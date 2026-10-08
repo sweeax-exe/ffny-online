@@ -9,6 +9,71 @@ per-game adapters for testing new upstream xboxrecomp releases against Def Jam,
 TimeSplitters 2 and Mercenaries, accounting for their different toolkit integrations.
 This is deferred planning; existing milestone gates and dependency pins are unchanged.
 
+## The launcher and the overlay on macOS — planned 2026-10-08
+
+Asked for by Vlad at the v0.5.0 release. The start-up launcher and the in-game overlay (v0.4.0,
+`src/hooks/pc_ui.cpp`, `pc_launcher.cpp`) are Dear ImGui on its Win32 and Direct3D 11 backends, so the
+macOS build leaves both out: the game starts at once and `settings.ini` is edited by hand
+(`src/hooks/pc_ui.h` answers for them off Windows).
+
+What it takes, as far as the code shows today:
+
+1. Build Dear ImGui with its SDL3 and Vulkan backends off Windows (`cmake/imgui.cmake` builds only the
+   Win32 and DX11 ones). The settings screen itself is backend-neutral ImGui code; what has to be
+   separated out of `pc_ui.cpp` is the device set-up, the window-message hook and the key capture.
+2. Overlay: the toolkit's present step has a hook (`d3d8_present_set_overlay`) whose arguments are
+   Direct3D 11 objects. The Vulkan device (`d3d8_vk.c`) needs the same hook with its own arguments: a
+   command buffer inside the pass that draws to the swap chain image, after the gamma pass.
+3. Input: the window's events arrive on the first thread (`src/host_posix.c`) and are already turned
+   into Windows virtual-key codes for the input layer; the overlay needs them first, as
+   `pc_ui_window_message` gets them on Windows, and pads through the host input layer as now.
+4. Launcher: a window before the game starts. On macOS the window must be made on the first thread,
+   which `host_posix_run` already owns; the launcher runs there before the game thread is started.
+5. The cursor rule (`hide_cursor` unless the overlay is open) and F1/the pad chord, as on Windows.
+
+Open question: whether Linux gets it in the same step (same backends, so probably yes).
+Done when: the overlay opens and changes a setting on macOS with mouse, keyboard and pad, the launcher
+shows and honours `[launcher] skip`, and the harness's overlay check
+(`RECOMP_INPUT_VIRTUAL_CHORD_MS`) passes off Windows.
+
+## Saves for regression tests without copying them by hand — planned 2026-10-08
+
+Asked for by Vlad at the v0.5.0 release: a way to share, transfer or store the saves the regression needs,
+or a "golden save" for testers.
+
+The problem as it stands. `intro`, `crib`, `gym`, `unlock` and the scenario fixtures depend on what is in
+the save area: which profiles exist, in what order, and how far their Story has got. The routes encode
+that (`scripts/harness.py`: "the THIRD user ID ... if profiles are added or removed, this is the number
+to revisit"). The owner's Windows and Mac saves have already diverged, so on 2026-10-07/08 the Story
+routes failed on the Mac for reasons that were not the code, twice, and were rerun against hand-made
+copies. A new tester has no Story profile at all.
+
+Constraint: saves are not published. The release process says so in as many words ("Do not publish
+generated code, executables, game files, saves or audio"), and a save made by the game is the game's
+own format with its artwork thumbnail inside (`saveimage.xbx`). Hashes and recipes are fine; bytes need a
+decision from Vlad.
+
+Options, cheapest first:
+
+1. **Make the routes independent of the list.** Choose the profile by name instead of by position
+   (read the user-ID screen's `MemCard.GetUserData(n)` results, or let a route say `--profile VY2`),
+   and let `intro` use a name that is free. Removes the breakage; does not give a tester a save.
+2. **A generated golden save.** A harness route that builds the save from an empty area: new ID, the
+   creator, the first fights, to the crib and the gym, with `--step-input` and `--rng-seed` so it
+   repeats. Its result is hashed into a fixture (`logs/fixtures/`, as the scenario suite does now) and
+   never leaves the machine. Costs a long first run per machine and a route that must survive game
+   changes; gives every tester the same save without anyone sharing a byte.
+3. **Export and import of the owner's fixture.** `harness.py save export <file>` / `save import <file>`:
+   one archive of `UserData`/`TitleData` with a manifest of hashes, moved between his machines by
+   whatever he already uses. Solves "without me needing to copy over" for him; not for testers.
+4. **A published golden save.** Only if Vlad decides a save he made is his to publish and the
+   thumbnail question is settled; then a release asset with its hash in `config/`, never in git.
+
+Suggested order: 1 now (small, and it is what failed), 2 as the tester answer, 3 if he still wants it
+after 2, 4 only on his decision.
+Done when: `regress.py` passes its Story routes on a machine that was given no save by hand, and a
+second machine reproduces the same fixture hash.
+
 ## A setup.exe that builds the game — planned 2026-10-07
 
 Owner-requested future To-Do, to be taken by another agent. Goal: a clickable path for players who are not

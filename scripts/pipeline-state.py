@@ -16,6 +16,8 @@ import tempfile
 import time
 
 REPO = Path(__file__).resolve().parents[1]
+# The game executable in a build folder: an .exe on Windows only.
+EXE_NAME = 'defjam_recomp.exe' if os.name == 'nt' else 'defjam_recomp'
 ANALYSIS_FILES = (
     'game_files/default_analysis.json',
     'tools/disasm/output/functions.json', 'tools/disasm/output/labels.json',
@@ -159,8 +161,9 @@ def verify_build(repo, preset):
     state = read_state(folder / 'build-state.json')
     toolkit = Path(state['toolkit'])
     verify_game_configuration(folder)
-    if state['inputs'] != build_inputs(repo, toolkit) or state['exe'] != digest(folder / 'defjam_recomp.exe'):
-        raise ValueError(f'Build {preset} is stale; run scripts/build.ps1 -Preset {preset}')
+    if state['inputs'] != build_inputs(repo, toolkit) or state['exe'] != digest(folder / EXE_NAME):
+        raise ValueError(f'Build {preset} is stale; rebuild it (scripts/build.ps1 -Preset {preset}, '
+                         f'or scripts/pipeline.py build --preset {preset})')
     return state
 
 
@@ -201,7 +204,7 @@ def main(argv=None):
             verify_game_configuration(folder)
             inputs = finish_stage_inputs(folder / 'build-state.json', build_inputs(repo, toolkit))
             write_state(folder / 'build-state.json', {'toolkit': str(toolkit),
-                        'inputs': inputs, 'exe': digest(folder / 'defjam_recomp.exe')})
+                        'inputs': inputs, 'exe': digest(folder / EXE_NAME)})
         else:
             verify_build(repo, args.preset)
     except (OSError, ValueError, KeyError, subprocess.CalledProcessError) as ex:

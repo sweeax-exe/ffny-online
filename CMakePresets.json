@@ -44,6 +44,25 @@
       "binaryDir": "${sourceDir}/build/${presetName}"
     },
     {
+      "name": "posix-debug",
+      "displayName": "macOS / Linux Debug (Ninja + Clang or GCC)",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "DEFJAM_VERBOSE_KERNEL": "ON"
+      }
+    },
+    {
+      "name": "posix-release",
+      "displayName": "macOS / Linux Release (Ninja + Clang or GCC)",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo"
+      }
+    },
+    {
       "name": "ci-runtime-only",
       "displayName": "CI: runtime libraries only, no game code",
       "generator": "Ninja",
@@ -71,6 +90,14 @@
       "name": "win-vs2022",
       "configurePreset": "win-vs2022",
       "configuration": "RelWithDebInfo"
+    },
+    {
+      "name": "posix-debug",
+      "configurePreset": "posix-debug"
+    },
+    {
+      "name": "posix-release",
+      "configurePreset": "posix-release"
     },
     {
       "name": "ci-runtime-only",

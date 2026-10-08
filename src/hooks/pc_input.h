@@ -4,7 +4,9 @@
 #define DEFJAM_PC_INPUT_H
 
 #include <stddef.h>
+#if defined(_WIN32)
 #include <windows.h>
+#endif
 #include "recomp_settings.h"
 #include "input_map.h"
 
@@ -35,14 +37,24 @@ void pc_input_apply(void);
 /* Offer a window message to the input layer: keys, mouse buttons, the wheel
  * and focus changes. Never consumes anything; the window procedure goes on to
  * handle the message as it did. Call from the window's own thread. */
+#if defined(_WIN32)
 void pc_input_window_message(HWND window, UINT msg, WPARAM wp, LPARAM lp);
+#else
+/* The same for a window that is not Win32's (src/host_posix.c): a key or
+ * mouse button by its Windows virtual-key code, and wheel notches (positive
+ * is away from the user). */
+void pc_input_host_key(int vk, int down);
+void pc_input_host_wheel(int notches);
+#endif
 
 /* Tell the layer whether the window has the focus right now (at creation). */
 void pc_input_set_focus(int focused);
 
 /* The virtual-key code a key message is for, with Shift, Ctrl and Alt resolved to the
  * side that was pressed (VK_LSHIFT and so on). Used to learn a key for a binding. */
+#if defined(_WIN32)
 int pc_input_vk_from_message(WPARAM wp, LPARAM lp);
+#endif
 
 /* The pad map the settings describe, for a screen that shows what the game sees. */
 void pc_input_current_padmap(InputPadMap *map);

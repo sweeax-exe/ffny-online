@@ -62,6 +62,34 @@ jobs:
       - name: Toolkit compiled CPU semantics
         run: python scripts/test-toolkit-msvc.py
 
+  runtime-posix:
+    name: Runtime + fixtures (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: recursive }
+      - name: Dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y ninja-build pkg-config libsdl2-dev libepoxy-dev libssl-dev libvulkan-dev libshaderc-dev
+      - name: Dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ninja pkg-config sdl2 libepoxy openssl@3 vulkan-headers vulkan-loader shaderc molten-vk sdl3
+      # The game reads pads through SDL3. Ubuntu's runners have no SDL3 package, so
+      # Linux builds the SDL2 path here; macOS builds the SDL3 one.
+      - run: cmake --preset ci-runtime-only ${{ runner.os == 'Linux' && '-DDEFJAM_SDL3=OFF' || '' }}
+      - run: cmake --build --preset ci-runtime-only
+      - name: Hardware-free fixtures
+        run: |
+          for t in mmio_trap_posix guest_cpu_posix memory_layout_posix kernel_memory_posix kernel_bridge nv2a_vsh settings; do
+            cmake -S tools/xboxrecomp/tests/$t -B build/fx-$t -G Ninja -DCMAKE_BUILD_TYPE=Release
+            cmake --build build/fx-$t
+            ctest --test-dir build/fx-$t --output-on-failure --no-tests=error
+          done
+
   native-fixtures:
     name: Release fixture (${{ matrix.fixture }})
     runs-on: windows-latest

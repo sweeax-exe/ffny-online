@@ -52,10 +52,11 @@
  * trapped for its write-1-to-clear interrupt status (see nv2a_regs_init).
  */
 
-#include <windows.h>
+#include "host.h"
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
 
 #include "mmio_decode.h"
 
@@ -275,7 +276,7 @@ int nv2a_regs_handle_mmio(void *ctx, uint32_t xbox_va)
          * the build's map). The hardware watchpoints cannot see these pages:
          * the access faults before it happens. */
         static uint32_t watch = 1;
-        uint64_t rip = ((PCONTEXT)ctx)->Rip;
+        uint64_t rip = HOST_PC(ctx);
         if (watch == 1) {
             const char *w = getenv("RECOMP_NV2A_REG_WATCH");
             watch = w ? (uint32_t)strtoul(w, NULL, 0) : 0;
@@ -290,7 +291,7 @@ int nv2a_regs_handle_mmio(void *ctx, uint32_t xbox_va)
         }
     }
     if (!ok && p->undecoded++ < 10) {
-        const uint8_t *ip = (const uint8_t *)((PCONTEXT)ctx)->Rip;
+        const uint8_t *ip = (const uint8_t *)(uintptr_t)HOST_PC(ctx);
         fprintf(stderr, "  [%s] undecoded access at +0x%03X: "
                         "%02X %02X %02X %02X %02X %02X\n",
                 p->name, xbox_va - p->base, ip[0], ip[1], ip[2], ip[3], ip[4], ip[5]);
@@ -347,7 +348,7 @@ void nv2a_regs_init(ptrdiff_t mem_offset)
         NvPage *p = &s_pages[s_page_count];
         DWORD old = 0;
 
-        memcpy(p->shadow, native, NV2A_PAGE);
+        memcpy(p->shadow, HOST_VIEW(native), NV2A_PAGE);
         p->name         = want[i].name;
         p->base         = want[i].base;
         p->special_read = want[i].rd;

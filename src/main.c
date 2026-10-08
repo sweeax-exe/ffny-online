@@ -1,7 +1,7 @@
 /**
  * Def Jam: Fight for NY (Xbox, EA-073) - Recompiled Game Entry Point
  *
- * This is the Windows executable that hosts the recompiled game code.
+ * This is the executable that hosts the recompiled game code.
  * It performs the following initialization sequence:
  *
  * 1. Load the original XBE file from disk
@@ -30,8 +30,18 @@
  *   Kernel imports: 160 (XDK 5849)
  */
 
-#include <windows.h>
+#include "host.h"
+#if defined(_WIN32)
 #include <dbghelp.h>
+#else
+#include <dlfcn.h>
+#if defined(__APPLE__)
+#include <mach-o/getsect.h>
+#include <mach-o/ldsyms.h>
+#endif
+#include <signal.h>
+#include <unistd.h>
+#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdbool.h>
@@ -171,6 +181,7 @@ void d3d11_translator_frame_end(void);
  */
 static void print_guest_context(void *rip)
 {
+#if defined(_WIN32)
     /* SYMBOL_INFO is variable-length: the name is written past the struct, so
      * it must be over-allocated with MaxNameLen set to the slack. */
     char buf[sizeof(SYMBOL_INFO) + 256];
@@ -183,6 +194,15 @@ static void print_guest_context(void *rip)
     if (SymFromAddr(GetCurrentProcess(), (DWORD64)(uintptr_t)rip, &disp, sym))
         fprintf(stderr, "  in %s+0x%llX\n",
                 sym->Name, (unsigned long long)disp);
+#else
+    /* The generated functions are ordinary symbols here too; the dynamic
+     * loader's table names them as long as the link exports them. */
+    Dl_info info;
+
+    if (dladdr(rip, &info) && info.dli_sname)
+        fprintf(stderr, "  in %s+0x%llX\n", info.dli_sname,
+                (unsigned long long)((uintptr_t)rip - (uintptr_t)info.dli_saddr));
+#endif
 
     /* What the pointer registers were actually pointing at.
      *
@@ -254,6 +274,7 @@ typedef void (*recomp_func_t)(void);
  * register model into a file that only needs four stack pushes. */
 #define GUEST32(va) (*(volatile uint32_t *)((uintptr_t)(va) + (uintptr_t)g_xbox_mem_offset))
 extern recomp_func_t recomp_lookup(uint32_t xbox_va);
+int recomp_dispatch_init(void);   /* generated, recomp_dispatch.c */
 
 static void recomp_selftest(void)
 {
@@ -347,6 +368,17 @@ static void recomp_selftest(void)
     fflush(stderr);
 }
 
+void host_fatal(const char *message)
+{
+#if defined(_WIN32)
+    MessageBoxA(NULL, message, "Def Jam: Fight for NY", MB_ICONERROR);
+#else
+    fprintf(stderr, "Def Jam: Fight for NY: %s\n", message);
+    fflush(stderr);
+#endif
+}
+
+#if defined(_WIN32)
 static LONG CALLBACK veh_handler(PEXCEPTION_POINTERS ep)
 {
     /* A hardware watchpoint arrives as a single step. Answered before anything
@@ -443,18 +475,104 @@ static LONG CALLBACK veh_handler(PEXCEPTION_POINTERS ep)
     return EXCEPTION_CONTINUE_SEARCH;
 }
 
-/* ── WinMain ───────────────────────────────────────────────── */
+#else /* !_WIN32 */
 
+/* The same routing from a signal handler. ctx is the ucontext; the device
+ * models decode the faulting instruction through the runtime's trap layer.
+ *
+ * One addition over the Windows handler: where the host page is larger than
+ * the console's 4 KB (16 KB on Apple Silicon), closing a device page closes
+ * its neighbours, and an access to one of those is completed as memory. */
+static void fault_handler(int sig, siginfo_t *si, void *ctx)
+{
+    uintptr_t fault_addr = (uintptr_t)si->si_addr;
+    uintptr_t rel = fault_addr - (uintptr_t)g_xbox_mem_offset;
+
+    if ((sig == SIGBUS || sig == SIGSEGV) && g_xbox_mem_offset && rel <= 0xFFFFFFFFu) {
+        uint32_t fault_va = (uint32_t)rel;
+
+        if (g_apu_state && fault_va >= 0xFE800000u && fault_va < 0xFE880000u
+                && apu_hook_handle_mmio(ctx, fault_addr, fault_va, 0))
+            return;
+        if (xbox_OhciOwnsAddress(fault_va) && xbox_OhciHandleMmio(ctx, fault_va))
+            return;
+        if (ac97_bm_owns_address(fault_va) && ac97_bm_handle_mmio(ctx, fault_va))
+            return;
+        if (nv2a_regs_owns_address(fault_va) && nv2a_regs_handle_mmio(ctx, fault_va))
+            return;
+    }
+    if ((sig == SIGBUS || sig == SIGSEGV) && mmio_trap_neighbour(ctx, fault_addr))
+        return;
+
+    fprintf(stderr, "[CRASH] %s (%s) at PC=0x%llX, fault addr=0x%llX\n",
+            sig == SIGBUS || sig == SIGSEGV ? "Access violation" : "Fatal signal",
+            sig == SIGBUS ? "SIGBUS" : sig == SIGSEGV ? "SIGSEGV" : sig == SIGILL ? "SIGILL"
+            : sig == SIGTRAP ? "SIGTRAP" : sig == SIGFPE ? "SIGFPE" : sig == SIGABRT ? "SIGABRT" : "signal",
+            (unsigned long long)HOST_PC(ctx), (unsigned long long)fault_addr);
+    fprintf(stderr, "  Xbox regs: eax=0x%08X ecx=0x%08X edx=0x%08X esp=0x%08X\n",
+            g_eax, g_ecx, g_edx, g_esp);
+    fprintf(stderr, "  Xbox regs: ebx=0x%08X esi=0x%08X edi=0x%08X\n",
+            g_ebx, g_esi, g_edi);
+    if (g_xbox_mem_offset && rel <= 0xFFFFFFFFu)
+        fprintf(stderr, "  Xbox VA of fault: 0x%08X\n", (uint32_t)rel);
+    else
+        fprintf(stderr, "  The fault address is outside guest memory\n");
+    {
+        const uint32_t *ip = (const uint32_t *)(uintptr_t)HOST_PC(ctx);
+        Dl_info info;
+        /* Only read the instruction if the address is inside a loaded image. */
+        if (dladdr(ip, &info) && info.dli_fname)
+            fprintf(stderr, "  host instruction: %08X\n", *ip);
+    }
+    print_guest_context((void *)(uintptr_t)HOST_PC(ctx));
+    fflush(stdout);
+    fflush(stderr);
+    /* Put the default action back; the instruction faults again and the
+     * process ends with the signal, as an unhandled exception would. */
+    signal(sig, SIG_DFL);
+}
+
+static void install_fault_handler(void)
+{
+    struct sigaction sa;
+
+    memset(&sa, 0, sizeof sa);
+    sa.sa_sigaction = fault_handler;
+    sa.sa_flags = SA_SIGINFO | SA_NODEFER;
+    sigemptyset(&sa.sa_mask);
+    sigaddset(&sa.sa_mask, SIGUSR2);   /* no guest-CPU hand-over inside a trap */
+    /* Darwin reports a protection fault as SIGBUS, Linux as SIGSEGV. */
+    sigaction(SIGSEGV, &sa, NULL);
+    sigaction(SIGBUS, &sa, NULL);
+    /* The ways a process dies without touching bad memory -- an abort in a
+     * library, a trap the compiler planted, an illegal instruction -- so the
+     * log says what happened instead of simply stopping. */
+    sigaction(SIGILL, &sa, NULL);
+    sigaction(SIGTRAP, &sa, NULL);
+    sigaction(SIGFPE, &sa, NULL);
+    sigaction(SIGABRT, &sa, NULL);
+}
+
+#endif /* _WIN32 */
+
+/* ── Entry ─────────────────────────────────────────────────── */
+
+#if defined(_WIN32)
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
                    LPSTR lpCmdLine, int nCmdShow)
+#else
+static int host_main(void)
+#endif
 {
     void *xbe_data = NULL;
     size_t xbe_size = 0;
 
+#if defined(_WIN32)
     (void)hInstance;
     (void)hPrevInstance;
     (void)lpCmdLine;
     (void)nCmdShow;
+#endif
 
     /* Buffered, and flushed: by the 130-odd fflush calls after messages that
      * matter, by the crash handler, and once a second by the runtime's timer
@@ -482,15 +600,18 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     /* Load symbols up front rather than from inside the handler: at fault
      * time the process is already in a bad way, and SymInitialize
      * allocates. Failure is not fatal -- the handler prints no name. */
+#if defined(_WIN32)
     SymSetOptions(SYMOPT_DEFERRED_LOADS | SYMOPT_UNDNAME);
     SymInitialize(GetCurrentProcess(), NULL, TRUE);
     AddVectoredExceptionHandler(1, veh_handler);
+#else
+    install_fault_handler();
+#endif
 
     /* Step 1: Load XBE */
     if (!load_xbe(YOUR_GAME_XBE_PATH, &xbe_data, &xbe_size)) {
-        MessageBoxA(NULL, "Failed to load default.xbe.\n"
-                    "Place the game files in the 'game' subdirectory.",
-                    "Recomp", MB_ICONERROR);
+        host_fatal("Failed to load default.xbe.\n"
+                   "Place the game files in the 'game' subdirectory.");
         return 1;
     }
     printf("XBE loaded: %zu bytes\n", xbe_size);
@@ -541,9 +662,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     /* Step 2: Initialize Xbox memory layout */
     printf("Initializing Xbox memory layout...\n");
     if (!xbox_MemoryLayoutInit(xbe_data, xbe_size)) {
-        MessageBoxA(NULL, "Failed to initialize Xbox memory layout.\n"
-                    "The required virtual address range may be unavailable.",
-                    "Recomp", MB_ICONERROR);
+        host_fatal("Failed to initialize Xbox memory layout.\n"
+                   "The required virtual address range may be unavailable.");
         free(xbe_data);
         return 1;
     }
@@ -610,25 +730,31 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
      * repository is public and the data lives outside it. */
     {
         extern void xbox_path_init(const char *game_dir, const char *save_dir);
-        extern BOOL xbox_translate_path(const char *xbox_path, WCHAR *host_path, DWORD size);
         const char *data = getenv("DEFJAM_DATA");
         char save[512];
-        WCHAR user_data[MAX_PATH];
+        xbox_host_char user_data[MAX_PATH];
         char user_data_utf8[1024];
 
         if (data && *data) {
             snprintf(save, sizeof(save), "%s%ssave", data,
-                     data[strlen(data) - 1] == '\\' ? "" : "\\");
+                     data[strlen(data) - 1] == HOST_SEP_CHAR ? "" : HOST_SEP);
             xbox_path_init(YOUR_GAME_DIR, save);
         } else {
             xbox_path_init(YOUR_GAME_DIR, NULL);
         }
         /* Resolve the same root as all guest file operations, including the
          * runtime's shell-folder fallback. Avoid a second default-path policy. */
+#if defined(_WIN32)
         if (xbox_translate_path("\\Device\\Harddisk0\\Partition1\\UDATA", user_data, MAX_PATH)
             && WideCharToMultiByte(CP_UTF8, 0, user_data, -1, user_data_utf8,
                                    sizeof(user_data_utf8), NULL, NULL))
             defjam_save_compat_init(user_data_utf8);
+#else
+        if (xbox_translate_path("\\Device\\Harddisk0\\Partition1\\UDATA", user_data, MAX_PATH)) {
+            snprintf(user_data_utf8, sizeof(user_data_utf8), "%s", user_data);
+            defjam_save_compat_init(user_data_utf8);
+        }
+#endif
         else
             defjam_save_compat_init(NULL);
     }
@@ -692,6 +818,17 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
      * without it (toolkit patch 0018, kernel_bridge.c). */
     {
         extern void xbox_PinToGuestCore(void);
+#if defined(__APPLE__)
+        /* No thread affinity here, so guest threads take turns instead, and
+         * one is preempted only while it is in the lifted code. */
+        unsigned long size = 0;
+        const void *code = getsectiondata(&_mh_execute_header, "__TEXT", "__guest", &size);
+        if (code)
+            guest_turn_set_code(code, size);
+        else
+            fprintf(stderr, "[HOST] no guest code section: guest threads change over"
+                            " only at kernel calls\n");
+#endif
         xbox_PinToGuestCore();
     }
     xbe_entry_point();
@@ -748,5 +885,13 @@ int main(int argc, char **argv)
 {
     (void)argc;
     (void)argv;
+#if defined(_WIN32)
     return WinMain(GetModuleHandle(NULL), NULL, GetCommandLineA(), SW_SHOW);
+#else
+    {
+        /* The window, if there is one, needs this thread; see host_posix.c. */
+        int host_posix_run(int (*game_main)(void));
+        return host_posix_run(host_main);
+    }
+#endif
 }

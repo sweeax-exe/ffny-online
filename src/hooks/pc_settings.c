@@ -18,7 +18,7 @@
  */
 
 #define _CRT_SECURE_NO_WARNINGS
-#include <windows.h>
+#include "host.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -59,7 +59,7 @@ static RecompSetting g_display_settings[] = {
 static RecompSetting g_settings[DISPLAY_SETTING_COUNT + 64 + 16];
 static size_t g_setting_count;
 
-static char g_path[MAX_PATH * 2];   /* empty: do not load or save */
+static char g_path[MAX_PATH * 4];   /* empty: do not load or save */
 static void (*g_fullscreen_notify)(int fullscreen);
 static void (*g_window_size_notify)(int width, int height);
 
@@ -67,6 +67,8 @@ static void settings_log(const char *message)
 {
     fprintf(stderr, "[SETTINGS] %s\n", message);
 }
+
+#if defined(_WIN32)
 
 static int file_exists(const char *path)
 {
@@ -158,6 +160,131 @@ static void open_log_if_needed(void)
     setvbuf(stderr, NULL, _IOFBF, 1 << 16);
 }
 
+static int program_dir(char *out, size_t size)
+{
+    if (!GetModuleFileNameA(NULL, out, (DWORD)size))
+        return 0;
+    strip_last(out);
+    return 1;
+}
+
+#else
+
+#include <limits.h>
+#include <unistd.h>
+#include <sys/stat.h>
+#if defined(__APPLE__)
+#include <mach-o/dyld.h>
+#endif
+
+static int file_exists(const char *path)
+{
+    struct stat st;
+    return stat(path, &st) == 0 && S_ISREG(st.st_mode);
+}
+
+static void strip_last(char *path)
+{
+    char *slash = strrchr(path, '/');
+    if (slash) *slash = 0;
+}
+
+/* The running program's own path, symbolic links resolved. */
+static int program_path(char *out, size_t size)
+{
+    char raw[PATH_MAX], real[PATH_MAX];
+#if defined(__APPLE__)
+    uint32_t n = sizeof(raw);
+    if (_NSGetExecutablePath(raw, &n))
+        return 0;
+#else
+    ssize_t n = readlink("/proc/self/exe", raw, sizeof(raw) - 1);
+    if (n <= 0)
+        return 0;
+    raw[n] = 0;
+#endif
+    if (!realpath(raw, real))
+        return 0;
+    snprintf(out, size, "%s", real);
+    return 1;
+}
+
+/* As on Windows: here, else beside the program, else up to four levels above
+ * it (the build tree is build/<preset>/ under the repository root). */
+static int find_game_root(void)
+{
+    char dir[PATH_MAX], probe[PATH_MAX + 32];
+    int up;
+
+    if (file_exists("game/default.xbe"))
+        return 1;
+    if (!program_path(dir, sizeof(dir)))
+        return 0;
+    strip_last(dir);
+    for (up = 0; up <= 4 && dir[0]; up++) {
+        snprintf(probe, sizeof(probe), "%s/game/default.xbe", dir);
+        if (file_exists(probe))
+            return chdir(dir) == 0;
+        strip_last(dir);
+    }
+    return 0;
+}
+
+/* DEFJAM_DATA, or the parent of the dump when `game` is a symbolic link to a
+ * folder named `extracted`. */
+static int find_data_root(char *root, size_t size)
+{
+    const char *env = getenv("DEFJAM_DATA");
+    char real[PATH_MAX];
+    char *name;
+
+    if (env && *env) {
+        snprintf(root, size, "%s", env);
+        return 1;
+    }
+    if (!realpath("game", real))
+        return 0;
+    snprintf(root, size, "%s", real);
+    name = strrchr(root, '/');
+    if (!name || strcasecmp(name + 1, "extracted") != 0)
+        return 0;
+    *name = 0;
+    setenv("DEFJAM_DATA", root, 1);
+    return 1;
+}
+
+/* Started from a file manager there is no terminal: keep a log then. */
+static void open_log_if_needed(void)
+{
+    char name[PATH_MAX];
+    time_t now = time(NULL);
+    struct tm *t = localtime(&now);
+    struct stat st;
+
+    /* A terminal, a pipe or a file the caller chose all keep the output;
+     * only /dev/null, which is what a launcher hands a program, loses it. */
+    if (fstat(STDERR_FILENO, &st) == 0
+            && !(S_ISCHR(st.st_mode) && !isatty(STDERR_FILENO)))
+        return;
+    mkdir("logs", 0755);
+    strftime(name, sizeof(name), "logs/run-%Y%m%d-%H%M%S.log", t);
+    freopen(name, "w", stdout);
+    strcat(name, ".err");
+    freopen(name, "w", stderr);
+    setvbuf(stdout, NULL, _IOFBF, 1 << 16);
+    setvbuf(stderr, NULL, _IOFBF, 1 << 16);
+}
+
+static int program_dir(char *out, size_t size)
+{
+    if (!program_path(out, size))
+        return 0;
+    strip_last(out);
+    return 1;
+}
+
+#endif
+
 /* What scripts/run.ps1 and the harness have always set: the vertical-blank
  * interrupt, the push-buffer executor, its Direct3D 11 output and the USB
  * model. Each is "on if set", so a diagnostic run that needs one off sets
@@ -230,6 +357,7 @@ void pc_display_set(const char *key, int value)
  * afterwards and anything read once at start-up is read after it. */
 static void run_launcher_if_wanted(void)
 {
+#if defined(_WIN32)
     const char *settings = getenv("RECOMP_SETTINGS");
     const char *cmd = GetCommandLineA();
     int test_run = (settings && !_stricmp(settings, "none")) ||
@@ -246,11 +374,12 @@ static void run_launcher_if_wanted(void)
         ExitProcess(0);
     }
     pc_input_restart();
+#endif
 }
 
 int pc_settings_init(void)
 {
-    char root[MAX_PATH];
+    char root[MAX_PATH * 2];
     const char *env = getenv("RECOMP_SETTINGS");
     int have_game = find_game_root();
     int have_root, read;
@@ -258,12 +387,11 @@ int pc_settings_init(void)
     if (have_game)
         open_log_if_needed();
     if (!have_game) {
-        MessageBoxA(NULL,
+        host_fatal(
             "The game files were not found.\n\n"
-            "Create a folder or junction named 'game' beside this program (or in the\n"
-            "repository root) that holds your own extracted dump, with default.xbe in it.\n"
-            "See docs/build-and-play.md.",
-            "Def Jam: Fight for NY", MB_ICONERROR);
+            "Create a folder, junction or symbolic link named 'game' beside this program\n"
+            "(or in the repository root) that holds your own extracted dump, with\n"
+            "default.xbe in it. See docs/build-and-play.md.");
         return 0;
     }
     supply_runtime_defaults();
@@ -274,11 +402,9 @@ int pc_settings_init(void)
     } else if (env && *env) {
         snprintf(g_path, sizeof(g_path), "%s", env);
     } else if (have_root) {
-        snprintf(g_path, sizeof(g_path), "%s\\settings.ini", root);
-    } else {
-        GetModuleFileNameA(NULL, g_path, MAX_PATH);
-        strip_last(g_path);
-        strcat(g_path, "\\settings.ini");
+        snprintf(g_path, sizeof(g_path), "%s" HOST_SEP "settings.ini", root);
+    } else if (program_dir(g_path, MAX_PATH)) {
+        strcat(g_path, HOST_SEP "settings.ini");
     }
 
     memcpy(g_settings, g_display_settings, sizeof(g_display_settings));
@@ -313,7 +439,9 @@ int pc_settings_init(void)
         _putenv_s("RECOMP_GAMMA", "0");
 
     d3d8_present_enable_scaling(1);
+#if defined(_WIN32)
     d3d8_present_set_overlay(pc_ui_overlay, NULL);
+#endif
     d3d8_present_set_render_scale((unsigned)pc_display("render_scale", 2));
     pc_settings_apply_display();
     recomp_settings_on_change(setting_changed, NULL);

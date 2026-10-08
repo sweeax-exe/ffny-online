@@ -46,7 +46,8 @@ Gameplay captured by the maintainer. The GIF is a short, silent preview.
 | Input | Gamepads (Xbox, DualSense, Switch Pro and most others), keyboard and mouse as a player of their own, rumble and remapping; see [Controllers, keyboard and mouse](docs/10-input.md) |
 | Saves | Local profiles, with compatibility for earlier project builds |
 | Steam Deck / Proton | Planned after PC features; not yet validated |
-| macOS / native Linux | Future roadmap; not yet supported |
+| macOS (Apple Silicon) | Playable natively through Vulkan since v0.5.0, without the launcher and overlay; see [Build on macOS and Linux](docs/build-macos-linux.md) |
+| Native Linux | The runtime and its fixtures build in CI; the game is not yet built or run there |
 
 The latest rebase passed the full nine-check game regression on Debug and Release,
 a 20-boot Debug soak, and five additional capture routes. These tests do not cover
@@ -89,8 +90,8 @@ There is no prebuilt player package in this release.
 
 PC features are in progress, one release at a time: display settings, a settings file,
 gamepads and keyboard play, a launcher and an in-game settings overlay are in; true 16:9 and
-texture packs follow. Steam Deck via Proton follows, then macOS. Native Linux
-and deeper gameplay decompilation remain stretch goals. See the
+texture packs follow. A native macOS build arrived in v0.5.0. Steam Deck and a native
+Linux game build follow; deeper gameplay decompilation remains a stretch goal. See the
 [roadmap](docs/01-plan-review.md#corrected-roadmap-milestones-with-exit-criteria)
 and [development status](PROGRESS.md).
 

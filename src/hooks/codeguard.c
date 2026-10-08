@@ -39,7 +39,7 @@
  * does is handled without a change here.
  */
 
-#include <windows.h>
+#include "host.h"
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>

@@ -4,7 +4,9 @@
 #define DEFJAM_PC_UI_H
 
 #include <stddef.h>
+#if defined(_WIN32)
 #include <windows.h>
+#endif
 #include "recomp_settings.h"
 
 #ifdef __cplusplus
@@ -24,6 +26,7 @@ size_t pc_ui_settings(RecompSetting *out, size_t max);
 int pc_launcher_wanted(int skip_setting, int force_flag, int no_flag, int shift_held,
                        int test_run);
 
+#if defined(_WIN32)
 /* ---- the in-game overlay (pc_ui.cpp) ------------------------------------------ */
 
 /* The window the overlay draws into and takes input from. */
@@ -48,6 +51,14 @@ void pc_ui_apply_settings(void);
 /* Show the launcher and run it until the player plays or quits. Returns 1 to go
  * on and start the game, 0 to quit. */
 int pc_launcher_run(void);
+
+#else
+/* The overlay and the launcher draw through Direct3D 11 and take Win32 window
+ * messages. Off Windows there is neither yet: the settings file and the
+ * environment are the way in, and the game starts at once. */
+static inline int  pc_ui_overlay_open(void)   { return 0; }
+static inline void pc_ui_apply_settings(void) { }
+#endif
 
 #ifdef __cplusplus
 }

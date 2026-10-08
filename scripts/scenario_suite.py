@@ -191,7 +191,7 @@ def route_assertions(route, run, preset):
                                       'front-end selected fighter slots before StartGame', slots=slots)]
         p = harness.presents_after(run.text, 'game.startgame(')
         median = sorted(p)[len(p) // 2] if p else 0
-        floor = 110 if preset == 'win-x64-release' else (80 if route.startswith('ffa') else 100)
+        floor = 110 if preset.endswith('-release') else (80 if route.startswith('ffa') else 100)
         checks += [evidence.assertion('fight.presentation_duration', len(p) >= 30, 'two-second reporting intervals', seconds=2 * len(p)),
                    evidence.assertion('fight.presentation_rate', bool(p) and median >= floor,
                                       'median presents per two seconds', median=median, floor=floor, minimum=min(p) if p else 0)]
@@ -410,7 +410,7 @@ def main(argv=None):
     run.add_argument('route', choices=sorted(harness.ROUTES))
     run.add_argument('--fixture', required=True)
     run.add_argument('--output')
-    run.add_argument('--preset', default='win-x64-release')
+    run.add_argument('--preset', default=harness.RELEASE_PRESET)
     run.add_argument('--settings', help='optional JSON render_scale/gamma/vsync; inherited RECOMP diagnostics are suppressed')
     audio_group = run.add_mutually_exclusive_group()
     audio_group.add_argument('--audio', action='store_true', default=None, help='strict health gates (default for fights)')
