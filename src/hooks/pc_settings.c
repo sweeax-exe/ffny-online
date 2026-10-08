@@ -357,6 +357,7 @@ void pc_display_set(const char *key, int value)
  * afterwards and anything read once at start-up is read after it. */
 static void run_launcher_if_wanted(void)
 {
+#if defined(_WIN32)
     const char *settings = getenv("RECOMP_SETTINGS");
     const char *cmd = GetCommandLineA();
     int test_run = (settings && !_stricmp(settings, "none")) ||
@@ -373,6 +374,7 @@ static void run_launcher_if_wanted(void)
         ExitProcess(0);
     }
     pc_input_restart();
+#endif
 }
 
 int pc_settings_init(void)
@@ -437,7 +439,9 @@ int pc_settings_init(void)
         _putenv_s("RECOMP_GAMMA", "0");
 
     d3d8_present_enable_scaling(1);
+#if defined(_WIN32)
     d3d8_present_set_overlay(pc_ui_overlay, NULL);
+#endif
     d3d8_present_set_render_scale((unsigned)pc_display("render_scale", 2));
     pc_settings_apply_display();
     recomp_settings_on_change(setting_changed, NULL);

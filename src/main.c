@@ -824,7 +824,7 @@ static int host_main(void)
         unsigned long size = 0;
         const void *code = getsectiondata(&_mh_execute_header, "__TEXT", "__guest", &size);
         if (code)
-            guest_cpu_set_code(code, size);
+            guest_turn_set_code(code, size);
         else
             fprintf(stderr, "[HOST] no guest code section: guest threads change over"
                             " only at kernel calls\n");

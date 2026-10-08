@@ -66,6 +66,10 @@ It finds `game` in the repository root and writes `settings.ini` and saves under
 `DEFJAM_DATA`. F11 or Alt+Enter switches full screen. `RECOMP_HEADLESS=1` runs
 without a window: frames are drawn off screen, which is what the tests use.
 
+The start-up launcher and the in-game settings overlay (v0.4.0) are Windows-only
+for now: they draw through Direct3D 11 and Win32 window messages. Here the game
+starts at once and `settings.ini` is edited by hand (`docs/settings-reference.md`).
+
 ## Tests
 
 ```bash

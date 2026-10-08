@@ -52,7 +52,9 @@ void pc_input_set_focus(int focused);
 
 /* The virtual-key code a key message is for, with Shift, Ctrl and Alt resolved to the
  * side that was pressed (VK_LSHIFT and so on). Used to learn a key for a binding. */
+#if defined(_WIN32)
 int pc_input_vk_from_message(WPARAM wp, LPARAM lp);
+#endif
 
 /* The pad map the settings describe, for a screen that shows what the game sees. */
 void pc_input_current_padmap(InputPadMap *map);
