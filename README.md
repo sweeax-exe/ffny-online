@@ -9,6 +9,7 @@ Xbox version with [xboxrecomp](https://github.com/sp00nznet/xboxrecomp).
 The Xbox executable is translated into C and compiled ahead of time. Its own
 gameplay, menus and cutscenes run on an Xbox compatibility runtime, with graphics
 rendered through Direct3D 11 and audio and controller input supplied by the host.
+Since v0.5.0 the same source also builds natively on macOS (Apple Silicon), drawn through Vulkan.
 
 **The Windows build is playable and FUN.** Menus, Story routes and fights render
 and run. The maintainer's October 4, 2026 playtest reported smooth frames, much
@@ -56,7 +57,11 @@ and [known issues](docs/known-issues.md).
 
 ## Getting started
 
-You need Windows x64, Git, Python, Visual Studio C++ Build Tools, a Direct3D 11
+On macOS (Apple Silicon) or Linux, follow
+[Build on macOS and Linux](docs/build-macos-linux.md) instead of the rest of this section;
+it lists what works there and what does not yet.
+
+On Windows you need Windows x64, Git, Python, Visual Studio C++ Build Tools, a Direct3D 11
 GPU and a gamepad or a keyboard. Only the **USA Xbox version** matching the
 [dump manifest](config/dump-manifest.json) is supported. PS2 and GameCube copies
 cannot be used as build inputs.
@@ -98,7 +103,7 @@ and [development status](PROGRESS.md).
 ## Reporting problems
 
 Open an [issue](https://github.com/vyanhursky/DefJamFFNY-recomp/issues) with your
-version/commit, Windows version, CPU/GPU, controller, reproduction steps and
+version/commit, operating system and version, CPU/GPU, controller, reproduction steps and
 expected versus observed behavior. Relevant lines from `logs/run-*.log.err`
 help identify a failure; review personal paths before sharing. Do not attach
 game data, generated source, saves or memory dumps.
