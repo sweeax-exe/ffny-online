@@ -34,7 +34,7 @@
 | Gameplay test harness | ⏳ | D67-D71. **v0.2.2, v0.2.3 and v0.2.4 released.** Status of every item in `docs/08-testing-roadmap.md`; next steps in `docs/research/testing-harness-handover.md`. |
 | PC features (M6) | ⏳ | D63-D66, D72, plan `docs/07-m6-plan.md`. v0.2.0 (display and settings file) and v0.2.1 (Terrordome crash fix) released 2026-10-05. **v0.3.0 input accepted by Vlad 2026-10-07 and released** (D73, `docs/10-input.md`). **v0.4.0 launcher and overlay accepted by Vlad 2026-10-07 and released** (D74, D75, `docs/launcher-and-overlay.md`). Next: v0.5.0 true 16:9; hand-over in `docs/research/m6-handover.md`. |
 | Steam Deck (M5), macOS (M9) | ⬜ | After M6, in that order (D45). |
-| Native macOS arm64 and Linux x86-64 (M9, M7) | ⏳ | Branch `feat/macos-linux-port`, draft PR 1 (D80). On arm64 macOS the game renders through Vulkan in a window or off screen and **every check of the full `regress.py` has passed** with the owner's profiles (2026-10-06; 11 in one run, the other 3 after a fix), the fight replay matching the Windows golden hash. Owner play-tests in a window with a DualSense, 2026-10-07: Story and a battle play; too bright (fixed: the gamma ramp is applied on screen), a freeze at a movie (fixed: one guest CPU, D81), distorted loud notes (fixed: holes in the mix; that change is in shared code and is unheard on Windows). Not done: the owner's play-test of those three fixes, a Windows build of this branch. Linux: runtime, fixtures and the Vulkan device build in CI; the game has not been built or run there. Guide: `docs/build-macos-linux.md`. |
+| Native macOS arm64 and Linux x86-64 (M9, M7) | ✅ macOS / ⏳ Linux | Released as v0.5.0 (D82). arm64 macOS: Vulkan renderer, SDL3 window, sound and pads, one guest CPU by token (D81); full `regress.py` 14 of 14 (two with caveats, work log 2026-10-08) and the owner's play-tests on Mac and Windows. Not on macOS: the launcher and overlay. Linux: runtime, fixtures and the Vulkan device build in CI; the game has not been built or run there. Guide: `docs/build-macos-linux.md`. |
 
 ## 1. Decisions log
 
@@ -138,6 +138,8 @@
 
 | D81 | 2026-10-07 | On a host that cannot pin threads (Apple Silicon macOS) the one-guest-CPU rule of D28 is a token: a thread that runs guest code runs only while it holds it, gives it up in every blocking call, and is preempted by a signal from a thread that has waited a millisecond, has just woken, or is the interrupt thread. It is preempted only while its program counter is in the lifted code, which the macOS build puts in its own section (`__TEXT,__guest`); in host code it hands over at the next kernel call's return. Windows and Linux keep affinity. | The D28 race froze two runs in one afternoon on the Mac (the owner's at a style movie, a headless one at the main menu), the main thread in `sub_001E7D80`'s chunk walk both times. Fixing that one reader by hand would leave every other single-core assumption in the title. Preempting anywhere was tried first and deadlocked within a minute: a thread stopped inside `getenv` held the C library's lock, and the next holder blocked on it in a fault handler. Cooperative hand-over alone cannot work: the reader spins without a kernel call. |
 
+| D82 | 2026-10-08 | Merge the port and release it as v0.5.0. A minor version because it adds a platform; the toolkit pin moves to the port tip and the fork branch `defjam/upstream-v0.13` named in `.gitmodules` is fast-forwarded to it. | Vlad, after playing both builds of the rebased branch: "I tested windows and I think it plays great. Mac playtest is good too. I think you can merge and release." The Windows game regression was not rerun on these sources; his play-test and hosted CI stand for Windows. |
+
 ## 2. Environment inventory (2026-09-17)
 
 - OS: Windows 11 Pro 10.0.26200
@@ -218,7 +220,9 @@ defjam-recomp/
 
 ## 7. Hand-off
 
-### Native macOS and Linux port, branch `feat/macos-linux-port`, 2026-10-06
+### Native macOS and Linux port, merged and released as v0.5.0 (D82), 2026-10-08
+Open after the release: the launcher and overlay off Windows; the one unresolved indirect call in `versus` (work log 2026-10-08); the Linux game build and a Steam Deck run; the Windows regression on these sources; the upstream candidates in `docs/research/upstream-macos-linux-candidates.md`.
+
 Work happens on a Mac (`/Users/vlad/Code/DefJamFFNY-recomp`, arm64, macOS 26, Homebrew cmake/ninja/
 pkg-config/sdl2/libepoxy/openssl). Toolkit work is on fork branch `defjam/macos-linux`, published, and
 the parent gitlink on this branch points at its tip.

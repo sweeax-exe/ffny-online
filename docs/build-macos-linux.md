@@ -1,4 +1,4 @@
-# Build on macOS and Linux (work in progress)
+# Build on macOS and Linux
 
 The Windows guide is [build-and-play.md](build-and-play.md) and is the supported
 route. This page is the same pipeline on macOS (Apple Silicon) and Linux, on the
