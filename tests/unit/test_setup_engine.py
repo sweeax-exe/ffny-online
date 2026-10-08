@@ -49,7 +49,7 @@ def installer(tmp_path):
     (dump / 'other.txt').write_bytes(b'files')
     args = argparse.Namespace(payload=str(folder), install_dir=str(tmp_path/'app'),
         data_dir=str(tmp_path/'data'), dump=str(dump), log=None, status_file=None,
-        cancel_file=None, install_prerequisites=False, silent=True, no_shortcuts=True)
+        cancel_file=None, install_prerequisites=False, silent=True, no_shortcuts=True, no_desktop_shortcut=False)
     result = engine.Engine(args)
     result.data.mkdir()
     result.prepare_source()
@@ -258,6 +258,22 @@ def test_nested_destination_failure_creates_log_before_engine_initialization(tmp
     assert code == 2
     assert 'separate, non-nested' in log.read_text()
     assert not (tmp_path/'app').exists()
+
+
+@pytest.mark.parametrize('desktop', [True, False])
+def test_desktop_choice_preserves_start_menu_shortcut_and_launch_guidance(tmp_path, monkeypatch, capsys, desktop):
+    setup = installer(tmp_path)
+    (setup.payload/'DefJamLauncher.exe').write_bytes(b'synthetic launcher')
+    setup.args.no_shortcuts = False
+    setup.args.no_desktop_shortcut = not desktop
+    calls = []
+    monkeypatch.setattr(setup, 'run', lambda argv: calls.append((argv, setup.env['DEFJAM_SETUP_DESKTOP_SHORTCUT'])))
+    setup.activate()
+    assert len(calls) == 1
+    assert calls[0][1] == ('1' if desktop else '0')
+    assert str(calls[0][0][-1]).endswith('shortcuts.ps1')
+    assert str(setup.install/'DefJamLauncher.exe') in capsys.readouterr().out
+    assert (setup.install/'installed.ini').exists()
 
 
 @pytest.mark.skipif(not (ROOT/'tools/xboxrecomp/tools/xiso').is_dir(), reason='requires recursive checkout')

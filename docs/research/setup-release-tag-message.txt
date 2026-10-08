@@ -1,0 +1,4 @@
+Def Jam: Fight for NY — Recompiled v0.5.1
+
+Game-free Windows setup, optional desktop shortcut, silent installation,
+preserved saves/settings, responsive preparation and persistent diagnostics.

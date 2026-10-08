@@ -111,6 +111,21 @@ Unicode-title/control smoke and actual asynchronous preparation/early-log smoke
 both return 0. The latter verifies timer events before the extraction worker
 completes and finds the nested-location error in the persistent session log.
 
+## Shortcut and launch feedback (2026-10-08)
+
+The wizard now offers Create a desktop shortcut (checked by default). Clearing
+it creates only the Start-menu shortcut; --no-shortcuts still suppresses both.
+Completion shows a selectable absolute launcher path beside the Play option.
+The standalone installed DefJamLauncher.exe also starts with no arguments, so
+double-clicking the displayed file works. Data/working-directory handling stays
+inside that stable launcher. Engine output/logs include the launcher location.
+All 216 project unit tests pass, including both desktop-choice cases.
+
+The owner requested PR/tag/release-note preparation. v0.5.0 is already published;
+v0.5.1 is prepared as a packaging update in CMake and docs/releases/v0.5.1.md.
+The release tag message and post-merge commands are in setup-release-preparation.md.
+No tag is created before reviewed main ancestry and green CI; no release is published.
+
 ## Remaining acceptance gates
 
 - Clean Windows 11 VM with no compiler/Git/Python, VS 2022 provisioning and restart

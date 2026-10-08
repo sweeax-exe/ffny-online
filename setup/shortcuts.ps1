@@ -2,7 +2,11 @@ $ErrorActionPreference = 'Stop'
 $shell = New-Object -ComObject WScript.Shell
 $menu = Join-Path ([Environment]::GetFolderPath('Programs')) 'Def Jam Recompiled'
 New-Item -ItemType Directory -Path $menu -Force | Out-Null
-foreach ($folder in @($menu, [Environment]::GetFolderPath('Desktop'))) {
+$folders = @($menu)
+if ($env:DEFJAM_SETUP_REMOVE_SHORTCUTS -or $env:DEFJAM_SETUP_DESKTOP_SHORTCUT -ne '0') {
+    $folders += [Environment]::GetFolderPath('Desktop')
+}
+foreach ($folder in $folders) {
     $path = Join-Path $folder 'Def Jam Recompiled.lnk'
     $shortcut = $shell.CreateShortcut($path)
     if ($env:DEFJAM_SETUP_REMOVE_SHORTCUTS) {

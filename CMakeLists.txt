@@ -15,7 +15,7 @@ cmake_minimum_required(VERSION 3.20)
 # (a junction/symlink is fine) and run scripts/verify-dump.py first.
 # ============================================================================
 
-project(defjam_recomp VERSION 0.5.0 LANGUAGES C CXX)
+project(defjam_recomp VERSION 0.5.1 LANGUAGES C CXX)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)

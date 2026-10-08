@@ -14,7 +14,7 @@
 #include <thread>
 
 namespace fs = std::filesystem;
-static HWND window, dumpEdit, installEdit, dataEdit, statusLabel, startButton, cancelButton, prerequisites;
+static HWND window, dumpEdit, installEdit, dataEdit, statusLabel, startButton, cancelButton, prerequisites, desktopShortcut, launchInfo;
 static HANDLE worker = nullptr;
 static fs::path payload, scratch, statusPath, cancelPath, logPath;
 static bool running = false;
@@ -215,6 +215,7 @@ static void setBusy(bool value) {
     running = value;
     for (int id = 101; id <= 109; ++id) EnableWindow(GetDlgItem(window, id), !value);
     EnableWindow(prerequisites, !value);
+    EnableWindow(desktopShortcut, !value);
     EnableWindow(GetDlgItem(window, 112), FALSE);
     SetWindowTextW(cancelButton, value ? L"Cancel" : L"Close");
 }
@@ -234,6 +235,8 @@ static LRESULT CALLBACK windowProc(HWND hwnd, UINT message, WPARAM wp, LPARAM lp
                     L"--data-dir", editText(dataEdit), L"--status-file", statusPath.wstring(), L"--cancel-file", cancelPath.wstring()};
                 if (SendMessageW(prerequisites, BM_GETCHECK, 0, 0) == BST_CHECKED)
                     args.push_back(L"--install-prerequisites");
+                if (SendMessageW(desktopShortcut, BM_GETCHECK, 0, 0) != BST_CHECKED)
+                    args.push_back(L"--no-desktop-shortcut");
                 setBusy(true); timerTicks = 0; SetTimer(window, 1, 400, nullptr);
                 SetWindowTextW(statusLabel, L"Preparing setup files... You can move the window or cancel.");
                 std::thread([args]() {
@@ -289,6 +292,12 @@ static LRESULT CALLBACK windowProc(HWND hwnd, UINT message, WPARAM wp, LPARAM lp
             DWORD code; GetExitCodeProcess(worker, &code); CloseHandle(worker); worker = nullptr;
             KillTimer(window, 1); setBusy(false);
             EnableWindow(GetDlgItem(window, 112), code == 0);
+            if (code == 0) {
+                auto path = fs::path(editText(installEdit)) / L"DefJamLauncher.exe";
+                auto text = L"To play, select Play or double-click this file:\r\n" + path.wstring();
+                SetWindowTextW(launchInfo, text.c_str());
+                SetWindowTextW(statusLabel, L"Setup complete. Your game is ready to launch.");
+            }
             if (preparationSmoke) {
                 std::ifstream in(logPath); std::string log((std::istreambuf_iterator<char>(in)), {});
                 smokeResult = code == 2 && preparationTicks >= 3 && log.find("separate, non-nested") != std::string::npos ? 0 : 4;
@@ -320,7 +329,7 @@ static int wizard(HINSTANCE instance, bool smoke = false, bool preparation = fal
     wc.hCursor = LoadCursor(nullptr, IDC_ARROW); wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
     wc.lpszClassName = L"DefJamSetupWizard"; RegisterClassW(&wc);
     window = CreateWindowW(wc.lpszClassName, L"Def Jam Recompiled \u2014 Setup", WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
-        CW_USEDEFAULT, CW_USEDEFAULT, 740, 470, nullptr, nullptr, instance, nullptr);
+        CW_USEDEFAULT, CW_USEDEFAULT, 740, 550, nullptr, nullptr, instance, nullptr);
     control(L"STATIC", L"Build and play from your own USA Xbox dump", 0, 24, 20, 660, 24, 0);
     control(L"STATIC", L"First setup can take an hour and needs internet for missing Microsoft Build Tools.", 0, 24, 49, 670, 25, 0);
     control(L"STATIC", L"Your ISO/XISO or extracted dump", 0, 24, 87, 580, 20, 0);
@@ -336,18 +345,23 @@ static int wizard(HINSTANCE instance, bool smoke = false, bool preparation = fal
     control(L"BUTTON", L"Browse...", WS_TABSTOP, 595, 238, 90, 26, 107);
     prerequisites = control(L"BUTTON", L"Install missing Microsoft Build Tools (requires consent and administrator access)",
         WS_TABSTOP | BS_AUTOCHECKBOX, 24, 278, 675, 25, 108);
-    statusLabel = control(L"STATIC", L"Choose your dump and destinations, then select Install / Repair.", 0, 24, 314, 670, 40, 0);
-    startButton = control(L"BUTTON", L"Install / Repair", WS_TABSTOP | BS_DEFPUSHBUTTON, 24, 372, 140, 30, 109);
-    control(L"BUTTON", L"Open logs", WS_TABSTOP, 180, 372, 110, 30, 111);
-    control(L"BUTTON", L"Play", WS_TABSTOP, 306, 372, 90, 30, 112);
+    desktopShortcut = control(L"BUTTON", L"Create a desktop shortcut", WS_TABSTOP | BS_AUTOCHECKBOX, 24, 309, 675, 25, 113);
+    SendMessageW(desktopShortcut, BM_SETCHECK, BST_CHECKED, 0);
+    statusLabel = control(L"STATIC", L"Choose your dump and destinations, then select Install / Repair.", 0, 24, 345, 670, 35, 0);
+    launchInfo = control(L"EDIT", L"After setup, use Play or open DefJamLauncher.exe from your install folder.",
+                        WS_TABSTOP | ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL, 24, 390, 660, 50, 114);
+    startButton = control(L"BUTTON", L"Install / Repair", WS_TABSTOP | BS_DEFPUSHBUTTON, 24, 452, 140, 30, 109);
+    control(L"BUTTON", L"Open logs", WS_TABSTOP, 180, 452, 110, 30, 111);
+    control(L"BUTTON", L"Play", WS_TABSTOP, 306, 452, 90, 30, 112);
     EnableWindow(GetDlgItem(window, 112), FALSE);
-    cancelButton = control(L"BUTTON", L"Close", WS_TABSTOP, 595, 372, 90, 30, 110);
+    cancelButton = control(L"BUTTON", L"Close", WS_TABSTOP, 595, 452, 90, 30, 110);
     if (smoke) {
         // Hardware-free CI probe: controls exist and the wizard needs no Python,
         // D3D device, compiler or payload extraction merely to open.
         wchar_t title[128]{}; GetWindowTextW(window, title, 128);
         bool valid = wcscmp(title, L"Def Jam Recompiled \u2014 Setup") == 0 &&
-                     window && dumpEdit && installEdit && dataEdit && prerequisites &&
+                     window && dumpEdit && installEdit && dataEdit && prerequisites && desktopShortcut && launchInfo &&
+                     SendMessageW(desktopShortcut, BM_GETCHECK, 0, 0) == BST_CHECKED &&
                      startButton && cancelButton && !editText(installEdit).empty() &&
                      !editText(dataEdit).empty() && IsWindowEnabled(startButton);
         DestroyWindow(window);
@@ -378,7 +392,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
             launchInstalled(); result = 0;
         } else {
 #ifdef DEFJAM_LAUNCHER_ONLY
-            throw std::runtime_error("Use --launch to start your installed game.");
+            if (count == 1) { launchInstalled(); result = 0; }
+            else throw std::runtime_error("Double-click this launcher or use --launch to start your installed game.");
 #else
             if (count > 1 && std::wstring(values[1]) == L"--ui-smoke") {
                 result = wizard(instance, true);

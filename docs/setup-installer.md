@@ -27,8 +27,12 @@ Install / Repair runs verification, extraction, analysis, lift and compile.
 Status shows the stage; **Open logs** reveals detailed output. **Cancel** stops
 the process tree; rerun to resume verified completed work. Changed/corrupt dump
 contents are refused rather than merged into an existing extraction.
-Desktop/Start-menu shortcuts launch through a stable native launcher. **Play**
-launches only on request; there is no automatic game launch.
+**Create a desktop shortcut** is checked by default; clear it to create only a
+Start-menu shortcut. Shortcuts launch through the stable native launcher.
+After setup, select **Play**, use the shortcut, or double-click
+`<install>\DefJamLauncher.exe`. The wizard displays the exact launcher path in a
+selectable field. It supplies the correct data location and working directory.
+There is no automatic game launch.
 
 ## Silent mode
 
@@ -40,6 +44,7 @@ Add `--install-prerequisites` to allow compiler installation explicitly. Silent
 mode suppresses the wizard, not Windows elevation or Microsoft's consent UI.
 For unattended operation, pre-provision the compiler, SDK, CMake and Ninja.
 Add `--no-shortcuts` to suppress desktop and Start-menu shortcuts.
+Add `--no-desktop-shortcut` to create only the Start-menu shortcut.
 
 Exit codes: 0 success; 2 invalid input; 3 prerequisites missing; 4 failed stage;
 5 concurrent setup/game; 6 cancelled; 3010 restart required. Logs default to

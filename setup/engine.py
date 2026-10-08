@@ -488,6 +488,7 @@ class Engine:
         os.replace(self.install / 'DefJamLauncher.exe.new', self.install / 'DefJamLauncher.exe')
         self.env['DEFJAM_SETUP_LAUNCHER'] = str(self.install / 'DefJamLauncher.exe')
         self.env['DEFJAM_SETUP_ROOT'] = str(self.install)
+        self.env['DEFJAM_SETUP_DESKTOP_SHORTCUT'] = '0' if self.args.no_desktop_shortcut else '1'
         if not self.args.no_shortcuts:
             self.run(['powershell.exe', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
                       self.payload / 'engine/shortcuts.ps1'])
@@ -496,7 +497,7 @@ class Engine:
         temporary.write_text('[install]\n' + ''.join(f'{key}={receipt[key]}\n' for key in
                              ('source', 'data', 'executable')), encoding='utf-16')
         os.replace(temporary, self.install / 'installed.ini')
-        self.event('Setup complete. Your game is ready to launch.')
+        self.event('Setup complete. Select Play or double-click: ' + str(self.install / 'DefJamLauncher.exe'))
 
     def execute(self):
         if os.name != 'nt':
@@ -562,6 +563,7 @@ def main(argv=None):
     parser.add_argument('--data-dir')
     parser.add_argument('--uninstall', action='store_true')
     parser.add_argument('--no-shortcuts', action='store_true', help='Do not create desktop/Start-menu shortcuts')
+    parser.add_argument('--no-desktop-shortcut', action='store_true', help='Create only the Start-menu shortcut')
     parser.add_argument('--install-prerequisites', action='store_true')
     parser.add_argument('--log')
     parser.add_argument('--status-file')
