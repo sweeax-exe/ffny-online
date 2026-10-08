@@ -56,7 +56,12 @@ and [known issues](docs/known-issues.md).
 
 ## Getting started
 
-You need Windows x64, Git, Python, Visual Studio C++ Build Tools, a Direct3D 11
+Windows source releases can include a **game-free setup installer** that builds
+your own dump locally. See [Windows setup](docs/setup-installer.md) for the wizard,
+custom install/data folders, optional desktop shortcut, silent mode and launch
+instructions. macOS/Linux installers remain to-dos.
+
+For a manual Windows build, you need Git, Python, Visual Studio C++ Build Tools, a Direct3D 11
 GPU and a gamepad or a keyboard. Only the **USA Xbox version** matching the
 [dump manifest](config/dump-manifest.json) is supported. PS2 and GameCube copies
 cannot be used as build inputs.
@@ -82,9 +87,9 @@ The executable enables graphics, display timing and input support automatically.
 launcher window first (settings and a Play button; it can be skipped) and the settings are also
 available in the game with F1: see [Launcher and overlay](docs/launcher-and-overlay.md).
 
-GitHub's source ZIP omits the toolkit submodule. A recursive Git clone is the
-supported setup path; release notes give the command for the exact version.
-There is no prebuilt player package in this release.
+GitHub's source ZIP omits the toolkit submodule. Use a recursive Git clone for
+manual source builds; release notes give the command for the exact version.
+The Windows setup includes its pinned toolkit and compiles the game on your machine.
 
 ## What comes next
 
