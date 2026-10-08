@@ -29,7 +29,7 @@
  * than a convenient one: this runtime has no DMA engine to reset.
  */
 
-#include "host.h"
+#include "../host.h"
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
