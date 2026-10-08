@@ -10,6 +10,36 @@ permissions:
   contents: read
 
 jobs:
+  windows-setup:
+    name: Game-free Windows setup
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: recursive }
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.13' }
+      - run: python -m pip install pytest
+      - name: Installer recovery and input boundaries
+        run: python -m pytest -q tests/unit/test_setup_engine.py
+      - name: Build and inventory standalone setup (no dump)
+        shell: pwsh
+        run: ./scripts/build-setup.ps1
+      - name: Packaged silent-mode invalid input exits safely
+        shell: pwsh
+        run: |
+          $setupPath = (Resolve-Path build/setup/DefJamSetup.exe).Path
+          $ui = Start-Process -FilePath $setupPath -ArgumentList '--ui-smoke' -WindowStyle Hidden -Wait -PassThru
+          if ($ui.ExitCode -ne 0) { throw 'Native setup wizard smoke failed' }
+          $app = Join-Path $env:RUNNER_TEMP 'defjam-test-app'
+          $data = Join-Path $env:RUNNER_TEMP 'defjam-test-data'
+          $process = Start-Process -FilePath $setupPath -ArgumentList "--silent --dump missing.iso --install-dir `"$app`" --data-dir `"$data`"" -WindowStyle Hidden -Wait -PassThru
+          if ($process.ExitCode -ne 2) { throw "Expected invalid-input exit 2, got $($process.ExitCode)" }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-setup-assets
+          path: build/setup-assets/*
+          if-no-files-found: error
+
   hygiene:
     name: No game data committed
     runs-on: ubuntu-latest

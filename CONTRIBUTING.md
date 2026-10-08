@@ -36,6 +36,13 @@ GitHub CI checks source hygiene, project tests, native fixtures and Release runt
 libraries. It has no game input, so it does not build or play the complete game.
 Green CI does not replace local gameplay checks.
 
+The standalone Windows setup is built without game data (`scripts/build-setup.ps1`).
+Its wizard/silent engine uses the same local pipeline as the build guide. Setup
+changes need synthetic recovery/input tests, payload inventory checks and local
+installation validation. Only its named game-free release artifact/checksum/
+provenance are permitted; never stage binaries or generated game files. See
+[installer behavior and acceptance gates](docs/setup-installer.md).
+
 ## Submissions
 
 Keep commits focused, with the symptom, change and validation. Retain notices and

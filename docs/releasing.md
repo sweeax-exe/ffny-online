@@ -1,6 +1,8 @@
 # Source releases
 
-A GitHub Release is a versioned source snapshot. The locally built game uses
+A GitHub Release is a versioned source snapshot with a game-free Windows setup
+tool, checksum and provenance. The setup compiles locally from the player's dump.
+The locally built game uses
 `win-x64-release` (optimized `RelWithDebInfo`, with diagnostic symbols). Hosted
 CI builds runtime libraries and native fixtures with `CMAKE_BUILD_TYPE=Release`.
 These three uses of “release” do not imply a downloadable game executable.
@@ -25,8 +27,13 @@ These three uses of “release” do not imply a downloadable game executable.
    use a new version to correct a published release.
 
 GitHub supplies the source ZIP/tar archives. They do not include submodules;
-the supported setup is a recursive clone at the tag. No executable assets are
-uploaded by this workflow. The fork URL and exact gitlink make dependency source
+the supported command-line setup is a recursive clone at the tag. Only
+`DefJamSetup-<version>-windows-x64.exe`, its `.sha256` and `.provenance.json` are
+attached after standalone setup inventory/tests pass. `check-setup-assets.py`
+refuses development payloads and generated/game inputs. Source-tree binary bans
+remain intact; a precompiled game is never published. See [setup installer](setup-installer.md)
+for behavior and remaining Windows acceptance gates.
+The fork URL and exact gitlink make dependency source
 and license notices available without game data.
 
 ## CI coverage
