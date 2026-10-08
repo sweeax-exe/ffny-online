@@ -9,6 +9,7 @@ reuse the merged port's Python pipeline and Vulkan/SDL3 backend.
 Choose an ISO/XISO or extracted folder, then choose **Install location** and
 **Data location** independently. Defaults are under your LocalAppData folder.
 Install, data and original dump locations must be separate and non-nested.
+Choose an empty install folder or an existing recognized Def Jam installation.
 Setup copies the dump into the data location and leaves the original untouched.
 Saves/settings stay in the data location through updates and uninstall.
 

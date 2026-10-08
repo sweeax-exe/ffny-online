@@ -32,7 +32,7 @@ This lane records its work here; integration should fold the results into PROGRE
 
 ## Evidence
 
-- 39 installer boundary/recovery tests pass, including valid synthetic XISO,
+- 40 installer boundary/recovery tests pass, including valid synthetic XISO,
   malicious disc paths, tampered inventories, extraction cancellation, source
   repair, changed data roots, locks, and uninstall preserving saves/unrelated files.
 - Native standalone launcher and setup build with static MSVC runtime. Hidden
@@ -50,7 +50,7 @@ This lane records its work here; integration should fold the results into PROGRE
 - Installed game checks: all four pass (m2 frame, m3 title, m4a menu and fight).
   Fight reached 90 seconds of observed combat, median 120 presents per two seconds.
   Report: installed source `logs/regress-20261008-143602.txt`.
-- All 212 project unit tests pass under VS 2019/MSVC; the three corrected fixture
+- All 213 project unit tests pass under VS 2019/MSVC; the three corrected fixture
   files separately pass all 10 tests. Packaged repair during the installed game
   run returns the documented busy exit 5 (`logs/setup-e2e/busy-result.json`).
 - Installed native launcher succeeds from an unrelated working directory, with
@@ -60,6 +60,35 @@ This lane records its work here; integration should fold the results into PROGRE
   toolchain handoff (exit 4, executable unchanged). Replaced it with a constant
   command expanding one quoted environment variable, without CALL's second
   expansion. Its native regression covers spaces, ampersands and literal percent.
+- Fresh-process update then exposed CreateProcess ignoring the child environment's
+  PATH for locating bare executable names. Resolve every bare tool name against
+  the imported compiler PATH before starting it; captured environment output is
+  excluded from logs. The earlier failure left the active receipt and synthetic
+  save/settings files unchanged (`logs/setup-e2e/update-result.json`).
+- Corrected production-format installer update succeeds from a fresh process
+  without developer compiler paths, reuses certified analysis/lift, rebuilds in
+  its own version root and activates the new receipt. Both synthetic save and
+  settings files remain byte-identical. Evidence: `logs/setup-e2e/update-fixed.log`
+  and `update-fixed-result.json`. Packaged source identity is
+  `ee27538d0bc181c0ea2cfde9f5cdc7da1bf263ce`; this is a local unsigned artifact,
+  not a published release.
+- Same-release packaged repair succeeds and reuses certified extraction, analysis,
+  lift and build. The game executable plus both save/settings fixtures remain
+  byte-identical (`logs/setup-e2e/repair-fixed-result.json`, three files checked).
+
+## Review handoff
+
+Branch `feat/release-setup` contains only public-history feature commits, based on
+the accepted public merge. The original private integration checkout and its
+unrelated changes remain separate. Setup assets are ignored local build output
+under `build/setup-assets`; no game executable/data is staged or exported.
+
+Public branch push was rejected by automatic approval review because the current
+session lacks explicit authorization to export these source commits to
+`vyanhursky/DefJamFFNY-recomp`. No push, PR, tag or release was created. Obtain owner
+approval for that exact repository and source-only payload, then push the feature
+branch, create a draft PR, attach it to this chat, and inspect remote CI. Use the
+explicit public URL; this worktree's inherited origin remains the private repo.
 - Merged port exposed missing `src` include paths in three native Python fixtures;
   fixed fixture compile commands without changing runtime behavior.
 
@@ -69,8 +98,8 @@ This lane records its work here; integration should fold the results into PROGRE
   behavior, independent real ISO/XISO, Unicode paths, physical-machine wizard and
   gameplay acceptance, peak disk use/timings, code signing/SmartScreen decision.
   Hyper-V enumeration on this host is unavailable with current account permissions.
-- Real update across different source/toolkit releases and interrupted compiler
-  installation. Synthetic recovery checks and same-release repair do not replace this.
+- Update across changed toolkit/lifter inputs and interrupted compiler installation.
+  The tested source-commit update keeps the existing toolkit pin and runtime inputs.
 - Show source/toolkit identities in the game's About UI (currently in install logs,
   JSON provenance/receipt and installed source).
 - macOS installer: arm64 toolchain/provisioning, MoltenVK/shaderc, bundle/signing/
