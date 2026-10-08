@@ -9,6 +9,75 @@ per-game adapters for testing new upstream xboxrecomp releases against Def Jam,
 TimeSplitters 2 and Mercenaries, accounting for their different toolkit integrations.
 This is deferred planning; existing milestone gates and dependency pins are unchanged.
 
+## A setup.exe that builds the game — planned 2026-10-07
+
+Owner-requested future To-Do, to be taken by another agent. Goal: a clickable path for players who are not
+comfortable with Python, a compiler or a command line. A single `DefJamSetup.exe` that takes the player's own
+dump and leaves them with a built game and a shortcut. Not scheduled against M6; it can be done before or after
+v0.5.0 (owner's call, see "Open questions").
+
+**Why this and not a prebuilt game.** A built `defjam_recomp.exe` contains the ~17,900 functions lifted from EA's
+`default.xbe`, so it is a derivative of EA's binary. Our rules (D5, D10, `CLAUDE.md` section 3, `docs/releasing.md`)
+never publish executables, lifted code or game data. The installer contains none of that: it produces the EA-derived
+code on the player's machine from the player's dump, which is what the repository's own build already does. Binary
+releases of the game itself stay off the table (no legal advice has been taken; treat it as policy). Hosted CI also
+cannot build the game (no dump), so it could not produce one anyway.
+
+**What it does** (Windows only; Linux and Steam Deck run the Windows build under Proton, macOS is M9):
+
+1. Ask for the dump: an ISO, an XISO or an extracted folder. Verify `default.xbe` against
+   `config/dump-manifest.json` (SHA-256 `31cc0d11...`) and explain wrong-version dumps in plain language. Extraction
+   uses `extract-xiso` (check its licence and how it is obtained before bundling or downloading it).
+2. Check prerequisites and install what is missing:
+   - the compiler: Visual Studio Build Tools (x64 MSVC toolset, Windows SDK, CMake, Ninja) through Microsoft's own
+     bootstrapper with the right workload IDs; it cannot be bundled (licence), needs a UAC prompt and the player's
+     acceptance. VS 2019 built the tested game, VS 2022 is untested here. `scripts/build.ps1` shows how the existing
+     scripts find it (vswhere);
+   - Python for the lift: an embedded Python (PSF licence) with `pyxbe` and `capstone`, so the player never sees
+     Python;
+   - source: the release's source at its tag plus the exact toolkit commit from the submodule pin (the GitHub source
+     ZIP omits submodules), SDL3 and Dear ImGui (the build already fetches both at pinned hashes).
+3. Run what `docs/build-and-play.md` describes: extract, `analyze.ps1`, `recomp.ps1` (the lift, about 20 minutes),
+   `build.ps1 -Preset win-x64-release` (about 15 minutes, `/bigobj` objects). Show progress and keep a log; make it
+   resumable and make a failed step restartable.
+4. Put the dump (or a link to it) where the game expects it (`game/` junction, data folder with `settings.ini` and
+   `save/`), create a desktop and Start-menu shortcut, offer to launch. The launcher (v0.4.0) is the first thing
+   the player then sees.
+5. An update path: running a newer setup against an existing install updates the source and rebuilds; skip the
+   lift when its inputs (`config/seed_functions.json`, lifter, pinned toolkit) did not change
+   (`scripts/pipeline-state.py` already compares input hashes).
+
+**Suggested shape.** A small C++ Win32 program reusing the Dear ImGui and Direct3D 11 code of the launcher
+(`src/hooks/pc_launcher.cpp`, `pc_ui.cpp`), so there is no new dependency, built from this repository by the
+release workflow (it needs no game data). A PowerShell script wrapped in an exe is quicker but feels less polished
+and is flagged more by antivirus.
+
+**Costs and risks to plan for.**
+- About 5-10 GB of disk and roughly an hour on a typical PC, mostly the compiler install; check free space first,
+  handle paths with spaces and Windows long paths, and cope with antivirus slowing or blocking compiles.
+- An unsigned `setup.exe` triggers SmartScreen and some antivirus warnings. Options: document it, or buy a code
+  signing certificate (cost, identity verification). Owner has not decided.
+- Release policy has to change deliberately and narrowly. Today `docs/releasing.md` says no executable assets, and the
+  release workflow and `scripts/check-release.py` / `scripts/check-source-tree.py` refuse binaries. Attaching
+  `DefJamSetup.exe` means allowing exactly that one asset (name, built by the workflow from tagged source, hash in
+  the release notes) and keeping every other rule: never publish the game executable, lifted code, captures or
+  game data. The "Source release" workflow is also where its build and checksum belong. Update `docs/releasing.md`,
+  the CI hygiene check and the CONTRIBUTING notes in the same change.
+- The installer must never upload or copy the player's dump anywhere, and must not embed any game bytes.
+- Version drift: the installer pins one source tag and one toolkit commit, and reports them in its log and in the
+  game's About page.
+- Test it on a clean Windows 11 VM with no Python, no Visual Studio and no git, and on a machine that already has
+  VS 2022; use a dump that is not the developer's usual one. Record the timings in the release notes.
+
+**Open questions for Vlad** (ask before starting): do it before or after v0.5.0 (true 16:9)? Is an unsigned
+installer with a documented SmartScreen warning acceptable, or should code signing be planned and paid for? Should
+the installer also offer to install `extract-xiso` itself, or require an already extracted dump?
+
+**Done when:** on a clean Windows 11 machine a player with only the ISO and the installer reaches a working game
+window without opening a terminal, the install log names the pinned source and toolkit versions, an update rebuild
+works, the release workflow builds and checksums the installer, and `docs/releasing.md` and the policy checks
+describe and enforce the narrow exception. Nothing from the dump or the lift is in the installer or the repository.
+
 Work that is deliberately deferred until M2 and the Direct3D interception experiment are settled.
 Nothing here blocks the current milestone. Revisit this file when M2 closes, and again whenever the
 rendering approach is decided, because several items depend on that outcome.

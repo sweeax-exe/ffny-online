@@ -52,12 +52,13 @@ typedef struct {
 } Ac97Page;
 
 static Ac97Page s_pages[2];
-static int      s_page_count;
+static volatile LONG s_page_count;
 
 static Ac97Page *page_for(uint32_t va)
 {
     int i;
-    for (i = 0; i < s_page_count; i++)
+    LONG count = InterlockedCompareExchange(&s_page_count, 0, 0);
+    for (i = 0; i < count; i++)
         if (va >= s_pages[i].base && va < s_pages[i].base + AC97_PAGE)
             return &s_pages[i];
     return NULL;
@@ -144,18 +145,21 @@ void ac97_bm_init(ptrdiff_t mem_offset)
         DWORD old = 0;
 
         memcpy(s_pages[s_page_count].shadow, native, AC97_PAGE);
+        s_pages[s_page_count].base = bases[i];
+        /* Polling threads are already running. Publish initialized ownership
+         * before protection can fault, as the NV2A page setup does. */
+        InterlockedIncrement(&s_page_count);
         if (!VirtualProtect(native, AC97_PAGE, PAGE_NOACCESS, &old)) {
             fprintf(stderr, "  [AC97] could not trap 0x%08X (error %lu); "
                             "the reset handshake will spin\n",
                     bases[i], GetLastError());
+            InterlockedDecrement(&s_page_count);
             continue;
         }
-        s_pages[s_page_count].base = bases[i];
-        s_page_count++;
     }
 
     if (s_page_count)
-        fprintf(stderr, "  AC97: %d bus-master page(s) trapped from 0x%08X "
+        fprintf(stderr, "  AC97: %ld bus-master page(s) trapped from 0x%08X "
                         "(channel resets report complete)\n",
                 s_page_count, AC97_BASE);
     fflush(stderr);

@@ -68,7 +68,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        fixture: [kernel_bridge, kernel_directory, usb_transfer, nv2a_vsh, settings, d3d8_present_fit, input_map, input_host]
+        fixture: [kernel_bridge, kernel_directory, usb_transfer, nv2a_vsh, settings, d3d8_present_fit, input_map, input_host, kernel_events, memory_regressions, kernel_regressions, kernel_object_paths, kernel_dispatch, kernel_irql_abi, kernel_physical_address]
+        include:
+          - fixture: kernel_regressions
+            configure_args: -DXBOX_SLOW_TESTS=ON
+          - fixture: ac97_startup
+            source: tests/ac97_startup
     steps:
       - uses: actions/checkout@v4
         with: { submodules: recursive }
@@ -76,7 +81,9 @@ jobs:
         with: { arch: x64 }
       - uses: seanmiddleditch/gha-setup-ninja@v5
       - name: Configure Release fixture
-        run: cmake -S tools/xboxrecomp/tests/${{ matrix.fixture }} -B build/ci-${{ matrix.fixture }} -G Ninja -DCMAKE_BUILD_TYPE=Release
+        env:
+          FIXTURE_SOURCE: ${{ matrix.source || format('tools/xboxrecomp/tests/{0}', matrix.fixture) }}
+        run: cmake -S $env:FIXTURE_SOURCE -B build/ci-${{ matrix.fixture }} -G Ninja -DCMAKE_BUILD_TYPE=Release ${{ matrix.configure_args }}
       - name: Build fixture
         run: cmake --build build/ci-${{ matrix.fixture }}
       - name: Run registered tests (empty suites fail)

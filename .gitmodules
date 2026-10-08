@@ -1,4 +1,4 @@
 [submodule "tools/xboxrecomp"]
 	path = tools/xboxrecomp
 	url = https://github.com/vyanhursky/xboxrecomp.git
-	branch = defjam/rebase-2026-10
+	branch = defjam/upstream-v0.13
