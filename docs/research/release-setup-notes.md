@@ -83,12 +83,11 @@ the accepted public merge. The original private integration checkout and its
 unrelated changes remain separate. Setup assets are ignored local build output
 under `build/setup-assets`; no game executable/data is staged or exported.
 
-Public branch push was rejected by automatic approval review because the current
-session lacks explicit authorization to export these source commits to
-`vyanhursky/DefJamFFNY-recomp`. No push, PR, tag or release was created. Obtain owner
-approval for that exact repository and source-only payload, then push the feature
-branch, create a draft PR, attach it to this chat, and inspect remote CI. Use the
-explicit public URL; this worktree's inherited origin remains the private repo.
+Public branch push initially required explicit owner authorization from automatic
+approval review. The owner subsequently approved the source-only push and draft PR.
+The branch is published and [draft PR #4](https://github.com/vyanhursky/DefJamFFNY-recomp/pull/4)
+is open and attached to this chat; remote CI started. No tag or release was created.
+Use the explicit public URL for this lane; the inherited origin remains private.
 - Merged port exposed missing `src` include paths in three native Python fixtures;
   fixed fixture compile commands without changing runtime behavior.
 
