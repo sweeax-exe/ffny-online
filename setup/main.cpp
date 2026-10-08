@@ -119,7 +119,7 @@ static void prepareSession(const std::vector<std::wstring>& args = {}) {
     cancelPath = scratch / L"cancel";
     logPath = root / L"logs" / (std::wstring(guid) + L".log");
     for (size_t i = 0; i + 1 < args.size(); ++i) if (args[i] == L"--log") logPath = args[i + 1];
-    fs::create_directories(logPath.parent_path());
+    if (!logPath.parent_path().empty()) fs::create_directories(logPath.parent_path());
     fs::create_directories(scratch);
     nativeLog("Preparing setup files. Diagnostics remain here even if validation fails.");
 }
