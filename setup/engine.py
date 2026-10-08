@@ -194,17 +194,22 @@ class Engine:
         if self.args.cancel_file and Path(self.args.cancel_file).exists():
             raise SetupError('Setup cancelled; run again to resume completed work', 6)
 
-    def run(self, argv, cwd=None, env=None, capture=False):
+    def run(self, argv, cwd=None, env=None, capture=False, log_output=True):
         self.cancelled()
         argv = list(argv)
         if Path(argv[0]) == self.python:
             argv.insert(1, '-B')
+        child_env = env or self.env
+        # Windows CreateProcess searches the parent's PATH, ignoring a custom
+        # child environment. Resolve tools against the imported VS environment.
+        if Path(argv[0]).name == str(argv[0]):
+            argv[0] = shutil.which(str(argv[0]), path=child_env.get('PATH', '')) or argv[0]
         if self.log:
             self.log.write('Running: ' + subprocess.list2cmdline(list(map(str, argv))) + '\n')
             self.log.flush()
         # Redirect to disk, not a pipe: compiler bursts cannot deadlock the UI.
         with tempfile.TemporaryFile() as output:
-            with subprocess.Popen(list(map(str, argv)), cwd=cwd, env=env or self.env,
+            with subprocess.Popen(list(map(str, argv)), cwd=cwd, env=child_env,
                                   stdout=output, stderr=subprocess.STDOUT,
                                   creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0) as child:
                 position = 0
@@ -215,7 +220,7 @@ class Engine:
                         output.seek(position)
                         chunk = output.read()
                         position += len(chunk)
-                        if chunk and self.log:
+                        if chunk and self.log and log_output:
                             self.log.write(chunk.decode('utf-8', errors='replace'))
                             self.log.flush()
                 except SetupError:
@@ -227,7 +232,7 @@ class Engine:
                     child.wait()
                     raise
                 output.seek(position)
-                if self.log:
+                if self.log and log_output:
                     self.log.write(output.read().decode('utf-8', errors='replace'))
                     self.log.flush()
                 if child.returncode:
@@ -397,7 +402,8 @@ class Engine:
         # Expand one quoted environment value after parsing a constant command;
         # omit CALL, whose second expansion would reinterpret percent characters.
         self.env['DEFJAM_SETUP_ENV_SCRIPT'] = '"' + str(batch) + '"'
-        lines = self.run(['cmd.exe', '/d', '/c', '%DEFJAM_SETUP_ENV_SCRIPT%'], capture=True)
+        lines = self.run(['cmd.exe', '/d', '/c', '%DEFJAM_SETUP_ENV_SCRIPT%'], capture=True,
+                         log_output=False)  # SET includes inherited environment secrets.
         for line in lines.splitlines():
             key, equal, value = line.partition('=')
             if equal and key and not key.startswith('='):

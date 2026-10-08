@@ -239,6 +239,17 @@ def test_toolchain_handoff_accepts_spaces_ampersands_and_literal_percent(tmp_pat
     assert output.strip() == 'TOOLCHAIN_OK'
 
 
+def test_captured_toolchain_environment_is_not_written_to_logs(tmp_path):
+    import io
+    setup = installer(tmp_path)
+    setup.log = io.StringIO()
+    setup.env['SETUP_TEST_CAPTURE'] = 'private-environment-fixture'
+    output = setup.run([sys.executable, '-c', 'import os; print(os.environ["SETUP_TEST_CAPTURE"])'],
+                       capture=True, log_output=False)
+    assert output.strip() == setup.env['SETUP_TEST_CAPTURE']
+    assert setup.env['SETUP_TEST_CAPTURE'] not in setup.log.getvalue()
+
+
 @pytest.mark.skipif(not (ROOT/'tools/xboxrecomp/tools/xiso').is_dir(), reason='requires recursive checkout')
 def test_image_traversal_is_rejected_before_any_file_publication(tmp_path):
     setup = installer(tmp_path)
