@@ -91,6 +91,26 @@ Use the explicit public URL for this lane; the inherited origin remains private.
 - Merged port exposed missing `src` include paths in three native Python fixtures;
   fixed fixture compile commands without changing runtime behavior.
 
+## Wizard feedback fixes (2026-10-08)
+
+The owner's trial showed a mojibake dash in the title, a brief Not Responding
+window during ZIP preparation, and an unlogged early failure. MSVC now compiles
+the native source as UTF-8, with an explicit Unicode title character. Payload
+preparation runs on a background thread, leaving the message loop and cancellation
+responsive. Persistent session logs are created before unpacking/validation under
+LocalAppData/DefJamSetup/logs; Open logs opens the actual file, and errors show its
+full location. The screenshot's install/data locations were nested, which the
+engine rejects before creating installation folders. Use sibling app/data folders.
+
+The native preparation probe runs actual payload extraction with a hidden wizard,
+requires UI timer ticks during preparation, then checks the nested-path failure
+has a readable log. The unit fixture separately covers logging before engine
+initialization. These fixes do not change the game/runtime or dependency pins.
+Validation: all 214 unit tests pass, including 41 installer fixtures. Native
+Unicode-title/control smoke and actual asynchronous preparation/early-log smoke
+both return 0. The latter verifies timer events before the extraction worker
+completes and finds the nested-location error in the persistent session log.
+
 ## Remaining acceptance gates
 
 - Clean Windows 11 VM with no compiler/Git/Python, VS 2022 provisioning and restart

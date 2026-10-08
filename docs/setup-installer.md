@@ -43,7 +43,10 @@ Add `--no-shortcuts` to suppress desktop and Start-menu shortcuts.
 
 Exit codes: 0 success; 2 invalid input; 3 prerequisites missing; 4 failed stage;
 5 concurrent setup/game; 6 cancelled; 3010 restart required. Logs default to
-`<install>/logs/setup-<timestamp>.log`; review personal paths before sharing.
+`%LOCALAPPDATA%\DefJamSetup\logs\<session>.log` for the wizard/packaged setup,
+including failures before destination validation. **Open logs** opens the current
+file directly, and error dialogs show its full path. `--log` overrides the path;
+review personal paths before sharing.
 No dump, game data or generated code is uploaded.
 
 ## Update, repair and uninstall

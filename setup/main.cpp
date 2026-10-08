@@ -11,12 +11,18 @@
 #include <string>
 #include <vector>
 #include <stdexcept>
+#include <thread>
 
 namespace fs = std::filesystem;
 static HWND window, dumpEdit, installEdit, dataEdit, statusLabel, startButton, cancelButton, prerequisites;
 static HANDLE worker = nullptr;
-static fs::path payload, scratch, statusPath, cancelPath;
+static fs::path payload, scratch, statusPath, cancelPath, logPath;
 static bool running = false;
+static bool preparationSmoke = false;
+static unsigned timerTicks = 0;
+static unsigned preparationTicks = 0;
+static int smokeResult = 4;
+static constexpr UINT WM_SETUP_READY = WM_APP + 1, WM_SETUP_FAILED = WM_APP + 2;
 
 static std::wstring utf8(const std::string& text) {
     int size = MultiByteToWideChar(CP_UTF8, 0, text.data(), (int)text.size(), nullptr, 0);
@@ -98,6 +104,26 @@ static void launchInstalled() {
 }
 
 #ifndef DEFJAM_LAUNCHER_ONLY
+static void nativeLog(const std::string& message) {
+    if (!logPath.empty()) { std::ofstream out(logPath, std::ios::app); out << message << '\n'; }
+}
+
+static void prepareSession(const std::vector<std::wstring>& args = {}) {
+    GUID id{};
+    if (FAILED(CoCreateGuid(&id))) throw std::runtime_error("Cannot create setup session");
+    wchar_t guid[64]; StringFromGUID2(id, guid, 64);
+    auto root = localAppData() / L"DefJamSetup";
+    scratch = root / guid;
+    payload = scratch / L"payload";
+    statusPath = scratch / L"status.txt";
+    cancelPath = scratch / L"cancel";
+    logPath = root / L"logs" / (std::wstring(guid) + L".log");
+    for (size_t i = 0; i + 1 < args.size(); ++i) if (args[i] == L"--log") logPath = args[i + 1];
+    fs::create_directories(logPath.parent_path());
+    fs::create_directories(scratch);
+    nativeLog("Preparing setup files. Diagnostics remain here even if validation fails.");
+}
+
 static std::wstring sha256(const void* bytes, DWORD size) {
     BCRYPT_ALG_HANDLE alg{};
     BCRYPT_HASH_HANDLE hash{};
@@ -128,11 +154,6 @@ static void unpack() {
     if (!bytes || sha256(bytes, size) != PAYLOAD_SHA256)
         throw std::runtime_error("Installer payload verification failed. Download it again.");
     // Unique private staging folder; never remove or reuse arbitrary caller paths.
-    GUID id{}; CoCreateGuid(&id);
-    wchar_t guid[64]; StringFromGUID2(id, guid, 64);
-    scratch = localAppData() / L"DefJamSetup" / guid;
-    fs::create_directories(scratch);
-    payload = scratch / L"payload";
     auto archive = scratch / L"payload.zip";
     { std::ofstream out(archive, std::ios::binary); out.write((const char*)bytes, size);
       if (!out) throw std::runtime_error("Could not write payload; check disk space"); }
@@ -142,14 +163,16 @@ static void unpack() {
         {L"-NoProfile", L"-NonInteractive", L"-Command",
          L"$ErrorActionPreference='Stop'; Expand-Archive -LiteralPath $env:DEFJAM_SETUP_ARCHIVE -DestinationPath $env:DEFJAM_SETUP_PAYLOAD"}));
     if (result) throw std::runtime_error("Cannot unpack setup payload");
-    statusPath = scratch / L"status.txt";
-    cancelPath = scratch / L"cancel";
+    nativeLog("Setup payload prepared.");
 }
 
 static HANDLE startEngine(std::vector<std::wstring> args) {
     std::vector<std::wstring> command{L"-B", (payload / L"engine/engine.py").wstring(),
         L"--payload", payload.wstring()};
     command.insert(command.end(), args.begin(), args.end());
+    bool hasLog = false;
+    for (const auto& arg : args) if (arg == L"--log") hasLog = true;
+    if (!hasLog) { command.push_back(L"--log"); command.push_back(logPath.wstring()); }
     return spawn(payload / L"python/python.exe", command);
 }
 
@@ -192,6 +215,7 @@ static void setBusy(bool value) {
     running = value;
     for (int id = 101; id <= 109; ++id) EnableWindow(GetDlgItem(window, id), !value);
     EnableWindow(prerequisites, !value);
+    EnableWindow(GetDlgItem(window, 112), FALSE);
     SetWindowTextW(cancelButton, value ? L"Cancel" : L"Close");
 }
 
@@ -205,22 +229,38 @@ static LRESULT CALLBACK windowProc(HWND hwnd, UINT message, WPARAM wp, LPARAM lp
         if (id == 109 && !running) {
             try {
                 if (editText(dumpEdit).empty()) throw std::runtime_error("Choose your Xbox dump first.");
-                if (payload.empty()) {
-                    SetWindowTextW(statusLabel, L"Preparing setup files..."); UpdateWindow(window); unpack();
-                }
-                fs::remove(cancelPath);
+                prepareSession();
                 std::vector<std::wstring> args{L"--dump", editText(dumpEdit), L"--install-dir", editText(installEdit),
                     L"--data-dir", editText(dataEdit), L"--status-file", statusPath.wstring(), L"--cancel-file", cancelPath.wstring()};
                 if (SendMessageW(prerequisites, BM_GETCHECK, 0, 0) == BST_CHECKED)
                     args.push_back(L"--install-prerequisites");
-                worker = startEngine(args); setBusy(true); SetTimer(window, 1, 400, nullptr);
+                setBusy(true); timerTicks = 0; SetTimer(window, 1, 400, nullptr);
+                SetWindowTextW(statusLabel, L"Preparing setup files... You can move the window or cancel.");
+                std::thread([args]() {
+                    try {
+                        unpack();
+                        if (fs::exists(cancelPath)) {
+                            nativeLog("Setup cancelled during preparation.");
+                            PostMessageW(window, WM_SETUP_FAILED, 6, (LPARAM)new std::wstring(L"Setup cancelled."));
+                        } else {
+                            auto process = startEngine(args);
+                            PostMessageW(window, WM_SETUP_READY, (WPARAM)process, 0);
+                        }
+                    } catch (const std::exception& ex) {
+                        nativeLog(std::string("Setup stopped: ") + ex.what());
+                        PostMessageW(window, WM_SETUP_FAILED, 4, (LPARAM)new std::wstring(utf8(ex.what())));
+                    }
+                }).detach();
             } catch (const std::exception& ex) {
-                MessageBoxW(window, utf8(ex.what()).c_str(), L"Setup", MB_OK | MB_ICONERROR);
+                nativeLog(std::string("Setup stopped: ") + ex.what());
+                KillTimer(window, 1); setBusy(false);
+                if (!preparationSmoke) MessageBoxW(window, utf8(ex.what()).c_str(), L"Setup", MB_OK | MB_ICONERROR);
             }
         }
         if (id == 110) SendMessageW(window, WM_CLOSE, 0, 0);
         if (id == 111) {
-            auto path = fs::path(editText(installEdit)) / L"logs";
+            auto path = logPath.empty() ? localAppData() / L"DefJamSetup/logs" : logPath;
+            fs::create_directories(logPath.empty() ? path : path.parent_path());
             ShellExecuteW(window, L"open", path.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
         }
         if (id == 112) {
@@ -229,7 +269,18 @@ static LRESULT CALLBACK windowProc(HWND hwnd, UINT message, WPARAM wp, LPARAM lp
         }
         return 0;
     }
-    if (message == WM_TIMER && worker) {
+    if (message == WM_SETUP_READY) { preparationTicks = timerTicks; worker = (HANDLE)wp; return 0; }
+    if (message == WM_SETUP_FAILED) {
+        auto error = reinterpret_cast<std::wstring*>(lp);
+        auto text = *error + L"\n\nLog: " + logPath.wstring(); delete error;
+        KillTimer(window, 1); setBusy(false); SetWindowTextW(statusLabel, text.c_str());
+        if (preparationSmoke) DestroyWindow(window);
+        else MessageBoxW(window, text.c_str(), L"Setup", MB_OK | MB_ICONERROR);
+        return 0;
+    }
+    if (message == WM_TIMER) {
+        ++timerTicks;
+        if (!worker) return 0;
         if (fs::exists(statusPath)) {
             std::ifstream in(statusPath); std::string text((std::istreambuf_iterator<char>(in)), {});
             SetWindowTextW(statusLabel, utf8(text).c_str());
@@ -238,8 +289,13 @@ static LRESULT CALLBACK windowProc(HWND hwnd, UINT message, WPARAM wp, LPARAM lp
             DWORD code; GetExitCodeProcess(worker, &code); CloseHandle(worker); worker = nullptr;
             KillTimer(window, 1); setBusy(false);
             EnableWindow(GetDlgItem(window, 112), code == 0);
+            if (preparationSmoke) {
+                std::ifstream in(logPath); std::string log((std::istreambuf_iterator<char>(in)), {});
+                smokeResult = code == 2 && preparationTicks >= 3 && log.find("separate, non-nested") != std::string::npos ? 0 : 4;
+                DestroyWindow(window); return 0;
+            }
             if (code) {
-                auto text = L"Setup stopped (exit " + std::to_wstring(code) + L"). Open the logs for details. Run again to resume.";
+                auto text = L"Setup stopped (exit " + std::to_wstring(code) + L").\n\nLog: " + logPath.wstring() + L"\n\nSelect Open logs for details.";
                 MessageBoxW(window, text.c_str(), L"Setup", MB_OK | MB_ICONINFORMATION);
             }
         }
@@ -258,11 +314,12 @@ static LRESULT CALLBACK windowProc(HWND hwnd, UINT message, WPARAM wp, LPARAM lp
     return DefWindowProcW(hwnd, message, wp, lp);
 }
 
-static int wizard(HINSTANCE instance, bool smoke = false) {
+static int wizard(HINSTANCE instance, bool smoke = false, bool preparation = false) {
+    preparationSmoke = preparation;
     WNDCLASSW wc{}; wc.lpfnWndProc = windowProc; wc.hInstance = instance;
     wc.hCursor = LoadCursor(nullptr, IDC_ARROW); wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
     wc.lpszClassName = L"DefJamSetupWizard"; RegisterClassW(&wc);
-    window = CreateWindowW(wc.lpszClassName, L"Def Jam Recompiled — Setup", WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
+    window = CreateWindowW(wc.lpszClassName, L"Def Jam Recompiled \u2014 Setup", WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
         CW_USEDEFAULT, CW_USEDEFAULT, 740, 470, nullptr, nullptr, instance, nullptr);
     control(L"STATIC", L"Build and play from your own USA Xbox dump", 0, 24, 20, 660, 24, 0);
     control(L"STATIC", L"First setup can take an hour and needs internet for missing Microsoft Build Tools.", 0, 24, 49, 670, 25, 0);
@@ -288,18 +345,26 @@ static int wizard(HINSTANCE instance, bool smoke = false) {
     if (smoke) {
         // Hardware-free CI probe: controls exist and the wizard needs no Python,
         // D3D device, compiler or payload extraction merely to open.
-        bool valid = window && dumpEdit && installEdit && dataEdit && prerequisites &&
+        wchar_t title[128]{}; GetWindowTextW(window, title, 128);
+        bool valid = wcscmp(title, L"Def Jam Recompiled \u2014 Setup") == 0 &&
+                     window && dumpEdit && installEdit && dataEdit && prerequisites &&
                      startButton && cancelButton && !editText(installEdit).empty() &&
                      !editText(dataEdit).empty() && IsWindowEnabled(startButton);
         DestroyWindow(window);
         return valid ? 0 : 4;
     }
-    ShowWindow(window, SW_SHOW);
+    if (preparation) {
+        SetWindowTextW(dumpEdit, L"missing.iso");
+        auto probe = localAppData() / L"DefJamSetup/probe";
+        SetWindowTextW(installEdit, probe.c_str());
+        SetWindowTextW(dataEdit, (probe / L"data").c_str());
+        PostMessageW(window, WM_COMMAND, 109, 0);
+    } else ShowWindow(window, SW_SHOW);
     MSG msg;
     while (GetMessageW(&msg, nullptr, 0, 0) > 0) {
         if (!IsDialogMessageW(window, &msg)) { TranslateMessage(&msg); DispatchMessageW(&msg); }
     }
-    return 0;
+    return preparation ? smokeResult : 0;
 }
 #endif
 
@@ -317,6 +382,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
 #else
             if (count > 1 && std::wstring(values[1]) == L"--ui-smoke") {
                 result = wizard(instance, true);
+            } else if (count > 1 && std::wstring(values[1]) == L"--ui-preparation-smoke") {
+                result = wizard(instance, false, true);
             } else if (count > 1 && std::wstring(values[1]) == L"--help") {
                 MessageBoxW(nullptr, L"Silent setup:\nDefJamSetup.exe --silent --dump PATH --install-dir PATH --data-dir PATH [--install-prerequisites] [--log PATH]\n\nExit codes: 0 success, 2 invalid input, 3 missing prerequisites, 4 failure, 5 busy, 6 cancelled, 3010 restart required.", L"Setup options", MB_OK);
                 result = 0;
@@ -325,11 +392,14 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
                 std::vector<std::wstring> args;
                 for (int i = 1; i < count; ++i) { args.emplace_back(values[i]); if (args.back() == L"--silent") silent = true; }
                 if (!silent) throw std::runtime_error("Command-line installation requires --silent; use --help for options.");
-                unpack(); result = (int)wait(startEngine(args));
+                prepareSession(args); unpack(); result = (int)wait(startEngine(args));
             } else result = wizard(instance);
 #endif
         }
     } catch (const std::exception& ex) {
+#ifndef DEFJAM_LAUNCHER_ONLY
+        nativeLog(std::string("Setup stopped: ") + ex.what());
+#endif
         bool silent = false;
         for (int i = 1; i < count; ++i) if (std::wstring(values[i]) == L"--silent") silent = true;
         if (!silent) MessageBoxW(nullptr, utf8(ex.what()).c_str(), L"Def Jam Setup", MB_OK | MB_ICONERROR);

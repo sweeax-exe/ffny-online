@@ -30,6 +30,8 @@ jobs:
           $setupPath = (Resolve-Path build/setup/DefJamSetup.exe).Path
           $ui = Start-Process -FilePath $setupPath -ArgumentList '--ui-smoke' -WindowStyle Hidden -Wait -PassThru
           if ($ui.ExitCode -ne 0) { throw 'Native setup wizard smoke failed' }
+          $preparation = Start-Process -FilePath $setupPath -ArgumentList '--ui-preparation-smoke' -WindowStyle Hidden -Wait -PassThru
+          if ($preparation.ExitCode -ne 0) { throw 'Wizard preparation responsiveness or early-failure log failed' }
           $app = Join-Path $env:RUNNER_TEMP 'defjam-test-app'
           $data = Join-Path $env:RUNNER_TEMP 'defjam-test-data'
           $process = Start-Process -FilePath $setupPath -ArgumentList "--silent --dump missing.iso --install-dir `"$app`" --data-dir `"$data`"" -WindowStyle Hidden -Wait -PassThru

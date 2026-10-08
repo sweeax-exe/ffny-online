@@ -250,6 +250,16 @@ def test_captured_toolchain_environment_is_not_written_to_logs(tmp_path):
     assert setup.env['SETUP_TEST_CAPTURE'] not in setup.log.getvalue()
 
 
+def test_nested_destination_failure_creates_log_before_engine_initialization(tmp_path):
+    folder = payload(tmp_path)
+    log = tmp_path/'diagnostics/session.log'
+    code = engine.main(['--payload', str(folder), '--silent', '--dump', str(tmp_path/'dump'),
+        '--install-dir', str(tmp_path/'app'), '--data-dir', str(tmp_path/'app/data'), '--log', str(log)])
+    assert code == 2
+    assert 'separate, non-nested' in log.read_text()
+    assert not (tmp_path/'app').exists()
+
+
 @pytest.mark.skipif(not (ROOT/'tools/xboxrecomp/tools/xiso').is_dir(), reason='requires recursive checkout')
 def test_image_traversal_is_rejected_before_any_file_publication(tmp_path):
     setup = installer(tmp_path)
