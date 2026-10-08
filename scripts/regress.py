@@ -70,10 +70,10 @@ QUICK = ["unit", "m2", "m3", "m4a", "fight"]
 
 # A 2 s line of a 60 Hz title holds 120 presents. Loading screens run at 30, so the
 # floor is on the median, and lower for the debug build.
-FPS_FLOOR = {"win-x64-release": 110, "win-x64-debug": 100}
+FPS_FLOOR = {"win-x64-release": 110, "win-x64-debug": 100, "posix-release": 110, "posix-debug": 100}
 # Four fighters cost the unoptimised build its 60 frames a second (median 95 presents
 # per 2 s measured 2026-10-05); the check there is for crashes and a playable rate.
-FFA_FPS_FLOOR = {"win-x64-release": 110, "win-x64-debug": 80}
+FFA_FPS_FLOOR = {"win-x64-release": 110, "win-x64-debug": 80, "posix-release": 110, "posix-debug": 80}
 
 def median(xs):
     return sorted(xs)[len(xs) // 2] if xs else 0
@@ -371,7 +371,7 @@ CHECKS = {"unit": check_unit, "m2": check_m2, "m3": check_m3, "m4a": check_m4a, 
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument("--preset", default=os.environ.get("RECOMP_PRESET", "win-x64-release"))
+    ap.add_argument("--preset", default=os.environ.get("RECOMP_PRESET", harness.RELEASE_PRESET))
     ap.add_argument("--quick", action="store_true", help="unit, the golden frames and a fight")
     ap.add_argument("--only", help="comma-separated checks: " + ",".join(ORDER))
     ap.add_argument("--soak", type=int, default=3, help="boots in the soak check (default 3)")

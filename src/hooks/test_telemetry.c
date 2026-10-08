@@ -22,7 +22,7 @@
  *     number generator, which the game otherwise takes from the time-stamp counter;
  *   RECOMP_TEST_INPUT=<file>  replaces a fighter's pad input, step by step (below).
  */
-#include <windows.h>
+#include "host.h"
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -81,8 +81,8 @@ static int s_dump_pad;              /* RECOMP_TEST_PAD_DUMP=1: raw pad entries i
 /* Each line is built whole and written with one call: stderr is shared with
  * every other thread's log, and a line assembled from several writes had other
  * output land in the middle of its JSON. */
-static __declspec(thread) char s_line[4096];
-static __declspec(thread) size_t s_len;
+static HOST_TLS char s_line[4096];
+static HOST_TLS size_t s_len;
 
 static void put(const char *format, ...)
 {

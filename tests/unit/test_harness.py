@@ -23,9 +23,10 @@ pipeline = load("pipeline-state")
 
 
 def test_presses_expand():
-    assert harness.expand_presses("right@5;a@8") == ["right:5:5.3", "a:8:8.3"]
+    d = harness.DIRECTION_HOLD      # directions are held for less off Windows
+    assert harness.expand_presses("right@5;a@8") == ["right:5:%g" % (5 + d), "a:8:8.3"]
     assert harness.expand_presses("a@8+4x3") == ["a:8:8.3", "a:12:12.3", "a:16:16.3"]
-    assert harness.expand_presses("down@11+0.6x2") == ["down:11:11.3", "down:11.6:11.9"]
+    assert harness.expand_presses("down@11+0.6x2") == ["down:11:%g" % (11 + d), "down:11.6:%g" % (11.6 + d)]
 
 
 def test_guarded_data_root_matches_child_cwd(tmp_path, monkeypatch):
@@ -272,7 +273,7 @@ def test_launch_failure_restores_full_save_root(tmp_path, monkeypatch, original)
     monkeypatch.setattr(harness.pipeline_state, 'verify_build', lambda *a: None)
     repo = tmp_path / 'repo'
     monkeypatch.setattr(harness, 'REPO', str(repo))
-    for name in ('build/win-x64-release/defjam_recomp.exe', 'game/default.xbe'):
+    for name in ('build/%s/%s' % (harness.RELEASE_PRESET, harness.EXE_NAME), 'game/default.xbe'):
         path = repo / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(b'synthetic fixture')
@@ -295,7 +296,7 @@ def test_freshness_rejects_changed_analysis_generated_code_and_runtime(tmp_path)
     repo, toolkit = pipeline_fixture(tmp_path)
     folder = repo / 'build/synthetic'
     folder.mkdir(parents=True)
-    exe = folder / 'defjam_recomp.exe'
+    exe = folder / pipeline.EXE_NAME
     exe.write_bytes(b'synthetic executable')
     (folder / 'CMakeCache.txt').write_text('DEFJAM_BUILD_GAME:BOOL=ON\n')
     pipeline.write_state(folder / 'build-state.json', {'toolkit': str(toolkit),

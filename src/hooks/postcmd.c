@@ -42,7 +42,7 @@
  * one ever appears, is never overwritten.
  */
 
-#include <windows.h>
+#include "host.h"
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>

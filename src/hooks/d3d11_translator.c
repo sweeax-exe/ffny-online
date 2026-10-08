@@ -1,5 +1,10 @@
 /*
- * Stand up a Direct3D 11 device for the push-buffer translator to draw through.
+ * Stand up a graphics device for the push-buffer translator to draw through:
+ * Direct3D 11 on Windows, the toolkit's Vulkan device elsewhere. The device,
+ * the frame-end hook and the capture are the same on both; only the window
+ * differs, and off Windows it lives in src/host_posix.c.
+ *
+ * Written for Direct3D 11 first, which is why the names say so:
  *
  * This title's Direct3D 8 is statically linked into the XBE, so it was
  * recompiled along with the game and never calls the runtime's own Direct3D.
@@ -24,7 +29,7 @@
  * executor. Without it nothing here runs and the software path is unchanged.
  */
 
-#include <windows.h>
+#include "host.h"
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -45,11 +50,14 @@
 
 static void capture_backbuffer(IDirect3DDevice8 *dev);
 
-static HWND  s_window;
 static int   s_ready;
 
 void d3d11_translator_pump(void);
 void d3d11_translator_report(void);
+
+#if defined(_WIN32)
+
+static HWND  s_window;
 
 /* Borderless full screen: the window loses its frame and covers the monitor
  * it is on. No display-mode change, so Alt-Tab is instant and the swap chain
@@ -356,6 +364,12 @@ static DWORD WINAPI window_thread(LPVOID unused)
     return 0;
 }
 
+#else
+
+int host_posix_open_window(int width, int height, const char *title);
+
+#endif /* _WIN32 */
+
 int d3d11_translator_init(void)
 {
     IDirect3D8 *d3d;
@@ -368,6 +382,7 @@ int d3d11_translator_init(void)
     if (!getenv("RECOMP_PB_D3D11"))
         return 0;
 
+#if defined(_WIN32)
     s_window_ready = CreateEventW(NULL, TRUE, FALSE, NULL);
     {
         HANDLE th = s_window_ready ? CreateThread(NULL, 0, window_thread, NULL, 0, NULL) : NULL;
@@ -383,6 +398,14 @@ int d3d11_translator_init(void)
         fprintf(stderr, "[TRANS] could not create a window\n");
         return 0;
     }
+#else
+    /* No window is not fatal here: the device then draws off screen, which
+     * is what a run without a display uses. */
+    if (!host_posix_open_window(pc_display("window_width", TRANSLATOR_WIDTH * 2),
+                                pc_display("window_height", TRANSLATOR_HEIGHT * 2),
+                                "Def Jam: Fight for NY"))
+        fprintf(stderr, "[TRANS] no window; frames are drawn off screen\n");
+#endif
 
     d3d = xbox_Direct3DCreate8(0);
     if (!d3d) {
@@ -396,11 +419,18 @@ int d3d11_translator_init(void)
     pp.BackBufferFormat       = D3DFMT_A8R8G8B8;
     pp.BackBufferCount        = 1;
     pp.SwapEffect             = D3DSWAPEFFECT_DISCARD;
+#if defined(_WIN32)
     pp.hDeviceWindow          = s_window;
+#endif
     pp.Windowed               = TRUE;
     pp.EnableAutoDepthStencil = FALSE;
 
-    hr = d3d->lpVtbl->CreateDevice(d3d, 0, 1 /* HAL */, s_window,
+    hr = d3d->lpVtbl->CreateDevice(d3d, 0, 1 /* HAL */,
+#if defined(_WIN32)
+                                   s_window,
+#else
+                                   NULL,
+#endif
                                    0x00000040 /* SOFTWARE_VERTEXPROCESSING */,
                                    &pp, &dev);
     if (FAILED(hr) || !dev) {
@@ -410,7 +440,7 @@ int d3d11_translator_init(void)
 
     pgraph_d3d11_init();
     s_ready = 1;
-    fprintf(stderr, "[TRANS] D3D11 translator ready: %ux%u picture in a %dx%d window, "
+    fprintf(stderr, "[TRANS] translator ready: %ux%u picture in a %dx%d window, "
                     "push-buffer methods will be forwarded\n",
             TRANSLATOR_WIDTH, TRANSLATOR_HEIGHT,
             pc_display("window_width", 0), pc_display("window_height", 0));

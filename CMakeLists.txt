@@ -20,7 +20,9 @@ project(defjam_recomp VERSION 0.4.1 LANGUAGES C CXX)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 
-add_compile_definitions(WIN32_LEAN_AND_MEAN NOMINMAX)
+if(WIN32)
+    add_compile_definitions(WIN32_LEAN_AND_MEAN NOMINMAX)
+endif()
 
 set(XBOXRECOMP_DIR "${CMAKE_CURRENT_SOURCE_DIR}/tools/xboxrecomp" CACHE PATH
     "Path to the xboxrecomp toolkit root directory")
@@ -68,17 +70,55 @@ if(DEFJAM_BUILD_GAME AND NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/recomp/gen/
 endif()
 
 if(DEFJAM_BUILD_GAME)
-    # Dear ImGui (MIT): the launcher and the in-game overlay. Fetched at a pinned hash.
-    list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
-    include(imgui)
+    if(WIN32)
+        set(HOST_SOURCES "")
+        # Dear ImGui (MIT): the launcher and the in-game overlay. Fetched at a pinned hash.
+        list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
+        include(imgui)
+    else()
+        # The Win32 window and the debug-register watchpoints have no place
+        # here; src/host_posix.c has the SDL window and stands in for the rest.
+        # The launcher and the overlay draw through Direct3D 11 and the Win32
+        # message loop, so they are Windows-only until they have a Vulkan and
+        # SDL backend; host_posix.c answers for them (no launcher, no overlay).
+        list(FILTER HOOK_SOURCES EXCLUDE REGEX "/(watchpoint\\.c|pc_ui\\.cpp|pc_launcher\\.cpp)$")
+        set(HOST_SOURCES src/host_posix.c)
+    endif()
     add_executable(${PROJECT_NAME} WIN32
         src/main.c
         src/recomp_manual.c
+        ${HOST_SOURCES}
         ${HOOK_SOURCES}
         ${PATCH_SOURCES}
         ${RECOMP_GEN_SOURCES}
     )
-    target_link_libraries(${PROJECT_NAME} PRIVATE xboxrecomp recomp_settings defjam_imgui d3d11 dxgi dxguid xinput winmm dbghelp shell32)
+    if(WIN32)
+        target_link_libraries(${PROJECT_NAME} PRIVATE xboxrecomp recomp_settings defjam_imgui d3d11 dxgi dxguid xinput winmm dbghelp shell32)
+    else()
+        # One SDL for the window, the sound and the pads: SDL3, the system's.
+        find_package(SDL3 REQUIRED CONFIG)
+        find_package(Vulkan REQUIRED)
+        target_link_libraries(${PROJECT_NAME} PRIVATE xboxrecomp recomp_settings
+                              SDL3::SDL3 Vulkan::Vulkan ${CMAKE_DL_LIBS} m)
+        # SDL opens the Vulkan loader by name; tell it where this build's is.
+        target_compile_definitions(${PROJECT_NAME} PRIVATE
+            DEFJAM_VULKAN_LIBRARY="${Vulkan_LIBRARY}")
+        # The lifted code was written against a compiler that does none of
+        # these: it reads memory through casts of every width, relies on
+        # wrapping arithmetic, and must not have a multiply and an add fused
+        # into one rounding (arm64 does that by default, and the game's
+        # simulation would then differ from the Windows build's).
+        target_compile_options(${PROJECT_NAME} PRIVATE
+            -fno-strict-aliasing -fwrapv -ffp-contract=off -g)
+        if(APPLE)
+            # One named section for the title's code (src/recomp/guest_section.h).
+            set_source_files_properties(${RECOMP_GEN_SOURCES} PROPERTIES COMPILE_OPTIONS
+                "-include;${CMAKE_CURRENT_SOURCE_DIR}/src/recomp/guest_section.h")
+        endif()
+        # Keep every lifted function's name in the dynamic symbol table, so
+        # the crash report can name the one that faulted.
+        set_target_properties(${PROJECT_NAME} PROPERTIES ENABLE_EXPORTS ON)
+    endif()
     target_compile_definitions(${PROJECT_NAME} PRIVATE DEFJAM_VERSION=\"${PROJECT_VERSION}\")
     target_include_directories(${PROJECT_NAME} PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src

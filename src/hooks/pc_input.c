@@ -24,6 +24,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "../host.h"   /* by its place, so the file also builds on its own (tests/unit) */
 #include "input_host.h"
 #include "input_map.h"
 #include "pc_input.h"
@@ -276,6 +277,8 @@ static void key_event(int vk, int down)
     xbox_HostInputKey(vk, down);
 }
 
+#if defined(_WIN32)
+
 /* Shift, Ctrl and Alt arrive as one virtual key for both sides; the scan code
  * and the extended bit say which. Report the side and the generic key, which
  * is held while either side is. */
@@ -329,6 +332,8 @@ static void mouse_button(HWND window, int vk, int down)
     key_event(vk, down);
 }
 
+#endif /* _WIN32 */
+
 static void release_everything(void)
 {
     int vk;
@@ -343,6 +348,8 @@ void pc_input_set_focus(int focused)
     xbox_HostInputFocus(focused);
     if (!focused) release_everything();
 }
+
+#if defined(_WIN32)
 
 void pc_input_window_message(HWND window, UINT msg, WPARAM wp, LPARAM lp)
 {
@@ -390,3 +397,19 @@ void pc_input_window_message(HWND window, UINT msg, WPARAM wp, LPARAM lp)
         break;
     }
 }
+
+#else /* !_WIN32 */
+
+void pc_input_host_key(int vk, int down)
+{
+    if (vk > 0 && vk < 256)
+        key_event(vk, down);
+}
+
+void pc_input_host_wheel(int notches)
+{
+    if (notches)
+        xbox_HostInputWheel(notches);
+}
+
+#endif /* _WIN32 */

@@ -43,6 +43,8 @@ __pycache__/
 
 # ---- local junction to the extracted disc (never committed) ----
 /game/
+# the same name as a symlink, which is how the folder is linked off Windows
+/game
 
 # ---- runtime logs ----
 logs/

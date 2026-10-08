@@ -44,7 +44,11 @@ import zlib
 from pathlib import Path
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-EXE_NAME = "defjam_recomp.exe"
+# Windows builds with the win-x64 presets; every other host with the posix ones.
+WINDOWS = os.name == "nt"
+EXE_NAME = "defjam_recomp.exe" if WINDOWS else "defjam_recomp"
+RELEASE_PRESET = "win-x64-release" if WINDOWS else "posix-release"
+DEBUG_PRESET = "win-x64-debug" if WINDOWS else "posix-debug"
 _state_spec = importlib.util.spec_from_file_location(
     'pipeline_state', os.path.join(REPO, 'scripts', 'pipeline-state.py'))
 pipeline_state = importlib.util.module_from_spec(_state_spec)
@@ -113,6 +117,14 @@ def title_presses():
     return out
 
 
+# How long a scripted direction press is held. The front end repeats a held
+# direction after about a quarter of a second: on macOS a 0.3 s hold on the main
+# menu moved the cursor twice and 0.1 and 0.2 s moved it once (2026-10-06, one
+# run each). The Windows routes were all tuned with 0.3 s, where the press is seen
+# later, and have not been run with anything else, so Windows keeps it.
+DIRECTION_HOLD = 0.3 if WINDOWS else 0.2
+
+
 def expand_presses(keys):
     """`right@5;a@8+4x6` -> ['right:5:5.3', 'a:8:8.3', 'a:12:12.3', ...]."""
     out = []
@@ -127,7 +139,8 @@ def expand_presses(keys):
             times = [float(t0) + i * float(step) for i in range(int(n))]
         else:
             times = [float(rest)]
-        out += ["%s:%g:%g" % (name, t, t + 0.3) for t in times]
+        hold = DIRECTION_HOLD if name.split("-")[-1] in ("up", "down", "left", "right") else 0.3
+        out += ["%s:%g:%g" % (name, t, t + hold) for t in times]
     return out
 
 
@@ -573,9 +586,17 @@ class Run:
 
 
 def process_memory(pid):
-    """(private bytes, working set) of a process, or None. Windows only, no dependency."""
+    """(private bytes, working set) of a process, or None. No dependency.
+
+    Off Windows both numbers are the resident set from `ps`: there is no cheap
+    private-bytes figure, and growth is what the caller looks for."""
     if os.name != "nt":
-        return None
+        try:
+            out = subprocess.run(["ps", "-o", "rss=", "-p", str(pid)], capture_output=True, text=True, timeout=5)
+            rss = int(out.stdout.split()[0]) * 1024
+            return rss, rss
+        except (OSError, ValueError, IndexError, subprocess.SubprocessError):
+            return None
     import ctypes
     from ctypes import wintypes
 
@@ -604,7 +625,7 @@ def process_memory(pid):
         kernel32.CloseHandle(handle)
 
 
-def run_game(name, stages=(), tail="", shots="", secs=240, preset="win-x64-release", env=None,
+def run_game(name, stages=(), tail="", shots="", secs=240, preset=RELEASE_PRESET, env=None,
              until=None, after=0, story=False, scripted=True, stall_secs=0, on_stall=None, quiet=False,
              until_file=None, controller=None, inherit_recomp=True):
     """Run the game once. Returns a Run.
@@ -619,7 +640,8 @@ def run_game(name, stages=(), tail="", shots="", secs=240, preset="win-x64-relea
     exe = exe_path(preset)
     validate_shots(shots)
     if not os.path.isfile(exe):
-        raise SystemExit("not built: %s (scripts/build.ps1 -Preset %s)" % (exe, preset))
+        raise SystemExit("not built: %s (scripts/build.ps1 -Preset %s, or scripts/pipeline.py build --preset %s)"
+                         % (exe, preset, preset))
     try:
         build_state = pipeline_state.verify_build(Path(REPO), preset)
     except (OSError, ValueError, KeyError) as ex:
@@ -725,7 +747,7 @@ def run_game(name, stages=(), tail="", shots="", secs=240, preset="win-x64-relea
     return run
 
 
-def run_route(route, preset="win-x64-release", secs=None, shots=None, env=None, extra_stages=(),
+def run_route(route, preset=RELEASE_PRESET, secs=None, shots=None, env=None, extra_stages=(),
               to_end=False, **kw):
     r = ROUTES[route]
     stages = list(r["stages"]) + list(extra_stages)
@@ -905,7 +927,7 @@ def main(argv=None):
 
     r = sub.add_parser("run", help="run one route")
     r.add_argument("route", choices=sorted(ROUTES))
-    r.add_argument("--preset", default=os.environ.get("RECOMP_PRESET", "win-x64-release"))
+    r.add_argument("--preset", default=os.environ.get("RECOMP_PRESET", RELEASE_PRESET))
     r.add_argument("--secs", type=int, help="upper bound on the run (the route has a default)")
     r.add_argument("--shots", help="capture times, RECOMP_TRANS_SHOT_SECS syntax; '' for none")
     r.add_argument("--stage", action="append", default=[], help="an extra `anchor=presses` stage (repeatable)")
@@ -915,7 +937,7 @@ def main(argv=None):
 
     s = sub.add_parser("soak", help="boot to the main menu repeatedly; dump state at a hang")
     s.add_argument("--boots", type=int, default=10)
-    s.add_argument("--preset", default=os.environ.get("RECOMP_PRESET", "win-x64-debug"))
+    s.add_argument("--preset", default=os.environ.get("RECOMP_PRESET", DEBUG_PRESET))
     s.add_argument("--keep-going", action="store_true", help="do not stop at the first hang")
 
     p = sub.add_parser("png", help="convert captures to PNG for viewing")

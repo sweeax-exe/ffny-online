@@ -22,7 +22,7 @@
 #include <stdint.h>
 #include <string.h>
 #include <stdlib.h>
-#include <windows.h>
+#include "host.h"
 
 /* The generated register model: MEM8/16/32, XBOX_PTR, and the guest registers
  * declared RECOMP_TLS. Declaring them here by hand instead would resolve to

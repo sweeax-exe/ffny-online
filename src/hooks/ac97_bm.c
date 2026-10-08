@@ -29,7 +29,7 @@
  * than a convenient one: this runtime has no DMA engine to reset.
  */
 
-#include <windows.h>
+#include "host.h"
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -120,7 +120,7 @@ int ac97_bm_handle_mmio(void *ctx, uint32_t xbox_va)
         return 0;
     ok = mmio_emulate((PCONTEXT)ctx, xbox_va - p->base, p, ac97_read, ac97_write);
     if (!ok && p->undecoded++ < 10) {
-        const uint8_t *ip = (const uint8_t *)((PCONTEXT)ctx)->Rip;
+        const uint8_t *ip = (const uint8_t *)(uintptr_t)HOST_PC(ctx);
         fprintf(stderr, "  [AC97] undecoded access at +0x%03X: "
                         "%02X %02X %02X %02X %02X %02X\n",
                 xbox_va - p->base, ip[0], ip[1], ip[2], ip[3], ip[4], ip[5]);
@@ -144,7 +144,7 @@ void ac97_bm_init(ptrdiff_t mem_offset)
         void *native = (void *)((uintptr_t)bases[i] + (uintptr_t)mem_offset);
         DWORD old = 0;
 
-        memcpy(s_pages[s_page_count].shadow, native, AC97_PAGE);
+        memcpy(s_pages[s_page_count].shadow, HOST_VIEW(native), AC97_PAGE);
         s_pages[s_page_count].base = bases[i];
         /* Polling threads are already running. Publish initialized ownership
          * before protection can fault, as the NV2A page setup does. */

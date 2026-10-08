@@ -7,7 +7,7 @@
  * frames. A zero-health observation is NOT a KO assertion. Fighter IDs,
  * positions, round state and event-aligned PCM remain to be mapped.
  */
-#include <windows.h>
+#include "host.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -18,8 +18,8 @@
 #define ACTORS 0x003B92E0u
 #define STRIDE 0x12E8u
 static volatile LONG64 updates;
-static __declspec(thread) uint32_t pending_actor, pending_caller;
-static __declspec(thread) float pending_health;
+static HOST_TLS uint32_t pending_actor, pending_caller;
+static HOST_TLS float pending_health;
 
 int defjam_test_observations_enabled(void)
 {
