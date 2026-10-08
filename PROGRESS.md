@@ -221,7 +221,7 @@ defjam-recomp/
 ## 7. Hand-off
 
 ### Native macOS and Linux port, merged and released as v0.5.0 (D82), 2026-10-08
-Open after the release: the launcher and overlay off Windows; the one unresolved indirect call in `versus` (work log 2026-10-08); the Linux game build and a Steam Deck run; the Windows regression on these sources; the upstream candidates in `docs/research/upstream-macos-linux-candidates.md`.
+Open after the release (the first two are written up in `docs/04-improvement-backlog.md` at Vlad's request): the launcher and overlay off Windows; saves for the Story routes without copying them by hand; the one unresolved indirect call in `versus` (work log 2026-10-08); the Linux game build and a Steam Deck run; the Windows regression on these sources; the upstream candidates in `docs/research/upstream-macos-linux-candidates.md`.
 
 Work happens on a Mac (`/Users/vlad/Code/DefJamFFNY-recomp`, arm64, macOS 26, Homebrew cmake/ninja/
 pkg-config/sdl2/libepoxy/openssl). Toolkit work is on fork branch `defjam/macos-linux`, published, and
