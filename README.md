@@ -22,6 +22,26 @@ game assets, disc images, translated game code or game executable.
 [Known issues](docs/known-issues.md) · [Contributing](CONTRIBUTING.md) ·
 [Releases](https://github.com/vyanhursky/DefJamFFNY-recomp/releases)
 
+## Features
+
+- **Native on Windows and macOS.** Direct3D 11 on Windows x64, Vulkan on Apple
+  Silicon Macs. Linux is in progress: the runtime builds, the game does not run
+  there yet.
+- **Controllers, keyboard and mouse.** Xbox (XInput), DualSense, Switch Pro and
+  most other gamepads, with rumble, hot-plug and remapping. The keyboard and
+  mouse play as a player of their own. Up to four players locally.
+- **Higher resolution.** Renders at up to 4× the console's resolution, in a
+  resizable window or borderless full screen.
+- **Optional HD textures.** 4× texture packs generated on your machine from
+  your own dump (Windows).
+- **An installer that builds the game for you.** Point the Windows setup wizard
+  at your dump; it checks it, then translates and compiles the game locally.
+- **Launcher and in-game settings.** A start-up window and an overlay (F1) for
+  display, texture, controller and key settings, usable with mouse, keyboard or
+  pad (Windows).
+- **Your saves stay local.** Profiles live in your data folder and survive
+  updates and repairs.
+
 ## Gameplay
 
 ![Banner and Blaze fighting in the Windows port](docs/media/fight-screenshot.png)
