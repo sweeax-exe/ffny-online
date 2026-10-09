@@ -502,6 +502,12 @@ static void capture_backbuffer(IDirect3DDevice8 *dev)
     uint32_t y, x, size;
     extern unsigned d3d8_GetRenderScale(void);
     uint32_t sc = d3d8_GetRenderScale();
+    const char *native_shot = getenv("RECOMP_TRANS_SHOT_NATIVE");
+    /* HD review needs actual rendered pixels; regression captures stay 640x480. */
+    if (native_shot && !strcmp(native_shot,"1")) {
+        w *= sc; h *= sc; sc = 1;
+        row = ((w * 3) + 3) & ~3u;
+    }
 
     char named[512];
     /* The frames the caller asked for, ascending. One frame writes to the path

@@ -256,6 +256,13 @@ def execute(args):
             env = {'DEFJAM_DATA': disposable, 'RECOMP_SETTINGS': 'none',
                    'RECOMP_PAD_HOST': '0', 'RECOMP_PRESENT_PACING': '1'}
             env.update(display_env)
+            # Fixture saves live in a disposable data root; HD pack assets can
+            # be read explicitly from the caller's separate mods directory.
+            # Ordinary scenarios still suppress inherited pack diagnostics.
+            if getattr(args, 'texture_packs', None) is not None:
+                env['RECOMP_TEXTURE_PACKS'] = args.texture_packs
+            if getattr(args, 'texture_root', None):
+                env['RECOMP_TEXTURE_ROOT'] = str(Path(args.texture_root).resolve())
             if args.observe_combat or args.require_combat:
                 env['RECOMP_TEST_OBSERVATIONS'] = '1'
             for item in args.test_env or []:
@@ -412,6 +419,8 @@ def main(argv=None):
     run.add_argument('--output')
     run.add_argument('--preset', default=harness.RELEASE_PRESET)
     run.add_argument('--settings', help='optional JSON render_scale/gamma/vsync; inherited RECOMP diagnostics are suppressed')
+    run.add_argument('--texture-packs', help='explicit semicolon-separated HD pack folders for this scenario')
+    run.add_argument('--texture-root', help='local mods folder read by the scenario; saves still use a disposable root')
     audio_group = run.add_mutually_exclusive_group()
     audio_group.add_argument('--audio', action='store_true', default=None, help='strict health gates (default for fights)')
     audio_group.add_argument('--no-audio', dest='audio', action='store_false', help='explicit runtime-only smoke run; omit audio gates')
@@ -444,6 +453,8 @@ def main(argv=None):
         return 0
     if (args.stream_out or args.stream_expect) and not (args.step_input and args.rng_seed is not None):
         parser.error('a state stream is only repeatable with --step-input and --rng-seed')
+    if args.texture_root and args.texture_packs is None:
+        parser.error('--texture-root requires explicit --texture-packs')
     return execute(args)
 
 

@@ -21,7 +21,10 @@ import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 PYTHON_VERSION = '3.13.5'
-PACKAGES = ['pyxbe==1.0.4', 'capstone==5.0.9']
+PACKAGES = ['pyxbe==1.0.4', 'capstone==5.0.9', 'Pillow==12.3.0', 'numpy==2.5.2']
+HD_SOURCES = ('scripts/build-hd-pack.py', 'scripts/hd_assets.py',
+              'scripts/hd_corpus.py', 'scripts/hd_corpus.html',
+              'config/hd-runtime-aliases.json')
 
 
 def git(root, *args):
@@ -110,6 +113,9 @@ def main(argv=None):
         source.mkdir()
         copy_sources(ROOT, source)
         copy_sources(toolkit, source / 'tools/xboxrecomp', True)
+        for name in HD_SOURCES:
+            if not (source / name).is_file():
+                raise ValueError('Required HD setup source is not tracked: ' + name)
         # Source archives contain no Git metadata and never receive the user's bytes.
         (source / 'src/recomp/gen').mkdir(parents=True, exist_ok=True)
         (source / 'src/recomp/gen/.gitkeep').touch()
@@ -128,6 +134,7 @@ def main(argv=None):
         wheels = args.cache / 'wheels'
         wheels.mkdir(exist_ok=True)
         subprocess.run([sys.executable, '-m', 'pip', 'download', '--only-binary=:all:', '--no-deps',
+                        '--platform', 'win_amd64', '--python-version', '313', '--implementation', 'cp', '--abi', 'cp313',
                         '--dest', str(wheels), *PACKAGES], check=True)
         for wheel_name, wheel_sha in dependencies['wheels'].items():
             wheel = wheels / wheel_name
@@ -137,7 +144,7 @@ def main(argv=None):
             provenance.append({'package': wheel_name, 'sha256': wheel_sha})
         # ._pth isolation requires explicitly adding source roots used by -m tools.
         (staging / 'python/python313._pth').write_text(
-            'python313.zip\n.\nLib/site-packages\n../source\n../source/tools/xboxrecomp\nimport site\n', encoding='utf-8')
+            'python313.zip\n.\nLib/site-packages\n../source\n../source/scripts\n../source/tools/xboxrecomp\nimport site\n', encoding='utf-8')
         # Users never download SDL/ImGui at configure time. Keep source archive checksums.
         for name, cmake, version_key, sha_key, url_pattern in (
             ('sdl3', toolkit / 'cmake/xbox_sdl3.cmake', 'XBOX_SDL3_VERSION', 'XBOX_SDL3_SHA256',

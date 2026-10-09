@@ -43,6 +43,18 @@ and what to do when something misbehaves, see [Controllers, keyboard and mouse](
 | `vsync` | `true` | Pace frames on the display. Used when the refresh rate is a multiple of 60 Hz; other displays use the game's own 60 fps timer. Env `RECOMP_PRESENT_VSYNC`. |
 | `gamma` | `true` | Apply the game's own brightness curve, as the console does. Restart. Env `RECOMP_GAMMA`. |
 
+## [textures]
+
+| Key | Default | Meaning |
+|---|---|---|
+| `enabled` | `false` | Use local HD texture packs. Restart. |
+| `packs` | `faithful-hd` | Folder names beneath `<data>/mods`, separated by semicolons. Later packs win. Restart. An explicit `RECOMP_TEXTURE_PACKS` enables those packs for one run. |
+| `cache_mb` | `512` | Replacement memory budget in MiB (32–4096), accounting for GPU resources and retained upload data. Restart. Env `RECOMP_TEXTURE_CACHE_MB`. |
+| `dump` | `false` | Write lossless source PNGs and texture identities to `<data>/hd-work/runtime`. Restart. Env `RECOMP_TEXTURE_DUMP_DIR` can select a different destination. |
+| `dump_limit` | `2000` | Maximum new images captured per run (0–65536). Restart. Env `RECOMP_TEXTURE_DUMP_LIMIT`. |
+
+See [HD textures](hd-textures.md) for the pack format and local workflow.
+
 ## [input]
 
 | Key | Default | Meaning |

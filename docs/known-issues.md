@@ -61,7 +61,8 @@ fixture; it does not establish Clang or native Linux correctness.
 A settings file, borderless full screen, a resizable window and render-scale choice
 arrive in v0.2.0. Exclusive full screen is not offered; the flip-model borderless window replaces it. Vsync
 paces the game only on displays whose refresh rate is a multiple of 60. Changing `render_scale` needs
-a restart. An in-game settings menu, true 16:9 and texture packs are planned for later M6 releases ([plan](07-m6-plan.md));
+a restart. The launcher and in-game settings are available; the v0.6.0 candidate
+adds optional Windows HD packs. True 16:9 remains planned ([plan](07-m6-plan.md));
 music replacement and frame rates above 60 are not planned for M6. Proton, Steam Deck, macOS
 and native Linux are unvalidated platforms. Network play is not supported.
 
