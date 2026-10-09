@@ -34,6 +34,16 @@ static const char *const k_aspect[] = { "4:3", "stretch", NULL };
 static const char *const k_filter[] = { "smooth", "sharp", NULL };
 
 static RecompSetting g_display_settings[] = {
+    { "textures", "enabled", RECOMP_SETTING_BOOL, 0, 0, 0, NULL, NULL, RECOMP_SETTING_RESTART,
+      "Use texture packs from the data folder's mods directory." },
+    { "textures", "packs", RECOMP_SETTING_STRING, 0, 0, 0, NULL, "RECOMP_TEXTURE_PACKS", RECOMP_SETTING_RESTART,
+      "Pack folder names separated by semicolons. Later packs take precedence.", "faithful-hd" },
+    { "textures", "cache_mb", RECOMP_SETTING_INT, 512, 32, 4096, NULL, "RECOMP_TEXTURE_CACHE_MB", RECOMP_SETTING_RESTART,
+      "Memory budget for replacement textures in MiB, including their retained upload data." },
+    { "textures", "dump", RECOMP_SETTING_BOOL, 0, 0, 0, NULL, NULL, RECOMP_SETTING_RESTART,
+      "Capture source textures for making a pack, in hd-work/runtime under the data folder." },
+    { "textures", "dump_limit", RECOMP_SETTING_INT, 2000, 0, 65536, NULL, "RECOMP_TEXTURE_DUMP_LIMIT", RECOMP_SETTING_RESTART,
+      "Maximum new source images captured in one run." },
     { "display", "fullscreen", RECOMP_SETTING_BOOL, 0, 0, 0, NULL, NULL, 0,
       "Borderless full screen. Alt+Enter or F11 switches while playing." },
     { "display", "window_width", RECOMP_SETTING_INT, 1280, 320, 16384, NULL, NULL, 0,
@@ -437,6 +447,26 @@ int pc_settings_init(void)
      * which may have changed them). */
     if (!getenv("RECOMP_GAMMA") && !pc_display("gamma", 1))
         _putenv_s("RECOMP_GAMMA", "0");
+
+    {
+        char value[MAX_PATH*2], packs[RECOMP_SETTING_TEXT_MAX];
+        if (!getenv("RECOMP_TEXTURE_PACKS")) {
+            recomp_settings_get_text("textures","packs",packs,sizeof packs,"faithful-hd");
+            _putenv_s("RECOMP_TEXTURE_PACKS",recomp_settings_get("textures","enabled",0) ? packs : "");
+        }
+        if (!getenv("RECOMP_TEXTURE_CACHE_MB")) {
+            snprintf(value,sizeof value,"%d",recomp_settings_get("textures","cache_mb",512));
+            _putenv_s("RECOMP_TEXTURE_CACHE_MB",value);
+        }
+        if (!getenv("RECOMP_TEXTURE_DUMP_LIMIT")) {
+            snprintf(value,sizeof value,"%d",recomp_settings_get("textures","dump_limit",2000));
+            _putenv_s("RECOMP_TEXTURE_DUMP_LIMIT",value);
+        }
+        if (!getenv("RECOMP_TEXTURE_DUMP_DIR") && have_root && recomp_settings_get("textures","dump",0)) {
+            snprintf(value,sizeof value,"%s/hd-work/runtime",root);
+            _putenv_s("RECOMP_TEXTURE_DUMP_DIR",value);
+        }
+    }
 
     d3d8_present_enable_scaling(1);
 #if defined(_WIN32)

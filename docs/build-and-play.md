@@ -8,7 +8,7 @@ game or game assets are distributed. Windows 11 x64 is the tested environment.
 
 Download `DefJamSetup-<version>-windows-x64.exe` from a release that includes
 setup on the [release page](https://github.com/vyanhursky/DefJamFFNY-recomp/releases).
-The commands below use the v0.5.1 filename. For local testing, run the supplied
+The commands below use the v0.6.0 filename. For local testing, run the supplied
 preview build.
 
 1. Run the setup executable and select your ISO/XISO or extracted dump folder.
@@ -19,6 +19,9 @@ preview build.
 3. Choose **Create a desktop shortcut** if wanted. Clearing it keeps the
    Start-menu shortcut. Enable **Install missing Microsoft Build Tools** only
    to permit Microsoft's installer to request consent/UAC for missing tools.
+   To generate faithful 4x textures, select **Apply HD texture upscale during
+   install (increases install time)** and allow 15 GiB extra working space.
+   See [HD texture usage](hd-textures.md) for sizes, fallback and restart controls.
 4. Select **Install / Repair**. Setup bundles Python and pinned build sources,
    verifies the dump, then analyzes, lifts and compiles it locally. Git, system
    Python and a separate extract-xiso installation are not needed for setup.
@@ -34,7 +37,7 @@ saves/settings stay in the data folder.
 For silent mode in PowerShell:
 
 ```powershell
-$setupPath = (Resolve-Path .\DefJamSetup-0.5.1-windows-x64.exe).Path
+$setupPath = (Resolve-Path .\DefJamSetup-0.6.0-windows-x64.exe).Path
 $setupArguments = '--silent --dump "D:\Dumps\DefJam.iso" --install-dir "D:\Games\DefJam\App" --data-dir "D:\Games\DefJam\Data"'
 $setupResult = Start-Process -FilePath $setupPath -ArgumentList $setupArguments -Wait -PassThru
 $setupResult.ExitCode
@@ -42,7 +45,8 @@ $setupResult.ExitCode
 
 Exit 0 means success. Add `--no-desktop-shortcut` for Start-menu only,
 `--no-shortcuts` for neither shortcut, or `--log "D:\Logs\DefJam-setup.log"`
-for a custom log. See [Windows setup](setup-installer.md) for prerequisites,
+for a custom log. Add `--hd-textures` to generate and enable Lanczos4x locally.
+See [Windows setup](setup-installer.md) for prerequisites,
 exit codes, removal, unsigned-build treatment and remaining acceptance limits.
 
 ## Manual build prerequisites

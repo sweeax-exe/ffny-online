@@ -34,6 +34,26 @@ After setup, select **Play**, use the shortcut, or double-click
 selectable field. It supplies the correct data location and working directory.
 There is no automatic game launch.
 
+## Optional HD textures (v0.6.0)
+
+**Apply HD texture upscale during install (increases install time)** is unchecked
+by default. It generates Lanczos4x from your verified dump locally after the game
+build, verifies the PNGs, then enables the generated texture packs for first launch.
+No GPU/AI model is needed. Expect about6.2GB of HD PNGs plus~0.65GB reusable cache;
+Setup reserves15GiB extra working headroom, including a copy fallback. This adds
+about four minutes on the developer's fast PC; other machines vary.
+
+Status shows texture counts. Cancel/failure does not enable unfinished packs;
+rerun resumes matching verified work. With the option unchecked, existing HD
+settings survive updates. To return to originals, disable packs on the launcher's
+Textures page and restart. Old recipe caches/pack versions remain in the data
+folder; uninstallation preserves them with the rest of the player's data.
+
+The packaged v0.6.0 installer was run end to end with this option from a real dump,
+and the installed game loaded the generated packs; see
+[release validation](research/hd-v060-release-validation.md) for what was and was
+not exercised. See also [HD setup integration](research/hd-setup-integration.md).
+
 ## Silent mode
 
 ```powershell
@@ -43,6 +63,7 @@ DefJamSetup.exe --silent --dump "D:\Dumps\DefJam.iso" --install-dir "D:\Games\De
 Add `--install-prerequisites` to allow compiler installation explicitly. Silent
 mode suppresses the wizard, not Windows elevation or Microsoft's consent UI.
 For unattended operation, pre-provision the compiler, SDK, CMake and Ninja.
+Add `--hd-textures` to generate and enable HD textures locally.
 Add `--no-shortcuts` to suppress desktop and Start-menu shortcuts.
 Add `--no-desktop-shortcut` to create only the Start-menu shortcut.
 
@@ -81,7 +102,7 @@ linked to its C++ runtime and independent of generated code/game renderer.
 The executable contains a SHA-256-checked ZIP resource. After unpacking in a unique
 local folder, the engine checks its complete file inventory before running stages.
 It uses the pinned toolkit XDVDFS reader with additional path/bounds/cycle checks.
-Python, pyxbe, capstone, SDL3 and ImGui inputs have pinned checksums and notices.
+Python, pyxbe, capstone, Pillow, NumPy, SDL3 and ImGui inputs have pinned checksums and notices.
 
 CI checks synthetic failures/recovery, embedded Python imports, the setup build
 and a packaged silent invalid-input run. Tagged releases attach exactly the setup,

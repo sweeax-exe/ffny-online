@@ -416,7 +416,8 @@ def test_missing_build_writes_failed_report_before_copying_fixture(tmp_path, mon
 
 
 @pytest.mark.parametrize('sample,expected_exit', [(200, 0), (0, 1)])
-def test_scenario_runner_requires_audio_and_retains_browsable_evidence(tmp_path, monkeypatch, sample, expected_exit):
+@pytest.mark.parametrize('packs', [None, 'synthetic-hd'])
+def test_scenario_runner_requires_audio_and_retains_browsable_evidence(tmp_path, monkeypatch, sample, expected_exit, packs):
     """Exercise the report path with synthetic launch evidence, including a
     silent-audio negative control despite otherwise healthy fight evidence."""
     src = tmp_path / 'source'
@@ -427,6 +428,7 @@ def test_scenario_runner_requires_audio_and_retains_browsable_evidence(tmp_path,
     monkeypatch.setattr(suite, 'source_identity', lambda _: {'head': 'synthetic'})
     monkeypatch.setattr(suite.harness.pipeline_state, 'verify_build', lambda *a: {})
     received = {}
+    monkeypatch.setenv('RECOMP_TEXTURE_PACKS', 'inherited-must-not-enter-scenario')
     def launch(route, **kwargs):
         received.update(kwargs)
         text = ('[FUNCCALL] Game.ResetMatchData()\n[FUNCCALL] Controller.ControllerSetup(0,0,1,0)\n'
@@ -445,14 +447,24 @@ def test_scenario_runner_requires_audio_and_retains_browsable_evidence(tmp_path,
         run.pcm_boundaries = [{'call': 'game.startgame()', 'pcm_bytes': 0, 'observed_seconds': 0}]
         run.timeline = [{'call': 'game.startgame()', 'observed_seconds': 0}]
         run.memory = [{'seconds': 20 + 5 * i, 'private_bytes': 300 << 20, 'working_set': 200 << 20} for i in range(10)]
+        run.identity = {'environment': {k:v for k,v in kwargs['env'].items() if k.startswith('RECOMP_')}}
         return run
     monkeypatch.setattr(suite.harness, 'run_route', launch)
     monkeypatch.setattr(suite.evidence, 'environment_identity', lambda: {'os': 'synthetic'})
     output = tmp_path / 'report'
-    assert suite.main(['run', 'fight-terrordome', '--fixture', str(fixture), '--output', str(output)]) == expected_exit
+    arguments=['run', 'fight-terrordome', '--fixture', str(fixture), '--output', str(output)]
+    if packs:
+        arguments += ['--texture-packs', packs, '--texture-root', str(tmp_path/'mods')]
+    assert suite.main(arguments) == expected_exit
     assert received['inherit_recomp'] is False
     assert received['env']['RECOMP_RENDER_SCALE'] == '2'
     report = json.loads((output / 'report.json').read_text())
+    recorded=report['identity']['run']['environment']
+    if packs:
+        assert recorded['RECOMP_TEXTURE_PACKS']==packs
+        assert recorded['RECOMP_TEXTURE_ROOT']==str((tmp_path/'mods').resolve())
+    else:
+        assert 'RECOMP_TEXTURE_PACKS' not in recorded and 'RECOMP_TEXTURE_ROOT' not in recorded
     assert report['scope']['audio_health_required'] is True and report['scope']['full_gameplay_acceptance'] is False
     assert report['captures'][0]['sha256'] == ev.digest(output / 'captures/fight-terrordome-15s.bmp')
     assert (output / 'audio-preview.wav').is_file()

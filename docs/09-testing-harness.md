@@ -213,7 +213,17 @@ match start, fighter positions, health, buttons, hits, damage, the result. `step
 in those lines counts the game's simulation steps, 60 a second in a fight. Normal
 play leaves the probes off. Adding or removing a probe point needs a re-lift.
 
+## HD pack validation
+
+For HD-pack checks, `scenario_suite.py run` accepts explicit `--texture-packs`
+and `--texture-root` arguments. The root points at your local mods directory;
+the scenario still copies fixture saves to a disposable data root, suppresses
+inherited diagnostics and records the explicit pack inputs in its report.
+Ordinary original-texture scenarios omit both flags. Pack-on captures have
+separate review evidence; they do not replace the original-texture goldens.
+
 ## Not done
+
 
 - Menus are still driven on the host's clock; only the fight's input is step-timed.
 - Repeatability is not guaranteed even for thirty seconds: the spectators push

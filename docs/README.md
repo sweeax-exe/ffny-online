@@ -7,6 +7,8 @@ history; their conclusions and old commands may have been superseded.
 |---|---|
 | [Build and play](build-and-play.md) | Prerequisites, your own dump, Release build, launch and saves |
 | [Windows setup](setup-installer.md) | Wizard/silent installation, folders, desktop shortcut, launch, repair and removal |
+| [HD textures](hd-textures.md) | Optional Windows texture packs, Setup generation, settings and fallback |
+| [Texture processing and review](hd-texture-workflow.md) | Reproduce the local census/upscale galleries and retain review flags |
 | [Build on macOS and Linux](build-macos-linux.md) | The same pipeline off Windows; work in progress |
 | [Known issues](known-issues.md) | Current limitations and unvalidated features |
 | [Contributing](../CONTRIBUTING.md) | Change boundaries, tests and reporting |

@@ -14,7 +14,7 @@
 #include <thread>
 
 namespace fs = std::filesystem;
-static HWND window, dumpEdit, installEdit, dataEdit, statusLabel, startButton, cancelButton, prerequisites, desktopShortcut, launchInfo;
+static HWND window, dumpEdit, installEdit, dataEdit, statusLabel, startButton, cancelButton, prerequisites, desktopShortcut, hdUpscale, launchInfo;
 static HANDLE worker = nullptr;
 static fs::path payload, scratch, statusPath, cancelPath, logPath;
 static bool running = false;
@@ -216,6 +216,7 @@ static void setBusy(bool value) {
     for (int id = 101; id <= 109; ++id) EnableWindow(GetDlgItem(window, id), !value);
     EnableWindow(prerequisites, !value);
     EnableWindow(desktopShortcut, !value);
+    EnableWindow(hdUpscale, !value);
     EnableWindow(GetDlgItem(window, 112), FALSE);
     SetWindowTextW(cancelButton, value ? L"Cancel" : L"Close");
 }
@@ -237,6 +238,8 @@ static LRESULT CALLBACK windowProc(HWND hwnd, UINT message, WPARAM wp, LPARAM lp
                     args.push_back(L"--install-prerequisites");
                 if (SendMessageW(desktopShortcut, BM_GETCHECK, 0, 0) != BST_CHECKED)
                     args.push_back(L"--no-desktop-shortcut");
+                if (SendMessageW(hdUpscale, BM_GETCHECK, 0, 0) == BST_CHECKED)
+                    args.push_back(L"--hd-textures");
                 setBusy(true); timerTicks = 0; SetTimer(window, 1, 400, nullptr);
                 SetWindowTextW(statusLabel, L"Preparing setup files... You can move the window or cancel.");
                 std::thread([args]() {
@@ -329,7 +332,7 @@ static int wizard(HINSTANCE instance, bool smoke = false, bool preparation = fal
     wc.hCursor = LoadCursor(nullptr, IDC_ARROW); wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
     wc.lpszClassName = L"DefJamSetupWizard"; RegisterClassW(&wc);
     window = CreateWindowW(wc.lpszClassName, L"Def Jam Recompiled \u2014 Setup", WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
-        CW_USEDEFAULT, CW_USEDEFAULT, 740, 550, nullptr, nullptr, instance, nullptr);
+        CW_USEDEFAULT, CW_USEDEFAULT, 740, 599, nullptr, nullptr, instance, nullptr);
     control(L"STATIC", L"Build and play from your own USA Xbox dump", 0, 24, 20, 660, 24, 0);
     control(L"STATIC", L"First setup can take an hour and needs internet for missing Microsoft Build Tools.", 0, 24, 49, 670, 25, 0);
     control(L"STATIC", L"Your ISO/XISO or extracted dump", 0, 24, 87, 580, 20, 0);
@@ -345,22 +348,26 @@ static int wizard(HINSTANCE instance, bool smoke = false, bool preparation = fal
     control(L"BUTTON", L"Browse...", WS_TABSTOP, 595, 238, 90, 26, 107);
     prerequisites = control(L"BUTTON", L"Install missing Microsoft Build Tools (requires consent and administrator access)",
         WS_TABSTOP | BS_AUTOCHECKBOX, 24, 278, 675, 25, 108);
-    desktopShortcut = control(L"BUTTON", L"Create a desktop shortcut", WS_TABSTOP | BS_AUTOCHECKBOX, 24, 309, 675, 25, 113);
+    hdUpscale = control(L"BUTTON", L"Apply HD texture upscale during install (increases install time)",
+        WS_TABSTOP | BS_AUTOCHECKBOX, 24, 309, 675, 25, 115);
+    control(L"STATIC", L"Adds about 6.2 GB; requires extra working space. No GPU needed.", 0, 44, 336, 650, 18, 0);
+    desktopShortcut = control(L"BUTTON", L"Create a desktop shortcut", WS_TABSTOP | BS_AUTOCHECKBOX, 24, 358, 675, 25, 113);
     SendMessageW(desktopShortcut, BM_SETCHECK, BST_CHECKED, 0);
-    statusLabel = control(L"STATIC", L"Choose your dump and destinations, then select Install / Repair.", 0, 24, 345, 670, 35, 0);
+    statusLabel = control(L"STATIC", L"Choose your dump and destinations, then select Install / Repair.", 0, 24, 394, 670, 35, 0);
     launchInfo = control(L"EDIT", L"After setup, use Play or open DefJamLauncher.exe from your install folder.",
-                        WS_TABSTOP | ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL, 24, 390, 660, 50, 114);
-    startButton = control(L"BUTTON", L"Install / Repair", WS_TABSTOP | BS_DEFPUSHBUTTON, 24, 452, 140, 30, 109);
-    control(L"BUTTON", L"Open logs", WS_TABSTOP, 180, 452, 110, 30, 111);
-    control(L"BUTTON", L"Play", WS_TABSTOP, 306, 452, 90, 30, 112);
+                        WS_TABSTOP | ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL, 24, 439, 660, 50, 114);
+    startButton = control(L"BUTTON", L"Install / Repair", WS_TABSTOP | BS_DEFPUSHBUTTON, 24, 501, 140, 30, 109);
+    control(L"BUTTON", L"Open logs", WS_TABSTOP, 180, 501, 110, 30, 111);
+    control(L"BUTTON", L"Play", WS_TABSTOP, 306, 501, 90, 30, 112);
     EnableWindow(GetDlgItem(window, 112), FALSE);
-    cancelButton = control(L"BUTTON", L"Close", WS_TABSTOP, 595, 452, 90, 30, 110);
+    cancelButton = control(L"BUTTON", L"Close", WS_TABSTOP, 595, 501, 90, 30, 110);
     if (smoke) {
         // Hardware-free CI probe: controls exist and the wizard needs no Python,
         // D3D device, compiler or payload extraction merely to open.
         wchar_t title[128]{}; GetWindowTextW(window, title, 128);
         bool valid = wcscmp(title, L"Def Jam Recompiled \u2014 Setup") == 0 &&
-                     window && dumpEdit && installEdit && dataEdit && prerequisites && desktopShortcut && launchInfo &&
+                     window && dumpEdit && installEdit && dataEdit && prerequisites && desktopShortcut && hdUpscale && launchInfo &&
+                     SendMessageW(hdUpscale, BM_GETCHECK, 0, 0) == BST_UNCHECKED &&
                      SendMessageW(desktopShortcut, BM_GETCHECK, 0, 0) == BST_CHECKED &&
                      startButton && cancelButton && !editText(installEdit).empty() &&
                      !editText(dataEdit).empty() && IsWindowEnabled(startButton);
@@ -400,7 +407,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
             } else if (count > 1 && std::wstring(values[1]) == L"--ui-preparation-smoke") {
                 result = wizard(instance, false, true);
             } else if (count > 1 && std::wstring(values[1]) == L"--help") {
-                MessageBoxW(nullptr, L"Silent setup:\nDefJamSetup.exe --silent --dump PATH --install-dir PATH --data-dir PATH [--install-prerequisites] [--log PATH]\n\nExit codes: 0 success, 2 invalid input, 3 missing prerequisites, 4 failure, 5 busy, 6 cancelled, 3010 restart required.", L"Setup options", MB_OK);
+                MessageBoxW(nullptr, L"Silent setup:\nDefJamSetup.exe --silent --dump PATH --install-dir PATH --data-dir PATH [--install-prerequisites] [--hd-textures] [--log PATH]\n\nExit codes: 0 success, 2 invalid input, 3 missing prerequisites, 4 failure, 5 busy, 6 cancelled, 3010 restart required.", L"Setup options", MB_OK);
                 result = 0;
             } else if (count > 1) {
                 bool silent = false;

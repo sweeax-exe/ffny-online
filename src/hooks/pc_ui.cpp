@@ -89,6 +89,9 @@ static const char *friendly(const char *section, const char *key)
         { "display", "window_height", "Window height" }, { "display", "aspect", "Picture shape" },
         { "display", "render_scale", "Render scale" }, { "display", "filter", "Scaling filter" },
         { "display", "vsync", "Vsync" }, { "display", "gamma", "Game brightness curve" },
+        { "textures", "enabled", "Use HD texture packs" }, { "textures", "packs", "Pack folders" },
+        { "textures", "cache_mb", "Texture memory budget (MiB)" }, { "textures", "dump", "Capture source textures" },
+        { "textures", "dump_limit", "Maximum new captures" },
         { "input", "keyboard_player", "Keyboard and mouse play as" }, { "input", "players", "Controllers at start" },
         { "input", "backend", "Pad backend" }, { "input", "rumble", "Rumble strength" },
         { "input", "rumble_floor", "Weakest rumble pulse" }, { "input", "rumble_min_ms", "Shortest rumble pulse (ms)" },
@@ -433,6 +436,17 @@ static void page_display()
                        "F11 or Alt+Enter switches full screen while playing.");
 }
 
+static void page_textures()
+{
+    ImGui::SeparatorText("HD texture packs");
+    settings_group("textures", { "enabled", "packs", "cache_mb" });
+    ImGui::TextWrapped("Install packs under mods in the data folder. Enter folder names separated by semicolons; "
+                       "the last pack wins when more than one replaces the same image. Changes apply after a restart.");
+    ImGui::SeparatorText("Making a pack");
+    settings_group("textures", { "dump", "dump_limit" });
+    ImGui::TextWrapped("Captures are saved under hd-work/runtime in the data folder. Turn capture off when finished.");
+}
+
 static void draw_stick(const char *id, float x, float y, float radius)
 {
     ImVec2 c = ImGui::GetCursorScreenPos();
@@ -693,6 +707,7 @@ UiResult ui_draw(UiMode mode, float x, float y, float width, float height)
     ImGui::BeginChild("page", ImVec2(0, -footer), ImGuiChildFlags_None);
     if (ImGui::BeginTabBar("pages")) {
         if (ImGui::BeginTabItem("Display")) { page_display(); ImGui::EndTabItem(); }
+        if (ImGui::BeginTabItem("Textures")) { page_textures(); ImGui::EndTabItem(); }
         if (ImGui::BeginTabItem("Controllers")) { page_controllers(); ImGui::EndTabItem(); }
         if (ImGui::BeginTabItem("Pad buttons")) { page_pad_buttons(); ImGui::EndTabItem(); }
         if (ImGui::BeginTabItem("Keyboard & mouse")) { page_keyboard(); ImGui::EndTabItem(); }

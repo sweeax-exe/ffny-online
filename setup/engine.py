@@ -194,7 +194,7 @@ class Engine:
         if self.args.cancel_file and Path(self.args.cancel_file).exists():
             raise SetupError('Setup cancelled; run again to resume completed work', 6)
 
-    def run(self, argv, cwd=None, env=None, capture=False, log_output=True):
+    def run(self, argv, cwd=None, env=None, capture=False, log_output=True, progress=False):
         self.cancelled()
         argv = list(argv)
         if Path(argv[0]) == self.python:
@@ -213,6 +213,7 @@ class Engine:
                                   stdout=output, stderr=subprocess.STDOUT,
                                   creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0) as child:
                 position = 0
+                progress_text = ''
                 try:
                     while child.poll() is None:
                         self.cancelled()
@@ -220,6 +221,14 @@ class Engine:
                         output.seek(position)
                         chunk = output.read()
                         position += len(chunk)
+                        if chunk and progress and self.args.status_file:
+                            progress_text += chunk.decode('utf-8', errors='replace')
+                            lines = progress_text.split('\n')
+                            progress_text = lines.pop()
+                            for line in lines:
+                                match = re.match(r'PROGRESS\s+(\d+)\s*/\s*(\d+)', line)
+                                if match:
+                                    write_status(self.args.status_file, 'Upscaling HD textures: ' + match[1] + ' / ' + match[2])
                         if chunk and self.log and log_output:
                             self.log.write(chunk.decode('utf-8', errors='replace'))
                             self.log.flush()
@@ -478,9 +487,24 @@ class Engine:
             self.run(argv, cwd=self.source)
             verify()
 
+    def build_hd_textures(self):
+        if not getattr(self.args, 'hd_textures', False):
+            return
+        self.event('Upscaling HD textures with Lanczos 4x; several minutes, CPU only')
+        receipt = self.version_root / 'hd-pack-build.json'
+        self.run([self.python, self.source / 'scripts/build-hd-pack.py',
+                  '--root', self.data / 'extracted', '--work', self.data / 'hd-work/setup-lanczos',
+                  '--mods', self.data / 'mods', '--receipt', receipt,
+                  '--aliases', self.source / 'config/hd-runtime-aliases.json'], progress=True)
+        result = json.loads(receipt.read_text(encoding='utf-8'))
+        self.hd_packs = result['packs']
+        self.event('HD textures ready (' + str(result['images']) + ' images); awaiting install activation')
+
     def activate(self):
         self.event('Creating launch shortcuts and install receipt')
         receipt = {key: self.manifest[key] for key in ('version', 'source_commit', 'toolkit_commit')}
+        previous = self.install / 'installed.json'
+        receipt['hd_packs'] = getattr(self, 'hd_packs', json.loads(previous.read_text()).get('hd_packs', []) if previous.exists() else [])
         receipt.update(schema=1, source=str(self.source), data=str(self.data),
                        executable=str(self.source / 'build/win-x64-release/defjam_recomp.exe'))
         # Stable native launcher reads this atomic receipt and supplies the data env.
@@ -492,11 +516,31 @@ class Engine:
         if not self.args.no_shortcuts:
             self.run(['powershell.exe', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
                       self.payload / 'engine/shortcuts.ps1'])
-        write_json(self.install / 'installed.json', receipt)
-        temporary = self.install / 'installed.ini.pending'
-        temporary.write_text('[install]\n' + ''.join(f'{key}={receipt[key]}\n' for key in
-                             ('source', 'data', 'executable')), encoding='utf-16')
-        os.replace(temporary, self.install / 'installed.ini')
+        self.cancelled()
+        # Commit HD selection with the receipts only after cancellable work.
+        # Restore exact prior bytes if any final publication fails.
+        paths = [self.install / 'installed.json', self.install / 'installed.ini']
+        if hasattr(self, 'hd_packs'):
+            paths.append(self.data / 'settings.ini')
+        before = {path: path.read_bytes() if path.exists() else None for path in paths}
+        try:
+            if hasattr(self, 'hd_packs'):
+                old_packs = json.loads(before[previous]).get('hd_packs', []) if before[previous] else []
+                enable_hd_packs(self.data, self.hd_packs, old_packs)
+            write_json(self.install / 'installed.json', receipt)
+            temporary = self.install / 'installed.ini.pending'
+            temporary.write_text('[install]\n' + ''.join(f'{key}={receipt[key]}\n' for key in
+                                 ('source', 'data', 'executable')), encoding='utf-16')
+            os.replace(temporary, self.install / 'installed.ini')
+        except (OSError, ValueError, SetupError):
+            for path, content in before.items():
+                if content is None:
+                    path.unlink(missing_ok=True)
+                else:
+                    pending = path.with_suffix('.rollback')
+                    pending.write_bytes(content)
+                    os.replace(pending, path)
+            raise
         self.event('Setup complete. Select Play or double-click: ' + str(self.install / 'DefJamLauncher.exe'))
 
     def execute(self):
@@ -519,14 +563,51 @@ class Engine:
                     raise SetupError('Dump does not exist', 2)
                 dump_size = sum(p.stat().st_size for p in self.dump.rglob('*') if p.is_file()) if self.dump.is_dir() else self.dump.stat().st_size
                 same_drive = self.install.anchor.casefold() == self.data.anchor.casefold()
-                if shutil.disk_usage(nearest_existing(self.data)).free < dump_size + 1024**3 + (required if same_drive else 0):
+                hd_space = 15 * 1024**3 if getattr(self.args, 'hd_textures', False) else 0
+                if shutil.disk_usage(nearest_existing(self.data)).free < dump_size + 1024**3 + hd_space + (required if same_drive else 0):
                     raise SetupError('Insufficient free space on the data drive', 2)
                 self.prepare_source()
                 self.extract()
                 self.toolchain()
                 self.link_game()
                 self.pipeline()
+                self.build_hd_textures()
                 self.activate()
+
+
+def enable_hd_packs(data, packs, previous=()):
+    """Change only texture enabled/pack keys; preserve other settings and comments."""
+    if not packs or any(not re.fullmatch(r'faithful-hd-[0-9a-f]{12}-(opacity|channels)', p) for p in packs):
+        raise SetupError('Invalid generated HD pack names', 2)
+    path = Path(data) / 'settings.ini'
+    if path.is_symlink():
+        raise SetupError('Settings must not be a symlink', 2)
+    text = path.read_text(encoding='utf-8-sig') if path.exists() else ''
+    sections = list(re.finditer(r'(?ims)^[ \t]*\[[ \t]*textures[ \t]*\][ \t]*(?:\r?\n|\Z)(.*?)(?=^[ \t]*\[[^\r\n]+\][ \t]*$|\Z)', text))
+    old_values = [m for section in sections for m in re.finditer(r'(?im)^[ \t]*packs[ \t]*=([^\r\n]*)', section.group(1))]
+    old = old_values[-1] if old_values else None
+    retained = [p.strip() for p in old.group(1).split(';') if p.strip() and p.strip() not in previous and p.strip() not in packs] if old else []
+    combined = ';'.join(retained + list(packs))
+    if len(combined.encode('ascii')) >= 256:
+        raise SetupError('Texture pack list is too long; shorten existing pack names', 2)
+    def updated(body):
+        for key, value in (('enabled','1'),('packs',combined)):
+            pattern = r'(?im)^([ \t]*' + key + r'[ \t]*=)[^\r\n]*'
+            if re.search(pattern,body):
+                body = re.sub(pattern,lambda m:m.group(1)+value,body)
+            else:
+                body = body.rstrip('\r\n')+'\n'+key+'='+value+'\n'
+        return body
+    # Runtime accepts padded section names and later values win. Update every
+    # matching section using the effective final pack list, preserving others.
+    if sections:
+        for section in reversed(sections):
+            text = text[:section.start(1)]+updated(section.group(1))+text[section.end(1):]
+    else:
+        text = text.rstrip('\r\n')+'\n[textures]\n'+updated('')
+    temporary=path.with_suffix('.pending')
+    temporary.write_text(text,encoding='utf-8')
+    os.replace(temporary,path)
 
 
 def uninstall(install):
@@ -565,6 +646,7 @@ def main(argv=None):
     parser.add_argument('--no-shortcuts', action='store_true', help='Do not create desktop/Start-menu shortcuts')
     parser.add_argument('--no-desktop-shortcut', action='store_true', help='Create only the Start-menu shortcut')
     parser.add_argument('--install-prerequisites', action='store_true')
+    parser.add_argument('--hd-textures', action='store_true', help='Generate and enable Lanczos 4x HD textures locally (extra time/space)')
     parser.add_argument('--log')
     parser.add_argument('--status-file')
     parser.add_argument('--cancel-file')

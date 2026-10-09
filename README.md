@@ -42,6 +42,7 @@ Gameplay captured by the maintainer. The GIF is a short, silent preview.
 | Menus and fights | Navigation, match setup, controllable fights and returning to menus verified |
 | Story | Intro/cutscenes, character creator, saved-profile crib and gym routes verified |
 | Graphics | GPU vertex programs and Direct3D 11 rendering; 2× render scale available |
+| HD textures (v0.6.0 candidate) | Optional Windows Lanczos 4× texture packs, generated locally from your own dump; see [HD textures](docs/hd-textures.md) |
 | Audio | Music, speech and effects; owner listening test accepted |
 | Launcher and overlay | A start-up window and an in-game overlay (F1) for display, controller and key settings, usable with mouse, keyboard or pad; see [Launcher and overlay](docs/launcher-and-overlay.md) |
 | Input | Gamepads (Xbox, DualSense, Switch Pro and most others), keyboard and mouse as a player of their own, rumble and remapping; see [Controllers, keyboard and mouse](docs/10-input.md) |
@@ -59,7 +60,7 @@ and [known issues](docs/known-issues.md).
 
 Windows source releases can include a **game-free setup installer** that builds
 your own dump locally. See [Windows setup](docs/setup-installer.md) for the wizard,
-custom install/data folders, optional desktop shortcut, silent mode and launch
+custom install/data folders, optional desktop shortcut and HD texture generation, silent mode and launch
 instructions. macOS/Linux installers remain to-dos.
 
 On macOS (Apple Silicon) or Linux, follow
@@ -99,8 +100,8 @@ The Windows setup includes its pinned toolkit and compiles the game on your mach
 ## What comes next
 
 PC features are in progress, one release at a time: display settings, a settings file,
-gamepads and keyboard play, a launcher and an in-game settings overlay are in; true 16:9 and
-texture packs follow. A native macOS build arrived in v0.5.0. Steam Deck and a native
+gamepads and keyboard play, a launcher and an in-game settings overlay are in;
+the v0.6.0 candidate adds HD texture packs. True 16:9 remains planned. A native macOS build arrived in v0.5.0. Steam Deck and a native
 Linux game build follow; deeper gameplay decompilation remains a stretch goal. See the
 [roadmap](docs/01-plan-review.md#corrected-roadmap-milestones-with-exit-criteria)
 and [development status](PROGRESS.md).

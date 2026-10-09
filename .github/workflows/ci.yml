@@ -18,9 +18,9 @@ jobs:
         with: { submodules: recursive }
       - uses: actions/setup-python@v5
         with: { python-version: '3.13' }
-      - run: python -m pip install pytest
+      - run: python -m pip install pytest Pillow==12.3.0 numpy==2.5.2
       - name: Installer recovery and input boundaries
-        run: python -m pytest -q tests/unit/test_setup_engine.py
+        run: python -m pytest -q tests/unit/test_setup_engine.py tests/unit/test_hd_assets.py tests/unit/test_hd_corpus.py tests/unit/test_hd_setup.py
       - name: Build and inventory standalone setup (no dump)
         shell: pwsh
         run: ./scripts/build-setup.ps1
@@ -128,7 +128,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        fixture: [kernel_bridge, kernel_directory, usb_transfer, nv2a_vsh, settings, d3d8_present_fit, input_map, input_host, kernel_events, memory_regressions, kernel_regressions, kernel_object_paths, kernel_dispatch, kernel_irql_abi, kernel_physical_address]
+        fixture: [kernel_bridge, kernel_directory, usb_transfer, nv2a_vsh, settings, d3d8_present_fit, input_map, input_host, kernel_events, memory_regressions, kernel_regressions, kernel_object_paths, kernel_dispatch, kernel_irql_abi, kernel_physical_address, texture_pack]
         include:
           - fixture: kernel_regressions
             configure_args: -DXBOX_SLOW_TESTS=ON
