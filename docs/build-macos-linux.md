@@ -1,5 +1,9 @@
 # Build on macOS and Linux
 
+The setup installer currently targets Windows; see [Windows setup](setup-installer.md).
+Native macOS and Linux/Steam Deck installer artifacts remain to-dos. Follow this
+guide for their manual source builds.
+
 The Windows guide is [build-and-play.md](build-and-play.md). This page is the
 same pipeline off Windows, since v0.5.0.
 

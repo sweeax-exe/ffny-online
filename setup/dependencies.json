@@ -1,0 +1,7 @@
+{
+  "python_sha256": "7d2650fd9d1b9d002d4a315d5f354247fd6a44f30517c7ef577b08f57a0fb6d9",
+  "wheels": {
+    "capstone-5.0.9-py3-none-win_amd64.whl": "732cedbbb56d42e723f14d7af6387f1454194a820b4b96b56d1e53f865ef85d0",
+    "pyxbe-1.0.4-py3-none-any.whl": "8c8a354b824ab978ca088472adeb2395f0704c71c0347c94b1eda639a2e34416"
+  }
+}

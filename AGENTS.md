@@ -53,7 +53,8 @@ Game data lives outside the repo at `C:\Users\Vlad\code\defjam` (`$env:DEFJAM_DA
 ## 3. Non-negotiable hygiene (the repo will be public)
 - Never track disc images, XBEs, `.viv/.mad/.xsh`, lifted C, logs, or build output. `git add -A --dry-run` before every commit; CI job `hygiene` also checks.
 - Never mention the site the dump came from, anywhere. Refer to "the user's own dump".
-- Never distribute built executables (they embed lifted EA code). Ship tools, patches, docs.
+- Never distribute built game executables (they embed lifted EA code). Ship tools, patches, docs.
+- Release setup exception: only the standalone game-free `DefJamSetup-<version>-windows-x64.exe`, its SHA-256 and provenance may be attached by the tagged release workflow after `check-setup-assets.py` passes. Setup compiles the player's dump locally. No binary is tracked in source; no game executable, generated guest code or game data enters the setup payload. macOS/Linux setup artifacts remain to-dos.
 - D58 (2026-10-04): Vlad explicitly approved the two README visuals in `docs/media/`. Only their exact paths and SHA-256 fingerprints in `scripts/check-source-tree.py` are permitted; no general capture/asset exception. The project license does not cover game artwork.
 - Hashes are fine, bytes are not. `config/dump-manifest.json` is the pattern.
 

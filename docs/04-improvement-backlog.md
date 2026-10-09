@@ -76,6 +76,17 @@ second machine reproduces the same fixture hash.
 
 ## A setup.exe that builds the game — planned 2026-10-07
 
+**Implementation update, 2026-10-08:** Windows setup is implemented on the release-setup
+feature lane; acceptance remains pending. See [installer guide](setup-installer.md) and
+[validation notes](research/release-setup-notes.md). The owner approved starting work,
+custom install/data destinations and silent mode. The native macOS/Linux port merged at
+`5cc5b3b0b6812ec039822cd2e80a7c7e3b2a38b5`; those setup configurations are explicit to-dos,
+using its Python pipeline, POSIX presets and Vulkan/SDL3 rather than a Proton-only plan.
+The implementation uses standard Windows controls and the pinned toolkit XDVDFS reader;
+the original proposal below is retained as history. Signing and clean-machine acceptance
+remain release gates. Exact source/toolkit identity is available in setup logs and receipts;
+adding those identities to the game's existing About page remains a UI follow-up.
+
 Owner-requested future To-Do, to be taken by another agent. Goal: a clickable path for players who are not
 comfortable with Python, a compiler or a command line. A single `DefJamSetup.exe` that takes the player's own
 dump and leaves them with a built game and a shortcut. Not scheduled against M6; it can be done before or after

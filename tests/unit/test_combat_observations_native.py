@@ -56,7 +56,7 @@ int main(void) {
     driver.write_text(text)
     exe = folder / 'observations.exe'
     result = subprocess.run([compiler, '/nologo', '/O2', '/TC', '/I'+str(folder),
-                             '/I'+str(ROOT/'src/hooks'), str(driver),
+                             '/I'+str(ROOT/'src/hooks'), '/I'+str(ROOT/'src'), str(driver),
                              str(ROOT/'src/hooks/test_observations.c'),
                              str(ROOT/'src/hooks/test_telemetry.c'), '/Fe:'+str(exe)],
                             cwd=folder, capture_output=True, text=True)
