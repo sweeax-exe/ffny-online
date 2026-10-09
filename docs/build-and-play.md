@@ -1,10 +1,51 @@
 # Build and play on Windows
 
-This guide builds the game locally from your own Xbox dump. The source release
-contains no game executable or assets. Windows x64 is the current platform;
-Windows 11 is the tested environment.
+This guide covers the Windows setup installer and a manual source build. Both
+build the game locally from your own supported USA Xbox dump. No precompiled
+game or game assets are distributed. Windows 11 x64 is the tested environment.
 
-## Prerequisites
+## Install with the Windows wizard
+
+Download `DefJamSetup-<version>-windows-x64.exe` from a release that includes
+setup on the [release page](https://github.com/vyanhursky/DefJamFFNY-recomp/releases).
+The commands below use the v0.5.1 filename. For local testing, run the supplied
+preview build.
+
+1. Run the setup executable and select your ISO/XISO or extracted dump folder.
+2. Choose separate sibling folders, such as `D:\Games\DefJam\App` for the
+   installation and `D:\Games\DefJam\Data` for the dump copy, settings and saves.
+   Data must not be inside the install folder. Keep 12 GiB build headroom plus
+   space for the copied dump and compiler.
+3. Choose **Create a desktop shortcut** if wanted. Clearing it keeps the
+   Start-menu shortcut. Enable **Install missing Microsoft Build Tools** only
+   to permit Microsoft's installer to request consent/UAC for missing tools.
+4. Select **Install / Repair**. Setup bundles Python and pinned build sources,
+   verifies the dump, then analyzes, lifts and compiles it locally. Git, system
+   Python and a separate extract-xiso installation are not needed for setup.
+5. After completion, select **Play**, use the shortcut, or double-click
+   `D:\Games\DefJam\App\DefJamLauncher.exe`. The wizard displays your exact
+   launcher path; it supplies the correct data location and working directory.
+
+**Open logs** opens the current session file. Packaged setup logs default to
+`%LOCALAPPDATA%\DefJamSetup\logs`, including failures before installation starts.
+Close the game and rerun setup with the same destinations to repair/update;
+saves/settings stay in the data folder.
+
+For silent mode in PowerShell:
+
+```powershell
+$setupPath = (Resolve-Path .\DefJamSetup-0.5.1-windows-x64.exe).Path
+$setupArguments = '--silent --dump "D:\Dumps\DefJam.iso" --install-dir "D:\Games\DefJam\App" --data-dir "D:\Games\DefJam\Data"'
+$setupResult = Start-Process -FilePath $setupPath -ArgumentList $setupArguments -Wait -PassThru
+$setupResult.ExitCode
+```
+
+Exit 0 means success. Add `--no-desktop-shortcut` for Start-menu only,
+`--no-shortcuts` for neither shortcut, or `--log "D:\Logs\DefJam-setup.log"`
+for a custom log. See [Windows setup](setup-installer.md) for prerequisites,
+exit codes, removal, unsigned-build treatment and remaining acceptance limits.
+
+## Manual build prerequisites
 
 - Git for Windows.
 - Python 3.12 or newer as `python` on PATH. Local development used 3.13; CI uses 3.12.

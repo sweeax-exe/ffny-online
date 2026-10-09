@@ -126,6 +126,12 @@ v0.5.1 is prepared as a packaging update in CMake and docs/releases/v0.5.1.md.
 The release tag message and post-merge commands are in setup-release-preparation.md.
 No tag is created before reviewed main ancestry and green CI; no release is published.
 
+Documentation follow-up: the README and documentation index link setup, and the
+Windows build/play guide now gives a full wizard and silent-mode quick start,
+sibling destinations, shortcut choice, launcher path, logs and repair before the
+manual-build prerequisites. The macOS/Linux build guide explicitly identifies
+their installers as to-dos and retains the manual source instructions.
+
 ## Remaining acceptance gates
 
 - Clean Windows 11 VM with no compiler/Git/Python, VS 2022 provisioning and restart
