@@ -23,6 +23,13 @@ builder = load('hd_builder', ROOT / 'scripts/build-hd-pack.py')
 engine = load('hd_setup_engine', ROOT / 'setup/engine.py')
 
 
+@pytest.fixture(autouse=True)
+def hd_enabled_on_every_host(monkeypatch):
+    # The generation and activation logic is host-independent; only the renderer
+    # that draws the packs differs, and setup refuses the option where it cannot.
+    monkeypatch.setattr(engine, 'HD_SUPPORTED', True)
+
+
 def corpus(tmp_path):
     from PIL import Image
     folder = tmp_path / 'corpus'
@@ -159,6 +166,10 @@ def test_activation_publishes_hd_with_receipts_or_preserves_previous_bytes(tmp_p
     obj.env={};obj.event=lambda message:None
     obj.hd_packs=['faithful-hd-'+'c'*12+'-opacity']
     (obj.payload/'DefJamLauncher.exe').write_bytes(b'synthetic launcher')
+    if not engine.IS_WINDOWS:
+        template=obj.payload/'launcher'/engine.LAUNCHER_BUNDLE
+        (template/'Contents/MacOS').mkdir(parents=True)
+        monkeypatch.setenv('HOME',str(tmp_path/'home'));(tmp_path/'home/Desktop').mkdir(parents=True)
     previous=dict(hd_packs=['faithful-hd-'+'d'*12+'-opacity'],version='0.5.1')
     (obj.install/'installed.json').write_text(json.dumps(previous))
     (obj.install/'installed.ini').write_bytes(b'old receipt')

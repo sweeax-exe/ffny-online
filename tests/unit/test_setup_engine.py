@@ -35,7 +35,7 @@ def payload(tmp_path):
         "def verify(folder, manifest):\n    from pathlib import Path\n    return [] if (Path(folder)/'default.xbe').read_bytes() == b'synthetic' else ['wrong dump']\n")
     (folder / 'source/src/maintained.c').write_text('/* synthetic source */')
     inventory = {p.relative_to(folder).as_posix(): engine.digest(p) for p in folder.rglob('*') if p.is_file()}
-    manifest = dict(schema=1, platform='windows-x64', version='0.4.1',
+    manifest = dict(schema=1, platform=engine.HOST_PLATFORM, version='0.4.1',
                     source_commit='a'*40, toolkit_commit='b'*40, files=inventory)
     engine.write_json(folder / 'manifest.json', manifest)
     return folder
@@ -260,6 +260,7 @@ def test_nested_destination_failure_creates_log_before_engine_initialization(tmp
     assert not (tmp_path/'app').exists()
 
 
+@pytest.mark.skipif(not engine.IS_WINDOWS, reason='Windows launcher and Start-menu shortcut')
 @pytest.mark.parametrize('desktop', [True, False])
 def test_desktop_choice_preserves_start_menu_shortcut_and_launch_guidance(tmp_path, monkeypatch, capsys, desktop):
     setup = installer(tmp_path)
@@ -358,3 +359,127 @@ def test_uninstall_preserves_data_and_unrelated_install_files(tmp_path, monkeypa
     assert not (setup.install/'DefJamLauncher.exe').exists()
     assert (setup.install/'unrelated.txt').read_bytes() == b'keep too'
     assert (setup.data/'save/profile').read_bytes() == b'keep'
+
+
+def synthetic_launcher_template(payload):
+    template = payload / 'launcher' / engine.LAUNCHER_BUNDLE
+    (template / 'Contents/MacOS').mkdir(parents=True)
+    (template / 'Contents/MacOS/DefJamLauncher').write_bytes(b'synthetic launcher')
+    return template
+
+
+@pytest.mark.skipif(engine.IS_WINDOWS, reason='macOS launcher bundle')
+@pytest.mark.parametrize('desktop', [True, False])
+def test_macos_launcher_bundle_shortcuts_follow_the_choices_and_stay_in_the_home_folder(
+        tmp_path, monkeypatch, capsys, desktop):
+    setup = installer(tmp_path)
+    home = tmp_path / 'home'
+    (home / 'Desktop').mkdir(parents=True)
+    monkeypatch.setenv('HOME', str(home))
+    synthetic_launcher_template(setup.payload)
+    setup.args.no_shortcuts = False
+    setup.args.no_desktop_shortcut = not desktop
+    calls = []
+    monkeypatch.setattr(setup, 'run', lambda argv, **kwargs: calls.append([str(a) for a in argv]))
+    setup.activate()
+    bundle = setup.install / engine.LAUNCHER_BUNDLE
+    assert (bundle / 'Contents/Resources/install-root.txt').read_text() == str(setup.install)
+    applications = home / 'Applications' / engine.LAUNCHER_BUNDLE
+    assert (applications / 'Contents/Resources/install-root.txt').read_text() == str(setup.install)
+    assert any('--make-alias' in call for call in calls) == desktop
+    receipt = json.loads((setup.install / 'installed.json').read_text())
+    assert str(applications) in receipt['shortcuts']
+    assert (str(home / 'Desktop' / 'Def Jam Recompiled') in receipt['shortcuts']) == desktop
+    assert str(bundle) in capsys.readouterr().out
+    assert not (setup.install / 'installed.ini').exists()
+
+
+@pytest.mark.skipif(engine.IS_WINDOWS, reason='macOS launcher bundle')
+def test_macos_no_shortcuts_leaves_the_home_folder_alone(tmp_path, monkeypatch):
+    setup = installer(tmp_path)
+    home = tmp_path / 'home'
+    home.mkdir()
+    monkeypatch.setenv('HOME', str(home))
+    synthetic_launcher_template(setup.payload)
+    monkeypatch.setattr(setup, 'run', lambda argv, **kwargs: None)
+    setup.activate()
+    assert (setup.install / engine.LAUNCHER_BUNDLE).is_dir()
+    assert list(home.iterdir()) == []
+
+
+@pytest.mark.skipif(engine.IS_WINDOWS, reason='macOS launcher bundle')
+def test_macos_uninstall_removes_only_recorded_shortcuts_that_still_name_this_install(tmp_path, monkeypatch):
+    setup = installer(tmp_path)
+    home = tmp_path / 'home'
+    (home / 'Desktop').mkdir(parents=True)
+    monkeypatch.setenv('HOME', str(home))
+    synthetic_launcher_template(setup.payload)
+    setup.args.no_shortcuts = False
+    monkeypatch.setattr(setup, 'run', lambda argv, **kwargs: (home / 'Desktop/Def Jam Recompiled').write_bytes(b'alias')
+                        if '--make-alias' in [str(a) for a in argv] else None)
+    setup.activate()
+    mine = home / 'Applications' / engine.LAUNCHER_BUNDLE
+    other = tmp_path / 'other-install'
+    other.mkdir()
+    (mine / 'Contents/Resources/install-root.txt').write_text(str(other))   # now names another install
+    (setup.data / 'settings.ini').write_text('keep')
+    engine.uninstall(setup.install)
+    assert mine.is_dir()                      # not ours any more: left alone
+    assert not (home / 'Desktop/Def Jam Recompiled').exists()
+    assert not (setup.install / engine.LAUNCHER_BUNDLE).exists()
+    assert (setup.data / 'settings.ini').read_text() == 'keep'
+
+
+@pytest.mark.skipif(engine.IS_WINDOWS or not engine.IS_MACOS, reason='macOS toolchain')
+def test_macos_setup_refuses_intel_and_missing_command_line_tools_with_the_documented_exit(tmp_path, monkeypatch):
+    setup = installer(tmp_path)
+    monkeypatch.setattr(engine.platform, 'machine', lambda: 'x86_64')
+    with pytest.raises(engine.SetupError, match='Apple Silicon') as intel:
+        setup.toolchain()
+    assert intel.value.code == 3
+    monkeypatch.setattr(engine.platform, 'machine', lambda: 'arm64')
+    monkeypatch.setattr(engine.subprocess, 'run', lambda *a, **k: subprocess.CompletedProcess(a, 2, '', 'no tools'))
+    with pytest.raises(engine.SetupError, match='Command Line Tools') as missing:
+        setup.toolchain()
+    assert missing.value.code == 3
+    assert engine.APPLE_COMMAND_LINE_TOOLS_URL in str(missing.value)
+
+
+@pytest.mark.skipif(engine.IS_WINDOWS, reason='POSIX process groups')
+def test_cancellation_stops_the_whole_process_tree(tmp_path):
+    import time
+    setup = installer(tmp_path)
+    marker = tmp_path / 'child.pid'
+    cancel = tmp_path / 'cancel'
+    setup.args.cancel_file = str(cancel)
+    script = f"sleep 300 & echo $! > '{marker}'; wait"
+
+    def raise_cancel():
+        while not marker.exists():
+            time.sleep(.05)
+        cancel.write_text('cancel')
+
+    import threading
+    threading.Thread(target=raise_cancel, daemon=True).start()
+    with pytest.raises(engine.SetupError) as stopped:
+        setup.run(['sh', '-c', script])
+    assert stopped.value.code == 6
+    pid = int(marker.read_text())
+    time.sleep(.3)
+    with pytest.raises(ProcessLookupError):
+        import os
+        os.kill(pid, 0)
+
+
+def test_hd_textures_are_refused_on_a_host_whose_renderer_cannot_draw_them(tmp_path, monkeypatch):
+    monkeypatch.setattr(engine, 'HD_SUPPORTED', False)
+    setup = installer(tmp_path)
+    setup.args.hd_textures = True
+    with pytest.raises(engine.SetupError, match='not supported') as refused:
+        setup.execute()
+    assert refused.value.code == 2
+    assert not (setup.install / 'installed.json').exists()
+
+
+def test_hd_textures_are_supported_on_windows_and_macos():
+    assert engine.HD_SUPPORTED == (engine.IS_WINDOWS or engine.IS_MACOS)

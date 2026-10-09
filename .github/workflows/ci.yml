@@ -42,6 +42,39 @@ jobs:
           path: build/setup-assets/*
           if-no-files-found: error
 
+  macos-setup:
+    name: Game-free macOS setup
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: recursive }
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.13' }
+      - run: python -m pip install pytest pyxbe capstone Pillow==12.3.0 numpy==2.5.2
+      - name: Installer recovery, input boundaries and payload builder
+        run: python -m pytest -q tests/unit/test_setup_engine.py tests/unit/test_hd_setup.py tests/unit/test_macos_payload.py
+      # SDL3 and shaderc are built from pinned source; keep them between runs.
+      - uses: actions/cache@v4
+        with:
+          path: build/setup-downloads/macos
+          key: macos-setup-${{ hashFiles('setup/dependencies-macos.json', 'scripts/macos_payload.py', '.gitmodules') }}-${{ hashFiles('tools/xboxrecomp/cmake/xbox_sdl3.cmake') }}
+      - name: Build and inventory the setup image (no dump)
+        run: ./scripts/build-setup.sh
+      - name: Wizard smoke and invalid input exit safely
+        run: |
+          app="build/setup-macos/image/Def Jam Setup.app/Contents/MacOS/DefJamSetup"
+          "$app" --ui-smoke
+          "$app" --ui-preparation-smoke
+          set +e
+          "$app" --silent --dump missing.iso --install-dir "$RUNNER_TEMP/defjam-test-app" --data-dir "$RUNNER_TEMP/defjam-test-data"
+          code=$?
+          if [ "$code" -ne 2 ]; then echo "Expected invalid-input exit 2, got $code"; exit 1; fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-setup-assets
+          path: build/setup-macos/setup-assets/*
+          if-no-files-found: error
+
   hygiene:
     name: No game data committed
     runs-on: ubuntu-latest
@@ -116,7 +149,7 @@ jobs:
       - run: cmake --build --preset ci-runtime-only
       - name: Hardware-free fixtures
         run: |
-          for t in mmio_trap_posix guest_cpu_posix memory_layout_posix kernel_memory_posix kernel_bridge nv2a_vsh settings; do
+          for t in mmio_trap_posix guest_cpu_posix memory_layout_posix kernel_memory_posix kernel_bridge nv2a_vsh settings texture_pack; do
             cmake -S tools/xboxrecomp/tests/$t -B build/fx-$t -G Ninja -DCMAKE_BUILD_TYPE=Release
             cmake --build build/fx-$t
             ctest --test-dir build/fx-$t --output-on-failure --no-tests=error

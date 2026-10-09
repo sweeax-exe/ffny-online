@@ -1,8 +1,9 @@
 # Build on macOS and Linux
 
-The setup installer currently targets Windows; see [Windows setup](setup-installer.md).
-Native macOS and Linux/Steam Deck installer artifacts remain to-dos. Follow this
-guide for their manual source builds.
+On an Apple Silicon Mac you do not need this page: the
+[macOS setup](setup-installer.md#macos-setup-apple-silicon) builds and installs the game
+from your own dump without Terminal. Follow this guide to build from source yourself,
+or for Linux, where an installer is still a to-do.
 
 The Windows guide is [build-and-play.md](build-and-play.md). This page is the
 same pipeline off Windows, since v0.5.0.
@@ -129,7 +130,11 @@ The redirection keeps a log of the session; the game prints a great deal, and
 
 ## Known limits
 
-- No launcher or overlay (see above).
+- No launcher or overlay (see above); they come in v0.6.2.
+- HD textures work since v0.6.1 through the same `[textures]` settings as on Windows
+  ([guide](hd-textures.md)); the packs are made by the macOS setup's HD option or by
+  `scripts/build-hd-pack.py`. They use more memory (`cache_mb`, 512 MiB by default) and
+  add a short hitch the first time a texture is shown.
 - No persistent shader cache: the first time an effect appears, the frame can
   hitch while its shader is compiled.
 - macOS cannot pin threads to a core, and the game relies on its console's

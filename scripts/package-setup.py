@@ -85,14 +85,100 @@ def safe_unpack(archive, destination):
                 if (item.external_attr >> 16) & 0o170000 == 0o120000:
                     raise ValueError('ZIP symlink is unsupported')
             package.extractall(destination)
+            for item in package.infolist():
+                mode = (item.external_attr >> 16) & 0o777
+                if mode and not item.is_dir():
+                    (destination / item.filename).chmod(mode)
     else:
         with tarfile.open(archive) as package:
             package.extractall(destination, filter='data')
 
 
+def stage_macos(args, staging, source, toolkit):
+    """Python, CMake, Ninja, the runtime libraries and the locally-made launcher app."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location('macos_payload', ROOT / 'scripts/macos_payload.py')
+    macos = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(macos)
+    cache = args.cache / 'macos'
+    cache.mkdir(parents=True, exist_ok=True)
+    (staging / 'engine').mkdir()
+    shutil.copyfile(ROOT / 'setup/engine.py', staging / 'engine/engine.py')
+    if not (args.launcher / 'Contents/MacOS/DefJamLauncher').is_file():
+        raise ValueError('--launcher must be the built Def Jam Recompiled.app')
+    shutil.copytree(args.launcher, staging / 'launcher' / args.launcher.name, symlinks=True)
+    provenance = macos.stage_python(staging, cache)
+    tool_provenance, tools = macos.stage_tools(staging, cache)
+    provenance += tool_provenance
+    prefix = args.runtime or (cache / 'runtime')
+    if not (prefix / 'lib/libMoltenVK.dylib').is_file():
+        provenance_runtime = macos.build_runtime_prefix(cache, prefix, tools)
+        (prefix / 'provenance.json').write_text(json.dumps(provenance_runtime, indent=2), encoding='utf-8')
+    provenance += json.loads((prefix / 'provenance.json').read_text(encoding='utf-8')) if (prefix / 'provenance.json').is_file() else []
+    shutil.copytree(prefix, staging / 'deps', ignore=shutil.ignore_patterns('provenance.json', 'licenses'))
+    shutil.copytree(prefix / 'licenses', staging / 'licenses')
+    for old in staging.rglob('.DS_Store'):
+        old.unlink()
+    return provenance
+
+
+def stage_windows(args, staging, source, toolkit):
+    """Embedded Python, wheels, offline SDL3/ImGui source and the native launcher."""
+    (staging / 'engine').mkdir()
+    for name in ('engine.py', 'install-prerequisites.ps1', 'shortcuts.ps1'):
+        shutil.copyfile(ROOT / 'setup' / name, staging / 'engine' / name)
+    shutil.copyfile(args.launcher, staging / 'DefJamLauncher.exe')
+    provenance = []
+    python_url = f'https://www.python.org/ftp/python/{PYTHON_VERSION}/python-{PYTHON_VERSION}-embed-amd64.zip'
+    python_zip = args.cache / ('python-' + PYTHON_VERSION + '.zip')
+    # Official runtime download has a checked-in digest in setup/dependencies.json.
+    dependencies = json.loads((ROOT / 'setup/dependencies.json').read_text())
+    sha = download(python_url, python_zip, dependencies['python_sha256'])
+    safe_unpack(python_zip, staging / 'python')
+    provenance.append({'url': python_url, 'sha256': sha})
+    wheels = args.cache / 'wheels'
+    wheels.mkdir(exist_ok=True)
+    subprocess.run([sys.executable, '-m', 'pip', 'download', '--only-binary=:all:', '--no-deps',
+                    '--platform', 'win_amd64', '--python-version', '313', '--implementation', 'cp', '--abi', 'cp313',
+                    '--dest', str(wheels), *PACKAGES], check=True)
+    for wheel_name, wheel_sha in dependencies['wheels'].items():
+        wheel = wheels / wheel_name
+        if not wheel.is_file() or digest(wheel) != wheel_sha:
+            raise ValueError('Python dependency checksum mismatch: ' + wheel_name)
+        safe_unpack(wheel, staging / 'python/Lib/site-packages')
+        provenance.append({'package': wheel_name, 'sha256': wheel_sha})
+    # ._pth isolation requires explicitly adding source roots used by -m tools.
+    (staging / 'python/python313._pth').write_text(
+        'python313.zip\n.\nLib/site-packages\n../source\n../source/scripts\n../source/tools/xboxrecomp\nimport site\n', encoding='utf-8')
+    # Users never download SDL/ImGui at configure time. Keep source archive checksums.
+    for name, cmake, version_key, sha_key, url_pattern in (
+        ('sdl3', toolkit / 'cmake/xbox_sdl3.cmake', 'XBOX_SDL3_VERSION', 'XBOX_SDL3_SHA256',
+         'https://github.com/libsdl-org/SDL/releases/download/release-{version}/SDL3-{version}.tar.gz'),
+        ('imgui', ROOT / 'cmake/imgui.cmake', 'DEFJAM_IMGUI_VERSION', 'DEFJAM_IMGUI_SHA256',
+         'https://github.com/ocornut/imgui/archive/refs/tags/v{version}.tar.gz')):
+        text = cmake.read_text()
+        dependency_version = re.search(r'set\(' + version_key + r' "([^"]+)"', text).group(1)
+        dependency_sha = re.search(r'set\(' + sha_key + r' "([^"]+)"', text).group(1)
+        archive = args.cache / (name + '-' + dependency_version + '.tar.gz')
+        url = url_pattern.format(version=dependency_version)
+        download(url, archive, dependency_sha)
+        folder = source / 'setup-deps' / name
+        safe_unpack(archive, folder)
+        children = list(folder.iterdir())
+        if len(children) != 1 or not children[0].is_dir():
+            raise ValueError('Unexpected dependency archive layout')
+        provenance.append({'url': url, 'sha256': dependency_sha,
+                           'source_dir': str(children[0].relative_to(source))})
+    return provenance
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--launcher', type=Path, required=True)
+    parser.add_argument('--platform', choices=['windows-x64', 'macos-arm64'],
+                        default='windows-x64' if sys.platform == 'win32' else 'macos-arm64')
+    parser.add_argument('--launcher', type=Path, required=True,
+                        help='built DefJamLauncher.exe (Windows) or Def Jam Recompiled.app (macOS)')
+    parser.add_argument('--runtime', type=Path, help='macOS: prebuilt runtime library prefix (see macos_payload.py)')
     parser.add_argument('--output', type=Path, default=ROOT / 'build/setup-payload.zip')
     parser.add_argument('--cache', type=Path, default=ROOT / 'build/setup-downloads')
     parser.add_argument('--development', action='store_true')
@@ -100,7 +186,7 @@ def main(argv=None):
     toolkit = ROOT / 'tools/xboxrecomp'
     commit, pin = git(ROOT, 'rev-parse', 'HEAD'), git(toolkit, 'rev-parse', 'HEAD')
     expected_pin = git(ROOT, 'ls-tree', 'HEAD', 'tools/xboxrecomp').split()[2]
-    if pin != expected_pin or git(toolkit, 'status', '--porcelain', '--untracked-files=no'):
+    if (pin != expected_pin and not args.development) or git(toolkit, 'status', '--porcelain', '--untracked-files=no'):
         raise ValueError('Toolkit must match the clean release gitlink')
     if not args.development and git(ROOT, 'status', '--porcelain', '--untracked-files=no'):
         raise ValueError('Production setup must be built from a clean reviewed release checkout')
@@ -119,54 +205,10 @@ def main(argv=None):
         # Source archives contain no Git metadata and never receive the user's bytes.
         (source / 'src/recomp/gen').mkdir(parents=True, exist_ok=True)
         (source / 'src/recomp/gen/.gitkeep').touch()
-        (staging / 'engine').mkdir()
-        for name in ('engine.py', 'install-prerequisites.ps1', 'shortcuts.ps1'):
-            shutil.copyfile(ROOT / 'setup' / name, staging / 'engine' / name)
-        shutil.copyfile(args.launcher, staging / 'DefJamLauncher.exe')
-        provenance = []
-        python_url = f'https://www.python.org/ftp/python/{PYTHON_VERSION}/python-{PYTHON_VERSION}-embed-amd64.zip'
-        python_zip = args.cache / ('python-' + PYTHON_VERSION + '.zip')
-        # Official runtime download has a checked-in digest in setup/dependencies.json.
-        dependencies = json.loads((ROOT / 'setup/dependencies.json').read_text())
-        sha = download(python_url, python_zip, dependencies['python_sha256'])
-        safe_unpack(python_zip, staging / 'python')
-        provenance.append({'url': python_url, 'sha256': sha})
-        wheels = args.cache / 'wheels'
-        wheels.mkdir(exist_ok=True)
-        subprocess.run([sys.executable, '-m', 'pip', 'download', '--only-binary=:all:', '--no-deps',
-                        '--platform', 'win_amd64', '--python-version', '313', '--implementation', 'cp', '--abi', 'cp313',
-                        '--dest', str(wheels), *PACKAGES], check=True)
-        for wheel_name, wheel_sha in dependencies['wheels'].items():
-            wheel = wheels / wheel_name
-            if not wheel.is_file() or digest(wheel) != wheel_sha:
-                raise ValueError('Python dependency checksum mismatch: ' + wheel_name)
-            safe_unpack(wheel, staging / 'python/Lib/site-packages')
-            provenance.append({'package': wheel_name, 'sha256': wheel_sha})
-        # ._pth isolation requires explicitly adding source roots used by -m tools.
-        (staging / 'python/python313._pth').write_text(
-            'python313.zip\n.\nLib/site-packages\n../source\n../source/scripts\n../source/tools/xboxrecomp\nimport site\n', encoding='utf-8')
-        # Users never download SDL/ImGui at configure time. Keep source archive checksums.
-        for name, cmake, version_key, sha_key, url_pattern in (
-            ('sdl3', toolkit / 'cmake/xbox_sdl3.cmake', 'XBOX_SDL3_VERSION', 'XBOX_SDL3_SHA256',
-             'https://github.com/libsdl-org/SDL/releases/download/release-{version}/SDL3-{version}.tar.gz'),
-            ('imgui', ROOT / 'cmake/imgui.cmake', 'DEFJAM_IMGUI_VERSION', 'DEFJAM_IMGUI_SHA256',
-             'https://github.com/ocornut/imgui/archive/refs/tags/v{version}.tar.gz')):
-            text = cmake.read_text()
-            dependency_version = re.search(r'set\(' + version_key + r' "([^"]+)"', text).group(1)
-            dependency_sha = re.search(r'set\(' + sha_key + r' "([^"]+)"', text).group(1)
-            archive = args.cache / (name + '-' + dependency_version + '.tar.gz')
-            url = url_pattern.format(version=dependency_version)
-            download(url, archive, dependency_sha)
-            folder = source / 'setup-deps' / name
-            safe_unpack(archive, folder)
-            children = list(folder.iterdir())
-            if len(children) != 1 or not children[0].is_dir():
-                raise ValueError('Unexpected dependency archive layout')
-            provenance.append({'url': url, 'sha256': dependency_sha,
-                               'source_dir': str(children[0].relative_to(source))})
+        provenance = (stage_macos if args.platform == 'macos-arm64' else stage_windows)(args, staging, source, toolkit)
         (staging / 'dependencies.json').write_text(json.dumps(provenance, indent=2), encoding='utf-8')
         inventory = {p.relative_to(staging).as_posix(): digest(p) for p in sorted(staging.rglob('*')) if p.is_file()}
-        manifest = {'schema': 1, 'platform': 'windows-x64', 'version': version,
+        manifest = {'schema': 1, 'platform': args.platform, 'version': version,
                     'source_commit': commit, 'toolkit_commit': pin,
                     'development': args.development, 'files': inventory}
         (staging / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n', encoding='utf-8')

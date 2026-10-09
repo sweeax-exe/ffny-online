@@ -13,13 +13,27 @@ import importlib.util
 import json
 import os
 from pathlib import Path, PurePosixPath
+import platform
 import re
+import shlex
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
 import time
 import urllib.request
+
+IS_WINDOWS = os.name == 'nt'
+IS_MACOS = sys.platform == 'darwin'
+# The payload manifest names the platform it was built for; a payload for
+# another one is refused before anything in it runs.
+HOST_PLATFORM = 'windows-x64' if IS_WINDOWS else 'macos-arm64' if IS_MACOS else 'linux-x64'
+PRESET = 'win-x64-release' if IS_WINDOWS else 'posix-release'
+HD_SUPPORTED = IS_WINDOWS or IS_MACOS  # drawn by the Direct3D 11 renderer and, since v0.6.1, the macOS Vulkan one
+LAUNCHER_BUNDLE = 'Def Jam Recompiled.app'
+RUNTIME_FOLDERS = ('source/', 'python/') if IS_WINDOWS else ('source/', 'python/', 'tools/', 'deps/')
+APPLE_COMMAND_LINE_TOOLS_URL = 'https://developer.apple.com/documentation/xcode/installing-the-command-line-tools/'
 
 
 class SetupError(Exception):
@@ -60,10 +74,10 @@ def safe_relative(name):
     return Path(*path.parts)
 
 
-def verify_payload(payload):
+def verify_payload(payload, platform=None):
     payload = Path(payload).resolve()
     manifest = json.loads((payload / 'manifest.json').read_text(encoding='utf-8'))
-    if manifest.get('schema') != 1 or manifest.get('platform') != 'windows-x64':
+    if manifest.get('schema') != 1 or manifest.get('platform') != (platform or HOST_PLATFORM):
         raise SetupError('Unsupported setup payload', 2)
     if not re.fullmatch(r'\d+\.\d+\.\d+', manifest.get('version', '')):
         raise SetupError('Invalid release version', 2)
@@ -148,6 +162,22 @@ def install_lock(root):
 
 @contextlib.contextmanager
 def game_lock(root):
+    if not IS_WINDOWS:
+        # The launcher holds an flock on play.lock for as long as the game runs
+        # (it execs the game with the descriptor open), so this fails while the
+        # game is up and succeeds again the moment it exits, even after a crash.
+        root.mkdir(parents=True, exist_ok=True)
+        import fcntl
+        stream = (root / 'play.lock').open('a+b')
+        try:
+            try:
+                fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except OSError as ex:
+                raise SetupError('Close the installed game before updating or repairing it', 5) from ex
+            yield
+        finally:
+            stream.close()
+        return
     kernel = ctypes.WinDLL('kernel32', use_last_error=True)
     kernel.CreateFileW.argtypes = [ctypes.c_wchar_p, ctypes.c_uint32, ctypes.c_uint32,
                                   ctypes.c_void_p, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_void_p]
@@ -178,8 +208,22 @@ class Engine:
                 self.env.pop(key)
         self.env['DEFJAM_DATA'] = str(self.data)
         self.env['PYTHONUTF8'] = '1'
-        self.env['PATH'] = str(self.payload / 'python') + os.pathsep + self.env.get('PATH', '')
-        self.python = self.version_root / 'python/python.exe'
+        if IS_WINDOWS:
+            self.env['PATH'] = str(self.payload / 'python') + os.pathsep + self.env.get('PATH', '')
+            self.python = self.version_root / 'python/python.exe'
+        else:
+            # A build must not pick up a package manager's compiler, headers or
+            # libraries: the toolchain is the system's, everything else is bundled.
+            for key in list(self.env):
+                if key.startswith(('DYLD_', 'HOMEBREW_', 'CMAKE_', 'PKG_CONFIG', 'CONDA', 'VIRTUAL_ENV')) or key in {
+                        'CC', 'CXX', 'CFLAGS', 'CXXFLAGS', 'LDFLAGS', 'CPPFLAGS', 'CPATH', 'LIBRARY_PATH',
+                        'SDKROOT', 'MACOSX_DEPLOYMENT_TARGET', 'VK_ICD_FILENAMES', 'VK_DRIVER_FILES',
+                        'SDL_VULKAN_LIBRARY', 'PYTHONSTARTUP', 'PYTHONUSERBASE'}:
+                    self.env.pop(key)
+            self.env['PATH'] = os.pathsep.join(
+                [str(self.version_root / 'python/bin'), str(self.version_root / 'tools/bin'),
+                 '/usr/bin', '/bin', '/usr/sbin', '/sbin'])
+            self.python = self.version_root / 'python/bin/python3'
         self.log = None
 
     def event(self, message):
@@ -205,13 +249,14 @@ class Engine:
         if Path(argv[0]).name == str(argv[0]):
             argv[0] = shutil.which(str(argv[0]), path=child_env.get('PATH', '')) or argv[0]
         if self.log:
-            self.log.write('Running: ' + subprocess.list2cmdline(list(map(str, argv))) + '\n')
+            self.log.write('Running: ' + (subprocess.list2cmdline if IS_WINDOWS else shlex.join)(list(map(str, argv))) + '\n')
             self.log.flush()
         # Redirect to disk, not a pipe: compiler bursts cannot deadlock the UI.
         with tempfile.TemporaryFile() as output:
             with subprocess.Popen(list(map(str, argv)), cwd=cwd, env=child_env,
                                   stdout=output, stderr=subprocess.STDOUT,
-                                  creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0) as child:
+                                  **({'creationflags': subprocess.CREATE_NO_WINDOW} if IS_WINDOWS
+                                     else {'start_new_session': True})) as child:
                 position = 0
                 progress_text = ''
                 try:
@@ -233,11 +278,20 @@ class Engine:
                             self.log.write(chunk.decode('utf-8', errors='replace'))
                             self.log.flush()
                 except SetupError:
-                    if os.name == 'nt':
+                    if IS_WINDOWS:
                         subprocess.run(['taskkill', '/PID', str(child.pid), '/T', '/F'],
                                        capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
                     else:
-                        child.terminate()
+                        # The child leads its own session, so this reaches the whole
+                        # compiler tree and not only the first process.
+                        for sig in (signal.SIGTERM, signal.SIGKILL):
+                            with contextlib.suppress(ProcessLookupError, PermissionError):
+                                os.killpg(child.pid, sig)
+                            try:
+                                child.wait(timeout=5)
+                                break
+                            except subprocess.TimeoutExpired:
+                                continue
                     child.wait()
                     raise
                 output.seek(position)
@@ -254,12 +308,13 @@ class Engine:
         # Resume generated/build artifacts while rechecking every distributed source file.
         self.source.mkdir(parents=True, exist_ok=True)
         for name, sha in self.manifest['files'].items():
-            if not name.startswith(('source/', 'python/')):
+            if not name.startswith(RUNTIME_FOLDERS):
                 continue
             destination = self.version_root / safe_relative(name)
             if not destination.is_file() or digest(destination) != sha:
                 destination.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copyfile(self.payload / name, destination)
+                # copy, not copyfile: the bundled interpreter and tools keep their execute bit.
+                shutil.copy(self.payload / name, destination)
         previous = self.install / 'installed.json'
         candidates = [p for p in (self.install / 'versions').glob('*/source')
                       if p != self.source and (p / 'src/recomp/gen/lift-state.json').is_file()]
@@ -291,7 +346,7 @@ class Engine:
             receipt = json.loads(receipt_file.read_text(encoding='utf-8'))
             if receipt.get('schema') != 1 or (self.install / 'versions') not in Path(receipt['source']).resolve().parents:
                 raise SetupError('Destination has an invalid installation receipt', 2)
-        elif any(p.name not in {'logs', 'setup.lock', 'play.lock'} for p in self.install.iterdir()):
+        elif any(p.name not in {'logs', 'setup.lock', 'play.lock', '.DS_Store'} for p in self.install.iterdir()):
             raise SetupError('Choose an empty install folder or a recognized Def Jam installation', 2)
         write_json(marker, identity)
 
@@ -302,6 +357,12 @@ class Engine:
         receipt = json.loads(receipt_path.read_text(encoding='utf-8'))
         if Path(receipt['data']).resolve() != self.data:
             raise SetupError('Updates must use the installed data folder: ' + receipt['data'], 2)
+        if not IS_WINDOWS:
+            # game_lock covers the launcher; this also catches the executable started by hand.
+            listing = self.run(['ps', '-axo', 'comm='], capture=True, log_output=False)
+            if any(line.strip() == receipt['executable'] for line in listing.splitlines()):
+                raise SetupError('Close the installed game before updating or repairing it', 5)
+            return
         self.env['DEFJAM_SETUP_INSTALLED_EXE'] = receipt['executable']
         result = self.run(['powershell.exe', '-NoProfile', '-Command',
             "if (Get-Process defjam_recomp -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $env:DEFJAM_SETUP_INSTALLED_EXE }) { Write-Output 'GAME_RUNNING' }"], capture=True)
@@ -385,7 +446,41 @@ class Engine:
             if staging.exists():
                 shutil.rmtree(staging)
 
+    def toolchain_macos(self):
+        self.event('Checking the Xcode Command Line Tools, CMake and Ninja')
+        if not IS_MACOS:
+            raise SetupError('Setup for this operating system is not available yet', 3)
+        if platform.machine() != 'arm64':
+            raise SetupError('This setup supports Apple Silicon Macs only', 3)
+        advice = ('Install the Xcode Command Line Tools (instructions: ' + APPLE_COMMAND_LINE_TOOLS_URL
+                  + '), then run setup again.')
+        selected = subprocess.run(['/usr/bin/xcode-select', '-p'], capture_output=True, text=True)
+        if selected.returncode or not Path(selected.stdout.strip()).is_dir():
+            if getattr(self.args, 'install_prerequisites', False):
+                # Apple's own installer window; nothing is installed by setup itself.
+                self.run(['/usr/bin/xcode-select', '--install'])
+                raise SetupError('Finish the Command Line Tools installer that just opened, then run setup again.', 3)
+            raise SetupError('The Xcode Command Line Tools are not installed. ' + advice, 3)
+        try:
+            sdk = self.run(['/usr/bin/xcrun', '--sdk', 'macosx', '--show-sdk-path'], capture=True).strip()
+            probe = self.version_root / 'toolchain-check'
+            probe.mkdir(parents=True, exist_ok=True)
+            (probe / 'check.c').write_text('int main(void) { return 0; }\n', encoding='utf-8')
+            self.run(['/usr/bin/xcrun', '--sdk', 'macosx', 'clang', '-arch', 'arm64',
+                      '-o', probe / 'check', probe / 'check.c'])
+        except SetupError as ex:
+            if ex.code == 6:
+                raise
+            raise SetupError('The Xcode Command Line Tools could not build a test program. ' + advice, 3) from ex
+        self.env['SDKROOT'] = sdk
+        for executable in ('cmake', 'ninja'):
+            if not shutil.which(executable, path=self.env['PATH']):
+                raise SetupError('Missing bundled build tool: ' + executable, 3)
+            self.run([executable, '--version'])
+
     def toolchain(self, provisioned=False):
+        if not IS_WINDOWS:
+            return self.toolchain_macos()
         self.event('Checking C++ compiler, Windows SDK, CMake and Ninja')
         vswhere = Path(os.environ.get('ProgramFiles(x86)', 'C:/Program Files (x86)')) / 'Microsoft Visual Studio/Installer/vswhere.exe'
         if not vswhere.is_file():
@@ -448,6 +543,9 @@ class Engine:
             if game.resolve() != (self.data / 'extracted').resolve():
                 raise SetupError('Existing game link points to different data', 2)
             return
+        if not IS_WINDOWS:
+            game.symlink_to(self.data / 'extracted', target_is_directory=True)
+            return
         self.env['DEFJAM_SETUP_LINK'] = str(game)
         self.env['DEFJAM_SETUP_TARGET'] = str(self.data / 'extracted')
         self.run(['powershell.exe', '-NoProfile', '-Command',
@@ -459,7 +557,7 @@ class Engine:
         for label, verify, action in (
             ('Analysis', lambda: state.verify_analysis(self.source, tk), 'analyze'),
             ('Lift', lambda: state.verify_lift(self.source, tk), 'recomp'),
-            ('Build', lambda: state.verify_build(self.source, 'win-x64-release'), 'build')):
+            ('Build', lambda: state.verify_build(self.source, PRESET), 'build')):
             self.cancelled()
             try:
                 verify()
@@ -474,14 +572,22 @@ class Engine:
             elif action == 'build':
                 # Populate FetchContent from the inventoried, offline dependency source.
                 self.run([self.python, self.source / 'scripts/pipeline-state.py', 'begin-build',
-                          '--preset', 'win-x64-release'], cwd=self.source)
-                deps = json.loads((self.payload / 'dependencies.json').read_text())
-                overrides = [f'-DFETCHCONTENT_SOURCE_DIR_{name.upper()}={self.source / item["source_dir"]}'
-                             for name, item in zip(('sdl3', 'imgui'), [d for d in deps if 'source_dir' in d])]
-                self.run(['cmake', '--preset', 'win-x64-release', '-DDEFJAM_BUILD_GAME=ON', *overrides], cwd=self.source)
-                self.run(['cmake', '--build', '--preset', 'win-x64-release', '--target', 'defjam_recomp'], cwd=self.source)
+                          '--preset', PRESET], cwd=self.source)
+                if IS_WINDOWS:
+                    deps = json.loads((self.payload / 'dependencies.json').read_text())
+                    overrides = [f'-DFETCHCONTENT_SOURCE_DIR_{name.upper()}={self.source / item["source_dir"]}'
+                                 for name, item in zip(('sdl3', 'imgui'), [d for d in deps if 'source_dir' in d])]
+                else:
+                    # SDL3, MoltenVK and shaderc come prebuilt with the setup; nothing is
+                    # looked for in /opt/homebrew, /usr/local or any other prefix.
+                    prefix = self.version_root / 'deps'
+                    overrides = [f'-DCMAKE_PREFIX_PATH={prefix}', f'-DVulkan_LIBRARY={prefix}/lib/libMoltenVK.dylib',
+                                 f'-DVulkan_INCLUDE_DIR={prefix}/include', '-DCMAKE_FIND_USE_CMAKE_SYSTEM_PATH=OFF',
+                                 '-DCMAKE_OSX_ARCHITECTURES=arm64']
+                self.run(['cmake', '--preset', PRESET, '-DDEFJAM_BUILD_GAME=ON', *overrides], cwd=self.source)
+                self.run(['cmake', '--build', '--preset', PRESET, '--target', 'defjam_recomp'], cwd=self.source)
                 self.run([self.python, self.source / 'scripts/pipeline-state.py', 'record-build',
-                          '--preset', 'win-x64-release'], cwd=self.source)
+                          '--preset', PRESET], cwd=self.source)
                 verify()
                 continue
             self.run(argv, cwd=self.source)
@@ -490,6 +596,8 @@ class Engine:
     def build_hd_textures(self):
         if not getattr(self.args, 'hd_textures', False):
             return
+        if not HD_SUPPORTED:
+            raise SetupError('HD textures are not supported on this platform yet', 2)
         self.event('Upscaling HD textures with Lanczos 4x; several minutes, CPU only')
         receipt = self.version_root / 'hd-pack-build.json'
         self.run([self.python, self.source / 'scripts/build-hd-pack.py',
@@ -500,26 +608,71 @@ class Engine:
         self.hd_packs = result['packs']
         self.event('HD textures ready (' + str(result['images']) + ' images); awaiting install activation')
 
+    def make_launcher_bundle(self, destination, root):
+        """A tiny local app: it takes the play lock, sets the data folder and execs the
+        game, so the game runs as this app. Made here, never downloaded, so Gatekeeper has
+        nothing to say about it; the ad-hoc signature is what Apple Silicon needs to run it."""
+        destination = Path(destination)
+        pending = destination.with_name(destination.name + '.new')
+        shutil.rmtree(pending, ignore_errors=True)
+        shutil.copytree(self.payload / 'launcher' / LAUNCHER_BUNDLE, pending, symlinks=True)
+        # The payload inventories files only, so an empty Resources folder is not in it.
+        (pending / 'Contents/Resources').mkdir(parents=True, exist_ok=True)
+        (pending / 'Contents/Resources/install-root.txt').write_text(str(root), encoding='utf-8')
+        self.run(['/usr/bin/codesign', '--force', '--sign', '-', pending])
+        if destination.is_dir() and not destination.is_symlink():
+            shutil.rmtree(destination)
+        else:
+            destination.unlink(missing_ok=True)
+        os.replace(pending, destination)
+
+    def install_launcher_bundle(self, receipt):
+        bundle = self.install / LAUNCHER_BUNDLE
+        self.make_launcher_bundle(bundle, self.install)
+        shortcuts = []
+        if not self.args.no_shortcuts:
+            try:
+                applications = Path.home() / 'Applications'
+                applications.mkdir(exist_ok=True)
+                self.make_launcher_bundle(applications / LAUNCHER_BUNDLE, self.install)
+                shortcuts.append(str(applications / LAUNCHER_BUNDLE))
+                if not self.args.no_desktop_shortcut:
+                    alias = Path.home() / 'Desktop' / 'Def Jam Recompiled'
+                    alias.unlink(missing_ok=True)
+                    self.run([bundle / 'Contents/MacOS/DefJamLauncher', '--make-alias', bundle, alias])
+                    shortcuts.append(str(alias))
+            except (OSError, SetupError) as ex:
+                if isinstance(ex, SetupError) and ex.code == 6:
+                    raise
+                # A refused folder permission must not undo a finished build.
+                self.event('Could not create every shortcut (' + str(ex) + '); open the app in the install folder instead')
+        receipt['shortcuts'] = shortcuts
+        return bundle
+
     def activate(self):
         self.event('Creating launch shortcuts and install receipt')
         receipt = {key: self.manifest[key] for key in ('version', 'source_commit', 'toolkit_commit')}
         previous = self.install / 'installed.json'
         receipt['hd_packs'] = getattr(self, 'hd_packs', json.loads(previous.read_text()).get('hd_packs', []) if previous.exists() else [])
         receipt.update(schema=1, source=str(self.source), data=str(self.data),
-                       executable=str(self.source / 'build/win-x64-release/defjam_recomp.exe'))
-        # Stable native launcher reads this atomic receipt and supplies the data env.
-        shutil.copyfile(self.payload / 'DefJamLauncher.exe', self.install / 'DefJamLauncher.exe.new')
-        os.replace(self.install / 'DefJamLauncher.exe.new', self.install / 'DefJamLauncher.exe')
-        self.env['DEFJAM_SETUP_LAUNCHER'] = str(self.install / 'DefJamLauncher.exe')
-        self.env['DEFJAM_SETUP_ROOT'] = str(self.install)
-        self.env['DEFJAM_SETUP_DESKTOP_SHORTCUT'] = '0' if self.args.no_desktop_shortcut else '1'
-        if not self.args.no_shortcuts:
-            self.run(['powershell.exe', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
-                      self.payload / 'engine/shortcuts.ps1'])
+                       executable=str(self.source / 'build' / PRESET / ('defjam_recomp.exe' if IS_WINDOWS else 'defjam_recomp')))
+        if IS_WINDOWS:
+            # Stable native launcher reads this atomic receipt and supplies the data env.
+            shutil.copyfile(self.payload / 'DefJamLauncher.exe', self.install / 'DefJamLauncher.exe.new')
+            os.replace(self.install / 'DefJamLauncher.exe.new', self.install / 'DefJamLauncher.exe')
+            launcher = self.install / 'DefJamLauncher.exe'
+            self.env['DEFJAM_SETUP_LAUNCHER'] = str(launcher)
+            self.env['DEFJAM_SETUP_ROOT'] = str(self.install)
+            self.env['DEFJAM_SETUP_DESKTOP_SHORTCUT'] = '0' if self.args.no_desktop_shortcut else '1'
+            if not self.args.no_shortcuts:
+                self.run(['powershell.exe', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
+                          self.payload / 'engine/shortcuts.ps1'])
+        else:
+            launcher = self.install_launcher_bundle(receipt)
         self.cancelled()
         # Commit HD selection with the receipts only after cancellable work.
         # Restore exact prior bytes if any final publication fails.
-        paths = [self.install / 'installed.json', self.install / 'installed.ini']
+        paths = [self.install / 'installed.json'] + ([self.install / 'installed.ini'] if IS_WINDOWS else [])
         if hasattr(self, 'hd_packs'):
             paths.append(self.data / 'settings.ini')
         before = {path: path.read_bytes() if path.exists() else None for path in paths}
@@ -528,10 +681,11 @@ class Engine:
                 old_packs = json.loads(before[previous]).get('hd_packs', []) if before[previous] else []
                 enable_hd_packs(self.data, self.hd_packs, old_packs)
             write_json(self.install / 'installed.json', receipt)
-            temporary = self.install / 'installed.ini.pending'
-            temporary.write_text('[install]\n' + ''.join(f'{key}={receipt[key]}\n' for key in
-                                 ('source', 'data', 'executable')), encoding='utf-16')
-            os.replace(temporary, self.install / 'installed.ini')
+            if IS_WINDOWS:
+                temporary = self.install / 'installed.ini.pending'
+                temporary.write_text('[install]\n' + ''.join(f'{key}={receipt[key]}\n' for key in
+                                     ('source', 'data', 'executable')), encoding='utf-16')
+                os.replace(temporary, self.install / 'installed.ini')
         except (OSError, ValueError, SetupError):
             for path, content in before.items():
                 if content is None:
@@ -541,11 +695,11 @@ class Engine:
                     pending.write_bytes(content)
                     os.replace(pending, path)
             raise
-        self.event('Setup complete. Select Play or double-click: ' + str(self.install / 'DefJamLauncher.exe'))
+        self.event('Setup complete. Select Play or double-click: ' + str(launcher))
 
     def execute(self):
-        if os.name != 'nt':
-            raise SetupError('macOS and Linux setup configurations remain to-dos', 2)
+        if getattr(self.args, 'hd_textures', False) and not HD_SUPPORTED:
+            raise SetupError('HD textures are not supported on this platform yet', 2)
         self.data.mkdir(parents=True, exist_ok=True)
         with install_lock(self.install), install_lock(self.data), game_lock(self.install):
             log_path = Path(self.args.log) if self.args.log else self.install / 'logs' / time.strftime('setup-%Y%m%d-%H%M%S.log')
@@ -562,7 +716,10 @@ class Engine:
                 if not self.dump.exists():
                     raise SetupError('Dump does not exist', 2)
                 dump_size = sum(p.stat().st_size for p in self.dump.rglob('*') if p.is_file()) if self.dump.is_dir() else self.dump.stat().st_size
-                same_drive = self.install.anchor.casefold() == self.data.anchor.casefold()
+                if IS_WINDOWS:
+                    same_drive = self.install.anchor.casefold() == self.data.anchor.casefold()
+                else:
+                    same_drive = os.stat(nearest_existing(self.install)).st_dev == os.stat(nearest_existing(self.data)).st_dev
                 hd_space = 15 * 1024**3 if getattr(self.args, 'hd_textures', False) else 0
                 if shutil.disk_usage(nearest_existing(self.data)).free < dump_size + 1024**3 + hd_space + (required if same_drive else 0):
                     raise SetupError('Insufficient free space on the data drive', 2)
@@ -626,6 +783,22 @@ def uninstall(install):
             shutil.rmtree(versions)
         for name in ('installed.ini', 'installed.json', 'DefJamLauncher.exe'):
             (root / name).unlink(missing_ok=True)
+        if not IS_WINDOWS:
+            bundle = root / LAUNCHER_BUNDLE
+            if bundle.is_dir() and not bundle.is_symlink():
+                shutil.rmtree(bundle)
+            # Only the shortcuts this installation made and recorded, and only if
+            # they still are what was made: a bundle that names this install, or an alias file.
+            for name in receipt.get('shortcuts', []):
+                shortcut = Path(name)
+                marker = shortcut / 'Contents/Resources/install-root.txt'
+                if shortcut.is_dir() and not shortcut.is_symlink() and marker.is_file() \
+                        and marker.read_text(encoding='utf-8') == str(root):
+                    shutil.rmtree(shortcut)
+                elif shortcut.is_file() and not shortcut.is_symlink():
+                    shortcut.unlink()
+            print('Application removed. Dump, saves, settings and logs were preserved.', flush=True)
+            return
         env = os.environ.copy()
         env['DEFJAM_SETUP_REMOVE_SHORTCUTS'] = '1'
         env['DEFJAM_SETUP_LAUNCHER'] = str(root / 'DefJamLauncher.exe')

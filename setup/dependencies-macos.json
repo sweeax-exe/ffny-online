@@ -1,0 +1,29 @@
+{
+  "python": {
+    "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20261009/cpython-3.13.16%2B20261009-aarch64-apple-darwin-install_only.tar.gz",
+    "sha256": "3338fcd572a670ec45ac9ef75480b95595ea9b6b5dd320952fcf5df185089941"
+  },
+  "cmake": {
+    "url": "https://github.com/Kitware/CMake/releases/download/v4.4.4/cmake-4.4.4-macos-universal.tar.gz",
+    "sha256": "4b7b73704b1db9b374e5c9ab8e17ac6148b817b6396ee75cd94a852cbac9d305"
+  },
+  "ninja": {
+    "url": "https://github.com/ninja-build/ninja/releases/download/v1.13.2/ninja-mac.zip",
+    "sha256": "c99048673aa765960a99cf10c6ddb9f1fad506099ff0a0e137ad8960a88f321b"
+  },
+  "moltenvk": {
+    "url": "https://github.com/KhronosGroup/MoltenVK/releases/download/v1.4.2/MoltenVK-macos.tar",
+    "sha256": "f95765a6229cb7b915990a2890ce12ebe36a730b021545d3d52ae69ce4c4024e"
+  },
+  "shaderc": {
+    "url": "https://github.com/google/shaderc",
+    "tag": "v2026.4",
+    "commit": "b64fd42c4a2a9d501c47aca5d3571f7673a5e9cc"
+  },
+  "wheels": {
+    "capstone-5.0.9-py3-none-macosx_11_0_arm64.whl": "fc269c5082e17d7f9f265cd6980e2fdc6ab572df913951d76db0357e06b8001d",
+    "pyxbe-1.0.4-py3-none-any.whl": "8c8a354b824ab978ca088472adeb2395f0704c71c0347c94b1eda639a2e34416",
+    "numpy-2.5.2-cp313-cp313-macosx_11_0_arm64.whl": "52c808f96484f5571a5cc863775ce50247c17dfb3b0361f8ed6b4b0456f80080",
+    "pillow-12.3.0-cp313-cp313-macosx_11_0_arm64.whl": "d69141514cc30b774ceea5e3ed3a6635c8d8a96edf664689b890f4089111fb35"
+  }
+}

@@ -35,6 +35,10 @@ jobs:
         with:
           name: windows-setup-assets
           path: setup-assets
+      - uses: actions/download-artifact@v4
+        with:
+          name: macos-setup-assets
+          path: setup-assets
       - name: Create reviewed source release draft
         env:
           GH_TOKEN: ${{ github.token }}
@@ -44,7 +48,7 @@ jobs:
           gh release create "$RELEASE_TAG" --verify-tag --draft \
             --title "Def Jam: Fight for NY — Recompiled $RELEASE_TAG" \
             --notes-file "docs/releases/$RELEASE_TAG.md" setup-assets/*
-      # Only the inventoried game-free setup, checksum and provenance are attached.
+      # Only the inventoried game-free setups (Windows and macOS), their checksums and provenance are attached.
       # No game executable, lifted source or game-data assets are uploaded.
       # Source archives contain the two fingerprinted owner-approved README visuals.
       # GitHub provides source archives; cloning recursively fetches the pinned toolkit.

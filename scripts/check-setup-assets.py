@@ -28,7 +28,7 @@ def inspect_payload(archive):
     with tempfile.TemporaryDirectory() as temporary:
         folder = Path(temporary)
         package.safe_unpack(archive, folder)
-        manifest = engine.verify_payload(folder)
+        manifest = engine.verify_payload(folder, platform_of(archive))
         for name in package.HD_SOURCES:
             if 'source/' + name not in manifest['files']:
                 raise ValueError('Required HD setup source missing: ' + name)
@@ -44,10 +44,25 @@ def inspect_payload(archive):
                     continue
                 if not package.source_allowed(relative, toolkit):
                     raise ValueError('Disallowed setup source input: ' + name)
+            elif manifest['platform'] == 'macos-arm64':
+                if not name.startswith(('python/', 'engine/', 'tools/', 'deps/', 'licenses/')) \
+                        and not name.startswith('launcher/Def Jam Recompiled.app/') and name != 'dependencies.json':
+                    raise ValueError('Unexpected setup component: ' + name)
             elif not name.startswith(('python/', 'engine/')) and name not in {'DefJamLauncher.exe', 'dependencies.json'}:
                 raise ValueError('Unexpected setup component: ' + name)
         # Probe the actual embedded runtime without generating new payload files.
-        if sys.platform == 'win32':
+        if manifest['platform'] == 'macos-arm64':
+            if sys.platform == 'darwin':
+                import subprocess
+                python = folder / 'python/bin/python3'
+                subprocess.run([python, '-B', '-c',
+                    'import capstone, xbe, PIL, numpy, tools.disasm, tools.recomp, tools.xiso; print("Bundled runtime imports OK")'],
+                    check=True, env={'PATH': '/usr/bin:/bin'})
+                subprocess.run([python, '-B', folder / 'source/scripts/build-hd-pack.py', '--help'], check=True,
+                               stdout=subprocess.DEVNULL, env={'PATH': '/usr/bin:/bin'})
+                subprocess.run([folder / 'tools/bin/cmake', '--version'], check=True, stdout=subprocess.DEVNULL)
+                subprocess.run([folder / 'tools/bin/ninja', '--version'], check=True, stdout=subprocess.DEVNULL)
+        elif sys.platform == 'win32':
             import subprocess
             subprocess.run([folder / 'python/python.exe', '-B', '-c',
                 'import capstone, xbe, PIL, numpy, tools.disasm, tools.recomp, tools.xiso; print("Embedded runtime imports OK")'], check=True)
@@ -57,13 +72,19 @@ def inspect_payload(archive):
         return manifest
 
 
-def validate_asset_names(version, names):
+def platform_of(archive):
+    with zipfile.ZipFile(archive) as package_zip:
+        return json.loads(package_zip.read('manifest.json'))['platform']
+
+
+def validate_asset_names(version, names, platform='windows-x64'):
     if not re.fullmatch(r'\d+\.\d+\.\d+', version):
         raise ValueError('Invalid setup release version')
-    stem = f'DefJamSetup-{version}-windows-x64'
-    expected = {stem + '.exe', stem + '.sha256', stem + '.provenance.json'}
+    stem = f'DefJamSetup-{version}-{platform}'
+    extension = {'windows-x64': '.exe', 'macos-arm64': '.dmg'}[platform]
+    expected = {stem + extension, stem + '.sha256', stem + '.provenance.json'}
     if set(names) != expected:
-        raise ValueError('Release assets must be exactly the approved Windows setup, checksum and provenance')
+        raise ValueError('Release assets must be exactly the approved setup installer, checksum and provenance')
 
 
 def verify_embedded_payload(installer, archive):
@@ -98,6 +119,20 @@ def verify_embedded_payload(installer, archive):
         kernel.FreeLibrary(handle)
 
 
+def verify_embedded_payload_macos(image, archive):
+    """Mount the disk image read-only and compare the payload inside the app with the inspected one."""
+    import subprocess
+    with tempfile.TemporaryDirectory() as mountpoint:
+        subprocess.run(['/usr/bin/hdiutil', 'attach', '-readonly', '-nobrowse', '-noverify', '-mountpoint', mountpoint,
+                        str(image)], check=True, stdout=subprocess.DEVNULL)
+        try:
+            bundled = Path(mountpoint) / 'Def Jam Setup.app/Contents/Resources/payload.zip'
+            if not bundled.is_file() or engine.digest(bundled) != engine.digest(archive):
+                raise ValueError('Installer payload does not match the inspected payload')
+        finally:
+            subprocess.run(['/usr/bin/hdiutil', 'detach', '-force', mountpoint], check=True, stdout=subprocess.DEVNULL)
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--payload', type=Path, required=True)
@@ -106,19 +141,20 @@ def main(argv=None):
     parser.add_argument('--development', action='store_true')
     args = parser.parse_args(argv)
     manifest = inspect_payload(args.payload)
-    verify_embedded_payload(args.installer, args.payload)
+    platform = manifest['platform']
+    (verify_embedded_payload_macos if platform == 'macos-arm64' else verify_embedded_payload)(args.installer, args.payload)
     if manifest.get('development') and not args.development:
         raise ValueError('A development payload cannot be published')
     args.output_dir.mkdir(parents=True, exist_ok=True)
-    stem = f'DefJamSetup-{manifest["version"]}-windows-x64'
+    stem = f'DefJamSetup-{manifest["version"]}-{platform}'
     import shutil
-    exe = args.output_dir / (stem + '.exe')
+    exe = args.output_dir / (stem + ('.dmg' if platform == 'macos-arm64' else '.exe'))
     shutil.copyfile(args.installer, exe)
     sha = engine.digest(exe)
     (args.output_dir / (stem + '.sha256')).write_text(sha + '  ' + exe.name + '\n', encoding='utf-8')
     (args.output_dir / (stem + '.provenance.json')).write_text(json.dumps(
         {'installer_sha256': sha, 'payload_sha256': engine.digest(args.payload), **manifest}, indent=2) + '\n', encoding='utf-8')
-    validate_asset_names(manifest['version'], [p.name for p in args.output_dir.iterdir()])
+    validate_asset_names(manifest['version'], [p.name for p in args.output_dir.iterdir()], platform)
     print('Verified game-free setup assets:', stem)
     return 0
 

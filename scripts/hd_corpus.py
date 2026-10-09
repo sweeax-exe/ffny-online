@@ -11,6 +11,7 @@ from functools import lru_cache
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 import io
 import json
+import os
 from pathlib import Path
 import shutil
 import threading
@@ -87,6 +88,15 @@ def classify(source):
         "Props" if "v2wp" in s or "trophies" in s else "Other textures")
 
 
+def atomic_save(image, path, **options):
+    """Save to a file private to this process, then rename it over the final path."""
+    path = Path(path)
+    pending = path.with_name(path.name + ".%d.pending" % os.getpid())
+    options.setdefault("format", {".png": "PNG", ".jpg": "JPEG"}[path.suffix.lower()])
+    image.save(pending, **options)
+    pending.replace(path)
+
+
 def process_leaf(blob, selected, out_text, recipe):
     from PIL import Image
     hd.unswizzle = fast_unswizzle
@@ -136,17 +146,18 @@ def process_leaf(blob, selected, out_text, recipe):
         alpha = alpha.resize((alpha.width*4, alpha.height*4),
             Image.Resampling.NEAREST if alpha_method == "nearest" else Image.Resampling.LANCZOS)
         colour.putalpha(alpha.crop((32, 32, alpha.width-32, alpha.height-32)))
-        original.save(out / paths["original"], compress_level=3)
+        # The same image can sit in several containers, so two workers can write one
+        # id at once: every write goes to a name of its own and is renamed into place
+        # (the content is identical, and a reader never sees a half-written file).
+        atomic_save(original, out / paths["original"], compress_level=3)
         # Installed packs may hard-link this file. Replace the path, never mutate
         # a shared inode when repairing a cache or building a changed recipe.
-        pending_image = (out / paths["upscaled"]).with_suffix(".pending")
-        colour.save(pending_image, format="PNG", compress_level=3)
-        pending_image.replace(out / paths["upscaled"])
+        atomic_save(colour, out / paths["upscaled"], format="PNG", compress_level=3)
         thumb = colour.copy()
         thumb.thumbnail((192, 144), Image.Resampling.LANCZOS)
         bg = Image.new("RGB", (192, 144), (40, 44, 51))
         bg.paste(thumb, ((192-thumb.width)//2, (144-thumb.height)//2), thumb)
-        bg.save(out / paths["thumbnail"], quality=86)
+        atomic_save(bg, out / paths["thumbnail"], format="JPEG", quality=86)
         result = dict(id=ident, source_id=ident, recipe_id=recipe["id"],
             width=original.width, height=original.height, alpha=list(alpha_range),
             alpha_method=alpha_method, bleed=bleed, category=cat,
@@ -155,7 +166,7 @@ def process_leaf(blob, selected, out_text, recipe):
         for k, path in paths.items():
             result[k+"_hash"] = hd.digest((out / path).read_bytes())
         record_path = out / "records" / (ident+".json")
-        pending_record = record_path.with_suffix(".pending")
+        pending_record = record_path.with_suffix(".%d.pending" % os.getpid())
         pending_record.write_text(json.dumps(result), encoding="utf8")
         pending_record.replace(record_path)
         completed.append(result)

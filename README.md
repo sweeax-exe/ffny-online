@@ -33,7 +33,7 @@ game assets, disc images, translated game code or game executable.
 - **Higher resolution.** Renders at up to 4× the console's resolution, in a
   resizable window or borderless full screen.
 - **Optional HD textures.** 4× texture packs generated on your machine from
-  your own dump (Windows).
+  your own dump (Windows and macOS).
 - **An installer that builds the game for you.** Point the Windows setup wizard
   at your dump; it checks it, then translates and compiles the game locally.
 - **Launcher and in-game settings.** A start-up window and an overlay (F1) for
@@ -55,13 +55,13 @@ Gameplay captured by the maintainer. The GIF is a short, silent preview.
 | Area | Status |
 |---|---|
 | Windows x64 | Playable; tested on Windows 11 |
-| macOS (Apple Silicon) | Playable through Vulkan since v0.5.0, without the launcher, overlay or HD textures; see [Build on macOS and Linux](docs/build-macos-linux.md) |
+| macOS (Apple Silicon) | Playable through Vulkan since v0.5.0, with a setup installer and optional HD textures since v0.6.1, still without the launcher and overlay (v0.6.2); see [macOS setup](docs/setup-installer.md#macos-setup-apple-silicon) |
 | Linux | The runtime and its test fixtures build in CI; the game is not yet built or run there |
 | Steam Deck / Proton | Planned; not yet tested |
 | Menus and fights | Menus, match setup, fights and the return to the menus work |
 | Story | Intro and cutscenes, character creator, crib and gym work; a full playthrough has not been verified |
 | Graphics | Direct3D 11 at up to 4× the console resolution; 4:3 picture (true 16:9 is planned) |
-| HD textures | Optional 4× texture packs on Windows, generated locally from your own dump; see [HD textures](docs/hd-textures.md) |
+| HD textures | Optional 4× texture packs, generated locally from your own dump; on Windows and (since v0.6.1) macOS; see [HD textures](docs/hd-textures.md) |
 | Audio | Music, speech and effects |
 | Input | Gamepads (Xbox, DualSense, Switch Pro and most others), keyboard and mouse, rumble and remapping; see [Controllers, keyboard and mouse](docs/10-input.md) |
 | Launcher and overlay | A start-up window and an in-game settings overlay (F1) on Windows; see [Launcher and overlay](docs/launcher-and-overlay.md) |
@@ -86,6 +86,20 @@ if they are missing. The installer is unsigned, so Windows may warn about it.
 See [Windows setup](docs/setup-installer.md) for folders, shortcuts, HD texture
 generation, silent mode, repair and removal.
 
+### macOS: setup installer (Apple Silicon)
+
+Download `DefJamSetup-<version>-macos-arm64.dmg` from the
+[latest release](https://github.com/vyanhursky/DefJamFFNY-recomp/releases/latest)
+and open `Def Jam Setup`. It has the same steps as the Windows wizard, needs no
+Terminal, Homebrew or build tools of your own, and works without an internet
+connection. It does need Apple's free **Xcode Command Line Tools**; if they are
+missing, setup stops and links Apple's
+[installation instructions](https://developer.apple.com/documentation/xcode/installing-the-command-line-tools/).
+The setup is unsigned, so macOS blocks it the first time: choose **Done**, then
+open System Settings, Privacy & Security, scroll to Security and choose **Open
+Anyway**. See [macOS setup](docs/setup-installer.md#macos-setup-apple-silicon) for
+folders, shortcuts, silent mode and removal.
+
 ### Windows: build from source
 
 You need Git, Python 3.12 or newer, Visual Studio Build Tools with the C++
@@ -108,10 +122,11 @@ extract and verify your disc. Then:
 
 Use a recursive clone: GitHub's source ZIP leaves out the toolkit submodule.
 
-### macOS and Linux
+### macOS and Linux: build from source
 
-Follow [Build on macOS and Linux](docs/build-macos-linux.md). It lists what
-works there and what does not yet.
+On a Mac, the setup above is the easy way. To build by hand, or on Linux, follow
+[Build on macOS and Linux](docs/build-macos-linux.md). It lists what works there
+and what does not yet.
 
 ## Playing
 
@@ -175,10 +190,10 @@ there upstream where they help other games.
 
 Released so far: display settings and a settings file, gamepad and keyboard
 input, the launcher and overlay, a native macOS build, the Windows installer and
-optional HD textures. Still planned:
+optional HD textures (Windows, then macOS). Still planned:
 
 - true 16:9 widescreen in fights;
-- the launcher, overlay and HD textures on macOS;
+- the launcher and overlay on macOS (v0.6.2);
 - Steam Deck through Proton, then a native Linux game build;
 - deeper gameplay decompilation, as a stretch goal.
 

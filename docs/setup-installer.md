@@ -1,8 +1,9 @@
-# Windows setup installer
+# Setup installers
 
-Implementation in progress. Setup contains tools and source and compiles your own
-USA Xbox dump locally. Windows x64 is first; macOS/Linux setup are to-dos that
-reuse the merged port's Python pipeline and Vulkan/SDL3 backend.
+Setup contains tools and source and compiles your own USA Xbox dump locally. It
+exists for Windows x64 and, since v0.6.1, macOS on Apple Silicon (see
+[macOS setup](#macos-setup-apple-silicon) below). The Windows sections come first;
+Linux setup is still a to-do and reuses the same engine.
 
 ## Wizard and destinations
 
@@ -112,3 +113,79 @@ The initial setup release is unsigned; Windows may display a SmartScreen prompt.
 Clean Windows 11 VM setup with no
 tools, VS 2022, independent ISO/XISO input, Unicode paths and physical-machine
 gameplay acceptance remain to be validated; CI is not a substitute.
+
+## macOS setup (Apple Silicon)
+
+`DefJamSetup-<version>-macos-arm64.dmg` holds `Def Jam Setup.app`, a short
+"READ ME FIRST" and the third-party licenses. It needs an Apple Silicon Mac on macOS 11
+or newer, the **Xcode Command Line Tools** and about 12 GiB free plus the dump copy. It
+needs no internet connection and no Terminal, Homebrew, CMake or Python of your own.
+
+**First open.** The setup is not signed with an Apple Developer ID, so macOS blocks it
+the first time. Choose **Done** (not Move to Trash), then open System Settings →
+Privacy & Security, scroll to Security, and choose **Open Anyway** beside the message
+about Def Jam Setup, then confirm with your password or Touch ID. You do this once.
+
+**Command Line Tools.** Setup uses Apple's compiler, which cannot be redistributed.
+If it is missing, setup stops with exit 3 and a message linking to
+[Apple's installation instructions](https://developer.apple.com/documentation/xcode/installing-the-command-line-tools/);
+install them, then run setup again. Intel Macs stop the same way.
+
+The wizard has the same controls as the Windows one: your ISO/XISO or extracted dump,
+separate **Install location** and **Data location** (defaults under
+`~/Library/Application Support/DefJamRecompiled`), a desktop-shortcut choice,
+**Install / Repair**, **Open logs**, **Play** and **Cancel**. Rules for the folders,
+the dump copy, resuming after cancel and refusing a changed dump are the Windows ones.
+There is no "install build tools" checkbox (see Command Line Tools above). The
+**Apply HD texture upscale during install** option is the Windows one: unchecked by
+default, about 6.2 GB of generated textures plus 15 GiB of working headroom, no GPU needed
+([HD textures](hd-textures.md)).
+
+Setup writes **Def Jam Recompiled.app** into the install folder, a copy in
+`~/Applications` and, unless you clear the choice, an alias on the Desktop. Open any of
+them or select **Play**. The app is made on your Mac, never downloaded, takes the play
+lock (an update refuses to run while the game does), supplies the data folder and
+working directory and keeps the ten newest play logs in `~/Library/Logs/DefJamRecompiled`
+(`.log` and `.log.err`; attach the `.err` to a problem report after reviewing it for
+personal paths). The launcher and in-game overlay are not on macOS yet; settings are in
+`settings.ini` ([reference](settings-reference.md)).
+
+Setup logs are in `~/Library/Logs/DefJamSetup`; **Open logs** opens the current one.
+
+### Silent mode
+
+```bash
+"/Applications/Def Jam Setup.app/Contents/MacOS/DefJamSetup" --silent --dump "$HOME/Dumps/DefJam.iso" \
+  --install-dir "$HOME/Games/DefJamApp" --data-dir "$HOME/Games/DefJamData" --log "$HOME/DefJamSetup.log"
+```
+
+`--hd-textures` generates and enables the HD packs. `--no-shortcuts` creates neither the `~/Applications` copy nor the Desktop alias;
+`--no-desktop-shortcut` skips only the alias. `--silent --uninstall --install-dir PATH`
+removes the app, the versions and the shortcuts it made, and keeps the dump copy, saves,
+settings and logs. Exit codes: 0 success; 2 invalid input; 3 prerequisites missing (Command
+Line Tools, or an Intel Mac); 4 failed stage; 5 another setup or the game is running;
+6 cancelled.
+
+### What the payload carries
+
+Reviewed source, the pinned toolkit, Python 3.13 with `pyxbe`, `capstone`, Pillow and
+NumPy, CMake and Ninja, and three libraries the game links: SDL3 and shaderc, built
+from pinned source, and MoltenVK, linked directly with no Vulkan loader. Everything is
+pinned by SHA-256 or git commit in `setup/dependencies-macos.json` (SDL3 by the
+toolkit's pin), arm64 only, and ad-hoc signed. The build looks nowhere else:
+`/opt/homebrew`, `/usr/local` and package-manager variables are ignored, so a Mac
+without Homebrew builds exactly what a Mac with it does.
+
+Build the setup with `scripts/build-setup.sh` (`--development` for a local prototype
+from a dirty checkout). CI builds it on a macOS arm64 runner, checks that the wizard
+opens and that a silent run with a missing dump exits 2, and a tagged release attaches
+exactly the dmg, its SHA-256 and provenance.
+
+### Validation
+
+Checked on arm64 macOS 26 with `/opt/homebrew` and `/usr/local` made unreadable: a full
+silent install from an XISO, the launcher starting the game with the receipt's data
+folder, a repair while the game runs (exit 5), shortcut creation and removal, and the
+installed build against the title, menu and fight checks. Not yet checked: a Mac with
+nothing installed, older macOS versions and Gatekeeper's first-open prompt on a
+downloaded copy.
