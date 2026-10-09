@@ -1,6 +1,6 @@
 # HD textures: Windows support and local workflow
 
-The v0.6.0 candidate adds optional Windows Direct3D 11 texture packs and local
+v0.6.0 added optional Windows Direct3D 11 texture packs and local
 Lanczos 4x generation. HD textures on Vulkan/macOS/Linux, widescreen, vector fonts
 and HD movies remain follow-ups. See `research/hd-textures-notes.md` for evidence and gaps.
 
@@ -107,14 +107,14 @@ standard 640x480 regression capture. At render scale 2/4 these are 1280x960/2560
 The default capture path and existing goldens stay at 640x480. Capture work is excluded from performance
 measurements.
 
-Use an isolated Python environment with Pillow. This machine's environment is
-`C:/Users/Vlad/code/defjam-hd-data/tools/python`; it does not change the project Python installation.
+Use an isolated Python environment with Pillow, for example `<hd-data>/tools/python`
+in a data folder of your own; it does not change the project Python installation.
 The portable official Real-ESRGAN NCNN Vulkan executable uses the local NVIDIA GPU without a CUDA/PyTorch
 installation. It and both model pairs live under `<data>/tools/realesrgan`. Reproduction downloads and
 hashes are in the research notes. chaiNNer is an optional GUI for auditioning and editing recipes.
 
 ```powershell
-$hdData = 'C:\Users\Vlad\code\defjam-hd-data'
+$hdData = 'D:\Games\DefJam\HdData'   # your own folder
 $hdPython = "$hdData\tools\python\Scripts\python.exe"
 $hdGpu = "$hdData\tools\realesrgan\realesrgan-ncnn-vulkan.exe"
 

@@ -4,25 +4,21 @@
 [![Release](https://img.shields.io/github/v/release/vyanhursky/DefJamFFNY-recomp)](https://github.com/vyanhursky/DefJamFFNY-recomp/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-A native Windows port of **Def Jam: Fight for NY**, built from the original
-Xbox version with [xboxrecomp](https://github.com/sp00nznet/xboxrecomp).
-The Xbox executable is translated into C and compiled ahead of time. Its own
-gameplay, menus and cutscenes run on an Xbox compatibility runtime, with graphics
-rendered through Direct3D 11 and audio and controller input supplied by the host.
-Since v0.5.0 the same source also builds natively on macOS (Apple Silicon), drawn through Vulkan.
+A native PC port of **Def Jam: Fight for NY**, built from the original Xbox
+version with [xboxrecomp](https://github.com/sp00nznet/xboxrecomp). The Xbox
+executable is translated into C and compiled ahead of time. The game's own
+gameplay, menus and cutscenes run on an Xbox compatibility runtime, drawn through
+Direct3D 11 on Windows and Vulkan on macOS, with sound and controllers supplied
+by the host.
 
-**The Windows build is playable and FUN.** Menus, Story routes and fights render
-and run. The maintainer's October 4, 2026 playtest reported smooth frames, much
-better audio, and no additional graphical glitches discovered over one hour
-of Story Mode playtime. This is an early release, with more PC features and
-platform work still ahead.
+**The Windows build is playable.** Menus, Story mode and fights run at 60 fps
+with sound. It is still an early release: see [known issues](docs/known-issues.md).
 
-You need your **own supported Xbox game dump** and must build the game locally.
-The public source package contains maintained port code, tooling and documentation.
-Game assets, disc images, generated game source and the compiled game executable
-are not distributed.
+You need your **own Xbox game dump**, and the game is built on your machine.
+This repository holds the port's code, tools and documentation. It contains no
+game assets, disc images, translated game code or game executable.
 
-[Build and play](docs/build-and-play.md) · [Documentation](docs/README.md) ·
+[Install and build](docs/build-and-play.md) · [Documentation](docs/README.md) ·
 [Known issues](docs/known-issues.md) · [Contributing](CONTRIBUTING.md) ·
 [Releases](https://github.com/vyanhursky/DefJamFFNY-recomp/releases)
 
@@ -34,51 +30,52 @@ are not distributed.
 
 Gameplay captured by the maintainer. The GIF is a short, silent preview.
 
-## Current status
+## Status
 
 | Area | Status |
 |---|---|
 | Windows x64 | Playable; tested on Windows 11 |
-| Menus and fights | Navigation, match setup, controllable fights and returning to menus verified |
-| Story | Intro/cutscenes, character creator, saved-profile crib and gym routes verified |
-| Graphics | GPU vertex programs and Direct3D 11 rendering; 2× render scale available |
-| HD textures (v0.6.0 candidate) | Optional Windows Lanczos 4× texture packs, generated locally from your own dump; see [HD textures](docs/hd-textures.md) |
-| Audio | Music, speech and effects; owner listening test accepted |
-| Launcher and overlay | A start-up window and an in-game overlay (F1) for display, controller and key settings, usable with mouse, keyboard or pad; see [Launcher and overlay](docs/launcher-and-overlay.md) |
-| Input | Gamepads (Xbox, DualSense, Switch Pro and most others), keyboard and mouse as a player of their own, rumble and remapping; see [Controllers, keyboard and mouse](docs/10-input.md) |
-| Saves | Local profiles, with compatibility for earlier project builds |
-| Steam Deck / Proton | Planned after PC features; not yet validated |
-| macOS (Apple Silicon) | Playable natively through Vulkan since v0.5.0, without the launcher and overlay; see [Build on macOS and Linux](docs/build-macos-linux.md) |
-| Native Linux | The runtime and its fixtures build in CI; the game is not yet built or run there |
+| macOS (Apple Silicon) | Playable through Vulkan since v0.5.0, without the launcher, overlay or HD textures; see [Build on macOS and Linux](docs/build-macos-linux.md) |
+| Linux | The runtime and its test fixtures build in CI; the game is not yet built or run there |
+| Steam Deck / Proton | Planned; not yet tested |
+| Menus and fights | Menus, match setup, fights and the return to the menus work |
+| Story | Intro and cutscenes, character creator, crib and gym work; a full playthrough has not been verified |
+| Graphics | Direct3D 11 at up to 4× the console resolution; 4:3 picture (true 16:9 is planned) |
+| HD textures | Optional 4× texture packs on Windows, generated locally from your own dump; see [HD textures](docs/hd-textures.md) |
+| Audio | Music, speech and effects |
+| Input | Gamepads (Xbox, DualSense, Switch Pro and most others), keyboard and mouse, rumble and remapping; see [Controllers, keyboard and mouse](docs/10-input.md) |
+| Launcher and overlay | A start-up window and an in-game settings overlay (F1) on Windows; see [Launcher and overlay](docs/launcher-and-overlay.md) |
+| Saves | Local profiles in your data folder |
 
-The latest rebase passed the full nine-check game regression on Debug and Release,
-a 20-boot Debug soak, and five additional capture routes. These tests do not cover
-every mode or a full Story playthrough. See [validation evidence](docs/research/toolkit-rebase-acceptance.md)
-and [known issues](docs/known-issues.md).
+## Install
 
-## Getting started
+Only the **USA Xbox version** matching the [dump manifest](config/dump-manifest.json)
+is supported. PS2 and GameCube copies cannot be used.
 
-Windows source releases can include a **game-free setup installer** that builds
-your own dump locally. See [Windows setup](docs/setup-installer.md) for the wizard,
-custom install/data folders, optional desktop shortcut and HD texture generation, silent mode and launch
-instructions. macOS/Linux installers remain to-dos.
+### Windows: setup installer
 
-On macOS (Apple Silicon) or Linux, follow
-[Build on macOS and Linux](docs/build-macos-linux.md) instead of the rest of this section;
-it lists what works there and what does not yet.
+Download `DefJamSetup-<version>-windows-x64.exe` from the
+[latest release](https://github.com/vyanhursky/DefJamFFNY-recomp/releases/latest).
+The installer contains no game. It takes your disc image or extracted dump,
+checks it, then translates and compiles the game on your machine. It bundles
+Python and the pinned build sources and can install Microsoft's C++ Build Tools
+if they are missing. The installer is unsigned, so Windows may warn about it.
 
-For a manual Windows x64 build, you need Git, Python, Visual Studio C++ Build Tools, a Direct3D 11
-GPU and a gamepad or a keyboard. Only the **USA Xbox version** matching the
-[dump manifest](config/dump-manifest.json) is supported. PS2 and GameCube copies
-cannot be used as build inputs.
+See [Windows setup](docs/setup-installer.md) for folders, shortcuts, HD texture
+generation, silent mode, repair and removal.
+
+### Windows: build from source
+
+You need Git, Python 3.12 or newer, Visual Studio Build Tools with the C++
+workload, and a Direct3D 11 GPU.
 
 ```powershell
 git clone --recursive https://github.com/vyanhursky/DefJamFFNY-recomp.git
 cd DefJamFFNY-recomp
 ```
 
-Follow the [build-and-play guide](docs/build-and-play.md) to choose a data folder,
-extract and verify your disc, then analyze, recompile and build:
+Follow [Build and play](docs/build-and-play.md) to choose a data folder and
+extract and verify your disc. Then:
 
 ```powershell
 .\scripts\analyze.ps1
@@ -87,47 +84,98 @@ extract and verify your disc, then analyze, recompile and build:
 .\scripts\run.ps1 -Preset win-x64-release
 ```
 
-The first build produces the game executable on your machine. The Release preset
-is optimized `RelWithDebInfo`: symbols are retained for crash diagnosis.
-The executable enables graphics, display timing and input support automatically. It opens a
-launcher window first (settings and a Play button; it can be skipped) and the settings are also
-available in the game with F1: see [Launcher and overlay](docs/launcher-and-overlay.md).
+Use a recursive clone: GitHub's source ZIP leaves out the toolkit submodule.
 
-GitHub's source ZIP omits the toolkit submodule. Use a recursive Git clone for
-manual source builds; release notes give the command for the exact version.
-The Windows setup includes its pinned toolkit and compiles the game on your machine.
+### macOS and Linux
 
-## What comes next
+Follow [Build on macOS and Linux](docs/build-macos-linux.md). It lists what
+works there and what does not yet.
 
-PC features are in progress, one release at a time: display settings, a settings file,
-gamepads and keyboard play, a launcher and an in-game settings overlay are in;
-the v0.6.0 candidate adds HD texture packs. True 16:9 remains planned. A native macOS build arrived in v0.5.0. Steam Deck and a native
-Linux game build follow; deeper gameplay decompilation remains a stretch goal. See the
-[roadmap](docs/01-plan-review.md#corrected-roadmap-milestones-with-exit-criteria)
-and [development status](PROGRESS.md).
+## Playing
+
+The game opens a launcher window with display, controller and key settings and
+a Play button. The same settings are available in the game with F1, and in
+`settings.ini` in your data folder.
+
+- [Launcher and overlay](docs/launcher-and-overlay.md)
+- [Controllers, keyboard and mouse](docs/10-input.md)
+- [settings.ini and keybinds](docs/settings-reference.md)
+- [HD textures](docs/hd-textures.md)
+
+## Testing
+
+Tests that need no game data, which is also what GitHub CI runs:
+
+```powershell
+python -m pip install pytest pyxbe capstone Pillow numpy
+python -m pytest -q tests/unit
+python scripts/check-source-tree.py
+```
+
+Tests that play the game need a local build made from your own dump:
+
+| Command | Time | Covers |
+|---|---|---|
+| `python scripts/regress.py --quick` | about 10 minutes | unit tests, three reference frames and one fight |
+| `python scripts/regress.py` | about an hour | adds four-fighter and two-pad matches, combat results, a replay check, Story routes and a boot soak |
+
+Do not run two game tests at once: they share the save area and the window.
+The [gameplay test harness](docs/09-testing-harness.md) guide explains each
+check and its report, and [CONTRIBUTING.md](CONTRIBUTING.md#testing) says which
+tests a change needs.
 
 ## Reporting problems
 
-Open an [issue](https://github.com/vyanhursky/DefJamFFNY-recomp/issues) with your
-version/commit, operating system and version, CPU/GPU, controller, reproduction steps and
-expected versus observed behavior. Relevant lines from `logs/run-*.log.err`
-help identify a failure; review personal paths before sharing. Do not attach
-game data, generated source, saves or memory dumps.
+Open an [issue](https://github.com/vyanhursky/DefJamFFNY-recomp/issues/new/choose)
+and pick the form that fits. Check [known issues](docs/known-issues.md) first.
+A useful report has:
+
+- the release version or commit, and whether you used the installer or a source build;
+- your operating system, CPU, GPU and controller;
+- the steps that lead to the problem, and what you expected instead;
+- the relevant lines of the log (`logs/run-*.log.err` for a source build, or the
+  installer log under `%LOCALAPPDATA%\DefJamSetup\logs`). Remove personal paths first.
+
+Never attach game data: no disc images, game files, translated game code, saves,
+memory dumps or audio recordings. A screenshot of the problem is fine.
+
+## Contributing
+
+Bug fixes, platform work and documentation are welcome. [CONTRIBUTING.md](CONTRIBUTING.md)
+covers the development setup, where each kind of change belongs, the tests to
+run and what a pull request needs. Changes to the generic runtime or translator
+go to the [toolkit fork](https://github.com/vyanhursky/xboxrecomp), and from
+there upstream where they help other games.
+
+## Roadmap
+
+Released so far: display settings and a settings file, gamepad and keyboard
+input, the launcher and overlay, a native macOS build, the Windows installer and
+optional HD textures. Still planned:
+
+- true 16:9 widescreen in fights;
+- the launcher, overlay and HD textures on macOS;
+- Steam Deck through Proton, then a native Linux game build;
+- deeper gameplay decompilation, as a stretch goal.
+
+See the [roadmap](docs/01-plan-review.md#corrected-roadmap-milestones-with-exit-criteria),
+the [PC features plan](docs/07-m6-plan.md) and the [improvement backlog](docs/04-improvement-backlog.md).
+The [release notes](docs/releases) record what each version changed.
 
 ## Credits and licensing
 
 Maintained by **vyanhursky**, with development assistance from Claude Code
-and Codex. The port builds on **sp00nz's xboxrecomp** and work from the Xbox
+and Codex. The port builds on **sp00nz's xboxrecomp** and on work from the Xbox
 emulation community. xemu provides hardware references and attributed components
 in the toolkit. [Burnout 3](https://github.com/sp00nznet/burnout3) and
 [Mercenaries Recompiled](https://github.com/KraftMacAndChee/Mercenaries-Recompiled)
-are related projects that helped shape the public documentation.
+are related projects that helped shape the documentation.
 
-This repository's maintained code is [MIT licensed](LICENSE). Toolkit components
-retain their own licenses, including LGPL-2.1-or-later components; see its
-[NOTICE](https://github.com/vyanhursky/xboxrecomp/blob/c7059bf26856660e669c7991559a649fd508a17a/NOTICE)
-and [license texts](https://github.com/vyanhursky/xboxrecomp/tree/c7059bf26856660e669c7991559a649fd508a17a/LICENSES).
-The license does not grant rights to the game or its assets.
+This repository's code is [MIT licensed](LICENSE). Toolkit components keep their
+own licenses, including LGPL-2.1-or-later components; see the toolkit's
+[NOTICE](https://github.com/vyanhursky/xboxrecomp/blob/4bff2573127c5499ad795d58ddd90159240520bd/NOTICE)
+and [license texts](https://github.com/vyanhursky/xboxrecomp/tree/4bff2573127c5499ad795d58ddd90159240520bd/LICENSES).
+The license grants no rights to the game or its assets.
 
-This is an unofficial fan project, unaffiliated with Electronic Arts, AKI or
+This is an unofficial fan project, not affiliated with Electronic Arts, AKI or
 Def Jam. Def Jam: Fight for NY and its assets belong to their respective owners.

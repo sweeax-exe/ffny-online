@@ -1,0 +1,72 @@
+name: Bug report
+description: Something goes wrong in the game (crash, hang, wrong picture or sound, input, saves)
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Check the [known issues](https://github.com/vyanhursky/DefJamFFNY-recomp/blob/main/docs/known-issues.md) first.
+        **Never attach game data:** no disc images, game files, translated game code, saves, memory dumps or audio recordings.
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The release version (shown under About on the settings screen) or the commit you built.
+      placeholder: v0.6.0
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: How was the game built?
+      options:
+        - Windows setup installer
+        - Windows source build
+        - macOS source build
+        - Linux source build
+    validations:
+      required: true
+  - type: input
+    id: system
+    attributes:
+      label: System
+      description: Operating system and version, CPU and GPU.
+      placeholder: Windows 11 24H2, Ryzen 5 5600, RTX 3060
+    validations:
+      required: true
+  - type: input
+    id: controller
+    attributes:
+      label: Controller
+      description: Gamepad model, or keyboard.
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: The mode, venue, fighters and what you pressed, as exactly as you can.
+      placeholder: |
+        1. Start a One on One at the Terrordome
+        2. ...
+    validations:
+      required: true
+  - type: textarea
+    id: result
+    attributes:
+      label: What happened, and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: Log lines
+      description: >
+        The relevant lines of `logs/run-*.log.err` (source build), especially any
+        `[CRASH]` or `[WATCHDOG]` block. Remove personal paths first.
+      render: text
+  - type: checkboxes
+    id: hygiene
+    attributes:
+      label: No game data
+      options:
+        - label: This report contains no game files, saves, memory dumps or translated game code.
+          required: true

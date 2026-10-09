@@ -13,11 +13,9 @@ Lanczos uses separate RGB/alpha,8source-pixel clamp padding, transparent colour
 spread for UI/HUD/loading logos, nearest alpha for effects and Lanczos alpha
 otherwise. Whole-atlas proportions are preserved. Actual wrap axes, alpha/mask
 semantics, mips and in-game seams require material-specific review. See
-`research/hd-full-lanczos-corpus.md` and `research/hd-full-corpus-categories.md`.
+[the full-corpus report](research/hd-full-lanczos-corpus.md).
 
-The currently implemented tools live in the active feature lane
-`C:/Users/Vlad/code/defjam-hd-textures/scripts`; source integration is a later
-step. This guide is also copied into the integration repo for handover. No
+The tools live in `scripts/`. No
 generated artwork, HTML corpus output, checkpoints, original archive bytes or
 captures belong in source control.
 
@@ -33,8 +31,8 @@ captures belong in source control.
 
 ## Existing local data and galleries
 
-Data root: `C:/Users/Vlad/code/defjam-hd-data` (own extracted dump junction, separate
-save/build/tool environments). Preserve this root while the feature is in use.
+`<hd-data>` below is a data folder of your own choosing (its own link to the extracted
+dump, separate save/build/tool environments). Preserve it while the feature is in use.
 
 | Data path below root | Use |
 |---|---|
@@ -58,7 +56,7 @@ needed. It must be running for autosaved flags and RGB/alpha channel routes.
 Run from the HD lane. Reopening requires only existing corpus+Pillow; no rebuild:
 
 ```powershell
-$hdData = 'C:\Users\Vlad\code\defjam-hd-data'
+$hdData = 'D:\Games\DefJam\HdData'   # your own folder
 $hdPython = "$hdData\tools\swinir-python\Scripts\python.exe"
 & $hdPython scripts/hd_corpus.py serve --output "$hdData/hd-work/full-lanczos" --port 8767
 ```
@@ -119,10 +117,9 @@ Verification scratch runners live at `hd-work/verify-full-corpus.py` and
 untouched review and refuses to overwrite an existing owner flag. These are local
 QA helpers, not release requirements for users.
 
-Further reports: `research/hd-representative-review.md`,
-`hd-detail-preservation-assessment.md`, `hd-lanczos-game-pilot.md`,
-`hd-swinir-classical-research.md`, `hd-swinir-audition.md` and
-`hd-texture-release-packaging.md`. Retain full-pack runtime mapping/material/
+Further reports: [representative review](research/hd-representative-review.md),
+[in-game Lanczos pilot](research/hd-lanczos-game-pilot.md) and
+[release packaging](research/hd-texture-release-packaging.md). Retain full-pack runtime mapping/material/
 performance and public-port gates. Fonts, HDvideo and widescreen are follow-ups.
 
 

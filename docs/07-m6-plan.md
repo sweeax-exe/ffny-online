@@ -23,7 +23,7 @@ the next slice does not start until he has tested the previous one.
 | v0.2.1 | Bug fix (**released 2026-10-05**) | Terrordome crash: seven stubbed function exits translated as code |
 | v0.3.0 | Input | SDL3 gamepad input (DualSense, Switch Pro, DirectInput pads); keyboard gameplay with rebindable keys; pad remapping and deadzones; rumble to the host pad; 2-4 pad local multiplayer checked in a real match |
 | v0.4.0 | Overlay and launcher | Pad-friendly in-game overlay; pre-boot launcher; mouse in both; live apply |
-| v0.6.0 (release preparation authorized) | HD texture packs | Lossless content IDs, PNG/classic DDS packs, launcher/overlay controls, faithful Lanczos4x tooling and optional local Setup generation |
+| v0.6.0 | HD texture packs (**released 2026-10-09**) | Lossless content IDs, PNG/classic DDS packs, launcher/overlay controls, faithful Lanczos4x tooling and optional local Setup generation |
 | Unscheduled | True 16:9 widescreen (**ToDo; D84**) | Wider 3D view in fights with the HUD placed correctly; menus and FMV stay 4:3 unless cheap |
 
 Deferred out of M6 (not selected): music replacement, frame rates above 60. Exclusive full screen is
@@ -53,7 +53,7 @@ at 4:3 with the gamma ramp off and an explicit render scale, so they stay compar
 
 ## Texture-pack investigation
 
-The 2026-10-08 [HD texture and local upscaling plan](research/hd-texture-plan.md) records the renderer gaps,
+The 2026-10-08 HD texture and local upscaling plan ([notes](research/hd-textures-notes.md)) records the renderer gaps,
 asset categories, local GPU workflow, pilot and proposed expanded acceptance gates. Vlad chose faithful cleanup
 and static assets first, with video extraction/workflow planning now and HD video playback later (D83).
 On 2026-10-08 Vlad moved HD before widescreen (D84). A subsequent public-state refresh found native

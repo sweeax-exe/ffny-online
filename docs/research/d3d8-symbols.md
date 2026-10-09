@@ -6,7 +6,7 @@ XAPILIB/XGRAPHC/D3D8/D3DX8/XBOXKRNL/DSOUND/LIBCMT all at **1.0.5849** (XDK build
 databases do not cover the XDK (verified separately: 0/9,370 functions named).
 
 All commands below were actually run against a scratch checkout in
-`C:\Users\Vlad\code\defjam\scratch` (not inside this repo) to verify claims rather than trust
+`<data>\scratch` (not inside this repo) to verify claims rather than trust
 webpage summaries. File/line citations point at the pinned commit used for that verification.
 
 ---

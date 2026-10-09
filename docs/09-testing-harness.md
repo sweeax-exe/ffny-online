@@ -2,8 +2,7 @@
 
 How to run the scripted gameplay checks and read what they prove. The roadmap
 behind this is [08-testing-roadmap.md](08-testing-roadmap.md); what is still
-missing is listed at the end and in the
-[handover](research/testing-harness-handover.md).
+missing is listed at the end.
 
 Everything here needs a local build made from your own dump. Hosted CI has no
 game data and runs only the unit tests. Captures, audio and reports are the

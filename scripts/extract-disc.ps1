@@ -1,11 +1,11 @@
 <#
 .SYNOPSIS  Turn a user-owned disc image (.iso / .xiso.iso, optionally inside a .7z) into a plain game directory.
-.EXAMPLE   .\scripts\extract-disc.ps1 -Image "D:\dumps\Def Jam - Fight for NY (USA).xiso.iso" -DataDir C:\Users\Vlad\code\defjam
+.EXAMPLE   .\scripts\extract-disc.ps1 -Image "D:\dumps\Def Jam - Fight for NY (USA).xiso.iso" -DataDir D:\Games\DefJam\Data
 .NOTES     extract-xiso auto-detects Redump (full disc) and XISO (game partition) layouts. Output is never put in the repo.
 #>
 param(
     [Parameter(Mandatory)] [string]$Image,
-    [string]$DataDir = $(if ($env:DEFJAM_DATA) { $env:DEFJAM_DATA } else { "C:\Users\Vlad\code\defjam" }),
+    [string]$DataDir = $(if ($env:DEFJAM_DATA) { $env:DEFJAM_DATA } else { $(Join-Path (Split-Path (Split-Path $PSScriptRoot -Parent) -Parent) "defjam") }),
     [string]$SevenZip = "C:\Program Files\7-Zip\7z.exe"
 )
 $ErrorActionPreference = "Stop"

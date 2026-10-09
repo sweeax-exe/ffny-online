@@ -33,7 +33,7 @@ other images use Lanczos alpha. PNG compression3 is lossless. Atlases retain
 their full relative layout and aspect ratio. All edges currently clamp; actual
 material wrap axes, masks, blend modes and atlas gutters still need game review.
 
-The fresh census is `C:/Users/Vlad/code/defjam-hd-data/hd-work/full-lanczos-census/inventory.json`.
+The fresh census is `<hd-data>/hd-work/full-lanczos-census/inventory.json`.
 The earlier `hd-work/inventory.json` used an older four-field identity descriptor;
 the current five-field descriptor includes row stride. Do not use those legacy
 IDs as current runtime keys. The full batch verifies canonical source identities
@@ -50,7 +50,7 @@ file hashes. Recipe stores census/decoder/runner hashes and Pillow version.
 ## Gallery and local flags
 
 Open http://127.0.0.1:8767/ . ServerPID49036, bound only to127.0.0.1; output root
-`C:/Users/Vlad/code/defjam-hd-data/hd-work/full-lanczos`. Search name, archive alias
+`<hd-data>/hd-work/full-lanczos`. Search name, archive alias
 or texture ID; filter category/review status; browse48 lazy thumbnails per page.
 Open an asset for original versus Lanczos4x, shared pan/zoom, checker/black/white,
 RGBA/trueRGB/alpha views and original/full PNG links. Category counts may overlap

@@ -1,7 +1,7 @@
 # M4a — feloader's screen-transition system: easeInOut, the pan/swap/door functions, and what drives them per frame
 
 Produced offline with `scripts/apt-dump.py screens/screens.viv screens/feloader.big --actions`
-against the user's own dump (`DEFJAM_DATA=C:\Users\Vlad\code\defjam`). All addresses below are
+against the user's own dump (`DEFJAM_DATA=<data>`). All addresses below are
 absolute byte offsets into `feloader.apt`'s own stream — the same numbers the tool prints — inside
 the movie's first Action block (`Action @0xB154`, main-timeline frame 0). No game bytes are quoted;
 everything below is opcode mnemonics, resolved constant-pool strings, and my own paraphrase.
