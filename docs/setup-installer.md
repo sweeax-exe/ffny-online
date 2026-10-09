@@ -34,7 +34,7 @@ After setup, select **Play**, use the shortcut, or double-click
 selectable field. It supplies the correct data location and working directory.
 There is no automatic game launch.
 
-## Optional HD textures (feature lane; not in published v0.5.1)
+## Optional HD textures (v0.6.0)
 
 **Apply HD texture upscale during install (increases install time)** is unchecked
 by default. It generates Lanczos4x from your verified dump locally after the game
@@ -49,9 +49,10 @@ settings survive updates. To return to originals, disable packs on the launcher'
 Textures page and restart. Old recipe caches/pack versions remain in the data
 folder; uninstallation preserves them with the rest of the player's data.
 
-This local feature has passed generation/UI/unit tests, but full-game coverage,
-material behavior/performance and final packaged installer validation remain
-release gates. See [HD setup integration](research/hd-setup-integration.md).
+The packaged v0.6.0 installer was run end to end with this option from a real dump,
+and the installed game loaded the generated packs; see
+[release validation](research/hd-v060-release-validation.md) for what was and was
+not exercised. See also [HD setup integration](research/hd-setup-integration.md).
 
 ## Silent mode
 

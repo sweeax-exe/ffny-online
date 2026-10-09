@@ -58,7 +58,23 @@ published before the parent pin. Source tag, version, notes, main ancestry and
 hygiene are re-checked by `scripts/check-release.py`; hosted CI and the Setup asset
 inventory run on the tag before the release draft is created.
 
-Not recorded in this lane: logs of the packaged Setup run through the selected,
-unselected, update, repair and cancel scenarios, and a cold/warm full-pack
-performance sweep. The owner reported testing complete on 2026-10-09; hosted CI
-on the pull request and the tag provide the clean-checkout evidence.
+## Packaged installer run (2026-10-09)
+
+The production `DefJamSetup-0.6.0-windows-x64.exe` (built by `scripts/build-setup.ps1`
+from commit `30b0a88`, asset check passed) was run silently with `--hd-textures` into
+fresh install and data folders, from the owner's own dump: exit 0 in 9 min 33 s.
+Stages: analysis (17,882 ABI entries), lift (17,891 of 17,896 functions, 0 failed,
+20 C files), Release build, HD generation (18,971 images, 238.3 s), verified assembly
+into two packs (14,054 and 4,917 images, 5.9 GB), activation, receipt.
+`settings.ini` ended with `[textures] enabled=1` and both packs named.
+The installed `defjam_recomp.exe`, started with `--no-launcher` against that data
+folder, loaded the manifest (18,984 entries) and replaced textures at run time
+(multi-mip loads of 10 to 12 levels) with no `[TEXPACK]` errors, for 120 s until
+stopped. Logs: `logs/hd-v060-installer-run-setup.log`, `logs/hd-v060-installer-run-game.err`.
+
+Hosted CI on pull request 5: 23 of 23 checks passed (Windows runtime and fixtures,
+Setup build, macOS and Linux runtime).
+
+Not run: the update, repair and cancel Setup scenarios against a real dump (these
+have unit coverage), the unchecked-HD packaged run, and a cold/warm full-pack
+performance sweep.
