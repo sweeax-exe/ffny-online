@@ -134,6 +134,11 @@ their installers as to-dos and retains the manual source instructions.
 
 ## Remaining acceptance gates
 
+Owner release decision, 2026-10-08: explicitly authorized merging PR #4 and
+publishing v0.5.1 after the documented installer trials and remaining limits.
+The initial release is unsigned; uncompleted checks below remain validation
+follow-ups and are not presented as completed release certification.
+
 - Clean Windows 11 VM with no compiler/Git/Python, VS 2022 provisioning and restart
   behavior, independent real ISO/XISO, Unicode paths, physical-machine wizard and
   gameplay acceptance, peak disk use/timings, code signing/SmartScreen decision.

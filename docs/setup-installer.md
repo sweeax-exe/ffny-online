@@ -87,7 +87,7 @@ CI checks synthetic failures/recovery, embedded Python imports, the setup build
 and a packaged silent invalid-input run. Tagged releases attach exactly the setup,
 checksum and provenance to a draft. Source hygiene still bans tracked binaries.
 
-Unsigned prototypes are for local validation. Code signing/SmartScreen treatment
-must be decided before public distribution. Clean Windows 11 VM setup with no
+The initial setup release is unsigned; Windows may display a SmartScreen prompt.
+Clean Windows 11 VM setup with no
 tools, VS 2022, independent ISO/XISO input, Unicode paths and physical-machine
-gameplay acceptance are still required gates; CI is not a substitute.
+gameplay acceptance remain to be validated; CI is not a substitute.

@@ -18,10 +18,12 @@ release validator requires tag/version/notes agreement, an exact tag checkout,
 clean source, and main ancestry. An official tag on the current unmerged feature
 tip would fail that policy. No local or remote release tag has been created.
 
-Resolve the documented binary acceptance gates before distributing setup publicly:
+The owner approved merging and publishing the initial setup release on 2026-10-08.
+Publish with the documented validation limits, without representing them as completed:
 clean Windows 11 provisioning, VS 2022/restart behavior, physical-machine wizard/
 gameplay, Unicode paths, changed-toolkit updates, and signing/SmartScreen treatment.
-See `release-setup-notes.md` for evidence and remaining limits.
+See `release-setup-notes.md` for evidence and remaining limits. This approval
+permits the initial unsigned release; it does not certify missing platform tests.
 
 ## Tag and draft release after acceptance
 
