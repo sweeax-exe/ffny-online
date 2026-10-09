@@ -1,8 +1,6 @@
 # src/patches — gameplay patches (opt-in)
 
-Behavioural changes to the game, each behind a runtime toggle so the vanilla path stays testable:
-- `framerate.c` — delta-time / 60 FPS unlock (M6),
-- `display.c` — resolution and aspect handling for 16:9 and Steam Deck 16:10 (M5),
-- `input.c` — 4-pad mapping, Steam Input quirks.
-
-Do not add anything here before M4 (a playable match) is reached; bring-up fixes belong in `src/hooks` or `src/recomp_manual.c`.
+Reserved for behavioral changes to the game itself, such as a widescreen view.
+Each goes behind a runtime setting so the unmodified path stays testable. CMake
+picks up every `.c` file here. There are none yet: fixes that make the game run
+belong in `src/hooks` or `src/recomp_manual.c`.

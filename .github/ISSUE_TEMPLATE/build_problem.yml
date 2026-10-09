@@ -1,0 +1,69 @@
+name: Build or setup problem
+description: The installer or a source build fails before the game runs
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Only the USA Xbox version that matches the dump manifest is supported.
+        **Never attach game data:** no disc images, game files or translated game code.
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The installer's version, or the commit you cloned.
+      placeholder: v0.6.0
+    validations:
+      required: true
+  - type: dropdown
+    id: route
+    attributes:
+      label: Which route?
+      options:
+        - Windows setup installer
+        - Windows source build
+        - macOS source build
+        - Linux source build
+    validations:
+      required: true
+  - type: input
+    id: system
+    attributes:
+      label: System
+      description: Operating system and version; for a source build, the compiler and Python versions.
+      placeholder: Windows 11 24H2, VS 2022 Build Tools 17.12, Python 3.13
+    validations:
+      required: true
+  - type: dropdown
+    id: step
+    attributes:
+      label: Which step failed?
+      options:
+        - Installing prerequisites
+        - Extracting or verifying the dump
+        - Analysis (analyze)
+        - Translation (recomp)
+        - Compiling (build)
+        - HD texture generation
+        - Starting the game
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Error output
+      description: >
+        The failing command and its output, or the end of the installer log from
+        `%LOCALAPPDATA%\DefJamSetup\logs`. Remove personal paths first.
+      render: text
+    validations:
+      required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: The dump verifies against the manifest (`python scripts/verify-dump.py <extracted folder>`, or the installer accepted it).
+        - label: For a source build, the repository was cloned with `--recursive`.
+        - label: This report contains no game files or translated game code.
+          required: true

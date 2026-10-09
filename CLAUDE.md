@@ -25,7 +25,8 @@ in the same commit: `tests/unit/test_agent_instructions.py` fails if they differ
 - **§7 Hand-off**: exact next steps with addresses, env vars and file names. Rewrite it at the end of every session so the next agent can start in five minutes. The block it replaces goes to the top of `docs/worklog/<YYYY-MM>-handoffs.md`; do not stack superseded blocks in §7.
 
 `PROGRESS.md` is read at the start of every session, so it has to stay short (about 300 lines). The archive
-under `docs/worklog/` is for searching, not for reading end to end.
+under `docs/worklog/` is for searching, not for reading end to end. It is a development record and is
+not part of the published tree; `worklog-add.py` creates the folder when it is missing.
 
 ## 2. Layout (short)
 
@@ -43,11 +44,11 @@ config/seed_functions.json          runtime-discovered function addresses fed ba
 scripts/                            env, extract-disc, verify-dump, analyze, recomp, build, run, seed-from-log;
                                     harness (scripted runs), regress (the regression run), pipeline-state, worklog-add
 tests/unit (pytest) · tests/smoke/boot-smoke.ps1 · tests/golden
-docs/research/                      sub-agent reports; add one per investigation
+docs/research/                      investigation reports; the published set is indexed in its README
 logs/                               run logs, gitignored; keep milestone/iteration copies as logs/iterN-*.log
 game/                               junction to the extracted dump, gitignored
 ```
-Game data lives outside the repo at `C:\Users\Vlad\code\defjam` (`$env:DEFJAM_DATA`): `xiso/`, `extracted/`,
+Game data lives outside the repo at `<data>` (`$env:DEFJAM_DATA`): `xiso/`, `extracted/`,
 `analysis/`, `save/`, `tools/{extract-xiso,ghidra}`.
 
 ## 3. Non-negotiable hygiene (the repo will be public)
@@ -55,7 +56,7 @@ Game data lives outside the repo at `C:\Users\Vlad\code\defjam` (`$env:DEFJAM_DA
 - Never mention the site the dump came from, anywhere. Refer to "the user's own dump".
 - Never distribute built game executables (they embed lifted EA code). Ship tools, patches, docs.
 - Release setup exception: only the standalone game-free `DefJamSetup-<version>-windows-x64.exe`, its SHA-256 and provenance may be attached by the tagged release workflow after `check-setup-assets.py` passes. Setup compiles the player's dump locally. No binary is tracked in source; no game executable, generated guest code or game data enters the setup payload. macOS/Linux setup artifacts remain to-dos.
-- D58 (2026-10-04): Vlad explicitly approved the two README visuals in `docs/media/`. Only their exact paths and SHA-256 fingerprints in `scripts/check-source-tree.py` are permitted; no general capture/asset exception. The project license does not cover game artwork.
+- D58 (2026-10-04): Vlad explicitly approved the two README visuals in `docs/media/`. Only their exact paths and SHA-256 fingerprints in `scripts/check-source-tree.py` are permitted; no general capture/asset exception. The project license does not cover game artwork. On 2026-10-09 he asked for two screenshots of the port's own interface (the setup wizard and the launcher, no game artwork); they are fingerprinted the same way.
 - Hashes are fine, bytes are not. `config/dump-manifest.json` is the pattern.
 
 ## 4. The working loop (how every bring-up iteration goes)
@@ -64,7 +65,7 @@ Game data lives outside the repo at `C:\Users\Vlad\code\defjam` (`$env:DEFJAM_DA
    **The "guest stack" in both blocks is a scan, not a walk.** It lists every stack word that looks like a code address, including stale ones from calls that already returned, so it suggests callers that were never on the path. Use `scripts/guest-stack.py` instead: it filters the same scan against the complete set of return addresses the lifter emitted, so every line is a real call site and says which function it is in and what it was calling. To locate a hang, use `scripts/sample-threads.py`, which reads each thread's actual instruction pointer, then `scripts/guest-stack.py` for the chain above it. `scripts/icall-window.py` reads the last indirect-call targets out of the running process, which is the only cheap view of game-level activity: direct calls compile away into ordinary C calls and are invisible.
 3. Pick the fix in this order of preference:
    - missing function → `.\scripts\seed-from-log.ps1` then `analyze.ps1` → `recomp.ps1` → `build.ps1`;
-   - runtime gap (kernel/D3D/NV2A) → make one logical source commit on our xboxrecomp fork branch, run its focused fixtures plus the game regression, then publish to the fork and update the parent gitlink to that published commit. Keep the submodule clean; `patches/xboxrecomp/` is historical and must not be replayed. Every upstream PR needs Vlad's separate approval;
+   - runtime gap (kernel/D3D/NV2A) → make one logical source commit on our xboxrecomp fork branch, run its focused fixtures plus the game regression, then publish to the fork and update the parent gitlink to that published commit. Keep the submodule clean; the old numbered patches are retired and no longer in the tree. Every upstream PR needs Vlad's separate approval;
    - lifter bug → hand-write the function as `void sub_XXXXXXXX(void)` in `src/recomp_manual.c`. The lifter reads that file (`--exclude-manual`) and stops generating the body, so yours links in its place for direct callers too. Adding `extern void sub_XXXXXXXX_gen(void);` emits the real body under that name so yours can bracket it, but **it also rewrites every direct call site to call `sub_XXXXXXXX_gen`**, so a direct caller never reaches your wrapper. It only intercepts calls arriving through `recomp_lookup_manual()`, which sees indirect calls only. To trace or hold a function with direct callers, define `void sub_XXXXXXXX_enter(void)` in the same file: since patch 0095 the generated function calls it first, from every caller, and keeps its own generated body (re-lift after adding one; `sub_0021EB90_enter` is the example). Or replace it outright, or watch something it writes with `RECOMP_WATCH_WRITE` (`src/hooks/watchpoint.c`) and read the chain with `scripts/guest-stack.py`. `#if 0` regions are ignored, so a retired override can stay as documentation. `recomp_lookup_manual()` only sees indirect calls and will not replace a function with direct callers. A hardware poke we do not need gets stubbed in `src/hooks/`.
 4. Rebuild, re-run, then `python scripts/regress.py --quick` (unit tests, the three golden frames, a fight); the full
    `python scripts/regress.py` (adds the Story routes and a boot soak, about 20 minutes) before a commit that touches
@@ -72,7 +73,7 @@ Game data lives outside the repo at `C:\Users\Vlad\code\defjam` (`$env:DEFJAM_DA
    keeps cited logs and clears the rest.
 5. Log the iteration in `PROGRESS.md` §6 with numbers; update §0 if a stage changed; add a `D<n>` if you chose between real alternatives.
 6. Commit: one commit per fix, message `fix(boot): <what> (<symptom>)` or `chore:`/`docs:`/`feat:`. Do not commit lifted code.
-   The working checkout `defjam-recomp` retains private `origin` (`DJFFNY-recomp`); the clean public checkout is `DJFFNY-public-preview` with its own `origin` (`DefJamFFNY-recomp`). Never push private history to the public remote. Then push to `origin main` (the private repo): Vlad gave standing permission on 2026-09-23. Write the
+   The private working checkout and the clean public checkout (`DefJamFFNY-recomp`) each have their own `origin`. Never push private history to the public remote. Then push to `origin main` (the private repo): Vlad gave standing permission on 2026-09-23. Write the
    message to a file and use `git commit -F <file>`; PowerShell 5.1 cannot pipe a here-string, and its
    `Set-Content -Encoding utf8` adds a BOM to the subject.
 7. Toolkit changes live on `vyanhursky/xboxrecomp`, branch `defjam/m6` (D63; started at the accepted
@@ -80,7 +81,7 @@ Game data lives outside the repo at `C:\Users\Vlad\code\defjam` (`$env:DEFJAM_DA
    Use an isolated toolkit worktree, preserve upstream behavior, and commit one logical topic with source-only
    staging and tests. Publish the reviewed commit before committing its gitlink in the parent; a fresh clone
    builds the exact fork commit from `git submodule update --init --recursive`, with no patch replay.
-   Keep `docs/research/toolkit-rebase-ledger.md` as the mapping for the 108 archived patches. Game-specific
+   Keep `docs/research/toolkit-rebase-ledger.md` as the mapping for the 108 retired patches. Game-specific
    fixes belong in `src/`. Never publish game data or built executables. Upstream PRs require separate approval.
 
 Diagnostics env vars are tabled in `docs/03-workflows.md`; full list in `docs/research/toolkit-bringup-notes.md`.

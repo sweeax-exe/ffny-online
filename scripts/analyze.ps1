@@ -3,7 +3,7 @@
 .NOTES     Steps: xbe_parser -> disasm -> func_id -> abi_analysis [-> ghidra_naming if -Ghidra]. Outputs copied to $DataDir\analysis.
 #>
 param(
-    [string]$DataDir = $(if ($env:DEFJAM_DATA) { $env:DEFJAM_DATA } else { "C:\Users\Vlad\code\defjam" }),
+    [string]$DataDir = $(if ($env:DEFJAM_DATA) { $env:DEFJAM_DATA } else { $(Join-Path (Split-Path (Split-Path $PSScriptRoot -Parent) -Parent) "defjam") }),
     [switch]$Ghidra,
     [string]$ToolkitDir = ""
 )

@@ -21,6 +21,9 @@ BLOCKED_ROOTS = {'game', 'assets', 'extracted', 'logs', 'build', 'out', 'save', 
 APPROVED_README_MEDIA = {
     'docs/media/fight-screenshot.png': '9804400a61948f0d562809cf46f3da09a2aa310f4b1b37f98c167b92c8fad434',
     'docs/media/fight-gameplay.gif': '77012147d4fe73227222c988610dba82510df1abad4f2405f1164935920b4277',
+    # 2026-10-09, at the owner's request: the port's own setup wizard and launcher. No game artwork.
+    'docs/media/setup-wizard.png': '14133e1592e34308aceeffa35366cf9ed6515c82346e8e4a7b85d2dd11d74bb1',
+    'docs/media/launcher.png': 'ffb73dfd833f6bbe4b059b57ed0969eaaad74d2b4e5a3aa7070253a44b2a5dc8',
 }
 
 

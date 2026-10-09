@@ -1,17 +1,18 @@
 # Def Jam: Fight for NY — Native PC Port (Recomp) — PROGRESS LOG
 
 > Living document. Newest entries at the bottom of each section. Export this file any time.
-> Repo: `C:\Users\Vlad\code\defjam-recomp`, pushed to the private `vyanhursky/DJFFNY-recomp` (private development history)
+> Development happens in a private working repository; reviewed source is published here.
 > Public source: [vyanhursky/DefJamFFNY-recomp](https://github.com/vyanhursky/DefJamFFNY-recomp)
-> Game data, xemu and the console ROMs, never committed: `C:\Users\Vlad\code\defjam\`
+> Game data and the reference emulator's files are never committed: they live in `<data>`, outside the repository.
+> Work logs under `docs/worklog/` and some research notes named below are development records that are not published.
 
 ## 0. Status at a glance
 
 | Area | State | Notes |
 |---|---|---|
 | Plan reviewed | ✅ | See `docs/01-plan-review.md` |
-| Source dump located | ✅ | Two 7z archives in Downloads: XISO (3.0 GB) and full Redump ISO (7.8 GB) |
-| XISO extracted | ✅ | `C:\Users\Vlad\code\defjam\extracted\` |
+| Source dump located | ✅ | Two images of the owner's disc: XISO (3.0 GB) and full-disc ISO (7.8 GB) |
+| XISO extracted | ✅ | `<data>\extracted\` |
 | `default.xbe` analyzed | ✅ | Fresh fork analysis: 17,876 funcs, 160 kernel imports, XDK 5849 (`docs/research/`, `config/dump-manifest.json`) |
 | Toolkit chosen | ✅ | Published fork `aa1a1b9` atop upstream `1409a7d`, pinned by the parent gitlink (D46, D54, D55). xemu remains the reference (D4) |
 | Repo skeleton | ✅ | Follows the toolkit template layout, see §3 |
@@ -40,7 +41,7 @@
 
 | # | Date | Decision | Rationale |
 |---|---|---|---|
-| D1 | 2026-09-17 | Game data lives OUTSIDE the repo (now `C:\Users\Vlad\code\defjam\`, see D9) | Recomp convention: repo must be shippable without any EA assets. `.gitignore` also blocks `*.iso`, `*.xbe`, `assets/`. |
+| D1 | 2026-09-17 | Game data lives OUTSIDE the repo (now `<data>\`, see D9) | Recomp convention: repo must be shippable without any EA assets. `.gitignore` also blocks `*.iso`, `*.xbe`, `assets/`. |
 | D2 | 2026-09-17 | Use the XISO (game partition only), not the 7.8 GB Redump ISO, as the working source | Identical game partition; extract-xiso reads it directly. Redump ISO kept as archival reference (hashes in §4). |
 | D3 | 2026-09-17 | Try VS 2019 Build Tools (MSVC 14.29, CMake 3.20, Ninja) for the first build; VS 2022 Build Tools being installed per toolkit README | First winget attempt exit 1602 (UAC cancelled), retry needed. |
 | D4 | 2026-09-17 | **Both** xboxrecomp and xemu (reference baseline). If xboxrecomp proves too immature, pause and re-evaluate | Vlad's answer Q1. Toolkit is 6 months old, single maintainer. |
@@ -48,11 +49,11 @@
 | D6 | 2026-09-17 | First milestone = **boot to title screen** (M3) | Vlad's answer Q4. |
 | D7 | 2026-09-17 | Steam Deck = **Windows build under Proton first**; native Linux is M7 stretch | Vlad's answer Q5. Toolkit's Linux/OpenGL backend is far less tested. |
 | D8 | 2026-09-17 | Ghidra 12.1.3 installed for symbol recovery (JDK 21 already present) | Vlad's answer Q6. |
-| D9 | 2026-09-17 | Game data root = `C:\Users\Vlad\code\defjam` (xiso/, extracted/, analysis/, tools/); repo has a gitignored `game/` junction to `extracted/` | Vlad's answer Q7. |
+| D9 | 2026-09-17 | Game data root = `<data>` (xiso/, extracted/, analysis/, tools/); repo has a gitignored `game/` junction to `extracted/` | Vlad's answer Q7. |
 | D10 | 2026-09-17 | Repo license MIT; lifted output is never distributed (derivative of the EA binary) | Public-release hygiene, mirrors N64Recomp/XenonRecomp practice. |
 | D11 | 2026-09-17 | Toolkit fixes are kept as `patches/xboxrecomp/NNNN-*.patch` applied by `scripts/apply-toolkit-patches.ps1`; the submodule pointer stays on upstream | Keeps the public repo reproducible from upstream + patches, and each patch is a ready upstream PR. |
-| D12 | 2026-09-19 | xemu plus Vlad's BIOS, MCPX boot ROM, hard disk image and EEPROM live at `C:\Users\Vlad\code\defjam\tools\xemu`, never in the repo. Reference screenshots use **xemu's own capture** into `C:\Users\Vlad\code\defjam\reference`, never a desktop screenshot | Console ROMs are copyrighted and personal. A full-screen capture also grabs whatever else is open, which is a privacy problem as well as a useless reference; this happened once and the image was deleted. |
-| D13 | 2026-09-19 | Private GitHub repo `vyanhursky/DJFFNY-recomp`, working title, name expected to change | Gets CI running against real pushes well before any public release. |
+| D12 | 2026-09-19 | xemu plus Vlad's BIOS, MCPX boot ROM, hard disk image and EEPROM live at `<data>\tools\xemu`, never in the repo. Reference screenshots use **xemu's own capture** into `<data>\reference`, never a desktop screenshot | Console ROMs are copyrighted and personal. A full-screen capture also grabs whatever else is open, which is a privacy problem as well as a useless reference; this happened once and the image was deleted. |
+| D13 | 2026-09-19 | Private GitHub repository under a working title, name expected to change | Gets CI running against real pushes well before any public release. |
 | D14 | 2026-09-19 | Deferred improvements are tracked in `docs/04-improvement-backlog.md`, to be revisited when M2 and the Direct3D interception experiment close | Keeps the current milestone focused while making sure the structural gaps are not forgotten. |
 | D15 | 2026-09-19 | Frames are verified by capturing the host's own back buffer (`RECOMP_TRANS_SHOT`), never by screenshotting the desktop, and golden baselines store measurements rather than pixels | A desktop capture catches whatever else is on screen, which already happened once (D12). A rendered frame is also EA artwork, so it cannot live in a public repository; `scripts/frame-signature.py` records the drawn region, pixel and colour counts and a hash, which is enough to catch a regression. |
 | D16 | 2026-09-19 | GPU registers that cannot be plain memory get one trapped page each in `src/hooks/nv2a_regs.c`, rather than trapping the whole 0xFD000000 aperture | The aperture is 16 MB and the title drives the push-buffer pointers through it every frame; trapping all of it would put a page fault on the hot path. Two pages cover both registers found so far, and the blocks the title uses per frame stay plain memory. |
@@ -100,7 +101,7 @@
 | D56 | 2026-10-04 | Accept Vlad's Release play-test and close the rebase integration. Merge private PR #1 into main after green checks; keep upstream PRs subject to separate approval. | Vlad: "it plays perfectly to me", "audio is much better than before", smooth frames and no graphical glitches observed. Manual launcher fix `c70f86d` passed CI 3/3; PR #1 merged at `c23b44a`. This is owner acceptance, not a new numerical audio-parity claim. M6 PC features follow, then M5 Proton and M9 macOS. |
 
 | D57 | 2026-10-04 | Prepare public-facing DJFFNY documentation, stronger Release CI and a source-only v0.1.0 release before upstream PRs. Preserve the private development history; propose a clean public snapshot rather than making the old repository public. | Vlad requests public README/docs modeled on Mercenaries/Burnout 3 and working CI/Releases; selects v0.1.0. History audit finds copied guest bodies/disassembly in Markdown, despite no tracked game asset/binary paths. Redacted 132 mapped excerpts in 21 current docs, retaining findings; old blobs remain private. Rename/new-public-repository transition needs separate owner approval. Existing optimized game preset and toolkit pin unchanged. |
-| D58 | 2026-10-04 | Publish a fresh public `DefJamFFNY-recomp`, retaining original `DJFFNY-recomp` privately; include exactly two owner-approved README visuals with CI fingerprints. Intro says playable and FUN; owner reports over one hour of Story Mode without additional graphical glitches. | Vlad explicitly requested the new public name and supplied screenshot/recording. Different name removes any need to rename the private repository. Media exception is narrow; no game executable/data/lifted-source publication. |
+| D58 | 2026-10-04 | Publish a fresh public `DefJamFFNY-recomp`, retaining the original repository privately; include exactly two owner-approved README visuals with CI fingerprints. Intro says playable and FUN; owner reports over one hour of Story Mode without additional graphical glitches. | Vlad explicitly requested the new public name and supplied screenshot/recording. Different name removes any need to rename the private repository. Media exception is narrow; no game executable/data/lifted-source publication. |
 
 | D59 | 2026-10-04 | Propose 19 focused new-PR candidates in small waves, starting with five contained fixes; coordinate competing flags/backend/audio/event work instead of duplicating open PRs. This is an analysis recommendation pending owner review, not preparation/submission approval. | Owner requests beginner-friendly scopes, impact/risk and overlap review and explicitly forbids upstream PRs before discussion. Reviewed 11 open and 22 merged since v0.12.0; all 22 merges are already in our base1409a7d. Whole-fork catalogue has39 boundaries, with20 held for coordination/optional/redesign. Preserve accepted pin aa1a1b9; no source/build/game change. |
 
@@ -180,9 +181,9 @@ defjam-recomp/
 
 ## 4. Source dump facts
 
-- Redump ISO (archival, in 7z): `Def Jam - Fight for NY (USA).iso` 7,825,162,240 bytes — CRC 71d5b621 · MD5 85725321fef4396d020b624cad8e2531 · SHA-1 1380355c5e3bc5f8e4ef8f2fc15e36a3d00e7774
+- Full-disc ISO (archival): `Def Jam - Fight for NY (USA).iso` 7,825,162,240 bytes — CRC 71d5b621 · MD5 85725321fef4396d020b624cad8e2531 · SHA-1 1380355c5e3bc5f8e4ef8f2fc15e36a3d00e7774
 - XISO: `Def Jam - Fight for NY (USA).xiso.iso` 3,023,831,040 bytes, made with extract-xiso build-202505152050
-- Extracted to `C:\Users\Vlad\code\defjam\extracted\` (see `docs/research/disc-layout.md`); `default.xbe` SHA-256 31cc0d11f7c656b1a6f337fdf7d9bbaac9df11c324a2fb881f7eb639d4be00c2; XISO SHA-256 ac70b2be01ca17c812398a21ad325814b9e671ac3df01a90c98a480ea5059ac7
+- Extracted to `<data>\extracted\` (see `docs/research/disc-layout.md`); `default.xbe` SHA-256 31cc0d11f7c656b1a6f337fdf7d9bbaac9df11c324a2fb881f7eb639d4be00c2; XISO SHA-256 ac70b2be01ca17c812398a21ad325814b9e671ac3df01a90c98a480ea5059ac7
 
 ## 5. Open questions for Vlad
 
@@ -190,7 +191,7 @@ defjam-recomp/
 
 - **Remaining upstream contribution scope (D59/D61).** Candidates1–5 are submitted as #167–171. Other14 candidates and held topics still require discussion/named approval. This chat maintains PRs on request; another agent owns milestones (D62). No additional owner input is currently needed for first five; disclose unavailable cross-title checks and compiler limitations in their descriptions.
 
-- ~~**Public repository transition (D57).**~~ Approved 2026-10-04 with updated name (D58): create fresh public `DefJamFFNY-recomp`. Existing `DJFFNY-recomp` remains private with its current name. Completed: fresh public repository and v0.1.0 source Release, public CI/release gates green.
+- ~~**Public repository transition (D57).**~~ Approved 2026-10-04 with updated name (D58): create fresh public `DefJamFFNY-recomp`. The existing repository remains private with its current name. Completed: fresh public repository and v0.1.0 source Release, public CI/release gates green.
 
 - ~~**Public-source authorization (2026-10-03).**~~ Vlad approved the exact 15-topic source branch;
   publication succeeded and remote SHA `aa1a1b91dea9fd266acb3a3fe51dfcec3b2e6bbc` matches (D54).
@@ -202,7 +203,7 @@ defjam-recomp/
 - ~~**(2026-10-02) Fork owner and visibility for the toolkit rebase (D46).**~~ Answered 2026-10-02: on
   Vlad's account (`vyanhursky`), public. Still to confirm with him: each upstream pull request before it
   is opened.
-- ~~**(2026-10-06) Game data on the Mac, Linux test machine, where to push (D80).**~~ Answered the same day: image supplied (data root `/Users/vlad/Code/defjam-data`), a Steam Deck is available for Linux play-tests, branches go to the public repositories.
+- ~~**(2026-10-06) Game data on the Mac, Linux test machine, where to push (D80).**~~ Answered the same day: image supplied (data root `<data>`), a Steam Deck is available for Linux play-tests, branches go to the public repositories.
 
 ## 6. Work log
 
@@ -217,19 +218,20 @@ defjam-recomp/
 - 2026-10-07 23:59 — Status audit confirms all scheduled local candidate gates complete/pass: Release14/14+fiveopt-ins,Debug9/9+5boots,host4/4,extraDebugversus26/26,quick5/5. Preservation verifies original22save/24generated/10build files and15/6fixture files unchanged. candidate-game-exit.json/final-local-exit.json all0/complete. Updated stale PROGRESS/handoff; no new executable tests/source edits. Source integration still uncommitted/unpublished; fresh-clone/CI/live acceptance/merge/release pending. Originalmain separately advancedba43570 docs; preserve it.
 - 2026-10-08 10:20 — D79: owner candidate playtest accepted ("It plays great") and release authorized as v0.4.1. Six tested toolkit integration topics committed source-only and published b8754f85 to fork defjam/upstream-v0.13, remote SHA verified. Preparing parent source integration, fresh clone, CI and source release; no binaries/data published.
 - 2026-10-08 12:20 — **Port branch rebased onto v0.4.1 and the v0.13 toolkit (D80, D81).** Toolkit `defjam/macos-linux`: the 12 port commits replayed onto `defjam/upstream-v0.13` `c979c09` (three conflicts: a header, `NtClose`, the input layer's pad loop) plus `e5e59f6`. Upstream v0.13 has its own opt-in `guest_cpu_join` lock (`RECOMP_GUEST_LOCK=1`, cooperative), which collided at link time with the token's; the token is `guest_turn_*` now and upstream's stays off. Game branch: squashed to one commit first (the eleven are on `backup/macos-linux-port-pre-v041`), then rebased; the port's decisions are D80 and D81 because main took D73-D79. The v0.4.0 launcher and overlay are Direct3D 11 and Win32, so the Mac build leaves `pc_ui.cpp` and `pc_launcher.cpp` out and starts the game at once. Re-lifted with the v0.13 lifter (17,882 functions). `regress.py --quick` 5 of 5 (`regress-20261008-104907`). Full run 12 of 14 (`regress-20261008-114624`): `gym` failed because main's Story routes now take the second profile and the scratch save had the Story profile first; `crib` and `gym` pass with it second (`regress-20261008-121353`). `versus` failed `runtime.faults` on one `[ICALL] Failed to resolve VA 0x001E3C14`, called from `sub_001E39F0` at `0x001E3A65` through `[esi+0x1C]`: that address is a return address inside the same function, so a stream request's callback slot held stale data. Not seen in any earlier log; `versus` passed 26 of 26 on the rerun (`regress-versus-20261008-114721`). Open: whether it is the title's own race showing through the token's preemption, or new with v0.13. Upstream candidates from the port written up in `docs/research/upstream-macos-linux-candidates.md`. Not run: Windows build of the branch.
+- 2026-10-09 — **Public tree clean-up before wider publicity.** Docs only, no behaviour change. Removed the retired `patches/xboxrecomp` archive (109 files), `docs/worklog/`, 65 of 96 research notes (31 kept, indexed in `docs/research/README.md`), two finished plans and two superseded scripts (`pad-chain.py`, `xemu-reference.ps1`); 385 tracked files to 208. README, CONTRIBUTING and `docs/README.md` rewritten for v0.6.0; issue forms, PR template, `SECURITY.md` and `CODE_OF_CONDUCT.md` added. Personal paths removed; four PowerShell scripts now fall back to a `defjam` folder beside the checkout, as `harness.py` does. `pytest tests/unit` 191 passed, 41 skipped (no toolkit submodule in the worktree); `check-source-tree.py` 0 failures; 0 broken relative links. At Vlad's request the README also shows the setup wizard and the launcher: `docs/media/setup-wizard.png` and `launcher.png`, captured from the v0.6.0 builds with example folders and default settings, no game artwork, fingerprinted in `check-source-tree.py` beside the D58 visuals.
 
 ## 7. Hand-off
 
 ### Native macOS and Linux port, merged and released as v0.5.0 (D82), 2026-10-08
 Open after the release (the first two are written up in `docs/04-improvement-backlog.md` at Vlad's request): the launcher and overlay off Windows; saves for the Story routes without copying them by hand; the one unresolved indirect call in `versus` (work log 2026-10-08); the Linux game build and a Steam Deck run; the Windows regression on these sources; the upstream candidates in `docs/research/upstream-macos-linux-candidates.md`.
 
-Work happens on a Mac (`/Users/vlad/Code/DefJamFFNY-recomp`, arm64, macOS 26, Homebrew cmake/ninja/
+Work happens on a Mac (`<repo>`, arm64, macOS 26, Homebrew cmake/ninja/
 pkg-config/sdl2/libepoxy/openssl). Toolkit work is on fork branch `defjam/macos-linux`, published, and
 the parent gitlink on this branch points at its tip.
 Build: `cmake --preset ci-runtime-only && cmake --build --preset ci-runtime-only`. Trap fixture:
 `cmake -S tools/xboxrecomp/tests/mmio_trap_posix -B build/mmio_trap_posix -G Ninja && cmake --build
 build/mmio_trap_posix && ctest --test-dir build/mmio_trap_posix`.
-Data root on the Mac: `DEFJAM_DATA=/Users/vlad/Code/defjam-data`; `game` is a symlink to its `extracted`.
+Data root on the Mac: `DEFJAM_DATA=<data>`; `game` is a symlink to its `extracted`.
 Pipeline: `uv run --no-project --with pyxbe --with capstone python scripts/pipeline.py analyze`, then `recomp`.
 Next, in order:
 1. Done: `xbox_kernel` compiles off Windows. Left behind on purpose: the AC97 write trap and the
@@ -253,7 +255,7 @@ Next, in order:
    of the ucontext (toolkit `8ca91ad`; fixture checked under Rosetta, the game itself only on arm64).
 4. Done: `src/main.c` and `src/hooks/*` build off Windows through `src/host.h`. `src/host_posix.c`
    stands in for `d3d11_translator.c` (no window) and `watchpoint.c`.
-   Run: `DEFJAM_DATA=/Users/vlad/Code/defjam-data RECOMP_SETTINGS=none RECOMP_WATCHDOG_SECS=30
+   Run: `DEFJAM_DATA=<data> RECOMP_SETTINGS=none RECOMP_WATCHDOG_SECS=30
    ./build/posix-release/defjam_recomp > logs/x.log 2> logs/x.log.err` from the repository root.
    The POSIX halves of `kernel_path.c` and `kernel_file.c` are upstream's and lag the Windows halves;
    partition images, the first-run copy and `[PATH]` are ported, the rest is unaudited.
@@ -285,7 +287,7 @@ Unchecked: whether any game hook assumes a host pointer equals a guest address.
 Vlad accepted the candidate on 2026-10-08: "It plays great. I am good to release this" (D79).
 All scheduled local gates passed; full details and dataset caveats are in
 docs/research/toolkit-v0.13.0-execution.md and the archived previous handoff.
-Candidate C:/Users/Vlad/code/defjam-upstream013, migration/xboxrecomp-v0.13.
+Candidate <migration worktree>, migration/xboxrecomp-v0.13.
 Six tested integration topics committed after 22 retained replay topics on exact
 upstream v0.13.0 b3700e1d. Published fork branch defjam/upstream-v0.13 matches
 c979c091ca43bb285d95a78aaa4e6aad3237e4bb. Toolkit working tree clean.
@@ -299,7 +301,7 @@ matrix committed and published in private PR #10. Slow counter-wrap enabled expl
 Preserve original main ba43570 and original uncommitted research/worklogs;
 candidate incorporates its setup-backlog documentation. Never publish private
 history to public DefJamFFNY-recomp. Existing public snapshot checkout is
-C:/Users/Vlad/code/DJFFNY-public-preview; update reviewed source only.
+<public checkout>; update reviewed source only.
 
 Remaining: sync documentation/source-only parent commits, private PR and CI,
 fresh recursive clone of published pin with analysis/lift/build verification,

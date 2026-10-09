@@ -1,7 +1,7 @@
 # Disc layout — Def Jam: Fight for NY (USA), Xbox
 
 Source: `Def Jam - Fight for NY (USA).xiso.iso` (3,023,831,040 bytes), extracted with extract-xiso 2.7.1 to
-`C:\Users\Vlad\defjam-source\extracted\`. 118 files, 2.9 GB. **Single executable: `default.xbe` (3,284,992 bytes).**
+`<data>\extracted\`. 118 files, 2.9 GB. **Single executable: `default.xbe` (3,284,992 bytes).**
 
 ## Top level
 ```

@@ -6,9 +6,9 @@ PROGRESS/worklogs. Do not call the prototype an accepted/released milestone.
 
 ## Source lanes and release drift
 
-- Parent `C:/Users/Vlad/code/defjam-hd-textures`, `feat/hd-textures`, base private main `1e5ace3`.
+- Parent `<repo>`, `feat/hd-textures`, base private main `1e5ace3`.
 - Toolkit `tools/xboxrecomp`, `defjam/hd-textures`, base accepted Windows v0.4.1 pin `c979c091`.
-- Own data `C:/Users/Vlad/code/defjam-hd-data`; extracted is a read-only junction. Analysis and generated C
+- Own data `<hd-data>`; extracted is a read-only junction. Analysis and generated C
   were freshly regenerated in the lane after detecting a stale copied analysis/tool-file hash. Own build,
   logs and small `vy2-hour-v1` fixture/save; owner saves and playtest builds untouched.
 - Refresh revealed public PR #1 merged 2026-10-08 21:05 UTC, native v0.5.0 published 21:19 UTC. Current public

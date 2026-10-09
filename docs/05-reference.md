@@ -59,7 +59,7 @@ well - see `src/recomp_manual.c`.
 3. **Toolkit changes are fork commits.** `tools/xboxrecomp` is pinned to a published commit on
    `vyanhursky/xboxrecomp`, branch `defjam/rebase-2026-10`. Build that checkout directly. Make generic
    changes in an isolated toolkit worktree, validate and publish, then commit the published gitlink in
-   the parent. `patches/xboxrecomp/` is a historical archive; never replay it on the fork. The ledger in
+   the parent. The 108 numbered patches that source comments still cite are retired and no longer shipped. The ledger in
    `docs/research/toolkit-rebase-ledger.md` maps all 108 old patches. Each upstream PR needs Vlad's approval.
 4. **Deferred structural work is in `docs/04-improvement-backlog.md`**, not in PROGRESS.md.
 5. **Captures come from the back buffer** (`RECOMP_TRANS_SHOT`, D12, D15) and carry the gamma ramp;

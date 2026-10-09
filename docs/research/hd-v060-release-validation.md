@@ -36,8 +36,7 @@ customization/fighter artwork pass remain follow-ups.
   All output PNG hashes match the owner-accepted gallery; generation 238.017 s.
   This proof precedes cache-publication fixes, which preserve pixel processing.
 
-Read-only reviews: [installer](hd-v060-installer-review.md) and
-[runtime](hd-v060-runtime-review.md). Their findings are reviewed evidence;
+Read-only installer and runtime reviews were made (unpublished development notes). Their findings are reviewed evidence;
 source inspection alone does not replace real installation/game gates.
 
 ## Game regressions (2026-10-09)

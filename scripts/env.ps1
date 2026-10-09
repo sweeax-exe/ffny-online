@@ -13,7 +13,7 @@ cmd /c "`"$devcmd`" -arch=amd64 -host_arch=amd64 -no_logo && set" | ForEach-Obje
 $cmakeBin = Join-Path $vs "Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin"
 $ninjaBin = Join-Path $vs "Common7\IDE\CommonExtensions\Microsoft\CMake\Ninja"
 $env:PATH = "$cmakeBin;$ninjaBin;$env:PATH"
-$env:DEFJAM_DATA = if ($env:DEFJAM_DATA) { $env:DEFJAM_DATA } else { "C:\Users\Vlad\code\defjam" }
+$env:DEFJAM_DATA = if ($env:DEFJAM_DATA) { $env:DEFJAM_DATA } else { $(Join-Path (Split-Path (Split-Path $PSScriptRoot -Parent) -Parent) "defjam") }
 Write-Host ("cl: " + (Get-Command cl.exe).Source)
 Write-Host ("cmake: " + (cmake --version | Select-Object -First 1))
 Write-Host ("ninja: " + (ninja --version))

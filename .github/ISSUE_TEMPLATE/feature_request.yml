@@ -1,0 +1,25 @@
+name: Feature request
+description: Something the port should do
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The README's roadmap and the [improvement backlog](https://github.com/vyanhursky/DefJamFFNY-recomp/blob/main/docs/04-improvement-backlog.md)
+        list what is already planned.
+  - type: textarea
+    id: want
+    attributes:
+      label: What would you like?
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why does it matter?
+      description: What it would let you do, or what is awkward today.
+  - type: input
+    id: platform
+    attributes:
+      label: Platform
+      description: The platform this applies to, if it is specific to one.

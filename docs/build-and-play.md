@@ -76,11 +76,11 @@ $env:DEFJAM_DATA = 'C:\Games\DJFFNY-data'
 ```
 
 Use a folder outside the repository. Set `DEFJAM_DATA` in each new shell before
-running the pipeline or game. Without it, historical scripts use the development
-machine's default path; avoid that default on another machine.
+running the pipeline or game. Without it, the scripts fall back to a folder named
+`defjam` beside the repository checkout.
 
 If you cloned without `--recursive`, run `git submodule update --init --recursive`.
-Do not update the toolkit to another branch or replay `patches/xboxrecomp`.
+Do not update the toolkit to another branch.
 
 ## Extract and verify
 

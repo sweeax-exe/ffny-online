@@ -1,8 +1,7 @@
 # Workflows (day-to-day)
 
 For first-time setup and normal Release play, use [Build and play](build-and-play.md).
-This page covers maintainer workflows. The historical development checkout is
-`C:\Users\Vlad\code\defjam-recomp`; select your own external data folder with
+This page covers maintainer workflows. Select your own external data folder with
 `$env:DEFJAM_DATA` before running these commands.
 
 ## One-time setup
@@ -89,7 +88,8 @@ Load the XISO from `$DEFJAM_DATA\xiso\`. Use it to capture title-screen goldens 
 - Commit messages for bring-up fixes follow `fix(boot): stub sub_0001B9F0 (HalReadWritePCISpace probe)`.
 - Generic toolkit changes are validated commits on our xboxrecomp fork; publish the commit before
   updating the parent gitlink. Upstream PRs to sp00nznet/xboxrecomp need Vlad's separate approval.
-  Game-specific bits stay here; `patches/xboxrecomp/` is an archive, with no replay step.
+  Game-specific bits stay here. The old numbered toolkit patches are retired; the
+  [ledger](research/toolkit-rebase-ledger.md) maps each one to the fork.
 
 ## Runtime diagnostics (environment variables read by the toolkit runtime)
 Full table with source references: `docs/research/toolkit-bringup-notes.md`. Everything logs to stderr; `scripts/run.ps1` captures it to `logs/`.

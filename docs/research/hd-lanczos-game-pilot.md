@@ -5,7 +5,7 @@ This authorizes a bounded local test pack, not every asset or the HD release.
 
 ## Corpus, correlation and pack
 
-Own data: C:/Users/Vlad/code/defjam-hd-data. Scratch: hd-work/lanczos-game.
+Own data: <hd-data>. Scratch: hd-work/lanczos-game.
 Default ONE_ON_ONE_SETUP with the verified VY2 fixture selects Blaze (fighter56,
 V2IP_113A) vs Doc (55), at Foundation (frontend1, V2BG_02A). It does not select
 the wood/concrete samples from V2BG_07A/V2BG_01A; navigation there is uncalibrated.

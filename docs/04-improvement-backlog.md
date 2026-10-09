@@ -77,8 +77,7 @@ second machine reproduces the same fixture hash.
 ## A setup.exe that builds the game — planned 2026-10-07
 
 **Implementation update, 2026-10-08:** Windows setup is implemented on the release-setup
-feature lane; acceptance remains pending. See [installer guide](setup-installer.md) and
-[validation notes](research/release-setup-notes.md). The owner approved starting work,
+feature lane; acceptance remains pending. See the [installer guide](setup-installer.md). The owner approved starting work,
 custom install/data destinations and silent mode. The native macOS/Linux port merged at
 `5cc5b3b0b6812ec039822cd2e80a7c7e3b2a38b5`; those setup configurations are explicit to-dos,
 using its Python pipeline, POSIX presets and Vulkan/SDL3 rather than a Proton-only plan.
@@ -264,7 +263,7 @@ but it should land before M7.
 **Why.** Every patch we carry makes the next submodule bump more expensive, and our fixes would get
 exercised against other titles, which is validation we cannot do alone.
 
-**What to do.** Follow `docs/06-toolkit-rebase-plan.md` Phase 4 and the replacement ledger. Select small,
+**What to do.** Follow the [replacement ledger](research/toolkit-rebase-ledger.md). Select small,
 single-purpose fixes from the consolidated fork; do not mechanically split the original 0001 patch,
 whose behavior now includes upstream-covered and superseded parts. Keep diagnostics gated and validate
 each proposed fix against current upstream. The direct-call wrapper limitation is documented in

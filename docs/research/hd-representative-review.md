@@ -28,7 +28,7 @@ all UV regions have been identified.
 ## Reproduction
 
 Local media root:
-`C:/Users/Vlad/code/defjam-hd-data/hd-work/representative-40`.
+`<hd-data>/hd-work/representative-40`.
 The requested selection lives in `requested.json`; decoded provenance, dimensions,
 palette/source IDs and original PNG hashes are in `selection.json`.
 
