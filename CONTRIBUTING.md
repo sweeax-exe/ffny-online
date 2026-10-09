@@ -116,9 +116,9 @@ could not run a game test, say so; the maintainer will run it.
 - Update the guides your change affects, and add a line to
   [known issues](docs/known-issues.md) if you leave a limitation behind.
 
-The only game images in the repository are the two README visuals in
-`docs/media/`, approved by the owner. CI checks their exact fingerprints; new
-media needs the owner's review. Game artwork is not covered by the MIT license.
+The only images in the repository are the README visuals in `docs/media/`,
+approved by the owner: two of gameplay and two of the port's own interface. CI
+checks their exact fingerprints; new media needs the owner's review. Game artwork is not covered by the MIT license.
 
 Upstream pull requests to `sp00nznet/xboxrecomp` on the project's behalf are
 opened by the maintainer, or with the maintainer's approval for each one.

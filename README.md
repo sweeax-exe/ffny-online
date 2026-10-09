@@ -61,6 +61,8 @@ checks it, then translates and compiles the game on your machine. It bundles
 Python and the pinned build sources and can install Microsoft's C++ Build Tools
 if they are missing. The installer is unsigned, so Windows may warn about it.
 
+![The setup wizard: choose your dump, an install folder and a data folder](docs/media/setup-wizard.png)
+
 See [Windows setup](docs/setup-installer.md) for folders, shortcuts, HD texture
 generation, silent mode, repair and removal.
 
@@ -96,6 +98,8 @@ works there and what does not yet.
 The game opens a launcher window with display, controller and key settings and
 a Play button. The same settings are available in the game with F1, and in
 `settings.ini` in your data folder.
+
+![The launcher's Display tab, with Quit and Play buttons](docs/media/launcher.png)
 
 - [Launcher and overlay](docs/launcher-and-overlay.md)
 - [Controllers, keyboard and mouse](docs/10-input.md)

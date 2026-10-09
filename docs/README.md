@@ -49,5 +49,6 @@ published, and the 108 numbered toolkit patches that source comments still cite
 are retired: the [ledger](research/toolkit-rebase-ledger.md) maps each to the
 published fork.
 
-The two README visuals in `media/` are the only published captures. See
+The README visuals in `media/` are the only published images: two gameplay
+captures and two screenshots of the port's own interface. See
 [media/README.md](media/README.md).
