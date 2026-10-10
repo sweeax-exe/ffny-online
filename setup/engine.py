@@ -581,7 +581,13 @@ class Engine:
                     # SDL3, MoltenVK and shaderc come prebuilt with the setup; nothing is
                     # looked for in /opt/homebrew, /usr/local or any other prefix.
                     prefix = self.version_root / 'deps'
-                    overrides = [f'-DCMAKE_PREFIX_PATH={prefix}', f'-DVulkan_LIBRARY={prefix}/lib/libMoltenVK.dylib',
+                    # Dear ImGui (the launcher and overlay) is built from the inventoried source.
+                    deps = json.loads((self.payload / 'dependencies.json').read_text())
+                    imgui = [d for d in deps if '/imgui/' in d.get('source_dir', '').replace('\\', '/') + '/']
+                    if len(imgui) != 1:
+                        raise SetupError('The setup payload has no Dear ImGui source', 2)
+                    overrides = [f'-DFETCHCONTENT_SOURCE_DIR_IMGUI={self.source / imgui[0]["source_dir"]}',
+                                 f'-DCMAKE_PREFIX_PATH={prefix}', f'-DVulkan_LIBRARY={prefix}/lib/libMoltenVK.dylib',
                                  f'-DVulkan_INCLUDE_DIR={prefix}/include', '-DCMAKE_FIND_USE_CMAKE_SYSTEM_PATH=OFF',
                                  '-DCMAKE_OSX_ARCHITECTURES=arm64']
                 self.run(['cmake', '--preset', PRESET, '-DDEFJAM_BUILD_GAME=ON', *overrides], cwd=self.source)

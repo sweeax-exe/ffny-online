@@ -147,8 +147,10 @@ them or select **Play**. The app is made on your Mac, never downloaded, takes th
 lock (an update refuses to run while the game does), supplies the data folder and
 working directory and keeps the ten newest play logs in `~/Library/Logs/DefJamRecompiled`
 (`.log` and `.log.err`; attach the `.err` to a problem report after reviewing it for
-personal paths). The launcher and in-game overlay are not on macOS yet; settings are in
-`settings.ini` ([reference](settings-reference.md)).
+personal paths). Since v0.6.2 the game shows its launcher window before it starts (hold Shift
+while opening the app to see it when it is skipped; `open "Def Jam Recompiled.app" --args
+--launcher` does too) and has the F1 overlay; settings are also in `settings.ini`
+([reference](settings-reference.md), [guide](launcher-and-overlay.md)).
 
 Setup logs are in `~/Library/Logs/DefJamSetup`; **Open logs** opens the current one.
 

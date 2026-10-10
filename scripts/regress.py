@@ -11,6 +11,11 @@ Checks, in order:
   m2       the loading screen's frame signature        tests/golden/m2-loading-screen.json
   m3       the title screen's                          tests/golden/m3-title-screen.json
   m4a      the main menu's                             tests/golden/m4a-main-menu.json
+  launcher the launcher window (macOS, Linux): its first screen is drawn, a tab and a
+           checkbox are clicked through the real event path, the change is in the settings
+           file, and Play goes on into the game
+  overlay  the F1 overlay (macOS, Linux): opened by a key event, a tab clicked, drawn over
+           the picture, and the window's frame read back (RECOMP_WINDOW_SHOT)
   fight    a scripted One on One: reaches the fight, holds the frame rate, no crash
   ffa      a scripted four-fighter Free For All at the default venue, the same checks
   ffa-terrordome  the same at the Terrordome for four minutes (the v0.2.1 crash)
@@ -39,8 +44,9 @@ The golden frames were taken without the title's gamma ramp, so those three runs
 set RECOMP_GAMMA=0. Every run uses the harness's complete-save-root guard and
 fails if the save area is not byte-identical afterwards.
 
-Exit code 0 only if every check that ran passed. The table is also written to
-logs/regress-<stamp>.txt.
+A check that does not apply on this host (the launcher and overlay checks on Windows) reports SKIP:
+it is counted as skipped, never as passed. Exit code 0 only if every check that ran passed. The
+table is also written to logs/regress-<stamp>.txt.
 """
 import argparse
 import hashlib
@@ -61,7 +67,7 @@ evidence = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(evidence)
 REPO = harness.REPO
 
-ORDER = ["unit", "m2", "m3", "m4a", "fight", "ffa", "fight-terrordome", "ffa-terrordome", "combat", "versus", "ffa-result", "two-matches", "replay", "repeat", "visual",
+ORDER = ["unit", "m2", "m3", "m4a", "launcher", "overlay", "fight", "ffa", "fight-terrordome", "ffa-terrordome", "combat", "versus", "ffa-result", "two-matches", "replay", "repeat", "visual",
          "intro", "crib", "gym", "soak"]
 # Opt-in (--only): the One on One at the Terrordome, which the Free For All covers, and
 # the repeatability check, which is two more fights.
@@ -86,6 +92,11 @@ def common_faults(run):
 
 def verdict(faults, detail):
     return (not faults), ("; ".join(faults) if faults else detail)
+
+
+def not_applicable(why):
+    """What a check returns when it cannot be run on this host: neither a pass nor a failure."""
+    return None, "not run: " + why
 
 
 # --- checks ----------------------------------------------------------------
@@ -153,6 +164,107 @@ def check_m4a(a):
     return golden(a, "m4a", "menu-50s.bmp", "m4a-main-menu.json",
                   {"RECOMP_SCRIPT_ANCHOR": harness.TITLE_ANCHOR, "RECOMP_TRANS_SHOT": shot,
                    "RECOMP_TRANS_SHOT_SECS": "50", "RECOMP_PAD_SCRIPT": pad}, 200)
+
+
+# --- the launcher and the overlay (drawn through SDL and Vulkan: macOS and Linux) -----------------
+
+UI_TAB = (158, 43, 33)          # the selected tab: (0.62, 0.17, 0.13)
+UI_PLAY = (46, 140, 56)         # the launcher's Play button: (0.18, 0.55, 0.22)
+
+
+def bmp_color_count(path, colors, tolerance=3):
+    """How many pixels of a 32-bit BMP (as the game writes them) are within `tolerance` of each
+    (r, g, b) in `colors`; also the image's size."""
+    import struct
+    with open(path, "rb") as f:
+        data = f.read()
+    if data[:2] != b"BM":
+        raise ValueError("not a BMP: " + path)
+    offset, = struct.unpack_from("<I", data, 10)
+    width, height, _planes, bits = struct.unpack_from("<iiHH", data, 18)
+    if bits != 32:
+        raise ValueError("expected a 32-bit BMP, got %d bits" % bits)
+    counts = {}
+    for (px,) in struct.iter_unpack("<I", data[offset:offset + abs(height) * width * 4]):
+        counts[px & 0xFFFFFF] = counts.get(px & 0xFFFFFF, 0) + 1
+    out = []
+    for r, g, b in colors:
+        n = 0
+        for rgb, c in counts.items():
+            if abs(((rgb >> 16) & 255) - r) <= tolerance and abs(((rgb >> 8) & 255) - g) <= tolerance \
+                    and abs((rgb & 255) - b) <= tolerance:
+                n += c
+        out.append(n)
+    return width, abs(height), out
+
+
+def ui_settings_file(name, text=""):
+    folder = os.path.join(REPO, "logs", "ui-check")
+    os.makedirs(folder, exist_ok=True)
+    path = os.path.join(folder, name + ".ini")
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(text)
+    return path
+
+
+def check_launcher(a):
+    if sys.platform == "win32":
+        return not_applicable("this check is for the SDL launcher (macOS, Linux); the Windows one is Direct3D 11")
+    shot = os.path.join(REPO, "logs", "shots", "ui-launcher", "launcher.bmp")
+    os.makedirs(os.path.dirname(shot), exist_ok=True)
+    if os.path.exists(shot):
+        os.remove(shot)
+    settings = ui_settings_file("launcher")
+    # The General tab, then "Skip the launcher at start"; a frame; Play. Window points.
+    script = "800:click:540:60;1500:click:21:675;2200:shot:%s;2600:play" % shot
+    run = harness.run_game("ui-launcher", secs=120, preset=a.preset, scripted=False, quiet=True, until_file=shot,
+                           env={"RECOMP_SETTINGS": settings, "RECOMP_LAUNCHER_SCRIPT": script,
+                                "RECOMP_INPUT_IGNORE_FOCUS": "1"})
+    faults = common_faults(run)
+    for needle in ("[UI] launcher shown", "[UI] launcher: frame written"):
+        if needle not in run.text:
+            faults.append("no %r in the log" % needle)
+    if not os.path.isfile(shot):
+        return False, "; ".join(faults + ["no frame captured"])
+    width, height, (tab, play) = bmp_color_count(shot, [UI_TAB, UI_PLAY])
+    if tab < 300:
+        faults.append("the General tab is not selected in the captured frame (%d tab-coloured pixels)" % tab)
+    if play < 300:
+        faults.append("no Play button in the captured frame (%d pixels)" % play)
+    with open(settings, encoding="utf-8") as f:
+        ini = f.read()
+    if not re.search(r"^skip\s*=\s*true\s*$", ini, re.M):
+        faults.append("the click on \"Skip the launcher at start\" did not reach settings.ini")
+    if "[UI] launcher closed: play" not in run.text:
+        faults.append("Play did not close the launcher")
+    return verdict(faults, "%dx%d frame, General tab and Play drawn, skip saved, Play went on" % (width, height))
+
+
+def check_overlay(a):
+    if sys.platform == "win32":
+        return not_applicable("this check is for the Vulkan overlay (macOS, Linux); the Windows one is Direct3D 11")
+    shot = os.path.join(REPO, "logs", "shots", "ui-overlay", "overlay.bmp")
+    os.makedirs(os.path.dirname(shot), exist_ok=True)
+    if os.path.exists(shot):
+        os.remove(shot)
+    settings = ui_settings_file("overlay", "[launcher]\nskip = true\n")
+    # F1 once the game is drawing, then the General tab (overlay pixels: the window is 1280x960 points).
+    script = "20000:key:F1;21500:click:659:126;28000:key:F1"
+    run = harness.run_game("ui-overlay", secs=150, preset=a.preset, scripted=False, quiet=True, until_file=shot,
+                           env={"RECOMP_SETTINGS": settings, "RECOMP_HOST_SCRIPT": script,
+                                "RECOMP_WINDOW_SHOT": shot, "RECOMP_WINDOW_SHOT_FRAME": "150"})
+    faults = common_faults(run)
+    for needle in ("[UI] overlay opened", "[UI] overlay ready", "window picture written"):
+        if needle not in run.text:
+            faults.append("no %r in the log" % needle)
+    if "[UI] launcher shown" in run.text:
+        faults.append("the launcher was shown although it is skipped")
+    if not os.path.isfile(shot):
+        return False, "; ".join(faults + ["no frame captured"])
+    width, height, (tab,) = bmp_color_count(shot, [UI_TAB])
+    if tab < 300:
+        faults.append("no selected tab in the captured window (%d tab-coloured pixels): the overlay is not drawn or its tab was not clicked" % tab)
+    return verdict(faults, "opened by F1, General tab clicked, %dx%d window frame has the overlay" % (width, height))
 
 
 def check_fight(a, route="fight"):
@@ -363,10 +475,15 @@ def check_soak(a):
     return (ok == a.soak and hung == 0 and failed == 0), "%d of %d boots reached the main menu" % (ok, a.soak)
 
 
-CHECKS = {"unit": check_unit, "m2": check_m2, "m3": check_m3, "m4a": check_m4a, "fight": check_fight, "ffa": check_ffa,
+CHECKS = {"unit": check_unit, "m2": check_m2, "m3": check_m3, "m4a": check_m4a, "launcher": check_launcher,
+          "overlay": check_overlay, "fight": check_fight, "ffa": check_ffa,
           "fight-terrordome": lambda a: check_fight(a, 'fight-terrordome'),
           "ffa-terrordome": lambda a: check_fight(a, 'ffa-terrordome'),
           "combat": check_combat, "versus": check_versus, "ffa-result": check_ffa_result, "two-matches": check_two_matches, "replay": check_replay, "visual": check_visual, "repeat": check_repeat, "intro": check_intro, "crib": check_crib, "gym": check_gym, "soak": check_soak}
+
+
+def status_word(ok):
+    return "SKIP" if ok is None else "ok" if ok else "FAIL"
 
 
 def main(argv=None):
@@ -409,13 +526,17 @@ def main(argv=None):
         except SystemExit as ex:                 # not built, no dump: say so and stop
             ok, detail = False, str(ex)
         rows.append((n, ok, detail, time.time() - t0))
-        print("%-6s %-4s %4d s  %s" % (n, "ok" if ok else "FAIL", rows[-1][3], detail), flush=True)
+        print("%-6s %-4s %4d s  %s" % (n, status_word(ok), rows[-1][3], detail), flush=True)
     harness.kill_stray()
 
-    failed = [r for r in rows if not r[1]]
+    failed = [r for r in rows if r[1] is not None and not r[1]]
+    skipped = [r for r in rows if r[1] is None]
+    ran = len(rows) - len(skipped)
     lines = ["regress %s  preset %s" % (time.strftime("%Y-%m-%d %H:%M"), a.preset)]
-    lines += ["%-6s %-4s %4d s  %s" % (n, "ok" if ok else "FAIL", dt, d) for n, ok, d, dt in rows]
-    lines.append("%d of %d passed in %d min" % (len(rows) - len(failed), len(rows), (time.time() - t_all) / 60))
+    lines += ["%-6s %-4s %4d s  %s" % (n, status_word(ok), dt, d) for n, ok, d, dt in rows]
+    lines.append("%d of %d passed%s in %d min" % (ran - len(failed), ran,
+                 (", %d skipped (%s)" % (len(skipped), ", ".join(r[0] for r in skipped))) if skipped else "",
+                 (time.time() - t_all) / 60))
     os.makedirs(os.path.join(REPO, "logs"), exist_ok=True)
     out = os.path.join(REPO, "logs", "regress-" + time.strftime("%Y%m%d-%H%M%S") + ".txt")
     with open(out, "w", encoding="utf-8") as f:

@@ -25,12 +25,11 @@ covering work files and filesystems that cannot hard-link the generated PNGs.
 Generation took about four minutes on the development PC; game compilation and
 texture verification add time, and other CPUs may take longer.
 
-In the launcher or F1 overlay on Windows, open **Textures** to disable HD packs, change the
-pack list or adjust the cache. Restart after changes. macOS has no launcher or overlay
-until v0.6.2: edit `[textures]` in `settings.ini` in your data folder instead (`enabled=0`
-turns the packs off, `enabled=1` on; `packs` and `cache_mb` are the pack list and memory budget;
-the [settings reference](settings-reference.md) lists them). Leave the generated names
-in place to use both opacity and material-channel mip policies.
+In the launcher or F1 overlay (Windows, and macOS since v0.6.2), open **Textures** to disable HD
+packs, change the pack list or adjust the cache. Restart after changes. Or edit `[textures]` in
+`settings.ini` in your data folder (`enabled=0` turns the packs off, `enabled=1` on; `packs` and
+`cache_mb` are the pack list and memory budget; the [settings reference](settings-reference.md) lists
+them). Leave the generated names in place to use both opacity and material-channel mip policies.
 
 Close the game and rerun Setup with the same locations to update or repair.
 Leaving the HD checkbox unchecked on an existing installation preserves its

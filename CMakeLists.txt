@@ -15,7 +15,7 @@ cmake_minimum_required(VERSION 3.20)
 # (a junction/symlink is fine) and run scripts/verify-dump.py first.
 # ============================================================================
 
-project(defjam_recomp VERSION 0.6.1 LANGUAGES C CXX)
+project(defjam_recomp VERSION 0.6.2 LANGUAGES C CXX)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -70,19 +70,23 @@ if(DEFJAM_BUILD_GAME AND NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/recomp/gen/
 endif()
 
 if(DEFJAM_BUILD_GAME)
+    # Dear ImGui (MIT): the launcher and the in-game overlay. Fetched at a pinned hash.
+    list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
     if(WIN32)
         set(HOST_SOURCES "")
-        # Dear ImGui (MIT): the launcher and the in-game overlay. Fetched at a pinned hash.
-        list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
+        list(FILTER HOOK_SOURCES EXCLUDE REGEX "/pc_launcher_sdl\\.cpp$")
         include(imgui)
     else()
         # The Win32 window and the debug-register watchpoints have no place
         # here; src/host_posix.c has the SDL window and stands in for the rest.
-        # The launcher and the overlay draw through Direct3D 11 and the Win32
-        # message loop, so they are Windows-only until they have a Vulkan and
-        # SDL backend; host_posix.c answers for them (no launcher, no overlay).
-        list(FILTER HOOK_SOURCES EXCLUDE REGEX "/(watchpoint\\.c|pc_ui\\.cpp|pc_launcher\\.cpp)$")
+        # The launcher (SDL's renderer in a window of its own) and the overlay
+        # (Vulkan, in the game's window) are the same screen as on Windows,
+        # in pc_ui.cpp; pc_launcher.cpp is the Direct3D 11 one.
+        list(FILTER HOOK_SOURCES EXCLUDE REGEX "/(watchpoint\\.c|pc_launcher\\.cpp)$")
         set(HOST_SOURCES src/host_posix.c)
+        find_package(SDL3 REQUIRED CONFIG)
+        find_package(Vulkan REQUIRED)
+        include(imgui)
     endif()
     add_executable(${PROJECT_NAME} WIN32
         src/main.c
@@ -96,10 +100,12 @@ if(DEFJAM_BUILD_GAME)
         target_link_libraries(${PROJECT_NAME} PRIVATE xboxrecomp recomp_settings defjam_imgui d3d11 dxgi dxguid xinput winmm dbghelp shell32)
     else()
         # One SDL for the window, the sound and the pads: SDL3, the system's.
-        find_package(SDL3 REQUIRED CONFIG)
-        find_package(Vulkan REQUIRED)
-        target_link_libraries(${PROJECT_NAME} PRIVATE xboxrecomp recomp_settings
+        target_link_libraries(${PROJECT_NAME} PRIVATE xboxrecomp recomp_settings defjam_imgui
                               SDL3::SDL3 Vulkan::Vulkan ${CMAKE_DL_LIBS} m)
+        if(APPLE)
+            # Shift held at start-up (src/host_posix.c) is read from the window server.
+            target_link_libraries(${PROJECT_NAME} PRIVATE "-framework ApplicationServices")
+        endif()
         # SDL opens the Vulkan loader by name; tell it where this build's is.
         target_compile_definitions(${PROJECT_NAME} PRIVATE
             DEFJAM_VULKAN_LIBRARY="${Vulkan_LIBRARY}")

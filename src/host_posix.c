@@ -24,10 +24,14 @@
 
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_vulkan.h>
+#ifdef __APPLE__
+#include <ApplicationServices/ApplicationServices.h>
+#endif
 
 #include "d3d8_vk.h"
 #include "hooks/pc_settings.h"
 #include "hooks/pc_input.h"
+#include "hooks/pc_ui.h"
 
 static SDL_Window *s_window;
 static int         s_have_video;
@@ -77,6 +81,21 @@ static void refresh_drawable(void)
         SDL_GetWindowSizeInPixels(s_window, &w, &h);
     s_drawable_w = w;
     s_drawable_h = h;
+}
+
+/* For the launcher (src/hooks/pc_launcher_sdl.cpp), which has a window of its own on this thread. */
+void host_posix_call_on_main(void (*fn)(void *), void *arg) { call_on_main(fn, arg); }
+int  host_posix_have_video(void) { return s_have_video; }
+
+/* Whether Shift is down right now, before any key event has said so: the launcher is shown when
+ * it is held at start-up. */
+int host_posix_shift_held(void)
+{
+#ifdef __APPLE__
+    return (CGEventSourceFlagsState(kCGEventSourceStateCombinedSessionState) & kCGEventFlagMaskShift) != 0;
+#else
+    return s_have_video && (SDL_GetModState() & SDL_KMOD_SHIFT) != 0;
+#endif
 }
 
 /* ── The window ────────────────────────────────────────────────────────── */
@@ -159,6 +178,66 @@ static void fullscreen_setting_changed(int fullscreen)
     SDL_PushEvent(&ev);
 }
 
+/* The overlay opened or closed, on the thread that draws. The pointer must show while it is up
+ * (full screen hides it), and typing into its text boxes must be delivered. */
+void host_posix_overlay_changed(int open)
+{
+    SDL_Event ev;
+    if (!s_have_video || !s_window)
+        return;
+    SDL_zero(ev);
+    ev.type = s_call_event + 3;
+    ev.user.code = open;
+    SDL_PushEvent(&ev);
+}
+
+/* display.window_width or window_height changed (the overlay's boxes, or the window itself being
+ * resized, which writes them): give a windowed, unmaximised window that size. */
+static void window_size_main(int w, int h)
+{
+    int cw = 0, ch = 0;
+
+    if (!s_window || s_fullscreen || w <= 0 || h <= 0)
+        return;
+    if (SDL_GetWindowFlags(s_window) & (SDL_WINDOW_MAXIMIZED | SDL_WINDOW_MINIMIZED))
+        return;
+    SDL_GetWindowSize(s_window, &cw, &ch);
+    if (cw == w && ch == h)
+        return;
+    SDL_SetWindowSize(s_window, w, h);
+    refresh_drawable();
+    fprintf(stderr, "[TRANS] window size set to %dx%d (the setting changed)\n", w, h);
+    fflush(stderr);
+}
+
+/* The size settings changed, on whichever thread changed them. */
+static void window_size_setting_changed(int width, int height)
+{
+    SDL_Event ev;
+
+    if (!s_have_video || !s_window)
+        return;
+    SDL_zero(ev);
+    ev.type = s_call_event + 4;
+    ev.user.code = width;
+    ev.user.data1 = (void *)(intptr_t)height;
+    SDL_PushEvent(&ev);
+}
+
+static void overlay_changed_main(int open)
+{
+    if (!s_window)
+        return;
+    if (open) {
+        SDL_ShowCursor();
+        SDL_StartTextInput(s_window);
+    } else {
+        SDL_StopTextInput(s_window);
+        if (s_fullscreen)
+            SDL_HideCursor();
+    }
+}
+
 /* Open the window the picture goes to and tell the graphics device about it.
  * Returns 0 when there is none; the device then draws off screen. */
 int host_posix_open_window(int width, int height, const char *title)
@@ -171,12 +250,19 @@ int host_posix_open_window(int width, int height, const char *title)
     call_on_main(make_window_main, &r);
     if (!s_window)
         return 0;
+    {
+        int pw = 0, ph = 0, w = 0, h = 0;
+        SDL_GetWindowSize(s_window, &w, &h);
+        SDL_GetWindowSizeInPixels(s_window, &pw, &ph);
+        fprintf(stderr, "[HOST] window %dx%d points, %dx%d pixels\n", w, h, pw, ph);
+    }
     host.instance_extensions = s_extensions;
     host.instance_extension_count = s_extension_count;
     host.create_surface = create_surface;
     host.drawable_size = drawable_size;
     d3d8_vk_set_host(&host);
     pc_settings_on_fullscreen(fullscreen_setting_changed);
+    pc_settings_on_window_size(window_size_setting_changed);
     if (pc_display("fullscreen", 0))
         fullscreen_setting_changed(1);
     return 1;
@@ -202,44 +288,51 @@ static void *game_thread(void *unused)
 }
 
 /* A key by where it is on the keyboard, as the Windows virtual-key code the
- * input layer's bindings are written in. Shift, Ctrl and Alt are reported by
- * side and as the generic key, held while either side is, as the Win32 window
- * reports them. */
+ * input layer's bindings are written in; 0 for a key it has no name for.
+ * Shift, Ctrl and Alt come by side (VK_LSHIFT and so on). */
+int host_posix_vk_from_scancode(int scancode)
+{
+    SDL_Scancode sc = (SDL_Scancode)scancode;
+
+    if (sc >= SDL_SCANCODE_A && sc <= SDL_SCANCODE_Z)        return 'A' + (sc - SDL_SCANCODE_A);
+    if (sc >= SDL_SCANCODE_1 && sc <= SDL_SCANCODE_9)        return '1' + (sc - SDL_SCANCODE_1);
+    if (sc == SDL_SCANCODE_0)                                return '0';
+    if (sc >= SDL_SCANCODE_F1 && sc <= SDL_SCANCODE_F12)     return 0x70 + (sc - SDL_SCANCODE_F1);
+    if (sc >= SDL_SCANCODE_KP_1 && sc <= SDL_SCANCODE_KP_9)  return 0x61 + (sc - SDL_SCANCODE_KP_1);
+    switch (sc) {
+    case SDL_SCANCODE_KP_0:      return 0x60;
+    case SDL_SCANCODE_RETURN:    return 0x0D;
+    case SDL_SCANCODE_KP_ENTER:  return 0x0D;
+    case SDL_SCANCODE_ESCAPE:    return 0x1B;
+    case SDL_SCANCODE_BACKSPACE: return 0x08;
+    case SDL_SCANCODE_TAB:       return 0x09;
+    case SDL_SCANCODE_SPACE:     return 0x20;
+    case SDL_SCANCODE_LEFT:      return 0x25;
+    case SDL_SCANCODE_UP:        return 0x26;
+    case SDL_SCANCODE_RIGHT:     return 0x27;
+    case SDL_SCANCODE_DOWN:      return 0x28;
+    case SDL_SCANCODE_LSHIFT:    return 0xA0;
+    case SDL_SCANCODE_RSHIFT:    return 0xA1;
+    case SDL_SCANCODE_LCTRL:     return 0xA2;
+    case SDL_SCANCODE_RCTRL:     return 0xA3;
+    case SDL_SCANCODE_LALT:      return 0xA4;
+    case SDL_SCANCODE_RALT:      return 0xA5;
+    default:                     return 0;
+    }
+}
+
+/* A key to the input layer. Shift, Ctrl and Alt are reported by side and as
+ * the generic key, held while either side is, as the Win32 window reports them. */
 static void key_to_input(SDL_Scancode sc, int down)
 {
     static unsigned char side[3][2];
-    int vk = 0, mod = -1, right = 0;
+    int vk = host_posix_vk_from_scancode((int)sc);
 
-    if (sc >= SDL_SCANCODE_A && sc <= SDL_SCANCODE_Z)        vk = 'A' + (sc - SDL_SCANCODE_A);
-    else if (sc >= SDL_SCANCODE_1 && sc <= SDL_SCANCODE_9)   vk = '1' + (sc - SDL_SCANCODE_1);
-    else if (sc == SDL_SCANCODE_0)                           vk = '0';
-    else if (sc >= SDL_SCANCODE_F1 && sc <= SDL_SCANCODE_F12) vk = 0x70 + (sc - SDL_SCANCODE_F1);
-    else if (sc >= SDL_SCANCODE_KP_1 && sc <= SDL_SCANCODE_KP_9) vk = 0x61 + (sc - SDL_SCANCODE_KP_1);
-    else switch (sc) {
-    case SDL_SCANCODE_KP_0:      vk = 0x60; break;
-    case SDL_SCANCODE_RETURN:    vk = 0x0D; break;
-    case SDL_SCANCODE_KP_ENTER:  vk = 0x0D; break;
-    case SDL_SCANCODE_ESCAPE:    vk = 0x1B; break;
-    case SDL_SCANCODE_BACKSPACE: vk = 0x08; break;
-    case SDL_SCANCODE_TAB:       vk = 0x09; break;
-    case SDL_SCANCODE_SPACE:     vk = 0x20; break;
-    case SDL_SCANCODE_LEFT:      vk = 0x25; break;
-    case SDL_SCANCODE_UP:        vk = 0x26; break;
-    case SDL_SCANCODE_RIGHT:     vk = 0x27; break;
-    case SDL_SCANCODE_DOWN:      vk = 0x28; break;
-    case SDL_SCANCODE_LSHIFT:    mod = 0; right = 0; break;
-    case SDL_SCANCODE_RSHIFT:    mod = 0; right = 1; break;
-    case SDL_SCANCODE_LCTRL:     mod = 1; right = 0; break;
-    case SDL_SCANCODE_RCTRL:     mod = 1; right = 1; break;
-    case SDL_SCANCODE_LALT:      mod = 2; right = 0; break;
-    case SDL_SCANCODE_RALT:      mod = 2; right = 1; break;
-    default: break;
-    }
-    if (mod >= 0) {
+    if (vk >= 0xA0 && vk <= 0xA5) {
         static const int generic[3] = { 0x10, 0x11, 0x12 };          /* VK_SHIFT, CONTROL, MENU */
-        static const int sided[3][2] = { { 0xA0, 0xA1 }, { 0xA2, 0xA3 }, { 0xA4, 0xA5 } };
+        int mod = (vk - 0xA0) / 2, right = (vk - 0xA0) % 2;
         side[mod][right] = (unsigned char)down;
-        pc_input_host_key(sided[mod][right], down);
+        pc_input_host_key(vk, down);
         pc_input_host_key(generic[mod], side[mod][0] || side[mod][1]);
         return;
     }
@@ -261,6 +354,30 @@ static void handle_event(const SDL_Event *ev)
     if (ev->type == s_call_event + 1) {
         set_fullscreen_main(ev->user.code ? (void *)1 : NULL);
         return;
+    }
+    if (ev->type == s_call_event + 3) {
+        overlay_changed_main(ev->user.code);
+        return;
+    }
+    if (ev->type == s_call_event + 4) {
+        window_size_main(ev->user.code, (int)(intptr_t)ev->user.data1);
+        return;
+    }
+    /* The overlay's own key, a key being learned for a binding, and (while it is up) the
+     * pointer and typing. The window's events are in points; the overlay says what it needs. */
+    switch (ev->type) {
+    case SDL_EVENT_KEY_DOWN: case SDL_EVENT_KEY_UP: case SDL_EVENT_TEXT_INPUT:
+    case SDL_EVENT_MOUSE_MOTION: case SDL_EVENT_MOUSE_BUTTON_DOWN: case SDL_EVENT_MOUSE_BUTTON_UP:
+    case SDL_EVENT_MOUSE_WHEEL: case SDL_EVENT_WINDOW_MOUSE_LEAVE: {
+        int w = 0, h = 0;
+        if (s_window)
+            SDL_GetWindowSize(s_window, &w, &h);
+        if (pc_ui_sdl_event(ev, (float)w, (float)h))
+            return;
+        break;
+    }
+    default:
+        break;
     }
     switch (ev->type) {
     case SDL_EVENT_QUIT:
@@ -319,6 +436,108 @@ static void handle_event(const SDL_Event *ev)
     }
 }
 
+/* ── A script of input for the window, for tests ───────────────────────── */
+
+/* RECOMP_HOST_SCRIPT="<ms>:key:<name>;<ms>:click:<x>:<y>;<ms>:move:<x>:<y>;<ms>:text:<chars>", times
+ * from the moment the window opened and positions in window points, plays the events through the
+ * handler as the window's own would arrive. It is how the overlay's keyboard and mouse paths are
+ * exercised on a machine with nobody at it (a locked screen, a remote run). A key is a key's SDL
+ * name (F1, Escape, A, Space). Off unless the variable is set. */
+typedef struct { Uint64 at; int kind; float x, y; char text[32]; int sent; Uint64 release; } ScriptStep;
+enum { STEP_KEY, STEP_CLICK, STEP_MOVE, STEP_TEXT };
+#define SCRIPT_MAX 64
+static ScriptStep s_script[SCRIPT_MAX];
+static int        s_script_n;
+static Uint64     s_script_start;
+
+static void script_parse(const char *text)
+{
+    const char *p = text;
+
+    while (p && *p && s_script_n < SCRIPT_MAX) {
+        ScriptStep st;
+        char kind[16] = "";
+        int used = 0;
+        unsigned long long ms;
+
+        memset(&st, 0, sizeof st);
+        if (sscanf(p, "%llu:%15[a-z]:%n", &ms, kind, &used) >= 2 && used) {
+            const char *arg = p + used;
+            size_t n = strcspn(arg, ";");
+            st.at = ms;
+            if (!strcmp(kind, "key") || !strcmp(kind, "text")) {
+                st.kind = kind[0] == 'k' ? STEP_KEY : STEP_TEXT;
+                snprintf(st.text, sizeof st.text, "%.*s", (int)(n < sizeof st.text - 1 ? n : sizeof st.text - 1), arg);
+                s_script[s_script_n++] = st;
+            } else if (!strcmp(kind, "click") || !strcmp(kind, "move")) {
+                st.kind = kind[0] == 'c' ? STEP_CLICK : STEP_MOVE;
+                if (sscanf(arg, "%f:%f", &st.x, &st.y) == 2)
+                    s_script[s_script_n++] = st;
+            }
+        }
+        p = strchr(p, ';');
+        if (p) p++;
+    }
+}
+
+/* Play what is due. Called from the first thread's loop. */
+static void script_step(void);
+static void handle_event(const SDL_Event *ev);
+
+static void script_send(SDL_Event *ev) { handle_event(ev); }
+
+static void script_step(void)
+{
+    Uint64 now;
+    int i;
+
+    if (!s_script_n || !s_window)
+        return;
+    if (!s_script_start)
+        s_script_start = SDL_GetTicks();
+    now = SDL_GetTicks() - s_script_start;
+    for (i = 0; i < s_script_n; i++) {
+        ScriptStep *st = &s_script[i];
+        SDL_Event ev;
+
+        if (st->sent == 2 || now < st->at)
+            continue;
+        SDL_zero(ev);
+        if (st->kind == STEP_KEY) {
+            SDL_Scancode sc = SDL_GetScancodeFromName(st->text);
+            ev.type = st->sent ? SDL_EVENT_KEY_UP : SDL_EVENT_KEY_DOWN;
+            ev.key.scancode = sc;
+            ev.key.key = SDL_GetKeyFromScancode(sc, 0, false);
+            ev.key.down = !st->sent;
+            if (!st->sent) { st->release = now + 80; st->sent = 1; script_send(&ev); }
+            else if (now >= st->release) { st->sent = 2; script_send(&ev); }
+        } else if (st->kind == STEP_TEXT) {
+            ev.type = SDL_EVENT_TEXT_INPUT;
+            ev.text.text = st->text;
+            st->sent = 2;
+            script_send(&ev);
+        } else if (st->kind == STEP_MOVE || (st->kind == STEP_CLICK && !st->sent)) {
+            ev.type = SDL_EVENT_MOUSE_MOTION;
+            ev.motion.x = st->x; ev.motion.y = st->y;
+            script_send(&ev);
+            if (st->kind == STEP_MOVE) { st->sent = 2; }
+            else { st->sent = 1; st->release = now + 60; }
+        } else if (st->kind == STEP_CLICK && st->sent == 1 && now >= st->release) {
+            ev.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
+            ev.button.button = SDL_BUTTON_LEFT; ev.button.down = true;
+            ev.button.x = st->x; ev.button.y = st->y;
+            script_send(&ev);
+            st->sent = 3; st->release = now + 100;
+        } else if (st->kind == STEP_CLICK && st->sent == 3 && now >= st->release) {
+            ev.type = SDL_EVENT_MOUSE_BUTTON_UP;
+            ev.button.button = SDL_BUTTON_LEFT; ev.button.down = false;
+            ev.button.x = st->x; ev.button.y = st->y;
+            script_send(&ev);
+            st->sent = 2;
+        }
+    }
+}
+
 /* Run the game. With a display: on its own thread, this one serving the
  * window until the game returns. Without: here. */
 int host_posix_run(int (*game_main)(void))
@@ -338,7 +557,7 @@ int host_posix_run(int (*game_main)(void))
         return game_main();
     }
     s_have_video = 1;
-    s_call_event = SDL_RegisterEvents(3);
+    s_call_event = SDL_RegisterEvents(5);
     s_game_main = game_main;
 
     /* The title's main thread: the stack the first thread would have had. */
@@ -349,10 +568,13 @@ int host_posix_run(int (*game_main)(void))
         return 1;
     }
     pthread_attr_destroy(&attr);
+    if (getenv("RECOMP_HOST_SCRIPT"))
+        script_parse(getenv("RECOMP_HOST_SCRIPT"));
     while (!s_game_done) {
         SDL_Event ev;
-        if (SDL_WaitEventTimeout(&ev, 100))
+        if (SDL_WaitEventTimeout(&ev, s_script_n ? 10 : 100))
             handle_event(&ev);
+        script_step();
     }
     pthread_join(th, NULL);
     SDL_Quit();

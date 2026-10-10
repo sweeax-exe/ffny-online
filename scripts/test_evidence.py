@@ -25,7 +25,10 @@ def digest(path):
 
 
 def assertion(name, passed, detail, **metrics):
-    return dict(name=name, status='pass' if passed else 'fail', detail=detail, metrics=metrics)
+    """`passed` is True, False, or None for a check that did not apply here (reported as skipped,
+    never as a pass)."""
+    status = 'skip' if passed is None else 'pass' if passed else 'fail'
+    return dict(name=name, status=status, detail=detail, metrics=metrics)
 
 
 def tree_manifest(root):
@@ -547,10 +550,13 @@ def write_report(folder, report):
     root = ET.Element('testsuite', name=report['name'], tests=str(len(checks)),
                       failures=str(sum(c['status'] == 'fail' for c in checks)),
                       errors=str(sum(c['status'] == 'blocked' for c in checks)),
+                      skipped=str(sum(c['status'] == 'skip' for c in checks)),
                       time=str(report.get('seconds', 0)))
     for c in checks:
         node = ET.SubElement(root, 'testcase', name=c['name'], time=str(c.get('seconds', 0)))
-        if c['status'] != 'pass':
+        if c['status'] == 'skip':
+            ET.SubElement(node, 'skipped', message=c['detail'])
+        elif c['status'] != 'pass':
             ET.SubElement(node, 'error' if c['status'] == 'blocked' else 'failure', message=c['detail'])
         ET.SubElement(node, 'system-out').text = json.dumps(c.get('metrics', {}), sort_keys=True)
     ET.ElementTree(root).write(folder / 'junit.xml', encoding='utf-8', xml_declaration=True)

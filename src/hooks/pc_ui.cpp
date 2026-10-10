@@ -11,9 +11,19 @@
 // to look for its hotkeys.
 
 #define _CRT_SECURE_NO_WARNINGS
+#if defined(_WIN32)
 #include <windows.h>
 #include <shellapi.h>
 #include <d3d11.h>
+#else
+#include <spawn.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#include <chrono>
+#include <mutex>
+#include <SDL3/SDL.h>
+#endif
+#include <ctype.h>
 #include <stdio.h>
 #include <string.h>
 #include <atomic>
@@ -21,8 +31,12 @@
 #include <vector>
 
 #include "imgui.h"
+#if defined(_WIN32)
 #include "imgui_impl_win32.h"
 #include "imgui_impl_dx11.h"
+#else
+#include "imgui_impl_vulkan.h"
+#endif
 
 extern "C" {
 #include "recomp_settings.h"
@@ -40,6 +54,10 @@ extern "C" {
 
 // ---- the lock -------------------------------------------------------------------------------
 
+#if defined(_WIN32)
+typedef ULONGLONG UiTick;
+static UiTick ui_ticks() { return GetTickCount64(); }
+
 static CRITICAL_SECTION g_cs;
 static INIT_ONCE g_cs_once = INIT_ONCE_STATIC_INIT;
 
@@ -56,6 +74,19 @@ void ui_lock()
 }
 
 void ui_unlock() { LeaveCriticalSection(&g_cs); }
+#else
+typedef unsigned long long UiTick;
+static UiTick ui_ticks()
+{
+    using namespace std::chrono;
+    return (UiTick)duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count();
+}
+
+// Recursive, like a critical section: a setting changed inside the screen calls back into it.
+static std::recursive_mutex g_mutex;
+void ui_lock() { g_mutex.lock(); }
+void ui_unlock() { g_mutex.unlock(); }
+#endif
 
 // ---- small helpers --------------------------------------------------------------------------
 
@@ -150,7 +181,7 @@ struct Capture {
     enum Kind { NONE, KEY, PAD } kind = NONE;
     std::string section, key;       // the setting that gets the result
     bool append = false;            // keyboard bindings take up to four keys; others take one
-    ULONGLONG armed_at = 0;
+    UiTick armed_at = 0;
 };
 
 Capture g_capture;
@@ -162,7 +193,7 @@ void capture_start(Capture::Kind kind, const char *section, const char *key, boo
     g_capture.section = section;
     g_capture.key = key;
     g_capture.append = append;
-    g_capture.armed_at = GetTickCount64() + 250;     // the click that started it is not the answer
+    g_capture.armed_at = ui_ticks() + 250;     // the click that started it is not the answer
     memset(g_pad_prev, 1, sizeof(g_pad_prev));       // a button already down does not count
 }
 
@@ -194,10 +225,11 @@ void capture_commit_key(int vk)
 
 bool ui_capturing() { return g_capture.kind != Capture::NONE; }
 
+#if defined(_WIN32)
 bool ui_capture_message(HWND, UINT msg, WPARAM wp, LPARAM lp)
 {
     if (g_capture.kind != Capture::KEY) return false;
-    bool armed = GetTickCount64() >= g_capture.armed_at;
+    bool armed = ui_ticks() >= g_capture.armed_at;
     switch (msg) {
     case WM_KEYDOWN: case WM_SYSKEYDOWN: {
         int vk = pc_input_vk_from_message(wp, lp);
@@ -219,6 +251,35 @@ bool ui_capture_message(HWND, UINT msg, WPARAM wp, LPARAM lp)
     }
     return false;
 }
+#else
+bool ui_capture_sdl_event(const SDL_Event *e)
+{
+    if (g_capture.kind != Capture::KEY) return false;
+    bool armed = ui_ticks() >= g_capture.armed_at;
+    switch (e->type) {
+    case SDL_EVENT_KEY_DOWN: {
+        int vk = host_posix_vk_from_scancode(e->key.scancode);
+        if (vk == VK_ESCAPE) { capture_cancel(); return true; }
+        if (armed && vk && !e->key.repeat && vk != VK_F11 && vk != VK_MENU && vk != 0xA4 && vk != 0xA5)
+            capture_commit_key(vk);
+        return true;
+    }
+    case SDL_EVENT_KEY_UP: case SDL_EVENT_TEXT_INPUT:
+        return true;
+    case SDL_EVENT_MOUSE_BUTTON_DOWN:
+        // Clicks are the menu's: the left and right buttons have buttons of their own.
+        if (e->button.button == SDL_BUTTON_MIDDLE) { if (armed) capture_commit_key(VK_MBUTTON); return true; }
+        if (e->button.button == SDL_BUTTON_X1) { if (armed) capture_commit_key(VK_XBUTTON1); return true; }
+        if (e->button.button == SDL_BUTTON_X2) { if (armed) capture_commit_key(VK_XBUTTON2); return true; }
+        return false;
+    case SDL_EVENT_MOUSE_WHEEL:
+        if (armed && e->wheel.y != 0)
+            capture_commit_key(e->wheel.y > 0 ? INPUT_KEY_WHEEL_UP : INPUT_KEY_WHEEL_DOWN);
+        return true;
+    }
+    return false;
+}
+#endif
 
 // Pads: the first button pressed on any of them becomes the answer.
 static void capture_poll_pad()
@@ -229,7 +290,7 @@ static void capture_poll_pad()
         if (!xbox_HostInputRawPad(slot, &raw)) continue;
         for (int s = INPUT_SRC_SOUTH; s < INPUT_SRC_COUNT; s++) {
             bool down = raw.src[s] >= 16384;
-            if (down && !g_pad_prev[s] && GetTickCount64() >= g_capture.armed_at) {
+            if (down && !g_pad_prev[s] && ui_ticks() >= g_capture.armed_at) {
                 recomp_settings_set_text(g_capture.section.c_str(), g_capture.key.c_str(), input_source_name(s));
                 commit();
                 capture_cancel();
@@ -282,20 +343,26 @@ void ui_feed_gamepad()
 // on a large monitor) gets bigger text, so the screen is as easy to read as it is in a window.
 static float g_extra_scale = 1.0f;
 
-static float display_scale(HWND window)
+static float display_scale(UiWindow window)
 {
     float dpi = g_extra_scale;
+#if defined(_WIN32)
     if (window) {
         UINT d = GetDpiForWindow(window);
         if (d) dpi *= d / 96.0f;
     }
+#else
+    // The window's points are not its pixels on a Retina display, and the screen is drawn in points
+    // (the launcher) or already sized by the picture's height (the overlay): nothing to add.
+    (void)window;
+#endif
     int percent = recomp_settings_get("ui", "scale", 100);
     return dpi * (percent / 100.0f);
 }
 
 static float g_scale_applied;
 
-void ui_apply_scale(HWND window)
+void ui_apply_scale(UiWindow window)
 {
     float s = display_scale(window);
     float &applied = g_scale_applied;
@@ -326,7 +393,7 @@ void ui_apply_scale(HWND window)
     style.FontScaleMain = s;
 }
 
-void ui_context_begin(HWND window)
+void ui_context_begin(UiWindow window)
 {
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
@@ -337,12 +404,22 @@ void ui_context_begin(HWND window)
     io.ConfigNavCaptureKeyboard = true;
     g_scale_applied = 0.0f;                 // a new context has not been styled yet
     // The system's UI font reads better than the built-in one at small sizes.
+#if defined(_WIN32)
     char font[MAX_PATH];
     if (GetWindowsDirectoryA(font, sizeof(font))) {
         strcat(font, "\\Fonts\\segoeui.ttf");
         if (GetFileAttributesA(font) != INVALID_FILE_ATTRIBUTES)
             io.Fonts->AddFontFromFileTTF(font, 17.0f);
     }
+#else
+    static const char *const fonts[] = {
+        "/System/Library/Fonts/Supplemental/Arial.ttf", "/System/Library/Fonts/Helvetica.ttc",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", "/usr/share/fonts/dejavu/DejaVuSans.ttf",
+    };
+    struct stat st;
+    for (const char *font : fonts)
+        if (stat(font, &st) == 0 && io.Fonts->AddFontFromFileTTF(font, 17.0f)) break;
+#endif
     ui_apply_scale(window);
     remember_start_values();
 }
@@ -620,12 +697,45 @@ static void page_keyboard()
     }
 }
 
+#if defined(_WIN32)
+static const char *k_show_file_label = "Show settings.ini in Explorer";
+
 static void open_folder()
 {
     char path[MAX_PATH * 2];
     snprintf(path, sizeof(path), "/select,\"%s\"", pc_settings_path());
     ShellExecuteA(nullptr, "open", "explorer.exe", path, nullptr, SW_SHOWNORMAL);
 }
+#else
+extern char **environ;
+#if defined(__APPLE__)
+static const char *k_show_file_label = "Show settings.ini in Finder";
+#else
+static const char *k_show_file_label = "Show the settings folder";
+#endif
+
+// Finder selects the file (`open -R`); elsewhere the file manager opens its folder (`xdg-open`).
+// No shell is involved, so a path with spaces needs no quoting.
+static void open_folder()
+{
+    const char *path = pc_settings_path();
+    if (!path || !*path) return;
+    pid_t pid;
+    int err;
+#if defined(__APPLE__)
+    char *argv[] = { (char *)"open", (char *)"-R", (char *)path, nullptr };
+    err = posix_spawn(&pid, "/usr/bin/open", nullptr, nullptr, argv, environ);
+#else
+    std::string folder = path;
+    size_t slash = folder.find_last_of('/');
+    folder = slash == std::string::npos ? "." : folder.substr(0, slash ? slash : 1);
+    char *argv[] = { (char *)"xdg-open", (char *)folder.c_str(), nullptr };
+    err = posix_spawnp(&pid, "xdg-open", nullptr, nullptr, argv, environ);
+#endif
+    if (err != 0)
+        fprintf(stderr, "[UI] could not open the settings file's folder\n");
+}
+#endif
 
 static void page_general(UiMode mode)
 {
@@ -659,7 +769,7 @@ static void page_general(UiMode mode)
     settings_group("ui", { "scale" });
     ImGui::SeparatorText("Files");
     ImGui::TextWrapped("Settings are saved as you change them in: %s", pc_settings_path());
-    if (ImGui::Button("Show settings.ini in Explorer")) open_folder();
+    if (ImGui::Button(k_show_file_label)) open_folder();
     ImGui::SameLine();
     static bool confirm_reset;
     if (ImGui::Button("Reset every setting to default")) confirm_reset = true;
@@ -747,17 +857,25 @@ UiResult ui_draw(UiMode mode, float x, float y, float width, float height)
 
 // ---- the overlay ----------------------------------------------------------------------------------------------------
 
+#if !defined(_WIN32)
+extern "C" void host_posix_overlay_changed(int open);      // src/host_posix.c
+#endif
+
 namespace {
 
 std::atomic<bool> g_open(false);
 std::atomic<bool> g_toggle(false);
 bool g_just_opened = false;
 bool g_ready = false;               // the context and backends exist (under the lock)
+#if defined(_WIN32)
 HWND g_window = nullptr;
 ID3D11Device *g_device = nullptr;
+#else
+UiWindow g_window = nullptr;        // unused: the overlay is drawn in the picture's own window
+#endif
 int g_overlay_vk = VK_F1;
 
-struct Chord { int src[3]; int n; ULONGLONG since; bool fired; };
+struct Chord { int src[3]; int n; UiTick since; bool fired; };
 std::vector<Chord> g_chords;        // read and written on the drawing thread, and by apply_settings under the lock
 
 void parse_chords()
@@ -795,7 +913,7 @@ bool pad_toggle_pressed()
         for (int s = 0; s < INPUT_SRC_COUNT; s++)
             if (raw.src[s] > all.src[s]) all.src[s] = raw.src[s];
     }
-    ULONGLONG now = GetTickCount64();
+    UiTick now = ui_ticks();
     bool fire = false;
     for (Chord &c : g_chords) {
         bool held = true;
@@ -813,13 +931,18 @@ void set_open(bool open)
     g_open = open;
     g_just_opened = open;
     xbox_HostInputSetUiActive(open ? 1 : 0);
+#if !defined(_WIN32)
+    host_posix_overlay_changed(open ? 1 : 0);       // the pointer shows, and typing is delivered
+#endif
     fprintf(stderr, "[UI] overlay %s\n", open ? "opened" : "closed");
     fflush(stderr);
 }
 
 } // namespace
 
+#if defined(_WIN32)
 extern "C" void pc_ui_set_window(HWND window) { g_window = window; }
+#endif
 
 extern "C" int pc_ui_overlay_open(void) { return g_open.load() ? 1 : 0; }
 
@@ -834,6 +957,7 @@ extern "C" void pc_ui_apply_settings(void)
     ui_unlock();
 }
 
+#if defined(_WIN32)
 extern "C" int pc_ui_window_message(HWND window, UINT msg, WPARAM wp, LPARAM lp)
 {
     if ((msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN) && !(lp & (1 << 30)) && (int)wp == g_overlay_vk) {
@@ -928,3 +1052,249 @@ extern "C" void pc_ui_overlay(void *device, void *context, void *window_rtv, uns
     if (close_request) set_open(false);
     ui_unlock();
 }
+#endif
+
+#if !defined(_WIN32)
+// ---- off Windows: SDL events, and the overlay through the Vulkan present --------------------------------------------
+
+static ImGuiKey imgui_key(SDL_Scancode sc)
+{
+    if (sc >= SDL_SCANCODE_A && sc <= SDL_SCANCODE_Z) return (ImGuiKey)(ImGuiKey_A + (sc - SDL_SCANCODE_A));
+    if (sc >= SDL_SCANCODE_1 && sc <= SDL_SCANCODE_9) return (ImGuiKey)(ImGuiKey_1 + (sc - SDL_SCANCODE_1));
+    if (sc >= SDL_SCANCODE_F1 && sc <= SDL_SCANCODE_F12) return (ImGuiKey)(ImGuiKey_F1 + (sc - SDL_SCANCODE_F1));
+    switch (sc) {
+    case SDL_SCANCODE_0: return ImGuiKey_0;
+    case SDL_SCANCODE_TAB: return ImGuiKey_Tab;
+    case SDL_SCANCODE_LEFT: return ImGuiKey_LeftArrow;
+    case SDL_SCANCODE_RIGHT: return ImGuiKey_RightArrow;
+    case SDL_SCANCODE_UP: return ImGuiKey_UpArrow;
+    case SDL_SCANCODE_DOWN: return ImGuiKey_DownArrow;
+    case SDL_SCANCODE_PAGEUP: return ImGuiKey_PageUp;
+    case SDL_SCANCODE_PAGEDOWN: return ImGuiKey_PageDown;
+    case SDL_SCANCODE_HOME: return ImGuiKey_Home;
+    case SDL_SCANCODE_END: return ImGuiKey_End;
+    case SDL_SCANCODE_INSERT: return ImGuiKey_Insert;
+    case SDL_SCANCODE_DELETE: return ImGuiKey_Delete;
+    case SDL_SCANCODE_BACKSPACE: return ImGuiKey_Backspace;
+    case SDL_SCANCODE_SPACE: return ImGuiKey_Space;
+    case SDL_SCANCODE_RETURN: return ImGuiKey_Enter;
+    case SDL_SCANCODE_ESCAPE: return ImGuiKey_Escape;
+    case SDL_SCANCODE_KP_ENTER: return ImGuiKey_KeypadEnter;
+    case SDL_SCANCODE_MINUS: return ImGuiKey_Minus;
+    case SDL_SCANCODE_EQUALS: return ImGuiKey_Equal;
+    case SDL_SCANCODE_PERIOD: return ImGuiKey_Period;
+    case SDL_SCANCODE_COMMA: return ImGuiKey_Comma;
+    case SDL_SCANCODE_SLASH: return ImGuiKey_Slash;
+    case SDL_SCANCODE_LSHIFT: return ImGuiKey_LeftShift;
+    case SDL_SCANCODE_RSHIFT: return ImGuiKey_RightShift;
+    case SDL_SCANCODE_LCTRL: return ImGuiKey_LeftCtrl;
+    case SDL_SCANCODE_RCTRL: return ImGuiKey_RightCtrl;
+    case SDL_SCANCODE_LALT: return ImGuiKey_LeftAlt;
+    case SDL_SCANCODE_RALT: return ImGuiKey_RightAlt;
+    case SDL_SCANCODE_LGUI: return ImGuiKey_LeftSuper;
+    case SDL_SCANCODE_RGUI: return ImGuiKey_RightSuper;
+    default: return ImGuiKey_None;
+    }
+}
+
+static float g_extra_scale_set = 1.0f;
+static unsigned long long g_last_frame_ns;
+
+void ui_set_extra_scale(float scale) { g_extra_scale = scale; (void)g_extra_scale_set; }
+
+bool ui_sdl_event(const SDL_Event *e, float scale_x, float scale_y)
+{
+    ImGuiIO &io = ImGui::GetIO();
+    switch (e->type) {
+    case SDL_EVENT_MOUSE_MOTION:
+        io.AddMousePosEvent(e->motion.x * scale_x, e->motion.y * scale_y);
+        return true;
+    case SDL_EVENT_MOUSE_BUTTON_DOWN:
+    case SDL_EVENT_MOUSE_BUTTON_UP: {
+        int b = e->button.button == SDL_BUTTON_LEFT ? 0 : e->button.button == SDL_BUTTON_RIGHT ? 1 :
+                e->button.button == SDL_BUTTON_MIDDLE ? 2 : -1;
+        io.AddMousePosEvent(e->button.x * scale_x, e->button.y * scale_y);
+        if (b >= 0) io.AddMouseButtonEvent(b, e->type == SDL_EVENT_MOUSE_BUTTON_DOWN);
+        return true;
+    }
+    case SDL_EVENT_MOUSE_WHEEL:
+        io.AddMouseWheelEvent(e->wheel.x, e->wheel.y);
+        return true;
+    case SDL_EVENT_WINDOW_MOUSE_LEAVE:
+        io.AddMousePosEvent(-FLT_MAX, -FLT_MAX);
+        return true;
+    case SDL_EVENT_TEXT_INPUT:
+        io.AddInputCharactersUTF8(e->text.text);
+        return true;
+    case SDL_EVENT_KEY_DOWN:
+    case SDL_EVENT_KEY_UP: {
+        SDL_Keymod mod = e->key.mod;
+        io.AddKeyEvent(ImGuiMod_Ctrl, (mod & SDL_KMOD_CTRL) != 0);
+        io.AddKeyEvent(ImGuiMod_Shift, (mod & SDL_KMOD_SHIFT) != 0);
+        io.AddKeyEvent(ImGuiMod_Alt, (mod & SDL_KMOD_ALT) != 0);
+        io.AddKeyEvent(ImGuiMod_Super, (mod & SDL_KMOD_GUI) != 0);
+        ImGuiKey k = imgui_key(e->key.scancode);
+        if (k != ImGuiKey_None) io.AddKeyEvent(k, e->type == SDL_EVENT_KEY_DOWN);
+        return true;
+    }
+    default:
+        return false;
+    }
+}
+
+void ui_sdl_frame(float width, float height, float framebuffer_scale)
+{
+    ImGuiIO &io = ImGui::GetIO();
+    unsigned long long now = SDL_GetTicksNS();
+    io.DisplaySize = ImVec2(width, height);
+    io.DisplayFramebufferScale = ImVec2(framebuffer_scale, framebuffer_scale);
+    io.DeltaTime = g_last_frame_ns ? (float)((now - g_last_frame_ns) / 1e9) : 1.0f / 60.0f;
+    if (io.DeltaTime < 0.0001f) io.DeltaTime = 0.0001f;
+    if (io.DeltaTime > 0.25f) io.DeltaTime = 0.25f;
+    g_last_frame_ns = now;
+}
+
+// ---- the overlay, drawn by the toolkit's Vulkan present --------------------------------------------------------------
+
+#include "d3d8_vk.h"
+
+namespace {
+
+uint32_t g_vk_generation;
+std::atomic<unsigned> g_frame_w(0), g_frame_h(0);       // what the overlay was last drawn into, in pixels
+
+// Asked once a frame whether to draw: this is where the hotkey and the pad chord are looked for.
+int overlay_active(void *)
+{
+    static bool configured;
+    if (!configured) {
+        configured = true;
+        pc_ui_apply_settings();
+    }
+    ui_lock();
+    bool toggled = g_toggle.exchange(false);
+    if (!ui_capturing() && !g_chords.empty() && pad_toggle_pressed()) toggled = true;
+    if (toggled) set_open(!g_open.load());
+    bool open = g_open.load();
+    ui_unlock();
+    return open ? 1 : 0;
+}
+
+void overlay_init_backend(const D3D8VkOverlayFrame *f)
+{
+    ImGui_ImplVulkan_InitInfo info = {};
+    info.ApiVersion = VK_API_VERSION_1_1;
+    info.Instance = (VkInstance)f->instance;
+    info.PhysicalDevice = (VkPhysicalDevice)f->physical_device;
+    info.Device = (VkDevice)f->device;
+    info.QueueFamily = f->queue_family;
+    info.Queue = (VkQueue)f->queue;
+    info.DescriptorPoolSize = IMGUI_IMPL_VULKAN_MINIMUM_SAMPLED_IMAGE_POOL_SIZE;
+    info.MinImageCount = 2;
+    info.ImageCount = f->image_count < 2 ? 2 : f->image_count;
+    info.PipelineInfoMain.RenderPass = (VkRenderPass)f->render_pass;
+    ImGui_ImplVulkan_Init(&info);
+    g_vk_generation = f->generation;
+}
+
+void overlay_draw(const D3D8VkOverlayFrame *f, void *)
+{
+    ui_lock();
+    if (!g_open.load()) { ui_unlock(); return; }
+    if (g_ready && f->generation != g_vk_generation) {
+        // The window's image has another format: the pipelines were built for the old pass.
+        ImGui_ImplVulkan_Shutdown();
+        overlay_init_backend(f);
+    }
+    if (!g_ready) {
+        ui_context_begin(nullptr);
+        g_last_frame_ns = 0;
+        overlay_init_backend(f);
+        g_ready = true;
+        fprintf(stderr, "[UI] overlay ready (Dear ImGui %s, Vulkan)\n", IMGUI_VERSION);
+        fflush(stderr);
+    }
+
+    g_frame_w = f->width;
+    g_frame_h = f->height;
+    {
+        float h = f->height / 960.0f;
+        ui_set_extra_scale(h < 1.0f ? 1.0f : h > 2.4f ? 2.4f : h);
+    }
+    ui_apply_scale(nullptr);
+    ui_feed_gamepad();
+    ImGui_ImplVulkan_NewFrame();
+    ui_sdl_frame((float)f->width, (float)f->height, 1.0f);
+    ImGui::NewFrame();
+
+    // Dim the game and put the settings in a panel in the middle (as the Direct3D overlay does).
+    ImGuiIO &io = ImGui::GetIO();
+    if (g_just_opened) {
+        g_just_opened = false;
+        ImGui::SetNextWindowFocus();
+    }
+    ImDrawList *bg = ImGui::GetBackgroundDrawList();
+    bg->AddRectFilled(ImVec2(0, 0), io.DisplaySize, IM_COL32(0, 0, 0, 150));
+    float pw = io.DisplaySize.x * 0.82f, ph = io.DisplaySize.y * 0.86f;
+    if (pw < 560) pw = io.DisplaySize.x;
+    if (ph < 420) ph = io.DisplaySize.y;
+    bool close_request = false;
+    {
+        ImGui::SetNextWindowBgAlpha(0.96f);
+        UiResult r = ui_draw(UI_OVERLAY, (io.DisplaySize.x - pw) / 2, (io.DisplaySize.y - ph) / 2, pw, ph);
+        close_request = r.leave;
+    }
+    // Escape or the pad's cancel button closes the overlay, unless a popup or a capture is open.
+    if (!ui_capturing() && !ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel) &&
+        (ImGui::IsKeyPressed(ImGuiKey_Escape, false) || ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false)))
+        close_request = true;
+
+    ImGui::Render();
+    ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), (VkCommandBuffer)f->command_buffer);
+    if (close_request) set_open(false);
+    ui_unlock();
+}
+
+} // namespace
+
+// Offer an SDL event to the overlay, on the thread that reads the window's events. Returns non-zero
+// when the overlay used it (its key, a key being captured for a binding) and it should go no further.
+extern "C" int pc_ui_sdl_event(const void *event, float window_width, float window_height)
+{
+    const SDL_Event *e = (const SDL_Event *)event;
+    if (e->type == SDL_EVENT_KEY_DOWN && !e->key.repeat &&
+        host_posix_vk_from_scancode(e->key.scancode) == g_overlay_vk) {
+        ui_lock();
+        bool capturing = ui_capturing();
+        ui_unlock();
+        if (!capturing) {
+            g_toggle = true;
+            return 1;
+        }
+    }
+    if (!g_open.load()) return 0;
+    ui_lock();
+    int handled = 0;
+    if (g_ready) {
+        if (ui_capture_sdl_event(e)) {
+            handled = 1;
+        } else {
+            // The pointer is in the window's points; the overlay is drawn in the pixels of the
+            // image it was last drawn into, which need not be the window's own pixel size.
+            float fw = (float)g_frame_w.load(), fh = (float)g_frame_h.load();
+            float sx = window_width > 0 && fw > 0 ? fw / window_width : 1.0f;
+            float sy = window_height > 0 && fh > 0 ? fh / window_height : 1.0f;
+            ui_sdl_event(e, sx, sy);
+        }
+    }
+    ui_unlock();
+    return handled;
+}
+
+// Hand the overlay to the Vulkan present step. Call before the graphics device is made.
+extern "C" void pc_ui_register_overlay(void)
+{
+    D3D8VkOverlay overlay = { overlay_active, overlay_draw, nullptr };
+    d3d8_vk_set_overlay(&overlay);
+}
+#endif

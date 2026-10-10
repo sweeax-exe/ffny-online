@@ -53,11 +53,24 @@ void pc_ui_apply_settings(void);
 int pc_launcher_run(void);
 
 #else
-/* The overlay and the launcher draw through Direct3D 11 and take Win32 window
- * messages. Off Windows there is neither yet: the settings file and the
- * environment are the way in, and the game starts at once. */
-static inline int  pc_ui_overlay_open(void)   { return 0; }
-static inline void pc_ui_apply_settings(void) { }
+/* ---- off Windows: SDL's window, the toolkit's Vulkan present (pc_ui.cpp, pc_launcher_sdl.cpp) ---- */
+
+/* Offer an SDL event (an SDL_Event) to the overlay, on the thread that reads the window's events.
+ * The window's size in points turns the pointer's position into the pixels the overlay is drawn
+ * in. Returns non-zero when the overlay used it (its key, a key being captured for a binding) and
+ * it should go no further. */
+int pc_ui_sdl_event(const void *event, float window_width, float window_height);
+
+int  pc_ui_overlay_open(void);
+void pc_ui_apply_settings(void);
+
+/* Hand the overlay to the toolkit's Vulkan present step (d3d8_vk_set_overlay). */
+void pc_ui_register_overlay(void);
+
+/* Show the launcher and run it until the player plays or quits. Returns 1 to go on and start the
+ * game, 0 to quit. The window is SDL's, so this hands the work to the thread that owns the window
+ * (host_posix_call_on_main) and waits. Returns 1 when there is no window to show it in. */
+int pc_launcher_run(void);
 #endif
 
 #ifdef __cplusplus

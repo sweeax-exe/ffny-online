@@ -9,7 +9,11 @@ per-game adapters for testing new upstream xboxrecomp releases against Def Jam,
 TimeSplitters 2 and Mercenaries, accounting for their different toolkit integrations.
 This is deferred planning; existing milestone gates and dependency pins are unchanged.
 
-## The launcher and the overlay on macOS — planned 2026-10-08
+## The launcher and the overlay on macOS — planned 2026-10-08, done in v0.6.2
+
+Done in v0.6.2 as planned below, with two differences: the launcher uses SDL's renderer (Metal) rather than a Vulkan device of its own,
+and the SDL events are fed to ImGui by a small piece of glue instead of `imgui_impl_sdl3`. Linux compiles from the same sources and
+has not been run. What follows is the plan as written.
 
 Asked for by Vlad at the v0.5.0 release. The start-up launcher and the in-game overlay (v0.4.0,
 `src/hooks/pc_ui.cpp`, `pc_launcher.cpp`) are Dear ImGui on its Win32 and Direct3D 11 backends, so the

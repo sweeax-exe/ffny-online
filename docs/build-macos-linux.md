@@ -18,9 +18,10 @@ same pipeline off Windows, since v0.5.0.
 What is different from Windows:
 
 - The picture is drawn through Vulkan (MoltenVK on macOS) instead of Direct3D 11.
-- There is **no launcher and no in-game overlay** yet. The game starts at once;
-  settings are changed by editing `settings.ini`
-  ([settings reference](settings-reference.md)).
+- The launcher (a window before the game starts) and the in-game overlay (F1) are there since v0.6.2, as
+  on Windows ([guide](launcher-and-overlay.md)); `settings.ini` still works too
+  ([settings reference](settings-reference.md)). Hold Shift while the game starts to see
+  the launcher when it is skipped.
 - The game does not write its own log file; redirect it yourself (see Run).
 
 The source contains no game executable or assets. You need your own **USA Xbox
@@ -122,15 +123,16 @@ The redirection keeps a log of the session; the game prints a great deal, and
   [Controllers, keyboard and mouse](10-input.md).
 - F11 or Alt+Enter switches full screen. Cmd+Q (macOS) or closing the window
   quits.
-- Display settings (window size, render scale, gamma) are in `settings.ini`;
-  see the [settings reference](settings-reference.md). There is no launcher or
-  overlay to change them from.
+- Display settings (window size, render scale, gamma) are in the launcher, the F1
+  overlay and `settings.ini`; see the [settings reference](settings-reference.md).
 - `RECOMP_HEADLESS=1` runs without a window or sound device: frames are drawn
   off screen. The tests use it.
 
 ## Known limits
 
-- No launcher or overlay (see above); they come in v0.6.2.
+- The window follows the display's pixel density (2560x1920 pixels for the default 1280x960 window on a Retina
+  display, as `[HOST] window ...` in the log says), and the overlay is drawn at that resolution. Window width and
+  height changed in the overlay resize the window at once.
 - HD textures work since v0.6.1 through the same `[textures]` settings as on Windows
   ([guide](hd-textures.md)); the packs are made by the macOS setup's HD option or by
   `scripts/build-hd-pack.py`. They use more memory (`cache_mb`, 512 MiB by default) and

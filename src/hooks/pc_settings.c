@@ -365,6 +365,29 @@ void pc_display_set(const char *key, int value)
 /* The launcher shows on every launch unless the player turned it off (docs/launcher in
  * pc_ui.h has the exact rule). It edits the settings, so the input layer is started again
  * afterwards and anything read once at start-up is read after it. */
+#if !defined(_WIN32)
+int host_posix_have_video(void);       /* src/host_posix.c */
+int host_posix_shift_held(void);
+
+static const char *const *g_argv;
+static int g_argc;
+
+void pc_settings_set_args(int argc, char **argv)
+{
+    g_argc = argc;
+    g_argv = (const char *const *)argv;
+}
+
+static int has_arg(const char *flag)
+{
+    int i;
+    for (i = 1; i < g_argc; i++)
+        if (g_argv[i] && !strcmp(g_argv[i], flag))
+            return 1;
+    return 0;
+}
+#endif
+
 static void run_launcher_if_wanted(void)
 {
 #if defined(_WIN32)
@@ -382,6 +405,28 @@ static void run_launcher_if_wanted(void)
         fprintf(stderr, "[UI] the launcher was closed; not starting the game\n");
         fflush(stderr);
         ExitProcess(0);
+    }
+    pc_input_restart();
+#else
+    const char *settings = getenv("RECOMP_SETTINGS");
+    int test_run = (settings && !strcasecmp(settings, "none")) ||
+                   (getenv("RECOMP_PAD_SCRIPT") && !getenv("RECOMP_PAD_HOST")) ||
+                   getenv("RECOMP_HEADLESS") != NULL;
+    int force = has_arg("--launcher");
+    int no = has_arg("--no-launcher");
+
+    /* Nothing to show it in without a display; the game itself then runs off screen. */
+    if (!host_posix_have_video())
+        return;
+    if (!pc_launcher_wanted(recomp_settings_get("launcher", "skip", 0), force && !no, no,
+                            host_posix_shift_held(), test_run))
+        return;
+    if (!pc_launcher_run()) {
+        fprintf(stderr, "[UI] the launcher was closed; not starting the game\n");
+        fflush(stderr);
+        pc_input_stop();
+        fflush(stdout);
+        _Exit(0);
     }
     pc_input_restart();
 #endif
@@ -471,6 +516,8 @@ int pc_settings_init(void)
     d3d8_present_enable_scaling(1);
 #if defined(_WIN32)
     d3d8_present_set_overlay(pc_ui_overlay, NULL);
+#else
+    pc_ui_register_overlay();
 #endif
     d3d8_present_set_render_scale((unsigned)pc_display("render_scale", 2));
     pc_settings_apply_display();

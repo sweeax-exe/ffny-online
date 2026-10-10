@@ -2,6 +2,7 @@
 import importlib.util
 import json
 from pathlib import Path
+import os
 import re
 import tarfile
 import zipfile
@@ -73,6 +74,7 @@ def test_unpack_rejects_traversal_and_symlinks_in_untrusted_archives(tmp_path):
     assert not (tmp_path / 'escape.txt').exists()
 
 
+@pytest.mark.skipif(os.name == 'nt', reason='POSIX execute bits: Windows files have none')
 def test_unpack_keeps_the_execute_bit_of_bundled_tools(tmp_path):
     archive = tmp_path / 'tools.zip'
     with zipfile.ZipFile(archive, 'w') as package:
@@ -83,6 +85,7 @@ def test_unpack_keeps_the_execute_bit_of_bundled_tools(tmp_path):
     assert (tmp_path / 'out/bin/tool').stat().st_mode & 0o111
 
 
+@pytest.mark.skipif(os.name == 'nt', reason='needs symbolic links, which Windows creates only with a privilege (WinError 1314)')
 def test_flatten_links_leaves_only_regular_files(tmp_path):
     (tmp_path / 'lib').mkdir()
     (tmp_path / 'lib/libreal.1.dylib').write_bytes(b'library')

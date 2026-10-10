@@ -13,6 +13,10 @@ extern "C" {
  * game folder could be found (a message has been shown). */
 int pc_settings_init(void);
 
+/* The command line, for the options that are not settings (--launcher, --no-launcher). Off
+ * Windows only: there the program is started through main, which has it. */
+void pc_settings_set_args(int argc, char **argv);
+
 /* Effective value of a [display] setting. */
 int pc_display(const char *key, int fallback);
 

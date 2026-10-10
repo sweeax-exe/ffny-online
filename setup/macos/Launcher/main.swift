@@ -73,7 +73,11 @@ let arguments = CommandLine.arguments
 if arguments.count == 4 && arguments[1] == "--make-alias" {
     exit(makeAlias(target: arguments[2], alias: arguments[3]))
 }
-if arguments.count > 1 && arguments[1] != "--launch" && !arguments[1].hasPrefix("-psn") && !arguments[1].hasPrefix("-NS") {
+// The only options handed on to the game: show or skip its launcher window for this start
+// (`open "Def Jam Recompiled.app" --args --launcher`). Nothing else is passed through.
+let gameFlags = ["--launcher", "--no-launcher"]
+if arguments.count > 1 && arguments[1] != "--launch" && !gameFlags.contains(arguments[1])
+    && !arguments[1].hasPrefix("-psn") && !arguments[1].hasPrefix("-NS") {
     fail("Double-click this app to start your installed game.")
 }
 
@@ -94,6 +98,6 @@ setenv("DEFJAM_DATA", receipt.data, 1)
 guard chdir(receipt.source) == 0 else { fail("The installed game folder is missing. Run Def Jam Setup to repair it.") }
 openSessionLog()
 let program = strdup(receipt.executable)
-var argv: [UnsafeMutablePointer<CChar>?] = [program, nil]
+var argv: [UnsafeMutablePointer<CChar>?] = [program] + arguments.dropFirst().filter { gameFlags.contains($0) }.map { strdup($0) } + [nil]
 execv(receipt.executable, &argv)
 fail("The game could not be started (\(String(cString: strerror(errno)))). Run Def Jam Setup to repair it.")

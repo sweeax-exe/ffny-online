@@ -94,6 +94,30 @@ def safe_unpack(archive, destination):
             package.extractall(destination, filter='data')
 
 
+def stage_dependency_source(args, source, name, cmake, version_key, sha_key, url_pattern):
+    """An upstream source archive, at the version and hash a CMake file pins, unpacked under
+    source/setup-deps so the build populates FetchContent from it and needs no network."""
+    text = cmake.read_text()
+    dependency_version = re.search(r'set\(' + version_key + r' "([^"]+)"', text).group(1)
+    dependency_sha = re.search(r'set\(' + sha_key + r' "([^"]+)"', text).group(1)
+    archive = args.cache / (name + '-' + dependency_version + '.tar.gz')
+    url = url_pattern.format(version=dependency_version)
+    download(url, archive, dependency_sha)
+    folder = source / 'setup-deps' / name
+    safe_unpack(archive, folder)
+    children = list(folder.iterdir())
+    if len(children) != 1 or not children[0].is_dir():
+        raise ValueError('Unexpected dependency archive layout')
+    return {'url': url, 'sha256': dependency_sha, 'source_dir': str(children[0].relative_to(source))}
+
+
+def stage_imgui_source(args, source):
+    """Dear ImGui, which the launcher and overlay are drawn with (cmake/imgui.cmake pins it)."""
+    return stage_dependency_source(
+        args, source, 'imgui', ROOT / 'cmake/imgui.cmake', 'DEFJAM_IMGUI_VERSION', 'DEFJAM_IMGUI_SHA256',
+        'https://github.com/ocornut/imgui/archive/refs/tags/v{version}.tar.gz')
+
+
 def stage_macos(args, staging, source, toolkit):
     """Python, CMake, Ninja, the runtime libraries and the locally-made launcher app."""
     import importlib.util
@@ -117,6 +141,8 @@ def stage_macos(args, staging, source, toolkit):
     provenance += json.loads((prefix / 'provenance.json').read_text(encoding='utf-8')) if (prefix / 'provenance.json').is_file() else []
     shutil.copytree(prefix, staging / 'deps', ignore=shutil.ignore_patterns('provenance.json', 'licenses'))
     shutil.copytree(prefix / 'licenses', staging / 'licenses')
+    # The launcher and overlay are drawn with Dear ImGui, built from this source with the game.
+    provenance.append(stage_imgui_source(args, source))
     for old in staging.rglob('.DS_Store'):
         old.unlink()
     return provenance
@@ -151,24 +177,10 @@ def stage_windows(args, staging, source, toolkit):
     (staging / 'python/python313._pth').write_text(
         'python313.zip\n.\nLib/site-packages\n../source\n../source/scripts\n../source/tools/xboxrecomp\nimport site\n', encoding='utf-8')
     # Users never download SDL/ImGui at configure time. Keep source archive checksums.
-    for name, cmake, version_key, sha_key, url_pattern in (
-        ('sdl3', toolkit / 'cmake/xbox_sdl3.cmake', 'XBOX_SDL3_VERSION', 'XBOX_SDL3_SHA256',
-         'https://github.com/libsdl-org/SDL/releases/download/release-{version}/SDL3-{version}.tar.gz'),
-        ('imgui', ROOT / 'cmake/imgui.cmake', 'DEFJAM_IMGUI_VERSION', 'DEFJAM_IMGUI_SHA256',
-         'https://github.com/ocornut/imgui/archive/refs/tags/v{version}.tar.gz')):
-        text = cmake.read_text()
-        dependency_version = re.search(r'set\(' + version_key + r' "([^"]+)"', text).group(1)
-        dependency_sha = re.search(r'set\(' + sha_key + r' "([^"]+)"', text).group(1)
-        archive = args.cache / (name + '-' + dependency_version + '.tar.gz')
-        url = url_pattern.format(version=dependency_version)
-        download(url, archive, dependency_sha)
-        folder = source / 'setup-deps' / name
-        safe_unpack(archive, folder)
-        children = list(folder.iterdir())
-        if len(children) != 1 or not children[0].is_dir():
-            raise ValueError('Unexpected dependency archive layout')
-        provenance.append({'url': url, 'sha256': dependency_sha,
-                           'source_dir': str(children[0].relative_to(source))})
+    provenance.append(stage_dependency_source(
+        args, source, 'sdl3', toolkit / 'cmake/xbox_sdl3.cmake', 'XBOX_SDL3_VERSION', 'XBOX_SDL3_SHA256',
+        'https://github.com/libsdl-org/SDL/releases/download/release-{version}/SDL3-{version}.tar.gz'))
+    provenance.append(stage_imgui_source(args, source))
     return provenance
 
 
