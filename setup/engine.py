@@ -1,4 +1,4 @@
-"""Local-only setup engine used by the Windows wizard and silent entry point.
+"""Local-only setup engine used by the Windows, macOS and Linux wizards and silent entry points.
 
 Exit codes: 0 success; 2 invalid input; 3 prerequisites missing; 4 stage failure;
 5 another setup is running; 6 cancelled; 3010 prerequisites require a reboot.
@@ -22,17 +22,24 @@ import subprocess
 import sys
 import tempfile
 import time
+import urllib.parse
 import urllib.request
 
 IS_WINDOWS = os.name == 'nt'
 IS_MACOS = sys.platform == 'darwin'
+IS_LINUX = sys.platform.startswith('linux')
 # The payload manifest names the platform it was built for; a payload for
 # another one is refused before anything in it runs.
 HOST_PLATFORM = 'windows-x64' if IS_WINDOWS else 'macos-arm64' if IS_MACOS else 'linux-x64'
 PRESET = 'win-x64-release' if IS_WINDOWS else 'posix-release'
 HD_SUPPORTED = IS_WINDOWS or IS_MACOS  # drawn by the Direct3D 11 renderer and, since v0.6.1, the macOS Vulkan one
 LAUNCHER_BUNDLE = 'Def Jam Recompiled.app'
-RUNTIME_FOLDERS = ('source/', 'python/') if IS_WINDOWS else ('source/', 'python/', 'tools/', 'deps/')
+RUNTIME_FOLDERS = ('source/', 'python/') if IS_WINDOWS or IS_LINUX else ('source/', 'python/', 'tools/', 'deps/')
+# Linux: the launcher script setup writes into the install folder, and the
+# desktop entries and Steam shortcut that point at it.
+LINUX_LAUNCHER = 'Def Jam Recompiled'
+LINUX_DESKTOP_ID = 'defjam-recompiled'
+LINUX_MARKER = 'X-DefJamRecompiled-Install'
 APPLE_COMMAND_LINE_TOOLS_URL = 'https://developer.apple.com/documentation/xcode/installing-the-command-line-tools/'
 
 
@@ -224,6 +231,7 @@ class Engine:
                 [str(self.version_root / 'python/bin'), str(self.version_root / 'tools/bin'),
                  '/usr/bin', '/bin', '/usr/sbin', '/sbin'])
             self.python = self.version_root / 'python/bin/python3'
+        self.container_image = None     # Linux: the build container, when the host has no toolchain
         self.log = None
 
     def event(self, message):
@@ -357,6 +365,11 @@ class Engine:
         receipt = json.loads(receipt_path.read_text(encoding='utf-8'))
         if Path(receipt['data']).resolve() != self.data:
             raise SetupError('Updates must use the installed data folder: ' + receipt['data'], 2)
+        if IS_LINUX:
+            # ps truncates comm to 15 characters there; /proc names the real file.
+            if receipt['executable'] in running_executables():
+                raise SetupError('Close the installed game before updating or repairing it', 5)
+            return
         if not IS_WINDOWS:
             # game_lock covers the launcher; this also catches the executable started by hand.
             listing = self.run(['ps', '-axo', 'comm='], capture=True, log_output=False)
@@ -478,7 +491,124 @@ class Engine:
                 raise SetupError('Missing bundled build tool: ' + executable, 3)
             self.run([executable, '--version'])
 
+    def host_toolchain_problem(self):
+        """None if this machine can build the game itself, else what is missing."""
+        compiler = shutil.which('clang', path=self.env['PATH']) or shutil.which('cc', path=self.env['PATH'])
+        missing = [name for name in ('cmake', 'ninja') if not shutil.which(name, path=self.env['PATH'])]
+        if not compiler:
+            missing.insert(0, 'a C compiler (clang)')
+        if missing:
+            return 'missing ' + ', '.join(missing)
+        # One probe for the three libraries the game links and their headers.
+        probe = self.version_root / 'toolchain-check'
+        probe.mkdir(parents=True, exist_ok=True)
+        (probe / 'check.c').write_text(
+            '#include <SDL3/SDL.h>\n#include <vulkan/vulkan.h>\n#include <shaderc/shaderc.h>\n'
+            'int main(void) { SDL_GetVersion(); shaderc_compiler_release(0);\n'
+            '  return (int)vkGetInstanceProcAddr(0, "vkCreateInstance") == 0; }\n', encoding='utf-8')
+        try:
+            self.run([compiler, '-o', probe / 'check', probe / 'check.c', '-lSDL3', '-lvulkan', '-lshaderc_shared'],
+                     log_output=True)
+        except SetupError as ex:
+            if ex.code == 6:
+                raise
+            return 'the SDL3, Vulkan or shaderc development files are missing'
+        self.env.setdefault('CC', compiler)
+        return None
+
+    def container_recipe(self):
+        pins = json.loads((self.source / 'setup/dependencies-linux.json').read_text(encoding='utf-8'))['container']
+        if not re.fullmatch(r'[\w./-]+@sha256:[0-9a-f]{64}', pins['image']) or \
+                not re.fullmatch(r'\d{4}/\d{2}/\d{2}', pins['archive_date']) or \
+                not all(re.fullmatch(r'[a-z0-9][a-z0-9+_.-]*', p) for p in pins['packages']):
+            raise SetupError('Invalid build container pins', 2)
+        stamp = pins['archive_date'].replace('/', '') + 'T120000'
+        # The archive's packages are signed by keys some of which have expired since;
+        # gpg judges them as of the archive date, so the signatures are still checked.
+        return ('FROM ' + pins['image'] + '\n'
+                "RUN echo 'Server = https://archive.archlinux.org/repos/" + pins['archive_date'] +
+                "/$repo/os/$arch' > /etc/pacman.d/mirrorlist \\\n"
+                " && echo 'faked-system-time " + stamp + "' >> /etc/pacman.d/gnupg/gpg.conf \\\n"
+                ' && pacman -Syy --noconfirm --needed ' + ' '.join(pins['packages']) + ' \\\n'
+                " && sed -i '/^faked-system-time/d' /etc/pacman.d/gnupg/gpg.conf \\\n"
+                ' && pacman -Scc --noconfirm\n'
+                'ENV CC=clang CXX=clang++\n')
+
+    def toolchain_linux(self):
+        choice = getattr(self.args, 'toolchain', 'auto') or 'auto'
+        self.event('Checking the build toolchain')
+        if platform.machine() not in ('x86_64', 'AMD64'):
+            raise SetupError('This setup supports x86-64 Linux only', 3)
+        problem = None
+        if choice in ('auto', 'host'):
+            problem = self.host_toolchain_problem()
+            if problem is None:
+                self.event('Building with this computer\'s own compiler and libraries')
+                self.record_toolchain('host')
+                return
+            if choice == 'host':
+                raise SetupError('This computer cannot build the game: ' + problem +
+                                 '. Install clang, cmake, ninja and the SDL3, Vulkan and shaderc development '
+                                 'packages, or run setup with the build container.', 3)
+        podman = shutil.which('podman', path=self.env['PATH'])
+        if not podman:
+            raise SetupError('This computer cannot build the game (' + (problem or 'no toolchain') +
+                             ') and has no podman for the build container. Install podman, or clang, cmake, '
+                             'ninja and the SDL3, Vulkan and shaderc development packages.', 3)
+        recipe = self.container_recipe()
+        self.container_image = 'localhost/defjam-recompiled-build:' + hashlib.sha256(recipe.encode()).hexdigest()[:12]
+        exists = subprocess.run([podman, 'image', 'exists', self.container_image],
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0
+        if not exists:
+            self.event('Preparing the build container (a one-time download of about 1 GB)')
+            folder = self.version_root / 'container'
+            folder.mkdir(parents=True, exist_ok=True)
+            (folder / 'Containerfile').write_text(recipe, encoding='utf-8')
+            try:
+                self.run([podman, 'build', '--pull=missing', '-t', self.container_image, folder])
+            except SetupError as ex:
+                if ex.code == 6:
+                    raise
+                raise SetupError('The build container could not be prepared; check the internet connection '
+                                 'and the setup log, then run setup again.', 3) from ex
+        self.run(self.in_container(['clang', '--version'], self.version_root))
+        self.event('Building in the build container')
+        self.record_toolchain('container:' + self.container_image)
+
+    def record_toolchain(self, identity):
+        """A build tree belongs to one compiler: switching between host and container starts it afresh."""
+        note = self.version_root / 'toolchain.txt'
+        if note.is_file() and note.read_text(encoding='utf-8') != identity:
+            shutil.rmtree(self.source / 'build' / PRESET, ignore_errors=True)
+        note.write_text(identity, encoding='utf-8')
+
+    def in_container(self, argv, cwd):
+        """argv run in the build container, with the install and data folders at their own paths."""
+        if not self.container_image:
+            return list(argv)
+        mounts = []
+        for folder in sorted({str(self.install), str(self.data)}):
+            mounts += ['-v', folder + ':' + folder]
+        return ['podman', 'run', '--rm', '--userns=keep-id', '--security-opt', 'label=disable', '--network=none',
+                *mounts, '-w', str(cwd), '-e', 'DEFJAM_DATA=' + str(self.data), self.container_image,
+                *map(str, argv)]
+
+    def check_host_runtime(self):
+        """The game runs on this computer's own SDL3, Vulkan loader and shaderc: say so now if one is missing."""
+        executable = self.source / 'build' / PRESET / 'defjam_recomp'
+        result = subprocess.run(['ldd', '-r', str(executable)], capture_output=True, text=True, env=self.env)
+        problems = sorted({line.strip() for line in (result.stdout + result.stderr).splitlines()
+                           if 'not found' in line or 'undefined symbol' in line})
+        if result.returncode or problems:
+            if self.log:
+                self.log.write('Runtime check:\n' + result.stdout + result.stderr)
+            raise SetupError('The game was built but cannot run on this computer: ' +
+                             '; '.join(problems[:4] or ['ldd failed']) +
+                             '. It needs SDL3 3.2 or newer, the Vulkan loader and shaderc.', 3)
+
     def toolchain(self, provisioned=False):
+        if IS_LINUX:
+            return self.toolchain_linux()
         if not IS_WINDOWS:
             return self.toolchain_macos()
         self.event('Checking C++ compiler, Windows SDK, CMake and Ninja')
@@ -551,6 +681,14 @@ class Engine:
         self.run(['powershell.exe', '-NoProfile', '-Command',
                   "New-Item -ItemType Junction -Path $env:DEFJAM_SETUP_LINK -Target $env:DEFJAM_SETUP_TARGET -ErrorAction Stop | Out-Null"])
 
+    def imgui_override(self):
+        """Dear ImGui (the launcher and overlay) built from the payload's inventoried source."""
+        deps = json.loads((self.payload / 'dependencies.json').read_text())
+        imgui = [d for d in deps if '/imgui/' in d.get('source_dir', '').replace('\\', '/') + '/']
+        if len(imgui) != 1:
+            raise SetupError('The setup payload has no Dear ImGui source', 2)
+        return f'-DFETCHCONTENT_SOURCE_DIR_IMGUI={self.source / imgui[0]["source_dir"]}'
+
     def pipeline(self):
         state = load_module('setup_pipeline_state', self.source / 'scripts/pipeline-state.py')
         tk = self.source / 'tools/xboxrecomp'
@@ -573,7 +711,11 @@ class Engine:
                 # Populate FetchContent from the inventoried, offline dependency source.
                 self.run([self.python, self.source / 'scripts/pipeline-state.py', 'begin-build',
                           '--preset', PRESET], cwd=self.source)
-                if IS_WINDOWS:
+                if IS_LINUX:
+                    # The system's (or the build container's) SDL3, Vulkan and shaderc; Dear
+                    # ImGui from the payload, since the container builds without a network.
+                    overrides = [self.imgui_override()]
+                elif IS_WINDOWS:
                     deps = json.loads((self.payload / 'dependencies.json').read_text())
                     overrides = [f'-DFETCHCONTENT_SOURCE_DIR_{name.upper()}={self.source / item["source_dir"]}'
                                  for name, item in zip(('sdl3', 'imgui'), [d for d in deps if 'source_dir' in d])]
@@ -581,20 +723,19 @@ class Engine:
                     # SDL3, MoltenVK and shaderc come prebuilt with the setup; nothing is
                     # looked for in /opt/homebrew, /usr/local or any other prefix.
                     prefix = self.version_root / 'deps'
-                    # Dear ImGui (the launcher and overlay) is built from the inventoried source.
-                    deps = json.loads((self.payload / 'dependencies.json').read_text())
-                    imgui = [d for d in deps if '/imgui/' in d.get('source_dir', '').replace('\\', '/') + '/']
-                    if len(imgui) != 1:
-                        raise SetupError('The setup payload has no Dear ImGui source', 2)
-                    overrides = [f'-DFETCHCONTENT_SOURCE_DIR_IMGUI={self.source / imgui[0]["source_dir"]}',
+                    overrides = [self.imgui_override(),
                                  f'-DCMAKE_PREFIX_PATH={prefix}', f'-DVulkan_LIBRARY={prefix}/lib/libMoltenVK.dylib',
                                  f'-DVulkan_INCLUDE_DIR={prefix}/include', '-DCMAKE_FIND_USE_CMAKE_SYSTEM_PATH=OFF',
                                  '-DCMAKE_OSX_ARCHITECTURES=arm64']
-                self.run(['cmake', '--preset', PRESET, '-DDEFJAM_BUILD_GAME=ON', *overrides], cwd=self.source)
-                self.run(['cmake', '--build', '--preset', PRESET, '--target', 'defjam_recomp'], cwd=self.source)
+                self.run(self.in_container(['cmake', '--preset', PRESET, '-DDEFJAM_BUILD_GAME=ON', *overrides],
+                                           self.source), cwd=self.source)
+                self.run(self.in_container(['cmake', '--build', '--preset', PRESET, '--target', 'defjam_recomp'],
+                                           self.source), cwd=self.source)
                 self.run([self.python, self.source / 'scripts/pipeline-state.py', 'record-build',
                           '--preset', PRESET], cwd=self.source)
                 verify()
+                if IS_LINUX:
+                    self.check_host_runtime()
                 continue
             self.run(argv, cwd=self.source)
             verify()
@@ -655,6 +796,61 @@ class Engine:
         receipt['shortcuts'] = shortcuts
         return bundle
 
+    def install_launcher_linux(self, receipt):
+        """The launcher script, a menu entry, a desktop shortcut and, if asked, a Steam shortcut."""
+        template = (self.payload / 'launcher/launcher.sh').read_text(encoding='utf-8')
+        script = template
+        for key in ('source', 'data', 'executable'):
+            if any(c in receipt[key] for c in '\r\n'):
+                raise SetupError('Install paths cannot contain line breaks', 2)
+            script = script.replace('@' + key.upper() + '@', shlex.quote(receipt[key]))
+        launcher = self.install / LINUX_LAUNCHER
+        pending = launcher.with_name(launcher.name + '.new')
+        pending.write_text(script, encoding='utf-8')
+        pending.chmod(0o755)
+        os.replace(pending, launcher)
+        entry = desktop_entry(launcher, self.install)
+        shortcuts = []
+        if not self.args.no_shortcuts:
+            data_home = Path(os.environ.get('XDG_DATA_HOME') or Path.home() / '.local/share')
+            places = [data_home / 'applications' / (LINUX_DESKTOP_ID + '.desktop')]
+            if not self.args.no_desktop_shortcut:
+                places.append(desktop_folder() / (LINUX_DESKTOP_ID + '.desktop'))
+            for place in places:
+                try:
+                    if place.exists() and LINUX_MARKER not in place.read_text(encoding='utf-8', errors='replace'):
+                        self.event('Left ' + str(place) + ' alone: it was not made by this setup')
+                        continue
+                    place.parent.mkdir(parents=True, exist_ok=True)
+                    place.write_text(entry, encoding='utf-8')
+                    place.chmod(0o755)        # a desktop file on the Desktop must be executable to be trusted
+                    shortcuts.append(str(place))
+                except OSError as ex:
+                    self.event('Could not create ' + str(place) + ' (' + str(ex) + ')')
+        if getattr(self.args, 'steam_shortcut', False):
+            self.add_to_steam(launcher)
+        receipt['shortcuts'] = shortcuts
+        return launcher
+
+    def add_to_steam(self, launcher):
+        """Steam's own Add a Non-Steam Game, through the same steam:// request SteamOS's Dolphin uses."""
+        helper = shutil.which('steamos-add-to-steam')
+        steam = shutil.which('steam')
+        if not (helper or steam) or subprocess.run(['pgrep', '-x', 'steam'], stdout=subprocess.DEVNULL).returncode:
+            self.event('Steam is not running; add ' + str(launcher) + ' to Steam with "Add a Non-Steam Game"')
+            return
+        try:
+            if helper:
+                self.run([helper, launcher])
+            else:
+                Path('/tmp/addnonsteamgamefile').touch()
+                self.run([steam, 'steam://addnonsteamgame/' + urllib.parse.quote(str(launcher), safe='')])
+            self.event('Asked Steam to add the game to your library')
+        except SetupError as ex:
+            if ex.code == 6:
+                raise
+            self.event('Steam did not take the shortcut; add ' + str(launcher) + ' with "Add a Non-Steam Game"')
+
     def activate(self):
         self.event('Creating launch shortcuts and install receipt')
         receipt = {key: self.manifest[key] for key in ('version', 'source_commit', 'toolkit_commit')}
@@ -673,6 +869,8 @@ class Engine:
             if not self.args.no_shortcuts:
                 self.run(['powershell.exe', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
                           self.payload / 'engine/shortcuts.ps1'])
+        elif IS_LINUX:
+            launcher = self.install_launcher_linux(receipt)
         else:
             launcher = self.install_launcher_bundle(receipt)
         self.cancelled()
@@ -773,6 +971,35 @@ def enable_hd_packs(data, packs, previous=()):
     os.replace(temporary,path)
 
 
+def running_executables():
+    """Linux: the executables of every process this user can see."""
+    found = set()
+    for entry in Path('/proc').iterdir():
+        if entry.name.isdigit():
+            with contextlib.suppress(OSError):
+                found.add(os.readlink(entry / 'exe'))
+    return found
+
+
+def desktop_folder():
+    """The XDG desktop folder (xdg-user-dirs), or ~/Desktop."""
+    with contextlib.suppress(OSError, subprocess.SubprocessError):
+        answer = subprocess.run(['xdg-user-dir', 'DESKTOP'], capture_output=True, text=True, timeout=5)
+        if answer.returncode == 0 and answer.stdout.strip() and Path(answer.stdout.strip()) != Path.home():
+            return Path(answer.stdout.strip())
+    return Path.home() / 'Desktop'
+
+
+def desktop_entry(launcher, install):
+    def quoted(path):
+        # Desktop Entry Exec quoting: a double-quoted argument with " ` $ \ escaped.
+        return '"' + re.sub(r'(["`$\\])', r'\\\1', str(path)) + '"'
+    return ('[Desktop Entry]\nType=Application\nName=Def Jam Recompiled\n'
+            'Comment=Def Jam: Fight for NY, built on this computer from your own copy\n'
+            'Exec=' + quoted(launcher) + '\nIcon=applications-games\nTerminal=false\nCategories=Game;\n'
+            + LINUX_MARKER + '=' + str(install) + '\n')
+
+
 def uninstall(install):
     root = Path(install).resolve()
     receipt_file = root / 'installed.json'
@@ -789,6 +1016,17 @@ def uninstall(install):
             shutil.rmtree(versions)
         for name in ('installed.ini', 'installed.json', 'DefJamLauncher.exe'):
             (root / name).unlink(missing_ok=True)
+        if IS_LINUX:
+            (root / LINUX_LAUNCHER).unlink(missing_ok=True)
+            # Only entries this installation made and recorded, and only if they still name it.
+            for name in receipt.get('shortcuts', []):
+                shortcut = Path(name)
+                if shortcut.is_file() and not shortcut.is_symlink() and \
+                        (LINUX_MARKER + '=' + str(root)) in shortcut.read_text(encoding='utf-8', errors='replace'):
+                    shortcut.unlink()
+            print('Application removed. Dump, saves, settings and logs were preserved. A Steam shortcut, '
+                  'if you added one, stays in Steam until you remove it there.', flush=True)
+            return
         if not IS_WINDOWS:
             bundle = root / LAUNCHER_BUNDLE
             if bundle.is_dir() and not bundle.is_symlink():
@@ -826,6 +1064,10 @@ def main(argv=None):
     parser.add_argument('--no-desktop-shortcut', action='store_true', help='Create only the Start-menu shortcut')
     parser.add_argument('--install-prerequisites', action='store_true')
     parser.add_argument('--hd-textures', action='store_true', help='Generate and enable Lanczos 4x HD textures locally (extra time/space)')
+    parser.add_argument('--toolchain', choices=['auto', 'host', 'container'], default='auto',
+                        help='Linux: build with this computer\'s compiler, in the pinned build container, '
+                             'or whichever works (the default)')
+    parser.add_argument('--steam-shortcut', action='store_true', help='Linux: add the game to Steam')
     parser.add_argument('--log')
     parser.add_argument('--status-file')
     parser.add_argument('--cancel-file')

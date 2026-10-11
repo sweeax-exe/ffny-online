@@ -56,7 +56,7 @@ Gameplay captured by the maintainer. The GIF is a short, silent preview.
 | Windows x64 | Playable; tested on Windows 11 |
 | macOS (Apple Silicon) | Playable through Vulkan since v0.5.0, with a setup installer and optional HD textures since v0.6.1 and the launcher and overlay since v0.6.2; see [macOS setup](docs/setup-installer.md#macos-setup-apple-silicon) |
 | Linux (x86-64) | Builds and runs natively through Vulkan, with the launcher and overlay of v0.6.2; see [Build on macOS and Linux](docs/build-macos-linux.md) |
-| Steam Deck | Native (Vulkan, PipeWire sound, the Deck's controls as a pad); automated regression and owner play-test on the Deck; a little audio distortion remains ([#11](https://github.com/vyanhursky/DefJamFFNY-recomp/issues/11)). Proton not tried. See [Steam Deck](docs/build-macos-linux.md#steam-deck) |
+| Steam Deck | Native (Vulkan, PipeWire sound, the Deck's controls as a pad), installed by the [Linux setup](docs/setup-installer.md#linux-setup) with an optional Steam shortcut for Gaming Mode; automated regression and owner play-test on the Deck; a little audio distortion remains ([#11](https://github.com/vyanhursky/DefJamFFNY-recomp/issues/11)). Proton not tried. See [Steam Deck](docs/build-macos-linux.md#steam-deck) |
 | Menus and fights | Menus, match setup, fights and the return to the menus work |
 | Story | Intro and cutscenes, character creator, crib and gym work; a full playthrough has not been verified |
 | Graphics | Direct3D 11 at up to 4× the console resolution; 4:3 picture (true 16:9 is planned) |
@@ -99,6 +99,16 @@ open System Settings, Privacy & Security, scroll to Security and choose **Open
 Anyway**. See [macOS setup](docs/setup-installer.md#macos-setup-apple-silicon) for
 folders, shortcuts, silent mode and removal.
 
+### Linux and Steam Deck: setup
+
+Unpack `DefJamSetup-<version>-linux-x64.tar.gz` and open `DefJamSetup.sh` (on the
+Steam Deck, in Desktop Mode: double-click it and choose Execute). It has the same
+steps as the other wizards, plus **Add to Steam** so the game starts from Gaming
+Mode. A computer with no compiler of its own, like the Steam Deck, builds in a
+container that setup fetches once (about 1 GB), so the first install needs an
+internet connection; the game then runs on the computer's own SDL3, Vulkan and
+shaderc. See [Linux setup](docs/setup-installer.md#linux-setup).
+
 ### Windows: build from source
 
 You need Git, Python 3.12 or newer, Visual Studio Build Tools with the C++
@@ -123,7 +133,7 @@ Use a recursive clone: GitHub's source ZIP leaves out the toolkit submodule.
 
 ### macOS and Linux: build from source
 
-On a Mac, the setup above is the easy way. To build by hand, or on Linux, follow
+On a Mac or on Linux, the setups above are the easy way. To build by hand, follow
 [Build on macOS and Linux](docs/build-macos-linux.md). It lists what works there
 and what does not yet.
 
@@ -188,11 +198,10 @@ there upstream where they help other games.
 ## Roadmap
 
 Released so far: display settings and a settings file, gamepad and keyboard
-input, the launcher and overlay (Windows, then macOS), a native macOS build, the Windows
-and macOS installers and optional HD textures. Still planned:
+input, the launcher and overlay (Windows, then macOS and Linux), native macOS and Linux builds
+(the Steam Deck included), the Windows, macOS and Linux installers and optional HD textures. Still planned:
 
 - true 16:9 widescreen in fights;
-- a Linux and Steam Deck installer;
 - deeper gameplay decompilation, as a stretch goal.
 
 See the [roadmap](docs/01-plan-review.md#corrected-roadmap-milestones-with-exit-criteria),

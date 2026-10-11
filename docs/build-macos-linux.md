@@ -1,9 +1,9 @@
 # Build on macOS and Linux
 
-On an Apple Silicon Mac you do not need this page: the
-[macOS setup](setup-installer.md#macos-setup-apple-silicon) builds and installs the game
-from your own dump without Terminal. Follow this guide to build from source yourself,
-or for Linux, where an installer is still a to-do.
+On an Apple Silicon Mac or on x86-64 Linux, including the Steam Deck, you do not need
+this page: the [macOS setup](setup-installer.md#macos-setup-apple-silicon) and the
+[Linux setup](setup-installer.md#linux-setup) build and install the game from your own
+dump. Follow this guide to build from source yourself.
 
 The Windows guide is [build-and-play.md](build-and-play.md). This page is the
 same pipeline off Windows, since v0.5.0.

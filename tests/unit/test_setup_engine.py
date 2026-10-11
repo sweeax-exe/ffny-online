@@ -368,7 +368,7 @@ def synthetic_launcher_template(payload):
     return template
 
 
-@pytest.mark.skipif(engine.IS_WINDOWS, reason='macOS launcher bundle')
+@pytest.mark.skipif(not engine.IS_MACOS, reason='macOS launcher bundle')
 @pytest.mark.parametrize('desktop', [True, False])
 def test_macos_launcher_bundle_shortcuts_follow_the_choices_and_stay_in_the_home_folder(
         tmp_path, monkeypatch, capsys, desktop):
@@ -394,7 +394,7 @@ def test_macos_launcher_bundle_shortcuts_follow_the_choices_and_stay_in_the_home
     assert not (setup.install / 'installed.ini').exists()
 
 
-@pytest.mark.skipif(engine.IS_WINDOWS, reason='macOS launcher bundle')
+@pytest.mark.skipif(not engine.IS_MACOS, reason='macOS launcher bundle')
 def test_macos_no_shortcuts_leaves_the_home_folder_alone(tmp_path, monkeypatch):
     setup = installer(tmp_path)
     home = tmp_path / 'home'
@@ -407,7 +407,7 @@ def test_macos_no_shortcuts_leaves_the_home_folder_alone(tmp_path, monkeypatch):
     assert list(home.iterdir()) == []
 
 
-@pytest.mark.skipif(engine.IS_WINDOWS, reason='macOS launcher bundle')
+@pytest.mark.skipif(not engine.IS_MACOS, reason='macOS launcher bundle')
 def test_macos_uninstall_removes_only_recorded_shortcuts_that_still_name_this_install(tmp_path, monkeypatch):
     setup = installer(tmp_path)
     home = tmp_path / 'home'
