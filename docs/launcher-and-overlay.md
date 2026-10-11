@@ -2,7 +2,8 @@
 
 Two ways to change settings without editing `settings.ini`. Both show the same screen, both save as you
 change things, and both are usable with a mouse, the keyboard or a gamepad. They are on Windows and, since
-v0.6.2, macOS; the screen is the same, and the few differences are marked **macOS** below.
+v0.6.2, macOS and Linux; the screen is the same, and the few differences are marked **macOS** below
+(Linux, the Steam Deck included, behaves as macOS does, with `defjam_recomp --launcher` from a terminal).
 
 ## The launcher
 

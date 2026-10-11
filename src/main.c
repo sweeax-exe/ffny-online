@@ -30,6 +30,12 @@
  *   Kernel imports: 160 (XDK 5849)
  */
 
+/* glibc only declares dladdr() and Dl_info under _GNU_SOURCE; macOS always
+ * does. It must come before the first system header, host.h included. */
+#if defined(__linux__) && !defined(_GNU_SOURCE)
+#define _GNU_SOURCE
+#endif
+
 #include "host.h"
 #if defined(_WIN32)
 #include <dbghelp.h>

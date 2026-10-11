@@ -149,7 +149,7 @@ jobs:
       - run: cmake --build --preset ci-runtime-only
       - name: Hardware-free fixtures
         run: |
-          for t in mmio_trap_posix guest_cpu_posix memory_layout_posix kernel_memory_posix kernel_bridge nv2a_vsh settings texture_pack; do
+          for t in mmio_trap_posix guest_cpu_posix memory_layout_posix kernel_memory_posix kernel_path_posix kernel_bridge nv2a_vsh settings texture_pack; do
             cmake -S tools/xboxrecomp/tests/$t -B build/fx-$t -G Ninja -DCMAKE_BUILD_TYPE=Release
             cmake --build build/fx-$t
             ctest --test-dir build/fx-$t --output-on-failure --no-tests=error

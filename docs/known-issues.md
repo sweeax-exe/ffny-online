@@ -71,8 +71,15 @@ a restart. The launcher and in-game settings are available on Windows and, since
 HD texture packs, on macOS too since v0.6.1 ([guide](hd-textures.md)). True 16:9 remains planned ([plan](07-m6-plan.md));
 music replacement and frame rates above 60 are not planned for M6. macOS on Apple Silicon is
 playable since v0.5.0, with the launcher and overlay since v0.6.2
-([guide](build-macos-linux.md)). Proton, Steam Deck and a native Linux game build are
-unvalidated. Network play is not supported.
+([guide](build-macos-linux.md)). Native Linux, including the Steam Deck, builds with Clang
+and passes most of the automated regression; Proton is untried. On the Steam Deck there is a
+little audio clipping or distortion: the audio device can run dry a few times in five minutes
+of fighting (the regression's `audio.dry_queue` check); tracked in
+[#11](https://github.com/vyanhursky/DefJamFFNY-recomp/issues/11). A game started from inside
+a build container (podman or distrobox) has no sound, because the container has no PipeWire library;
+start it from the host. On macOS and Linux, vsync is only used on a display refreshing at a
+multiple of 60 Hz (60, 120, 180, 240), as on Windows: on a 75, 90, 100 or 144 Hz display the
+game paces itself and the picture can tear. Network play is not supported.
 
 See the [improvement backlog](04-improvement-backlog.md) and
 [rebase acceptance](research/toolkit-rebase-acceptance.md) for details.
