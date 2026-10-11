@@ -41,7 +41,8 @@ displays or the Deck.
 2. Release notes: what to try (`widescreen = auto` in the launcher), what is known to be rough (32:9, unswept venues), how
    to report (issue form with the aspect and screen).
 3. The owner plays through the script below at 16:9 and on the Deck. Fixes land as `beta.2`, `beta.3`.
-4. When the script passes and the venue sweep (WS-9) is done: `v0.8.0` with `widescreen = auto`.
+4. When the script passes at 16:9 and 16:10 and the venue sweep (WS-9) is done at those aspects: `v0.8.0` with
+   `widescreen = auto`. The 21:9/32:9 sweep and polish follow in a later release (owner, 2026-10-11).
 
 ## 4. Play-test script (owner, by hand)
 

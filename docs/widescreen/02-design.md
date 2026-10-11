@@ -116,7 +116,7 @@ New entries in `[display]` (settings core `src/hooks/pc_settings.c`; launcher an
 
 | Key | Values | Default (beta → release) | Notes |
 |---|---|---|---|
-| `widescreen` | `off`, `auto`, `16:9`, `16:10`, `21:9`, `32:9` | `off` → `auto` | Restart required in v1 (R6). Env `RECOMP_WIDESCREEN`. `off` keeps today's `aspect` behaviour. |
+| `widescreen` | `off`, `auto`, `16:9`, `16:10`, `21:9`, `32:9` | `off` → `auto` | Restart required in v1 (R6). Env `RECOMP_WIDESCREEN`. `off` keeps today's `aspect` behaviour. First release supports 16:9 and 16:10; `21:9` and `32:9` are shown as "(experimental)", and `auto` on a wider window falls back to 16:9 unless the player picks an experimental value. |
 | `hud` | `auto`, `edge`, `centered` | `auto` | `auto` = edge up to 16:9, centred 16:9 box above. |
 | `cutscenes` | `authored`, `fill` | `authored` | §2 table. |
 | `side_fill` | `blur`, `black`, `art` | `blur` | §4. |
@@ -135,7 +135,8 @@ Nothing about widescreen needs the mod folder except the optional side-art pack.
 - **Deck:** `auto` on a 1280x800 screen gives 16:10 (`Lw = 768`). Render scale 2 → 1536x960 target, close to the
   4:3 cost at scale 2 (1280x960). HUD edge-anchored. Cutscenes: thin bars (authored) or Vert+ (fill). The Vulkan
   backend gets the same canvas work as D3D11 (WS-1b); Deck play-test is part of the beta.
-- **21:9:** fully supported target; HUD `auto` → centred 16:9 box; cutscenes in a 16:9 box.
+- **21:9:** experimental in the first release (owner, 2026-10-11), first-class once the ultrawide venue sweep passes;
+  HUD `auto` → centred 16:9 box; cutscenes in a 16:9 box.
 - **32:9:** supported but labelled experimental in the launcher until a venue sweep at 32:9 passes; HUD centred;
   `fov_cap` may bite (venue FOV 46° → 2·atan(tan 23°·2.667) = 97°, below the cap).
 - **Narrower than 4:3** (5:4, portrait windows): widescreen inactive, 4:3 with bars.

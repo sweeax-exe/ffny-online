@@ -192,7 +192,7 @@ defjam-recomp/
 
 ## 5. Open questions for Vlad
 
-- **(2026-10-11) Widescreen scope (`docs/widescreen/README.md`).** (1) First release: 16:9 + 16:10 only, or 21:9/32:9 too? (2) HUD default edge-anchored or centred? (3) Side fill for 4:3 pictures: blur or black? (4) Build the optional local AI side-art tool (WS-12) or leave AI out? (5) Ship as `v0.8.0-beta.1` with widescreen off by default for play-testing? Proposed answers are decisions W1-W6 in the pack.
+- **(2026-10-11) Widescreen scope (`docs/widescreen/README.md`).** ~~(1) scope~~ 16:9 + 16:10 first, ultrawide experimental. ~~(2) HUD~~ edges, 16:9 box on ultrawide. (3) Side fill default blur or black (proposed blur). ~~(4) AI~~ try blur and AI on one FMV first, then decide WS-12. (5) `v0.8.0-beta.1` with widescreen off by default (proposed). ~~(6) publish~~ push the branch and open a draft PR.
 
 - **(2026-10-09) Linux / Steam Deck (D95).** ~~(1) Owner play-test~~ done 2026-10-10: good, a little audio clipping/distortion (issue #11). ~~(2) Windows/macOS regressions~~ done by Vlad 2026-10-10/11, no regressions. (3) Whether to chase the KEVENTS fighter-select hang (to make the stale-stack fix safe) or leave KEVENTS opt-in. ~~(5)~~ Vlad: the audio is a to-do (issue #11).
 

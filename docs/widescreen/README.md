@@ -66,12 +66,14 @@ Where a report and this folder disagree, this folder wins: it was checked agains
 | W5 | Cutscenes: **authored 16:9 framing** (fill at 16:9, 16:9 box when wider, thin bars or a slightly taller view at 16:10). | It is the makers' own framing (finding 2). |
 | W6 | Goldens, the replay hash and every existing regression check run with widescreen **off** and stay bit-identical. Widescreen gets its own checks. | Keeps 4:3 a supported, unchanged mode (Unleashed's "Original 4:3" lesson). |
 
-## Open questions for the owner
+## Owner's answers (2026-10-11)
 
-Asked in chat on 2026-10-11 and copied to `PROGRESS.md` §5 when the implementation starts:
+| Question | Answer |
+|---|---|
+| First-release scope | **16:9 and 16:10** (desktop and Steam Deck). 21:9 and 32:9 stay selectable but labelled experimental until the ultrawide venue sweep passes. |
+| HUD default | **Edge-anchored up to 16:9, centred 16:9 box above** (W4 as proposed). |
+| Generative AI | **Try both on one FMV first**: the blurred side fill and an AI-extended version of the same clip, then decide whether WS-12 is built. See [06 §5](06-cutscenes-movies-and-ai.md#5-fmv-trial-blur-vs-ai). |
+| Publishing | Branch pushed and a draft PR opened for the implementing agents. |
 
-1. First-release scope: 16:9 + 16:10 only, with 21:9/32:9 as "experimental", or all four from the start?
-2. HUD default: edge-anchored (W4) or always centred?
-3. Side fill for 4:3 content: blurred (proposed default) or black?
-4. AI side-art packs: build the optional local tool (WS-12), or leave AI out entirely?
-5. Release shape: a public `v0.8.0-beta.1` with widescreen `off` by default for play-testing, then `v0.8.0` with `auto`?
+Still open (defaults apply unless the owner says otherwise): side fill `blur` vs `black` as the default (proposed
+`blur`), and the beta shape (`v0.8.0-beta.1` with widescreen off by default, proposed).

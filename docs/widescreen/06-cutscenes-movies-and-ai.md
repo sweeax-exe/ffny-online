@@ -69,3 +69,10 @@ Recommendation: ship the non-AI default (blur or black), and make AI a later, op
 
 Before committing to WS-12, a cheap spike (an afternoon on the owner's GPU): outpaint five backdrops and three 5-second FMV
 shots and look at them. The report's §7 lists the exact checks.
+
+## 5. FMV trial: blur vs AI
+
+Owner's request (2026-10-11): try both options on one FMV, then decide on WS-12. Status: in progress; the clip, the
+method, the hardware, the time taken and the verdict are recorded here when done. The outputs are the game's artwork and
+stay local (`logs/ws/fmv-trial/`), never committed.
+
