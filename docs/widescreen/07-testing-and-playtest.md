@@ -41,8 +41,8 @@ Story hub, cutscenes) is the real Hor+ result, and the window presents at that a
 not in yet; ignore that and judge the 3D: fight framing in 1v1 and free-for-all, venue edges, special cameras,
 cutscenes. On Windows, from the worktree root:
 
-```
-$env:RECOMP_WS_ASPECT = "1.7778"; .uild\win-x64-release\defjam_recomp.exe
+```powershell
+$env:RECOMP_WS_ASPECT = "1.7778"; .\build\win-x64-release\defjam_recomp.exe
 ```
 
 ## 4. Beta release
