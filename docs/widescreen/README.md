@@ -72,7 +72,7 @@ Where a report and this folder disagree, this folder wins: it was checked agains
 |---|---|
 | First-release scope | **16:9 and 16:10** (desktop and Steam Deck). 21:9 and 32:9 stay selectable but labelled experimental until the ultrawide venue sweep passes. |
 | HUD default | **Edge-anchored up to 16:9, centred 16:9 box above** (W4 as proposed). |
-| Generative AI | **Try both on one FMV first**: the blurred side fill and an AI-extended version of the same clip, then decide whether WS-12 is built. See [06 §5](06-cutscenes-movies-and-ai.md#5-fmv-trial-blur-vs-ai). |
+| Generative AI | **Try both on one FMV first**: done 2026-10-11 ([06 §5](06-cutscenes-movies-and-ai.md#5-fmv-trial-blur-vs-ai)): AI works locally (about 12 GPU-hours for all FMV on the owner's card) with good but softer sides and occasional off-model faces; blur stays the default; WS-12 awaits the owner's look at the comparison. |
 | Publishing | Branch pushed and a draft PR opened for the implementing agents. |
 
 Still open (defaults apply unless the owner says otherwise): side fill `blur` vs `black` as the default (proposed

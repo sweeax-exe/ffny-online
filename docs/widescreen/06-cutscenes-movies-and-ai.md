@@ -72,7 +72,38 @@ shots and look at them. The report's §7 lists the exact checks.
 
 ## 5. FMV trial: blur vs AI
 
-Owner's request (2026-10-11): try both options on one FMV, then decide on WS-12. Status: in progress; the clip, the
-method, the hardware, the time taken and the verdict are recorded here when done. The outputs are the game's artwork and
-stay local (`logs/ws/fmv-trial/`), never committed.
+Owner's request (2026-10-11): try both options on one FMV, then decide on WS-12. Done the same day. Outputs are the
+game's artwork and stay local (`logs/ws/fmv-trial/`: `blur.mp4`, `ai.mp4`, `compare.mp4` with blur on top and AI below,
+`still-*.png`); nothing is committed.
 
+**Clip.** `intro.mad` 0:28.25–0:33.17 (149 frames at 30.3 fps, two shots: a dark close group by a wall, then the crew
+walking toward the camera down a street). Decoded with ffmpeg 9.0.2 (`eamad` decoder; the 6-channel EA audio is not
+supported by ffmpeg and was not needed). No FMV has baked-in bars (`cropdetect` over the whole opening movie: 640x480
+throughout), so there is no free "zoom to fill".
+
+**Blur.** One ffmpeg filter: the frame scaled to 848x480, box-blurred, darkened 12% and desaturated 20%, with the
+original 640x480 overlaid in the centre. Instant; never wrong; obviously a 4:3 picture with soft sides.
+
+**AI.** Wan2.1-VACE-1.3B (diffusers 0.41, Apache-2.0, 19 GB download), 848x480, 81-frame chunks overlapping by 12 frames
+(the overlap given as known content so the sides continue), 30 steps, guidance 5, a scene prompt written for the shot,
+original centre pasted back over every output frame (the 4:3 picture stays bit-exact). RTX 4070 Ti SUPER 16 GB:
+9.7 GB VRAM with model CPU offload and VAE tiling (without tiling the VAE overflowed VRAM and stalled), 16.7 s a step,
+**about 9.5 minutes per 81-frame chunk, 19 minutes for this 4.9-second clip**, i.e. about 3.9 GPU-minutes per second of
+footage, **about 12 GPU-hours for the 3 minutes of full-screen FMV** on this card.
+
+**What it looked like.**
+- Good: plausible, well-lit continuations: a brick building and windows on the right of the street shot, more of the
+  crew and the street on the left, the stone wall continued in the dark shot, half-visible people at the frame edge
+  completed (arms, shoulders). The hard cut between the shots switches the sides on the same frame; the chunk boundary
+  is invisible; the street shot is temporally smooth (mean frame-to-frame change of the sides about half the centre's).
+- Bad: generated sides are visibly softer than the original centre; a known character cut by the edge (the fighter in
+  the #27 jersey) gets an off-model face; the dark shot has a few side "pops" (single-frame jumps on one side, frames
+  19, 29, 41–44). A first run fed a corrupt start (decoder seeked between keyframes) and drew a duplicate head at the
+  seam: input quality matters, and every shot needs a human look.
+
+**Recommendation.** Keep `blur` as the default (decision unchanged). WS-12 is feasible on the owner's hardware and the
+result is good enough to offer as an **optional, experimental, per-shot reviewed** pack: about half a day of GPU time for
+all FMV, plus review. If built: split by real shot boundaries (scene detection misses dark cuts; check by eye), write a
+prompt per shot, generate 2–3 seeds per shot and pick, fall back to blur per shot, and consider the 14B model only if
+the softness bothers the owner (it needs offloading on 16 GB and is several times slower). Owner to decide after
+watching `compare.mp4`.
