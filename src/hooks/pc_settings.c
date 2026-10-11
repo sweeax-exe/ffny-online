@@ -319,6 +319,14 @@ int pc_display(const char *key, int fallback)
 void pc_settings_apply_display(void)
 {
     d3d8_present_set_aspect(pc_display("aspect", 0) == 0, 4, 3);
+    {
+        /* Widescreen preview (experiment, docs/widescreen): the guest still renders
+         * 640x480, so present it stretched to the experiment's aspect. */
+        const char *ws = getenv("RECOMP_WS_ASPECT");
+        double a = ws ? atof(ws) : 0.0;
+        if (a > 4.0 / 3.0)
+            d3d8_present_set_aspect(1, (unsigned)(a * 1000.0 + 0.5), 1000);
+    }
     d3d8_present_set_linear_filter(pc_display("filter", 0) == 0);
     d3d8_present_set_vsync(pc_display("vsync", 1));
 }

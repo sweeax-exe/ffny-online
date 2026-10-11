@@ -32,9 +32,23 @@ Run the smoke set at each, plus a window resize and Alt+Enter at each:
 A machine without those monitors can use window sizes (`window_width`/`window_height`); full-screen checks need the real
 displays or the Deck.
 
-## 3. Beta release
+## 3. Preview before the beta (2026-10-11)
 
-1. When WS-0, WS-1a, WS-2, WS-3, WS-4, WS-5, WS-6 and WS-7 are in (WS-8 can be `black` only), cut **`v0.8.0-beta.1`** from
+The owner asked for an early look while the beta is built. The branch build with the experiment switched on is a
+playable **preview**: run the game with `RECOMP_WS_ASPECT=1.7778` (16:9) or `1.6` (16:10). The 3D (fights, free-for-all,
+Story hub, cutscenes) is the real Hor+ result, and the window presents at that aspect without touching
+`settings.ini`. Everything 2D (menus, HUD, movies, loading posters) is **stretched**, because the 2D work packages are
+not in yet; ignore that and judge the 3D: fight framing in 1v1 and free-for-all, venue edges, special cameras,
+cutscenes. On Windows, from the worktree root:
+
+```
+$env:RECOMP_WS_ASPECT = "1.7778"; .uild\win-x64-release\defjam_recomp.exe
+```
+
+## 4. Beta release
+
+1. When WS-0, WS-1a, WS-2, WS-3, WS-4 (with the edge-anchored HUD, owner 2026-10-11), WS-5, WS-6, WS-7 and WS-8
+   (`blur`) are in, cut **`v0.8.0-beta.1`** from
    `feat/widescreen` merged to main, with `widescreen = off` by default and the setting visible in the launcher. Follow
    `docs/releasing.md`; confirm the release workflow handles a pre-release tag (mark it as a pre-release on GitHub, not
    "Latest").
@@ -44,7 +58,7 @@ displays or the Deck.
 4. When the script passes at 16:9 and 16:10 and the venue sweep (WS-9) is done at those aspects: `v0.8.0` with
    `widescreen = auto`. The 21:9/32:9 sweep and polish follow in a later release (owner, 2026-10-11).
 
-## 4. Play-test script (owner, by hand)
+## 5. Play-test script (owner, by hand)
 
 Tick each at 16:9 (desktop) and 16:10 (Deck); 21:9 if a monitor is available. Note anything stretched, cut off, misplaced,
 flickering at the screen edges, or different from 4:3.
@@ -76,7 +90,7 @@ flickering at the screen edges, or different from 4:3.
 - [ ] HD texture pack on, widescreen on: no conflict.
 - [ ] Widescreen off: the game looks exactly as before.
 
-## 5. Where findings go
+## 6. Where findings go
 
 Bugs from the play-test go into `docs/research/widescreen-beta-findings.md` (one line each: screen, aspect, what, capture
 file name kept locally), then into GitHub issues for anything the public may also hit. Each fix names the element row in
