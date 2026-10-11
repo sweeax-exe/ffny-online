@@ -53,7 +53,12 @@ void sub_001A6870_enter(void)
 /* Match telemetry (src/hooks/test_telemetry.c): the fight's simulation step,
  * match set-up, the result recorder and the random number generator's seeding.
  * Read-only, except that RECOMP_TEST_RNG_SEED replaces the seed argument. */
-void sub_00087700_enter(void) { defjam_test_step(); }
+void sub_00087700_enter(void)
+{
+    extern void nv2a_ws_hud_heartbeat(void);
+    defjam_test_step();
+    nv2a_ws_hud_heartbeat();   /* widescreen: a fight HUD is up (src/patches/widescreen.c) */
+}
 void sub_001A4D90_enter(void) { defjam_test_match_start(); }
 void sub_001BC690_enter(void) { defjam_test_rng(g_esp); }
 void sub_001AD220_enter(void) { defjam_test_ai_seed(g_esp); }
@@ -920,3 +925,9 @@ void sub_0001A4E0(void)
                    MEM32(g_esp + 16), MEM32(g_esp + 20));
     g_esp += 24; /* thiscall: return address and five arguments */
 }
+
+/* Investigation probes for the 2D placement work (RECOMP_WS_TRACE2D=1; off: nothing). */
+extern void ws_trace_pos(void), ws_trace_vtx_arr(void), ws_trace_vtx(void);
+void sub_00028F90_enter(void) { ws_trace_pos(); }
+void sub_0002E390_enter(void) { ws_trace_vtx_arr(); }
+void sub_0002E470_enter(void) { ws_trace_vtx(); }
