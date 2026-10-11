@@ -51,6 +51,18 @@ cite other development notes, logs and captures that are not published.
 - [Acceptance, storage and release packaging](hd-texture-release-packaging.md)
 - [v0.6.0 validation](hd-v060-release-validation.md)
 
+## Widescreen
+
+The plan built from these is in [docs/widescreen](../widescreen/README.md), which also lists their errata.
+
+- [Prior art in ports, recomps and patches](widescreen-prior-art.md)
+- [Def Jam community patches and platform support](widescreen-defjam-community.md)
+- [Generative AI for widescreen extension](widescreen-genai.md)
+- [The 3D projection and culling](widescreen-game-projection.md)
+- [Fight, special and cinematic cameras](widescreen-game-cameras.md)
+- [Front end, HUD and movies](widescreen-frontend-2d.md)
+- [Renderer: canvas, viewport and classification](widescreen-renderer.md)
+
 ## Toolkit and platforms
 
 - [Toolkit rebase acceptance](toolkit-rebase-acceptance.md)
