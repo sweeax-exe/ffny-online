@@ -115,6 +115,30 @@ Clean Windows 11 VM setup with no
 tools, VS 2022, independent ISO/XISO input, Unicode paths and physical-machine
 gameplay acceptance remain to be validated; CI is not a substitute.
 
+## Icons and artwork
+
+Every executable, bundle and launcher carries the shield from the game's menus (v0.7.1):
+`DefJamSetup.exe`, `DefJamLauncher.exe` and the game on Windows (with file properties), both
+`.app` bundles on macOS, and the application-menu and desktop entries on
+Linux. The Start-menu and desktop shortcuts, the wizard windows and the game window use it
+too, and on macOS and Linux the SDL game window sets it as the Dock and taskbar icon.
+
+On Linux, **Add to Steam** also gives the shortcut library artwork: a portrait and a wide
+capsule, a hero and a logo, from [`branding/fan/steam`](../branding/README.md) -- the title
+with **FAN RECOMP** under it, so the port reads as a fan project (the hero is the plain set's, as
+it carries no title) -- and the plain set in `branding/steam` for anything the fan set lacks. Steam writes the
+shortcut's id into `userdata/<id>/config/shortcuts.vdf`; setup reads it back from there and
+copies the four images into `config/grid` under that id (`<id>p.png`, `<id>.png`,
+`<id>_hero.png`, `<id>_logo.png`). It never replaces artwork you chose yourself, and
+uninstalling removes only the files it placed. Steam reads `grid` at start-up, so restart
+Steam or switch to Gaming Mode to see it. If Steam was slow to write the shortcut, or you
+added it by hand later, run `--steam-art` (`DefJamSetup.sh --silent --steam-art --install-dir
+<install>`) once the game shows in your library.
+
+The artwork is the game's own, rendered from its textures; it stays the property of its
+rights holders and the MIT licence does not cover it. The owner approved committing exactly
+the files in [`branding/`](../branding/README.md), which CI pins by checksum.
+
 ## macOS setup (Apple Silicon)
 
 `DefJamSetup-<version>-macos-arm64.dmg` holds `Def Jam Setup.app`, a short
@@ -206,7 +230,8 @@ in Dolphin and choose Execute. The wizard has the same controls as the others --
 ISO/XISO or extracted dump, separate **Install location** and **Data location**
 (defaults `~/Games/DefJamRecompiled/App` and `.../Data`), menu and desktop shortcuts --
 and one more: **Add to Steam**, which asks the running Steam client to add the game as a
-non-Steam shortcut so it starts from Gaming Mode. HD textures are not offered on Linux yet.
+non-Steam shortcut so it starts from Gaming Mode, with its library artwork (see
+[Icons and artwork](#icons-and-artwork)). HD textures are not offered on Linux yet.
 
 **The compiler.** If this computer has one (clang, cmake, ninja and the SDL3, Vulkan
 and shaderc development packages; one probe build checks them), setup uses it. If not
@@ -232,7 +257,7 @@ opens its launcher window first and has the F1 overlay, as on the other platform
 ```bash
 ./DefJamSetup.sh --silent --dump ~/Dumps/DefJam.iso \
     --install-dir ~/Games/DefJamRecompiled/App --data-dir ~/Games/DefJamRecompiled/Data \
-    [--steam-shortcut] [--no-desktop-shortcut | --no-shortcuts] [--toolchain host|container]
+    [--steam-shortcut | --steam-art] [--no-desktop-shortcut | --no-shortcuts] [--toolchain host|container]
 ./DefJamSetup.sh --uninstall --install-dir ~/Games/DefJamRecompiled/App
 ```
 

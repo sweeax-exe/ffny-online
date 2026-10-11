@@ -132,6 +132,9 @@ extern "C" int pc_launcher_run(void)
     wc.lpfnWndProc = launcher_proc;
     wc.hInstance = GetModuleHandleW(nullptr);
     wc.hCursor = LoadCursorW(nullptr, MAKEINTRESOURCEW(32512));   // IDC_ARROW
+    wc.hIcon = LoadIconW(wc.hInstance, MAKEINTRESOURCEW(1));      // the exe's own icon (src/defjam.rc.in)
+    wc.hIconSm = (HICON)LoadImageW(wc.hInstance, MAKEINTRESOURCEW(1), IMAGE_ICON,
+                                   GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), 0);
     wc.lpszClassName = L"DefJamRecompLauncher";
     RegisterClassExW(&wc);
 

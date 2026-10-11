@@ -18,6 +18,7 @@ foreach ($folder in $folders) {
     $shortcut.TargetPath = $env:DEFJAM_SETUP_LAUNCHER
     $shortcut.Arguments = '--launch'
     $shortcut.WorkingDirectory = $env:DEFJAM_SETUP_ROOT
+    $shortcut.IconLocation = $env:DEFJAM_SETUP_LAUNCHER + ',0'
     $shortcut.Description = 'Play your locally built Def Jam: Fight for NY'
     $shortcut.Save()
 }

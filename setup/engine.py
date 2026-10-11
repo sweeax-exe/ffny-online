@@ -18,6 +18,7 @@ import re
 import shlex
 import shutil
 import signal
+import struct
 import subprocess
 import sys
 import tempfile
@@ -40,6 +41,9 @@ RUNTIME_FOLDERS = ('source/', 'python/') if IS_WINDOWS or IS_LINUX else ('source
 LINUX_LAUNCHER = 'Def Jam Recompiled'
 LINUX_DESKTOP_ID = 'defjam-recompiled'
 LINUX_MARKER = 'X-DefJamRecompiled-Install'
+# Steam artwork for the non-Steam shortcut: grid file suffix -> file name. The "Fan Recomp" set in
+# branding/fan/steam comes first; whatever it lacks (hero) comes from branding/steam.
+STEAM_ART = {'p': 'portrait.png', '': 'wide.png', '_hero': 'hero.png', '_logo': 'logo.png'}
 APPLE_COMMAND_LINE_TOOLS_URL = 'https://developer.apple.com/documentation/xcode/installing-the-command-line-tools/'
 
 
@@ -809,7 +813,13 @@ class Engine:
         pending.write_text(script, encoding='utf-8')
         pending.chmod(0o755)
         os.replace(pending, launcher)
-        entry = desktop_entry(launcher, self.install)
+        icon = self.install / (LINUX_LAUNCHER + '.png')
+        icon_source = self.source / 'branding/icon/png/defjam-256.png'
+        if icon_source.is_file():
+            shutil.copyfile(icon_source, icon)
+        else:
+            icon = None
+        entry = desktop_entry(launcher, self.install, icon)
         shortcuts = []
         if not self.args.no_shortcuts:
             data_home = Path(os.environ.get('XDG_DATA_HOME') or Path.home() / '.local/share')
@@ -828,11 +838,11 @@ class Engine:
                 except OSError as ex:
                     self.event('Could not create ' + str(place) + ' (' + str(ex) + ')')
         if getattr(self.args, 'steam_shortcut', False):
-            self.add_to_steam(launcher)
+            self.add_to_steam(launcher, receipt)
         receipt['shortcuts'] = shortcuts
         return launcher
 
-    def add_to_steam(self, launcher):
+    def add_to_steam(self, launcher, receipt):
         """Steam's own Add a Non-Steam Game, through the same steam:// request SteamOS's Dolphin uses."""
         helper = shutil.which('steamos-add-to-steam')
         steam = shutil.which('steam')
@@ -846,6 +856,9 @@ class Engine:
                 Path('/tmp/addnonsteamgamefile').touch()
                 self.run([steam, 'steam://addnonsteamgame/' + urllib.parse.quote(str(launcher), safe='')])
             self.event('Asked Steam to add the game to your library')
+            previous = self.install / 'installed.json'
+            owned = json.loads(previous.read_text(encoding='utf-8')).get('steam_art', []) if previous.is_file() else []
+            receipt['steam_art'] = place_steam_art(self.source, launcher, owned, self.event)
         except SetupError as ex:
             if ex.code == 6:
                 raise
@@ -990,14 +1003,127 @@ def desktop_folder():
     return Path.home() / 'Desktop'
 
 
-def desktop_entry(launcher, install):
+def desktop_entry(launcher, install, icon=None):
     def quoted(path):
         # Desktop Entry Exec quoting: a double-quoted argument with " ` $ \ escaped.
         return '"' + re.sub(r'(["`$\\])', r'\\\1', str(path)) + '"'
     return ('[Desktop Entry]\nType=Application\nName=Def Jam Recompiled\n'
             'Comment=Def Jam: Fight for NY, built on this computer from your own copy\n'
-            'Exec=' + quoted(launcher) + '\nIcon=applications-games\nTerminal=false\nCategories=Game;\n'
+            'Exec=' + quoted(launcher) + '\nIcon=' + (str(icon) if icon else 'applications-games')
+            + '\nTerminal=false\nCategories=Game;\nStartupWMClass=' + LINUX_DESKTOP_ID + '\n'
             + LINUX_MARKER + '=' + str(install) + '\n')
+
+
+def parse_binary_vdf(data):
+    """Steam's binary VDF (shortcuts.vdf): nested maps of strings and integers."""
+    def node(pos):
+        out = {}
+        while pos < len(data):
+            kind = data[pos]
+            pos += 1
+            if kind == 8:
+                return out, pos
+            end = data.index(b'\0', pos)
+            key = data[pos:end].decode('utf-8', 'replace')
+            pos = end + 1
+            if kind == 0:
+                out[key], pos = node(pos)
+            elif kind == 1:
+                end = data.index(b'\0', pos)
+                out[key] = data[pos:end].decode('utf-8', 'replace')
+                pos = end + 1
+            elif kind == 2:
+                out[key] = struct.unpack_from('<I', data, pos)[0]
+                pos += 4
+            elif kind == 7:
+                out[key] = struct.unpack_from('<Q', data, pos)[0]
+                pos += 8
+            else:
+                raise ValueError('unsupported VDF value type %d' % kind)
+        raise ValueError('unterminated VDF map')
+    parsed, _ = node(0)
+    return parsed
+
+
+def steam_userdata_folders():
+    """Every Steam user's folder on this account: the native install, the symlink and Flatpak Steam."""
+    data_home = Path(os.environ.get('XDG_DATA_HOME') or Path.home() / '.local/share')
+    found = []
+    for root in (data_home / 'Steam', Path.home() / '.steam/steam',
+                 Path.home() / '.var/app/com.valvesoftware.Steam/.local/share/Steam'):
+        with contextlib.suppress(OSError):
+            for entry in sorted((root / 'userdata').iterdir()):
+                if entry.name.isdigit() and entry.name != '0' and entry.resolve() not in [f.resolve() for f in found]:
+                    found.append(entry)
+    return found
+
+
+def find_steam_shortcut(launcher, folders=None):
+    """(appid, user folder) of the non-Steam shortcut that runs `launcher`, or (None, None).
+    The appid is read back from Steam's own file: sources disagree on how it is computed."""
+    best = (None, None, -1)
+    for folder in steam_userdata_folders() if folders is None else folders:
+        vdf = Path(folder) / 'config/shortcuts.vdf'
+        try:
+            entries = parse_binary_vdf(vdf.read_bytes()).get('shortcuts', {})
+            stamp = vdf.stat().st_mtime
+        except (OSError, ValueError, struct.error):
+            continue
+        for entry in entries.values():
+            exe = next((v for k, v in entry.items() if k.lower() == 'exe'), '')
+            appid = next((v for k, v in entry.items() if k.lower() == 'appid'), None)
+            if isinstance(exe, str) and exe.strip('"') == str(launcher) and isinstance(appid, int) and stamp > best[2]:
+                best = (appid & 0xFFFFFFFF, Path(folder), stamp)
+    return best[0], best[1]
+
+
+def place_steam_art(source, launcher, owned=(), event=print, timeout=20.0, folders=None):
+    """Copy the portrait and wide capsules, the hero and the logo into the shortcut's grid folder,
+    named by its appid. Waits for Steam to write the shortcut; never overwrites art the player chose.
+    Returns the files placed (or already ours)."""
+    art_folders = [Path(source) / 'branding/fan/steam', Path(source) / 'branding/steam']
+    deadline = time.monotonic() + timeout
+    while True:
+        appid, folder = find_steam_shortcut(launcher, folders)
+        if appid is not None:
+            break
+        if time.monotonic() >= deadline:
+            event('Steam has not written the shortcut yet, so its artwork was not placed; '
+                  'run setup again with --steam-art once it shows in your library')
+            return []
+        time.sleep(1)
+    grid = folder / 'config/grid'
+    grid.mkdir(parents=True, exist_ok=True)
+    placed = []
+    for suffix, name in STEAM_ART.items():
+        origin = next((f / name for f in art_folders if (f / name).is_file()), None)
+        target = grid / (str(appid) + suffix + '.png')
+        if origin is None:
+            continue
+        if target.exists() and str(target) not in owned and digest(target) != digest(origin):
+            event('Left ' + str(target) + ' alone: it is your own artwork')
+            continue
+        pending = target.with_name(target.name + '.new')
+        shutil.copyfile(origin, pending)
+        os.replace(pending, target)
+        placed.append(str(target))
+    event('Steam artwork placed in ' + str(grid) + '; restart Steam, or switch to Gaming Mode, to see it')
+    return placed
+
+
+def apply_steam_art(install):
+    """--steam-art: the artwork for a shortcut that was added after setup finished."""
+    root = Path(install).resolve()
+    receipt_file = root / 'installed.json'
+    if not IS_LINUX or not receipt_file.is_file():
+        raise SetupError('Steam artwork needs an installation made by the Linux setup', 2)
+    receipt = json.loads(receipt_file.read_text(encoding='utf-8'))
+    placed = place_steam_art(receipt['source'], root / LINUX_LAUNCHER, receipt.get('steam_art', []), timeout=3.0)
+    if not placed:
+        raise SetupError('No Steam shortcut for ' + str(root / LINUX_LAUNCHER) + ' was found; add it to Steam first', 2)
+    receipt['steam_art'] = placed
+    write_json(receipt_file, receipt)
+    return 0
 
 
 def uninstall(install):
@@ -1018,6 +1144,11 @@ def uninstall(install):
             (root / name).unlink(missing_ok=True)
         if IS_LINUX:
             (root / LINUX_LAUNCHER).unlink(missing_ok=True)
+            (root / (LINUX_LAUNCHER + '.png')).unlink(missing_ok=True)
+            for name in receipt.get('steam_art', []):
+                art = Path(name)
+                if art.parent.name == 'grid' and art.is_file() and not art.is_symlink():
+                    art.unlink()   # the artwork this setup placed for its Steam shortcut
             # Only entries this installation made and recorded, and only if they still name it.
             for name in receipt.get('shortcuts', []):
                 shortcut = Path(name)
@@ -1068,6 +1199,8 @@ def main(argv=None):
                         help='Linux: build with this computer\'s compiler, in the pinned build container, '
                              'or whichever works (the default)')
     parser.add_argument('--steam-shortcut', action='store_true', help='Linux: add the game to Steam')
+    parser.add_argument('--steam-art', action='store_true',
+                        help="Linux: place the Steam artwork for the installed game's existing shortcut")
     parser.add_argument('--log')
     parser.add_argument('--status-file')
     parser.add_argument('--cancel-file')
@@ -1078,6 +1211,8 @@ def main(argv=None):
             verify_payload(Path(args.payload))
             uninstall(args.install_dir)
             return 0
+        if args.steam_art:
+            return apply_steam_art(args.install_dir)
         if not args.dump or not args.data_dir:
             raise SetupError('--dump and --data-dir are required for installation', 2)
         engine = Engine(args)

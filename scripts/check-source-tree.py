@@ -25,10 +25,32 @@ APPROVED_README_MEDIA = {
     'docs/media/setup-wizard.png': '14133e1592e34308aceeffa35366cf9ed6515c82346e8e4a7b85d2dd11d74bb1',
     'docs/media/launcher.png': 'ffb73dfd833f6bbe4b059b57ed0969eaaad74d2b4e5a3aa7070253a44b2a5dc8',
 }
+# D98 (2026-10-10): the owner approved committing the application icons and the Steam artwork
+# rendered from the game's own textures (the shield, the title wordmark, the title-screen scene).
+# The whole set is pinned by the SHA-256 of branding/SHA256SUMS, which lists every other file in
+# branding/ and is written by scripts/make-branding.py. Changing any file therefore needs the
+# owner to approve a new pin here.
+BRANDING_SUMS = 'branding/SHA256SUMS'
+BRANDING_SUMS_SHA256 = 'c8d6048985f1bda2f167f008ec0c278713b6da43eb1f7c46e9560af8f21a1af7'
 
 
-def path_problem(name):
-    if name in APPROVED_README_MEDIA:
+def approved_branding(repo):
+    """{path: sha256} for branding/ when its list still has the approved fingerprint, else {}."""
+    try:
+        data = (repo / BRANDING_SUMS).read_bytes()
+    except OSError:
+        return {}
+    if hashlib.sha256(data).hexdigest() != BRANDING_SUMS_SHA256:
+        return {}
+    approved = {}
+    for line in data.decode('utf-8').splitlines():
+        digest, _, name = line.partition('  ')
+        approved['branding/' + name] = digest
+    return approved
+
+
+def path_problem(name, approved=None):
+    if name in APPROVED_README_MEDIA or name in (approved or {}):
         return None
     path = PurePosixPath(name)
     if path.parts[0] in BLOCKED_ROOTS:
@@ -40,10 +62,11 @@ def path_problem(name):
     return None
 
 
-def text_problem(data, name):
-    if name in APPROVED_README_MEDIA:
-        if hashlib.sha256(data).hexdigest() != APPROVED_README_MEDIA[name]:
-            return 'approved README media changed; requires owner review and fingerprint update'
+def text_problem(data, name, approved=None):
+    expected = APPROVED_README_MEDIA.get(name) or (approved or {}).get(name)
+    if expected:
+        if hashlib.sha256(data).hexdigest() != expected:
+            return 'approved media changed; requires owner review and fingerprint update'
         return None
     if b'\0' in data:
         return 'binary content'
@@ -66,6 +89,8 @@ def check(repo):
         ['git', 'ls-files', '--stage', '-z'], cwd=repo).split(b'\0')
     problems = []
     count = 0
+    approved = approved_branding(repo)
+    tracked = set()
     for entry in entries:
         if not entry:
             continue
@@ -83,14 +108,19 @@ def check(repo):
             problems.append((name, 'unsupported file mode'))
             continue
         count += 1
-        problem = path_problem(name)
+        tracked.add(name)
+        problem = path_problem(name, approved)
         if not problem:
             try:
-                problem = text_problem((repo / name).read_bytes(), name)
+                problem = text_problem((repo / name).read_bytes(), name, approved)
             except OSError:
                 problem = 'tracked file unavailable'
         if problem:
             problems.append((name, problem))
+    if BRANDING_SUMS in tracked and not approved:
+        problems.append((BRANDING_SUMS, 'branding fingerprint list changed; requires owner review and a new pin'))
+    for name in sorted(set(approved) - tracked):
+        problems.append((name, 'approved branding file is not tracked'))
     return count, problems
 
 

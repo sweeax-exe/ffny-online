@@ -330,6 +330,7 @@ static int wizard(HINSTANCE instance, bool smoke = false, bool preparation = fal
     preparationSmoke = preparation;
     WNDCLASSW wc{}; wc.lpfnWndProc = windowProc; wc.hInstance = instance;
     wc.hCursor = LoadCursor(nullptr, IDC_ARROW); wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
+    wc.hIcon = LoadIcon(instance, MAKEINTRESOURCE(1));  // setup/app.rc.in
     wc.lpszClassName = L"DefJamSetupWizard"; RegisterClassW(&wc);
     window = CreateWindowW(wc.lpszClassName, L"Def Jam Recompiled \u2014 Setup", WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
         CW_USEDEFAULT, CW_USEDEFAULT, 740, 599, nullptr, nullptr, instance, nullptr);

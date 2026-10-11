@@ -8,6 +8,8 @@ import os
 from pathlib import Path, PurePosixPath
 import re
 import shlex
+import shutil
+import struct
 import subprocess
 import tarfile
 import zipfile
@@ -264,3 +266,115 @@ def test_the_offline_build_takes_dear_imgui_from_the_payload(tmp_path):
     with pytest.raises(engine.SetupError) as error:
         setup.imgui_override()
     assert error.value.code == 2
+
+
+# ---- icons and Steam artwork (D98) ----------------------------------------------------------
+
+def shortcuts_vdf(*entries):
+    """A shortcuts.vdf as Steam writes it: (appid, name, exe) -> binary map."""
+    body = b''
+    for index, (appid, name, exe) in enumerate(entries):
+        body += (b'\x00' + str(index).encode() + b'\x00'
+                 + b'\x02appid\x00' + struct.pack('<I', appid & 0xFFFFFFFF)
+                 + b'\x01AppName\x00' + name.encode() + b'\x00'
+                 + b'\x01Exe\x00"' + exe.encode() + b'"\x00'
+                 + b'\x00tags\x00\x08' + b'\x08')
+    return b'\x00shortcuts\x00' + body + b'\x08\x08'
+
+
+def steam_user(tmp_path, *entries):
+    user = tmp_path / 'steam/userdata/1234567'
+    (user / 'config').mkdir(parents=True)
+    (user / 'config/shortcuts.vdf').write_bytes(shortcuts_vdf(*entries))
+    return user
+
+
+def art_source(tmp_path):
+    source = tmp_path / 'source'
+    (source / 'branding/steam').mkdir(parents=True)
+    for name in engine.STEAM_ART.values():
+        (source / 'branding/steam' / name).write_bytes(b'png ' + name.encode())
+    return source
+
+
+def test_steams_binary_shortcut_file_is_read_back_for_its_appid(tmp_path):
+    user = steam_user(tmp_path, (0xC0FFEE01, 'Other game', '/usr/bin/other'),
+                      (0x9A8B7C6D, 'Def Jam Recompiled', '/games/Def Jam Recompiled'))
+    parsed = engine.parse_binary_vdf((user / 'config/shortcuts.vdf').read_bytes())
+    assert parsed['shortcuts']['1']['AppName'] == 'Def Jam Recompiled'
+    assert engine.find_steam_shortcut(PurePosixPath('/games/Def Jam Recompiled'), [user]) == (0x9A8B7C6D, user)
+    assert engine.find_steam_shortcut(PurePosixPath('/games/elsewhere'), [user]) == (None, None)
+    (user / 'config/shortcuts.vdf').write_bytes(b'\x00shortcuts\x00\x00')            # damaged: ignored, not fatal
+    assert engine.find_steam_shortcut(PurePosixPath('/games/Def Jam Recompiled'), [user]) == (None, None)
+
+
+def test_steam_artwork_is_named_by_the_shortcuts_appid_and_the_players_own_art_is_kept(tmp_path):
+    user = steam_user(tmp_path, (0x9A8B7C6D, 'Def Jam Recompiled', '/games/Def Jam Recompiled'))
+    source = art_source(tmp_path)
+    messages = []
+    placed = engine.place_steam_art(source, PurePosixPath('/games/Def Jam Recompiled'), event=messages.append, folders=[user])
+    grid = user / 'config/grid'
+    names = sorted(p.name for p in grid.iterdir())
+    assert names == sorted(['2592832621p.png', '2592832621.png', '2592832621_hero.png', '2592832621_logo.png'])
+    assert sorted(placed) == sorted(str(grid / n) for n in names)
+    assert (grid / '2592832621p.png').read_bytes() == b'png portrait.png'
+    # A second run leaves identical files alone; art the player put there is never replaced.
+    (grid / '2592832621_hero.png').write_bytes(b'my own hero')
+    again = engine.place_steam_art(source, PurePosixPath('/games/Def Jam Recompiled'), event=messages.append, folders=[user])
+    assert str(grid / '2592832621_hero.png') not in again
+    assert (grid / '2592832621_hero.png').read_bytes() == b'my own hero'
+    assert any('your own artwork' in m for m in messages)
+    # ...unless an earlier setup placed it.
+    owned = [str(grid / '2592832621_hero.png')]
+    engine.place_steam_art(source, PurePosixPath('/games/Def Jam Recompiled'), owned=owned, event=messages.append, folders=[user])
+    assert (grid / '2592832621_hero.png').read_bytes() == b'png hero.png'
+
+
+def test_the_fan_set_is_placed_by_default_and_the_plain_set_fills_the_gaps(tmp_path):
+    user = steam_user(tmp_path, (0x9A8B7C6D, 'Def Jam Recompiled', '/games/Def Jam Recompiled'))
+    source = art_source(tmp_path)                                   # the plain set: all four
+    (source / 'branding/fan/steam').mkdir(parents=True)
+    for name in ('portrait.png', 'wide.png', 'logo.png'):           # the fan set has no hero
+        (source / 'branding/fan/steam' / name).write_bytes(b'fan ' + name.encode())
+    engine.place_steam_art(source, PurePosixPath('/games/Def Jam Recompiled'), event=lambda m: None, folders=[user])
+    grid = user / 'config/grid'
+    assert (grid / '2592832621p.png').read_bytes() == b'fan portrait.png'
+    assert (grid / '2592832621_logo.png').read_bytes() == b'fan logo.png'
+    assert (grid / '2592832621_hero.png').read_bytes() == b'png hero.png'      # from the plain set
+
+
+def test_no_shortcut_yet_places_nothing_and_says_how_to_finish(tmp_path):
+    user = steam_user(tmp_path)
+    messages = []
+    assert engine.place_steam_art(art_source(tmp_path), PurePosixPath('/games/x'), event=messages.append,
+                                  timeout=0.0, folders=[user]) == []
+    assert not (user / 'config/grid').exists() and '--steam-art' in messages[0]
+
+
+def test_the_desktop_entry_uses_the_icon_and_falls_back_to_the_themes():
+    entry = engine.desktop_entry(PurePosixPath('/games/Def Jam Recompiled'), Path('/games'), PurePosixPath('/games/Def Jam Recompiled.png'))
+    assert 'Icon=/games/Def Jam Recompiled.png\n' in entry and 'StartupWMClass=' + engine.LINUX_DESKTOP_ID in entry
+    assert 'Icon=applications-games\n' in engine.desktop_entry(PurePosixPath('/games/x'), Path('/games'))
+
+
+@linux_only
+def test_setup_installs_the_icon_and_uninstall_removes_it_and_the_steam_art(tmp_path, monkeypatch):
+    home = fake_home(tmp_path, monkeypatch)
+    setup = installer(tmp_path)
+    (setup.source / 'branding/icon/png').mkdir(parents=True)
+    (setup.source / 'branding/icon/png/defjam-256.png').write_bytes(b'icon')
+    user = steam_user(tmp_path, (0x9A8B7C6D, 'Def Jam Recompiled', str(setup.install / engine.LINUX_LAUNCHER)))
+    monkeypatch.setattr(engine, 'steam_userdata_folders', lambda: [user])
+    shutil.copytree(art_source(tmp_path) / 'branding/steam', setup.source / 'branding/steam')
+    setup.args.steam_shortcut = True
+    monkeypatch.setattr(engine.shutil, 'which', lambda name: '/usr/bin/true' if name == 'steamos-add-to-steam' else None)
+    monkeypatch.setattr(engine.subprocess, 'run', lambda *a, **k: subprocess.CompletedProcess(a, 0))
+    monkeypatch.setattr(setup, 'run', lambda *a, **k: '')
+    setup.activate()
+    icon = setup.install / (engine.LINUX_LAUNCHER + '.png')
+    assert icon.read_bytes() == b'icon'
+    assert f'Icon={icon}\n' in (home / '.local/share/applications' / (engine.LINUX_DESKTOP_ID + '.desktop')).read_text()
+    receipt = json.loads((setup.install / 'installed.json').read_text())
+    assert len(receipt['steam_art']) == 4 and all(Path(p).is_file() for p in receipt['steam_art'])
+    engine.uninstall(setup.install)
+    assert not icon.exists() and not any(Path(p).exists() for p in receipt['steam_art'])
