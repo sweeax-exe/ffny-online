@@ -157,6 +157,8 @@ def test_padded_and_duplicate_texture_sections_keep_effective_user_packs(tmp_pat
 @pytest.mark.parametrize('failure', ['shortcuts', 'cancel', 'receipt', None])
 def test_activation_publishes_hd_with_receipts_or_preserves_previous_bytes(tmp_path, monkeypatch, failure):
     from types import SimpleNamespace
+    if failure=='shortcuts' and engine.IS_LINUX:
+        pytest.skip('Linux activation runs no command; a shortcut it cannot write is reported, not raised')
     obj=object.__new__(engine.Engine)
     obj.args=SimpleNamespace(no_shortcuts=False,no_desktop_shortcut=False,cancel_file=None)
     obj.install=tmp_path/'install';obj.data=tmp_path/'data';obj.payload=tmp_path/'payload'
@@ -169,7 +171,9 @@ def test_activation_publishes_hd_with_receipts_or_preserves_previous_bytes(tmp_p
     if not engine.IS_WINDOWS:
         template=obj.payload/'launcher'/engine.LAUNCHER_BUNDLE
         (template/'Contents/MacOS').mkdir(parents=True)
+        (obj.payload/'launcher/launcher.sh').write_text('#!/bin/sh\nexec @EXECUTABLE@\n')
         monkeypatch.setenv('HOME',str(tmp_path/'home'));(tmp_path/'home/Desktop').mkdir(parents=True)
+        monkeypatch.setenv('XDG_DATA_HOME',str(tmp_path/'home/.local/share'))
     previous=dict(hd_packs=['faithful-hd-'+'d'*12+'-opacity'],version='0.5.1')
     (obj.install/'installed.json').write_text(json.dumps(previous))
     (obj.install/'installed.ini').write_bytes(b'old receipt')

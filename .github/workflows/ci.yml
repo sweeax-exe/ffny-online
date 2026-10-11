@@ -20,7 +20,7 @@ jobs:
         with: { python-version: '3.13' }
       - run: python -m pip install pytest Pillow==12.3.0 numpy==2.5.2
       - name: Installer recovery and input boundaries
-        run: python -m pytest -q tests/unit/test_setup_engine.py tests/unit/test_hd_assets.py tests/unit/test_hd_corpus.py tests/unit/test_hd_setup.py
+        run: python -m pytest -q tests/unit/test_setup_engine.py tests/unit/test_linux_setup.py tests/unit/test_hd_assets.py tests/unit/test_hd_corpus.py tests/unit/test_hd_setup.py
       - name: Build and inventory standalone setup (no dump)
         shell: pwsh
         run: ./scripts/build-setup.ps1
@@ -73,6 +73,38 @@ jobs:
         with:
           name: macos-setup-assets
           path: build/setup-macos/setup-assets/*
+          if-no-files-found: error
+
+  linux-setup:
+    name: Game-free Linux setup
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: recursive }
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.13' }
+      - run: python -m pip install pytest pyxbe capstone Pillow==12.3.0 numpy==2.5.2
+      - name: Installer recovery, input boundaries, launcher and payload checks
+        run: python -m pytest -q tests/unit/test_setup_engine.py tests/unit/test_linux_setup.py tests/unit/test_hd_setup.py
+      - uses: actions/cache@v4
+        with:
+          path: build/setup-downloads/linux
+          key: linux-setup-${{ hashFiles('setup/dependencies-linux.json') }}
+      - name: Build and inventory the setup archive (no dump)
+        run: ./scripts/build-setup-linux.sh
+      - name: Wizard smoke and invalid input exit safely
+        run: |
+          sudo apt-get install -y xvfb > /dev/null
+          folder=$(ls -d build/setup-linux/image/DefJamSetup-*-linux-x64)
+          xvfb-run -a "$folder/DefJamSetup.sh" --ui-smoke
+          set +e
+          "$folder/DefJamSetup.sh" --silent --dump missing.iso --install-dir "$RUNNER_TEMP/defjam-test-app" --data-dir "$RUNNER_TEMP/defjam-test-data"
+          code=$?
+          if [ "$code" -ne 2 ]; then echo "Expected invalid-input exit 2, got $code"; exit 1; fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-setup-assets
+          path: build/setup-linux/setup-assets/*
           if-no-files-found: error
 
   hygiene:

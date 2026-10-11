@@ -148,6 +148,25 @@ def stage_macos(args, staging, source, toolkit):
     return provenance
 
 
+def stage_linux(args, staging, source, toolkit):
+    """Python (with Tk), the wheels, the wizard, the engine and the launcher template; no binaries."""
+    spec = importlib.util.spec_from_file_location('linux_payload', ROOT / 'scripts/linux_payload.py')
+    linux = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(linux)
+    cache = args.cache / 'linux'
+    cache.mkdir(parents=True, exist_ok=True)
+    provenance = linux.stage(staging, cache)
+    # The launcher and overlay are drawn with Dear ImGui, built from this source with the game:
+    # the build container has no network.
+    provenance.append(stage_imgui_source(args, source))
+    (staging / 'licenses').mkdir(exist_ok=True)
+    notice = staging / 'python/lib' / next(p.name for p in (staging / 'python/lib').iterdir()
+                                          if re.fullmatch(r'python3\.\d+', p.name)) / 'LICENSE.txt'
+    if notice.is_file():
+        shutil.copyfile(notice, staging / 'licenses/Python-PSF.txt')
+    return provenance
+
+
 def stage_windows(args, staging, source, toolkit):
     """Embedded Python, wheels, offline SDL3/ImGui source and the native launcher."""
     (staging / 'engine').mkdir()
@@ -186,15 +205,19 @@ def stage_windows(args, staging, source, toolkit):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--platform', choices=['windows-x64', 'macos-arm64'],
-                        default='windows-x64' if sys.platform == 'win32' else 'macos-arm64')
-    parser.add_argument('--launcher', type=Path, required=True,
-                        help='built DefJamLauncher.exe (Windows) or Def Jam Recompiled.app (macOS)')
+    parser.add_argument('--platform', choices=['windows-x64', 'macos-arm64', 'linux-x64'],
+                        default='windows-x64' if sys.platform == 'win32'
+                        else 'macos-arm64' if sys.platform == 'darwin' else 'linux-x64')
+    parser.add_argument('--launcher', type=Path,
+                        help='built DefJamLauncher.exe (Windows) or Def Jam Recompiled.app (macOS); '
+                             'Linux uses the script template in setup/linux')
     parser.add_argument('--runtime', type=Path, help='macOS: prebuilt runtime library prefix (see macos_payload.py)')
     parser.add_argument('--output', type=Path, default=ROOT / 'build/setup-payload.zip')
     parser.add_argument('--cache', type=Path, default=ROOT / 'build/setup-downloads')
     parser.add_argument('--development', action='store_true')
     args = parser.parse_args(argv)
+    if args.platform != 'linux-x64' and not args.launcher:
+        parser.error('--launcher is required for ' + args.platform)
     toolkit = ROOT / 'tools/xboxrecomp'
     commit, pin = git(ROOT, 'rev-parse', 'HEAD'), git(toolkit, 'rev-parse', 'HEAD')
     expected_pin = git(ROOT, 'ls-tree', 'HEAD', 'tools/xboxrecomp').split()[2]
@@ -217,7 +240,8 @@ def main(argv=None):
         # Source archives contain no Git metadata and never receive the user's bytes.
         (source / 'src/recomp/gen').mkdir(parents=True, exist_ok=True)
         (source / 'src/recomp/gen/.gitkeep').touch()
-        provenance = (stage_macos if args.platform == 'macos-arm64' else stage_windows)(args, staging, source, toolkit)
+        stage = {'macos-arm64': stage_macos, 'linux-x64': stage_linux}.get(args.platform, stage_windows)
+        provenance = stage(args, staging, source, toolkit)
         (staging / 'dependencies.json').write_text(json.dumps(provenance, indent=2), encoding='utf-8')
         inventory = {p.relative_to(staging).as_posix(): digest(p) for p in sorted(staging.rglob('*')) if p.is_file()}
         manifest = {'schema': 1, 'platform': args.platform, 'version': version,

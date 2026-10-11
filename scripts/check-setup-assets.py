@@ -44,6 +44,10 @@ def inspect_payload(archive):
                     continue
                 if not package.source_allowed(relative, toolkit):
                     raise ValueError('Disallowed setup source input: ' + name)
+            elif manifest['platform'] == 'linux-x64':
+                if not name.startswith(('python/', 'engine/', 'licenses/')) \
+                        and name not in {'launcher/launcher.sh', 'dependencies.json'}:
+                    raise ValueError('Unexpected setup component: ' + name)
             elif manifest['platform'] == 'macos-arm64':
                 if not name.startswith(('python/', 'engine/', 'tools/', 'deps/', 'licenses/')) \
                         and not name.startswith('launcher/Def Jam Recompiled.app/') and name != 'dependencies.json':
@@ -51,7 +55,15 @@ def inspect_payload(archive):
             elif not name.startswith(('python/', 'engine/')) and name not in {'DefJamLauncher.exe', 'dependencies.json'}:
                 raise ValueError('Unexpected setup component: ' + name)
         # Probe the actual embedded runtime without generating new payload files.
-        if manifest['platform'] == 'macos-arm64':
+        if manifest['platform'] == 'linux-x64':
+            if sys.platform.startswith('linux'):
+                import subprocess
+                python = folder / 'python/bin/python3'
+                python.chmod(0o755)   # safe_unpack keeps no modes; the shipped folder does
+                subprocess.run([python, '-B', '-c',
+                    'import capstone, xbe, tkinter, tools.disasm, tools.recomp, tools.xiso; print("Bundled runtime imports OK")'],
+                    check=True, env={'PATH': '/usr/bin:/bin'})
+        elif manifest['platform'] == 'macos-arm64':
             if sys.platform == 'darwin':
                 import subprocess
                 python = folder / 'python/bin/python3'
@@ -77,11 +89,14 @@ def platform_of(archive):
         return json.loads(package_zip.read('manifest.json'))['platform']
 
 
+INSTALLER_EXTENSION = {'windows-x64': '.exe', 'macos-arm64': '.dmg', 'linux-x64': '.tar.gz'}
+
+
 def validate_asset_names(version, names, platform='windows-x64'):
     if not re.fullmatch(r'\d+\.\d+\.\d+', version):
         raise ValueError('Invalid setup release version')
     stem = f'DefJamSetup-{version}-{platform}'
-    extension = {'windows-x64': '.exe', 'macos-arm64': '.dmg'}[platform]
+    extension = INSTALLER_EXTENSION[platform]
     expected = {stem + extension, stem + '.sha256', stem + '.provenance.json'}
     if set(names) != expected:
         raise ValueError('Release assets must be exactly the approved setup installer, checksum and provenance')
@@ -133,6 +148,28 @@ def verify_embedded_payload_macos(image, archive):
             subprocess.run(['/usr/bin/hdiutil', 'detach', '-force', mountpoint], check=True, stdout=subprocess.DEVNULL)
 
 
+def verify_embedded_payload_linux(tarball, archive):
+    """Every file under payload/ in the tarball is the inspected ZIP's, byte for byte, and nothing else ships."""
+    import tarfile
+    with zipfile.ZipFile(archive) as package_zip:
+        expected = {name: hashlib.sha256(package_zip.read(name)).hexdigest()
+                    for name in package_zip.namelist() if not name.endswith('/')}
+    found, top = {}, set()
+    with tarfile.open(tarball) as image:
+        for member in image.getmembers():
+            parts = member.name.split('/')
+            if member.issym() or member.islnk() or not (member.isfile() or member.isdir()) or '..' in parts:
+                raise ValueError('Unexpected entry in the setup archive: ' + member.name)
+            if len(parts) > 1:
+                top.add(parts[1])
+            if member.isfile() and len(parts) > 2 and parts[1] == 'payload':
+                found['/'.join(parts[2:])] = hashlib.sha256(image.extractfile(member).read()).hexdigest()
+    if found != expected:
+        raise ValueError('Installer payload does not match the inspected payload')
+    if top - {'payload', 'DefJamSetup.sh', 'READ ME FIRST.txt', 'Licenses'}:
+        raise ValueError('Unexpected files in the setup archive: ' + ', '.join(sorted(top)))
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--payload', type=Path, required=True)
@@ -142,13 +179,14 @@ def main(argv=None):
     args = parser.parse_args(argv)
     manifest = inspect_payload(args.payload)
     platform = manifest['platform']
-    (verify_embedded_payload_macos if platform == 'macos-arm64' else verify_embedded_payload)(args.installer, args.payload)
+    {'macos-arm64': verify_embedded_payload_macos, 'linux-x64': verify_embedded_payload_linux}.get(
+        platform, verify_embedded_payload)(args.installer, args.payload)
     if manifest.get('development') and not args.development:
         raise ValueError('A development payload cannot be published')
     args.output_dir.mkdir(parents=True, exist_ok=True)
     stem = f'DefJamSetup-{manifest["version"]}-{platform}'
     import shutil
-    exe = args.output_dir / (stem + ('.dmg' if platform == 'macos-arm64' else '.exe'))
+    exe = args.output_dir / (stem + INSTALLER_EXTENSION[platform])
     shutil.copyfile(args.installer, exe)
     sha = engine.digest(exe)
     (args.output_dir / (stem + '.sha256')).write_text(sha + '  ' + exe.name + '\n', encoding='utf-8')

@@ -1,5 +1,5 @@
 {
   "windows-x64": {"status": "in-development", "preset": "win-x64-release", "artifact": ".exe"},
   "macos-arm64": {"status": "todo", "preset": "posix-release", "artifact": ".dmg", "renderer": "Vulkan/MoltenVK"},
-  "linux-x64": {"status": "todo", "preset": "posix-release", "artifact": ".AppImage", "renderer": "Vulkan", "fallback": "user-built Windows game under Proton"}
+  "linux-x64": {"status": "in-development", "preset": "posix-release", "artifact": ".tar.gz", "renderer": "Vulkan", "toolchain": "host, or the pinned build container (setup/dependencies-linux.json) where there is none"}
 }

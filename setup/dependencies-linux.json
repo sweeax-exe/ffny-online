@@ -1,0 +1,17 @@
+{
+  "python": {
+    "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20260924/cpython-3.13.15%2B20260924-x86_64-unknown-linux-gnu-install_only.tar.gz",
+    "sha256": "c20e1ff8600a0241849588b36948942eaccdc80da34df69674f3784a687197de"
+  },
+  "wheels": {
+    "capstone-5.0.9-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl": "273fd8d747d2e35c88f91450be51a603ecfaafb00d96d9f315dcb8689c86193e",
+    "pyxbe-1.0.4-py3-none-any.whl": "8c8a354b824ab978ca088472adeb2395f0704c71c0347c94b1eda639a2e34416"
+  },
+  "container": {
+    "comment": "The build toolchain for hosts without one (SteamOS). Arch Linux as of the archive date below, which carries the same glibc, SDL3, shaderc and Vulkan loader as SteamOS 3.8, so the game it builds runs on the host's own libraries.",
+    "image": "docker.io/library/archlinux@sha256:af82cf8d6d8e461701c28e339bb39de2f22376f06382c205fe22f86175889f4d",
+    "image_tag": "base-devel-20250727.0.390543",
+    "archive_date": "2025/07/27",
+    "packages": ["cmake", "ninja", "clang", "pkgconf", "sdl3", "shaderc", "vulkan-headers", "vulkan-icd-loader", "openssl"]
+  }
+}

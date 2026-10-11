@@ -1,9 +1,10 @@
 # Setup installers
 
 Setup contains tools and source and compiles your own USA Xbox dump locally. It
-exists for Windows x64 and, since v0.6.1, macOS on Apple Silicon (see
-[macOS setup](#macos-setup-apple-silicon) below). The Windows sections come first;
-Linux setup is still a to-do and reuses the same engine.
+exists for Windows x64, macOS on Apple Silicon (see
+[macOS setup](#macos-setup-apple-silicon)) and x86-64 Linux including the Steam Deck
+(see [Linux setup](#linux-setup)). The Windows sections come first; all three share
+one engine.
 
 ## Wizard and destinations
 
@@ -191,3 +192,82 @@ folder, a repair while the game runs (exit 5), shortcut creation and removal, an
 installed build against the title, menu and fight checks. Not yet checked: a Mac with
 nothing installed, older macOS versions and Gatekeeper's first-open prompt on a
 downloaded copy.
+
+## Linux setup
+
+`DefJamSetup-<version>-linux-x64.tar.gz` unpacks to a folder holding `DefJamSetup.sh`,
+"READ ME FIRST" and the third-party licenses. It needs x86-64 Linux with a Vulkan
+GPU and, at run time, SDL3 3.2 or newer, the Vulkan loader and shaderc -- SteamOS 3.8
+has all three -- plus about 12 GiB free and room for the dump copy. It brings its own
+Python (with Tk, for the wizard) and needs no Python, CMake or Git of your own.
+
+**Start it.** Open `DefJamSetup.sh`; on the Steam Deck, in Desktop Mode, double-click it
+in Dolphin and choose Execute. The wizard has the same controls as the others -- your
+ISO/XISO or extracted dump, separate **Install location** and **Data location**
+(defaults `~/Games/DefJamRecompiled/App` and `.../Data`), menu and desktop shortcuts --
+and one more: **Add to Steam**, which asks the running Steam client to add the game as a
+non-Steam shortcut so it starts from Gaming Mode. HD textures are not offered on Linux yet.
+
+**The compiler.** If this computer has one (clang, cmake, ninja and the SDL3, Vulkan
+and shaderc development packages; one probe build checks them), setup uses it. If not
+-- SteamOS has no compiler, but has podman -- setup builds in a container: Arch Linux
+pinned by image digest and by an archive date whose glibc, SDL3, shaderc and Vulkan
+loader are SteamOS 3.8's own, so the game it builds runs on SteamOS's libraries. The
+container is fetched once (about 1 GB, so the first install needs internet), runs
+without network access and sees only the install and data folders. `--toolchain host`
+or `--toolchain container` forces either. After the build, setup checks with `ldd`
+that the game's libraries are all present on this computer and says which are not.
+
+**Afterwards.** Setup writes the launcher, `Def Jam Recompiled`, into the install folder,
+an application-menu entry, a desktop shortcut unless you clear the choice, and asks
+Steam for its shortcut if you chose it. The launcher takes the play lock (an update
+refuses to run while the game does), supplies the data folder and working directory
+and keeps the ten newest play logs in `~/.local/state/DefJamRecompiled/logs`. The game
+opens its launcher window first and has the F1 overlay, as on the other platforms
+([guide](launcher-and-overlay.md)); settings are also in `settings.ini`
+([reference](settings-reference.md)). Setup logs are in `~/.local/state/DefJamSetup/logs`.
+
+**Silent mode and removal.**
+
+```bash
+./DefJamSetup.sh --silent --dump ~/Dumps/DefJam.iso \
+    --install-dir ~/Games/DefJamRecompiled/App --data-dir ~/Games/DefJamRecompiled/Data \
+    [--steam-shortcut] [--no-desktop-shortcut | --no-shortcuts] [--toolchain host|container]
+./DefJamSetup.sh --uninstall --install-dir ~/Games/DefJamRecompiled/App
+```
+
+Exit codes as on the other platforms: 0 success; 2 invalid input; 3 prerequisites
+missing (no toolchain and no podman, the container could not be fetched, or the
+game's libraries are missing); 4 failed stage; 5 another setup or the game is
+running; 6 cancelled. Uninstalling removes the application, the launcher and the menu
+and desktop entries it made, and keeps the dump copy, saves, settings and logs. A
+Steam shortcut stays in Steam until you remove it there (in the Library, the game's
+**Manage** menu, *Remove non-Steam game from your library*), and the build container stays
+in podman's store (`podman rmi $(podman images -q localhost/defjam-recompiled-build)`).
+
+### What the Linux payload carries
+
+The source, python-build-standalone's CPython with the `pyxbe` and `capstone` wheels,
+the wizard, the engine and the launcher template, each pinned by SHA-256 in
+`setup/dependencies-linux.json` with the build container's image digest, archive
+date and package list. It carries no compiler and no libraries. Build it with
+`scripts/build-setup-linux.sh` (`--development` for a local prototype from a dirty
+checkout); `check-setup-assets.py` verifies that the tarball's payload is the
+inspected one, byte for byte, and nothing else.
+
+### Validation
+
+Checked on a Steam Deck OLED (SteamOS 3.8, no compiler, podman 5.5) from the development
+archive of this branch: a silent install from an XISO took five minutes, including fetching
+the build container (the toolchain probe chose it), extraction, analysis, lift, build and the
+host library check; the launcher started the game with the install's data folder, PipeWire
+sound, the Deck's controls as player 1 and Vulkan at 60 frames a second, and kept its play log;
+the application-menu entry, the desktop shortcut and (with `--steam-shortcut`, Steam running)
+the Steam shortcut were made. A repair with the same folders reused every verified stage and
+took 13 seconds. An update from v0.6.1 to v0.6.2 built Dear ImGui offline in the container, and the
+installed game opened its launcher. `--uninstall` removed the application, the launcher and
+both entries and kept the data folder (exit 0). Also checked: the wizard opens and closes
+(`--ui-smoke`), and a silent run with a missing dump exits 2. Vlad played the installed game
+on the Deck. Not yet checked: the wizard driven by hand from start to finish, the Steam shortcut
+started from Gaming Mode, and a desktop
+Linux distribution with its own toolchain (`--toolchain host`).
