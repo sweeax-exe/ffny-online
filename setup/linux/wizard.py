@@ -60,6 +60,12 @@ def wizard(payload, smoke=False):
 
     root = tk.Tk()
     root.title(TITLE)
+    icon = Path(payload) / 'source/branding/icon/png/defjam-128.png'
+    if icon.is_file():
+        try:
+            root.iconphoto(True, tk.PhotoImage(file=str(icon)))   # the shield, in the title bar and taskbar
+        except tk.TclError:
+            pass
     root.minsize(720, 0)
     try:
         root.tk.call('tk', 'scaling', max(1.0, root.winfo_fpixels('1i') / 72.0))

@@ -15,7 +15,7 @@ cmake_minimum_required(VERSION 3.20)
 # (a junction/symlink is fine) and run scripts/verify-dump.py first.
 # ============================================================================
 
-project(defjam_recomp VERSION 0.7.0 LANGUAGES C CXX)
+project(defjam_recomp VERSION 0.7.1 LANGUAGES C CXX)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -76,6 +76,12 @@ if(DEFJAM_BUILD_GAME)
         set(HOST_SOURCES "")
         list(FILTER HOOK_SOURCES EXCLUDE REGEX "/pc_launcher_sdl\\.cpp$")
         include(imgui)
+        # The shield icon and the file properties (branding/icon/defjam.ico).
+        enable_language(RC)
+        include(windows_resource)
+        defjam_windows_resource(DEFJAM_RC NAME defjam_recomp VERSION ${PROJECT_VERSION}
+                                DESCRIPTION "Def Jam: Fight for NY - Recompiled")
+        set(HOST_SOURCES ${DEFJAM_RC})
     else()
         # The Win32 window and the debug-register watchpoints have no place
         # here; src/host_posix.c has the SDL window and stands in for the rest.
@@ -87,6 +93,7 @@ if(DEFJAM_BUILD_GAME)
         find_package(SDL3 REQUIRED CONFIG)
         find_package(Vulkan REQUIRED)
         include(imgui)
+        include(app_icon)
     endif()
     add_executable(${PROJECT_NAME} WIN32
         src/main.c
@@ -100,6 +107,7 @@ if(DEFJAM_BUILD_GAME)
         target_link_libraries(${PROJECT_NAME} PRIVATE xboxrecomp recomp_settings defjam_imgui d3d11 dxgi dxguid xinput winmm dbghelp shell32)
     else()
         # One SDL for the window, the sound and the pads: SDL3, the system's.
+        defjam_app_icon(${PROJECT_NAME})
         target_link_libraries(${PROJECT_NAME} PRIVATE xboxrecomp recomp_settings defjam_imgui
                               SDL3::SDL3 Vulkan::Vulkan ${CMAKE_DL_LIBS} m)
         if(APPLE)

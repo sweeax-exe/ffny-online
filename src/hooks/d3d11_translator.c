@@ -272,6 +272,10 @@ static HWND make_window(void)
     wc.lpfnWndProc   = translator_wndproc;
     wc.hInstance     = GetModuleHandleW(NULL);
     wc.hCursor       = LoadCursorW(NULL, IDC_ARROW);
+    /* The shield from the exe's own resources (src/defjam.rc.in, id 1): title bar, taskbar, Alt+Tab. */
+    wc.hIcon         = LoadIconW(wc.hInstance, MAKEINTRESOURCEW(1));
+    wc.hIconSm       = (HICON)LoadImageW(wc.hInstance, MAKEINTRESOURCEW(1), IMAGE_ICON,
+                                         GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), 0);
     wc.lpszClassName = L"DefJamRecompTranslator";
     RegisterClassExW(&wc);
 

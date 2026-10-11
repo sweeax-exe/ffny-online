@@ -1,3 +1,5 @@
+<p align="center"><img src="branding/icon/png/defjam-128.png" width="96" alt="The shield icon"></p>
+
 # Def Jam: Fight for NY — Recompiled
 
 [![CI](https://github.com/vyanhursky/DefJamFFNY-recomp/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/vyanhursky/DefJamFFNY-recomp/actions/workflows/ci.yml)

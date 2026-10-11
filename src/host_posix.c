@@ -28,6 +28,7 @@
 #include <ApplicationServices/ApplicationServices.h>
 #endif
 
+#include "app_icon_rgba.h"   /* generated from branding/icon/window (cmake/app_icon.cmake) */
 #include "d3d8_vk.h"
 #include "hooks/pc_settings.h"
 #include "hooks/pc_input.h"
@@ -126,6 +127,15 @@ static void make_window_main(void *arg)
         return;
     }
     SDL_SetWindowMinimumSize(s_window, 320, 240);
+    {   /* The shield: the window's icon, and on macOS the Dock's. The Linux taskbar and
+         * switcher use the desktop entry's icon; this covers a run outside it. */
+        SDL_Surface *icon = SDL_CreateSurfaceFrom(APP_ICON_SIZE, APP_ICON_SIZE, SDL_PIXELFORMAT_RGBA32,
+                                                  (void *)app_icon_rgba, APP_ICON_SIZE * 4);
+        if (icon) {
+            SDL_SetWindowIcon(s_window, icon);
+            SDL_DestroySurface(icon);
+        }
+    }
     s_extensions = SDL_Vulkan_GetInstanceExtensions(&s_extension_count);
     if (!s_extensions) {
         fprintf(stderr, "[HOST] SDL cannot name its Vulkan extensions: %s\n", SDL_GetError());
