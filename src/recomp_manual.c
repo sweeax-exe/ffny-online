@@ -22,7 +22,6 @@
 #include <stdint.h>
 #include <string.h>
 #include <stdlib.h>
-#include <math.h>
 #include "host.h"
 
 /* The generated register model: MEM8/16/32, XBOX_PTR, and the guest registers
@@ -904,95 +903,20 @@ void sub_002203C6_enter(void)
 }
 
 /*
- * EXPERIMENT (feat/widescreen research, not a shipped feature): widescreen probes.
- * docs/research/widescreen-game-projection.md has the analysis.
+ * Widescreen (src/patches/widescreen.c, docs/widescreen/02-design.md).
  *
  * sub_0001A4E0 is the scene viewport's GetViewParams(this, mode, &fov, &aspect,
- * &y, &height), `ret 0x14`. The engine's fov is HORIZONTAL degrees (m00 =
- * cot(fov/2), m11 = cot(fov/2) * aspect). Mode 0 returns the 4:3 literal, mode 1
- * a 16:9 aspect with the viewport cut to 75% of the height (the cutscene
- * letterbox), mode 2 the viewport's own width/height.
- *
- * RECOMP_WS_ASPECT=<w/h> (e.g. 1.7778): mode 0 widens fov so the vertical view
- * is unchanged (Hor+); mode 1 drops the letterbox and keeps the authored 16:9
- * framing, widening further only past 16:9. Unset: the original behaviour.
- * The guest still renders 640x480, so captures are anamorphic: stretch them
- * to the target aspect to see the result.
+ * &y, &height), thiscall, `ret 0x14`, and the one place every 3D view gets its
+ * aspect: a 4:3 literal (mode 0), the cutscenes' 16:9 letterbox (mode 1) or the
+ * viewport's own width/height (mode 2). With widescreen off it does exactly what
+ * the original did; on, full-screen views are widened (Hor+) and cutscenes follow
+ * the cutscene setting.
  */
-static float ws_aspect(void)
-{
-    static float a = -1.0f;
-    if (a < 0.0f) {
-        const char *e = getenv("RECOMP_WS_ASPECT");
-        a = e ? (float)atof(e) : 0.0f;
-        if (a > 0.0f)
-            fprintf(stderr, "[WS] experimental aspect %.4f\n", a);
-    }
-    return a;
-}
-
-static float ws_widen(float fov_deg, float from, float to)
-{
-    const double d2r = 3.14159265358979323846 / 180.0;
-    double f;
-    if (to <= from)
-        return fov_deg;
-    f = 2.0 * atan(tan(fov_deg * d2r * 0.5) * (to / from)) / d2r;
-    return (float)(f > 170.0 ? 170.0 : f);
-}
+#include "patches/widescreen.h"
 
 void sub_0001A4E0(void)
 {
-    uint32_t vp = g_ecx, mode = MEM32(g_esp + 4);
-    uint32_t pfov = MEM32(g_esp + 8), pasp = MEM32(g_esp + 12);
-    uint32_t py = MEM32(g_esp + 16), ph = MEM32(g_esp + 20);
-    float fov = MEMF(vp + 0xC), y = MEMF(vp + 0x18), h = MEMF(vp + 0x20);
-    float a = ws_aspect();
-    static unsigned seen[3];
-
-    if (mode > 2) {
-        /* the original writes nothing for other modes */
-    } else if (mode == 2) {
-        MEMF(pfov) = fov;
-        MEMF(pasp) = (float)((double)MEMF(vp + 0x1C) / (double)h);
-        MEMF(py) = y;
-        MEMF(ph) = h;
-    } else if (mode == 1) {
-        if (a > 0.0f) {
-            MEMF(pfov) = ws_widen(fov, 16.0f / 9.0f, a);
-            MEMF(pasp) = a > 16.0f / 9.0f ? a : 16.0f / 9.0f;
-            MEMF(py) = y;
-            MEMF(ph) = h;
-        } else {
-            MEMF(pfov) = fov;
-            MEM32(pasp) = 0x3FE38E39;
-            MEMF(py) = (float)((double)h * 0.25 * 0.5 + (double)y);
-            MEMF(ph) = (float)((double)h - (double)h * 0.25);
-        }
-    } else {
-        MEMF(pfov) = a > 0.0f ? ws_widen(fov, 4.0f / 3.0f, a) : fov;
-        if (a > 4.0f / 3.0f)
-            MEMF(pasp) = a;
-        else
-            MEM32(pasp) = 0x3FAAAAAB;
-        MEMF(py) = y;
-        MEMF(ph) = h;
-    }
-    if (a > 0.0f && mode < 3 && seen[mode]++ < 3)
-        fprintf(stderr, "[WS] view mode %u fov %.2f -> %.2f\n", mode, fov, MEMF(pfov));
+    ws_view_params(g_ecx, MEM32(g_esp + 4), MEM32(g_esp + 8), MEM32(g_esp + 12),
+                   MEM32(g_esp + 16), MEM32(g_esp + 20));
     g_esp += 24; /* thiscall: return address and five arguments */
-}
-
-/* RECOMP_WS_UI=1: hand the Flash front end gWidescreenMode = "1" instead of
- * "off" (sub_0006B760 pushes the value string at 0x29A9D4). */
-void sub_0006B760_enter(void)
-{
-    static int done;
-    const char *e = getenv("RECOMP_WS_UI");
-    if (done || !e || *e != '1')
-        return;
-    MEM8(0x29A9D4) = '1';
-    MEM8(0x29A9D5) = 0;
-    done = 1;
-    fprintf(stderr, "[WS] gWidescreenMode = \"1\"\n");
 }

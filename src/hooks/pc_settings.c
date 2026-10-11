@@ -29,9 +29,15 @@
 #include "pc_settings.h"
 #include "pc_input.h"
 #include "pc_ui.h"
+#include "patches/widescreen.h"
 
 static const char *const k_aspect[] = { "4:3", "stretch", NULL };
 static const char *const k_filter[] = { "smooth", "sharp", NULL };
+static const char *const k_widescreen[] = { "off", "auto", "16:9", "16:10", "21:9 (experimental)",
+                                            "32:9 (experimental)", NULL };
+static const char *const k_ws_hud[] = { "auto", "edges", "centered", NULL };
+static const char *const k_ws_cutscenes[] = { "authored", "fill", NULL };
+static const char *const k_ws_fill[] = { "blur", "black", NULL };
 
 static RecompSetting g_display_settings[] = {
     { "textures", "enabled", RECOMP_SETTING_BOOL, 0, 0, 0, NULL, NULL, RECOMP_SETTING_RESTART,
@@ -51,6 +57,16 @@ static RecompSetting g_display_settings[] = {
     { "display", "window_height", RECOMP_SETTING_INT, 960, 240, 16384, NULL, NULL, 0, NULL },
     { "display", "aspect", RECOMP_SETTING_ENUM, 0, 0, 0, k_aspect, NULL, 0,
       "4:3 keeps the console's picture shape with black bars; stretch fills the window." },
+    { "display", "widescreen", RECOMP_SETTING_ENUM, 0, 0, 0, k_widescreen, "RECOMP_WIDESCREEN", RECOMP_SETTING_RESTART,
+      "Widescreen: a wider 3D view with menus and HUD kept in shape. auto matches the screen (16:9 or 16:10). Beta." },
+    { "display", "widescreen_hud", RECOMP_SETTING_ENUM, 0, 0, 0, k_ws_hud, NULL, RECOMP_SETTING_RESTART,
+      "Where the fight HUD goes in widescreen: the screen edges, or a centred 16:9 box (auto: edges up to 16:9)." },
+    { "display", "widescreen_cutscenes", RECOMP_SETTING_ENUM, 0, 0, 0, k_ws_cutscenes, NULL, RECOMP_SETTING_RESTART,
+      "Story cutscenes in widescreen: authored keeps the game's own 16:9 framing, fill always fills the screen." },
+    { "display", "widescreen_side_fill", RECOMP_SETTING_ENUM, 0, 0, 0, k_ws_fill, NULL, RECOMP_SETTING_RESTART,
+      "Beside 4:3 pictures (movies, menu backgrounds) in widescreen: a soft blurred extension, or black." },
+    { "display", "widescreen_fov_cap", RECOMP_SETTING_INT, 150, 90, 170, NULL, NULL, RECOMP_SETTING_RESTART,
+      "Widest horizontal field of view widescreen may use, in degrees (only very wide screens reach it)." },
     { "display", "render_scale", RECOMP_SETTING_INT, 2, 1, 4, NULL, "RECOMP_RENDER_SCALE",
       RECOMP_SETTING_RESTART,
       "Internal resolution as a multiple of the console's 640x480. Higher is sharper and costs GPU time." },
@@ -318,15 +334,10 @@ int pc_display(const char *key, int fallback)
 
 void pc_settings_apply_display(void)
 {
-    d3d8_present_set_aspect(pc_display("aspect", 0) == 0, 4, 3);
-    {
-        /* Widescreen preview (experiment, docs/widescreen): the guest still renders
-         * 640x480, so present it stretched to the experiment's aspect. */
-        const char *ws = getenv("RECOMP_WS_ASPECT");
-        double a = ws ? atof(ws) : 0.0;
-        if (a > 4.0 / 3.0)
-            d3d8_present_set_aspect(1, (unsigned)(a * 1000.0 + 0.5), 1000);
-    }
+    if (ws_aspect() > 0.0f)       /* widescreen: the canvas's shape, with bars if the window differs */
+        d3d8_present_set_aspect(1, (unsigned)(ws_aspect() * 10000.0f + 0.5f), 10000);
+    else
+        d3d8_present_set_aspect(pc_display("aspect", 0) == 0, 4, 3);
     d3d8_present_set_linear_filter(pc_display("filter", 0) == 0);
     d3d8_present_set_vsync(pc_display("vsync", 1));
 }
@@ -522,6 +533,7 @@ int pc_settings_init(void)
     }
 
     d3d8_present_enable_scaling(1);
+    ws_init(pc_display("window_width", 1280), pc_display("window_height", 960), pc_display("fullscreen", 0));
 #if defined(_WIN32)
     d3d8_present_set_overlay(pc_ui_overlay, NULL);
 #else
