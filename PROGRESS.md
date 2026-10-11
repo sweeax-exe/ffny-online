@@ -241,7 +241,7 @@ defjam-recomp/
 
 ## 7. Hand-off
 
-### Widescreen lane (2026-10-11): beta.1 implemented on Windows, awaiting the owner's play-test
+### Widescreen lane (2026-10-11): beta.1 implemented on Windows, awaiting the owner's play-test (PR #12 CI 25/25 green at `d171ae8`). **Owner, 2026-10-11: he play-tests on Windows first; the Vulkan canvas (Linux, Steam Deck, macOS) waits for that play-test.**
 Worktree `code/defjam-widescreen`, branch `feat/widescreen` (draft PR #12; toolkit fork branch `defjam/widescreen` at `085d2b2`, pushed 2026-10-11 with the owner's OK). Read `docs/widescreen/README.md`, then `02-design.md` section 0 (the renderer-side 2D design actually built) and `04-work-packages.md` status table. Play: launcher Display, `widescreen = auto` (or `16:9`/`16:10`), restart; or `RECOMP_WS_ASPECT=1.7778`. Test captures: `--env RECOMP_WS_ASPECT=1.7778 --env RECOMP_TRANS_SHOT_WIDE=1`. Open: Vulkan canvas (WS-1b, Deck/Linux/macOS), the 16:9 box for cutscenes beyond 16:9, a `widescreen` regress check, the venue sweep, a 1-px slide-in sliver at the 4:3 box edge on two screens, removing the `RECOMP_WS_TRACE2D` probe (needs a re-lift). FMV AI side art is a to-do (`docs/widescreen/08-fmv-ai-pipeline.md`).
 ### v0.7.1 released: icons and Steam artwork (D98), 2026-10-11
 PR from `feat/icons-and-steam-art` (five commits rebased onto v0.7.0 main), merged and tagged `v0.7.1`
