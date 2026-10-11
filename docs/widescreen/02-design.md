@@ -1,6 +1,30 @@
 # 02 — Design
 
-## 1. Architecture in one picture
+## 0. Revision (2026-10-11, during the beta.1 build)
+
+Measured while implementing, and now the design: **2D placement lives in the renderer, not in game code.**
+
+- The native 2D quad setters the front-end report named (`sub_00028F90`, `sub_0002E390`, `sub_0002E470`) are
+  **never called** in menus or fights (an entry-hook probe counted zero calls over a whole fight route).
+- A batch dump of a fight frame shows a clean signal instead: 3D batches come out of their vertex program with
+  varying depth, 2D batches (HUD, menus) with `w = 1` and one depth, in 640x480 pixels; P1's HUD pieces end left of
+  x = 300, P2's start right of 340, and the timer and centred text straddle the middle.
+- So the push-buffer executor classifies every batch (toolkit `ws_place_batch`, `nv2a_pb_exec.c`) and the renderer
+  applies a per-draw clip-space placement `x * kx + bx`:
+  - 3D: unchanged (the game's Hor+ view already fills the canvas);
+  - full-screen 2D, untextured or with a texture of 128 texels or less (fades, tints, vignette): stretched;
+  - full-screen 2D picture (movie, poster, backdrop): centred, and the present step fills the sides (blur);
+  - other 2D: centred; during a fight (heartbeat from the match step `sub_00087700`, which runs only in matches)
+    pieces wholly left of 300 / right of 340 are anchored to that side (to the screen edge, or the edge of a
+    centred 16:9 box on ultrawide);
+  - every placed batch is clipped to where its own clip rectangle lands (slide-ins stay hidden).
+- Game code still owns the 3D view (Hor+, cutscene policy), the settings, and the two signals (k and the heartbeat).
+
+This replaces decision W3's "place 2D in the game code that emits it". The game-side work packages WS-4/5/6/7 shrink
+to verification of the classifier per screen; WS-11 became the main mechanism. Known limits of the heuristics are
+tracked in [04](04-work-packages.md#status-2026-10-11).
+
+## 1. Architecture in one picture (original plan, superseded in part by section 0)
 
 ```
             game code (lifted, src/)                         renderer (toolkit fork)

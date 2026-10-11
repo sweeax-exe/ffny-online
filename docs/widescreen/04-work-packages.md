@@ -16,6 +16,21 @@ The experiment in `src/recomp_manual.c` ("EXPERIMENT" section: `sub_0001A4E0` re
 starting point for WS-2/WS-3 and is removed or absorbed by WS-2. `RECOMP_WS_UI` and the `sub_0006B760_enter` hook are
 deleted there (finding: the flag does nothing).
 
+## Status (2026-10-11)
+
+| WS | State | Notes |
+|---|---|---|
+| WS-0 settings | done | `[display] widescreen`, `widescreen_hud`, `widescreen_cutscenes`, `widescreen_side_fill`, `widescreen_fov_cap`; `RECOMP_WS_ASPECT` for experiments |
+| WS-1a canvas (D3D11) | done | toolkit `d3d8_present_set_canvas_aspect`; scissor and point sprites per axis; captures (`RECOMP_TRANS_SHOT_WIDE=1`) |
+| WS-1b canvas (Vulkan) | open | Linux/macOS stay 4:3 (the game refuses widescreen there until this lands) |
+| WS-2 Hor+ | done | `src/patches/widescreen.c` `ws_view_params`; full-screen views only |
+| WS-3 cutscenes | mostly | 16:9 full screen, 16:10 thin bars; the 16:9 box beyond 16:9 is still Hor+ (experimental aspects only) |
+| WS-4/5/6/7 2D | done via the renderer classifier (design section 0) | to verify per screen in the play-test: pause, popups, Story hub, shops, create-a-player, results |
+| WS-8 side fill | done (blur, D3D11) | present-time blur of the picture's mips beside the 4:3 box when a full-screen picture was centred |
+| WS-9 venue sweep | open | 16:9/16:10 first (owner's scope) |
+| WS-10 tests | partly | canvas maths unit test; quick regression stays bit-identical; a widescreen regress check is still to add |
+| WS-12 AI side art | to-do | owner: refine seam blending first ([08](08-fmv-ai-pipeline.md)) |
+
 ## Order and parallelism
 
 ```
