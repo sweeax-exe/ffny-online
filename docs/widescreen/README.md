@@ -13,6 +13,7 @@ order. Every claim here is either measured in a run, verified in the lifted code
 | [05-cameras-and-venues.md](05-cameras-and-venues.md) | Fight cameras in 1v1 and free-for-all, special and cinematic cameras, the venue sweep |
 | [06-cutscenes-movies-and-ai.md](06-cutscenes-movies-and-ai.md) | Cutscene policy, the FMVs, full-screen backdrops, and where generative AI fits (and where it does not) |
 | [07-testing-and-playtest.md](07-testing-and-playtest.md) | Automated checks, the aspect test matrix, the beta release and the play-test script |
+| [08-fmv-ai-pipeline.md](08-fmv-ai-pipeline.md) | The FMV widening pipeline: blurred sides (shipping) and AI outpainting (to-do): tools, commands, measurements, refinement plan |
 
 Research behind it (all in `docs/research/`): [prior art](../research/widescreen-prior-art.md),
 [community patches](../research/widescreen-defjam-community.md), [generative AI](../research/widescreen-genai.md),
@@ -72,8 +73,8 @@ Where a report and this folder disagree, this folder wins: it was checked agains
 |---|---|
 | First-release scope | **16:9 and 16:10** (desktop and Steam Deck). 21:9 and 32:9 stay selectable but labelled experimental until the ultrawide venue sweep passes. |
 | HUD default | **Edge-anchored up to 16:9, centred 16:9 box above** (W4 as proposed). |
-| Generative AI | **Try both on one FMV first**: done 2026-10-11 ([06 §5](06-cutscenes-movies-and-ai.md#5-fmv-trial-blur-vs-ai)): AI works locally (about 12 GPU-hours for all FMV on the owner's card) with good but softer sides and occasional off-model faces; blur stays the default; WS-12 awaits the owner's look at the comparison. |
+| Generative AI | Trial done ([06 §5](06-cutscenes-movies-and-ai.md#5-fmv-trial-blur-vs-ai), pipeline in [08](08-fmv-ai-pipeline.md)). AI "looks surprisingly good" but the seam between real and generated needs more blending: **to-do** (WS-12). |
+| Side fill | **Blurred sides** are the default and ship (`side_fill = blur`). |
+| Beta | **Yes**: `v0.8.0-beta.1` with widescreen off by default, for an initial owner play-test; tweaking continues through later betas. |
 | Publishing | Branch pushed and a draft PR opened for the implementing agents. |
 
-Still open (defaults apply unless the owner says otherwise): side fill `blur` vs `black` as the default (proposed
-`blur`), and the beta shape (`v0.8.0-beta.1` with widescreen off by default, proposed).

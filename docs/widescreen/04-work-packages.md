@@ -218,11 +218,13 @@ toolkit lane (WS-1b, WS-8 host part, WS-11).
   (`frame[6..7]`, `nv2a_vsh_cpu.c:393`, `d3d8_shaders.c:155-156`, `d3d8_vk.c:523-540`) driven by a table of vertex-program hashes,
   for any 2D source that cannot be patched in game code.
 
-## WS-12 — Optional AI side-art pack builder (decided after the FMV trial)
+## WS-12 — Optional AI side-art pack builder (to-do: seam blending first)
 
 See [06](06-cutscenes-movies-and-ai.md#4-generative-ai). Local, user-run, never distributed, writes an `art` pack for WS-8.
 The owner asked (2026-10-11) for one FMV to be tried both ways (blurred side fill and AI extension) before deciding;
-the trial and its result are in [06 §5](06-cutscenes-movies-and-ai.md#5-fmv-trial-blur-vs-ai).
+the trial and its result are in [06 §5](06-cutscenes-movies-and-ai.md#5-fmv-trial-blur-vs-ai). Verdict: promising, but the seam
+is visible; resume with the refinement plan in [08 §6](08-fmv-ai-pipeline.md#6-to-do-refinement-plan-in-order) using
+`scripts/fmv-widescreen.py`. Not needed for the beta.
 
 ## WS-13 — Live switching and 32:9 polish (later)
 

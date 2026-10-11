@@ -101,7 +101,7 @@ Worked numbers: 16:9 → `k = 0.75`, `Lw = 853.3` (target 854·s), fov 30° → 
 Content that is a full-screen 4:3 picture (FMV, loading posters, 2D-only menu backdrops) leaves side areas. Options,
 chosen by the `side_fill` setting:
 
-- `blur` (default): at present time, the host fills each side area with a heavily blurred, darkened, horizontally
+- `blur` (default, confirmed by the owner after the FMV trial): at present time, the host fills each side area with a heavily blurred, darkened, horizontally
   stretched copy of the nearest third of the picture (the "ambient" look of video players). The game marks frames that
   need it through a host call (`recomp_ws_side_fill(on)`) from the movie and backdrop hooks, so 3D frames are never
   touched. Cost: one small downsample/blur pass per marked frame.

@@ -101,7 +101,12 @@ footage, **about 12 GPU-hours for the 3 minutes of full-screen FMV** on this car
   19, 29, 41–44). A first run fed a corrupt start (decoder seeked between keyframes) and drew a duplicate head at the
   seam: input quality matters, and every shot needs a human look.
 
-**Recommendation.** Keep `blur` as the default (decision unchanged). WS-12 is feasible on the owner's hardware and the
+**Owner's verdict (2026-10-11).** Blurred sides look good and stay the default. The AI version looks surprisingly good
+but you can tell where the real picture ends and the AI begins; it needs more blending, so it is a **to-do**. The full
+pipeline, measurements and the refinement plan (feathered seam band, grain/colour matching, pop fixes) are in
+[08-fmv-ai-pipeline.md](08-fmv-ai-pipeline.md).
+
+**Recommendation (before the verdict).** Keep `blur` as the default (decision unchanged). WS-12 is feasible on the owner's hardware and the
 result is good enough to offer as an **optional, experimental, per-shot reviewed** pack: about half a day of GPU time for
 all FMV, plus review. If built: split by real shot boundaries (scene detection misses dark cuts; check by eye), write a
 prompt per shot, generate 2–3 seeds per shot and pick, fall back to blur per shot, and consider the 14B model only if

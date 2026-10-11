@@ -194,7 +194,7 @@ defjam-recomp/
 
 ## 5. Open questions for Vlad
 
-- **(2026-10-11) Widescreen scope (`docs/widescreen/README.md`).** ~~(1) scope~~ 16:9 + 16:10 first, ultrawide experimental. ~~(2) HUD~~ edges, 16:9 box on ultrawide. (3) Side fill default blur or black (proposed blur). ~~(4) AI~~ try blur and AI on one FMV first, then decide WS-12. (5) `v0.8.0-beta.1` with widescreen off by default (proposed). ~~(6) publish~~ push the branch and open a draft PR.
+- **(2026-10-11) Widescreen scope (`docs/widescreen/README.md`).** ~~(1) scope~~ 16:9 + 16:10 first, ultrawide experimental. ~~(2) HUD~~ edges, 16:9 box on ultrawide. ~~(3) Side fill~~ blur (owner liked it). ~~(4) AI~~ trial done: promising, seam needs blending, to-do (`docs/widescreen/08-fmv-ai-pipeline.md`). ~~(5) Beta~~ yes, `v0.8.0-beta.1` for an initial play-test. ~~(6) publish~~ push the branch and open a draft PR.
 
 - **(2026-10-09) Linux / Steam Deck (D95).** ~~(1) Owner play-test~~ done 2026-10-10: good, a little audio clipping/distortion (issue #11). ~~(2) Windows/macOS regressions~~ done by Vlad 2026-10-10/11, no regressions. (3) Whether to chase the KEVENTS fighter-select hang (to make the stale-stack fix safe) or leave KEVENTS opt-in. ~~(5)~~ Vlad: the audio is a to-do (issue #11).
 
