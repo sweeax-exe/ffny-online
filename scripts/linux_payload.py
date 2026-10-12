@@ -3,8 +3,8 @@
 
 The setup compiles the player's dump on their computer, so the payload brings
 the Python that runs the wizard, the engine and the lifter (with Tk for the
-wizard and the two wheels the pipeline needs), the wizard itself and the
-launcher template. It carries no compiler and no libraries: the game is built
+wizard, the two wheels the pipeline needs and the two the optional HD texture
+upscale needs), the wizard itself and the launcher template. It carries no compiler and no libraries: the game is built
 with the computer's own toolchain or, where there is none (SteamOS), in a
 build container pinned in setup/dependencies-linux.json, and it runs on the
 computer's own SDL3, Vulkan loader and shaderc. Every download is pinned by
@@ -21,7 +21,7 @@ import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
-PACKAGES = ['pyxbe==1.0.4', 'capstone==5.0.9']
+PACKAGES = ['pyxbe==1.0.4', 'capstone==5.0.9', 'Pillow==12.3.0', 'numpy==2.5.2']
 PYTHON_PRUNE = ('bin/idle3', 'bin/idle3.13', 'bin/pip', 'bin/pip3', 'bin/pip3.13', 'bin/pydoc3', 'bin/pydoc3.13',
                 'bin/python3-config', 'bin/python3.13-config', 'bin/python', 'share', 'include', 'lib/pkgconfig')
 PYTHON_PRUNE_LIB = ('test', 'idlelib', 'turtledemo', 'ensurepip', 'lib2to3')
@@ -72,6 +72,7 @@ def stage_python(staging, cache):
     if not all((wheels / name).is_file() and digest(wheels / name) == sha for name, sha in expected.items()):
         subprocess.run([sys.executable, '-m', 'pip', 'download', '--only-binary=:all:', '--no-deps', '--dest',
                         str(wheels), '--platform', 'manylinux2014_x86_64', '--platform', 'manylinux_2_17_x86_64',
+                        '--platform', 'manylinux_2_28_x86_64',
                         '--python-version', '313', '--implementation', 'cp', '--abi', 'cp313', *PACKAGES], check=True)
     provenance = []
     for name, sha in expected.items():
