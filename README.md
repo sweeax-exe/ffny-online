@@ -1,4 +1,4 @@
-<p align="center"><img src="branding/icon/png/defjam-128.png" width="96" alt="The shield icon"></p>
+<p align="center"><img src="branding/fan/github/social-preview-1280x640.jpg" width="960" alt="Def Jam: Fight for NY — Fan Recomp"></p>
 
 # Def Jam: Fight for NY — Recompiled
 
