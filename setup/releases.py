@@ -166,7 +166,7 @@ def catalog(platform, cache, cancelled=lambda: None, allow_cached=False):
                        'reason': '' if available else 'No complete setup for this platform',
                        'notes': str(release.get('body') or '')[:20000], 'assets': selected if available else []})
     result.sort(key=lambda row: version(row['version']), reverse=True)
-    # Cache is display metadata only; selected downloads always refresh their pinned identity.
+    # Display cache is explicit offline metadata; downloads still verify pinned asset bytes.
     fd, temporary = tempfile.mkstemp(prefix='releases-', suffix='.pending', dir=cache)
     pending = Path(temporary)
     try:
@@ -174,7 +174,13 @@ def catalog(platform, cache, cancelled=lambda: None, allow_cached=False):
             json.dump(result, stream)
             stream.flush()
             os.fsync(stream.fileno())
-        os.replace(pending, cache / 'releases.json')
+        try:
+            os.replace(pending, cache / 'releases.json')
+        except PermissionError:
+            # Another Windows discovery reader can temporarily deny replacement.
+            # Online results remain valid; an older display cache can be refreshed later.
+            if not (cache / 'releases.json').is_file() or (cache / 'releases.json').is_symlink():
+                raise
     finally:
         pending.unlink(missing_ok=True)
     return result
@@ -225,7 +231,17 @@ def download(asset, cache, cancelled=lambda: None, progress=lambda text: None, e
             os.fsync(stream.fileno())
         if count != size or sha(pending) != checksum:
             raise ValueError('Setup download size or SHA-256 mismatch')
-        os.replace(pending, path)
+        # Another setup may have promoted these same bytes while this one downloaded.
+        # Replacing an open final file is denied by Windows; validated cache bytes suffice.
+        def valid_final():
+            return path.is_file() and not path.is_symlink() and path.stat().st_size == size and sha(path) == checksum
+        if valid_final():
+            return path
+        try:
+            os.replace(pending, path)
+        except PermissionError:
+            if not valid_final():
+                raise
         return path
     finally:
         pending.unlink(missing_ok=True)
@@ -235,7 +251,7 @@ def safe_zip(data, destination):
     total, seen = 0, set()
     with zipfile.ZipFile(io.BytesIO(data)) as archive:
         for member in archive.infolist():
-            name = member.filename.rstrip('/')
+            name = member.orig_filename.rstrip('/')
             path = PurePosixPath(name)
             folded = name.casefold()
             mode = member.external_attr >> 16
@@ -412,6 +428,27 @@ class WindowsJob:
         if self.handle:
             self.api.CloseHandle(self.handle); self.handle = None
 
+
+def start_selected(interpreter, arguments):
+    if os.name != 'nt':
+        return subprocess.Popen([interpreter, *arguments], start_new_session=True), None
+    # Start only a standard-library gate until the controller owns the Windows job.
+    # Running the engine in this same interpreter then inherits the job for every stage,
+    # including historical engines; no child can escape before job assignment.
+    gate = ("import sys\nif sys.stdin.buffer.read(1)!=b'1':sys.exit(6)\n"
+            "import os,runpy\nsys.argv=sys.argv[1:]\nsys.path.insert(0,os.path.dirname(sys.argv[0]))\n"
+            "runpy.run_path(sys.argv[0],run_name='__main__')")
+    child = subprocess.Popen([interpreter, '-B', '-c', gate, *arguments[1:]], stdin=subprocess.PIPE)
+    job = None
+    try:
+        job = WindowsJob(child)
+        child.stdin.write(b'1'); child.stdin.flush(); child.stdin.close()
+        return child, job
+    except BaseException:
+        child.terminate(); child.wait()
+        if job: job.close()
+        raise
+
 def run_selected(args, platform, payload, cancelled):
     interpreter = payload / ('python/python.exe' if platform == 'windows-x64' else 'python/bin/python3')
     # The verified target runs its own engine/Python. stdout remains native wizard diagnostics.
@@ -451,11 +488,8 @@ def run_selected(args, platform, payload, cancelled):
                     os.killpg(pid, sig)
     known = {}
     sampled = 0
-    child = subprocess.Popen([interpreter, *child_arguments(args, payload, supported)], start_new_session=os.name != 'nt')
-    job = None
+    child, job = start_selected(interpreter, child_arguments(args, payload, supported))
     try:
-        if os.name == 'nt':
-            job = WindowsJob(child)
         while child.poll() is None:
             if time.monotonic() - sampled > .5:
                 sample()

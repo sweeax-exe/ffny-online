@@ -83,7 +83,8 @@ def test_download_url_boundary(url):
 @pytest.mark.parametrize('name',['../escape','/escape','C:/escape','a\\b','a/../b','a//b','a.','a:stream'])
 def test_archive_rejects_unsafe_paths_before_writing(tmp_path,name):
     out=io.BytesIO()
-    with zipfile.ZipFile(out,'w') as package:package.writestr(name,b'data')
+    info=zipfile.ZipInfo('raw');info.filename=info.orig_filename=name
+    with zipfile.ZipFile(out,'w') as package:package.writestr(info,b'data')
     with pytest.raises(ValueError):releases.safe_zip(out.getvalue(),tmp_path/'dest')
     assert not (tmp_path/'escape').exists()
 
@@ -344,12 +345,19 @@ def test_failed_handoff_only_stops_same_stage_process_identity(tmp_path,monkeypa
     assert calls==([] if reused else [43])
 
 
-def test_windows_job_closing_reaps_separate_child_tree(tmp_path):
+def test_windows_job_closing_reaps_separate_child_tree_before_engine_can_spawn(tmp_path,monkeypatch):
     if os.name!='nt':pytest.skip('Native Windows job object')
     ready=tmp_path/'ready'
     code="import subprocess,sys,time;from pathlib import Path;p=subprocess.Popen([sys.executable,'-c','import time;time.sleep(60)']);Path(sys.argv[1]).write_text(str(p.pid));time.sleep(60)"
-    child=subprocess.Popen([sys.executable,'-c',code,str(ready)])
-    job=releases.WindowsJob(child)
+    script=tmp_path/'engine.py';script.write_text(code)
+    original=releases.WindowsJob
+    def delayed_job(child):
+        import time
+        time.sleep(.5)
+        assert not ready.exists(), 'Engine ran before its process job was assigned'
+        return original(child)
+    monkeypatch.setattr(releases,'WindowsJob',delayed_job)
+    child,job=releases.start_selected(Path(sys.executable),['-B',str(script),str(ready)])
     import time,ctypes
     try:
         deadline=time.monotonic()+10
@@ -364,3 +372,22 @@ def test_windows_job_closing_reaps_separate_child_tree(tmp_path):
     finally:
         job.close()
         if child.poll() is None:child.kill();child.wait()
+
+
+def test_download_reuses_concurrently_promoted_cache_with_open_reader(tmp_path,monkeypatch):
+    import hashlib
+    body=b'identical verified bytes';digest=hashlib.sha256(body).hexdigest()
+    a=asset('v0.8.0','setup.exe');a.update(size=len(body),digest='sha256:'+digest)
+    target=tmp_path/(digest+'-'+str(a['id']));held=[]
+    class Response(io.BytesIO):url=a['browser_download_url']
+    class Opener:
+        def open(self,*args,**kwargs):
+            target.write_bytes(body);held.append(target.open('rb'))
+            return Response(body)
+    monkeypatch.setattr(releases.urllib.request,'build_opener',lambda *a:Opener())
+    def locked_replace(*a):raise PermissionError('cache reader holds Windows file')
+    monkeypatch.setattr(releases.os,'replace',locked_replace)
+    try:assert releases.download(a,tmp_path)==target
+    finally:
+        for stream in held:stream.close()
+    assert not list(tmp_path.glob('*.partial'))

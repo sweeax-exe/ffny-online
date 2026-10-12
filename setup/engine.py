@@ -968,8 +968,7 @@ class Engine:
             self.cancelled()
             for path in paths:
                 if path.is_file():
-                    with path.open('rb') as stream:
-                        os.fsync(stream.fileno())
+                    transaction.flush_file(path)
                 transaction.sync_directory(path.parent)
             journal.commit()
         except BaseException:

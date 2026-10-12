@@ -351,7 +351,7 @@ def test_uninstall_preserves_data_and_unrelated_install_files(tmp_path, monkeypa
     (setup.data/'save').mkdir()
     (setup.data/'save/profile').write_bytes(b'keep')
     (setup.install/'unrelated.txt').write_bytes(b'keep too')
-    engine.write_json(setup.install/'installed.json', {'schema':1, 'source':str(setup.source)})
+    engine.write_json(setup.install/'installed.json', {'schema':1, 'source':str(setup.source), 'data':str(setup.data)})
     (setup.install/'DefJamLauncher.exe').write_bytes(b'synthetic')
     monkeypatch.setattr(engine.subprocess, 'run', lambda *a, **k: None)
     engine.uninstall(setup.install)

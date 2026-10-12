@@ -70,6 +70,12 @@ def inventory(path):
     return {'directory': path.is_dir(), 'files': result}
 
 
+
+def flush_file(path):
+    # Windows _commit/FlushFileBuffers requires a writable descriptor.
+    with Path(path).open('r+b' if os.name == 'nt' else 'rb') as stream:
+        os.fsync(stream.fileno())
+
 def copy(source, destination):
     if source.is_dir():
         shutil.copytree(source, destination)
@@ -77,8 +83,7 @@ def copy(source, destination):
         shutil.copy2(source, destination)
     for item in destination.rglob('*') if destination.is_dir() else [destination]:
         if item.is_file():
-            with item.open('rb') as stream:
-                os.fsync(stream.fileno())
+            flush_file(item)
     sync_tree(destination)
 
 
@@ -170,8 +175,7 @@ class Activation:
             if path.exists():
                 for item in path.rglob('*') if path.is_dir() else [path]:
                     if item.is_file():
-                        with item.open('rb') as stream:
-                            os.fsync(stream.fileno())
+                        flush_file(item)
                 sync_tree(path)
         self.journal['committed'] = True
         atomic_json(self.folder / 'journal.json', self.journal)
