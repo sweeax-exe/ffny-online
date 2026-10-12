@@ -41,6 +41,8 @@
 | Launcher and overlay on macOS (v0.6.2) | ✅ released (v0.6.2) | D94. SDL/Metal launcher window and Vulkan overlay, same screen as Windows; scripted checks (rendered frames read back, real event paths, virtual pad) and `regress.py` pass; not driven by hand (screen locked), Windows not rebuilt. Release record in the work log. |
 | Native macOS arm64 and Linux x86-64 (M9, M7) | ✅ macOS / ✅ Linux (owner play-test 2026-10-10 good) | Released as v0.5.0 (D82). arm64 macOS: Vulkan renderer, SDL3 window, sound and pads, one guest CPU by token (D81); full `regress.py` 14 of 14 (two with caveats, work log 2026-10-08) and the owner's play-tests on Mac and Windows. Not on macOS: the launcher and overlay. Linux (D95, 2026-10-09): built with Clang 20 and run natively on a Steam Deck (SteamOS 3.8, RADV), PipeWire sound, the Deck's controls as a pad; eight Linux fixes; quick regression 5/5, boot soak 10/10, full regression 12 of 14 (combat and versus fail only `audio.dry_queue`). Not on Linux: launcher and overlay. Guide: `docs/build-macos-linux.md`. |
 
+| GitHub setup updates (D100–D101) | ✅ test plan / ⬜ implementation | Approved: clean build preserves all player data; no historical downgrade, future-capable downgrade testing; Linux scope Deck only. Acceptance matrix in `docs/setup-update-test-plan.md`; feature worktree `codex/setup-github-updates`. |
+
 ## 1. Decisions log
 
 | # | Date | Decision | Rationale |
@@ -152,6 +154,9 @@
 | D98 | 2026-10-10 | Every executable, bundle, launcher and shortcut carries the in-game shield, and the Linux setup gives the Steam shortcut library artwork (v0.7.1, branch `feat/icons-and-steam-art`, on the Linux setup branch). The artwork is the game's own, rendered from its textures, and is committed under `branding/` -- an exception to the no-game-artwork rule, pinned like D58: `scripts/check-source-tree.py` holds the SHA-256 of `branding/SHA256SUMS`, which lists every file, so any change needs a new approval. The shield (`battlemodeLogosIcons`) is the icon; the title wordmark (`nis_logo`) and the title-screen scene (three `demoStrt` layers, 640x480) make the banners. `scripts/make-branding.py` rebuilds everything from `branding/masters/`. | Vlad, 2026-10-10: option B (commit the real art), shield for the small and general icons, the wide title with the city backdrop for the wide art, release as v0.7.1 on top of PRs #9 and #10, and the official cover to be considered. A game-free setup cannot hold the icon in the setup executable if the art only came from the dump, so committing was the simple way to cover every surface. Steam art is placed by reading the appid back from `shortcuts.vdf`, because sources disagree on how it is computed. |
 | D99 | 2026-10-11 | The Linux setup offers the HD texture upscale (v0.7.2, branch `feat/linux-hd-textures`, PR #16): `HD_SUPPORTED` includes Linux, the wizard has the Windows checkbox (unchecked), and the payload carries four wheels (pyxbe, capstone, Pillow, NumPy). The packs' cost on Linux is fixed in the toolkit (`defjam/linux-hd-sha`, pinned `2992bd8`; `defjam/upstream-v0.13` to be fast-forwarded to it when #16 merges): SHA-NI for the texture identity on x86 POSIX, `process_vm_readv` instead of parsing `/proc/self/maps` for the readability check, and a 64-bit check (xxHash64 rounds) before re-hashing a bound texture every 8 ms, which also runs on Windows and macOS. The Battle routes in `harness.py` press on the main menu once `Audio.PlayMusic` is called. Setup no longer asks Steam for a second shortcut when one already runs the launcher (a repair with Add to Steam made a duplicate on the Deck). | Vlad asked for the HD option on Linux (2026-10-11, after testing the v0.7.1 installer), "~15 mins" in the guide, and to merge and tag when ready; then, given the shared code, to stop at a green PR for his Windows and Mac regressions; after the Windows ones (all green) he released it with macOS untested (2026-10-11). On the Deck the packs ran a fight at 25 fps: `perf` put the C SHA-256 (35% of the GPU thread) and then the maps parse (24%) on top; after the three changes no texture-pack code is near the top. The identity and pack names are unchanged, so existing packs keep working; the cheap check only decides when to recompute it. The menu presses moved because the HD menu art made the main menu answer about 3 s late. |
 
+| D100 | 2026-10-12 | Add GitHub release selection and clean updates to setup on Windows x64, macOS arm64 and Steam Deck/SteamOS. Clean updates rebuild code while preserving all player data. Historical releases are not downgrade targets; add downgrade and tests only among future updater-capable versions. Work in a feature worktree and prepare a PR. | Vlad accepted the research plan and specified these three choices; feature branch/PR and worktree explicitly authorized. Linux product scope is Deck only for this feature, not a promise for desktop distributions. |
+| D101 | 2026-10-12 | Gate the updater on the operation/option/native-platform and durable recovery matrix in `docs/setup-update-test-plan.md`, linked from the canonical test plan. Define U0 at the first implementing release; future downgrade needs compatible protocol/data formats. Recovery of a failed legacy update may restore its prior legacy install without enabling user-requested historical downgrade. | Safe recovery is different from choosing an older release. Receipts alone cannot prove activation: Linux embeds the new executable in its launcher before receipt publication, and macOS removes its old bundle before swap. Tests must execute the stable launcher after faults and verify player-data hashes. |
+
 ## 2. Environment inventory (2026-09-17)
 
 - OS: Windows 11 Pro 10.0.26200
@@ -222,13 +227,9 @@ defjam-recomp/
 
 ## 6. Work log
 
-> Recent entries only. Everything before 2026-10-07 18:17 is in `docs/worklog/` (one file a month); when this
+> Recent entries only. Everything before 2026-10-07 23:59 is in `docs/worklog/` (one file a month); when this
 > section passes about eight entries, move the oldest there.
 
-- 2026-10-07 18:17 — Original corrected combat retry27/27 inclaudio passes (regress-combat-20261007-181124); all seven corrected scenarios have passing runs, first intermittent AC97 crash retained. Candidate AC97 forced-interleaving/read/rollback fixture passes; original-source negativecontrol compiles/fails6checks. Parent173 pass; both candidate builds refreshed/certified after AC97. CandidateM2 unchanged frame40 golden passes (regress181708), serial full/opt-in/Debug/host matrix19137 active. Publication/live acceptance pending.
-- 2026-10-07 20:07 — Candidate Release full14/14 passes in74min (regress-20261007-193201), including unchanged three goldens/replay80records/1800steps and10/10 soak boots with0hangs/failures. Opt-ins Terrordome fight passes436s, FFA-result28/28 (193918), two-matches35/35 (194759); repeatA passes, repeatB200632 active. Visual/Debug9+5boots/four host checks remain queued serially19137. Topic ledger accounts26 original topics:22replays+4upstream equivalents; publication/reproducibility/live pending.
-- 2026-10-07 20:16 — Read-only next-upstream-wave review refreshes main193e2995/v0.13.1 and merged#167–175 status; only#162/#176 open, current reviews/files read. Recommended independent FPREM/doublelane/MSVCfixtures/parity/eventmultiwait, older inputmap/settings/VSHstate/storage/texture/DMA; source/isolated-proof limits documented upstream-next-wave-2026-10-07.md. No submissions/source changes/new tests. Candidate all5Releaseopt-ins nowpass inclrepeat80unchangedgolden and visual4/4(201131); Debug9+5boots19137 active, host follows. Archived priorhandoff; original artifacts preserved.
-- 2026-10-07 20:24 — D78 records user priority: currentrebase validation/merge/release first, fivefocused upstream preparations afterwards. Debug imagegoldens m2/m3/m4a pass; nine-check/five-boot chain19137 continues. Read-only heartbeat def-jam-migration-test-updates ACTIVE20min for meaningful existing-result updates; auto-review rejected broader autonomous commit/publication follow-up, narrower monitor accepted. No new code/tests/source publication.
 - 2026-10-07 23:59 — Status audit confirms all scheduled local candidate gates complete/pass: Release14/14+fiveopt-ins,Debug9/9+5boots,host4/4,extraDebugversus26/26,quick5/5. Preservation verifies original22save/24generated/10build files and15/6fixture files unchanged. candidate-game-exit.json/final-local-exit.json all0/complete. Updated stale PROGRESS/handoff; no new executable tests/source edits. Source integration still uncommitted/unpublished; fresh-clone/CI/live acceptance/merge/release pending. Originalmain separately advancedba43570 docs; preserve it.
 - 2026-10-08 10:20 — D79: owner candidate playtest accepted ("It plays great") and release authorized as v0.4.1. Six tested toolkit integration topics committed source-only and published b8754f85 to fork defjam/upstream-v0.13, remote SHA verified. Preparing parent source integration, fresh clone, CI and source release; no binaries/data published.
 - 2026-10-08 12:20 — **Port branch rebased onto v0.4.1 and the v0.13 toolkit (D80, D81).** Toolkit `defjam/macos-linux`: the 12 port commits replayed onto `defjam/upstream-v0.13` `c979c09` (three conflicts: a header, `NtClose`, the input layer's pad loop) plus `e5e59f6`. Upstream v0.13 has its own opt-in `guest_cpu_join` lock (`RECOMP_GUEST_LOCK=1`, cooperative), which collided at link time with the token's; the token is `guest_turn_*` now and upstream's stays off. Game branch: squashed to one commit first (the eleven are on `backup/macos-linux-port-pre-v041`), then rebased; the port's decisions are D80 and D81 because main took D73-D79. The v0.4.0 launcher and overlay are Direct3D 11 and Win32, so the Mac build leaves `pc_ui.cpp` and `pc_launcher.cpp` out and starts the game at once. Re-lifted with the v0.13 lifter (17,882 functions). `regress.py --quick` 5 of 5 (`regress-20261008-104907`). Full run 12 of 14 (`regress-20261008-114624`): `gym` failed because main's Story routes now take the second profile and the scratch save had the Story profile first; `crib` and `gym` pass with it second (`regress-20261008-121353`). `versus` failed `runtime.faults` on one `[ICALL] Failed to resolve VA 0x001E3C14`, called from `sub_001E39F0` at `0x001E3A65` through `[esi+0x1C]`: that address is a return address inside the same function, so a stream request's callback slot held stale data. Not seen in any earlier log; `versus` passed 26 of 26 on the rerun (`regress-versus-20261008-114721`). Open: whether it is the title's own race showing through the token's preemption, or new with v0.13. Upstream candidates from the port written up in `docs/research/upstream-macos-linux-candidates.md`. Not run: Windows build of the branch.
@@ -239,296 +240,20 @@ defjam-recomp/
 - 2026-10-10 — **v0.7.0: Linux and the Steam Deck (D97).** Review fixes from Vlad's Windows and Mac regressions (toolkit merged with `0e191bf` as `24724b5`; `PurePosixPath` in a setup test, run by the Windows job; vsync known issue). Found while merging: the Linux setup bundles Dear ImGui for its offline build; rolling-Arch builds need GLIBC_2.43 (Deck guide moved to a pinned podman image). On the Deck: quick 5/5, launcher and overlay 2/2, soak 3/3; `--uninstall` exit 0. CI 24/24 (#9) and 25/25 (#10). #9 squashed as `3089df7`.
 - 2026-10-10 22:00 — **Icons and Steam artwork (D98, v0.7.1), branch `feat/icons-and-steam-art` on `feat/linux-setup`, lane `code/defjam-icons`.** Found the logos in the dump's textures (shield `battlemodeLogosIcons`, wordmark `nis_logo`, title scene = three `demoStrt` layers, 640x480); rendered them with `scripts/make-branding.py` into `branding/` (3.7 MB, 29 files) and pinned the set in `check-source-tree.py` (0 failures, 263 files). Windows: `cmake/app.rc.in` for game, launcher and setup, window-class icons, shortcut `IconLocation`; macOS: `CFBundleIconFile`, `.icns`; POSIX game: embedded 128x128 window icon; Linux setup: `Icon=` path, Steam art placed from the appid read out of `shortcuts.vdf`, `--steam-art`. Checks: `pytest tests/unit` 211 passed / 2 failed (macOS payload tests that need symlinks and execute bits, Windows-only, unrelated) on Windows; Linux and branding tests 22 passed on Ubuntu (WSL); a packaged Windows setup built (asset check passed) and a silent install from the XISO (`defjam-icons-test`, no shortcuts) compiled the game: game exe, launcher and setup exe carry the icon and version info. The official cover (SteamGridDB, 660x930, owner-approved download) is the portrait capsule's base. Later the same day Vlad asked for a "FAN RECOMP" tag on the larger logos and banners (approved from previews, tag cap height 45% of the wordmark's) as a parallel set: `branding/fan/`, `masters/fan-tag.png`, and the installer prefers it (`place_steam_art`, hero from the plain set). Not run: macOS, a Steam Deck, Steam itself.
 - 2026-10-11 16:40 — **HD textures in the Linux setup (D99, v0.7.2), branch `feat/linux-hd-textures`, PR #16.** Engine `HD_SUPPORTED` on Linux, wizard checkbox, Pillow/NumPy manylinux wheels, asset probe; `scripts/hd-pack-digest.py`. On the Deck: the v0.7.1 install removed (`--uninstall`, Steam shortcut edited out of `shortcuts.vdf` with Steam stopped, folders), fresh silent install with `--hd-textures --steam-shortcut` 14 min 48 s (upscale ~9 min 40 s, 18,971 images, 6,569,283,340 bytes vs 6,212,168,677 on Windows/Mac: Pillow's Linux zlib; pixel digest `14d09aa3...`). Packs on, the fight ran 50 presents/2 s (25 fps) and the menu presses were lost (`regress-20261011-111737`, `-152653`). `perf`: GPU thread saturated, C SHA-256 35% of it; after SHA-NI the `/proc/self/maps` parse 24%; after `process_vm_readv` FFA still 106; after the cheap re-check fight 120 and FFA 113, both pass (`regress-20261011-162206`). Main menu ready ~3.1 s after its first call with packs (HD art decode), so the Battle routes now anchor on `audio.playmusic(`. Toolkit `defjam/linux-hd-sha` 91577b1, 0fa2051, 48edfee, 2992bd8 (fixture page size for macOS); fixtures add FIPS vectors, SHA-NI vs C, page-range readability and the cheap check (3 builds pass). Unit tests 276 passed, 23 skipped.
+- 2026-10-12 09:52 — Setup update test contract (D100–D101): feature worktree from public ce4d4ab, 14 operation families, 26 common cases, 12 crash checkpoints, 6 Windows/7 macOS/8 Deck native families. Clean data preservation, no historical downgrade, future compatibility and Deck-only scope recorded; canonical test gates linked. Documentation only; no updater code/game tests or acceptance claimed. Draft PR preparation underway.
 
 ## 7. Hand-off
 
-### v0.7.2 released: HD textures in the Linux setup (D99), 2026-10-11
-PR #16 from `feat/linux-hd-textures` merged and tagged `v0.7.2` (notes `docs/releases/v0.7.2.md`) after Vlad's
-Windows regressions (all green); **macOS untested** in this release. Toolkit pin `2992bd8` (`defjam/linux-hd-sha`),
-and the fork's `defjam/upstream-v0.13` fast-forwarded to it. On the Deck the game is installed from the v0.7.2
-setup with HD and Add to Steam (`~/Games/DefJamRecompiled`). To test packs from the install's own
-source tree: `cd <App>/versions/<ver>/source && DEFJAM_DATA=<Data> RECOMP_TEXTURE_PACKS="<both pack names>"
-python3 -B scripts/regress.py --only fight,ffa` (harness runs use `RECOMP_SETTINGS=none`, so the packs come from the
-environment). A toolkit edit tested in an install must be rebuilt in the setup's container image and recorded with
-`pipeline-state.py begin-build`/`record-build`, or `regress.py` refuses the build as stale. Open: a macOS regression of the shared
-texture-pack change, the pixel digest (`scripts/hd-pack-digest.py`) of a Windows or Mac pack
-against `14d09aa3...a9de7e`, the first-show stall of HD screens (decode on the GPU thread; a loader thread would fix it),
-FFA at 56 fps with packs on the Deck (renderer-bound).
+### Setup updater test contract, 2026-10-12 (D100–D101)
 
-### v0.7.1 released: icons and Steam artwork (D98), 2026-10-11
-PR from `feat/icons-and-steam-art` (five commits rebased onto v0.7.0 main), merged and tagged `v0.7.1`
-(notes `docs/releases/v0.7.1.md`). `branding/` holds the owner-approved artwork: the plain set and a
-`fan/` set with a FAN RECOMP tag under the title; the Linux setup places the fan set for its Steam shortcut
-(`place_steam_art`, hero from the plain set). Changing any file means `python scripts/make-branding.py render`
-(Pillow, NumPy; `fan-tag` redraws the tag from a font), the new `SHA256SUMS` hash in `BRANDING_SUMS_SHA256`
-and Vlad's approval. Not yet seen working: a Steam Deck with Add to Steam (the four `grid` files named by the
-appid read from `shortcuts.vdf`, shown after a Steam restart), the three macOS bundle icons and the Dock icon.
-Vlad uploads `branding/fan/github/social-preview-1280x640.jpg` as the repository social preview (no API).
+Feature worktree: `/Users/vlad/.codex/worktrees/setup-github-updates/DefJamFFNY-recomp`, branch `codex/setup-github-updates`, based on public main/v0.7.2 `ce4d4ab`. `docs/setup-update-test-plan.md` is the concrete acceptance contract; `docs/02-test-plan.md` links its release gates. This change is documentation only: no updater code, new executable tests, game runs or acceptance results yet. Draft PR authorized; no merge/release authorization in this session.
 
-### v0.7.0 released: Linux and the Steam Deck (D95-D97), 2026-10-10
-#9 and #10 merged into main and tagged `v0.7.0` (notes `docs/releases/v0.7.0.md`); the release carries
-the Windows, macOS and Linux setups. Toolkit pin `24724b5`, and `defjam/upstream-v0.13` fast-forwarded to
-it. Afterwards the Deck was wiped of everything this work put there, at Vlad's request, before his
-re-install: the installed game (through `--uninstall`), its Steam shortcut, the data roots, the clones,
-the containers and images (including `djbuild`, where `gh` was logged in). Vlad's play-test save is kept
-as `~/Downloads/DefJam-SteamDeck-save-2026-10-10.zip` beside his `UserData.zip`. The paths and
-containers in the block below no longer exist on the Deck: rebuild them from `docs/build-macos-linux.md`
-or install through the Linux setup. Open: issue #11 (audio), KEVENTS (item 3 below), HD textures in the
-Linux setup, `--toolchain host` on a desktop distribution, Gaming Mode start through the Steam shortcut.
+Scope: Windows x64, Apple Silicon macOS, Steam Deck/SteamOS only. Clean update preserves dump/saves/profiles/settings/mods/HD/user art and rebuilds fresh. Historical versions are never downgrade targets. Future capable pairs require explicit protocol/data compatibility; U0 version assigned at release. Failure recovery to a prior legacy install remains required. Prereleases hidden by default; no channel expansion required.
 
+Next: implement shared discovery/download/policy tests; durable activation journal and one active-version pointer plus fresh attempt builds/verified installed-dump reuse; then three wizards and selected-installer handoff. Use test checkpoints for subprocess kill/recovery; actual launcher version marker and data inventories are the oracle. Existing v0.7.2 Linux launcher embeds paths before receipt commit; macOS deletes old app before rename; all launchers/shortcuts are outside rollback. Run native game-free CI and owner-dump acceptance on three hosts; missing hosts remain BLOCKED. Worktree submodule has not been initialized for this documentation task; initialize its published exact pin before package/game builds, without changing the gitlink.
 
-### Native Linux and the Steam Deck (D95), 2026-10-09
-Branch `feat/linux-steam-deck` (PR #9, `main` merged in after v0.6.1); toolkit fork branch
-`defjam/linux-v0.6.1` (published): the Linux fixes atop the v0.6.1 pin `e4e653a` (the first cut,
-`defjam/linux`, sat on `4bff257`). Branch `feat/linux-setup` (PR #10, on this one) adds the Linux setup.
+### Existing release and standing work
 
-Machine: Steam Deck, SteamOS 3.8 (no compiler, read-only system). Build environment: distrobox `djbuild`
-(Arch, `cmake ninja clang pkgconf sdl3 shaderc vulkan-headers vulkan-icd-loader openssl python uv gdb
-github-cli`); `gh` is logged in there and git pushes run from inside it. That container is rolling Arch:
-since v0.6.2 (Dear ImGui's `atan2f`/`acosf`/`sqrtf`) its builds need GLIBC_2.43 and no longer start on
-SteamOS (2.41). Build anything meant to run on SteamOS in the pinned image instead (the Linux setup's
-`localhost/defjam-recompiled-build:*`, or `localhost/defjam-dev` from the Containerfile in
-`docs/build-macos-linux.md#steam-deck`). Data root
-`DEFJAM_DATA=/home/deck/Games/DJFFNY-data` (the owner's real save in `save/UserData`); `game` links to
-its `extracted`. Build: `distrobox enter djbuild`, `export CC=clang CXX=clang++`, then
-`uv run --no-project --with pyxbe --with capstone --with pytest python scripts/pipeline.py analyze|recomp|build`.
-Run on SteamOS itself, not in the container (the container has no PipeWire library, so no sound there):
-the binary needs at most GLIBC_2.38 and resolves against SteamOS's SDL3 3.2.18, Vulkan and shaderc
-(`ldd -r` is clean). Analysis 1 min, lift 2 min, Clang build 2 min on the Deck.
+Public v0.7.2 is released (D99), toolkit pin `2992bd8`. Deck installed with HD and Add to Steam under `~/Games/DefJamRecompiled`; Windows owner regressions green; macOS runtime regression of shared texture-pack change still pending. Compare HD pack decoded-pixel digest against Windows/macOS; Linux digest `14d09aa313ef713940f620abfc663ab078a181a0a5c750c70c4eaa6c85a9de7e`. Keep audio to-do #11 and existing milestone backlog independent of updater work. Prior detailed handoff archived unchanged under `docs/worklog/2026-10-handoffs.md` (development record).
 
-Fixed (game): `_GNU_SOURCE` for `dladdr`; headless runs keep SIGINT/SIGTERM (SDL swallowed them with
-no event loop). Fixed (toolkit): guest window reserved whole on Linux (arena in `win32_compat.c`); MMIO
-decoder ALU forms; case-insensitive guest paths; POSIX clock overflow (`qemu_clock_get_ns/us`, PTIMER and
-`NV_PAPU_XGSCNT` wrapped every 18 s) and the APU deadline running ahead during a pause; Vulkan texture
-conversion out of write-combined staging memory (movies 10 -> 30 fps, soak 0/10 -> 10/10); vsync only on
-displays at a multiple of 60 Hz, as on Windows (the Deck OLED's 90 Hz panel and a 144 Hz monitor held
-the title to ~40 fps with FIFO; new `D3D8VkHost.refresh_hz`, filled by `src/host_posix.c`).
-
-Results: quick 5/5 (`logs/regress-20261009-123014.txt`), soak 10/10, full 12 of 14 checks (`logs/regress-20261010-082035.txt` and reruns `regress-20261010-084419`, `-092011`, `-093159`): unit 210, the three goldens, fight, FFA, Terrordome FFA, replay (golden hash), intro, crib, gym and the boot soak pass; combat and versus pass every assertion but `audio.dry_queue` (2 and 7 isolated device underruns, no dropped buffers, the same through PipeWire on SteamOS).
-
-Next:
-1. Done 2026-10-10: Vlad's play-test on the Deck looks good; a little audio clipping or distortion is to-do issue #11.
-2. Done 2026-10-10/11: Vlad's Windows and macOS full regressions of this stack show no regressions (PR #9 comments); the toolkit was merged with main's `0e191bf` (overlay) as `24724b5`.
-3. KEVENTS: find who sets the event the FFA fighter select waits on with `RECOMP_TITLE_KEVENTS=1`
-   (main thread in `bridge_KeWaitForSingleObject` -> `ke_guest_event` path, infinite wait). Suspects:
-   setters that signal the host handle without writing guest `SignalState` (`KeSetEventBoostPriority`
-   does; the title's ordinal summary did not show it). With that fixed, KEVENTS removes the stale-stack
-   call through 0x80003344 at boot (from 0x0027EC6E, every Linux boot without it).
-4. The Windows hang tools (`sample-threads.py`, `guest-stack.py`, `native-stacks.py`, `hang-peek.py`)
-   have no POSIX path; `gdb -p` as root (or `kernel.yama.ptrace_scope=0`) did their work here. A soak hang
-   dump on Linux is three Python tracebacks.
-5. Menu routes calibrated for one profile list fail on the owner's real save (fighter select, gym);
-   use a fixture save for gate runs (`docs/09-testing-harness.md`).
-6. Issue #11 (audio clipping/distortion heard in the play-test). `audio.dry_queue` fails combat and versus on the Deck: 2-7 single underruns per run, no dropped
-   buffers, in the container (PulseAudio) and natively (PipeWire) alike. SDL output ring in
-   `apu_xaudio2.c` (preroll 2 x 1024 frames, cap 4 x); PipeWire's default quantum is 1024. Measure
-   with `RECOMP_APU_LEVEL=1` before tuning. The harness's scenarios ignore `RECOMP_HEADLESS` (they
-   strip inherited `RECOMP_` variables) and open a real window: on a Deck, keep the screen on.
-
-### macOS setup and HD on macOS, v0.6.1 candidate (D93), 2026-10-09
-Lane `feat/macos-setup` (draft PR to main), toolkit `defjam/macos-setup` at `e4e653a` (published, pinned). The release is ready except what is below; nothing is tagged.
-Build the setup: `./scripts/build-setup.sh --development` (a clean tree and no flag for the release); the image, SHA-256 and provenance land in `build/setup-macos/setup-assets`. The runtime libraries (SDL3, shaderc, MoltenVK) are cached in `build/setup-downloads/macos/runtime`; `scripts/macos_payload.py` rebuilds them from `setup/dependencies-macos.json`.
-Test without Homebrew: `sandbox-exec` with a profile denying `/opt/homebrew` and `/usr/local`, `env -i PATH=/usr/bin:/bin`, then the setup's `--silent` mode (see `docs/setup-installer.md`). Always run the game through `perl -e 'exec { $ARGV[0] } @ARGV'` when a path has spaces, and `kill -9` strays: the game ignores SIGTERM.
-Next, in order:
-1. Read the first macOS CI run (the job builds shaderc, about ten minutes) and fix what it finds.
-2. A clean Mac or user (no Homebrew, Command Line Tools present, then absent), macOS before 26, and Gatekeeper's first-open on a downloaded copy (`xattr -w com.apple.quarantine ...` on the dmg).
-3. The Windows setup and game, once, for the shared code this lane touched: `setup/engine.py`, `scripts/package-setup.py`, `scripts/check-setup-assets.py`, `scripts/hd_corpus.py` and the Windows paths of `texture_pack.c` (moved, not rewritten).
-4. Tag `v0.6.1` from main (the release workflow attaches the Windows exe and the macOS dmg, each with SHA-256 and provenance); notes are in `docs/releases/v0.6.1.md`.
-5. v0.6.2: launcher and overlay on macOS (ImGui on SDL3 and Vulkan, overlay hook in the Vulkan present path, pad chord).
-Known, not blocking: the README wizard screenshot is the Windows one (a macOS one needs a fingerprint approval in `scripts/check-source-tree.py`); pack names change whenever the HD scripts change, so each release leaves the previous ~6 GB packs on disk.
-
-### Native macOS and Linux port, merged and released as v0.5.0 (D82), 2026-10-08
-Open after the release (the first two are written up in `docs/04-improvement-backlog.md` at Vlad's request): the launcher and overlay off Windows; saves for the Story routes without copying them by hand; the one unresolved indirect call in `versus` (work log 2026-10-08); the Linux game build and a Steam Deck run; the Windows regression on these sources; the upstream candidates in `docs/research/upstream-macos-linux-candidates.md`.
-
-Work happens on a Mac (`<repo>`, arm64, macOS 26, Homebrew cmake/ninja/
-pkg-config/sdl2/libepoxy/openssl). Toolkit work is on fork branch `defjam/macos-linux`, published, and
-the parent gitlink on this branch points at its tip.
-Build: `cmake --preset ci-runtime-only && cmake --build --preset ci-runtime-only`. Trap fixture:
-`cmake -S tools/xboxrecomp/tests/mmio_trap_posix -B build/mmio_trap_posix -G Ninja && cmake --build
-build/mmio_trap_posix && ctest --test-dir build/mmio_trap_posix`.
-Data root on the Mac: `DEFJAM_DATA=<data>`; `game` is a symlink to its `extracted`.
-Pipeline: `uv run --no-project --with pyxbe --with capstone python scripts/pipeline.py analyze`, then `recomp`.
-Next, in order:
-1. Done: `xbox_kernel` compiles off Windows. Left behind on purpose: the AC97 write trap and the
-   `RECOMP_WATCH` page are Windows-only (they single-step with the trace flag); move them onto `mmio_trap`.
-2. Done (D81, toolkit `db0e78a`): one guest CPU on macOS as a token in `win32_compat.c`; the lifted
-   sources are force-included `src/recomp/guest_section.h` so `main.c` can give the runtime their
-   range. `[KERNEL] guest CPU: N preemptions, M requests, longest wait W ms` every 2 s shows it working
-   (about 1,100 preemptions a second in a fight; W is how long a woken or time-critical thread
-   waited, 1-3 ms as a rule, 9 at worst in a four-minute match, 23 seen once), and `guest CPU kept
-   N ms in host code` names a host function that sat on it (`atos -o build/posix-release/defjam_recomp
-   -l <load address> <pc>`). A blocking call added to the runtime that is not one of the
-   `win32_compat.c` primitives holds the guest CPU while it blocks: route it through them.
-   Its functions are `guest_turn_*` since the rebase onto toolkit v0.13: upstream now has its own
-   opt-in `guest_cpu_join`/`guest_cpu_part` lock (`RECOMP_GUEST_LOCK=1`, cooperative, off by default,
-   and by its own note deadlocks on a thread spinning without a kernel call, which is this title's
-   case); the two are independent and only the token is on here.
-   Fixture: `tools/xboxrecomp/tests/guest_cpu_posix`. To take a frozen process's stacks on the Mac:
-   `sample <pid> 3 -file logs/x.txt` (the main thread spinning in `sub_001E7D80` is this race).
-3. Done: NV2A register pages, APU, OHCI and AC97 go through the trap layer from `fault_handler` in
-   `src/main.c`. arm64 decodes A64 loads and stores; x86-64 reuses `mmio_decode.h`'s decoder on a copy
-   of the ucontext (toolkit `8ca91ad`; fixture checked under Rosetta, the game itself only on arm64).
-4. Done: `src/main.c` and `src/hooks/*` build off Windows through `src/host.h`. `src/host_posix.c`
-   stands in for `d3d11_translator.c` (no window) and `watchpoint.c`.
-   Run: `DEFJAM_DATA=<data> RECOMP_SETTINGS=none RECOMP_WATCHDOG_SECS=30
-   ./build/posix-release/defjam_recomp > logs/x.log 2> logs/x.log.err` from the repository root.
-   The POSIX halves of `kernel_path.c` and `kernel_file.c` are upstream's and lag the Windows halves;
-   partition images, the first-run copy and `[PATH]` are ported, the rest is unaudited.
-5. Done: Vulkan device `tools/xboxrecomp/src/d3d/d3d8_vk.c`, and the gamma ramp on screen (toolkit
-   `2290ecc`). Left: vsync pacing, a persistent shader cache, movies through the title's own decoder only.
-6. Port `scripts/*.ps1` (extract, analyze, recomp, build, run) to Python or shell, then lift and boot.
-7. Done: quick and full regression on the Mac (work log). Next there: one uninterrupted full run on
-   the final build, then the `--only` checks (`visual` needs baselines approved on this machine).
-8. On Windows: build this branch and run `regress.py --quick`; the Windows game build is untested here.
-   Listen to a fight there too: toolkit `ca45955` changes the shared APU frame thread (it waits out a
-   stopped front end instead of playing the rest of the period as silence, and catches up to four
-   periods). Measure with `--env RECOMP_APU_LEVEL=1 --env RECOMP_APU_PCM=<file>` on the `fight` route:
-   the capture should have no run of zeros between loud samples, and `[APU] front-end stops waited
-   out` says how many were bridged.
-9. The Story routes of `regress.py` depend on the layout of the save area. Since v0.4.x `crib` and
-   `gym` take the SECOND profile in the list (two downs from "new ID"; `scripts/harness.py` says
-   third, counting that entry) and `intro` needs no profile named AAA. The owner's Mac save lists
-   AAA, ABC, VY2, VY1/VY3: the second is the empty ABC and AAA exists, so all three fail on it. Run
-   them with `DEFJAM_DATA` pointing at a copy (`extracted` symlinked, `save` copied) that has ABC,
-   VY2 and VY1/VY3 for `crib`/`gym`, and no AAA for `intro`; or ask before changing the save.
-10. Owner play-test on the Mac of the three fixes of 2026-10-07 (brightness, the freeze, the audio).
-   Launch: `t=$(date +%Y%m%d-%H%M%S); ./build/posix-release/defjam_recomp > logs/playtest-$t.log 2>
-   logs/playtest-$t.log.err`. A headless process ignores SIGTERM (SDL takes it as a quit request and
-   nothing reads the queue); the harness kills it, by hand use `kill -KILL`.
-Unchecked: whether any game hook assumes a host pointer equals a guest address.
-
-### v0.4.1 release integration authorized; live candidate accepted
-
-Vlad accepted the candidate on 2026-10-08: "It plays great. I am good to release this" (D79).
-All scheduled local gates passed; full details and dataset caveats are in
-docs/research/toolkit-v0.13.0-execution.md and the archived previous handoff.
-Candidate <migration worktree>, migration/xboxrecomp-v0.13.
-Six tested integration topics committed after 22 retained replay topics on exact
-upstream v0.13.0 b3700e1d. Published fork branch defjam/upstream-v0.13 matches
-c979c091ca43bb285d95a78aaa4e6aad3237e4bb. Toolkit working tree clean.
-Hosted fixture correction explicitly disables GPU preemption only for the
-synthetic 16 MB kernel-regressions buffer (same as prior local runner).
-No upstream PR submitted. The five focused upstream candidates remain deferred
-until current merge/release (D78).
-
-Parent release version v0.4.1; AC97 startup fix/new fixture and expanded native CI
-matrix committed and published in private PR #10. Slow counter-wrap enabled explicitly in CI.
-Preserve original main ba43570 and original uncommitted research/worklogs;
-candidate incorporates its setup-backlog documentation. Never publish private
-history to public DefJamFFNY-recomp. Existing public snapshot checkout is
-<public checkout>; update reviewed source only.
-
-Remaining: sync documentation/source-only parent commits, private PR and CI,
-fresh recursive clone of published pin with analysis/lift/build verification,
-merge private integration, update clean-history public source snapshot, hosted
-CI and source release gates, publish v0.4.1. No executable/game bytes/lifted C/
-saves/logs/captures published. Keep accepted build and saves for rollback.
-Executable tests remain serial and use disposable runtime-data. No need to
-repeat completed gameplay matrix without behavior changes or new failures.
-Read-only monitor def-jam-migration-test-updates stays narrow; stop it after
-final migration/release completion. Scratch/logs under original
-logs/upstream-013-work; candidate-game-exit.json/final-local-exit.json all pass.
-
-### Launcher and overlay on macOS, v0.6.2 (D94), 2026-10-09
-Lane `feat/macos-launcher` (PR to main), toolkit `defjam/macos-launcher` at `0e191bf` (published, pinned). Written and checked overnight with the Mac's screen locked: everything below that says "verified" was seen through frames read back and scripted input, never by hand.
-Where it lives: `src/hooks/pc_ui.cpp` (the screen; Windows code under `_WIN32`, SDL glue and the Vulkan overlay after it), `src/hooks/pc_launcher_sdl.cpp` (the launcher, on the first thread), `src/host_posix.c` (event forwarding, `host_posix_vk_from_scancode`, Shift at start, the scripted-input hook), toolkit `d3d8_vk_set_overlay` and `RECOMP_WINDOW_SHOT`. Guide: `docs/launcher-and-overlay.md` (the test hooks are tabled there). Build and test as before; `python scripts/regress.py --only launcher,overlay` takes about a minute.
-Next, in order:
-1. A person at the Mac: open the launcher, click through every page, Play; F1 (or fn+F1) in a fight, change a setting, learn a key, close it; with a DualSense and with a trackpad. Report what looks off.
-2. Read the CI run for this PR; the macOS setup job now stages the ImGui source.
-3. The Windows build and a click through the launcher and overlay, once: `pc_ui.cpp` is shared and was only given platform guards (`UiWindow`, `UiTick`, the lock, fonts), but no Windows compiler has seen it.
-4. Shift held at start through the app bundle; macOS before 26; a clean Mac; Gatekeeper's first-open on a downloaded dmg.
-5. Linux: the same sources compile in principle (`xdg-open`, DejaVu font paths); nothing has been run.
-Known, not blocking: with the screen locked the game's window was made at pixel density 1 (`[HOST] window 1280x960 points, 1280x960 pixels`); with the display awake it is 2560x1920 pixels and the overlay is sharp. The `crib` and `gym` routes need a save with Story profiles in the right order (see 2026-10-08). Found by hand on 2026-10-10 and fixed: the window did not follow `window_width`/`window_height` (`pc_settings_on_window_size` was never registered off Windows).
-Test without Homebrew, the setup build and the guards are as in the v0.6.1 notes in `docs/setup-installer.md`: `./scripts/build-setup.sh --development`, then `sandbox-exec` denying `/opt/homebrew` and `/usr/local` with `env -i PATH=/usr/bin:/bin` and the setup's `--silent` mode. The packager copies tracked files only: a new source file must be `git add`ed before the setup is rebuilt, or the installed build fails to link (it did, once, for `pc_launcher_sdl.cpp`).
-
-### Native macOS and Linux port, merged and released as v0.5.0 (D82), 2026-10-08
-Open after the release (the first two are written up in `docs/04-improvement-backlog.md` at Vlad's request): the launcher and overlay off Windows; saves for the Story routes without copying them by hand; the one unresolved indirect call in `versus` (work log 2026-10-08); the Linux game build and a Steam Deck run; the Windows regression on these sources; the upstream candidates in `docs/research/upstream-macos-linux-candidates.md`.
-
-Work happens on a Mac (`<repo>`, arm64, macOS 26, Homebrew cmake/ninja/
-pkg-config/sdl2/libepoxy/openssl). Toolkit work is on fork branch `defjam/macos-linux`, published, and
-the parent gitlink on this branch points at its tip.
-Build: `cmake --preset ci-runtime-only && cmake --build --preset ci-runtime-only`. Trap fixture:
-`cmake -S tools/xboxrecomp/tests/mmio_trap_posix -B build/mmio_trap_posix -G Ninja && cmake --build
-build/mmio_trap_posix && ctest --test-dir build/mmio_trap_posix`.
-Data root on the Mac: `DEFJAM_DATA=<data>`; `game` is a symlink to its `extracted`.
-Pipeline: `uv run --no-project --with pyxbe --with capstone python scripts/pipeline.py analyze`, then `recomp`.
-Next, in order:
-1. Done: `xbox_kernel` compiles off Windows. Left behind on purpose: the AC97 write trap and the
-   `RECOMP_WATCH` page are Windows-only (they single-step with the trace flag); move them onto `mmio_trap`.
-2. Done (D81, toolkit `db0e78a`): one guest CPU on macOS as a token in `win32_compat.c`; the lifted
-   sources are force-included `src/recomp/guest_section.h` so `main.c` can give the runtime their
-   range. `[KERNEL] guest CPU: N preemptions, M requests, longest wait W ms` every 2 s shows it working
-   (about 1,100 preemptions a second in a fight; W is how long a woken or time-critical thread
-   waited, 1-3 ms as a rule, 9 at worst in a four-minute match, 23 seen once), and `guest CPU kept
-   N ms in host code` names a host function that sat on it (`atos -o build/posix-release/defjam_recomp
-   -l <load address> <pc>`). A blocking call added to the runtime that is not one of the
-   `win32_compat.c` primitives holds the guest CPU while it blocks: route it through them.
-   Its functions are `guest_turn_*` since the rebase onto toolkit v0.13: upstream now has its own
-   opt-in `guest_cpu_join`/`guest_cpu_part` lock (`RECOMP_GUEST_LOCK=1`, cooperative, off by default,
-   and by its own note deadlocks on a thread spinning without a kernel call, which is this title's
-   case); the two are independent and only the token is on here.
-   Fixture: `tools/xboxrecomp/tests/guest_cpu_posix`. To take a frozen process's stacks on the Mac:
-   `sample <pid> 3 -file logs/x.txt` (the main thread spinning in `sub_001E7D80` is this race).
-3. Done: NV2A register pages, APU, OHCI and AC97 go through the trap layer from `fault_handler` in
-   `src/main.c`. arm64 decodes A64 loads and stores; x86-64 reuses `mmio_decode.h`'s decoder on a copy
-   of the ucontext (toolkit `8ca91ad`; fixture checked under Rosetta, the game itself only on arm64).
-4. Done: `src/main.c` and `src/hooks/*` build off Windows through `src/host.h`. `src/host_posix.c`
-   stands in for `d3d11_translator.c` (no window) and `watchpoint.c`.
-   Run: `DEFJAM_DATA=<data> RECOMP_SETTINGS=none RECOMP_WATCHDOG_SECS=30
-   ./build/posix-release/defjam_recomp > logs/x.log 2> logs/x.log.err` from the repository root.
-   The POSIX halves of `kernel_path.c` and `kernel_file.c` are upstream's and lag the Windows halves;
-   partition images, the first-run copy and `[PATH]` are ported, the rest is unaudited.
-5. Done: Vulkan device `tools/xboxrecomp/src/d3d/d3d8_vk.c`, and the gamma ramp on screen (toolkit
-   `2290ecc`). Left: vsync pacing, a persistent shader cache, movies through the title's own decoder only.
-6. Port `scripts/*.ps1` (extract, analyze, recomp, build, run) to Python or shell, then lift and boot.
-7. Done: quick and full regression on the Mac (work log). Next there: one uninterrupted full run on
-   the final build, then the `--only` checks (`visual` needs baselines approved on this machine).
-8. On Windows: build this branch and run `regress.py --quick`; the Windows game build is untested here.
-   Listen to a fight there too: toolkit `ca45955` changes the shared APU frame thread (it waits out a
-   stopped front end instead of playing the rest of the period as silence, and catches up to four
-   periods). Measure with `--env RECOMP_APU_LEVEL=1 --env RECOMP_APU_PCM=<file>` on the `fight` route:
-   the capture should have no run of zeros between loud samples, and `[APU] front-end stops waited
-   out` says how many were bridged.
-9. The Story routes of `regress.py` depend on the layout of the save area. Since v0.4.x `crib` and
-   `gym` take the SECOND profile in the list (two downs from "new ID"; `scripts/harness.py` says
-   third, counting that entry) and `intro` needs no profile named AAA. The owner's Mac save lists
-   AAA, ABC, VY2, VY1/VY3: the second is the empty ABC and AAA exists, so all three fail on it. Run
-   them with `DEFJAM_DATA` pointing at a copy (`extracted` symlinked, `save` copied) that has ABC,
-   VY2 and VY1/VY3 for `crib`/`gym`, and no AAA for `intro`; or ask before changing the save.
-10. Owner play-test on the Mac of the three fixes of 2026-10-07 (brightness, the freeze, the audio).
-   Launch: `t=$(date +%Y%m%d-%H%M%S); ./build/posix-release/defjam_recomp > logs/playtest-$t.log 2>
-   logs/playtest-$t.log.err`. A headless process ignores SIGTERM (SDL takes it as a quit request and
-   nothing reads the queue); the harness kills it, by hand use `kill -KILL`.
-Unchecked: whether any game hook assumes a host pointer equals a guest address.
-
-### v0.4.1 release integration authorized; live candidate accepted
-
-Vlad accepted the candidate on 2026-10-08: "It plays great. I am good to release this" (D79).
-All scheduled local gates passed; full details and dataset caveats are in
-docs/research/toolkit-v0.13.0-execution.md and the archived previous handoff.
-Candidate <migration worktree>, migration/xboxrecomp-v0.13.
-Six tested integration topics committed after 22 retained replay topics on exact
-upstream v0.13.0 b3700e1d. Published fork branch defjam/upstream-v0.13 matches
-c979c091ca43bb285d95a78aaa4e6aad3237e4bb. Toolkit working tree clean.
-Hosted fixture correction explicitly disables GPU preemption only for the
-synthetic 16 MB kernel-regressions buffer (same as prior local runner).
-No upstream PR submitted. The five focused upstream candidates remain deferred
-until current merge/release (D78).
-
-Parent release version v0.4.1; AC97 startup fix/new fixture and expanded native CI
-matrix committed and published in private PR #10. Slow counter-wrap enabled explicitly in CI.
-Preserve original main ba43570 and original uncommitted research/worklogs;
-candidate incorporates its setup-backlog documentation. Never publish private
-history to public DefJamFFNY-recomp. Existing public snapshot checkout is
-<public checkout>; update reviewed source only.
-
-Remaining: sync documentation/source-only parent commits, private PR and CI,
-fresh recursive clone of published pin with analysis/lift/build verification,
-merge private integration, update clean-history public source snapshot, hosted
-CI and source release gates, publish v0.4.1. No executable/game bytes/lifted C/
-saves/logs/captures published. Keep accepted build and saves for rollback.
-Executable tests remain serial and use disposable runtime-data. No need to
-repeat completed gameplay matrix without behavior changes or new failures.
-Read-only monitor def-jam-migration-test-updates stays narrow; stop it after
-final migration/release completion. Scratch/logs under original
-logs/upstream-013-work; candidate-game-exit.json/final-local-exit.json all pass.
+The original checkout `feat/macos-launcher` and its uncommitted LICENSE/media/research/Apex state remain untouched by this feature worktree. Its separate PROGRESS carries that investigation's handoff; do not migrate or publish those edits through this branch.

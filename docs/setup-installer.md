@@ -313,3 +313,11 @@ With the packs on, the fight and Free For All regression checks pass (median 60 
 second) after the v0.7.2 toolkit change; the main menu takes about 3 s to respond the first time
 it is shown while its HD art loads. Running setup again with **Add to Steam** keeps the one shortcut (v0.7.2; before, a repair
 added a second).
+
+## Planned release selector and clean updates
+
+GitHub release selection and a dedicated clean-update route are planned; they are
+not implemented by the current setup. The [acceptance plan](setup-update-test-plan.md)
+covers Windows x64, Apple Silicon macOS and Steam Deck/SteamOS. Clean updates will
+preserve player data, and downgrade support will begin with future compatible
+updater-capable releases. Existing historical releases will not be downgrade targets.
