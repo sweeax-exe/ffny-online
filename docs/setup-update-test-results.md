@@ -65,20 +65,53 @@ are retained even on failure. This evidence-only follow-up changes no tested cod
 Local development dmg SHA-256: `d1a7027fc0ef0329eeb1d681aaa351a4bdc136bea895d7b81af99f702ca2b75f`.
 It is not a tagged release artifact and is not attached to the PR.
 
+## Interactive Mac retry (2026-10-12)
+
+The desktop became accessible. The real wizard fetched and displayed all 17 GitHub
+releases; releases without a Mac asset were disabled. The historical v0.7.2
+selected downgrade was refused, with all 25 guarded receipt/settings/save files
+in the disposable real-game install unchanged.
+
+Local game-free future wizards 0.8.0/0.9.0 then exercised the actual AppKit event
+paths: clean update without a dump, compatible downgrade, same-version Repair,
+cancellation during update preparation, and the Play button after update/downgrade.
+Receipt, sentinel settings/save hashes and actual signed-launcher version/data/CWD
+were checked. These are local future fixtures, not published game versions.
+The initial batched automated menu/start downgrade submission was safely refused;
+the settled retry's process arguments explicitly showed `--operation downgrade`
+and completed successfully. Its failed log is retained alongside the retry.
+
+This exposed a UI race: release discovery can finish while the cancellation
+confirmation is open, then the old handler overwrites its completed status with
+“Cancelling…”. The patched handler ignores late cancellation after completion.
+The same-version completion while the dialog remained open preserved success and
+Play, and late discovery confirmation preserved its idle state. Early discovery
+cancellation now displays “Release fetch cancelled”; previously enabled Play is
+restored. Successful setup also refreshes the installed-version label; final
+Repair showed 0.8.0 and enabled Play.
+
+Current Mac layout was inspected visually and through its accessibility tree;
+controls remained responsive, disabled appropriately while busy, and idle Close
+worked. Remaining MAC01/02/03/06/07 variants still apply. Reports and raw wizard
+logs are local: `logs/setup-updates/2026-10-12-mac-ui/interactive-results.json`
+(nine observed UI case groups), cancellation/preservation/launcher JSON and the
+session UUID logs. Scratch test apps are under `/private/tmp/dju-ui-retry/`.
+No screenshots, binaries or game data are committed.
+
 ## Pending acceptance and caveats
 
 Windows and Steam Deck native owner-dump acceptance are **NOT RUN** in this
 session. The three setup CI lanes now execute shared updater tests; macOS CI also
-runs the eight native synthetic cases. Hosted green packaging/tests cannot replace
+runs the ten native synthetic cases. Hosted green packaging/tests cannot replace
 Windows standard-user/UAC/SmartScreen or physical SteamOS/Gaming Mode/Steam tests.
 No desktop-Linux updater acceptance is claimed.
 
 MAC01 minimum OS, compiler repair, quarantined browser-download/Open Anyway,
-interactive release picker/cancel/close/accessibility, Finder/Dock launch, external
+broader keyboard/accessibility, Finder/Dock launch, external
 volumes/case-sensitive APFS and owned shortcut permutations remain pending.
-The Mac was locked when interactive UI inspection was attempted. Offscreen PNG
-creation is not counted as successful visual inspection. Local signed launcher
-CLI tests and automated AppKit preparation probes passed.
+The earlier locked-desktop block was resolved on the owner's retry. Live AppKit
+inspection and interaction passed on the current Mac; offscreen PNG creation is
+still not counted as visual evidence. Broader hardware/OS variants remain pending.
 
 The option manifest/pairwise matrix, real HD generation/HD on-off acceptance,
 legacy→new rollback on each native host, skipped-version updates, corruption repair,

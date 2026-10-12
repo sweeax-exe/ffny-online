@@ -294,6 +294,7 @@ final class Wizard: NSObject, NSApplicationDelegate, NSWindowDelegate {
     @objc func fetchReleases() {
         guard !running else { return }
         readInstalled()
+        let canPlay = playButton.isEnabled
         let session = Session()
         self.session = session
         setBusy(true)
@@ -301,6 +302,7 @@ final class Wizard: NSObject, NSApplicationDelegate, NSWindowDelegate {
         DispatchQueue.global().async {
             do {
                 try session.unpack()
+                if fs.fileExists(atPath: session.cancel.path) { throw SetupFailure(message: "Release fetch cancelled.", code: 6) }
                 let result = session.scratch.appendingPathComponent("releases.json")
                 let process = session.engineProcess(["--list-releases", "--releases-file", result.path, "--cancel-file", session.cancel.path])
                 try process.run()
@@ -311,6 +313,7 @@ final class Wizard: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 let rows = catalog?["releases"] as? [[String: Any]] ?? []
                 DispatchQueue.main.async {
                     self.setBusy(false)
+                    self.playButton.isEnabled = canPlay
                     self.releaseChoice.removeAllItems()
                     self.releaseChoice.addItem(withTitle: "Bundled " + (catalog?["bundled"] as? String ?? "release") + " (offline)")
                     self.releaseTags = [nil]
@@ -327,7 +330,13 @@ final class Wizard: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 }
             } catch {
                 session.note("Release fetch stopped: \(error)")
-                DispatchQueue.main.async { self.setBusy(false); self.status.stringValue = "Release fetch failed. Bundled setup is available offline. See Open logs." }
+                DispatchQueue.main.async {
+                    self.setBusy(false)
+                    self.playButton.isEnabled = canPlay
+                    self.status.stringValue = fs.fileExists(atPath: session.cancel.path)
+                        ? "Release fetch cancelled. Bundled setup is available offline."
+                        : "Release fetch failed. Bundled setup is available offline. See Open logs."
+                }
             }
         }
     }
@@ -420,6 +429,7 @@ final class Wizard: NSObject, NSApplicationDelegate, NSWindowDelegate {
             return
         }
         if code == 0 {
+            readInstalled()
             let launcher = URL(fileURLWithPath: installField.stringValue).appendingPathComponent("Def Jam Recompiled.app")
             playButton.isEnabled = true
             launchInfo.stringValue = "To play, select Play or open this app:\n" + launcher.path
@@ -438,7 +448,10 @@ final class Wizard: NSObject, NSApplicationDelegate, NSWindowDelegate {
         box.messageText = "Cancel setup? Completed steps can be resumed."
         box.addButton(withTitle: "Cancel setup")
         box.addButton(withTitle: "Keep going")
-        if box.runModal() == .alertFirstButtonReturn, let session = session {
+        if box.runModal() == .alertFirstButtonReturn {
+            // The operation can finish while AppKit runs the modal alert's event loop.
+            // Preserve its completed state rather than displaying a stale cancellation.
+            guard running, let session = session else { return }
             fs.createFile(atPath: session.cancel.path, contents: Data("cancel".utf8))
             status.stringValue = "Cancelling the current step\u{2026}"
         }
