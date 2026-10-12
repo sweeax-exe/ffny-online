@@ -2,7 +2,8 @@
 
 Candidate: draft [PR #18](https://github.com/vyanhursky/DefJamFFNY-recomp/pull/18),
 `codex/setup-github-updates`, based on v0.7.2 `ce4d4ab`; development payload made
-from the dirty feature checkout at base commit `700e6c9`. Toolkit remains
+from implementation commit `f238afe` (development mode). Earlier evidence used
+the dirty feature checkout at base commit `700e6c9`. Toolkit remains
 `2992bd85277cd6a7a208158588c7d91917dc59aa`. No new release/version/tag was created.
 The fixture labels 0.8.0 and 0.9.0 are local test identities, not published releases
 or tests of those versions' game changes. The [73-family contract](setup-update-test-plan.md)
@@ -22,11 +23,11 @@ Local raw evidence is retained under `logs/setup-updates/2026-10-12-macos/` and
 | Test / case variants | Result and limit | Evidence |
 |---|---|---|
 | Shared project unit suite; common policy/network/archive/cache/ownership/locks/handoff tests | 339 passed, 30 skipped on macOS. Skips include native Windows job test and platform-specific fixtures. Does not establish all common-family variants on every OS. | `unit-final.log`; `tests/unit/test_setup_updates.py` |
-| OP01 / OP05 / OP07 intact / OP08 / OP11 B→A | Native synthetic install, clean update, repair, clean rebuild and future downgrade all pass. Real CMake/CLT compile, distinct attempt roots and ad-hoc signed stable launcher executed; version/data/CWD match; settings/save sentinels unchanged. Corrupt repair, skipped C variants and option permutations remain pending. | `native-results.json`, five positive cases; `scripts/test-setup-updates-macos.py` |
+| OP01 / OP05 / OP07 intact / OP08 / OP11 B→A | Native synthetic install, clean update, repair, clean rebuild and future downgrade all pass. Real CMake/CLT compile, distinct attempt roots and ad-hoc signed stable launcher executed; version/data/CWD match; settings/save sentinels unchanged. Corrupt repair, skipped C variants and option permutations remain pending. | `native-results.json`, five positive cases plus final selected-engine update/downgrade; `scripts/test-setup-updates-macos.py` |
 | TX01/03/05/06/08 subset; TX09/10 validation | Unit subprocess recovery: six checkpoints × three hard exits. Unsafe/tampered journals and interrupted recovery retry tested. Native signed-app engine also exits 91 at prepared/launcher/JSON receipt, recovers and executes prior launcher successfully (three cases). This is process termination, not reboot or power-loss evidence. | `test_setup_updates.py`; `native-results.json`, three fault cases |
 | MAC07 controls/preparation subset | Packaged `--ui-smoke` and `--ui-preparation-smoke` exit 0. The preparation probe expects invalid nested-path rejection, a retained log and UI timer progress. | `packaged-smoke.json` |
 | NET/HAND production endpoint smoke | Bundled Python fetched 17 public release entries through GitHub TLS. Actual v0.7.2 dmg download, SHA/provenance/inventory validation, read-only mount and historical own-engine handoff completed. Deliberately missing dump exits 2 as expected; this is not a completed remote game install. | `live-releases.json`; `historical-handoff.log` |
-| Game-free dmg/package | Build, bundled imports and source/payload inventory pass: 4,867 files, 64,056,340 ZIP bytes in this local development build. No game/generated code/data in payload. | `build-setup-final.log`; dmg SHA-256 below |
+| Game-free dmg/package | Build, bundled imports and source/payload inventory pass: 4,867 files, 64,060,226 ZIP bytes in this local development build. No game/generated code/data in payload. | `build-final-head.log`; dmg SHA-256 below |
 | Owner-dump fresh macOS install | Install succeeded using the owner's verified extracted dump and bundled tools; fresh analysis/lift/build (17,896 translated functions, five manual exclusions). Saves were copied into disposable data; original save root was never used by the game. | `real-install.log`; `/private/tmp/dju-real/app/installed.json` |
 | Owner-dump local future clean update | Initial 0.7.2→local 0.8.0 update succeeds without original image, with a fresh candidate and retained old build. Of 120 non-extracted files, only the generated disassembly cache changed. This exposed data/analysis rewriting; the final implementation uses `pipeline.py analyze --no-archive` to preserve it, with a focused test. Final local 0.8.0→0.9.0 clean update passes with all 120 non-extracted files byte-identical, including the analysis cache; three builds retained. It first correctly refused insufficient space before staging, then passed after removal of obsolete synthetic test builds. | `real-update.log`; `real-update-preservation.json`; `real-update-final.log`; `real-update-final-preservation.json` |
 | Installed game menu/fight and reviewed captures | M4a menu and full fight checks PASS; fight median 120 presents/2 s (60 fps), minimum 113. Initial M2/M3 runner failed because setup intentionally omits test/golden JSON metadata. Supplying reviewed hash-only metadata then rechecking existing loading/title captures passes (M2 frames 40/70/100/150; M3 title-5s). The original runner remains exit 1 / two of four checks PASS; do not call it quick 5/5 or a four-of-four runner pass. | installed source `logs/regress-20261012-125747.txt`, preserved initial run outputs; `golden-recheck.json` |
@@ -43,7 +44,25 @@ open-cache-reader race; an uninstall fixture also lacked the required data path.
 These were corrected with the checks retained. Final rerun and checksum/selected-handoff additions are tracked on PR18; do not count
 this first failed lane as acceptance. `ci-first-failed.log` retains its trace.
 
-Local development dmg SHA-256: `d576be50c2767e58093980817c15cbe6ea034b611e88a5c270e22b9f0578ffba`.
+Final local `f238afe` native execution: **ten of ten PASS**. This repeats the
+original eight cases and adds selected-engine update and downgrade. Target bundled
+Python/engine built and activated each selected release, then its signed stable
+launcher reported the expected version/data/CWD. The report includes host, source,
+toolkit and payload-manifest SHA-256: `native-final-head.json`; output
+`native-final-head.log`. Live checksum-file cross-check passed against GitHub's
+actual v0.7.2 Mac artifact (`live-checksum-smoke.log`). Obsolete synthetic build
+folders were pruned for disk headroom; their reports remain retained.
+
+[Corrected CI run ae2c890](https://github.com/vyanhursky/DefJamFFNY-recomp/actions/runs/38305557205)
+passed all three setup lanes and the workflow. It includes the Windows startup-gate,
+native job cleanup, raw ZIP and writable file-flush fixes. The checksum and two
+extra selected-handoff cases are in final code `f238afe`; its hosted run is
+[38306033576](https://github.com/vyanhursky/DefJamFFNY-recomp/actions/runs/38306033576).
+**Final code CI: 25/25 jobs PASS**, including Windows/macOS/Linux setup lanes
+and the ten-case native Mac fixture. JUnit and native game-free JSON/log artifacts
+are retained even on failure. This evidence-only follow-up changes no tested code.
+
+Local development dmg SHA-256: `d1a7027fc0ef0329eeb1d681aaa351a4bdc136bea895d7b81af99f702ca2b75f`.
 It is not a tagged release artifact and is not attached to the PR.
 
 ## Pending acceptance and caveats
