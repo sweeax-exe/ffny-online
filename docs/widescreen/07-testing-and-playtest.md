@@ -95,3 +95,25 @@ flickering at the screen edges, or different from 4:3.
 Bugs from the play-test go into `docs/research/widescreen-beta-findings.md` (one line each: screen, aspect, what, capture
 file name kept locally), then into GitHub issues for anything the public may also hit. Each fix names the element row in
 [03](03-element-catalog.md) it touches, so the catalog stays the single list of what has been checked.
+
+## 7. Steam Deck (Vulkan) scripted validation, 2026-10-12
+
+Build: this branch merged with main at v0.7.3 (toolkit `872fbc3`), posix-release in the Deck build container,
+HD packs on with `cache_mb = 2048`. Runs were `harness.py run <route>` inside `gamescope -W 1280 -H 800 -r 90`
+(Deck panel shape), with `RECOMP_WS_ASPECT=1.6` (or 1.7778) and `RECOMP_TRANS_SHOT_WIDE=1` unless noted.
+
+| Run | Result |
+|---|---|
+| One-on-one fight, 16:10, packs | 0 crashes, save identical, median 120 presents per 2 s (min 59) |
+| Free For All, 4:3 vs 16:10, packs | median 120 vs 118 per 2 s; GPU fence about 2.9 ms vs 3.1 ms. Widescreen costs about nothing |
+| Terrordome Free For All, 4 min, 16:10, packs | median 120 (min 59) |
+| Story intro to the creator, 16:9 and 16:10 | clean; cutscenes fill the frame; the fighter-select menu is centred with black sides |
+| Fight with `aspect = widescreen (auto)` in a settings file, full screen | `[WS] widescreen 1.6000`, swap chain 1280x800, median 120 |
+| Widescreen off: m2, m3, m4a golden frames, a 120 s fight | match; median 120, min 110 |
+| Unit tests (full checkout) | 239 passed, 50 skipped |
+
+Captures at 16:10 show the 3D widened (FOV 30 to 35.65), the fight HUD in the corners (four corners in Free For All)
+and the timer centred. Notes: a single 2 s window per run dips to about 59 presents (the cause was not investigated; it
+appears at 4:3 too); the harness uses a 1280x960 window unless a settings file asks for full screen, so use
+the settings-file run for the real output size. Not covered: pause and popups, shops, the Story hub, and the
+by-hand checklist in section 5, which still needs a person on the Deck.
