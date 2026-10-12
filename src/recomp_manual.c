@@ -55,9 +55,16 @@ void sub_001A6870_enter(void)
  * Read-only, except that RECOMP_TEST_RNG_SEED replaces the seed argument. */
 void sub_00087700_enter(void)
 {
-    extern void nv2a_ws_hud_heartbeat(void);
+    extern void nv2a_ws_hud_heartbeat(int bottom_rows);
+    uint32_t i, fighters = 0;
     defjam_test_step();
-    nv2a_ws_hud_heartbeat();   /* widescreen: a fight HUD is up (src/patches/widescreen.c) */
+    /* Widescreen: a fight HUD is up (src/patches/widescreen.c). The four fighter
+     * slots the fight camera reads (0x340D70, stride 0xC8; a slot counts when set
+     * and bit 3 of +0xC0 is clear): with 3 or 4 fighters the HUD has bottom rows. */
+    for (i = 0; i < 4; i++)
+        if (MEM32(0x340D70 + i * 0xC8) != 0 && (MEM8(0x340D70 + i * 0xC8 + 0xC0) & 8) == 0)
+            fighters++;
+    nv2a_ws_hud_heartbeat(fighters >= 3);
 }
 void sub_001A4D90_enter(void) { defjam_test_match_start(); }
 void sub_001BC690_enter(void) { defjam_test_rng(g_esp); }
