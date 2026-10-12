@@ -9,6 +9,7 @@ import argparse
 import hashlib
 import json
 import os
+import platform
 from pathlib import Path
 import shutil
 import subprocess
@@ -52,6 +53,12 @@ def main():
     data.mkdir();(data/'save').mkdir();(data/'save/profile').write_bytes(b'preserve current progress')
     (data/'settings.ini').write_bytes(b'; user comments\r\n[controls]\r\ncustom=keep\r\n')
     sentinels=inventory(data)
+    (work/'sentinel-before.json').write_text(json.dumps(sentinels,indent=2))
+    base_manifest=json.loads((args.payload/'manifest.json').read_text())
+    metadata=dict(platform='macos-arm64',host=platform.platform(),architecture=platform.machine(),
+                  synthetic=True,python=sys.version,toolkit_commit=base_manifest['toolkit_commit'],
+                  source_commit=base_manifest['source_commit'],
+                  base_manifest_sha256=hashlib.sha256((args.payload/'manifest.json').read_bytes()).hexdigest())
     a=payload(args.payload,work/'payload-a','0.8.0');b=payload(args.payload,work/'payload-b','0.9.0')
     reports=[]
     for label,package,op,input_dump in [('install',a,'install',True),('update',b,'update',False),('downgrade',a,'downgrade',False),('repair',a,'repair',False),('rebuild',a,'rebuild',False)]:
@@ -70,7 +77,7 @@ def main():
         subprocess.run([launcher],check=True)
         lines=marker.read_text().splitlines();assert lines==[expected,str(data),receipt['source']],lines
         reports.append(dict(case=label,version=expected,exit_code=result.returncode,seconds=round(time.time()-started,2),actual_launcher=lines,source=receipt['source']))
-        (work/'results.json').write_text(json.dumps(dict(platform='macos-arm64',synthetic=True,results=reports),indent=2))
+        (work/'results.json').write_text(json.dumps(dict(**metadata,results=reports),indent=2))
     assert len({r['source'] for r in reports})==5,'Every attempt must be isolated'
     # Faults run through the real engine, signed app staging and receipt publication.
     for point in ('prepared', 'launcher', 'receipt-json'):
@@ -88,7 +95,7 @@ def main():
         subprocess.run([app/'Def Jam Recompiled.app/Contents/MacOS/DefJamLauncher'],check=True)
         assert (data/'launcher-marker.txt').read_text().splitlines()==['0.8.0',str(data),before['source']]
         reports.append(dict(case='hard-exit-'+point,recovered=True,exit_code=91,actual_source=before['source']))
-    (work/'results.json').write_text(json.dumps(dict(platform='macos-arm64',synthetic=True,results=reports),indent=2))
+    (work/'results.json').write_text(json.dumps(dict(**metadata,results=reports),indent=2))
     print(json.dumps(reports,indent=2))
 
 
