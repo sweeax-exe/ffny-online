@@ -58,14 +58,20 @@ float ws_init(int window_w, int window_h, int fullscreen)
     } else if (choice > 0 && choice < (int)(sizeof k_choice_aspect / sizeof k_choice_aspect[0])) {
         a = k_choice_aspect[choice];
         if (a < 0.0f) {                                /* auto */
+            /* The screen's shape, windowed or not: a window's size is arbitrary,
+             * and full screen is often entered after start-up (F11, Alt+Enter),
+             * while the canvas is fixed for the run. Owner's play-test: a 1470x960
+             * window gave a 1.53 canvas with bars on his 16:9 monitor. */
             int w = window_w, h = window_h;
-#if defined(_WIN32)
-            if (fullscreen) {
-                w = GetSystemMetrics(SM_CXSCREEN);
-                h = GetSystemMetrics(SM_CYSCREEN);
-            }
-#else
             (void)fullscreen;
+#if defined(_WIN32)
+            {
+                int sw = GetSystemMetrics(SM_CXSCREEN), sh = GetSystemMetrics(SM_CYSCREEN);
+                if (sw > 0 && sh > 0) {
+                    w = sw;
+                    h = sh;
+                }
+            }
 #endif
             a = (w > 0 && h > 0) ? snap_auto((float)w / (float)h) : 0.0f;
         }
