@@ -58,7 +58,7 @@ passed all three setup lanes and the workflow. It includes the Windows startup-g
 native job cleanup, raw ZIP and writable file-flush fixes. The checksum and two
 extra selected-handoff cases are in final code `f238afe`; its hosted run is
 [38306033576](https://github.com/vyanhursky/DefJamFFNY-recomp/actions/runs/38306033576).
-**Final code CI: 25/25 jobs PASS**, including Windows/macOS/Linux setup lanes
+**Initial implementation CI: 25/25 jobs PASS**, including Windows/macOS/Linux setup lanes
 and the ten-case native Mac fixture. JUnit and native game-free JSON/log artifacts
 are retained even on failure. This evidence-only follow-up changes no tested code.
 
@@ -97,6 +97,8 @@ logs are local: `logs/setup-updates/2026-10-12-mac-ui/interactive-results.json`
 (nine observed UI case groups), cancellation/preservation/launcher JSON and the
 session UUID logs. Scratch test apps are under `/private/tmp/dju-ui-retry/`.
 No screenshots, binaries or game data are committed.
+
+Final interactive fixes in `e93705c` passed [all 25 hosted CI jobs](https://github.com/vyanhursky/DefJamFFNY-recomp/actions/runs/38314016983), including all three setup lanes. The rebuilt development package passed its game-free inventory (4867 files; 64058282-byte payload ZIP), bundled runtime imports and both packaged UI/preparation smokes. Its live picker was rechecked: 17 releases, 12 unavailable Mac entries disabled, responsive controls and idle Close. Local units remain **339 passed / 30 skipped**. `packaged-smoke.json` and `build.log` retain this final-package evidence.
 
 ## Pending acceptance and caveats
 
