@@ -79,12 +79,61 @@ No dump, game data or generated code is uploaded.
 
 ## Update, repair and uninstall
 
-Rerun the newer setup against the same install and data folders. Source/builds
-live in versioned directories, and the active launch receipt changes only after
-certification. Failed updates leave the previous game usable. Analysis/lift
-outputs can be copied from the previous version, but every incoming pipeline
-fingerprint is checked before reuse. Compiler objects are rebuilt. Close the
-game before updating; launcher lifetime locks and direct-process checks guard this.
+The updater implementation in [PR #18](https://github.com/vyanhursky/DefJamFFNY-recomp/pull/18)
+adds **Fetch GitHub releases**, a release picker and an operation picker to all
+three setup wizards. It is not yet in a published setup release. The bundled
+release remains available offline; fetching chooses the newest stable release
+with a complete setup for this platform. Releases without host assets are shown
+as unavailable. The CLI's `--release latest` follows GitHub's latest stable endpoint
+and reports an error if that release lacks a host setup.
+
+Select **Automatic**, **Install**, **Repair**, **Clean Update**, **Downgrade** or
+**Clean Rebuild**. Automatic installs into an empty location, repairs an equal
+version, or updates to a newer one; downgrade always requires an explicit choice.
+Clean Update, Downgrade and Clean Rebuild use fresh analysis, lifted code and
+compiler objects in a separate attempt directory. Repair may reuse verified
+analysis/lift work. Every successful attempt gets a distinct build directory.
+The stable launcher and receipts switch through a recoverable activation journal.
+Close the game first; setup, data and launcher lifetime locks prevent overlapping
+operations. If interrupted activation blocks the launcher, rerun setup to recover.
+Previous builds are retained, so repeated updates consume disk space.
+
+For an existing installation, leave **Your game copy** empty to verify and reuse
+its installed extraction. Corrupt or missing extracted files require the original
+dump. Setup preserves saves, profiles, settings, game caches, mods, HD packs and
+user artwork. Its new analysis cache stays in the candidate rather than replacing
+`data/analysis`. Optional shortcut failures are logged after core activation;
+they do not undo a working installation. Modified foreign shortcuts/art are kept.
+
+Selected GitHub assets must have the expected exe/dmg/tar.gz, checksum and
+provenance. Setup verifies SHA-256, embedded inventory and source/toolkit identity,
+then runs that release's own bundled Python and engine. Downloads are cached,
+verified again before reuse, and promoted only after completion. Discovery may
+show explicitly marked cached metadata offline; a pinned remote choice may reuse fully verified cached assets when offline.
+`--release latest` requires GitHub to resolve the latest tag. HTTP errors/rate limits leave the bundled option.
+Checksums and provenance detect corruption; the unsigned release trust policy
+still depends on the GitHub repository and release publisher.
+
+Historical setups can be selected for a **fresh install** with the original dump.
+Repair an existing historical installation using its original setup directly.
+The new updater refuses remote historical repair/update on an existing destination.
+Historical versions cannot be downgrade targets. Future downgrade requires both
+receipts/payloads to declare the same supported updater protocol and data schema;
+no published future pair exists yet. Local synthetic future packages test this
+path without publishing fake releases. Linux acceptance for these new operations
+is limited to Steam Deck/SteamOS. See the [test contract](setup-update-test-plan.md)
+and [current results and pending gates](setup-update-test-results.md).
+
+The following updater CLI options are forwarded by all packaged entry points:
+`--operation auto|install|repair|update|downgrade|rebuild`, `--release vX.Y.Z|latest`,
+`--bundled-only`, `--list-releases`, `--releases-file PATH` and `--download-cache PATH`.
+Omit `--dump` for recognized installed data; install/data locations remain required
+unless the data location can be read from the existing receipt. `--release` and
+`--bundled-only` are mutually exclusive. Example for a future published target:
+
+```powershell
+DefJamSetup.exe --silent --operation update --release latest --install-dir "D:\Games\DefJamApp" --data-dir "D:\Games\DefJamData"
+```
 
 ```powershell
 DefJamSetup.exe --silent --uninstall --install-dir "D:\Games\DefJamApp"

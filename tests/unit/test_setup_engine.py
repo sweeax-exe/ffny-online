@@ -415,7 +415,7 @@ def test_macos_uninstall_removes_only_recorded_shortcuts_that_still_name_this_in
     monkeypatch.setenv('HOME', str(home))
     synthetic_launcher_template(setup.payload)
     setup.args.no_shortcuts = False
-    monkeypatch.setattr(setup, 'run', lambda argv, **kwargs: (home / 'Desktop/Def Jam Recompiled').write_bytes(b'alias')
+    monkeypatch.setattr(setup, 'run', lambda argv, **kwargs: Path(argv[-1]).write_bytes(b'alias')
                         if '--make-alias' in [str(a) for a in argv] else None)
     setup.activate()
     mine = home / 'Applications' / engine.LAUNCHER_BUNDLE

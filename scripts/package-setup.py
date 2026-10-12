@@ -150,7 +150,8 @@ def stage_macos(args, staging, source, toolkit):
     cache = args.cache / 'macos'
     cache.mkdir(parents=True, exist_ok=True)
     (staging / 'engine').mkdir()
-    shutil.copyfile(ROOT / 'setup/engine.py', staging / 'engine/engine.py')
+    for name in ('engine.py', 'releases.py', 'transaction.py'):
+        shutil.copyfile(ROOT / 'setup' / name, staging / 'engine' / name)
     if not (args.launcher / 'Contents/MacOS/DefJamLauncher').is_file():
         raise ValueError('--launcher must be the built Def Jam Recompiled.app')
     shutil.copytree(args.launcher, staging / 'launcher' / args.launcher.name, symlinks=True)
@@ -193,7 +194,7 @@ def stage_linux(args, staging, source, toolkit):
 def stage_windows(args, staging, source, toolkit):
     """Embedded Python, wheels, offline SDL3/ImGui source and the native launcher."""
     (staging / 'engine').mkdir()
-    for name in ('engine.py', 'install-prerequisites.ps1', 'shortcuts.ps1'):
+    for name in ('engine.py', 'releases.py', 'transaction.py', 'install-prerequisites.ps1', 'shortcuts.ps1'):
         shutil.copyfile(ROOT / 'setup' / name, staging / 'engine' / name)
     shutil.copyfile(args.launcher, staging / 'DefJamLauncher.exe')
     provenance = []
@@ -269,7 +270,7 @@ def main(argv=None):
         inventory = {p.relative_to(staging).as_posix(): digest(p) for p in sorted(staging.rglob('*')) if p.is_file()}
         manifest = {'schema': 1, 'platform': args.platform, 'version': version,
                     'source_commit': commit, 'toolkit_commit': pin,
-                    'development': args.development, 'files': inventory}
+                    'development': args.development, 'updater': {'protocol': 1, 'data_schema': 1}, 'files': inventory}
         (staging / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n', encoding='utf-8')
         with zipfile.ZipFile(args.output, 'w', zipfile.ZIP_DEFLATED) as package:
             for p in sorted(staging.rglob('*')):

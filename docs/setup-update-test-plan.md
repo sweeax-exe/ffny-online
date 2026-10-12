@@ -1,6 +1,7 @@
 # Setup release selection and update acceptance plan
 
-Status: approved scope, planned checks; no updater acceptance is claimed. Baseline:
+Status: implemented in draft PR #18; macOS initial execution recorded in
+[the results ledger](setup-update-test-results.md). Full release acceptance is pending. Baseline:
 public v0.7.2 (`ce4d4ab`). This plan covers the setup wizard/installer, not a
 background updater inside the game launcher. See [setup guide](setup-installer.md).
 
@@ -19,8 +20,8 @@ background updater inside the game launcher. See [setup guide](setup-installer.m
   is no requirement to add a prerelease channel in this iteration.
 - Historical pre-updater versions are **not downgrade targets**. Legacy -> new
   update is supported; new -> legacy is refused in GUI and CLI before mutation.
-  Fresh historical install/repair may use the historical setup with its existing
-  behavior, but cannot be advertised as the new transactional clean route.
+  Fresh historical install may use its own engine. Existing historical repair
+  uses the original setup directly; the new updater refuses that remote handoff.
 - Let **U0** be the first published release implementing this contract; its actual
   version is assigned when released, not guessed here. Downgrade starts with future
   capable versions: U1 -> U0, U2 -> U1/U0, only when the target supports the required
@@ -235,8 +236,10 @@ mandatory for DECK01/04–08; no desktop-Linux acceptance claim follows from Ubu
 Existing coverage to preserve: `tests/unit/test_setup_engine.py` (ownership, input,
 locks, extraction, resume, cancellation, shortcuts); `test_hd_setup.py` (pack/settings
 publication and preservation); `test_linux_setup.py` (container, launcher, Steam
-and packaging); `test_macos_payload.py`; `test_source_release.py`. These do not yet
-prove release fetching, clean builds, future downgrade or durable activation.
+and packaging); `test_macos_payload.py`; `test_source_release.py`. New coverage in `test_setup_updates.py` tests release policy/transport, fresh
+candidates, verified installed-dump reuse and subprocess journal recovery.
+`scripts/test-setup-updates-macos.py` builds native marker executables with the
+packaged runtime and exercises signed launcher activation; it runs in macOS CI.
 
 Implement shared release/transport/policy tests, native subprocess transaction
 fixtures, and packaged handoff/UI smoke in **each** existing setup CI job. Test
@@ -274,7 +277,8 @@ Release gates:
    notes enumerate unresolved platform limits. Owner reviews concrete native results
    before release. Draft PR status alone does not imply updater completion.
 
-Current execution: **plan only**. No new updater tests implemented or game acceptance
-run by this change. The feature implementation should land in reviewable commits:
-policy/discovery/download; durable activation and clean installed-dump route; all
-three wizard/handoff integrations; native package/host acceptance evidence.
+Current execution: shared engine, three wizard integrations, packaging and CI
+tests are implemented. macOS packaged native operations and initial owner-dump
+build/update/game checks have run. See the [results ledger](setup-update-test-results.md)
+for exact evidence, fixture limits and pending Windows/Deck/option/reboot gates.
+None of the six release gates above is declared complete by these initial results.

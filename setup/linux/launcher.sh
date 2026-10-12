@@ -30,6 +30,8 @@ fail() {
 exec 9>> "$ROOT/play.lock" || fail "The install folder is not writable."
 flock -n 9 || fail "The game or an update is already running."
 
+[ ! -e "$ROOT/.setup-transaction" ] || fail "An update was interrupted. Run setup again to recover it."
+
 cd "$SOURCE" || fail "The installed game folder is missing. Run Def Jam Setup to repair it."
 export DEFJAM_DATA="$DATA"
 
