@@ -20,7 +20,7 @@ deleted there (finding: the flag does nothing).
 
 | WS | State | Notes |
 |---|---|---|
-| WS-0 settings | done | `[display] widescreen`, `widescreen_hud`, `widescreen_cutscenes`, `widescreen_side_fill`, `widescreen_fov_cap`; `RECOMP_WS_ASPECT` for experiments |
+| WS-0 settings | done | `[display] aspect` widescreen shapes (merged with Picture shape, 2026-10-12), `widescreen_hud`, `widescreen_cutscenes`, `widescreen_side_fill`, `widescreen_fov_cap`; `RECOMP_WS_ASPECT` for experiments |
 | WS-1a canvas (D3D11) | done | toolkit `d3d8_present_set_canvas_aspect`; scissor and point sprites per axis; captures (`RECOMP_TRANS_SHOT_WIDE=1`) |
 | WS-1b canvas (Vulkan) | open | Linux/macOS stay 4:3 (the game refuses widescreen there until this lands) |
 | WS-2 Hor+ | done | `src/patches/widescreen.c` `ws_view_params`; full-screen views only |
@@ -60,7 +60,7 @@ toolkit lane (WS-1b, WS-8 host part, WS-11).
 - **API to add** (game side, `src/patches/widescreen.h`): `float ws_aspect(void)` (0 = off; resolved once at start-up per R6,
   `auto` → window aspect snapped to {4:3, 16:10, 16:9, 21:9, 32:9} within 3%), `int ws_hud_mode(void)`,
   `int ws_cutscene_mode(void)`, `int ws_side_fill(void)`, `float ws_fov_cap(void)`.
-- **Steps:** add the enum/int entries with descriptions and `RECOMP_SETTING_RESTART`; env overrides `RECOMP_WIDESCREEN`,
+- **Steps:** add the enum/int entries with descriptions and `RECOMP_SETTING_RESTART`; env overrides `RECOMP_ASPECT`,
   `RECOMP_WS_HUD`, `RECOMP_WS_CUTSCENES`, `RECOMP_WS_SIDE_FILL`; the launcher groups them under Display and greys the
   `aspect` setting when widescreen is on; mark 32:9 "(experimental)".
 - **Accept:** settings round-trip unit test; `docs/settings-reference.md` test passes; launcher shows and saves the
@@ -83,7 +83,7 @@ toolkit lane (WS-1b, WS-8 host part, WS-11).
 - **API:** `d3d8_set_canvas_aspect(num, den)` (or a float) called by the game before device creation; `0` = 4:3.
 - **Note:** the NDC constant `Screen.xy = 2/(640,480)` (`nv2a_vsh_cpu.c:393`, `d3d8_shaders.c:155-156`) does **not** change:
   guest pixels still map 0..640 → −1..1. Only the target size does.
-- **Accept:** with the canvas at 4:3: `regress.py --quick` green, goldens identical. With `RECOMP_WIDESCREEN=16:9` and the
+- **Accept:** with the canvas at 4:3: `regress.py --quick` green, goldens identical. With `RECOMP_WS_ASPECT=1.7778` and the
   WS-2 (or experiment) Hor+: a wide capture of a fight shows round fighters and round light glows; window resize and
   Alt+Enter keep the canvas letterboxed correctly in a 16:10 and a 21:9 window; no D3D11 debug-layer messages
   (`win-x64-debug` run).
@@ -217,7 +217,7 @@ toolkit lane (WS-1b, WS-8 host part, WS-11).
 - Unit tests for the maths in [02 §2](02-design.md#2-coordinate-maths-normative) (a C test in the toolkit's test folder for the
   canvas/scissor maths; a Python mirror for the placement formulas used by the game side, or a C unit test built with the
   game's test target).
-- Harness: `--widescreen <value>` on `harness.py run` (sets `RECOMP_WIDESCREEN` and `RECOMP_TRANS_SHOT_WIDE=1`); new routes are
+- Harness: `--widescreen <value>` on `harness.py run` (sets `RECOMP_WS_ASPECT` and `RECOMP_TRANS_SHOT_WIDE=1`); new routes are
   not needed — existing routes run at other aspects.
 - `regress.py` check `widescreen` (full run only): fight at 16:9 and intro at 16:9 — no crash, presents within 5% of the 4:3
   run, `[WS]` lines present, wide capture frame signatures (box, counts, hash; no pixels committed) against reviewed baselines

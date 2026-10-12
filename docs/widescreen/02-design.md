@@ -108,7 +108,7 @@ Worked numbers: 16:9 → `k = 0.75`, `Lw = 853.3` (target 854·s), fov 30° → 
   flashes, clears. A 2D quad is a fill when it covers 0..640 x 0..480 **and** is untextured or uses a known fill
   texture (vignette/scratches). Full-screen **pictures** (posters, backdrops, movies) are not fills: they are centred
   with a side fill (§4).
-- **R4 Off is bit-identical.** With `widescreen = off` (and always under `RECOMP_SETTINGS=none`, which the harness
+- **R4 Off is bit-identical.** With a 4:3 or stretch `aspect` (and always under `RECOMP_SETTINGS=none`, which the harness
   uses) every hook returns the original values; goldens, `replay`, `visual` stay unchanged.
 - **R5 Clip 2D to its box.** UI slides in from x up to 754 (seen in batch dumps). Centred or anchored 2D must be
   scissored to its own box so off-screen slide-ins do not appear in the side areas. The game patch sets the clip;
@@ -140,13 +140,13 @@ New entries in `[display]` (settings core `src/hooks/pc_settings.c`; launcher an
 
 | Key | Values | Default (beta → release) | Notes |
 |---|---|---|---|
-| `widescreen` | `off`, `auto`, `16:9`, `16:10`, `21:9`, `32:9` | `off` → `auto` | Restart required in v1 (R6). Env `RECOMP_WIDESCREEN`. `off` keeps today's `aspect` behaviour. First release supports 16:9 and 16:10; `21:9` and `32:9` are shown as "(experimental)", and `auto` on a wider window falls back to 16:9 unless the player picks an experimental value. |
+| `aspect` (merged, owner 2026-10-12) | `4:3`, `stretch`, `widescreen (auto)`, `16:9`, `16:10`, `21:9 (experimental)`, `32:9 (experimental)` | `4:3` → `widescreen (auto)` | Restart required in v1 (R6). Env `RECOMP_WIDESCREEN`. `off` keeps today's `aspect` behaviour. First release supports 16:9 and 16:10; `21:9` and `32:9` are shown as "(experimental)", and `auto` on a wider window falls back to 16:9 unless the player picks an experimental value. |
 | `hud` | `auto`, `edge`, `centered` | `auto` | `auto` = edge up to 16:9, centred 16:9 box above. |
 | `cutscenes` | `authored`, `fill` | `authored` | §2 table. |
 | `side_fill` | `blur`, `black`, `art` | `blur` | §4. |
 | `fov_cap` | 90..170 degrees | 150 | Horizontal FOV ceiling for Hor+ (only bites at 32:9 with wide venue FOVs). |
 
-When `widescreen` is on, the existing `aspect` setting is ignored for the game picture (the canvas has the chosen
+One setting, `aspect` ("Picture shape"), holds both the old choices and the widescreen ones (owner, 2026-10-12: merge the two); the widescreen sub-options show under it in the launcher only when a widescreen shape is chosen. With a widescreen shape the picture (the canvas has the chosen
 aspect; the present step fits it into the window with bars if the window's aspect differs, e.g. a 16:9 canvas in a
 16:10 window). The launcher shows the widescreen options together under "Display".
 

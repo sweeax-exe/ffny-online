@@ -31,10 +31,11 @@
 #include "pc_ui.h"
 #include "patches/widescreen.h"
 
-static const char *const k_aspect[] = { "4:3", "stretch", NULL };
+/* Picture shape: the console's 4:3, stretched, or widescreen (docs/widescreen); the widescreen
+ * choices are indices 2.. and are read once at start-up (src/patches/widescreen.c). */
+static const char *const k_aspect[] = { "4:3", "stretch", "widescreen (auto)", "16:9", "16:10",
+                                        "21:9 (experimental)", "32:9 (experimental)", NULL };
 static const char *const k_filter[] = { "smooth", "sharp", NULL };
-static const char *const k_widescreen[] = { "off", "auto", "16:9", "16:10", "21:9 (experimental)",
-                                            "32:9 (experimental)", NULL };
 static const char *const k_ws_hud[] = { "auto", "edges", "centered", NULL };
 static const char *const k_ws_cutscenes[] = { "authored", "fill", NULL };
 static const char *const k_ws_fill[] = { "blur", "black", NULL };
@@ -55,10 +56,9 @@ static RecompSetting g_display_settings[] = {
     { "display", "window_width", RECOMP_SETTING_INT, 1280, 320, 16384, NULL, NULL, 0,
       "Window size when not full screen. Resizing the window updates these." },
     { "display", "window_height", RECOMP_SETTING_INT, 960, 240, 16384, NULL, NULL, 0, NULL },
-    { "display", "aspect", RECOMP_SETTING_ENUM, 0, 0, 0, k_aspect, NULL, 0,
-      "4:3 keeps the console's picture shape with black bars; stretch fills the window." },
-    { "display", "widescreen", RECOMP_SETTING_ENUM, 0, 0, 0, k_widescreen, "RECOMP_WIDESCREEN", RECOMP_SETTING_RESTART,
-      "Widescreen: a wider 3D view with menus and HUD kept in shape. auto matches the screen (16:9 or 16:10). Beta." },
+    { "display", "aspect", RECOMP_SETTING_ENUM, 0, 0, 0, k_aspect, "RECOMP_ASPECT", 0,
+      "4:3 keeps the console's picture shape with black bars; stretch fills the window; the widescreen shapes "
+      "(beta) widen the 3D view and keep menus, HUD and movies in shape, and start with the game." },
     { "display", "widescreen_hud", RECOMP_SETTING_ENUM, 0, 0, 0, k_ws_hud, NULL, RECOMP_SETTING_RESTART,
       "Where the fight HUD goes in widescreen: the screen edges, or a centred 16:9 box (auto: edges up to 16:9)." },
     { "display", "widescreen_cutscenes", RECOMP_SETTING_ENUM, 0, 0, 0, k_ws_cutscenes, NULL, RECOMP_SETTING_RESTART,
@@ -337,7 +337,7 @@ void pc_settings_apply_display(void)
     if (ws_aspect() > 0.0f)       /* widescreen: the canvas's shape, with bars if the window differs */
         d3d8_present_set_aspect(1, (unsigned)(ws_aspect() * 10000.0f + 0.5f), 10000);
     else
-        d3d8_present_set_aspect(pc_display("aspect", 0) == 0, 4, 3);
+        d3d8_present_set_aspect(pc_display("aspect", 0) != 1, 4, 3);   /* only "stretch" fills the window */
     d3d8_present_set_linear_filter(pc_display("filter", 0) == 0);
     d3d8_present_set_vsync(pc_display("vsync", 1));
 }

@@ -49,14 +49,14 @@ $env:RECOMP_WS_ASPECT = "1.7778"; .\build\win-x64-release\defjam_recomp.exe
 
 1. When WS-0, WS-1a, WS-2, WS-3, WS-4 (with the edge-anchored HUD, owner 2026-10-11), WS-5, WS-6, WS-7 and WS-8
    (`blur`) are in, cut **`v0.8.0-beta.1`** from
-   `feat/widescreen` merged to main, with `widescreen = off` by default and the setting visible in the launcher. Follow
+   `feat/widescreen` merged to main, with Picture shape `4:3` by default and the setting visible in the launcher. Follow
    `docs/releasing.md`; confirm the release workflow handles a pre-release tag (mark it as a pre-release on GitHub, not
    "Latest").
-2. Release notes: what to try (`widescreen = auto` in the launcher), what is known to be rough (32:9, unswept venues), how
+2. Release notes: what to try (Picture shape `widescreen (auto)` in the launcher), what is known to be rough (32:9, unswept venues), how
    to report (issue form with the aspect and screen).
 3. The owner plays through the script below at 16:9 and on the Deck. Fixes land as `beta.2`, `beta.3`.
 4. When the script passes at 16:9 and 16:10 and the venue sweep (WS-9) is done at those aspects: `v0.8.0` with
-   `widescreen = auto`. The 21:9/32:9 sweep and polish follow in a later release (owner, 2026-10-11).
+   Picture shape `widescreen (auto)` as the default. The 21:9/32:9 sweep and polish follow in a later release (owner, 2026-10-11).
 
 ## 5. Play-test script (owner, by hand)
 
