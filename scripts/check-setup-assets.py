@@ -61,8 +61,10 @@ def inspect_payload(archive):
                 python = folder / 'python/bin/python3'
                 python.chmod(0o755)   # safe_unpack keeps no modes; the shipped folder does
                 subprocess.run([python, '-B', '-c',
-                    'import capstone, xbe, tkinter, tools.disasm, tools.recomp, tools.xiso; print("Bundled runtime imports OK")'],
+                    'import capstone, xbe, tkinter, PIL, numpy, tools.disasm, tools.recomp, tools.xiso; print("Bundled runtime imports OK")'],
                     check=True, env={'PATH': '/usr/bin:/bin'})
+                subprocess.run([python, '-B', folder / 'source/scripts/build-hd-pack.py', '--help'], check=True,
+                               stdout=subprocess.DEVNULL, env={'PATH': '/usr/bin:/bin'})
         elif manifest['platform'] == 'macos-arm64':
             if sys.platform == 'darwin':
                 import subprocess

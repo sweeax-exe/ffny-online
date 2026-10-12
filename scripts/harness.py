@@ -170,9 +170,14 @@ FIGHT_TAIL = ("@game.startgame(,right:8:1200:4:1.2,x:10:1200:0.8:0.15,y:10.2:120
 # Typing "AAA" on the user-ID screen and taking DONE.
 NEW_ID_KEYS = "a@5;a@7;a@8;a@9;down@11+0.6x9;right@17.5;a@19;a@23+3x6"
 
+# Main menu -> Battle. The presses wait for the menu music, which starts once the menu
+# is live: with HD texture packs the menu loads its art first (about 3 s on a Steam
+# Deck), and presses timed from the screen's first call landed before it could take them.
+MAIN_MENU_BATTLE = "audio.playmusic(=right@3;a@6"
+
 # Battle mode up to the second fighter being chosen; the venue screen follows.
 ONE_ON_ONE_SETUP = [
-    "getscreeninfo(intmain/mainmenu=right@5;a@8",
+    MAIN_MENU_BATTLE,
     # With more than one user ID in the save area Battle asks for one first.
     "getscreeninfo(options/userid=down@4;a@7+4x3",
     "getscreeninfo(battle/cmtype=a@5+4x7",
@@ -186,7 +191,7 @@ ONE_ON_ONE_SETUP = [
 # Free For All (the third match type) up to the fourth fighter being chosen. A
 # fighter can be picked once, so each CPU slot moves off the ones before it.
 FFA_SETUP = [
-    "getscreeninfo(intmain/mainmenu=right@5;a@8",
+    MAIN_MENU_BATTLE,
     "getscreeninfo(options/userid=down@4;a@7+4x3",
     "getscreeninfo(battle/cmtype=right@5;right@6.5;a@9",
     "setmatchtype(=a@5+4x7",
@@ -274,7 +279,7 @@ ROUTES = {
     "versus": {
         "help": "One on One between two pads: both press START, each picks a fighter, default venue",
         "stages": [
-            "getscreeninfo(intmain/mainmenu=right@5;a@8",
+            MAIN_MENU_BATTLE,
             "getscreeninfo(options/userid=down@4;a@7+4x3",
             "getscreeninfo(battle/cmtype=a@5+4x7",
             "setmatchtype(=a@5+4x7",

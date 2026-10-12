@@ -481,5 +481,5 @@ def test_hd_textures_are_refused_on_a_host_whose_renderer_cannot_draw_them(tmp_p
     assert not (setup.install / 'installed.json').exists()
 
 
-def test_hd_textures_are_supported_on_windows_and_macos():
-    assert engine.HD_SUPPORTED == (engine.IS_WINDOWS or engine.IS_MACOS)
+def test_hd_textures_are_supported_on_windows_macos_and_linux():
+    assert engine.HD_SUPPORTED == (engine.IS_WINDOWS or engine.IS_MACOS or engine.IS_LINUX)

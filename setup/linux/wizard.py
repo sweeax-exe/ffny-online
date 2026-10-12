@@ -78,6 +78,7 @@ def wizard(payload, smoke=False):
     shortcuts = tk.BooleanVar(value=True)
     desktop = tk.BooleanVar(value=True)
     steam = tk.BooleanVar(value=bool(shutil.which('steam')))
+    hd = tk.BooleanVar(value=False)
     status = tk.StringVar(value='Choose your Def Jam: Fight for NY (USA, Xbox) disc image or extracted folder.')
     session = {'child': None, 'cancel': None, 'status': None, 'log': None}
 
@@ -114,6 +115,10 @@ def wizard(payload, smoke=False):
     ttk.Checkbutton(options, text='Create a desktop shortcut', variable=desktop).grid(row=1, column=0, sticky='w')
     ttk.Checkbutton(options, text='Add to Steam (for Gaming Mode; Steam must be running)',
                     variable=steam).grid(row=2, column=0, sticky='w')
+    ttk.Checkbutton(options, text='Apply HD texture upscale during install (increases install time)',
+                    variable=hd).grid(row=3, column=0, sticky='w')
+    ttk.Label(options, text='Adds about 6.2 GB; needs extra working space. No GPU needed.',
+              foreground='#555').grid(row=4, column=0, sticky='w', padx=(24, 0))
     ttk.Label(frame, text='Setup builds the game from your copy on this computer. The first install takes '
                           'a while; without a compiler it downloads a build container once (about 1 GB).',
               wraplength=640, foreground='#555').grid(row=5, column=0, columnspan=4, sticky='w', pady=8)
@@ -154,6 +159,8 @@ def wizard(payload, smoke=False):
             argv.append('--no-desktop-shortcut')
         if steam.get():
             argv.append('--steam-shortcut')
+        if hd.get():
+            argv.append('--hd-textures')
         session['child'] = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                                             stderr=subprocess.DEVNULL, start_new_session=True)
         for button in (install_button, play_button):

@@ -5,7 +5,9 @@
   },
   "wheels": {
     "capstone-5.0.9-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl": "273fd8d747d2e35c88f91450be51a603ecfaafb00d96d9f315dcb8689c86193e",
-    "pyxbe-1.0.4-py3-none-any.whl": "8c8a354b824ab978ca088472adeb2395f0704c71c0347c94b1eda639a2e34416"
+    "pyxbe-1.0.4-py3-none-any.whl": "8c8a354b824ab978ca088472adeb2395f0704c71c0347c94b1eda639a2e34416",
+    "numpy-2.5.2-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl": "29b86ff8a6cc556b47ec6b64b194815cc80e6bf5eedcc6cddfd65318cb0b4eee",
+    "pillow-12.3.0-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl": "0847a763afefb695bc912d7c131e7e0632d4edc1d8698f58ddabec8e46b8b6d3"
   },
   "container": {
     "comment": "The build toolchain for hosts without one (SteamOS). Arch Linux as of the archive date below, which carries the same glibc, SDL3, shaderc and Vulkan loader as SteamOS 3.8, so the game it builds runs on the host's own libraries.",

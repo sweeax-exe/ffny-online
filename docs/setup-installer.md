@@ -231,7 +231,12 @@ ISO/XISO or extracted dump, separate **Install location** and **Data location**
 (defaults `~/Games/DefJamRecompiled/App` and `.../Data`), menu and desktop shortcuts --
 and one more: **Add to Steam**, which asks the running Steam client to add the game as a
 non-Steam shortcut so it starts from Gaming Mode, with its library artwork (see
-[Icons and artwork](#icons-and-artwork)). HD textures are not offered on Linux yet.
+[Icons and artwork](#icons-and-artwork)). **Apply HD texture upscale during install**
+is the Windows option (since v0.7.2): unchecked by default, about 6.2 GB of generated
+textures plus 15 GiB of working headroom, no GPU needed, made with the setup's own
+Python after the game is built ([HD textures](hd-textures.md)). **On the Steam Deck, an
+install with upscaled textures takes about 15 minutes** (about 10 of them for the upscale;
+see [Validation](#validation-1)); keep the Deck plugged in and awake.
 
 **The compiler.** If this computer has one (clang, cmake, ninja and the SDL3, Vulkan
 and shaderc development packages; one probe build checks them), setup uses it. If not
@@ -257,22 +262,25 @@ opens its launcher window first and has the F1 overlay, as on the other platform
 ```bash
 ./DefJamSetup.sh --silent --dump ~/Dumps/DefJam.iso \
     --install-dir ~/Games/DefJamRecompiled/App --data-dir ~/Games/DefJamRecompiled/Data \
-    [--steam-shortcut | --steam-art] [--no-desktop-shortcut | --no-shortcuts] [--toolchain host|container]
+    [--steam-shortcut | --steam-art] [--no-desktop-shortcut | --no-shortcuts] [--hd-textures] \
+    [--toolchain host|container]
 ./DefJamSetup.sh --uninstall --install-dir ~/Games/DefJamRecompiled/App
 ```
 
 Exit codes as on the other platforms: 0 success; 2 invalid input; 3 prerequisites
 missing (no toolchain and no podman, the container could not be fetched, or the
 game's libraries are missing); 4 failed stage; 5 another setup or the game is
-running; 6 cancelled. Uninstalling removes the application, the launcher and the menu
-and desktop entries it made, and keeps the dump copy, saves, settings and logs. A
+running; 6 cancelled. `--hd-textures` generates and enables the HD packs. Uninstalling
+removes the application, the launcher and the menu and desktop entries it made, and keeps
+the dump copy, saves, settings, generated HD packs and logs. A
 Steam shortcut stays in Steam until you remove it there (in the Library, the game's
 **Manage** menu, *Remove non-Steam game from your library*), and the build container stays
 in podman's store (`podman rmi $(podman images -q localhost/defjam-recompiled-build)`).
 
 ### What the Linux payload carries
 
-The source, python-build-standalone's CPython with the `pyxbe` and `capstone` wheels,
+The source, python-build-standalone's CPython with the `pyxbe` and `capstone` wheels
+and, for the HD upscale, the manylinux `Pillow` and `NumPy` wheels (since v0.7.2),
 the wizard, the engine and the launcher template, each pinned by SHA-256 in
 `setup/dependencies-linux.json` with the build container's image digest, archive
 date and package list. It carries no compiler and no libraries. Build it with
@@ -296,3 +304,12 @@ both entries and kept the data folder (exit 0). Also checked: the wizard opens a
 on the Deck. Not yet checked: the wizard driven by hand from start to finish, the Steam shortcut
 started from Gaming Mode, and a desktop
 Linux distribution with its own toolchain (`--toolchain host`).
+
+The HD option (v0.7.2) was checked on the same Deck from the v0.7.2 development archive: the
+previous install, its Steam shortcut and folders removed, then a silent install from the XISO with
+`--hd-textures --steam-shortcut` took 14 min 48 s, about 9 min 40 s of it the upscale (18,971
+images, 6.57 GB, both packs enabled in `settings.ini`, the Steam shortcut and its artwork placed).
+With the packs on, the fight and Free For All regression checks pass (median 60 and 56.5 frames a
+second) after the v0.7.2 toolkit change; the main menu takes about 3 s to respond the first time
+it is shown while its HD art loads. Running setup again with **Add to Steam** keeps the one shortcut (v0.7.2; before, a repair
+added a second).
