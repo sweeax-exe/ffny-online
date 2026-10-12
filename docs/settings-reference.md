@@ -49,7 +49,7 @@ and what to do when something misbehaves, see [Controllers, keyboard and mouse](
 |---|---|---|
 | `enabled` | `false` | Use local HD texture packs. Restart. |
 | `packs` | `faithful-hd` | Folder names beneath `<data>/mods`, separated by semicolons. Later packs win. Restart. An explicit `RECOMP_TEXTURE_PACKS` enables those packs for one run. |
-| `cache_mb` | `512` | Replacement memory budget in MiB (32–4096), accounting for GPU resources and retained upload data. Restart. Env `RECOMP_TEXTURE_CACHE_MB`. |
+| `cache_mb` | `2048` | Replacement memory budget in MiB (32–4096), accounting for GPU resources and retained upload data. A budget smaller than a scene's textures makes the game evict and reload them during play. Restart. Env `RECOMP_TEXTURE_CACHE_MB`. |
 | `dump` | `false` | Write lossless source PNGs and texture identities to `<data>/hd-work/runtime`. Restart. Env `RECOMP_TEXTURE_DUMP_DIR` can select a different destination. |
 | `dump_limit` | `2000` | Maximum new images captured per run (0–65536). Restart. Env `RECOMP_TEXTURE_DUMP_LIMIT`. |
 
