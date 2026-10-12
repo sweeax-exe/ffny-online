@@ -339,6 +339,14 @@ def unpack_setup(installer, platform, destination):
                 target.chmod(member.mode & 0o777)
 
 
+
+def verify_checksum(path, name, expected):
+    if Path(path).stat().st_size > 1024:
+        raise ValueError('Setup checksum file is too large')
+    match = re.fullmatch(r'([0-9a-f]{64})\s+\*?([^\r\n]+)', Path(path).read_text(encoding='ascii').strip())
+    if not match or match[1] != expected or match[2] != name:
+        raise ValueError('Setup checksum file does not match release provenance')
+
 def select_payload(tag, platform, cache, verify, previous, operation, cancelled, progress):
     cache = Path(cache)
     cache.mkdir(parents=True, exist_ok=True)
@@ -349,6 +357,8 @@ def select_payload(tag, platform, cache, verify, previous, operation, cancelled,
     if previous and version(target['version']) < version(previous['version']) and not previous.get('updater'):
         raise ValueError('Historical installations do not support downgrade')
     installer_asset, checksum_asset, provenance_asset = target['assets']
+    if type(provenance_asset.get('size')) is not int or provenance_asset['size'] > 4 * 1024**2:
+        raise ValueError('Setup provenance too large')
     provenance_path = download(provenance_asset, cache, cancelled, progress)
     if provenance_path.stat().st_size > 4 * 1024**2:
         raise ValueError('Setup provenance too large')
@@ -358,6 +368,10 @@ def select_payload(tag, platform, cache, verify, previous, operation, cancelled,
     if previous and not capable(provenance.get('updater')):
         raise ValueError('Historical setup cannot safely repair or update an existing install; use an updater-capable release')
     policy(operation, provenance, previous)
+    if type(checksum_asset.get('size')) is not int or checksum_asset['size'] > 1024:
+        raise ValueError('Setup checksum file is too large')
+    checksum = download(checksum_asset, cache, cancelled, progress)
+    verify_checksum(checksum, installer_asset['name'], provenance['installer_sha256'])
     installer = download(installer_asset, cache, cancelled, progress, provenance['installer_sha256'])
     if sha(installer) != provenance['installer_sha256']:
         raise ValueError('Setup provenance checksum mismatch')

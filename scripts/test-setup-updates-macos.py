@@ -7,6 +7,7 @@ programs instead of game code. No real dump, saves or shortcuts are touched.
 """
 import argparse
 import hashlib
+import importlib.util
 import json
 import os
 import platform
@@ -95,6 +96,20 @@ def main():
         subprocess.run([app/'Def Jam Recompiled.app/Contents/MacOS/DefJamLauncher'],check=True)
         assert (data/'launcher-marker.txt').read_text().splitlines()==['0.8.0',str(data),before['source']]
         reports.append(dict(case='hard-exit-'+point,recovered=True,exit_code=91,actual_source=before['source']))
+    # Exercise a real parent→selected-engine handoff with the target's bundled Python.
+    spec=importlib.util.spec_from_file_location('selected_releases',args.payload/'engine/releases.py')
+    release_module=importlib.util.module_from_spec(spec);spec.loader.exec_module(release_module)
+    for label,package,op in [('selected-update',b,'update'),('selected-downgrade',a,'downgrade')]:
+        chosen=argparse.Namespace(install_dir=str(app),data_dir=str(data),dump=None,operation=op,toolchain='auto',
+                                 log=str(work/(label+'.log')),status_file=None,cancel_file=None,no_shortcuts=True)
+        code=release_module.run_selected(chosen,'macos-arm64',package,lambda:None)
+        assert code==0
+        receipt=json.loads((app/'installed.json').read_text());expected=json.loads((package/'manifest.json').read_text())['version']
+        assert receipt['version']==expected
+        for name,sha in sentinels.items():assert hashlib.sha256((data/name).read_bytes()).hexdigest()==sha
+        subprocess.run([app/'Def Jam Recompiled.app/Contents/MacOS/DefJamLauncher'],check=True)
+        lines=(data/'launcher-marker.txt').read_text().splitlines();assert lines==[expected,str(data),receipt['source']]
+        reports.append(dict(case=label,version=expected,exit_code=code,actual_launcher=lines,source=receipt['source']))
     (work/'results.json').write_text(json.dumps(dict(**metadata,results=reports),indent=2))
     print(json.dumps(reports,indent=2))
 

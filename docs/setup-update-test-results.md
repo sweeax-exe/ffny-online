@@ -21,7 +21,7 @@ Local raw evidence is retained under `logs/setup-updates/2026-10-12-macos/` and
 
 | Test / case variants | Result and limit | Evidence |
 |---|---|---|
-| Shared project unit suite; common policy/network/archive/cache/ownership/locks/handoff tests | 335 passed, 30 skipped on macOS. Skips include native Windows job test and platform-specific fixtures. Does not establish all common-family variants on every OS. | `unit-final.log`; `tests/unit/test_setup_updates.py` |
+| Shared project unit suite; common policy/network/archive/cache/ownership/locks/handoff tests | 339 passed, 30 skipped on macOS. Skips include native Windows job test and platform-specific fixtures. Does not establish all common-family variants on every OS. | `unit-final.log`; `tests/unit/test_setup_updates.py` |
 | OP01 / OP05 / OP07 intact / OP08 / OP11 B→A | Native synthetic install, clean update, repair, clean rebuild and future downgrade all pass. Real CMake/CLT compile, distinct attempt roots and ad-hoc signed stable launcher executed; version/data/CWD match; settings/save sentinels unchanged. Corrupt repair, skipped C variants and option permutations remain pending. | `native-results.json`, five positive cases; `scripts/test-setup-updates-macos.py` |
 | TX01/03/05/06/08 subset; TX09/10 validation | Unit subprocess recovery: six checkpoints × three hard exits. Unsafe/tampered journals and interrupted recovery retry tested. Native signed-app engine also exits 91 at prepared/launcher/JSON receipt, recovers and executes prior launcher successfully (three cases). This is process termination, not reboot or power-loss evidence. | `test_setup_updates.py`; `native-results.json`, three fault cases |
 | MAC07 controls/preparation subset | Packaged `--ui-smoke` and `--ui-preparation-smoke` exit 0. The preparation probe expects invalid nested-path rejection, a retained log and UI timer progress. | `packaged-smoke.json` |
@@ -40,7 +40,7 @@ First hosted implementation CI at `a43cdd6` (run 38304792498): macOS/Linux setup
 lanes PASS; Windows had 29 failures /117 passes /21 skips. Failures exposed Windows
 read-only-descriptor flush semantics, a raw ZIP-name normalization issue and an
 open-cache-reader race; an uninstall fixture also lacked the required data path.
-These were corrected with the checks retained. Final rerun is required; do not count
+These were corrected with the checks retained. Final rerun and checksum/selected-handoff additions are tracked on PR18; do not count
 this first failed lane as acceptance. `ci-first-failed.log` retains its trace.
 
 Local development dmg SHA-256: `d576be50c2767e58093980817c15cbe6ea034b611e88a5c270e22b9f0578ffba`.

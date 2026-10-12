@@ -391,3 +391,10 @@ def test_download_reuses_concurrently_promoted_cache_with_open_reader(tmp_path,m
     finally:
         for stream in held:stream.close()
     assert not list(tmp_path.glob('*.partial'))
+
+
+@pytest.mark.parametrize('contents', ['b'*64+'  setup.dmg', 'a'*64+'  wrong.dmg', 'short  setup.dmg', 'a'*64+'  setup.dmg\nextra'])
+def test_release_checksum_file_must_match_provenance_and_asset(tmp_path,contents):
+    path=tmp_path/'checksum';path.write_text(contents)
+    with pytest.raises(ValueError):releases.verify_checksum(path,'setup.dmg','a'*64)
+    path.write_text('a'*64+'  setup.dmg\n');releases.verify_checksum(path,'setup.dmg','a'*64)
