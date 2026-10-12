@@ -113,8 +113,10 @@ Worked numbers: 16:9 → `k = 0.75`, `Lw = 853.3` (target 854·s), fov 30° → 
 - **R5 Clip 2D to its box.** UI slides in from x up to 754 (seen in batch dumps). Centred or anchored 2D must be
   scissored to its own box so off-screen slide-ins do not appear in the side areas. The game patch sets the clip;
   the existing surface-clip → scissor path carries it.
-- **R6 One aspect per boot (v1).** The canvas size and the game patch read `A` at start-up. `auto` uses the window's
-  aspect at start-up, snapped to the nearest of {4:3, 16:10, 16:9, 21:9, 32:9} within 3%; otherwise the exact value.
+- **R6 One aspect per boot (v1).** The canvas size and the game patch read `A` at start-up. `auto` uses the primary
+  screen's aspect at start-up, windowed or not (a window's size is arbitrary and full screen is often entered later;
+  owner's play-test 2026-10-12), snapped to 16:10 or 16:9 within 3%; wider screens get 16:9 unless an ultrawide
+  shape is picked explicitly; otherwise the exact value.
   Live switching (resize → new canvas at a frame boundary, `sub_0001A710` re-run) is WS-13, later.
 - **R7 Game-specific in `src/`, generic in the toolkit.** The canvas, present, capture and point-sprite pieces are
   generic toolkit features on a fork branch; every address in this pack is game code in `src/patches/widescreen.c`
