@@ -72,18 +72,19 @@ float ws_init(int window_w, int window_h, int fullscreen)
                     h = sh;
                 }
             }
+#else
+            {
+                extern int host_posix_display_size(int *w, int *h);   /* src/host_posix.c, SDL */
+                int sw, sh;
+                if (host_posix_display_size(&sw, &sh)) {
+                    w = sw;
+                    h = sh;
+                }
+            }
 #endif
             a = (w > 0 && h > 0) ? snap_auto((float)w / (float)h) : 0.0f;
         }
     }
-#if !defined(_WIN32)
-    if (a > 0.0f && !getenv("RECOMP_WS_ASPECT")) {
-        /* The Vulkan renderer has no widescreen canvas yet (WS-1b): a widened
-         * view would be squeezed into a 4:3 picture. */
-        fprintf(stderr, "[WS] widescreen needs the Vulkan canvas, not built yet; staying 4:3\n");
-        a = 0.0f;
-    }
-#endif
     if (a <= WS_DESIGN_ASPECT)
         a = 0.0f;
     g_aspect = a;
@@ -142,7 +143,10 @@ void ws_view_params(uint32_t vp, uint32_t mode, uint32_t pfov, uint32_t pasp, ui
         return;                                        /* the original writes nothing */
     if (mode == 2) {
         MEMF(pfov) = fov;
-        MEMF(pasp) = (float)((double)MEMF(vp + 0x1C) / (double)h);
+        if (a > 0.0f && !full)    /* a squeezed sub-view keeps the shape it was authored with */
+            MEMF(pasp) = (float)((double)MEMF(vp + 0x1C) / (double)g_k / (double)h);
+        else
+            MEMF(pasp) = (float)((double)MEMF(vp + 0x1C) / (double)h);
         MEMF(py) = y;
         MEMF(ph) = h;
     } else if (mode == 1) {
@@ -233,3 +237,23 @@ void ws_trace_vtx_arr(void)
     trace2d(0x2E390, MEM32(g_esp), g_ecx, MEMF(arr + i * 12), MEMF(arr + i * 12 + 4));
 }
 void ws_trace_vtx(void)    { trace2d(0x2E470, MEM32(g_esp), g_ecx, MEMF(g_esp + 8), MEMF(g_esp + 12)); }
+
+/* Sub-views (3D inside a menu panel: the sketch artist's head, a created
+ * fighter's portrait on the versus poster, menu previews). sub_0001A7A0 is the
+ * viewport's SetRect(this, x, y, w, h, apply), thiscall with five stack words.
+ * The panels around them are centred and squeezed by k in the renderer, so a
+ * rectangle that is not the whole screen is squeezed the same way here, before
+ * the game stores it; the 3D then renders exactly where its panel is. Its
+ * projection keeps the authored shape (ws_view_params). Full-screen rectangles
+ * are left alone. Off: nothing. */
+void ws_view_rect_enter(void)
+{
+    float x = MEMF(g_esp + 4), w = MEMF(g_esp + 12);
+    static unsigned logged;
+    if (g_aspect <= 0.0f || (x <= 0.5f && w >= 639.5f))
+        return;
+    MEMF(g_esp + 4) = 320.0f + (x - 320.0f) * g_k;
+    MEMF(g_esp + 12) = w * g_k;
+    if (logged++ < 8)
+        fprintf(stderr, "[WS] sub-view rect x %.1f w %.1f -> x %.1f w %.1f\n", x, w, MEMF(g_esp + 4), MEMF(g_esp + 12));
+}

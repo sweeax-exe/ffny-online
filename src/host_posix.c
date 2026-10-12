@@ -100,6 +100,31 @@ static void refresh_drawable(void)
 void host_posix_call_on_main(void (*fn)(void *), void *arg) { call_on_main(fn, arg); }
 int  host_posix_have_video(void) { return s_have_video; }
 
+/* The primary display's size, for widescreen's "auto" (src/patches/widescreen.c). Asked on
+ * the main thread, where SDL's video calls belong. 0 when there is no display. */
+typedef struct { int w, h; } DisplaySize;
+static void display_size_main(void *arg)
+{
+    DisplaySize *d = arg;
+    const SDL_DisplayMode *m = SDL_GetDesktopDisplayMode(SDL_GetPrimaryDisplay());
+    if (m) {
+        d->w = m->w;
+        d->h = m->h;
+    }
+}
+int host_posix_display_size(int *w, int *h)
+{
+    DisplaySize d = { 0, 0 };
+    if (!s_have_video)
+        return 0;
+    call_on_main(display_size_main, &d);
+    if (d.w <= 0 || d.h <= 0)
+        return 0;
+    *w = d.w;
+    *h = d.h;
+    return 1;
+}
+
 /* Whether Shift is down right now, before any key event has said so: the launcher is shown when
  * it is held at start-up. */
 int host_posix_shift_held(void)

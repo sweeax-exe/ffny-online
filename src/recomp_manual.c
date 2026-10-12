@@ -926,6 +926,10 @@ void sub_002203C6_enter(void)
  */
 #include "patches/widescreen.h"
 
+/* Sub-view rectangles follow the centred 2D (src/patches/widescreen.c). */
+extern void ws_view_rect_enter(void);
+void sub_0001A7A0_enter(void) { ws_view_rect_enter(); }
+
 void sub_0001A4E0(void)
 {
     ws_view_params(g_ecx, MEM32(g_esp + 4), MEM32(g_esp + 8), MEM32(g_esp + 12),
