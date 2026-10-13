@@ -96,7 +96,8 @@ analysis/lift work. Every successful attempt gets a distinct build directory.
 The stable launcher and receipts switch through a recoverable activation journal.
 Close the game first; setup, data and launcher lifetime locks prevent overlapping
 operations. If interrupted activation blocks the launcher, rerun setup to recover.
-Previous builds are retained, so repeated updates consume disk space.
+Previous successful builds are retained, so repeated updates consume disk space (about 0.9 GB each on Linux);
+a failed or cancelled attempt deletes its own build directory.
 
 For an existing installation, leave **Your game copy** empty to verify and reuse
 its installed extraction. Corrupt or missing extracted files require the original
@@ -363,10 +364,13 @@ second) after the v0.7.2 toolkit change; the main menu takes about 3 s to respon
 it is shown while its HD art loads. Running setup again with **Add to Steam** keeps the one shortcut (v0.7.2; before, a repair
 added a second).
 
-## Planned release selector and clean updates
+## Release selector and clean updates
 
-GitHub release selection and a dedicated clean-update route are planned; they are
-not implemented by the current setup. The [acceptance plan](setup-update-test-plan.md)
-covers Windows x64, Apple Silicon macOS and Steam Deck/SteamOS. Clean updates will
-preserve player data, and downgrade support will begin with future compatible
-updater-capable releases. Existing historical releases will not be downgrade targets.
+Rerunning setup can fetch the published stable releases (**Fetch GitHub releases**, on Linux too),
+and install, repair, clean-update, clean-rebuild or downgrade as described under
+[Update, repair and uninstall](#update-repair-and-uninstall). The [acceptance plan](setup-update-test-plan.md)
+covers Windows x64, Apple Silicon macOS and Steam Deck/SteamOS, and the
+[results](setup-update-test-results.md) record what has been run. Releases from before the updater
+can be installed fresh but cannot update or repair an existing installation; the picker marks them
+**(update unavailable)** when an installation is selected. Clean updates preserve player data, and
+downgrade is only to future compatible updater-capable releases.

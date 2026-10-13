@@ -1267,6 +1267,21 @@ def uninstall(install):
     print('Application removed. Dump, saves, settings and logs were preserved.', flush=True)
 
 
+def discard_failed_attempt(engine):
+    """Delete the unique version folder this run created, so a failed or cancelled attempt does not
+    keep gigabytes. Never the folder the installed receipt names, nor anything while an activation is pending."""
+    try:
+        if not engine or '-attempt-' not in engine.version_root.name or (engine.install / '.setup-transaction').exists():
+            return
+        receipt = engine.install / 'installed.json'
+        if receipt.is_file() and Path(json.loads(receipt.read_text(encoding='utf-8'))['source']).resolve().is_relative_to(engine.version_root.resolve()):
+            return
+        if engine.version_root.is_dir() and engine.version_root.parent == engine.install / 'versions':
+            shutil.rmtree(engine.version_root, ignore_errors=True)
+    except (OSError, ValueError, KeyError):
+        pass
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--payload', required=True)
@@ -1396,6 +1411,7 @@ def main(argv=None):
                 log.write(message + '\n')
         if args.status_file:
             write_status(args.status_file, message)
+        discard_failed_attempt(engine)
         return ex.code if isinstance(ex, SetupError) else 4
     finally:
         if selection:

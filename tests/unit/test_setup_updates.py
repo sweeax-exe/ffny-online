@@ -443,3 +443,22 @@ def test_release_checksum_file_must_match_provenance_and_asset(tmp_path,contents
     path=tmp_path/'checksum';path.write_text(contents)
     with pytest.raises(ValueError):releases.verify_checksum(path,'setup.dmg','a'*64)
     path.write_text('a'*64+'  setup.dmg\n');releases.verify_checksum(path,'setup.dmg','a'*64)
+
+
+def test_failed_attempt_directory_is_discarded_but_active_one_is_kept(tmp_path):
+    install = tmp_path / 'App'
+    failed, active = (install / 'versions' / name for name in ('0.7.2-a-b-attempt-11111111', '0.7.2-a-b-attempt-22222222'))
+    for folder in (failed, active):
+        (folder / 'source').mkdir(parents=True)
+    (install / 'installed.json').write_text(json.dumps({'source': str(active / 'source')}))
+    fake = lambda root: argparse.Namespace(install=install, version_root=root)
+    engine.discard_failed_attempt(fake(active))
+    assert active.is_dir()
+    engine.discard_failed_attempt(fake(failed))
+    assert not failed.exists()
+    (install / '.setup-transaction').mkdir()
+    again = install / 'versions' / '0.7.2-a-b-attempt-33333333'
+    again.mkdir()
+    engine.discard_failed_attempt(fake(again))
+    assert again.is_dir()
+    engine.discard_failed_attempt(None)

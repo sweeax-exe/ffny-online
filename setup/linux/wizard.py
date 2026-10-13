@@ -137,8 +137,25 @@ def wizard(payload, smoke=False):
         button.grid(row=0, column=i, padx=4)
 
     release_tags = [None]
+    release_kinds = ['ok']
+
+    def installed():
+        return (Path(install.get()).expanduser() / 'installed.json').is_file()
+
+    def choosable(kind):
+        return kind == 'ok' or (kind == 'fresh' and not installed())
+
+    def release_picked(_event=None):
+        index = release_choice.current()
+        if index > 0 and not choosable(release_kinds[index]):
+            release_choice.current(0)
+            status.set('This release has no complete Linux setup. Choose a compatible release.'
+                       if release_kinds[index] == 'unavailable' else
+                       'This release predates the updater, so it cannot update or repair an existing installation. '
+                       'Choose a newer release.')
     release_choice = ttk.Combobox(frame, state='readonly', values=['Bundled release (offline)'])
     release_choice.current(0)
+    release_choice.bind('<<ComboboxSelected>>', release_picked)
     operation_choice = ttk.Combobox(frame, state='readonly', values=['Automatic', 'Install', 'Repair', 'Clean Update', 'Downgrade (future releases)', 'Clean Rebuild'])
     operation_choice.current(0)
     operations = ['auto', 'install', 'repair', 'update', 'downgrade', 'rebuild']
@@ -159,8 +176,10 @@ def wizard(payload, smoke=False):
         session['cancel'] = work / 'cancel'
         mutable(False); install_button.configure(state='disabled'); play_button.configure(state='disabled')
         cancel_button.configure(state='normal'); progress.start(12); status.set('Fetching GitHub releases…')
-        child = subprocess.Popen([sys.executable, '-B', str(HERE / 'wizard.py'), '--silent', '--payload', str(payload),
-                                  '--list-releases', '--cancel-file', str(session['cancel'])],
+        listing = [sys.executable, '-B', str(HERE / 'wizard.py'), '--silent', '--payload', str(payload),
+                   '--list-releases', '--cancel-file', str(session['cancel'])]
+        if installed(): listing += ['--install-dir', str(Path(install.get()).expanduser())]
+        child = subprocess.Popen(listing,
                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True)
         session['child'] = child
         def background():
@@ -176,8 +195,13 @@ def wizard(payload, smoke=False):
                 try: rows = json.loads(output)['releases']
                 except (ValueError, KeyError): status.set('Invalid release list.'); return
                 release_tags[:] = [None] + [row['tag'] for row in rows]
-                release_choice.configure(values=['Bundled release (offline)'] + [row['tag'] + ('' if row['available'] else ' (unavailable)') for row in rows])
-                release_choice.current(next((i+1 for i,row in enumerate(rows) if row['available']),0))
+                # 'unavailable' has no setup for this platform; 'fresh' predates the updater (updater == False)
+                # and cannot update or repair an existing installation.
+                release_kinds[:] = ['ok'] + ['unavailable' if not row['available'] else 'fresh' if row.get('updater') is False else 'ok' for row in rows]
+                release_choice.configure(values=['Bundled release (offline)'] + [
+                    row['tag'] + {'ok': '', 'unavailable': ' (unavailable)', 'fresh': ' (update unavailable)'}[kind]
+                    for row, kind in zip(rows, release_kinds[1:])])
+                release_choice.current(next((i for i, kind in enumerate(release_kinds) if i and choosable(kind)), 0))
                 status.set('Select a release and operation; unavailable releases will be refused.')
             if not session['closing']: root.after(0, complete)
         threading.Thread(target=background, daemon=True).start()
@@ -245,6 +269,8 @@ def wizard(payload, smoke=False):
         code = child.returncode
         if code == 0:
             status.set('Setup complete. Select Play, or start Def Jam Recompiled from the menu, the desktop or Steam.')
+        elif code == 6:
+            status.set('Setup cancelled. Run it again to resume completed work.')
         else:
             messagebox.showerror(TITLE, status.get() + '\n\nThe setup log is ' + str(session['log']))
 
