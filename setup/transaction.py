@@ -48,6 +48,12 @@ def atomic_json(path, value):
     sync_directory(path.parent)
 
 
+def posix_mode(item):
+    # Windows reports execute bits for .exe and no others, so a backup copied under
+    # another name reads back with different bits; the mode is not comparable there.
+    return 0 if os.name == 'nt' else item.stat().st_mode & 0o777
+
+
 def inventory(path):
     if not path.exists() and not path.is_symlink():
         return None
@@ -62,9 +68,9 @@ def inventory(path):
         if item.is_file():
             with item.open('rb') as stream:
                 sha = hashlib.file_digest(stream, 'sha256').hexdigest()
-            result[name] = [sha, item.stat().st_mode & 0o777]
+            result[name] = [sha, posix_mode(item)]
         elif item.is_dir():
-            result[name + '/'] = ['directory', item.stat().st_mode & 0o777]
+            result[name + '/'] = ['directory', posix_mode(item)]
         else:
             raise ValueError('Unsupported activation file')
     return {'directory': path.is_dir(), 'files': result}

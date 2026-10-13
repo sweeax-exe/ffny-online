@@ -166,6 +166,16 @@ def test_recovery_refuses_changed_backup_and_escaping_journal(tmp_path):
     assert target.read_text()=='new'
 
 
+def test_activation_backup_of_an_executable_is_recognised_on_recovery(tmp_path):
+    # Regression: a Windows .exe backup is stored without its extension, which changes
+    # the mode bits Windows reports; recovery then refused the committed journal.
+    root=tmp_path/'app';data=tmp_path/'data';root.mkdir();data.mkdir()
+    launcher=root/'DefJamLauncher.exe';launcher.write_bytes(b'MZ old')
+    tx=transaction.Activation(root,data);tx.begin([launcher]);launcher.write_bytes(b'MZ new')
+    tx.commit();tx.recover()
+    assert launcher.read_bytes()==b'MZ new' and not tx.folder.exists()
+
+
 def test_installed_dump_without_original_is_verified_and_clean_candidate_is_unique(tmp_path):
     from test_setup_engine import installer
     obj=installer(tmp_path);obj.extract()
