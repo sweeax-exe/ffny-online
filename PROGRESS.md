@@ -43,7 +43,7 @@
 
 | GitHub setup updates (D100–D101/D103) | ✅ implementation / ⏳ acceptance | Draft PR #18 implements all three wizards, verified release handoff and recoverable clean builds. Mac: 339 unit tests, ten native synthetic cases, owner-dump install/update and menu/fight checks. Interactive/minimum-OS/options, Windows and Deck acceptance pending; `docs/setup-update-test-results.md`. |
 
-| Setup GitHub updater (v0.8.0) | ⏳ release packaging | PR #18 tested and merge/release authorized by Vlad 2026-10-12; U0 protocol/data schema 1. Release workflow must pass before publication. |
+| Setup GitHub updater (v0.8.0) | ✅ released | PR #18 merged at f582cd1; tag v0.8.0 points to that merge. Release workflow 38346723528 passed 27/27; Windows/macOS/Linux setups, checksums and provenance published. U0 protocol/data schema 1. |
 
 ## 1. Decisions log
 
@@ -237,12 +237,9 @@ defjam-recomp/
 
 ## 6. Work log
 
-> Recent entries only. Everything before 2026-10-12 09:52 is in `docs/worklog/` (one file a month); when this
+> Recent entries only. Everything before 2026-10-12 10:59 is in `docs/worklog/` (one file a month); when this
 > section passes about eight entries, move the oldest there.
 
-- 2026-10-12 09:52 — Setup update test contract (D100–D101): feature worktree from public ce4d4ab, 14 operation families, 26 common cases, 12 crash checkpoints, 6 Windows/7 macOS/8 Deck native families. Clean data preservation, no historical downgrade, future compatibility and Deck-only scope recorded; canonical test gates linked. Documentation only; no updater code/game tests or acceptance claimed. Draft PR #18 opened on codex/setup-github-updates; hygiene 276 files/0 failures, 73 unique case IDs and changed-doc links pass; hosted CI pending.
-- 2026-10-12 — **Steam Deck double input (D100), branch `fix/steam-deck-double-input`.** Cause read from the v0.7.2 session logs (two SDL pads, one player each). Toolkit `input_host.c` drops the physical Valve pad while `Steam Virtual Gamepad` exists. Built in the container and swapped into the Deck install for the owner's re-test; not yet confirmed on hardware.
-- 2026-10-12 — **Steam Deck stutter and fight frame rate (D101), branch `perf/deck-texture-streaming`, toolkit `perf/hd-async-load`.** Profiled with `perf` and per-call timers on the Deck (install tree rebuilt in the setup container with `pipeline-state.py begin-build`/`record-build`). Findings: the stutter was the synchronous PNG decode and mips on the render thread; fights lost frames to cache eviction (512 MiB against a 2 GiB working set) and to a 4 MB software Z clear; the guest thread's 60% in `sub_0021EC50` is D3D's wait for pushbuffer space, not work. A nested 90 Hz gamescope (`gamescope -W 1280 -H 800 -r 90 -- python3 scripts/regress.py ...`) reproduces the game-mode window. Regressions with the packs: fight, intro, crib, gym, ffa green; texture-pack fixture 3 of 3 with a new background-decode check; unit tests 231 passed, 50 skipped.
 - 2026-10-12 10:59 — README header now uses the existing FAN RECOMP social-preview banner instead of the 96px shield icon, displayed at 960px. Exact SHA-256 matches GitHub og:image (b40bb377…); no new media or runtime changes. Source hygiene and diff checks pass.
 - 2026-10-12 13:30 — Implemented PR18 updater engine/discovery/journal and all three native frontends (D103); Mac units 339 passed/30 skipped, signed marker install/update/downgrade/repair/rebuild plus three hard exits 8/8. Development dmg verified (4867 files), live GitHub 17 entries and v0.7.2 historical own-engine invalid-input handoff exit2. Real owner-dump install and local future clean update built 17896 functions; menu/fight pass at median60fps, initial M2/M3 omitted baseline metadata failures retained and reviewed captures rechecked. Data cache write found and fixed via no-archive; final no-archive real update preserves120/120files includinganalysiscache and updated M2/M3 runner2/2 passes. Evidence logs/setup-updates/2026-10-12-macos; native-final-2/results.json. All native Windows/Deck/options/power-loss gates pending; interactive Mac locked. No game/toolkit source or pin changes.
 - 2026-10-12 13:48 — Final code f238afe: Mac units339pass/30skip, packaged fixture10/10 including selected-engine update/downgrade; native-final-head.json records source/toolkit/payload identity. Real clean0.8→local0.9 update no-original-dump exit0,120/120non-extracted files includinganalysiscache unchanged, three builds retained; updated loading/title runner2/2 (regress-20261012-133441). Live officialv0.7.2 checksum/provenance/inventory pass. First WindowsCI29failures fixed (writablefsync, rawZIP, cache reader, completeuninstallfixture, gatedjobownership), corrected hostedrun38305557205 allgreen; finalcode38306033576 pending. Game-free reports retained; no game source or toolkit pin changes. Interactive Mac locked and fullnative Windows/Deck/options/HD/reboot gates remain pending.
@@ -250,19 +247,20 @@ defjam-recomp/
 - 2026-10-12 14:59 — Mac desktop retry succeeds: live AppKit release picker17entries/unavailable-disabled, historicaldowngrade refused with25/25guarded files unchanged; GUI localfuture0.8→0.9 update and0.9→0.8 downgrade, Repair, cancel-before-activation, latecompletion andPlay pass. Sentinelbytes/actualsignedlauncher version/data/CWD verified; nine observedcasegroups in logs/setup-updates/2026-10-12-mac-ui/interactive-results.json. Fixed modalcompletion/cancellation race, cancelled-fetch message, Play restoration and installedversion refresh. Both testwizards compile/sign; finalRepair/cancel checks pass; units339pass/30skip. New package/CI pending; no runtime/game/toolkit changes; remaining nativehost/HD/OS/reboot gates retained.
 - 2026-10-12 15:25 — Final Mac GUI correction e93705c passes CI38314016983 all25/25, including three setup lanes. Rebuilt development package4867files/64058282ZIPbytes, bundled imports/game-free inventory and UI/preparation smokes2/2 pass. Live final package picker17releases/12unavailable-disabled and idleClose rechecked. Nine GUI casegroups plus339units/30skip retained in logs/setup-updates/2026-10-12-mac-ui; broader nativehost/HD/OS/reboot gates remain pending. Source-only evidence update; no release/merge/game/toolkit changes.
 - 2026-10-12 21:29 — D104: Vlad confirms PR18 tested and authorizes merge/tag/release. Pre-release head67f6166 CI38345243666 passes25/25. Prepared v0.8.0 U0 version/notes; game/toolkit sources unchanged by release preparation. Tagged packaging and publication next.
+- 2026-10-12 21:37 — PR18 merged f582cd1; exact merge tagged v0.8.0. Source release38346723528 passes27/27, mergeCI38346713921 green. Published latest v0.8.0 with9 assets (three game-free setups plus SHA256/provenance); no game binaries/data uploaded.
 
 ## 7. Hand-off
 
-### v0.8.0 setup updater release (D104), 2026-10-12
+### v0.8.0 published (D104), 2026-10-12
 
-Vlad confirms PR #18 tested and authorizes merge/tag/release. Release preparation
-adds only CMake version 0.8.0, notes docs/releases/v0.8.0.md and this state update.
-Merge PR #18 with a merge commit; tag that exact commit v0.8.0. Run the existing
-Source release workflow, verify all setup lanes and release-policy pass, and
-publish its resulting draft with the three setup packages/checksums/provenance.
-U0 is v0.8.0; historical releases cannot be downgrade targets. Recorded native
-fixture versions 0.8/0.9 remain synthetic evidence, not released game tests.
-Preserve detailed evidence and follow-ups in docs/setup-update-test-results.md;
-owner release acceptance does not rewrite historical measurements. Keep issue
-#11 and unrelated checkout work independent. Never publish docs/worklog archives,
-game data, built games or generated guest source.
+PR #18 merged at f582cd119017cae58dd472b42ab4414acc9288b5. Annotated tag
+v0.8.0 points to that exact merge commit. Source release workflow 38346723528
+passed 27/27; merge CI 38346713921 also passed. Release is published and latest:
+https://github.com/vyanhursky/DefJamFFNY-recomp/releases/tag/v0.8.0
+Nine assets: Windows x64 exe, macOS arm64 dmg, Linux x64 tar.gz, each with SHA-256
+and provenance. All pass game-free inventory checks. Notes: docs/releases/v0.8.0.md.
+U0 is v0.8.0, updater protocol/data schema 1; historical releases cannot be
+user-selected downgrade targets. Detailed recorded tests and evidence limits
+remain in docs/setup-update-test-results.md. Vlad confirmed testing complete and
+authorized release; no remaining merge/publication work. Keep issue #11 and
+unrelated checkout work independent. Archived handoffs/worklogs remain local.
