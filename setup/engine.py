@@ -23,6 +23,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import uuid
 import urllib.parse
 import urllib.request
 
@@ -95,6 +96,8 @@ def verify_payload(payload, platform=None):
     for key in ('source_commit', 'toolkit_commit'):
         if not re.fullmatch('[0-9a-f]{40}', manifest.get(key, '')):
             raise SetupError('Invalid release identity: ' + key, 2)
+    if 'updater' in manifest and not releases.capable(manifest['updater']):
+        raise SetupError('Unsupported updater protocol/data format; use a compatible newer setup', 2)
     expected = manifest['files']
     for name, sha in expected.items():
         path = payload / safe_relative(name)
@@ -129,8 +132,10 @@ def nearest_existing(path):
 
 
 def validate_locations(install, data, dump):
-    install, data, dump = (Path(p).resolve() for p in (install, data, dump))
-    for first, second in ((install, data), (install, dump), (data, dump)):
+    install, data = (Path(p).resolve() for p in (install, data))
+    dump = Path(dump).resolve() if dump else None
+    pairs = [(install, data)] + ([(install, dump), (data, dump)] if dump else [])
+    for first, second in pairs:
         if first == second or first in second.parents or second in first.parents:
             raise SetupError('Install, data and dump locations must be separate, non-nested folders', 2)
     for target in (install, data):
@@ -144,15 +149,15 @@ def validate_locations(install, data, dump):
 
 
 @contextlib.contextmanager
-def install_lock(root):
+def install_lock(root, name='setup.lock'):
     """OS-held lock: released even after a crash; a stale file is harmless."""
     root.mkdir(parents=True, exist_ok=True)
-    stream = (root / 'setup.lock').open('a+b')
+    stream = (root / name).open('a+b')
     try:
         stream.seek(0)
         if os.name == 'nt':
             import msvcrt
-            if (root / 'setup.lock').stat().st_size == 0:
+            if (root / name).stat().st_size == 0:
                 stream.write(b'0')
                 stream.flush()
             stream.seek(0)
@@ -203,6 +208,10 @@ def game_lock(root):
         kernel.CloseHandle(handle)
 
 
+releases = load_module('setup_releases', Path(__file__).with_name('releases.py'))
+transaction = load_module('setup_transaction', Path(__file__).with_name('transaction.py'))
+
+
 class Engine:
     def __init__(self, args):
         self.args = args
@@ -210,7 +219,9 @@ class Engine:
         self.manifest = verify_payload(self.payload)
         self.install, self.data, self.dump = validate_locations(args.install_dir, args.data_dir, args.dump)
         identity = self.manifest['source_commit'][:12] + '-' + self.manifest['toolkit_commit'][:12]
-        self.version_root = self.install / 'versions' / (self.manifest['version'] + '-' + identity)
+        self.operation = getattr(args, 'operation', 'auto')
+        suffix = ('-attempt-' + uuid.uuid4().hex[:8]) if hasattr(args, 'operation') else ''
+        self.version_root = self.install / 'versions' / (self.manifest['version'] + '-' + identity + suffix)
         self.source = self.version_root / 'source'
         self.env = os.environ.copy()
         # Do not inherit the developer's test switches or another installation's data.
@@ -247,6 +258,12 @@ class Engine:
             write_status(self.args.status_file, message)
 
     def cancelled(self):
+        parent = getattr(self.args, 'handoff_parent', None)
+        if parent and not IS_WINDOWS:
+            try:
+                os.kill(parent, 0)
+            except ProcessLookupError:
+                raise SetupError('Setup handoff parent exited; cancelling the build', 6)
         if self.args.cancel_file and Path(self.args.cancel_file).exists():
             raise SetupError('Setup cancelled; run again to resume completed work', 6)
 
@@ -327,6 +344,8 @@ class Engine:
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 # copy, not copyfile: the bundled interpreter and tools keep their execute bit.
                 shutil.copy(self.payload / name, destination)
+        if self.operation in ('update', 'downgrade', 'rebuild'):
+            return  # Fresh analysis, lift and objects are the clean operation contract.
         previous = self.install / 'installed.json'
         candidates = [p for p in (self.install / 'versions').glob('*/source')
                       if p != self.source and (p / 'src/recomp/gen/lift-state.json').is_file()]
@@ -358,7 +377,7 @@ class Engine:
             receipt = json.loads(receipt_file.read_text(encoding='utf-8'))
             if receipt.get('schema') != 1 or (self.install / 'versions') not in Path(receipt['source']).resolve().parents:
                 raise SetupError('Destination has an invalid installation receipt', 2)
-        elif any(p.name not in {'logs', 'setup.lock', 'play.lock', '.DS_Store'} for p in self.install.iterdir()):
+        elif any(p.name not in {'logs', 'setup.lock', 'selection.lock', 'play.lock', '.DS_Store'} for p in self.install.iterdir()):
             raise SetupError('Choose an empty install folder or a recognized Def Jam installation', 2)
         write_json(marker, identity)
 
@@ -388,9 +407,24 @@ class Engine:
 
     def extract(self):
         self.event('Verifying and preparing your dump')
+        extracted = self.data / 'extracted'
+        if self.dump is None:
+            if not (self.install / 'installed.json').is_file():
+                raise SetupError('Choose a dump for the first installation', 2)
+            state = self.data / 'extraction-state.json'
+            if not state.is_file() or not extracted.is_dir() or extracted.is_symlink():
+                raise SetupError('Installed dump is unavailable; provide the original dump', 2)
+            if any(p.is_symlink() for p in extracted.rglob('*')):
+                raise SetupError('Installed dump must not contain symlinks', 2)
+            recorded = json.loads(state.read_text(encoding='utf-8'))
+            current = {p.relative_to(extracted).as_posix(): digest(p) for p in extracted.rglob('*') if p.is_file()}
+            if recorded.get('outputs') != current:
+                raise SetupError('Installed dump changed; provide a verified original in a new data location', 2)
+            validate_dump(extracted, self.source)
+            self.event('Verified installed dump reused; original image is not needed')
+            return
         if not self.dump.exists():
             raise SetupError('Dump does not exist', 2)
-        extracted = self.data / 'extracted'
         state = self.data / 'extraction-state.json'
         if self.dump.is_dir():
             validate_dump(self.dump, self.source)
@@ -710,7 +744,7 @@ class Engine:
             self.event(label + ' in progress (this may take several minutes)')
             argv = [self.python, self.source / 'scripts/pipeline.py', action]
             if action == 'analyze':
-                argv += ['--data', self.data]
+                argv += ['--data', self.data, '--no-archive']
             elif action == 'build':
                 # Populate FetchContent from the inventoried, offline dependency source.
                 self.run([self.python, self.source / 'scripts/pipeline-state.py', 'begin-build',
@@ -777,21 +811,33 @@ class Engine:
             destination.unlink(missing_ok=True)
         os.replace(pending, destination)
 
-    def install_launcher_bundle(self, receipt):
+    def install_launcher_bundle(self, receipt, core=True):
         bundle = self.install / LAUNCHER_BUNDLE
-        self.make_launcher_bundle(bundle, self.install)
+        if core:
+            self.make_launcher_bundle(bundle, self.install)
         shortcuts = []
         if not self.args.no_shortcuts:
             try:
                 applications = Path.home() / 'Applications'
                 applications.mkdir(exist_ok=True)
-                self.make_launcher_bundle(applications / LAUNCHER_BUNDLE, self.install)
+                destination = applications / LAUNCHER_BUNDLE
+                note = destination / 'Contents/Resources/install-root.txt'
+                if destination.exists() and (not note.is_file() or note.read_text() != str(self.install)):
+                    raise SetupError('Existing Applications app belongs to another installation', 2)
+                self.make_launcher_bundle(destination, self.install)
                 shortcuts.append(str(applications / LAUNCHER_BUNDLE))
                 if not self.args.no_desktop_shortcut:
                     alias = Path.home() / 'Desktop' / 'Def Jam Recompiled'
-                    alias.unlink(missing_ok=True)
-                    self.run([bundle / 'Contents/MacOS/DefJamLauncher', '--make-alias', bundle, alias])
-                    shortcuts.append(str(alias))
+                    expected = receipt.get('shortcut_hashes', {}).get(str(alias))
+                    if alias.exists() and (alias.is_symlink() or not alias.is_file() or expected is None or digest(alias) != expected):
+                        self.event('Left the existing desktop alias alone; its ownership/content is not verified')
+                    else:
+                        pending = alias.with_name(alias.name + '.new')
+                        self.run([bundle / 'Contents/MacOS/DefJamLauncher', '--make-alias', bundle, pending])
+                        if pending.is_file():
+                            os.replace(pending, alias)
+                            receipt.setdefault('shortcut_hashes', {})[str(alias)] = digest(alias)
+                        shortcuts.append(str(alias))
             except (OSError, SetupError) as ex:
                 if isinstance(ex, SetupError) and ex.code == 6:
                     raise
@@ -800,7 +846,7 @@ class Engine:
         receipt['shortcuts'] = shortcuts
         return bundle
 
-    def install_launcher_linux(self, receipt):
+    def install_launcher_linux(self, receipt, core=True):
         """The launcher script, a menu entry, a desktop shortcut and, if asked, a Steam shortcut."""
         template = (self.payload / 'launcher/launcher.sh').read_text(encoding='utf-8')
         script = template
@@ -810,13 +856,15 @@ class Engine:
             script = script.replace('@' + key.upper() + '@', shlex.quote(receipt[key]))
         launcher = self.install / LINUX_LAUNCHER
         pending = launcher.with_name(launcher.name + '.new')
-        pending.write_text(script, encoding='utf-8')
-        pending.chmod(0o755)
-        os.replace(pending, launcher)
+        if core:
+            pending.write_text(script, encoding='utf-8')
+            pending.chmod(0o755)
+            os.replace(pending, launcher)
         icon = self.install / (LINUX_LAUNCHER + '.png')
         icon_source = self.source / 'branding/icon/png/defjam-256.png'
         if icon_source.is_file():
-            shutil.copyfile(icon_source, icon)
+            if core:
+                shutil.copyfile(icon_source, icon)
         else:
             icon = None
         entry = desktop_entry(launcher, self.install, icon)
@@ -861,61 +909,88 @@ class Engine:
                 self.run([steam, 'steam://addnonsteamgame/' + urllib.parse.quote(str(launcher), safe='')])
                 self.event('Asked Steam to add the game to your library')
             previous = self.install / 'installed.json'
-            owned = json.loads(previous.read_text(encoding='utf-8')).get('steam_art', []) if previous.is_file() else []
+            old = json.loads(previous.read_text(encoding='utf-8')) if previous.is_file() else {}
+            owned = [name for name in old.get('steam_art', []) if Path(name).is_file() and not Path(name).is_symlink() and digest(name) == old.get('steam_art_hashes', {}).get(name)]
             receipt['steam_art'] = place_steam_art(self.source, launcher, owned, self.event)
+            receipt['steam_art_hashes'] = {name: digest(name) for name in receipt['steam_art']}
         except SetupError as ex:
             if ex.code == 6:
                 raise
             self.event('Steam did not take the shortcut; add ' + str(launcher) + ' with "Add a Non-Steam Game"')
 
     def activate(self):
-        self.event('Creating launch shortcuts and install receipt')
-        receipt = {key: self.manifest[key] for key in ('version', 'source_commit', 'toolkit_commit')}
+        self.event('Activating the verified installation')
         previous = self.install / 'installed.json'
-        receipt['hd_packs'] = getattr(self, 'hd_packs', json.loads(previous.read_text()).get('hd_packs', []) if previous.exists() else [])
-        receipt.update(schema=1, source=str(self.source), data=str(self.data),
+        old = json.loads(previous.read_text()) if previous.exists() else {}
+        receipt = {key: self.manifest[key] for key in ('version', 'source_commit', 'toolkit_commit')}
+        receipt['hd_packs'] = getattr(self, 'hd_packs', old.get('hd_packs', []))
+        receipt['shortcuts'] = old.get('shortcuts', [])
+        receipt['shortcut_hashes'] = old.get('shortcut_hashes', {})
+        receipt['steam_art_hashes'] = old.get('steam_art_hashes', {})
+        if 'steam_art' in old:
+            receipt['steam_art'] = old['steam_art']
+        receipt.update(schema=1, updater=releases.CONTRACT, source=str(self.source), data=str(self.data),
                        executable=str(self.source / 'build' / PRESET / ('defjam_recomp.exe' if IS_WINDOWS else 'defjam_recomp')))
+        paths = [previous]
         if IS_WINDOWS:
-            # Stable native launcher reads this atomic receipt and supplies the data env.
-            shutil.copyfile(self.payload / 'DefJamLauncher.exe', self.install / 'DefJamLauncher.exe.new')
-            os.replace(self.install / 'DefJamLauncher.exe.new', self.install / 'DefJamLauncher.exe')
-            launcher = self.install / 'DefJamLauncher.exe'
-            self.env['DEFJAM_SETUP_LAUNCHER'] = str(launcher)
-            self.env['DEFJAM_SETUP_ROOT'] = str(self.install)
-            self.env['DEFJAM_SETUP_DESKTOP_SHORTCUT'] = '0' if self.args.no_desktop_shortcut else '1'
-            if not self.args.no_shortcuts:
-                self.run(['powershell.exe', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
-                          self.payload / 'engine/shortcuts.ps1'])
+            paths += [self.install / 'installed.ini', self.install / 'DefJamLauncher.exe']
         elif IS_LINUX:
-            launcher = self.install_launcher_linux(receipt)
+            paths += [self.install / LINUX_LAUNCHER, self.install / (LINUX_LAUNCHER + '.png')]
         else:
-            launcher = self.install_launcher_bundle(receipt)
-        self.cancelled()
-        # Commit HD selection with the receipts only after cancellable work.
-        # Restore exact prior bytes if any final publication fails.
-        paths = [self.install / 'installed.json'] + ([self.install / 'installed.ini'] if IS_WINDOWS else [])
+            paths += [self.install / LAUNCHER_BUNDLE]
         if hasattr(self, 'hd_packs'):
             paths.append(self.data / 'settings.ini')
-        before = {path: path.read_bytes() if path.exists() else None for path in paths}
+        journal = transaction.Activation(self.install, self.data)
+        no_shortcuts = self.args.no_shortcuts
         try:
-            if hasattr(self, 'hd_packs'):
-                old_packs = json.loads(before[previous]).get('hd_packs', []) if before[previous] else []
-                enable_hd_packs(self.data, self.hd_packs, old_packs)
-            write_json(self.install / 'installed.json', receipt)
+            journal.begin(paths)
+            self.args.no_shortcuts = True
             if IS_WINDOWS:
-                temporary = self.install / 'installed.ini.pending'
-                temporary.write_text('[install]\n' + ''.join(f'{key}={receipt[key]}\n' for key in
-                                     ('source', 'data', 'executable')), encoding='utf-16')
-                os.replace(temporary, self.install / 'installed.ini')
-        except (OSError, ValueError, SetupError):
-            for path, content in before.items():
-                if content is None:
-                    path.unlink(missing_ok=True)
-                else:
-                    pending = path.with_suffix('.rollback')
-                    pending.write_bytes(content)
-                    os.replace(pending, path)
+                shutil.copyfile(self.payload / 'DefJamLauncher.exe', self.install / 'DefJamLauncher.exe.new')
+                os.replace(self.install / 'DefJamLauncher.exe.new', self.install / 'DefJamLauncher.exe')
+                launcher = self.install / 'DefJamLauncher.exe'
+            elif IS_LINUX:
+                launcher = self.install_launcher_linux(receipt)
+            else:
+                launcher = self.install_launcher_bundle(receipt)
+            transaction.checkpoint('launcher')
+            self.cancelled()
+            if hasattr(self, 'hd_packs'):
+                enable_hd_packs(self.data, self.hd_packs, old.get('hd_packs', []))
+            transaction.checkpoint('settings')
+            write_json(previous, receipt)
+            transaction.checkpoint('receipt-json')
+            if IS_WINDOWS:
+                pending = self.install / 'installed.ini.pending'
+                pending.write_text('[install]\n' + ''.join(f'{key}={receipt[key]}\n' for key in ('source', 'data', 'executable')), encoding='utf-16')
+                os.replace(pending, self.install / 'installed.ini')
+            transaction.checkpoint('receipt-ini')
+            self.cancelled()
+            for path in paths:
+                if path.is_file():
+                    transaction.flush_file(path)
+                transaction.sync_directory(path.parent)
+            journal.commit()
+        except BaseException:
+            journal.recover()
             raise
+        finally:
+            self.args.no_shortcuts = no_shortcuts
+        # Core commit is final. Optional shortcuts cannot invalidate a verified game.
+        if not no_shortcuts:
+            try:
+                if IS_WINDOWS:
+                    self.env['DEFJAM_SETUP_LAUNCHER'] = str(launcher)
+                    self.env['DEFJAM_SETUP_ROOT'] = str(self.install)
+                    self.env['DEFJAM_SETUP_DESKTOP_SHORTCUT'] = '0' if self.args.no_desktop_shortcut else '1'
+                    self.run(['powershell.exe', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', self.payload / 'engine/shortcuts.ps1'])
+                elif IS_LINUX:
+                    self.install_launcher_linux(receipt, core=False)
+                else:
+                    self.install_launcher_bundle(receipt, core=False)
+                write_json(previous, receipt)
+            except (OSError, ValueError, SetupError) as ex:
+                self.event('Installation is ready; optional shortcuts need repair: ' + str(ex))
         self.event('Setup complete. Select Play or double-click: ' + str(launcher))
 
     def execute(self):
@@ -928,15 +1003,18 @@ class Engine:
             with log_path.open('a', encoding='utf-8') as log:
                 self.log = log
                 self.event('Setup ' + json.dumps({k: self.manifest[k] for k in ('version', 'source_commit', 'toolkit_commit')}))
+                transaction.Activation(self.install, self.data).recover()
                 self.check_install_destination()
                 self.check_existing_install()
+                previous = self.install / 'installed.json'
+                self.operation = releases.policy(self.operation, self.manifest, json.loads(previous.read_text()) if previous.exists() else None)
                 # At least 12 GiB build headroom plus extracted files; measured later on clean VM.
                 required = 12 * 1024**3
                 if shutil.disk_usage(nearest_existing(self.install)).free < required:
                     raise SetupError('At least 12 GiB free space is required on the install drive', 2)
-                if not self.dump.exists():
+                if self.dump is not None and not self.dump.exists():
                     raise SetupError('Dump does not exist', 2)
-                dump_size = sum(p.stat().st_size for p in self.dump.rglob('*') if p.is_file()) if self.dump.is_dir() else self.dump.stat().st_size
+                dump_size = 0 if self.dump is None or (self.data / 'extraction-state.json').is_file() else sum(p.stat().st_size for p in self.dump.rglob('*') if p.is_file()) if self.dump.is_dir() else self.dump.stat().st_size
                 if IS_WINDOWS:
                     same_drive = self.install.anchor.casefold() == self.data.anchor.casefold()
                 else:
@@ -1139,7 +1217,9 @@ def uninstall(install):
     versions = root / 'versions'
     if receipt.get('schema') != 1 or versions.resolve() != versions or versions not in Path(receipt['source']).parents:
         raise SetupError('Invalid installation ownership receipt', 2)
-    with install_lock(root), game_lock(root):
+    with install_lock(root), install_lock(Path(receipt['data'])), game_lock(root):
+        transaction.Activation(root, receipt['data']).recover()
+        receipt = json.loads(receipt_file.read_text(encoding='utf-8'))
         # Python 3.13 rmtree does not traverse Windows junction contents. Data is
         # outside versions by contract; verify the final target before deletion.
         if versions.exists():
@@ -1151,7 +1231,7 @@ def uninstall(install):
             (root / (LINUX_LAUNCHER + '.png')).unlink(missing_ok=True)
             for name in receipt.get('steam_art', []):
                 art = Path(name)
-                if art.parent.name == 'grid' and art.is_file() and not art.is_symlink():
+                if art.parent.name == 'grid' and art.is_file() and not art.is_symlink() and digest(art) == receipt.get('steam_art_hashes', {}).get(name):
                     art.unlink()   # the artwork this setup placed for its Steam shortcut
             # Only entries this installation made and recorded, and only if they still name it.
             for name in receipt.get('shortcuts', []):
@@ -1174,7 +1254,7 @@ def uninstall(install):
                 if shortcut.is_dir() and not shortcut.is_symlink() and marker.is_file() \
                         and marker.read_text(encoding='utf-8') == str(root):
                     shutil.rmtree(shortcut)
-                elif shortcut.is_file() and not shortcut.is_symlink():
+                elif shortcut.is_file() and not shortcut.is_symlink() and digest(shortcut) == receipt.get('shortcut_hashes', {}).get(name):
                     shortcut.unlink()
             print('Application removed. Dump, saves, settings and logs were preserved.', flush=True)
             return
@@ -1187,12 +1267,34 @@ def uninstall(install):
     print('Application removed. Dump, saves, settings and logs were preserved.', flush=True)
 
 
+def discard_failed_attempt(engine):
+    """Delete the unique version folder this run created, so a failed or cancelled attempt does not
+    keep gigabytes. Never the folder the installed receipt names, nor anything while an activation is pending."""
+    try:
+        if not engine or '-attempt-' not in engine.version_root.name or (engine.install / '.setup-transaction').exists():
+            return
+        receipt = engine.install / 'installed.json'
+        if receipt.is_file() and Path(json.loads(receipt.read_text(encoding='utf-8'))['source']).resolve().is_relative_to(engine.version_root.resolve()):
+            return
+        if engine.version_root.is_dir() and engine.version_root.parent == engine.install / 'versions':
+            shutil.rmtree(engine.version_root, ignore_errors=True)
+    except (OSError, ValueError, KeyError):
+        pass
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--payload', required=True)
     parser.add_argument('--silent', action='store_true')
     parser.add_argument('--dump')
-    parser.add_argument('--install-dir', required=True)
+    parser.add_argument('--install-dir')
+    parser.add_argument('--operation', choices=['auto', 'install', 'repair', 'update', 'downgrade', 'rebuild'], default='auto')
+    parser.add_argument('--release', help='Exact published GitHub release tag, or latest')
+    parser.add_argument('--bundled-only', action='store_true', help='Use this setup payload without fetching another release')
+    parser.add_argument('--list-releases', action='store_true')
+    parser.add_argument('--releases-file', help='Write the release catalog JSON for a native wizard')
+    parser.add_argument('--download-cache')
+    parser.add_argument('--handoff-parent', type=int, help=argparse.SUPPRESS)
     parser.add_argument('--data-dir')
     parser.add_argument('--uninstall', action='store_true')
     parser.add_argument('--no-shortcuts', action='store_true', help='Do not create desktop/Start-menu shortcuts')
@@ -1210,19 +1312,96 @@ def main(argv=None):
     parser.add_argument('--cancel-file')
     args = parser.parse_args(argv)
     engine = None
+    selection = None
     try:
+        bootstrap = verify_payload(Path(args.payload))
+        cache = Path(args.download_cache) if args.download_cache else releases.default_cache()
+        def cancelled():
+            if args.cancel_file and Path(args.cancel_file).exists():
+                raise SetupError('Setup cancelled', 6)
+        def progress(message):
+            if args.status_file:
+                write_status(args.status_file, message)
+            if args.log:
+                with Path(args.log).open('a', encoding='utf-8') as stream:
+                    stream.write(message + '\n')
+        if args.list_releases:
+            rows = releases.catalog(HOST_PLATFORM, cache, cancelled, allow_cached=True)
+            if args.install_dir and (Path(args.install_dir) / 'installed.json').is_file():
+                # An existing installation can only move to a release whose setup carries the updater contract.
+                for row in rows:
+                    if row['available']:
+                        row['updater'] = releases.updater_status(row, cache, cancelled)
+            result = {'bundled': bootstrap['version'], 'releases': rows}
+            if args.releases_file:
+                write_json(Path(args.releases_file), result)
+                updater = {True: '1', False: '0'}
+                Path(args.releases_file + '.tags').write_text(''.join(
+                    row['tag'] + '|' + ('1' if row['available'] else '0') + '|' + updater.get(row.get('updater'), '?') + '\n'
+                    for row in rows), encoding='utf-8')
+            else:
+                print(json.dumps(result))
+            return 0
+        if not args.install_dir:
+            raise SetupError('--install-dir is required', 2)
+        if args.release and args.bundled_only:
+            raise SetupError('--release and --bundled-only cannot be combined', 2)
+        root = Path(args.install_dir).resolve()
+        if root == Path(root.anchor) or len(str(root)) > 140:
+            raise SetupError('Choose a shorter writable install folder', 2)
+        if args.data_dir:
+            validate_locations(root, args.data_dir, args.dump)
+        if not args.handoff_parent:
+            selection = install_lock(releases.default_cache().parent / 'locks' / hashlib.sha256(str(root).encode('utf-8')).hexdigest())
+            try:
+                selection.__enter__()
+            except BaseException:
+                selection = None
+                raise
+        recovery = root / transaction.NAME
+        if recovery.exists():
+            if recovery.is_symlink():
+                raise SetupError('Unsafe recovery folder', 2)
+            journal_file = recovery / 'journal.json'
+            if not journal_file.is_file():
+                if not args.data_dir:
+                    raise SetupError('Choose the data folder to recover this interrupted setup', 2)
+                data_root = Path(args.data_dir).resolve()
+            else:
+                journal = json.loads(journal_file.read_text())
+                data_root = Path(journal['data']).resolve()
+                if args.data_dir and Path(args.data_dir).resolve() != data_root:
+                    raise SetupError('Recovery must use the previous data folder', 2)
+            validate_locations(root, data_root, None)
+            with install_lock(root), install_lock(data_root), game_lock(root):
+                transaction.Activation(root, data_root).recover()
+            args.data_dir = str(data_root)
+        receipt_path = root / 'installed.json'
+        previous = json.loads(receipt_path.read_text()) if receipt_path.is_file() else None
+        if previous and not args.data_dir:
+            args.data_dir = previous['data']
+        if args.release:
+            if args.uninstall or args.steam_art:
+                raise SetupError('Release selection cannot be combined with removal or Steam-art repair', 2)
+            if args.release == 'latest':
+                args.release = releases.latest_tag(cancelled)
+            scratch, selected = releases.select_payload(args.release, HOST_PLATFORM, cache, verify_payload, previous, args.operation, cancelled, progress)
+            try:
+                return releases.run_selected(args, HOST_PLATFORM, selected, cancelled)
+            finally:
+                shutil.rmtree(scratch)
         if args.uninstall:
             verify_payload(Path(args.payload))
             uninstall(args.install_dir)
             return 0
         if args.steam_art:
             return apply_steam_art(args.install_dir)
-        if not args.dump or not args.data_dir:
-            raise SetupError('--dump and --data-dir are required for installation', 2)
+        if not args.data_dir or (not args.dump and previous is None):
+            raise SetupError('--dump and --data-dir are required for the first installation', 2)
         engine = Engine(args)
         engine.execute()
         return 0
-    except (SetupError, OSError, ValueError, KeyError) as ex:
+    except (SetupError, OSError, ValueError, KeyError, subprocess.SubprocessError) as ex:
         message = 'Setup stopped: ' + str(ex)
         print(message, file=sys.stderr, flush=True)
         error_log = Path(engine.log.name) if engine and engine.log else Path(args.log) if args.log else None
@@ -1230,9 +1409,13 @@ def main(argv=None):
             error_log.parent.mkdir(parents=True, exist_ok=True)
             with error_log.open('a', encoding='utf-8') as log:
                 log.write(message + '\n')
-        if engine and args.status_file:
+        if args.status_file:
             write_status(args.status_file, message)
+        discard_failed_attempt(engine)
         return ex.code if isinstance(ex, SetupError) else 4
+    finally:
+        if selection:
+            selection.__exit__(None, None, None)
 
 
 if __name__ == '__main__':

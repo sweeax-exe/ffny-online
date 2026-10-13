@@ -6,7 +6,7 @@
     python scripts/pipeline.py build [--preset posix-release] [--clean]
 
 The data folder comes from --data or DEFJAM_DATA and holds `extracted/`.
-Analysis outputs are archived to `<data>/analysis`. The XBE working copy and
+Analysis outputs are archived to `<data>/analysis` unless --no-archive is passed. The XBE working copy and
 the generated C stay local and ignored, as on Windows. Needs pyxbe and capstone.
 """
 import argparse
@@ -49,6 +49,8 @@ def analyze(args):
     run('function identification', ['-m', 'tools.func_id', xbe, '-v'], tk)
     run('ABI analysis', ['-m', 'tools.abi_analysis', xbe, '-v'], tk)
     run('analysis state validation', [SCRIPTS / 'pipeline-state.py', 'record-analysis', '--toolkit', tk])
+    if getattr(args, 'no_archive', False):
+        return  # Setup candidates keep analysis local; preserve player data caches.
     archive = data / 'analysis'
     archive.mkdir(exist_ok=True)
     for d in ANALYSIS_DIRS:
@@ -94,6 +96,7 @@ def main():
     sub = ap.add_subparsers(dest='cmd', required=True)
     a = sub.add_parser('analyze')
     a.add_argument('--data')
+    a.add_argument('--no-archive', action='store_true', help='Keep analysis in the candidate toolkit; do not write data/analysis')
     a.set_defaults(fn=analyze)
     r = sub.add_parser('recomp')
     r.add_argument('--split', type=int, default=1000)

@@ -89,7 +89,8 @@ def stage_python(staging, cache):
 def stage(staging, cache):
     """The engine, the wizard, the launcher template and Python."""
     (staging / 'engine').mkdir()
-    shutil.copyfile(ROOT / 'setup/engine.py', staging / 'engine/engine.py')
+    for name in ('engine.py', 'releases.py', 'transaction.py'):
+        shutil.copyfile(ROOT / 'setup' / name, staging / 'engine' / name)
     shutil.copyfile(ROOT / 'setup/linux/wizard.py', staging / 'engine/wizard.py')
     (staging / 'launcher').mkdir()
     shutil.copyfile(ROOT / 'setup/linux/launcher.sh', staging / 'launcher/launcher.sh')

@@ -63,6 +63,16 @@ Renderer support and art coverage are separate claims. The initial Windows proto
 - Preserve macOS/Linux build compatibility after reconciling the native port; disclose that initial WIC/CNG replacement loading is Windows-only unless a backend-neutral implementation is completed and tested.
 - Fresh-checkout source hygiene/CI pass. Owner accepts the concrete pack/gameplay build before release. Ship source tooling/docs/recipes only; full texture coverage, font host integration and HD video playback must not be claimed from a small pilot.
 
+## Setup updater release gates (D100–D101)
+
+The [setup update acceptance plan](setup-update-test-plan.md) defines required
+operation, option, network, integrity, interruption and native platform coverage.
+Clean updates preserve player data; historical releases are not downgrade targets.
+Future capable versions need explicit downgrade compatibility and acceptance.
+Linux product acceptance targets Steam Deck; Ubuntu CI is portable validation.
+Game-free CI and packaged smoke cannot replace owner-dump runs on Windows, Apple
+Silicon and Deck. No updater gate is complete until its results ledger has evidence.
+
 ## Regression discipline
 - `python scripts/regress.py` is the regression run: unit tests, the M2/M3/M4a golden frames, a scripted
   fight, Story from a new ID through both cutscenes to the creator, Story with a saved profile into the crib
