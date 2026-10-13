@@ -237,11 +237,20 @@ def download(asset, cache, cancelled=lambda: None, progress=lambda text: None, e
             return path.is_file() and not path.is_symlink() and path.stat().st_size == size and sha(path) == checksum
         if valid_final():
             return path
+        # Publish with a hard link where the filesystem allows it: linking to an existing
+        # name fails without replacing it, so a concurrent reader never sees the file
+        # delete-pending (Windows denies that open with PermissionError).
         try:
-            os.replace(pending, path)
-        except PermissionError:
+            os.link(pending, path)
+        except FileExistsError:
             if not valid_final():
-                raise
+                os.replace(pending, path)
+        except OSError:
+            try:
+                os.replace(pending, path)
+            except PermissionError:
+                if not valid_final():
+                    raise
         return path
     finally:
         pending.unlink(missing_ok=True)
