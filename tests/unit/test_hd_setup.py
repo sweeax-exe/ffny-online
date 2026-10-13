@@ -190,7 +190,10 @@ def test_activation_publishes_hd_with_receipts_or_preserves_previous_bytes(tmp_p
         if failure=='receipt':raise OSError('receipt publication failed')
         real_write(path,value)
     monkeypatch.setattr(engine,'write_json',write)
-    if failure:
+    if failure=='shortcuts' and engine.IS_WINDOWS:
+        obj.activate()
+        assert json.loads(paths[0].read_text())['hd_packs']==obj.hd_packs
+    elif failure:
         with pytest.raises((engine.SetupError,OSError)):obj.activate()
         assert {p:p.read_bytes() for p in paths}==before
     else:

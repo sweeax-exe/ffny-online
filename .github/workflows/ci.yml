@@ -20,7 +20,7 @@ jobs:
         with: { python-version: '3.13' }
       - run: python -m pip install pytest Pillow==12.3.0 numpy==2.5.2
       - name: Installer recovery and input boundaries
-        run: python -m pytest -q tests/unit/test_setup_engine.py tests/unit/test_linux_setup.py tests/unit/test_hd_assets.py tests/unit/test_hd_corpus.py tests/unit/test_hd_setup.py
+        run: python -m pytest -q --junitxml=build/setup-unit-results.xml tests/unit/test_setup_updates.py tests/unit/test_setup_engine.py tests/unit/test_linux_setup.py tests/unit/test_hd_assets.py tests/unit/test_hd_corpus.py tests/unit/test_hd_setup.py
       - name: Build and inventory standalone setup (no dump)
         shell: pwsh
         run: ./scripts/build-setup.ps1
@@ -37,6 +37,12 @@ jobs:
           $process = Start-Process -FilePath $setupPath -ArgumentList "--silent --dump missing.iso --install-dir `"$app`" --data-dir `"$data`"" -WindowStyle Hidden -Wait -PassThru
           if ($process.ExitCode -ne 2) { throw "Expected invalid-input exit 2, got $($process.ExitCode)" }
       - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-updater-test-reports
+          path: build/setup-unit-results.xml
+          if-no-files-found: warn
+      - uses: actions/upload-artifact@v4
         with:
           name: windows-setup-assets
           path: build/setup-assets/*
@@ -52,7 +58,7 @@ jobs:
         with: { python-version: '3.13' }
       - run: python -m pip install pytest pyxbe capstone Pillow==12.3.0 numpy==2.5.2
       - name: Installer recovery, input boundaries and payload builder
-        run: python -m pytest -q tests/unit/test_setup_engine.py tests/unit/test_hd_setup.py tests/unit/test_macos_payload.py
+        run: python -m pytest -q --junitxml=build/setup-unit-results.xml tests/unit/test_setup_updates.py tests/unit/test_setup_engine.py tests/unit/test_hd_setup.py tests/unit/test_macos_payload.py
       # SDL3 and shaderc are built from pinned source; keep them between runs.
       - uses: actions/cache@v4
         with:
@@ -60,6 +66,11 @@ jobs:
           key: macos-setup-${{ hashFiles('setup/dependencies-macos.json', 'scripts/macos_payload.py', '.gitmodules') }}-${{ hashFiles('tools/xboxrecomp/cmake/xbox_sdl3.cmake') }}
       - name: Build and inventory the setup image (no dump)
         run: ./scripts/build-setup.sh
+      - name: Native game-free install, update, downgrade, repair and rebuild
+        run: |
+          python -c "import zipfile; zipfile.ZipFile('build/setup-macos/setup-payload.zip').extractall('build/native-update-payload')"
+          python -c "from pathlib import Path; [p.chmod(p.stat().st_mode | 0o111) for p in Path('build/native-update-payload').rglob('*') if p.is_file() and (p.name in ('python3', 'cmake', 'ninja', 'DefJamLauncher') or p.name.startswith('python3.'))]"
+          python scripts/test-setup-updates-macos.py --payload build/native-update-payload --work "$RUNNER_TEMP/setup-update-native"
       - name: Wizard smoke and invalid input exit safely
         run: |
           app="build/setup-macos/image/Def Jam Setup.app/Contents/MacOS/DefJamSetup"
@@ -69,6 +80,16 @@ jobs:
           "$app" --silent --dump missing.iso --install-dir "$RUNNER_TEMP/defjam-test-app" --data-dir "$RUNNER_TEMP/defjam-test-data"
           code=$?
           if [ "$code" -ne 2 ]; then echo "Expected invalid-input exit 2, got $code"; exit 1; fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: macos-updater-test-reports
+          path: |
+            build/setup-unit-results.xml
+            ${{ runner.temp }}/setup-update-native/*.json
+            ${{ runner.temp }}/setup-update-native/*.log
+            ${{ runner.temp }}/setup-update-native/*.out
+          if-no-files-found: warn
       - uses: actions/upload-artifact@v4
         with:
           name: macos-setup-assets
@@ -85,7 +106,7 @@ jobs:
         with: { python-version: '3.13' }
       - run: python -m pip install pytest pyxbe capstone Pillow==12.3.0 numpy==2.5.2
       - name: Installer recovery, input boundaries, launcher and payload checks
-        run: python -m pytest -q tests/unit/test_setup_engine.py tests/unit/test_linux_setup.py tests/unit/test_hd_setup.py
+        run: python -m pytest -q --junitxml=build/setup-unit-results.xml tests/unit/test_setup_updates.py tests/unit/test_setup_engine.py tests/unit/test_linux_setup.py tests/unit/test_hd_setup.py
       - uses: actions/cache@v4
         with:
           path: build/setup-downloads/linux
@@ -101,6 +122,12 @@ jobs:
           "$folder/DefJamSetup.sh" --silent --dump missing.iso --install-dir "$RUNNER_TEMP/defjam-test-app" --data-dir "$RUNNER_TEMP/defjam-test-data"
           code=$?
           if [ "$code" -ne 2 ]; then echo "Expected invalid-input exit 2, got $code"; exit 1; fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: linux-updater-test-reports
+          path: build/setup-unit-results.xml
+          if-no-files-found: warn
       - uses: actions/upload-artifact@v4
         with:
           name: linux-setup-assets

@@ -10,11 +10,14 @@
 #include <fstream>
 #include <string>
 #include <vector>
+#include <algorithm>
 #include <stdexcept>
 #include <thread>
 
 namespace fs = std::filesystem;
 static HWND window, dumpEdit, installEdit, dataEdit, statusLabel, startButton, cancelButton, prerequisites, desktopShortcut, hdUpscale, launchInfo;
+static HWND releaseChoice, operationChoice, refreshButton;
+static std::vector<std::wstring> releaseTags{L""};
 static HANDLE worker = nullptr;
 static fs::path payload, scratch, statusPath, cancelPath, logPath;
 static bool running = false;
@@ -22,7 +25,9 @@ static bool preparationSmoke = false;
 static unsigned timerTicks = 0;
 static unsigned preparationTicks = 0;
 static int smokeResult = 4;
-static constexpr UINT WM_SETUP_READY = WM_APP + 1, WM_SETUP_FAILED = WM_APP + 2;
+static constexpr UINT WM_SETUP_READY = WM_APP + 1, WM_SETUP_FAILED = WM_APP + 2, WM_RELEASES_READY = WM_APP + 3;
+// Release picker item data: what the picker allows for each row.
+static constexpr LRESULT ReleaseUnavailable = 0, ReleaseSelectable = 1, ReleaseFreshOnly = 2;
 
 static std::wstring utf8(const std::string& text) {
     int size = MultiByteToWideChar(CP_UTF8, 0, text.data(), (int)text.size(), nullptr, 0);
@@ -85,16 +90,21 @@ static void launchInstalled() {
     wchar_t self[32768], source[32768], data[32768], exe[32768];
     GetModuleFileNameW(nullptr, self, 32768);
     auto root = fs::path(self).parent_path();
+    HANDLE lock = CreateFileW((root / L"play.lock").c_str(), GENERIC_READ | GENERIC_WRITE,
+                             0, nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (lock == INVALID_HANDLE_VALUE) throw std::runtime_error("The game or an update is already running.");
+    if (fs::exists(root / L".setup-transaction")) {
+        CloseHandle(lock);
+        throw std::runtime_error("An update was interrupted. Run setup again to recover it.");
+    }
     auto receipt = root / L"installed.ini";
     GetPrivateProfileStringW(L"install", L"source", L"", source, 32768, receipt.c_str());
     GetPrivateProfileStringW(L"install", L"data", L"", data, 32768, receipt.c_str());
     GetPrivateProfileStringW(L"install", L"executable", L"", exe, 32768, receipt.c_str());
-    if (!*source || !*data || !fs::is_regular_file(exe))
+    if (!*source || !*data || !fs::is_regular_file(exe)) {
+        CloseHandle(lock);
         throw std::runtime_error("No completed installation. Run setup to install or repair it.");
-    // Lock held for the full game lifetime: updates cannot replace a running game.
-    HANDLE lock = CreateFileW((root / L"play.lock").c_str(), GENERIC_READ | GENERIC_WRITE,
-                             0, nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
-    if (lock == INVALID_HANDLE_VALUE) throw std::runtime_error("The game or an update is already running.");
+    }
     SetEnvironmentVariableW(L"DEFJAM_DATA", data);
     HANDLE process;
     try { process = spawn(exe, {}, source); }
@@ -217,6 +227,7 @@ static void setBusy(bool value) {
     EnableWindow(prerequisites, !value);
     EnableWindow(desktopShortcut, !value);
     EnableWindow(hdUpscale, !value);
+    EnableWindow(releaseChoice, !value); EnableWindow(operationChoice, !value); EnableWindow(refreshButton, !value);
     EnableWindow(GetDlgItem(window, 112), FALSE);
     SetWindowTextW(cancelButton, value ? L"Cancel" : L"Close");
 }
@@ -226,14 +237,61 @@ static LRESULT CALLBACK windowProc(HWND hwnd, UINT message, WPARAM wp, LPARAM lp
         int id = LOWORD(wp);
         if (id == 102) browse(dumpEdit, false);
         if (id == 103) browse(dumpEdit, true);
-        if (id == 105) browse(installEdit, true);
+        if (id == 105) {
+            browse(installEdit, true);
+            auto receipt = fs::path(editText(installEdit)) / L"installed.ini";
+            wchar_t installedData[32768]{};
+            GetPrivateProfileStringW(L"install", L"data", L"", installedData, 32768, receipt.c_str());
+            if (*installedData) SetWindowTextW(dataEdit, installedData);
+        }
+        if (id == 117 && HIWORD(wp) == CBN_SELCHANGE) {
+            auto index = SendMessageW(releaseChoice, CB_GETCURSEL, 0, 0);
+            auto kind = SendMessageW(releaseChoice, CB_GETITEMDATA, index, 0);
+            bool installed = fs::exists(fs::path(editText(installEdit)) / L"installed.json");
+            if (index > 0 && (kind == ReleaseUnavailable || (kind == ReleaseFreshOnly && installed))) {
+                SendMessageW(releaseChoice, CB_SETCURSEL, 0, 0);
+                SetWindowTextW(statusLabel, kind == ReleaseUnavailable
+                    ? L"This release has no complete Windows setup. Choose a compatible release."
+                    : L"This release predates the updater, so it cannot update or repair an existing installation. Choose a newer release.");
+            }
+        }
         if (id == 107) browse(dataEdit, true);
+        if (id == 118 && !running) {
+            try {
+                prepareSession(); setBusy(true);
+                SetWindowTextW(statusLabel, L"Fetching releases; bundled setup remains available offline...");
+                auto installDir = editText(installEdit);
+                std::thread([installDir]() {
+                    try {
+                        unpack();
+                        auto output = scratch / L"releases.json";
+                        std::vector<std::wstring> arguments{L"--list-releases", L"--releases-file", output.wstring(), L"--cancel-file", cancelPath.wstring()};
+                        if (!installDir.empty()) { arguments.push_back(L"--install-dir"); arguments.push_back(installDir); }
+                        DWORD code = wait(startEngine(arguments));
+                        if (code) throw std::runtime_error("Cannot fetch releases. Use bundled setup or retry; see Open logs.");
+                        std::ifstream in(output.wstring() + L".tags");
+                        auto rows = new std::vector<std::wstring>;
+                        std::string line;
+                        while (std::getline(in, line)) rows->push_back(utf8(line));
+                        PostMessageW(window, WM_RELEASES_READY, 0, (LPARAM)rows);
+                    } catch (const std::exception& ex) { PostMessageW(window, WM_SETUP_FAILED, 4, (LPARAM)new std::wstring(utf8(ex.what()))); }
+                }).detach();
+            } catch (const std::exception& ex) { MessageBoxW(window, utf8(ex.what()).c_str(), L"Setup", MB_OK | MB_ICONERROR); }
+        }
         if (id == 109 && !running) {
             try {
-                if (editText(dumpEdit).empty()) throw std::runtime_error("Choose your Xbox dump first.");
+                if (editText(dumpEdit).empty() && !fs::exists(fs::path(editText(installEdit)) / L"installed.json") && !fs::exists(fs::path(editText(installEdit)) / L".setup-transaction"))
+                    throw std::runtime_error("Choose your Xbox dump for the first installation.");
                 prepareSession();
-                std::vector<std::wstring> args{L"--dump", editText(dumpEdit), L"--install-dir", editText(installEdit),
+                std::vector<std::wstring> args{L"--install-dir", editText(installEdit),
                     L"--data-dir", editText(dataEdit), L"--status-file", statusPath.wstring(), L"--cancel-file", cancelPath.wstring()};
+                if (!editText(dumpEdit).empty()) { args.push_back(L"--dump"); args.push_back(editText(dumpEdit)); }
+                const wchar_t* operations[] = {L"auto", L"install", L"repair", L"update", L"downgrade", L"rebuild"};
+                auto op = SendMessageW(operationChoice, CB_GETCURSEL, 0, 0);
+                args.push_back(L"--operation"); args.push_back(operations[op < 0 || op > 5 ? 0 : op]);
+                auto chosen = SendMessageW(releaseChoice, CB_GETCURSEL, 0, 0);
+                if (chosen > 0 && (size_t)chosen < releaseTags.size()) { args.push_back(L"--release"); args.push_back(releaseTags[chosen]); }
+                else args.push_back(L"--bundled-only");
                 if (SendMessageW(prerequisites, BM_GETCHECK, 0, 0) == BST_CHECKED)
                     args.push_back(L"--install-prerequisites");
                 if (SendMessageW(desktopShortcut, BM_GETCHECK, 0, 0) != BST_CHECKED)
@@ -274,6 +332,30 @@ static LRESULT CALLBACK windowProc(HWND hwnd, UINT message, WPARAM wp, LPARAM lp
             ShellExecuteW(window, L"open", launcher.c_str(), L"--launch", nullptr, SW_SHOWNORMAL);
         }
         return 0;
+    }
+    if (message == WM_RELEASES_READY) {
+        auto rows = reinterpret_cast<std::vector<std::wstring>*>(lp);
+        SendMessageW(releaseChoice, CB_RESETCONTENT, 0, 0); releaseTags = {L""};
+        SendMessageW(releaseChoice, CB_ADDSTRING, 0, (LPARAM)L"Bundled release (offline)");
+        bool installed = fs::exists(fs::path(editText(installEdit)) / L"installed.json");
+        int defaultRelease = 0;
+        for (const auto& row : *rows) {
+            // Rows are tag|available|updater; updater is 1 (can update), 0 (predates the updater) or ? (not checked offline).
+            auto first = row.find(L'|'); if (first == std::wstring::npos) continue;
+            auto second = row.find(L'|', first + 1);
+            auto tag = row.substr(0, first);
+            auto available = row.substr(first + 1, second == std::wstring::npos ? std::wstring::npos : second - first - 1) == L"1";
+            auto updater = second == std::wstring::npos ? std::wstring(L"?") : row.substr(second + 1);
+            auto kind = !available ? ReleaseUnavailable : updater == L"0" ? ReleaseFreshOnly : ReleaseSelectable;
+            auto label = kind == ReleaseUnavailable ? tag + L" (unavailable)" : kind == ReleaseFreshOnly ? tag + L" (update unavailable)" : tag;
+            auto index = SendMessageW(releaseChoice, CB_ADDSTRING, 0, (LPARAM)label.c_str());
+            SendMessageW(releaseChoice, CB_SETITEMDATA, index, kind);
+            bool choosable = kind == ReleaseSelectable || (kind == ReleaseFreshOnly && !installed);
+            if (choosable && !defaultRelease) defaultRelease = (int)index;
+            releaseTags.push_back(tag);
+        }
+        delete rows; SendMessageW(releaseChoice, CB_SETCURSEL, defaultRelease, 0);
+        setBusy(false); SetWindowTextW(statusLabel, L"Choose a release and operation. Unsupported versions are refused before installation."); return 0;
     }
     if (message == WM_SETUP_READY) { preparationTicks = timerTicks; worker = (HANDLE)wp; return 0; }
     if (message == WM_SETUP_FAILED) {
@@ -333,7 +415,7 @@ static int wizard(HINSTANCE instance, bool smoke = false, bool preparation = fal
     wc.hIcon = LoadIcon(instance, MAKEINTRESOURCE(1));  // setup/app.rc.in
     wc.lpszClassName = L"DefJamSetupWizard"; RegisterClassW(&wc);
     window = CreateWindowW(wc.lpszClassName, L"Def Jam Recompiled \u2014 Setup", WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
-        CW_USEDEFAULT, CW_USEDEFAULT, 740, 599, nullptr, nullptr, instance, nullptr);
+        CW_USEDEFAULT, CW_USEDEFAULT, 740, 689, nullptr, nullptr, instance, nullptr);
     control(L"STATIC", L"Build and play from your own USA Xbox dump", 0, 24, 20, 660, 24, 0);
     control(L"STATIC", L"First setup can take an hour and needs internet for missing Microsoft Build Tools.", 0, 24, 49, 670, 25, 0);
     control(L"STATIC", L"Your ISO/XISO or extracted dump", 0, 24, 87, 580, 20, 0);
@@ -362,6 +444,18 @@ static int wizard(HINSTANCE instance, bool smoke = false, bool preparation = fal
     control(L"BUTTON", L"Play", WS_TABSTOP, 306, 501, 90, 30, 112);
     EnableWindow(GetDlgItem(window, 112), FALSE);
     cancelButton = control(L"BUTTON", L"Close", WS_TABSTOP, 595, 501, 90, 30, 110);
+    // Make room for release/operation choices while preserving the existing control geometry.
+    for (HWND child = GetWindow(window, GW_CHILD); child; child = GetWindow(child, GW_HWNDNEXT)) {
+        RECT rect{}; GetWindowRect(child, &rect); MapWindowPoints(nullptr, window, (POINT*)&rect, 2);
+        if (rect.top >= 394) SetWindowPos(child, nullptr, rect.left, rect.top + 90, 0, 0, SWP_NOSIZE | SWP_NOZORDER);
+    }
+    releaseChoice = control(L"COMBOBOX", L"", WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL, 24, 391, 410, 230, 117);
+    refreshButton = control(L"BUTTON", L"Fetch GitHub releases", WS_TABSTOP, 445, 391, 240, 26, 118);
+    operationChoice = control(L"COMBOBOX", L"", WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL, 24, 429, 660, 230, 116);
+    SendMessageW(releaseChoice, CB_ADDSTRING, 0, (LPARAM)L"Bundled release (offline)");
+    const wchar_t* labels[] = {L"Automatic install / repair / update", L"Install", L"Repair", L"Clean Update", L"Downgrade (future compatible releases)", L"Clean Rebuild (same version)"};
+    for (auto label : labels) SendMessageW(operationChoice, CB_ADDSTRING, 0, (LPARAM)label);
+    SendMessageW(releaseChoice, CB_SETCURSEL, 0, 0); SendMessageW(operationChoice, CB_SETCURSEL, 0, 0);
     if (smoke) {
         // Hardware-free CI probe: controls exist and the wizard needs no Python,
         // D3D device, compiler or payload extraction merely to open.
@@ -414,7 +508,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
                 bool silent = false;
                 std::vector<std::wstring> args;
                 for (int i = 1; i < count; ++i) { args.emplace_back(values[i]); if (args.back() == L"--silent") silent = true; }
-                if (!silent) throw std::runtime_error("Command-line installation requires --silent; use --help for options.");
+                if (!silent && std::find(args.begin(), args.end(), L"--list-releases") == args.end()) throw std::runtime_error("Command-line installation requires --silent; use --help for options.");
                 prepareSession(args); unpack(); result = (int)wait(startEngine(args));
             } else result = wizard(instance);
 #endif
