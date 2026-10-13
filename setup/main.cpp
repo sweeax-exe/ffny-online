@@ -26,6 +26,8 @@ static unsigned timerTicks = 0;
 static unsigned preparationTicks = 0;
 static int smokeResult = 4;
 static constexpr UINT WM_SETUP_READY = WM_APP + 1, WM_SETUP_FAILED = WM_APP + 2, WM_RELEASES_READY = WM_APP + 3;
+// Release picker item data: what the picker allows for each row.
+static constexpr LRESULT ReleaseUnavailable = 0, ReleaseSelectable = 1, ReleaseFreshOnly = 2;
 
 static std::wstring utf8(const std::string& text) {
     int size = MultiByteToWideChar(CP_UTF8, 0, text.data(), (int)text.size(), nullptr, 0);
@@ -244,9 +246,13 @@ static LRESULT CALLBACK windowProc(HWND hwnd, UINT message, WPARAM wp, LPARAM lp
         }
         if (id == 117 && HIWORD(wp) == CBN_SELCHANGE) {
             auto index = SendMessageW(releaseChoice, CB_GETCURSEL, 0, 0);
-            if (index > 0 && SendMessageW(releaseChoice, CB_GETITEMDATA, index, 0) == 0) {
+            auto kind = SendMessageW(releaseChoice, CB_GETITEMDATA, index, 0);
+            bool installed = fs::exists(fs::path(editText(installEdit)) / L"installed.json");
+            if (index > 0 && (kind == ReleaseUnavailable || (kind == ReleaseFreshOnly && installed))) {
                 SendMessageW(releaseChoice, CB_SETCURSEL, 0, 0);
-                SetWindowTextW(statusLabel, L"This release has no complete Windows setup. Choose a compatible release.");
+                SetWindowTextW(statusLabel, kind == ReleaseUnavailable
+                    ? L"This release has no complete Windows setup. Choose a compatible release."
+                    : L"This release predates the updater, so it cannot update or repair an existing installation. Choose a newer release.");
             }
         }
         if (id == 107) browse(dataEdit, true);
@@ -254,11 +260,14 @@ static LRESULT CALLBACK windowProc(HWND hwnd, UINT message, WPARAM wp, LPARAM lp
             try {
                 prepareSession(); setBusy(true);
                 SetWindowTextW(statusLabel, L"Fetching releases; bundled setup remains available offline...");
-                std::thread([]() {
+                auto installDir = editText(installEdit);
+                std::thread([installDir]() {
                     try {
                         unpack();
                         auto output = scratch / L"releases.json";
-                        DWORD code = wait(startEngine({L"--list-releases", L"--releases-file", output.wstring(), L"--cancel-file", cancelPath.wstring()}));
+                        std::vector<std::wstring> arguments{L"--list-releases", L"--releases-file", output.wstring(), L"--cancel-file", cancelPath.wstring()};
+                        if (!installDir.empty()) { arguments.push_back(L"--install-dir"); arguments.push_back(installDir); }
+                        DWORD code = wait(startEngine(arguments));
                         if (code) throw std::runtime_error("Cannot fetch releases. Use bundled setup or retry; see Open logs.");
                         std::ifstream in(output.wstring() + L".tags");
                         auto rows = new std::vector<std::wstring>;
@@ -328,14 +337,21 @@ static LRESULT CALLBACK windowProc(HWND hwnd, UINT message, WPARAM wp, LPARAM lp
         auto rows = reinterpret_cast<std::vector<std::wstring>*>(lp);
         SendMessageW(releaseChoice, CB_RESETCONTENT, 0, 0); releaseTags = {L""};
         SendMessageW(releaseChoice, CB_ADDSTRING, 0, (LPARAM)L"Bundled release (offline)");
+        bool installed = fs::exists(fs::path(editText(installEdit)) / L"installed.json");
         int defaultRelease = 0;
         for (const auto& row : *rows) {
-            auto split = row.find(L'|'); if (split == std::wstring::npos) continue;
-            auto tag = row.substr(0, split); auto available = row.substr(split + 1) == L"1";
-            auto label = available ? tag : tag + L" (unavailable)";
+            // Rows are tag|available|updater; updater is 1 (can update), 0 (predates the updater) or ? (not checked offline).
+            auto first = row.find(L'|'); if (first == std::wstring::npos) continue;
+            auto second = row.find(L'|', first + 1);
+            auto tag = row.substr(0, first);
+            auto available = row.substr(first + 1, second == std::wstring::npos ? std::wstring::npos : second - first - 1) == L"1";
+            auto updater = second == std::wstring::npos ? std::wstring(L"?") : row.substr(second + 1);
+            auto kind = !available ? ReleaseUnavailable : updater == L"0" ? ReleaseFreshOnly : ReleaseSelectable;
+            auto label = kind == ReleaseUnavailable ? tag + L" (unavailable)" : kind == ReleaseFreshOnly ? tag + L" (update unavailable)" : tag;
             auto index = SendMessageW(releaseChoice, CB_ADDSTRING, 0, (LPARAM)label.c_str());
-            SendMessageW(releaseChoice, CB_SETITEMDATA, index, available ? 1 : 0);
-            if (available && !defaultRelease) defaultRelease = (int)index;
+            SendMessageW(releaseChoice, CB_SETITEMDATA, index, kind);
+            bool choosable = kind == ReleaseSelectable || (kind == ReleaseFreshOnly && !installed);
+            if (choosable && !defaultRelease) defaultRelease = (int)index;
             releaseTags.push_back(tag);
         }
         delete rows; SendMessageW(releaseChoice, CB_SETCURSEL, defaultRelease, 0);

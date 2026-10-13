@@ -186,6 +186,18 @@ def catalog(platform, cache, cancelled=lambda: None, allow_cached=False):
     return result
 
 
+def updater_status(release, cache, cancelled=lambda: None):
+    """True when the release's setup can update an existing installation, False when it cannot, None when unknown."""
+    try:
+        path = download(release['assets'][2], cache, cancelled)
+        if path.stat().st_size > 4 * 1024**2:
+            return None
+        provenance = json.loads(path.read_text(encoding='utf-8'))
+    except (OSError, ValueError, KeyError, IndexError, urllib.error.URLError, TimeoutError):
+        return None
+    return capable(provenance.get('updater')) if isinstance(provenance, dict) else False
+
+
 def sha(path):
     with Path(path).open('rb') as stream:
         return hashlib.file_digest(stream, 'sha256').hexdigest()

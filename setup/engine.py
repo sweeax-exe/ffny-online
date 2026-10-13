@@ -1312,10 +1312,18 @@ def main(argv=None):
                     stream.write(message + '\n')
         if args.list_releases:
             rows = releases.catalog(HOST_PLATFORM, cache, cancelled, allow_cached=True)
+            if args.install_dir and (Path(args.install_dir) / 'installed.json').is_file():
+                # An existing installation can only move to a release whose setup carries the updater contract.
+                for row in rows:
+                    if row['available']:
+                        row['updater'] = releases.updater_status(row, cache, cancelled)
             result = {'bundled': bootstrap['version'], 'releases': rows}
             if args.releases_file:
                 write_json(Path(args.releases_file), result)
-                Path(args.releases_file + '.tags').write_text(''.join(row['tag'] + '|' + ('1' if row['available'] else '0') + '\n' for row in rows), encoding='utf-8')
+                updater = {True: '1', False: '0'}
+                Path(args.releases_file + '.tags').write_text(''.join(
+                    row['tag'] + '|' + ('1' if row['available'] else '0') + '|' + updater.get(row.get('updater'), '?') + '\n'
+                    for row in rows), encoding='utf-8')
             else:
                 print(json.dumps(result))
             return 0

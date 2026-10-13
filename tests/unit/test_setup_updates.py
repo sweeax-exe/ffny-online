@@ -176,6 +176,41 @@ def test_activation_backup_of_an_executable_is_recognised_on_recovery(tmp_path):
     assert launcher.read_bytes()==b'MZ new' and not tx.folder.exists()
 
 
+def test_updater_status_reads_the_provenance_contract(tmp_path, monkeypatch):
+    import urllib.error
+    release=dict(assets=[asset('v0.7.3','setup.exe',1),asset('v0.7.3','setup.sha256',2),asset('v0.7.3','setup.provenance.json',3)])
+    def serve(payload):
+        path=tmp_path/'provenance.json';path.write_text(json.dumps(payload))
+        monkeypatch.setattr(releases,'download',lambda *a,**k:path)
+    contract={'protocol':1,'data_schema':1}
+    for payload,expected in ((dict(updater=contract),True),(dict(version='0.7.3'),False),(dict(updater={'protocol':2,'data_schema':1}),False),([],False)):
+        serve(payload);assert releases.updater_status(release,tmp_path) is expected
+    def offline(*a,**k):raise urllib.error.URLError('offline')
+    monkeypatch.setattr(releases,'download',offline)
+    assert releases.updater_status(release,tmp_path) is None
+
+
+def test_list_releases_marks_pre_updater_releases_only_for_existing_installs(tmp_path, monkeypatch):
+    from test_setup_engine import installer
+    obj=installer(tmp_path)
+    rows=[dict(tag='v0.8.0',version='0.8.0',available=True,assets=[]),dict(tag='v0.7.3',version='0.7.3',available=True,assets=[]),
+          dict(tag='v0.6.0',version='0.6.0',available=False,assets=[])]
+    verdicts={'v0.8.0':True,'v0.7.3':False}
+    probed=[]
+    monkeypatch.setattr(engine.releases,'catalog',lambda *a,**k:rows)
+    def status(row,*a,**k):
+        probed.append(row['tag']);return verdicts.get(row['tag'])
+    monkeypatch.setattr(engine.releases,'updater_status',status)
+    out=tmp_path/'releases.json';args=['--payload',str(obj.payload),'--list-releases','--releases-file',str(out),
+                                       '--install-dir',str(obj.install),'--download-cache',str(tmp_path/'cache')]
+    assert engine.main(args)==0
+    assert out.with_name('releases.json.tags').read_text().splitlines()==['v0.8.0|1|?','v0.7.3|1|?','v0.6.0|0|?'] and probed==[]
+    obj.install.mkdir(parents=True,exist_ok=True);(obj.install/'installed.json').write_text('{}')
+    assert engine.main(args)==0
+    assert out.with_name('releases.json.tags').read_text().splitlines()==['v0.8.0|1|1','v0.7.3|1|0','v0.6.0|0|?']
+    assert probed==['v0.8.0','v0.7.3']
+
+
 def test_installed_dump_without_original_is_verified_and_clean_candidate_is_unique(tmp_path):
     from test_setup_engine import installer
     obj=installer(tmp_path);obj.extract()
