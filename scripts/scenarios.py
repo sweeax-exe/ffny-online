@@ -275,6 +275,8 @@ def main(argv=None):
     group.add_argument('--inject', help='a raw RECOMP_FE_INJECT rule: "anchor[#N]=>command[;command]"')
     cut.add_argument('--secs', type=float, default=90, help='how long to watch after the injection')
     cut.add_argument('--every', type=float, default=3, help='seconds between captures')
+    cut.add_argument('--test-env', action='append', metavar='RECOMP_TEST_NAME=VALUE',
+                     help='passed to scenario_suite, e.g. RECOMP_TEST_CINEMA_SCENE=sc05')
     cut.add_argument('--seed', type=int)
     cut.add_argument('--record', action='store_true', default=True)
     cut.add_argument('--print', action='store_true')
@@ -339,11 +341,18 @@ def main(argv=None):
     inject = a.inject
     if a.scene:
         command = cat['cutscenes']['launch_command']
-        if not command:
+        env = cat['cutscenes'].get('launch_env')
+        if command:
+            anchor = harness.ROUTES[a.base]['until']
+            inject = '%s#1=>%s' % (anchor, command % a.scene)
+        elif env:
+            # The loader hook swaps the first scene the game loads (src/hooks/fe_inject.c); the
+            # injected command is a harmless query that anchors the captures at Story's start.
+            inject = cat['cutscenes']['launch_inject']
+            a.test_env = (a.test_env or []) + ['%s=%s' % (env, a.scene)]
+        else:
             raise SystemExit('the command that starts a scene is not known yet: see docs/research/scenario-launching.md, '
                              'or pass --inject with a candidate from scripts/funccall-catalog.py')
-        anchor = harness.ROUTES[a.base]['until']
-        inject = '%s#1=>%s' % (anchor, command % a.scene)
     if a.base not in harness.ROUTES:
         raise SystemExit('unknown route %r' % a.base)
     route = cutscene_route(harness, a.base, inject, a.secs, a.every)

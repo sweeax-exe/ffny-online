@@ -87,6 +87,9 @@ void sub_001BC6E0_enter(void) { defjam_test_draw(2, MEM32(g_esp)); }
 void sub_000AA300_enter(void) { defjam_test_draw(g_ecx, MEM32(g_esp)); }
 void sub_000AA340_enter(void) { defjam_test_draw(g_ecx, MEM32(g_esp)); }
 void sub_000DB870_enter(void) { defjam_test_crowd_update(); defjam_crowd_update(); }
+/* The Story scene loader (CINEMA LoadScene's caller; assets/cinema/%s.viv): names every
+ * scene, and RECOMP_TEST_CINEMA_SCENE plays a chosen one in the first one's place. */
+void sub_00073FD0_enter(void) { fe_cinema_scene_enter(); }
 /* The per-fighter pad reader: RECOMP_TEST_INPUT replaces what it is about to read. */
 void sub_001BAA00_enter(void) { defjam_test_input(MEM32(g_esp + 4)); }
 void sub_001A6A80_enter(void)

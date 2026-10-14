@@ -182,6 +182,31 @@ find out, cheapest first. **To run:**
    (`--from` with extra `--stage`s) reaches every scene the long way, once each
    fixture exists.
 
+### Found on macOS, 2026-10-14
+
+- **No front-end command names a scene.** `funccall-catalog.py --grep cinema --grep scene`
+  lists 444 commands in 113 modules; the scene-like ones are FMV movies
+  (`Extra.PlayMovie(`, `Game.ShowFightingMovie(`), voicemail (`Crib.PlayVoiceMail(`) and
+  Story flow (`Game.LoadNextRunModule()`, `Game.StoryModeKick(`, `Crib.FightMatch(`).
+  `Game.LoadNextRunModule()` was tried once; its anchor (the crib) was not reached, see below.
+- **The loader.** `assets/cinema/%s.viv` (guest `0x29C488`) and `assets/nis_%s.bin`
+  (`0x29C474`) are formatted in `sub_00073FD0` (thiscall, the scene's name as its first
+  argument; called from `sub_00076C60` and `sub_0007B150`, above them `sub_0002D4F0` and
+  `sub_0002DBE0`). `RECOMP_WATCH_EXEC` cannot watch it on Apple Silicon (x86 debug
+  registers), so it now has an `_enter` hook (`src/hooks/fe_inject.c`): every scene is
+  logged as `[CINEMA] scene scNN` and as a recorder `cinema` event.
+- **The launcher.** `RECOMP_TEST_CINEMA_SCENE=scNN` plays that scene in place of the first
+  one the game loads. A profile with no Story progress loads the prologue's `sc00` right
+  after `Game.StartStoryMode`; with the `mac-profiles` fixture the `crib` route's profile is
+  one, so `scenarios.py cutscene --fixture mac-profiles --from crib --scene sc05` played an
+  in-engine scene for about 65 s (only `sc05`'s files opened), then the character screen.
+  The catalog's `cutscenes.launch_env` holds this. The name is rewritten in the game's own
+  buffer, so a longer name is refused (every `scNN` fits).
+- **The view signal is weak.** View mode 1 was set once during `sc00` (at 193 s of 144-213 s
+  of scene) and never during `sc05`. The `cinema` event is the signal to use.
+- **The intro route** (a new user ID) plays only movies (`thx`, `eagames`, `intro.mad`)
+  before the character creator; no cinema scene in its window.
+
 ## Evidence limits
 
 - Nothing above ran against the game. The C controls were built against the real

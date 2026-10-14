@@ -122,3 +122,44 @@ void fe_inject_after_call(const char *text)
         }
     }
 }
+
+/* The Story scene loader (guest 0x00073FD0, thiscall, the scene's name as its first
+ * argument): it opens assets/nis_<name>.bin and assets/cinema/<name>.viv. Every scene
+ * is logged by name ([CINEMA], and a recorder `cinema` event). With
+ * RECOMP_TEST_CINEMA_SCENE=<name> set, the first scene the game loads is that one
+ * instead: start Story from a new profile (the intro route) and the prologue's
+ * place plays the chosen scene. The name is rewritten in the game's own buffer, so
+ * only a name no longer than the one it replaces is taken (the scenes are sc00 to
+ * sc21; see the dump's assets/cinema). A test control, off unless set. */
+void fe_cinema_scene_enter(void)
+{
+    static int armed = -1;
+    static char want[32];
+    char old[32];
+    uint32_t name = MEM32(g_esp + 4);
+    size_t n = 0;
+
+    if (armed < 0) {
+        const char *s = getenv("RECOMP_TEST_CINEMA_SCENE");
+        armed = s && *s && strlen(s) < sizeof want;
+        if (armed) snprintf(want, sizeof want, "%s", s);
+    }
+    if (!name) return;
+    while (n + 1 < sizeof old && MEM8(name + (uint32_t)n)) {
+        old[n] = (char)MEM8(name + (uint32_t)n);
+        n++;
+    }
+    old[n] = 0;
+    fprintf(stderr, "[CINEMA] scene %s\n", old);
+    recorder_event_text("cinema", "scene", old);
+    if (armed != 1) return;
+    armed = 2;                                  /* once: the scenes after it play as the story has them */
+    if (strlen(want) > n) {
+        fprintf(stderr, "[CINEMA] RECOMP_TEST_CINEMA_SCENE=%s is longer than %s; not replaced\n", want, old);
+        return;
+    }
+    for (n = 0; want[n]; n++) MEM8(name + (uint32_t)n) = (uint8_t)want[n];
+    MEM8(name + (uint32_t)n) = 0;
+    fprintf(stderr, "[CINEMA] %s replaced by %s (RECOMP_TEST_CINEMA_SCENE)\n", old, want);
+    recorder_event_text("cinema", "replaced_by", want);
+}
