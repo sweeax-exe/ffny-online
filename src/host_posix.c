@@ -106,6 +106,14 @@ typedef struct { int w, h; } DisplaySize;
 static void display_size_main(void *arg)
 {
     DisplaySize *d = arg;
+#ifdef __APPLE__
+    /* Fullscreen Cocoa content excludes the camera/menu strip on notched
+     * screens. Use that screen shape in windowed mode too: the canvas is fixed
+     * for the run, so entering fullscreen later must keep the same framing. */
+    extern int host_macos_display_size(int *w, int *h);
+    if (host_macos_display_size(&d->w, &d->h))
+        return;
+#endif
     const SDL_DisplayMode *m = SDL_GetDesktopDisplayMode(SDL_GetPrimaryDisplay());
     if (m) {
         d->w = m->w;

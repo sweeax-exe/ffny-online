@@ -103,7 +103,7 @@ def not_applicable(why):
 
 def check_unit(a):
     r = subprocess.run([sys.executable, "-m", "pytest", "-q", "tests/unit"], cwd=REPO, capture_output=True, text=True)
-    last = (r.stdout.strip().splitlines() or ["no output"])[-1]
+    last = (r.stdout.strip().splitlines() or r.stderr.strip().splitlines() or ["no output"])[-1]
     return r.returncode == 0, last
 
 
@@ -142,7 +142,7 @@ def check_m2(a):
         r = subprocess.run([sys.executable, os.path.join(HERE, "frame-signature.py"), path, "--check",
                             os.path.join(REPO, "tests", "golden", "m2-loading-screen.json")],
                            cwd=REPO, capture_output=True, text=True)
-        line = (r.stdout.strip().splitlines() or ["no output"])[-1]
+        line = (r.stdout.strip().splitlines() or r.stderr.strip().splitlines() or ["no output"])[-1]
         if r.returncode == 0 and line.startswith("OK"):
             return verdict(faults, "%s matches" % os.path.basename(path))
         seen.append("%s: %s" % (os.path.basename(path), line))
