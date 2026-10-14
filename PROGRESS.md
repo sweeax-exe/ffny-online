@@ -44,6 +44,7 @@
 | GitHub setup updates (D100–D101/D103) | ✅ implementation / ⏳ acceptance | Draft PR #18 implements all three wizards, verified release handoff and recoverable clean builds. Mac: 339 unit tests, ten native synthetic cases, owner-dump install/update and menu/fight checks. Interactive/minimum-OS/options, Windows and Deck acceptance pending; `docs/setup-update-test-results.md`. |
 
 | Setup GitHub updater (v0.8.0) | ✅ released | PR #18 merged at f582cd1; tag v0.8.0 points to that merge. Release workflow 38346723528 passed 27/27; Windows/macOS/Linux setups, checksums and provenance published. U0 protocol/data schema 1. |
+| Agent tooling (D105) | ⏳ PR open | `triage.py`, `progress.py`, `docs/agent/` playbooks, shared `AGENTS.md`, generated skills and briefs for Claude and Codex, Markdown-only CI gating. Unit tests added; Windows and macOS CI and Codex's own review pending. |
 
 ## 1. Decisions log
 
@@ -164,6 +165,7 @@
 | D103 | 2026-10-12 | Implement PR #18 with release-specific engine/Python handoff, updater protocol/data schema 1, distinct attempt builds, verified installed extraction and an owned activation journal covering launchers/receipts/HD settings. Keep analysis caches inside candidates; reconcile optional shortcuts after commit. Historical remote handoff is fresh-install-only; use original setup for legacy repair. | Matching the selected release engine avoids dependency/pipeline skew. Core rollback protects legacy and future installs; postcommit optional integrations cannot undo a working game. Shared cache uses unique staging, fixed per-install controller locks and owned child cleanup. Mac is the first testbed; no release, signing-policy expansion, toolkit pin or game-source change. |
 
 | D104 | 2026-10-12 | Merge PR #18 and release from its merge commit as v0.8.0 (U0, updater protocol/data schema 1). | Vlad: "It's all been tested just needs release"; explicit merge/tag/release authorization supersedes the draft hold. Minor version chosen for the new setup update lifecycle. Preserve the test ledger's recorded evidence limits; tagged CI verifies the release packages before publication. |
+| D105 | 2026-10-14 | Make the agent tooling cheaper to run and shared by Claude and Codex. `AGENTS.md` is the one instruction file (under 30 KiB, Codex stops at 32 KiB) and `CLAUDE.md` is `@AGENTS.md` plus Claude-only notes; the long how-to text moved to `docs/agent/` (triage, diagnostics, harness, lifter overrides, delegation, environment). `scripts/triage.py` digests a run log and always prints the way into the original (`--around/--lines/--grep/--tail`, bounded); `scripts/progress.py` reads `PROGRESS.md` by section or decision number. Skills and sub-agent briefs are written once under `docs/agent/` and copied to `.claude/` and `.codex/skills/` by `scripts/sync-agent-adapters.py` (a unit test fails on drift). `pytest.ini` marks the one slow test (`-m "not slow"` in `regress.py`). CI: a `changes` job skips the heavy jobs for Markdown-only changes, PR runs cancel superseded runs, and `CI result` is one gate with a table that lists the failing job first. **Not done, on purpose:** no hooks (Vlad: skip, instructions are enough); `PROGRESS.md` stays one file (Vlad exports it, and `worklog-add.py` and the archive depend on its layout) so `progress.py` gets the saving instead of a split; no Codex agent files (format unconfirmed); the 19 Windows fixture jobs are not batched (needs iteration on a runner). | Vlad's review of the plan, 2026-10-14: "Just make the triage.py with correct instructions. If the agent ignores the instructions a small amount of the time, that is OK. Rest of your plan looks good." Measured before the change: `CLAUDE.md` 23.1 KB and `PROGRESS.md` 78.5 KB (71% decisions) loaded at every start, about 26k tokens; one `list_workflow_jobs` call for a 25-job run was 55k characters; a Markdown-only push (run 38347364895) ran all 25 jobs, 28 runner-minutes, 74% on Windows; unit tests 28 s locally, 19 s of it one branding test. After: `AGENTS.md` 14.4 KB, `progress.py brief` 5.3 KB, unit tests without the slow test about 9 s. The digest's verdicts are conservative (`explained` needs a resolved function or address and nothing unclassified before it; a watchdog is never `explained`), so a routine failure is one screen and an odd one tells the agent to read the log. |
 
 ## 2. Environment inventory (2026-09-17)
 
@@ -237,10 +239,9 @@ defjam-recomp/
 
 ## 6. Work log
 
-> Recent entries only. Everything before 2026-10-12 10:59 is in `docs/worklog/` (one file a month); when this
+> Recent entries only. Everything before 2026-10-12 13:30 is in `docs/worklog/` (one file a month); when this
 > section passes about eight entries, move the oldest there.
 
-- 2026-10-12 10:59 — README header now uses the existing FAN RECOMP social-preview banner instead of the 96px shield icon, displayed at 960px. Exact SHA-256 matches GitHub og:image (b40bb377…); no new media or runtime changes. Source hygiene and diff checks pass.
 - 2026-10-12 13:30 — Implemented PR18 updater engine/discovery/journal and all three native frontends (D103); Mac units 339 passed/30 skipped, signed marker install/update/downgrade/repair/rebuild plus three hard exits 8/8. Development dmg verified (4867 files), live GitHub 17 entries and v0.7.2 historical own-engine invalid-input handoff exit2. Real owner-dump install and local future clean update built 17896 functions; menu/fight pass at median60fps, initial M2/M3 omitted baseline metadata failures retained and reviewed captures rechecked. Data cache write found and fixed via no-archive; final no-archive real update preserves120/120files includinganalysiscache and updated M2/M3 runner2/2 passes. Evidence logs/setup-updates/2026-10-12-macos; native-final-2/results.json. All native Windows/Deck/options/power-loss gates pending; interactive Mac locked. No game/toolkit source or pin changes.
 - 2026-10-12 13:48 — Final code f238afe: Mac units339pass/30skip, packaged fixture10/10 including selected-engine update/downgrade; native-final-head.json records source/toolkit/payload identity. Real clean0.8→local0.9 update no-original-dump exit0,120/120non-extracted files includinganalysiscache unchanged, three builds retained; updated loading/title runner2/2 (regress-20261012-133441). Live officialv0.7.2 checksum/provenance/inventory pass. First WindowsCI29failures fixed (writablefsync, rawZIP, cache reader, completeuninstallfixture, gatedjobownership), corrected hostedrun38305557205 allgreen; finalcode38306033576 pending. Game-free reports retained; no game source or toolkit pin changes. Interactive Mac locked and fullnative Windows/Deck/options/HD/reboot gates remain pending.
 - 2026-10-12 13:50 — Final updater code f238afe accepted by hosted CI run38306033576:25/25 jobs PASS, including Windows/macOS/Linux game-free setup and native10-case Mac synthetic install/update/downgrade/recovery/selected-engine handoff. Local339unit pass/30skip; live officialMac checksum/provenance/inventory and final game-free package verified. Source-only evidence follow-up; original checkout setup summary synced while preserving D102/independent work. DraftPR18 retains native Windows/Deck game acceptance, locked interactive Mac, options/HD/minimumOS/quarantine/reboot gates; no release or merge performed.
@@ -248,19 +249,24 @@ defjam-recomp/
 - 2026-10-12 15:25 — Final Mac GUI correction e93705c passes CI38314016983 all25/25, including three setup lanes. Rebuilt development package4867files/64058282ZIPbytes, bundled imports/game-free inventory and UI/preparation smokes2/2 pass. Live final package picker17releases/12unavailable-disabled and idleClose rechecked. Nine GUI casegroups plus339units/30skip retained in logs/setup-updates/2026-10-12-mac-ui; broader nativehost/HD/OS/reboot gates remain pending. Source-only evidence update; no release/merge/game/toolkit changes.
 - 2026-10-12 21:29 — D104: Vlad confirms PR18 tested and authorizes merge/tag/release. Pre-release head67f6166 CI38345243666 passes25/25. Prepared v0.8.0 U0 version/notes; game/toolkit sources unchanged by release preparation. Tagged packaging and publication next.
 - 2026-10-12 21:37 — PR18 merged f582cd1; exact merge tagged v0.8.0. Source release38346723528 passes27/27, mergeCI38346713921 green. Published latest v0.8.0 with9 assets (three game-free setups plus SHA256/provenance); no game binaries/data uploaded.
+- 2026-10-14 00:58 — D105: agent tooling. New `scripts/triage.py` (digest + bounded slices of the original log; 86 MB synthetic log in 6 s), `scripts/progress.py` (`brief` 5.3 KB vs 78.5 KB whole file), `scripts/ci-digest.py`, `scripts/sync-agent-adapters.py`; `AGENTS.md` 23.1 -> 14.4 KB with `CLAUDE.md` as an import and playbooks in `docs/agent/`; `pytest.ini` + slow marker; CI `changes`/`CI result` jobs (actionlint clean). 55 new unit tests; unit suite without the slow test 9 s locally. No game run: this host has no dump or build, so the `regress.py`/`harness.py` edits are covered by unit tests only. Hosted CI and Codex review pending.
 
 ## 7. Hand-off
 
-### v0.8.0 published (D104), 2026-10-12
+### Agent tooling PR (D105), 2026-10-14
 
-PR #18 merged at f582cd119017cae58dd472b42ab4414acc9288b5. Annotated tag
-v0.8.0 points to that exact merge commit. Source release workflow 38346723528
-passed 27/27; merge CI 38346713921 also passed. Release is published and latest:
-https://github.com/vyanhursky/DefJamFFNY-recomp/releases/tag/v0.8.0
-Nine assets: Windows x64 exe, macOS arm64 dmg, Linux x64 tar.gz, each with SHA-256
-and provenance. All pass game-free inventory checks. Notes: docs/releases/v0.8.0.md.
-U0 is v0.8.0, updater protocol/data schema 1; historical releases cannot be
-user-selected downgrade targets. Detailed recorded tests and evidence limits
-remain in docs/setup-update-test-results.md. Vlad confirmed testing complete and
-authorized release; no remaining merge/publication work. Keep issue #11 and
-unrelated checkout work independent. Archived handoffs/worklogs remain local.
+Branch `feature/eloquent-dijkstra-963vf0`, one pull request, for Vlad and Codex to review. No game, runtime,
+toolkit or release changes. What to know:
+- Instructions: `AGENTS.md` is canonical; `CLAUDE.md` imports it. Playbooks are in `docs/agent/` (index in its
+  README). Skills and briefs have one source under `docs/agent/`; run `python scripts/sync-agent-adapters.py`
+  after editing one (`--check` is what the unit test runs). Codex custom-agent files are not generated.
+- Reading a run: `python scripts/triage.py [log]`, then slice the original with `--around/--lines/--grep/--tail`.
+  Verdicts: clean, explained, partial, unexplained (`docs/agent/triage.md`). Add benign lines to
+  `config/triage-ignore.txt`. Its patterns are tested on synthetic logs shaped like `src/main.c`'s `[CRASH]`
+  block and the `[ICALL]` line; the first real failure will show what it misses, so add that signature and a test.
+- Reading `PROGRESS.md`: `python scripts/progress.py brief | section N | decision D<n> | decisions --grep T | grep T`.
+- CI: Markdown-only changes skip the setup, runtime and fixture jobs; `CI result` is the one gate to require
+  if branch protection is ever set up. Untested on the hosted runners until this PR's own CI runs.
+- Next: merge after review; then watch two or three real failures through `triage.py` and fix its misses;
+  confirm Codex's custom-agent format before generating those; consider batching the 19 Windows fixture jobs.
+- Not part of this PR: the v0.8.0 release work (done, D104), issue #11, other checkouts.
