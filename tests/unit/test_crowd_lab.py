@@ -91,10 +91,12 @@ def test_streams_compared_record_by_record():
 
 
 def test_report_table_has_a_row_per_variant():
-    results = {'none': {'runs_ok': '2/2', 'draws_equal_at_step1': False, 'crowd_updates': [902, 903],
+    results = {'none': {'runs_ok': '2/2', 'draws_equal_at_step1': False, 'logic_equal_at_step1': False,
+                        'crowd_updates': [902, 903],
                         'stream_parts_at_step': 871, 'pictures': {300: 0.12}},
-               'both': {'runs_ok': '2/2', 'draws_equal_at_step1': True, 'crowd_updates': [880, 880],
+               'both': {'runs_ok': '2/2', 'draws_equal_at_step1': False, 'logic_equal_at_step1': True,
+                        'crowd_updates': [880, 880],
                         'stream_parts_at_step': None, 'pictures': {300: 0.0}}}
     table = lab.report_table(results, [300])
-    assert '| none | 2/2 | no | 902 / 903 | 871 | 12.00% |' in table
-    assert '| both | 2/2 | yes | 880 / 880 | never | 0.00% |' in table
+    assert '| none | 2/2 | no | no | 902 / 903 | 871 | 12.00% |' in table
+    assert '| both | 2/2 | no | yes | 880 / 880 | never | 0.00% |' in table

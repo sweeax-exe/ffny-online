@@ -222,7 +222,10 @@ def compare_pair(a, b, steps):
     da, sa = draws_at(a['log'])
     db, sb = draws_at(b['log'])
     idx = first_difference(a['stream'], b['stream'])
+    # Draw counts are taken before a reseed acts, so they cannot agree under it; the
+    # logic state at step 1 is what a reseed makes repeat.
     row = {'draws_equal_at_step1': bool(da) and da == db,
+           'logic_equal_at_step1': sa.get('logic_state') is not None and sa.get('logic_state') == sb.get('logic_state'),
            'crowd_updates': [sa.get('crowd_updates'), sb.get('crowd_updates')],
            'stream_parts_at_step': None if idx is None else (stream_step(a['stream'][idx]) if idx < len(a['stream']) else idx),
            'pictures': {}}
@@ -235,13 +238,14 @@ def compare_pair(a, b, steps):
 
 
 def report_table(results, steps):
-    L = ['| variant | runs ok | draws equal at step 1 | crowd updates | streams part at step | '
-         + ' | '.join('changed at step %d' % s for s in steps) + ' |',
-         '|---|---|---|---|---|' + '---|' * len(steps)]
+    L = ['| variant | runs ok | draws equal at step 1 | logic state equal at step 1 | crowd updates | '
+         'streams part at step | ' + ' | '.join('changed at step %d' % s for s in steps) + ' |',
+         '|---|---|---|---|---|---|' + '---|' * len(steps)]
     for name, r in results.items():
         pics = ' | '.join(('%.2f%%' % (100 * r['pictures'][s]) if r['pictures'].get(s) is not None else '-') for s in steps)
-        L.append('| %s | %s | %s | %s | %s | %s |' % (
+        L.append('| %s | %s | %s | %s | %s | %s | %s |' % (
             name, r['runs_ok'], 'yes' if r['draws_equal_at_step1'] else 'no',
+            'yes' if r.get('logic_equal_at_step1') else 'no',
             ' / '.join(str(x) for x in r['crowd_updates']),
             'never' if r['stream_parts_at_step'] is None else r['stream_parts_at_step'], pics))
     return '\n'.join(L)
