@@ -47,6 +47,8 @@
 
 | Widescreen macOS / v0.9.0 | ✅ released | PR12 merged `c4bcda6`, v0.9.0 published with9 game-free assets; PRCI25/25, release27/27. Mac auto-notch correction, source352tests and native checks; known baseline diagnostics retained in [Mac ledger](docs/widescreen/09-macos-validation.md). |
 
+| recomp.fyi listing (D113) | ⏳ | `.recomp.json` committed at the repo root; the board's bot adds the row on its daily scan or from the manifest-form issue. Check https://recomp.fyi for "Def Jam: Fight for NY" with this repo and fix anything the bot flags. |
+
 ## 1. Decisions log
 
 | # | Date | Decision | Rationale |
@@ -182,6 +184,8 @@
 
 | D112 | 2026-10-14 | Vlad selected option B, the step1200 face-off, and requested a widescreen-versus-4:3 comparison. Replace the README hero with the labelled matched pair and update the standalone gallery hero to the same moment. | Both sides use HD, scale2 and gamma; proportional fitting preserves vertical framing. Exact new fingerprints/provenance replace the rejected step1500 exports. |
 
+| D113 | 2026-10-14 | List the port on recomp.fyi (the recomp.board directory) by committing a root `.recomp.json` to the public repo (route A), with status `released`, toolchain `Xboxrecomp` (the spelling other Xbox rows use), and a manifest-form issue for immediate listing. | Vlad's choice. The board already has an unclaimed Def Jam row for another repository; duplicates per game are normal, so we add our own row and do not claim theirs. The file names no disc image, dump or source of one (the board refuses a file that does) and omits `original.sha1`. 834 bytes; validates against `https://recomp.fyi/schema/v1.json`; `check-source-tree.py` passes. |
+
 ## 2. Environment inventory (2026-09-17)
 
 - OS: Windows 11 Pro 10.0.26200
@@ -260,7 +264,6 @@ defjam-recomp/
 
 > Recent entries only; older entries remain unchanged in the local `docs/worklog/` archive.
 
-- 2026-10-13 20:23 — Mac auto fix native build109steps/certificate pass; complete source suite352pass/30skip (`fix-all-unit.txt`). Full runtime regression remains active: title/menu goldens, launcher, overlay and fight pass so far; bundled interpreter lacks pytest, independently resolved by the complete UV source-suite run. Compact actual-gameplay GIF3.45MB plus two60fps comparison clips exported locally with hashes; not published.
 - 2026-10-13 21:07 — Fixed-source full regression completes11/16 in56min (`logs/widescreen-macos/fix-full.txt`, integration `logs/regress-20261013-210713.txt`): fight/FFA/Terrordome/replay/intro/gym and soak3/3 pass; combat26/27 and versus25/26, each onlyaudio.dry_queue3events/0drops. Other failed checks: bundled Python lacks pytest (independent352-source-tests pass), known startup callback in m2, historicalstream callback0x001E3C14 during crib boot (crib reached/saves restored). Targeted fullscreen and unit/m2/crib repeats queued serially; raw failures retained.
 - 2026-10-14 12:00 — **Stale-docs pass from the platform-parity audit (issue #15).** Fixed statements that contradicted the shipped state: `docs/known-issues.md` (Linux launcher/overlay shipped since v0.7.0 and checked on the Deck 2/2; launcher and HD list now include Linux; Clang note points at the Deck runs), `docs/02-test-plan.md` and `docs/01-plan-review.md` (WIC/CNG and M5-via-Proton lines marked superseded by D95 and v0.6.1/v0.7.2), `docs/04-improvement-backlog.md` (installer section, overlay note, clang-cl note and the Steam Deck row of the comparison table). `README.md` is left to PR #22, which rewrites the HD line. Documentation only; no code, toolkit or release change.
 - 2026-10-13 21:15 — Mac validation complete: corrected auto-fullscreenHD resolves1.6000/FOV35.65/swapchain3600x2260, reachescombat, actualF1overlay opens/closes, nofaults/savesrestored (`fix-auto.json`); launcher renders/exits0. Targeted source+loading2/2 (352tests/30skip, goldenframe100), crib1/1 clean; rawfull11/16 retained with twoexistingaudio gates stillfailed. Whole isolatedsave root15files byte-identical to prepared baseline. Localmedia reviewZIP27.8MB with original/HD/widescreen PNG+60fpsMP4, compactGIF, overlay/launcher and provenance; no new media published. Source commits/push/CI/merge/release next.
@@ -268,6 +271,7 @@ defjam-recomp/
 - 2026-10-14 08:30 — PR22 curated media refresh: reviewed six hero poses, original/HD and widescreen pairs, launcher/overlay, Story/FFA sheets and three videos sampled at4fps throughout. Nine selected exports exact-pinned; hero+GIF4.03MB, longer clips linked from gallery. Synced v0.9.0 and corrected released-beta wording; candidate provenance retained. Unit suite356passed/34skipped; link/hygiene results in logs/media-review/verification.txt. No game/runtime changes or original saves touched.
 - 2026-10-14 08:40 — Owner rejected the battle still; reviewed existing step900 strike,1200 face-off and2100 clinch options, replacement selection pending. README removes PR12 caption and directly states all-platform widescreen beta sincev0.9.0. Technical provenance retained in gallery; no new media or runtime changes. Source/whitespace checks pass.
 - 2026-10-14 08:45 — Owner selected B face-off, step1200: README hero now1932x584 labelled4:3/16:9 pair, HD/scale2/gamma on both; gallery960x540 hero also replaced. Revised2media SHA256pins and captions/provenance; no new raw data/runtime changes. Focused publication/agent tests, source policy and whitespace checks run; preview updated.
+- 2026-10-14 14:00 — recomp.fyi listing (D113): read the site rules and the `.recomp.json` spec; added a root `.recomp.json` (game, system Xbox, type recomp, status released, toolchain Xboxrecomp, four targets, two links). Schema-valid, 834 bytes, `check-source-tree.py` 0 failures. The board already lists an unrelated unclaimed Def Jam row (another repo); ours is separate. Pushed to public main; manifest-form issue submitted if the tool allowed it, otherwise the daily scan picks the file up.
 
 ## 7. Hand-off
 
