@@ -41,6 +41,7 @@
 #include "pc_input.h"
 #include "pc_ui.h"
 #include "recomp_settings.h"
+#include "recorder.h"
 
 /* The title sets a 640x480 mode. Matching it keeps the translator's screen
  * space and ours the same, so a vertex the title placed at 320,240 lands in
@@ -452,6 +453,61 @@ int d3d11_translator_init(void)
     return 1;
 }
 
+/* The play-test recorder's share of a frame (recorder.c): a picture for its
+ * ring when it asks for one, read back the way capture_backbuffer reads it, and
+ * the frame's measurements. Nothing runs unless [debug] record is on. */
+static double recorder_capture(IDirect3DDevice8 *dev)
+{
+    IDirect3DSurface8 *surf = NULL;
+    D3DLOCKED_RECT lr;
+    double start;
+    extern unsigned d3d8_GetRenderScale(void);
+    extern float d3d8_GetCanvasScaleX(void);
+    extern uint8_t g_recomp_gamma[3][256];
+    extern int g_recomp_gamma_on;
+    uint32_t sw, sh;
+
+    if (!recorder_picture_wanted())
+        return 0.0;
+    start = recorder_now_ms();
+    sw = (uint32_t)(TRANSLATOR_WIDTH * d3d8_GetCanvasScaleX() + 0.5f);
+    sh = TRANSLATOR_HEIGHT * d3d8_GetRenderScale();
+    if (FAILED(dev->lpVtbl->GetBackBuffer(dev, 0, 0, &surf)) || !surf)
+        return 0.0;
+    memset(&lr, 0, sizeof(lr));
+    if (SUCCEEDED(surf->lpVtbl->LockRect(surf, &lr, NULL, D3DLOCK_READONLY)) && lr.pBits) {
+        recorder_picture((const uint8_t *)lr.pBits, lr.Pitch, (int)sw, (int)sh,
+                         g_recomp_gamma_on ? (const uint8_t (*)[256])g_recomp_gamma : NULL);
+        surf->lpVtbl->UnlockRect(surf);
+    }
+    return recorder_now_ms() - start;
+}
+
+static void recorder_frame_done(double present_ms, double capture_ms)
+{
+    extern int g_xa2_dropped, g_xa2_starved;
+    extern long long defjam_test_current_step(void);
+    PgraphD3D11Stats st;
+    RecorderFrameIn in;
+
+    memset(&in, 0, sizeof in);
+    pgraph_d3d11_get_stats(&st);
+    in.present_ms = present_ms;
+    in.capture_ms = capture_ms;
+    in.draws = st.draw_calls;
+    in.vertices = st.vertices_submitted;
+    in.clears = st.clears;
+    in.audio_dropped = g_xa2_dropped;
+    in.audio_dry = g_xa2_starved;
+    in.step = defjam_test_current_step();
+    /* Where the log has got to: with this in every row, scripts/bug-bundle.py puts each
+     * log line on the frames' clock without the log's format changing. Flushing once a
+     * frame also keeps the log's end on disk if the process is killed. */
+    fflush(stderr);
+    in.log_bytes = (long long)ftell(stderr);
+    recorder_frame_end(&in);
+}
+
 /* Put the frame on screen.
  *
  * pgraph_d3d11_flush() submits whatever geometry was still batched and counts
@@ -468,8 +524,17 @@ void d3d11_translator_frame_end(void)
         return;
     dev = xbox_GetD3DDevice();
     if (dev) {
+        double capture_ms = 0.0, present_at = 0.0;
+        int recording = recorder_on();
         capture_backbuffer(dev);
+        if (recording) {
+            recorder_frame_begin();
+            capture_ms = recorder_capture(dev);
+            present_at = recorder_now_ms();
+        }
         dev->lpVtbl->Present(dev, NULL, NULL, NULL, NULL);
+        if (recording)
+            recorder_frame_done(recorder_now_ms() - present_at, capture_ms);
         /* While the display paces the presents (display.vsync on a 60, 120,
          * 180 or 240 Hz display) it is the frame clock, and the executor's
          * 60 Hz flip timer would drift against it. Loosen the timer to a

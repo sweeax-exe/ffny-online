@@ -119,7 +119,7 @@ def telemetry_tool(tmp_path_factory):
     exe = folder / 'telemetry.exe'
     result = subprocess.run([compiler, '/nologo', '/O2', '/TC', '/I' + str(folder), '/I' + str(ROOT / 'src/hooks'),
                              '/I' + str(ROOT / 'src'), str(driver), str(ROOT / 'src/hooks/test_observations.c'),
-                             str(ROOT / 'src/hooks/test_telemetry.c'), '/Fe:' + str(exe)],
+                             str(ROOT / 'src/hooks/test_telemetry.c'), str(ROOT / 'src/hooks/recorder.c'), '/Fe:' + str(exe)],
                             cwd=folder, capture_output=True, text=True)
     assert result.returncode == 0, result.stdout + result.stderr
     return exe

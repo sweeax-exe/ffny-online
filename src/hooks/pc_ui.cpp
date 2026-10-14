@@ -40,6 +40,7 @@
 
 extern "C" {
 #include "recomp_settings.h"
+#include "recorder.h"
 #include "input_host.h"
 #include "input_map.h"
 }
@@ -136,6 +137,12 @@ static const char *friendly(const char *section, const char *key)
         { "gamepad", "left_stick", "Left stick comes from" }, { "gamepad", "right_stick", "Right stick comes from" },
         { "launcher", "skip", "Skip the launcher at start" }, { "ui", "scale", "Text and control size" },
         { "ui", "overlay_pad", "Overlay pad buttons" }, { "ui", "overlay_key", "Overlay key" },
+        { "debug", "record", "Record play-tests" }, { "debug", "mark_key", "Mark key" },
+        { "debug", "record_fps", "Pictures kept a second" }, { "debug", "record_seconds", "Seconds kept before a mark" },
+        { "debug", "record_audio", "Keep the sound" }, { "debug", "record_game_state", "Log fighters and match events" },
+        { "debug", "auto_bundle_hitch_ms", "Bundle a hitch longer than (ms)" },
+        { "debug", "hang_seconds", "Bundle a hang after (s)" }, { "debug", "keep_sessions", "Sessions kept whole" },
+        { "debug", "record_guest_ram", "Crash bundles hold game memory" },
     };
     for (const Label &l : labels)
         if (!strcmp(l.section, section) && !strcmp(l.key, key)) return l.text;
@@ -808,6 +815,32 @@ static void page_general(UiMode mode)
     ImGui::TextDisabled("Dear ImGui %s (MIT)  -  SDL3 (zlib)", IMGUI_VERSION);
 }
 
+static void page_debug(UiMode mode)
+{
+    ImGui::SeparatorText("Play-test recorder");
+    settings_group("debug", { "record" });
+    ImGui::TextWrapped("Keeps logs/sessions/<time>/ for every run: each frame's timing, what the game was doing, the sound, "
+                       "and the last seconds of pictures. The mark key (or the button below) saves a bug bundle of the "
+                       "seconds before it; a crash or a hang saves one by itself. Bundles hold the game's own pictures "
+                       "and sound: keep them on this computer. Read one with scripts/bug-bundle.py.");
+    ImGui::Indent();
+    settings_group("debug", { "mark_key", "record_fps", "record_seconds", "record_audio", "record_game_state",
+                              "auto_bundle_hitch_ms", "hang_seconds", "keep_sessions", "record_guest_ram" });
+    ImGui::Unindent();
+    if (mode == UI_OVERLAY) {
+        char status[1024];
+        recorder_status(status, sizeof status);
+        ImGui::SeparatorText("This run");
+        ImGui::TextWrapped("%s", status);
+        if (recorder_on()) {
+            if (ImGui::Button("Mark a bug here")) recorder_mark("overlay");
+            ImGui::SetItemTooltip("Saves the last seconds of play, from before the overlay was opened, as a bug bundle.");
+        } else {
+            ImGui::TextDisabled("Turn recording on above and restart the game to record.");
+        }
+    }
+}
+
 UiResult ui_draw(UiMode mode, float x, float y, float width, float height)
 {
     UiResult result;
@@ -836,6 +869,7 @@ UiResult ui_draw(UiMode mode, float x, float y, float width, float height)
         if (ImGui::BeginTabItem("Pad buttons")) { page_pad_buttons(); ImGui::EndTabItem(); }
         if (ImGui::BeginTabItem("Keyboard & mouse")) { page_keyboard(); ImGui::EndTabItem(); }
         if (ImGui::BeginTabItem("General")) { page_general(mode); ImGui::EndTabItem(); }
+        if (ImGui::BeginTabItem("Debug")) { page_debug(mode); ImGui::EndTabItem(); }
         ImGui::EndTabBar();
     }
     ImGui::EndChild();
@@ -950,6 +984,7 @@ void set_open(bool open)
 #endif
     fprintf(stderr, "[UI] overlay %s\n", open ? "opened" : "closed");
     fflush(stderr);
+    recorder_event("overlay", open ? "\"open\":true" : "\"open\":false");
 }
 
 } // namespace
@@ -974,6 +1009,16 @@ extern "C" void pc_ui_apply_settings(void)
 #if defined(_WIN32)
 extern "C" int pc_ui_window_message(HWND window, UINT msg, WPARAM wp, LPARAM lp)
 {
+    if ((msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN) && !(lp & (1 << 30)) && recorder_mark_vk() &&
+        (int)wp == recorder_mark_vk() && (int)wp != g_overlay_vk) {
+        ui_lock();
+        bool capturing = ui_capturing();
+        ui_unlock();
+        if (!capturing) {
+            recorder_mark("key");
+            return 1;
+        }
+    }
     if ((msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN) && !(lp & (1 << 30)) && (int)wp == g_overlay_vk) {
         ui_lock();
         bool capturing = ui_capturing();
@@ -1276,6 +1321,17 @@ void overlay_draw(const D3D8VkOverlayFrame *f, void *)
 extern "C" int pc_ui_sdl_event(const void *event, float window_width, float window_height)
 {
     const SDL_Event *e = (const SDL_Event *)event;
+    if (e->type == SDL_EVENT_KEY_DOWN && !e->key.repeat && recorder_mark_vk() &&
+        host_posix_vk_from_scancode(e->key.scancode) == recorder_mark_vk() &&
+        host_posix_vk_from_scancode(e->key.scancode) != g_overlay_vk) {
+        ui_lock();
+        bool capturing = ui_capturing();
+        ui_unlock();
+        if (!capturing) {
+            recorder_mark("key");
+            return 1;
+        }
+    }
     if (e->type == SDL_EVENT_KEY_DOWN && !e->key.repeat &&
         host_posix_vk_from_scancode(e->key.scancode) == g_overlay_vk) {
         ui_lock();

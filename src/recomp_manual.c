@@ -31,6 +31,7 @@
 #include "recomp/gen/recomp_types.h"
 #include "hooks/save_compat.h"
 #include "hooks/test_observations.h"
+#include "hooks/recorder.h"
 
 /* Read-only probes use the lifter's universal entry hooks. They do not alter
  * guest registers, stack, memory or the generated body. Off in normal play. */
@@ -504,6 +505,8 @@ static void funccall_hook(void)
     text[i] = 0;
     if (printed++ < 4000)
         fprintf(stderr, "[FUNCCALL] %s\n", text);
+    /* The play-test recorder keeps every one, with its time (the log stops at 4000). */
+    recorder_event_text("fe", "text", text);
     xbox_NoteAnchorEvent(text);
     sub_00068BA0();
 }

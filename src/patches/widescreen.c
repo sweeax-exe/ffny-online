@@ -14,6 +14,7 @@
 #include "recomp/gen/recomp_types.h"
 #include "recomp_settings.h"
 #include "d3d8_present.h"
+#include "hooks/recorder.h"
 
 static float g_aspect;          /* 0 = off */
 static float g_k = 1.0f;
@@ -141,6 +142,9 @@ void ws_view_params(uint32_t vp, uint32_t mode, uint32_t pfov, uint32_t pasp, ui
 
     if (mode > 2)
         return;                                        /* the original writes nothing */
+    /* Mode 1 is a Story cutscene's view: the recorder notes when one starts and ends. */
+    if (full)
+        recorder_set_view_mode((int)mode);
     if (mode == 2) {
         MEMF(pfov) = fov;
         if (a > 0.0f && !full)    /* a squeezed sub-view keeps the shape it was authored with */
