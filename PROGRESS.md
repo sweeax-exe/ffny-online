@@ -45,7 +45,7 @@
 
 | Setup GitHub updater (v0.8.0) | ✅ released | PR #18 merged at f582cd1; tag v0.8.0 points to that merge. Release workflow 38346723528 passed 27/27; Windows/macOS/Linux setups, checksums and provenance published. U0 protocol/data schema 1. |
 | Agent tooling (D109) | ⏳ PR open | `triage.py`, `progress.py`, `docs/agent/` playbooks, shared `AGENTS.md`, generated skills and briefs for Claude and Codex, Markdown-only CI gating. Unit tests added; Windows and macOS CI and Codex's own review pending. |
-| Play-test recorder and scenarios (D110, D111) | ⏳ built, not run on the game | Branch `feature/clever-feynman-4ovoyk` (on top of PR #24). `[debug] record` / `--record`: `logs/sessions/` with per-frame rows, events, audio and a picture ring; F9, crash, hang or long hitch writes a bug bundle; `scripts/bug-bundle.py` reports it. `scripts/scenarios.py` (fixture library, generated fight routes, cutscene injection), `RECOMP_FE_INJECT`, `RECOMP_TEST_CROWD`, `scripts/crowd-lab.py`, `scripts/funccall-catalog.py`. 462 unit tests pass (the one failure is the known container-only setup test), incl. native builds of the new C against fakes; no game build here (no dump). |
+| Play-test recorder and scenarios (D110–D112) | ⏳ built, not run on the game | Branch `feature/clever-feynman-4ovoyk` (PR #25, on top of PR #24). `[debug] record` / `--record`: `logs/sessions/` with per-frame rows, events, audio and a picture ring; F9, crash, hang or long hitch writes a bug bundle; `scripts/bug-bundle.py` reports it. Scenarios, crowd lab, front-end injection, command catalog (D111). Pictures now read back asynchronously on Direct3D 11 and Vulkan (D112, toolkit `48702e6`; fixture passes on Vulkan/lavapipe, D3D11 runs in CI only). 2026-10-14 test session ran in a Linux cloud container (no MSVC, GPU or dump): unit tests 463 pass, CI MSVC ran the recorder native tests 9/9; no game build, regression or play-test yet. |
 
 | Widescreen macOS / v0.9.0 | ✅ released | PR12 merged `c4bcda6`, v0.9.0 published with9 game-free assets; PRCI25/25, release27/27. Mac auto-notch correction, source352tests and native checks; known baseline diagnostics retained in [Mac ledger](docs/widescreen/09-macos-validation.md). |
 
@@ -182,6 +182,8 @@
 
 | D111 | 2026-10-14 | Scenarios by choice: a fixture library in the data folder (`scripts/scenarios.py fixture`), fight routes generated from the harness's own menu blocks plus `config/scenario-catalog.json` (the six known combinations must equal the harness routes, tested), `--expect-character` to catch a wrong pick from telemetry; crowd test controls `RECOMP_TEST_CROWD=hold[:N],reseed` and `scripts/crowd-lab.py` to measure them (plus learned masks as the fallback); `RECOMP_FE_INJECT` to send the front end's FuncCall handler any command, and `scripts/funccall-catalog.py` to find the one that starts a scene. | Savestates are not practical in this recompilation; the game's saves are. The crowd note (`docs/research/crowd-nondeterminism.md`) measured an update-count difference in the loading window (hold targets it) and generator draw differences (reseed targets them); both use hooks that already exist, so no new probe point. No command that plays a chosen scene is known yet; the injection channel and catalog make finding it one run, and `docs/research/scenario-launching.md` has the fallback (a `LoadScene` entry hook). |
 
+| D112 | 2026-10-14 | Asynchronous picture read-back (owner-approved toolkit change, fork branch `defjam/async-readback`, `bac3653` + `48702e6`): `d3d8_readback_begin/poll/reset`. Direct3D 11: a ring of 3 staging textures, `CopyResource` from the game texture (or swap-chain buffer 0 without scaling, taken and released, no `GetBackBuffer` surface), `Map` with `D3D11_MAP_FLAG_DO_NOT_WAIT` later; Vulkan: the copy recorded into the frame's own command buffer with a completed-submit counter, no extra submit; OpenGL and multisampled targets: -1. The recorder tags each request with its frame (`recorder_picture_request` / `recorder_picture_tagged`), falls back to the synchronous read-back on -1 (for the rest of the run) or a busy ring (that picture), and `RECOMP_RECORD_SYNC=1` forces the old path for comparison. Upstream verdict: generic Direct3D 8 device code with no title knowledge, so valid for `sp00nznet/xboxrecomp` in substance, but not submittable alone: upstream v0.13.1 has neither the scaled presentation (`d3d8_present.c`) the D3D11 side reads from nor the Vulkan device. A candidate after those two topics, or as a reduced D3D11-only version reading the swap chain. | Vlad approved the change in the test brief. Copying into the frame's own submission keeps Vulkan to one fence wait a frame; a tag rather than "the latest picture" keeps the clip's frame numbers and times true when pictures arrive late. Falling back per picture keeps a still for F9 even when the ring is busy. |
+
 ## 2. Environment inventory (2026-09-17)
 
 - OS: Windows 11 Pro 10.0.26200
@@ -228,7 +230,7 @@ defjam-recomp/
 
 ## 5. Open questions for Vlad
 
-- **(2026-10-14) Play-test recorder and scenarios (D110, D111), branch `feature/clever-feynman-4ovoyk`.** Built and unit-tested here, never built or run against the game (no dump on that machine). Needs, in order: (1) a Windows build and `regress.py --quick` with recording off (the default; nothing should change), then one play-test with `[debug] record = true`, an F9, and `python scripts/bug-bundle.py latest`; the Mac and Deck builds too (mach/Linux paths compiled only with gcc). (2) Is ten pictures a second the right default given the synchronous read-back (see `capture_ms` in `frames.csv`)? An asynchronous read-back is a toolkit fork commit; say if wanted. (3) `scripts/scenarios.py fixture add` at the Story points worth testing (save one profile at a time). (4) `python scripts/crowd-lab.py run --fixture <name>` and `python scripts/funccall-catalog.py --grep cinema --grep scene`: the first decides the crowd default for fight baselines, the second is the lead for launching a cutscene. (5) The branch contains PR #24 merged into current main (D109 renumbered from D105, which main had used); merge #24 first or this branch with it.
+- **(2026-10-14) Play-test recorder and scenarios (D110–D112), PR #25.** A test session on 2026-10-14 ran in a Linux cloud container, not on Vlad's machine: no MSVC, no GPU, no dump. Done there: unit tests, strict clang/MinGW checks of every new C file for Windows and Linux, the async read-back (D112) with a fixture passing on Vulkan (lavapipe) and OpenGL, and three fixes. Still needs Vlad's machine, in order: (1) `scripts\build.ps1` (after `recomp.ps1`) with MSVC (`pc_debug.c`, `pc_ui.cpp`, `main.c` and the translator have never seen `cl`; `recorder.c`, `fe_inject.c` and `crowd_control.c` have, in CI); (2) `regress.py --quick` then the full run with recording off; (3) the recorder checks, `capture_ms` with and without `RECOMP_RECORD_SYNC=1`, and record_fps 10 vs 0 pacing in a fight; (4) scenarios, crowd lab, the cutscene command search; (5) the Mac and Deck builds. Answered: (2) of the old list, the asynchronous read-back, is implemented (D112). New: may D112 be offered upstream once the scaled presentation and the Vulkan device are (or as a reduced D3D11-only version)? The candidates list lives in the private tree only, so it is recorded in D112 for now.
 
 - **(2026-10-12) Interactive Mac updater acceptance.** Desktop access resolved on retry. Live release picker, historical refusal, local future GUI update/downgrade, Repair, cancellation/late completion and Play verified; UI status fixes implemented. Broader Mac OS/quarantine/HD/external-volume/reboot and native Windows/Deck acceptance remain pending; no new policy input needed.
 
@@ -260,7 +262,6 @@ defjam-recomp/
 
 > Recent entries only; older entries remain unchanged in the local `docs/worklog/` archive.
 
-- 2026-10-13 20:23 — Mac auto fix native build109steps/certificate pass; complete source suite352pass/30skip (`fix-all-unit.txt`). Full runtime regression remains active: title/menu goldens, launcher, overlay and fight pass so far; bundled interpreter lacks pytest, independently resolved by the complete UV source-suite run. Compact actual-gameplay GIF3.45MB plus two60fps comparison clips exported locally with hashes; not published.
 - 2026-10-13 21:07 — Fixed-source full regression completes11/16 in56min (`logs/widescreen-macos/fix-full.txt`, integration `logs/regress-20261013-210713.txt`): fight/FFA/Terrordome/replay/intro/gym and soak3/3 pass; combat26/27 and versus25/26, each onlyaudio.dry_queue3events/0drops. Other failed checks: bundled Python lacks pytest (independent352-source-tests pass), known startup callback in m2, historicalstream callback0x001E3C14 during crib boot (crib reached/saves restored). Targeted fullscreen and unit/m2/crib repeats queued serially; raw failures retained.
 - 2026-10-14 12:00 — **Stale-docs pass from the platform-parity audit (issue #15).** Fixed statements that contradicted the shipped state: `docs/known-issues.md` (Linux launcher/overlay shipped since v0.7.0 and checked on the Deck 2/2; launcher and HD list now include Linux; Clang note points at the Deck runs), `docs/02-test-plan.md` and `docs/01-plan-review.md` (WIC/CNG and M5-via-Proton lines marked superseded by D95 and v0.6.1/v0.7.2), `docs/04-improvement-backlog.md` (installer section, overlay note, clang-cl note and the Steam Deck row of the comparison table). `README.md` is left to PR #22, which rewrites the HD line. Documentation only; no code, toolkit or release change.
 - 2026-10-13 21:15 — Mac validation complete: corrected auto-fullscreenHD resolves1.6000/FOV35.65/swapchain3600x2260, reachescombat, actualF1overlay opens/closes, nofaults/savesrestored (`fix-auto.json`); launcher renders/exits0. Targeted source+loading2/2 (352tests/30skip, goldenframe100), crib1/1 clean; rawfull11/16 retained with twoexistingaudio gates stillfailed. Whole isolatedsave root15files byte-identical to prepared baseline. Localmedia reviewZIP27.8MB with original/HD/widescreen PNG+60fpsMP4, compactGIF, overlay/launcher and provenance; no new media published. Source commits/push/CI/merge/release next.
@@ -268,32 +269,41 @@ defjam-recomp/
 - 2026-10-14 00:58 — D109 (numbered D105 on its branch): agent tooling. New `scripts/triage.py` (digest + bounded slices of the original log; 86 MB synthetic log in 6 s), `scripts/progress.py` (`brief` 5.3 KB vs 78.5 KB whole file), `scripts/ci-digest.py`, `scripts/sync-agent-adapters.py`; `AGENTS.md` 23.1 -> 14.4 KB with `CLAUDE.md` as an import and playbooks in `docs/agent/`; `pytest.ini` + slow marker; CI `changes`/`CI result` jobs (actionlint clean). 55 new unit tests; unit suite without the slow test 9 s locally. No game run: this host has no dump or build, so the `regress.py`/`harness.py` edits are covered by unit tests only. Hosted CI and Codex review pending.
 - 2026-10-14 01:23 — Codex review of PR #24 (head 1e75c97) reproduced and fixed: a crash/watchdog block no longer swallows the next fault (a block ends at the next log tag or non-detail line); CLEAN needs positive frame evidence (reports with presents above zero, last not zero); an unfamiliar `[ICALL]` line is kept as unclassified; `[UNIMPL]` gets the same preceding-evidence rule as crashes; `--grep --last` keeps a bounded deque (200,000 matches: 13.6 MB peak before, under 2 MB asserted now); `CI result` fails closed (explicit `--always`/`--heavy` lists, a test that the workflow passes every job). Also quoted paths in the suggested commands, noted the 400-line hang heuristic as a limit, and corrected the 32 KiB, sub-agent and timing claims. 17 new tests. CI on 27f54d7 was 27/27 green; re-run pending on the fix push.
 - 2026-10-14 05:30 — D110/D111 on `feature/clever-feynman-4ovoyk` (PR #24 merged into main first; its D105 is D109 here). Play-test recorder (`src/hooks/recorder.c`, `pc_debug.c`; `[debug] record`, `--record`, `RECOMP_RECORD`): per-frame `frames.csv` with the log's and audio's byte counts (log lines and samples on the frames' clock without changing the log), `events.jsonl` (every front-end call, hitches, audio drop-outs, cutscene view, match telemetry, memory), audio, a 30 s picture ring; F9/overlay button/crash/hang/long hitch write a bundle. `scripts/bug-bundle.py` (report, charts, contact sheets, timed log); `triage.py` names bundles. `scripts/scenarios.py` (fixture library, generated routes equal to the six harness fight routes, `--expect-character`, `cutscene`), `RECOMP_FE_INJECT`, `RECOMP_TEST_CROWD=hold,reseed`, `scripts/crowd-lab.py` (matrix + learned masks), `scripts/funccall-catalog.py`. Synthetic end-to-end test plants a hitch, a draw dip, a one-picture flash, an audio gap and a click and finds all five. Not built or run on the game; syntax-checked with gcc, clang, MinGW (overlay against ImGui 1.92.9b and SDL3 headers).
+- 2026-10-14 13:03 — PR #25 test session, **in a Linux cloud container, not on Vlad's machine** (no MSVC, PowerShell, GPU or dump), so no game build, regression, play-test, scenarios, crowd lab or cutscene search. Done: unit tests 462 pass (+1 new: 463), 1 failure `test_cancellation_stops_the_whole_process_tree` also fails on `main` in this container; CI run 38565783560 on head `2f7ccff` all 27 green, its Windows MSVC job ran `test_recorder_native.py` + `test_scenario_controls_native.py` 9/9 under `cl`. Strict clang (`-Wpedantic -Wgnu -Wvla`) of every new or edited C file for the Windows (MinGW headers) and Linux targets: clean; `pc_ui.cpp` clean as C++14 against ImGui 1.92.9. Fixes: `pc_debug.c` macOS `PATH_MAX` include (`dbfd82f`); `recorder_capture` leaked a back-buffer surface per picture, 10/s (`1c4330f`). D112: async read-back in the toolkit (`bac3653`, `48702e6` on `defjam/async-readback`), fixture `tests/d3d8_readback` passes on Vulkan/lavapipe (8 frames byte-equal to LockRect; two planted bugs caught) and GL (unsupported), D3D11 cross-built with MinGW and added to the Windows CI matrix. Lavapipe, 640x480, median of 40: capture calls LockRect 0.52–0.59 ms vs async 0.001–0.002 ms; whole frame 0.34–0.41 ms no capture, 0.60–0.68 LockRect, 0.45–0.49 async. Recorder tagged pictures (`4795393`) and integration with sync fallback and `RECOMP_RECORD_SYNC=1` (`eef2b2d`).
 
 ## 7. Hand-off
 
-### Play-test recorder and scenarios (D110, D111), 2026-10-14
+### PR #25: play-test recorder, scenarios, async read-back (D110–D112), 2026-10-14
 
-Branch `feature/clever-feynman-4ovoyk`: current main + PR #24 (agent tooling, D109) merged + this work. Nothing
-here has been built into the game or run against it: the authoring machine had no dump. Guides:
-`docs/playtest-recorder.md`, `docs/research/scenario-launching.md`, `docs/agent/playtest.md`.
+Branch `feature/clever-feynman-4ovoyk` (draft PR #25). Toolkit gitlink `48702e6` on `vyanhursky/xboxrecomp`
+`defjam/async-readback` (= `defjam/widescreen` `872fbc3` + the read-back). The 2026-10-14 test session ran in a
+Linux cloud container (no MSVC, PowerShell, GPU or dump): the steps that need the game are all still open.
+Guides: `docs/playtest-recorder.md`, `docs/research/scenario-launching.md`, `docs/agent/playtest.md`.
 
-What to do first (Windows, then Mac and Deck):
-1. `scripts\build.ps1` (new C: `src/hooks/recorder.c`, `pc_debug.c`, `fe_inject.c`, `crowd_control.c`,
-   `guest_call.h`; edits in `d3d11_translator.c`, `pc_settings.c`, `pc_ui.cpp`, `test_telemetry.c`, `main.c`,
-   `recomp_manual.c`, `patches/widescreen.c`). No new `_enter` hook, so the lifted code is the same, but the
-   freshness check hashes `recomp_manual.c` and will ask for `recomp.ps1` first (about 20 min). MSVC never
-   compiled this: expect small fixes (MinGW, gcc and clang did).
-2. `python scripts/regress.py --quick` with recording off: must match main.
-3. Play with `--record` (or Debug tab), press F9 after something, `python scripts/bug-bundle.py latest`;
-   check `report.md`, `frametime.png`, `around-mark.png`, and `capture_ms` in `frames.csv` (the read-back cost).
-   Also `python scripts/scenario_suite.py run fight --fixture <f> --record` and look at `report.json` -> recorder.
-4. `python scripts/scenarios.py fixture add <name> --story crib`, then
-   `python scripts/crowd-lab.py run --fixture <name>` (about 6 variants x 2 fights) and record the table here.
-5. `python scripts/funccall-catalog.py --grep cinema --grep scene`; try a candidate with
-   `scenarios.py cutscene --fixture <name> --inject "getscreeninfo(story/crib#1=><command>"`. A hit goes in
-   `config/scenario-catalog.json` `cutscenes.launch_command`; no hit: the `LoadScene` entry-hook route in the
-   research note.
+On Vlad's Windows machine, in order:
+1. Kill `defjam_recomp.exe`; `.\scripts\recomp.ps1` (the freshness check hashes `recomp_manual.c`; no new
+   `_enter` hook), then `.\scripts\build.ps1`. Never compiled by `cl`: `pc_debug.c`, `pc_ui.cpp`, `main.c`,
+   `d3d11_translator.c`, `pc_settings.c`, `test_telemetry.c`, `recomp_manual.c`, `patches/widescreen.c`
+   (clang-clean for Windows and Linux). `recorder.c`, `fe_inject.c`, `crowd_control.c` pass under `cl` in CI.
+2. `python scripts/regress.py --quick`, then the full run, recording off: must match main.
+3. `--record`, play to a fight, F9 a few seconds in, quit; `python scripts/bug-bundle.py latest`. Check the
+   brief's list (session files, bundle files, `bundle.json` last_screen/last_match_start, `log-timed.txt`,
+   `report.md`, charts, F9 and the Debug tab's "Mark a bug here"). The log should say nothing about
+   `[RECORD] pictures are read back synchronously` on D3D11/Vulkan.
+4. Cost: median `capture_ms` in `frames.csv` with the async default, then with `RECOMP_RECORD_SYNC=1`; fight
+   pacing with `record_fps=10` against `0`. Lavapipe numbers for comparison are in §6.
+5. `scenarios.py fixture add <name> --story crib`; `scenario_suite.py run fight --fixture <name> --record`
+   (report.json -> recorder); `scenarios.py generate` one-on-one and free-for-all at Terrordome, seed 12345;
+   one new move list and venue calibrated into `config/scenario-catalog.json`; `crowd-lab.py run`, table in
+   §6; `funccall-catalog.py --grep cinema --grep scene` and the cutscene injection.
+6. Mac and Deck builds (the mach `task_info` / `F_GETPATH` and `/proc` paths, and the Vulkan read-back on a
+   real GPU and on MoltenVK).
+7. Then the gitlink: D112's toolkit commits were published to the fork branch before the game regression
+   (no game here). If the regression is clean, keep `48702e6`; otherwise fix on that branch and re-pin.
+   Merging `defjam/async-readback` into `defjam/widescreen` (or the next pin branch) is still to do.
+   Upstream: D112 is a candidate after the scaled presentation and the Vulkan device; needs approval.
 
-Known limits: picture read-back is synchronous (10/s default); audio is pre-device; venue not named in bundles;
-`hold` and `reseed` rest on the crowd note's measurements and are unproven; `worklog-add.py` now creates
-`docs/worklog/` (it crashed in a fresh clone). Archived hand-offs: `docs/worklog/2026-10-handoffs.md` (local).
+CI to read on PR #25: the Windows fixture `d3d8_readback` (the D3D11 path against LockRect; "skipped" means the
+runner made no device). Known limits: audio is pre-device; venue not named in bundles; crowd `hold` and
+`reseed` unproven. Archived hand-offs: `docs/worklog/2026-10-handoffs.md` (local; the 2026-10-14 container's
+copy was not kept).
