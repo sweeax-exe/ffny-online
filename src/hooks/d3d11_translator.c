@@ -505,13 +505,23 @@ static void capture_backbuffer(IDirect3DDevice8 *dev)
     uint8_t hdr[54];
     uint32_t y, x, size;
     extern unsigned d3d8_GetRenderScale(void);
+    extern float d3d8_GetCanvasScaleX(void);
     uint32_t sc = d3d8_GetRenderScale();
+    /* The target's size: the title's times the render scale, wider across when
+     * it is a widescreen canvas (docs/widescreen/02-design.md). */
+    uint32_t sw = (uint32_t)(TRANSLATOR_WIDTH * d3d8_GetCanvasScaleX() + 0.5f);
+    uint32_t sh = TRANSLATOR_HEIGHT * sc;
     const char *native_shot = getenv("RECOMP_TRANS_SHOT_NATIVE");
-    /* HD review needs actual rendered pixels; regression captures stay 640x480. */
+    const char *wide_shot = getenv("RECOMP_TRANS_SHOT_WIDE");
+    /* HD review needs actual rendered pixels; regression captures stay 640x480
+     * (a widescreen canvas squeezed to the title's coordinates); WIDE keeps the
+     * canvas's shape at the title's height. */
     if (native_shot && !strcmp(native_shot,"1")) {
-        w *= sc; h *= sc; sc = 1;
-        row = ((w * 3) + 3) & ~3u;
+        w = sw; h = sh;
+    } else if (wide_shot && !strcmp(wide_shot, "1")) {
+        w = (sw + sc / 2) / sc;
     }
+    row = ((w * 3) + 3) & ~3u;
 
     char named[512];
     /* The frames the caller asked for, ascending. One frame writes to the path
@@ -633,9 +643,13 @@ static void capture_backbuffer(IDirect3DDevice8 *dev)
         fwrite(hdr, 1, sizeof(hdr), f);
         /* BMP rows run bottom to top. At a render scale above 1 the back
          * buffer is that many times the title's size, and each pixel written
-         * is the mean of its sc x sc block -- what the window shows. */
+         * is the mean of the block of target pixels it covers -- what the
+         * window shows. (sc x sc for the usual 4:3 target.) */
         for (y = 0; y < h; y++) {
             uint32_t written = 0;
+            uint32_t sy0 = (uint32_t)(((uint64_t)(h - 1 - y) * sh) / h);
+            uint32_t sy1 = (uint32_t)(((uint64_t)(h - y) * sh) / h);
+            if (sy1 <= sy0) sy1 = sy0 + 1;
             /* The runtime's swap chain is R8G8B8A8 (d3d8_device.c), so the
              * locked bytes run R, G, B, A and a BMP wants B, G, R. Written in
              * the locked order, every capture had red and blue swapped -- skin
@@ -643,12 +657,14 @@ static void capture_backbuffer(IDirect3DDevice8 *dev)
              * window was right. */
             for (x = 0; x < w; x++) {
                 uint32_t sum[3] = { 0, 0, 0 }, i, j, c;
-                for (j = 0; j < sc; j++) {
-                    const uint8_t *src = (const uint8_t *)lr.pBits
-                                       + (size_t)((h - 1 - y) * sc + j) * lr.Pitch;
-                    for (i = 0; i < sc; i++)
+                uint32_t sx0 = (uint32_t)(((uint64_t)x * sw) / w);
+                uint32_t sx1 = (uint32_t)(((uint64_t)(x + 1) * sw) / w);
+                if (sx1 <= sx0) sx1 = sx0 + 1;
+                for (j = sy0; j < sy1; j++) {
+                    const uint8_t *src = (const uint8_t *)lr.pBits + (size_t)j * lr.Pitch;
+                    for (i = sx0; i < sx1; i++)
                         for (c = 0; c < 3; c++)
-                            sum[c] += src[(x * sc + i) * 4 + c];
+                            sum[c] += src[i * 4 + c];
                 }
                 for (c = 0; c < 3; c++) {
                     /* The title's gamma ramp is applied at presentation,
@@ -656,7 +672,7 @@ static void capture_backbuffer(IDirect3DDevice8 *dev)
                      * the window shows (recomp_manual.c). */
                     extern uint8_t g_recomp_gamma[3][256];
                     extern int g_recomp_gamma_on;
-                    sum[c] /= sc * sc;
+                    sum[c] /= (sx1 - sx0) * (sy1 - sy0);
                     if (g_recomp_gamma_on)
                         sum[c] = g_recomp_gamma[c][sum[c] & 0xFF];
                 }

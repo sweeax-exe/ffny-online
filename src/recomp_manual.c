@@ -53,7 +53,19 @@ void sub_001A6870_enter(void)
 /* Match telemetry (src/hooks/test_telemetry.c): the fight's simulation step,
  * match set-up, the result recorder and the random number generator's seeding.
  * Read-only, except that RECOMP_TEST_RNG_SEED replaces the seed argument. */
-void sub_00087700_enter(void) { defjam_test_step(); }
+void sub_00087700_enter(void)
+{
+    extern void nv2a_ws_hud_heartbeat(int bottom_rows);
+    uint32_t i, fighters = 0;
+    defjam_test_step();
+    /* Widescreen: a fight HUD is up (src/patches/widescreen.c). The four fighter
+     * slots the fight camera reads (0x340D70, stride 0xC8; a slot counts when set
+     * and bit 3 of +0xC0 is clear): with 3 or 4 fighters the HUD has bottom rows. */
+    for (i = 0; i < 4; i++)
+        if (MEM32(0x340D70 + i * 0xC8) != 0 && (MEM8(0x340D70 + i * 0xC8 + 0xC0) & 8) == 0)
+            fighters++;
+    nv2a_ws_hud_heartbeat(fighters >= 3);
+}
 void sub_001A4D90_enter(void) { defjam_test_match_start(); }
 void sub_001BC690_enter(void) { defjam_test_rng(g_esp); }
 void sub_001AD220_enter(void) { defjam_test_ai_seed(g_esp); }
@@ -901,3 +913,32 @@ void sub_002203C6_enter(void)
                 g_recomp_gamma[0][32], g_recomp_gamma[0][64], g_recomp_gamma[0][128],
                 g_recomp_gamma[0][192], g_recomp_gamma[0][224]);
 }
+
+/*
+ * Widescreen (src/patches/widescreen.c, docs/widescreen/02-design.md).
+ *
+ * sub_0001A4E0 is the scene viewport's GetViewParams(this, mode, &fov, &aspect,
+ * &y, &height), thiscall, `ret 0x14`, and the one place every 3D view gets its
+ * aspect: a 4:3 literal (mode 0), the cutscenes' 16:9 letterbox (mode 1) or the
+ * viewport's own width/height (mode 2). With widescreen off it does exactly what
+ * the original did; on, full-screen views are widened (Hor+) and cutscenes follow
+ * the cutscene setting.
+ */
+#include "patches/widescreen.h"
+
+/* Sub-view rectangles follow the centred 2D (src/patches/widescreen.c). */
+extern void ws_view_rect_enter(void);
+void sub_0001A7A0_enter(void) { ws_view_rect_enter(); }
+
+void sub_0001A4E0(void)
+{
+    ws_view_params(g_ecx, MEM32(g_esp + 4), MEM32(g_esp + 8), MEM32(g_esp + 12),
+                   MEM32(g_esp + 16), MEM32(g_esp + 20));
+    g_esp += 24; /* thiscall: return address and five arguments */
+}
+
+/* Investigation probes for the 2D placement work (RECOMP_WS_TRACE2D=1; off: nothing). */
+extern void ws_trace_pos(void), ws_trace_vtx_arr(void), ws_trace_vtx(void);
+void sub_00028F90_enter(void) { ws_trace_pos(); }
+void sub_0002E390_enter(void) { ws_trace_vtx_arr(); }
+void sub_0002E470_enter(void) { ws_trace_vtx(); }

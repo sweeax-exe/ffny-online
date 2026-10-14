@@ -31,6 +31,7 @@
 |---|---|
 | [Roadmap](01-plan-review.md#corrected-roadmap-milestones-with-exit-criteria) | Milestone order and exit criteria, inside the September 2026 review of the original plan |
 | [PC features plan](07-m6-plan.md) | The display, input, launcher and texture releases, and where their code lives |
+| [Widescreen implementation pack](widescreen/README.md) | Findings, design, element catalog, work packages and play-test plan for 16:9, 16:10 and ultrawide |
 | [Testing roadmap](08-testing-roadmap.md) | What the test harness covers and what is still open |
 | [Improvement backlog](04-improvement-backlog.md) | Deferred structural work |
 | [PROGRESS.md](../PROGRESS.md) | The maintainer's running status, decisions log and hand-off notes |

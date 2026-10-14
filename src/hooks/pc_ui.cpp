@@ -120,6 +120,9 @@ static const char *friendly(const char *section, const char *key)
         { "display", "window_height", "Window height" }, { "display", "aspect", "Picture shape" },
         { "display", "render_scale", "Render scale" }, { "display", "filter", "Scaling filter" },
         { "display", "vsync", "Vsync" }, { "display", "gamma", "Game brightness curve" },
+        { "display", "widescreen_hud", "Fight HUD position" },
+        { "display", "widescreen_cutscenes", "Story cutscenes" }, { "display", "widescreen_side_fill", "Beside 4:3 pictures" },
+        { "display", "widescreen_fov_cap", "Widest field of view (degrees)" },
         { "textures", "enabled", "Use HD texture packs" }, { "textures", "packs", "Pack folders" },
         { "textures", "cache_mb", "Texture memory budget (MiB)" }, { "textures", "dump", "Capture source textures" },
         { "textures", "dump_limit", "Maximum new captures" },
@@ -505,11 +508,22 @@ static void settings_group(const char *section, std::initializer_list<const char
 static void page_display()
 {
     ImGui::SeparatorText("Window and picture");
-    settings_group("display", { "fullscreen", "window_width", "window_height", "aspect", "filter", "vsync" });
+    settings_group("display", { "fullscreen", "window_width", "window_height", "aspect" });
+    if (recomp_settings_get("display", "aspect", 0) >= 2) {
+        /* A widescreen shape: its own options, under it. */
+        ImGui::Indent();
+        settings_group("display", { "widescreen_hud", "widescreen_cutscenes", "widescreen_side_fill",
+                                    "widescreen_fov_cap" });
+        ImGui::TextWrapped("Widescreen (beta): the 3D view gets wider; menus, the HUD and movies keep their shape. "
+                           "widescreen (auto) matches your screen (16:9 or 16:10). It starts with the game: choose it "
+                           "here before Play, or restart after changing it in the overlay.");
+        ImGui::Unindent();
+    }
+    settings_group("display", { "filter", "vsync" });
     ImGui::SeparatorText("Quality");
     settings_group("display", { "render_scale", "gamma" });
-    ImGui::TextWrapped("Full screen, window size, picture shape, filter and vsync apply as you change them. "
-                       "Render scale and the brightness curve apply the next time the game starts. "
+    ImGui::TextWrapped("Full screen, window size, filter, vsync and the 4:3 and stretch shapes apply as you change them. "
+                       "The widescreen shapes, render scale and the brightness curve apply the next time the game starts. "
                        "F11 or Alt+Enter switches full screen while playing.");
 }
 

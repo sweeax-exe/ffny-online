@@ -15,7 +15,7 @@ cmake_minimum_required(VERSION 3.20)
 # (a junction/symlink is fine) and run scripts/verify-dump.py first.
 # ============================================================================
 
-project(defjam_recomp VERSION 0.8.0 LANGUAGES C CXX)
+project(defjam_recomp VERSION 0.9.0 LANGUAGES C CXX)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -90,6 +90,10 @@ if(DEFJAM_BUILD_GAME)
         # in pc_ui.cpp; pc_launcher.cpp is the Direct3D 11 one.
         list(FILTER HOOK_SOURCES EXCLUDE REGEX "/(watchpoint\\.c|pc_launcher\\.cpp)$")
         set(HOST_SOURCES src/host_posix.c)
+        if(APPLE)
+            enable_language(OBJC)
+            list(APPEND HOST_SOURCES src/host_macos.m)
+        endif()
         find_package(SDL3 REQUIRED CONFIG)
         find_package(Vulkan REQUIRED)
         include(imgui)
@@ -112,7 +116,7 @@ if(DEFJAM_BUILD_GAME)
                               SDL3::SDL3 Vulkan::Vulkan ${CMAKE_DL_LIBS} m)
         if(APPLE)
             # Shift held at start-up (src/host_posix.c) is read from the window server.
-            target_link_libraries(${PROJECT_NAME} PRIVATE "-framework ApplicationServices")
+            target_link_libraries(${PROJECT_NAME} PRIVATE "-framework ApplicationServices" "-framework AppKit")
         endif()
         # SDL opens the Vulkan loader by name; tell it where this build's is.
         target_compile_definitions(${PROJECT_NAME} PRIVATE

@@ -42,6 +42,17 @@ Fighters selection. They do not cover every mode or a full Story campaign.
 - Audio counters do not prove fidelity of every track/effect; owner listening
   accepted the experience.
 
+## Mac diagnostics retained in v0.9.0 validation
+
+The strict audio underrun check also fails in the accepted pre-widescreen Mac
+build, with gameplay and PCM checks passing; this shares the existing audio
+investigation [#11](https://github.com/vyanhursky/DefJamFFNY-recomp/issues/11).
+A historical stream callback target `0x001E3C14` appeared during an HD capture
+and one widescreen-off crib boot. The same symptom was recorded before
+widescreen; focused 16:10 and crib repeats passed, but the cause is unresolved.
+Raw failures remain in the [Mac validation report](widescreen/09-macos-validation.md).
+No callback suppression or weaker test threshold was added.
+
 ## Launcher and overlay (v0.4.0)
 
 The launcher and overlay are checked by clicking through them in the real game and by scripted runs
@@ -71,7 +82,7 @@ A settings file, borderless full screen, a resizable window and render-scale cho
 arrived in v0.2.0. Exclusive full screen is not offered; the flip-model borderless window replaces it. Vsync
 paces the game only on displays whose refresh rate is a multiple of 60. Changing `render_scale` needs
 a restart. The launcher and in-game settings are available on Windows and, since v0.6.2, macOS and Linux, and v0.6.0 added optional
-HD texture packs, on macOS too since v0.6.1 and on Linux and the Steam Deck since v0.7.2 ([guide](hd-textures.md)). True 16:9 remains planned ([plan](07-m6-plan.md));
+HD texture packs, on macOS too since v0.6.1 and on Linux and the Steam Deck since v0.7.2 ([guide](hd-textures.md)). Widescreen is available as an opt-in beta since v0.9.0 ([guide](widescreen/README.md));
 music replacement and frame rates above 60 are not planned for M6. macOS on Apple Silicon is
 playable since v0.5.0, with the launcher and overlay since v0.6.2
 ([guide](build-macos-linux.md)). Native Linux, including the Steam Deck, builds with Clang
