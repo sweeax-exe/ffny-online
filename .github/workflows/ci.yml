@@ -204,6 +204,10 @@ jobs:
         run: python -m pytest -q tests/unit/test_save_compat.py
       - name: Input settings and defaults (MSVC)
         run: python -m pytest -q tests/unit/test_input_native.py
+      - name: Play-test recorder, bundle analysis and scenario controls (MSVC, synthetic data)
+        run: |
+          python -m pip install Pillow==12.3.0 numpy==2.5.2
+          python -m pytest -q tests/unit/test_recorder_native.py tests/unit/test_scenario_controls_native.py
       - run: cmake --preset ci-runtime-only
       - name: Verify Release configuration without game code
         shell: pwsh
