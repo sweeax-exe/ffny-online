@@ -22,6 +22,7 @@
 
 #if !defined(_WIN32)
 #include <fcntl.h>
+#include <limits.h>                     /* PATH_MAX: Darwin defines it only in <sys/syslimits.h> */
 #include <sys/stat.h>
 #include <unistd.h>
 #endif
