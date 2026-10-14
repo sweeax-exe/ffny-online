@@ -184,7 +184,8 @@ def route_assertions(route, run, preset):
         contexts = evidence.fight_contexts(run.text)
         context = contexts[0] if contexts else {}
         slots = context.get('slots', {})
-        expected_venue = 6 if 'terrordome' in route else 1
+        # A generated route names its venue (scenarios.py, the catalog's index); the harness's own: 6 or 1.
+        expected_venue = harness.ROUTES.get(route, {}).get('venue_index', 6 if 'terrordome' in route else 1)
         checks += [evidence.assertion('setup.venue_request', context.get('venue') == expected_venue,
                                       'front-end venue request before StartGame', context=context, expected=expected_venue),
                    evidence.assertion('setup.fighter_requests', len(slots) == (4 if route.startswith('ffa') else 2),

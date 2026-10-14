@@ -61,7 +61,16 @@ def test_catalog_venues_and_modes_are_well_formed():
     cat = scenarios.catalog()
     for name, v in cat['venues'].items():
         assert 'steps' in v and isinstance(v.get('calibrated'), bool), name
+        assert v.get('index') is None or isinstance(v['index'], int), name
+    for entry in cat['fighters'].get('calibrated', []):
+        assert entry['p1'] and all(isinstance(c, int) for c in entry['characters'].values()), entry
     assert cat['cutscenes']['launch_command'] is None or '%s' in cat['cutscenes']['launch_command']
+
+
+def test_generated_route_carries_the_venue_index_the_suite_checks():
+    route = scenarios.fight_route(harness, 'one-on-one', 'the-pit')
+    assert route['venue_index'] == 19 and route['stages'][-1].startswith('getscreeninfo(battle/chsvenue=right@6;down@8')
+    assert scenarios.fight_route(harness, 'one-on-one', 'terrordome')['venue_index'] == 6
 
 
 LOG = ('[FUNCCALL] Game.StartGame()\n'

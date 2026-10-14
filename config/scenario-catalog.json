@@ -8,13 +8,22 @@
                      "note": "the third match type; the ffa routes"}
   },
   "venues": {
-    "foundation": {"steps": "", "calibrated": true, "note": "the cursor's starting venue"},
-    "terrordome": {"steps": "right@6", "calibrated": true, "note": "venue 6, one step right of the Foundation"}
+    "foundation": {"steps": "", "index": 1, "calibrated": true, "note": "the cursor's starting venue"},
+    "terrordome": {"steps": "right@6", "index": 6, "calibrated": true, "note": "venue 6, one step right of the Foundation"},
+    "the-pit": {"steps": "right@6;down@8", "index": 19, "calibrated": true,
+                "note": "Game.ChooseVenue(19), one step down from the Terrordome on the map; calibrated on macOS 2026-10-14 from the venue-map capture and the fight"}
   },
   "fighters": {
-    "about": "The fighter grid is moved with right/down from where the cursor starts. Record what a move list picks with `scenarios.py generate ... --expect-character N`: the match_start telemetry names the character index each slot got, so a wrong calibration fails instead of fighting the wrong fighter.",
+    "about": "The fighter grid is moved with right/down from where the cursor starts. In a one-on-one route player 1 is already READY (the profile's fighter: Blaze, character 4, with the harness's profiles) when the controllersetup(0,0= presses arrive, so the presses after the first A choose the CPU's fighter. Record what a move list picks with `scenarios.py generate ... --expect-character SLOT:N`: the match_start telemetry names the character index each slot got, so a wrong calibration fails instead of fighting the wrong fighter.",
     "player_default": "right@4;a@6;right@10;a@12;a@16;a@20;a@24;a@28",
-    "cpu_default": "a@4+4x6"
+    "cpu_default": "a@4+4x6",
+    "calibrated": [
+      {"p1": "right@4;a@6;right@10;a@12;a@16;a@20;a@24;a@28", "characters": {"0": 4, "1": 9},
+       "names": "Blaze; Doc (CPU)", "calibrated": true, "note": "player_default: every one-on-one harness route"},
+      {"p1": "right@4;right@6;a@8;right@11;a@13;a@17;a@21;a@25;a@29", "characters": {"0": 4, "1": 14},
+       "names": "Blaze; Ice-T (CPU)", "calibrated": true,
+       "note": "macOS 2026-10-14, at The Pit with --expect-character 0:4 1:14. Presses 2 s apart; a second right 1 s after the first was not taken"}
+    ]
   },
   "story_points": [
     {"id": "new-profile", "how": "no Story save: Main menu -> Story with a new user ID", "route": "intro",

@@ -96,6 +96,8 @@ def fight_route(harness, mode, venue, length='short', p1=None, cpu=None, cat=Non
     four = mode != 'one-on-one'
     route = {'help': 'generated: %s at %s' % (mode, venue), 'stages': stages, 'tail': harness.FIGHT_TAIL,
              'generated': {'mode': mode, 'venue': venue, 'length': length, 'p1': p1, 'cpu': cpu}}
+    if 'index' in cat['venues'][venue]:
+        route['venue_index'] = cat['venues'][venue]['index']    # what scenario_suite checks Game.ChooseVenue against
     if length == 'result':
         route.update(until='game.getmatchsummary(', after=6, secs=1200 if four else 900, shots='@game.startgame(,60')
     elif length == 'long' or steps:
