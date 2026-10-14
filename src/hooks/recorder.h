@@ -70,6 +70,13 @@ int  recorder_picture_wanted(void);
  * window applies it. */
 void recorder_picture(const uint8_t *rgba, int pitch, int width, int height,
                       const uint8_t gamma[3][256]);
+/* The same when the picture is read back asynchronously and arrives a frame or two
+ * late. After recorder_picture_wanted() said yes, take this frame's request (0: none);
+ * when the picture comes, hand it over with that tag and it is filed under the frame and
+ * time of the request. `bgra`: the bytes run B, G, R, A. */
+uint64_t recorder_picture_request(void);
+void recorder_picture_tagged(uint64_t tag, const uint8_t *pixels, int pitch, int width, int height,
+                             int bgra, const uint8_t gamma[3][256]);
 
 /* One line of events.jsonl. `fields` is the inside of a JSON object
  * ("\"a\":1,\"b\":\"x\"") or NULL. Any thread. */

@@ -34,6 +34,23 @@ static void nap(int ms) { usleep(ms * 1000); }
 
 static unsigned char img[96 * 64 * 4];
 
+/* "async": pictures are requested by tag and handed over two frames later with their
+ * bytes in B, G, R, A order, as an asynchronous read-back delivers them. */
+static unsigned long long late_tag[3];
+static unsigned char late_img[3][96 * 64 * 4];
+static int late_age[3];
+
+static void deliver_late(int all)
+{
+    int k;
+    for (k = 0; k < 3; k++) {
+        if (late_tag[k] && (all || ++late_age[k] >= 2)) {
+            recorder_picture_tagged(late_tag[k], late_img[k], 96 * 4, 96, 64, 1, NULL);
+            late_tag[k] = 0;
+        }
+    }
+}
+
 int main(int argc, char **argv)
 {
     char log[1024], pcm[1024];
@@ -41,6 +58,7 @@ int main(int argc, char **argv)
     RecorderConfig c;
     RecorderFrameIn in;
     int f, pictures = 0, crash = argc > 2 && !strcmp(argv[2], "crash");
+    int late = argc > 2 && !strcmp(argv[2], "async");
     long long sample = 0;
 
     snprintf(log, sizeof log, "%s/fake.log", argv[1]);
@@ -68,6 +86,7 @@ int main(int argc, char **argv)
         int i, want;
         nap(f == 200 ? 90 : 3);                     /* the game's work; frame 200 is a hitch */
         recorder_frame_begin();
+        if (late) deliver_late(0);
         want = recorder_picture_wanted();
         if (want) {
             pictures++;
@@ -82,7 +101,23 @@ int main(int argc, char **argv)
                 }
                 img[i * 4 + 3] = 255;
             }
-            recorder_picture(img, 96 * 4, 96, 64, NULL);
+            if (late) {
+                unsigned long long tag = recorder_picture_request();
+                int k, slot = -1;
+                for (k = 0; k < 3; k++) if (!late_tag[k]) slot = k;
+                if (tag && slot >= 0) {
+                    for (i = 0; i < 96 * 64; i++) {
+                        late_img[slot][i * 4 + 0] = img[i * 4 + 2];
+                        late_img[slot][i * 4 + 1] = img[i * 4 + 1];
+                        late_img[slot][i * 4 + 2] = img[i * 4 + 0];
+                        late_img[slot][i * 4 + 3] = 255;
+                    }
+                    late_tag[slot] = tag;
+                    late_age[slot] = 0;
+                }
+            } else {
+                recorder_picture(img, 96 * 4, 96, 64, NULL);
+            }
         }
         /* 800 samples a frame: a 440 Hz tone, silent for frames 100-105, one click at 230. */
         for (i = 0; i < 800; i++, sample++) {
@@ -104,6 +139,7 @@ int main(int argc, char **argv)
         if (f == 120) recorder_event_text("fe", "text", "Control.GetScreenInfo(story/crib.swf)");
         if (f == 125) recorder_set_view_mode(1);
     }
+    if (late) deliver_late(1);
     for (f = 0; f < 40; f++) recorder_set_view_mode(1);   /* held long enough to count */
     if (crash) {
         recorder_on_crash("synthetic crash");
@@ -246,3 +282,23 @@ def test_old_sessions_keep_bundles_and_lose_bulk(driver, tmp_path):
     assert not (oldest / 'frames.csv').exists() and not (oldest / 'audio.pcm').exists()
     assert (oldest / 'events.jsonl').exists() and list((oldest / 'bundles').iterdir())
     assert (sessions[-1] / 'frames.csv').exists()
+
+
+def test_late_pictures_are_filed_under_their_request(driver, tmp_path):
+    """Pictures read back asynchronously arrive two frames late, B, G, R, A: the clip
+    must hold them as the synchronous run does, in R, G, B and in request order."""
+    session, err = run(driver, tmp_path, 'async')
+    bundles = sorted((session / 'bundles').iterdir())
+    assert len(bundles) == 1, err
+    meta = json.loads((bundles[0] / 'bundle.json').read_text())
+    clip = meta['clip']
+    assert clip['width'] == 72 and clip['height'] == 48 and len(clip['frames']) > 20
+    data = (bundles[0] / 'clip.rgb').read_bytes()
+    n = clip['width'] * clip['height'] * 3
+    blues = {data[i * n + 2] for i in range(len(clip['frames']))}     # first pixel of each picture
+    assert 90 in blues                                                # B stays B (250 is the odd one out)
+    reds = {data[i * n] for i in range(len(clip['frames']))}
+    assert reds <= {0, 1, 2, 250}                                     # R from x*2 at the left edge
+    frames = [c[0] for c in clip['frames']]                           # [frame, t_ms] of the request
+    times = [c[1] for c in clip['frames']]
+    assert frames == sorted(frames) and len(set(frames)) == len(frames) and times == sorted(times)

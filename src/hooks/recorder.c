@@ -375,9 +375,10 @@ int recorder_picture_wanted(void)
     return mask;
 }
 
-/* Box-filter `rgba` (sw x sh) to `out` (w x h, R G B), applying `gamma`. */
+/* Box-filter `rgba` (sw x sh) to `out` (w x h, R G B), applying `gamma`. `bgra`: the
+ * source's bytes run B, G, R, A. */
 static void downsample(const uint8_t *rgba, int pitch, int sw, int sh, uint8_t *out, int w, int h,
-                       const uint8_t gamma[3][256])
+                       int bgra, const uint8_t gamma[3][256])
 {
     int x, y;
     for (y = 0; y < h; y++) {
@@ -395,7 +396,7 @@ static void downsample(const uint8_t *rgba, int pitch, int sw, int sh, uint8_t *
                 for (j = y0; j < y1; j += sy) {
                     const uint8_t *row = rgba + (size_t)j * (size_t)pitch;
                     for (i = x0; i < x1; i += sx) {
-                        for (c = 0; c < 3; c++) sum[c] += row[i * 4 + c];
+                        for (c = 0; c < 3; c++) sum[c] += row[i * 4 + (bgra ? 2 - c : c)];
                         n++;
                     }
                 }
@@ -408,13 +409,21 @@ static void downsample(const uint8_t *rgba, int pitch, int sw, int sh, uint8_t *
     }
 }
 
-void recorder_picture(const uint8_t *rgba, int pitch, int width, int height, const uint8_t gamma[3][256])
+/* The picture's period has been served: the next one is due a period later. */
+static void picture_advance(double t)
 {
-    int mask = g_pic_mask;
-    double t;
-    g_pic_mask = 0;
+    double period = 1000.0 / (double)(g_cfg.video_fps > 0 ? g_cfg.video_fps : 1);
+    g_next_pic += period;
+    if (g_next_pic < t) g_next_pic = t + period;
+}
+
+/* A picture for the ring (mask 1) and/or the still (mask 2), taken at `frame` and `t`.
+ * `advance`: this call also serves the period (a synchronous picture; an asynchronous one
+ * served it when it was requested). */
+static void picture_store(int mask, unsigned long long frame, double t, const uint8_t *rgba, int pitch,
+                          int width, int height, int bgra, const uint8_t gamma[3][256], int advance)
+{
     if (!g_on || !rgba || width <= 0 || height <= 0 || !mask) return;
-    t = now_ms();
     /* A bundle being written holds the ring for a moment: skip this picture rather than
      * make the frame wait (the recorder must not cause the hitches it records). */
     if (!mtx_trylock(&g_pic_lock)) {
@@ -442,16 +451,13 @@ void recorder_picture(const uint8_t *rgba, int pitch, int width, int height, con
         }
         if (g_ring) {
             size_t slot = (size_t)(g_ring_n % (unsigned long long)g_ring_slots);
-            downsample(rgba, pitch, width, height, g_ring + slot * g_slot_bytes, g_tw, g_th, gamma);
-            g_ring_meta[slot].frame = g_frame;
+            downsample(rgba, pitch, width, height, g_ring + slot * g_slot_bytes, g_tw, g_th, bgra, gamma);
+            g_ring_meta[slot].frame = frame;
             g_ring_meta[slot].t = t;
             g_ring_n++;
         }
-        {
-            double period = 1000.0 / (double)(g_cfg.video_fps > 0 ? g_cfg.video_fps : 1);
-            g_next_pic += period;
-            if (g_next_pic < t) g_next_pic = t + period;
-        }
+        if (advance)
+            picture_advance(t);
     }
     if (mask & 2) {
         int h = 480, w = (int)(480.0 * (double)width / (double)height + 0.5);
@@ -463,14 +469,61 @@ void recorder_picture(const uint8_t *rgba, int pitch, int width, int height, con
             g_still_h = g_still ? h : 0;
         }
         if (g_still) {
-            downsample(rgba, pitch, width, height, g_still, g_still_w, g_still_h, gamma);
+            downsample(rgba, pitch, width, height, g_still, g_still_w, g_still_h, bgra, gamma);
             g_still_t = t;
-            g_still_frame = g_frame;
+            g_still_frame = frame;
             g_still_ready = 1;
         }
         g_still_wanted = 0;
     }
     mtx_unlock(&g_pic_lock);
+}
+
+void recorder_picture(const uint8_t *rgba, int pitch, int width, int height, const uint8_t gamma[3][256])
+{
+    int mask = g_pic_mask;
+    g_pic_mask = 0;
+    picture_store(mask, g_frame, now_ms(), rgba, pitch, width, height, 0, gamma, 1);
+}
+
+/* Asynchronous pictures: the request's time, by tag, until the picture arrives. */
+#define PIC_PENDING 8
+static struct { uint64_t tag; double t; } g_pic_pending[PIC_PENDING];
+static unsigned g_pic_pending_i;
+
+uint64_t recorder_picture_request(void)
+{
+    int mask = g_pic_mask;
+    uint64_t tag;
+    double t;
+    g_pic_mask = 0;
+    if (!g_on || !mask) return 0;
+    t = now_ms();
+    /* Served now, so the frames before the picture arrives do not ask again. A still
+     * that then finds the ring busy asks again (picture_store puts the flag back). */
+    if (mask & 1) picture_advance(t);
+    if (mask & 2) g_still_wanted = 0;
+    tag = ((uint64_t)g_frame << 2) | (uint64_t)mask;
+    g_pic_pending[g_pic_pending_i % PIC_PENDING].tag = tag;
+    g_pic_pending[g_pic_pending_i % PIC_PENDING].t = t;
+    g_pic_pending_i++;
+    return tag;
+}
+
+void recorder_picture_tagged(uint64_t tag, const uint8_t *pixels, int pitch, int width, int height, int bgra,
+                             const uint8_t gamma[3][256])
+{
+    double t = -1.0;
+    int i;
+    for (i = 0; i < PIC_PENDING; i++)
+        if (g_pic_pending[i].tag == tag) {
+            t = g_pic_pending[i].t;
+            g_pic_pending[i].tag = 0;
+            break;
+        }
+    if (t < 0.0) t = now_ms();      /* too late to find: when it arrived */
+    picture_store((int)(tag & 3u), (unsigned long long)(tag >> 2), t, pixels, pitch, width, height, bgra,
+                  gamma, 0);
 }
 
 /* ---- frames --------------------------------------------------------------------------------------- */
