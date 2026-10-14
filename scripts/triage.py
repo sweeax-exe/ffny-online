@@ -144,6 +144,7 @@ def scan(path, ignores):
         'unimpl': collections.OrderedDict(), 'unimpl_known': 0,
         'abi': [], 'truncated_batches': 0, 'debug_layer': 0, 'filepath_fail': [],
         'anomalies': collections.OrderedDict(),
+        'record_session': None, 'record_bundles': [],
     }
     block = None              # [kind, start line, [lines], limit] while a header's detail lines are read
     with open(path, 'rb') as f:
@@ -162,6 +163,14 @@ def scan(path, ignores):
                     r['presents'].append(int(raw[i:j]))
                     r['last_present_line'] = n
                     r['first_present_line'] = r['first_present_line'] or n
+                continue
+            if raw.startswith(b'[RECORD] '):
+                # The play-test recorder (src/hooks/recorder.c): where this run's session and bundles are.
+                text = raw.rstrip(b'\r\n').decode('utf-8', 'replace')
+                if 'recording this session to ' in text:
+                    r['record_session'] = text.split('recording this session to ', 1)[1].split(' (', 1)[0]
+                elif ' written to ' in text and len(r['record_bundles']) < 20:
+                    r['record_bundles'].append((n, text.split(' written to ', 1)[1]))
                 continue
             if raw.startswith(b'[FUNCCALL] '):
                 r['funccall_count'] += 1
@@ -331,6 +340,9 @@ def next_steps(r, verdict, path):
     q = quote(rel)
     steps = []
     win = os.name == 'nt'
+    for _, bundle in r['record_bundles'][-3:]:
+        steps.append('python scripts/bug-bundle.py %s      (the recorder\'s bundle: pictures, frame times, sound)'
+                     % quote(bundle))
     if r['crash']:
         c = r['crash']
         steps.append('python scripts/triage.py %s --around %d --context 30      (the crash block and what led to it)'
@@ -377,6 +389,9 @@ def digest(r):
         'abi': [{'line': n, 'text': t} for n, t in r['abi']],
         'truncated_batches': r['truncated_batches'], 'debug_layer': r['debug_layer'],
         'file_path_failures': [{'line': n, 'text': t} for n, t in r['filepath_fail']],
+        'record': ({'session': r['record_session'],
+                    'bundles': [{'line': n, 'dir': b} for n, b in r['record_bundles']]}
+                   if r['record_session'] or r['record_bundles'] else None),
         'unclassified': [{'line': v[0], 'count': v[1], 'text': v[2]}
                          for v in sorted(r['anomalies'].values())][:SHOW_ANOMALIES],
         'unclassified_distinct': len(r['anomalies']),
@@ -428,6 +443,10 @@ def human(d):
         extra.append('%d D3D11 debug-layer messages' % d['debug_layer'])
     if extra:
         L.append('GPU      ' + ', '.join(extra))
+    rec = d.get('record')
+    if rec:
+        L.append('RECORD   session %s; %d bundle(s)%s' % (rec['session'] or '(not named)', len(rec['bundles']),
+                 (': ' + ', '.join('@%d %s' % (b['line'], b['dir']) for b in rec['bundles'][-3:])) if rec['bundles'] else ''))
     for fp in d['file_path_failures']:
         L.append('FILE     @%d %s' % (fp['line'], fp['text']))
     if d['unclassified']:

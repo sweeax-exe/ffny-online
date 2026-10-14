@@ -338,3 +338,14 @@ def test_no_argument_picks_the_newest_run(tmp_path):
     assert triage.resolve(None, str(tmp_path)) == new
     with pytest.raises(SystemExit):
         triage.resolve(None, str(tmp_path / 'nowhere'))
+
+
+def test_recorder_bundles_are_listed_and_come_first_in_next_steps(tmp_path):
+    d = digest(tmp_path, '[RECORD] recording this session to logs/sessions/20261014-101500 (pictures 10 a second, '
+               '30 s kept; mark with the key 120)\n' + healthy() +
+               '[RECORD] bundle (key) written to logs/sessions/20261014-101500/bundles/001-key-101612\n')
+    assert d['verdict'] == 'clean'
+    assert d['record']['session'] == 'logs/sessions/20261014-101500'
+    assert d['record']['bundles'][0]['dir'].endswith('001-key-101612')
+    assert d['next'][0].startswith('python scripts/bug-bundle.py logs/sessions/20261014-101500/bundles/001-key-101612')
+    assert 'RECORD   session logs/sessions/20261014-101500; 1 bundle(s)' in triage.human(d)
