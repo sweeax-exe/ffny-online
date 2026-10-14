@@ -223,6 +223,43 @@ def visual_assertions(manifest_path, route, run, folder):
     return checks
 
 
+def recorder_sessions():
+    root = Path(harness.REPO) / 'logs' / 'sessions'
+    return {p.name for p in root.iterdir() if p.is_dir()} if root.is_dir() else set()
+
+
+def recorder_results(before, folder):
+    """The session the run's recorder made, analysed with scripts/bug-bundle.py, and each bundle in it."""
+    root = Path(harness.REPO) / 'logs' / 'sessions'
+    new = sorted(recorder_sessions() - before)
+    if not new:
+        return {'session': None}
+    session = root / new[-1]
+    bug_bundle = load_hyphenated('bug-bundle')
+    out = {'session': str(session), 'bundles': []}
+    try:
+        summary = bug_bundle.analyse(session, folder / 'recorder')
+        out['session_report'] = str(folder / 'recorder' / 'report.md')
+        out['hitches'] = len(summary['hitches'])
+        out['frames'] = summary['frames']
+    except (OSError, ValueError, SystemExit) as ex:
+        out['session_error'] = str(ex)
+    for bundle in sorted((session / 'bundles').glob('*/bundle.json')):
+        try:
+            bug_bundle.analyse(bundle.parent)
+            out['bundles'].append(str(bundle.parent / 'report.md'))
+        except (OSError, ValueError, SystemExit) as ex:
+            out['bundles'].append('%s: %s' % (bundle.parent, ex))
+    return out
+
+
+def load_hyphenated(name):
+    spec = importlib.util.spec_from_file_location(name.replace('-', '_'), HERE / (name + '.py'))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def execute(args):
     started = time.monotonic()
     folder = Path(args.output or (Path(harness.REPO) / 'logs/scenarios' / (args.route + '-' + time.strftime('%Y%m%d-%H%M%S')))).resolve()
@@ -272,6 +309,12 @@ def execute(args):
                 env[name] = value
             if args.rng_seed is not None:
                 env['RECOMP_TEST_RNG_SEED'] = str(args.rng_seed)
+            sessions_before = recorder_sessions() if getattr(args, 'record', False) else None
+            if sessions_before is not None:
+                # The play-test recorder (docs/playtest-recorder.md): frame rows, events and pictures of the run.
+                env['RECOMP_RECORD'] = '1'
+                if args.record_hitch_ms:
+                    env['RECOMP_RECORD_AUTO_HITCH_MS'] = str(args.record_hitch_ms)
             if args.step_shots:
                 steps = [int(x) for x in args.step_shots.split(',')]
                 if any(x <= 0 for x in steps) or steps != sorted(set(steps)):
@@ -374,6 +417,11 @@ def execute(args):
                 expected = Path(args.stream_expect).read_text(encoding='utf-8').splitlines()
                 report['identity']['stream_expect_sha256'] = evidence.digest(args.stream_expect)
                 report['assertions'] += evidence.stream_checks(run.text, expected, args.stream_steps)
+            if sessions_before is not None:
+                report['recorder'] = recorder_results(sessions_before, folder)
+                report['assertions'].append(evidence.assertion(
+                    'recorder.session', bool(report['recorder'].get('session')),
+                    'the play-test recorder kept a session for this run', **report['recorder']))
             if args.baselines:
                 report['assertions'] += visual_assertions(args.baselines, args.route, run, folder)
                 report['images'] += [str(p) for p in folder.glob('diff-*.png')]
@@ -442,6 +490,10 @@ def main(argv=None):
                      help="replace the seed of the match's random number generator (changes CPU behaviour; for repeatable runs)")
     run.add_argument('--baselines', help='local approved-baseline manifest')
     run.add_argument('--session-plan', help='experimental ordered-screen recipe using live pad input')
+    run.add_argument('--record', action='store_true',
+                     help='turn the play-test recorder on and analyse its session and bundles (docs/playtest-recorder.md)')
+    run.add_argument('--record-hitch-ms', type=int, default=0,
+                     help='with --record: a frame this long writes a bundle by itself')
     run.add_argument('--require-combat', action='store_true',
                      help='assert movement, a player attack, damage and (on routes that play to the end) the result from game state')
     args = parser.parse_args(argv)

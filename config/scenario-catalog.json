@@ -1,0 +1,32 @@
+{
+  "schema": 1,
+  "about": "Building blocks for scripts/scenarios.py: how to pick a match type, a venue and a fighter from the menus, which Story points the fixture library should hold, and what is known about launching a cutscene. Pad steps use the harness stage syntax (docs/09-testing-harness.md). 'calibrated' means a run has confirmed the step lands where the name says; an uncalibrated entry is a guess to be checked with --expect-character or the captures. No game data: names and menu steps only.",
+  "modes": {
+    "one-on-one": {"cmtype": "a@5+4x7", "fighters": 2, "calibrated": true,
+                   "note": "the first match type; the fight and fight-result routes"},
+    "free-for-all": {"cmtype": "right@5;right@6.5;a@9", "fighters": 4, "calibrated": true,
+                     "note": "the third match type; the ffa routes"}
+  },
+  "venues": {
+    "foundation": {"steps": "", "calibrated": true, "note": "the cursor's starting venue"},
+    "terrordome": {"steps": "right@6", "calibrated": true, "note": "venue 6, one step right of the Foundation"}
+  },
+  "fighters": {
+    "about": "The fighter grid is moved with right/down from where the cursor starts. Record what a move list picks with `scenarios.py generate ... --expect-character N`: the match_start telemetry names the character index each slot got, so a wrong calibration fails instead of fighting the wrong fighter.",
+    "player_default": "right@4;a@6;right@10;a@12;a@16;a@20;a@24;a@28",
+    "cpu_default": "a@4+4x6"
+  },
+  "story_points": [
+    {"id": "new-profile", "how": "no Story save: Main menu -> Story with a new user ID", "route": "intro",
+     "cutscenes": "the opening movies and the prologue's in-engine scenes, then the character creator"},
+    {"id": "crib", "how": "a profile past the prologue; Story -> the crib", "route": "crib"},
+    {"id": "gym", "how": "crib -> Map -> Shop District -> Stapleton Athletics", "route": "gym"}
+  ],
+  "cutscenes": {
+    "files": "assets/cinema/*.viv in the dump: sc00 to sc21 and the gf* set (docs/research/widescreen-game-cameras.md, section 4.2)",
+    "subsystem": "CINEMA::CCinemaSubsystem::LoadScene (its assert strings start near guest 0x29C715); the cinema update sub_00078A40 -> sub_0005BE50 -> the camera sampler sub_00070DF0",
+    "view_signal": "a Story cutscene sets the game's view mode 1 (sub_0001A4E0); the recorder logs it as a 'view' event with cutscene=true",
+    "launch_command": null,
+    "launch_note": "Not found yet. scripts/funccall-catalog.py lists every command the front end can send; the one that starts a scene goes here as a format with %s for the scene (for example \"Story.Something(%s)\"), and `scenarios.py cutscene --scene sc05` then uses it. docs/research/scenario-launching.md has the steps."
+  }
+}

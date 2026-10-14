@@ -1,0 +1,106 @@
+"""scripts/scenarios.py: generated routes, fixture library, expectations, cutscene routes."""
+import importlib.util
+import json
+from pathlib import Path
+
+import pytest
+
+ROOT = Path(__file__).resolve().parents[2]
+
+
+def load(name):
+    spec = importlib.util.spec_from_file_location(name.replace('-', '_'), ROOT / 'scripts' / (name + '.py'))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+scenarios = load('scenarios')
+harness = load('harness')
+
+KEYS = ('stages', 'tail', 'until', 'after', 'secs', 'shots')
+
+
+@pytest.mark.parametrize('mode,venue,length,existing', [
+    ('one-on-one', 'foundation', 'short', 'fight'),
+    ('one-on-one', 'foundation', 'result', 'fight-result'),
+    ('one-on-one', 'terrordome', 'short', 'fight-terrordome'),
+    ('free-for-all', 'foundation', 'short', 'ffa'),
+    ('free-for-all', 'foundation', 'result', 'ffa-result'),
+    ('free-for-all', 'terrordome', 'short', 'ffa-terrordome'),
+])
+def test_calibrated_combinations_are_the_harness_routes(mode, venue, length, existing):
+    route = scenarios.fight_route(harness, mode, venue, length)
+    want = harness.ROUTES[existing]
+    assert {k: route.get(k) for k in KEYS} == {k: want.get(k) for k in KEYS}
+
+
+def test_names_make_scenario_suite_treat_them_as_fights():
+    assert scenarios.route_name('one-on-one', 'terrordome', 'short') == 'fight-gen-terrordome'
+    assert scenarios.route_name('free-for-all', 'foundation', 'result') == 'ffa-gen-foundation-result'
+
+
+def test_fighter_moves_replace_only_the_selection_stage():
+    route = scenarios.fight_route(harness, 'one-on-one', 'foundation', p1='right@4;right@5;a@7', cpu='down@4;a@6')
+    assert route['stages'][-2] == 'controllersetup(0,0=right@4;right@5;a@7'
+    assert route['stages'][-1] == 'controllersetup(1,=down@4;a@6'
+    assert route['stages'][:-2] == list(harness.ONE_ON_ONE_SETUP[:-1])
+    ffa = scenarios.fight_route(harness, 'free-for-all', 'foundation', p1='a@5')
+    assert 'controllersetup(0,0=a@5' in ffa['stages']
+    assert sum(s.startswith('controllersetup(0,0=') for s in ffa['stages']) == 1
+
+
+def test_unknown_names_say_what_is_known():
+    with pytest.raises(SystemExit, match='terrordome'):
+        scenarios.fight_route(harness, 'one-on-one', 'nowhere')
+    with pytest.raises(SystemExit, match='free-for-all'):
+        scenarios.fight_route(harness, 'tag', 'foundation')
+
+
+def test_catalog_venues_and_modes_are_well_formed():
+    cat = scenarios.catalog()
+    for name, v in cat['venues'].items():
+        assert 'steps' in v and isinstance(v.get('calibrated'), bool), name
+    assert cat['cutscenes']['launch_command'] is None or '%s' in cat['cutscenes']['launch_command']
+
+
+LOG = ('[FUNCCALL] Game.StartGame()\n'
+       '[TEST-EVENT] {"event":"match_start","match":1,"step":1,"host_ms":5,"match_type":0,"fighters":['
+       '{"slot":0,"character":4,"cpu":0},{"slot":1,"character":9,"cpu":1}]}\n')
+
+
+def test_expected_fighters_are_checked_from_telemetry():
+    assert scenarios.match_fighters(LOG) == [(0, 4, 0), (1, 9, 1)]
+    ok, msg = scenarios.check_expectations(LOG, {0: 4, 1: 9})
+    assert ok and 'slot 0: character 4' in msg
+    ok, msg = scenarios.check_expectations(LOG, {0: 5})
+    assert not ok and 'slot 0: character 4, not 5' in msg
+    ok, msg = scenarios.check_expectations('[FUNCCALL] x\n', {0: 4})
+    assert not ok and 'no match_start' in msg
+    assert scenarios.parse_expect(['0:4', '1:12']) == {0: 4, 1: 12}
+
+
+def test_cutscene_route_injects_after_the_base_route_and_keeps_capturing():
+    r = scenarios.cutscene_route(harness, 'crib', 'getscreeninfo(story/crib#1=>Story.Play(sc05)', 9, 3)
+    assert r['env']['RECOMP_FE_INJECT'] == 'getscreeninfo(story/crib#1=>Story.Play(sc05)'
+    assert r['shots'] == '@getscreeninfo(story/crib,3,6,9'
+    assert r['stages'] == harness.ROUTES['crib']['stages'] and r['until'] is None
+    harness.validate_shots(r['shots'])
+
+
+def test_fixture_library_add_list_and_refuse_duplicates(tmp_path, monkeypatch):
+    data = tmp_path / 'data'
+    (data / 'save' / 'UserData' / 'ABC').mkdir(parents=True)
+    (data / 'save' / 'UserData' / 'ABC' / 'profile.dat').write_bytes(b'x' * 32)
+    monkeypatch.setenv('DEFJAM_DATA', str(data))
+    suite = load('scenario_suite')
+    out, entry = scenarios.fixture_add(harness, suite, 'crib-day1', None, 'crib', 'after the first fight')
+    assert (out / 'fixture.json').exists() and (out / 'save' / 'UserData' / 'ABC' / 'profile.dat').exists()
+    lib = json.loads((data / 'fixtures' / 'library.json').read_text())
+    assert lib['fixtures']['crib-day1']['story'] == 'crib'
+    assert scenarios.fixture_path(harness, 'crib-day1') == out
+    with pytest.raises(SystemExit, match='exists'):
+        scenarios.fixture_add(harness, suite, 'crib-day1', None, 'crib', '')
+    with pytest.raises(SystemExit, match='letters'):
+        scenarios.fixture_add(harness, suite, '../escape', None, None, None)
+    assert scenarios.main(['fixture', 'verify']) == 0
