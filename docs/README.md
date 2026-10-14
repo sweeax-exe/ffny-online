@@ -5,12 +5,12 @@
 | Guide | Purpose |
 |---|---|
 | [Build and play](build-and-play.md) | Windows: the installer, or a manual source build from your own dump; launch and saves |
-| [Windows setup](setup-installer.md) | The installer in detail: folders, shortcuts, silent mode, repair and removal |
+| [Setup installers](setup-installer.md) | Windows, macOS and Linux/Steam Deck: folders, shortcuts, silent mode, repair and removal |
 | [Build on macOS and Linux](build-macos-linux.md) | The same pipeline off Windows, and what works there |
 | [Launcher and overlay](launcher-and-overlay.md) | The start-up window and the in-game settings screen (F1) |
 | [Controllers, keyboard and mouse](10-input.md) | Gamepads, the keyboard player, default keys, remapping and rumble |
 | [settings.ini and keybinds](settings-reference.md) | Every setting, the default keys and key names, with examples |
-| [HD textures](hd-textures.md) | Optional Windows texture packs: generation, settings and fallback |
+| [HD textures](hd-textures.md) | Optional texture packs on Windows, macOS and Linux: generation, settings and fallback |
 | [Known issues](known-issues.md) | Current limitations and what has not been tested |
 
 ## Develop and test
@@ -26,6 +26,8 @@
 | [Agent playbooks](agent/README.md) | Reading a failed run (`triage.py`), diagnostics, the harness, sub-agent briefs; what `AGENTS.md` points to |
 | [Texture processing and review](hd-texture-workflow.md) | Reproducing the HD texture census, upscale and review galleries |
 | [Release process](releasing.md) | Source releases, tag checks and GitHub CI |
+| [Maintaining the GitHub introduction](github-introduction.md) | About wording, README structure and the documentation release pass |
+| [Media capture plan](media/capture-plan.md) | Current-release screenshots/clips, export settings and capture handoff |
 
 ## Plans and history
 
@@ -39,11 +41,8 @@
 | [PROGRESS.md](../PROGRESS.md) | The maintainer's running status, decisions log and hand-off notes |
 | [Research notes](research/README.md) | Selected investigations into the game and the runtime |
 
-Release notes: [v0.6.0](releases/v0.6.0.md) · [v0.5.1](releases/v0.5.1.md) ·
-[v0.5.0](releases/v0.5.0.md) · [v0.4.1](releases/v0.4.1.md) · [v0.4.0](releases/v0.4.0.md) ·
-[v0.3.0](releases/v0.3.0.md) · [v0.2.4](releases/v0.2.4.md) · [v0.2.3](releases/v0.2.3.md) ·
-[v0.2.2](releases/v0.2.2.md) · [v0.2.1](releases/v0.2.1.md) · [v0.2.0](releases/v0.2.0.md) ·
-[v0.1.0](releases/v0.1.0.md)
+Release notes: [GitHub releases](https://github.com/vyanhursky/DefJamFFNY-recomp/releases)
+and the [versioned notes](releases).
 
 Plans, the progress log and research notes are dated records. Their commands
 and conclusions may have been superseded; the guides above and the source are
@@ -52,6 +51,7 @@ published, and the 108 numbered toolkit patches that source comments still cite
 are retired: the [ledger](research/toolkit-rebase-ledger.md) maps each to the
 published fork.
 
-The README visuals in `media/` are the only published images: two gameplay
-captures and two screenshots of the port's own interface. See
-[media/README.md](media/README.md).
+The [media index](media/README.md) records the approved gameplay and interface
+captures. [Branding](../branding/README.md) documents the separately approved
+application icons, Steam artwork and social preview. Game artwork retains its
+original ownership; the MIT license does not cover it.

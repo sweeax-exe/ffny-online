@@ -6,224 +6,180 @@
 [![Release](https://img.shields.io/github/v/release/vyanhursky/DefJamFFNY-recomp)](https://github.com/vyanhursky/DefJamFFNY-recomp/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-A native PC port of **Def Jam: Fight for NY**, built from the original Xbox
-version with [xboxrecomp](https://github.com/sp00nznet/xboxrecomp). The Xbox
-executable is translated into C and compiled ahead of time. The game's own
-gameplay, menus and cutscenes run on an Xbox compatibility runtime, drawn through
-Direct3D 11 on Windows and Vulkan on macOS and Linux, with sound and controllers supplied
-by the host.
+Bring **Def Jam: Fight for NY** to Windows, macOS and Linux, including the Steam Deck.
+This unofficial native port recompiles the original Xbox game for your computer,
+with higher rendering resolution, modern controller support, local multiplayer
+and optional HD textures.
 
-**The Windows build is playable.** Menus, Story mode and fights run at 60 fps
-with sound. It is still an early release: see [known issues](docs/known-issues.md).
+**The port is playable and still improving.** Menus, fights and tested Story routes
+work, including the intro, character creator, crib and gym. See
+[known issues](docs/known-issues.md) and the
+[latest release notes](https://github.com/vyanhursky/DefJamFFNY-recomp/releases/latest)
+for current limitations.
 
-You need your **own Xbox game dump**, and the game is built on your machine.
-This repository holds the port's code, tools and documentation. It contains no
-game assets, disc images, translated game code or game executable.
+You need **your own supported USA Xbox dump**. Setup checks your dump and builds
+the game on your machine. PS2 and GameCube copies cannot be used.
 
-[Install and build](docs/build-and-play.md) · [Documentation](docs/README.md) ·
-[Known issues](docs/known-issues.md) · [Contributing](CONTRIBUTING.md) ·
-[Releases](https://github.com/vyanhursky/DefJamFFNY-recomp/releases)
-
-## Features
-
-- **Native on Windows, macOS and Linux.** Direct3D 11 on Windows x64, Vulkan on
-  Apple Silicon Macs and on x86-64 Linux, including the Steam Deck.
-- **Controllers, keyboard and mouse.** Xbox (XInput), DualSense, Switch Pro and
-  most other gamepads, with rumble, hot-plug and remapping. The keyboard and
-  mouse play as a player of their own. Up to four players locally.
-- **Higher resolution.** Renders at up to 4× the console's resolution, in a
-  resizable window or borderless full screen.
-- **Optional HD textures.** 4× texture packs generated on your machine from
-  your own dump (Windows and macOS).
-- **An installer that builds the game for you.** Point the Windows setup wizard
-  at your dump; it checks it, then translates and compiles the game locally.
-- **Launcher and in-game settings.** A start-up window and an overlay (F1) for
-  display, texture, controller and key settings, usable with mouse, keyboard or
-  pad (Windows, macOS and Linux).
-- **Your saves stay local.** Profiles live in your data folder and survive
-  updates and repairs.
+**[Get the latest setup](https://github.com/vyanhursky/DefJamFFNY-recomp/releases/latest)** ·
+[Install guide](docs/setup-installer.md) · [Documentation](docs/README.md) ·
+[Report a problem](https://github.com/vyanhursky/DefJamFFNY-recomp/issues/new/choose)
 
 ## Gameplay
 
-![Banner and Blaze fighting in the Windows port](docs/media/fight-screenshot.png)
+![Blaze and Doc face-off: original 4:3 framing versus wider 16:9, with faithful HD textures on both sides](docs/media/widescreen-comparison.png)
 
-![A short fight clip from the Windows port](docs/media/fight-gameplay.gif)
+**4:3 versus 16:9 widescreen:** the same fight moment, with faithful HD textures
+and native macOS rendering at 2× scale. The wider view reveals more of the arena
+while keeping the fighters and HUD in proportion.
 
-Gameplay captured by the maintainer. The GIF is a short, silent preview.
+![Three-second fight preview showing strikes and a knockdown](docs/media/gameplay-preview-compact.gif)
 
-## Status
+Silent three-second preview exported at 20 fps; its cadence is not a game
+performance measurement. [Download the longer 60-fps MP4](docs/media/hd-16x9-gameplay.mp4).
 
-| Area | Status |
-|---|---|
-| Windows x64 | Playable; tested on Windows 11 |
-| macOS (Apple Silicon) | Playable through Vulkan since v0.5.0, with a setup installer and optional HD textures since v0.6.1 and the launcher and overlay since v0.6.2; see [macOS setup](docs/setup-installer.md#macos-setup-apple-silicon) |
-| Linux (x86-64) | Builds and runs natively through Vulkan, with the launcher and overlay of v0.6.2; see [Build on macOS and Linux](docs/build-macos-linux.md) |
-| Steam Deck | Native (Vulkan, PipeWire sound, the Deck's controls as a pad), installed by the [Linux setup](docs/setup-installer.md#linux-setup) with an optional Steam shortcut for Gaming Mode; automated regression and owner play-test on the Deck; a little audio distortion remains ([#11](https://github.com/vyanhursky/DefJamFFNY-recomp/issues/11)). Proton not tried. See [Steam Deck](docs/build-macos-linux.md#steam-deck) |
-| Menus and fights | Menus, match setup, fights and the return to the menus work |
-| Story | Intro and cutscenes, character creator, crib and gym work; a full playthrough has not been verified |
-| Graphics | Direct3D 11 at up to 4× the console resolution; 4:3 picture (true 16:9 is planned) |
-| HD textures | Optional 4× texture packs, generated locally from your own dump; on Windows and (since v0.6.1) macOS; see [HD textures](docs/hd-textures.md) |
-| Audio | Music, speech and effects |
-| Input | Gamepads (Xbox, DualSense, Switch Pro and most others), keyboard and mouse, rumble and remapping; see [Controllers, keyboard and mouse](docs/10-input.md) |
-| Launcher and overlay | A start-up window and an in-game settings overlay (F1) on Windows and (since v0.6.2) macOS and Linux; see [Launcher and overlay](docs/launcher-and-overlay.md) |
-| Saves | Local profiles in your data folder |
+**[Compare 4:3 and widescreen, original and HD textures, and see the launcher and overlay](docs/media/README.md)**
 
-## Install
+## Features
 
-Only the **USA Xbox version** matching the [dump manifest](config/dump-manifest.json)
-is supported. PS2 and GameCube copies cannot be used.
+- **Native across three platforms.** Windows x64 uses Direct3D 11; Apple Silicon
+  Macs and x86-64 Linux use Vulkan. Steam Deck runs the Linux version natively.
+- **60-fps gameplay.** The port targets 60 frames per second, with performance
+  depending on your hardware, chosen settings and the scene.
+- **Sharper rendering.** Choose 1×–4× internal resolution, a resizable window
+  or borderless full screen.
+- **Widescreen (beta), available now.** Since v0.9.0, Windows, macOS and
+  Linux/Steam Deck support wider 16:9 and 16:10 views. The 3D view widens while
+  the HUD and menus keep their shape; original 4:3 remains available.
+- **Optional HD textures.** Setup can generate faithful 4× texture packs locally
+  from your dump on Windows, macOS and Linux. Original textures remain available.
+- **Controllers and keyboard play.** Xbox, DualSense, Switch Pro and other
+  supported gamepads, with remapping, hot-plug and rumble. Keyboard and mouse
+  buttons can supply gameplay bindings; the launcher and settings support a pointer.
+- **Up to four local players.** Play with gamepads and a keyboard player.
+  Network multiplayer is not supported.
+- **Settings before and during play.** Use the launcher or open the overlay
+  with F1 or a configured controller shortcut. Changes are saved locally;
+  settings that require a restart are marked. The overlay does not pause the game.
+- **Local saves.** Profiles, settings and generated texture packs live in your
+  data folder, which setup preserves through updates and repairs.
 
-### Windows: setup installer
+## Get started
 
-Download `DefJamSetup-<version>-windows-x64.exe` from the
-[latest release](https://github.com/vyanhursky/DefJamFFNY-recomp/releases/latest).
-The installer contains no game. It takes your disc image or extracted dump,
-checks it, then translates and compiles the game on your machine. It bundles
-Python and the pinned build sources and can install Microsoft's C++ Build Tools
-if they are missing. The installer is unsigned, so Windows may warn about it.
+1. Have your own USA Xbox disc image or extracted dump matching the
+   [supported dump manifest](config/dump-manifest.json).
+2. Download the setup for your platform from the
+   [latest release](https://github.com/vyanhursky/DefJamFFNY-recomp/releases/latest).
+3. Choose your dump, install folder and data folder. Enable HD texture generation
+   if you want it, then let setup verify, recompile and build the game.
+4. Open the launcher, choose your display and input settings, and select **Play**.
 
-![The setup wizard: choose your dump, an install folder and a data folder](docs/media/setup-wizard.png)
+| Platform | Setup download | Guide |
+|---|---|---|
+| Windows x64 | `DefJamSetup-<version>-windows-x64.exe` | [Windows setup](docs/setup-installer.md) |
+| macOS, Apple Silicon | `DefJamSetup-<version>-macos-arm64.dmg` | [macOS setup](docs/setup-installer.md#macos-setup-apple-silicon) |
+| Linux x86-64 / Steam Deck | `DefJamSetup-<version>-linux-x64.tar.gz` | [Linux setup](docs/setup-installer.md#linux-setup) |
 
-See [Windows setup](docs/setup-installer.md) for folders, shortcuts, HD texture
-generation, silent mode, repair and removal.
+Setup builds from your dump rather than downloading a precompiled game.
+The [install guide](docs/setup-installer.md) covers platform requirements,
+unsigned-app prompts, disk space, updates and repairs. HD generation needs
+additional disk space and install time.
 
-### macOS: setup installer (Apple Silicon)
+Prefer a manual source build? Use [Build and play](docs/build-and-play.md) for
+Windows or [Build on macOS and Linux](docs/build-macos-linux.md).
 
-Download `DefJamSetup-<version>-macos-arm64.dmg` from the
-[latest release](https://github.com/vyanhursky/DefJamFFNY-recomp/releases/latest)
-and open `Def Jam Setup`. It has the same steps as the Windows wizard, needs no
-Terminal, Homebrew or build tools of your own, and works without an internet
-connection. It does need Apple's free **Xcode Command Line Tools**; if they are
-missing, setup stops and links Apple's
-[installation instructions](https://developer.apple.com/documentation/xcode/installing-the-command-line-tools/).
-The setup is unsigned, so macOS blocks it the first time: choose **Done**, then
-open System Settings, Privacy & Security, scroll to Security and choose **Open
-Anyway**. See [macOS setup](docs/setup-installer.md#macos-setup-apple-silicon) for
-folders, shortcuts, silent mode and removal.
+## Customize your game
 
-### Linux and Steam Deck: setup
-
-Unpack `DefJamSetup-<version>-linux-x64.tar.gz` and open `DefJamSetup.sh` (on the
-Steam Deck, in Desktop Mode: double-click it and choose Execute). It has the same
-steps as the other wizards, plus **Add to Steam** so the game starts from Gaming
-Mode. A computer with no compiler of its own, like the Steam Deck, builds in a
-container that setup fetches once (about 1 GB), so the first install needs an
-internet connection; the game then runs on the computer's own SDL3, Vulkan and
-shaderc. See [Linux setup](docs/setup-installer.md#linux-setup).
-
-### Windows: build from source
-
-You need Git, Python 3.12 or newer, Visual Studio Build Tools with the C++
-workload, and a Direct3D 11 GPU.
-
-```powershell
-git clone --recursive https://github.com/vyanhursky/DefJamFFNY-recomp.git
-cd DefJamFFNY-recomp
-```
-
-Follow [Build and play](docs/build-and-play.md) to choose a data folder and
-extract and verify your disc. Then:
-
-```powershell
-.\scripts\analyze.ps1
-.\scripts\recomp.ps1
-.\scripts\build.ps1 -Preset win-x64-release
-.\scripts\run.ps1 -Preset win-x64-release
-```
-
-Use a recursive clone: GitHub's source ZIP leaves out the toolkit submodule.
-
-### macOS and Linux: build from source
-
-On a Mac or on Linux, the setups above are the easy way. To build by hand, follow
-[Build on macOS and Linux](docs/build-macos-linux.md). It lists what works there
-and what does not yet.
-
-## Playing
-
-The game opens a launcher window with display, controller and key settings and
-a Play button. The same settings are available in the game with F1, and in
-`settings.ini` in your data folder.
-
-![The launcher's Display tab, with Quit and Play buttons](docs/media/launcher.png)
+Use the launcher or F1 overlay to change display settings, controls and texture
+packs. The same options are stored in `settings.ini` in your data folder.
 
 - [Launcher and overlay](docs/launcher-and-overlay.md)
 - [Controllers, keyboard and mouse](docs/10-input.md)
-- [settings.ini and keybinds](docs/settings-reference.md)
-- [HD textures](docs/hd-textures.md)
+- [Settings reference](docs/settings-reference.md)
+- [HD texture packs: generate, install and enable](docs/hd-textures.md)
 
-## Testing
+### Texture packs and mod support
 
-Tests that need no game data, which is also what GitHub CI runs:
+**Available now:** local texture replacement packs, including the faithful HD
+packs generated by setup. Packs can be enabled and ordered through the Textures
+page. The [texture guide](docs/hd-textures.md) describes formats, load order and
+supported resources.
 
-```powershell
-python -m pip install pytest pyxbe capstone Pillow numpy
-python -m pytest -q tests/unit
-python scripts/check-source-tree.py
-```
+**Proposed:** broader data overrides and a curated mod list managed from the
+launcher, with downloads and updates handled by a separate helper. This is an
+[unscheduled design proposal](https://github.com/vyanhursky/DefJamFFNY-recomp/pull/17).
+New fighters, stages, music replacements and code/gameplay mods are not released
+modding capabilities.
 
-Tests that play the game need a local build made from your own dump:
+## Where the project is heading
 
-| Command | Time | Covers |
-|---|---|---|
-| `python scripts/regress.py --quick` | about 10 minutes | unit tests, three reference frames and one fight |
-| `python scripts/regress.py` | about an hour | adds four-fighter and two-pad matches, combat results, a replay check, Story routes and a boot soak |
+The project aims to preserve the original game's experience while making it
+easier to play and customize on modern computers.
 
-Do not run two game tests at once: they share the save area and the window.
-The [gameplay test harness](docs/09-testing-harness.md) guide explains each
-check and its report, and [CONTRIBUTING.md](CONTRIBUTING.md#testing) says which
-tests a change needs.
+| Direction | Goal and current stage |
+|---|---|
+| Engine optimizations | Improve performance on low-spec machines, stay up to date with [xboxrecomp](https://github.com/sp00nznet/xboxrecomp), and contribute improvements upstream. |
+| Port accuracy | Keep the visuals, tone and gameplay feel faithful to the original Xbox game. |
+| Fully unlocked frame rates | Support frame rates above 60 fps while preserving game speed, timing and gameplay feel. Future work; not supported by the current release. |
+| Widescreen refinement | Beta released in [v0.9.0](https://github.com/vyanhursky/DefJamFFNY-recomp/releases/tag/v0.9.0) on Windows, macOS and Linux/Steam Deck. Improve edge cases and broader aspect/venue coverage; 21:9 and 32:9 remain experimental. |
+| Broader mod support | Enable modified game modes, difficulty changes and restored cut content. The [mod-system design proposal](https://github.com/vyanhursky/DefJamFFNY-recomp/pull/17) is not scheduled; texture packs work today. |
+| Build and release automation | Improve automation and the gameplay test harness so shipping builds have reliable, repeatable validation. |
+| Deeper gameplay decompilation | Long-term stretch goal. |
 
-## Reporting problems
+These stages describe current work, not promised release dates. See the
+[PC features plan](docs/07-m6-plan.md), [roadmap](docs/01-plan-review.md#corrected-roadmap-milestones-with-exit-criteria)
+and [improvement backlog](docs/04-improvement-backlog.md) for detail.
 
-Open an [issue](https://github.com/vyanhursky/DefJamFFNY-recomp/issues/new/choose)
-and pick the form that fits. Check [known issues](docs/known-issues.md) first.
-A useful report has:
+## Compatibility and known limits
 
-- the release version or commit, and whether you used the installer or a source build;
-- your operating system, CPU, GPU and controller;
-- the steps that lead to the problem, and what you expected instead;
-- the relevant lines of the log (`logs/run-*.log.err` for a source build, or the
-  installer log under `%LOCALAPPDATA%\DefJamSetup\logs`). Remove personal paths first.
+The released build targets Windows x64, Apple Silicon macOS and x86-64 Linux.
+Steam Deck has automated regression coverage and maintainer playtesting;
+Proton is untested. Performance varies with hardware, settings and scenes.
+Steam Deck audio distortion and Story tutorial performance remain under
+investigation.
 
-Never attach game data: no disc images, game files, translated game code, saves,
-memory dumps or audio recordings. A screenshot of the problem is fine.
+Check both [known issues](docs/known-issues.md) and the
+[latest release notes](https://github.com/vyanhursky/DefJamFFNY-recomp/releases/latest).
+Some release-specific fixes and validation limits appear in the notes first.
 
-## Contributing
+## Help improve the port
 
-Bug fixes, platform work and documentation are welcome. [CONTRIBUTING.md](CONTRIBUTING.md)
-covers the development setup, where each kind of change belongs, the tests to
-run and what a pull request needs. Changes to the generic runtime or translator
-go to the [toolkit fork](https://github.com/vyanhursky/xboxrecomp), and from
-there upstream where they help other games.
+[Report a problem](https://github.com/vyanhursky/DefJamFFNY-recomp/issues/new/choose)
+with your version, operating system, CPU/GPU, controller, reproduction steps and
+relevant log lines. Remove personal paths and keep game files, saves and memory
+dumps out of reports. See [Contributing](CONTRIBUTING.md) for reporting guidance,
+development setup and the tests a change needs.
 
-## Roadmap
+Bug fixes, platform testing and documentation improvements are welcome.
+The [gameplay test harness](docs/09-testing-harness.md) explains automated game
+checks and their limits. GitHub CI also runs checks that need no game data;
+a passing CI badge does not establish full campaign compatibility.
 
-Released so far: display settings and a settings file, gamepad and keyboard
-input, the launcher and overlay (Windows, then macOS and Linux), native macOS and Linux builds
-(the Steam Deck included), the Windows, macOS and Linux installers and optional HD textures. Still planned:
+## How it works
 
-- true 16:9 widescreen in fights;
-- deeper gameplay decompilation, as a stretch goal.
+The [xboxrecomp](https://github.com/sp00nznet/xboxrecomp) toolchain translates the
+Xbox executable into C, which is compiled ahead of time. The game's code runs
+through an Xbox compatibility runtime, with graphics, audio and input supplied
+by your computer. This is a static recompilation port; deeper gameplay
+decompilation remains future work.
 
-See the [roadmap](docs/01-plan-review.md#corrected-roadmap-milestones-with-exit-criteria),
-the [PC features plan](docs/07-m6-plan.md) and the [improvement backlog](docs/04-improvement-backlog.md).
-The [release notes](docs/releases) record what each version changed.
+The repository distributes maintained port code, build tools and documentation.
+It does not distribute a disc image, playable game data, translated game source
+or a compiled game executable. The repository does include selected approved
+screenshots and branding artwork; those retain their original ownership.
 
 ## Credits and licensing
 
-Maintained by **vyanhursky**, with development assistance from Claude Code
-and Codex. The port builds on **sp00nz's xboxrecomp** and on work from the Xbox
-emulation community. xemu provides hardware references and attributed components
-in the toolkit. [Burnout 3](https://github.com/sp00nznet/burnout3) and
+Maintained by **vyanhursky**, with development assistance from Claude Code and
+Codex. Built on **sp00nz's xboxrecomp** and work from the Xbox emulation
+community, including xemu hardware references and attributed toolkit components.
+[Burnout 3](https://github.com/sp00nznet/burnout3) and
 [Mercenaries Recompiled](https://github.com/KraftMacAndChee/Mercenaries-Recompiled)
 are related projects that helped shape the documentation.
 
-This repository's code is [MIT licensed](LICENSE). Toolkit components keep their
-own licenses, including LGPL-2.1-or-later components; see the toolkit's
-[NOTICE](https://github.com/vyanhursky/xboxrecomp/blob/4bff2573127c5499ad795d58ddd90159240520bd/NOTICE)
+The project's code is [MIT licensed](LICENSE). Toolkit components retain their
+own licenses; see the [toolkit NOTICE](https://github.com/vyanhursky/xboxrecomp/blob/4bff2573127c5499ad795d58ddd90159240520bd/NOTICE)
 and [license texts](https://github.com/vyanhursky/xboxrecomp/tree/4bff2573127c5499ad795d58ddd90159240520bd/LICENSES).
-The license grants no rights to the game or its assets.
+The license grants no rights to the game or its artwork.
 
 This is an unofficial fan project, not affiliated with Electronic Arts, AKI or
 Def Jam. Def Jam: Fight for NY and its assets belong to their respective owners.
