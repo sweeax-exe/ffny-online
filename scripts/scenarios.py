@@ -117,7 +117,9 @@ def cutscene_route(harness, base, inject, secs, every):
     command and then takes a capture every `every` seconds for `secs` seconds."""
     r = dict(harness.ROUTES[base])
     anchor = inject.split('=>', 1)[0].split('#', 1)[0]
-    times = ','.join('%g' % (t * every) for t in range(1, int(secs // every) + 1))
+    # The harness takes at most 16 captures a launch: spread them wider rather than refuse the run.
+    every = max(every, secs / 16.0)
+    times = ','.join('%g' % round(t * every, 1) for t in range(1, min(16, int(secs // every)) + 1))
     r.update(help='cutscene: %s then %s' % (base, inject), until=None, after=0,
              secs=r['secs'] + secs + 30, shots='@%s,%s' % (anchor, times),
              env=dict(r.get('env', {}), RECOMP_FE_INJECT=inject), generated={'cutscene': inject, 'from': base})
@@ -351,6 +353,9 @@ def main(argv=None):
         return 0
     suite = load('scenario_suite')
     code, report = run_suite(suite, name, route, fixture_path(harness, a.fixture), a)
+    if report and not (report.parent / 'game.log.err').exists():
+        print('the run did not start: read %s' % report.parent / 'report.json')
+        return code or 1
     if report:
         log = (report.parent / 'game.log.err').read_text(encoding='utf-8', errors='replace')
         injected = [l for l in log.splitlines() if l.startswith('[FE-INJECT] after')]

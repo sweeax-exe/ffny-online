@@ -89,6 +89,13 @@ def test_expected_fighters_are_checked_from_telemetry():
     assert scenarios.parse_expect(['0:4', '1:12']) == {0: 4, 1: 12}
 
 
+def test_cutscene_route_stays_within_the_harness_capture_limit():
+    r = scenarios.cutscene_route(harness, 'crib', 'getscreeninfo(story/crib#1=>Game.LoadNextRunModule()', 90, 3)
+    times = [t for t in r['shots'].split(',') if not t.startswith('@')]
+    assert len(times) <= 16 and float(times[-1]) <= 90
+    harness.validate_shots(r['shots'])      # what the harness refused before: 30 captures
+
+
 def test_cutscene_route_injects_after_the_base_route_and_keeps_capturing():
     r = scenarios.cutscene_route(harness, 'crib', 'getscreeninfo(story/crib#1=>Story.Play(sc05)', 9, 3)
     assert r['env']['RECOMP_FE_INJECT'] == 'getscreeninfo(story/crib#1=>Story.Play(sc05)'
