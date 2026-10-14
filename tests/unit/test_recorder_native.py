@@ -236,6 +236,9 @@ def test_bundle_files_and_index(marked):
     assert meta['last_screen'] == 'Control.GetScreenInfo(story/crib.swf)'
     assert meta['view_mode'] == 1
     assert meta['summary']['frames'] == 300
+    mark = next(json.loads(l) for l in (bundle / 'events.jsonl').read_text().splitlines()
+                if json.loads(l)['kind'] == 'mark')
+    assert meta['frame_at_mark'] == mark['frame']   # the mark's frame, not the one the bundle was written in
     assert (bundle / 'log-tail.txt').read_text().endswith('[TEST] frame 299\n')
     assert (bundle / 'audio.pcm').stat().st_size % 4 == 0 and meta['audio_offset'] >= 0
     assert 'bug-bundle.py' in (bundle / 'README.txt').read_text()

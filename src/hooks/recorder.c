@@ -235,6 +235,7 @@ static double g_median = 16.67;
 static volatile int g_mark_pending;
 static char g_mark_reason[48];
 static double g_mark_t;
+static unsigned long long g_mark_frame;   /* the frame the mark was made in, not the one the bundle is written in */
 static int g_bundles, g_auto_bundles;
 static double g_last_auto;
 static char g_last_bundle[PATH_LEN];
@@ -722,7 +723,8 @@ static size_t history_window(double from, FrameRec *out, size_t max)
     return n;
 }
 
-static void write_bundle(const char *reason, double t_mark, int crash, const char *what, void *os_exception)
+static void write_bundle(const char *reason, double t_mark, unsigned long long frame_at_mark, int crash,
+                         const char *what, void *os_exception)
 {
     char dir[PATH_LEN], path[PATH_LEN + 64], name[128], stamp[32];
     double from = rel_ms(t_mark) - (double)g_cfg.ring_seconds * 1000.0;
@@ -873,7 +875,7 @@ static void write_bundle(const char *reason, double t_mark, int crash, const cha
             fprintf(f, "  \"detail\": \"%s\",\n", esc);
             fprintf(f, "  \"mark_t_ms\": %.1f,\n  \"written_t_ms\": %.1f,\n  \"window_from_t_ms\": %.1f,\n",
                     rel_ms(t_mark), until, from);
-            fprintf(f, "  \"frame_at_mark\": %llu,\n", g_frame);
+            fprintf(f, "  \"frame_at_mark\": %llu,\n", frame_at_mark);
             json_escape(esc, sizeof esc, g_build);
             fprintf(f, "  \"build\": \"%s\",\n", esc);
 #if defined(_WIN32)
@@ -945,6 +947,7 @@ void recorder_mark(const char *reason)
     if (!g_on || g_mark_pending) return;
     copy_text(g_mark_reason, sizeof g_mark_reason, reason && *reason ? reason : "mark");
     g_mark_t = now_ms();
+    g_mark_frame = g_frame;
     g_still_wanted = 1;
     g_mark_pending = 1;
     snprintf(fields, sizeof fields, "\"reason\":\"%s\"", g_mark_reason);
@@ -956,7 +959,7 @@ void recorder_on_crash(const char *what)
     if (!g_on || g_crashed) return;
     g_crashed = 1;
     recorder_event_text("crash", "what", what);
-    write_bundle("crash", now_ms(), 1, what, NULL);
+    write_bundle("crash", now_ms(), g_frame, 1, what, NULL);
 }
 
 /* The Windows exception handler's entry: as recorder_on_crash, with the
@@ -966,7 +969,7 @@ void recorder_on_crash_os(const char *what, void *os_exception)
     if (!g_on || g_crashed) return;
     g_crashed = 1;
     recorder_event_text("crash", "what", what);
-    write_bundle("crash", now_ms(), 1, what, os_exception);
+    write_bundle("crash", now_ms(), g_frame, 1, what, os_exception);
 }
 
 /* ---- the worker ------------------------------------------------------------------------------------- */
@@ -982,7 +985,7 @@ static void worker_tick(void)
         double wait = is_auto ? (double)g_cfg.after_seconds * 500.0 : (double)g_cfg.after_seconds * 1000.0;
         /* Wait for the seconds after the mark, and for the still (or give up on it). */
         if (t - g_mark_t >= wait && (g_still_ready || t - g_mark_t >= wait + 2000.0)) {
-            write_bundle(g_mark_reason, g_mark_t, 0, NULL, NULL);
+            write_bundle(g_mark_reason, g_mark_t, g_mark_frame, 0, NULL, NULL);
             g_mark_pending = 0;
         }
     }
@@ -993,7 +996,7 @@ static void worker_tick(void)
                 hang_reported = 1;
                 snprintf(fields, sizeof fields, "\"since_ms\":%.0f", t - g_last_end);
                 recorder_event("hang", fields);
-                write_bundle("hang", t, 0, "no frame presented", NULL);
+                write_bundle("hang", t, g_frame, 0, "no frame presented", NULL);
             }
         } else if (hang_reported) {
             hang_reported = 0;
