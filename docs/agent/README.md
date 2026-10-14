@@ -8,6 +8,7 @@ session loads only what it needs.
 |---|---|
 | `triage.md` | a run, a regression row or a smoke test failed or looks wrong |
 | `diagnostics.md` | the digest does not explain a stop; the table of watch/trace tools and the three rules |
+| `playtest.md` | the owner reports a fault seen in play, or hands you a bug bundle |
 | `harness.md` | you are scripting a run, a route or a scenario |
 | `lifter-overrides.md` | you are about to write or change something in `src/recomp_manual.c` |
 | `delegation.md` | you are considering a sub-agent |

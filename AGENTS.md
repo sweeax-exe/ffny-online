@@ -16,6 +16,7 @@ file, not an import:
 |---|---|
 | see a failed or odd run, a failed `regress.py` row, a smoke test failure | `docs/agent/triage.md` (and run `python scripts/triage.py`) |
 | need the watch/trace tools, or the digest did not explain a stop | `docs/agent/diagnostics.md` |
+| get a play-test fault report (a hitch, a glitch, a pop) or a bug bundle | `docs/agent/playtest.md` (and run `python scripts/bug-bundle.py latest`) |
 | script a run, a route or a scenario | `docs/agent/harness.md` |
 | write or change something in `src/recomp_manual.c` | `docs/agent/lifter-overrides.md` |
 | consider a sub-agent | `docs/agent/delegation.md` (briefs in `docs/agent/briefs/`) |
@@ -60,11 +61,13 @@ config/seed_functions.json          runtime-discovered function addresses fed ba
 scripts/                            env, extract-disc, verify-dump, analyze, recomp, build, run, seed-from-log;
                                     harness (scripted runs), regress (the regression run), pipeline-state, worklog-add,
                                     triage (digest a run log), progress (read PROGRESS.md in pieces),
-                                    sync-agent-adapters (skills and briefs for each tool)
+                                    sync-agent-adapters (skills and briefs for each tool), bug-bundle (read a play-test
+                                    bundle), scenarios (fixtures, generated fight routes, cutscenes), crowd-lab
 tests/unit (pytest; `-m "not slow"` skips the one slow test) · tests/smoke/boot-smoke.ps1 · tests/golden
 docs/agent/                         playbooks, skills and briefs for agents (index in its README)
 docs/research/                      investigation reports; the published set is indexed in its README
-logs/                               run logs, gitignored; keep milestone/iteration copies as logs/iterN-*.log
+logs/                               run logs, gitignored; keep milestone/iteration copies as logs/iterN-*.log;
+                                    logs/sessions/ holds play-test recordings and bug bundles (docs/playtest-recorder.md)
 game/                               junction to the extracted dump, gitignored
 ```
 Game data lives outside the repo at `<data>` (`$env:DEFJAM_DATA`): `xiso/`, `extracted/`,

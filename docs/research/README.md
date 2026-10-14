@@ -40,6 +40,7 @@ cite other development notes, logs and captures that are not published.
 - [Combat telemetry](combat-telemetry.md)
 - [Why a scripted fight does not replay identically](fight-determinism.md)
 - [Why fight pictures do not repeat](crowd-nondeterminism.md)
+- [Launching a scenario by choice: fixtures, generated routes, the crowd, cutscenes](scenario-launching.md)
 
 ## HD textures
 

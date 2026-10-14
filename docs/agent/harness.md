@@ -31,6 +31,13 @@ python scripts/scenario_suite.py run fight-result --fixture logs/fixtures/NAME -
   three are `--only`. In a pad script `anchor#N` waits for the Nth call; an anchor cannot contain a comma.
   Guide: `docs/09-testing-harness.md`.
 - Input (v0.3.0, `docs/10-input.md`). `settings.ini` and `RECOMP_SETTINGS=none` runs leave the host input layer off so the harness keeps its one scripted pad. To exercise the real paths in a route add `--env RECOMP_INPUT_HOST=1 --env RECOMP_INPUT_IGNORE_FOCUS=1 --env RECOMP_PAD_HOST=1`, then either `--env RECOMP_INPUT_NO_PADS=1 --env RECOMP_PAD_SCRIPT_KEYS=1` (the scripted pad of the keyboard's player becomes key presses; `--env RECOMP_KEYBOARD_PLAYER=2` makes the keyboard player 2 beside a scripted pad 1) or `--env RECOMP_INPUT_NO_PADS=1 --env RECOMP_INPUT_VIRTUAL_PADS=2 --env RECOMP_PAD_SCRIPT_VIRTUAL=1` (SDL virtual gamepads pressed by the script, through the real SDL path); `--env RECOMP_RUMBLE_LOG=1` logs the rumble the game sends. The launcher never shows in a `RECOMP_SETTINGS=none` or scripted run; to test the overlay add `--env RECOMP_INPUT_VIRTUAL_CHORD_MS=40000` (virtual pad 1 opens it with both stick clicks and closes it with B; see `docs/launcher-and-overlay.md`).
+- Scenarios on demand (`docs/research/scenario-launching.md`): `scripts/scenarios.py fixture add NAME --story ID`
+  keeps a save at a Story point in a library in the data folder; `scenarios.py generate --mode --venue [--p1 --cpu]
+  --fixture NAME [--seed N] [--record] [--expect-character SLOT:INDEX]` composes and runs a fight route (the
+  calibrated combinations are exactly the harness's routes); `scenarios.py cutscene --fixture NAME --inject
+  "anchor#1=>command"` reaches a Story point and sends a front-end command. `scenario_suite.py run ... --record`
+  turns the play-test recorder on and analyses its session and bundles. `scripts/crowd-lab.py` tests the crowd
+  controls and learns masks for fight baselines.
 - A new screen to reach: run the nearest route with extra `--stage`s and `--shots`, look at the captures
   (`harness.py montage`), and add the stage to `ROUTES` once it is right.
 - Scripts written for one investigation belong in the session's scratch directory. Anything used twice

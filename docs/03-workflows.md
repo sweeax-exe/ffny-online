@@ -109,6 +109,9 @@ Full table with source references: `docs/research/toolkit-bringup-notes.md`. Eve
 | `RECOMP_PB_PROBE=x,y[;x,y...]` | with a batch dump: every triangle covering those pixels (up to 8), with its depth there and its depth-write, blend and stencil state -- the layers at a point, in draw order |
 | `RECOMP_GAMMA=0` | leaves out the gamma ramp the title sets at start-up (an S curve applied at presentation and to captures). The golden frames were taken without it: set this when checking them. |
 | `RECOMP_CS_TRACE_CRT`, `RECOMP_CS_WATCH` | critical-section tracing |
+| `RECOMP_RECORD=1` (or `[debug] record`, `--record`) | the play-test recorder: `logs/sessions/`, F9 bug bundles, read with `scripts/bug-bundle.py` ([guide](playtest-recorder.md)) |
+| `RECOMP_FE_INJECT="anchor#N=>command"` | send the front end's FuncCall handler a command after the Nth call containing the anchor ([scenario launching](research/scenario-launching.md)) |
+| `RECOMP_TEST_CROWD=hold[:N],reseed` | crowd test controls, with `RECOMP_TEST_OBSERVATIONS=1`; measured by `scripts/crowd-lab.py` |
 
 Compile-time: `-DRECOMP_ICALL_FEEDBACK` plus `python -m tools.recomp.icall_feedback` closes the loop on indirect-call targets that static analysis cannot see; `python -m tools.seed_from_log <run.log>` seeds functions from `Failed to resolve VA` lines.
 

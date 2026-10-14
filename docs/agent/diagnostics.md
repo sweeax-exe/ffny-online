@@ -16,6 +16,9 @@ answer. Reach for them before writing a new one.
 | `RECOMP_WATCH_WRITE` / `_LEN` / `_RW` | Who wrote this address. Prints the guest registers and a stack scan. |
 | `RECOMP_GUARD_CODE=1` | What is writing over the image. Noisy by construction -- XBE sections mix code and data -- and the reports that matter are the ones on jump tables. |
 | `RECOMP_PEEK` (toolkit) | The current value of a few guest addresses. Covers both memory windows. |
+| `[debug] record` / `RECOMP_RECORD=1` / `--record` | The play-test recorder: per-frame timing, events, audio and the last seconds of pictures; F9 (or a crash, hang or long hitch) writes a bug bundle. `scripts/bug-bundle.py` reads one (`docs/agent/playtest.md`). The cheapest way to locate a short-lived fault in time. |
+| `RECOMP_FE_INJECT="anchor#N=>cmd"` | Sends the front end's own FuncCall handler a command after the Nth call containing the anchor: start a mode or a scene without the menus. `scripts/funccall-catalog.py` lists the commands the screens contain. |
+| `RECOMP_TEST_CROWD=hold,reseed` | Test controls for the two crowds (with the test probes on); `scripts/crowd-lab.py` measures what they do. |
 | `RECOMP_POST_CMD` | Feeds the front end a synthetic command, to separate "the machinery is broken" from "nothing triggers it". |
 | `scripts/string-va.py` | A byte string's guest address. **The most useful of these.** The lifted C has no string literals -- a format string is a bare `PUSH32(esp, 0x29C0DC)` -- so searching for `.big` finds nothing while searching for the address finds every user. |
 | `scripts/callers.py` | Direct callers, N levels up. Says "reached only indirectly" as an answer. |

@@ -52,7 +52,7 @@ Exit: a fight that renders but ignores controls or never causes damage cannot pa
   *Part: `--step-shots` captures at a fight step; cutscene captures are still at host-time offsets.*
 - [x] Compare local approved baselines using pixel/perceptual metrics and masks
   for legitimately variable regions. Produce baseline/current/difference images.
-  *Done for still screens: crib, Learn Moves and the move preview have reviewed local baselines with measured tolerances and masks (`regress.py --only visual`). Fights: fighters, HUD and arena repeat pixel for pixel but the two crowds do not (`docs/research/crowd-nondeterminism.md`), so whole-frame fight baselines are not usable.*
+  *Done for still screens: crib, Learn Moves and the move preview have reviewed local baselines with measured tolerances and masks (`regress.py --only visual`). Fights: fighters, HUD and arena repeat pixel for pixel but the two crowds do not (`docs/research/crowd-nondeterminism.md`), so whole-frame fight baselines are not usable. Since 2026-10-14: crowd test controls (`RECOMP_TEST_CROWD`) and masks learned from repeated runs (`scripts/crowd-lab.py`), both unmeasured on the game (`docs/research/scenario-launching.md`).*
 - [ ] Cover normal gamma, fighters, arena, lighting, transparency, effects and FMV.
 - [ ] Keep console-fidelity references distinct from last-known-good port images.
 - [ ] Prove representative missing textures/effects fail without making healthy
@@ -65,7 +65,7 @@ Any public media exception requires the existing owner review process.
 
 - [~] Capture and distinguish generated PCM from accepted/output audio. Align
   observations to scenario events; do not infer wall-clock alignment from PCM length.
-  *Part: generated PCM is captured and bounded by observed events; it is not the device's output and alignment is to the log polling interval.*
+  *Part: generated PCM is captured and bounded by observed events; it is not the device's output and alignment is to the log polling interval. With the play-test recorder (`--record`) every sample is placed on the frames' clock through `pcm_bytes`, and `bug-bundle.py` finds gaps, clicks and clipping in time.*
 - [x] Gate unexpected silence, clipping, dropped buffers and dry queues with
   separately defined startup/loading and active-game budgets.
   *Done for fights, with the drop allowance calibrated on healthy runs. No separate loading budget.*
@@ -80,7 +80,7 @@ Any public media exception requires the existing owner review process.
 
 - [~] Add grapple/combo, two-player input, representative venues/fight modes,
   Story progression, save/load, cutscene natural/skip and unlock navigation scenarios.
-  *Part: One on One, Free For All (to its result, with eliminations asserted), two pads, two matches in one launch, the Terrordome, crib, gym, intro and unlock. Open: grapples as such, save and load, cutscene skipping.*
+  *Part: One on One, Free For All (to its result, with eliminations asserted), two pads, two matches in one launch, the Terrordome, crib, gym, intro and unlock. Open: grapples as such, save and load, cutscene skipping. Since 2026-10-14: a fixture library and generated venue and fighter routes (`scripts/scenarios.py`), and front-end command injection for cutscenes (command not yet found).*
 - [~] Measure frame-time percentiles/hitches, memory growth over repeated matches,
   long sessions and simulation speed across supported FPS settings.
   *Part: frame pacing and memory growth are asserted for one fight. Open: repeated matches, long sessions, other frame rates.*

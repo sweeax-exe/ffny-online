@@ -21,6 +21,7 @@
 | [Workflows](03-workflows.md) | The build pipeline, troubleshooting and diagnostics |
 | [Runtime reference](05-reference.md) | Rendering architecture and investigation tools |
 | [Gameplay test harness](09-testing-harness.md) | Scripted gameplay checks, what each proves, reports and fixtures |
+| [Play-test recorder](playtest-recorder.md) | Recording ordinary play (frame times, events, sound, the last seconds of pictures), F9 bug bundles and reading them with `bug-bundle.py` |
 | [Test plan](02-test-plan.md) | Milestone gates and regression discipline |
 | [Agent playbooks](agent/README.md) | Reading a failed run (`triage.py`), diagnostics, the harness, sub-agent briefs; what `AGENTS.md` points to |
 | [Texture processing and review](hd-texture-workflow.md) | Reproducing the HD texture census, upscale and review galleries |

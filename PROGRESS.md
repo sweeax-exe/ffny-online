@@ -45,6 +45,7 @@
 
 | Setup GitHub updater (v0.8.0) | ✅ released | PR #18 merged at f582cd1; tag v0.8.0 points to that merge. Release workflow 38346723528 passed 27/27; Windows/macOS/Linux setups, checksums and provenance published. U0 protocol/data schema 1. |
 | Agent tooling (D109) | ⏳ PR open | `triage.py`, `progress.py`, `docs/agent/` playbooks, shared `AGENTS.md`, generated skills and briefs for Claude and Codex, Markdown-only CI gating. Unit tests added; Windows and macOS CI and Codex's own review pending. |
+| Play-test recorder and scenarios (D110, D111) | ⏳ built, not run on the game | Branch `feature/clever-feynman-4ovoyk` (on top of PR #24). `[debug] record` / `--record`: `logs/sessions/` with per-frame rows, events, audio and a picture ring; F9, crash, hang or long hitch writes a bug bundle; `scripts/bug-bundle.py` reports it. `scripts/scenarios.py` (fixture library, generated fight routes, cutscene injection), `RECOMP_FE_INJECT`, `RECOMP_TEST_CROWD`, `scripts/crowd-lab.py`, `scripts/funccall-catalog.py`. 462 unit tests pass (the one failure is the known container-only setup test), incl. native builds of the new C against fakes; no game build here (no dump). |
 
 | Widescreen macOS / v0.9.0 | ✅ released | PR12 merged `c4bcda6`, v0.9.0 published with9 game-free assets; PRCI25/25, release27/27. Mac auto-notch correction, source352tests and native checks; known baseline diagnostics retained in [Mac ledger](docs/widescreen/09-macos-validation.md). |
 
@@ -177,6 +178,10 @@
 
 | D109 | 2026-10-14 | Make the agent tooling cheaper to run and shared by Claude and Codex. `AGENTS.md` is the one instruction file (kept under 30 KiB; Codex's default limit for combined project instructions is 32 KiB and configurable) and `CLAUDE.md` is `@AGENTS.md` plus Claude-only notes; the long how-to text moved to `docs/agent/` (triage, diagnostics, harness, lifter overrides, delegation, environment). `scripts/triage.py` digests a run log and always prints the way into the original (`--around/--lines/--grep/--tail`, bounded); `scripts/progress.py` reads `PROGRESS.md` by section or decision number. Skills and sub-agent briefs are written once under `docs/agent/` and copied to `.claude/` and `.codex/skills/` by `scripts/sync-agent-adapters.py` (a unit test fails on drift). `pytest.ini` marks the one slow test (`-m "not slow"` in `regress.py`). CI: a `changes` job skips the heavy jobs for Markdown-only changes, PR runs cancel superseded runs, and `CI result` is one gate with a table that lists the failing job first. **Not done, on purpose:** no hooks (Vlad: skip, instructions are enough); `PROGRESS.md` stays one file (Vlad exports it, and `worklog-add.py` and the archive depend on its layout) so `progress.py` gets the saving instead of a split; no Codex agent files (the review says current docs specify `.codex/agents/*.toml`; the schema was not readable here); the 19 Windows fixture jobs are not batched (needs iteration on a runner). | Vlad's review of the plan, 2026-10-14: "Just make the triage.py with correct instructions. If the agent ignores the instructions a small amount of the time, that is OK. Rest of your plan looks good." Measured before the change: `CLAUDE.md` 23.1 KB and `PROGRESS.md` 78.5 KB (71% decisions) loaded at every start, about 26k tokens; one `list_workflow_jobs` call for a 25-job run was 55k characters; a Markdown-only push (run 38347364895) ran all 25 jobs, 28 runner-minutes, 74% on Windows; unit tests 28 s locally, 19 s of it one branding test. After: `AGENTS.md` 14.4 KB, `progress.py brief` 5.3 KB, unit tests without the slow test 9 s here and 19 s on a Mac (the review's figure), against 28 s for the full run here; the saving depends on the host. Text, not billed tokens, was measured: the review counted 22 KB of instructions plus brief against roughly 100 KB before. The digest's verdicts are conservative (`explained` needs a resolved function or address and nothing unclassified before it; a watchdog is never `explained`), so a routine failure is one screen and an odd one tells the agent to read the log. |
 
+| D110 | 2026-10-14 | Play-test recorder in the game's own code (`src/hooks/recorder.c`, `pc_debug.c`), no toolkit change. Off by default; `[debug] record`, the launcher's Debug tab, `--record` or `RECOMP_RECORD=1`. Log lines are put on the frames' clock by recording the log's byte count in every frame row (flushed each frame while recording), not by adding timestamps to lines. Pictures come from the existing synchronous back-buffer read-back, ten a second at 240 rows, with its cost in every row and subtracted before a hitch is called; audio through the runtime's `RECOMP_APU_PCM`. Bundles on F9, the overlay button, a crash (Windows minidump), a hang (no frame for 15 s) or a long hitch (opt-in). `scripts/bug-bundle.py` measures first (hitches with their side, draw-count dips, single-picture flashes, audio gaps/clicks/clipping) and draws second (charts, contact sheets around each finding, timed log). | Vlad asked for playtest capture an agent can review (video, audio, frame times, logs). Agents cannot watch video or hear audio and vision models miss glitches, so the analysis has to produce numbers and pointed pictures. Prefixing log lines would break `triage.py` and the harness, which match line starts. An asynchronous read-back, a device-side audio tap and per-line timestamps would each need a toolkit fork commit; left as follow-ups so this stays one reviewable branch while Vlad was away. |
+
+| D111 | 2026-10-14 | Scenarios by choice: a fixture library in the data folder (`scripts/scenarios.py fixture`), fight routes generated from the harness's own menu blocks plus `config/scenario-catalog.json` (the six known combinations must equal the harness routes, tested), `--expect-character` to catch a wrong pick from telemetry; crowd test controls `RECOMP_TEST_CROWD=hold[:N],reseed` and `scripts/crowd-lab.py` to measure them (plus learned masks as the fallback); `RECOMP_FE_INJECT` to send the front end's FuncCall handler any command, and `scripts/funccall-catalog.py` to find the one that starts a scene. | Savestates are not practical in this recompilation; the game's saves are. The crowd note (`docs/research/crowd-nondeterminism.md`) measured an update-count difference in the loading window (hold targets it) and generator draw differences (reseed targets them); both use hooks that already exist, so no new probe point. No command that plays a chosen scene is known yet; the injection channel and catalog make finding it one run, and `docs/research/scenario-launching.md` has the fallback (a `LoadScene` entry hook). |
+
 ## 2. Environment inventory (2026-09-17)
 
 - OS: Windows 11 Pro 10.0.26200
@@ -223,6 +228,8 @@ defjam-recomp/
 
 ## 5. Open questions for Vlad
 
+- **(2026-10-14) Play-test recorder and scenarios (D110, D111), branch `feature/clever-feynman-4ovoyk`.** Built and unit-tested here, never built or run against the game (no dump on that machine). Needs, in order: (1) a Windows build and `regress.py --quick` with recording off (the default; nothing should change), then one play-test with `[debug] record = true`, an F9, and `python scripts/bug-bundle.py latest`; the Mac and Deck builds too (mach/Linux paths compiled only with gcc). (2) Is ten pictures a second the right default given the synchronous read-back (see `capture_ms` in `frames.csv`)? An asynchronous read-back is a toolkit fork commit; say if wanted. (3) `scripts/scenarios.py fixture add` at the Story points worth testing (save one profile at a time). (4) `python scripts/crowd-lab.py run --fixture <name>` and `python scripts/funccall-catalog.py --grep cinema --grep scene`: the first decides the crowd default for fight baselines, the second is the lead for launching a cutscene. (5) The branch contains PR #24 merged into current main (D109 renumbered from D105, which main had used); merge #24 first or this branch with it.
+
 - **(2026-10-12) Interactive Mac updater acceptance.** Desktop access resolved on retry. Live release picker, historical refusal, local future GUI update/downgrade, Repair, cancellation/late completion and Play verified; UI status fixes implemented. Broader Mac OS/quarantine/HD/external-volume/reboot and native Windows/Deck acceptance remain pending; no new policy input needed.
 
 - **(2026-10-11) HD textures on Linux (D99).** (1) ~~Windows regressions~~ all green (Vlad, 2026-10-11); still to do: the Mac regressions with v0.7.2 (the texture-pack re-check is shared code; released with macOS untested). (2) Run `python scripts/hd-pack-digest.py <data>/mods/faithful-hd-*` on a Windows or Mac install and compare the pixel digest with the Deck's `14d09aa313ef713940f620abfc663ab078a181a0a5c750c70c4eaa6c85a9de7e`. (3) Whether to move HD texture decoding off the GPU thread (the ~3 s first-show stall on the Deck).
@@ -253,9 +260,6 @@ defjam-recomp/
 
 > Recent entries only; older entries remain unchanged in the local `docs/worklog/` archive.
 
-- 2026-10-13 19:39 — All five fight capture variants produce six native stills and match the 80-record Windows simulation golden. 16:10 run flagged one unresolved stream callback `0x001E3C14`, caller `0x001E3A68` (`run-20261013-193158.log.err`), identical to the pre-widescreen Mac symptom from 2026-10-08; raw failure retained, not waived. Static context-lifetime findings in local `logs/widescreen-macos/callback-notes.md` are hypotheses, not a diagnosed fix. Four-fighter/Story/auto/launcher checks and focused audio repeat remain queued serially.
-- 2026-10-13 19:51 — Additional Mac checks pass: 16:9 HD four-fighter fight (two native captures, all four HUD corners, median120presents/2s), Story intro at16:9 and16:10 (four captures each, creator reached). Authored cutscene picture fills16:9 and has864 nonblack rows in960 at16:10 (`media/cutscenes-review.png`). Stream continuation/wait/callback generated functions are byte-identical to accepted baseline; no cause/fix inferred from static reads alone. HD Story subviews and real-settings fullscreen/overlay/launcher remain in progress.
-- 2026-10-13 20:11 — Owner chose v0.9.0 (D106). Focused seeded audio repeat24/25 passes; only existing underrun gate fails (2 dry events,0 dropped buffers), versus accepted baseline5 dry/290post-anchor reports. Explicit16:10 repeat has no faults, restored saves and80 golden records. Found/fixed Mac auto notch geometry (D107) in isolated source: AppKit safe-area helper and Objective-C build-input certification; focused32tests pass. Bundled-dependency rebuild109steps and build certificate pass (`fix-build.txt`); required full regression running (`fix-full.txt`), then corrected real-settings fullscreen/overlay check queued.
 - 2026-10-13 20:23 — Mac auto fix native build109steps/certificate pass; complete source suite352pass/30skip (`fix-all-unit.txt`). Full runtime regression remains active: title/menu goldens, launcher, overlay and fight pass so far; bundled interpreter lacks pytest, independently resolved by the complete UV source-suite run. Compact actual-gameplay GIF3.45MB plus two60fps comparison clips exported locally with hashes; not published.
 - 2026-10-13 21:07 — Fixed-source full regression completes11/16 in56min (`logs/widescreen-macos/fix-full.txt`, integration `logs/regress-20261013-210713.txt`): fight/FFA/Terrordome/replay/intro/gym and soak3/3 pass; combat26/27 and versus25/26, each onlyaudio.dry_queue3events/0drops. Other failed checks: bundled Python lacks pytest (independent352-source-tests pass), known startup callback in m2, historicalstream callback0x001E3C14 during crib boot (crib reached/saves restored). Targeted fullscreen and unit/m2/crib repeats queued serially; raw failures retained.
 - 2026-10-14 12:00 — **Stale-docs pass from the platform-parity audit (issue #15).** Fixed statements that contradicted the shipped state: `docs/known-issues.md` (Linux launcher/overlay shipped since v0.7.0 and checked on the Deck 2/2; launcher and HD list now include Linux; Clang note points at the Deck runs), `docs/02-test-plan.md` and `docs/01-plan-review.md` (WIC/CNG and M5-via-Proton lines marked superseded by D95 and v0.6.1/v0.7.2), `docs/04-improvement-backlog.md` (installer section, overlay note, clang-cl note and the Steam Deck row of the comparison table). `README.md` is left to PR #22, which rewrites the HD line. Documentation only; no code, toolkit or release change.
@@ -263,64 +267,33 @@ defjam-recomp/
 - 2026-10-13 21:34 — PR12 source7e95ebe accepted by CI38495079579 (25/25), Macreport commented and PRmerged c4bcda69b3dc839a3705bfb443fc774d7828f33a. Exactmerge taggedv0.9.0; source release38495648349 passes27/27 and mergeCI38495640368 green. Publishedlatestv0.9.0 with9 game-free setup/checksum/provenance assets; allthree platformdigests/source/toolkit identities verified, MacDMG and payloadhash locallychecked and correctedsource bytesmatch nativevalidation. Existingv0.8.0 untouched; no gamebinary/data/generatedsource/newmedia published. Localmedia review ZIP27.8MB ready for ownerselection; savebaseline15/15 unchanged.
 - 2026-10-14 00:58 — D109 (numbered D105 on its branch): agent tooling. New `scripts/triage.py` (digest + bounded slices of the original log; 86 MB synthetic log in 6 s), `scripts/progress.py` (`brief` 5.3 KB vs 78.5 KB whole file), `scripts/ci-digest.py`, `scripts/sync-agent-adapters.py`; `AGENTS.md` 23.1 -> 14.4 KB with `CLAUDE.md` as an import and playbooks in `docs/agent/`; `pytest.ini` + slow marker; CI `changes`/`CI result` jobs (actionlint clean). 55 new unit tests; unit suite without the slow test 9 s locally. No game run: this host has no dump or build, so the `regress.py`/`harness.py` edits are covered by unit tests only. Hosted CI and Codex review pending.
 - 2026-10-14 01:23 — Codex review of PR #24 (head 1e75c97) reproduced and fixed: a crash/watchdog block no longer swallows the next fault (a block ends at the next log tag or non-detail line); CLEAN needs positive frame evidence (reports with presents above zero, last not zero); an unfamiliar `[ICALL]` line is kept as unclassified; `[UNIMPL]` gets the same preceding-evidence rule as crashes; `--grep --last` keeps a bounded deque (200,000 matches: 13.6 MB peak before, under 2 MB asserted now); `CI result` fails closed (explicit `--always`/`--heavy` lists, a test that the workflow passes every job). Also quoted paths in the suggested commands, noted the 400-line hang heuristic as a limit, and corrected the 32 KiB, sub-agent and timing claims. 17 new tests. CI on 27f54d7 was 27/27 green; re-run pending on the fix push.
+- 2026-10-14 05:30 — D110/D111 on `feature/clever-feynman-4ovoyk` (PR #24 merged into main first; its D105 is D109 here). Play-test recorder (`src/hooks/recorder.c`, `pc_debug.c`; `[debug] record`, `--record`, `RECOMP_RECORD`): per-frame `frames.csv` with the log's and audio's byte counts (log lines and samples on the frames' clock without changing the log), `events.jsonl` (every front-end call, hitches, audio drop-outs, cutscene view, match telemetry, memory), audio, a 30 s picture ring; F9/overlay button/crash/hang/long hitch write a bundle. `scripts/bug-bundle.py` (report, charts, contact sheets, timed log); `triage.py` names bundles. `scripts/scenarios.py` (fixture library, generated routes equal to the six harness fight routes, `--expect-character`, `cutscene`), `RECOMP_FE_INJECT`, `RECOMP_TEST_CROWD=hold,reseed`, `scripts/crowd-lab.py` (matrix + learned masks), `scripts/funccall-catalog.py`. Synthetic end-to-end test plants a hitch, a draw dip, a one-picture flash, an audio gap and a click and finds all five. Not built or run on the game; syntax-checked with gcc, clang, MinGW (overlay against ImGui 1.92.9b and SDL3 headers).
 
 ## 7. Hand-off
 
-### Widescreen v0.9.0 — released; PR #22 media ready locally
+### Play-test recorder and scenarios (D110, D111), 2026-10-14
 
-PR #12 merged `c4bcda69b3dc839a3705bfb443fc774d7828f33a`, exact merge tagged
-v0.9.0 and published latest. Mac fix `5866124`, release preparation `7e95ebe`,
-toolkit `872fbc3`. PRCI38495079579 passes25/25; release38495648349 passes27/27;
-mergeCI38495640368 green. Nine approved game-free setup/checksum/provenance
-assets verified; Mac installer SHA256
-`bc33acc61b2538adaec8ee39bd1ea0d3f594255314ceb0fd854bfcc7c54a2369`.
-Existing v0.8.0 updater release is unchanged. No game executable, data, generated
-source or new game media was published. Mac results/release links are in PR #12.
+Branch `feature/clever-feynman-4ovoyk`: current main + PR #24 (agent tooling, D109) merged + this work. Nothing
+here has been built into the game or run against it: the authoring machine had no dump. Guides:
+`docs/playtest-recorder.md`, `docs/research/scenario-launching.md`, `docs/agent/playtest.md`.
 
-Mac validation: bundled-dependency native109-step build/certificate; source352
-pass/30skip; replay80/80golden; fights/FFA/Terrordome/intro/gym/soak3/3/F1/launcher
-pass. Auto now1.6/FOV35.65/drawable3600x2260 on a notchedMac. Rawfull11/16 kept;
-unit/loading/crib focused repeats pass. Existing audio.dry_queue remains failed
-(combat26/27, versus25/26, allgameplay passes, each3dry/0drops). Historical stream
-callback0x001E3C14 recurred in HDcapture and cribboot; cause unresolved, clean
-repeats retained, no guessed suppression. Details: `docs/widescreen/09-macos-validation.md`.
-Original installations/saves untouched; disposable save root15/15 matches baseline.
+What to do first (Windows, then Mac and Deck):
+1. `scripts\build.ps1` (new C: `src/hooks/recorder.c`, `pc_debug.c`, `fe_inject.c`, `crowd_control.c`,
+   `guest_call.h`; edits in `d3d11_translator.c`, `pc_settings.c`, `pc_ui.cpp`, `test_telemetry.c`, `main.c`,
+   `recomp_manual.c`, `patches/widescreen.c`). No new `_enter` hook, so the lifted code is the same, but the
+   freshness check hashes `recomp_manual.c` and will ask for `recomp.ps1` first (about 20 min). MSVC never
+   compiled this: expect small fixes (MinGW, gcc and clang did).
+2. `python scripts/regress.py --quick` with recording off: must match main.
+3. Play with `--record` (or Debug tab), press F9 after something, `python scripts/bug-bundle.py latest`;
+   check `report.md`, `frametime.png`, `around-mark.png`, and `capture_ms` in `frames.csv` (the read-back cost).
+   Also `python scripts/scenario_suite.py run fight --fixture <f> --record` and look at `report.json` -> recorder.
+4. `python scripts/scenarios.py fixture add <name> --story crib`, then
+   `python scripts/crowd-lab.py run --fixture <name>` (about 6 variants x 2 fights) and record the table here.
+5. `python scripts/funccall-catalog.py --grep cinema --grep scene`; try a candidate with
+   `scenarios.py cutscene --fixture <name> --inject "getscreeninfo(story/crib#1=><command>"`. A hit goes in
+   `config/scenario-catalog.json` `cutscenes.launch_command`; no hit: the `LoadScene` entry-hook route in the
+   research note.
 
-Shared managed workspace is at merged0.9 source. Ignored `build/posix-release`
-links to the certified native build in `logs/widescreen-macos/integration`.
-For further tests set `DEFJAM_DATA=<repo>/logs/widescreen-macos/data`; use the
-existing guards. Original CI install remains in `logs/widescreen-macos/install`;
-final Mac tag artifact/provenance in `tag-mac-assets`; release evidence in
-`{pr-ci,release-ci,draft-release,published-release,merged-pr}.json`. All test
-queues finished. Runtime source inputs match the release tag; generated C stays ignored.
-
-Bonus media: `logs/widescreen-macos/media/index.html` local gallery,
-`review-exports.zip` (~27.8MB), `exports.json` hashes/identity/limits and
-`readme-media-snippet.md`. Hero + compact3s20fpsGIF about4MB; original/HD and
-4:3/16:9 stills plus silent60fps clips, actualoverlay/launcher, Story/FFA stills.
-Comparisons use original PR12a7 candidate; UI uses corrected0.9 runtime inputs,
-recorded separately. Clips have same seed/input but are not pixel-synchronised;
-background crowd can vary and GIF cadence is not a benchmark. Native masters/
-raw recordings stay local. Next owner choice: select exact exports for PR #22,
-then update provenance/allowlist pins and README in its docs branch. No new
-media approval/pins yet. Keep `docs/worklog/` archives local-only.
-
-### (merged from PR #24) Agent tooling PR (D109), 2026-10-14
-
-Branch `feature/eloquent-dijkstra-963vf0`, one pull request, for Vlad and Codex to review. No game, runtime,
-toolkit or release changes. What to know:
-- Instructions: `AGENTS.md` is canonical; `CLAUDE.md` imports it. Playbooks are in `docs/agent/` (index in its
-  README). Skills and briefs have one source under `docs/agent/`; run `python scripts/sync-agent-adapters.py`
-  after editing one (`--check` is what the unit test runs). Codex custom-agent files are not generated.
-- Reading a run: `python scripts/triage.py [log]`, then slice the original with `--around/--lines/--grep/--tail`.
-  Verdicts: clean, explained, partial, unexplained (`docs/agent/triage.md`). Add benign lines to
-  `config/triage-ignore.txt`. Its patterns are tested on synthetic logs shaped like `src/main.c`'s `[CRASH]`
-  block and the `[ICALL]` line; the first real failure will show what it misses, so add that signature and a test.
-- Reading `PROGRESS.md`: `python scripts/progress.py brief | section N | decision D<n> | decisions --grep T | grep T`.
-- CI: Markdown-only changes skip the setup, runtime and fixture jobs; `CI result` is the one gate to require
-  if branch protection is ever set up, and it fails closed (a missing job, or a heavy job skipped when the change
-  touches more than Markdown, fails it). The code path ran green on all 27 jobs of this PR; the docs-only skip
-  path is covered by unit tests but has not run on a hosted runner yet.
-- Next: merge after review; then watch two or three real failures through `triage.py` and fix its misses;
-  confirm Codex's custom-agent format before generating those; consider batching the 19 Windows fixture jobs.
-- Not part of this PR: the v0.8.0 release work (done, D104), issue #11, other checkouts.
+Known limits: picture read-back is synchronous (10/s default); audio is pre-device; venue not named in bundles;
+`hold` and `reseed` rest on the crowd note's measurements and are unproven; `worklog-add.py` now creates
+`docs/worklog/` (it crashed in a fresh clone). Archived hand-offs: `docs/worklog/2026-10-handoffs.md` (local).

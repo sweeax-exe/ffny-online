@@ -47,6 +47,7 @@ lists the changes that are waiting for a restart. Keys: `[ui] overlay_key` and `
 | Pad buttons | Which physical button acts as each Xbox control. Choose from a list, or press **Detect** and then the button on your pad |
 | Keyboard & mouse | The keys and mouse inputs for each Xbox control. Press **Add**, then a key, a side or middle mouse button or a wheel notch (Esc cancels); the left and right mouse buttons have buttons of their own while you are adding. **Clear** and **Default** per control |
 | General | Skip the launcher, the overlay's key and pad buttons, text size, a button that shows `settings.ini` in Explorer (Finder on macOS), reset every setting to default, and the version |
+| Debug | The play-test recorder (`[debug]` settings) and, in the overlay, what this run has recorded and a **Mark a bug here** button that saves the last seconds as a bug bundle (the same as the mark key, F9). See [Play-test recorder](playtest-recorder.md) |
 
 ## Using a gamepad in the menus
 
