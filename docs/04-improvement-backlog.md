@@ -12,8 +12,8 @@ This is deferred planning; existing milestone gates and dependency pins are unch
 ## The launcher and the overlay on macOS — planned 2026-10-08, done in v0.6.2
 
 Done in v0.6.2 as planned below, with two differences: the launcher uses SDL's renderer (Metal) rather than a Vulkan device of its own,
-and the SDL events are fed to ImGui by a small piece of glue instead of `imgui_impl_sdl3`. Linux compiles from the same sources and
-has not been run. What follows is the plan as written.
+and the SDL events are fed to ImGui by a small piece of glue instead of `imgui_impl_sdl3`. Linux uses the same sources and has
+shipped it since v0.7.0. What follows is the plan as written.
 
 Asked for by Vlad at the v0.5.0 release. The start-up launcher and the in-game overlay (v0.4.0,
 `src/hooks/pc_ui.cpp`, `pc_launcher.cpp`) are Dear ImGui on its Win32 and Direct3D 11 backends, so the
@@ -102,7 +102,7 @@ code on the player's machine from the player's dump, which is what the repositor
 releases of the game itself stay off the table (no legal advice has been taken; treat it as policy). Hosted CI also
 cannot build the game (no dump), so it could not produce one anyway.
 
-**What it does** (Windows only; Linux and Steam Deck run the Windows build under Proton, macOS is M9):
+**What it does** (as first written: Windows only, with Linux and Steam Deck under Proton and macOS as M9; the macOS (v0.6.1) and Linux/Steam Deck (v0.7.0, native) setups have since shipped, see [the installer guide](setup-installer.md)):
 
 1. Ask for the dump: an ISO, an XISO or an extracted folder. Verify `default.xbe` against
    `config/dump-manifest.json` (SHA-256 `31cc0d11...`) and explain wrong-version dumps in plain language. Extraction
@@ -259,8 +259,8 @@ Microsoft compiler because it was already installed. That is fine for a Windows-
 being fine when the same source has to produce a consistent result on two platforms.
 
 **What to do.** Add a `clang-cl` preset, get it building and passing the smoke test, and make it the
-default before starting the Linux target. Steam Deck is planned via Proton first, so this is not urgent,
-but it should land before M7.
+default before starting the Linux target. Native Linux and the Steam Deck have since shipped (v0.7.0, D95) with Clang,
+so what remains open is the `clang-cl` preset for Windows.
 
 ## 6. Upstream what belongs upstream
 
@@ -319,6 +319,6 @@ Kept for context when revisiting the above.
 | Lifter validation | recompiler run against an instruction test suite | none in CI |
 | Renderer | a serious modern renderer | a translation layer plus a diagnostic executor |
 | Mods | defined format with template and build tool | not designed yet |
-| Steam Deck | native Linux build plus Flatpak | Windows build under Proton, native deferred |
+| Steam Deck | native Linux build plus Flatpak | native Linux build since v0.7.0 (Vulkan, SDL3, PipeWire), installed by the Linux setup; no Flatpak, Proton untried |
 
 The renderer row is the one that decides the project. Everything else on this page is ordinary work.
