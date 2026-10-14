@@ -67,7 +67,7 @@ cannot validate those control-flow joins. Use compiled recompiler tests for
 flag behavior, and retain the separate coverage and jump-table audits.
 
 ## The bring-up loop (M1 to M3)
-1. Run with the watchdog and read `logs\run-*.log`. The VEH handler prints the guest function (`sub_XXXXXXXX`), Xbox registers and a guest stack scan.
+1. Run with the watchdog, then digest the log with `python scripts/triage.py` (newest run) instead of reading `logs\run-*.log.err`, which can be hundreds of megabytes; it prints the verdict and the line numbers to slice (`--around`, `--grep`, `--lines`, `--tail`), see `docs/agent/triage.md`. The VEH handler prints the guest function (`sub_XXXXXXXX`), Xbox registers and a guest stack scan.
 2. Locate the function in `tools\xboxrecomp\tools\disasm\output\asm\` or in the Ghidra project under `$DEFJAM_DATA\ghidra`.
 3. Decide which of three fixes applies. A missing kernel or D3D shim is implemented in the toolkit and is upstream-able. A lifter bug is overridden in `src\recomp_manual.c` through `recomp_lookup_manual()`. A hardware poke we do not need (TV encoder, PCI space, interrupts) is stubbed in `src\hooks\`.
 4. Rebuild. Ninja is incremental, and generated chunks only recompile after a re-lift.

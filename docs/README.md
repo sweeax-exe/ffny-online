@@ -22,6 +22,7 @@
 | [Runtime reference](05-reference.md) | Rendering architecture and investigation tools |
 | [Gameplay test harness](09-testing-harness.md) | Scripted gameplay checks, what each proves, reports and fixtures |
 | [Test plan](02-test-plan.md) | Milestone gates and regression discipline |
+| [Agent playbooks](agent/README.md) | Reading a failed run (`triage.py`), diagnostics, the harness, sub-agent briefs; what `AGENTS.md` points to |
 | [Texture processing and review](hd-texture-workflow.md) | Reproducing the HD texture census, upscale and review galleries |
 | [Release process](releasing.md) | Source releases, tag checks and GitHub CI |
 
