@@ -14,6 +14,6 @@ Never read a run log whole: it is hundreds of megabytes. Full guidance: `docs/ag
 3. `partial`, `unexplained`, or a fix that did not change the outcome: go to the original, bounded, with
    the line numbers the digest printed:
    `triage.py <log> --around LINE --context 30`, `--lines A:B`, `--grep REGEX --max 40` (`--last`), `--head N`, `--tail N`.
-4. Hangs are always `partial`: find the live thread (`scripts/sample-threads.py`, `scripts/native-stacks.py`
-   on Windows; `sample` or gdb elsewhere), then `scripts/guest-stack.py`. The watchdog's own stack is a scan.
+4. Hangs are always `partial`: find the live thread (`scripts/native-stacks.py` on every host,
+   `scripts/sample-threads.py` on Windows), then `scripts/guest-stack.py` (Windows). The watchdog's own stack is a scan.
 5. Record the finding in `PROGRESS.md` §6 with the log name.

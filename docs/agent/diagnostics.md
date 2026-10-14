@@ -25,7 +25,7 @@ answer. Reach for them before writing a new one.
 | `scripts/gap-seeds.py` | Functions the lifter never reached (vtable slots, driver tables): code-shaped starts in the gaps between lifted functions. `--write` seeds them. Check `Original:` extents before and after the re-lift. |
 | `scripts/stub-targets.py` | Which unresolved stubs are real code a lifted function jumps into, and which can be seeded. A stub reached at run time skips code and leaves the stack wrong; the failure shows up callers away (the Terrordome crash, v0.2.1). `[ABI] ... esp(epilogue never ran)` from the `win-x64-abicheck` preset names the function. |
 | `scripts/mem-find.py` | Searches a live process's guest memory for a byte pattern. |
-| `scripts/native-stacks.py` | Every thread's **host** call stack, named from the PDB (dbghelp, no debugger). The answer when a thread is "outside the exe": which lock or wait, and which of our functions got it there. |
+| `scripts/native-stacks.py` | Every thread's **host** call stack, named from the PDB (dbghelp, no debugger; lldb on macOS, gdb or eu-stack on Linux). The answer when a thread is "outside the exe": which lock or wait, and which of our functions got it there. |
 | `scripts/big-entry.py`, `scripts/refpack.py` | Read the dump offline: list a BIG4 directory, decompress RefPack and list the nested archive. Metadata only -- they never write game bytes anywhere. |
 
 **Three rules, each learned by getting it wrong.**

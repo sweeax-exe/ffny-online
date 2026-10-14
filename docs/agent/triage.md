@@ -41,8 +41,8 @@ exists to avoid. Slice, and slice again. You lose nothing by it: the log is neve
 ## Where the digest is deliberately weak
 
 - **Hangs.** A `[WATCHDOG]` is always `partial`. Its guest stack is a scan of stale words. Locate the
-  live thread with `scripts/sample-threads.py` and `scripts/native-stacks.py` (Windows; on macOS and
-  Linux use `sample` or gdb, `docs/build-macos-linux.md`), then `scripts/guest-stack.py`. A log is weak
+  live thread with `scripts/native-stacks.py` (every host; lldb on macOS, gdb on Linux) and
+  `scripts/sample-threads.py` (Windows), then `scripts/guest-stack.py` (Windows). A log is weak
   evidence for a hang: a loop entered once at start-up never shows again (`docs/agent/diagnostics.md`, rule 1).
 - **Order.** Unclassified lines *before* the stop keep a crash, an unresolved call or an untranslated
   instruction from being `explained`, for that reason: the last error in a log is often a consequence of

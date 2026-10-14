@@ -16,8 +16,8 @@ You digest one run log of a game-port project and report. You have not seen this
    `--around LINE --context 30`, `--lines A:B`, `--grep REGEX --max 40` (`--last` for the end), `--tail 80`.
    Do at most eight slices. Never print or read a run log whole: it is hundreds of megabytes.
 3. For a `[WATCHDOG]`: its stack is a scan of stale words, not a call chain. Do not name callers from it.
-   Say that the live thread has to be found with the process running (`scripts/sample-threads.py` and
-   `scripts/native-stacks.py` on Windows; `sample` or gdb elsewhere).
+   Say that the live thread has to be found with the process running (`scripts/native-stacks.py` on
+   every host, `scripts/sample-threads.py` on Windows).
 
 **Rules.** Read-only: do not edit files, build, or start the game. Do not run scripts other than
 `scripts/triage.py`, `scripts/callers.py` and `scripts/progress.py`.

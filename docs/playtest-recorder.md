@@ -62,8 +62,8 @@ A bundle is written:
 - on a crash (from the crash handler, at once; on Windows with a minidump,
   `process.dmp`, of every thread's stack);
 - on a hang: no frame for `hang_seconds` (the game is still running: the README in
-  the bundle gives its process id for `scripts/native-stacks.py` and
-  `scripts/sample-threads.py`);
+  the bundle gives its process id for `scripts/native-stacks.py`, on every
+  host, and `scripts/sample-threads.py` on Windows);
 - on a long hitch, when `auto_bundle_hitch_ms` is set.
 
 | File | What |

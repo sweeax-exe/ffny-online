@@ -925,9 +925,15 @@ static void write_bundle(const char *reason, double t_mark, unsigned long long f
                 "picture and the log lines of these seconds with their times, beside these files.\n", reason, dir);
         if (!strcmp(reason, "hang"))
             fprintf(f, "\nThe game was still running when this was written (pid %d). While it is, run\n"
-                       "  python scripts/native-stacks.py --pid %d     (Windows)\n"
+                       "  python scripts/native-stacks.py --pid %d\n"
+#if defined(_WIN32)
                        "  python scripts/sample-threads.py --pid %d\n"
-                       "to see where each thread is.\n", process_id(), process_id(), process_id());
+#endif
+                       "to see where each thread is.\n", process_id(), process_id()
+#if defined(_WIN32)
+                       , process_id()
+#endif
+                       );
         fclose(f);
     }
     copy_text(g_last_bundle, sizeof g_last_bundle, dir);
