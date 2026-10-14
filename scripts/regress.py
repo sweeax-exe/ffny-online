@@ -102,7 +102,10 @@ def not_applicable(why):
 # --- checks ----------------------------------------------------------------
 
 def check_unit(a):
-    r = subprocess.run([sys.executable, "-m", "pytest", "-q", "tests/unit"], cwd=REPO, capture_output=True, text=True)
+    # The slow tests (rebuilding the branding set) run in CI and with `pytest tests/unit`; the
+    # regression run is about the game, and a seven-second unit check is worth running first.
+    r = subprocess.run([sys.executable, "-m", "pytest", "-q", "-m", "not slow", "tests/unit"],
+                       cwd=REPO, capture_output=True, text=True)
     last = (r.stdout.strip().splitlines() or ["no output"])[-1]
     return r.returncode == 0, last
 
@@ -510,6 +513,7 @@ def main(argv=None):
     t_all = time.time()
     for n in names:
         t0 = time.time()
+        log_before = harness.LAST_LOG
         try:
             if a.shared_story and n in ('crib', 'gym'):
                 if shared_story is None:
@@ -527,6 +531,8 @@ def main(argv=None):
             ok, detail = False, str(ex)
         rows.append((n, ok, detail, time.time() - t0))
         print("%-6s %-4s %4d s  %s" % (n, status_word(ok), rows[-1][3], detail), flush=True)
+        if ok is False and harness.LAST_LOG and harness.LAST_LOG != log_before:
+            print("       " + harness.triage_hint(harness.LAST_LOG), flush=True)
     harness.kill_stray()
 
     failed = [r for r in rows if r[1] is not None and not r[1]]
