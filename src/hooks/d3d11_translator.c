@@ -480,6 +480,8 @@ static double recorder_capture(IDirect3DDevice8 *dev)
                          g_recomp_gamma_on ? (const uint8_t (*)[256])g_recomp_gamma : NULL);
         surf->lpVtbl->UnlockRect(surf);
     }
+    /* Direct3D 11's GetBackBuffer makes a new surface, holding the texture, every call. */
+    surf->lpVtbl->Release(surf);
     return recorder_now_ms() - start;
 }
 
