@@ -22,7 +22,7 @@ deleted there (finding: the flag does nothing).
 |---|---|---|
 | WS-0 settings | done | `[display] aspect` widescreen shapes (merged with Picture shape, 2026-10-12), `widescreen_hud`, `widescreen_cutscenes`, `widescreen_side_fill`, `widescreen_fov_cap`; `RECOMP_WS_ASPECT` for experiments |
 | WS-1a canvas (D3D11) | done | toolkit `d3d8_present_set_canvas_aspect`; scissor and point sprites per axis; captures (`RECOMP_TRANS_SHOT_WIDE=1`) |
-| WS-1b canvas (Vulkan) | done on the Deck | ported (toolkit `d3d8_vk.c`); scripted 16:10 and 16:9 runs on a Steam Deck 2026-10-12, see [07](07-testing-and-playtest.md) section 7; macOS compiles only |
+| WS-1b canvas (Vulkan) | done on Deck and Mac | ported (toolkit `d3d8_vk.c`); Deck scripted runs in [07](07-testing-and-playtest.md) section 7; Mac original/HD, 16:9/16:10 and replay results in [09](09-macos-validation.md) |
 | WS-2 Hor+ | done | `src/patches/widescreen.c` `ws_view_params`; full-screen views only |
 | WS-3 cutscenes | mostly | 16:9 full screen, 16:10 thin bars; the 16:9 box beyond 16:9 is still Hor+ (experimental aspects only) |
 | WS-4/5/6/7 2D | done via the renderer classifier (design section 0) | to verify per screen in the play-test: pause, popups, Story hub, shops, create-a-player, results |

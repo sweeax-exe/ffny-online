@@ -45,18 +45,19 @@ cutscenes. On Windows, from the worktree root:
 $env:RECOMP_WS_ASPECT = "1.7778"; .\build\win-x64-release\defjam_recomp.exe
 ```
 
-## 4. Beta release
+## 4. Release plan (updated 2026-10-13)
 
-1. When WS-0, WS-1a, WS-2, WS-3, WS-4 (with the edge-anchored HUD, owner 2026-10-11), WS-5, WS-6, WS-7 and WS-8
-   (`blur`) are in, cut **`v0.8.0-beta.1`** from
-   `feat/widescreen` merged to main, with Picture shape `4:3` by default and the setting visible in the launcher. Follow
-   `docs/releasing.md`; confirm the release workflow handles a pre-release tag (mark it as a pre-release on GitHub, not
-   "Latest").
-2. Release notes: what to try (Picture shape `widescreen (auto)` in the launcher), what is known to be rough (32:9, unswept venues), how
-   to report (issue form with the aspect and screen).
-3. The owner plays through the script below at 16:9 and on the Deck. Fixes land as `beta.2`, `beta.3`.
-4. When the script passes at 16:9 and 16:10 and the venue sweep (WS-9) is done at those aspects: `v0.8.0` with
-   Picture shape `widescreen (auto)` as the default. The 21:9/32:9 sweep and polish follow in a later release (owner, 2026-10-11).
+Vlad requested the widescreen release after Windows, Linux and Mac validation,
+then chose **v0.9.0** because v0.8.0 already shipped the setup updater.
+Use the stable source-release workflow in `docs/releasing.md`; the widescreen
+feature remains labelled **beta** and **off by default**. This version change
+does not make unswept venues or experimental ultrawide shapes fully validated.
+
+Release notes describe the tested routes, platform differences and retained
+known issues. The Mac evidence is in [09-macos-validation.md](09-macos-validation.md).
+The original beta sequence and eventual automatic-default proposal remain
+research plans; changing the default requires a later decision and the venue
+sweep. Continue the hand play-test below at 16:9 and 16:10, and record any gaps.
 
 ## 5. Play-test script (owner, by hand)
 

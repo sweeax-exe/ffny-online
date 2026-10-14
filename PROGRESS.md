@@ -266,8 +266,8 @@ defjam-recomp/
 Owner resumed and chose v0.9.0; preserve released v0.8.0 updater. Public PR #12
 head still `a7dc1b7`, toolkit `872fbc3`. Integration source/build is
 `logs/widescreen-macos/integration` (`codex/widescreen-integration`, base merge
-`b06848b`). Native Mac auto-notch fix, Objective-C build certification and
-v0.9.0 preparation are validated and awaiting source-only commits.
+`b06848b`). Mac auto-notch fix/certification/validation committed as `5866124`; current
+main documentation merged as `8e2a567`. v0.9.0 version/notes commit next.
 
 Exact CI setup installed with Homebrew blocked; 109-step corrected build and
 certificate pass. Full fixed regression11/16 in56min (`fix-full.txt`): failures
@@ -280,8 +280,7 @@ Auto-fullscreenHD/F1/launcher pass (`fix-auto.json`): aspect1.6, FOV35.65,
 3600x2260 drawable. Whole disposable save root15files matches prepared baseline;
 original installations and saves untouched. All test queues have finished.
 
-Next: commit fix, merge latest documentation-only `origin/main` (`8b1e90b`),
-preserve its work-log entry, commit v0.9.0 notes/version, source checks, push to
+Next: commit v0.9.0 notes/version, final source checks, then push to
 `origin feat/widescreen`, update/comment PR #12, awaitCI, then merge/tag/release
 v0.9.0 as requested. No push/comment/merge/tag for this task yet. Publish only
 reviewed game-free setup assets; never game executables/data/generated source.

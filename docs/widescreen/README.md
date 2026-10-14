@@ -75,6 +75,9 @@ Where a report and this folder disagree, this folder wins: it was checked agains
 | HUD default | **Edge-anchored up to 16:9, centred 16:9 box above** (W4 as proposed). |
 | Generative AI | Trial done ([06 §5](06-cutscenes-movies-and-ai.md#5-fmv-trial-blur-vs-ai), pipeline in [08](08-fmv-ai-pipeline.md)). AI "looks surprisingly good" but the seam between real and generated needs more blending: **to-do** (WS-12). |
 | Side fill | **Blurred sides** are the default and ship (`side_fill = blur`). |
-| Beta | **Yes**: `v0.8.0-beta.1` with widescreen off by default, for an initial owner play-test; tweaking continues through later betas. |
+| Beta | **Yes**: `v0.9.0-beta.1` with widescreen off by default, for an initial owner play-test; tweaking continues through later betas. |
 | Publishing | Branch pushed and a draft PR opened for the implementing agents. |
 
+
+Mac installation, automatic-aspect correction, replay comparisons and retained
+diagnostics: [09 — macOS validation](09-macos-validation.md).
