@@ -214,8 +214,10 @@ def test_session_holds_rows_events_and_identity(marked):
     kinds = [e['kind'] for e in events]
     for k in ('session_start', 'fe', 'hitch', 'audio_dropped', 'view', 'mark', 'bundle'):
         assert k in kinds, k
-    hitch = next(e for e in events if e['kind'] == 'hitch')
-    assert hitch['frame'] == 200 and hitch['interval_ms'] >= 80
+    # The planted hitch, found by its frame: a shared CI runner can stall a frame of its own
+    # past the 50 ms threshold (seen at frame 90 on Windows), which is not what this checks.
+    hitches = [e for e in events if e['kind'] == 'hitch']
+    assert any(h['frame'] == 200 and h['interval_ms'] >= 80 for h in hitches), hitches
     view = next(e for e in events if e['kind'] == 'view')
     assert view['mode'] == 1 and view['cutscene'] is True
     meta = json.loads((session / 'session.json').read_text())
