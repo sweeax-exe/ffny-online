@@ -181,6 +181,7 @@ void pc_debug_start(const char *log_path, int force)
     cfg.build = build;
     cfg.settings_json = json;
     cfg.mark_vk = vk > 0 ? vk : 0x78;   /* VK_F9 */
+    cfg.mark_key_name = vk > 0 ? key : "F9";
     if (!recorder_init(&cfg)) {
         free(json);
         return;

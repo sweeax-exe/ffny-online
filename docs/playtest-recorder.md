@@ -20,6 +20,10 @@ Any one of:
 - `settings.ini`: `[debug] record = true`;
 - start the game with `--record`, or with `RECOMP_RECORD=1` set, for one run.
 
+On a Mac keyboard F9 is a media key (fast-forward): press **fn+F9**, turn on
+*Use F1, F2, etc. keys as standard function keys* in the Keyboard settings, or set
+`mark_key` to another key. The overlay's button works everywhere.
+
 Every run then keeps a session folder, `logs/sessions/<date>-<time>/`, beside the
 usual `logs/run-*.log.err`. `logs/sessions/LATEST` names the newest one.
 
@@ -143,12 +147,13 @@ routes, `--env RECOMP_RECORD=1` works too.
 
 ## Not done
 
-- The asynchronous read-back has passed its toolkit fixture (Vulkan on Mesa's
-  software driver) but has not yet been measured in the game: `capture_ms` with and
-  without `RECOMP_RECORD_SYNC=1` is the comparison to make.
+- The asynchronous read-back has been measured in the game on macOS only (above);
+  Direct3D 11 and the Deck's Vulkan driver are still to be measured.
 - Audio is captured before the device. What the device actually played, and its
   latency, is not recorded.
 - Venues are not named in bundles: the game's venue index has not been mapped. The
   front-end calls around a fight (`fe` events) usually say which screen chose it.
-- macOS was not built with this change; the Windows and Linux paths were compiled
-  with MinGW and gcc, not MSVC (see `PROGRESS.md`).
+- macOS: built and run on an M-series Mac (AppleClang, MoltenVK) on 2026-10-14: sessions,
+  F9 and overlay bundles, the reports, and the asynchronous read-back (`capture_ms` about
+  1.2 ms a picture against 3.4 ms synchronous). Windows (MSVC) and the Steam Deck are still
+  to be run on the game.

@@ -1162,8 +1162,12 @@ int recorder_init(const RecorderConfig *cfg)
     }
     recorder_event("session_start", NULL);
     start_worker();
-    fprintf(stderr, "[RECORD] recording this session to %s (pictures %d a second, %d s kept; mark with the key %d)\n",
-            g_session, g_cfg.video_fps, g_cfg.ring_seconds, g_cfg.mark_vk);
+    if (cfg->mark_key_name && *cfg->mark_key_name)
+        fprintf(stderr, "[RECORD] recording this session to %s (pictures %d a second, %d s kept; mark with %s)\n",
+                g_session, g_cfg.video_fps, g_cfg.ring_seconds, cfg->mark_key_name);
+    else
+        fprintf(stderr, "[RECORD] recording this session to %s (pictures %d a second, %d s kept; mark with the key %d)\n",
+                g_session, g_cfg.video_fps, g_cfg.ring_seconds, g_cfg.mark_vk);
     fflush(stderr);
     return 1;
 }

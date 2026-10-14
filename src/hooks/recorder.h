@@ -35,6 +35,7 @@ typedef struct RecorderConfig {
     const char *build;          /* version and source identity, for bundle.json */
     const char *settings_json;  /* a JSON object: the settings this run started with */
     int mark_vk;                /* the key that marks a moment (a Windows virtual-key code) */
+    const char *mark_key_name;  /* its name for the log ("F9"), read by recorder_init only; NULL: the code */
 } RecorderConfig;
 
 /* What the caller measured for one frame. Counters are the runtime's own and
