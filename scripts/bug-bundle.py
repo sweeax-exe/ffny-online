@@ -655,8 +655,11 @@ def analyse(target, out=None, mp4=False):
     log = timed_log(folder, meta, rows) if b['kind'] == 'bundle' else []
     if log:
         with open(out / 'log-timed.txt', 'w', encoding='utf-8') as f:
+            placed = False      # an unplaced line after a placed one was written after the last frame row
             for t, fr, line in log:
-                f.write('%s %s  %s\n' % ('[%+9.3fs' % rel(t, mark) if t is not None else '[  before ',
+                placed = placed or t is not None
+                f.write('%s %s  %s\n' % ('[%+9.3fs' % rel(t, mark) if t is not None else
+                                         ('[  after  ' if placed else '[  before '),
                                          ('f%-7d]' % fr) if fr is not None else '        ]', line))
         result['files']['log'] = 'log-timed.txt'
 
@@ -784,7 +787,9 @@ def write_report(b, result, stats, log, events, mark, notes):
     s = meta.get('settings') or {}
     if s:
         keys = ['display.aspect', 'display.render_scale', 'display.vsync', 'textures.enabled', 'debug.record_fps']
-        L.append('- Settings: ' + ', '.join('%s=%s' % (k.split('.', 1)[1], s[k]) for k in keys if k in s))
+        # The key alone, unless it says nothing without its section (textures.enabled).
+        L.append('- Settings: ' + ', '.join('%s=%s' % (k if k.endswith('.enabled') else k.split('.', 1)[1], s[k])
+                                            for k in keys if k in s))
 
     # Frames
     fs = result['frames']
