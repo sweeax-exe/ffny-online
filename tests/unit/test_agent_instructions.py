@@ -1,7 +1,8 @@
 """One set of agent instructions for every tool, and the per-tool copies derived from it.
 
 `AGENTS.md` is the instruction file (Codex reads it as is). `CLAUDE.md` imports it with `@AGENTS.md` and adds
-only notes for Claude Code. Codex stops reading project instructions at 32 KiB, so `AGENTS.md` stays under 30.
+only notes for Claude Code. Codex's default limit for the combined project instructions it discovers is 32 KiB (`project_doc_max_bytes`, which
+can be changed), so `AGENTS.md` stays under 30 as a convention; this checks the one file, not the whole chain.
 Skills and sub-agent briefs are written once under docs/agent/ and copied for each tool by
 scripts/sync-agent-adapters.py; a copy that differs from its source fails here. Line endings are ignored,
 since a checkout may convert them.
@@ -35,7 +36,7 @@ def test_claude_md_imports_agents_md():
 
 def test_agents_md_fits_codex_budget():
     size = len(read('AGENTS.md').encode())
-    assert size < LIMIT, 'AGENTS.md is %d bytes; Codex drops project instructions past 32 KiB. Move detail to docs/agent/' % size
+    assert size < LIMIT, 'AGENTS.md is %d bytes; keep AGENTS.md under the 32 KiB default Codex limit with room to spare. Move detail to docs/agent/' % size
 
 
 def test_agents_md_has_nothing_only_one_tool_understands():

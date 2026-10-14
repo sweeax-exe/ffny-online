@@ -153,6 +153,100 @@ def test_a_very_long_line_is_cut_and_says_so(tmp_path):
     assert out.startswith('x' * 220) and out.endswith('...(+780 chars)')
 
 
+# --- review findings (PR 24): each of these was a wrong verdict or an unbounded read ---------------
+
+def test_a_watchdog_right_after_a_crash_is_not_swallowed(tmp_path):
+    text = (FRAME + '[CRASH] Access violation at RIP=0x140012345, fault addr=0x1000\n'
+            '  in sub_00100000+0x10\n'
+            '[WATCHDOG] no exit after 10s; guest esp=0x00F7F874\n  GS 00F7F87C 0021EF70\n')
+    d = digest(tmp_path, text)
+    assert d['watchdog'] and d['watchdog']['stack_words'] == 1
+    assert d['crash']['function'] == 'sub_00100000+0x10'
+    assert d['verdict'] == 'partial' and any('[CRASH]' in r for r in d['reasons'])
+
+
+def test_a_second_crash_does_not_lend_its_function_to_the_first(tmp_path):
+    text = (FRAME + '[CRASH] Fatal signal (SIGABRT) at PC=0x1, fault addr=0x0\n'
+            '[CRASH] Access violation (SIGSEGV) at PC=0x2, fault addr=0x10\n  in sub_00200000+0x4\n')
+    d = digest(tmp_path, text)
+    assert d['crash']['function'] is None and d['verdict'] == 'partial'
+
+
+def test_signatures_after_a_crash_are_still_counted(tmp_path):
+    text = (FRAME + CRASH + '[ICALL] Failed to resolve VA 0x00201770 (total calls: 3)\n'
+            '[UNIMPL] untranslated instruction REACHED: `unknown` at 0x00100004\n'
+            'plain text that is not a detail line, with an error in it\n')
+    d = digest(tmp_path, text)
+    assert [i['va'] for i in d['unresolved_icall']] == ['0x00201770']
+    assert len(d['untranslated']) == 1 and d['unclassified_distinct'] == 1
+    assert d['crash']['function'] == 'sub_0021EB90+0x44'
+
+
+def test_a_crash_detail_line_is_not_reported_as_unclassified(tmp_path):
+    d = digest(tmp_path, FRAME + CRASH + '    [0] 0x140001234\n')
+    assert d['unclassified_distinct'] == 0 and d['verdict'] == 'explained'
+
+
+def test_a_long_boot_with_no_frame_reports_is_not_clean(tmp_path):
+    d = digest(tmp_path, 'XBE loaded\n' + 'idle\n' * 49)
+    assert d['verdict'] == 'unexplained' and 'no frame reports' in d['reasons'][0]
+
+
+def test_frame_reports_with_nothing_presented_are_not_clean(tmp_path):
+    d = digest(tmp_path, '  [D3D] 2.0s: 0 present (0.0 fps), 0 begin\n' * 10)
+    assert d['verdict'] == 'unexplained' and 'all with 0 presents' in d['reasons'][0]
+
+
+def test_frames_that_end_at_zero_are_partial(tmp_path):
+    d = digest(tmp_path, FRAME * 3 + '  [D3D] 2.0s: 0 present (0.0 fps), 0 begin\n')
+    assert d['verdict'] == 'partial' and 'last frame report shows 0' in d['reasons'][0]
+
+
+def test_an_unfamiliar_icall_message_is_kept_not_swallowed(tmp_path):
+    for line in ('[ICALL] unexpected resolver failure\n', '[ICALL] Failed to resolve target (no address)\n'):
+        d = digest(tmp_path, healthy() + line)
+        assert d['verdict'] == 'unexplained', line
+        assert d['unclassified'][0]['text'].startswith('[ICALL]')
+
+
+def test_a_short_icall_address_is_still_an_unresolved_target(tmp_path):
+    d = digest(tmp_path, healthy() + '[ICALL] Failed to resolve VA 0x1234\n')
+    assert d['verdict'] == 'explained' and d['unresolved_icall'][0]['va'] == '0x1234'
+
+
+def test_untranslated_instructions_after_unknown_evidence_are_partial(tmp_path):
+    text = healthy() + 'Heap corruption detected\n[UNIMPL] untranslated instruction REACHED: `unknown` at 0x00100004\n'
+    d = digest(tmp_path, text)
+    assert d['verdict'] == 'partial' and 'before the first untranslated' in d['reasons'][0]
+    assert d['unclassified'][0]['text'] == 'Heap corruption detected'
+
+
+def test_next_commands_quote_a_path_with_spaces(tmp_path, monkeypatch):
+    d = tmp_path / 'my logs'
+    d.mkdir()
+    path = str(d / 'run-1.log.err')
+    open(path, 'w').write(healthy() + CRASH)
+    monkeypatch.setattr(triage, 'REPO', str(tmp_path))
+    out = triage.digest(triage.scan(path, triage.load_ignores()))
+    around = [s for s in out['next'] if '--around' in s][0]
+    assert ("'my logs/run-1.log.err'" in around) or ('"my logs\\run-1.log.err"' in around)
+    assert triage.quote('plain/path.err') == 'plain/path.err'
+
+
+def test_last_matches_use_memory_bounded_by_the_output_not_the_match_count(tmp_path):
+    import tracemalloc
+    path = tmp_path / 'many.log.err'
+    path.write_text(''.join('match number %d\n' % i for i in range(200000)))
+    tracemalloc.start()
+    try:
+        lines, total, shown = triage.numbered(str(path), lambda n, raw: True, 40, last=True)
+        peak = tracemalloc.get_traced_memory()[1]
+    finally:
+        tracemalloc.stop()
+    assert total == 200000 and len(lines) == 40 and lines[-1].startswith('200000: match number 199999')
+    assert peak < 2_000_000, 'peak %d bytes: the last-N search is holding every match' % peak
+
+
 # --- the way into the original ------------------------------------------------------------
 
 def run_cli(capsys, *argv):

@@ -73,48 +73,102 @@ def test_changes_prints_the_job_output_line(tmp_path, monkeypatch, capsys):
     assert capsys.readouterr().out.strip() == 'code=false'
 
 
-NEEDS = {
-    'changes': {'result': 'success', 'outputs': {'code': 'true'}},
-    'hygiene': {'result': 'success', 'outputs': {}},
-    'python-tools': {'result': 'failure', 'outputs': {}},
-    'windows-setup': {'result': 'success', 'outputs': {}},
-}
+ALWAYS = ['changes', 'hygiene', 'python-tools']
+HEAVY = ['windows-setup', 'runtime-posix']
+
+
+def needs(code='true', **results):
+    base = {'changes': 'success', 'hygiene': 'success', 'python-tools': 'success',
+            'windows-setup': 'success', 'runtime-posix': 'success'}
+    base.update(results)
+    return {k: {'result': v, 'outputs': ({'code': code} if k == 'changes' else {})} for k, v in base.items()}
+
+
+def run_summary(monkeypatch, tmp_path, data, always=ALWAYS, heavy=HEAVY):
+    monkeypatch.setenv('NEEDS', json.dumps(data))
+    monkeypatch.setenv('GITHUB_STEP_SUMMARY', str(tmp_path / 'summary.md'))
+    code = ci.main(['summary', '--always', ','.join(always), '--heavy', ','.join(heavy)])
+    path = tmp_path / 'summary.md'
+    return code, (path.read_text() if path.exists() else '')
+
+
+def test_summary_passes_when_everything_succeeded(monkeypatch, tmp_path):
+    code, text = run_summary(monkeypatch, tmp_path, needs())
+    assert code == 0 and text.startswith('CI passed')
 
 
 def test_summary_puts_the_failing_job_first(monkeypatch, tmp_path, capsys):
-    out = tmp_path / 'summary.md'
-    monkeypatch.setenv('NEEDS', json.dumps(NEEDS))
-    monkeypatch.setenv('GITHUB_STEP_SUMMARY', str(out))
-    assert ci.main(['summary']) == 1
-    text = out.read_text()
-    assert text.startswith('**CI failed:** python-tools')
+    code, text = run_summary(monkeypatch, tmp_path, needs(**{'python-tools': 'failure'}))
+    assert code == 1 and text.startswith('**CI failed:** python-tools (failure)')
     assert text.index('| python-tools | failure |') < text.index('| hygiene | success |')
-    assert '::error::CI failed: python-tools' in capsys.readouterr().out
+    assert '::error::CI failed: python-tools (failure)' in capsys.readouterr().out
 
 
-def test_summary_passes_when_heavy_jobs_were_skipped_for_a_docs_change(monkeypatch, tmp_path):
-    needs = {k: dict(v) for k, v in NEEDS.items()}
-    needs['changes']['outputs'] = {'code': 'false'}
-    needs['python-tools']['result'] = 'success'
-    needs['windows-setup']['result'] = 'skipped'
-    monkeypatch.setenv('NEEDS', json.dumps(needs))
-    monkeypatch.setenv('GITHUB_STEP_SUMMARY', str(tmp_path / 's.md'))
-    assert ci.main(['summary']) == 0
-    assert 'skipped because only Markdown changed' in (tmp_path / 's.md').read_text()
+def test_heavy_jobs_may_be_skipped_only_for_an_established_docs_only_change(monkeypatch, tmp_path):
+    skipped = needs(code='false', **{'windows-setup': 'skipped', 'runtime-posix': 'skipped'})
+    code, text = run_summary(monkeypatch, tmp_path, skipped)
+    assert code == 0 and '2 job(s) skipped because only Markdown changed' in text
+    # the same skip while the change touches code is a failure, not a pass
+    wrong = needs(code='true', **{'windows-setup': 'skipped'})
+    code, text = run_summary(monkeypatch, tmp_path, wrong)
+    assert code == 1 and 'windows-setup (skipped although the change touches more than Markdown)' in text
+    # and so is a skip when the changes job gave no answer
+    unknown = needs(code='', **{'runtime-posix': 'skipped'})
+    assert run_summary(monkeypatch, tmp_path, unknown)[0] == 1
 
 
-def test_summary_fails_if_the_changes_job_did_not_succeed(monkeypatch):
-    needs = {'changes': {'result': 'skipped', 'outputs': {}}, 'hygiene': {'result': 'success', 'outputs': {}}}
-    monkeypatch.setenv('NEEDS', json.dumps(needs))
-    monkeypatch.delenv('GITHUB_STEP_SUMMARY', raising=False)
-    assert ci.main(['summary']) == 1
+def test_a_skipped_always_job_is_a_failure(monkeypatch, tmp_path):
+    code, text = run_summary(monkeypatch, tmp_path, needs(code='false', hygiene='skipped'))
+    assert code == 1 and 'hygiene (skipped)' in text
 
 
-def test_summary_cancelled_counts_as_failed(monkeypatch):
-    monkeypatch.setenv('NEEDS', json.dumps({'a': {'result': 'cancelled'}}))
-    assert ci.main(['summary']) == 1
+def test_missing_results_fail_closed(monkeypatch, tmp_path):
+    assert run_summary(monkeypatch, tmp_path, {})[0] == 1                 # NEEDS={}
+    data = needs()
+    del data['changes']
+    code, text = run_summary(monkeypatch, tmp_path, data)
+    assert code == 1 and 'changes (missing)' in text
+    data = needs()
+    del data['windows-setup']
+    code, text = run_summary(monkeypatch, tmp_path, data)
+    assert code == 1 and 'windows-setup (missing)' in text
+
+
+def test_the_changes_job_must_have_succeeded(monkeypatch, tmp_path):
+    for bad in ('failure', 'skipped', 'cancelled'):
+        assert run_summary(monkeypatch, tmp_path, needs(code='false', changes=bad))[0] == 1
+
+
+def test_cancelled_and_unknown_states_are_failures(monkeypatch, tmp_path):
+    assert run_summary(monkeypatch, tmp_path, needs(**{'windows-setup': 'cancelled'}))[0] == 1
+    assert run_summary(monkeypatch, tmp_path, needs(**{'windows-setup': 'weird'}))[0] == 1
+    extra = needs()
+    extra['other'] = {'result': 'failure', 'outputs': {}}
+    assert run_summary(monkeypatch, tmp_path, extra)[0] == 1
 
 
 def test_bad_needs_json_fails_cleanly(monkeypatch):
     monkeypatch.setenv('NEEDS', '{not json')
-    assert ci.main(['summary']) == 1
+    assert ci.main(['summary', '--always', 'a', '--heavy', 'b']) == 1
+
+
+def test_the_flags_are_required():
+    import pytest
+    with pytest.raises(SystemExit):
+        ci.main(['summary'])
+
+
+def test_the_workflow_passes_every_job_to_the_gate():
+    """ci-result's needs, its --always list and its --heavy list agree with the jobs the workflow defines."""
+    import re
+    text = open(os.path.join(HERE, '..', '..', '.github', 'workflows', 'ci.yml'), encoding='utf-8').read()
+    jobs_block = text[text.index('\njobs:'):]
+    ids = re.findall(r'(?m)^  ([a-z][\w-]*):\s*$', jobs_block)
+    gate = 'ci-result'
+    assert gate in ids
+    needs_line = re.search(r'(?m)^    needs: \[([^\]]*)\]', jobs_block[jobs_block.index('  %s:' % gate):]).group(1)
+    needed = {n.strip() for n in needs_line.split(',')}
+    assert needed == set(ids) - {gate}, 'ci-result must wait for every other job'
+    flags = re.search(r'--always (\S+)\s+--heavy (\S+)', jobs_block)
+    listed = set(flags.group(1).split(',')) | set(flags.group(2).split(','))
+    assert listed == needed, 'the gate must judge every job it waits for: %s' % (listed ^ needed)

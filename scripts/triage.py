@@ -14,12 +14,17 @@ The digest is the first step, not a replacement for the log. A run log is easily
 megabytes, and most of it is one line a frame; the digest says what stopped the run, what is
 unusual, and the line numbers to look at. It ends with a verdict:
 
-    clean        no fault signature, nothing unusual, frames presented to the end
+    clean        no fault signature, nothing unusual, and positive evidence of presentation: frame
+                 reports with presents above zero, the last one not zero
     explained    one known stop signature with a resolved detail (the function or the address),
                  and nothing unclassified before it
     partial      a known signature, but the detail is missing, or unclassified lines come first,
-                 or it is a hang (the watchdog's stack is a scan, not a walk)
-    unexplained  the run looks wrong and no known signature says why
+                 or it is a hang (the watchdog's stack is a scan, not a walk), or only symptoms
+    unexplained  the run looks wrong and no known signature says why, or nothing shows it presented a frame
+
+A line with a fault word or fault tag that no parser claimed (an unfamiliar [ICALL] message, say) is never
+dropped: it is listed as unclassified and keeps the verdict from being clean. A crash or watchdog block ends
+at the next log tag or non-detail line, so a second fault right behind it is read as its own.
 
 Only `clean` and `explained` mean the digest is enough. For `partial` and `unexplained`, or when a
 fix based on an `explained` verdict does not change the outcome, read the original: every number
@@ -44,7 +49,9 @@ IGNORE_FILE = os.path.join(REPO, 'config', 'triage-ignore.txt')
 WIDTH = 220                  # a longer line is cut, with the count of what was cut
 DEFAULT_MAX = 80             # lines a drill-down prints before saying "more"
 HARD_MAX = 400               # ... and the most it will ever print
-CRASH_BLOCK = 40             # lines read after a [CRASH] or [WATCHDOG] line
+CRASH_BLOCK = 60             # most detail lines read after a [CRASH] line
+WATCHDOG_BLOCK = 600         # ... and after a [WATCHDOG] line (the guest stack scan is long)
+TRAILING_LINES = 400         # lines after the last frame report before it counts as stopped
 SHOW_ANOMALIES = 8           # distinct unclassified lines listed in the digest
 
 CRASH_RE = re.compile(rb'\[CRASH\] (.*)')
@@ -52,7 +59,7 @@ FAULT_RE = re.compile(rb'fault addr=0x([0-9A-Fa-f]+)')
 PC_RE = re.compile(rb'(?:RIP|PC)=0x([0-9A-Fa-f]+)')
 GUEST_VA_RE = re.compile(rb'Xbox VA of fault: 0x([0-9A-Fa-f]+)')
 IN_FUNC_RE = re.compile(rb'^\s+in (\S+?)\+0x([0-9A-Fa-f]+)')
-ICALL_RE = re.compile(rb'\[ICALL\] Failed to resolve VA (0x[0-9A-Fa-f]{8})')
+ICALL_RE = re.compile(rb'\[ICALL\] Failed to resolve VA (0x[0-9A-Fa-f]+)')
 ICALL_NONCODE_RE = re.compile(rb'\[ICALL\] target (0x[0-9A-Fa-f]+) is not code')
 FILEPATH_FAIL_RE = re.compile(rb'^\s*\[(?:FILE|PATH)\].*(?:fail|error|not found|denied|invalid)', re.I)
 # What a log line has to look like to be worth a person's eye when no signature claims it.
@@ -60,15 +67,14 @@ ANOMALY_RE = re.compile(
     rb'\b(?:error|fail|fatal|assert|abort|exception|unhandled|panic|not implemented|unimplemented|'
     rb'corrupt|overflow|underflow|deadlock|time ?out)'
     rb'|0xC0{2,}[0-9A-Fa-f]{4}|\[(?:CRASH|WATCHDOG|ICALL|UNIMPL|ABI|D3D11-DEBUG)\]', re.I)
-# Lines that carry a signature are classified, so they are not "unclassified" as well.
-CLASSIFIED_RE = re.compile(
-    rb'\[(?:CRASH|WATCHDOG|ICALL|UNIMPL|UNIMPL-KNOWN|ABI|D3D11-DEBUG)\]|indices truncated')
 # One search per ordinary line: everything the scan wants to look at twice starts here.
 INTEREST_RE = re.compile(
     ANOMALY_RE.pattern + rb'|\[UNIMPL-KNOWN\]|indices truncated|\[(?:FILE|PATH)\].*(?:not found|denied|invalid)', re.I)
 BUILTIN_IGNORE = [
     rb'\d+ unhandled methods',           # the GPU executor's coverage note, not a fault
 ]
+# A log tag at the start of a line ends a crash or watchdog block: it is a different message.
+TAG_RE = re.compile(rb'^\s*\[[A-Z][A-Z0-9-]*\]')
 DIGITS_RE = re.compile(rb'0x[0-9A-Fa-f]+|\b[0-9A-Fa-f]{6,}\b|\d+')
 
 
@@ -119,27 +125,36 @@ def normalise(raw):
     return DIGITS_RE.sub(b'#', raw.strip())[:160]
 
 
+def is_detail(raw):
+    """A line that belongs to the block above it: indented, or one word of the watchdog's stack scan."""
+    return raw[:1] in (b' ', b'\t') or raw.startswith(b'GS ')
+
+
 def scan(path, ignores):
-    """One streaming pass. Returns the findings; never holds the log in memory."""
+    """One streaming pass. Returns the findings; never holds the log in memory.
+
+    A signature is recorded only when a specific parser has claimed the line. Anything with a fault word
+    or a fault tag that no parser claimed (an unfamiliar [ICALL] message, say) is kept as unclassified."""
     r = {
         'file': path, 'size': os.path.getsize(path), 'lines': 0,
         'presents': [], 'last_present_line': 0, 'first_present_line': 0,
         'funccalls': [], 'funccall_count': 0,
-        'crash': None, 'watchdog': None,
+        'crash': None, 'crash_count': 0, 'watchdog': None,
         'icall': collections.OrderedDict(), 'icall_noncode': collections.OrderedDict(),
         'unimpl': collections.OrderedDict(), 'unimpl_known': 0,
         'abi': [], 'truncated_batches': 0, 'debug_layer': 0, 'filepath_fail': [],
         'anomalies': collections.OrderedDict(),
     }
-    pending = None            # ('crash'|'watchdog', start line, [lines]) while a block is read
+    block = None              # [kind, start line, [lines], limit] while a header's detail lines are read
     with open(path, 'rb') as f:
         for n, raw in enumerate(f, 1):
             r['lines'] = n
-            if pending:
-                pending[2].append(raw)
-                if len(pending[2]) >= CRASH_BLOCK:
-                    _close_block(r, pending)
-                    pending = None
+            if block:
+                if len(block[2]) < block[3] and is_detail(raw) and not TAG_RE.match(raw):
+                    block[2].append(raw)
+                    continue
+                _close_block(r, block)           # the next message starts here, whatever it is
+                block = None
             if b'[D3D] 2.0s:' in raw:
                 i = raw.find(b'2.0s: ') + 6
                 j = raw.find(b' ', i)
@@ -154,16 +169,16 @@ def scan(path, ignores):
                 if len(r['funccalls']) > 6:
                     del r['funccalls'][0]
                 continue
-            hit = INTEREST_RE.search(raw)
-            if not hit:
+            if not INTEREST_RE.search(raw):
                 continue
-            if b'[CRASH]' in raw and not r['crash'] and not pending:
-                pending = ('crash', n, [raw])
+            if b'[CRASH]' in raw:
+                r['crash_count'] += 1
+                if not r['crash']:
+                    block = ['crash', n, [raw], CRASH_BLOCK]
                 continue
-            if b'[WATCHDOG]' in raw and not r['watchdog'] and not pending:
-                pending = ('watchdog', n, [raw])
-                continue
-            if pending:
+            if b'[WATCHDOG]' in raw:
+                if not r['watchdog']:
+                    block = ['watchdog', n, [raw], WATCHDOG_BLOCK]
                 continue
             if b'[ICALL]' in raw:
                 m = ICALL_RE.search(raw)
@@ -174,28 +189,28 @@ def scan(path, ignores):
                 if m:
                     r['icall_noncode'].setdefault(m.group(1).decode(), [n, 0])[1] += 1
                     continue
-            if b'[UNIMPL-KNOWN]' in raw:
+                # an [ICALL] message nobody has taught this script: fall through, keep it as unclassified
+            elif b'[UNIMPL-KNOWN]' in raw:
                 r['unimpl_known'] += 1
                 continue
-            if b'[UNIMPL]' in raw:
-                key = clip(raw)
-                r['unimpl'].setdefault(key, [n, 0])[1] += 1
+            elif b'[UNIMPL]' in raw:
+                r['unimpl'].setdefault(clip(raw), [n, 0])[1] += 1
                 continue
-            if b'[ABI]' in raw:
+            elif b'[ABI]' in raw:
                 if len(r['abi']) < 5:
                     r['abi'].append((n, clip(raw)))
                 continue
-            if b'indices truncated' in raw:
+            elif b'indices truncated' in raw:
                 r['truncated_batches'] += 1
                 continue
-            if b'[D3D11-DEBUG]' in raw:
+            elif b'[D3D11-DEBUG]' in raw:
                 r['debug_layer'] += 1
                 continue
             if (b'[FILE]' in raw or b'[PATH]' in raw) and FILEPATH_FAIL_RE.search(raw):
                 if len(r['filepath_fail']) < 5:
                     r['filepath_fail'].append((n, clip(raw)))
                 # not `continue`: a failure also belongs in the anomaly counts below
-            if ANOMALY_RE.search(raw) and not CLASSIFIED_RE.search(raw):
+            if ANOMALY_RE.search(raw):
                 if any(p.search(raw) for p in ignores):
                     continue
                 key = normalise(raw)
@@ -205,24 +220,24 @@ def scan(path, ignores):
                         r['anomalies'][key] = [n, 1, clip(raw)]
                 else:
                     slot[1] += 1
-    if pending:
-        _close_block(r, pending)
+    if block:
+        _close_block(r, block)
     return r
 
 
-def _close_block(r, pending):
-    kind, start, lines = pending
-    block = b''.join(lines)
+def _close_block(r, block):
+    kind, start, lines = block[0], block[1], block[2]
+    detail = b''.join(lines[1:])
     if kind == 'crash':
         head = lines[0]
         m_pc, m_fault = PC_RE.search(head), FAULT_RE.search(head)
         func = None
-        for ln in lines:
+        for ln in lines[1:]:
             m = IN_FUNC_RE.match(ln)
             if m:
                 func = '%s+0x%s' % (m.group(1).decode(), m.group(2).decode())
                 break
-        m_va = GUEST_VA_RE.search(block)
+        m_va = GUEST_VA_RE.search(detail)
         what = CRASH_RE.search(head)
         r['crash'] = {
             'line': start, 'what': what.group(1).decode('utf-8', 'replace')[:160] if what else '',
@@ -230,12 +245,11 @@ def _close_block(r, pending):
             'fault_addr': ('0x' + m_fault.group(1).decode()) if m_fault else None,
             'guest_va': ('0x' + m_va.group(1).decode()) if m_va else None,
             'function': func,
-            'regs': [clip(ln).strip() for ln in lines if b'Xbox regs:' in ln][:2],
+            'regs': [clip(ln).strip() for ln in lines[1:] if b'Xbox regs:' in ln][:2],
         }
     else:
-        stack = [ln for ln in lines if ln.lstrip().startswith(b'GS ')]
-        r['watchdog'] = {'line': start, 'head': clip(lines[0]).strip(),
-                         'stack_words': len(stack)}
+        stack = [ln for ln in lines[1:] if ln.lstrip().startswith(b'GS ')]
+        r['watchdog'] = {'line': start, 'head': clip(lines[0]).strip(), 'stack_words': len(stack)}
 
 
 def decide(r):
@@ -243,77 +257,103 @@ def decide(r):
     reasons = []
     first_anomaly = min((v[0] for v in r['anomalies'].values()), default=None)
     p = r['presents']
-    stopped_presenting = bool(p) and r['lines'] - r['last_present_line'] > 400 and not r['crash']
+
+    def preceded(line):
+        return first_anomaly is not None and first_anomaly < line
 
     if r['watchdog']:
         reasons.append('watchdog fired: its guest stack is a scan of stale words, not a walk; '
                        'find the live thread with sample-threads.py / native-stacks.py')
+        if r['crash']:
+            reasons.append('a [CRASH] is also in the log (line %d); it is not the whole story'
+                           % r['crash']['line'])
         return 'partial', reasons
     if r['crash']:
         c = r['crash']
         detail = c['function'] or c['guest_va']
         if not detail:
-            reasons.append('crash without a function or guest address in its block')
-            return 'partial', reasons
-        if first_anomaly is not None and first_anomaly < c['line']:
-            reasons.append('unclassified lines come before the crash (first at line %d); '
-                           'the crash may be a consequence' % first_anomaly)
-            return 'partial', reasons
-        return 'explained', ['crash at line %d in %s' % (c['line'], detail)]
+            return 'partial', ['crash without a function or guest address in its block']
+        if preceded(c['line']):
+            return 'partial', ['unclassified lines come before the crash (first at line %d); '
+                               'the crash may be a consequence' % first_anomaly]
+        why = 'crash at line %d in %s' % (c['line'], detail)
+        if r['crash_count'] > 1:
+            why += ' (%d crashes logged; this is the first)' % r['crash_count']
+        return 'explained', [why]
     if r['icall']:
-        if first_anomaly is not None and first_anomaly < min(v[0] for v in r['icall'].values()):
-            reasons.append('unclassified lines come before the first unresolved call')
-            return 'partial', reasons
+        line = min(v[0] for v in r['icall'].values())
+        if preceded(line):
+            return 'partial', ['unclassified lines come before the first unresolved call (line %d)' % first_anomaly]
         return 'explained', ['%d unresolved indirect-call target(s)' % len(r['icall'])]
     if r['unimpl']:
+        line = min(v[0] for v in r['unimpl'].values())
+        if preceded(line):
+            return 'partial', ['unclassified lines come before the first untranslated instruction (line %d)' % first_anomaly]
         return 'explained', ['%d untranslated instruction(s) reached' % len(r['unimpl'])]
     if r['abi']:
         return 'partial', ['[ABI] stack mismatch reported; the first one names the function']
     if r['icall_noncode'] or r['truncated_batches'] or r['debug_layer']:
         return 'partial', ['non-code indirect calls, truncated GPU batches or D3D11 debug-layer '
                            'messages are present; they are symptoms, not a cause']
-    if stopped_presenting:
+    if p and max(p) > 0 and r['lines'] - r['last_present_line'] > TRAILING_LINES:
         return 'partial', ['frames stopped %d lines before the end of the log (last present at '
-                           'line %d): a hang without a watchdog' % (r['lines'] - r['last_present_line'],
-                                                                   r['last_present_line'])]
+                           'line %d): a hang without a watchdog; the log has no clock, so this is '
+                           'a line count, not a time' % (r['lines'] - r['last_present_line'], r['last_present_line'])]
     if r['anomalies']:
         return 'unexplained', ['%d distinct unclassified line(s); the first is at line %d'
                                % (len(r['anomalies']), first_anomaly)]
     if r['filepath_fail']:
         return 'unexplained', ['file/path failures only (line %d); see below' % r['filepath_fail'][0][0]]
-    if not p and r['lines'] < 50:
-        return 'unexplained', ['almost nothing was logged (%d lines): did the process start?' % r['lines']]
-    return 'clean', ['no fault signature; %d frames-per-2s lines' % len(p)]
+    if not p:
+        if r['lines'] < 50:
+            return 'unexplained', ['almost nothing was logged (%d lines): did the process start?' % r['lines']]
+        return 'unexplained', ['no frame reports in %d lines: nothing shows the game presented a frame' % r['lines']]
+    if max(p) == 0:
+        return 'unexplained', ['%d frame reports, all with 0 presents' % len(p)]
+    if p[-1] == 0:
+        return 'partial', ['the last frame report shows 0 presents (line %d) after earlier frames' % r['last_present_line']]
+    return 'clean', ['no fault signature; %d frame reports, the last with %d presents' % (len(p), p[-1])]
+
+
+def quote(path):
+    """A path as it should be typed in a command: left alone unless it needs quoting."""
+    if not re.search(r'[\s"\'&|<>()$`;*?]', path):
+        return path
+    if os.name == 'nt':
+        return '"%s"' % path.replace('"', '""')
+    import shlex
+    return shlex.quote(path)
 
 
 def next_steps(r, verdict, path):
     """Exact commands, with this log's own line numbers."""
     rel = os.path.relpath(path, REPO) if path.startswith(REPO) else path
+    q = quote(rel)
     steps = []
     win = os.name == 'nt'
     if r['crash']:
         c = r['crash']
         steps.append('python scripts/triage.py %s --around %d --context 30      (the crash block and what led to it)'
-                     % (rel, c['line']))
+                     % (q, c['line']))
         if c['function']:
             fn = c['function'].split('+')[0]
             va = '0x' + fn[4:] if fn.startswith('sub_') else fn
             steps.append('python scripts/callers.py %s --depth 2      (who calls %s)' % (va, fn))
-        steps.append('python scripts/guest-stack.py --log %s      (call sites on the stack)' % rel)
+        steps.append('python scripts/guest-stack.py --log %s      (call sites on the stack)' % q)
     if r['watchdog']:
-        steps.append('python scripts/triage.py %s --around %d --context 40' % (rel, r['watchdog']['line']))
+        steps.append('python scripts/triage.py %s --around %d --context 40' % (q, r['watchdog']['line']))
         steps.append('python scripts/sample-threads.py      (live threads, process still running)' if win else
                      'sample the live process (macOS `sample`, Linux gdb): docs/build-macos-linux.md; '
                      'sample-threads.py is Windows-only')
     if r['icall']:
         steps.append('seed the targets (scripts/seed-from-log.ps1, or `python -m tools.seed_from_log %s`), '
-                     'then analyze -> recomp -> build' % rel)
+                     'then analyze -> recomp -> build' % q)
     if verdict in ('partial', 'unexplained'):
         first = min((v[0] for v in r['anomalies'].values()), default=None)
         if first:
-            steps.append('python scripts/triage.py %s --around %d      (the first unclassified line)' % (rel, first))
-        steps.append('python scripts/triage.py %s --tail 80      (how the log ends)' % rel)
-        steps.append('python scripts/triage.py %s --grep "<word from a line above>" --max 40' % rel)
+            steps.append('python scripts/triage.py %s --around %d      (the first unclassified line)' % (q, first))
+        steps.append('python scripts/triage.py %s --tail 80      (how the log ends)' % q)
+        steps.append('python scripts/triage.py %s --grep "<word from a line above>" --max 40' % q)
     if verdict == 'explained':
         steps.append('if the fix based on this does not change the outcome, go deeper: --around / --grep above '
                      '(do not re-run the digest)')
@@ -404,18 +444,21 @@ def human(d):
 
 # --- drill-down: bounded slices of the original --------------------------------------------
 
-def numbered(path, want, limit):
-    """Lines selected by want(n, raw) -> bool, with line numbers, at most `limit` of them."""
-    got, total, more = [], 0, 0
+def numbered(path, want, limit, last=False):
+    """Lines selected by want(n, raw) -> bool, with line numbers: the first `limit`, or with last=True the
+    final `limit`. Returns (lines, total matches, matches not shown). Memory is bounded by `limit`."""
+    total = 0
+    if last:
+        keep = collections.deque(maxlen=limit)
+    else:
+        keep = []
     with open(path, 'rb') as f:
         for n, raw in enumerate(f, 1):
             if want(n, raw):
                 total += 1
-                if len(got) < limit:
-                    got.append('%d: %s' % (n, clip(raw)))
-                else:
-                    more += 1
-    return got, total, more
+                if last or len(keep) < limit:
+                    keep.append('%d: %s' % (n, clip(raw)))
+    return list(keep), total, total - len(keep)
 
 
 def line_count(path):
@@ -469,10 +512,9 @@ def drill(args, path):
         except re.error as ex:
             raise SystemExit('bad --grep pattern: %s' % ex)
         if args.last:
-            got, total, _ = numbered(path, lambda n, raw: bool(rx.search(raw)), 10 ** 9)
-            shown = got[-limit:]
-            print('\n'.join(shown))
-            print('-- %d matching lines; showing the last %d' % (total, len(shown)))
+            got, total, _ = numbered(path, lambda n, raw: bool(rx.search(raw)), limit, last=True)
+            print('\n'.join(got))
+            print('-- %d matching lines; showing the last %d' % (total, len(got)))
         else:
             got, total, more = numbered(path, lambda n, raw: bool(rx.search(raw)), limit)
             print('\n'.join(got))

@@ -289,4 +289,7 @@ jobs:
       - name: Summarise
         env:
           NEEDS: ${{ toJSON(needs) }}
-        run: python3 scripts/ci-digest.py summary
+        run: >-
+          python3 scripts/ci-digest.py summary
+          --always changes,hygiene,python-tools
+          --heavy windows-setup,macos-setup,linux-setup,runtime-windows,runtime-posix,native-fixtures

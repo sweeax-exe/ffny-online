@@ -2,7 +2,7 @@
 """Two small helpers for .github/workflows/ci.yml, kept here so they can be tested.
 
     python scripts/ci-digest.py changes --base SHA --head SHA     prints `code=true` or `code=false`
-    python scripts/ci-digest.py summary                           reads the `needs` context from $NEEDS (JSON)
+    python scripts/ci-digest.py summary --always a,b --heavy c,d  reads the `needs` context from $NEEDS (JSON)
 
 `changes` decides whether the expensive jobs (three setup builds, the MSVC runtime, the POSIX runtime and the
 native fixtures) have anything to check: a change that only touches Markdown files cannot alter them. The
@@ -10,9 +10,11 @@ cheap jobs (source hygiene and the unit tests, which do read some Markdown) alwa
 sure, it says `code=true`: no base commit (a new branch, a tag, a force-push), a git failure, an empty diff.
 
 `summary` turns the results of every job into one short table (appended to $GITHUB_STEP_SUMMARY when set) and
-exits 1 if any job failed or was cancelled, or if the `changes` job did not succeed. It lists only the jobs that
-are not plain successes first, so whoever (or whatever) reads a failed run starts at the failing job and does
-not have to list every job to find it.
+fails closed: exit 1 unless every `--always` job (including `changes`) succeeded and every `--heavy` job either
+succeeded or was skipped because `changes` established a docs-only change. A job that is missing from the
+results, was skipped for any other reason, failed, was cancelled or is in any other state is a problem. The
+failing jobs are listed first, so whoever (or whatever) reads a failed run starts there and does not have to
+list every job to find it.
 
 Standard library only.
 """
@@ -62,22 +64,44 @@ def cmd_changes(args):
     return 0
 
 
-def summarise(needs):
-    """(markdown, failed job names, problems)"""
-    bad = {'failure', 'cancelled'}
-    failed = sorted(k for k, v in needs.items() if v.get('result') in bad)
-    problems = list(failed)
-    if needs.get('changes', {}).get('result') not in (None, 'success'):
-        if 'changes' not in problems:
-            problems.append('changes')
-    order = sorted(needs.items(), key=lambda kv: (kv[0] not in problems, kv[1].get('result') == 'success', kv[0]))
+def judge(needs, always, heavy):
+    """Problems, as `job (why)` strings. Fails closed: a job that is missing, skipped without cause, failed,
+    cancelled or in any unexpected state is a problem. Only the `heavy` jobs may be skipped, and only when
+    the `changes` job succeeded and said the change is docs-only (`code` = false)."""
+    problems = []
+    code = (needs.get('changes') or {}).get('outputs', {}).get('code')
+    docs_only_established = (needs.get('changes') or {}).get('result') == 'success' and code == 'false'
+    for job in always:
+        result = (needs.get(job) or {}).get('result')
+        if result != 'success':
+            problems.append('%s (%s)' % (job, result or 'missing'))
+    for job in heavy:
+        result = (needs.get(job) or {}).get('result')
+        if result == 'success' or (result == 'skipped' and docs_only_established):
+            continue
+        if result == 'skipped':
+            problems.append('%s (skipped although the change touches more than Markdown)' % job)
+        else:
+            problems.append('%s (%s)' % (job, result or 'missing'))
+    for job, info in sorted(needs.items()):
+        if job not in always and job not in heavy and (info or {}).get('result') in ('failure', 'cancelled'):
+            problems.append('%s (%s)' % (job, info['result']))
+    return problems
+
+
+def summarise(needs, always, heavy):
+    """(markdown, problems)"""
+    problems = judge(needs, always, heavy)
+    bad = {p.split(' ')[0] for p in problems}
+    names = list(dict.fromkeys(list(always) + list(heavy) + sorted(needs)))
+    order = sorted(names, key=lambda k: (k not in bad, (needs.get(k) or {}).get('result') == 'success', k))
     lines = ['| Job | Result |', '|---|---|']
-    lines += ['| %s | %s |' % (k, v.get('result', '?')) for k, v in order]
-    head = ('**CI failed:** ' + ', '.join(problems)) if problems else 'CI passed'
-    skipped = [k for k, v in needs.items() if v.get('result') == 'skipped']
+    lines += ['| %s | %s |' % (k, (needs.get(k) or {}).get('result', 'missing')) for k in order]
+    head = ('**CI failed:** ' + '; '.join(problems)) if problems else 'CI passed'
+    skipped = [k for k in heavy if (needs.get(k) or {}).get('result') == 'skipped']
     note = ('\n\n%d job(s) skipped because only Markdown changed.' % len(skipped)
-            if skipped and needs.get('changes', {}).get('outputs', {}).get('code') == 'false' else '')
-    return head + '\n\n' + '\n'.join(lines) + note + '\n', failed, problems
+            if skipped and not problems else '')
+    return head + '\n\n' + '\n'.join(lines) + note + '\n', problems
 
 
 def cmd_summary(args):
@@ -86,14 +110,16 @@ def cmd_summary(args):
     except json.JSONDecodeError as ex:
         print('NEEDS is not JSON: %s' % ex, file=sys.stderr)
         return 1
-    text, _, problems = summarise(needs)
+    always = [j for j in args.always.split(',') if j]
+    heavy = [j for j in args.heavy.split(',') if j]
+    text, problems = summarise(needs, always, heavy)
     out = os.environ.get('GITHUB_STEP_SUMMARY')
     if out:
         with open(out, 'a', encoding='utf-8') as f:
             f.write(text)
     print(text.splitlines()[0])
     if problems:
-        print('::error::CI failed: %s' % ', '.join(problems))
+        print('::error::CI failed: %s' % '; '.join(problems))
     return 1 if problems else 0
 
 
@@ -105,7 +131,10 @@ def main(argv=None):
     p.add_argument('--base', default='')
     p.add_argument('--head', default='')
     p.set_defaults(fn=cmd_changes)
-    sub.add_parser('summary').set_defaults(fn=cmd_summary)
+    p = sub.add_parser('summary')
+    p.add_argument('--always', required=True, help='comma-separated jobs that must succeed on every run (include `changes`)')
+    p.add_argument('--heavy', required=True, help='comma-separated jobs that may be skipped only for a docs-only change')
+    p.set_defaults(fn=cmd_summary)
     args = ap.parse_args(argv)
     return args.fn(args)
 

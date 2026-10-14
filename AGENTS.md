@@ -7,9 +7,10 @@ owner (Vlad) can hand the project between agents without losing state. Read this
 Open the rest of `PROGRESS.md` by section or by decision number only when you need it (§1).
 
 `AGENTS.md` is the one instructions file for every agent. Codex reads it directly; `CLAUDE.md` imports it
-and adds only notes that apply to Claude Code. Edit this file, not a copy. It must stay under 30 KiB (Codex
-stops reading project instructions at 32 KiB; `tests/unit/test_agent_instructions.py` enforces it), so longer
-how-to material lives in `docs/agent/` and is read when the task calls for it:
+and adds only notes that apply to Claude Code. Edit this file, not a copy. It is kept under 30 KiB (Codex's default limit for the combined project instructions it discovers is 32 KiB,
+`project_doc_max_bytes`, which can be changed; `tests/unit/test_agent_instructions.py` checks this one file), so
+longer how-to material lives in `docs/agent/` and is read on request. A pointer is an instruction to read the
+file, not an import:
 
 | When you ... | Read |
 |---|---|

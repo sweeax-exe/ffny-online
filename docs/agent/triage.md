@@ -14,10 +14,10 @@ python scripts/triage.py LOG --json               the same, for a script
 
 | Verdict | Meaning | You |
 |---|---|---|
-| `clean` | no fault signature, nothing unusual, frames presented to the end | move on |
+| `clean` | no fault signature, nothing unusual, **and** positive evidence of presentation (frame reports with presents above zero, the last one not zero) | move on |
 | `explained` | one known stop signature **with** its function or address, and nothing unclassified before it | act on it: `callers.py`, `guest-stack.py`, the fix |
 | `partial` | a known signature without enough detail; or unclassified lines come first (the stop may be a consequence); or a hang (the watchdog's stack is a scan, not a walk); or only symptoms (non-code calls, truncated batches, debug-layer messages) | **read the original**, starting at the line numbers the digest printed |
-| `unexplained` | the run looks wrong and no known signature says why | **read the original** |
+| `unexplained` | the run looks wrong and no known signature says why; or nothing shows a frame was presented (no frame reports, or all of them 0) | **read the original** |
 
 Also read the original, and do not re-run the digest, when a fix based on an `explained` verdict does
 not change the outcome. A digest is a summary of lines it recognised; the cause may be in the ones it did not.
@@ -44,8 +44,15 @@ exists to avoid. Slice, and slice again. You lose nothing by it: the log is neve
   live thread with `scripts/sample-threads.py` and `scripts/native-stacks.py` (Windows; on macOS and
   Linux use `sample` or gdb, `docs/build-macos-linux.md`), then `scripts/guest-stack.py`. A log is weak
   evidence for a hang: a loop entered once at start-up never shows again (`docs/agent/diagnostics.md`, rule 1).
-- **Order.** Unclassified lines *before* the stop are listed first-occurrence-first for that reason.
-  The last error in a log is often a consequence of an earlier one.
+- **Order.** Unclassified lines *before* the stop keep a crash, an unresolved call or an untranslated
+  instruction from being `explained`, for that reason: the last error in a log is often a consequence of
+  an earlier one. A line with a fault word that no parser recognised (an unfamiliar `[ICALL]` message)
+  is kept as unclassified, never dropped.
+- **"Frames stopped".** The log has no clock. A hang without a watchdog is inferred from more than 400
+  lines after the last frame report, so a sparse hang can be missed and a verbose normal shutdown can
+  look like one. Treat it as a pointer to `--tail`, not as a measurement.
+- **Two faults.** A `[CRASH]` followed by a `[WATCHDOG]` (or a second crash) is read as two events; a
+  watchdog is always `partial`.
 - **Counts.** Repeats of one message are collapsed to its first line and a count (numbers are
   normalised). A count is a total, not a rate.
 - **Unknown noise.** A line the project knows to be harmless can be added to `config/triage-ignore.txt`

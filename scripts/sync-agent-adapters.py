@@ -13,8 +13,11 @@ Copies, generated (the first line after the frontmatter says so; do not edit the
     .codex/skills/<name>/SKILL.md        Codex
     .claude/agents/<name>.md             Claude Code sub-agents (the brief plus the tool and model it runs with)
 
-Codex custom agents are not generated: the brief is plain text that any agent can be given in a delegation
-prompt (docs/agent/delegation.md). Standard library only.
+Codex custom agents (documented as .codex/agents/*.toml) are not generated yet: the schema was not available
+when this was written. The brief is plain text that any agent can be given in a delegation prompt
+(docs/agent/delegation.md). Skills are copied to .codex/skills, which Codex CLI discovers (reported working
+on 0.162); its documentation recommends .agents/skills, so change SKILL_TARGETS if you prefer that path.
+Standard library only.
 """
 import argparse
 import os
