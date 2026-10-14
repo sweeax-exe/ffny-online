@@ -27,7 +27,8 @@ typedef struct RecorderConfig {
     int hang_seconds;           /* no frame for this long makes a "hang" bundle; 0: never */
     int keep_sessions;          /* older sessions keep their bundles and events, and lose the rest */
     int guest_ram;              /* crash and hang bundles include guest memory */
-    const void *guest_base;     /* guest address 0 in host memory */
+    const void *(*guest_base)(void);   /* guest address 0 in host memory, asked when a bundle is written
+                                          (guest memory is set up after the recorder starts) */
     size_t guest_size;
     const char *log_path;       /* the file stderr goes to, when known */
     const char *audio_path;     /* the mixed audio being written (raw 48 kHz stereo 16-bit), when known */

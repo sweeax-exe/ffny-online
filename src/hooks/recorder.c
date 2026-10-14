@@ -51,6 +51,7 @@
 #if defined(_WIN32)
 #include <windows.h>
 #include <direct.h>
+#include <errno.h>
 #include <sys/stat.h>
 #include <psapi.h>
 
@@ -68,7 +69,7 @@ static double now_ms(void)
     QueryPerformanceCounter(&c);
     return (double)c.QuadPart * 1000.0 / (double)f.QuadPart;
 }
-static int make_dir(const char *p) { return _mkdir(p) == 0 || GetLastError() == ERROR_ALREADY_EXISTS; }
+static int make_dir(const char *p) { return _mkdir(p) == 0 || errno == EEXIST; }
 static long long file_size(const char *p)
 {
     struct __stat64 st;
@@ -414,7 +415,12 @@ void recorder_picture(const uint8_t *rgba, int pitch, int width, int height, con
     g_pic_mask = 0;
     if (!g_on || !rgba || width <= 0 || height <= 0 || !mask) return;
     t = now_ms();
-    mtx_lock(&g_pic_lock);
+    /* A bundle being written holds the ring for a moment: skip this picture rather than
+     * make the frame wait (the recorder must not cause the hitches it records). */
+    if (!mtx_trylock(&g_pic_lock)) {
+        if (mask & 2) g_still_wanted = 1;
+        return;
+    }
     if ((mask & 1) && !g_frozen) {
         if (!g_ring && g_cfg.video_fps > 0) {
             int th = g_cfg.thumb_height > 0 ? g_cfg.thumb_height : 240;
@@ -720,32 +726,52 @@ static void write_bundle(const char *reason, double t_mark, int crash, const cha
         if (locked) mtx_unlock(&g_pic_lock);
         g_frozen = 0;
 
-        /* Rows and events of the same seconds. */
+        /* Rows and events of the same seconds: copied under the lock (the presenting thread
+         * takes it each frame), written after it. */
         rows = (FrameRec *)malloc(sizeof(FrameRec) * (g_hist_cap ? g_hist_cap : 1));
-        locked = crash ? mtx_trylock(&g_lock) : (mtx_lock(&g_lock), 1);
-        if (g_frames_file) fflush(g_frames_file);
-        if (g_events_file) fflush(g_events_file);
-        if (rows && g_hist) nrows = history_window(from, rows, g_hist_cap);
-        if (path_join(path, sizeof path, dir, "frames.csv") && (f = fopen(path, "w")) != NULL) {
-            fputs("frame,t_ms,interval_ms,present_ms,work_ms,capture_ms,draws,vertices,clears,"
-                  "audio_dropped,audio_dry,step,log_bytes,pcm_bytes\n", f);
-            for (i = 0; i < nrows; i++) {
-                const FrameRec *r = &rows[i];
-                fprintf(f, "%llu,%.3f,%.3f,%.3f,%.3f,%.3f,%u,%u,%u,%d,%d,%lld,%lld,%lld\n",
-                        r->frame, r->t, r->interval, r->present, r->work, r->capture, r->draws, r->vertices,
-                        r->clears, r->dropped, r->dry, r->step, r->log_bytes, r->pcm_bytes);
+        {
+            char *events = NULL;
+            size_t events_len = 0, events_cap = 0;
+            locked = crash ? mtx_trylock(&g_lock) : (mtx_lock(&g_lock), 1);
+            if (rows && g_hist) nrows = history_window(from, rows, g_hist_cap);
+            {
+                unsigned long long k = g_ev_n > EVENT_RING ? g_ev_n - EVENT_RING : 0;
+                for (; k < g_ev_n; k++) {
+                    size_t slot = (size_t)(k % EVENT_RING), n;
+                    if (!g_ev[slot] || rel_ms(g_ev_t[slot]) < from) continue;
+                    n = strlen(g_ev[slot]);
+                    if (events_len + n + 2 > events_cap) {
+                        size_t cap = (events_cap ? events_cap * 2 : 65536) + n + 2;
+                        char *grown = (char *)realloc(events, cap);
+                        if (!grown) break;
+                        events = grown;
+                        events_cap = cap;
+                    }
+                    memcpy(events + events_len, g_ev[slot], n);
+                    events_len += n;
+                    events[events_len++] = '\n';
+                }
             }
-            fclose(f);
-        }
-        if (path_join(path, sizeof path, dir, "events.jsonl") && (f = fopen(path, "w")) != NULL) {
-            unsigned long long k = g_ev_n > EVENT_RING ? g_ev_n - EVENT_RING : 0;
-            for (; k < g_ev_n; k++) {
-                size_t slot = (size_t)(k % EVENT_RING);
-                if (g_ev[slot] && rel_ms(g_ev_t[slot]) >= from) fprintf(f, "%s\n", g_ev[slot]);
+            if (locked) mtx_unlock(&g_lock);
+            if (g_frames_file) fflush(g_frames_file);
+            if (g_events_file) fflush(g_events_file);
+            if (path_join(path, sizeof path, dir, "frames.csv") && (f = fopen(path, "w")) != NULL) {
+                fputs("frame,t_ms,interval_ms,present_ms,work_ms,capture_ms,draws,vertices,clears,"
+                      "audio_dropped,audio_dry,step,log_bytes,pcm_bytes\n", f);
+                for (i = 0; i < nrows; i++) {
+                    const FrameRec *r = &rows[i];
+                    fprintf(f, "%llu,%.3f,%.3f,%.3f,%.3f,%.3f,%u,%u,%u,%d,%d,%lld,%lld,%lld\n",
+                            r->frame, r->t, r->interval, r->present, r->work, r->capture, r->draws, r->vertices,
+                            r->clears, r->dropped, r->dry, r->step, r->log_bytes, r->pcm_bytes);
+                }
+                fclose(f);
             }
-            fclose(f);
+            if (path_join(path, sizeof path, dir, "events.jsonl") && (f = fopen(path, "wb")) != NULL) {
+                if (events_len) fwrite(events, 1, events_len, f);
+                fclose(f);
+            }
+            free(events);
         }
-        if (locked) mtx_unlock(&g_lock);
 
         /* The end of the log and of the audio. */
         fflush(stderr);
@@ -762,10 +788,12 @@ static void write_bundle(const char *reason, double t_mark, int crash, const cha
             (void)os_exception;
 #endif
         }
-        if ((crash || !strcmp(reason, "hang")) && g_cfg.guest_ram && g_cfg.guest_base && g_cfg.guest_size &&
-            path_join(path, sizeof path, dir, "guest-ram.bin") && (f = fopen(path, "wb")) != NULL) {
-            fwrite(g_cfg.guest_base, 1, g_cfg.guest_size, f);
-            fclose(f);
+        if ((crash || !strcmp(reason, "hang")) && g_cfg.guest_ram && g_cfg.guest_base && g_cfg.guest_size) {
+            const void *base = g_cfg.guest_base();
+            if (base && path_join(path, sizeof path, dir, "guest-ram.bin") && (f = fopen(path, "wb")) != NULL) {
+                fwrite(base, 1, g_cfg.guest_size, f);
+                fclose(f);
+            }
         }
 
         /* bundle.json: what this is, where it came from, and the index of the pictures. */
@@ -930,10 +958,9 @@ static void worker_tick(void)
     }
     if (t - last_flush >= 1000.0) {
         last_flush = t;
-        mtx_lock(&g_lock);
+        /* Not under g_lock: each FILE has its own lock, and a slow disk must not hold up a frame. */
         if (g_frames_file) fflush(g_frames_file);
         if (g_events_file) fflush(g_events_file);
-        mtx_unlock(&g_lock);
     }
 }
 

@@ -33,6 +33,11 @@
 extern ptrdiff_t g_xbox_mem_offset;
 #define GUEST_RAM_BYTES 0x04000000u     /* the console's 64 MB, guest addresses 0 up */
 
+static const void *guest_base(void)
+{
+    return g_xbox_mem_offset ? (const void *)g_xbox_mem_offset : NULL;
+}
+
 size_t pc_debug_settings(RecompSetting *out, size_t max)
 {
     size_t n = 0;
@@ -167,7 +172,7 @@ void pc_debug_start(const char *log_path, int force)
     cfg.hang_seconds = recomp_settings_get("debug", "hang_seconds", 15);
     cfg.keep_sessions = recomp_settings_get("debug", "keep_sessions", 20);
     cfg.guest_ram = recomp_settings_get("debug", "record_guest_ram", 0);
-    cfg.guest_base = (const void *)g_xbox_mem_offset;
+    cfg.guest_base = guest_base;
     cfg.guest_size = GUEST_RAM_BYTES;
     cfg.log_path = log[0] ? log : NULL;
     /* A caller that already captures the audio keeps its file; the recorder reads it. */
