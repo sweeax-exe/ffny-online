@@ -75,6 +75,8 @@ def main(argv=None):
     progress, nl = read(path)
     worklog = os.path.join(REPO, "docs", "worklog")
     progress, moved = add_and_trim(progress, entry, a.keep, worklog)
+    if moved:
+        os.makedirs(worklog, exist_ok=True)     # the archive is local-only; a fresh clone has no folder
     for month, entries in moved.items():
         w = os.path.join(worklog, month + ".md")
         if os.path.exists(w):
