@@ -488,6 +488,13 @@ def read_log(path):
 
 
 PRESENT_RE = re.compile(r"\[D3D\] 2\.0s: (\d+) present")
+LAST_LOG = None          # the .log.err of the most recent run_game, so a caller can point at it
+
+
+def triage_hint(log):
+    """The command that digests a run log; the first thing to run on a failed one."""
+    rel = os.path.relpath(log, REPO)
+    return "python scripts/triage.py %s" % rel.replace(os.sep, "/")
 
 
 def summarise(text):
@@ -747,6 +754,8 @@ def run_game(name, stages=(), tail="", shots="", secs=240, preset=RELEASE_PRESET
         run.save_ok = guard.restored_equal
     run.text = read_log(run.log)
     run.summary = summarise(run.text)
+    global LAST_LOG
+    LAST_LOG = run.log
     if not quiet:
         print_run(run)
     return run
@@ -784,6 +793,7 @@ def print_run(run):
     faults = run_faults(run)
     if faults:
         print("FAIL     " + "; ".join(faults))
+        print("triage   " + triage_hint(run.log))
     if s['baseline_noops']:
         print("baseline %d reported verified inherited omissions" % s['baseline_noops'])
     for f in run.shots():
