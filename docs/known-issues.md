@@ -55,20 +55,23 @@ On macOS (v0.6.2) the launcher and overlay were checked by scripted runs (a rend
 keys played through the real event path, a virtual pad), not by a person at the keyboard; see
 [Launcher and overlay](launcher-and-overlay.md#looking-at-it-without-a-screen). Not covered: a trackpad or
 an external mouse's smooth scrolling in the overlay, text entry with an input method (the text boxes take typed
-characters only), and Intel Macs. The overlay's Linux build compiles from the same sources but has not been run.
+characters only), and Intel Macs. On Linux the launcher and overlay have shipped since v0.7.0 and were checked on a
+Steam Deck by the same scripted `launcher` and `overlay` regression checks (2 of 2, see the v0.7.0 notes); a desktop
+Linux distribution has not been tried.
 
 ## Future features
 
 MSVC is the supported compiler. Clang is not a validated build path: expanded CI
 exposed a 32-bit NEG flag test failure under Clang optimization and a switch
 fixture compilation issue. The Release gate selects MSVC for the shared CPU
-fixture; it does not establish Clang or native Linux correctness.
+fixture; it does not establish Clang or native Linux correctness. Native Linux is built with Clang and checked by the
+Deck regression runs described below.
 
 A settings file, borderless full screen, a resizable window and render-scale choice
 arrived in v0.2.0. Exclusive full screen is not offered; the flip-model borderless window replaces it. Vsync
 paces the game only on displays whose refresh rate is a multiple of 60. Changing `render_scale` needs
-a restart. The launcher and in-game settings are available on Windows and, since v0.6.2, macOS, and v0.6.0 added optional
-HD texture packs, on macOS too since v0.6.1 ([guide](hd-textures.md)). True 16:9 remains planned ([plan](07-m6-plan.md));
+a restart. The launcher and in-game settings are available on Windows and, since v0.6.2, macOS and Linux, and v0.6.0 added optional
+HD texture packs, on macOS too since v0.6.1 and on Linux and the Steam Deck since v0.7.2 ([guide](hd-textures.md)). True 16:9 remains planned ([plan](07-m6-plan.md));
 music replacement and frame rates above 60 are not planned for M6. macOS on Apple Silicon is
 playable since v0.5.0, with the launcher and overlay since v0.6.2
 ([guide](build-macos-linux.md)). Native Linux, including the Steam Deck, builds with Clang
