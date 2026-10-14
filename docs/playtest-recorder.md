@@ -122,10 +122,15 @@ and puts `bug-bundle.py` first in its next steps.
 ## Cost
 
 Recording is off by default and costs nothing then. On, it flushes the log once a
-frame, appends a row and checks two file sizes. Each kept picture is a synchronous
-read-back from the graphics card (both renderers), ten a second by default; its
-cost is in every row (`capture_ms`), and the analysis subtracts it before calling
-a frame a hitch. Lower `record_fps` (or set it to 0) when measuring pacing itself.
+frame, appends a row and checks two file sizes. Each kept picture, ten a second by
+default, is read back from the graphics card without waiting for it on Direct3D 11
+and Vulkan: the copy starts in the frame that wants it and is collected a frame or
+two later, filed under the frame that asked (`d3d8_readback.h` in the toolkit). The
+OpenGL renderer, a multisampled target or a full set of copies in flight fall back to
+a synchronous read-back, which waits for the card. Either way the cost is in every
+row (`capture_ms`), and the analysis subtracts it before calling a frame a hitch.
+`RECOMP_RECORD_SYNC=1` always reads synchronously, to compare the two. Lower
+`record_fps` (or set it to 0) when measuring pacing itself.
 The picture ring takes about 75 MB of memory at the defaults; a session about 12 MB
 a minute on disk, most of it audio.
 
@@ -138,8 +143,9 @@ routes, `--env RECOMP_RECORD=1` works too.
 
 ## Not done
 
-- Pictures are read back synchronously; an asynchronous read-back (staging copies
-  read a frame later) needs a toolkit change and would make `capture_ms` near zero.
+- The asynchronous read-back has passed its toolkit fixture (Vulkan on Mesa's
+  software driver) but has not yet been measured in the game: `capture_ms` with and
+  without `RECOMP_RECORD_SYNC=1` is the comparison to make.
 - Audio is captured before the device. What the device actually played, and its
   latency, is not recorded.
 - Venues are not named in bundles: the game's venue index has not been mapped. The

@@ -42,6 +42,7 @@
 #include "pc_ui.h"
 #include "recomp_settings.h"
 #include "recorder.h"
+#include "d3d8_readback.h"
 
 /* The title sets a 640x480 mode. Matching it keeps the translator's screen
  * space and ours the same, so a vertex the title placed at 320,240 lands in
@@ -454,34 +455,77 @@ int d3d11_translator_init(void)
 }
 
 /* The play-test recorder's share of a frame (recorder.c): a picture for its
- * ring when it asks for one, read back the way capture_backbuffer reads it, and
- * the frame's measurements. Nothing runs unless [debug] record is on. */
-static double recorder_capture(IDirect3DDevice8 *dev)
+ * ring when it asks for one, and the frame's measurements. Nothing runs unless
+ * [debug] record is on.
+ *
+ * The picture is read back asynchronously where the device can
+ * (tools/xboxrecomp/src/d3d/d3d8_readback.h: Direct3D 11 and Vulkan): the copy
+ * starts here and is collected a frame or two later, filed under the frame that
+ * asked (recorder_picture_tagged). Where it cannot (OpenGL, a multisampled
+ * target, every slot busy) the picture is read back at once, the way
+ * capture_backbuffer reads it. RECOMP_RECORD_SYNC=1 always reads at once, to
+ * compare the two costs (capture_ms in frames.csv). */
+static void recorder_picture_now(IDirect3DDevice8 *dev, uint64_t tag, const uint8_t (*gamma)[256])
 {
     IDirect3DSurface8 *surf = NULL;
     D3DLOCKED_RECT lr;
-    double start;
     extern unsigned d3d8_GetRenderScale(void);
     extern float d3d8_GetCanvasScaleX(void);
-    extern uint8_t g_recomp_gamma[3][256];
-    extern int g_recomp_gamma_on;
-    uint32_t sw, sh;
+    uint32_t sw = (uint32_t)(TRANSLATOR_WIDTH * d3d8_GetCanvasScaleX() + 0.5f);
+    uint32_t sh = TRANSLATOR_HEIGHT * d3d8_GetRenderScale();
 
-    if (!recorder_picture_wanted())
-        return 0.0;
-    start = recorder_now_ms();
-    sw = (uint32_t)(TRANSLATOR_WIDTH * d3d8_GetCanvasScaleX() + 0.5f);
-    sh = TRANSLATOR_HEIGHT * d3d8_GetRenderScale();
     if (FAILED(dev->lpVtbl->GetBackBuffer(dev, 0, 0, &surf)) || !surf)
-        return 0.0;
+        return;
     memset(&lr, 0, sizeof(lr));
     if (SUCCEEDED(surf->lpVtbl->LockRect(surf, &lr, NULL, D3DLOCK_READONLY)) && lr.pBits) {
-        recorder_picture((const uint8_t *)lr.pBits, lr.Pitch, (int)sw, (int)sh,
-                         g_recomp_gamma_on ? (const uint8_t (*)[256])g_recomp_gamma : NULL);
+        if (tag)
+            recorder_picture_tagged(tag, (const uint8_t *)lr.pBits, lr.Pitch, (int)sw, (int)sh, 0, gamma);
+        else
+            recorder_picture((const uint8_t *)lr.pBits, lr.Pitch, (int)sw, (int)sh, gamma);
         surf->lpVtbl->UnlockRect(surf);
     }
     /* Direct3D 11's GetBackBuffer makes a new surface, holding the texture, every call. */
     surf->lpVtbl->Release(surf);
+}
+
+static double recorder_capture(IDirect3DDevice8 *dev)
+{
+    static int async = -1;          /* -1 not decided, 0 read at once, 1 asynchronous */
+    extern uint8_t g_recomp_gamma[3][256];
+    extern int g_recomp_gamma_on;
+    const uint8_t (*gamma)[256] = g_recomp_gamma_on ? (const uint8_t (*)[256])g_recomp_gamma : NULL;
+    D3D8Readback rb;
+    double start = 0.0;
+    int polled = 0;
+
+    if (async < 0) {
+        const char *e = getenv("RECOMP_RECORD_SYNC");
+        async = (e && *e == '1') ? 0 : 1;
+    }
+    if (async) {
+        start = recorder_now_ms();
+        /* The pictures asked for a frame or two ago. */
+        while (d3d8_readback_poll(&rb)) {
+            recorder_picture_tagged(rb.tag, rb.pixels, rb.pitch, (int)rb.width, (int)rb.height, rb.bgra, gamma);
+            polled = 1;
+        }
+    }
+    if (!recorder_picture_wanted())
+        return polled ? recorder_now_ms() - start : 0.0;
+    if (!polled)
+        start = recorder_now_ms();
+    if (async) {
+        uint64_t tag = recorder_picture_request();
+        int r = tag ? d3d8_readback_begin(tag) : 1;
+        if (r < 0) {
+            async = 0;              /* this device has no asynchronous path: stop asking */
+            fprintf(stderr, "[RECORD] pictures are read back synchronously on this device\n");
+        }
+        if (r <= 0)
+            recorder_picture_now(dev, tag, gamma);
+    } else {
+        recorder_picture_now(dev, 0, gamma);
+    }
     return recorder_now_ms() - start;
 }
 
