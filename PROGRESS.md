@@ -45,7 +45,7 @@
 
 | Setup GitHub updater (v0.8.0) | ✅ released | PR #18 merged at f582cd1; tag v0.8.0 points to that merge. Release workflow 38346723528 passed 27/27; Windows/macOS/Linux setups, checksums and provenance published. U0 protocol/data schema 1. |
 
-| Widescreen macOS / v0.9.0 | ✅ Mac checks / ⏳ publication | Exact CI install and109-step corrected build; source352pass/30skip, fights/HUD/replay/Story/soak/fullscreen/F1 pass including focused repeats. Known audio and historical callback failures retained; [Mac ledger](docs/widescreen/09-macos-validation.md). |
+| Widescreen macOS / v0.9.0 | ✅ released | PR12 merged `c4bcda6`, v0.9.0 published with9 game-free assets; PRCI25/25, release27/27. Mac auto-notch correction, source352tests and native checks; known baseline diagnostics retained in [Mac ledger](docs/widescreen/09-macos-validation.md). |
 
 ## 1. Decisions log
 
@@ -250,7 +250,6 @@ defjam-recomp/
 
 > Recent entries only; older entries remain unchanged in the local `docs/worklog/` archive.
 
-- 2026-10-13 19:28 — First three capture variants pass: original 4:3, HD 4:3 and original 16:9, each six native stills, no runtime faults and saves restored. All 85 state/event records match hash `5520bde4f2bb7477707d34099d97eac5681028bace6a285d11165d282d7033eb`; capture-free samples 120/121/120 presents per 2 s. Native wide canvas 1708x960, edge HUD and Hor+ visually verified (`media/widescreen-review.png`). Fixed local helper string/Path error after first completed run; recovered its captures and verified full-root restoration against retained backup. Prepared main merge in isolated `logs/widescreen-macos/integration`; 347 unit tests pass/34 skip and hygiene 303 files/0 failures. Recommended v0.9.0 files local, version reply still pending.
 - 2026-10-13 19:39 — All five fight capture variants produce six native stills and match the 80-record Windows simulation golden. 16:10 run flagged one unresolved stream callback `0x001E3C14`, caller `0x001E3A68` (`run-20261013-193158.log.err`), identical to the pre-widescreen Mac symptom from 2026-10-08; raw failure retained, not waived. Static context-lifetime findings in local `logs/widescreen-macos/callback-notes.md` are hypotheses, not a diagnosed fix. Four-fighter/Story/auto/launcher checks and focused audio repeat remain queued serially.
 - 2026-10-13 19:51 — Additional Mac checks pass: 16:9 HD four-fighter fight (two native captures, all four HUD corners, median120presents/2s), Story intro at16:9 and16:10 (four captures each, creator reached). Authored cutscene picture fills16:9 and has864 nonblack rows in960 at16:10 (`media/cutscenes-review.png`). Stream continuation/wait/callback generated functions are byte-identical to accepted baseline; no cause/fix inferred from static reads alone. HD Story subviews and real-settings fullscreen/overlay/launcher remain in progress.
 - 2026-10-13 20:11 — Owner chose v0.9.0 (D106). Focused seeded audio repeat24/25 passes; only existing underrun gate fails (2 dry events,0 dropped buffers), versus accepted baseline5 dry/290post-anchor reports. Explicit16:10 repeat has no faults, restored saves and80 golden records. Found/fixed Mac auto notch geometry (D107) in isolated source: AppKit safe-area helper and Objective-C build-input certification; focused32tests pass. Bundled-dependency rebuild109steps and build certificate pass (`fix-build.txt`); required full regression running (`fix-full.txt`), then corrected real-settings fullscreen/overlay check queued.
@@ -258,38 +257,45 @@ defjam-recomp/
 - 2026-10-13 21:07 — Fixed-source full regression completes11/16 in56min (`logs/widescreen-macos/fix-full.txt`, integration `logs/regress-20261013-210713.txt`): fight/FFA/Terrordome/replay/intro/gym and soak3/3 pass; combat26/27 and versus25/26, each onlyaudio.dry_queue3events/0drops. Other failed checks: bundled Python lacks pytest (independent352-source-tests pass), known startup callback in m2, historicalstream callback0x001E3C14 during crib boot (crib reached/saves restored). Targeted fullscreen and unit/m2/crib repeats queued serially; raw failures retained.
 - 2026-10-14 12:00 — **Stale-docs pass from the platform-parity audit (issue #15).** Fixed statements that contradicted the shipped state: `docs/known-issues.md` (Linux launcher/overlay shipped since v0.7.0 and checked on the Deck 2/2; launcher and HD list now include Linux; Clang note points at the Deck runs), `docs/02-test-plan.md` and `docs/01-plan-review.md` (WIC/CNG and M5-via-Proton lines marked superseded by D95 and v0.6.1/v0.7.2), `docs/04-improvement-backlog.md` (installer section, overlay note, clang-cl note and the Steam Deck row of the comparison table). `README.md` is left to PR #22, which rewrites the HD line. Documentation only; no code, toolkit or release change.
 - 2026-10-13 21:15 — Mac validation complete: corrected auto-fullscreenHD resolves1.6000/FOV35.65/swapchain3600x2260, reachescombat, actualF1overlay opens/closes, nofaults/savesrestored (`fix-auto.json`); launcher renders/exits0. Targeted source+loading2/2 (352tests/30skip, goldenframe100), crib1/1 clean; rawfull11/16 retained with twoexistingaudio gates stillfailed. Whole isolatedsave root15files byte-identical to prepared baseline. Localmedia reviewZIP27.8MB with original/HD/widescreen PNG+60fpsMP4, compactGIF, overlay/launcher and provenance; no new media published. Source commits/push/CI/merge/release next.
+- 2026-10-13 21:34 — PR12 source7e95ebe accepted by CI38495079579 (25/25), Macreport commented and PRmerged c4bcda69b3dc839a3705bfb443fc774d7828f33a. Exactmerge taggedv0.9.0; source release38495648349 passes27/27 and mergeCI38495640368 green. Publishedlatestv0.9.0 with9 game-free setup/checksum/provenance assets; allthree platformdigests/source/toolkit identities verified, MacDMG and payloadhash locallychecked and correctedsource bytesmatch nativevalidation. Existingv0.8.0 untouched; no gamebinary/data/generatedsource/newmedia published. Localmedia review ZIP27.8MB ready for ownerselection; savebaseline15/15 unchanged.
 
 ## 7. Hand-off
 
-### Widescreen PR #12 / v0.9.0 — validation complete, publication pending
+### Widescreen v0.9.0 — released; PR #22 media ready locally
 
-Owner resumed and chose v0.9.0; preserve released v0.8.0 updater. Public PR #12
-head still `a7dc1b7`, toolkit `872fbc3`. Integration source/build is
-`logs/widescreen-macos/integration` (`codex/widescreen-integration`, base merge
-`b06848b`). Mac auto-notch fix/certification/validation committed as `5866124`; current
-main documentation merged as `8e2a567`. v0.9.0 version/notes commit next.
+PR #12 merged `c4bcda69b3dc839a3705bfb443fc774d7828f33a`, exact merge tagged
+v0.9.0 and published latest. Mac fix `5866124`, release preparation `7e95ebe`,
+toolkit `872fbc3`. PRCI38495079579 passes25/25; release38495648349 passes27/27;
+mergeCI38495640368 green. Nine approved game-free setup/checksum/provenance
+assets verified; Mac installer SHA256
+`bc33acc61b2538adaec8ee39bd1ea0d3f594255314ceb0fd854bfcc7c54a2369`.
+Existing v0.8.0 updater release is unchanged. No game executable, data, generated
+source or new game media was published. Mac results/release links are in PR #12.
 
-Exact CI setup installed with Homebrew blocked; 109-step corrected build and
-certificate pass. Full fixed regression11/16 in56min (`fix-full.txt`): failures
-are missing bundled pytest, known startup/stream callbacks and twoexistingaudio
-underrun gates. Targeted source/loading2/2 and crib1/1 resolve the firstthree;
-source352pass/30skip, combat7/7 and versus6/6 gameplay, each3dry/0drops.
-Accepted pre-widescreen baseline reproduces underruns. Raw failures retained;
-no guessed kernel fix or changed threshold. See `docs/widescreen/09-macos-validation.md`.
-Auto-fullscreenHD/F1/launcher pass (`fix-auto.json`): aspect1.6, FOV35.65,
-3600x2260 drawable. Whole disposable save root15files matches prepared baseline;
-original installations and saves untouched. All test queues have finished.
+Mac validation: bundled-dependency native109-step build/certificate; source352
+pass/30skip; replay80/80golden; fights/FFA/Terrordome/intro/gym/soak3/3/F1/launcher
+pass. Auto now1.6/FOV35.65/drawable3600x2260 on a notchedMac. Rawfull11/16 kept;
+unit/loading/crib focused repeats pass. Existing audio.dry_queue remains failed
+(combat26/27, versus25/26, allgameplay passes, each3dry/0drops). Historical stream
+callback0x001E3C14 recurred in HDcapture and cribboot; cause unresolved, clean
+repeats retained, no guessed suppression. Details: `docs/widescreen/09-macos-validation.md`.
+Original installations/saves untouched; disposable save root15/15 matches baseline.
 
-Next: commit v0.9.0 notes/version, final source checks, then push to
-`origin feat/widescreen`, update/comment PR #12, awaitCI, then merge/tag/release
-v0.9.0 as requested. No push/comment/merge/tag for this task yet. Publish only
-reviewed game-free setup assets; never game executables/data/generated source.
+Shared managed workspace is at merged0.9 source. Ignored `build/posix-release`
+links to the certified native build in `logs/widescreen-macos/integration`.
+For further tests set `DEFJAM_DATA=<repo>/logs/widescreen-macos/data`; use the
+existing guards. Original CI install remains in `logs/widescreen-macos/install`;
+final Mac tag artifact/provenance in `tag-mac-assets`; release evidence in
+`{pr-ci,release-ci,draft-release,published-release,merged-pr}.json`. All test
+queues finished. Runtime source inputs match the release tag; generated C stays ignored.
 
-PR #22 media are local: `logs/widescreen-macos/media/{index.html,exports.json,
-review-exports.zip,readme-media-snippet.md}`. Hero, original/HD and4:3/16:9
-comparisons, silent60fps clips,3s20fps GIF, actualoverlay/launcher and Story/FFA
-stills are reviewed. Comparisons use PR12a7; UI uses corrected0.9native source,
-recorded separately. No exact new media publication approval; keep captures
-local until owner chooses exports/pins. `docs/worklog/` remains local-only.
-Installer remains mounted `/private/tmp/defjam-widescreen-macos`; native build
-uses bundled dependencies in `logs/widescreen-macos/install/versions/`.
+Bonus media: `logs/widescreen-macos/media/index.html` local gallery,
+`review-exports.zip` (~27.8MB), `exports.json` hashes/identity/limits and
+`readme-media-snippet.md`. Hero + compact3s20fpsGIF about4MB; original/HD and
+4:3/16:9 stills plus silent60fps clips, actualoverlay/launcher, Story/FFA stills.
+Comparisons use original PR12a7 candidate; UI uses corrected0.9 runtime inputs,
+recorded separately. Clips have same seed/input but are not pixel-synchronised;
+background crowd can vary and GIF cadence is not a benchmark. Native masters/
+raw recordings stay local. Next owner choice: select exact exports for PR #22,
+then update provenance/allowlist pins and README in its docs branch. No new
+media approval/pins yet. Keep `docs/worklog/` archives local-only.
