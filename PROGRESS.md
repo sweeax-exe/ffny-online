@@ -49,6 +49,8 @@
 
 | recomp.fyi listing (D113) | ⏳ | `.recomp.json` committed at the repo root; the board's bot adds the row on its daily scan or from the manifest-form issue. Check https://recomp.fyi for "Def Jam: Fight for NY" with this repo and fix anything the bot flags. |
 
+| Heap reclamation / v0.9.1 | ⏳ release preparation | PR28 merged `dd0e57c`, PR27 closed; owner reports Deck success and accepts Windows reporter ~52min/at least20starts/0exhaustion. Preparing version0.9.1 and tagged setup workflow; issue26 stays open for monitoring. |
+
 ## 1. Decisions log
 
 | # | Date | Decision | Rationale |
@@ -186,6 +188,8 @@
 
 | D113 | 2026-10-14 | List the port on recomp.fyi (the recomp.board directory) by committing a root `.recomp.json` to the public repo (route A), with status `released`, toolchain `Xboxrecomp` (the spelling other Xbox rows use), and (optionally) a manifest-form issue for immediate listing, left to Vlad because the session could not reach the board's repo. | Vlad's choice. The board already has an unclaimed Def Jam row for another repository; duplicates per game are normal, so we add our own row and do not claim theirs. The file names no disc image, dump or source of one (the board refuses a file that does) and omits `original.sha1`. 834 bytes; validates against `https://recomp.fyi/schema/v1.json`; `check-source-tree.py` passes. |
 
+| D114 | 2026-10-15 | Merge PR28, close PR27, publish patch release v0.9.1 and notify issue26 while continuing to monitor. | Explicit owner authorization after successful Windows reporter and owner-reported Steam Deck tests. The requested example "9.0.1" is normalized to 0.9.1, the patch after current0.9.0. No scene-purge change. |
+
 ## 2. Environment inventory (2026-09-17)
 
 - OS: Windows 11 Pro 10.0.26200
@@ -264,7 +268,6 @@ defjam-recomp/
 
 > Recent entries only; older entries remain unchanged in the local `docs/worklog/` archive.
 
-- 2026-10-13 21:07 — Fixed-source full regression completes11/16 in56min (`logs/widescreen-macos/fix-full.txt`, integration `logs/regress-20261013-210713.txt`): fight/FFA/Terrordome/replay/intro/gym and soak3/3 pass; combat26/27 and versus25/26, each onlyaudio.dry_queue3events/0drops. Other failed checks: bundled Python lacks pytest (independent352-source-tests pass), known startup callback in m2, historicalstream callback0x001E3C14 during crib boot (crib reached/saves restored). Targeted fullscreen and unit/m2/crib repeats queued serially; raw failures retained.
 - 2026-10-14 12:00 — **Stale-docs pass from the platform-parity audit (issue #15).** Fixed statements that contradicted the shipped state: `docs/known-issues.md` (Linux launcher/overlay shipped since v0.7.0 and checked on the Deck 2/2; launcher and HD list now include Linux; Clang note points at the Deck runs), `docs/02-test-plan.md` and `docs/01-plan-review.md` (WIC/CNG and M5-via-Proton lines marked superseded by D95 and v0.6.1/v0.7.2), `docs/04-improvement-backlog.md` (installer section, overlay note, clang-cl note and the Steam Deck row of the comparison table). `README.md` is left to PR #22, which rewrites the HD line. Documentation only; no code, toolkit or release change.
 - 2026-10-13 21:15 — Mac validation complete: corrected auto-fullscreenHD resolves1.6000/FOV35.65/swapchain3600x2260, reachescombat, actualF1overlay opens/closes, nofaults/savesrestored (`fix-auto.json`); launcher renders/exits0. Targeted source+loading2/2 (352tests/30skip, goldenframe100), crib1/1 clean; rawfull11/16 retained with twoexistingaudio gates stillfailed. Whole isolatedsave root15files byte-identical to prepared baseline. Localmedia reviewZIP27.8MB with original/HD/widescreen PNG+60fpsMP4, compactGIF, overlay/launcher and provenance; no new media published. Source commits/push/CI/merge/release next.
 - 2026-10-13 21:34 — PR12 source7e95ebe accepted by CI38495079579 (25/25), Macreport commented and PRmerged c4bcda69b3dc839a3705bfb443fc774d7828f33a. Exactmerge taggedv0.9.0; source release38495648349 passes27/27 and mergeCI38495640368 green. Publishedlatestv0.9.0 with9 game-free setup/checksum/provenance assets; allthree platformdigests/source/toolkit identities verified, MacDMG and payloadhash locallychecked and correctedsource bytesmatch nativevalidation. Existingv0.8.0 untouched; no gamebinary/data/generatedsource/newmedia published. Localmedia review ZIP27.8MB ready for ownerselection; savebaseline15/15 unchanged.
@@ -272,52 +275,21 @@ defjam-recomp/
 - 2026-10-14 08:40 — Owner rejected the battle still; reviewed existing step900 strike,1200 face-off and2100 clinch options, replacement selection pending. README removes PR12 caption and directly states all-platform widescreen beta sincev0.9.0. Technical provenance retained in gallery; no new media or runtime changes. Source/whitespace checks pass.
 - 2026-10-14 08:45 — Owner selected B face-off, step1200: README hero now1932x584 labelled4:3/16:9 pair, HD/scale2/gamma on both; gallery960x540 hero also replaced. Revised2media SHA256pins and captions/provenance; no new raw data/runtime changes. Focused publication/agent tests, source policy and whitespace checks run; preview updated.
 - 2026-10-14 14:00 — recomp.fyi listing (D113): read the site rules and the `.recomp.json` spec; added a root `.recomp.json` (game, system Xbox, type recomp, status released, toolchain Xboxrecomp, four targets, two links). Schema-valid, 834 bytes, `check-source-tree.py` 0 failures. The board already lists an unrelated unclaimed Def Jam row (another repo); ours is separate. Pushed to public main (`ca490cd`). The manifest-form issue was NOT submitted (the session could not reach the board's repo), so the daily scan picks the file up; Vlad may submit the form by hand for an immediate row.
+- 2026-10-15 10:07 — Owner authorized heap-reclaim release after successful Windows reporter and owner-reported Deck tests (D114). PR28 merged dd0e57c with25/25CI; PR27 closed unmerged. Prepared0.9.1 version and release notes, keeping issue26 open for monitoring. No game binary/data or generated guest code distributed; tagged setup policy/CI/publish pending.
 
 ## 7. Hand-off
 
-### README media PR22 — face-off comparison selected, 2026-10-14
+### v0.9.1 — heap-reclamation bugfix release preparation
 
-Vlad selected B, step1200 face-off, for the widescreen/4:3 comparison (D112).
-README now uses `widescreen-comparison.png`; gallery `gameplay-hero.png` shows
-the same selected moment. Both revised exports have exact pins and provenance.
-Widescreen availability is stated directly since v0.9.0 on all three platforms;
-technical capture identities stay in the gallery. Worktree:
-`/Users/vlad/.codex/worktrees/readme-media-review/DefJamFFNY-recomp`, PR22 branch
-`docs/readme-intro-refresh`. Selected raw masters are `hd-{4x3,16x9}-fight-step1200.png`
-in the capture worktree's `logs/widescreen-macos/media/`. No decision pending.
-Next: review/merge PR22 if desired; no merge/release authorized here. Current
-setup/Deck/varied-scene gaps remain in `docs/media/capture-plan.md`. No runtime
-changes or original save modifications; archives/raw masters remain local.
+Owner authorized merge/tag/release and issue26 release notice (D114). PR28
+merged dd0e57c15cd07b03bb0c2599cc8628ed67513dd3 after25/25green PRCI38668356135.
+PR27 closed without merging its scene-purge heuristic. Toolkit837e2c7ea65a.
+Windows reporter log confirms reclaimon,0exhaustion,~52min,180058frames,at least
+20starts and no56MiBthreshold reached; review is issuecomment6191806248.
+Owner reports successful Steam Deck play-test on2026-10-15. No new native Mac
+playtest or controlled performance benchmark claimed. Version+release notes
+prepared for0.9.1; release-policy and tagged workflow must pass before publishing
+the generated draft. Verify9game-free setup/checksum/provenance assets, then
+publish latest and add release link/monitoring note on issue26, keeping it open.
 
-### Widescreen v0.9.0 — released; PR #22 media ready locally
-
-PR #12 merged `c4bcda69b3dc839a3705bfb443fc774d7828f33a`, exact merge tagged
-v0.9.0 and published latest. Mac fix `5866124`, release preparation `7e95ebe`,
-toolkit `872fbc3`. PRCI38495079579 passes25/25; release38495648349 passes27/27;
-mergeCI38495640368 green. Nine approved game-free setup/checksum/provenance
-assets verified; Mac installer SHA256
-`bc33acc61b2538adaec8ee39bd1ea0d3f594255314ceb0fd854bfcc7c54a2369`.
-Existing v0.8.0 updater release is unchanged. No game executable, data, generated
-source or new game media was published. Mac results/release links are in PR #12.
-
-Mac validation: bundled-dependency native109-step build/certificate; source352
-pass/30skip; replay80/80golden; fights/FFA/Terrordome/intro/gym/soak3/3/F1/launcher
-pass. Auto now1.6/FOV35.65/drawable3600x2260 on a notchedMac. Rawfull11/16 kept;
-unit/loading/crib focused repeats pass. Existing audio.dry_queue remains failed
-(combat26/27, versus25/26, allgameplay passes, each3dry/0drops). Historical stream
-callback0x001E3C14 recurred in HDcapture and cribboot; cause unresolved, clean
-repeats retained, no guessed suppression. Details: `docs/widescreen/09-macos-validation.md`.
-Original installations/saves untouched; disposable save root15/15 matches baseline.
-
-Shared managed workspace is at merged0.9 source. Ignored `build/posix-release`
-links to the certified native build in `logs/widescreen-macos/integration`.
-For further tests set `DEFJAM_DATA=<repo>/logs/widescreen-macos/data`; use the
-existing guards. Original CI install remains in `logs/widescreen-macos/install`;
-final Mac tag artifact/provenance in `tag-mac-assets`; release evidence in
-`{pr-ci,release-ci,draft-release,published-release,merged-pr}.json`. All test
-queues finished. Runtime source inputs match the release tag; generated C stays ignored.
-
-Selected Mac media now lives in PR22's exact-pinned gallery. Raw masters and
-review sheets remain local at `logs/widescreen-macos/media/` in the capture
-checkout. Gameplay is the earlier PR12 candidate; UI runtime inputs match
-v0.9.0. See the current media handoff above and `docs/media/README.md`.
+Prior README/media/widescreen handoff archived locally in docs/worklog/.
