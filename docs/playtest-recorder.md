@@ -2,8 +2,9 @@
 
 For finding small, short-lived faults during ordinary play: a hitch, a picture that
 is wrong for a second, a pop or a gap in the sound, something that happens only at
-one venue or one Story point. Turn the recorder on, play, and press **F9** when
-something looks or sounds wrong. The seconds before the key are saved as a *bug
+one venue or one Story point. Turn the recorder on, play, and press **F9** (on a pad
+or a Steam Deck: hold **View** and click the **left stick**) when something looks or
+sounds wrong. The seconds before the key are saved as a *bug
 bundle*, which an agent (Claude, Codex) can read with
 `python scripts/bug-bundle.py latest`.
 
@@ -30,7 +31,8 @@ usual `logs/run-*.log.err`. `logs/sessions/LATEST` names the newest one.
 | Setting (`[debug]`) | Default | Meaning |
 |---|---|---|
 | `record` | `false` | Keep a session for every run (env `RECOMP_RECORD`) |
-| `mark_key` | `F9` | The key that writes a bundle; the overlay's Debug tab has a *Mark a bug here* button for a pad |
+| `mark_key` | `F9` | The key that writes a bundle; the overlay's Debug tab also has a *Mark a bug here* button |
+| `mark_pad` | `back+left_stick_click` | Pad buttons that write a bundle: hold **View/Back** and the **left stick click** together for half a second (on a Steam Deck too) |
 | `record_fps` | `10` | Pictures a second kept for bundles, 0 to 30 (env `RECOMP_RECORD_FPS`) |
 | `record_seconds` | `30` | How far back a bundle reaches, 5 to 120 (env `RECOMP_RECORD_SECONDS`) |
 | `record_audio` | `true` | Keep the mixed sound, about 11 MB a minute |
@@ -139,6 +141,8 @@ The picture ring takes about 75 MB of memory at the defaults; a session about 12
 a minute on disk, most of it audio.
 
 ## In scripted runs
+
+To watch or record a particular Story cutscene, see [Playing a chosen Story scene](scene-selector.md).
 
 `scenario_suite.py run ... --record` turns the recorder on for a harness scenario and
 links the session's analysis and every bundle from the scenario report.

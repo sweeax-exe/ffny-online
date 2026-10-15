@@ -40,6 +40,7 @@ line turns it on for one run. Every key here is read at start-up.
 |---|---|---|
 | `record` | `false` | Keep a session under `logs/sessions/` for every run: frame times, events, the sound and the last seconds of pictures. Env `RECOMP_RECORD`. |
 | `mark_key` | `F9` | While recording, the key that saves a bug bundle of the seconds before it. |
+| `mark_pad` | `back+left_stick_click` | While recording, pad buttons that do the same (on a Steam Deck: hold **View** and press the **left stick** for half a second). Alternatives separated by commas, a combination joined with `+`, button names as in `[gamepad]`; empty for none. |
 | `record_fps` | `10` | Pictures a second kept for bundles, 0-30. Each is a read-back from the graphics card. Env `RECOMP_RECORD_FPS`. |
 | `record_seconds` | `30` | Seconds before a mark a bundle holds, 5-120. Env `RECOMP_RECORD_SECONDS`. |
 | `record_audio` | `true` | Keep the mixed sound (about 11 MB a minute). |

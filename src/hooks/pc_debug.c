@@ -42,14 +42,18 @@ static const void *guest_base(void)
 size_t pc_debug_settings(RecompSetting *out, size_t max)
 {
     size_t n = 0;
-    if (max < 10) return 0;
-    memset(out, 0, sizeof(*out) * 10);
+    if (max < 11) return 0;
+    memset(out, 0, sizeof(*out) * 11);
 #define ADD(...) do { RecompSetting s_ = { __VA_ARGS__ }; out[n++] = s_; } while (0)
     ADD("debug", "record", RECOMP_SETTING_BOOL, 0, 0, 0, NULL, "RECOMP_RECORD", RECOMP_SETTING_RESTART,
         "Keep a play-test record of every run under logs/sessions: frame times, events, the sound and the last "
         "seconds of pictures. The mark key writes a bug bundle of those seconds. See docs/playtest-recorder.md.");
     ADD("debug", "mark_key", RECOMP_SETTING_STRING, 0, 0, 0, NULL, NULL, RECOMP_SETTING_RESTART,
         "While recording, the key that marks a moment and writes a bug bundle of the seconds around it.", "F9");
+    ADD("debug", "mark_pad", RECOMP_SETTING_STRING, 0, 0, 0, NULL, NULL, RECOMP_SETTING_RESTART,
+        "While recording, pad buttons that mark a moment, for a pad or a Steam Deck. Alternatives are separated "
+        "by commas; a combination joined with + must be held for half a second. Button names as in [gamepad]. "
+        "Empty for none.", "back+left_stick_click");
     ADD("debug", "record_fps", RECOMP_SETTING_INT, 10, 0, 30, NULL, "RECOMP_RECORD_FPS", RECOMP_SETTING_RESTART,
         "Pictures a second kept for bundles (0 for none). Each one is read back from the graphics card, which "
         "costs that frame a little; frames.csv records how much.");
