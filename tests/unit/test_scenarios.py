@@ -120,3 +120,23 @@ def test_fixture_library_add_list_and_refuse_duplicates(tmp_path, monkeypatch):
     with pytest.raises(SystemExit, match='letters'):
         scenarios.fixture_add(harness, suite, '../escape', None, None, None)
     assert scenarios.main(['fixture', 'verify']) == 0
+
+
+def test_scene_names_come_from_the_dump_sc_first(tmp_path, monkeypatch):
+    cinema = tmp_path / 'extracted' / 'assets' / 'cinema'
+    cinema.mkdir(parents=True)
+    for n in ('gf1a', 'sc10', 'sc00', 'sc07a'):
+        (cinema / (n + '.viv')).write_bytes(b'')
+    monkeypatch.setattr(harness, 'data_dir', lambda: str(tmp_path))
+    assert scenarios.scene_names(harness) == ['sc00', 'sc07a', 'sc10', 'gf1a']
+
+
+def test_contact_sheet_orders_captures_by_their_seconds(tmp_path):
+    Image = pytest.importorskip('PIL.Image')
+    for t, shade in ((11.2, 200), (5.6, 100), (90, 50)):
+        Image.new('RGB', (64, 48), (shade, 0, 0)).save(tmp_path / ('scene-sc05-%gs.png' % t))
+    out = tmp_path / 'sheet.png'
+    assert scenarios.contact_sheet(tmp_path, out, 'sc05', width=64)
+    sheet = Image.open(out)
+    assert sheet.size == (4 * 64, 24 + 48 + 18)
+    assert [sheet.getpixel((x * 64 + 30, 40))[0] for x in range(3)] == [100, 200, 50]   # 5.6 s, 11.2 s, 90 s

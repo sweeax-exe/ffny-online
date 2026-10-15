@@ -67,6 +67,22 @@ int main(int argc, char **argv)
         fe_inject_after_call("Control.GetScreenInfo(story/crib.swf)");
         return 0;
     }
+    if (!strcmp(argv[1], "cinema")) {
+        /* The image's scene table (one name every 8 bytes), then two loads of sc00. */
+        static const char *names[] = { "sc00", "sc01", "sc07a", "gf1b1" };
+        int i, k;
+        for (i = 0; i < 4; i++)
+            for (k = 0; names[i][k]; k++) MEM8(0x0028CA28u + (uint32_t)i * 8u + (uint32_t)k) = (uint8_t)names[i][k];
+        for (i = 0; i < 2; i++) {
+            g_esp = 0x30000;
+            MEM32(0x30004) = 0x0028CA28u;
+            fe_cinema_scene_enter();
+            printf("load %d: %s at %x\n", i, (const char *)memory + 0x38000u + (MEM32(0x30004) - 0x0028C000u),
+                   MEM32(0x30004));
+        }
+        printf("table: %s\n", (const char *)memory + 0x38A28u);
+        return 0;
+    }
     /* crowd: set-up seeds one generator, the crowd updates five times, then the first step. */
     g_esp = 0x30000;
     MEM8(0x2E3488 % sizeof memory) = 0;
@@ -98,7 +114,9 @@ def tool(tmp_path_factory):
     (folder / 'recomp/gen').mkdir(parents=True)
     # 0x2E3488 is outside the fake memory: the test maps the crowd's gate into it.
     (folder / 'recomp/gen/recomp_types.h').write_text(
-        TYPES.replace('(memory + (a))', '(memory + ((a) == 0x002E3488u || (a) == 0x2E3488 ? 0x3F000u : (a)))'),
+        # and the image's scene table (0x28CA28) at 0x38A28.
+        TYPES.replace('(memory + (a))', '(memory + ((a) == 0x002E3488u || (a) == 0x2E3488 ? 0x3F000u : '
+                      '(a) >= 0x28C000u && (a) < 0x28D000u ? (a) - 0x28C000u + 0x38000u : (a)))'),
         encoding='utf-8')
     driver = folder / 'driver.c'
     driver.write_text(DRIVER.replace('MEM8(0x2E3488 % sizeof memory) = 0;', 'MEM8(0x2E3488) = 1;'), encoding='utf-8')
@@ -155,3 +173,22 @@ def test_crowd_controls_are_off_by_default(tool):
     assert all(line.endswith('gate=1') for line in out if line.startswith('update'))
     assert not any(line.startswith('seed') for line in out)
     assert 'TEST-CROWD' not in err
+
+
+def test_cinema_scene_points_the_first_load_at_the_chosen_entry(tool):
+    out, err = run(tool, 'cinema', RECOMP_TEST_CINEMA_SCENE='sc07a')    # longer than sc00: no write needed
+    assert out[0] == 'load 0: sc07a at 28ca38'
+    assert out[1] == 'load 1: sc00 at 28ca28'                # only the first load is replaced
+    assert out[2] == 'table: sc00'                           # the game's table is not written
+    assert '[CINEMA] sc00 replaced by sc07a' in err and err.count('[CINEMA] scene sc00') == 2
+
+
+def test_cinema_scene_refuses_a_name_the_game_does_not_have(tool):
+    out, err = run(tool, 'cinema', RECOMP_TEST_CINEMA_SCENE='sc99')
+    assert out[0] == 'load 0: sc00 at 28ca28'
+    assert 'not a scene of this game; known: sc00 sc01 sc07a gf1b1' in err
+
+
+def test_cinema_scenes_are_only_logged_without_the_variable(tool):
+    out, err = run(tool, 'cinema')
+    assert out[:2] == ['load 0: sc00 at 28ca28', 'load 1: sc00 at 28ca28'] and 'replaced' not in err

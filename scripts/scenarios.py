@@ -25,7 +25,9 @@ its saves guard, its evidence and its report:
     python scripts/scenarios.py generate --mode one-on-one --venue terrordome --fixture crib-day1 \\
         --seed 12345 --record --expect-character 0:4
     python scripts/scenarios.py cutscene --fixture crib-day1 --from crib --inject "getscreeninfo(story/crib#1=>Cmd(x))"
-    python scripts/scenarios.py cutscene --fixture crib-day1 --scene sc05      (once the command is known)
+    python scripts/scenarios.py cutscene --fixture crib-day1 --scene sc05      (plays sc05 in the first scene's place)
+    python scripts/scenarios.py scenes                                         (the scenes in the dump)
+    python scripts/scenarios.py scenes sc05 sc07a gf1a --fixture crib-day1     (each in turn, a contact sheet each)
 
 A generated route is called fight-gen-... or ffa-gen-... so scenario_suite treats it
 as a fight (audio, pacing and memory gates). --expect-character SLOT:INDEX checks,
@@ -237,6 +239,81 @@ def run_suite(suite, name, route, fixture, a, extra=()):
     return code, report
 
 
+def scene_names(harness):
+    """The scene names in the user's dump (assets/cinema/<name>.viv), sorted: sc00..sc21, then gf*."""
+    folder = Path(harness.data_dir()) / 'extracted' / 'assets' / 'cinema'
+    names = [p.stem for p in folder.glob('*.viv')] if folder.is_dir() else []
+    return sorted(names, key=lambda n: (not n.startswith('sc'), n))
+
+
+def contact_sheet(captures, out, title, width=320):
+    """The captures of one run, in time order, labelled with their seconds, as one PNG; False without Pillow."""
+    try:
+        from PIL import Image, ImageDraw
+    except ImportError:
+        return False
+    shots = sorted(captures.glob('*s.png'), key=lambda p: float(re.findall(r'-([0-9.]+)s\.png$', p.name)[0])
+                   if re.findall(r'-([0-9.]+)s\.png$', p.name) else 0.0)
+    if not shots:
+        return False
+    cols, height = 4, width * 3 // 4
+    rows = (len(shots) + cols - 1) // cols
+    sheet = Image.new('RGB', (cols * width, rows * (height + 18) + 24), (16, 16, 16))
+    draw = ImageDraw.Draw(sheet)
+    draw.text((6, 6), title, fill=(240, 200, 60))
+    for i, shot in enumerate(shots):
+        x, y = (i % cols) * width, 24 + (i // cols) * (height + 18)
+        sheet.paste(Image.open(shot).convert('RGB').resize((width, height)), (x, y))
+        draw.text((x + 4, y + height + 2), shot.stem.rsplit('-', 1)[-1] + ' after Story start', fill=(200, 200, 200))
+    sheet.save(out)
+    return True
+
+
+def play_scenes(harness, cat, a):
+    """`scenes`: list the dump's scenes, or play each named one in the first scene's place and keep a sheet of it."""
+    known = scene_names(harness)
+    if not a.names:
+        print('%d scenes in %s:' % (len(known), Path(harness.data_dir()) / 'extracted' / 'assets' / 'cinema'))
+        print(' '.join(known) or '(none found: is DEFJAM_DATA set?)')
+        print('play some: scenarios.py scenes sc05 sc07a --fixture <name>   (or all)')
+        return 0
+    names = known if a.names == ['all'] else a.names
+    unknown = [n for n in names if known and n not in known]
+    if unknown:
+        raise SystemExit('not in the dump: %s; known: %s' % (', '.join(unknown), ' '.join(known)))
+    if not a.fixture:
+        raise SystemExit('--fixture is needed: a save whose --from route starts Story at its first scene '
+                         '(docs/research/scenario-launching.md)')
+    env = cat['cutscenes'].get('launch_env')
+    if not env:
+        raise SystemExit('no scene launcher in the catalog (cutscenes.launch_env)')
+    suite = load('scenario_suite')
+    out = REPO / 'logs' / 'scene-tour' / time.strftime('%Y%m%d-%H%M%S')
+    out.mkdir(parents=True)
+    rows = []
+    for scene in names:
+        a.test_env, a.seed = ['%s=%s' % (env, scene)], None
+        route = cutscene_route(harness, a.base, cat['cutscenes']['launch_inject'], a.secs, a.every)
+        code, report = run_suite(suite, 'scene-' + re.sub(r'[^a-z0-9]+', '-', scene.lower()), route,
+                                 fixture_path(harness, a.fixture), a)
+        log = report.parent / 'game.log.err' if report else None
+        text = log.read_text(encoding='utf-8', errors='replace') if log and log.exists() else ''
+        played = ('replaced by %s ' % scene) in text
+        sheet = out / ('%s.png' % scene)
+        made = played and contact_sheet(report.parent / 'captures', sheet, '%s (in place of the first scene)' % scene)
+        rows.append((scene, 'yes' if played else 'NO', sheet.name if made else '-', str(report.parent) if report else '-'))
+        print('%-6s played: %-3s sheet: %s' % rows[-1][:3])
+    index = ['# Scene tour, %s' % time.strftime('%Y-%m-%d %H:%M'), '',
+             'Each scene played in the place of the first one Story loads (`%s`), from the `%s` route on fixture '
+             '`%s`. Captures every %g s for %g s after Story starts. Game pictures: keep this folder local.'
+             % (env, a.base, a.fixture, a.every, a.secs), '',
+             '| scene | played | sheet | run |', '|---|---|---|---|']
+    index += ['| %s | %s | %s | %s |' % r for r in rows]
+    (out / 'index.md').write_text('\n'.join(index) + '\n', encoding='utf-8')
+    print('index: %s' % (out / 'index.md'))
+    return 0 if all(r[1] == 'yes' for r in rows) else 1
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])
     sub = ap.add_subparsers(dest='action', required=True)
@@ -277,6 +354,14 @@ def main(argv=None):
     cut.add_argument('--every', type=float, default=3, help='seconds between captures')
     cut.add_argument('--test-env', action='append', metavar='RECOMP_TEST_NAME=VALUE',
                      help='passed to scenario_suite, e.g. RECOMP_TEST_CINEMA_SCENE=sc05')
+
+    scn = sub.add_parser('scenes', help='the Story scenes in the dump: list them, or play several in turn')
+    scn.add_argument('names', nargs='*', help="scenes to play (sc05 gf1a ...), or 'all'; none: list them")
+    scn.add_argument('--fixture', help='a fixture whose --from route starts Story at its first scene')
+    scn.add_argument('--from', dest='base', default='crib', help='the harness route that starts Story')
+    scn.add_argument('--secs', type=float, default=90, help='how long to watch each scene')
+    scn.add_argument('--every', type=float, default=6, help='seconds between captures')
+    scn.add_argument('--record', action='store_true')
     cut.add_argument('--seed', type=int)
     cut.add_argument('--record', action='store_true', default=True)
     cut.add_argument('--print', action='store_true')
@@ -336,6 +421,9 @@ def main(argv=None):
             print(('EXPECTED FIGHTERS: ' if ok else 'WRONG FIGHTERS: ') + message)
             code = code or (0 if ok else 1)
         return code
+
+    if a.action == 'scenes':
+        return play_scenes(harness, cat, a)
 
     # cutscene
     inject = a.inject
