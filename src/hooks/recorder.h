@@ -47,6 +47,13 @@ typedef struct RecorderFrameIn {
     int audio_dropped, audio_dry;       /* the audio device's counters */
     long long step;             /* the game's simulation step in a fight, -1 outside one */
     long long log_bytes;        /* how much of the log has been written, -1 unknown */
+    /* The translator's texture cache: uploads (new and changed in place), their bytes and
+     * evictions as running totals; entries and bytes held now. hd_cache_bytes: the HD
+     * texture pack's resident replacements now, 0 without a pack. */
+    uint32_t tex_uploads, tex_evictions;
+    unsigned long long tex_upload_bytes;
+    uint32_t tex_cached;
+    unsigned long long tex_cache_bytes, hd_cache_bytes;
 } RecorderFrameIn;
 
 /* Make a session folder, start the worker. Returns 1 when recording. */

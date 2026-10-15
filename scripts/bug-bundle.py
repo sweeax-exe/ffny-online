@@ -84,7 +84,8 @@ def read_rows(path):
         for r in csv.DictReader(f):
             try:
                 rows.append({k: (float(v) if k not in ('frame', 'step', 'log_bytes', 'pcm_bytes', 'draws',
-                                                       'vertices', 'clears', 'audio_dropped', 'audio_dry')
+                                                       'vertices', 'clears', 'audio_dropped', 'audio_dry',
+                                                       'tex_uploads', 'tex_evictions', 'tex_cached')
                                  else int(float(v))) for k, v in r.items() if v != ''})
             except ValueError:
                 continue
@@ -186,12 +187,24 @@ def frame_stats(rows, hitch_floor=50.0, factor=2.5):
                 side = 'mixed'
             hitches.append({'frame': r['frame'], 't_ms': r['t_ms'], 'interval_ms': interval, 'median_ms': median,
                             'present_ms': present, 'work_ms': work, 'capture_ms': r.get('capture_ms', 0.0),
-                            'draws': r.get('draws'), 'side': side})
+                            'draws': r.get('draws'), 'side': side,
+                            'tex_uploads': r.get('tex_uploads', 0), 'tex_upload_kb': r.get('tex_upload_kb', 0.0),
+                            'tex_evictions': r.get('tex_evictions', 0)})
         else:
             window.append(interval)
             if len(window) > 120:
                 window.pop(0)
     stats['hitches'] = hitches
+    # The texture cache (sessions from before these columns have none of them).
+    if rows and 'tex_uploads' in rows[0]:
+        stats['textures'] = {
+            'uploads': sum(r.get('tex_uploads', 0) for r in rows),
+            'upload_mb': sum(r.get('tex_upload_kb', 0.0) for r in rows) / 1024.0,
+            'evictions': sum(r.get('tex_evictions', 0) for r in rows),
+            'busiest_frame_uploads': max(r.get('tex_uploads', 0) for r in rows),
+            'cached_max': max(r.get('tex_cached', 0) for r in rows),
+            'cache_mb_max': max(r.get('tex_cache_mb', 0.0) for r in rows),
+            'hd_cache_mb_max': max(r.get('hd_cache_mb', 0.0) for r in rows)}
     stats['audio_dropped'] = sum(r.get('audio_dropped', 0) for r in rows)
     stats['audio_dry'] = sum(r.get('audio_dry', 0) for r in rows)
     return stats
@@ -809,10 +822,21 @@ def write_report(b, result, stats, log, events, mark, notes):
             nearby = [describe_event(e) for e in near(events, h['t_ms'], 500) if e.get('kind') not in ('hitch', 'memory')]
             close = sorted((abs(t - h['t_ms']), ln) for t, fr, ln in log if t is not None and abs(t - h['t_ms']) <= 200)
             lines = [ln for _, ln in close[:3]]
-            ctx = '; '.join(nearby[:3] + ['log: ' + ln[:90] for ln in lines])
+            tex = []
+            if h.get('tex_uploads'):
+                tex.append('%d texture upload(s), %.0f KB' % (h['tex_uploads'], h.get('tex_upload_kb', 0.0)))
+            if h.get('tex_evictions'):
+                tex.append('%d eviction(s)' % h['tex_evictions'])
+            ctx = '; '.join(tex + nearby[:3] + ['log: ' + ln[:90] for ln in lines])
             L.append('| %+.3f s | %d | %.1f ms | %.1f | %.1f | %.1f | %s | %s |' % (
                 rel(h['t_ms'], mark), h['frame'], h['interval_ms'], h['present_ms'], h['work_ms'], h['capture_ms'],
                 h['side'], ctx.replace('|', '/') or '-'))
+    tx = fs.get('textures')
+    if tx:
+        L += ['', 'Texture cache in these rows: %d upload(s), %.1f MB (at most %d in one frame), %d eviction(s); '
+              'at most %d textures, %.1f MB held; HD pack at most %.0f MB resident.' % (
+                  tx['uploads'], tx['upload_mb'], tx['busiest_frame_uploads'], tx['evictions'], tx['cached_max'],
+                  tx['cache_mb_max'], tx['hd_cache_mb_max'])]
     if result['draw_outliers']:
         L += ['', 'Frames whose draw count left both neighbours (possible one-frame missing geometry):', '']
         for o in result['draw_outliers'][:10]:

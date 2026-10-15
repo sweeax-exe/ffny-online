@@ -182,6 +182,8 @@ typedef struct FrameRec {
     uint32_t draws, vertices, clears;
     int dropped, dry;           /* this frame's increments */
     long long step, log_bytes, pcm_bytes;
+    uint32_t tex_uploads, tex_evictions, tex_cached;   /* this frame's uploads and evictions; entries held */
+    double tex_upload_kb, tex_cache_mb, hd_cache_mb;
 } FrameRec;
 
 typedef struct PicMeta { unsigned long long frame; double t; } PicMeta;
@@ -558,7 +560,8 @@ static void recent_add(double interval)
 
 void recorder_frame_end(const RecorderFrameIn *in)
 {
-    static uint32_t last_draws, last_vertices, last_clears;
+    static uint32_t last_draws, last_vertices, last_clears, last_tex_uploads, last_tex_evictions;
+    static unsigned long long last_tex_bytes;
     FrameRec r;
     double t;
     char fields[256];
@@ -579,6 +582,15 @@ void recorder_frame_end(const RecorderFrameIn *in)
     last_draws = in->draws;
     last_vertices = in->vertices;
     last_clears = in->clears;
+    r.tex_uploads = in->tex_uploads - last_tex_uploads;
+    r.tex_evictions = in->tex_evictions - last_tex_evictions;
+    r.tex_upload_kb = in->tex_upload_bytes >= last_tex_bytes ? (double)(in->tex_upload_bytes - last_tex_bytes) / 1024.0 : 0.0;
+    last_tex_uploads = in->tex_uploads;
+    last_tex_evictions = in->tex_evictions;
+    last_tex_bytes = in->tex_upload_bytes;
+    r.tex_cached = in->tex_cached;
+    r.tex_cache_mb = (double)in->tex_cache_bytes / 1048576.0;
+    r.hd_cache_mb = (double)in->hd_cache_bytes / 1048576.0;
     r.dropped = counter_delta(in->audio_dropped, &g_last_dropped);
     r.dry = counter_delta(in->audio_dry, &g_last_dry);
     r.step = in->step;
@@ -593,9 +605,10 @@ void recorder_frame_end(const RecorderFrameIn *in)
         g_hist_n++;
     }
     if (g_frames_file)
-        fprintf(g_frames_file, "%llu,%.3f,%.3f,%.3f,%.3f,%.3f,%u,%u,%u,%d,%d,%lld,%lld,%lld\n",
+        fprintf(g_frames_file, "%llu,%.3f,%.3f,%.3f,%.3f,%.3f,%u,%u,%u,%d,%d,%lld,%lld,%lld,%u,%.1f,%u,%u,%.2f,%.2f\n",
                 r.frame, r.t, r.interval, r.present, r.work, r.capture, r.draws, r.vertices, r.clears,
-                r.dropped, r.dry, r.step, r.log_bytes, r.pcm_bytes);
+                r.dropped, r.dry, r.step, r.log_bytes, r.pcm_bytes,
+                r.tex_uploads, r.tex_upload_kb, r.tex_evictions, r.tex_cached, r.tex_cache_mb, r.hd_cache_mb);
     mtx_unlock(&g_lock);
 
     if (r.interval > 0.0) {
@@ -812,12 +825,15 @@ static void write_bundle(const char *reason, double t_mark, unsigned long long f
             if (g_events_file) fflush(g_events_file);
             if (path_join(path, sizeof path, dir, "frames.csv") && (f = fopen(path, "w")) != NULL) {
                 fputs("frame,t_ms,interval_ms,present_ms,work_ms,capture_ms,draws,vertices,clears,"
-                      "audio_dropped,audio_dry,step,log_bytes,pcm_bytes\n", f);
+                      "audio_dropped,audio_dry,step,log_bytes,pcm_bytes,"
+                      "tex_uploads,tex_upload_kb,tex_evictions,tex_cached,tex_cache_mb,hd_cache_mb\n", f);
                 for (i = 0; i < nrows; i++) {
                     const FrameRec *r = &rows[i];
-                    fprintf(f, "%llu,%.3f,%.3f,%.3f,%.3f,%.3f,%u,%u,%u,%d,%d,%lld,%lld,%lld\n",
+                    fprintf(f, "%llu,%.3f,%.3f,%.3f,%.3f,%.3f,%u,%u,%u,%d,%d,%lld,%lld,%lld,%u,%.1f,%u,%u,%.2f,%.2f\n",
                             r->frame, r->t, r->interval, r->present, r->work, r->capture, r->draws, r->vertices,
-                            r->clears, r->dropped, r->dry, r->step, r->log_bytes, r->pcm_bytes);
+                            r->clears, r->dropped, r->dry, r->step, r->log_bytes, r->pcm_bytes,
+                            r->tex_uploads, r->tex_upload_kb, r->tex_evictions, r->tex_cached, r->tex_cache_mb,
+                            r->hd_cache_mb);
                 }
                 fclose(f);
             }
@@ -1124,7 +1140,8 @@ int recorder_init(const RecorderConfig *cfg)
     g_hist = (FrameRec *)calloc(g_hist_cap, sizeof(FrameRec));
     if (path_join(path, sizeof path, g_session, "frames.csv") && (g_frames_file = fopen(path, "w")) != NULL)
         fputs("frame,t_ms,interval_ms,present_ms,work_ms,capture_ms,draws,vertices,clears,"
-              "audio_dropped,audio_dry,step,log_bytes,pcm_bytes\n", g_frames_file);
+              "audio_dropped,audio_dry,step,log_bytes,pcm_bytes,"
+                      "tex_uploads,tex_upload_kb,tex_evictions,tex_cached,tex_cache_mb,hd_cache_mb\n", g_frames_file);
     if (path_join(path, sizeof path, g_session, "events.jsonl"))
         g_events_file = fopen(path, "w");
     g_t0 = now_ms();

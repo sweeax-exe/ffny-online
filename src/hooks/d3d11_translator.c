@@ -37,6 +37,7 @@
 
 #include "d3d8_xbox.h"
 #include "nv2a_pgraph_d3d11.h"
+#include "texture_pack.h"            /* texture_pack_stats: the HD pack's resident bytes for frames.csv */
 #include "pc_settings.h"
 #include "pc_input.h"
 #include "pc_ui.h"
@@ -546,6 +547,16 @@ static void recorder_frame_done(double present_ms, double capture_ms)
     in.audio_dropped = g_xa2_dropped;
     in.audio_dry = g_xa2_starved;
     in.step = defjam_test_current_step();
+    in.tex_uploads = st.textures_uploaded;
+    in.tex_evictions = st.texture_evictions;
+    in.tex_upload_bytes = st.texture_upload_bytes;
+    in.tex_cached = st.textures_cached;
+    in.tex_cache_bytes = st.texture_cache_bytes;
+    {
+        uint64_t resident = 0;
+        texture_pack_stats(&resident, NULL);
+        in.hd_cache_bytes = resident;
+    }
     /* Where the log has got to: with this in every row, scripts/bug-bundle.py puts each
      * log line on the frames' clock without the log's format changing. Flushing once a
      * frame also keeps the log's end on disk if the process is killed. */
