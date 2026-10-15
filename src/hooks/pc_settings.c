@@ -328,6 +328,13 @@ static void supply_runtime_defaults(void)
     for (i = 0; i < sizeof(names) / sizeof(names[0]); i++)
         if (!getenv(names[i]))
             _putenv_s(names[i], "1");
+    /* The 64 MiB contiguous window, where this title keeps textures and vertex
+     * data, is a bump allocator that never frees unless reclaim is on. A long
+     * session ran it dry (576 "[CONTIG] arena exhausted" lines across a match
+     * load, then UI corruption until restart; issue #26). RECOMP_NO_HEAP_RECLAIM=1
+     * restores the old behaviour for comparison. */
+    if (!getenv("RECOMP_HEAP_RECLAIM") && !getenv("RECOMP_NO_HEAP_RECLAIM"))
+        _putenv_s("RECOMP_HEAP_RECLAIM", "1");
 }
 
 int pc_display(const char *key, int fallback)
