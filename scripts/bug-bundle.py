@@ -87,7 +87,7 @@ def read_rows(path):
                                                        'vertices', 'clears', 'audio_dropped', 'audio_dry',
                                                        'tex_uploads', 'tex_evictions', 'tex_cached')
                                  else int(float(v))) for k, v in r.items() if v != ''})
-            except ValueError:
+            except (ValueError, TypeError):  # a run stopped mid-row leaves short last line
                 continue
     return rows
 

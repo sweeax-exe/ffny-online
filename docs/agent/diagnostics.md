@@ -13,6 +13,7 @@ answer. Reach for them before writing a new one.
 | `RECOMP_WATCH_EXEC_STR=1` | The string at `ecx` and at the first argument. Half the interesting functions take a name. |
 | `RECOMP_WATCH_EXEC_FIELD=0x20` | `MEM32(ecx + 0x20)` at the call. The ordinary shape of a member read. |
 | `RECOMP_WATCH_EXEC_CHAIN=0,8` | Follows a pointer chain from `ecx` **at the instant of the call**. |
+| `RECOMP_APU_VOICE_PCM=<prefix>` | What voices `0xF8`-`0xFA` (the title's six-channel mix buffer) produced, before volume, in `<prefix>F8.pcm` etc. `python scripts/audio-holes.py <prefix>` counts the places where the buffer replayed the previous lap, the audible click. `RECOMP_APU_SLICE_PACE=1/0` turns per-slice APU pacing on or off (on by default on Linux; D118). |
 | `RECOMP_WATCH_WRITE` / `_LEN` / `_RW` | Who wrote this address. Prints the guest registers and a stack scan. |
 | `RECOMP_GUARD_CODE=1` | What is writing over the image. Noisy by construction -- XBE sections mix code and data -- and the reports that matter are the ones on jump tables. |
 | `RECOMP_PEEK` (toolkit) | The current value of a few guest addresses. Covers both memory windows. |
