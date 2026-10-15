@@ -49,7 +49,7 @@
 
 | recomp.fyi listing (D113) | ⏳ | `.recomp.json` committed at the repo root; the board's bot adds the row on its daily scan or from the manifest-form issue. Check https://recomp.fyi for "Def Jam: Fight for NY" with this repo and fix anything the bot flags. |
 
-| Heap reclamation / v0.9.1 | ⏳ release preparation | PR28 merged `dd0e57c`, PR27 closed; owner reports Deck success and accepts Windows reporter ~52min/at least20starts/0exhaustion. Preparing version0.9.1 and tagged setup workflow; issue26 stays open for monitoring. |
+| Heap reclamation / v0.9.1 | ✅ released / monitoring | PR28 merged dd0e57c; PR27 closed unmerged. v0.9.1 published latest from055f3c1 after release38748620594 passes27/27 and9asset hashes/provenance verified. Windows reporter and owner Deck success; issue26 stays open, release notice6194257593. |
 
 ## 1. Decisions log
 
@@ -268,7 +268,6 @@ defjam-recomp/
 
 > Recent entries only; older entries remain unchanged in the local `docs/worklog/` archive.
 
-- 2026-10-14 12:00 — **Stale-docs pass from the platform-parity audit (issue #15).** Fixed statements that contradicted the shipped state: `docs/known-issues.md` (Linux launcher/overlay shipped since v0.7.0 and checked on the Deck 2/2; launcher and HD list now include Linux; Clang note points at the Deck runs), `docs/02-test-plan.md` and `docs/01-plan-review.md` (WIC/CNG and M5-via-Proton lines marked superseded by D95 and v0.6.1/v0.7.2), `docs/04-improvement-backlog.md` (installer section, overlay note, clang-cl note and the Steam Deck row of the comparison table). `README.md` is left to PR #22, which rewrites the HD line. Documentation only; no code, toolkit or release change.
 - 2026-10-13 21:15 — Mac validation complete: corrected auto-fullscreenHD resolves1.6000/FOV35.65/swapchain3600x2260, reachescombat, actualF1overlay opens/closes, nofaults/savesrestored (`fix-auto.json`); launcher renders/exits0. Targeted source+loading2/2 (352tests/30skip, goldenframe100), crib1/1 clean; rawfull11/16 retained with twoexistingaudio gates stillfailed. Whole isolatedsave root15files byte-identical to prepared baseline. Localmedia reviewZIP27.8MB with original/HD/widescreen PNG+60fpsMP4, compactGIF, overlay/launcher and provenance; no new media published. Source commits/push/CI/merge/release next.
 - 2026-10-13 21:34 — PR12 source7e95ebe accepted by CI38495079579 (25/25), Macreport commented and PRmerged c4bcda69b3dc839a3705bfb443fc774d7828f33a. Exactmerge taggedv0.9.0; source release38495648349 passes27/27 and mergeCI38495640368 green. Publishedlatestv0.9.0 with9 game-free setup/checksum/provenance assets; allthree platformdigests/source/toolkit identities verified, MacDMG and payloadhash locallychecked and correctedsource bytesmatch nativevalidation. Existingv0.8.0 untouched; no gamebinary/data/generatedsource/newmedia published. Localmedia review ZIP27.8MB ready for ownerselection; savebaseline15/15 unchanged.
 - 2026-10-14 08:30 — PR22 curated media refresh: reviewed six hero poses, original/HD and widescreen pairs, launcher/overlay, Story/FFA sheets and three videos sampled at4fps throughout. Nine selected exports exact-pinned; hero+GIF4.03MB, longer clips linked from gallery. Synced v0.9.0 and corrected released-beta wording; candidate provenance retained. Unit suite356passed/34skipped; link/hygiene results in logs/media-review/verification.txt. No game/runtime changes or original saves touched.
@@ -276,20 +275,31 @@ defjam-recomp/
 - 2026-10-14 08:45 — Owner selected B face-off, step1200: README hero now1932x584 labelled4:3/16:9 pair, HD/scale2/gamma on both; gallery960x540 hero also replaced. Revised2media SHA256pins and captions/provenance; no new raw data/runtime changes. Focused publication/agent tests, source policy and whitespace checks run; preview updated.
 - 2026-10-14 14:00 — recomp.fyi listing (D113): read the site rules and the `.recomp.json` spec; added a root `.recomp.json` (game, system Xbox, type recomp, status released, toolchain Xboxrecomp, four targets, two links). Schema-valid, 834 bytes, `check-source-tree.py` 0 failures. The board already lists an unrelated unclaimed Def Jam row (another repo); ours is separate. Pushed to public main (`ca490cd`). The manifest-form issue was NOT submitted (the session could not reach the board's repo), so the daily scan picks the file up; Vlad may submit the form by hand for an immediate row.
 - 2026-10-15 10:07 — Owner authorized heap-reclaim release after successful Windows reporter and owner-reported Deck tests (D114). PR28 merged dd0e57c with25/25CI; PR27 closed unmerged. Prepared0.9.1 version and release notes, keeping issue26 open for monitoring. No game binary/data or generated guest code distributed; tagged setup policy/CI/publish pending.
+- 2026-10-15 10:17 — Published latestv0.9.1/source055f3c1/toolkit837e2c7 after taggedworkflow38748620594 passes27/27;9game-free assets downloaded/API-hash+checksum+provenance verified on all3platforms. PR28 merged dd0e57c; PR27 closed unmerged. Issue26 staysOPEN; release/monitoring comment6194257593 read-back verified. Windows ~52min/atleast20starts/0arena-failure and owner-reported Decksuccess; no new nativeMac/performanceclaim. Prior stable releases unchanged, no gamebinary/data/generatedsource published.
 
 ## 7. Hand-off
 
-### v0.9.1 — heap-reclamation bugfix release preparation
+### v0.9.1 — released, issue26 monitoring
 
-Owner authorized merge/tag/release and issue26 release notice (D114). PR28
-merged dd0e57c15cd07b03bb0c2599cc8628ed67513dd3 after25/25green PRCI38668356135.
-PR27 closed without merging its scene-purge heuristic. Toolkit837e2c7ea65a.
-Windows reporter log confirms reclaimon,0exhaustion,~52min,180058frames,at least
-20starts and no56MiBthreshold reached; review is issuecomment6191806248.
-Owner reports successful Steam Deck play-test on2026-10-15. No new native Mac
-playtest or controlled performance benchmark claimed. Version+release notes
-prepared for0.9.1; release-policy and tagged workflow must pass before publishing
-the generated draft. Verify9game-free setup/checksum/provenance assets, then
-publish latest and add release link/monitoring note on issue26, keeping it open.
+Published latest https://github.com/vyanhursky/DefJamFFNY-recomp/releases/tag/v0.9.1
+from source055f3c1df698aa7280ab7167cf6a6ec62603022f, toolkit837e2c7ea65a.
+PR28 merged dd0e57c; PR27 closed without its scene-purge change. Release
+workflow38748620594 passed27/27; all9game-free setup/checksum/provenance assets
+downloaded and verified against API SHA256, installer checksum and exact source/
+toolkit identity. Windows installer5f770a66, Macf8f423ce, Linuxf20ff81b.
+40local release-policy/agent tests passed;319source files hygiene0fail. Tag is
+unchanged by this subsequent documentation update. Prior0.9.0/0.8.0 untouched.
 
-Prior README/media/widescreen handoff archived locally in docs/worklog/.
+Issue26 remains open. Release/monitoring notice6194257593 was posted and read
+back verified; earlier detailed review6191806248. Windows reporter log confirms
+reclaimon,0arena failures over~52min/180058frames/atleast20starts, no56MiB
+threshold reached. Owner reports Decksuccess; no new nativeMacgameplay or
+controlledperformancebenchmark claimed. No universal visual-causality claim.
+Continue monitoring for corruption/lifetime/performance regressions; request
+matching runtime.log/.log.err plus platform, elapsedtime and matchsequence.
+No scheduled monitoring automation was requested or created.
+
+Private release evidence and downloads remain local/ignored in the coordinating
+investigation workspace. Release notes are docs/releases/v0.9.1.md. No game
+binary/data/generatedsource or new media was published by this release task.
+Prior README/media/widescreen handoff is archived locally under docs/worklog/.
