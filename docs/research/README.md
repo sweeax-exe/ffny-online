@@ -38,6 +38,7 @@ cite other development notes, logs and captures that are not published.
 - [Fighter record fields](fighter-record-fields.md)
 - [Match-end state](match-end-state.md)
 - [Combat telemetry](combat-telemetry.md)
+- [Unlocking everything for playtests](unlock-everything.md): the unlock routine the retail image still carries, and the switch that calls it
 - [Why a scripted fight does not replay identically](fight-determinism.md)
 - [Why fight pictures do not repeat](crowd-nondeterminism.md)
 - [Launching a scenario by choice: fixtures, generated routes, the crowd, cutscenes](scenario-launching.md)

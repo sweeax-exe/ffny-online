@@ -1,0 +1,19 @@
+{
+  "$schema": "https://recomp.fyi/schema/v1.json",
+  "game": "Def Jam: Fight for NY",
+  "system": "Xbox",
+  "type": "recomp",
+  "status": "released",
+  "project": "Def Jam: Fight for NY — Recompiled",
+  "targets": ["Windows", "macOS", "Linux", "Steam Deck"],
+  "toolchain": "Xboxrecomp",
+  "approach": "Static recompilation of the Xbox executable to C, built locally by a setup from the player's own copy; Direct3D 11 and Vulkan renderers",
+  "maintainers": [
+    { "name": "vyanhursky", "link": "https://github.com/vyanhursky" }
+  ],
+  "links": [
+    { "label": "Releases", "url": "https://github.com/vyanhursky/DefJamFFNY-recomp/releases/latest" },
+    { "label": "Docs", "url": "https://github.com/vyanhursky/DefJamFFNY-recomp/blob/main/docs/README.md" }
+  ],
+  "tags": ["fighting", "widescreen", "hd-textures", "steam-deck"]
+}

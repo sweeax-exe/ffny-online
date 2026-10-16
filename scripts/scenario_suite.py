@@ -301,6 +301,8 @@ def execute(args):
                 env['RECOMP_TEXTURE_PACKS'] = args.texture_packs
             if getattr(args, 'texture_root', None):
                 env['RECOMP_TEXTURE_ROOT'] = str(Path(args.texture_root).resolve())
+            if args.no_unlock:
+                env['RECOMP_UNLOCK_ALL'] = '0'
             if args.observe_combat or args.require_combat:
                 env['RECOMP_TEST_OBSERVATIONS'] = '1'
             for item in args.test_env or []:
@@ -489,6 +491,8 @@ def main(argv=None):
                      help='fight steps the stream covers (default 1800, thirty seconds)')
     run.add_argument('--rng-seed', type=int,
                      help="replace the seed of the match's random number generator (changes CPU behaviour; for repeatable runs)")
+    run.add_argument('--no-unlock', action='store_true',
+                     help='run without RECOMP_UNLOCK_ALL (the harness turns it on); the pinned fight stream was recorded without it')
     run.add_argument('--baselines', help='local approved-baseline manifest')
     run.add_argument('--session-plan', help='experimental ordered-screen recipe using live pad input')
     run.add_argument('--record', action='store_true',

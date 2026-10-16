@@ -69,6 +69,18 @@ BASE_ENV = {
 TITLE_ANCHOR = "feflow.xml#2"
 
 
+def unlock_default(e):
+    """Test runs have every fighter and venue, whatever the save holds (src/patches/dev_unlock.c).
+
+    A caller, or the shell, can say otherwise: RECOMP_UNLOCK_ALL=0 turns it off, and an empty value
+    leaves it unset, so the settings file's own [debug] unlock_all applies."""
+    if "RECOMP_UNLOCK_ALL" not in e:
+        e["RECOMP_UNLOCK_ALL"] = "1"
+    elif e["RECOMP_UNLOCK_ALL"] == "":
+        del e["RECOMP_UNLOCK_ALL"]
+    return e
+
+
 def data_dir():
     """The game data root (dump, analysis, save area), outside the repo."""
     return os.environ.get("DEFJAM_DATA") or os.path.join(os.path.dirname(REPO), "defjam")
@@ -432,6 +444,12 @@ class SaveGuard:
         if not self.copy:
             return False
         kill_stray()
+        # DEFJAM_HARNESS_SNAPSHOT_SAVE=<dir>: keep what the run wrote, before the restore
+        # puts the original back (a profile the game itself produced, e.g. with RECOMP_UNLOCK_ALL).
+        snapshot = os.environ.get("DEFJAM_HARNESS_SNAPSHOT_SAVE")
+        if snapshot and os.path.isdir(self.src):
+            shutil.rmtree(snapshot, ignore_errors=True)
+            shutil.copytree(self.src, snapshot)
         for attempt in range(5):
             try:
                 if os.path.isdir(self.src):
@@ -681,6 +699,7 @@ def run_game(name, stages=(), tail="", shots="", secs=240, preset=RELEASE_PRESET
         e["RECOMP_TRANS_SHOT"] = os.path.join(shots_dir, name + ".bmp")
         e["RECOMP_TRANS_SHOT_SECS"] = shots
     e.update(env or {})
+    unlock_default(e)
     e['DEFJAM_DATA'] = guarded_data_root(e['DEFJAM_DATA'])
 
     run = Run(name, log + ".err", shots_dir)

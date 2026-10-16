@@ -46,8 +46,19 @@ lists the changes that are waiting for a restart. Keys: `[ui] overlay_key` and `
 | Controllers | Which controller is in which player, with a live view of each pad's sticks and buttons as the game will see them (after dead zones and mapping) and a rumble test; who plays (keyboard player, controller count, backend); dead zones and thresholds; rumble; the pointer |
 | Pad buttons | Which physical button acts as each Xbox control. Choose from a list, or press **Detect** and then the button on your pad |
 | Keyboard & mouse | The keys and mouse inputs for each Xbox control. Press **Add**, then a key, a side or middle mouse button or a wheel notch (Esc cancels); the left and right mouse buttons have buttons of their own while you are adding. **Clear** and **Default** per control |
-| General | Skip the launcher, the overlay's key and pad buttons, text size, a button that shows `settings.ini` in Explorer (Finder on macOS), reset every setting to default, and the version |
 | Debug | The play-test recorder (`[debug]` settings) and, in the overlay, what this run has recorded and a **Mark a bug here** button that saves the last seconds as a bug bundle (the same as the mark key, F9). See [Play-test recorder](playtest-recorder.md) |
+| General | Skip the launcher, the overlay's key and pad buttons, text size, a Debug option ("Unlock all Fighters and Venues", restart), a button that shows `settings.ini` in Explorer (Finder on macOS), reset every setting to default, and the version |
+
+### The Debug option
+
+The General page ends with a **Debug** section holding one checkbox, "Debug - Unlock all Fighters and
+Venues (Requires Restart)" (`[debug] unlock_all` in `settings.ini`, off by default). With it on, the game
+runs its developers' own unlock routine whenever a screen changes, so every profile, a new one included,
+has all 74 fighters and every venue, and 10,000 reward points. It is meant for testing: it changes the
+profile in memory and asks the game to save it, so leave it off for a save you care about. The choice is
+read when the game starts; the banner at the bottom lists it as waiting for a restart. The environment
+variable `RECOMP_UNLOCK_ALL` (`1` or `0`) overrides it for one run and greys the checkbox out. See
+[unlocking everything](research/unlock-everything.md).
 
 ## Using a gamepad in the menus
 

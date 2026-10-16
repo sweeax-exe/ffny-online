@@ -142,6 +142,26 @@ def test_save_guard_restores_userdata_caches_and_original_absence(tmp_path, monk
     assert guard.restored_equal and not (absent / 'save').exists()
 
 
+def test_runs_unlock_everything_unless_told_otherwise():
+    assert harness.unlock_default({})["RECOMP_UNLOCK_ALL"] == "1"
+    assert harness.unlock_default({"RECOMP_UNLOCK_ALL": "0"})["RECOMP_UNLOCK_ALL"] == "0"
+    assert "RECOMP_UNLOCK_ALL" not in harness.unlock_default({"RECOMP_UNLOCK_ALL": ""})
+
+
+def test_save_guard_can_keep_what_the_run_wrote(tmp_path, monkeypatch):
+    monkeypatch.setattr(harness, 'kill_stray', lambda: None)
+    keep = tmp_path / 'kept'
+    monkeypatch.setenv('DEFJAM_HARNESS_SNAPSHOT_SAVE', str(keep))
+    save = tmp_path / 'data' / 'save'
+    (save / 'UserData').mkdir(parents=True)
+    (save / 'UserData/profile').write_bytes(b'original')
+    with harness.SaveGuard(str(tmp_path / 'data')) as guard:
+        (save / 'UserData/profile').write_bytes(b'unlocked')
+    assert guard.restored_equal
+    assert (save / 'UserData/profile').read_bytes() == b'original'
+    assert (keep / 'UserData/profile').read_bytes() == b'unlocked'
+
+
 @pytest.mark.parametrize('name', ['__pycache__', 'CVS', 'same-name'])
 def test_save_comparison_does_not_ignore_names_or_shape(tmp_path, name):
     a, b = tmp_path / 'a', tmp_path / 'b'

@@ -101,7 +101,7 @@ Game data lives outside the repo at `<data>` (`$env:DEFJAM_DATA`): `xiso/`, `ext
    keeps cited logs and clears the rest. Run the full regression in the background and read its table, not its logs; a failing row prints a `triage.py` line for the log it used.
 5. Log the iteration in `PROGRESS.md` §6 with numbers; update §0 if a stage changed; add a `D<n>` if you chose between real alternatives.
 6. Commit: one commit per fix, message `fix(boot): <what> (<symptom>)` or `chore:`/`docs:`/`feat:`. Do not commit lifted code.
-   The private working checkout and the clean public checkout (`DefJamFFNY-recomp`) each have their own `origin`. Never push private history to the public remote. Then push to `origin main` (the private repo): Vlad gave standing permission on 2026-09-23. Write the
+   Push only when Vlad asks. Write the
    message to a file and use `git commit -F <file>`; PowerShell 5.1 cannot pipe a here-string, and its
    `Set-Content -Encoding utf8` adds a BOM to the subject.
 7. Toolkit changes live on `vyanhursky/xboxrecomp`, branch `defjam/m6` (D63; started at the accepted

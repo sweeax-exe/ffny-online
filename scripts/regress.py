@@ -67,7 +67,7 @@ evidence = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(evidence)
 REPO = harness.REPO
 
-ORDER = ["unit", "m2", "m3", "m4a", "launcher", "overlay", "fight", "ffa", "fight-terrordome", "ffa-terrordome", "combat", "versus", "ffa-result", "two-matches", "replay", "repeat", "visual",
+ORDER = ["unit", "m2", "m3", "m4a", "launcher", "overlay", "unlockopt", "fight", "ffa", "fight-terrordome", "ffa-terrordome", "combat", "versus", "ffa-result", "two-matches", "replay", "repeat", "visual",
          "intro", "crib", "gym", "soak"]
 # Opt-in (--only): the One on One at the Terrordome, which the Free For All covers, and
 # the repeatability check, which is two more fights.
@@ -270,6 +270,51 @@ def check_overlay(a):
     return verdict(faults, "opened by F1, General tab clicked, %dx%d window frame has the overlay" % (width, height))
 
 
+def check_unlock_option(a):
+    """The launcher's "Debug - Unlock all Fighters and Venues" checkbox, and what it does.
+
+    Part one clicks it in the launcher and expects `unlock_all = true` under [debug] in the settings
+    file. Part two starts the game from a file that says so, with no environment variable, and expects
+    the unlock routine to run; a file without it must leave the routine alone."""
+    if sys.platform == "win32":
+        return not_applicable("this check is for the SDL launcher (macOS, Linux); the Windows one is Direct3D 11")
+    faults = []
+    shot = os.path.join(REPO, "logs", "shots", "ui-unlockopt", "launcher.bmp")
+    os.makedirs(os.path.dirname(shot), exist_ok=True)
+    if os.path.exists(shot):
+        os.remove(shot)
+    settings = ui_settings_file("unlockopt")
+    # The General tab, the Debug checkbox (window points), a frame, Play. The harness turns the
+    # unlock on for its runs, which would lock the checkbox, so the variable is left unset here.
+    script = "800:click:540:60;1500:click:21:390;2200:shot:%s;2600:play" % shot
+    run = harness.run_game("ui-unlockopt", secs=120, preset=a.preset, scripted=False, quiet=True, until_file=shot,
+                           env={"RECOMP_SETTINGS": settings, "RECOMP_LAUNCHER_SCRIPT": script,
+                                "RECOMP_INPUT_IGNORE_FOCUS": "1", "RECOMP_UNLOCK_ALL": ""})
+    faults += common_faults(run)
+    with open(settings, encoding="utf-8") as f:
+        ini = f.read()
+    if not re.search(r"^\[debug\][^\[]*^unlock_all\s*=\s*true\s*$", ini, re.M | re.S):
+        faults.append("the click on the Debug checkbox did not reach settings.ini")
+    if "[UI] launcher closed: play" not in run.text:
+        faults.append("Play did not close the launcher")
+    if faults:
+        return False, "; ".join(faults)
+    # Part two: the saved choice reaches the game, and its absence leaves the game alone.
+    for want, text in ((True, "[launcher]\nskip = true\n[debug]\nunlock_all = true\n"),
+                       (False, "[launcher]\nskip = true\n")):
+        path = ui_settings_file("unlockopt-" + ("on" if want else "off"), text)
+        run = harness.run_route("boot", preset=a.preset, quiet=True,
+                                env={"RECOMP_SETTINGS": path, "RECOMP_UNLOCK_ALL": ""})
+        faults += common_faults(run)
+        started = "[UNLOCK] RECOMP_UNLOCK_ALL:" in run.text
+        ran = "[UNLOCK] sub_000158F0 run" in run.text
+        if want and not (started and ran):
+            faults.append("unlock_all = true in the file, but the unlock routine did not run")
+        if not want and (started or ran):
+            faults.append("unlock_all is off in the file, but the unlock routine ran")
+    return verdict(faults, "the checkbox saves [debug] unlock_all; from the file alone the unlock runs, and without it does not")
+
+
 def check_fight(a, route="fight"):
     run = harness.run_route(route, preset=a.preset, quiet=True)
     faults = common_faults(run)
@@ -374,7 +419,7 @@ def check_replay(a):
     folder = os.path.join(REPO, "logs", "scenarios", "regress-replay-" + stamp)
     stream = os.path.join(REPO, "logs", "scenarios", "regress-replay-%s.stream" % stamp)
     code = suite.main(["run", "fight", "--fixture", fixture, "--no-audio", "--observe-combat", "--step-input", "default",
-                       "--rng-seed", "20261006", "--preset", a.preset, "--stream-out", stream, "--output", folder])
+                       "--rng-seed", "20261006", "--no-unlock", "--preset", a.preset, "--stream-out", stream, "--output", folder])
     try:
         with open(stream, encoding="utf-8") as f:
             lines = [line for line in f.read().splitlines() if line]
@@ -404,7 +449,7 @@ def check_repeat(a):
     second = os.path.join(REPO, "logs", "scenarios", "regress-repeat-b-" + stamp)
     stream = os.path.join(REPO, "logs", "scenarios", "regress-repeat-%s.stream" % stamp)
     common = ["run", "fight", "--fixture", fixture, "--no-audio", "--observe-combat", "--step-input", "default",
-              "--rng-seed", "20261006", "--preset", a.preset]
+              "--rng-seed", "20261006", "--no-unlock", "--preset", a.preset]
     if suite.main(common + ["--stream-out", stream, "--output", first]) != 0:
         return False, "the recording run failed  " + os.path.relpath(first, REPO)
     code = suite.main(common + ["--stream-expect", stream, "--output", second])
@@ -479,7 +524,7 @@ def check_soak(a):
 
 
 CHECKS = {"unit": check_unit, "m2": check_m2, "m3": check_m3, "m4a": check_m4a, "launcher": check_launcher,
-          "overlay": check_overlay, "fight": check_fight, "ffa": check_ffa,
+          "overlay": check_overlay, "unlockopt": check_unlock_option, "fight": check_fight, "ffa": check_ffa,
           "fight-terrordome": lambda a: check_fight(a, 'fight-terrordome'),
           "ffa-terrordome": lambda a: check_fight(a, 'ffa-terrordome'),
           "combat": check_combat, "versus": check_versus, "ffa-result": check_ffa_result, "two-matches": check_two_matches, "replay": check_replay, "visual": check_visual, "repeat": check_repeat, "intro": check_intro, "crib": check_crib, "gym": check_gym, "soak": check_soak}
