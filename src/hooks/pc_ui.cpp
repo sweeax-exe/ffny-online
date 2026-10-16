@@ -135,6 +135,7 @@ static const char *friendly(const char *section, const char *key)
         { "gamepad", "trigger_threshold", "Trigger threshold" }, { "gamepad", "button_threshold", "Button threshold" },
         { "gamepad", "left_stick", "Left stick comes from" }, { "gamepad", "right_stick", "Right stick comes from" },
         { "launcher", "skip", "Skip the launcher at start" }, { "ui", "scale", "Text and control size" },
+        { "debug", "unlock_all", "Debug - Unlock all Fighters and Venues (Requires Restart)" },
         { "ui", "overlay_pad", "Overlay pad buttons" }, { "ui", "overlay_key", "Overlay key" },
     };
     for (const Label &l : labels)
@@ -485,7 +486,7 @@ static bool setting_widget(RecompSetting *s, const char *label = nullptr)
     if (locked) ImGui::EndDisabled();
     if (s->help) ImGui::SetItemTooltip("%s", s->help);
     if (locked) ImGui::SetItemTooltip("Set by an environment variable for this run.");
-    if (s->flags & RECOMP_SETTING_RESTART) {
+    if ((s->flags & RECOMP_SETTING_RESTART) && !strstr(label, "Restart")) {
         ImGui::SameLine();
         ImGui::TextDisabled("(restart)");
         ImGui::SetItemTooltip("Takes effect the next time the game starts.");
@@ -781,6 +782,10 @@ static void page_general(UiMode mode)
     }
     ImGui::SeparatorText("Appearance");
     settings_group("ui", { "scale" });
+    ImGui::SeparatorText("Debug");
+    settings_group("debug", { "unlock_all" });
+    ImGui::TextWrapped("For testing: every fighter and venue is available on any profile. It changes the profile in memory "
+                       "and asks the game to save it, so keep it off for a save you care about.");
     ImGui::SeparatorText("Files");
     ImGui::TextWrapped("Settings are saved as you change them in: %s", pc_settings_path());
     if (ImGui::Button(k_show_file_label)) open_folder();

@@ -110,6 +110,15 @@ Full table with source references: `docs/research/toolkit-bringup-notes.md`. Eve
 | `RECOMP_GAMMA=0` | leaves out the gamma ramp the title sets at start-up (an S curve applied at presentation and to captures). The golden frames were taken without it: set this when checking them. |
 | `RECOMP_CS_TRACE_CRT`, `RECOMP_CS_WATCH` | critical-section tracing |
 
+Game-side switches (`src/patches/dev_unlock.c`; off unless set; the test harness turns the first on):
+
+| Variable | Effect |
+|---|---|
+| `RECOMP_UNLOCK_ALL=1` | every fighter and venue on any profile, through the developers' own routine at guest `0x000158F0`; the `[debug] unlock_all` setting sets it at start-up. `0` turns it off, including for the harness. |
+| `RECOMP_DEV_DEBUG=1` | the in-fight debug label under each health bar (holds the byte at `0x0039C1DA`) |
+| `RECOMP_START_FIGHTERS=a,b[,c,d]`, `RECOMP_START_VENUE=n`, `RECOMP_START_LOG=1` | replace the fighters and venue when the match is made; see [the testing harness](09-testing-harness.md#choosing-the-fighters-and-the-venue) |
+| `DEFJAM_HARNESS_SNAPSHOT_SAVE=<dir>` | harness only: keep the save area as the run left it, before the guard restores the original |
+
 Compile-time: `-DRECOMP_ICALL_FEEDBACK` plus `python -m tools.recomp.icall_feedback` closes the loop on indirect-call targets that static analysis cannot see; `python -m tools.seed_from_log <run.log>` seeds functions from `Failed to resolve VA` lines.
 
 ## Replacing a badly lifted function by hand

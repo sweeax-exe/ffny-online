@@ -74,7 +74,7 @@ Game data lives outside the repo at `<data>` (`$env:DEFJAM_DATA`): `xiso/`, `ext
    keeps cited logs and clears the rest.
 5. Log the iteration in `PROGRESS.md` §6 with numbers; update §0 if a stage changed; add a `D<n>` if you chose between real alternatives.
 6. Commit: one commit per fix, message `fix(boot): <what> (<symptom>)` or `chore:`/`docs:`/`feat:`. Do not commit lifted code.
-   The private working checkout and the clean public checkout (`DefJamFFNY-recomp`) each have their own `origin`. Never push private history to the public remote. Then push to `origin main` (the private repo): Vlad gave standing permission on 2026-09-23. Write the
+   Push only when Vlad asks. Write the
    message to a file and use `git commit -F <file>`; PowerShell 5.1 cannot pipe a here-string, and its
    `Set-Content -Encoding utf8` adds a BOM to the subject.
 7. Toolkit changes live on `vyanhursky/xboxrecomp`, branch `defjam/m6` (D63; started at the accepted
@@ -144,6 +144,7 @@ python scripts/scenario_suite.py run fight-result --fixture logs/fixtures/NAME -
 - Every harness route and soak boot uses a complete-save-root guard, including profiles and caches.
   The run fails unless restoration is byte-identical. Keep only three successful backups; retain every
   failed backup. For rebase tests use the preserved disposable `runtime-data` root, never the original save.
+- Harness runs have every fighter and venue unlocked: `harness.py` sets `RECOMP_UNLOCK_ALL=1` (`--env RECOMP_UNLOCK_ALL=0`, or `scenario_suite.py --no-unlock`, turns it off). `replay` and `repeat` run without it, because it changes the pinned fight. `RECOMP_START_FIGHTERS` / `RECOMP_START_VENUE` choose the match (`docs/09-testing-harness.md`).
 - Captures land in `logs/shots/<route>/` and remain local. Only the two owner-approved README visuals (D58) may be committed, with exact CI fingerprints.
 - `scripts/scenario_suite.py` runs one route on a throw-away copy of a hashed save fixture and writes a
   JSON/JUnit/HTML report under `logs/scenarios/`. `--require-combat` asserts movement, a player attack,

@@ -149,6 +149,53 @@ The other regression checks still use the whole save folder with the copy-aside
 guard, which is why they are slower. Do not stop one mid-run: the guard restores
 the saves when the run ends.
 
+### Every fighter and venue, on any profile
+
+The harness (and so `regress.py` and the scenario suite) turns `RECOMP_UNLOCK_ALL` on for every
+run it starts; `--env RECOMP_UNLOCK_ALL=0` turns it off for one (the scenario suite drops inherited `RECOMP_*`
+variables, so it takes `--no-unlock`). The `replay` and `repeat` checks use `--no-unlock`: with the unlock
+on, the pinned fight plays differently (95 records against the golden 80; the cause is not known), and
+the golden was recorded without it. For a game you start yourself the
+switch is the `[debug] unlock_all` setting (the General page of the launcher and overlay), or the
+variable. `RECOMP_UNLOCK_ALL=1` runs the developers' own unlock routine (guest `0x000158F0`, still in the
+retail image) on each screen change once the main menu has started: all 74 fighters and every
+venue are available, whatever the profile holds, a new one included. It is runtime-only and off
+unless asked for:
+
+```bash
+python scripts/harness.py run unlock --env RECOMP_UNLOCK_ALL=1     # Unlock Fighters: 74 / 74
+python scripts/harness.py run fight --env RECOMP_UNLOCK_ALL=1 --env RECOMP_DEV_DEBUG=1
+```
+
+`RECOMP_DEV_DEBUG=1` adds the in-fight debug overlay. To keep the save area as a run left it
+(the guard still restores the original afterwards) set `DEFJAM_HARNESS_SNAPSHOT_SAVE=<dir>`.
+It does not unlock Story progress, songs or items. How it was found, and what was checked:
+[unlocking everything](research/unlock-everything.md).
+
+The unlock changes how the pinned fight plays (95 state records against the golden 80, every time; the
+cause is not known), so `replay` and `repeat` run without it: `scripts/scenario_suite.py run ... --no-unlock`.
+
+### Choosing the fighters and the venue
+
+A fight route plays "defaults all the way"; these switches replace the choice at the moment the match is
+made, so any fighter on any venue can be tested without scripting the menus:
+
+| Variable | Meaning |
+|---|---|
+| `RECOMP_START_FIGHTERS=a,b[,c,d]` | The fighter in each slot, by `<ID>` in `fighter.xml` (the default One on One is `56,55`, Blaze and Doc). Fewer ids than slots leave the rest as chosen. |
+| `RECOMP_START_VENUE=n` | The venue, as the `<feID>` number in `venue.xml` that `Game.ChooseVenue(n)` carries (1 is The Foundation, the default; 17 is Gun Hill Garage). The game maps it to the venue it stores through a table of 14 ids (0-5, 8, 10-13, 17, 24, 26); an id not in the table gives venue 0, a plain rubble floor, so check the picture for the ones you rely on. |
+| `RECOMP_START_LOG=1` | Print what `Game.StartGame` is about to be given (`[START]` in the log). Setting either variable above prints it too. |
+
+```bash
+python scripts/harness.py run fight --env RECOMP_START_FIGHTERS=3,20 --env RECOMP_START_VENUE=17
+```
+
+The menus still run up to Fight, and only the choices are replaced. The ids need no unlock, because
+nothing on the way to the match checks them. Only the two slots a One on One fills were tried (a
+four-fighter mode takes four ids but was not run). The combat telemetry reports the engine's index for a
+fighter, not the `<ID>`, so check the names on the HUD. The addresses and the runs are in
+[unlocking everything](research/unlock-everything.md#starting-a-match-on-a-chosen-fighter-and-venue).
+
 ## Audio, pacing and memory
 
 - **Audio.** The generated PCM must be long enough, not clipped and not silent,

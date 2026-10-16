@@ -542,6 +542,10 @@ int pc_settings_init(void)
         }
     }
 
+    /* [debug] unlock_all: src/patches/dev_unlock.c reads the variable once the game runs. */
+    if (!getenv("RECOMP_UNLOCK_ALL") && recomp_settings_get("debug", "unlock_all", 0))
+        _putenv_s("RECOMP_UNLOCK_ALL", "1");
+
     d3d8_present_enable_scaling(1);
     ws_init(pc_display("window_width", 1280), pc_display("window_height", 960), pc_display("fullscreen", 0));
 #if defined(_WIN32)

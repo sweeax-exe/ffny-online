@@ -23,6 +23,12 @@ and what to do when something misbehaves, see [Controllers, keyboard and mouse](
 |---|---|---|
 | `skip` | `false` | Skip the launcher and start the game at once. The launcher shows on every launch unless this is on. Hold **Shift** while the game starts, or start it with `--launcher`, to see it anyway; turn this off in the overlay's General page or the launcher's own checkbox. Env `RECOMP_NO_LAUNCHER=1` skips it for one run. |
 
+## [debug]
+
+| Key | Default | Meaning |
+|---|---|---|
+| `unlock_all` | `false` | Every fighter and venue is available on any profile, through the developers' own unlock routine in the game. For testing: it changes the profile in memory and asks the game to save it, so keep it off for a save you care about. Restart. Shown in the launcher and the overlay's General page as "Debug - Unlock all Fighters and Venues (Requires Restart)". Env `RECOMP_UNLOCK_ALL` (`1` on, `0` off). The test harness turns it on for its runs. [How it works](research/unlock-everything.md). |
+
 ## [ui]
 
 | Key | Default | Meaning |

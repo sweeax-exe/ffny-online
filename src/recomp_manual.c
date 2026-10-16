@@ -487,6 +487,7 @@ static void trace_sleep_caller(void)
  */
 extern void sub_00068BA0(void);
 extern void xbox_NoteAnchorEvent(const char *text);
+extern void defjam_unlock_all_on_funccall(const char *text);
 
 static void funccall_hook(void)
 {
@@ -505,6 +506,7 @@ static void funccall_hook(void)
     if (printed++ < 4000)
         fprintf(stderr, "[FUNCCALL] %s\n", text);
     xbox_NoteAnchorEvent(text);
+    defjam_unlock_all_on_funccall(text);   /* RECOMP_UNLOCK_ALL, src/patches/dev_unlock.c */
     sub_00068BA0();
 }
 
@@ -646,6 +648,12 @@ recomp_func_t recomp_lookup_manual(uint32_t xbox_va)
         return trace_sleep_caller;
     if (xbox_va == 0x00068BA0u)
         return funccall_hook;
+    if (xbox_va == 0x00046E40u) {   /* Game.StartGame, src/patches/dev_unlock.c */
+        extern recomp_func_t defjam_start_game_hook(void);
+        recomp_func_t w = defjam_start_game_hook();
+        if (w)
+            return w;
+    }
 
     if (s_trace_count < 0)
         trace_parse();

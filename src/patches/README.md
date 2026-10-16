@@ -2,5 +2,9 @@
 
 Reserved for behavioral changes to the game itself, such as a widescreen view.
 Each goes behind a runtime setting so the unmodified path stays testable. CMake
-picks up every `.c` file here. There are none yet: fixes that make the game run
-belong in `src/hooks` or `src/recomp_manual.c`.
+picks up every `.c` file here. Fixes that make the game run belong in `src/hooks`
+or `src/recomp_manual.c`.
+
+- `dev_unlock.c`: `RECOMP_UNLOCK_ALL=1` (every fighter and venue, through the developers'
+  own routine at `0x000158F0`) and `RECOMP_DEV_DEBUG=1` (the in-fight debug overlay). Both off
+  by default; [the investigation](../../docs/research/unlock-everything.md).
