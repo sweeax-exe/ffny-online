@@ -29,6 +29,7 @@ DRIVER = r'''
 #include <string.h>
 #include "recomp/gen/recomp_types.h"
 #include "fe_inject.h"
+#include "scene_launcher.h"
 
 unsigned char memory[0x40000];
 uint32_t g_eax, g_ecx, g_edx, g_esp, g_ebx, g_esi, g_edi, g_ebp;
@@ -45,6 +46,14 @@ void sub_00068BA0(void)
     uint32_t p = MEM32(g_esp + 4);
     printf("handler: %s\n", (const char *)memory + p);
     g_eax = 0x77; g_ecx = 0xDEAD; g_edx = 0xBEEF; g_esi = 1;
+    g_esp += 4;
+}
+/* The mode system's "start the cinema" (thiscall, no arguments): what scene it was given, then state 3. */
+void sub_0002D4F0(void)
+{
+    printf("start cinema: scene %u\n", MEM32(MEM32(g_ecx + 0x2A8) + 0x18));
+    MEM32(g_ecx + 0x2A0) = 3;
+    g_eax = 1;
     g_esp += 4;
 }
 /* The seeding routine: thiscall, two arguments, ret 8. */
@@ -67,20 +76,28 @@ int main(int argc, char **argv)
         fe_inject_after_call("Control.GetScreenInfo(story/crib.swf)");
         return 0;
     }
-    if (!strcmp(argv[1], "cinema")) {
-        /* The image's scene table (one name every 8 bytes), then two loads of sc00. */
+    if (!strcmp(argv[1], "launch")) {
+        /* The image's scene names (one every 8 bytes) and the number -> name table, a mode
+         * system in the game state (1), then six mode updates; the scene "ends" after the fourth. */
         static const char *names[] = { "sc00", "sc01", "sc07a", "gf1b1" };
+        const uint32_t mode = 0x20000u;
         int i, k;
-        for (i = 0; i < 4; i++)
+        for (i = 0; i < 4; i++) {
             for (k = 0; names[i][k]; k++) MEM8(0x0028CA28u + (uint32_t)i * 8u + (uint32_t)k) = (uint8_t)names[i][k];
-        for (i = 0; i < 2; i++) {
-            g_esp = 0x30000;
-            MEM32(0x30004) = 0x0028CA28u;
-            fe_cinema_scene_enter();
-            printf("load %d: %s at %x\n", i, (const char *)memory + 0x38000u + (MEM32(0x30004) - 0x0028C000u),
-                   MEM32(0x30004));
+            MEM32(0x002DC018u + (uint32_t)i * 4u) = 0x0028CA28u + (uint32_t)i * 8u;
         }
-        printf("table: %s\n", (const char *)memory + 0x38A28u);
+        MEM8(mode + 0x21) = 1; MEM32(mode + 0x2A0) = 1; MEM32(mode + 0x2A8) = 0x21000u;
+        printf("count %d, sc07a %d, 3 %d, sc99 %d\n", scene_launcher_count(), scene_launcher_find("sc07a"),
+               scene_launcher_find("3"), scene_launcher_find("sc99"));
+        g_esp = 0x30000; MEM32(0x30004) = 0x0028CA38u;
+        scene_launcher_loader_enter();
+        for (i = 0; i < 6; i++) {
+            g_ecx = mode; g_eax = 77;
+            scene_launcher_mode_enter();
+            printf("tick %d: state %u, playing %d, eax %u, esp %x\n", i, MEM32(mode + 0x2A0), scene_launcher_playing(),
+                   g_eax, g_esp);
+            if (i == 3) MEM32(mode + 0x2A0) = 0;   /* sub_0002D570 ends the scene: the debug menu's state */
+        }
         return 0;
     }
     /* crowd: set-up seeds one generator, the crowd updates five times, then the first step. */
@@ -114,13 +131,15 @@ def tool(tmp_path_factory):
     (folder / 'recomp/gen').mkdir(parents=True)
     # 0x2E3488 is outside the fake memory: the test maps the crowd's gate into it.
     (folder / 'recomp/gen/recomp_types.h').write_text(
-        # and the image's scene table (0x28CA28) at 0x38A28.
+        # and the image's scene names (0x28CA28) at 0x38A28, the scene table (0x2DC018) at 0x3A018.
         TYPES.replace('(memory + (a))', '(memory + ((a) == 0x002E3488u || (a) == 0x2E3488 ? 0x3F000u : '
-                      '(a) >= 0x28C000u && (a) < 0x28D000u ? (a) - 0x28C000u + 0x38000u : (a)))'),
+                      '(a) >= 0x28C000u && (a) < 0x28D000u ? (a) - 0x28C000u + 0x38000u : '
+                      '(a) >= 0x2DC000u && (a) < 0x2DD000u ? (a) - 0x2DC000u + 0x3A000u : (a)))'),
         encoding='utf-8')
     driver = folder / 'driver.c'
     driver.write_text(DRIVER.replace('MEM8(0x2E3488 % sizeof memory) = 0;', 'MEM8(0x2E3488) = 1;'), encoding='utf-8')
     sources = [str(driver), str(ROOT / 'src/hooks/fe_inject.c'), str(ROOT / 'src/hooks/crowd_control.c'),
+               str(ROOT / 'src/hooks/scene_launcher.c'),
                str(ROOT / 'src/hooks/recorder.c')]
     if os.name == 'nt':
         exe = folder / 'controls.exe'
@@ -175,20 +194,24 @@ def test_crowd_controls_are_off_by_default(tool):
     assert 'TEST-CROWD' not in err
 
 
-def test_cinema_scene_points_the_first_load_at_the_chosen_entry(tool):
-    out, err = run(tool, 'cinema', RECOMP_TEST_CINEMA_SCENE='sc07a')    # longer than sc00: no write needed
-    assert out[0] == 'load 0: sc07a at 28ca38'
-    assert out[1] == 'load 1: sc00 at 28ca28'                # only the first load is replaced
-    assert out[2] == 'table: sc00'                           # the game's table is not written
-    assert '[CINEMA] sc00 replaced by sc07a' in err and err.count('[CINEMA] scene sc00') == 2
+def test_scene_launcher_starts_the_cinema_mode_and_restores_the_state(tool):
+    out, err = run(tool, 'launch', RECOMP_SCENE='sc07a', RECOMP_SCENE_DELAY_FRAMES='1')
+    assert out[0] == 'count 4, sc07a 2, 3 3, sc99 -1'
+    assert '[SCENE] loading sc07a' in err
+    assert out[1] == 'tick 0: state 1, playing -1, eax 77, esp 30000'     # the delay
+    assert out[2] == 'start cinema: scene 2'                                # the number, then the game's own start
+    assert out[3] == 'tick 1: state 3, playing 2, eax 77, esp 30000'      # registers as they were
+    assert out[4:6] == ['tick 2: state 3, playing 2, eax 77, esp 30000', 'tick 3: state 3, playing 2, eax 77, esp 30000']
+    assert out[6] == 'tick 4: state 1, playing -1, eax 77, esp 30000'     # ended: the game state again
+    assert '[SCENE] sc07a ended; mode state 1 again' in err
 
 
-def test_cinema_scene_refuses_a_name_the_game_does_not_have(tool):
-    out, err = run(tool, 'cinema', RECOMP_TEST_CINEMA_SCENE='sc99')
-    assert out[0] == 'load 0: sc00 at 28ca28'
-    assert 'not a scene of this game; known: sc00 sc01 sc07a gf1b1' in err
+def test_scene_launcher_refuses_a_scene_the_game_does_not_have(tool):
+    out, err = run(tool, 'launch', RECOMP_SCENE='sc99', RECOMP_SCENE_DELAY_FRAMES='1')
+    assert not any(line.startswith('start cinema') for line in out)
+    assert 'RECOMP_SCENE=sc99 is not a scene of this game; known: sc00 sc01 sc07a gf1b1' in err
 
 
-def test_cinema_scenes_are_only_logged_without_the_variable(tool):
-    out, err = run(tool, 'cinema')
-    assert out[:2] == ['load 0: sc00 at 28ca28', 'load 1: sc00 at 28ca28'] and 'replaced' not in err
+def test_scene_launcher_does_nothing_unless_asked(tool):
+    out, err = run(tool, 'launch')
+    assert not any(line.startswith('start cinema') for line in out) and 'playing' not in err
