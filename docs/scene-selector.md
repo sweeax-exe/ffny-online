@@ -29,8 +29,11 @@ Open the overlay (**F1**, or the pad's overlay buttons), go to **Debug**, and un
   request waits for the title screen.
 - Whatever was running is left: after the scene the game returns to the **main menu**, not
   to the fight or Story point you were in.
-- **Developer menu** opens EA's own debug menu instead (it reads pad 1; which buttons move,
-  change and start is not mapped yet: try the d-pad and A). **Back to the main menu** leaves it.
+- **Developer menu** opens EA's own debug menu instead. It reads pad 1: the d-pad moves and
+  changes values, **A starts** the highlighted mode. **Back to the main menu** leaves it.
+  Careful with `MODE - GAME`: with the menu's default fighters (`Crow1 (MAR)`, a developer
+  placeholder) it asks for speech files the retail disc does not have and stalls.
+  `MODE - REAL TIME CINEMA` plays the `CINEMA` line's scene; the other modes are untried.
 
 ## From the command line: one command
 
@@ -54,7 +57,8 @@ folder lists every scene, whether it played and ended, its sheet and its log.
 ## By hand, without the scripts
 
 Set `RECOMP_SCENE` when you start the game; the scene plays once the title screen is up and
-the game then returns to the main menu.
+the game then returns to the main menu. A list (`RECOMP_SCENE=sc12,sc05,gf1a`) plays each in
+turn, back to the main menu between them.
 
 macOS and Linux (from the repository folder):
 

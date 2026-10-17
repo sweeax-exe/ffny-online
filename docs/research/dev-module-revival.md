@@ -226,6 +226,24 @@ Story-based switch and its docs (`docs/scene-selector.md`); try the debug menu b
 - **Not yet:** the debug menu's buttons, its other modes and `MODE - GAME`; a request from inside a fight;
   Windows and the Deck.
 
+## Play-test findings (2026-10-17, owner on macOS)
+
+- **Frozen at the second scene of a run** (sc16 after sc05; sc12 twice). Cause: the mode system's init
+  (`sub_0002C790`) adds the static task `0x2DBF28` to the task list (subsystem 1, head at `+4`, next at
+  node `+8`) with `sub_0001B170`, which links at the head with no check for a duplicate; `sub_0002D4F0`
+  takes it out (`sub_0001B1C0`) and `sub_0002D570` puts it back, but neither `0x77DD0` nor `0x2C970`
+  removes it, so the second module's init linked it again, to itself, and the next walk never ended.
+  Fix: `dev_module.c` removes it at Unload (and before Load). Reproduced with `RECOMP_SCENE=sc12,sc12`
+  (frames stopped at the second Load, `logs/run-20261017-094348.log.err`); after the fix sc12, sc12, sc16
+  and sc05 in one run (`logs/run-20261017-0947*`).
+- **"A does not select" in the debug menu:** A does start the highlighted mode (bit `0x10` of pad 0's
+  pressed mask, `sub_000DD2B0(1)`): scripted A moved the mode state 0 -> 1. The cursor starts on
+  `MODE - GAME`, which starts a match with the default `Crow1 (MAR)` fighters and stalls asking for
+  `speech/streams/intro/028.asf` and the venue announcer, files the retail disc does not have. Choosing
+  real fighters and a stage first is untried.
+- The render view the module's init claims ("AKIDEBUG", `sub_00016240`) is a fixed slot set up again
+  each time, not an allocation; four entries in one run were fine.
+
 ## Decisions and risks
 
 - Injecting means constructing the object on the host side with the game's allocator
