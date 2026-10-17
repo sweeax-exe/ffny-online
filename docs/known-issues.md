@@ -12,9 +12,10 @@ Fighters selection. They do not cover every mode or a full Story campaign.
   clock that stood still for 12-18 ms at a time, late wake-ups and thread priority on macOS).
   On the Mac the opening Story scene went from about 10 holes a second to 5 in four minutes,
   confirmed by ear. One short skip remains as the car crash hits in the opening scene, the
-  heaviest frame of the scene; it is left for performance work. Windows and the Steam Deck
-  have not been play-tested with the fix; the clock fix is shared code. Each part can be
-  switched off to compare (`docs/03-workflows.md`).
+  heaviest frame of the scene; it is left for performance work. On the Steam Deck the owner's
+  play-test of v0.9.3 found the audio significantly improved. Windows has not been play-tested
+  with the fix; the clock fix is shared code. Each part can be switched off to compare
+  (`docs/03-workflows.md`).
 - **Unresolved jump targets.** The translated code has about a hundred placeholders for
   jump targets the translator could not resolve; reaching one skips real code. v0.2.1
   replaced the seven that are simple function exits, one of which caused the Terrordome
@@ -99,8 +100,8 @@ playable since v0.5.0, with the launcher and overlay since v0.6.2
 ([guide](build-macos-linux.md)). Native Linux, including the Steam Deck, builds with Clang
 and passes most of the automated regression; Proton is untried. On the Steam Deck there was a
 little audio clipping or distortion (the old #11). It was the same crackle as on the other
-platforms, and v0.9.3's fix should cover it, but it has not been play-tested on the Deck yet;
-tracked in [#30](https://github.com/vyanhursky/DefJamFFNY-recomp/issues/30). A game started from inside
+platforms, and the owner's play-test of v0.9.3 on the Deck found the audio significantly
+improved; tracked in [#30](https://github.com/vyanhursky/DefJamFFNY-recomp/issues/30). A game started from inside
 a build container (podman or distrobox) has no sound, because the container has no PipeWire library;
 start it from the host. On macOS and Linux, vsync is only used on a display refreshing at a
 multiple of 60 Hz (60, 120, 180, 240), as on Windows: on a 75, 90, 100 or 144 Hz display the
