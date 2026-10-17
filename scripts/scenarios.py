@@ -1,0 +1,467 @@
+#!/usr/bin/env python3
+"""Scenarios on demand: a library of save fixtures, generated fight routes, cutscenes.
+
+The harness's routes (scripts/harness.py) each reach one fixed place. Chasing a
+bug that only shows at one venue, with one fighter or at one Story point needs a
+run that starts there, repeatably, as often as asked. This script builds those
+runs from three pieces and hands them to scripts/scenario_suite.py, which keeps
+its saves guard, its evidence and its report:
+
+  a fixture   a copy of a save at a known point, kept in a library in the data
+              folder (never in the repository). Make one by playing to the point,
+              quitting, and running `fixture add`.
+  a route     menu presses that reach the match: a match type, a venue and the
+              fighters, composed from config/scenario-catalog.json. The combinations
+              the harness already had come out exactly as its routes do.
+  controls    a pinned seed and step-timed input (a fight that repeats), the crowd
+              controls (RECOMP_TEST_CROWD, see scripts/crowd-lab.py), the play-test
+              recorder, and front-end command injection (RECOMP_FE_INJECT) to start
+              a scene the menus would otherwise need a play-through to reach.
+
+    python scripts/scenarios.py list
+    python scripts/scenarios.py fixture add crib-day1 --story crib --note "after the first fight"
+    python scripts/scenarios.py fixture list
+    python scripts/scenarios.py generate --mode free-for-all --venue terrordome --print
+    python scripts/scenarios.py generate --mode one-on-one --venue terrordome --fixture crib-day1 \\
+        --seed 12345 --record --expect-character 0:4
+    python scripts/scenarios.py cutscene --fixture crib-day1 --from crib --inject "getscreeninfo(story/crib#1=>Cmd(x))"
+    python scripts/scenarios.py cutscene --fixture crib-day1 --scene sc05      (plays sc05 in the first scene's place)
+    python scripts/scenarios.py scenes                                         (the scenes in the dump)
+    python scripts/scenarios.py scenes sc05 sc07a gf1a --fixture crib-day1     (each in turn, a contact sheet each)
+
+A generated route is called fight-gen-... or ffa-gen-... so scenario_suite treats it
+as a fight (audio, pacing and memory gates). --expect-character SLOT:INDEX checks,
+from the match_start telemetry, that the menus picked the fighter the moves were
+meant to: a calibration that has drifted fails instead of quietly fighting someone
+else. Never run two of these at once (docs/09-testing-harness.md).
+"""
+import argparse
+import importlib.util
+import json
+import re
+import sys
+import time
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+REPO = HERE.parent
+CATALOG = REPO / 'config' / 'scenario-catalog.json'
+
+
+def load(name):
+    spec = importlib.util.spec_from_file_location(name.replace('-', '_'), HERE / (name + '.py'))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def catalog():
+    return json.loads(CATALOG.read_text(encoding='utf-8'))
+
+
+# ---------------------------------------------------------------------------
+# Routes
+# ---------------------------------------------------------------------------
+
+def venue_stage(steps):
+    """The venue screen: the moves, then confirm. The harness's own routes press A at 8 s
+    when the cursor stays put and at 9 s after a move."""
+    if not steps:
+        return 'getscreeninfo(battle/chsvenue=a@8+4x4'
+    return 'getscreeninfo(battle/chsvenue=%s;a@9+4x4' % steps
+
+
+def fight_route(harness, mode, venue, length='short', p1=None, cpu=None, cat=None):
+    """A route dict in harness.ROUTES form for a match type, a venue and the fighters."""
+    cat = cat or catalog()
+    if mode not in cat['modes']:
+        raise SystemExit('unknown mode %r; known: %s' % (mode, ', '.join(cat['modes'])))
+    if venue not in cat['venues']:
+        raise SystemExit('unknown venue %r; known: %s (add one to config/scenario-catalog.json)'
+                         % (venue, ', '.join(cat['venues'])))
+    steps = cat['venues'][venue]['steps']
+    if mode == 'one-on-one':
+        stages = list(harness.ONE_ON_ONE_SETUP)
+        if p1:
+            stages[-1] = 'controllersetup(0,0=' + p1
+        if steps:
+            # As fight-terrordome: the CPU slot is left to the venue screen's presses.
+            stages += ['controllersetup(1,=' + (cpu or 'back@9999'), venue_stage(steps)]
+        else:
+            stages += ['controllersetup(1,=' + (cpu or cat['fighters']['cpu_default'])]
+    else:
+        stages = list(harness.FFA_SETUP)
+        if p1:
+            i = next(k for k, s in enumerate(stages) if s.startswith('controllersetup(0,0='))
+            stages[i] = 'controllersetup(0,0=' + p1
+        stages.append(venue_stage(steps))
+    four = mode != 'one-on-one'
+    route = {'help': 'generated: %s at %s' % (mode, venue), 'stages': stages, 'tail': harness.FIGHT_TAIL,
+             'generated': {'mode': mode, 'venue': venue, 'length': length, 'p1': p1, 'cpu': cpu}}
+    if 'index' in cat['venues'][venue]:
+        route['venue_index'] = cat['venues'][venue]['index']    # what scenario_suite checks Game.ChooseVenue against
+    if length == 'result':
+        route.update(until='game.getmatchsummary(', after=6, secs=1200 if four else 900, shots='@game.startgame(,60')
+    elif length == 'long' or steps:
+        route.update(until='game.startgame(', after=240, secs=620, shots='@game.startgame(,15,60,230')
+    else:
+        route.update(until='game.startgame(', after=150 if four else 120, secs=520 if four else 420,
+                     shots='@game.startgame(,60,140' if four else '@game.startgame(,60,110')
+    return route
+
+
+def route_name(mode, venue, length):
+    return '%s-gen-%s%s' % ('fight' if mode == 'one-on-one' else 'ffa', venue, '' if length == 'short' else '-' + length)
+
+
+def cutscene_route(harness, base, inject, secs, every):
+    """A Story route that, once it is where the base route stops, injects a front-end
+    command and then takes a capture every `every` seconds for `secs` seconds."""
+    r = dict(harness.ROUTES[base])
+    anchor = inject.split('=>', 1)[0].split('#', 1)[0]
+    # The harness takes at most 16 captures a launch: spread them wider rather than refuse the run.
+    every = max(every, secs / 16.0)
+    times = ','.join('%g' % round(t * every, 1) for t in range(1, min(16, int(secs // every)) + 1))
+    r.update(help='cutscene: %s then %s' % (base, inject), until=None, after=0,
+             secs=r['secs'] + secs + 30, shots='@%s,%s' % (anchor, times),
+             env=dict(r.get('env', {}), RECOMP_FE_INJECT=inject), generated={'cutscene': inject, 'from': base})
+    return r
+
+
+# ---------------------------------------------------------------------------
+# The fixture library (in the data folder)
+# ---------------------------------------------------------------------------
+
+def library_root(harness):
+    return Path(harness.data_dir()) / 'fixtures'
+
+
+def library(harness):
+    path = library_root(harness) / 'library.json'
+    return json.loads(path.read_text(encoding='utf-8')) if path.exists() else {'schema': 1, 'fixtures': {}}
+
+
+def save_library(harness, lib):
+    root = library_root(harness)
+    root.mkdir(parents=True, exist_ok=True)
+    (root / 'library.json').write_text(json.dumps(lib, indent=2, sort_keys=True), encoding='utf-8')
+
+
+def fixture_path(harness, name_or_path):
+    p = Path(name_or_path)
+    if (p / 'fixture.json').exists():
+        return p
+    q = library_root(harness) / name_or_path
+    if (q / 'fixture.json').exists():
+        return q
+    raise SystemExit('no fixture %r (a folder with fixture.json, or a name in %s)' % (name_or_path, library_root(harness)))
+
+
+def fixture_add(harness, suite, name, source, story, note):
+    if not re.match(r'^[A-Za-z0-9][A-Za-z0-9_.-]*$', name):
+        raise SystemExit('a fixture name is letters, digits, dot, dash and underscore')
+    lib = library(harness)
+    if name in lib['fixtures']:
+        raise SystemExit('fixture %r exists; pick another name' % name)
+    src = Path(source) if source else Path(harness.data_dir()) / 'save'
+    profiles = src / 'UserData' if (src / 'UserData').is_dir() else src
+    if not profiles.is_dir():
+        raise SystemExit('no saved profiles at ' + str(profiles))
+    out = library_root(harness) / name
+    import shutil
+    import tempfile
+    library_root(harness).mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix='fixture-source-', dir=library_root(harness)) as staging:
+        shutil.copytree(profiles, Path(staging) / 'UserData')
+        identity = suite.create_fixture(staging, out, '%s: %s' % (story or 'unlabelled', note or ''))
+    lib['fixtures'][name] = {'story': story, 'note': note, 'created': time.strftime('%Y-%m-%d %H:%M'),
+                             'manifest_sha256': identity['manifest_sha256']}
+    save_library(harness, lib)
+    return out, lib['fixtures'][name]
+
+
+# ---------------------------------------------------------------------------
+# Checking what the menus picked
+# ---------------------------------------------------------------------------
+
+def match_fighters(log_text):
+    """[(slot, character, cpu)] from the first match_start telemetry event."""
+    for line in log_text.splitlines():
+        if line.startswith('[TEST-EVENT]') and '"match_start"' in line:
+            try:
+                ev = json.loads(line.split('] ', 1)[1])
+            except (IndexError, ValueError):
+                continue
+            return [(f['slot'], f['character'], f['cpu']) for f in ev.get('fighters', [])]
+    return None
+
+
+def check_expectations(log_text, expected):
+    """expected: {slot: character}. Returns (ok, message)."""
+    got = match_fighters(log_text)
+    if got is None:
+        return False, 'no match_start telemetry in the log (did the match start?)'
+    picked = {s: c for s, c, _ in got}
+    wrong = {s: (c, picked.get(s)) for s, c in expected.items() if picked.get(s) != c}
+    if wrong:
+        return False, 'menus picked ' + ', '.join('slot %d: character %s, not %s' % (s, g, w) for s, (w, g) in wrong.items())
+    return True, 'menus picked ' + ', '.join('slot %d: character %d' % (s, c) for s, c, _ in got)
+
+
+def parse_expect(items):
+    out = {}
+    for item in items or []:
+        slot, _, character = item.partition(':')
+        out[int(slot)] = int(character)
+    return out
+
+
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
+
+def run_suite(suite, name, route, fixture, a, extra=()):
+    suite.harness.ROUTES[name] = route
+    argv = ['run', name, '--fixture', str(fixture)]
+    if a.seed is not None:
+        argv += ['--rng-seed', str(a.seed), '--step-input', 'default']
+    if a.record:
+        argv += ['--record']
+    if getattr(a, 'require_combat', False):
+        argv += ['--require-combat']
+    for item in getattr(a, 'test_env', None) or []:
+        argv += ['--test-env', item]
+    argv += list(extra)
+    started = time.time()
+    code = suite.main(argv)
+    reports = sorted((REPO / 'logs' / 'scenarios').glob(name + '-*/report.json'), key=lambda p: p.stat().st_mtime)
+    report = reports[-1] if reports and reports[-1].stat().st_mtime >= started else None
+    return code, report
+
+
+def scene_names(harness):
+    """The scene names in the user's dump (assets/cinema/<name>.viv), sorted: sc00..sc21, then gf*."""
+    folder = Path(harness.data_dir()) / 'extracted' / 'assets' / 'cinema'
+    names = [p.stem for p in folder.glob('*.viv')] if folder.is_dir() else []
+    return sorted(names, key=lambda n: (not n.startswith('sc'), n))
+
+
+def contact_sheet(captures, out, title, width=320):
+    """The captures of one run, in time order, labelled with their seconds, as one PNG; False without Pillow."""
+    try:
+        from PIL import Image, ImageDraw
+    except ImportError:
+        return False
+    shots = sorted(captures.glob('*s.png'), key=lambda p: float(re.findall(r'-([0-9.]+)s\.png$', p.name)[0])
+                   if re.findall(r'-([0-9.]+)s\.png$', p.name) else 0.0)
+    if not shots:
+        return False
+    cols, height = 4, width * 3 // 4
+    rows = (len(shots) + cols - 1) // cols
+    sheet = Image.new('RGB', (cols * width, rows * (height + 18) + 24), (16, 16, 16))
+    draw = ImageDraw.Draw(sheet)
+    draw.text((6, 6), title, fill=(240, 200, 60))
+    for i, shot in enumerate(shots):
+        x, y = (i % cols) * width, 24 + (i // cols) * (height + 18)
+        sheet.paste(Image.open(shot).convert('RGB').resize((width, height)), (x, y))
+        draw.text((x + 4, y + height + 2), shot.stem.rsplit('-', 1)[-1] + ' after Story start', fill=(200, 200, 200))
+    sheet.save(out)
+    return True
+
+
+def play_scenes(harness, cat, a):
+    """`scenes`: list the dump's scenes, or play each named one in the first scene's place and keep a sheet of it."""
+    known = scene_names(harness)
+    if not a.names:
+        print('%d scenes in %s:' % (len(known), Path(harness.data_dir()) / 'extracted' / 'assets' / 'cinema'))
+        print(' '.join(known) or '(none found: is DEFJAM_DATA set?)')
+        print('play some: scenarios.py scenes sc05 sc07a --fixture <name>   (or all)')
+        return 0
+    names = known if a.names == ['all'] else a.names
+    unknown = [n for n in names if known and n not in known]
+    if unknown:
+        raise SystemExit('not in the dump: %s; known: %s' % (', '.join(unknown), ' '.join(known)))
+    if not a.fixture:
+        raise SystemExit('--fixture is needed: a save whose --from route starts Story at its first scene '
+                         '(docs/research/scenario-launching.md)')
+    env = cat['cutscenes'].get('launch_env')
+    if not env:
+        raise SystemExit('no scene launcher in the catalog (cutscenes.launch_env)')
+    suite = load('scenario_suite')
+    out = REPO / 'logs' / 'scene-tour' / time.strftime('%Y%m%d-%H%M%S')
+    out.mkdir(parents=True)
+    rows = []
+    for scene in names:
+        a.test_env, a.seed = ['%s=%s' % (env, scene)], None
+        route = cutscene_route(harness, a.base, cat['cutscenes']['launch_inject'], a.secs, a.every)
+        code, report = run_suite(suite, 'scene-' + re.sub(r'[^a-z0-9]+', '-', scene.lower()), route,
+                                 fixture_path(harness, a.fixture), a)
+        log = report.parent / 'game.log.err' if report else None
+        text = log.read_text(encoding='utf-8', errors='replace') if log and log.exists() else ''
+        played = ('replaced by %s ' % scene) in text
+        sheet = out / ('%s.png' % scene)
+        made = played and contact_sheet(report.parent / 'captures', sheet, '%s (in place of the first scene)' % scene)
+        rows.append((scene, 'yes' if played else 'NO', sheet.name if made else '-', str(report.parent) if report else '-'))
+        print('%-6s played: %-3s sheet: %s' % rows[-1][:3])
+    index = ['# Scene tour, %s' % time.strftime('%Y-%m-%d %H:%M'), '',
+             'Each scene played in the place of the first one Story loads (`%s`), from the `%s` route on fixture '
+             '`%s`. Captures every %g s for %g s after Story starts. Game pictures: keep this folder local.'
+             % (env, a.base, a.fixture, a.every, a.secs), '',
+             '| scene | played | sheet | run |', '|---|---|---|---|']
+    index += ['| %s | %s | %s | %s |' % r for r in rows]
+    (out / 'index.md').write_text('\n'.join(index) + '\n', encoding='utf-8')
+    print('index: %s' % (out / 'index.md'))
+    return 0 if all(r[1] == 'yes' for r in rows) else 1
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])
+    sub = ap.add_subparsers(dest='action', required=True)
+    sub.add_parser('list', help='modes, venues, Story points and the fixture library')
+    fx = sub.add_parser('fixture', help='the fixture library in the data folder')
+    fxs = fx.add_subparsers(dest='fixture_action', required=True)
+    add = fxs.add_parser('add', help='copy the current saved profiles (or --from) into the library')
+    add.add_argument('name')
+    add.add_argument('--from', dest='source', help='a save folder (holding UserData); default: <data>/save')
+    add.add_argument('--story', help='which Story point this is (an id from the catalog, or your own)')
+    add.add_argument('--note', help='anything else worth knowing: the profile, what was just done')
+    fxs.add_parser('list')
+    fxs.add_parser('verify', help='check every library fixture still matches its hashes')
+
+    gen = sub.add_parser('generate', help='a fight route from a mode, a venue and fighter moves')
+    gen.add_argument('--mode', default='one-on-one')
+    gen.add_argument('--venue', default='foundation')
+    gen.add_argument('--length', choices=('short', 'long', 'result'), default='short')
+    gen.add_argument('--p1', help="player 1's fighter-select presses, harness stage syntax")
+    gen.add_argument('--cpu', help="the CPU fighter's presses (one on one)")
+    gen.add_argument('--print', action='store_true', help='print the route and stop')
+    gen.add_argument('--fixture', help='a library name or a fixture folder')
+    gen.add_argument('--seed', type=int, help='pin the seeds and step-time the fight (a fight that repeats)')
+    gen.add_argument('--record', action='store_true', help='turn the play-test recorder on')
+    gen.add_argument('--require-combat', action='store_true')
+    gen.add_argument('--expect-character', action='append', metavar='SLOT:INDEX',
+                     help='fail unless that slot got that character (match_start telemetry)')
+    gen.add_argument('--test-env', action='append', metavar='RECOMP_TEST_NAME=VALUE',
+                     help='passed to scenario_suite, e.g. RECOMP_TEST_CROWD=hold,reseed')
+
+    cut = sub.add_parser('cutscene', help='reach a Story point, inject a front-end command, capture what follows')
+    cut.add_argument('--fixture', required=True)
+    cut.add_argument('--from', dest='base', default='crib', help='the harness route that reaches the starting point')
+    group = cut.add_mutually_exclusive_group(required=True)
+    group.add_argument('--scene', help='a scene name, through the catalog\'s cutscenes.launch_command')
+    group.add_argument('--inject', help='a raw RECOMP_FE_INJECT rule: "anchor[#N]=>command[;command]"')
+    cut.add_argument('--secs', type=float, default=90, help='how long to watch after the injection')
+    cut.add_argument('--every', type=float, default=3, help='seconds between captures')
+    cut.add_argument('--test-env', action='append', metavar='RECOMP_TEST_NAME=VALUE',
+                     help='passed to scenario_suite, e.g. RECOMP_TEST_CINEMA_SCENE=sc05')
+
+    scn = sub.add_parser('scenes', help='the Story scenes in the dump: list them, or play several in turn')
+    scn.add_argument('names', nargs='*', help="scenes to play (sc05 gf1a ...), or 'all'; none: list them")
+    scn.add_argument('--fixture', help='a fixture whose --from route starts Story at its first scene')
+    scn.add_argument('--from', dest='base', default='crib', help='the harness route that starts Story')
+    scn.add_argument('--secs', type=float, default=90, help='how long to watch each scene')
+    scn.add_argument('--every', type=float, default=6, help='seconds between captures')
+    scn.add_argument('--record', action='store_true')
+    cut.add_argument('--seed', type=int)
+    cut.add_argument('--record', action='store_true', default=True)
+    cut.add_argument('--print', action='store_true')
+    a = ap.parse_args(argv)
+
+    harness = load('harness')
+    cat = catalog()
+    if a.action == 'list':
+        print('modes:   ' + ', '.join('%s%s' % (k, '' if v.get('calibrated') else ' (uncalibrated)') for k, v in cat['modes'].items()))
+        print('venues:  ' + ', '.join('%s%s' % (k, '' if v.get('calibrated') else ' (uncalibrated)') for k, v in cat['venues'].items()))
+        print('story:   ' + ', '.join(p['id'] for p in cat['story_points']))
+        print('cutscene command: %s' % (cat['cutscenes']['launch_command'] or 'not known yet (docs/research/scenario-launching.md)'))
+        try:
+            lib = library(harness)
+        except SystemExit:
+            lib = {'fixtures': {}}
+        print('library: %s' % (library_root(harness) if lib['fixtures'] else '(empty)'))
+        for name, f in sorted(lib['fixtures'].items()):
+            print('  %-24s %-14s %s' % (name, f.get('story') or '-', f.get('note') or ''))
+        return 0
+
+    if a.action == 'fixture':
+        suite = load('scenario_suite')
+        if a.fixture_action == 'add':
+            out, entry = fixture_add(harness, suite, a.name, a.source, a.story, a.note)
+            print('added %s at %s (%s)' % (a.name, out, entry['manifest_sha256'][:12]))
+        elif a.fixture_action == 'list':
+            for name, f in sorted(library(harness)['fixtures'].items()):
+                print('%-24s %-14s %-17s %s' % (name, f.get('story') or '-', f.get('created'), f.get('note') or ''))
+        else:
+            bad = 0
+            for name, f in sorted(library(harness)['fixtures'].items()):
+                try:
+                    ident = suite.evidence.fixture_identity(library_root(harness) / name)
+                    ok = ident['manifest_sha256'] == f['manifest_sha256']
+                except (OSError, ValueError) as ex:
+                    ok, ident = False, {'error': str(ex)}
+                bad += not ok
+                print('%-24s %s' % (name, 'ok' if ok else 'CHANGED or unreadable'))
+            return 1 if bad else 0
+        return 0
+
+    if a.action == 'generate':
+        route = fight_route(harness, a.mode, a.venue, a.length, a.p1, a.cpu, cat)
+        name = route_name(a.mode, a.venue, a.length)
+        if a.print or not a.fixture:
+            print(json.dumps({name: route}, indent=2))
+            if not a.fixture and not a.print:
+                print('(no --fixture: printed only)', file=sys.stderr)
+            return 0
+        suite = load('scenario_suite')
+        expected = parse_expect(a.expect_character)
+        code, report = run_suite(suite, name, route, fixture_path(harness, a.fixture), a)
+        if expected and report:
+            log = (report.parent / 'game.log.err').read_text(encoding='utf-8', errors='replace')
+            ok, message = check_expectations(log, expected)
+            print(('EXPECTED FIGHTERS: ' if ok else 'WRONG FIGHTERS: ') + message)
+            code = code or (0 if ok else 1)
+        return code
+
+    if a.action == 'scenes':
+        return play_scenes(harness, cat, a)
+
+    # cutscene
+    inject = a.inject
+    if a.scene:
+        command = cat['cutscenes']['launch_command']
+        env = cat['cutscenes'].get('launch_env')
+        if command:
+            anchor = harness.ROUTES[a.base]['until']
+            inject = '%s#1=>%s' % (anchor, command % a.scene)
+        elif env:
+            # The loader hook swaps the first scene the game loads (src/hooks/fe_inject.c); the
+            # injected command is a harmless query that anchors the captures at Story's start.
+            inject = cat['cutscenes']['launch_inject']
+            a.test_env = (a.test_env or []) + ['%s=%s' % (env, a.scene)]
+        else:
+            raise SystemExit('the command that starts a scene is not known yet: see docs/research/scenario-launching.md, '
+                             'or pass --inject with a candidate from scripts/funccall-catalog.py')
+    if a.base not in harness.ROUTES:
+        raise SystemExit('unknown route %r' % a.base)
+    route = cutscene_route(harness, a.base, inject, a.secs, a.every)
+    name = 'cutscene-' + re.sub(r'[^a-z0-9]+', '-', (a.scene or 'inject').lower()).strip('-')
+    if a.print:
+        print(json.dumps({name: route}, indent=2))
+        return 0
+    suite = load('scenario_suite')
+    code, report = run_suite(suite, name, route, fixture_path(harness, a.fixture), a)
+    if report and not (report.parent / 'game.log.err').exists():
+        print('the run did not start: read %s' % report.parent / 'report.json')
+        return code or 1
+    if report:
+        log = (report.parent / 'game.log.err').read_text(encoding='utf-8', errors='replace')
+        injected = [l for l in log.splitlines() if l.startswith('[FE-INJECT] after')]
+        print('injected: %d command(s); captures in %s' % (len(injected), report.parent / 'captures'))
+        if not injected:
+            print('the anchor was never reached: check the route and the anchor text')
+            code = code or 1
+    return code
+
+
+if __name__ == '__main__':
+    sys.exit(main())

@@ -67,7 +67,7 @@ cannot validate those control-flow joins. Use compiled recompiler tests for
 flag behavior, and retain the separate coverage and jump-table audits.
 
 ## The bring-up loop (M1 to M3)
-1. Run with the watchdog and read `logs\run-*.log`. The VEH handler prints the guest function (`sub_XXXXXXXX`), Xbox registers and a guest stack scan.
+1. Run with the watchdog, then digest the log with `python scripts/triage.py` (newest run) instead of reading `logs\run-*.log.err`, which can be hundreds of megabytes; it prints the verdict and the line numbers to slice (`--around`, `--grep`, `--lines`, `--tail`), see `docs/agent/triage.md`. The VEH handler prints the guest function (`sub_XXXXXXXX`), Xbox registers and a guest stack scan.
 2. Locate the function in `tools\xboxrecomp\tools\disasm\output\asm\` or in the Ghidra project under `$DEFJAM_DATA\ghidra`.
 3. Decide which of three fixes applies. A missing kernel or D3D shim is implemented in the toolkit and is upstream-able. A lifter bug is overridden in `src\recomp_manual.c` through `recomp_lookup_manual()`. A hardware poke we do not need (TV encoder, PCI space, interrupts) is stubbed in `src\hooks\`.
 4. Rebuild. Ninja is incremental, and generated chunks only recompile after a re-lift.
@@ -110,13 +110,17 @@ Full table with source references: `docs/research/toolkit-bringup-notes.md`. Eve
 | `RECOMP_GAMMA=0` | leaves out the gamma ramp the title sets at start-up (an S curve applied at presentation and to captures). The golden frames were taken without it: set this when checking them. |
 | `RECOMP_CS_TRACE_CRT`, `RECOMP_CS_WATCH` | critical-section tracing |
 | `RECOMP_TICK_THREAD=0`, `RECOMP_PRECISE_SLEEP=0`, `RECOMP_GUEST_TURN_PRIO=0`, `RECOMP_GUEST_QOS=0`, `RECOMP_APU_SLICE_PACE=0` | turn off one of the audio crackle fixes (D120-D122), each on by default, to compare; `RECOMP_APU_VOICE_PCM=<prefix>` dumps voices `0xF8`-`0xFA` for `scripts/audio-holes.py` |
+| `RECOMP_RECORD=1` (or `[debug] record`, `--record`) | the play-test recorder: `logs/sessions/`, F9 bug bundles, read with `scripts/bug-bundle.py` ([guide](playtest-recorder.md)) |
+| `RECOMP_RECORD_SYNC=1` | the recorder reads its pictures back synchronously (as before the asynchronous read-back), to compare `capture_ms` |
+| `RECOMP_FE_INJECT="anchor#N=>command"` | send the front end's FuncCall handler a command after the Nth call containing the anchor ([scenario launching](research/scenario-launching.md)) |
+| `RECOMP_TEST_CROWD=hold[:N],reseed` | crowd test controls, with `RECOMP_TEST_OBSERVATIONS=1`; measured by `scripts/crowd-lab.py` |
 
 Game-side switches (`src/patches/dev_unlock.c`; off unless set; the test harness turns the first on):
 
 | Variable | Effect |
 |---|---|
 | `RECOMP_UNLOCK_ALL=1` | every fighter and venue on any profile, through the developers' own routine at guest `0x000158F0`; the `[debug] unlock_all` setting sets it at start-up. `0` turns it off, including for the harness. |
-| `RECOMP_SKIP_INTRO=1` | start at Press Start, bypassing startup legal and EA/THX/intro movies only. Overrides `[debug] skip_intro`; `0` restores normal boot. For a skip-enabled harness route also set `RECOMP_SCRIPT_ANCHOR=getscreeninfo(intmain/prestart` (the usual `feflow.xml#2` anchor no longer occurs). `regress.py --only skipintro` checks the option and both override directions. |
+| `RECOMP_SKIP_INTRO=1` | start at Press Start, bypassing startup legal and EA/THX/intro movies only. Overrides `[debug] skip_intro`; `0` restores normal boot. Harness/scenario runs default to skip enabled and use the preStart request as their anchor; m3 keeps one complete normal startup in each regression set. `regress.py --only skipintro` checks the option and both override directions. |
 | `RECOMP_DEV_DEBUG=1` | the in-fight debug label under each health bar (holds the byte at `0x0039C1DA`) |
 | `RECOMP_START_FIGHTERS=a,b[,c,d]`, `RECOMP_START_VENUE=n`, `RECOMP_START_LOG=1` | replace the fighters and venue when the match is made; see [the testing harness](09-testing-harness.md#choosing-the-fighters-and-the-venue) |
 | `DEFJAM_HARNESS_SNAPSHOT_SAVE=<dir>` | harness only: keep the save area as the run left it, before the guard restores the original |

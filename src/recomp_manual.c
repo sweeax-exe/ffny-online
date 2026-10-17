@@ -31,6 +31,14 @@
 #include "recomp/gen/recomp_types.h"
 #include "hooks/save_compat.h"
 #include "hooks/test_observations.h"
+#include "hooks/recorder.h"
+#include "hooks/fe_inject.h"
+
+/* Crowd test controls (src/hooks/crowd_control.c, RECOMP_TEST_CROWD; off unless set). */
+void defjam_crowd_match_start(void);
+void defjam_crowd_update(void);
+void defjam_crowd_seed(uint32_t generator, uint32_t stack);
+void defjam_crowd_step(void);
 
 /* Read-only probes use the lifter's universal entry hooks. They do not alter
  * guest registers, stack, memory or the generated body. Off in normal play. */
@@ -57,6 +65,7 @@ void sub_00087700_enter(void)
 {
     extern void nv2a_ws_hud_heartbeat(int bottom_rows);
     uint32_t i, fighters = 0;
+    defjam_crowd_step();
     defjam_test_step();
     /* Widescreen: a fight HUD is up (src/patches/widescreen.c). The four fighter
      * slots the fight camera reads (0x340D70, stride 0xC8; a slot counts when set
@@ -66,18 +75,21 @@ void sub_00087700_enter(void)
             fighters++;
     nv2a_ws_hud_heartbeat(fighters >= 3);
 }
-void sub_001A4D90_enter(void) { defjam_test_match_start(); }
+void sub_001A4D90_enter(void) { defjam_test_match_start(); defjam_crowd_match_start(); }
 void sub_001BC690_enter(void) { defjam_test_rng(g_esp); }
 void sub_001AD220_enter(void) { defjam_test_ai_seed(g_esp); }
 /* The seeding routine every generator of this kind goes through (thiscall). */
-void sub_000AA0D0_enter(void) { defjam_test_generator_seed(g_ecx, g_esp); }
+void sub_000AA0D0_enter(void) { defjam_test_generator_seed(g_ecx, g_esp); defjam_crowd_seed(g_ecx, g_esp); }
 /* Every draw (RECOMP_TEST_DRAWS): the C runtime's rand, the match generator, and the two
  * wrappers the object-form generators are drawn through; then the background crowd's update. */
 void sub_00200820_enter(void) { defjam_test_draw(1, MEM32(g_esp)); }
 void sub_001BC6E0_enter(void) { defjam_test_draw(2, MEM32(g_esp)); }
 void sub_000AA300_enter(void) { defjam_test_draw(g_ecx, MEM32(g_esp)); }
 void sub_000AA340_enter(void) { defjam_test_draw(g_ecx, MEM32(g_esp)); }
-void sub_000DB870_enter(void) { defjam_test_crowd_update(); }
+void sub_000DB870_enter(void) { defjam_test_crowd_update(); defjam_crowd_update(); }
+/* The Story scene loader (CINEMA LoadScene's caller; assets/cinema/%s.viv): names every
+ * scene, and RECOMP_TEST_CINEMA_SCENE plays a chosen one in the first one's place. */
+void sub_00073FD0_enter(void) { fe_cinema_scene_enter(); }
 /* The per-fighter pad reader: RECOMP_TEST_INPUT replaces what it is about to read. */
 void sub_001BAA00_enter(void) { defjam_test_input(MEM32(g_esp + 4)); }
 void sub_001A6A80_enter(void)
@@ -508,9 +520,13 @@ static void funccall_hook(void)
     text[i] = 0;
     if (printed++ < 4000)
         fprintf(stderr, "[FUNCCALL] %s\n", text);
+    /* The play-test recorder keeps every one, with its time (the log stops at 4000). */
+    recorder_event_text("fe", "text", text);
     xbox_NoteAnchorEvent(text);
     defjam_unlock_all_on_funccall(text);   /* RECOMP_UNLOCK_ALL, src/patches/dev_unlock.c */
     sub_00068BA0();
+    /* RECOMP_FE_INJECT: commands of a test's own, after a chosen call (src/hooks/fe_inject.c). */
+    fe_inject_after_call(text);
 }
 
 /* ---- Trace chosen functions, by guest address --------------------------

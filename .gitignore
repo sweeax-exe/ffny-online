@@ -54,3 +54,7 @@ logs/
 *.bmp
 *.ppm
 tests/golden/*.png
+
+# ---- personal agent settings (the shared .claude/skills, .claude/agents, .codex/skills are generated and tracked) ----
+.claude/settings.local.json
+CLAUDE.local.md

@@ -29,6 +29,7 @@
 #include "pc_settings.h"
 #include "pc_input.h"
 #include "pc_ui.h"
+#include "pc_debug.h"
 #include "patches/widescreen.h"
 
 /* Picture shape: the console's 4:3, stretched, or widescreen (docs/widescreen); the widescreen
@@ -85,10 +86,11 @@ static RecompSetting g_display_settings[] = {
 
 /* The display table followed by the input tables (pc_input.c): one array, one
  * registration, one file. */
-static RecompSetting g_settings[DISPLAY_SETTING_COUNT + 64 + 16];
+static RecompSetting g_settings[DISPLAY_SETTING_COUNT + 64 + 16 + 16];
 static size_t g_setting_count;
 
 static char g_path[MAX_PATH * 4];   /* empty: do not load or save */
+static char g_log_name[MAX_PATH * 2];   /* the log this program opened for itself, if it did */
 static void (*g_fullscreen_notify)(int fullscreen);
 static void (*g_window_size_notify)(int width, int height);
 
@@ -184,6 +186,7 @@ static void open_log_if_needed(void)
     freopen(name, "w", stdout);
     strcat(name, ".err");
     freopen(name, "w", stderr);
+    snprintf(g_log_name, sizeof g_log_name, "%s", name);
     /* Buffered, as main.c sets the streams it was given. */
     setvbuf(stdout, NULL, _IOFBF, 1 << 16);
     setvbuf(stderr, NULL, _IOFBF, 1 << 16);
@@ -300,6 +303,7 @@ static void open_log_if_needed(void)
     freopen(name, "w", stdout);
     strcat(name, ".err");
     freopen(name, "w", stderr);
+    snprintf(g_log_name, sizeof g_log_name, "%s", name);
     setvbuf(stdout, NULL, _IOFBF, 1 << 16);
     setvbuf(stderr, NULL, _IOFBF, 1 << 16);
 }
@@ -495,6 +499,7 @@ int pc_settings_init(void)
     g_setting_count = DISPLAY_SETTING_COUNT +
         pc_input_settings(g_settings + DISPLAY_SETTING_COUNT, 64);
     g_setting_count += pc_ui_settings(g_settings + g_setting_count, 16);
+    g_setting_count += pc_debug_settings(g_settings + g_setting_count, 16);
     recomp_settings_register(g_settings, g_setting_count);
     recomp_settings_set_log(settings_log);
     read = g_path[0] ? recomp_settings_load(g_path) : 0;
@@ -542,6 +547,14 @@ int pc_settings_init(void)
         }
     }
 
+    /* The play-test recorder ([debug] record): after the launcher, which can turn it on,
+     * and before the audio starts, whose capture it points into the session. */
+#if defined(_WIN32)
+    pc_debug_start(g_log_name[0] ? g_log_name : NULL,
+                   GetCommandLineA() && strstr(GetCommandLineA(), "--record") != NULL);
+#else
+    pc_debug_start(g_log_name[0] ? g_log_name : NULL, has_arg("--record"));
+#endif
     /* [debug] unlock_all: src/patches/dev_unlock.c reads the variable once the game runs. */
     if (!getenv("RECOMP_UNLOCK_ALL") && recomp_settings_get("debug", "unlock_all", 0))
         _putenv_s("RECOMP_UNLOCK_ALL", "1");

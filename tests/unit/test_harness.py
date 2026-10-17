@@ -486,3 +486,14 @@ def test_a_check_that_does_not_apply_is_skipped_never_passed(monkeypatch, tmp_pa
     assert ok is False                                   # a skip does not make the run "all passed"
     junit = (tmp_path / "junit.xml").read_text(encoding="utf-8")
     assert 'skipped="1"' in junit and 'failures="0"' in junit and "<skipped" in junit
+
+
+def test_a_failed_run_points_at_the_triage_digest(capsys):
+    run = harness.Run('synthetic', os.path.join(harness.REPO, 'logs', 'run-20261014-101500.log.err'), '')
+    run.save_ok = True
+    run.text = LOG
+    run.summary = harness.summarise(LOG)
+    harness.print_run(run)
+    out = capsys.readouterr().out
+    assert 'FAIL' in out
+    assert 'triage   python scripts/triage.py logs/run-20261014-101500.log.err' in out

@@ -40,6 +40,7 @@
 
 extern "C" {
 #include "recomp_settings.h"
+#include "recorder.h"
 #include "input_host.h"
 #include "input_map.h"
 }
@@ -138,6 +139,13 @@ static const char *friendly(const char *section, const char *key)
         { "debug", "unlock_all", "Debug - Unlock all Fighters and Venues (Requires Restart)" },
         { "debug", "skip_intro", "Skip startup movies and legal screen" },
         { "ui", "overlay_pad", "Overlay pad buttons" }, { "ui", "overlay_key", "Overlay key" },
+        { "debug", "record", "Record play-tests" }, { "debug", "mark_key", "Mark key" },
+        { "debug", "mark_pad", "Mark pad buttons" },
+        { "debug", "record_fps", "Pictures kept a second" }, { "debug", "record_seconds", "Seconds kept before a mark" },
+        { "debug", "record_audio", "Keep the sound" }, { "debug", "record_game_state", "Log fighters and match events" },
+        { "debug", "auto_bundle_hitch_ms", "Bundle a hitch longer than (ms)" },
+        { "debug", "hang_seconds", "Bundle a hang after (s)" }, { "debug", "keep_sessions", "Sessions kept whole" },
+        { "debug", "record_guest_ram", "Crash bundles hold game memory" },
     };
     for (const Label &l : labels)
         if (!strcmp(l.section, section) && !strcmp(l.key, key)) return l.text;
@@ -816,6 +824,33 @@ static void page_general(UiMode mode)
     ImGui::TextDisabled("Dear ImGui %s (MIT)  -  SDL3 (zlib)", IMGUI_VERSION);
 }
 
+static void page_debug(UiMode mode)
+{
+    ImGui::SeparatorText("Play-test recorder");
+    settings_group("debug", { "record" });
+    ImGui::TextWrapped("Keeps logs/sessions/<time>/ for every run: each frame's timing, what the game was doing, the sound, "
+                       "and the last seconds of pictures. The mark key, the mark pad buttons (View and the left stick "
+                       "click held together, by default) or the button below save a bug bundle of the "
+                       "seconds before it; a crash or a hang saves one by itself. Bundles hold the game's own pictures "
+                       "and sound: keep them on this computer. Read one with scripts/bug-bundle.py.");
+    ImGui::Indent();
+    settings_group("debug", { "mark_key", "mark_pad", "record_fps", "record_seconds", "record_audio", "record_game_state",
+                              "auto_bundle_hitch_ms", "hang_seconds", "keep_sessions", "record_guest_ram" });
+    ImGui::Unindent();
+    if (mode == UI_OVERLAY) {
+        char status[1024];
+        recorder_status(status, sizeof status);
+        ImGui::SeparatorText("This run");
+        ImGui::TextWrapped("%s", status);
+        if (recorder_on()) {
+            if (ImGui::Button("Mark a bug here")) recorder_mark("overlay");
+            ImGui::SetItemTooltip("Saves the last seconds of play, from before the overlay was opened, as a bug bundle.");
+        } else {
+            ImGui::TextDisabled("Turn recording on above and restart the game to record.");
+        }
+    }
+}
+
 UiResult ui_draw(UiMode mode, float x, float y, float width, float height)
 {
     UiResult result;
@@ -844,6 +879,7 @@ UiResult ui_draw(UiMode mode, float x, float y, float width, float height)
         if (ImGui::BeginTabItem("Pad buttons")) { page_pad_buttons(); ImGui::EndTabItem(); }
         if (ImGui::BeginTabItem("Keyboard & mouse")) { page_keyboard(); ImGui::EndTabItem(); }
         if (ImGui::BeginTabItem("General")) { page_general(mode); ImGui::EndTabItem(); }
+        if (ImGui::BeginTabItem("Debug")) { page_debug(mode); ImGui::EndTabItem(); }
         ImGui::EndTabBar();
     }
     ImGui::EndChild();
@@ -899,11 +935,11 @@ int g_overlay_vk = VK_F1;
 
 struct Chord { int src[3]; int n; UiTick since; bool fired; };
 std::vector<Chord> g_chords;        // read and written on the drawing thread, and by apply_settings under the lock
+std::vector<Chord> g_mark_chords;   // [debug] mark_pad: the recorder's mark, from a pad
 
-void parse_chords()
+void parse_chord_list(const std::string &text, std::vector<Chord> &chords)
 {
-    g_chords.clear();
-    std::string text = get_text("ui", "overlay_pad");
+    chords.clear();
     size_t pos = 0;
     while (pos <= text.size()) {
         size_t comma = text.find(',', pos);
@@ -920,12 +956,18 @@ void parse_chords()
             int src = input_source_from_name(name.substr(a, b - a + 1).c_str());
             if (src > INPUT_SRC_NONE) c.src[c.n++] = src;
         }
-        if (c.n) g_chords.push_back(c);
+        if (c.n) chords.push_back(c);
     }
 }
 
-// Pad buttons that open and close the overlay, from any pad.
-bool pad_toggle_pressed()
+void parse_chords()
+{
+    parse_chord_list(get_text("ui", "overlay_pad"), g_chords);
+    parse_chord_list(get_text("debug", "mark_pad"), g_mark_chords);
+}
+
+// A chord of `chords` was just completed, on any pad: one button at once, two or three held half a second.
+bool chords_pressed(std::vector<Chord> &chords)
 {
     InputRaw all;
     memset(&all, 0, sizeof(all));
@@ -937,7 +979,7 @@ bool pad_toggle_pressed()
     }
     UiTick now = ui_ticks();
     bool fire = false;
-    for (Chord &c : g_chords) {
+    for (Chord &c : chords) {
         bool held = true;
         for (int i = 0; i < c.n; i++) held = held && all.src[c.src[i]] >= 16384;
         if (!held) { c.since = 0; c.fired = false; continue; }
@@ -945,6 +987,16 @@ bool pad_toggle_pressed()
         if (!c.fired && now - c.since >= (c.n > 1 ? 500u : 0u)) { c.fired = true; fire = true; }
     }
     return fire;
+}
+
+// Pad buttons that open and close the overlay, from any pad.
+bool pad_toggle_pressed() { return chords_pressed(g_chords); }
+
+// The recorder's mark from a pad; checked once a frame wherever the overlay chord is.
+void pad_mark_poll()
+{
+    if (recorder_on() && !g_mark_chords.empty() && !ui_capturing() && chords_pressed(g_mark_chords))
+        recorder_mark("pad");
 }
 
 void set_open(bool open)
@@ -958,6 +1010,7 @@ void set_open(bool open)
 #endif
     fprintf(stderr, "[UI] overlay %s\n", open ? "opened" : "closed");
     fflush(stderr);
+    recorder_event("overlay", open ? "\"open\":true" : "\"open\":false");
 }
 
 } // namespace
@@ -982,6 +1035,16 @@ extern "C" void pc_ui_apply_settings(void)
 #if defined(_WIN32)
 extern "C" int pc_ui_window_message(HWND window, UINT msg, WPARAM wp, LPARAM lp)
 {
+    if ((msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN) && !(lp & (1 << 30)) && recorder_mark_vk() &&
+        (int)wp == recorder_mark_vk() && (int)wp != g_overlay_vk) {
+        ui_lock();
+        bool capturing = ui_capturing();
+        ui_unlock();
+        if (!capturing) {
+            recorder_mark("key");
+            return 1;
+        }
+    }
     if ((msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN) && !(lp & (1 << 30)) && (int)wp == g_overlay_vk) {
         ui_lock();
         bool capturing = ui_capturing();
@@ -1011,6 +1074,7 @@ extern "C" void pc_ui_overlay(void *device, void *context, void *window_rtv, uns
     }
     ui_lock();
     bool toggled = g_toggle.exchange(false);
+    pad_mark_poll();
     if (!ui_capturing() && !g_chords.empty() && pad_toggle_pressed()) toggled = true;
     if (toggled) set_open(!g_open.load());
     if (!g_open.load()) { ui_unlock(); return; }
@@ -1195,6 +1259,7 @@ int overlay_active(void *)
     }
     ui_lock();
     bool toggled = g_toggle.exchange(false);
+    pad_mark_poll();
     if (!ui_capturing() && !g_chords.empty() && pad_toggle_pressed()) toggled = true;
     if (toggled) set_open(!g_open.load());
     bool open = g_open.load();
@@ -1284,6 +1349,17 @@ void overlay_draw(const D3D8VkOverlayFrame *f, void *)
 extern "C" int pc_ui_sdl_event(const void *event, float window_width, float window_height)
 {
     const SDL_Event *e = (const SDL_Event *)event;
+    if (e->type == SDL_EVENT_KEY_DOWN && !e->key.repeat && recorder_mark_vk() &&
+        host_posix_vk_from_scancode(e->key.scancode) == recorder_mark_vk() &&
+        host_posix_vk_from_scancode(e->key.scancode) != g_overlay_vk) {
+        ui_lock();
+        bool capturing = ui_capturing();
+        ui_unlock();
+        if (!capturing) {
+            recorder_mark("key");
+            return 1;
+        }
+    }
     if (e->type == SDL_EVENT_KEY_DOWN && !e->key.repeat &&
         host_posix_vk_from_scancode(e->key.scancode) == g_overlay_vk) {
         ui_lock();

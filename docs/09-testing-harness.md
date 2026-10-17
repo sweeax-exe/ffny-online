@@ -102,6 +102,9 @@ Options:
 - `--step-shots N,N` capture the frame at those fight steps.
 - `--settings file.json` render scale, gamma and vsync for the run.
 - `--session-plan file.json` experimental: live input driven by screen events.
+- `--record` turn the [play-test recorder](playtest-recorder.md) on: the run's frame rows, events and
+  pictures are kept, analysed with `scripts/bug-bundle.py` and linked from the report; `--record-hitch-ms N`
+  also saves a bundle for every frame of N ms or more.
 
 ## Repeatable fights
 
@@ -280,6 +283,30 @@ inherited diagnostics and records the explicit pack inputs in its report.
 Ordinary original-texture scenarios omit both flags. Pack-on captures have
 separate review evidence; they do not replace the original-texture goldens.
 
+## Scenarios on demand
+
+`scripts/scenarios.py` starts a run where a bug is ([details](research/scenario-launching.md)):
+
+```powershell
+python scripts/scenarios.py fixture add crib-day1 --story crib --note "after the first fight"   # the current saves, into a library
+python scripts/scenarios.py list                                                                 # modes, venues, Story points, fixtures
+python scripts/scenarios.py generate --mode free-for-all --venue terrordome --fixture crib-day1 --seed 12345 --record
+python scripts/scenarios.py generate --mode one-on-one --p1 "right@4;right@5;a@7;a@12;a@16;a@20;a@24;a@28" --fixture crib-day1 --expect-character 0:5
+python scripts/scenarios.py cutscene --fixture crib-day1 --from crib --inject "getscreeninfo(story/crib#1=>Some.Command(x))"
+```
+
+The fixture library lives in the data folder (`<data>/fixtures/`, with `library.json`), never in the
+repository. Generated routes come from `config/scenario-catalog.json`; the combinations the harness
+already had generate exactly its routes. `--expect-character SLOT:INDEX` fails a run whose menus picked
+another fighter (from the `match_start` telemetry), which is how a new fighter or venue move list is
+calibrated. `cutscene` uses `RECOMP_FE_INJECT` to send the front end a command once a Story point is
+reached; which command starts a chosen scene is still to be found (`scripts/funccall-catalog.py`).
+
+`scripts/crowd-lab.py run --fixture NAME` plays a pinned fight twice under each crowd control
+(`RECOMP_TEST_CROWD=hold`, `reseed`, both, and inline workers) and tabulates whether the crowds came out
+the same; `crowd-lab.py mask` learns which cells of a fight step's capture move between runs and writes
+them as baseline `masks`, refusing a mask that would hide a fighter.
+
 ## Not done
 
 
@@ -287,7 +314,8 @@ separate review evidence; they do not replace the original-texture goldens.
 - Repeatability is not guaranteed even for thirty seconds: the spectators push
   fighters, the spectators do not repeat, and pinned pairs have parted at step 871.
   The `replay` check has passed every time so far and can fail by chance.
-- Whole-frame fight baselines: the crowds are not repeatable (see above).
+- Whole-frame fight baselines: the crowds are not repeatable (see above). The crowd controls and learned
+  masks (`scripts/crowd-lab.py`) exist but have not been measured on the game.
 - Sounds are not tied to events (hit effects, the announcer).
 - A human win, time-up, grapples and throws as such, save and load, and cutscene
   skipping are not covered.

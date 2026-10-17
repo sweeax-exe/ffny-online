@@ -37,10 +37,13 @@
 
 #include "d3d8_xbox.h"
 #include "nv2a_pgraph_d3d11.h"
+#include "texture_pack.h"            /* texture_pack_stats: the HD pack's resident bytes for frames.csv */
 #include "pc_settings.h"
 #include "pc_input.h"
 #include "pc_ui.h"
 #include "recomp_settings.h"
+#include "recorder.h"
+#include "d3d8_readback.h"
 
 /* The title sets a 640x480 mode. Matching it keeps the translator's screen
  * space and ours the same, so a vertex the title placed at 320,240 lands in
@@ -452,6 +455,116 @@ int d3d11_translator_init(void)
     return 1;
 }
 
+/* The play-test recorder's share of a frame (recorder.c): a picture for its
+ * ring when it asks for one, and the frame's measurements. Nothing runs unless
+ * [debug] record is on.
+ *
+ * The picture is read back asynchronously where the device can
+ * (tools/xboxrecomp/src/d3d/d3d8_readback.h: Direct3D 11 and Vulkan): the copy
+ * starts here and is collected a frame or two later, filed under the frame that
+ * asked (recorder_picture_tagged). Where it cannot (OpenGL, a multisampled
+ * target, every slot busy) the picture is read back at once, the way
+ * capture_backbuffer reads it. RECOMP_RECORD_SYNC=1 always reads at once, to
+ * compare the two costs (capture_ms in frames.csv). */
+static void recorder_picture_now(IDirect3DDevice8 *dev, uint64_t tag, const uint8_t (*gamma)[256])
+{
+    IDirect3DSurface8 *surf = NULL;
+    D3DLOCKED_RECT lr;
+    extern unsigned d3d8_GetRenderScale(void);
+    extern float d3d8_GetCanvasScaleX(void);
+    uint32_t sw = (uint32_t)(TRANSLATOR_WIDTH * d3d8_GetCanvasScaleX() + 0.5f);
+    uint32_t sh = TRANSLATOR_HEIGHT * d3d8_GetRenderScale();
+
+    if (FAILED(dev->lpVtbl->GetBackBuffer(dev, 0, 0, &surf)) || !surf)
+        return;
+    memset(&lr, 0, sizeof(lr));
+    if (SUCCEEDED(surf->lpVtbl->LockRect(surf, &lr, NULL, D3DLOCK_READONLY)) && lr.pBits) {
+        if (tag)
+            recorder_picture_tagged(tag, (const uint8_t *)lr.pBits, lr.Pitch, (int)sw, (int)sh, 0, gamma);
+        else
+            recorder_picture((const uint8_t *)lr.pBits, lr.Pitch, (int)sw, (int)sh, gamma);
+        surf->lpVtbl->UnlockRect(surf);
+    }
+    /* Direct3D 11's GetBackBuffer makes a new surface, holding the texture, every call. */
+    surf->lpVtbl->Release(surf);
+}
+
+static double recorder_capture(IDirect3DDevice8 *dev)
+{
+    static int async = -1;          /* -1 not decided, 0 read at once, 1 asynchronous */
+    extern uint8_t g_recomp_gamma[3][256];
+    extern int g_recomp_gamma_on;
+    const uint8_t (*gamma)[256] = g_recomp_gamma_on ? (const uint8_t (*)[256])g_recomp_gamma : NULL;
+    D3D8Readback rb;
+    double start = 0.0;
+    int polled = 0;
+
+    if (async < 0) {
+        const char *e = getenv("RECOMP_RECORD_SYNC");
+        async = (e && *e == '1') ? 0 : 1;
+    }
+    if (async) {
+        start = recorder_now_ms();
+        /* The pictures asked for a frame or two ago. */
+        while (d3d8_readback_poll(&rb)) {
+            recorder_picture_tagged(rb.tag, rb.pixels, rb.pitch, (int)rb.width, (int)rb.height, rb.bgra, gamma);
+            polled = 1;
+        }
+    }
+    if (!recorder_picture_wanted())
+        return polled ? recorder_now_ms() - start : 0.0;
+    if (!polled)
+        start = recorder_now_ms();
+    if (async) {
+        uint64_t tag = recorder_picture_request();
+        int r = tag ? d3d8_readback_begin(tag) : 1;
+        if (r < 0) {
+            async = 0;              /* this device has no asynchronous path: stop asking */
+            fprintf(stderr, "[RECORD] pictures are read back synchronously on this device\n");
+        }
+        if (r <= 0)
+            recorder_picture_now(dev, tag, gamma);
+    } else {
+        recorder_picture_now(dev, 0, gamma);
+    }
+    return recorder_now_ms() - start;
+}
+
+static void recorder_frame_done(double present_ms, double capture_ms)
+{
+    extern int g_xa2_dropped, g_xa2_starved;
+    extern long long defjam_test_current_step(void);
+    PgraphD3D11Stats st;
+    RecorderFrameIn in;
+
+    memset(&in, 0, sizeof in);
+    pgraph_d3d11_get_stats(&st);
+    in.present_ms = present_ms;
+    in.capture_ms = capture_ms;
+    in.draws = st.draw_calls;
+    in.vertices = st.vertices_submitted;
+    in.clears = st.clears;
+    in.audio_dropped = g_xa2_dropped;
+    in.audio_dry = g_xa2_starved;
+    in.step = defjam_test_current_step();
+    in.tex_uploads = st.textures_uploaded;
+    in.tex_evictions = st.texture_evictions;
+    in.tex_upload_bytes = st.texture_upload_bytes;
+    in.tex_cached = st.textures_cached;
+    in.tex_cache_bytes = st.texture_cache_bytes;
+    {
+        uint64_t resident = 0;
+        texture_pack_stats(&resident, NULL);
+        in.hd_cache_bytes = resident;
+    }
+    /* Where the log has got to: with this in every row, scripts/bug-bundle.py puts each
+     * log line on the frames' clock without the log's format changing. Flushing once a
+     * frame also keeps the log's end on disk if the process is killed. */
+    fflush(stderr);
+    in.log_bytes = (long long)ftell(stderr);
+    recorder_frame_end(&in);
+}
+
 /* Put the frame on screen.
  *
  * pgraph_d3d11_flush() submits whatever geometry was still batched and counts
@@ -468,8 +581,17 @@ void d3d11_translator_frame_end(void)
         return;
     dev = xbox_GetD3DDevice();
     if (dev) {
+        double capture_ms = 0.0, present_at = 0.0;
+        int recording = recorder_on();
         capture_backbuffer(dev);
+        if (recording) {
+            recorder_frame_begin();
+            capture_ms = recorder_capture(dev);
+            present_at = recorder_now_ms();
+        }
         dev->lpVtbl->Present(dev, NULL, NULL, NULL, NULL);
+        if (recording)
+            recorder_frame_done(recorder_now_ms() - present_at, capture_ms);
         /* While the display paces the presents (display.vsync on a 60, 120,
          * 180 or 240 Hz display) it is the frame clock, and the executor's
          * 60 Hz flip timer would drift against it. Loosen the timer to a
