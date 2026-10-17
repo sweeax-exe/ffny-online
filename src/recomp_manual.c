@@ -33,6 +33,8 @@
 #include "hooks/test_observations.h"
 #include "hooks/recorder.h"
 #include "hooks/fe_inject.h"
+#include "hooks/scene_launcher.h"
+#include "hooks/dev_module.h"
 
 /* Crowd test controls (src/hooks/crowd_control.c, RECOMP_TEST_CROWD; off unless set). */
 void defjam_crowd_match_start(void);
@@ -87,9 +89,18 @@ void sub_001BC6E0_enter(void) { defjam_test_draw(2, MEM32(g_esp)); }
 void sub_000AA300_enter(void) { defjam_test_draw(g_ecx, MEM32(g_esp)); }
 void sub_000AA340_enter(void) { defjam_test_draw(g_ecx, MEM32(g_esp)); }
 void sub_000DB870_enter(void) { defjam_test_crowd_update(); defjam_crowd_update(); }
-/* The Story scene loader (CINEMA LoadScene's caller; assets/cinema/%s.viv): names every
- * scene, and RECOMP_TEST_CINEMA_SCENE plays a chosen one in the first one's place. */
-void sub_00073FD0_enter(void) { fe_cinema_scene_enter(); }
+/* Story scenes (src/hooks/scene_launcher.c): the scene loader names every scene it loads, and
+ * the mode system's update plays one on request (RECOMP_SCENE, the overlay) through the game's
+ * own developer cinema mode. */
+void sub_00073FD0_enter(void) { scene_launcher_loader_enter(); }
+void sub_0002DFF0_enter(void) { scene_launcher_mode_enter(); }
+/* The developer run module, rebuilt from the host (src/hooks/dev_module.c): the manager's tick
+ * queues it on request; its methods are traced. RECOMP_DEV_MODULE; off unless set. */
+void sub_00077040_enter(void) { dev_module_manager_enter(); }
+void sub_00077C40_enter(void) { dev_module_trace(1); }
+void sub_00077A40_enter(void) { dev_module_trace(3); }
+void sub_00077B20_enter(void) { dev_module_trace(4); }
+void sub_00077DD0_enter(void) { dev_module_trace(7); }
 /* The per-fighter pad reader: RECOMP_TEST_INPUT replaces what it is about to read. */
 void sub_001BAA00_enter(void) { defjam_test_input(MEM32(g_esp + 4)); }
 void sub_001A6A80_enter(void)
@@ -524,6 +535,7 @@ static void funccall_hook(void)
     sub_00068BA0();
     /* RECOMP_FE_INJECT: commands of a test's own, after a chosen call (src/hooks/fe_inject.c). */
     fe_inject_after_call(text);
+    dev_module_after_call(text);
 }
 
 /* ---- Trace chosen functions, by guest address --------------------------

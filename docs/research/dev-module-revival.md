@@ -12,8 +12,8 @@ This document tracks the attempt to bring it back. Branch `feature/scene-launche
 |---|---|---|
 | 0 | Find the cinema mode and why it never runs | done (below) |
 | 1 | Map the run-module interface and the developer module's methods; how the next module is chosen | done 2026-10-17 (viable) |
-| 2 | Build the module ourselves (guest object + virtual table) and inject it; its init runs | not started |
-| 3 | Play a scene in it, return cleanly; overlay picker and `RECOMP_SCENE` | not started |
+| 2 | Build the module ourselves (guest object + virtual table) and inject it; its init runs | **done 2026-10-17**: Load, Update, Render run; EA's debug menu is drawn |
+| 3 | Play a scene in it, return cleanly; overlay picker and `RECOMP_SCENE` | core works 2026-10-17 (sc12 plays in full from the main menu); return to the front end, overlay picker, tools and docs to do |
 
 ## Established (step 0, 2026-10-16)
 
@@ -184,6 +184,31 @@ Risks that remain: Load running on the loader thread while the front end's resou
 font that the retail boot did not load; Render `0x77B20` drawing nothing visible without the
 render setup a developer boot did; audio for the cinema (the mode pauses subsystem 0x22, and the
 cinema subsystem may expect the Story module's audio setup).
+
+## Step 2 and 3 results (2026-10-17, macOS)
+
+`src/hooks/dev_module.c` (build and queue, traces) and `src/hooks/scene_launcher.c` (the scene request),
+hooked in `src/recomp_manual.c` on the manager tick `sub_00077040`, the module's methods and the mode
+update `sub_0002DFF0` (one re-lift).
+
+- **Step 2:** `harness.py run boot --env RECOMP_DEV_MODULE=1` (`logs/run-20261017-071354.log.err`):
+  queued once the main menu was up (module `0x80026340`, table `0x8000A0A0`, pause menu and popup made
+  by `0x779F0`), the manager loaded it (`Load` = `CRunModuleAki::Init`), swapped from the front end
+  (`0x80011E50`) and has run `Update` and `Render` every frame since (mode system `0x800C5F80`, state 0),
+  60 frames a second, no fault, saves restored identical. The picture is **EA's debug menu**:
+  `DEBUG MENU -- assets`, `MATCH_MODE - SINGLE`, `FIGHTER_0..3 - Crow1 (MAR) 1 (PLAYER / CPU Easy)`,
+  `STAGE - 02A The Foundation (FightClub)`, `CINEMA - sc00`, and the seven `MODE -` lines with the
+  cursor on `GAME`.
+- **Step 3 core:** with `RECOMP_SCENE=sc12` as well (`logs/run-20261017-071746.log.err`,
+  `-072...`): the menu shows `CINEMA - sc12`, `[SCENE] loading sc12`, `playing sc12 (scene 13)`, the
+  game draws 221 draws a frame against the menu's 25, the captures show the scene in-engine and
+  letterboxed, and after about 4.5 s `[SCENE] sc12 ended`, back to the menu. The same scene runs
+  310 frames (about 5 s) in Story (`logs/run-20261016-194515.log.err`), so it played in full.
+
+Still to do for step 3: leave the module (request the front end's loader, factory id 9) after the
+scene or on demand; an overlay picker (Debug tab) and a one-command `scenarios.py scene`; replace the
+Story-based switch and its docs (`docs/scene-selector.md`); try the debug menu by pad (it reads pad
+0) and the other modes; regressions with everything off.
 
 ## Decisions and risks
 

@@ -15,8 +15,4 @@ int fe_inject_parse(const char *spec, FeInjectRule *rules, int max);
 /* Called by the FuncCall hook after each front-end call has run. */
 void fe_inject_after_call(const char *text);
 
-/* At the entry of the Story scene loader: logs the scene, and RECOMP_TEST_CINEMA_SCENE
- * swaps the first one (fe_inject.c). */
-void fe_cinema_scene_enter(void);
-
 #endif
