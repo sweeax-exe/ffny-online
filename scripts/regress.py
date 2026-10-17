@@ -16,6 +16,7 @@ Checks, in order:
            file, and Play goes on into the game
   overlay  the F1 overlay (macOS, Linux): opened by a key event, a tab clicked, drawn over
            the picture, and the window's frame read back (RECOMP_WINDOW_SHOT)
+  skipintro (--only) default/file/environment startup skip, first screen, title golden and Start
   fight    a scripted One on One: reaches the fight, holds the frame rate, no crash
   ffa      a scripted four-fighter Free For All at the default venue, the same checks
   ffa-terrordome  the same at the Terrordome for four minutes (the v0.2.1 crash)
@@ -44,6 +45,11 @@ The golden frames were taken without the title's gamma ramp, so those three runs
 set RECOMP_GAMMA=0. Every run uses the harness's complete-save-root guard and
 fails if the save area is not byte-identical afterwards.
 
+Quick and full sets each play legal and all startup movies once, in m3, with
+ordered log assertions and the title golden. Other runs use the harness's startup
+skip default and anchor input/captures to the actual Press Start screen request.
+Story cutscenes and move previews still play in their own checks.
+
 A check that does not apply on this host (the launcher and overlay checks on Windows) reports SKIP:
 it is counted as skipped, never as passed. Exit code 0 only if every check that ran passed. The
 table is also written to logs/regress-<stamp>.txt.
@@ -67,11 +73,11 @@ evidence = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(evidence)
 REPO = harness.REPO
 
-ORDER = ["unit", "m2", "m3", "m4a", "launcher", "overlay", "unlockopt", "fight", "ffa", "fight-terrordome", "ffa-terrordome", "combat", "versus", "ffa-result", "two-matches", "replay", "repeat", "visual",
+ORDER = ["unit", "m2", "m3", "m4a", "launcher", "overlay", "unlockopt", "skipintro", "fight", "ffa", "fight-terrordome", "ffa-terrordome", "combat", "versus", "ffa-result", "two-matches", "replay", "repeat", "visual",
          "intro", "crib", "gym", "soak"]
 # Opt-in (--only): the One on One at the Terrordome, which the Free For All covers, and
 # the repeatability check, which is two more fights.
-DEFAULT = [n for n in ORDER if n not in ("fight-terrordome", "ffa-result", "two-matches", "repeat", "visual")]
+DEFAULT = [n for n in ORDER if n not in ("fight-terrordome", "ffa-result", "two-matches", "repeat", "visual", "skipintro")]
 QUICK = ["unit", "m2", "m3", "m4a", "fight"]
 
 # A 2 s line of a 60 Hz title holds 120 presents. Loading screens run at 30, so the
@@ -107,13 +113,17 @@ def check_unit(a):
     return r.returncode == 0, last
 
 
-def golden(a, name, frame, json_name, env, secs):
+def golden(a, name, frame, json_name, env, secs, normal_startup=False):
     e = {"RECOMP_GAMMA": "0"}
+    if normal_startup and os.environ.get('RECOMP_HEADLESS'):
+        e['RECOMP_HEADLESS'] = os.environ['RECOMP_HEADLESS']
     e.update(env)
     path = os.path.join(REPO, "logs", "shots", "golden-" + name, frame)
     run = harness.run_game("golden-" + name, secs=secs, preset=a.preset, env=e, scripted=False, quiet=True,
-                           until_file=path)
+                           until_file=path, inherit_recomp=not normal_startup)
     faults = common_faults(run)
+    if normal_startup:
+        faults += normal_startup_faults(run.text)
     if not os.path.isfile(path):
         return False, "; ".join(faults + ["no capture (%s)" % os.path.relpath(run.log, REPO)])
     r = subprocess.run([sys.executable, os.path.join(HERE, "frame-signature.py"), path, "--check",
@@ -121,7 +131,7 @@ def golden(a, name, frame, json_name, env, secs):
     line = (r.stdout.strip().splitlines() or [r.stderr.strip() or "no output"])[-1]
     if r.returncode != 0 or not line.startswith("OK"):
         faults.append(line)
-    return verdict(faults, line)
+    return verdict(faults, ('legal, EA/THX/intro movies, Press Start; ' if normal_startup else '') + line)
 
 
 # The loading screen has no [FUNCCALL] to anchor on, and which frame it is on
@@ -153,14 +163,17 @@ def check_m2(a):
 def check_m3(a):
     shot = os.path.join(REPO, "logs", "shots", "golden-m3", "title.bmp")
     return golden(a, "m3", "title-5s.bmp", "m3-title-screen.json",
-                  {"RECOMP_SCRIPT_ANCHOR": harness.TITLE_ANCHOR, "RECOMP_TRANS_SHOT": shot,
-                   "RECOMP_TRANS_SHOT_SECS": "5"}, 150)
+                  {"RECOMP_SKIP_INTRO": "0", "RECOMP_SCRIPT_ANCHOR": harness.TITLE_ANCHOR,
+                   "RECOMP_TRANS_SHOT": shot, "RECOMP_TRANS_SHOT_SECS": "5"}, 150,
+                  normal_startup=True)
 
 
 def check_m4a(a):
     shot = os.path.join(REPO, "logs", "shots", "golden-m4a", "menu.bmp")
-    pad = ("start:8:8.4,start:11:11.4,a:14:14.3,a:18:18.3,a:22:22.3,a:26:26.3,a:30:30.3,a:34:34.3,"
-           "a:38:38.3,b:42:42.3,b:46:46.3")
+    # Screen-request time precedes the old flow-file anchor. Keep the title's
+    # native input delay, then dismiss storage notices and back out of Story.
+    pad = ("start:14:14.3,start:17:17.3,a:20:20.3,a:23:23.3,a:26:26.3,a:29:29.3,"
+           "a:32:32.3,a:35:35.3,a:38:38.3,b:42:42.3,b:46:46.3")
     return golden(a, "m4a", "menu-50s.bmp", "m4a-main-menu.json",
                   {"RECOMP_SCRIPT_ANCHOR": harness.TITLE_ANCHOR, "RECOMP_TRANS_SHOT": shot,
                    "RECOMP_TRANS_SHOT_SECS": "50", "RECOMP_PAD_SCRIPT": pad}, 200)
@@ -310,6 +323,92 @@ def check_unlock_option(a):
         if not want and (started or ran):
             faults.append("unlock_all is off in the file, but the unlock routine ran")
     return verdict(faults, "the checkbox saves [debug] unlock_all; from the file alone the unlock runs, and without it does not")
+
+
+def startup_skip_faults(text, enabled):
+    """Require a positive first-screen observation; only inspect the startup interval."""
+    startup = re.split(r'^\[FUNCCALL\] Control\.GetScreenInfo\(intMain/mainMenu', text,
+                       maxsplit=1, flags=re.M | re.I)[0]
+    screens = re.findall(r'^\[FUNCCALL\] Control\.GetScreenInfo\(([^)]*)\)', startup, re.M | re.I)
+    want = 'intmain/prestart.swf' if enabled else 'intmain/legal1.swf'
+    faults = []
+    if not screens or screens[0].lower() != want:
+        faults.append('first front-end screen %r, expected %s' % (screens[0] if screens else None, want))
+    redirects = startup.count('[STARTUP] skip_intro: controller boot initialized;')
+    if redirects != int(enabled):
+        faults.append('startup redirect count %d, expected %d' % (redirects, int(enabled)))
+    if enabled:
+        if any(s.lower() in ('intmain/legal1.swf', 'intmain/bootload.swf') for s in screens):
+            faults.append('legal or bootLoad requested with skip enabled')
+        if re.search(r'\[PATH\][^\r\n]*[\\/]movies[\\/](eagames|thx|intro)\.mad', startup, re.I):
+            faults.append('a startup movie opened with skip enabled')
+    return faults
+
+
+def normal_startup_faults(text):
+    """The one complete normal boot in both quick/full sets must positively prove each stage."""
+    faults = startup_skip_faults(text, False)
+    stages = (
+        ('legal', r'^\[FUNCCALL\] Control\.GetScreenInfo\(intMain/legal1\.swf\)'),
+        ('bootLoad', r'^\[FUNCCALL\] Control\.GetScreenInfo\(intMain/bootLoad\.swf\)'),
+        ('movie controller', r'^\[FUNCCALL\] Game\.StartMainMenu\(\s*0\s*\)'),
+        ('EA movie', r'\[PATH\][^\r\n]*[\\/]movies[\\/]eagames\.mad'),
+        ('THX movie', r'\[PATH\][^\r\n]*[\\/]movies[\\/]thx\.mad'),
+        ('intro movie', r'\[PATH\][^\r\n]*[\\/]movies[\\/]intro\.mad'),
+        ('Press Start', r'^\[FUNCCALL\] Control\.GetScreenInfo\(intMain/preStart\.swf\)'),
+    )
+    end = 0
+    for label, pattern in stages:
+        match = re.search(pattern, text[end:], re.M | re.I)
+        if not match:
+            faults.append('normal startup missing or out of order: ' + label)
+            break
+        end += match.end()
+    return faults
+
+
+def check_skip_intro(a):
+    """Actual startup with defaults, INI alone, and both directions of the env override."""
+    faults = []
+    title = 'getscreeninfo(intmain/prestart'
+    menu = 'getscreeninfo(intmain/mainmenu'
+    for name, ini_value, override, enabled in (
+            ('default', None, None, False), ('file', True, None, True),
+            ('env-off', True, '0', False), ('env-on', False, '1', True),
+            ('with-unlock', True, None, True)):
+        combined = name == 'with-unlock'
+        env = {'RECOMP_UNLOCK_ALL': '1' if combined else '0', 'RECOMP_SKIP_INTRO': ''}
+        if os.environ.get('RECOMP_HEADLESS'):
+            env['RECOMP_HEADLESS'] = os.environ['RECOMP_HEADLESS']
+        if ini_value is not None:
+            env['RECOMP_SETTINGS'] = ui_settings_file('skipintro-' + name,
+                '[launcher]\nskip = true\n[debug]\nskip_intro = %s\n' % str(ini_value).lower())
+        if override is not None:
+            env['RECOMP_SKIP_INTRO'] = override
+        if enabled:
+            # Skipping the first flow load invalidates feflow.xml#2. Anchor to the
+            # actual title request, keep its native animation/input delay, then Start.
+            env['RECOMP_SCRIPT_ANCHOR'] = title
+            env['RECOMP_PAD_SCRIPT'] = ','.join(harness.title_presses())
+            env['RECOMP_GAMMA'] = '0'
+        run = harness.run_game('skipintro-' + name, preset=a.preset, scripted=False, quiet=True,
+            env=env, inherit_recomp=False, secs=170,
+            until='getscreeninfo(options/userid' if combined else (menu if enabled else 'getscreeninfo(intmain/legal1'),
+            after=4 if enabled else 2, shots='@' + title + ',5' if enabled else '')
+        faults += [name + ': ' + f for f in common_faults(run) + startup_skip_faults(run.text, enabled)]
+        if enabled:
+            if not harness.reached(run.summary, menu):
+                faults.append(name + ': Start did not reach the main menu')
+            if combined and '[UNLOCK] sub_000158F0 run' not in run.text:
+                faults.append(name + ': startup skip prevented the unlock routine from running')
+            shot = os.path.join(run.shots_dir, 'skipintro-' + name + '-5s.bmp')
+            result = subprocess.run([sys.executable, os.path.join(HERE, 'frame-signature.py'),
+                                     shot, '--check', os.path.join(REPO, 'tests/golden/m3-title-screen.json')],
+                                    capture_output=True, text=True)
+            if result.returncode:
+                faults.append(name + ': skipped title does not match the existing golden: ' +
+                              (result.stdout + result.stderr).strip())
+    return verdict(faults, '5 startup cases: defaults, INI, both env overrides, combined unlock; title golden and Start to menu')
 
 
 def check_fight(a, route="fight"):
@@ -521,7 +620,7 @@ def check_soak(a):
 
 
 CHECKS = {"unit": check_unit, "m2": check_m2, "m3": check_m3, "m4a": check_m4a, "launcher": check_launcher,
-          "overlay": check_overlay, "unlockopt": check_unlock_option, "fight": check_fight, "ffa": check_ffa,
+          "overlay": check_overlay, "unlockopt": check_unlock_option, "skipintro": check_skip_intro, "fight": check_fight, "ffa": check_ffa,
           "fight-terrordome": lambda a: check_fight(a, 'fight-terrordome'),
           "ffa-terrordome": lambda a: check_fight(a, 'ffa-terrordome'),
           "combat": check_combat, "versus": check_versus, "ffa-result": check_ffa_result, "two-matches": check_two_matches, "replay": check_replay, "visual": check_visual, "repeat": check_repeat, "intro": check_intro, "crib": check_crib, "gym": check_gym, "soak": check_soak}

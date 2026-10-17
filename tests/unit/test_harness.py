@@ -45,6 +45,45 @@ def test_noncode_icall_is_a_shared_failure():
     assert harness.run_faults(run) == ['1 indirect calls to non-code']
 
 
+def test_startup_skip_requires_first_screen_and_rejects_startup_movies():
+    redirect = '[STARTUP] skip_intro: controller boot initialized; legal1 -> preStart\n'
+    title = '[FUNCCALL] Control.GetScreenInfo(intMain/preStart.swf)\n'
+    legal = '[FUNCCALL] Control.GetScreenInfo(intMain/legal1.swf)\n'
+    movie = r'[PATH] \Device\CdRom0\movies\intro.mad' + '\n'
+    menu = '[FUNCCALL] Control.GetScreenInfo(intMain/mainMenu.swf)\n'
+    assert regress.startup_skip_faults(redirect + title, True) == []
+    assert regress.startup_skip_faults(legal + movie + title, False) == []
+    assert regress.startup_skip_faults(redirect + title + menu + movie, True) == []  # later attract/Story allowed
+    for text in ('', 'unrelated preStart.swf\n', title, redirect + legal + title,
+                 redirect + title + movie, redirect + redirect + title):
+        assert regress.startup_skip_faults(text, True)
+    assert regress.startup_skip_faults(redirect + title, False)
+
+
+def test_normal_startup_requires_each_movie_in_order():
+    stages = [
+        '[FUNCCALL] Control.GetScreenInfo(intMain/legal1.swf)',
+        '[FUNCCALL] Control.GetScreenInfo(intMain/bootLoad.swf)',
+        '[FUNCCALL] Game.StartMainMenu( 0 )',
+        r'  [PATH] \Device\CdRom0\movies\eagames.mad',
+        r'  [PATH] \Device\CdRom0\movies\thx.mad',
+        r'  [PATH] \Device\CdRom0\movies\intro.mad',
+        '[FUNCCALL] Control.GetScreenInfo(intMain/preStart.swf)',
+    ]
+    assert regress.normal_startup_faults('\n'.join(stages)) == []
+    for i in range(len(stages)):
+        assert regress.normal_startup_faults('\n'.join(stages[:i] + stages[i + 1:]))
+    stages[3], stages[4] = stages[4], stages[3]
+    assert regress.normal_startup_faults('\n'.join(stages))
+
+
+def test_harness_startup_defaults_allow_normal_and_file_only_runs():
+    assert harness.startup_default({})['RECOMP_SKIP_INTRO'] == '1'
+    assert harness.startup_default({'RECOMP_SKIP_INTRO': '0'})['RECOMP_SKIP_INTRO'] == '0'
+    assert 'RECOMP_SKIP_INTRO' not in harness.startup_default({'RECOMP_SKIP_INTRO': ''})
+    assert harness.TITLE_ANCHOR == 'getscreeninfo(intmain/prestart'
+
+
 def test_pad_script_orders_stages_after_the_title_presses():
     s = harness.build_pad_script(["getscreeninfo(intmain/mainmenu=a@6", "game.startgame(=x@2"], "@tail,b:1:2")
     parts = s.split(",")

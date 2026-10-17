@@ -19,6 +19,18 @@ game's artwork and stay under `logs/`, which git ignores.
 Never run two of these at once: they share the save area, the window and the
 frame-rate measurements.
 
+Harness and scenario runs skip the startup legal screen and EA/THX/intro movies
+by default. Both quick and full regression keep one complete normal startup in
+`m3`: it requires legal, all three movies and Press Start in order, then compares
+the title image. Other checks use the shorter boot. Story scenes and move previews
+remain enabled. Input and timed captures start at the actual Press Start screen
+request, so either boot path works without changing route timings.
+
+For an individual normal boot, pass `--env RECOMP_SKIP_INTRO=0` to the harness.
+An empty override (`--env RECOMP_SKIP_INTRO=`) removes the test default and uses
+the specified INI or the game's default-off setting. This test default does not
+change a player's settings file or normal game launches.
+
 The full regression is the quick one plus a four-fighter Free For All, the same
 at the Terrordome for four minutes, the **combat check**, a **two-pad match**, the
 **replay check**, the Story intro, crib, gym and a boot soak. `--only a,b` picks

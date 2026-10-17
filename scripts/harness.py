@@ -65,8 +65,18 @@ BASE_ENV = {
     "RECOMP_SETTINGS": "none",
 }
 
-# The front end's flow file loads twice; the second load is the title screen.
-TITLE_ANCHOR = "feflow.xml#2"
+# A screen request works with both normal and shortened startup. Counting flow
+# file opens does not: skipping legal/bootLoad also skips the first flow load.
+TITLE_ANCHOR = "getscreeninfo(intmain/prestart"
+
+
+def startup_default(e):
+    """Shorten test boots; explicit 0 keeps normal startup, empty uses the INI/default."""
+    if "RECOMP_SKIP_INTRO" not in e:
+        e["RECOMP_SKIP_INTRO"] = "1"
+    elif e["RECOMP_SKIP_INTRO"] == "":
+        del e["RECOMP_SKIP_INTRO"]
+    return e
 
 
 def unlock_default(e):
@@ -693,6 +703,7 @@ def run_game(name, stages=(), tail="", shots="", secs=240, preset=RELEASE_PRESET
         e["RECOMP_TRANS_SHOT_SECS"] = shots
     e.update(env or {})
     unlock_default(e)
+    startup_default(e)
     e['DEFJAM_DATA'] = guarded_data_root(e['DEFJAM_DATA'])
 
     run = Run(name, log + ".err", shots_dir)

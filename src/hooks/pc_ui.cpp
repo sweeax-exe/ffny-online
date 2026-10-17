@@ -136,6 +136,7 @@ static const char *friendly(const char *section, const char *key)
         { "gamepad", "left_stick", "Left stick comes from" }, { "gamepad", "right_stick", "Right stick comes from" },
         { "launcher", "skip", "Skip the launcher at start" }, { "ui", "scale", "Text and control size" },
         { "debug", "unlock_all", "Debug - Unlock all Fighters and Venues (Requires Restart)" },
+        { "debug", "skip_intro", "Skip startup movies and legal screen" },
         { "ui", "overlay_pad", "Overlay pad buttons" }, { "ui", "overlay_key", "Overlay key" },
     };
     for (const Label &l : labels)
@@ -786,6 +787,8 @@ static void page_general(UiMode mode)
     settings_group("debug", { "unlock_all" });
     ImGui::TextWrapped("For testing: every fighter and venue is available on any profile. It changes the profile in memory "
                        "and asks the game to save it, so keep it off for a save you care about.");
+    settings_group("debug", { "skip_intro" });
+    ImGui::TextWrapped("Start at Press Start. Story cutscenes still play. Changes in the overlay apply next time you start the game.");
     ImGui::SeparatorText("Files");
     ImGui::TextWrapped("Settings are saved as you change them in: %s", pc_settings_path());
     if (ImGui::Button(k_show_file_label)) open_folder();
