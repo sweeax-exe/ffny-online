@@ -100,10 +100,18 @@ def fight_route(harness, mode, venue, length='short', p1=None, cpu=None, cat=Non
              'generated': {'mode': mode, 'venue': venue, 'length': length, 'p1': p1, 'cpu': cpu}}
     if 'index' in cat['venues'][venue]:
         route['venue_index'] = cat['venues'][venue]['index']    # what scenario_suite checks Game.ChooseVenue against
+    if venue == 'terrordome':
+        # Map traversal changes with the unlocked venues. Select the retail FE ID
+        # after the menu's choice, before loading, as the named stress routes do.
+        route['env'] = {'RECOMP_FE_INJECT': 'game.choosevenue#1=>Game.ChooseVenue(%d)' % route['venue_index'],
+                        'RECOMP_START_LOG': '1'}
+        route['expected_venue'] = route['venue_index']
     if length == 'result':
         route.update(until='game.getmatchsummary(', after=6, secs=1200 if four else 900, shots='@game.startgame(,60')
     elif length == 'long' or steps:
         route.update(until='game.startgame(', after=240, secs=620, shots='@game.startgame(,15,60,230')
+        if venue == 'terrordome':
+            route['shots'] = '@getscreeninfo(battle/oldmload,1,' + route['shots']
     else:
         route.update(until='game.startgame(', after=150 if four else 120, secs=520 if four else 420,
                      shots='@game.startgame(,60,140' if four else '@game.startgame(,60,110')

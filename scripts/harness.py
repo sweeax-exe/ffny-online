@@ -328,14 +328,20 @@ ROUTES = {
         "stages": FFA_SETUP + [TERRORDOME],
         "tail": FIGHT_TAIL,
         "until": "game.startgame(", "after": 240, "secs": 620,
-        "shots": "@game.startgame(,15,60,230",
+        "shots": "@getscreeninfo(battle/oldmload,1,@game.startgame(,15,60,230",
+        # Unlocking every venue changes traversal of the map. Pin the actual
+        # retail FE ID through ChooseVenue before the loading screen starts.
+        "env": {"RECOMP_FE_INJECT": "game.choosevenue#1=>Game.ChooseVenue(6)",
+                "RECOMP_START_LOG": "1"}, "expected_venue": 6,
     },
     "fight-terrordome": {
         "help": "One on One at the Terrordome (venue 6), played for four minutes",
         "stages": ONE_ON_ONE_SETUP + ["controllersetup(1,=back@9999", TERRORDOME],
         "tail": FIGHT_TAIL,
         "until": "game.startgame(", "after": 240, "secs": 620,
-        "shots": "@game.startgame(,15,60,230",
+        "shots": "@getscreeninfo(battle/oldmload,1,@game.startgame(,15,60,230",
+        "env": {"RECOMP_FE_INJECT": "game.choosevenue#1=>Game.ChooseVenue(6)",
+                "RECOMP_START_LOG": "1"}, "expected_venue": 6,
     },
     # The Story routes pick the THIRD user ID (down twice): the save area has four profiles since 2026-10-06 and the
     # second one no longer has a Story save. If profiles are added or removed, this is the number to revisit.

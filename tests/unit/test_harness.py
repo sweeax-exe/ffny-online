@@ -3,6 +3,7 @@
 No game is run here; the routes themselves are exercised by scripts/regress.py.
 """
 import importlib.util
+import json
 import os
 import pytest
 
@@ -99,6 +100,26 @@ def test_every_route_builds():
         script = harness.build_pad_script(r["stages"], r.get("tail", ""))
         assert script.count("@") >= len(r["stages"]), name
         assert r["secs"] > r.get("after", 0), name
+
+
+def test_named_stress_routes_select_the_catalog_venue_independently_of_map_order():
+    with open(os.path.join(ROOT, 'config/scenario-catalog.json')) as f:
+        venue = json.load(f)['venues']['terrordome']['index']
+    for name in ('fight-terrordome', 'ffa-terrordome'):
+        route = harness.ROUTES[name]
+        assert route['expected_venue'] == venue
+        assert route['env']['RECOMP_FE_INJECT'] == 'game.choosevenue#1=>Game.ChooseVenue(%d)' % venue
+        assert route['env']['RECOMP_START_LOG'] == '1'
+        assert 'RECOMP_START_VENUE' not in route['env']
+
+
+def test_final_venue_requires_positive_startgame_evidence():
+    early = '[FE-INJECT] after "game.choosevenue" #1: Game.ChooseVenue(6)\n'
+    start = '[START] venue(script)=6 fighters(gd+1aaa step 5): 4 9\n'
+    assert regress.start_venue_faults(early + start, 6) == []
+    for text in ('', '[FUNCCALL] Game.ChooseVenue(6)', early + '[START] venue(script)=14 fighters: 4 9',
+                 start, start + early):
+        assert regress.start_venue_faults(text, 6)
 
 
 LOG = """\

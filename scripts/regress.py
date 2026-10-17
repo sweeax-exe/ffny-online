@@ -414,9 +414,27 @@ def check_skip_intro(a):
     return verdict(faults, '5 startup cases: defaults, INI, both env overrides, combined unlock; title golden and Start to menu')
 
 
+def start_venue_faults(text, expected):
+    """Require early venue selection and the final value given to StartGame."""
+    match = re.search(r'^\[START\] venue\(script\)=(-?\d+)\b', text, re.M)
+    if not match:
+        return ['no final StartGame venue observation']
+    faults = []
+    actual = int(match.group(1))
+    if actual != expected:
+        faults.append('StartGame venue %d, expected %d' % (actual, expected))
+    early = re.search(r'^\[FE-INJECT\][^\r\n]*: Game\.ChooseVenue\(%d\)' % expected, text, re.M)
+    if not early or early.start() > match.start():
+        faults.append('no venue selection before StartGame')
+    return faults
+
+
 def check_fight(a, route="fight"):
     run = harness.run_route(route, preset=a.preset, quiet=True)
     faults = common_faults(run)
+    expected = harness.ROUTES[route].get('expected_venue')
+    if expected is not None:
+        faults += start_venue_faults(run.text, expected)
     if not harness.reached(run.summary, "game.startgame("):
         faults.append("never reached the fight")
     p = harness.presents_after(run.text, "game.startgame(")

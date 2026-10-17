@@ -9,7 +9,7 @@
   },
   "venues": {
     "foundation": {"steps": "", "index": 1, "calibrated": true, "note": "the cursor's starting venue"},
-    "terrordome": {"steps": "right@6", "index": 6, "calibrated": true, "note": "venue 6, one step right of the Foundation"},
+    "terrordome": {"steps": "right@6", "index": 6, "calibrated": true, "note": "retail FE ID6; this positional recipe was calibrated with the older unlock state. With every venue unlocked it selects FE ID14 (Hunt's Point); the named harness stress routes and generated Terrordome scenarios inject ChooseVenue(6) before loading. The stress check also asserts its value at StartGame."},
     "the-pit": {"steps": "right@6;down@8", "index": 19, "calibrated": true,
                 "note": "Game.ChooseVenue(19), one step down from the Terrordome on the map; calibrated on macOS 2026-10-14 from the venue-map capture and the fight"}
   },

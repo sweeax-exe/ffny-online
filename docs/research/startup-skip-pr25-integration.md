@@ -204,5 +204,68 @@ Quick log audit: `run-20261017-151321`, `151520`, and `151617` each contain one
 redirect and first screen preStart. `151330` contains no redirect and positively
 passes legal→bootLoad→EA→THX→intro→preStart plus the title golden. Thus three
 of the four quick game launches skip, and exactly one complete normal startup
-remains. All save guards restore identical. The standard full suite is running
-against the same binary and an explicit hashed scenario fixture.
+remains. All save guards restore identical. The final full suite results below supersede this initial checkpoint.
+
+## Final native validation on PR25 integration
+
+Source `0ea5c5d` adds the first-menu unlock fix caught by the initial full run:
+when startup movies are bypassed, unlock must apply immediately at the first
+real main menu, rather than waiting for another front-end event. The normal
+Game.StartMainMenu path is preserved. All nine native startup fixture cases and
+the native unlock option plus five-case skip matrix pass
+(`logs/regress-20261017-153428.txt`).
+
+The final quick set passes **5/5**, 412 seconds
+(`logs/regress-20261017-154147.txt`): 461 unit passes, 34 platform skips, one slow
+branding case deselected, all three existing screen goldens unchanged, and 122
+seconds of combat at median121 presents/2seconds (minimum113). Audit
+`logs/startup-skip/quick-final-startup-audit.json` confirms four game launches:
+**three skipped startups and exactly one positively ordered normal startup**.
+
+The full set completed **16/17 in35minutes**
+(`logs/regress-20261017-161802.txt`, console
+`logs/startup-skip/pr25-final-full.txt`). The sole failed assertion is
+`audio.dry_queue`, one post-StartGame underrun in `combat` (26/27 assertions;
+all seven gameplay assertions pass). This same intermittent gate is recorded
+in D122; this run does not isolate its cause. No gate was relaxed or waived.
+Two-pad `versus` passes26/26, all six combat assertions. Replay exactly matches
+80 golden records across1800steps. Story opening scenes reach the creator;
+crib, gym movie requests, all launcher/overlay/options, goldens, and3/3soak
+boots pass. Every completed save guard restores byte-identical.
+
+Full startup audit `logs/startup-skip/full-startup-audit.json`: **20launches,
+19 with one startup redirect and first FE screen preStart, exactly one legal/
+EA/THX/intro startup, no unclassified launch**. The feature remains default off
+for players; only the harness default is fast. Initial loading and native title
+animation/input delay remain. Story and attract movies still play.
+
+The full table’s old `ffa-terrordome` row exercised Hunt’s Point14, discovered
+by checking its actual venue request. Its row must not be counted as Terrordome
+coverage. The route correction, primary loading-caption evidence and focused
+replacement stress are recorded in `startup-skip-venue-audit.md`. No game C or
+binary changed for this route correction.
+
+Scope: local macOS26.5.2 arm64, Clang21/MoltenVK. Windows and Deck have not been
+tested by this session. PR25 remains open at exact head0bb115f as of16:41 on
+2026-10-17; no remote merge or push occurred. The tested combined toolkit5445b73
+remains unpublished, so the parent gitlink still names published9051be9 until
+Vlad authorizes toolkit publication.
+
+### Final affected checks and audio retry
+
+The corrected Terrordome route passes240seconds of actual four-player
+Terrordome combat at median120 presents/2seconds (minimum110), no detected
+runtime fault or save mismatch (`logs/regress-20261017-163533.txt`). The
+scenario composer was synchronized with its early command and loading capture;
+actual request-context extraction reports venue6 and all four fighter slots
+(`logs/startup-skip/terrordome-final-context.json`).
+
+Final complete units pass **464**,34skip,1slow deselected. The original combat
+check then passes **27/27**, including all7combat assertions, audio.dry_queue=0
+and byte-identical save restoration
+(`logs/regress-20261017-164056.txt`,
+`logs/scenarios/regress-combat-20261017-163605/report.json`). The focused result
+is2/2. The first full set remains recorded as16/17; a successful retry does not
+turn that raw run green or establish an audio root cause. No audio code or
+threshold changed. The game binary is unchanged since0ea5c5d. All game runs
+are finished, and source hygiene is checked before the final source commit.

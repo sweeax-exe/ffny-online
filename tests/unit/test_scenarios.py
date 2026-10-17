@@ -18,7 +18,7 @@ def load(name):
 scenarios = load('scenarios')
 harness = load('harness')
 
-KEYS = ('stages', 'tail', 'until', 'after', 'secs', 'shots')
+KEYS = ('stages', 'tail', 'until', 'after', 'secs', 'shots', 'env', 'expected_venue')
 
 
 @pytest.mark.parametrize('mode,venue,length,existing', [
