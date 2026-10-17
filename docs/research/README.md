@@ -24,6 +24,7 @@ cite other development notes, logs and captures that are not published.
 - [How a loaded movie becomes the displayed one](m3-movie-display.md)
 - [Screen transitions](m4a-fe-transitions.md)
 - [Skipping the startup legal screen and movies](startup-skip-flow.md): the first-screen selector, controller initialization and native play tests; [settings and test design](startup-skip-setting.md)
+  and [PR25 integration](startup-skip-pr25-integration.md), including the combined toolkit and faster regression policy.
 - [Movie audio clock](movie-audio-clock.md)
 
 ## Controllers and sound

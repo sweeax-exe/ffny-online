@@ -102,9 +102,13 @@ void defjam_unlock_all_on_funccall(const char *text)
         /* The managers sub_000158F0 reads exist once the front end is up.
          * skip_intro bypasses bootLoad's Game.StartMainMenu(0); the actual
          * main-menu screen is also a safe activation boundary. */
-        if (strstr(text, "Game.StartMainMenu") || strstr(text, "Control.GetScreenInfo(intMain/mainMenu."))
+        if (strstr(text, "Game.StartMainMenu")) {
             s_started = 1;
-        return;
+            return;
+        }
+        if (!strstr(text, "Control.GetScreenInfo(intMain/mainMenu."))
+            return;
+        s_started = 1;  /* Apply at the first menu too, before it can use the profile. */
     }
     if (debug)
         MEM8(DEBUG_FLAG) = 1;

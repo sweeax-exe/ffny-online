@@ -170,3 +170,39 @@ Specific timing/evidence risks:
 Source review found no blocker to adding the finalized feature. The runtime
 and regression claims must come from the coordinator's newly certified PR #25
 build and serialized, guarded play-tests.
+
+## Local integration checkpoint
+
+The coordinator merged exact PR25 head `0bb115f` into startup commit `321cd8e`
+as `db88b0a`, preserving main's version0.9.3, current status and PR25's recorder,
+scenario, triage and adapter changes. Missing decision rows D115–D119 were
+retained; superseded PR25 work-log entries moved unchanged to the local archive.
+
+Isolated toolkit branch `defjam/skip-intro-pr25` starts from9051be9 and applies
+the already-published a5b2ccf/4a6c88e topics unchanged. Merge `5445b73` records
+the released4a6c88e history too; its tree is identical to the two-topic result
+`8507a75`. Compared with released main, only PR25's read-back/cache-stat source
+and fixture additions remain. Both original toolkit tips are ancestors.
+
+On macOS arm64, the guest-CPU fixture passes1/1 and real Vulkan/MoltenVK read-back
+passes2/2, including scaled presentation. Integrated units pass461, skip34
+platform-specific cases, and deselect the one slow branding test, matching PR25's
+regression policy. Logs: `logs/startup-skip/fx-guest-cpu.txt`, `fx-readback.txt`,
+`pr25-unit.txt`. Re-lift/build and native quick/full validation follow this
+checkpoint. Nothing was pushed or merged remotely; the parent keeps its published
+base pin until the combined toolkit publication is authorized.
+
+The integrated build is now certified after regenerating17,896 functions into
+20 C files (90MiB). Native quick regression passes5/5 in410s
+(`logs/regress-20261017-151938.txt`), versus576s for the earlier all-normal
+startup run. These are observed suite durations on different source integrations,
+not an isolated benchmark of the hook. The skipped menu check takes57s versus154s;
+the fight check takes201s versus297s and retains120s of combat (median120 presents
+per2s, minimum112). The exact existing title/menu/loading goldens pass unchanged.
+
+Quick log audit: `run-20261017-151321`, `151520`, and `151617` each contain one
+redirect and first screen preStart. `151330` contains no redirect and positively
+passes legal→bootLoad→EA→THX→intro→preStart plus the title golden. Thus three
+of the four quick game launches skip, and exactly one complete normal startup
+remains. All save guards restore identical. The standard full suite is running
+against the same binary and an explicit hashed scenario fixture.

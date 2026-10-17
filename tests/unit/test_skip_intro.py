@@ -55,6 +55,7 @@ int main(int argc, char **argv)
     if (argc > 3) {
         /* With startup skipped there is no Game.StartMainMenu(0) event. */
         defjam_unlock_all_on_funccall("Control.GetScreenInfo(intMain/mainMenu.swf)");
+        assert(unlock_calls == 1); /* The first menu must already have the unlocks. */
         defjam_unlock_all_on_funccall("Control.GetScreenInfo(battle/cmtype.swf)");
         printf("unlock %d\n", unlock_calls);
         assert(g_eax == 0x1234 && g_ecx == 0x100 && g_edx == 0x5678 && g_esp == 0x1000);
@@ -129,4 +130,4 @@ def test_skip_intro_and_unlock_can_be_enabled_together(startup_tool, tmp_path):
     result = subprocess.run([str(startup_tool), str(ini), '0', 'unlock'], env=env,
                             capture_output=True, text=True, timeout=10)
     assert result.returncode == 0, result.stdout + result.stderr
-    assert result.stdout.splitlines() == ['first 1 boots 1', 'later 0 boots 1', 'unlock 1']
+    assert result.stdout.splitlines() == ['first 1 boots 1', 'later 0 boots 1', 'unlock 2']

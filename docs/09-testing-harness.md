@@ -19,6 +19,9 @@ game's artwork and stay under `logs/`, which git ignores.
 Never run two of these at once: they share the save area, the window and the
 frame-rate measurements.
 
+Leave `RECOMP_HEADLESS` unset for the full suite: its presence suppresses the
+launcher, so the launcher/checkbox checks cannot run in that mode.
+
 Harness and scenario runs skip the startup legal screen and EA/THX/intro movies
 by default. Both quick and full regression keep one complete normal startup in
 `m3`: it requires legal, all three movies and Press Start in order, then compares

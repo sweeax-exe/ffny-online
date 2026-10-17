@@ -217,13 +217,17 @@ overrides the file. `sub_0006BC90_enter()` in `src/recomp_manual.c` connects the
 patch to direct and indirect callers after re-lifting. The original selector
 still runs. A different first screen is logged and left unchanged. The
 one-shot latch is consumed even when disabled, so changing the setting in the
-overlay never changes a running game. No toolkit, lifter or renderer code is
-changed; the toolkit stays at released pin `4a6c88e`.
+overlay never changes a running game. The startup patch changes no toolkit,
+lifter or renderer code; the initial validation uses released pin `4a6c88e`.
+The owner's later PR25 integration requires combining its recorder runtime
+with main's released audio topics, documented in
+[the integration report](startup-skip-pr25-integration.md).
 
 Compatibility with the existing debug unlock needs one additional boundary in
 `dev_unlock.c`: its old activation waited for `Game.StartMainMenu(0)`, which
 bootLoad no longer calls when skipping. The actual main-menu screen request
-now also arms it. The ordinary boot still takes the original activation path.
+now also arms it and applies the unlock before that menu handles the profile.
+The ordinary boot still takes the original activation path.
 This keeps both `unlock_all` and `RECOMP_DEV_DEBUG` usable with startup skip.
 
 The launcher and overlay expose **General → Debug → Skip startup movies and
@@ -262,3 +266,12 @@ the ordered legal/movie chain plus the existing title golden. Explicit env0
 retains normal startup for an individual route; an empty value lets INI/default
 settings apply. This policy also reaches scenario runs that sanitize inherited
 environment variables.
+
+The integrated full run caught a first-menu timing gap in the initial compatibility
+change: the file-only unlock boot enabled the option and reached mainMenu, but
+the newly armed hook returned until a later screen change. That fails the existing
+`unlockopt` gate, which stops at the menu. The fix applies unlocks at that first
+menu immediately; the native fixture now asserts the call at the first event,
+then a second call for the following screen. Evidence retained in
+`logs/startup-skip/pr25-full-unlock-boundary.txt` and `run-20261017-152910.log.err`.
+The setting/export path was already working; no gate or test duration was weakened.

@@ -55,7 +55,7 @@
 | Agent tooling (D115) | ⏳ PR open | `triage.py`, `progress.py`, `docs/agent/` playbooks, shared `AGENTS.md`, generated skills and briefs for Claude and Codex, Markdown-only CI gating. Unit tests added; Windows and macOS CI and Codex's own review pending. |
 | Play-test recorder and scenarios (D116–D119) | ⏳ macOS done, Windows and Deck to run | Branch `feature/clever-feynman-4ovoyk` (PR #25). `[debug] record` / `--record`: `logs/sessions/` with per-frame rows, events, audio and a picture ring; F9, the pad chord View + left stick (`mark_pad`), the overlay button, a crash, a hang or a long hitch writes a bug bundle; `scripts/bug-bundle.py` reports it. Scenarios, crowd lab, front-end injection, command catalog (D117); a chosen Story scene by name, `RECOMP_TEST_CINEMA_SCENE` and `scenarios.py scenes` (D119, `docs/scene-selector.md`). Asynchronous read-back (D118). **macOS, 2026-10-14:** built (AppleClang), unit 475 pass, recorder end to end, 1.2 ms a picture async vs 3.4 ms sync, scenarios, crowd lab and the scene launcher run on the game; full regression 12/16 on PR and on main, the same four failures (save data, intermittent audio queue). Texture-cache columns in `frames.csv` (toolkit `49a1798`). Windows (MSVC, D3D11) not run. **Deck, 2026-10-15 (D120):** built in the container, recorder on the Deck was 585 ms a frame until the read-back moved to cached memory; audio crackle: two measured fixes, the rest open. |
 
-| Skip startup movies/legal (D123-D124) | ✅ directed play tests / ⏳ PR25 integration/full regression | `[debug] skip_intro` / `RECOMP_SKIP_INTRO`, default off, General → Debug. Native Mac: preStart at4s versus102s baseline; five option cases, UI, Story, attract, combat, fresh saves, keyboard, late SDL pad and combined unlock pass. Harness now defaults to skip, with one positive normal boot in m3 per quick/full set. Branch `feat/skip-startup-intro`; integrating PR25 while retaining main's audio fixes. |
+| Skip startup movies/legal (D123-D124) | ✅ directed tests/PR25 build/quick / ⏳ full regression | `[debug] skip_intro` / `RECOMP_SKIP_INTRO`, default off, General → Debug. Native Mac: preStart at4s versus102s baseline; five option cases, UI, Story, attract, combat, fresh saves, keyboard, late SDL pad and combined unlock pass. Harness now defaults to skip, with one positive normal boot in m3 per quick/full set. Branch `feat/skip-startup-intro`; integrating PR25 while retaining main's audio fixes. |
 
 ## 1. Decisions log
 
@@ -211,6 +211,8 @@
 
 | D123 | 2026-10-17 | Add default-off `[debug] skip_intro` / `RECOMP_SKIP_INTRO`, selecting pending screen0→1 only at the first `0x0006BC90` entry. Preserve the generated selector and native ControllerBootup `0x00055640`; keep later cutscenes/attract and normal Start storage checks. Let the existing debug unlock also arm at the actual main menu, since skipping omits its old startup event. | Vlad requested research, troubleshooting and play tests. A one-shot screen decision avoids changing movie decoders or dump bytes; reading the settings registry preserves INI/env/launcher precedence and restart semantics. Latest released source, disposable saves, no toolkit/lifter/renderer-code change, publication or release requested. |
 | D124 | 2026-10-17 | After finalizing the startup skip, build it on PR25 and run full regression there. Quick and full regressions should skip legal/startup movies for most checks, retaining one complete normal startup sequence in each set. | Vlad's explicit follow-up. Keep positive legal/movie/title coverage once, use the real preStart anchor for fast checks, and preserve PR25's recorder/bug-bundle/test changes. No request to merge PR25, push or release. |
+| D125 | 2026-10-17 | Integrate PR25 head `0bb115f` with current main and the startup patch locally (`db88b0a`), retaining version0.9.3. Combine PR25's toolkit9051be9 with main's unchanged a5b2ccf/4a6c88e audio topics in an isolated worktree; local merge5445b73 records both histories. | PR25's recorder requires read-back APIs absent from main, while its pin lacks the released scene-load/APU scheduling fixes. No published combined tip was found. The combined tree differs from main only by PR25's read-back/cache-stat support; no new runtime algorithm. Focused guest-CPU and two hardware read-back fixtures pass. Combined pin remains local/uncommitted in the parent until publication is authorized. |
+| D126 | 2026-10-17 | Apply the existing debug unlock immediately at its first main-menu fallback event when startup is skipped, preserving the normal Game.StartMainMenu activation path. | Integrated full regression caught `unlockopt`: INI enable/export worked, but the fallback armed and returned until another screen change. The first menu must already have unlocks. Native fixture now asserts that first event; preserve the existing gate instead of driving to a later screen to satisfy it. |
 
 ## 2. Environment inventory (2026-09-17)
 
@@ -295,45 +297,46 @@ defjam-recomp/
 
 > Recent entries only; older entries remain unchanged in the local `docs/worklog/` archive.
 
-- 2026-10-16 09:30 — **Audio crackle fix taken to main on its own** (issue #30, D120-D122 with PR #25's numbers): toolkit `defjam/audio-fix` `a5b2ccf` = main's pin `837e2c7` + the Deck's `3eea9a8`/`8ae5cb7` and the five macOS fixes, cherry-picked without PR #25's recorder and read-back work; `scripts/audio-holes.py`. Owner play-test on the Mac: "sounds great"; one skip remains as the car crash hits in the opening scene, left for performance work.
-- 2026-10-16 11:55 — Release check of the audio fix (PR #34): full regression `logs/regress-20261016-105358.txt` 15/17 (only `audio.dry_queue`), but the dry events were up (combat 6, versus 5). `ffa-terrordome` A/B: 23 dry with the fixes, 10 with `RECOMP_GUEST_QOS=0`, 10 with all off: user-interactive QoS for guest threads starved the APU frame thread. The frame thread now runs at the same QoS (toolkit `defjam/audio-fix`): 0 and 0 dry in two fights, intro 5 holes in 249 s, `versus` passes the gate, `combat` 1 dry. The KeTickCount thread is also stopped before guest memory is released (CI `memory_layout_posix_test` crashed at exit).
-- 2026-10-16 12:00 — **Upstream xboxrecomp PR review.** v0.14.0 "Other Machines" (`eb0aa1d5`) tagged 08:53 UTC with #177, #178, #179, #180, #181 and #201 merged; release notes credit each. #201: the maintainer kept #190's `NtClose` cleanup in `kernel_file.c`/`kernel.h` and merged only our `tests/kernel_directory_posix` fixture, which passes against #190 on Linux (WSL, GCC 14). The maintainer also followed up #177 with `14b0752c` (removed a second SSE header from `cases.py`). #203 (portable input mapping, head `d9a0a38`) is held: it still merges cleanly into v0.14.0, but it adds an `InputKey` ID space and binding format beside #191's single key table (`src/input/keyboard.{c,h}`, `RECOMP_KEYBOARD`) and #205's `RECOMP_MKB` pad. The maintainer asks for a rebase on that table, keeping named bindings and their persistence format, remapping, radial deadzones, trigger thresholds and the merge rules. Plan in `docs/research/input-mapping-pr-2026-10-12.md` (local). Nothing pushed, no comment posted, Def Jam pin unchanged.
 - 2026-10-16 12:30 — **v0.9.3 prepared** (CMake 0.9.3, `docs/releases/v0.9.3.md`): the audio crackle fix merged in PR #34 (`16e75ba`, 25/25 CI), on top of v0.9.2's unlock switches (v0.9.2 was tagged but its release was left a draft). Mac-tested only; tag follows the merged, green release-prep commit.
 - 2026-10-16 18:00 — **#203 reworked and pushed** (Vlad's go-ahead). It is rebuilt on #191's key table as 4 commits on v0.14.0 `eb0aa1d5`. Force-pushed with lease from `d9a0a38` to `cc0f192`; the PR body was replaced and the reply posted (issuecomment-6227255661). Before the push: upstream main was unchanged, and trial merges with open #215/#220/#221 were clean. Live smoke test through the runtime's SDL framebuffer window (`xbox_HostWindowMain`, `RECOMP_KEYBOARD=1`), with events pushed through the window loop and port 0 read via `xbox_InputGetState`: 112 steps, 5 runs each on v0.14.0 and the branch, identical majority state on every step, packet number advancing. Run-to-run noise was single presses dropped after macOS `TAKE_FOCUS`, and v0.14.0 showed it too. Not run: MSVC, Linux/GCC, a title on v0.14.0.
 - 2026-10-17 14:40 — Startup skip (D123): current main9c17309/toolkit4a6c88e regenerated17,896functions and built natively on macOS arm64. First6BC90 pending screen0→1 retains ControllerBootup55640 and the original selector; default off. Baseline preStart observed102s versus4s with skip; title golden matches, Start reaches main menu, 4settings/override cases pass, actual launcher checkbox saves/applies on Play. Unit350passed/33skipped; all save guards identical. Story/combat/attract validation in progress; evidence logs/startup-skip/, baseline run-20261017-143136.log.err, candidate run-20261017-143558.log.err, UI run-20261017-143919.log.err. No toolkit pin change or publication.
 - 2026-10-17 15:08 — Startup skip directed tests complete: five settings cases pass (logs/startup-skip/option-matrix-final.txt), Story scenes/creator, attract movie/return, all7 fight-result assertions, fresh-save host keyboard, late SDL pad with both players moving/damaging and combined unlock74/74 pass; all save guards restore identical. Unit fixture covers9 startup/ABI/combined cases. D124 adds PR25 integration and one normal movie boot per quick/full set; shared harness fast default and positive ordered m3 coverage implemented,56 focused unit tests pass. Ordinary quick still running; integration/full pending. No publication.
 - 2026-10-17 15:10 — Pre-PR25 ordinary quick regression5/5 passes in9min (logs/regress-20261017-150933.txt):351unit/33skip, three existing screen goldens,120s fight median120presents/2s minimum110, no faults and save restored. This run retained normal startup throughout; the new fast-default policy has56 focused unit passes and awaits integrated native validation.
+- 2026-10-17 15:20 — PR25 head0bb115f integrated locally asdb88b0a; main0.9.3 and recorder/scenario/triage changes retained. Combined toolkit5445b73 has both published histories and unchanged audio topics; focused guestCPU1/1 and Vulkan read-back2/2 pass. Regenerated17,896functions/20C/90MB and certified native build (logs/startup-skip/pr25-recomp.txt,pr25-build.txt). Fast-policy quick5/5 in410s (logs/regress-20261017-151938.txt):461unit/34skip/1slow deselected, loading/title/menu goldens, one positively ordered normal startup,120s fight median120/min112. Full suite running on disposable saves; combined toolkit unpublished and parent pin uncommitted pending authorization.
+- 2026-10-17 15:25 — Full regression environment corrected: first attempt retained RECOMP_HEADLESS=1, which suppresses the launcher by presence and prevents its UI check. Stopped owned coordinator/child, kept logs/startup-skip/pr25-full-aborted-headless.txt, verified15save files against the guard payload and its success marker byte-identical. Restarted the unchanged certified build with HEADLESS and SKIP_INTRO unset (normal startup explicitly retained only by m3); full table logs/startup-skip/pr25-full.txt, session68608. No game/source fix or gate relaxation.
+- 2026-10-17 15:35 — D126 fixes the first-menu unlock fallback: full unlockopt had loaded/exported the INI option but armed/returned until another screen. Now it applies before the first menu uses the profile; normal Game.StartMainMenu path unchanged. Native fixture asserts first event,9cases pass; incremental build certified. Targeted native unlockopt72s and five-case skipintro100s pass (logs/regress-20261017-153428.txt). Full old-boundary attempt stopped with guard restoration, log retained pr25-full-unlock-boundary.txt; final quick/full reruns pending.
 
 ## 7. Hand-off
 
-Startup skip is on `feat/skip-startup-intro`, developed on main9c17309/toolkit4a6c88e.
-Implementation and directed native Mac play tests are complete; source/tests/docs are
-being committed locally. No push requested. Five-case option matrix passes; Story,
-attract, combat, fresh-save keyboard, late SDL pad and combined unlock74/74 also pass.
-Evidence: `docs/research/startup-skip-flow.md`, `logs/startup-skip/`.
+Branch `feat/skip-startup-intro`:321cd8e startup feature, db88b0a merges exact
+PR25 head0bb115f with current main (version0.9.3 retained). Final first-menu
+unlock fallback fix D126 is being committed now; ordinary startup is unchanged.
+General → Debug → Skip startup movies and legal screen is opt-in/default off.
 
-Owner follow-up D124: integrate PR25 (head0bb115f, still open/conflicting at15:07),
-retain main0.9.3/audio fixes, build and run full regression. Fast test policy uses
-preStart screen requests as the clock anchor; m3 explicitly skip0 and positively
-requires legal/bootLoad/EA/THX/intro/preStart, other harness/scenario runs default1.
-Default/file-only option checks remove that automatic override. Native validation
-of this new test policy is pending on the integrated build.
+The initial native tests cover settings, real UI, Story, attract, combat, fresh
+saves/keyboard, late SDL pad and combined unlock74/74. PR25 build is re-lifted
+and certified:17,896functions/20C/90MiB. First integrated quick5/5 passed410s
+(logs/regress-20261017-151938.txt). Full attempts are retained as
+`pr25-full-aborted-headless.txt` (wrong HEADLESS environment) and
+`pr25-full-unlock-boundary.txt` (caught D126; stopped to fix). Neither is final
+full coverage. Both owned runs restored saves; original player data untouched.
 
-PR25 toolkit9051be9 has recorder/readback APIs absent from main4a6c88e, but lacks
-main's scene-load/QoS topics. Local isolated toolkit branch `defjam/skip-intro-pr25`
-in `logs/startup-skip/toolkit-integration` applies the already-reviewed a5b2ccf and
-4a6c88e topics onto9051be9 (tip8507a75). No published combined pin exists as of this
-inspection. Test this combination; publish only with Vlad's go-ahead and before
-committing its parent gitlink. Do not edit the other chat's PR25 checkout.
+After D126, nine native fixture cases and both targeted checks pass:
+`logs/regress-20261017-153428.txt` (unlockopt72s, five startup cases100s).
+Build: `logs/startup-skip/pr25-build-unlock-boundary.txt`. Next: repeat final
+quick, then full serially. Use disposable DEFJAM_DATA absolute path
+`/Users/vlad/Code/DefJamFFNY-recomp/logs/startup-skip/story-data` and uv with
+pyxbe/capstone/pytest/pillow. Quick can use HEADLESS=1. For full UNSET HEADLESS
+(its presence suppresses launcher) and SKIP_INTRO, and pass `--fixture
+/Users/vlad/Code/defjam-data/fixtures/mac-profiles`. Keep audio/replay/save gates.
+No concurrent game runs. Read failed rows via triage.py before original slices.
 
-Tests use `uv run --no-project --with pyxbe --with capstone --with pytest --with pillow
-python ...`, `RECOMP_HEADLESS=1`, explicit disposable DEFJAM_DATA under
-`logs/startup-skip/{runtime-data,story-data,fresh-data}`. Original player saves/settings
-must remain untouched. Story-data omits AAA so fresh Story creation can run. Fixture
-for scenario checks: `/Users/vlad/Code/defjam-data/fixtures/mac-profiles`.
-
-Next: finish the running ordinary quick check (`logs/startup-skip/regress-quick.txt`),
-commit only this task's source/docs/tests; integrate PR25 preserving its recorder and
-triage hooks, re-lift, build, focused toolkit fixtures, new-policy quick/full regression.
-Update this handoff and work log with actual final results. Do not weaken audio,
-replay or save-restoration gates. No game data, captures, generated C or logs staged.
+Root toolkit5445b73 is the combined local candidate, isolated branch
+`defjam/skip-intro-pr25` under `logs/startup-skip/toolkit-integration`; both
+published toolkit histories9051be9/4a6c88e are ancestors. GuestCPU1/1 and actual
+Vulkan read-back2/2 pass. Parent commits published9051be9; do not commit local
+combined gitlink before publication is authorized. Nothing pushed or merged
+remotely. PR25 was still open/conflicting at15:19; recheck its head before
+completion. Reports: `docs/research/startup-skip-*.md`. Finish full validation,
+audit normal/fast boot split and save guards, update reports/work log/handoff,
+source hygiene and task-only staging. Never stage game data/captures/lifted C.
