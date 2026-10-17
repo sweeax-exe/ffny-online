@@ -244,6 +244,13 @@ Story-based switch and its docs (`docs/scene-selector.md`); try the debug menu b
 - The render view the module's init claims ("AKIDEBUG", `sub_00016240`) is a fixed slot set up again
   each time, not an allocation; four entries in one run were fine.
 
+## Regressions (2026-10-17, macOS, everything off)
+
+Quick 5/5 (`logs/regress-20261017-122223.txt`). Full 15/17 (`logs/regress-20261017-132453.txt`): every check
+passes except `audio.dry_queue` in `combat` and `versus` (1 dry event each, no dropped buffers), the known macOS
+audio gate (issue #29) that main fails the same way. The developer module, the scene launcher and their hooks
+change nothing when not asked for.
+
 ## Decisions and risks
 
 - Injecting means constructing the object on the host side with the game's allocator
