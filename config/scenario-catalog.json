@@ -34,13 +34,11 @@
   "cutscenes": {
     "files": "assets/cinema/*.viv in the dump: sc00 to sc21 and the gf* set (docs/research/widescreen-game-cameras.md, section 4.2)",
     "subsystem": "CINEMA::CCinemaSubsystem::LoadScene (its assert strings start near guest 0x29C715); the cinema update sub_00078A40 -> sub_0005BE50 -> the camera sampler sub_00070DF0",
-    "loader": "sub_00073FD0 (thiscall, the scene's name as its first argument) opens assets/nis_<name>.bin and assets/cinema/<name>.viv; its _enter hook logs every scene as [CINEMA] and as a recorder 'cinema' event",
+    "loader": "sub_00073FD0 (thiscall, the scene's name as its first argument) opens assets/nis_<name>.bin and assets/cinema/<name>.viv; its _enter hook logs every scene as [SCENE] loading <name> and as a recorder 'cinema' event",
     "view_signal": "view mode 1 (sub_0001A4E0, a 'view' event with cutscene=true) is set by some shots only: once in sc00, never in sc05 on macOS 2026-10-14. The 'cinema' event is the reliable signal",
     "launch_command": null,
-    "launch_note": "No front-end command names a scene (scripts/funccall-catalog.py --grep cinema --grep scene: none; Game.LoadNextRunModule() was not reached in the one try). Scenes are launched through the loader hook instead: launch_env.",
-    "launch_env": "RECOMP_TEST_CINEMA_SCENE",
-    "launch_inject": "game.startstorymode(#1=>Controller.GetControllersEnabled()",
-    "launch_how": "RECOMP_TEST_CINEMA_SCENE=<scene> plays that scene in place of the first one the game loads. Start Story with a profile whose next scene is the prologue's sc00 (no Story progress; with the mac-profiles fixture the crib route's profile is one): `scenarios.py cutscene --fixture <f> --from crib --scene sc05`. Calibrated on macOS 2026-10-14: sc00 replaced by sc05, an in-engine scene played for about 65 s, then the character screen",
+    "launch_note": "No front-end command names a scene (funccall-catalog: 444 commands). Scenes are played by the game's own developer cinema mode instead, in its developer run module rebuilt from the host (docs/research/dev-module-revival.md).",
+    "launcher": "RECOMP_SCENE=<name or number>: the developer run module starts at the title screen, plays the scene, and the game returns to the main menu (src/hooks/dev_module.c, scene_launcher.c). `scenarios.py scene <name>` does one, `scenarios.py scenes all` the tour; the overlay's Debug tab has a picker. No save, profile or menu is involved",
     "calibrated": true
   }
 }
