@@ -50,6 +50,7 @@ void sub_00068BA0(void)
 }
 /* dev_module.c's hand-off, which the scene launcher calls when a scene ends. */
 void dev_module_scene_ended(void) { fprintf(stderr, "[stub] scene ended\n"); }
+void dev_module_again(void) { fprintf(stderr, "[stub] again\n"); }
 /* The mode system's "start the cinema" (thiscall, no arguments): what scene it was given, then state 3. */
 void sub_0002D4F0(void)
 {
@@ -211,7 +212,13 @@ def test_scene_launcher_starts_the_cinema_mode_and_restores_the_state(tool):
 def test_scene_launcher_refuses_a_scene_the_game_does_not_have(tool):
     out, err = run(tool, 'launch', RECOMP_SCENE='sc99', RECOMP_SCENE_DELAY_FRAMES='1')
     assert not any(line.startswith('start cinema') for line in out)
-    assert 'RECOMP_SCENE=sc99 is not a scene of this game; known: sc00 sc01 sc07a gf1b1' in err
+    assert 'RECOMP_SCENE: sc99 is not a scene of this game; known: sc00 sc01 sc07a gf1b1' in err
+
+
+def test_scene_launcher_plays_a_list_coming_back_for_each(tool):
+    out, err = run(tool, 'launch', RECOMP_SCENE='sc07a,1', RECOMP_SCENE_DELAY_FRAMES='1')
+    assert out[2] == 'start cinema: scene 2'
+    assert '[stub] again' in err and err.index('[stub] again') < err.index('[stub] scene ended')
 
 
 def test_scene_launcher_does_nothing_unless_asked(tool):

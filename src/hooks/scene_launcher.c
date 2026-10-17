@@ -45,6 +45,7 @@
 extern void sub_0002D4F0(void);         /* CModeSubsystem: start REAL TIME CINEMA (thiscall, no arguments) */
 
 static volatile int s_request = -1;     /* asked for, any thread; -1 none */
+static int s_queue[64], s_queued, s_next; /* RECOMP_SCENE=a,b,c: played in turn, the module re-entered for each */
 static volatile int s_playing = -1;     /* the scene being played, -1 none */
 static volatile unsigned s_updates;     /* mode updates seen: the 3D module is running while this moves */
 static int s_saved_state, s_delay = -1;
@@ -117,19 +118,24 @@ void scene_launcher_mode_enter(void)
     if (s_delay < 0) {
         const char *want = getenv("RECOMP_SCENE"), *delay = getenv("RECOMP_SCENE_DELAY_FRAMES");
         s_delay = delay && *delay ? atoi(delay) : 30;
-        if (want && *want) {
-            index = scene_launcher_find(want);
+        while (want && *want && s_queued < 64) {
+            char one[16];
+            size_t n = strcspn(want, ",");
+            snprintf(one, sizeof one, "%.*s", (int)(n < sizeof one - 1 ? n : sizeof one - 1), want);
+            index = scene_launcher_find(one);
             if (index < 0) {
                 char list[640] = "";
                 size_t len = 0;
                 int i;
                 for (i = 0; i < scene_launcher_count() && scene_launcher_name(i, name, sizeof name); i++)
                     len += (size_t)snprintf(list + len, sizeof list - len, "%s%s", i ? " " : "", name);
-                fprintf(stderr, "[SCENE] RECOMP_SCENE=%s is not a scene of this game; known: %s\n", want, list);
+                fprintf(stderr, "[SCENE] RECOMP_SCENE: %s is not a scene of this game; known: %s\n", one, list);
             } else {
-                scene_launcher_request(index);
+                s_queue[s_queued++] = index;
             }
+            want += n + (want[n] == ',');
         }
+        if (s_queued) scene_launcher_request(s_queue[s_next++]);
     }
     if (!mode || !MEM8(mode + MODE_ACTIVE)) return;
     state = MEM32(mode + MODE_STATE);
@@ -142,6 +148,10 @@ void scene_launcher_mode_enter(void)
         fprintf(stderr, "[SCENE] %s ended; mode state %d again\n", name, s_saved_state);
         recorder_event_text("cinema", "ended", name);
         s_playing = -1;
+        if (s_next < s_queued) {            /* the next of RECOMP_SCENE's list: leave, then come back for it */
+            scene_launcher_request(s_queue[s_next++]);
+            dev_module_again();
+        }
         dev_module_scene_ended();
         return;
     }

@@ -46,6 +46,16 @@
 extern void sub_00029680(void);         /* the game's allocator: cdecl (size, tag, flags) */
 extern void sub_000779F0(void);         /* the module's constructor body (thiscall): pause menu, popup */
 extern void sub_000773A0(void);         /* the manager's request(type) (thiscall, one argument) */
+extern void sub_0001B1C0(void);         /* the task list's remove(task) (thiscall, one argument) */
+
+/* The mode system's init (sub_0002C790) adds a static task to the task list (subsystem 1) with
+ * sub_0001B170, which links it at the head without checking whether it is already there; the
+ * cinema takes it out and puts it back, but nothing removes it when the module goes. Entered a
+ * second time in one run, the module added it again: it then pointed at itself and the next walk
+ * of the list never ended (the game froze at the second scene). EA's developers presumably never
+ * left and re-entered this module; we take the task out when the module unloads. */
+#define TASKS_SLOT      0x002FB14Cu     /* registry subsystem 1: the task list (head +4, next at node +8) */
+#define DEV_TASK        0x002DBF28u
 
 /* The factory's eight module types by virtual table, and the loader type that leads to each. */
 static const uint32_t k_module_table[8] = { 0x0029D784u, 0x0029D5C4u, 0x0029D5E4u, 0x0029D604u,
@@ -65,7 +75,7 @@ static const uint32_t k_slots[8] = {
 };
 
 static volatile int s_mode = -1;        /* -1 env not read, 0 idle, 1 waiting for the anchor, 2 wanted, 3 queued */
-static volatile int s_leave, s_for_scene;
+static volatile int s_leave, s_for_scene, s_again;
 static volatile int s_title_seen;       /* the start-up sequence is over: its own requests are done */
 static char s_anchor[96];
 static uint32_t s_table, s_object;
@@ -79,6 +89,25 @@ static int module_type(uint32_t module)
     if (!module) return -1;
     for (i = 0; i < 8; i++) if (MEM32(module) == k_module_table[i]) return i;
     return -1;
+}
+
+static int task_listed(uint32_t list, uint32_t task)
+{
+    uint32_t node = MEM32(list + 4);
+    int n;
+    for (n = 0; node && n < 4096; n++, node = MEM32(node + 8))
+        if (node == task) return 1;
+    return 0;
+}
+
+/* Take the developer task out of the task list if it is in it (the game's own remove). */
+static void drop_dev_task(const char *when)
+{
+    uint32_t list = MEM32(TASKS_SLOT), task = DEV_TASK;
+    if (!list || !task_listed(list, task)) return;
+    guest_call(sub_0001B1C0, list, 1, &task);
+    fprintf(stderr, "[DEVMOD] removed the developer task %08X from the task list (%s)%s\n", task, when,
+            task_listed(list, task) ? "; it is STILL listed" : "");
 }
 
 static uint32_t guest_alloc(uint32_t size)
@@ -115,6 +144,7 @@ void dev_module_request(int for_scene)
 }
 void dev_module_leave(void) { if (dev_module_active()) s_leave = 1; }
 void dev_module_scene_ended(void) { if (s_for_scene) { s_for_scene = 0; dev_module_leave(); } }
+void dev_module_again(void) { s_again = 1; }
 
 void dev_module_after_call(const char *text)
 {
@@ -147,7 +177,9 @@ void dev_module_manager_enter(void)
                       : s_return_type == 0 && s_fe_screen && s_fe_screen < FE_SCREEN_NONE ? s_fe_screen
                       : FE_MAIN_MENU;
         s_leave = 0;
-        s_mode = 0;
+        s_mode = s_again ? 2 : 0;           /* asked to come back (the next scene of a list) */
+        s_for_scene = s_again;
+        s_again = 0;
         /* As the game's own flow does before it requests the front end's loader (sub_000C1DF0). */
         if (fe && want) MEM32(fe + FE_SCREEN) = want;
         fprintf(stderr, "[DEVMOD] leaving: front-end screen %u, requesting loader type %u (the front end; type %d ran "
@@ -192,6 +224,18 @@ void dev_module_trace(int slot)
 {
     static const char *names[8] = { "destroy", "Load", "Start", "Update", "Render", "CanLeave", "Stop", "Unload" };
     if (!s_object || g_ecx != s_object) return;
+    if (slot == 1) drop_dev_task("before Load");    /* in case anything left it there */
+    if (slot == 7) drop_dev_task("at Unload");
+    if (slot == 3 && MEM32(s_object + 0x14)) {     /* the mode system's state, whenever it changes */
+        static uint32_t last = 0xFFFFFFFFu;
+        uint32_t state = MEM32(MEM32(s_object + 0x14) + 0x2A0);
+        if (state != last) {
+            static const char *modes[8] = { "debug menu", "game", "idle", "real time cinema", "stage viewer",
+                                            "animation viewer", "create player", "crowd test or Blazin viewer" };
+            fprintf(stderr, "[DEVMOD] mode state %u (%s)\n", state, state < 8 ? modes[state] : "?");
+            last = state;
+        }
+    }
     if (slot == 3 && ++s_updates > 3 && s_updates % 600) return;
     if (slot == 4 && ++s_renders > 3 && s_renders % 600) return;
     if (slot == 3 || slot == 4) {
