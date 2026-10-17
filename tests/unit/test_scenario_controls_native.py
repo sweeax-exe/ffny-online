@@ -48,6 +48,8 @@ void sub_00068BA0(void)
     g_eax = 0x77; g_ecx = 0xDEAD; g_edx = 0xBEEF; g_esi = 1;
     g_esp += 4;
 }
+/* dev_module.c's hand-off, which the scene launcher calls when a scene ends. */
+void dev_module_scene_ended(void) { fprintf(stderr, "[stub] scene ended\n"); }
 /* The mode system's "start the cinema" (thiscall, no arguments): what scene it was given, then state 3. */
 void sub_0002D4F0(void)
 {
@@ -203,7 +205,7 @@ def test_scene_launcher_starts_the_cinema_mode_and_restores_the_state(tool):
     assert out[3] == 'tick 1: state 3, playing 2, eax 77, esp 30000'      # registers as they were
     assert out[4:6] == ['tick 2: state 3, playing 2, eax 77, esp 30000', 'tick 3: state 3, playing 2, eax 77, esp 30000']
     assert out[6] == 'tick 4: state 1, playing -1, eax 77, esp 30000'     # ended: the game state again
-    assert '[SCENE] sc07a ended; mode state 1 again' in err
+    assert '[SCENE] sc07a ended; mode state 1 again' in err and '[stub] scene ended' in err
 
 
 def test_scene_launcher_refuses_a_scene_the_game_does_not_have(tool):

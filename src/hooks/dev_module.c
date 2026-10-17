@@ -10,8 +10,12 @@
  * The manager then loads it on its loader thread, asks the current module whether it can leave,
  * stops and unloads that one, and starts this. docs/research/dev-module-revival.md has the map.
  *
- *   RECOMP_DEV_MODULE=1           queue it once the front end's main menu is up
+ *   RECOMP_DEV_MODULE=1           queue it once the title screen is up (after the start-up movies)
  *   RECOMP_DEV_MODULE=<anchor>    ... once a front-end call containing <anchor> has run
+ *   RECOMP_SCENE=<scene>          implies RECOMP_DEV_MODULE=1; after the scene the module is left
+ *
+ * Leaving requests the loader of the module that ran before (by its virtual table: the eight
+ * module types and their loaders are tabled below), as the game's own flow does.
  *
  * Every method of ours is traced as [DEVMOD]. A test control: nothing changes unless set.
  */
@@ -28,6 +32,11 @@
 #include "dev_module.h"
 
 #define MANAGER_SLOT    0x002FB1A4u     /* registry 0x2FB148, subsystem 0x17: CRunModuleMan */
+#define FRONTEND_SLOT   0x002FB17Cu     /* registry 0x2FB148, subsystem 0x0D: the front end */
+#define FE_SCREEN       0x9C            /* the screen the front end opens when it starts (sub_0006B000 sets it): an
+                                           index into the name table at 0x2DFE08; 33 is "none" */
+#define FE_SCREEN_NONE  33
+#define FE_MAIN_MENU    15              /* intMain/mainMenu.swf (1 is the title, intMain/preStart.swf) */
 #define MGR_CURRENT     0x18
 #define MGR_PENDING     0x1C
 #define MGR_STATE       0x24            /* 0 running, 1 requested, 2 loading, 3 loaded */
@@ -36,6 +45,12 @@
 
 extern void sub_00029680(void);         /* the game's allocator: cdecl (size, tag, flags) */
 extern void sub_000779F0(void);         /* the module's constructor body (thiscall): pause menu, popup */
+extern void sub_000773A0(void);         /* the manager's request(type) (thiscall, one argument) */
+
+/* The factory's eight module types by virtual table, and the loader type that leads to each. */
+static const uint32_t k_module_table[8] = { 0x0029D784u, 0x0029D5C4u, 0x0029D5E4u, 0x0029D604u,
+                                            0x0029D664u, 0x0029D644u, 0x0029D624u, 0x0029D764u };
+static const uint32_t k_loader_for[8] = { 9, 15, 10, 11, 13, 14, 12, 16 };
 
 /* destructor, Load, Start, Update(dt), Render, CanLeave, Stop, Unload */
 static const uint32_t k_slots[8] = {
@@ -49,10 +64,21 @@ static const uint32_t k_slots[8] = {
     0x00077DD0u,    /* Unload: undoes Init */
 };
 
-static int s_mode = -1;                 /* -1 env not read, 0 off, 1 waiting for the anchor, 2 wanted, 3 queued */
+static volatile int s_mode = -1;        /* -1 env not read, 0 idle, 1 waiting for the anchor, 2 wanted, 3 queued */
+static volatile int s_leave, s_for_scene;
 static char s_anchor[96];
 static uint32_t s_table, s_object;
+static int s_return_type = -1;          /* the module type that ran before ours */
+static uint32_t s_fe_screen;            /* the front end's screen number then, given back when leaving */
 static unsigned s_updates, s_renders;
+
+static int module_type(uint32_t module)
+{
+    int i;
+    if (!module) return -1;
+    for (i = 0; i < 8; i++) if (MEM32(module) == k_module_table[i]) return i;
+    return -1;
+}
 
 static uint32_t guest_alloc(uint32_t size)
 {
@@ -63,19 +89,31 @@ static uint32_t guest_alloc(uint32_t size)
 
 static void read_env(void)
 {
-    const char *v = getenv("RECOMP_DEV_MODULE");
+    const char *v = getenv("RECOMP_DEV_MODULE"), *scene = getenv("RECOMP_SCENE");
     size_t i;
     s_mode = 0;
+    if (scene && *scene) { s_for_scene = 1; if (!v || !*v) v = "1"; }
     if (!v || !*v || !strcmp(v, "0")) return;
-    snprintf(s_anchor, sizeof s_anchor, "%s", strcmp(v, "1") ? v : "getscreeninfo(intmain/mainmenu");
+    /* The title screen: the start-up sequence (logos, movies) is over, so no request of the game's
+     * own replaces ours in the manager's single pending slot (it did at bootLoad). */
+    snprintf(s_anchor, sizeof s_anchor, "%s", strcmp(v, "1") ? v : "getscreeninfo(intmain/prestart");
     for (i = 0; s_anchor[i]; i++) s_anchor[i] = (char)tolower((unsigned char)s_anchor[i]);
     s_mode = 1;
     fprintf(stderr, "[DEVMOD] armed: the developer module is queued after a front-end call containing \"%s\"\n",
             s_anchor);
 }
 
-void dev_module_request(void) { if (s_mode < 0) read_env(); if (s_mode < 3) s_mode = 2; }
 int  dev_module_active(void) { uint32_t m = MEM32(MANAGER_SLOT); return s_object && m && MEM32(m + MGR_CURRENT) == s_object; }
+void dev_module_request(int for_scene)
+{
+    if (s_mode < 0) read_env();
+    s_leave = 0;
+    if (dev_module_active() || s_mode == 3) return;
+    s_for_scene = for_scene;
+    s_mode = 2;
+}
+void dev_module_leave(void) { if (dev_module_active()) s_leave = 1; }
+void dev_module_scene_ended(void) { if (s_for_scene) { s_for_scene = 0; dev_module_leave(); } }
 
 void dev_module_after_call(const char *text)
 {
@@ -95,7 +133,35 @@ void dev_module_manager_enter(void)
     int i;
 
     if (s_mode < 0) read_env();
-    if (s_mode != 2 || !mgr || MEM32(mgr + MGR_STATE) != 0 || MEM32(mgr + MGR_PENDING) != 0) return;
+    if (!mgr || MEM32(mgr + MGR_STATE) != 0 || MEM32(mgr + MGR_PENDING) != 0) return;
+    if (s_leave && MEM32(mgr + MGR_CURRENT) == s_object) {
+        /* Back to the front end: a game, Story or gym module cannot simply be re-entered (their own
+         * flow sets up the match or the Story point first), so those return to the main menu too. */
+        uint32_t type = k_loader_for[0];
+        uint32_t fe = MEM32(FRONTEND_SLOT);
+        const char *screen = getenv("RECOMP_DEV_MODULE_SCREEN");
+        uint32_t want = screen && *screen ? (uint32_t)strtoul(screen, NULL, 0)
+                      : s_return_type == 0 && s_fe_screen && s_fe_screen < FE_SCREEN_NONE ? s_fe_screen
+                      : FE_MAIN_MENU;
+        s_leave = 0;
+        s_mode = 0;
+        /* As the game's own flow does before it requests the front end's loader (sub_000C1DF0). */
+        if (fe && want) MEM32(fe + FE_SCREEN) = want;
+        fprintf(stderr, "[DEVMOD] leaving: front-end screen %u, requesting loader type %u (the front end; type %d ran "
+                "before)\n", fe ? MEM32(fe + FE_SCREEN) : 0, type, s_return_type);
+        recorder_event_text("devmod", "state", "leaving");
+        guest_call(sub_000773A0, mgr, 1, &type);
+        return;
+    }
+    if (s_mode == 3 && MEM32(mgr + MGR_CURRENT) != s_object) {
+        /* Queued but never made current: the game's own request took the single pending slot. */
+        fprintf(stderr, "[DEVMOD] the queued module %08X was replaced by the game's own request before it ran\n",
+                s_object);
+        s_mode = 0;
+        s_object = 0;
+        return;
+    }
+    if (s_mode != 2) return;
     if (!s_table) {
         s_table = guest_alloc(sizeof k_slots);
         if (!s_table) { fprintf(stderr, "[DEVMOD] no memory for the table\n"); s_mode = 0; return; }
@@ -107,11 +173,14 @@ void dev_module_manager_enter(void)
     MEM32(obj) = s_table;
     guest_call(sub_000779F0, obj, 0, NULL);
     s_object = obj;
+    s_return_type = module_type(MEM32(mgr + MGR_CURRENT));
+    s_fe_screen = MEM32(FRONTEND_SLOT) ? MEM32(MEM32(FRONTEND_SLOT) + FE_SCREEN) : 0;
     MEM32(mgr + MGR_PENDING) = obj;
     MEM32(mgr + MGR_STATE) = 1;
     s_mode = 3;
-    fprintf(stderr, "[DEVMOD] queued: module %08X, table %08X, pause menu %08X, popup %08X; current module %08X\n",
-            obj, s_table, MEM32(obj + 0x3C), MEM32(obj + 0x40), MEM32(mgr + MGR_CURRENT));
+    fprintf(stderr, "[DEVMOD] queued: module %08X, table %08X, pause menu %08X, popup %08X; current module %08X "
+            "(type %d, table %08X), front-end screen %u\n", obj, s_table, MEM32(obj + 0x3C), MEM32(obj + 0x40),
+            MEM32(mgr + MGR_CURRENT), s_return_type, MEM32(MEM32(mgr + MGR_CURRENT)), s_fe_screen);
     recorder_event_text("devmod", "state", "queued");
 }
 

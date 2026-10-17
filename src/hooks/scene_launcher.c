@@ -14,8 +14,9 @@
  * and when the scene has ended puts back the state that was running before. No profile,
  * no Story progress and no menus are involved.
  *
- *   RECOMP_SCENE=<name or number>    play it once the 3D module has run a few seconds
- *                                    (RECOMP_SCENE_DELAY_FRAMES, default 120)
+ *   RECOMP_SCENE=<name or number>    play it once the mode system has run half a second
+ *                                    (RECOMP_SCENE_DELAY_FRAMES, default 30); the developer
+ *                                    run module is started for it (dev_module.c) and left after
  *   scene_launcher_request(index)    the same from the overlay (Debug tab, Story scenes)
  *
  * The scene loader sub_00073FD0 is hooked too (scene_launcher_loader_enter): every scene
@@ -32,6 +33,7 @@
 #include "guest_call.h"
 #include "recorder.h"
 #include "scene_launcher.h"
+#include "dev_module.h"
 
 #define SCENE_TABLE     0x002DC018u     /* scene number -> name, one guest pointer each */
 #define MODE_ACTIVE     0x21            /* byte: the mode system is up */
@@ -114,7 +116,7 @@ void scene_launcher_mode_enter(void)
     s_updates++;
     if (s_delay < 0) {
         const char *want = getenv("RECOMP_SCENE"), *delay = getenv("RECOMP_SCENE_DELAY_FRAMES");
-        s_delay = delay && *delay ? atoi(delay) : 120;
+        s_delay = delay && *delay ? atoi(delay) : 30;
         if (want && *want) {
             index = scene_launcher_find(want);
             if (index < 0) {
@@ -140,6 +142,7 @@ void scene_launcher_mode_enter(void)
         fprintf(stderr, "[SCENE] %s ended; mode state %d again\n", name, s_saved_state);
         recorder_event_text("cinema", "ended", name);
         s_playing = -1;
+        dev_module_scene_ended();
         return;
     }
     index = s_request;

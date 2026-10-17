@@ -7,7 +7,9 @@
 extern "C" {
 #endif
 
-void dev_module_request(void);                  /* queue it at the next quiet manager tick */
+void dev_module_request(int for_scene);         /* queue it at the next quiet manager tick; for_scene: leave after the scene */
+void dev_module_leave(void);                    /* back to the module that ran before */
+void dev_module_scene_ended(void);              /* scene_launcher: a scene ended */
 int  dev_module_active(void);                   /* it is the current run module */
 void dev_module_after_call(const char *text);   /* the front-end call hook: arms on RECOMP_DEV_MODULE's anchor */
 void dev_module_manager_enter(void);            /* _enter of the manager's tick sub_00077040 */
