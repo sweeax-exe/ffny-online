@@ -66,6 +66,7 @@ static const uint32_t k_slots[8] = {
 
 static volatile int s_mode = -1;        /* -1 env not read, 0 idle, 1 waiting for the anchor, 2 wanted, 3 queued */
 static volatile int s_leave, s_for_scene;
+static volatile int s_title_seen;       /* the start-up sequence is over: its own requests are done */
 static char s_anchor[96];
 static uint32_t s_table, s_object;
 static int s_return_type = -1;          /* the module type that ran before ours */
@@ -120,9 +121,11 @@ void dev_module_after_call(const char *text)
     char low[160];
     size_t i;
     if (s_mode < 0) read_env();
-    if (s_mode != 1 || !text) return;
+    if (!text) return;
     for (i = 0; text[i] && i + 1 < sizeof low; i++) low[i] = (char)tolower((unsigned char)text[i]);
     low[i] = 0;
+    if (strstr(low, "getscreeninfo(intmain/prestart")) s_title_seen = 1;
+    if (s_mode != 1) return;
     if (strstr(low, s_anchor)) s_mode = 2;
 }
 
@@ -161,7 +164,7 @@ void dev_module_manager_enter(void)
         s_object = 0;
         return;
     }
-    if (s_mode != 2) return;
+    if (s_mode != 2 || !s_title_seen) return;     /* a request made earlier waits for the title screen */
     if (!s_table) {
         s_table = guest_alloc(sizeof k_slots);
         if (!s_table) { fprintf(stderr, "[DEVMOD] no memory for the table\n"); s_mode = 0; return; }
