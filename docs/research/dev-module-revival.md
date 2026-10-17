@@ -1,0 +1,195 @@
+# Reviving the developer module (CRunModuleAki): progress
+
+Owner request (2026-10-16): play any Story scene at any moment, with any profile, without
+the menus. The game still holds EA's developer mode system, whose REAL TIME CINEMA mode
+plays a scene by number, but the module that runs it is dead code in the retail build.
+This document tracks the attempt to bring it back. Branch `feature/scene-launcher`
+(worktree `DefJamFFNY-recomp-scenes`).
+
+## Status
+
+| Step | What | State |
+|---|---|---|
+| 0 | Find the cinema mode and why it never runs | done (below) |
+| 1 | Map the run-module interface and the developer module's methods; how the next module is chosen | done 2026-10-17 (viable) |
+| 2 | Build the module ourselves (guest object + virtual table) and inject it; its init runs | not started |
+| 3 | Play a scene in it, return cleanly; overlay picker and `RECOMP_SCENE` | not started |
+
+## Established (step 0, 2026-10-16)
+
+- **The mode system.** `CModeSubsystem` (0x2AC bytes, allocated by `sub_00077C40` with the tag
+  "CRunModuleAki::Init.m_pMode", registered as subsystem 9 in the registry at `0x2FB148`,
+  init `sub_0002C790`). Its update `sub_0002DFF0` (thiscall, one stack argument) switches on
+  `this+0x2A0`: 0 the debug menu (`sub_0002DBE0`), 1 the game, 2 idle, 3 REAL TIME CINEMA,
+  4-7 the viewers (stage, animation, create player, ...). Settings: 15 words at
+  `MEM32(this+0x2A8)`; the scene number is at `+0x18`. Init sets state 0 (debug menu).
+- **The cinema mode.** `sub_0002D4F0` starts it: pauses subsystem `0x22` (`sub_000C5900`),
+  sets subsystem `0x15` (cinema) flag 2, state 3, names the scene through the table at
+  `0x002DC018` (38 pointers: 0 `sc00` ... 22 `sc21`, 23 `gf1a` ... 37 `gf3c`) and has the cinema
+  player at `0x3459A0` load it (`sub_00076C60` -> `sub_00073FD0`, which formats
+  `assets/nis_%s.bin` and `assets/cinema/%s.viv`). State 3 calls `sub_00076CD0` on the player
+  each frame; when it reports done, `sub_0002D570` unloads (`sub_00076D00`), resumes `0x22`
+  (`sub_000C5910`) and sets state 0.
+- **Strings beside it.** Mode names (`MODE - GAME`, `MODE - REAL TIME CINEMA`, `MODE - STAGE VIEWER`,
+  `MODE - ANIMATION VIEWER`, `MODE - CREATE PLAYER`, `MODE - CROWD TEST`, `MODE - BLAZIN VIEWER`),
+  debug menu lines (`DEBUG MENU -- %s`, `MATCH_MODE`, `FIGHTER_0`..`3`, `STAGE`, `CINEMA`,
+  `JUMP STARTING THE DAMN GAME!!!`), `AKIDEBUG`.
+- **Why it never runs.** The module that owns the mode system, `CRunModuleAki` (methods
+  `0x779A0`-`0x77EF0`: update `0x77A40`, a render-like `0x77B20`, init `0x77C40`, shutdown
+  `0x77DD0`, mode-state setter `0x77EB0`, destructors), is referenced by nothing: no virtual
+  table, no call, no jump, no stored address anywhere in the image. The run-module factory
+  `sub_000773A0` (switch on 17 types, tags `RunModule`/`RunModuleLoad`/`RunModuleSMLoad`) builds
+  every module the game uses; the developer module is not among them. A hook on its update
+  (`sub_0002DFF0_enter`) never fired in a Battle fight (`logs/run-20261016-202155.log.err`).
+- **Story's cinema module** is a different class, virtual table `0x29D664` (slot 1
+  `sub_0007B150` loads the scene, whose name comes from the Story state through subsystem
+  `0x18`'s entity data), so it cannot be told a scene by number.
+- **The module interface.** Every live module has an 8-slot virtual table (slot 0 a destructor);
+  the manager functions `0x77040`, `0x771E0`, `0x77230`, `0x772D0` call slots `+0x04` to `+0x1C`.
+
+## Step 1 findings
+
+### A. The run-module interface (2026-10-16; sub-agent report, spot-checked)
+
+Spot-checked: the base table, slot 3's `ret 4` (Story cinema `0x7B2D0`), and the swap in
+`sub_00077040` (`+0x18` <- `+0x1C`, `+0x24` cleared, then 2).
+
+- **Manager:** `CRunModuleMan`, 0x4C bytes, registry subsystem `0x17` (stored at `0x2FB1A4`).
+  Fields: **+0x18** current module, **+0x1C** pending module, **+0x24** state (0 running,
+  1 requested, 2 loading, 3 loaded/waiting to swap), +0x21 restart request (`sub_00077020`),
+  +0x20 "exit the main loop" (no writer found).
+- **Base class:** virtual table `0x29D5A4` = destructor `0x76D30` + seven `_purecall` (`0x2007EF`).
+  Only slot 0 (destructor, `delete` flag) and slot 3 (`float dt`) take a stack argument.
+
+| slot | offset | name (ours) | when |
+|---|---|---|---|
+| 0 | +0x00 | destructor(delete) | after Stop/Unload of the old module |
+| 1 | +0x04 | Load() | on the **loader thread** (`sub_000771E0`), on the pending module; then state 3 |
+| 2 | +0x08 | Start() | main thread, right after the swap (and on an in-place restart) |
+| 3 | +0x0C | Update(float dt) | every tick (`sub_00077040`), under the critical section `0x2FB000` |
+| 4 | +0x10 | Render() -> bool | once a frame (`sub_00077740`); the bool feeds the fps counter only |
+| 5 | +0x14 | CanLeave() -> bool | polled in state 3 before the swap; 0 holds the swap |
+| 6 | +0x18 | Stop() | inverse of Start: in the swap, the restart and teardown |
+| 7 | +0x1C | Unload() | inverse of Load: in the swap and teardown |
+
+- **The swap (state 3):** old->CanLeave(); old->Stop(); old->Unload(); new->Start();
+  delete old. The main loop is `sub_00011500` (init `sub_00011E40`, loop `sub_00011CD0` calling
+  `sub_00077040(dt)` and `sub_00077740` per frame, shutdown `sub_00011060`).
+- **The 17 types** (factory `sub_000773A0`, heap memory comes back zeroed):
+
+| id | module | size | table |
+|---|---|---|---|
+| 0 | front end | 0x28 | `0x29D784` |
+| 1 | 3D front end (guess) | 0x4C | `0x29D5C4` |
+| 2 | game | 0x4C | `0x29D5E4` |
+| 3 | tutorial (guess) | 0x50 | `0x29D604` |
+| 4 | Story cinema | 0x08 | `0x29D664` |
+| 5 | movie player | 0x20 | `0x29D644` |
+| 6 | gym (guess) | 0x24 | `0x29D624` |
+| 7 | character select (guess) | 0x14 | `0x29D764` |
+| 8-16 | loaders, 0x18 each | | 9->0, 15->1, 10->2, 11->3, 13->4, 14->5, 12->6, 16->7 ("RunModuleSMLoad"); 8 never requested |
+
+  A loader's Start (`sub_0007AB80`) requests its target `this+4`, so a switch is
+  old -> loader -> target, and the old module unloads before the target loads. The first loader
+  ("RunModuleLoadStartup") is made directly in `sub_00077230`.
+- **`LoadNextRunModule`** (front-end command, `sub_00046200`) does not call the factory: it calls
+  slot 2 of an object at `game(0x18)+0x38C`, a separate flow-object class.
+- Open: what `CanLeave`'s helper `sub_001811F0` tests (a 256-entry table; audio streams?);
+  `sub_00019320` on subsystem 4 at every swap (resource pools?).
+
+### B. The developer module (2026-10-17; sub-agent report, spot-checked)
+
+Spot-checked: `0x77B20` returns 1; the game module's table `0x29D5E4` has `0x793A0` in slot 1 and
+`0x79580` in slot 7 (the counterparts of the developer module's `0x77C40` and `0x77DD0`);
+`0x76EE0` is `mov al,1; ret`, used as CanLeave by three live loader tables; `sub_00044150`
+fetches subsystem 9 and reads its mode state.
+
+- **What in 0x77740-0x77EF0 is not the developer module:** `0x77740` the host's Render loop;
+  `0x77780` the constructor of table `0x29D784`; `0x777A0`-`0x77980` the deleting destructors of the
+  16 live tables; `0x779B0`-`0x779E0`, `0x77E70`, `0x77E90` belong to FXTexAnim and the pause menu;
+  `0x77EB0`/`0x77EE0`/`0x77EF0` are `CModeSubsystem`'s constructor and destructors.
+- **The developer module's own methods:** `0x779F0` (creates the pause menu, 0x104 bytes, loads
+  `assets/misc.viv|pause.xsh`, fetches subsystem 0x28 Popup into `this+0x40`; runs in the
+  constructor), `0x77C40` Init, `0x77A40` Update(dt), `0x77B20` Render, `0x77DD0` Shutdown.
+  `0x779A0` is an unreferenced `ret 4` no-op of unknown role.
+- **The table to write** (base `0x29D5A4` filled in):
+
+| slot | entry | why |
+|---|---|---|
+| 0 | `0x76D30` (base destructor) | frees with `sub_00029740` |
+| 1 Load | `0x77C40` | same shape as the game module's slot 1 `0x793A0`; runs on the loader thread |
+| 2 Start | a `ret` stub (ours) | no surviving function; the live modules' Start is trivial for this kind |
+| 3 Update | `0x77A40` | `ret 4` |
+| 4 Render | `0x77B20` | returns 1 |
+| 5 CanLeave | `0x76EE0` | must return true or the module can never be left |
+| 6 Stop | `0x76EF0` (`ret`) | |
+| 7 Unload | `0x77DD0` | undoes Init, as the game module's slot 7 `0x79580` does |
+
+- **The object:** at least 0x44 bytes from `sub_00029680` (so the destructor's `sub_00029740` frees
+  it). Fields (subsystem ids in brackets; some names are guesses): +04 Render (4), +08 Task (1),
+  +0C Sprite (5), +10 Scene (6), **+14 the mode system** (0x2AC bytes, registered as 9), +18 Font
+  (7), +1C BackEnd (0x18), +20 Cinema (0x15), +24 Particle (0xA), +28 LightMan (0xB), +2C FrontEnd
+  (0xD), +30 FXSparkleMan (0x21), +34 FXTexAnim (registered as 0x22), +38 FXScreen (0x26),
+  +3C pause menu, +40 Popup.
+- **Constructor to write** (as the game module's `0x76DC0` does): set the table pointer, zero
+  `+04`..`+40`, call `0x779F0`.
+- **What Init needs:** the registry filled by `sub_00011E40` (always so once a module exists);
+  it claims a render view "AKIDEBUG" (`sub_00016240`), opens `RunModuleAKI.log`, adds the static task
+  `0x2DBF28`, reads the venue (0x1F) and fighter (0x20) tables, allocates a 0x400-byte console, and
+  registers subsystems 9 and 0x22. Unload clears 9 and 0x22 and frees what Init made (not the
+  AKIDEBUG view slot).
+- **Subsystem 9 is read by retail code** (`sub_00044150`, `441C0`, `44210`, `44AC0`, `44B10`,
+  `44B90`, `44C20` switch on its mode state and default to GAME when it is absent), so it must
+  exist only while the developer module runs, which Init/Unload already ensure.
+- **The debug menu** (state 0, 15 items) is complete: pad 0 through the input subsystem 0x19
+  (`sub_000DD2B0`: masks 0x1000/0x2000 move, 0x10 activates, others change values), drawing
+  through `sub_001DC908`. Nothing in it looks stripped; what is missing is the constructor, the
+  table, the factory case and one error print.
+
+### C. How the next module is chosen (2026-10-16)
+
+- The run-module manager is **subsystem `0x17`** in the registry at `0x2FB148`.
+- `sub_000773A0` is its **request** method (thiscall on the manager, one stack argument: the
+  module type, 0-16; `ret 4`). Each case allocates the module with `sub_00029680(size, tag, flags)`,
+  sets its virtual table or calls its constructor, stores it at **manager+0x1C** (the next module)
+  and sets **manager+0x24 = 1** (a switch is pending). A failed allocation stores 0 and still sets
+  the flag. The manager makes the switch on its next pass (agent A: the loop).
+- Requests come from Story flow control (`sub_000C1240` types 9, 0xD, 0xC, 0x10, 0xA, 0xF;
+  `sub_000C1AF0` 0xF; `sub_000C1DF0` 9; `sub_000C20B0` 0xA, 9; `sub_000C4460` a variable type),
+  the back end (`sub_000D7060`: 0xE, 9, a variable), `sub_0007BB50` (0xB), `sub_0006AF30` (0xA),
+  and loader modules: `sub_0007AB80` / `sub_0007ABA0` are virtual methods of loader classes that,
+  when done, request the type stored at their own `this+4` ("load, then run type N").
+- **Injection point for step 2:** on the game thread, build the developer module, store it at
+  manager+0x1C and set manager+0x24 = 1; or intercept one request inside `sub_000773A0`. No new
+  mechanism is needed: the game switches modules this way itself.
+
+## Verdict after step 1 (2026-10-17)
+
+**Step 2 looks viable, with modest work.** Everything the module needs exists except four
+things we can supply from the host side without touching the lifter:
+1. an 8-dword virtual table in guest memory (allocated once with `sub_00029680`): the table above;
+2. a constructor: `sub_00029680(0x44, tag, 0)`, set the table pointer, zero the fields, call `0x779F0`;
+3. the injection: on the game thread, store the object at manager+0x1C and set manager+0x24 = 1
+   (manager = subsystem 0x17). The manager then runs Load on its loader thread, waits for
+   CanLeave of the current module, and swaps; no factory case is needed;
+4. a way back: request the front end's loader (factory id 9 -> module 0) when done.
+
+**Step 3 then follows from code that is all present:** with the module running, the mode system
+starts in state 0 (the debug menu, driven by pad 0). The cinema can be started the way
+`scene_launcher.c` already does (set settings+0x18, call `sub_0002D4F0`); when it ends the mode
+returns to state 0, and we request the front end again.
+
+Risks that remain: Load running on the loader thread while the front end's resources are released
+(order: old Stop/Unload, then new Load); the AKIDEBUG render view and the console text needing a
+font that the retail boot did not load; Render `0x77B20` drawing nothing visible without the
+render setup a developer boot did; audio for the cinema (the mode pauses subsystem 0x22, and the
+cinema subsystem may expect the Story module's audio setup).
+
+## Decisions and risks
+
+- Injecting means constructing the object on the host side with the game's allocator
+  (`sub_00029680(size, tag, 0)`), writing a virtual table of our own into guest memory, and
+  handing the object to the manager in place of a module it was about to make.
+- Risks: pieces stripped with the table (debug-menu input, font, a loading module the developer
+  boot used); an init that assumes developer-boot state; subsystem ids it registers clashing
+  with the live game's.
