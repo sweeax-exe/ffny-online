@@ -882,7 +882,7 @@ static void page_debug(UiMode mode)
         ImGui::EndDisabled();
         if (!active) {
             if (ImGui::Button("Developer menu")) dev_module_request(0);
-            ImGui::SetItemTooltip("EA's own debug menu (pad 1: up and down choose, left and right change, A starts). "
+            ImGui::SetItemTooltip("EA's own debug menu, driven by pad 1 (try the d-pad and A). "
                                   "Leaves what is running now.");
         } else if (ImGui::Button("Back to the main menu")) {
             dev_module_leave();

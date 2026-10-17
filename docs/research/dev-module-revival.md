@@ -13,7 +13,7 @@ This document tracks the attempt to bring it back. Branch `feature/scene-launche
 | 0 | Find the cinema mode and why it never runs | done (below) |
 | 1 | Map the run-module interface and the developer module's methods; how the next module is chosen | done 2026-10-17 (viable) |
 | 2 | Build the module ourselves (guest object + virtual table) and inject it; its init runs | **done 2026-10-17**: Load, Update, Render run; EA's debug menu is drawn |
-| 3 | Play a scene in it, return cleanly; overlay picker and `RECOMP_SCENE` | core works 2026-10-17 (sc12 plays in full from the main menu); return to the front end, overlay picker, tools and docs to do |
+| 3 | Play a scene in it, return cleanly; overlay picker and `RECOMP_SCENE` | **done 2026-10-17** (macOS): scene by name, back to the main menu, overlay picker, `scenarios.py scene`, guide |
 
 ## Established (step 0, 2026-10-16)
 
@@ -209,6 +209,22 @@ Still to do for step 3: leave the module (request the front end's loader, factor
 scene or on demand; an overlay picker (Debug tab) and a one-command `scenarios.py scene`; replace the
 Story-based switch and its docs (`docs/scene-selector.md`); try the debug menu by pad (it reads pad
 0) and the other modes; regressions with everything off.
+
+## Step 3 finished (2026-10-17)
+
+- **Leaving:** the front end opens the screen whose number is at FrontEnd(subsystem 0xD)+0x9C, an index into
+  the name table at `0x2DFE08` (0 legal, 1 title `intMain/preStart.swf`, 15 `intMain/mainMenu.swf`, ... 33 "none";
+  `sub_0006BC90` reads it and resets it to 33). Requesting the front end's loader (type 9) with 33 there gave an
+  unnamed screen stuck on LOADING; with 15 the main menu comes back with its music. A game or Story module is
+  not re-entered (its own flow sets up the match first), so leaving always goes to the front end.
+- **When to queue:** at `bootLoad` the start-up sequence (logos, movies; `sub_000D7060`) requested its next module
+  after ours and took the single pending slot, after our Load had registered subsystem 9. Requests now wait for
+  the title screen (`intMain/preStart`), and a displaced module is reported.
+- **Front ends to it:** `RECOMP_SCENE` (alone: arm at the title, play, leave), the overlay's Debug tab
+  (Play scene, Developer menu, Back to the main menu), `scenarios.py scene` / `scenes` (one launch a scene,
+  captures on the scene file's clock, contact sheet). Guide: `docs/scene-selector.md`.
+- **Not yet:** the debug menu's buttons, its other modes and `MODE - GAME`; a request from inside a fight;
+  Windows and the Deck.
 
 ## Decisions and risks
 

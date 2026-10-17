@@ -182,6 +182,13 @@ find out, cheapest first. **To run:**
    (`--from` with extra `--stage`s) reaches every scene the long way, once each
    fixture exists.
 
+### Superseded, 2026-10-17
+
+Scenes are now played by the game's own developer cinema mode, in its developer run module
+rebuilt from the host: [dev-module-revival.md](dev-module-revival.md), user guide
+[../scene-selector.md](../scene-selector.md). `RECOMP_TEST_CINEMA_SCENE` and the fixture
+route below were removed; the loader hook still logs every scene (`[SCENE] loading`).
+
 ### Found on macOS, 2026-10-14
 
 - **No front-end command names a scene.** `funccall-catalog.py --grep cinema --grep scene`
