@@ -221,6 +221,10 @@ jobs:
       - run: cmake --build --preset ci-runtime-only
       - name: Toolkit compiled CPU semantics
         run: python scripts/test-toolkit-msvc.py
+      # The game's own sources (hooks, patches, main.c) are otherwise compiled first on a player's
+      # machine, by Setup. No game code: the toolkit's template header and an empty dispatch stand in.
+      - name: Game-side sources compile (MSVC, no game code)
+        run: python scripts/compile-game-sources.py
 
   runtime-posix:
     name: Runtime + fixtures (${{ matrix.os }})
