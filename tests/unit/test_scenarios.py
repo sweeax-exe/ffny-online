@@ -142,6 +142,14 @@ def test_contact_sheet_orders_captures_by_their_seconds(tmp_path):
     assert [sheet.getpixel((x * 64 + 30, 40))[0] for x in range(3)] == [100, 200, 50]   # 5.6 s, 11.2 s, 90 s
 
 
+def test_contact_sheet_keeps_a_widescreen_capture_shape(tmp_path):
+    Image = pytest.importorskip('PIL.Image')
+    Image.new('RGB', (160, 90), (90, 0, 0)).save(tmp_path / 'scene-sc05-6s.png')
+    out = tmp_path / 'sheet.png'
+    assert scenarios.contact_sheet(tmp_path, out, 'sc05', width=64)
+    assert Image.open(out).size == (4 * 64, 24 + 36 + 18)
+
+
 def test_scene_shots_follow_the_scene_file_and_stay_within_the_limit():
     spec = scenarios.scene_shots('sc12', 90, 3)
     assert spec.startswith('@sc12.viv#1,')
