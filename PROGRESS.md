@@ -223,6 +223,7 @@
 | D131 | 2026-10-17 | Reconcile PR39 with PR25 release-prep head02d9d14, preserving version0.10.1, developer-menu/scene features, startup skip and native CI coverage. Qualify the independently assigned startup-branch D129 as D129/CI (PR39); keep PR25 D129 and D130 verbatim. | Both public branches independently assigned D129 before integration. Numeric history is preserved with an explicit branch qualifier; no decision is dropped or silently reused. Re-lift new guest entry hooks, rebuild and regress the combined source before marking PR39 ready. |
 | D132 | 2026-10-17 | Vlad explicitly authorizes merging the PRs and cutting v0.10.1 after validation. Merge the toolkit with a merge commit so the published game pin remains reachable; merge PR39 after refreshed checks, then tag the reviewed main commit and publish the workflow’s verified game-free setup release. | Owner: “Merge the PR and cut the release when you’re done.” The existing Windows/macOS/Linux setup-only asset exception remains; verify checksums and provenance, never distribute a compiled game. |
 | D133 | 2026-10-18 | Vulkan shader cache (F4): key the on-disk SPIR-V by a hash of the generated HLSL text, its stage and a version seed (SHADER_CACHE_VERSION, the shaderc options, shaderc's SPIR-V version), not by the NV2A program hash; and give each HLSL text one module per run. Cache in `<data>/cache/vulkan` (toolkit default off unless the host sets a folder; `RECOMP_SHADER_CACHE` overrides). Toolkit `defjam/shader-cache` adb67f7 + 2edf96f, not published. | The program hash and the combiner-state bytes cover more than the text depends on: sc00 compiled 29 distinct texts 188 times (2.3 s) and made 348 pipelines for 33. Keying by text makes a stale translator impossible to hit and the duplicates free; the per-run dedup alone took sc00 late frames 2.8% to 0.2%. Off by default in the toolkit preserves upstream behaviour (no files written unasked). |
+| D134 | 2026-10-18 | F1's random 100-300 ms Story stalls on macOS: run the push-buffer executor (`nv2a_ack_thread`) at user-interactive QoS and make Darwin's yield `thread_switch(MACH_PORT_NULL, SWITCH_OPTION_NONE, 0)` instead of `sched_yield()` (toolkit `defjam/hitch-capture`; `RECOMP_EXECUTOR_QOS=0` / `RECOMP_YIELD_DEPRESS=1` restore the old behaviour). Both, not either: the yield change alone made a loaded run worse (10.8% late vs 6-7%), the QoS change alone left the audio frame thread starved (23 dry). Chosen over replacing the fence-hold spin with an executor-signalled wait (F5), which is the larger change and stays open for the Deck. | A hitch probe (`RECOMP_HITCH_PROBE=1`) caught the stalls: the game in Direct3D's fence hold depressed to priority 0 by `sched_yield()` (= `swtch_pri(0)`), the executor at the default priority 31 with work queued, both getting 3-8 ms of CPU in 54 ms on a busy 8-core Mac. Loaded A/B (6 busy processes): 6.1-7.4% late, 9 hitches, 46 dry -> 0.00-0.02%, 0, 0. Unloaded: 0.09-0.12% late, 7-9 hitches -> 0.02-0.03%, 0. Linux and Windows unaffected (no yield depression, threads pinned, QoS is Darwin's). |
 
 ## 2. Environment inventory (2026-09-17)
 
@@ -310,7 +311,6 @@ defjam-recomp/
 
 > Recent entries only; older entries remain unchanged in the local `docs/worklog/` archive.
 
-- 2026-10-17 21:54 — Updated full passes first10checks:470units, three goldens, launcher/overlay/unlock,122s fight median120/min96,150sFFA median120/min115, actual Terrordome240s median120/min102 with loading caption inspected. Full combat/audio, versus, replay, Story and soak remain running in exec63917 (logs/startup-skip/pr25-updated-full.txt). Same source/build; all completed save guards restored.
 - 2026-10-17 21:57 — D132: owner explicitly authorizes merging the PR and cutting0.10.1 when validation is done. Will preserve toolkit5445b73 through a merge commit, merge PR39 after refreshed checks, tag reviewed main, and verify/publish only the game-free setup assets/checksums/provenance. Updated full remains running in exec63917; no gates weakened.
 - 2026-10-17 21:59 — Toolkit fork PR1 merged with a merge commit a37e19e, preserving published/tested game pin5445b73. Updated full combat26/27: sole failure audio.dry_queue=3, drops0, seven gameplay checks/runtime/save restoration pass; bounded triage shows presentation through stop, inherited FS-control stub. No threshold or audio change. Full continues; logs/scenarios/regress-combat-20261017-215259/report.json.
 - 2026-10-17 22:11 — Updated v0.10.0 integration full15/17 in36min (logs/regress-20261017-221050.txt): only known audio dry gates, combat3/versus1, drops0; all13 gameplay assertions, replay80records/1800steps, Story/crib/gym and soak3/3 pass, saves restored. Units470, quick5/5. Audits quick3fast/1normal and full19fast/1normal, zero unknowns. No audio/threshold change or new cause claimed. ToolkitPR1 merged/pin ancestry verified; finalize commit/fresh CI then authorized merge/release.
@@ -318,32 +318,32 @@ defjam-recomp/
 - 2026-10-17 22:26 — v0.10.1 published/latest at22:25:58 ET from PR39 merge0985f40, source release39089619805 green30/30. Downloaded/verified exactly9 game-free assets: Windows54,604,800B, Mac65,355,652B, Linux140,662,442B; SHA files and every GitHub digest match, provenance source0985f40/toolkit5445b73, production payloads4186/4907/3234files. Latest API confirms0.10.1. Evidence logs/startup-skip/release-v0.10.1/verification.json. Final strict full15/17 baseline audio failures remain disclosed; feature, regression efficiency and authorized publication complete.
 - 2026-10-18 12:30 — Scene performance pass on the Mac (branch test/scene-perf-tour): new scripts/scene-perf.py ran all 38 Story scenes at 16:9/scale 3/vsync with the recorder: 38/38 play and end, no log faults, 22.1 min/77,811 frames, median 16.5-17.1 ms, 0.33% late, 23 hitches, loads up to 1.79 s (sc07a). Repeat of 11 hitching scenes: stalls not repeatable (3 of them were). 83% of >=60 ms frames carry a streamed [READ] (17% baseline). Two local toolkit A/Bs (6 scenes x2 passes each, ~47k frames a side) rule out log flushing and slow host reads (max 6.2 ms); both reverted. sample: loads wait in the fence hold; executor in flip_pace/shader_make; fence hold spins 38% of the game thread in steady sc00. Overlay Play scene checked by RECOMP_HOST_SCRIPT (plays twice, disabled while playing); fixed unwrapped tooltips, widescreen contact sheets. Units 504/30 skip. Report docs/research/scene-perf-macos-2026-10-18.md, baseline .json; logs/scene-perf/mac-stress-20261018.
 - 2026-10-18 15:55 — F4 shader cache (branch perf/shader-cache, toolkit defjam/shader-cache adb67f7 + 2edf96f, not pushed, D133): SPIR-V and VkPipelineCache in <data>/cache/vulkan, header/hash-validated; one module per HLSL text. sc00/gf1a/sc13 (stress, --every 0): old behaviour 188 compiles 2323 ms + 348 pipelines 880 ms in sc00 (logs/scene-perf/f4-cold); dedup alone 29/314 ms + 33/34 ms, late 2.8%→0.2% (f4-dedup-cold); warm 6-8 ms shaders, 8-19 ms pipelines, sc00 +0.3 s 137-140 ms hitch gone in f4-warm and f4-warm2; damaged cache ignored and rewritten (f4-damaged). regress --quick: m2/m3/m4a/fight ok (logs/regress-20261018-155319.txt), units 504/30 skip via uv (system python has no pytest); fixture tests/d3d8_vk_cache passes under ASan/UBSan.
+- 2026-10-18 18:40 — F1 random stalls found and fixed on macOS (branch test/hitch-capture on perf/shader-cache, toolkit defjam/hitch-capture on defjam/shader-cache; not pushed; D134). New hitch probe: RECOMP_HITCH_PROBE=1 with the recorder samples every thread (Mach, stack/priority/CPU time, guest-CPU holder, g_xbox_kernel_caller, ICALL ring, executor state) while a frame is 60+ ms late, into the hitch event and stalls.jsonl; scripts/hitch-probes.py reads it; 2-7 ms a sample. Cause: the host starved the executor (default priority 31) and every yielding thread (Darwin sched_yield = swtch_pri(0), priority 0): game 3 ms / executor 8 ms of CPU in a 54 ms stall. Fix: executor at user-interactive QoS + non-depressing thread_switch yield. Loaded A/B (6 busy processes, sc01/04/08/11): 6.1-7.4% late, 9 hitches, 46 dry -> 0.00-0.02%, 0, 0; each change alone worse or partial. Unloaded 6 scenes: 0.12/0.09% late, 9/7 hitches -> 0.02/0.03%, 0. Runs logs/scene-perf/{probe-*,ab-yield-*,ab-load-*,ab-fix-*} in the hitch worktree. Mac is 6P+2E cores (report corrected). Units: hitch-probes, recorder native, scene-perf pass.
 
 ## 7. Hand-off
 
-Branch `test/scene-perf-tour` (from main `c4078ef`, toolkit `5445b73` unchanged, not pushed): a scene
-performance pass on the Mac. Report `docs/research/scene-perf-macos-2026-10-18.md`, numbers-only baseline
-`docs/research/scene-perf-macos-2026-10-18.json`. New `scripts/scene-perf.py` (`run` scenes with the recorder
-on and stop each launch 6 s after the scene ends; `summarize`; `compare` two runs or a run and the baseline;
-`baseline`), `tests/unit/test_scene_perf.py`. Fixes: overlay/launcher tooltips wrap at 35 em
-(`src/hooks/pc_ui.cpp` `item_tooltip`; long help ran off the window), contact sheets keep the capture's
-aspect (`scripts/scenarios.py`). Units 504 pass / 30 skip; source-tree policy 396/0; posix-release rebuilt and
-verified after both reverted toolkit experiments.
+Branch `test/hitch-capture` (on `perf/shader-cache` 040eae5, which is on `test/scene-perf-tour` 77714da), toolkit
+`defjam/hitch-capture` (on `defjam/shader-cache` 2edf96f). Nothing pushed: publish the toolkit branches
+(`defjam/shader-cache`, then `defjam/hitch-capture`) before the parent gitlinks. Worktree
+`/Users/vlad/Code/DefJamFFNY-recomp-hitch`.
 
-Results (16:9, scale 3, vsync, recorder 10/s): 38/38 play and end, 22.1 min, 77,811 frames, median
-16.5-17.1 ms everywhere, 0.33% late, 23 hitches. F1 random 100-300 ms game-side stalls, not repeatable,
-83% in frames with a streamed `[READ]` (17% baseline); ruled out: log writes (A/B `logs/scene-perf/ab-*`)
-and slow host reads (A/B `ab2-*`, max read 6.2 ms). Next: hitch-triggered capture of the guest-CPU holder
-(guest function + native stack) into the recorder's `hitch` event. F2 loads hold the picture 0.84-1.79 s in
-eleven scenes; `sample` shows the game in the fence hold (`sub_0021EB90_enter`) and the executor in
-flip_pace/shader_make, plus an occasional long stall delivering the trapped `PCRTC_START` read
-(`xbox_memory_layout.c:1698`, on every loop because `RECOMP_PB_EXEC` enables the trace). F4 done on branch
-`perf/shader-cache` (toolkit `defjam/shader-cache` adb67f7 + 2edf96f, D133; neither pushed: publish the toolkit
-branch before the parent gitlink): on-disk SPIR-V and pipeline cache in `<data>/cache/vulkan`, one module per HLSL text. F5 the fence hold spins (38% of the game thread in steady sc00).
+F1 (random 100-300 ms Story stalls, Mac): found and fixed, D134. The push-buffer executor now runs at
+user-interactive QoS and Darwin's yield no longer depresses the caller to priority 0 (`win32_compat.c`
+`host_yield`, `xbox_memory_layout.c` `nv2a_ack_thread`; `RECOMP_EXECUTOR_QOS=0`, `RECOMP_YIELD_DEPRESS=1` to
+compare). Report: `docs/research/scene-perf-macos-2026-10-18.md` F1 "Cause found". New diagnostic:
+`RECOMP_HITCH_PROBE=1` (recorder on, macOS) samples every thread of a late frame into the `hitch` event and
+`stalls.jsonl`; `scripts/hitch-probes.py <session> --summary`. Before merging: full `python scripts/regress.py`
+on the Mac (the yield change touches every `SwitchToThread`/`Sleep(0)`), and a Windows/Linux build (the
+changes are `#if __APPLE__`; the probe is a stub elsewhere).
 
-Deck: `python3 scripts/scene-perf.py run all` then `compare` with the baseline; the report's last section
-says what to look for. Local evidence (not published): `logs/scene-perf/mac-stress-20261018/`,
-`mac-stress-repeat-20261018/`, `ab-*`, `ab2-*`, `prof-sc00/`. Recorder keeps 20 sessions whole, so
-scene-perf copies rows per scene. No game is running.
+F4 shader cache: branch `perf/shader-cache` (D133). Deck report: branch `test/scene-perf-deck`
+(`docs/research/scene-perf-deck-2026-10-18.md`): 3.4-3.7% late frames in the same 11 scenes every run (steady
+CPU cost, not F1; D134 does not apply on Linux). Next for the Deck: stacks during sc00/sc06
+(`scripts/native-stacks.py`), the one-CPU guest pinning against the executor and audio threads
+(`RECOMP_GUEST_CORES=all` A/B), then F5 (replace the fence-hold spin with an executor-signalled wait); repeat
+the tour for `dry`. F2 (1.4-2.0 s loads) unchanged.
+
+Local evidence (not published): `logs/scene-perf/` in the hitch worktree (`probe-*`, `ab-yield-*`,
+`ab-load-*`, `ab-fix-*`) and in the main checkout (`mac-stress-20261018/`, `ab-*`, `ab2-*`). No game is running.
 
 Decisions are read by number or keyword: `decision D<n>`, `decisions --grep TEXT`.

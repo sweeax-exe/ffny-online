@@ -52,6 +52,15 @@ usual `logs/run-*.log.err`. `logs/sessions/LATEST` names the newest one.
 | `session.json` | Build, platform, the recorder's settings and every setting the run started with |
 | `bundles/` | One folder per bundle |
 
+**Late frames, sampled while they are late** (macOS, for agents). With `RECOMP_HITCH_PROBE=1`
+the recorder looks every 4 ms for a frame that has not come for 60 ms and, while it stays late
+(every 50 ms, six times at most), asks the runtime what every thread is doing: which thread holds
+the guest CPU and the guest call site it is in, each thread's native stack, priority and CPU time,
+and where the push-buffer executor is. The holder goes into the frame's `hitch` event, everything
+into `stalls.jsonl` beside `frames.csv`; `python scripts/hitch-probes.py <session>` prints one line
+per sample and `--summary` counts the causes. A sample costs 2-7 ms on a thread of its own. Off by
+default.
+
 **Times for log lines.** The log keeps its format; scripts and the harness parse it
 as it is. Instead, every frame row records how many bytes of the log had been
 written by then (`log_bytes`, flushed each frame while recording), so any line can

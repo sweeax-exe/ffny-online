@@ -1115,6 +1115,7 @@ static void *prober_entry(void *arg)
     while (!g_stop) {
         double t, end, since, gap;
         unsigned long long frame;
+        int n_ok;
 
         sleep_ms(4);
         end = g_last_end;
@@ -1129,7 +1130,9 @@ static void *prober_entry(void *arg)
         if (end <= 0.0 || frame < 60) continue;
         since = t - end;
         if (since < (double)g_cfg.stall_probe_ms || n >= 6 || (n > 0 && t - last < 50.0)) continue;
-        if (g_cfg.stall_probe(holder, sizeof holder, all, sizeof all) <= 0) continue;
+        n_ok = g_cfg.stall_probe(holder, sizeof holder, all, sizeof all);
+        woke = now_ms();                        /* the probe's own time is not a late wake-up */
+        if (n_ok <= 0) continue;
         if (g_frame != frame) continue;         /* the frame came while we looked */
         n++;
         last = t;

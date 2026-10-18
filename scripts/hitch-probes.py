@@ -124,6 +124,7 @@ def main():
     a = ap.parse_args()
 
     causes = collections.Counter()
+    stats = collections.Counter()
     for folder in sessions(a.folders):
         probes = read_jsonl(folder / 'stalls.jsonl')
         hitches = {e.get('frame'): e for e in read_jsonl(folder / 'events.jsonl') if e.get('kind') == 'hitch'}
@@ -131,7 +132,10 @@ def main():
         if (folder / 'frames.csv').exists():
             with open(folder / 'frames.csv', newline='') as f:
                 for r in csv.DictReader(f):
-                    rows[int(r['frame'])] = (float(r['interval_ms']), int(r['log_bytes']))
+                    try:
+                        rows[int(r['frame'])] = (float(r['interval_ms']), int(r['log_bytes']))
+                    except (TypeError, ValueError):
+                        pass        # a row cut short when the game was stopped
         log_marks = {k: v[1] for k, v in rows.items()}
         by_frame = collections.OrderedDict()
         for p in probes:
@@ -148,12 +152,21 @@ def main():
             if frame in hitches:
                 head += ' (hitch)'
             print(head)
+            prev = None
             for p in ps:
                 threads = p['all']['threads'] if p.get('all') else []
+                cpu = {role(t): t['cpu_ms'] for t in threads if role(t) in ('game', 'executor')}
                 game = [t for t in threads if role(t) == 'game']
                 ex = [t for t in threads if role(t) == 'executor']
                 hold = p.get('holder') or {}
                 line = f"  +{p['since_ms']:.0f}ms"
+                if 'prober_gap_ms' in p:
+                    line += f" (prober slept {p['prober_gap_ms']:.0f} ms for 4)"
+                if prev:
+                    dt = p['t_ms'] - prev[0]
+                    line += ' cpu ' + ', '.join(f"{k} {cpu[k] - prev[1][k]}/{dt:.0f} ms"
+                                                for k in sorted(cpu) if k in prev[1])
+                prev = (p['t_ms'], cpu)
                 line += f" | game: {guest_site(game[0]) if game else '?'}"
                 line += f" | executor: {executor_activity(ex[0]) + ' (' + ex[0]['run'] + ')' if ex else '?'}"
                 if hold.get('stack'):
@@ -162,6 +175,9 @@ def main():
                     line += f" | holder: {hold.get('start', 'game' if hold.get('start') is None else '')} in {hsub} ({hs[0]})"
                 else:
                     line += ' | holder: none'
+                for t in game + ex:
+                    if 'pri' in t:
+                        line += f" | {role(t)} pri {t['pri']}{' depressed' if t.get('depressed') else ''} {t['run']}"
                 gpu = (p.get('all') or {}).get('gpu')
                 if gpu:
                     line += (f" | gpu: backlog {gpu['backlog']}, swm wait {gpu['swm_wait_ms']} ms,"
@@ -180,7 +196,20 @@ def main():
                    ('game waits: ' + next((name(f) for f in game[0]['stack'] if name(f).endswith('_enter') or
                                            (' exe+' in f and not name(f).startswith('sub_'))), '?')) if game else '?')
             causes[key] += 1
+            gaps = [q.get('prober_gap_ms', 0) for q in ps]
+            stats['late frames'] += 1
+            if max(gaps) >= 20:
+                stats['the prober itself ran 20+ ms late (the process was not scheduled)'] += 1
+            if game and any(name(f).endswith('_enter') and 'sub_0021EB90' in name(f) for f in game[0]['stack']):
+                stats["game in Direct3D's fence hold at the first probe"] += 1
+            if ex and executor_activity(ex[0]).startswith(('shader compile', 'pipeline create')):
+                stats['executor compiling a shader or pipeline'] += 1
+            if game and game[0].get('depressed'):
+                stats['game thread priority-depressed (a yield)'] += 1
     if a.summary:
+        print('\n## Late frames')
+        for k, n in stats.items():
+            print(f'{n:4}  {k}')
         print('\n## Late frames by first probe (executor activity, game thread)')
         for (ex, g), n in causes.most_common():
             print(f'{n:4}  {ex:40}  {g}')

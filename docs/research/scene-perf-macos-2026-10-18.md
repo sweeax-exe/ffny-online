@@ -21,7 +21,9 @@ pictures); how to repeat the run is at the end.
      do not repeat at the same moment when a scene is played again, so they are the runtime or
      the host, not the scene's content. 83% of them fall in a frame in which the game read
      streamed data, against 17% of ordinary frames; two experiments ruled out the log and the
-     disk. Cause not found yet. See [F1](#f1-random-game-side-stalls-of-100-300-ms).
+     disk. **Cause found:** the host starved the push-buffer executor (default priority) and every
+     yielding thread (Darwin's yield drops the caller to priority 0); fixed on `test/hitch-capture`
+     (D134). See [F1](#f1-random-game-side-stalls-of-100-300-ms).
   2. **Scene loads hold the picture for 0.8-1.8 s** in eleven scenes (one frame lasts that long);
      the game is mostly waiting for the push-buffer executor. [F2](#f2-scene-loads-freeze-the-picture-for-up-to-18-s).
   3. **sc00, the opening scene, is the heaviest:** 2.9% late frames against 0.1-0.5% elsewhere.
@@ -35,7 +37,7 @@ pictures); how to repeat the run is at the end.
   loose-file lookups, made in Story too), the 2.5 s of silence after each scene (the return to the
   main menu), and sc07b's 366 MB of texture uploads (an animated reflection).
 - **For the Deck:** the game thread spends 38% of its time in a yield loop waiting for the
-  executor ([F5](#f5-the-fence-hold-spins)). Harmless on a 10-core M1 Pro; on the Deck's four
+  executor ([F5](#f5-the-fence-hold-spins)). Harmless on this 8-core M1 Pro; on the Deck's four
   cores it competes with the executor and the audio threads, and is the first thing to look at
   if the Deck run shows more late frames than this one.
 
@@ -43,7 +45,7 @@ pictures); how to repeat the run is at the end.
 
 | | |
 |---|---|
-| Machine | MacBook Pro, Apple M1 Pro (8 performance + 2 efficiency cores), 16 GB, macOS 26.5.2, built-in display at 120 Hz |
+| Machine | MacBook Pro, Apple M1 Pro (6 performance + 2 efficiency cores; corrected 2026-10-18, first written as 8 + 2), 16 GB, macOS 26.5.2, built-in display at 120 Hz |
 | Build | v0.10.1 (`main` at `c4078ef`), toolkit `5445b73`, `posix-release`; the measured build was the released source |
 | Settings | Harness defaults (`RECOMP_SETTINGS=none`) plus `RECOMP_ASPECT=16:9`, `RECOMP_RENDER_SCALE=3`, `RECOMP_PRESENT_VSYNC=1`: a 2560x1440 render target in a 1280x960-point window (2560x1920 swap chain), Vulkan through MoltenVK, FIFO present |
 | Recorder | On, 10 pictures a second (asynchronous read-back, 0.6-0.7 ms a picture, taken off before judging a frame) |
@@ -147,13 +149,67 @@ up changed hitches from 16 to 11 and late frames from 360 to 364, within the run
 (one scene's worst frame moves between 40 and 250 ms from one run to the next). The reads are fast;
 the stalls come with them, not from them.
 
-**What is left, and the next step.** The game's streaming thread reads 8 KB, then works on it
-while holding the guest CPU; something in that work, or in handing the CPU back to the game thread,
-sometimes takes 100-300 ms. Aggregate profiles cannot show a once-a-minute event, so the next tool
-is a hitch-triggered capture: when no frame has been presented for 60 ms, record which guest thread
-holds the guest CPU, its guest function (`g_xbox_kernel_caller`, the ICALL window) and its native
-stack (`scripts/native-stacks.py` already reads stacks on macOS), and write it into the recorder's
-`hitch` event. Both experimental builds were local only and are reverted.
+Both experimental builds were local only and are reverted.
+
+**Cause found (2026-10-18, branch `test/hitch-capture`, toolkit `defjam/hitch-capture`, D134): the
+host starves the two threads every frame waits for.** A hitch-triggered capture
+(`RECOMP_HITCH_PROBE=1`, below) sampled every thread while frames were late. In the stalls it caught
+the game thread was in Direct3D's fence hold (`sub_0021EB90_enter`), yielding until the push-buffer
+executor caught up, and the executor (`nv2a_ack_thread`) had work queued (a backlog of 50-220 KB, the
+fence 16 behind) but was barely running: over one 54 ms window the game ran 3 ms and the executor
+8 ms, though neither was blocked, and in another 77 ms window 5 and 6 ms. A recorder thread that does
+nothing but sleep 4 ms at a time woke 30-140 ms late in the same frames. Two things put those threads
+behind everything else on the machine:
+
+- **The executor ran at the default priority (31),** the band of every ordinary thread of every
+  application. Guest threads and the APU's frame thread already run at user-interactive QoS (46,
+  D121); the thread that is the GPU had been left out.
+- **Every yield depressed the caller to priority 0.** Darwin's `sched_yield()` is `swtch_pri(0)`:
+  until the thread next runs it is below every runnable thread on the host. The fence hold, the
+  executor's loop and the APU frame thread all yield in loops (`SwitchToThread`, `Sleep(0)`); the
+  probe shows the game thread at priority 0 in the fence hold.
+
+This Mac has 8 cores (6 performance, 2 efficiency; the table above said 10), a browser and the
+system's daemons using several of them, and 7 of its 8 GB of swap in use, so it is often short of a
+free core for 50-100 ms; that is when a frame stalls, which is why the stalls move from run to run.
+Why they fall in frames with a streamed read is not proven: reads come when new content arrives,
+which is when the executor has the most to do, so a starved executor shows there first.
+
+**Fix.** The executor runs at user-interactive QoS (`xbox_memory_layout.c`, `RECOMP_EXECUTOR_QOS=0`
+restores the default), and on Darwin a yield is `thread_switch(MACH_PORT_NULL, SWITCH_OPTION_NONE, 0)`,
+which gives the CPU to a ready thread without lowering the caller (`win32_compat.c`,
+`RECOMP_YIELD_DEPRESS=1` restores `sched_yield()`). They go together. Measured on four scenes (sc01,
+sc04, sc08, sc11) with six busy processes at default priority on the host, one or two passes each:
+
+| | late frames | hitches | audio ran dry |
+|---|---|---|---|
+| before (both switches back) | 6.1-7.4% | 9 in two passes | 46 |
+| yield change only | 10.8% | 11 | 0 |
+| executor QoS only | 2.4% | 0 | 23 |
+| both (the fix) | 0.00-0.02% | 0 in two passes | 0 |
+
+The yield change alone is worse: a game thread that no longer depresses itself in the fence hold
+takes the cores from an executor still at 31. The QoS change alone leaves the audio frame thread,
+which yields, starved. Unloaded, on the six scenes of the earlier experiments (two passes each way,
+alternating, shader cache warm): before, 0.12% and 0.09% late with 9 and 7 hitches; with the fix,
+0.02% and 0.03% with none (the last pass covers five scenes: something outside the run stopped it in
+sc17). An unloaded Mac rarely runs short of cores, so the difference there is smaller, as expected.
+
+**The capture.** `RECOMP_HITCH_PROBE=1` (or a number of milliseconds) with the recorder on: a
+recorder thread looks every 4 ms for a frame that has not come for 60 ms and, while it stays late,
+calls the runtime's `guest_turn_probe()` every 50 ms (six times at most). That samples every thread
+from outside with Mach, one suspended at a time (registers, the frame-pointer chain read with
+`vm_read`, priority, CPU time), names the frames with `dladdr` afterwards, and adds which guest thread
+holds the guest CPU, its `g_xbox_kernel_caller`, the ICALL ring and the executor's state (position
+against PUT, a software method it is stopped at, the fence against Direct3D's latest). A sample costs
+2-7 ms on the recorder's thread; nothing runs unless asked. The holder goes into the frame's `hitch`
+event, every sample into `stalls.jsonl`; `scripts/hitch-probes.py <session> --summary` reads them.
+macOS only (Linux and Windows pin guest threads to a CPU and have no token to ask about). Runs:
+`logs/scene-perf/probe-*`, `ab-yield-*` (the yield change alone, unloaded), `ab-load-*`, `ab-fix-*`.
+Other things the probes showed: in the first launches after the change, most stalls were F4's
+compiles on the executor (fixed by the shader cache, which this branch is built on); one stall had
+the executor in an uninterruptible log `write()` with the game waiting for the same lock; scene loads
+(F2) are the game and the executor both busy, not waiting.
 
 ### F2. Scene loads freeze the picture for up to 1.8 s
 
@@ -223,7 +279,9 @@ executor itself is waiting for vsync for most of that time. On the Mac the spare
 and frame pacing is fine; on the Deck's four cores a spinning thread competes with the executor and
 the audio mixer, which is the classic way to turn a held frame into a late one. A wait on an event
 the executor signals when it completes a fence would cost nothing. Worth trying if the Deck run has
-more late frames or audio running dry than this one.
+more late frames or audio running dry than this one. (On the Mac the spin also made the stalls of F1
+worse, because each yield dropped the game thread to priority 0; D134 changed the yield, not the spin.
+Linux's `sched_yield()` does not depress and the QoS call is Darwin's, so the Deck runs as before.)
 
 ### Checked, not faults
 
