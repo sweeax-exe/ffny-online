@@ -19,6 +19,27 @@ game's artwork and stay under `logs/`, which git ignores.
 Never run two of these at once: they share the save area, the window and the
 frame-rate measurements.
 
+Leave `RECOMP_HEADLESS` unset for the full suite: its presence suppresses the
+launcher, so the launcher/checkbox checks cannot run in that mode.
+
+Harness and scenario runs skip the startup legal screen and EA/THX/intro movies
+by default. Both quick and full regression keep one complete normal startup in
+`m3`: it requires legal, all three movies and Press Start in order, then compares
+the title image. Other checks use the shorter boot. Story scenes and move previews
+remain enabled. Input and timed captures start at the actual Press Start screen
+request, so either boot path works without changing route timings.
+
+For an individual normal boot, pass `--env RECOMP_SKIP_INTRO=0` to the harness.
+An empty override (`--env RECOMP_SKIP_INTRO=`) removes the test default and uses
+the specified INI or the game's default-off setting. This test default does not
+change a player's settings file or normal game launches.
+
+The named Terrordome stress routes and generated Terrordome scenarios also select retail venue FE ID6 through
+ChooseVenue before loading; the stress checks require its final StartGame observation. Unlocking every venue changes map traversal;
+the old one-step-right recipe selected Hunt's Point (FE ID14) with the test defaults.
+The positional recipe in the scenario catalog remains dependent on the exact save
+and unlock state; the early command makes Terrordome selection independent of that map order.
+
 The full regression is the quick one plus a four-fighter Free For All, the same
 at the Terrordome for four minutes, the **combat check**, a **two-pad match**, the
 **replay check**, the Story intro, crib, gym and a boot soak. `--only a,b` picks
@@ -186,7 +207,7 @@ made, so any fighter on any venue can be tested without scripting the menus:
 | Variable | Meaning |
 |---|---|
 | `RECOMP_START_FIGHTERS=a,b[,c,d]` | The fighter in each slot, by `<ID>` in `fighter.xml` (the default One on One is `56,55`, Blaze and Doc). Fewer ids than slots leave the rest as chosen. |
-| `RECOMP_START_VENUE=n` | The venue, as the `<feID>` number in `venue.xml` that `Game.ChooseVenue(n)` carries (1 is The Foundation, the default; 17 is Gun Hill Garage). The game maps it to the venue it stores through a table of 14 ids (0-5, 8, 10-13, 17, 24, 26); an id not in the table gives venue 0, a plain rubble floor, so check the picture for the ones you rely on. |
+| `RECOMP_START_VENUE=n` | The venue, as the `<feID>` number in `venue.xml` that `Game.ChooseVenue(n)` carries (1 is The Foundation, the default; 17 is Gun Hill Garage). StartGame also maps it through a compact 13-entry table (0-5, 8, 10-12, 17, 24, 26), with a zero fallback, while separately loading venue data by the original FE ID. That compact field alone does not identify the rendered arena; verify the loading caption and fight. See `docs/research/startup-skip-venue-audit.md`. |
 | `RECOMP_START_LOG=1` | Print what `Game.StartGame` is about to be given (`[START]` in the log). Setting either variable above prints it too. |
 
 ```bash

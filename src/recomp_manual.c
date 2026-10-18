@@ -508,6 +508,9 @@ static void trace_sleep_caller(void)
  * offered to the script anchors, so a pad script can wait for a screen:
  * "@getscreeninfo(intmain/mainmenu" (matched without case).
  */
+extern void defjam_skip_intro_enter(void);
+void sub_0006BC90_enter(void) { defjam_skip_intro_enter(); }
+
 extern void sub_00068BA0(void);
 extern void xbox_NoteAnchorEvent(const char *text);
 extern void defjam_unlock_all_on_funccall(const char *text);

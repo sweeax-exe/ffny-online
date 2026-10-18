@@ -56,6 +56,16 @@ def pcm_checks(tmp_path, value, **kwargs):
     return ev.audio_checks(p, text, sample_rate=10, min_seconds=1, **kwargs)
 
 
+def test_injected_venue_request_replaces_menu_choice_before_start():
+    text = ('[FUNCCALL] Game.ChooseVenue(14)\n'
+            '[FE-INJECT] 1 rule(s) armed: Game.ChooseVenue(99)\n'
+            '[FE-INJECT] after "game.choosevenue" #1: Game.ChooseVenue(6)\n'
+            '[FUNCCALL] Game.StartGame()\n'
+            '[FUNCCALL] Game.ResetMatchData()\n'
+            '[FUNCCALL] Game.StartGame()\n')
+    assert [c['venue'] for c in ev.fight_contexts(text)] == [6, None]
+
+
 def test_audio_healthy_silent_and_clipped_controls(tmp_path):
     assert all(c['status'] == 'pass' for c in pcm_checks(tmp_path, 200))
     assert next(c for c in pcm_checks(tmp_path, 0, max_silent_seconds=1) if c['name'] == 'audio.silence')['status'] == 'fail'

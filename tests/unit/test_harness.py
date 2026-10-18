@@ -3,6 +3,7 @@
 No game is run here; the routes themselves are exercised by scripts/regress.py.
 """
 import importlib.util
+import json
 import os
 import pytest
 
@@ -45,6 +46,45 @@ def test_noncode_icall_is_a_shared_failure():
     assert harness.run_faults(run) == ['1 indirect calls to non-code']
 
 
+def test_startup_skip_requires_first_screen_and_rejects_startup_movies():
+    redirect = '[STARTUP] skip_intro: controller boot initialized; legal1 -> preStart\n'
+    title = '[FUNCCALL] Control.GetScreenInfo(intMain/preStart.swf)\n'
+    legal = '[FUNCCALL] Control.GetScreenInfo(intMain/legal1.swf)\n'
+    movie = r'[PATH] \Device\CdRom0\movies\intro.mad' + '\n'
+    menu = '[FUNCCALL] Control.GetScreenInfo(intMain/mainMenu.swf)\n'
+    assert regress.startup_skip_faults(redirect + title, True) == []
+    assert regress.startup_skip_faults(legal + movie + title, False) == []
+    assert regress.startup_skip_faults(redirect + title + menu + movie, True) == []  # later attract/Story allowed
+    for text in ('', 'unrelated preStart.swf\n', title, redirect + legal + title,
+                 redirect + title + movie, redirect + redirect + title):
+        assert regress.startup_skip_faults(text, True)
+    assert regress.startup_skip_faults(redirect + title, False)
+
+
+def test_normal_startup_requires_each_movie_in_order():
+    stages = [
+        '[FUNCCALL] Control.GetScreenInfo(intMain/legal1.swf)',
+        '[FUNCCALL] Control.GetScreenInfo(intMain/bootLoad.swf)',
+        '[FUNCCALL] Game.StartMainMenu( 0 )',
+        r'  [PATH] \Device\CdRom0\movies\eagames.mad',
+        r'  [PATH] \Device\CdRom0\movies\thx.mad',
+        r'  [PATH] \Device\CdRom0\movies\intro.mad',
+        '[FUNCCALL] Control.GetScreenInfo(intMain/preStart.swf)',
+    ]
+    assert regress.normal_startup_faults('\n'.join(stages)) == []
+    for i in range(len(stages)):
+        assert regress.normal_startup_faults('\n'.join(stages[:i] + stages[i + 1:]))
+    stages[3], stages[4] = stages[4], stages[3]
+    assert regress.normal_startup_faults('\n'.join(stages))
+
+
+def test_harness_startup_defaults_allow_normal_and_file_only_runs():
+    assert harness.startup_default({})['RECOMP_SKIP_INTRO'] == '1'
+    assert harness.startup_default({'RECOMP_SKIP_INTRO': '0'})['RECOMP_SKIP_INTRO'] == '0'
+    assert 'RECOMP_SKIP_INTRO' not in harness.startup_default({'RECOMP_SKIP_INTRO': ''})
+    assert harness.TITLE_ANCHOR == 'getscreeninfo(intmain/prestart'
+
+
 def test_pad_script_orders_stages_after_the_title_presses():
     s = harness.build_pad_script(["getscreeninfo(intmain/mainmenu=a@6", "game.startgame(=x@2"], "@tail,b:1:2")
     parts = s.split(",")
@@ -60,6 +100,26 @@ def test_every_route_builds():
         script = harness.build_pad_script(r["stages"], r.get("tail", ""))
         assert script.count("@") >= len(r["stages"]), name
         assert r["secs"] > r.get("after", 0), name
+
+
+def test_named_stress_routes_select_the_catalog_venue_independently_of_map_order():
+    with open(os.path.join(ROOT, 'config/scenario-catalog.json')) as f:
+        venue = json.load(f)['venues']['terrordome']['index']
+    for name in ('fight-terrordome', 'ffa-terrordome'):
+        route = harness.ROUTES[name]
+        assert route['expected_venue'] == venue
+        assert route['env']['RECOMP_FE_INJECT'] == 'game.choosevenue#1=>Game.ChooseVenue(%d)' % venue
+        assert route['env']['RECOMP_START_LOG'] == '1'
+        assert 'RECOMP_START_VENUE' not in route['env']
+
+
+def test_final_venue_requires_positive_startgame_evidence():
+    early = '[FE-INJECT] after "game.choosevenue" #1: Game.ChooseVenue(6)\n'
+    start = '[START] venue(script)=6 fighters(gd+1aaa step 5): 4 9\n'
+    assert regress.start_venue_faults(early + start, 6) == []
+    for text in ('', '[FUNCCALL] Game.ChooseVenue(6)', early + '[START] venue(script)=14 fighters: 4 9',
+                 start, start + early):
+        assert regress.start_venue_faults(text, 6)
 
 
 LOG = """\

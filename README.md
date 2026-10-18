@@ -60,6 +60,9 @@ performance measurement. [Download the longer 60-fps MP4](docs/media/hd-16x9-gam
 - **Settings before and during play.** Use the launcher or open the overlay
   with F1 or a configured controller shortcut. Changes are saved locally;
   settings that require a restart are marked. The overlay does not pause the game.
+- **Optional faster startup.** Skip the legal screen and startup movies to reach
+  Press Start after initial loading. Enable it under General → Debug;
+  Story and attract-mode movies still play.
 - **EA's developer menu, restored.** The game's own debug menu, cut off in the retail
   build, opens from the overlay (Debug tab): set up any match with any fighters, venue and
   match type, play any Story scene, or look at a venue in the stage viewer. See

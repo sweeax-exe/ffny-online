@@ -142,7 +142,7 @@ def run(tool, ini_text):
 
 def test_defaults_are_valid_and_complete(tool):
     out, ini = run(tool, None)
-    assert out['count'] == 'count 60'
+    assert out['count'] == 'count 61'
     assert out['decision'] == 'decision 1 0 1 1 0 0 0'
     assert out['ui'] == 'ui F1|guide, left_stick_click+right_stick_click|100|0'
     assert out['duplicate_keys'] == 'duplicate_keys 0'

@@ -65,8 +65,18 @@ BASE_ENV = {
     "RECOMP_SETTINGS": "none",
 }
 
-# The front end's flow file loads twice; the second load is the title screen.
-TITLE_ANCHOR = "feflow.xml#2"
+# A screen request works with both normal and shortened startup. Counting flow
+# file opens does not: skipping legal/bootLoad also skips the first flow load.
+TITLE_ANCHOR = "getscreeninfo(intmain/prestart"
+
+
+def startup_default(e):
+    """Shorten test boots; explicit 0 keeps normal startup, empty uses the INI/default."""
+    if "RECOMP_SKIP_INTRO" not in e:
+        e["RECOMP_SKIP_INTRO"] = "1"
+    elif e["RECOMP_SKIP_INTRO"] == "":
+        del e["RECOMP_SKIP_INTRO"]
+    return e
 
 
 def unlock_default(e):
@@ -318,14 +328,20 @@ ROUTES = {
         "stages": FFA_SETUP + [TERRORDOME],
         "tail": FIGHT_TAIL,
         "until": "game.startgame(", "after": 240, "secs": 620,
-        "shots": "@game.startgame(,15,60,230",
+        "shots": "@getscreeninfo(battle/oldmload,1,@game.startgame(,15,60,230",
+        # Unlocking every venue changes traversal of the map. Pin the actual
+        # retail FE ID through ChooseVenue before the loading screen starts.
+        "env": {"RECOMP_FE_INJECT": "game.choosevenue#1=>Game.ChooseVenue(6)",
+                "RECOMP_START_LOG": "1"}, "expected_venue": 6,
     },
     "fight-terrordome": {
         "help": "One on One at the Terrordome (venue 6), played for four minutes",
         "stages": ONE_ON_ONE_SETUP + ["controllersetup(1,=back@9999", TERRORDOME],
         "tail": FIGHT_TAIL,
         "until": "game.startgame(", "after": 240, "secs": 620,
-        "shots": "@game.startgame(,15,60,230",
+        "shots": "@getscreeninfo(battle/oldmload,1,@game.startgame(,15,60,230",
+        "env": {"RECOMP_FE_INJECT": "game.choosevenue#1=>Game.ChooseVenue(6)",
+                "RECOMP_START_LOG": "1"}, "expected_venue": 6,
     },
     # The Story routes pick the THIRD user ID (down twice): the save area has four profiles since 2026-10-06 and the
     # second one no longer has a Story save. If profiles are added or removed, this is the number to revisit.
@@ -700,6 +716,7 @@ def run_game(name, stages=(), tail="", shots="", secs=240, preset=RELEASE_PRESET
         e["RECOMP_TRANS_SHOT_SECS"] = shots
     e.update(env or {})
     unlock_default(e)
+    startup_default(e)
     e['DEFJAM_DATA'] = guarded_data_root(e['DEFJAM_DATA'])
 
     run = Run(name, log + ".err", shots_dir)

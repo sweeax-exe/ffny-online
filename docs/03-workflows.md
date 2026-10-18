@@ -120,6 +120,7 @@ Game-side switches (`src/patches/dev_unlock.c`; off unless set; the test harness
 | Variable | Effect |
 |---|---|
 | `RECOMP_UNLOCK_ALL=1` | every fighter and venue on any profile, through the developers' own routine at guest `0x000158F0`; the `[debug] unlock_all` setting sets it at start-up. `0` turns it off, including for the harness. |
+| `RECOMP_SKIP_INTRO=1` | start at Press Start, bypassing startup legal and EA/THX/intro movies only. Overrides `[debug] skip_intro`; `0` restores normal boot. Harness/scenario runs default to skip enabled and use the preStart request as their anchor; m3 keeps one complete normal startup in each regression set. `regress.py --only skipintro` checks the option and both override directions. |
 | `RECOMP_DEV_DEBUG=1` | the in-fight debug label under each health bar (holds the byte at `0x0039C1DA`) |
 | `RECOMP_START_FIGHTERS=a,b[,c,d]`, `RECOMP_START_VENUE=n`, `RECOMP_START_LOG=1` | replace the fighters and venue when the match is made; see [the testing harness](09-testing-harness.md#choosing-the-fighters-and-the-venue) |
 | `DEFJAM_HARNESS_SNAPSHOT_SAVE=<dir>` | harness only: keep the save area as the run left it, before the guard restores the original |
