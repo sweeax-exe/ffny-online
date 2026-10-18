@@ -1,5 +1,46 @@
 # Improvement backlog
 
+## One compiled pixel shader per HLSL text on Windows (Direct3D 11) — planned 2026-10-18
+
+Found during the 2026-10-18 scene performance pass (finding F4, first-use shader compile stutter). The
+Vulkan fix is on branch `perf/shader-cache`: toolkit `defjam/shader-cache`, commits `adb67f7` (disk cache)
+and `2edf96f` (one module per text), not yet published. That fix does not touch the Windows path, and
+nobody has measured this on Windows yet; the reading below is from the code and one Mac run.
+
+The problem. `d3d8_combiners_get_shader()` (toolkit `src/d3d/d3d8_combiners.c`) looks up its 128-slot
+cache by a hash of the whole `NV2ACombinerState`. That struct includes the constant colours `c0[8]`,
+`c1[8]`, `final_c0` and `final_c1`. The generated HLSL does not contain them: it reads them from the
+constant buffer that `d3d8_combiners_apply` uploads on every draw. So every new constant colour is
+another `D3DCompile(ps_5_0, O3)` of a text that has already been compiled. Vulkan used the same key and
+the same generator, and that is where its duplicate compiles came from.
+
+Measured on the Mac (sc00, 16:9, scale 3, `RECOMP_COMBINER_DUMP` printing each new combiner state before
+the Vulkan text dedup): 212 combiner states, 10 distinct texts, one text 201 times. The new states keep
+arriving through the scene rather than only at its start, so on Windows they are compiles during play.
+212 states also overflow the 128-slot table, and LRU eviction can then compile the same text again;
+there is no disk cache on Windows to soften it.
+
+Not affected: NV2A vertex programs (`d3d8_extvs.c`). Their text includes the program's start slot and
+every decoded field, so different program hashes do not give the same text; the same run made 14
+vertex-program compiles from 14 distinct texts. `d3d8_vsh.c` hashes the microcode its text comes from.
+
+What to do (needs a Windows machine):
+
+1. In `d3d8_combiners.c`, generate the text on a state-cache miss, hash it (64 bits plus a check hash, as
+   `shader_seen()` does in `d3d8_vk.c`), and reuse the `ID3D11PixelShader` already compiled from that text
+   (`AddRef`, so eviction's `Release` stays correct). Compile only texts not seen before.
+2. A `[D3D11CACHE]` log line like Vulkan's `[VKCACHE]`: compiles, compile milliseconds and reuses for
+   pixel shaders and for vertex programs (the second confirms the zero-duplicate reading on Windows).
+3. Optional: leave the constant colours out of the state hash, so constant changes do not fill the state
+   table at all. That is safe only while the generator never writes constants into the text; the text table
+   is what guarantees it.
+4. Measure with `python scripts/scene-perf.py run sc00 gf1a sc13 --no-audio --every 0` before and after,
+   then `python scripts/regress.py --quick`. A DXBC disk cache is not part of this; it needs its own
+   measurement once the duplicates are gone.
+
+Done when: sc00 on Windows compiles about 10 combiner shaders per launch instead of about 212, its late
+frames are measured before and after, and the toolkit commit is on its own fork branch with those numbers.
+
 ## Gameplay regression and cross-title upgrade testing — planned 2026-10-05
 
 Owner-requested future To-Do: [testing roadmap](08-testing-roadmap.md). Extend
