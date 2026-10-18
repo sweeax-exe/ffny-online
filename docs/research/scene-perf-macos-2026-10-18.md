@@ -35,7 +35,7 @@ pictures); how to repeat the run is at the end.
   loose-file lookups, made in Story too), the 2.5 s of silence after each scene (the return to the
   main menu), and sc07b's 366 MB of texture uploads (an animated reflection).
 - **For the Deck:** the game thread spends 38% of its time in a yield loop waiting for the
-  executor ([F5](#f5-the-fence-hold-spins)). Harmless on a 10-core M1 Pro; on the Deck's four
+  executor ([F5](#f5-the-fence-hold-spins)). Harmless on an 8-core M1 Pro; on the Deck's four
   cores it competes with the executor and the audio threads, and is the first thing to look at
   if the Deck run shows more late frames than this one.
 
@@ -43,7 +43,7 @@ pictures); how to repeat the run is at the end.
 
 | | |
 |---|---|
-| Machine | MacBook Pro, Apple M1 Pro (8 performance + 2 efficiency cores), 16 GB, macOS 26.5.2, built-in display at 120 Hz |
+| Machine | MacBook Pro, Apple M1 Pro (6 performance + 2 efficiency cores), 16 GB (swap nearly full during the runs), macOS 26.5.2, built-in display at 120 Hz |
 | Build | v0.10.1 (`main` at `c4078ef`), toolkit `5445b73`, `posix-release`; the measured build was the released source |
 | Settings | Harness defaults (`RECOMP_SETTINGS=none`) plus `RECOMP_ASPECT=16:9`, `RECOMP_RENDER_SCALE=3`, `RECOMP_PRESENT_VSYNC=1`: a 2560x1440 render target in a 1280x960-point window (2560x1920 swap chain), Vulkan through MoltenVK, FIFO present |
 | Recorder | On, 10 pictures a second (asynchronous read-back, 0.6-0.7 ms a picture, taken off before judging a frame) |
