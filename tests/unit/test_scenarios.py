@@ -140,3 +140,27 @@ def test_contact_sheet_orders_captures_by_their_seconds(tmp_path):
     sheet = Image.open(out)
     assert sheet.size == (4 * 64, 24 + 48 + 18)
     assert [sheet.getpixel((x * 64 + 30, 40))[0] for x in range(3)] == [100, 200, 50]   # 5.6 s, 11.2 s, 90 s
+
+
+def test_scene_shots_follow_the_scene_file_and_stay_within_the_limit():
+    spec = scenarios.scene_shots('sc12', 90, 3)
+    assert spec.startswith('@sc12.viv#1,')
+    harness.validate_shots(spec)
+    times = [float(t) for t in spec.split(',')[1:]]
+    assert len(times) <= 16 and times[-1] <= 90
+
+
+def test_play_scene_reads_the_launch(tmp_path, monkeypatch):
+    class Run:
+        text = '[SCENE] loading sc12\n[SCENE] playing sc12 (scene 13) in the game\'s cinema mode\n[SCENE] sc12 ended; x\n'
+        log = str(tmp_path / 'run.log.err')
+        def shots(self):
+            return []
+    seen = {}
+    def run_game(name, **kw):
+        seen.update(kw, name=name)
+        return Run()
+    monkeypatch.setattr(harness, 'run_game', run_game)
+    played, ended, sheet, run = scenarios.play_scene(harness, 'sc12', secs=30, every=5, out=tmp_path)
+    assert played and ended and sheet is None
+    assert seen['name'] == 'scene-sc12' and seen['env'] == {'RECOMP_SCENE': 'sc12'} and seen['scripted'] is False

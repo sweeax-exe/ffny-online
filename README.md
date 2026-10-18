@@ -63,6 +63,10 @@ performance measurement. [Download the longer 60-fps MP4](docs/media/hd-16x9-gam
 - **Optional faster startup.** Skip the legal screen and startup movies to reach
   Press Start after initial loading. Enable it under General → Debug;
   Story and attract-mode movies still play.
+- **EA's developer menu, restored.** The game's own debug menu, cut off in the retail
+  build, opens from the overlay (Debug tab): set up any match with any fighters, venue and
+  match type, play any Story scene, or look at a venue in the stage viewer. See
+  [The developer menu](docs/developer-menu.md).
 - **Local saves.** Profiles, settings and generated texture packs live in your
   data folder, which setup preserves through updates and repairs.
 
@@ -149,7 +153,8 @@ Some release-specific fixes and validation limits appear in the notes first.
 [Report a problem](https://github.com/vyanhursky/DefJamFFNY-recomp/issues/new/choose)
 with your version, operating system, CPU/GPU, controller, reproduction steps and
 relevant log lines. Remove personal paths and keep game files, saves and memory
-dumps out of reports. See [Contributing](CONTRIBUTING.md) for reporting guidance,
+dumps out of reports. With the [play-test recorder](docs/playtest-recorder.md) on, F9 (or
+View + left stick click) saves the last seconds of play as a bug bundle to attach. See [Contributing](CONTRIBUTING.md) for reporting guidance,
 development setup and the tests a change needs.
 
 Bug fixes, platform testing and documentation improvements are welcome.

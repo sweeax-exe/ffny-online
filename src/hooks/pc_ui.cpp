@@ -41,6 +41,8 @@
 extern "C" {
 #include "recomp_settings.h"
 #include "recorder.h"
+#include "scene_launcher.h"
+#include "dev_module.h"
 #include "input_host.h"
 #include "input_map.h"
 }
@@ -847,6 +849,53 @@ static void page_debug(UiMode mode)
             ImGui::SetItemTooltip("Saves the last seconds of play, from before the overlay was opened, as a bug bundle.");
         } else {
             ImGui::TextDisabled("Turn recording on above and restart the game to record.");
+        }
+
+        /* Story scenes through the game's developer module (src/hooks/dev_module.c, scene_launcher.c). */
+        ImGui::SeparatorText("Story scenes");
+        static int pick = 0;
+        int count = scene_launcher_count();
+        if (count <= 0) {
+            ImGui::TextDisabled("The game's scene list is not readable yet.");
+            return;
+        }
+        if (pick >= count) pick = 0;
+        char current[16];
+        scene_launcher_name(pick, current, sizeof current);
+        ImGui::SetNextItemWidth(ImGui::GetFontSize() * 8);
+        if (ImGui::BeginCombo("Scene", current)) {
+            for (int i = 0; i < count; i++) {
+                char name[16];
+                scene_launcher_name(i, name, sizeof name);
+                if (ImGui::Selectable(name, i == pick)) pick = i;
+                if (i == pick) ImGui::SetItemDefaultFocus();
+            }
+            ImGui::EndCombo();
+        }
+        int playing = scene_launcher_playing();
+        bool active = dev_module_active() != 0;
+        ImGui::BeginDisabled(playing >= 0);
+        ImGui::SameLine();
+        if (ImGui::Button("Play scene")) {
+            scene_launcher_request(pick);
+            dev_module_request(active ? 0 : 1);
+        }
+        ImGui::SetItemTooltip("Plays the scene in the game's developer cinema mode, then returns to the main menu. "
+                              "Whatever is running now (a fight, the Story) is left. Close the overlay to watch.");
+        ImGui::EndDisabled();
+        if (!active) {
+            if (ImGui::Button("Developer menu")) dev_module_request(0);
+            ImGui::SetItemTooltip("EA's own debug menu, driven by pad 1 (try the d-pad and A). "
+                                  "Leaves what is running now.");
+        } else if (ImGui::Button("Back to the main menu")) {
+            dev_module_leave();
+        }
+        if (playing >= 0) {
+            char name[16];
+            scene_launcher_name(playing, name, sizeof name);
+            ImGui::Text("Playing %s.", name);
+        } else {
+            ImGui::TextDisabled(active ? "The developer module is running." : "The developer module is not running.");
         }
     }
 }

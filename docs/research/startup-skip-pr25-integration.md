@@ -299,7 +299,7 @@ at0bb115f during publication; after its merge/release, retarget and reconcile
 PR39 onto main before merging/tagging0.10.1. No release or remote merge was
 performed in this step. CI results remain available on the PR.
 
-### PR39 CI dependency correction (D129)
+### PR39 CI dependency correction (branch-local D129/CI)
 
 The first source-only scripts/unit job fails nine startup-fixture setups because
 that job deliberately checks out no toolkit submodule (missing settings header
@@ -311,3 +311,59 @@ are added to the recursive-checkout Windows/MSVC, macOS and Linux runtime jobs
 so the source-only skip does not remove native CI coverage. Locally, all9native
 cases pass with the toolkit; an isolated source-only test copy skips all9.
 No game/runtime source or regression gate changed.
+
+## Reconciliation with the released v0.10.0 (D131)
+
+The readiness check found old PR39 head9ff054d green28/28 but conflicting with
+PR25’s updated02d9d14. That update restores the developer module/menu and the
+scene launcher, adds game-side MSVC compilation, and prepares0.10.0. Its native
+hooks were absent from the earlier startup integration. Conflicts are resolved
+by retaining version0.10.1, both README features, the expanded Debug tab and
+General startup checkbox, both release notes, and all native CI coverage.
+PR25’s D129/D130 remain verbatim; the independently assigned PR39 CI decision
+is qualified D129/CI rather than silently replacing either history.
+
+New guest code is regenerated:17,896functions,20Cfiles,90MiB. The33-step native
+build is certified (`pr25-updated-{recomp,build}.txt` under logs/startup-skip).
+Units pass470/34skip/1slow deselected. Quick passes5/5
+(`logs/regress-20261017-213306.txt`), including the ordered normal movie startup,
+three unchanged goldens and122seconds of combat (median120/min105presents/2s).
+
+Two targeted fast-start/developer-scene checks pass. SC12 enters cinema, ends,
+removes its developer task on Unload and returns to the main menu, with no
+detected faults and identical saves (`run-20261017-212547.log.err`). Its8second
+capture caught the return-loading transition. SC05 provides actual visual proof:
+the24second capture renders the scene, one startup redirect, no faults, saves
+restored (`run-20261017-213317.log.err`,33.10seconds elapsed). Image stays local:
+`logs/startup-skip/updated-scene-sc05.png`. These are request, execution and
+visual observations separately; a request log alone is not render proof.
+
+PR25 is now merged at5331f58 and v0.10.0 published. The main merge tree is
+identical to02d9d14; PR39 is retargeted to main. The toolkit pin is still the
+same published5445b73. Updated full regression completes on this exact source
+and guarded disposable saves: **15/17 in36minutes**
+(`logs/regress-20261017-221050.txt`, console
+`logs/startup-skip/pr25-updated-full.txt`). All three screen goldens, UI/options,
+fights, actual240second Terrordome (median120/min102), replay80records/1800steps,
+Story/creator/crib/gym and3/3soak pass. Every save-restoration gate passes.
+
+The only failures are `audio.dry_queue`: combat26/27, dry3/drops0
+(`logs/scenarios/regress-combat-20261017-215259/report.json`), and versus25/26,
+dry1/drops0 (`logs/scenarios/regress-versus-20261017-215710/report.json`). All7
+combat and6two-player gameplay assertions pass. Bounded triage confirms live
+presentation through the final captured frames; the verbose tail is not proof
+of a hang. These are the two known strict gates documented in released0.10.0
+(and D122), not a newly isolated audio cause. No audio source, limit or gate is
+changed or waived. This raw full run remains15/17; the earlier27/27 retry belongs
+to the prior integration and is not presented as a new retry of this source.
+
+The updated startup audit passes: quick4launches=3fast/1normal, full20=19fast/
+1normal, zero unknowns and exactly one redirect in each fast launch. Evidence:
+`logs/startup-skip/pr25-updated-{quick,full}-startup-audit.json`.
+
+Vlad explicitly authorizes merging and releasing0.10.1 (D132). Toolkit forkPR1
+is merged with merge commit `a37e19edf07473fd8e963209a28a2cdd3e142598`; verified
+5445b73 remains its ancestor and the game gitlink stays unchanged/clean. Main's
+subsequent PR41 only records publication of0.10.0; preserve that metadata while
+finalizing this integration. Fresh PR39 CI and the tagged release asset checks
+remain required before publishing0.10.1.
