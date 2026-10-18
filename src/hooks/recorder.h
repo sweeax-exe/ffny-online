@@ -36,6 +36,12 @@ typedef struct RecorderConfig {
     const char *settings_json;  /* a JSON object: the settings this run started with */
     int mark_vk;                /* the key that marks a moment (a Windows virtual-key code) */
     const char *mark_key_name;  /* its name for the log ("F9"), read by recorder_init only; NULL: the code */
+    /* The hitch probe: when no frame has been presented for stall_probe_ms (0: never), a
+     * thread of the recorder's calls stall_probe, again every 50 ms up to six times a frame.
+     * It writes two JSON objects, the thread holding the guest CPU and every thread's stack;
+     * the first goes into the frame's hitch event, all of them into stalls.jsonl. */
+    int stall_probe_ms;
+    int (*stall_probe)(char *holder, size_t holder_size, char *all, size_t all_size);
 } RecorderConfig;
 
 /* What the caller measured for one frame. Counters are the runtime's own and

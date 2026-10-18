@@ -39,6 +39,22 @@ static const void *guest_base(void)
     return g_xbox_mem_offset ? (const void *)g_xbox_mem_offset : NULL;
 }
 
+#if !defined(_WIN32)
+/* The runtime's hitch probe (win32_compat.c; Darwin only, 0 elsewhere). */
+int guest_turn_probe(char *holder, size_t holder_size, char *all, size_t all_size);
+#endif
+
+/* RECOMP_HITCH_PROBE=1 (or a number of milliseconds, 60 for 1): when a frame is that
+ * late, sample which thread holds the guest CPU and every thread's stack, into the
+ * hitch event and stalls.jsonl. Off by default. */
+static int hitch_probe_ms(void)
+{
+    const char *e = getenv("RECOMP_HITCH_PROBE");
+    int ms = e ? atoi(e) : 0;
+    if (ms == 1) ms = 60;
+    return ms > 0 ? ms : 0;
+}
+
 size_t pc_debug_settings(RecompSetting *out, size_t max)
 {
     size_t n = 0;
@@ -186,6 +202,10 @@ void pc_debug_start(const char *log_path, int force)
     cfg.settings_json = json;
     cfg.mark_vk = vk > 0 ? vk : 0x78;   /* VK_F9 */
     cfg.mark_key_name = vk > 0 ? key : "F9";
+#if !defined(_WIN32)
+    cfg.stall_probe_ms = hitch_probe_ms();
+    cfg.stall_probe = guest_turn_probe;
+#endif
     if (!recorder_init(&cfg)) {
         free(json);
         return;

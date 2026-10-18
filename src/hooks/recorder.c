@@ -77,6 +77,8 @@ static long long file_size(const char *p)
 }
 static DWORD WINAPI worker_entry(LPVOID arg);
 static void start_worker(void) { CreateThread(NULL, 0, worker_entry, NULL, 0, NULL); }
+static DWORD WINAPI prober_entry(LPVOID arg);
+static void start_prober(void) { CreateThread(NULL, 0, prober_entry, NULL, 0, NULL); }
 static long long private_bytes(void)
 {
     PROCESS_MEMORY_COUNTERS_EX pmc;
@@ -143,6 +145,12 @@ static void start_worker(void)
 {
     pthread_t t;
     if (pthread_create(&t, NULL, worker_entry, NULL) == 0) pthread_detach(t);
+}
+static void *prober_entry(void *arg);
+static void start_prober(void)
+{
+    pthread_t t;
+    if (pthread_create(&t, NULL, prober_entry, NULL) == 0) pthread_detach(t);
 }
 static long long private_bytes(void)
 {
@@ -228,6 +236,13 @@ static unsigned long long g_still_frame;
 
 static unsigned long long g_frame;
 static double g_begin, g_last_end;
+/* The hitch probe's findings for the frame being waited for (under g_lock). */
+#define PROBE_HOLDER 6144
+static FILE *g_stalls_file;
+static unsigned long long g_probe_frame = ~0ull;
+static int g_probe_n;
+static double g_probe_since;
+static char g_probe_first[PROBE_HOLDER], g_probe_last[PROBE_HOLDER];
 static int g_last_dropped = -1, g_last_dry = -1;
 static long long g_total_dropped, g_total_dry, g_hitches;
 static double g_recent[RECENT];
@@ -558,6 +573,27 @@ static void recent_add(double interval)
     }
 }
 
+/* A hitch event, with what the probe saw while the frame was late (the guest CPU's
+ * holder at the first probe and at the last). */
+static void hitch_event(const char *fields, unsigned long long frame)
+{
+    static char big[2 * PROBE_HOLDER + 512];
+    int n = 0;
+
+    if (g_cfg.stall_probe) {
+        mtx_lock(&g_lock);
+        if (g_probe_frame == frame && g_probe_n > 0) {
+            n = snprintf(big, sizeof big, "%s,\"probes\":%d,\"probe_since_ms\":%.1f,\"holder\":%s",
+                         fields, g_probe_n, g_probe_since, g_probe_first[0] ? g_probe_first : "null");
+            if (g_probe_n > 1 && n > 0 && (size_t)n < sizeof big)
+                n += snprintf(big + n, sizeof big - (size_t)n, ",\"holder_last\":%s",
+                              g_probe_last[0] ? g_probe_last : "null");
+        }
+        mtx_unlock(&g_lock);
+    }
+    recorder_event("hitch", n > 0 && (size_t)n < sizeof big ? big : fields);
+}
+
 void recorder_frame_end(const RecorderFrameIn *in)
 {
     static uint32_t last_draws, last_vertices, last_clears, last_tex_uploads, last_tex_evictions;
@@ -622,7 +658,7 @@ void recorder_frame_end(const RecorderFrameIn *in)
             snprintf(fields, sizeof fields,
                      "\"interval_ms\":%.2f,\"median_ms\":%.2f,\"present_ms\":%.2f,\"work_ms\":%.2f,\"capture_ms\":%.2f",
                      r.interval, g_median, r.present, r.work, r.capture);
-            recorder_event("hitch", fields);
+            hitch_event(fields, r.frame);
             if (g_cfg.auto_bundle_hitch_ms > 0 && own >= (double)g_cfg.auto_bundle_hitch_ms &&
                 g_auto_bundles < 5 && (g_last_auto == 0.0 || t - g_last_auto > 60000.0)) {
                 g_last_auto = t;
@@ -1060,6 +1096,69 @@ static void *worker_entry(void *arg)
 #endif
 }
 
+/* ---- the hitch probe -------------------------------------------------------------------------------- */
+
+/* Looks every few milliseconds for a frame that is late, and asks the runtime what
+ * its threads are doing while it still is: a stall that has ended leaves nothing to see. */
+#if defined(_WIN32)
+static DWORD WINAPI prober_entry(LPVOID arg)
+#else
+static void *prober_entry(void *arg)
+#endif
+{
+    static char holder[PROBE_HOLDER], all[256 * 1024];
+    unsigned long long seen = ~0ull;
+    int n = 0;
+    double last = 0.0, woke = now_ms(), gap_max = 0.0;
+
+    (void)arg;
+    while (!g_stop) {
+        double t, end, since, gap;
+        unsigned long long frame;
+
+        sleep_ms(4);
+        end = g_last_end;
+        frame = g_frame;
+        t = now_ms();
+        /* How long this thread was away for a 4 ms sleep: a stall that stops every
+         * thread of the process (or the host's scheduling of it) shows here too. */
+        gap = t - woke;
+        woke = t;
+        if (frame != seen) { seen = frame; n = 0; gap_max = 0.0; }
+        if (gap > gap_max) gap_max = gap;
+        if (end <= 0.0 || frame < 60) continue;
+        since = t - end;
+        if (since < (double)g_cfg.stall_probe_ms || n >= 6 || (n > 0 && t - last < 50.0)) continue;
+        if (g_cfg.stall_probe(holder, sizeof holder, all, sizeof all) <= 0) continue;
+        if (g_frame != frame) continue;         /* the frame came while we looked */
+        n++;
+        last = t;
+        mtx_lock(&g_lock);
+        if (g_probe_frame != frame) {
+            g_probe_frame = frame;
+            g_probe_since = since;
+            copy_text(g_probe_first, sizeof g_probe_first, holder);
+            g_probe_last[0] = 0;
+        } else {
+            copy_text(g_probe_last, sizeof g_probe_last, holder);
+        }
+        g_probe_n = n;
+        mtx_unlock(&g_lock);
+        if (g_stalls_file) {
+            fprintf(g_stalls_file, "{\"t_ms\":%.1f,\"frame\":%llu,\"since_ms\":%.1f,\"probe\":%d,"
+                                   "\"cost_ms\":%.2f,\"prober_gap_ms\":%.1f,\"holder\":%s,\"all\":%s}\n",
+                    rel_ms(t), frame, since, n, now_ms() - t, gap_max, holder[0] ? holder : "null",
+                    all[0] ? all : "null");
+            fflush(g_stalls_file);
+        }
+    }
+#if defined(_WIN32)
+    return 0;
+#else
+    return NULL;
+#endif
+}
+
 /* ---- the session ---------------------------------------------------------------------------------- */
 
 typedef struct Sessions { char names[512][64]; int n; } Sessions;
@@ -1179,6 +1278,13 @@ int recorder_init(const RecorderConfig *cfg)
     }
     recorder_event("session_start", NULL);
     start_worker();
+    if (g_cfg.stall_probe && g_cfg.stall_probe_ms > 0) {
+        if (path_join(path, sizeof path, g_session, "stalls.jsonl"))
+            g_stalls_file = fopen(path, "w");
+        start_prober();
+        fprintf(stderr, "[RECORD] hitch probe on: a frame %d ms late is sampled into stalls.jsonl\n",
+                g_cfg.stall_probe_ms);
+    }
     if (cfg->mark_key_name && *cfg->mark_key_name)
         fprintf(stderr, "[RECORD] recording this session to %s (pictures %d a second, %d s kept; mark with %s)\n",
                 g_session, g_cfg.video_fps, g_cfg.ring_seconds, cfg->mark_key_name);

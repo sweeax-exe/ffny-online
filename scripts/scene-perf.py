@@ -119,7 +119,7 @@ def keep_session(folder, keep, scene, audio):
     if folder is None:
         return None
     keep.mkdir(parents=True, exist_ok=True)
-    for name in ('frames.csv', 'events.jsonl', 'session.json'):
+    for name in ('frames.csv', 'events.jsonl', 'session.json', 'stalls.jsonl'):
         if (folder / name).exists():
             shutil.copy2(folder / name, keep / name)
     result = {}
