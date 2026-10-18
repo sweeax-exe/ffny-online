@@ -68,6 +68,8 @@ int main(int argc, char **argv)
 
 @pytest.fixture(scope='module')
 def startup_tool(tmp_path_factory):
+    if not (ROOT / 'tools/xboxrecomp/src/settings/recomp_settings.c').is_file():
+        pytest.skip('native startup fixture needs the initialized toolkit submodule')
     compiler = shutil.which('cl') if os.name == 'nt' else shutil.which('cc')
     if not compiler:
         pytest.skip('native startup fixture needs a C compiler')

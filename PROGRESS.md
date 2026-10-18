@@ -55,7 +55,7 @@
 | Agent tooling (D115) | ⏳ PR open | `triage.py`, `progress.py`, `docs/agent/` playbooks, shared `AGENTS.md`, generated skills and briefs for Claude and Codex, Markdown-only CI gating. Unit tests added; Windows and macOS CI and Codex's own review pending. |
 | Play-test recorder and scenarios (D116–D119) | ⏳ macOS done, Windows and Deck to run | Branch `feature/clever-feynman-4ovoyk` (PR #25). `[debug] record` / `--record`: `logs/sessions/` with per-frame rows, events, audio and a picture ring; F9, the pad chord View + left stick (`mark_pad`), the overlay button, a crash, a hang or a long hitch writes a bug bundle; `scripts/bug-bundle.py` reports it. Scenarios, crowd lab, front-end injection, command catalog (D117); a chosen Story scene by name, `RECOMP_TEST_CINEMA_SCENE` and `scenarios.py scenes` (D119, `docs/scene-selector.md`). Asynchronous read-back (D118). **macOS, 2026-10-14:** built (AppleClang), unit 475 pass, recorder end to end, 1.2 ms a picture async vs 3.4 ms sync, scenarios, crowd lab and the scene launcher run on the game; full regression 12/16 on PR and on main, the same four failures (save data, intermittent audio queue). Texture-cache columns in `frames.csv` (toolkit `49a1798`). Windows (MSVC, D3D11) not run. **Deck, 2026-10-15 (D120):** built in the container, recorder on the Deck was 585 ms a frame until the read-back moved to cached memory; audio crackle: two measured fixes, the rest open. |
 
-| Skip startup movies/legal (D123-D127) | ✅ feature/PR25/quick; full16/17 | `[debug] skip_intro` / `RECOMP_SKIP_INTRO`, default off, General → Debug. Native Mac: preStart at4s versus102s baseline; five option cases, UI, Story, attract, combat, fresh saves, keyboard, late SDL pad and combined unlock pass. Harness now defaults to skip, with one positive normal boot in m3 per quick/full set. Branch `feat/skip-startup-intro` integrates PR25 while retaining main's audio fixes. Full16/17: only combat audio.dry_queue=1 (existing D122 gate), no waiver; corrected Terrordome stress240s passes (median120/min110). Final units464pass/34skip/1slow deselected; unchanged combat retry27/27, audio dry0 and saves restored. Toolkit5445b73 publication authorized/completed (fork PR1); v0.10.1 game PR preparation in progress. |
+| Skip startup movies/legal (D123-D127) | ✅ feature/PR25/quick; full16/17 | `[debug] skip_intro` / `RECOMP_SKIP_INTRO`, default off, General → Debug. Native Mac: preStart at4s versus102s baseline; five option cases, UI, Story, attract, combat, fresh saves, keyboard, late SDL pad and combined unlock pass. Harness now defaults to skip, with one positive normal boot in m3 per quick/full set. Branch `feat/skip-startup-intro` integrates PR25 while retaining main's audio fixes. Full16/17: only combat audio.dry_queue=1 (existing D122 gate), no waiver; corrected Terrordome stress240s passes (median120/min110). Final units464pass/34skip/1slow deselected; unchanged combat retry27/27, audio dry0 and saves restored. Toolkit5445b73 published/pinned, fork PR1 open; v0.10.1 game PR39 pushed as draft stacked on PR25, with version/notes/README. Await PR25 merge/release before retargeting PR39 to main. |
 
 ## 1. Decisions log
 
@@ -215,6 +215,7 @@
 | D126 | 2026-10-17 | Apply the existing debug unlock immediately at its first main-menu fallback event when startup is skipped, preserving the normal Game.StartMainMenu activation path. | Integrated full regression caught `unlockopt`: INI enable/export worked, but the fallback armed and returned until another screen change. The first menu must already have unlocks. Native fixture now asserts that first event; preserve the existing gate instead of driving to a later screen to satisfy it. |
 | D127 | 2026-10-17 | Correct the Terrordome stress and generated routes using PR25’s native front-end injection after the menu chooses, before loading. Require final venue6 at StartGame and capture the loading caption. | The old profile-dependent one-right recipe selected Hunt’s Point14 under all-unlocked test defaults; the game’s own map/loading UI confirmed it. Retail FE ID6 and the corrected native loading caption identify The Terrordome. The compact mapper fallback alone does not identify an arena. Preserve the original full report and run the affected four-minute stress separately; no game/runtime change or gate relaxation. |
 | D128 | 2026-10-17 | Vlad authorizes pushing the startup integration and opening the PRs; designate the next release **v0.10.1**, noting the optional legal/startup-movie skip and more time-efficient quick/full regression runs. | PR25 is being merged/released separately. Publish tested toolkit5445b73 first, pin it in the game source, prepare version/notes, and open the game PR with its PR25 dependency explicit. Release tagging remains after merge/CI per the release workflow. |
+| D129 | 2026-10-17 | Keep the source-only unit job independent of submodule checkout; skip the native startup fixture only when its toolkit settings source is absent, and execute that fixture explicitly in the recursive-checkout Windows/MSVC, macOS and Linux runtime jobs. | PR39 CI exposed9 fixture setup errors from missing toolkit files, not game behavior. This matches the existing native-input fixture’s dependency handling while retaining real native startup/ABI/combined-option coverage on all three compiler lanes. |
 
 ## 2. Environment inventory (2026-09-17)
 
@@ -263,7 +264,7 @@ defjam-recomp/
 
 ## 5. Open questions for Vlad
 
-- ~~**(2026-10-17) Startup/PR25 integration publication (D125).**~~ Approved by Vlad (D128): push the toolkit and game branches and make the PRs; release target0.10.1. Toolkit5445b73 is published and verified at `defjam/skip-intro-pr25`; [fork integration PR1](https://github.com/vyanhursky/xboxrecomp/pull/1) targets `defjam/audio-fix`. Game version0.10.1/notes prepared and built; game draft PR will stack on PR25 while it remains open. No tag or remote merge yet.
+- ~~**(2026-10-17) Startup/PR25 integration publication (D125).**~~ Approved by Vlad (D128): push the toolkit and game branches and make the PRs; release target0.10.1. Toolkit5445b73 is published and verified at `defjam/skip-intro-pr25`; [fork integration PR1](https://github.com/vyanhursky/xboxrecomp/pull/1) targets `defjam/audio-fix`. Game version0.10.1/notes prepared and built; [draft PR39](https://github.com/vyanhursky/DefJamFFNY-recomp/pull/39) pushed/attached, stacked on PR25 while it remains open. Authorization is fulfilled; no tag or remote merge performed.
 
 - **(2026-10-15) Audio crackle fix (D121).** ~~(1) publish the toolkit commits~~ done 2026-10-16 (`defjam/audio-crackle`, `fb153f1`); ~~(2) rebase or merge~~ main merged into PR #25, decisions renumbered D115-D121. (3) Still open: run the intro route on Windows and the Deck, `harness.py run intro --env RECOMP_APU_VOICE_PCM=<prefix>` then `scripts/audio-holes.py <prefix>`, with `--env RECOMP_TICK_THREAD=0` for the before.
 
@@ -301,58 +302,59 @@ defjam-recomp/
 
 > Recent entries only; older entries remain unchanged in the local `docs/worklog/` archive.
 
-- 2026-10-17 15:20 — PR25 head0bb115f integrated locally asdb88b0a; main0.9.3 and recorder/scenario/triage changes retained. Combined toolkit5445b73 has both published histories and unchanged audio topics; focused guestCPU1/1 and Vulkan read-back2/2 pass. Regenerated17,896functions/20C/90MB and certified native build (logs/startup-skip/pr25-recomp.txt,pr25-build.txt). Fast-policy quick5/5 in410s (logs/regress-20261017-151938.txt):461unit/34skip/1slow deselected, loading/title/menu goldens, one positively ordered normal startup,120s fight median120/min112. Full suite running on disposable saves; combined toolkit unpublished and parent pin uncommitted pending authorization.
-- 2026-10-17 15:25 — Full regression environment corrected: first attempt retained RECOMP_HEADLESS=1, which suppresses the launcher by presence and prevents its UI check. Stopped owned coordinator/child, kept logs/startup-skip/pr25-full-aborted-headless.txt, verified15save files against the guard payload and its success marker byte-identical. Restarted the unchanged certified build with HEADLESS and SKIP_INTRO unset (normal startup explicitly retained only by m3); full table logs/startup-skip/pr25-full.txt, session68608. No game/source fix or gate relaxation.
 - 2026-10-17 15:35 — D126 fixes the first-menu unlock fallback: full unlockopt had loaded/exported the INI option but armed/returned until another screen. Now it applies before the first menu uses the profile; normal Game.StartMainMenu path unchanged. Native fixture asserts first event,9cases pass; incremental build certified. Targeted native unlockopt72s and five-case skipintro100s pass (logs/regress-20261017-153428.txt). Full old-boundary attempt stopped with guard restoration, log retained pr25-full-unlock-boundary.txt; final quick/full reruns pending.
 - 2026-10-17 15:42 — Final-source quick regression5/5 after D126 (logs/regress-20261017-154147.txt),412s:461unit/34skip/1slow deselected, loading/title/menu goldens; one ordered legal/movie boot;122s fight median121presents/2s minimum113. Targeted unlockopt and five-case startup matrix also pass. Full restarted on the same certified0ea5c5d/toolkit5445b73 build with UI enabled, table logs/startup-skip/pr25-final-full.txt; all17checks and original audio/replay/save gates retained.
 - 2026-10-17 16:34 — Integrated final full completed16/17 in35min (logs/regress-20261017-161802.txt): all startup/UI/goldens/Story/soak/replay and gameplay assertions pass; combat only fails audio.dry_queue=1, the existing D122 intermittent gate, not waived. Startup audit20launches:19skip/1normal; quick4launches:3skip/1normal. Found old named Terrordome positional route selected Hunt’s Point14; primary map/loading capture confirms it. Corrected early native ChooseVenue6 injection shows The Terrordome loading caption and four-player arena; full4min stress finishing. No save mismatch, runtime source unchanged.
 - 2026-10-17 16:41 — Final D127 early venue-selection stress passes240s at actual The Terrordome (loading caption, StartGame6, four slots), median120presents/2s minimum110, log run-20261017-162943 and regress-20261017-163533.txt. Composer capture parity and injected-request evidence synchronized; final complete units464pass/34skip/1slow deselected, unchanged combat retry27/27 (all7gameplay, audio dry0, saves restored), logs/regress-20261017-164056.txt. Original full16/17 retained; no audio change/waiver. PR25 exact0bb115f stillopen/conflicting. All runs finished, toolkit5445b73 publication/pin is sole pending authorization; no push.
 - 2026-10-17 20:15 — D128: owner authorizes pushes/PRs and targets0.10.1 for the optional startup skip and faster regressions. Published exact tested toolkit5445b73 to defjam/skip-intro-pr25, verified remote SHA; fork PR1 targets audio-fix and is attached. Version0.10.1/notes/README prepared,58 release/instructions/startup tests pass; version-only native rebuild running (logs/startup-skip/release-0.10.1-build.txt). PR25 stillopen at tested0bb115f; no tag or merge performed.
 - 2026-10-17 20:18 — Version-only0.10.1 native build certified (46steps, logs/startup-skip/release-0.10.1-build.txt),58 focused release/agent/startup tests pass. Short boot201609 reaches preStart but retains baseline ICALL80003344/caller27EC6E (same143136,D95); unchanged retry201656 passes in6.02s, one redirect/no faults/saves restored (release-0.10.1-boot-retry.txt). No runtime change/gate waiver. PR25 remainsopen0bb115f; game0.10.1 draft will stack on it.
+- 2026-10-17 20:19 — Published game branch feat/skip-startup-intro with release prep4d567f3 and exact published toolkit5445b73 pin; opened/attached draft game PR39 (base PR25 feature/clever-feynman-4ovoyk), toolkit fork PR1 also attached. Version0.10.1/notes/README include startup skip and faster regressions. Hygiene386files/0fail,58 focused tests and native version boot retry pass; prior full/boot failures retained. PR25 stillopen0bb115f; retarget/reconcile39 to main after its merge/release. No upstream PR, remote merge, tag or release performed.
+- 2026-10-17 20:21 — PR39 first CI source-only unit job fails9startup fixture setups: toolkit submodule intentionally absent, settings header/source missing (logs/startup-skip/pr39-ci-python-first.txt). D129 adds the native fixture’s dependency guard and explicit Windows/MSVC/macOS/Linux CI execution with recursive checkout. Local9native cases pass; isolated source-only copy9skip. Runtime/game source unchanged; CI rerun follows the status commit.
 
 ## 7. Hand-off
 
-Branch `feat/skip-startup-intro`: startup321cd8e, PR25 merge db88b0a, first-menu
-unlock0ea5c5d, verified Terrordome route07c4cc1. D128 authorizes pushes/PRs and
-names v0.10.1 for startup skip plus faster regressions. Version0.10.1, release
-notes and README prepared. PR25 remains OPEN at0bb115f (20:17), not merged by us;
-open the game PR as a draft based on `feature/clever-feynman-4ovoyk`, then retarget
-to main after PR25’s merge/release. No tag/release requested in this publication
-step; release workflow requires main ancestry and CI. No game is running.
+D128 publication complete: game branch `feat/skip-startup-intro`, release prep
+4d567f3 after startup321cd8e / PR25 merge db88b0a / unlock0ea5c5d / route07c4cc1.
+Version **0.10.1** and `docs/releases/v0.10.1.md` describe the optional legal/movie
+skip and more time-efficient regressions. Pushed [game draft PR39](https://github.com/vyanhursky/DefJamFFNY-recomp/pull/39), attached to this task.
+Base is PR25’s `feature/clever-feynman-4ovoyk`; PR25 remains OPEN at0bb115f
+at publication. No remote merge or release/tag by this task. No game is running.
 
-Toolkit5445b730d08348c20fc029cd728bb24a4a85c8e0 is PUBLISHED and remote SHA verified:
-`vyanhursky/xboxrecomp`, branch `defjam/skip-intro-pr25`,
-https://github.com/vyanhursky/xboxrecomp/pull/1 (base defjam/audio-fix, attached).
-Both published9051be9/4a6c88e are ancestors; tested tree unchanged. GuestCPU1/1,
-Vulkan/MoltenVK read-back2/2 pass. Parent may now commit that exact pin. Isolated
-worktree `logs/startup-skip/toolkit-integration`; no upstream PR. Fork has no PR
-checks configured/reported. Root submodule clean inside. Push game branch and
-attach its created draft PR; preserve unrelated untracked notes/media.
+Next integration step AFTER PR25’s merge/release: fetch origin/main, retarget
+PR39 to main, reconcile any version/progress conflicts retaining0.10.1 and the
+feature/test changes, verify the resulting source tree and CI, then normal
+review/merge/release workflow. Do not tag before main ancestry/CI gates pass.
+The owner asked for pushes/PRs; no additional authorization is needed for those
+already completed. PR links show live checks. Initial source-only unit CI failed9fixture setups because it does not checkout the toolkit; D129 fixes dependency handling and explicitly runs the fixture in the Windows/macOS/Linux native jobs. Local9native pass and9source-only skips verified; CI rerun pending. No CI success asserted here.
+
+Toolkit exact pin5445b730d08348c20fc029cd728bb24a4a85c8e0 is published, verified
+and COMMITTED in the parent. [Fork integration PR1](https://github.com/vyanhursky/xboxrecomp/pull/1), base defjam/audio-fix, attached;
+branch `defjam/skip-intro-pr25`, worktree `logs/startup-skip/toolkit-integration`.
+Both published9051be9/4a6c88e are ancestors, tested tree unchanged, guestCPU1/1
+and Vulkan/MoltenVK read-back2/2 pass. No upstream PR. Fork reports no PR checks;
+parent CI exercises the pinned source. Keep pin reachable when cleaning branches.
 
 Option: General → Debug → Skip startup movies and legal screen, default off;
-`[debug] skip_intro=true` / `RECOMP_SKIP_INTRO=1`. Startup/controller initialization
-retained; Start runs save checks, Story/attract movies play. Harness fast by
-default; one positive complete legal/EA/THX/intro boot per quick/full set.
-Audits: quick3fast/1normal, full19fast/1normal. Native setting/UI/fresh-save
-keyboard/late SDL pad/two players/unlock74/74 pass; nine native startup cases.
+`[debug] skip_intro=true` / `RECOMP_SKIP_INTRO=1`. Controller/save checks remain;
+Story/attract movies play. Harness fast by default; one positive complete legal/
+EA/THX/intro boot per quick/full set. Audits quick3fast/1normal, full19fast/1normal.
+Native UI/settings/fresh-save keyboard/late pad/two players/unlock74/74 pass.
 
-Integrated feature validation: final quick5/5 (`logs/regress-20261017-154147.txt`),
-full16/17 (`logs/regress-20261017-161802.txt`):only existing intermittent combat
-queue underrun1. All7gameplay assertions, versus26/26,80records/1800steps exact
-replay, Story/crib/gym/UI,3/3soak pass. Original failed full remains a failure.
-Final focused `logs/regress-20261017-164056.txt`:464units/34skip/1slow deselected,
-combat27/27,dry0, save restored. Corrected actual Terrordome240s, median120/min110
-passes; original full venue row was Hunt’s Point and is not Terrordome coverage.
-See `docs/research/startup-skip-venue-audit.md`; loading-caption proof stays local.
+Feature validation: quick5/5 (`logs/regress-20261017-154147.txt`), full16/17
+(`logs/regress-20261017-161802.txt`):only existing intermittent combat dry1. All7
+combat gameplay assertions, versus26/26,80records/1800steps exact replay,
+Story/crib/gym/UI,3/3soak pass. Original failed full retained. Focused final retry
+`logs/regress-20261017-164056.txt`:464units/34skip/1slow deselected;combat27/27,dry0,
+saves identical. Corrected actual Terrordome240s median120/min110 passes; original
+full venue row was Hunt’s Point and is not counted as Terrordome coverage.
 
-Version-only0.10.1 rebuild certified (`logs/startup-skip/release-0.10.1-build.txt`),
-58 release/agent/startup tests pass. Short boot run201609 hits existing ICALL
-80003344/caller27EC6E (same baseline143136,D95), retained; unchanged retry201656
-passes:preStart6.02s/one redirect/no faults/saves identical. No runtime algorithm
-or gate changed. Windows/Deck gameplay not tested this session. Player saves and
-settings untouched; disposable `logs/startup-skip/story-data` only.
+Version-only0.10.1 native build certified in46steps
+(`logs/startup-skip/release-0.10.1-build.txt`),58release/agent/startup tests pass.
+First short boot201609 retains baseline ICALL80003344/caller27EC6E (same143136,D95);
+unchanged retry201656 passes6.02s, one redirect, no faults, identical saves.
+No runtime algorithm or gate changed. Source hygiene386files/0fail. Windows/Deck
+play-testing not done this session. Use only disposable logs/startup-skip/story-data.
 
-Next: commit release prep/published pin with task-only staging and hygiene, push
-and open/attach game draft PR, record URL and CI status. Do not merge PR25 or tag
-0.10.1 prematurely. Full evidence in docs/research/startup-skip-*.md. No game
-bytes, generated C, logs, captures, builds or unrelated local files in commits.
+Reports indexed under docs/research/startup-skip-*.md. Owner saves/settings untouched.
+Unrelated notes/media/work-log archives remain untracked. Never stage game bytes,
+generated C, captures, logs, build output or those unrelated files.

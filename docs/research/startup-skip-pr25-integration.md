@@ -290,3 +290,24 @@ claimed. The unchanged retry (`run-20261017-201656.log.err`) reaches preStart in
 6.02s, one redirect, no detected fault, save restoration identical. The first
 failure is retained rather than filtered. No game/runtime code changed in the
 release preparation.
+
+[Game PR39](https://github.com/vyanhursky/DefJamFFNY-recomp/pull/39) is now pushed
+and opened as a draft stacked on PR25’s `feature/clever-feynman-4ovoyk` branch.
+It contains the published toolkit pin, version0.10.1, release notes and the
+feature/test changes. Both PRs are attached to this task. PR25 was still open
+at0bb115f during publication; after its merge/release, retarget and reconcile
+PR39 onto main before merging/tagging0.10.1. No release or remote merge was
+performed in this step. CI results remain available on the PR.
+
+### PR39 CI dependency correction (D129)
+
+The first source-only scripts/unit job fails nine startup-fixture setups because
+that job deliberately checks out no toolkit submodule (missing settings header
+and source), while the local/native jobs include it. Log:
+`logs/startup-skip/pr39-ci-python-first.txt`, run39082276988/job117541517642.
+The fixture now skips only when its required toolkit source is absent, matching
+the existing native-input dependency handling. Explicit startup fixture steps
+are added to the recursive-checkout Windows/MSVC, macOS and Linux runtime jobs
+so the source-only skip does not remove native CI coverage. Locally, all9native
+cases pass with the toolkit; an isolated source-only test copy skips all9.
+No game/runtime source or regression gate changed.
