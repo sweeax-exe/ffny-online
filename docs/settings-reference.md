@@ -37,6 +37,25 @@ and what to do when something misbehaves, see [Controllers, keyboard and mouse](
 | `overlay_pad` | `guide, left_stick_click+right_stick_click` | Pad buttons that open and close the overlay, any pad. Alternatives are separated by commas; buttons joined with `+` must all be held for half a second. Button names are the physical names used in `[gamepad]`. Empty for none. |
 | `scale` | `100` | Size of the launcher's and overlay's text and controls in percent, 60-250, on top of your display's scaling (full screen on a large monitor is scaled up automatically). |
 
+## [debug]
+
+The play-test recorder: see [Play-test recorder](playtest-recorder.md). Off by default; `--record` on the command
+line turns it on for one run. Every key here is read at start-up.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `record` | `false` | Keep a session under `logs/sessions/` for every run: frame times, events, the sound and the last seconds of pictures. Env `RECOMP_RECORD`. |
+| `mark_key` | `F9` | While recording, the key that saves a bug bundle of the seconds before it. |
+| `mark_pad` | `back+left_stick_click` | While recording, pad buttons that do the same (on a Steam Deck: hold **View** and press the **left stick** for half a second). Alternatives separated by commas, a combination joined with `+`, button names as in `[gamepad]`; empty for none. |
+| `record_fps` | `10` | Pictures a second kept for bundles, 0-30. Each is a read-back from the graphics card. Env `RECOMP_RECORD_FPS`. |
+| `record_seconds` | `30` | Seconds before a mark a bundle holds, 5-120. Env `RECOMP_RECORD_SECONDS`. |
+| `record_audio` | `true` | Keep the mixed sound (about 11 MB a minute). |
+| `record_game_state` | `true` | Log fighters, health and match events (read-only). |
+| `auto_bundle_hitch_ms` | `0` | A frame at least this long saves a bundle by itself (five a run at most); 0 is off. Env `RECOMP_RECORD_AUTO_HITCH_MS`. |
+| `hang_seconds` | `15` | No frame for this many seconds saves a hang bundle; 0 is off. Env `RECOMP_RECORD_HANG_SECS`. |
+| `keep_sessions` | `20` | Sessions kept whole; older ones keep their bundles and events only. |
+| `record_guest_ram` | `false` | Crash and hang bundles also hold the game's 64 MB of memory. |
+
 ## [display]
 
 | Key | Default | Meaning |

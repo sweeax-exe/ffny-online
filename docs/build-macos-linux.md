@@ -207,10 +207,10 @@ The redirection keeps a log of the session; the game prints a great deal, and
   a `[D3D8-VK]` line near the top of the log names the device it found.
 - The game stops responding but sound continues: keep the log, and if you can,
   take the thread stacks before quitting with
-  `sample $(pgrep -f posix-release/defjam_recomp) 3 -file logs/sample.txt` on macOS,
-  or `gdb -p $(pgrep -x defjam_recomp) -batch -ex "thread apply all bt 12" > logs/stacks.txt`
-  on Linux (as root, or with `kernel.yama.ptrace_scope` at 0). The hang tools in
-  `scripts/` (`sample-threads.py`, `guest-stack.py`, `native-stacks.py`) are
+  `python3 scripts/native-stacks.py > logs/stacks.txt` (lldb on macOS; gdb or
+  elfutils' `eu-stack` on Linux, as root or with `kernel.yama.ptrace_scope` at 0).
+  `sample $(pgrep -x defjam_recomp) 3 -file logs/sample.txt` also works on macOS. The
+  other hang tools in `scripts/` (`sample-threads.py`, `guest-stack.py`) are
   Windows-only.
 - No sound: the log has an `[XA2]` line naming the audio driver and device.
 

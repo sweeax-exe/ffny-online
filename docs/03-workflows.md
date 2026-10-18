@@ -67,7 +67,7 @@ cannot validate those control-flow joins. Use compiled recompiler tests for
 flag behavior, and retain the separate coverage and jump-table audits.
 
 ## The bring-up loop (M1 to M3)
-1. Run with the watchdog and read `logs\run-*.log`. The VEH handler prints the guest function (`sub_XXXXXXXX`), Xbox registers and a guest stack scan.
+1. Run with the watchdog, then digest the log with `python scripts/triage.py` (newest run) instead of reading `logs\run-*.log.err`, which can be hundreds of megabytes; it prints the verdict and the line numbers to slice (`--around`, `--grep`, `--lines`, `--tail`), see `docs/agent/triage.md`. The VEH handler prints the guest function (`sub_XXXXXXXX`), Xbox registers and a guest stack scan.
 2. Locate the function in `tools\xboxrecomp\tools\disasm\output\asm\` or in the Ghidra project under `$DEFJAM_DATA\ghidra`.
 3. Decide which of three fixes applies. A missing kernel or D3D shim is implemented in the toolkit and is upstream-able. A lifter bug is overridden in `src\recomp_manual.c` through `recomp_lookup_manual()`. A hardware poke we do not need (TV encoder, PCI space, interrupts) is stubbed in `src\hooks\`.
 4. Rebuild. Ninja is incremental, and generated chunks only recompile after a re-lift.
@@ -109,6 +109,10 @@ Full table with source references: `docs/research/toolkit-bringup-notes.md`. Eve
 | `RECOMP_PB_PROBE=x,y[;x,y...]` | with a batch dump: every triangle covering those pixels (up to 8), with its depth there and its depth-write, blend and stencil state -- the layers at a point, in draw order |
 | `RECOMP_GAMMA=0` | leaves out the gamma ramp the title sets at start-up (an S curve applied at presentation and to captures). The golden frames were taken without it: set this when checking them. |
 | `RECOMP_CS_TRACE_CRT`, `RECOMP_CS_WATCH` | critical-section tracing |
+| `RECOMP_RECORD=1` (or `[debug] record`, `--record`) | the play-test recorder: `logs/sessions/`, F9 bug bundles, read with `scripts/bug-bundle.py` ([guide](playtest-recorder.md)) |
+| `RECOMP_RECORD_SYNC=1` | the recorder reads its pictures back synchronously (as before the asynchronous read-back), to compare `capture_ms` |
+| `RECOMP_FE_INJECT="anchor#N=>command"` | send the front end's FuncCall handler a command after the Nth call containing the anchor ([scenario launching](research/scenario-launching.md)) |
+| `RECOMP_TEST_CROWD=hold[:N],reseed` | crowd test controls, with `RECOMP_TEST_OBSERVATIONS=1`; measured by `scripts/crowd-lab.py` |
 | `RECOMP_TICK_THREAD=0`, `RECOMP_PRECISE_SLEEP=0`, `RECOMP_GUEST_TURN_PRIO=0`, `RECOMP_GUEST_QOS=0`, `RECOMP_APU_SLICE_PACE=0` | turn off one of the audio crackle fixes (D120-D122), each on by default, to compare; `RECOMP_APU_VOICE_PCM=<prefix>` dumps voices `0xF8`-`0xFA` for `scripts/audio-holes.py` |
 
 Game-side switches (`src/patches/dev_unlock.c`; off unless set; the test harness turns the first on):

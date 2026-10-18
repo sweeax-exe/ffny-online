@@ -34,6 +34,8 @@ APPROVED_README_MEDIA = {
     'docs/media/hd-16x9-gameplay.mp4': '385b041f57b7ddd61feb99e0ce726f6e4a5856f1e9936c416aca81949ee428f0',
     'docs/media/textures-comparison.mp4': '0659c294460c00fafd69552a2f4fb0c70d161b5d6206e78c902cdd4ca3a03383',
     'docs/media/widescreen-comparison.mp4': '2916fc4efd72b6d109d829157c01479c9ef50d84c5bbb94437d3fd87060f7d2c',
+    # D130 (2026-10-17): the owner's own screenshot of EA's developer menu (text only) for docs/developer-menu.md.
+    'docs/media/developer-menu.png': '86a3a91ae252ff9692003e3b88ee8bbc68af176ab74bb7fa0db4e4fd5add9077',
 }
 # D98 (2026-10-10): the owner approved committing the application icons and the Steam artwork
 # rendered from the game's own textures (the shield, the title wordmark, the title-screen scene).

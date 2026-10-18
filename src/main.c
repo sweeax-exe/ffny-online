@@ -58,6 +58,7 @@
 #include <xbox/xboxrecomp.h>
 #include "nv2a/nv2a_pgraph_d3d11.h"
 #include "hooks/save_compat.h"
+#include "hooks/recorder.h"
 
 /*
  * If xboxrecomp.h is not an umbrella header in your setup, include
@@ -477,6 +478,14 @@ static LONG CALLBACK veh_handler(PEXCEPTION_POINTERS ep)
             }
         }
         fflush(stderr);
+        /* With [debug] record on, the last seconds of the run, the log's end and a
+         * minidump go to a bug bundle (src/hooks/recorder.c). */
+        {
+            char what[96];
+            snprintf(what, sizeof what, "access violation at guest 0x%08X (%s)", fault_va,
+                     is_write ? "write" : "read");
+            recorder_on_crash_os(what, ep);
+        }
     }
 
     return EXCEPTION_CONTINUE_SEARCH;
@@ -534,6 +543,11 @@ static void fault_handler(int sig, siginfo_t *si, void *ctx)
     print_guest_context((void *)(uintptr_t)HOST_PC(ctx));
     fflush(stdout);
     fflush(stderr);
+    {
+        char what[96];
+        snprintf(what, sizeof what, "signal %d at fault address 0x%llX", sig, (unsigned long long)fault_addr);
+        recorder_on_crash(what);
+    }
     /* Put the default action back; the instruction faults again and the
      * process ends with the signal, as an unhandled exception would. */
     signal(sig, SIG_DFL);
