@@ -320,7 +320,7 @@ defjam-recomp/
 ## 7. Hand-off
 
 Startup skip is finalized on feat/skip-startup-intro, merged with PR25 release
-head02d9d14. Main PR41 b6e4c1f only adds0.10.0 publication metadata; preserve it.
+head02d9d14. Main PR41 b6e4c1f is absorbed; its0.10.0 publication row/log are preserved.
 Version0.10.1. Native guest code re-lifted17896functions/20C/90MiB, certified
 33-step build. Units470pass/34skip/1slow deselected, quick5/5 (regress213306),
 full15/17 in36minutes (logs/regress-20261017-221050.txt). All screen goldens,
@@ -334,8 +334,8 @@ Fast SC05 visibly renders; SC12 ends/returns main menu. Captures/logs stay local
 
 Toolkit forkPR1 merged a37e19e with tested pin5445b73 preserved as ancestor;
 game submodule remains clean at that exact pin. PR39 targets main. Both attached.
-D132 authorizes game merge and v0.10.1 release after validation. Next: commit the
-resolved merge, absorb current main metadata, push, verify fresh CI, mark ready
+D132 authorizes game merge and v0.10.1 release after validation. Next: push the
+resolved merge, verify fresh CI, mark ready
 and merge39 with matching head. Tag exact reviewed main v0.10.1, run source
 release workflow, verify its9 approved game-free assets (SHA/provenance/source/
 toolkit identity), then publish draft/latest. Never ship the compiled game.
