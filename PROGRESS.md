@@ -270,6 +270,7 @@ defjam-recomp/
 
 ## 5. Open questions for Vlad
 
+- **(2026-10-18) Scene performance pass (branch `test/scene-perf-tour`).** All 38 Story scenes measured on the Mac at 16:9, render scale 3, vsync (`docs/research/scene-perf-macos-2026-10-18.md`): all play and end, steady 60 fps, no log faults. Open for Vlad: (1) run `python3 scripts/scene-perf.py run all` on the Deck and `compare` it with `docs/research/scene-perf-macos-2026-10-18.json`; (2) which findings to pursue: random 100-300 ms game-side stalls (F1, cause not found; next tool a hitch-triggered capture), scene-load freezes up to 1.8 s (F2), no shader/pipeline cache (F4), fence-hold spin (F5, Deck-relevant); (3) branch review/PR (scene-perf.py, wrapped overlay tooltips, widescreen contact sheets); nothing pushed.
 - ~~**(2026-10-17) Startup/PR25 publication and release.**~~ Fulfilled (D128/D132): toolkitPR1 merged a37e19e, PR39 merged0985f40 after CI28/28, v0.10.1 published/latest2026-10-17 22:25 ET. Release workflow39089619805 passes30/30; nine game-free assets verified by SHA-256/GitHub digests and exact source/toolkit provenance. [Release](https://github.com/vyanhursky/DefJamFFNY-recomp/releases/tag/v0.10.1).
 
 - **(2026-10-15) Audio crackle fix (D121).** ~~(1) publish the toolkit commits~~ done 2026-10-16 (`defjam/audio-crackle`, `fb153f1`); ~~(2) rebase or merge~~ main merged into PR #25, decisions renumbered D115-D121. (3) Still open: run the intro route on Windows and the Deck, `harness.py run intro --env RECOMP_APU_VOICE_PCM=<prefix>` then `scripts/audio-holes.py <prefix>`, with `--env RECOMP_TICK_THREAD=0` for the before.
@@ -308,7 +309,6 @@ defjam-recomp/
 
 > Recent entries only; older entries remain unchanged in the local `docs/worklog/` archive.
 
-- 2026-10-17 21:34 — PR25 verified merged5331f58 (head02d9d14), v0.10.0 published; origin/main tree identical to the integrated head. Retargeted draftPR39 to main. Fast startup + SC05 developer cinema visibly renders at24s, one redirect/no faults/saves restored, run213317 (pr25-updated-scene-sc05.txt). Full started on same certified build, exec63917, logs/startup-skip/pr25-updated-full.txt, guarded story-data/mac-profiles fixture; all original gates retained.
 - 2026-10-17 21:35 — **v0.10.0 published** (latest): PR #25 merged with a merge commit `5331f58` (CI 28/28, including the new MSVC game-sources step; quick regression on the merged build 5/5, `logs/regress-20261017-212456.txt`); PR #24 closed as delivered through #25. Tag `v0.10.0` checked by `check-release.py`; Source release workflow `39086468383` passed; nine game-free assets, each `.sha256` equal to GitHub's digest, all three provenance files name `5331f58` and toolkit `5445b73`. https://github.com/vyanhursky/DefJamFFNY-recomp/releases/tag/v0.10.0
 - 2026-10-17 21:54 — Updated full passes first10checks:470units, three goldens, launcher/overlay/unlock,122s fight median120/min96,150sFFA median120/min115, actual Terrordome240s median120/min102 with loading caption inspected. Full combat/audio, versus, replay, Story and soak remain running in exec63917 (logs/startup-skip/pr25-updated-full.txt). Same source/build; all completed save guards restored.
 - 2026-10-17 21:57 — D132: owner explicitly authorizes merging the PR and cutting0.10.1 when validation is done. Will preserve toolkit5445b73 through a merge commit, merge PR39 after refreshed checks, tag reviewed main, and verify/publish only the game-free setup assets/checksums/provenance. Updated full remains running in exec63917; no gates weakened.
@@ -316,37 +316,32 @@ defjam-recomp/
 - 2026-10-17 22:11 — Updated v0.10.0 integration full15/17 in36min (logs/regress-20261017-221050.txt): only known audio dry gates, combat3/versus1, drops0; all13 gameplay assertions, replay80records/1800steps, Story/crib/gym and soak3/3 pass, saves restored. Units470, quick5/5. Audits quick3fast/1normal and full19fast/1normal, zero unknowns. No audio/threshold change or new cause claimed. ToolkitPR1 merged/pin ancestry verified; finalize commit/fresh CI then authorized merge/release.
 - 2026-10-17 22:18 — PR39 final head99c5d56 passes CI28/28 (39089261537), marked ready/merged0985f40 at22:17; tree exactly matches the tested source. Fast-forwarded main, release-policy verifies0.10.1 version/notes/main ancestry/hygiene396/0; tagv0.10.1 pushed. Source release workflow39089619805 running; toolkitPR1 already merged a37e19e/pin5445b73 retained. Pruned/deleted merged feature branch; preparing release outcome record, assets not yet published.
 - 2026-10-17 22:26 — v0.10.1 published/latest at22:25:58 ET from PR39 merge0985f40, source release39089619805 green30/30. Downloaded/verified exactly9 game-free assets: Windows54,604,800B, Mac65,355,652B, Linux140,662,442B; SHA files and every GitHub digest match, provenance source0985f40/toolkit5445b73, production payloads4186/4907/3234files. Latest API confirms0.10.1. Evidence logs/startup-skip/release-v0.10.1/verification.json. Final strict full15/17 baseline audio failures remain disclosed; feature, regression efficiency and authorized publication complete.
+- 2026-10-18 12:30 — Scene performance pass on the Mac (branch test/scene-perf-tour): new scripts/scene-perf.py ran all 38 Story scenes at 16:9/scale 3/vsync with the recorder: 38/38 play and end, no log faults, 22.1 min/77,811 frames, median 16.5-17.1 ms, 0.33% late, 23 hitches, loads up to 1.79 s (sc07a). Repeat of 11 hitching scenes: stalls not repeatable (3 of them were). 83% of >=60 ms frames carry a streamed [READ] (17% baseline). Two local toolkit A/Bs (6 scenes x2 passes each, ~47k frames a side) rule out log flushing and slow host reads (max 6.2 ms); both reverted. sample: loads wait in the fence hold; executor in flip_pace/shader_make; fence hold spins 38% of the game thread in steady sc00. Overlay Play scene checked by RECOMP_HOST_SCRIPT (plays twice, disabled while playing); fixed unwrapped tooltips, widescreen contact sheets. Units 504/30 skip. Report docs/research/scene-perf-macos-2026-10-18.md, baseline .json; logs/scene-perf/mac-stress-20261018.
 
 ## 7. Hand-off
 
-v0.10.1 is published/latest, 2026-10-17 22:25 ET:
-https://github.com/vyanhursky/DefJamFFNY-recomp/releases/tag/v0.10.1
-PR39 merged0985f40c4b8230fed1dd4165a03b7f0fd16102d2 after CI28/28
-(39089261537). Tag names that exact reviewed main commit; source-policy
-version/notes/ancestry/hygiene396/0 verified. Source release39089619805 passes
-30/30. Downloaded all9 assets; all SHA files and GitHub digests match, all three
-provenance files name source0985f40 and toolkit5445b73, production payloads.
-Evidence logs/startup-skip/release-v0.10.1/{metadata,verification}.json and assets/.
-Only game-free setups/checksums/provenance published; no compiled game.
-Toolkit forkPR1 merged a37e19e, tested game pin5445b73 retained as ancestor.
-Both PRs attached. Merged game feature branch pruned/deleted; toolkit integration
-branch remains checked out in its isolated worktree, so was not deleted.
+Branch `test/scene-perf-tour` (from main `c4078ef`, toolkit `5445b73` unchanged, not pushed): a scene
+performance pass on the Mac. Report `docs/research/scene-perf-macos-2026-10-18.md`, numbers-only baseline
+`docs/research/scene-perf-macos-2026-10-18.json`. New `scripts/scene-perf.py` (`run` scenes with the recorder
+on and stop each launch 6 s after the scene ends; `summarize`; `compare` two runs or a run and the baseline;
+`baseline`), `tests/unit/test_scene_perf.py`. Fixes: overlay/launcher tooltips wrap at 35 em
+(`src/hooks/pc_ui.cpp` `item_tooltip`; long help ran off the window), contact sheets keep the capture's
+aspect (`scripts/scenarios.py`). Units 504 pass / 30 skip; source-tree policy 396/0; posix-release rebuilt and
+verified after both reverted toolkit experiments.
 
-Enable General → Debug → Skip startup movies and legal screen. Default off,
-launcher applies before Play, overlay next launch; initial loading/title animation
-remain. Story/attract movies/controller/save checks preserved; developer scenes
-from0.10.0 retained (SC05 visible, SC12 ends/returns menu).
-Final native build:17896functions/20C/90MiB, certified33steps. Units470pass,
-34skip/1slow deselected; quick5/5 (regress213306), full15/17 in36min
-(logs/regress-20261017-221050.txt). All goldens, UI/options, gameplay, actual
-Terrordome240s, replay80records/1800steps, Story/creator/crib/gym and3/3soak pass;
-saves restored. Audit quick3fast/1normal, full19fast/1normal, zero unknowns.
-Strict baseline audio.dry_queue failures retained: combat3/drops0 (215259),
-versus1/drops0 (215710); no gate/threshold change, no new audio cause claimed.
-Windows/Deck native gameplay not run in this session; CI compiles/tests all3.
-No startup-release work remains. Further audio investigation and platform
-play-tests are existing follow-ups in §5, outside this release change.
-No game is running. All captures/generated code/builds remain local; unrelated
-untracked notes/media and local work-log archives were not staged.
+Results (16:9, scale 3, vsync, recorder 10/s): 38/38 play and end, 22.1 min, 77,811 frames, median
+16.5-17.1 ms everywhere, 0.33% late, 23 hitches. F1 random 100-300 ms game-side stalls, not repeatable,
+83% in frames with a streamed `[READ]` (17% baseline); ruled out: log writes (A/B `logs/scene-perf/ab-*`)
+and slow host reads (A/B `ab2-*`, max read 6.2 ms). Next: hitch-triggered capture of the guest-CPU holder
+(guest function + native stack) into the recorder's `hitch` event. F2 loads hold the picture 0.84-1.79 s in
+eleven scenes; `sample` shows the game in the fence hold (`sub_0021EB90_enter`) and the executor in
+flip_pace/shader_make, plus an occasional long stall delivering the trapped `PCRTC_START` read
+(`xbox_memory_layout.c:1698`, on every loop because `RECOMP_PB_EXEC` enables the trace). F4 no shader or
+pipeline cache (`d3d8_vk.c`). F5 the fence hold spins (38% of the game thread in steady sc00).
+
+Deck: `python3 scripts/scene-perf.py run all` then `compare` with the baseline; the report's last section
+says what to look for. Local evidence (not published): `logs/scene-perf/mac-stress-20261018/`,
+`mac-stress-repeat-20261018/`, `ab-*`, `ab2-*`, `prof-sc00/`. Recorder keeps 20 sessions whole, so
+scene-perf copies rows per scene. No game is running.
 
 Decisions are read by number or keyword: `decision D<n>`, `decisions --grep TEXT`.
