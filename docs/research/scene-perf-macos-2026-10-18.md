@@ -203,6 +203,18 @@ time during the load. A shader and pipeline cache on disk (keyed by the program'
 `vk.progs` already is) would remove these, and matter more on the Deck, where pipeline creation is
 slower.
 
+**Follow-up (2026-10-18, branch `perf/shader-cache`, toolkit `defjam/shader-cache`, D133).** Two
+changes. (1) One module per HLSL text: the program hash and the combiner state cover more than the
+generated text, so sc00 compiled its 29 distinct shaders 188 times (2,323 ms) and made 348 pipelines
+for 33 (880 ms) in every launch; now 29 compiles (314 ms) and 33 pipelines (34 ms), and sc00's late
+frames fell from 2.8% to 0.2% (the baseline's 2.85% was this). (2) The SPIR-V and the
+`VkPipelineCache` are kept in `<data>/cache/vulkan`, keyed by the text, the stage and a translator
+version; damaged, stale or other-device files are ignored and replaced. With the cache full a launch
+spends 6-8 ms on shaders (sc00, gf1a, sc13) and 8-19 ms on pipelines, and sc00's repeatable
+137-140 ms hitch at +0.3 s is gone in two warm runs; gf1a loads in 750 ms instead of 860. Runs
+`logs/scene-perf/f4-cold` (old behaviour), `f4-dedup-cold`, `f4-first` (empty cache), `f4-warm`,
+`f4-warm2`, `f4-damaged`. The remaining sc00/sc13 hitches in warm runs are F1's random stalls.
+
 ### F5. The fence hold spins
 
 In steady play the game thread spends 38% of its samples (1,314 of 3,427 in five seconds of sc00)

@@ -157,9 +157,9 @@ The redirection keeps a log of the session; the game prints a great deal, and
 `logs/play-*.log.err` is what a problem report needs. Plain
 `./build/posix-release/defjam_recomp` works too.
 
-- The game finds `game` in the repository root, and writes `settings.ini` and
-  the saves under `DEFJAM_DATA` (`save/`). The first lines of the log say which
-  folders were used.
+- The game finds `game` in the repository root, and writes `settings.ini`, the
+  saves (`save/`) and its shader cache (`cache/vulkan/`) under `DEFJAM_DATA`. The
+  first lines of the log say which folders were used.
 - Gamepads (Xbox, DualSense, Switch Pro and most others) work when plugged in
   or paired, before or after the game starts. The keyboard and mouse are a
   player of their own. Defaults and remapping:
@@ -183,8 +183,11 @@ The redirection keeps a log of the session; the game prints a great deal, and
   replacement is decoded on background threads and the original texture is drawn until it is
   ready, so the first showing of a screen no longer stalls the game; the art arrives a moment
   after the screen does.
-- No persistent shader cache: the first time an effect appears, the frame can
-  hitch while its shader is compiled.
+- Shaders are compiled the first time an effect appears, and that frame can hitch.
+  The compiled shaders and the graphics driver's pipeline cache are kept in
+  `DEFJAM_DATA/cache/vulkan`, so this happens once per effect, not once per launch.
+  Deleting that folder is safe (it is rebuilt); `RECOMP_SHADER_CACHE=off` runs
+  without it.
 - Vsync (`settings.ini` `vsync`) is only used on a display refreshing at a
   multiple of 60 Hz, as on Windows; elsewhere the game paces itself. The Steam
   Deck OLED's panel runs at 90 Hz, so it plays without vsync there; the log's
