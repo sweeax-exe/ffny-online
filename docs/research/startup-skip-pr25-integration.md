@@ -365,5 +365,28 @@ Vlad explicitly authorizes merging and releasing0.10.1 (D132). Toolkit forkPR1
 is merged with merge commit `a37e19edf07473fd8e963209a28a2cdd3e142598`; verified
 5445b73 remains its ancestor and the game gitlink stays unchanged/clean. Main's
 subsequent PR41 only records publication of0.10.0; preserve that metadata while
-finalizing this integration. Fresh PR39 CI and the tagged release asset checks
-remain required before publishing0.10.1.
+finalizing this integration. Fresh PR39 CI and tagged release asset checks completed as recorded below.
+
+
+## v0.10.1 published (D132)
+
+Final head99c5d56 passes28/28 CI checks (39089261537), including Windows/MSVC,
+macOS and Linux native startup fixtures and game-free setup builds. PR39 merged
+with merge commit `0985f40c4b8230fed1dd4165a03b7f0fd16102d2`; its tree exactly
+matches the tested head. Source tagv0.10.1 names that reviewed main commit.
+Local release policy verifies version, notes, exact tag/main ancestry and
+source hygiene396files/0fail. Source release workflow39089619805 passes30/30.
+
+Exactly9 workflow assets were downloaded and independently verified: three
+game-free setup packages, SHA-256 files and provenance JSON. Every file matches
+its GitHub SHA-256 digest; each installer matches its checksum and provenance.
+All production manifests name source0985f40 and toolkit5445b73. Payload file
+counts are4186Windows,4907macOS,3234Linux. Local verification evidence:
+`logs/startup-skip/release-v0.10.1/verification.json`. No game executable, lifted
+source, logs, captures or dump data is attached.
+
+Published2026-10-17 22:25:58 ET and verified through the latest-release API:
+[v0.10.1](https://github.com/vyanhursky/DefJamFFNY-recomp/releases/tag/v0.10.1).
+The release notes retain the strict15/17 full outcome and its known audio limits.
+Merged game branch is pruned/deleted locally after switching to main; the toolkit
+integration branch remains checked out in its isolated worktree and is retained.

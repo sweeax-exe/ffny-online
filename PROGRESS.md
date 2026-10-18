@@ -55,7 +55,7 @@
 | Agent tooling (D115) | ⏳ PR open | `triage.py`, `progress.py`, `docs/agent/` playbooks, shared `AGENTS.md`, generated skills and briefs for Claude and Codex, Markdown-only CI gating. Unit tests added; Windows and macOS CI and Codex's own review pending. |
 | Play-test recorder and scenarios (D116–D119) | ⏳ macOS done, Windows and Deck to run | Branch `feature/clever-feynman-4ovoyk` (PR #25). `[debug] record` / `--record`: `logs/sessions/` with per-frame rows, events, audio and a picture ring; F9, the pad chord View + left stick (`mark_pad`), the overlay button, a crash, a hang or a long hitch writes a bug bundle; `scripts/bug-bundle.py` reports it. Scenarios, crowd lab, front-end injection, command catalog (D117); a chosen Story scene by name, `RECOMP_TEST_CINEMA_SCENE` and `scenarios.py scenes` (D119, `docs/scene-selector.md`). Asynchronous read-back (D118). **macOS, 2026-10-14:** built (AppleClang), unit 475 pass, recorder end to end, 1.2 ms a picture async vs 3.4 ms sync, scenarios, crowd lab and the scene launcher run on the game; full regression 12/16 on PR and on main, the same four failures (save data, intermittent audio queue). Texture-cache columns in `frames.csv` (toolkit `49a1798`). Windows (MSVC, D3D11) not run. **Deck, 2026-10-15 (D120):** built in the container, recorder on the Deck was 585 ms a frame until the read-back moved to cached memory; audio crackle: two measured fixes, the rest open. |
 
-| Skip startup movies/legal (D123-D128/D131-D132) | ✅ implemented/tested; release authorized | Default-off General → Debug option, `[debug] skip_intro` / `RECOMP_SKIP_INTRO`; first screen after loading is Press Start. PR25/v0.10.0 integrated, developer scenes retained. Final units470pass, quick5/5, full15/17 (only known audio.dry_queue: combat3/versus1, zero drops; all gameplay/save gates pass), replay unchanged and soak3/3. Audit: quick3fast/1normal, full19fast/1normal. ToolkitPR1 merged a37e19e, tested pin5445b73 preserved; PR39 targets main, fresh CI/merge and v0.10.1 release next (authorized D132). |
+| Skip startup movies/legal (D123-D128/D131-D132) | ✅ released v0.10.1 | Default-off General → Debug option, `[debug] skip_intro` / `RECOMP_SKIP_INTRO`; first screen after loading is Press Start. PR25/v0.10.0 developer features preserved. Units470pass, quick5/5, full15/17 (only known audio dry gates: combat3/versus1, zero drops; all gameplay/save gates pass), replay unchanged/soak3/3. Audit: quick3fast/1normal, full19fast/1normal. ToolkitPR1 merged a37e19e/pin5445b73; PR39 merged0985f40 after CI28/28. Release39089619805 passes30/30; nine game-free setup/checksum/provenance assets verified and published/latest2026-10-17 22:25 ET. |
 
 | Developer module, debug menu and Story scenes (D129, D130) | ✅ released v0.10.0 (macOS tested; Windows by CI compile only) | EA's developer run module (`CRunModuleAki`) rebuilt from the host and handed to the game's run-module manager. Its debug menu works: any match (`MODE - GAME`, tested Ludacris vs David Banner), REAL TIME CINEMA, stage viewer; controls mapped (d-pad, LT/RT ±10, A, Start = pause, QUIT → main menu). Any of the 38 Story scenes by name with no save: overlay Debug tab, `scenarios.py scene`, `RECOMP_SCENE`. Guides `docs/developer-menu.md`, `docs/scene-selector.md`; research `docs/research/dev-module-revival.md`. |
 
@@ -270,7 +270,7 @@ defjam-recomp/
 
 ## 5. Open questions for Vlad
 
-- ~~**(2026-10-17) Startup/PR25 publication and release.**~~ D128/D132: Vlad authorizes pushes, PRs, merges and v0.10.1 release after validation. Toolkit PR1 merged a37e19e, exact pin5445b73 preserved. PR25/v0.10.0 is released, PR39 targets main; final quick5/5/full15/17 (only known audio gates) complete. Fresh CI, game merge and verified setup release are the remaining authorized steps.
+- ~~**(2026-10-17) Startup/PR25 publication and release.**~~ Fulfilled (D128/D132): toolkitPR1 merged a37e19e, PR39 merged0985f40 after CI28/28, v0.10.1 published/latest2026-10-17 22:25 ET. Release workflow39089619805 passes30/30; nine game-free assets verified by SHA-256/GitHub digests and exact source/toolkit provenance. [Release](https://github.com/vyanhursky/DefJamFFNY-recomp/releases/tag/v0.10.1).
 
 - **(2026-10-15) Audio crackle fix (D121).** ~~(1) publish the toolkit commits~~ done 2026-10-16 (`defjam/audio-crackle`, `fb153f1`); ~~(2) rebase or merge~~ main merged into PR #25, decisions renumbered D115-D121. (3) Still open: run the intro route on Windows and the Deck, `harness.py run intro --env RECOMP_APU_VOICE_PCM=<prefix>` then `scripts/audio-holes.py <prefix>`, with `--env RECOMP_TICK_THREAD=0` for the before.
 
@@ -308,39 +308,45 @@ defjam-recomp/
 
 > Recent entries only; older entries remain unchanged in the local `docs/worklog/` archive.
 
-- 2026-10-17 21:26 — Updated PR25 integration rebuild certified33steps; units470pass/34skip/1slow deselected (logs/startup-skip/pr25-updated-{build,unit}.txt). Fast startup + new developer Story launcher RECOMP_SCENE=sc12 passes17.06s, one redirect/preStart/scene request accepted;8s capture still loading, later-frame visual check pending, no faults, saves restored, run212547. Quick regression started; full follows on identical source.
-- 2026-10-17 21:33 — Resolved current PR25 integration quick5/5 (logs/regress-20261017-213306.txt):470unit/34skip/1slow deselected, loading/title/menu goldens, ordered normal movies,122s fight median120presents/2s minimum105; saves restored. SC12 developer request also ended/returned cleanly (8s capture was return loading); longer SC05 capture check now running before full. Same certified source/toolkit5445b73.
 - 2026-10-17 21:34 — PR25 verified merged5331f58 (head02d9d14), v0.10.0 published; origin/main tree identical to the integrated head. Retargeted draftPR39 to main. Fast startup + SC05 developer cinema visibly renders at24s, one redirect/no faults/saves restored, run213317 (pr25-updated-scene-sc05.txt). Full started on same certified build, exec63917, logs/startup-skip/pr25-updated-full.txt, guarded story-data/mac-profiles fixture; all original gates retained.
 - 2026-10-17 21:35 — **v0.10.0 published** (latest): PR #25 merged with a merge commit `5331f58` (CI 28/28, including the new MSVC game-sources step; quick regression on the merged build 5/5, `logs/regress-20261017-212456.txt`); PR #24 closed as delivered through #25. Tag `v0.10.0` checked by `check-release.py`; Source release workflow `39086468383` passed; nine game-free assets, each `.sha256` equal to GitHub's digest, all three provenance files name `5331f58` and toolkit `5445b73`. https://github.com/vyanhursky/DefJamFFNY-recomp/releases/tag/v0.10.0
 - 2026-10-17 21:54 — Updated full passes first10checks:470units, three goldens, launcher/overlay/unlock,122s fight median120/min96,150sFFA median120/min115, actual Terrordome240s median120/min102 with loading caption inspected. Full combat/audio, versus, replay, Story and soak remain running in exec63917 (logs/startup-skip/pr25-updated-full.txt). Same source/build; all completed save guards restored.
 - 2026-10-17 21:57 — D132: owner explicitly authorizes merging the PR and cutting0.10.1 when validation is done. Will preserve toolkit5445b73 through a merge commit, merge PR39 after refreshed checks, tag reviewed main, and verify/publish only the game-free setup assets/checksums/provenance. Updated full remains running in exec63917; no gates weakened.
 - 2026-10-17 21:59 — Toolkit fork PR1 merged with a merge commit a37e19e, preserving published/tested game pin5445b73. Updated full combat26/27: sole failure audio.dry_queue=3, drops0, seven gameplay checks/runtime/save restoration pass; bounded triage shows presentation through stop, inherited FS-control stub. No threshold or audio change. Full continues; logs/scenarios/regress-combat-20261017-215259/report.json.
 - 2026-10-17 22:11 — Updated v0.10.0 integration full15/17 in36min (logs/regress-20261017-221050.txt): only known audio dry gates, combat3/versus1, drops0; all13 gameplay assertions, replay80records/1800steps, Story/crib/gym and soak3/3 pass, saves restored. Units470, quick5/5. Audits quick3fast/1normal and full19fast/1normal, zero unknowns. No audio/threshold change or new cause claimed. ToolkitPR1 merged/pin ancestry verified; finalize commit/fresh CI then authorized merge/release.
+- 2026-10-17 22:18 — PR39 final head99c5d56 passes CI28/28 (39089261537), marked ready/merged0985f40 at22:17; tree exactly matches the tested source. Fast-forwarded main, release-policy verifies0.10.1 version/notes/main ancestry/hygiene396/0; tagv0.10.1 pushed. Source release workflow39089619805 running; toolkitPR1 already merged a37e19e/pin5445b73 retained. Pruned/deleted merged feature branch; preparing release outcome record, assets not yet published.
+- 2026-10-17 22:26 — v0.10.1 published/latest at22:25:58 ET from PR39 merge0985f40, source release39089619805 green30/30. Downloaded/verified exactly9 game-free assets: Windows54,604,800B, Mac65,355,652B, Linux140,662,442B; SHA files and every GitHub digest match, provenance source0985f40/toolkit5445b73, production payloads4186/4907/3234files. Latest API confirms0.10.1. Evidence logs/startup-skip/release-v0.10.1/verification.json. Final strict full15/17 baseline audio failures remain disclosed; feature, regression efficiency and authorized publication complete.
 
 ## 7. Hand-off
 
-Startup skip is finalized on feat/skip-startup-intro, merged with PR25 release
-head02d9d14. Main PR41 b6e4c1f is absorbed; its0.10.0 publication row/log are preserved.
-Version0.10.1. Native guest code re-lifted17896functions/20C/90MiB, certified
-33-step build. Units470pass/34skip/1slow deselected, quick5/5 (regress213306),
-full15/17 in36minutes (logs/regress-20261017-221050.txt). All screen goldens,
-UI/options, combat gameplay, two-pad gameplay, actual Terrordome240s, replay
-80records/1800steps, Story/creator/crib/gym and3/3soak pass. Saves restored.
-Only strict audio.dry_queue fails: combat dry3/drops0 (scenario215259), versus
-dry1/drops0 (215710), same two known failing gates as released0.10.0. No waiver,
-threshold/audio change or claim of a new cause. Original failures retained.
-Startup audit quick3fast/1normal, full19fast/1normal, zero unknowns/one redirect.
-Fast SC05 visibly renders; SC12 ends/returns main menu. Captures/logs stay local.
+v0.10.1 is published/latest, 2026-10-17 22:25 ET:
+https://github.com/vyanhursky/DefJamFFNY-recomp/releases/tag/v0.10.1
+PR39 merged0985f40c4b8230fed1dd4165a03b7f0fd16102d2 after CI28/28
+(39089261537). Tag names that exact reviewed main commit; source-policy
+version/notes/ancestry/hygiene396/0 verified. Source release39089619805 passes
+30/30. Downloaded all9 assets; all SHA files and GitHub digests match, all three
+provenance files name source0985f40 and toolkit5445b73, production payloads.
+Evidence logs/startup-skip/release-v0.10.1/{metadata,verification}.json and assets/.
+Only game-free setups/checksums/provenance published; no compiled game.
+Toolkit forkPR1 merged a37e19e, tested game pin5445b73 retained as ancestor.
+Both PRs attached. Merged game feature branch pruned/deleted; toolkit integration
+branch remains checked out in its isolated worktree, so was not deleted.
 
-Toolkit forkPR1 merged a37e19e with tested pin5445b73 preserved as ancestor;
-game submodule remains clean at that exact pin. PR39 targets main. Both attached.
-D132 authorizes game merge and v0.10.1 release after validation. Next: push the
-resolved merge, verify fresh CI, mark ready
-and merge39 with matching head. Tag exact reviewed main v0.10.1, run source
-release workflow, verify its9 approved game-free assets (SHA/provenance/source/
-toolkit identity), then publish draft/latest. Never ship the compiled game.
-No game is running. Use guarded disposable roots for any new run; runs serial.
-Do not stage unrelated notes/media, local archives, game bytes or build output.
-Update this hand-off with actual merge/release outcome before ending the turn.
+Enable General → Debug → Skip startup movies and legal screen. Default off,
+launcher applies before Play, overlay next launch; initial loading/title animation
+remain. Story/attract movies/controller/save checks preserved; developer scenes
+from0.10.0 retained (SC05 visible, SC12 ends/returns menu).
+Final native build:17896functions/20C/90MiB, certified33steps. Units470pass,
+34skip/1slow deselected; quick5/5 (regress213306), full15/17 in36min
+(logs/regress-20261017-221050.txt). All goldens, UI/options, gameplay, actual
+Terrordome240s, replay80records/1800steps, Story/creator/crib/gym and3/3soak pass;
+saves restored. Audit quick3fast/1normal, full19fast/1normal, zero unknowns.
+Strict baseline audio.dry_queue failures retained: combat3/drops0 (215259),
+versus1/drops0 (215710); no gate/threshold change, no new audio cause claimed.
+Windows/Deck native gameplay not run in this session; CI compiles/tests all3.
+No startup-release work remains. Further audio investigation and platform
+play-tests are existing follow-ups in §5, outside this release change.
+No game is running. All captures/generated code/builds remain local; unrelated
+untracked notes/media and local work-log archives were not staged.
 
 Decisions are read by number or keyword: `decision D<n>`, `decisions --grep TEXT`.
