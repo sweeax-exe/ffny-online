@@ -269,3 +269,24 @@ is2/2. The first full set remains recorded as16/17; a successful retry does not
 turn that raw run green or establish an audio root cause. No audio code or
 threshold changed. The game binary is unchanged since0ea5c5d. All game runs
 are finished, and source hygiene is checked before the final source commit.
+
+## Publication and v0.10.1 preparation (D128)
+
+On2026-10-17 Vlad authorized pushing the integration and opening the PRs, naming
+v0.10.1 for the startup option and more time-efficient regression sets. Toolkit
+`5445b730d08348c20fc029cd728bb24a4a85c8e0` is now published and its remote SHA
+verified. [Fork PR1](https://github.com/vyanhursky/xboxrecomp/pull/1) targets
+`defjam/audio-fix`, preserving the tested tree. No upstream PR is opened.
+The parent may now pin that published commit. Version0.10.1 and its release
+notes are prepared separately from PR25’s pending merge/release.
+
+The version-only0.10.1 build completes and is certified
+(`logs/startup-skip/release-0.10.1-build.txt`);58 focused release-policy, agent
+instruction and native startup tests pass. Its first short boot reaches preStart
+but fails the unchanged runtime gate on one non-code ICALL80003344/caller27EC6E
+(`run-20261017-201609.log.err`). Bounded triage matches the earlier normal boot
+`run-20261017-143136.log.err` and documented baseline D95; no new cause is
+claimed. The unchanged retry (`run-20261017-201656.log.err`) reaches preStart in
+6.02s, one redirect, no detected fault, save restoration identical. The first
+failure is retained rather than filtered. No game/runtime code changed in the
+release preparation.

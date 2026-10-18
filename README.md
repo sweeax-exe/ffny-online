@@ -60,6 +60,9 @@ performance measurement. [Download the longer 60-fps MP4](docs/media/hd-16x9-gam
 - **Settings before and during play.** Use the launcher or open the overlay
   with F1 or a configured controller shortcut. Changes are saved locally;
   settings that require a restart are marked. The overlay does not pause the game.
+- **Optional faster startup.** Skip the legal screen and startup movies to reach
+  Press Start after initial loading. Enable it under General → Debug;
+  Story and attract-mode movies still play.
 - **Local saves.** Profiles, settings and generated texture packs live in your
   data folder, which setup preserves through updates and repairs.
 
