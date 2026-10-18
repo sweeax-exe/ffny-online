@@ -1,0 +1,120 @@
+# Story scene performance on the Steam Deck, 2026-10-18
+
+The PR #45 tour (`scripts/scene-perf.py run all`, stress profile: 16:9, render scale 3) on a Steam Deck
+(AMD Custom APU 0932, SteamOS, desktop session, Vulkan, 90 Hz panel), three times:
+
+| run | build | toolkit | shader cache |
+|---|---|---|---|
+| **base** | `test/scene-perf-tour` (77714da, PR #45) | 5445b73 | none |
+| **cold** | `perf/shader-cache` (040eae5) | 2edf96f | empty `Data/cache/vulkan` at start |
+| **warm** | same build, straight after the cold run | 2edf96f | filled by the cold run |
+
+All 38 scenes played and ended in every run; no log faults, no crash. Built in the Deck podman image
+(`be9dd70c0e79`), run one launch per scene, one run at a time, with the owner's `Data` and a clean
+shader cache for the cold run. Numbers-only copies: `scene-perf-deck-{base,shader-cold,shader-warm}-2026-10-18.json`.
+
+## Totals
+
+| | base | cold | warm | Mac (M1 Pro) |
+|---|---|---|---|---|
+| frames measured | 74,757 | 75,087 | 75,387 | 77,811 |
+| late frames | 3.67% | 3.43% | 3.44% | 0.33% |
+| scenes with >1% late | 11 | 11 | 11 | 1 |
+| hitches (>= bundle threshold) | 22 | 10 | 8 | 23 |
+| worst frame | 172 ms | 172 ms | 60 ms | 213 ms |
+| scene load, median / mean | 494 / 713 ms | 305 / 544 ms | 309 / 540 ms | 420 / 599 ms |
+| scene loads over 2 s | 1 (sc07a) | 0 | 0 | 0 |
+| audio `dry` (all scenes) | 2 | 6 | 8 | 6 |
+| peak memory | 300 MB | 300 MB | 280 MB | 555 MB |
+
+## Does the shader cache help?
+
+**Yes, for first-use hitches and loads; no for steady frame pacing.**
+
+- **Hitches:** 22 → 10 (cold) → 8 (warm). sc00, the scene the branch targets, went from 13 hitches and a
+  172 ms worst frame to 2 hitches (cold, the 172 ms first-use frame remains) and 0 hitches with a 40 ms worst
+  frame (warm). Its p99 fell from 45.5 to 31 ms and its 1%-low from 17.5 to 28-31 fps. sc13 (164 → 45 ms worst),
+  sc07b, sc18 and sc08 lose their single hitch too.
+- **Loads:** the median scene load drops from 494 to about 307 ms, and the 2.08 s sc07a load to 1.95 s. The gain
+  is mostly in the short loads (265-370 ms → 60-250 ms); the long ones (sc00, sc03, sc06, sc07a at 1.4-2.0 s)
+  barely move, so they are not shader compiles.
+- **The cold run already gets most of it.** The per-HLSL-text module fix (toolkit 2edf96f) is independent of the
+  disk cache, and the cold run's totals are close to the warm run's. The disk cache removes the one remaining
+  first-launch hitch (sc00's 172 ms at +0.3 s) and little else.
+- **Late frames barely change** (3.67% → 3.44%). The same 11 scenes are late by the same amounts in all three runs
+  (sc00 21.6/20.3/20.3%, sc06 13.6/-/12.8%, sc11 10.9/10.4%, sc16 9.7/9.9%, sc03 7.3/7.0%, sc07b 7.1/5.7%,
+  sc19 6.0/5.4%, sc01 5.0/5.5%): this is content or CPU cost, not compilation.
+- **`dry` rose from 2 to 6-8 drop-outs across the tour** (warm run: sc07a, sc09, sc13, sc19, sc20, gf1b2; base: sc00, sc20).
+  Each is one event in a scene, in a different scene each run, so this is more likely audio scheduling noise
+  (issue #11, PR #30) than the cache; it is worth a repeat run before anyone reads it as a regression.
+- **Cache size:** 268 KB on disk after the tour.
+
+## Deck against Mac
+
+- **Frame time:** median 16.5-19.2 ms on the Deck too (sc07a 19.2 ms is the exception), mean 59.6 fps.
+- **Late frames are the difference:** 3.4-3.7% against 0.33%, concentrated in 11 scenes where the Mac has one.
+  On the Deck, p99 sits at 29-31 ms in those scenes (probably alternating 16/33 ms frames; not checked frame by frame), so they may run at an effective
+  ~45 fps even though the median is 60. sc00 is the worst (21%).
+- **Hitches:** Deck base 22 against Mac 23; the game-side stalls the Mac report show up here too, all as `game`.
+- **Loads:** 494 ms median against 420 ms; no load over 2.1 s (the Mac's eleven slow loads are 0.84-1.79 s).
+
+## Caveats
+
+- The panel is 90 Hz, so `[D3D8-VK] display refreshes at 90 Hz, not a multiple of 60: vsync not used`. The game
+  paces itself to 60 and the table counts a frame late against a 60 Hz vblank, so "late" is stricter than on the
+  Mac's vsync'd 60 Hz. The 29-31 ms p99 in those scenes says it is not only the metric.
+- Desktop session, not gamescope (gamescope exits after its first game launch, which a per-scene tour can't use).
+- One run each; the cold and warm runs agree closely with each other, but the base-to-cold difference in `dry`
+  and the single-digit hitch counts are within what a repeat might move.
+- Not run: `--profile default`, HD packs off/on comparison (the owner's packs were enabled, `cache_mb = 2048`).
+
+## Where to look next
+
+1. The 11 late-frame scenes (sc00, sc06, sc11, sc16, sc03, sc07b, sc19, sc01, sc07a, sc04, sc09): CPU-bound
+   on the Deck; F5 in the Mac report (fence-hold spin) is the first suspect.
+2. sc00 / sc03 / sc06 / sc07a loads of 1.4-2.0 s: waiting on the push-buffer executor, not shaders.
+3. Repeat the tour for `dry`.
+
+Per-scene comparison, base against warm:
+
+| scene | load ms A / B | median A / B | p99 A / B | worst A / B | 1% low A / B | late % A / B | hitches A / B | dry A / B |
+|---|---|---|---|---|---|---|---|---|
+| sc00 | 1630 / 1629 | 17.29 / 17.27 | 45.5 / 31.0 | 172 / 40 | 17.5 / 30.9 | 21.63 / 20.29 | 13 / 0 | 1 / 0 |
+| sc01 | 304 / 118 | 17.41 / 17.72 | 28.9 / 29.3 | 52 / 50 | 31.2 / 31.3 | 5.02 / 5.46 | 0 / 1 | 0 / 0 |
+| sc02 | 305 / 110 | 16.86 / 16.86 | 21.3 / 20.7 | 43 / 42 | 44.0 / 44.9 | 0.06 / 0.06 | 0 / 0 | 0 / 0 |
+| sc03 | 1637 / 1476 | 16.99 / 16.96 | 28.4 / 28.9 | 47 / 45 | 32.7 / 32.8 | 7.33 / 7.02 | 0 / 0 | 0 / 0 |
+| sc04 | 372 / 146 | 16.93 / 16.96 | 25.6 / 25.6 | 27 / 27 | 38.5 / 38.4 | 1.47 / 1.48 | 0 / 0 | 0 / 0 |
+| sc05 | 1294 / 1142 | 16.91 / 16.91 | 24.6 / 24.6 | 46 / 27 | 39.4 / 40.4 | 0.18 / 0.05 | 0 / 0 | 0 / 0 |
+| sc06 | 1524 / 1365 | 17.20 / 16.98 | 29.6 / 29.6 | 50 / 38 | 31.0 / 33.2 | 13.56 / 12.83 | 0 / 0 | 0 / 0 |
+| sc07a | 2082 / 1953 | 19.18 / 19.02 | 26.4 / 26.3 | 49 / 54 | 31.5 / 31.2 | 3.77 / 3.15 | 0 / 1 | 0 / 1 |
+| sc07b | 281 / 114 | 17.02 / 17.02 | 31.6 / 28.4 | 64 / 35 | 28.9 / 31.6 | 7.12 / 5.73 | 2 / 0 | 0 / 0 |
+| sc08 | 338 / 125 | 16.83 / 16.82 | 23.6 / 23.6 | 61 / 45 | 38.3 / 39.8 | 0.27 / 0.24 | 1 / 0 | 0 / 0 |
+| sc09 | 1417 / 1202 | 16.86 / 16.84 | 26.9 / 26.7 | 49 / 57 | 33.0 / 32.6 | 1.70 / 1.57 | 0 / 1 | 0 / 1 |
+| sc10 | 1045 / 822 | 17.25 / 17.19 | 23.9 / 23.7 | 49 / 52 | 36.4 / 34.2 | 0.18 / 0.24 | 0 / 2 | 0 / 0 |
+| sc11 | 674 / 476 | 17.11 / 17.15 | 29.7 / 29.7 | 60 / 59 | 30.3 / 31.2 | 10.86 / 10.43 | 1 / 1 | 0 / 0 |
+| sc12 | 265 / 75 | 16.78 / 16.73 | 21.2 / 21.3 | 21 / 21 | 46.9 / 47.0 | 0.00 / 0.00 | 0 / 0 | 0 / 0 |
+| sc13 | 1380 / 1348 | 16.83 / 16.84 | 20.6 / 20.8 | 164 / 45 | 37.8 / 46.0 | 0.09 / 0.03 | 1 / 0 | 0 / 1 |
+| sc14 | 267 / 102 | 16.82 / 16.86 | 20.8 / 20.6 | 48 / 23 | 41.7 / 48.2 | 0.14 / 0.00 | 0 / 0 | 0 / 0 |
+| sc15 | 665 / 483 | 16.51 / 16.92 | 21.1 / 21.9 | 22 / 24 | 46.6 / 43.9 | 0.00 / 0.00 | 0 / 0 | 0 / 0 |
+| sc16 | 1464 / 1282 | 17.26 / 17.20 | 29.7 / 29.6 | 45 / 31 | 30.5 / 33.3 | 9.70 / 9.87 | 0 / 0 | 0 / 0 |
+| sc17 | 1179 / 1003 | 16.88 / 16.88 | 21.6 / 21.6 | 55 / 57 | 44.2 / 44.4 | 0.05 / 0.05 | 1 / 1 | 0 / 0 |
+| sc18 | 294 / 94 | 16.85 / 16.83 | 20.7 / 20.7 | 70 / 49 | 43.6 / 45.8 | 0.11 / 0.03 | 1 / 0 | 0 / 0 |
+| sc19 | 361 / 122 | 17.23 / 17.23 | 29.8 / 29.6 | 52 / 60 | 31.3 / 29.8 | 5.99 / 5.39 | 1 / 1 | 0 / 3 |
+| sc20 | 236 / 80 | 16.84 / 16.88 | 20.8 / 21.2 | 47 / 44 | 42.9 / 43.4 | 0.10 / 0.07 | 0 / 0 | 1 / 1 |
+| sc21 | 302 / 92 | 16.86 / 16.85 | 21.3 / 21.3 | 41 / 24 | 43.0 / 46.3 | 0.08 / 0.00 | 0 / 0 | 0 / 0 |
+| gf1a | 997 / 856 | 16.85 / 16.87 | 21.4 / 20.7 | 43 / 21 | 37.0 / 48.1 | 0.27 / 0.00 | 0 / 0 | 0 / 0 |
+| gf1b1 | 584 / 440 | 16.87 / 16.88 | 21.1 / 20.9 | 45 / 22 | 30.6 / 46.8 | 0.43 / 0.00 | 0 / 0 | 0 / 0 |
+| gf1b2 | 646 / 472 | 16.85 / 16.86 | 21.8 / 22.5 | 41 / 40 | 32.7 / 33.0 | 0.87 / 0.64 | 0 / 0 | 0 / 1 |
+| gf1b3 | 521 / 367 | 16.90 / 16.85 | 21.7 / 20.7 | 40 / 39 | 36.4 / 38.5 | 0.22 / 0.21 | 0 / 0 | 0 / 0 |
+| gf1b4 | 597 / 429 | 16.85 / 16.86 | 21.0 / 20.6 | 43 / 22 | 37.2 / 46.5 | 0.22 / 0.00 | 0 / 0 | 0 / 0 |
+| gf1c | 925 / 693 | 16.91 / 16.95 | 22.8 / 22.8 | 64 / 47 | 33.3 / 38.6 | 0.21 / 0.11 | 1 / 0 | 0 / 0 |
+| gf1d | 520 / 342 | 16.78 / 16.74 | 20.7 / 20.6 | 32 / 21 | 40.4 / 47.0 | 0.33 / 0.00 | 0 / 0 | 0 / 0 |
+| gf2a | 468 / 254 | 16.84 / 16.84 | 20.7 / 21.3 | 22 / 21 | 47.8 / 46.9 | 0.00 / 0.00 | 0 / 0 | 0 / 0 |
+| gf2b | 383 / 199 | 16.84 / 16.87 | 20.7 / 20.7 | 23 / 22 | 46.6 / 47.4 | 0.00 / 0.00 | 0 / 0 | 0 / 0 |
+| gf2c | 431 / 255 | 16.86 / 16.85 | 20.6 / 20.6 | 22 / 21 | 47.3 / 48.5 | 0.00 / 0.00 | 0 / 0 | 0 / 0 |
+| gf2d | 358 / 195 | 16.81 / 16.82 | 20.6 / 20.7 | 21 / 44 | 48.5 / 37.4 | 0.00 / 0.25 | 0 / 0 | 0 / 0 |
+| gf2e | 459 / 276 | 16.86 / 16.87 | 20.6 / 20.6 | 49 / 21 | 39.4 / 48.4 | 0.15 / 0.00 | 0 / 0 | 0 / 0 |
+| gf3a | 448 / 262 | 16.91 / 16.80 | 23.7 / 24.5 | 27 / 28 | 39.0 / 38.0 | 0.59 / 0.86 | 0 / 0 | 0 / 0 |
+| gf3b | 222 / 63 | 16.86 / 16.85 | 21.3 / 20.7 | 47 / 44 | 30.4 / 39.1 | 0.41 / 0.20 | 0 / 0 | 0 / 0 |
+| gf3c | 214 / 64 | 16.81 / 16.87 | 21.4 / 20.7 | 21 / 21 | 46.8 / 48.2 | 0.00 / 0.00 | 0 / 0 | 0 / 0 |
+
