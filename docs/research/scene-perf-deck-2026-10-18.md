@@ -75,6 +75,86 @@ shader cache for the cold run. Numbers-only copies: `scene-perf-deck-{base,shade
 2. sc00 / sc03 / sc06 / sc07a loads of 1.4-2.0 s: waiting on the push-buffer executor, not shaders.
 3. Repeat the tour for `dry`.
 
+## Analysis from the Mac side, and a retest (2026-10-18)
+
+Read against the Mac report and the two follow-up branches (`perf/shader-cache`, `test/hitch-capture`).
+
+**The shader cache does what it was for.** Hitches 22 to 8, sc00 from 13 hitches and 172 ms to none and 40 ms,
+short loads from about 300 to about 100 ms. Most of it comes from compiling each HLSL text once (cold run),
+not from the disk; the disk cache removes the one first-launch compile left in sc00.
+
+**The Mac's random 100-300 ms stalls do not happen here.** The worst frame of the warm run is 60 ms. The stall
+session (`test/hitch-capture`, D134) traced them to macOS: a yielding thread drops to the lowest priority there,
+and the push-buffer executor ran at default priority, so the executor was starved. Linux's `sched_yield()` does
+not drop priority, so no Deck change is expected from that fix.
+
+**What is left is late frames in 11 scenes, and they are not shown to be CPU-bound yet.** The median frame is
+normal (16.8-17.3 ms) but p99 is 29-31 ms: heavy shots alternate 16 and 33 ms frames. Warm run against the Mac,
+time before Present (*work*: game, executor and the game's own wait for its 60 Hz tick) and in Present:
+
+| scene | late % Deck / Mac | work p50 Deck / Mac | work p99 Deck / Mac | present p50 Deck / Mac | present p99 Deck / Mac |
+|---|---|---|---|---|---|
+| sc00 | 20.3 / 2.9 | 13.5 / 12.4 | 22.2 / 27.1 | 4.7 / 4.6 | 16.0 / 11.9 |
+| sc06 | 12.8 / 0.2 | 12.0 / 13.1 | 20.9 / 17.9 | 4.7 / 3.3 | 6.5 / 5.4 |
+| sc11 | 10.4 / 0.5 | 11.6 / 12.3 | 20.1 / 17.9 | 5.4 / 3.7 | 7.2 / 5.8 |
+| sc16 | 9.9 / 0.1 | 12.3 / 13.3 | 21.2 / 17.8 | 4.6 / 3.3 | 5.7 / 4.6 |
+| sc03 | 7.0 / 0.0 | 11.5 / 12.8 | 20.8 / 16.0 | 5.2 / 3.6 | 6.4 / 5.4 |
+| sc01 | 5.5 / 0.2 | 9.0 / 10.9 | 13.2 / 14.6 | 7.8 / 5.4 | 20.1 / 13.4 |
+| sc02 (fine) | 0.1 / 0.1 | 12.1 / 13.3 | 14.4 / 16.4 | 4.3 / 3.1 | 6.2 / 4.9 |
+
+Two differences, and both can cost a frame:
+
+1. **Render scale 3 may be heavy for this GPU.** It renders 2560x1440 for a 1280x800 screen, 3.6 times its
+   pixels. Present is longer than the Mac's (4.3-5.4 ms median against 3.1-4.6), although here it holds no vsync
+   wait and on the Mac it does, so the GPU's share is a candidate, not shown. The clearer sign is *work* p99:
+   20-23 ms in the late scenes against 13-16 ms in the ones that are fine (sc01 is the exception: its
+   late frames are on the Present side, p99 20 ms).
+2. **No vsync, so no slack.** The Mac presents with vsync and its queue absorbs a frame of 18 ms. The 90 Hz
+   panel is not a multiple of 60, so here the game paces itself: a frame past 16.7 ms waits for the next tick
+   and becomes 33 ms. On a 90 Hz panel even a perfect 60 fps shows each frame for one or two refreshes
+   (11 or 22 ms), a judder a player can see whatever the numbers say.
+
+*work* includes the wait for the next tick, so these numbers cannot by themselves tell CPU cost from waiting;
+"CPU-bound" above is a hypothesis. The retest separates the three.
+
+Also to check: the report says the owner's HD packs were enabled. The harness runs with `RECOMP_SETTINGS=none`,
+which leaves packs off, as on the Mac, and the Deck's peak memory (300 MB against the Mac's 555 MB) points the same
+way. `"textures.enabled"` in any `logs/sessions/<s>/session.json` of the run settles it.
+
+### The retest
+
+Same build as this branch (the shader cache is in it; let the cache warm with one pass first if it was cleared),
+the 11 late scenes, one arm at a time. Setting the panel to 60 Hz: System Settings, Display & Monitor, Refresh
+rate 60 Hz (desktop mode); the summary's *Display* line then no longer says *vsync not used*.
+
+```
+SC="sc00 sc06 sc11 sc16 sc03 sc07b sc19 sc01 sc07a sc04 sc09"
+# panel at 90 Hz
+python3 scripts/scene-perf.py run $SC --every 0 --out logs/scene-perf/deck-A-stress-90hz
+python3 scripts/scene-perf.py run $SC --every 0 --env RECOMP_RENDER_SCALE=2 --out logs/scene-perf/deck-B-scale2-90hz
+# panel at 60 Hz
+python3 scripts/scene-perf.py run $SC --every 0 --out logs/scene-perf/deck-C-stress-60hz
+python3 scripts/scene-perf.py run $SC --every 0 --profile deck --out logs/scene-perf/deck-D-deck-60hz
+# each against A
+python3 scripts/scene-perf.py compare logs/scene-perf/deck-A-stress-90hz logs/scene-perf/deck-B-scale2-90hz
+```
+
+About ten minutes an arm. A is the control (same as the warm run, repeated, so run-to-run spread is known);
+B changes only the render scale, C only the refresh (vsync on), D is what a Deck player would sensibly use
+(16:10, scale 2, vsync). Commit `baseline` copies of the four summaries beside this report.
+
+How to read it:
+
+| result | meaning | next |
+|---|---|---|
+| B well below A | GPU cost of render scale 3 | recommend scale 2 on the Deck (launcher default or the Deck guide) |
+| C well below A | pacing without vsync | Game Mode at 60 Hz in the Deck guide; consider better self-pacing on non-60 Hz panels |
+| D near zero | the sensible Deck setting is fine | document D as the Deck configuration |
+| none moves | CPU cost | `perf record` on the Deck during sc00; the fence-hold spin (Mac report F5) first |
+
+`dry` (2 against 6-8 between runs) is read from all four arms together; if it stays at one or two single events
+per run in different scenes, it is noise.
+
 Per-scene comparison, base against warm:
 
 | scene | load ms A / B | median A / B | p99 A / B | worst A / B | 1% low A / B | late % A / B | hitches A / B | dry A / B |
