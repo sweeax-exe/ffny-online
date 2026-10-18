@@ -29,11 +29,9 @@ Open the overlay (**F1**, or the pad's overlay buttons), go to **Debug**, and un
   request waits for the title screen.
 - Whatever was running is left: after the scene the game returns to the **main menu**, not
   to the fight or Story point you were in.
-- **Developer menu** opens EA's own debug menu instead. It reads pad 1: the d-pad moves and
-  changes values, **A starts** the highlighted mode. **Back to the main menu** leaves it.
-  Careful with `MODE - GAME`: with the menu's default fighters (`Crow1 (MAR)`, a developer
-  placeholder) it asks for speech files the retail disc does not have and stalls.
-  `MODE - REAL TIME CINEMA` plays the `CINEMA` line's scene; the other modes are untried.
+- **Developer menu** opens EA's own debug menu instead: any match, any scene, the venue viewer.
+  Its lines, controls and modes are in [The developer menu](developer-menu.md).
+  **Back to the main menu** leaves it.
 
 ## From the command line: one command
 
@@ -72,7 +70,7 @@ Windows (PowerShell, from the repository folder):
 $env:RECOMP_SCENE = "sc12"; .\build\win-x64-release\defjam_recomp.exe
 ```
 
-`RECOMP_DEV_MODULE=1` alone opens the developer menu at the title screen instead.
+`RECOMP_DEV_MODULE=1` alone opens the [developer menu](developer-menu.md) at the title screen instead.
 
 ## What the log says
 

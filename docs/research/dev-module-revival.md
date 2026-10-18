@@ -251,6 +251,34 @@ passes except `audio.dry_queue` in `combat` and `versus` (1 dry event each, no d
 audio gate (issue #29) that main fails the same way. The developer module, the scene launcher and their hooks
 change nothing when not asked for.
 
+## The debug menu, mapped (2026-10-17, for v0.10.0)
+
+Guide for players: [`docs/developer-menu.md`](../developer-menu.md). Read from `sub_0002DBE0` (input),
+`sub_0002CA20` (drawing) and the mode update `sub_0002DFF0`, then checked with scripted input on macOS.
+
+- **The game's button mask** (input subsystem 0x19, `sub_000DCBA0(0)` = pad 1; `sub_000DD2B0(0)` held at
+  `+0x84`, `(1)` newly pressed, `(2)` auto-repeat at `+0x8C`), logged per button: LT `0x01`, White `0x02`,
+  RT `0x04`, Black `0x08`, A `0x10`, B `0x20`, X `0x40`, Y `0x80`, Start `0x100`, Back `0x200`, d-pad up,
+  down, left, right `0x1000`-`0x8000`. The stick clicks are not mapped.
+- **Items** (cursor at mode `+0x2A4`, 15 items, labels at `0x2DBFB0`, kinds at `0x2DEDC`, value counts at
+  `0x2DC0B0`): 0 `MATCH_MODE` (6: SINGLE, TAG, 3WAY, 4WAY, 1_VS_2, 1_VS_3), 1-4 `FIGHTER_0`-`3` (fighter table
+  0x20; A cycles the controller at `0x33E75C + 4n` through PLAYER, CPU Easy, Normal, Hard), 5 `STAGE` (venue
+  table 0x1F), 6 `CINEMA` (38), 7 empty (skipped), 8-14 the modes. Up/down move (wrapping), left/right ±1,
+  LT/RT ±10; on item 14 left/right change the Blazin number at `0x33DBA0` (0-81). A on 8-14 calls
+  `sub_0002D1C0` (GAME; also item 14), `0x2D4F0`, `0x2D5D0`, `0x2D6C0`, `0x2D7C0`, `0x2D8C0`. The cursor starts
+  on `MODE - GAME`. A fighter line prints the record's name (`+0xC`) and a number (`+0x14`) from the
+  character table, for example `Ludacris (KIC) 4`, `DavidBanner (STF) 16`, `Ice-T (SUB) 15`.
+- **GAME** with real fighters runs a whole match and returns to the menu (`logs/run-20261017-203456.log.err`:
+  Ludacris vs David Banner, The Foundation, intro, fight, KO, menu at about 95 s). Only
+  `speech/streams/intro/028.asf` is missing; with the `Crow1` stand-ins the match stalled (above).
+- **STAGE VIEWER** (`sub_0008D5C0` on `0x3797F0`): five lines (OBJECT, MORPH, ENVATK, TRANSP, ANIM), up/down
+  pick, left/right step, B steps the object's variant. Its exit is `held & 0x100` (Start) with `pressed &
+  0x200` (Back), but Start's press first opens the module's pause menu, and in a scripted run the chord
+  did not leave the viewer; the pause menu's QUIT goes to the main menu (owner). Start alone opens the pause
+  menu from any mode.
+- Not run: TAG, 3WAY, 4WAY and the handicap modes; the animation viewer, create player, crowd test and
+  Blazin viewer (owner tried them; left undocumented at the owner's request).
+
 ## Decisions and risks
 
 - Injecting means constructing the object on the host side with the game's allocator

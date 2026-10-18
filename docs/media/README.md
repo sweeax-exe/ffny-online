@@ -108,6 +108,7 @@ and `ac3583188a87e46dc7f183969f2b51dd0300cf3d6bd05ca3ecf40513c61f4d2f`.
 | `hd-16x9-gameplay.mp4` | 1280×720, silent 60-fps CFR | 5.57 MB | `385b041f57b7ddd61feb99e0ce726f6e4a5856f1e9936c416aca81949ee428f0` |
 | `textures-comparison.mp4` | 1280×520, silent 60-fps CFR | 3.88 MB | `0659c294460c00fafd69552a2f4fb0c70d161b5d6206e78c902cdd4ca3a03383` |
 | `widescreen-comparison.mp4` | 1280×400, silent 60-fps CFR | 2.65 MB | `2916fc4efd72b6d109d829157c01479c9ef50d84c5bbb94437d3fd87060f7d2c` |
+| `developer-menu.png` | 1830×1336 | 0.24 MB | `86a3a91ae252ff9692003e3b88ee8bbc68af176ab74bb7fa0db4e4fd5add9077` |
 
 ## Earlier captures
 
