@@ -74,6 +74,24 @@ def write_status(path, message):
     os.replace(temporary, path)
 
 
+def write_progress(status_path, permille):
+    """Overall progress, 0-1000, beside the status file (<status>.progress). The Windows
+    wizard draws it as a bar; a front end that does not read it loses nothing."""
+    path = Path(str(status_path) + '.progress')
+    temporary = Path(str(status_path) + '.progress-pending')
+    temporary.write_text(str(max(0, min(1000, int(permille)))), encoding='ascii')
+    os.replace(temporary, path)
+
+
+# Share of the whole run each stage is given in the progress bar (permille, cumulative
+# starts). The build is most of an install; with HD textures their upscale takes a slice of it.
+PROGRESS_STAGES = {
+    'source': (0, 20), 'extract': (20, 90), 'toolchain': (90, 130), 'analysis': (130, 170),
+    'lift': (170, 260), 'build': (260, 950), 'hd': (950, 950), 'activate': (950, 1000),
+}
+PROGRESS_STAGES_HD = dict(PROGRESS_STAGES, build=(260, 800), hd=(800, 960), activate=(960, 1000))
+
+
 def safe_relative(name):
     path = PurePosixPath(name)
     if (not name or '\\' in name or ':' in name or path.is_absolute()
@@ -130,9 +148,14 @@ def nearest_existing(path):
 
 def validate_locations(install, data, dump):
     install, data, dump = (Path(p).resolve() for p in (install, data, dump))
-    for first, second in ((install, data), (install, dump), (data, dump)):
-        if first == second or first in second.parents or second in first.parents:
-            raise SetupError('Install, data and dump locations must be separate, non-nested folders', 2)
+    named = (('install', install), ('data', data), ('dump', dump))
+    for i, (first_name, first) in enumerate(named):
+        for second_name, second in named[i + 1:]:
+            if first == second or first in second.parents or second in first.parents:
+                raise SetupError('Install, data and dump locations must be separate, non-nested folders: the '
+                                 + first_name + ' location (' + str(first) + ') and the ' + second_name
+                                 + ' location (' + str(second) + ') overlap. Keep the dump outside the install'
+                                 ' and data folders, and the two of them apart.', 2)
     for target in (install, data):
         if any(c in str(target) for c in ('\r', '\n')):
             raise SetupError('Destination paths cannot contain line breaks', 2)
@@ -246,6 +269,19 @@ class Engine:
         if self.args.status_file:
             write_status(self.args.status_file, message)
 
+    def stage(self, name):
+        """Enter a progress stage: the bar jumps to its start, and steps reported while it
+        runs (run(progress=True)) fill it towards its end."""
+        stages = PROGRESS_STAGES_HD if getattr(self.args, 'hd_textures', False) else PROGRESS_STAGES
+        self.progress_span = stages[name]
+        self.progress(0, 1)
+
+    def progress(self, done, total):
+        lo, hi = getattr(self, 'progress_span', (0, 0))
+        if self.args.status_file and total > 0:
+            with contextlib.suppress(OSError):
+                write_progress(self.args.status_file, lo + (hi - lo) * min(done, total) / total)
+
     def cancelled(self):
         if self.args.cancel_file and Path(self.args.cancel_file).exists():
             raise SetupError('Setup cancelled; run again to resume completed work', 6)
@@ -286,6 +322,12 @@ class Engine:
                                 match = re.match(r'PROGRESS\s+(\d+)\s*/\s*(\d+)', line)
                                 if match:
                                     write_status(self.args.status_file, 'Upscaling HD textures: ' + match[1] + ' / ' + match[2])
+                                    self.progress(int(match[1]), int(match[2]))
+                                    continue
+                                # Ninja's "[12/352] Building C object ...": the build's own count.
+                                match = re.match(r'\s*\[(\d+)/(\d+)\]', line)
+                                if match:
+                                    self.progress(int(match[1]), int(match[2]))
                         if chunk and self.log and log_output:
                             self.log.write(chunk.decode('utf-8', errors='replace'))
                             self.log.flush()
@@ -701,6 +743,7 @@ class Engine:
             ('Lift', lambda: state.verify_lift(self.source, tk), 'recomp'),
             ('Build', lambda: state.verify_build(self.source, PRESET), 'build')):
             self.cancelled()
+            self.stage({'analyze': 'analysis', 'recomp': 'lift', 'build': 'build'}[action])
             try:
                 verify()
                 self.event(label + ' already verified; reused')
@@ -734,7 +777,7 @@ class Engine:
                 self.run(self.in_container(['cmake', '--preset', PRESET, '-DDEFJAM_BUILD_GAME=ON', *overrides],
                                            self.source), cwd=self.source)
                 self.run(self.in_container(['cmake', '--build', '--preset', PRESET, '--target', 'defjam_recomp'],
-                                           self.source), cwd=self.source)
+                                           self.source), cwd=self.source, progress=True)
                 self.run([self.python, self.source / 'scripts/pipeline-state.py', 'record-build',
                           '--preset', PRESET], cwd=self.source)
                 verify()
@@ -944,13 +987,19 @@ class Engine:
                 hd_space = 15 * 1024**3 if getattr(self.args, 'hd_textures', False) else 0
                 if shutil.disk_usage(nearest_existing(self.data)).free < dump_size + 1024**3 + hd_space + (required if same_drive else 0):
                     raise SetupError('Insufficient free space on the data drive', 2)
+                self.stage('source')
                 self.prepare_source()
+                self.stage('extract')
                 self.extract()
+                self.stage('toolchain')
                 self.toolchain()
                 self.link_game()
                 self.pipeline()
+                self.stage('hd')
                 self.build_hd_textures()
+                self.stage('activate')
                 self.activate()
+                self.progress(1, 1)
 
 
 def enable_hd_packs(data, packs, previous=()):

@@ -328,6 +328,7 @@ int pc_display(const char *key, int fallback)
 
 #if defined(_WIN32)
 void pgraph_d3d11_set_anisotropy(int max_anisotropy);   /* toolkit nv2a_pgraph_d3d11.h */
+void d3d8_Nv2aSetFlatSqueeze(float squeeze);           /* toolkit d3d8_extvs.c */
 #endif
 
 /* The widescreen camera (src/recomp_manual.c sub_0001A4E0) takes the setting once, when the
@@ -354,6 +355,9 @@ void pc_settings_apply_display(void)
     /* Direct3D 11 only for now; the Vulkan renderer keeps its plain scale. */
     d3d8_present_set_post(pc_display("anti_aliasing", 1), pc_display("sharpen", 30));
     pgraph_d3d11_set_anisotropy(1 << pc_display("anisotropy", 4));   /* off, 2x .. 16x */
+    /* Anamorphic 16:9: menus, HUD and movies are drawn three quarters as wide, so the
+     * stretch to 16:9 gives them back their shape, centred. */
+    d3d8_Nv2aSetFlatSqueeze(widescreen ? 0.75f : 1.0f);
 #endif
 }
 

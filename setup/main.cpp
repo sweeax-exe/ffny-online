@@ -15,6 +15,7 @@
 
 namespace fs = std::filesystem;
 static HWND window, dumpEdit, installEdit, dataEdit, statusLabel, startButton, cancelButton, prerequisites, desktopShortcut, hdUpscale, launchInfo;
+static HWND progressBar;    // overall progress, 0-1000, from the engine's <status>.progress file
 static HANDLE worker = nullptr;
 static fs::path payload, scratch, statusPath, cancelPath, logPath;
 static bool running = false;
@@ -241,6 +242,7 @@ static LRESULT CALLBACK windowProc(HWND hwnd, UINT message, WPARAM wp, LPARAM lp
                 if (SendMessageW(hdUpscale, BM_GETCHECK, 0, 0) == BST_CHECKED)
                     args.push_back(L"--hd-textures");
                 setBusy(true); timerTicks = 0; SetTimer(window, 1, 400, nullptr);
+                SendMessageW(progressBar, PBM_SETPOS, 0, 0);
                 SetWindowTextW(statusLabel, L"Preparing setup files... You can move the window or cancel.");
                 std::thread([args]() {
                     try {
@@ -291,11 +293,18 @@ static LRESULT CALLBACK windowProc(HWND hwnd, UINT message, WPARAM wp, LPARAM lp
             std::ifstream in(statusPath); std::string text((std::istreambuf_iterator<char>(in)), {});
             SetWindowTextW(statusLabel, utf8(text).c_str());
         }
+        {
+            std::ifstream in(statusPath.wstring() + L".progress");
+            int permille = -1;
+            if (in >> permille && permille >= 0 && permille <= 1000)
+                SendMessageW(progressBar, PBM_SETPOS, (WPARAM)permille, 0);
+        }
         if (WaitForSingleObject(worker, 0) == WAIT_OBJECT_0) {
             DWORD code; GetExitCodeProcess(worker, &code); CloseHandle(worker); worker = nullptr;
             KillTimer(window, 1); setBusy(false);
             EnableWindow(GetDlgItem(window, 112), code == 0);
             if (code == 0) {
+                SendMessageW(progressBar, PBM_SETPOS, 1000, 0);
                 auto path = fs::path(editText(installEdit)) / L"DefJamLauncher.exe";
                 auto text = L"To play, select Play or double-click this file:\r\n" + path.wstring();
                 SetWindowTextW(launchInfo, text.c_str());
@@ -354,9 +363,11 @@ static int wizard(HINSTANCE instance, bool smoke = false, bool preparation = fal
     control(L"STATIC", L"Adds about 6.2 GB; requires extra working space. No GPU needed.", 0, 44, 336, 650, 18, 0);
     desktopShortcut = control(L"BUTTON", L"Create a desktop shortcut", WS_TABSTOP | BS_AUTOCHECKBOX, 24, 358, 675, 25, 113);
     SendMessageW(desktopShortcut, BM_SETCHECK, BST_CHECKED, 0);
-    statusLabel = control(L"STATIC", L"Choose your dump and destinations, then select Install / Repair.", 0, 24, 394, 670, 35, 0);
+    progressBar = control(PROGRESS_CLASSW, L"", PBS_SMOOTH, 24, 389, 660, 16, 116);
+    SendMessageW(progressBar, PBM_SETRANGE32, 0, 1000);
+    statusLabel = control(L"STATIC", L"Choose your dump and destinations, then select Install / Repair.", 0, 24, 411, 670, 30, 0);
     launchInfo = control(L"EDIT", L"After setup, use Play or open DefJamLauncher.exe from your install folder.",
-                        WS_TABSTOP | ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL, 24, 439, 660, 50, 114);
+                        WS_TABSTOP | ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL, 24, 445, 660, 46, 114);
     startButton = control(L"BUTTON", L"Install / Repair", WS_TABSTOP | BS_DEFPUSHBUTTON, 24, 501, 140, 30, 109);
     control(L"BUTTON", L"Open logs", WS_TABSTOP, 180, 501, 110, 30, 111);
     control(L"BUTTON", L"Play", WS_TABSTOP, 306, 501, 90, 30, 112);
@@ -392,7 +403,7 @@ static int wizard(HINSTANCE instance, bool smoke = false, bool preparation = fal
 
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
-    INITCOMMONCONTROLSEX cc{sizeof(cc), ICC_STANDARD_CLASSES}; InitCommonControlsEx(&cc);
+    INITCOMMONCONTROLSEX cc{sizeof(cc), ICC_STANDARD_CLASSES | ICC_PROGRESS_CLASS}; InitCommonControlsEx(&cc);
     int count; LPWSTR* values = CommandLineToArgvW(GetCommandLineW(), &count);
     int result = 4;
     try {
