@@ -200,6 +200,9 @@ needs no internet connection and no Terminal, Homebrew, CMake or Python of your 
 the first time. Choose **Done** (not Move to Trash), then open System Settings →
 Privacy & Security, scroll to Security, and choose **Open Anyway** beside the message
 about Def Jam Setup, then confirm with your password or Touch ID. You do this once.
+Setup unpacks its SHA-256-checked payload without the download's quarantine (`ditto
+--noqtn`, then `xattr -dr com.apple.quarantine`), so the bundled Python, CMake, Ninja and
+libraries, which are signed ad hoc, not notarized, need no prompt of their own (#59).
 
 **Command Line Tools.** Setup uses Apple's compiler, which cannot be redistributed.
 If it is missing, setup stops with exit 3 and a message linking to
@@ -265,7 +268,9 @@ silent install from an XISO, the launcher starting the game with the receipt's d
 folder, a repair while the game runs (exit 5), shortcut creation and removal, and the
 installed build against the title, menu and fight checks. Not yet checked: a Mac with
 nothing installed, older macOS versions and Gatekeeper's first-open prompt on a
-downloaded copy.
+downloaded copy. Checked since #59: a quarantined payload unpacks to files with no
+quarantine, and the bundled engine starts (`tests/unit/test_macos_payload.py` runs the
+same `ditto` and `xattr` calls on a quarantined archive).
 
 ## Linux setup
 

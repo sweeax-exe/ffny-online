@@ -4,6 +4,8 @@ import json
 from pathlib import Path
 import os
 import re
+import subprocess
+import sys
 import tarfile
 import zipfile
 
@@ -95,6 +97,40 @@ def test_flatten_links_leaves_only_regular_files(tmp_path):
     assert (tmp_path / 'lib/libreal.dylib').read_bytes() == b'library'
     assert not (tmp_path / 'lib/libreal.dylib').is_symlink()
     assert not (tmp_path / 'lib/dangling').exists() and not (tmp_path / 'lib/dangling').is_symlink()
+
+
+def setup_unpack_commands(archive, destination):
+    """The tool calls Setup.unpack() in setup/macos/Setup/main.swift makes, with its paths filled in."""
+    body = (ROOT / 'setup/macos/Setup/main.swift').read_text(encoding='utf-8').split('func unpack()', 1)[1]
+    body = body.split('func engineProcess', 1)[0]
+    commands = []
+    for tool, arguments in re.findall(r'tool\("([^"]+)", \[([^\]]*)\]\)', body):
+        values = {'archive.path': str(archive), 'payload.path': str(destination)}
+        commands.append([tool] + [values.get(a.strip(), a.strip().strip('"')) for a in arguments.split(',')])
+    return commands
+
+
+def test_setup_unpacks_its_payload_without_the_download_quarantine():
+    commands = setup_unpack_commands('A', 'P')
+    assert commands[0] == ['/usr/bin/ditto', '-x', '-k', '--noqtn', 'A', 'P']
+    assert ['/usr/bin/xattr', '-d', '-r', 'com.apple.quarantine', 'P'] in commands
+
+
+@pytest.mark.skipif(sys.platform != 'darwin', reason='macOS quarantine attributes and ditto')
+def test_a_quarantined_payload_unpacks_to_files_gatekeeper_will_run(tmp_path):
+    archive = tmp_path / 'payload.zip'
+    with zipfile.ZipFile(archive, 'w') as package:
+        info = zipfile.ZipInfo('python/bin/python3')
+        info.external_attr = 0o100755 << 16
+        package.writestr(info, '#!/bin/sh\n')
+    # What a browser stamps on a download; the disk image and everything in it inherit it.
+    subprocess.run(['/usr/bin/xattr', '-w', 'com.apple.quarantine', '0081;6ad6628e;Firefox;', archive], check=True)
+    for command in setup_unpack_commands(archive, tmp_path / 'payload'):
+        subprocess.run(command, check=True)
+    unpacked = tmp_path / 'payload/python/bin/python3'
+    assert unpacked.stat().st_mode & 0o111
+    attributes = subprocess.run(['/usr/bin/xattr', unpacked], capture_output=True, text=True, check=True).stdout
+    assert 'com.apple.quarantine' not in attributes
 
 
 def test_macos_release_assets_are_exactly_the_dmg_checksum_and_provenance():
