@@ -73,7 +73,7 @@ evidence = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(evidence)
 REPO = harness.REPO
 
-ORDER = ["unit", "m2", "m3", "m4a", "launcher", "overlay", "unlockopt", "skipintro", "fight", "ffa", "fight-terrordome", "ffa-terrordome", "combat", "versus", "ffa-result", "two-matches", "replay", "repeat", "visual",
+ORDER = ["unit", "m2", "m3", "m4a", "launcher", "overlay", "unlockopt", "picture", "skipintro", "fight", "ffa", "fight-terrordome", "ffa-terrordome", "combat", "versus", "ffa-result", "two-matches", "replay", "repeat", "visual",
          "intro", "crib", "gym", "soak"]
 # Opt-in (--only): the One on One at the Terrordome, which the Free For All covers, and
 # the repeatability check, which is two more fights.
@@ -326,6 +326,44 @@ def check_unlock_option(a):
         if not want and (started or ran):
             faults.append("unlock_all is off in the file, but the unlock routine ran")
     return verdict(faults, "the checkbox saves [debug] unlock_all; from the file alone the unlock runs, and without it does not")
+
+
+def check_picture_options(a):
+    """The launcher's Picture controls (issues #44 and #47) and what reaches the game.
+
+    Clicks the Brightness slider at three quarters of its track and the Vignette checkbox, then
+    Play. Expects [display] brightness above 100 and vignette = false in the settings file, and the
+    game to start with them ([PICTURE] line). What they do to the picture is measured by
+    docs/research/picture-options.md, not here: a fight is too long for this check."""
+    if sys.platform == "win32":
+        return not_applicable("this check is for the SDL launcher (macOS, Linux); the Windows one is Direct3D 11")
+    faults = []
+    shot = os.path.join(REPO, "logs", "shots", "ui-picture", "launcher.bmp")
+    os.makedirs(os.path.dirname(shot), exist_ok=True)
+    if os.path.exists(shot):
+        os.remove(shot)
+    settings = ui_settings_file("picture")
+    script = "800:click:186:421;1400:click:21:490;2200:shot:%s;2600:play" % shot
+    run = harness.run_game("ui-picture", secs=60, preset=a.preset, scripted=False, quiet=True,
+                           env={"RECOMP_SETTINGS": settings, "RECOMP_LAUNCHER_SCRIPT": script,
+                                "RECOMP_INPUT_IGNORE_FOCUS": "1"})
+    faults += common_faults(run)
+    with open(settings, encoding="utf-8") as f:
+        ini = f.read()
+    display = re.search(r"^\[display\]([^\[]*)", ini, re.M)
+    display = display.group(1) if display else ""
+    brightness = re.search(r"^brightness\s*=\s*(\d+)\s*$", display, re.M)
+    if not brightness or not 100 < int(brightness.group(1)) <= 200:
+        faults.append("the Brightness slider did not reach settings.ini (%s)" % (brightness.group(0) if brightness else "missing"))
+    if not re.search(r"^vignette\s*=\s*false\s*$", display, re.M):
+        faults.append("the Vignette checkbox did not reach settings.ini")
+    if "[UI] launcher closed: play" not in run.text:
+        faults.append("Play did not close the launcher")
+    started = re.search(r"^\[PICTURE\] brightness (\d+), vignette off", run.text, re.M)
+    if not started or not brightness or started.group(1) != brightness.group(1):
+        faults.append("the game did not start with the saved brightness and the vignette off")
+    return verdict(faults, "Brightness %s and Vignette off saved by the launcher and applied when the game started"
+                   % (brightness.group(1) if brightness else "?"))
 
 
 def startup_skip_faults(text, enabled):
@@ -641,7 +679,7 @@ def check_soak(a):
 
 
 CHECKS = {"unit": check_unit, "m2": check_m2, "m3": check_m3, "m4a": check_m4a, "launcher": check_launcher,
-          "overlay": check_overlay, "unlockopt": check_unlock_option, "skipintro": check_skip_intro, "fight": check_fight, "ffa": check_ffa,
+          "overlay": check_overlay, "unlockopt": check_unlock_option, "picture": check_picture_options, "skipintro": check_skip_intro, "fight": check_fight, "ffa": check_ffa,
           "fight-terrordome": lambda a: check_fight(a, 'fight-terrordome'),
           "ffa-terrordome": lambda a: check_fight(a, 'ffa-terrordome'),
           "combat": check_combat, "versus": check_versus, "ffa-result": check_ffa_result, "two-matches": check_two_matches, "replay": check_replay, "visual": check_visual, "repeat": check_repeat, "intro": check_intro, "crib": check_crib, "gym": check_gym, "soak": check_soak}

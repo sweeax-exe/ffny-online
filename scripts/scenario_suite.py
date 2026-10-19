@@ -151,18 +151,22 @@ def bootstrap_stages(route):
 
 
 def scenario_settings(path=None):
-    settings = {'render_scale': 2, 'gamma': True, 'vsync': True}
+    settings = {'render_scale': 2, 'gamma': True, 'vsync': True,
+                'brightness': 100, 'vignette': True, 'vignette_strength': 100}
     if path:
         supplied = json.loads(Path(path).read_text(encoding='utf-8'))
         if set(supplied) - set(settings):
             raise ValueError('unknown scenario display setting')
         settings.update(supplied)
-    if type(settings['render_scale']) is not int or not 1 <= settings['render_scale'] <= 4:
-        raise ValueError('render_scale must be an integer from 1 to 4')
-    if any(type(settings[k]) is not bool for k in ('gamma', 'vsync')):
-        raise ValueError('gamma/vsync must be booleans')
+    for key, low, high in (('render_scale', 1, 4), ('brightness', 50, 200), ('vignette_strength', 0, 100)):
+        if type(settings[key]) is not int or not low <= settings[key] <= high:
+            raise ValueError('%s must be an integer from %d to %d' % (key, low, high))
+    if any(type(settings[k]) is not bool for k in ('gamma', 'vsync', 'vignette')):
+        raise ValueError('gamma/vsync/vignette must be booleans')
     env = {'RECOMP_RENDER_SCALE': str(settings['render_scale']),
-           'RECOMP_GAMMA': str(int(settings['gamma'])), 'RECOMP_PRESENT_VSYNC': str(int(settings['vsync']))}
+           'RECOMP_GAMMA': str(int(settings['gamma'])), 'RECOMP_PRESENT_VSYNC': str(int(settings['vsync'])),
+           'RECOMP_BRIGHTNESS': str(settings['brightness']), 'RECOMP_VIGNETTE': str(int(settings['vignette'])),
+           'RECOMP_VIGNETTE_STRENGTH': str(settings['vignette_strength'])}
     return settings, env
 
 
@@ -469,7 +473,7 @@ def main(argv=None):
     run.add_argument('--fixture', required=True)
     run.add_argument('--output')
     run.add_argument('--preset', default=harness.RELEASE_PRESET)
-    run.add_argument('--settings', help='optional JSON render_scale/gamma/vsync; inherited RECOMP diagnostics are suppressed')
+    run.add_argument('--settings', help='optional JSON render_scale/gamma/vsync/brightness/vignette/vignette_strength; inherited RECOMP diagnostics are suppressed')
     run.add_argument('--texture-packs', help='explicit semicolon-separated HD pack folders for this scenario')
     run.add_argument('--texture-root', help='local mods folder read by the scenario; saves still use a disposable root')
     audio_group = run.add_mutually_exclusive_group()
