@@ -147,8 +147,10 @@ def nearest_existing(path):
 
 
 def validate_locations(install, data, dump):
-    install, data, dump = (Path(p).resolve() for p in (install, data, dump))
-    named = (('install', install), ('data', data), ('dump', dump))
+    """dump is None for an update that reuses the installed game files (--reuse-extracted)."""
+    install, data = Path(install).resolve(), Path(data).resolve()
+    dump = Path(dump).resolve() if dump is not None else None
+    named = (('install', install), ('data', data)) + ((('dump', dump),) if dump is not None else ())
     for i, (first_name, first) in enumerate(named):
         for second_name, second in named[i + 1:]:
             if first == second or first in second.parents or second in first.parents:
@@ -231,7 +233,8 @@ class Engine:
         self.args = args
         self.payload = Path(args.payload).resolve()
         self.manifest = verify_payload(self.payload)
-        self.install, self.data, self.dump = validate_locations(args.install_dir, args.data_dir, args.dump)
+        self.install, self.data, self.dump = validate_locations(
+            args.install_dir, args.data_dir, None if getattr(args, 'reuse_extracted', False) else args.dump)
         identity = self.manifest['source_commit'][:12] + '-' + self.manifest['toolkit_commit'][:12]
         self.version_root = self.install / 'versions' / (self.manifest['version'] + '-' + identity)
         self.source = self.version_root / 'source'
@@ -429,6 +432,15 @@ class Engine:
             raise SetupError('Close the installed game before updating or repairing it', 5)
 
     def extract(self):
+        if self.dump is None:
+            # An update from the launcher: the game files this installation already extracted.
+            extracted = self.data / 'extracted'
+            self.event('Checking the installed game files')
+            if not extracted.is_dir():
+                raise SetupError('This installation has no game files to reuse; run setup with your dump', 2)
+            validate_dump(extracted, self.source)
+            self.event('Installed game files reused')
+            return
         self.event('Verifying and preparing your dump')
         if not self.dump.exists():
             raise SetupError('Dump does not exist', 2)
@@ -977,9 +989,12 @@ class Engine:
                 required = 12 * 1024**3
                 if shutil.disk_usage(nearest_existing(self.install)).free < required:
                     raise SetupError('At least 12 GiB free space is required on the install drive', 2)
-                if not self.dump.exists():
+                if self.dump is None:
+                    dump_size = 0       # an update reuses the extracted files already on the data drive
+                elif not self.dump.exists():
                     raise SetupError('Dump does not exist', 2)
-                dump_size = sum(p.stat().st_size for p in self.dump.rglob('*') if p.is_file()) if self.dump.is_dir() else self.dump.stat().st_size
+                else:
+                    dump_size = sum(p.stat().st_size for p in self.dump.rglob('*') if p.is_file()) if self.dump.is_dir() else self.dump.stat().st_size
                 if IS_WINDOWS:
                     same_drive = self.install.anchor.casefold() == self.data.anchor.casefold()
                 else:
@@ -1241,6 +1256,8 @@ def main(argv=None):
     parser.add_argument('--payload', required=True)
     parser.add_argument('--silent', action='store_true')
     parser.add_argument('--dump')
+    parser.add_argument('--reuse-extracted', action='store_true',
+                        help='Update: build from the game files the installation already extracted (no --dump)')
     parser.add_argument('--install-dir', required=True)
     parser.add_argument('--data-dir')
     parser.add_argument('--uninstall', action='store_true')
@@ -1266,8 +1283,8 @@ def main(argv=None):
             return 0
         if args.steam_art:
             return apply_steam_art(args.install_dir)
-        if not args.dump or not args.data_dir:
-            raise SetupError('--dump and --data-dir are required for installation', 2)
+        if (not args.dump and not args.reuse_extracted) or not args.data_dir:
+            raise SetupError('--dump (or --reuse-extracted) and --data-dir are required for installation', 2)
         engine = Engine(args)
         engine.execute()
         return 0

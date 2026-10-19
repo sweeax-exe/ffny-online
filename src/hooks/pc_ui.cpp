@@ -49,6 +49,8 @@ extern "C" {
 #include "pc_ui.h"
 #include "pc_ui_internal.h"
 #include "netplay.h"
+#include "hd_build.h"
+#include "updater.h"
 
 #ifndef DEFJAM_VERSION
 #define DEFJAM_VERSION "dev"
@@ -680,8 +682,53 @@ static void page_display()
                        "F11 or Alt+Enter switches full screen while playing.");
 }
 
+// Make the HD packs here when setup did not: the same local upscale, with a bar, and turn them on.
+static void hd_build_section()
+{
+    int done = 0, total = 0;
+    char text[256], packs[256];
+    static bool applied;
+    HdBuildState state = hd_build_status(&done, &total, text, sizeof(text), packs, sizeof(packs));
+    ImGui::SeparatorText("Make HD textures");
+    if (state == HD_BUILD_DONE && !applied) {
+        // Switch the new packs on, once, from this thread (the settings belong to the screen).
+        recomp_settings_set_text("textures", "packs", packs);
+        recomp_settings_set("textures", "enabled", 1);
+        commit();
+        applied = true;
+    }
+    if (state == HD_BUILD_RUNNING) {
+        float f = total > 0 ? (float)done / (float)total : 0.0f;
+        char overlay[64];
+        if (total > 0) snprintf(overlay, sizeof(overlay), "%d / %d", done, total);
+        else snprintf(overlay, sizeof(overlay), "preparing...");
+        ImGui::PushStyleColor(ImGuiCol_PlotHistogram, k_red);
+        ImGui::ProgressBar(total > 0 ? f : -1.0f * (float)ImGui::GetTime(), ImVec2(-1, 0), overlay);
+        ImGui::PopStyleColor();
+        ImGui::TextWrapped("%s", text);
+        if (ImGui::Button("Stop")) hd_build_cancel();
+        ImGui::SameLine();
+        ImGui::TextDisabled("Play is available again when it has finished.");
+        return;
+    }
+    ImGui::TextWrapped("Upscales every texture of your own game four times, on this PC, with no download and no GPU. "
+                       "It takes about 5 to 20 minutes and about 6 GB (15 GB free space while it works).");
+    double gib = hd_build_free_gib();
+    if (gib >= 0) ImGui::TextDisabled("Free space on the data drive: %.0f GB", gib);
+    if (state == HD_BUILD_DONE || state == HD_BUILD_FAILED)
+        ImGui::TextColored(state == HD_BUILD_DONE ? ImVec4(0.45f, 0.85f, 0.45f, 1) : ImVec4(1.0f, 0.45f, 0.4f, 1), "%s", text);
+    ImGui::PushStyleColor(ImGuiCol_Button, k_red);
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, k_red_hi);
+    if (ImGui::Button(state == HD_BUILD_DONE ? "Make them again" : "Make HD textures", ImVec2(ImGui::GetFontSize() * 12, 0))) {
+        applied = false;
+        hd_build_start();
+    }
+    ImGui::PopStyleColor(2);
+}
+
 static void page_textures()
 {
+    hd_build_section();
     ImGui::SeparatorText("HD texture packs");
     settings_group("textures", { "enabled", "packs", "cache_mb" });
     ImGui::TextWrapped("Install packs under mods in the data folder. Enter folder names separated by semicolons; "
@@ -1018,6 +1065,21 @@ static void page_general(UiMode mode)
         if (ImGui::Button("Cancel")) { confirm_reset = false; ImGui::CloseCurrentPopup(); }
         ImGui::EndPopup();
     }
+    ImGui::SeparatorText("Updates");
+    {
+        char message[256];
+        UpdaterState state = updater_state();
+        updater_message(message, sizeof(message));
+        ImGui::Text("This is build %d.", updater_local_build());
+        if (message[0]) { ImGui::SameLine(); ImGui::TextDisabled("%s", message); }
+        if (state != UPDATER_CHECKING && state != UPDATER_DOWNLOADING && state != UPDATER_STARTED) {
+            if (ImGui::Button("Check for updates")) updater_check();
+            if (state == UPDATER_AVAILABLE && mode == UI_LAUNCHER) {
+                ImGui::SameLine();
+                if (ImGui::Button("Install the update")) updater_install();
+            }
+        }
+    }
     ImGui::SeparatorText("About");
     ImGui::Text("Def Jam: Fight for NY - Recompiled, version %s", DEFJAM_VERSION);
     ImGui::TextDisabled("Dear ImGui %s (MIT)  -  SDL3 (zlib)", IMGUI_VERSION);
@@ -1077,10 +1139,66 @@ static void draw_page(int page, UiMode mode)
     }
 }
 
+// The update offer: a modal over the launcher when a newer build is signed and published.
+static void update_popup(UiResult &result)
+{
+    static bool asked_once, dismissed;
+    UpdaterState state = updater_state();
+    char message[256];
+    updater_message(message, sizeof(message));
+    if (state == UPDATER_AVAILABLE && !asked_once && !dismissed) {
+        ImGui::OpenPopup("Update available");
+        asked_once = true;
+    }
+    ImGui::SetNextWindowSize(ImVec2(ImGui::GetFontSize() * 30, 0));
+    if (!ImGui::BeginPopupModal("Update available", nullptr, ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings))
+        return;
+    int build = 0;
+    char version[64], notes[1024];
+    updater_info(&build, version, sizeof(version), notes, sizeof(notes));
+    ImGui::PushFont(g_font_black, ImGui::GetStyle().FontSizeBase * 1.4f);
+    ImGui::TextColored(k_gold, "Version %s", version);
+    ImGui::PopFont();
+    ImGui::TextDisabled("Build %d - you have build %d", build, updater_local_build());
+    if (notes[0]) {
+        ImGui::Spacing();
+        ImGui::PushTextWrapPos(ImGui::GetFontSize() * 29);
+        ImGui::TextUnformatted(notes);
+        ImGui::PopTextWrapPos();
+    }
+    ImGui::Spacing();
+    if (state == UPDATER_DOWNLOADING) {
+        ImGui::PushStyleColor(ImGuiCol_PlotHistogram, k_red);
+        ImGui::ProgressBar((float)updater_progress(), ImVec2(-1, 0));
+        ImGui::PopStyleColor();
+        ImGui::TextWrapped("%s", message);
+    } else if (state == UPDATER_STARTED) {
+        ImGui::TextWrapped("%s", message);
+        result.leave = true;            // the setup takes over; it waits for this window to close
+    } else if (!updater_can_install()) {
+        ImGui::TextWrapped("This copy was built from a source checkout, not installed by setup: get the new version "
+                           "from the source and build it again.");
+        if (ImGui::Button("OK", ImVec2(ImGui::GetFontSize() * 8, 0))) { dismissed = true; ImGui::CloseCurrentPopup(); }
+    } else {
+        if (state == UPDATER_FAILED) ImGui::TextColored(ImVec4(1.0f, 0.45f, 0.4f, 1), "%s", message);
+        ImGui::TextWrapped("The setup downloads (about 55 MB), checks it, and rebuilds the game from your installed "
+                           "game files with a progress bar. Saves, settings and HD textures stay.");
+        ImGui::PushStyleColor(ImGuiCol_Button, k_red);
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, k_red_hi);
+        if (ImGui::Button("Install now", ImVec2(ImGui::GetFontSize() * 10, 0))) updater_install();
+        ImGui::PopStyleColor(2);
+        ImGui::SameLine();
+        if (ImGui::Button("Later", ImVec2(ImGui::GetFontSize() * 8, 0))) { dismissed = true; ImGui::CloseCurrentPopup(); }
+    }
+    ImGui::EndPopup();
+}
+
 static UiResult draw_launcher(float x, float y, float width, float height)
 {
     UiResult result;
     static int page = PAGE_DISPLAY;
+    static bool checked;
+    if (!checked) { checked = true; updater_check(); }
     const float u = ImGui::GetFontSize() / 17.0f;           // one design pixel at the current scale
     ImGuiStyle &style = ImGui::GetStyle();
 
@@ -1120,7 +1238,7 @@ static UiResult draw_launcher(float x, float y, float width, float height)
     }
     {
         char version[96];
-        snprintf(version, sizeof(version), "PC RECOMP  v%s", DEFJAM_VERSION);
+        snprintf(version, sizeof(version), "PC RECOMP  v%s  build %d", DEFJAM_VERSION, updater_local_build());
         ImGui::PushFont(g_font_bold, style.FontSizeBase * 0.85f);
         ImVec2 ts = ImGui::CalcTextSize(version);
         dl->AddText(ImVec2(bb.x - ts.x - pad, ba.y + 14 * u), col(ImVec4(1, 1, 1, 0.55f)), version);
@@ -1197,7 +1315,10 @@ static UiResult draw_launcher(float x, float y, float width, float height)
     ImGui::PushStyleColor(ImGuiCol_ButtonActive, k_red_lo);
     ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 8 * u);
     ImGui::PushFont(g_font_black, style.FontSizeBase * 1.35f);
+    bool making_hd = hd_build_status(nullptr, nullptr, nullptr, 0, nullptr, 0) == HD_BUILD_RUNNING;
+    if (making_hd) ImGui::BeginDisabled();
     if (ImGui::Button("PLAY", ImVec2(play_w, play_h))) result.play = true;
+    if (making_hd) ImGui::EndDisabled();
     ImGui::PopFont();
     ImGui::PopStyleVar();
     ImGui::PopStyleColor(3);
@@ -1206,6 +1327,7 @@ static UiResult draw_launcher(float x, float y, float width, float height)
         dl->AddRect(a, b, col(k_gold, ImGui::IsItemHovered() ? 0.9f : 0.45f), 8 * u, 0, 2 * u);
     }
     if (ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere(-1);
+    update_popup(result);
     ImGui::End();
     return result;
 }

@@ -324,9 +324,17 @@ static void on_data(const uint8_t *p, int len)
             uint32_t seq = get32(p + 1);
             EnterCriticalSection(&g_cs);
             if ((int32_t)(seq - N.remote_seq) > 0) {
+                static int seen, pressed;
                 N.remote_seq = seq;
                 memcpy(&N.remote_pad, p + 5, sizeof(XBOX_GAMEPAD));
                 N.remote_packet++;
+                if (!seen++)
+                    fprintf(stderr, "[NETPLAY] the other player's controller is arriving (player %d)\n", 2 - N.slot);
+                if (!pressed && (N.remote_pad.wButtons || N.remote_pad.bAnalogButtons[0] > 32)) {
+                    pressed = 1;
+                    fprintf(stderr, "[NETPLAY] first press from the other player's controller (buttons %04X)\n",
+                            N.remote_pad.wButtons);
+                }
             }
             LeaveCriticalSection(&g_cs);
         }

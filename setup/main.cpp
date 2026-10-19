@@ -216,9 +216,15 @@ static HWND control(const wchar_t* type, const wchar_t* text, DWORD style, int x
     return result;
 }
 
+// An update started from the game's launcher (--update): the installation's own locations,
+// no dump (the engine reuses the installed game files), and it starts by itself.
+static bool g_update;
+static fs::path g_update_install, g_update_data;
+static DWORD g_wait_pid;
+
 static fs::path folder() { return fs::path(editText(installEdit)); }
-static fs::path installDir() { return folder() / L"app"; }
-static fs::path dataDir() { return folder() / L"data"; }
+static fs::path installDir() { return g_update ? g_update_install : folder() / L"app"; }
+static fs::path dataDir() { return g_update ? g_update_data : folder() / L"data"; }
 
 // Lower-case, absolute and normalised, for comparing paths the way Windows does.
 static std::wstring comparable(const fs::path& p) {
@@ -252,17 +258,19 @@ static LRESULT CALLBACK windowProc(HWND hwnd, UINT message, WPARAM wp, LPARAM lp
         if (id == 105) browse(installEdit, true);
         if (id == 109 && !running) {
             try {
-                if (editText(dumpEdit).empty()) throw std::runtime_error("Choose your Xbox dump first.");
+                if (!g_update && editText(dumpEdit).empty()) throw std::runtime_error("Choose your Xbox dump first.");
                 if (editText(installEdit).empty()) throw std::runtime_error("Choose a folder to install the game into.");
-                if (!preparationSmoke && inside(editText(dumpEdit), folder()))
+                if (!g_update && !preparationSmoke && inside(editText(dumpEdit), folder()))
                     throw std::runtime_error("Your dump is inside the install folder. Move the ISO to another folder "
                                              "(for example Documents), or choose a different install folder, then try again.");
-                if (!preparationSmoke && inside(folder(), editText(dumpEdit)))
+                if (!g_update && !preparationSmoke && inside(folder(), editText(dumpEdit)))
                     throw std::runtime_error("The install folder is inside your dump folder. Choose an install folder "
                                              "somewhere else, then try again.");
                 prepareSession();
-                std::vector<std::wstring> args{L"--dump", editText(dumpEdit), L"--install-dir", installDir().wstring(),
+                std::vector<std::wstring> args{L"--install-dir", installDir().wstring(),
                     L"--data-dir", dataDir().wstring(), L"--status-file", statusPath.wstring(), L"--cancel-file", cancelPath.wstring()};
+                if (g_update) args.push_back(L"--reuse-extracted");
+                else { args.push_back(L"--dump"); args.push_back(editText(dumpEdit)); }
                 if (SendMessageW(prerequisites, BM_GETCHECK, 0, 0) == BST_CHECKED)
                     args.push_back(L"--install-prerequisites");
                 if (SendMessageW(desktopShortcut, BM_GETCHECK, 0, 0) != BST_CHECKED)
@@ -274,6 +282,11 @@ static LRESULT CALLBACK windowProc(HWND hwnd, UINT message, WPARAM wp, LPARAM lp
                 SetWindowTextW(statusLabel, L"Preparing setup files... You can move the window or cancel.");
                 std::thread([args]() {
                     try {
+                        if (g_wait_pid) {
+                            // The game that asked for this update closes itself; its files must be free.
+                            HANDLE old = OpenProcess(SYNCHRONIZE, FALSE, g_wait_pid);
+                            if (old) { WaitForSingleObject(old, 30000); CloseHandle(old); }
+                        }
                         unpack();
                         if (fs::exists(cancelPath)) {
                             nativeLog("Setup cancelled during preparation.");
@@ -412,7 +425,16 @@ static int wizard(HINSTANCE instance, bool smoke = false, bool preparation = fal
         DestroyWindow(window);
         return valid ? 0 : 4;
     }
-    if (preparation) {
+    if (g_update) {
+        // Everything is known: show what happens and start.
+        SetWindowTextW(window, L"Def Jam Recompiled — Update");
+        SetWindowTextW(dumpEdit, L"(the game files you installed before are reused)");
+        SetWindowTextW(installEdit, g_update_install.parent_path().c_str());
+        for (int id : { 101, 102, 103, 104, 105 }) EnableWindow(GetDlgItem(window, id), FALSE);
+        SetWindowTextW(startButton, L"Update");
+        ShowWindow(window, SW_SHOW);
+        PostMessageW(window, WM_COMMAND, 109, 0);
+    } else if (preparation) {
         // A dump inside the install location: the engine must refuse it ("separate, non-nested").
         auto probe = localAppData() / L"DefJamSetup/probe";
         SetWindowTextW(dumpEdit, (probe / L"app/missing.iso").c_str());
@@ -444,6 +466,18 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
                 result = wizard(instance, true);
             } else if (count > 1 && std::wstring(values[1]) == L"--ui-preparation-smoke") {
                 result = wizard(instance, false, true);
+            } else if (count > 1 && std::wstring(values[1]) == L"--update") {
+                // From the game's launcher: --update --install-dir X --data-dir Y [--wait-pid N].
+                for (int i = 2; i + 1 < count; i += 2) {
+                    std::wstring k = values[i];
+                    if (k == L"--install-dir") g_update_install = values[i + 1];
+                    else if (k == L"--data-dir") g_update_data = values[i + 1];
+                    else if (k == L"--wait-pid") g_wait_pid = (DWORD)wcstoul(values[i + 1], nullptr, 10);
+                }
+                if (g_update_install.empty() || g_update_data.empty())
+                    throw std::runtime_error("An update needs --install-dir and --data-dir.");
+                g_update = true;
+                result = wizard(instance);
             } else if (count > 1 && std::wstring(values[1]) == L"--help") {
                 MessageBoxW(nullptr, L"Silent setup:\nDefJamSetup.exe --silent --dump PATH --install-dir PATH --data-dir PATH [--install-prerequisites] [--hd-textures] [--log PATH]\n\nExit codes: 0 success, 2 invalid input, 3 missing prerequisites, 4 failure, 5 busy, 6 cancelled, 3010 restart required.", L"Setup options", MB_OK);
                 result = 0;

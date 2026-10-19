@@ -159,4 +159,7 @@ def test_each_platforms_payload_carries_only_the_branding_it_uses():
         assert package.payload_wants('setup/engine.py', platform)
     # The macOS payload was 7.6 MB heavier with all of branding/ and hdiutil ran out of room.
     assert sum((ROOT / n).stat().st_size for n in wanted('macos-arm64')) < 200_000
-    assert sum((ROOT / n).stat().st_size for n in wanted('windows-x64')) < 300_000
+    # Windows: the .ico, and the launcher's banner and logo (src/hooks/pc_launcher.cpp), about 1.7 MB.
+    assert 'branding/steam/hero.png' in wanted('windows-x64')
+    assert 'branding/fan/steam/logo.png' in wanted('windows-x64')
+    assert sum((ROOT / n).stat().st_size for n in wanted('windows-x64')) < 2_500_000
