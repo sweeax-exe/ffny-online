@@ -4,6 +4,8 @@ Vlad approved the Brick & paper proposal and requested implementation in a workt
 Branch `codex/launcher-redesign`, based on main `63207ea`; source commit `205582d`.
 [Draft PR #58](https://github.com/vyanhursky/DefJamFFNY-recomp/pull/58) is pushed for owner playtest. No release/tag or merge was requested.
 
+Incoming agents: start with the [short launcher handover](../agent/launcher-handoff.md).
+
 ## Delivered behavior
 
 - Native Home uses procedural faint brickwork, a torn-paper title and gold Play, common display choices,
