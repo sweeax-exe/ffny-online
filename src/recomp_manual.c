@@ -31,6 +31,7 @@
 #include "recomp/gen/recomp_types.h"
 #include "hooks/save_compat.h"
 #include "hooks/test_observations.h"
+#include "hooks/pc_settings.h"
 
 /* Read-only probes use the lifter's universal entry hooks. They do not alter
  * guest registers, stack, memory or the generated body. Off in normal play. */
@@ -68,6 +69,78 @@ void sub_000AA340_enter(void) { defjam_test_draw(g_ecx, MEM32(g_esp)); }
 void sub_000DB870_enter(void) { defjam_test_crowd_update(); }
 /* The per-fighter pad reader: RECOMP_TEST_INPUT replaces what it is about to read. */
 void sub_001BAA00_enter(void) { defjam_test_input(MEM32(g_esp + 4)); }
+
+/* The screen camera's projection shape, written out by hand so it can answer
+ * 16:9 (docs/research/widescreen.md). thiscall, ret 20:
+ *   (mode, float *fov, float *aspect, float *top, float *height)
+ * mode 0 is the console's 4:3 over the whole viewport and is the only one this
+ * title asks for (one camera, at 0x80017200, built at start-up); mode 1 is a
+ * 16:9 letterbox inside it (height less a quarter, moved down an eighth);
+ * mode 2 takes the shape from the camera's own rectangle. With [display]
+ * widescreen on, mode 0 answers 16:9 instead: the engine builds a wider
+ * projection (and culls to it) into the same 640x480 target, and the present
+ * pass shows that target at 16:9 -- anamorphic, as console widescreen was.
+ * Everything else is what the lifted body did. Read once: a restart setting. */
+void sub_0001A4E0(void)
+{
+    uint32_t cam = g_ecx, mode = MEM32(g_esp + 4);
+    uint32_t p_fov = MEM32(g_esp + 8), p_aspect = MEM32(g_esp + 0xC);
+    uint32_t p_top = MEM32(g_esp + 0x10), p_height = MEM32(g_esp + 0x14);
+    int widescreen = pc_widescreen_latch();
+
+    switch (mode) {
+    case 0:
+        MEM32(p_fov) = MEM32(cam + 0xC);
+        MEM32(p_aspect) = widescreen ? 0x3FE38E39u /* 16/9 */ : 0x3FAAAAABu /* 4/3 */;
+        MEM32(p_top) = MEM32(cam + 0x18);
+        MEM32(p_height) = MEM32(cam + 0x20);
+        break;
+    case 1: {
+        float h = MEMF(cam + 0x20), cut = h * MEMF(0x286D30);   /* 0.25: a quarter of the height */
+        MEM32(p_fov) = MEM32(cam + 0xC);
+        MEM32(p_aspect) = 0x3FE38E39u;
+        MEMF(p_top) = MEMF(0x286D2C) * cut + MEMF(cam + 0x18);  /* 0.5: half of it above */
+        MEMF(p_height) = h - cut;
+        break;
+    }
+    case 2:
+        MEM32(p_fov) = MEM32(cam + 0xC);
+        MEMF(p_aspect) = MEMF(cam + 0x1C) / MEMF(cam + 0x20);
+        MEM32(p_top) = MEM32(cam + 0x18);
+        MEM32(p_height) = MEM32(cam + 0x20);
+        break;
+    default:
+        break;
+    }
+    g_esp += 24;    /* ret 20 */
+}
+
+/* The music ring's refill (docs/research/music-ring-mixer.md). The menu music
+ * plays from a 50 ms looping DirectSound ring (2,400 frames, [0x3A965C]); a
+ * time-critical thread wakes 100 times a second, reads the write cursor and
+ * fills to 20 ms past it ([0x3A9660] = 960 frames). On the console the voice
+ * processor reads 32 frames at a time, so those 20 ms are all slack. Here it
+ * reads a 256-frame period at once plus a resampler's look-ahead, and the
+ * refill waits on the engine lock first; the slack left was 16 to 21 ms, a
+ * late refill about once a second let playback lap the writer and play a
+ * stretch of the previous lap -- the crackling in the music. Each refill makes
+ * sure the lead is 35 ms. The fill still stops far short of a lap
+ * (1,680 + 32 < 2,400), so nothing unplayed is overwritten; the cost is 15 ms
+ * more latency on the music alone. RECOMP_MUSIC_LEAD_MS (20..40) overrides it;
+ * 20 is the title's own value. */
+void sub_001241A0_enter(void)
+{
+    static uint32_t lead;
+    if (!lead) {
+        const char *e = getenv("RECOMP_MUSIC_LEAD_MS");
+        int ms = e && *e ? atoi(e) : 35;
+        if (ms < 20) ms = 20;
+        if (ms > 40) ms = 40;
+        lead = (uint32_t)(48 * ms);
+    }
+    if (MEM32(0x3A965C) == 2400 && MEM32(0x3A9660) == 960)
+        MEM32(0x3A9660) = lead;
+}
 void sub_001A6A80_enter(void)
 {
     if (defjam_test_observations_enabled())

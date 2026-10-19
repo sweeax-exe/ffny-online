@@ -32,6 +32,8 @@
 
 static const char *const k_aspect[] = { "4:3", "stretch", NULL };
 static const char *const k_filter[] = { "smooth", "sharp", NULL };
+static const char *const k_aa[] = { "off", "on", NULL };
+static const char *const k_anisotropy[] = { "off", "2x", "4x", "8x", "16x", NULL };
 
 static RecompSetting g_display_settings[] = {
     { "textures", "enabled", RECOMP_SETTING_BOOL, 0, 0, 0, NULL, NULL, RECOMP_SETTING_RESTART,
@@ -51,11 +53,19 @@ static RecompSetting g_display_settings[] = {
     { "display", "window_height", RECOMP_SETTING_INT, 960, 240, 16384, NULL, NULL, 0, NULL },
     { "display", "aspect", RECOMP_SETTING_ENUM, 0, 0, 0, k_aspect, NULL, 0,
       "4:3 keeps the console's picture shape with black bars; stretch fills the window." },
+    { "display", "widescreen", RECOMP_SETTING_BOOL, 0, 0, 0, NULL, "RECOMP_WIDESCREEN", RECOMP_SETTING_RESTART,
+      "Experimental: a 16:9 picture with a wider view of the 3D scene. Menus and the HUD are drawn wider too." },
     { "display", "render_scale", RECOMP_SETTING_INT, 2, 1, 4, NULL, "RECOMP_RENDER_SCALE",
       RECOMP_SETTING_RESTART,
       "Internal resolution as a multiple of the console's 640x480. Higher is sharper and costs GPU time." },
     { "display", "filter", RECOMP_SETTING_ENUM, 0, 0, 0, k_filter, NULL, 0,
       "How the picture is scaled to the window." },
+    { "display", "anti_aliasing", RECOMP_SETTING_ENUM, 1, 0, 0, k_aa, NULL, 0,
+      "Average every rendered pixel into the window and soften remaining jagged edges." },
+    { "display", "sharpen", RECOMP_SETTING_INT, 30, 0, 100, NULL, NULL, 0,
+      "Sharpen the picture, more where it is soft and less on strong edges. 0 turns it off." },
+    { "display", "anisotropy", RECOMP_SETTING_ENUM, 4, 0, 0, k_anisotropy, NULL, 0,
+      "Texture filtering for surfaces seen at a slant, such as floors: higher keeps more detail." },
     { "display", "vsync", RECOMP_SETTING_BOOL, 1, 0, 0, NULL, "RECOMP_PRESENT_VSYNC", 0,
       "Pace frames on the display for even motion. Used when the refresh rate is a multiple of 60 (60, 120, 180, 240 Hz); other displays use the game's own 60 fps timer." },
     { "display", "gamma", RECOMP_SETTING_BOOL, 1, 0, 0, NULL, "RECOMP_GAMMA",
@@ -316,11 +326,35 @@ int pc_display(const char *key, int fallback)
     return recomp_settings_get("display", key, fallback);
 }
 
+#if defined(_WIN32)
+void pgraph_d3d11_set_anisotropy(int max_anisotropy);   /* toolkit nv2a_pgraph_d3d11.h */
+#endif
+
+/* The widescreen camera (src/recomp_manual.c sub_0001A4E0) takes the setting once, when the
+ * title first builds its camera, after the launcher. From then on the picture's shape follows
+ * what the camera took, not a later change in the overlay (that one waits for a restart). */
+static volatile LONG g_widescreen_latched = -1;
+
+int pc_widescreen_latch(void)
+{
+    if (g_widescreen_latched < 0) {
+        InterlockedCompareExchange(&g_widescreen_latched, pc_display("widescreen", 0) != 0, -1);
+        pc_settings_apply_display();
+    }
+    return (int)g_widescreen_latched;
+}
+
 void pc_settings_apply_display(void)
 {
-    d3d8_present_set_aspect(pc_display("aspect", 0) == 0, 4, 3);
+    int widescreen = g_widescreen_latched >= 0 ? (int)g_widescreen_latched : pc_display("widescreen", 0) != 0;
+    d3d8_present_set_aspect(pc_display("aspect", 0) == 0, widescreen ? 16 : 4, widescreen ? 9 : 3);
     d3d8_present_set_linear_filter(pc_display("filter", 0) == 0);
     d3d8_present_set_vsync(pc_display("vsync", 1));
+#if defined(_WIN32)
+    /* Direct3D 11 only for now; the Vulkan renderer keeps its plain scale. */
+    d3d8_present_set_post(pc_display("anti_aliasing", 1), pc_display("sharpen", 30));
+    pgraph_d3d11_set_anisotropy(1 << pc_display("anisotropy", 4));   /* off, 2x .. 16x */
+#endif
 }
 
 static void setting_changed(const RecompSetting *s, void *user)

@@ -40,6 +40,10 @@ and what to do when something misbehaves, see [Controllers, keyboard and mouse](
 | `aspect` | `4:3` | `4:3` keeps the console's picture shape with black bars; `stretch` fills the window. |
 | `render_scale` | `2` | Internal resolution as a multiple of the console's 640x480, 1-4. Higher is sharper and costs GPU time. Restart. Env `RECOMP_RENDER_SCALE`. |
 | `filter` | `smooth` | How the picture is scaled to the window: `smooth` or `sharp`. |
+| `widescreen` | `false` | Experimental. The game's camera is given a 16:9 shape (a wider view of the 3D scene, culled to match) and the picture is shown at 16:9, anamorphic as console widescreen was. Menus, movies and the HUD are drawn wider as well. Restart. Env `RECOMP_WIDESCREEN`. |
+| `anti_aliasing` | `on` | `on` averages every rendered pixel into the window (no skipped texels when the render scale is above the window size) and softens remaining jagged edges; `off` is the plain single-sample scale. Direct3D 11 (Windows). |
+| `sharpen` | `30` | 0-100. Sharpens the scaled picture, less on strong edges and never past the neighbouring pixels' range, so no halos. 0 turns it off. Direct3D 11 (Windows). |
+| `anisotropy` | `16x` | `off`, `2x`, `4x`, `8x`, `16x`: anisotropic filtering of the textures the game filters linearly, so floors and walls at a slant keep their detail. Unfiltered sprites keep their texels. Direct3D 11 (Windows). |
 | `vsync` | `true` | Pace frames on the display. Used when the refresh rate is a multiple of 60 Hz; other displays use the game's own 60 fps timer. Env `RECOMP_PRESENT_VSYNC`. |
 | `gamma` | `true` | Apply the game's own brightness curve, as the console does. Restart. Env `RECOMP_GAMMA`. |
 

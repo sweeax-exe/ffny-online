@@ -26,6 +26,7 @@
 #include <ctype.h>
 #include <stdio.h>
 #include <string.h>
+#include <algorithm>
 #include <atomic>
 #include <string>
 #include <vector>
@@ -120,6 +121,9 @@ static const char *friendly(const char *section, const char *key)
         { "display", "window_height", "Window height" }, { "display", "aspect", "Picture shape" },
         { "display", "render_scale", "Render scale" }, { "display", "filter", "Scaling filter" },
         { "display", "vsync", "Vsync" }, { "display", "gamma", "Game brightness curve" },
+        { "display", "widescreen", "Widescreen 16:9 (experimental)" },
+        { "display", "anti_aliasing", "Anti-aliasing" }, { "display", "sharpen", "Sharpening" },
+        { "display", "anisotropy", "Anisotropic filtering" },
         { "textures", "enabled", "Use HD texture packs" }, { "textures", "packs", "Pack folders" },
         { "textures", "cache_mb", "Texture memory budget (MiB)" }, { "textures", "dump", "Capture source textures" },
         { "textures", "dump_limit", "Maximum new captures" },
@@ -500,15 +504,139 @@ static void settings_group(const char *section, std::initializer_list<const char
     }
 }
 
+// ---- window size ----------------------------------------------------------------------------------------
+
+struct WindowSize { int w, h; };
+
+// The window sizes worth offering: the display's own modes and the console picture's 4:3 multiples
+// (640x480, 1280x960, ...), largest first, each once, and only those whose window -- frame and title
+// bar included -- fits the desktop, since a larger one is cut down to the work area anyway (make_window
+// in d3d11_translator.c). Off Windows they come from SDL in points, the unit the window size is in there.
+static std::vector<WindowSize> window_sizes()
+{
+    std::vector<WindowSize> out;
+    int fit_w = 0, fit_h = 0;      // the largest client area that fits; 0: unknown, nothing filtered
+    auto add = [&out](int w, int h) {
+        if (w < 640 || h < 480) return;
+        for (const WindowSize &s : out)
+            if (s.w == w && s.h == h) return;
+        out.push_back({ w, h });
+    };
+#if defined(_WIN32)
+    for (DWORD i = 0;; i++) {
+        DEVMODEW mode = {};
+        mode.dmSize = sizeof(mode);
+        if (!EnumDisplaySettingsW(nullptr, i, &mode)) break;
+        add((int)mode.dmPelsWidth, (int)mode.dmPelsHeight);
+    }
+    RECT work, frame = { 0, 0, 0, 0 };
+    if (SystemParametersInfoW(SPI_GETWORKAREA, 0, &work, 0) && AdjustWindowRect(&frame, WS_OVERLAPPEDWINDOW, FALSE)) {
+        fit_w = (work.right - work.left) - (frame.right - frame.left);
+        fit_h = (work.bottom - work.top) - (frame.bottom - frame.top);
+    }
+#else
+    SDL_DisplayID display = SDL_GetPrimaryDisplay();
+    int count = 0;
+    if (SDL_DisplayMode **modes = display ? SDL_GetFullscreenDisplayModes(display, &count) : nullptr) {
+        for (int i = 0; i < count; i++) add(modes[i]->w, modes[i]->h);
+        SDL_free(modes);
+    }
+    SDL_Rect usable;
+    if (display && SDL_GetDisplayUsableBounds(display, &usable)) {
+        fit_w = usable.w;
+        fit_h = usable.h - 32;      // SDL does not say how tall the title bar is; leave room for a typical one
+    }
+#endif
+    for (int k = 1; k <= 8; k++) add(640 * k, 480 * k);
+    if (fit_w > 0 && fit_h > 0)
+        out.erase(std::remove_if(out.begin(), out.end(),
+                                 [=](const WindowSize &s) { return s.w > fit_w || s.h > fit_h; }), out.end());
+    std::sort(out.begin(), out.end(),
+              [](const WindowSize &a, const WindowSize &b) { return a.w != b.w ? a.w > b.w : a.h > b.h; });
+    return out;
+}
+
+static std::string size_label(int w, int h)
+{
+    char buf[64];
+    int a = w, b = h;
+    while (b) { int t = a % b; a = b; b = t; }                       // greatest common divisor
+    int rw = a ? w / a : 0, rh = a ? h / a : 0;
+    if (rw == 8 && rh == 5) { rw = 16; rh = 10; }                  // say 16:10, as monitors are sold
+    if (rw > 0 && rh > 0 && rw <= 64 && rh <= 64)
+        snprintf(buf, sizeof(buf), "%d x %d  (%d:%d)", w, h, rw, rh);
+    else
+        snprintf(buf, sizeof(buf), "%d x %d", w, h);
+    return buf;
+}
+
+// display.window_width and window_height as one choice of the sizes above. A size set by hand or by
+// dragging the window that is not in the list is shown as it is, marked as custom, and kept until
+// another is chosen. With no list (no display information) the two numbers are edited as before.
+static void window_size_widget()
+{
+    RecompSetting *ws = find("display", "window_width"), *hs = find("display", "window_height");
+    RecompSetting *fs = find("display", "fullscreen");
+    if (!ws || !hs) return;
+    static std::vector<WindowSize> sizes;
+    static UiTick listed;
+    if (sizes.empty() || ui_ticks() - listed > 5000) {           // a display change is picked up soon enough
+        sizes = window_sizes();
+        listed = ui_ticks();
+    }
+    if (sizes.empty()) {
+        setting_widget(ws);
+        setting_widget(hs);
+        return;
+    }
+    bool locked = ws->source == RECOMP_SETTING_FROM_ENV || hs->source == RECOMP_SETTING_FROM_ENV;
+    bool fullscreen = fs && fs->stored != 0;
+    int w = ws->stored, h = hs->stored;
+    bool listed_now = false;
+    for (const WindowSize &s : sizes)
+        if (s.w == w && s.h == h) listed_now = true;
+    std::string current = size_label(w, h) + (listed_now ? "" : "  custom");
+    ImGui::PushID("window_size");
+    if (locked) ImGui::BeginDisabled();
+    ImGui::SetNextItemWidth(ImGui::GetFontSize() * 14);
+    if (ImGui::BeginCombo("Window size", current.c_str())) {
+        for (const WindowSize &s : sizes) {
+            bool selected = s.w == w && s.h == h;
+            if (ImGui::Selectable(size_label(s.w, s.h).c_str(), selected) && !selected) {
+                recomp_settings_set("display", "window_width", s.w);
+                recomp_settings_set("display", "window_height", s.h);
+                commit();
+            }
+            if (selected) ImGui::SetItemDefaultFocus();
+        }
+        ImGui::EndCombo();
+    }
+    if (locked) ImGui::EndDisabled();
+    if (locked)
+        ImGui::SetItemTooltip("Set by an environment variable for this run.");
+    else
+        ImGui::SetItemTooltip("Sizes your display offers that fit on the desktop as a window. "
+                              "Dragging the window's edge sets any other size.");
+    if (fullscreen) {
+        ImGui::SameLine();
+        ImGui::TextDisabled("(used in a window)");
+        ImGui::SetItemTooltip("Full screen always fills the display; this is the size when you leave it.");
+    }
+    ImGui::PopID();
+}
+
 // ---- the pages ----------------------------------------------------------------------------------------------
 
 static void page_display()
 {
     ImGui::SeparatorText("Window and picture");
-    settings_group("display", { "fullscreen", "window_width", "window_height", "aspect", "filter", "vsync" });
+    settings_group("display", { "fullscreen" });
+    window_size_widget();
+    settings_group("display", { "widescreen", "aspect", "filter", "vsync" });
     ImGui::SeparatorText("Quality");
-    settings_group("display", { "render_scale", "gamma" });
-    ImGui::TextWrapped("Full screen, window size, picture shape, filter and vsync apply as you change them. "
+    settings_group("display", { "render_scale", "anisotropy", "anti_aliasing", "sharpen", "gamma" });
+    ImGui::TextWrapped("Full screen, window size, picture shape, filter, vsync, anti-aliasing, sharpening and "
+                       "anisotropic filtering apply as you change them. "
                        "Render scale and the brightness curve apply the next time the game starts. "
                        "F11 or Alt+Enter switches full screen while playing.");
 }
