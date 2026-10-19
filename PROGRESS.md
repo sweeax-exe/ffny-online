@@ -58,7 +58,7 @@
 | Skip startup movies/legal (D123-D128/D131-D132) | ✅ released v0.10.1 | Default-off General → Debug option, `[debug] skip_intro` / `RECOMP_SKIP_INTRO`; first screen after loading is Press Start. PR25/v0.10.0 developer features preserved. Units470pass, quick5/5, full15/17 (only known audio dry gates: combat3/versus1, zero drops; all gameplay/save gates pass), replay unchanged/soak3/3. Audit: quick3fast/1normal, full19fast/1normal. ToolkitPR1 merged a37e19e/pin5445b73; PR39 merged0985f40 after CI28/28. Release39089619805 passes30/30; nine game-free setup/checksum/provenance assets verified and published/latest2026-10-17 22:25 ET. |
 
 | Developer module, debug menu and Story scenes (D129, D130) | ✅ released v0.10.0 (macOS tested; Windows by CI compile only) | EA's developer run module (`CRunModuleAki`) rebuilt from the host and handed to the game's run-module manager. Its debug menu works: any match (`MODE - GAME`, tested Ludacris vs David Banner), REAL TIME CINEMA, stage viewer; controls mapped (d-pad, LT/RT ±10, A, Start = pause, QUIT → main menu). Any of the 38 Story scenes by name with no save: overlay Debug tab, `scenarios.py scene`, `RECOMP_SCENE`. Guides `docs/developer-menu.md`, `docs/scene-selector.md`; research `docs/research/dev-module-revival.md`. |
-| Picture options and setup progress fix (D136; issues #40, #44, #47) | ⏳ PRs open, not merged | `[display] brightness` (50-200, a curve on the title's gamma ramp), `vignette` and `vignette_strength` in the launcher and overlay Display → Picture, applying at once (`src/patches/picture.c`, `docs/research/picture-options.md`); measured on macOS from repeatable fights and the window read-back; new `regress.py --only picture`. Windows setup: progress-file contention (WinError 5) no longer stops setup, PR #54, CI green with the native Windows sharing tests. Windows/Deck play-test of the picture options to do. Subtitles (#44) not started. |
+| Picture options and setup progress fix (D136-D137; issues #40, #44, #47) | ✅ merged / ⏳ v0.10.3 beta (pre-release) on the Deck | PR #54 (setup progress-file contention, WinError 5) merged `c37bf34`; PR #55 (`[display] brightness`, `vignette`, `vignette_strength`, launcher/overlay Display → Picture, live; `docs/research/picture-options.md`) merged `1b04982`. Released as v0.10.3, a GitHub pre-release, for the owner's Deck test (D137); promote to latest once it passes. Windows not play-tested. Subtitles (#44) not started. |
 
 ## 1. Decisions log
 
@@ -227,6 +227,7 @@
 | D134 | 2026-10-18 | F1's random 100-300 ms Story stalls on macOS: run the push-buffer executor (`nv2a_ack_thread`) at user-interactive QoS and make Darwin's yield `thread_switch(MACH_PORT_NULL, SWITCH_OPTION_NONE, 0)` instead of `sched_yield()` (toolkit `defjam/hitch-capture`; `RECOMP_EXECUTOR_QOS=0` / `RECOMP_YIELD_DEPRESS=1` restore the old behaviour). Both, not either: the yield change alone made a loaded run worse (10.8% late vs 6-7%), the QoS change alone left the audio frame thread starved (23 dry). Chosen over replacing the fence-hold spin with an executor-signalled wait (F5), which is the larger change and stays open for the Deck. | A hitch probe (`RECOMP_HITCH_PROBE=1`) caught the stalls: the game in Direct3D's fence hold depressed to priority 0 by `sched_yield()` (= `swtch_pri(0)`), the executor at the default priority 31 with work queued, both getting 3-8 ms of CPU in 54 ms on a busy 8-core Mac. Loaded A/B (6 busy processes): 6.1-7.4% late, 9 hitches, 46 dry -> 0.00-0.02%, 0, 0. Unloaded: 0.09-0.12% late, 7-9 hitches -> 0.02-0.03%, 0. Linux and Windows unaffected (no yield depression, threads pinned, QoS is Darwin's). |
 | D135 | 2026-10-18 | Release the scene performance work as v0.10.2 (patch): the Vulkan shader cache (D133), the macOS executor scheduling fix (D134) and the wrapped tooltips, from main `0abf212` with toolkit `32aab4d` (merged into fork `defjam/audio-fix` by fork PR #2, `95390b9`). Prepare the version, notes and checks on `chore/release-v0.10.2`; tag only on Vlad's go-ahead. | Owner: "Prepare the next release (version bump, release notes, release-policy check) from main, and stop before tagging for my go-ahead." Fixes and a performance change with no new player feature, as v0.9.3 and v0.10.1 were numbered. Windows not play-tested (renderer unchanged); the Deck tested the shader cache, not the macOS-only fix. |
 | D136 | 2026-10-18 | Picture options: brightness as a power curve composed on the title's own gamma ramp (100 = the ramp unchanged), and the venue vignette removed by clearing the tint draw's vignette argument (`sub_000D9AF0`) or weakened by turning its multiply into `DESTCOLOR`/`INVSRCALPHA` with colour = strength (`sub_00028460`), all three applying live. Two PRs: the setup fix (#40) alone, the two picture options together. | Owner asked for #40, #44's brightness and #47 (both options), tested, with branches and PRs. A curve keeps black and white (an offset would grey the blacks). The pfx `VignetteAlpha` is never read on the draw path, so a strength has to change the draw itself; `_enter` hooks keep the generated bodies. The two options share the settings table, the Display page and one re-lift, so one PR. |
+| D137 | 2026-10-19 | Release PR #54 (setup progress fix, #40) and PR #55 (brightness and vignette, #44/#47) as **v0.10.3, a GitHub pre-release (beta)** for the owner's Steam Deck test; promote the same release to latest after it passes. | Owner: "release PR54 and 55 as a beta 0.10.2 - I will install it on deck via the setup wizard". v0.10.2 is already published and a published release is never replaced, so the owner chose v0.10.3. Setup's picker and `/releases/latest` skip pre-releases, so existing players are not moved; the Deck test downloads the v0.10.3 Linux setup, whose wizard installs its bundled version by default. |
 
 ## 2. Environment inventory (2026-09-17)
 
@@ -326,19 +327,15 @@ defjam-recomp/
 
 ## 7. Hand-off
 
-Open PRs from the 2026-10-18/19 night session (owner asked for #40, #44's brightness and #47, tested; subtitles left
-alone):
+v0.10.3 is the beta for the owner's Steam Deck test (D137), a **GitHub pre-release**: setup's picker and "latest" skip it,
+so players stay on v0.10.2. It holds PR #54 (setup progress fix, #40, merged `c37bf34`) and PR #55 (brightness and vignette,
+#44/#47, merged `1b04982`), prepared on `chore/release-v0.10.3`. On the Deck: download `DefJamSetup-0.10.3-linux-x64.tar.gz`
+from the v0.10.3 release, run it and update the existing installation (the wizard installs its bundled 0.10.3 by default).
+Check Display → Picture in the launcher and the overlay, and the vignette in a fight.
 
-- **#54** `fix/setup-status-race` (issue #40): setup progress-file contention no longer stops setup. CI 28/28; the two
-  Windows-only handle tests ran and passed on windows-latest. Not confirmed on the reporter's PC.
-- **Picture options** `feature/brightness-vignette` (issues #44 brightness, #47; D136): `[display] brightness`, `vignette`,
-  `vignette_strength`, launcher and overlay Display → Picture, live. Needs a re-lift (two new `_enter` hooks). Mac: full
-  regression 18/18 `logs/regress-20261019-001613.txt`, new `regress.py --only picture`, measurements in
-  `docs/research/picture-options.md`.
-
-Next: Vlad reviews and merges both; Windows (week of 2026-10-25) re-lift + `regress.py` and a look at brightness and the
-vignette options in a fight (D3D11 maps both blend factors, untested); a Deck look. Keep #44 open for subtitles. The
-earlier open items stay: Deck follow-ups (render scale 1 on sc00/sc11/sc07b/sc06, Game Mode 60 Hz, `perf record` during
-sc00, F5 fence-hold wait), F2 scene-load freezes, the Windows to-do in §5. No game is running.
+After the Deck test: if it passes, `gh release edit v0.10.3 --prerelease=false --latest` (same tag, nothing replaced);
+if not, fix on main and release v0.10.4. Keep #44 open for subtitles. Earlier items stay: Deck follow-ups (render scale 1 on
+sc00/sc11/sc07b/sc06, Game Mode 60 Hz, `perf record` during sc00, F5 fence-hold wait), F2 scene-load freezes, the Windows
+to-do in §5 (add the picture options to it). No game is running.
 
 Decisions are read by number or keyword: `decision D<n>`, `decisions --grep TEXT`.
