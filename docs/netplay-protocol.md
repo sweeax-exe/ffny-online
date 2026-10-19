@@ -145,6 +145,7 @@ voting (for the countdown).
   every venue of `pool` = 1, 6, 19 and makes the client its host.
 - Errors as before: 1 room not found, 2 room full; new: **8** not allowed (not host, wrong phase),
   **9** not in a room / already in one.
+- Requests are idempotent, since clients retry over UDP: `CREATE`, `QUICK` or `JOIN` of its own room from a client already in a room changes nothing and is answered with a fresh `ROOM` (only `JOIN` of a different room gets `ERROR 9`); `READY`, `VOTE`, `SETTINGS` or `OVER` that change nothing still get a `ROOM` to the sender; `LEAVE` has no reply and is ignored in the lobby; `LIST` always gets `ROOMS`, even with count 0; a repeated `HELLO` mode 2 gets the same `WELCOME`; a `VOTE` after the vote has ended gets the `START` again.
 
 ## Server operation
 
