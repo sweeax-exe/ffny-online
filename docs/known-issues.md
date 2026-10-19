@@ -42,10 +42,10 @@ Fighters selection. They do not cover every mode or a full Story campaign.
 
   Measure with `python3 scripts/scene-perf.py run sc00 sc03 sc06 sc07a sc16 sc09 --no-audio --every 0`,
   two interleaved passes per arm, and compare *load ms*; then `python scripts/regress.py --quick`.
-- **Picture options (v0.10.3 beta).** Brightness and the vignette options were measured on macOS
-  in the default One on One venue; the Steam Deck and Windows had not run them at release, and
-  other venues and Story scenes were not toured one by one. Setting them back to 100 / on / 100
-  restores the original picture.
+- **Picture options (v0.10.3).** Brightness and the vignette options were measured on macOS in the
+  default One on One venue and play-tested by the owner on the Steam Deck; Windows has not run
+  them, and other venues and Story scenes were not toured one by one. Setting them back to
+  100 / on / 100 restores the original picture.
 - **Unresolved jump targets.** The translated code has about a hundred placeholders for
   jump targets the translator could not resolve; reaching one skips real code. v0.2.1
   replaced the seven that are simple function exits, one of which caused the Terrordome
