@@ -110,6 +110,8 @@ Full table with source references: `docs/research/toolkit-bringup-notes.md`. Eve
 | `RECOMP_GAMMA=0` | leaves out the gamma ramp the title sets at start-up (an S curve applied at presentation and to captures). The golden frames were taken without it: set this when checking them. |
 | `RECOMP_CS_TRACE_CRT`, `RECOMP_CS_WATCH` | critical-section tracing |
 | `RECOMP_RECORD=1` (or `[debug] record`, `--record`) | the play-test recorder: `logs/sessions/`, F9 bug bundles, read with `scripts/bug-bundle.py` ([guide](playtest-recorder.md)) |
+| `RECOMP_HITCH_PROBE=1` (or milliseconds; with the recorder on, macOS) | when no frame has come for 60 ms, sample which thread holds the guest CPU, every thread's native stack, priority and CPU time, and the push-buffer executor's state, into the frame's `hitch` event and the session's `stalls.jsonl`; read with `scripts/hitch-probes.py` |
+| `RECOMP_YIELD_DEPRESS=1`, `RECOMP_EXECUTOR_QOS=0` | macOS: yield with `sched_yield()` (which drops the caller to priority 0) instead of `thread_switch()`, and run the push-buffer executor at the default QoS instead of user-interactive -- the two causes of F1's random stalls (D134), to compare |
 | `RECOMP_RECORD_SYNC=1` | the recorder reads its pictures back synchronously (as before the asynchronous read-back), to compare `capture_ms` |
 | `RECOMP_FE_INJECT="anchor#N=>command"` | send the front end's FuncCall handler a command after the Nth call containing the anchor ([scenario launching](research/scenario-launching.md)) |
 | `RECOMP_TEST_CROWD=hold[:N],reseed` | crowd test controls, with `RECOMP_TEST_OBSERVATIONS=1`; measured by `scripts/crowd-lab.py` |
