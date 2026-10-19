@@ -19,11 +19,29 @@ Fighters selection. They do not cover every mode or a full Story campaign.
   with the fix; the clock fix is shared code. Each part can be switched off to compare
   (`docs/03-workflows.md`).
 - **Story scene performance (v0.10.2, [Mac](research/scene-perf-macos-2026-10-18.md),
-  [Deck](research/scene-perf-deck-2026-10-18.md)).** Scene loads hold the picture for up to
-  about 2 s in the longest scenes, on every platform. On the Steam Deck, render scale 3 doubles
+  [Deck](research/scene-perf-deck-2026-10-18.md)).** On the Steam Deck, render scale 3 doubles
   the late frames of the heaviest scenes; at the default scale 2 the opening scene still drops
   about 11% of frames in its heaviest shots. Windows compiles each shader at first use in every
   launch (no Direct3D 11 shader cache yet).
+- **Scene loads freeze the picture for up to 2 s (to do).** When a Story scene loads, one frame
+  lasts 0.8-1.8 s on the Mac in eleven scenes (sc07a 1.8 s; sc00 and sc03 1.4 s; sc06, sc16, sc09,
+  sc13, sc05, sc17, gf1a, sc10) and up to 2.1 s on the Deck; the rest load in 0.2-0.75 s. The picture
+  stops for that long. It is not the disk (sc00 reads 10.6 MB in 8 KB reads, none slower
+  than 6 ms) and not shader compiles (the v0.10.2 cache did not shorten these loads). A profile of
+  sc00's load shows the game thread held in Direct3D's fence hold (`sub_0021EB90_enter` in
+  `src/recomp_manual.c`), waiting for the push-buffer executor, and the executor sleeping in vsync
+  pacing (`flip_pace`, `nv2a_pb_exec.c`) and, at times, stalled on a trapped diagnostic read of
+  `PCRTC_START` that it makes on every loop (`xbox_memory_layout.c`, the NV2A trace that
+  `RECOMP_PB_EXEC` turns on). Details: F2 in the [Mac report](research/scene-perf-macos-2026-10-18.md).
+  **How to fix**, each behind a switch so it can be compared, cheapest first:
+  1. read `PCRTC_START` only when `RECOMP_NV2A_TRACE` asks for the trace;
+  2. do not pace the executor to vsync while no new picture is being presented (inside a load);
+  3. replace the fence hold's `SwitchToThread` loop with a wait on an event the executor signals
+     when it completes a fence (F5 in the Mac report);
+  4. if a long load remains, keep presenting the last picture or a loading indicator meanwhile.
+
+  Measure with `python3 scripts/scene-perf.py run sc00 sc03 sc06 sc07a sc16 sc09 --no-audio --every 0`,
+  two interleaved passes per arm, and compare *load ms*; then `python scripts/regress.py --quick`.
 - **Unresolved jump targets.** The translated code has about a hundred placeholders for
   jump targets the translator could not resolve; reaching one skips real code. v0.2.1
   replaced the seven that are simple function exits, one of which caused the Terrordome
