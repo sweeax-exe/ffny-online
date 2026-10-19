@@ -77,3 +77,4 @@ The plan built from these is in [docs/widescreen](../widescreen/README.md), whic
 ## Performance
 
 - [Story scene performance on macOS, 2026-10-18](scene-perf-macos-2026-10-18.md): all 38 scenes at 16:9 and render scale 3, random game-side stalls, load freezes, shader compiles, and the baseline for the Deck run
+- [Story scene performance on the Steam Deck, 2026-10-18](scene-perf-deck-2026-10-18.md): the same tour on a Deck OLED with and without the shader cache, and a retest by render scale and refresh rate
