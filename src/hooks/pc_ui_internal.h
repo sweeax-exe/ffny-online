@@ -89,6 +89,11 @@ void ui_set_extra_scale(float scale);
 // The settings screen, drawn into the whole of the current frame (launcher) or a panel (overlay).
 UiResult ui_draw(UiMode mode, float x, float y, float width, float height);
 
+// The launcher's banner and logo (textures of the front end that draws it; 0 for none). Call with
+// the UI lock held; 0, 0, 0, 0, 0, 0 before the textures are released.
+void ui_set_launcher_art(ImTextureID banner, float banner_w, float banner_h,
+                         ImTextureID logo, float logo_w, float logo_h);
+
 // The current frame's pad-press detection runs here, so it is only done while a screen is showing.
 bool ui_capturing();
 

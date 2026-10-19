@@ -366,6 +366,12 @@ static float display_scale(UiWindow window)
 
 static float g_scale_applied;
 
+// The palette: near-black panels, Def Jam red for actions and selection, gold for highlights.
+static const ImVec4 k_red(0.78f, 0.06f, 0.16f, 1.0f), k_red_hi(0.90f, 0.16f, 0.25f, 1.0f), k_red_lo(0.58f, 0.04f, 0.12f, 1.0f);
+static const ImVec4 k_gold(0.96f, 0.72f, 0.20f, 1.0f);
+static const ImVec4 k_bg(0.055f, 0.055f, 0.065f, 1.0f), k_panel(0.085f, 0.085f, 0.10f, 1.0f), k_sidebar(0.045f, 0.045f, 0.055f, 1.0f);
+static ImFont *g_font_bold, *g_font_black;     // Segoe UI Bold / Black when present
+
 void ui_apply_scale(UiWindow window)
 {
     float s = display_scale(window);
@@ -375,24 +381,46 @@ void ui_apply_scale(UiWindow window)
     applied = s;
     style = ImGuiStyle();
     ImGui::StyleColorsDark();
-    style.WindowRounding = 6.0f;
-    style.FrameRounding = 4.0f;
-    style.TabRounding = 4.0f;
-    style.GrabRounding = 4.0f;
-    style.FramePadding = ImVec2(8, 5);
-    style.ItemSpacing = ImVec2(10, 7);
-    style.Colors[ImGuiCol_Header] = ImVec4(0.55f, 0.15f, 0.12f, 0.55f);
-    style.Colors[ImGuiCol_HeaderHovered] = ImVec4(0.75f, 0.2f, 0.15f, 0.8f);
-    style.Colors[ImGuiCol_HeaderActive] = ImVec4(0.85f, 0.25f, 0.2f, 1.0f);
-    style.Colors[ImGuiCol_Tab] = ImVec4(0.30f, 0.12f, 0.10f, 0.9f);
-    style.Colors[ImGuiCol_TabHovered] = ImVec4(0.75f, 0.2f, 0.15f, 0.9f);
-    style.Colors[ImGuiCol_TabSelected] = ImVec4(0.62f, 0.17f, 0.13f, 1.0f);
-    style.Colors[ImGuiCol_Button] = ImVec4(0.45f, 0.14f, 0.11f, 0.9f);
-    style.Colors[ImGuiCol_ButtonHovered] = ImVec4(0.75f, 0.2f, 0.15f, 1.0f);
-    style.Colors[ImGuiCol_ButtonActive] = ImVec4(0.9f, 0.27f, 0.2f, 1.0f);
-    style.Colors[ImGuiCol_CheckMark] = ImVec4(1.0f, 0.75f, 0.2f, 1.0f);
-    style.Colors[ImGuiCol_SliderGrab] = ImVec4(0.95f, 0.65f, 0.15f, 1.0f);
-    style.Colors[ImGuiCol_NavCursor] = ImVec4(1.0f, 0.75f, 0.2f, 1.0f);
+    style.WindowRounding = 8.0f;
+    style.ChildRounding = 8.0f;
+    style.FrameRounding = 5.0f;
+    style.PopupRounding = 6.0f;
+    style.TabRounding = 5.0f;
+    style.GrabRounding = 5.0f;
+    style.ScrollbarRounding = 6.0f;
+    style.FramePadding = ImVec2(10, 6);
+    style.ItemSpacing = ImVec2(10, 8);
+    style.WindowBorderSize = 0.0f;
+    style.ChildBorderSize = 0.0f;
+    style.SeparatorTextBorderSize = 2.0f;
+    style.SeparatorTextPadding = ImVec2(0, 4);
+    ImVec4 *c = style.Colors;
+    c[ImGuiCol_Text] = ImVec4(0.93f, 0.93f, 0.94f, 1.0f);
+    c[ImGuiCol_TextDisabled] = ImVec4(0.55f, 0.55f, 0.60f, 1.0f);
+    c[ImGuiCol_WindowBg] = k_bg;
+    c[ImGuiCol_ChildBg] = ImVec4(0, 0, 0, 0);
+    c[ImGuiCol_PopupBg] = ImVec4(0.10f, 0.10f, 0.12f, 0.98f);
+    c[ImGuiCol_Border] = ImVec4(1, 1, 1, 0.07f);
+    c[ImGuiCol_FrameBg] = ImVec4(0.14f, 0.14f, 0.17f, 1.0f);
+    c[ImGuiCol_FrameBgHovered] = ImVec4(0.19f, 0.19f, 0.23f, 1.0f);
+    c[ImGuiCol_FrameBgActive] = ImVec4(0.23f, 0.23f, 0.28f, 1.0f);
+    c[ImGuiCol_Header] = ImVec4(k_red.x, k_red.y, k_red.z, 0.45f);
+    c[ImGuiCol_HeaderHovered] = ImVec4(k_red.x, k_red.y, k_red.z, 0.70f);
+    c[ImGuiCol_HeaderActive] = k_red;
+    c[ImGuiCol_Tab] = ImVec4(0.14f, 0.14f, 0.17f, 1.0f);
+    c[ImGuiCol_TabHovered] = k_red_hi;
+    c[ImGuiCol_TabSelected] = k_red;
+    c[ImGuiCol_TabSelectedOverline] = k_gold;
+    c[ImGuiCol_Button] = ImVec4(0.17f, 0.17f, 0.21f, 1.0f);
+    c[ImGuiCol_ButtonHovered] = ImVec4(0.25f, 0.25f, 0.30f, 1.0f);
+    c[ImGuiCol_ButtonActive] = k_red;
+    c[ImGuiCol_CheckMark] = k_gold;
+    c[ImGuiCol_SliderGrab] = k_red_hi;
+    c[ImGuiCol_SliderGrabActive] = k_gold;
+    c[ImGuiCol_Separator] = ImVec4(1, 1, 1, 0.08f);
+    c[ImGuiCol_ScrollbarBg] = ImVec4(0, 0, 0, 0);
+    c[ImGuiCol_ScrollbarGrab] = ImVec4(1, 1, 1, 0.12f);
+    c[ImGuiCol_NavCursor] = k_gold;
     style.ScaleAllSizes(s);
     style.FontScaleMain = s;
 }
@@ -409,11 +437,19 @@ void ui_context_begin(UiWindow window)
     g_scale_applied = 0.0f;                 // a new context has not been styled yet
     // The system's UI font reads better than the built-in one at small sizes.
 #if defined(_WIN32)
-    char font[MAX_PATH];
-    if (GetWindowsDirectoryA(font, sizeof(font))) {
-        strcat(font, "\\Fonts\\segoeui.ttf");
-        if (GetFileAttributesA(font) != INVALID_FILE_ATTRIBUTES)
-            io.Fonts->AddFontFromFileTTF(font, 17.0f);
+    char windows[MAX_PATH];
+    g_font_bold = g_font_black = nullptr;
+    if (GetWindowsDirectoryA(windows, sizeof(windows))) {
+        // The first font added is the default; the heavier cuts are for headings and the Play button.
+        static const char *const files[] = { "segoeui.ttf", "segoeuib.ttf", "seguibl.ttf" };
+        ImFont **slots[] = { nullptr, &g_font_bold, &g_font_black };
+        for (int i = 0; i < 3; i++) {
+            char font[MAX_PATH + 32];
+            snprintf(font, sizeof(font), "%s\\Fonts\\%s", windows, files[i]);
+            if (GetFileAttributesA(font) == INVALID_FILE_ATTRIBUTES) continue;
+            ImFont *f = io.Fonts->AddFontFromFileTTF(font, 17.0f);
+            if (slots[i]) *slots[i] = f;
+        }
     }
 #else
     static const char *const fonts[] = {
@@ -922,10 +958,197 @@ static void page_general(UiMode mode)
     ImGui::TextDisabled("Dear ImGui %s (MIT)  -  SDL3 (zlib)", IMGUI_VERSION);
 }
 
+// ---- the launcher's own layout ------------------------------------------------------------------------
+//
+// A banner (the title screen's skyline and the logo, when the front end could load them), the pages
+// in a sidebar, and a footer with a large Play. The overlay keeps the compact tabbed screen below.
+
+struct LauncherArt { ImTextureID tex; float w, h; };
+static LauncherArt g_banner_art, g_logo_art;
+
+void ui_set_launcher_art(ImTextureID banner, float banner_w, float banner_h,
+                         ImTextureID logo, float logo_w, float logo_h)
+{
+    g_banner_art = { banner, banner_w, banner_h };
+    g_logo_art = { logo, logo_w, logo_h };
+}
+
+static ImU32 col(const ImVec4 &v, float alpha = 1.0f) { return ImGui::GetColorU32(ImVec4(v.x, v.y, v.z, v.w * alpha)); }
+
+// An image drawn to fill the rectangle, cropped to keep its shape.
+static void draw_cover(ImDrawList *dl, const LauncherArt &art, ImVec2 a, ImVec2 b)
+{
+    float rw = b.x - a.x, rh = b.y - a.y;
+    if (!art.tex || art.w <= 0 || art.h <= 0 || rw <= 0 || rh <= 0) return;
+    float img = art.w / art.h, box = rw / rh;
+    ImVec2 uv0(0, 0), uv1(1, 1);
+    if (img > box) { float f = box / img; uv0.x = (1 - f) / 2; uv1.x = 1 - uv0.x; }       // crop the sides
+    else           { float f = img / box; uv0.y = (1 - f) * 0.35f; uv1.y = uv0.y + f; }   // crop mostly below
+    dl->AddImage(art.tex, a, b, uv0, uv1);
+}
+
+enum { PAGE_DISPLAY, PAGE_TEXTURES, PAGE_CONTROLLERS, PAGE_PAD, PAGE_KEYBOARD, PAGE_GENERAL, PAGE_COUNT };
+static const char *const k_page_names[PAGE_COUNT] = {
+    "Display", "Textures", "Controllers", "Pad buttons", "Keyboard & mouse", "General" };
+static const char *const k_page_hints[PAGE_COUNT] = {
+    "Window, picture shape, resolution and image quality",
+    "HD texture packs and making your own",
+    "Who plays with which pad, rumble and dead zones",
+    "Remap every button of a gamepad",
+    "Keys and mouse buttons for the keyboard player",
+    "Start-up, the in-game overlay and files" };
+
+static void draw_page(int page, UiMode mode)
+{
+    switch (page) {
+    case PAGE_DISPLAY: page_display(); break;
+    case PAGE_TEXTURES: page_textures(); break;
+    case PAGE_CONTROLLERS: page_controllers(); break;
+    case PAGE_PAD: page_pad_buttons(); break;
+    case PAGE_KEYBOARD: page_keyboard(); break;
+    default: page_general(mode); break;
+    }
+}
+
+static UiResult draw_launcher(float x, float y, float width, float height)
+{
+    UiResult result;
+    static int page = PAGE_DISPLAY;
+    const float u = ImGui::GetFontSize() / 17.0f;           // one design pixel at the current scale
+    ImGuiStyle &style = ImGui::GetStyle();
+
+    ImGui::SetNextWindowPos(ImVec2(x, y));
+    ImGui::SetNextWindowSize(ImVec2(width, height));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
+    ImGui::Begin("##launcher", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
+                 ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoBringToFrontOnFocus |
+                 ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+    ImGui::PopStyleVar(2);
+    ImDrawList *dl = ImGui::GetWindowDrawList();
+    ImVec2 origin = ImGui::GetWindowPos();
+
+    // Banner.
+    float banner_h = height * 0.27f;
+    if (banner_h < 130 * u) banner_h = 130 * u;
+    if (banner_h > 260 * u) banner_h = 260 * u;
+    ImVec2 ba = origin, bb(origin.x + width, origin.y + banner_h);
+    if (g_banner_art.tex)
+        draw_cover(dl, g_banner_art, ba, bb);
+    else
+        dl->AddRectFilledMultiColor(ba, bb, col(k_red_lo), col(k_bg), col(k_bg), col(k_red_lo, 0.6f));
+    // Fade into the page below and darken the left, where the logo sits.
+    dl->AddRectFilledMultiColor(ImVec2(ba.x, ba.y + banner_h * 0.45f), bb, col(k_bg, 0), col(k_bg, 0), col(k_bg), col(k_bg));
+    dl->AddRectFilledMultiColor(ba, ImVec2(ba.x + width * 0.6f, bb.y), col(k_bg, 0.75f), col(k_bg, 0), col(k_bg, 0), col(k_bg, 0.75f));
+    float pad = 28 * u;
+    if (g_logo_art.tex) {
+        float lh = banner_h * 0.52f, lw = lh * g_logo_art.w / g_logo_art.h;
+        if (lw > width * 0.55f) { lw = width * 0.55f; lh = lw * g_logo_art.h / g_logo_art.w; }
+        ImVec2 la(ba.x + pad, ba.y + (banner_h - lh) * 0.42f);
+        dl->AddImage(g_logo_art.tex, la, ImVec2(la.x + lw, la.y + lh));
+    } else {
+        ImGui::PushFont(g_font_black, style.FontSizeBase * 2.4f);
+        dl->AddText(ImVec2(ba.x + pad, ba.y + banner_h * 0.3f), col(k_gold), "DEF JAM: FIGHT FOR NY");
+        ImGui::PopFont();
+    }
+    {
+        char version[96];
+        snprintf(version, sizeof(version), "PC RECOMP  v%s", DEFJAM_VERSION);
+        ImGui::PushFont(g_font_bold, style.FontSizeBase * 0.85f);
+        ImVec2 ts = ImGui::CalcTextSize(version);
+        dl->AddText(ImVec2(bb.x - ts.x - pad, ba.y + 14 * u), col(ImVec4(1, 1, 1, 0.55f)), version);
+        ImGui::PopFont();
+    }
+    dl->AddRectFilled(ImVec2(ba.x, bb.y - 3 * u), bb, col(k_red));
+
+    // Sidebar, page and footer.
+    float footer_h = 74 * u, side_w = 230 * u;
+    float body_top = banner_h, body_h = height - banner_h - footer_h;
+    dl->AddRectFilled(ImVec2(origin.x, origin.y + body_top), ImVec2(origin.x + side_w, origin.y + body_top + body_h), col(k_sidebar));
+
+    ImGui::SetCursorPos(ImVec2(0, body_top));
+    ImGui::BeginChild("##sidebar", ImVec2(side_w, body_h), ImGuiChildFlags_None, ImGuiWindowFlags_NoScrollbar);
+    ImGui::Dummy(ImVec2(0, 14 * u));
+    for (int i = 0; i < PAGE_COUNT; i++) {
+        ImVec2 a = ImGui::GetCursorScreenPos();
+        float item_h = 40 * u;
+        ImGui::PushID(i);
+        bool chosen = ImGui::InvisibleButton("##page", ImVec2(side_w, item_h));
+        bool hovered = ImGui::IsItemHovered() || ImGui::IsItemFocused();
+        ImGui::PopID();
+        if (chosen) page = i;
+        ImDrawList *sd = ImGui::GetWindowDrawList();
+        ImVec2 b(a.x + side_w, a.y + item_h);
+        if (page == i) {
+            sd->AddRectFilledMultiColor(a, b, col(k_red, 0.38f), col(k_red, 0.0f), col(k_red, 0.0f), col(k_red, 0.38f));
+            sd->AddRectFilled(a, ImVec2(a.x + 4 * u, b.y), col(k_red_hi));
+        } else if (hovered) {
+            sd->AddRectFilled(a, b, col(ImVec4(1, 1, 1, 0.05f)));
+        }
+        ImGui::PushFont(page == i ? g_font_bold : nullptr, style.FontSizeBase * 1.05f);
+        float th = ImGui::GetFontSize();
+        sd->AddText(ImVec2(a.x + 24 * u, a.y + (item_h - th) / 2), page == i ? col(ImVec4(1, 1, 1, 1)) :
+                    col(style.Colors[ImGuiCol_Text], 0.72f), k_page_names[i]);
+        ImGui::PopFont();
+    }
+    ImGui::EndChild();
+
+    ImGui::SetCursorPos(ImVec2(side_w, body_top));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(30 * u, 22 * u));
+    ImGui::BeginChild("##page", ImVec2(width - side_w, body_h), ImGuiChildFlags_AlwaysUseWindowPadding);
+    ImGui::PushFont(g_font_black, style.FontSizeBase * 1.7f);
+    ImGui::TextUnformatted(k_page_names[page]);
+    ImGui::PopFont();
+    ImGui::TextDisabled("%s", k_page_hints[page]);
+    ImGui::Dummy(ImVec2(0, 6 * u));
+    draw_page(page, UI_LAUNCHER);
+    ImGui::EndChild();
+    ImGui::PopStyleVar();
+
+    // Footer.
+    float fy = origin.y + body_top + body_h;
+    dl->AddRectFilled(ImVec2(origin.x, fy), ImVec2(origin.x + width, origin.y + height), col(k_panel));
+    dl->AddLine(ImVec2(origin.x, fy), ImVec2(origin.x + width, fy), col(ImVec4(1, 1, 1, 0.06f)));
+    float play_w = 190 * u, play_h = 46 * u, quit_w = 110 * u;
+    float row = body_top + body_h + (footer_h - play_h) / 2;
+    ImGui::SetCursorPos(ImVec2(pad, body_top + body_h + 12 * u));
+    {
+        std::string restart = restart_needed();
+        if (!restart.empty())
+            ImGui::TextColored(k_gold, "Applies at the next start: %s", restart.c_str());
+        else
+            ImGui::TextDisabled("Changes are saved as you make them.");
+        ImGui::SetCursorPosX(pad);
+        RecompSetting *skip = find("launcher", "skip");
+        if (skip) setting_widget(skip);
+    }
+    ImGui::SetCursorPos(ImVec2(width - pad - play_w - quit_w - 12 * u, row + (play_h - 36 * u) / 2));
+    if (ImGui::Button("Quit", ImVec2(quit_w, 36 * u))) result.leave = true;
+    ImGui::SetCursorPos(ImVec2(width - pad - play_w, row));
+    ImGui::PushStyleColor(ImGuiCol_Button, k_red);
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, k_red_hi);
+    ImGui::PushStyleColor(ImGuiCol_ButtonActive, k_red_lo);
+    ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 8 * u);
+    ImGui::PushFont(g_font_black, style.FontSizeBase * 1.35f);
+    if (ImGui::Button("PLAY", ImVec2(play_w, play_h))) result.play = true;
+    ImGui::PopFont();
+    ImGui::PopStyleVar();
+    ImGui::PopStyleColor(3);
+    {
+        ImVec2 a = ImGui::GetItemRectMin(), b = ImGui::GetItemRectMax();
+        dl->AddRect(a, b, col(k_gold, ImGui::IsItemHovered() ? 0.9f : 0.45f), 8 * u, 0, 2 * u);
+    }
+    if (ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere(-1);
+    ImGui::End();
+    return result;
+}
+
 UiResult ui_draw(UiMode mode, float x, float y, float width, float height)
 {
     UiResult result;
     capture_poll_pad();
+    if (mode == UI_LAUNCHER)
+        return draw_launcher(x, y, width, height);
 
     ImGui::SetNextWindowPos(ImVec2(x, y));
     ImGui::SetNextWindowSize(ImVec2(width, height));
