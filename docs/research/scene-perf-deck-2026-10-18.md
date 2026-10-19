@@ -66,7 +66,7 @@ shader cache for the cold run. Numbers-only copies: `scene-perf-deck-{base,shade
 - Desktop session, not gamescope (gamescope exits after its first game launch, which a per-scene tour can't use).
 - One run each; the cold and warm runs agree closely with each other, but the base-to-cold difference in `dry`
   and the single-digit hitch counts are within what a repeat might move.
-- Not run: `--profile default`, HD packs off/on comparison (the owner's packs were enabled, `cache_mb = 2048`).
+- Not run: `--profile default`, HD packs on (the harness runs with packs off: `textures.enabled` is `false` in every session.json; the earlier version of this line said the owner's packs were enabled, which was wrong).
 
 ## Where to look next
 
@@ -198,3 +198,61 @@ Per-scene comparison, base against warm:
 | gf3b | 222 / 63 | 16.86 / 16.85 | 21.3 / 20.7 | 47 / 44 | 30.4 / 39.1 | 0.41 / 0.20 | 0 / 0 | 0 / 0 |
 | gf3c | 214 / 64 | 16.81 / 16.87 | 21.4 / 20.7 | 21 / 21 | 46.8 / 48.2 | 0.00 / 0.00 | 0 / 0 | 0 / 0 |
 
+
+## Retest results (run on the Deck, 2026-10-18)
+
+The four arms above, the 11 late scenes each, same build (`perf/shader-cache`, cache warm), packs off
+(`textures.enabled=false` in every session.json, which settles the question above). Numbers-only copies:
+`scene-perf-deck-retest-{A-stress-90hz,B-scale2-90hz,C-stress-60hz,D-deck-60hz}-2026-10-18.json`.
+
+**The Deck's panel offers only 90 Hz** (`kscreen-doctor -o`: one mode, 800x1280@90), so arms C and D could not use
+the System Settings refresh rate. They ran each launch through `gamescope -W 1280 -H 800 -r 60 --` (a wrapper in
+place of the game binary in the local build folder, undone afterwards); the summary's *Display* line reads
+`[HOST] display refresh 60 Hz`. This is a **nested gamescope window on the desktop session, not Game Mode**, so it
+adds a compositing step that the 90 Hz arms do not have. C and D are therefore a lower bound for what 60 Hz can do.
+
+| arm | settings | late frames | scenes >1% late | mean fps | hitches | `dry` |
+|---|---|---|---|---|---|---|
+| A | stress (16:9, scale 3), 90 Hz, no vsync | 8.20% | 11 | 54.0 | 2 | 5 |
+| B | scale 2, 90 Hz, no vsync | **3.80%** | 9 | 56.1 | 3 | 4 |
+| C | stress, 60 Hz in gamescope, vsync | 10.87% | 11 | 53.2 | 2 | 0 |
+| D | `deck` profile (16:10, scale 2), 60 Hz in gamescope, vsync | 6.38% | 11 | 56.0 | 5 | 5 |
+
+Late % per scene (p99 ms in brackets for A and B):
+
+| scene | A | B | C | D |
+|---|---|---|---|---|
+| sc00 | 21.7 (30.8) | 10.9 (29.8) | 24.4 | 12.9 |
+| sc06 | 13.0 (30.7) | 3.7 (28.8) | 14.4 | 6.5 |
+| sc11 | 11.0 (29.8) | 5.4 (28.8) | 16.0 | 8.4 |
+| sc16 | 9.8 (30.6) | 3.0 (29.6) | 11.7 | 4.2 |
+| sc03 | 7.2 (29.2) | 3.9 (26.8) | 10.2 | 5.3 |
+| sc07b | 6.8 (30.8) | 5.3 (29.8) | 11.0 | 9.0 |
+| sc01 | 5.5 (29.2) | 0.2 (22.9) | 6.5 | 2.1 |
+| sc19 | 5.3 (29.7) | 2.6 (28.9) | 7.7 | 5.9 |
+| sc07a | 2.8 (25.7) | 2.3 (25.6) | 7.3 | 2.2 |
+| sc04 | 1.5 (25.6) | 0.1 (24.8) | 3.0 | 2.6 |
+| sc09 | 1.9 (26.7) | 1.1 (25.4) | 4.9 | 5.0 |
+
+**Reading, against the table above:**
+
+- **B well below A: yes.** Render scale 2 more than halves late frames (8.2% to 3.8%) and takes sc01 and sc04
+  to about zero, sc06 from 13% to 3.7%, sc16 from 9.8% to 3.0%. So much of the late-frame cost is GPU work at
+  scale 3 (2560x1440 on a 1280x800 panel). Recommendation: **scale 2 on the Deck** (the launcher default is 2;
+  the `stress` profile is a Mac setting).
+- **C below A: no.** C is worse than A (10.9% against 8.2%), not better, so a 60 Hz panel with vsync does not by
+  itself cure the late frames. Caveat: C is nested gamescope, and the extra compositing may account for the
+  difference. Game Mode at 60 Hz proper was not tested; it needs the owner at the Deck.
+- **D near zero: no.** D is 6.4% and worse than B (3.8%), with the same settings apart from the 60 Hz vsync path
+  and 16:10. Again the vsync path is no help here (nested-gamescope caveat applies).
+- **Does anything leave a floor?** Yes. Even at scale 2, nine scenes stay above 1% late and p99 remains
+  25-30 ms: sc00 (11-13%), sc11 (5-8%), sc07b (5-9%), sc06 (4-7%) are the worst. Their GPU cost is not the whole
+  story; the CPU hypothesis (`perf record` during sc00, fence-hold spin first) is still open.
+- **`dry` is noise.** 5, 4, 0, 5 across the arms (and 2 to 8 in the tour), in different scenes each time, with no
+  link to any setting; C had none. Nothing to act on.
+- **Hitches and worst frames:** 2-5 hitches per arm over 11 scenes, worst frame 60 ms (sc11), no repeat of the
+  172 ms first-use compile. The cache holds.
+
+**Not done:** Game Mode at 60 Hz; `perf record`; a 90 Hz arm with vsync forced. The first is the one that
+answers whether the Deck's own 60 Hz (LCD) models, or Game Mode's frame limiter, behave better than this
+desktop-session run.
