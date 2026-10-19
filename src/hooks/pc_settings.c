@@ -26,6 +26,9 @@
 
 #include "recomp_settings.h"
 #include "d3d8_present.h"
+#if !defined(_WIN32)
+#include "d3d8_vk.h"
+#endif
 #include "pc_settings.h"
 #include "pc_input.h"
 #include "pc_ui.h"
@@ -565,6 +568,14 @@ int pc_settings_init(void)
     d3d8_present_set_overlay(pc_ui_overlay, NULL);
 #else
     pc_ui_register_overlay();
+    /* Compiled shaders and the driver's pipeline cache are kept in
+     * <data>/cache/vulkan, so a shader met in an earlier run is not compiled
+     * again at its first draw. */
+    if (have_root) {
+        char cache[PATH_MAX];
+        snprintf(cache, sizeof(cache), "%s/cache/vulkan", root);
+        d3d8_vk_set_cache_dir(cache);
+    }
 #endif
     d3d8_present_set_render_scale((unsigned)pc_display("render_scale", 2));
     pc_settings_apply_display();
