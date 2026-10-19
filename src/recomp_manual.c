@@ -32,6 +32,7 @@
 #include "hooks/save_compat.h"
 #include "hooks/test_observations.h"
 #include "hooks/pc_settings.h"
+#include "hooks/netplay.h"
 
 /* Read-only probes use the lifter's universal entry hooks. They do not alter
  * guest registers, stack, memory or the generated body. Off in normal play. */
@@ -54,12 +55,14 @@ void sub_001A6870_enter(void)
 /* Match telemetry (src/hooks/test_telemetry.c): the fight's simulation step,
  * match set-up, the result recorder and the random number generator's seeding.
  * Read-only, except that RECOMP_TEST_RNG_SEED replaces the seed argument. */
-void sub_00087700_enter(void) { defjam_test_step(); }
-void sub_001A4D90_enter(void) { defjam_test_match_start(); }
-void sub_001BC690_enter(void) { defjam_test_rng(g_esp); }
-void sub_001AD220_enter(void) { defjam_test_ai_seed(g_esp); }
+/* Online play (src/hooks/netplay.c) uses the same points: it counts the steps, and in a
+ * session it replaces every seed with one both PCs derive from the session. */
+void sub_00087700_enter(void) { defjam_test_step(); netplay_on_step(); }
+void sub_001A4D90_enter(void) { defjam_test_match_start(); netplay_on_match_start(); }
+void sub_001BC690_enter(void) { defjam_test_rng(g_esp); netplay_on_seed(g_esp, 2, 0x1BC690u); }
+void sub_001AD220_enter(void) { defjam_test_ai_seed(g_esp); netplay_on_seed(g_esp, 1, 0x1AD220u); }
 /* The seeding routine every generator of this kind goes through (thiscall). */
-void sub_000AA0D0_enter(void) { defjam_test_generator_seed(g_ecx, g_esp); }
+void sub_000AA0D0_enter(void) { defjam_test_generator_seed(g_ecx, g_esp); netplay_on_seed(g_esp, 2, g_ecx); }
 /* Every draw (RECOMP_TEST_DRAWS): the C runtime's rand, the match generator, and the two
  * wrappers the object-form generators are drawn through; then the background crowd's update. */
 void sub_00200820_enter(void) { defjam_test_draw(1, MEM32(g_esp)); }
@@ -67,8 +70,9 @@ void sub_001BC6E0_enter(void) { defjam_test_draw(2, MEM32(g_esp)); }
 void sub_000AA300_enter(void) { defjam_test_draw(g_ecx, MEM32(g_esp)); }
 void sub_000AA340_enter(void) { defjam_test_draw(g_ecx, MEM32(g_esp)); }
 void sub_000DB870_enter(void) { defjam_test_crowd_update(); }
-/* The per-fighter pad reader: RECOMP_TEST_INPUT replaces what it is about to read. */
-void sub_001BAA00_enter(void) { defjam_test_input(MEM32(g_esp + 4)); }
+/* The per-fighter pad reader: RECOMP_TEST_INPUT replaces what it is about to read, and so
+ * does online play, with the entry both PCs agreed on for this step. */
+void sub_001BAA00_enter(void) { defjam_test_input(MEM32(g_esp + 4)); netplay_on_pad_read(MEM32(g_esp + 4)); }
 
 /* The screen camera's projection shape, written out by hand so it can answer
  * 16:9 (docs/research/widescreen.md). thiscall, ret 20:

@@ -29,6 +29,7 @@
 #include "pc_settings.h"
 #include "pc_input.h"
 #include "pc_ui.h"
+#include "netplay.h"
 
 static const char *const k_aspect[] = { "4:3", "stretch", NULL };
 static const char *const k_filter[] = { "smooth", "sharp", NULL };
@@ -46,6 +47,12 @@ static RecompSetting g_display_settings[] = {
       "Capture source textures for making a pack, in hd-work/runtime under the data folder." },
     { "textures", "dump_limit", RECOMP_SETTING_INT, 2000, 0, 65536, NULL, "RECOMP_TEXTURE_DUMP_LIMIT", RECOMP_SETTING_RESTART,
       "Maximum new source images captured in one run." },
+    { "online", "server", RECOMP_SETTING_STRING, 0, 0, 0, NULL, "RECOMP_NETPLAY_SERVER", 0,
+      "The relay server for online play, as host or host:port (port 27777 if left out).", "" },
+    { "online", "name", RECOMP_SETTING_STRING, 0, 0, 0, NULL, NULL, 0,
+      "Your name, shown to the other player.", "Player" },
+    { "online", "input_delay", RECOMP_SETTING_INT, 3, 1, 8, NULL, NULL, 0,
+      "Steps (1/60 s each) between a press and its effect in an online fight. More hides more ping; the host's value is used." },
     { "display", "fullscreen", RECOMP_SETTING_BOOL, 0, 0, 0, NULL, NULL, 0,
       "Borderless full screen. Alt+Enter or F11 switches while playing." },
     { "display", "window_width", RECOMP_SETTING_INT, 1280, 320, 16384, NULL, NULL, 0,
@@ -560,6 +567,7 @@ int pc_settings_init(void)
     d3d8_present_set_render_scale((unsigned)pc_display("render_scale", 2));
     pc_settings_apply_display();
     recomp_settings_on_change(setting_changed, NULL);
+    netplay_autostart();        /* tests only: RECOMP_NETPLAY (src/hooks/netplay.c) */
     fflush(stderr);
     return 1;
 }

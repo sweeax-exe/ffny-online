@@ -48,6 +48,7 @@ extern "C" {
 #include "pc_settings.h"
 #include "pc_ui.h"
 #include "pc_ui_internal.h"
+#include "netplay.h"
 
 #ifndef DEFJAM_VERSION
 #define DEFJAM_VERSION "dev"
@@ -136,6 +137,8 @@ static const char *friendly(const char *section, const char *key)
         { "gamepad", "trigger_threshold", "Trigger threshold" }, { "gamepad", "button_threshold", "Button threshold" },
         { "gamepad", "left_stick", "Left stick comes from" }, { "gamepad", "right_stick", "Right stick comes from" },
         { "launcher", "skip", "Skip the launcher at start" }, { "ui", "scale", "Text and control size" },
+        { "online", "server", "Server" }, { "online", "name", "Your name" },
+        { "online", "input_delay", "Input delay (steps)" },
         { "ui", "overlay_pad", "Overlay pad buttons" }, { "ui", "overlay_key", "Overlay key" },
     };
     for (const Label &l : labels)
@@ -901,6 +904,68 @@ static void open_folder()
 }
 #endif
 
+// Online play: connect to the relay, host a room or join one, and see how it stands.
+static void page_online(UiMode mode)
+{
+    static char room_input[8];
+    enum NetplayState state = netplay_state();
+    bool busy = state == NETPLAY_CONNECTING || state == NETPLAY_WAITING || state == NETPLAY_SYNCING;
+    char status[256];
+    netplay_status(status, sizeof(status));
+
+    ImGui::SeparatorText("Connection");
+    if (state == NETPLAY_CONNECTED || busy) ImGui::BeginDisabled();
+    settings_group("online", { "server", "name", "input_delay" });
+    if (state == NETPLAY_CONNECTED || busy) ImGui::EndDisabled();
+
+    ImGui::SeparatorText("Play together");
+    if (state == NETPLAY_OFF || state == NETPLAY_FAILED) {
+        std::string server = get_text("online", "server"), name = get_text("online", "name");
+        bool ready = !server.empty();
+        if (!ready) ImGui::BeginDisabled();
+        ImGui::PushStyleColor(ImGuiCol_Button, k_red);
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, k_red_hi);
+        if (ImGui::Button("Host a match", ImVec2(ImGui::GetFontSize() * 10, 0)))
+            netplay_host(server.c_str(), name.c_str(), recomp_settings_get("online", "input_delay", 3));
+        ImGui::PopStyleColor(2);
+        ImGui::SameLine();
+        ImGui::TextDisabled("or");
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(ImGui::GetFontSize() * 6);
+        ImGui::InputTextWithHint("##room", "CODE", room_input, sizeof(room_input), ImGuiInputTextFlags_CharsUppercase);
+        ImGui::SameLine();
+        if (ImGui::Button("Join", ImVec2(ImGui::GetFontSize() * 6, 0)))
+            netplay_join(server.c_str(), name.c_str(), room_input);
+        if (!ready) ImGui::EndDisabled();
+        if (!ready) ImGui::TextColored(k_gold, "Enter the server address above first.");
+    } else {
+        char room[8];
+        netplay_room(room, sizeof(room));
+        if (room[0]) {
+            ImGui::TextUnformatted("Room code");
+            ImGui::SameLine();
+            ImGui::PushFont(g_font_black, ImGui::GetStyle().FontSizeBase * 1.8f);
+            ImGui::TextColored(k_gold, "%s", room);
+            ImGui::PopFont();
+        }
+        if (ImGui::Button(state == NETPLAY_CONNECTED ? "Leave" : "Cancel", ImVec2(ImGui::GetFontSize() * 8, 0)))
+            netplay_stop();
+    }
+    ImGui::Spacing();
+    ImVec4 tone = state == NETPLAY_CONNECTED ? ImVec4(0.45f, 0.85f, 0.45f, 1) :
+                  state == NETPLAY_FAILED ? ImVec4(1.0f, 0.45f, 0.4f, 1) : ImVec4(0.93f, 0.93f, 0.94f, 1);
+    ImGui::PushTextWrapPos(0);
+    ImGui::TextColored(tone, "%s", status);
+    ImGui::PopTextWrapPos();
+
+    ImGui::SeparatorText("How it works");
+    ImGui::TextWrapped("Both players need their own copy of the game and this same version. One of you hosts and reads "
+                       "out the room code; the other enters it and joins. Then both press %s. The host is player 1 and "
+                       "the guest player 2 on both PCs: in the menus each of you sees the other's controller, so choose "
+                       "Versus together. In a fight the two games run in lockstep, so the fight is the same on both screens.",
+                       mode == UI_LAUNCHER ? "PLAY" : "Close");
+}
+
 static void page_general(UiMode mode)
 {
     ImGui::SeparatorText("Start-up");
@@ -987,20 +1052,22 @@ static void draw_cover(ImDrawList *dl, const LauncherArt &art, ImVec2 a, ImVec2 
     dl->AddImage(art.tex, a, b, uv0, uv1);
 }
 
-enum { PAGE_DISPLAY, PAGE_TEXTURES, PAGE_CONTROLLERS, PAGE_PAD, PAGE_KEYBOARD, PAGE_GENERAL, PAGE_COUNT };
+enum { PAGE_DISPLAY, PAGE_TEXTURES, PAGE_CONTROLLERS, PAGE_PAD, PAGE_KEYBOARD, PAGE_ONLINE, PAGE_GENERAL, PAGE_COUNT };
 static const char *const k_page_names[PAGE_COUNT] = {
-    "Display", "Textures", "Controllers", "Pad buttons", "Keyboard & mouse", "General" };
+    "Display", "Textures", "Controllers", "Pad buttons", "Keyboard & mouse", "Online", "General" };
 static const char *const k_page_hints[PAGE_COUNT] = {
     "Window, picture shape, resolution and image quality",
     "HD texture packs and making your own",
     "Who plays with which pad, rumble and dead zones",
     "Remap every button of a gamepad",
     "Keys and mouse buttons for the keyboard player",
+    "Fight a friend over the internet",
     "Start-up, the in-game overlay and files" };
 
 static void draw_page(int page, UiMode mode)
 {
     switch (page) {
+    case PAGE_ONLINE: page_online(mode); break;
     case PAGE_DISPLAY: page_display(); break;
     case PAGE_TEXTURES: page_textures(); break;
     case PAGE_CONTROLLERS: page_controllers(); break;
@@ -1172,6 +1239,7 @@ UiResult ui_draw(UiMode mode, float x, float y, float width, float height)
         if (ImGui::BeginTabItem("Controllers")) { page_controllers(); ImGui::EndTabItem(); }
         if (ImGui::BeginTabItem("Pad buttons")) { page_pad_buttons(); ImGui::EndTabItem(); }
         if (ImGui::BeginTabItem("Keyboard & mouse")) { page_keyboard(); ImGui::EndTabItem(); }
+        if (ImGui::BeginTabItem("Online")) { page_online(mode); ImGui::EndTabItem(); }
         if (ImGui::BeginTabItem("General")) { page_general(mode); ImGui::EndTabItem(); }
         ImGui::EndTabBar();
     }

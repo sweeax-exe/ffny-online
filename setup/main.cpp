@@ -6,6 +6,7 @@
 #include <shobjidl.h>
 #include <shellapi.h>
 #include <bcrypt.h>
+#include <cwctype>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -14,7 +15,10 @@
 #include <thread>
 
 namespace fs = std::filesystem;
-static HWND window, dumpEdit, installEdit, dataEdit, statusLabel, startButton, cancelButton, prerequisites, desktopShortcut, hdUpscale, launchInfo;
+// One folder for everything: the engine's install location is <folder>\app and its data
+// location (dump copy, saves, settings, texture packs) <folder>\data. Asking a player for two
+// folders, which must not overlap, was the setup's most common way to fail.
+static HWND window, dumpEdit, installEdit, statusLabel, startButton, cancelButton, prerequisites, desktopShortcut, hdUpscale, launchInfo;
 static HWND progressBar;    // overall progress, 0-1000, from the engine's <status>.progress file
 static HANDLE worker = nullptr;
 static fs::path payload, scratch, statusPath, cancelPath, logPath;
@@ -212,6 +216,24 @@ static HWND control(const wchar_t* type, const wchar_t* text, DWORD style, int x
     return result;
 }
 
+static fs::path folder() { return fs::path(editText(installEdit)); }
+static fs::path installDir() { return folder() / L"app"; }
+static fs::path dataDir() { return folder() / L"data"; }
+
+// Lower-case, absolute and normalised, for comparing paths the way Windows does.
+static std::wstring comparable(const fs::path& p) {
+    std::error_code ec;
+    auto full = fs::weakly_canonical(fs::absolute(p, ec), ec).wstring();
+    for (auto& c : full) c = (wchar_t)towlower(c);
+    while (full.size() > 3 && (full.back() == L'\\' || full.back() == L'/')) full.pop_back();
+    return full;
+}
+
+static bool inside(const fs::path& child, const fs::path& parent) {
+    auto c = comparable(child), p = comparable(parent);
+    return c == p || (c.size() > p.size() && c.compare(0, p.size(), p) == 0 && (c[p.size()] == L'\\' || p.back() == L'\\'));
+}
+
 static void setBusy(bool value) {
     running = value;
     for (int id = 101; id <= 109; ++id) EnableWindow(GetDlgItem(window, id), !value);
@@ -228,13 +250,19 @@ static LRESULT CALLBACK windowProc(HWND hwnd, UINT message, WPARAM wp, LPARAM lp
         if (id == 102) browse(dumpEdit, false);
         if (id == 103) browse(dumpEdit, true);
         if (id == 105) browse(installEdit, true);
-        if (id == 107) browse(dataEdit, true);
         if (id == 109 && !running) {
             try {
                 if (editText(dumpEdit).empty()) throw std::runtime_error("Choose your Xbox dump first.");
+                if (editText(installEdit).empty()) throw std::runtime_error("Choose a folder to install the game into.");
+                if (!preparationSmoke && inside(editText(dumpEdit), folder()))
+                    throw std::runtime_error("Your dump is inside the install folder. Move the ISO to another folder "
+                                             "(for example Documents), or choose a different install folder, then try again.");
+                if (!preparationSmoke && inside(folder(), editText(dumpEdit)))
+                    throw std::runtime_error("The install folder is inside your dump folder. Choose an install folder "
+                                             "somewhere else, then try again.");
                 prepareSession();
-                std::vector<std::wstring> args{L"--dump", editText(dumpEdit), L"--install-dir", editText(installEdit),
-                    L"--data-dir", editText(dataEdit), L"--status-file", statusPath.wstring(), L"--cancel-file", cancelPath.wstring()};
+                std::vector<std::wstring> args{L"--dump", editText(dumpEdit), L"--install-dir", installDir().wstring(),
+                    L"--data-dir", dataDir().wstring(), L"--status-file", statusPath.wstring(), L"--cancel-file", cancelPath.wstring()};
                 if (SendMessageW(prerequisites, BM_GETCHECK, 0, 0) == BST_CHECKED)
                     args.push_back(L"--install-prerequisites");
                 if (SendMessageW(desktopShortcut, BM_GETCHECK, 0, 0) != BST_CHECKED)
@@ -272,7 +300,7 @@ static LRESULT CALLBACK windowProc(HWND hwnd, UINT message, WPARAM wp, LPARAM lp
             ShellExecuteW(window, L"open", path.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
         }
         if (id == 112) {
-            auto launcher = fs::path(editText(installEdit)) / L"DefJamLauncher.exe";
+            auto launcher = installDir() / L"DefJamLauncher.exe";
             ShellExecuteW(window, L"open", launcher.c_str(), L"--launch", nullptr, SW_SHOWNORMAL);
         }
         return 0;
@@ -305,7 +333,7 @@ static LRESULT CALLBACK windowProc(HWND hwnd, UINT message, WPARAM wp, LPARAM lp
             EnableWindow(GetDlgItem(window, 112), code == 0);
             if (code == 0) {
                 SendMessageW(progressBar, PBM_SETPOS, 1000, 0);
-                auto path = fs::path(editText(installEdit)) / L"DefJamLauncher.exe";
+                auto path = installDir() / L"DefJamLauncher.exe";
                 auto text = L"To play, select Play or double-click this file:\r\n" + path.wstring();
                 SetWindowTextW(launchInfo, text.c_str());
                 SetWindowTextW(statusLabel, L"Setup complete. Your game is ready to launch.");
@@ -342,55 +370,53 @@ static int wizard(HINSTANCE instance, bool smoke = false, bool preparation = fal
     wc.hIcon = LoadIcon(instance, MAKEINTRESOURCE(1));  // setup/app.rc.in
     wc.lpszClassName = L"DefJamSetupWizard"; RegisterClassW(&wc);
     window = CreateWindowW(wc.lpszClassName, L"Def Jam Recompiled \u2014 Setup", WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
-        CW_USEDEFAULT, CW_USEDEFAULT, 740, 599, nullptr, nullptr, instance, nullptr);
+        CW_USEDEFAULT, CW_USEDEFAULT, 740, 560, nullptr, nullptr, instance, nullptr);
     control(L"STATIC", L"Build and play from your own USA Xbox dump", 0, 24, 20, 660, 24, 0);
-    control(L"STATIC", L"First setup can take an hour and needs internet for missing Microsoft Build Tools.", 0, 24, 49, 670, 25, 0);
-    control(L"STATIC", L"Your ISO/XISO or extracted dump", 0, 24, 87, 580, 20, 0);
-    dumpEdit = control(L"EDIT", L"", WS_TABSTOP | ES_AUTOHSCROLL, 24, 110, 465, 26, 101);
-    control(L"BUTTON", L"Image...", WS_TABSTOP, 499, 110, 86, 26, 102);
-    control(L"BUTTON", L"Folder...", WS_TABSTOP, 595, 110, 90, 26, 103);
-    control(L"STATIC", L"Install location", 0, 24, 151, 580, 20, 0);
+    control(L"STATIC", L"1. Choose your game image.  2. Keep or change the install folder.  3. Select Install. "
+                       L"The first install can take up to an hour.", 0, 24, 46, 680, 36, 0);
+    control(L"STATIC", L"Your game: the ISO/XISO file (or an extracted folder)", 0, 24, 90, 580, 20, 0);
+    dumpEdit = control(L"EDIT", L"", WS_TABSTOP | ES_AUTOHSCROLL, 24, 113, 465, 26, 101);
+    control(L"BUTTON", L"Image...", WS_TABSTOP, 499, 113, 86, 26, 102);
+    control(L"BUTTON", L"Folder...", WS_TABSTOP, 595, 113, 90, 26, 103);
+    control(L"STATIC", L"Install folder (the game, your saves and settings all go here; keep your ISO outside it)", 0, 24, 154, 670, 20, 0);
     auto root = localAppData() / L"DefJamRecompiled";
-    installEdit = control(L"EDIT", (root / L"app").c_str(), WS_TABSTOP | ES_AUTOHSCROLL, 24, 174, 560, 26, 104);
-    control(L"BUTTON", L"Browse...", WS_TABSTOP, 595, 174, 90, 26, 105);
-    control(L"STATIC", L"Data location (dump copy, saves and settings; preserved across updates)", 0, 24, 215, 660, 20, 0);
-    dataEdit = control(L"EDIT", (root / L"data").c_str(), WS_TABSTOP | ES_AUTOHSCROLL, 24, 238, 560, 26, 106);
-    control(L"BUTTON", L"Browse...", WS_TABSTOP, 595, 238, 90, 26, 107);
-    prerequisites = control(L"BUTTON", L"Install missing Microsoft Build Tools (requires consent and administrator access)",
-        WS_TABSTOP | BS_AUTOCHECKBOX, 24, 278, 675, 25, 108);
-    hdUpscale = control(L"BUTTON", L"Apply HD texture upscale during install (increases install time)",
-        WS_TABSTOP | BS_AUTOCHECKBOX, 24, 309, 675, 25, 115);
-    control(L"STATIC", L"Adds about 6.2 GB; requires extra working space. No GPU needed.", 0, 44, 336, 650, 18, 0);
-    desktopShortcut = control(L"BUTTON", L"Create a desktop shortcut", WS_TABSTOP | BS_AUTOCHECKBOX, 24, 358, 675, 25, 113);
+    installEdit = control(L"EDIT", root.c_str(), WS_TABSTOP | ES_AUTOHSCROLL, 24, 177, 560, 26, 104);
+    control(L"BUTTON", L"Browse...", WS_TABSTOP, 595, 177, 90, 26, 105);
+    prerequisites = control(L"BUTTON", L"Install missing Microsoft Build Tools if needed (Windows asks for permission)",
+        WS_TABSTOP | BS_AUTOCHECKBOX, 24, 220, 675, 25, 108);
+    SendMessageW(prerequisites, BM_SETCHECK, BST_CHECKED, 0);
+    hdUpscale = control(L"BUTTON", L"Make HD textures during install (about 15 minutes more, about 6 GB more)",
+        WS_TABSTOP | BS_AUTOCHECKBOX, 24, 251, 675, 25, 115);
+    control(L"STATIC", L"Made on your PC from your own game; no GPU or download needed.", 0, 44, 278, 650, 18, 0);
+    desktopShortcut = control(L"BUTTON", L"Create a desktop shortcut", WS_TABSTOP | BS_AUTOCHECKBOX, 24, 300, 675, 25, 113);
     SendMessageW(desktopShortcut, BM_SETCHECK, BST_CHECKED, 0);
-    progressBar = control(PROGRESS_CLASSW, L"", PBS_SMOOTH, 24, 389, 660, 16, 116);
+    progressBar = control(PROGRESS_CLASSW, L"", PBS_SMOOTH, 24, 341, 660, 18, 116);
     SendMessageW(progressBar, PBM_SETRANGE32, 0, 1000);
-    statusLabel = control(L"STATIC", L"Choose your dump and destinations, then select Install / Repair.", 0, 24, 411, 670, 30, 0);
-    launchInfo = control(L"EDIT", L"After setup, use Play or open DefJamLauncher.exe from your install folder.",
-                        WS_TABSTOP | ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL, 24, 445, 660, 46, 114);
-    startButton = control(L"BUTTON", L"Install / Repair", WS_TABSTOP | BS_DEFPUSHBUTTON, 24, 501, 140, 30, 109);
-    control(L"BUTTON", L"Open logs", WS_TABSTOP, 180, 501, 110, 30, 111);
-    control(L"BUTTON", L"Play", WS_TABSTOP, 306, 501, 90, 30, 112);
+    statusLabel = control(L"STATIC", L"Choose your game image, then select Install.", 0, 24, 365, 670, 34, 0);
+    launchInfo = control(L"EDIT", L"After setup, select Play, or use the desktop shortcut.",
+                        WS_TABSTOP | ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL, 24, 405, 660, 46, 114);
+    startButton = control(L"BUTTON", L"Install", WS_TABSTOP | BS_DEFPUSHBUTTON, 24, 462, 140, 30, 109);
+    control(L"BUTTON", L"Open logs", WS_TABSTOP, 180, 462, 110, 30, 111);
+    control(L"BUTTON", L"Play", WS_TABSTOP, 306, 462, 90, 30, 112);
     EnableWindow(GetDlgItem(window, 112), FALSE);
-    cancelButton = control(L"BUTTON", L"Close", WS_TABSTOP, 595, 501, 90, 30, 110);
+    cancelButton = control(L"BUTTON", L"Close", WS_TABSTOP, 595, 462, 90, 30, 110);
     if (smoke) {
         // Hardware-free CI probe: controls exist and the wizard needs no Python,
         // D3D device, compiler or payload extraction merely to open.
         wchar_t title[128]{}; GetWindowTextW(window, title, 128);
         bool valid = wcscmp(title, L"Def Jam Recompiled \u2014 Setup") == 0 &&
-                     window && dumpEdit && installEdit && dataEdit && prerequisites && desktopShortcut && hdUpscale && launchInfo &&
+                     window && dumpEdit && installEdit && prerequisites && desktopShortcut && hdUpscale && launchInfo &&
                      SendMessageW(hdUpscale, BM_GETCHECK, 0, 0) == BST_UNCHECKED &&
                      SendMessageW(desktopShortcut, BM_GETCHECK, 0, 0) == BST_CHECKED &&
-                     startButton && cancelButton && !editText(installEdit).empty() &&
-                     !editText(dataEdit).empty() && IsWindowEnabled(startButton);
+                     startButton && cancelButton && !editText(installEdit).empty() && IsWindowEnabled(startButton);
         DestroyWindow(window);
         return valid ? 0 : 4;
     }
     if (preparation) {
-        SetWindowTextW(dumpEdit, L"missing.iso");
+        // A dump inside the install location: the engine must refuse it ("separate, non-nested").
         auto probe = localAppData() / L"DefJamSetup/probe";
+        SetWindowTextW(dumpEdit, (probe / L"app/missing.iso").c_str());
         SetWindowTextW(installEdit, probe.c_str());
-        SetWindowTextW(dataEdit, (probe / L"data").c_str());
         PostMessageW(window, WM_COMMAND, 109, 0);
     } else ShowWindow(window, SW_SHOW);
     MSG msg;
