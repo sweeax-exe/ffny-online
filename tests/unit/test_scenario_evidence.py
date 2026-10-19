@@ -167,12 +167,21 @@ def test_fixture_output_inside_source_is_rejected(tmp_path):
 
 def test_scenario_settings_are_explicit_and_reject_ambiguous_values(tmp_path):
     settings, env = suite.scenario_settings()
-    assert settings == {'render_scale': 2, 'gamma': True, 'vsync': True}
+    assert settings == {'render_scale': 2, 'gamma': True, 'vsync': True,
+                        'brightness': 100, 'vignette': True, 'vignette_strength': 100}
     assert env['RECOMP_RENDER_SCALE'] == '2' and env['RECOMP_GAMMA'] == '1'
+    assert env['RECOMP_BRIGHTNESS'] == '100' and env['RECOMP_VIGNETTE'] == '1' and env['RECOMP_VIGNETTE_STRENGTH'] == '100'
     p = tmp_path / 'settings.json'
     p.write_text(json.dumps({'render_scale': 3, 'gamma': False}))
     settings, env = suite.scenario_settings(p)
     assert env['RECOMP_RENDER_SCALE'] == '3' and env['RECOMP_GAMMA'] == '0'
+    p.write_text(json.dumps({'brightness': 150, 'vignette': False, 'vignette_strength': 40}))
+    settings, env = suite.scenario_settings(p)
+    assert env['RECOMP_BRIGHTNESS'] == '150' and env['RECOMP_VIGNETTE'] == '0' and env['RECOMP_VIGNETTE_STRENGTH'] == '40'
+    for bad in ({'brightness': 49}, {'brightness': 201}, {'vignette_strength': 101}, {'brightness': '120'}):
+        p.write_text(json.dumps(bad))
+        with pytest.raises(ValueError, match='integer'):
+            suite.scenario_settings(p)
     p.write_text(json.dumps({'gamma': 'false'}))
     with pytest.raises(ValueError, match='booleans'):
         suite.scenario_settings(p)

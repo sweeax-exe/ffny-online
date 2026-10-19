@@ -35,6 +35,7 @@
 #include "hooks/fe_inject.h"
 #include "hooks/scene_launcher.h"
 #include "hooks/dev_module.h"
+#include "patches/picture.h"
 
 /* Crowd test controls (src/hooks/crowd_control.c, RECOMP_TEST_CROWD; off unless set). */
 void defjam_crowd_match_start(void);
@@ -918,20 +919,17 @@ void sub_0021EB90_enter(void)
  * 64 -> 52, 128 -> 125, 192 -> 198, 224 -> 233) that deepens the shadows,
  * which is why everything looked lighter than the console. The runtime's
  * Direct3D layer already applies a ramp at presentation (d3d8_gamma.c); this
- * hands it the title's. g_recomp_gamma is the same ramp for captures, which
- * are read before presentation. RECOMP_GAMMA=0 leaves the picture as drawn.
+ * hands it the title's, after the player's brightness (src/patches/picture.c, which
+ * also keeps g_recomp_gamma, the same ramp for captures, which are read before
+ * presentation). RECOMP_GAMMA=0 leaves the title's ramp out.
  */
-uint8_t g_recomp_gamma[3][256];
-int g_recomp_gamma_on;
-
 void sub_002203C6_enter(void)
 {
-    struct { uint16_t c[3][256]; } ramp;
-    extern void d3d8_gamma_set(const void *ramp);
+    uint8_t ramp[3 * 256];
     static int on = -1;
     static unsigned sets;
     uint32_t src = MEM32(g_esp + 4);
-    int c, i;
+    int i;
 
     if (on < 0) {
         const char *e = getenv("RECOMP_GAMMA");
@@ -939,19 +937,22 @@ void sub_002203C6_enter(void)
     }
     if (!on || src < 0x10000u)
         return;
-    for (c = 0; c < 3; c++)
-        for (i = 0; i < 256; i++) {
-            uint8_t v = MEM8(src + c * 256 + i);
-            g_recomp_gamma[c][i] = v;
-            ramp.c[c][i] = (uint16_t)(v * 257);
-        }
-    g_recomp_gamma_on = 1;
-    d3d8_gamma_set(&ramp);
+    for (i = 0; i < 3 * 256; i++)
+        ramp[i] = MEM8(src + i);
+    picture_title_ramp(ramp);
     if (sets++ < 4)
         fprintf(stderr, "[GAMMA] ramp set: 32 -> %u, 64 -> %u, 128 -> %u, 192 -> %u, 224 -> %u\n",
-                g_recomp_gamma[0][32], g_recomp_gamma[0][64], g_recomp_gamma[0][128],
-                g_recomp_gamma[0][192], g_recomp_gamma[0][224]);
+                ramp[32], ramp[64], ramp[128], ramp[192], ramp[224]);
 }
+
+/*
+ * The venue vignette ([display] vignette, vignette_strength; src/patches/picture.c).
+ * sub_000D9AF0 is the platform tint's per-frame draw, whose last argument turns the
+ * "Vignette Quad" on; sub_00028460 sets a quad's colour, where a weaker vignette
+ * gets its alpha and blend.
+ */
+void sub_000D9AF0_enter(void) { picture_tint_draw_enter(); }
+void sub_00028460_enter(void) { picture_quad_color_enter(); }
 
 /*
  * Widescreen (src/patches/widescreen.c, docs/widescreen/02-design.md).

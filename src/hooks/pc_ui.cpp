@@ -123,6 +123,8 @@ static const char *friendly(const char *section, const char *key)
         { "display", "window_height", "Window height" }, { "display", "aspect", "Picture shape" },
         { "display", "render_scale", "Render scale" }, { "display", "filter", "Scaling filter" },
         { "display", "vsync", "Vsync" }, { "display", "gamma", "Game brightness curve" },
+        { "display", "brightness", "Brightness" }, { "display", "vignette", "Vignette" },
+        { "display", "vignette_strength", "Vignette strength (%)" },
         { "display", "widescreen_hud", "Fight HUD position" },
         { "display", "widescreen_cutscenes", "Story cutscenes" }, { "display", "widescreen_side_fill", "Beside 4:3 pictures" },
         { "display", "widescreen_fov_cap", "Widest field of view (degrees)" },
@@ -545,10 +547,17 @@ static void page_display()
     }
     settings_group("display", { "filter", "vsync" });
     ImGui::SeparatorText("Quality");
-    settings_group("display", { "render_scale", "gamma" });
-    ImGui::TextWrapped("Full screen, window size, filter, vsync and the 4:3 and stretch shapes apply as you change them. "
-                       "The widescreen shapes, render scale and the brightness curve apply the next time the game starts. "
-                       "F11 or Alt+Enter switches full screen while playing.");
+    settings_group("display", { "render_scale" });
+    ImGui::SeparatorText("Picture");
+    settings_group("display", { "brightness", "gamma", "vignette" });
+    if (recomp_settings_get("display", "vignette", 1)) {
+        ImGui::Indent();
+        settings_group("display", { "vignette_strength" });
+        ImGui::Unindent();
+    }
+    ImGui::TextWrapped("Full screen, window size, filter, vsync, the 4:3 and stretch shapes, brightness and the vignette "
+                       "apply as you change them. The widescreen shapes, render scale and the brightness curve apply the "
+                       "next time the game starts. F11 or Alt+Enter switches full screen while playing.");
 }
 
 static void page_textures()

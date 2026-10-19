@@ -34,6 +34,7 @@
 #include "pc_ui.h"
 #include "pc_debug.h"
 #include "patches/widescreen.h"
+#include "patches/picture.h"
 
 /* Picture shape: the console's 4:3, stretched, or widescreen (docs/widescreen); the widescreen
  * choices are indices 2.. and are read once at start-up (src/patches/widescreen.c). */
@@ -84,6 +85,13 @@ static RecompSetting g_display_settings[] = {
     { "display", "gamma", RECOMP_SETTING_BOOL, 1, 0, 0, NULL, "RECOMP_GAMMA",
       RECOMP_SETTING_RESTART,
       "Apply the game's own brightness curve, as the console does." },
+    { "display", "brightness", RECOMP_SETTING_INT, 100, 50, 200, NULL, "RECOMP_BRIGHTNESS", 0,
+      "Brightness of the picture's mid-tones; black and white stay as they are. 100 is the console's picture, "
+      "higher is brighter." },
+    { "display", "vignette", RECOMP_SETTING_BOOL, 1, 0, 0, NULL, "RECOMP_VIGNETTE", 0,
+      "The darkened screen edges that venues and scenes draw. Off removes them." },
+    { "display", "vignette_strength", RECOMP_SETTING_INT, 100, 0, 100, NULL, "RECOMP_VIGNETTE_STRENGTH", 0,
+      "How dark the vignette is, in percent of the game's own (100)." },
 };
 #define DISPLAY_SETTING_COUNT (sizeof(g_display_settings) / sizeof(g_display_settings[0]))
 
@@ -357,6 +365,7 @@ void pc_settings_apply_display(void)
         d3d8_present_set_aspect(pc_display("aspect", 0) != 1, 4, 3);   /* only "stretch" fills the window */
     d3d8_present_set_linear_filter(pc_display("filter", 0) == 0);
     d3d8_present_set_vsync(pc_display("vsync", 1));
+    picture_apply_settings();
 }
 
 static void setting_changed(const RecompSetting *s, void *user)

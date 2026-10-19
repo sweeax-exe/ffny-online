@@ -17,6 +17,7 @@ cite other development notes, logs and captures that are not published.
 - [Vertical-blank interrupt hang](m2-vblank-isr.md)
 - [Push-buffer space reservation and ring wrap](d3d-pushbuffer-wrap.md)
 - [Vertex programs on the GPU](m4e-gpu-vertex-programs.md)
+- [Picture options: brightness and the venue vignette](picture-options.md): the post-effect variances, the tint draw and how the options change it
 
 ## Front end and movies
 

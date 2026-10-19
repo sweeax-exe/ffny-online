@@ -72,6 +72,9 @@ line turns it on for one run. Every key here is read at start-up.
 | `filter` | `smooth` | How the picture is scaled to the window: `smooth` or `sharp`. |
 | `vsync` | `true` | Pace frames on the display. Used when the refresh rate is a multiple of 60 Hz; other displays use the game's own 60 fps timer. Env `RECOMP_PRESENT_VSYNC`. |
 | `gamma` | `true` | Apply the game's own brightness curve, as the console does. Restart. Env `RECOMP_GAMMA`. |
+| `brightness` | `100` | Picture brightness, 50-200, on top of the game's curve: a power curve that moves the mid-tones and keeps black and white where they are. 100 is the console's picture; higher is brighter. Applies at once. Env `RECOMP_BRIGHTNESS`. |
+| `vignette` | `true` | The darkened screen edges that venues and some scenes draw (part of the game's post effects). `false` removes them. Applies at once. Env `RECOMP_VIGNETTE` (`1` on, `0` off). |
+| `vignette_strength` | `100` | How dark the vignette is, 0-100 percent of the game's own; 0 is the same as off. Applies at once. Env `RECOMP_VIGNETTE_STRENGTH`. [How both work](research/picture-options.md). |
 
 ## [textures]
 

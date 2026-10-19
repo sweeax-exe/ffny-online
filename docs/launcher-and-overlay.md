@@ -33,8 +33,8 @@ Close it before the next hit. **macOS:** on a Mac keyboard F1 is often the brigh
 choose another key in the General page (the key, a pad button or both stick clicks open it too).
 The pointer shows while the overlay is open, also in full screen.
 
-Full screen, window size, picture shape, filter and vsync apply as you change them. Render scale and the
-brightness curve are marked *(restart)* and take effect the next time the game starts; a banner at the bottom
+Full screen, window size, picture shape, filter, vsync, brightness and the vignette apply as you change them.
+Render scale and the brightness curve are marked *(restart)* and take effect the next time the game starts; a banner at the bottom
 lists the changes that are waiting for a restart. Keys: `[ui] overlay_key` and `overlay_pad` in
 `settings.ini`, or the General page.
 
@@ -42,7 +42,7 @@ lists the changes that are waiting for a restart. Keys: `[ui] overlay_key` and `
 
 | Page | What it has |
 |---|---|
-| Display | Full screen, window size, picture shape, scaling filter, vsync, render scale, the brightness curve |
+| Display | Full screen, window size, picture shape, scaling filter, vsync, render scale; under **Picture**: brightness, the game's brightness curve, the vignette and its strength |
 | Controllers | Which controller is in which player, with a live view of each pad's sticks and buttons as the game will see them (after dead zones and mapping) and a rumble test; who plays (keyboard player, controller count, backend); dead zones and thresholds; rumble; the pointer |
 | Pad buttons | Which physical button acts as each Xbox control. Choose from a list, or press **Detect** and then the button on your pad |
 | Keyboard & mouse | The keys and mouse inputs for each Xbox control. Press **Add**, then a key, a side or middle mouse button or a wheel notch (Esc cancels); the left and right mouse buttons have buttons of their own while you are adding. **Clear** and **Default** per control |
