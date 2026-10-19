@@ -803,6 +803,18 @@ class Engine:
             if action == 'analyze':
                 argv += ['--data', self.data]
             elif action == 'build':
+                if IS_WINDOWS:
+                    # The shared build folder must be in place before anything writes into
+                    # <source>\build (begin-build below creates it otherwise).
+                    cache = self.install / 'build-cache'
+                    cache.mkdir(exist_ok=True)
+                    link = self.source / 'build'
+                    is_link = getattr(os.path, 'isjunction', lambda p: False)(link) or os.path.islink(link)
+                    if os.path.lexists(link) and not is_link:
+                        # A plain folder from an earlier run of this version: set it aside.
+                        os.replace(link, self.source / ('build.old-' + str(int(time.time()))))
+                    if not os.path.lexists(link):
+                        self.junction(link, cache)
                 # Populate FetchContent from the inventoried, offline dependency source.
                 self.run([self.python, self.source / 'scripts/pipeline-state.py', 'begin-build',
                           '--preset', PRESET], cwd=self.source)
@@ -815,10 +827,6 @@ class Engine:
                     # and Ninja see the same tree from update to update and rebuild only what
                     # changed (keep_unchanged_times). <install>\work points at this version's
                     # source; its build folder points at <install>\build-cache.
-                    cache = self.install / 'build-cache'
-                    cache.mkdir(exist_ok=True)
-                    if not os.path.lexists(self.source / 'build'):
-                        self.junction(self.source / 'build', cache)
                     work = self.install / 'work'
                     self.junction(work, self.source)
                     build_dir = work
