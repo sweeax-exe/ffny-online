@@ -174,8 +174,8 @@ final class Wizard: NSObject, NSApplicationDelegate, NSWindowDelegate {
         window.delegate = self
         window.isReleasedWhenClosed = false
         let support = home.appendingPathComponent("Library/Application Support/DefJamRecompiled")
-        installField.stringValue = support.appendingPathComponent("app").path
-        dataField.stringValue = support.appendingPathComponent("data").path
+        installField.stringValue = ProcessInfo.processInfo.environment["DEFJAM_INSTALL_DIR"] ?? support.appendingPathComponent("app").path
+        dataField.stringValue = ProcessInfo.processInfo.environment["DEFJAM_DATA"] ?? support.appendingPathComponent("data").path
         desktopShortcut.state = .on
         hdUpscale.state = .off
         launchInfo.isSelectable = true

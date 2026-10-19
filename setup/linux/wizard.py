@@ -30,7 +30,8 @@ def state_home():
 
 def default_locations():
     root = Path.home() / 'Games' / 'DefJamRecompiled'
-    return root / 'App', root / 'Data'
+    return (Path(os.environ.get("DEFJAM_INSTALL_DIR") or root / "App"),
+            Path(os.environ.get("DEFJAM_DATA") or root / "Data"))
 
 
 def run_engine(argv):

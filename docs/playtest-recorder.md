@@ -16,7 +16,7 @@ it anywhere.
 
 Any one of:
 
-- the launcher's or the overlay's **Debug** tab: *Record play-tests* (takes effect
+- the launcher's or the overlay's **Diagnostics** tab: *Record play-tests* (takes effect
   at the next start);
 - `settings.ini`: `[debug] record = true`;
 - start the game with `--record`, or with `RECOMP_RECORD=1` set, for one run.
@@ -31,7 +31,7 @@ usual `logs/run-*.log.err`. `logs/sessions/LATEST` names the newest one.
 | Setting (`[debug]`) | Default | Meaning |
 |---|---|---|
 | `record` | `false` | Keep a session for every run (env `RECOMP_RECORD`) |
-| `mark_key` | `F9` | The key that writes a bundle; the overlay's Debug tab also has a *Mark a bug here* button |
+| `mark_key` | `F9` | The key that writes a bundle; the overlay's Diagnostics tab also has a *Mark a bug here* button |
 | `mark_pad` | `back+left_stick_click` | Pad buttons that write a bundle: hold **View/Back** and the **left stick click** together for half a second (on a Steam Deck too) |
 | `record_fps` | `10` | Pictures a second kept for bundles, 0 to 30 (env `RECOMP_RECORD_FPS`) |
 | `record_seconds` | `30` | How far back a bundle reaches, 5 to 120 (env `RECOMP_RECORD_SECONDS`) |

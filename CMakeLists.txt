@@ -107,8 +107,9 @@ if(DEFJAM_BUILD_GAME)
         ${PATCH_SOURCES}
         ${RECOMP_GEN_SOURCES}
     )
+    target_compile_features(${PROJECT_NAME} PRIVATE cxx_std_17)
     if(WIN32)
-        target_link_libraries(${PROJECT_NAME} PRIVATE xboxrecomp recomp_settings defjam_imgui d3d11 dxgi dxguid xinput winmm dbghelp shell32)
+        target_link_libraries(${PROJECT_NAME} PRIVATE xboxrecomp recomp_settings defjam_imgui d3d11 dxgi dxguid xinput winmm dbghelp shell32 comdlg32)
     else()
         # One SDL for the window, the sound and the pads: SDL3, the system's.
         defjam_app_icon(${PROJECT_NAME})

@@ -21,14 +21,14 @@ and what to do when something misbehaves, see [Controllers, keyboard and mouse](
 
 | Key | Default | Meaning |
 |---|---|---|
-| `skip` | `false` | Skip the launcher and start the game at once. The launcher shows on every launch unless this is on. Hold **Shift** while the game starts, or start it with `--launcher`, to see it anyway; turn this off in the overlay's General page or the launcher's own checkbox. Env `RECOMP_NO_LAUNCHER=1` skips it for one run. |
+| `skip` | `false` | Skip the launcher and start the game at once. The launcher shows on every launch unless this is on. Hold **Shift** while the game starts, or start it with `--launcher`, to see it anyway; turn this off in the overlay's Interface page or the launcher's own checkbox. Env `RECOMP_NO_LAUNCHER=1` skips it for one run. |
 
 ## [debug]
 
 | Key | Default | Meaning |
 |---|---|---|
-| `unlock_all` | `false` | Every fighter and venue is available on any profile, through the developers' own unlock routine in the game. For testing: it changes the profile in memory and asks the game to save it, so keep it off for a save you care about. Restart. Shown in the launcher and the overlay's General page as "Debug - Unlock all Fighters and Venues (Requires Restart)". Env `RECOMP_UNLOCK_ALL` (`1` on, `0` off). The test harness turns it on for its runs. [How it works](research/unlock-everything.md). |
-| `skip_intro` | `false` | Skip the startup legal screen and EA/THX/intro movies and start at **Press Start**. A brief resource-loading screen and the title's own animation still run. Story cutscenes and idle attract playback keep working. Choose **General → Debug → Skip startup movies and legal screen** before Play, or restart after changing it in the overlay. Env `RECOMP_SKIP_INTRO` (`1` on, `0` off) overrides the file. [How it works](research/startup-skip-flow.md). |
+| `unlock_all` | `false` | Every fighter and venue is available on any profile, through the developers' own unlock routine in the game. For testing: it changes the profile in memory and asks the game to save it, so keep it off for a save you care about. Restart. Shown in the launcher and the overlay's Diagnostics page as "Unlock all fighters and venues". Env `RECOMP_UNLOCK_ALL` (`1` on, `0` off). The test harness turns it on for its runs. [How it works](research/unlock-everything.md). |
+| `skip_intro` | `false` | Skip the startup legal screen and EA/THX/intro movies and start at **Press Start**. A brief resource-loading screen and the title's own animation still run. Story cutscenes and idle attract playback keep working. Choose **Interface → Skip startup movies and legal screen** before Play, or restart after changing it in the overlay. Env `RECOMP_SKIP_INTRO` (`1` on, `0` off) overrides the file. [How it works](research/startup-skip-flow.md). |
 
 ## [ui]
 
@@ -63,7 +63,7 @@ line turns it on for one run. Every key here is read at start-up.
 |---|---|---|
 | `fullscreen` | `false` | Borderless full screen. **Alt+Enter** or **F11** switches while playing, and the choice is saved. |
 | `window_width`, `window_height` | `1280`, `960` | Window size when not full screen (320-16384 by 240-16384). Resizing the window updates both. |
-| `aspect` | `4:3` | Picture shape. `4:3` keeps the console's picture shape with black bars; `stretch` fills the window; **widescreen (beta):** `widescreen (auto)` (the screen's shape: 16:9 or 16:10; wider screens get 16:9), `16:9`, `16:10`, `21:9 (experimental)`, `32:9 (experimental)` widen the 3D view (more of the arena at the sides, same vertical view) while menus, HUD and movies keep their shape. Widescreen is Windows only for now and starts with the game (4:3 and stretch apply at once). Env `RECOMP_ASPECT` (a choice name). See [widescreen](widescreen/README.md). |
+| `aspect` | `4:3` | Picture shape. `4:3` keeps the console's picture shape with black bars; `stretch` fills the window; **widescreen (beta):** `widescreen (auto)` (the screen's shape: 16:9 or 16:10; wider screens get 16:9), `16:9`, `16:10`, `21:9 (experimental)`, `32:9 (experimental)` widen the 3D view (more of the arena at the sides, same vertical view) while menus, HUD and movies keep their shape. Widescreen starts with the game (4:3 and stretch apply at once). Env `RECOMP_ASPECT` (a choice name). See [widescreen](widescreen/README.md). |
 | `widescreen_hud` | `auto` | Fight HUD in widescreen: `edges` (screen corners), `centered` (corners of a centred 16:9 box) or `auto` (edges up to 16:9, the box when wider). Restart. |
 | `widescreen_cutscenes` | `authored` | Story cutscenes in widescreen: `authored` keeps the game's own 16:9 framing (full screen at 16:9, thin bars at 16:10); `fill` always fills the screen. Restart. |
 | `widescreen_side_fill` | `blur` | What is beside 4:3 pictures (movies, menu backgrounds) in widescreen: `blur` (a soft blurred extension) or `black`. Restart. |

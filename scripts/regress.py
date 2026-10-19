@@ -93,7 +93,10 @@ def median(xs):
 
 def common_faults(run):
     """What no run should show, whatever it was for."""
-    return harness.run_faults(run)
+    faults = harness.run_faults(run)
+    if "[UI] script target missing:" in run.text:
+        faults.append("a scripted launcher control was unavailable")
+    return faults
 
 
 def verdict(faults, detail):
@@ -184,8 +187,8 @@ def check_m4a(a):
 
 # --- the launcher and the overlay (drawn through SDL and Vulkan: macOS and Linux) -----------------
 
-UI_TAB = (158, 43, 33)          # the selected tab: (0.62, 0.17, 0.13)
-UI_PLAY = (46, 140, 56)         # the launcher's Play button: (0.18, 0.55, 0.22)
+UI_TAB = (141, 45, 42)          # selected category, oxblood
+UI_PLAY = (214, 173, 82)         # Play, ochre
 
 
 def bmp_color_count(path, colors, tolerance=3):
@@ -231,8 +234,8 @@ def check_launcher(a):
     if os.path.exists(shot):
         os.remove(shot)
     settings = ui_settings_file("launcher")
-    # The General tab, then "Skip the launcher at start"; a frame; Play. Window points.
-    script = "800:click:540:60;1500:click:21:675;2200:shot:%s;2600:play" % shot
+    # Visit direct routes, save skip in Interface, return Home, capture and click Play.
+    script = "800:ui:Mods;1300:ui:Back;1800:ui:Configure;2300:ui:Back;2800:ui:Advanced;3300:ui:Interface;3800:ui:launcher.skip;4300:ui:Back;4700:move:1050:25;5100:shot:%s;5600:ui:Play" % shot
     run = harness.run_game("ui-launcher", secs=120, preset=a.preset, scripted=False, quiet=True, until_file=shot,
                            env={"RECOMP_SETTINGS": settings, "RECOMP_LAUNCHER_SCRIPT": script,
                                 "RECOMP_INPUT_IGNORE_FOCUS": "1"})
@@ -242,9 +245,7 @@ def check_launcher(a):
             faults.append("no %r in the log" % needle)
     if not os.path.isfile(shot):
         return False, "; ".join(faults + ["no frame captured"])
-    width, height, (tab, play) = bmp_color_count(shot, [UI_TAB, UI_PLAY])
-    if tab < 300:
-        faults.append("the General tab is not selected in the captured frame (%d tab-coloured pixels)" % tab)
+    width, height, (play,) = bmp_color_count(shot, [UI_PLAY])
     if play < 300:
         faults.append("no Play button in the captured frame (%d pixels)" % play)
     with open(settings, encoding="utf-8") as f:
@@ -253,7 +254,7 @@ def check_launcher(a):
         faults.append("the click on \"Skip the launcher at start\" did not reach settings.ini")
     if "[UI] launcher closed: play" not in run.text:
         faults.append("Play did not close the launcher")
-    return verdict(faults, "%dx%d frame, General tab and Play drawn, skip saved, Play went on" % (width, height))
+    return verdict(faults, "%dx%d frame, Home and Play drawn, skip saved, Play went on" % (width, height))
 
 
 def check_overlay(a):
@@ -264,8 +265,8 @@ def check_overlay(a):
     if os.path.exists(shot):
         os.remove(shot)
     settings = ui_settings_file("overlay", "[launcher]\nskip = true\n")
-    # F1 once the game is drawing, then the General tab (overlay pixels: the window is 1280x960 points).
-    script = "20000:key:F1;21500:click:659:126;28000:key:F1"
+    # F1 opens the shared Advanced screen on Display; capture its selected category.
+    script = "20000:key:F1;28000:key:F1"
     run = harness.run_game("ui-overlay", secs=150, preset=a.preset, scripted=False, quiet=True, until_file=shot,
                            env={"RECOMP_SETTINGS": settings, "RECOMP_HOST_SCRIPT": script,
                                 "RECOMP_WINDOW_SHOT": shot, "RECOMP_WINDOW_SHOT_FRAME": "150"})
@@ -280,7 +281,7 @@ def check_overlay(a):
     width, height, (tab,) = bmp_color_count(shot, [UI_TAB])
     if tab < 300:
         faults.append("no selected tab in the captured window (%d tab-coloured pixels): the overlay is not drawn or its tab was not clicked" % tab)
-    return verdict(faults, "opened by F1, General tab clicked, %dx%d window frame has the overlay" % (width, height))
+    return verdict(faults, "opened by F1, Display category drawn, %dx%d window frame has the overlay" % (width, height))
 
 
 def check_unlock_option(a):
@@ -297,9 +298,9 @@ def check_unlock_option(a):
     if os.path.exists(shot):
         os.remove(shot)
     settings = ui_settings_file("unlockopt")
-    # The General tab, the Debug checkbox (window points), a frame, Play. The harness turns the
+    # Open Diagnostics, click unlock, capture and click Play. The harness turns the
     # unlock on for its runs, which would lock the checkbox, so the variable is left unset here.
-    script = "800:click:540:60;1500:click:21:390;2200:shot:%s;2600:play" % shot
+    script = "800:ui:Advanced;1300:ui:Diagnostics;1900:ui:debug.unlock_all;2400:shot:%s;2800:ui:Play" % shot
     run = harness.run_game("ui-unlockopt", secs=120, preset=a.preset, scripted=False, quiet=True, until_file=shot,
                            env={"RECOMP_SETTINGS": settings, "RECOMP_LAUNCHER_SCRIPT": script,
                                 "RECOMP_INPUT_IGNORE_FOCUS": "1", "RECOMP_UNLOCK_ALL": ""})
@@ -343,7 +344,7 @@ def check_picture_options(a):
     if os.path.exists(shot):
         os.remove(shot)
     settings = ui_settings_file("picture")
-    script = "800:click:186:421;1400:click:21:490;2200:shot:%s;2600:play" % shot
+    script = "800:ui:Advanced;1400:ui:display.brightness;2000:ui:display.vignette;2500:shot:%s;2900:ui:Play" % shot
     run = harness.run_game("ui-picture", secs=60, preset=a.preset, scripted=False, quiet=True,
                            env={"RECOMP_SETTINGS": settings, "RECOMP_LAUNCHER_SCRIPT": script,
                                 "RECOMP_INPUT_IGNORE_FOCUS": "1"})

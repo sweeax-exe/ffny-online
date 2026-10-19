@@ -29,6 +29,11 @@
 #include <atomic>
 #include <string>
 #include <vector>
+#include <map>
+#include "pc_ui_model.h"
+#include "pc_ui_theme.h"
+#include "pc_ui_actions.h"
+#include "pc_launcher_home.h"
 
 #include "imgui.h"
 #if defined(_WIN32)
@@ -105,51 +110,131 @@ static std::string get_text(const char *section, const char *key)
     return buf;
 }
 
-static void commit() { pc_settings_save(); }
+static void commit()
+{
+    pcui::clear_action_status();
+    pc_settings_save();
+}
+static UiMode g_mode = UI_LAUNCHER;
+struct UiTestTarget
+{
+    ImVec2 center;
+    bool visible;
+};
+static std::map<std::string, UiTestTarget> g_targets;
+static std::string g_reveal_target;
+static std::string g_help;
+void ui_target(const char *name)
+{
+    if (!getenv("RECOMP_LAUNCHER_SCRIPT"))
+        return;
+    ImVec2 a = ImGui::GetItemRectMin(), b = ImGui::GetItemRectMax();
+    ImVec2 center((a.x + b.x) * .5f, (a.y + b.y) * .5f);
+    auto *draw = ImGui::GetWindowDrawList();
+    ImVec2 lo = draw->GetClipRectMin(), hi = draw->GetClipRectMax();
+    bool visible =
+        ImGui::IsItemVisible() && center.x >= lo.x && center.y >= lo.y && center.x < hi.x && center.y < hi.y;
+    g_targets[name] = {center, visible};
+    if (g_reveal_target == name && !visible)
+        ImGui::SetScrollHereY(.5f);
+}
+bool ui_test_target(const char *name, float *x, float *y)
+{
+    auto it = g_targets.find(name);
+    if (it == g_targets.end() || !it->second.visible)
+    {
+        g_reveal_target = name;
+        return false;
+    }
+    g_reveal_target.clear();
+    *x = it->second.center.x;
+    *y = it->second.center.y;
+    return true;
+}
 
 static const char *k_control_labels[INPUT_CONTROL_COUNT] = {
-    "D-pad up", "D-pad down", "D-pad left", "D-pad right", "Start", "Back",
-    "Left stick click", "Right stick click", "A", "B", "X", "Y", "Black", "White",
-    "Left trigger", "Right trigger",
-    "Left stick up", "Left stick down", "Left stick left", "Left stick right",
-    "Right stick up", "Right stick down", "Right stick left", "Right stick right",
+    "D-pad up",
+    "D-pad down",
+    "D-pad left",
+    "D-pad right",
+    "Start",
+    "Back",
+    "Left stick click",
+    "Right stick click",
+    "A",
+    "B",
+    "X",
+    "Y",
+    "Black",
+    "White",
+    "Left trigger",
+    "Right trigger",
+    "Left stick up",
+    "Left stick down",
+    "Left stick left",
+    "Left stick right",
+    "Right stick up",
+    "Right stick down",
+    "Right stick left",
+    "Right stick right",
 };
 
 static const char *friendly(const char *section, const char *key)
 {
     struct Label { const char *section, *key, *text; };
     static const Label labels[] = {
-        { "display", "fullscreen", "Full screen" }, { "display", "window_width", "Window width" },
-        { "display", "window_height", "Window height" }, { "display", "aspect", "Picture shape" },
-        { "display", "render_scale", "Render scale" }, { "display", "filter", "Scaling filter" },
-        { "display", "vsync", "Vsync" }, { "display", "gamma", "Game brightness curve" },
-        { "display", "brightness", "Brightness" }, { "display", "vignette", "Vignette" },
-        { "display", "vignette_strength", "Vignette strength (%)" },
-        { "display", "widescreen_hud", "Fight HUD position" },
-        { "display", "widescreen_cutscenes", "Story cutscenes" }, { "display", "widescreen_side_fill", "Beside 4:3 pictures" },
-        { "display", "widescreen_fov_cap", "Widest field of view (degrees)" },
-        { "textures", "enabled", "Use HD texture packs" }, { "textures", "packs", "Pack folders" },
-        { "textures", "cache_mb", "Texture memory budget (MiB)" }, { "textures", "dump", "Capture source textures" },
-        { "textures", "dump_limit", "Maximum new captures" },
-        { "input", "keyboard_player", "Keyboard and mouse play as" }, { "input", "players", "Controllers at start" },
-        { "input", "backend", "Pad backend" }, { "input", "rumble", "Rumble strength" },
-        { "input", "rumble_floor", "Weakest rumble pulse" }, { "input", "rumble_min_ms", "Shortest rumble pulse (ms)" },
-        { "input", "rumble_on_connect", "Buzz a pad when it connects" },
-        { "input", "hide_cursor", "Hide the pointer when idle" }, { "input", "confine_cursor", "Keep the pointer in the window (full screen)" },
-        { "gamepad", "left_deadzone", "Left stick dead zone" }, { "gamepad", "right_deadzone", "Right stick dead zone" },
-        { "gamepad", "trigger_threshold", "Trigger threshold" }, { "gamepad", "button_threshold", "Button threshold" },
-        { "gamepad", "left_stick", "Left stick comes from" }, { "gamepad", "right_stick", "Right stick comes from" },
-        { "launcher", "skip", "Skip the launcher at start" }, { "ui", "scale", "Text and control size" },
-        { "debug", "unlock_all", "Debug - Unlock all Fighters and Venues (Requires Restart)" },
-        { "debug", "skip_intro", "Skip startup movies and legal screen" },
-        { "ui", "overlay_pad", "Overlay pad buttons" }, { "ui", "overlay_key", "Overlay key" },
-        { "debug", "record", "Record play-tests" }, { "debug", "mark_key", "Mark key" },
-        { "debug", "mark_pad", "Mark pad buttons" },
-        { "debug", "record_fps", "Pictures kept a second" }, { "debug", "record_seconds", "Seconds kept before a mark" },
-        { "debug", "record_audio", "Keep the sound" }, { "debug", "record_game_state", "Log fighters and match events" },
-        { "debug", "auto_bundle_hitch_ms", "Bundle a hitch longer than (ms)" },
-        { "debug", "hang_seconds", "Bundle a hang after (s)" }, { "debug", "keep_sessions", "Sessions kept whole" },
-        { "debug", "record_guest_ram", "Crash bundles hold game memory" },
+        {"display", "fullscreen", "Full screen"},
+        {"display", "window_width", "Window width"},
+        {"display", "window_height", "Window height"},
+        {"display", "aspect", "Picture shape"},
+        {"display", "render_scale", "Render scale"},
+        {"display", "filter", "Scaling filter"},
+        {"display", "vsync", "Vsync"},
+        {"display", "gamma", "Game brightness curve"},
+        {"display", "brightness", "Brightness"},
+        {"display", "vignette", "Vignette"},
+        {"display", "vignette_strength", "Vignette strength (%)"},
+        {"display", "widescreen_hud", "Fight HUD position"},
+        {"display", "widescreen_cutscenes", "Story cutscenes"},
+        {"display", "widescreen_side_fill", "Beside 4:3 pictures"},
+        {"display", "widescreen_fov_cap", "Widest field of view (degrees)"},
+        {"textures", "enabled", "Use HD texture packs"},
+        {"textures", "packs", "Pack folders"},
+        {"textures", "cache_mb", "Texture memory budget (MiB)"},
+        {"textures", "dump", "Capture source textures"},
+        {"textures", "dump_limit", "Maximum new captures"},
+        {"input", "keyboard_player", "Keyboard and mouse play as"},
+        {"input", "players", "Controllers at start"},
+        {"input", "backend", "Pad backend"},
+        {"input", "rumble", "Rumble strength"},
+        {"input", "rumble_floor", "Weakest rumble pulse"},
+        {"input", "rumble_min_ms", "Shortest rumble pulse (ms)"},
+        {"input", "rumble_on_connect", "Buzz a pad when it connects"},
+        {"input", "hide_cursor", "Hide the pointer when idle"},
+        {"input", "confine_cursor", "Keep the pointer in the window (full screen)"},
+        {"gamepad", "left_deadzone", "Left stick dead zone"},
+        {"gamepad", "right_deadzone", "Right stick dead zone"},
+        {"gamepad", "trigger_threshold", "Trigger threshold"},
+        {"gamepad", "button_threshold", "Button threshold"},
+        {"gamepad", "left_stick", "Left stick comes from"},
+        {"gamepad", "right_stick", "Right stick comes from"},
+        {"launcher", "skip", "Skip the launcher at start"},
+        {"ui", "scale", "Text and control size"},
+        {"debug", "unlock_all", "Unlock all fighters and venues"},
+        {"debug", "skip_intro", "Skip startup movies and legal screen"},
+        {"ui", "overlay_pad", "Overlay pad buttons"},
+        {"ui", "overlay_key", "Overlay key"},
+        {"debug", "record", "Record play-tests"},
+        {"debug", "mark_key", "Mark key"},
+        {"debug", "mark_pad", "Mark pad buttons"},
+        {"debug", "record_fps", "Pictures kept a second"},
+        {"debug", "record_seconds", "Seconds kept before a mark"},
+        {"debug", "record_audio", "Keep the sound"},
+        {"debug", "record_game_state", "Log fighters and match events"},
+        {"debug", "auto_bundle_hitch_ms", "Bundle a hitch longer than (ms)"},
+        {"debug", "hang_seconds", "Bundle a hang after (s)"},
+        {"debug", "keep_sessions", "Sessions kept whole"},
+        {"debug", "record_guest_ram", "Crash bundles hold game memory"},
     };
     for (const Label &l : labels)
         if (!strcmp(l.section, section) && !strcmp(l.key, key)) return l.text;
@@ -172,7 +257,8 @@ static void remember_start_values()
     if (!g_start_values.empty()) return;
     for (size_t i = 0; i < recomp_settings_count(); i++) {
         RecompSetting *s = recomp_settings_at(i);
-        if (s->flags & RECOMP_SETTING_RESTART)
+        if ((s->flags & RECOMP_SETTING_RESTART) ||
+            (!strcmp(s->section, "display") && !strcmp(s->key, "aspect")))
             g_start_values.push_back({ s->section, s->key, value_text(s) });
     }
 }
@@ -183,6 +269,15 @@ static std::string restart_needed()
     for (const StartValue &v : g_start_values) {
         RecompSetting *s = find(v.section.c_str(), v.key.c_str());
         if (s && value_text(s) != v.text) {
+            if (v.key == "aspect")
+            {
+                int before = 0;
+                for (int i = 0; s->choices[i]; i++)
+                    if (v.text == s->choices[i])
+                        before = i;
+                if (!pcui::aspect_next_launch(before, s->stored))
+                    continue;
+            }
             if (!out.empty()) out += ", ";
             out += friendly(v.section.c_str(), v.key.c_str());
         }
@@ -386,34 +481,14 @@ void ui_apply_scale(UiWindow window)
     ImGuiStyle &style = ImGui::GetStyle();
     if (s == applied) return;
     applied = s;
-    style = ImGuiStyle();
-    ImGui::StyleColorsDark();
-    style.WindowRounding = 6.0f;
-    style.FrameRounding = 4.0f;
-    style.TabRounding = 4.0f;
-    style.GrabRounding = 4.0f;
-    style.FramePadding = ImVec2(8, 5);
-    style.ItemSpacing = ImVec2(10, 7);
-    style.Colors[ImGuiCol_Header] = ImVec4(0.55f, 0.15f, 0.12f, 0.55f);
-    style.Colors[ImGuiCol_HeaderHovered] = ImVec4(0.75f, 0.2f, 0.15f, 0.8f);
-    style.Colors[ImGuiCol_HeaderActive] = ImVec4(0.85f, 0.25f, 0.2f, 1.0f);
-    style.Colors[ImGuiCol_Tab] = ImVec4(0.30f, 0.12f, 0.10f, 0.9f);
-    style.Colors[ImGuiCol_TabHovered] = ImVec4(0.75f, 0.2f, 0.15f, 0.9f);
-    style.Colors[ImGuiCol_TabSelected] = ImVec4(0.62f, 0.17f, 0.13f, 1.0f);
-    style.Colors[ImGuiCol_Button] = ImVec4(0.45f, 0.14f, 0.11f, 0.9f);
-    style.Colors[ImGuiCol_ButtonHovered] = ImVec4(0.75f, 0.2f, 0.15f, 1.0f);
-    style.Colors[ImGuiCol_ButtonActive] = ImVec4(0.9f, 0.27f, 0.2f, 1.0f);
-    style.Colors[ImGuiCol_CheckMark] = ImVec4(1.0f, 0.75f, 0.2f, 1.0f);
-    style.Colors[ImGuiCol_SliderGrab] = ImVec4(0.95f, 0.65f, 0.15f, 1.0f);
-    style.Colors[ImGuiCol_NavCursor] = ImVec4(1.0f, 0.75f, 0.2f, 1.0f);
-    style.ScaleAllSizes(s);
-    style.FontScaleMain = s;
+    pcui::theme(s);
 }
 
 void ui_context_begin(UiWindow window)
 {
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
+    pcui::clear_action_status();
     ImGuiIO &io = ImGui::GetIO();
     io.IniFilename = nullptr;
     io.LogFilename = nullptr;
@@ -437,6 +512,7 @@ void ui_context_begin(UiWindow window)
     for (const char *font : fonts)
         if (stat(font, &st) == 0 && io.Fonts->AddFontFromFileTTF(font, 17.0f)) break;
 #endif
+    pcui::load_display_font();
     ui_apply_scale(window);
     remember_start_values();
 }
@@ -456,68 +532,135 @@ static void item_tooltip(const char *text)
 {
     if (!ImGui::BeginItemTooltip())
         return;
-    ImGui::PushTextWrapPos(ImGui::GetFontSize() * 35.0f);
+    ImGui::PushTextWrapPos(std::min(ImGui::GetFontSize() * 35.0f,
+                                  std::max(120.0f, ImGui::GetIO().DisplaySize.x -
+                                                     80 * ImGui::GetStyle().FontScaleMain)));
     ImGui::TextUnformatted(text);
     ImGui::PopTextWrapPos();
     ImGui::EndTooltip();
 }
 
 // A bool, integer, choice or text setting as its natural control. Returns true when it changed.
-static bool setting_widget(RecompSetting *s, const char *label = nullptr)
+static bool setting_widget(RecompSetting *s, const char *label = nullptr, bool stacked = false)
 {
-    if (!label) label = friendly(s->section, s->key);
-    bool locked = s->source == RECOMP_SETTING_FROM_ENV;
-    bool changed = false;
+    if (!s)
+        return false;
+    if (!label)
+        label = friendly(s->section, s->key);
+    // An explicit pack list enables/disables texture replacements independently of the file switch.
+    RecompSetting *packs = find("textures", "packs");
+    bool pack_override = !strcmp(s->section, "textures") && !strcmp(s->key, "enabled") && packs &&
+                         packs->source == RECOMP_SETTING_FROM_ENV;
+    bool quick_field = stacked;
+    stacked = stacked || ImGui::GetContentRegionAvail().x < ImGui::GetFontSize() * 36;
+    bool locked = s->source == RECOMP_SETTING_FROM_ENV || pack_override, changed = false;
+    int value = pack_override ? packs->value_text[0] != 0 : locked ? s->value : s->stored;
     ImGui::PushID(s);
-    if (locked) ImGui::BeginDisabled();
-    switch (s->type) {
-    case RECOMP_SETTING_BOOL: {
-        bool v = s->stored != 0;
-        if (ImGui::Checkbox(label, &v)) { recomp_settings_set(s->section, s->key, v ? 1 : 0); changed = true; }
-        break;
+    const char *control = stacked ? "##value" : label;
+    if (stacked)
+    {
+        ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+        ImGui::TextWrapped("%s", label);
+        ImGui::PopStyleColor();
+        ImGui::SetNextItemWidth(-1);
     }
-    case RECOMP_SETTING_INT: {
-        int v = s->stored;
-        ImGui::SetNextItemWidth(ImGui::GetFontSize() * 14);
-        if (s->max - s->min > 2000) {
-            if (ImGui::InputInt(label, &v, 10, 100)) { recomp_settings_set(s->section, s->key, v); changed = true; }
-        } else {
-            if (ImGui::SliderInt(label, &v, s->min, s->max)) { recomp_settings_set(s->section, s->key, v); changed = true; }
+    if (locked)
+        ImGui::BeginDisabled();
+    switch (s->type)
+    {
+    case RECOMP_SETTING_BOOL:
+        if (stacked)
+        {
+            const char *off = !strcmp(s->key, "fullscreen") ? "Windowed" : "Off";
+            const char *on = !strcmp(s->key, "fullscreen") ? "Borderless fullscreen" : "On";
+            if (ImGui::BeginCombo(control, value ? on : off))
+            {
+                for (int i = 0; i < 2; i++)
+                    if (ImGui::Selectable(i ? on : off, value == i))
+                        changed = recomp_settings_set(s->section, s->key, i) > 0;
+                ImGui::EndCombo();
+            }
+        }
+        else
+        {
+            bool v = value != 0;
+            if (ImGui::Checkbox(control, &v))
+                changed = recomp_settings_set(s->section, s->key, v) > 0;
         }
         break;
+    case RECOMP_SETTING_INT: {
+        if (!stacked)
+            ImGui::SetNextItemWidth(ImGui::GetFontSize() * 14);
+        int v = value;
+        if (stacked && !strcmp(s->key, "render_scale"))
+        {
+            char current[24];
+            snprintf(current, sizeof current, "%dx%s", v, v == 2 ? " (default)" : "");
+            if (ImGui::BeginCombo(control, current))
+            {
+                for (int i = 1; i <= 4; i++)
+                {
+                    char item[24];
+                    snprintf(item, sizeof item, "%dx%s", i, i == 2 ? " (default)" : "");
+                    if (ImGui::Selectable(item, v == i))
+                        changed = recomp_settings_set(s->section, s->key, i) > 0;
+                }
+                ImGui::EndCombo();
+            }
+        }
+        else if (s->max - s->min > 2000)
+        {
+            if (ImGui::InputInt(control, &v, 10, 100))
+                changed = recomp_settings_set(s->section, s->key, v) > 0;
+        }
+        else if (ImGui::SliderInt(control, &v, s->min, s->max))
+            changed = recomp_settings_set(s->section, s->key, v) > 0;
+        break;
     }
-    case RECOMP_SETTING_ENUM: {
-        int v = s->stored;
-        const char *current = s->choices[v];
-        ImGui::SetNextItemWidth(ImGui::GetFontSize() * 14);
-        if (ImGui::BeginCombo(label, current)) {
+    case RECOMP_SETTING_ENUM:
+        if (!stacked)
+            ImGui::SetNextItemWidth(ImGui::GetFontSize() * 14);
+        if (ImGui::BeginCombo(control, s->choices[value]))
+        {
             for (int i = 0; s->choices[i]; i++)
-                if (ImGui::Selectable(s->choices[i], i == v)) { recomp_settings_set(s->section, s->key, i); changed = true; }
+                if (ImGui::Selectable(s->choices[i], i == value))
+                    changed = recomp_settings_set(s->section, s->key, i) > 0;
             ImGui::EndCombo();
         }
         break;
-    }
     case RECOMP_SETTING_STRING: {
         char buf[RECOMP_SETTING_TEXT_MAX];
-        snprintf(buf, sizeof(buf), "%s", s->stored_text);
-        ImGui::SetNextItemWidth(ImGui::GetFontSize() * 22);
-        if (ImGui::InputText(label, buf, sizeof(buf), ImGuiInputTextFlags_EnterReturnsTrue)) {
-            recomp_settings_set_text(s->section, s->key, buf);
-            changed = true;
-        }
+        snprintf(buf, sizeof buf, "%s", locked ? s->value_text : s->stored_text);
+        if (!stacked)
+            ImGui::SetNextItemWidth(ImGui::GetFontSize() * 22);
+        if (ImGui::InputText(control, buf, sizeof buf, ImGuiInputTextFlags_EnterReturnsTrue))
+            changed = recomp_settings_set_text(s->section, s->key, buf) > 0;
         break;
     }
     }
-    if (locked) ImGui::EndDisabled();
-    if (s->help) item_tooltip(s->help);
-    if (locked) item_tooltip("Set by an environment variable for this run.");
-    if ((s->flags & RECOMP_SETTING_RESTART) && !strstr(label, "Restart")) {
-        ImGui::SameLine();
-        ImGui::TextDisabled("(restart)");
-        item_tooltip("Takes effect the next time the game starts.");
+    std::string id = std::string(s->section) + "." + s->key;
+    ui_target(id.c_str());
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled) || ImGui::IsItemFocused())
+        g_help = s->help ? s->help : label;
+    if (locked)
+        ImGui::EndDisabled();
+    if (s->help)
+        item_tooltip(s->help);
+    if (locked)
+    {
+        ImGui::TextDisabled("Set for this run by %s", pack_override ? "RECOMP_TEXTURE_PACKS"
+                                                      : s->env      ? s->env
+                                                                    : "the environment");
+    }
+    else if (!quick_field && (s->flags & RECOMP_SETTING_RESTART))
+    {
+        if (!stacked)
+            ImGui::SameLine();
+        ImGui::TextDisabled(g_mode == UI_LAUNCHER ? "(on Play)" : "(next launch)");
     }
     ImGui::PopID();
-    if (changed) commit();
+    if (changed)
+        commit();
     return changed;
 }
 
@@ -560,15 +703,181 @@ static void page_display()
                        "next time the game starts. F11 or Alt+Enter switches full screen while playing.");
 }
 
+static std::vector<pcui::Pack> g_packs;
+static std::string g_pack_key, g_pack_path, g_pack_status;
+static void refresh_packs(bool force = false)
+{
+    std::string key = get_text("textures", "packs"), path = pcui::folder_path(pcui::Folder::Mods);
+    if (force || key != g_pack_key || path != g_pack_path)
+    {
+        g_pack_key = key;
+        g_pack_path = path;
+        g_packs = pcui::inventory(std::filesystem::u8path(path), key);
+    }
+}
+static bool packs_available()
+{
+    refresh_packs();
+    for (auto &p : g_packs)
+        if (p.selected && p.problem.empty())
+            return true;
+    return false;
+}
+static void save_packs()
+{
+    auto text = pcui::selected_packs(g_packs);
+    if (text.size() >= RECOMP_SETTING_TEXT_MAX)
+    {
+        g_pack_status = "Pack list is too long; change was not saved.";
+        g_pack_path.clear(); // Reload inventory next frame, even when the saved list is empty.
+        return;
+    }
+    recomp_settings_set_text("textures", "packs", text.c_str());
+    commit();
+    g_pack_key = text;
+    g_pack_status = "Saved. Later packs take priority; applies at next launch.";
+}
 static void page_textures()
 {
-    ImGui::SeparatorText("HD texture packs");
-    settings_group("textures", { "enabled", "packs", "cache_mb" });
-    ImGui::TextWrapped("Install packs under mods in the data folder. Enter folder names separated by semicolons; "
-                       "the last pack wins when more than one replaces the same image. Changes apply after a restart.");
-    ImGui::SeparatorText("Making a pack");
-    settings_group("textures", { "dump", "dump_limit" });
-    ImGui::TextWrapped("Captures are saved under hd-work/runtime in the data folder. Turn capture off when finished.");
+    ImGui::SeparatorText("Local texture packs");
+    settings_group("textures", {"enabled"});
+    refresh_packs();
+    bool locked = find("textures", "packs")->source == RECOMP_SETTING_FROM_ENV;
+    if (locked)
+        ImGui::TextWrapped("Pack selection is set for this run by RECOMP_TEXTURE_PACKS.");
+    if (ImGui::Button("Refresh packs"))
+        refresh_packs(true);
+    ImGui::SameLine();
+    if (ImGui::Button("Open Mods Folder"))
+        pcui::open_path(g_pack_path);
+    ImGui::TextWrapped("Later selected packs take priority. Pack changes apply next launch.");
+    if (std::none_of(g_packs.begin(), g_packs.end(), [](const pcui::Pack &p) { return p.problem.empty(); }))
+        ImGui::TextWrapped(
+            "No local packs found. Setup can generate the faithful HD packs from your own dump.");
+    ImGui::BeginDisabled(locked);
+    for (size_t i = 0; i < g_packs.size(); i++)
+    {
+        auto &p = g_packs[i];
+        const std::string pack_id = p.name;
+        ImGui::PushID((int)i);
+        bool checked = p.selected;
+        ImGui::BeginDisabled(!p.problem.empty() && !p.selected);
+        if (ImGui::Checkbox(p.name.c_str(), &checked))
+        {
+            p.selected = checked;
+            save_packs();
+        }
+        ui_target(("pack." + pack_id).c_str());
+        ImGui::EndDisabled();
+        if (p.selected)
+        {
+            ImGui::SameLine();
+            ImGui::BeginDisabled(i == 0);
+            if (ImGui::SmallButton("Earlier"))
+            {
+                std::swap(g_packs[i], g_packs[i - 1]);
+                save_packs();
+            }
+            ui_target(("pack.earlier." + pack_id).c_str());
+            ImGui::EndDisabled();
+            ImGui::SameLine();
+            ImGui::BeginDisabled(i + 1 == g_packs.size());
+            if (ImGui::SmallButton("Later"))
+            {
+                std::swap(g_packs[i], g_packs[i + 1]);
+                save_packs();
+            }
+            ui_target(("pack.later." + pack_id).c_str());
+            ImGui::EndDisabled();
+        }
+        if (!p.problem.empty())
+            ImGui::TextWrapped("%s", p.problem.c_str());
+        ImGui::PopID();
+    }
+    ImGui::EndDisabled();
+    if (!g_pack_status.empty())
+        ImGui::TextWrapped("%s", g_pack_status.c_str());
+    if (ImGui::CollapsingHeader("Memory and manual pack list"))
+        settings_group("textures", {"cache_mb", "packs"});
+}
+void ui_home_fields()
+{
+    bool two = ImGui::GetContentRegionAvail().x > 390 * ImGui::GetStyle().FontScaleMain;
+    auto begin = [](const char *id) {
+        ImGui::TableNextColumn();
+        ImGui::BeginChild(id, ImVec2(0, 80 * ImGui::GetStyle().FontScaleMain), ImGuiChildFlags_None,
+                          ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoScrollbar);
+    };
+    if (ImGui::BeginTable("quick fields", two ? 2 : 1, ImGuiTableFlags_SizingStretchSame))
+    {
+        begin("mode");
+        setting_widget(find("display", "fullscreen"), "Display mode", true);
+        ImGui::EndChild();
+        begin("size");
+        ImGui::TextDisabled("Window size");
+        int w = pc_display("window_width", 1280), h = pc_display("window_height", 960);
+        char label[48];
+        snprintf(label, sizeof label, "%d x %d", w, h);
+        bool locked = find("display", "window_width")->source == RECOMP_SETTING_FROM_ENV ||
+                      find("display", "window_height")->source == RECOMP_SETTING_FROM_ENV;
+        ImGui::BeginDisabled(pc_display("fullscreen", 0) != 0 || locked);
+        ImGui::SetNextItemWidth(-1);
+        if (ImGui::BeginCombo("##window size", label))
+        {
+            const int sizes[][2] = {{1280, 960}, {1280, 720}, {1280, 800}, {1920, 1080}, {2560, 1440}};
+            bool custom = true;
+            for (auto &size : sizes)
+            {
+                char name[48];
+                snprintf(name, sizeof name, "%d x %d", size[0], size[1]);
+                bool selected = w == size[0] && h == size[1];
+                custom &= !selected;
+                if (ImGui::Selectable(name, selected))
+                {
+                    pc_display_set("window_width", size[0]);
+                    pc_display_set("window_height", size[1]);
+                }
+            }
+            if (custom)
+                ImGui::TextDisabled("Custom: %s (kept)", label);
+            ImGui::EndCombo();
+        }
+        ui_target("display.window_size");
+        ImGui::EndDisabled();
+        ImGui::EndChild();
+        begin("aspect");
+        setting_widget(find("display", "aspect"), "Picture shape", true);
+        ImGui::EndChild();
+        begin("render_scale");
+        setting_widget(find("display", "render_scale"), "Render scale", true);
+        ImGui::EndChild();
+        begin("vsync");
+        setting_widget(find("display", "vsync"), "VSync", true);
+        ImGui::EndChild();
+        begin("textures");
+        bool available = packs_available();
+        ImGui::BeginDisabled(!available && !recomp_settings_get("textures", "enabled", 0));
+        setting_widget(find("textures", "enabled"), available ? "HD textures" : "HD textures (not installed)",
+                       true);
+        ImGui::EndDisabled();
+        ImGui::EndChild();
+        ImGui::EndTable();
+    }
+}
+void ui_home_devices()
+{
+    bool any = false;
+    for (int i = 0; i < 4; i++)
+    {
+        char name[64];
+        if (xbox_HostInputSlotInfo(i, name, sizeof name))
+        {
+            ImGui::TextWrapped("Player %d: %s", i + 1, name);
+            any = true;
+        }
+    }
+    if (!any)
+        ImGui::TextDisabled("No controller connected / keyboard available");
 }
 
 static void draw_stick(const char *id, float x, float y, float radius)
@@ -744,46 +1053,11 @@ static void page_keyboard()
     }
 }
 
-#if defined(_WIN32)
-static const char *k_show_file_label = "Show settings.ini in Explorer";
-
+static const char *k_show_file_label = "Show settings file";
 static void open_folder()
 {
-    char path[MAX_PATH * 2];
-    snprintf(path, sizeof(path), "/select,\"%s\"", pc_settings_path());
-    ShellExecuteA(nullptr, "open", "explorer.exe", path, nullptr, SW_SHOWNORMAL);
+    pcui::open_path(pcui::folder_path(pcui::Folder::Settings), true);
 }
-#else
-extern char **environ;
-#if defined(__APPLE__)
-static const char *k_show_file_label = "Show settings.ini in Finder";
-#else
-static const char *k_show_file_label = "Show the settings folder";
-#endif
-
-// Finder selects the file (`open -R`); elsewhere the file manager opens its folder (`xdg-open`).
-// No shell is involved, so a path with spaces needs no quoting.
-static void open_folder()
-{
-    const char *path = pc_settings_path();
-    if (!path || !*path) return;
-    pid_t pid;
-    int err;
-#if defined(__APPLE__)
-    char *argv[] = { (char *)"open", (char *)"-R", (char *)path, nullptr };
-    err = posix_spawn(&pid, "/usr/bin/open", nullptr, nullptr, argv, environ);
-#else
-    std::string folder = path;
-    size_t slash = folder.find_last_of('/');
-    folder = slash == std::string::npos ? "." : folder.substr(0, slash ? slash : 1);
-    char *argv[] = { (char *)"xdg-open", (char *)folder.c_str(), nullptr };
-    err = posix_spawnp(&pid, "xdg-open", nullptr, nullptr, argv, environ);
-#endif
-    if (err != 0)
-        fprintf(stderr, "[UI] could not open the settings file's folder\n");
-}
-#endif
-
 static void page_general(UiMode mode)
 {
     ImGui::SeparatorText("Start-up");
@@ -814,12 +1088,40 @@ static void page_general(UiMode mode)
     }
     ImGui::SeparatorText("Appearance");
     settings_group("ui", { "scale" });
-    ImGui::SeparatorText("Debug");
-    settings_group("debug", { "unlock_all" });
-    ImGui::TextWrapped("For testing: every fighter and venue is available on any profile. It changes the profile in memory "
-                       "and asks the game to save it, so keep it off for a save you care about.");
-    settings_group("debug", { "skip_intro" });
-    ImGui::TextWrapped("Start at Press Start. Story cutscenes still play. Changes in the overlay apply next time you start the game.");
+    ImGui::SeparatorText("Startup movies");
+    settings_group("debug", {"skip_intro"});
+    ImGui::TextWrapped("Start at Press Start. Story cutscenes still play. Applies on the next launch.");
+}
+static void page_maintenance(UiMode mode)
+{
+    const char *names[] = {"Data", "Saves", "Mods", "Installation", "Settings file", "Play logs"};
+    pcui::Folder paths[] = {pcui::Folder::Data,    pcui::Folder::Saves,    pcui::Folder::Mods,
+                            pcui::Folder::Install, pcui::Folder::Settings, pcui::Folder::Logs};
+    for (int i = 0; i < 6; i++)
+    {
+        ImGui::PushID(i);
+        auto path = pcui::folder_path(paths[i]);
+        ImGui::SeparatorText(names[i]);
+        ImGui::TextWrapped("%s", path.empty() ? "Not available for this run" : path.c_str());
+        if (ImGui::Button("Open"))
+            pcui::open_path(path, i == 4);
+        ImGui::SameLine();
+        if (ImGui::Button("Copy path"))
+            pcui::copy_text(path);
+        ui_target((std::string("Copy ") + names[i]).c_str());
+        ImGui::PopID();
+    }
+    ImGui::SeparatorText("Update / Repair");
+    if (mode == UI_OVERLAY)
+        ImGui::TextWrapped("Close the game and open Update / Repair in the launcher to continue in Setup.");
+    else
+    {
+        if (ImGui::Button("Choose Setup application"))
+            pcui::setup_choose();
+    }
+    ImGui::TextWrapped("Setup: %s", pcui::setup_path().empty() ? "not selected" : pcui::setup_path().c_str());
+    ImGui::TextWrapped("Use Update / Repair on the launcher's Home screen to open the wizard and close the "
+                       "game. Setup verifies releases and builds your dump locally.");
     ImGui::SeparatorText("Files");
     ImGui::TextWrapped("Settings are saved as you change them in: %s", pc_settings_path());
     if (ImGui::Button(k_show_file_label)) open_folder();
@@ -849,6 +1151,13 @@ static void page_general(UiMode mode)
 
 static void page_debug(UiMode mode)
 {
+    ImGui::SeparatorText("Developer tools");
+    settings_group("debug", {"unlock_all"});
+    ImGui::TextWrapped("For testing: unlocks fighters and venues and can save the change to your profile. "
+                       "Keep off for a save you care about.");
+    ImGui::SeparatorText("Texture authoring");
+    settings_group("textures", {"dump", "dump_limit"});
+    ImGui::TextWrapped("Source captures go to hd-work/runtime. Turn capture off when finished.");
     ImGui::SeparatorText("Play-test recorder");
     settings_group("debug", { "record" });
     ImGui::TextWrapped("Keeps logs/sessions/<time>/ for every run: each frame's timing, what the game was doing, the sound, "
@@ -921,63 +1230,255 @@ static void page_debug(UiMode mode)
     }
 }
 
+static int g_page = 0;
+static bool g_advanced = false, g_select_page = false, g_return_focus = false, g_setup_request = false;
+static std::string g_home_return = "Advanced";
+static const char *page_names[] = {"Display", "Controls", "Mods", "Interface", "Diagnostics", "Maintenance"};
+static void controls_page()
+{
+    if (ImGui::CollapsingHeader("Players, devices and feel", ImGuiTreeNodeFlags_DefaultOpen))
+        page_controllers();
+    if (ImGui::CollapsingHeader("Gamepad button mapping"))
+        page_pad_buttons();
+    if (ImGui::CollapsingHeader("Keyboard and mouse bindings"))
+        page_keyboard();
+}
 UiResult ui_draw(UiMode mode, float x, float y, float width, float height)
 {
     UiResult result;
+    g_mode = mode;
     capture_poll_pad();
-
+    g_targets.clear();
+    g_help.clear();
+    pcui::setup_poll();
+    float scale = ImGui::GetStyle().FontScaleMain;
     ImGui::SetNextWindowPos(ImVec2(x, y));
     ImGui::SetNextWindowSize(ImVec2(width, height));
-    ImGuiWindowFlags flags = ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
-                             ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoSavedSettings |
-                             ImGuiWindowFlags_NoBringToFrontOnFocus;
+    auto flags = ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
+                 ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoSavedSettings |
+                 ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoScrollbar |
+                 ImGuiWindowFlags_NoScrollWithMouse;
     ImGui::Begin("##settings", nullptr, flags);
-
-    ImGui::PushFont(nullptr, ImGui::GetStyle().FontSizeBase * 1.35f);
-    ImGui::TextColored(ImVec4(1.0f, 0.78f, 0.22f, 1.0f), "DEF JAM: FIGHT FOR NY");
-    ImGui::PopFont();
-    ImGui::SameLine();
-    ImGui::TextDisabled(mode == UI_LAUNCHER ? "Recompiled - launcher" : "Recompiled - settings");
+    float header_width = ImGui::CalcTextSize("DEF JAM RECOMPILED").x +
+                         ImGui::CalcTextSize("/ v" DEFJAM_VERSION).x + ImGui::GetStyle().ItemSpacing.x;
+    bool version_inline = header_width < ImGui::GetContentRegionAvail().x;
+    ImGui::TextUnformatted("DEF JAM RECOMPILED");
+    if (version_inline)
+        ImGui::SameLine();
+    ImGui::TextDisabled("/ v%s", DEFJAM_VERSION);
     ImGui::Separator();
-
-    float footer = ImGui::GetFrameHeightWithSpacing() * 2.2f + ImGui::GetStyle().ItemSpacing.y * 2;
-    ImGui::BeginChild("page", ImVec2(0, -footer), ImGuiChildFlags_None);
-    if (ImGui::BeginTabBar("pages")) {
-        if (ImGui::BeginTabItem("Display")) { page_display(); ImGui::EndTabItem(); }
-        if (ImGui::BeginTabItem("Textures")) { page_textures(); ImGui::EndTabItem(); }
-        if (ImGui::BeginTabItem("Controllers")) { page_controllers(); ImGui::EndTabItem(); }
-        if (ImGui::BeginTabItem("Pad buttons")) { page_pad_buttons(); ImGui::EndTabItem(); }
-        if (ImGui::BeginTabItem("Keyboard & mouse")) { page_keyboard(); ImGui::EndTabItem(); }
-        if (ImGui::BeginTabItem("General")) { page_general(mode); ImGui::EndTabItem(); }
-        if (ImGui::BeginTabItem("Debug")) { page_debug(mode); ImGui::EndTabItem(); }
-        ImGui::EndTabBar();
+    bool advanced = mode == UI_OVERLAY || g_advanced;
+    bool compact_footer = height < 600 * scale && pcui::action_status().empty();
+    float footer = ImGui::GetFrameHeightWithSpacing() * (compact_footer ? 1.0f : 2.1f) + 25 * scale;
+    ImGui::BeginChild("page", ImVec2(0, -footer), ImGuiChildFlags_None, ImGuiWindowFlags_NoBackground);
+    if (!advanced)
+    {
+        auto home = ui_launcher_home(ImGui::GetContentRegionAvail().x, ImGui::GetContentRegionAvail().y,
+                                     g_return_focus ? g_home_return.c_str() : nullptr);
+        g_return_focus = false;
+        result.play = home.play;
+        if (home.route >= 1 && home.route <= 3)
+        {
+            g_advanced = true;
+            ImGui::SetScrollY(0);
+            g_page = home.route == 2 ? 1 : home.route == 3 ? 2 : g_page;
+            g_select_page = true;
+            g_home_return = home.route == 2 ? "Configure" : home.route == 3 ? "Mods" : "Advanced";
+        }
+        if (home.route == 4)
+            g_setup_request = true;
+    }
+    else
+    {
+        bool compact_header = height < 500 * scale;
+        if (mode == UI_LAUNCHER)
+        {
+            if (ImGui::Button(compact_header ? "< Back" : "< Back to launcher"))
+            {
+                g_advanced = false;
+                ImGui::SetScrollY(0);
+                g_return_focus = true;
+            }
+            ui_target("Back");
+            if (compact_header || width > 650 * scale)
+                ImGui::SameLine();
+        }
+        if (!compact_header)
+            pcui::heading("ADVANCED SETTINGS", 24 * scale);
+        bool popup = ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel);
+        if (!ui_capturing() && !popup)
+        {
+            if (ImGui::IsKeyPressed(ImGuiKey_GamepadR1, false))
+            {
+                g_page = (g_page + 1) % 6;
+                g_select_page = true;
+            }
+            if (ImGui::IsKeyPressed(ImGuiKey_GamepadL1, false))
+            {
+                g_page = (g_page + 5) % 6;
+                g_select_page = true;
+            }
+            if (mode == UI_LAUNCHER && (ImGui::IsKeyPressed(ImGuiKey_Escape, false) ||
+                                        ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false)))
+            {
+                g_advanced = false;
+                ImGui::SetScrollY(0);
+                g_return_focus = true;
+            }
+        }
+        // At large text sizes a vertical selector keeps every category available.
+        bool narrow = ImGui::GetContentRegionAvail().x < 680 * scale;
+        if (narrow)
+        {
+            ImGui::SetNextItemWidth(-1);
+            if (ImGui::BeginCombo("##category", page_names[g_page]))
+            {
+                for (int i = 0; i < 6; i++)
+                    if (ImGui::Selectable(page_names[i], g_page == i))
+                        g_page = i;
+                ImGui::EndCombo();
+            }
+            ui_target("Category");
+        }
+        else if (ImGui::BeginTabBar("categories", ImGuiTabBarFlags_NoCloseWithMiddleMouseButton))
+        {
+            int requested = g_page;
+            for (int i = 0; i < 6; i++)
+            {
+                bool active =
+                    ImGui::BeginTabItem(page_names[i], nullptr,
+                                        g_select_page && requested == i ? ImGuiTabItemFlags_SetSelected : 0);
+                ui_target(page_names[i]);
+                if (active)
+                {
+                    g_page = i;
+                    ImGui::EndTabItem();
+                }
+            }
+            ImGui::EndTabBar();
+        }
+        g_select_page = false;
+        bool inspector = ImGui::GetContentRegionAvail().x >= 900 * scale;
+        ImGui::BeginChild("settings content",
+                          ImVec2(inspector ? ImGui::GetContentRegionAvail().x - 280 * scale : 0, 0),
+                          ImGuiChildFlags_None, ImGuiWindowFlags_NoBackground);
+        switch (g_page)
+        {
+        case 0:
+            page_display();
+            break;
+        case 1:
+            controls_page();
+            break;
+        case 2:
+            page_textures();
+            break;
+        case 3:
+            page_general(mode);
+            break;
+        case 4:
+            page_debug(mode);
+            break;
+        case 5:
+            page_maintenance(mode);
+            break;
+        }
+        ImGui::EndChild();
+        if (inspector)
+        {
+            ImGui::SameLine();
+            ImGui::BeginChild("context help", ImVec2(0, 0),
+                              ImGuiChildFlags_Borders | ImGuiChildFlags_AlwaysUseWindowPadding);
+            pcui::heading("ABOUT THIS OPTION", 18 * scale);
+            ImGui::Spacing();
+            ImGui::TextWrapped(
+                "%s", g_help.empty()
+                          ? "Focus or hover a setting to see what it does. Changes save as you make them."
+                          : g_help.c_str());
+            ImGui::Spacing();
+            ImGui::TextColored(pcui::gold(), mode == UI_LAUNCHER ? "Startup changes apply on Play."
+                                                                 : "Startup changes apply next launch.");
+            ImGui::EndChild();
+        }
     }
     ImGui::EndChild();
-
     ImGui::Separator();
     std::string restart = restart_needed();
-    if (!restart.empty())
-        ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.2f, 1.0f), "Changes that need a restart to apply: %s", restart.c_str());
-    else
-        ImGui::TextDisabled("Changes are saved as you make them.");
-
-    float bw = ImGui::GetFontSize() * 9;
-    if (mode == UI_LAUNCHER) {
-        RecompSetting *skip = find("launcher", "skip");
-        if (skip) setting_widget(skip);
-        ImGui::SameLine(ImGui::GetWindowWidth() - bw * 2 - ImGui::GetStyle().WindowPadding.x - ImGui::GetStyle().ItemSpacing.x);
-        if (ImGui::Button("Quit", ImVec2(bw, 0))) result.leave = true;
+    if (!compact_footer && !pcui::action_status().empty())
+    {
+        ImGui::BeginChild("last action", ImVec2(0, ImGui::GetTextLineHeight() * 2), ImGuiChildFlags_None,
+                          ImGuiWindowFlags_NoBackground);
+        ImGui::TextWrapped("%s", pcui::action_status().c_str());
+        ImGui::EndChild();
+    }
+    else if (!compact_footer && !restart.empty())
+        ImGui::TextWrapped("%s: %s", mode == UI_LAUNCHER ? "Applies on Play" : "Next launch",
+                           restart.c_str());
+    else if (!compact_footer)
+        ImGui::TextDisabled(mode == UI_LAUNCHER ? "Saved as you change / startup options apply on Play"
+                                                : "Saved as you change / startup options apply next launch");
+    // Keep actions reachable even at 250% text scale; the body scrolls independently.
+    if (mode == UI_LAUNCHER)
+    {
+        if (ImGui::Button("Quit"))
+            result.leave = true;
+        ui_target("Quit");
         ImGui::SameLine();
-        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.18f, 0.55f, 0.22f, 1.0f));
-        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.25f, 0.7f, 0.3f, 1.0f));
-        if (ImGui::Button("Play", ImVec2(bw, 0))) result.play = true;
-        ImGui::PopStyleColor(2);
-        if (ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere(-1);
-    } else {
-        RecompSetting *skip = find("launcher", "skip");
-        if (skip) setting_widget(skip);
-        ImGui::SameLine(ImGui::GetWindowWidth() - bw - ImGui::GetStyle().WindowPadding.x);
-        if (ImGui::Button("Close", ImVec2(bw, 0))) result.leave = true;
+        if (advanced || width < 900 * scale)
+        {
+            if (pcui::play_button("PLAY", ImVec2(100 * scale, 0)))
+                result.play = true;
+            ui_target("Play");
+            ImGui::SameLine();
+        }
+        if (!compact_footer)
+            setting_widget(find("launcher", "skip"), "Skip launcher next time");
+        else
+            ImGui::TextDisabled(mode == UI_LAUNCHER ? "Saved" : restart.empty() ? "Saved" : "Next launch");
+    }
+    else
+    {
+        if (ImGui::Button("Close"))
+            result.leave = true;
+        ImGui::SameLine();
+        if (!compact_footer)
+            setting_widget(find("launcher", "skip"), "Skip launcher next time");
+        else
+            ImGui::TextDisabled(mode == UI_LAUNCHER ? "Saved" : restart.empty() ? "Saved" : "Next launch");
+    }
+    if (g_setup_request)
+    {
+        ImGui::OpenPopup("Update / Repair");
+        g_setup_request = false;
+    }
+    ImGui::SetNextWindowSizeConstraints(
+        ImVec2(0, 0), ImVec2(std::max(200.0f, width - 32 * scale), std::max(160.0f, height - 32 * scale)));
+    if (ImGui::BeginPopupModal("Update / Repair", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+    {
+        ImGui::PushTextWrapPos(std::min(ImGui::GetFontSize() * 34, std::max(120.0f, width - 100 * scale)));
+        ImGui::TextWrapped("Open Def Jam Setup to choose a release, update or repair. The launcher will "
+                           "close. No installation starts until you choose it in the wizard.");
+        ImGui::TextWrapped("Setup: %s",
+                           pcui::setup_path().empty() ? "not selected" : pcui::setup_path().c_str());
+        if (ImGui::Button("Choose Setup..."))
+            pcui::setup_choose();
+        if (width > 650 * scale)
+            ImGui::SameLine();
+        if (ImGui::Button("Download Setup"))
+            pcui::open_path("https://github.com/vyanhursky/DefJamFFNY-recomp/releases/latest");
+        ImGui::BeginDisabled(!pcui::setup_ready());
+        if (ImGui::Button("Open Setup"))
+        {
+            result.setup = true;
+            result.leave = true;
+            ImGui::CloseCurrentPopup();
+        }
+        ui_target("SetupOpen");
+        ImGui::EndDisabled();
+        if (ImGui::Button("Cancel"))
+            ImGui::CloseCurrentPopup();
+        ImGui::PopTextWrapPos();
+        ImGui::EndPopup();
     }
     ImGui::End();
     return result;
