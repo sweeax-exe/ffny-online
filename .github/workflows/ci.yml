@@ -46,7 +46,7 @@ jobs:
         with: { python-version: '3.13' }
       - run: python -m pip install pytest Pillow==12.3.0 numpy==2.5.2
       - name: Installer recovery and input boundaries
-        run: python -m pytest -q --junitxml=build/setup-unit-results.xml tests/unit/test_setup_updates.py tests/unit/test_setup_engine.py tests/unit/test_linux_setup.py tests/unit/test_hd_assets.py tests/unit/test_hd_corpus.py tests/unit/test_hd_setup.py
+        run: python -m pytest -q --junitxml=build/setup-unit-results.xml tests/unit/test_setup_updates.py tests/unit/test_setup_engine.py tests/unit/test_setup_status.py tests/unit/test_linux_setup.py tests/unit/test_hd_assets.py tests/unit/test_hd_corpus.py tests/unit/test_hd_setup.py
       - name: Build and inventory standalone setup (no dump)
         shell: pwsh
         run: ./scripts/build-setup.ps1
@@ -86,7 +86,7 @@ jobs:
         with: { python-version: '3.13' }
       - run: python -m pip install pytest pyxbe capstone Pillow==12.3.0 numpy==2.5.2
       - name: Installer recovery, input boundaries and payload builder
-        run: python -m pytest -q --junitxml=build/setup-unit-results.xml tests/unit/test_setup_updates.py tests/unit/test_setup_engine.py tests/unit/test_hd_setup.py tests/unit/test_macos_payload.py
+        run: python -m pytest -q --junitxml=build/setup-unit-results.xml tests/unit/test_setup_updates.py tests/unit/test_setup_engine.py tests/unit/test_setup_status.py tests/unit/test_hd_setup.py tests/unit/test_macos_payload.py
       # SDL3 and shaderc are built from pinned source; keep them between runs.
       - uses: actions/cache@v4
         with:
@@ -136,7 +136,7 @@ jobs:
         with: { python-version: '3.13' }
       - run: python -m pip install pytest pyxbe capstone Pillow==12.3.0 numpy==2.5.2
       - name: Installer recovery, input boundaries, launcher and payload checks
-        run: python -m pytest -q --junitxml=build/setup-unit-results.xml tests/unit/test_setup_updates.py tests/unit/test_setup_engine.py tests/unit/test_linux_setup.py tests/unit/test_hd_setup.py
+        run: python -m pytest -q --junitxml=build/setup-unit-results.xml tests/unit/test_setup_updates.py tests/unit/test_setup_engine.py tests/unit/test_setup_status.py tests/unit/test_linux_setup.py tests/unit/test_hd_setup.py
       - uses: actions/cache@v4
         with:
           path: build/setup-downloads/linux

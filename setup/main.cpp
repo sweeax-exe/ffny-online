@@ -36,6 +36,26 @@ static std::wstring utf8(const std::string& text) {
     return result;
 }
 
+// The engine publishes progress by replacing the status file (os.replace) while the wizard polls it.
+// Windows refuses that replace while any open handle lacks FILE_SHARE_DELETE, which std::ifstream's
+// does, so read it with every sharing flag and close it at once (issue #40).
+static bool readShared(const fs::path& path, std::string& text) {
+    text.clear();
+    HANDLE file = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                              nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (file == INVALID_HANDLE_VALUE) return false;
+    LARGE_INTEGER size{};
+    DWORD read = 0;
+    bool ok = GetFileSizeEx(file, &size) && size.QuadPart >= 0 && size.QuadPart <= 65536;
+    if (ok) {
+        text.resize((size_t)size.QuadPart);
+        ok = text.empty() || ReadFile(file, text.data(), (DWORD)text.size(), &read, nullptr);
+        text.resize(ok ? read : 0);
+    }
+    CloseHandle(file);
+    return ok;
+}
+
 // CommandLineToArgvW/CreateProcess quoting, including trailing backslashes.
 static std::wstring quote(const std::wstring& text) {
     std::wstring result = L"\"";
@@ -369,10 +389,8 @@ static LRESULT CALLBACK windowProc(HWND hwnd, UINT message, WPARAM wp, LPARAM lp
     if (message == WM_TIMER) {
         ++timerTicks;
         if (!worker) return 0;
-        if (fs::exists(statusPath)) {
-            std::ifstream in(statusPath); std::string text((std::istreambuf_iterator<char>(in)), {});
-            SetWindowTextW(statusLabel, utf8(text).c_str());
-        }
+        std::string text;
+        if (readShared(statusPath, text) && !text.empty()) SetWindowTextW(statusLabel, utf8(text).c_str());
         if (WaitForSingleObject(worker, 0) == WAIT_OBJECT_0) {
             DWORD code; GetExitCodeProcess(worker, &code); CloseHandle(worker); worker = nullptr;
             KillTimer(window, 1); setBusy(false);
