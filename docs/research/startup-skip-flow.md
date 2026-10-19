@@ -209,6 +209,32 @@ The code reads support proceeding with these tests; no additional controller
 wait, save initialization or second boot-helper call is justified by this
 follow-up.
 
+## Audio initialization (issue #65)
+
+The first release of the option (v0.10.1 to v0.10.4) left Press Start and the menu transition sound effects silent, although
+music played and the front end made the same `Audio.Play(...)` calls as a normal boot.
+
+`sub_0003DE20` is the audio engine's initialization, `AudioInit(mode)` (cdecl, one argument). If the engine is already
+up (`0x00340374 == 1`) it first shuts it down through `sub_0003A570(0)`. Mode 0 then only sets `0x00340374 = 1`. Any other mode
+also reads the audio configuration, builds the music list and sets `0x00340320 = 1`. A normal boot calls it twice, both from
+the state-0 entry `sub_00078090` (traced with temporary entry logging, not kept):
+
+| When | Call | Result |
+|---|---|---|
+| First state-0 entry, before `legal1` | `sub_0003DE20(0)` | `0x340374 = 1`; `0x340320` stays 0 |
+| After the startup movies, state 0 is entered again | `sub_0003A570(0)`, then `sub_0003DE20(1)` | full init: `0x340320 = 1`, music list and configuration loaded |
+
+Skipping `bootLoad` and the movie controller removes the second entry. A guest memory dump at the first `Audio.Play(0)` differed
+from a normal boot in exactly these places (`0x340320`, the music name list near `0x33E798`).
+
+`defjam_skip_intro_enter` now calls `sub_0003DE20(1)` once, in the same place it replays `ControllerBootup`: after the first state-0
+entry and before the screen is selected, so the full init is in place before `preStart.swf` loads. The call is made on the same
+terms as the game's own (return word, one cdecl argument, caller drops it) and the caller's registers are restored.
+
+Checks: `regress.py --only skipintro` requires `0x00340320 == 1` (`RECOMP_PEEK`) in every enabled case; it fails on v0.10.4
+and passes with the fix. The native fixture asserts the call and its stack layout. On the Mac, `RECOMP_APU_PCM` captures of the
+`boot` route showed no output at the menu sound events before the fix and the same bursts as a normal boot after it.
+
 ## Implementation and native acceptance
 
 `src/patches/skip_intro.c` reads the effective `[debug] skip_intro` setting on

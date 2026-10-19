@@ -386,6 +386,21 @@ def startup_skip_faults(text, enabled):
     return faults
 
 
+# Guest 0x00340320 is 1 once the full audio initialization (AudioInit(1)) has run. A normal
+# boot makes it after the startup movies; skipping them must not lose it, or the Press Start
+# and menu transition sound effects never play (v0.10.1 to v0.10.4).
+AUDIO_MODE_PEEK = '0x340320'
+
+
+def audio_init_faults(text):
+    values = re.findall(r'\[PEEK\] 0x00340320 = ([0-9A-Fa-f]{8})', text)
+    if not values:
+        return ['no audio mode observation; the run ended before the first state sample']
+    if int(values[-1], 16) != 1:
+        return ['full audio initialization missing (0x00340320 = %s); menu sound effects would be silent' % values[-1]]
+    return []
+
+
 def normal_startup_faults(text):
     """The one complete normal boot in both quick/full sets must positively prove each stage."""
     faults = startup_skip_faults(text, False)
@@ -430,6 +445,7 @@ def check_skip_intro(a):
             # Skipping the first flow load invalidates feflow.xml#2. Anchor to the
             # actual title request, keep its native animation/input delay, then Start.
             env['RECOMP_SCRIPT_ANCHOR'] = title
+            env['RECOMP_PEEK'] = AUDIO_MODE_PEEK
             env['RECOMP_PAD_SCRIPT'] = ','.join(harness.title_presses())
             env['RECOMP_GAMMA'] = '0'
         run = harness.run_game('skipintro-' + name, preset=a.preset, scripted=False, quiet=True,
@@ -440,6 +456,7 @@ def check_skip_intro(a):
         if enabled:
             if not harness.reached(run.summary, menu):
                 faults.append(name + ': Start did not reach the main menu')
+            faults += [name + ': ' + f for f in audio_init_faults(run.text)]
             if combined and '[UNLOCK] sub_000158F0 run' not in run.text:
                 faults.append(name + ': startup skip prevented the unlock routine from running')
             shot = os.path.join(run.shots_dir, 'skipintro-' + name + '-5s.bmp')
