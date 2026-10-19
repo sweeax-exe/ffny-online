@@ -11,11 +11,19 @@ Fighters selection. They do not cover every mode or a full Story campaign.
   mix buffer late and old audio played again. v0.9.3 fixes the causes in the port (a game
   clock that stood still for 12-18 ms at a time, late wake-ups and thread priority on macOS).
   On the Mac the opening Story scene went from about 10 holes a second to 5 in four minutes,
-  confirmed by ear. One short skip remains as the car crash hits in the opening scene, the
-  heaviest frame of the scene; it is left for performance work. On the Steam Deck the owner's
+  confirmed by ear. One short skip remained as the car crash hits in the opening scene, the
+  heaviest frame of the scene. v0.10.2's shader cache and macOS scheduling fix took that
+  scene's late frames on the Mac from 2.8% to 0.1-0.2%, and the skip did not show in the
+  measured runs since; it has not been re-checked by ear. On the Steam Deck the owner's
   play-test of v0.9.3 found the audio significantly improved. Windows has not been play-tested
   with the fix; the clock fix is shared code. Each part can be switched off to compare
   (`docs/03-workflows.md`).
+- **Story scene performance (v0.10.2, [Mac](research/scene-perf-macos-2026-10-18.md),
+  [Deck](research/scene-perf-deck-2026-10-18.md)).** Scene loads hold the picture for up to
+  about 2 s in the longest scenes, on every platform. On the Steam Deck, render scale 3 doubles
+  the late frames of the heaviest scenes; at the default scale 2 the opening scene still drops
+  about 11% of frames in its heaviest shots. Windows compiles each shader at first use in every
+  launch (no Direct3D 11 shader cache yet).
 - **Unresolved jump targets.** The translated code has about a hundred placeholders for
   jump targets the translator could not resolve; reaching one skips real code. v0.2.1
   replaced the seven that are simple function exits, one of which caused the Terrordome
