@@ -448,6 +448,18 @@ void ui_context_end()
 
 // ---- generic setting widgets --------------------------------------------------------------------------
 
+// A hover tooltip for the last item, wrapped: ImGui's own one-line tooltip does not wrap, and the longer
+// help texts ran past the right edge of the window and were cut off.
+static void item_tooltip(const char *text)
+{
+    if (!ImGui::BeginItemTooltip())
+        return;
+    ImGui::PushTextWrapPos(ImGui::GetFontSize() * 35.0f);
+    ImGui::TextUnformatted(text);
+    ImGui::PopTextWrapPos();
+    ImGui::EndTooltip();
+}
+
 // A bool, integer, choice or text setting as its natural control. Returns true when it changed.
 static bool setting_widget(RecompSetting *s, const char *label = nullptr)
 {
@@ -495,12 +507,12 @@ static bool setting_widget(RecompSetting *s, const char *label = nullptr)
     }
     }
     if (locked) ImGui::EndDisabled();
-    if (s->help) ImGui::SetItemTooltip("%s", s->help);
-    if (locked) ImGui::SetItemTooltip("Set by an environment variable for this run.");
+    if (s->help) item_tooltip(s->help);
+    if (locked) item_tooltip("Set by an environment variable for this run.");
     if ((s->flags & RECOMP_SETTING_RESTART) && !strstr(label, "Restart")) {
         ImGui::SameLine();
         ImGui::TextDisabled("(restart)");
-        ImGui::SetItemTooltip("Takes effect the next time the game starts.");
+        item_tooltip("Takes effect the next time the game starts.");
     }
     ImGui::PopID();
     if (changed) commit();
@@ -846,7 +858,7 @@ static void page_debug(UiMode mode)
         ImGui::TextWrapped("%s", status);
         if (recorder_on()) {
             if (ImGui::Button("Mark a bug here")) recorder_mark("overlay");
-            ImGui::SetItemTooltip("Saves the last seconds of play, from before the overlay was opened, as a bug bundle.");
+            item_tooltip("Saves the last seconds of play, from before the overlay was opened, as a bug bundle.");
         } else {
             ImGui::TextDisabled("Turn recording on above and restart the game to record.");
         }
@@ -880,12 +892,12 @@ static void page_debug(UiMode mode)
             scene_launcher_request(pick);
             dev_module_request(active ? 0 : 1);
         }
-        ImGui::SetItemTooltip("Plays the scene in the game's developer cinema mode, then returns to the main menu. "
+        item_tooltip("Plays the scene in the game's developer cinema mode, then returns to the main menu. "
                               "Whatever is running now (a fight, the Story) is left. Close the overlay to watch.");
         ImGui::EndDisabled();
         if (!active) {
             if (ImGui::Button("Developer menu")) dev_module_request(0);
-            ImGui::SetItemTooltip("EA's own debug menu, driven by pad 1 (try the d-pad and A). "
+            item_tooltip("EA's own debug menu, driven by pad 1 (try the d-pad and A). "
                                   "Leaves what is running now.");
         } else if (ImGui::Button("Back to the main menu")) {
             dev_module_leave();

@@ -52,6 +52,17 @@ python3 scripts/scenarios.py scenes all        # each in its own launch, about 2
 the spacing, and `--record` keeps a play-test session of each launch. `index.md` in the
 folder lists every scene, whether it played and ended, its sheet and its log.
 
+## Measuring them
+
+```bash
+python3 scripts/scene-perf.py run all
+```
+
+plays every scene the same way with the play-test recorder on and writes one table of load times,
+frame pacing, hitches, audio drop-outs and the log's faults (`logs/scene-perf/<time>/summary.md`).
+`compare` puts two runs, or a run and a committed baseline, side by side. The method and the Mac's
+results are in [the 2026-10-18 report](research/scene-perf-macos-2026-10-18.md).
+
 ## By hand, without the scripts
 
 Set `RECOMP_SCENE` when you start the game; the scene plays once the title screen is up and

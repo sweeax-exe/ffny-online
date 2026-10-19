@@ -73,3 +73,7 @@ The plan built from these is in [docs/widescreen](../widescreen/README.md), whic
 - [Toolkit rebase acceptance](toolkit-rebase-acceptance.md)
 - [Toolkit rebase ledger](toolkit-rebase-ledger.md): maps the 108 retired patch numbers to fork commits
 - [macOS and Linux port survey](macos-linux-port-survey.md)
+
+## Performance
+
+- [Story scene performance on macOS, 2026-10-18](scene-perf-macos-2026-10-18.md): all 38 scenes at 16:9 and render scale 3, random game-side stalls, load freezes, shader compiles, and the baseline for the Deck run

@@ -272,7 +272,9 @@ def contact_sheet(captures, out, title, width=320, label='s after the scene bega
     shots = sorted((Path(p) for p in captures), key=_seconds)
     if not shots:
         return False
-    cols, height = 4, width * 3 // 4
+    first = Image.open(shots[0])
+    # The captures' own shape: a widescreen run's are wider than 4:3.
+    cols, height = 4, max(1, round(width * first.height / max(1, first.width)))
     rows = (len(shots) + cols - 1) // cols
     sheet = Image.new('RGB', (cols * width, rows * (height + 18) + 24), (16, 16, 16))
     draw = ImageDraw.Draw(sheet)
