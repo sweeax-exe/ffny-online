@@ -18,7 +18,10 @@ hosts, two builds) side by side.
 
 Profiles (environment variables only, so a player's settings.ini never changes a run):
   stress   16:9, render scale 3, vsync on (RECOMP_ASPECT, RECOMP_RENDER_SCALE, RECOMP_PRESENT_VSYNC)
+  deck     16:10, render scale 2, vsync on: the Steam Deck's own screen shape at a sensible scale
   default  the built-in defaults: 4:3, render scale 2, vsync on
+--env overrides a profile's variables (--env RECOMP_RENDER_SCALE=2 changes one thing only).
+Vsync is used only on a display refreshing at a multiple of 60 Hz; the summary names the refresh.
 
 `run` summarizes at the end by itself. The audio columns need NumPy (and the contact
 sheets Pillow), as bug-bundle.py does; without them those columns are left empty.
@@ -40,6 +43,7 @@ VBLANK_MS = 1000.0 / 60.0
 
 PROFILES = {
     'stress': {'RECOMP_ASPECT': '16:9', 'RECOMP_RENDER_SCALE': '3', 'RECOMP_PRESENT_VSYNC': '1'},
+    'deck': {'RECOMP_ASPECT': '16:10', 'RECOMP_RENDER_SCALE': '2', 'RECOMP_PRESENT_VSYNC': '1'},
     'default': {},
 }
 
@@ -223,11 +227,12 @@ def scan_log(path, start_byte, end_byte):
         e['scene'] += 1 if inside(m.start()) else 0
     shots = [m.end() for m in SHOT_LINE.finditer(data)]
     refresh = None
-    for line in data.splitlines():
-        if b'refresh' in line.lower() or b'vsync' in line.lower():
-            m = REFRESH.search(line)
-            if m:
+    for line in data.splitlines():       # the line that says whether vsync is used wins over a bare refresh rate
+        low = line.lower()
+        if (b'refresh' in low or b'vsync' in low) and REFRESH.search(line):
+            if refresh is None or b'vsync' in low:
                 refresh = line.decode('utf-8', 'replace').strip()[:160]
+            if b'vsync' in low:
                 break
     return {'faults': faults, 'missing_files': missing, 'shot_bytes': shots, 'refresh_line': refresh,
             'log_bytes': len(data)}
@@ -399,6 +404,7 @@ def summarize(folder, audio=True):
             rows.append({'scene': entry['scene'], 'played': entry.get('played'), 'ended': entry.get('ended'),
                          'error': '%s: %s' % (type(ex).__name__, ex)})
     host = host_line(runs)
+    host['refresh'] = next((r['refresh_line'] for r in rows if r.get('refresh_line')), None)
     summary = {'format': 'defjam-scene-perf/1', 'folder': os.path.relpath(folder, REPO), 'host': host,
                'profile': runs[0].get('profile') if runs else None, 'scenes': rows}
     (folder / 'summary.json').write_text(json.dumps(summary, indent=1) + '\n', encoding='utf-8')
@@ -414,7 +420,8 @@ def summary_markdown(s):
     out = ['# Scene performance, %s' % s['folder'], '',
            'Build `%s`, %s; profile `%s`: aspect %s, render scale %s, vsync %s, window %s, recorder %s pictures/s.'
            % (h.get('build'), h.get('platform'), s.get('profile'), h.get('aspect'), h.get('render_scale'),
-              h.get('vsync'), h.get('window'), h.get('record_fps')), '',
+              h.get('vsync'), h.get('window'), h.get('record_fps')),
+           'Display: `%s`.' % (h.get('refresh') or 'refresh not logged'), '',
            'Measured from the scene\'s first frame after its load to its end (the recorder\'s `cinema` events), '
            'leaving out frames next to a harness capture. *load* is the frame that carried the scene\'s load; '
            '*late* frames are longer than 1.5 vblanks (25 ms); a *hitch* is 50 ms and 2.5x the running median '

@@ -132,4 +132,6 @@ def test_stop_controller_gives_up_when_nothing_starts(tmp_path):
 def test_profiles_are_environment_only():
     assert perf.PROFILES['stress'] == {'RECOMP_ASPECT': '16:9', 'RECOMP_RENDER_SCALE': '3',
                                        'RECOMP_PRESENT_VSYNC': '1'}
+    assert perf.PROFILES['deck'] == {'RECOMP_ASPECT': '16:10', 'RECOMP_RENDER_SCALE': '2',
+                                     'RECOMP_PRESENT_VSYNC': '1'}
     assert perf.PROFILES['default'] == {}
