@@ -1,7 +1,9 @@
 """Compile the startup hook with synthetic guest memory and the real settings registry.
 
 Exercise opt-in/file/environment precedence, the one-shot boundary, and the guest
-stack/register contract of the controller initialization kept when legal1 is skipped.
+stack/register contract of the controller initialization and the full audio
+initialization (the menu sound effects) that skipping the startup movies would
+otherwise lose.
 """
 import os
 from pathlib import Path
@@ -22,6 +24,7 @@ DRIVER = r'''
 unsigned char memory[8192];
 uint32_t g_eax = 0x1234, g_ecx = 0x100, g_edx = 0x5678, g_esp = 0x1000;
 static int boot_calls;
+static int audio_calls;
 static int unlock_calls;
 void defjam_skip_intro_enter(void);
 void defjam_unlock_all_on_funccall(const char *text);
@@ -35,6 +38,15 @@ void sub_00055640(void)
     g_eax = 77; g_ecx = 88; g_edx = 99;
     g_esp += 12;
 }
+void sub_0003DE20(void)
+{
+    /* AudioInit(1), cdecl: return word then one argument; the caller drops the argument. */
+    assert(g_esp == 0x1000 - 8);
+    assert(!MEM32(g_esp) && MEM32(g_esp + 4) == 1);
+    audio_calls++;
+    g_eax = 11; g_ecx = 22; g_edx = 33;
+    g_esp += 4;
+}
 int main(int argc, char **argv)
 {
     RecompSetting settings[16];
@@ -44,14 +56,14 @@ int main(int argc, char **argv)
     MEM32(0x19C) = (uint32_t)atoi(argv[2]);
     MEM32(0x198) = 42;
     defjam_skip_intro_enter();
-    printf("first %u boots %d\n", MEM32(0x19C), boot_calls);
+    printf("first %u boots %d audio %d\n", MEM32(0x19C), boot_calls, audio_calls);
     assert(g_eax == 0x1234 && g_ecx == 0x100 && g_edx == 0x5678 && g_esp == 0x1000);
     assert(MEM32(0x198) == 42); /* the generated selector still owns the current screen */
     /* A later UI edit and another legal-screen request must not restart the skip. */
     recomp_settings_set("debug", "skip_intro", 1);
     MEM32(0x19C) = 0;
     defjam_skip_intro_enter();
-    printf("later %u boots %d\n", MEM32(0x19C), boot_calls);
+    printf("later %u boots %d audio %d\n", MEM32(0x19C), boot_calls, audio_calls);
     if (argc > 3) {
         /* With startup skipped there is no Game.StartMainMenu(0) event. */
         defjam_unlock_all_on_funccall("Control.GetScreenInfo(intMain/mainMenu.swf)");
@@ -120,7 +132,8 @@ def test_startup_skip_boundary_and_settings(startup_tool, tmp_path, file_value, 
     result = subprocess.run([str(startup_tool), str(ini), str(pending)], env=env,
                             capture_output=True, text=True, timeout=10)
     assert result.returncode == 0, result.stdout + result.stderr
-    assert result.stdout.splitlines() == [f'first {want} boots {boots}', f'later 0 boots {boots}']
+    assert result.stdout.splitlines() == [f'first {want} boots {boots} audio {boots}',
+                                      f'later 0 boots {boots} audio {boots}']
     assert 'skip_intro = true' in ini.read_text()
 
 
@@ -132,4 +145,4 @@ def test_skip_intro_and_unlock_can_be_enabled_together(startup_tool, tmp_path):
     result = subprocess.run([str(startup_tool), str(ini), '0', 'unlock'], env=env,
                             capture_output=True, text=True, timeout=10)
     assert result.returncode == 0, result.stdout + result.stderr
-    assert result.stdout.splitlines() == ['first 1 boots 1', 'later 0 boots 1', 'unlock 2']
+    assert result.stdout.splitlines() == ['first 1 boots 1 audio 1', 'later 0 boots 1 audio 1', 'unlock 2']
