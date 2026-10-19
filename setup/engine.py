@@ -67,12 +67,29 @@ def write_json(path, value):
     os.replace(temporary, path)
 
 
+STATUS_ATTEMPTS = 5
+
+
 def write_status(path, message):
+    """Publish one progress line for the wizard, best effort (issue #40).
+
+    The wizard polls this file while setup replaces it. Windows refuses the replace while any
+    reader holds the file without delete sharing (an older wizard, a scanner), so a refusal is
+    retried briefly and then the previous line is left. A progress label never stops setup;
+    receipts and payloads keep the strict write_json and their own failures.
+    """
     path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix('.pending')
-    temporary.write_text(message, encoding='utf-8')
-    os.replace(temporary, path)
+    for attempt in range(STATUS_ATTEMPTS):
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            temporary.write_text(message, encoding='utf-8')
+            os.replace(temporary, path)
+            return True
+        except OSError:
+            if attempt + 1 < STATUS_ATTEMPTS:
+                time.sleep(0.01 * 2 ** attempt)
+    return False
 
 
 def safe_relative(name):
@@ -1319,7 +1336,11 @@ def main(argv=None):
         def cancelled():
             if args.cancel_file and Path(args.cancel_file).exists():
                 raise SetupError('Setup cancelled', 6)
+        last_progress = [None]
         def progress(message):
+            if message == last_progress[0]:
+                return      # the download reports every 64 KiB; the label changes once a MiB
+            last_progress[0] = message
             if args.status_file:
                 write_status(args.status_file, message)
             if args.log:
