@@ -1167,11 +1167,28 @@ static void update_popup(UiResult &result)
         ImGui::PopTextWrapPos();
     }
     ImGui::Spacing();
-    if (state == UPDATER_DOWNLOADING) {
+    if (state == UPDATER_DOWNLOADING || state == UPDATER_INSTALLING) {
+        char overlay[48];
+        snprintf(overlay, sizeof(overlay), "%s %d%%", state == UPDATER_DOWNLOADING ? "Download" : "Installing",
+                 (int)(updater_progress() * 100.0 + 0.5));
         ImGui::PushStyleColor(ImGuiCol_PlotHistogram, k_red);
-        ImGui::ProgressBar((float)updater_progress(), ImVec2(-1, 0));
+        ImGui::ProgressBar((float)updater_progress(), ImVec2(-1, 0), overlay);
         ImGui::PopStyleColor();
-        ImGui::TextWrapped("%s", message);
+        ImGui::PushTextWrapPos(ImGui::GetFontSize() * 29);
+        ImGui::TextUnformatted(message);
+        ImGui::PopTextWrapPos();
+        ImGui::TextDisabled("You can keep this window open; the game stays as it is until you restart.");
+    } else if (state == UPDATER_INSTALLED) {
+        ImGui::TextColored(ImVec4(0.45f, 0.85f, 0.45f, 1), "%s", message);
+        ImGui::PushStyleColor(ImGuiCol_Button, k_red);
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, k_red_hi);
+        if (ImGui::Button("Restart now", ImVec2(ImGui::GetFontSize() * 10, 0))) {
+            updater_restart();
+            result.leave = true;        // this copy closes; the helper starts the new launcher
+        }
+        ImGui::PopStyleColor(2);
+        ImGui::SameLine();
+        if (ImGui::Button("Later", ImVec2(ImGui::GetFontSize() * 8, 0))) { dismissed = true; ImGui::CloseCurrentPopup(); }
     } else if (state == UPDATER_STARTED) {
         ImGui::TextWrapped("%s", message);
         result.leave = true;            // the setup takes over; it waits for this window to close
@@ -1181,8 +1198,8 @@ static void update_popup(UiResult &result)
         if (ImGui::Button("OK", ImVec2(ImGui::GetFontSize() * 8, 0))) { dismissed = true; ImGui::CloseCurrentPopup(); }
     } else {
         if (state == UPDATER_FAILED) ImGui::TextColored(ImVec4(1.0f, 0.45f, 0.4f, 1), "%s", message);
-        ImGui::TextWrapped("The setup downloads (about 55 MB), checks it, and rebuilds the game from your installed "
-                           "game files with a progress bar. Saves, settings and HD textures stay.");
+        ImGui::TextWrapped("The update downloads (about 55 MB), is checked, and is built from your installed game "
+                           "files right here, usually in a few minutes. Saves, settings and HD textures stay.");
         ImGui::PushStyleColor(ImGuiCol_Button, k_red);
         ImGui::PushStyleColor(ImGuiCol_ButtonHovered, k_red_hi);
         if (ImGui::Button("Install now", ImVec2(ImGui::GetFontSize() * 10, 0))) updater_install();
@@ -1315,7 +1332,9 @@ static UiResult draw_launcher(float x, float y, float width, float height)
     ImGui::PushStyleColor(ImGuiCol_ButtonActive, k_red_lo);
     ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 8 * u);
     ImGui::PushFont(g_font_black, style.FontSizeBase * 1.35f);
-    bool making_hd = hd_build_status(nullptr, nullptr, nullptr, 0, nullptr, 0) == HD_BUILD_RUNNING;
+    UpdaterState upd = updater_state();
+    bool making_hd = hd_build_status(nullptr, nullptr, nullptr, 0, nullptr, 0) == HD_BUILD_RUNNING ||
+                     upd == UPDATER_DOWNLOADING || upd == UPDATER_INSTALLING;
     if (making_hd) ImGui::BeginDisabled();
     if (ImGui::Button("PLAY", ImVec2(play_w, play_h))) result.play = true;
     if (making_hd) ImGui::EndDisabled();

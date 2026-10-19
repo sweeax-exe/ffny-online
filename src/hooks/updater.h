@@ -17,9 +17,14 @@ enum UpdaterState {
     UPDATER_CURRENT,        /* this is the newest build */
     UPDATER_AVAILABLE,      /* a newer build: updater_info */
     UPDATER_DOWNLOADING,    /* updater_progress */
-    UPDATER_STARTED,        /* the setup runs: close the launcher and do not start the game */
+    UPDATER_INSTALLING,     /* the setup builds the new version in the background: updater_progress */
+    UPDATER_INSTALLED,      /* done: updater_restart starts it */
+    UPDATER_STARTED,        /* (older flow) the setup window runs: close the launcher */
     UPDATER_FAILED          /* updater_message says why; the game still plays */
 };
+
+/* Start the newly installed version (its stable launcher) and let this one close. */
+void updater_restart(void);
 
 /* Look for an update in the background (once per call; the launcher calls it at start). */
 void updater_check(void);

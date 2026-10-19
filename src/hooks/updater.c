@@ -22,6 +22,7 @@
 #if !defined(_WIN32)
 
 void updater_check(void) {}
+void updater_restart(void) {}
 enum UpdaterState updater_state(void) { return UPDATER_CURRENT; }
 int updater_local_build(void) { return 0; }
 void updater_info(int *b, char *v, int vs, char *n, int ns) { if (b) *b = 0; if (vs > 0) v[0] = 0; if (ns > 0) n[0] = 0; }
@@ -34,6 +35,7 @@ void updater_message(char *t, int size) { if (size > 0) t[0] = 0; }
 
 #include <winhttp.h>
 #include <bcrypt.h>
+#include <shellapi.h>
 #pragma comment(lib, "winhttp.lib")
 #pragma comment(lib, "bcrypt.lib")
 
@@ -359,25 +361,89 @@ static DWORD WINAPI install_thread(LPVOID unused)
                                : "The download did not finish; try again later.");
         return 0;
     }
+    /* The setup runs without its window (--silent) while this launcher stays open: the new
+     * version is built beside the running one (setup/engine.py --allow-running; each version
+     * has its own executable) and this launcher shows the setup's status and progress files. */
     {
-        wchar_t cmd[MAX_PATH * 8], winstall[MAX_PATH * 2], wdata[MAX_PATH * 2];
+        wchar_t cmd[MAX_PATH * 8], winstall[MAX_PATH * 2], wdata[MAX_PATH * 2], wstatus[MAX_PATH * 2], wlog[MAX_PATH * 2];
+        char status[MAX_PATH * 2], text[256], line[MAX_PATH * 2];
         STARTUPINFOW si;
         PROCESS_INFORMATION pi;
+        DWORD code = 1;
+        snprintf(status, sizeof(status), "%s\\status.txt", dir);
+        DeleteFileA(status);
+        snprintf(line, sizeof(line), "%s.progress", status);
+        DeleteFileA(line);
         MultiByteToWideChar(CP_UTF8, 0, install, -1, winstall, MAX_PATH * 2);
         MultiByteToWideChar(CP_UTF8, 0, data, -1, wdata, MAX_PATH * 2);
-        _snwprintf(cmd, sizeof(cmd) / sizeof(cmd[0]), L"\"%s\" --update --install-dir \"%s\" --data-dir \"%s\" --wait-pid %lu",
-                   wpath, winstall, wdata, (unsigned long)GetCurrentProcessId());
+        MultiByteToWideChar(CP_UTF8, 0, status, -1, wstatus, MAX_PATH * 2);
+        snprintf(line, sizeof(line), "%s\\update-log.txt", dir);
+        MultiByteToWideChar(CP_UTF8, 0, line, -1, wlog, MAX_PATH * 2);
+        _snwprintf(cmd, sizeof(cmd) / sizeof(cmd[0]),
+                   L"\"%s\" --silent --reuse-extracted --allow-running --install-prerequisites --no-shortcuts"
+                   L" --install-dir \"%s\" --data-dir \"%s\" --status-file \"%s\" --log \"%s\"",
+                   wpath, winstall, wdata, wstatus, wlog);
         memset(&si, 0, sizeof(si));
         si.cb = sizeof(si);
-        if (!CreateProcessW(NULL, cmd, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi)) {
+        if (!CreateProcessW(NULL, cmd, NULL, NULL, FALSE, CREATE_NO_WINDOW | BELOW_NORMAL_PRIORITY_CLASS,
+                            NULL, NULL, &si, &pi)) {
             say(UPDATER_FAILED, "The setup could not be started.");
             return 0;
         }
         CloseHandle(pi.hThread);
+        InterlockedExchange(&g_permille, 0);
+        say(UPDATER_INSTALLING, "Installing version %s...", g_version);
+        while (WaitForSingleObject(pi.hProcess, 500) == WAIT_TIMEOUT) {
+            FILE *f = fopen(status, "r");
+            if (f) {
+                if (fgets(text, sizeof(text), f)) {
+                    size_t n = strlen(text);
+                    while (n && (text[n - 1] == '\n' || text[n - 1] == '\r')) text[--n] = 0;
+                    EnterCriticalSection(&g_cs);
+                    snprintf(g_message, sizeof(g_message), "%s", text);
+                    LeaveCriticalSection(&g_cs);
+                }
+                fclose(f);
+            }
+            snprintf(line, sizeof(line), "%s.progress", status);
+            if ((f = fopen(line, "r")) != NULL) {
+                int permille;
+                if (fscanf(f, "%d", &permille) == 1 && permille >= 0 && permille <= 1000)
+                    InterlockedExchange(&g_permille, permille);
+                fclose(f);
+            }
+        }
+        GetExitCodeProcess(pi.hProcess, &code);
+        CloseHandle(pi.hProcess);
+        if (code == 0) {
+            InterlockedExchange(&g_permille, 1000);
+            say(UPDATER_INSTALLED, "Version %s is installed. Restart to play it.", g_version);
+        } else {
+            say(UPDATER_FAILED, "The update stopped (code %lu); your current version still plays. Details: %s\\update-log.txt",
+                (unsigned long)code, dir);
+        }
+    }
+    return 0;
+}
+
+/* The new version's launcher can only take play.lock once this game -- and the old launcher
+ * waiting for it -- has exited: a hidden helper waits for this process, then starts it. */
+void updater_restart(void)
+{
+    char install[MAX_PATH * 2], data[MAX_PATH * 2], cmd[MAX_PATH * 6];
+    STARTUPINFOA si;
+    PROCESS_INFORMATION pi;
+    if (!find_install(install, sizeof(install), data, sizeof(data))) return;
+    snprintf(cmd, sizeof(cmd),
+             "powershell.exe -NoProfile -WindowStyle Hidden -Command \"Wait-Process -Id %lu -ErrorAction SilentlyContinue; "
+             "Start-Sleep -Seconds 2; Start-Process -FilePath '%s\\DefJamLauncher.exe' -WorkingDirectory '%s'\"",
+             (unsigned long)GetCurrentProcessId(), install, install);
+    memset(&si, 0, sizeof(si));
+    si.cb = sizeof(si);
+    if (CreateProcessA(NULL, cmd, NULL, NULL, FALSE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi)) {
+        CloseHandle(pi.hThread);
         CloseHandle(pi.hProcess);
     }
-    say(UPDATER_STARTED, "The update is running; the game will rebuild and be ready to play.");
-    return 0;
 }
 
 void updater_install(void)

@@ -390,6 +390,38 @@ class Engine:
                 if src.is_dir() and (not dst.exists() or (relative == 'src/recomp/gen' and
                                                           not (dst / 'lift-state.json').exists())):
                     shutil.copytree(src, dst, dirs_exist_ok=True)
+            self.keep_unchanged_times(old.parent)
+
+    def keep_unchanged_times(self, old_root):
+        """A file the new version ships byte for byte as the old one had it takes the old
+        file's modification time. Windows builds share one build folder across versions
+        (pipeline): Ninja then recompiles only what really changed -- usually a few
+        files, where every update used to rebuild all 92 MB of generated code."""
+        kept = 0
+        for name, sha in self.manifest['files'].items():
+            if not name.startswith(RUNTIME_FOLDERS):
+                continue
+            new, old = self.version_root / safe_relative(name), old_root / safe_relative(name)
+            try:
+                if old.is_file() and old.stat().st_size == new.stat().st_size and digest(old) == sha:
+                    st = old.stat()
+                    os.utime(new, ns=(st.st_atime_ns, st.st_mtime_ns))
+                    kept += 1
+            except OSError:
+                pass
+        self.event('Reusing the previous build where nothing changed (' + str(kept) + ' files unchanged)')
+
+    def junction(self, link, target):
+        """A directory junction (Windows): link -> target, replacing an old junction."""
+        link, target = Path(link), Path(target)
+        if os.path.lexists(link):
+            if not (getattr(os.path, 'isjunction', lambda p: False)(link) or os.path.islink(link)):
+                raise SetupError('Expected a link but found a folder: ' + str(link), 2)
+            os.rmdir(link)              # removes the junction only, never its target's contents
+        self.env['DEFJAM_SETUP_LINK'] = str(link)
+        self.env['DEFJAM_SETUP_TARGET'] = str(target)
+        self.run(['powershell.exe', '-NoProfile', '-Command',
+                  "New-Item -ItemType Junction -Path $env:DEFJAM_SETUP_LINK -Target $env:DEFJAM_SETUP_TARGET -ErrorAction Stop | Out-Null"])
 
     def check_install_destination(self):
         marker = self.install / 'setup-owner.json'
@@ -424,6 +456,10 @@ class Engine:
             listing = self.run(['ps', '-axo', 'comm='], capture=True, log_output=False)
             if any(line.strip() == receipt['executable'] for line in listing.splitlines()):
                 raise SetupError('Close the installed game before updating or repairing it', 5)
+            return
+        if getattr(self.args, 'allow_running', False) and Path(receipt['executable']).parent.name == 'bin':
+            # An update from the game's own launcher: the running copy is the old version's own
+            # executable (place_executable), which this update neither writes nor removes.
             return
         self.env['DEFJAM_SETUP_INSTALLED_EXE'] = receipt['executable']
         result = self.run(['powershell.exe', '-NoProfile', '-Command',
@@ -775,8 +811,19 @@ class Engine:
                     # ImGui from the payload, since the container builds without a network.
                     overrides = [self.imgui_override()]
                 elif IS_WINDOWS:
+                    # One build folder for every version, reached through one stable path, so CMake
+                    # and Ninja see the same tree from update to update and rebuild only what
+                    # changed (keep_unchanged_times). <install>\work points at this version's
+                    # source; its build folder points at <install>\build-cache.
+                    cache = self.install / 'build-cache'
+                    cache.mkdir(exist_ok=True)
+                    if not os.path.lexists(self.source / 'build'):
+                        self.junction(self.source / 'build', cache)
+                    work = self.install / 'work'
+                    self.junction(work, self.source)
+                    build_dir = work
                     deps = json.loads((self.payload / 'dependencies.json').read_text())
-                    overrides = [f'-DFETCHCONTENT_SOURCE_DIR_{name.upper()}={self.source / item["source_dir"]}'
+                    overrides = [f'-DFETCHCONTENT_SOURCE_DIR_{name.upper()}={work / item["source_dir"]}'
                                  for name, item in zip(('sdl3', 'imgui'), [d for d in deps if 'source_dir' in d])]
                 else:
                     # SDL3, MoltenVK and shaderc come prebuilt with the setup; nothing is
@@ -786,18 +833,45 @@ class Engine:
                                  f'-DCMAKE_PREFIX_PATH={prefix}', f'-DVulkan_LIBRARY={prefix}/lib/libMoltenVK.dylib',
                                  f'-DVulkan_INCLUDE_DIR={prefix}/include', '-DCMAKE_FIND_USE_CMAKE_SYSTEM_PATH=OFF',
                                  '-DCMAKE_OSX_ARCHITECTURES=arm64']
+                build_cwd = build_dir if IS_WINDOWS else self.source
                 self.run(self.in_container(['cmake', '--preset', PRESET, '-DDEFJAM_BUILD_GAME=ON', *overrides],
-                                           self.source), cwd=self.source)
+                                           self.source), cwd=build_cwd)
                 self.run(self.in_container(['cmake', '--build', '--preset', PRESET, '--target', 'defjam_recomp'],
-                                           self.source), cwd=self.source, progress=True)
+                                           self.source), cwd=build_cwd, progress=True)
                 self.run([self.python, self.source / 'scripts/pipeline-state.py', 'record-build',
                           '--preset', PRESET], cwd=self.source)
                 verify()
+                if IS_WINDOWS:
+                    self.place_executable()
                 if IS_LINUX:
                     self.check_host_runtime()
                 continue
             self.run(argv, cwd=self.source)
             verify()
+
+    def place_executable(self):
+        """Windows: this version's own copy of the game, <source>\\bin, which the receipt names.
+        The shared build folder's executable is overwritten by the next update's build; a copy
+        per version lets the old version keep running (an update from its launcher) and stay
+        playable if the new build fails."""
+        built = self.source / 'build' / PRESET
+        bin_dir = self.source / 'bin'
+        bin_dir.mkdir(parents=True, exist_ok=True)
+        for name in ('defjam_recomp.exe', 'defjam_recomp.pdb'):
+            if (built / name).is_file():
+                pending = bin_dir / (name + '.new')
+                shutil.copy2(built / name, pending)
+                os.replace(pending, bin_dir / name)
+        if not (bin_dir / 'defjam_recomp.exe').is_file():
+            raise SetupError('The build produced no game executable', 4)
+
+    def executable(self):
+        """The receipt's executable: this version's own copy when the build placed one (Windows),
+        otherwise the build folder's, as before."""
+        name = 'defjam_recomp.exe' if IS_WINDOWS else 'defjam_recomp'
+        if IS_WINDOWS and (self.source / 'bin' / name).is_file():
+            return self.source / 'bin' / name
+        return self.source / 'build' / PRESET / name
 
     def build_hd_textures(self):
         if not getattr(self.args, 'hd_textures', False):
@@ -928,12 +1002,21 @@ class Engine:
         receipt = {key: self.manifest[key] for key in ('version', 'source_commit', 'toolkit_commit')}
         previous = self.install / 'installed.json'
         receipt['hd_packs'] = getattr(self, 'hd_packs', json.loads(previous.read_text()).get('hd_packs', []) if previous.exists() else [])
-        receipt.update(schema=1, source=str(self.source), data=str(self.data),
-                       executable=str(self.source / 'build' / PRESET / ('defjam_recomp.exe' if IS_WINDOWS else 'defjam_recomp')))
+        receipt.update(schema=1, source=str(self.source), data=str(self.data), executable=str(self.executable()))
         if IS_WINDOWS:
             # Stable native launcher reads this atomic receipt and supplies the data env.
             shutil.copyfile(self.payload / 'DefJamLauncher.exe', self.install / 'DefJamLauncher.exe.new')
-            os.replace(self.install / 'DefJamLauncher.exe.new', self.install / 'DefJamLauncher.exe')
+            target = self.install / 'DefJamLauncher.exe'
+            for stale in self.install.glob('DefJamLauncher.exe.old-*'):
+                with contextlib.suppress(OSError):
+                    stale.unlink()      # left by an earlier update while it ran
+            try:
+                os.replace(self.install / 'DefJamLauncher.exe.new', target)
+            except PermissionError:
+                # It runs (it waits for the game that started this update): Windows lets a running
+                # executable be renamed, not replaced. Move it aside, then put the new one in place.
+                os.replace(target, self.install / ('DefJamLauncher.exe.old-' + str(int(time.time()))))
+                os.replace(self.install / 'DefJamLauncher.exe.new', target)
             launcher = self.install / 'DefJamLauncher.exe'
             self.env['DEFJAM_SETUP_LAUNCHER'] = str(launcher)
             self.env['DEFJAM_SETUP_ROOT'] = str(self.install)
@@ -977,7 +1060,11 @@ class Engine:
         if getattr(self.args, 'hd_textures', False) and not HD_SUPPORTED:
             raise SetupError('HD textures are not supported on this platform yet', 2)
         self.data.mkdir(parents=True, exist_ok=True)
-        with install_lock(self.install), install_lock(self.data), game_lock(self.install):
+        # From the running game's launcher (--allow-running, Windows) the game holds play.lock; the
+        # update builds a new version beside it and touches nothing the running one uses.
+        playing = (contextlib.nullcontext() if IS_WINDOWS and getattr(self.args, 'allow_running', False)
+                   else game_lock(self.install))
+        with install_lock(self.install), install_lock(self.data), playing:
             log_path = Path(self.args.log) if self.args.log else self.install / 'logs' / time.strftime('setup-%Y%m%d-%H%M%S.log')
             log_path.parent.mkdir(parents=True, exist_ok=True)
             with log_path.open('a', encoding='utf-8') as log:
@@ -1258,6 +1345,8 @@ def main(argv=None):
     parser.add_argument('--dump')
     parser.add_argument('--reuse-extracted', action='store_true',
                         help='Update: build from the game files the installation already extracted (no --dump)')
+    parser.add_argument('--allow-running', action='store_true',
+                        help='Update from the running game\'s launcher (Windows; the old version keeps its own copy)')
     parser.add_argument('--install-dir', required=True)
     parser.add_argument('--data-dir')
     parser.add_argument('--uninstall', action='store_true')

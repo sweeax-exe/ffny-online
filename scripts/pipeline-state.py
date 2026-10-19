@@ -131,6 +131,18 @@ def lift(repo, toolkit, split, extra):
         (staged / '.gitkeep').write_bytes((gen / '.gitkeep').read_bytes())
     write_state(staged / 'lift-state.json', {'inputs': inputs, 'outputs': generated_outputs(staged),
                                           'split': split, 'extra_args': extra})
+    # A generated file that comes out byte for byte as before keeps its old modification time,
+    # so the build recompiles only the files that changed (each is several MB of C).
+    if gen.is_dir():
+        kept = 0
+        for new in staged.iterdir():
+            old = gen / new.name
+            if new.suffix in {'.c', '.h'} and old.is_file() and old.stat().st_size == new.stat().st_size \
+                    and digest(old) == digest(new):
+                st = old.stat()
+                os.utime(new, ns=(st.st_atime_ns, st.st_mtime_ns))
+                kept += 1
+        print(f'{kept} generated files unchanged; only the others will be recompiled')
     backup = repo / 'logs/lift-backups' / time.strftime('%Y%m%d-%H%M%S')
     if gen.exists():
         backup.parent.mkdir(parents=True, exist_ok=True)
