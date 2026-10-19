@@ -33,6 +33,7 @@
 #include "hooks/test_observations.h"
 #include "hooks/pc_settings.h"
 #include "hooks/netplay.h"
+#include "hooks/automatch.h"
 
 /* Read-only probes use the lifter's universal entry hooks. They do not alter
  * guest registers, stack, memory or the generated body. Off in normal play. */
@@ -571,6 +572,25 @@ static void funccall_hook(void)
         fprintf(stderr, "[FUNCCALL] %s\n", text);
     xbox_NoteAnchorEvent(text);
     sub_00068BA0();
+    automatch_on_funccall(text);    /* a requested match starts here (src/hooks/automatch.c) */
+}
+
+/* One front-end command, as the Flash side would send it, on the game thread (the FuncCall
+ * hook above is the only caller, through automatch). cdecl: the argument and a dummy return
+ * address are pushed below the current stack, the string above the callee's frame. Returns the
+ * guest address of the result string, or 0. */
+unsigned int defjam_fe_call(const char *command)
+{
+    uint32_t sp0 = g_esp, n = (uint32_t)strlen(command) + 1, s, i;
+    s = (sp0 - 0x40u - n) & ~3u;
+    for (i = 0; i < n; i++)
+        MEM8(s + i) = (uint8_t)command[i];
+    g_esp = s;
+    PUSH32(g_esp, s);
+    PUSH32(g_esp, 0x00000000u);
+    sub_00068BA0();
+    g_esp = sp0;
+    return g_eax;
 }
 
 /* ---- Trace chosen functions, by guest address --------------------------
