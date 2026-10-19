@@ -437,6 +437,7 @@ static int has_arg(const char *flag)
 
 static void run_launcher_if_wanted(void)
 {
+    netplay_autostart();        /* tests only: already connecting while the launcher shows */
 #if defined(_WIN32)
     const char *settings = getenv("RECOMP_SETTINGS");
     const char *cmd = GetCommandLineA();

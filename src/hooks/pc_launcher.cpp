@@ -322,7 +322,8 @@ extern "C" int pc_launcher_run(void)
     g_done = false;
     g_result = 1;
     const char *shot = getenv("RECOMP_WINDOW_SHOT");
-    int frames = 0;
+    const char *shot_at = getenv("RECOMP_WINDOW_SHOT_FRAME");     /* default 30 */
+    int frames = 0, shot_frame = shot_at && atoi(shot_at) > 0 ? atoi(shot_at) : 30;
     while (!g_done) {
         MSG msg;
         while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
@@ -347,7 +348,7 @@ extern "C" int pc_launcher_run(void)
         g_ctx->ClearRenderTargetView(g_rtv, clear);
         ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
         ui_unlock();
-        if (shot && *shot && ++frames == 30) {
+        if (shot && *shot && ++frames == shot_frame) {
             fprintf(stderr, "[UI] launcher picture %s %s\n", write_shot(shot) ? "written to" : "could not be written to", shot);
             g_done = true;
             g_result = 0;

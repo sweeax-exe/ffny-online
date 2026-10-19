@@ -1514,7 +1514,7 @@ static const char *const k_page_hints[PAGE_COUNT] = {
     "Who plays with which pad, rumble and dead zones",
     "Remap every button of a gamepad",
     "Keys and mouse buttons for the keyboard player",
-    "Fight a friend over the internet",
+    "Quick match, rooms and venue votes over the internet",
     "Start-up, the in-game overlay and files" };
 
 static void draw_page(int page, UiMode mode)
@@ -1601,10 +1601,20 @@ static void update_popup(UiResult &result)
     ImGui::EndPopup();
 }
 
+// RECOMP_LAUNCHER_PAGE=online (or another page's name): open on that page, for screenshots.
+static int initial_page()
+{
+    static const char *const names[] = { "display", "textures", "controllers", "pad", "keyboard", "online", "general" };
+    const char *want = getenv("RECOMP_LAUNCHER_PAGE");
+    for (int i = 0; want && i < PAGE_COUNT; i++)
+        if (!strcmp(want, names[i])) return i;
+    return PAGE_DISPLAY;
+}
+
 static UiResult draw_launcher(float x, float y, float width, float height)
 {
     UiResult result;
-    static int page = PAGE_DISPLAY;
+    static int page = initial_page();
     static bool checked;
     if (!checked) { checked = true; updater_check(); }
     const float u = ImGui::GetFontSize() / 17.0f;           // one design pixel at the current scale

@@ -1109,13 +1109,18 @@ void netplay_on_main_menu(void)
 /* Unattended sessions for tests: RECOMP_NETPLAY=host or join, RECOMP_NETPLAY_SERVER, and
  * RECOMP_NETPLAY_CODE_FILE, where the host writes its room code once it has one and the
  * guest waits for it (up to a minute). RECOMP_NETPLAY=quick enters the hub, quick-matches
- * and readies with RECOMP_NETPLAY_FIGHTER (default 55), voting for the first venue. */
+ * and readies with RECOMP_NETPLAY_FIGHTER (default 55), voting for the first venue; =lobby only
+ * enters the hub. */
 static DWORD WINAPI autostart_thread(LPVOID unused)
 {
     const char *mode = getenv("RECOMP_NETPLAY"), *server = getenv("RECOMP_NETPLAY_SERVER");
     const char *file = getenv("RECOMP_NETPLAY_CODE_FILE");
     int i;
     (void)unused;
+    if (!strcmp(mode, "lobby")) {
+        netplay_lobby(server, "Test player");
+        return 0;
+    }
     if (!strcmp(mode, "quick")) {
         const char *f = getenv("RECOMP_NETPLAY_FIGHTER");
         int fighter = f && *f ? atoi(f) : 55, readied = 0;
@@ -1167,8 +1172,10 @@ static DWORD WINAPI autostart_thread(LPVOID unused)
 void netplay_autostart(void)
 {
     const char *mode = getenv("RECOMP_NETPLAY"), *server = getenv("RECOMP_NETPLAY_SERVER");
+    static LONG once;
     HANDLE t;
-    if (!mode || !server || (strcmp(mode, "host") && strcmp(mode, "join") && strcmp(mode, "quick"))) return;
+    if (InterlockedExchange(&once, 1)) return;
+    if (!mode || !server || (strcmp(mode, "host") && strcmp(mode, "join") && strcmp(mode, "quick") && strcmp(mode, "lobby"))) return;
     t = CreateThread(NULL, 0, autostart_thread, NULL, 0, NULL);
     if (t) CloseHandle(t);
 }
