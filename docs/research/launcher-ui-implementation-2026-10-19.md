@@ -1,7 +1,8 @@
 # Launcher implementation and playtest — 2026-10-19
 
 Vlad approved the Brick & paper proposal and requested implementation in a worktree, tests and a push.
-Branch `codex/launcher-redesign`, based on main `63207ea`. A release/tag or merge is outside this change.
+Branch `codex/launcher-redesign`, based on main `63207ea`; source commit `205582d`.
+[Draft PR #58](https://github.com/vyanhursky/DefJamFFNY-recomp/pull/58) is pushed for owner playtest. No release/tag or merge was requested.
 
 ## Delivered behavior
 
@@ -69,7 +70,23 @@ logs/scenarios/regress-combat-20261019-121629/report.json and game.log.err:88813
 launcher. A final-build repeat is recorded below; the first failure is retained rather than reclassified.
 The two-player route passed 26/26 assertions.
 
-Final-build quick regression passed **5/5 in 7 minutes** (logs/regress-20261019-125121.txt; fight median 120 presents per 2 seconds, minimum 112). The four-check UI set, focused combat retry and remote CI are running or pending publication; their results are added after completion.
+Final-build checks passed:
+
+- **Quick 5/5 in 7 minutes**: logs/regress-20261019-125121.txt; fight median 120 presents per
+  2 seconds, minimum 112.
+- **UI 4/4**: logs/regress-20261019-125530.txt; Home routes/Play/skip, F1 overlay,
+  unlock-option persistence/default off, brightness 151/vignette off saved and applied.
+- **Combat retry 27/27 assertions**, including the audio gates: logs/regress-20261019-125931.txt,
+  scenario logs/scenarios/regress-combat-20261019-125530. The first failure above remains recorded.
+- **[Source CI 28/28](https://github.com/vyanhursky/DefJamFFNY-recomp/actions/runs/39289203701)** at `205582d`: Windows/MSVC game-side source compile and native
+  fixtures, Windows/macOS/Linux setup builds and smoke/update checks, POSIX runtime fixtures,
+  Python tools and source hygiene. All run without game data.
+
+The owner's save still byte-matches the verified restored payload after all isolated tests
+(logs/launcher-review/final-owner-save-check.json). Source hygiene: 427 files, zero failures.
+Local playtest entry is build/Def Jam Launcher Playtest.app in the launcher-redesign worktree. It forces
+Home even if the normal skip preference is enabled and uses the owner's normal data by default.
+The bundle/build/captures are local only; keep this worktree available during owner playtest.
 
 ## Owner playtest
 

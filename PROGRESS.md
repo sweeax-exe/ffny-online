@@ -10,7 +10,7 @@
 
 | Area | State | Notes |
 |---|---|---|
-| Launcher redesign (D138-D140) | ⏳ implemented; final validation/publication | Native Home + six Advanced pages, shared overlay, Mods and setup/file utilities. Mac build, 527 unit tests and 11 native UI cases pass. Full run 16/18 (one audio underrun, historical stream ICALL; replay hash matches). Final quick 5/5; UI rerun, combat retry and CI pending. Report `docs/research/launcher-ui-implementation-2026-10-19.md`. |
+| Launcher redesign (D138-D140) | ✅ pushed; ready for owner playtest | `codex/launcher-redesign`, source `205582d`, [draft PR #58](https://github.com/vyanhursky/DefJamFFNY-recomp/pull/58); CI 28/28, units 527/32 skip, native UI 11/11, final quick 5/5 and UI 4/4; combat retry 27/27. Full first run 16/18 (one audio dry event, historical stream ICALL with exact replay hash), both recorded. Local Mac app in worktree build/. Windows/Deck live acceptance pending. |
 | Plan reviewed | ✅ | See `docs/01-plan-review.md` |
 | Source dump located | ✅ | Two images of the owner's disc: XISO (3.0 GB) and full-disc ISO (7.8 GB) |
 | XISO extracted | ✅ | `<data>\extracted\` |
@@ -320,7 +320,6 @@ defjam-recomp/
 
 > Recent entries only; older entries remain unchanged in the local `docs/worklog/` archive.
 
-- 2026-10-18 19:40 — Full regress.py on the Mac for D134 (test/hitch-capture 0c4b9fb, toolkit 32aab4d): 16 of 17 in 38 min (logs/regress-20261018-191008.txt). unit 507 pass/30 skip, m2/m3/m4a goldens, launcher, overlay, fight/ffa/ffa-terrordome (median 120 presents per 2 s, min 92-120), combat 27/27, versus 26/26, replay hash, intro, crib, gym, soak 3/3 ok. The one failure, unlockopt ("the click on the Debug checkbox did not reach settings.ini", logs/run-20261018-183621.log.err, game frames normal), passed on 2 of 2 reruns with the fix and 1 of 1 with RECOMP_YIELD_DEPRESS=1 RECOMP_EXECUTOR_QOS=0: a flake in the scripted overlay click. Not pushed.
 - 2026-10-18 22:10 — Merge order executed (owner-approved): PR46 f44dde3, PR45 5ee420e (quick 5/5 logs/regress-20261018-210808.txt), toolkit fork PR2 95390b9 into defjam/audio-fix (pins 2edf96f/32aab4d kept), PR48 F4 shader cache 7d6862d (CI 28/28; full Mac 16/17 logs/regress-20261018-215017.txt, sole failure combat audio.dry_queue dry=1, the known baseline). test/hitch-capture merged with main: no src/toolkit change since its full 16/17; quick 5/5 logs/regress-20261018-215849.txt. Next: its PR, then the Deck report PR.
 - 2026-10-18 22:35 — v0.10.2 prepared on chore/release-v0.10.2 (D135), not tagged: CMake 0.10.2, docs/releases/v0.10.2.md, known-issues scene-performance limits. Candidate build verified (binary reports 0.10.2), quick 5/5 logs/regress-20261018-222254.txt (units 507/30 skip), check-source-tree 410/0, check-release version+notes ok (tag and main-ancestry parts run at tagging). Waiting for Vlad's go-ahead to merge, tag and publish.
 - 2026-10-18 22:50 — v0.10.2 published/latest at 22:44 ET from PR51 merge c17dffb (CI 28/28 on main 39190415641; check-release verified 411 files); Source release 39190861886 green 30/30. Nine game-free assets downloaded and verified: SHA files and GitHub digests match, provenance source c17dffb/toolkit 32aab4d, production payloads; against v0.10.1 only the new scene-perf/hitch-probe scripts and shader-cache sources added. Evidence logs/release-v0.10.2/verification.json.
@@ -328,25 +327,31 @@ defjam-recomp/
 - 2026-10-19 10:20 — v0.10.3 published as a GitHub **pre-release** (D137) from PR #56 merge `d8c8ad2` (CI 28/28; `check-release.py` verified 416 files; quick 5/5 `logs/regress-20261019-100411.txt`). Source release run 39266562051 green. Nine game-free assets downloaded and verified (`logs/release-v0.10.3/assets`): each `.sha256` and GitHub digest match, provenance names source `d8c8ad2` and toolkit `32aab4d`; the Linux payload carries `src/patches/picture.c` and the fixed `setup/engine.py`. `/releases/latest` and setup's live catalog still show v0.10.2.
 - 2026-10-19 11:57 — Launcher redesign implementation (D139) in isolated `codex/launcher-redesign` from `63207ea`: native Home + 6 Advanced categories, shared overlay, local pack ordering, path/log actions and setup handoff. Mac build passes; native cases 5/5 with save roots restored, setup child releases inherited play.lock; focused tests 60 pass/17 skip, Swift type-check. Fixed double text scaling/field alignment/footer visibility found by captures. Full regression running on disposable runtime-data. Early run stopped for override fix; interrupted save restore recovered and byte-verified (logs/launcher-review/save-recovery.json; logs/run-20261019-115113.log.err). No push yet.
 - 2026-10-19 12:45 — D139-D140 launcher: Mac final build, full units 527 pass/32 skip, native UI 11/11 plus constrained tooltip pass (all saves restored, clipboard restored, Setup child releases play.lock). Full pre-polish 16/18 in 42 min (logs/regress-20261019-123630.txt): combat dry=1/110 ms host stall; replay exact 80-record golden hash with historical 0x001E3C14. Final quick/UI/combat retry running on disposable data; publication next.
+- 2026-10-19 13:02 — D139-D140 launcher ready for playtest: source 205582d on codex/launcher-redesign pushed, draft PR #58; source CI 39289203701 28/28. Units 527 pass/32 skip; native UI 11/11 + tooltip, clipboard/save restoration and Setup inherited-lock release verified. Final quick 5/5 logs/regress-20261019-125121.txt, UI 4/4 logs/regress-20261019-125530.txt; combat retry 27/27 logs/regress-20261019-125931.txt (first full 16/18 audio/stream limits retained). Owner save still byte-matches recovered payload. Local build/Def Jam Launcher Playtest.app ready; physical pad/Windows/Deck acceptance for Vlad. No merge/tag/release.
 
 ## 7. Hand-off
 
-Launcher redesign (D138-D140) is implemented in `/Users/vlad/.codex/worktrees/launcher-redesign/DefJamFFNY-recomp`,
-branch `codex/launcher-redesign` from main `63207ea`. Owner authorized implementation, testing and push; no merge/tag/release.
-See `docs/research/launcher-ui-implementation-2026-10-19.md` and `docs/launcher-and-overlay.md` for architecture and playtest.
-Local owner entry: `build/Def Jam Launcher Playtest.app` (forces launcher, uses the owner's normal data). Never publish it.
+Launcher redesign (D138-D140) is ready for owner playtest: branch `codex/launcher-redesign`, source commit `205582d`,
+[draft PR #58](https://github.com/vyanhursky/DefJamFFNY-recomp/pull/58). Worktree `/Users/vlad/.codex/worktrees/launcher-redesign/DefJamFFNY-recomp` remains attached.
+Owner authorized build/test/push; no merge/tag/release. Keep the worktree: local entry is
+`build/Def Jam Launcher Playtest.app` (forces launcher, normal owner data); no game executable is published.
 
-Mac build, full units 527 pass/32 skip and 11 native UI cases pass, including real mod ordering, environment locks,
-640x480 at 200%, system clipboard restoration, Setup inherited-lock release and the app wrapper. Captures/check JSON stay
-in `logs/launcher-review`. Full pre-polish run 16/18 in 42 min: all UI, golden, fight performance, Story and 3/3 soak passed;
-combat had one audio dry event beside a 110 ms host stall, replay matched the golden hash but hit historical 0x001E3C14 (D108).
-Table `logs/regress-20261019-123630.txt`; triaged scenario reports in the implementation note. Keep these limitations visible.
+Read `docs/research/launcher-ui-implementation-2026-10-19.md` and `docs/launcher-and-overlay.md` on that branch.
+Implemented native Home, six shared Advanced/overlay categories, procedural brick/paper theme, local pack ordering,
+file/log/clipboard utilities and Setup context/handoff. Existing defaults, renderer, toolkit pin and branding stay intact.
 
-Final quick passed 5/5 (`logs/regress-20261019-125121.txt`, fight median 120/minimum 112). The UI four-check set and focused combat retry are serial under `/tmp/dj-launcher-impl/final_regress.py`;
-tables `/tmp/dj-launcher-post-{quick,ui,combat}.txt`, receipts `logs/launcher-review/final-regress.json`, disposable runtime-data.
-No game-source edits until those finish. Next: source-only stage/hygiene, commit, push, open/attach draft PR and check CI.
-An early interrupted save restore was recovered byte-identically before tests continued (`save-recovery.json` in the local
-review folder). Native Windows/Deck GUI acceptance is for Vlad. No renderer/toolkit/default/branding changes.
+Validation: full units 527 pass/32 skip; native UI 11/11 plus tooltip capture, all guarded saves restored and clipboard
+restored; Setup child releases inherited play.lock. Final quick 5/5 (`logs/regress-20261019-125121.txt`), UI 4/4
+(`logs/regress-20261019-125530.txt`), combat retry 27/27 (`logs/regress-20261019-125931.txt`). Source CI 28/28:
+https://github.com/vyanhursky/DefJamFFNY-recomp/actions/runs/39289203701 (`205582d`, includes MSVC game-side source compile and new native fixtures).
+First full run 16/18 (`logs/regress-20261019-123630.txt`): one combat audio underrun beside a 110 ms host stall;
+replay matched all 80 golden records but hit historical 0x001E3C14 (D108). Both remain visible; no thresholds/diagnostics
+were suppressed. Early interrupted SaveGuard recovery was verified byte-identical; final owner-save comparison still
+matches (`logs/launcher-review/final-owner-save-check.json`). Other receipts/captures stay in that ignored review folder.
+
+Next: Vlad playtests Home/Advanced/Back, physical-controller navigation/remapping, actual HD packs and priority, folder/log
+actions and the real Setup selection/prefill. Native Windows and Deck GUI acceptance remains his check. Use the report's
+checklist; collect feedback on PR #58. No game is running. The v0.10.3 beta/Deck release work remains below.
 
 v0.10.3 is published (2026-10-19 10:15 ET, https://github.com/vyanhursky/DefJamFFNY-recomp/releases/tag/v0.10.3), the beta for the owner's Steam Deck test (D137), a **GitHub pre-release**: setup's picker and "latest" skip it,
 so players stay on v0.10.2. It holds PR #54 (setup progress fix, #40, merged `c37bf34`) and PR #55 (brightness and vignette,
