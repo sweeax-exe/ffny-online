@@ -3,8 +3,8 @@
  * The front end hands the game a match through FuncCall strings (Game.SetMatchType,
  * Controller.ControllerSetup, Game.ChooseVenue, Game.StartGame, ...). This replays the sequence a
  * two-player Versus run logs, with the requested values, on the game thread (the FuncCall hook),
- * once the main menu has settled: no MemCard call for a while, which is when the boot-time save
- * checks are done.
+ * once the main menu, or the battle match-type screen a match's summary leads back to, has
+ * settled: no MemCard call for a while, which is when the boot-time save checks are done.
  *
  * Tests: RECOMP_AUTOMATCH="type=0,venue=1,f0=55,p0=0,f1=22,p1=-1" (pads: -1 is the CPU).
  * RECOMP_FE_RESULTS=1 prints what the roster, venue and match-type queries return. */
@@ -16,6 +16,7 @@
 #include <string.h>
 #include "recomp/gen/recomp_types.h"
 #include "automatch.h"
+#include "netplay.h"
 
 /* The idle main menu makes only a handful of FuncCalls (its music and sounds), so the sequence
  * runs at the menu music's start, or after a few calls with no MemCard call in between. */
@@ -83,6 +84,7 @@ static void run_sequence(void)
     g_running = 1;
     InterlockedExchange(&g_armed, 0);
     for (i = 0; i < m->count; i++) if (m->pad[i] >= 0) humans++;
+    netplay_sync_point();
     call("Game.StartBattleMode()");
     call("Game.ResetMatchTypeList()");
     call("Game.ResetMatchData()");
@@ -128,8 +130,13 @@ void automatch_on_funccall(const char *text)
     if (!g_env_read) read_env();
     print_result(text);
     if (g_running) return;
-    if (strstr(text, "intMain/mainMenu.swf")) { g_on_menu = 1; g_quiet = 0; }
-    else if (strstr(text, "GetScreenInfo(") && !strstr(text, "mainMenu")) g_on_menu = 0;
+    /* the main menu, or the battle match-type screen the summary of a match returns to */
+    if (strstr(text, "intMain/mainMenu.swf") || strstr(text, "GetScreenInfo(battle/cmtype")) {
+        g_on_menu = 1;
+        g_quiet = 0;
+        if (!g_armed) netplay_on_main_menu();       /* an online match has ended */
+    }
+    else if (strstr(text, "GetScreenInfo(")) g_on_menu = 0;
     if (!strncmp(text, "MemCard.", 8)) g_quiet = 0;
     else if (g_on_menu) g_quiet++;
     if (g_armed && g_on_menu && (g_quiet >= SETTLE_CALLS || !strcmp(text, "Audio.PlayMusic()"))) {

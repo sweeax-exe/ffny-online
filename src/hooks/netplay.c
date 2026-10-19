@@ -4,17 +4,23 @@
  * Threads. A network thread owns the socket: it talks to the relay, keeps the
  * session alive, streams this PC's controller and stores what arrives. The game
  * thread calls the hooks below from the title's own functions; a fight step waits
- * there until the other player's input for that step has arrived. One critical
+ * there until every other player's input for that step has arrived. One critical
  * section covers the shared state.
  *
- * Lockstep. Fight step s uses, for both players, the pad-table entry (all 32
+ * Two ways in. netplay_host/netplay_join make a two-player room by code; both
+ * players then pick the match in the menus. netplay_lobby enters the hub: rooms,
+ * quick match and the venue vote run on the server, and its START names the
+ * match, which automatch.c sets up on every PC from the main menu.
+ *
+ * Lockstep. Fight step s uses, for every player, the pad-table entry (all 32
  * bytes: buttons, a second word, both sticks) that the player's PC captured
- * `delay` steps earlier. Both PCs therefore feed the same entries to the same
+ * `delay` steps earlier. All PCs therefore feed the same entries to the same
  * steps, whatever their frame timing, and the first `delay` steps of a match get
- * an empty entry on both. The title polls the pad once per pass and may run
+ * an empty entry on all. The title polls the pad once per pass and may run
  * several steps a pass; the last word of an entry (always 0 from the poller) is
  * set to a marker when an entry is injected, so a reader can tell a fresh poll
- * from what it injected itself. */
+ * from what it injected itself. A player is a position 0..players-1, the game's
+ * player number; in a hub room positions follow the room slots in order. */
 #define _CRT_SECURE_NO_WARNINGS
 #if defined(_WIN32)
 #include <winsock2.h>
@@ -29,6 +35,8 @@
 #include <string.h>
 #include "recomp/gen/recomp_types.h"
 #include "netplay.h"
+#include "automatch.h"
+#include "online_data.h"
 
 #if !defined(_WIN32)
 
@@ -40,6 +48,20 @@ void netplay_status(char *t, int size) { if (size > 0) snprintf(t, (size_t)size,
 void netplay_room(char *c, int size) { if (size > 0) c[0] = 0; }
 void netplay_autostart(void) {}
 int netplay_active(void) { return 0; }
+int netplay_lobby(const char *s, const char *n) { (void)s; (void)n; return -1; }
+void netplay_lobby_list(int m) { (void)m; }
+int netplay_lobby_rooms(NetRoomInfo *o, int m, unsigned *v) { (void)o; (void)m; if (v) *v = 0; return 0; }
+void netplay_lobby_create(const NetRoomSettings *s) { (void)s; }
+void netplay_lobby_join(const char *c) { (void)c; }
+void netplay_lobby_quick(int m, int x) { (void)m; (void)x; }
+void netplay_lobby_settings(const NetRoomSettings *s) { (void)s; }
+void netplay_lobby_ready(int r, int f) { (void)r; (void)f; }
+void netplay_lobby_vote(int c) { (void)c; }
+void netplay_lobby_leave(void) {}
+void netplay_lobby_room(NetRoom *o) { memset(o, 0, sizeof(*o)); }
+int netplay_in_lobby(void) { return 0; }
+void netplay_sync_point(void) {}
+void netplay_on_main_menu(void) {}
 void netplay_on_match_start(void) {}
 void netplay_on_pad_pass(void) {}
 void netplay_on_step(void) {}
@@ -64,15 +86,29 @@ void netplay_on_seed(uint32_t e, int w, uint32_t x) { (void)e; (void)w; (void)x;
 #define T_PONG        0x06
 #define T_BYE         0x07
 #define T_ERROR       0x08
+/* the lobby extension */
+#define T_LIST        0x10
+#define T_ROOMS       0x11
+#define T_CREATE      0x12
+#define T_JOIN        0x13
+#define T_QUICK       0x14
+#define T_SETTINGS    0x15
+#define T_READY       0x16
+#define T_VOTE        0x17
+#define T_LEAVE       0x18
+#define T_ROOM        0x19
+#define T_START       0x1A
+#define T_OVER        0x1B
 
-/* Payload types inside DATA (ours; the relay never reads them). */
+/* DATA payloads between the game copies (opaque to the relay) */
 #define P_GAMEHELLO   1     /* host -> guest: u32 session seed, u8 input delay, u8 lockstep version */
 #define P_GAMEACK     2     /* guest -> host */
 #define P_LIVEPAD     3     /* u32 sequence, 18 bytes XBOX_GAMEPAD */
 #define P_STEPS       4     /* u32 match, u32 last step, u8 count, count x 32 bytes */
 #define P_HASH        5     /* u32 match, u32 step, u32 hash */
-#define LOCKSTEP_VERSION 1
+#define LOCKSTEP_VERSION 2
 
+#define MAXP          NETPLAY_MAX_PLAYERS
 #define PAD_TABLE     0x003B8F48u
 #define ACTORS        0x003B92E0u
 #define STRIDE        0x12E8u
@@ -81,8 +117,11 @@ void netplay_on_seed(uint32_t e, int w, uint32_t x) { (void)e; (void)w; (void)x;
 #define RING          512           /* steps of input kept per player */
 #define REDUNDANT     8             /* steps repeated in every STEPS packet */
 #define HASH_EVERY    60
-#define STALL_LIMIT_MS 10000        /* mid-fight: the other player has gone */
-#define START_LIMIT_MS 90000        /* the first steps: the other PC may still be loading the venue */
+#define STALL_LIMIT_MS 10000        /* mid-fight: a player has gone */
+#define START_LIMIT_MS 90000        /* the first steps: another PC may still be loading the venue */
+#define LOBBY_DELAY   3             /* hub matches: every PC must use the same delay */
+#define RETRY_MS      400           /* lobby requests are repeated until the server answers */
+#define RETRIES       8
 
 static CRITICAL_SECTION g_cs;
 static INIT_ONCE g_once = INIT_ONCE_STATIC_INIT;
@@ -95,22 +134,26 @@ static struct {
     struct sockaddr_storage server;
     int server_len;
     char server_text[128];
-    int creating;                   /* 1 host, 0 guest */
+    int creating;                   /* code rooms: 1 host, 0 guest */
+    int lobby;                      /* 1: the hub */
     char room[7];
     char name[25], peer_name[25];
     uint8_t build[8];
     uint8_t token[8];
     int have_token;
-    int slot;                       /* 0 host = player 1, 1 guest = player 2 */
+    int slot;                       /* this client's slot in its room */
     char status[192];
     /* session */
     uint32_t session;
     int delay;
     int acked;
+    int players, pos;               /* players in the match, this PC's position */
+    int fighters;                   /* in the fight, with the CPU ones */
+    int pos_of_slot[MAXP];          /* room slot -> position, -1 none */
     /* controllers */
-    XBOX_GAMEPAD remote_pad;
-    uint32_t remote_seq, local_seq;
-    DWORD remote_packet;
+    XBOX_GAMEPAD remote_pad[MAXP];
+    uint32_t remote_seq[MAXP], local_seq;
+    DWORD remote_packet[MAXP];
     XBOX_GAMEPAD last_sent;
     ULONGLONG last_pad_sent;
     /* link */
@@ -119,16 +162,31 @@ static struct {
     int rtt_ms;
     /* lockstep (step numbers count from 1 at each match start) */
     volatile LONG lockstep;         /* connected and not abandoned */
-    uint32_t match, step;
+    uint32_t match, match_count, step;
     uint8_t latest_local[ENTRY];
-    uint8_t in[2][RING][ENTRY];
-    uint32_t in_tag[2][RING];       /* step + 1 (0 = empty) */
-    uint32_t in_match[2][RING];
+    uint8_t in[MAXP][RING][ENTRY];
+    uint32_t in_tag[MAXP][RING];    /* step + 1 (0 = empty) */
+    uint32_t in_match[MAXP][RING];
     HANDLE arrived;
     uint32_t local_hash[16][3], remote_hash[16][3];   /* match, step, hash */
     int desync;
     uint32_t desync_step;
     struct { uint32_t which, count; } seeds[32];
+    /* the hub */
+    NetRoom roomv;
+    NetRoomInfo rooms[32];
+    int room_count;
+    unsigned rooms_version;
+    uint8_t pend[300];              /* the request waiting for an answer */
+    int pend_len, pend_tries;
+    ULONGLONG pend_sent;
+    int match_live;                 /* START received, OVER not yet sent */
+    int match_seen;                 /* the game has started that match */
+    int over_pending;
+    int start_this_play;            /* a START arrived since the room entered phase 2 */
+    ULONGLONG last_recover;
+    uint32_t start_seed;
+    int start_slots[MAXP];
 } N;
 
 static BOOL CALLBACK init_once(PINIT_ONCE o, PVOID p, PVOID *c)
@@ -183,9 +241,9 @@ static void send_hello(void)
 {
     uint8_t b[64];
     int n = header(b, T_HELLO), len = (int)strlen(N.name);
-    b[n++] = N.creating ? 0 : 1;
+    b[n++] = N.lobby ? 2 : N.creating ? 0 : 1;
     memset(b + n, 0, 6);
-    if (!N.creating) memcpy(b + n, N.room, 6);
+    if (!N.lobby && !N.creating) memcpy(b + n, N.room, 6);
     n += 6;
     memcpy(b + n, N.build, 8); n += 8;
     b[n++] = (uint8_t)len;
@@ -212,35 +270,85 @@ static void send_data(const uint8_t *payload, int len)
     send_raw(b, n);
 }
 
-/* ---- the remote controller, as the title's second pad -------------------------- */
-
-static DWORD remote_state(XBOX_INPUT_STATE *state)
+/* A hub request: header, token, then `body`. Repeated every RETRY_MS until the server answers
+ * (the relay treats a repeat as the same request). A new request replaces a waiting one. */
+static void request(uint8_t type, const uint8_t *body, int len)
 {
-    if (N.state != NETPLAY_CONNECTED) return ERROR_DEVICE_NOT_CONNECTED;
+    uint8_t b[sizeof(N.pend)];
+    int n;
+    if (!N.lobby || !N.have_token || len < 0 || len > (int)sizeof(b) - 14) return;
+    n = header(b, type);
+    memcpy(b + n, N.token, 8); n += 8;
+    if (len) memcpy(b + n, body, (size_t)len);
+    n += len;
     EnterCriticalSection(&g_cs);
-    state->dwPacketNumber = N.remote_packet;
-    state->Gamepad = N.remote_pad;
+    memcpy(N.pend, b, (size_t)n);
+    N.pend_len = n;
+    N.pend_tries = 1;
+    N.pend_sent = GetTickCount64();
+    N.roomv.error[0] = 0;
+    LeaveCriticalSection(&g_cs);
+    send_raw(b, n);
+}
+
+static void answered(void)
+{
+    N.pend_len = 0;
+}
+
+/* ---- the other players' controllers, as the title's other pads ---------------- */
+
+static DWORD remote_slot_state(int slot, XBOX_INPUT_STATE *state)
+{
+    if (N.state != NETPLAY_CONNECTED || slot < 0 || slot >= N.players || slot == N.pos)
+        return ERROR_DEVICE_NOT_CONNECTED;
+    EnterCriticalSection(&g_cs);
+    state->dwPacketNumber = N.remote_packet[slot];
+    state->Gamepad = N.remote_pad[slot];
     LeaveCriticalSection(&g_cs);
     return ERROR_SUCCESS;
 }
 
+static void assign_input(int on)
+{
+    unsigned mask = 0;
+    int i;
+    if (!on) { xbox_HostInputSetNetplay(0, 0, 0, NULL); return; }
+    for (i = 0; i < N.players; i++)
+        if (i != N.pos) mask |= 1u << i;
+    xbox_HostInputSetNetplayMulti(1, N.pos, mask, remote_slot_state);
+}
+
+static void reset_remote_pads(void)
+{
+    EnterCriticalSection(&g_cs);
+    memset(N.remote_pad, 0, sizeof(N.remote_pad));
+    memset(N.remote_seq, 0, sizeof(N.remote_seq));
+    LeaveCriticalSection(&g_cs);
+}
+
 static void become_connected(void)
 {
-    N.match = N.step = 0;
-    memset(N.in_tag, 0, sizeof(N.in_tag));
+    if (!N.lobby) {
+        N.match_count = N.step = 0;
+        memset(N.in_tag, 0, sizeof(N.in_tag));
+    }
     memset(N.seeds, 0, sizeof(N.seeds));
     N.desync = 0;
     InterlockedExchange(&N.state, NETPLAY_CONNECTED);
     InterlockedExchange(&N.lockstep, 1);
-    xbox_HostInputSetNetplay(1, N.slot, 1 - N.slot, remote_state);
-    set_status("Connected to %s. You are player %d. Both choose Versus; player 1 picks first.",
-               N.peer_name[0] ? N.peer_name : "the other player", N.slot + 1);
+    assign_input(1);
+    if (N.lobby)
+        set_status("Match found: %d players, you are player %d. It starts by itself.", N.players, N.pos + 1);
+    else
+        set_status("Connected to %s. You are player %d. Both choose Versus; player 1 picks first.",
+                   N.peer_name[0] ? N.peer_name : "the other player", N.pos + 1);
 }
 
 static void lose_peer(const char *why)
 {
     InterlockedExchange(&N.lockstep, 0);
-    xbox_HostInputSetNetplay(0, 0, 0, NULL);
+    assign_input(0);
     SetEvent(N.arrived);
     if (N.creating && !N.stop) {
         InterlockedExchange(&N.state, NETPLAY_WAITING);
@@ -252,13 +360,26 @@ static void lose_peer(const char *why)
     }
 }
 
+/* The hub match is over for this PC: tell the server and go back to the room. */
+static void end_hub_match(const char *why)
+{
+    InterlockedExchange(&N.lockstep, 0);
+    assign_input(0);
+    SetEvent(N.arrived);
+    N.match_live = N.match_seen = 0;
+    N.over_pending = 1;
+    request(T_OVER, NULL, 0);
+    InterlockedExchange(&N.state, NETPLAY_LOBBY);
+    set_status("%s", why);
+}
+
 /* ---- what arrives -------------------------------------------------------------- */
 
-static void store_steps(const uint8_t *p, int len)
+static void store_steps(int from, const uint8_t *p, int len)
 {
     uint32_t match, last;
-    int count, i, remote = 1 - N.slot;
-    if (len < 9) return;
+    int count, i;
+    if (len < 9 || from < 0 || from >= MAXP) return;
     match = get32(p); last = get32(p + 4); count = p[8];
     if (len < 9 + count * ENTRY) return;
     EnterCriticalSection(&g_cs);
@@ -266,9 +387,9 @@ static void store_steps(const uint8_t *p, int len)
         uint32_t s = last - (uint32_t)(count - 1 - i);
         uint32_t k = s % RING;
         if (s == 0) continue;
-        memcpy(N.in[remote][k], p + 9 + i * ENTRY, ENTRY);
-        N.in_tag[remote][k] = s + 1;
-        N.in_match[remote][k] = match;
+        memcpy(N.in[from][k], p + 9 + i * ENTRY, ENTRY);
+        N.in_tag[from][k] = s + 1;
+        N.in_match[from][k] = match;
     }
     LeaveCriticalSection(&g_cs);
     SetEvent(N.arrived);
@@ -276,7 +397,7 @@ static void store_steps(const uint8_t *p, int len)
 
 static unsigned g_hash_matches;     /* checksums compared and equal, this session */
 
-/* Compare every checksum both sides have for the same match and step, once each. */
+/* Compare every checksum this PC and another have for the same match and step, once each. */
 static void check_hashes(void)
 {
     int i, j;
@@ -289,23 +410,23 @@ static void check_hashes(void)
                 if (!N.desync) {
                     N.desync = 1;
                     N.desync_step = N.local_hash[i][1];
-                    fprintf(stderr, "[NETPLAY] desync in match %u at step %u (local %08X, remote %08X)\n",
+                    fprintf(stderr, "[NETPLAY] desync in match %08X at step %u (local %08X, remote %08X)\n",
                             N.local_hash[i][0], N.local_hash[i][1], N.local_hash[i][2], N.remote_hash[j][2]);
                 }
             } else if (++g_hash_matches % 10 == 0) {
-                fprintf(stderr, "[NETPLAY] in step: %u checksums compared and equal (match %u, step %u)\n",
+                fprintf(stderr, "[NETPLAY] in step: %u checksums compared and equal (match %08X, step %u)\n",
                         g_hash_matches, N.local_hash[i][0], N.local_hash[i][1]);
             }
             N.remote_hash[j][1] = 0;    /* compared */
         }
 }
 
-static void on_data(const uint8_t *p, int len)
+static void on_data(int from, const uint8_t *p, int len)
 {
-    if (len < 1) return;
+    if (len < 1 || from < 0 || from >= MAXP || from == N.pos) return;
     switch (p[0]) {
     case P_GAMEHELLO:
-        if (!N.creating && len >= 7 && p[6] == LOCKSTEP_VERSION) {
+        if (!N.lobby && !N.creating && len >= 7 && p[6] == LOCKSTEP_VERSION) {
             uint8_t ack = P_GAMEACK;
             N.session = get32(p + 1);
             N.delay = p[5] >= 1 && p[5] <= 12 ? p[5] : 3;
@@ -314,7 +435,7 @@ static void on_data(const uint8_t *p, int len)
         }
         break;
     case P_GAMEACK:
-        if (N.creating && N.state == NETPLAY_SYNCING) {
+        if (!N.lobby && N.creating && N.state == NETPLAY_SYNCING) {
             N.acked = 1;
             become_connected();
         }
@@ -323,24 +444,24 @@ static void on_data(const uint8_t *p, int len)
         if (len >= 5 + (int)sizeof(XBOX_GAMEPAD)) {
             uint32_t seq = get32(p + 1);
             EnterCriticalSection(&g_cs);
-            if ((int32_t)(seq - N.remote_seq) > 0) {
+            if ((int32_t)(seq - N.remote_seq[from]) > 0) {
                 static int seen, pressed;
-                N.remote_seq = seq;
-                memcpy(&N.remote_pad, p + 5, sizeof(XBOX_GAMEPAD));
-                N.remote_packet++;
+                N.remote_seq[from] = seq;
+                memcpy(&N.remote_pad[from], p + 5, sizeof(XBOX_GAMEPAD));
+                N.remote_packet[from]++;
                 if (!seen++)
-                    fprintf(stderr, "[NETPLAY] the other player's controller is arriving (player %d)\n", 2 - N.slot);
-                if (!pressed && (N.remote_pad.wButtons || N.remote_pad.bAnalogButtons[0] > 32)) {
+                    fprintf(stderr, "[NETPLAY] the other player's controller is arriving (player %d)\n", from + 1);
+                if (!pressed && (N.remote_pad[from].wButtons || N.remote_pad[from].bAnalogButtons[0] > 32)) {
                     pressed = 1;
                     fprintf(stderr, "[NETPLAY] first press from the other player's controller (buttons %04X)\n",
-                            N.remote_pad.wButtons);
+                            N.remote_pad[from].wButtons);
                 }
             }
             LeaveCriticalSection(&g_cs);
         }
         break;
     case P_STEPS:
-        store_steps(p + 1, len - 1);
+        store_steps(from, p + 1, len - 1);
         break;
     case P_HASH:
         if (len >= 13) {
@@ -356,6 +477,208 @@ static void on_data(const uint8_t *p, int len)
     }
 }
 
+/* ---- the hub's messages -------------------------------------------------------- */
+
+typedef struct { const uint8_t *p; int n, i, bad; } Reader;
+
+static int rd8(Reader *r)
+{
+    if (r->i >= r->n) { r->bad = 1; return 0; }
+    return r->p[r->i++];
+}
+
+static void rdbytes(Reader *r, void *out, int count)
+{
+    if (r->i + count > r->n) { r->bad = 1; memset(out, 0, (size_t)count); return; }
+    memcpy(out, r->p + r->i, (size_t)count);
+    r->i += count;
+}
+
+static void rdstr(Reader *r, char *out, int size)
+{
+    int len = rd8(r), keep = len < size - 1 ? len : size - 1;
+    if (r->i + len > r->n) { r->bad = 1; out[0] = 0; return; }
+    memcpy(out, r->p + r->i, (size_t)keep);
+    out[keep] = 0;
+    r->i += len;
+}
+
+static void rdsettings(Reader *r, NetRoomSettings *s)
+{
+    memset(s, 0, sizeof(*s));
+    rdstr(r, s->name, sizeof(s->name));
+    s->is_public = rd8(r);
+    s->mode = rd8(r);
+    s->max = rd8(r);
+    s->rounds = rd8(r);
+    s->pool_count = rd8(r);
+    if (s->pool_count > 32) { r->bad = 1; s->pool_count = 0; return; }
+    rdbytes(r, s->pool, s->pool_count);
+}
+
+static int put_settings(uint8_t *b, const NetRoomSettings *s)
+{
+    int n = 0, len = (int)strlen(s->name), pool = s->pool_count;
+    if (len > 24) len = 24;
+    if (len == 0) { b[n++] = 4; memcpy(b + n, "Room", 4); n += 4; }
+    else { b[n++] = (uint8_t)len; memcpy(b + n, s->name, (size_t)len); n += len; }
+    b[n++] = s->is_public ? 1 : 0;
+    b[n++] = (uint8_t)s->mode;
+    b[n++] = (uint8_t)(s->max < 2 ? 2 : s->max > MAXP ? MAXP : s->max);
+    b[n++] = (uint8_t)s->rounds;
+    if (pool < 1) pool = 0;
+    if (pool > 32) pool = 32;
+    b[n++] = (uint8_t)pool;
+    memcpy(b + n, s->pool, (size_t)pool); n += pool;
+    return n;
+}
+
+static void on_rooms(const uint8_t *b, int len)
+{
+    Reader r = { b, len, 0, 0 };
+    NetRoomInfo list[32];
+    int count = rd8(&r), i;
+    if (count > 32) count = 32;
+    for (i = 0; i < count && !r.bad; i++) {
+        rdbytes(&r, list[i].code, 6);
+        list[i].code[6] = 0;
+        rdstr(&r, list[i].name, sizeof(list[i].name));
+        list[i].mode = rd8(&r);
+        list[i].players = rd8(&r);
+        list[i].max = rd8(&r);
+        list[i].phase = rd8(&r);
+    }
+    if (r.bad) return;
+    EnterCriticalSection(&g_cs);
+    memcpy(N.rooms, list, sizeof(list[0]) * (size_t)count);
+    N.room_count = count;
+    N.rooms_version++;
+    if (N.pend_len && (N.pend[5] == T_LIST || N.pend[5] == T_LEAVE)) answered();
+    LeaveCriticalSection(&g_cs);
+}
+
+static void on_room(const uint8_t *b, int len)
+{
+    Reader r = { b, len, 0, 0 };
+    NetRoom v;
+    int i, count, gone = 0;
+    memset(&v, 0, sizeof(v));
+    rdbytes(&r, v.code, 6);
+    v.code[6] = 0;
+    v.you = rd8(&r);
+    v.host = rd8(&r);
+    v.phase = rd8(&r);
+    rdsettings(&r, &v.settings);
+    v.candidate_count = rd8(&r);
+    if (v.candidate_count > 3) return;
+    rdbytes(&r, v.candidates, v.candidate_count);
+    for (i = 0; i < v.candidate_count; i++) v.votes[i] = rd8(&r);
+    v.ms_left = rd8(&r);
+    v.ms_left |= rd8(&r) << 8;
+    count = rd8(&r);
+    if (count > MAXP) return;
+    v.player_count = count;
+    for (i = 0; i < count; i++) {
+        v.players[i].slot = rd8(&r);
+        rdstr(&r, v.players[i].name, sizeof(v.players[i].name));
+        v.players[i].ready = rd8(&r);
+        v.players[i].fighter = rd8(&r);
+        v.players[i].voted = rd8(&r);
+        if (v.players[i].voted == 0xFF) v.players[i].voted = -1;
+    }
+    if (r.bad) return;
+    v.in_room = 1;
+    v.received = GetTickCount64();
+    EnterCriticalSection(&g_cs);
+    memcpy(v.error, N.roomv.error, sizeof(v.error));
+    v.version = N.roomv.version + 1;
+    N.roomv = v;
+    N.slot = v.you;
+    memcpy(N.room, v.code, 7);
+    if (N.pend_len && N.pend[5] != T_LIST && N.pend[5] != T_LEAVE) answered();
+    if (v.phase != 2) N.over_pending = N.start_this_play = 0;
+    /* A player of the running match has left: the others cannot go on in lockstep. */
+    if (N.match_live) {
+        int k, j;
+        for (k = 0; k < N.players; k++) {
+            int found = 0;
+            for (j = 0; j < count; j++) if (v.players[j].slot == N.start_slots[k]) found = 1;
+            if (!found) gone = 1;
+        }
+    }
+    LeaveCriticalSection(&g_cs);
+    if (gone && N.lockstep) {
+        InterlockedExchange(&N.lockstep, 0);
+        assign_input(0);
+        SetEvent(N.arrived);
+        set_status("A player left the match; it finishes offline.");
+    }
+}
+
+static void on_start(const uint8_t *b, int len)
+{
+    Reader r = { b, len, 0, 0 };
+    AutoMatch m;
+    uint32_t seed;
+    int count, i, j, slots[MAXP], fighters[MAXP], pos = -1;
+    if (len < 4) return;
+    seed = get32(b);
+    r.i = 4;
+    memset(&m, 0, sizeof(m));
+    m.type = rd8(&r);
+    m.rules = rd8(&r);
+    m.venue = rd8(&r);
+    count = rd8(&r);
+    if (count < 2 || count > MAXP) return;
+    for (i = 0; i < count; i++) { slots[i] = rd8(&r); fighters[i] = rd8(&r); }
+    if (r.bad) return;
+    if (N.start_seed && seed == N.start_seed) { N.start_this_play = 1; return; }     /* a repeat */
+    /* positions follow the room slots in order */
+    for (i = 1; i < count; i++)
+        for (j = i; j > 0 && slots[j - 1] > slots[j]; j--) {
+            int t = slots[j]; slots[j] = slots[j - 1]; slots[j - 1] = t;
+            t = fighters[j]; fighters[j] = fighters[j - 1]; fighters[j - 1] = t;
+        }
+    for (i = 0; i < MAXP; i++) N.pos_of_slot[i] = -1;
+    for (i = 0; i < count; i++) {
+        if (slots[i] < MAXP) N.pos_of_slot[slots[i]] = i;
+        if (slots[i] == N.slot) pos = i;
+        N.start_slots[i] = slots[i];
+        m.fighter[i] = fighters[i];
+        m.pad[i] = i;
+    }
+    if (pos < 0) return;
+    m.count = count;
+    {   /* the mode's free places go to CPU fighters, the same on every PC */
+        const OnlineMode *mode = online_mode(m.type);
+        const OnlineFighter *roster;
+        int roster_count = online_fighters(&roster);
+        for (i = count; mode && i < mode->fighters && i < MAXP; i++) {
+            m.pad[i] = -1;
+            m.fighter[i] = roster_count ? roster[mix32(seed ^ (0xC0FFEEu + (uint32_t)i)) % (uint32_t)roster_count].id : 55;
+            m.count = i + 1;
+        }
+    }
+    EnterCriticalSection(&g_cs);
+    N.start_seed = seed;
+    N.session = seed;
+    N.players = count;
+    N.fighters = m.count;
+    N.pos = pos;
+    N.delay = LOBBY_DELAY;
+    N.match_count = 0;
+    N.match_live = 1;
+    N.match_seen = 0;
+    N.over_pending = 0;
+    N.start_this_play = 1;
+    LeaveCriticalSection(&g_cs);
+    reset_remote_pads();
+    fprintf(stderr, "[NETPLAY] START: seed %08X, type %d, rules %d, venue %d, %d players, this PC is player %d\n",
+            seed, m.type, m.rules, m.venue, count, pos + 1);
+    become_connected();
+    automatch_request(&m);
+}
+
 static void on_packet(const uint8_t *b, int len)
 {
     if (len < 6 || memcmp(b, "DJNP", 4) || b[4] != PROTO) return;
@@ -365,7 +688,16 @@ static void on_packet(const uint8_t *b, int len)
         if (len >= 6 + 8 + 1 + 6) {
             memcpy(N.token, b + 6, 8);
             N.have_token = 1;
+            if (N.lobby) {
+                if (N.state == NETPLAY_CONNECTING) {
+                    InterlockedExchange(&N.state, NETPLAY_LOBBY);
+                    set_status("In the lobby of %s.", N.server_text);
+                    netplay_lobby_list(0xFF);
+                }
+                break;
+            }
             N.slot = b[14] ? 1 : 0;
+            N.pos = N.slot;
             memcpy(N.room, b + 15, 6);
             N.room[6] = 0;
             if (N.state == NETPLAY_CONNECTING) {
@@ -378,7 +710,7 @@ static void on_packet(const uint8_t *b, int len)
         }
         break;
     case T_PEER:
-        if (len >= 8) {
+        if (len >= 8 && !N.lobby) {
             int n = b[7];
             if (n == 0) {
                 if (N.state == NETPLAY_CONNECTED || N.state == NETPLAY_SYNCING)
@@ -399,21 +731,54 @@ static void on_packet(const uint8_t *b, int len)
         }
         break;
     case T_DATA:
-        if (len >= 7) on_data(b + 7, len - 7);
+        if (len >= 7) {
+            int from = N.lobby ? (b[6] < MAXP ? N.pos_of_slot[b[6]] : -1) : (b[6] ? 1 : 0);
+            on_data(from, b + 7, len - 7);
+        }
         break;
     case T_PONG:
         if (len >= 10 && get32(b + 6) == N.ping_nonce)
             N.rtt_ms = (int)(GetTickCount64() - N.last_ping);
         break;
+    case T_ROOMS:
+        if (N.lobby) on_rooms(b + 6, len - 6);
+        break;
+    case T_ROOM:
+        if (N.lobby) on_room(b + 6, len - 6);
+        break;
+    case T_START:
+        if (N.lobby) on_start(b + 6, len - 6);
+        break;
     case T_ERROR:
         if (len >= 7) {
             static const char *const why[] = { "", "No room with that code.", "That room is full.",
                 "The other player has a different version of the game.", "That name is not allowed.",
-                "The server is full.", "Too many attempts; wait a minute.", "The server lost this session." };
+                "The server is full.", "Too many attempts; wait a minute.", "The server lost this session.",
+                "Only the room's host can do that, and not while voting or playing.",
+                "Not possible here: not in a room, or already in one." };
             int code = b[6];
+            const char *text = code >= 1 && code <= 9 ? why[code] : "The server refused the request.";
+            if (N.lobby && (code == 1 || code == 2 || code == 3 || code == 8 || code == 9)) {
+                /* refused, but the session goes on */
+                EnterCriticalSection(&g_cs);
+                answered();
+                snprintf(N.roomv.error, sizeof(N.roomv.error), "%s", text);
+                N.roomv.version++;
+                LeaveCriticalSection(&g_cs);
+                fprintf(stderr, "[NETPLAY] refused: %s\n", text);
+                break;
+            }
+            if (N.lobby && code == 7) {             /* the server restarted: enter again */
+                N.have_token = 0;
+                N.started = GetTickCount64();
+                memset(&N.roomv, 0, sizeof(N.roomv));
+                InterlockedExchange(&N.state, NETPLAY_CONNECTING);
+                set_status("Reconnecting to %s...", N.server_text);
+                break;
+            }
             InterlockedExchange(&N.lockstep, 0);
             InterlockedExchange(&N.state, NETPLAY_FAILED);
-            set_status("%s", code >= 1 && code <= 7 ? why[code] : "The server refused the connection.");
+            set_status("%s", text);
         }
         break;
     }
@@ -448,7 +813,11 @@ static DWORD WINAPI net_thread(LPVOID unused)
             if (now - N.hello_sent >= 500) { send_hello(); N.hello_sent = now; }
             if (now - N.started > 10000) {
                 InterlockedExchange(&N.state, NETPLAY_FAILED);
-                set_status("No answer from the server %s. Check the address and that it is running.", N.server_text);
+                if (N.lobby)
+                    set_status("No answer from the server %s. It may be down, or an older server without the "
+                               "online hub (play by code still works there).", N.server_text);
+                else
+                    set_status("No answer from the server %s. Check the address and that it is running.", N.server_text);
             }
         }
         if (N.have_token && N.state != NETPLAY_FAILED) {
@@ -459,12 +828,39 @@ static DWORD WINAPI net_thread(LPVOID unused)
             }
             if (now - N.last_rx > 15000) {
                 InterlockedExchange(&N.lockstep, 0);
-                xbox_HostInputSetNetplay(0, 0, 0, NULL);
+                assign_input(0);
                 InterlockedExchange(&N.state, NETPLAY_FAILED);
                 set_status("The connection to the server was lost.");
             }
         }
-        if (N.state == NETPLAY_SYNCING && N.creating && now - N.hello_sent >= 300) {
+        if (N.pend_len && now - N.pend_sent >= RETRY_MS) {
+            uint8_t again[sizeof(N.pend)];
+            int n = 0;
+            EnterCriticalSection(&g_cs);
+            if (N.pend_len && N.pend_tries >= RETRIES) {
+                answered();
+                snprintf(N.roomv.error, sizeof(N.roomv.error), "The server did not answer; try again.");
+                N.roomv.version++;
+            } else if (N.pend_len) {
+                memcpy(again, N.pend, (size_t)N.pend_len);
+                n = N.pend_len;
+                N.pend_tries++;
+                N.pend_sent = now;
+            }
+            LeaveCriticalSection(&g_cs);
+            if (n) send_raw(again, n);
+        }
+        /* The room is playing but this PC never got its START: a VOTE makes the server send it again. */
+        if (N.lobby && N.roomv.in_room && N.roomv.phase == 2 && !N.start_this_play && !N.over_pending &&
+            now - N.last_recover >= 500) {
+            uint8_t vb[6 + 8 + 1];
+            int n = header(vb, T_VOTE);
+            memcpy(vb + n, N.token, 8); n += 8;
+            vb[n++] = 0;
+            send_raw(vb, n);
+            N.last_recover = now;
+        }
+        if (!N.lobby && N.state == NETPLAY_SYNCING && N.creating && now - N.hello_sent >= 300) {
             uint8_t p[7];
             p[0] = P_GAMEHELLO;
             put32(p + 1, N.session);
@@ -506,20 +902,21 @@ static int resolve(const char *server)
     return 0;
 }
 
-static int start(const char *server, const char *name, int creating, const char *room, int delay)
+static int start(const char *server, const char *name, int creating, const char *room, int delay, int lobby)
 {
     DWORD timeout = 20;
     uint32_t h1 = 2166136261u, h2;
     const char *v;
+    int i;
     InitOnceExecuteOnce(&g_once, init_once, NULL, NULL);
     netplay_stop();
     if (!server || !*server) { InterlockedExchange(&N.state, NETPLAY_FAILED); set_status("Enter the server address first."); return -1; }
     snprintf(N.server_text, sizeof(N.server_text), "%s", server);
     snprintf(N.name, sizeof(N.name), "%s", name && *name ? name : "Player");
     N.creating = creating;
+    N.lobby = lobby;
     memset(N.room, 0, sizeof(N.room));
-    if (!creating) {
-        int i;
+    if (!lobby && !creating) {
         for (i = 0; i < 6 && room && room[i]; i++) N.room[i] = (char)toupper((unsigned char)room[i]);
         if (i != 6) { InterlockedExchange(&N.state, NETPLAY_FAILED); set_status("A room code has 6 characters."); return -1; }
     }
@@ -531,8 +928,20 @@ static int start(const char *server, const char *name, int creating, const char 
     N.have_token = 0;
     N.peer_name[0] = 0;
     N.rtt_ms = -1;
-    N.remote_seq = N.local_seq = 0;
-    memset(&N.remote_pad, 0, sizeof(N.remote_pad));
+    N.local_seq = 0;
+    N.players = N.fighters = 2;
+    N.pos = 0;
+    for (i = 0; i < MAXP; i++) N.pos_of_slot[i] = i < 2 ? i : -1;
+    reset_remote_pads();
+    EnterCriticalSection(&g_cs);
+    memset(N.in_tag, 0, sizeof(N.in_tag));
+    memset(&N.roomv, 0, sizeof(N.roomv));
+    N.room_count = 0;
+    N.pend_len = 0;
+    N.match_live = N.match_seen = N.over_pending = N.start_this_play = 0;
+    N.start_seed = 0;
+    N.match_count = 0;
+    LeaveCriticalSection(&g_cs);
     if (resolve(server)) { InterlockedExchange(&N.state, NETPLAY_FAILED); set_status("Cannot find the server %s.", server); return -1; }
     N.sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     if (N.sock == INVALID_SOCKET) { InterlockedExchange(&N.state, NETPLAY_FAILED); set_status("No network socket."); return -1; }
@@ -548,19 +957,24 @@ static int start(const char *server, const char *name, int creating, const char 
 
 int netplay_host(const char *server, const char *name, int input_delay)
 {
-    return start(server, name, 1, NULL, input_delay);
+    return start(server, name, 1, NULL, input_delay, 0);
 }
 
 int netplay_join(const char *server, const char *name, const char *room)
 {
-    return start(server, name, 0, room, 3);
+    return start(server, name, 0, room, 3, 0);
+}
+
+int netplay_lobby(const char *server, const char *name)
+{
+    return start(server, name, 0, NULL, LOBBY_DELAY, 1);
 }
 
 void netplay_stop(void)
 {
     InitOnceExecuteOnce(&g_once, init_once, NULL, NULL);
     InterlockedExchange(&N.lockstep, 0);
-    xbox_HostInputSetNetplay(0, 0, 0, NULL);
+    assign_input(0);
     if (N.thread) {
         N.stop = 1;
         WaitForSingleObject(N.thread, 2000);
@@ -569,6 +983,8 @@ void netplay_stop(void)
     }
     if (N.sock != INVALID_SOCKET) { closesocket(N.sock); N.sock = INVALID_SOCKET; }
     N.have_token = 0;
+    N.lobby = 0;
+    N.match_live = N.match_seen = 0;
     InterlockedExchange(&N.state, NETPLAY_OFF);
     SetEvent(N.arrived);
 }
@@ -583,6 +999,8 @@ void netplay_status(char *text, int size)
     if (N.state == NETPLAY_CONNECTED && N.rtt_ms >= 0)
         snprintf(text, (size_t)size, "%s  Ping %d ms, input delay %d steps.%s", N.status, N.rtt_ms, N.delay,
                  N.desync ? "  The games went out of step in the last fight." : "");
+    else if (N.state == NETPLAY_LOBBY && N.rtt_ms >= 0)
+        snprintf(text, (size_t)size, "%s  Ping %d ms.", N.status, N.rtt_ms);
     else if (N.state == NETPLAY_OFF)
         snprintf(text, (size_t)size, "Not connected.");
     else
@@ -595,15 +1013,134 @@ void netplay_room(char *code, int size)
     if (size > 0) snprintf(code, (size_t)size, "%s", N.room);
 }
 
+/* ---- the hub, for the launcher and overlay ------------------------------------ */
+
+int netplay_in_lobby(void) { return N.lobby; }
+
+void netplay_lobby_list(int mode)
+{
+    uint8_t m = (uint8_t)mode;
+    request(T_LIST, &m, 1);
+}
+
+int netplay_lobby_rooms(NetRoomInfo *out, int max, unsigned *version)
+{
+    int n;
+    InitOnceExecuteOnce(&g_once, init_once, NULL, NULL);
+    EnterCriticalSection(&g_cs);
+    n = N.room_count < max ? N.room_count : max;
+    if (n > 0) memcpy(out, N.rooms, sizeof(out[0]) * (size_t)n);
+    if (version) *version = N.rooms_version;
+    LeaveCriticalSection(&g_cs);
+    return n;
+}
+
+void netplay_lobby_create(const NetRoomSettings *settings)
+{
+    uint8_t b[64];
+    request(T_CREATE, b, put_settings(b, settings));
+}
+
+void netplay_lobby_join(const char *code)
+{
+    uint8_t b[6];
+    int i;
+    for (i = 0; i < 6; i++) b[i] = (uint8_t)toupper((unsigned char)(code && code[i] ? code[i] : 0));
+    request(T_JOIN, b, 6);
+}
+
+void netplay_lobby_quick(int mode, int max)
+{
+    uint8_t b[2] = { (uint8_t)mode, (uint8_t)(max < 2 ? 2 : max > MAXP ? MAXP : max) };
+    request(T_QUICK, b, 2);
+}
+
+void netplay_lobby_settings(const NetRoomSettings *settings)
+{
+    uint8_t b[64];
+    request(T_SETTINGS, b, put_settings(b, settings));
+}
+
+void netplay_lobby_ready(int ready, int fighter)
+{
+    uint8_t b[2] = { (uint8_t)(ready ? 1 : 0), (uint8_t)fighter };
+    request(T_READY, b, 2);
+}
+
+void netplay_lobby_vote(int choice)
+{
+    uint8_t b = (uint8_t)choice;
+    request(T_VOTE, &b, 1);
+}
+
+void netplay_lobby_leave(void)
+{
+    EnterCriticalSection(&g_cs);
+    memset(&N.roomv, 0, sizeof(N.roomv));
+    N.roomv.version = (unsigned)GetTickCount64();
+    N.room[0] = 0;
+    LeaveCriticalSection(&g_cs);
+    request(T_LEAVE, NULL, 0);
+}
+
+void netplay_lobby_room(NetRoom *out)
+{
+    InitOnceExecuteOnce(&g_once, init_once, NULL, NULL);
+    EnterCriticalSection(&g_cs);
+    *out = N.roomv;
+    LeaveCriticalSection(&g_cs);
+}
+
+void netplay_sync_point(void)
+{
+    if (!N.lockstep) return;
+    EnterCriticalSection(&g_cs);
+    memset(N.seeds, 0, sizeof(N.seeds));
+    LeaveCriticalSection(&g_cs);
+    fprintf(stderr, "[NETPLAY] sync point: setting up the room's match\n");
+}
+
+void netplay_on_main_menu(void)
+{
+    if (N.lobby && N.match_live && N.match_seen)
+        end_hub_match("Match over; back in the room.");
+}
+
 /* Unattended sessions for tests: RECOMP_NETPLAY=host or join, RECOMP_NETPLAY_SERVER, and
  * RECOMP_NETPLAY_CODE_FILE, where the host writes its room code once it has one and the
- * guest waits for it (up to a minute). */
+ * guest waits for it (up to a minute). RECOMP_NETPLAY=quick enters the hub, quick-matches
+ * and readies with RECOMP_NETPLAY_FIGHTER (default 55), voting for the first venue. */
 static DWORD WINAPI autostart_thread(LPVOID unused)
 {
     const char *mode = getenv("RECOMP_NETPLAY"), *server = getenv("RECOMP_NETPLAY_SERVER");
     const char *file = getenv("RECOMP_NETPLAY_CODE_FILE");
     int i;
     (void)unused;
+    if (!strcmp(mode, "quick")) {
+        const char *f = getenv("RECOMP_NETPLAY_FIGHTER");
+        int fighter = f && *f ? atoi(f) : 55, readied = 0;
+        unsigned voted_in = 0;
+        netplay_lobby(server, "Test player");
+        for (i = 0; i < 600 && N.state == NETPLAY_CONNECTING; i++) Sleep(100);
+        netplay_lobby_quick(0, 2);
+        while (!N.stop && N.state != NETPLAY_FAILED && N.state != NETPLAY_OFF) {
+            NetRoom r;
+            netplay_lobby_room(&r);
+            if (r.in_room && r.phase == 0 && !readied && !N.match_live) {
+                netplay_lobby_ready(1, fighter);
+                readied = 1;
+            }
+            if (r.in_room && r.phase == 1 && voted_in != r.version) {
+                int me;
+                for (me = 0; me < r.player_count; me++)
+                    if (r.players[me].slot == r.you && r.players[me].voted < 0) { netplay_lobby_vote(0); break; }
+                voted_in = r.version;
+            }
+            if (r.phase == 2) readied = 0;
+            Sleep(100);
+        }
+        return 0;
+    }
     if (!strcmp(mode, "host")) {
         netplay_host(server, "Test host", 3);
         for (i = 0; i < 600 && !N.room[0] && N.state != NETPLAY_FAILED; i++) Sleep(100);
@@ -631,7 +1168,7 @@ void netplay_autostart(void)
 {
     const char *mode = getenv("RECOMP_NETPLAY"), *server = getenv("RECOMP_NETPLAY_SERVER");
     HANDLE t;
-    if (!mode || !server || (strcmp(mode, "host") && strcmp(mode, "join"))) return;
+    if (!mode || !server || (strcmp(mode, "host") && strcmp(mode, "join") && strcmp(mode, "quick"))) return;
     t = CreateThread(NULL, 0, autostart_thread, NULL, 0, NULL);
     if (t) CloseHandle(t);
 }
@@ -646,7 +1183,7 @@ static uint32_t fighter_hash(void)
     uint32_t h = 2166136261u;
     int slot;
     unsigned i;
-    for (slot = 0; slot < 2; slot++)
+    for (slot = 0; slot < (N.fighters > N.players ? N.fighters : N.players); slot++)
         for (i = 0; i < sizeof(fields) / sizeof(fields[0]); i++)
             h = (h ^ MEM32(ACTORS + (uint32_t)slot * STRIDE + fields[i])) * 16777619u;
     return h;
@@ -656,12 +1193,14 @@ void netplay_on_match_start(void)
 {
     if (!N.lockstep) return;
     EnterCriticalSection(&g_cs);
-    N.match++;
+    N.match_count++;
+    N.match = mix32(N.session ^ (N.match_count * 0x9E3779B9u));   /* the same on every PC, new per match */
     N.step = 0;
     memset(N.latest_local, 0, sizeof(N.latest_local));
     N.desync = 0;
+    if (N.match_live) N.match_seen = 1;
     LeaveCriticalSection(&g_cs);
-    fprintf(stderr, "[NETPLAY] match %u starts in lockstep (delay %d)\n", N.match, N.delay);
+    fprintf(stderr, "[NETPLAY] match %08X starts in lockstep (%d players, delay %d)\n", N.match, N.players, N.delay);
 }
 
 void netplay_on_pad_pass(void) {}
@@ -670,7 +1209,7 @@ static void send_steps(uint32_t last)
 {
     uint8_t p[1 + 9 + REDUNDANT * ENTRY];
     uint32_t first = last >= REDUNDANT ? last - REDUNDANT + 1 : 1, s;
-    int count = 0, local = N.slot;
+    int count = 0, local = N.pos;
     p[0] = P_STEPS;
     put32(p + 1, N.match);
     put32(p + 5, last);
@@ -691,16 +1230,15 @@ static void send_steps(uint32_t last)
 void netplay_on_step(void)
 {
     uint32_t s, target, k;
-    int remote = 1 - N.slot;
     ULONGLONG waited_since, last_send;
     if (!N.lockstep) return;
     s = ++N.step;
     target = s + (uint32_t)N.delay;
     k = target % RING;
     EnterCriticalSection(&g_cs);
-    memcpy(N.in[N.slot][k], N.latest_local, ENTRY);
-    N.in_tag[N.slot][k] = target + 1;
-    N.in_match[N.slot][k] = N.match;
+    memcpy(N.in[N.pos][k], N.latest_local, ENTRY);
+    N.in_tag[N.pos][k] = target + 1;
+    N.in_match[N.pos][k] = N.match;
     LeaveCriticalSection(&g_cs);
     send_steps(target);
 
@@ -716,23 +1254,24 @@ void netplay_on_step(void)
         send_data(p, 13);
     }
 
-    /* Wait for the other player's entry for this step. */
+    /* Wait for every other player's entry for this step. */
     if (s <= (uint32_t)N.delay) return;
     k = s % RING;
     waited_since = last_send = GetTickCount64();
     for (;;) {
-        int ready;
+        int ready = 1, i;
         EnterCriticalSection(&g_cs);
-        ready = N.in_tag[remote][k] == s + 1 && N.in_match[remote][k] == N.match;
+        for (i = 0; i < N.players; i++)
+            if (i != N.pos && !(N.in_tag[i][k] == s + 1 && N.in_match[i][k] == N.match)) ready = 0;
         LeaveCriticalSection(&g_cs);
         if (ready || !N.lockstep) break;
         WaitForSingleObject(N.arrived, 4);
         {
             ULONGLONG now = GetTickCount64();
-            if (now - last_send >= 50) { send_steps(target); last_send = now; }   /* the peer may be waiting for ours */
+            if (now - last_send >= 50) { send_steps(target); last_send = now; }   /* the others may be waiting for ours */
             if (now - waited_since > (s <= (uint32_t)N.delay + 1 ? START_LIMIT_MS : STALL_LIMIT_MS)) {
                 InterlockedExchange(&N.lockstep, 0);
-                set_status("The other player stopped answering during the fight; continuing offline.");
+                set_status("A player stopped answering during the fight; continuing offline.");
                 break;
             }
         }
@@ -747,10 +1286,10 @@ void netplay_on_pad_read(uint32_t actor)
     if (!N.lockstep) return;
     if (actor < ACTORS || (actor - ACTORS) % STRIDE) return;
     slot = (actor - ACTORS) / STRIDE;
-    if (slot > 1) return;
+    if ((int)slot >= N.players) return;
     base = PAD_TABLE + slot * 0x20u;
     /* This PC's player: a fresh poll (no marker) is the input to send next. */
-    if ((int)slot == N.slot && MEM32(base + 28) != MARK) {
+    if ((int)slot == N.pos && MEM32(base + 28) != MARK) {
         EnterCriticalSection(&g_cs);
         for (i = 0; i < ENTRY; i++) N.latest_local[i] = MEM8(base + (uint32_t)i);
         N.latest_local[28] = N.latest_local[29] = N.latest_local[30] = N.latest_local[31] = 0;
@@ -761,7 +1300,7 @@ void netplay_on_pad_read(uint32_t actor)
     if (s > (uint32_t)N.delay) {
         uint32_t k = s % RING;
         EnterCriticalSection(&g_cs);
-        if (N.in_tag[slot][k] == s + 1)
+        if (N.in_tag[slot][k] == s + 1 && N.in_match[slot][k] == N.match)
             memcpy(entry, N.in[slot][k], ENTRY);
         LeaveCriticalSection(&g_cs);
     }

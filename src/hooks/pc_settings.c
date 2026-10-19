@@ -51,6 +51,8 @@ static RecompSetting g_display_settings[] = {
       "The relay server for online play, as host or host:port (port 27777 if left out).", "142.132.178.17" },
     { "online", "name", RECOMP_SETTING_STRING, 0, 0, 0, NULL, NULL, 0,
       "Your name, shown to the other player.", "Player" },
+    { "online", "fighter", RECOMP_SETTING_INT, 55, 0, 255, NULL, NULL, 0,
+      "The fighter you pick in online rooms (fighter.xml ID); chosen in the room." },
     { "online", "input_delay", RECOMP_SETTING_INT, 3, 1, 8, NULL, NULL, 0,
       "Steps (1/60 s each) between a press and its effect in an online fight. More hides more ping; the host's value is used." },
     { "display", "fullscreen", RECOMP_SETTING_BOOL, 0, 0, 0, NULL, NULL, 0,

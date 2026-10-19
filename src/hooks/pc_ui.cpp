@@ -49,6 +49,7 @@ extern "C" {
 #include "pc_ui.h"
 #include "pc_ui_internal.h"
 #include "netplay.h"
+#include "online_data.h"
 #include "hd_build.h"
 #include "updater.h"
 
@@ -951,40 +952,428 @@ static void open_folder()
 }
 #endif
 
-// Online play: connect to the relay, host a room or join one, and see how it stands.
+// ---- Online: the hub (quick match, rooms, venue vote) and play-by-code ----------------
+
+static const char *mode_name(int type)
+{
+    const OnlineMode *m = online_mode(type);
+    return m ? m->name : "Match";
+}
+
+// A big red call-to-action.
+static bool hub_button(const char *label, ImVec2 size, bool primary = true)
+{
+    if (primary) {
+        ImGui::PushStyleColor(ImGuiCol_Button, k_red);
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, k_red_hi);
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive, k_red_lo);
+    }
+    ImGui::PushFont(g_font_black, ImGui::GetStyle().FontSizeBase * 1.15f);
+    bool pressed = ImGui::Button(label, size);
+    ImGui::PopFont();
+    if (primary) ImGui::PopStyleColor(3);
+    return pressed;
+}
+
+static void heading(const char *text, float scale = 1.5f, ImVec4 tone = ImVec4(0.96f, 0.96f, 0.97f, 1))
+{
+    ImGui::PushFont(g_font_black, ImGui::GetStyle().FontSizeBase * scale);
+    ImGui::TextColored(tone, "%s", text);
+    ImGui::PopFont();
+}
+
+// Mode and player count, kept consistent: a mode has a fixed number of fighters and the room
+// holds at most that many players (the rest are CPU fighters).
+static bool mode_picker(int *type, int *max)
+{
+    const OnlineMode *modes;
+    int count = online_modes(&modes);
+    bool changed = false;
+    ImGui::SetNextItemWidth(ImGui::GetFontSize() * 10);
+    if (ImGui::BeginCombo("Mode", mode_name(*type))) {
+        for (int i = 0; i < count; i++)
+            if (ImGui::Selectable(modes[i].name, modes[i].type == *type)) { *type = modes[i].type; changed = true; }
+        ImGui::EndCombo();
+    }
+    const OnlineMode *m = online_mode(*type);
+    int most = m ? m->fighters : 2;
+    if (*max > most) { *max = most; changed = true; }
+    if (*max < 2) { *max = 2; changed = true; }
+    if (most > 2) {
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(ImGui::GetFontSize() * 7);
+        if (ImGui::SliderInt("Players", max, 2, most)) changed = true;
+    }
+    if (m && *max < m->fighters)
+        ImGui::TextDisabled("%d fighters; the %d free place%s go%s to the CPU.", m->fighters, m->fighters - *max,
+                            m->fighters - *max == 1 ? "" : "s", m->fighters - *max == 1 ? "es" : "");
+    return changed;
+}
+
+// Which venues the room votes on.
+static bool pool_picker(NetRoomSettings &s)
+{
+    const OnlineVenue *venues;
+    int count = online_venues(&venues);
+    bool changed = false;
+    if (!count) {
+        ImGui::TextDisabled("The venue list could not be read from the game folder.");
+        return false;
+    }
+    ImGui::TextUnformatted("Venues in the vote");
+    ImGui::SameLine();
+    if (ImGui::SmallButton("All")) {
+        s.pool_count = 0;
+        for (int i = 0; i < count && s.pool_count < 32; i++) s.pool[s.pool_count++] = (unsigned char)venues[i].fe_id;
+        changed = true;
+    }
+    ImGui::SameLine();
+    if (ImGui::SmallButton("Classic three")) {
+        static const unsigned char classic[] = { 1, 6, 19 };
+        s.pool_count = 3;
+        memcpy(s.pool, classic, 3);
+        changed = true;
+    }
+    if (ImGui::BeginChild("##pool", ImVec2(0, ImGui::GetFontSize() * 8.5f), ImGuiChildFlags_Borders)) {
+        int columns = std::max(1, (int)(ImGui::GetContentRegionAvail().x / (ImGui::GetFontSize() * 13)));
+        if (ImGui::BeginTable("##pooltable", columns)) {
+            for (int i = 0; i < count; i++) {
+                bool on = false;
+                for (int k = 0; k < s.pool_count; k++) if (s.pool[k] == venues[i].fe_id) on = true;
+                ImGui::TableNextColumn();
+                ImGui::PushID(i);
+                if (ImGui::Checkbox(venues[i].name, &on)) {
+                    if (on && s.pool_count < 32) s.pool[s.pool_count++] = (unsigned char)venues[i].fe_id;
+                    if (!on && s.pool_count > 1) {
+                        int w = 0;
+                        for (int k = 0; k < s.pool_count; k++) if (s.pool[k] != venues[i].fe_id) s.pool[w++] = s.pool[k];
+                        s.pool_count = w;
+                    }
+                    changed = true;
+                }
+                ImGui::PopID();
+            }
+            ImGui::EndTable();
+        }
+    }
+    ImGui::EndChild();
+    ImGui::TextDisabled("%d venue%s; when everyone is ready, three of them are put to the vote.", s.pool_count,
+                        s.pool_count == 1 ? "" : "s");
+    return changed;
+}
+
+// The fighter list with a search box. Returns true when a fighter was picked.
+static bool fighter_picker(int *fighter)
+{
+    static char filter[32];
+    const OnlineFighter *roster;
+    int count = online_fighters(&roster);
+    bool picked = false;
+    ImGui::SetNextItemWidth(ImGui::GetFontSize() * 16);
+    if (ImGui::BeginCombo("Your fighter", online_fighter_name(*fighter), ImGuiComboFlags_HeightLarge)) {
+        if (ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere();
+        ImGui::SetNextItemWidth(-1);
+        ImGui::InputTextWithHint("##find", "Search", filter, sizeof(filter));
+        for (int i = 0; i < count; i++) {
+            std::string label = std::string(roster[i].name) + "  ";
+            std::string low = label, want = filter;
+            std::transform(low.begin(), low.end(), low.begin(), ::tolower);
+            std::transform(want.begin(), want.end(), want.begin(), ::tolower);
+            if (!want.empty() && low.find(want) == std::string::npos) continue;
+            ImGui::PushID(i);
+            if (ImGui::Selectable(roster[i].name, roster[i].id == *fighter)) { *fighter = roster[i].id; picked = true; }
+            ImGui::SameLine(ImGui::GetFontSize() * 11);
+            ImGui::TextDisabled("%s", roster[i].style);
+            ImGui::PopID();
+        }
+        if (!count) ImGui::TextDisabled("The roster could not be read from the game folder.");
+        ImGui::EndCombo();
+    }
+    return picked;
+}
+
+static void default_settings(NetRoomSettings &s, const std::string &player)
+{
+    memset(&s, 0, sizeof(s));
+    snprintf(s.name, sizeof(s.name), "%s's room", player.empty() ? "Player" : player.c_str());
+    s.is_public = 1;
+    s.mode = 0;
+    s.max = 2;
+    const OnlineVenue *venues;
+    int count = online_venues(&venues);
+    for (int i = 0; i < count && s.pool_count < 32; i++) s.pool[s.pool_count++] = (unsigned char)venues[i].fe_id;
+    if (!s.pool_count) { s.pool[0] = 1; s.pool[1] = 6; s.pool[2] = 19; s.pool_count = 3; }
+}
+
+// In the lobby, not in a room: quick match, the room list, a new room, a code.
+static void hub_lobby(const std::string &player)
+{
+    static NetRoomSettings create;
+    static bool create_open, create_init;
+    static int quick_mode = 0, quick_max = 2;
+    static char code[8];
+    static ULONGLONG last_list, last_action;
+    ULONGLONG now = GetTickCount64();
+    float font = ImGui::GetFontSize();
+    if (!create_init) { default_settings(create, player); create_init = true; }
+    if (now - last_list > 3000 && now - last_action > 2500) { netplay_lobby_list(0xFF); last_list = now; }
+
+    // Quick match: straight into a room.
+    ImGui::PushStyleColor(ImGuiCol_ChildBg, k_panel);
+    if (ImGui::BeginChild("##quick", ImVec2(0, 0), ImGuiChildFlags_AutoResizeY | ImGuiChildFlags_AlwaysUseWindowPadding)) {
+        heading("QUICK MATCH", 1.3f, k_gold);
+        ImGui::TextDisabled("Puts you straight into an open room, or opens one that others are put into.");
+        mode_picker(&quick_mode, &quick_max);
+        if (hub_button("FIND A MATCH", ImVec2(font * 12, font * 2.2f))) {
+            netplay_lobby_quick(quick_mode, quick_max);
+            last_action = now;
+        }
+    }
+    ImGui::EndChild();
+    ImGui::PopStyleColor();
+    ImGui::Spacing();
+
+    // The open rooms.
+    NetRoomInfo rooms[32];
+    unsigned version;
+    int count = netplay_lobby_rooms(rooms, 32, &version);
+    ImGui::SeparatorText("Open rooms");
+    if (ImGui::BeginTable("##rooms", 4, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_SizingStretchProp)) {
+        ImGui::TableSetupColumn("Room", ImGuiTableColumnFlags_WidthStretch, 3);
+        ImGui::TableSetupColumn("Mode", ImGuiTableColumnFlags_WidthStretch, 2);
+        ImGui::TableSetupColumn("Players", ImGuiTableColumnFlags_WidthStretch, 1.4f);
+        ImGui::TableSetupColumn("", ImGuiTableColumnFlags_WidthFixed, font * 6);
+        ImGui::TableHeadersRow();
+        for (int i = 0; i < count; i++) {
+            ImGui::PushID(i);
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            ImGui::TextUnformatted(rooms[i].name);
+            ImGui::TableNextColumn();
+            ImGui::TextUnformatted(mode_name(rooms[i].mode));
+            ImGui::TableNextColumn();
+            ImGui::Text("%d / %d%s", rooms[i].players, rooms[i].max,
+                        rooms[i].phase == 1 ? "  voting" : rooms[i].phase == 2 ? "  playing" : "");
+            ImGui::TableNextColumn();
+            bool open = rooms[i].phase == 0 && rooms[i].players < rooms[i].max;
+            if (!open) ImGui::BeginDisabled();
+            if (ImGui::Button("Join", ImVec2(-1, 0))) { netplay_lobby_join(rooms[i].code); last_action = now; }
+            if (!open) ImGui::EndDisabled();
+            ImGui::PopID();
+        }
+        ImGui::EndTable();
+    }
+    if (!count) ImGui::TextDisabled("No open rooms right now. Quick match or make one.");
+    ImGui::Spacing();
+
+    // A room of your own.
+    if (ImGui::Button(create_open ? "Hide" : "Create a room", ImVec2(font * 9, 0))) create_open = !create_open;
+    ImGui::SameLine();
+    ImGui::TextDisabled("or join by code");
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(font * 6);
+    ImGui::InputTextWithHint("##code", "CODE", code, sizeof(code), ImGuiInputTextFlags_CharsUppercase);
+    ImGui::SameLine();
+    if (ImGui::Button("Join##code", ImVec2(font * 5, 0)) && strlen(code) == 6) { netplay_lobby_join(code); last_action = now; }
+    if (create_open) {
+        ImGui::PushStyleColor(ImGuiCol_ChildBg, k_panel);
+        if (ImGui::BeginChild("##create", ImVec2(0, 0), ImGuiChildFlags_AutoResizeY | ImGuiChildFlags_AlwaysUseWindowPadding)) {
+            ImGui::SetNextItemWidth(font * 14);
+            ImGui::InputText("Name", create.name, sizeof(create.name));
+            ImGui::SameLine();
+            bool pub = create.is_public != 0;
+            if (ImGui::Checkbox("Listed", &pub)) create.is_public = pub;
+            ImGui::SetItemTooltip("Shown in the room list and found by quick match. Off: join by code only.");
+            mode_picker(&create.mode, &create.max);
+            pool_picker(create);
+            if (hub_button("OPEN THE ROOM", ImVec2(font * 12, font * 2))) {
+                netplay_lobby_create(&create);
+                last_action = now;
+            }
+        }
+        ImGui::EndChild();
+        ImGui::PopStyleColor();
+    }
+}
+
+// In a room: the players, your fighter and ready, the host's settings, the vote.
+static void hub_room(const NetRoom &r)
+{
+    static NetRoomSettings edit;
+    static unsigned edit_from;
+    static bool editing;
+    float font = ImGui::GetFontSize();
+    bool host = r.you == r.host;
+    const NetRoomPlayer *me = nullptr;
+    for (int i = 0; i < r.player_count; i++) if (r.players[i].slot == r.you) me = &r.players[i];
+
+    heading(r.settings.name, 1.6f);
+    ImGui::SameLine();
+    ImGui::TextDisabled("  %s  -  code", mode_name(r.settings.mode));
+    ImGui::SameLine();
+    ImGui::PushFont(g_font_black, ImGui::GetStyle().FontSizeBase * 1.1f);
+    ImGui::TextColored(k_gold, "%s", r.code);
+    ImGui::PopFont();
+    ImGui::SameLine(ImGui::GetContentRegionMax().x - font * 6);
+    if (ImGui::Button("Leave room", ImVec2(font * 6, 0))) { netplay_lobby_leave(); editing = false; return; }
+
+    // The players.
+    if (ImGui::BeginTable("##players", 3, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_SizingStretchProp)) {
+        ImGui::TableSetupColumn("Player", ImGuiTableColumnFlags_WidthStretch, 3);
+        ImGui::TableSetupColumn("Fighter", ImGuiTableColumnFlags_WidthStretch, 3);
+        ImGui::TableSetupColumn("", ImGuiTableColumnFlags_WidthStretch, 1.6f);
+        ImGui::TableHeadersRow();
+        for (int i = 0; i < r.player_count; i++) {
+            const NetRoomPlayer &p = r.players[i];
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            ImGui::PushFont(g_font_bold, ImGui::GetStyle().FontSizeBase);
+            ImGui::TextColored(p.slot == r.you ? k_gold : ImVec4(0.93f, 0.93f, 0.94f, 1), "%s", p.name);
+            ImGui::PopFont();
+            if (p.slot == r.host) { ImGui::SameLine(); ImGui::TextDisabled("host"); }
+            ImGui::TableNextColumn();
+            ImGui::TextUnformatted(p.fighter == 0xFF ? "-" : online_fighter_name(p.fighter));
+            ImGui::TableNextColumn();
+            if (r.phase == 1) ImGui::TextDisabled(p.voted >= 0 ? "voted" : "voting...");
+            else if (p.ready) ImGui::TextColored(ImVec4(0.45f, 0.85f, 0.45f, 1), "READY");
+            else ImGui::TextDisabled("choosing");
+        }
+        for (int i = r.player_count; i < r.settings.max; i++) {
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            ImGui::TextDisabled("open place");
+        }
+        ImGui::EndTable();
+    }
+    ImGui::Spacing();
+
+    if (r.phase == 0) {
+        int fighter = recomp_settings_get("online", "fighter", 55);
+        bool ready = me && me->ready;
+        if (ready) ImGui::BeginDisabled();
+        if (fighter_picker(&fighter)) recomp_settings_set("online", "fighter", fighter);
+        if (ready) ImGui::EndDisabled();
+        ImGui::SameLine();
+        if (hub_button(ready ? "NOT READY" : "READY", ImVec2(font * 9, font * 2), !ready))
+            netplay_lobby_ready(ready ? 0 : 1, fighter);
+        if (r.player_count < 2) ImGui::TextColored(k_gold, "Waiting for another player to join...");
+        else ImGui::TextDisabled("When everyone is ready, the room votes on the venue.");
+
+        if (host) {
+            if (!editing || edit_from != r.version) {
+                if (!editing) edit = r.settings;
+                edit_from = r.version;
+            }
+            if (ImGui::CollapsingHeader("Room settings (host)")) {
+                editing = true;
+                bool changed = false;
+                ImGui::SetNextItemWidth(font * 14);
+                ImGui::InputText("Name", edit.name, sizeof(edit.name));
+                if (ImGui::IsItemDeactivatedAfterEdit()) changed = true;
+                ImGui::SameLine();
+                bool pub = edit.is_public != 0;
+                if (ImGui::Checkbox("Listed", &pub)) { edit.is_public = pub; changed = true; }
+                if (mode_picker(&edit.mode, &edit.max)) changed = true;
+                if (pool_picker(edit)) changed = true;
+                if (changed) netplay_lobby_settings(&edit);
+                ImGui::TextDisabled("A change clears everyone's ready.");
+            } else {
+                editing = false;
+            }
+        }
+    } else if (r.phase == 1) {
+        int left = r.ms_left - (int)(GetTickCount64() - r.received);
+        if (left < 0) left = 0;
+        heading("VOTE FOR THE VENUE", 1.3f, k_gold);
+        ImGui::SameLine();
+        ImGui::Text("  %d s", (left + 999) / 1000);
+        ImGui::ProgressBar(left / 15000.0f, ImVec2(-1, font * 0.35f), "");
+        float w = (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x * 2) / 3;
+        for (int i = 0; i < r.candidate_count; i++) {
+            bool mine = me && me->voted == i;
+            if (i) ImGui::SameLine();
+            ImGui::PushID(i);
+            ImGui::PushStyleColor(ImGuiCol_Button, mine ? k_red : k_panel);
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, mine ? k_red_hi : ImVec4(0.16f, 0.16f, 0.19f, 1));
+            ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 1.5f);
+            ImGui::PushStyleColor(ImGuiCol_Border, mine ? k_gold : ImVec4(0.3f, 0.3f, 0.34f, 1));
+            ImVec2 at = ImGui::GetCursorScreenPos();
+            if (ImGui::Button("##tile", ImVec2(w, font * 5))) netplay_lobby_vote(i);
+            ImDrawList *dl = ImGui::GetWindowDrawList();
+            ImGui::PushFont(g_font_black, ImGui::GetStyle().FontSizeBase * 1.15f);
+            dl->AddText(ImVec2(at.x + font * 0.6f, at.y + font * 0.6f), IM_COL32(245, 245, 247, 255), online_venue_name(r.candidates[i]));
+            ImGui::PopFont();
+            char votes[32];
+            snprintf(votes, sizeof(votes), "%d vote%s", r.votes[i], r.votes[i] == 1 ? "" : "s");
+            dl->AddText(ImVec2(at.x + font * 0.6f, at.y + font * 3.4f), IM_COL32(245, 184, 51, 255), votes);
+            for (int k = 0; k < r.votes[i]; k++)
+                dl->AddCircleFilled(ImVec2(at.x + w - font * (1.0f + k * 1.1f), at.y + font * 4.0f), font * 0.35f, IM_COL32(245, 184, 51, 255));
+            ImGui::PopStyleColor(3);
+            ImGui::PopStyleVar();
+            ImGui::PopID();
+        }
+        ImGui::TextDisabled("Click a venue. The most votes wins; a tie is decided at random.");
+    } else {
+        heading("MATCH ON", 1.3f, ImVec4(0.45f, 0.85f, 0.45f, 1));
+        ImGui::TextWrapped("The match starts by itself from the main menu. After the summary, press A to come back here "
+                           "for the next one.");
+    }
+}
+
+// Online play: the hub, or a two-player room by code.
 static void page_online(UiMode mode)
 {
     static char room_input[8];
     enum NetplayState state = netplay_state();
     bool busy = state == NETPLAY_CONNECTING || state == NETPLAY_WAITING || state == NETPLAY_SYNCING;
+    bool hub = netplay_in_lobby() && state != NETPLAY_OFF && state != NETPLAY_FAILED;
     char status[256];
     netplay_status(status, sizeof(status));
+    std::string server = get_text("online", "server"), name = get_text("online", "name");
+    float font = ImGui::GetFontSize();
 
-    ImGui::SeparatorText("Connection");
-    if (state == NETPLAY_CONNECTED || busy) ImGui::BeginDisabled();
-    settings_group("online", { "server", "name", "input_delay" });
-    if (state == NETPLAY_CONNECTED || busy) ImGui::EndDisabled();
-
-    ImGui::SeparatorText("Play together");
-    if (state == NETPLAY_OFF || state == NETPLAY_FAILED) {
-        std::string server = get_text("online", "server"), name = get_text("online", "name");
+    if (!hub && !busy && state != NETPLAY_CONNECTED) {
+        ImGui::SeparatorText("Connection");
+        settings_group("online", { "server", "name" });
+        ImGui::Spacing();
         bool ready = !server.empty();
         if (!ready) ImGui::BeginDisabled();
-        ImGui::PushStyleColor(ImGuiCol_Button, k_red);
-        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, k_red_hi);
-        if (ImGui::Button("Host a match", ImVec2(ImGui::GetFontSize() * 10, 0)))
-            netplay_host(server.c_str(), name.c_str(), recomp_settings_get("online", "input_delay", 3));
-        ImGui::PopStyleColor(2);
-        ImGui::SameLine();
-        ImGui::TextDisabled("or");
-        ImGui::SameLine();
-        ImGui::SetNextItemWidth(ImGui::GetFontSize() * 6);
-        ImGui::InputTextWithHint("##room", "CODE", room_input, sizeof(room_input), ImGuiInputTextFlags_CharsUppercase);
-        ImGui::SameLine();
-        if (ImGui::Button("Join", ImVec2(ImGui::GetFontSize() * 6, 0)))
-            netplay_join(server.c_str(), name.c_str(), room_input);
+        if (hub_button("GO ONLINE", ImVec2(font * 12, font * 2.4f)))
+            netplay_lobby(server.c_str(), name.c_str());
         if (!ready) ImGui::EndDisabled();
+        ImGui::SameLine();
+        ImGui::TextDisabled("Quick match, open rooms, your own room with a venue vote.");
         if (!ready) ImGui::TextColored(k_gold, "Enter the server address above first.");
+
+        ImGui::Spacing();
+        if (ImGui::CollapsingHeader("Play one friend by code (pick everything in the game's menus)")) {
+            settings_group("online", { "input_delay" });
+            if (!ready) ImGui::BeginDisabled();
+            if (ImGui::Button("Host a match", ImVec2(font * 10, 0)))
+                netplay_host(server.c_str(), name.c_str(), recomp_settings_get("online", "input_delay", 3));
+            ImGui::SameLine();
+            ImGui::TextDisabled("or");
+            ImGui::SameLine();
+            ImGui::SetNextItemWidth(font * 6);
+            ImGui::InputTextWithHint("##room", "CODE", room_input, sizeof(room_input), ImGuiInputTextFlags_CharsUppercase);
+            ImGui::SameLine();
+            if (ImGui::Button("Join", ImVec2(font * 6, 0)))
+                netplay_join(server.c_str(), name.c_str(), room_input);
+            if (!ready) ImGui::EndDisabled();
+        }
+    } else if (hub) {
+        NetRoom r;
+        netplay_lobby_room(&r);
+        if (state == NETPLAY_CONNECTING) {
+            heading("CONNECTING...", 1.3f, k_gold);
+        } else if (r.in_room) {
+            hub_room(r);
+        } else {
+            hub_lobby(name);
+        }
+        if (r.error[0]) ImGui::TextColored(ImVec4(1.0f, 0.45f, 0.4f, 1), "%s", r.error);
+        ImGui::Spacing();
+        if (ImGui::Button("Go offline", ImVec2(font * 7, 0))) netplay_stop();
     } else {
         char room[8];
         netplay_room(room, sizeof(room));
@@ -995,22 +1384,24 @@ static void page_online(UiMode mode)
             ImGui::TextColored(k_gold, "%s", room);
             ImGui::PopFont();
         }
-        if (ImGui::Button(state == NETPLAY_CONNECTED ? "Leave" : "Cancel", ImVec2(ImGui::GetFontSize() * 8, 0)))
+        if (ImGui::Button(state == NETPLAY_CONNECTED ? "Leave" : "Cancel", ImVec2(font * 8, 0)))
             netplay_stop();
     }
     ImGui::Spacing();
     ImVec4 tone = state == NETPLAY_CONNECTED ? ImVec4(0.45f, 0.85f, 0.45f, 1) :
-                  state == NETPLAY_FAILED ? ImVec4(1.0f, 0.45f, 0.4f, 1) : ImVec4(0.93f, 0.93f, 0.94f, 1);
+                  state == NETPLAY_FAILED ? ImVec4(1.0f, 0.45f, 0.4f, 1) : ImVec4(0.6f, 0.6f, 0.64f, 1);
     ImGui::PushTextWrapPos(0);
     ImGui::TextColored(tone, "%s", status);
     ImGui::PopTextWrapPos();
 
-    ImGui::SeparatorText("How it works");
-    ImGui::TextWrapped("Both players need their own copy of the game and this same version. One of you hosts and reads "
-                       "out the room code; the other enters it and joins. Then both press %s. The host is player 1 and "
-                       "the guest player 2 on both PCs: in the menus each of you sees the other's controller, so choose "
-                       "Versus together. In a fight the two games run in lockstep, so the fight is the same on both screens.",
-                       mode == UI_LAUNCHER ? "PLAY" : "Close");
+    if (!hub) {
+        ImGui::SeparatorText("How it works");
+        ImGui::TextWrapped("Everyone needs their own copy of the game and this same version. Go online, then quick match "
+                           "or join a room. When everyone in the room is ready, you vote on the venue and the match "
+                           "starts by itself on every PC from the main menu%s. In a fight the games run in lockstep, so "
+                           "it is the same fight on every screen.",
+                           mode == UI_LAUNCHER ? " (press PLAY first, or while you wait)" : "");
+    }
 }
 
 static void page_general(UiMode mode)

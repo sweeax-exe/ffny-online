@@ -1,7 +1,8 @@
 # Online play
 
-Two players, each with their own copy of the game and the same version of this port, fight each
-other over the internet. A small relay server pairs them; it never sees game data.
+Two to four players, each with their own copy of the game and the same version of this port, fight
+each other over the internet. A small relay server runs the lobby and forwards the inputs; it never
+sees game data.
 
 ## What you need
 
@@ -10,26 +11,43 @@ other over the internet. A small relay server pairs them; it never sees game dat
   [netplay/relay/README.md](../netplay/relay/README.md). The default port is **27777/udp**.
 - Both players: this port installed from their own dump, the same version.
 
-## Playing
+## Playing: the online hub
 
-1. Both open the launcher and go to **Online**. Enter the server (`your.server` or `1.2.3.4`, or
-   `host:port` for another port) and your name.
-2. One player selects **Host a match** and reads out the six-letter room code. The other enters it
-   and selects **Join**. When the status turns green ("Connected to ..."), both press **PLAY**.
-3. The host is player 1 and the guest player 2 on both PCs. In the menus each of you sees the
-   other's controller, so go to **Battle - One on One** together: both press START, each picks a
-   fighter with their own pad, the host picks the venue.
-4. The fight runs in lockstep: both PCs simulate the same fight from the same inputs.
+1. Open the launcher (or the overlay in the game) and go to **Online**. The server is filled in;
+   enter your name and select **GO ONLINE**.
+2. Then either
+   - **Quick match**: pick the mode and select **FIND A MATCH**. You are put straight into an open
+     room of that mode, or a new one is opened that the next player is put into; or
+   - **Open rooms**: the list of listed rooms with their mode and players; **Join** one; or
+   - **Create a room**: name, listed or code-only, mode, players, and the venues to vote on. Friends
+     can also join by its six-letter code.
+3. In the room pick **your fighter** and select **READY**. The host can change the settings while
+   nobody is voting (that clears everyone's ready).
+4. When everyone (at least two) is ready, three venues from the room's list go to the **vote**:
+   click one within 15 seconds. The most votes wins; a tie is decided at random.
+5. The match then starts by itself on every PC from the main menu (press **PLAY** in the launcher
+   if you are not in the game yet). Modes with more fighters than players fill the free places with
+   CPU fighters. After the summary press A: you are back in the room for the next match.
 
-**Input delay** (Online page, the host's value is used): each press takes effect this many steps
-(1/60 s each) later on both screens. 3 (50 ms) suits players in the same country; raise it if the
-fight stutters (the game waits whenever the other player's input is late).
+Modes offered online: One on One, 3-Way, Free for All (more follow once tested online).
+
+## Playing one friend by code
+
+Under **Play one friend by code** one player selects **Host a match** and reads out the room code;
+the other enters it and selects **Join**. When the status turns green both press **PLAY**. The host
+is player 1 and the guest player 2 on both PCs; each sees the other's controller in the menus, so
+go to **Battle - One on One** together and pick there.
+
+**Input delay**: each press takes effect this many steps (1/60 s each) later on every screen. Hub
+matches use 3 (50 ms); a code match uses the host's setting.
 
 ## How it works
 
 - **Menus:** each PC streams its player's controller to the other about 100 times a second; the
   other PC shows it as the second controller.
-- **Fights:** every simulation step uses, for both fighters, the controller entry their player's PC
+- **Hub matches:** the server's `START` names the mode, venue, players and fighters and a random
+  seed; each PC replays the front end's own match-setup calls with them (`src/hooks/automatch.c`).
+- **Fights:** every simulation step uses, for every human fighter, the controller entry their player's PC
   captured `delay` steps earlier. Every random generator is seeded from the session instead of the
   clock. Every 60 steps the PCs compare a checksum of both fighters (state, position, facing,
   health); a mismatch is logged as `[NETPLAY] desync` and shown on the Online page.
@@ -40,4 +58,6 @@ fight stutters (the game waits whenever the other player's input is late).
 
 `RECOMP_NETPLAY=host|join`, `RECOMP_NETPLAY_SERVER=127.0.0.1` and `RECOMP_NETPLAY_CODE_FILE=<file>`
 start a session without the launcher: the host writes its room code to the file and the guest
-reads it. Run a local relay (`go run ./cmd/relay` in `netplay/relay`) and two copies of the game.
+reads it. `RECOMP_NETPLAY=quick` (with `RECOMP_NETPLAY_FIGHTER=<id>`) enters the hub, quick-matches,
+readies and votes by itself. Run a local relay (`go run ./cmd/relay` in `netplay/relay`) and two
+copies of the game.
