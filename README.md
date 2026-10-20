@@ -97,7 +97,8 @@ Gameplay captured by the maintainer. The GIF is a short, silent preview.
 ## Install
 
 Only the **USA Xbox version** matching the [dump manifest](config/dump-manifest.json)
-is supported. PS2 and GameCube copies cannot be used.
+is supported. PS2 and GameCube copies cannot be used. How to make a dump of your own disc:
+[Dump your own disc](docs/dump-your-disc.md).
 
 ### Windows: setup installer
 
