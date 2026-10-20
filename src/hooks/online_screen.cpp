@@ -540,7 +540,7 @@ void connect_if_needed()
 {
     enum NetplayState st = netplay_state();
     if (netplay_in_lobby() && st != NETPLAY_OFF && st != NETPLAY_FAILED) return;
-    std::string server = setting_text("server", "142.132.178.17"), name = setting_text("name", "Player");
+    std::string server = setting_text("server", "play.defjam.online"), name = setting_text("name", "Player");
     netplay_lobby(server.c_str(), name.c_str());
 }
 

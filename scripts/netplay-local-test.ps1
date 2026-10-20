@@ -10,7 +10,7 @@
 .PARAMETER Install  The install folder (the one with installed.json); found by itself if left out.
 .PARAMETER Server   The relay (default: the project's server).
 #>
-param([string]$Install = '', [string]$Server = '142.132.178.17')
+param([string]$Install = '', [string]$Server = 'play.defjam.online')
 $ErrorActionPreference = 'Stop'
 
 # The game and its data folder: an installed copy, or this checkout's own build.

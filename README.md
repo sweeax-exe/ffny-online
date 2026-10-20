@@ -1,12 +1,17 @@
 <p align="center"><img src="branding/fan/github/social-preview-1280x640.jpg" width="960" alt="Def Jam: Fight for NY — Fan Recomp"></p>
 
-# Def Jam: Fight for NY — Recompiled
+# FFNY Online — Def Jam: Fight for NY on PC, with online multiplayer
 
-[![CI](https://github.com/vyanhursky/DefJamFFNY-recomp/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/vyanhursky/DefJamFFNY-recomp/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/vyanhursky/DefJamFFNY-recomp)](https://github.com/vyanhursky/DefJamFFNY-recomp/releases)
+[![Release](https://img.shields.io/github/v/release/sweeax-exe/ffny-online)](https://github.com/sweeax-exe/ffny-online/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-A native PC port of **Def Jam: Fight for NY**, built from the original Xbox
+**FFNY Online** is an unofficial fan project that brings **Def Jam: Fight for NY** to the PC
+and adds what the original never had: **online multiplayer**, with quick match, rooms, a
+venue vote and fights in lockstep, right in the game's own main menu. It builds on
+[Vlad Yanhursky's Def Jam: Fight for NY Recompiled](https://github.com/vyanhursky/DefJamFFNY-recomp),
+the native PC port this project is a fork of; all credit for the port itself goes there.
+
+The port is built from the original Xbox
 version with [xboxrecomp](https://github.com/sp00nznet/xboxrecomp). The Xbox
 executable is translated into C and compiled ahead of time. The game's own
 gameplay, menus and cutscenes run on an Xbox compatibility runtime, drawn through
@@ -20,9 +25,28 @@ You need your **own Xbox game dump**, and the game is built on your machine.
 This repository holds the port's code, tools and documentation. It contains no
 game assets, disc images, translated game code or game executable.
 
-[Install and build](docs/build-and-play.md) · [Documentation](docs/README.md) ·
-[Known issues](docs/known-issues.md) · [Contributing](CONTRIBUTING.md) ·
-[Releases](https://github.com/vyanhursky/DefJamFFNY-recomp/releases)
+[Install and build](docs/build-and-play.md) · [Online play](docs/netplay.md) ·
+[Documentation](docs/README.md) · [Known issues](docs/known-issues.md) ·
+[Contributing](CONTRIBUTING.md) · [Releases](https://github.com/sweeax-exe/ffny-online/releases)
+
+## Online play
+
+Choose **ONLINE** in the main menu (the poster in the bottom-left slot):
+
+- **Quick match** puts you straight into a room of the mode you pick, or opens one for the next
+  players.
+- **Rooms**: the list of open rooms, your own room (mode, players, the venues to vote on, listed
+  or by code only), and joining a friend by code.
+- **In the room** you pick your fighter from the roster and ready up; then everyone votes on
+  the venue (three candidates, 15 seconds) and the match starts by itself on every PC.
+- **Modes**: One on One, 3-Way and Free for All (up to four players, CPU fighters fill free
+  places).
+- **Fights run in lockstep**: every PC simulates the same fight from the same inputs, with an
+  input delay set from the players' pings. The relay server only forwards inputs; it never sees
+  game data.
+- **Updates** arrive through the launcher, signed, so you and your friends stay on the same build.
+
+Online play is Windows only for now. Details: [Online play](docs/netplay.md).
 
 ## Features
 
@@ -42,6 +66,7 @@ game assets, disc images, translated game code or game executable.
   pad (Windows, macOS and Linux).
 - **Your saves stay local.** Profiles live in your data folder and survive
   updates and repairs.
+- **Online multiplayer** in the game's own menus (Windows), and updates from the launcher.
 
 ## Gameplay
 
@@ -67,6 +92,7 @@ Gameplay captured by the maintainer. The GIF is a short, silent preview.
 | Input | Gamepads (Xbox, DualSense, Switch Pro and most others), keyboard and mouse, rumble and remapping; see [Controllers, keyboard and mouse](docs/10-input.md) |
 | Launcher and overlay | A start-up window and an in-game settings overlay (F1) on Windows and (since v0.6.2) macOS and Linux; see [Launcher and overlay](docs/launcher-and-overlay.md) |
 | Saves | Local profiles in your data folder |
+| Online multiplayer | Windows: hub, rooms, quick match, venue vote, 2-4 players in lockstep; tested with two players. Not yet on macOS and Linux |
 
 ## Install
 
@@ -76,7 +102,7 @@ is supported. PS2 and GameCube copies cannot be used.
 ### Windows: setup installer
 
 Download `DefJamSetup-<version>-windows-x64.exe` from the
-[latest release](https://github.com/vyanhursky/DefJamFFNY-recomp/releases/latest).
+[latest release](https://github.com/sweeax-exe/ffny-online/releases/latest).
 The installer contains no game. It takes your disc image or extracted dump,
 checks it, then translates and compiles the game on your machine. It bundles
 Python and the pinned build sources and can install Microsoft's C++ Build Tools
@@ -90,7 +116,7 @@ generation, silent mode, repair and removal.
 ### macOS: setup installer (Apple Silicon)
 
 Download `DefJamSetup-<version>-macos-arm64.dmg` from the
-[latest release](https://github.com/vyanhursky/DefJamFFNY-recomp/releases/latest)
+[latest release](https://github.com/sweeax-exe/ffny-online/releases/latest)
 and open `Def Jam Setup`. It has the same steps as the Windows wizard, needs no
 Terminal, Homebrew or build tools of your own, and works without an internet
 connection. It does need Apple's free **Xcode Command Line Tools**; if they are
@@ -117,8 +143,8 @@ You need Git, Python 3.12 or newer, Visual Studio Build Tools with the C++
 workload, and a Direct3D 11 GPU.
 
 ```powershell
-git clone --recursive https://github.com/vyanhursky/DefJamFFNY-recomp.git
-cd DefJamFFNY-recomp
+git clone --recursive https://github.com/sweeax-exe/ffny-online.git
+cd ffny-online
 ```
 
 Follow [Build and play](docs/build-and-play.md) to choose a data folder and
@@ -176,7 +202,7 @@ tests a change needs.
 
 ## Reporting problems
 
-Open an [issue](https://github.com/vyanhursky/DefJamFFNY-recomp/issues/new/choose)
+Open an [issue](https://github.com/sweeax-exe/ffny-online/issues/new/choose)
 and pick the form that fits. Check [known issues](docs/known-issues.md) first.
 A useful report has:
 
@@ -212,7 +238,11 @@ The [release notes](docs/releases) record what each version changed.
 
 ## Credits and licensing
 
-Maintained by **vyanhursky**, with development assistance from Claude Code
+**FFNY Online** (online play, the in-game online screens, the update service and the relay) is
+maintained by **sweeax-exe**, with development assistance from Claude Code.
+
+The PC port it builds on, **[Def Jam: Fight for NY Recompiled](https://github.com/vyanhursky/DefJamFFNY-recomp)**,
+is by **Vlad Yanhursky (vyanhursky)**, with development assistance from Claude Code
 and Codex. The port builds on **sp00nz's xboxrecomp** and on work from the Xbox
 emulation community. xemu provides hardware references and attributed components
 in the toolkit. [Burnout 3](https://github.com/sp00nznet/burnout3) and

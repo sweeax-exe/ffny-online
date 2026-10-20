@@ -39,8 +39,10 @@ void updater_message(char *t, int size) { if (size > 0) t[0] = 0; }
 #pragma comment(lib, "winhttp.lib")
 #pragma comment(lib, "bcrypt.lib")
 
-/* The update service on the project's server (netplay/relay -updates-listen). */
-#define UPDATE_HOST L"142.132.178.17"
+/* The update service on the project's server (netplay/relay -updates-listen): its name, then the
+ * address of the first server, for as long as installs from before the name still ask there.
+ * The manifest is signed (below), so the host only needs to be reachable, not trusted. */
+static const wchar_t *const k_update_hosts[] = { L"play.defjam.online", L"142.132.178.17" };
 #define UPDATE_PORT 27778
 /* updatesign's public key: X and Y of the P-256 point, big-endian. */
 static const char k_public_key[] =
@@ -127,7 +129,9 @@ int updater_can_install(void)
 
 typedef int (*Sink)(const void *data, DWORD size, void *user);
 
-static int http_get(const wchar_t *path, Sink sink, void *user, unsigned long long *length)
+/* One host; *started says whether data reached the sink (then no other host may be tried). */
+static int http_get_from(const wchar_t *host, const wchar_t *path, Sink sink, void *user,
+                         unsigned long long *length, int *started)
 {
     HINTERNET session = NULL, connect = NULL, request = NULL;
     int ok = 0;
@@ -135,7 +139,7 @@ static int http_get(const wchar_t *path, Sink sink, void *user, unsigned long lo
     session = WinHttpOpen(L"DefJamRecomp-Updater/1", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
                           WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
     if (session) WinHttpSetTimeouts(session, 5000, 5000, 10000, 30000);
-    if (session) connect = WinHttpConnect(session, UPDATE_HOST, UPDATE_PORT, 0);
+    if (session) connect = WinHttpConnect(session, host, UPDATE_PORT, 0);
     if (connect) request = WinHttpOpenRequest(connect, L"GET", path, NULL, WINHTTP_NO_REFERER,
                                               WINHTTP_DEFAULT_ACCEPT_TYPES, 0);
     if (request && WinHttpSendRequest(request, WINHTTP_NO_ADDITIONAL_HEADERS, 0, WINHTTP_NO_REQUEST_DATA, 0, 0, 0) &&
@@ -158,6 +162,7 @@ static int http_get(const wchar_t *path, Sink sink, void *user, unsigned long lo
             if (avail > sizeof(buf)) avail = sizeof(buf);
             if (!WinHttpReadData(request, buf, avail, &got)) { ok = 0; break; }
             if (!got) break;
+            *started = 1;
             if (!sink(buf, got, user)) { ok = 0; break; }
         }
     }
@@ -165,6 +170,17 @@ static int http_get(const wchar_t *path, Sink sink, void *user, unsigned long lo
     if (connect) WinHttpCloseHandle(connect);
     if (session) WinHttpCloseHandle(session);
     return ok;
+}
+
+static int http_get(const wchar_t *path, Sink sink, void *user, unsigned long long *length)
+{
+    size_t i;
+    for (i = 0; i < sizeof(k_update_hosts) / sizeof(k_update_hosts[0]); i++) {
+        int started = 0;
+        if (http_get_from(k_update_hosts[i], path, sink, user, length, &started)) return 1;
+        if (started) return 0;
+    }
+    return 0;
 }
 
 typedef struct { char *data; DWORD used, cap; } Memory;

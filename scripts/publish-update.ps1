@@ -9,12 +9,13 @@
      server, the manifest last so a launcher never sees a manifest without its setup.
   Raise config/remaster-version.txt and commit before publishing a new build.
 .PARAMETER Notes   One or two sentences for the update dialog.
-.PARAMETER Server  The ssh host (an entry in ~/.ssh/config).
+.PARAMETER Server  The ssh hosts (entries in ~/.ssh/config), comma-separated: the project's server,
+                   and the first one for as long as older installs ask there.
 .PARAMETER NoUpload  Build and sign only (build/update/).
 #>
 param(
     [Parameter(Mandatory = $true)][string]$Notes,
-    [string]$Server = 'hetzner-sweeax',
+    [string[]]$Server = @('ffny-online', 'hetzner-sweeax'),
     [string]$Key = "$env:USERPROFILE\.defjam\update-signing-key.pem",
     [switch]$NoUpload
 )
@@ -55,14 +56,16 @@ if ($LASTEXITCODE) { throw 'The fresh signature does not verify' }
 if ($NoUpload) { return }
 
 $remote = '/opt/defjam-relay/updates'
-scp -o BatchMode=yes $setup "$($Server):/tmp/$setupName"
-scp -o BatchMode=yes (Join-Path $out 'latest.json') "$($Server):/tmp/defjam-latest.json"
-scp -o BatchMode=yes (Join-Path $out 'latest.json.sig') "$($Server):/tmp/defjam-latest.json.sig"
-ssh -o BatchMode=yes $Server ("set -e; install -d -m 0755 $remote; " +
+foreach ($host_ in $Server) {
+scp -o BatchMode=yes $setup "$($host_):/tmp/$setupName"
+scp -o BatchMode=yes (Join-Path $out 'latest.json') "$($host_):/tmp/defjam-latest.json"
+scp -o BatchMode=yes (Join-Path $out 'latest.json.sig') "$($host_):/tmp/defjam-latest.json.sig"
+ssh -o BatchMode=yes $host_ ("set -e; install -d -m 0755 $remote; " +
     "install -m 0644 /tmp/$setupName $remote/$setupName; " +
     "install -m 0644 /tmp/defjam-latest.json.sig $remote/latest.json.sig.new; " +
     "install -m 0644 /tmp/defjam-latest.json $remote/latest.json.new; " +
     "mv $remote/latest.json.sig.new $remote/latest.json.sig; mv $remote/latest.json.new $remote/latest.json; " +
     "rm -f /tmp/$setupName /tmp/defjam-latest.json /tmp/defjam-latest.json.sig; ls -l $remote")
-if ($LASTEXITCODE) { throw 'Upload failed' }
+if ($LASTEXITCODE) { throw "Upload to $host_ failed" }
+}
 "Published $version. Launchers will offer it at their next start."
