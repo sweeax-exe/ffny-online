@@ -32,6 +32,9 @@ bool take_open_request();
 /* The online screens; returns false when the player leaves them (back to the main menu). */
 bool draw(ImVec2 display);
 
+/* The last false from draw() was a match starting, not a press: nothing to keep from the game. */
+bool closed_for_match();
+
 }
 #endif
 

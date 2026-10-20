@@ -1730,7 +1730,17 @@ extern "C" void pc_ui_overlay(void *device, void *context, void *window_rtv, uns
     if (old_rtv) old_rtv->Release();
     if (old_dsv) old_dsv->Release();
     (void)width;
-    if (close_request) set_open(false);
+    if (close_request) {
+        bool for_match = g_online && online_screen::closed_for_match();
+        set_open(false);
+        // Closed by a match starting, not by a press: the fight's own input is not to be held
+        // (MATCH FOUND can run out while the match is loading and the player already holds a move).
+        if (for_match) {
+            g_hold_input = false;
+            xbox_HostInputSetUiActive(0);
+            fprintf(stderr, "[UI] closed for the match: game input back at once\n");
+        }
+    }
     ui_unlock();
 }
 #endif

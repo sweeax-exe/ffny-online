@@ -47,6 +47,7 @@ std::atomic<int> g_focus{-1};       // the slot under the cursor, -1 unknown
 std::atomic<int> g_open_req{0};
 std::atomic<int> g_menu_ticks{0};   // Online.Tick() since the menu came up: it is on screen
 std::atomic<long long> g_last_tick_ms{0};
+bool g_closed_for_match = false;    // overlay thread: the last close was MATCH FOUND running out
 
 long long now_ms()
 {
@@ -992,6 +993,8 @@ void draw_decor(ImDrawList *dl, ImVec2 display)
               "Fight players across the world. Quick match, rooms and venue votes.");
 }
 
+bool closed_for_match() { return g_closed_for_match; }
+
 bool take_open_request()
 {
     if (!g_open_req.exchange(0)) return false;
@@ -1022,9 +1025,11 @@ bool draw(ImVec2 display)
         page_title(dl, f, "MATCH FOUND");
         text(dl, f, g_hand, 22, 320, 200, ORANGE, "Get ready to fight!", CENTER, 1.2f);
         text(dl, f, g_title, 14, 320, 240, WHITE, "The match starts by itself.", CENTER);
-        return GetTickCount64() - S.start_seen < 1800;
+        g_closed_for_match = GetTickCount64() - S.start_seen >= 1800;
+        return !g_closed_for_match;
     }
     S.start_seen = 0;
+    g_closed_for_match = false;
 
     if (st == NETPLAY_CONNECTING || (!netplay_in_lobby() && st != NETPLAY_FAILED)) {
         page_title(dl, f, "ONLINE");
@@ -1097,6 +1102,7 @@ bool decor_wanted() { return false; }
 void draw_decor(ImDrawList *, ImVec2) {}
 bool take_open_request() { return g_open_req.exchange(0) != 0 && false; }
 bool draw(ImVec2) { return false; }
+bool closed_for_match() { return false; }
 }
 
 #endif
