@@ -427,3 +427,35 @@ def test_a_check_that_does_not_apply_is_skipped_never_passed(monkeypatch, tmp_pa
     assert ok is False                                   # a skip does not make the run "all passed"
     junit = (tmp_path / "junit.xml").read_text(encoding="utf-8")
     assert 'skipped="1"' in junit and 'failures="0"' in junit and "<skipped" in junit
+
+
+def test_a_boot_that_never_presents_is_a_hang_only_with_a_start_window():
+    # After the first present: the count has to stand still for stall_secs.
+    assert not harness.stalled(3, 9.9, 100, 10)
+    assert harness.stalled(3, 10, 100, 10)
+    # Before it the count never moves, so only start_secs can call it a hang.
+    assert not harness.stalled(0, 500, 500, 10)
+    assert not harness.stalled(0, 59, 59, 10, start_secs=60)
+    assert harness.stalled(0, 60, 60, 10, start_secs=60)
+
+
+def test_hang_dump_names_the_hung_child_and_its_build():
+    commands = harness.dump_hang_commands(4242, "win-x64-release")
+    # The one that suspends nothing goes first: the others can stall on a starved thread.
+    assert [c[0] for c in commands] == ["thread-sched.py", "native-stacks.py", "guest-stack.py",
+                                        "sample-threads.py", "hang-peek.py"]
+    for script, args, _ in commands:
+        assert args[args.index("--pid") + 1] == "4242", script
+        if script != "native-stacks.py":           # it finds the PDB by itself
+            assert args[args.index("--preset") + 1] == "win-x64-release", script
+
+
+def test_a_diagnostic_that_overruns_is_killed_and_the_dump_goes_on(tmp_path):
+    import sys
+    out = tmp_path / "tool.txt"
+    assert not harness.run_diagnostic([sys.executable, "-c", "import time; time.sleep(30)"],
+                                      str(out), timeout=1)
+    assert b"gave up after 1 s" in out.read_bytes()
+    ok = tmp_path / "ok.txt"
+    assert harness.run_diagnostic([sys.executable, "-c", "print('stacks')"], str(ok), timeout=30)
+    assert ok.read_bytes().strip() == b"stacks"

@@ -496,12 +496,19 @@ class SaveGuard:
 _OWNED_PROCESSES = set()
 
 
+# How long a killed game may take to go. Termination runs on each of its threads, and
+# they all share the one guest CPU: with that CPU busy (2026-10-20, a second process
+# on it) a boot that had reached the menu took more than 15 s to exit, and the soak
+# stopped on the TimeoutExpired.
+EXIT_WAIT_SECS = 60
+
+
 def kill_stray():
     """Reap only this harness's children; other worktrees may be running games."""
     for process in list(_OWNED_PROCESSES):
         if process.poll() is None:
             process.kill()
-        process.wait(timeout=15)
+        process.wait(timeout=EXIT_WAIT_SECS)
         _OWNED_PROCESSES.discard(process)
 
 
@@ -554,6 +561,18 @@ def presents_after(text, anchor):
         if m:
             out.append(int(m.group(1)))
     return out
+
+
+def stalled(presents, since_change, since_start, stall_secs, start_secs=0):
+    """Whether a run has stopped presenting. Pure, for the tests.
+
+    After its first present a run is stalled when the count has not moved for
+    `stall_secs`. Before it, the count never moves, so only `start_secs` can
+    say so: a boot that stops before its first frame (2026-10-20, interrupts
+    never delivered) otherwise runs out its whole time unnoticed."""
+    if presents > 0:
+        return since_change >= stall_secs
+    return bool(start_secs) and since_start >= start_secs
 
 
 class LogTail:
@@ -658,7 +677,7 @@ def process_memory(pid):
 
 def run_game(name, stages=(), tail="", shots="", secs=240, preset=RELEASE_PRESET, env=None,
              until=None, after=0, story=False, scripted=True, stall_secs=0, on_stall=None, quiet=False,
-             until_file=None, controller=None, inherit_recomp=True):
+             until_file=None, controller=None, inherit_recomp=True, start_secs=0):
     """Run the game once. Returns a Run.
 
     until/after: stop `after` seconds after the first `[FUNCCALL]` containing
@@ -666,6 +685,8 @@ def run_game(name, stages=(), tail="", shots="", secs=240, preset=RELEASE_PRESET
     stall_secs: if no `[D3D] 2.0s` line arrives for this long before `until` is
     reached, the run is a hang: `on_stall(run, process)` is called while the
     process is still alive, then it is stopped.
+    start_secs: with stall_secs, a run that has not presented at all after this
+    long is a hang too (one that stops before its first frame never stalls).
     until_file: stop a few seconds after this file exists (a capture that is all
     the run is for)."""
     exe = exe_path(preset)
@@ -762,14 +783,15 @@ def run_game(name, stages=(), tail="", shots="", secs=240, preset=RELEASE_PRESET
                     n = tail_log.presents
                     if n != last_presents:
                         last_presents, last_change = n, time.time()
-                    elif n > 0 and time.time() - last_change >= stall_secs:
+                    elif stalled(n, time.time() - last_change, time.time() - t0, stall_secs,
+                                 start_secs):
                         run.hung = True
                         if on_stall:
                             on_stall(run, p)
                         break
             if p.poll() is None:
                 p.kill()
-                p.wait(timeout=15)
+                p.wait(timeout=EXIT_WAIT_SECS)
             else:
                 run.unexpected_exit = True
             run.exit_code = p.returncode
@@ -828,24 +850,60 @@ def print_run(run):
 # Hang catcher
 # ---------------------------------------------------------------------------
 
+def run_diagnostic(cmd, out_path, timeout=90):
+    """Run one hang tool into a file, and never wait on it for longer than `timeout`.
+
+    Output goes to the file, not a pipe: subprocess.run(capture_output=True,
+    timeout=...) kills a tool that overruns and then waits for its pipes, and
+    on 2026-10-20 the tool was in a wait Windows would not end (GetThreadContext
+    on a starved thread), so the kill never finished and the soak, with the hung
+    game still spinning, stopped for good. A tool that overruns here is killed
+    and abandoned."""
+    with open(out_path, "wb") as f:
+        try:
+            p = subprocess.Popen(cmd, cwd=REPO, stdout=f, stderr=subprocess.STDOUT)
+        except OSError as ex:                                  # a diagnostic must not end the catch
+            f.write(("failed: %r\n" % (ex,)).encode())
+            return False
+        try:
+            p.wait(timeout=timeout)
+            return True
+        except subprocess.TimeoutExpired:
+            p.kill()
+            try:
+                p.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                pass
+            f.write(("\n[harness] gave up after %d s; the tool was killed and abandoned\n"
+                     % timeout).encode())
+            return False
+
+
+def dump_hang_commands(pid, preset):
+    """The diagnostics a hang dump runs, as (script, arguments, output file).
+
+    Each names the hung child by pid: found by image name they read whichever
+    copy of the game tasklist lists first, and on 2026-10-20 that was a
+    player's installed copy running beside the harness."""
+    target = ["--pid", str(pid)]
+    build = ["--preset", preset]
+    return (("thread-sched.py", target + build, "sched.txt"),    # suspends nothing: first
+            ("native-stacks.py", target, "native.txt"),
+            ("guest-stack.py", target + build, "guest.txt"),
+            ("sample-threads.py", target + build + ["--samples", "6", "--interval", "0.3"], "sample.txt"),
+            ("hang-peek.py", target + build, "state.txt"))
+
+
 def dump_hang(run, process):
     """Everything worth having from a process that stopped presenting, while it lives."""
     out = os.path.join(REPO, "logs", "hang-" + time.strftime("%Y%m%d-%H%M%S"))
     os.makedirs(out, exist_ok=True)
-    for script, args, name in (("native-stacks.py", [], "native.txt"),
-                               ("guest-stack.py", [], "guest.txt"),
-                               ("sample-threads.py", ["--samples", "6", "--interval", "0.3"], "sample.txt"),
-                               ("hang-peek.py", [], "state.txt")):
+    preset = run.identity.get('preset', RELEASE_PRESET)
+    for script, args, name in dump_hang_commands(process.pid, preset):
         path = os.path.join(REPO, "scripts", script)
         if not os.path.isfile(path):
             continue
-        try:
-            r = subprocess.run([sys.executable, path] + args, cwd=REPO, capture_output=True, timeout=120)
-            with open(os.path.join(out, name), "wb") as f:
-                f.write(r.stdout + r.stderr)
-        except Exception as ex:                                   # a diagnostic must not end the catch
-            with open(os.path.join(out, name), "w") as f:
-                f.write("failed: %r\n" % (ex,))
+        run_diagnostic([sys.executable, path] + args, os.path.join(out, name))
     shutil.copyfile(run.log, os.path.join(out, "log.err"))
     print("hang dump: %s" % os.path.relpath(out, REPO))
 
@@ -854,7 +912,8 @@ def soak(boots, preset, stop_on_hang=True):
     """Boot to the main menu `boots` times; a boot that stops presenting is a hang."""
     ok = hung = failed = 0
     for k in range(1, boots + 1):
-        r = run_route("boot", preset=preset, shots="", stall_secs=10, on_stall=dump_hang, quiet=True)
+        r = run_route("boot", preset=preset, shots="", stall_secs=10, start_secs=60,
+                      on_stall=dump_hang, quiet=True)
         if r.hung:
             hung += 1
             verdict = "HUNG"

@@ -9,7 +9,7 @@ the lifted function (sub_XXXXXXXX) or the runtime function the thread is inside.
 Usage:  python scripts/sample-threads.py [--preset win-x64-debug] [--samples 5] [--interval 0.5]
 Run it while the game is running (e.g. from a second shell after scripts/run.ps1).
 """
-import argparse, bisect, ctypes, ctypes.wintypes as wt, os, re, sys, time
+import argparse, bisect, ctypes, ctypes.wintypes as wt, importlib.util, os, re, sys, time
 
 TH32CS_SNAPTHREAD = 0x4
 THREAD_SUSPEND_RESUME = 0x2
@@ -76,6 +76,33 @@ def threads_of(pid):
                 break
     k32.CloseHandle(snap)
     return tids
+
+
+def walk_plan(pid):
+    """(first, rest, skipped) thread ids from scripts/thread-sched.py's plan_walk."""
+    spec = importlib.util.spec_from_file_location(
+        "thread_sched", os.path.join(os.path.dirname(os.path.abspath(__file__)), "thread-sched.py"))
+    ts = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(ts)
+    return ts.plan_for(pid)
+
+
+def hold(tids):
+    """Suspend these threads; returns the handles for release()."""
+    out = []
+    for tid in tids:
+        h = k32.OpenThread(THREAD_SUSPEND_RESUME, False, tid)
+        if h and k32.SuspendThread(h) != 0xFFFFFFFF:
+            out.append(h)
+        elif h:
+            k32.CloseHandle(h)
+    return out
+
+
+def release(handles):
+    for h in handles:
+        k32.ResumeThread(h)
+        k32.CloseHandle(h)
 
 
 def sample(tid):
@@ -158,10 +185,11 @@ def main():
     ap.add_argument("--preset", default="win-x64-debug")
     ap.add_argument("--samples", type=int, default=5)
     ap.add_argument("--interval", type=float, default=0.5)
+    ap.add_argument("--pid", type=int, help="this process, when more than one copy runs")
     a = ap.parse_args()
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     mappath = os.path.join(root, "build", a.preset, "defjam_recomp.map")
-    pid = find_pid()
+    pid = a.pid or find_pid()
     if not pid:
         print("defjam_recomp.exe is not running"); return 1
     base, size = module_base(pid)
@@ -181,38 +209,48 @@ def main():
                 guest_base = int.from_bytes(raw, "little")
     guest_ptrs = {}
     hits = {}
+    # Busy threads are held for the round so their CPUs are free; starved ones are
+    # skipped (scripts/thread-sched.py, plan_walk: a suspension completes only when
+    # the thread runs, and one that never runs would hang this script).
+    first, rest, skipped = walk_plan(pid)
+    for tid in skipped:
+        print(f"  tid {tid:6d} not sampled: ready but not scheduled (starved)")
     for s in range(a.samples):
-        for tid in threads_of(pid):
-            r = sample(tid)
-            if not r:
-                continue
-            rip, rsp, rax, rcx, rdx, allregs = r
-            # A host register holding a guest pointer reads as the guest VA plus
-            # the mapping offset. Spotting those is how you find out which
-            # structure a spinning loop is watching, which the guest register
-            # file cannot tell you from outside: those are thread-local.
-            if guest_base:
-                for name, v in zip(("rax", "rbx", "rcx", "rdx", "rsi", "rdi",
-                                    "r8", "r9", "r10", "r11", "r12", "r13",
-                                    "r14", "r15"), allregs):
-                    # Skip the bare mapping base: the generated code keeps that
-                    # in a register permanently, so it says nothing about what
-                    # a loop is looking at.
-                    if guest_base + 0x1000 <= v < guest_base + 0x08000000:
-                        guest_ptrs.setdefault(tid, {}).setdefault(
-                            f"{name}=0x{v - guest_base:08X}", 0)
-                        guest_ptrs[tid][f"{name}=0x{v - guest_base:08X}"] += 1
-            name = "?"
-            if addrs and base is not None and base <= rip < base + size:
-                va = rip - base + (pref or base)
-                i = bisect.bisect_right(addrs, va) - 1
-                if i >= 0:
-                    name = f"{names[i]}+0x{va - addrs[i]:X}"
-            elif base is not None and not (base <= rip < base + size):
-                name = "(outside exe: kernel32/ntdll wait or syscall)"
-            hits.setdefault(tid, []).append(name)
-            if s == 0:
-                print(f"  tid {tid:6d} rip 0x{rip:X} rsp 0x{rsp:X} rax 0x{rax:X} rcx 0x{rcx:X} rdx 0x{rdx:X}  {name}")
+        held = hold(first)
+        try:
+            for tid in first + rest:
+                r = sample(tid)
+                if not r:
+                    continue
+                rip, rsp, rax, rcx, rdx, allregs = r
+                # A host register holding a guest pointer reads as the guest VA plus
+                # the mapping offset. Spotting those is how you find out which
+                # structure a spinning loop is watching, which the guest register
+                # file cannot tell you from outside: those are thread-local.
+                if guest_base:
+                    for name, v in zip(("rax", "rbx", "rcx", "rdx", "rsi", "rdi",
+                                        "r8", "r9", "r10", "r11", "r12", "r13",
+                                        "r14", "r15"), allregs):
+                        # Skip the bare mapping base: the generated code keeps that
+                        # in a register permanently, so it says nothing about what
+                        # a loop is looking at.
+                        if guest_base + 0x1000 <= v < guest_base + 0x08000000:
+                            guest_ptrs.setdefault(tid, {}).setdefault(
+                                f"{name}=0x{v - guest_base:08X}", 0)
+                            guest_ptrs[tid][f"{name}=0x{v - guest_base:08X}"] += 1
+                name = "?"
+                if addrs and base is not None and base <= rip < base + size:
+                    va = rip - base + (pref or base)
+                    i = bisect.bisect_right(addrs, va) - 1
+                    if i >= 0:
+                        name = f"{names[i]}+0x{va - addrs[i]:X}"
+                elif base is not None and not (base <= rip < base + size):
+                    name = "(outside exe: kernel32/ntdll wait or syscall)"
+                hits.setdefault(tid, []).append(name)
+                if s == 0:
+                    print(f"  tid {tid:6d} rip 0x{rip:X} rsp 0x{rsp:X} rax 0x{rax:X} rcx 0x{rcx:X} rdx 0x{rdx:X}  {name}")
+        finally:
+            release(held)
         time.sleep(a.interval)
     if guest_ptrs:
         print("--- guest pointers seen in host registers ---")

@@ -108,6 +108,7 @@ def main():
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--preset", default="win-x64-debug")
     ap.add_argument("--tid", type=int, help="one thread instead of all of them")
+    ap.add_argument("--pid", type=int, help="this process, when more than one copy runs")
     ap.add_argument("--depth", type=int, default=256, help="stack words to scan")
     ap.add_argument("--samples", type=int, default=1)
     ap.add_argument("--interval", type=float, default=0.5)
@@ -135,7 +136,7 @@ def main():
         print("the map is missing the guest registers, the TLS slot or the memory offset")
         return 1
 
-    pid = guest_regs.find_pid()
+    pid = a.pid or guest_regs.find_pid()
     if not pid:
         print("defjam_recomp.exe is not running")
         return 1

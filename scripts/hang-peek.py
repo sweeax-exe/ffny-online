@@ -55,10 +55,11 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--samples", type=int, default=4)
     ap.add_argument("--preset")
+    ap.add_argument("--pid", type=int, help="this process, when more than one copy runs")
     a = ap.parse_args(argv)
     preset = a.preset or running_preset() or "win-x64-debug"
     mapfile = os.path.join(REPO, "build", preset, "defjam_recomp.map")
-    pid = pg.find_pid()
+    pid = a.pid or pg.find_pid()
     if not pid:
         sys.exit("the game is not running")
     h = pg.k32.OpenProcess(pg.PROCESS_VM_READ | pg.PROCESS_QUERY_INFORMATION, False, pid)
