@@ -12,8 +12,7 @@ This unofficial native port recompiles the original Xbox game for your computer,
 with higher rendering resolution, modern controller support, local multiplayer
 and optional HD textures.
 
-**The port is playable and still improving.** Menus, fights and tested Story routes
-work, including the intro, character creator, crib and gym. See
+**The port is now mature and continues to improve.** All game functionality is working and we are continuously optimizing, enhancing, and bugfixing. See
 [known issues](docs/known-issues.md) and the
 [latest release notes](https://github.com/vyanhursky/DefJamFFNY-recomp/releases/latest)
 for current limitations.
