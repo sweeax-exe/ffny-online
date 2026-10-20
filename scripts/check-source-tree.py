@@ -22,8 +22,17 @@ APPROVED_README_MEDIA = {
     'docs/media/fight-screenshot.png': '9804400a61948f0d562809cf46f3da09a2aa310f4b1b37f98c167b92c8fad434',
     'docs/media/fight-gameplay.gif': '77012147d4fe73227222c988610dba82510df1abad4f2405f1164935920b4277',
     # 2026-10-09, at the owner's request: the port's own setup wizard and launcher. No game artwork.
-    'docs/media/setup-wizard.png': '14133e1592e34308aceeffa35366cf9ed6515c82346e8e4a7b85d2dd11d74bb1',
-    'docs/media/launcher.png': 'ffb73dfd833f6bbe4b059b57ed0969eaaad74d2b4e5a3aa7070253a44b2a5dc8',
+    'docs/media/setup-wizard.png': '0a9ee25b0e97751972cba83eea0b1b93a26ec12463c91f712d2fd9ef28b4b7ff',
+    'docs/media/launcher.png': '50a18097a6d4724dd955937d698a51cdbdab9343f186afe73493791319e9708e',
+    # 2026-10-20, FFNY Online's owner, for the README and the release post: the online screens
+    # (main menu entry, hub, room, fighter grid, venue vote) and an online fight, captured from the
+    # game's own frames; the setup wizard and launcher pictures were retaken for FFNY Online.
+    'docs/media/online-menu.png': 'd25b23b9d4fda22438089ff01dcd64b313f16f5df5db47277bf92de39d835639',
+    'docs/media/online-hub.png': '520d38027c22bed874e2649b124f2931a362422c275dac99e22244e2eefca0ed',
+    'docs/media/online-room.png': 'acc3add318ab278772d445042d6044da1f2dfe0ed48ef8c693cbc8c8aff6676a',
+    'docs/media/online-fighters.png': '6ff224a9e64b317be2166c9a086b6c087652e7ea2e906292c415a1ba0b15125f',
+    'docs/media/online-vote.png': '2a86d860bf5a202cc68e94ac2cafdd4d2913a0846781fdb17ec353afe6e85279',
+    'docs/media/online-fight.png': '17c30e63e490fd10e1f071d2b6a4390f98855936bb809c2450974ad3a8785a88',
 }
 # D98 (2026-10-10): the owner approved committing the application icons and the Steam artwork
 # rendered from the game's own textures (the shield, the title wordmark, the title-screen scene).

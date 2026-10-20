@@ -294,7 +294,13 @@ extern "C" int pc_launcher_run(void)
         x = work.left + (work.right - work.left - w) / 2;
         y = work.top + (work.bottom - work.top - h) / 2;
     }
-    HWND window = CreateWindowExW(0, L"DefJamRecompLauncher", L"Def Jam: Fight for NY - Launcher",
+    // RECOMP_WINDOW_BACKGROUND (test runs, screenshots): off the desktop and without the focus.
+    bool background = getenv("RECOMP_WINDOW_BACKGROUND") != nullptr;
+    if (background) {
+        x = GetSystemMetrics(SM_XVIRTUALSCREEN) - w - 64;
+        y = GetSystemMetrics(SM_YVIRTUALSCREEN);
+    }
+    HWND window = CreateWindowExW(background ? WS_EX_NOACTIVATE : 0, L"DefJamRecompLauncher", L"Def Jam: Fight for NY - Launcher",
                                   WS_OVERLAPPEDWINDOW, x, y, w, h, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
     if (!window) return 1;                       // no window: do not hold the game back
     if (!make_device(window)) {
@@ -314,8 +320,8 @@ extern "C" int pc_launcher_run(void)
     fprintf(stderr, "[UI] launcher artwork: banner %s, logo %s\n", g_banner.srv ? "loaded" : "not found",
             g_logo.srv ? "loaded" : "not found");
     ui_unlock();
-    ShowWindow(window, SW_SHOW);
-    SetForegroundWindow(window);
+    ShowWindow(window, background ? SW_SHOWNOACTIVATE : SW_SHOW);
+    if (!background) SetForegroundWindow(window);
     fprintf(stderr, "[UI] launcher shown\n");
     fflush(stderr);
 

@@ -46,6 +46,21 @@ Choose **ONLINE** in the main menu (the poster in the bottom-left slot):
   game data.
 - **Updates** arrive through the launcher, signed, so you and your friends stay on the same build.
 
+<table>
+<tr>
+<td><img src="docs/media/online-menu.png" alt="ONLINE in the game's main menu"></td>
+<td><img src="docs/media/online-hub.png" alt="The online hub: quick match, find a room, create a room"></td>
+</tr>
+<tr>
+<td><img src="docs/media/online-fighters.png" alt="Choosing a fighter from the roster"></td>
+<td><img src="docs/media/online-vote.png" alt="The room votes on the venue"></td>
+</tr>
+<tr>
+<td><img src="docs/media/online-room.png" alt="A room with both players ready"></td>
+<td><img src="docs/media/online-fight.png" alt="An online fight in the Terror Dome"></td>
+</tr>
+</table>
+
 Online play is Windows only for now. Details: [Online play](docs/netplay.md).
 
 ## Features
