@@ -63,6 +63,8 @@ BASE_ENV = {
     "RECOMP_USB": "1",
     # A player's settings.ini must never change a test run: defaults only, nothing written.
     "RECOMP_SETTINGS": "none",
+    # Reviewed goldens/replays use the original canvas, independent of player defaults.
+    "RECOMP_ASPECT": "4:3",
 }
 
 # A screen request works with both normal and shortened startup. Counting flow

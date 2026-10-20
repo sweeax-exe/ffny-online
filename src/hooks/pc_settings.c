@@ -61,10 +61,10 @@ static RecompSetting g_display_settings[] = {
       "Maximum new source images captured in one run." },
     { "display", "fullscreen", RECOMP_SETTING_BOOL, 0, 0, 0, NULL, NULL, 0,
       "Borderless full screen. Alt+Enter or F11 switches while playing." },
-    { "display", "window_width", RECOMP_SETTING_INT, 1280, 320, 16384, NULL, NULL, 0,
+    { "display", "window_width", RECOMP_SETTING_INT, 1920, 320, 16384, NULL, NULL, 0,
       "Window size when not full screen. Resizing the window updates these." },
-    { "display", "window_height", RECOMP_SETTING_INT, 960, 240, 16384, NULL, NULL, 0, NULL },
-    { "display", "aspect", RECOMP_SETTING_ENUM, 0, 0, 0, k_aspect, "RECOMP_ASPECT", 0,
+    { "display", "window_height", RECOMP_SETTING_INT, 1080, 240, 16384, NULL, NULL, 0, NULL },
+    { "display", "aspect", RECOMP_SETTING_ENUM, 2, 0, 0, k_aspect, "RECOMP_ASPECT", 0,
       "4:3 keeps the console's picture shape with black bars; stretch fills the window; the widescreen shapes "
       "(beta) widen the 3D view and keep menus, HUD and movies in shape, and start with the game." },
     { "display", "widescreen_hud", RECOMP_SETTING_ENUM, 0, 0, 0, k_ws_hud, NULL, RECOMP_SETTING_RESTART,
@@ -77,7 +77,10 @@ static RecompSetting g_display_settings[] = {
       "Widest horizontal field of view widescreen may use, in degrees (only very wide screens reach it)." },
     { "display", "render_scale", RECOMP_SETTING_INT, 2, 1, 4, NULL, "RECOMP_RENDER_SCALE",
       RECOMP_SETTING_RESTART,
-      "Internal resolution as a multiple of the console's 640x480. Higher is sharper and costs GPU time." },
+      "Internal render height: 1x = 480p, 2x = 960p, 3x = 1440p, 4x = 1920p. "
+      "1080p output: 2x balances speed and clarity; 3x is sharper. 1440p output: 3x. "
+      "Width follows Picture shape; window size is separate. Higher scales cost GPU time. "
+      "Applies on Play/next launch." },
     { "display", "filter", RECOMP_SETTING_ENUM, 0, 0, 0, k_filter, NULL, 0,
       "How the picture is scaled to the window." },
     { "display", "vsync", RECOMP_SETTING_BOOL, 1, 0, 0, NULL, "RECOMP_PRESENT_VSYNC", 0,

@@ -60,8 +60,15 @@ body:
     attributes:
       label: Log lines
       description: >
-        The relevant lines of `logs/run-*.log.err` (source build), especially any
-        `[CRASH]` or `[WATCHDOG]` block. Remove personal paths first.
+        Paste the newest `logs/run-*.log.err` (the last 100 lines is enough),
+        especially any `[CRASH]` or `[WATCHDOG]` block. It is in a `logs` folder inside
+        the folder you installed to (the setup installer) or in the repository (source
+        build). If the game crashed so early that no log was written, run
+        `defjam_recomp.exe` from PowerShell inside the install folder and paste what it
+        prints, and add the "Application Error" entry from Event Viewer
+        (Windows Logs, Application). Remove personal paths first.
+      placeholder: |
+        [CRASH] Access violation at RIP=0x...
       render: text
   - type: checkboxes
     id: hygiene

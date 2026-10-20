@@ -46,6 +46,10 @@ at the Terrordome for four minutes, the **combat check**, a **two-pad match**, t
 checks; `fight-terrordome`, `ffa-result`, `two-matches`, `repeat` and `visual` are
 selectable that way only.
 
+The harness explicitly sets `RECOMP_ASPECT=4:3` for the reviewed goldens and replays; new player
+defaults can use Widescreen (Auto) without changing those baselines. An explicit per-run
+`RECOMP_ASPECT` overrides this test choice; an empty value lets the settings file/default apply.
+
 ## The combat check
 
 `python scripts/regress.py --only combat`, or directly:

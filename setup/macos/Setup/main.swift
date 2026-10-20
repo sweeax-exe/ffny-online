@@ -62,15 +62,27 @@ final class Session {
         guard actual == payloadSHA256 else {
             throw SetupFailure(message: "Installer payload verification failed. Download it again.", code: 4)
         }
-        let ditto = Process()
-        ditto.executableURL = URL(fileURLWithPath: "/usr/bin/ditto")
-        ditto.arguments = ["-x", "-k", archive.path, payload.path]
-        try ditto.run()
-        ditto.waitUntilExit()
-        guard ditto.terminationStatus == 0 else {
+        // A downloaded copy runs from a quarantined disk image, and plain ditto copies that
+        // quarantine onto every unpacked file. Gatekeeper then refuses the bundled python3,
+        // CMake, Ninja and libraries, which are signed ad hoc, not notarized (issue #59).
+        // The player has already approved this app and the payload matches the digest
+        // compiled into it, so the unpacked files are not quarantined again.
+        guard tool("/usr/bin/ditto", ["-x", "-k", "--noqtn", archive.path, payload.path]) else {
             throw SetupFailure(message: "Cannot unpack setup payload. Check the free disk space.", code: 4)
         }
+        guard tool("/usr/bin/xattr", ["-d", "-r", "com.apple.quarantine", payload.path]) else {
+            throw SetupFailure(message: "Cannot clear the download quarantine from the setup payload.", code: 4)
+        }
         note("Setup payload prepared.")
+    }
+
+    private func tool(_ path: String, _ arguments: [String]) -> Bool {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: path)
+        process.arguments = arguments
+        guard (try? process.run()) != nil else { return false }
+        process.waitUntilExit()
+        return process.terminationStatus == 0
     }
 
     func engineProcess(_ arguments: [String]) -> Process {

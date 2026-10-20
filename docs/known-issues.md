@@ -42,10 +42,10 @@ Fighters selection. They do not cover every mode or a full Story campaign.
 
   Measure with `python3 scripts/scene-perf.py run sc00 sc03 sc06 sc07a sc16 sc09 --no-audio --every 0`,
   two interleaved passes per arm, and compare *load ms*; then `python scripts/regress.py --quick`.
-- **Picture options (v0.10.3 beta).** Brightness and the vignette options were measured on macOS
-  in the default One on One venue; the Steam Deck and Windows had not run them at release, and
-  other venues and Story scenes were not toured one by one. Setting them back to 100 / on / 100
-  restores the original picture.
+- **Picture options (v0.10.3).** Brightness and the vignette options were measured on macOS in the
+  default One on One venue and play-tested by the owner on the Steam Deck; Windows has not run
+  them, and other venues and Story scenes were not toured one by one. Setting them back to
+  100 / on / 100 restores the original picture.
 - **Unresolved jump targets.** The translated code has about a hundred placeholders for
   jump targets the translator could not resolve; reaching one skips real code. v0.2.1
   replaced the seven that are simple function exits, one of which caused the Terrordome
@@ -81,6 +81,18 @@ Fighters selection. They do not cover every mode or a full Story campaign.
 - Optional CPU vertex-program fallback performance is unmeasured after rebase.
 - Audio counters do not prove fidelity of every track/effect; owner listening
   accepted the experience.
+
+## Mac setup: "python3" Not Opened (fixed in v0.10.4)
+
+A v0.10.3 or earlier Mac setup downloaded with a browser stops at "Preparing setup files" with
+*"python3" Not Opened*, even after **Open Anyway** for Def Jam Setup. Setup unpacked its payload
+with the download's quarantine still attached, so Gatekeeper refused the bundled Python, which is
+signed ad hoc, not notarized
+([#59](https://github.com/vyanhursky/DefJamFFNY-recomp/issues/59)). The v0.10.4 setup unpacks
+without the quarantine; use it. Workaround for an older setup: choose **Done**, drag Def Jam
+Setup to Applications, run
+`xattr -dr com.apple.quarantine "/Applications/Def Jam Setup.app"` in Terminal, then open it
+from Applications.
 
 ## Mac diagnostics retained in v0.9.0 validation
 

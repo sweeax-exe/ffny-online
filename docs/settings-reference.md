@@ -62,13 +62,13 @@ line turns it on for one run. Every key here is read at start-up.
 | Key | Default | Meaning |
 |---|---|---|
 | `fullscreen` | `false` | Borderless full screen. **Alt+Enter** or **F11** switches while playing, and the choice is saved. |
-| `window_width`, `window_height` | `1280`, `960` | Window size when not full screen (320-16384 by 240-16384). Resizing the window updates both. |
-| `aspect` | `4:3` | Picture shape. `4:3` keeps the console's picture shape with black bars; `stretch` fills the window; **widescreen (beta):** `widescreen (auto)` (the screen's shape: 16:9 or 16:10; wider screens get 16:9), `16:9`, `16:10`, `21:9 (experimental)`, `32:9 (experimental)` widen the 3D view (more of the arena at the sides, same vertical view) while menus, HUD and movies keep their shape. Widescreen starts with the game (4:3 and stretch apply at once). Env `RECOMP_ASPECT` (a choice name). See [widescreen](widescreen/README.md). |
+| `window_width`, `window_height` | `1920`, `1080` | Window size when not full screen (320-16384 by 240-16384). Resizing the window updates both. |
+| `aspect` | `widescreen (auto)` | Picture shape. `4:3` keeps the console's picture shape with black bars; `stretch` fills the window; **widescreen (beta):** `widescreen (auto)` (the screen's shape: 16:9 or 16:10; wider screens get 16:9), `16:9`, `16:10`, `21:9 (experimental)`, `32:9 (experimental)` widen the 3D view (more of the arena at the sides, same vertical view) while menus, HUD and movies keep their shape. Widescreen starts with the game (4:3 and stretch apply at once). Env `RECOMP_ASPECT` (a choice name). See [widescreen](widescreen/README.md). |
 | `widescreen_hud` | `auto` | Fight HUD in widescreen: `edges` (screen corners), `centered` (corners of a centred 16:9 box) or `auto` (edges up to 16:9, the box when wider). Restart. |
 | `widescreen_cutscenes` | `authored` | Story cutscenes in widescreen: `authored` keeps the game's own 16:9 framing (full screen at 16:9, thin bars at 16:10); `fill` always fills the screen. Restart. |
 | `widescreen_side_fill` | `blur` | What is beside 4:3 pictures (movies, menu backgrounds) in widescreen: `blur` (a soft blurred extension) or `black`. Restart. |
 | `widescreen_fov_cap` | `150` | The widest horizontal field of view widescreen may use, 90-170 degrees. Restart. |
-| `render_scale` | `2` | Internal resolution as a multiple of the console's 640x480, 1-4. Higher is sharper and costs GPU time. Restart. Env `RECOMP_RENDER_SCALE`. |
+| `render_scale` | `2` | Internal render height: 1× = 480p, 2× = 960p, 3× = 1440p, 4× = 1920p; width follows Picture shape. For 1080p output, 2× balances sharpness and cost, or 3× renders above the output height for extra sharpness. For 1440p, 3× matches the height. Window size is separate; higher scales cost GPU time. Restart. Env `RECOMP_RENDER_SCALE`. |
 | `filter` | `smooth` | How the picture is scaled to the window: `smooth` or `sharp`. |
 | `vsync` | `true` | Pace frames on the display. Used when the refresh rate is a multiple of 60 Hz; other displays use the game's own 60 fps timer. Env `RECOMP_PRESENT_VSYNC`. |
 | `gamma` | `true` | Apply the game's own brightness curve, as the console does. Restart. Env `RECOMP_GAMMA`. |

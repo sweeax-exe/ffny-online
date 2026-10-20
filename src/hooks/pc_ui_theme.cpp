@@ -80,6 +80,16 @@ void theme(float scale)
     s.ScaleAllSizes(scale);
     s.FontScaleMain = scale;
 }
+bool slider_int(const char *label, int *value, int minimum, int maximum)
+{
+    // Keep the full slider track visible against the page without brightening other fields.
+    ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(.24f, .22f, .19f, 1));
+    ImGui::PushStyleColor(ImGuiCol_FrameBgHovered, ImVec4(.31f, .27f, .21f, 1));
+    ImGui::PushStyleColor(ImGuiCol_FrameBgActive, ImVec4(.37f, .31f, .23f, 1));
+    bool changed = ImGui::SliderInt(label, value, minimum, maximum);
+    ImGui::PopStyleColor(3);
+    return changed;
+}
 void heading(const char *text, float size)
 {
     ImGui::PushFont(display_font, size / ImGui::GetStyle().FontScaleMain);

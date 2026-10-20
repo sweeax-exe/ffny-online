@@ -106,3 +106,34 @@ The bundle/build/captures are local only; keep this worktree available during ow
 
 Native GUI testing here is macOS. Windows and Steam Deck need the owner's live acceptance; remote CI
 compiles source/setup without game data. No built game executable is published.
+
+## Follow-up — 2026-10-20
+
+Vlad continued in the original chat and accepted the Mac appearance, requesting three refinements:
+
+- Slider tracks now use a lighter warm charcoal with distinct hover/active states; the gold handle
+  stays. Styling is scoped to sliders in the shared launcher/overlay widget.
+- New/reset settings use Windowed, 1920×1080, Widescreen (Auto), render scale 2; existing saved values
+  survive. Auto follows the monitor. A fresh native boot resolved 16:10 here and macOS fitted the
+  requested window to 1800×1034 points (3600×2068 backing pixels), keeping it within the desktop.
+- Render scale help now distinguishes internal height from output/window size: 1×/2×/3×/4× means
+  480p/960p/1440p/1920p. For 1080p output, 2× balances cost and clarity, or 3× renders above the
+  output height for extra sharpness; 3× matches 1440p. The initial long tooltip went off-screen
+  at 200% in 640×480. The shorter help and explicit viewport placement now keep all of it visible.
+
+Native captures cover normal/large/narrow slider tracks, fresh settings creation, preservation of
+explicit older fullscreen/size/aspect/scale choices, actual Auto startup, and final Home/Advanced/
+640×480 at 200% help. Each run restored its disposable save root. Receipts are local in
+logs/launcher-review/slider-20261020/checks.json and display-20261020/{default-checks,final-tooltip-checks}.json;
+the latter folder is also under logs/launcher-review. No owner settings/save were changed.
+
+Main `af0c03c` is integrated, including the released macOS setup quarantine and skip-intro audio fixes;
+both Swift wrappers type-check. The harness explicitly selects 4:3 for reviewed goldens/replays,
+independently of player defaults; no golden data or threshold changed. Prior full-run limitations
+above remain recorded. Windows/Deck GUI and physical-pad acceptance still require real hardware.
+
+Final follow-up automation: quick **5/5** (logs/regress-20261020-102601.txt), including **528 unit passes, 32 skips,
+one slow test deselected**, unchanged golden frames and 120 s of fight, median 120 presents per 2 s, minimum 119. Picture/overlay **2/2**
+(logs/regress-20261020-102746.txt): F1 overlay drawn and brightness/vignette edits saved and applied. Native final tooltip
+captures show the complete help at normal size and 200% in 640×480. Source hygiene: 430 files,
+zero failures. The local playtest app now reports the integrated 0.10.5 base; its wrapper is unchanged.

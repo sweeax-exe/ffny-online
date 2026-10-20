@@ -530,11 +530,23 @@ void ui_context_end()
 // help texts ran past the right edge of the window and were cut off.
 static void item_tooltip(const char *text)
 {
-    if (!ImGui::BeginItemTooltip())
+    if (!ImGui::IsItemHovered(ImGuiHoveredFlags_ForTooltip))
         return;
-    ImGui::PushTextWrapPos(std::min(ImGui::GetFontSize() * 35.0f,
-                                  std::max(120.0f, ImGui::GetIO().DisplaySize.x -
-                                                     80 * ImGui::GetStyle().FontScaleMain)));
+    const auto &style = ImGui::GetStyle();
+    ImVec2 area = ImGui::GetIO().DisplaySize;
+    float margin = 8 * style.FontScaleMain;
+    float wrap = std::max(1.0f, std::min(ImGui::GetFontSize() * 35.0f,
+                                       area.x - 2 * (margin + style.WindowPadding.x)));
+    ImVec2 text_size = ImGui::CalcTextSize(text, nullptr, false, wrap);
+    ImVec2 size(text_size.x + 2 * style.WindowPadding.x, text_size.y + 2 * style.WindowPadding.y);
+    ImVec2 mouse = ImGui::GetIO().MousePos;
+    // ImGui may place a tall tooltip outside the viewport when no side of the pointer fits it.
+    ImGui::SetNextWindowPos(ImVec2(
+        std::clamp(mouse.x + 12 * style.FontScaleMain, margin, std::max(margin, area.x - margin - size.x)),
+        std::clamp(mouse.y + 20 * style.FontScaleMain, margin, std::max(margin, area.y - margin - size.y))));
+    if (!ImGui::BeginTooltip())
+        return;
+    ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + wrap);
     ImGui::TextUnformatted(text);
     ImGui::PopTextWrapPos();
     ImGui::EndTooltip();
@@ -613,7 +625,7 @@ static bool setting_widget(RecompSetting *s, const char *label = nullptr, bool s
             if (ImGui::InputInt(control, &v, 10, 100))
                 changed = recomp_settings_set(s->section, s->key, v) > 0;
         }
-        else if (ImGui::SliderInt(control, &v, s->min, s->max))
+        else if (pcui::slider_int(control, &v, s->min, s->max))
             changed = recomp_settings_set(s->section, s->key, v) > 0;
         break;
     }

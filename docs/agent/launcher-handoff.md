@@ -6,8 +6,9 @@ repository policy and current project state remain in those files.
 ## Candidate and entry point
 
 [Draft PR #58](https://github.com/vyanhursky/DefJamFFNY-recomp/pull/58), branch
-`codex/launcher-redesign`, source commit `205582d`. Build/test/push are owner-authorized;
-owner playtest is pending. No merge, tag or release was requested.
+`codex/launcher-redesign`; initial UI source `205582d`, now integrated with main `af0c03c`.
+Build/test/push are owner-authorized. Vlad is continuing in the original chat; his Mac appearance
+feedback is positive. No PR merge, tag or release was requested.
 
 Local worktree: `/Users/vlad/.codex/worktrees/launcher-redesign/DefJamFFNY-recomp`.
 `build/Def Jam Launcher Playtest.app` forces Home and uses the owner's normal data by default.
@@ -38,7 +39,9 @@ the [player guide](../launcher-and-overlay.md) explains the settings layout.
   95 bytes. Inventory checks manifest headers; the renderer validates images.
 - Setup opens its existing wizard after launcher teardown, without inheriting `play.lock` or starting
   an install automatically. Long chosen paths live in `<data>/launcher-setup-path.txt`.
-- Retain Back/focus restoration and narrow/200% text layouts. Theme assets are procedural/system fonts.
+- New/reset defaults are Windowed, 1920×1080, Widescreen (Auto), 2×; saved choices survive upgrades.
+  Auto follows the monitor. Render scale is internal height (2× = 960p, 3× = 1440p), separate from window size.
+- Retain brighter slider tracks, Back/focus restoration and narrow/200% layouts. Theme assets are procedural/system fonts.
 
 ## Evidence and next work
 
@@ -47,6 +50,10 @@ Final quick **5/5**, UI **4/4**, combat retry **27/27**; source CI **28/28** at 
 The first full run remains **16/18**: one combat audio underrun beside a host stall, plus replay's
 historical stream target `0x001E3C14` (D108), despite exact golden records. Do not report a clean full run.
 Receipts/captures are local in `logs/launcher-review/`; the report names regression logs.
+
+2026-10-20 follow-up: fresh/saved settings and Auto boot pass; final tooltip fits 640×480 at 200%.
+Quick 5/5 (`logs/regress-20261020-102601.txt`), picture/overlay 2/2 (`logs/regress-20261020-102746.txt`);
+quick units 528 pass/32 skip/one slow deselected. See the report for native receipts.
 
 1. Collect Vlad's feedback on Home/Advanced, physical-pad navigation/remapping, text scaling, actual
    HD packs/priority, folder/log actions and real Setup selection/prefill. Windows/Deck GUI acceptance

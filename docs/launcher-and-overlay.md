@@ -34,9 +34,11 @@ remains in Interface. Display DPI and the existing text/control size setting sti
 | Diagnostics | Recorder/capture/retention settings, texture authoring, save-affecting unlock tools and, in-game, Story scenes and EA's developer menu |
 | Maintenance | Data/save/mod/install/settings/play-log paths with Open and Copy path; setup selection, reset settings, version and licenses |
 
+New settings default to **Windowed, 1920×1080, Widescreen (Auto), 2× render scale**, with VSync on. Existing saved choices are preserved. Auto follows the monitor's shape, so a 16:10 monitor can show bars inside a 16:9 window. The Render scale tooltip explains internal heights: 2× is 960p, 3× is 1440p; window size is separate.
+
 Home, Advanced and the overlay share the same controls and `settings.ini`. Environment overrides show
 the effective value, name the variable and disable editing for that run. On a wide window an explanation
-pane follows the focused or hovered setting. The existing INI names and defaults are retained.
+pane follows the focused or hovered setting. Existing INI names and saved values are retained.
 
 ### Texture packs
 
