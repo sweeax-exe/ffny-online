@@ -60,6 +60,11 @@ extern "C" void online_menu_on_funccall(const char *text)
 {
     if (!strncmp(text, "Control.GetScreenInfo(", 22)) {
         int up = strstr(text, "intMain/mainMenu") != nullptr;
+        // A hub match's summary leads to the battle match-type screen: the room comes back
+        // instead of that menu (the match is still "connected" at this point; automatch then
+        // returns the session to the room).
+        if (strstr(text, "battle/cmtype") && netplay_in_lobby() && netplay_state() == NETPLAY_CONNECTED)
+            g_open_req = 1;
         g_menu_up = up;
         g_focus = -1;
         g_menu_ticks = 0;
@@ -1008,7 +1013,8 @@ bool draw(ImVec2 display)
     NetRoom room;
     netplay_lobby_room(&room);
     enum NetplayState st = netplay_state();
-    backdrop(dl, f, display, S.page == FIGHTERS || room.in_room || st == NETPLAY_CONNECTED);
+    // Over any screen but the main menu (after a match: the battle menu) every page is full-screen.
+    backdrop(dl, f, display, S.page == FIGHTERS || room.in_room || st == NETPLAY_CONNECTED || !g_menu_up.load());
 
     // a match was agreed: show it, then give the menu back to the game, which starts it
     if (st == NETPLAY_CONNECTED && netplay_in_lobby()) {

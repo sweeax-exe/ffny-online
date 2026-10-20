@@ -41,6 +41,10 @@ every internal pointer there is an absolute offset):
     the lit white level and the dim/lit ratio measured on the STORY poster. Only whole DXT5
     blocks inside one rectangle change, so the poster slides with the wall and is lit and
     dimmed like the others. Texture and bank layout are untouched;
+  * battle/cmtype (patch version 4): the screen an online match's summary leads to gets the
+    same per-frame FuncCall("Online.Tick()"): a new empty-sprite placement in frame 0 of its main
+    timeline carrying an EnterFrame clip event. The screen defines no clip event or onEnterFrame
+    of its own and nothing else on it changes; its entry is hash-gated like the main menu's;
   * the `.apt` is re-laid out in its BIGF (other inner files byte-identical),
     wrapped as a literal-only RefPack stream, appended to the archive copy, and
     its directory record and the header total size are updated.
@@ -86,8 +90,9 @@ NEW_POS = (-61.0, 95.5)           # bottom-left cell: its poster's centre (-62.5
                                   # (+1.5, +1.5) offset every other slot's hit target has
 
 NEW_CLIP_NAME = "mmOnline"
-PATCH_VERSION = 3                 # 1: slot 6 + Focus/Open; 2: + per-frame Online.Tick();
-                                  # 3: + the ONLINE poster painted into the poster wall textures
+PATCH_VERSION = 4                 # 1: slot 6 + Focus/Open; 2: + per-frame Online.Tick();
+                                  # 3: + the ONLINE poster painted into the poster wall textures;
+                                  # 4: + the same per-frame Online.Tick() on battle/cmtype
 CLIP_EVENT_ENTERFRAME = 0x02
 PLACE_HAS_CLIP_ACTIONS = 0x80
 CMD_TICK = "Online.Tick()"
@@ -110,6 +115,19 @@ POSTER_XSH, POSTER_TEX = "mainMenuButtons.xsh", "15"
 POSTER_TEX_SHA256 = "ec14de8a8db5a5380420063c6029fd8af285f41cf8437c1393eea49b0fea9033"   # its 16,384 DXT5 bytes
 POSTER_SRC_W = POSTER_SRC_H = 128
 MAX_PAINT_ERROR = 14.0                # mean abs error allowed between the intended and the encoded poster
+
+# battle/cmtype ("CHOOSE MATCH TYPE", where an online match's summary leads): the same per-frame
+# Online.Tick(), as a clip event on a new placement in frame 0 of the movie's main timeline.
+CMTYPE_ENTRY_NAME = "screens/battle/cmtype.big"
+CMTYPE_ENTRY_RAW_SHA256 = "65a210c97f56094d40acc91a647fee205d6a165e2f31a2f024e80347a5156775"
+CMTYPE_PAYLOAD_SHA256 = "8cac1358d9041d97ed74f0a05dff0e29fe2bf7495a732a3f594931e975ec733f"
+CMTYPE_APT_SHA256 = "9f6b0f14e379c213a0146f5e9ac7aae590c27d5ef2d41cef9a0307ef1931774e"
+CMTYPE_CONST_SHA256 = "69382bd9c0153ff49fb2587e5d627a96fffa8c0eac921db513a398235203429b"
+CMTYPE_APT_LEN = 60028
+CMTYPE_FRAMES = 67
+CMTYPE_TEMPLATE_NAME = "rules"        # an empty-sprite placement of frame 0 that is cloned
+CMTYPE_TICK_DEPTH = 130
+CMTYPE_TICK_NAME = "onlineTick"
 
 BIG_ALIGN = 128                   # inner BIGF entries are 128-aligned
 OUTER_ALIGN = 4
@@ -698,10 +716,16 @@ def verify_new_apt(apt, new_apt, info):
     for off in range(0, len(apt), 4):
         if apt[off:off + 4] != new_apt[off:off + 4] and off not in allowed:
             raise PatchError("original .apt byte range 0x%X changed unexpectedly" % off)
-    # The per-frame hook: placement -> ClipActions -> (EnterFrame, key 0, action) -> decodable action.
+    verify_tick_clip(new_apt, info)
+    return "%d function bodies decode to their exact size, tick action decodes, %d appended bytes" % (
+        nfun, len(new_apt) - len(apt))
+
+
+def verify_tick_clip(new_apt, info):
+    """The per-frame hook: placement -> ClipActions -> (EnterFrame, key 0, action) -> decodable action."""
     pl = struct.unpack_from("<16I", new_apt, info["place_at"])
     if pl[0] != 3 or not pl[1] & PLACE_HAS_CLIP_ACTIONS or pl[15] != info["clipact_at"]:
-        raise PatchError("mmOnline placement does not carry the clip actions")
+        raise PatchError("the tick placement does not carry the clip actions")
     if struct.unpack_from("<II", new_apt, info["clipact_at"]) != (1, info["entry_at"]):
         raise PatchError("ClipActions record is wrong")
     if struct.unpack_from("<III", new_apt, info["entry_at"]) != (CLIP_EVENT_ENTERFRAME, 0, info["tick_at"]):
@@ -712,8 +736,6 @@ def verify_new_apt(apt, new_apt, info):
         raise PatchError("tick action does not decode as expected")
     if cstr(new_apt, tick[1].vals[0]) != CMD_TICK or tick[-1].nxt != info["tick_at"] + info["tick_len"]:
         raise PatchError("tick action string or extent is wrong")
-    return "%d function bodies decode to their exact size, tick action decodes, %d appended bytes" % (
-        nfun, len(new_apt) - len(apt))
 
 
 def _iter_functions(buf, ins):
@@ -722,6 +744,133 @@ def _iter_functions(buf, ins):
             yield i
             bs, sz = i.body
             yield from _iter_functions(buf, decode(buf, bs, bs + sz))
+
+
+# ------------------------------------------------------- battle/cmtype: per-frame Online.Tick()
+
+def build_cmtype_apt(apt, const):
+    """Append a tick clip to frame 0 of cmtype's main timeline. Returns (new .apt, info)."""
+    if len(apt) != CMTYPE_APT_LEN or len(apt) % 4:
+        raise PatchError("cmtype.apt is %d bytes, expected %d" % (len(apt), CMTYPE_APT_LEN))
+    strings = const_strings(const)
+    movie = struct.unpack_from("<I", const, 0x14)[0]
+    if u32(apt, movie) != 9:
+        raise PatchError("cmtype movie header not at 0x%X" % movie)
+    nframes, frames = u32(apt, movie + 8), u32(apt, movie + 12)
+    nchars, chars = u32(apt, movie + 20), u32(apt, movie + 24)
+    if nframes != CMTYPE_FRAMES:
+        raise PatchError("cmtype has %d root frames, expected %d" % (nframes, CMTYPE_FRAMES))
+    count, arr = struct.unpack_from("<II", apt, frames)
+    # Every depth used on the main timeline, and the template placement.
+    used, template = set(), None
+    for fi in range(nframes):
+        n, ip = struct.unpack_from("<II", apt, frames + 8 * fi)
+        for k in range(n):
+            it = u32(apt, ip + 4 * k)
+            if u32(apt, it) == 3:
+                w = struct.unpack_from("<16I", apt, it)
+                used.add(w[2])
+                if fi == 0 and w[1] & 0x20 and w[13] and cstr(apt, w[13]) == CMTYPE_TEMPLATE_NAME:
+                    template = w
+    if template is None:
+        raise PatchError("no %r placement in frame 0" % CMTYPE_TEMPLATE_NAME)
+    if CMTYPE_TICK_DEPTH in used:
+        raise PatchError("depth %d is already used on the main timeline" % CMTYPE_TICK_DEPTH)
+    char = template[3]
+    ch = u32(apt, chars + 4 * char) if char < nchars else 0
+    if not ch or u32(apt, ch) != 5 or u32(apt, ch + 8) != 1:
+        raise PatchError("the template placement is not a one-frame sprite")
+    fp = u32(apt, ch + 12)
+    if struct.unpack_from("<I", apt, fp)[0] != 0:
+        raise PatchError("the template sprite is not empty")
+    cidx = []
+    for name in ("_level0", "_root", "FuncCall"):
+        try:
+            cidx.append(strings.index(name))
+        except ValueError:
+            raise PatchError("constant %r is not in cmtype's .const table" % name)
+
+    pos = len(apt)
+    data = bytearray()
+
+    def put_str(text):
+        at = pos + len(data)
+        data.extend(text.encode("latin-1") + b"\x00")
+        return at
+
+    p_name, p_tick = put_str(CMTYPE_TICK_NAME), put_str(CMD_TICK)
+    while (pos + len(data)) % 4:
+        data.append(0)
+    pool_at = pos + len(data)
+    data += struct.pack("<3I", *cidx)
+    tick_at = pos + len(data)
+    tick_code = asm_tick_action(tick_at, pool_at, p_tick)
+    data += tick_code
+    while (pos + len(data)) % 4:
+        data.append(0)
+    entry_at = pos + len(data)
+    data += struct.pack("<III", CLIP_EVENT_ENTERFRAME, 0, tick_at)
+    clipact_at = pos + len(data)
+    data += struct.pack("<II", 1, entry_at)
+    place_at = pos + len(data)
+    words = list(template)
+    words[2] = CMTYPE_TICK_DEPTH
+    words[1] |= PLACE_HAS_CLIP_ACTIONS
+    words[13] = p_name
+    words[15] = clipact_at
+    data += struct.pack("<16I", *words)
+    arr_at = pos + len(data)
+    ptrs = [u32(apt, arr + 4 * k) for k in range(count)]
+    data += struct.pack("<%dI" % (count + 1), *(ptrs + [place_at]))
+
+    new_apt = bytearray(apt) + data
+    struct.pack_into("<II", new_apt, frames, count + 1, arr_at)
+    info = dict(frames=frames, tick_at=tick_at, tick_len=len(tick_code), clipact_at=clipact_at,
+                entry_at=entry_at, place_at=place_at, array_at=arr_at, apt_len=len(new_apt))
+    return bytes(new_apt), info
+
+
+def verify_cmtype_apt(apt, new_apt, info):
+    allowed = {info["frames"], info["frames"] + 4}
+    for off in range(0, len(apt), 4):
+        if apt[off:off + 4] != new_apt[off:off + 4] and off not in allowed:
+            raise PatchError("original cmtype.apt bytes changed unexpectedly at 0x%X" % off)
+    verify_tick_clip(new_apt, info)
+    if struct.unpack_from("<II", new_apt, info["frames"]) != (u32(apt, info["frames"]) + 1, info["array_at"]):
+        raise PatchError("frame-0 record of cmtype is wrong")
+    return "tick clip appended (%d bytes), no existing byte changed but the frame-0 record" % (len(new_apt) - len(apt))
+
+
+def patch_cmtype_entry(raw_entry, extras=None):
+    """Raw (RefPack) cmtype entry -> (new raw entry, report lines). Refuses a different version."""
+    lines = []
+    if sha(raw_entry) != CMTYPE_ENTRY_RAW_SHA256:
+        lines.append("note: cmtype entry differs from the reference build (payload is checked instead)")
+    payload = refpack_decode(raw_entry)
+    if sha(payload) != CMTYPE_PAYLOAD_SHA256:
+        raise PatchError("decompressed cmtype payload does not match the expected hash "
+                         "(different region or version); refusing to patch")
+    files = inner_files(payload)
+    apt, const = files.get("cmtype.apt"), files.get("cmtype.const")
+    if apt is None or const is None or sha(apt) != CMTYPE_APT_SHA256 or sha(const) != CMTYPE_CONST_SHA256:
+        raise PatchError("cmtype.apt/.const do not match the expected hashes")
+    new_apt, info = build_cmtype_apt(apt, const)
+    lines.append("verify cmtype.apt: " + verify_cmtype_apt(apt, new_apt, info))
+    new_payload = rebuild_bigf(payload, {"cmtype.apt": new_apt})
+    new_files = inner_files(new_payload)
+    if list(new_files) != list(files):
+        raise PatchError("cmtype inner file list changed")
+    for n in files:
+        if n != "cmtype.apt" and files[n] != new_files[n]:
+            raise PatchError("cmtype inner file %s changed" % n)
+    if new_files["cmtype.apt"] != new_apt:
+        raise PatchError("re-laid out cmtype.apt differs from the built one")
+    new_raw = refpack_encode_literal(new_payload)
+    if refpack_decode(new_raw) != new_payload:
+        raise PatchError("cmtype RefPack round trip failed")
+    lines.append("cmtype payload %d -> %d bytes, entry %d -> %d bytes (literal RefPack)"
+                 % (len(payload), len(new_payload), len(raw_entry), len(new_raw)))
+    return new_raw, lines
 
 
 # ------------------------------------------------------------ textures (DXT5)
@@ -1017,11 +1166,15 @@ def patch_entry(raw_entry, extras=None):
 
 
 class Plan:
-    """Everything needed to write or compare the patched archive."""
+    """Everything needed to write or compare the patched archive. The main entry is patched by
+    `patcher(raw, extras)`; `more` lists further entries as (name, patcher(raw)) pairs. Each patched
+    entry is appended to the archive (4-aligned) and its directory record points at the copy."""
 
-    def __init__(self, src_path, entry_name=ENTRY_NAME, patcher=None, extra_entries=None):
+    def __init__(self, src_path, entry_name=ENTRY_NAME, patcher=None, extra_entries=None, more=None):
         self.src = src_path
         self.size = os.path.getsize(src_path)
+        if more is None and patcher is None:
+            more = [(CMTYPE_ENTRY_NAME, patch_cmtype_entry)]
         with open(src_path, "rb") as f:
             top = f.read(32)
             if top[:4] not in (b"BIG4", b"BIGF"):
@@ -1032,26 +1185,38 @@ class Plan:
             f.seek(0)
             self.head = bytearray(f.read(hdr + 4096))
             self.records = big_records(self.head)
-            rec = [r for r in self.records if r[0] == entry_name]
-            if len(rec) != 1:
-                raise PatchError("%s not found in the archive" % entry_name)
-            self.rec_pos, self.old_off, self.old_size = rec[0][1:]
-            if self.old_off + self.old_size > self.size:
-                raise PatchError("directory entry runs past the end of the file")
-            f.seek(self.old_off)
-            raw = f.read(self.old_size)
+
+            def read(name):
+                rec = [r for r in self.records if r[0] == name]
+                if len(rec) != 1:
+                    raise PatchError("%s not found in the archive" % name)
+                if rec[0][2] + rec[0][3] > self.size:
+                    raise PatchError("directory entry %s runs past the end of the file" % name)
+                f.seek(rec[0][2])
+                return rec[0][1], f.read(rec[0][3])
+
+            self.rec_pos, raw = read(entry_name)
+            self.old_off, self.old_size = [r for r in self.records if r[0] == entry_name][0][2:]
             extras = {}
             wanted = [POSTER_ENTRY_NAME] if extra_entries is None and patcher is None else (extra_entries or [])
             for name in wanted:
-                er = [r for r in self.records if r[0] == name]
-                if len(er) != 1 or er[0][2] + er[0][3] > self.size:
-                    raise PatchError("%s not found in the archive" % name)
-                f.seek(er[0][2])
-                extras[name] = f.read(er[0][3])
-        self.new_raw, self.lines = (patcher or patch_entry)(raw, extras)
-        self.append_at = align(self.size, OUTER_ALIGN)
-        self.final_size = self.append_at + len(self.new_raw)
-        struct.pack_into(">II", self.head, self.rec_pos, self.append_at, len(self.new_raw))
+                extras[name] = read(name)[1]
+            jobs = [(entry_name, self.rec_pos, (patcher or patch_entry), (raw, extras))]
+            for name, fn in (more or []):
+                rpos, raw2 = read(name)
+                jobs.append((name, rpos, fn, (raw2,)))
+        self.lines = []
+        self.blobs = []                     # [(archive offset, bytes)]
+        cursor = self.size
+        for name, rpos, fn, args in jobs:
+            new_raw, lines = fn(*args)
+            self.lines += lines
+            at = align(cursor, OUTER_ALIGN)
+            self.blobs.append((at, new_raw))
+            struct.pack_into(">II", self.head, rpos, at, len(new_raw))
+            cursor = at + len(new_raw)
+        self.append_at, self.new_raw = self.blobs[0]     # the main entry
+        self.final_size = cursor
         total = struct.unpack_from("<I", self.head, 4)[0]
         if total != self.size:
             self.lines.append("note: header total size %d differs from the file size %d" % (total, self.size))
@@ -1074,8 +1239,9 @@ def write_override(plan, dst):
                 if not chunk:
                     break
                 d.write(chunk)
-            d.write(b"\x00" * (plan.append_at - plan.size))
-            d.write(plan.new_raw)
+            for at, blob in plan.blobs:
+                d.write(b"\x00" * (at - d.tell()))
+                d.write(blob)
         if os.path.getsize(tmp) != plan.final_size:
             raise PatchError("written size %d != expected %d" % (os.path.getsize(tmp), plan.final_size))
         problems = compare_override(plan, tmp)
@@ -1106,12 +1272,14 @@ def compare_override(plan, path):
                 break
             left -= len(a)
         else:
-            o.seek(plan.append_at)
-            if o.read() != plan.new_raw:
-                problems.append("appended entry differs")
-            o.seek(plan.size)
-            if o.read(plan.append_at - plan.size).strip(b"\x00"):
-                problems.append("alignment padding is not zero")
+            cursor = plan.size
+            for at, blob in plan.blobs:
+                o.seek(cursor)
+                if o.read(at - cursor).strip(b"\x00"):
+                    problems.append("alignment padding is not zero")
+                if o.read(len(blob)) != blob:
+                    problems.append("appended entry differs")
+                cursor = at + len(blob)
     return problems
 
 

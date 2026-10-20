@@ -331,6 +331,102 @@ def test_paint_poster_changes_only_the_poster_blocks():
         ap.paint_poster(xsh, poster)
 
 
+# --------------------------------------------------------------- battle/cmtype tick clip
+
+def synthetic_cmtype(monkeypatch):
+    """A tiny stand-in for cmtype.apt/.const: a movie with 67 root frames, an empty one-frame sprite
+    (character 295) and a frame-0 placement of it named "rules"."""
+    names = ["_level0", "_root", "FuncCall", "rules"]
+    strings = bytearray()
+    entries = []
+    base = 0x20 + 8 * len(names)
+    for n in names:
+        entries.append((1, base + len(strings)))
+        strings += n.encode() + b"\0"
+    const = bytearray(b"Apt constant file\0\0")
+    const += struct.pack("<III", 0x1000, len(names), 0x20)
+    for t_, v in entries:
+        const += struct.pack("<II", t_, v)
+    const += strings
+    apt = bytearray(0x3000)
+    movie, frames, chars, nchars = 0x1000, 0x1100, 0x1400, 296
+    struct.pack_into("<I", const, 0x14, movie)
+    struct.pack_into("<2I", apt, movie, 9, 0x09876543)
+    struct.pack_into("<I", apt, movie + 8, 67)
+    struct.pack_into("<I", apt, movie + 12, frames)
+    struct.pack_into("<II", apt, movie + 20, nchars, chars)
+    sprite, sprite_frames = 0x1900, 0x1950
+    struct.pack_into("<5I", apt, sprite, 5, 0x09876543, 1, sprite_frames, 0)       # one frame ...
+    struct.pack_into("<II", apt, sprite_frames, 0, 0)                               # ... with no items
+    struct.pack_into("<I", apt, chars + 4 * 295, sprite)
+    rules_name = 0x1A00
+    apt[rules_name:rules_name + 6] = b"rules\0"
+    place, arr = 0x1A40, 0x1A80
+    struct.pack_into("<16I", apt, place, 3, 0x26, 111, 295, 0x3F800000, 0, 0, 0x3F800000, 0, 0,
+                     0xFFFFFFFF, 0, 0, rules_name, 0xFFFFFFFF, 0)
+    struct.pack_into("<I", apt, arr, place)
+    struct.pack_into("<II", apt, frames, 1, arr)
+    monkeypatch.setattr(ap, "CMTYPE_APT_LEN", len(apt))
+    return bytes(apt), bytes(const)
+
+
+def test_cmtype_tick_clip_on_a_synthetic_movie(monkeypatch):
+    apt, const = synthetic_cmtype(monkeypatch)
+    new, info = ap.build_cmtype_apt(apt, const)
+    assert "tick clip appended" in ap.verify_cmtype_apt(apt, new, info)
+    assert struct.unpack_from("<II", new, info["frames"]) == (2, info["array_at"])
+    ptrs = struct.unpack_from("<2I", new, info["array_at"])
+    assert ptrs[1] == info["place_at"]
+    words = struct.unpack_from("<16I", new, info["place_at"])
+    assert words[1] == 0x26 | 0x80 and words[2] == ap.CMTYPE_TICK_DEPTH and words[3] == 295
+    assert ap.cstr(new, words[13]) == ap.CMTYPE_TICK_NAME
+    # Only the frame-0 record changed in the original bytes.
+    diff = [i for i in range(len(apt)) if apt[i] != new[i]]
+    assert diff and all(info["frames"] <= i < info["frames"] + 8 for i in diff)
+    # A depth already in use, or a non-empty template sprite, is refused.
+    bad = bytearray(apt)
+    struct.pack_into("<I", bad, 0x1A40 + 8, ap.CMTYPE_TICK_DEPTH)
+    with pytest.raises(ap.PatchError, match="depth"):
+        ap.build_cmtype_apt(bytes(bad), const)
+    bad = bytearray(apt)
+    struct.pack_into("<I", bad, 0x1950, 1)
+    with pytest.raises(ap.PatchError, match="empty"):
+        ap.build_cmtype_apt(bytes(bad), const)
+
+
+def test_cmtype_entry_is_refused_when_it_differs():
+    other = make_big(b"BIGF", [("cmtype.apt", b"x" * 40)], 128)
+    with pytest.raises(ap.PatchError, match="refusing"):
+        ap.patch_cmtype_entry(ap.refpack_encode_literal(other))
+
+
+def test_plan_patches_two_entries_of_a_fake_archive(tmp_path):
+    filler = bytes(range(256)) * 8
+    a_new = ap.refpack_encode_literal(b"A" * 333)
+    b_new = ap.refpack_encode_literal(b"B" * 77)
+    entries = [("screens/a.big", ap.refpack_encode_literal(b"a")), ("screens/x.big", filler),
+               ("screens/b.big", ap.refpack_encode_literal(b"b"))]
+    big = make_big(b"BIG4", entries)
+    src = tmp_path / "screens.viv"
+    src.write_bytes(big)
+    plan = ap.Plan(str(src), entry_name="screens/a.big", patcher=lambda raw, extras: (a_new, ["a"]),
+                   more=[("screens/b.big", lambda raw: (b_new, ["b"]))])
+    assert [len(b) for _, b in plan.blobs] == [len(a_new), len(b_new)]
+    assert all(at % 4 == 0 for at, _ in plan.blobs) and plan.blobs[1][0] >= plan.blobs[0][0] + len(a_new)
+    dst = tmp_path / "o" / "screens.viv"
+    ap.write_override(plan, str(dst))
+    assert ap.compare_override(plan, str(dst)) == []
+    out = dst.read_bytes()
+    recs = {r[0]: r for r in ap.big_records(out)}
+    assert out[recs["screens/a.big"][2]:][:recs["screens/a.big"][3]] == a_new
+    assert out[recs["screens/b.big"][2]:][:recs["screens/b.big"][3]] == b_new
+    assert struct.unpack_from("<I", out, 4)[0] == len(out)
+    bad = bytearray(out)
+    bad[-2] ^= 1
+    dst.write_bytes(bytes(bad))
+    assert ap.compare_override(plan, str(dst))
+
+
 # ------------------------------------------------------------ the user's own dump
 
 def data_screens():
@@ -348,5 +444,7 @@ def test_real_archive_plan_verifies_and_leaves_the_source_alone(tmp_path):
     except ap.PatchError as e:                                     # another region or version
         pytest.skip("not the reference dump: %s" % e)
     assert any(l.startswith("verify .apt: 25 function bodies") for l in plan.lines)
-    assert plan.final_size == plan.append_at + len(plan.new_raw)
+    assert any(l.startswith("verify cmtype.apt: tick clip appended") for l in plan.lines)
+    assert len(plan.blobs) == 2
+    assert plan.final_size == plan.blobs[-1][0] + len(plan.blobs[-1][1])
     assert (src.stat().st_size, src.stat().st_mtime_ns) == before

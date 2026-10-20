@@ -1231,9 +1231,18 @@ static DWORD WINAPI autostart_thread(LPVOID unused)
         while (!N.stop && N.state != NETPLAY_FAILED && N.state != NETPLAY_OFF) {
             NetRoom r;
             netplay_lobby_room(&r);
-            if (r.in_room && r.phase == 0 && !readied && !N.match_live) {
-                netplay_lobby_ready(1, fighter);
-                readied = 1;
+            if (r.in_room && r.phase == 0 && !N.match_live) {
+                /* Ready again whenever this player shows as not ready: after a
+                   match, or after a scripted press toggled it in the overlay. */
+                int me, mine = !readied;
+                for (me = 0; me < r.player_count; me++)
+                    if (r.players[me].slot == r.you) { mine = !r.players[me].ready; break; }
+                if (mine && !readied) {
+                    netplay_lobby_ready(1, fighter);
+                    readied = 1;
+                } else if (mine && readied) {
+                    readied = 0;    /* the server shows us not ready: send it again next pass */
+                }
             }
             if (r.in_room && r.phase == 1 && voted_in != r.version) {
                 int me;

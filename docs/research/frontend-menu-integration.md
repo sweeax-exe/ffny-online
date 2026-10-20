@@ -574,3 +574,39 @@ the wall slid in and out. The reason is how the shipped menu draws its posters, 
   textures no longer matches them and the wall draws at the original resolution (the HD generation would have to be
   run on the patched archive to cover it); (5) the cursor still glides to the poster (hit target moved from
   (-62, 99) to (-61, 95.5)).
+
+### 10.3 Patch version 4: the same per-frame `Online.Tick()` on battle/cmtype
+
+After an online match the summary leads to `battle/cmtype` ("CHOOSE MATCH TYPE", `screens/battle/cmtype.big`, archive
+entry offset 0x346B1C in the original). The next online match is started from inside the FuncCall hook, which needs a
+call while that screen sits idle.
+
+* **What the screen does on its own.** Nothing periodic: `cmtype` defines no `onEnterFrame`, no `setInterval`, and
+  has **no clip event at all** (no `onEnterFrame` constant in its `.const`; zero clip-action records). Its main
+  timeline (67 frames: `screenpreload` 0, `screenwait` 1 with a `stop()`, `screenrestart` 2) runs the setup action in
+  frame 2 (CMenu class, key handlers, the mode list), then plays an intro to frame 66, where a `stop()` leaves the
+  idle state. Pad input arrives through `keyDown/keyUp/keyLeft/keyRight/keyX/keyBack` on this timeline; `keyBack`
+  goes to `intMain/mainMenu.swf`, `keyX` sends `Game.SetMatchType(n)` and goes to `options/battleID.swf`
+  (or opens the rules card for custom-rules modes). [V]
+* **What version 4 does.** In frame 0 of the main timeline (so from the moment the movie is loaded until it is
+  unloaded, whatever frame it is on) it adds a placement named `onlineTick` at depth 130 (unused on the timeline),
+  cloned from the movie's own empty one-frame sprite placement `rules` (character 295, an empty clip the screen
+  uses as a load target), with the HasClipActions flag and one EnterFrame clip event whose action is exactly the
+  main menu's: ConstantPool `[_level0, _root, FuncCall]`, `_level0._root.FuncCall("Online.Tick()")`, End. The frame-0
+  record is the only existing word that changes (item count 8 -> 9, new item array); nothing else on the screen is
+  touched (188 bytes appended to `cmtype.apt`; `.const`, `.o`, `.xsh` byte-identical).
+* **Gate and checks.** The cmtype entry is hash-gated like the main menu's (raw entry `65a210c9...6775`,
+  payload `8cac1358...733f`, `.apt` `9f6b0f14...774e`, `.const` `69382bd9...429b`); a different version is
+  refused with a clear message and nothing is written. Self-check: the tick action decodes, the placement carries
+  the clip actions, every original `.apt` byte is unchanged except the frame-0 record, the other inner files are
+  identical, the RefPack round-trips, and the written file is compared with the plan. `Plan` now appends two entries
+  (main menu and cmtype); `--check` compares both. The regenerated override is 101,402,288 bytes, `--check` says
+  `current`; an independent parse shows 8,795 directory records with only `mainMenu.big` and `cmtype.big` differing.
+* **Confidence that it fires every frame on that screen.** About 85%: the clip event is the same kind of object
+  (an empty one-frame sprite with an EnterFrame clip action) that worked on the main menu's art clip, and here the
+  placement lives on the root timeline of a movie that is stopped at idle, the same situation as the main menu's
+  stopped `mainMenu` clip. What a run has to confirm is that clip events of a *child of the loaded movie's root*
+  fire (the main menu's tick lives one level down, in a clip of the loaded movie) and that the loader's clip
+  swap (`clip1`/`clip3`) does not pause them. A fallback, if it did not fire, is to put the placement in frame 66's
+  item list or on `chooseMatchTypeButtons`'s timeline. Ticks start while the screen is still loading and moving in
+  (frame 0), earlier than "idle", which the port's hook has to tolerate.
