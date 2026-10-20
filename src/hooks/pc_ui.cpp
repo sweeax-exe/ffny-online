@@ -548,7 +548,7 @@ static void settings_group(const char *section, std::initializer_list<const char
 
 // ---- window size ----------------------------------------------------------------------------------------
 
-struct WindowSize { int w, h; };
+struct WindowSize { int w, h; bool full = false; };    // full: the display's own size, as full screen
 
 // The window sizes worth offering: the display's own modes and the console picture's 4:3 multiples
 // (640x480, 1280x960, ...), largest first, each once, and only those whose window -- frame and title
@@ -558,6 +558,7 @@ static std::vector<WindowSize> window_sizes()
 {
     std::vector<WindowSize> out;
     int fit_w = 0, fit_h = 0;      // the largest client area that fits; 0: unknown, nothing filtered
+    int native_w = 0, native_h = 0; // the display's current mode
     auto add = [&out](int w, int h) {
         if (w < 640 || h < 480) return;
         for (const WindowSize &s : out)
@@ -571,6 +572,14 @@ static std::vector<WindowSize> window_sizes()
         if (!EnumDisplaySettingsW(nullptr, i, &mode)) break;
         add((int)mode.dmPelsWidth, (int)mode.dmPelsHeight);
     }
+    {
+        DEVMODEW mode = {};
+        mode.dmSize = sizeof(mode);
+        if (EnumDisplaySettingsW(nullptr, ENUM_CURRENT_SETTINGS, &mode)) {
+            native_w = (int)mode.dmPelsWidth;
+            native_h = (int)mode.dmPelsHeight;
+        }
+    }
     RECT work, frame = { 0, 0, 0, 0 };
     if (SystemParametersInfoW(SPI_GETWORKAREA, 0, &work, 0) && AdjustWindowRect(&frame, WS_OVERLAPPEDWINDOW, FALSE)) {
         fit_w = (work.right - work.left) - (frame.right - frame.left);
@@ -582,6 +591,10 @@ static std::vector<WindowSize> window_sizes()
     if (SDL_DisplayMode **modes = display ? SDL_GetFullscreenDisplayModes(display, &count) : nullptr) {
         for (int i = 0; i < count; i++) add(modes[i]->w, modes[i]->h);
         SDL_free(modes);
+    }
+    if (const SDL_DisplayMode *mode = display ? SDL_GetCurrentDisplayMode(display) : nullptr) {
+        native_w = mode->w;
+        native_h = mode->h;
     }
     SDL_Rect usable;
     if (display && SDL_GetDisplayUsableBounds(display, &usable)) {
@@ -595,6 +608,12 @@ static std::vector<WindowSize> window_sizes()
                                  [=](const WindowSize &s) { return s.w > fit_w || s.h > fit_h; }), out.end());
     std::sort(out.begin(), out.end(),
               [](const WindowSize &a, const WindowSize &b) { return a.w != b.w ? a.w > b.w : a.h > b.h; });
+    // The display's own size does not fit as a window (title bar, taskbar); it is offered first,
+    // as full screen, which fills exactly that.
+    if (native_w >= 640 && native_h >= 480) {
+        WindowSize full = { native_w, native_h, true };
+        out.insert(out.begin(), full);
+    }
     return out;
 }
 
@@ -635,18 +654,28 @@ static void window_size_widget()
     bool fullscreen = fs && fs->stored != 0;
     int w = ws->stored, h = hs->stored;
     bool listed_now = false;
-    for (const WindowSize &s : sizes)
-        if (s.w == w && s.h == h) listed_now = true;
-    std::string current = size_label(w, h) + (listed_now ? "" : "  custom");
+    const WindowSize *full_entry = nullptr;
+    for (const WindowSize &s : sizes) {
+        if (s.full) full_entry = &s;
+        else if (s.w == w && s.h == h) listed_now = true;
+    }
+    std::string current = fullscreen && full_entry ? size_label(full_entry->w, full_entry->h) + "  full screen"
+                                                   : size_label(w, h) + (listed_now ? "" : "  custom");
     ImGui::PushID("window_size");
     if (locked) ImGui::BeginDisabled();
     ImGui::SetNextItemWidth(ImGui::GetFontSize() * 14);
     if (ImGui::BeginCombo("Window size", current.c_str())) {
         for (const WindowSize &s : sizes) {
-            bool selected = s.w == w && s.h == h;
-            if (ImGui::Selectable(size_label(s.w, s.h).c_str(), selected) && !selected) {
-                recomp_settings_set("display", "window_width", s.w);
-                recomp_settings_set("display", "window_height", s.h);
+            bool selected = s.full ? fullscreen : !fullscreen && s.w == w && s.h == h;
+            std::string label = size_label(s.w, s.h) + (s.full ? "  full screen" : "");
+            if (ImGui::Selectable(label.c_str(), selected) && !selected) {
+                if (s.full) {
+                    recomp_settings_set("display", "fullscreen", 1);
+                } else {
+                    recomp_settings_set("display", "fullscreen", 0);
+                    recomp_settings_set("display", "window_width", s.w);
+                    recomp_settings_set("display", "window_height", s.h);
+                }
                 commit();
             }
             if (selected) ImGui::SetItemDefaultFocus();
@@ -657,13 +686,8 @@ static void window_size_widget()
     if (locked)
         ImGui::SetItemTooltip("Set by an environment variable for this run.");
     else
-        ImGui::SetItemTooltip("Sizes your display offers that fit on the desktop as a window. "
-                              "Dragging the window's edge sets any other size.");
-    if (fullscreen) {
-        ImGui::SameLine();
-        ImGui::TextDisabled("(used in a window)");
-        ImGui::SetItemTooltip("Full screen always fills the display; this is the size when you leave it.");
-    }
+        ImGui::SetItemTooltip("The display's own size as full screen, then the sizes that fit on the desktop as a "
+                              "window. Dragging the window's edge sets any other size.");
     ImGui::PopID();
 }
 
