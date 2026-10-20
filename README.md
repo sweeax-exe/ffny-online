@@ -47,6 +47,9 @@ Choose **ONLINE** in the main menu (the poster in the bottom-left slot):
   input delay set from the players' pings. The relay server only forwards inputs; it never sees
   game data.
 - **Updates** arrive through the launcher, signed, so you and your friends stay on the same build.
+- **Sign in with Discord** (optional, launcher → Online): you appear online with your Discord name;
+  ranked play builds on it. Only your Discord name, id and avatar are stored
+  ([privacy](https://play.defjam.online/privacy)), and the launcher can delete the account.
 
 <table>
 <tr>

@@ -2,7 +2,8 @@ name: Source release
 
 on:
   push:
-    tags: ['v*']
+    # FFNY Online's builds (v0.7.2-remaster.N) are released by scripts/publish-update.ps1.
+    tags: ['v*', '!v*-remaster.*']
 
 permissions:
   contents: read

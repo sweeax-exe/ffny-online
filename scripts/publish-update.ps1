@@ -7,17 +7,22 @@
      setup file name, SHA-256, size) and signs it with the private update key.
   4. Uploads the setup, then the signature and the manifest, to the update folder on the
      server, the manifest last so a launcher never sees a manifest without its setup.
+  5. Pushes the checkout to GitHub (remote ffny, main) and makes the GitHub release
+     v<version> with the setup and its .sha256. The Discord bot announces the build by itself
+     from latest.json within five minutes.
   Raise config/remaster-version.txt and commit before publishing a new build.
 .PARAMETER Notes   One or two sentences for the update dialog.
 .PARAMETER Server  The ssh hosts (entries in ~/.ssh/config), comma-separated: the project's server,
                    and the first one for as long as older installs ask there.
 .PARAMETER NoUpload  Build and sign only (build/update/).
+.PARAMETER NoGitHub  Upload to the servers but make no GitHub release.
 #>
 param(
     [Parameter(Mandatory = $true)][string]$Notes,
     [string[]]$Server = @('ffny-online', 'hetzner-sweeax'),
     [string]$Key = "$env:USERPROFILE\.defjam\update-signing-key.pem",
-    [switch]$NoUpload
+    [switch]$NoUpload,
+    [switch]$NoGitHub
 )
 $ErrorActionPreference = 'Stop'
 $repo = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
@@ -69,3 +74,33 @@ ssh -o BatchMode=yes $host_ ("set -e; install -d -m 0755 $remote; " +
 if ($LASTEXITCODE) { throw "Upload to $host_ failed" }
 }
 "Published $version. Launchers will offer it at their next start."
+if ($NoGitHub) { return }
+
+# GitHub: the code first, then the release with the very setup the servers offer.
+git push ffny HEAD:main
+if ($LASTEXITCODE) { throw 'Push to GitHub failed; the servers already offer the build' }
+$tag = "v$version"
+$asset = Join-Path $out "DefJamSetup-$version-windows-x64.exe"
+Copy-Item $setup $asset -Force
+[IO.File]::WriteAllText("$asset.sha256", "$hash  $(Split-Path $asset -Leaf)`n", (New-Object Text.UTF8Encoding($false)))
+$body = @"
+**FFNY Online** build $build. Def Jam: Fight for NY on PC with online multiplayer. Unofficial fan project, built on [Vlad Yanhursky's DefJamFFNY-recomp](https://github.com/vyanhursky/DefJamFFNY-recomp).
+
+### What's new
+$Notes
+
+### What you need
+- Windows 10/11, 64-bit
+- Your own **USA Xbox** copy of the game, dumped to your PC (see the [disc guide](https://github.com/sweeax-exe/ffny-online/blob/main/docs/dump-your-disc.md)). PS2 and GameCube versions do not work. This download contains no game data: the setup checks your dump and builds the game on your PC.
+
+### Install
+Download ``DefJamSetup-$version-windows-x64.exe``, run it, point it at your dump. The setup is unsigned, so Windows SmartScreen may warn; choose "More info" and "Run anyway". Installed copies update through the launcher.
+
+Questions, bugs, opponents: [Discord](https://discord.gg/zCZKVDnKaP). SHA-256 of the setup is in the ``.sha256`` file next to it.
+"@
+$notesFile = Join-Path $out 'release-notes.md'
+[IO.File]::WriteAllText($notesFile, $body, (New-Object Text.UTF8Encoding($false)))
+gh release create $tag $asset "$asset.sha256" --repo sweeax-exe/ffny-online --target main `
+    --title "FFNY Online - build $build" --notes-file $notesFile --latest
+if ($LASTEXITCODE) { throw 'The GitHub release failed; the servers already offer the build' }
+"GitHub release $tag is out. The Discord bot posts the build within five minutes."
