@@ -8,7 +8,8 @@ extern "C" {
 
 enum AccountState { ACCOUNT_OUT, ACCOUNT_CHECKING, ACCOUNT_WAITING, ACCOUNT_IN, ACCOUNT_FAILED };
 
-void account_init(void);            /* loads the saved session and checks it in the background */
+void account_init(void);            /* loads the saved session (no network at start-up)         */
+void account_refresh(void);         /* checks the saved session with the service, once         */
 void account_sign_in(void);         /* opens the browser on Discord and waits for the result   */
 void account_cancel(void);          /* stops waiting for the browser                           */
 void account_sign_out(void);

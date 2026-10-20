@@ -343,14 +343,22 @@ static void run(LPTHREAD_START_ROUTINE fn, void *param)
     if (t) CloseHandle(t);
 }
 
+/* Start-up only reads the saved session: no network while the game boots, which is when the
+ * runtime is most sensitive to other threads (docs/research/boot-intermittents.md). The session
+ * is checked with the service the first time the online screens or the Online page need it. */
 void account_init(void)
 {
     static LONG once;
     if (InterlockedExchange(&once, 1)) return;
-    if (load()) {
-        set_state(ACCOUNT_CHECKING);
-        run(check_thread, NULL);
-    }
+    if (load()) set_state(ACCOUNT_IN);
+}
+
+void account_refresh(void)
+{
+    static LONG once;
+    if (g_state != ACCOUNT_IN || InterlockedExchange(&once, 1)) return;
+    set_state(ACCOUNT_CHECKING);
+    run(check_thread, NULL);
 }
 
 void account_sign_in(void)
@@ -418,6 +426,7 @@ void account_text(char *out, int size)
 #else   /* sign-in is Windows only for now, like online play */
 
 void account_init(void) {}
+void account_refresh(void) {}
 void account_sign_in(void) {}
 void account_cancel(void) {}
 void account_sign_out(void) {}

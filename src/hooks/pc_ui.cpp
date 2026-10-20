@@ -980,6 +980,7 @@ static void open_folder()
 // The optional FFNY Online account: sign-in with Discord (src/hooks/account.c).
 static void page_account()
 {
+    account_refresh();
     enum AccountState state = account_state();
     char text[256];
     account_text(text, sizeof(text));
