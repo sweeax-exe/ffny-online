@@ -535,3 +535,42 @@ adds one that fires every frame while the menu is on screen.
   while the guest thread is running the front end (it is a FuncCall like any other). The tick fires from frame 0
   of the menu, before the cursor is touched, and `Online.Tick()` is unknown to the dispatcher (`NO_FOUND`), so the
   hook must swallow it like the other `Online.*` commands.
+
+### 10.2 Patch version 3: the ONLINE poster is part of the wall
+
+Player feedback on version 2: the poster drawn from outside was half the size of the others and visible while
+the wall slid in and out. The reason is how the shipped menu draws its posters, which this section records.
+
+* **How the neighbours are drawn.** There are no per-slot poster shapes. The whole poster wall is **two baked
+  textures** of `mainMenu.xsh`: entry `5` (dim, ambient) and entry `14` (the lit copy), each 256x512 DXT5, with
+  the 64x512 strips `4` and `13` at the right edge. Shape 6 (`5`+`4`) is placed at depth 2 of the art clip
+  (character 16) and again at depth 6 under the spotlight's clip mask; frame 1 swaps depth 6 to shape 15
+  (`14`+`13`), the lit copy. The spotlight circle (shape 7) is the mask. So the posters slide with the clip, and
+  the spotlight reveals the bright texture. The `mm*` placements are only invisible hit targets.
+  `intMain/support/mainMenuButtons.big` is a design-time library; the shipped menu never loads it. [V]
+* **Where the bottom-left slot is.** It is baked as a decorative "DEF JAM II" shield with torn paper. Mapping
+  [V from the neighbours' hit targets]: texture pixel (x, y) is drawn at menu-clip (x - 153 - 3.5, y - 254 + 14),
+  1:1, that is 640x480 screen **(x - 2.8, y - 0.1)** (the menu clip sits at (316.2, 239.9) in the root, the art
+  clip at (-162.5, 0) in it). The other posters are about 58x85 px (STORY x 72-129, y 123-208 in texture px;
+  OPTIONS x 66-124; HIGH SCORES x 127-185, y 292-377).
+* **What version 3 does.** `scripts/apt-patch.py` decodes the library's ONLINE poster (`mainMenuButtons.big`,
+  texture `15`, 128x128; its raw entry, payload and the 16,384 poster bytes are hash-gated), crops it to its opaque
+  box (64x87), makes it neutral grey (the art has a green fringe), resamples it to **60x84** and paints it over the
+  slot in **both** wall textures at texture px **(64, 292)** (block aligned). Brightness is matched against the STORY
+  poster: the lit texture gets gain 0.92, the dim texture the measured dim/lit ratio (0.34). Only whole DXT5 blocks
+  inside that rectangle (630 blocks over the two textures) are re-encoded; every other byte of the bank is
+  unchanged, and the tool checks that, and that the encoded poster is within a mean error of 14 grey levels of the
+  intended picture. Nothing else about the movie changes: `Online.Tick`, `Online.Focus` and `Online.Open` are
+  exactly as in version 2, and the slot's door-logo/title/subtitle/description frames stay empty (the port keeps
+  drawing the door text while `Online.Focus(6)` is current).
+* **The slot's geometry for alignment.** Poster rectangle in the 640x480 menu space, at the menu's resting position:
+  **x 61.2-121.2, y 291.9-375.9 (60x84), centre (91.2, 333.9)**. The hit target `mmOnline` is at menu-clip
+  (-61.0, 95.5), the centre plus the (+1.5, +1.5) every other slot has, so the spotlight centres on it like the others.
+  While the wall slides (panDown/panUp) all of this moves with the clip.
+* **What to look for in the first run.** (1) the poster in the lit circle and dimmed outside it, with the same slide
+  as its neighbours; (2) a torn-paper remnant of the old shield below it (24 px) and to its left, left on purpose;
+  (3) a slightly softer look than the neighbours (it is a 4-colour-per-block re-encode of a resampled picture);
+  (4) **HD texture packs:** the identity of textures `5` and `14` changes, so a pack built from the original
+  textures no longer matches them and the wall draws at the original resolution (the HD generation would have to be
+  run on the patched archive to cover it); (5) the cursor still glides to the poster (hit target moved from
+  (-62, 99) to (-61, 95.5)).

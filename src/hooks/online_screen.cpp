@@ -672,7 +672,9 @@ void draw_code(ImDrawList *dl, const Frame &f, const Pad &pad)
     }
 
     page_title(dl, f, "JOIN BY CODE");
-    text(dl, f, g_hand, 15, 54, 70, ORANGE, "The code is shown in the room of the friend you want to join.", LEFT, 0.8f);
+    text(dl, f, g_hand, 15, 54, 70, ORANGE, "The code is shown in your friend's room.", LEFT, 0.8f, 270);
+    door_text(dl, f, nullptr, "JOIN BY CODE", "SIX CHARACTERS",
+              "Up and down change a character, left and right move. Or type it. A joins the room.");
     for (int i = 0; i < 6; i++) {
         float x = 70 + i * 46, y = 150;
         rect(dl, f, x, y, 40, 56, IM_COL32(15, 15, 15, 220));
@@ -965,12 +967,8 @@ void draw_decor(ImDrawList *dl, ImVec2 display)
     if (!decor_wanted()) return;
     Frame f = menu_frame(display);
     bool focused = g_focus.load() == ONLINE_SLOT;
-    // the poster in the empty bottom-left slot of the menu's grid
-    const Tex &poster = tex("ui/online_poster.png");
-    if (!image(dl, f, poster, 62, 294, 62, 62, focused ? IM_COL32_WHITE : IM_COL32(205, 205, 205, 255))) {
-        rect(dl, f, 66, 298, 54, 54, IM_COL32(230, 230, 230, 255));
-        text(dl, f, nullptr, 11, 93, 318, BLACK, "ONLINE", CENTER, 0);
-    }
+    // The poster itself is painted into the menu's wall textures (scripts/apt-patch.py v3), so it
+    // slides and lights with its neighbours; only the door's text is drawn here.
     if (!focused) return;
     // the door: cover what it shows for the empty slot, then the entry's icon, title and text
     door_shutter(dl, f);

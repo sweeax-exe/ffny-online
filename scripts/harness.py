@@ -696,6 +696,10 @@ def run_game(name, stages=(), tail="", shots="", secs=240, preset=RELEASE_PRESET
     # for a missing file and the title goes on). HARNESS_INTRO=1 keeps them.
     if not os.environ.get("HARNESS_INTRO"):
         e.setdefault("RECOMP_SKIP_FILES", INTRO_MOVIES)
+    # The game's window opens off the desktop and without the focus, so a run never covers
+    # what the person at the PC is doing (HARNESS_VISIBLE=1 shows it).
+    if not os.environ.get("HARNESS_VISIBLE"):
+        e.setdefault("RECOMP_WINDOW_BACKGROUND", "1")
     e["DEFJAM_DATA"] = data_dir()
     if scripted:
         e["RECOMP_SCRIPT_ANCHOR"] = TITLE_ANCHOR

@@ -1539,6 +1539,75 @@ void set_open(bool open)
 
 #if defined(_WIN32)
 extern "C" void pc_ui_set_window(HWND window) { g_window = window; }
+
+// RECOMP_OVERLAY_SHOT_DIR=<folder>: test runs write the finished picture, the overlay included,
+// every RECOMP_OVERLAY_SHOT_MS (default 2000) while the overlay draws, as <ms since the first>.bmp.
+// It reads the game's own back buffer, never the screen, so nothing else on the desktop gets in.
+static void overlay_shot(ID3D11Device *dev, ID3D11DeviceContext *ctx, ID3D11RenderTargetView *rtv)
+{
+    static const char *dir = getenv("RECOMP_OVERLAY_SHOT_DIR");
+    static UiTick first, last;
+    static unsigned period = 0;
+    if (!dir || !*dir) return;
+    if (!period) {
+        const char *ms = getenv("RECOMP_OVERLAY_SHOT_MS");
+        period = ms && atoi(ms) > 0 ? (unsigned)atoi(ms) : 2000;
+    }
+    UiTick now = ui_ticks();
+    if (!first) first = now;
+    if (last && now - last < period) return;
+    last = now;
+    ID3D11Resource *res = nullptr;
+    ID3D11Texture2D *back = nullptr, *staging = nullptr;
+    rtv->GetResource(&res);
+    if (!res) return;
+    if (FAILED(res->QueryInterface(IID_PPV_ARGS(&back)))) { res->Release(); return; }
+    res->Release();
+    D3D11_TEXTURE2D_DESC desc;
+    back->GetDesc(&desc);
+    bool bgra = desc.Format == DXGI_FORMAT_B8G8R8A8_UNORM || desc.Format == DXGI_FORMAT_B8G8R8A8_UNORM_SRGB;
+    desc.Usage = D3D11_USAGE_STAGING;
+    desc.BindFlags = 0;
+    desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+    desc.MiscFlags = 0;
+    desc.SampleDesc.Count = 1;
+    desc.SampleDesc.Quality = 0;
+    if (SUCCEEDED(dev->CreateTexture2D(&desc, nullptr, &staging))) {
+        D3D11_MAPPED_SUBRESOURCE map;
+        ctx->CopyResource(staging, back);
+        if (SUCCEEDED(ctx->Map(staging, 0, D3D11_MAP_READ, 0, &map))) {
+            char path[1024];
+            snprintf(path, sizeof(path), "%s/%06u.bmp", dir, (unsigned)(now - first));
+            FILE *f = fopen(path, "wb");
+            if (f) {
+                unsigned w = desc.Width, h = desc.Height, row = w * 4, size = 54 + row * h;
+                unsigned char header[54] = { 'B', 'M' };
+                memcpy(header + 2, &size, 4);
+                header[10] = 54; header[14] = 40;
+                memcpy(header + 18, &w, 4);
+                int height = -(int)h;
+                memcpy(header + 22, &height, 4);
+                header[26] = 1; header[28] = 32;
+                fwrite(header, 1, 54, f);
+                std::vector<unsigned char> line(row);
+                for (unsigned y = 0; y < h; y++) {
+                    const unsigned char *src = (const unsigned char *)map.pData + (size_t)y * map.RowPitch;
+                    for (unsigned x = 0; x < w; x++) {
+                        line[x * 4 + 0] = src[x * 4 + (bgra ? 0 : 2)];
+                        line[x * 4 + 1] = src[x * 4 + 1];
+                        line[x * 4 + 2] = src[x * 4 + (bgra ? 2 : 0)];
+                        line[x * 4 + 3] = 255;
+                    }
+                    fwrite(line.data(), 1, row, f);
+                }
+                fclose(f);
+            }
+            ctx->Unmap(staging, 0);
+        }
+        staging->Release();
+    }
+    back->Release();
+}
 #endif
 
 extern "C" int pc_ui_overlay_open(void) { return g_open.load() ? 1 : 0; }
@@ -1656,6 +1725,7 @@ extern "C" void pc_ui_overlay(void *device, void *context, void *window_rtv, uns
     ID3D11RenderTargetView *rtv = (ID3D11RenderTargetView *)window_rtv;
     ctx->OMSetRenderTargets(1, &rtv, nullptr);
     ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
+    overlay_shot(dev, ctx, rtv);
     ctx->OMSetRenderTargets(1, &old_rtv, old_dsv);       // the title's own target, as it was
     if (old_rtv) old_rtv->Release();
     if (old_dsv) old_dsv->Release();

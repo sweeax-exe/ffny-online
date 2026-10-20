@@ -296,7 +296,15 @@ static HWND make_window(void)
         y = work.top + (work.bottom - work.top - h) / 2;
     }
 
-    return CreateWindowExW(0, L"DefJamRecompTranslator",
+    /* RECOMP_WINDOW_BACKGROUND=1 (test runs): the window opens beyond the left edge of the
+     * desktop and without taking the focus, so a run never covers what the person at the PC
+     * is doing; the picture is still rendered and captured as usual. */
+    if (getenv("RECOMP_WINDOW_BACKGROUND")) {
+        x = GetSystemMetrics(SM_XVIRTUALSCREEN) - w - 64;
+        y = GetSystemMetrics(SM_YVIRTUALSCREEN);
+    }
+
+    return CreateWindowExW(getenv("RECOMP_WINDOW_BACKGROUND") ? WS_EX_NOACTIVATE : 0, L"DefJamRecompTranslator",
                            L"Def Jam: Fight for NY", WS_OVERLAPPEDWINDOW,
                            x, y, w, h,
                            NULL, NULL, GetModuleHandleW(NULL), NULL);
@@ -348,14 +356,14 @@ static DWORD WINAPI window_thread(LPVOID unused)
     }
     s_window = make_window();
     if (s_window) {
-        ShowWindow(s_window, SW_SHOW);
+        ShowWindow(s_window, getenv("RECOMP_WINDOW_BACKGROUND") ? SW_SHOWNOACTIVATE : SW_SHOW);
         s_mouse_moved = GetTickCount64();
         SetTimer(s_window, CURSOR_TIMER, 250, NULL);
         pc_input_set_focus(GetFocus() == s_window);
         pc_settings_on_fullscreen(fullscreen_setting_changed);
         pc_settings_on_window_size(window_size_setting_changed);
         pc_ui_set_window(s_window);
-        if (pc_display("fullscreen", 0))
+        if (pc_display("fullscreen", 0) && !getenv("RECOMP_WINDOW_BACKGROUND"))
             set_fullscreen(s_window, 1);
     }
     SetEvent(s_window_ready);

@@ -33,6 +33,14 @@ every internal pointer there is an absolute offset):
     The function bodies are edited in place (their size fields and the one
     branch that crosses an insertion are fixed up) rather than wrapped, so no
     behaviour depends on how the VM resolves a redefined name.
+  * the poster itself (patch version 3): the shipped menu's poster wall is two baked textures
+    of `mainMenu.xsh` (a dim one and the lit one the spotlight reveals), so the other slots'
+    posters are not separate shapes. The tool decodes the library's ONLINE poster from
+    `screens/intMain/support/mainMenuButtons.big` (also hash-gated), scales it to the
+    neighbours' size and paints it over the bottom-left cell of both wall textures, matching
+    the lit white level and the dim/lit ratio measured on the STORY poster. Only whole DXT5
+    blocks inside one rectangle change, so the poster slides with the wall and is lit and
+    dimmed like the others. Texture and bank layout are untouched;
   * the `.apt` is re-laid out in its BIGF (other inner files byte-identical),
     wrapped as a literal-only RefPack stream, appended to the archive copy, and
     its directory record and the header total size are updated.
@@ -74,16 +82,34 @@ FRAME_ITEMS_OLD = (13, 0x2E14)
 MMCREDITS_ITEM = 0x92B8           # PlaceObject of the mmCredits hit target
 NEW_SLOT = 6
 NEW_DEPTH = 27
-NEW_POS = (-62.0, 99.0)           # bottom-left cell; row 3 sits at y 96-101
+NEW_POS = (-61.0, 95.5)           # bottom-left cell: its poster's centre (-62.5, 94) plus the
+                                  # (+1.5, +1.5) offset every other slot's hit target has
 
 NEW_CLIP_NAME = "mmOnline"
-PATCH_VERSION = 2                 # 1: slot 6 + Focus/Open; 2: adds the per-frame Online.Tick()
+PATCH_VERSION = 3                 # 1: slot 6 + Focus/Open; 2: + per-frame Online.Tick();
+                                  # 3: + the ONLINE poster painted into the poster wall textures
 CLIP_EVENT_ENTERFRAME = 0x02
 PLACE_HAS_CLIP_ACTIONS = 0x80
 CMD_TICK = "Online.Tick()"
 CMD_OPEN = "Online.Open()"
 CMD_FOCUS_PREFIX = "Online.Focus("
 CMD_FOCUS_SUFFIX = ")"
+
+# The poster wall is two baked textures of mainMenu.xsh (a dim one and the lit one the spotlight
+# reveals), each 256x512 DXT5, drawn 1:1 with texture pixel (x, y) at menu-clip (x - 153, y - 254),
+# i.e. 640x480 screen (x - 2.8, y - 0.1). The vacant slot is the bottom-left cell, where a
+# decorative "II" shield is baked in. The tool paints the library's ONLINE poster there.
+WALL_DIM_TEX, WALL_LIT_TEX = "5", "14"
+WALL_W, WALL_H = 256, 512
+POSTER_RECT = (64, 292, 60, 84)       # x, y, w, h in texture pixels; 4-aligned so whole blocks change
+REF_RECT = (72, 123, 57, 85)          # the STORY poster, to match brightness against
+POSTER_ENTRY_NAME = "screens/intMain/support/mainMenuButtons.big"
+POSTER_ENTRY_RAW_SHA256 = "5402eb2ac35b41deff49ea705090cc577ac0d01071e62e754f54aae5b75c3e9c"
+POSTER_PAYLOAD_SHA256 = "4f18b962a53690b2e2fce88f2249cad36c9ce3bd678458777ea7961f69ff8c16"
+POSTER_XSH, POSTER_TEX = "mainMenuButtons.xsh", "15"
+POSTER_TEX_SHA256 = "ec14de8a8db5a5380420063c6029fd8af285f41cf8437c1393eea49b0fea9033"   # its 16,384 DXT5 bytes
+POSTER_SRC_W = POSTER_SRC_H = 128
+MAX_PAINT_ERROR = 14.0                # mean abs error allowed between the intended and the encoded poster
 
 BIG_ALIGN = 128                   # inner BIGF entries are 128-aligned
 OUTER_ALIGN = 4
@@ -698,14 +724,249 @@ def _iter_functions(buf, ins):
             yield from _iter_functions(buf, decode(buf, bs, bs + sz))
 
 
+# ------------------------------------------------------------ textures (DXT5)
+
+def shpx_directory(x):
+    """{name: offset} of an SHPX bank (header: magic, size, count, tag; then (4-char name, offset))."""
+    if x[:4] != b"SHPX" or struct.unpack_from("<I", x, 4)[0] != len(x):
+        raise PatchError("not an SHPX bank")
+    count = struct.unpack_from("<I", x, 8)[0]
+    out = {}
+    for i in range(count):
+        name = x[16 + 8 * i:20 + 8 * i].decode("latin-1").strip()
+        out[name] = struct.unpack_from("<I", x, 20 + 8 * i)[0]
+    return out
+
+
+def shpx_image(x, name):
+    """(data offset, width, height) of a plain DXT5 (type 0x62) image of the bank."""
+    off = shpx_directory(x).get(name)
+    if off is None:
+        raise PatchError("texture %s not in the bank" % name)
+    if x[off] != 0x62:
+        raise PatchError("texture %s is not DXT5" % name)
+    w, h = struct.unpack_from("<HH", x, off + 4)
+    if struct.unpack_from("<I", x, off + 12)[0] & 0xF0002000:      # mips or swizzle: not handled
+        raise PatchError("texture %s has mips or is swizzled" % name)
+    if w % 4 or h % 4 or off + 16 + w * h > len(x):
+        raise PatchError("texture %s has an unexpected layout" % name)
+    return off + 16, w, h
+
+
+def _expand565(v):
+    return (((v >> 11) & 31) * 255 // 31, ((v >> 5) & 63) * 255 // 63, (v & 31) * 255 // 31)
+
+
+def _pack565(c):
+    return ((c[0] * 31 + 127) // 255) << 11 | ((c[1] * 63 + 127) // 255) << 5 | ((c[2] * 31 + 127) // 255)
+
+
+def _palette(c0, c1):
+    e0, e1 = _expand565(c0), _expand565(c1)
+    return [e0, e1, tuple((2 * p + q) // 3 for p, q in zip(e0, e1)), tuple((p + 2 * q) // 3 for p, q in zip(e0, e1))]
+
+
+def dxt5_decode_block(blk):
+    """16 bytes -> 16 (r, g, b, a) tuples in row-major order."""
+    a0, a1 = blk[0], blk[1]
+    bits = int.from_bytes(blk[2:8], "little")
+    tab = [a0, a1]
+    if a0 > a1:
+        tab += [((7 - i) * a0 + i * a1) // 7 for i in range(1, 7)]
+    else:
+        tab += [((5 - i) * a0 + i * a1) // 5 for i in range(1, 5)] + [0, 255]
+    c0, c1, cb = struct.unpack_from("<HHI", blk, 8)
+    pal = _palette(c0, c1)
+    return [pal[(cb >> (2 * i)) & 3] + (tab[(bits >> (3 * i)) & 7],) for i in range(16)]
+
+
+def dxt5_encode_block(px):
+    """16 (r, g, b, a) tuples -> 16 bytes. The endpoints are the darkest and the brightest pixel,
+    which fits black-and-white poster art; c0 >= c1 so every reading of the colour block agrees."""
+    lum = [p[0] * 299 + p[1] * 587 + p[2] * 114 for p in px]
+    c0, c1 = _pack565(px[lum.index(max(lum))]), _pack565(px[lum.index(min(lum))])
+    if c0 < c1:
+        c0, c1 = c1, c0
+    pal = _palette(c0, c1)
+    cb = 0
+    for i, p in enumerate(px):
+        best = min(range(4), key=lambda k: (p[0] - pal[k][0]) ** 2 + (p[1] - pal[k][1]) ** 2 + (p[2] - pal[k][2]) ** 2)
+        cb |= best << (2 * i)
+    al = [p[3] for p in px]
+    hi_a, lo_a = max(al), min(al)
+    if hi_a == lo_a:
+        ab = bytes([hi_a, lo_a]) + bytes(6)
+    else:
+        tab = [hi_a, lo_a] + [((7 - i) * hi_a + i * lo_a) // 7 for i in range(1, 7)]
+        bits = 0
+        for i, a in enumerate(al):
+            bits |= min(range(8), key=lambda k: abs(a - tab[k])) << (3 * i)
+        ab = bytes([hi_a, lo_a]) + bits.to_bytes(6, "little")
+    return ab + struct.pack("<HHI", c0, c1, cb)
+
+
+def dxt5_region(data, base, w, rect):
+    """Decode a block-aligned rectangle (x, y, w, h) of an image into rows of (r, g, b, a)."""
+    x0, y0, rw, rh = rect
+    rows = [[None] * rw for _ in range(rh)]
+    for by in range(y0 // 4, (y0 + rh) // 4):
+        for bx in range(x0 // 4, (x0 + rw) // 4):
+            at = base + (by * (w // 4) + bx) * 16
+            for i, p in enumerate(dxt5_decode_block(data[at:at + 16])):
+                rows[by * 4 + i // 4 - y0][bx * 4 + i % 4 - x0] = p
+    return rows
+
+
+def dxt5_store_region(buf, base, w, rect, rows):
+    """Encode `rows` (rectangle-sized) into the bytearray, whole blocks only."""
+    x0, y0, rw, rh = rect
+    if x0 % 4 or y0 % 4 or rw % 4 or rh % 4:
+        raise PatchError("the poster rectangle must be block aligned")
+    for by in range(y0 // 4, (y0 + rh) // 4):
+        for bx in range(x0 // 4, (x0 + rw) // 4):
+            px = [rows[by * 4 + i // 4 - y0][bx * 4 + i % 4 - x0] for i in range(16)]
+            at = base + (by * (w // 4) + bx) * 16
+            buf[at:at + 16] = dxt5_encode_block(px)
+
+
+def resample_rgba(rows, size):
+    """Bilinear resample of rows of (r, g, b, a) with a in 0..1 to size (w, h). The colour is
+    averaged premultiplied by alpha so soft edges do not pick up the colour of transparent pixels."""
+    sh, sw = len(rows), len(rows[0])
+    dw, dh = size
+    out = []
+    for y in range(dh):
+        fy = min(max((y + 0.5) * sh / dh - 0.5, 0.0), sh - 1.0)
+        y0 = int(fy)
+        y1 = min(y0 + 1, sh - 1)
+        ty = fy - y0
+        row = []
+        for x in range(dw):
+            fx = min(max((x + 0.5) * sw / dw - 0.5, 0.0), sw - 1.0)
+            x0 = int(fx)
+            x1 = min(x0 + 1, sw - 1)
+            tx = fx - x0
+            acc = [0.0, 0.0, 0.0, 0.0]
+            for yy, wy in ((y0, 1 - ty), (y1, ty)):
+                for xx, wx in ((x0, 1 - tx), (x1, tx)):
+                    p, wgt = rows[yy][xx], wy * wx
+                    acc[0] += p[0] * p[3] * wgt
+                    acc[1] += p[1] * p[3] * wgt
+                    acc[2] += p[2] * p[3] * wgt
+                    acc[3] += p[3] * wgt
+            if acc[3] > 1e-6:
+                row.append((acc[0] / acc[3], acc[1] / acc[3], acc[2] / acc[3], acc[3]))
+            else:
+                row.append((0.0, 0.0, 0.0, 0.0))
+        out.append(row)
+    return out
+
+
+def _lum(p):
+    return (p[0] + p[1] + p[2]) / 3.0
+
+
+def poster_art(poster_xsh, check_hash=True):
+    """The library's ONLINE poster, cropped to its opaque bounding box: rows of (r, g, b, a 0..1)."""
+    base, w, h = shpx_image(poster_xsh, POSTER_TEX)
+    if (w, h) != (POSTER_SRC_W, POSTER_SRC_H):
+        raise PatchError("the ONLINE poster texture is not 128x128")
+    if check_hash and sha(bytes(poster_xsh[base:base + w * h])) != POSTER_TEX_SHA256:
+        raise PatchError("the ONLINE poster texture does not match the expected hash")
+    rows = dxt5_region(poster_xsh, base, w, (0, 0, w, h))
+    xs = [x for r in rows for x, p in enumerate(r) if p[3] > 128]
+    ys = [y for y, r in enumerate(rows) for p in r if p[3] > 128]
+    x0, x1, y0, y1 = min(xs), max(xs), min(ys), max(ys)
+    # The art is black and white; its edge pixels carry a green fringe, and the wall's posters are neutral.
+    return [[(_lum(p),) * 3 + (p[3] / 255.0,) for p in r[x0:x1 + 1]] for r in rows[y0:y1 + 1]]
+
+
+def _outer_blocks(rect):
+    """The smallest 4-aligned rectangle containing `rect`."""
+    x0, y0, rw, rh = rect
+    ax0, ay0 = x0 // 4 * 4, y0 // 4 * 4
+    return (ax0, ay0, (x0 + rw + 3) // 4 * 4 - ax0, (y0 + rh + 3) // 4 * 4 - ay0)
+
+
+def paint_poster(xsh, poster_xsh, check_hash=True):
+    """New mainMenu.xsh with the ONLINE poster painted over the vacant bottom-left slot of both wall
+    textures. Same size, same directory; only whole DXT5 blocks inside POSTER_RECT change.
+    Returns (new bytes, report line, the intended pixels per texture, for verification)."""
+    art = poster_art(poster_xsh, check_hash)
+    px0, py0, pw, ph = POSTER_RECT
+    scaled = resample_rgba(art, (pw, ph))
+    dim_base, dw, dh = shpx_image(xsh, WALL_DIM_TEX)
+    lit_base, lw, lh = shpx_image(xsh, WALL_LIT_TEX)
+    if (dw, dh) != (WALL_W, WALL_H) or (lw, lh) != (WALL_W, WALL_H):
+        raise PatchError("the wall textures are not 256x512")
+    # Match the neighbours: white level from the STORY poster of the lit wall; the dim wall is the
+    # lit wall darkened by the ratio measured on the same poster.
+    ref = _outer_blocks(REF_RECT)
+    lit_ref = dxt5_region(xsh, lit_base, lw, ref)
+    dim_ref = dxt5_region(xsh, dim_base, dw, ref)
+    ref_l = sorted(_lum(p) for r in lit_ref for p in r)
+    opaque = sorted(_lum(p) for r in art for p in r if p[3] > 0.9)
+    gain = min(1.0, max(0.5, ref_l[int(len(ref_l) * 0.95)] / max(1.0, opaque[int(len(opaque) * 0.95)])))
+    sums_l = [sum(p[k] for r in lit_ref for p in r) for k in range(3)]
+    sums_d = [sum(p[k] for r in dim_ref for p in r) for k in range(3)]
+    ratio = [min(1.0, max(0.05, d / max(1.0, l))) for d, l in zip(sums_d, sums_l)]
+    out = bytearray(xsh)
+    expected = {}
+    for name, base, w, factors in ((WALL_LIT_TEX, lit_base, lw, [gain] * 3),
+                                   (WALL_DIM_TEX, dim_base, dw, [gain * r for r in ratio])):
+        wall = dxt5_region(xsh, base, w, POSTER_RECT)
+        rows = []
+        for y in range(ph):
+            row = []
+            for x in range(pw):
+                wp, sp = wall[y][x], scaled[y][x]
+                a = max(0.0, min(1.0, sp[3]))
+                row.append(tuple(int(round(min(255.0, max(0.0, wp[k] * (1 - a) + sp[k] * factors[k] * a))))
+                                 for k in range(3)) + (255,))
+            rows.append(row)
+        dxt5_store_region(out, base, w, POSTER_RECT, rows)
+        expected[name] = rows
+    line = "ONLINE poster %dx%d painted at texture px (%d, %d) of walls %s/%s (gain %.2f, dim ratio %.2f)" % (
+        pw, ph, px0, py0, WALL_LIT_TEX, WALL_DIM_TEX, gain, sum(ratio) / 3)
+    return bytes(out), line, expected
+
+
+def verify_paint(old, new, expected):
+    """Outside the poster blocks nothing changed; inside, the encoded blocks are close to the intent."""
+    if len(old) != len(new) or old[:16] != new[:16] or shpx_directory(old) != shpx_directory(new):
+        raise PatchError("texture bank size or directory changed")
+    x0, y0, rw, rh = POSTER_RECT
+    allowed = set()
+    for name in (WALL_LIT_TEX, WALL_DIM_TEX):
+        base, w, h = shpx_image(new, name)
+        for by in range(y0 // 4, (y0 + rh) // 4):
+            for bx in range(x0 // 4, (x0 + rw) // 4):
+                allowed.add(base + (by * (w // 4) + bx) * 16)
+        got = dxt5_region(new, base, w, POSTER_RECT)
+        err = n = 0
+        for y in range(rh):
+            for x in range(rw):
+                for k in range(3):
+                    err += abs(got[y][x][k] - expected[name][y][x][k])
+                    n += 1
+        if err / n > MAX_PAINT_ERROR:
+            raise PatchError("texture %s: the encoded poster is too far from the intended picture (%.1f)"
+                             % (name, err / n))
+    for at in range(0, len(old), 16):       # every 16-byte cell: only poster blocks may differ
+        if old[at:at + 16] != new[at:at + 16] and at not in allowed:
+            raise PatchError("the texture bank changed outside the poster blocks (offset 0x%X)" % at)
+    return "%d poster blocks re-encoded, nothing else in the bank changed" % len(allowed)
+
+
 # --------------------------------------------------------- entry / archive level
 
 def sha(b):
     return hashlib.sha256(b).hexdigest()
 
 
-def patch_entry(raw_entry):
-    """Given the archive's raw (RefPack) mainMenu entry, return (new raw entry, report lines)."""
+def patch_entry(raw_entry, extras=None):
+    """Given the archive's raw (RefPack) mainMenu entry, and the raw ONLINE poster library entry
+    (`extras[POSTER_ENTRY_NAME]`), return (new raw entry, report lines)."""
     lines = ["patch version %d" % PATCH_VERSION]
     if sha(raw_entry) != ENTRY_RAW_SHA256:
         lines.append("note: archive entry differs from the reference build (payload is checked instead)")
@@ -719,16 +980,34 @@ def patch_entry(raw_entry):
         raise PatchError("mainMenu.apt/.const do not match the expected hashes")
     new_apt, info = build_new_apt(apt, const)
     lines.append("verify .apt: " + verify_new_apt(apt, new_apt, info))
-    new_payload = rebuild_bigf(payload, {"mainMenu.apt": new_apt})
+    xsh = files.get("mainMenu.xsh")
+    if xsh is None:
+        raise PatchError("mainMenu.xsh missing")
+    poster_raw = (extras or {}).get(POSTER_ENTRY_NAME)
+    if poster_raw is None:
+        raise PatchError("the poster library entry %s was not supplied" % POSTER_ENTRY_NAME)
+    if sha(poster_raw) != POSTER_ENTRY_RAW_SHA256:
+        lines.append("note: poster library entry differs from the reference build (payload is checked instead)")
+    poster_payload = refpack_decode(poster_raw)
+    if sha(poster_payload) != POSTER_PAYLOAD_SHA256:
+        raise PatchError("the poster library %s does not match the expected hash; refusing to patch"
+                         % POSTER_ENTRY_NAME)
+    poster_xsh = inner_files(poster_payload).get(POSTER_XSH)
+    if poster_xsh is None:
+        raise PatchError("%s missing" % POSTER_XSH)
+    new_xsh, paint_line, intended = paint_poster(xsh, poster_xsh)
+    lines.append(paint_line)
+    lines.append("verify .xsh: " + verify_paint(xsh, new_xsh, intended))
+    new_payload = rebuild_bigf(payload, {"mainMenu.apt": new_apt, "mainMenu.xsh": new_xsh})
     # Inner file check: everything except the .apt is byte-identical and the .apt starts as before.
     new_files = inner_files(new_payload)
     if list(new_files) != list(files):
         raise PatchError("inner file list changed")
     for n in files:
-        if n != "mainMenu.apt" and files[n] != new_files[n]:
+        if n not in ("mainMenu.apt", "mainMenu.xsh") and files[n] != new_files[n]:
             raise PatchError("inner file %s changed" % n)
-    if new_files["mainMenu.apt"] != new_apt:
-        raise PatchError("re-laid out .apt differs from the built one")
+    if new_files["mainMenu.apt"] != new_apt or new_files["mainMenu.xsh"] != new_xsh:
+        raise PatchError("re-laid out .apt/.xsh differ from the built ones")
     new_raw = refpack_encode_literal(new_payload)
     if refpack_decode(new_raw) != new_payload:
         raise PatchError("RefPack round trip failed")
@@ -740,7 +1019,7 @@ def patch_entry(raw_entry):
 class Plan:
     """Everything needed to write or compare the patched archive."""
 
-    def __init__(self, src_path, entry_name=ENTRY_NAME, patcher=None):
+    def __init__(self, src_path, entry_name=ENTRY_NAME, patcher=None, extra_entries=None):
         self.src = src_path
         self.size = os.path.getsize(src_path)
         with open(src_path, "rb") as f:
@@ -761,7 +1040,15 @@ class Plan:
                 raise PatchError("directory entry runs past the end of the file")
             f.seek(self.old_off)
             raw = f.read(self.old_size)
-        self.new_raw, self.lines = (patcher or patch_entry)(raw)
+            extras = {}
+            wanted = [POSTER_ENTRY_NAME] if extra_entries is None and patcher is None else (extra_entries or [])
+            for name in wanted:
+                er = [r for r in self.records if r[0] == name]
+                if len(er) != 1 or er[0][2] + er[0][3] > self.size:
+                    raise PatchError("%s not found in the archive" % name)
+                f.seek(er[0][2])
+                extras[name] = f.read(er[0][3])
+        self.new_raw, self.lines = (patcher or patch_entry)(raw, extras)
         self.append_at = align(self.size, OUTER_ALIGN)
         self.final_size = self.append_at + len(self.new_raw)
         struct.pack_into(">II", self.head, self.rec_pos, self.append_at, len(self.new_raw))

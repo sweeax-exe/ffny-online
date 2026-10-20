@@ -96,7 +96,7 @@ def test_plan_rewrites_one_directory_record_of_a_fake_archive(tmp_path):
     src.write_bytes(bytes(b))
     new_raw = ap.refpack_encode_literal(b"patched payload, longer than the old one")
 
-    plan = ap.Plan(str(src), entry_name="screens/target.big", patcher=lambda raw: (new_raw, ["ok"]))
+    plan = ap.Plan(str(src), entry_name="screens/target.big", patcher=lambda raw, extras: (new_raw, ["ok"]))
     assert plan.append_at % 4 == 0 and plan.append_at >= plan.size
     dst = tmp_path / "override" / "screens" / "screens.viv"
     ap.write_override(plan, str(dst))
@@ -241,6 +241,94 @@ def test_branch_into_the_middle_of_an_instruction_is_rejected():
     struct.pack_into("<I", b, if_at, 0xFFFFFFFE)                  # target = 2 bytes before the operand's end
     with pytest.raises(ap.PatchError):
         ap.verify_block(bytes(b), base)
+
+
+# ----------------------------------------------------------------- DXT5 and the poster
+
+def make_shpx(images):
+    """images: [(name, w, h, bytes of w*h DXT5)] -> a minimal SHPX bank, entries 256-aligned like the game's."""
+    n = len(images)
+    dir_end = 16 + 8 * n
+    out = bytearray(dir_end)
+    pos = (dir_end + 0xF0 + 0xFF) // 0x100 * 0x100 - 0x10      # header at ...F0 so data is 256-aligned
+    for i, (name, w, h, data) in enumerate(images):
+        pos = (pos + 0xFF) // 0x100 * 0x100 + 0xF0 if pos % 0x100 != 0xF0 else pos
+        out[16 + 8 * i:20 + 8 * i] = name.ljust(4).encode()
+        struct.pack_into("<I", out, 20 + 8 * i, pos)
+        if len(out) < pos:
+            out += bytes(pos - len(out))
+        out += bytes([0x62, 0x20]) + struct.pack("<H", w * h // 256) + struct.pack("<HH", w, h) + bytes(8) + data
+        pos = len(out)
+    out[:4] = b"SHPX"
+    struct.pack_into("<II", out, 4, len(out), n)
+    out[12:16] = b"G355"
+    return bytes(out)
+
+
+def solid_block(rgb, a=255):
+    return ap.dxt5_encode_block([rgb + (a,)] * 16)
+
+
+def test_dxt5_blocks_round_trip():
+    for rgb in ((0, 0, 0), (255, 255, 255), (123, 200, 40)):
+        got = ap.dxt5_decode_block(solid_block(rgb))
+        assert all(max(abs(g - e) for g, e in zip(p[:3], rgb)) <= 8 and p[3] == 255 for p in got)
+    bw = [(255, 255, 255, 255) if (i // 4 + i) % 2 else (0, 0, 0, 255) for i in range(16)]
+    assert [p[:3] for p in ap.dxt5_decode_block(ap.dxt5_encode_block(bw))] == [p[:3] for p in bw]
+    ramp = [(i * 16, i * 16, i * 16, 255) for i in range(16)]
+    blk = ap.dxt5_encode_block(ramp)
+    assert max(abs(p[0] - q[0]) for p, q in zip(ap.dxt5_decode_block(blk), ramp)) <= 44     # four colours for a 16-step ramp
+    soft = [(10, 20, 30, i * 16) for i in range(16)]
+    assert max(abs(p[3] - q[3]) for p, q in zip(ap.dxt5_decode_block(ap.dxt5_encode_block(soft)), soft)) <= 18
+    assert blk[8] * 256 + blk[9] >= 0 and struct.unpack_from("<H", blk, 8)[0] >= struct.unpack_from("<H", blk, 10)[0]
+
+
+def test_resample_keeps_edges_clean_and_size():
+    rows = [[(200.0, 200.0, 200.0, 1.0) if x > 1 else (0.0, 255.0, 0.0, 0.0) for x in range(8)] for y in range(8)]
+    out = ap.resample_rgba(rows, (4, 6))
+    assert len(out) == 6 and len(out[0]) == 4
+    for row in out:
+        for p in row:
+            assert p[3] == 0.0 or abs(p[1] - 200.0) < 1e-6        # no green bleeds from the transparent side
+
+
+def synthetic_banks():
+    rnd = random.Random(7)
+    wall = bytes(rnd.randrange(256) for _ in range(ap.WALL_W * ap.WALL_H))
+    # a smooth wall instead of noise so the encode error stays small: use solid blocks of two levels
+    blocks = b"".join(solid_block((40 + (i % 7) * 3,) * 3) for i in range(ap.WALL_W // 4 * ap.WALL_H // 4))
+    lit = b"".join(solid_block((120 + (i % 5) * 4,) * 3) for i in range(ap.WALL_W // 4 * ap.WALL_H // 4))
+    xsh = make_shpx([("14", ap.WALL_W, ap.WALL_H, lit), ("5", ap.WALL_W, ap.WALL_H, blocks)])
+    art = []
+    for by in range(32):
+        for bx in range(32):
+            px = [((255, 255, 255, 255) if (bx * 4 + i % 4 + by * 4 + i // 4) % 9 < 4 else (0, 0, 0, 255)) for i in range(16)]
+            art.append(ap.dxt5_encode_block(px))
+    poster = make_shpx([("15", 128, 128, b"".join(art))])
+    return xsh, poster
+
+
+def test_paint_poster_changes_only_the_poster_blocks():
+    xsh, poster = synthetic_banks()
+    new, line, intended = ap.paint_poster(xsh, poster, check_hash=False)
+    assert len(new) == len(xsh) and ap.shpx_directory(new) == ap.shpx_directory(xsh)
+    assert "painted" in line
+    assert "poster blocks" in ap.verify_paint(xsh, new, intended)
+    x0, y0, w, h = ap.POSTER_RECT
+    base, tw, _ = ap.shpx_image(new, ap.WALL_LIT_TEX)
+    rows = ap.dxt5_region(new, base, tw, ap.POSTER_RECT)
+    lum = [p[0] for r in rows for p in r]
+    assert max(lum) > 100 and min(lum) < 40                     # the black-and-white art is in there
+    assert new != xsh
+    # A change outside the rectangle is caught.
+    bad = bytearray(new)
+    base5, _, _ = ap.shpx_image(bad, ap.WALL_DIM_TEX)
+    bad[base5] ^= 0xFF
+    with pytest.raises(ap.PatchError, match="outside"):
+        ap.verify_paint(xsh, bytes(bad), intended)
+    # A poster that does not match the expected hash is refused by default.
+    with pytest.raises(ap.PatchError, match="expected hash"):
+        ap.paint_poster(xsh, poster)
 
 
 # ------------------------------------------------------------ the user's own dump
