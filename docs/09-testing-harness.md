@@ -50,6 +50,10 @@ The harness explicitly sets `RECOMP_ASPECT=4:3` for the reviewed goldens and rep
 defaults can use Widescreen (Auto) without changing those baselines. An explicit per-run
 `RECOMP_ASPECT` overrides this test choice; an empty value lets the settings file/default apply.
 
+For native launcher help checks, `RECOMP_LAUNCHER_SCRIPT` accepts `<ms>:ui:<id>` to click a named
+control and `<ms>:hover:<id>` to reveal/hover it without editing its value (for example,
+`600:ui:Advanced;1200:hover:display.render_scale`). Captures and quit use the existing script actions.
+
 ## The combat check
 
 `python scripts/regress.py --only combat`, or directly:

@@ -51,9 +51,10 @@ The first full run remains **16/18**: one combat audio underrun beside a host st
 historical stream target `0x001E3C14` (D108), despite exact golden records. Do not report a clean full run.
 Receipts/captures are local in `logs/launcher-review/`; the report names regression logs.
 
-2026-10-20 follow-up: fresh/saved settings and Auto boot pass; final tooltip fits 640×480 at 200%.
-Quick 5/5 (`logs/regress-20261020-102601.txt`), picture/overlay 2/2 (`logs/regress-20261020-102746.txt`);
-quick units 528 pass/32 skip/one slow deselected. See the report for native receipts.
+2026-10-20 follow-up: fresh/saved settings and Auto boot pass; compact controls and complete help
+are verified at 100/200/250%, including 640×480. Latest quick 5/5 (`logs/regress-20261020-105429.txt`),
+picture/overlay 2/2 (`logs/regress-20261020-105615.txt`); quick units 528 pass/32 skip/one slow deselected.
+The report records the initial 250% failure and its fix (D143).
 
 1. Collect Vlad's feedback on Home/Advanced, physical-pad navigation/remapping, text scaling, actual
    HD packs/priority, folder/log actions and real Setup selection/prefill. Windows/Deck GUI acceptance

@@ -535,9 +535,20 @@ static void item_tooltip(const char *text)
     const auto &style = ImGui::GetStyle();
     ImVec2 area = ImGui::GetIO().DisplaySize;
     float margin = 8 * style.FontScaleMain;
-    float wrap = std::max(1.0f, std::min(ImGui::GetFontSize() * 35.0f,
-                                       area.x - 2 * (margin + style.WindowPadding.x)));
-    ImVec2 text_size = ImGui::CalcTextSize(text, nullptr, false, wrap);
+    float font_size = ImGui::GetFontSize(), minimum_font = std::min(font_size, 17.0f);
+    float wrap;
+    ImVec2 text_size;
+    for (;;)
+    {
+        ImGui::PushFont(nullptr, font_size / style.FontScaleMain);
+        wrap = std::max(1.0f, std::min(ImGui::GetFontSize() * 35.0f,
+                                     area.x - 2 * (margin + style.WindowPadding.x)));
+        text_size = ImGui::CalcTextSize(text, nullptr, false, wrap);
+        if (text_size.y + 2 * style.WindowPadding.y <= area.y - 2 * margin || font_size <= minimum_font)
+            break;
+        ImGui::PopFont();
+        font_size = std::max(minimum_font, font_size * .9f);
+    }
     ImVec2 size(text_size.x + 2 * style.WindowPadding.x, text_size.y + 2 * style.WindowPadding.y);
     ImVec2 mouse = ImGui::GetIO().MousePos;
     // ImGui may place a tall tooltip outside the viewport when no side of the pointer fits it.
@@ -545,11 +556,15 @@ static void item_tooltip(const char *text)
         std::clamp(mouse.x + 12 * style.FontScaleMain, margin, std::max(margin, area.x - margin - size.x)),
         std::clamp(mouse.y + 20 * style.FontScaleMain, margin, std::max(margin, area.y - margin - size.y))));
     if (!ImGui::BeginTooltip())
+    {
+        ImGui::PopFont();
         return;
+    }
     ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + wrap);
     ImGui::TextUnformatted(text);
     ImGui::PopTextWrapPos();
     ImGui::EndTooltip();
+    ImGui::PopFont();
 }
 
 // A bool, integer, choice or text setting as its natural control. Returns true when it changed.
@@ -1270,18 +1285,27 @@ UiResult ui_draw(UiMode mode, float x, float y, float width, float height)
                  ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoSavedSettings |
                  ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoScrollbar |
                  ImGuiWindowFlags_NoScrollWithMouse;
+    // At maximum text size, keep enough height for the independently scrolling controls.
+    bool tight = height < 250 * scale;
+    ImVec2 padding = ImGui::GetStyle().WindowPadding;
+    if (tight)
+        padding.y = std::min(padding.y, 8 * scale);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, padding);
     ImGui::Begin("##settings", nullptr, flags);
-    float header_width = ImGui::CalcTextSize("DEF JAM RECOMPILED").x +
+    ImGui::PopStyleVar();
+    const char *brand = tight ? "DEF JAM" : "DEF JAM RECOMPILED";
+    float header_width = ImGui::CalcTextSize(brand).x +
                          ImGui::CalcTextSize("/ v" DEFJAM_VERSION).x + ImGui::GetStyle().ItemSpacing.x;
     bool version_inline = header_width < ImGui::GetContentRegionAvail().x;
-    ImGui::TextUnformatted("DEF JAM RECOMPILED");
+    ImGui::TextUnformatted(brand);
     if (version_inline)
         ImGui::SameLine();
     ImGui::TextDisabled("/ v%s", DEFJAM_VERSION);
     ImGui::Separator();
     bool advanced = mode == UI_OVERLAY || g_advanced;
     bool compact_footer = height < 600 * scale && pcui::action_status().empty();
-    float footer = ImGui::GetFrameHeightWithSpacing() * (compact_footer ? 1.0f : 2.1f) + 25 * scale;
+    float footer = ImGui::GetFrameHeightWithSpacing() * (compact_footer ? 1.0f : 2.1f) +
+                   (compact_footer && tight ? 8 : 25) * scale;
     ImGui::BeginChild("page", ImVec2(0, -footer), ImGuiChildFlags_None, ImGuiWindowFlags_NoBackground);
     if (!advanced)
     {
@@ -1438,7 +1462,8 @@ UiResult ui_draw(UiMode mode, float x, float y, float width, float height)
         ImGui::SameLine();
         if (advanced || width < 900 * scale)
         {
-            if (pcui::play_button("PLAY", ImVec2(100 * scale, 0)))
+            if (pcui::play_button("PLAY", ImVec2(100 * scale, 0),
+                                  tight ? ImGui::GetFontSize() / scale : 30.0f))
                 result.play = true;
             ui_target("Play");
             ImGui::SameLine();
@@ -1446,7 +1471,11 @@ UiResult ui_draw(UiMode mode, float x, float y, float width, float height)
         if (!compact_footer)
             setting_widget(find("launcher", "skip"), "Skip launcher next time");
         else
-            ImGui::TextDisabled(mode == UI_LAUNCHER ? "Saved" : restart.empty() ? "Saved" : "Next launch");
+        {
+            const char *status = mode == UI_LAUNCHER || restart.empty() ? "Saved" : "Next launch";
+            if (ImGui::GetContentRegionAvail().x >= ImGui::CalcTextSize(status).x)
+                ImGui::TextDisabled("%s", status);
+        }
     }
     else
     {
@@ -1456,7 +1485,11 @@ UiResult ui_draw(UiMode mode, float x, float y, float width, float height)
         if (!compact_footer)
             setting_widget(find("launcher", "skip"), "Skip launcher next time");
         else
-            ImGui::TextDisabled(mode == UI_LAUNCHER ? "Saved" : restart.empty() ? "Saved" : "Next launch");
+        {
+            const char *status = mode == UI_LAUNCHER || restart.empty() ? "Saved" : "Next launch";
+            if (ImGui::GetContentRegionAvail().x >= ImGui::CalcTextSize(status).x)
+                ImGui::TextDisabled("%s", status);
+        }
     }
     if (g_setup_request)
     {

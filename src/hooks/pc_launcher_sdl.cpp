@@ -11,6 +11,7 @@
 // nobody at it (a locked screen, a remote run):
 //   RECOMP_LAUNCHER_SCRIPT   "<ms>:move:<x>:<y>;<ms>:click:<x>:<y>;<ms>:shot:<file.bmp>;<ms>:play;<ms>:quit", times
 //                            from the window's first frame, in window points
+//   Named controls: "<ms>:ui:<id>" clicks; "<ms>:hover:<id>" hovers, revealing scrolled controls.
 //   RECOMP_WINDOW_SHOT       a file to write the first full frame to, as a BMP
 
 #define _CRT_SECURE_NO_WARNINGS
@@ -46,6 +47,7 @@ struct ScriptStep {
     {
         CLICK,
         TARGET,
+        HOVER,
         RESIZE,
         MOVE,
         SHOT,
@@ -75,9 +77,10 @@ std::vector<ScriptStep> parse_script(const char *text)
             st.at_ms = ms;
             st.x = x;
             st.y = y;
-            if (!strcmp(kind, "ui") && sscanf(item.c_str(), "%llu:ui:%511[^;]", &ms, file) == 2)
+            if ((!strcmp(kind, "ui") || !strcmp(kind, "hover")) &&
+                sscanf(item.c_str(), "%llu:%*[^:]:%511[^;]", &ms, file) == 2)
             {
-                st.kind = ScriptStep::TARGET;
+                st.kind = !strcmp(kind, "hover") ? ScriptStep::HOVER : ScriptStep::TARGET;
                 st.file = file;
             }
             else if (!strcmp(kind, "resize"))
@@ -195,7 +198,7 @@ void launcher_main(void *arg)
             if (st.done || now < st.at_ms) continue;
             if (st.kind == ScriptStep::SHOT && frames < 3) continue;       // after the screen has been drawn
             st.done = true;
-            if (st.kind == ScriptStep::TARGET)
+            if (st.kind == ScriptStep::TARGET || st.kind == ScriptStep::HOVER)
             {
                 ui_lock();
                 bool found = ui_test_target(st.file.c_str(), &st.x, &st.y);
@@ -229,7 +232,7 @@ void launcher_main(void *arg)
                 press_at = now + 60;
                 release_at = now + 160;
             }
-            else if (st.kind == ScriptStep::MOVE)
+            else if (st.kind == ScriptStep::MOVE || st.kind == ScriptStep::HOVER)
             {
                 SDL_Event m;
                 SDL_zero(m);

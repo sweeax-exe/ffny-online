@@ -135,13 +135,13 @@ void poster(ImVec2 a, ImVec2 size, float s)
     ImGui::PopFont();
     ImGui::PopStyleColor();
 }
-bool play_button(const char *text, ImVec2 size)
+bool play_button(const char *text, ImVec2 size, float font_size)
 {
     ImGui::PushStyleColor(ImGuiCol_Button, gold());
     ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(.93f, .77f, .42f, 1));
     ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(.78f, .60f, .26f, 1));
     ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(.086f, .075f, .05f, 1));
-    ImGui::PushFont(display_font, 30);
+    ImGui::PushFont(display_font, font_size);
     bool hit = ImGui::Button(text, size);
     ImGui::PopFont();
     ImGui::PopStyleColor(4);

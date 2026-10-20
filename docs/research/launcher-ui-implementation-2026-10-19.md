@@ -137,3 +137,18 @@ one slow test deselected**, unchanged golden frames and 120 s of fight, median 1
 (logs/regress-20261020-102746.txt): F1 overlay drawn and brightness/vignette edits saved and applied. Native final tooltip
 captures show the complete help at normal size and 200% in 640×480. Source hygiene: 430 files,
 zero failures. The local playtest app now reports the integrated 0.10.5 base; its wrapper is unchanged.
+
+### Maximum text scale correction (D143)
+
+An extra check after `7fac946` passed CI 28/28 exposed an existing compact-layout corner:
+640×480 at 250% left no body below the large header/navigation/footer. The script could not reach
+Render Scale (logs/run-20261020-103627.log.err); bounded triage confirmed a normal prelaunch quit.
+The compact header and padding now leave room for controls, the footer Play font fits its reserved
+row, and help text fits vertically as well as horizontally. Stored/control text scale is preserved.
+The SDL test script's new named hover action reveals controls without editing them.
+
+Final native checks pass at 100%, 200% and 250%, including complete help, visible footer controls
+and Back to Home. Receipts: logs/launcher-review/display-20261020/max-layout-checks.json, with
+fit100/fit200/fit250 captures. Final quick **5/5** (logs/regress-20261020-105429.txt), picture/overlay **2/2** (logs/regress-20261020-105615.txt);
+quick units remain 528 pass/32 skip/one slow deselected. Source hygiene 430/0. No further broad
+suite is needed for this UI correction; the earlier full-run limitations remain above.
