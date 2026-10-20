@@ -3,14 +3,15 @@
 Start with `AGENTS.md`, then `python3 scripts/progress.py brief`. This is a continuation note;
 repository policy and current project state remain in those files.
 
-## Candidate and entry point
+## Released beta and entry point
 
-[PR #58](https://github.com/vyanhursky/DefJamFFNY-recomp/pull/58), branch
-`codex/launcher-redesign`; initial UI source `205582d`, now integrated with main `af0c03c`.
-Build/test/push are owner-authorized. Vlad is continuing in the original chat; his Mac appearance
-feedback is positive, and he confirmed the controller works. He authorized a beta release
-for Deck installation on 2026-10-20 (D144); v0.10.6 is being prepared as a GitHub prerelease,
-with v0.10.5 remaining stable/latest. He also requested new README/docs launcher screenshots.
+[PR #58](https://github.com/vyanhursky/DefJamFFNY-recomp/pull/58) merged at `2e8ec40`,
+the exact **v0.10.6 beta** tag. [Published prerelease](https://github.com/vyanhursky/DefJamFFNY-recomp/releases/tag/v0.10.6);
+v0.10.5 remains stable/latest. The owner accepted Mac appearance and confirmed the physical controller
+works, then requested beta deployment for Deck and fresh README/docs launcher screenshots (D144).
+Candidate CI passed 28/28; tagged release 39452474210 passed 30/30. All nine game-free setup/checksum/
+provenance assets were downloaded and verified against GitHub digests and source/toolkit identity.
+The source branch was cleaned after merging. Keep the local worktree/app for feedback.
 
 Local worktree: `/Users/vlad/.codex/worktrees/launcher-redesign/DefJamFFNY-recomp`.
 `build/Def Jam Launcher Playtest.app` forces Home and uses the owner's normal data by default.
@@ -67,5 +68,6 @@ restored; units 529 passed/32 skipped/one slow deselected, 62 local docs links v
    (`regress.py --only launcher,overlay,unlockopt,picture`), then the applicable AGENTS checks.
    Run games serially with `DEFJAM_DATA` pointing to the disposable
    `logs/launcher-review/runtime-data`; leave the owner's save alone.
-3. Keep PR #58 and PROGRESS current. Publish only the reviewed game-free setup assets through the
-   tagged release workflow; confirm prerelease status and preserve the stable latest release.
+3. Keep PROGRESS current. The beta is published; collect Deck acceptance before any promotion.
+   For Deck use the beta Linux setup, existing install/data folders, Clean Update + Bundled;
+   Latest excludes prereleases. Publish only reviewed game-free setups through the tagged workflow.
