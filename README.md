@@ -5,7 +5,7 @@
 [![CI](https://github.com/vyanhursky/DefJamFFNY-recomp/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/vyanhursky/DefJamFFNY-recomp/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/vyanhursky/DefJamFFNY-recomp)](https://github.com/vyanhursky/DefJamFFNY-recomp/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Discord](https://img.shields.io/badge/Discord-Join%20the%20community-5865F2?logo=discord&logoColor=white)](https://discord.gg/PxKZSwVZQ)
+[![Discord](https://img.shields.io/badge/Discord-Join%20the%20community-5865F2?logo=discord&logoColor=white)](https://discord.gg/xNvBs23ZBw)
 
 Bring **Def Jam: Fight for NY** to Windows, macOS and Linux, including the Steam Deck.
 This unofficial native port recompiles the original Xbox game for your computer,
@@ -24,7 +24,7 @@ the game on your machine. PS2 and GameCube copies cannot be used.
 **[Get the latest setup](https://github.com/vyanhursky/DefJamFFNY-recomp/releases/latest)** ·
 [Install guide](docs/setup-installer.md) · [Documentation](docs/README.md) ·
 [Report a problem](https://github.com/vyanhursky/DefJamFFNY-recomp/issues/new/choose) ·
-[Join the Discord](https://discord.gg/PxKZSwVZQ)
+[Join the Discord](https://discord.gg/xNvBs23ZBw)
 
 ## Gameplay
 
@@ -153,7 +153,7 @@ Some release-specific fixes and validation limits appear in the notes first.
 ## Community
 
 This project is in very active development, and the
-**[Def Jam: Fight for NY Recomp Discord](https://discord.gg/PxKZSwVZQ)** is where
+**[Def Jam: Fight for NY Recomp Discord](https://discord.gg/xNvBs23ZBw)** is where
 we collaborate and talk it through. Join to:
 
 - follow and discuss development as it happens;
