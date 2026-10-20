@@ -337,7 +337,7 @@ int pc_display(const char *key, int fallback)
 
 #if defined(_WIN32)
 void pgraph_d3d11_set_anisotropy(int max_anisotropy);   /* toolkit nv2a_pgraph_d3d11.h */
-void d3d8_Nv2aSetFlatSqueeze(float squeeze);           /* toolkit d3d8_extvs.c */
+void d3d8_Nv2aSetFlatSqueeze(float squeeze);           /* toolkit nv2a_pb_exec.c */
 #endif
 
 /* The widescreen camera (src/recomp_manual.c sub_0001A4E0) takes the setting once, when the
