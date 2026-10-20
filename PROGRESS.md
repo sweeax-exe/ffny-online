@@ -10,7 +10,7 @@
 
 | Area | State | Notes |
 |---|---|---|
-| Launcher redesign (D138-D140, D142-D143) | ✅ owner refinements verified | PR #58, main `af0c03c` integrated; brighter slider tracks, Windowed 1920×1080 / Auto / 2× defaults, bounded render-scale help and usable 250% compact controls. Native fresh/saved settings and Auto boot pass; final quick 5/5 (units 528/32 skip/one slow deselected), picture/overlay 2/2. Saved preferences preserved; physical pad and Windows/Deck GUI acceptance pending. |
+| Launcher redesign (D138-D140, D142-D144) | ⏳ beta release authorized | PR #58, main `af0c03c` integrated; brighter slider tracks, Windowed 1920×1080 / Auto / 2× defaults, bounded render-scale help and usable 250% compact controls. Native fresh/saved settings and Auto boot pass; final quick 5/5 (units 528/32 skip/one slow deselected), picture/overlay 2/2. Saved preferences preserved; owner confirms physical controller works. v0.10.6 prerelease preparation includes refreshed Home/Advanced docs images; Windows/Deck GUI acceptance pending. |
 | Plan reviewed | ✅ | See `docs/01-plan-review.md` |
 | Source dump located | ✅ | Two images of the owner's disc: XISO (3.0 GB) and full-disc ISO (7.8 GB) |
 | XISO extracted | ✅ | `<data>\extracted\` |
@@ -237,6 +237,8 @@
 | D142 | 2026-10-20 | Owner continues launcher work in this chat after positive Mac appearance feedback: brighten only slider tracks; new/reset display defaults are Windowed, 1920×1080, Widescreen (Auto), render scale 2. Explain scale heights and 1080p/1440p choices in the shared help; keep tooltips inside small windows. | Preserve existing saved values. Auto follows the monitor, not the window; integer scales have internal heights 480/960/1440/1920, so 2× is below 1080p and 3× matches 1440p. Pin the harness canvas explicitly to 4:3 for existing goldens/replays. Integrate main `af0c03c` to retain released fixes; D138-D140 from concurrent branches are labelled without renumbering. |
 | D143 | 2026-10-20 | Keep the minimum-size launcher usable at 250% text: shorten only the compact header, reduce compact vertical chrome and match the footer Play font to the control row. Fit explanation text to the viewport when its requested size cannot fit; retain the selected scale for controls. Add semantic `hover:<id>` to the existing SDL test script. | Extra native QA after 7fac946 CI 28/28 found Advanced had no usable body at 640×480/250% (logs/run-20261020-103627.log.err, missing scripted target, normal quit). Resolved by compact layout rather than replacing the user's saved scale. Named hover reveals scrolled controls without changing their values or relying on coordinates. |
 
+| D144 | 2026-10-20 | Owner accepted physical controller and requested beta deployment for Deck. Prepare v0.10.6 as a GitHub prerelease, keep v0.10.5 latest, merge reviewed PR #58 and publish only workflow-verified game-free setup assets. Replace old launcher screenshots throughout README/docs with real current Home/Advanced exports and show Home on the front page; pin those exact UI-only images. | Owner: "Controller works. Deploy this as a beta release and I can install it on Deck"; then requested all older launcher screenshots be replaced and one shown on the front page README. Numeric tag follows release policy; prerelease/latest flags control the beta channel. Existing saved settings stay. No general capture exception or game binary distribution. |
+
 D138–D140 were allocated independently on main and the launcher branch. Their rows retain both records, labelled by branch, so existing decision references keep their meaning; no identifiers were renumbered.
 
 
@@ -327,7 +329,6 @@ defjam-recomp/
 
 > Recent entries only; older entries remain unchanged in the local `docs/worklog/` archive.
 
-- 2026-10-19 15:25 — v0.10.4 published/latest at 15:21 ET (D139): release PR #63 merged `110d50e`, tag `v0.10.4`, Source release run 39309194188 green 30/30. Nine game-free assets downloaded and verified: each `.sha256` and GitHub digest match; provenance names source `110d50e`, toolkit `32aab4d`, production payloads. Released Mac DMG run with a quarantined payload: setup 0.10.4 unpacked 0/4914 files quarantined and the bundled engine ran (exit 2, no dump given). Issue #59 commented with the release and the workaround for older setups.
 - 2026-10-19 15:30 — Owner confirmed the #59 fix with a quarantined test DMG of PR #60 ("This has fixed the issue") and asked for a hotfix. PR #60 merged `1d4e13d` (CI 28/28); #59 closed by it. v0.10.4 prepared on `chore/release-v0.10.4` (D139): CMake 0.10.4, `docs/releases/v0.10.4.md`, known-issues entry now "fixed in v0.10.4" with the `xattr` workaround for older setups. Since v0.10.3 only `setup/macos/Setup/main.swift`, its tests and docs changed (game sources and toolkit `32aab4d` identical), so no game regression was run.
 - 2026-10-19 16:05 — Issue #65 (owner report): with `skip_intro` on, Press Start and menu transition sound effects are silent (v0.10.1 to v0.10.4). Reproduced on the Mac with `RECOMP_APU_PCM` on the `boot` route (skip boot silent at the Audio.Play events; normal boot has the bursts), while the log shows identical `Audio.Play` calls. Temporary `[AUD]` entry logging in the lifted code (not kept, `src/recomp/gen` restored byte for byte) showed a normal boot calls `sub_0003DE20(0)` then, after the movies, `sub_0003DE20(1)`; skip only does the first. D140: `skip_intro.c` calls `sub_0003DE20(1)`. Fixed skip boot has the same bursts as a normal boot; `fight` route 101 present lines, median 120, no crash, save identical; `regress.py --only skipintro` passes 110 s (`logs/regress-20261019-155827.txt`), fails without the fix (`logs/regress-20261019-160026.txt`); native fixture passes. Another `defjam_recomp` from `~/.codex/worktrees/01c5` was running during these runs and one startup crash coincided with it (not reproduced).
 - 2026-10-19 16:20 — Pushed `fix/skip-intro-menu-audio` and opened PR #66 for issue #65 (D140). Prepared v0.10.5 on `chore/release-v0.10.5` (D141): CMake 0.10.5, `docs/releases/v0.10.5.md`; not merged, tagged or published.
@@ -335,51 +336,34 @@ defjam-recomp/
 - 2026-10-20 12:00 — Issue #72 (v0.10.5 installer build on Windows 11, 5080: "has stopped working" right after build, empty Log lines field). Cannot be diagnosed without the log. Reworded the bug report's Log lines field (`.github/ISSUE_TEMPLATE/bug_report.yml`) to say where `logs/run-*.log.err` is for the installer and source builds, and to fall back to a PowerShell launch plus the Event Viewer "Application Error" entry when no log exists. Not committed or pushed; comment on #72 drafted, not posted.
 - 2026-10-20 10:28 — D142 launcher follow-up: main af0c03c integrated (v0.10.5 fixes preserved, concurrent D138-D140 labelled); slider-only contrast, Windowed 1920×1080 / Auto / 2× first-run/reset defaults, render-height help and viewport-bounded tooltip. Native new/saved settings + Auto boot and 200% narrow help verified; all disposable saves restored. Final quick 5/5 logs/regress-20261020-102601.txt (units 528 pass/32 skip/one slow deselected), picture/overlay 2/2 logs/regress-20261020-102746.txt; Swift wrappers type-check; hygiene 430/0. PR #58 remains for playtest, no merge/tag/release.
 - 2026-10-20 10:57 — D143: extra 640×480/250% QA after 7fac946 CI 28/28 could not reach Render Scale (logs/run-20261020-103627.log.err; triage: normal prelaunch quit, body crowded by chrome). Compact header/padding/footer and viewport-fitted help fixed; semantic hover added for stable native checks. 100/200/250% controls/help/Back pass, all disposable save roots restored. Final quick 5/5 logs/regress-20261020-105429.txt (528 units/32 skip/one slow deselected), picture/overlay 2/2 logs/regress-20261020-105615.txt; hygiene 430/0. PR #58; no merge/tag/release.
+- 2026-10-20 11:45 — D144: owner confirms controller works, authorizes Deck beta and README/docs screenshot replacement. Prepared v0.10.6 prerelease (v0.10.5 stays latest), rebuilt version-only source, captured real native Home/Advanced with disposable data/save guard; replaced launcher.png, added launcher-advanced.png and pinned exact UI-only hashes. Front-page README/player guide/gallery refreshed; final units 529 passed/32 skipped/one slow deselected, 62 local docs links valid, source hygiene 432/0. Initial unit run overlapped the final image/hash replacement (one fingerprint failure); rerun after finalization passed. Release/CI/publication pending.
 
 ## 7. Hand-off
 
-Launcher PR #58 remains the active work in this chat: `codex/launcher-redesign`, worktree
-`/Users/vlad/.codex/worktrees/launcher-redesign/DefJamFFNY-recomp`. Main `af0c03c` is integrated,
-retaining v0.10.5 and the setup quarantine/skip-intro audio hotfixes. D138-D140 retain both concurrent
-branch records with labels; owner follow-up is D142; maximum-scale correction is D143. No PR merge, tag or release was requested.
+Vlad confirmed the Mac physical controller works and authorized beta deployment for Deck (D144).
+Prepare **v0.10.6**, a GitHub prerelease, while **v0.10.5 remains stable/latest**.
+PR #58, branch `codex/launcher-redesign`, worktree
+`/Users/vlad/.codex/worktrees/launcher-redesign/DefJamFFNY-recomp`; source ffb428b was CI 28/28.
+Version/docs/media only follow-up: new Home/Advanced captures replace the old launcher image;
+front-page README and player guide show Home. Exact UI-only hashes pinned; no new game artwork.
 
-Vlad accepted the Mac appearance and requested brighter slider tracks, Windowed 1920×1080 with
-Widescreen (Auto) / render scale 2 defaults, and resolution guidance. All are implemented; existing
-saved preferences stay. Auto uses the monitor shape. Scale 2 is 960p internally, scale 3 is 1440p;
-help is shared by Home/Advanced/overlay and fits 640×480 through 250% text; compact header/footer leave controls reachable.
+Preparation checks: version-only build and UI capture/save restoration pass; units 529 passed/32 skipped/one slow deselected, local docs links 62/62, source hygiene 432/0.
+Next: commit/push, mark PR #58 ready, merge after green CI,
+then tag main v0.10.6. Tagged release workflow builds/verifies three game-free setups + checksums +
+provenance (nine assets). Verify the draft, then publish as prerelease with latest=false.
+Do not publish a built game. Verify asset digests and keep a local receipt under
+`logs/launcher-review/beta-20261020/`. Update this handoff when publication completes.
 
-Local entry remains `build/Def Jam Launcher Playtest.app` (forces Home, normal owner data); it uses
-the current rebuilt candidate. Keep the worktree/app; no built game is published. Read
-`docs/agent/launcher-handoff.md`, `docs/research/launcher-ui-implementation-2026-10-19.md` and
-`docs/launcher-and-overlay.md`. Prior setting/pack/path/Setup invariants still apply.
+Mac acceptance: appearance/controller owner-approved; brighter slider tracks, Windowed 1920×1080 /
+Widescreen Auto / 2× defaults and render-scale help implemented. Saved settings preserved.
+Native 100/200/250% controls/help pass; latest quick 5/5 (`logs/regress-20261020-105429.txt`, units
+528 passed/32 skipped/one slow deselected), picture/overlay 2/2 (`logs/regress-20261020-105615.txt`).
+Original full run remains 16/18 (`logs/regress-20261019-123630.txt`): host-stall audio underrun
+(combat retry 27/27), historical replay target 0x001E3C14 (D108) despite exact records.
+No broad game rerun needed for version/docs/media. All captures/tests use disposable runtime-data.
 
-Final follow-up checks: quick 5/5 (`logs/regress-20261020-105429.txt`), units 528 pass/32 skip/one slow deselected,
-picture/overlay 2/2 (`logs/regress-20261020-105615.txt`), both Swift wrappers type-check, hygiene 430/0.
-Native slider captures, fresh settings creation, saved overrides, Auto startup and final Home/Advanced/
-200% narrow help pass; all isolated save roots restored. Receipts/captures stay in
-`logs/launcher-review/{slider,display}-20261020/`. No owner settings/save changes.
-The extra 250% check initially missed Render Scale because the body had no room
-(logs/run-20261020-103627.log.err, normal quit). Fixed compact chrome/footer and fitted help;
-native 100/200/250% checks pass, with named hover targets and saved scale retained.
-The initial full run remains 16/18 (`logs/regress-20261019-123630.txt`): one audio underrun beside
-a host stall, plus historical stream target 0x001E3C14 (D108) despite exact replay records.
-Combat retry was 27/27. No thresholds/diagnostics/goldens were suppressed or updated.
-
-Next: check the current PR head's CI, then owner feedback on physical-pad navigation/remapping,
-actual HD packs/priority, folder/log actions and real Setup selection/prefill. Native Windows/Deck
-GUI acceptance remains pending. The original Mac appearance feedback does not establish those checks.
-Do not rerun broad game suites unless changes or a reported fault justify them. Current release state:
-
-v0.10.5 is the latest release (D141): https://github.com/vyanhursky/DefJamFFNY-recomp/releases/tag/v0.10.5. Tag on release PR #68
-merge `cb10747` (toolkit `32aab4d`); Source release run 39344036207 green 30/30; nine assets present, the three installers'
-SHA-256 files match GitHub's asset digests. It fixes #65 (PR #66): with *Skip startup movies and legal screen* on, Press
-Start and the menu transition sounds were silent in v0.10.1 to v0.10.4; `skip_intro.c` now runs `sub_0003DE20(1)`, the full
-audio init the game makes after the movies. Verified on the Mac only (audio capture, `boot`/`fight` routes, `--only skipintro`
-with a negative control, native fixture). The owner merged the PRs; no ear test of the fix is recorded, and Windows and Linux
-were not listened to.
-
-Open: Windows play-test of the picture options and the skip-on menu sounds (add to the §5 Windows to-do for the week of
-2026-10-25); subtitles (#44, backlog). Earlier items stay: Deck follow-ups (render scale 1 on sc00/sc11/sc07b/sc06, Game Mode
-60 Hz, `perf record` during sc00, F5 fence-hold wait), F2 scene-load freezes, the Windows to-do in §5. No game is running.
-
-Decisions are read by number or keyword: `decision D<n>`, `decisions --grep TEXT`.
+Deck/Windows GUI acceptance and actual pack/Setup utility acceptance remain. On Deck use beta Linux
+setup, existing install/data folders, Clean Update + Bundled. Latest excludes prereleases. Keep local
+`build/Def Jam Launcher Playtest.app` and worktree for owner. Short code map/invariants are in
+`docs/agent/launcher-handoff.md`; evidence in `docs/research/launcher-ui-implementation-2026-10-19.md`.
+Preserve existing Windows/F2/scene-load/audio backlog in §5 and `docs/known-issues.md`.

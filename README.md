@@ -40,6 +40,15 @@ performance measurement. [Download the longer 60-fps MP4](docs/media/hd-16x9-gam
 
 **[Compare 4:3 and widescreen, original and HD textures, and see the launcher and overlay](docs/media/README.md)**
 
+## Launcher
+
+![New launcher Home screen with quick display settings and Advanced, Mods, logs, folder and Update / Repair buttons](docs/media/launcher.png)
+
+The v0.10.6 beta brings a focused Home screen, with detailed options in
+[Advanced settings](docs/launcher-and-overlay.md). The brickwork and torn-paper
+style uses the game's charcoal, ivory, red and gold palette.
+[Try the beta setup](https://github.com/vyanhursky/DefJamFFNY-recomp/releases/tag/v0.10.6).
+
 ## Features
 
 - **Native across three platforms.** Windows x64 uses Direct3D 11; Apple Silicon

@@ -5,6 +5,8 @@ mouse, keyboard or gamepad on Windows, macOS and Linux, including the Steam Deck
 
 ## Home and Advanced
 
+![Launcher Home with quick settings and utility buttons](media/launcher.png)
+
 The launcher opens before the game loads. Home has a quiet brickwork/paper design, a large **Play**
 button and the common choices: display mode, window size, picture shape, render scale, VSync and local
 HD textures. The live controller summary has **Configure controls**. **Quit** or closing the window
@@ -24,6 +26,8 @@ remains in Interface. Display DPI and the existing text/control size setting sti
 - On macOS the Metal launcher closes before the game window opens. Its red close button/Cmd+Q quits.
 
 ## The settings pages
+
+![Advanced Display settings with brighter slider tracks and contextual help](media/launcher-advanced.png)
 
 | Page | Contents |
 |---|---|

@@ -5,10 +5,12 @@ repository policy and current project state remain in those files.
 
 ## Candidate and entry point
 
-[Draft PR #58](https://github.com/vyanhursky/DefJamFFNY-recomp/pull/58), branch
+[PR #58](https://github.com/vyanhursky/DefJamFFNY-recomp/pull/58), branch
 `codex/launcher-redesign`; initial UI source `205582d`, now integrated with main `af0c03c`.
 Build/test/push are owner-authorized. Vlad is continuing in the original chat; his Mac appearance
-feedback is positive. No PR merge, tag or release was requested.
+feedback is positive, and he confirmed the controller works. He authorized a beta release
+for Deck installation on 2026-10-20 (D144); v0.10.6 is being prepared as a GitHub prerelease,
+with v0.10.5 remaining stable/latest. He also requested new README/docs launcher screenshots.
 
 Local worktree: `/Users/vlad/.codex/worktrees/launcher-redesign/DefJamFFNY-recomp`.
 `build/Def Jam Launcher Playtest.app` forces Home and uses the owner's normal data by default.
@@ -55,12 +57,15 @@ Receipts/captures are local in `logs/launcher-review/`; the report names regress
 are verified at 100/200/250%, including 640×480. Latest quick 5/5 (`logs/regress-20261020-105429.txt`),
 picture/overlay 2/2 (`logs/regress-20261020-105615.txt`); quick units 528 pass/32 skip/one slow deselected.
 The report records the initial 250% failure and its fix (D143).
+Beta version/media preparation: native 0.10.6 rebuild and Home/Advanced captures pass; save root
+restored; units 529 passed/32 skipped/one slow deselected, 62 local docs links valid, hygiene 432/0.
 
-1. Collect Vlad's feedback on Home/Advanced, physical-pad navigation/remapping, text scaling, actual
+1. Mac appearance and physical controller are owner-accepted. Collect Deck feedback, text scaling, actual
    HD packs/priority, folder/log actions and real Setup selection/prefill. Windows/Deck GUI acceptance
    remains pending; CI compilation does not cover it.
 2. After changes, use the focused model/action fixtures and real UI targets
    (`regress.py --only launcher,overlay,unlockopt,picture`), then the applicable AGENTS checks.
    Run games serially with `DEFJAM_DATA` pointing to the disposable
    `logs/launcher-review/runtime-data`; leave the owner's save alone.
-3. Keep PR #58 and PROGRESS current. Do not widen this into renderer/runtime or release work.
+3. Keep PR #58 and PROGRESS current. Publish only the reviewed game-free setup assets through the
+   tagged release workflow; confirm prerelease status and preserve the stable latest release.
