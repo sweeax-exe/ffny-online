@@ -34,6 +34,7 @@
 #include "imgui.h"
 #include "online_screen.h"
 #include "netplay.h"
+#include "account.h"
 #include "online_data.h"
 #include "pc_settings.h"
 #include "recomp_settings.h"
@@ -558,6 +559,8 @@ void connect_if_needed()
     enum NetplayState st = netplay_state();
     if (netplay_in_lobby() && st != NETPLAY_OFF && st != NETPLAY_FAILED) return;
     std::string server = setting_text("server", "play.defjam.online"), name = setting_text("name", "Player");
+    char discord[32];
+    if (account_game_name(discord, sizeof(discord))) name = discord;    // signed in: the Discord name
     netplay_lobby(server.c_str(), name.c_str());
 }
 

@@ -49,6 +49,7 @@ extern "C" {
 #include "pc_ui.h"
 #include "pc_ui_internal.h"
 #include "netplay.h"
+#include "account.h"
 #include "online_screen.h"
 #include "hd_build.h"
 #include "updater.h"
@@ -976,6 +977,46 @@ static void open_folder()
 }
 #endif
 
+// The optional FFNY Online account: sign-in with Discord (src/hooks/account.c).
+static void page_account()
+{
+    enum AccountState state = account_state();
+    char text[256];
+    account_text(text, sizeof(text));
+    float w = ImGui::GetFontSize() * 11;
+    if (state == ACCOUNT_IN) {
+        ImGui::TextColored(k_gold, "Signed in with Discord: %s", text);
+        if (ImGui::Button("Sign out", ImVec2(w * 0.7f, 0))) account_sign_out();
+        ImGui::SameLine();
+        if (ImGui::Button("Delete account...", ImVec2(w, 0))) ImGui::OpenPopup("Delete account");
+        if (ImGui::BeginPopupModal("Delete account", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+            ImGui::TextUnformatted("Delete your FFNY Online account and everything stored with it?");
+            if (ImGui::Button("Delete", ImVec2(w * 0.7f, 0))) { account_delete(); ImGui::CloseCurrentPopup(); }
+            ImGui::SameLine();
+            if (ImGui::Button("Keep it", ImVec2(w * 0.7f, 0))) ImGui::CloseCurrentPopup();
+            ImGui::EndPopup();
+        }
+    } else if (state == ACCOUNT_WAITING) {
+        ImGui::TextColored(k_gold, "Finish signing in with Discord in your browser...");
+        if (ImGui::Button("Cancel", ImVec2(w * 0.7f, 0))) account_cancel();
+    } else if (state == ACCOUNT_CHECKING) {
+        ImGui::TextDisabled("Checking your account...");
+    } else {
+#if defined(_WIN32)
+        if (ImGui::Button("Sign in with Discord", ImVec2(w, 0))) account_sign_in();
+        ImGui::SameLine();
+        ImGui::TextDisabled("Optional: online you appear with your Discord name.");
+#else
+        ImGui::TextDisabled("Signing in with Discord comes to this system with online play.");
+#endif
+        if (text[0]) ImGui::TextColored(state == ACCOUNT_FAILED ? ImVec4(1.0f, 0.45f, 0.4f, 1) : ImVec4(0.6f, 0.6f, 0.64f, 1),
+                                        "%s", text);
+    }
+#if defined(_WIN32)
+    if (ImGui::SmallButton("Privacy")) ShellExecuteA(nullptr, "open", account_privacy_url(), nullptr, nullptr, SW_SHOWNORMAL);
+#endif
+}
+
 // Online: the connection settings. The hub itself (quick match, rooms, the venue vote) is in the
 // game, behind the main menu's ONLINE entry (src/hooks/online_screen.cpp).
 static void page_online(UiMode mode)
@@ -984,8 +1025,15 @@ static void page_online(UiMode mode)
     char status[256];
     netplay_status(status, sizeof(status));
 
+    ImGui::SeparatorText("Account");
+    page_account();
     ImGui::SeparatorText("Connection");
     settings_group("online", { "server", "name" });
+    {
+        char shown[32];
+        if (account_game_name(shown, sizeof(shown)))
+            ImGui::TextDisabled("Online you appear as %s, from your Discord account.", shown);
+    }
     ImGui::Spacing();
     ImGui::PushFont(g_font_bold, ImGui::GetStyle().FontSizeBase * 1.1f);
     ImGui::TextColored(k_gold, "Online play is in the game: choose ONLINE in the main menu.");
