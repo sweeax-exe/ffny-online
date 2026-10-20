@@ -39,10 +39,11 @@ void updater_message(char *t, int size) { if (size > 0) t[0] = 0; }
 #pragma comment(lib, "winhttp.lib")
 #pragma comment(lib, "bcrypt.lib")
 
-/* The update service on the project's server (netplay/relay -updates-listen): its name, then the
- * address of the first server, for as long as installs from before the name still ask there.
+/* The update service on the project's server (netplay/relay -updates-listen): its name, its address
+ * (for a resolver that does not know the name yet), then the first server, for as long as installs
+ * from before the name still ask there.
  * The manifest is signed (below), so the host only needs to be reachable, not trusted. */
-static const wchar_t *const k_update_hosts[] = { L"play.defjam.online", L"142.132.178.17" };
+static const wchar_t *const k_update_hosts[] = { L"play.defjam.online", L"49.12.78.32", L"142.132.178.17" };
 #define UPDATE_PORT 27778
 /* updatesign's public key: X and Y of the P-256 point, big-endian. */
 static const char k_public_key[] =

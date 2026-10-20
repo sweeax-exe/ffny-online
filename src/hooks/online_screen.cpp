@@ -1011,7 +1011,8 @@ bool draw(ImVec2 display)
 
     if (st == NETPLAY_CONNECTING || (!netplay_in_lobby() && st != NETPLAY_FAILED)) {
         page_title(dl, f, "ONLINE");
-        text(dl, f, g_hand, 20, 320, 210, ORANGE, "Connecting...", CENTER, 1.0f);
+        text(dl, f, g_hand, 20, 54, 120, ORANGE, "Connecting...", LEFT, 1.0f);
+        door_text(dl, f, &tex("ui/online_icon.png"), "ONLINE", "CONNECTING", "To the FFNY Online server.");
         hint(dl, f, 54, 392, "b", "BACK");
         return !pad.b;
     }
@@ -1019,8 +1020,10 @@ bool draw(ImVec2 display)
         char status[256];
         netplay_status(status, sizeof(status));
         page_title(dl, f, "ONLINE");
-        text(dl, f, g_hand, 20, 320, 180, RED, "No connection", CENTER, 1.0f);
-        text(dl, f, g_title, 13, 120, 220, WHITE, status, LEFT, 0.8f, 400);
+        text(dl, f, g_hand, 20, 54, 110, RED, "No connection", LEFT, 1.0f);
+        text(dl, f, g_title, 14, 54, 145, WHITE, status, LEFT, 0.8f, 265);
+        door_text(dl, f, &tex("ui/online_icon.png"), "OFFLINE", "NO CONNECTION",
+                  "Check the internet connection, then press A to try again.");
         float hx = 54;
         hx += hint(dl, f, hx, 392, "a", "TRY AGAIN");
         hint(dl, f, hx, 392, "b", "BACK");

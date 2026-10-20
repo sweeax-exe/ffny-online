@@ -77,6 +77,8 @@ void netplay_on_seed(uint32_t e, int w, uint32_t x) { (void)e; (void)w; (void)x;
 #endif
 
 #define DEFAULT_PORT  27777
+#define PROJECT_SERVER_NAME    "play.defjam.online"
+#define PROJECT_SERVER_ADDRESS "49.12.78.32"
 #define PROTO         1
 #define T_HELLO       0x01
 #define T_WELCOME     0x02
@@ -951,7 +953,14 @@ static int resolve(const char *server)
     memset(&hints, 0, sizeof(hints));
     hints.ai_family = AF_INET;
     hints.ai_socktype = SOCK_DGRAM;
-    if (getaddrinfo(host, port, &hints, &res) || !res) return -1;
+    if (getaddrinfo(host, port, &hints, &res) || !res) {
+        /* The project's server by its address when its name does not resolve (a resolver that
+         * still remembers the name as missing, or a DNS outage). */
+        res = NULL;
+        if (_stricmp(host, PROJECT_SERVER_NAME) || getaddrinfo(PROJECT_SERVER_ADDRESS, port, &hints, &res) || !res)
+            return -1;
+        fprintf(stderr, "[NETPLAY] %s did not resolve; using %s\n", host, PROJECT_SERVER_ADDRESS);
+    }
     memcpy(&N.server, res->ai_addr, res->ai_addrlen);
     N.server_len = (int)res->ai_addrlen;
     freeaddrinfo(res);
