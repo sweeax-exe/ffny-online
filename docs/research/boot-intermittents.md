@@ -214,3 +214,23 @@ starved ...`), and so is a quiet thread that turned out to be waiting (`... idle
 - [V] The stale URB of §2 fired in 5 of the 10 paired boots (all `0x0002A167` from `0x0027EC6E`) and in 1 of 15
   alone (`0x80003344`, the Linux value). Before this, 3 of the day's 75 logs. A busy CPU delays the completion, so
   the late write is common under load. It is not caused by the watchdog: it appears in old-build logs (`-182644`, `-191325`).
+
+## 5. A later freeze with the watchdog in place (owner's boot, build 11 code, 2026-10-20)
+
+Log: `logs/run-hung-boot-account-test.log.err`, the owner's own launcher boot. An extra host thread was making a WinHTTP request at start-up; it has since been moved out of start-up.
+
+- [V] The start-up starvation happened and was rescued (line 588: `timer thread starved for 78 ms ...`).
+  Interrupts and deferred routines then ran normally, and the boot drew 234 frames.
+- [V] At frame 234, a game critical section (`0x802493D8`) was contended between two game threads (the `[CS]`
+  lines). The timer thread waited 62 ms on a lock (state 5, wait reason 37 = `WrAlertByThreadId`), and the
+  watchdog correctly left it alone (`idle ... but not starved`).
+- [V] After that the timer thread kept working: the pad was polled 1250 times every 10 s until the window was closed,
+  which only happens when its deferred routines run. So this is not the starvation of §1.
+- [V] What stopped was the GPU executor: `DMA_GET` frozen at `0x02A2CBC0`, with a backlog of 0x13D4
+  (`[GPU] executor not moving ...`).
+- [U] What the executor waited on. It might be a software method, a semaphore or a fence. A live look is needed: run
+  `scripts/thread-sched.py` and then `scripts/native-stacks.py --tid <executor>` on a frozen process. Also check
+  `[PGRAPH] software method held` lines in a log with `RECOMP_PGRAPH_SWM_TRACE=1`.
+- [U] Whether the rescue 4 s earlier contributed. A rescue can let interrupt work run beside title code (§1, the
+  misfire). Unlike the misfire, this rescue was a Ready-starved one, and the boot ran 234 frames past it. A run
+  with `RECOMP_TIMER_WATCHDOG=0` that freezes the same way would settle it.
