@@ -17,6 +17,7 @@ cite other development notes, logs and captures that are not published.
 - [Vertical-blank interrupt hang](m2-vblank-isr.md)
 - [Push-buffer space reservation and ring wrap](d3d-pushbuffer-wrap.md)
 - [Vertex programs on the GPU](m4e-gpu-vertex-programs.md)
+- [Boot intermittents: the boot that never draws, and a stale USB completion](boot-intermittents.md)
 
 ## Front end and movies
 
@@ -28,6 +29,7 @@ cite other development notes, logs and captures that are not published.
 ## Controllers and sound
 
 - [USB enumeration state machine](m4-usb-enumeration.md)
+- [A USB request completed after its stack frame was gone](stale-urb-completion.md)
 - [Controller ports and slots](m4b-controller-ports.md)
 - [DirectSound voice-list crash](dsound-voice-list-crash.md)
 - [Code-segment corruption](codeseg-corruption.md)
