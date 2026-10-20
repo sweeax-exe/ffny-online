@@ -48,7 +48,7 @@ about four minutes on the developer's fast PC; other machines vary.
 Status shows texture counts. Cancel/failure does not enable unfinished packs;
 rerun resumes matching verified work. With the option unchecked, existing HD
 settings survive updates. To return to originals, disable packs on the launcher's
-Textures page and restart. Old recipe caches/pack versions remain in the data
+Mods page and restart. Old recipe caches/pack versions remain in the data
 folder; uninstallation preserves them with the rest of the player's data.
 
 The packaged v0.6.0 installer was run end to end with this option from a real dump,

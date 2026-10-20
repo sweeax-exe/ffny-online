@@ -126,6 +126,8 @@ static void launchInstalled() {
         throw std::runtime_error("No completed installation. Run setup to install or repair it.");
     }
     SetEnvironmentVariableW(L"DEFJAM_DATA", data);
+    SetEnvironmentVariableW(L"DEFJAM_INSTALL_DIR", root.c_str());
+    SetEnvironmentVariableW(L"DEFJAM_LOG_DIR", (fs::path(source) / L"logs").c_str());
     HANDLE process;
     try { process = spawn(exe, {}, source); }
     catch (...) { CloseHandle(lock); throw; }
@@ -442,10 +444,13 @@ static int wizard(HINSTANCE instance, bool smoke = false, bool preparation = fal
     control(L"BUTTON", L"Folder...", WS_TABSTOP, 595, 110, 90, 26, 103);
     control(L"STATIC", L"Install location", 0, 24, 151, 580, 20, 0);
     auto root = localAppData() / L"DefJamRecompiled";
-    installEdit = control(L"EDIT", (root / L"app").c_str(), WS_TABSTOP | ES_AUTOHSCROLL, 24, 174, 560, 26, 104);
+    wchar_t contextInstall[32768]={},contextData[32768]={};
+    GetEnvironmentVariableW(L"DEFJAM_INSTALL_DIR",contextInstall,32768);
+    GetEnvironmentVariableW(L"DEFJAM_DATA",contextData,32768);
+    installEdit = control(L"EDIT", *contextInstall?contextInstall:(root / L"app").c_str(), WS_TABSTOP | ES_AUTOHSCROLL, 24, 174, 560, 26, 104);
     control(L"BUTTON", L"Browse...", WS_TABSTOP, 595, 174, 90, 26, 105);
     control(L"STATIC", L"Data location (dump copy, saves and settings; preserved across updates)", 0, 24, 215, 660, 20, 0);
-    dataEdit = control(L"EDIT", (root / L"data").c_str(), WS_TABSTOP | ES_AUTOHSCROLL, 24, 238, 560, 26, 106);
+    dataEdit = control(L"EDIT", *contextData?contextData:(root / L"data").c_str(), WS_TABSTOP | ES_AUTOHSCROLL, 24, 238, 560, 26, 106);
     control(L"BUTTON", L"Browse...", WS_TABSTOP, 595, 238, 90, 26, 107);
     prerequisites = control(L"BUTTON", L"Install missing Microsoft Build Tools (requires consent and administrator access)",
         WS_TABSTOP | BS_AUTOCHECKBOX, 24, 278, 675, 25, 108);

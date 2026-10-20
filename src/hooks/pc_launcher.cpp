@@ -22,6 +22,7 @@ extern "C" {
 #include "pc_input.h"
 #include "pc_settings.h"
 #include "pc_ui.h"
+#include "pc_ui_actions.h"
 #include "pc_ui_internal.h"
 
 namespace {
@@ -143,7 +144,7 @@ extern "C" int pc_launcher_run(void)
         HDC dc = GetDC(nullptr);
         if (dc) { dpi = GetDeviceCaps(dc, LOGPIXELSX); ReleaseDC(nullptr, dc); }
     }
-    RECT r = { 0, 0, MulDiv(1000, dpi, 96), MulDiv(720, dpi, 96) };
+    RECT r = {0, 0, MulDiv(1100, dpi, 96), MulDiv(720, dpi, 96)};
     AdjustWindowRect(&r, WS_OVERLAPPEDWINDOW, FALSE);
     int w = r.right - r.left, h = r.bottom - r.top;
     RECT work;
@@ -173,6 +174,7 @@ extern "C" int pc_launcher_run(void)
     fprintf(stderr, "[UI] launcher shown\n");
     fflush(stderr);
 
+    bool open_setup = false;
     g_done = false;
     g_result = 1;
     while (!g_done) {
@@ -201,7 +203,12 @@ extern "C" int pc_launcher_run(void)
         ui_unlock();
         g_swap->Present(1, 0);
         if (res.play) { g_done = true; g_result = 1; }
-        if (res.leave) { g_done = true; g_result = 0; }
+        if (res.leave)
+        {
+            g_done = true;
+            g_result = 0;
+            open_setup = res.setup;
+        }
     }
 
     ui_lock();
@@ -214,5 +221,7 @@ extern "C" int pc_launcher_run(void)
     UnregisterClassW(L"DefJamRecompLauncher", GetModuleHandleW(nullptr));
     fprintf(stderr, "[UI] launcher closed: %s\n", g_result ? "play" : "quit");
     fflush(stderr);
+    if (open_setup)
+        pcui::setup_launch();
     return g_result;
 }

@@ -11,7 +11,7 @@ restored is in [the research notes](research/dev-module-revival.md).
 
 ## Opening and leaving it
 
-- **In the game:** open the overlay (**F1**, or the pad's overlay buttons), go to **Debug**, and
+- **In the game:** open the overlay (**F1**, or the pad's overlay buttons), go to **Diagnostics**, and
   under **Story scenes** press **Developer menu**. Close the overlay. The menu replaces what
   was running (tested from the main menu); leaving it later goes to the main menu, not back there.
 - **At start-up:** set `RECOMP_DEV_MODULE=1` and the menu opens as soon as the title screen is up:

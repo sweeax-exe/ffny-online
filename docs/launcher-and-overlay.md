@@ -1,105 +1,131 @@
 # Launcher and overlay
 
-Two ways to change settings without editing `settings.ini`. Both show the same screen, both save as you
-change things, and both are usable with a mouse, the keyboard or a gamepad. They are on Windows and, since
-v0.6.2, macOS and Linux; the screen is the same, and the few differences are marked **macOS** below
-(Linux, the Steam Deck included, behaves as macOS does, with `defjam_recomp --launcher` from a terminal).
+The launcher and in-game overlay edit the same settings and save as you change them. Both work with a
+mouse, keyboard or gamepad on Windows, macOS and Linux, including the Steam Deck.
 
-## The launcher
+## Home and Advanced
 
-A window that appears **every time you start the game**, before the game itself loads. It has the settings
-and two buttons: **Play** starts the game, **Quit** closes it. Changes that are read only at start-up (render
-scale, who plays, how many controllers, the pad backend) take effect for this very launch, because the game
-has not started yet.
+![Launcher Home with quick settings and utility buttons](media/launcher.png)
 
-- **Skip it:** tick *Skip the launcher at start* at the bottom of the launcher, or in the overlay's
-  General page (`[launcher] skip` in `settings.ini`).
-- **Bring it back when skipped:** hold **Shift** while the game starts, or start `defjam_recomp.exe` with
-  `--launcher`. `--no-launcher` skips it for one launch.
-  **macOS:** hold Shift while you open `Def Jam Recompiled.app`, or from Terminal
-  `open "Def Jam Recompiled.app" --args --launcher` (`--no-launcher` the same way). Those two
-  options are the only ones the app hands on to the game.
-- Test and scripted runs (the regression harness, `RECOMP_SETTINGS=none`) never show it, and neither does
-  a run with no display (`RECOMP_HEADLESS=1`).
-- **macOS:** the launcher is a window of its own, drawn through Metal, that goes away before the game's
-  window opens. Closing it (the red button, Cmd+Q) quits without starting the game, as **Quit** does.
+The launcher opens before the game loads. Home has a quiet brickwork/paper design, a large **Play**
+button and the common choices: display mode, window size, picture shape, render scale, VSync and local
+HD textures. The live controller summary has **Configure controls**. **Quit** or closing the window
+exits without starting the game. Startup-only settings apply to this launch when you press Play.
 
-## The overlay
+**Advanced** opens all settings in the same window. **Mods** opens its texture-pack page directly.
+**Back to launcher**, Escape or the pad's B button returns to Home, except while capturing a binding
+or using a popup. **Open Logs**, **Open Folder** and **Update / Repair** are directly available on Home.
+Enlarged text/narrow windows use a compact title and a category selector. The body scrolls; footer
+actions remain available. Short windows with large text use a compact footer; the skip preference
+remains in Interface. Display DPI and the existing text/control size setting still apply.
 
-Press **F1** in the game (or the pad's guide button, or hold both stick clicks for half a second) to open it
-over the picture; the same keys close it, and so do Esc and the pad's B button. While it is open the game is
-polled at rest, as if every pad and the keyboard were untouched, but it **keeps running**: it does not pause.
-Close it before the next hit. **macOS:** on a Mac keyboard F1 is often the brightness key; hold **fn**, or
-choose another key in the General page (the key, a pad button or both stick clicks open it too).
-The pointer shows while the overlay is open, also in full screen.
+- **Skip:** select *Skip launcher next time* in the footer or Interface (`[launcher] skip`).
+- **Bring it back:** hold Shift at startup or pass `--launcher`; `--no-launcher` skips it once.
+  On macOS, hold Shift while opening the app, or use `open "Def Jam Recompiled.app" --args --launcher`.
+- Test runs (`RECOMP_SETTINGS=none`) and headless runs (`RECOMP_HEADLESS=1`) do not show the launcher.
+- On macOS the Metal launcher closes before the game window opens. Its red close button/Cmd+Q quits.
 
-Full screen, window size, picture shape, filter, vsync, brightness and the vignette apply as you change them.
-Render scale and the brightness curve are marked *(restart)* and take effect the next time the game starts; a banner at the bottom
-lists the changes that are waiting for a restart. Keys: `[ui] overlay_key` and `overlay_pad` in
-`settings.ini`, or the General page.
+## The settings pages
 
-## The pages
+![Advanced Display settings with brighter slider tracks and contextual help](media/launcher-advanced.png)
 
-| Page | What it has |
+| Page | Contents |
 |---|---|
-| Display | Full screen, window size, picture shape, scaling filter, vsync, render scale; under **Picture**: brightness, the game's brightness curve, the vignette and its strength |
-| Controllers | Which controller is in which player, with a live view of each pad's sticks and buttons as the game will see them (after dead zones and mapping) and a rumble test; who plays (keyboard player, controller count, backend); dead zones and thresholds; rumble; the pointer |
-| Pad buttons | Which physical button acts as each Xbox control. Choose from a list, or press **Detect** and then the button on your pad |
-| Keyboard & mouse | The keys and mouse inputs for each Xbox control. Press **Add**, then a key, a side or middle mouse button or a wheel notch (Esc cancels); the left and right mouse buttons have buttons of their own while you are adding. **Clear** and **Default** per control |
-| Debug | The play-test recorder (`[debug]` settings) and, in the overlay, what this run has recorded and a **Mark a bug here** button that saves the last seconds as a bug bundle (the same as the mark key, F9). See [Play-test recorder](playtest-recorder.md). **Story scenes** plays any Story scene ([guide](scene-selector.md)) and opens EA's [developer menu](developer-menu.md) |
-| General | Skip the launcher, the overlay's key and pad buttons, text size, Debug options (unlock fighters/venues and skip startup movies/legal, restart), a button that shows `settings.ini` in Explorer (Finder on macOS), reset every setting to default, and the version |
+| Display | Fullscreen, window dimensions, picture shape, filter, VSync, render scale; widescreen HUD/cutscene/side-fill/FOV options; brightness, game brightness curve and vignette |
+| Controls | Players/devices and live stick/button feedback, rumble test, keyboard player, startup controller count/backend, dead zones, thresholds, rumble and pointer behavior; expand Gamepad button mapping or Keyboard and mouse bindings for Detect/Add/Clear/Default |
+| Mods | Local texture packs, enablement and priority; Earlier/Later changes precedence, with later selected packs winning; Refresh packs, Open Mods Folder, Memory and manual pack list |
+| Interface | Launcher skip, startup movies, overlay key/pad chord, text/control size |
+| Diagnostics | Recorder/capture/retention settings, texture authoring, save-affecting unlock tools and, in-game, Story scenes and EA's developer menu |
+| Maintenance | Data/save/mod/install/settings/play-log paths with Open and Copy path; setup selection, reset settings, version and licenses |
 
-### The Debug options
+New settings default to **Windowed, 1920×1080, Widescreen (Auto), 2× render scale**, with VSync on. Existing saved choices are preserved. Auto follows the monitor's shape, so a 16:10 monitor can show bars inside a 16:9 window. The Render scale tooltip explains internal heights: 2× is 960p, 3× is 1440p; window size is separate.
 
-The General page has a **Debug** section with "Debug - Unlock all Fighters and
-Venues (Requires Restart)" (`[debug] unlock_all` in `settings.ini`, off by default). With it on, the game
-runs its developers' own unlock routine whenever a screen changes, so every profile, a new one included,
-has all 74 fighters and every venue, and 10,000 reward points. It is meant for testing: it changes the
-profile in memory and asks the game to save it, so leave it off for a save you care about. The choice is
-read when the game starts; the banner at the bottom lists it as waiting for a restart. The environment
-variable `RECOMP_UNLOCK_ALL` (`1` or `0`) overrides it for one run and greys the checkbox out. See
-[unlocking everything](research/unlock-everything.md).
+Home, Advanced and the overlay share the same controls and `settings.ini`. Environment overrides show
+the effective value, name the variable and disable editing for that run. On a wide window an explanation
+pane follows the focused or hovered setting. Existing INI names and saved values are retained.
 
-**Skip startup movies and legal screen** (`[debug] skip_intro`, off by default) starts the
-game at **Press Start** after the initial resource load. It skips only the startup presentation;
-Story cutscenes and the title's idle attract movie still play. Set it before Play to use it
-immediately; an overlay change applies on the next launch. `RECOMP_SKIP_INTRO=1` or `0`
-overrides the file and locks the checkbox for that run. The title retains its own short opening
-animation before accepting Start.
+### Texture packs
 
-## Using a gamepad in the menus
+Mods lists selected packs first, including missing selections, then other local folders. Inventory checks
+the `manifest.ini` header; the texture loader validates image entries. Unchecking removes a pack from
+the active list and keeps its files. Later enabled packs take priority. Changes and memory budgets apply
+at the next launch. Lists exceeding the existing 95-byte string payload limit are rejected with a message.
+Texture capture is in Diagnostics. Home's HD switch is unavailable until at least one selected local pack
+has a supported manifest, but an already enabled switch can always be turned off.
 
-The d-pad or left stick moves, **A** (the bottom face button) activates, **B** goes back or closes, the shoulder
-buttons switch pages, and the triggers change a slider faster. This works with any pad the game reads, with
-the first pad to press a button, and independently of the game's own button mapping.
+### Folders, logs and setup
 
-## Where it comes from
+Open Folder offers Data, Saves, Mods, Installation and Settings file. Open Logs uses the installed
+wrapper's play-log location; a developer checkout uses `logs`. Maintenance shows the resolved paths and
+has Copy path, useful in Steam Gaming Mode when a file manager cannot open.
 
-The screen is [Dear ImGui](https://github.com/ocornut/imgui) (MIT; release 1.92.9b, fetched at build time at
-a pinned hash, licence in `thirdparty/imgui-LICENSE.txt`). The overlay is drawn in the presentation step after
-the game's picture has been scaled into the window, so it is in window pixels and never in a test capture.
-Source: `src/hooks/pc_ui.cpp` (the screen and the overlay), `src/hooks/pc_launcher.cpp` (the Windows launcher
-window), `src/hooks/pc_launcher_sdl.cpp` (the macOS one), `src/hooks/pc_ui_settings.c` (the settings and the rule
-for when the launcher shows).
+Update / Repair opens a dialog. Choose a locally available **Def Jam Setup** application, or use
+**Download Setup** to visit the stable release page. On macOS select `Def Jam Setup.app`, on Windows the
+setup `.exe`, on Linux the extracted `DefJamSetup.sh`; first open/extract a dmg/archive. Its location is
+remembered in `launcher-setup-path.txt` in the data folder. `DEFJAM_SETUP_PATH` supplies it for one run.
+This is only a tool path; gameplay settings remain in `settings.ini`.
 
-| | Windows | macOS (and the Linux build) |
+**Open Setup** destroys the launcher window, opens the setup wizard and exits the
+game process. Setup does not inherit the play lock. No installation starts automatically: choose the
+release and operation in the wizard. New installed wrappers supply installation/data/log context, so
+setup is prefilled. In the overlay, Maintenance directs you to close the game and return to the launcher
+before updating. A missing or moved setup can be selected again.
+
+### Developer options
+
+Diagnostics contains **Unlock all fighters and venues** (`[debug] unlock_all`, off by default).
+It runs the developers' unlock routine on screen changes, giving every profile all 74 fighters, every
+venue and 10,000 reward points. It changes the profile in memory and asks the game to save it: keep it
+off for a save you care about. It applies on Play/next launch. `RECOMP_UNLOCK_ALL` overrides it for a run.
+See [unlocking everything](research/unlock-everything.md).
+
+Interface contains **Skip startup movies and legal screen**, preserving `[debug] skip_intro` and its
+default off. It starts at Press Start after resource loading; Story scenes and idle attract playback
+remain. `RECOMP_SKIP_INTRO` overrides it for a run. See [startup skipping](research/startup-skip-setting.md).
+
+## In-game overlay
+
+Press **F1**, the pad's guide button, or hold both stick clicks for half a second. The same inputs close
+it; Esc/B also closes it when no popup or binding capture is open. The game sees no pad/keyboard input
+while the overlay is open, but **keeps running**; it does not pause. On a Mac keyboard use fn+F1 if F1 is
+the brightness key, or change the shortcut in Interface. The pointer shows while the overlay is open.
+
+Fullscreen, window size, 4:3/stretch, filter, VSync, brightness and vignette apply live. Widescreen,
+render scale, brightness curve and other startup settings apply at the next launch; the footer lists
+pending changes. Settings in the launcher say **on Play** instead. Widescreen transitions into or out of
+a wide canvas are tracked separately from the two live picture shapes.
+
+## Keyboard and gamepad
+
+D-pad/left stick moves, A activates, B goes back/closes, shoulders switch Advanced categories, triggers
+adjust sliders faster. Navigation uses the first pad to press a button, independently of the game's own
+mapping. Esc cancels binding capture. Returning Home restores focus to its originating utility action.
+
+## Implementation and test hooks
+
+Dear ImGui 1.92.9b is fetched at its pinned hash (MIT, `thirdparty/imgui-LICENSE.txt`). Shared pages,
+settings controls and overlay are in `src/hooks/pc_ui.cpp`; Home is `pc_launcher_home.cpp`, palette/fonts
+and procedural geometry are `pc_ui_theme.cpp`, paths/setup handoff are `pc_ui_actions.cpp`, and the
+renderer-independent inventory/timing helpers are `pc_ui_model.h`. No new artwork or font binary is used.
+
+| | Windows | macOS/Linux |
 |---|---|---|
-| Launcher window | Win32 window, Direct3D 11 | SDL3 window and renderer (Metal), on the process's first thread |
-| Overlay | Direct3D 11, in the present step | Vulkan (MoltenVK): a render pass the toolkit's Vulkan present step opens on the window's image (`d3d8_vk_set_overlay`) |
-| Keyboard and mouse | the window's messages | SDL events, fed in by `src/host_posix.c` |
+| Launcher | Win32/D3D11 (`pc_launcher.cpp`) | SDL3 renderer, Metal on macOS (`pc_launcher_sdl.cpp`), first-thread event loop |
+| Overlay | D3D11 presentation hook | Vulkan/MoltenVK presentation hook |
+| Input | Window messages | SDL events from `src/host_posix.c` |
 
-## Looking at it without a screen
+Off-by-default test hooks:
 
-Test hooks, all off unless set. They exist because the picture cannot be looked at on a machine with
-nobody at it (a locked screen, a remote run):
-
-| Variable | What it does |
+| Variable | Behavior |
 |---|---|
-| `RECOMP_WINDOW_SHOT=<file.bmp>` | Writes what the launcher (first frame) or the game window (the overlay, after `RECOMP_WINDOW_SHOT_FRAME` overlay frames, 20 by default) shows, as a 32-bit BMP. macOS and Linux |
-| `RECOMP_LAUNCHER_SCRIPT` | The launcher's input: `<ms>:click:<x>:<y>`, `<ms>:move:<x>:<y>`, `<ms>:shot:<file>`, `<ms>:play`, `<ms>:quit`, separated by `;`, times from the window's first frame and positions in window points |
-| `RECOMP_HOST_SCRIPT` | The game window's input: `<ms>:key:<SDL key name>` (`F1`, `Escape`), `<ms>:click:<x>:<y>`, `<ms>:move:<x>:<y>`, `<ms>:text:<chars>`, times from the window's opening |
-| `RECOMP_INPUT_VIRTUAL_PADS`, `RECOMP_INPUT_VIRTUAL_CHORD_MS` | An SDL virtual gamepad, which also opens and closes the overlay with its stick clicks and B ([input guide](10-input.md)) |
+| `RECOMP_WINDOW_SHOT=<file.bmp>` | Read back the launcher or overlay window to a 32-bit BMP; macOS/Linux |
+| `RECOMP_WINDOW_SHOT_FRAME` | Overlay frame to capture, default 20 |
+| `RECOMP_LAUNCHER_SCRIPT` | `<ms>:click:<x>:<y>`, `move`, `resize:<width>:<height>`, `shot:<file>`, `ui:<target>`, `play`, `quit`, separated by semicolons; positions in window points |
+| `RECOMP_HOST_SCRIPT` | Game window: `<ms>:key:<SDL name>`, `click`, `move`, `text`; times from opening |
+| `RECOMP_INPUT_VIRTUAL_PADS`, `RECOMP_INPUT_VIRTUAL_CHORD_MS` | SDL virtual pad tests, including overlay stick-click/B paths ([input guide](10-input.md)) |
 
-For example, `RECOMP_HOST_SCRIPT="14000:key:F1;15000:click:659:126" RECOMP_WINDOW_SHOT=/tmp/overlay.bmp
-RECOMP_WINDOW_SHOT_FRAME=90` opens the overlay fourteen seconds in, clicks its General tab and writes the
-picture; add `--no-launcher` or turn the launcher off first.
+Named UI targets include Advanced, Mods, Configure, Back, all six categories, Play, Quit, SetupOpen and
+setting keys such as `display.brightness` or `debug.unlock_all`, plus `pack.<folder>` and
+`pack.earlier.<folder>` / `pack.later.<folder>`. Targets scroll into view, then receive
+real SDL press/release events. A missing target is reported; tests do not change a setting directly.
+Captures remain local and are never committed.

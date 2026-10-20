@@ -21,6 +21,9 @@ cite other development notes, logs and captures that are not published.
 
 ## Front end and movies
 
+- [Launcher UI proposal, 2026-10-19](launcher-ui-proposal-2026-10-19.md): Home/Advanced organization and source review
+- [Launcher implementation and playtest, 2026-10-19](launcher-ui-implementation-2026-10-19.md): native UI, setup handoff and acceptance evidence
+
 - [The loader's own script](m3-feloader-script.md)
 - [How a loaded movie becomes the displayed one](m3-movie-display.md)
 - [Screen transitions](m4a-fe-transitions.md)

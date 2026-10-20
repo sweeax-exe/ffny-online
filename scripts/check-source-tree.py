@@ -29,7 +29,9 @@ APPROVED_README_MEDIA = {
     'docs/media/gameplay-preview-compact.gif': '88b8c8747d6b3936203191aca261ed0ca85108e2ae4bb914f0b0773495f641ec',
     'docs/media/textures-comparison.png': 'bfb4bfdd75b28268cf2cea5638f1fe6962e9ac2e30f2b275dc800c13a8fd9e8a',
     'docs/media/widescreen-comparison.png': 'dd8b23a051e8ef98516ea6aa349ef450f441e58669efc67a56fb2273dfbeaf67',
-    'docs/media/launcher.png': '0c9704f81d05abc61a1ed8255683036541ee7f9dff11f0e6fad37c050fcba7c0',
+    # D144 (2026-10-20): owner requested current Home/Advanced screenshots in README and docs.
+    'docs/media/launcher.png': '61be58a7a76224e0ac5f8d42689c715294d323b2f1ed559491f019a93a2ef693',
+    'docs/media/launcher-advanced.png': '2b314e1d96c797a56e475b2d18cae0d502e5a6c944b07af2c8307bbd0dc3060a',
     'docs/media/overlay.png': 'a137a13fa65cbbfc765897aa9d51d3ef84523e5cabd0fe934f6e477f446ca09b',
     'docs/media/hd-16x9-gameplay.mp4': '385b041f57b7ddd61feb99e0ce726f6e4a5856f1e9936c416aca81949ee428f0',
     'docs/media/textures-comparison.mp4': '0659c294460c00fafd69552a2f4fb0c70d161b5d6206e78c902cdd4ca3a03383',

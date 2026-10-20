@@ -2,7 +2,8 @@
 
 [Back to the project](../../README.md) · [Capture guide and remaining shots](capture-plan.md)
 
-These are real captures of the native Mac port, recorded on October 13, 2026
+These are real captures of the native Mac port. The launcher Home and Advanced
+screens were captured on October 20, 2026; gameplay and the historical overlay were recorded on October 13, 2026
 on an Apple M1 Pro running macOS 26.5.2, using Vulkan/MoltenVK. Gameplay uses
 render scale 2, the game brightness curve and locally generated faithful HD
 packs where labelled. Widescreen beta shipped in
@@ -46,23 +47,30 @@ Both recordings follow the same seeded inputs but are not frame synchronized.
 
 ## Launcher and F1 overlay
 
-![Mac launcher Display page with widescreen auto and render scale 2 selected](launcher.png)
+![New launcher Home with Widescreen Auto, 1920×1080 and render scale 2 selected](launcher.png)
 
-The v0.9.0 Mac launcher exposes picture shape, HUD placement, cutscene framing
-and rendering options before Play. The selected blur option only supplies
-blurred sides on Windows in v0.9.0; macOS and Linux use black sides.
+The v0.10.6 beta Home screen keeps the common display choices beside Play, with
+Advanced, Mods, Open Logs, Open Folder and Update / Repair directly below.
+The screenshot uses fresh defaults; upgrading preserves your saved choices.
+
+![Advanced Display settings with visible slider tracks](launcher-advanced.png)
+
+Advanced groups the shared settings into Display, Controls, Mods, Interface,
+Diagnostics and Maintenance. Focus or hover an option for its explanation.
+These are real native macOS UI captures, not Steam Deck or Windows captures.
 
 ![F1 Display settings overlay over a live Mac fight](overlay.png)
 
-The F1 overlay opens over live gameplay and does not pause it. Widescreen and
-other settings marked restart take effect on the next launch.
+Historical v0.9.0 F1 overlay capture, retained as a gameplay-overlay example. The
+current overlay shares the new Advanced categories and theme shown above. It
+does not pause gameplay; options marked **on Play** apply on the next launch.
 
 ## Setup example
 
 ![Windows setup wizard with neutral example folders](setup-wizard.png)
 
 Historical v0.6.0 Windows setup screenshot, approved October 9, 2026. It
-illustrates the installation workflow, not the current v0.9.0 wizard or its
+illustrates the installation workflow, not the current wizard or its
 new update controls. A fresh setup capture is still needed; see the
 [setup guide](../setup-installer.md) for current behavior.
 
@@ -77,13 +85,21 @@ simulation streams, native masters and diagnostic contact sheets stay local.
 
 Gameplay stills, GIF and videos: PR #12 source `a7dc1b7`, CI merge `d319a802`,
 toolkit `872fbc3`. These precede the final Mac correction and are candidate
-captures, not recordings of the tagged installer. Launcher and overlay:
+captures, not recordings of the tagged installer. Historical overlay:
 corrected source runtime inputs certified to match v0.9.0 commit
 `c4bcda69b3dc839a3705bfb443fc774d7828f33a` (compiled before the commit).
-The launcher/overlay executable SHA-256 is
+The historical overlay executable SHA-256 is
 `f4aaee1f7cd07ae411c07e67d121a03bb87b73cc615950d2319ba1f514570adf`;
 Mac helper SHA-256 is
 `2a44eced81b0f8d933969082dc42aaea245ca3777835af981755978a445ba22c`.
+
+Current Home/Advanced exports: source `ffb428b` with only the CMake version changed
+to 0.10.6 before capture; toolkit `32aab4d`. Executable SHA-256:
+`ef478860ad10ddacb3586fab744e6471b688c56b3a1afdf4c33a7541645a0f75`.
+Captured through SDL/Metal at 2400×1600 pixels and downsampled to 1440×960;
+no visual mockup or game artwork was added. The owner requested this replacement
+on October 20 (D144). Disposable data and the complete-save-root guard were used;
+restoration passed. Local receipt: `logs/launcher-review/beta-20261020/receipt.json`.
 
 The local master set is `logs/widescreen-macos/media/` in the capture checkout,
 with identities in `exports.json`. Seed `20261006`; the five texture/aspect
@@ -103,7 +119,8 @@ and `ac3583188a87e46dc7f183969f2b51dd0300cf3d6bd05ca3ecf40513c61f4d2f`.
 | `gameplay-preview-compact.gif` | 480×270, 3 s / 20 fps | 3.45 MB | `88b8c8747d6b3936203191aca261ed0ca85108e2ae4bb914f0b0773495f641ec` |
 | `textures-comparison.png` | 1932×764 | 1.59 MB | `bfb4bfdd75b28268cf2cea5638f1fe6962e9ac2e30f2b275dc800c13a8fd9e8a` |
 | `widescreen-comparison.png` | 1932×584 | 1.08 MB | `dd8b23a051e8ef98516ea6aa349ef450f441e58669efc67a56fb2273dfbeaf67` |
-| `launcher.png` | 1200×864 | 0.26 MB | `0c9704f81d05abc61a1ed8255683036541ee7f9dff11f0e6fad37c050fcba7c0` |
+| `launcher.png` | 1440×960 | 0.18 MB | `61be58a7a76224e0ac5f8d42689c715294d323b2f1ed559491f019a93a2ef693` |
+| `launcher-advanced.png` | 1440×960 | 0.24 MB | `2b314e1d96c797a56e475b2d18cae0d502e5a6c944b07af2c8307bbd0dc3060a` |
 | `overlay.png` | 1800×1130 | 0.59 MB | `a137a13fa65cbbfc765897aa9d51d3ef84523e5cabd0fe934f6e477f446ca09b` |
 | `hd-16x9-gameplay.mp4` | 1280×720, silent 60-fps CFR | 5.57 MB | `385b041f57b7ddd61feb99e0ce726f6e4a5856f1e9936c416aca81949ee428f0` |
 | `textures-comparison.mp4` | 1280×520, silent 60-fps CFR | 3.88 MB | `0659c294460c00fafd69552a2f4fb0c70d161b5d6206e78c902cdd4ca3a03383` |

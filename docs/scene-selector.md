@@ -22,7 +22,7 @@ lists the scenes in your dump: 38 in the USA Xbox version (`sc00`-`sc06`, `sc07a
 
 ## In the game: the overlay
 
-Open the overlay (**F1**, or the pad's overlay buttons), go to **Debug**, and under
+Open the overlay (**F1**, or the pad's overlay buttons), go to **Diagnostics**, and under
 **Story scenes** pick a scene and press **Play scene**. Close the overlay to watch.
 
 - The scene starts within a second if the game is past its title screen; earlier, the

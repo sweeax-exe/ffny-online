@@ -53,6 +53,7 @@ func makeAlias(target: String, alias: String) -> Int32 {
 func openSessionLog() {
     let logs = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Logs/DefJamRecompiled")
     try? FileManager.default.createDirectory(at: logs, withIntermediateDirectories: true)
+    setenv("DEFJAM_LOG_DIR", logs.path, 1)
     let stamp = DateFormatter()
     stamp.dateFormat = "yyyyMMdd-HHmmss"
     stamp.locale = Locale(identifier: "en_US_POSIX")
@@ -97,6 +98,7 @@ guard let bytes = try? Data(contentsOf: root.appendingPathComponent("installed.j
 }
 
 setenv("DEFJAM_DATA", receipt.data, 1)
+setenv("DEFJAM_INSTALL_DIR", root.path, 1)
 guard chdir(receipt.source) == 0 else { fail("The installed game folder is missing. Run Def Jam Setup to repair it.") }
 openSessionLog()
 let program = strdup(receipt.executable)

@@ -23,7 +23,7 @@
 | [Gameplay test harness](09-testing-harness.md) | Scripted gameplay checks, what each proves, reports and fixtures |
 | [Play-test recorder](playtest-recorder.md) | Recording ordinary play (frame times, events, sound, the last seconds of pictures), F9 (or View + left stick click) bug bundles and reading them with `bug-bundle.py` |
 | [The developer menu](developer-menu.md) | EA's debug menu, restored: any match (fighters, venue, match type), any Story scene, the venue viewer; its controls and each option |
-| [Playing a chosen Story scene](scene-selector.md) | Any in-engine Story cutscene by name through the game's revived developer module: the overlay's Debug tab, `scenarios.py scene`, or `RECOMP_SCENE`; no save or menus |
+| [Playing a chosen Story scene](scene-selector.md) | Any in-engine Story cutscene by name through the game's revived developer module: the overlay's Diagnostics tab, `scenarios.py scene`, or `RECOMP_SCENE`; no save or menus |
 | [Test plan](02-test-plan.md) | Milestone gates and regression discipline |
 | [Agent playbooks](agent/README.md) | Reading a failed run (`triage.py`), diagnostics, the harness, sub-agent briefs; what `AGENTS.md` points to |
 | [Texture processing and review](hd-texture-workflow.md) | Reproducing the HD texture census, upscale and review galleries |
