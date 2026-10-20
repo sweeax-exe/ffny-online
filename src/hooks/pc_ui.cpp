@@ -1490,13 +1490,44 @@ bool pad_toggle_pressed()
     return fire;
 }
 
+// After the overlay closes the game gets its controls back only once every button and key is
+// released: the A or B that closed it would otherwise reach the menu underneath (and A on ONLINE
+// would open the online screens again at once).
+bool g_hold_input = false;
+
+bool controls_released()
+{
+    for (int slot = 0; slot < 4; slot++) {
+        InputRaw raw;
+        if (!xbox_HostInputRawPad(slot, &raw)) continue;
+        for (int s = 0; s < INPUT_SRC_COUNT; s++)
+            if (raw.src[s] >= 12000) return false;
+    }
+#if defined(_WIN32)
+    static const int keys[] = { VK_RETURN, VK_ESCAPE, VK_SPACE, VK_BACK, VK_UP, VK_DOWN, VK_LEFT, VK_RIGHT,
+                                'K', 'L', 'J', 'I', 'W', 'A', 'S', 'D', VK_LBUTTON };
+    for (int k : keys)
+        if (GetAsyncKeyState(k) & 0x8000) return false;
+#endif
+    return true;
+}
+
+void release_input_when_idle()
+{
+    if (g_hold_input && !g_open.load() && controls_released()) {
+        g_hold_input = false;
+        xbox_HostInputSetUiActive(0);
+    }
+}
+
 void set_open(bool open)
 {
     if (g_open.load() == open) return;
     g_open = open;
     g_just_opened = open;
     if (!open) g_online = false;
-    xbox_HostInputSetUiActive(open ? 1 : 0);
+    if (open) { g_hold_input = false; xbox_HostInputSetUiActive(1); }
+    else g_hold_input = true;           // released in release_input_when_idle
 #if !defined(_WIN32)
     host_posix_overlay_changed(open ? 1 : 0);       // the pointer shows, and typing is delivered
 #endif
@@ -1557,6 +1588,7 @@ extern "C" void pc_ui_overlay(void *device, void *context, void *window_rtv, uns
     bool toggled = g_toggle.exchange(false);
     if (!ui_capturing() && !g_chords.empty() && pad_toggle_pressed()) toggled = true;
     if (toggled) set_open(!g_open.load());
+    release_input_when_idle();
     if (online_screen::take_open_request()) {      // ONLINE chosen in the game's main menu
         set_open(true);
         g_online = true;
@@ -1754,6 +1786,7 @@ int overlay_active(void *)
     bool toggled = g_toggle.exchange(false);
     if (!ui_capturing() && !g_chords.empty() && pad_toggle_pressed()) toggled = true;
     if (toggled) set_open(!g_open.load());
+    release_input_when_idle();
     bool open = g_open.load();
     ui_unlock();
     return open ? 1 : 0;

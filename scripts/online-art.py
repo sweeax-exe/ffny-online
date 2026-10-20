@@ -10,7 +10,7 @@ the repository contains game bytes: only archive entry names and image names.
 
     python scripts/online-art.py [--data <DEFJAM_DATA>] [--check]
 
-Layout of the output: fighters/<id>.png (the choose-character portrait, 128x192; `id` is the
+Layout of the output: fighters/<id>.png (the choose-character portrait without its padding; `id` is the
 fighter.xml ID), venues/<feID>.png (venue.xml feID: its photo with
 its sign, 256x256) and venues/<feID>_name.png (the gold name banner), ui/<name>.png, fonts/<file>.ttf,
 and manifest.json. Needs Pillow (the installed Python has it for the HD textures).
@@ -25,7 +25,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import hd_assets  # noqa: E402
 
-VERSION = 3
+VERSION = 4
 
 # (output name, screens.viv entry, SHPX image name). See docs/research/frontend-menu-integration.md §6.
 UI_IMAGES = [
@@ -70,6 +70,28 @@ def images(entry_blob):
     return out
 
 
+def trim_padding(image, threshold=3.0):
+    """Cut the texture padding off the right and bottom: rows and columns the encoder filled by
+    repeating the last real one (they differ from their neighbour by almost nothing)."""
+    from PIL import ImageChops, ImageStat
+    w, h = image.size
+    rgb = image.convert("RGB")
+
+    def column(x):
+        return rgb.crop((x, 0, x + 1, h))
+
+    def row(y):
+        return rgb.crop((0, y, w, y + 1))
+
+    right = w
+    while right > w // 2 and sum(ImageStat.Stat(ImageChops.difference(column(right - 1), column(right - 2))).mean) < threshold:
+        right -= 1
+    bottom = h
+    while bottom > h // 2 and sum(ImageStat.Stat(ImageChops.difference(row(bottom - 1), row(bottom - 2))).mean) < threshold:
+        bottom -= 1
+    return image.crop((0, 0, right, bottom))
+
+
 def maybe_refpack(blob):
     return hd_assets.unpack_refpack(blob) if blob[:2] in (b"\x10\xfb", b"\x11\xfb", b"\x90\xfb", b"\x91\xfb") else blob
 
@@ -91,9 +113,8 @@ def build(data, out):
         if m:      # p_CT_<n> is fighter.xml ID n-1 (the battle roster's FE_ID + 1)
             fid = int(m.group(1)) - 1
             imgs = images(blob_entry)
-            if imgs:   # the lower quarter of the 128x256 texture is padding
-                image = next(iter(imgs.values()))
-                image.crop((0, 0, image.size[0], image.size[1] * 3 // 4)).save(tmp / "fighters" / ("%d.png" % fid))
+            if imgs:   # the 128x256 texture holds the portrait and padding to its right and below
+                trim_padding(next(iter(imgs.values()))).save(tmp / "fighters" / ("%d.png" % fid))
                 manifest["fighters"].append(fid)
             continue
         m = re.fullmatch(r"screens/portrait/(vp|mVen)(\d+)\.big", name)

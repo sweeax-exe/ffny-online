@@ -1136,8 +1136,20 @@ void netplay_lobby_leave(void)
     memset(&N.roomv, 0, sizeof(N.roomv));
     N.roomv.version = (unsigned)GetTickCount64();
     N.room[0] = 0;
+    N.pend_len = 0;                 /* whatever was waiting belonged to the room */
     LeaveCriticalSection(&g_cs);
-    request(T_LEAVE, NULL, 0);
+    /* The relay never answers LEAVE (docs/netplay-protocol.md), so it is sent twice and not
+     * waited for; if both are lost the server still has this client in the room and says so
+     * with its next ROOM, which brings the room back here. */
+    if (N.lobby && N.have_token) {
+        uint8_t b[6 + 8];
+        int n = header(b, T_LEAVE);
+        memcpy(b + n, N.token, 8);
+        n += 8;
+        send_raw(b, n);
+        send_raw(b, n);
+    }
+    netplay_lobby_list(0xFF);
 }
 
 void netplay_lobby_room(NetRoom *out)
