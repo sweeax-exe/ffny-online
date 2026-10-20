@@ -568,11 +568,30 @@ static void funccall_hook(void)
         text[i] = c;
     }
     text[i] = 0;
-    if (printed++ < 4000)
+    /* Online.Tick() comes every frame from the patched main menu (scripts/apt-patch.py). */
+    if (strcmp(text, "Online.Tick()") && printed++ < 4000)
         fprintf(stderr, "[FUNCCALL] %s\n", text);
     xbox_NoteAnchorEvent(text);
     sub_00068BA0();
     automatch_on_funccall(text);    /* a requested match starts here (src/hooks/automatch.c) */
+}
+
+/* The fight's "first time help" cards (BLAZIN', weapon, KO): the message-bus handler
+ * sub_000D6670(msg, data) takes the request that later pauses the fight and shows a card
+ * (docs/research/fight-tips.md). Whether a card comes depends on the player's save, so in an
+ * online match one PC would pause and the other not, and the lockstep would stop: while
+ * netplay is active the request is dropped (cdecl: only the return address is popped). */
+extern void sub_000D6670(void);
+
+static void first_time_help_hook(void)
+{
+    if (netplay_active()) {
+        static int told;
+        if (!told++) { fprintf(stderr, "[NETPLAY] a first-time help card was skipped (online match)\n"); fflush(stderr); }
+        g_esp += 4;
+        return;
+    }
+    sub_000D6670();
 }
 
 /* One front-end command, as the Flash side would send it, on the game thread (the FuncCall
@@ -731,6 +750,8 @@ recomp_func_t recomp_lookup_manual(uint32_t xbox_va)
         return trace_sleep_caller;
     if (xbox_va == 0x00068BA0u)
         return funccall_hook;
+    if (xbox_va == 0x000D6670u)
+        return first_time_help_hook;
 
     if (s_trace_count < 0)
         trace_parse();

@@ -17,6 +17,7 @@
 #include "recomp/gen/recomp_types.h"
 #include "automatch.h"
 #include "netplay.h"
+#include "online_screen.h"
 
 extern void xbox_NoteAnchorEvent(const char *text);
 
@@ -26,7 +27,12 @@ extern void xbox_NoteAnchorEvent(const char *text);
 
 static AutoMatch g_req;
 static volatile LONG g_armed;
-static int g_on_menu, g_quiet, g_running, g_env_read, g_results = -1;
+static int g_on_menu, g_quiet, g_ticks, g_running, g_env_read, g_results = -1;
+
+/* The patched main menu sends Online.Tick() every frame (scripts/apt-patch.py): this many
+ * ticks with no MemCard call in between count as settled too, so a match agreed while the
+ * menu sits idle still starts. */
+#define SETTLE_TICKS 45
 
 void automatch_request(const AutoMatch *m)
 {
@@ -174,26 +180,28 @@ void automatch_on_funccall(const char *text)
 {
     unsigned int keep = g_eax;
     if (!g_env_read) read_env();
+    online_menu_on_funccall(text);
     print_result(text);
     if (g_running) return;
     /* the main menu, or the battle match-type screen the summary of a match returns to */
     if (strstr(text, "intMain/mainMenu.swf") || strstr(text, "GetScreenInfo(battle/cmtype")) {
         g_on_menu = 1;
-        g_quiet = 0;
+        g_quiet = g_ticks = 0;
         if (!g_armed) netplay_on_main_menu();       /* an online match has ended */
     }
     else if (strstr(text, "GetScreenInfo(")) g_on_menu = 0;
-    if (!strncmp(text, "MemCard.", 8)) g_quiet = 0;
+    if (!strncmp(text, "MemCard.", 8)) g_quiet = g_ticks = 0;
+    else if (!strcmp(text, "Online.Tick()")) { if (g_on_menu) g_ticks++; }
     else if (g_on_menu) g_quiet++;
     {
         static int probed;
-        if (!probed && g_on_menu && (g_quiet >= SETTLE_CALLS || !strcmp(text, "Audio.PlayMusic()")) &&
+        if (!probed && g_on_menu && (g_quiet >= SETTLE_CALLS || g_ticks >= SETTLE_TICKS || !strcmp(text, "Audio.PlayMusic()")) &&
             getenv("RECOMP_FE_PROBE")) {
             probed = 1;
             run_probe();
         }
     }
-    if (g_armed && g_on_menu && (g_quiet >= SETTLE_CALLS || !strcmp(text, "Audio.PlayMusic()"))) {
+    if (g_armed && g_on_menu && (g_quiet >= SETTLE_CALLS || g_ticks >= SETTLE_TICKS || !strcmp(text, "Audio.PlayMusic()"))) {
         g_on_menu = 0;
         run_sequence();
     }

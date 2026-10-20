@@ -25,7 +25,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import hd_assets  # noqa: E402
 
-VERSION = 2
+VERSION = 3
 
 # (output name, screens.viv entry, SHPX image name). See docs/research/frontend-menu-integration.md §6.
 UI_IMAGES = [
@@ -38,6 +38,7 @@ UI_IMAGES = [
     ("header_strip", "screens/xHead.big", "7"),
     ("menu_wall", "screens/intMain/mainMenu.big", "5"),
     ("menu_door", "screens/intMain/mainMenu.big", "53"),
+    ("door_shutter", "screens/intMain/mainMenu.big", "18"),
     ("paper_sign", "screens/options/options.big", "4"),
     ("paper_edge", "screens/options/options.big", "7"),
     ("selector", "screens/battle/cmtype.big", "10"),

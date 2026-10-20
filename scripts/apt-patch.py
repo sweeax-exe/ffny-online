@@ -19,6 +19,10 @@ every internal pointer there is an absolute offset):
   * a new PlaceObject item `mmOnline` (a clone of the `mmCredits` placement, at
     the free bottom-left grid position), a new 14-item array for frame 0 of the
     `mainMenu` art clip, and the frame record that points at it;
+  * a per-frame hook: the `mmOnline` placement carries a clip event (EnterFrame, the mechanism
+    the menu's own spotlight mover uses) whose action sends FuncCall("Online.Tick()") every
+    frame while the menu is on screen; the menu defines no onEnterFrame of its own, so there
+    is nothing to chain to;
   * a copy of the frame-0 action of the menu clip (the whole menu program) with
     three insertions, and the action item re-pointed at the copy:
       - `selectPoster`: first statement sends FuncCall("Online.Focus(<index>)");
@@ -73,6 +77,10 @@ NEW_DEPTH = 27
 NEW_POS = (-62.0, 99.0)           # bottom-left cell; row 3 sits at y 96-101
 
 NEW_CLIP_NAME = "mmOnline"
+PATCH_VERSION = 2                 # 1: slot 6 + Focus/Open; 2: adds the per-frame Online.Tick()
+CLIP_EVENT_ENTERFRAME = 0x02
+PLACE_HAS_CLIP_ACTIONS = 0x80
+CMD_TICK = "Online.Tick()"
 CMD_OPEN = "Online.Open()"
 CMD_FOCUS_PREFIX = "Online.Focus("
 CMD_FOCUS_SUFFIX = ")"
@@ -376,6 +384,12 @@ class Asm:
         self.buf += struct.pack("<I", value & 0xFFFFFFFF)
         return at
 
+    def op_u32x2(self, op, a, b):
+        """An opcode with two aligned 32-bit operands (ConstantPool: count, pointer)."""
+        self.buf.append(op)
+        self.align_to(4)
+        self.buf += struct.pack("<II", a & 0xFFFFFFFF, b & 0xFFFFFFFF)
+
     def patch_u32(self, at, value):
         struct.pack_into("<I", self.buf, at, value & 0xFFFFFFFF)
 
@@ -427,6 +441,16 @@ def asm_select_insert(addr, slots, prefix_ptr, suffix_ptr):
     a.op(OP_ADD2, OP_PUSHONE, OP_PUSHVAR, slots["_level0"], OP_GETMEMBER, slots["_root"],
          OP_CALLNAMEDMETHODPOP, slots["FuncCall"])
     a.pad_to_multiple_of_4()
+    return bytes(a.buf)
+
+
+def asm_tick_action(addr, pool_ptr, tick_ptr):
+    """The clip-event action: ConstantPool [_level0, _root, FuncCall]; then
+    _level0._root.FuncCall("Online.Tick()"); End. Same shape as the game's own clip actions."""
+    a = Asm(addr)
+    a.op_u32x2(OP_CONSTPOOL, 3, pool_ptr)
+    a.op_u32(OP_PUSHSTRING, tick_ptr)
+    a.op(OP_PUSHONE, OP_PUSHVAR, 0, OP_GETMEMBER, 1, OP_CALLNAMEDMETHODPOP, 2, OP_END)
     return bytes(a.buf)
 
 
@@ -537,8 +561,30 @@ def build_new_apt(apt, const, slot=NEW_SLOT):
     p_pre = put_str(CMD_FOCUS_PREFIX)
     p_suf = put_str(CMD_FOCUS_SUFFIX)
     p_name = put_str(NEW_CLIP_NAME)
+    p_tick = put_str(CMD_TICK)
     while (pos + len(data)) % 4:
         data.append(0)
+
+    # Per-frame hook: a clip event (EnterFrame) on the new placement, the mechanism the menu
+    # itself uses for its spotlight mover. Pool: const indices of the three names.
+    cidx = []
+    for name in ("_level0", "_root", "FuncCall"):
+        try:
+            cidx.append(strings.index(name))
+        except ValueError:
+            raise PatchError("constant %r is not in the .const table" % name)
+    pool_at = pos + len(data)
+    data += struct.pack("<3I", *cidx)
+    tick_at = pos + len(data)
+    assert tick_at % 4 == 0
+    tick_code = asm_tick_action(tick_at, pool_at, p_tick)
+    data += tick_code
+    while (pos + len(data)) % 4:
+        data.append(0)
+    entry_at = pos + len(data)
+    data += struct.pack("<III", CLIP_EVENT_ENTERFRAME, 0, tick_at)
+    clipact_at = pos + len(data)
+    data += struct.pack("<II", 1, entry_at)
 
     # PlaceObject clone of the mmCredits placement.
     place_at = pos + len(data)
@@ -557,6 +603,8 @@ def build_new_apt(apt, const, slot=NEW_SLOT):
     words[8] = struct.unpack("<I", struct.pack("<f", NEW_POS[0]))[0]
     words[9] = struct.unpack("<I", struct.pack("<f", NEW_POS[1]))[0]
     words[13] = p_name
+    words[1] |= PLACE_HAS_CLIP_ACTIONS
+    words[15] = clipact_at
     data += struct.pack("<16I", *words)
 
     # New frame item array: the old pointers plus the new placement.
@@ -594,7 +642,8 @@ def build_new_apt(apt, const, slot=NEW_SLOT):
     new_apt += new_block
     struct.pack_into("<I", new_apt, ACTION_ITEM_PTR, block_at)
     struct.pack_into("<II", new_apt, FRAME_RECORD, old_count + 1, arr_at)
-    info = dict(block_at=block_at, block_len=len(new_block), data_at=pos, place_at=place_at,
+    info = dict(tick_at=tick_at, tick_len=len(tick_code), clipact_at=clipact_at, entry_at=entry_at,
+                block_at=block_at, block_len=len(new_block), data_at=pos, place_at=place_at,
                 array_at=arr_at, sel_len=len(sel_code), key_len=len(key_code),
                 tail_len=len(tail_code), slots=slots, apt_len=len(new_apt))
     return bytes(new_apt), info
@@ -623,9 +672,22 @@ def verify_new_apt(apt, new_apt, info):
     for off in range(0, len(apt), 4):
         if apt[off:off + 4] != new_apt[off:off + 4] and off not in allowed:
             raise PatchError("original .apt byte range 0x%X changed unexpectedly" % off)
-    if len(apt) % 4:
-        raise PatchError("internal: apt length")
-    return "%d function bodies decode to their exact size, %d appended bytes" % (nfun, len(new_apt) - len(apt))
+    # The per-frame hook: placement -> ClipActions -> (EnterFrame, key 0, action) -> decodable action.
+    pl = struct.unpack_from("<16I", new_apt, info["place_at"])
+    if pl[0] != 3 or not pl[1] & PLACE_HAS_CLIP_ACTIONS or pl[15] != info["clipact_at"]:
+        raise PatchError("mmOnline placement does not carry the clip actions")
+    if struct.unpack_from("<II", new_apt, info["clipact_at"]) != (1, info["entry_at"]):
+        raise PatchError("ClipActions record is wrong")
+    if struct.unpack_from("<III", new_apt, info["entry_at"]) != (CLIP_EVENT_ENTERFRAME, 0, info["tick_at"]):
+        raise PatchError("clip action entry is wrong")
+    tick = decode(new_apt, info["tick_at"])
+    if [i.op for i in tick] != [OP_CONSTPOOL, OP_PUSHSTRING, OP_PUSHONE, OP_PUSHVAR, OP_GETMEMBER,
+                                OP_CALLNAMEDMETHODPOP, OP_END]:
+        raise PatchError("tick action does not decode as expected")
+    if cstr(new_apt, tick[1].vals[0]) != CMD_TICK or tick[-1].nxt != info["tick_at"] + info["tick_len"]:
+        raise PatchError("tick action string or extent is wrong")
+    return "%d function bodies decode to their exact size, tick action decodes, %d appended bytes" % (
+        nfun, len(new_apt) - len(apt))
 
 
 def _iter_functions(buf, ins):
@@ -644,7 +706,7 @@ def sha(b):
 
 def patch_entry(raw_entry):
     """Given the archive's raw (RefPack) mainMenu entry, return (new raw entry, report lines)."""
-    lines = []
+    lines = ["patch version %d" % PATCH_VERSION]
     if sha(raw_entry) != ENTRY_RAW_SHA256:
         lines.append("note: archive entry differs from the reference build (payload is checked instead)")
     payload = refpack_decode(raw_entry)

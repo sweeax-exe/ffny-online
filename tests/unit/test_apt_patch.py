@@ -159,6 +159,16 @@ def test_select_insert_known_bytes():
     assert code == expected and len(code) == 28
 
 
+def test_tick_action_known_bytes():
+    code = ap.asm_tick_action(0x13000, 0x5000, 0x6000)
+    expected = (bytes([0x88, 0, 0, 0]) + le(3) + le(0x5000)           # ConstantPool: 3 entries at 0x5000
+                + bytes([0xA1, 0, 0, 0]) + le(0x6000)                  # "Online.Tick()"
+                + bytes([0x5A, 0xAE, 0x00, 0xAF, 0x01, 0xB2, 0x02, 0x00]))   # _level0._root.FuncCall(...); End
+    assert code == expected
+    ins = ap.decode(bytes(0x13000) + code, 0x13000)
+    assert [i.op for i in ins] == [0x88, 0xA1, 0x5A, 0xAE, 0xAF, 0xB2, 0x00]
+
+
 def test_tail_known_bytes_and_filler_parities():
     code = ap.asm_tail(0x13000, SLOTS, 0x4000)
     assert code == (bytes([0xAE, 0x27, 0xB5, 0x06, 0xA1, 0, 0, 0]) + le(0x4000) + bytes([0x4F]))

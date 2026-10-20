@@ -881,6 +881,18 @@ class Engine:
             return self.source / 'bin' / name
         return self.source / 'build' / PRESET / name
 
+    def prepare_online(self):
+        """The main menu's ONLINE entry and the online screens' art, made from the player's own
+        files: scripts/apt-patch.py writes <data>/override/screens/screens.viv, and
+        scripts/online-art.py <data>/online-art. A dump they do not recognise keeps the game
+        without the in-game online screens, so a failure here is reported, not fatal."""
+        for script, what in (('apt-patch.py', 'the ONLINE entry in the main menu'),
+                             ('online-art.py', "the online screens' art")):
+            try:
+                self.run([self.python, self.source / 'scripts' / script, '--data', self.data])
+            except SetupError as error:
+                self.event('Could not prepare ' + what + ' (' + str(error) + '); online play stays in the launcher')
+
     def build_hd_textures(self):
         if not getattr(self.args, 'hd_textures', False):
             return
@@ -1105,6 +1117,7 @@ class Engine:
                 self.toolchain()
                 self.link_game()
                 self.pipeline()
+                self.prepare_online()
                 self.stage('hd')
                 self.build_hd_textures()
                 self.stage('activate')

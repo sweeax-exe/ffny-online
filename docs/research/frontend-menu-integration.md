@@ -505,3 +505,33 @@ Still unknown, and only a game run (E2) can answer:
   no label or door logo until native art is drawn over it.
 * Whether `Add2` of a string and a number formats the index as plain digits in this VM (the game's own scripts
   concatenate numbers the same way).
+
+### 10.1 Patch version 2: a per-frame `Online.Tick()`
+
+E2 passed for version 1 (`Online.Focus(n)` and `Online.Open()` reach `funccall_hook`; `logs/run-20261020-143257.log.err`).
+The idle menu sends no FuncCall of its own, but the online match is started from inside the hook, so version 2
+adds one that fires every frame while the menu is on screen.
+
+* **How.** The new `mmOnline` placement now carries a **clip event**: its PlaceObject has the HasClipActions flag
+  (0xA6) and a ClipActions record (1 entry: event mask 0x02 = EnterFrame, key 0, action). The action is the
+  game's own shape: ConstantPool `[_level0, _root, FuncCall]`, then
+  `_level0._root.FuncCall("Online.Tick()")`, End. The art clip it lives in is on stage as long as the menu is,
+  and goes away with it, so the ticks stop when the menu is left.
+* **Why a clip event and not `onEnterFrame = function`.** I checked `mainMenu` first: it defines no
+  `onEnterFrame`/`setInterval` of its own (nothing to chain to), and its only periodic code is exactly one clip
+  event, the spotlight mover (EnterFrame, `motionIndex += 0.16` each frame), so per-frame clip events are proven to run in
+  this screen on this VM. The `onEnterFrame` method form is present in other front-end screens (options,
+  hiScores, chsVenue, unlockchar ...) and in `feloader`, but not in this one, so I did not rely on it. Fallbacks if
+  the clip event were ever not enough: a looping two-frame timeline action (a frame action that sends the call, plus
+  `gotoAndPlay` back), or `setInterval` (used in `main.big` and `battle/rewards1`); neither was needed.
+* **Identity.** `PATCH_VERSION = 2` is printed by the tool, and `--check` compares the override with the freshly
+  built plan byte for byte, so a version-1 override reports `stale` (the appended entry differs). The override was
+  regenerated: 98,994,797 bytes, `--check` says `current`.
+* **Verification added.** The self-check decodes the tick action (ConstantPool, PushString, PushOne, PushVar,
+  GetMember, CallNamedMethodPop, End), checks the placement flag, the ClipActions record and the entry; a
+  unit test pins the action's bytes.
+* **Residual uncertainty.** The event runs once per rendered frame of the APT clock (the same one that advances
+  the spotlight), so it is as steady as the menu animation, not a fixed wall-clock rate; it also only fires
+  while the guest thread is running the front end (it is a FuncCall like any other). The tick fires from frame 0
+  of the menu, before the cursor is touched, and `Online.Tick()` is unknown to the dispatcher (`NO_FOUND`), so the
+  hook must swallow it like the other `Online.*` commands.

@@ -11,32 +11,32 @@ sees game data.
   [netplay/relay/README.md](../netplay/relay/README.md). The default port is **27777/udp**.
 - Both players: this port installed from their own dump, the same version.
 
-## Playing: the online hub
+## Playing: ONLINE in the main menu
 
-1. Open the launcher (or the overlay in the game) and go to **Online**. The server is filled in;
-   enter your name and select **GO ONLINE**.
-2. Then either
-   - **Quick match**: pick the mode and select **FIND A MATCH**. You are put straight into an open
-     room of that mode, or a new one is opened that the next player is put into; or
-   - **Open rooms**: the list of listed rooms with their mode and players; **Join** one; or
-   - **Create a room**: name, listed or code-only, mode, players, and the venues to vote on. Friends
-     can also join by its six-letter code.
-3. In the room pick **your fighter** and select **READY**. The host can change the settings while
-   nobody is voting (that clears everyone's ready).
-4. When everyone (at least two) is ready, three venues from the room's list go to the **vote**:
-   click one within 15 seconds. The most votes wins; a tie is decided at random.
-5. The match then starts by itself on every PC from the main menu (press **PLAY** in the launcher
-   if you are not in the game yet). Modes with more fighters than players fill the free places with
-   CPU fighters. After the summary press A: you are back in the room for the next match.
+The game's main menu has an **ONLINE** entry in its bottom-left slot (made by the setup from your own
+copy of the game, `scripts/apt-patch.py`; the art and fonts of the online screens come from it too,
+`scripts/online-art.py`). Choose it with A:
 
-Modes offered online: One on One, 3-Way, Free for All (more follow once tested online).
+1. The online screens open over the menu and connect to the server set in the launcher (Online page:
+   server and your name).
+2. **QUICK MATCH** (left/right picks the mode) puts you straight into an open room of that mode, or
+   opens one that the next players are put into. **FIND A ROOM** lists the open rooms; **CREATE A
+   ROOM** sets the mode, the players, the venues to vote on and whether the room is listed.
+3. In the room press X to **choose your fighter** from the roster (the game's portraits) and A to
+   get **READY**; the host can change the room settings with Y while nobody is ready.
+4. When everyone (at least two) is ready, three venues go to the **vote**: left/right and A, within
+   15 seconds. The most votes win; a tie is decided at random.
+5. The match then starts by itself on every PC. Modes with more fighters than players fill the free
+   places with CPU fighters. After the summary press A: the room readies for the next one.
 
-## Playing one friend by code
+Modes offered online: One on One, 3-Way, Free for All (more follow once tested online). The
+fight's first-time help cards (BLAZIN', weapon, KO) are skipped in online matches: they depend on
+each player's save and would pause only one of the games.
 
-Under **Play one friend by code** one player selects **Host a match** and reads out the room code;
-the other enters it and selects **Join**. When the status turns green both press **PLAY**. The host
-is player 1 and the guest player 2 on both PCs; each sees the other's controller in the menus, so
-go to **Battle - One on One** together and pick there.
+## Playing a friend
+
+Create a room that is not listed ("By code only") and tell your friend the code shown in the room;
+the friend joins it from FIND A ROOM by code, or from the room list if you leave it listed.
 
 **Input delay**: each press takes effect this many steps (1/60 s each) later on every screen. In a
 hub match it is set by itself: after `START` every PC sends the others its ping to the server
