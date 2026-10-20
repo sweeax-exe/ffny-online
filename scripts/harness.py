@@ -241,12 +241,33 @@ SECOND_MATCH_FFA = raw_stages([
     "getscreeninfo(battle/chsvenue#2=a@8+4x4",
 ])
 
+# An online hub match (RECOMP_NETPLAY=quick in two copies): the room's match starts by itself
+# (automatch reports its calls to the anchors), the scripted fighter fights it, the summary
+# goes back to the match-type screen, the room readies again and a second match follows.
+# Player 2 faces the other way, so its approach is "left".
+ONLINE_TAIL = ",".join([FIGHT_TAIL, raw_stages(["game.getmatchsummary(=a@4+3x12"]),
+                        FIGHT_TAIL.replace("@game.startgame(", "@game.startgame(#2")])
+
 ROUTES = {
     "boot": {
         "help": "start-up to the main menu, nothing pressed there",
         "stages": ["getscreeninfo(intmain/mainmenu=back@9999"],
         "until": "getscreeninfo(intmain/mainmenu", "after": 8, "secs": 170,
         "shots": "@getscreeninfo(intmain/mainmenu,5",
+    },
+    "online-p1": {
+        "help": "online hub, player 1 of a room: two matches that start by themselves (needs RECOMP_NETPLAY=quick)",
+        "stages": [],
+        "tail": ONLINE_TAIL,
+        "until": "game.getmatchsummary(#3", "after": 6, "secs": 1500,
+        "shots": "",
+    },
+    "online-p2": {
+        "help": "online hub, player 2 of a room (approaches with left)",
+        "stages": [],
+        "tail": ONLINE_TAIL.replace("right:", "left:"),
+        "until": "game.getmatchsummary(#3", "after": 6, "secs": 1500,
+        "shots": "",
     },
     "fight": {
         "help": "Battle -> One on One, defaults all the way, then a scripted fighter",

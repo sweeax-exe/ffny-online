@@ -18,6 +18,8 @@
 #include "automatch.h"
 #include "netplay.h"
 
+extern void xbox_NoteAnchorEvent(const char *text);
+
 /* The idle main menu makes only a handful of FuncCalls (its music and sounds), so the sequence
  * runs at the menu music's start, or after a few calls with no MemCard call in between. */
 #define SETTLE_CALLS 4
@@ -73,6 +75,7 @@ static void call(const char *format, ...)
     va_start(args, format);
     vsnprintf(command, sizeof(command), format, args);
     va_end(args);
+    xbox_NoteAnchorEvent(command);     /* a pad script can wait for these as for the front end's own */
     result = defjam_fe_call(command);
     fprintf(stderr, "[AUTOMATCH] %s -> %s\n", command, result ? "ok" : "0");
 }
@@ -104,6 +107,49 @@ static void run_sequence(void)
     call("Game.StartGame()");
     g_running = 0;
     fprintf(stderr, "[AUTOMATCH] sequence done\n");
+    fflush(stderr);
+}
+
+/* RECOMP_FE_PROBE=1: once the main menu has settled, list for every match type what the venue
+ * screen would offer (Game.ResetVenueList / GetNextVenue), and the match types and the roster
+ * once, as [FE-PROBE] lines. For working out which venues each mode allows; a probe run only. */
+static void probe_list(const char *reset, const char *next, const char *tag, int limit)
+{
+    char first[200] = "";
+    int i;
+    defjam_fe_call(reset);
+    for (i = 0; i < limit; i++) {
+        unsigned int p = defjam_fe_call(next), k;
+        char out[200];
+        for (k = 0; p && k < sizeof(out) - 1; k++) {
+            char c = (char)MEM8(p + k);
+            if (!c) break;
+            out[k] = c;
+        }
+        out[p ? k : 0] = 0;
+        if (!out[0] || !strcmp(out, first)) break;
+        if (!i) strcpy(first, out);
+        fprintf(stderr, "[FE-PROBE] %s %s\n", tag, out);
+    }
+}
+
+static void run_probe(void)
+{
+    int t;
+    char cmd[64], tag[32];
+    g_running = 1;
+    defjam_fe_call("Game.StartBattleMode()");
+    probe_list("Game.ResetMatchTypeList()", "Game.GetNextMatchType()", "matchtype", 20);
+    probe_list("Game.ResetFighterList()", "Game.GetNextFighter()", "fighter", 200);
+    for (t = 0; t <= 12; t++) {
+        snprintf(cmd, sizeof(cmd), "Game.SetMatchType(%d)", t);
+        defjam_fe_call(cmd);
+        snprintf(tag, sizeof(tag), "venue[type %d]", t);
+        probe_list("Game.ResetVenueList(0)", "Game.GetNextVenue()", tag, 60);
+    }
+    defjam_fe_call("Game.SetMatchType(0)");
+    g_running = 0;
+    fprintf(stderr, "[FE-PROBE] done\n");
     fflush(stderr);
 }
 
@@ -139,6 +185,14 @@ void automatch_on_funccall(const char *text)
     else if (strstr(text, "GetScreenInfo(")) g_on_menu = 0;
     if (!strncmp(text, "MemCard.", 8)) g_quiet = 0;
     else if (g_on_menu) g_quiet++;
+    {
+        static int probed;
+        if (!probed && g_on_menu && (g_quiet >= SETTLE_CALLS || !strcmp(text, "Audio.PlayMusic()")) &&
+            getenv("RECOMP_FE_PROBE")) {
+            probed = 1;
+            run_probe();
+        }
+    }
     if (g_armed && g_on_menu && (g_quiet >= SETTLE_CALLS || !strcmp(text, "Audio.PlayMusic()"))) {
         g_on_menu = 0;
         run_sequence();

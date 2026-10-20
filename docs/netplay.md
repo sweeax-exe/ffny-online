@@ -38,8 +38,10 @@ the other enters it and selects **Join**. When the status turns green both press
 is player 1 and the guest player 2 on both PCs; each sees the other's controller in the menus, so
 go to **Battle - One on One** together and pick there.
 
-**Input delay**: each press takes effect this many steps (1/60 s each) later on every screen. Hub
-matches use 3 (50 ms); a code match uses the host's setting.
+**Input delay**: each press takes effect this many steps (1/60 s each) later on every screen. In a
+hub match it is set by itself: after `START` every PC sends the others its ping to the server
+(worst of the last five), and all derive the same delay from the two slowest players, half of
+each round trip plus one step, between 2 and 10. A code match uses the host's setting.
 
 ## How it works
 

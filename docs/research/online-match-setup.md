@@ -130,20 +130,13 @@ contains it (grep for `choosef4` finds nothing), so the exact `SetMatchType` id 
 
 ### 2.1 Dispatch chain (all [V])
 
-```
-Flash ActionScript FuncCall("Game.StartGame()")
-  -> GetURL -> guest 0x00068BA0 (cdecl, one stack arg = char* command)        [hooked: funccall_hook]
-       copies the string into a 512-byte stack buffer, calls
-     sub_000457D0(buf)   : split "Module" "." "Method" "(" args ")"
-         sub_00045510  tokenizer (the "." at 0x2928E4 and "(" at 0x2928E8)
-         sub_000455E0  module lookup: count MEM32(0x341534), module objects MEM32(0x3412B0 + 4*i)
-         sub_00045670  method lookup in the module's table (count at module+0xC08, entries of 0x30
-                       bytes starting at module+8, name hash at +8, handler at +0xC) and
-                       handler(this=module, char **argv, int argc) via an indirect call
-     result: handler returns eax = 0 (or a char* result such as 0x341330, the shared return buffer);
-     sub_00068BA0 copies a non-null result into a new string and returns it; a null result yields
-     the string "NO_RETURN" at 0x299A9C / "NO_FOUND" at 0x292998.
-```
+The path of one front-end command, in words: the screen's ActionScript calls `FuncCall("Game.StartGame()")`,
+which goes through `GetURL` to the guest handler at 0x00068BA0 (cdecl, one stack argument, the command
+string; this is where `funccall_hook` sits). The handler copies the string into a 512-byte stack buffer
+and hands it to the dispatcher at 0x000457D0, which splits it into module, method and arguments with the
+tokenizer at 0x00045510 (separators "." at 0x2928E4 and "(" at 0x2928E8), finds the module at 0x000455E0
+(module count at 0x341534, module objects in the table at 0x3412B0) and the method at 0x00045670 (method
+count at module+0xC08, 0x30-byte entries), then calls the method's handler.
 
 Name hash = djb2 (`h = h*33 + c`, start 5381) in `sub_000CAA30`. Handlers are `thiscall`,
 `ret 8`, arguments are decimal strings parsed with `sub_00200D22` (an `atoi`/`strtol` tail jump).
@@ -350,21 +343,12 @@ over the logs), so it doubles as a game-thread tick that exists exactly when the
 lifted `sub_00068BA0` directly (not through `recomp_lookup`) skips the `[FUNCCALL]` log line, so the helper should
 print its own.
 
-```c
-/* sketch: replay one front-end command; hook thread only. cdecl, pops only the return address. */
-static uint32_t fe_call(const char *cmd)
-{
-    uint32_t sp0 = g_esp, s, n = (uint32_t)strlen(cmd) + 1;
-    s = (sp0 - 0x40 - n) & ~3u;            /* the string sits above the callee's 0x200-byte frame */
-    for (uint32_t i = 0; i < n; i++) MEM8(s + i) = (uint8_t)cmd[i];
-    g_esp = s;
-    PUSH32(g_esp, s);                      /* argument */
-    PUSH32(g_esp, 0x00000000u);            /* dummy return address, popped by the callee */
-    sub_00068BA0();
-    g_esp = sp0;
-    return g_eax;                          /* guest address of the result string, or 0 */
-}
-```
+Sketch of the replay, in words (implemented as `defjam_fe_call` in `src/recomp_manual.c`): on the hook
+thread only, copy the command string to the guest stack 0x40 bytes plus the string length below the
+current stack pointer (aligned to 4, so it sits above the callee's 0x200-byte frame), push its address as
+the one argument and a dummy return address (the callee pops only the return address), call the handler
+at 0x00068BA0, restore the stack pointer and return the handler's result register, the guest address of
+the answer string.
 This follows the existing manual-override convention (`PUSH32(g_esp, ...)`, call, `g_esp += n`, see the
 `sub_0025F530` and timer overrides). [I] for the exact stack margin; test with E1.
 
@@ -522,3 +506,20 @@ Already covered by netplay: session-derived seeds for the match generators (`sub
 | `RECOMP_POST_CMD` cannot start a match | V |
 | Replay-from-main-menu works without the Flash screens | U (E1) |
 | Button-map desync risk | I |
+
+## 6. Probe of the battle lists (2026-10-20, `RECOMP_FE_PROBE=1`)
+
+`src/hooks/automatch.c` can replay the list queries itself from the settled main menu
+(log `logs/run-20261020-135221.log.err`, one run, the owner's save):
+
+- `Game.GetNextMatchType()` after `Game.ResetMatchTypeList()`: `NAME=<name>&STATE=Unlocked|Locked&ID=<n>`
+  for 0 Single, 1 Tag, 2 3Way, 3 4Way, 4 1vs2, 5 1vs3, 6 Demolition, 7 Inferno, 8 Subway, 9 Window,
+  10 Cage, 11 Ringout, 12 Tutorial; on this save 0-3 and 12 are unlocked. Past the end it answers
+  `NO_RETURN`. [V]
+- `Game.GetNextVenue()` after `Game.ResetVenueList(0)`: `STATE=..&FE_ID=..&BE_ID=..&DESC=<text>`, 24
+  venues (FE_ID 0-2, 4-19, 21, 22, 24, 26, 27), then `NO_RETURN`. **The list is the same for every
+  match type** set with `Game.SetMatchType` before it, so the game does not filter venues by mode
+  through this query; any restriction of the special modes (Inferno, Subway, Cage, ...) to their
+  venues is the front end's (screen script) business. [V]
+- `Game.GetNextFighter()` after `Game.ResetFighterList()`: about 200 calls answered (roster with lock
+  states). [V]

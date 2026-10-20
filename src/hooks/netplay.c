@@ -106,6 +106,7 @@ void netplay_on_seed(uint32_t e, int w, uint32_t x) { (void)e; (void)w; (void)x;
 #define P_LIVEPAD     3     /* u32 sequence, 18 bytes XBOX_GAMEPAD */
 #define P_STEPS       4     /* u32 match, u32 last step, u8 count, count x 32 bytes */
 #define P_HASH        5     /* u32 match, u32 step, u32 hash */
+#define P_RTT         6     /* hub: u32 START seed, u16 this PC's ping to the relay in ms */
 #define LOCKSTEP_VERSION 2
 
 #define MAXP          NETPLAY_MAX_PLAYERS
@@ -119,7 +120,10 @@ void netplay_on_seed(uint32_t e, int w, uint32_t x) { (void)e; (void)w; (void)x;
 #define HASH_EVERY    60
 #define STALL_LIMIT_MS 10000        /* mid-fight: a player has gone */
 #define START_LIMIT_MS 90000        /* the first steps: another PC may still be loading the venue */
-#define LOBBY_DELAY   3             /* hub matches: every PC must use the same delay */
+#define LOBBY_DELAY   3             /* hub matches: until the delay is agreed (P_RTT) */
+#define DELAY_MIN     2
+#define DELAY_MAX     10
+#define RTT_WAIT_MS   5000          /* at the sync point: how long to wait for every player's ping */
 #define RETRY_MS      400           /* lobby requests are repeated until the server answers */
 #define RETRIES       8
 
@@ -160,6 +164,7 @@ static struct {
     ULONGLONG last_rx, last_ping, hello_sent, started;
     uint32_t ping_nonce;
     int rtt_ms;
+    int rtt_recent[5], rtt_next;    /* the last pings, for a jitter margin */
     /* lockstep (step numbers count from 1 at each match start) */
     volatile LONG lockstep;         /* connected and not abandoned */
     uint32_t match, match_count, step;
@@ -184,6 +189,9 @@ static struct {
     int match_seen;                 /* the game has started that match */
     int over_pending;
     int start_this_play;            /* a START arrived since the room entered phase 2 */
+    int peer_rtt[MAXP];             /* each position's ping as it reported it for this START, -1 not yet */
+    int delay_fixed;                /* the match's delay is agreed */
+    ULONGLONG last_rtt_sent;
     ULONGLONG last_recover;
     uint32_t start_seed;
     int start_slots[MAXP];
@@ -421,6 +429,32 @@ static void check_hashes(void)
         }
 }
 
+/* Hub: this PC's ping for the current START, so every PC derives the same input delay. */
+static void send_rtt(void)
+{
+    uint8_t p[7];
+    int rtt = N.peer_rtt[N.pos] < 0 ? 0 : N.peer_rtt[N.pos];
+    p[0] = P_RTT;
+    put32(p + 1, N.start_seed);
+    p[5] = (uint8_t)rtt;
+    p[6] = (uint8_t)(rtt >> 8);
+    send_data(p, 7);
+    N.last_rtt_sent = GetTickCount64();
+}
+
+/* The delay every PC derives from the same pings: the slowest path between two players goes
+ * through the relay, about half of each one's round trip, plus a step of margin. */
+static int agreed_delay(void)
+{
+    int a = 0, b = 0, i, d;
+    for (i = 0; i < N.players; i++) {
+        int r = N.peer_rtt[i] < 0 ? 0 : N.peer_rtt[i];
+        if (r > a) { b = a; a = r; } else if (r > b) b = r;
+    }
+    d = ((a + b) / 2 * 3 + 49) / 50 + 1;      /* ms to 1/60 s steps, rounded up, + 1 */
+    return d < DELAY_MIN ? DELAY_MIN : d > DELAY_MAX ? DELAY_MAX : d;
+}
+
 static void on_data(int from, const uint8_t *p, int len)
 {
     if (len < 1 || from < 0 || from >= MAXP || from == N.pos) return;
@@ -462,6 +496,14 @@ static void on_data(int from, const uint8_t *p, int len)
         break;
     case P_STEPS:
         store_steps(from, p + 1, len - 1);
+        break;
+    case P_RTT:
+        if (N.lobby && N.match_live && len >= 7 && get32(p + 1) == N.start_seed) {
+            int had = N.peer_rtt[from];
+            N.peer_rtt[from] = p[5] | (p[6] << 8);
+            SetEvent(N.arrived);
+            if (N.delay_fixed && had < 0) send_rtt();   /* it may still be waiting for ours */
+        }
         break;
     case P_HASH:
         if (len >= 13) {
@@ -666,6 +708,13 @@ static void on_start(const uint8_t *b, int len)
     N.fighters = m.count;
     N.pos = pos;
     N.delay = LOBBY_DELAY;
+    N.delay_fixed = 0;
+    for (i = 0; i < MAXP; i++) N.peer_rtt[i] = -1;
+    {   /* this PC's ping as of now, with the worst of the last few as the jitter margin */
+        int k, worst = N.rtt_ms > 0 ? N.rtt_ms : 0;
+        for (k = 0; k < 5; k++) if (N.rtt_recent[k] > worst) worst = N.rtt_recent[k];
+        N.peer_rtt[pos] = worst > 2000 ? 2000 : worst;
+    }
     N.match_count = 0;
     N.match_live = 1;
     N.match_seen = 0;
@@ -738,7 +787,11 @@ static void on_packet(const uint8_t *b, int len)
         break;
     case T_PONG:
         if (len >= 10 && get32(b + 6) == N.ping_nonce)
+        {
             N.rtt_ms = (int)(GetTickCount64() - N.last_ping);
+            N.rtt_recent[N.rtt_next] = N.rtt_ms;
+            N.rtt_next = (N.rtt_next + 1) % 5;
+        }
         break;
     case T_ROOMS:
         if (N.lobby) on_rooms(b + 6, len - 6);
@@ -850,6 +903,9 @@ static DWORD WINAPI net_thread(LPVOID unused)
             LeaveCriticalSection(&g_cs);
             if (n) send_raw(again, n);
         }
+        /* Hub: our ping for this START, until the match is under way. */
+        if (N.lobby && N.match_live && !N.match_seen && now - N.last_rtt_sent >= 100)
+            send_rtt();
         /* The room is playing but this PC never got its START: a VOTE makes the server send it again. */
         if (N.lobby && N.roomv.in_room && N.roomv.phase == 2 && !N.start_this_play && !N.over_pending &&
             now - N.last_recover >= 500) {
@@ -928,6 +984,7 @@ static int start(const char *server, const char *name, int creating, const char 
     N.have_token = 0;
     N.peer_name[0] = 0;
     N.rtt_ms = -1;
+    memset(N.rtt_recent, 0, sizeof(N.rtt_recent));
     N.local_seq = 0;
     N.players = N.fighters = 2;
     N.pos = 0;
@@ -1094,6 +1151,22 @@ void netplay_lobby_room(NetRoom *out)
 void netplay_sync_point(void)
 {
     if (!N.lockstep) return;
+    if (N.lobby && N.match_live && !N.delay_fixed) {
+        /* Every player's ping for this START, then the delay they all derive from them. */
+        ULONGLONG t0 = GetTickCount64();
+        int known, i;
+        for (;;) {
+            known = 1;
+            for (i = 0; i < N.players; i++) if (N.peer_rtt[i] < 0) known = 0;
+            if (known || GetTickCount64() - t0 > RTT_WAIT_MS || !N.lockstep) break;
+            WaitForSingleObject(N.arrived, 20);
+        }
+        N.delay = agreed_delay();
+        N.delay_fixed = 1;
+        send_rtt();
+        fprintf(stderr, "[NETPLAY] input delay %d steps (pings %d/%d/%d/%d ms%s)\n", N.delay,
+                N.peer_rtt[0], N.peer_rtt[1], N.peer_rtt[2], N.peer_rtt[3], known ? "" : ", some missing");
+    }
     EnterCriticalSection(&g_cs);
     memset(N.seeds, 0, sizeof(N.seeds));
     LeaveCriticalSection(&g_cs);
@@ -1109,7 +1182,8 @@ void netplay_on_main_menu(void)
 /* Unattended sessions for tests: RECOMP_NETPLAY=host or join, RECOMP_NETPLAY_SERVER, and
  * RECOMP_NETPLAY_CODE_FILE, where the host writes its room code once it has one and the
  * guest waits for it (up to a minute). RECOMP_NETPLAY=quick enters the hub, quick-matches
- * and readies with RECOMP_NETPLAY_FIGHTER (default 55), voting for the first venue; =lobby only
+ * (RECOMP_NETPLAY_QUICK="mode,players", default "0,2") and readies with RECOMP_NETPLAY_FIGHTER
+ * (default 55), voting for the first venue; =lobby only
  * enters the hub. */
 static DWORD WINAPI autostart_thread(LPVOID unused)
 {
@@ -1127,7 +1201,12 @@ static DWORD WINAPI autostart_thread(LPVOID unused)
         unsigned voted_in = 0;
         netplay_lobby(server, "Test player");
         for (i = 0; i < 600 && N.state == NETPLAY_CONNECTING; i++) Sleep(100);
-        netplay_lobby_quick(0, 2);
+        {   /* RECOMP_NETPLAY_QUICK="mode,players", default "0,2" (One on One) */
+            const char *q = getenv("RECOMP_NETPLAY_QUICK");
+            int qmode = 0, qmax = 2;
+            if (q && *q) sscanf(q, "%d,%d", &qmode, &qmax);
+            netplay_lobby_quick(qmode, qmax);
+        }
         while (!N.stop && N.state != NETPLAY_FAILED && N.state != NETPLAY_OFF) {
             NetRoom r;
             netplay_lobby_room(&r);
@@ -1310,6 +1389,19 @@ void netplay_on_pad_read(uint32_t actor)
         if (N.in_tag[slot][k] == s + 1 && N.in_match[slot][k] == N.match)
             memcpy(entry, N.in[slot][k], ENTRY);
         LeaveCriticalSection(&g_cs);
+    }
+    {   /* RECOMP_NETPLAY_PADLOG=n: the first n reads, polled and injected, with the slot's bindings */
+        static int budget = -1;
+        if (budget < 0) budget = getenv("RECOMP_NETPLAY_PADLOG") ? atoi(getenv("RECOMP_NETPLAY_PADLOG")) : 0;
+        if (budget > 0 && (s % 30 == 5 || s < 8)) {
+            uint32_t bind = 0x003B90C8u + slot * 0x18u;
+            budget--;
+            fprintf(stderr, "[PADLOG] step %u slot %u polled %08X %08X %08X w7 %08X | injected %08X %08X %08X | "
+                    "mask %08X bind %08X %08X %08X %08X %08X %08X\n", s, slot,
+                    MEM32(base), MEM32(base + 4), MEM32(base + 8), MEM32(base + 28),
+                    get32(entry), get32(entry + 4), get32(entry + 8), MEM32(0x003B8FC8u + slot * 4u),
+                    MEM32(bind), MEM32(bind + 4), MEM32(bind + 8), MEM32(bind + 12), MEM32(bind + 16), MEM32(bind + 20));
+        }
     }
     for (i = 0; i < 7; i++)
         MEM32(base + (uint32_t)i * 4) = get32(entry + i * 4);

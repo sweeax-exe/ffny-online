@@ -163,14 +163,10 @@ for each seg > 0: sub_001291D0(&(ringbase + lastwrite*12), seg); lastwrite = 0 a
 
 After the tick (0x12435A-0x124381):
 
-```
-now      = *KeTickCount            // sub_001F49DB: MEM32(MEM32(0x2852C8)), import 0x8000009C = ordinal 156
-deadline = [0x3A95D8]
-wait     = deadline - now          // signed
-[0x3A95D8] = deadline + 10
-if (wait < 0) wait = 1
-sub_001F6083(wait)                 // SleepEx(wait, FALSE) -> KeDelayExecutionThread
-```
+The pacing step, in words: it reads the kernel tick count (`KeTickCount`, import ordinal 156, read
+through the import slot at 0x2852C8), takes the deadline stored at 0x3A95D8, computes the signed
+wait as deadline minus now, advances the stored deadline by 10 ticks, clamps a negative wait to 1,
+and sleeps that long (`SleepEx(wait, FALSE)`, which reaches `KeDelayExecutionThread`).
 
 * A fixed 100 Hz schedule from the first `KeTickCount`, no drift, catch-up by 1 ms sleeps after a stall. The request is `deadline - now` after the work of the tick, so
   work time is subtracted and any late wake shortens the next request. The requested value is therefore 1..10 ms, **mean exactly 10 ms**; intervals above 10 ms in your
