@@ -4,6 +4,7 @@
 
 [![Release](https://img.shields.io/github/v/release/sweeax-exe/ffny-online)](https://github.com/sweeax-exe/ffny-online/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Discord](https://img.shields.io/badge/Discord-join-5865F2?logo=discord&logoColor=white)](https://discord.gg/zCZKVDnKaP)
 
 **FFNY Online** is an unofficial fan project that brings **Def Jam: Fight for NY** to the PC
 and adds what the original never had: **online multiplayer**, with quick match, rooms, a
@@ -27,7 +28,8 @@ game assets, disc images, translated game code or game executable.
 
 [Install and build](docs/build-and-play.md) · [Online play](docs/netplay.md) ·
 [Documentation](docs/README.md) · [Known issues](docs/known-issues.md) ·
-[Contributing](CONTRIBUTING.md) · [Releases](https://github.com/sweeax-exe/ffny-online/releases)
+[Contributing](CONTRIBUTING.md) · [Releases](https://github.com/sweeax-exe/ffny-online/releases) ·
+[Discord](https://discord.gg/zCZKVDnKaP)
 
 ## Online play
 
@@ -219,7 +221,7 @@ tests a change needs.
 ## Reporting problems
 
 Open an [issue](https://github.com/sweeax-exe/ffny-online/issues/new/choose)
-and pick the form that fits. Check [known issues](docs/known-issues.md) first.
+and pick the form that fits, or a ticket in #get-help on the [Discord](https://discord.gg/zCZKVDnKaP). Check [known issues](docs/known-issues.md) first.
 A useful report has:
 
 - the release version or commit, and whether you used the installer or a source build;
