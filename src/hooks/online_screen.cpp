@@ -298,12 +298,23 @@ void frame_rect(ImDrawList *dl, const Frame &f, float x, float y, float w, float
 void selector(ImDrawList *dl, const Frame &f, float x, float y, float w, float h)
 {
     const Tex &t = tex("ui/selector.png");
-    if (t.srv) {   // the bracket sits in the middle half of its texture
-        float mx = w * 0.32f, my = h * 0.32f;
-        image(dl, f, t, x - mx, y - my, w + 2 * mx, h + 2 * my, IM_COL32_WHITE);
-    } else {
+    if (!t.srv || t.w <= 0) {
         frame_rect(dl, f, x - 3, y - 3, w + 6, h + 6, RED, 2.5f);
+        return;
     }
+    // The bracket's solid lines are pixels 23..80 x 21..103 of the 128x128 texture, the glow a
+    // few pixels around them. Nine slices, so the corners keep their shape on a wide item: the
+    // source box with its glow (17..86 x 15..109) maps onto the item grown by the same margin.
+    const float S0x = 17, S1x = 86, S0y = 15, S1y = 109, LX = 23 - 17, LY = 21 - 15, C = 16;
+    float k = std::min(w / (80 - 23), h / (103 - 21));
+    k = k < 0.5f ? 0.5f : k > 1.1f ? 1.1f : k;
+    float X0 = x - LX * k, Y0 = y - LY * k, X1 = x + w + LX * k, Y1 = y + h + LY * k, c = C * k;
+    float xs[4] = { X0, X0 + c, X1 - c, X1 }, ys[4] = { Y0, Y0 + c, Y1 - c, Y1 };
+    float us[4] = { S0x, S0x + C, S1x - C, S1x }, vs[4] = { S0y, S0y + C, S1y - C, S1y };
+    for (int i = 0; i < 3; i++)
+        for (int j = 0; j < 3; j++)
+            dl->AddImage((ImTextureID)(intptr_t)t.srv, f.p(xs[i], ys[j]), f.p(xs[i + 1], ys[j + 1]),
+                         ImVec2(us[i] / t.w, vs[j] / t.h), ImVec2(us[i + 1] / t.w, vs[j + 1] / t.h));
 }
 
 // A button glyph and its word, as in the game's header ("A SELECT").
@@ -341,7 +352,7 @@ void door_shutter(ImDrawList *dl, const Frame &f, ImU32 tint = IM_COL32_WHITE)
 void backdrop(ImDrawList *dl, const Frame &f, ImVec2 display, bool full)
 {
     if (full) {
-        dl->AddRectFilled(ImVec2(0, 0), display, IM_COL32(0, 0, 0, 228));
+        dl->AddRectFilled(ImVec2(0, 0), display, IM_COL32(4, 4, 4, 255));   // opaque: no menu showing through
         return;
     }
     // outside the menu's 4:3 (widescreen bars, a stretched picture's edges) stays as it is
