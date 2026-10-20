@@ -106,6 +106,9 @@ def validate_shots(spec):
 # Pad scripts
 # ---------------------------------------------------------------------------
 
+INTRO_MOVIES = r"movies\eagames.mad;movies\thx.mad;movies\intro.mad"
+
+
 def title_presses():
     """START past the title, then A every three seconds until a stage takes over.
 
@@ -257,14 +260,16 @@ ROUTES = {
     },
     "online-p1": {
         "help": "online hub, player 1 of a room: two matches that start by themselves (needs RECOMP_NETPLAY=quick)",
-        "stages": [],
+        # the main menu's harmless LT ends the title's repeated A before it reaches the menu
+        "stages": ["getscreeninfo(intmain/mainmenu=lt@0.5"],
         "tail": ONLINE_TAIL,
         "until": "game.getmatchsummary(#3", "after": 6, "secs": 1500,
         "shots": "",
     },
     "online-p2": {
         "help": "online hub, player 2 of a room (approaches with left)",
-        "stages": [],
+        # the main menu's harmless LT ends the title's repeated A before it reaches the menu
+        "stages": ["getscreeninfo(intmain/mainmenu=lt@0.5"],
         "tail": ONLINE_TAIL.replace("right:", "left:"),
         "until": "game.getmatchsummary(#3", "after": 6, "secs": 1500,
         "shots": "",
@@ -687,6 +692,10 @@ def run_game(name, stages=(), tail="", shots="", secs=240, preset=RELEASE_PRESET
 
     e = {k: v for k, v in os.environ.items() if inherit_recomp or not k.upper().startswith('RECOMP_')}
     e.update(BASE_ENV)
+    # The intro movies take about 80 s of every boot; runs leave them out (the open fails as
+    # for a missing file and the title goes on). HARNESS_INTRO=1 keeps them.
+    if not os.environ.get("HARNESS_INTRO"):
+        e.setdefault("RECOMP_SKIP_FILES", INTRO_MOVIES)
     e["DEFJAM_DATA"] = data_dir()
     if scripted:
         e["RECOMP_SCRIPT_ANCHOR"] = TITLE_ANCHOR
