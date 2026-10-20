@@ -251,6 +251,11 @@ static void setBusy(bool value) {
 }
 
 static LRESULT CALLBACK windowProc(HWND hwnd, UINT message, WPARAM wp, LPARAM lp) {
+    if (message == WM_CTLCOLORSTATIC) {
+        // Labels (and the read-only status box) on the window's own white, not on grey boxes.
+        SetBkMode((HDC)wp, TRANSPARENT);
+        return (LRESULT)GetSysColorBrush(COLOR_WINDOW);
+    }
     if (message == WM_COMMAND) {
         int id = LOWORD(wp);
         if (id == 102) browse(dumpEdit, false);
@@ -376,13 +381,41 @@ static LRESULT CALLBACK windowProc(HWND hwnd, UINT message, WPARAM wp, LPARAM lp
     return DefWindowProcW(hwnd, message, wp, lp);
 }
 
+// --ui-shot FILE.bmp: draw the wizard off the desktop, write its picture and quit (README images;
+// nothing is installed and no window appears on screen).
+static std::wstring g_ui_shot;
+
+static bool write_window_bmp(HWND hwnd, const std::wstring& path) {
+    RECT r; GetWindowRect(hwnd, &r);
+    int w = r.right - r.left, h = r.bottom - r.top;
+    HDC screen = GetDC(nullptr), dc = CreateCompatibleDC(screen);
+    BITMAPINFO bi{}; bi.bmiHeader.biSize = sizeof(bi.bmiHeader); bi.bmiHeader.biWidth = w;
+    bi.bmiHeader.biHeight = -h; bi.bmiHeader.biPlanes = 1; bi.bmiHeader.biBitCount = 32;
+    void* bits = nullptr;
+    HBITMAP bmp = CreateDIBSection(screen, &bi, DIB_RGB_COLORS, &bits, nullptr, 0);
+    HGDIOBJ old = SelectObject(dc, bmp);
+    bool ok = PrintWindow(hwnd, dc, 2 /* PW_RENDERFULLCONTENT */) != 0;
+    if (ok) {
+        FILE* f = _wfopen(path.c_str(), L"wb");
+        ok = f != nullptr;
+        if (f) {
+            BITMAPFILEHEADER fh{}; fh.bfType = 0x4D42; fh.bfOffBits = sizeof(fh) + sizeof(bi.bmiHeader);
+            fh.bfSize = fh.bfOffBits + (DWORD)w * h * 4;
+            fwrite(&fh, sizeof(fh), 1, f); fwrite(&bi.bmiHeader, sizeof(bi.bmiHeader), 1, f);
+            fwrite(bits, 4, (size_t)w * h, f); fclose(f);
+        }
+    }
+    SelectObject(dc, old); DeleteObject(bmp); DeleteDC(dc); ReleaseDC(nullptr, screen);
+    return ok;
+}
+
 static int wizard(HINSTANCE instance, bool smoke = false, bool preparation = false) {
     preparationSmoke = preparation;
     WNDCLASSW wc{}; wc.lpfnWndProc = windowProc; wc.hInstance = instance;
     wc.hCursor = LoadCursor(nullptr, IDC_ARROW); wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
     wc.hIcon = LoadIcon(instance, MAKEINTRESOURCE(1));  // setup/app.rc.in
     wc.lpszClassName = L"DefJamSetupWizard"; RegisterClassW(&wc);
-    window = CreateWindowW(wc.lpszClassName, L"Def Jam Recompiled \u2014 Setup", WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
+    window = CreateWindowW(wc.lpszClassName, L"FFNY Online \u2014 Setup", WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
         CW_USEDEFAULT, CW_USEDEFAULT, 740, 560, nullptr, nullptr, instance, nullptr);
     control(L"STATIC", L"Build and play from your own USA Xbox dump", 0, 24, 20, 660, 24, 0);
     control(L"STATIC", L"1. Choose your game image.  2. Keep or change the install folder.  3. Select Install. "
@@ -413,11 +446,26 @@ static int wizard(HINSTANCE instance, bool smoke = false, bool preparation = fal
     control(L"BUTTON", L"Play", WS_TABSTOP, 306, 462, 90, 30, 112);
     EnableWindow(GetDlgItem(window, 112), FALSE);
     cancelButton = control(L"BUTTON", L"Close", WS_TABSTOP, 595, 462, 90, 30, 110);
+    if (!g_ui_shot.empty()) {
+        SetWindowTextW(dumpEdit, L"D:\\Games\\Def Jam - Fight for NY (USA).iso");
+        SetWindowTextW(installEdit, L"D:\\Games\\FFNY Online");
+        SetWindowPos(window, nullptr, -4000, -4000, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+        ShowWindow(window, SW_SHOWNOACTIVATE);
+        UpdateWindow(window);
+        for (ULONGLONG until = GetTickCount64() + 600; GetTickCount64() < until;) {
+            MSG m;
+            while (PeekMessageW(&m, nullptr, 0, 0, PM_REMOVE)) { TranslateMessage(&m); DispatchMessageW(&m); }
+            Sleep(10);
+        }
+        bool ok = write_window_bmp(window, g_ui_shot);
+        DestroyWindow(window);
+        return ok ? 0 : 4;
+    }
     if (smoke) {
         // Hardware-free CI probe: controls exist and the wizard needs no Python,
         // D3D device, compiler or payload extraction merely to open.
         wchar_t title[128]{}; GetWindowTextW(window, title, 128);
-        bool valid = wcscmp(title, L"Def Jam Recompiled \u2014 Setup") == 0 &&
+        bool valid = wcscmp(title, L"FFNY Online \u2014 Setup") == 0 &&
                      window && dumpEdit && installEdit && prerequisites && desktopShortcut && hdUpscale && launchInfo &&
                      SendMessageW(hdUpscale, BM_GETCHECK, 0, 0) == BST_UNCHECKED &&
                      SendMessageW(desktopShortcut, BM_GETCHECK, 0, 0) == BST_CHECKED &&
@@ -427,7 +475,7 @@ static int wizard(HINSTANCE instance, bool smoke = false, bool preparation = fal
     }
     if (g_update) {
         // Everything is known: show what happens and start.
-        SetWindowTextW(window, L"Def Jam Recompiled — Update");
+        SetWindowTextW(window, L"FFNY Online — Update");
         SetWindowTextW(dumpEdit, L"(the game files you installed before are reused)");
         SetWindowTextW(installEdit, g_update_install.parent_path().c_str());
         for (int id : { 101, 102, 103, 104, 105 }) EnableWindow(GetDlgItem(window, id), FALSE);
@@ -462,7 +510,10 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
             if (count == 1) { launchInstalled(); result = 0; }
             else throw std::runtime_error("Double-click this launcher or use --launch to start your installed game.");
 #else
-            if (count > 1 && std::wstring(values[1]) == L"--ui-smoke") {
+            if (count > 2 && std::wstring(values[1]) == L"--ui-shot") {
+                g_ui_shot = values[2];
+                result = wizard(instance);
+            } else if (count > 1 && std::wstring(values[1]) == L"--ui-smoke") {
                 result = wizard(instance, true);
             } else if (count > 1 && std::wstring(values[1]) == L"--ui-preparation-smoke") {
                 result = wizard(instance, false, true);
