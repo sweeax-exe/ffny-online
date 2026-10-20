@@ -61,8 +61,10 @@ Error codes: 1 room not found, 2 room full, 3 build mismatch, 4 bad name, 5 serv
 - A room holds two players. When both are present each receives `PEER` about the other.
 - A repeated `HELLO` from the same address and port that already has a token is answered
   with the same `WELCOME` (lost replies are retried by the client every 500 ms).
-- A client is known by token **and** source address; a message whose token does not match
-  its source is answered with `ERROR 7` at most once per second, then ignored.
+- A client is known by token and source address. A known token from an address no other client
+  holds moves that client there (a router that changed its port, a laptop that changed
+  networks): the session, its room and a running match go on. Any other token mismatch is
+  answered with `ERROR 7` at most once per second, then ignored.
 - Idle timeout: a client that sends nothing for **15 s** is removed (clients send `PING`
   every second). A room with no players is deleted at once; a room that never got a second
   player is deleted after **10 minutes**.
