@@ -746,6 +746,15 @@ static int host_main(void)
             snprintf(save, sizeof(save), "%s%ssave", data,
                      data[strlen(data) - 1] == HOST_SEP_CHAR ? "" : HOST_SEP);
             xbox_path_init(YOUR_GAME_DIR, save);
+            /* <data>/override: game files the port rebuilt from the player's own (the
+             * main menu with its ONLINE entry, scripts/apt-patch.py) or a mod's. */
+            {
+                extern void xbox_path_set_override_dir(const char *dir);
+                char over[512];
+                snprintf(over, sizeof(over), "%s%soverride", data,
+                         data[strlen(data) - 1] == HOST_SEP_CHAR ? "" : HOST_SEP);
+                xbox_path_set_override_dir(over);
+            }
         } else {
             xbox_path_init(YOUR_GAME_DIR, NULL);
         }

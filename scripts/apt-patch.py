@@ -1,0 +1,816 @@
+#!/usr/bin/env python3
+"""Local-only patch that gives the main menu a real ONLINE slot.
+
+The shipped main menu (screens/intMain/mainMenu.big, an EA "APT" movie) lays its
+items out in a 3x3 grid and leaves the bottom-left cell empty: slot index 6 is
+`null` in the item array, has no mode constant and no label art. This tool fills
+that slot. It writes a complete patched copy of the player's own
+`screens/screens.viv` to `<data>/override/screens/screens.viv`, which the port
+loads in place of the original (the original file is never opened for writing).
+Only one archive entry changes; the rest of the archive is copied byte for byte.
+
+    python scripts/apt-patch.py                  # build the override
+    python scripts/apt-patch.py --check          # report whether it exists and is current
+    python scripts/apt-patch.py --data D:\\DefJam\\data
+
+What is patched, all in the `mainMenu.apt` stream (offsets are `.apt` offsets,
+every internal pointer there is an absolute offset):
+
+  * a new PlaceObject item `mmOnline` (a clone of the `mmCredits` placement, at
+    the free bottom-left grid position), a new 14-item array for frame 0 of the
+    `mainMenu` art clip, and the frame record that points at it;
+  * a copy of the frame-0 action of the menu clip (the whole menu program) with
+    three insertions, and the action item re-pointed at the copy:
+      - `selectPoster`: first statement sends FuncCall("Online.Focus(<index>)");
+      - `keyX`: right after the select sound, `if (oMenu.getIndex() == 6)`
+        sends FuncCall("Online.Open()") (every other index runs as before);
+      - end of the action: `aMenuArray[6] = "mmOnline"`, which makes the slot
+        reachable (the cursor skips null entries).
+    The function bodies are edited in place (their size fields and the one
+    branch that crosses an insertion are fixed up) rather than wrapped, so no
+    behaviour depends on how the VM resolves a redefined name.
+  * the `.apt` is re-laid out in its BIGF (other inner files byte-identical),
+    wrapped as a literal-only RefPack stream, appended to the archive copy, and
+    its directory record and the header total size are updated.
+
+The tool contains no game bytes: only offsets, SHA-256 expectations and the
+bytecode and data we author. A different region or version of the game is
+refused (the decompressed payload must match the expected hash). After building
+it decodes its own output, parses every DefineFunction in the new action to its
+exact declared size, checks every branch lands on an instruction boundary,
+and byte-compares everything that should not have changed.
+
+Python 3, standard library only.
+"""
+
+import argparse
+import hashlib
+import os
+import struct
+import sys
+
+# ----------------------------------------------------------------- constants
+
+ENTRY_NAME = "screens/intMain/mainMenu.big"
+SCREENS_REL = os.path.join("screens", "screens.viv")
+
+# Expected hashes of the user's own data (identification only).
+ENTRY_RAW_SHA256 = "71bec380772ac8e430b80d07b79737af9f66a356eb7a741fe639c09954059e29"
+PAYLOAD_SHA256 = "b3619d08e3c52ff5d7e7f7f470fa54efc993934093d2fe0d61f2b27755273263"
+APT_SHA256 = "d1183e6673b8f3eac688c4df0d4bdf366dc99fee01c8ae3b8464ba91c8320549"
+CONST_SHA256 = "62ef965806a5112eded66bb1a3a61ca170b0bbbd647125bf69300b0d5f45c0a9"
+
+# Offsets inside mainMenu.apt (see docs/research/frontend-menu-integration.md).
+APT_LEN = 0x12044                 # 73,796 bytes
+ACTION_ITEM_PTR = 0xD3CC          # action item at 0xD3C8 is (type 1, ptr); ptr -> 0x10CF8
+ACTION_START = 0x10CF8            # frame-0 action of the menu clip (character 222)
+ACTION_STOP_OP = 0x1193C          # final `stop()`; End follows at 0x1193D
+FRAME_RECORD = 0x2064             # frame 0 of the art clip (character 16): (13 items, array ptr)
+FRAME_ITEMS_OLD = (13, 0x2E14)
+MMCREDITS_ITEM = 0x92B8           # PlaceObject of the mmCredits hit target
+NEW_SLOT = 6
+NEW_DEPTH = 27
+NEW_POS = (-62.0, 99.0)           # bottom-left cell; row 3 sits at y 96-101
+
+NEW_CLIP_NAME = "mmOnline"
+CMD_OPEN = "Online.Open()"
+CMD_FOCUS_PREFIX = "Online.Focus("
+CMD_FOCUS_SUFFIX = ")"
+
+BIG_ALIGN = 128                   # inner BIGF entries are 128-aligned
+OUTER_ALIGN = 4
+
+SPEC = {                          # operand layout of opcodes (checked on 2,485 function bodies)
+    0x81: "a", 0x83: "pp", 0x87: "a", 0x8A: "a", 0x8B: "p", 0x8C: "p", 0x94: "a",
+    0x99: "a", 0x9D: "a", 0x9F: "a",
+    0xA1: "p", 0xA2: "b", 0xA3: "H", 0xA4: "p", 0xA5: "p", 0xA6: "p", 0xA7: "p",
+    0xAE: "b", 0xAF: "b", 0xB0: "b", 0xB1: "b", 0xB2: "b", 0xB3: "b",
+    0xB4: "f", 0xB5: "b", 0xB6: "h", 0xB7: "i",
+}
+OP_END, OP_POP, OP_PUSHZERO, OP_PUSHONE = 0x00, 0x17, 0x59, 0x5A
+OP_CALLMETHOD, OP_EQUALS2, OP_ADD2, OP_NOT, OP_SETMEMBER = 0x52, 0x49, 0x47, 0x12, 0x4F
+OP_CONSTPOOL, OP_PUSHDATA, OP_DEFFUNC, OP_DEFFUNC2 = 0x88, 0x96, 0x9B, 0x8E
+OP_BRANCH, OP_IF = 0x99, 0x9D
+OP_PUSHSTRING, OP_PUSHCONST, OP_PUSHVAR, OP_GETMEMBER = 0xA1, 0xA2, 0xAE, 0xAF
+OP_CALLNAMEDMETHODPOP, OP_PUSHBYTE = 0xB2, 0xB5
+FUNC_MARKER = struct.pack("<II", 0x98765432, 0x12345678)
+
+
+class PatchError(Exception):
+    pass
+
+
+# ------------------------------------------------------------------- RefPack
+
+def refpack_decode(src):
+    """EA RefPack (0x10FB / 0x90FB). Strict: the output must match the header size."""
+    if len(src) < 5:
+        raise PatchError("RefPack: truncated header")
+    sig = struct.unpack_from(">H", src, 0)[0]
+    if sig & 0x3EFF != 0x10FB:
+        raise PatchError("not RefPack: signature 0x%04X" % sig)
+    step = 4 if sig & 0x8000 else 3
+    pos = 2 + (step if sig & 0x0100 else 0)
+    size = int.from_bytes(src[pos:pos + step], "big")
+    pos += step
+    out = bytearray()
+    while pos < len(src):
+        b0 = src[pos]
+        pos += 1
+        if b0 < 0x80:
+            b1 = src[pos]
+            pos += 1
+            run, length, dist = b0 & 3, ((b0 & 0x1C) >> 2) + 3, ((b0 & 0x60) << 3) + b1 + 1
+        elif b0 < 0xC0:
+            b1, b2 = src[pos], src[pos + 1]
+            pos += 2
+            run, length, dist = (b1 >> 6) & 3, (b0 & 0x3F) + 4, ((b1 & 0x3F) << 8) + b2 + 1
+        elif b0 < 0xE0:
+            b1, b2, b3 = src[pos], src[pos + 1], src[pos + 2]
+            pos += 3
+            run, length = b0 & 3, ((b0 & 0x0C) << 6) + b3 + 5
+            dist = ((b0 & 0x10) << 12) + (b1 << 8) + b2 + 1
+        elif b0 < 0xFC:
+            run, length, dist = ((b0 & 0x1F) << 2) + 4, 0, 0
+        else:
+            run, length, dist = b0 & 3, 0, 0
+        out += src[pos:pos + run]
+        pos += run
+        if length:
+            if dist > len(out):
+                raise PatchError("RefPack: back-reference before start")
+            for _ in range(length):
+                out.append(out[-dist])
+        if b0 >= 0xFC:
+            break
+    if len(out) != size:
+        raise PatchError("RefPack: decoded %d bytes, header says %d" % (len(out), size))
+    return bytes(out)
+
+
+def refpack_encode_literal(data):
+    """A valid RefPack stream that stores `data` uncompressed (about 1% larger)."""
+    n = len(data)
+    if n < (1 << 24):
+        out = bytearray(struct.pack(">H", 0x10FB) + n.to_bytes(3, "big"))
+    else:
+        out = bytearray(struct.pack(">H", 0x90FB) + n.to_bytes(4, "big"))
+    i = 0
+    while n - i >= 112:
+        out.append(0xFB)                      # literal run of 112
+        out += data[i:i + 112]
+        i += 112
+    r = n - i
+    if r >= 4:
+        k = (r - 4) // 4
+        run = 4 * k + 4
+        out.append(0xE0 + k)
+        out += data[i:i + run]
+        i += run
+    r = n - i
+    out.append(0xFC | r)                      # stop code with 0-3 trailing literals
+    out += data[i:i + r]
+    return bytes(out)
+
+
+# ------------------------------------------------------------------- BIG files
+
+def big_records(data):
+    """[(name, record_pos, offset, size)] of a BIGF/BIG4 directory (data = at least the directory)."""
+    if data[:4] not in (b"BIG4", b"BIGF"):
+        raise PatchError("not a BIG archive: %r" % data[:4])
+    count = struct.unpack_from(">I", data, 8)[0]
+    pos, out = 16, []
+    for _ in range(count):
+        if pos + 8 > len(data):
+            raise PatchError("BIG: truncated directory")
+        off, size = struct.unpack_from(">II", data, pos)
+        end = data.find(b"\x00", pos + 8)
+        if end < 0:
+            raise PatchError("BIG: unterminated name")
+        out.append((data[pos + 8:end].decode("latin-1"), pos, off, size))
+        pos = end + 1
+    return out
+
+
+def align(n, a):
+    return (n + a - 1) // a * a
+
+
+def rebuild_bigf(payload, replace):
+    """New BIGF with the same entries in the same order and the same header and names;
+    `replace` maps an entry name to its new bytes. Entries are re-laid out 128-aligned."""
+    recs = big_records(payload)
+    head = bytearray(payload[:min(recs[0][2], len(payload))])
+    cursor = recs[0][2]
+    blobs = []
+    for name, rpos, off, size in recs:
+        data = replace.get(name, payload[off:off + size])
+        cursor = align(cursor, BIG_ALIGN)
+        struct.pack_into(">II", head, rpos, cursor, len(data))
+        blobs.append((cursor, data))
+        cursor += len(data)
+    total = align(cursor, BIG_ALIGN)
+    out = bytearray(total)
+    out[:len(head)] = head
+    struct.pack_into("<I", out, 4, total)
+    for at, data in blobs:
+        out[at:at + len(data)] = data
+    return bytes(out)
+
+
+def inner_files(payload):
+    return {n: bytes(payload[o:o + s]) for n, _, o, s in big_records(payload)}
+
+
+# ------------------------------------------------------------ .apt / .const model
+
+def u32(b, o):
+    return struct.unpack_from("<I", b, o)[0]
+
+
+def cstr(b, o):
+    e = b.index(b"\x00", o)
+    return b[o:e].decode("latin-1")
+
+
+def const_strings(const):
+    """Strings of an `Apt constant file` by index (None for non-string items)."""
+    count, table = struct.unpack_from("<II", const, 0x18)
+    out = []
+    for i in range(count):
+        t, v = struct.unpack_from("<II", const, table + 8 * i)
+        out.append(cstr(const, v) if t == 1 else None)
+    return out
+
+
+class Ins:
+    __slots__ = ("addr", "nxt", "op", "vals", "body")
+
+    def __init__(self, addr, nxt, op, vals, body=None):
+        self.addr, self.nxt, self.op, self.vals, self.body = addr, nxt, op, vals, body
+
+    @property
+    def target(self):               # branch destination (offset is relative to the next instruction)
+        v = self.vals[0]
+        return self.nxt + (v - (1 << 32) if v >= 1 << 31 else v)
+
+
+def decode(buf, start, end=None):
+    """Instructions from `start`. With `end`, up to exactly `end` (a function body); without,
+    through the End opcode. A DefineFunction is one instruction whose body is skipped by size."""
+    out, o = [], start
+    while True:
+        if end is not None and o >= end:
+            break
+        if o >= len(buf):
+            raise PatchError("bytecode runs off the end at 0x%X" % o)
+        st, op = o, buf[o]
+        o += 1
+        if op == OP_DEFFUNC:
+            o = align(o, 4)
+            name, npar, pptr, size = struct.unpack_from("<IIII", buf, o)
+            o += 16
+            if buf[o:o + 8] != FUNC_MARKER:
+                raise PatchError("DefineFunction at 0x%X lacks its marker" % st)
+            o += 8
+            out.append(Ins(st, o + size, op, (name, npar, pptr, size, o - 8 - 4), (o, size)))
+            o += size
+            continue
+        if op == OP_DEFFUNC2:
+            raise PatchError("DefineFunction2 at 0x%X is not supported" % st)
+        if op in (OP_CONSTPOOL, OP_PUSHDATA):
+            o = align(o, 4)
+            vals = struct.unpack_from("<II", buf, o)
+            o += 8
+        elif op in SPEC:
+            vals = []
+            for ch in SPEC[op]:
+                if ch == "b":
+                    vals.append(buf[o]); o += 1
+                elif ch == "h":
+                    vals.append(struct.unpack_from("<h", buf, o)[0]); o += 2
+                elif ch == "H":
+                    vals.append(struct.unpack_from("<H", buf, o)[0]); o += 2
+                elif ch in "if":
+                    vals.append(struct.unpack_from("<I", buf, o)[0]); o += 4
+                else:                                       # "a" and "p": aligned u32
+                    o = align(o, 4)
+                    vals.append(u32(buf, o)); o += 4
+            vals = tuple(vals)
+        elif op < 0x80:
+            vals = ()
+        else:
+            raise PatchError("unknown opcode 0x%02X at 0x%X" % (op, st))
+        out.append(Ins(st, o, op, vals))
+        if end is None and op == OP_END:
+            break
+    if end is not None and o != end:
+        raise PatchError("body ends at 0x%X, expected 0x%X" % (o, end))
+    return out
+
+
+def check_branches(ins, lo, hi):
+    """Every branch must land on an instruction boundary (or the end) inside [lo, hi]."""
+    bounds = {i.addr for i in ins} | {ins[-1].nxt} if ins else set()
+    for i in ins:
+        if i.op in (OP_BRANCH, OP_IF) and i.target not in bounds:
+            raise PatchError("branch at 0x%X lands inside an instruction (0x%X)" % (i.addr, i.target))
+
+
+def verify_block(buf, start, expect_end=None):
+    """Decode a top-level block and, recursively, every function body to its exact size.
+    Returns (instruction list, number of function bodies checked)."""
+    ins = decode(buf, start)
+    if expect_end is not None and ins[-1].nxt != expect_end:
+        raise PatchError("block ends at 0x%X, expected 0x%X" % (ins[-1].nxt, expect_end))
+    check_branches(ins, start, ins[-1].nxt)
+    return ins, _nested(buf, ins)
+
+
+def _nested(buf, ins):
+    n = 0
+    for i in ins:
+        if i.op == OP_DEFFUNC:
+            bstart, size = i.body
+            sub = decode(buf, bstart, bstart + size)       # raises if it does not end exactly
+            check_branches(sub, bstart, bstart + size)
+            n += 1 + _nested(buf, sub)
+    return n
+
+
+def pool_slots(buf, ins):
+    """Map constant string -> first pool slot of the block's ConstantPool instruction."""
+    for i in ins:
+        if i.op == OP_CONSTPOOL:
+            count, ptr = i.vals
+            return [u32(buf, ptr + 4 * k) for k in range(count)]
+    raise PatchError("action has no ConstantPool")
+
+
+# -------------------------------------------------------------------- assembler
+
+class Asm:
+    """Bytecode writer that knows the absolute (apt) address it will live at, because the
+    VM aligns the operands of many opcodes on the absolute address."""
+
+    def __init__(self, addr):
+        self.base, self.buf = addr, bytearray()
+
+    @property
+    def cur(self):
+        return self.base + len(self.buf)
+
+    def op(self, *b):
+        self.buf += bytes(b)
+
+    def align_to(self, n=4):
+        while self.cur % n:
+            self.buf.append(0)
+
+    def op_u32(self, op, value):
+        """An opcode with an aligned 32-bit operand; returns the operand's buffer position."""
+        self.buf.append(op)
+        self.align_to(4)
+        at = len(self.buf)
+        self.buf += struct.pack("<I", value & 0xFFFFFFFF)
+        return at
+
+    def patch_u32(self, at, value):
+        struct.pack_into("<I", self.buf, at, value & 0xFFFFFFFF)
+
+    def pad_to_multiple_of_4(self):
+        """Harmless filler so later aligned code keeps its padding: pairs of PushZero/Pop, and
+        PushByte 0/Pop (3 bytes) to move the parity."""
+        need = (-len(self.buf)) % 4
+        if need == 0:
+            return
+        if need % 2:                           # 1 or 3: 3 now, then pairs
+            self.op(OP_PUSHBYTE, 0, OP_POP)
+            need = (-len(self.buf)) % 4
+        while need:
+            self.op(OP_PUSHZERO, OP_POP)
+            need -= 2
+
+
+def asm_funccall_const(a, string_ptr, slots):
+    """`_level0._root.FuncCall(<inline string>)` as the game's own scripts do it."""
+    a.op_u32(OP_PUSHSTRING, string_ptr)
+    a.op(OP_PUSHONE, OP_PUSHVAR, slots["_level0"], OP_GETMEMBER, slots["_root"],
+         OP_CALLNAMEDMETHODPOP, slots["FuncCall"])
+
+
+def asm_get_index(a, slots):
+    a.op(OP_PUSHZERO, OP_PUSHVAR, slots["oMenu"], OP_PUSHCONST, slots["getIndex"], OP_CALLMETHOD)
+
+
+def asm_keyx_insert(addr, slots, open_ptr, slot=NEW_SLOT):
+    """if (oMenu.getIndex() == slot) _level0._root.FuncCall("Online.Open()");"""
+    a = Asm(addr)
+    asm_get_index(a, slots)
+    a.op(OP_PUSHBYTE, slot, OP_EQUALS2, OP_NOT)
+    at = a.op_u32(OP_IF, 0)
+    after = len(a.buf)
+    asm_funccall_const(a, open_ptr, slots)
+    a.patch_u32(at, len(a.buf) - after)
+    a.pad_to_multiple_of_4()
+    return bytes(a.buf)
+
+
+def asm_select_insert(addr, slots, prefix_ptr, suffix_ptr):
+    """_level0._root.FuncCall("Online.Focus(" + oMenu.getIndex() + ")");"""
+    a = Asm(addr)
+    a.op_u32(OP_PUSHSTRING, prefix_ptr)
+    asm_get_index(a, slots)
+    a.op(OP_ADD2)
+    a.op_u32(OP_PUSHSTRING, suffix_ptr)
+    a.op(OP_ADD2, OP_PUSHONE, OP_PUSHVAR, slots["_level0"], OP_GETMEMBER, slots["_root"],
+         OP_CALLNAMEDMETHODPOP, slots["FuncCall"])
+    a.pad_to_multiple_of_4()
+    return bytes(a.buf)
+
+
+def asm_tail(addr, slots, name_ptr, slot=NEW_SLOT):
+    """aMenuArray[slot] = "mmOnline";"""
+    a = Asm(addr)
+    a.op(OP_PUSHVAR, slots["aMenuArray"], OP_PUSHBYTE, slot)
+    a.op_u32(OP_PUSHSTRING, name_ptr)
+    a.op(OP_SETMEMBER)
+    return bytes(a.buf)
+
+
+# --------------------------------------------------------- generic body editing
+
+def apply_edits(block, block_start, fixups, inserts):
+    """`block` holds old bytes starting at old address `block_start`. Fix up u32 fields (old
+    coordinates), then insert bytes at old addresses (processed from the end)."""
+    b = bytearray(block)
+    for addr, delta in fixups:
+        rel = addr - block_start
+        struct.pack_into("<I", b, rel, (struct.unpack_from("<I", b, rel)[0] + delta) & 0xFFFFFFFF)
+    for addr, data in sorted(inserts, key=lambda t: t[0], reverse=True):
+        rel = addr - block_start
+        b[rel:rel] = data
+    return bytes(b)
+
+
+def branches_crossing(ins, point):
+    """Branch instructions of a function body that jump over `point` (forward), and any that
+    jump backwards over it (unsupported)."""
+    fwd = []
+    for i in ins:
+        if i.op in (OP_BRANCH, OP_IF):
+            if i.nxt <= point < i.target:
+                fwd.append(i)
+            elif i.target <= point < i.nxt:
+                raise PatchError("backward branch at 0x%X crosses the insertion point" % i.addr)
+    return fwd
+
+
+# ------------------------------------------------------------------ the patch
+
+def find_function(ins, apt, name):
+    for i in ins:
+        if i.op == OP_DEFFUNC and i.vals[0] and cstr(apt, i.vals[0]) == name:
+            return i
+    raise PatchError("function %r not found in the menu action" % name)
+
+
+def build_new_apt(apt, const, slot=NEW_SLOT):
+    """Return (new .apt bytes, info dict). `apt`/`const` are the user's original streams."""
+    if len(apt) != APT_LEN:
+        raise PatchError(".apt is %d bytes, expected %d" % (len(apt), APT_LEN))
+    if len(apt) % 4:
+        raise PatchError(".apt length not 4-aligned")
+    strings = const_strings(const)
+
+    # Structural anchors (all are re-validated by decoding, not trusted blindly).
+    if (u32(apt, FRAME_RECORD), u32(apt, FRAME_RECORD + 4)) != FRAME_ITEMS_OLD:
+        raise PatchError("frame record at 0x%X is not the expected (13 items)" % FRAME_RECORD)
+    if u32(apt, ACTION_ITEM_PTR - 4) != 1 or u32(apt, ACTION_ITEM_PTR) != ACTION_START:
+        raise PatchError("action item at 0x%X does not point at the menu action" % (ACTION_ITEM_PTR - 4))
+    if apt[ACTION_STOP_OP] != 0x07 or apt[ACTION_STOP_OP + 1] != OP_END:
+        raise PatchError("menu action does not end with stop() at 0x%X" % ACTION_STOP_OP)
+
+    ins = decode(apt, ACTION_START)
+    if ins[-1].nxt != ACTION_STOP_OP + 2 or ins[-2].addr != ACTION_STOP_OP:
+        raise PatchError("menu action decodes to a different extent")
+    slots_list = pool_slots(apt, ins)
+    slots = {}
+    for name in ("oMenu", "getIndex", "_level0", "_root", "FuncCall", "PlaySound", "aMenuArray"):
+        try:
+            slots[name] = next(k for k, c in enumerate(slots_list) if strings[c] == name)
+        except StopIteration:
+            raise PatchError("constant %r is not in the action's pool" % name)
+
+    sel = find_function(ins, apt, "selectPoster")
+    keyx = find_function(ins, apt, "keyX")
+    sel_body, sel_size = sel.body
+    key_body, key_size = keyx.body
+    keyx_ins = decode(apt, key_body, key_body + key_size)
+
+    # keyX: insert right after the select sound (the PlaySound call inside the guard).
+    play = next((i for i in keyx_ins if i.op == OP_CALLNAMEDMETHODPOP
+                 and strings[slots_list[i.vals[0]]] == "PlaySound"), None)
+    if play is None:
+        raise PatchError("keyX has no PlaySound call")
+    key_point = play.nxt
+    crossing = branches_crossing(keyx_ins, key_point)
+    if len(crossing) != 1 or crossing[0].op != OP_IF or crossing[0].target != key_body + key_size:
+        raise PatchError("keyX guard is not the single branch over the insertion point")
+    guard = crossing[0]
+    guard_operand = align(guard.addr + 1, 4)
+    sel_ins = decode(apt, sel_body, sel_body + sel_size)
+    branches_crossing(sel_ins, sel_body)          # start of body: nothing may cross
+
+    # ---- layout of the appended data -------------------------------------------------
+    pos = len(apt)
+    data = bytearray()
+
+    def put_str(s):
+        nonlocal data
+        at = pos + len(data)
+        data += s.encode("latin-1") + b"\x00"
+        return at
+
+    p_open = put_str(CMD_OPEN)
+    p_pre = put_str(CMD_FOCUS_PREFIX)
+    p_suf = put_str(CMD_FOCUS_SUFFIX)
+    p_name = put_str(NEW_CLIP_NAME)
+    while (pos + len(data)) % 4:
+        data.append(0)
+
+    # PlaceObject clone of the mmCredits placement.
+    place_at = pos + len(data)
+    words = list(struct.unpack_from("<16I", apt, MMCREDITS_ITEM))
+    if words[0] != 3 or cstr(apt, words[13]) != "mmCredits":
+        raise PatchError("0x%X is not the mmCredits placement" % MMCREDITS_ITEM)
+    old_count, old_arr = FRAME_ITEMS_OLD
+    used_depths = set()
+    for k in range(old_count):
+        it = u32(apt, old_arr + 4 * k)
+        if u32(apt, it) == 3:
+            used_depths.add(u32(apt, it + 8))
+    if NEW_DEPTH in used_depths:
+        raise PatchError("depth %d already used in the art clip" % NEW_DEPTH)
+    words[2] = NEW_DEPTH
+    words[8] = struct.unpack("<I", struct.pack("<f", NEW_POS[0]))[0]
+    words[9] = struct.unpack("<I", struct.pack("<f", NEW_POS[1]))[0]
+    words[13] = p_name
+    data += struct.pack("<16I", *words)
+
+    # New frame item array: the old pointers plus the new placement.
+    arr_at = pos + len(data)
+    old_ptrs = [u32(apt, old_arr + 4 * k) for k in range(old_count)]
+    data += struct.pack("<%dI" % (old_count + 1), *(old_ptrs + [place_at]))
+
+    block_at = pos + len(data)
+    assert block_at % 4 == 0
+
+    # ---- the modified action copy ----------------------------------------------------
+    old_block = apt[ACTION_START:ACTION_STOP_OP + 2]
+
+    def shifted(old_addr, earlier):             # new absolute address of an old address
+        return block_at + (old_addr - ACTION_START) + earlier
+
+    sel_code = asm_select_insert(shifted(sel_body, 0), slots, p_pre, p_suf)
+    key_code = asm_keyx_insert(shifted(key_point, len(sel_code)), slots, p_open)
+    tail_code = asm_tail(shifted(ACTION_STOP_OP, len(sel_code) + len(key_code)), slots, p_name)
+    for c in (sel_code, key_code):
+        if len(c) % 4:
+            raise PatchError("internal: insertion is not a multiple of 4 bytes")
+
+    sel_size_field, key_size_field = sel.vals[4], keyx.vals[4]
+    new_block = apply_edits(
+        old_block, ACTION_START,
+        fixups=[(sel_size_field, len(sel_code)), (key_size_field, len(key_code)),
+                (guard_operand, len(key_code))],
+        inserts=[(sel_body, sel_code), (key_point, key_code), (ACTION_STOP_OP, tail_code)])
+    # keyX is after selectPoster, so nothing else shifts the fields we fixed (they were
+    # edited in old coordinates before splicing).
+
+    new_apt = bytearray(apt)
+    new_apt += data
+    new_apt += new_block
+    struct.pack_into("<I", new_apt, ACTION_ITEM_PTR, block_at)
+    struct.pack_into("<II", new_apt, FRAME_RECORD, old_count + 1, arr_at)
+    info = dict(block_at=block_at, block_len=len(new_block), data_at=pos, place_at=place_at,
+                array_at=arr_at, sel_len=len(sel_code), key_len=len(key_code),
+                tail_len=len(tail_code), slots=slots, apt_len=len(new_apt))
+    return bytes(new_apt), info
+
+
+def verify_new_apt(apt, new_apt, info):
+    """Decode the patched stream; compare it with the original; return a one-line report."""
+    block_at = info["block_at"]
+    old_ins = decode(apt, ACTION_START)
+    new_ins, nfun = verify_block(new_apt, block_at, expect_end=len(new_apt))
+    old_fun = sum(1 for _ in _iter_functions(apt, old_ins))
+    new_fun = sum(1 for _ in _iter_functions(new_apt, new_ins))
+    if old_fun != new_fun:
+        raise PatchError("function count changed (%d -> %d)" % (old_fun, new_fun))
+    old_names = sorted(cstr(apt, i.vals[0]) for i in old_ins if i.op == OP_DEFFUNC and i.vals[0])
+    new_names = sorted(cstr(new_apt, i.vals[0]) for i in new_ins if i.op == OP_DEFFUNC and i.vals[0])
+    if old_names != new_names:
+        raise PatchError("function names changed")
+    # Same program plus our additions: top-level instruction count grew by exactly the tail
+    # (PushVar, PushByte, PushString, SetMember).
+    if len(new_ins) != len(old_ins) + 4:
+        raise PatchError("top-level instruction count %d -> %d (expected +4)"
+                         % (len(old_ins), len(new_ins)))
+    # Untouched bytes: the whole original stream except the three rewritten words.
+    allowed = {ACTION_ITEM_PTR, FRAME_RECORD, FRAME_RECORD + 4}
+    for off in range(0, len(apt), 4):
+        if apt[off:off + 4] != new_apt[off:off + 4] and off not in allowed:
+            raise PatchError("original .apt byte range 0x%X changed unexpectedly" % off)
+    if len(apt) % 4:
+        raise PatchError("internal: apt length")
+    return "%d function bodies decode to their exact size, %d appended bytes" % (nfun, len(new_apt) - len(apt))
+
+
+def _iter_functions(buf, ins):
+    for i in ins:
+        if i.op == OP_DEFFUNC:
+            yield i
+            bs, sz = i.body
+            yield from _iter_functions(buf, decode(buf, bs, bs + sz))
+
+
+# --------------------------------------------------------- entry / archive level
+
+def sha(b):
+    return hashlib.sha256(b).hexdigest()
+
+
+def patch_entry(raw_entry):
+    """Given the archive's raw (RefPack) mainMenu entry, return (new raw entry, report lines)."""
+    lines = []
+    if sha(raw_entry) != ENTRY_RAW_SHA256:
+        lines.append("note: archive entry differs from the reference build (payload is checked instead)")
+    payload = refpack_decode(raw_entry)
+    if sha(payload) != PAYLOAD_SHA256:
+        raise PatchError("decompressed mainMenu payload does not match the expected hash "
+                         "(different region or version); refusing to patch")
+    files = inner_files(payload)
+    apt, const = files.get("mainMenu.apt"), files.get("mainMenu.const")
+    if apt is None or const is None or sha(apt) != APT_SHA256 or sha(const) != CONST_SHA256:
+        raise PatchError("mainMenu.apt/.const do not match the expected hashes")
+    new_apt, info = build_new_apt(apt, const)
+    lines.append("verify .apt: " + verify_new_apt(apt, new_apt, info))
+    new_payload = rebuild_bigf(payload, {"mainMenu.apt": new_apt})
+    # Inner file check: everything except the .apt is byte-identical and the .apt starts as before.
+    new_files = inner_files(new_payload)
+    if list(new_files) != list(files):
+        raise PatchError("inner file list changed")
+    for n in files:
+        if n != "mainMenu.apt" and files[n] != new_files[n]:
+            raise PatchError("inner file %s changed" % n)
+    if new_files["mainMenu.apt"] != new_apt:
+        raise PatchError("re-laid out .apt differs from the built one")
+    new_raw = refpack_encode_literal(new_payload)
+    if refpack_decode(new_raw) != new_payload:
+        raise PatchError("RefPack round trip failed")
+    lines.append("payload %d -> %d bytes, entry %d -> %d bytes (literal RefPack)"
+                 % (len(payload), len(new_payload), len(raw_entry), len(new_raw)))
+    return new_raw, lines
+
+
+class Plan:
+    """Everything needed to write or compare the patched archive."""
+
+    def __init__(self, src_path, entry_name=ENTRY_NAME, patcher=None):
+        self.src = src_path
+        self.size = os.path.getsize(src_path)
+        with open(src_path, "rb") as f:
+            top = f.read(32)
+            if top[:4] not in (b"BIG4", b"BIGF"):
+                raise PatchError("%s is not a BIG archive" % src_path)
+            hdr = struct.unpack_from(">I", top, 12)[0]
+            if not 16 < hdr < 64 * 1024 * 1024:
+                raise PatchError("implausible directory size %d" % hdr)
+            f.seek(0)
+            self.head = bytearray(f.read(hdr + 4096))
+            self.records = big_records(self.head)
+            rec = [r for r in self.records if r[0] == entry_name]
+            if len(rec) != 1:
+                raise PatchError("%s not found in the archive" % entry_name)
+            self.rec_pos, self.old_off, self.old_size = rec[0][1:]
+            if self.old_off + self.old_size > self.size:
+                raise PatchError("directory entry runs past the end of the file")
+            f.seek(self.old_off)
+            raw = f.read(self.old_size)
+        self.new_raw, self.lines = (patcher or patch_entry)(raw)
+        self.append_at = align(self.size, OUTER_ALIGN)
+        self.final_size = self.append_at + len(self.new_raw)
+        struct.pack_into(">II", self.head, self.rec_pos, self.append_at, len(self.new_raw))
+        total = struct.unpack_from("<I", self.head, 4)[0]
+        if total != self.size:
+            self.lines.append("note: header total size %d differs from the file size %d" % (total, self.size))
+        struct.pack_into("<I", self.head, 4, self.final_size)
+
+
+CHUNK = 8 * 1024 * 1024
+
+
+def write_override(plan, dst):
+    tmp = dst + ".tmp"
+    os.makedirs(os.path.dirname(dst), exist_ok=True)
+    try:
+        with open(plan.src, "rb") as s, open(tmp, "wb") as d:
+            n = len(plan.head)
+            d.write(plan.head[:min(n, plan.size)])
+            s.seek(min(n, plan.size))
+            while True:
+                chunk = s.read(CHUNK)
+                if not chunk:
+                    break
+                d.write(chunk)
+            d.write(b"\x00" * (plan.append_at - plan.size))
+            d.write(plan.new_raw)
+        if os.path.getsize(tmp) != plan.final_size:
+            raise PatchError("written size %d != expected %d" % (os.path.getsize(tmp), plan.final_size))
+        problems = compare_override(plan, tmp)
+        if problems:
+            raise PatchError("verification of the written file failed: " + problems[0])
+        os.replace(tmp, dst)
+    except BaseException:
+        if os.path.exists(tmp):
+            os.remove(tmp)
+        raise
+
+
+def compare_override(plan, path):
+    """[] when `path` is exactly the patched archive for this plan, else the differences."""
+    problems = []
+    if os.path.getsize(path) != plan.final_size:
+        return ["size %d, expected %d" % (os.path.getsize(path), plan.final_size)]
+    n = min(len(plan.head), plan.size)
+    with open(path, "rb") as o, open(plan.src, "rb") as s:
+        if o.read(n) != bytes(plan.head[:n]):
+            problems.append("header/directory differs")
+        s.seek(n)
+        left = plan.size - n
+        while left > 0:
+            a, b = o.read(min(CHUNK, left)), s.read(min(CHUNK, left))
+            if a != b:
+                problems.append("archive body differs from the original")
+                break
+            left -= len(a)
+        else:
+            o.seek(plan.append_at)
+            if o.read() != plan.new_raw:
+                problems.append("appended entry differs")
+            o.seek(plan.size)
+            if o.read(plan.append_at - plan.size).strip(b"\x00"):
+                problems.append("alignment padding is not zero")
+    return problems
+
+
+# ------------------------------------------------------------------------- CLI
+
+def default_data():
+    return os.environ.get("DEFJAM_DATA", "")
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    ap.add_argument("--data", default=default_data(), help="data folder (default $DEFJAM_DATA)")
+    ap.add_argument("--check", action="store_true", help="report whether the override exists and is current; write nothing")
+    ap.add_argument("--rebuild", action="store_true", help="rewrite even when the override is current")
+    args = ap.parse_args(argv)
+    if not args.data:
+        print("error: no data folder (pass --data or set DEFJAM_DATA)", file=sys.stderr)
+        return 2
+    src = os.path.join(args.data, "extracted", SCREENS_REL)
+    dst = os.path.join(args.data, "override", SCREENS_REL)
+    if not os.path.isfile(src):
+        print("error: %s not found" % src, file=sys.stderr)
+        return 2
+    if os.path.abspath(src) == os.path.abspath(dst):
+        print("error: source and override are the same file", file=sys.stderr)
+        return 2
+    try:
+        plan = Plan(src)
+    except PatchError as e:
+        print("refused: %s" % e, file=sys.stderr)
+        return 2
+    for line in plan.lines:
+        print(line)
+    if not os.path.isfile(dst):
+        state, code = "missing", 1
+    else:
+        problems = compare_override(plan, dst)
+        state, code = ("current", 0) if not problems else ("stale (%s)" % problems[0], 1)
+    if args.check:
+        print("override %s: %s" % (dst, state))
+        return code
+    if state == "current" and not args.rebuild:
+        print("override %s is already current (%d bytes)" % (dst, os.path.getsize(dst)))
+        return 0
+    write_override(plan, dst)
+    print("wrote %s (%d bytes); original untouched" % (dst, os.path.getsize(dst)))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
