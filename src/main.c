@@ -566,6 +566,35 @@ static void install_fault_handler(void)
 /* ── Entry ─────────────────────────────────────────────────── */
 
 #if defined(_WIN32)
+/* The guest's host address range, held from the first line of WinMain until the memory layout
+ * maps it. The launcher runs before that (Direct3D 11, fonts, artwork, the Discord sign-in), and
+ * whatever it allocated in the low 4 GB could take the guest base at 0x00010000: the base then
+ * moved, its mirrors and the 0xF0000000 tiled aperture failed with error 487, and the first read
+ * of the frame buffer at a match start crashed (a player's build 13 log, 2026-10-21). Reserved in
+ * 64 MB pieces, as many as are free; what the launcher needs then goes elsewhere. */
+#define GUEST_HOLD_PIECE ((uintptr_t)64 << 20)
+static void *s_guest_hold[64];
+
+static void hold_guest_range(void)
+{
+    uintptr_t a = 0x00010000u;
+    int i;
+    for (i = 0; i < 64; i++, a += GUEST_HOLD_PIECE)
+        s_guest_hold[i] = VirtualAlloc((LPVOID)a, GUEST_HOLD_PIECE, MEM_RESERVE, PAGE_NOACCESS);
+}
+
+static void release_guest_range(void)
+{
+    int i, held = 0;
+    for (i = 0; i < 64; i++)
+        if (s_guest_hold[i]) {
+            VirtualFree(s_guest_hold[i], 0, MEM_RELEASE);
+            s_guest_hold[i] = NULL;
+            held++;
+        }
+    fprintf(stderr, "[MEM] guest address range held through start-up: %d of 64 pieces\n", held);
+}
+
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
                    LPSTR lpCmdLine, int nCmdShow)
 #else
@@ -580,6 +609,7 @@ static int host_main(void)
     (void)hPrevInstance;
     (void)lpCmdLine;
     (void)nCmdShow;
+    hold_guest_range();             /* before the launcher: see hold_guest_range */
 #endif
 
     /* Buffered, and flushed: by the 130-odd fflush calls after messages that
@@ -670,6 +700,9 @@ static int host_main(void)
 
     /* Step 2: Initialize Xbox memory layout */
     printf("Initializing Xbox memory layout...\n");
+#if defined(_WIN32)
+    release_guest_range();          /* the layout maps into the range held since start-up */
+#endif
     if (!xbox_MemoryLayoutInit(xbe_data, xbe_size)) {
         host_fatal("Failed to initialize Xbox memory layout.\n"
                    "The required virtual address range may be unavailable.");
