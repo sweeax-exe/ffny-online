@@ -44,10 +44,10 @@ performance measurement. [Download the longer 60-fps MP4](docs/media/hd-16x9-gam
 
 ![New launcher Home screen with quick display settings and Advanced, Mods, logs, folder and Update / Repair buttons](docs/media/launcher.png)
 
-The v0.10.6 beta brings a focused Home screen, with detailed options in
+**Improved Game Launcher (v0.10.6)** brings a focused Home screen, with detailed options in
 [Advanced settings](docs/launcher-and-overlay.md). The brickwork and torn-paper
 style uses the game's charcoal, ivory, red and gold palette.
-[Try the beta setup](https://github.com/vyanhursky/DefJamFFNY-recomp/releases/tag/v0.10.6).
+[Get the latest setup](https://github.com/vyanhursky/DefJamFFNY-recomp/releases/tag/v0.10.6).
 
 ## Features
 

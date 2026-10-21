@@ -1,7 +1,7 @@
 # Current-release media capture plan
 
 The [gallery](README.md) now contains reviewed Mac gameplay, original/HD and
-4:3/16:9 comparisons, the v0.10.6 beta Home/Advanced launcher (October 20), and a
+4:3/16:9 comparisons, the v0.10.6 Home/Advanced launcher (October 20), and a
 labelled historical v0.9.0 F1 overlay. The README shows the new Home screen and uses
 one owner-selected face-off 4:3/16:9 comparison and one compact 20-fps GIF
 (about 4.53 MB together); videos are
@@ -32,7 +32,7 @@ such. Widescreen beta is now released on all three platforms in v0.9.0.
 2. Build/install the selected release from your own supported dump using the
    [setup guide](../setup-installer.md) or [source build guide](../build-and-play.md).
    Initialize the pinned toolkit submodule for a source build. Record the exact
-   tag and commit used; launcher captures target v0.10.6 beta, while the gameplay
+   tag and commit used; launcher captures target v0.10.6, while the gameplay
    capture plan was originally reviewed against v0.7.3.
 3. Use disposable saves for scripted captures. Keep raw PNGs and recordings
    local, under the ignored `logs/` folder or outside the repository.

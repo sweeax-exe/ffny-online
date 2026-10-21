@@ -10,7 +10,7 @@
 
 | Area | State | Notes |
 |---|---|---|
-| Launcher redesign (D138-D140, D142-D144) | ✅ v0.10.6 beta published | PR #58, main `af0c03c` integrated; brighter slider tracks, Windowed 1920×1080 / Auto / 2× defaults, bounded render-scale help and usable 250% compact controls. Native fresh/saved settings and Auto boot pass; final quick 5/5 (units 528/32 skip/one slow deselected), picture/overlay 2/2. Saved preferences preserved; owner confirms physical controller works. PR #58 merged 2e8ec40 after candidate CI 28/28; v0.10.6 prerelease published; release run 39452474210 30/30, nine asset hashes/provenance verified; v0.10.5 remains stable/latest. Refreshed Home/Advanced docs images included; Windows/Deck GUI acceptance pending. |
+| Launcher redesign (D138-D140, D142-D145) | ✅ v0.10.6 stable/latest | PR #58, main `af0c03c` integrated; brighter slider tracks, Windowed 1920×1080 / Auto / 2× defaults, bounded render-scale help and usable 250% compact controls. Native fresh/saved settings and Auto boot pass; final quick 5/5 (units 528/32 skip/one slow deselected), picture/overlay 2/2. Saved preferences preserved; owner confirms physical controller works. PR #58 merged 2e8ec40 after candidate CI 28/28; v0.10.6 promoted stable/latest as Improved Game Launcher (D145); release run 39452474210 30/30, nine asset hashes/provenance verified and unchanged. Refreshed Home/Advanced docs images included; Windows/Deck GUI acceptance pending. |
 | Plan reviewed | ✅ | See `docs/01-plan-review.md` |
 | Source dump located | ✅ | Two images of the owner's disc: XISO (3.0 GB) and full-disc ISO (7.8 GB) |
 | XISO extracted | ✅ | `<data>\extracted\` |
@@ -239,6 +239,8 @@
 
 | D144 | 2026-10-20 | Owner accepted physical controller and requested beta deployment for Deck. Publish v0.10.6 as a GitHub prerelease, keep v0.10.5 latest, merge reviewed PR #58 and publish only workflow-verified game-free setup assets. Completed: PR #58 merge/tag 2e8ec40; release run 39452474210 30/30; nine assets verified. Replace old launcher screenshots throughout README/docs with real current Home/Advanced exports and show Home on the front page; pin those exact UI-only images. | Owner: "Controller works. Deploy this as a beta release and I can install it on Deck"; then requested all older launcher screenshots be replaced and one shown on the front page README. Numeric tag follows release policy; prerelease/latest flags control the beta channel. Existing saved settings stay. No general capture exception or game binary distribution. |
 
+| D145 | 2026-10-20 | Promote existing v0.10.6 to stable/latest and name it **Improved Game Launcher**. Update release title/notes, README/gallery and handover; keep the exact tag and all nine verified assets. | Owner: "You can release 0.10.6 as a stable release now - Call it "Improved Game Launcher" not "Brick and Paper"". API confirms stable/latest and unchanged asset IDs, sizes and digests. No rebuild or new gameplay test; detailed device results are not inferred from this approval. |
+
 D138–D140 were allocated independently on main and the launcher branch. Their rows retain both records, labelled by branch, so existing decision references keep their meaning; no identifiers were renumbered.
 
 
@@ -329,7 +331,6 @@ defjam-recomp/
 
 > Recent entries only; older entries remain unchanged in the local `docs/worklog/` archive.
 
-- 2026-10-19 16:05 — Issue #65 (owner report): with `skip_intro` on, Press Start and menu transition sound effects are silent (v0.10.1 to v0.10.4). Reproduced on the Mac with `RECOMP_APU_PCM` on the `boot` route (skip boot silent at the Audio.Play events; normal boot has the bursts), while the log shows identical `Audio.Play` calls. Temporary `[AUD]` entry logging in the lifted code (not kept, `src/recomp/gen` restored byte for byte) showed a normal boot calls `sub_0003DE20(0)` then, after the movies, `sub_0003DE20(1)`; skip only does the first. D140: `skip_intro.c` calls `sub_0003DE20(1)`. Fixed skip boot has the same bursts as a normal boot; `fight` route 101 present lines, median 120, no crash, save identical; `regress.py --only skipintro` passes 110 s (`logs/regress-20261019-155827.txt`), fails without the fix (`logs/regress-20261019-160026.txt`); native fixture passes. Another `defjam_recomp` from `~/.codex/worktrees/01c5` was running during these runs and one startup crash coincided with it (not reproduced).
 - 2026-10-19 16:20 — Pushed `fix/skip-intro-menu-audio` and opened PR #66 for issue #65 (D140). Prepared v0.10.5 on `chore/release-v0.10.5` (D141): CMake 0.10.5, `docs/releases/v0.10.5.md`; not merged, tagged or published.
 - 2026-10-19 19:58 — v0.10.5 published as latest (D141) from PR #68 merge `cb10747` (PR #66 merged `f2b7c6f`, #65 closed; both PRs CI 28/28). Source release run 39344036207 green 30/30; `check-release.py` verified 418 files; nine assets, installer SHA-256 files match GitHub digests. Not listened to on Windows or Linux.
 - 2026-10-20 12:00 — Issue #72 (v0.10.5 installer build on Windows 11, 5080: "has stopped working" right after build, empty Log lines field). Cannot be diagnosed without the log. Reworded the bug report's Log lines field (`.github/ISSUE_TEMPLATE/bug_report.yml`) to say where `logs/run-*.log.err` is for the installer and source builds, and to fall back to a PowerShell launch plus the Event Viewer "Application Error" entry when no log exists. Not committed or pushed; comment on #72 drafted, not posted.
@@ -337,43 +338,35 @@ defjam-recomp/
 - 2026-10-20 10:57 — D143: extra 640×480/250% QA after 7fac946 CI 28/28 could not reach Render Scale (logs/run-20261020-103627.log.err; triage: normal prelaunch quit, body crowded by chrome). Compact header/padding/footer and viewport-fitted help fixed; semantic hover added for stable native checks. 100/200/250% controls/help/Back pass, all disposable save roots restored. Final quick 5/5 logs/regress-20261020-105429.txt (528 units/32 skip/one slow deselected), picture/overlay 2/2 logs/regress-20261020-105615.txt; hygiene 430/0. PR #58; no merge/tag/release.
 - 2026-10-20 11:45 — D144: owner confirms controller works, authorizes Deck beta and README/docs screenshot replacement. Prepared v0.10.6 prerelease (v0.10.5 stays latest), rebuilt version-only source, captured real native Home/Advanced with disposable data/save guard; replaced launcher.png, added launcher-advanced.png and pinned exact UI-only hashes. Front-page README/player guide/gallery refreshed; final units 529 passed/32 skipped/one slow deselected, 62 local docs links valid, source hygiene 432/0. Initial unit run overlapped the final image/hash replacement (one fingerprint failure); rerun after finalization passed. Release/CI/publication pending.
 - 2026-10-20 12:01 — D144: PR #58 merged 2e8ec40 after candidate 4a4d74f CI 28/28 (39451428303); local/remote branch cleaned, v0.10.6 tagged, check-release 432/0. Source release 39452474210 passes 30/30; nine game-free setup/checksum/provenance assets downloaded, every GitHub digest verified, installer checksums/provenance/source/toolkit/version agree. Published GitHub prerelease/latest=false; v0.10.5 remains latest. New Home/Advanced captures replace older launcher; Home on front README and guide, exact fingerprints pinned. Mac controller owner-accepted; Deck/Windows GUI acceptance pending. No game binary distributed.
+- 2026-10-20 22:13 — D145: owner authorized v0.10.6 stable promotion and name Improved Game Launcher. Updated GitHub title/notes, prerelease=false/latest=true; API confirms latest v0.10.6, same release ID, tag 2e8ec40 and all nine asset IDs/sizes/digests. README/gallery/handover beta wording removed; no rebuild, tag move, asset replacement or game run. Receipts logs/launcher-review/stable-20261020/{before,after,latest}.json.
 
 ## 7. Hand-off
 
-**v0.10.6 beta is published** for the owner's Deck playtest (D144):
+**v0.10.6 is stable/latest — Improved Game Launcher** (D145), owner-approved October 20:
 https://github.com/vyanhursky/DefJamFFNY-recomp/releases/tag/v0.10.6
-It is a GitHub prerelease; v0.10.5 remains stable/latest. PR #58 merged at
-`2e8ec40c93fe309ef0cdba5d4e3915e18f24976e`, the exact v0.10.6 tag. Branch cleanup done;
-local launcher worktree is retained at the tag, plus a docs-only release record branch.
+Promoted the existing prerelease; release ID, tag `2e8ec40c93fe309ef0cdba5d4e3915e18f24976e`
+and all nine asset IDs/sizes/digests are unchanged. API confirms prerelease=false,
+draft=false and Latest=v0.10.6. Updated title/notes and README/gallery/handover wording.
+No rebuild or new tag/assets; no new gameplay tests for this metadata/docs-only promotion.
+Before/after/latest receipts: `logs/launcher-review/stable-20261020/{before,after,latest}.json`.
 
-Candidate 4a4d74f CI **28/28** (39451428303). Tagged Source release **30/30**
-(39452474210), including all three game-free setup builds/inventories and platform checks.
-Local `check-release.py v0.10.6` verified main ancestry, version/notes and 432 files/0 hygiene failures.
-Nine published assets checked: every GitHub digest matches downloaded bytes; installer checksums
-and provenance agree, source=2e8ec40, toolkit=32aab4d, version=0.10.6, no development payload.
-Receipts and downloads remain ignored in `logs/launcher-review/beta-20261020/`.
-No built game executable was distributed. Stable latest was checked after publication.
+Existing validation remains: candidate CI 28/28 (39451428303), tagged release 30/30
+(39452474210), source hygiene 432/0, nine setup/checksum/provenance assets downloaded and verified.
+Native Mac quick 5/5, picture/overlay 2/2, 100/200/250% UI and fresh/saved defaults checks pass.
+Version/media units 529 passed/32 skipped/one slow deselected. Earlier full run remains 16/18
+(host-stall audio underrun, retry27/27; historical replay callback D108 despite exact records).
+Keep those limits; do not claim a new full regression or detailed Deck acceptance from release approval.
 
-README front page, launcher guide and gallery show the new Home; gallery/guide also show Advanced.
-The old launcher.png is replaced; exact Home/Advanced hashes are pinned in source policy (D144).
-Captures use native SDL/Metal, source ffb428b + only CMake 0.10.6 before capture,
-disposable runtime-data/save guard; 2400×1600 downsampled to 1440×960. No game artwork added.
-Historical overlay/setup captures remain explicitly labelled, rather than claiming they are current.
+Settings: new/reset Windowed 1920×1080 / Widescreen Auto / 2×, VSync on; saved preferences preserved.
+Slider contrast, render-resolution help, Home/Advanced shared settings and Setup/pack invariants
+are in `docs/agent/launcher-handoff.md`; implementation evidence in
+`docs/research/launcher-ui-implementation-2026-10-19.md`. README and guides show current Home/Advanced;
+the UI-only exports stay hash-pinned. Mac appearance/controller owner-accepted. More detailed
+Deck/Windows GUI, real pack/Setup utility and gameplay feedback can still be collected.
 
-Mac appearance/controller are owner-accepted. Fresh/reset defaults: Windowed 1920×1080 /
-Widescreen Auto / 2×, VSync on; saved choices preserved. Brighter slider tracks and scale help,
-compact 100/200/250% controls and viewport-bounded help verified. Final game-code quick **5/5**
-(`logs/regress-20261020-105429.txt`, units 528 passed/32 skipped/one slow deselected),
-picture/overlay **2/2** (`logs/regress-20261020-105615.txt`). Version/media units **529/32/1 deselected**.
-The earlier full run remains **16/18** (`logs/regress-20261019-123630.txt`): one host-stall audio
-underrun (combat retry27/27), historical replay callback 0x001E3C14/D108 despite exact records.
-No golden/threshold/diagnostic changes to pass tests. Don't repeat broad suites for these docs.
-
-Next: owner installs Linux beta on Deck in Desktop Mode: extract archive, run DefJamSetup.sh,
-existing install/data folders, **Clean Update**, **Bundled release (offline)**. Latest excludes
-prereleases. Check Home/Advanced controls, scrolling/text, Play, packs/utility actions and Gaming
-Mode display. Existing settings survive; use --launcher if previously skipped. Deck/Windows GUI
-acceptance and real pack/Setup utility acceptance remain. Do not promote to stable before owner feedback.
-Keep `build/Def Jam Launcher Playtest.app` and this worktree available. Code map/invariants:
-`docs/agent/launcher-handoff.md`; detailed evidence: `docs/research/launcher-ui-implementation-2026-10-19.md`.
-Earlier Windows/F2/scene-load/audio backlog remains in §5 and `docs/known-issues.md`.
+Use stable Linux setup in Desktop Mode: existing install/data folders, Clean Update, Bundled or Latest.
+Beta users already have the same installers/game version; promotion alone needs no reinstall.
+Keep launcher worktree `/Users/vlad/.codex/worktrees/launcher-redesign/DefJamFFNY-recomp` and
+`build/Def Jam Launcher Playtest.app`; owner continues in this chat. Finish/merge the docs-only
+promotion record after its CI passes, then prune its merged branch. Earlier Windows/F2/scene-load/
+audio backlog remains in §5 and `docs/known-issues.md`.
