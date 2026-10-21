@@ -3,11 +3,12 @@
 Start with `AGENTS.md`, then `python3 scripts/progress.py brief`. This is a continuation note;
 repository policy and current project state remain in those files.
 
-## Released beta and entry point
+## Stable release and entry point
 
 [PR #58](https://github.com/vyanhursky/DefJamFFNY-recomp/pull/58) merged at `2e8ec40`,
-the exact **v0.10.6 beta** tag. [Published prerelease](https://github.com/vyanhursky/DefJamFFNY-recomp/releases/tag/v0.10.6);
-v0.10.5 remains stable/latest. The owner accepted Mac appearance and confirmed the physical controller
+the exact **v0.10.6** tag. [Improved Game Launcher — stable/latest](https://github.com/vyanhursky/DefJamFFNY-recomp/releases/tag/v0.10.6);
+The owner authorized stable promotion on October 20 (D145); tag/assets are unchanged.
+He accepted Mac appearance and confirmed the physical controller
 works, then requested beta deployment for Deck and fresh README/docs launcher screenshots (D144).
 Candidate CI passed 28/28; tagged release 39452474210 passed 30/30. All nine game-free setup/checksum/
 provenance assets were downloaded and verified against GitHub digests and source/toolkit identity.
@@ -68,6 +69,7 @@ restored; units 529 passed/32 skipped/one slow deselected, 62 local docs links v
    (`regress.py --only launcher,overlay,unlockopt,picture`), then the applicable AGENTS checks.
    Run games serially with `DEFJAM_DATA` pointing to the disposable
    `logs/launcher-review/runtime-data`; leave the owner's save alone.
-3. Keep PROGRESS current. The beta is published; collect Deck acceptance before any promotion.
-   For Deck use the beta Linux setup, existing install/data folders, Clean Update + Bundled;
-   Latest excludes prereleases. Publish only reviewed game-free setups through the tagged workflow.
+3. Keep PROGRESS current. v0.10.6 is stable/latest as **Improved Game Launcher** (D145).
+   Use the Linux setup, existing install/data folders, Clean Update + Bundled or Latest.
+   Collect any further Deck/Windows reports; do not infer detailed playtest results from release approval.
+   Publish only reviewed game-free setups through the tagged workflow.

@@ -49,7 +49,7 @@ Both recordings follow the same seeded inputs but are not frame synchronized.
 
 ![New launcher Home with Widescreen Auto, 1920×1080 and render scale 2 selected](launcher.png)
 
-The v0.10.6 beta Home screen keeps the common display choices beside Play, with
+The v0.10.6 Home screen keeps the common display choices beside Play, with
 Advanced, Mods, Open Logs, Open Folder and Update / Repair directly below.
 The screenshot uses fresh defaults; upgrading preserves your saved choices.
 
