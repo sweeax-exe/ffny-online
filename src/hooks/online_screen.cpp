@@ -1347,7 +1347,14 @@ bool draw(ImVec2 display)
                 netplay_lobby_ranked(fighter);
                 S.page = RANKED;
             } else {
-                if (room.in_room) netplay_lobby_ready(1, fighter);
+                if (room.in_room) {
+                    // The pick tells the room the fighter but leaves "ready" as it was: players asked
+                    // to choose without being readied at once (A readies).
+                    int ready = 0;
+                    for (int i = 0; i < room.player_count; i++)
+                        if (room.players[i].slot == room.you) ready = room.players[i].ready;
+                    netplay_lobby_ready(ready, fighter);
+                }
                 say(std::string(online_fighter_name(fighter)) + " it is.");
                 S.page = HUB;
             }
