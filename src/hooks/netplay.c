@@ -215,7 +215,7 @@ static struct {
     /* the room match for its result report (account.c): set at START, sent once */
     AutoMatch report_m;
     char report_names[MAXP][25];
-    char report_key[24];
+    char report_key[32];
     int reported, fighting_seen, last_late;
     int seed_bypass;                /* crowd_reset seeds a generator with its own words */
     char toast[160];                /* a notice for the fight (netplay_toast), until toast_until */
@@ -1304,7 +1304,7 @@ static int json_put(char *out, int size, int n, const char *s)
 void netplay_on_result(uint32_t winners, uint32_t losers, uint32_t code)
 {
     AutoMatch m;
-    char names[MAXP][25], key[24], json[2048];
+    char names[MAXP][25], key[32], json[2048];
     const OnlineMode *mode;
     int i, n = 0, pos, players, first = 1;
     (void)losers;
@@ -1488,6 +1488,15 @@ void netplay_on_match_start(void)
     N.match_count++;
     N.match = mix32(N.session ^ (N.match_count * 0x9E3779B9u));   /* the same on every PC, new per match */
     N.step = 0;
+    /* every match of a START is reported on its own (the results screen's rematch runs a
+     * second match without a new START): the key gets the match's number */
+    if (N.report_key[0]) {
+        char *dash = strchr(N.report_key, '-');
+        if (dash && (dash = strchr(dash + 1, '-')) != NULL) *dash = 0;
+        snprintf(N.report_key + strlen(N.report_key), sizeof(N.report_key) - strlen(N.report_key), "-%u",
+                 (unsigned)N.match_count);
+    }
+    N.reported = N.fighting_seen = 0;
     memset(N.latest_local, 0, sizeof(N.latest_local));
     N.desync = 0;
     if (N.match_live) N.match_seen = 1;
