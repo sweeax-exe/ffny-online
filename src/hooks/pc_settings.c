@@ -545,6 +545,32 @@ static void run_launcher_if_wanted(void)
 #endif
 }
 
+/* debug-env.txt in the data folder: one RECOMP_NAME=value per line ('#' starts a comment), for a
+ * player to try a runtime switch that has no setting, such as RECOMP_SKIP_RT_SAMPLE=1, when we ask
+ * them to. Only RECOMP_ names, and never over a value the environment already has. */
+static void load_debug_env(const char *root)
+{
+    char path[MAX_PATH * 2], line[512];
+    FILE *f;
+    snprintf(path, sizeof(path), "%s" HOST_SEP "debug-env.txt", root);
+    f = fopen(path, "r");
+    if (!f) return;
+    while (fgets(line, sizeof(line), f)) {
+        char *eq, *end = line + strlen(line);
+        while (end > line && (end[-1] == '\n' || end[-1] == '\r' || end[-1] == ' ')) *--end = 0;
+        if (strncmp(line, "RECOMP_", 7) || !(eq = strchr(line, '=')) || eq - line > 64) continue;
+        *eq = 0;
+        if (getenv(line)) continue;
+#if defined(_WIN32)
+        _putenv_s(line, eq + 1);
+#else
+        setenv(line, eq + 1, 0);
+#endif
+        fprintf(stderr, "[SETTINGS] debug-env.txt: %s=%s\n", line, eq + 1);
+    }
+    fclose(f);
+}
+
 int pc_settings_init(void)
 {
     char root[MAX_PATH * 2];
@@ -564,6 +590,7 @@ int pc_settings_init(void)
     }
     supply_runtime_defaults();
     have_root = find_data_root(root, sizeof(root));
+    if (have_root) load_debug_env(root);
 
     if (env && !_stricmp(env, "none")) {
         g_path[0] = 0;

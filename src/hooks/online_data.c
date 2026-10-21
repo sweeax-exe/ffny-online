@@ -96,6 +96,11 @@ static void load_fighters(void)
             while (paren > disp && paren[-1] == ' ') paren--;
             *paren = 0;
         }
+        /* Teck, Santos, O.E and Eric Sermon: story figures without a select portrait. A match with
+         * any of them crashes the load (WrestlerSpecInit, docs/research/crash-001B2480.md), also as
+         * the CPU that fills a mode's free places, so they are in no list at all (the relay plays
+         * them as Doc for older builds). */
+        if (atoi(id) == 40 || atoi(id) == 41 || atoi(id) == 52 || atoi(id) == 78) continue;
         f = &g_fighters[g_fighter_count++];
         f->id = atoi(id);
         snprintf(f->name, sizeof(f->name), "%s", disp);
