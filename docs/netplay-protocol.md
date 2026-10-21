@@ -114,6 +114,7 @@ to the lobby with the same token.
 | 0x17 | `VOTE` | `token` 8, `choice` u8 (0..2: index into the candidates) |
 | 0x18 | `LEAVE` | `token` 8 |
 | 0x1B | `OVER` | `token` 8 (this client's match has ended) |
+| 0x1C | `WHO` | `token` 8 (who is online; not a pending request, the hub asks every few seconds) |
 
 ### Server to client
 
@@ -122,6 +123,7 @@ to the lobby with the same token.
 | 0x11 | `ROOMS` | `count` u8, then per room: `room` 6, `name` string, `mode` u8, `players` u8, `max` u8, `phase` u8 |
 | 0x19 | `ROOM` | the whole room: `room` 6, `you` u8 (your slot), `host` u8 (host's slot), `phase` u8, `Settings`, `candidates` u8 count + count x u8, `votes` count x u8 (votes per candidate), `ms_left` u16 (voting countdown), `players` u8 count, then per player: `slot` u8, `name` string, `ready` u8, `fighter` u8, `voted` u8 (0xFF = not yet) |
 | 0x1A | `START` | `seed` u32, `mode` u8, `rounds` u8, `venue` u8, `players` u8 count, per player: `slot` u8, `fighter` u8 |
+| 0x1D | `PLAYERS` | `online` u16 (clients connected), `rooms` u16, `count` u8 (at most 40), per player: `name` string, `state` u8 (0 in the hub, 1 in a room, 2 playing). Lobby players of the asker's build, the hub first, then by name; as many as fit one datagram. Relays before FFNY Online build 13 ignore `WHO`. |
 
 `ROOMS` lists public rooms only, newest first, at most 30 (as many as fit in 1200 bytes).
 `ROOM` is sent to every member whenever anything in the room changes, and once a second while
