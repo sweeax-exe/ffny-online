@@ -19,6 +19,10 @@ at the cited place), [I] inferred, [U] unknown.
    It can reach players. The skipped call itself is harmless, but the late completion also writes four
    words into whatever now owns that stack. Not fixed here; see the follow-up below. Details in
    [stale-urb-completion.md](stale-urb-completion.md).
+3. **The freeze after a good start (2026-10-21, §6).** The same deadlock, mid-boot, after the watchdog switched
+   itself off: in boots where the main thread stays at priority 16, each fence spin needs a rescue, and the
+   rescue's re-pin closed its window too late to be watched again. Fixed in the toolkit (window closed before the
+   pin, a lapsed window counts as closed). What holds the main thread at 16 is still unknown.
 
 ## 1. The hang
 
@@ -198,6 +202,8 @@ starved ...`), and so is a quiet thread that turned out to be waiting (`... idle
   `-191543` (dump `logs/hang-20261020-191644`), `-192044`. Good: `-164727`, `-171453`.
 - `logs/hang-20261020-183552` is a dump of the wrong process (the installed copy), kept as the example of the pid bug.
 - ICALL: `logs/run-20261020-182644.log.err` line 1185.
+- §6: frozen boot `logs/run-20261021-003451` (dump `logs/hang-20261021-003552`); stuck-16 boot that passed on
+  the fix build `logs/run-20261021-005427`; the recovered twin of the owner's boot `logs/run-20261019-173225`.
 
 ## 4. Results with the watchdog
 
@@ -234,3 +240,104 @@ Log: `logs/run-hung-boot-account-test.log.err`, the owner's own launcher boot. A
 - [U] Whether the rescue 4 s earlier contributed. A rescue can let interrupt work run beside title code (§1, the
   misfire). Unlike the misfire, this rescue was a Ready-starved one, and the boot ran 234 frames past it. A run
   with `RECOMP_TIMER_WATCHDOG=0` that freezes the same way would settle it.
+
+## 6. Why the GPU executor stops after a good start (2026-10-21)
+
+Sources: the owner's log of §5, every harness log from 2026-10-19 to -21, a frozen process held live
+(`logs/run-20261021-003451`, dump `logs/hang-20261021-003552`), a priority poller run beside the boots
+(`NtQuerySystemInformation` every 20 ms, reads only), and the runtime's host globals read through the
+linker map.
+
+### Short answer
+
+The executor stops because §1's deadlock comes back after the watchdog has switched itself off. In some boots
+Windows holds the title's main thread at priority 16 for the whole run, not only at start-up. Every time
+Direct3D's fence spin runs (`sub_0021EC50`), it starves the timer thread again, and the watchdog rescues it, several
+times a boot. A rescue ends with the timer thread pinning itself back to the guest CPU and *then* closing the
+rescue window. The pin puts it behind the spinning main thread at once, so the window is never closed, and the
+watchdog does not look at a thread whose window is open. From then on nothing rescues it. Fixed in the toolkit:
+the window is closed before the pin, and a window that has run out counts as closed.
+
+### What a frozen boot looks like (live)
+
+- [V] `thread-sched.py`: the main thread Running at 16 (base 8) on CPU 2, a full second of CPU, no context
+  switch; its native stack is `sub_0021EC50+0x91A <- sub_00219AA0 <- sub_0010BBE0 <- ...`, §1's spin. The
+  timer thread is Ready at 15, CPU mask `0x4`, starved; four more guest threads are Ready and starved.
+- [V] Host globals: `g_timer_beat` had not moved for 8.4 s; `g_timer_free_until` was non-zero and long past;
+  `g_timer_rescues` 6; one software method queued and not presented (`g_swm_tail` 87, `g_swm_head` 86);
+  `g_gpu_servicing` 0; the DPC queue empty; no runtime lock held.
+- [V] The log: rescues at frames 0, 5, 23, 43, 59; frames stop at 80; no watchdog line after the last rescue.
+- [V] Widening the timer thread's CPU mask from outside, which is what a rescue does, revived the boot: the queued
+  method was presented, `g_timer_free_until` went to 0, and the frame count went from 80 to 1181.
+- [V] The code (`kernel_timer_heartbeat`, before the fix): `xbox_PinToGuestCore()` then
+  `InterlockedExchange64(&g_timer_free_until, 0)`; the watchdog skipped any thread with `g_timer_free_until` set.
+
+### The main thread at 16
+
+- [V] Poller, eight unscripted boots of the old build: in three the main thread was at 16 (base 8) when first
+  seen. In two of them it was back at 9 within 100 ms and the boot was clean. In the third it stayed at 16 for
+  the whole run, and that boot froze as above.
+- [V] On a later boot with the main thread stuck at 16, one `SetThreadPriority(main, THREAD_PRIORITY_NORMAL)`
+  from outside, the level it already had, brought it to 8, and it stayed there. So the 16 is a dynamic priority
+  that never decays; re-setting the base clears it.
+- [U] What raises it. The runtime calls no MMCSS function (SDL's WASAPI backend does, on its own audio thread,
+  which the Windows build does not use). The poller first sees it in `Wait/Executive` at start-up. §1's 20
+  suggests a value set from outside rather than a boost. A kernel trace (WPR, priority events) would settle it.
+- [I] A main thread stuck at 16 also starves every other guest thread on the guest CPU whenever it runs, not only
+  the timer thread. That is the slow start in the owner's boot: the loader thread (#8, `0x001F683A` with
+  `0x001ED080`) opens its first file two frames after it is created in good boots and 229 frames later there
+  (`run-20261019-173225`: 934 frames later, then recovered). It is also behind
+  `[IRQL] a thread stayed at DISPATCH_LEVEL for 200 ms`: a title thread at DISPATCH_LEVEL, holding the dispatch
+  lock, preempted by the main thread.
+
+### Across the logs
+
+- [V] Every log with a rescue at frame 0, when Direct3D starts, failed later: 9 of 9
+  (`run-20261020-194554`, `-194724`, `-200120`, `-203920`, `-204106`, `-224630`, `-224736`,
+  `run-20261021-000511` and the owner's). Eight of them had a second rescue at frame 5, after the loader thread
+  is created, and stopped at frame 21, 53 or 374 with `DMA_GET` frozen. About 144 boots without a rescue show
+  none of it.
+- [V] Not a second copy: only `-200120` overlapped another copy of the game (the installed one).
+
+### Does the watchdog contribute?
+
+- [V] It does not cause the freeze. The frozen boot was §1's deadlock, and doing by hand what a rescue does
+  ended it. The watchdog carried that boot past five deadlocks and lost the sixth to its own re-pin.
+- [I] Without the watchdog these boots hang at their first deadlock, at frame 0, as in §1.
+  `RECOMP_TIMER_WATCHDOG=0` runs: see the results below.
+
+### The owner's boot (§5)
+
+- [I] Same precondition: a rescue at frame 0 and the loader thread starved for about 3.9 s.
+- [U] The last step. The re-pin race cannot be it: the watchdog wrote `idle for 62 ms but not starved` at frame
+  234, which it only does with the window closed, and a later starvation would have been rescued and logged. The
+  timer thread was blocked on a host lock for those 62 ms (wait reason 37). Candidates: a lock held by a title
+  thread that the main thread at 16 starves, or Direct3D's interrupt enable left cleared. Neither is shown. A
+  live look at the next such freeze would settle it.
+
+### The fix (toolkit `kernel_bridge.c`)
+
+- `kernel_timer_heartbeat` closes the window with a compare-exchange before it pins the thread back.
+- `kernel_timer_watchdog` treats a window that has run out as closed. A rescue that lands between the
+  compare-exchange and the pin therefore costs at most one more window, and its log line says so
+  (`it was starved again before it closed the last window`).
+- Not changed: the realtime main thread itself. Re-setting a guest thread's priority when it is found above 15
+  with a lower base would remove the cause of §1 and of this. That is proposed separately.
+
+### Results
+
+- [V] Old build, unscripted boots shaped like `regress.py`'s m3 (`RECOMP_SETTINGS=none`, no pad script),
+  2026-10-21 00:28-00:35: 7 of 8 ok; the 8th is the frozen boot above.
+- [V] Fix build (a private build of the same tree plus the fix), 2026-10-21 00:51-00:56: 5 of 5 ok. One of them
+  had the main thread stuck at 16, with rescues at frames 0, 5, 156 and 157, and reached the title, but its
+  priority was also reset by hand during the boot, so it is not clean evidence.
+- [V] Fix build, 14:16-14:34: 20 of 20 ok, no rescue at all. The main thread went to 16 in 9 of the 20 and
+  came back within 100 ms every time, so no boot needed the fix.
+- [U] The fix has not yet been seen to rescue a stuck-16 boot with nobody intervening. It cannot be forced from
+  outside: this account gets the HIGH priority class at most (13-15), and only a thread above 15 makes the
+  deadlock permanent. Watch the logs for rescues past frame 0 and for the new
+  `starved again before it closed the last window`.
+- `RECOMP_TIMER_WATCHDOG=0` was not compared: with no stuck-16 boot in the day's 20, such runs compare boots that
+  never need the watchdog. The live by-hand rescue above is the direct answer.
+- [V] Two-copy online test runs by another session on a build with the fix (`run-20261021-132658`/`-132704`,
+  `-135558`/`-135604`): no rescue, no freeze.
