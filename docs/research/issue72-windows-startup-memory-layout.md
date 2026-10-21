@@ -206,3 +206,47 @@ and its v0.10.5 baseline remain unchanged.
 confirms the Windows fix. No auto-merge, tag or release was enabled. Fork PR #3
 targets the project's `defjam/audio-fix`, not the upstream repository. Separate
 texture-list PR #73 must be preserved when the two toolkit topics are integrated.
+
+## 2026-10-21 reporter follow-up: setup version mismatch
+
+[Reporter reply](https://github.com/vyanhursky/DefJamFFNY-recomp/issues/72#issuecomment-6311677698)
+contains setup logs, not a new game-crash log. The screenshot and current five-line
+log show the correct candidate (`source=9e4f805`, `toolkit=e818066`) selected
+**Bundled release (offline)** and **Clean Rebuild (same version)**, then stopped:
+`Repair and Clean Rebuild require the installed version`.
+
+The 1,309-line log is the earlier successful v0.10.1 installation (`0985f40`,
+toolkit5445b73) in the default AppData app/data locations; it ends with setup
+complete. The original v0.10.5 game crash came from a different C:\Games installation.
+The current installed receipt was not attached, but the refusal establishes that
+its version differs from the candidate; the supplied earlier log identifies
+v0.10.1 at the selected location. This is consistent with selecting the older
+installation rather than the original v0.10.5 one.
+
+`setup/releases.py::policy` intentionally refuses same-version rebuild across
+versions, before source preparation/build/activation. For the selected v0.10.1
+location, choose **Clean Update** to install the bundled patched v0.10.5. Keep
+its app/data pair; leave the game-copy field blank to reuse verified extraction.
+Alternatively choose the original v0.10.5 app/data pair and use Clean Rebuild.
+Play is initially disabled and is enabled after successful setup; Install/Repair
+starts the selected operation. This attempt never exercised the patched runtime,
+so it neither confirms nor disproves the memory fix. No further runtime fix or
+new Windows artifact is justified by these logs.
+
+[Clarifying test instructions posted](https://github.com/vyanhursky/DefJamFFNY-recomp/issues/72#issuecomment-6316443011).
+Existing setup policy/recovery tests pass **72/1 skip**; direct checks reproduce
+the exact rebuild refusal and confirm update/auto accept 0.10.1 → 0.10.5, and
+rebuild accepts 0.10.5 → 0.10.5. No installer policy was relaxed or changed.
+
+Separately, PR #76 integration CI passed all Windows/macOS jobs but failed Ubuntu
+linking the newly standalone fixture: undefined `feclearexcept` in win32_compat.
+Published test-only toolkit **8589f8834e3c370e2def3c6757b0d4f6e3e89d70** adds Linux
+`libm` linkage to that fixture, without runtime code changes. Parent PR pin now
+includes it; integration CI must rerun. Local fixture passes on Mac (the first
+sandboxed run could not create shared memory; permitted rerun passed). No full
+game regression is repeated for a test-build-only change.
+
+Evidence (ignored): `logs/issue72/followup-20261021/candidate-rebuild.log` is
+attachment51061AB7 (5 lines), `old-install-0.10.1.log` is attachment2778FFCD
+(1309 lines); `setup.png`, `error-message.png`, `pr-ci-failure.log`, and
+`issue-reply.md`. No reporter paths or log contents are committed.

@@ -61,7 +61,7 @@
 | Developer module, debug menu and Story scenes (D129, D130) | ✅ released v0.10.0 (macOS tested; Windows by CI compile only) | EA's developer run module (`CRunModuleAki`) rebuilt from the host and handed to the game's run-module manager. Its debug menu works: any match (`MODE - GAME`, tested Ludacris vs David Banner), REAL TIME CINEMA, stage viewer; controls mapped (d-pad, LT/RT ±10, A, Start = pause, QUIT → main menu). Any of the 38 Story scenes by name with no save: overlay Debug tab, `scenarios.py scene`, `RECOMP_SCENE`. Guides `docs/developer-menu.md`, `docs/scene-selector.md`; research `docs/research/dev-module-revival.md`. |
 | Picture options and setup progress fix (D136-D138; issues #40, #44, #47) | ✅ released v0.10.3 (latest, 2026-10-19) | PR #54 (setup progress-file contention, WinError 5) merged `c37bf34`; PR #55 (`[display] brightness`, `vignette`, `vignette_strength`, launcher/overlay Display → Picture, live; `docs/research/picture-options.md`) merged `1b04982`. Beta pre-release, owner's Deck play-test: brightness and vignette "work perfectly"; promoted to latest (D138). Windows not play-tested. Subtitles (#44) not started. |
 | Mac setup quarantine fix (D139; issue #59) | ✅ released v0.10.4 (latest, 2026-10-19) | PR #60 merged `1d4e13d`: the macOS setup unpacks its digest-checked payload with `ditto --noqtn` plus `xattr -d -r com.apple.quarantine`, so a browser-downloaded setup no longer stops on *"python3" Not Opened*. Owner confirmed with a quarantined test DMG. Tag `v0.10.4` on release PR #63 merge `110d50e`; game and toolkit identical to v0.10.3. |
-| Issue #72 / Windows startup crash | ⏳ PRs submitted; reporter retest pending | D143–D144 (issue72 branch). Incomplete guest layout caused AC97 to read missing memory. Published toolkit e818066, parent 9e4f805 on fix/issue72-startup. Windows run 39519139830 green: native memory 5/5, runtime/game-source compilation, installer 177 pass/9 skip, inventory and packaged smokes. Game-free artifact 12310426740 downloaded/hash/provenance verified; issue comment 6304712397 links it and asks @klwn911 to Clean Rebuild/test menu+fight. Parent PR #76/fork PR #3 open; integration CI running. Hold merge/release for reporter confirmation and owner instruction. Report docs/research/issue72-windows-startup-memory-layout.md. |
+| Issue #72 / Windows startup crash | ⏳ reporter setup retry needed; PRs open | Correct patched candidate9e4f805/e818066 opened, but Clean Rebuild refused different installed version; old supplied log shows0.10.1/default location versus original0.10.5 elsewhere. Clarification6316443011: Clean Update + Bundled offline for0.10.1, or select original0.10.5 app/data and rebuild. Runtime not retested; no new runtime fix/artifact indicated. PR76/forkPR3 remain unmerged. Test-only toolkit8589f88 fixes Ubuntu fixture libm link; parent integration CI rerun pending. Setup policy tests72pass/1skip. |
 
 ## 1. Decisions log
 
@@ -332,7 +332,6 @@ defjam-recomp/
 
 > Recent entries only; older entries remain unchanged in the local `docs/worklog/` archive.
 
-- 2026-10-19 16:20 — Pushed `fix/skip-intro-menu-audio` and opened PR #66 for issue #65 (D140). Prepared v0.10.5 on `chore/release-v0.10.5` (D141): CMake 0.10.5, `docs/releases/v0.10.5.md`; not merged, tagged or published.
 - 2026-10-19 19:58 — v0.10.5 published as latest (D141) from PR #68 merge `cb10747` (PR #66 merged `f2b7c6f`, #65 closed; both PRs CI 28/28). Source release run 39344036207 green 30/30; `check-release.py` verified 418 files; nine assets, installer SHA-256 files match GitHub digests. Not listened to on Windows or Linux.
 - 2026-10-20 12:00 — Issue #72 (v0.10.5 installer build on Windows 11, 5080: "has stopped working" right after build, empty Log lines field). Cannot be diagnosed without the log. Reworded the bug report's Log lines field (`.github/ISSUE_TEMPLATE/bug_report.yml`) to say where `logs/run-*.log.err` is for the installer and source builds, and to fall back to a PowerShell launch plus the Event Viewer "Application Error" entry when no log exists. Not committed or pushed; comment on #72 drafted, not posted.
 - 2026-10-20 10:28 — D142 launcher follow-up: main af0c03c integrated (v0.10.5 fixes preserved, concurrent D138-D140 labelled); slider-only contrast, Windowed 1920×1080 / Auto / 2× first-run/reset defaults, render-height help and viewport-bounded tooltip. Native new/saved settings + Auto boot and 200% narrow help verified; all disposable saves restored. Final quick 5/5 logs/regress-20261020-102601.txt (units 528 pass/32 skip/one slow deselected), picture/overlay 2/2 logs/regress-20261020-102746.txt; Swift wrappers type-check; hygiene 430/0. PR #58 remains for playtest, no merge/tag/release.
@@ -340,39 +339,56 @@ defjam-recomp/
 - 2026-10-20 11:45 — D144: owner confirms controller works, authorizes Deck beta and README/docs screenshot replacement. Prepared v0.10.6 prerelease (v0.10.5 stays latest), rebuilt version-only source, captured real native Home/Advanced with disposable data/save guard; replaced launcher.png, added launcher-advanced.png and pinned exact UI-only hashes. Front-page README/player guide/gallery refreshed; final units 529 passed/32 skipped/one slow deselected, 62 local docs links valid, source hygiene 432/0. Initial unit run overlapped the final image/hash replacement (one fingerprint failure); rerun after finalization passed. Release/CI/publication pending.
 - 2026-10-20 12:01 — D144: PR #58 merged 2e8ec40 after candidate 4a4d74f CI 28/28 (39451428303); local/remote branch cleaned, v0.10.6 tagged, check-release 432/0. Source release 39452474210 passes 30/30; nine game-free setup/checksum/provenance assets downloaded, every GitHub digest verified, installer checksums/provenance/source/toolkit/version agree. Published GitHub prerelease/latest=false; v0.10.5 remains latest. New Home/Advanced captures replace older launcher; Home on front README and guide, exact fingerprints pinned. Mac controller owner-accepted; Deck/Windows GUI acceptance pending. No game binary distributed.
 - 2026-10-20 20:22 — Owner requested a submitted PR and explicitly deferred release until reporter confirmation. Opened fork toolkit PR #3 targeting defjam/audio-fix (not upstream). Submitted parent PR #76, focused integration on current main7bb4bdf: published e818066 pin, permanent Windows/POSIX placement fixture CI, issue72 research/state only; original Windows candidate9e4f805/artifact unchanged. Windows candidate checks passed; integration PR CI will validate current-main combination. Branch-labelled concurrent D143/D144 decisions retained, beta handoff preserved. No merge/tag/release.
+- 2026-10-21 08:53 — Issue72 new reporter logs diagnosed as setup version mismatch, not new runtime crash: correct candidate9e4f805/e818066 stops at policy before rebuilding (5-line attachment51061AB7); older attachment2778FFCD is successful0.10.1 in default AppData, original0.10.5 was elsewhere. Posted clarification6316443011: Clean Update + bundled offline for selected0.10.1, or original0.10.5 folders + rebuild; no uninstall/new artifact needed. Policy checks reproduce refusal/update success; existing tests72pass/1skip. Separate PR76 Ubuntu standalone fixture link missing libm/feclearexcept fixed in published test-only toolkit8589f88; Mac fixture passes with shared-memory access. Integration pin/CI updated; runtime unchanged; PRs unmerged/release hold persists. Evidence logs/issue72/followup-20261021/.
 
 ## 7. Hand-off
 
-**PRs submitted; hold merge/release.** Parent https://github.com/vyanhursky/DefJamFFNY-recomp/pull/76
-(`codex/issue72-windows-startup` → main), fork https://github.com/vyanhursky/xboxrecomp/pull/3
-(`defjam/issue72-memory-layout` → defjam/audio-fix). Both open/mergeable; parent CI running,
-no auto-merge enabled. Vlad will request release after reporter confirmation. No merge/tag/release now.
-Integration worktree `logs/issue72/pr-integration` starts at main7bb4bdf and preserves its
-launcher/beta work; adds the same e818066 pin, permanent Windows/POSIX placement fixture CI
-and issue72 research/state only. Original 0.10.5 candidate/artifact remains unchanged.
-Preserve independent texture-list PR #73/toolkit72bec86 when integrating both topics.
+**Issue #72: waiting for reporter to retry setup correctly, not a new runtime crash.**
+2026-10-21 reply6311677698: candidate log identifies correct source9e4f805/toolkit e818066,
+then refuses Clean Rebuild because installed version differs. Earlier supplied setup
+log is successful0.10.1 in default AppData; original0.10.5 crash was in a different
+C:\Games installation. Current receipt not attached; earlier version inferred from
+old log, but mismatch proved by the current policy error. No patched game run yet.
 
+Corrected instructions posted/read back:
+https://github.com/vyanhursky/DefJamFFNY-recomp/issues/72#issuecomment-6316443011
+Use **Clean Update** + **Bundled release (offline)** for selected0.10.1 app/data;
+or choose original0.10.5 app/data and Clean Rebuild. Reuse extraction with blank dump;
+no uninstall/deletion needed. Play enables after successful setup. No new runtime
+fix or Windows artifact is justified. Setup policy/recovery tests72pass/1skip;
+direct policy checks reproduce refusal and confirm update/auto succeeds. No policy change.
 
-**Issue #72 PR integration requested; leave unmerged/unreleased pending reporter confirmation and owner instruction.**
-Toolkit PR: https://github.com/vyanhursky/xboxrecomp/pull/3 (`defjam/audio-fix` base).
-Parent integration branch `codex/issue72-windows-startup` starts at main 7bb4bdf;
-it adds only the published e818066 pin, permanent Windows/POSIX memory fixture CI,
-and issue72 research/state. Reporter candidate remains unchanged on the v0.10.5 baseline
-(commit9e4f805); this integration branch retains current main's launcher/beta work.
-Separate open texture-list PR #73/toolkit72bec86 is not replaced; preserve both topics
-when merging their pins. Do not merge or tag until Vlad asks after reporter confirmation.
+Parent https://github.com/vyanhursky/DefJamFFNY-recomp/pull/76 (current main integration)
+and fork https://github.com/vyanhursky/xboxrecomp/pull/3 (base defjam/audio-fix) remain
+**open/unmerged; no auto-merge/tag/release** until reporter confirms and Vlad instructs.
+Parent worktree logs/issue72/pr-integration, branch codex/issue72-windows-startup.
+Separate texture-list PR73/toolkit72bec86 must be preserved when integrating both topics.
 
-Windows candidate run39519139830 passed: native allocator1/1, existing memory4/4,
-runtime/game-source compilation, installer177 pass/9 skip, inventory/packaged smokes.
-Artifact https://github.com/vyanhursky/DefJamFFNY-recomp/actions/runs/39519139830/artifacts/12310426740
-(sign-in required; expires2026-11-20 00:11UTC), game-free setup/checksum/provenance only.
-Verified installer SHA25687d84cd4e373206987c96498d1295196f6bf16d7c69ccd75e326fe07a6f590ed,
-source9e4f805 and toolkit e818066/development=false. Reporter asked to Clean Rebuild,
-test menu+fight: https://github.com/vyanhursky/DefJamFFNY-recomp/issues/72#issuecomment-6304712397
-Reporter acceptance pending; agent has not run the installed game on Windows.
-Mac baseline+fix all17 game gates pass across two runs, units478/44skip/1deselected;
-see `docs/research/issue72-windows-startup-memory-layout.md` for evidence/history/root cause.
-Integration onto current main has its own PR CI; candidate evidence is not a current-main game playtest.
+Initial PR76 CI passed all Windows/macOS jobs but Ubuntu fixture linking lacked libm
+(undefined feclearexcept). Published test-only toolkit **8589f8834e3c370e2def3c6757b0d4f6e3e89d70**
+adds Linux libm linkage to tests/windows_guest_layout/CMakeLists.txt; runtime code unchanged.
+Parent PR pin updated; integration CI rerun pending. Local mapping fixture1/1 passes
+with shared-memory access (sandboxed attempt was blocked, permitted rerun passed).
+No broad game suite repeated for test CMake change.
+
+Original verified Windows candidate stays on v0.10.5 source9e4f805/runtime e818066.
+Run39519139830 green: memory5/5, runtime/game-source compilation, installer177/9skip,
+inventory and packaged smokes. Artifact (sign-in; expires2026-11-20 00:11UTC):
+https://github.com/vyanhursky/DefJamFFNY-recomp/actions/runs/39519139830/artifacts/12310426740
+Game-free installer54,650,880bytes SHA256
+87d84cd4e373206987c96498d1295196f6bf16d7c69ccd75e326fe07a6f590ed, checksum/provenance verified.
+Original artifact/test request issuecomment6304712397 remains valid except same-version
+operation assumption now clarified. No game executable/translated code distributed.
+
+Root/fix/history and Mac regression evidence are in
+`docs/research/issue72-windows-startup-memory-layout.md` (new2026-10-21 section).
+New ignored evidence logs/issue72/followup-20261021/: candidate-rebuild.log=5lines
+(attachment51061AB7), old-install-0.10.1.log=1309lines (attachment2778FFCD), screenshots,
+pr-ci-failure.log and issue-reply.md. Game log not supplied in this follow-up.
+Toolkit worktree logs/issue72/toolkit at8589f88; primary submodule remains at candidatee818066.
+No game running. Prior Mac baseline+fix all17 game gates pass over two runs and
+units478pass/44skip/1deselected; see report for logs. Use DEFJAM_DATA=/Users/vlad/Code/defjam-data,
+mac-profiles fixture, documented uv Python if rerunning.
 
 **v0.10.6 beta is published** for the owner's Deck playtest (D144):
 https://github.com/vyanhursky/DefJamFFNY-recomp/releases/tag/v0.10.6
