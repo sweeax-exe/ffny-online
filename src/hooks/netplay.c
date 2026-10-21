@@ -66,6 +66,8 @@ void netplay_lobby_ready(int r, int f) { (void)r; (void)f; }
 void netplay_lobby_vote(int c) { (void)c; }
 void netplay_lobby_leave(void) {}
 void netplay_lobby_room(NetRoom *o) { memset(o, 0, sizeof(*o)); }
+void netplay_lobby_ranked(int f) { (void)f; }
+int netplay_lobby_queue(int *w, int *s, char *t, int n) { (void)w; (void)s; if (t && n > 0) t[0] = 0; return NETQUEUE_NONE; }
 int netplay_in_lobby(void) { return 0; }
 void netplay_sync_point(void) {}
 void netplay_on_main_menu(void) {}
@@ -114,6 +116,9 @@ void netplay_crowd_update(void) { sub_00081170(); }
 #define T_OVER        0x1B
 #define T_WHO         0x1C      /* who is online (relays since build 13) */
 #define T_PLAYERS     0x1D
+#define T_RANKED      0x1E      /* the ranked queue (relays since build 15) */
+#define T_QUEUE       0x1F
+#define TICKET_LEN    16        /* RANKED: the account service's one-time ticket */
 
 /* DATA payloads between the game copies (opaque to the relay) */
 #define P_GAMEHELLO   1     /* host -> guest: u32 session seed, u8 input delay, u8 lockstep version */
@@ -197,6 +202,8 @@ static struct {
     NetRoomInfo rooms[32];
     NetPlayer who[40];              /* the last PLAYERS */
     int who_count, who_online, who_rooms;
+    int queue_state, queue_waited, queue_searching;     /* the ranked queue (NETQUEUE_*) */
+    char queue_text[96];
     int room_count;
     unsigned rooms_version;
     uint8_t pend[300];              /* the request waiting for an answer */
@@ -231,6 +238,7 @@ static BOOL CALLBACK init_once(PINIT_ONCE o, PVOID p, PVOID *c)
     N.sock = INVALID_SOCKET;
     N.arrived = CreateEventW(NULL, FALSE, FALSE, NULL);
     N.who_online = -1;              /* no PLAYERS yet */
+    N.queue_state = NETQUEUE_NONE;
     return TRUE;
 }
 
@@ -258,6 +266,10 @@ static void toast(unsigned ms, const char *format, ...)
     va_end(args);
     fprintf(stderr, "[NETPLAY] notice: %s\n", N.toast);
 }
+
+static const char *player_name(int pos);
+static void put32(uint8_t *p, uint32_t v);
+static void send_data(const uint8_t *payload, int len);
 
 int netplay_toast(char *out, int size)
 {
@@ -679,6 +691,26 @@ static void on_players(const uint8_t *b, int len)
     LeaveCriticalSection(&g_cs);
 }
 
+static void on_queue(const uint8_t *b, int len)
+{
+    static const char *const say[] = { "Checking your account...", "Searching for an opponent...",
+        "Ranked play needs a signed-in account (sign in with Discord in the launcher).", "", "Opponent found!" };
+    int state;
+    if (len < 5 || b[0] > NETQUEUE_FOUND) return;
+    state = b[0];
+    EnterCriticalSection(&g_cs);
+    if (N.pend_len && N.pend[5] == T_RANKED) answered();
+    if (N.queue_state != NETQUEUE_NONE || state == NETQUEUE_FOUND) {
+        if (state != N.queue_state)
+            fprintf(stderr, "[NETPLAY] ranked queue: state %d\n", state);
+        N.queue_state = state == NETQUEUE_OFF ? NETQUEUE_NONE : state;
+        N.queue_waited = b[1] | b[2] << 8;
+        N.queue_searching = b[3] | b[4] << 8;
+        snprintf(N.queue_text, sizeof(N.queue_text), "%s", say[state]);
+    }
+    LeaveCriticalSection(&g_cs);
+}
+
 static void on_room(const uint8_t *b, int len)
 {
     Reader r = { b, len, 0, 0 };
@@ -888,6 +920,9 @@ static void on_packet(const uint8_t *b, int len)
         break;
     case T_PLAYERS:
         if (N.lobby) on_players(b + 6, len - 6);
+        break;
+    case T_QUEUE:
+        if (N.lobby) on_queue(b + 6, len - 6);
         break;
     case T_ROOM:
         if (N.lobby) on_room(b + 6, len - 6);
@@ -1237,6 +1272,68 @@ void netplay_lobby_quick(int mode, int max)
     request(T_QUICK, b, 2);
 }
 
+/* Asks the account service for a ticket (it blocks), then joins the queue with it. */
+static DWORD WINAPI ranked_thread(LPVOID param)
+{
+    char ticket[33];
+    uint8_t b[TICKET_LEN + 1];
+    int i, fighter = (int)(INT_PTR)param;
+    if (!account_ranked_ticket(ticket)) {
+        EnterCriticalSection(&g_cs);
+        if (N.queue_state == NETQUEUE_TICKET) {
+            N.queue_state = NETQUEUE_REFUSED;
+            snprintf(N.queue_text, sizeof(N.queue_text), "%s", account_state() == ACCOUNT_IN ?
+                     "The account service did not answer; try again." :
+                     "Ranked play needs a signed-in account (sign in with Discord in the launcher).");
+        }
+        LeaveCriticalSection(&g_cs);
+        return 0;
+    }
+    for (i = 0; i < TICKET_LEN; i++) {
+        unsigned v;
+        sscanf(ticket + 2 * i, "%2x", &v);
+        b[i] = (uint8_t)v;
+    }
+    SecureZeroMemory(ticket, sizeof(ticket));
+    b[TICKET_LEN] = (uint8_t)fighter;
+    EnterCriticalSection(&g_cs);
+    i = N.queue_state == NETQUEUE_TICKET;   /* not cancelled meanwhile */
+    if (i) N.queue_state = NETQUEUE_CHECKING;
+    LeaveCriticalSection(&g_cs);
+    if (i) request(T_RANKED, b, (int)sizeof(b));
+    return 0;
+}
+
+void netplay_lobby_ranked(int fighter)
+{
+    HANDLE h;
+    if (!N.lobby || !N.have_token) return;
+    EnterCriticalSection(&g_cs);
+    if (N.queue_state != NETQUEUE_NONE && N.queue_state != NETQUEUE_REFUSED) {
+        LeaveCriticalSection(&g_cs);
+        return;                             /* already searching */
+    }
+    N.queue_state = NETQUEUE_TICKET;
+    N.queue_waited = N.queue_searching = 0;
+    snprintf(N.queue_text, sizeof(N.queue_text), "Checking your account...");
+    LeaveCriticalSection(&g_cs);
+    h = CreateThread(NULL, 0, ranked_thread, (LPVOID)(INT_PTR)fighter, 0, NULL);
+    if (h) CloseHandle(h);
+}
+
+int netplay_lobby_queue(int *waited, int *searching, char *text, int size)
+{
+    int state;
+    InitOnceExecuteOnce(&g_once, init_once, NULL, NULL);
+    EnterCriticalSection(&g_cs);
+    state = N.queue_state;
+    if (waited) *waited = N.queue_waited;
+    if (searching) *searching = N.queue_searching;
+    if (text && size > 0) snprintf(text, (size_t)size, "%s", N.queue_text);
+    LeaveCriticalSection(&g_cs);
+    return state;
+}
+
 void netplay_lobby_settings(const NetRoomSettings *settings)
 {
     uint8_t b[64];
@@ -1262,6 +1359,7 @@ void netplay_lobby_leave(void)
     N.roomv.version = (unsigned)GetTickCount64();
     N.room[0] = 0;
     N.pend_len = 0;                 /* whatever was waiting belonged to the room */
+    N.queue_state = NETQUEUE_NONE;  /* LEAVE also ends a ranked search */
     LeaveCriticalSection(&g_cs);
     /* The relay never answers LEAVE (docs/netplay-protocol.md), so it is sent twice and not
      * waited for; if both are lost the server still has this client in the room and says so
@@ -1380,7 +1478,8 @@ void netplay_on_main_menu(void)
  * RECOMP_NETPLAY_CODE_FILE, where the host writes its room code once it has one and the
  * guest waits for it (up to a minute). RECOMP_NETPLAY=quick enters the hub, quick-matches
  * (RECOMP_NETPLAY_QUICK="mode,players", default "0,2") and readies with RECOMP_NETPLAY_FIGHTER
- * (default 55), voting for the first venue; =lobby only
+ * (default 55), voting for the first venue; =ranked does the same through the ranked queue
+ * (the copy must be signed in; RECOMP_ACCOUNT_SERVER for test accounts); =lobby only
  * enters the hub. */
 static DWORD WINAPI autostart_thread(LPVOID unused)
 {
@@ -1392,7 +1491,7 @@ static DWORD WINAPI autostart_thread(LPVOID unused)
         netplay_lobby(server, "Test player");
         return 0;
     }
-    if (!strcmp(mode, "quick")) {
+    if (!strcmp(mode, "quick") || !strcmp(mode, "ranked")) {
         const char *f = getenv("RECOMP_NETPLAY_FIGHTER");
         int fighter = f && *f ? atoi(f) : 55, readied = 0;
         unsigned voted_in = 0;
@@ -1402,7 +1501,8 @@ static DWORD WINAPI autostart_thread(LPVOID unused)
             const char *q = getenv("RECOMP_NETPLAY_QUICK");
             int qmode = 0, qmax = 2;
             if (q && *q) sscanf(q, "%d,%d", &qmode, &qmax);
-            netplay_lobby_quick(qmode, qmax);
+            if (!strcmp(mode, "ranked")) netplay_lobby_ranked(fighter);
+            else netplay_lobby_quick(qmode, qmax);
         }
         while (!N.stop && N.state != NETPLAY_FAILED && N.state != NETPLAY_OFF) {
             NetRoom r;
@@ -1460,7 +1560,7 @@ void netplay_autostart(void)
     static LONG once;
     HANDLE t;
     if (InterlockedExchange(&once, 1)) return;
-    if (!mode || !server || (strcmp(mode, "host") && strcmp(mode, "join") && strcmp(mode, "quick") && strcmp(mode, "lobby"))) return;
+    if (!mode || !server || (strcmp(mode, "host") && strcmp(mode, "join") && strcmp(mode, "quick") && strcmp(mode, "ranked") && strcmp(mode, "lobby"))) return;
     t = CreateThread(NULL, 0, autostart_thread, NULL, 0, NULL);
     if (t) CloseHandle(t);
 }

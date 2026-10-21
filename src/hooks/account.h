@@ -31,6 +31,10 @@ void account_fetch_stats(void);                 /* the statistics and the leader
 int account_stats_busy(void);
 /* The statistics in the service's text form ("key=value" lines, newest fetch); 0 if none yet. */
 int account_stats(char *out, int size);
+/* Ranked play: a one-time ticket for the relay's ranked queue (32 hex digits and a 0), from the
+ * service. Blocks for the request (call it off the game's threads); 0 when not signed in or the
+ * service could not be reached. */
+int account_ranked_ticket(char out[33]);
 
 #ifdef __cplusplus
 }

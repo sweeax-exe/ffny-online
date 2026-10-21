@@ -14,6 +14,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <ctype.h>
 
 #if defined(_WIN32)
 #define WIN32_LEAN_AND_MEAN
@@ -508,6 +509,26 @@ static DWORD WINAPI report_thread(LPVOID param)
     return 0;
 }
 
+int account_ranked_ticket(char out[33])
+{
+    char token[65], buf[256];
+    int status, i;
+    out[0] = 0;
+    if (g_state != ACCOUNT_IN) return 0;
+    AcquireSRWLockShared(&g_lock);
+    memcpy(token, g_token, sizeof(token));
+    ReleaseSRWLockShared(&g_lock);
+    status = request(L"POST", L"/api/ranked/ticket?format=text", token, NULL, buf, sizeof(buf));
+    SecureZeroMemory(token, sizeof(token));
+    if (status == 401) { forget(); set_reason("Your sign-in ran out; sign in again."); set_state(ACCOUNT_OUT); }
+    if (status != 200) return 0;
+    for (i = 0; i < 32; i++)
+        if (!isxdigit((unsigned char)buf[i])) return 0;
+    memcpy(out, buf, 32);
+    out[32] = 0;
+    return 1;
+}
+
 void account_report_match(const char *json)
 {
     char *copy;
@@ -531,6 +552,7 @@ void account_report_match(const char *json) { (void)json; }
 void account_fetch_stats(void) {}
 int account_stats_busy(void) { return 0; }
 int account_stats(char *out, int size) { (void)out; (void)size; return 0; }
+int account_ranked_ticket(char out[33]) { out[0] = 0; return 0; }
 
 #endif
 

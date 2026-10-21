@@ -92,6 +92,23 @@ void netplay_lobby_ready(int ready, int fighter);
 void netplay_lobby_vote(int choice);
 void netplay_lobby_leave(void);
 void netplay_lobby_room(NetRoom *out);
+
+/* Ranked (One on One against a player of a similar rating; signed-in players only). The search
+ * runs until a match is found (the ranked room's ROOM arrives, both players ready, the vote
+ * starts) or netplay_lobby_leave. */
+enum NetQueueState {
+    NETQUEUE_NONE = -1,     /* not searching */
+    NETQUEUE_CHECKING = 0,  /* the server checks the account */
+    NETQUEUE_SEARCHING = 1,
+    NETQUEUE_REFUSED = 2,   /* see the text */
+    NETQUEUE_OFF = 3,
+    NETQUEUE_FOUND = 4,
+    NETQUEUE_TICKET = 5     /* asking the account service for a ticket */
+};
+void netplay_lobby_ranked(int fighter);
+/* The queue state; waited (seconds), searching (players in the queue) and text (why refused)
+ * when not NULL. */
+int netplay_lobby_queue(int *waited, int *searching, char *text, int size);
 int netplay_in_lobby(void);     /* 1 while the session came from netplay_lobby */
 
 /* From automatch: the agreed match is about to be set up (every PC reaches this point at the
