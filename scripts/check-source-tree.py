@@ -23,7 +23,7 @@ APPROVED_README_MEDIA = {
     'docs/media/fight-gameplay.gif': '77012147d4fe73227222c988610dba82510df1abad4f2405f1164935920b4277',
     # 2026-10-09, at the owner's request: the port's own setup wizard and launcher. No game artwork.
     'docs/media/setup-wizard.png': '0a9ee25b0e97751972cba83eea0b1b93a26ec12463c91f712d2fd9ef28b4b7ff',
-    'docs/media/launcher.png': '50a18097a6d4724dd955937d698a51cdbdab9343f186afe73493791319e9708e',
+    'docs/media/launcher.png': 'c1341634388ba674aa3383a665c058b5e132cfa650264d685f6e7f99f4d8d496',
     # 2026-10-20, FFNY Online's owner, for the README and the release post: the online screens
     # (main menu entry, hub, room, fighter grid, venue vote) and an online fight, captured from the
     # game's own frames; the setup wizard and launcher pictures were retaken for FFNY Online.
@@ -33,6 +33,10 @@ APPROVED_README_MEDIA = {
     'docs/media/online-fighters.png': '6ff224a9e64b317be2166c9a086b6c087652e7ea2e906292c415a1ba0b15125f',
     'docs/media/online-vote.png': '2a86d860bf5a202cc68e94ac2cafdd4d2913a0846781fdb17ec353afe6e85279',
     'docs/media/online-fight.png': '17c30e63e490fd10e1f071d2b6a4390f98855936bb809c2450974ad3a8785a88',
+    # 2026-10-21, build 13: MY STATS and PLAYERS ONLINE from the game's own frames (test accounts),
+    # and the launcher retaken with the FFNY Online logo.
+    'docs/media/online-stats.png': '6bf29abdf7e036d8691b0f2d04004764afb12d2f6f4fc43afe32d01e956efee9',
+    'docs/media/online-players.png': '9b35c222581bbc6bb087415be07963447f8ef8888cbf1a29893f00d784cbd4f0',
     # 2026-10-21, FFNY Online's owner: the project's own logo (made for the project, no game artwork
     # and no EA or Def Jam marks), for the launcher, the README, the Discord and the web pages.
     'ffny-branding/logo.png': '33888212e2e025e40bfe2b570f340edadb619368d0a976d1f6e45488f0d3a799',

@@ -48,6 +48,8 @@ Choose **ONLINE** in the main menu (the poster in the bottom-left slot):
   input delay set from the players' pings. The relay server only forwards inputs; it never sees
   game data.
 - **Updates** arrive through the launcher, signed, so you and your friends stay on the same build.
+- **Stats and leaderboard** (build 13): signed in with Discord, MY STATS shows your record, main fighter and last fights, with a leaderboard; PLAYERS ONLINE shows who is around. On the Discord: `/profile` and `/leaderboard`.
+- **The crowd stays in sync** (build 13): crowd catches, holds and weapons work online, the same on every PC.
 - **Sign in with Discord** (optional, launcher → Online): you appear online with your Discord name;
   ranked play builds on it. Only your Discord name, id and avatar are stored
   ([privacy](https://play.defjam.online/privacy)), and the launcher can delete the account.
@@ -64,6 +66,10 @@ Choose **ONLINE** in the main menu (the poster in the bottom-left slot):
 <tr>
 <td><img src="docs/media/online-room.png" alt="A room with both players ready"></td>
 <td><img src="docs/media/online-fight.png" alt="An online fight in the Terror Dome"></td>
+</tr>
+<tr>
+<td><img src="docs/media/online-stats.png" alt="MY STATS: record, main fighter, last fights and the leaderboard"></td>
+<td><img src="docs/media/online-players.png" alt="PLAYERS ONLINE: who is around"></td>
 </tr>
 </table>
 
@@ -193,7 +199,7 @@ The game opens a launcher window with display, controller and key settings and
 a Play button. The same settings are available in the game with F1, and in
 `settings.ini` in your data folder.
 
-![The launcher's Display tab, with Quit and Play buttons](docs/media/launcher.png)
+![The launcher with the FFNY Online logo: the Online page, signed in with Discord](docs/media/launcher.png)
 
 - [Launcher and overlay](docs/launcher-and-overlay.md)
 - [Controllers, keyboard and mouse](docs/10-input.md)
