@@ -314,7 +314,10 @@ extern "C" int pc_launcher_run(void)
     ImGui_ImplWin32_Init(window);
     ImGui_ImplDX11_Init(g_dev, g_ctx);
     load_art(L"steam\\hero.png", g_banner);
-    load_art(L"fan\\steam\\logo.png", g_logo);
+    // FFNY Online's own logo (ffny-branding/, beside branding/ in the source tree); the fan
+    // wordmark when it is missing.
+    load_art(L"..\\ffny-branding\\logo-512.png", g_logo);
+    if (!g_logo.srv) load_art(L"fan\\steam\\logo.png", g_logo);
     ui_set_launcher_art((ImTextureID)(intptr_t)g_banner.srv, (float)g_banner.width, (float)g_banner.height,
                         (ImTextureID)(intptr_t)g_logo.srv, (float)g_logo.width, (float)g_logo.height);
     fprintf(stderr, "[UI] launcher artwork: banner %s, logo %s\n", g_banner.srv ? "loaded" : "not found",

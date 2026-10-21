@@ -33,6 +33,13 @@ APPROVED_README_MEDIA = {
     'docs/media/online-fighters.png': '6ff224a9e64b317be2166c9a086b6c087652e7ea2e906292c415a1ba0b15125f',
     'docs/media/online-vote.png': '2a86d860bf5a202cc68e94ac2cafdd4d2913a0846781fdb17ec353afe6e85279',
     'docs/media/online-fight.png': '17c30e63e490fd10e1f071d2b6a4390f98855936bb809c2450974ad3a8785a88',
+    # 2026-10-21, FFNY Online's owner: the project's own logo (made for the project, no game artwork
+    # and no EA or Def Jam marks), for the launcher, the README, the Discord and the web pages.
+    'ffny-branding/logo.png': '33888212e2e025e40bfe2b570f340edadb619368d0a976d1f6e45488f0d3a799',
+    'ffny-branding/logo-512.png': '597f0c9d3e02b1a94e665337ccedf9e58b6b0c33ac57a001d003f5711774cb9b',
+    'ffny-branding/icon-1024.png': '130658498e88dc1cb5e6f781bb08cb2dfbc9ca131aee09692ec2a976cf04d14b',
+    'ffny-branding/icon-256.png': 'f640abfadaf49f3da32b726f795b4300df12aab60ce5fd27650dfdbebfc6536d',
+    'ffny-branding/ffny.ico': '884d182c92b5d8269dfeaefcee68e8bbb8ff0e7fba82154cf04f59fb5739e46b',
 }
 # D98 (2026-10-10): the owner approved committing the application icons and the Steam artwork
 # rendered from the game's own textures (the shield, the title wordmark, the title-screen scene).

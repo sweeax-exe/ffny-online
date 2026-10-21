@@ -1,4 +1,4 @@
-<p align="center"><img src="branding/fan/github/social-preview-1280x640.jpg" width="960" alt="Def Jam: Fight for NY — Fan Recomp"></p>
+<p align="center"><img src="ffny-branding/logo.png" width="420" alt="FFNY Online"></p>
 
 # FFNY Online — Def Jam: Fight for NY on PC, with online multiplayer
 

@@ -39,8 +39,8 @@ def digest(path):
 def source_allowed(name, toolkit=False):
     """Conservative source inventory; binaries and generated data cannot sneak in."""
     path = PurePosixPath(name)
-    if not toolkit and path.parts[0] == 'branding':
-        return True  # the approved icons and Steam artwork; check-source-tree.py pins every file (D98)
+    if not toolkit and path.parts[0] in ('branding', 'ffny-branding'):
+        return True  # the approved icons, artwork and FFNY Online's logo; check-source-tree.py pins every file
     if path.suffix.lower() in {'.xbe', '.iso', '.viv', '.mad', '.xsh', '.exe', '.dll', '.obj', '.pdb',
                               '.lib', '.a', '.so', '.pcm', '.wav', '.wma', '.png', '.gif', '.zip', '.7z', '.bmp', '.log'}:
         return False
@@ -61,7 +61,8 @@ def source_allowed(name, toolkit=False):
 # places the Steam artwork. The rest (masters, macOS icons, previews) is for the repository, and a
 # payload that carried it would be megabytes larger.
 BRANDING_FOR = {
-    'windows-x64': ('branding/icon/defjam.ico', 'branding/steam/hero.png', 'branding/fan/steam/logo.png'),
+    'windows-x64': ('branding/icon/defjam.ico', 'branding/steam/hero.png', 'branding/fan/steam/logo.png',
+                    'ffny-branding/logo-512.png', 'ffny-branding/ffny.ico'),
     'macos-arm64': ('branding/icon/window/window-128-macos.rgba',),
     'linux-x64': ('branding/icon/window/window-128.rgba', 'branding/icon/png/defjam-128.png',
                   'branding/icon/png/defjam-256.png', 'branding/steam/', 'branding/fan/steam/'),
@@ -70,7 +71,7 @@ BRANDING_FOR = {
 
 def payload_wants(name, platform):
     """Whether `name` (a tracked path in the parent repository) belongs in `platform`'s payload."""
-    if not name.startswith('branding/'):
+    if not name.startswith(('branding/', 'ffny-branding/')):
         return True
     return any(name == want or (want.endswith('/') and name.startswith(want)) for want in BRANDING_FOR[platform])
 

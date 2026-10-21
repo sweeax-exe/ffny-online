@@ -3,7 +3,11 @@
 # its path in <out-var>. Windows only.
 function(defjam_windows_resource out)
     cmake_parse_arguments(RC "" "NAME;DESCRIPTION;VERSION" "" ${ARGN})
-    set(RC_ICON "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../branding/icon/defjam.ico")
+    # FFNY Online's own icon (ffny-branding/), the shield (branding/) when it is missing.
+    set(RC_ICON "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../ffny-branding/ffny.ico")
+    if(NOT EXISTS "${RC_ICON}")
+        set(RC_ICON "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../branding/icon/defjam.ico")
+    endif()
     cmake_path(NORMAL_PATH RC_ICON)
     if(NOT EXISTS "${RC_ICON}")
         message(FATAL_ERROR "Missing ${RC_ICON}; it is tracked in the repository (branding/)")
