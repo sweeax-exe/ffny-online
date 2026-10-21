@@ -742,19 +742,28 @@ class Engine:
         for executable in ('cl.exe', 'cmake.exe', 'ninja.exe', 'rc.exe'):
             if not shutil.which(executable, path=self.env['PATH']):
                 if self.args.install_prerequisites and not provisioned:
-                    self.install_prerequisites()
+                    # Build Tools are there but lack a part (CMake and Ninja, usually): add it to
+                    # that installation; a fresh install would leave it as it is.
+                    self.install_prerequisites(modify=vs)
                     return self.toolchain(provisioned=True)
-                raise SetupError('Missing toolchain component: ' + executable, 3)
+                hint = (' (the "C++ CMake tools for Windows" part of Visual Studio). Tick "Install missing Microsoft Build '
+                        'Tools" and select Install again') if executable in ('cmake.exe', 'ninja.exe') else ''
+                raise SetupError('Missing toolchain component: ' + executable + hint, 3)
         self.run(['cmake', '--version'])
         self.run(['ninja', '--version'])
 
-    def install_prerequisites(self):
-        self.event('Installing Microsoft Build Tools; Windows may request administrator consent')
-        cache = self.install / 'downloads'
-        cache.mkdir(exist_ok=True)
-        bootstrapper = cache / 'vs_buildtools.exe'
-        urllib.request.urlretrieve('https://aka.ms/vs/17/release/vs_buildtools.exe', bootstrapper)
-        self.env['DEFJAM_SETUP_BOOTSTRAPPER'] = str(bootstrapper)
+    def install_prerequisites(self, modify=None):
+        if modify:
+            self.event('Adding CMake and Ninja to your Visual Studio Build Tools; Windows may request administrator consent')
+            self.env['DEFJAM_SETUP_VS_MODIFY'] = str(modify)
+        else:
+            self.event('Installing Microsoft Build Tools; Windows may request administrator consent')
+            self.env.pop('DEFJAM_SETUP_VS_MODIFY', None)
+            cache = self.install / 'downloads'
+            cache.mkdir(exist_ok=True)
+            bootstrapper = cache / 'vs_buildtools.exe'
+            urllib.request.urlretrieve('https://aka.ms/vs/17/release/vs_buildtools.exe', bootstrapper)
+            self.env['DEFJAM_SETUP_BOOTSTRAPPER'] = str(bootstrapper)
         # Authenticode is checked before requesting elevation. No user strings in script.
         script = self.payload / 'engine/install-prerequisites.ps1'
         result = self.run(['powershell.exe', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', script], capture=True)

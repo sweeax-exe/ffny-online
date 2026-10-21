@@ -18,7 +18,7 @@ namespace fs = std::filesystem;
 // One folder for everything: the engine's install location is <folder>\app and its data
 // location (dump copy, saves, settings, texture packs) <folder>\data. Asking a player for two
 // folders, which must not overlap, was the setup's most common way to fail.
-static HWND window, dumpEdit, installEdit, statusLabel, startButton, cancelButton, prerequisites, desktopShortcut, hdUpscale, launchInfo;
+static HWND window, dumpEdit, installEdit, statusLabel, startButton, cancelButton, prerequisites, desktopShortcut, launchInfo;
 static HWND progressBar;    // overall progress, 0-1000, from the engine's <status>.progress file
 static HANDLE worker = nullptr;
 static fs::path payload, scratch, statusPath, cancelPath, logPath;
@@ -245,7 +245,6 @@ static void setBusy(bool value) {
     for (int id = 101; id <= 109; ++id) EnableWindow(GetDlgItem(window, id), !value);
     EnableWindow(prerequisites, !value);
     EnableWindow(desktopShortcut, !value);
-    EnableWindow(hdUpscale, !value);
     EnableWindow(GetDlgItem(window, 112), FALSE);
     SetWindowTextW(cancelButton, value ? L"Cancel" : L"Close");
 }
@@ -280,8 +279,6 @@ static LRESULT CALLBACK windowProc(HWND hwnd, UINT message, WPARAM wp, LPARAM lp
                     args.push_back(L"--install-prerequisites");
                 if (SendMessageW(desktopShortcut, BM_GETCHECK, 0, 0) != BST_CHECKED)
                     args.push_back(L"--no-desktop-shortcut");
-                if (SendMessageW(hdUpscale, BM_GETCHECK, 0, 0) == BST_CHECKED)
-                    args.push_back(L"--hd-textures");
                 setBusy(true); timerTicks = 0; SetTimer(window, 1, 400, nullptr);
                 SendMessageW(progressBar, PBM_SETPOS, 0, 0);
                 SetWindowTextW(statusLabel, L"Preparing setup files... You can move the window or cancel.");
@@ -431,9 +428,9 @@ static int wizard(HINSTANCE instance, bool smoke = false, bool preparation = fal
     prerequisites = control(L"BUTTON", L"Install missing Microsoft Build Tools if needed (Windows asks for permission)",
         WS_TABSTOP | BS_AUTOCHECKBOX, 24, 220, 675, 25, 108);
     SendMessageW(prerequisites, BM_SETCHECK, BST_CHECKED, 0);
-    hdUpscale = control(L"BUTTON", L"Make HD textures during install (about 15 minutes more, about 6 GB more)",
-        WS_TABSTOP | BS_AUTOCHECKBOX, 24, 251, 675, 25, 115);
-    control(L"STATIC", L"Made on your PC from your own game; no GPU or download needed.", 0, 44, 278, 650, 18, 0);
+    // HD textures are made in the launcher (Textures page), where they can be made again or removed;
+    // the setup no longer offers them, so the first install stays short. --hd-textures still works.
+    control(L"STATIC", L"HD textures: make them later in the launcher, on its Textures page.", 0, 24, 256, 670, 20, 0);
     desktopShortcut = control(L"BUTTON", L"Create a desktop shortcut", WS_TABSTOP | BS_AUTOCHECKBOX, 24, 300, 675, 25, 113);
     SendMessageW(desktopShortcut, BM_SETCHECK, BST_CHECKED, 0);
     progressBar = control(PROGRESS_CLASSW, L"", PBS_SMOOTH, 24, 341, 660, 18, 116);
@@ -466,8 +463,7 @@ static int wizard(HINSTANCE instance, bool smoke = false, bool preparation = fal
         // D3D device, compiler or payload extraction merely to open.
         wchar_t title[128]{}; GetWindowTextW(window, title, 128);
         bool valid = wcscmp(title, L"FFNY Online \u2014 Setup") == 0 &&
-                     window && dumpEdit && installEdit && prerequisites && desktopShortcut && hdUpscale && launchInfo &&
-                     SendMessageW(hdUpscale, BM_GETCHECK, 0, 0) == BST_UNCHECKED &&
+                     window && dumpEdit && installEdit && prerequisites && desktopShortcut && launchInfo &&
                      SendMessageW(desktopShortcut, BM_GETCHECK, 0, 0) == BST_CHECKED &&
                      startButton && cancelButton && !editText(installEdit).empty() && IsWindowEnabled(startButton);
         DestroyWindow(window);

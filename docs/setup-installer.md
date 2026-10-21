@@ -38,7 +38,9 @@ There is no automatic game launch.
 
 ## Optional HD textures (v0.6.0)
 
-**Apply HD texture upscale during install (increases install time)** is unchecked
+FFNY Online's Windows wizard no longer offers HD textures: make them in the launcher, on its
+**Textures** page, after the first install (the silent `--hd-textures` below still works).
+On macOS, **Apply HD texture upscale during install (increases install time)** is unchecked
 by default. It generates Lanczos4x from your verified dump locally after the game
 build, verifies the PNGs, then enables the generated texture packs for first launch.
 No GPU/AI model is needed. Expect about6.2GB of HD PNGs plus~0.65GB reusable cache;
