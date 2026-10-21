@@ -115,6 +115,7 @@ to the lobby with the same token.
 | 0x18 | `LEAVE` | `token` 8 |
 | 0x1B | `OVER` | `token` 8 (this client's match has ended) |
 | 0x1C | `WHO` | `token` 8 (who is online; not a pending request, the hub asks every few seconds) |
+| 0x1E | `RANKED` | `token` 8, `ticket` 16 (one-time, from the account service), `fighter` u8 (join the ranked queue; see "Ranked queue") |
 
 ### Server to client
 
@@ -124,6 +125,7 @@ to the lobby with the same token.
 | 0x19 | `ROOM` | the whole room: `room` 6, `you` u8 (your slot), `host` u8 (host's slot), `phase` u8, `Settings`, `candidates` u8 count + count x u8, `votes` count x u8 (votes per candidate), `ms_left` u16 (voting countdown), `players` u8 count, then per player: `slot` u8, `name` string, `ready` u8, `fighter` u8, `voted` u8 (0xFF = not yet) |
 | 0x1A | `START` | `seed` u32, `mode` u8, `rounds` u8, `venue` u8, `players` u8 count, per player: `slot` u8, `fighter` u8 |
 | 0x1D | `PLAYERS` | `online` u16 (clients connected), `rooms` u16, `count` u8 (at most 40), per player: `name` string, `state` u8 (0 in the hub, 1 in a room, 2 playing). Lobby players of the asker's build, the hub first, then by name; as many as fit one datagram. Relays before FFNY Online build 13 ignore `WHO`. |
+| 0x1F | `QUEUE` | `state` u8 (0 checking the ticket, 1 searching, 2 refused, 3 out of the queue, 4 found: the ranked room's `ROOM` follows), `waited` u16 (seconds searching), `searching` u16 (players in the queue) |
 
 `ROOMS` lists public rooms only, newest first, at most 30 (as many as fit in 1200 bytes).
 `ROOM` is sent to every member whenever anything in the room changes, and once a second while
@@ -151,6 +153,30 @@ voting (for the countdown).
 - Errors as before: 1 room not found, 2 room full; new: **8** not allowed (not host, wrong phase),
   **9** not in a room / already in one.
 - Requests are idempotent, since clients retry over UDP: `CREATE`, `QUICK` or `JOIN` of its own room from a client already in a room changes nothing and is answered with a fresh `ROOM` (only `JOIN` of a different room gets `ERROR 9`); `READY`, `VOTE`, `SETTINGS` or `OVER` that change nothing still get a `ROOM` to the sender; `LEAVE` has no reply and is ignored in the lobby; `LIST` always gets `ROOMS`, even with count 0; a repeated `HELLO` mode 2 gets the same `WELCOME`; a `VOTE` after the vote has ended gets the `START` again.
+
+### Ranked queue
+
+Ranked play is One on One between signed-in players of a similar rating (`docs/ranked-design.md`).
+
+- The game asks the account service for a **ticket** (`POST /api/ranked/ticket` with the launcher's
+  session; 32 hex digits = 16 bytes, valid for one minute, usable once) and sends `RANKED` with it.
+  The launcher's session itself never goes over UDP.
+- The relay answers `QUEUE` 0 and redeems the ticket on the account service's local listener
+  (`POST /internal/ranked/redeem`), which names the account and its rating. An unknown, used or
+  expired ticket, an account already searching from another game, or a relay without an account
+  service (`-accounts-internal` not set) gives `QUEUE` 2. A client in a room gets `ERROR 9`.
+- While searching the client gets `QUEUE` 1 once a second. Every second the relay pairs the queue:
+  the longest-waiting player first, with the closest rating that both players' windows accept. A
+  window is ±100 rating points at first and grows by 50 every 10 s of searching, up to ±1000.
+- A pair gets `QUEUE` 4 and a private room named "Ranked" (One on One, `max` 2, pool 1, 6, 19)
+  with both players ready with their fighters, so the vote starts at once; then `START` as usual.
+  The host cannot change a ranked room's settings (`ERROR 8`).
+- Every `START` in a ranked room that still holds the two paired accounts is posted to the
+  account service (`POST /internal/ranked/pairing`, key `<room>-<SEED in hex>`, the key the games
+  report the match under). Only matches with such a pairing, reported by both paired accounts
+  from their own slots with the same result, change ratings (Glicko-2), at most 5 per pair per day.
+- `LEAVE` while searching leaves the queue (`QUEUE` 3); `CREATE`, `JOIN` or `QUICK` leave it
+  silently; so does disconnecting. A repeated `RANKED` while queued only changes the fighter.
 
 ## Server operation
 
