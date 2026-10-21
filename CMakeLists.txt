@@ -118,10 +118,14 @@ if(DEFJAM_BUILD_GAME)
         if(APPLE)
             # Shift held at start-up (src/host_posix.c) is read from the window server.
             target_link_libraries(${PROJECT_NAME} PRIVATE "-framework ApplicationServices" "-framework AppKit")
+            # SDL opens the Vulkan loader by name, and macOS's search does not
+            # reach a package manager's prefix; tell it where this build's is.
+            # Not on Linux: there the game is often built in a container whose
+            # /lib is not the player's (on Fedora it holds 32-bit libraries),
+            # and SDL's own libvulkan.so.1 is found by the system's loader.
+            target_compile_definitions(${PROJECT_NAME} PRIVATE
+                DEFJAM_VULKAN_LIBRARY="${Vulkan_LIBRARY}")
         endif()
-        # SDL opens the Vulkan loader by name; tell it where this build's is.
-        target_compile_definitions(${PROJECT_NAME} PRIVATE
-            DEFJAM_VULKAN_LIBRARY="${Vulkan_LIBRARY}")
         # The lifted code was written against a compiler that does none of
         # these: it reads memory through casts of every width, relies on
         # wrapping arithmetic, and must not have a multiply and an add fused

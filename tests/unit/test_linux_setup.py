@@ -90,6 +90,15 @@ def fake_home(tmp_path, monkeypatch):
 
 
 @linux_only
+def test_the_vulkan_loader_path_is_baked_in_on_macos_only():
+    """A container build's /lib/libvulkan.so is 32-bit on the player's Fedora (wrong ELF class, no window)."""
+    cmake = (ROOT / 'CMakeLists.txt').read_text()
+    define = cmake.index('DEFJAM_VULKAN_LIBRARY=')
+    apple = cmake.rindex('if(APPLE)', 0, define)
+    assert 'endif()' not in cmake[apple:define]
+    assert 'SDL_HINT_VULKAN_LIBRARY' in (ROOT / 'src/host_posix.c').read_text()
+
+
 def test_container_recipe_uses_the_pins_and_judges_signatures_as_of_the_archive(tmp_path):
     setup = installer(tmp_path)
     recipe = setup.container_recipe()

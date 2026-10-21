@@ -611,8 +611,10 @@ int host_posix_run(int (*game_main)(void))
     pthread_attr_t attr;
 
 #ifdef DEFJAM_VULKAN_LIBRARY
-    /* SDL loads the Vulkan loader by name, from places that do not include a
-     * package manager's prefix; say where the build found it. */
+    /* macOS only (CMakeLists.txt): SDL loads the Vulkan loader by name, from
+     * places that do not include a package manager's prefix; say where the
+     * build found it. Linux keeps SDL's libvulkan.so.1, which the system's
+     * loader resolves for this executable's architecture. */
     if (!getenv("SDL_VULKAN_LIBRARY"))
         SDL_SetHint(SDL_HINT_VULKAN_LIBRARY, DEFJAM_VULKAN_LIBRARY);
 #endif
