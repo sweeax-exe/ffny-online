@@ -94,6 +94,19 @@ Setup to Applications, run
 `xattr -dr com.apple.quarantine "/Applications/Def Jam Setup.app"` in Terminal, then open it
 from Applications.
 
+## Windows setup: LNK1000 "Internal error during IncrCalcPtrs" (fixed after v0.10.5)
+
+On some Windows PCs the setup's build stops at the last link step with
+`defjam_recomp.rc.res : fatal error LNK1000: Internal error during IncrCalcPtrs`, an access
+violation (C0000005) inside `link.exe`, and setup ends with "Stage failed". The build used
+RelWithDebInfo, which CMake links with `/INCREMENTAL`, and the Microsoft linker's incremental
+code can crash on an image as large as this one. The `.rc.res` file named in the message is only
+the last input on the link line. The link now passes `/INCREMENTAL:NO` (nothing to reuse in a
+from-scratch setup build). Workaround for an earlier setup: in an "x64 Native Tools Command
+Prompt for VS", in the setup's source folder, delete `build\win-x64-release` and run
+`cmake -S . -B build/win-x64-release -DCMAKE_EXE_LINKER_FLAGS_RELWITHDEBINFO="/debug /INCREMENTAL:NO"`,
+then run setup again. Not yet confirmed with the reporter.
+
 ## Mac diagnostics retained in v0.9.0 validation
 
 At v0.9.0 the strict audio underrun check (`audio.dry_queue`) failed on the Mac, as in the
