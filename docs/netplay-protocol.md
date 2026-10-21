@@ -144,9 +144,10 @@ voting (for the countdown).
   or after 30 minutes, the room returns to phase 0 with ready cleared.
 - The host is the lowest slot present; when the host leaves, the next lowest becomes host. An empty
   room is deleted at once.
-- `QUICK` joins the public room in phase 0 with that mode and `max`, a free slot and the most
-  players (then the oldest); if there is none it creates a public room named after the player with
-  every venue of `pool` = 1, 6, 19 and makes the client its host.
+- `QUICK` joins the public room in phase 0 with that mode (any `max`), a free slot and the most
+  players (then the oldest); if there is none it creates a public room of that `max` named
+  "Quick: <player>" (cut to 24 bytes) with `pool` = 1, 6, 19 and makes the client its host.
+  (Before FFNY Online build 15 the `max` had to match too and the room was named after the player.)
 - Errors as before: 1 room not found, 2 room full; new: **8** not allowed (not host, wrong phase),
   **9** not in a room / already in one.
 - Requests are idempotent, since clients retry over UDP: `CREATE`, `QUICK` or `JOIN` of its own room from a client already in a room changes nothing and is answered with a fresh `ROOM` (only `JOIN` of a different room gets `ERROR 9`); `READY`, `VOTE`, `SETTINGS` or `OVER` that change nothing still get a `ROOM` to the sender; `LEAVE` has no reply and is ignored in the lobby; `LIST` always gets `ROOMS`, even with count 0; a repeated `HELLO` mode 2 gets the same `WELCOME`; a `VOTE` after the vote has ended gets the `START` again.
