@@ -752,6 +752,8 @@ recomp_func_t recomp_lookup_manual(uint32_t xbox_va)
         return funccall_hook;
     if (xbox_va == 0x000D6670u)
         return first_time_help_hook;
+    if (xbox_va == 0x00081170u)         /* the crowd's update: its own generator copy online */
+        return netplay_crowd_update;
 
     if (s_trace_count < 0)
         trace_parse();

@@ -85,12 +85,17 @@ static void load_fighters(void)
         if (!end) break;
         if (!field(p, end, "dispname", disp, sizeof(disp)) || !field(p, end, "ID", id, sizeof(id))) continue;
         paren = strrchr(disp, '(');
-        if (!paren || strlen(paren) != 5 || paren[4] != ')') continue;
-        paren[4] = 0;
-        style = style_name(paren + 1);
-        if (!style) continue;
-        while (paren > disp && paren[-1] == ' ') paren--;
-        *paren = 0;
+        if (!paren || strlen(paren) != 5 || paren[4] != ')') {
+            /* Lauren is a Battle-mode fighter whose entry has no style (players asked for her) */
+            if (strcmp(disp, "Lauren")) continue;
+            style = "";
+        } else {
+            paren[4] = 0;
+            style = style_name(paren + 1);
+            if (!style) continue;
+            while (paren > disp && paren[-1] == ' ') paren--;
+            *paren = 0;
+        }
         f = &g_fighters[g_fighter_count++];
         f->id = atoi(id);
         snprintf(f->name, sizeof(f->name), "%s", disp);

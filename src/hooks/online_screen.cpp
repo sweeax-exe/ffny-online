@@ -416,7 +416,7 @@ std::string upper(const char *s)
 
 // ---- the screens --------------------------------------------------------------------------------
 
-enum Page { HUB, ROOMS, SETTINGS, FIGHTERS, CODE };
+enum Page { HUB, ROOMS, SETTINGS, FIGHTERS, CODE, STATS, PLAYERS };
 
 struct State {
     Page page = HUB;
@@ -489,13 +489,11 @@ const std::vector<OnlineFighter> &roster()
     static bool built = false;
     if (!built) {
         built = true;
+        // Every selectable fighter of the dump; a few (Santos, Teck, O.E, Eric Sermon) have no
+        // select portrait in the game and are shown by name.
         const OnlineFighter *all;
         int n = online_fighters(&all);
-        for (int i = 0; i < n; i++) {
-            std::wstring path = art_root() + L"fighters\\" + std::to_wstring(all[i].id) + L".png";
-            if (GetFileAttributesW(path.c_str()) != INVALID_FILE_ATTRIBUTES) list.push_back(all[i]);
-        }
-        if (list.empty()) for (int i = 0; i < n; i++) list.push_back(all[i]);
+        for (int i = 0; i < n; i++) list.push_back(all[i]);
         std::sort(list.begin(), list.end(), [](const OnlineFighter &a, const OnlineFighter &b) {
             return _stricmp(a.name, b.name) < 0; });
     }
@@ -568,31 +566,78 @@ void connect_if_needed()
 
 // ---- hub ----
 
+const int HUB_ITEMS = 6, HUB_LEAVE = 5;
+
+// "142 PLAYERS ONLINE - 12 ROOMS" at the bottom right, once the relay has answered a WHO.
+void online_count(ImDrawList *dl, const Frame &f)
+{
+    int online = -1, rooms = 0;
+    netplay_lobby_players(nullptr, 0, &online, &rooms);
+    if (online < 0) return;
+    char line[64];
+    snprintf(line, sizeof(line), "%d PLAYER%s ONLINE  -  %d ROOM%s", online, online == 1 ? "" : "S", rooms,
+             rooms == 1 ? "" : "S");
+    text(dl, f, g_hand, 14, 606, 430, ORANGE, line, RIGHT, 1.0f);    // beside the status line, clear of the menu's hints
+}
+
+// ---- players online ----
+
+void draw_players(ImDrawList *dl, const Frame &f, const Pad &pad)
+{
+    static NetPlayer list[40];
+    int online = -1, rooms = 0;
+    int n = netplay_lobby_players(list, 40, &online, &rooms);
+    if (pad.x) netplay_lobby_who();
+    page_title(dl, f, "PLAYERS ONLINE");
+    online_count(dl, f);
+    if (n < 0) {
+        text(dl, f, g_title, 20, 320, 200, CREAM, "ASKING THE SERVER...", CENTER, 1.4f);
+        return;
+    }
+    dl->AddRectFilled(f.p(40, 84), f.p(606, 404), IM_COL32(0, 0, 0, 150));
+    static const char *const states[] = { "IN THE MENU", "IN A ROOM", "FIGHTING" };
+    const ImU32 colours[] = { CREAM, ORANGE, GREEN };
+    for (int i = 0; i < n; i++) {
+        float x = i < 20 ? 52 : 330, y = 94 + (i % 20) * 15.5f;
+        int st = list[i].state >= 0 && list[i].state <= 2 ? list[i].state : 0;
+        text(dl, f, g_title, 13, x, y, WHITE, list[i].name, LEFT, 1.1f);
+        text(dl, f, g_title, 10, x + 262, y + 2, colours[st], states[st], RIGHT, 1.0f);
+    }
+    if (n == 0) text(dl, f, g_title, 14, 320, 200, GREY, "Nobody else with this version right now.", CENTER, 1.0f);
+    if (online > n)
+        text(dl, f, g_title, 10, 592, 392, GREY, "and others on other versions or not shown", RIGHT, 1.0f);
+}
+
 void draw_hub(ImDrawList *dl, const Frame &f, const Pad &pad)
 {
-    static const char *const items[] = { "QUICK MATCH", "FIND A ROOM", "CREATE A ROOM", "LEAVE" };
-    static const char *const subs[] = { "STRAIGHT INTO A FIGHT", "OPEN ROOMS", "YOUR RULES", "BACK TO THE MENU" };
+    static const char *const items[] = { "QUICK MATCH", "FIND A ROOM", "CREATE A ROOM", "MY STATS", "PLAYERS ONLINE",
+                                         "LEAVE" };
+    static const char *const subs[] = { "STRAIGHT INTO A FIGHT", "OPEN ROOMS", "YOUR RULES", "RECORD AND LEADERBOARD",
+                                        "WHO IS AROUND", "BACK TO THE MENU" };
     static const char *const descs[] = {
         "You are put into an open room of this mode, or one is opened for the next players.",
         "Every listed room with its mode and players. Pick one and join it.",
         "Pick the mode, the players and the venues to vote on. Others join from the list or by its code.",
+        "Your wins, losses and last fights, and the leaderboard. Sign in with Discord in the launcher to keep them.",
+        "Everyone online right now: in the menu, in a room or fighting.",
         "Back to the main menu. You stay reachable until you go offline in the settings.",
     };
     const OnlineMode *modes;
     int mode_count = online_modes(&modes);
-    if (pad.up) S.hub_sel = (S.hub_sel + 3) % 4;
-    if (pad.down) S.hub_sel = (S.hub_sel + 1) % 4;
+    if (pad.up) S.hub_sel = (S.hub_sel + HUB_ITEMS - 1) % HUB_ITEMS;
+    if (pad.down) S.hub_sel = (S.hub_sel + 1) % HUB_ITEMS;
     if (S.hub_sel == 0 && (pad.left || pad.right) && mode_count)
         S.quick_mode = (S.quick_mode + (pad.right ? 1 : mode_count - 1)) % mode_count;
 
     page_title(dl, f, "ONLINE");
-    for (int i = 0; i < 4; i++) {
-        float x = 50, y = 96 + i * 76, w = 262, h = 58;
+    online_count(dl, f);
+    for (int i = 0; i < HUB_ITEMS; i++) {
+        float x = 50, y = 88 + i * 53, w = 262, h = 46;
         if (mouse_in(f, x, y, w, h)) S.hub_sel = i;
         bool sel = S.hub_sel == i;
         if (sel) selector(dl, f, x, y, w, h);
-        text(dl, f, g_title, 27, x + 16, y + 6, sel ? CREAM : with_alpha(GREY, 0.85f), items[i], LEFT, 1.6f);
-        text(dl, f, g_hand, 14, x + 18, y + 36, sel ? ORANGE : with_alpha(ORANGE, 0.45f), subs[i], LEFT, 1.0f);
+        text(dl, f, g_title, 23, x + 16, y + 3, sel ? CREAM : with_alpha(GREY, 0.85f), items[i], LEFT, 1.6f);
+        text(dl, f, g_hand, 12, x + 18, y + 29, sel ? ORANGE : with_alpha(ORANGE, 0.45f), subs[i], LEFT, 1.0f);
         if (mouse_click(f, x, y, w, h)) const_cast<Pad &>(pad).a = true;
     }
     // the door: what the chosen item does
@@ -621,8 +666,147 @@ void draw_hub(ImDrawList *dl, const Frame &f, const Pad &pad)
             S.settings_sel = 0;
             S.page = SETTINGS;
             break;
-        case 3: break;      // handled by the caller (closes)
+        case 3: S.page = STATS; account_fetch_stats(); break;
+        case 4: S.page = PLAYERS; netplay_lobby_who(); break;
+        case HUB_LEAVE: break;      // handled by the caller (closes)
         }
+    }
+}
+
+// ---- my stats ----
+
+// The account service's statistics in its text form (account_stats): "key=value" lines.
+struct StatsView {
+    std::string name, favorite_name;
+    int matches = 0, wins = 0, losses = 0, draws = 0, win_rate = 0, streak = 0, best = 0, rank = 0, min = 3;
+    int favorite = -1;
+    std::vector<std::vector<std::string>> recent, board;
+};
+
+std::vector<std::string> split_bar(const std::string &v)
+{
+    std::vector<std::string> out;
+    size_t at = 0;
+    for (;;) {
+        size_t bar = v.find('|', at);
+        out.push_back(v.substr(at, bar == std::string::npos ? std::string::npos : bar - at));
+        if (bar == std::string::npos) return out;
+        at = bar + 1;
+    }
+}
+
+bool read_stats(StatsView &v)
+{
+    static char buf[16384];
+    if (!account_stats(buf, sizeof(buf))) return false;
+    for (char *line = buf; line && *line;) {
+        char *end = strchr(line, '\n');
+        if (end) *end = 0;
+        char *eq = strchr(line, '=');
+        if (eq) {
+            *eq = 0;
+            std::string k = line, val = eq + 1;
+            int n = atoi(eq + 1);
+            if (k == "name") v.name = val;
+            else if (k == "matches") v.matches = n;
+            else if (k == "wins") v.wins = n;
+            else if (k == "losses") v.losses = n;
+            else if (k == "draws") v.draws = n;
+            else if (k == "win_rate") v.win_rate = n;
+            else if (k == "streak") v.streak = n;
+            else if (k == "best_streak") v.best = n;
+            else if (k == "rank") v.rank = n;
+            else if (k == "min") v.min = n;
+            else if (k == "favorite") v.favorite = n;
+            else if (k == "favorite_name") v.favorite_name = val;
+            else if (k == "recent") v.recent.push_back(split_bar(val));
+            else if (k == "board") v.board.push_back(split_bar(val));
+        }
+        line = end ? end + 1 : nullptr;
+    }
+    return true;
+}
+
+void big_number(ImDrawList *dl, const Frame &f, float x, float y, const char *value, const char *label, ImU32 col)
+{
+    text(dl, f, g_title, 34, x, y, col, value, CENTER, 1.8f);
+    text(dl, f, g_hand, 13, x, y + 40, ORANGE, label, CENTER, 1.0f);
+}
+
+void draw_stats(ImDrawList *dl, const Frame &f, const Pad &pad)
+{
+    if (pad.x) account_fetch_stats();
+    page_title(dl, f, "MY STATS");
+    enum AccountState acc = account_state();
+    StatsView v;
+    bool have = (acc == ACCOUNT_IN || acc == ACCOUNT_CHECKING) && read_stats(v);
+    if (acc != ACCOUNT_IN && acc != ACCOUNT_CHECKING) {
+        text(dl, f, g_title, 24, 320, 180, CREAM, "SIGN IN TO KEEP YOUR STATS", CENTER, 1.6f);
+        text(dl, f, g_hand, 15, 320, 222, ORANGE, "IN THE LAUNCHER: ONLINE, SIGN IN WITH DISCORD", CENTER, 1.0f);
+        text(dl, f, g_title, 13, 320, 256, GREY,
+             "Signed-in players get their wins, losses and last fights here, and a place on the leaderboard.",
+             CENTER, 1.0f, 440);
+        return;
+    }
+    if (!have) {
+        text(dl, f, g_title, 22, 320, 200, CREAM, account_stats_busy() ? "LOADING..." : "NO STATS YET", CENTER, 1.6f);
+        if (!account_stats_busy())
+            text(dl, f, g_hand, 14, 320, 236, ORANGE, "PRESS X TO TRY AGAIN", CENTER, 1.0f);
+        return;
+    }
+    char num[32];
+    // left: the main fighter and the record
+    if (v.favorite < 0 || !portrait(dl, f, v.favorite, 46, 84, 110, 165))
+        dl->AddRectFilled(f.p(46, 84), f.p(156, 249), IM_COL32(20, 20, 20, 200));
+    text(dl, f, g_title, 22, 168, 92, CREAM, v.name.c_str(), LEFT, 1.6f);
+    if (!v.favorite_name.empty()) {
+        text(dl, f, g_hand, 13, 170, 124, ORANGE, "MAIN", LEFT, 1.0f);
+        text(dl, f, g_title, 14, 170, 140, WHITE, v.favorite_name.c_str(), LEFT, 1.2f);
+    }
+    if (v.rank) snprintf(num, sizeof(num), "#%d", v.rank);
+    else snprintf(num, sizeof(num), "%d MORE", std::max(0, v.min - v.matches));
+    text(dl, f, g_hand, 13, 170, 172, ORANGE, "LEADERBOARD", LEFT, 1.0f);
+    text(dl, f, g_title, 20, 170, 188, v.rank ? CREAM : GREY, num, LEFT, 1.4f);
+    if (!v.rank) text(dl, f, g_title, 11, 170, 214, GREY, "matches to get on it", LEFT, 1.0f);
+    snprintf(num, sizeof(num), "%d", v.wins);
+    big_number(dl, f, 78, 262, num, "WINS", GREEN);
+    snprintf(num, sizeof(num), "%d", v.losses);
+    big_number(dl, f, 160, 262, num, "LOSSES", IM_COL32(235, 90, 80, 255));
+    snprintf(num, sizeof(num), "%d%%", v.win_rate);
+    big_number(dl, f, 248, 262, num, "WIN RATE", CREAM);
+    snprintf(num, sizeof(num), "STREAK %d   BEST %d", v.streak, v.best);
+    text(dl, f, g_title, 13, 46, 324, WHITE, num, LEFT, 1.1f);
+    // last fights
+    text(dl, f, g_hand, 13, 46, 344, ORANGE, "LAST FIGHTS", LEFT, 1.0f);
+    if (v.recent.empty()) text(dl, f, g_title, 12, 46, 362, GREY, "Play online while signed in.", LEFT, 1.0f);
+    for (size_t i = 0; i < v.recent.size() && i < 3; i++) {
+        const auto &r = v.recent[i];
+        if (r.size() < 4) continue;
+        bool win = r[0] == "win", draw = r[0] == "draw";
+        std::string line = r[1] + " vs " + (r[2].empty() ? "?" : r[2]);
+        float y = 360 + i * 18;
+        text(dl, f, g_title, 13, 46, y, win ? GREEN : draw ? GREY : IM_COL32(235, 90, 80, 255), win ? "W" : draw ? "D" : "L",
+             LEFT, 1.1f);
+        text(dl, f, g_title, 12, 64, y + 1, CREAM, line.c_str(), LEFT, 1.0f, 250);
+    }
+    // right: the leaderboard
+    dl->AddRectFilled(f.p(330, 84), f.p(606, 404), IM_COL32(0, 0, 0, 150));
+    text(dl, f, g_title, 20, 344, 92, ORANGE, "LEADERBOARD", LEFT, 1.4f);
+    text(dl, f, g_title, 10, 592, 100, GREY, "MOST WINS", RIGHT, 1.0f);
+    if (v.board.empty())
+        text(dl, f, g_title, 12, 344, 130, GREY, "Nobody yet. Three online matches signed in put you on it.", LEFT,
+             1.0f, 250);
+    for (size_t i = 0; i < v.board.size() && i < 10; i++) {
+        const auto &e = v.board[i];
+        if (e.size() < 5) continue;
+        float y = 124 + i * 27;
+        bool me = e[1] == v.name;
+        if (me) dl->AddRectFilled(f.p(334, y - 3), f.p(602, y + 21), IM_COL32(255, 168, 26, 60));
+        ImU32 col = i == 0 ? IM_COL32(255, 205, 60, 255) : me ? CREAM : WHITE;
+        text(dl, f, g_title, 16, 362, y, col, e[0].c_str(), RIGHT, 1.2f);
+        text(dl, f, g_title, 15, 372, y + 1, col, e[1].c_str(), LEFT, 1.2f);
+        std::string wl = e[2] + "-" + e[3];
+        text(dl, f, g_title, 14, 592, y + 2, me ? CREAM : GREY, wl.c_str(), RIGHT, 1.1f);
     }
 }
 
@@ -806,7 +990,8 @@ void draw_fighters(ImDrawList *dl, const Frame &f, const Pad &pad, bool *chosen,
     const OnlineFighter &cur = list[S.fighter_sel];
     // the chosen fighter, large, with name and style
     rect(dl, f, 40, 78, 172, 300, IM_COL32(10, 10, 10, 200));
-    portrait(dl, f, cur.id, 46, 84, 160, 240);
+    if (!portrait(dl, f, cur.id, 46, 84, 160, 240))
+        text(dl, f, g_title, 26, 126, 180, with_alpha(CREAM, 0.6f), cur.name, CENTER, 1.4f, 150);
     text(dl, f, g_hand, 22, 126, 330, ORANGE, cur.name, CENTER, 1.2f);
     text(dl, f, g_title, 13, 126, 356, WHITE, cur.style, CENTER);
     // the grid
@@ -1022,7 +1207,14 @@ bool draw(ImVec2 display)
     netplay_lobby_room(&room);
     enum NetplayState st = netplay_state();
     // Over any screen but the main menu (after a match: the battle menu) every page is full-screen.
-    backdrop(dl, f, display, S.page == FIGHTERS || room.in_room || st == NETPLAY_CONNECTED || !g_menu_up.load());
+    {   // who is online: asked every five seconds while the online screens are up
+        static unsigned long long asked;
+        unsigned long long now = GetTickCount64();
+        if (netplay_in_lobby() && now - asked > 5000) { asked = now; netplay_lobby_who(); }
+    }
+    backdrop(dl, f, display, S.page == FIGHTERS || S.page == STATS || S.page == PLAYERS || room.in_room ||
+             st == NETPLAY_CONNECTED ||
+             !g_menu_up.load());
 
     // a match was agreed: show it, then give the menu back to the game, which starts it
     if (st == NETPLAY_CONNECTED && netplay_in_lobby()) {
@@ -1075,6 +1267,18 @@ bool draw(ImVec2 display)
         float hx = 54;
         hx += hint(dl, f, hx, 392, "a", "CHOOSE");
         hint(dl, f, hx, 392, "b", "BACK");
+    } else if (S.page == PLAYERS && !room.in_room) {
+        draw_players(dl, f, pad);
+        float hx = 54;
+        hx += hint(dl, f, hx, 420, "x", "REFRESH");
+        hint(dl, f, hx, 420, "b", "BACK");
+        if (pad.b) S.page = HUB;
+    } else if (S.page == STATS && !room.in_room) {
+        draw_stats(dl, f, pad);
+        float hx = 54;
+        hx += hint(dl, f, hx, 420, "x", "REFRESH");
+        hint(dl, f, hx, 420, "b", "BACK");
+        if (pad.b) S.page = HUB;
     } else if (S.page == CODE) {
         draw_code(dl, f, pad);
         float hx = 54;
@@ -1091,7 +1295,7 @@ bool draw(ImVec2 display)
         hint(dl, f, hx, 420, "b", "BACK");
     } else {
         draw_hub(dl, f, pad);      // the menu's own "A SELECT  B BACK" stays visible above
-        if ((pad.a && S.hub_sel == 3) || pad.b) keep = false;
+        if ((pad.a && S.hub_sel == HUB_LEAVE) || pad.b) keep = false;
     }
     draw_status(dl, f);
     return keep;

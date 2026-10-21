@@ -10,6 +10,7 @@
  * RECOMP_FE_RESULTS=1 prints what the roster, venue and match-type queries return. */
 #define _CRT_SECURE_NO_WARNINGS
 #include "host.h"
+#include <ctype.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -86,6 +87,54 @@ static void call(const char *format, ...)
     fprintf(stderr, "[AUTOMATCH] %s -> %s\n", command, result ? "ok" : "0");
 }
 
+/* Online matches are fought on Hard, the same on every PC: the reported difference (players lost
+ * health much faster online) came from each PC's own Options setting, which also changes the
+ * fight, so different settings would part the lockstep. The player's own setting comes back on the
+ * main menu once the online session is over. */
+#define ONLINE_DIFFICULTY 2
+static int g_saved_difficulty = -1;
+
+/* A front-end call's answer as a number: a small value as it is, or the text it points to
+ * ("2", or a name); -1 if it says nothing usable. */
+static int fe_number(const char *command)
+{
+    unsigned int p = defjam_fe_call(command), k;
+    char text[16];
+    if (p < 16) return (int)p;
+    for (k = 0; k < sizeof(text) - 1; k++) {
+        char c = (char)MEM8(p + k);
+        if (!c) break;
+        text[k] = (char)tolower((unsigned char)c);
+    }
+    text[k] = 0;
+    if (text[0] >= '0' && text[0] <= '9') return atoi(text);
+    if (strstr(text, "easy")) return 0;
+    if (strstr(text, "med") || strstr(text, "norm")) return 1;
+    if (strstr(text, "hard")) return 2;
+    return -1;
+}
+
+static void difficulty_for_online(void)
+{
+    /* RECOMP_ONLINE_DIFFICULTY=keep or 0..2: tests compare the settings */
+    const char *e = getenv("RECOMP_ONLINE_DIFFICULTY");
+    int want = e && *e >= '0' && *e <= '2' ? *e - '0' : ONLINE_DIFFICULTY;
+    if (e && !strcmp(e, "keep")) return;
+    if (g_saved_difficulty < 0) {
+        g_saved_difficulty = fe_number("Option.GetDifficulty()");
+        fprintf(stderr, "[AUTOMATCH] the player's difficulty is %d; online matches use %d\n",
+                g_saved_difficulty, want);
+    }
+    call("Option.SetDifficulty(%d)", want);
+}
+
+static void difficulty_back(void)
+{
+    if (g_saved_difficulty < 0) return;
+    call("Option.SetDifficulty(%d)", g_saved_difficulty);
+    g_saved_difficulty = -1;
+}
+
 static void run_sequence(void)
 {
     const AutoMatch *m = &g_req;
@@ -94,6 +143,7 @@ static void run_sequence(void)
     InterlockedExchange(&g_armed, 0);
     for (i = 0; i < m->count; i++) if (m->pad[i] >= 0) humans++;
     netplay_sync_point();
+    difficulty_for_online();
     call("Game.StartBattleMode()");
     call("Game.ResetMatchTypeList()");
     call("Game.ResetMatchData()");
@@ -188,6 +238,8 @@ void automatch_on_funccall(const char *text)
         g_on_menu = 1;
         g_quiet = g_ticks = 0;
         if (!g_armed) netplay_on_main_menu();       /* an online match has ended */
+        if (!g_armed && strstr(text, "intMain/mainMenu.swf") && !netplay_in_lobby())
+            difficulty_back();                      /* the online session is over */
     }
     else if (strstr(text, "GetScreenInfo(")) g_on_menu = 0;
     if (!strncmp(text, "MemCard.", 8)) g_quiet = g_ticks = 0;

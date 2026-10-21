@@ -23,6 +23,15 @@ int account_game_name(char *out, int size);
 void account_text(char *out, int size);
 const char *account_privacy_url(void);
 
+/* Match results and statistics. A finished online match's result goes to the service (signed in
+ * only; json as POST /api/matches takes it); it counts once the other players' games agree, and
+ * the statistics are fetched again a moment later. */
+void account_report_match(const char *json);
+void account_fetch_stats(void);                 /* the statistics and the leaderboard, in the background */
+int account_stats_busy(void);
+/* The statistics in the service's text form ("key=value" lines, newest fetch); 0 if none yet. */
+int account_stats(char *out, int size);
+
 #ifdef __cplusplus
 }
 #endif

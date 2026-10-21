@@ -37,6 +37,11 @@
 #include "netplay.h"
 #include "automatch.h"
 #include "online_data.h"
+#include "account.h"
+
+#define G_MATCH_PHASE   0x003B8F30u     /* test_telemetry.c G_PHASE */
+#define G_MATCH_WINNER  0x003B8F40u     /* test_telemetry.c G_WINNER: the winner's fighter slot */
+#define G_CROWD_RECORDS 0x003494E0u     /* count of the crowd's "audience public" records */
 
 #if !defined(_WIN32)
 
@@ -50,6 +55,8 @@ void netplay_autostart(void) {}
 int netplay_active(void) { return 0; }
 int netplay_lobby(const char *s, const char *n) { (void)s; (void)n; return -1; }
 void netplay_lobby_list(int m) { (void)m; }
+void netplay_lobby_who(void) {}
+int netplay_lobby_players(NetPlayer *o, int m, int *a, int *b) { (void)o; (void)m; if (a) *a = -1; if (b) *b = 0; return -1; }
 int netplay_lobby_rooms(NetRoomInfo *o, int m, unsigned *v) { (void)o; (void)m; if (v) *v = 0; return 0; }
 void netplay_lobby_create(const NetRoomSettings *s) { (void)s; }
 void netplay_lobby_join(const char *c) { (void)c; }
@@ -67,6 +74,10 @@ void netplay_on_pad_pass(void) {}
 void netplay_on_step(void) {}
 void netplay_on_pad_read(uint32_t a) { (void)a; }
 void netplay_on_seed(uint32_t e, int w, uint32_t x) { (void)e; (void)w; (void)x; }
+void netplay_on_result(uint32_t w, uint32_t l, uint32_t c) { (void)w; (void)l; (void)c; }
+int netplay_toast(char *t, int n) { (void)t; (void)n; return 0; }
+extern void sub_00081170(void);
+void netplay_crowd_update(void) { sub_00081170(); }
 
 #else
 
@@ -101,6 +112,8 @@ void netplay_on_seed(uint32_t e, int w, uint32_t x) { (void)e; (void)w; (void)x;
 #define T_ROOM        0x19
 #define T_START       0x1A
 #define T_OVER        0x1B
+#define T_WHO         0x1C      /* who is online (relays since build 13) */
+#define T_PLAYERS     0x1D
 
 /* DATA payloads between the game copies (opaque to the relay) */
 #define P_GAMEHELLO   1     /* host -> guest: u32 session seed, u8 input delay, u8 lockstep version */
@@ -182,6 +195,8 @@ static struct {
     /* the hub */
     NetRoom roomv;
     NetRoomInfo rooms[32];
+    NetPlayer who[40];              /* the last PLAYERS */
+    int who_count, who_online, who_rooms;
     int room_count;
     unsigned rooms_version;
     uint8_t pend[300];              /* the request waiting for an answer */
@@ -197,6 +212,14 @@ static struct {
     ULONGLONG last_recover;
     uint32_t start_seed;
     int start_slots[MAXP];
+    /* the room match for its result report (account.c): set at START, sent once */
+    AutoMatch report_m;
+    char report_names[MAXP][25];
+    char report_key[24];
+    int reported, fighting_seen, last_late;
+    int seed_bypass;                /* crowd_reset seeds a generator with its own words */
+    char toast[160];                /* a notice for the fight (netplay_toast), until toast_until */
+    ULONGLONG toast_until;
 } N;
 
 static BOOL CALLBACK init_once(PINIT_ONCE o, PVOID p, PVOID *c)
@@ -207,6 +230,7 @@ static BOOL CALLBACK init_once(PINIT_ONCE o, PVOID p, PVOID *c)
     WSAStartup(MAKEWORD(2, 2), &wsa);
     N.sock = INVALID_SOCKET;
     N.arrived = CreateEventW(NULL, FALSE, FALSE, NULL);
+    N.who_online = -1;              /* no PLAYERS yet */
     return TRUE;
 }
 
@@ -220,6 +244,35 @@ static void set_status(const char *format, ...)
     va_end(args);
     fprintf(stderr, "[NETPLAY] %s\n", N.status);
     fflush(stderr);
+}
+
+/* A short notice the overlay shows over the fight: a wait, a desync, a player gone. */
+static void toast(unsigned ms, const char *format, ...)
+{
+    va_list args;
+    va_start(args, format);
+    EnterCriticalSection(&g_cs);
+    vsnprintf(N.toast, sizeof(N.toast), format, args);
+    N.toast_until = GetTickCount64() + ms;
+    LeaveCriticalSection(&g_cs);
+    va_end(args);
+    fprintf(stderr, "[NETPLAY] notice: %s\n", N.toast);
+}
+
+int netplay_toast(char *out, int size)
+{
+    int on;
+    InitOnceExecuteOnce(&g_once, init_once, NULL, NULL);
+    EnterCriticalSection(&g_cs);
+    on = N.toast[0] && GetTickCount64() < N.toast_until;
+    if (on) snprintf(out, size, "%s", N.toast);
+    LeaveCriticalSection(&g_cs);
+    return on;
+}
+
+static const char *player_name(int pos)
+{
+    return pos >= 0 && pos < MAXP && N.report_names[pos][0] ? N.report_names[pos] : "the other player";
 }
 
 static uint32_t mix32(uint32_t x)
@@ -422,6 +475,7 @@ static void check_hashes(void)
                     N.desync_step = N.local_hash[i][1];
                     fprintf(stderr, "[NETPLAY] desync in match %08X at step %u (local %08X, remote %08X)\n",
                             N.local_hash[i][0], N.local_hash[i][1], N.local_hash[i][2], N.remote_hash[j][2]);
+                    toast(8000, "The games went out of sync: this match won't count.");
                 }
             } else if (++g_hash_matches % 10 == 0) {
                 fprintf(stderr, "[NETPLAY] in step: %u checksums compared and equal (match %08X, step %u)\n",
@@ -601,6 +655,30 @@ static void on_rooms(const uint8_t *b, int len)
     LeaveCriticalSection(&g_cs);
 }
 
+static void on_players(const uint8_t *b, int len)
+{
+    Reader r = { b, len, 0, 0 };
+    NetPlayer list[40];
+    int online, rooms, count, i;
+    online = rd8(&r);
+    online |= rd8(&r) << 8;
+    rooms = rd8(&r);
+    rooms |= rd8(&r) << 8;
+    count = rd8(&r);
+    if (count > 40) count = 40;
+    for (i = 0; i < count && !r.bad; i++) {
+        rdstr(&r, list[i].name, sizeof(list[i].name));
+        list[i].state = rd8(&r);
+    }
+    if (r.bad) return;
+    EnterCriticalSection(&g_cs);
+    memcpy(N.who, list, sizeof(list[0]) * (size_t)count);
+    N.who_count = count;
+    N.who_online = online;
+    N.who_rooms = rooms;
+    LeaveCriticalSection(&g_cs);
+}
+
 static void on_room(const uint8_t *b, int len)
 {
     Reader r = { b, len, 0, 0 };
@@ -722,6 +800,16 @@ static void on_start(const uint8_t *b, int len)
     N.match_seen = 0;
     N.over_pending = 0;
     N.start_this_play = 1;
+    N.report_m = m;
+    for (i = 0; i < MAXP; i++) {
+        N.report_names[i][0] = 0;
+        if (i < count)
+            for (j = 0; j < N.roomv.player_count; j++)
+                if (N.roomv.players[j].slot == slots[i])
+                    snprintf(N.report_names[i], sizeof(N.report_names[i]), "%s", N.roomv.players[j].name);
+    }
+    snprintf(N.report_key, sizeof(N.report_key), "%.6s-%08X", N.roomv.code[0] ? N.roomv.code : N.room, seed);
+    N.reported = N.fighting_seen = 0;
     LeaveCriticalSection(&g_cs);
     reset_remote_pads();
     fprintf(stderr, "[NETPLAY] START: seed %08X, type %d, rules %d, venue %d, %d players, this PC is player %d\n",
@@ -797,6 +885,9 @@ static void on_packet(const uint8_t *b, int len)
         break;
     case T_ROOMS:
         if (N.lobby) on_rooms(b + 6, len - 6);
+        break;
+    case T_PLAYERS:
+        if (N.lobby) on_players(b + 6, len - 6);
         break;
     case T_ROOM:
         if (N.lobby) on_room(b + 6, len - 6);
@@ -1089,6 +1180,31 @@ void netplay_lobby_list(int mode)
     request(T_LIST, &m, 1);
 }
 
+/* Not a pending request (the online screens ask every few seconds, and a lost answer is simply
+ * asked again), so it never displaces a JOIN or READY that is waiting for its ROOM. */
+void netplay_lobby_who(void)
+{
+    uint8_t b[32];
+    int n;
+    if (!N.lobby || !N.have_token) return;
+    n = header(b, T_WHO);
+    memcpy(b + n, N.token, 8);
+    send_raw(b, n + 8);
+}
+
+int netplay_lobby_players(NetPlayer *out, int max, int *online, int *rooms)
+{
+    int n;
+    InitOnceExecuteOnce(&g_once, init_once, NULL, NULL);
+    EnterCriticalSection(&g_cs);
+    n = N.who_online < 0 ? -1 : (N.who_count < max ? N.who_count : max);
+    if (n > 0) memcpy(out, N.who, sizeof(out[0]) * (size_t)n);
+    if (online) *online = N.who_online;
+    if (rooms) *rooms = N.who_rooms;
+    LeaveCriticalSection(&g_cs);
+    return n;
+}
+
 int netplay_lobby_rooms(NetRoomInfo *out, int max, unsigned *version)
 {
     int n;
@@ -1167,6 +1283,66 @@ void netplay_lobby_room(NetRoom *out)
     EnterCriticalSection(&g_cs);
     *out = N.roomv;
     LeaveCriticalSection(&g_cs);
+}
+
+/* A JSON string member's value: the names here are the game's printable ASCII. */
+static int json_put(char *out, int size, int n, const char *s)
+{
+    if (n < size) out[n++] = '"';
+    for (; *s && n < size - 2; s++) {
+        if (*s == '"' || *s == '\\') out[n++] = '\\';
+        if ((unsigned char)*s >= 0x20) out[n++] = *s;
+    }
+    if (n < size) out[n++] = '"';
+    return n;
+}
+
+/* The room match's result (winners as a mask of fighter slots; code 4 a draw), from
+ * netplay_on_step. A signed-in player's game reports it to the account service (account.c),
+ * once per START; the service counts it when every player's report agrees. Positions are the
+ * fighters' controller slots: the room's players in slot order, then the CPU fighters. */
+void netplay_on_result(uint32_t winners, uint32_t losers, uint32_t code)
+{
+    AutoMatch m;
+    char names[MAXP][25], key[24], json[2048];
+    const OnlineMode *mode;
+    int i, n = 0, pos, players, first = 1;
+    (void)losers;
+    InitOnceExecuteOnce(&g_once, init_once, NULL, NULL);
+    EnterCriticalSection(&g_cs);
+    if (!N.lobby || !N.match_live || N.reported || !N.report_key[0] || N.desync || !N.lockstep) {
+        LeaveCriticalSection(&g_cs);
+        return;
+    }
+    N.reported = 1;
+    m = N.report_m;
+    memcpy(names, N.report_names, sizeof(names));
+    memcpy(key, N.report_key, sizeof(key));
+    pos = N.pos;
+    players = N.players;
+    LeaveCriticalSection(&g_cs);
+    mode = online_mode(m.type);
+    n += snprintf(json + n, sizeof(json) - n, "{\"key\":\"%s\",\"mode\":%d,\"mode_name\":", key, m.type);
+    n = json_put(json, (int)sizeof(json), n, mode ? mode->name : "");
+    n += snprintf(json + n, sizeof(json) - n, ",\"venue\":%d,\"venue_name\":", m.venue);
+    n = json_put(json, (int)sizeof(json), n, online_venue_name(m.venue));
+    n += snprintf(json + n, sizeof(json) - n, ",\"you\":%d,\"players\":[", pos);
+    for (i = 0; i < m.count && i < MAXP && n < (int)sizeof(json) - 200; i++) {
+        int cpu = i >= players;
+        n += snprintf(json + n, sizeof(json) - n, "%s{\"slot\":%d,\"name\":", i ? "," : "", i);
+        n = json_put(json, (int)sizeof(json), n, cpu ? "CPU" : names[i]);
+        n += snprintf(json + n, sizeof(json) - n, ",\"fighter\":%d,\"fighter_name\":", m.fighter[i]);
+        n = json_put(json, (int)sizeof(json), n, online_fighter_name(m.fighter[i]));
+        n += snprintf(json + n, sizeof(json) - n, ",\"cpu\":%s}", cpu ? "true" : "false");
+    }
+    n += snprintf(json + n, sizeof(json) - n, "],\"winners\":[");
+    for (i = 0; i < m.count && i < MAXP; i++)
+        if (winners & (1u << i)) { n += snprintf(json + n, sizeof(json) - n, "%s%d", first ? "" : ",", i); first = 0; }
+    n += snprintf(json + n, sizeof(json) - n, "],\"draw\":%s}", (code & 4u) ? "true" : "false");
+    if (n >= (int)sizeof(json)) return;
+    fprintf(stderr, "[NETPLAY] match result: winners 0x%X, code 0x%X; reporting it when signed in\n",
+            (unsigned)winners, (unsigned)code);
+    account_report_match(json);
 }
 
 void netplay_sync_point(void)
@@ -1343,12 +1519,217 @@ static void send_steps(uint32_t last)
     send_data(p, 10 + count * ENTRY);
 }
 
+/* ---- the crowd, the same on every PC ------------------------------------------------------------
+ *
+ * The arena's spectators start animating while the match loads, at host timing, and one of the
+ * generators they draw from (0x33DB5C) is seeded from the wall clock at boot, so each PC's crowd
+ * leaves the loading window in a state of its own. Through the crowd's record table that reaches
+ * the fight as catches, holds and weapon offers, which parted the lockstep. At the first fight step
+ * every PC therefore restarts the crowd the way the game does at a match start on a loaded arena
+ * (sub_00080880), from shared seeds, and evens out what that restart leaves alone. From then on the
+ * crowd updates once a step on every PC. docs/research/crowd-lockstep-reset.md (recipe a, G1). */
+extern void sub_000AA0D0(void);     /* generator seed: ecx = generator, two words */
+extern void sub_0002A720(void);     /* the global generator 0x33DB5C from one word */
+extern void sub_00080880(void);     /* the crowd's match-start restart: ecx = manager */
+extern void sub_0007F030(void);     /* publishes the spectators' records: ecx = manager */
+extern void sub_0007D240(void);     /* resets one member's state: ecx = member */
+extern void sub_0007F3D0(void);     /* crowd intensity: ecx = manager, one float */
+extern void sub_0007F6E0(void);     /* deals the next idle state by quota: ecx = manager, returns it */
+extern void sub_0007D2F0(void);     /* starts a member's clip: ecx = member, state, -1 */
+extern void sub_0007D560(void);     /* samples a member's pose: ecx = member, 0 */
+
+#define CROWD_VTABLE    0x0029EBE8u
+#define GLOBAL_GEN      0x0033DB5Cu     /* 6 words; the crowd and other, host-timed users draw it */
+
+/* The crowd's own copy of the global generator for the match (crowd_reset makes it from the match
+ * seed); netplay_crowd_update swaps it in around every crowd update, so draws elsewhere at host
+ * timing cannot reach the crowd. */
+static uint32_t g_crowd_gen[6];
+static int g_crowd_gen_on;
+#define CROWD_MANAGER   0x0002B9F0u     /* the manager inside the arena object */
+
+static void guest_call(void (*fn)(void), uint32_t ecx, int nargs, const uint32_t *args)
+{
+    uint32_t sp = g_esp;
+    int i;
+    g_esp = (sp - 0x80u) & ~3u;         /* below the hook's frame */
+    for (i = nargs - 1; i >= 0; i--) PUSH32(g_esp, args[i]);
+    PUSH32(g_esp, 0u);                  /* a return address the lifted ret only pops */
+    g_ecx = ecx;
+    fn();
+    g_esp = sp;                         /* whatever the callee popped */
+}
+
+/* The crowd's update (vtable+8 of the crowd manager, called only indirectly by the arena), as
+ * recomp_lookup_manual hands it out: in a lockstep fight it draws from the crowd's copy of the
+ * global generator. */
+extern void sub_00081170(void);
+void netplay_crowd_update(void)
+{
+    uint32_t real[6], i;
+    if (!N.lockstep || !g_crowd_gen_on) { sub_00081170(); return; }
+    for (i = 0; i < 6; i++) { real[i] = MEM32(GLOBAL_GEN + 4u * i); MEM32(GLOBAL_GEN + 4u * i) = g_crowd_gen[i]; }
+    sub_00081170();
+    for (i = 0; i < 6; i++) { g_crowd_gen[i] = MEM32(GLOBAL_GEN + 4u * i); MEM32(GLOBAL_GEN + 4u * i) = real[i]; }
+}
+
+static void crowd_reset(uint32_t arena)
+{
+    uint32_t mgr = arena + CROWD_MANAGER, xml, n, i, args[2];
+    int with_text;
+    uint32_t eax = g_eax, ecx = g_ecx, edx = g_edx, ebx = g_ebx, esi = g_esi, edi = g_edi, ebp = g_ebp, esp = g_esp;
+    double fp[8];
+    int fp_top = g_fp_top;
+    uint16_t fp_cw = g_fp_control_word;
+    if (MEM32(mgr) != CROWD_VTABLE) {
+        fprintf(stderr, "[NETPLAY] crowd: no crowd manager at %08X (vtable %08X); left as it is\n", mgr, MEM32(mgr));
+        return;
+    }
+    n = MEM32(mgr + 0x18u);
+    xml = MEM32(mgr + 0x24u);
+    if (!n || n > 256 || !MEM32(mgr + 0xA90u) || (MEM32(mgr + 0x20u) & 1u)) {
+        fprintf(stderr, "[NETPLAY] crowd: not in a state to restart (members %u, flags %08X); left as it is\n",
+                n, MEM32(mgr + 0x20u));
+        return;
+    }
+    /* The game's restart re-reads the arena's crowd text; by the first fight step that text can be
+     * gone, and then the same restart is done field by field (recipe b). */
+    with_text = xml && MEM32(xml + 0xA4u) && (int32_t)MEM32(xml + 0xA8u) > 0;
+    memcpy(fp, g_fp_stack, sizeof(fp));
+    /* 1. the crowd's own generator, and the global one, from the match's seed */
+    args[0] = mix32(N.session ^ 0xC0A7D001u);
+    args[1] = mix32(N.session ^ 0x5EED0002u) | 1u;
+    N.seed_bypass = 1;
+    guest_call(sub_000AA0D0, mgr + 0xE18u, 2, args);
+    N.seed_bypass = 0;
+    {   /* the crowd's own copy of the global generator, made by the game's own seeding routine */
+        uint32_t real[6];
+        for (i = 0; i < 6; i++) real[i] = MEM32(GLOBAL_GEN + 4u * i);
+        args[0] = mix32(N.session ^ 0x0033DB5Cu);
+        guest_call(sub_0002A720, 0, 1, args);
+        for (i = 0; i < 6; i++) { g_crowd_gen[i] = MEM32(GLOBAL_GEN + 4u * i); MEM32(GLOBAL_GEN + 4u * i) = real[i]; }
+        g_crowd_gen_on = 1;
+    }
+    /* 2. the game's own restart: states, clip times, variants, offers, intensity */
+    if (with_text) {
+        guest_call(sub_00080880, mgr, 0, NULL);
+    } else {
+        uint32_t recs = MEM32(0x003494E4u);
+        for (i = 0; i < n; i++) {
+            uint32_t m = MEM32(mgr + 0xA90u + 4u * i), idx;
+            if (!m) continue;
+            guest_call(sub_0007D240, m, 0, NULL);
+            MEM32(m + 0xC8u) = 0xFFFFFFFFu;
+            MEM32(m + 0x10u) = MEM32(m);
+            idx = MEM32(m + 0x0Cu);
+            if (recs && idx != 0xFFFFFFFFu && idx < MEM32(0x003494E0u)) MEM32(recs + idx * 0x34u + 0x30u) = 0xFFFFFFFFu;
+        }
+        MEM32(mgr + 0xC98u) = 0;
+        MEM32(mgr + 0xCD0u) = 0;
+        MEM32(mgr + 0xCCCu) = 0xFFFFFFFFu;
+        MEM32(mgr + 0xCD4u) = 0;
+        MEM32(mgr + 0xC20u) = MEM32(mgr + 0xC24u) = 0x42700000u;     /* 60.0 */
+        MEM32(mgr + 0xC2Cu) = 0xBF800000u;                           /* -1.0 */
+        MEM32(mgr + 0xC34u) = 0;
+        args[0] = 0;                                                  /* 0.0f */
+        guest_call(sub_0007F3D0, mgr, 1, args);
+        for (i = 0; i < n; i++) {                                     /* member order, as the game deals */
+            uint32_t m = MEM32(mgr + 0xA90u + 4u * i), state;
+            if (!m || MEM32(m) == 0xCu) continue;
+            guest_call(sub_0007F6E0, mgr, 0, NULL);
+            state = g_eax;
+            args[0] = state;
+            args[1] = 0xFFFFFFFFu;
+            guest_call(sub_0007D2F0, m, 2, args);
+            args[0] = 0;
+            guest_call(sub_0007D560, m, 1, args);
+        }
+    }
+    /* 3. what it leaves: the update rotation, each spectator's speed and two timers */
+    MEM32(mgr + 0x1Cu) = 0;
+    for (i = 0; i < n; i++) {
+        uint32_t m = MEM32(mgr + 0xA90u + 4u * i), bits;
+        float speed;
+        if (!m) continue;
+        speed = MEM32(m) == 0xDu ? 0.75f : (float)((int)(mix32(N.session ^ (0xC20D0000u + i)) % 60u) - 30) * 0.01f + 1.0f;
+        memcpy(&bits, &speed, 4);
+        MEM32(m + 0x68u) = bits;
+        MEM8(m + 0xDCu) = 0;
+        MEM32(m + 0xD8u) = 0;
+    }
+    /* 4. the records the fighters read, before the step's first update */
+    guest_call(sub_0007F030, mgr, 0, NULL);
+    g_eax = eax; g_ecx = ecx; g_edx = edx; g_ebx = ebx; g_esi = esi; g_edi = edi; g_ebp = ebp; g_esp = esp;
+    memcpy(g_fp_stack, fp, sizeof(fp));
+    g_fp_top = fp_top;
+    g_fp_control_word = fp_cw;
+    fprintf(stderr, "[NETPLAY] crowd restarted for the match (%u spectators, %s)\n", n,
+            with_text ? "the game's restart" : "field by field");
+}
+
 void netplay_on_step(void)
 {
     uint32_t s, target, k;
     ULONGLONG waited_since, last_send;
     if (!N.lockstep) return;
+    /* RECOMP_ONLINE_CROWD=off (tests only): the spectators cannot touch the fight. Their animation
+     * differs between the PCs (it starts while the match loads, at host timing) and reaches the
+     * fighters through the crowd's record table as catches, holds and weapons, which parts the
+     * lockstep. With the record count at 0 no scan sees a spectator. Catches and crowd weapons are
+     * part of the game, so this is a comparison switch, not the fix. docs/research/spectator-shove.md */
+    {
+        static int crowd_off = -1;
+        if (crowd_off < 0) crowd_off = getenv("RECOMP_ONLINE_CROWD") && !strcmp(getenv("RECOMP_ONLINE_CROWD"), "off");
+        if (crowd_off) MEM32(G_CROWD_RECORDS) = 0;
+    }
+    /* The room match decided (the game's phase word: 1 fighting, 2 decided, 3 finished; see
+     * test_telemetry.c): report its result. Only after this match was seen fighting, as the
+     * phase still holds the last match's value for a moment after a START. */
+    if (N.lobby && N.match_live && !N.reported) {
+        uint32_t phase = MEM32(G_MATCH_PHASE);
+        if (phase == 1u) N.fighting_seen = 1;
+        else if (N.fighting_seen && phase >= 2u && phase <= 3u) {
+            uint32_t w = MEM32(G_MATCH_WINNER);
+            netplay_on_result(w < MAXP ? 1u << w : 0u, 0, w < MAXP ? 1u : 4u);
+        }
+    }
     s = ++N.step;
+    if (s == 1) {
+        static int crowd_on = -1;   /* RECOMP_ONLINE_CROWD=keep: tests compare without the restart */
+        if (crowd_on < 0) crowd_on = !(getenv("RECOMP_ONLINE_CROWD") && !strcmp(getenv("RECOMP_ONLINE_CROWD"), "keep"));
+        if (crowd_on) crowd_reset(g_ecx);
+    }
+    {
+        /* The arena hands its frame argument (edi, kept by sub_00087700 for the crowd update that
+         * follows) to the crowd; it is the host's measured frame time, so the spectators' clips
+         * advanced by a different amount on each PC. Online the crowd gets the fight's fixed step. */
+        uint32_t dt = g_edi;
+        float f;
+        memcpy(&f, &dt, 4);
+        if (s <= 3 || s == 300)
+            fprintf(stderr, "[NETPLAY] crowd frame argument at step %u: %08X (%g as a float)\n", s, dt, (double)f);
+        if (f > 0.001f && f < 0.25f) {
+            f = 1.0f / 60.0f;
+            memcpy(&g_edi, &f, 4);
+        }
+    }
+    if (s <= 120 && getenv("RECOMP_CROWD_TRACE")) {
+        /* tests: the crowd's three parts, every step, to see which parts first and when */
+        uint32_t hr = 2166136261u, hg = 2166136261u, hu = 2166136261u, k, recs = MEM32(0x003494E4u);
+        uint32_t count = MEM32(0x003494E0u);
+        for (k = 0; recs && k < count * 0x34u && k < 0x4000u; k++) hr = (hr ^ MEM8(recs + k)) * 16777619u;
+        for (k = 0; k < 0x88u; k++) hg = (hg ^ MEM8(g_ecx + CROWD_MANAGER + 0xE18u + k)) * 16777619u;
+        for (k = 0; k < 6u; k++) hu = (hu ^ g_crowd_gen[k]) * 16777619u;
+        fprintf(stderr, "[NETPLAY] crowd parts at step %u: records %08X crowd-gen %08X global-gen %08X\n", s, hr, hg, hu);
+    }
+    if (s == 1 || s == 2 || s == 60 || s == 300 || s == 900 || s == 1800) {
+        /* the crowd's state, to compare between the PCs: the records, its generator, the global one */
+        uint32_t h = 2166136261u, k, recs = MEM32(0x003494E4u), count = MEM32(0x003494E0u);
+        for (k = 0; recs && k < count * 0x34u && k < 0x4000u; k++) h = (h ^ MEM8(recs + k)) * 16777619u;
+        for (k = 0; k < 0x88u; k++) h = (h ^ MEM8(g_ecx + CROWD_MANAGER + 0xE18u + k)) * 16777619u;
+        for (k = 0; k < 6u; k++) h = (h ^ g_crowd_gen[k]) * 16777619u;     /* the crowd's copy, not the real one */
+        fprintf(stderr, "[NETPLAY] crowd hash at step %u: %08X (%u records)\n", s, h, count);
+    }
     target = s + (uint32_t)N.delay;
     k = target % RING;
     EnterCriticalSection(&g_cs);
@@ -1375,12 +1756,19 @@ void netplay_on_step(void)
     k = s % RING;
     waited_since = last_send = GetTickCount64();
     for (;;) {
-        int ready = 1, i;
+        int ready = 1, i, late = -1;
         EnterCriticalSection(&g_cs);
         for (i = 0; i < N.players; i++)
-            if (i != N.pos && !(N.in_tag[i][k] == s + 1 && N.in_match[i][k] == N.match)) ready = 0;
+            if (i != N.pos && !(N.in_tag[i][k] == s + 1 && N.in_match[i][k] == N.match)) { ready = 0; late = i; }
         LeaveCriticalSection(&g_cs);
-        if (ready || !N.lockstep) break;
+        if (ready || !N.lockstep) {
+            ULONGLONG waited = GetTickCount64() - waited_since;
+            /* a frozen picture of half a second or more: say why once it moves again */
+            if (ready && waited >= 500 && s > (uint32_t)N.delay + 1)
+                toast(4000, "Waited %.1f s for %s (connection).", waited / 1000.0, player_name(N.last_late));
+            break;
+        }
+        N.last_late = late;
         WaitForSingleObject(N.arrived, 4);
         {
             ULONGLONG now = GetTickCount64();
@@ -1388,6 +1776,7 @@ void netplay_on_step(void)
             if (now - waited_since > (s <= (uint32_t)N.delay + 1 ? START_LIMIT_MS : STALL_LIMIT_MS)) {
                 InterlockedExchange(&N.lockstep, 0);
                 set_status("A player stopped answering during the fight; continuing offline.");
+                toast(10000, "%s stopped answering: the fight goes on offline and won't count.", player_name(late));
                 break;
             }
         }
@@ -1442,7 +1831,7 @@ void netplay_on_seed(uint32_t esp, int words, uint32_t which)
 {
     int i, slot = -1;
     uint32_t count;
-    if (!N.lockstep) return;
+    if (!N.lockstep || N.seed_bypass) return;
     EnterCriticalSection(&g_cs);
     for (i = 0; i < 32; i++)
         if (N.seeds[i].which == which || !N.seeds[i].which) { slot = i; break; }

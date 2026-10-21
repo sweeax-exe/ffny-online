@@ -12,6 +12,7 @@
 #include "pc_settings.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #if defined(_WIN32)
@@ -53,12 +54,25 @@ static int request(const wchar_t *method, const wchar_t *path, const char *token
     DWORD status = 0, ssize = sizeof(status);
     int n = 0;
     buf[0] = 0;
-    session = WinHttpOpen(L"FFNY-Online-Launcher/1", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
+    /* RECOMP_ACCOUNT_SERVER=127.0.0.1:8095: tests talk plain HTTP to a local service with test
+     * accounts, so they never touch the players' real statistics. */
+    const char *test = getenv("RECOMP_ACCOUNT_SERVER");
+    wchar_t host[64] = ACCOUNT_HOST;
+    INTERNET_PORT port = INTERNET_DEFAULT_HTTPS_PORT;
+    DWORD secure = WINHTTP_FLAG_SECURE;
+    if (test && *test) {
+        const char *colon = strchr(test, ':');
+        int len = colon ? (int)(colon - test) : (int)strlen(test);
+        swprintf(host, 64, L"%.*hs", len, test);
+        port = (INTERNET_PORT)(colon ? atoi(colon + 1) : 80);
+        secure = 0;
+    }
+    session = WinHttpOpen(L"FFNY-Online-Launcher/1", test && *test ? WINHTTP_ACCESS_TYPE_NO_PROXY : WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
                           WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
     if (session) WinHttpSetTimeouts(session, 5000, 5000, 10000, 15000);
-    if (session) connect = WinHttpConnect(session, ACCOUNT_HOST, INTERNET_DEFAULT_HTTPS_PORT, 0);
+    if (session) connect = WinHttpConnect(session, host, port, 0);
     if (connect) req = WinHttpOpenRequest(connect, method, path, NULL, WINHTTP_NO_REFERER,
-                                          WINHTTP_DEFAULT_ACCEPT_TYPES, WINHTTP_FLAG_SECURE);
+                                          WINHTTP_DEFAULT_ACCEPT_TYPES, secure);
     if (req) {
         wchar_t headers[200] = L"";
         DWORD blen = body ? (DWORD)strlen(body) : 0;
@@ -134,10 +148,11 @@ static int json_str(const char *json, const char *key, char *out, int size)
 
 static void data_path(char *out, int size)
 {
-    const char *settings = pc_settings_path();
+    const char *settings = pc_settings_path(), *data = getenv("DEFJAM_DATA");
     const char *slash = settings ? strrchr(settings, '\\') : NULL;
     if (!slash && settings) slash = strrchr(settings, '/');
     if (slash) snprintf(out, size, "%.*s\\account.dat", (int)(slash - settings), settings);
+    else if (data && *data) snprintf(out, size, "%s\\account.dat", data);     /* runs without settings.ini */
     else snprintf(out, size, "account.dat");
 }
 
@@ -423,6 +438,84 @@ void account_text(char *out, int size)
     ReleaseSRWLockShared(&g_lock);
 }
 
+/* ---- match results and statistics ---- */
+
+static char *g_stats;               /* the service's text form; guarded by g_lock */
+static volatile LONG g_stats_busy;
+
+static void fetch_stats_now(void)
+{
+    char token[65], *buf = (char *)malloc(16384);
+    int status;
+    if (!buf) return;
+    AcquireSRWLockShared(&g_lock);
+    memcpy(token, g_token, sizeof(token));
+    ReleaseSRWLockShared(&g_lock);
+    status = request(L"GET", L"/api/me/stats?format=text", token, NULL, buf, 16384);
+    SecureZeroMemory(token, sizeof(token));
+    if (status == 200) {
+        AcquireSRWLockExclusive(&g_lock);
+        free(g_stats);
+        g_stats = buf;
+        ReleaseSRWLockExclusive(&g_lock);
+        return;
+    }
+    free(buf);
+    if (status == 401) { forget(); set_reason("Your sign-in ran out; sign in again."); set_state(ACCOUNT_OUT); }
+}
+
+static DWORD WINAPI stats_thread(LPVOID unused)
+{
+    (void)unused;
+    fetch_stats_now();
+    InterlockedExchange(&g_stats_busy, 0);
+    return 0;
+}
+
+void account_fetch_stats(void)
+{
+    if (g_state != ACCOUNT_IN || InterlockedExchange(&g_stats_busy, 1)) return;
+    run(stats_thread, NULL);
+}
+
+int account_stats_busy(void) { return g_stats_busy != 0; }
+
+int account_stats(char *out, int size)
+{
+    int ok;
+    AcquireSRWLockShared(&g_lock);
+    ok = g_stats != NULL;
+    if (ok) snprintf(out, size, "%s", g_stats);
+    ReleaseSRWLockShared(&g_lock);
+    return ok;
+}
+
+static DWORD WINAPI report_thread(LPVOID param)
+{
+    char *json = (char *)param, token[65], buf[512];
+    int status;
+    AcquireSRWLockShared(&g_lock);
+    memcpy(token, g_token, sizeof(token));
+    ReleaseSRWLockShared(&g_lock);
+    status = request(L"POST", L"/api/matches", token, json, buf, sizeof(buf));
+    SecureZeroMemory(token, sizeof(token));
+    free(json);
+    fprintf(stderr, "[ACCOUNT] match result sent: HTTP %d\n", status);
+    if (status == 202) {
+        Sleep(50000);               /* the service counts it once every report is in (45 s) */
+        if (!InterlockedExchange(&g_stats_busy, 1)) { fetch_stats_now(); InterlockedExchange(&g_stats_busy, 0); }
+    }
+    return 0;
+}
+
+void account_report_match(const char *json)
+{
+    char *copy;
+    if (g_state != ACCOUNT_IN && g_state != ACCOUNT_CHECKING) return;
+    copy = _strdup(json);
+    if (copy) run(report_thread, copy);
+}
+
 #else   /* sign-in is Windows only for now, like online play */
 
 void account_init(void) {}
@@ -434,6 +527,10 @@ void account_delete(void) {}
 enum AccountState account_state(void) { return ACCOUNT_OUT; }
 int account_game_name(char *out, int size) { (void)out; (void)size; return 0; }
 void account_text(char *out, int size) { if (size > 0) out[0] = 0; }
+void account_report_match(const char *json) { (void)json; }
+void account_fetch_stats(void) {}
+int account_stats_busy(void) { return 0; }
+int account_stats(char *out, int size) { (void)out; (void)size; return 0; }
 
 #endif
 

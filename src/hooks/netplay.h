@@ -46,6 +46,12 @@ typedef struct NetRoomInfo {
     int mode, players, max, phase;
 } NetRoomInfo;
 
+/* One player in the relay's list of who is online (WHO / PLAYERS). */
+typedef struct NetPlayer {
+    char name[25];
+    int state;                      /* 0 in the hub, 1 in a room, 2 playing */
+} NetPlayer;
+
 typedef struct NetRoomPlayer {
     int slot;
     char name[25];
@@ -74,6 +80,10 @@ typedef struct NetRoom {
 int netplay_lobby(const char *server, const char *name);
 void netplay_lobby_list(int mode);                      /* mode 0xFF: any */
 int netplay_lobby_rooms(NetRoomInfo *out, int max, unsigned *version);
+void netplay_lobby_who(void);   /* asks who is online; the answer comes as netplay_lobby_players */
+/* The last answer: the players listed (up to max), how many are connected and how many rooms
+ * there are; -1 before any answer. */
+int netplay_lobby_players(NetPlayer *out, int max, int *online, int *rooms);
 void netplay_lobby_create(const NetRoomSettings *settings);
 void netplay_lobby_join(const char *code);
 void netplay_lobby_quick(int mode, int max);
@@ -119,6 +129,9 @@ void netplay_autostart(void);
 void netplay_on_match_start(void);                  /* sub_001A4D90: a match is set up      */
 void netplay_on_pad_pass(void);                     /* sub_001AD380: pad entries just read */
 void netplay_on_step(void);                         /* sub_00087700: one simulation step    */
+int netplay_toast(char *text, int size);   /* a notice for the fight right now (wait, desync, gone) */
+void netplay_crowd_update(void);  /* the crowd's update, as recomp_lookup_manual hands it out */
+void netplay_on_result(uint32_t winners, uint32_t losers, uint32_t code);  /* the room match decided */
 void netplay_on_pad_read(uint32_t actor);           /* sub_001BAA00: a fighter reads its pad */
 /* Seed arguments on the stack at `esp` (after the return address); `which`
  * names the call site so the two sides derive the same value for it. */

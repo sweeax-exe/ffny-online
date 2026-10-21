@@ -716,6 +716,17 @@ static void hd_build_section()
     static bool applied;
     HdBuildState state = hd_build_status(&done, &total, text, sizeof(text), packs, sizeof(packs));
     ImGui::SeparatorText("Make HD textures");
+    // Players reported white screens and wrong pictures with the packs on: say so, and offer the way back.
+    ImGui::TextColored(ImVec4(1.0f, 0.72f, 0.3f, 1),
+                       "Experimental: HD textures can cause a white screen, white boxes or wrong pictures.");
+    if (recomp_settings_get("textures", "enabled", 0) && state != HD_BUILD_RUNNING) {
+        ImGui::TextWrapped("If you see that, turn them off here and restart the game. Your packs stay on disk.");
+        if (ImGui::Button("Turn HD textures off", ImVec2(ImGui::GetFontSize() * 12, 0))) {
+            recomp_settings_set("textures", "enabled", 0);
+            commit();
+        }
+        ImGui::Spacing();
+    }
     if (state == HD_BUILD_DONE && !applied) {
         // Switch the new packs on, once, from this thread (the settings belong to the screen).
         recomp_settings_set_text("textures", "packs", packs);
@@ -1298,7 +1309,8 @@ static UiResult draw_launcher(float x, float y, float width, float height)
     dl->AddRectFilledMultiColor(ba, ImVec2(ba.x + width * 0.6f, bb.y), col(k_bg, 0.75f), col(k_bg, 0), col(k_bg, 0), col(k_bg, 0.75f));
     float pad = 28 * u;
     if (g_logo_art.tex) {
-        float lh = banner_h * 0.52f, lw = lh * g_logo_art.w / g_logo_art.h;
+        // A wide wordmark at half the banner's height; a near-square emblem (FFNY Online's) larger.
+        float lh = banner_h * (g_logo_art.w < g_logo_art.h * 1.5f ? 0.86f : 0.52f), lw = lh * g_logo_art.w / g_logo_art.h;
         if (lw > width * 0.55f) { lw = width * 0.55f; lh = lw * g_logo_art.h / g_logo_art.w; }
         ImVec2 la(ba.x + pad, ba.y + (banner_h - lh) * 0.42f);
         dl->AddImage(g_logo_art.tex, la, ImVec2(la.x + lw, la.y + lh));
@@ -1714,7 +1726,9 @@ extern "C" void pc_ui_overlay(void *device, void *context, void *window_rtv, uns
     }
     // Closed, the overlay still draws the ONLINE entry's art on the main menu.
     bool decor = !g_open.load() && online_screen::decor_wanted();
-    if (!g_open.load() && !decor) { ui_unlock(); return; }
+    char notice[160];
+    bool toast = !g_open.load() && netplay_toast(notice, sizeof(notice));    // online: a wait, a desync
+    if (!g_open.load() && !decor && !toast) { ui_unlock(); return; }
 
     ID3D11Device *dev = (ID3D11Device *)device;
     ID3D11DeviceContext *ctx = (ID3D11DeviceContext *)context;
@@ -1742,11 +1756,21 @@ extern "C" void pc_ui_overlay(void *device, void *context, void *window_rtv, uns
 
     ImGuiIO &io = ImGui::GetIO();
     bool close_request = false;
+    if (toast) {
+        ImDrawList *fg = ImGui::GetForegroundDrawList();
+        ImFont *font = g_font_bold ? g_font_bold : ImGui::GetFont();
+        float size = std::max(18.0f, io.DisplaySize.y * 0.028f);
+        ImVec2 t = font->CalcTextSizeA(size, FLT_MAX, 0, notice);
+        ImVec2 at((io.DisplaySize.x - t.x) * 0.5f, io.DisplaySize.y * 0.16f);
+        fg->AddRectFilled(ImVec2(at.x - size, at.y - size * 0.5f), ImVec2(at.x + t.x + size, at.y + t.y + size * 0.5f),
+                          IM_COL32(0, 0, 0, 200), size * 0.3f);
+        fg->AddText(font, size, at, IM_COL32(255, 168, 26, 255), notice);
+    }
     if (decor) {
         online_screen::draw_decor(ImGui::GetForegroundDrawList(), io.DisplaySize);
     } else if (g_online) {
         if (!online_screen::draw(io.DisplaySize)) close_request = true;
-    } else {
+    } else if (g_open.load()) {
     // Dim the game and put the settings in a panel in the middle.
     if (g_just_opened) {
         g_just_opened = false;
