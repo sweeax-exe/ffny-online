@@ -333,6 +333,9 @@ extern "C" int pc_launcher_run(void)
     const char *shot = getenv("RECOMP_WINDOW_SHOT");
     const char *shot_at = getenv("RECOMP_WINDOW_SHOT_FRAME");     /* default 30 */
     int frames = 0, shot_frame = shot_at && atoi(shot_at) > 0 ? atoi(shot_at) : 30;
+    /* Tests: RECOMP_LAUNCHER_AUTOPLAY=<frames> presses Play after that many frames. */
+    const char *autoplay = getenv("RECOMP_LAUNCHER_AUTOPLAY");
+    int play_frame = autoplay && atoi(autoplay) > 0 ? atoi(autoplay) : 0;
     while (!g_done) {
         MSG msg;
         while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
@@ -364,6 +367,7 @@ extern "C" int pc_launcher_run(void)
             res.play = res.leave = false;
         }
         g_swap->Present(1, 0);
+        if (play_frame && ++frames >= play_frame) res.play = true;
         if (res.play) { g_done = true; g_result = 1; }
         if (res.leave) { g_done = true; g_result = 0; }
     }

@@ -435,6 +435,70 @@ static int has_arg(const char *flag)
 }
 #endif
 
+#if defined(_WIN32)
+static WCHAR *g_start_env;                  /* the environment as the process got it */
+static WCHAR g_start_dir[MAX_PATH * 2];     /* and its working directory */
+
+void pc_settings_capture_start(void)
+{
+    LPWCH env = GetEnvironmentStringsW();
+    if (env) {
+        size_t n = 0;
+        while (env[n] || env[n + 1]) n++;
+        n += 2;
+        g_start_env = (WCHAR *)malloc(n * sizeof(WCHAR));
+        if (g_start_env) memcpy(g_start_env, env, n * sizeof(WCHAR));
+        FreeEnvironmentStringsW(env);
+    }
+    if (!GetCurrentDirectoryW(MAX_PATH * 2, g_start_dir)) g_start_dir[0] = 0;
+}
+
+/* After the launcher, the game runs in a fresh process, started exactly as with the launcher
+ * skipped (the same command line plus --no-launcher, the environment and directory this one was
+ * started with), and this process waits for it and exits with its code. The launcher's
+ * Direct3D 11, fonts, artwork, input, update check and sign-in leave threads and allocations
+ * behind; some of them land in the guest's low 4 GB the moment start-up releases it for the
+ * memory layout, and on some PCs the game then did not start at all. Players found that ticking
+ * "Skip the launcher" made it work (2026-10-21). Waiting keeps DefJamLauncher's play.lock held
+ * for the game's whole life, as before. Returns only when the process could not be started (the
+ * game then starts here, as it used to). */
+static void start_game_process(void)
+{
+    static WCHAR exe[32768];
+    const WCHAR *line = GetCommandLineW();
+    STARTUPINFOW si;
+    PROCESS_INFORMATION pi;
+    DWORD code = 1;
+    size_t n;
+    WCHAR *cmd;
+    if (!GetModuleFileNameW(NULL, exe, 32768)) return;
+    n = wcslen(line) + 32;
+    cmd = (WCHAR *)malloc(n * sizeof(WCHAR));
+    if (!cmd) return;
+    swprintf(cmd, n, L"%ls --no-launcher", line);
+    memset(&si, 0, sizeof(si));
+    si.cb = sizeof(si);
+    pc_input_stop();                /* the controllers go to the game's process */
+    netplay_stop();                 /* and so does any online session (one player, one session) */
+    if (!CreateProcessW(exe, cmd, NULL, NULL, FALSE, g_start_env ? CREATE_UNICODE_ENVIRONMENT : 0,
+                        g_start_env, g_start_dir[0] ? g_start_dir : NULL, &si, &pi)) {
+        fprintf(stderr, "[UI] could not start the game in its own process (error %lu); starting it here\n",
+                (unsigned long)GetLastError());
+        fflush(stderr);
+        free(cmd);
+        return;
+    }
+    free(cmd);
+    fprintf(stderr, "[UI] the game runs in its own process (%lu); this one waits for it\n",
+            (unsigned long)pi.dwProcessId);
+    fflush(stderr);
+    CloseHandle(pi.hThread);
+    WaitForSingleObject(pi.hProcess, INFINITE);
+    GetExitCodeProcess(pi.hProcess, &code);
+    ExitProcess(code);
+}
+#endif
+
 static void run_launcher_if_wanted(void)
 {
     netplay_autostart();        /* tests only: already connecting while the launcher shows */
@@ -454,6 +518,7 @@ static void run_launcher_if_wanted(void)
         fflush(stderr);
         ExitProcess(0);
     }
+    if (!getenv("RECOMP_LAUNCHER_SAME_PROCESS")) start_game_process();
     pc_input_restart();
 #else
     const char *settings = getenv("RECOMP_SETTINGS");

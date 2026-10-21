@@ -13,6 +13,11 @@ extern "C" {
  * game folder could be found (a message has been shown). */
 int pc_settings_init(void);
 
+/* Windows: call on the first line of WinMain, before pc_settings_init changes anything. Keeps the
+ * environment and working directory the process was started with, for the game's own process
+ * after the launcher (see start_game_process in pc_settings.c). */
+void pc_settings_capture_start(void);
+
 /* The command line, for the options that are not settings (--launcher, --no-launcher). Off
  * Windows only: there the program is started through main, which has it. */
 void pc_settings_set_args(int argc, char **argv);
