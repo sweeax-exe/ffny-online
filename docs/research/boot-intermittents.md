@@ -22,7 +22,8 @@ at the cited place), [I] inferred, [U] unknown.
 3. **The freeze after a good start (2026-10-21, §6).** The same deadlock, mid-boot, after the watchdog switched
    itself off: in boots where the main thread stays at priority 16, each fence spin needs a rescue, and the
    rescue's re-pin closed its window too late to be watched again. Fixed in the toolkit (window closed before the
-   pin, a lapsed window counts as closed). What holds the main thread at 16 is still unknown.
+   pin, a lapsed window counts as closed). What holds the main thread at 16 is still unknown; since toolkit
+   `f65a88e` a guest thread found above 15 re-sets its own level on kernel entry, which clears it (§6, end).
 
 ## 1. The hang
 
@@ -321,8 +322,7 @@ the window is closed before the pin, and a window that has run out counts as clo
 - `kernel_timer_watchdog` treats a window that has run out as closed. A rescue that lands between the
   compare-exchange and the pin therefore costs at most one more window, and its log line says so
   (`it was starved again before it closed the last window`).
-- Not changed: the realtime main thread itself. Re-setting a guest thread's priority when it is found above 15
-  with a lower base would remove the cause of §1 and of this. That is proposed separately.
+- Not changed here: the realtime main thread itself. See "The realtime band itself" below.
 
 ### Results
 
@@ -341,3 +341,30 @@ the window is closed before the pin, and a window that has run out counts as clo
   never need the watchdog. The live by-hand rescue above is the direct answer.
 - [V] Two-copy online test runs by another session on a build with the fix (`run-20261021-132658`/`-132704`,
   `-135558`/`-135604`): no rescue, no freeze.
+
+### The realtime band itself (toolkit `f65a88e`, 2026-10-21 later)
+
+- Remedy: `kernel_priority_check()` in `kernel_bridge.c`, first in `kernel_thunk_dispatch_body`. On kernel entry,
+  at most every 50 ms per thread, a guest thread reads its own dynamic priority (`NtQueryInformationThread`,
+  ThreadBasicInformation) and, when it is above 15, calls `SetThreadPriority` with the level it already has: the
+  call measured above, made by the thread itself. Not for a TIME_CRITICAL thread (the timer thread) and not in a
+  realtime-class process. Logged as `[KERNEL] guest thread N ran at priority P (level L); re-set its level, now Q`
+  (first five, then every 100th). `RECOMP_PRIORITY_RESET=0` turns it off.
+- [I] It does not replace the watchdog. `sub_0021EC50`'s spin makes no kernel call, so a thread raised just
+  before one still needs a rescue; its next kernel entry after the rescue removes the cause, so a boot needs at most
+  one rescue for it instead of one per fence wait.
+- [V] Not yet seen to fire. On a build with it (2026-10-21 15:01-15:52): 20 unscripted m3-shaped boots, 20 ok, and
+  8 pairs of title boots on CPU 2 at once (one copy on another save root, 5 s apart), all 16 presented. No
+  thread stayed above 15 in any of them; no reset, no rescue, no `DISPATCH_LEVEL for 200 ms`. `regress.py --quick`
+  5/5 (`logs/regress-20261021-154711.txt`). Every pair's second copy logged §2's `[ICALL] 0x0002A167`, the first
+  copies none.
+- [V] What the poller saw instead: in 16 of 20 single boots and 7 of 8 pairs the main thread went to 16 (base 8)
+  0.01-0.17 s after start, for 23-46 ms, and dropped back by itself (to 9-15). No reset was logged for these, and a
+  thread's first kernel call checks at once, so they happen during host start-up, before guest code. Worker threads
+  (base 6) show the same 25-38 ms at 16 as the harness kills the process.
+- [V] Ruled out as the source (a probe pinned to CPU 2 with a watcher thread sampling its priority): a bare process
+  start; `XAudio2Create` plus a mastering voice (the base-22 thread appears with it, the caller stays at 8-9);
+  `SymInitialize(..., TRUE)`; a 1 GB reservation with 256 MB committed and touched. Not tried: the Vulkan device
+  and window creation, `pc_settings_init`, `account_init`. A kernel trace needs an elevated session (WPR).
+- [U] Whether the reset holds against whatever raises the thread. One reset from outside held for the rest of a
+  boot; if the source re-raises, the log's running count (every 100th) shows it.
