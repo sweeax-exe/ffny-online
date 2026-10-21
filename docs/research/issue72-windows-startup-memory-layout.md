@@ -191,3 +191,18 @@ Local evidence: `logs/issue72/windows-job-current.log`,
 and sent body `logs/issue72/issue-comment-published.md` (all ignored).
 A later integration target may include the separately published texture-list
 fix `72bec86`; apply this memory topic on that fork tip to preserve the other fix.
+
+## Pull requests and release hold
+
+At Vlad's request, submitted [parent PR #76](https://github.com/vyanhursky/DefJamFFNY-recomp/pull/76)
+and [fork toolkit PR #3](https://github.com/vyanhursky/xboxrecomp/pull/3).
+Both are open and mergeable. Parent #76 starts from current main `7bb4bdf`, retains
+its launcher/beta work, pins the same tested `e818066`, and registers the new
+fixture in Windows and POSIX CI. Its diff contains only CI, the pin and issue72
+research/state. Parent integration CI is running; the existing reporter artifact
+and its v0.10.5 baseline remain unchanged.
+
+**Leave both PRs unmerged.** Vlad will request the release after the reporter
+confirms the Windows fix. No auto-merge, tag or release was enabled. Fork PR #3
+targets the project's `defjam/audio-fix`, not the upstream repository. Separate
+texture-list PR #73 must be preserved when the two toolkit topics are integrated.
