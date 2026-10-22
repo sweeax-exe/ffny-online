@@ -1,0 +1,337 @@
+/*
+ * Bug reports. Players found it hard to find and attach the right run-....log.err, and a log
+ * alone cannot show a wrong picture, so F9 in the game sends both: this session's log and the
+ * picture F9 just took, as multipart/form-data to POST /api/report on the account service.
+ * The answer is a short id the toast shows, so a player can name the report in a ticket.
+ *
+ * What leaves the PC: the log, cut to its first 512 KB and last 2.5 MB if it is longer, with the
+ * Windows user folder blanked; the picture as a PNG; the build number. The privacy page
+ * (accounts/server.go) says the same.
+ */
+#include "bug_report.h"
+
+#if defined(_WIN32)
+#include "account.h"
+#include "updater.h"
+
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#include <io.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#define STB_IMAGE_WRITE_STATIC
+#include "../../tools/xboxrecomp/src/nv2a/stb/stb_image_write.h"
+
+#define LOG_HEAD (512 << 10)
+#define LOG_TAIL (2560 << 10)
+#define TOAST_MS 8000
+
+typedef struct { char *p; size_t n, cap; } Buf;
+
+static int put(Buf *b, const void *data, size_t n)
+{
+    if (b->n + n > b->cap) {
+        size_t cap = b->cap ? b->cap : 1 << 16;
+        char *p;
+        while (cap < b->n + n) cap *= 2;
+        if (!(p = (char *)realloc(b->p, cap))) return 0;
+        b->p = p;
+        b->cap = cap;
+    }
+    memcpy(b->p + b->n, data, n);
+    b->n += n;
+    return 1;
+}
+
+static int puts_(Buf *b, const char *s) { return put(b, s, strlen(s)); }
+
+static void png_out(void *ctx, void *data, int n) { put((Buf *)ctx, data, (size_t)n); }
+
+static SRWLOCK s_lock = SRWLOCK_INIT;
+static char s_toast[160];
+static ULONGLONG s_toast_until;    /* 0: shown while sending */
+static volatile LONG s_busy;
+
+static void set_toast(const char *text, int lasting)
+{
+    AcquireSRWLockExclusive(&s_lock);
+    snprintf(s_toast, sizeof(s_toast), "%s", text);
+    s_toast_until = lasting ? GetTickCount64() + TOAST_MS : 0;
+    ReleaseSRWLockExclusive(&s_lock);
+}
+
+int bug_report_toast(char *out, int size)
+{
+    int on;
+    AcquireSRWLockShared(&s_lock);
+    on = s_toast[0] && (!s_toast_until || GetTickCount64() < s_toast_until);
+    if (on) snprintf(out, size, "%s", s_toast);
+    ReleaseSRWLockShared(&s_lock);
+    return on;
+}
+
+/* Replace every case-insensitive occurrence of what with by, in place (by is not longer). */
+static size_t blank(char *s, size_t n, const char *what, const char *by)
+{
+    size_t wl = strlen(what), bl = strlen(by), i = 0, o = 0;
+    if (wl < 4 || bl > wl) return n;
+    while (i < n) {
+        if (i + wl <= n && _strnicmp(s + i, what, wl) == 0) {
+            memcpy(s + o, by, bl);
+            o += bl;
+            i += wl;
+        } else {
+            s[o++] = s[i++];
+        }
+    }
+    return o;
+}
+
+/* The log, its head and tail if long, with the user folder blanked. */
+static int read_log(const char *path, Buf *out)
+{
+    HANDLE h = CreateFileA(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL,
+                           OPEN_EXISTING, 0, NULL);
+    LARGE_INTEGER size;
+    char *text;
+    size_t n = 0;
+    DWORD got;
+    char profile[MAX_PATH], user[128], seg[140];
+    if (h == INVALID_HANDLE_VALUE) return 0;
+    if (!GetFileSizeEx(h, &size)) { CloseHandle(h); return 0; }
+    text = (char *)malloc(LOG_HEAD + LOG_TAIL + 64);
+    if (!text) { CloseHandle(h); return 0; }
+    if (size.QuadPart <= LOG_HEAD + LOG_TAIL) {
+        if (ReadFile(h, text, (DWORD)size.QuadPart, &got, NULL)) n = got;
+    } else {
+        LARGE_INTEGER at;
+        if (ReadFile(h, text, LOG_HEAD, &got, NULL)) n = got;
+        n += (size_t)snprintf(text + n, 64, "\n[REPORT] ... %lld bytes left out ...\n",
+                              size.QuadPart - LOG_HEAD - LOG_TAIL);
+        at.QuadPart = size.QuadPart - LOG_TAIL;
+        if (SetFilePointerEx(h, at, NULL, FILE_BEGIN) && ReadFile(h, text + n, LOG_TAIL, &got, NULL)) n += got;
+    }
+    CloseHandle(h);
+    if (GetEnvironmentVariableA("USERPROFILE", profile, sizeof(profile)))
+        n = blank(text, n, profile, "%USERPROFILE%");
+    if (GetEnvironmentVariableA("USERNAME", user, sizeof(user))) {     /* in other folders: D:\<name>\Games */
+        snprintf(seg, sizeof(seg), "\\%s\\", user);
+        n = blank(text, n, seg, "\\%USER%\\");
+    }
+    put(out, text, n);
+    free(text);
+    return 1;
+}
+
+/* The F9 picture (our own 24-bit bottom-up BMP) as a PNG. */
+static int read_picture(const char *path, Buf *out)
+{
+    FILE *f = fopen(path, "rb");
+    unsigned char hdr[54], *rgb;
+    int w, h, row, y, ok = 0;
+    if (!f) return 0;
+    if (fread(hdr, 1, 54, f) == 54 && hdr[0] == 'B' && hdr[1] == 'M' && hdr[28] == 24) {
+        w = hdr[18] | hdr[19] << 8;
+        h = hdr[22] | hdr[23] << 8;
+        row = (w * 3 + 3) & ~3;
+        rgb = (w > 0 && h > 0 && w <= 8192 && h <= 8192) ? (unsigned char *)malloc((size_t)w * h * 3) : NULL;
+        if (rgb) {
+            unsigned char *line = (unsigned char *)malloc(row);
+            ok = line != NULL;
+            fseek(f, hdr[10] | hdr[11] << 8, SEEK_SET);
+            for (y = 0; ok && y < h; y++) {
+                unsigned char *dst = rgb + (size_t)(h - 1 - y) * w * 3;
+                int x;
+                if (fread(line, 1, row, f) != (size_t)row) { ok = 0; break; }
+                for (x = 0; x < w; x++) {
+                    dst[x * 3] = line[x * 3 + 2];
+                    dst[x * 3 + 1] = line[x * 3 + 1];
+                    dst[x * 3 + 2] = line[x * 3];
+                }
+            }
+            free(line);
+            ok = ok && stbi_write_png_to_func(png_out, out, w, h, 3, rgb, w * 3);
+            free(rgb);
+        }
+    }
+    fclose(f);
+    return ok;
+}
+
+/* This session's log: wherever stderr goes, if it is a file. */
+static int own_log(char *out, int size)
+{
+    HANDLE h = (HANDLE)_get_osfhandle(_fileno(stderr));
+    char path[MAX_PATH + 8];
+    DWORD n;
+    if (h == INVALID_HANDLE_VALUE || GetFileType(h) != FILE_TYPE_DISK) return 0;
+    n = GetFinalPathNameByHandleA(h, path, sizeof(path), FILE_NAME_NORMALIZED);
+    if (!n || n >= sizeof(path)) return 0;
+    snprintf(out, size, "%s", strncmp(path, "\\\\?\\", 4) == 0 ? path + 4 : path);
+    return 1;
+}
+
+typedef struct { char kind[16], log[MAX_PATH + 8], picture[MAX_PATH + 8]; } Job;
+
+static void field(Buf *b, const char *boundary, const char *name, const char *file, const char *ctype)
+{
+    puts_(b, "--");
+    puts_(b, boundary);
+    puts_(b, "\r\nContent-Disposition: form-data; name=\"");
+    puts_(b, name);
+    if (file) {
+        puts_(b, "\"; filename=\"");
+        puts_(b, file);
+    }
+    puts_(b, "\"\r\n");
+    if (ctype) {
+        puts_(b, "Content-Type: ");
+        puts_(b, ctype);
+        puts_(b, "\r\n");
+    }
+    puts_(b, "\r\n");
+}
+
+static DWORD WINAPI send_thread(LPVOID param)
+{
+    Job *job = (Job *)param;
+    Buf log = { 0 }, pic = { 0 }, body = { 0 };
+    char boundary[48], ctype[96], build[16], answer[128], text[160];
+    int status = 0, have_pic;
+
+    if (!job->log[0]) {
+        Sleep(2500);                /* the frame after F9 and its draws (nv2a_pb_dump_next_frame) */
+        fflush(stderr);
+        if (!own_log(job->log, sizeof(job->log))) job->log[0] = 0;
+    }
+    if (!job->log[0] || !read_log(job->log, &log)) {
+        set_toast("Bug report not sent: this session has no log file.", 1);
+        goto done;
+    }
+    have_pic = job->picture[0] && read_picture(job->picture, &pic);
+
+    snprintf(boundary, sizeof(boundary), "ffny%08lx%08lx", (unsigned long)GetTickCount(), (unsigned long)GetCurrentProcessId());
+    snprintf(ctype, sizeof(ctype), "multipart/form-data; boundary=%s", boundary);
+    snprintf(build, sizeof(build), "%d", updater_local_build());
+    field(&body, boundary, "kind", NULL, NULL);
+    puts_(&body, job->kind);
+    puts_(&body, "\r\n");
+    field(&body, boundary, "build", NULL, NULL);
+    puts_(&body, build);
+    puts_(&body, "\r\n");
+    field(&body, boundary, "log", "run.log.err", "text/plain");
+    put(&body, log.p, log.n);
+    puts_(&body, "\r\n");
+    if (have_pic) {
+        field(&body, boundary, "picture", "picture.png", "image/png");
+        put(&body, pic.p, pic.n);
+        puts_(&body, "\r\n");
+    }
+    puts_(&body, "--");
+    puts_(&body, boundary);
+    if (!puts_(&body, "--\r\n")) {
+        set_toast("Bug report not sent: out of memory.", 1);
+        goto done;
+    }
+    status = account_send_bug_report(ctype, body.p, (int)body.n, answer, sizeof(answer));
+    fprintf(stderr, "[REPORT] bug report (%s, log %zu bytes, picture %zu bytes) sent: HTTP %d %s\n", job->kind, log.n,
+            pic.n, status, status == 201 ? answer : "");
+    if (status == 201)
+        snprintf(text, sizeof(text), "Bug report sent - code %.6s. Thanks!", answer);
+    else if (status == 429)
+        snprintf(text, sizeof(text), "Bug report not sent: too many reports, try again in an hour.");
+    else
+        snprintf(text, sizeof(text), "Bug report not sent (%s). The picture is beside settings.ini.",
+                 status ? "the server said no" : "no connection");
+    set_toast(text, 1);
+done:
+    free(log.p);
+    free(pic.p);
+    free(body.p);
+    free(job);
+    InterlockedExchange(&s_busy, 0);
+    return 0;
+}
+
+void bug_report_send(const char *kind, const char *log_path, const char *picture_path)
+{
+    Job *job;
+    HANDLE t;
+    if (InterlockedExchange(&s_busy, 1)) return;        /* one at a time */
+    job = (Job *)calloc(1, sizeof(*job));
+    if (!job) { InterlockedExchange(&s_busy, 0); return; }
+    snprintf(job->kind, sizeof(job->kind), "%s", kind);
+    if (log_path) snprintf(job->log, sizeof(job->log), "%s", log_path);
+    if (picture_path) snprintf(job->picture, sizeof(job->picture), "%s", picture_path);
+    set_toast("Sending the bug report...", 0);
+    t = CreateThread(NULL, 0, send_thread, job, 0, NULL);
+    if (t) CloseHandle(t);
+    else { free(job); InterlockedExchange(&s_busy, 0); set_toast("", 1); }
+}
+
+int bug_report_busy(void) { return s_busy != 0; }
+
+/* The run before this one, if it ended in a crash report (main.c) not offered yet. Logs are
+ * named by their start time (pc_settings.c), so the newest other one is the previous run. */
+int bug_report_last_crash(char *out, int size)
+{
+    WIN32_FIND_DATAA fd;
+    HANDLE find = FindFirstFileA("logs\\run-*.log.err", &fd);
+    char own[MAX_PATH + 8], best[MAX_PATH] = "", path[MAX_PATH + 16], *tail;
+    const char *own_name = NULL;
+    HANDLE h;
+    LARGE_INTEGER size_, at;
+    DWORD got = 0;
+    int crashed = 0;
+    if (find == INVALID_HANDLE_VALUE) return 0;
+    if (own_log(own, sizeof(own))) own_name = strrchr(own, '\\') ? strrchr(own, '\\') + 1 : own;
+    do {
+        if (own_name && _stricmp(fd.cFileName, own_name) == 0) continue;
+        if (strcmp(fd.cFileName, best) > 0) snprintf(best, sizeof(best), "%s", fd.cFileName);
+    } while (FindNextFileA(find, &fd));
+    FindClose(find);
+    if (!best[0]) return 0;
+    snprintf(path, sizeof(path), "logs\\%s.seen", best);
+    if (GetFileAttributesA(path) != INVALID_FILE_ATTRIBUTES) return 0;
+    snprintf(path, sizeof(path), "logs\\%s", best);
+    h = CreateFileA(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, NULL);
+    if (h == INVALID_HANDLE_VALUE) return 0;
+    tail = (char *)malloc((1 << 20) + 1);
+    if (tail && GetFileSizeEx(h, &size_)) {
+        at.QuadPart = size_.QuadPart > (1 << 20) ? size_.QuadPart - (1 << 20) : 0;
+        if (SetFilePointerEx(h, at, NULL, FILE_BEGIN) && ReadFile(h, tail, 1 << 20, &got, NULL)) {
+            DWORD i;
+            for (i = 0; i + 7 <= got && !crashed; i++)
+                crashed = memcmp(tail + i, "[CRASH]", 7) == 0;
+        }
+    }
+    free(tail);
+    CloseHandle(h);
+    if (crashed) snprintf(out, size, "%s", path);
+    return crashed;
+}
+
+void bug_report_crash_seen(const char *log_path)
+{
+    char path[MAX_PATH + 16];
+    HANDLE h;
+    snprintf(path, sizeof(path), "%s.seen", log_path);
+    h = CreateFileA(path, GENERIC_WRITE, 0, NULL, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (h != INVALID_HANDLE_VALUE) CloseHandle(h);
+}
+
+#else
+
+void bug_report_send(const char *kind, const char *log_path, const char *picture_path)
+{ (void)kind; (void)log_path; (void)picture_path; }
+int bug_report_toast(char *out, int size) { (void)out; (void)size; return 0; }
+int bug_report_busy(void) { return 0; }
+int bug_report_last_crash(char *out, int size) { (void)out; (void)size; return 0; }
+void bug_report_crash_seen(const char *log_path) { (void)log_path; }
+
+#endif

@@ -49,6 +49,11 @@
 #define TRANSLATOR_HEIGHT  480
 
 static void capture_backbuffer(IDirect3DDevice8 *dev);
+/* F9 in the game window: the picture as it is now goes to picture-report-<time>.bmp beside
+ * settings.ini, and the next frame's batches to the log (nv2a_pb_dump_next_frame), so a player
+ * who sees something wrong on screen can send both. */
+static volatile LONG s_report_shot;
+static char s_report_path[MAX_PATH * 2];
 
 static int   s_ready;
 
@@ -183,6 +188,10 @@ static LRESULT CALLBACK translator_wndproc(HWND h, UINT msg, WPARAM wp, LPARAM l
             return 0;   /* no beep for the Alt+Enter just handled */
         break;
     case WM_KEYDOWN:
+        if (wp == VK_F9 && !(lp & (1 << 30))) {     /* a picture report: see capture_backbuffer */
+            InterlockedExchange(&s_report_shot, 1);
+            return 0;
+        }
         if (wp == VK_F11 && !(lp & (1 << 30))) {
             pc_display_set("fullscreen", !s_fullscreen);
             return 0;
@@ -559,6 +568,22 @@ static void capture_backbuffer(IDirect3DDevice8 *dev)
             path = named;
         }
     }
+    if (!step_shot && InterlockedExchange(&s_report_shot, 0)) {
+        const char *ini = pc_settings_path(), *slash;
+        SYSTEMTIME t;
+        GetLocalTime(&t);
+        slash = ini ? strrchr(ini, '\\') : NULL;
+        snprintf(s_report_path, sizeof(s_report_path), "%.*s%spicture-report-%04u%02u%02u-%02u%02u%02u.bmp",
+                 slash ? (int)(slash - ini) : 0, slash ? ini : "", slash ? "\\" : "",
+                 t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute, t.wSecond);
+        path = s_report_path;
+        step_shot = -1;             /* taken now, whatever the frame and time lists say */
+        {
+            extern void nv2a_pb_dump_next_frame(void);
+            nv2a_pb_dump_next_frame();
+        }
+        fprintf(stderr, "[REPORT] picture report: %s, and the next frame's draws below\n", path);
+    }
     if (!step_shot) {
     if (!path || !*path)
         return;
@@ -682,6 +707,10 @@ static void capture_backbuffer(IDirect3DDevice8 *dev)
             /* And, with RECOMP_PB_BATCH_DUMP=shot, the next frame's batches. */
             extern void nv2a_pb_request_dump_next(void);
             nv2a_pb_request_dump_next();
+        }
+        if (step_shot == -1) {      /* F9: send it with the log */
+            extern void bug_report_send(const char *kind, const char *log_path, const char *picture_path);
+            bug_report_send("picture", NULL, path);
         }
         if (!step_shot && ++next >= nwant)
             _putenv_s("RECOMP_TRANS_SHOT", "");   /* every requested frame taken */

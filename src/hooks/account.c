@@ -46,10 +46,10 @@ static void set_reason(const char *text)
     ReleaseSRWLockExclusive(&g_lock);
 }
 
-/* One HTTPS request to the account service; the body (if any) as JSON. Returns the HTTP status,
- * 0 when the service could not be reached; the answer goes to buf. */
-static int request(const wchar_t *method, const wchar_t *path, const char *token, const char *body,
-                   char *buf, int size)
+/* One HTTPS request to the account service, with a body of blen bytes of type ctype (if any).
+ * Returns the HTTP status, 0 when the service could not be reached; the answer goes to buf. */
+static int request_body(const wchar_t *method, const wchar_t *path, const char *token, const char *ctype,
+                        const void *body, DWORD blen, char *buf, int size)
 {
     HINTERNET session = NULL, connect = NULL, req = NULL;
     DWORD status = 0, ssize = sizeof(status);
@@ -70,15 +70,15 @@ static int request(const wchar_t *method, const wchar_t *path, const char *token
     }
     session = WinHttpOpen(L"FFNY-Online-Launcher/1", test && *test ? WINHTTP_ACCESS_TYPE_NO_PROXY : WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
                           WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
-    if (session) WinHttpSetTimeouts(session, 5000, 5000, 10000, 15000);
+    /* A bug report of a few MB may take a while on a slow line. */
+    if (session) WinHttpSetTimeouts(session, 5000, 5000, blen > 65536 ? 120000 : 10000, 15000);
     if (session) connect = WinHttpConnect(session, host, port, 0);
     if (connect) req = WinHttpOpenRequest(connect, method, path, NULL, WINHTTP_NO_REFERER,
                                           WINHTTP_DEFAULT_ACCEPT_TYPES, secure);
     if (req) {
-        wchar_t headers[200] = L"";
-        DWORD blen = body ? (DWORD)strlen(body) : 0;
+        wchar_t headers[300] = L"";
         if (token && *token) swprintf(headers, 200, L"Authorization: Bearer %hs\r\n", token);
-        if (body) wcscat(headers, L"Content-Type: application/json\r\n");
+        if (body) swprintf(headers + wcslen(headers), 300 - wcslen(headers), L"Content-Type: %hs\r\n", ctype);
         if (WinHttpSendRequest(req, headers[0] ? headers : WINHTTP_NO_ADDITIONAL_HEADERS, headers[0] ? (DWORD)-1L : 0,
                                (LPVOID)body, blen, blen, 0) &&
             WinHttpReceiveResponse(req, NULL) &&
@@ -97,6 +97,13 @@ static int request(const wchar_t *method, const wchar_t *path, const char *token
     if (connect) WinHttpCloseHandle(connect);
     if (session) WinHttpCloseHandle(session);
     return (int)status;
+}
+
+/* The same with a JSON body. */
+static int request(const wchar_t *method, const wchar_t *path, const char *token, const char *body,
+                   char *buf, int size)
+{
+    return request_body(method, path, token, "application/json", body, body ? (DWORD)strlen(body) : 0, buf, size);
 }
 
 static void put_utf8(char *out, int size, int *n, unsigned cp)
@@ -540,6 +547,19 @@ int account_ranked_ticket(char out[33])
     return 1;
 }
 
+int account_send_bug_report(const char *ctype, const void *body, int len, char *out, int size)
+{
+    char token[65];
+    int status;
+    AcquireSRWLockShared(&g_lock);
+    memcpy(token, g_token, sizeof(token));
+    ReleaseSRWLockShared(&g_lock);
+    status = request_body(L"POST", L"/api/report?format=text", g_state == ACCOUNT_IN ? token : NULL, ctype, body,
+                          (DWORD)len, out, size);
+    SecureZeroMemory(token, sizeof(token));
+    return status;
+}
+
 void account_report_match(const char *json)
 {
     char *copy;
@@ -565,6 +585,8 @@ void account_fetch_stats_page(int page) { (void)page; }
 int account_stats_busy(void) { return 0; }
 int account_stats(char *out, int size) { (void)out; (void)size; return 0; }
 int account_ranked_ticket(char out[33]) { out[0] = 0; return 0; }
+int account_send_bug_report(const char *ctype, const void *body, int len, char *out, int size)
+{ (void)ctype; (void)body; (void)len; if (size > 0) out[0] = 0; return 0; }
 
 #endif
 

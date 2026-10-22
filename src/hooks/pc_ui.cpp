@@ -50,6 +50,7 @@ extern "C" {
 #include "pc_ui_internal.h"
 #include "netplay.h"
 #include "account.h"
+#include "bug_report.h"
 #include "online_screen.h"
 #include "hd_build.h"
 #include "updater.h"
@@ -1095,6 +1096,10 @@ static void page_general(UiMode mode)
     }
     ImGui::SeparatorText("Appearance");
     settings_group("ui", { "scale" });
+    ImGui::SeparatorText("Bug reports");
+    ImGui::TextWrapped("Something wrong in the game? Press F9 while it is on screen: the game takes a picture and sends "
+                       "it with its log to the developers, and shows a code you can quote on Discord. After a crash the "
+                       "launcher offers to send the crash log. Your Windows user folder is blanked in the log.");
     ImGui::SeparatorText("Files");
     ImGui::TextWrapped("Settings are saved as you change them in: %s", pc_settings_path());
     if (ImGui::Button(k_show_file_label)) open_folder();
@@ -1189,6 +1194,53 @@ static void draw_page(int page, UiMode mode)
     case PAGE_KEYBOARD: page_keyboard(); break;
     default: page_general(mode); break;
     }
+}
+
+// After a crash, an offer to send that run's log (bug_report.c); F9 cannot, the game is gone.
+static void crash_popup()
+{
+    static bool checked, sent;
+    static char log_path[300];
+    // After the update check, so the two modals never replace each other: an offered update comes
+    // first, this after "Later".
+    UpdaterState upd = updater_state();
+    if (ImGui::IsPopupOpen("Update available")) return;
+    if (!checked && ((upd != UPDATER_IDLE && upd != UPDATER_CHECKING) || ImGui::GetTime() > 8.0)) {
+        checked = true;
+        if (bug_report_last_crash(log_path, sizeof(log_path))) ImGui::OpenPopup("The game crashed");
+    }
+    ImGui::SetNextWindowSize(ImVec2(ImGui::GetFontSize() * 30, 0));
+    if (!ImGui::BeginPopupModal("The game crashed", nullptr, ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings))
+        return;
+    ImGui::PushTextWrapPos(ImGui::GetFontSize() * 29);
+    ImGui::TextUnformatted("The game crashed last time. Send its log to the developers? It shows where the crash "
+                           "happened, so it can be fixed.");
+    ImGui::TextDisabled("Only that session's log is sent, with your Windows user folder blanked. See Privacy.");
+    char status[160];
+    bool busy = bug_report_busy();
+    if (sent && bug_report_toast(status, sizeof(status))) ImGui::TextColored(k_gold, "%s", status);
+    ImGui::PopTextWrapPos();
+    ImGui::Spacing();
+    if (!sent) {
+        ImGui::PushStyleColor(ImGuiCol_Button, k_red);
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, k_red_hi);
+        if (ImGui::Button("Send crash report", ImVec2(ImGui::GetFontSize() * 11, 0))) {
+            bug_report_send("crash", log_path, nullptr);
+            bug_report_crash_seen(log_path);
+            sent = true;
+        }
+        ImGui::PopStyleColor(2);
+        ImGui::SameLine();
+        if (ImGui::Button("No thanks", ImVec2(ImGui::GetFontSize() * 8, 0))) {
+            bug_report_crash_seen(log_path);
+            ImGui::CloseCurrentPopup();
+        }
+    } else {
+        if (busy) ImGui::BeginDisabled();
+        if (ImGui::Button("Close", ImVec2(ImGui::GetFontSize() * 8, 0))) ImGui::CloseCurrentPopup();
+        if (busy) ImGui::EndDisabled();
+    }
+    ImGui::EndPopup();
 }
 
 // The update offer: a modal over the launcher when a newer build is signed and published.
@@ -1407,6 +1459,7 @@ static UiResult draw_launcher(float x, float y, float width, float height)
     }
     if (ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere(-1);
     update_popup(result);
+    crash_popup();
     ImGui::End();
     return result;
 }
@@ -1717,7 +1770,8 @@ extern "C" void pc_ui_overlay(void *device, void *context, void *window_rtv, uns
     // Closed, the overlay still draws the ONLINE entry's art on the main menu.
     bool decor = !g_open.load() && online_screen::decor_wanted();
     char notice[160];
-    bool toast = !g_open.load() && netplay_toast(notice, sizeof(notice));    // online: a wait, a desync
+    bool toast = !g_open.load() && (netplay_toast(notice, sizeof(notice))     // online: a wait, a desync
+                                    || bug_report_toast(notice, sizeof(notice)));  // F9
     if (!g_open.load() && !decor && !toast) { ui_unlock(); return; }
 
     ID3D11Device *dev = (ID3D11Device *)device;

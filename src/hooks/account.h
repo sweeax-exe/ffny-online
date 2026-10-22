@@ -36,6 +36,9 @@ int account_stats(char *out, int size);
  * service. Blocks for the request (call it off the game's threads); 0 when not signed in or the
  * service could not be reached. */
 int account_ranked_ticket(char out[33]);
+/* A bug report (bug_report.c): POST /api/report with this body, naming the account if signed in.
+ * Blocks; returns the HTTP status (201: out holds the report's id), 0 if unreachable. */
+int account_send_bug_report(const char *ctype, const void *body, int len, char *out, int size);
 
 #ifdef __cplusplus
 }
