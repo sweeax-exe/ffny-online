@@ -94,6 +94,33 @@ Setup to Applications, run
 `xattr -dr com.apple.quarantine "/Applications/Def Jam Setup.app"` in Terminal, then open it
 from Applications.
 
+## Windows setup: LNK1000 "Internal error during IncrCalcPtrs" (fixed in v0.10.7)
+
+On some Windows PCs the setup's build stops at the last link step with
+`defjam_recomp.rc.res : fatal error LNK1000: Internal error during IncrCalcPtrs`, an access
+violation (C0000005) inside `link.exe`, and setup ends with "Stage failed". The build used
+RelWithDebInfo, which CMake links with `/INCREMENTAL`, and the Microsoft linker's incremental
+code can crash on an image as large as this one. The `.rc.res` file named in the message is only
+the last input on the link line. The link now passes `/INCREMENTAL:NO` (nothing to reuse in a
+from-scratch setup build). Workaround for an earlier setup: in an "x64 Native Tools Command
+Prompt for VS", in the setup's source folder, delete `build\win-x64-release` and run
+`cmake -S . -B build/win-x64-release -DCMAKE_EXE_LINKER_FLAGS_RELWITHDEBINFO="/debug /INCREMENTAL:NO"`,
+then run setup again. The crash did not reproduce on a Windows 11 PC with VS 2019 Build Tools
+(MSVC 14.29), where v0.10.6 and v0.10.7 both built, so the change rests on the cause analysis. The
+reporter has not yet confirmed it.
+
+## Windows: the game closes right after setup builds it, before the menu (fixed in v0.10.7, issue #72)
+
+On some Windows PCs the game stopped at start-up with an access violation in `VCRUNTIME140.dll`,
+before any window content. The start-up memory placement accepted a location for the 64 MB of
+Xbox RAM without checking that the device memory areas it needs could be placed at the same
+offset. When Windows refused one, audio start-up read memory that had never been mapped. The
+code dates from v0.1.0 and depends on how Windows lays out the PC's address space. v0.10.7
+checks the whole layout before booting, retries another location if any area is unavailable,
+and stops with a message instead of continuing. Tested with the placement fixture on Windows;
+the reporter has not yet confirmed it on their PC. If it still happens, attach the newest
+`logs\run-*.log.err` (the `[CRASH]` block) to the issue.
+
 ## Mac diagnostics retained in v0.9.0 validation
 
 At v0.9.0 the strict audio underrun check (`audio.dry_queue`) failed on the Mac, as in the

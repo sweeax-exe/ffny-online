@@ -47,7 +47,7 @@ performance measurement. [Download the longer 60-fps MP4](docs/media/hd-16x9-gam
 **Improved Game Launcher (v0.10.6)** brings a focused Home screen, with detailed options in
 [Advanced settings](docs/launcher-and-overlay.md). The brickwork and torn-paper
 style uses the game's charcoal, ivory, red and gold palette.
-[Get the latest setup](https://github.com/vyanhursky/DefJamFFNY-recomp/releases/tag/v0.10.6).
+[Get the latest setup](https://github.com/vyanhursky/DefJamFFNY-recomp/releases/tag/v0.10.7).
 
 ## Features
 
