@@ -66,6 +66,7 @@ def recomp(args):
         sys.exit('run "pipeline.py analyze" first')
     run('recompilation (previous generated sources preserved)',
         [SCRIPTS / 'pipeline-state.py', 'lift', '--toolkit', tk, '--split', args.split, '--', *args.extra])
+    run('manual override addresses', [SCRIPTS / 'check-manual-addresses.py', '--toolkit', tk])
     gen = [p for p in (REPO / 'src/recomp/gen').iterdir() if p.is_file()]
     print(f"Generated: {sum(p.suffix == '.c' for p in gen)} C files, "
           f"{round(sum(p.stat().st_size for p in gen) / 2**20)} MB")

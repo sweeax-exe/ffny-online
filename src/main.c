@@ -657,6 +657,12 @@ static int host_main(void)
     /* Preserve this title's six-speaker balance when using the newer toolkit. */
     if (!getenv("RECOMP_APU_MIXDOWN"))
         _putenv_s("RECOMP_APU_MIXDOWN", "six");
+    /* Toolkit v0.16 renders 3D voices through HRTF by default (as xemu does).
+     * Off for this title until a listening comparison says otherwise (D147):
+     * a new default stays off for the migration's acceptance, as with v0.13
+     * (D76). RECOMP_APU_HRTF=1 turns it on. */
+    if (!getenv("RECOMP_APU_HRTF"))
+        _putenv_s("RECOMP_APU_HRTF", "0");
 
     /* Acknowledge the audio DSP's command doorbell.
      *

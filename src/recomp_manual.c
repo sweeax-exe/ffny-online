@@ -145,8 +145,9 @@ void recomp_unimpl(const char *text, uint32_t va)
      * omissions; repeated IRQ/cache instructions must not exhaust that budget. */
     int known = !strcmp(text, "cli") || !strcmp(text, "sti") || !strcmp(text, "wbinvd");
     /* Exact PUSHFD/POPFD sites from the preserved baseline's lift summary and
-     * generated TODOs. Other sites remain failures. Implementing their flags
-     * and interrupt effects is a separate runtime project, not this migration. */
+     * generated TODOs. Other sites remain failures. Since toolkit v0.16 the
+     * lifter translates both through a g_eflags image (#186), so these no
+     * longer reach here; kept for code lifted by an older toolkit. */
     if (!strcmp(text, "pushfd"))
         known = va == 0x00088500u || va == 0x0009F2C0u || va == 0x00130B46u
              || va == 0x002470B8u || va == 0x002470C4u;
@@ -429,12 +430,12 @@ done:
  * returned. Neither ever printed anything, and the reason is worth keeping.
  *
  * Declaring `extern void sub_X_gen(void);` does emit the real body under that
- * name -- and it also rewrites every direct call site to call `sub_X_gen`
- * instead. So a direct caller goes straight to the original body and the
- * wrapper is never on the path. It only intercepts calls that arrive through
- * recomp_lookup_manual(), which sees indirect calls only. The sleep trace
- * below works for exactly that reason: its target is reached through a
- * function pointer.
+ * name -- and with toolkit v0.13 it also rewrote every direct call site to call
+ * `sub_X_gen` instead, so a direct caller went straight to the original body
+ * and the wrapper was never on the path. Since v0.16 (upstream #175) a direct
+ * call to a wrapped function goes through the manual lookup and does reach the
+ * wrapper; these two were not retried. The sleep trace below is reached
+ * through a function pointer either way.
  *
  * To trace a function with direct callers, either replace it outright (define
  * it here without the `_gen` declaration and implement the behaviour), or put

@@ -167,7 +167,7 @@ void pc_debug_start(const char *log_path, int force)
     else
         stderr_file(log, sizeof log);
     recomp_settings_get_text("debug", "mark_key", key, sizeof key, "F9");
-    vk = input_key_from_name(key);
+    vk = xbox_InputMap_KeyFromName(key);
     record_audio = recomp_settings_get("debug", "record_audio", 1);
     /* The probes are read-only (docs/09-testing-harness.md); they give bundles the fighters and the match. */
     if (recomp_settings_get("debug", "record_game_state", 1) && !getenv("RECOMP_TEST_OBSERVATIONS"))
