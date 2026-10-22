@@ -283,6 +283,18 @@ void defjam_test_step(void)
     int slot;
     if (!defjam_test_observations_enabled() || !s_in_match) return;
     s_step++;
+    {   /* RECOMP_TEST_FAST_KO=<percent>: every fighter fights with that share of its health, so a
+         * test match is decided in seconds. Set on the step the fight begins (phase 1; the intro
+         * fills the bars before that), which is the same step on every PC of an online room, so the
+         * lockstep stays equal. Tests only. */
+        static int pct = -1, done;
+        if (s_step == 1) done = 0;
+        if (pct < 0) pct = getenv("RECOMP_TEST_FAST_KO") ? atoi(getenv("RECOMP_TEST_FAST_KO")) : 0;
+        if (pct > 0 && pct < 100 && !done && MEM32(G_PHASE) == 1 && (done = 1))
+            for (slot = 0; slot < SLOTS; slot++)
+                if (active(slot))
+                    MEMF(record(slot) + F_HEALTH) = MEMF(record(slot) + F_HEALTH_MAX) * (float)pct / 100.0f;
+    }
     if (s_step == 1 || s_step == 300 || s_step == 900) draws_report(s_step == 1 ? "step1" : s_step == 300 ? "step300" : "step900");
 
     if (s_setup_due) {

@@ -31,6 +31,10 @@ void automatch_on_funccall(const char *text);
 /* Replays one front-end command on the game thread; returns the guest address of its result
  * string or 0. Defined in src/recomp_manual.c; call only from automatch_on_funccall. */
 unsigned int defjam_fe_call(const char *command);
+/* Tests: a match from "type=0,venue=1,f0=55,p0=0,f1=22,p1=-1" (as RECOMP_AUTOMATCH); a front-end
+ * command run on the game thread at the front end's next call. 1 if taken. */
+int automatch_request_text(const char *spec);
+int automatch_queue_fe(const char *command);
 
 #ifdef __cplusplus
 }

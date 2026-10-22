@@ -78,6 +78,7 @@ void netplay_on_pad_read(uint32_t a) { (void)a; }
 void netplay_on_seed(uint32_t e, int w, uint32_t x) { (void)e; (void)w; (void)x; }
 void netplay_on_result(uint32_t w, uint32_t l, uint32_t c) { (void)w; (void)l; (void)c; }
 int netplay_toast(char *t, int n) { (void)t; (void)n; return 0; }
+int netplay_debug_json(char *o, int n) { return snprintf(o, (size_t)n, "{}"); }
 extern void sub_00081170(void);
 void netplay_crowd_update(void) { sub_00081170(); }
 
@@ -393,7 +394,7 @@ static DWORD remote_slot_state(int slot, XBOX_INPUT_STATE *state)
 static void fight_input(void)
 {
     static LONG on = -1;
-    LONG want = N.lobby && N.lockstep;
+    LONG want = N.lobby && N.lockstep && N.match_seen;    /* the match itself, not the menus before it */
     if (InterlockedExchange(&on, want) != want)
         xbox_HostInputSetNetplayFight(want ? 0x0010 : 0);   /* the START button */
 }
@@ -1220,6 +1221,16 @@ void netplay_room(char *code, int size)
     if (size > 0) snprintf(code, (size_t)size, "%s", N.room);
 }
 
+/* Tests (src/hooks/test_control.c): the lockstep's state as one JSON object. */
+int netplay_debug_json(char *out, int size)
+{
+    return snprintf(out, (size_t)size,
+                    "{\"lockstep\":%d,\"lobby\":%d,\"players\":%d,\"pos\":%d,\"delay\":%d,\"step\":%u,"
+                    "\"match\":\"%08X\",\"matches\":%u,\"desync\":%d,\"rtt_ms\":%d,\"match_live\":%d}",
+                    (int)N.lockstep, N.lobby, N.players, N.pos, N.delay, (unsigned)N.step, (unsigned)N.match,
+                    (unsigned)N.match_count, N.desync, N.rtt_ms, N.match_live);
+}
+
 /* ---- the hub, for the launcher and overlay ------------------------------------ */
 
 int netplay_in_lobby(void) { return N.lobby; }
@@ -1616,6 +1627,11 @@ void netplay_on_match_start(void)
     N.desync = 0;
     if (N.match_live) N.match_seen = 1;
     LeaveCriticalSection(&g_cs);
+    /* From the load on, not from the first step: a START pressed while the venue loads or the
+     * fighters' intro runs (players press it to skip the intro) paused that game before its
+     * first step, and the others waited for it until they gave up (seen on The Pit, whose load is
+     * the longest). */
+    fight_input();
     fprintf(stderr, "[NETPLAY] match %08X starts in lockstep (%d players, delay %d)\n", N.match, N.players, N.delay);
 }
 

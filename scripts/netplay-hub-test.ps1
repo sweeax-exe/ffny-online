@@ -13,9 +13,11 @@
 .PARAMETER ExtraEnv Extra NAME=VALUE pairs for every copy.
 .PARAMETER Route    harness route family: online (two matches) or online5 (five in a row).
 .PARAMETER Fighters fighter.xml IDs, one per copy.
+.PARAMETER Stage    extra harness stages for every copy (e.g. a START press during the fight).
 #>
 param([ValidateRange(2, 4)][int]$Players = 2, [int]$Secs = 1200, [string[]]$ExtraEnv = @(),
-      [ValidateSet('online', 'online5', 'online-rematch')][string]$Route = 'online', [int[]]$Fighters = @(55, 22, 9, 31))
+      [ValidateSet('online', 'online5', 'online-rematch')][string]$Route = 'online', [int[]]$Fighters = @(55, 22, 9, 31),
+      [string[]]$Stage = @())
 $ErrorActionPreference = 'Stop'
 $repo = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 Set-Location $repo
@@ -52,6 +54,7 @@ for ($i = 0; $i -lt $Players; $i++) {
     # Never the live account service: test results would land on the real leaderboard.
     if (-not ($ExtraEnv -match '^RECOMP_ACCOUNT_SERVER=')) { $args += @('--env', 'RECOMP_ACCOUNT_SERVER=127.0.0.1:9') }
     foreach ($e in $ExtraEnv) { $args += @('--env', $e) }
+    foreach ($st in $Stage) { $args += @('--stage', $st) }
     $env:DEFJAM_DATA = $root
     $procs += Start-Process python -ArgumentList $args -PassThru -WindowStyle Hidden `
               -RedirectStandardOutput "$logs\copy$i.txt" -RedirectStandardError "$logs\copy$i.err"

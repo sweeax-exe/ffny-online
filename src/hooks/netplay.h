@@ -146,7 +146,8 @@ void netplay_autostart(void);
 void netplay_on_match_start(void);                  /* sub_001A4D90: a match is set up      */
 void netplay_on_pad_pass(void);                     /* sub_001AD380: pad entries just read */
 void netplay_on_step(void);                         /* sub_00087700: one simulation step    */
-int netplay_toast(char *text, int size);   /* a notice for the fight right now (wait, desync, gone) */
+int netplay_toast(char *text, int size);
+int netplay_debug_json(char *out, int size);    /* tests: the lockstep's state as JSON */   /* a notice for the fight right now (wait, desync, gone) */
 void netplay_crowd_update(void);  /* the crowd's update, as recomp_lookup_manual hands it out */
 void netplay_on_result(uint32_t winners, uint32_t losers, uint32_t code);  /* the room match decided */
 void netplay_on_pad_read(uint32_t actor);           /* sub_001BAA00: a fighter reads its pad */

@@ -499,8 +499,11 @@ static void start_game_process(void)
 }
 #endif
 
+void test_control_start(void);  /* src/hooks/test_control.c */
+
 static void run_launcher_if_wanted(void)
 {
+    test_control_start();       /* tests only (RECOMP_CONTROL_PORT): the live control channel */
     netplay_autostart();        /* tests only: already connecting while the launcher shows */
 #if defined(_WIN32)
     const char *settings = getenv("RECOMP_SETTINGS");

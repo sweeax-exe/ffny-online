@@ -46,14 +46,13 @@ void automatch_request(const AutoMatch *m)
 
 int automatch_pending(void) { return g_armed || g_running; }
 
-static void read_env(void)
+/* "type=0,venue=1,f0=55,p0=0,f1=22,p1=-1" (pads: -1 is the CPU) -> a request. */
+int automatch_request_text(const char *e)
 {
-    const char *e = getenv("RECOMP_AUTOMATCH");
     AutoMatch m;
     char key[8];
     int value, n = 0;
-    g_env_read = 1;
-    if (!e || !*e) return;
+    if (!e || !*e) return 0;
     memset(&m, 0, sizeof(m));
     m.venue = 1;
     m.fighter[0] = 55; m.fighter[1] = 22; m.pad[0] = 0; m.pad[1] = -1;
@@ -72,6 +71,46 @@ static void read_env(void)
     }
     if (m.count < 2) m.count = 2;
     automatch_request(&m);
+    return 1;
+}
+
+static void read_env(void)
+{
+    g_env_read = 1;
+    automatch_request_text(getenv("RECOMP_AUTOMATCH"));
+}
+
+/* Tests (src/hooks/test_control.c): front-end commands to run on the game thread at the next call. */
+static char g_fe_queue[4][160];
+static volatile LONG g_fe_count;
+static CRITICAL_SECTION g_fe_cs;
+static INIT_ONCE g_fe_once = INIT_ONCE_STATIC_INIT;
+static BOOL CALLBACK fe_init(PINIT_ONCE o, PVOID p, PVOID *c) { (void)o; (void)p; (void)c; InitializeCriticalSection(&g_fe_cs); return TRUE; }
+
+int automatch_queue_fe(const char *command)
+{
+    int ok = 0;
+    InitOnceExecuteOnce(&g_fe_once, fe_init, NULL, NULL);
+    EnterCriticalSection(&g_fe_cs);
+    if (g_fe_count < 4) { snprintf(g_fe_queue[g_fe_count], sizeof(g_fe_queue[0]), "%s", command); g_fe_count++; ok = 1; }
+    LeaveCriticalSection(&g_fe_cs);
+    return ok;
+}
+
+static void run_fe_queue(void)
+{
+    char cmds[4][160];
+    int n, i;
+    if (!g_fe_count) return;
+    EnterCriticalSection(&g_fe_cs);
+    n = g_fe_count;
+    memcpy(cmds, g_fe_queue, sizeof(cmds));
+    g_fe_count = 0;
+    LeaveCriticalSection(&g_fe_cs);
+    for (i = 0; i < n; i++) {
+        unsigned int r = defjam_fe_call(cmds[i]);
+        fprintf(stderr, "[CONTROL] %s -> 0x%08X\n", cmds[i], r);
+    }
 }
 
 static void call(const char *format, ...)
@@ -226,8 +265,12 @@ static void print_result(const char *text)
     fprintf(stderr, "[FE-RESULT] %s = %s\n", text, out);
 }
 
+void test_control_note_funccall(const char *text);     /* src/hooks/test_control.c */
+
 void automatch_on_funccall(const char *text)
 {
+    test_control_note_funccall(text);
+    run_fe_queue();
     unsigned int keep = g_eax;
     if (!g_env_read) read_env();
     online_menu_on_funccall(text);
