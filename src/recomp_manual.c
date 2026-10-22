@@ -83,7 +83,7 @@ void sub_0002C530_enter(void) { netplay_on_update(); }
 void sub_0003C6E0_enter(void) { rollback_audio_init_begin(); }
 void sub_00012CC0_enter(void) { rollback_audio_init_end(); }
 /* EAGL's DynamicLoader::Resolve: a model, weapon or render object is linked in (rollback.c logs it in fights). */
-void sub_0010AC20_enter(void) { rollback_note_dynamic_load(MEM32(g_esp)); }
+void sub_0010AC20_enter(void) { rollback_note_dynamic_load(MEM32(g_esp), g_ecx); }
 
 
 /* The lifted body below uses the generated code's register names. */
@@ -106,7 +106,7 @@ extern void sub_001E9E90(void);     /* the pool allocator */
  * the engine 0x11C000..) comes from rollback.c's arena outside the heap, so a rollback, which puts
  * the heap back, never touches what the sound side still holds.
  */
-void sub_00029500(void)
+static void sub_00029500_body(void)
 {
     uint32_t ebp = 0;
     ebp = g_ebp;  /* frameless: caller's frame */
@@ -116,7 +116,6 @@ void sub_00029500(void)
     int32_t _fas = 0, _fbs = 0;
     (void)_fa; (void)_fb; (void)_fas; (void)_fbs;
     ebp = g_seh_ebp; /* fpo_leaf: inherit caller's frame */
-    if (rollback_route_alloc()) return;
 
 loc_00029500: ;
     PUSH32(esp, ebx);
@@ -255,6 +254,14 @@ loc_0002959F: ;
     POP32(esp, ebx);
     esp += 4; return; /* ret */
 
+}
+
+void sub_00029500(void)
+{
+    uint32_t caller = MEM32(g_esp), size = MEM32(g_esp + 8u);
+    if (rollback_route_alloc()) return;
+    sub_00029500_body();
+    rollback_check_alloc(caller, size, g_eax);     /* tests: a block over a live loader's tables */
 }
 #undef eax
 #undef ecx

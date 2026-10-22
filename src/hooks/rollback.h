@@ -32,7 +32,11 @@ void rollback_sound_free(void);
 /* sub_00029500's first test: 1 when the block was taken from the arena (the audio code asked). */
 int rollback_route_alloc(void);
 /* A dynamic load (sub_0010AC20) begins; `caller` is its return address. */
-void rollback_note_dynamic_load(uint32_t caller);
+void rollback_note_dynamic_load(uint32_t caller, uint32_t handle);
+/* Tests (RECOMP_ROLLBACK_CHECK=1): the game allocator returned block for size bytes; says so when it
+ * lies over the tables of the last loaded object, or those tables no longer hold. */
+void rollback_check_alloc(uint32_t caller, uint32_t size, uint32_t block);
+void rollback_check_tables(const char *where);
 /* Called by the crash report (src/main.c) when set: netplay prints the rollback state. */
 extern void (*rollback_crash_cb)(void);
 const char *rollback_page_state(uint32_t addr);

@@ -2255,6 +2255,7 @@ static void rollback_to(uint32_t f)
     g_last_rb_from = N.step;
     rollback_crash_cb = rollback_crash_state;
     rollback_load(slot);
+    rollback_check_tables("right after a load");
     N.step = f - 1;
     N.updates = N.snap[slot].update;
     defjam_test_set_step(N.snap[slot].test_step);
@@ -2296,6 +2297,7 @@ void netplay_on_update(void)
 {
     uint32_t t, f = 0;
     int i;
+    rollback_check_tables(N.resim ? "a re-run update starts" : "an update starts");
     if (N.resim || !N.rb_on) return;
     /* The fight is decided and every step ran on the real entries, or the match went on offline:
      * no more rollback in this match (write tracking off, no saves on the results screen). */

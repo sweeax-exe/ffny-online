@@ -57,6 +57,17 @@ static const Range k_data[] = {
 static const Range k_data_skip[] = {
     { 0x002E6000u, 0x002E8000u }, { 0x003A9000u, 0x003B1000u }, { 0x003C8000u, 0x003CA000u },
 };
+/* Bytes another thread writes on a .data page that must be kept: they stay out of the save, the
+ * page around them goes in. 0x3A56B8..0x3A56C0 changes under the held game thread (a host-timed
+ * counter); left out as a whole page, it took with it EAGL's list of loaded objects (0x3A52A8), its
+ * symbol pool and registries, so after a load back to before a weapon's model was made the list
+ * still began with the model, whose memory was the older one: the next lookup read junk and crashed
+ * in sub_0010A7D0 (stress runs, 2026-10-22/23; the 20-second soak shows it too). */
+static const Range k_data_hole[] = {
+    { 0x003A56B8u, 0x003A56C0u },
+};
+#define N_DATA_HOLE (sizeof(k_data_hole) / sizeof(k_data_hole[0]))
+
 /* Kept on purpose: 0x3A4000..0x3A7000 holds the small-block pool's free lists (0x3A4B60.., its
  * block [0x3A4FDC], sub_000E5F40), which the fight allocates from (animation mirrors); the lists
  * and the block are restored together, or the next allocation crashes. */
@@ -212,6 +223,7 @@ static uint32_t s_read_at[8], s_read_len[8], s_reads_told;
 static int s_read_game[8];
 static uint32_t s_read_save[8];
 static volatile LONG s_saves;           /* saves since the reference: a clock for the log */
+static uint8_t *s_data_before;          /* rollback_prepare: .data before the hold, to name what changed */
 
 /* The first write since the reference to page p, by the game thread or another. Lock-free: it runs
  * in the exception handler of whichever thread wrote, and two threads may meet on one page (both
@@ -341,11 +353,104 @@ const char *rollback_page_state(uint32_t addr)
     return "not tracked";
 }
 
-void rollback_note_dynamic_load(uint32_t caller)
+/* Tests (RECOMP_ROLLBACK_CHECK=1): the tables of the object loaded last, to catch what overwrites
+ * them. A weapon's model, loaded again in a re-run, crashed in its own "Model" lookup a moment after
+ * its hash chain was built (sub_0010A7D0 reading a chain entry that was not one): something wrote
+ * over the chain between the build and the lookup, an allocation handed out twice or a stale
+ * pointer. EAGL DynamicLoader object (docs/research/rollback-async-loads.md 1.1): +0x10 symbol
+ * count, +0x20..+0x41F 256 buckets, +0x420 chain (count words), +0x424 defined flags (count bytes). */
+static int s_check = -1;
+static uint32_t s_wobj, s_wchain, s_wflags, s_wcount, s_wcaller;
+static unsigned s_wtold;
+
+static int check_on(void)
+{
+    if (s_check < 0) s_check = getenv("RECOMP_ROLLBACK_CHECK") && *getenv("RECOMP_ROLLBACK_CHECK") == '1';
+    return s_check;
+}
+
+/* the first entry that is not -1 or a symbol index; -1 when all hold */
+static int loader_bad(uint32_t *at, uint32_t *value)
+{
+    uint32_t i, v;
+    for (i = 0; i < 256; i++) {
+        v = MEM32(s_wobj + 0x20u + i * 4u);
+        if (v != 0xFFFFFFFFu && v >= s_wcount) { *at = s_wobj + 0x20u + i * 4u; *value = v; return (int)i; }
+    }
+    for (i = 0; i < s_wcount; i++) {
+        v = MEM32(s_wchain + i * 4u);
+        if (v != 0xFFFFFFFFu && v >= s_wcount) { *at = s_wchain + i * 4u; *value = v; return 256 + (int)i; }
+    }
+    return -1;
+}
+
+/* whether the watched object is still loaded (in the list at 0x3A52A8, next at +4): one the game
+ * unloaded gives its memory back, and then a new block there is no error */
+static int watched_loaded(void)
+{
+    uint32_t o = MEM32(0x003A52A8u);
+    int k;
+    for (k = 0; k < 4096 && o >= 0x80003000u && o < 0x82A0D000u; k++, o = MEM32(o + 4u))
+        if (o == s_wobj) return 1;
+    return 0;
+}
+
+void rollback_check_tables(const char *where)
+{
+    uint32_t at, v;
+    if (!check_on() || !s_wobj) return;
+    if (!s_tracking || !watched_loaded()) { s_wobj = 0; return; }
+    if (MEM32(s_wobj + 0x420u) != s_wchain || MEM32(s_wobj + 0x10u) != s_wcount) {
+        if (s_wtold++ < 40)
+            fprintf(stderr, "[ROLLBACK-CHECK] %s: loader %08X no longer itself (count %08X chain %08X, were %08X %08X; "
+                    "its page %s, list head %08X, %ld saves in); watch off\n", where, s_wobj, MEM32(s_wobj + 0x10u),
+                    MEM32(s_wobj + 0x420u), s_wcount, s_wchain, rollback_page_state(s_wobj), MEM32(0x003A52A8u),
+                    (long)s_saves);
+        s_wobj = 0;
+        return;
+    }
+    if (loader_bad(&at, &v) >= 0) {
+        if (s_wtold++ < 40)
+            fprintf(stderr, "[ROLLBACK-CHECK] %s: loader %08X (loaded from %08X) has a bad table word at %08X = %08X "
+                    "(%s, %ld saves in)\n", where, s_wobj, s_wcaller, at, v, rollback_page_state(at), (long)s_saves);
+        s_wobj = 0;
+    }
+}
+
+void rollback_check_alloc(uint32_t caller, uint32_t size, uint32_t block)
+{
+    uint32_t end = block + size;
+    if (!check_on() || !s_wobj || !block) return;
+    if (!s_tracking || !watched_loaded()) { s_wobj = 0; return; }
+    if ((block < s_wobj + 0x430u && end > s_wobj) || (block < s_wchain + s_wcount * 4u && end > s_wchain) ||
+        (block < s_wflags + s_wcount && end > s_wflags)) {
+        if (s_wtold++ < 40)
+            fprintf(stderr, "[ROLLBACK-CHECK] allocation %08X..%08X (size %X, caller %08X) lies over loader %08X "
+                    "(chain %08X, flags %08X; %ld saves in)\n", block, end, size, caller, s_wobj,
+                    s_wchain, s_wflags, (long)s_saves);
+        s_wobj = 0;
+        return;
+    }
+    rollback_check_tables("after an allocation");
+}
+
+void rollback_note_dynamic_load(uint32_t caller, uint32_t handle)
 {
     static unsigned told;
     if (s_tracking && told++ < 200)
         fprintf(stderr, "[ROLLBACK] a dynamic load in the fight (caller %08X, %ld updates in)\n", caller, (long)s_saves);
+    if (check_on() && s_tracking && handle >= 0x10000u) {
+        uint32_t obj = MEM32(handle);
+        rollback_check_tables("before the next load");
+        if (obj >= 0x80003000u && obj < 0x82A0D000u) {
+            s_wobj = obj;
+            s_wcount = MEM32(obj + 0x10u);
+            s_wchain = MEM32(obj + 0x420u);
+            s_wflags = MEM32(obj + 0x424u);
+            s_wcaller = caller;
+            rollback_check_tables("as the load starts");
+        }
+    }
 }
 
 void rollback_reset(void)
@@ -359,6 +464,21 @@ void rollback_reset(void)
 }
 
 /* .data kept less the skipped pages, as segments. */
+/* whether every word of the page that changed during the hold lies in one of k_data_hole */
+static int only_holes_changed(uint32_t page)
+{
+    uint32_t o, j;
+    if (!s_data_before) return 0;
+    for (o = 0; o < PAGE; o += 4) {
+        int in_hole = 0;
+        if (MEM32(page + o) == *(uint32_t *)(s_data_before + page + o)) continue;
+        for (j = 0; j < N_DATA_HOLE; j++)
+            if (page + o >= k_data_hole[j].lo && page + o < k_data_hole[j].hi) in_hole = 1;
+        if (!in_hole) return 0;
+    }
+    return 1;
+}
+
 static void build_data(const uint8_t *data_bg, unsigned data_pages)
 {
     unsigned k, j;
@@ -373,10 +493,22 @@ static void build_data(const uint8_t *data_bg, unsigned data_pages)
                 if (page >= k_data_skip[j].lo && page < k_data_skip[j].hi) skip = 1;
             if (page / PAGE < data_pages && data_bg[page / PAGE]) skip = 1;
             if (!skip) {
-                if (s_ndseg && s_dseg[s_ndseg - 1].hi == a) s_dseg[s_ndseg - 1].hi = end;
-                else if (s_ndseg < MAX_DSEG) { s_dseg[s_ndseg].lo = a; s_dseg[s_ndseg].hi = end; s_ndseg++; }
-                else skip = 1;
-                if (!skip) s_dbytes += end - a;
+                uint32_t lo = a;
+                while (lo < end) {      /* the piece [lo, hi) up to the next hole, then past it */
+                    uint32_t hi = end, after = end;
+                    for (j = 0; j < N_DATA_HOLE; j++)
+                        if (k_data_hole[j].hi > lo && k_data_hole[j].lo < hi) {
+                            hi = k_data_hole[j].lo > lo ? k_data_hole[j].lo : lo;
+                            after = k_data_hole[j].hi < end ? k_data_hole[j].hi : end;
+                        }
+                    if (hi > lo) {
+                        if (s_ndseg && s_dseg[s_ndseg - 1].hi == lo) s_dseg[s_ndseg - 1].hi = hi;
+                        else if (s_ndseg < MAX_DSEG) { s_dseg[s_ndseg].lo = lo; s_dseg[s_ndseg].hi = hi; s_ndseg++; }
+                        else break;
+                        s_dbytes += hi - lo;
+                    }
+                    lo = after > hi ? after : end;
+                }
             }
             a = end;
         }
@@ -415,10 +547,31 @@ int rollback_prepare(void)
     }
     /* hold the game thread: what changes meanwhile belongs to another thread */
     for (p = 0x002D5000u / PAGE; p < DATA_PAGES; p++) data_h[p] = page_hash(p * PAGE);
+    if (!s_data_before) s_data_before = (uint8_t *)malloc(DATA_PAGES * PAGE);
+    if (s_data_before) memcpy(s_data_before + 0x002D5000u, XBOX_PTR(0x002D5000u), DATA_PAGES * PAGE - 0x002D5000u);
     for (p = 0; p < HEAP_PAGES; p++) heap_h[p] = page_hash(HEAP_LO + p * PAGE);
     Sleep(HOLD_MS);
     for (p = 0x002D5000u / PAGE; p < DATA_PAGES; p++)
-        if (page_hash(p * PAGE) != data_h[p]) { data_bg[p] = 1; held_data++; }
+        if (page_hash(p * PAGE) != data_h[p] && !only_holes_changed(p * PAGE)) {
+            data_bg[p] = 1;
+            if (held_data++ < 16) {
+                /* which bytes: the words that differ, as up to six spans */
+                char spans[200] = "";
+                size_t used = 0;
+                uint32_t o = 0, n = 0;
+                while (o < PAGE && n < 6 && s_data_before) {
+                    uint32_t lo, hi;
+                    if (MEM32(p * PAGE + o) == *(uint32_t *)(s_data_before + p * PAGE + o)) { o += 4; continue; }
+                    lo = o;
+                    while (o < PAGE && MEM32(p * PAGE + o) != *(uint32_t *)(s_data_before + p * PAGE + o)) o += 4;
+                    hi = o;
+                    used += (size_t)snprintf(spans + used, sizeof(spans) - used, " %08X..%08X", p * PAGE + lo, p * PAGE + hi);
+                    n++;
+                }
+                fprintf(stderr, "[ROLLBACK] .data page %08X changed while the game was held: left out (bytes%s)\n",
+                        p * PAGE, spans);
+            }
+        }
     for (p = 0; p < HEAP_PAGES; p++)
         if (!s_skip[p] && page_hash(HEAP_LO + p * PAGE) != heap_h[p]) { s_skip[p] = 1; held_heap++; }
     build_data(data_bg, DATA_PAGES);
@@ -743,7 +896,9 @@ void rollback_mixer_unlock_b(void) { if (MEM32(g_esp) == MIX_UNLOCKS) mixer_end(
 #else
 int rollback_enabled(void) { return 0; }
 const char *rollback_page_state(uint32_t addr) { (void)addr; return "-"; }
-void rollback_note_dynamic_load(uint32_t caller) { (void)caller; }
+void rollback_note_dynamic_load(uint32_t caller, uint32_t handle) { (void)caller; (void)handle; }
+void rollback_check_alloc(uint32_t caller, uint32_t size, uint32_t block) { (void)caller; (void)size; (void)block; }
+void rollback_check_tables(const char *where) { (void)where; }
 void rollback_sound_context(int on) { (void)on; }
 void rollback_mixer_lock_a(void) {}
 void rollback_mixer_lock_b(void) {}
