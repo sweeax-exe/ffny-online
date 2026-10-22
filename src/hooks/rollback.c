@@ -223,7 +223,9 @@ static LONG CALLBACK track_fault(PEXCEPTION_POINTERS e)
     a = (uintptr_t)r->ExceptionInformation[1];
     if (a < lo || a >= lo + (uintptr_t)HEAP_PAGES * PAGE) return EXCEPTION_CONTINUE_SEARCH;
     p = (uint32_t)((a - lo) / PAGE);
-    if (!s_tracking) return EXCEPTION_CONTINUE_SEARCH;
+    /* a page still guarded counts even while tracking starts or stops (the flag and the
+     * protection change one after the other while other threads run) */
+    if (!s_tracking && !s_guard[p]) return EXCEPTION_CONTINUE_SEARCH;
     /* the game thread inside a sound command writes the engine's memory, not the fight's */
     first_write(p, GetCurrentThreadId() == s_game_tid && !t_in_sound);
     {   /* writable now (by this thread or another a moment ago): write again */
@@ -273,17 +275,17 @@ static int track_start(void)
     if (!s_veh) return -1;
     s_game_tid = GetCurrentThreadId();
     s_foreign = s_foreign_told = 0;
+    xbox_guest_write_notify = track_read;
+    InterlockedExchange(&s_tracking, 1);
     EnterCriticalSection(&s_track_cs);
     for (p = 0; p < HEAP_PAGES; p = q) {
         for (q = p; q < HEAP_PAGES && !s_skip[q] == !s_skip[p]; q++) {}
-        if (!s_skip[p] && VirtualProtect(page_host(p), (size_t)(q - p) * PAGE, PAGE_READONLY, &old)) {
-            memset(s_guard + p, 1, q - p);
-            guarded += q - p;
-        }
+        if (s_skip[p]) continue;
+        memset(s_guard + p, 1, q - p);          /* before the protection: a fault finds the flag set */
+        if (VirtualProtect(page_host(p), (size_t)(q - p) * PAGE, PAGE_READONLY, &old)) guarded += q - p;
+        else memset(s_guard + p, 0, q - p);
     }
     LeaveCriticalSection(&s_track_cs);
-    xbox_guest_write_notify = track_read;
-    InterlockedExchange(&s_tracking, 1);
     fprintf(stderr, "[ROLLBACK] write tracking on %u heap pages\n", guarded);
     return 0;
 }
