@@ -1770,8 +1770,10 @@ extern "C" void pc_ui_overlay(void *device, void *context, void *window_rtv, uns
     // Closed, the overlay still draws the ONLINE entry's art on the main menu.
     bool decor = !g_open.load() && online_screen::decor_wanted();
     char notice[160];
-    bool toast = !g_open.load() && (netplay_toast(notice, sizeof(notice))     // online: a wait, a desync
-                                    || bug_report_toast(notice, sizeof(notice)));  // F9
+    // F9's notice shows over everything, the online screens and the settings included (pressed in
+    // the online menu, it was hidden there); the netplay notices are for the fight only.
+    bool toast = bug_report_toast(notice, sizeof(notice)) ||
+                 (!g_open.load() && netplay_toast(notice, sizeof(notice)));    // online: a wait, a desync
     if (!g_open.load() && !decor && !toast) { ui_unlock(); return; }
 
     ID3D11Device *dev = (ID3D11Device *)device;
@@ -1800,16 +1802,6 @@ extern "C" void pc_ui_overlay(void *device, void *context, void *window_rtv, uns
 
     ImGuiIO &io = ImGui::GetIO();
     bool close_request = false;
-    if (toast) {
-        ImDrawList *fg = ImGui::GetForegroundDrawList();
-        ImFont *font = g_font_bold ? g_font_bold : ImGui::GetFont();
-        float size = std::max(18.0f, io.DisplaySize.y * 0.028f);
-        ImVec2 t = font->CalcTextSizeA(size, FLT_MAX, 0, notice);
-        ImVec2 at((io.DisplaySize.x - t.x) * 0.5f, io.DisplaySize.y * 0.16f);
-        fg->AddRectFilled(ImVec2(at.x - size, at.y - size * 0.5f), ImVec2(at.x + t.x + size, at.y + t.y + size * 0.5f),
-                          IM_COL32(0, 0, 0, 200), size * 0.3f);
-        fg->AddText(font, size, at, IM_COL32(255, 168, 26, 255), notice);
-    }
     if (decor) {
         online_screen::draw_decor(ImGui::GetForegroundDrawList(), io.DisplaySize);
     } else if (g_online) {
@@ -1834,6 +1826,16 @@ extern "C" void pc_ui_overlay(void *device, void *context, void *window_rtv, uns
     if (!ui_capturing() && !ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel) &&
         (ImGui::IsKeyPressed(ImGuiKey_Escape, false) || ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false)))
         close_request = true;
+    }
+    if (toast) {    // last, so no screen drawn this frame covers it
+        ImDrawList *fg = ImGui::GetForegroundDrawList();
+        ImFont *font = g_font_bold ? g_font_bold : ImGui::GetFont();
+        float size = std::max(18.0f, io.DisplaySize.y * 0.028f);
+        ImVec2 t = font->CalcTextSizeA(size, FLT_MAX, 0, notice);
+        ImVec2 at((io.DisplaySize.x - t.x) * 0.5f, io.DisplaySize.y * 0.16f);
+        fg->AddRectFilled(ImVec2(at.x - size, at.y - size * 0.5f), ImVec2(at.x + t.x + size, at.y + t.y + size * 0.5f),
+                          IM_COL32(0, 0, 0, 200), size * 0.3f);
+        fg->AddText(font, size, at, IM_COL32(255, 168, 26, 255), notice);
     }
 
     ImGui::Render();
