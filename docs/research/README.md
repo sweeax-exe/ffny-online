@@ -74,6 +74,8 @@ The plan built from these is in [docs/widescreen](../widescreen/README.md), whic
 
 ## Toolkit and platforms
 
+- [Windows startup memory layout, issue #72](issue72-windows-startup-memory-layout.md): root cause, regression history, checked placement and Windows test candidate
+
 - [Toolkit rebase acceptance](toolkit-rebase-acceptance.md)
 - [Toolkit rebase ledger](toolkit-rebase-ledger.md): maps the 108 retired patch numbers to fork commits
 - [macOS and Linux port survey](macos-linux-port-survey.md)
