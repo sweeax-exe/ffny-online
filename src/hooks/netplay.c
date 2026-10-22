@@ -38,6 +38,8 @@
 #include "automatch.h"
 #include "online_data.h"
 #include "account.h"
+#include "rollback.h"
+#include "test_observations.h"
 
 #define G_MATCH_PHASE   0x003B8F30u     /* test_telemetry.c G_PHASE */
 #define G_MATCH_WINNER  0x003B8F40u     /* test_telemetry.c G_WINNER: the winner's fighter slot */
@@ -74,6 +76,10 @@ void netplay_on_main_menu(void) {}
 void netplay_on_match_start(void) {}
 void netplay_on_pad_pass(void) {}
 void netplay_on_step(void) {}
+void netplay_on_update(void) {}
+extern void sub_00137010(void);
+void netplay_sound_command(void) { sub_00137010(); }
+void *netplay_sound_handler(uint32_t va) { (void)va; return NULL; }
 void netplay_on_pad_read(uint32_t a) { (void)a; }
 void netplay_on_seed(uint32_t e, int w, uint32_t x) { (void)e; (void)w; (void)x; }
 void netplay_on_result(uint32_t w, uint32_t l, uint32_t c) { (void)w; (void)l; (void)c; }
@@ -147,6 +153,8 @@ void netplay_crowd_update(void) { sub_00081170(); }
 #define RTT_WAIT_MS   5000          /* at the sync point: how long to wait for every player's ping */
 #define RETRY_MS      400           /* lobby requests are repeated until the server answers */
 #define RETRIES       8
+#define RB_AHEAD      8             /* rollback: steps a PC runs on predicted entries before it waits */
+#define RB_LESS       4             /* hub matches where every PC rolls back: the delay is this much shorter */
 
 static CRITICAL_SECTION g_cs;
 static INIT_ONCE g_once = INIT_ONCE_STATIC_INIT;
@@ -226,9 +234,38 @@ static struct {
     char report_key[32];
     int reported, fighting_seen, last_late;
     int seed_bypass;                /* crowd_reset seeds a generator with its own words */
+    /* rollback (rollback.h): a fighting step runs on a prediction of each entry that has not
+     * arrived (that player's last one); when the real one differs, the game goes back to the
+     * save state taken before that step and runs the steps again. */
+    uint8_t used[MAXP][RING][ENTRY];    /* each other player's entry as its step ran */
+    uint32_t used_tag[MAXP][RING];      /* step + 1 */
+    uint8_t used_pred[MAXP][RING];      /* 1: a prediction */
+    uint32_t final_step;                /* every step up to this one ran on the real entries */
+    uint32_t updates;                   /* game updates since the match's reference copy */
+    uint32_t hash_at[RING], hash_tag[RING], hash_sent;
+    int rb_on, rb_ref_due, resim, predicting;
+    int rb_fought;                      /* the phase word said "fighting" in this match */
+    int peer_rb[MAXP];                  /* each position rolls back (its P_RTT says so) */
+    struct {
+        int valid;
+        uint32_t step, update;          /* the step about to run, the update about to start */
+        long long test_step;
+        uint32_t crowd_gen[6];
+        int crowd_gen_on;
+        uint32_t seeds[32][2];
+    } snap[ROLLBACK_SLOTS];
+    unsigned rb_count, rb_steps, rb_deepest, rb_failed;
+    double rb_ms_max, rb_ms_total;
     char toast[160];                /* a notice for the fight (netplay_toast), until toast_until */
     ULONGLONG toast_until;
 } N;
+
+/* RECOMP_ROLLBACK=off (debug-env.txt): wait for every entry, as builds before 17 did. */
+static int rollback_wanted(void)
+{
+    const char *v = getenv("RECOMP_ROLLBACK");
+    return !(v && !strcmp(v, "off"));
+}
 
 static BOOL CALLBACK init_once(PINIT_ONCE o, PVOID p, PVOID *c)
 {
@@ -466,12 +503,15 @@ static void end_hub_match(const char *why)
 
 /* ---- what arrives -------------------------------------------------------------- */
 
+static unsigned g_steps_rx[MAXP], g_steps_last[MAXP];
 static void store_steps(int from, const uint8_t *p, int len)
 {
     uint32_t match, last;
     int count, i;
     if (len < 9 || from < 0 || from >= MAXP) return;
     match = get32(p); last = get32(p + 4); count = p[8];
+    g_steps_rx[from]++;
+    g_steps_last[from] = last;
     if (len < 9 + count * ENTRY) return;
     EnterCriticalSection(&g_cs);
     for (i = 0; i < count; i++) {
@@ -516,13 +556,14 @@ static void check_hashes(void)
 /* Hub: this PC's ping for the current START, so every PC derives the same input delay. */
 static void send_rtt(void)
 {
-    uint8_t p[7];
+    uint8_t p[8];
     int rtt = N.peer_rtt[N.pos] < 0 ? 0 : N.peer_rtt[N.pos];
     p[0] = P_RTT;
     put32(p + 1, N.start_seed);
     p[5] = (uint8_t)rtt;
     p[6] = (uint8_t)(rtt >> 8);
-    send_data(p, 7);
+    p[7] = (uint8_t)N.peer_rb[N.pos];   /* builds before 17 send 7 bytes: no rollback */
+    send_data(p, 8);
     N.last_rtt_sent = GetTickCount64();
 }
 
@@ -536,6 +577,11 @@ static int agreed_delay(void)
         if (r > a) { b = a; a = r; } else if (r > b) b = r;
     }
     d = ((a + b) / 2 * 3 + 49) / 50 + 1;      /* ms to 1/60 s steps, rounded up, + 1 */
+    {   /* every PC rolls back: what the delay does not cover, a rollback does */
+        int all = 1;
+        for (i = 0; i < N.players; i++) if (!N.peer_rb[i]) all = 0;
+        if (all) d -= RB_LESS;
+    }
     return d < DELAY_MIN ? DELAY_MIN : d > DELAY_MAX ? DELAY_MAX : d;
 }
 
@@ -585,6 +631,7 @@ static void on_data(int from, const uint8_t *p, int len)
         if (N.lobby && N.match_live && len >= 7 && get32(p + 1) == N.start_seed) {
             int had = N.peer_rtt[from];
             N.peer_rtt[from] = p[5] | (p[6] << 8);
+            N.peer_rb[from] = len >= 8 && p[7] == 1;
             SetEvent(N.arrived);
             if (N.delay_fixed && had < 0) send_rtt();   /* it may still be waiting for ours */
         }
@@ -837,7 +884,8 @@ static void on_start(const uint8_t *b, int len)
     N.pos = pos;
     N.delay = LOBBY_DELAY;
     N.delay_fixed = 0;
-    for (i = 0; i < MAXP; i++) N.peer_rtt[i] = -1;
+    for (i = 0; i < MAXP; i++) N.peer_rtt[i] = -1, N.peer_rb[i] = 0;
+    N.peer_rb[pos] = rollback_wanted();
     {   /* this PC's ping as of now, with the worst of the last few as the jitter margin */
         int k, worst = N.rtt_ms > 0 ? N.rtt_ms : 0;
         for (k = 0; k < 5; k++) if (N.rtt_recent[k] > worst) worst = N.rtt_recent[k];
@@ -998,10 +1046,23 @@ static void send_live_pad(ULONGLONG now)
     send_data(p, (int)sizeof(p));
 }
 
+/* RECOMP_NETPLAY_LAG_MS=<ms>[,<jitter ms>] (tests): what arrives is handled that much later, so
+ * two copies on one PC play as if far apart. In order: jitter delays, it does not reorder. */
+#define LAG_QUEUE 1024
+static uint8_t lag_buf[LAG_QUEUE][1500];
+static int lag_len[LAG_QUEUE], lag_head, lag_n, lag_ms = -1, lag_jitter;
+static ULONGLONG lag_due[LAG_QUEUE];
+
 static DWORD WINAPI net_thread(LPVOID unused)
 {
     uint8_t b[1500];
     (void)unused;
+    if (lag_ms < 0) {
+        const char *v = getenv("RECOMP_NETPLAY_LAG_MS");
+        lag_ms = v ? atoi(v) : 0;
+        lag_jitter = v && strchr(v, ',') ? atoi(strchr(v, ',') + 1) : 0;
+        if (lag_ms > 0) fprintf(stderr, "[NETPLAY] tests: arriving packets held %d ms (+0..%d)\n", lag_ms, lag_jitter);
+    }
     N.started = N.last_rx = GetTickCount64();
     while (!N.stop) {
         ULONGLONG now = GetTickCount64();
@@ -1072,8 +1133,20 @@ static DWORD WINAPI net_thread(LPVOID unused)
         if (N.state == NETPLAY_CONNECTED || N.state == NETPLAY_SYNCING)
             send_live_pad(now);
         got = recv(N.sock, (char *)b, sizeof(b), 0);
-        if (got > 0)
+        if (got > 0 && lag_ms > 0) {        /* tests: hold every arriving packet for a while */
+            if (lag_n < LAG_QUEUE) {
+                int at = (lag_head + lag_n++) % LAG_QUEUE;
+                memcpy(lag_buf[at], b, (size_t)got);
+                lag_len[at] = got;
+                lag_due[at] = now + (ULONGLONG)lag_ms + (lag_jitter > 0 ? (ULONGLONG)(rand() % (lag_jitter + 1)) : 0);
+            }
+        } else if (got > 0)
             on_packet(b, got);
+        while (lag_n && GetTickCount64() >= lag_due[lag_head]) {
+            on_packet(lag_buf[lag_head], lag_len[lag_head]);
+            lag_head = (lag_head + 1) % LAG_QUEUE;
+            lag_n--;
+        }
     }
     if (N.have_token)
         send_token_only(T_BYE, 0, 0);
@@ -1607,9 +1680,54 @@ static uint32_t fighter_hash(void)
     return h;
 }
 
+/* The checksums of steps up to `upto` (the state each one started from), once they are final. */
+static void send_hashes(uint32_t upto)
+{
+    uint32_t t;
+    for (t = N.hash_sent + 1; t <= upto; t++) {
+        uint8_t p[13];
+        uint32_t h;
+        if (t % HASH_EVERY || N.hash_tag[t % RING] != t + 1) continue;
+        h = N.hash_at[t % RING];
+        EnterCriticalSection(&g_cs);
+        memmove(N.local_hash[1], N.local_hash[0], sizeof(N.local_hash[0]) * 15);
+        N.local_hash[0][0] = N.match; N.local_hash[0][1] = t; N.local_hash[0][2] = h;
+        check_hashes();
+        LeaveCriticalSection(&g_cs);
+        p[0] = P_HASH; put32(p + 1, N.match); put32(p + 5, t); put32(p + 9, h);
+        send_data(p, 13);
+    }
+    if (upto > N.hash_sent) N.hash_sent = upto;
+}
+
+/* RECOMP_ROLLBACK_SOAK=<depth> (tests, offline): every few updates of a fight the game goes back
+ * <depth> steps (2..12) and runs them again, and the per-step fingerprints of the second run
+ * (test_telemetry.c) are compared with the first. A difference names the first step that came out
+ * otherwise: what the save states miss. */
+static int soak_depth(void)
+{
+    static int d = -1;
+    if (d < 0) {
+        const char *v = getenv("RECOMP_ROLLBACK_SOAK");
+        d = v ? atoi(v) : 0;
+        if (d && (d < 2 || d > 12)) d = 6;
+    }
+    return d;
+}
+
+static void soak_match_start(void)
+{
+    N.step = 0;
+    N.final_step = N.hash_sent = N.updates = 0;
+    N.rb_on = N.rb_ref_due = N.resim = N.predicting = 0;
+    memset(N.snap, 0, sizeof(N.snap));
+    rollback_reset();
+    fprintf(stderr, "[ROLLBACK] soak: going back %d steps every few updates\n", soak_depth());
+}
+
 void netplay_on_match_start(void)
 {
-    if (!N.lockstep) return;
+    if (!N.lockstep) { if (soak_depth()) soak_match_start(); return; }
     EnterCriticalSection(&g_cs);
     N.match_count++;
     N.match = mix32(N.session ^ (N.match_count * 0x9E3779B9u));   /* the same on every PC, new per match */
@@ -1626,7 +1744,13 @@ void netplay_on_match_start(void)
     memset(N.latest_local, 0, sizeof(N.latest_local));
     N.desync = 0;
     if (N.match_live) N.match_seen = 1;
+    N.final_step = N.hash_sent = N.updates = 0;
+    N.rb_on = N.rb_ref_due = N.resim = N.predicting = N.rb_fought = 0;
+    memset(N.used_tag, 0, sizeof(N.used_tag));
+    memset(N.hash_tag, 0, sizeof(N.hash_tag));
+    memset(N.snap, 0, sizeof(N.snap));
     LeaveCriticalSection(&g_cs);
+    rollback_reset();
     /* From the load on, not from the first step: a START pressed while the venue loads or the
      * fighters' intro runs (players press it to skip the intro) paused that game before its
      * first step, and the others waited for it until they gave up (seen on The Pit, whose load is
@@ -1809,10 +1933,16 @@ static void crowd_reset(uint32_t arena)
 
 void netplay_on_step(void)
 {
-    uint32_t s, target, k;
+    uint32_t s, target, k, need;
     ULONGLONG waited_since, last_send;
     fight_input();              /* also after a fight went on offline */
-    if (!N.lockstep) return;
+    if (!N.lockstep) {
+        if (soak_depth()) {     /* tests: the soak counts steps and prepares the save states itself */
+            s = ++N.step;
+            if (s == 1 && !N.resim && rollback_prepare() == 0) N.rb_on = N.rb_ref_due = 1;
+        }
+        return;
+    }
     /* RECOMP_ONLINE_CROWD=off (tests only): the spectators cannot touch the fight. Their animation
      * differs between the PCs (it starts while the match loads, at host timing) and reaches the
      * fighters through the crowd's record table as catches, holds and weapons, which parts the
@@ -1826,7 +1956,7 @@ void netplay_on_step(void)
     /* The room match decided (the game's phase word: 1 fighting, 2 decided, 3 finished; see
      * test_telemetry.c): report its result. Only after this match was seen fighting, as the
      * phase still holds the last match's value for a moment after a START. */
-    if (N.lobby && N.match_live && !N.reported) {
+    if (N.lobby && N.match_live && !N.reported && !N.resim && (!N.rb_on || N.step <= N.final_step)) {
         uint32_t phase = MEM32(G_MATCH_PHASE);
         if (phase == 1u) N.fighting_seen = 1;
         else if (N.fighting_seen && phase >= 2u && phase <= 3u) {
@@ -1839,6 +1969,7 @@ void netplay_on_step(void)
         static int crowd_on = -1;   /* RECOMP_ONLINE_CROWD=keep: tests compare without the restart */
         if (crowd_on < 0) crowd_on = !(getenv("RECOMP_ONLINE_CROWD") && !strcmp(getenv("RECOMP_ONLINE_CROWD"), "keep"));
         if (crowd_on) crowd_reset(g_ecx);
+        if (!N.resim && rollback_wanted() && rollback_prepare() == 0) N.rb_on = N.rb_ref_due = 1;
     }
     {
         /* The arena hands its frame argument (edi, kept by sub_00087700 for the crowd update that
@@ -1871,6 +2002,10 @@ void netplay_on_step(void)
         for (k = 0; k < 6u; k++) h = (h ^ g_crowd_gen[k]) * 16777619u;     /* the crowd's copy, not the real one */
         fprintf(stderr, "[NETPLAY] crowd hash at step %u: %08X (%u records)\n", s, h, count);
     }
+    k = s % RING;
+    N.hash_at[k] = fighter_hash();      /* the state as this step starts */
+    N.hash_tag[k] = s + 1;
+    if (N.resim) return;                /* a re-run: the entries are all known or predicted */
     target = s + (uint32_t)N.delay;
     k = target % RING;
     EnterCriticalSection(&g_cs);
@@ -1880,27 +2015,25 @@ void netplay_on_step(void)
     LeaveCriticalSection(&g_cs);
     send_steps(target);
 
-    if (s % HASH_EVERY == 0) {
-        uint8_t p[13];
-        uint32_t h = fighter_hash();
-        EnterCriticalSection(&g_cs);
-        memmove(N.local_hash[1], N.local_hash[0], sizeof(N.local_hash[0]) * 15);
-        N.local_hash[0][0] = N.match; N.local_hash[0][1] = s; N.local_hash[0][2] = h;
-        check_hashes();
-        LeaveCriticalSection(&g_cs);
-        p[0] = P_HASH; put32(p + 1, N.match); put32(p + 5, s); put32(p + 9, h);
-        send_data(p, 13);
-    }
+    if (!N.rb_on) send_hashes(s);      /* with rollback, once the steps before are final (netplay_on_update) */
 
-    /* Wait for every other player's entry for this step. */
+    /* Wait for every other player's entry for this step; while they fight, with rollback, only
+     * for the entries RB_AHEAD steps back (the newer ones are predicted). */
     if (s <= (uint32_t)N.delay) return;
-    k = s % RING;
+    /* only once every other PC is under way (an entry of its own has arrived): one may still be
+     * loading the venue, and a PC that ran ahead would give up on it after STALL_LIMIT_MS */
+    N.predicting = N.rb_on && rollback_ready() && MEM32(G_MATCH_PHASE) == 1u && N.final_step > (uint32_t)N.delay;
+    need = N.predicting ? (s > RB_AHEAD ? s - RB_AHEAD : 0) : s;
+    if (need <= (uint32_t)N.delay) return;
     waited_since = last_send = GetTickCount64();
     for (;;) {
         int ready = 1, i, late = -1;
+        uint32_t t = need;
+        if (N.rb_on) { t = N.final_step + 1; if (t <= (uint32_t)N.delay) t = (uint32_t)N.delay + 1; }
         EnterCriticalSection(&g_cs);
-        for (i = 0; i < N.players; i++)
-            if (i != N.pos && !(N.in_tag[i][k] == s + 1 && N.in_match[i][k] == N.match)) { ready = 0; late = i; }
+        for (; t <= need; t++)
+            for (i = 0; i < N.players; i++)
+                if (i != N.pos && !(N.in_tag[i][t % RING] == t + 1 && N.in_match[i][t % RING] == N.match)) { ready = 0; late = i; }
         LeaveCriticalSection(&g_cs);
         if (ready || !N.lockstep) {
             ULONGLONG waited = GetTickCount64() - waited_since;
@@ -1914,7 +2047,15 @@ void netplay_on_step(void)
         {
             ULONGLONG now = GetTickCount64();
             if (now - last_send >= 50) { send_steps(target); last_send = now; }   /* the others may be waiting for ours */
-            if (now - waited_since > (s <= (uint32_t)N.delay + 1 ? START_LIMIT_MS : STALL_LIMIT_MS)) {
+            if (now - waited_since > (need <= (uint32_t)N.delay + 1 ? START_LIMIT_MS : STALL_LIMIT_MS)) {
+                uint32_t u;
+                fprintf(stderr, "[NETPLAY] gave up at step %u waiting for the entries up to %u (final %u, phase %u, "
+                        "predicting %d, rollback %d); player %d has:", s, need, N.final_step, MEM32(G_MATCH_PHASE),
+                        N.predicting, N.rb_on, late);
+                for (u = N.final_step + 1; u <= need + 2 && late >= 0; u++)
+                    fprintf(stderr, " %u:%u/%08X", u, N.in_tag[late][u % RING], N.in_match[late][u % RING]);
+                fprintf(stderr, " (match %08X; STEPS packets from it %u, last step %u)\n", N.match,
+                        late >= 0 ? g_steps_rx[late] : 0, late >= 0 ? g_steps_last[late] : 0);
                 InterlockedExchange(&N.lockstep, 0);
                 set_status("A player stopped answering during the fight; continuing offline.");
                 toast(10000, "%s stopped answering: the fight goes on offline and won't count.", player_name(late));
@@ -1935,7 +2076,7 @@ void netplay_on_pad_read(uint32_t actor)
     if ((int)slot >= N.players) return;
     base = PAD_TABLE + slot * 0x20u;
     /* This PC's player: a fresh poll (no marker) is the input to send next. */
-    if ((int)slot == N.pos && MEM32(base + 28) != MARK) {
+    if ((int)slot == N.pos && MEM32(base + 28) != MARK && !N.resim) {
         EnterCriticalSection(&g_cs);
         for (i = 0; i < ENTRY; i++) N.latest_local[i] = MEM8(base + (uint32_t)i);
         N.latest_local[28] = N.latest_local[29] = N.latest_local[30] = N.latest_local[31] = 0;
@@ -1945,9 +2086,24 @@ void netplay_on_pad_read(uint32_t actor)
     memset(entry, 0, sizeof(entry));
     if (s > (uint32_t)N.delay) {
         uint32_t k = s % RING;
+        int predicted = 0;
         EnterCriticalSection(&g_cs);
         if (N.in_tag[slot][k] == s + 1 && N.in_match[slot][k] == N.match)
             memcpy(entry, N.in[slot][k], ENTRY);
+        else if (N.predicting || N.resim) {     /* not here yet: that player's last entry */
+            uint32_t t;
+            predicted = 1;
+            for (t = s - 1; t > (uint32_t)N.delay && t + 64 > s; t--)
+                if (N.in_tag[slot][t % RING] == t + 1 && N.in_match[slot][t % RING] == N.match) {
+                    memcpy(entry, N.in[slot][t % RING], ENTRY);
+                    break;
+                }
+        }
+        if ((int)slot != N.pos) {
+            memcpy(N.used[slot][k], entry, ENTRY);
+            N.used_tag[slot][k] = s + 1;
+            N.used_pred[slot][k] = (uint8_t)predicted;
+        }
         LeaveCriticalSection(&g_cs);
     }
     {   /* RECOMP_NETPLAY_PADLOG=n: the first n reads, polled and injected, with the slot's bindings */
@@ -1966,6 +2122,194 @@ void netplay_on_pad_read(uint32_t actor)
     for (i = 0; i < 7; i++)
         MEM32(base + (uint32_t)i * 4) = get32(entry + i * 4);
     MEM32(base + 28) = MARK;
+}
+
+/* ---- rollback ---------------------------------------------------------------------------
+ *
+ * At the start of every game update (the main loop's dt read, src/recomp_manual.c) the state is
+ * saved for the step about to run. When an entry arrives that differs from the prediction a step
+ * ran with, the save from before that step is loaded and the updates since are run again here,
+ * the way the main loop runs them (sub_00011CD0: input, the screen manager, the event manager and
+ * its snapshot, the render subsystem's tick), with the sound engine's commands silenced. */
+extern void sub_000DD930(void);     /* the input subsystem's update: ecx = it, dt */
+extern void sub_00077040(void);     /* the screen manager's update: ecx = it, dt; al = go on */
+extern void sub_000BD860(void);     /* the event manager: ecx = it */
+extern void sub_000BDF40(void);     /* its copy of the public buffers: ecx = it */
+extern void sub_0001A240(void);     /* the render subsystem's per-update tick: ecx = it, dt */
+extern void sub_00137010(void);     /* the sound engine's command call */
+#define DT_BITS 0x3C888889u         /* 1/60, the constant every update gets */
+
+void netplay_sound_command(void)
+{
+    if (N.resim) { g_eax = 0; g_esp += 4; return; }     /* cdecl: the caller pops the arguments */
+    rollback_sound_context(1);
+    sub_00137010();
+    rollback_sound_context(0);
+}
+
+/* The audio subsystem's message-bus handlers (rollback-step-structure.md 2.1): while steps run
+ * again they do nothing, so the game's sound state stays what the sound engine was told. cdecl. */
+#define SOUND_HANDLERS(X) X(00034A60) X(00038440) X(00035250) X(00035670) X(00035890)                           X(00035970) X(00035A20) X(00035AE0) X(00038620) X(00038760)
+#define SOUND_WRAP(a) extern void sub_##a(void);     static void snd_##a(void) { if (N.resim) { g_eax = 0; g_esp += 4; return; } sub_##a(); }
+SOUND_HANDLERS(SOUND_WRAP)
+
+void *netplay_sound_handler(uint32_t va)
+{
+#define SOUND_CASE(a) if (va == 0x##a##u) return (void *)snd_##a;
+    SOUND_HANDLERS(SOUND_CASE)
+    return NULL;
+}
+
+static void snap_save(void)
+{
+    uint32_t step = N.step + 1;
+    int slot = (int)(step % ROLLBACK_SLOTS);
+    if (rollback_save(slot)) { N.snap[slot].valid = 0; return; }
+    N.snap[slot].valid = 1;
+    N.snap[slot].step = step;
+    N.snap[slot].update = N.updates;
+    N.snap[slot].test_step = defjam_test_current_step();
+    memcpy(N.snap[slot].crowd_gen, g_crowd_gen, sizeof(g_crowd_gen));
+    N.snap[slot].crowd_gen_on = g_crowd_gen_on;
+    EnterCriticalSection(&g_cs);
+    memcpy(N.snap[slot].seeds, N.seeds, sizeof(N.snap[slot].seeds));
+    LeaveCriticalSection(&g_cs);
+}
+
+static void rollback_to(uint32_t f)
+{
+    int slot = (int)(f % ROLLBACK_SLOTS);
+    uint32_t n, j;
+    /* the objects the main loop updates, from the game's registry (sub_00012CF0 reads 0x2FB148[slot]) */
+    uint32_t input = MEM32(0x002FB148u + 0x19u * 4u), machine = MEM32(0x002FB148u + 0x17u * 4u);
+    uint32_t em = MEM32(0x002FB148u + 0x1Eu * 4u), render = MEM32(0x002FB148u + 4u * 4u);
+    uint32_t dt = DT_BITS, depth = N.step + 1 - f;
+    uint32_t eax = g_eax, ecx = g_ecx, edx = g_edx, ebx = g_ebx, esi = g_esi, edi = g_edi, ebp = g_ebp, esp = g_esp;
+    double fp[8];
+    int fp_top = g_fp_top;
+    uint16_t fp_cw = g_fp_control_word;
+    LARGE_INTEGER freq, t0, t1;
+    double ms;
+    if (!N.snap[slot].valid || N.snap[slot].step != f || N.updates < N.snap[slot].update ||
+        N.updates - N.snap[slot].update > 4 * ROLLBACK_SLOTS) {
+        if (N.rb_failed++ < 5)
+            fprintf(stderr, "[ROLLBACK] no save state for step %u (now %u): this match may go out of sync\n", f, N.step);
+        N.final_step = f;
+        return;
+    }
+    QueryPerformanceFrequency(&freq);
+    QueryPerformanceCounter(&t0);
+    memcpy(fp, g_fp_stack, sizeof(fp));
+    n = N.updates - N.snap[slot].update;
+    rollback_load(slot);
+    N.step = f - 1;
+    N.updates = N.snap[slot].update;
+    defjam_test_set_step(N.snap[slot].test_step);
+    memcpy(g_crowd_gen, N.snap[slot].crowd_gen, sizeof(g_crowd_gen));
+    g_crowd_gen_on = N.snap[slot].crowd_gen_on;
+    EnterCriticalSection(&g_cs);
+    memcpy(N.seeds, N.snap[slot].seeds, sizeof(N.snap[slot].seeds));
+    LeaveCriticalSection(&g_cs);
+    N.resim = 1;
+    for (j = 0; j < n; j++) {
+        if (j) snap_save();
+        guest_call(sub_000DD930, input, 1, &dt);
+        guest_call(sub_00077040, machine, 1, &dt);
+        if (g_eax & 0xFFu) {
+            guest_call(sub_000BD860, em, 0, NULL);
+            guest_call(sub_000BDF40, em, 0, NULL);
+            guest_call(sub_0001A240, render, 1, &dt);
+        }
+        N.updates++;
+    }
+    N.resim = 0;
+    g_eax = eax; g_ecx = ecx; g_edx = edx; g_ebx = ebx; g_esi = esi; g_edi = edi; g_ebp = ebp; g_esp = esp;
+    memcpy(g_fp_stack, fp, sizeof(fp));
+    g_fp_top = fp_top;
+    g_fp_control_word = fp_cw;
+    QueryPerformanceCounter(&t1);
+    ms = (double)(t1.QuadPart - t0.QuadPart) * 1000.0 / (double)freq.QuadPart;
+    N.rb_count++;
+    N.rb_steps += depth;
+    if (depth > N.rb_deepest) N.rb_deepest = depth;
+    if (ms > N.rb_ms_max) N.rb_ms_max = ms;
+    N.rb_ms_total += ms;
+    if (N.rb_count <= 10 || N.rb_count % 200 == 0)
+        fprintf(stderr, "[ROLLBACK] #%u: back to step %u, %u updates again in %.2f ms (now at step %u)\n",
+                N.rb_count, f, n, ms, N.step);
+}
+
+void netplay_on_update(void)
+{
+    uint32_t t, f = 0;
+    int i;
+    if (N.resim || !N.rb_on) return;
+    /* The fight is decided and every step ran on the real entries, or the match went on offline:
+     * no more rollback in this match (write tracking off, no saves on the results screen). */
+    if (MEM32(G_MATCH_PHASE) == 1u) N.rb_fought = 1;   /* a rematch starts with the last match's phase */
+    if ((!N.lockstep && !soak_depth()) ||
+        (N.lockstep && N.rb_fought && MEM32(G_MATCH_PHASE) >= 2u && N.final_step >= N.step && !N.predicting)) {
+        N.rb_on = 0;
+        rollback_reset();
+        fprintf(stderr, "[ROLLBACK] off for the rest of this match (step %u, %u rollbacks)\n", N.step, N.rb_count);
+        return;
+    }
+    if (N.rb_ref_due) {
+        N.rb_ref_due = 0;
+        if (rollback_reference()) { N.rb_on = 0; return; }
+        N.updates = 0;
+        memset(N.snap, 0, sizeof(N.snap));
+    }
+    rollback_discover(MEM32(G_MATCH_PHASE) == 1u ? 16 : 4);
+    /* which steps ran on the real entries; the first that ran on a wrong prediction */
+    EnterCriticalSection(&g_cs);
+    for (t = N.final_step + 1; t <= N.step; t++) {
+        uint32_t k = t % RING;
+        int all = 1, wrong = 0;
+        if (t > (uint32_t)N.delay)
+            for (i = 0; i < N.players; i++) {
+                if (i == N.pos) continue;
+                if (!(N.in_tag[i][k] == t + 1 && N.in_match[i][k] == N.match)) { all = 0; continue; }
+                if (N.used_tag[i][k] == t + 1 && N.used_pred[i][k] && memcmp(N.used[i][k], N.in[i][k], ENTRY)) wrong = 1;
+            }
+        if (wrong) { f = t; break; }
+        if (!all) break;
+        N.final_step = t;
+    }
+    LeaveCriticalSection(&g_cs);
+    if (f) rollback_to(f);
+    if (!N.lockstep && soak_depth()) {      /* tests: go back and compare */
+        static unsigned soaks, same, differ;
+        long long t = defjam_test_current_step();
+        int d = 2 + (int)((N.updates / 5) % (uint32_t)(soak_depth() - 1));
+        if (t > 40 && N.step > (uint32_t)d + 2 && N.updates % 5 == 0) {
+            unsigned long long before[16];
+            int k;
+            for (k = 0; k < d; k++) before[k] = defjam_test_step_hash(t - d + k);
+            rollback_to(N.step + 1 - (uint32_t)d);
+            soaks++;
+            for (k = 0; k < d; k++) {       /* k = 0: the state the load put back */
+                unsigned long long after = defjam_test_step_hash(t - d + k);
+                if (!before[k] || !after) continue;
+                if (before[k] == after) same++;
+                else if (differ++ < 20)
+                    fprintf(stderr, "[ROLLBACK] soak #%u: step %lld came out otherwise after going back %d "
+                            "(%016llX, first %016llX)\n", soaks, t - d + k, d, after, before[k]);
+            }
+            if (soaks % 100 == 0)
+                fprintf(stderr, "[ROLLBACK] soak: %u times back, %u steps the same, %u otherwise\n", soaks, same, differ);
+        }
+    }
+    send_hashes(N.final_step + 1 < N.step ? N.final_step + 1 : N.step);
+    snap_save();
+    N.updates++;
+    if (N.updates % 1800 == 0 && N.rb_count) {
+        unsigned kb, changing, skipped;
+        rollback_stats(&kb, &changing, &skipped);
+        fprintf(stderr, "[ROLLBACK] %u rollbacks, %u steps run again, deepest %u, %.2f ms average, %.2f ms longest; "
+                "save %u KB (%u heap pages change)\n", N.rb_count, N.rb_steps, N.rb_deepest,
+                N.rb_ms_total / N.rb_count, N.rb_ms_max, kb, changing);
+    }
 }
 
 void netplay_on_seed(uint32_t esp, int words, uint32_t which)

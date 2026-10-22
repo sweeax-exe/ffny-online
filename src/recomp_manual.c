@@ -34,6 +34,7 @@
 #include "hooks/pc_settings.h"
 #include "hooks/netplay.h"
 #include "hooks/automatch.h"
+#include "hooks/rollback.h"
 
 /* Read-only probes use the lifter's universal entry hooks. They do not alter
  * guest registers, stack, memory or the generated body. Off in normal play. */
@@ -74,6 +75,192 @@ void sub_000DB870_enter(void) { defjam_test_crowd_update(); }
 /* The per-fighter pad reader: RECOMP_TEST_INPUT replaces what it is about to read, and so
  * does online play, with the entry both PCs agreed on for this step. */
 void sub_001BAA00_enter(void) { defjam_test_input(MEM32(g_esp + 4)); netplay_on_pad_read(MEM32(g_esp + 4)); }
+/* Rollback (src/hooks/rollback.c). The main loop's dt read is the first call of every game
+ * update, so its entry is the clean point between two updates: save, load and re-run there.
+ * The audio subsystem's start-up brackets the memory the sound engine and its mixer thread
+ * own, which a load must leave alone (sub_00012CC0, the registry store, follows it). */
+void sub_0002C530_enter(void) { netplay_on_update(); }
+void sub_0003C6E0_enter(void) { rollback_audio_init_begin(); }
+void sub_00012CC0_enter(void) { rollback_audio_init_end(); }
+
+
+/* The lifted body below uses the generated code's register names. */
+extern void sub_001ECF40(void);     /* fills a new block */
+extern void sub_001E9E90(void);     /* the pool allocator */
+#define eax g_eax
+#define ecx g_ecx
+#define edx g_edx
+#define esp g_esp
+#define ebx g_ebx
+#define esi g_esi
+#define edi g_edi
+/**
+ * sub_00029500
+ * Original: 0x00029500 - 0x000295A6 (166 bytes, 68 insns)
+ * CC: cdecl (tag, size, flags), returns the block
+ *
+ * The game's allocator, kept as the lifter wrote it, with one test in front: a block the game's
+ * audio code asks for (the sound engine's AEMS layer 0x1C000.., the audio subsystem 0x30000..,
+ * the engine 0x11C000..) comes from rollback.c's arena outside the heap, so a rollback, which puts
+ * the heap back, never touches what the sound side still holds.
+ */
+void sub_00029500(void)
+{
+    uint32_t ebp = 0;
+    ebp = g_ebp;  /* frameless: caller's frame */
+    int _flags = 0, _sf = 0, _of = 0, _pf = 0;
+    unsigned _fv = 0; /* dynamic ZF/SF/OF/PF validity */
+    uint32_t _fa = 0, _fb = 0;
+    int32_t _fas = 0, _fbs = 0;
+    (void)_fa; (void)_fb; (void)_fas; (void)_fbs;
+    ebp = g_seh_ebp; /* fpo_leaf: inherit caller's frame */
+    if (rollback_route_alloc()) return;
+
+loc_00029500: ;
+    PUSH32(esp, ebx);
+    ebx = MEM32(esp + 0x10);
+    PUSH32(esp, ebp);
+    eax = 4;
+    _fa = (uint32_t)(LO8(eax)) & 0xFFu; _fb = (uint32_t)(HI8(ebx)) & 0xFFu;
+    _fas = (int32_t)(int8_t)(_fa); _fbs = (int32_t)(int8_t)(_fb); /* test LO8(eax), HI8(ebx) (8-bit) */
+    { uint32_t _r = (_fa & _fb) & 0xFFu; _flags = (_r == 0); _sf = ((_r & 0x80u) != 0); _of = 0; _pf = RECOMP_PARITY8(_r); _fv = 15; }
+    PUSH32(esp, esi);
+    PUSH32(esp, edi);
+    if (((_fv & 1u) == 1u && (_flags))) goto loc_00029516; /* je: published flags */
+
+loc_00029511: ;
+    eax = 0x80;
+
+loc_00029516: ;
+    ebp = MEM32(esp + 0x18);
+    edx = ebx;
+    edx = edx & 0x80000000u;
+    _fa = (uint32_t)(edx) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* and result */ _flags = (_fa == 0); _sf = (_fas < 0); _of = 0; _pf = RECOMP_PARITY8(_fa); _fv = 15;
+    MEM32(esp + 0x1C) = edx;
+    if (((_fv & 1u) == 1u && (!_flags))) goto loc_0002956C; /* jne: published flags */
+
+loc_00029528: ;
+    ecx = MEM32(0x33DB54);
+    _fa = (uint32_t)(ecx) & 0xFFFFFFFFu; _fb = (uint32_t)(0) & 0xFFFFFFFFu;
+    _fas = (int32_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp ecx, 0 (32-bit) */
+    { uint32_t _r = (_fa - _fb) & 0xFFFFFFFFu; _flags = (_r == 0); _sf = ((_r & 0x80000000u) != 0); _of = (((_fa ^ _fb) & (_fa ^ _r) & 0x80000000u) != 0); _pf = RECOMP_PARITY8(_r); _fv = 15; }
+    if (CMP_EQ(_fa, _fb)) goto loc_0002956C; /* je: equal / zero */
+
+loc_00029532: ;
+    _fa = (uint32_t)(ebp) & 0xFFFFFFFFu; _fb = (uint32_t)(0x400) & 0xFFFFFFFFu;
+    _fas = (int32_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp ebp, 0x400 (32-bit) */
+    { uint32_t _r = (_fa - _fb) & 0xFFFFFFFFu; _flags = (_r == 0); _sf = ((_r & 0x80000000u) != 0); _of = (((_fa ^ _fb) & (_fa ^ _r) & 0x80000000u) != 0); _pf = RECOMP_PARITY8(_r); _fv = 15; }
+    if (CMP_G(_fas, _fbs)) goto loc_0002956C; /* jg: greater (signed >) */
+
+loc_0002953A: ;
+    _fa = (uint32_t)(eax) & 0xFFFFFFFFu; _fb = (uint32_t)(0x80) & 0xFFFFFFFFu;
+    _fas = (int32_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp eax, 0x80 (32-bit) */
+    { uint32_t _r = (_fa - _fb) & 0xFFFFFFFFu; _flags = (_r == 0); _sf = ((_r & 0x80000000u) != 0); _of = (((_fa ^ _fb) & (_fa ^ _r) & 0x80000000u) != 0); _pf = RECOMP_PARITY8(_r); _fv = 15; }
+    if (CMP_G(_fas, _fbs)) goto loc_0002956C; /* jg: greater (signed >) */
+
+loc_00029541: ;
+    _fa = (uint32_t)(ebp) & 0xFFFFFFFFu; _fb = (uint32_t)(eax) & 0xFFFFFFFFu;
+    _fas = (int32_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp ebp, eax (32-bit) */
+    { uint32_t _r = (_fa - _fb) & 0xFFFFFFFFu; _flags = (_r == 0); _sf = ((_r & 0x80000000u) != 0); _of = (((_fa ^ _fb) & (_fa ^ _r) & 0x80000000u) != 0); _pf = RECOMP_PARITY8(_r); _fv = 15; }
+    edi = ebp;
+    if (((_fv & 6u) == 6u && (_sf == _of))) goto loc_00029549; /* jge: published flags */
+
+loc_00029547: ;
+    edi = eax;
+
+loc_00029549: ;
+    eax = MEM32(ecx);
+    { uint32_t _icall_esp = g_esp;
+    PUSH32(esp, edi);
+    { uint32_t _icall_target = MEM32(eax + 4); PUSH32(esp, 0x0002954Fu); RECOMP_ICALL_SAFE_AT(_icall_target, _icall_esp, 0x0002954Cu); } /* indirect call */
+    }
+
+loc_0002954F: ;
+    esi = eax;
+    _fa = (uint32_t)(esi) & 0xFFFFFFFFu; _fb = (uint32_t)(0) & 0xFFFFFFFFu;
+    _fas = (int32_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp esi, 0 (32-bit) */
+    { uint32_t _r = (_fa - _fb) & 0xFFFFFFFFu; _flags = (_r == 0); _sf = ((_r & 0x80000000u) != 0); _of = (((_fa ^ _fb) & (_fa ^ _r) & 0x80000000u) != 0); _pf = RECOMP_PARITY8(_r); _fv = 15; }
+    if (CMP_EQ(_fa, _fb)) goto loc_00029568; /* je: equal / zero */
+
+loc_00029555: ;
+    PUSH32(esp, edi);
+    PUSH32(esp, 0);
+    PUSH32(esp, esi);
+    PUSH32(esp, 0x0002955Eu); RECOMP_ABI_CALL(0x001ECF40u, sub_001ECF40); /* call 0x001ECF40 */
+
+loc_0002955E: ;
+    _fb = (uint32_t)(0xC) & 0xFFFFFFFFu; _fbs = (int32_t)(int32_t)(_fb); /* add source, before the write */
+    esp = esp + 0xC;
+    _fa = (uint32_t)(esp) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* add result */ _flags = (_fa == 0); _sf = (_fas < 0); { uint32_t _a = (_fa - _fb) & 0xFFFFFFFFu; _of = ((~(_a ^ _fb) & (_a ^ _fa) & 0x80000000u) != 0); _pf = RECOMP_PARITY8(_fa); _fv = 15; }
+    POP32(esp, edi);
+    eax = esi;
+    POP32(esp, esi);
+    POP32(esp, ebp);
+    POP32(esp, ebx);
+    esp += 4; return; /* ret */
+
+loc_00029568: ;
+    edx = MEM32(esp + 0x1C);
+
+loc_0002956C: ;
+    _fa = (uint32_t)(edx) & 0xFFFFFFFFu; _fb = (uint32_t)(0) & 0xFFFFFFFFu;
+    _fas = (int32_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp edx, 0 (32-bit) */
+    { uint32_t _r = (_fa - _fb) & 0xFFFFFFFFu; _flags = (_r == 0); _sf = ((_r & 0x80000000u) != 0); _of = (((_fa ^ _fb) & (_fa ^ _r) & 0x80000000u) != 0); _pf = RECOMP_PARITY8(_r); _fv = 15; }
+    if (CMP_NE(_fa, _fb)) goto loc_00029578; /* jne: not equal / not zero */
+
+loc_00029570: ;
+    ebx = ebx | MEM32(0x3C9138);
+    _fa = (uint32_t)(ebx) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* or result */ _flags = (_fa == 0); _sf = (_fas < 0); _of = 0; _pf = RECOMP_PARITY8(_fa); _fv = 15;
+    goto loc_0002957E;
+
+loc_00029578: ;
+    ebx = ebx ^ 0x80000000u;
+    _fa = (uint32_t)(ebx) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* xor result */ _flags = (_fa == 0); _sf = (_fas < 0); _of = 0; _pf = RECOMP_PARITY8(_fa); _fv = 15;
+
+loc_0002957E: ;
+    ecx = MEM32(esp + 0x14);
+    PUSH32(esp, ebx);
+    PUSH32(esp, ebp);
+    PUSH32(esp, ecx);
+    PUSH32(esp, 0x0002958Au); RECOMP_ABI_CALL(0x001E9E90u, sub_001E9E90); /* call 0x001E9E90 */
+
+loc_0002958A: ;
+    esi = eax;
+    _fb = (uint32_t)(0xC) & 0xFFFFFFFFu; _fbs = (int32_t)(int32_t)(_fb); /* add source, before the write */
+    esp = esp + 0xC;
+    _fa = (uint32_t)(esp) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* add result */ _flags = (_fa == 0); _sf = (_fas < 0); { uint32_t _a = (_fa - _fb) & 0xFFFFFFFFu; _of = ((~(_a ^ _fb) & (_a ^ _fa) & 0x80000000u) != 0); _pf = RECOMP_PARITY8(_fa); _fv = 15; }
+    _fa = (uint32_t)(esi) & 0xFFFFFFFFu; _fb = (uint32_t)(0) & 0xFFFFFFFFu;
+    _fas = (int32_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp esi, 0 (32-bit) */
+    { uint32_t _r = (_fa - _fb) & 0xFFFFFFFFu; _flags = (_r == 0); _sf = ((_r & 0x80000000u) != 0); _of = (((_fa ^ _fb) & (_fa ^ _r) & 0x80000000u) != 0); _pf = RECOMP_PARITY8(_r); _fv = 15; }
+    if (CMP_EQ(_fa, _fb)) goto loc_0002959F; /* je: equal / zero */
+
+loc_00029593: ;
+    PUSH32(esp, ebp);
+    PUSH32(esp, 0);
+    PUSH32(esp, esi);
+    PUSH32(esp, 0x0002959Cu); RECOMP_ABI_CALL(0x001ECF40u, sub_001ECF40); /* call 0x001ECF40 */
+
+loc_0002959C: ;
+    _fb = (uint32_t)(0xC) & 0xFFFFFFFFu; _fbs = (int32_t)(int32_t)(_fb); /* add source, before the write */
+    esp = esp + 0xC;
+    _fa = (uint32_t)(esp) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* add result */ _flags = (_fa == 0); _sf = (_fas < 0); { uint32_t _a = (_fa - _fb) & 0xFFFFFFFFu; _of = ((~(_a ^ _fb) & (_a ^ _fa) & 0x80000000u) != 0); _pf = RECOMP_PARITY8(_fa); _fv = 15; }
+
+loc_0002959F: ;
+    POP32(esp, edi);
+    eax = esi;
+    POP32(esp, esi);
+    POP32(esp, ebp);
+    POP32(esp, ebx);
+    esp += 4; return; /* ret */
+
+}
+#undef eax
+#undef ecx
+#undef edx
+#undef esp
+#undef ebx
+#undef esi
+#undef edi
 
 /* The screen camera's projection shape, written out by hand so it can answer
  * 16:9 (docs/research/widescreen.md). thiscall, ret 20:
@@ -754,6 +941,24 @@ recomp_func_t recomp_lookup_manual(uint32_t xbox_va)
         return first_time_help_hook;
     if (xbox_va == 0x00081170u)         /* the crowd's update: its own generator copy online */
         return netplay_crowd_update;
+    if (xbox_va == 0x00137010u)         /* the sound engine's commands: silent while steps re-run */
+        return netplay_sound_command;
+    if (netplay_sound_handler(xbox_va))  /* and the audio subsystem's bus handlers */
+        return (recomp_func_t)netplay_sound_handler(xbox_va);
+    if (xbox_va == 0x0001DC10u)         /* the sound engine's allocator: its own arena (rollback.c) */
+        return rollback_sound_alloc;
+    if (xbox_va == 0x0001DC20u)
+        return rollback_sound_free;
+    if (xbox_va == 0x0002A180u)         /* the game heap's free (vtable 0x28BB14 +8): arena blocks */
+        return rollback_heap_free;
+    if (xbox_va == 0x0011FCC0u)         /* the mixer's tick: the pages it writes (rollback.c) */
+        return rollback_mixer_lock_a;
+    if (xbox_va == 0x00121C80u)
+        return rollback_mixer_lock_b;
+    if (xbox_va == 0x0011FCD0u)
+        return rollback_mixer_unlock_a;
+    if (xbox_va == 0x00121C90u)
+        return rollback_mixer_unlock_b;
 
     if (s_trace_count < 0)
         trace_parse();

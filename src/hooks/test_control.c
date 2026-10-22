@@ -218,6 +218,17 @@ static void command(char *line, char *out, size_t size)
         snprintf(out, size, "{\"ok\":true,\"saved_step\":%lld}", defjam_test_snap_step());
         return;
     }
+    if (!strcmp(verb, "freeze")) {         /* freeze <ms>: hold the game thread at the next fight step */
+        defjam_test_request_freeze((unsigned)strtoul(a1, NULL, 0));
+        snprintf(out, size, "{\"ok\":true}");
+        return;
+    }
+    if (!strcmp(verb, "snapskip")) {       /* snapskip <addr> <bytes>: save/load leave it alone; snapskip clear */
+        int n = !strcmp(a1, "clear") ? defjam_test_snap_skip(0, 0)
+                                     : defjam_test_snap_skip((uint32_t)strtoul(a1, NULL, 0), (uint32_t)strtoul(a2, NULL, 0));
+        snprintf(out, size, "{\"ok\":%s,\"skips\":%d}", n >= 0 ? "true" : "false", n);
+        return;
+    }
     if (!strcmp(verb, "hashes")) {         /* hashes <from step> <to step>: the state hash at each step */
         long long from = atoll(a1), to = atoll(a2), k;
         size_t len = (size_t)snprintf(out, size, "{\"ok\":true,\"from\":%lld,\"hashes\":[", from);
@@ -228,16 +239,17 @@ static void command(char *line, char *out, size_t size)
         return;
     }
     if (!strcmp(verb, "memdiff")) {        /* memdiff begin | memdiff end: which 4 KB pages of guest RAM changed */
-        enum { PAGES = 0x04000000 / 4096 };
+        /* main RAM, then the game's heap window (0x80000000..0x82A10000) */
+        enum { MAIN_PAGES = 0x04000000 / 4096, PAGES = MAIN_PAGES + 0x02A10000 / 4096 };
         static uint64_t *base;
-        const uint64_t *ram = (const uint64_t *)XBOX_PTR(0);
+#define PAGE_ADDR(p) ((p) < MAIN_PAGES ? (uint32_t)(p) * 4096u : 0x80000000u + (uint32_t)((p) - MAIN_PAGES) * 4096u)
         unsigned p, changed = 0, ranges = 0, run = 0;
         size_t len;
         if (!base) base = (uint64_t *)calloc(PAGES, sizeof(uint64_t));
         if (!base) { snprintf(out, size, "{\"ok\":false,\"error\":\"no memory\"}"); return; }
         if (!strcmp(a1, "begin")) {
             for (p = 0; p < PAGES; p++) {
-                const uint64_t *w = ram + (size_t)p * 512;
+                const uint64_t *w = (const uint64_t *)XBOX_PTR(PAGE_ADDR(p));
                 uint64_t h = 0x9E3779B97F4A7C15ull;
                 int k;
                 for (k = 0; k < 512; k++) h = (h ^ w[k]) * 0x100000001B3ull;
@@ -250,7 +262,7 @@ static void command(char *line, char *out, size_t size)
         for (p = 0; p <= PAGES; p++) {
             int dirty = 0;
             if (p < PAGES) {
-                const uint64_t *w = ram + (size_t)p * 512;
+                const uint64_t *w = (const uint64_t *)XBOX_PTR(PAGE_ADDR(p));
                 uint64_t h = 0x9E3779B97F4A7C15ull;
                 int k;
                 for (k = 0; k < 512; k++) h = (h ^ w[k]) * 0x100000001B3ull;
@@ -261,7 +273,7 @@ static void command(char *line, char *out, size_t size)
             if (run) {
                 if (ranges < 300 && len + 48 < size)
                     len += (size_t)snprintf(out + len, size - len, "%s[\"0x%08X\",%u]", ranges ? "," : "",
-                                            (p - run) * 4096u, run * 4u);
+                                            PAGE_ADDR(p - run), run * 4u);
                 ranges++;
                 run = 0;
             }
@@ -275,8 +287,8 @@ static void command(char *line, char *out, size_t size)
         unsigned addr = (unsigned)strtoul(a1, NULL, 0), count = a2[0] ? (unsigned)strtoul(a2, NULL, 0) : 64, k;
         size_t len = 0;
         if (count > 512) count = 512;
-        if (addr < 0x10000u || addr + count > 0x04000000u) {
-            snprintf(out, size, "{\"ok\":false,\"error\":\"guest RAM is 0x10000..0x4000000\"}");
+        if ((addr < 0x10000u || addr + count > 0x04000000u) && (addr < 0x80000000u || addr + count > 0x84000000u)) {
+            snprintf(out, size, "{\"ok\":false,\"error\":\"guest RAM is 0x10000..0x4000000 and 0x80000000..0x84000000\"}");
             return;
         }
         len = (size_t)snprintf(out, size, "{\"ok\":true,\"addr\":\"0x%08X\",\"hex\":\"", addr);

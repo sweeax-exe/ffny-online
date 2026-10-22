@@ -280,79 +280,145 @@ void defjam_test_rng(uint32_t stack)
 /* sub_00087700: one simulation step of a live fight is about to run. */
 /* ---- Save states for the rollback groundwork (tests; src/hooks/test_control.c) ----------------
  *
- * The fight's simulation state measured with memdiff lives almost entirely in the XBE's .data/.bss
- * (the fighter records, match globals, the generators); the other pages that change are thread
- * stacks, TLS and the graphics driver's state, which a restore must not touch. A save copies
- * SNAP_LO..SNAP_HI at the start of a step, on the game thread; a load copies it back at the start
- * of the next step and rewinds the step counter. Each step's hash of the region is kept, so a
- * replay can be compared with the first pass step by step. */
-#define SNAP_LO   0x002D5000u
-#define SNAP_HI   0x003CD000u
-/* RECOMP_TEST_SNAP=full: the whole guest RAM except the main thread's TLS and stack
- * (0x00700000..0x00F80000), for the experiment that tells whether .data/.bss is enough. */
-#define FULL_LO   0x00010000u
-#define FULL_HI   0x04000000u
-#define KEEP_LO   0x00700000u
-#define KEEP_HI   0x00F80000u
-static int snap_full(void)
-{
-    static int full = -1;
-    if (full < 0) full = getenv("RECOMP_TEST_SNAP") && !strcmp(getenv("RECOMP_TEST_SNAP"), "full");
-    return full;
-}
+ * The fight's state is the game's heap (one 42 MiB block MmAllocateContiguousMemoryEx gave it in the
+ * 0x80000000 window) plus the XBE's .data/.bss, less what other threads own: their stacks and TLS,
+ * the driver sections, the audio refill, mailbox and loader clusters inside .data and the game's
+ * D3D wrapper caches (docs/research/rollback-state.md). A save copies the kept ranges at the start
+ * of a step, on the game thread; a load copies them back there and rewinds the step counter. Each
+ * step's fingerprint (the fighter records, the match globals and the generators) is kept so a
+ * replay can be compared with the first pass. */
+typedef struct { uint32_t lo, hi; } Range;
+static const Range k_keep[] = {             /* saved and restored */
+    { 0x002D54E0u, 0x002EB5ACu },           /* .data, up to the mailbox thread's block */
+    { 0x002EBF1Cu, 0x003A9324u },           /* .data/.bss with the small-block free lists at 0x3A4B60.. */
+    { 0x003A9684u, 0x003B8070u },           /* past the music refiller, up to the mailbox block */
+    { 0x003B83BCu, 0x003C92C8u },           /* the fight's globals, fighter records, pool table */
+    { 0x80003000u, 0x82A0D000u },           /* the game's heap */
+};
+#define KEEP_COUNT (sizeof(k_keep) / sizeof(k_keep[0]))
 #define HASH_RING 4096
+#define MAX_SKIP 1024
+#define MAX_SEGS (KEEP_COUNT + MAX_SKIP + 2)
 static uint8_t *s_snap;
+static size_t s_snap_size;
 static LONG64 s_snap_step = -1;
-static volatile LONG s_req_save, s_req_load;
+static volatile LONG s_req_save, s_req_load, s_freeze_ms;
 static uint64_t s_hash[HASH_RING];
 static LONG64 s_hash_step[HASH_RING];
+static Range s_skip[MAX_SKIP];              /* left alone by save and load (other threads' memory) */
+static volatile LONG s_skip_count;
+static Range s_seg[MAX_SEGS];               /* what the snapshot holds: k_keep less the skips */
+static int s_seg_count;
 
 void defjam_test_request_save(void) { InterlockedExchange(&s_req_save, 1); }
 void defjam_test_request_load(void) { InterlockedExchange(&s_req_load, 1); }
+void defjam_test_request_freeze(unsigned ms) { InterlockedExchange(&s_freeze_ms, (LONG)ms); }
 long long defjam_test_snap_step(void) { return s_snap_step; }
 
-/* The hash of the region as it was at the start of `step` (0 if not recorded). */
+int defjam_test_snap_skip(uint32_t addr, uint32_t bytes)
+{
+    LONG n = s_skip_count;
+    if (!bytes) { InterlockedExchange(&s_skip_count, 0); return 0; }
+    if (n >= MAX_SKIP) return -1;
+    s_skip[n].lo = addr;
+    s_skip[n].hi = addr + bytes;
+    InterlockedExchange(&s_skip_count, n + 1);
+    return n + 1;
+}
+
+/* k_keep less the skip ranges and the frame-record queue (the 60 Hz producer thread's, in the heap). */
+static void build_segments(void)
+{
+    Range skip[MAX_SKIP + 1];
+    int n = (int)s_skip_count, i, j, k;
+    uint32_t queue = MEM32(0x003A017Cu);
+    memcpy(skip, s_skip, (size_t)n * sizeof(Range));
+    if (queue >= 0x80003000u && queue < 0x82A0D000u) { skip[n].lo = queue; skip[n].hi = queue + 0x1AA0u; n++; }
+    for (i = 1; i < n; i++)                 /* sort by start */
+        for (j = i; j > 0 && skip[j].lo < skip[j - 1].lo; j--) { Range t = skip[j]; skip[j] = skip[j - 1]; skip[j - 1] = t; }
+    s_seg_count = 0;
+    for (k = 0; k < (int)KEEP_COUNT; k++) {
+        uint32_t at = k_keep[k].lo;
+        for (i = 0; i < n && at < k_keep[k].hi; i++) {
+            if (skip[i].hi <= at || skip[i].lo >= k_keep[k].hi) continue;
+            if (skip[i].lo > at && s_seg_count < MAX_SEGS) { s_seg[s_seg_count].lo = at; s_seg[s_seg_count].hi = skip[i].lo; s_seg_count++; }
+            if (skip[i].hi > at) at = skip[i].hi;
+        }
+        if (at < k_keep[k].hi && s_seg_count < MAX_SEGS) { s_seg[s_seg_count].lo = at; s_seg[s_seg_count].hi = k_keep[k].hi; s_seg_count++; }
+    }
+}
+
+/* The fingerprint as it was at the start of `step` (0 if not recorded). */
 unsigned long long defjam_test_step_hash(long long step)
 {
     int k = (int)(step % HASH_RING);
     return step >= 0 && s_hash_step[k] == step ? s_hash[k] : 0;
 }
 
-static uint64_t region_hash(void)
+static uint64_t hash_range(uint64_t h, uint32_t lo, uint32_t hi)
 {
-    const uint64_t *w = (const uint64_t *)XBOX_PTR(SNAP_LO);
-    size_t n = (SNAP_HI - SNAP_LO) / 8, k;
-    uint64_t h = 0x9E3779B97F4A7C15ull;
+    const uint32_t *w = (const uint32_t *)XBOX_PTR(lo);
+    size_t n = (hi - lo) / 4, k;
     for (k = 0; k < n; k++) h = (h ^ w[k]) * 0x100000001B3ull;
+    return h;
+}
+
+/* Sim-owned words only: the four fighter records, the match globals 0x3B8F28..0x3B9074, the match
+ * generator 0x3C1404 and the four AI generators 0x3BFC70 + 0x88 * n. */
+static uint64_t fingerprint(void)
+{
+    uint64_t h = 0x9E3779B97F4A7C15ull;
+    h = hash_range(h, ACTORS, ACTORS + SLOTS * STRIDE);
+    h = hash_range(h, 0x003B8F28u, 0x003B9074u);
+    h = hash_range(h, G_RNG_STATE, G_RNG_STATE + 8);
+    h = hash_range(h, 0x003BFC70u, 0x003BFC70u + 4 * 0x88u);
     return h;
 }
 
 static void snapshot_point(void)
 {
+    size_t at;
+    int k;
+    LONG freeze = InterlockedExchange(&s_freeze_ms, 0);
+    if (freeze > 0) {                        /* tests: hold the game thread so a memdiff sees only the others */
+        fprintf(stderr, "[SNAP] holding the game thread for %ld ms at step %lld\n", (long)freeze, (long long)s_step);
+        fflush(stderr);
+        Sleep((DWORD)freeze);
+    }
     if (InterlockedExchange(&s_req_load, 0) && s_snap) {
-        if (snap_full()) {
-            memcpy((void *)XBOX_PTR(FULL_LO), s_snap, KEEP_LO - FULL_LO);
-            memcpy((void *)XBOX_PTR(KEEP_HI), s_snap + (KEEP_HI - FULL_LO), FULL_HI - KEEP_HI);
-        } else
-            memcpy((void *)XBOX_PTR(SNAP_LO), s_snap, SNAP_HI - SNAP_LO);
+        LARGE_INTEGER f, t0, t1;
+        QueryPerformanceFrequency(&f);
+        QueryPerformanceCounter(&t0);
+        for (k = 0, at = 0; k < s_seg_count; at += s_seg[k].hi - s_seg[k].lo, k++)
+            memcpy((void *)XBOX_PTR(s_seg[k].lo), s_snap + at, s_seg[k].hi - s_seg[k].lo);
+        QueryPerformanceCounter(&t1);
         s_step = s_snap_step;
-        fprintf(stderr, "[SNAP] loaded the state of step %lld\n", (long long)s_snap_step);
+        fprintf(stderr, "[SNAP] loaded the state of step %lld (%.2f ms)\n", (long long)s_snap_step,
+                (double)(t1.QuadPart - t0.QuadPart) * 1000.0 / (double)f.QuadPart);
+        fflush(stderr);
     }
     if (InterlockedExchange(&s_req_save, 0)) {
-        if (!s_snap) s_snap = (uint8_t *)malloc(snap_full() ? FULL_HI - FULL_LO : SNAP_HI - SNAP_LO);
+        size_t need = 0;
+        build_segments();
+        for (k = 0; k < s_seg_count; k++) need += s_seg[k].hi - s_seg[k].lo;
+        if (need > s_snap_size) { free(s_snap); s_snap = (uint8_t *)malloc(need); s_snap_size = s_snap ? need : 0; }
         if (s_snap) {
-            if (snap_full())
-                memcpy(s_snap, (const void *)XBOX_PTR(FULL_LO), FULL_HI - FULL_LO);
-            else
-                memcpy(s_snap, (const void *)XBOX_PTR(SNAP_LO), SNAP_HI - SNAP_LO);
+            LARGE_INTEGER f, t0, t1;
+            QueryPerformanceFrequency(&f);
+            QueryPerformanceCounter(&t0);
+            for (k = 0, at = 0; k < s_seg_count; at += s_seg[k].hi - s_seg[k].lo, k++)
+                memcpy(s_snap + at, (const void *)XBOX_PTR(s_seg[k].lo), s_seg[k].hi - s_seg[k].lo);
+            QueryPerformanceCounter(&t1);
             s_snap_step = s_step;
-            fprintf(stderr, "[SNAP] saved the state of step %lld\n", (long long)s_step);
+            fprintf(stderr, "[SNAP] saved the state of step %lld (%zu KB in %d pieces, %.2f ms)\n", (long long)s_step,
+                    need / 1024, s_seg_count, (double)(t1.QuadPart - t0.QuadPart) * 1000.0 / (double)f.QuadPart);
+            fflush(stderr);
         }
     }
     {
-        int k = (int)(s_step % HASH_RING);
-        s_hash[k] = region_hash();
-        s_hash_step[k] = s_step;
+        int i = (int)(s_step % HASH_RING);
+        s_hash[i] = fingerprint();
+        s_hash_step[i] = s_step;
     }
 }
 
@@ -366,10 +432,9 @@ void defjam_test_step(void)
          * test match is decided in seconds. Set on the step the fight begins (phase 1; the intro
          * fills the bars before that), which is the same step on every PC of an online room, so the
          * lockstep stays equal. Tests only. */
-        static int pct = -1, done;
-        if (s_step == 1) done = 0;
+        static int pct = -1;
         if (pct < 0) pct = getenv("RECOMP_TEST_FAST_KO") ? atoi(getenv("RECOMP_TEST_FAST_KO")) : 0;
-        if (pct > 0 && pct < 100 && !done && MEM32(G_PHASE) == 1 && (done = 1))
+        if (pct > 0 && pct < 100 && s_step == 120 && MEM32(G_PHASE) == 1)  /* step 120: after the intro; a rollback runs it again */
             for (slot = 0; slot < SLOTS; slot++)
                 if (active(slot))
                     MEMF(record(slot) + F_HEALTH) = MEMF(record(slot) + F_HEALTH_MAX) * (float)pct / 100.0f;
@@ -564,6 +629,8 @@ void defjam_test_input_clear(void)
 }
 
 long long defjam_test_current_step(void) { return s_in_match ? (long long)s_step : -1; }
+/* Rollback (netplay.c): the step count goes back with a load. */
+void defjam_test_set_step(long long step) { if (s_in_match && step >= 0) s_step = step; }
 
 /* sub_001BAA00(record): a fighter is about to read its pad-table entry. */
 void defjam_test_input(uint32_t actor)
