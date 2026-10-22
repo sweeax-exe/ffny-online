@@ -349,3 +349,16 @@ def test_recorder_bundles_are_listed_and_come_first_in_next_steps(tmp_path):
     assert d['record']['bundles'][0]['dir'].endswith('001-key-101612')
     assert d['next'][0].startswith('python scripts/bug-bundle.py logs/sessions/20261014-101500/bundles/001-key-101612')
     assert 'RECORD   session logs/sessions/20261014-101500; 1 bundle(s)' in triage.human(d)
+
+
+def test_a_log_character_the_console_cannot_show_does_not_crash_the_digest(tmp_path):
+    # The Windows console and a piped stdout use a legacy code page (cp1252), which has no arrow;
+    # the runtime logs one. The digest and the slices must print a stand-in, not raise.
+    import subprocess
+    arrow = chr(0x2192)
+    path = write(tmp_path, healthy() + '[KERNEL] ' + arrow + ' returned 0xC00000BB\n')
+    env = dict(os.environ, PYTHONIOENCODING='cp1252')
+    for extra in ([], ['--grep', 'returned']):
+        run = subprocess.run([sys.executable, SCRIPT, path] + extra, env=env, capture_output=True)
+        assert run.returncode == 0, run.stderr.decode('ascii', 'replace')
+        assert b'returned 0xC00000BB' in run.stdout
