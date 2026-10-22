@@ -356,7 +356,7 @@ Fork `vyanhursky/xboxrecomp` branch `defjam/upstream-v0.16` (pin `32aa980`: v0.1
 (`logs/regress-20261022-100441.txt` in `logs/v016/parent`), replay hash unchanged. Audio (opening scene, 330 s, F8 replayed laps): migrated
 147/10/5/5, v0.13 build 32/7/6/0 -- steady state alike, one migrated outlier; listen for it in the play-test. Next: Windows (MSVC build,
 regression, issue #72 fixtures), Steam Deck, owner play-test, then merge (after #76/#73: rebase the gitlink), release as a minor version.
-Worktrees: port `logs/v016/parent`, toolkit `logs/v016/toolkit`. Do not run the game while another session does (Codex worktree 077a did).
+Windows/Deck agents: follow `docs/research/toolkit-v016-handover.md` (temporary; delete before merge). Worktrees: port `logs/v016/parent`, toolkit `logs/v016/toolkit`. Do not run the game while another session does (Codex worktree 077a did).
 
 **v0.10.7 (Windows fixes) is PREPARED on `release/0.10.7`, not merged, tagged or published** (D148). Evidence is in
 `docs/releases/v0.10.7.md` and the Windows row of section 0. Next steps, in order:
