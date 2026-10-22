@@ -21,7 +21,7 @@ DRIVER = r'''
 #include <stdlib.h>
 #include "recomp/gen/recomp_types.h"
 #include "pc_ui.h"
-unsigned char memory[8192];
+unsigned char memory[0x3A0000]; /* covers DEBUG_FLAG (0x39C1DA): MSVC if-converts the guarded store */
 uint32_t g_eax = 0x1234, g_ecx = 0x100, g_edx = 0x5678, g_esp = 0x1000;
 static int boot_calls;
 static int audio_calls;
