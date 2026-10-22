@@ -1878,5 +1878,1569 @@
  {
   "start": "0x00205740",
   "note": "Jump target inside sub_00205726 that the lifter stubbed (scripts/stub-targets.py); translated as a fragment so its epilogue runs."
+ },
+ {
+  "start": "0x00011004",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (imm_ref_target); an entry inside 0x00011000, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x00011170",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x00011102, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x0001A820",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (cc_boundary); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x0001AA10",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (cc_boundary); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x0001FFFC",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x0001FE70, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x00020000",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x0001FE70, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x00020002",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x0001FE70, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x00020010",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x0001FE70, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x00020020",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x0001FE70, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x00020024",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x0001FE70, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x00020025",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x0001FE70, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x00020028",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x0001FE70, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x0002002A",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x0001FE70, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x0002002F",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x0001FE70, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x0002003E",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x0001FE70, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x0002005D",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x0001FE70, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x0002007D",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x0001FE70, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x000200A4",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x0001FE70, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x000200A6",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x0001FE70, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x000200AC",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x0001FE70, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x000200AF",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x0001FE70, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x000200B0",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x0001FE70, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x000200B7",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x0001FE70, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x000200B8",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x0001FE70, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x000200B9",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x0001FE70, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x000200BB",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x0001FE70, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x000200D7",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x0001FE70, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x00020103",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x000200E0, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x00020202",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x000200E0, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x00020208",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x000200E0, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x0002020A",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x000200E0, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x00020211",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x000200E0, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x0002021D",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x000200E0, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x00020525",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x00020270, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x00020D25",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x00020C40, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x00020E00",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x00020D70, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x00022060",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x00022010, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x0002A2FE",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (gap_prologue); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x00030003",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x0002F910, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x0003010C",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x0002F910, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x00030201",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x0002F910, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x00033016",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (gap_prologue); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x0003BE3E",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (gap_prologue); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x0003FFFF",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (imm_ref_target); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x00040036",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x00040034, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x00040037",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x00040034, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x00040038",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x00040034, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x00040098",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x00040034, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x00040264",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x00040260, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x00040294",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (imm_ref_target); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x00040298",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (imm_ref_target); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x0004029C",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (imm_ref_target); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x00040328",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (imm_ref_target); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x0004032C",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (imm_ref_target); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x00040368",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x00040364, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x00040388",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x0004037C, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x0004043C",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (imm_ref_target); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x000409F8",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (imm_ref_target); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x000409FC",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (imm_ref_target); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x00040A9C",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x00040A88, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x00040AAC",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x00040A88, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x00040E00",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x00040DD0, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x00041424",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (imm_ref_target); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x000416BC",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (imm_ref_target); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x0004195C",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (imm_ref_target); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x00041D78",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x00041D60, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x00041D90",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x00041D60, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x00041E24",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (imm_ref_target); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x00044188",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (imm_ref_target); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x0004418C",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (imm_ref_target); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x000442FC",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (imm_ref_target); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x00044B6A",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (gap_prologue); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x00048886",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (gap_prologue); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x0004C96E",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (gap_prologue); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x00050003",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x0004FD80, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x00050201",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x0004FD80, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x00050403",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x0004FD80, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x0005FFE4",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x0005F9B0, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x0005FFE8",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x0005F9B0, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x00060606",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x00060600, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x0006718A",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (gap_prologue); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x00070000",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x0006FDC0, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x0007C906",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (gap_prologue); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x0007F800",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (imm_ref_target); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x0007FFDA",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x0007FDA0, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x00080001",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x0007FDA0, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x00080008",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x0007FDA0, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x00080065",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x0007FDA0, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x00080069",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x0007FDA0, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x0008006D",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x0007FDA0, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x00080070",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x0007FDA0, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x00080072",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x0007FDA0, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x00080074",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x0007FDA0, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x00080076",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x0007FDA0, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x000800E0",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x0007FDA0, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x000800E5",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x0007FDA0, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x000800E7",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x0007FDA0, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x000800E9",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x0007FDA0, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x000800ED",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x0007FDA0, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x000800F0",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x0007FDA0, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x000800F9",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x0007FDA0, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x000800FB",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x0007FDA0, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x00080101",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x0007FDA0, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x00081B40",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x00081AB0, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x00081BC0",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x00081AB0, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x000884F6",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (gap_prologue); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x00090102",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x000900B0, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x00093BA2",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (gap_prologue); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x00098142",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x000980B0, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x00099906",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (gap_prologue); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x0009F2B6",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (gap_prologue); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x0009FFDE",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (gap_prologue); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x000A005B",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x000A0040, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x000A0076",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x000A0070, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x000A0909",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x000A0830, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x000A0D3E",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x000A0C40, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x000A0D65",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x000A0C40, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x000A0D78",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x000A0C40, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x000A2064",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x000A2020, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x000A2065",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x000A2020, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x000A2129",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x000A2020, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x000A216C",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x000A2020, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x000A216D",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x000A2020, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x000A2172",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x000A2020, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x000A2179",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x000A2020, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x000A2273",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x000A2190, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x000A2764",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x000A2550, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x000A2927",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x000A28A0, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x000A2973",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x000A28A0, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x000A2978",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x000A28A0, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x000A2E2E",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x000A2E20, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x000A352A",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x000A31D0, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x000A3595",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x000A31D0, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x000A3B45",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x000A3830, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x000A3E66",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (gap_prologue); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x000A4606",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (gap_prologue); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x000A646E",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x000A6270, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x000A6564",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x000A6550, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x000A6576",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x000A6550, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x000A6632",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x000A6550, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x000A6633",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x000A6550, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x000A6863",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x000A6680, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x000A7272",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x000A7000, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x000A7372",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x000A7360, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x000A7465",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x000A73E0, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x000A8F32",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (gap_prologue); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x000AFFCE",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x000AFE30, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x000B0000",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x000AFE30, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x000BDEBE",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (gap_prologue); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x000BFFC7",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x000BFD60, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x000C0000",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x000BFD60, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x000C2152",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (gap_prologue); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x000C3FDA",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (gap_prologue); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x000CE009",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x000CDEA0, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x000CFA8E",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (gap_prologue); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x000DA4EA",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (gap_prologue); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x000DFFBB",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x000DFFB0, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x000E2080",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x000E1FD0, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x000EA420",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x000EA3F0, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x000F0003",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x000EFD80, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x000F000E",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x000EFD80, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x00100001",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x000FFFB1, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x00100040",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x000FFFB1, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x00100041",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x000FFFB1, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x00100043",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x000FFFB1, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x00100058",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x00100056, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x001000C0",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x00100056, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x001000C4",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x00100056, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x001000C8",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x00100056, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x001000CB",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x00100056, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x001000CC",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x00100056, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x001000CF",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x00100056, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x001000D1",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x00100056, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x001000D3",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x00100056, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x001000D5",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x00100056, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x001000DB",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x00100056, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x001000DF",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x00100056, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x00100111",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x00100056, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x00100A6E",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (gap_prologue); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x00100AF0",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (imm_ref_target); an entry inside 0x00100A70, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x0010144A",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (gap_prologue); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x0010B3BE",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (gap_prologue); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x0010C9D2",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (gap_prologue); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x0010E096",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (gap_prologue); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x0010E2C0",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (cc_boundary); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x0010E6A0",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (cc_boundary); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x0010E6B0",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (cc_boundary); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x0010E6C0",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (cc_boundary); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x0010E750",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (cc_boundary); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x0010E760",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (cc_boundary); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x0010E770",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (cc_boundary); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x0010E780",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (cc_boundary); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x0010E790",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (cc_boundary); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x0010E7A0",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (cc_boundary); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x0010E7B0",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (cc_boundary); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x0010E7C0",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (cc_boundary); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x0010E7D0",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (cc_boundary); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x0010FDD6",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (gap_prologue); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x0010FFAD",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x0010FF60, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x00110001",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x0010FFF0, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x00110010",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x0010FFF0, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x00110112",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x00110060, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x00111111",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x00111040, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x001180B0",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (cc_boundary); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x00118680",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (cc_boundary); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x001186C0",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (cc_boundary); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x0011FFA9",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x0011FD70, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x00121212",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x00121210, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x00127692",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (gap_prologue); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x0012A9B2",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (gap_prologue); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x0012FFA1",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x0012FB40, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x0012FFA3",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x0012FB40, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x00130001",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x0012FB40, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x0013000A",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x0012FB40, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x00130013",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x0012FB40, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x00130025",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x0012FB40, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x00130049",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x0012FB40, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x00130064",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x0012FB40, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x0013006D",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x0012FB40, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x0013FF9F",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x0013FF40, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x00140000",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x0013FFF0, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x00151515",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x00151500, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x00154A20",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x00154810, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x00160200",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x001601E0, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x0016112E",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (gap_prologue); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x00167C22",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (gap_prologue); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x0016A03A",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (gap_prologue); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x0016A88A",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (gap_prologue); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x0016DDA6",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (gap_prologue); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x0016FF8D",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x0016FD00, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x00170011",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x0016FD00, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x00170B22",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (gap_prologue); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x00173752",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (gap_prologue); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x0017928A",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (gap_prologue); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x0017DC5E",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (gap_prologue); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x00180000",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (imm_ref_target); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x0018000C",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (imm_ref_target); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x00182010",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x00181D20, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x00190003",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x0018FBD0, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x00198F52",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (gap_prologue); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x0019954A",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (gap_prologue); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x0019A152",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (gap_prologue); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x0019ACB6",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (gap_prologue); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x001A0003",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x0019FFC0, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x001A1FE6",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (gap_prologue); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x001A5D9A",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (gap_prologue); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x001A698A",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (gap_prologue); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x001AD91E",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (gap_prologue); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x001B0000",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x001AFC6D, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x001B0DF6",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (gap_prologue); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x001B186E",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (gap_prologue); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x001B1B1B",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x001B1970, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x001B48FA",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (gap_prologue); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x001B53BA",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (gap_prologue); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x001C0000",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x001BF030, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x001C0014",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x001BF030, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x001C2EEE",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (gap_prologue); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x001C4F92",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (gap_prologue); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x001C6106",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (gap_prologue); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x001C7E8A",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (gap_prologue); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x001CA36E",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (gap_prologue); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x001CA75E",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (gap_prologue); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x001CFF71",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x001CFD00, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x001D0000",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x001CFD00, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x001D001C",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x001CFD00, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x001D001D",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x001CFD00, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x001D47CE",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (gap_prologue); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x001D4B2A",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (gap_prologue); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x001D51A2",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (gap_prologue); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x001D5676",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (gap_prologue); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x001D7232",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (gap_prologue); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x001D8B96",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (gap_prologue); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x001DA3EA",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (gap_prologue); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x001DC0FC",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x001DBFF0, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x001DFF69",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x001DFF57, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x001DFF6B",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x001DFF57, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x001E1E1E",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x001E1C63, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x001E4660",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (cc_boundary); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x001E90DE",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (gap_prologue); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x001EFF63",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x001EFEC2, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x001F001F",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x001F0006, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x001F707B",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x001F705D, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x001F9C8F",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x001F9C8B, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x001F9CF8",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x001F9CF4, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x001F9DBA",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x001F9DB6, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x001FED80",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x001FF7F4",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x001FF9B7",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x001FF995, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x00200BB9",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x00201000",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x00200FDE, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x0020169F",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x00201810",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x002016B0, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x00201B21",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x00203A20",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x0020398A, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x00203A2C",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x00203C5B",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x00205044",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x00205040, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x00205684",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x0020568B",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_target); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x00205726",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_target); an entry inside 0x002056E7, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x00206852",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x00206849, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x00206883",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x00206C33",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x00207346",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x00207342, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x00207434",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (cc_boundary); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x00208338",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (cc_boundary); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x00208F45",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x00209547",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x002097BB",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x002099F1",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x0020AB11",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x0020ABE9",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x0020AC8F",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x0020AE12",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x0020AF13",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x0020B049",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x0020B16A",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x0020B686",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x0020B8CA",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x00213928",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (cc_boundary); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x002139AD",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x002220B2",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (gap_prologue); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x00222376",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (gap_prologue); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x0023BD12",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (imm_ref_target); an entry inside 0x0023BCF6, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x0023BDA7",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (imm_ref_target); an entry inside 0x0023BD9B, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x0024FF44",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x0024FEB9, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x00250000",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x0024FF46, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x0025002E",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x0024FF46, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x00250037",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x0024FF46, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x0025005B",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x0024FF46, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x00253D40",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (cc_boundary); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x0025FF42",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x0025FE79, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x00260003",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x0025FFB8, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x00260026",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x0025FFB8, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x00268468",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (cc_boundary); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x00280003",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x0027FFBE, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x00280028",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x0028001A, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x00282828",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (tail_jump_alias); an entry inside 0x00282811, seeded as an alias so that function keeps its extent and indirect calls to the entry resolve as before.",
+  "alias": true
+ },
+ {
+  "start": "0x002851F8",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (cc_boundary); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x003D2558",
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (imm_ref_target); kept so indirect calls to it resolve as before."
  }
 ]
