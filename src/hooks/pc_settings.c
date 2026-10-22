@@ -557,6 +557,10 @@ static void load_debug_env(const char *root)
     FILE *f;
     snprintf(path, sizeof(path), "%s" HOST_SEP "debug-env.txt", root);
     f = fopen(path, "r");
+    if (!f) {   /* a file made in Explorer with the extensions hidden is debug-env.txt.txt */
+        snprintf(path, sizeof(path), "%s" HOST_SEP "debug-env.txt.txt", root);
+        f = fopen(path, "r");
+    }
     if (!f) return;
     while (fgets(line, sizeof(line), f)) {
         char *eq, *end = line + strlen(line);
