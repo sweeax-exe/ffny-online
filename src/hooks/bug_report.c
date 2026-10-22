@@ -94,38 +94,115 @@ static size_t blank(char *s, size_t n, const char *what, const char *by)
 }
 
 /* The log, its head and tail if long, with the user folder blanked. */
+/* Lines a long session repeats by the hundred thousand and that tell nothing about a bug: the
+ * graphics queue's positions, the per-frame counters, kernel call counts, USB polls. About nine in
+ * ten lines of a long log; left out, a report's head and tail reach much further into the session.
+ * The frame's [BATCH] dump and every other line stay. */
+static const char *const k_noise[] = {
+    "  [NV2A] DMA_PUT", "  [NV2A] PCRTC_START", "[TRANS] frames ", "  [GPU] draw #", "  [READ] from=",
+    "  [KERNEL]   ordinal", "  [KTRAIL]", "  [OHCI0] periodic", "  [DPC] queued", "  [PGRAPH] software method",
+    "  [NV2A] interrupt",
+};
+
+static int noise(const char *line, size_t n)
+{
+    size_t i, k;
+    for (i = 0; i < sizeof(k_noise) / sizeof(k_noise[0]); i++) {
+        k = strlen(k_noise[i]);
+        if (n >= k && !memcmp(line, k_noise[i], k)) return 1;
+    }
+    return 0;
+}
+
+/* The log without the noise: its first LOG_HEAD bytes and its last LOG_TAIL, with the user folder
+ * blanked. Read through once in pieces, so a log of hundreds of MB costs no more memory. */
 static int read_log(const char *path, Buf *out)
 {
     HANDLE h = CreateFileA(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL,
                            OPEN_EXISTING, 0, NULL);
-    LARGE_INTEGER size;
-    char *text;
-    size_t n = 0;
+    Buf head = { 0 }, tail = { 0 };
+    char *chunk, *line = NULL;
+    size_t line_n = 0, line_cap = 0, cut = 0, dropped = 0;
+    int head_full = 0;
     DWORD got;
-    char profile[MAX_PATH], user[128], seg[140];
+    char profile[MAX_PATH], user[128], seg[140], note[96];
     if (h == INVALID_HANDLE_VALUE) return 0;
-    if (!GetFileSizeEx(h, &size)) { CloseHandle(h); return 0; }
-    text = (char *)malloc(LOG_HEAD + LOG_TAIL + 64);
-    if (!text) { CloseHandle(h); return 0; }
-    if (size.QuadPart <= LOG_HEAD + LOG_TAIL) {
-        if (ReadFile(h, text, (DWORD)size.QuadPart, &got, NULL)) n = got;
-    } else {
-        LARGE_INTEGER at;
-        if (ReadFile(h, text, LOG_HEAD, &got, NULL)) n = got;
-        n += (size_t)snprintf(text + n, 64, "\n[REPORT] ... %lld bytes left out ...\n",
-                              size.QuadPart - LOG_HEAD - LOG_TAIL);
-        at.QuadPart = size.QuadPart - LOG_TAIL;
-        if (SetFilePointerEx(h, at, NULL, FILE_BEGIN) && ReadFile(h, text + n, LOG_TAIL, &got, NULL)) n += got;
+    chunk = (char *)malloc(1 << 20);
+    if (!chunk) { CloseHandle(h); return 0; }
+    for (;;) {
+        DWORD i, from = 0;
+        int last = !ReadFile(h, chunk, 1 << 20, &got, NULL) || got == 0;
+        for (i = 0; i <= got; i++) {
+            int end = last ? i == got : i < got && chunk[i] == '\n';
+            if (!end && i < got) continue;
+            if (i == got && !last) {            /* a line that goes on in the next piece */
+                size_t k = i - from;
+                if (line_n + k > line_cap) {
+                    char *p2 = (char *)realloc(line, line_cap = (line_n + k) * 2 + 256);
+                    if (!p2) break;
+                    line = p2;
+                }
+                memcpy(line + line_n, chunk + from, k);
+                line_n += k;
+                break;
+            }
+            {
+                size_t k = i - from + (i < got ? 1 : 0);
+                const char *text = chunk + from;
+                if (line_n) {                   /* finish the line carried over */
+                    if (line_n + k > line_cap) {
+                        char *p2 = (char *)realloc(line, line_cap = (line_n + k) * 2 + 256);
+                        if (!p2) break;
+                        line = p2;
+                    }
+                    memcpy(line + line_n, text, k);
+                    text = line;
+                    k += line_n;
+                    line_n = 0;
+                }
+                if (k && noise(text, k)) dropped++;
+                else if (k && !head_full && head.n + k <= LOG_HEAD) put(&head, text, k);
+                else if (k) {
+                    head_full = 1;          /* in order: once full, everything goes on in the tail */
+                    put(&tail, text, k);
+                    if (tail.n > 2 * LOG_TAIL) {    /* keep only the newest LOG_TAIL bytes, from a line start */
+                        size_t keep = LOG_TAIL, at = tail.n - keep;
+                        while (at < tail.n && tail.p[at - 1] != '\n') at++;
+                        cut += at;
+                        memmove(tail.p, tail.p + at, tail.n - at);
+                        tail.n -= at;
+                    }
+                }
+            }
+            from = i + 1;
+        }
+        if (last) break;
     }
     CloseHandle(h);
+    free(chunk);
+    free(line);
+    if (tail.n > LOG_TAIL) {
+        size_t at = tail.n - LOG_TAIL;
+        while (at < tail.n && tail.p[at - 1] != '\n') at++;
+        cut += at;
+        memmove(tail.p, tail.p + at, tail.n - at);
+        tail.n -= at;
+    }
+    if (cut || dropped) {
+        snprintf(note, sizeof(note), "\n[REPORT] ... %zu bytes left out here; %zu noise lines left out ...\n", cut, dropped);
+        put(&head, note, strlen(note));
+    }
+    if (tail.n) put(&head, tail.p, tail.n);
+    free(tail.p);
+    if (!head.p) return 0;
     if (GetEnvironmentVariableA("USERPROFILE", profile, sizeof(profile)))
-        n = blank(text, n, profile, "%USERPROFILE%");
+        head.n = blank(head.p, head.n, profile, "%USERPROFILE%");
     if (GetEnvironmentVariableA("USERNAME", user, sizeof(user))) {     /* in other folders: D:\<name>\Games */
         snprintf(seg, sizeof(seg), "\\%s\\", user);
-        n = blank(text, n, seg, "\\%USER%\\");
+        head.n = blank(head.p, head.n, seg, "\\%USER%\\");
     }
-    put(out, text, n);
-    free(text);
+    put(out, head.p, head.n);
+    free(head.p);
     return 1;
 }
 

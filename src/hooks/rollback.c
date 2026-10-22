@@ -126,14 +126,14 @@ static volatile LONG s_mix_on;          /* a mixer tick is being watched (see mi
 static HANDLE s_game_thread;
 static ULONG64 s_game_cycles;
 
-/* RECOMP_ROLLBACK=on (debug-env.txt) until rollback ships for everyone; off, nothing of it runs:
- * no audio arena, no write tracking, no saves. */
+/* On for everyone since build 19; RECOMP_ROLLBACK=off (debug-env.txt) turns it off, and then
+ * nothing of it runs: no audio arena, no write tracking, no saves. */
 int rollback_enabled(void)
 {
     static int on = -1;
     if (on < 0) {
         const char *v = getenv("RECOMP_ROLLBACK");
-        on = v && !strcmp(v, "on");
+        on = !(v && !strcmp(v, "off"));
     }
     return on;
 }

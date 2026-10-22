@@ -23,7 +23,7 @@ does). This file records what was built, why each part is there, and how it was 
   agreed delay is `RB_LESS` (4) steps shorter (minimum 2). Mixed rooms keep the old delay; prediction
   itself is local and safe with any peer.
 * **End.** Once the fight is decided and every step is final, rollback stops for the match (write
-  tracking off, no saves on the results screen). `RECOMP_ROLLBACK=off` turns it off entirely.
+  tracking off, no saves on the results screen). `RECOMP_ROLLBACK=off` turns it off entirely (on by default since build 19).
 
 ## 2. Save states (`src/hooks/rollback.c`)
 

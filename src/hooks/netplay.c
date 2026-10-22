@@ -261,7 +261,7 @@ static struct {
     ULONGLONG toast_until;
 } N;
 
-/* Rollback (rollback.h) is on with RECOMP_ROLLBACK=on; otherwise every step waits for every entry. */
+/* Rollback (rollback.h) is on unless RECOMP_ROLLBACK=off; off, every step waits for every entry. */
 static int rollback_wanted(void) { return rollback_enabled(); }
 
 static BOOL CALLBACK init_once(PINIT_ONCE o, PVOID p, PVOID *c)
