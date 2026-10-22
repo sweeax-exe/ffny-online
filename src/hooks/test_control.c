@@ -19,6 +19,7 @@
 #include "recomp/gen/recomp_types.h"
 #include "netplay.h"
 #include "automatch.h"
+#include "test_observations.h"
 
 #if defined(_WIN32)
 #include <winsock2.h>
@@ -113,15 +114,23 @@ static void state(char *out, size_t size)
         json_str(out, size, &len, g_calls[i % CALLS]);
     }
     LeaveCriticalSection(&g_cs);
-    PUT("],\"match\":{\"phase\":%u,\"clock\":\"%u:%02u\",\"type\":%u,\"fighters\":[",
-        MEM32(G_PHASE), MEM32(G_CLOCK_MIN), MEM32(G_CLOCK_SEC), MEM32(G_TYPE));
+    PUT("],\"match\":{\"phase\":%u,\"clock\":\"%u:%02u\",\"type\":%u,\"step\":%lld,\"fighters\":[",
+        MEM32(G_PHASE), MEM32(G_CLOCK_MIN), MEM32(G_CLOCK_SEC), MEM32(G_TYPE), defjam_test_current_step());
     for (i = 0; i < 4; i++) {
         uint32_t r = ACTORS + i * STRIDE;
         uint32_t ch = MEM32(r + F_CHARACTER);
         if (i) PUT(",");
         if (MEM32(r + F_SLOT) == 0xFFFFFFFFu) { PUT("null"); continue; }
-        PUT("{\"slot\":%u,\"character\":%u,\"health\":%.1f,\"health_max\":%.1f,\"cpu\":%d}", i, ch,
-            (double)MEMF(r + F_HEALTH), (double)MEMF(r + F_HEALTH_MAX), MEM8(r + F_CONTROL) & 1);
+        /* fighter-record-fields.md, wall-stagger.md: state +0x30 (0x11/0x12 stagger, 0x37 wall slam,
+         * 0x1B corner pin, 0x14 rope bounce, 0x08 leaning on the wall), position, momentum, combo
+         * step, the pinned-hit count, the pad bits held and newly pressed this step. */
+        PUT("{\"slot\":%u,\"character\":%u,\"health\":%.1f,\"health_max\":%.1f,\"cpu\":%d,"
+            "\"state\":\"0x%02X\",\"pos\":[%.2f,%.2f,%.2f],\"facing\":%.3f,\"momentum\":%.1f,\"momentum_max\":%.1f,"
+            "\"combo\":%u,\"pinned_hits\":%u,\"held\":\"0x%05X\",\"pressed\":\"0x%05X\",\"blocked\":\"0x%05X\"}", i, ch,
+            (double)MEMF(r + F_HEALTH), (double)MEMF(r + F_HEALTH_MAX), MEM8(r + F_CONTROL) & 1,
+            MEM32(r + 0x30u), (double)MEMF(r + 0x44u), (double)MEMF(r + 0x48u), (double)MEMF(r + 0x4Cu),
+            (double)MEMF(r + 0x54u), (double)MEMF(r + 0x374u), (double)MEMF(r + 0x378u),
+            MEM32(r + 0x40Cu), MEM32(r + 0x384u), MEM32(r + 0x9E0u), MEM32(r + 0x9F0u), MEM32(0x003B8FC8u + i * 4u));
     }
     netplay_status(status, sizeof(status));
     PUT("]},\"online\":{\"state\":%d,\"status\":", (int)netplay_state());
@@ -188,6 +197,22 @@ static void command(char *line, char *out, size_t size)
                                : "{\"ok\":false,\"error\":\"queue full\"}");
         return;
     }
+    if (!strcmp(verb, "inject")) {         /* inject <slot> <from +steps> <steps> <hex pad bits> | inject clear */
+        int slot2, rel, n2;
+        unsigned bits;
+        long long now = defjam_test_current_step();
+        if (!strcmp(a1, "clear")) { defjam_test_input_clear(); snprintf(out, size, "{\"ok\":true}"); return; }
+        if (sscanf(line, "%*s %d %d %d %x", &slot2, &rel, &n2, &bits) != 4 || now < 0 || n2 < 1) {
+            snprintf(out, size, "{\"ok\":false,\"error\":\"inject <slot> <from +steps> <steps> <hex>, during a fight\"}");
+            return;
+        }
+        if (!defjam_test_input_add(slot2, now + rel, now + rel + n2 - 1, bits)) {
+            snprintf(out, size, "{\"ok\":false,\"error\":\"not taken\"}");
+            return;
+        }
+        snprintf(out, size, "{\"ok\":true,\"first\":%lld,\"last\":%lld}", now + rel, now + rel + n2 - 1);
+        return;
+    }
     if (!strcmp(verb, "peek")) {           /* peek <guest address> [bytes<=512] */
         unsigned addr = (unsigned)strtoul(a1, NULL, 0), count = a2[0] ? (unsigned)strtoul(a2, NULL, 0) : 64, k;
         size_t len = 0;
@@ -211,7 +236,7 @@ static void command(char *line, char *out, size_t size)
         snprintf(out, size, "{\"ok\":true}");
         return;
     }
-    snprintf(out, size, "{\"ok\":false,\"error\":\"commands: ping, state, press, hold, release, match, fe, peek, poke\"}");
+    snprintf(out, size, "{\"ok\":false,\"error\":\"commands: ping, state, press, hold, release, inject, match, fe, peek, poke\"}");
 }
 
 static DWORD WINAPI control_thread(LPVOID param)

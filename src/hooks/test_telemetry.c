@@ -464,6 +464,28 @@ static void input_load(void)
             s_input_count, s_input_slots);
 }
 
+/* Tests (src/hooks/test_control.c): add a step-timed interval live, and read the fight step. */
+int defjam_test_input_add(int slot, long long first, long long last, unsigned buttons)
+{
+    if (s_input_count < 0) input_load();
+    if (slot < 0 || slot >= SLOTS || first < 1 || last < first || s_input_count >= INPUT_MAX) return 0;
+    s_input[s_input_count].slot = slot;
+    s_input[s_input_count].first = first;
+    s_input[s_input_count].last = last;
+    s_input[s_input_count].buttons = buttons;
+    s_input_count++;
+    s_input_slots |= 1 << slot;
+    return 1;
+}
+
+void defjam_test_input_clear(void)
+{
+    s_input_count = 0;
+    s_input_slots = 0;
+}
+
+long long defjam_test_current_step(void) { return s_in_match ? (long long)s_step : -1; }
+
 /* sub_001BAA00(record): a fighter is about to read its pad-table entry. */
 void defjam_test_input(uint32_t actor)
 {

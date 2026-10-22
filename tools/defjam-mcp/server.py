@@ -11,6 +11,9 @@ Claude Code starts it from the repository's .mcp.json. Tools:
   screenshot  the copy's window as a picture
   log         lines of a copy's log, filtered
   wait_for    wait until a copy's log has a line containing a text
+  to_menu     from wherever the copy is (title, legal screens) to the main menu
+  wait_state  wait until a state field meets a condition (e.g. match.phase == 1)
+  inject      pad bits for a fighter on exact fight steps (offline; frame-accurate tests)
   match       start any match at once (mode, venue, fighters, CPUs) from the main menu
   fe          run a front-end command (Game.*, Controller.*, ...) on the game thread
   peek/poke   read / write guest memory
@@ -194,6 +197,62 @@ def wait_for(i, text, timeout=120):
     return {"found": False, "timeout_s": timeout}
 
 
+def get_path(obj, path):
+    for part in path.split("."):
+        if isinstance(obj, list):
+            obj = obj[int(part)] if int(part) < len(obj) else None
+        elif isinstance(obj, dict):
+            obj = obj.get(part)
+        else:
+            return None
+        if obj is None:
+            return None
+    return obj
+
+
+def compare(have, op, want):
+    try:
+        if isinstance(have, str) and have.lower().startswith("0x") and str(want).lower().startswith("0x"):
+            have, want = int(have, 16), int(str(want), 16)
+        elif not isinstance(have, str):
+            want = type(have)(want) if not isinstance(have, bool) else str(want).lower() in ("1", "true")
+    except (TypeError, ValueError):
+        pass
+    if op == "contains":
+        return str(want).lower() in str(have).lower()
+    return {"==": have == want, "!=": have != want, ">": have > want, ">=": have >= want,
+            "<": have < want, "<=": have <= want}[op]
+
+
+def wait_state(i, path, op, value, timeout=60):
+    deadline = time.time() + float(timeout)
+    have = None
+    while time.time() < deadline:
+        s = control(i, "state")
+        if "error" in s:
+            time.sleep(0.5)
+            continue
+        have = get_path(s, path)
+        if have is not None and compare(have, op, value):
+            return {"met": True, "value": have, "match": s.get("match")}
+        time.sleep(0.25)
+    return {"met": False, "last": have}
+
+
+def to_menu(i, timeout=180):
+    deadline = time.time() + float(timeout)
+    k = 0
+    while time.time() < deadline:
+        s = control(i, "state")
+        if "error" not in s:
+            if "mainmenu" in s.get("screen", "").lower():
+                return {"ok": True, "screen": s["screen"]}
+            control(i, "press 0 %s 200" % ("start" if k % 3 == 0 else "a"))
+            k += 1
+        time.sleep(1.2)
+    return {"ok": False, "error": "not at the main menu after %ss" % timeout}
+
+
 # ---- pictures --------------------------------------------------------------------------------
 
 def screenshot(i, scale=0.5):
@@ -277,6 +336,21 @@ TOOLS = [
      "'Match over', 'GetScreenInfo(intMain/mainMenu', '[CRASH]'. Returns that line.",
      "inputSchema": {"type": "object", "properties": {"copy": {"type": "integer"}, "text": {"type": "string"},
                      "timeout": {"type": "number"}}, "required": ["text"]}},
+    {"name": "to_menu", "description": "Take a copy from the title / legal / memory-card screens to the main menu.",
+     "inputSchema": {"type": "object", "properties": {"copy": {"type": "integer"}, "timeout": {"type": "number"}}}},
+    {"name": "wait_state", "description": "Wait until a field of the copy's state meets a condition. path is dotted "
+     "(match.phase, match.step, match.fighters.1.state, online.lockstep.step, screen), op one of == != > >= < <= "
+     "contains, value compared as the field's type (hex strings like 0x37 compare as numbers).",
+     "inputSchema": {"type": "object", "properties": {"copy": {"type": "integer"}, "path": {"type": "string"},
+                     "op": {"type": "string"}, "value": {}, "timeout": {"type": "number"}},
+                     "required": ["path", "op", "value"]}},
+    {"name": "inject", "description": "Frame-accurate input for offline tests: from `start` steps after the current fight "
+     "step, for `steps` steps, fighter `slot` reads these pad-table bits instead of its pad (hex: 0x1 up? 0x8 right, 0x2, "
+     "0x4 directions; 0x10 0x20 0x40 0x80 0x1000 0x2000 the six action buttons; 0x10000 left stick active). "
+     "clear=true drops every interval. Online matches use their own lockstep input; use press there.",
+     "inputSchema": {"type": "object", "properties": {"copy": {"type": "integer"}, "slot": {"type": "integer"},
+                     "start": {"type": "integer"}, "steps": {"type": "integer"}, "bits": {"type": "string"},
+                     "clear": {"type": "boolean"}}}},
     {"name": "match", "description": "Start a match on a copy as soon as it is at the main menu, without the menus: "
      "spec like 'type=0,venue=6,f0=58,p0=0,f1=40,p1=-1' (type 0 One on One, 3 Tag Team, ...; venue = venue.xml feID; "
      "fN = fighter.xml ID; pN = controller port, -1 for the CPU; up to f3/p3).",
@@ -319,6 +393,15 @@ def call(name, a):
         return [text(read_log(copy, a.get("grep"), a.get("last", 40)))]
     if name == "wait_for":
         return [text(wait_for(copy, a["text"], a.get("timeout", 120)))]
+    if name == "to_menu":
+        return [text(to_menu(copy, a.get("timeout", 180)))]
+    if name == "wait_state":
+        return [text(wait_state(copy, a["path"], a["op"], a["value"], a.get("timeout", 60)))]
+    if name == "inject":
+        if a.get("clear"):
+            return [text(control(copy, "inject clear"))]
+        return [text(control(copy, "inject %d %d %d %s" % (int(a.get("slot", 0)), int(a.get("start", 0)),
+                                                          int(a.get("steps", 1)), a.get("bits", "0"))))]
     if name == "match":
         return [text(control(copy, "match " + a["spec"]))]
     if name == "fe":
