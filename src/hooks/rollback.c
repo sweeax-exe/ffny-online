@@ -34,6 +34,8 @@
 #define AUDIO_RAM   0x0033E9E4u     /* AudioManagedRAM, the sound engine's first block */
 #define FRAME_QUEUE 0x003A017Cu     /* the frame-record queue object (registry 0x27) */
 #define QUEUE_BYTES 0x1AA0u
+#define FILE_REQUESTS 0x003C8F30u   /* the file layer's slot array and request objects */
+#define FILE_REQUEST_BYTES 0x2400u
 #define HOLD_MS     150
 
 typedef struct { uint32_t lo, hi; } Range;
@@ -192,6 +194,11 @@ static uint8_t *page_host(uint32_t p) { return (uint8_t *)XBOX_PTR(HEAP_LO + p *
 
 /* The first write since the reference to page p, by the game thread or another. */
 static uint32_t s_foreign_page[12], s_foreign_told;
+static volatile LONG s_reads;
+static uint32_t s_read_at[8], s_read_len[8], s_reads_told;
+static int s_read_game[8];
+static uint32_t s_read_save[8];
+static volatile LONG s_saves;           /* saves since the reference: a clock for the log */
 
 /* The first write since the reference to page p, by the game thread or another. Lock-free: it runs
  * in the exception handler of whichever thread wrote, and two threads may meet on one page (both
@@ -213,13 +220,16 @@ static void first_write(uint32_t p, int game)
     }
 }
 
+/* src/main.c's crash report calls it: the rollback state at the crash. */
+void (*rollback_crash_cb)(void);
+
 static LONG CALLBACK track_fault(PEXCEPTION_POINTERS e)
 {
     const EXCEPTION_RECORD *r = e->ExceptionRecord;
     uintptr_t lo = (uintptr_t)page_host(0), a;
     uint32_t p;
-    if (r->ExceptionCode != EXCEPTION_ACCESS_VIOLATION || r->NumberParameters < 2 || r->ExceptionInformation[0] != 1)
-        return EXCEPTION_CONTINUE_SEARCH;
+    if (r->ExceptionCode != EXCEPTION_ACCESS_VIOLATION || r->NumberParameters < 2) return EXCEPTION_CONTINUE_SEARCH;
+    if (r->ExceptionInformation[0] != 1) return EXCEPTION_CONTINUE_SEARCH;
     a = (uintptr_t)r->ExceptionInformation[1];
     if (a < lo || a >= lo + (uintptr_t)HEAP_PAGES * PAGE) return EXCEPTION_CONTINUE_SEARCH;
     p = (uint32_t)((a - lo) / PAGE);
@@ -239,8 +249,19 @@ static LONG CALLBACK track_fault(PEXCEPTION_POINTERS e)
 static void track_read(void *host, size_t length)
 {
     uintptr_t lo = (uintptr_t)page_host(0), a = (uintptr_t)host, end = a + length;
-    int game = GetCurrentThreadId() == s_game_tid;
+    /* the file layer is synchronous for the game: a worker thread reads while the game thread waits
+     * for it (sub_001E5420), into the game's buffers; audio streams read into the arena, not here */
+    int game = 1;
     if (!s_tracking || end <= lo || a >= lo + (uintptr_t)HEAP_PAGES * PAGE) return;
+    {   /* how often the fight reads files into the heap, and on which thread (printed at saves) */
+        LONG n = InterlockedIncrement(&s_reads);
+        if (n <= 8) {
+            s_read_at[n - 1] = HEAP_LO + (uint32_t)(a - lo);
+            s_read_len[n - 1] = (uint32_t)length;
+            s_read_game[n - 1] = game;
+            s_read_save[n - 1] = (uint32_t)s_saves;
+        }
+    }
     if (a < lo) a = lo;
     if (end > lo + (uintptr_t)HEAP_PAGES * PAGE) end = lo + (uintptr_t)HEAP_PAGES * PAGE;
     for (a = (a - lo) / PAGE; a < (end - lo + PAGE - 1) / PAGE; a++)
@@ -275,6 +296,9 @@ static int track_start(void)
     if (!s_veh) return -1;
     s_game_tid = GetCurrentThreadId();
     s_foreign = s_foreign_told = 0;
+    s_reads = 0;
+    s_saves = 0;
+    s_reads_told = 0;
     xbox_guest_write_notify = track_read;
     InterlockedExchange(&s_tracking, 1);
     EnterCriticalSection(&s_track_cs);
@@ -291,6 +315,13 @@ static int track_start(void)
 }
 
 void rollback_sound_context(int on) { t_in_sound = on; }
+
+void rollback_note_dynamic_load(uint32_t caller)
+{
+    static unsigned told;
+    if (s_tracking && told++ < 20)
+        fprintf(stderr, "[ROLLBACK] a dynamic load in the fight (caller %08X, %ld updates in)\n", caller, (long)s_saves);
+}
 
 void rollback_reset(void)
 {
@@ -347,6 +378,12 @@ int rollback_prepare(void)
     memset(data_bg, 0, sizeof(data_bg));
     for (p = 0; p < HEAP_PAGES; p++) if (s_audio_page[p]) s_skip[p] = 1;
     if (queue >= HEAP_LO && queue < HEAP_HI) skip_heap(queue, queue + QUEUE_BYTES);
+    {   /* the file layer's worker slots and request objects (one heap block, [0x3C8F30]); its free
+         * list head (0x3C8F34) is in .data the other threads own, so the block goes with it
+         * (docs/research/rollback-async-loads.md 5, 6) */
+        uint32_t io = MEM32(FILE_REQUESTS);
+        if (io >= HEAP_LO && io < HEAP_HI) skip_heap(io, io + FILE_REQUEST_BYTES);
+    }
     {
         uint32_t pool = MEM32(POOL_BASE), size = MEM32(POOL_SIZE);
         fprintf(stderr, "[ROLLBACK] the system pool: %08X, %u KB\n", pool, size / 1024);
@@ -416,6 +453,13 @@ int rollback_save(int slot)
     if (!s_ready || slot < 0 || slot >= ROLLBACK_SLOTS) return -1;
     while (s_foreign_told < 12 && s_foreign_told < s_foreign && s_foreign_page[s_foreign_told])
         fprintf(stderr, "[ROLLBACK] another thread writes %08X: left alone from now on\n", s_foreign_page[s_foreign_told++]);
+    while (s_reads_told < 8 && s_reads_told < (uint32_t)s_reads && s_read_at[s_reads_told]) {
+        fprintf(stderr, "[ROLLBACK] a file read into the heap in the fight: %08X, %u bytes, %s thread, %u updates in\n",
+                s_read_at[s_reads_told], s_read_len[s_reads_told], s_read_game[s_reads_told] ? "the game" : "another",
+                s_read_save[s_reads_told]);
+        s_reads_told++;
+    }
+    InterlockedIncrement(&s_saves);
     s = &s_slot[slot];
     if (!s->data && !(s->data = (uint8_t *)malloc(s_dbytes))) return -1;
     if (s->heap_cap < (size_t)s_nchange * PAGE) {
@@ -672,6 +716,7 @@ void rollback_mixer_unlock_a(void) { if (MEM32(g_esp) == MIX_UNLOCKS) mixer_end(
 void rollback_mixer_unlock_b(void) { if (MEM32(g_esp) == MIX_UNLOCKS) mixer_end(); sub_00121C90(); }
 
 #else
+void rollback_note_dynamic_load(uint32_t caller) { (void)caller; }
 void rollback_sound_context(int on) { (void)on; }
 void rollback_mixer_lock_a(void) {}
 void rollback_mixer_lock_b(void) {}

@@ -2160,6 +2160,16 @@ void *netplay_sound_handler(uint32_t va)
     return NULL;
 }
 
+static uint32_t g_last_rb_target, g_last_rb_from;
+
+static void rollback_crash_state(void)
+{
+    fprintf(stderr, "[ROLLBACK] at the crash: %s, step %u, final %u, update %u, %u rollbacks, the last back to %u from %u, thread %lu%s\n",
+            N.resim ? "running steps again" : "a normal update", N.step, N.final_step, N.updates, N.rb_count,
+            g_last_rb_target, g_last_rb_from, (unsigned long)GetCurrentThreadId(), N.predicting ? ", predicting" : "");
+    fflush(stderr);
+}
+
 static void snap_save(void)
 {
     uint32_t step = N.step + 1;
@@ -2201,6 +2211,9 @@ static void rollback_to(uint32_t f)
     QueryPerformanceCounter(&t0);
     memcpy(fp, g_fp_stack, sizeof(fp));
     n = N.updates - N.snap[slot].update;
+    g_last_rb_target = f;
+    g_last_rb_from = N.step;
+    rollback_crash_cb = rollback_crash_state;
     rollback_load(slot);
     N.step = f - 1;
     N.updates = N.snap[slot].update;

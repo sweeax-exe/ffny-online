@@ -82,6 +82,8 @@ void sub_001BAA00_enter(void) { defjam_test_input(MEM32(g_esp + 4)); netplay_on_
 void sub_0002C530_enter(void) { netplay_on_update(); }
 void sub_0003C6E0_enter(void) { rollback_audio_init_begin(); }
 void sub_00012CC0_enter(void) { rollback_audio_init_end(); }
+/* EAGL's DynamicLoader::Resolve: a model, weapon or render object is linked in (rollback.c logs it in fights). */
+void sub_0010AC20_enter(void) { rollback_note_dynamic_load(MEM32(g_esp)); }
 
 
 /* The lifted body below uses the generated code's register names. */

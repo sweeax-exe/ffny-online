@@ -58,6 +58,7 @@
 #include <xbox/xboxrecomp.h>
 #include "nv2a/nv2a_pgraph_d3d11.h"
 #include "hooks/save_compat.h"
+#include "hooks/rollback.h"
 
 /*
  * If xboxrecomp.h is not an umbrella header in your setup, include
@@ -444,6 +445,7 @@ static LONG CALLBACK veh_handler(PEXCEPTION_POINTERS ep)
             return EXCEPTION_CONTINUE_SEARCH;
         }
 
+        if (rollback_crash_cb) rollback_crash_cb();     /* online: whether steps were being run again */
         fprintf(stderr, "[CRASH] Access violation at RIP=0x%llX, fault addr=0x%llX (%s)\n",
             (unsigned long long)ep->ContextRecord->Rip,
             (unsigned long long)fault_addr,

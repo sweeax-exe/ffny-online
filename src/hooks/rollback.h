@@ -28,6 +28,10 @@ void rollback_sound_alloc(void);
 void rollback_sound_free(void);
 /* sub_00029500's first test: 1 when the block was taken from the arena (the audio code asked). */
 int rollback_route_alloc(void);
+/* A dynamic load (sub_0010AC20) begins; `caller` is its return address. */
+void rollback_note_dynamic_load(uint32_t caller);
+/* Called by the crash report (src/main.c) when set: netplay prints the rollback state. */
+extern void (*rollback_crash_cb)(void);
 /* The game heap's free (sub_0002A180), as recomp_lookup_manual hands it out. */
 void rollback_heap_free(void);
 /* The mixer's lock and unlock (0x2E61C0 / 0x2E61C4 point at one of two pairs). */
