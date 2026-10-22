@@ -33,6 +33,7 @@ void rollback_sound_free(void);
 int rollback_route_alloc(void);
 /* A dynamic load (sub_0010AC20) begins; `caller` is its return address. */
 void rollback_note_dynamic_load(uint32_t caller, uint32_t handle);
+unsigned rollback_dynamic_loads(void);      /* how many so far (a clock for slow rollbacks) */
 /* Tests (RECOMP_ROLLBACK_CHECK=1): the game allocator returned block for size bytes; says so when it
  * lies over the tables of the last loaded object, or those tables no longer hold. */
 void rollback_check_alloc(uint32_t caller, uint32_t size, uint32_t block);

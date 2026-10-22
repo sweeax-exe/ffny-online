@@ -293,6 +293,49 @@ static void track_read(void *host, size_t length)
         if (s_guard[a]) first_write((uint32_t)a, game && !t_in_sound);
 }
 
+/* Contiguous frees in a fight (RECOMP_HEAP_RECLAIM, on by default since build 19): a weapon's vertex
+ * and index buffers live in contiguous memory, outside the save states. Given back at once, a block
+ * could go to something new while a load brings back the weapon that still points at it. So they
+ * are held until the fight's tracking ends, when no save that knew them is left. */
+extern int (*xbox_contig_free_defer)(uint32_t addr);
+extern int xbox_ContiguousFreeNow(uint32_t addr);
+static uint32_t s_held_free[4096];
+static unsigned s_nheld, s_held_over;
+static CRITICAL_SECTION s_held_cs;
+static LONG s_held_cs_ready;
+
+static int hold_contig_free(uint32_t addr)
+{
+    int kept = 0;
+    EnterCriticalSection(&s_held_cs);
+    if (s_nheld < sizeof(s_held_free) / sizeof(s_held_free[0])) { s_held_free[s_nheld++] = addr; kept = 1; }
+    else s_held_over++;
+    LeaveCriticalSection(&s_held_cs);
+    return kept;
+}
+
+static void release_contig_frees(void)
+{
+    unsigned i, n;
+    if (!s_held_cs_ready) return;
+    xbox_contig_free_defer = NULL;
+    EnterCriticalSection(&s_held_cs);
+    n = s_nheld;
+    for (i = 0; i < n; i++) xbox_ContiguousFreeNow(s_held_free[i]);
+    s_nheld = 0;
+    LeaveCriticalSection(&s_held_cs);
+    if (n || s_held_over)
+        fprintf(stderr, "[ROLLBACK] %u contiguous block(s) held through the fight given back (%u given back at once: "
+                "too many)\n", n, s_held_over);
+    s_held_over = 0;
+}
+
+static void hold_contig_frees(void)
+{
+    if (!InterlockedExchange(&s_held_cs_ready, 1)) InitializeCriticalSection(&s_held_cs);
+    xbox_contig_free_defer = hold_contig_free;
+}
+
 static void track_stop(void)
 {
     uint32_t p, q;
@@ -306,6 +349,7 @@ static void track_stop(void)
     }
     memset(s_guard, 0, sizeof(s_guard));
     LeaveCriticalSection(&s_track_cs);
+    release_contig_frees();
 }
 
 static int track_start(void)
@@ -326,6 +370,7 @@ static int track_start(void)
     s_reads_told = 0;
     xbox_guest_write_notify = track_read;
     InterlockedExchange(&s_tracking, 1);
+    hold_contig_frees();
     EnterCriticalSection(&s_track_cs);
     for (p = 0; p < HEAP_PAGES; p = q) {
         for (q = p; q < HEAP_PAGES && !s_skip[q] == !s_skip[p]; q++) {}
@@ -434,9 +479,13 @@ void rollback_check_alloc(uint32_t caller, uint32_t size, uint32_t block)
     rollback_check_tables("after an allocation");
 }
 
+static volatile LONG s_dynloads;
+unsigned rollback_dynamic_loads(void) { return (unsigned)s_dynloads; }
+
 void rollback_note_dynamic_load(uint32_t caller, uint32_t handle)
 {
     static unsigned told;
+    InterlockedIncrement(&s_dynloads);
     if (s_tracking && told++ < 200)
         fprintf(stderr, "[ROLLBACK] a dynamic load in the fight (caller %08X, %ld updates in)\n", caller, (long)s_saves);
     if (check_on() && s_tracking && handle >= 0x10000u) {
@@ -897,6 +946,7 @@ void rollback_mixer_unlock_b(void) { if (MEM32(g_esp) == MIX_UNLOCKS) mixer_end(
 int rollback_enabled(void) { return 0; }
 const char *rollback_page_state(uint32_t addr) { (void)addr; return "-"; }
 void rollback_note_dynamic_load(uint32_t caller, uint32_t handle) { (void)caller; (void)handle; }
+unsigned rollback_dynamic_loads(void) { return 0; }
 void rollback_check_alloc(uint32_t caller, uint32_t size, uint32_t block) { (void)caller; (void)size; (void)block; }
 void rollback_check_tables(const char *where) { (void)where; }
 void rollback_sound_context(int on) { (void)on; }

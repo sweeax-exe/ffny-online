@@ -608,6 +608,20 @@ int pc_settings_init(void)
 #else
         setenv("RECOMP_SKIP_RT_SAMPLE", "1", 0);
 #endif
+    /* The 64 MiB contiguous window, where the game keeps textures and vertex data, is a bump
+     * allocator that never frees unless reclaim is on. A few matches into a session it ran dry
+     * ("[CONTIG] arena exhausted", 636 times in a player's log of 2026-10-21) and the game drew
+     * with the buffers it did not get: the announcer word sheet or glow strips full-screen over
+     * the fight, from a won match on, until a restart. Upstream found and fixed the same in
+     * v0.9.1 (vyanhursky/DefJamFFNY-recomp issue #26) by this default; rollback's audio arena
+     * (12 MiB of the same window) makes it matter more. RECOMP_NO_HEAP_RECLAIM=1 keeps the old
+     * behaviour for comparison. */
+    if (!getenv("RECOMP_HEAP_RECLAIM") && !getenv("RECOMP_NO_HEAP_RECLAIM"))
+#if defined(_WIN32)
+        _putenv_s("RECOMP_HEAP_RECLAIM", "1");
+#else
+        setenv("RECOMP_HEAP_RECLAIM", "1", 0);
+#endif
 
     if (env && !_stricmp(env, "none")) {
         g_path[0] = 0;

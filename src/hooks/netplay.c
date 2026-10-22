@@ -2240,6 +2240,7 @@ static void rollback_to(uint32_t f)
     uint16_t fp_cw = g_fp_control_word;
     LARGE_INTEGER freq, t0, t1;
     double ms;
+    unsigned loads_before;
     if (!N.snap[slot].valid || N.snap[slot].step != f || N.updates < N.snap[slot].update ||
         N.updates - N.snap[slot].update > 4 * ROLLBACK_SLOTS) {
         if (N.rb_failed++ < 5)
@@ -2254,6 +2255,7 @@ static void rollback_to(uint32_t f)
     g_last_rb_target = f;
     g_last_rb_from = N.step;
     rollback_crash_cb = rollback_crash_state;
+    loads_before = rollback_dynamic_loads();
     rollback_load(slot);
     rollback_check_tables("right after a load");
     N.step = f - 1;
@@ -2287,6 +2289,12 @@ static void rollback_to(uint32_t f)
     N.rb_steps += depth;
     if (depth > N.rb_deepest) N.rb_deepest = depth;
     if (ms > N.rb_ms_max) N.rb_ms_max = ms;
+    if (ms > 30.0) {        /* a stutter: say how deep, and whether models were loaded in it */
+        static unsigned told;
+        if (told++ < 60)
+            fprintf(stderr, "[ROLLBACK] slow: back %u step(s) in %.1f ms, %u model load(s) in it, step %u\n",
+                    depth, ms, rollback_dynamic_loads() - loads_before, f);
+    }
     N.rb_ms_total += ms;
     if (N.rb_count <= 10 || N.rb_count % 200 == 0)
         fprintf(stderr, "[ROLLBACK] #%u: back to step %u, %u updates again in %.2f ms (now at step %u)\n",
