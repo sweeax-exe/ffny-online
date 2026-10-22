@@ -3442,5 +3442,20 @@
  {
   "start": "0x003D2558",
   "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis that v0.16's discovery no longer finds (imm_ref_target); kept so indirect calls to it resolve as before."
+ },
+ {
+  "start": "0x0004C990",
+  "alias": true,
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis (imm_ref_target) that v0.16 no longer finds; an entry inside 0x0004C96E, seeded as an alias so that function keeps its extent. Reached at runtime (Mac full regression, 2026-10-22)."
+ },
+ {
+  "start": "0x001C2F50",
+  "alias": true,
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis (imm_ref_target) that v0.16 no longer finds; an entry inside 0x001C2EEE, seeded as an alias so that function keeps its extent. Reached at runtime (Mac full regression, 2026-10-22)."
+ },
+ {
+  "start": "0x001C7F60",
+  "alias": true,
+  "note": "Toolkit v0.16 migration (D147): a function of the v0.13 analysis (imm_ref_target) that v0.16 no longer finds; an entry inside 0x001C7E8A, seeded as an alias so that function keeps its extent. Reached at runtime (Mac full regression, 2026-10-22)."
  }
 ]
