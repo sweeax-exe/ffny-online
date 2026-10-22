@@ -116,6 +116,7 @@ int netplay_in_lobby(void);     /* 1 while the session came from netplay_lobby *
  * battle match-type screen that a match's summary leads to). */
 void netplay_sync_point(void);
 void netplay_on_main_menu(void);
+int netplay_match_abandoned(void);  /* the sync point: a player left before the match was set up */
 
 /* Start as the host (create a room) or join `room` (6 characters). `server` is
  * "host" or "host:port" (default port 27777); `name` is shown to the other

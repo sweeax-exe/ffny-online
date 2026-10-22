@@ -132,7 +132,7 @@ static const char *friendly(const char *section, const char *key)
         { "textures", "enabled", "Use HD texture packs" }, { "textures", "packs", "Pack folders" },
         { "textures", "cache_mb", "Texture memory budget (MiB)" }, { "textures", "dump", "Capture source textures" },
         { "textures", "dump_limit", "Maximum new captures" },
-        { "input", "keyboard_player", "Keyboard and mouse play as" }, { "input", "players", "Controllers at start" },
+        { "input", "keyboard_player", "Keyboard and mouse play as" }, { "input", "ports", "Controller ports" },
         { "input", "backend", "Pad backend" }, { "input", "rumble", "Rumble strength" },
         { "input", "rumble_floor", "Weakest rumble pulse" }, { "input", "rumble_min_ms", "Shortest rumble pulse (ms)" },
         { "input", "rumble_on_connect", "Buzz a pad when it connects" },
@@ -830,7 +830,7 @@ static void page_controllers()
     ImGui::TextWrapped("Press buttons and push the sticks to check them. The circles show the sticks after the dead zones below.");
 
     ImGui::SeparatorText("Who plays");
-    settings_group("input", { "keyboard_player", "players", "backend" });
+    settings_group("input", { "keyboard_player", "ports", "backend" });
     ImGui::SeparatorText("Sticks and triggers");
     settings_group("gamepad", { "left_deadzone", "right_deadzone", "trigger_threshold", "button_threshold",
                                 "left_stick", "right_stick" });

@@ -472,11 +472,17 @@ static LONG CALLBACK veh_handler(PEXCEPTION_POINTERS ep)
 
         /* Print native stack return addresses for debugging */
         {
+            /* every word in the next 4 KB of the stack that points into the exe (a scan, so stale
+             * frames show too); scripts/symbolize-host.py names them from the PDB */
             uintptr_t *sp = (uintptr_t *)ep->ContextRecord->Rsp;
-            fprintf(stderr, "  Native stack (first 8 return addrs):\n");
-            for (int i = 0; i < 64 && sp[i]; i++) {
-                if (sp[i] >= 0x140000000ULL && sp[i] < 0x150000000ULL) {
+            HMODULE self = GetModuleHandleW(NULL);
+            int shown = 0;
+            fprintf(stderr, "  Native stack (exe base 0x%llX, words pointing into it):\n", (unsigned long long)(uintptr_t)self);
+            fprintf(stderr, "    [rip] 0x%llX\n", (unsigned long long)ep->ContextRecord->Rip);
+            for (int i = 0; i < 512 && shown < 40; i++) {
+                if (sp[i] >= (uintptr_t)self && sp[i] < (uintptr_t)self + 0x10000000ULL) {
                     fprintf(stderr, "    [%d] 0x%llX\n", i, (unsigned long long)sp[i]);
+                    shown++;
                 }
             }
         }

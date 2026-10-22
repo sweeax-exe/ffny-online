@@ -73,6 +73,7 @@ int netplay_lobby_queue(int *w, int *s, char *t, int n) { (void)w; (void)s; if (
 int netplay_in_lobby(void) { return 0; }
 void netplay_sync_point(void) {}
 void netplay_on_main_menu(void) {}
+int netplay_match_abandoned(void) { return 0; }
 void netplay_on_match_start(void) {}
 void netplay_on_pad_pass(void) {}
 void netplay_on_step(void) {}
@@ -260,12 +261,8 @@ static struct {
     ULONGLONG toast_until;
 } N;
 
-/* RECOMP_ROLLBACK=off (debug-env.txt): wait for every entry, as builds before 17 did. */
-static int rollback_wanted(void)
-{
-    const char *v = getenv("RECOMP_ROLLBACK");
-    return !(v && !strcmp(v, "off"));
-}
+/* Rollback (rollback.h) is on with RECOMP_ROLLBACK=on; otherwise every step waits for every entry. */
+static int rollback_wanted(void) { return rollback_enabled(); }
 
 static BOOL CALLBACK init_once(PINIT_ONCE o, PVOID p, PVOID *c)
 {
@@ -1573,6 +1570,19 @@ void netplay_on_main_menu(void)
         end_hub_match("Match over; back in the room.");
 }
 
+/* At the sync point, before the match is set up: the room's START came, but a player has left
+ * since (the room says so, and the lockstep is off). Then no match is set up at all: the match
+ * is over for this PC and it stays in the menu, instead of starting a fight the other side will
+ * never join and dropping back to the main menu without a word. */
+int netplay_match_abandoned(void)
+{
+    if (!N.lobby || !N.match_live || N.match_seen || N.lockstep) return 0;
+    end_hub_match("The other player left before the fight started.");
+    toast(6000, "The other player left before the fight started.");
+    fprintf(stderr, "[NETPLAY] a player left before the match was set up; it is not started\n");
+    return 1;
+}
+
 /* Unattended sessions for tests: RECOMP_NETPLAY=host or join, RECOMP_NETPLAY_SERVER, and
  * RECOMP_NETPLAY_CODE_FILE, where the host writes its room code once it has one and the
  * guest waits for it (up to a minute). RECOMP_NETPLAY=quick enters the hub, quick-matches
@@ -2167,6 +2177,24 @@ static void rollback_crash_state(void)
     fprintf(stderr, "[ROLLBACK] at the crash: %s, step %u, final %u, update %u, %u rollbacks, the last back to %u from %u, thread %lu%s\n",
             N.resim ? "running steps again" : "a normal update", N.step, N.final_step, N.updates, N.rb_count,
             g_last_rb_target, g_last_rb_from, (unsigned long)GetCurrentThreadId(), N.predicting ? ", predicting" : "");
+    {   /* EAGL's loaded objects (list head 0x3A52A8, next at +4): which one is bad, and its page */
+        uint32_t o = MEM32(0x003A52A8u);
+        int k;
+        for (k = 0; k < 48 && o; k++) {
+            int sane = o >= 0x80003000u && o < 0x82A0D000u;
+            fprintf(stderr, "[ROLLBACK]   loaded object %08X (%s)%s\n", o, rollback_page_state(o), sane ? "" : " NOT A HEAP ADDRESS");
+            if (!sane) break;
+            {   /* dlsym's pointers: +8 string table, +0x10 symbol count, +0x14 symbol table, +0x420 chain, +0x424 flags */
+                static const uint32_t off[] = { 8u, 0x10u, 0x14u, 0x18u, 0x1Cu, 0x420u, 0x424u, 0x42Cu };
+                unsigned j;
+                for (j = 0; j < sizeof(off) / sizeof(off[0]); j++) {
+                    uint32_t v = MEM32(o + off[j]);
+                    fprintf(stderr, "[ROLLBACK]     +%03X = %08X (%s)\n", off[j], v, rollback_page_state(v));
+                }
+            }
+            o = MEM32(o + 4u);
+        }
+    }
     fflush(stderr);
 }
 

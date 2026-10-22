@@ -72,8 +72,8 @@ int main(int argc, char **argv)
     printf("deadzone %d %d trigger %d\n", recomp_settings_get("gamepad", "left_deadzone", -1),
            recomp_settings_get("gamepad", "right_deadzone", -1),
            recomp_settings_get("gamepad", "trigger_threshold", -1));
-    printf("rumble %d players %d keyboard_player %d\n", recomp_settings_get("input", "rumble", -1),
-           recomp_settings_get("input", "players", -1), recomp_settings_get("input", "keyboard_player", -1));
+    printf("rumble %d ports %d keyboard_player %d\n", recomp_settings_get("input", "rumble", -1),
+           recomp_settings_get("input", "ports", -1), recomp_settings_get("input", "keyboard_player", -1));
     printf("a=%s\n", recomp_settings_get_text("keyboard", "a", text, sizeof(text), "?"));
     printf("source_a=%d\n", input_source_from_name(recomp_settings_get_text("gamepad", "a", text, sizeof(text), "")));
     printf("source_b=%d\n", input_source_from_name(recomp_settings_get_text("gamepad", "b", text, sizeof(text), "")));
@@ -149,7 +149,7 @@ def test_defaults_are_valid_and_complete(tool):
     assert out['keyboard'] == 'keyboard rejected 0 empty 0 shared 0'
     assert out['padmap_differs'] == 'padmap_differs 0'
     assert out['deadzone'] == 'deadzone 15 15 trigger 5'
-    assert out['rumble'] == 'rumble 100 players 0 keyboard_player 0'
+    assert out['rumble'] == 'rumble 100 ports 4 keyboard_player 0'
     assert out['a'] == 'a=K, Space, Mouse1'
     # The file written for a first run lists every setting with its help.
     text = ini.read_text(encoding='ascii')
@@ -163,7 +163,7 @@ def test_file_values_load_and_bad_ones_fall_back(tool):
     out, ini = run(tool, INI)
     assert out['keyboard'] == 'keyboard rejected 1 empty 1 shared 0'      # "banana" is not a key: X is unbound
     assert out['deadzone'] == 'deadzone 25 15 trigger 5'
-    assert out['rumble'] == 'rumble 100 players 0 keyboard_player 4'      # 150 clamps to 100; "2" is the fifth choice
+    assert out['rumble'] == 'rumble 100 ports 4 keyboard_player 4'      # 150 clamps to 100; "2" is the fifth choice
     assert out['a'] == 'a=F, Mouse3'
     assert out['source_a'] == 'source_a=2'                                # a = east
     assert out['source_b'] == 'source_b=-1'                               # "nonsense": pc_input keeps the default

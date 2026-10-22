@@ -20,6 +20,9 @@ extern "C" {
 
 #define ROLLBACK_SLOTS 16
 
+/* RECOMP_ROLLBACK=on: rollback is used (build 17 ships it off). */
+int rollback_enabled(void);
+
 /* The audio subsystem's start-up (sub_0003C6E0) begins / the next registry store ends it. */
 void rollback_audio_init_begin(void);
 void rollback_audio_init_end(void);
@@ -32,6 +35,7 @@ int rollback_route_alloc(void);
 void rollback_note_dynamic_load(uint32_t caller);
 /* Called by the crash report (src/main.c) when set: netplay prints the rollback state. */
 extern void (*rollback_crash_cb)(void);
+const char *rollback_page_state(uint32_t addr);
 /* The game heap's free (sub_0002A180), as recomp_lookup_manual hands it out. */
 void rollback_heap_free(void);
 /* The mixer's lock and unlock (0x2E61C0 / 0x2E61C4 point at one of two pairs). */

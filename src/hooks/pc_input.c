@@ -82,8 +82,11 @@ size_t pc_input_settings(RecompSetting *out, size_t max)
         RECOMP_SETTING_RESTART,
         "How the keyboard and mouse play: auto makes them their own player after the pads (player 1 when no pad "
         "is connected); off; merge adds them to player 1's pad; 1 to 4 picks the player.");
-    ADD("input", "players", RECOMP_SETTING_INT, 0, 0, 4, NULL, NULL, RECOMP_SETTING_RESTART,
-        "Controllers the game sees. 0 is one per pad plus one for the keyboard. Raise it to hot-plug pads later.");
+    /* "ports" replaced "players" (default 0) in build 17: four ports let an online room of three or
+     * four play (with fewer, the game waited for a controller in port 3), so every install starts there. */
+    ADD("input", "ports", RECOMP_SETTING_INT, 4, 0, 4, NULL, NULL, RECOMP_SETTING_RESTART,
+        "Controller ports the game sees. 4 lets online rooms of three or four play; 0 is one per pad plus one "
+        "for the keyboard.");
     ADD("input", "backend", RECOMP_SETTING_ENUM, 0, 0, 0, k_backend, "RECOMP_INPUT_BACKEND", RECOMP_SETTING_RESTART,
         "Where pads are read: sdl (DualSense, Switch Pro, Xbox and most others) or xinput (Xbox-style pads only).");
     ADD("input", "rumble", RECOMP_SETTING_INT, 100, 0, 100, NULL, NULL, 0,
@@ -153,7 +156,7 @@ static void build_config(InputHostConfig *cfg)
 
     xbox_HostInputDefaults(cfg);
     cfg->keyboard = modes[mode >= 0 && mode < 7 ? mode : 0];
-    cfg->players = geti("input", "players", 0);
+    cfg->players = geti("input", "ports", 4);
     cfg->use_sdl = geti("input", "backend", 0) == 0;
     cfg->rumble_percent = geti("input", "rumble", 100);
     cfg->rumble_floor = geti("input", "rumble_floor", 60);

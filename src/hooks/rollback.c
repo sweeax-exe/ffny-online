@@ -115,6 +115,18 @@ static volatile LONG s_mix_on;          /* a mixer tick is being watched (see mi
 static HANDLE s_game_thread;
 static ULONG64 s_game_cycles;
 
+/* RECOMP_ROLLBACK=on (debug-env.txt) until rollback ships for everyone; off, nothing of it runs:
+ * no audio arena, no write tracking, no saves. */
+int rollback_enabled(void)
+{
+    static int on = -1;
+    if (on < 0) {
+        const char *v = getenv("RECOMP_ROLLBACK");
+        on = v && !strcmp(v, "on");
+    }
+    return on;
+}
+
 static uint64_t page_hash(uint32_t addr)
 {
     const uint64_t *w = (const uint64_t *)XBOX_PTR(addr);
@@ -128,6 +140,7 @@ void rollback_audio_init_begin(void)
 {
     unsigned p;
     if (s_audio_state) return;
+    if (!rollback_enabled()) { s_audio_state = 2; return; }
     s_boot_hash = (uint64_t *)malloc(HEAP_PAGES * sizeof(uint64_t));
     if (!s_boot_hash) { s_audio_state = 2; return; }
     for (p = 0; p < HEAP_PAGES; p++) s_boot_hash[p] = page_hash(HEAP_LO + p * PAGE);
@@ -316,10 +329,22 @@ static int track_start(void)
 
 void rollback_sound_context(int on) { t_in_sound = on; }
 
+/* For crash reports: how the save states treat the page of a guest address. */
+const char *rollback_page_state(uint32_t addr)
+{
+    uint32_t p;
+    if (addr < HEAP_LO || addr >= HEAP_HI) return "outside the heap";
+    p = (addr - HEAP_LO) / PAGE;
+    if (s_skip[p]) return s_audio_page[p] ? "left alone (audio)" : "left alone";
+    if (s_known[p]) return "saved";
+    if (s_guard[p]) return "unchanged since the reference";
+    return "not tracked";
+}
+
 void rollback_note_dynamic_load(uint32_t caller)
 {
     static unsigned told;
-    if (s_tracking && told++ < 20)
+    if (s_tracking && told++ < 200)
         fprintf(stderr, "[ROLLBACK] a dynamic load in the fight (caller %08X, %ld updates in)\n", caller, (long)s_saves);
 }
 
@@ -580,7 +605,7 @@ static int arena_free(uint32_t a)
 static void arena_start(void)
 {
     if (s_arena_state) return;
-    if (getenv("RECOMP_ROLLBACK") && !strcmp(getenv("RECOMP_ROLLBACK"), "off")) { s_arena_state = -1; return; }
+    if (!rollback_enabled()) { s_arena_state = -1; return; }
     InitializeCriticalSection(&s_arena_cs);
     s_arena = xbox_ContiguousAlloc(ARENA_BYTES, 4096);
     if (!s_arena) { s_arena_state = -1; fprintf(stderr, "[ROLLBACK] no room for the sound engine's arena\n"); return; }
@@ -716,6 +741,8 @@ void rollback_mixer_unlock_a(void) { if (MEM32(g_esp) == MIX_UNLOCKS) mixer_end(
 void rollback_mixer_unlock_b(void) { if (MEM32(g_esp) == MIX_UNLOCKS) mixer_end(); sub_00121C90(); }
 
 #else
+int rollback_enabled(void) { return 0; }
+const char *rollback_page_state(uint32_t addr) { (void)addr; return "-"; }
 void rollback_note_dynamic_load(uint32_t caller) { (void)caller; }
 void rollback_sound_context(int on) { (void)on; }
 void rollback_mixer_lock_a(void) {}

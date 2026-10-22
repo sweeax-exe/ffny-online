@@ -9,7 +9,7 @@ delay and rollback behave as over the internet.
 
     python scripts/play-vs-bot.py                 # 60 ms each way, 10 ms jitter
     python scripts/play-vs-bot.py --lag 90,20
-    python scripts/play-vs-bot.py --no-rollback   # the same, as builds before 17 played
+    python scripts/play-vs-bot.py --no-rollback   # the same without rollback (the default of build 17)
 
 Press START in your window; the room match starts by itself. Close your window to end; the bot and
 the relay stop with it. Logs: logs/mcp/copy0.log.err (yours), copy1.log.err (the bot).
@@ -51,8 +51,7 @@ def main():
         "RECOMP_NETPLAY": "quick", "RECOMP_NETPLAY_SERVER": "127.0.0.1", "RECOMP_NETPLAY_QUICK": "0,2",
         "RECOMP_NETPLAY_LAG_MS": a.lag,
     }
-    if a.no_rollback:
-        common["RECOMP_ROLLBACK"] = "off"
+    common["RECOMP_ROLLBACK"] = "off" if a.no_rollback else "on"
     for i in (0, 1):
         e = dict(base)
         e.update(common)

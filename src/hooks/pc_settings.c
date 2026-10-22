@@ -594,6 +594,16 @@ int pc_settings_init(void)
     supply_runtime_defaults();
     have_root = find_data_root(root, sizeof(root));
     if (have_root) load_debug_env(root);
+    /* Batches that sample a surface the game rendered into draw stale memory on the D3D11 path:
+     * black on some PCs, a white full-screen layer over the fight (and no health bars) on others
+     * (docs/research/hd-white-textures.md B4). Left out by default since build 17, which is what the
+     * black PCs showed; RECOMP_SKIP_RT_SAMPLE=0 in debug-env.txt brings them back. */
+    if (!getenv("RECOMP_SKIP_RT_SAMPLE"))
+#if defined(_WIN32)
+        _putenv_s("RECOMP_SKIP_RT_SAMPLE", "1");
+#else
+        setenv("RECOMP_SKIP_RT_SAMPLE", "1", 0);
+#endif
 
     if (env && !_stricmp(env, "none")) {
         g_path[0] = 0;
