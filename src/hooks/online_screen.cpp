@@ -1159,6 +1159,12 @@ void draw_vote(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
         if (sel) selector(dl, f, x, y, w, 290);
         if (mouse_click(f, x, y, w, 290)) const_cast<Pad &>(pad).a = true;
     }
+    {   // a way out while voting too: the others go back to the room's lobby (relay leaveRoom)
+        float hx = 54;
+        hx += hint(dl, f, hx, 396, "a", "VOTE");
+        hint(dl, f, hx, 396, "b", "LEAVE ROOM");
+    }
+    if (pad.b) { netplay_lobby_leave(); S.page = HUB; say("You left the room."); return; }
     if (pad.a) netplay_lobby_vote(S.vote_sel);
 }
 

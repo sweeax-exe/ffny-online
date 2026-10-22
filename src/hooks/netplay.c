@@ -1003,6 +1003,18 @@ static void on_packet(const uint8_t *b, int len)
             if (N.lobby && (code == 1 || code == 2 || code == 3 || code == 8 || code == 9)) {
                 /* refused, but the session goes on */
                 EnterCriticalSection(&g_cs);
+                /* "not in a room" to a room action (a vote, ready, settings) while this side still
+                 * shows the room: the server let us go and the news was lost, e.g. the other
+                 * player quit during the vote. Its word counts: back to the lobby, or the vote
+                 * screen stays up with no way out (a player's report, 2026-10-22). */
+                if (code == 9 && N.roomv.in_room && N.pend_len && N.pend[5] != T_CREATE &&
+                    N.pend[5] != T_JOIN && N.pend[5] != T_QUICK) {
+                    unsigned version = N.roomv.version;
+                    memset(&N.roomv, 0, sizeof(N.roomv));
+                    N.roomv.version = version + 1;
+                    N.room[0] = 0;
+                    text = "The room is gone (the other player left).";
+                }
                 answered();
                 snprintf(N.roomv.error, sizeof(N.roomv.error), "%s", text);
                 N.roomv.version++;
