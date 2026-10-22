@@ -618,6 +618,14 @@ int pc_settings_init(void)
         if (!strcmp(server, "142.132.178.17") && recomp_settings_reset_to_default("online", "server") > 0 && g_path[0])
             recomp_settings_save(g_path);
     }
+    /* "Skip the launcher at start" left the players' menus (2026-10-22): players who had ticked it
+     * kept asking how to get the launcher back. A player's own settings.ini that still has it is
+     * set back once; a settings file a test names (RECOMP_SETTINGS) keeps it. */
+    if (!env && g_path[0] && recomp_settings_get("launcher", "skip", 0) &&
+        recomp_settings_reset_to_default("launcher", "skip") > 0) {
+        recomp_settings_save(g_path);
+        fprintf(stderr, "[SETTINGS] the launcher shows again at start (the skip setting is gone)\n");
+    }
     if (!g_path[0])
         fprintf(stderr, "[SETTINGS] defaults only (RECOMP_SETTINGS=none)\n");
     else if (read < 0)

@@ -1070,10 +1070,7 @@ static void page_online(UiMode mode)
 
 static void page_general(UiMode mode)
 {
-    ImGui::SeparatorText("Start-up");
-    settings_group("launcher", { "skip" });
-    if (mode == UI_OVERLAY)
-        ImGui::TextWrapped("With the launcher skipped, hold Shift while the game starts, or start it with --launcher, to see it again.");
+    (void)mode;
     ImGui::SeparatorText("In-game overlay");
     {
         RecompSetting *k = find("ui", "overlay_key");
@@ -1386,9 +1383,6 @@ static UiResult draw_launcher(float x, float y, float width, float height)
             ImGui::TextColored(k_gold, "Applies at the next start: %s", restart.c_str());
         else
             ImGui::TextDisabled("Changes are saved as you make them.");
-        ImGui::SetCursorPosX(pad);
-        RecompSetting *skip = find("launcher", "skip");
-        if (skip) setting_widget(skip);
     }
     ImGui::SetCursorPos(ImVec2(width - pad - play_w - quit_w - 12 * u, row + (play_h - 36 * u) / 2));
     if (ImGui::Button("Quit", ImVec2(quit_w, 36 * u))) result.leave = true;
@@ -1461,8 +1455,6 @@ UiResult ui_draw(UiMode mode, float x, float y, float width, float height)
 
     float bw = ImGui::GetFontSize() * 9;
     if (mode == UI_LAUNCHER) {
-        RecompSetting *skip = find("launcher", "skip");
-        if (skip) setting_widget(skip);
         ImGui::SameLine(ImGui::GetWindowWidth() - bw * 2 - ImGui::GetStyle().WindowPadding.x - ImGui::GetStyle().ItemSpacing.x);
         if (ImGui::Button("Quit", ImVec2(bw, 0))) result.leave = true;
         ImGui::SameLine();
@@ -1472,8 +1464,6 @@ UiResult ui_draw(UiMode mode, float x, float y, float width, float height)
         ImGui::PopStyleColor(2);
         if (ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere(-1);
     } else {
-        RecompSetting *skip = find("launcher", "skip");
-        if (skip) setting_widget(skip);
         ImGui::SameLine(ImGui::GetWindowWidth() - bw - ImGui::GetStyle().WindowPadding.x);
         if (ImGui::Button("Close", ImVec2(bw, 0))) result.leave = true;
     }
