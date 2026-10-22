@@ -18,7 +18,7 @@ xboxrecomp v0.13 to upstream v0.16.0 (decision D147).
 | Toolkit fork branch | `vyanhursky/xboxrecomp` `defjam/upstream-v0.16` |
 | Toolkit pin | `32aa980` (v0.16.0 `f0f8a46` plus 15 fork commits) |
 | Mapping of old fork commits to new | `docs/research/toolkit-v016-ledger.md` |
-| CI on the branch | green, run 39813517170 |
+| CI on the branch | green; installers come from the newest green run: `gh run list --branch feat/toolkit-v0.16 --status success --limit 1` (call its id `<run>`) |
 
 **Done on the Mac (M1 Pro):**
 - full regression 18/18 (`regress.py`);
@@ -137,8 +137,8 @@ py -3 scripts/regress.py --preset win-x64-release
 
 ### 4.5 Setup installer
 
-Download `windows-setup-assets` from CI run 39813517170
-(`gh run download 39813517170 -n windows-setup-assets`). Then:
+Download `windows-setup-assets` from CI run `<run>`
+(`gh run download <run> -n windows-setup-assets`). Then:
 1. Install it into a new folder.
 2. Point it at the dump and let it build.
 3. Start the game from the launcher.
@@ -195,8 +195,8 @@ Run it on SteamOS, not in the container; add numpy and pytest the way your setup
 
 ### 5.5 Setup installer
 
-Run `linux-setup-assets` from CI run 39813517170
-(`gh run download 39813517170 -n linux-setup-assets`). Install, build and launch it on the
+Run `linux-setup-assets` from CI run `<run>`
+(`gh run download <run> -n linux-setup-assets`). Install, build and launch it on the
 Deck in Game Mode. Then check that the Deck's controls work as a pad, including rumble.
 
 ## 6. Checks on both platforms
