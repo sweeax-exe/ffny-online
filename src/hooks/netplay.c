@@ -148,6 +148,7 @@ void netplay_crowd_update(void) { sub_00081170(); }
 #define HASH_EVERY    60
 #define STALL_LIMIT_MS 10000        /* mid-fight: a player has gone */
 #define START_LIMIT_MS 90000        /* the first steps: another PC may still be loading the venue */
+#define DECIDED_LIMIT_MS 1000       /* after the KO: a PC that went on ahead is not a lost player */
 #define LOBBY_DELAY   3             /* hub matches: until the delay is agreed (P_RTT) */
 #define DELAY_MIN     2
 #define DELAY_MAX     10
@@ -2069,8 +2070,21 @@ void netplay_on_step(void)
         {
             ULONGLONG now = GetTickCount64();
             if (now - last_send >= 50) { send_steps(target); last_send = now; }   /* the others may be waiting for ours */
-            if (now - waited_since > (need <= (uint32_t)N.delay + 1 ? START_LIMIT_MS : STALL_LIMIT_MS)) {
+            /* The fight decided (KO, time): what follows is the winner's scene and the results, the same
+             * on every PC however they part, and a PC that skips ahead stops sending steps. Waiting the
+             * mid-fight ten seconds there froze the winner's scene and then said the fight would not
+             * count, after it had (Farouk's F9 report 63684c, 2026-10-23). */
+            int decided = N.fighting_seen && MEM32(G_MATCH_PHASE) >= 2u;
+            if (now - waited_since > (decided ? DECIDED_LIMIT_MS :
+                                      need <= (uint32_t)N.delay + 1 ? START_LIMIT_MS : STALL_LIMIT_MS)) {
                 uint32_t u;
+                if (decided) {
+                    fprintf(stderr, "[NETPLAY] the match is decided and player %d went on ahead (step %u): the rest "
+                            "runs on this PC alone\n", late, s);
+                    InterlockedExchange(&N.lockstep, 0);
+                    set_status("The match is over; the rest runs on this PC.");
+                    break;
+                }
                 fprintf(stderr, "[NETPLAY] gave up at step %u waiting for the entries up to %u (final %u, phase %u, "
                         "predicting %d, rollback %d); player %d has:", s, need, N.final_step, MEM32(G_MATCH_PHASE),
                         N.predicting, N.rb_on, late);
