@@ -65,3 +65,49 @@ With both, the analysis lists 18,442 functions; 5 of v0.13's are still absent (n
 613 functions whose extent shrank match a stock v0.16 lift (trailing padding no longer counted). The 42
 addresses `src/recomp_manual.c` names are all function starts (`scripts/check-manual-addresses.py`, run by
 `pipeline.py recomp`). Pruning the restored seeds is later work, one at a time against the regressions.
+
+## Windows results (2026-10-22)
+
+Windows 11, RTX 4070 Ti SUPER, VS 2019 Build Tools (MSVC 14.29), branch at `ada3323`, pin `32aa980`; the
+comparison build is v0.10.7 (`009473a`, toolkit `8589f88`) on the same PC.
+
+| Check | Result |
+|---|---|
+| Toolkit tests, MSVC (`scripts/test-toolkit-msvc.py`) | 826 passed, 20 skipped. CI's Windows job: 844/2. The 18 extra skips are tests that call clang or gcc, which this PC does not have |
+| Native fixtures (all 19 CI runs, Release, Ninja) | 19/19, including `windows_guest_layout`, `memory_regressions`, `kernel_regressions` (slow tests on), `input_host` |
+| Analyze, lift, build `win-x64-release` | Pass. Analyze 16.6 min against 1 min for v0.10.7 (below). 18,440 of 18,446 functions lifted, 0 failed; MSVC build clean |
+| `check-manual-addresses.py` | 42 checked, 0 missing. Run by hand: `recomp.ps1` does not call it, only `pipeline.py recomp` does |
+| Full regression (`logs/regress-20261022-152519.txt`) | 14/14; launcher, overlay, unlockopt and picture skip on Windows by design. Replay hash unchanged (80 records, 1,800 steps); Terrordome 242 s at median 120; combat 27/27; versus 26/26; soak 3/3 |
+| Port unit tests in the MSVC environment | 539 passed, 25 skipped (v0.10.7: 537/25) |
+| Saves | crib and gym load the existing profile; `save/` has no `UDATA`/`TDATA`; `UserData` identical to a copy taken before the run |
+| Missing functions | No `[ICALL] Failed to resolve` and no `[CRASH]` in 21 run logs |
+| HRTF | `RECOMP_APU_HRTF` unset in the shell, user and machine environment; nothing in the launcher, scripts or `settings.ini` sets it |
+| Setup (CI run 39846827103, SHA-256 checked) | Silent install into a new folder: exit 0 in 30.5 min. The installed game reaches the main menu at median 60 with no crash (the issue #72 path) |
+| **Audio clicks** | **Fail.** Below |
+| Play in the Windows launcher | Not run: it needs a person (the scripted launcher check is SDL-only) |
+
+**Audio.** Opening scene, 330 s, four runs per build, alternating, holes from `scripts/audio-holes.py`:
+
+| Build | F8 | FA |
+|---|---|---|
+| migrated | 5 / 367 / 421 / 187 | 0 / 125 / 45 / 44 |
+| v0.10.7 | 9 / 182 / 5 / 5 | 1 / 0 / 0 / 0 |
+
+Three migrated runs have holes through the whole scene (0.6-1.4 a second, per-minute counts flat), and FA
+has them too. v0.10.7's one bad run has its holes in the last minute only. Frame pacing is the same in all
+runs (median 120 presents per 2 s). This is a Windows regression of the migration. It is not fixed here: the
+fix is in the toolkit. On Windows the APU still writes through waveOut with period pacing (slice pacing is
+off on Windows, `apu_core.c`). The suspect is `97a7307`, which took upstream's device-paced output and
+#193's resampler in place of look-ahead 8. The Mac's one high run (147) may be the same effect, less often.
+
+**Analysis time.** The disasm step takes 990 s here (965 s inside Setup) against 30-32 s for the v0.10.6 and
+v0.10.7 Setups. A profile shows 46,514 `probes_as_callback_body` calls, each a full `disassemble_cfg`, 25
+million capstone decodes in all. That is upstream v0.16 code; the fork's only disasm change after
+`f0f8a46` is the alias seeds (`aa00125`). Players' Setup time triples (30.5 min).
+
+**Two alias seeds have no effect.** `0x001F707B` and `0x001FF9B7` are in v0.10.7's dispatch table and
+missing from this lift although `config/seed_functions.json` seeds them. Each sits right after the end of a
+real function, in bytes only tail-jump alias bodies cover (`0x001F705D`, `0x001FF995`), and
+`_pass_seed_aliases` needs a real enclosing body. Both are SEH handler entries. The runtime has no guest SEH
+dispatch, so they are unreachable today. The third missing address, `0x001D5295`, is expected: the lifter now
+extends `0x001D5270` over its inline jump tables.
