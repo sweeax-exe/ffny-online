@@ -213,6 +213,50 @@ static void command(char *line, char *out, size_t size)
         snprintf(out, size, "{\"ok\":true,\"first\":%lld,\"last\":%lld}", now + rel, now + rel + n2 - 1);
         return;
     }
+    if (!strcmp(verb, "memdiff")) {        /* memdiff begin | memdiff end: which 4 KB pages of guest RAM changed */
+        enum { PAGES = 0x04000000 / 4096 };
+        static uint64_t *base;
+        const uint64_t *ram = (const uint64_t *)XBOX_PTR(0);
+        unsigned p, changed = 0, ranges = 0, run = 0;
+        size_t len;
+        if (!base) base = (uint64_t *)calloc(PAGES, sizeof(uint64_t));
+        if (!base) { snprintf(out, size, "{\"ok\":false,\"error\":\"no memory\"}"); return; }
+        if (!strcmp(a1, "begin")) {
+            for (p = 0; p < PAGES; p++) {
+                const uint64_t *w = ram + (size_t)p * 512;
+                uint64_t h = 0x9E3779B97F4A7C15ull;
+                int k;
+                for (k = 0; k < 512; k++) h = (h ^ w[k]) * 0x100000001B3ull;
+                base[p] = h;
+            }
+            snprintf(out, size, "{\"ok\":true,\"pages\":%u}", (unsigned)PAGES);
+            return;
+        }
+        len = (size_t)snprintf(out, size, "{\"ok\":true,\"ranges\":[");
+        for (p = 0; p <= PAGES; p++) {
+            int dirty = 0;
+            if (p < PAGES) {
+                const uint64_t *w = ram + (size_t)p * 512;
+                uint64_t h = 0x9E3779B97F4A7C15ull;
+                int k;
+                for (k = 0; k < 512; k++) h = (h ^ w[k]) * 0x100000001B3ull;
+                dirty = h != base[p];
+                base[p] = h;
+            }
+            if (dirty) { changed++; run++; continue; }
+            if (run) {
+                if (ranges < 300 && len + 48 < size)
+                    len += (size_t)snprintf(out + len, size - len, "%s[\"0x%08X\",%u]", ranges ? "," : "",
+                                            (p - run) * 4096u, run * 4u);
+                ranges++;
+                run = 0;
+            }
+        }
+        if (len + 64 < size)
+            snprintf(out + len, size - len, "],\"range_count\":%u,\"changed_pages\":%u,\"changed_kb\":%u}",
+                     ranges, changed, changed * 4u);
+        return;
+    }
     if (!strcmp(verb, "peek")) {           /* peek <guest address> [bytes<=512] */
         unsigned addr = (unsigned)strtoul(a1, NULL, 0), count = a2[0] ? (unsigned)strtoul(a2, NULL, 0) : 64, k;
         size_t len = 0;

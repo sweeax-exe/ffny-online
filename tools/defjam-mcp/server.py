@@ -363,6 +363,10 @@ TOOLS = [
     {"name": "peek", "description": "Read guest memory: address (e.g. 0x3B92E0), bytes up to 512. Returns hex.",
      "inputSchema": {"type": "object", "properties": {"copy": {"type": "integer"}, "address": {"type": "string"},
                      "bytes": {"type": "integer"}}, "required": ["address"]}},
+    {"name": "memdiff", "description": "Which 4 KB pages of guest RAM change: call with phase 'begin', let the game "
+     "run, then 'end'. Returns the changed ranges [address, KB] and the totals.",
+     "inputSchema": {"type": "object", "properties": {"copy": {"type": "integer"}, "phase": {"type": "string"}},
+                     "required": ["phase"]}},
     {"name": "poke", "description": "Write one aligned 32-bit word of guest memory (tests only).",
      "inputSchema": {"type": "object", "properties": {"copy": {"type": "integer"}, "address": {"type": "string"},
                      "value": {"type": "string"}}, "required": ["address", "value"]}},
@@ -408,6 +412,8 @@ def call(name, a):
         return [text(control(copy, "fe " + a["command"]))]
     if name == "peek":
         return [text(control(copy, "peek %s %d" % (a["address"], int(a.get("bytes", 64)))))]
+    if name == "memdiff":
+        return [text(control(copy, "memdiff " + a.get("phase", "begin"), timeout=30))]
     if name == "poke":
         return [text(control(copy, "poke %s %s" % (a["address"], a["value"])))]
     if name == "close":
