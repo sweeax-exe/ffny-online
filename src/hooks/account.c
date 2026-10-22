@@ -443,6 +443,7 @@ void account_text(char *out, int size)
 
 static char *g_stats;               /* the service's text form; guarded by g_lock */
 static volatile LONG g_stats_busy;
+static volatile LONG g_stats_page;  /* the leaderboard page asked for (10 places each) */
 
 static void fetch_stats_now(void)
 {
@@ -452,7 +453,11 @@ static void fetch_stats_now(void)
     AcquireSRWLockShared(&g_lock);
     memcpy(token, g_token, sizeof(token));
     ReleaseSRWLockShared(&g_lock);
-    status = request(L"GET", L"/api/me/stats?format=text", token, NULL, buf, 16384);
+    {
+        wchar_t path[64];
+        swprintf(path, 64, L"/api/me/stats?format=text&page=%ld", (long)g_stats_page);
+        status = request(L"GET", path, token, NULL, buf, 16384);
+    }
     SecureZeroMemory(token, sizeof(token));
     if (status == 200) {
         AcquireSRWLockExclusive(&g_lock);
@@ -480,6 +485,12 @@ void account_fetch_stats(void)
 }
 
 int account_stats_busy(void) { return g_stats_busy != 0; }
+
+void account_fetch_stats_page(int page)
+{
+    InterlockedExchange(&g_stats_page, page < 0 ? 0 : page);
+    account_fetch_stats();
+}
 
 int account_stats(char *out, int size)
 {
@@ -550,6 +561,7 @@ int account_game_name(char *out, int size) { (void)out; (void)size; return 0; }
 void account_text(char *out, int size) { if (size > 0) out[0] = 0; }
 void account_report_match(const char *json) { (void)json; }
 void account_fetch_stats(void) {}
+void account_fetch_stats_page(int page) { (void)page; }
 int account_stats_busy(void) { return 0; }
 int account_stats(char *out, int size) { (void)out; (void)size; return 0; }
 int account_ranked_ticket(char out[33]) { out[0] = 0; return 0; }

@@ -22,4 +22,8 @@ void defjam_test_crowd_update(void);
 int defjam_test_input_add(int slot, long long first, long long last, unsigned buttons);
 void defjam_test_input_clear(void);
 long long defjam_test_current_step(void);
+void defjam_test_request_save(void);
+void defjam_test_request_load(void);
+long long defjam_test_snap_step(void);
+unsigned long long defjam_test_step_hash(long long step);
 #endif

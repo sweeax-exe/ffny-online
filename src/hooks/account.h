@@ -28,6 +28,7 @@ const char *account_privacy_url(void);
  * the statistics are fetched again a moment later. */
 void account_report_match(const char *json);
 void account_fetch_stats(void);                 /* the statistics and the leaderboard, in the background */
+void account_fetch_stats_page(int page);        /* the same with that leaderboard page (10 places, 0 = top 10) */
 int account_stats_busy(void);
 /* The statistics in the service's text form ("key=value" lines, newest fetch); 0 if none yet. */
 int account_stats(char *out, int size);

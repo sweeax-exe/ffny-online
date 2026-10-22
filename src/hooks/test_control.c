@@ -213,6 +213,20 @@ static void command(char *line, char *out, size_t size)
         snprintf(out, size, "{\"ok\":true,\"first\":%lld,\"last\":%lld}", now + rel, now + rel + n2 - 1);
         return;
     }
+    if (!strcmp(verb, "save") || !strcmp(verb, "load")) {   /* at the start of the next fight step */
+        if (!strcmp(verb, "save")) defjam_test_request_save(); else defjam_test_request_load();
+        snprintf(out, size, "{\"ok\":true,\"saved_step\":%lld}", defjam_test_snap_step());
+        return;
+    }
+    if (!strcmp(verb, "hashes")) {         /* hashes <from step> <to step>: the state hash at each step */
+        long long from = atoll(a1), to = atoll(a2), k;
+        size_t len = (size_t)snprintf(out, size, "{\"ok\":true,\"from\":%lld,\"hashes\":[", from);
+        if (to - from > 600) to = from + 600;
+        for (k = from; k <= to && len + 24 < size; k++)
+            len += (size_t)snprintf(out + len, size - len, "%s\"%016llX\"", k > from ? "," : "", defjam_test_step_hash(k));
+        if (len + 3 < size) { out[len++] = ']'; out[len++] = '}'; out[len] = 0; }
+        return;
+    }
     if (!strcmp(verb, "memdiff")) {        /* memdiff begin | memdiff end: which 4 KB pages of guest RAM changed */
         enum { PAGES = 0x04000000 / 4096 };
         static uint64_t *base;

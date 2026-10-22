@@ -278,10 +278,89 @@ void defjam_test_rng(uint32_t stack)
 }
 
 /* sub_00087700: one simulation step of a live fight is about to run. */
+/* ---- Save states for the rollback groundwork (tests; src/hooks/test_control.c) ----------------
+ *
+ * The fight's simulation state measured with memdiff lives almost entirely in the XBE's .data/.bss
+ * (the fighter records, match globals, the generators); the other pages that change are thread
+ * stacks, TLS and the graphics driver's state, which a restore must not touch. A save copies
+ * SNAP_LO..SNAP_HI at the start of a step, on the game thread; a load copies it back at the start
+ * of the next step and rewinds the step counter. Each step's hash of the region is kept, so a
+ * replay can be compared with the first pass step by step. */
+#define SNAP_LO   0x002D5000u
+#define SNAP_HI   0x003CD000u
+/* RECOMP_TEST_SNAP=full: the whole guest RAM except the main thread's TLS and stack
+ * (0x00700000..0x00F80000), for the experiment that tells whether .data/.bss is enough. */
+#define FULL_LO   0x00010000u
+#define FULL_HI   0x04000000u
+#define KEEP_LO   0x00700000u
+#define KEEP_HI   0x00F80000u
+static int snap_full(void)
+{
+    static int full = -1;
+    if (full < 0) full = getenv("RECOMP_TEST_SNAP") && !strcmp(getenv("RECOMP_TEST_SNAP"), "full");
+    return full;
+}
+#define HASH_RING 4096
+static uint8_t *s_snap;
+static LONG64 s_snap_step = -1;
+static volatile LONG s_req_save, s_req_load;
+static uint64_t s_hash[HASH_RING];
+static LONG64 s_hash_step[HASH_RING];
+
+void defjam_test_request_save(void) { InterlockedExchange(&s_req_save, 1); }
+void defjam_test_request_load(void) { InterlockedExchange(&s_req_load, 1); }
+long long defjam_test_snap_step(void) { return s_snap_step; }
+
+/* The hash of the region as it was at the start of `step` (0 if not recorded). */
+unsigned long long defjam_test_step_hash(long long step)
+{
+    int k = (int)(step % HASH_RING);
+    return step >= 0 && s_hash_step[k] == step ? s_hash[k] : 0;
+}
+
+static uint64_t region_hash(void)
+{
+    const uint64_t *w = (const uint64_t *)XBOX_PTR(SNAP_LO);
+    size_t n = (SNAP_HI - SNAP_LO) / 8, k;
+    uint64_t h = 0x9E3779B97F4A7C15ull;
+    for (k = 0; k < n; k++) h = (h ^ w[k]) * 0x100000001B3ull;
+    return h;
+}
+
+static void snapshot_point(void)
+{
+    if (InterlockedExchange(&s_req_load, 0) && s_snap) {
+        if (snap_full()) {
+            memcpy((void *)XBOX_PTR(FULL_LO), s_snap, KEEP_LO - FULL_LO);
+            memcpy((void *)XBOX_PTR(KEEP_HI), s_snap + (KEEP_HI - FULL_LO), FULL_HI - KEEP_HI);
+        } else
+            memcpy((void *)XBOX_PTR(SNAP_LO), s_snap, SNAP_HI - SNAP_LO);
+        s_step = s_snap_step;
+        fprintf(stderr, "[SNAP] loaded the state of step %lld\n", (long long)s_snap_step);
+    }
+    if (InterlockedExchange(&s_req_save, 0)) {
+        if (!s_snap) s_snap = (uint8_t *)malloc(snap_full() ? FULL_HI - FULL_LO : SNAP_HI - SNAP_LO);
+        if (s_snap) {
+            if (snap_full())
+                memcpy(s_snap, (const void *)XBOX_PTR(FULL_LO), FULL_HI - FULL_LO);
+            else
+                memcpy(s_snap, (const void *)XBOX_PTR(SNAP_LO), SNAP_HI - SNAP_LO);
+            s_snap_step = s_step;
+            fprintf(stderr, "[SNAP] saved the state of step %lld\n", (long long)s_step);
+        }
+    }
+    {
+        int k = (int)(s_step % HASH_RING);
+        s_hash[k] = region_hash();
+        s_hash_step[k] = s_step;
+    }
+}
+
 void defjam_test_step(void)
 {
     int slot;
     if (!defjam_test_observations_enabled() || !s_in_match) return;
+    snapshot_point();
     s_step++;
     {   /* RECOMP_TEST_FAST_KO=<percent>: every fighter fights with that share of its health, so a
          * test match is decided in seconds. Set on the step the fight begins (phase 1; the intro

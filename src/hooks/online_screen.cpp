@@ -424,6 +424,7 @@ struct State {
     bool ranked_pick = false;       // FIGHTERS picks the fighter for a ranked search
     int hub_sel = 0, rooms_sel = 0, settings_sel = 0, fighter_sel = 0, fighter_top = 0, vote_sel = 0;
     int quick_mode = 0;             // index into online_modes
+    int stats_page = 0;             // MY STATS: the leaderboard page
     NetRoomSettings settings;
     bool settings_init = false;
     unsigned long long last_list = 0, start_seen = 0, opened = 0;
@@ -699,7 +700,7 @@ void draw_hub(ImDrawList *dl, const Frame &f, const Pad &pad)
             S.settings_sel = 0;
             S.page = SETTINGS;
             break;
-        case 4: S.page = STATS; account_fetch_stats(); break;
+        case 4: S.page = STATS; S.stats_page = 0; account_fetch_stats_page(0); break;
         case 5: S.page = PLAYERS; netplay_lobby_who(); break;
         case HUB_LEAVE: break;      // handled by the caller (closes)
         }
@@ -714,6 +715,7 @@ struct StatsView {
     int matches = 0, wins = 0, losses = 0, draws = 0, win_rate = 0, streak = 0, best = 0, rank = 0, min = 3;
     int favorite = -1;
     int ranked_rating = 0, ranked_games = 0;    // 0 games: not played ranked yet
+    int board_page = 0, board_pages = 1;        // the leaderboard page shown (10 places each)
     std::vector<std::vector<std::string>> recent, board;
 };
 
@@ -755,6 +757,8 @@ bool read_stats(StatsView &v)
             else if (k == "favorite_name") v.favorite_name = val;
             else if (k == "recent") v.recent.push_back(split_bar(val));
             else if (k == "board") v.board.push_back(split_bar(val));
+            else if (k == "board_page") v.board_page = n;
+            else if (k == "board_pages") v.board_pages = n > 0 ? n : 1;
             else if (k == "ranked") {
                 auto r = split_bar(val);
                 if (r.size() >= 2) { v.ranked_rating = atoi(r[0].c_str()); v.ranked_games = atoi(r[1].c_str()); }
@@ -773,7 +777,7 @@ void big_number(ImDrawList *dl, const Frame &f, float x, float y, const char *va
 
 void draw_stats(ImDrawList *dl, const Frame &f, const Pad &pad)
 {
-    if (pad.x) account_fetch_stats();
+    if (pad.x) account_fetch_stats_page(S.stats_page);
     page_title(dl, f, "MY STATS");
     enum AccountState acc = account_state();
     StatsView v;
@@ -830,9 +834,21 @@ void draw_stats(ImDrawList *dl, const Frame &f, const Pad &pad)
              LEFT, 1.1f);
         text(dl, f, g_title, 12, 64, y + 1, CREAM, line.c_str(), LEFT, 1.0f, 250);
     }
-    // right: the leaderboard
+    // right: the leaderboard, ten places a page (left/right or LB/RB turn the page)
+    if (!account_stats_busy()) {
+        int want = v.board_page;
+        if ((pad.left || pad.lb) && v.board_page > 0) want = v.board_page - 1;
+        if ((pad.right || pad.rb) && v.board_page + 1 < v.board_pages) want = v.board_page + 1;
+        if (want != v.board_page) { S.stats_page = want; account_fetch_stats_page(want); }
+    }
     dl->AddRectFilled(f.p(330, 84), f.p(606, 404), IM_COL32(0, 0, 0, 150));
     text(dl, f, g_title, 20, 344, 92, ORANGE, "LEADERBOARD", LEFT, 1.4f);
+    if (v.board_pages > 1) {
+        char pg[32];
+        snprintf(pg, sizeof(pg), "%s  %d / %d  %s", v.board_page > 0 ? "<" : " ", v.board_page + 1, v.board_pages,
+                 v.board_page + 1 < v.board_pages ? ">" : " ");
+        text(dl, f, g_title, 14, 468, 386, account_stats_busy() ? GREY : CREAM, pg, CENTER, 1.1f);
+    }
     text(dl, f, g_title, 10, 592, 100, GREY, "MOST WINS", RIGHT, 1.0f);
     if (v.board.empty())
         text(dl, f, g_title, 12, 344, 130, GREY, "Nobody yet. Three online matches signed in put you on it.", LEFT,
@@ -843,7 +859,7 @@ void draw_stats(ImDrawList *dl, const Frame &f, const Pad &pad)
         float y = 124 + i * 27;
         bool me = e[1] == v.name;
         if (me) dl->AddRectFilled(f.p(334, y - 3), f.p(602, y + 21), IM_COL32(255, 168, 26, 60));
-        ImU32 col = i == 0 ? IM_COL32(255, 205, 60, 255) : me ? CREAM : WHITE;
+        ImU32 col = e[0] == "1" ? IM_COL32(255, 205, 60, 255) : me ? CREAM : WHITE;
         text(dl, f, g_title, 16, 362, y, col, e[0].c_str(), RIGHT, 1.2f);
         text(dl, f, g_title, 15, 372, y + 1, col, e[1].c_str(), LEFT, 1.2f);
         std::string wl = e[2] + "-" + e[3];
