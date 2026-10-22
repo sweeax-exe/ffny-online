@@ -189,7 +189,9 @@ static LRESULT CALLBACK translator_wndproc(HWND h, UINT msg, WPARAM wp, LPARAM l
         break;
     case WM_KEYDOWN:
         if (wp == VK_F9 && !(lp & (1 << 30))) {     /* a picture report: see capture_backbuffer */
-            InterlockedExchange(&s_report_shot, 1);
+            extern int bug_report_f9(void);         /* bug_report.c: one a minute */
+            if (bug_report_f9())
+                InterlockedExchange(&s_report_shot, 1);
             return 0;
         }
         if (wp == VK_F11 && !(lp & (1 << 30))) {

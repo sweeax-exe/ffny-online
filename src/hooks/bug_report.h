@@ -15,6 +15,9 @@ void bug_report_send(const char *kind, const char *log_path, const char *picture
 /* A line for the screen while a report is on its way and for a few seconds after; 0 otherwise. */
 int bug_report_toast(char *out, int size);
 int bug_report_busy(void);
+/* F9 pressed: 1 to take the picture and send it now, 0 while the last one is under a minute old
+ * or still on its way (a toast says so). */
+int bug_report_f9(void);
 
 /* After a crash: the previous run's log, when it ended in a crash report and the launcher has not
  * offered it yet (1, path in out). bug_report_crash_seen marks it offered, sent or not. */

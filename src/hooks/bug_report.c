@@ -30,6 +30,7 @@
 #define LOG_HEAD (512 << 10)
 #define LOG_TAIL (2560 << 10)
 #define TOAST_MS 8000
+#define COOLDOWN_MS 60000
 
 typedef struct { char *p; size_t n, cap; } Buf;
 
@@ -276,6 +277,25 @@ void bug_report_send(const char *kind, const char *log_path, const char *picture
 
 int bug_report_busy(void) { return s_busy != 0; }
 
+/* F9 pressed: whether to take the picture and send it now. One report a minute from a game; the
+ * service has its own limit per address (accounts/reports.go). Says on screen either way. */
+int bug_report_f9(void)
+{
+    static ULONGLONG next_allowed;
+    ULONGLONG now = GetTickCount64();
+    char text[96];
+    if (s_busy) return 0;               /* the toast already says it is on its way */
+    if (now < next_allowed) {
+        snprintf(text, sizeof(text), "Please wait %u s before the next bug report.",
+                 (unsigned)((next_allowed - now + 999) / 1000));
+        set_toast(text, 1);
+        return 0;
+    }
+    next_allowed = now + COOLDOWN_MS;
+    set_toast("Bug report: taking a picture...", 0);
+    return 1;
+}
+
 /* The run before this one, if it ended in a crash report (main.c) not offered yet. Logs are
  * named by their start time (pc_settings.c), so the newest other one is the previous run. */
 int bug_report_last_crash(char *out, int size)
@@ -331,6 +351,7 @@ void bug_report_send(const char *kind, const char *log_path, const char *picture
 { (void)kind; (void)log_path; (void)picture_path; }
 int bug_report_toast(char *out, int size) { (void)out; (void)size; return 0; }
 int bug_report_busy(void) { return 0; }
+int bug_report_f9(void) { return 0; }
 int bug_report_last_crash(char *out, int size) { (void)out; (void)size; return 0; }
 void bug_report_crash_seen(const char *log_path) { (void)log_path; }
 
