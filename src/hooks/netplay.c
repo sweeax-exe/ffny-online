@@ -135,7 +135,7 @@ void netplay_crowd_update(void) { sub_00081170(); }
 #define P_STEPS       4     /* u32 match, u32 last step, u8 count, count x 32 bytes */
 #define P_HASH        5     /* u32 match, u32 step, u32 hash */
 #define P_RTT         6     /* hub: u32 START seed, u16 this PC's ping to the relay in ms */
-#define LOCKSTEP_VERSION 2
+#define LOCKSTEP_VERSION 3     /* 3: build 19, rollback and contiguous reclaim on (memory laid out differently) */
 
 #define MAXP          NETPLAY_MAX_PLAYERS
 #define PAD_TABLE     0x003B8F48u
