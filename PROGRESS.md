@@ -10,6 +10,7 @@
 
 | Area | State | Notes |
 |---|---|---|
+| Windows start-up and setup fixes (D148) | ⏳ v0.10.7 prepared, not published | Branch `release/0.10.7`: PR #76 (issue #72: reject incomplete Windows memory layouts, toolkit `8589f88`) and PR #80 (issue #81: `/INCREMENTAL:NO` link). Windows 11 / RTX 4070 Ti SUPER / VS 2019 (MSVC 14.29): full regression 12 of 14 (combat and versus failed only `audio.dry_queue`, passed on stock v0.10.6 and on two reruns), quick 5/5 on the final build, units 537 passed, native placement fixture and the memory/settings/texture/kernel fixtures pass, 10-boot soak 10/10, published v0.10.6 setup then this setup (Clean Update, bundled): exit 0, 125-file data inventory identical. Neither reporter has confirmed; neither crash reproduced here. PR #73 deliberately left out (owner: bundle with the mod release). |
 | Launcher redesign (D138-D140, D142-D145) | ✅ v0.10.6 stable/latest | PR #58, main `af0c03c` integrated; brighter slider tracks, Windowed 1920×1080 / Auto / 2× defaults, bounded render-scale help and usable 250% compact controls. Native fresh/saved settings and Auto boot pass; final quick 5/5 (units 528/32 skip/one slow deselected), picture/overlay 2/2. Saved preferences preserved; owner confirms physical controller works. PR #58 merged 2e8ec40 after candidate CI 28/28; v0.10.6 promoted stable/latest as Improved Game Launcher (D145); release run 39452474210 30/30, nine asset hashes/provenance verified and unchanged. Refreshed Home/Advanced docs images included; Windows/Deck GUI acceptance pending. |
 | Plan reviewed | ✅ | See `docs/01-plan-review.md` |
 | Source dump located | ✅ | Two images of the owner's disc: XISO (3.0 GB) and full-disc ISO (7.8 GB) |
@@ -244,6 +245,7 @@
 
 | D145 | 2026-10-20 | Promote existing v0.10.6 to stable/latest and name it **Improved Game Launcher**. Update release title/notes, README/gallery and handover; keep the exact tag and all nine verified assets. | Owner: "You can release 0.10.6 as a stable release now - Call it "Improved Game Launcher" not "Brick and Paper"". API confirms stable/latest and unchanged asset IDs, sizes and digests. No rebuild or new gameplay test; detailed device results are not inferred from this approval. |
 | D146 | 2026-10-20 | Linux: stop baking the build-time Vulkan loader path into the game (issue #77). Keep `DEFJAM_VULKAN_LIBRARY` (SDL_HINT_VULKAN_LIBRARY) on macOS only and let SDL load `libvulkan.so.1` on Linux. | A container build saves Arch's 64-bit `/lib/libvulkan.so`; on Fedora-family hosts (Bazzite) `/lib` is 32-bit, so SDL failed with wrong ELF class and the game ran with no window (SteamOS matches Arch, so the Deck worked). The system loader resolves the soname for the right architecture on every distribution; `ldd` setup check cannot see a dlopen path. Alternatives rejected: rewrite the path per host (fragile), a launcher env var (hides the bug, misses direct runs). |
+| D148 | 2026-10-22 | Cut v0.10.7 as a regular (not pre-) release containing only the pending Windows fixes: PR #76 (toolkit pin `8589f88`) and PR #80, integrated on `release/0.10.7`. PR #73 (long texture-pack lists, toolkit `72bec86`) is not included; the owner will bundle it with the mod release. PR #85 (toolkit v0.16, D147) and the draft mod PRs are out of scope. The skip-intro native fixture's synthetic memory is enlarged so MSVC no longer faults on it (test only; it failed on v0.10.6 too). | Owner, 2026-10-22: include #80, #76 and the setup update path; not #73; a regular release; run the regression only on failures, then on the candidate. Releasing before the reporters confirm is the owner's call (the #76 body asked to hold). D147 is reserved by PR #85. |
 
 D138–D140 were allocated independently on main and the launcher branch. Their rows retain both records, labelled by branch, so existing decision references keep their meaning; no identifiers were renumbered. D143–D144 were also allocated independently on the issue72 branch; its rows retain the branch label, and their existing references keep that meaning.
 
@@ -335,9 +337,6 @@ defjam-recomp/
 
 > Recent entries only; older entries remain unchanged in the local `docs/worklog/` archive.
 
-- 2026-10-20 10:28 — D142 launcher follow-up: main af0c03c integrated (v0.10.5 fixes preserved, concurrent D138-D140 labelled); slider-only contrast, Windowed 1920×1080 / Auto / 2× first-run/reset defaults, render-height help and viewport-bounded tooltip. Native new/saved settings + Auto boot and 200% narrow help verified; all disposable saves restored. Final quick 5/5 logs/regress-20261020-102601.txt (units 528 pass/32 skip/one slow deselected), picture/overlay 2/2 logs/regress-20261020-102746.txt; Swift wrappers type-check; hygiene 430/0. PR #58 remains for playtest, no merge/tag/release.
-- 2026-10-20 10:57 — D143: extra 640×480/250% QA after 7fac946 CI 28/28 could not reach Render Scale (logs/run-20261020-103627.log.err; triage: normal prelaunch quit, body crowded by chrome). Compact header/padding/footer and viewport-fitted help fixed; semantic hover added for stable native checks. 100/200/250% controls/help/Back pass, all disposable save roots restored. Final quick 5/5 logs/regress-20261020-105429.txt (528 units/32 skip/one slow deselected), picture/overlay 2/2 logs/regress-20261020-105615.txt; hygiene 430/0. PR #58; no merge/tag/release.
-- 2026-10-20 11:45 — D144: owner confirms controller works, authorizes Deck beta and README/docs screenshot replacement. Prepared v0.10.6 prerelease (v0.10.5 stays latest), rebuilt version-only source, captured real native Home/Advanced with disposable data/save guard; replaced launcher.png, added launcher-advanced.png and pinned exact UI-only hashes. Front-page README/player guide/gallery refreshed; final units 529 passed/32 skipped/one slow deselected, 62 local docs links valid, source hygiene 432/0. Initial unit run overlapped the final image/hash replacement (one fingerprint failure); rerun after finalization passed. Release/CI/publication pending.
 - 2026-10-20 12:01 — D144: PR #58 merged 2e8ec40 after candidate 4a4d74f CI 28/28 (39451428303); local/remote branch cleaned, v0.10.6 tagged, check-release 432/0. Source release 39452474210 passes 30/30; nine game-free setup/checksum/provenance assets downloaded, every GitHub digest verified, installer checksums/provenance/source/toolkit/version agree. Published GitHub prerelease/latest=false; v0.10.5 remains latest. New Home/Advanced captures replace older launcher; Home on front README and guide, exact fingerprints pinned. Mac controller owner-accepted; Deck/Windows GUI acceptance pending. No game binary distributed.
 - 2026-10-20 21:30 — D146, issue #77: Linux player gets no window (sound and pad work), `Failed loading /lib/libvulkan.so: wrong ELF class: ELFCLASS32`. The baked SDL Vulkan hint (CMake `Vulkan_LIBRARY`) is now macOS-only; Linux uses SDL's `libvulkan.so.1`. New unit test pins it; Linux setup and setup-engine tests 55 passed/17 skipped; `compile-game-sources.py` on macOS 31/31 with the hint still defined. Branch `fix/linux-vulkan-loader`; a game-free Linux setup from its CI goes to the reporter on #77.
 - 2026-10-20 22:13 — D145: owner authorized v0.10.6 stable promotion and name Improved Game Launcher. Updated GitHub title/notes, prerelease=false/latest=true; API confirms latest v0.10.6, same release ID, tag 2e8ec40 and all nine asset IDs/sizes/digests. README/gallery/handover beta wording removed; no rebuild, tag move, asset replacement or game run. Receipts logs/launcher-review/stable-20261020/{before,after,latest}.json.
@@ -346,34 +345,18 @@ defjam-recomp/
 
 - 2026-10-20 20:22 — Owner requested a submitted PR and explicitly deferred release until reporter confirmation. Opened fork toolkit PR #3 targeting defjam/audio-fix (not upstream). Submitted parent PR #76, focused integration on current main7bb4bdf: published e818066 pin, permanent Windows/POSIX placement fixture CI, issue72 research/state only; original Windows candidate9e4f805/artifact unchanged. Windows candidate checks passed; integration PR CI will validate current-main combination. Branch-labelled concurrent D143/D144 decisions retained, beta handoff preserved. No merge/tag/release.
 - 2026-10-21 08:53 — Issue72 new reporter logs diagnosed as setup version mismatch, not new runtime crash: correct candidate9e4f805/e818066 stops at policy before rebuilding (5-line attachment51061AB7); older attachment2778FFCD is successful0.10.1 in default AppData, original0.10.5 was elsewhere. Posted clarification6316443011: Clean Update + bundled offline for selected0.10.1, or original0.10.5 folders + rebuild; no uninstall/new artifact needed. Policy checks reproduce refusal/update success; existing tests72pass/1skip. Separate PR76 Ubuntu standalone fixture link missing libm/feclearexcept fixed in published test-only toolkit8589f88; Mac fixture passes with shared-memory access. Integration pin/CI updated; runtime unchanged; PRs unmerged/release hold persists. Evidence logs/issue72/followup-20261021/.
+- 2026-10-22 12:20 — D148: v0.10.7 (Windows fixes) prepared on `release/0.10.7` = main a0c9109 + PR #80 (`/INCREMENTAL:NO`) + PR #76 (toolkit `8589f88`, checked memory layout); PR #73 left out by the owner. First Windows run since 2026-10-11 (RTX 4070 Ti SUPER, VS 2019 MSVC 14.29). Full regress 12/14, 4 skipped by design (SDL launcher/Vulkan overlay checks): combat and versus failed only `audio.dry_queue` (10, 23 dry), passed on stock v0.10.6 (27/27, 26/26) and on two reruns of the candidate. Quick 5/5 on the final build. Units 537 passed/25 skipped under the MSVC environment (was 1 failure, also on v0.10.6: `test_skip_intro_and_unlock_can_be_enabled_together`, 8 KB synthetic guest memory vs a store at 0x39C1DA that MSVC if-converts; fixture memory enlarged). Native fixtures windows_guest_layout, memory_regressions, settings, texture_pack, kernel_regressions pass. 10-boot soak 10/10, but every boot got RAM at 0x142B50000 (no layout variance here). Setup: published v0.10.6 setup installed from scratch (exit 0, no LNK1000 on this toolchain), then the 0.10.7 setup Clean Updated it with `--bundled-only` (exit 0, 125-file data inventory byte-identical, installed game boots to Game.StartMainMenu, exe 26,620,416 bytes with no .ilk). Windows launcher renders (v0.10.7, screenshot only). Note: `scripts/triage.py` raises UnicodeEncodeError on a cp1252 console (set PYTHONIOENCODING=utf-8). Logs: logs/regress-full-candidate.log, logs/regress-quick-final.log, logs/soak10.log, ../defjam-setup-test/logs.
 
 ## 7. Hand-off
 
-**v0.10.6 is stable/latest — Improved Game Launcher** (D145), owner-approved October 20:
-https://github.com/vyanhursky/DefJamFFNY-recomp/releases/tag/v0.10.6
-Promoted the existing prerelease; release ID, tag `2e8ec40c93fe309ef0cdba5d4e3915e18f24976e`
-and all nine asset IDs/sizes/digests are unchanged. API confirms prerelease=false,
-draft=false and Latest=v0.10.6. Updated title/notes and README/gallery/handover wording.
-No rebuild or new tag/assets; no new gameplay tests for this metadata/docs-only promotion.
-Before/after/latest receipts: `logs/launcher-review/stable-20261020/{before,after,latest}.json`.
+**v0.10.7 (Windows fixes) is PREPARED on `release/0.10.7`, not merged, tagged or published** (D148). Evidence is in
+`docs/releases/v0.10.7.md` and the Windows row of section 0. Next steps, in order:
+1. Push `release/0.10.7`, open the PR, wait for CI. The owner merges (the `gh pr merge` call is blocked for the agent).
+2. `git tag -a v0.10.7` on the merge commit, push the tag; the tag workflow makes the draft; check the three Windows assets
+   against GitHub digests and `check-setup-assets`; the owner publishes (regular release, latest).
+3. After publishing: ask the #72 and #81 reporters to test v0.10.7; PRs #76 and #80 close with the merge; #73 stays open for the mod release.
+Worktrees `code/defjam-release-0.10.7` and `code/defjam-baseline-0.10.6` and the throw-away install `code/defjam-setup-test` can be removed after the release.
 
-Existing validation remains: candidate CI 28/28 (39451428303), tagged release 30/30
-(39452474210), source hygiene 432/0, nine setup/checksum/provenance assets downloaded and verified.
-Native Mac quick 5/5, picture/overlay 2/2, 100/200/250% UI and fresh/saved defaults checks pass.
-Version/media units 529 passed/32 skipped/one slow deselected. Earlier full run remains 16/18
-(host-stall audio underrun, retry27/27; historical replay callback D108 despite exact records).
-Keep those limits; do not claim a new full regression or detailed Deck acceptance from release approval.
 
-Settings: new/reset Windowed 1920×1080 / Widescreen Auto / 2×, VSync on; saved preferences preserved.
-Slider contrast, render-resolution help, Home/Advanced shared settings and Setup/pack invariants
-are in `docs/agent/launcher-handoff.md`; implementation evidence in
-`docs/research/launcher-ui-implementation-2026-10-19.md`. README and guides show current Home/Advanced;
-the UI-only exports stay hash-pinned. Mac appearance/controller owner-accepted. More detailed
-Deck/Windows GUI, real pack/Setup utility and gameplay feedback can still be collected.
-
-Use stable Linux setup in Desktop Mode: existing install/data folders, Clean Update, Bundled or Latest.
-Beta users already have the same installers/game version; promotion alone needs no reinstall.
-Keep launcher worktree `/Users/vlad/.codex/worktrees/launcher-redesign/DefJamFFNY-recomp` and
-`build/Def Jam Launcher Playtest.app`; owner continues in this chat. Finish/merge the docs-only
-promotion record after its CI passes, then prune its merged branch. Earlier Windows/F2/scene-load/
-audio backlog remains in §5 and `docs/known-issues.md`.
+Still open elsewhere: v0.10.6 is the current published release (stable/latest, D145); issue #72 and #81 reporters have not confirmed
+any fix; PR #73 (D142), #82/#62 (mod manager, draft) and #85 (toolkit v0.16, D147, draft) are untouched by this release.
