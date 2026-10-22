@@ -159,7 +159,10 @@ if(DEFJAM_BUILD_GAME)
         # identical function bodies together, which it otherwise does freely here: thousands of lifted
         # functions translate to byte-identical code, and folding makes a crash report name whichever of
         # them won the merge rather than the one that ran.
-        target_link_options(${PROJECT_NAME} PRIVATE /DEBUG /MAP:${CMAKE_BINARY_DIR}/defjam_recomp.map
+        # /INCREMENTAL:NO: CMake gives RelWithDebInfo "/debug /INCREMENTAL", and link.exe's incremental
+        # linker can crash on an image this large (LNK1000, internal error during IncrCalcPtrs). The setup
+        # builds from scratch, so an incremental link has nothing to reuse (upstream v0.10.7, issue #81).
+        target_link_options(${PROJECT_NAME} PRIVATE /DEBUG /INCREMENTAL:NO /MAP:${CMAKE_BINARY_DIR}/defjam_recomp.map
                             /DYNAMICBASE:NO /OPT:NOICF)
     endif()
     # Debug-only diagnostics (toggle from the preset or command line)
