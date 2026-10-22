@@ -384,14 +384,29 @@ static DWORD remote_slot_state(int slot, XBOX_INPUT_STATE *state)
     return ERROR_SUCCESS;
 }
 
+/* A hub match in lockstep: the title reads its pause (START) straight from the controllers, not
+ * from the agreed inputs, so a press paused one game of the room only (and the other PCs saw it
+ * on that player's port, through the live pads, and opened the pause there as that player): the
+ * games parted, or a player kept everyone waiting. A port that read as unplugged mid-fight brought
+ * up "Controller Disconnected" on one PC the same way. While a hub match runs, START reaches no
+ * controller and every port reads as plugged in (players' Discord reports, 2026-10-22). */
+static void fight_input(void)
+{
+    static LONG on = -1;
+    LONG want = N.lobby && N.lockstep;
+    if (InterlockedExchange(&on, want) != want)
+        xbox_HostInputSetNetplayFight(want ? 0x0010 : 0);   /* the START button */
+}
+
 static void assign_input(int on)
 {
     unsigned mask = 0;
     int i;
-    if (!on) { xbox_HostInputSetNetplay(0, 0, 0, NULL); return; }
+    if (!on) { xbox_HostInputSetNetplay(0, 0, 0, NULL); fight_input(); return; }
     for (i = 0; i < N.players; i++)
         if (i != N.pos) mask |= 1u << i;
     xbox_HostInputSetNetplayMulti(1, N.pos, mask, remote_slot_state);
+    fight_input();
 }
 
 static void reset_remote_pads(void)
@@ -1780,6 +1795,7 @@ void netplay_on_step(void)
 {
     uint32_t s, target, k;
     ULONGLONG waited_since, last_send;
+    fight_input();              /* also after a fight went on offline */
     if (!N.lockstep) return;
     /* RECOMP_ONLINE_CROWD=off (tests only): the spectators cannot touch the fight. Their animation
      * differs between the PCs (it starts while the match loads, at host timing) and reaches the
