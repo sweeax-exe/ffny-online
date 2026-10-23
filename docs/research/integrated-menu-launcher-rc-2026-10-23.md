@@ -29,8 +29,8 @@ from current released v0.10.7; this is an untagged RC, not a stable release.
   installed testing versions. Helper tests cover selection/view/install behavior.
 - macOS image creation sizes the temporary filesystem from source allocation plus
   128MiB metadata/headroom and reports free disk space. This gives hdiutil deterministic
-  filesystem headroom after the prior no-space failure; successful full packaging
-  CI remains required to confirm resolution.
+  filesystem headroom after the prior no-space failure; CI now passes packaging
+  on all three platforms.
 - Catalogue source includes RC2 with exact immutable R2 URL/size/hash, capabilities,
   expansion bounds and optional Faithful order recommendations. Runtime minimum
   0.10.8 plus wide-v1 capability prevents offering it on existing released builds.
@@ -40,7 +40,7 @@ from current released v0.10.7; this is an untagged RC, not a stable release.
   still fails closed. This avoids two owner signing approvals merely to publish
   an empty catalogue and then its first mod. Owner approval is never bypassed.
 
-## Validation in progress
+## Validation
 
 - Native combined build succeeds with DEFJAM_MOD_WIDE=1.
 - Fast units589pass/32skip/1slow deselected with normal setup-cache/process access.
@@ -49,10 +49,9 @@ from current released v0.10.7; this is an untagged RC, not a stable release.
 - Real RC2 validates through catalogue archive parser:157 texture mappings and
   textures-v1/wide-v1 capabilities. Full public bytes/hash/range verification is
   retained in the R2 upload report.
-- Full serial native regression, synthetic native manager/testing-channel tours,
-  protected catalogue publication, actual hosted native launcher installation
-  and CI/Windows artifact receipts will be appended when complete. Do not treat
-  these pending gates as passed.
+- Completed serial regression, manager tours, platform CI and Windows artifact
+  verification are detailed below. Actual hosted installation and Play also pass
+  against the owner-approved live catalogue.
 
 ## Windows testing procedure
 
@@ -79,9 +78,9 @@ No ordinary save/settings or restored artwork is modified by candidate tests.
 
 - Catalogue source: d1f8e796c32b8027f05d2dd70ca2aa8325a8abec, catalogue PR1 merged.
 - Protected publish run: https://github.com/vyanhursky/DefJamFFNY-mods/actions/runs/39996850444.
-  Download verification, archive validation and malware scan pass; signing waits
-  for the owner-selected catalogue-release approval. The agent does not approve
-  its own trusted publication.
+  Download verification, archive validation and malware scan pass. Vlad approved
+  the protected catalogue-release deployment; signing and Pages publication
+  completed successfully at 2026-10-23 21:17UTC. No approval boundary was bypassed.
 - Local native build: logs/integrated-rc-build-v0108.txt.
 - Full serial regression: logs/integrated-rc-regression.txt, using the preserved
   disposable mod-manager-native/data fixture in the manager worktree.
@@ -127,10 +126,10 @@ files match the tested tree byte for byte; build certification remains valid.
 
 Four focused native manager tours pass: synthetic update/shared order,820x560
 at250% text, interrupted recovery preserving skip=true, and explicit testing
-channel installation of2.0.0-rc1. All exit0 and restore saves byte-identical.
+channel installation of2.0.0-rc1. All exit 0 and restore saves byte-identical.
 Receipts/captures: logs/integrated-rc-native-manager/launcher-receipts.json;
 testing and large-text captures inspected. This does not substitute for actual
-signed hosted RC2 installation, which still waits for catalogue approval.
+signed hosted RC2 installation, which is checked separately below.
 
 ## Platform CI and Windows candidate
 
@@ -138,7 +137,7 @@ signed hosted RC2 installation, which still waits for catalogue approval.
 passes29/29, including Windows native lock/bridge fixtures, Windows/Linux/macOS
 setup builds, runtime fixtures and source hygiene. Both prior failed CI gates
 are resolved. Game PR91 is conflict-free with main; no stable game release/tag
-has been made. The real hosted-install gate remains pending owner approval.
+has been made. The real hosted-install gate is checked separately below.
 
 [Windows game-free setup artifact](https://github.com/vyanhursky/DefJamFFNY-recomp/actions/runs/40003181247/artifacts/12521984699),
 windows-setup-assets, contains DefJamSetup-0.10.8-windows-x64.exe, its checksum and
@@ -172,13 +171,48 @@ and byte-identical save restoration. Main-menu montage and loading capture
 inspected locally. Receipt logs/integrated-rc-wide/receipts.json, corrected
 loading log logs/run-20261023-113657.log.err; no new artwork was generated.
 
-## Remaining manual gate
+## Owner-approved live publication
 
-The protected catalogue-release job in publish39996850444 is still waiting for
-the owner. On its Actions page choose Review deployments, select catalogue-release
-and Approve and deploy. This is the owner's chosen signing boundary. After it
-publishes, verify the actual index/signature with the client's key pin and run
-the real hosted native launcher installation/enable/order/offline-reopen utility,
-then launch the game from that managed installation. Do not call this complete
-launcher-only acceptance or Windows-ready until that final gate is verified.
-The previous manual-download menu instructions remain interim history only.
+Vlad approved catalogue-release deployment 39996850444. Both verify and publish
+jobs succeeded; the live index and detached signature are available at the
+client's default GitHub Pages URL. Client verification with the unchanged pinned
+public key accepts revision 1, issued 2026-10-23 17:46:17UTC and expiring 2026-11-22
+17:46:17UTC. The RC2 record binds the exact 421563157-byte immutable R2 archive
+and SHA256 43bbb22cd14197091143623551f350a0b7ff622f0efccb1da058f491e7157634.
+Republish with owner approval before expiry to keep new downloads available;
+installed packs and offline play remain usable.
+
+Game PRs17/62/73/82 are closed as superseded by the single draft PR91. No game
+PR was merged, stable release tagged, or texture asset committed.
+
+## Real hosted launcher acceptance — passed
+
+From a new disposable data root, scripts/test-hosted-menu-launcher.py exercised
+native Mods controls against the production URL and unchanged client trust pin.
+No local archive, synthetic catalogue or substitute key was supplied. Refresh
+accepted signed revision 1; Show testing versions exposed RC2; Download and install
+fetched 421,563,157 bytes from R2 and installed the stable menu-ui-hd-wide folder.
+All 326 installed files subsequently matched their recorded SHA256 values.
+
+Enablement appended the menu pack after both local Faithful components. Reopening
+with an unavailable network proxy preserved the enabled order. The native UI
+reports 157 textures overridden by menu-ui-hd-wide. All four launcher tours exit 0
+and restore saves byte-identical. Receipts/captures remain private at
+logs/hosted-menu-launcher-20261023-141908/receipt.json and installed-hash-receipt.json.
+
+A separate actual native Play click from the same managed settings starts the
+game at 32:9 with no texture-root or pack-list environment overrides. Press Start
+renders at 1707x480; metadata records 45 wide anchors/17 stretch entries and 73 wide
+side batches. Capture inspected; no runtime faults and save restoration is
+byte-identical. Play receipt is in the same folder; game log is
+logs/run-20261023-142158.log.err. The triage digest's unclassified lines were
+checked in bounded originals: unsupported filesystem-control probe, absent
+optional metadata/LCONFIG, ordinary worker waits and unused CPU-raster counters;
+continuous presentation and the wide capture confirm no stop at those lines.
+
+The integrated candidate is ready for the owner's Windows acceptance using the
+verified artifact linked above. No manual Cloudflare action or mod archive
+extraction is needed. PR91 remains a draft until platform/playtest acceptance;
+this does not turn the retained full-suite 15/18 result or inherited visual gates
+into passes. The source implementation and tested installer remain 0279950;
+subsequent commits only record documentation/evidence.
