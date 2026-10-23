@@ -106,6 +106,16 @@ v0.10.7 Setups. A profile shows 46,514 `probes_as_callback_body` calls, each a f
 million capstone decodes in all. That is upstream v0.16 code; the fork's only disasm change after
 `f0f8a46` is the alias seeds (`aa00125`). Players' Setup time triples (30.5 min).
 
+**Re-test on pin `2b73d81` (2026-10-23).** Branch `7350962`: the v0.16 migration, the disasm decode
+cache and main after the v0.10.7 publication. Toolkit tests with MSVC 829 passed / 20 skipped (the 3
+new ones added). Analyze 2 min 44 s (disasm 157 s); the analysis output and all 23 lifted C files are
+byte-identical to `32aa980`'s; manual addresses 42/0. Full regression 14/14 again
+(`logs/regress-20261023-151711.txt`): replay hash unchanged, Terrordome 242 s at median 120, combat
+27/27, versus 26/26, soak 3/3; no ICALL failure or crash in 18 logs; saves unchanged. CI run
+40028710042 green; its Setup (provenance toolkit `2b73d81`) installs from the dump into a new folder
+in 16.5 min (30.5 on `32aa980`, disasm 155 s against 965), and the installed game reaches the main
+menu at median 60.
+
 **Two alias seeds have no effect.** `0x001F707B` and `0x001FF9B7` are in v0.10.7's dispatch table and
 missing from this lift although `config/seed_functions.json` seeds them. Each sits right after the end of a
 real function, in bytes only tail-jump alias bodies cover (`0x001F705D`, `0x001FF995`), and
