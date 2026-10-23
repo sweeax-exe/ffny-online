@@ -2,7 +2,7 @@
 
 **Temporary.** Remove this file before PR #85 merges; its results go to `PROGRESS.md` and
 `docs/research/toolkit-v016-ledger.md`. Written 2026-10-22 for the agents that test PR #85 on
-Windows and on Linux/Steam Deck.
+Windows and on Linux/Steam Deck; updated 2026-10-23 after the Windows pass (pin `2b73d81`).
 
 Read `AGENTS.md` first, then `python scripts/progress.py brief`. This file covers only this
 test pass.
@@ -14,20 +14,26 @@ xboxrecomp v0.13 to upstream v0.16.0 (decision D147).
 
 | Item | Value |
 |---|---|
-| Port branch | `feat/toolkit-v0.16` (includes main as of v0.10.7) |
+| Port branch | `feat/toolkit-v0.16` (includes main after the v0.10.7 publication) |
 | Toolkit fork branch | `vyanhursky/xboxrecomp` `defjam/upstream-v0.16` |
-| Toolkit pin | `32aa980` (v0.16.0 `f0f8a46` plus 15 fork commits) |
+| Toolkit pin | `2b73d81` (v0.16.0 `f0f8a46` plus 16 fork commits; the 16th is the disasm decode cache, see item 7 below) |
 | Mapping of old fork commits to new | `docs/research/toolkit-v016-ledger.md` |
-| CI on the branch | green; installers come from the newest green run: `gh run list --branch feat/toolkit-v0.16 --status success --limit 1` (call its id `<run>`) |
+| CI on the branch | installers come from the newest green run: `gh run list --branch feat/toolkit-v0.16 --status success --limit 1` (call its id `<run>`). Use a run of a commit after `04b7ca4`, the pin of `2b73d81`; older runs build `32aa980` |
 
-**Done on the Mac (M1 Pro):**
+`git -C tools/xboxrecomp log --oneline -1` must print `2b73d81` (section 3).
+
+**Done on the Mac (M1 Pro), on `32aa980`:**
 - full regression 18/18 (`regress.py`);
 - replay hash unchanged;
 - toolkit Python tests pass (938);
 - every native fixture that builds on macOS passes.
 
-**Not done anywhere yet:** an MSVC game build and regression, the Steam Deck, and the owner's
-play-test.
+**Done on Windows (2026-10-22/23; ledger "Windows results"):** toolkit tests with MSVC, 19/19
+native fixtures, full regression 14/14 (4 macOS/Linux-only checks skip), saves, ICALL scan, HRTF,
+Setup install and boot. With `2b73d81` the analysis output and the lifted C are byte-identical to
+`32aa980`'s, so `2b73d81` changes analysis time only.
+
+**Not done yet:** the Steam Deck and the owner's play-test.
 
 **What changed and could break on your platform:**
 1. **Function seeds.** v0.16's analysis drops about 340 functions the old one found. The port
@@ -48,10 +54,19 @@ play-test.
    - Upstream's new APU timing (#192: `RECOMP_DISPATCH_GATE`, `RECOMP_VBLANK=paced`,
      `RECOMP_FLIP_PACING`) is opt-in, and the port does not use it. Do not set those switches.
    - On the Mac, the migrated build had one burst of audio clicks the old build did not.
+   - On Windows it clicked all through the opening scene in 3 of 4 runs on 2026-10-22, then not
+     in 14 runs on 2026-10-23. It comes back when Windows' power throttling is forced on the
+     process. Issue #93 tracks it, with a fix kept on the fork branch
+     `fix/windows-power-throttling` (not pinned). Whether Linux shows it at all is unknown
+     (section 5.4).
 5. **Input.** `xbox_InputMap_*` was renamed, and wheel up/down got the virtual keys `0x88`/`0x89`.
    Check pads, rumble, keyboard and the launcher's control mapping.
 6. **SDL3 only.** v0.16 added SDL2 host files; the port's SDL3 build leaves them out. The
    Linux build is the most likely place for a link error here.
+7. **Analysis time.** Upstream's callback probes (v0.14.0, #182) made the disasm step take 990 s
+   on Windows with v0.16 (the Setup install 30.5 min). `2b73d81` is the fork copy of upstream
+   PR #255 (issue #254): 167 s on Windows, output byte-identical. It is plain Python, so the
+   same gain is expected on Linux; record the time there (section 5.3).
 
 ## 2. Rules for this pass
 
@@ -76,11 +91,13 @@ play-test.
 git fetch origin
 git switch feat/toolkit-v0.16
 git submodule update --init --recursive
-git -C tools/xboxrecomp log --oneline -1    # must print 32aa980
+git -C tools/xboxrecomp log --oneline -1    # must print 2b73d81
 ```
 
 Use a separate worktree or clone if your main checkout has other work. Set `DEFJAM_DATA` to
-the existing data folder (the one with `extracted/` and `save/`).
+the existing data folder (the one with `extracted/` and `save/`). A new worktree also needs the
+`game` link to `$DEFJAM_DATA/extracted` before `regress.py`; without it every game check fails at
+once with "./game/default.xbe missing".
 
 **Back up `$DEFJAM_DATA/save` before the first run.** Copy it somewhere outside the data
 folder; restore it if the saves check fails.
@@ -119,8 +136,11 @@ foreach ($t in 'windows_guest_layout','memory_regressions','kernel_regressions',
 .\scripts\build.ps1 -Preset win-x64-release
 ```
 
-- `analyze.ps1` takes about 2 minutes.
-- `recomp.ps1` takes about 20 minutes. It must end with `check-manual-addresses` passing.
+- With `2b73d81`, `analyze.ps1` takes about 3 minutes (16.6 with `32aa980`), `recomp.ps1` and
+  `build.ps1` 1-2 minutes each on a 16-core PC. VS 2019 Build Tools work.
+- `recomp.ps1` does not run `check-manual-addresses`; run
+  `py -3 scripts/check-manual-addresses.py --toolkit tools/xboxrecomp` after it (42 checked,
+  0 missing). `pipeline.py recomp` runs it itself.
 - Close `defjam_recomp.exe` before building (a running copy causes LNK1168).
 
 ### 4.4 Regression
@@ -180,6 +200,11 @@ djpy scripts/pipeline.py build              # preset posix-release
 ldd -r build/posix-release/defjam_recomp     # on SteamOS, outside the container: nothing missing
 ```
 
+- **Time the analyze step** (`time djpy scripts/pipeline.py analyze`) and report it. On Windows the
+  disasm step went from 990 s with `32aa980` to 167 s with `2b73d81`. Fifteen minutes or more
+  here means the fix did not take effect on Linux: check the pin first.
+- `pipeline.py recomp` must end with the manual-address check passing (42 checked, 0 missing).
+
 ### 5.4 Regression
 
 ```bash
@@ -193,11 +218,27 @@ Run it on SteamOS, not in the container; add numpy and pytest the way your setup
 - that pattern with the same or fewer underruns counts as unchanged;
 - any other failure is new.
 
+**Audio clicks on Linux** (issue #93 is Windows so far; this says whether Linux has it too). Two
+runs of the opening scene with the migrated build, after the regression:
+
+```bash
+python3 scripts/harness.py run intro --preset posix-release --secs 330 --to-end --env RECOMP_APU_VOICE_PCM=logs/aud-deck1-
+python3 scripts/audio-holes.py logs/aud-deck1-
+python3 scripts/harness.py run intro --preset posix-release --secs 330 --to-end --env RECOMP_APU_VOICE_PCM=logs/aud-deck2-
+python3 scripts/audio-holes.py logs/aud-deck2-
+```
+
+Report the F8 and FA lines of each. For comparison, Windows on an idle PC gives F8 5-11 holes
+per 330 s (0.02-0.03/s) and FA 0-8; the bad 2026-10-22 runs gave F8 187-421, holes spread over the
+whole scene. If one run is high, say which minutes the holes fall in and what else was running.
+
 ### 5.5 Setup installer
 
 Run `linux-setup-assets` from CI run `<run>`
 (`gh run download <run> -n linux-setup-assets`). Install, build and launch it on the
 Deck in Game Mode. Then check that the Deck's controls work as a pad, including rumble.
+Record how long the install takes: on Windows the v0.16 Setup took 30.5 min with `32aa980`,
+against about 10 for v0.10.7, and `2b73d81` should bring it back near that.
 
 ## 6. Checks on both platforms
 
@@ -231,6 +272,7 @@ steady state was the same; the migrated build had one burst of clicks.
    - the check counts;
    - the log names;
    - the audio numbers;
+   - the analyze and Setup install times;
    - any new seeds or fixes.
 2. **Status row.** Update the D147 row in §0, e.g. `✅ Mac, ✅ Windows, ⏳ Deck`.
 3. **Ledger.** In `docs/research/toolkit-v016-ledger.md`, add a short "Windows" or
