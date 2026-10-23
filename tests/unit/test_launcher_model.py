@@ -8,8 +8,14 @@ ROOT=Path(__file__).resolve().parents[2]
 DRIVER=r'''
 #include "pc_ui_model.h"
 #include <iostream>
+#if defined(_WIN32)
+int wmain(int argc,wchar_t**argv){
+    auto list=pcui::inventory(std::filesystem::path(argv[1]),
+                            pcui::path_utf8(std::filesystem::path(argv[2])));
+#else
 int main(int argc,char**argv){
     auto list=pcui::inventory(std::filesystem::u8path(argv[1]),argv[2]);
+#endif
     for(const auto&p:list)std::cout<<p.name<<"|"<<p.selected<<"|"<<p.problem<<"\n";
     std::cout<<"chosen="<<pcui::selected_packs(list)<<"\n";
     std::cout<<"timing="<<pcui::aspect_next_launch(0,1)<<pcui::aspect_next_launch(1,0)
@@ -18,22 +24,22 @@ int main(int argc,char**argv){
 }
 '''
 
-@pytest.fixture(scope='module')
-def inventory_tool(tmp_path_factory):
+@pytest.fixture(scope='module', params=['c++17', 'c++20'])
+def inventory_tool(tmp_path_factory, request):
     folder=tmp_path_factory.mktemp('launcher-model')
     source=folder/'main.cpp';source.write_text(DRIVER)
     compiler=shutil.which('cl') or shutil.which('clang++') or shutil.which('g++')
     if not compiler:pytest.skip('C++ compiler required')
     exe=folder/('inventory.exe' if Path(compiler).stem.lower()=='cl' else 'inventory')
     if Path(compiler).stem.lower()=='cl':
-        cmd=[compiler,'/nologo','/std:c++17','/EHsc','/I'+str(ROOT/'src/hooks'),str(source),'/Fe:'+str(exe)]
-    else:cmd=[compiler,'-std=c++17','-I'+str(ROOT/'src/hooks'),str(source),'-o',str(exe)]
+        cmd=[compiler,'/nologo','/std:' + request.param,'/EHsc','/I'+str(ROOT/'src/hooks'),str(source),'/Fe:'+str(exe)]
+    else:cmd=[compiler,'-std=' + request.param,'-I'+str(ROOT/'src/hooks'),str(source),'-o',str(exe)]
     result=subprocess.run(cmd,cwd=folder,capture_output=True,text=True)
     assert result.returncode==0,result.stdout+result.stderr
     return exe
 
 def run(tool,mods,chosen):
-    result=subprocess.run([str(tool),str(mods),chosen],capture_output=True,text=True,check=True)
+    result=subprocess.run([str(tool),str(mods),chosen],capture_output=True,encoding='utf-8',check=True)
     return result.stdout
 
 def pack(mods,name,manifest='[pack]\nschema = 1\n[textures]\n'):
@@ -77,3 +83,18 @@ def test_duplicate_pack_list_preserves_last_override_priority(inventory_tool, tm
     pack(tmp_path, 'second')
     out = run(inventory_tool, tmp_path, 'first;second;first')
     assert 'chosen=second;first\n' in out
+
+
+def test_inventory_preserves_pack_name_under_unicode_mods_path(inventory_tool, tmp_path):
+    mods = tmp_path / 'Mods NY 街'
+    mods.mkdir()
+    pack(mods, 'faithful-hd')
+    out = run(inventory_tool, mods, 'faithful-hd')
+    assert 'faithful-hd|1|\n' in out
+    assert 'chosen=faithful-hd\n' in out
+
+
+def test_inventory_preserves_unicode_name_in_validation_message(inventory_tool, tmp_path):
+    pack(tmp_path, '街-pack')
+    out = run(inventory_tool, tmp_path, '')
+    assert '街-pack|0|Invalid pack folder name\n' in out
