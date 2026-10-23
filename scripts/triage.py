@@ -549,7 +549,18 @@ def drill(args, path):
     return True
 
 
+def keep_printing_unencodable_text():
+    """The runtime logs characters such as an arrow; the Windows console and a piped stdout are cp1252.
+    Keep each stream's encoding but print a stand-in for what it cannot show, instead of raising."""
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(errors='replace')
+        except (AttributeError, ValueError):
+            pass
+
+
 def main(argv=None):
+    keep_printing_unencodable_text()
     ap = argparse.ArgumentParser(description=__doc__.split('\n\n')[0],
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('log', nargs='?', help='a run log (path, stem or .log.err); default: the newest run')
