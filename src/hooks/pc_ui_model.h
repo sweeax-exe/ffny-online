@@ -11,6 +11,13 @@
 namespace pcui
 {
 namespace fs = std::filesystem;
+inline std::string path_utf8(const fs::path &path)
+{
+    // C++17 returns std::string; C++20 returns std::u8string. Keep the UTF-8
+    // bytes in the char strings used by ImGui, SDL and our settings API.
+    const auto text = path.u8string();
+    return std::string(reinterpret_cast<const char *>(text.data()), text.size());
+}
 inline std::string trim(std::string s)
 {
     const auto a = s.find_first_not_of(" \t\r\n"), b = s.find_last_not_of(" \t\r\n");
@@ -86,7 +93,7 @@ inline std::vector<Pack> inventory(const fs::path &mods, const std::string &chos
     {
         std::error_code entry_error;
         if (it->is_directory(entry_error))
-            available.push_back(it->path().filename().u8string());
+            available.push_back(path_utf8(it->path().filename()));
     }
     std::sort(available.begin(), available.end());
     for (const auto &name : available)
