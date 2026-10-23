@@ -30,6 +30,7 @@ port traps.
 | `06a9cf3` feat(d3d) | 05db81c, 26f2747, c4e5af1, bec01fa, 3e80eae, 10ab24c, a87ab22, dc132fa, c4b0bf9, e4e653a, 0e191bf, eb2de31, f3e7c60, b4464f8, 085d2b2, 16edd57, 769d3ca, c527129, 7afcd20, bac3653, 48702e6, 6eb0abc, eb4b0f1, adb67f7, 2edf96f | unchanged |
 | `aa00125` feat(disasm) alias seeds | (new) | a seed entry marked `"alias": true` becomes an alias body, never a start |
 | `0988577`, `f30a713`, `81810c8` fix(recomp) switch slots | ed81613, 48268f5, c3e95e7 | cherry-picked; two upstream tests adjusted for the fallback's second path |
+| `2b73d81` perf(disasm) decode cache | (new) | fork copy of upstream PR #255 (issue #254): the callback probes share one decoder that decodes each instruction once; disasm 990 s -> 167 s here, output byte-identical. Drop at the next rebase once upstream has it |
 
 ## Dropped
 
