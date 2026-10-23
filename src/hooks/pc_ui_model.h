@@ -4,6 +4,8 @@
 #include <cctype>
 #include <filesystem>
 #include <fstream>
+#include <map>
+#include <set>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -115,6 +117,47 @@ inline std::string selected_packs(const std::vector<Pack> &packs)
                 result += ';';
             result += p.name;
         }
+    return result;
+}
+// Bounded, refresh-time metadata only. No image bytes are loaded by the launcher.
+inline std::set<std::string> pack_texture_ids(const fs::path &folder)
+{
+    std::ifstream input(folder / "manifest.ini");
+    std::string line, section;
+    std::set<std::string> ids;
+    for (unsigned n=0; n<131072 && std::getline(input,line); n++) {
+        if (line.size()>2048) break;
+        line=trim(line);
+        if (!line.empty() && line[0]=='[') section=line;
+        if (section!="[textures]") continue;
+        auto eq=line.find('=');
+        if (eq==std::string::npos) continue;
+        auto id=trim(line.substr(0,eq));
+        if (id.size()!=64 || !std::all_of(id.begin(),id.end(),[](unsigned char c){return std::isxdigit(c);})) continue;
+        std::transform(id.begin(),id.end(),id.begin(),[](unsigned char c){return (char)std::tolower(c);});
+        ids.insert(id);
+        if (ids.size()>=65536) break;
+    }
+    return ids;
+}
+inline std::map<std::string,std::string> pack_conflicts(const fs::path &mods,const std::vector<Pack> &packs)
+{
+    std::map<std::string,std::set<std::string>> keys;
+    std::map<std::string,std::string> winner, result;
+    for (const auto &pack:packs) if (pack.selected && pack.problem.empty()) {
+        keys[pack.name]=pack_texture_ids(mods/fs::u8path(pack.name));
+        for (const auto &key:keys[pack.name]) winner[key]=pack.name;
+    }
+    for (const auto &pack:keys) {
+        std::map<std::string,unsigned> counts;
+        for (const auto &key:pack.second) if (winner[key]!=pack.first) counts[winner[key]]++;
+        std::string text;
+        for (const auto &count:counts) {
+            if (!text.empty()) text+="; ";
+            text+=std::to_string(count.second)+" texture(s) overridden by "+count.first;
+        }
+        result[pack.first]=text;
+    }
     return result;
 }
 inline bool aspect_next_launch(int before, int after)

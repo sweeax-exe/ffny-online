@@ -436,6 +436,8 @@ static int has_arg(const char *flag)
 }
 #endif
 
+extern int pc_mods_needs_recovery(void);
+
 static void run_launcher_if_wanted(void)
 {
 #if defined(_WIN32)
@@ -447,7 +449,7 @@ static void run_launcher_if_wanted(void)
     int no = cmd && strstr(cmd, "--no-launcher") != NULL;
     int shift = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
 
-    if (!pc_launcher_wanted(recomp_settings_get("launcher", "skip", 0), force && !no, no, shift, test_run))
+    if (!pc_launcher_wanted(pc_mods_needs_recovery() ? 0 : recomp_settings_get("launcher", "skip", 0), force && !no, no, shift, test_run))
         return;
     if (!pc_launcher_run()) {
         fprintf(stderr, "[UI] the launcher was closed; not starting the game\n");
@@ -466,7 +468,7 @@ static void run_launcher_if_wanted(void)
     /* Nothing to show it in without a display; the game itself then runs off screen. */
     if (!host_posix_have_video())
         return;
-    if (!pc_launcher_wanted(recomp_settings_get("launcher", "skip", 0), force && !no, no,
+    if (!pc_launcher_wanted(pc_mods_needs_recovery() ? 0 : recomp_settings_get("launcher", "skip", 0), force && !no, no,
                             host_posix_shift_held(), test_run))
         return;
     if (!pc_launcher_run()) {
@@ -536,6 +538,13 @@ int pc_settings_init(void)
 
     pc_input_start();
     run_launcher_if_wanted();
+    {
+        extern int pc_mods_game_lock(void);
+        if (!pc_mods_game_lock()) {
+            host_fatal("Mods are being installed or need recovery.\n\nOpen the launcher Mods page and wait for recovery before playing.");
+            return 0;
+        }
+    }
 
     /* Settings read once at start-up by code that looks at the environment (after the launcher,
      * which may have changed them). */

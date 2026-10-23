@@ -11,6 +11,7 @@ DRIVER=r'''
 int main(int argc,char**argv){
     auto list=pcui::inventory(std::filesystem::u8path(argv[1]),argv[2]);
     for(const auto&p:list)std::cout<<p.name<<"|"<<p.selected<<"|"<<p.problem<<"\n";
+    for(const auto &pair:pcui::pack_conflicts(std::filesystem::u8path(argv[1]),list))std::cout<<"conflict="<<pair.first<<"|"<<pair.second<<"\n";
     std::cout<<"chosen="<<pcui::selected_packs(list)<<"\n";
     std::cout<<"timing="<<pcui::aspect_next_launch(0,1)<<pcui::aspect_next_launch(1,0)
         <<pcui::aspect_next_launch(0,2)<<pcui::aspect_next_launch(2,0)
@@ -77,3 +78,13 @@ def test_duplicate_pack_list_preserves_last_override_priority(inventory_tool, tm
     pack(tmp_path, 'second')
     out = run(inventory_tool, tmp_path, 'first;second;first')
     assert 'chosen=second;first\n' in out
+
+
+def test_conflict_readout_names_the_final_winner(inventory_tool,tmp_path):
+    key='a'*64
+    for name in ('base','middle','menu'):
+        pack(tmp_path,name,'[pack]\nschema=1\n[textures]\n'+key+'=test.png\n')
+    out=run(inventory_tool,tmp_path,'base;middle;menu')
+    assert 'conflict=base|1 texture(s) overridden by menu' in out
+    assert 'conflict=middle|1 texture(s) overridden by menu' in out
+    assert 'conflict=menu|\n' in out

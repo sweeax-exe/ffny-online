@@ -130,8 +130,14 @@ static int stderr_file(char *out, size_t size)
 /* {"display.aspect":"4:3",...}: every setting as this run started with it. */
 static char *settings_json(void)
 {
-    size_t i, count = recomp_settings_count(), cap = 256 + count * 128, len = 0;
-    char *out = (char *)malloc(cap);
+    size_t i, count = recomp_settings_count(), cap = 256, len = 0;
+    char *out;
+    /* Room for every key and its escaped value; a string can be a long list. */
+    for (i = 0; i < count; i++) {
+        const RecompSetting *s = recomp_settings_at(i);
+        cap += 128 + (s->type == RECOMP_SETTING_STRING ? 2 * strlen(s->value_text) : 0);
+    }
+    out = (char *)malloc(cap);
     if (!out) return NULL;
     len += (size_t)snprintf(out + len, cap - len, "{");
     for (i = 0; i < count && len + 200 < cap; i++) {
@@ -146,7 +152,9 @@ static char *settings_json(void)
             esc[o++] = value[j];
         }
         esc[o] = 0;
-        len += (size_t)snprintf(out + len, cap - len, "%s\"%s.%s\":\"%s\"", i ? "," : "", s->section, s->key, esc);
+        o = (size_t)snprintf(out + len, cap - len, "%s\"%s.%s\":\"%s\"", i ? "," : "", s->section, s->key, esc);
+        if (o >= cap - len - 1) break;      /* never past the end, even if a value grew meanwhile */
+        len += o;
     }
     snprintf(out + len, cap - len, "}");
     return out;
