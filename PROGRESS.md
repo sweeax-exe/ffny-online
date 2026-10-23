@@ -359,7 +359,7 @@ disasm 990 s -> 167 s with the pin, output byte-identical. The 2026-10-22 Window
 forced Windows power throttling reproduces it, so it is a watch item: issue https://github.com/vyanhursky/DefJamFFNY-recomp/issues/93 and
 fork branch `fix/windows-power-throttling` `dc9f72f` (not pinned; upstream only if it recurs in our regression tests). Next: Steam Deck pass,
 owner play-test (listen for crackle with another app in front), then delete `docs/research/toolkit-v016-handover.md`, merge (after
-#76/#73: rebase the gitlink), release as a minor version. Deck agents: follow that handover; the pin and installers are now newer than it says.
+#73: rebase the gitlink; #76 is in v0.10.7), release as a minor version. Deck agents: follow that handover; the pin and installers are now newer than it says.
 
 **v0.10.7 (Windows fixes) is PUBLISHED, stable/latest** (D148, 2026-10-22):
 https://github.com/vyanhursky/DefJamFFNY-recomp/releases/tag/v0.10.7

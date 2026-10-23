@@ -155,6 +155,13 @@ py -3 scripts/regress.py --preset win-x64-release
   checks as stale.
 - For a failed row, use the `triage.py` line it prints (`docs/agent/triage.md`).
 
+**Windows baseline (v0.10.7, D148).** On the test PC (RTX 4070 Ti SUPER, VS 2019 MSVC 14.29), the
+full regression gave 12/14, with 4 checks skipped by design (the SDL launcher and Vulkan overlay
+checks). `combat` and `versus` sometimes fail only on `audio.dry_queue`: 2 of 8 runs, issue #88,
+present before this migration. For this pass:
+- a `dry_queue`-only failure that passes on a rerun counts as unchanged;
+- any other failing assertion is new.
+
 ### 4.5 Setup installer
 
 Download `windows-setup-assets` from CI run `<run>`
@@ -291,6 +298,8 @@ workaround, and stop.
   (`contig_native`, fixed in `32aa980`).
 - **Seeds.** A function reached only on a path the Mac regression did not take could still
   be missing. It shows up as `[ICALL] Failed to resolve`.
+- **Windows `audio.dry_queue` (issue #88).** Intermittent before the migration. Compare its
+  rate, not one run.
 - **Audio underruns on the Deck (issue #11).** This existed before the migration; compare
   against the 12/14 baseline.
 - **Linux link errors.** The SDL2 files are kept out of the build by `XBOXRECOMP_SDL3`. A link
