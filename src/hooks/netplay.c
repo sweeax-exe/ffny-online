@@ -233,6 +233,7 @@ static struct {
     int delay_fixed;                /* the match's delay is agreed */
     ULONGLONG last_rtt_sent;
     ULONGLONG last_recover;
+    ULONGLONG start_tick;           /* when this PC took the room's START: load times are measured from it */
     uint32_t start_seed;
     int start_slots[MAXP];
     /* the room match for its result report (account.c): set at START, sent once */
@@ -918,6 +919,7 @@ static void on_start(const uint8_t *b, int len)
     N.match_seen = 0;
     N.over_pending = 0;
     N.start_this_play = 1;
+    N.start_tick = GetTickCount64();
     N.report_m = m;
     for (i = 0; i < MAXP; i++) {
         N.report_names[i][0] = 0;
@@ -1834,7 +1836,8 @@ void netplay_on_match_start(void)
      * first step, and the others waited for it until they gave up (seen on The Pit, whose load is
      * the longest). */
     fight_input();
-    fprintf(stderr, "[NETPLAY] match %08X starts in lockstep (%d players, delay %d)\n", N.match, N.players, N.delay);
+    fprintf(stderr, "[NETPLAY] match %08X starts in lockstep (%d players, delay %d); loaded in %.1f s since the START\n",
+            N.match, N.players, N.delay, N.start_tick ? (GetTickCount64() - N.start_tick) / 1000.0 : -1.0);
     log_contiguous("at the match start");
 }
 
