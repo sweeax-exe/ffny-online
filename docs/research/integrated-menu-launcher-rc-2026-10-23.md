@@ -131,3 +131,54 @@ channel installation of2.0.0-rc1. All exit0 and restore saves byte-identical.
 Receipts/captures: logs/integrated-rc-native-manager/launcher-receipts.json;
 testing and large-text captures inspected. This does not substitute for actual
 signed hosted RC2 installation, which still waits for catalogue approval.
+
+## Platform CI and Windows candidate
+
+[CI40003181247](https://github.com/vyanhursky/DefJamFFNY-recomp/actions/runs/40003181247)
+passes29/29, including Windows native lock/bridge fixtures, Windows/Linux/macOS
+setup builds, runtime fixtures and source hygiene. Both prior failed CI gates
+are resolved. Game PR91 is conflict-free with main; no stable game release/tag
+has been made. The real hosted-install gate remains pending owner approval.
+
+[Windows game-free setup artifact](https://github.com/vyanhursky/DefJamFFNY-recomp/actions/runs/40003181247/artifacts/12521984699),
+windows-setup-assets, contains DefJamSetup-0.10.8-windows-x64.exe, its checksum and
+provenance. Downloaded locally and verified:58819072bytes, SHA256
+8fbc03aee2a762c801c32f8dac299ac2bd92ebfb992992517a64c7bafc3a8212.
+Payload SHA2566e4ea7527fdc925934a446d138d33f2d80384babae1d92378d75e2d58c1c6a82.
+CI merge source dd17361144e563bf988a86bd9aefb956d65396c7 has parents main dcd0df0
+and candidate0279950; toolkit pin bd8c6336c268cf15783b480fce6869eb11d74ec0.
+Local source comparison matches208files exactly plus367Windows CRLF checkout
+variants, with no other differences. Full receipt is private under
+logs/integrated-rc-windows-verified.json; no installer bytes are tracked in Git.
+
+## Additional native acceptance
+
+Fresh empty-save intro passes in157seconds: both Story cutscenes reach character
+creation, median120presents/2seconds and four captures. This separates the copied
+fixture collision from working Story startup without erasing the full-run failure.
+Receipt logs/regress-20261023-112708.txt.
+
+Approved unchanged menu-only pack passes Press Start and settled Main Menu at
+4:3,16:10,16:9,21:9 and32:9, with captures at640x480,768x480,854x480,1120x480
+and1707x480 respectively.4:3 records zero wide side batches; all four wide cases
+record positive side replay. All save guards restore identical. The first two
+ultrawide attempts used unsupported short enum labels and fell back to16:10;
+these are explicitly excluded, with separate rejected-attempt receipts. Corrected
+runs use the exact experimental enum labels and assert captured dimensions.
+
+32:9 actual pre-fight loading also passes with both optional Faithful components
+preceding RC2:1707x480 loading capture, complete match start, no runtime faults
+and byte-identical save restoration. Main-menu montage and loading capture
+inspected locally. Receipt logs/integrated-rc-wide/receipts.json, corrected
+loading log logs/run-20261023-113657.log.err; no new artwork was generated.
+
+## Remaining manual gate
+
+The protected catalogue-release job in publish39996850444 is still waiting for
+the owner. On its Actions page choose Review deployments, select catalogue-release
+and Approve and deploy. This is the owner's chosen signing boundary. After it
+publishes, verify the actual index/signature with the client's key pin and run
+the real hosted native launcher installation/enable/order/offline-reopen utility,
+then launch the game from that managed installation. Do not call this complete
+launcher-only acceptance or Windows-ready until that final gate is verified.
+The previous manual-download menu instructions remain interim history only.
