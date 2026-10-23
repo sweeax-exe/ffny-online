@@ -53,9 +53,25 @@ its output is decoded as UTF-8.
 
 ## Hand-off
 
-The fix is local, not released. Publish/review this branch when authorized;
-then a game-free Linux setup built from the fixed source can be tested by the
-reporter. Updating to unmodified v0.10.7 alone does not include this change.
+Published [PR #90](https://github.com/vyanhursky/DefJamFFNY-recomp/pull/90)
+on the owner's request. It links #83. [CI run 39981681675](https://github.com/vyanhursky/DefJamFFNY-recomp/actions/runs/39981681675)
+passed all 28 jobs after retrying a Ninja download timeout in `kernel_directory`
+(the failed attempt never reached compilation).
+
+The reporter's [Linux candidate artifact](https://github.com/vyanhursky/DefJamFFNY-recomp/actions/runs/39981681675/artifacts/12512749441)
+is `linux-setup-assets`. Its setup is version 0.10.7 with source `6c9563e`
+(the PR merge containing fix `8bf8fbf`), toolkit `8589f88`, development false.
+Downloaded and verified the artifact ZIP against GitHub's digest, the installer
+against its checksum/provenance, all 3,248 payload files against the inventory,
+and both patched launcher source files byte for byte against the tested fix.
+Installer SHA-256: `9d8866e267e30e8f0fb5563cae6af3c991f0a3ce349ade5c915ac3cecc4e813a`.
+Local receipt: `build/issue83-artifact-verification.json`.
+
+[Test instructions and download link posted on #83](https://github.com/vyanhursky/DefJamFFNY-recomp/issues/83#issuecomment-6369126220).
+They specify Bundled release (offline) so the candidate's fixed source is used,
+Install for a failed first install, Clean Update from a working 0.10.6, or
+Clean Rebuild for an existing 0.10.7. The issue stays open for reporter confirmation.
+No merge or stable release. Updating to the published v0.10.7 alone does not include this change.
 A source-build workaround on the affected release is to reconfigure its existing
 source/build folder with `cmake --preset posix-release -DCMAKE_CXX_STANDARD=17`,
 then `cmake --build --preset posix-release --target defjam_recomp`.

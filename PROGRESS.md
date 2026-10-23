@@ -339,7 +339,6 @@ defjam-recomp/
 
 > Recent entries only; older entries remain unchanged in the local `docs/worklog/` archive.
 
-- 2026-10-20 22:13 — D145: owner authorized v0.10.6 stable promotion and name Improved Game Launcher. Updated GitHub title/notes, prerelease=false/latest=true; API confirms latest v0.10.6, same release ID, tag 2e8ec40 and all nine asset IDs/sizes/digests. README/gallery/handover beta wording removed; no rebuild, tag move, asset replacement or game run. Receipts logs/launcher-review/stable-20261020/{before,after,latest}.json.
 - 2026-10-21 08:48 — D146, issue #77: reporter confirms the Linux test setup from CI run 39521387707 (commit 2ccfee0, Clean Rebuild) opens a window and plays. PR #78 (28/28 CI) merged after merging main (D145 number taken by the v0.10.6 stable promotion; this decision renumbered D146). Issue #77 closed as fixed in the next release; no release cut.
 - 2026-10-21 12:00 — Discord report (reporter K11): Windows setup build fails at the final link, `defjam_recomp.rc.res : fatal error LNK1000: Internal error during IncrCalcPtrs`, access violation C0000005, setup exit 4. Cause found by reading the build config: the setup's preset is RelWithDebInfo, which CMake links with `/debug /INCREMENTAL` (confirmed in CMake's Windows-MSVC.cmake), and `link.exe`'s incremental code can crash on an image this large; the `.rc.res` is only the last link input. Fix on branch fix/msvc-link-incremental-off: `/INCREMENTAL:NO` in the MSVC link options, plus a known-issues entry with a workaround command. Not built or run on Windows here (macOS host); not yet confirmed with the reporter, whose setup log and Visual Studio version were requested.
 
@@ -348,19 +347,23 @@ defjam-recomp/
 - 2026-10-22 12:20 — D148: v0.10.7 (Windows fixes) prepared on `release/0.10.7` = main a0c9109 + PR #80 (`/INCREMENTAL:NO`) + PR #76 (toolkit `8589f88`, checked memory layout); PR #73 left out by the owner. First Windows run since 2026-10-11 (RTX 4070 Ti SUPER, VS 2019 MSVC 14.29). Full regress 12/14, 4 skipped by design (SDL launcher/Vulkan overlay checks): combat and versus failed only `audio.dry_queue` (10, 23 dry), passed on stock v0.10.6 (27/27, 26/26) and on two reruns of the candidate. Quick 5/5 on the final build. Units 537 passed/25 skipped under the MSVC environment (was 1 failure, also on v0.10.6: `test_skip_intro_and_unlock_can_be_enabled_together`, 8 KB synthetic guest memory vs a store at 0x39C1DA that MSVC if-converts; fixture memory enlarged). Native fixtures windows_guest_layout, memory_regressions, settings, texture_pack, kernel_regressions pass. 10-boot soak 10/10, but every boot got RAM at 0x142B50000 (no layout variance here). Setup: published v0.10.6 setup installed from scratch (exit 0, no LNK1000 on this toolchain), then the 0.10.7 setup Clean Updated it with `--bundled-only` (exit 0, 125-file data inventory byte-identical, installed game boots to Game.StartMainMenu, exe 26,620,416 bytes with no .ilk). Windows launcher renders (v0.10.7, screenshot only). Note: `scripts/triage.py` raises UnicodeEncodeError on a cp1252 console (set PYTHONIOENCODING=utf-8). Logs: logs/regress-full-candidate.log, logs/regress-quick-final.log, logs/soak10.log, ../defjam-setup-test/logs.
 - 2026-10-22 20:30 — D148: v0.10.7 PUBLISHED (regular release, Latest) after the owner's Windows play-test. PR #86 merged as `009473a` (tree identical to the tested head `c13716e`), annotated tag `v0.10.7`, `check-release.py` verified 434 files, Source release run 39845952105 passed 31/31 and made the draft. Downloaded all nine assets into a fresh folder: each file hash equals GitHub's digest, each `.sha256` equals its file, all three provenance files say version 0.10.7, source `009473a`, toolkit `8589f88`, development false; rechecked after publishing (unchanged). Release title set to the notes heading; body = the tagged notes with two sentences updated (owner play-test, link to #88). PR #87 (`triage.py` UnicodeEncodeError on cp1252 consoles: errors='replace', subprocess test) merged `abb4bf5` after CI 27/27. Issue #84 (third-party promotion) closed as not planned; issue #88 filed for the intermittent Windows `audio.dry_queue` failures (2 of 8 runs). The reporters of #72 and #81 have not been asked to test yet.
 - 2026-10-23 07:48 — D149, issue #83: reproduced the CachyOS launcher compile error in Linux GCC C++20 (8 C++17 passes, 8 C++20 compile errors before fix). Explicit UTF-8 byte conversion fixes all ten path sites; native fixtures now run both standards with Unicode coverage. Linux GCC13.3/SDL3.4.18 and Windows MSVC14.29 each pass 30/30; pc_ui.cpp and pc_ui_actions.cpp pass Linux C++20 compile checks. No game/Setup run on CachyOS, push, release or GitHub reply. Report docs/research/issue83-cachyos-notes.md; Linux compile diagnostics /root/defjam-issue83-ui-cxx20.log in WSL.
+- 2026-10-23 09:04 — Owner authorized publication/testing for #83. Pushed fix8bf8fbf, opened linked PR90; CI39981681675 passes28/28 after a network-only Ninja download retry. Linux artifact12512749441 downloaded and verified: source6c9563e PR merge, toolkit8589f88, exact fixed source, all3248 payload files; installerSHA256 9d8866e267e30e8f0fb5563cae6af3c991f0a3ce349ade5c915ac3cecc4e813a. Posted test download/Bundled offline/operation instructions on issue83 comment6369126220, linked in PR. No merge/release; awaiting CachyOS reporter result. Receipt build/issue83-artifact-verification.json.
 
 ## 7. Hand-off
 
-**Issue #83 (CachyOS installation), D149: fixed locally on `fix/issue83-cachyos`.**
-See `docs/research/issue83-cachyos-notes.md` for the GCC 16/C++20 cause,
-UTF-8 conversion fix, test commands, source-build workaround and limits.
-Linux GCC 13.3 + real SDL3: 30/30 native launcher tests; Windows MSVC 14.29: 30/30;
-both reported Linux translation units pass the C++20 compile check.
-Not pushed/released; no CachyOS end-to-end setup or game run. Next: publish/review
-when requested and get the reporter's install result from a setup built with this fix.
-The v0.10.7 setup does not contain it. The current stable release remains v0.10.7,
-tag `009473a`, toolkit `8589f88` (D148); its assets and release are unchanged.
+**Issue #83 (CachyOS installation), D149: PR #90 open, test installer delivered.**
+PR: https://github.com/vyanhursky/DefJamFFNY-recomp/pull/90
+CI run 39981681675 passed 28/28 after retrying a Ninja-download timeout.
+Verified game-free Linux artifact `12512749441` from that run: source `6c9563e`
+(PR merge containing fix `8bf8fbf`), toolkit `8589f88`, version 0.10.7; checksum,
+provenance, all 3,248 payload files and exact patched source match.
+Download/instructions: https://github.com/vyanhursky/DefJamFFNY-recomp/issues/83#issuecomment-6369126220
+Await the reporter's CachyOS install/launch result; issue open, no merge or stable
+release. The bundled candidate must be selected, not the published v0.10.7.
+Details and source-build workaround: `docs/research/issue83-cachyos-notes.md`.
+Local verification receipt: `build/issue83-artifact-verification.json`.
 
-Other pending work is unchanged: reporter retests of #72/#81; intermittent Windows
+Stable remains v0.10.7, tag `009473a`, toolkit `8589f88` (D148), unchanged.
+Other pending work: reporter retests of #72/#81; intermittent Windows
 `audio.dry_queue` #88; #73 held for the mod release; drafts #82/#62/#85 and #17.
-The previous release hand-off is archived locally in `docs/worklog/2026-10-handoffs.md`.
+Earlier hand-offs are archived locally in `docs/worklog/2026-10-handoffs.md`.
