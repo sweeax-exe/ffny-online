@@ -142,6 +142,12 @@ int netplay_active(void);
 /* 1 while a fight runs, online or not (the game's match phase): no notices over it. */
 int netplay_in_fight(void);
 
+/* Voice chat (voice.c): 1 while this PC is in a room of the online hub (its lobby or its match); a
+ * voice packet to every other member; the name of the member in relay slot `slot` (0 if none). */
+int netplay_voice_room(void);
+void netplay_send_voice(const uint8_t *payload, int len);
+int netplay_room_name(int slot, char *out, int size);
+
 /* Tests: start a session from RECOMP_NETPLAY=host|join, RECOMP_NETPLAY_SERVER and
  * RECOMP_NETPLAY_CODE_FILE, if they are set. Call once at start-up. */
 void netplay_autostart(void);

@@ -51,6 +51,7 @@ extern "C" {
 #include "netplay.h"
 #include "account.h"
 #include "bug_report.h"
+#include "voice.h"
 #include "online_screen.h"
 #include "hd_build.h"
 #include "updater.h"
@@ -1064,6 +1065,11 @@ static void page_online(UiMode mode)
         ImGui::PopTextWrapPos();
         if (ImGui::Button("Go offline", ImVec2(ImGui::GetFontSize() * 7, 0))) netplay_stop();
     }
+    ImGui::SeparatorText("Voice chat");
+    settings_group("online", { "voice", "voice_key", "voice_volume" });
+    ImGui::TextDisabled("Everyone in your room hears you, in the room and in the fight. Push-to-talk: hold the key "
+                        "above while the game window has the focus. Your voice goes live through the project's server "
+                        "and is not recorded.");
     ImGui::SeparatorText("How it works");
     ImGui::TextWrapped("Everyone needs their own copy of the game and this same version. In a fight the games run in "
                        "lockstep through the relay server, so it is the same fight on every screen.");
@@ -1804,7 +1810,9 @@ extern "C" void pc_ui_overlay(void *device, void *context, void *window_rtv, uns
     bool toast = bug_report_toast(notice, sizeof(notice)) ||
                  (!g_open.load() && netplay_toast(notice, sizeof(notice))) ||  // online: a wait, a desync
                  update_notice(notice, sizeof(notice));                         // a newer build is out
-    if (!g_open.load() && !decor && !toast) { ui_unlock(); return; }
+    char talk[160];
+    bool talking = voice_overlay(talk, sizeof(talk)) != 0;               // voice chat: who talks
+    if (!g_open.load() && !decor && !toast && !talking) { ui_unlock(); return; }
 
     ID3D11Device *dev = (ID3D11Device *)device;
     ID3D11DeviceContext *ctx = (ID3D11DeviceContext *)context;
@@ -1856,6 +1864,16 @@ extern "C" void pc_ui_overlay(void *device, void *context, void *window_rtv, uns
     if (!ui_capturing() && !ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel) &&
         (ImGui::IsKeyPressed(ImGuiKey_Escape, false) || ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false)))
         close_request = true;
+    }
+    if (talking) {  // small, bottom left, over everything
+        ImDrawList *fg = ImGui::GetForegroundDrawList();
+        ImFont *font = g_font_bold ? g_font_bold : ImGui::GetFont();
+        float size = std::max(15.0f, io.DisplaySize.y * 0.022f);
+        ImVec2 t = font->CalcTextSizeA(size, FLT_MAX, 0, talk);
+        ImVec2 at(size, io.DisplaySize.y - t.y - size * 1.2f);
+        fg->AddRectFilled(ImVec2(at.x - size * 0.5f, at.y - size * 0.3f), ImVec2(at.x + t.x + size * 0.5f, at.y + t.y + size * 0.3f),
+                          IM_COL32(0, 0, 0, 170), size * 0.3f);
+        fg->AddText(font, size, at, IM_COL32(120, 220, 120, 255), talk);
     }
     if (toast) {    // last, so no screen drawn this frame covers it
         ImDrawList *fg = ImGui::GetForegroundDrawList();

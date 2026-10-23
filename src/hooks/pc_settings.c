@@ -35,6 +35,7 @@ static const char *const k_aspect[] = { "4:3", "stretch", NULL };
 static const char *const k_filter[] = { "smooth", "sharp", NULL };
 static const char *const k_aa[] = { "off", "on", NULL };
 static const char *const k_anisotropy[] = { "off", "2x", "4x", "8x", "16x", NULL };
+static const char *const k_voice[] = { "off", "push_to_talk", "open", NULL };
 
 static RecompSetting g_display_settings[] = {
     { "textures", "enabled", RECOMP_SETTING_BOOL, 0, 0, 0, NULL, NULL, RECOMP_SETTING_RESTART,
@@ -53,6 +54,13 @@ static RecompSetting g_display_settings[] = {
       "Your name, shown to the other player.", "Player" },
     { "online", "fighter", RECOMP_SETTING_INT, 55, 0, 255, NULL, NULL, 0,
       "The fighter you pick in online rooms (fighter.xml ID); chosen in the room." },
+    { "online", "voice", RECOMP_SETTING_ENUM, 1, 0, 0, k_voice, NULL, 0,
+      "Voice chat with the players in your online room, in the room and in the fight: off, push_to_talk (hold the "
+      "key below) or open (sends while you speak; use a headset)." },
+    { "online", "voice_key", RECOMP_SETTING_STRING, 0, 0, 0, NULL, NULL, 0,
+      "The push-to-talk key: a letter or digit, F1-F12, Tab, CapsLock, LAlt, Mouse4 or Mouse5.", "T" },
+    { "online", "voice_volume", RECOMP_SETTING_INT, 100, 0, 200, NULL, NULL, 0,
+      "Volume of the other players' voices in percent; 0 mutes them." },
     { "online", "input_delay", RECOMP_SETTING_INT, 3, 1, 8, NULL, NULL, 0,
       "Steps (1/60 s each) between a press and its effect in an online fight. More hides more ping; the host's value is used." },
     { "display", "fullscreen", RECOMP_SETTING_BOOL, 0, 0, 0, NULL, NULL, 0,

@@ -56,6 +56,9 @@ void netplay_room(char *c, int size) { if (size > 0) c[0] = 0; }
 void netplay_autostart(void) {}
 int netplay_active(void) { return 0; }
 int netplay_in_fight(void) { return 0; }
+int netplay_voice_room(void) { return 0; }
+void netplay_send_voice(const uint8_t *p, int n) { (void)p; (void)n; }
+int netplay_room_name(int s, char *o, int n) { (void)s; if (n > 0) o[0] = 0; return 0; }
 int netplay_lobby(const char *s, const char *n) { (void)s; (void)n; return -1; }
 void netplay_lobby_list(int m) { (void)m; }
 void netplay_lobby_who(void) {}
@@ -93,6 +96,7 @@ void netplay_crowd_update(void) { sub_00081170(); }
 #else
 
 #include "input_host.h"
+#include "voice.h"
 
 #ifndef DEFJAM_VERSION
 #define DEFJAM_VERSION "dev"
@@ -982,6 +986,10 @@ static void on_packet(const uint8_t *b, int len)
         }
         break;
     case T_DATA:
+        if (len >= 8 && b[7] == P_VOICE) {     /* voice chat: by relay slot, in the room and the match */
+            voice_on_packet(b[6], b + 7, len - 7);
+            break;
+        }
         if (len >= 7) {
             int from = N.lobby ? (b[6] < MAXP ? N.pos_of_slot[b[6]] : -1) : (b[6] ? 1 : 0);
             on_data(from, b + 7, len - 7);
@@ -1707,6 +1715,32 @@ void netplay_autostart(void)
 
 int netplay_active(void) { return N.lockstep != 0; }
 int netplay_in_fight(void) { return MEM32(G_MATCH_PHASE) == 1u; }
+
+int netplay_voice_room(void)
+{
+    return N.lobby && N.have_token && (N.roomv.in_room || N.match_live) &&
+           (N.state == NETPLAY_LOBBY || N.state == NETPLAY_CONNECTED);
+}
+
+void netplay_send_voice(const uint8_t *payload, int len)
+{
+    if (netplay_voice_room()) send_data(payload, len);
+}
+
+int netplay_room_name(int slot, char *out, int size)
+{
+    int i, found = 0;
+    if (size <= 0) return 0;
+    out[0] = 0;
+    EnterCriticalSection(&g_cs);
+    for (i = 0; i < N.roomv.player_count; i++)
+        if (N.roomv.players[i].slot == slot) {
+            snprintf(out, (size_t)size, "%s", N.roomv.players[i].name);
+            found = out[0] != 0;
+        }
+    LeaveCriticalSection(&g_cs);
+    return found;
+}
 
 /* ---- the game's hooks ------------------------------------------------------------ */
 
