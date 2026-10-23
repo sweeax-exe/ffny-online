@@ -138,8 +138,9 @@ void netplay_crowd_update(void) { sub_00081170(); }
 #define P_GAMEACK     2     /* guest -> host */
 #define P_LIVEPAD     3     /* u32 sequence, 18 bytes XBOX_GAMEPAD */
 #define P_STEPS       4     /* u32 match, u32 last step, u8 count, count x 32 bytes */
-#define P_HASH        5     /* u32 match, u32 step, u32 hash */
-#define P_RTT         6     /* hub: u32 START seed, u16 this PC's ping to the relay in ms */
+#define P_HASH        5     /* u32 match, u32 step, u32 hash; since build 23 also the HASH_PARTS words */
+#define P_RTT         6     /* hub: u32 START seed, u16 this PC's ping to the relay in ms, u8 rollback,
+                               * since build 23 u32 the game files' fingerprint */
 #define LOCKSTEP_VERSION 4     /* 3: builds 19-20, rollback on; 4: build 21, rollback off again, reclaim on */
 
 #define MAXP          NETPLAY_MAX_PLAYERS
@@ -151,6 +152,7 @@ void netplay_crowd_update(void) { sub_00081170(); }
 #define RING          512           /* steps of input kept per player */
 #define REDUNDANT     8             /* steps repeated in every STEPS packet */
 #define HASH_EVERY    60
+#define HASH_PARTS    6             /* the checksum in parts: fighters 1-4, the AI generators, the rest */
 #define STALL_LIMIT_MS 10000        /* mid-fight: a player has gone */
 #define START_LIMIT_MS 90000        /* the first steps: another PC may still be loading the venue */
 #define DECIDED_LIMIT_MS 1000       /* after the KO: a PC that went on ahead is not a lost player */
@@ -209,7 +211,8 @@ static struct {
     uint32_t in_tag[MAXP][RING];    /* step + 1 (0 = empty) */
     uint32_t in_match[MAXP][RING];
     HANDLE arrived;
-    uint32_t local_hash[16][3], remote_hash[16][3];   /* match, step, hash */
+    /* match, step, hash, its HASH_PARTS parts, 1 when the parts came along (builds before 23 send none) */
+    uint32_t local_hash[16][4 + HASH_PARTS], remote_hash[16][4 + HASH_PARTS];
     int desync;
     uint32_t desync_step;
     struct { uint32_t which, count; } seeds[32];
@@ -251,6 +254,7 @@ static struct {
     uint32_t final_step;                /* every step up to this one ran on the real entries */
     uint32_t updates;                   /* game updates since the match's reference copy */
     uint32_t hash_at[RING], hash_tag[RING], hash_sent;
+    uint32_t hash_parts[RING][HASH_PARTS];
     int rb_on, rb_ref_due, resim, predicting;
     int rb_fought;                      /* the phase word said "fighting" in this match */
     int peer_rb[MAXP];                  /* each position rolls back (its P_RTT says so) */
@@ -551,6 +555,21 @@ static void store_steps(int from, const uint8_t *p, int len)
 
 static unsigned g_hash_matches;     /* checksums compared and equal, this session */
 
+/* Which part of the checksum differs: a fighter (a player's or a CPU's), the CPU fighters'
+ * generators, or the rest. Desyncs so far came from matches with CPU fighters only. */
+static void desync_detail(const uint32_t *mine, const uint32_t *theirs)
+{
+    char text[200];
+    int n = 0, slot, fighters = N.fighters > N.players ? N.fighters : N.players;
+    for (slot = 0; slot < 4 && slot < fighters; slot++)
+        if (mine[slot] != theirs[slot])
+            n += snprintf(text + n, sizeof(text) - (size_t)n, "%sfighter %d (%s %d)", n ? ", " : "", slot + 1,
+                          slot < N.players ? "player" : "CPU", slot < N.players ? slot + 1 : slot + 1 - N.players);
+    fprintf(stderr, "[NETPLAY] desync detail: %s; the CPU fighters' generators %s; the shared generator and time scale %s\n",
+            n ? text : "no fighter's fields", mine[4] == theirs[4] ? "equal" : "differ",
+            mine[5] == theirs[5] ? "equal" : "differ");
+}
+
 /* Compare every checksum this PC and another have for the same match and step, once each. */
 static void check_hashes(void)
 {
@@ -566,6 +585,7 @@ static void check_hashes(void)
                     N.desync_step = N.local_hash[i][1];
                     fprintf(stderr, "[NETPLAY] desync in match %08X at step %u (local %08X, remote %08X)\n",
                             N.local_hash[i][0], N.local_hash[i][1], N.local_hash[i][2], N.remote_hash[j][2]);
+                    if (N.remote_hash[j][3 + HASH_PARTS]) desync_detail(N.local_hash[i] + 3, N.remote_hash[j] + 3);
                     toast(8000, "The games went out of sync: this match won't count.");
                 }
             } else if (++g_hash_matches % 10 == 0) {
@@ -576,17 +596,69 @@ static void check_hashes(void)
         }
 }
 
+/* The game files a fight reads (fighters, moves, the CPU fighters' AI), as this PC has them: the
+ * override folder's copy where there is one (a mod). Two PCs whose files differ play the same
+ * inputs differently, and the setup checks only default.xbe. Made once, on the network thread. */
+static const char *const k_fight_files[] = {
+    "fighter.xml", "gamedata.xml", "gconfig.xml", "venue.xml", "assets\\gamecore.xml", "assets\\combs.xml",
+    "assets\\ai\\ai.viv", "motion\\main_all.dat",
+};
+static uint32_t g_data_print;
+
+static uint32_t file_print(const char *name, int *overridden)
+{
+    static uint8_t buf[65536];
+    const char *data = getenv("DEFJAM_DATA");
+    char path[MAX_PATH];
+    FILE *f = NULL;
+    uint32_t h = 2166136261u;
+    size_t got, i;
+    *overridden = 0;
+    if (data && *data) {
+        snprintf(path, sizeof(path), "%s\\override\\%s", data, name);
+        if ((f = fopen(path, "rb")) != NULL) *overridden = 1;
+    }
+    if (!f) {
+        snprintf(path, sizeof(path), "game\\%s", name);
+        f = fopen(path, "rb");
+    }
+    if (!f) return 0;
+    while ((got = fread(buf, 1, sizeof(buf), f)) > 0)
+        for (i = 0; i < got; i++) h = (h ^ buf[i]) * 16777619u;
+    fclose(f);
+    return h ? h : 1;
+}
+
+static void make_data_print(void)
+{
+    char text[400], over[160];
+    int n = 0, o = 0;
+    unsigned i;
+    uint32_t h = 2166136261u;
+    over[0] = 0;
+    for (i = 0; i < sizeof(k_fight_files) / sizeof(k_fight_files[0]); i++) {
+        int overridden;
+        uint32_t f = file_print(k_fight_files[i], &overridden);
+        h = mix32(h ^ f);
+        if (n < (int)sizeof(text)) n += snprintf(text + n, sizeof(text) - (size_t)n, "%s%s %08X", i ? ", " : "", k_fight_files[i], f);
+        if (overridden && o < (int)sizeof(over)) o += snprintf(over + o, sizeof(over) - (size_t)o, " %s", k_fight_files[i]);
+    }
+    g_data_print = h ? h : 1;
+    fprintf(stderr, "[NETPLAY] game files %08X: %s%s%s\n", g_data_print, text, o ? "; from the override folder:" : "", over);
+}
+
 /* Hub: this PC's ping for the current START, so every PC derives the same input delay. */
 static void send_rtt(void)
 {
-    uint8_t p[8];
+    uint8_t p[12];
     int rtt = N.peer_rtt[N.pos] < 0 ? 0 : N.peer_rtt[N.pos];
     p[0] = P_RTT;
     put32(p + 1, N.start_seed);
     p[5] = (uint8_t)rtt;
     p[6] = (uint8_t)(rtt >> 8);
     p[7] = (uint8_t)N.peer_rb[N.pos];   /* builds before 17 send 7 bytes: no rollback */
-    send_data(p, 8);
+    put32(p + 8, g_data_print);         /* builds before 23 send 8 bytes */
+    send_data(p, 12);
     N.last_rtt_sent = GetTickCount64();
 }
 
@@ -655,6 +727,18 @@ static void on_data(int from, const uint8_t *p, int len)
             int had = N.peer_rtt[from];
             N.peer_rtt[from] = p[5] | (p[6] << 8);
             N.peer_rb[from] = len >= 8 && p[7] == 1;
+            if (len >= 12 && g_data_print && get32(p + 8) && get32(p + 8) != g_data_print) {
+                static uint32_t warned_seed[MAXP];
+                if (warned_seed[from] != N.start_seed) {
+                    char who[32];
+                    warned_seed[from] = N.start_seed;
+                    fprintf(stderr, "[NETPLAY] player %d's game files differ from this PC's (%08X there, %08X here)\n",
+                            from + 1, get32(p + 8), g_data_print);
+                    if (!netplay_room_name(N.start_slots[from], who, (int)sizeof(who)))
+                        snprintf(who, sizeof(who), "player %d", from + 1);
+                    toast(8000, "%s's game files differ from yours (a mod?): this match may go out of sync.", who);
+                }
+            }
             SetEvent(N.arrived);
             if (N.delay_fixed && had < 0) send_rtt();   /* it may still be waiting for ours */
         }
@@ -666,6 +750,11 @@ static void on_data(int from, const uint8_t *p, int len)
             N.remote_hash[0][0] = get32(p + 1);
             N.remote_hash[0][1] = get32(p + 5);
             N.remote_hash[0][2] = get32(p + 9);
+            N.remote_hash[0][3 + HASH_PARTS] = len >= 13 + 4 * HASH_PARTS;
+            if (N.remote_hash[0][3 + HASH_PARTS]) {
+                int k;
+                for (k = 0; k < HASH_PARTS; k++) N.remote_hash[0][3 + k] = get32(p + 13 + 4 * k);
+            }
             check_hashes();
             LeaveCriticalSection(&g_cs);
         }
@@ -1104,6 +1193,7 @@ static DWORD WINAPI net_thread(LPVOID unused)
         if (lag_ms > 0) fprintf(stderr, "[NETPLAY] tests: arriving packets held %d ms (+0..%d)\n", lag_ms, lag_jitter);
     }
     N.started = N.last_rx = GetTickCount64();
+    if (!g_data_print) make_data_print();
     while (!N.stop) {
         ULONGLONG now = GetTickCount64();
         int got;
@@ -1748,15 +1838,30 @@ int netplay_room_name(int slot, char *out, int size)
 
 /* ---- the game's hooks ------------------------------------------------------------ */
 
-static uint32_t fighter_hash(void)
+#define AI_GENS       0x003BFC70u   /* the CPU fighters' four generators, 0x88 bytes each (docs/research/fight-determinism.md) */
+#define SHARED_GEN    0x0039C0E0u   /* the utility generator menus, camera and effects draw too */
+#define TIME_SCALE    0x00349764u   /* CLogic+4, the step's scale (slow motion) */
+
+static uint32_t fighter_hash(uint32_t parts[HASH_PARTS])
 {
     static const uint32_t fields[] = { 0x30, 0x44, 0x48, 0x4C, 0x54, 0x350 };
-    uint32_t h = 2166136261u;
+    uint32_t h = 2166136261u, a;
     int slot;
     unsigned i;
-    for (slot = 0; slot < (N.fighters > N.players ? N.fighters : N.players); slot++)
-        for (i = 0; i < sizeof(fields) / sizeof(fields[0]); i++)
-            h = (h ^ MEM32(ACTORS + (uint32_t)slot * STRIDE + fields[i])) * 16777619u;
+    memset(parts, 0, sizeof(uint32_t) * HASH_PARTS);
+    for (slot = 0; slot < (N.fighters > N.players ? N.fighters : N.players); slot++) {
+        uint32_t one = 2166136261u;
+        for (i = 0; i < sizeof(fields) / sizeof(fields[0]); i++) {
+            uint32_t v = MEM32(ACTORS + (uint32_t)slot * STRIDE + fields[i]);
+            h = (h ^ v) * 16777619u;
+            one = (one ^ v) * 16777619u;
+        }
+        if (slot < 4) parts[slot] = one;
+    }
+    parts[4] = parts[5] = 2166136261u;
+    for (a = 0; a < 4u * 0x88u; a += 4) parts[4] = (parts[4] ^ MEM32(AI_GENS + a)) * 16777619u;
+    for (a = 0; a < 0x88u; a += 4) parts[5] = (parts[5] ^ MEM32(SHARED_GEN + a)) * 16777619u;
+    parts[5] = (parts[5] ^ MEM32(TIME_SCALE)) * 16777619u;
     return h;
 }
 
@@ -1765,17 +1870,21 @@ static void send_hashes(uint32_t upto)
 {
     uint32_t t;
     for (t = N.hash_sent + 1; t <= upto; t++) {
-        uint8_t p[13];
+        uint8_t p[13 + 4 * HASH_PARTS];
         uint32_t h;
+        int k;
         if (t % HASH_EVERY || N.hash_tag[t % RING] != t + 1) continue;
         h = N.hash_at[t % RING];
         EnterCriticalSection(&g_cs);
         memmove(N.local_hash[1], N.local_hash[0], sizeof(N.local_hash[0]) * 15);
         N.local_hash[0][0] = N.match; N.local_hash[0][1] = t; N.local_hash[0][2] = h;
+        for (k = 0; k < HASH_PARTS; k++) N.local_hash[0][3 + k] = N.hash_parts[t % RING][k];
+        N.local_hash[0][3 + HASH_PARTS] = 1;
         check_hashes();
         LeaveCriticalSection(&g_cs);
         p[0] = P_HASH; put32(p + 1, N.match); put32(p + 5, t); put32(p + 9, h);
-        send_data(p, 13);
+        for (k = 0; k < HASH_PARTS; k++) put32(p + 13 + 4 * k, N.hash_parts[t % RING][k]);
+        send_data(p, (int)sizeof(p));
     }
     if (upto > N.hash_sent) N.hash_sent = upto;
 }
@@ -2085,7 +2194,7 @@ void netplay_on_step(void)
         fprintf(stderr, "[NETPLAY] crowd hash at step %u: %08X (%u records)\n", s, h, count);
     }
     k = s % RING;
-    N.hash_at[k] = fighter_hash();      /* the state as this step starts */
+    N.hash_at[k] = fighter_hash(N.hash_parts[k]);   /* the state as this step starts */
     N.hash_tag[k] = s + 1;
     if (N.resim) return;                /* a re-run: the entries are all known or predicted */
     target = s + (uint32_t)N.delay;
