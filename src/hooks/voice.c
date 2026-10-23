@@ -107,6 +107,7 @@ static ULONGLONG s_heard[SLOTS];                /* when a packet from the slot l
 static uint16_t s_seq_in[SLOTS];
 static int s_seq_seen[SLOTS];
 static volatile LONG s_sending;                 /* this PC sends right now */
+static int s_player_vol[SLOTS] = { 100, 100, 100, 100 };    /* per room slot, for this room only */
 static int s_mic_failed, s_out_failed;
 static INIT_ONCE s_once = INIT_ONCE_STATIC_INIT;
 static const WAVEFORMATEX k_format = { WAVE_FORMAT_PCM, 1, RATE, RATE * 2, 2, 16, 0 };
@@ -166,6 +167,7 @@ static void close_all(void)
     memset(s_rd, 0, sizeof(s_rd));
     memset(s_wr, 0, sizeof(s_wr));
     memset(s_seq_seen, 0, sizeof(s_seq_seen));
+    for (i = 0; i < SLOTS; i++) s_player_vol[i] = 100;      /* a new room starts with everyone at 100 % */
     ReleaseSRWLockExclusive(&s_lock);
 }
 
@@ -205,7 +207,8 @@ static void feed_speakers(void)
         AcquireSRWLockExclusive(&s_lock);
         for (k = 0; k < SLOTS; k++) {
             unsigned have = s_wr[k] - s_rd[k], n = have < MIX ? have : MIX;
-            for (i = 0; i < (int)n; i++) mix[i] += s_ring[k][(s_rd[k] + (unsigned)i) % RING];
+            float pv = (float)s_player_vol[k] / 100.0f;
+            for (i = 0; i < (int)n; i++) mix[i] += s_ring[k][(s_rd[k] + (unsigned)i) % RING] * pv;
             s_rd[k] += n;
         }
         ReleaseSRWLockExclusive(&s_lock);
@@ -310,12 +313,56 @@ static void send_frame(const int16_t *pcm, uint16_t seq, Adpcm *st)
     netplay_send_voice(b, (int)sizeof(b));
 }
 
+/* Level before sending. Headset microphones record quietly ("my voice is too quiet", the first test
+ * with a real microphone), so with voice_auto_level a frame is brought towards a common loudness,
+ * up to 6x, the gain following slowly (quiet frames, breath and room noise, never raise it); then
+ * the player's own voice_mic_volume. Every frame read sets the level meter the settings show. */
+#define AGC_TARGET 4500.0f
+#define AGC_MAX    6.0f
+static volatile LONG s_meter;                   /* the microphone's level after the gain, 0..1000 */
+
+static void level(int16_t *pcm, float *gain)
+{
+    double sum = 0, out = 0;
+    float rms, want, g;
+    int i;
+    for (i = 0; i < FRAME; i++) sum += (double)pcm[i] * pcm[i];
+    rms = (float)sqrt(sum / FRAME);
+    if (!recomp_settings_get("online", "voice_auto_level", 1)) {
+        *gain = 1.0f;
+    } else if (rms > 250.0f) {
+        want = AGC_TARGET / rms;
+        if (want > AGC_MAX) want = AGC_MAX;
+        if (want < 1.0f) want = 1.0f;
+        *gain += (want - *gain) * (want < *gain ? 0.5f : 0.15f);   /* down fast, up slowly */
+    }
+    g = *gain * (float)recomp_settings_get("online", "voice_mic_volume", 100) / 100.0f;
+    for (i = 0; i < FRAME; i++) {
+        float v = pcm[i] * g;
+        pcm[i] = (int16_t)(v > 32767.0f ? 32767 : v < -32768.0f ? -32768 : v);
+        out += (double)pcm[i] * pcm[i];
+    }
+    out = sqrt(out / FRAME) / 12000.0;          /* a loud voice fills most of the meter */
+    InterlockedExchange(&s_meter, (LONG)(out > 1.0 ? 1000 : out * 1000));
+}
+
+float voice_mic_meter(void) { return s_in ? (float)s_meter / 1000.0f : -1.0f; }
+
+int voice_player_volume(int slot) { return slot >= 0 && slot < SLOTS ? s_player_vol[slot] : 100; }
+
+void voice_set_player_volume(int slot, int percent)
+{
+    if (slot < 0 || slot >= SLOTS) return;
+    s_player_vol[slot] = percent < 0 ? 0 : percent > 200 ? 200 : percent;
+}
+
 static DWORD WINAPI voice_thread(LPVOID unused)
 {
     int16_t pcm[FRAME];
     uint16_t seq = 0;
     Adpcm enc = { 0, 0 };
     int hang = 0, test = getenv("RECOMP_VOICE_TEST_TONE") != NULL;
+    float agc = 1.0f;
     double phase = 0;
     ULONGLONG next_tone = 0;
     (void)unused;
@@ -354,10 +401,11 @@ static DWORD WINAPI voice_thread(LPVOID unused)
             } else {                    /* open: send while the voice is above the room noise, and a moment after */
                 double sum = 0;
                 for (i = 0; i < FRAME; i++) sum += (double)pcm[i] * pcm[i];
-                if (sqrt(sum / FRAME) > 700.0) hang = OPEN_HANG;
+                if (sqrt(sum / FRAME) > 400.0) hang = OPEN_HANG;     /* before the level control: quiet microphones too */
                 send = hang > 0;
                 if (hang > 0) hang--;
             }
+            level(pcm, &agc);           /* every frame: the meter shows what would go out */
             if (send) {
                 if (!s_sending) enc.pred = 0, enc.index = 0;    /* a fresh start for each burst */
                 send_frame(pcm, ++seq, &enc);
@@ -397,5 +445,8 @@ int voice_overlay(char *out, int size)
 
 void voice_on_packet(int slot, const uint8_t *p, int len) { (void)slot; (void)p; (void)len; }
 int voice_overlay(char *out, int size) { (void)out; (void)size; return 0; }
+float voice_mic_meter(void) { return -1.0f; }
+int voice_player_volume(int slot) { (void)slot; return 100; }
+void voice_set_player_volume(int slot, int percent) { (void)slot; (void)percent; }
 
 #endif

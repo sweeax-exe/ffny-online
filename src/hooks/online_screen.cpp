@@ -34,6 +34,7 @@
 #include "imgui.h"
 #include "online_screen.h"
 #include "netplay.h"
+#include "voice.h"
 #include "account.h"
 #include "online_data.h"
 #include "pc_settings.h"
@@ -67,6 +68,10 @@ extern "C" void online_menu_on_funccall(const char *text)
         // returns the session to the room).
         if (strstr(text, "battle/cmtype") && netplay_in_lobby() && netplay_state() == NETPLAY_CONNECTED)
             g_open_req = 1;
+        {   // tests: RECOMP_TEST_OPEN_ONLINE=1 opens the online screens at the first main menu
+            static int once;
+            if (up && !once && getenv("RECOMP_TEST_OPEN_ONLINE")) { once = 1; g_open_req = 1; }
+        }
         g_menu_up = up;
         g_focus = -1;
         g_menu_ticks = 0;
@@ -329,6 +334,13 @@ float hint(ImDrawList *dl, const Frame &f, float x, float y, const char *button,
 {
     std::string name = std::string("ui/button_") + button + ".png";
     const Tex &t = tex(name);
+    if (button[0] && button[1] && !t.srv) {     // "rb", "lb": a small plate with both letters
+        char up[3] = { (char)(button[0] - 32), (char)(button[1] - 32), 0 };
+        rect(dl, f, x - 2, y + 1, 22, 14, IM_COL32(70, 70, 70, 255), 4);
+        text(dl, f, g_body, 10, x + 9, y + 2, WHITE, up, CENTER, 0);
+        text(dl, f, g_title, 13, x + 24, y + 1, WHITE, word, LEFT, 1.0f);
+        return 24 + text_width(f, g_title, 13, word) + 12;
+    }
     if (!image(dl, f, t, x, y, 16, 16)) {
         dl->AddCircleFilled(f.p(x + 8, y + 8), 8 * f.s(), button[0] == 'a' ? GREEN : button[0] == 'b' ? RED :
                             button[0] == 'x' ? IM_COL32(60, 120, 230, 255) : IM_COL32(230, 200, 40, 255));
@@ -416,13 +428,13 @@ std::string upper(const char *s)
 
 // ---- the screens --------------------------------------------------------------------------------
 
-enum Page { HUB, ROOMS, SETTINGS, FIGHTERS, CODE, STATS, PLAYERS, RANKED };
+enum Page { HUB, ROOMS, SETTINGS, FIGHTERS, CODE, STATS, PLAYERS, RANKED, VOICE };
 
 struct State {
     Page page = HUB;
     bool settings_edit = false;     // SETTINGS changes the room's (host) instead of a new one
     bool ranked_pick = false;       // FIGHTERS picks the fighter for a ranked search
-    int hub_sel = 0, rooms_sel = 0, settings_sel = 0, fighter_sel = 0, fighter_top = 0, vote_sel = 0;
+    int hub_sel = 0, rooms_sel = 0, settings_sel = 0, fighter_sel = 0, fighter_top = 0, vote_sel = 0, voice_sel = 0;
     int quick_mode = 0;             // index into online_modes
     int stats_page = 0;             // MY STATS: the leaderboard page
     NetRoomSettings settings;
@@ -573,7 +585,7 @@ void connect_if_needed()
 
 // ---- hub ----
 
-const int HUB_ITEMS = 7, HUB_LEAVE = 6, HUB_RANKED = 1;
+const int HUB_ITEMS = 8, HUB_LEAVE = 7, HUB_RANKED = 1, HUB_VOICE = 6;
 
 // RANKED MATCH waits until ranked play is switched on on the server (docs/ranked-design.md);
 // RECOMP_RANKED=1 shows it for tests.
@@ -627,9 +639,10 @@ void draw_players(ImDrawList *dl, const Frame &f, const Pad &pad)
 void draw_hub(ImDrawList *dl, const Frame &f, const Pad &pad)
 {
     static const char *const items[] = { "QUICK MATCH", "RANKED MATCH", "FIND A ROOM", "CREATE A ROOM", "MY STATS",
-                                         "PLAYERS ONLINE", "LEAVE" };
+                                         "PLAYERS ONLINE", "VOICE CHAT", "LEAVE" };
     static const char *const subs[] = { "STRAIGHT INTO A FIGHT", "ONE ON ONE FOR YOUR RATING", "OPEN ROOMS", "YOUR RULES",
-                                        "RECORD AND LEADERBOARD", "WHO IS AROUND", "BACK TO THE MENU" };
+                                        "RECORD AND LEADERBOARD", "WHO IS AROUND", "TALK IN ROOMS AND FIGHTS",
+                                        "BACK TO THE MENU" };
     static const char *const descs[] = {
         "You are put into an open room of this mode, or one is opened for the next players.",
         "Pick your fighter, then the server finds an opponent with a similar rating. Wins and losses move your "
@@ -638,6 +651,8 @@ void draw_hub(ImDrawList *dl, const Frame &f, const Pad &pad)
         "Pick the mode, the players and the venues to vote on. Others join from the list or by its code.",
         "Your wins, losses and last fights, and the leaderboard. Sign in with Discord in the launcher to keep them.",
         "Everyone online right now: in the menu, in a room or fighting.",
+        "Talk with the players in your room, in the room and in the fight. Push-to-talk, open microphone or off, "
+        "your microphone's and the others' volume.",
         "Back to the main menu. You stay reachable until you go offline in the settings.",
     };
     const OnlineMode *modes;
@@ -702,6 +717,7 @@ void draw_hub(ImDrawList *dl, const Frame &f, const Pad &pad)
             break;
         case 4: S.page = STATS; S.stats_page = 0; account_fetch_stats_page(0); break;
         case 5: S.page = PLAYERS; netplay_lobby_who(); break;
+        case HUB_VOICE: S.page = VOICE; S.voice_sel = 0; break;
         case HUB_LEAVE: break;      // handled by the caller (closes)
         }
     }
@@ -1217,6 +1233,7 @@ void draw_room(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
     hx += hint(dl, f, hx, hy, "a", ready ? "NOT READY" : "READY");
     if (!ready) hx += hint(dl, f, hx, hy, "x", "CHOOSE FIGHTER");
     if (host && !ready) hx += hint(dl, f, hx, hy, "y", "ROOM SETTINGS");
+    hx += hint(dl, f, hx, hy, "rb", "VOICE");
     hint(dl, f, hx, hy, "b", "LEAVE ROOM");
 
     if (pad.a) netplay_lobby_ready(ready ? 0 : 1, fighter);
@@ -1231,7 +1248,95 @@ void draw_room(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
         S.settings_sel = 0;
         S.page = SETTINGS;
     }
+    if (pad.rb) { S.page = VOICE; S.voice_sel = 0; }
     if (pad.b) { netplay_lobby_leave(); S.page = HUB; say("You left the room."); }
+}
+
+// ---- voice chat (voice.c): the settings, and each other player in the room ----
+
+void draw_voice(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
+{
+    static const char *const modes[] = { "OFF", "PUSH TO TALK", "OPEN MICROPHONE" };
+    int others[NETPLAY_MAX_PLAYERS], n_others = 0;
+    if (r.in_room)
+        for (int i = 0; i < r.player_count && n_others < NETPLAY_MAX_PLAYERS; i++)
+            if (r.players[i].slot != r.you) others[n_others++] = i;
+    const int fixed = 4, rows = fixed + n_others + 1;           // the settings, the players, BACK
+    if (S.voice_sel >= rows) S.voice_sel = rows - 1;
+    if (pad.up) S.voice_sel = (S.voice_sel + rows - 1) % rows;
+    if (pad.down) S.voice_sel = (S.voice_sel + 1) % rows;
+    int step = pad.right ? 1 : pad.left ? -1 : 0;
+    int mode = recomp_settings_get("online", "voice", 1), vol = recomp_settings_get("online", "voice_volume", 100);
+    int mic = recomp_settings_get("online", "voice_mic_volume", 100), agc = recomp_settings_get("online", "voice_auto_level", 1);
+    if (step) {
+        switch (S.voice_sel) {
+        case 0: recomp_settings_set("online", "voice", (mode + step + 3) % 3); break;
+        case 1: recomp_settings_set("online", "voice_volume", std::max(0, std::min(200, vol + step * 10))); break;
+        case 2: recomp_settings_set("online", "voice_mic_volume", std::max(0, std::min(400, mic + step * 10))); break;
+        case 3: recomp_settings_set("online", "voice_auto_level", agc ? 0 : 1); break;
+        default:
+            if (S.voice_sel - fixed < n_others) {
+                int slot = r.players[others[S.voice_sel - fixed]].slot;
+                voice_set_player_volume(slot, voice_player_volume(slot) + step * 25);
+            }
+        }
+        mode = recomp_settings_get("online", "voice", 1);
+        vol = recomp_settings_get("online", "voice_volume", 100);
+        mic = recomp_settings_get("online", "voice_mic_volume", 100);
+        agc = recomp_settings_get("online", "voice_auto_level", 1);
+    }
+
+    page_title(dl, f, "VOICE CHAT");
+    std::string key = setting_text("voice_key", "T");
+    for (int i = 0; i < rows; i++) {
+        float x = 50, y = 80 + i * 39, w = 270, h = 34;
+        if (mouse_in(f, x, y, w, h)) S.voice_sel = i;
+        bool sel = S.voice_sel == i;
+        rect(dl, f, x, y, w, h, sel ? IM_COL32(25, 22, 18, 235) : IM_COL32(15, 15, 15, 170));
+        if (sel) selector(dl, f, x, y, w, h);
+        if (i == rows - 1) {
+            text(dl, f, g_title, 18, x + w / 2, y + 7, sel ? CREAM : GREY, "BACK", CENTER);
+            if (mouse_click(f, x, y, w, h)) const_cast<Pad &>(pad).a = true;
+            continue;
+        }
+        char label[48], value[48];
+        if (i == 0) {
+            snprintf(label, sizeof(label), "VOICE CHAT");
+            snprintf(value, sizeof(value), mode == 1 ? "%s  (%s)" : "%s", modes[mode >= 0 && mode < 3 ? mode : 1], key.c_str());
+        } else if (i == 1) {
+            snprintf(label, sizeof(label), "EVERYONE ELSE");
+            snprintf(value, sizeof(value), vol ? "%d %%" : "MUTED", vol);
+        } else if (i == 2) {
+            snprintf(label, sizeof(label), "MY MICROPHONE");
+            snprintf(value, sizeof(value), "%d %%", mic);
+        } else if (i == 3) {
+            snprintf(label, sizeof(label), "AUTO LEVEL");
+            snprintf(value, sizeof(value), agc ? "ON  (quiet microphones louder)" : "OFF");
+        } else {
+            const NetRoomPlayer &p = r.players[others[i - fixed]];
+            int pv = voice_player_volume(p.slot);
+            snprintf(label, sizeof(label), "PLAYER");
+            snprintf(value, sizeof(value), pv ? "%s  %d %%" : "%s  MUTED", p.name, pv);
+        }
+        text(dl, f, g_title, 10, x + 12, y + 3, GREY, label);
+        text(dl, f, g_title, 15, x + 12, y + 15, sel ? WHITE : GREY, value);
+        if (sel) { text(dl, f, g_title, 17, x + w - 26, y + 8, ORANGE, "<", CENTER); text(dl, f, g_title, 17, x + w - 10, y + 8, ORANGE, ">", CENTER); }
+    }
+    // the door: how it works, and the microphone's level
+    door_text(dl, f, &tex("ui/online_icon.png"), "VOICE CHAT", "TALK IN ROOMS AND FIGHTS",
+              "Everyone in your room hears you. Hold the key to talk (change it in the launcher). "
+              "Turn a player to 0 to mute them.");
+    // the microphone's level, under the rows
+    float meter = voice_mic_meter(), my = 80 + rows * 39 + 6;
+    if (meter >= 0.0f) {
+        text(dl, f, g_title, 10, 52, my, GREY, meter > 0.95f ? "YOUR MICROPHONE: TOO LOUD" : "YOUR MICROPHONE");
+        rect(dl, f, 52, my + 14, 266, 9, IM_COL32(40, 40, 40, 255));
+        rect(dl, f, 52, my + 14, 266 * meter, 9, meter > 0.95f ? RED : GREEN);
+    } else {
+        text(dl, f, g_title, 10, 52, my, GREY, r.in_room ? "Press the talk key once: your microphone's level shows here."
+                                                       : "Your microphone's level shows here in a room.");
+    }
+    if ((pad.a && S.voice_sel == rows - 1) || pad.b) S.page = HUB;
 }
 
 void draw_status(ImDrawList *dl, const Frame &f)
@@ -1403,6 +1508,11 @@ bool draw(ImVec2 display)
         if (pad.b) S.page = HUB;
     } else if (S.page == RANKED && !room.in_room) {
         draw_ranked(dl, f, pad);
+    } else if (S.page == VOICE && !(room.in_room && room.phase != 0)) {
+        draw_voice(dl, f, pad, room);
+        float hx = 54;
+        hx += hint(dl, f, hx, 420, "b", "BACK");
+        (void)hx;
     } else if (S.page == CODE) {
         draw_code(dl, f, pad);
         float hx = 54;

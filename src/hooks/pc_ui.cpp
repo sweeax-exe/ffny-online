@@ -1066,7 +1066,18 @@ static void page_online(UiMode mode)
         if (ImGui::Button("Go offline", ImVec2(ImGui::GetFontSize() * 7, 0))) netplay_stop();
     }
     ImGui::SeparatorText("Voice chat");
-    settings_group("online", { "voice", "voice_key", "voice_volume" });
+    settings_group("online", { "voice", "voice_key", "voice_volume", "voice_mic_volume", "voice_auto_level" });
+    {
+        float meter = voice_mic_meter();
+        if (meter >= 0.0f) {
+            ImGui::ProgressBar(meter, ImVec2(ImGui::GetFontSize() * 16, 0), "your microphone");
+            ImGui::SameLine();
+            ImGui::TextDisabled(meter > 0.95f ? "too loud: lower your microphone volume" : "");
+        } else {
+            ImGui::TextDisabled("The level of your microphone shows here while you are in a room and it is open "
+                                "(after your first push-to-talk press).");
+        }
+    }
     ImGui::TextDisabled("Everyone in your room hears you, in the room and in the fight. Push-to-talk: hold the key "
                         "above while the game window has the focus. Your voice goes live through the project's server "
                         "and is not recorded.");

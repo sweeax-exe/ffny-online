@@ -17,6 +17,13 @@ void voice_on_packet(int slot, const uint8_t *p, int len);
 /* A line for the screen: who is talking, and whether this PC sends; 0 when there is nothing to show. */
 int voice_overlay(char *out, int size);
 
+/* The microphone's level after the gains, 0..1, for the settings' meter; -1 while it is closed. */
+float voice_mic_meter(void);
+
+/* One room member's volume in percent (0 mutes them, up to 200), by relay slot; for this room only. */
+int voice_player_volume(int slot);
+void voice_set_player_volume(int slot, int percent);
+
 #ifdef __cplusplus
 }
 #endif
