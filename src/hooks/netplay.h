@@ -139,6 +139,9 @@ void netplay_room(char *code, int size);
 /* 1 while a session is connected and the game should run in lockstep. */
 int netplay_active(void);
 
+/* 1 while a fight runs, online or not (the game's match phase): no notices over it. */
+int netplay_in_fight(void);
+
 /* Tests: start a session from RECOMP_NETPLAY=host|join, RECOMP_NETPLAY_SERVER and
  * RECOMP_NETPLAY_CODE_FILE, if they are set. Call once at start-up. */
 void netplay_autostart(void);

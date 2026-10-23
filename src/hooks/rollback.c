@@ -109,7 +109,14 @@ static volatile LONG s_foreign;
 extern void (*xbox_guest_write_notify)(void *host, size_t length);
 static int s_audio_state;               /* 0 before, 1 during, 2 after the audio start-up */
 
-#define ARENA_BYTES  (12u * 1024u * 1024u)
+/* The arena grows in pieces as the sound side asks: it shares the 64 MiB contiguous window with the
+ * game's heap and its GPU data, and a fixed 12 MiB piece left the GPU data too little: a player's game
+ * froze with 62.9 of 64 MiB in use, the title's contiguous allocation retrying for ever (build 20). The
+ * sound side was seen to hold up to 5.6 MiB. */
+#define ARENA_FIRST  (3u * 1024u * 1024u)
+#define ARENA_GROW   (1u * 1024u * 1024u)
+#define ARENA_MAX    (12u * 1024u * 1024u)
+#define ARENA_CHUNKS 16
 #define ARENA_BLOCKS 8192
 #define ARENA_ALIGN  128u               /* what sub_00029500 gives at most */
 #define SND_ALLOCATOR 0x003ADB58u
@@ -117,7 +124,17 @@ static int s_audio_state;               /* 0 before, 1 during, 2 after the audio
 typedef struct { uint32_t addr, size, user; int used; } Block;
 static Block s_blk[ARENA_BLOCKS];
 static int s_nblk;
-static uint32_t s_arena, s_arena_live, s_arena_peak;
+static uint32_t s_arena, s_arena_live, s_arena_peak, s_arena_total;
+static uint32_t s_chunk_lo[ARENA_CHUNKS], s_chunk_hi[ARENA_CHUNKS];
+static int s_nchunk;
+
+static int in_arena(uint32_t a)
+{
+    int k;
+    for (k = 0; k < s_nchunk; k++)
+        if (a >= s_chunk_lo[k] && a < s_chunk_hi[k]) return 1;
+    return 0;
+}
 static CRITICAL_SECTION s_arena_cs;
 static int s_arena_state;               /* 0 not yet, 1 on, -1 unavailable */
 static void arena_start(void);
@@ -126,14 +143,17 @@ static volatile LONG s_mix_on;          /* a mixer tick is being watched (see mi
 static HANDLE s_game_thread;
 static ULONG64 s_game_cycles;
 
-/* On for everyone since build 19; RECOMP_ROLLBACK=off (debug-env.txt) turns it off, and then
- * nothing of it runs: no audio arena, no write tracking, no saves. */
+/* Off by default again since build 21: on for everyone in builds 19 and 20, players' games crashed
+ * in the sound engine (sub_0012BE20, sub_00126150: engine objects with junk vtables in the audio
+ * arena) a few seconds into online fights, and the 12 MiB arena left the GPU data too little room
+ * (a freeze with 62.9 of 64 MiB in use). RECOMP_ROLLBACK=on (debug-env.txt) turns it on for tests;
+ * off, nothing of it runs: no audio arena, no write tracking, no saves. */
 int rollback_enabled(void)
 {
     static int on = -1;
     if (on < 0) {
         const char *v = getenv("RECOMP_ROLLBACK");
-        on = !(v && !strcmp(v, "off"));
+        on = v && !strcmp(v, "on");
     }
     return on;
 }
@@ -168,7 +188,7 @@ void rollback_audio_init_end(void)
     if (s_audio_state != 1 || MEM32(g_esp) != 0x0001284Bu) return;
     s_audio_state = 2;
     base = MEM32(AUDIO_RAM);
-    if (s_arena && base >= s_arena && base < s_arena + ARENA_BYTES) {
+    if (s_arena && in_arena(base)) {
         free(s_boot_hash);
         s_boot_hash = NULL;
         s_audio_lo = base;
@@ -747,12 +767,37 @@ extern uint32_t xbox_ContiguousAlloc(uint32_t size, uint32_t alignment);
 extern void sub_0001DC10(void);
 extern void sub_0001DC20(void);
 
+/* A new piece of contiguous memory for the arena, as a free block in address order (the lock held). */
+extern uint32_t xbox_ContiguousAlloc(uint32_t size, uint32_t alignment);
+static int arena_grow(uint32_t need)
+{
+    uint32_t size = need > ARENA_GROW ? (need + 0xFFFFu) & ~0xFFFFu : ARENA_GROW, base;
+    int i;
+    if (s_nchunk >= ARENA_CHUNKS || s_nblk >= ARENA_BLOCKS || s_arena_total + size > ARENA_MAX) return 0;
+    base = xbox_ContiguousAlloc(size, 4096);
+    if (!base) return 0;
+    s_chunk_lo[s_nchunk] = base;
+    s_chunk_hi[s_nchunk++] = base + size;
+    s_arena_total += size;
+    for (i = 0; i < s_nblk && s_blk[i].addr < base; i++) {}
+    memmove(&s_blk[i + 1], &s_blk[i], (size_t)(s_nblk - i) * sizeof(Block));
+    s_blk[i].addr = base;
+    s_blk[i].size = size;
+    s_blk[i].user = 0;
+    s_blk[i].used = 0;
+    s_nblk++;
+    fprintf(stderr, "[ROLLBACK] the audio arena grows by %u KB at %08X (%u KB in all)\n", size / 1024, base,
+            s_arena_total / 1024);
+    return 1;
+}
+
 static uint32_t arena_alloc(uint32_t want)
 {
-    int i;
+    int i, grown = 0;
     uint32_t a = 0, size = (want + ARENA_ALIGN + 16u + 15u) & ~15u;
-    if (s_arena_state != 1 || want > ARENA_BYTES / 2) return 0;
+    if (s_arena_state != 1 || want > ARENA_MAX / 2) return 0;
     EnterCriticalSection(&s_arena_cs);
+again:
     for (i = 0; i < s_nblk; i++) {
         if (s_blk[i].used || s_blk[i].size < size) continue;
         if (s_blk[i].size > size && s_nblk < ARENA_BLOCKS) {    /* split: the rest stays free */
@@ -778,6 +823,7 @@ static uint32_t arena_alloc(uint32_t want)
         }
         break;
     }
+    if (!a && !grown && arena_grow(size)) { grown = 1; goto again; }
     LeaveCriticalSection(&s_arena_cs);
     return a;
 }
@@ -785,7 +831,7 @@ static uint32_t arena_alloc(uint32_t want)
 static int arena_free_now(uint32_t a)
 {
     int i;
-    if (!s_arena || a < s_arena || a >= s_arena + ARENA_BYTES) return 0;
+    if (!s_arena || !in_arena(a)) return 0;
     EnterCriticalSection(&s_arena_cs);
     for (i = 0; i < s_nblk; i++) {
         if (s_blk[i].user != a || !s_blk[i].used) continue;
@@ -822,7 +868,7 @@ static int arena_free(uint32_t a)
 {
     unsigned k;
     int i, live = 0;
-    if (!s_arena || a < s_arena || a >= s_arena + ARENA_BYTES) return 0;
+    if (!s_arena || !in_arena(a)) return 0;
     if (!s_tracking) return arena_free_now(a);
     EnterCriticalSection(&s_arena_cs);
     for (i = 0; i < s_nblk && !live; i++) live = s_blk[i].user == a && s_blk[i].used;
@@ -861,15 +907,12 @@ static void arena_start(void)
     if (s_arena_state) return;
     if (!rollback_enabled()) { s_arena_state = -1; return; }
     InitializeCriticalSection(&s_arena_cs);
-    s_arena = xbox_ContiguousAlloc(ARENA_BYTES, 4096);
-    if (!s_arena) { s_arena_state = -1; fprintf(stderr, "[ROLLBACK] no room for the sound engine's arena\n"); return; }
-    s_blk[0].addr = s_arena;
-    s_blk[0].size = ARENA_BYTES;
-    s_blk[0].used = 0;
-    s_nblk = 1;
+    s_nblk = 0;
+    if (!arena_grow(ARENA_FIRST)) { s_arena_state = -1; fprintf(stderr, "[ROLLBACK] no room for the sound engine's arena\n"); return; }
+    s_arena = s_chunk_lo[0];
     s_arena_state = 1;
-    fprintf(stderr, "[ROLLBACK] the audio code allocates from its own arena at %08X (%u KB; pool slot 63 %08X)\n",
-            s_arena, ARENA_BYTES / 1024, MEM32(0x003C9158u + 63u * 4u));
+    fprintf(stderr, "[ROLLBACK] the audio code allocates from its own arena at %08X (%u KB to start, up to %u KB; "
+            "pool slot 63 %08X)\n", s_arena, ARENA_FIRST / 1024, ARENA_MAX / 1024, MEM32(0x003C9158u + 63u * 4u));
 }
 
 static int audio_code(uint32_t ret)

@@ -55,6 +55,7 @@ void netplay_status(char *t, int size) { if (size > 0) snprintf(t, (size_t)size,
 void netplay_room(char *c, int size) { if (size > 0) c[0] = 0; }
 void netplay_autostart(void) {}
 int netplay_active(void) { return 0; }
+int netplay_in_fight(void) { return 0; }
 int netplay_lobby(const char *s, const char *n) { (void)s; (void)n; return -1; }
 void netplay_lobby_list(int m) { (void)m; }
 void netplay_lobby_who(void) {}
@@ -135,7 +136,7 @@ void netplay_crowd_update(void) { sub_00081170(); }
 #define P_STEPS       4     /* u32 match, u32 last step, u8 count, count x 32 bytes */
 #define P_HASH        5     /* u32 match, u32 step, u32 hash */
 #define P_RTT         6     /* hub: u32 START seed, u16 this PC's ping to the relay in ms */
-#define LOCKSTEP_VERSION 3     /* 3: build 19, rollback and contiguous reclaim on (memory laid out differently) */
+#define LOCKSTEP_VERSION 4     /* 3: builds 19-20, rollback on; 4: build 21, rollback off again, reclaim on */
 
 #define MAXP          NETPLAY_MAX_PLAYERS
 #define PAD_TABLE     0x003B8F48u
@@ -262,7 +263,7 @@ static struct {
     ULONGLONG toast_until;
 } N;
 
-/* Rollback (rollback.h) is on unless RECOMP_ROLLBACK=off; off, every step waits for every entry. */
+/* Rollback (rollback.h) is on with RECOMP_ROLLBACK=on (off by default since build 21); off, every step waits for every entry. */
 static int rollback_wanted(void) { return rollback_enabled(); }
 
 static BOOL CALLBACK init_once(PINIT_ONCE o, PVOID p, PVOID *c)
@@ -487,8 +488,20 @@ static void lose_peer(const char *why)
 }
 
 /* The hub match is over for this PC: tell the server and go back to the room. */
+/* The contiguous window's use (64 MiB: textures, vertex data, rollback's audio arena) at a match's
+ * start and end: when it runs dry the game draws with buffers it did not get (white blocks, the
+ * announcer word sheet). Reports from build 19 showed it full at a second match's start. */
+extern uint32_t xbox_ContiguousLiveBytes(void);
+extern uint32_t xbox_ContiguousAllocatedBytes(void);
+static void log_contiguous(const char *when)
+{
+    fprintf(stderr, "[MEM] contiguous memory %s: %.1f MB in use, %.1f MB reached\n", when,
+            xbox_ContiguousLiveBytes() / 1048576.0, xbox_ContiguousAllocatedBytes() / 1048576.0);
+}
+
 static void end_hub_match(const char *why)
 {
+    log_contiguous("at the match end");
     InterlockedExchange(&N.lockstep, 0);
     assign_input(0);
     SetEvent(N.arrived);
@@ -1688,6 +1701,7 @@ void netplay_autostart(void)
 }
 
 int netplay_active(void) { return N.lockstep != 0; }
+int netplay_in_fight(void) { return MEM32(G_MATCH_PHASE) == 1u; }
 
 /* ---- the game's hooks ------------------------------------------------------------ */
 
@@ -1780,6 +1794,7 @@ void netplay_on_match_start(void)
      * the longest). */
     fight_input();
     fprintf(stderr, "[NETPLAY] match %08X starts in lockstep (%d players, delay %d)\n", N.match, N.players, N.delay);
+    log_contiguous("at the match start");
 }
 
 void netplay_on_pad_pass(void) {}

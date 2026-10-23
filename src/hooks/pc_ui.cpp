@@ -1751,6 +1751,35 @@ extern "C" int pc_ui_window_message(HWND window, UINT msg, WPARAM wp, LPARAM lp)
     return handled;
 }
 
+// A newer build published while the game runs: say so in the menus. The launcher checks only at its
+// start, and players stay in the game for hours, so hotfixes went unseen. Checked a minute after start
+// and every fifteen minutes; shown once per build for fifteen seconds, never over a fight.
+static bool update_notice(char *out, size_t size)
+{
+    static UiTick next_check, until;
+    static int shown_build;
+    UiTick now = ui_ticks();
+    if (!next_check) next_check = now + 60000;
+    if (now >= next_check) {
+        next_check = now + 15 * 60000;
+        UpdaterState st = updater_state();
+        if (st != UPDATER_AVAILABLE && st != UPDATER_DOWNLOADING && st != UPDATER_INSTALLING && st != UPDATER_INSTALLED)
+            updater_check();
+    }
+    if (updater_state() == UPDATER_AVAILABLE && !netplay_in_fight()) {
+        int build = 0;
+        char version[64], notes[8];
+        updater_info(&build, version, sizeof(version), notes, sizeof(notes));
+        if (build > updater_local_build() && build != shown_build) {
+            shown_build = build;
+            until = now + 15000;
+        }
+    }
+    if (!until || now >= until) return false;
+    snprintf(out, size, "Build %d is out: close the game and start the launcher to update.", shown_build);
+    return true;
+}
+
 extern "C" void pc_ui_overlay(void *device, void *context, void *window_rtv, unsigned width, unsigned height, void *)
 {
     static bool configured;
@@ -1773,7 +1802,8 @@ extern "C" void pc_ui_overlay(void *device, void *context, void *window_rtv, uns
     // F9's notice shows over everything, the online screens and the settings included (pressed in
     // the online menu, it was hidden there); the netplay notices are for the fight only.
     bool toast = bug_report_toast(notice, sizeof(notice)) ||
-                 (!g_open.load() && netplay_toast(notice, sizeof(notice)));    // online: a wait, a desync
+                 (!g_open.load() && netplay_toast(notice, sizeof(notice))) ||  // online: a wait, a desync
+                 update_notice(notice, sizeof(notice));                         // a newer build is out
     if (!g_open.load() && !decor && !toast) { ui_unlock(); return; }
 
     ID3D11Device *dev = (ID3D11Device *)device;
