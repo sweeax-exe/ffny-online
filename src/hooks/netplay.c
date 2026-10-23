@@ -412,7 +412,7 @@ static void answered(void)
 
 static DWORD remote_slot_state(int slot, XBOX_INPUT_STATE *state)
 {
-    if (N.state != NETPLAY_CONNECTED || slot < 0 || slot >= N.players || slot == N.pos)
+    if (N.state != NETPLAY_CONNECTED || !N.lockstep || slot < 0 || slot >= N.players || slot == N.pos)
         return ERROR_DEVICE_NOT_CONNECTED;
     EnterCriticalSection(&g_cs);
     state->dwPacketNumber = N.remote_packet[slot];
@@ -427,12 +427,17 @@ static DWORD remote_slot_state(int slot, XBOX_INPUT_STATE *state)
  * games parted, or a player kept everyone waiting. A port that read as unplugged mid-fight brought
  * up "Controller Disconnected" on one PC the same way. While a hub match runs, START reaches no
  * controller and every port reads as plugged in (players' Discord reports, 2026-10-22). */
+#define REST_ONLY 0x0400      /* no Xbox button: the other ports read as pads at rest, START works */
 static void fight_input(void)
 {
     static LONG on = -1;
-    LONG want = N.lobby && N.lockstep && N.match_seen;    /* the match itself, not the menus before it */
+    /* the match itself, not the menus before it; once the other players are gone (it goes on
+     * offline) their ports stay plugged-in pads at rest: unplugged, they brought up "Controller
+     * Disconnected - port 2" mid-fight, which only that port's START closes (players' reports,
+     * 2026-10-23); this PC's START works again then, to pause and quit */
+    LONG want = !N.lobby || !N.match_seen ? 0 : N.lockstep ? 0x0010 : N.match_live ? REST_ONLY : 0;
     if (InterlockedExchange(&on, want) != want)
-        xbox_HostInputSetNetplayFight(want ? 0x0010 : 0);   /* the START button */
+        xbox_HostInputSetNetplayFight((WORD)want);
 }
 
 static void assign_input(int on)
@@ -837,7 +842,7 @@ static void on_room(const uint8_t *b, int len)
     LeaveCriticalSection(&g_cs);
     if (gone && N.lockstep) {
         InterlockedExchange(&N.lockstep, 0);
-        assign_input(0);
+        fight_input();              /* their ports stay plugged in, at rest, until the match ends */
         SetEvent(N.arrived);
         set_status("A player left the match; it finishes offline.");
     }
