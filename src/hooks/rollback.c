@@ -223,6 +223,7 @@ static uint32_t s_read_at[8], s_read_len[8], s_reads_told;
 static int s_read_game[8];
 static uint32_t s_read_save[8];
 static volatile LONG s_saves;           /* saves since the reference: a clock for the log */
+static void release_held_arena(int all);
 static uint8_t *s_data_before;          /* rollback_prepare: .data before the hold, to name what changed */
 
 /* The first write since the reference to page p, by the game thread or another. Lock-free: it runs
@@ -350,6 +351,7 @@ static void track_stop(void)
     memset(s_guard, 0, sizeof(s_guard));
     LeaveCriticalSection(&s_track_cs);
     release_contig_frees();
+    release_held_arena(1);
 }
 
 static int track_start(void)
@@ -687,6 +689,7 @@ int rollback_save(int slot)
         s_reads_told++;
     }
     InterlockedIncrement(&s_saves);
+    release_held_arena(0);
     s = &s_slot[slot];
     if (!s->data && !(s->data = (uint8_t *)malloc(s_dbytes))) return -1;
     if (s->heap_cap < (size_t)s_nchange * PAGE) {
@@ -779,7 +782,7 @@ static uint32_t arena_alloc(uint32_t want)
     return a;
 }
 
-static int arena_free(uint32_t a)
+static int arena_free_now(uint32_t a)
 {
     int i;
     if (!s_arena || a < s_arena || a >= s_arena + ARENA_BYTES) return 0;
@@ -802,6 +805,55 @@ static int arena_free(uint32_t a)
     }
     LeaveCriticalSection(&s_arena_cs);
     return 1;
+}
+
+/* Arena frees in a fight are held, as the contiguous ones are: the arena is not part of the save
+ * states, so a block given back after a save and handed to the sound engine again was still the
+ * game's after a load back to that save, and the game wrote into the engine's new object (a
+ * player's crash in sub_0012BE20, build 19: engine objects with junk vtables, 124 rollbacks in).
+ * A held block stays allocated until no save older than its free is left (ROLLBACK_SLOTS saves
+ * later); a block freed again meanwhile (the game frees it once more after a load) just moves
+ * its time on. */
+#define HELD_ARENA 4096
+static struct { uint32_t addr; LONG at; } s_held_arena[HELD_ARENA];
+static unsigned s_nheld_arena;
+
+static int arena_free(uint32_t a)
+{
+    unsigned k;
+    int i, live = 0;
+    if (!s_arena || a < s_arena || a >= s_arena + ARENA_BYTES) return 0;
+    if (!s_tracking) return arena_free_now(a);
+    EnterCriticalSection(&s_arena_cs);
+    for (i = 0; i < s_nblk && !live; i++) live = s_blk[i].user == a && s_blk[i].used;
+    if (live) {
+        for (k = 0; k < s_nheld_arena && s_held_arena[k].addr != a; k++) {}
+        if (k == s_nheld_arena && s_nheld_arena < HELD_ARENA) s_nheld_arena++;
+        if (k < s_nheld_arena) { s_held_arena[k].addr = a; s_held_arena[k].at = s_saves; }
+        else live = 0;      /* the list is full: give it back now */
+    }
+    LeaveCriticalSection(&s_arena_cs);
+    return live ? 1 : arena_free_now(a);
+}
+
+/* give back the held blocks no save can reach any more (all = 1: every one, the fight is over) */
+static void release_held_arena(int all)
+{
+    unsigned k = 0;
+    if (!s_arena) return;
+    EnterCriticalSection(&s_arena_cs);
+    while (k < s_nheld_arena) {
+        if (all || s_saves - s_held_arena[k].at > ROLLBACK_SLOTS + 2) {
+            uint32_t a = s_held_arena[k].addr;
+            s_held_arena[k] = s_held_arena[--s_nheld_arena];
+            LeaveCriticalSection(&s_arena_cs);
+            arena_free_now(a);
+            EnterCriticalSection(&s_arena_cs);
+        } else {
+            k++;
+        }
+    }
+    LeaveCriticalSection(&s_arena_cs);
 }
 
 static void arena_start(void)
