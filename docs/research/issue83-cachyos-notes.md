@@ -70,10 +70,13 @@ Local receipt: `build/issue83-artifact-verification.json`.
 [Test instructions and download link posted on #83](https://github.com/vyanhursky/DefJamFFNY-recomp/issues/83#issuecomment-6369126220).
 They specify Bundled release (offline) so the candidate's fixed source is used,
 Install for a failed first install, Clean Update from a working 0.10.6, or
-Clean Rebuild for an existing 0.10.7. The issue stays open for reporter confirmation.
-No merge or stable release. Updating to the published v0.10.7 alone does not include this change.
+Clean Rebuild for an existing 0.10.7. The [reporter confirmed on 2026-10-23](https://github.com/vyanhursky/DefJamFFNY-recomp/issues/83#issuecomment-6369284367):
+"It is working now. I'm watching the intro." The owner also reports a second
+successful test from a Discord user. The owner authorized merging PR #90 and
+closing #83, with the fix to ship in the next release the owner makes. All 29
+checks on PR head `8d5ddf5` passed. No new release or tag is requested. Updating to the published v0.10.7 alone does not include this change.
 A source-build workaround on the affected release is to reconfigure its existing
 source/build folder with `cmake --preset posix-release -DCMAKE_CXX_STANDARD=17`,
 then `cmake --build --preset posix-release --target defjam_recomp`.
 Setup sanitizes compiler environment variables, so setting `CXXFLAGS` outside
-Setup is not a reliable workaround. Do not close #83 as reporter-confirmed yet.
+Setup is not a reliable workaround. Issue #83 can now be closed as fixed with PR #90; reporter confirmation is recorded above.

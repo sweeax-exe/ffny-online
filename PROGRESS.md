@@ -247,7 +247,7 @@
 | D146 | 2026-10-20 | Linux: stop baking the build-time Vulkan loader path into the game (issue #77). Keep `DEFJAM_VULKAN_LIBRARY` (SDL_HINT_VULKAN_LIBRARY) on macOS only and let SDL load `libvulkan.so.1` on Linux. | A container build saves Arch's 64-bit `/lib/libvulkan.so`; on Fedora-family hosts (Bazzite) `/lib` is 32-bit, so SDL failed with wrong ELF class and the game ran with no window (SteamOS matches Arch, so the Deck worked). The system loader resolves the soname for the right architecture on every distribution; `ldd` setup check cannot see a dlopen path. Alternatives rejected: rewrite the path per host (fragile), a launcher env var (hides the bug, misses direct runs). |
 | D148 | 2026-10-22 | Cut v0.10.7 as a regular (not pre-) release containing only the pending Windows fixes: PR #76 (toolkit pin `8589f88`) and PR #80, integrated on `release/0.10.7`. PR #73 (long texture-pack lists, toolkit `72bec86`) is not included; the owner will bundle it with the mod release. PR #85 (toolkit v0.16, D147) and the draft mod PRs are out of scope. The skip-intro native fixture's synthetic memory is enlarged so MSVC no longer faults on it (test only; it failed on v0.10.6 too). | Owner, 2026-10-22: include #80, #76 and the setup update path; not #73; a regular release; run the regression only on failures, then on the candidate. Releasing before the reporters confirm is the owner's call (the #76 body asked to hold). D147 is reserved by PR #85. Published 2026-10-22 as a regular release (not a prerelease) after the owner play-test; the owner asked the agent to publish and merge the remaining PRs itself. The follow-ups: PR #87 (triage.py prints a stand-in for characters the console cannot show, merged `abb4bf5`) and issue #88 (`audio.dry_queue` on Windows). |
 
-| D149 | 2026-10-23 | Issue #83: convert filesystem UTF-8 results explicitly to byte strings in the launcher; support C++17 and C++20 instead of forcing an older language mode. Native fixtures run in both modes. | GCC 16 on CachyOS defaults to C++20; `u8string()` then returns `char8_t`, incompatible with the launcher's `std::string` interfaces. Linux GCC C++20 reproduced the report. Preserve UTF-8 bytes on Windows and POSIX, keep existing CMake minimum and toolkit pin. Details: `docs/research/issue83-cachyos-notes.md`. |
+| D149 | 2026-10-23 | Issue #83: convert filesystem UTF-8 results explicitly to byte strings in the launcher; support C++17 and C++20 instead of forcing an older language mode. Native fixtures run in both modes. | GCC 16 on CachyOS defaults to C++20; `u8string()` then returns `char8_t`, incompatible with the launcher's `std::string` interfaces. Linux GCC C++20 reproduced the report. Preserve UTF-8 bytes on Windows and POSIX, keep existing CMake minimum and toolkit pin. Details: `docs/research/issue83-cachyos-notes.md`. Owner accepted 2026-10-23 after the GitHub reporter confirmed the intro plays and a second Discord user confirmed success (owner report); merge PR #90, close #83, include the fix in the owner's next release. |
 
 D138–D140 were allocated independently on main and the launcher branch. Their rows retain both records, labelled by branch, so existing decision references keep their meaning; no identifiers were renumbered. D143–D144 were also allocated independently on the issue72 branch; its rows retain the branch label, and their existing references keep that meaning.
 
@@ -339,7 +339,6 @@ defjam-recomp/
 
 > Recent entries only; older entries remain unchanged in the local `docs/worklog/` archive.
 
-- 2026-10-21 08:48 — D146, issue #77: reporter confirms the Linux test setup from CI run 39521387707 (commit 2ccfee0, Clean Rebuild) opens a window and plays. PR #78 (28/28 CI) merged after merging main (D145 number taken by the v0.10.6 stable promotion; this decision renumbered D146). Issue #77 closed as fixed in the next release; no release cut.
 - 2026-10-21 12:00 — Discord report (reporter K11): Windows setup build fails at the final link, `defjam_recomp.rc.res : fatal error LNK1000: Internal error during IncrCalcPtrs`, access violation C0000005, setup exit 4. Cause found by reading the build config: the setup's preset is RelWithDebInfo, which CMake links with `/debug /INCREMENTAL` (confirmed in CMake's Windows-MSVC.cmake), and `link.exe`'s incremental code can crash on an image this large; the `.rc.res` is only the last link input. Fix on branch fix/msvc-link-incremental-off: `/INCREMENTAL:NO` in the MSVC link options, plus a known-issues entry with a workaround command. Not built or run on Windows here (macOS host); not yet confirmed with the reporter, whose setup log and Visual Studio version were requested.
 
 - 2026-10-20 20:22 — Owner requested a submitted PR and explicitly deferred release until reporter confirmation. Opened fork toolkit PR #3 targeting defjam/audio-fix (not upstream). Submitted parent PR #76, focused integration on current main7bb4bdf: published e818066 pin, permanent Windows/POSIX placement fixture CI, issue72 research/state only; original Windows candidate9e4f805/artifact unchanged. Windows candidate checks passed; integration PR CI will validate current-main combination. Branch-labelled concurrent D143/D144 decisions retained, beta handoff preserved. No merge/tag/release.
@@ -348,20 +347,21 @@ defjam-recomp/
 - 2026-10-22 20:30 — D148: v0.10.7 PUBLISHED (regular release, Latest) after the owner's Windows play-test. PR #86 merged as `009473a` (tree identical to the tested head `c13716e`), annotated tag `v0.10.7`, `check-release.py` verified 434 files, Source release run 39845952105 passed 31/31 and made the draft. Downloaded all nine assets into a fresh folder: each file hash equals GitHub's digest, each `.sha256` equals its file, all three provenance files say version 0.10.7, source `009473a`, toolkit `8589f88`, development false; rechecked after publishing (unchanged). Release title set to the notes heading; body = the tagged notes with two sentences updated (owner play-test, link to #88). PR #87 (`triage.py` UnicodeEncodeError on cp1252 consoles: errors='replace', subprocess test) merged `abb4bf5` after CI 27/27. Issue #84 (third-party promotion) closed as not planned; issue #88 filed for the intermittent Windows `audio.dry_queue` failures (2 of 8 runs). The reporters of #72 and #81 have not been asked to test yet.
 - 2026-10-23 07:48 — D149, issue #83: reproduced the CachyOS launcher compile error in Linux GCC C++20 (8 C++17 passes, 8 C++20 compile errors before fix). Explicit UTF-8 byte conversion fixes all ten path sites; native fixtures now run both standards with Unicode coverage. Linux GCC13.3/SDL3.4.18 and Windows MSVC14.29 each pass 30/30; pc_ui.cpp and pc_ui_actions.cpp pass Linux C++20 compile checks. No game/Setup run on CachyOS, push, release or GitHub reply. Report docs/research/issue83-cachyos-notes.md; Linux compile diagnostics /root/defjam-issue83-ui-cxx20.log in WSL.
 - 2026-10-23 09:04 — Owner authorized publication/testing for #83. Pushed fix8bf8fbf, opened linked PR90; CI39981681675 passes28/28 after a network-only Ninja download retry. Linux artifact12512749441 downloaded and verified: source6c9563e PR merge, toolkit8589f88, exact fixed source, all3248 payload files; installerSHA256 9d8866e267e30e8f0fb5563cae6af3c991f0a3ce349ade5c915ac3cecc4e813a. Posted test download/Bundled offline/operation instructions on issue83 comment6369126220, linked in PR. No merge/release; awaiting CachyOS reporter result. Receipt build/issue83-artifact-verification.json.
+- 2026-10-23 14:55 — Issue83 reporter confirms the game works and intro plays (comment6369284367); owner reports a second Discord confirmation and authorizes merge PR90/close83 for the next release he makes. All29 checks pass on head8d5ddf5. Updated acceptance/release hand-off; no source changes or new release/tag.
 
 ## 7. Hand-off
 
-**Issue #83 (CachyOS installation), D149: PR #90 open, test installer delivered.**
+**Issue #83 (CachyOS installation), D149: accepted for the owner's next release.**
 PR: https://github.com/vyanhursky/DefJamFFNY-recomp/pull/90
-CI run 39981681675 passed 28/28 after retrying a Ninja-download timeout.
-Verified game-free Linux artifact `12512749441` from that run: source `6c9563e`
-(PR merge containing fix `8bf8fbf`), toolkit `8589f88`, version 0.10.7; checksum,
-provenance, all 3,248 payload files and exact patched source match.
-Download/instructions: https://github.com/vyanhursky/DefJamFFNY-recomp/issues/83#issuecomment-6369126220
-Await the reporter's CachyOS install/launch result; issue open, no merge or stable
-release. The bundled candidate must be selected, not the published v0.10.7.
-Details and source-build workaround: `docs/research/issue83-cachyos-notes.md`.
-Local verification receipt: `build/issue83-artifact-verification.json`.
+The reporter confirms the game works and the intro plays:
+https://github.com/vyanhursky/DefJamFFNY-recomp/issues/83#issuecomment-6369284367
+The owner reports another successful Discord test and authorizes merging PR #90
+and closing #83. All 29 checks on code/record head `8d5ddf5` passed. Ship the
+C++17/C++20 UTF-8 path fix in the next release the owner makes; do not cut a new
+release or tag from this task. Details: `docs/research/issue83-cachyos-notes.md`.
+The verified test artifact remains `12512749441` in CI run `39981681675`;
+its source `6c9563e` includes fix `8bf8fbf`, toolkit `8589f88`, all 3,248 payload
+files verified. Local receipt: `build/issue83-artifact-verification.json`.
 
 Stable remains v0.10.7, tag `009473a`, toolkit `8589f88` (D148), unchanged.
 Other pending work: reporter retests of #72/#81; intermittent Windows
