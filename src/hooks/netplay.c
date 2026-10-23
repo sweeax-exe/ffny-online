@@ -524,6 +524,7 @@ static void end_hub_match(const char *why)
 /* ---- what arrives -------------------------------------------------------------- */
 
 static unsigned g_steps_rx[MAXP], g_steps_last[MAXP];
+static uint32_t g_steps_match[MAXP];       /* the match of each player's latest STEPS: 0 or older while it still loads */
 static void store_steps(int from, const uint8_t *p, int len)
 {
     uint32_t match, last;
@@ -531,6 +532,7 @@ static void store_steps(int from, const uint8_t *p, int len)
     if (len < 9 || from < 0 || from >= MAXP) return;
     match = get32(p); last = get32(p + 4); count = p[8];
     g_steps_rx[from]++;
+    g_steps_match[from] = match;
     g_steps_last[from] = last;
     if (len < 9 + count * ENTRY) return;
     EnterCriticalSection(&g_cs);
@@ -2011,7 +2013,7 @@ static void crowd_reset(uint32_t arena)
 void netplay_on_step(void)
 {
     uint32_t s, target, k, need;
-    ULONGLONG waited_since, last_send;
+    ULONGLONG waited_since, last_send, last_note;
     fight_input();              /* also after a fight went on offline */
     if (!N.lockstep) {
         if (soak_depth()) {     /* tests: the soak counts steps and prepares the save states itself */
@@ -2103,6 +2105,7 @@ void netplay_on_step(void)
     need = N.predicting ? (s > RB_AHEAD ? s - RB_AHEAD : 0) : s;
     if (need <= (uint32_t)N.delay) return;
     waited_since = last_send = GetTickCount64();
+    last_note = 0;
     for (;;) {
         int ready = 1, i, late = -1;
         uint32_t t = need;
@@ -2115,14 +2118,24 @@ void netplay_on_step(void)
         if (ready || !N.lockstep) {
             ULONGLONG waited = GetTickCount64() - waited_since;
             /* a frozen picture of half a second or more: say why once it moves again */
-            if (ready && waited >= 500 && s > (uint32_t)N.delay + 1)
+            if (ready && waited >= 500 && s > (uint32_t)N.delay + 1 && !last_note)
                 toast(4000, "Waited %.1f s for %s (connection).", waited / 1000.0, player_name(N.last_late));
+            if (waited >= 1000 && last_note) {     /* the screen could not say it meanwhile: say it now */
+                toast(5000, "Waited %.1f s for %s to finish loading the fight.", waited / 1000.0, player_name(N.last_late));
+                fprintf(stderr, "[NETPLAY] waited %.1f s at the fight's start for player %d to finish loading\n",
+                        waited / 1000.0, N.last_late);
+            }
             break;
         }
         N.last_late = late;
         WaitForSingleObject(N.arrived, 4);
         {
             ULONGLONG now = GetTickCount64();
+            /* At the fight's start the other PC may still be loading the venue (a slower drive): the
+             * picture stands on "FIGHT!" meanwhile, which players took for a freeze (four F9
+             * reports, 2026-10-23). The game draws nothing while it waits here, so this is noted and
+             * said once the fight moves (above). */
+            if (late >= 0 && g_steps_match[late] != N.match && now - waited_since >= 1500) last_note = now;
             if (now - last_send >= 50) { send_steps(target); last_send = now; }   /* the others may be waiting for ours */
             /* The fight decided (KO, time): what follows is the winner's scene and the results, the same
              * on every PC however they part, and a PC that skips ahead stops sending steps. Waiting the

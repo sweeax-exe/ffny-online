@@ -684,6 +684,14 @@ int pc_settings_init(void)
 
     pc_input_start();
     run_launcher_if_wanted();
+    /* What the picture runs with, for bug reports: input delay and frame pacing questions start here. */
+    fprintf(stderr, "[SETTINGS] display: %s %dx%d, render scale %d, vsync %s, anti-aliasing %s, anisotropy %d, "
+            "sharpen %d, aspect %d, HD textures %s; voice %d\n",
+            pc_display("fullscreen", 0) ? "full screen" : "window",
+            pc_display("window_width", 1280), pc_display("window_height", 960), pc_display("render_scale", 2),
+            pc_display("vsync", 1) ? "on" : "off", pc_display("anti_aliasing", 1) ? "on" : "off",
+            pc_display("anisotropy", 0), pc_display("sharpen", 30), pc_display("aspect", 0),
+            recomp_settings_get("textures", "enabled", 0) ? "on" : "off", recomp_settings_get("online", "voice", 1));
 
     /* Settings read once at start-up by code that looks at the environment (after the launcher,
      * which may have changed them). */
