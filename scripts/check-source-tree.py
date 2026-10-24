@@ -48,6 +48,9 @@ APPROVED_README_MEDIA = {
     # game's own intro, graded, with a red rim light and smoke) and a blurred copy for the glass panels.
     'ffny-branding/launcher-bg.jpg': '919760df1e6d599ee6b019d2d3c387a74d0615e1786d588e5ab0e26c5ff97225',
     'ffny-branding/launcher-bg-blur.jpg': '483cfd22c413736321f35152470352e9f935e4f55fda88082075af1fc3c8c559',
+    # 2026-10-24, chosen by FFNY Online's owner: the Anton display font (SIL Open Font License 1.1, its
+    # licence beside it in OFL.txt), from google/fonts, for the launcher's headings and PLAY.
+    'ffny-branding/fonts/Anton-Regular.ttf': 'a4ba3a92350ebb031da0cb47630ac49eb265082ca1bc0450442f4a83ab947cab',
 }
 # D98 (2026-10-10): the owner approved committing the application icons and the Steam artwork
 # rendered from the game's own textures (the shield, the title wordmark, the title-screen scene).
