@@ -8,8 +8,9 @@ on slice edges.
 import importlib.util
 import os
 
-import numpy as np
 import pytest
+
+np = pytest.importorskip('numpy')   # before the script, which exits without it
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 _spec = importlib.util.spec_from_file_location('audio_clicks', os.path.join(ROOT, 'scripts', 'audio-clicks.py'))
