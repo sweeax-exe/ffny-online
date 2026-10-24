@@ -1167,7 +1167,10 @@ int rollback_route_alloc(void)
     if (s_arena_state != 1) return 0;
     /* sub_00029680 / 000296B0 / 00029710 call it with five words pushed: their caller is 24 bytes up */
     if (ret == 0x00029696u || ret == 0x000296C6u || ret == 0x00029723u) req = MEM32(g_esp + 24);
-    if (!audio_code(req)) {
+    /* Another thread than the game's (the mixer), or the game thread inside a sound command: the
+     * block is the sound engine's whoever called. Through the heap such blocks put the heap's own
+     * bookkeeping on pages the mixer writes (0x80003104 in a hub run), which then left the save. */
+    if (!audio_code(req) && !t_in_sound && !(s_tracking && GetCurrentThreadId() != s_game_tid)) {
         /* The file layer's buffers (allocated at return 0x1E3F20) for a stream the audio code opens:
          * the music stream's buffer is the one block outside the arena the mixer writes (two-copy runs
          * with each copy on one CPU, 2026-10-24). Its caller is generic, so the call chain decides. */

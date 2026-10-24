@@ -133,3 +133,14 @@ and check the contiguous-memory frees the same way.
   bookkeeping or boot-time objects the game also changes, a load restores the game but not them. Next: name
   the blocks on those two pages (allocation log) and who writes them (`RECOMP_ROLLBACK_WRITERS=1`); route
   allocations made on non-game threads to the arena.
+
+## Threads (2026-10-24, 23:00)
+
+A hub run with the write diagnostics showed the mixer thread allocating through the engine allocator's
+fallback (`sub_0001DC10` -> `sub_00029710`) and writing the heap's own bookkeeping (`0x80003104`), so that
+page left the save. `rollback_route_alloc` now sends to the arena every allocation made during a fight on a
+thread other than the game's, and every one made inside a sound command. The next five-match run: the first
+match with about 2100 rollbacks, no mixer page, no crash at its KO; early in the second match one copy
+crashed in the file layer (`sub_001E8340+0x6D`, `edx 0x832D7C94` in the arena, junk read
+`0xF6FE0F27`; `logs/rb-online5-filecrash.log.err`), likely a stream buffer the arena holds across the match
+change. Next: what the file layer keeps between matches that now lives in the arena.
