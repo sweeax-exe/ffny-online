@@ -58,3 +58,18 @@ interaction and large-text acceptance remain pending**, not claimed as passed.
 Logs outside source: `../logs/mods-table-focused-tests.log`,
 `mods-table-all-tests.log`, `mods-preview-build.log`, `mods-ui-preview-native.log`.
 The original playtest launcher still opens the previously verified RC UI.
+
+## Owner review follow-up — 2026-10-24
+
+The owner reviewed the native preview, supplied its Load Order screenshot and
+approved the revised layout. Removed the mod-specific "Put HD Widescreen Menus
+above..." sentence; only the generic next-game-start notice remains. The preview
+was rebuilt successfully. Automated computer-use acceptance remains distinct
+from this owner visual approval; large-text and cross-platform checks remain.
+
+Author credit is corrected in the authoritative catalogue source from `Vlad` to
+`vyanhursky` on `fix/menu-author-github-name`, commit`c8940e2`. Source validation
+and13applicable tests/22subtests pass; the symlink test remains inapplicable on
+this Windows machine without the required privilege. The live signed catalogue
+still contains the old credit until the metadata PR is merged and a new signed
+revision is published. No client-side hardcoded author override is introduced.

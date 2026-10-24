@@ -918,7 +918,7 @@ static void page_textures()
             ImGui::EndTable();
         }
         ImGui::EndDisabled(); ImGui::EndChild();
-        ImGui::TextWrapped("Put HD Widescreen Menus above Recomp HD textures to use its menu replacements. Changes apply on the next game start.");
+        ImGui::TextWrapped("Changes apply on the next game start.");
         if (ImGui::Button("Done") || ImGui::IsKeyPressed(ImGuiKey_Escape) || ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight)) ImGui::CloseCurrentPopup();
         ui_target("mods.order-done");
         ImGui::EndPopup();
