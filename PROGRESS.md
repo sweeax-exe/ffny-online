@@ -461,7 +461,8 @@ Windows: full regression 14/14 on the merged branch, opening-scene clicks at the
    `--only repeat` twice (#98; the Mac has never run it).
 4. Audio at the device, the measure that found both Windows causes (the mix-buffer hole count misses them):
    `python3 scripts/harness.py run intro --preset posix-release --secs 330 --to-end --env RECOMP_APU_PCM=logs/aud-dev.pcm`,
-   then count step clicks at 32-sample slice edges in that file. Windows: 386-422 before `3e63e7b`, 1 after, v0.10.7 2.
+   then `python3 scripts/audio-clicks.py logs/aud-dev.pcm` (clicks, and how many sit on 32-sample slice edges).
+   Windows: 386-422 before `3e63e7b`, nearly all on slice edges; 1 after; v0.10.7 2.
 5. Install the Setup from the newest green CI run of the branch and play the Story intro with a pad.
 Then: owner play-test on Mac or Deck if he wants it, merge, bump to 0.12.0, release. Leftovers to delete afterwards: worktrees
 `code/defjam-v016-win`, `code/defjam-v0107-base`, `code/xboxrecomp-up-perf`, `code/xboxrecomp-up-throttle`, `code/xboxrecomp-named`,
