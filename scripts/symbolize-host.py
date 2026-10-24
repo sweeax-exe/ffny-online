@@ -46,6 +46,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("items", nargs="+", help="a log file, or addresses")
     ap.add_argument("--base", default=None, help="the exe base the addresses belong to (default from the log)")
+    ap.add_argument("--exe", default=None, help="another build's exe (its .pdb beside it), e.g. an installed copy")
     a = ap.parse_args()
     if os.path.isfile(a.items[0]):
         base, addrs = addresses_from_log(a.items[0])
@@ -53,6 +54,7 @@ def main():
         base, addrs = 0x140000000, [int(x, 0) for x in a.items]
     if a.base:
         base = int(a.base, 0)
+    exe = os.path.abspath(a.exe) if a.exe else EXE
     dbg = ctypes.WinDLL("dbghelp")
     dbg.SymInitializeW.argtypes = [wt.HANDLE, wt.LPCWSTR, wt.BOOL]
     dbg.SymLoadModuleExW.restype = ctypes.c_uint64
@@ -61,10 +63,10 @@ def main():
     dbg.SymFromAddr.argtypes = [wt.HANDLE, ctypes.c_uint64, ctypes.POINTER(ctypes.c_uint64), ctypes.POINTER(SYMBOL_INFO)]
     h = wt.HANDLE(0x5EED)
     dbg.SymSetOptions(0x2 | 0x10)                 # undecorated names, load lines lazily
-    if not dbg.SymInitializeW(h, os.path.dirname(EXE), False):
+    if not dbg.SymInitializeW(h, os.path.dirname(exe), False):
         sys.exit("SymInitialize failed")
-    if not dbg.SymLoadModuleExW(h, None, EXE, None, ctypes.c_uint64(base), 0, None, 0):
-        sys.exit("cannot load " + EXE)
+    if not dbg.SymLoadModuleExW(h, None, exe, None, ctypes.c_uint64(base), 0, None, 0):
+        sys.exit("cannot load " + exe)
     for addr in addrs:
         sym = SYMBOL_INFO()
         sym.SizeOfStruct = ctypes.sizeof(SYMBOL_INFO) - 256
