@@ -240,6 +240,7 @@ static struct {
     ULONGLONG last_rtt_sent;
     ULONGLONG last_recover;
     ULONGLONG start_tick;           /* when this PC took the room's START: load times are measured from it */
+    int load_done, load_hinted;     /* this START's match is loaded; the long-load notice was shown */
     uint32_t start_seed;
     int start_slots[MAXP];
     /* the room match for its result report (account.c): set at START, sent once */
@@ -1101,6 +1102,7 @@ static void on_start(const uint8_t *b, int len)
     N.over_pending = 0;
     N.start_this_play = 1;
     N.start_tick = GetTickCount64();
+    N.load_done = N.load_hinted = 0;
     N.report_m = m;
     for (i = 0; i < MAXP; i++) {
         N.report_names[i][0] = 0;
@@ -1295,6 +1297,12 @@ static DWORD WINAPI net_thread(LPVOID unused)
     while (!N.stop) {
         ULONGLONG now = GetTickCount64();
         int got;
+        /* The first match after the game starts reads everything from the disk: 20 to 40 s on the
+         * menu's LOADING, which players took for a freeze (F9 reports, build 23). */
+        if (N.match_live && N.start_tick && !N.load_done && !N.load_hinted && now - N.start_tick > 8000) {
+            N.load_hinted = 1;
+            toast(12000, "Loading the match... The first one after the game starts can take up to half a minute.");
+        }
         if (N.state == NETPLAY_CONNECTING) {
             if (now - N.hello_sent >= 500) { send_hello(); N.hello_sent = now; }
             if (now - N.started > 10000) {
@@ -2081,6 +2089,7 @@ void netplay_on_match_start(void)
      * first step, and the others waited for it until they gave up (seen on The Pit, whose load is
      * the longest). */
     fight_input();
+    N.load_done = 1;
     fprintf(stderr, "[NETPLAY] match %08X starts in lockstep (%d players, delay %d); loaded in %.1f s since the START\n",
             N.match, N.players, N.delay, N.start_tick ? (GetTickCount64() - N.start_tick) / 1000.0 : -1.0);
     if (N.lobby && N.match_live && N.report_key[0]) {
