@@ -444,15 +444,29 @@ defjam-recomp/
 
 ## 7. Hand-off
 
-**Toolkit v0.16.0 migration (D147): Mac and Windows done, PR #85, Steam Deck and owner play-test next.** https://github.com/vyanhursky/DefJamFFNY-recomp/pull/85
-Fork `vyanhursky/xboxrecomp` branch `defjam/upstream-v0.16`, pin `2b73d81`: v0.16.0 + the 15 migration commits + `2b73d81`, the fork copy
-of upstream PR https://github.com/sp00nznet/xboxrecomp/pull/255 (disasm decode cache, issue #254; drop it at the next rebase once upstream
-merges it). Mac: full regression 18/18. Windows (ledger "Windows results"): fixtures 19/19, regression 14/14, Setup installs and boots;
-disasm 990 s -> 167 s with the pin, output byte-identical. The 2026-10-22 Windows audio crackle did not come back in 14 runs on 2026-10-23;
-forced Windows power throttling reproduces it, so it is a watch item: issue https://github.com/vyanhursky/DefJamFFNY-recomp/issues/93 and
-fork branch `fix/windows-power-throttling` `dc9f72f` (not pinned; upstream only if it recurs in our regression tests). **2026-10-24: the owner's play-test crackled in borderless fullscreen; fixed by D199 (XAudio2 6 x 512 on Windows, upstream issue #259).**
-**2026-10-24 later: the owner's re-test still crackled; second cause found and fixed (§6 11:45, ledger "Windows audio: the second cause"): fork `3e63e7b`, pinned locally, not pushed.** Next: owner re-test, then push the fork branch and this branch, then the Mac and Deck re-check (shared code), then delete `docs/research/toolkit-v016-handover.md`, merge (after
-#73: rebase the gitlink; #76 is in v0.10.7), release as a minor version. Deck agents: follow that handover; the pin and installers are now newer than it says.
+**Toolkit v0.16.0 migration (D147): Windows accepted by the owner's ear; Mac and Deck re-check of the final pin next; release as v0.12.0** (v0.11.0 is the Mod Support Beta).
+PR https://github.com/vyanhursky/DefJamFFNY-recomp/pull/85, branch `feat/toolkit-v0.16` (main merged after v0.11.0). Fork `vyanhursky/xboxrecomp`
+branch `defjam/upstream-v0.16`, pin `3e63e7b`: v0.16.0 + the 15 migration commits + `2b73d81` (disasm decode cache, fork copy of
+upstream PR https://github.com/sp00nznet/xboxrecomp/pull/255; drop it once upstream merges it) + `3e63e7b` (APU reads the right copy of a
+page shared by a window buffer and a named heap block; upstream PR drafted in `logs/v016-win/upstream-named-pr-draft.md` of the Windows
+test worktree, not posted). Port default D199: XAudio2 6 x 512 on Windows (upstream issue https://github.com/sp00nznet/xboxrecomp/issues/259).
+Windows: full regression 14/14 on the merged branch, opening-scene clicks at the device 386 -> 1 (v0.10.7 2), owner re-test clean
+(2026-10-24). Mac (18/18) and Deck (16/17, `repeat` issue #98) passed on older pins; the last two fixes are shared code.
+
+**Mac and Steam Deck re-check, on the final pin** (one run each; the old test handover is retired):
+1. `git switch feat/toolkit-v0.16 && git submodule update --init --recursive`; `git -C tools/xboxrecomp log --oneline -1` prints `3e63e7b`.
+2. `python scripts/pipeline.py analyze && python scripts/pipeline.py recomp && python scripts/pipeline.py build` (Deck: `djpy` in the
+   pinned container, `docs/build-macos-linux.md`). Time the analyze step: it should be minutes, not a quarter of an hour.
+3. `python3 scripts/regress.py --preset posix-release` (Deck: on SteamOS inside `gamescope --backend headless`), then
+   `--only repeat` twice (#98; the Mac has never run it).
+4. Audio at the device, the measure that found both Windows causes (the mix-buffer hole count misses them):
+   `python3 scripts/harness.py run intro --preset posix-release --secs 330 --to-end --env RECOMP_APU_PCM=logs/aud-dev.pcm`,
+   then count step clicks at 32-sample slice edges in that file. Windows: 386-422 before `3e63e7b`, 1 after, v0.10.7 2.
+5. Install the Setup from the newest green CI run of the branch and play the Story intro with a pad.
+Then: owner play-test on Mac or Deck if he wants it, merge, bump to 0.12.0, release. Leftovers to delete afterwards: worktrees
+`code/defjam-v016-win`, `code/defjam-v0107-base`, `code/xboxrecomp-up-perf`, `code/xboxrecomp-up-throttle`, `code/xboxrecomp-named`,
+`code/xboxrecomp-up-named` (unlink each `game` junction with `cmd /c rmdir` first), test installs `code/defjam-v016-setup*`,
+`defjam\save.bak-20261022-v016`.
 
 ### v0.11.0 stable/latest — Mod Support Beta — 2026-10-24
 
