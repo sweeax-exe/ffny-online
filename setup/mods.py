@@ -556,7 +556,7 @@ class Manager:
             self.cancelled()
             self.progress('Installing verified package')
             self.commit(mod_id, stage, receipt)
-            self.progress('Installed; enable this pack under Installed mods, then set Load Order')
+            self.progress('Installed; enable this pack in the Installed mods table, then set its priority in Load Order')
         finally:
             if stage.exists():
                 shutil.rmtree(stage)
@@ -594,7 +594,7 @@ class Manager:
                            and semver(v['min_recomp']) <= semver(self.runtime) and set(v['capabilities']) <= self.capabilities]
                 latest = max(choices, key=lambda v: semver(v['version'])) if choices else None
                 revoked = installed.get('version') in mod['revoked_versions']
-                rows.append(dict(id=mod['id'], name=mod['name'], description=mod['description'],
+                rows.append(dict(id=mod['id'], name=mod['name'], authors=', '.join(mod['authors']), description=mod['description'],
                     installed=installed.get('version', ''), latest=latest['version'] if latest else '',
                     bytes=latest['archive']['size'] if latest else 0,
                     channel=latest['channel'] if latest else '', compatible=int(bool(latest) and not stale),

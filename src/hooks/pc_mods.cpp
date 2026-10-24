@@ -73,7 +73,7 @@ static void read_view() {
         auto &row = entry.second;
         if (entry.first.rfind("catalogue.",0) == 0) {
             ModRow mod;
-            mod.id = row["id"]; mod.name = row["name"]; mod.description = row["description"];
+            mod.id = row["id"]; mod.name = row["name"]; mod.authors = row["authors"]; mod.description = row["description"];
             mod.installed = row["installed"]; mod.latest = row["latest"]; mod.load_after = row["load_after"]; mod.channel = row["channel"];
             mod.bytes = strtoull(row["bytes"].c_str(), nullptr, 10);
             mod.compatible = row["compatible"] == "1"; mod.revoked = row["revoked"] == "1"; mod.update = row["update"] == "1";

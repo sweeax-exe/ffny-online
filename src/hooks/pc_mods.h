@@ -5,7 +5,7 @@
 #include <vector>
 namespace pcui {
 struct ModRow {
-    std::string id, name, description, installed, latest, load_after, channel;
+    std::string id, name, authors, description, installed, latest, load_after, channel;
     unsigned long long bytes = 0;
     bool compatible = false, revoked = false, update = false;
 };

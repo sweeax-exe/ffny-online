@@ -68,6 +68,15 @@ def manager(tmp_path):
     return manager, key
 
 
+def test_view_projects_all_catalogue_authors(manager,tmp_path):
+    manager,key=manager
+    _,row=package(tmp_path)
+    row['authors']=['First Author','Second Author']
+    signed(manager,key,[row])
+    manager.view()
+    assert 'authors=First Author, Second Author\n' in (manager.root/'view.ini').read_text()
+
+
 def test_signed_index_trust_and_replay(manager, tmp_path):
     manager, key = manager
     _, row = package(tmp_path)

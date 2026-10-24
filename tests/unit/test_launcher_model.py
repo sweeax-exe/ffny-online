@@ -10,6 +10,14 @@ DRIVER=r'''
 #include <iostream>
 int main(int argc,char**argv){
     auto list=pcui::inventory(std::filesystem::u8path(argv[1]),argv[2]);
+    auto groups=pcui::mod_groups(std::filesystem::u8path(argv[1]),list);
+    if(argc>3 && std::string(argv[3])=="toggle")
+        for(const auto &g:groups)if(g.builtin)pcui::select_mod(list,g,true);
+    if(argc>3 && std::string(argv[3])=="lower")pcui::move_priority(list,groups,0,false);
+    if(argc>3 && std::string(argv[3])=="higher")pcui::move_priority(list,groups,1,true);
+    groups=pcui::mod_groups(std::filesystem::u8path(argv[1]),list);
+    for(const auto &g:groups)if(g.builtin)std::cout<<"builtin="<<g.name<<"|"<<g.members.size()<<"\n";
+    for(const auto &g:pcui::priority_groups(list,groups))std::cout<<"priority="<<g.name<<"|"<<g.members.size()<<"\n";
     for(const auto&p:list)std::cout<<p.name<<"|"<<p.selected<<"|"<<p.problem<<"\n";
     for(const auto &pair:pcui::pack_conflicts(std::filesystem::u8path(argv[1]),list))std::cout<<"conflict="<<pair.first<<"|"<<pair.second<<"\n";
     std::cout<<"chosen="<<pcui::selected_packs(list)<<"\n";
@@ -33,8 +41,8 @@ def inventory_tool(tmp_path_factory):
     assert result.returncode==0,result.stdout+result.stderr
     return exe
 
-def run(tool,mods,chosen):
-    result=subprocess.run([str(tool),str(mods),chosen],capture_output=True,text=True,check=True)
+def run(tool,mods,chosen,action=None):
+    result=subprocess.run([str(tool),str(mods),chosen]+([action] if action else []),capture_output=True,text=True,check=True)
     return result.stdout
 
 def pack(mods,name,manifest='[pack]\nschema = 1\n[textures]\n'):
@@ -88,3 +96,58 @@ def test_conflict_readout_names_the_final_winner(inventory_tool,tmp_path):
     assert 'conflict=base|1 texture(s) overridden by menu' in out
     assert 'conflict=middle|1 texture(s) overridden by menu' in out
     assert 'conflict=menu|\n' in out
+
+
+def generated_hd(mods, policy, recipe='a'*64):
+    import json
+    name=f'faithful-hd-{recipe[:12]}-{policy}'
+    pack(mods,name,f'[pack]\nschema=1\npng_mips={policy}\n[textures]\n')
+    (mods/name/'builder.json').write_text(json.dumps(dict(schema=1,product='DefJamFaithfulHD',recipe_id=recipe,png_mips=policy),indent=2))
+    return name
+
+
+def test_builtin_group_preserves_saved_order_and_missing_legacy_alias(inventory_tool,tmp_path):
+    opacity=generated_hd(tmp_path,'opacity');channels=generated_hd(tmp_path,'channels')
+    pack(tmp_path,'custom')
+    chosen=f'faithful-hd;{opacity};{channels};custom'
+    out=run(inventory_tool,tmp_path,chosen)
+    assert 'builtin=Recomp HD textures|2\n' in out
+    assert f'chosen={chosen}\n' in out
+    assert 'faithful-hd|1|Not installed' in out
+    assert out.index('priority=custom')<out.index('priority=Recomp HD textures')<out.index('priority=faithful-hd')
+
+
+def test_priority_move_moves_whole_contiguous_builtin_pair(inventory_tool,tmp_path):
+    opacity=generated_hd(tmp_path,'opacity');channels=generated_hd(tmp_path,'channels')
+    pack(tmp_path,'custom')
+    for action in ('lower','higher'):
+        out=run(inventory_tool,tmp_path,f'{opacity};{channels};custom',action)
+        assert f'chosen=custom;{opacity};{channels}\n' in out
+
+
+def test_interleaved_components_keep_distinct_priorities(inventory_tool,tmp_path):
+    opacity=generated_hd(tmp_path,'opacity');channels=generated_hd(tmp_path,'channels')
+    pack(tmp_path,'custom')
+    chosen=f'{opacity};custom;{channels}'
+    out=run(inventory_tool,tmp_path,chosen)
+    assert 'builtin=Recomp HD textures|2\n' in out
+    assert 'priority=Recomp HD textures (material channels)|1' in out
+    assert 'priority=Recomp HD textures (transparency)|1' in out
+    assert f'chosen={chosen}\n' in out
+
+
+def test_group_toggle_keeps_existing_slot_priority(inventory_tool,tmp_path):
+    opacity=generated_hd(tmp_path,'opacity');channels=generated_hd(tmp_path,'channels')
+    pack(tmp_path,'custom')
+    out=run(inventory_tool,tmp_path,f'{opacity};custom','toggle')
+    assert f'chosen={opacity};custom;{channels}\n' in out
+
+
+def test_lookalike_or_mismatched_marker_is_not_a_builtin(inventory_tool,tmp_path):
+    import json
+    for name in ('faithful-hd-fake-channels','faithful-hd'):
+        pack(tmp_path,name)
+    opacity=generated_hd(tmp_path,'opacity')
+    marker=tmp_path/opacity/'builder.json'
+    value=json.loads(marker.read_text());value['png_mips']='channels';marker.write_text(json.dumps(value))
+    assert 'builtin=' not in run(inventory_tool,tmp_path,'')
