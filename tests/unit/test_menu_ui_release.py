@@ -24,7 +24,17 @@ def test_component_files_cannot_escape_the_component(tmp_path):
     assert release.safe_file(root,'native.png')==root/'native.png'
     with pytest.raises(ValueError,match='escapes root'):
         release.safe_file(root,'../outside.png')
-    (root/'link.png').symlink_to(tmp_path/'outside.png')
+
+
+def test_component_symlink_cannot_escape_the_component(tmp_path):
+    root=tmp_path/'component';root.mkdir()
+    (tmp_path/'outside.png').write_bytes(b'outside')
+    try:
+        (root/'link.png').symlink_to(tmp_path/'outside.png')
+    except OSError as error:
+        if getattr(error, 'winerror', None) == 1314:
+            pytest.skip('Windows symlink privilege unavailable; traversal checked separately')
+        raise
     with pytest.raises(ValueError,match='escapes root'):
         release.safe_file(root,'link.png')
 
