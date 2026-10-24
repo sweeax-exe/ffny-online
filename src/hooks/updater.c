@@ -85,7 +85,11 @@ static void say(enum UpdaterState state, const char *format, ...)
 int updater_local_build(void)
 {
     int build = 0;
-    FILE *f = fopen("config\\remaster-version.txt", "r");
+    FILE *f;
+    /* tests: RECOMP_TEST_LOCAL_BUILD=22 plays an older build, so the published one shows as an update */
+    const char *test = getenv("RECOMP_TEST_LOCAL_BUILD");
+    if (test && atoi(test) > 0) return atoi(test);
+    f = fopen("config\\remaster-version.txt", "r");
     if (f) {
         if (fscanf(f, "%d", &build) != 1) build = 0;
         fclose(f);

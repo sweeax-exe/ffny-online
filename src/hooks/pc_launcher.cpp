@@ -458,7 +458,8 @@ extern "C" int pc_launcher_watch(HANDLE game)
             shown ? "" : " (no notification icon)");
     fflush(stderr);
 
-    bool told = updater_state() == UPDATER_AVAILABLE;       // the launcher already offered this one
+    // the launcher already offered this one (tests: RECOMP_WATCH_ANNOUNCE=1 announces it anyway)
+    bool told = updater_state() == UPDATER_AVAILABLE && !getenv("RECOMP_WATCH_ANNOUNCE");
     int told_build = 0;
     if (told) updater_info(&told_build, nullptr, 0, nullptr, 0);
     ULONGLONG next = GetTickCount64() + period;
@@ -470,8 +471,9 @@ extern "C" int pc_launcher_watch(HANDLE game)
         MSG msg;
         while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) DispatchMessageW(&msg);
         if (GetTickCount64() >= next) {
+            UpdaterState st = updater_state();
             next = GetTickCount64() + period;
-            updater_check();
+            if (st == UPDATER_IDLE || st == UPDATER_CURRENT || st == UPDATER_FAILED) updater_check();
         }
         int build = 0;
         if (updater_state() == UPDATER_AVAILABLE) updater_info(&build, nullptr, 0, nullptr, 0);

@@ -1771,13 +1771,17 @@ static void crash_popup()
 // The update offer: a modal over the launcher when a newer build is signed and published.
 static void update_popup(UiResult &result)
 {
-    static bool asked_once, dismissed;
+    static int offered;             // the build offered last: each new one is offered once
     UpdaterState state = updater_state();
     char message[256];
     updater_message(message, sizeof(message));
-    if (state == UPDATER_AVAILABLE && !asked_once && !dismissed) {
-        ImGui::OpenPopup("Update available");
-        asked_once = true;
+    if (state == UPDATER_AVAILABLE) {
+        int newest = 0;
+        updater_info(&newest, nullptr, 0, nullptr, 0);
+        if (newest > 0 && newest != offered) {
+            ImGui::OpenPopup("Update available");
+            offered = newest;
+        }
     }
     if (!begin_glass_modal("Update available", ImGui::GetFontSize() * 30)) return;
     int build = 0;
@@ -1805,7 +1809,7 @@ static void update_popup(UiResult &result)
         ImGui::TextUnformatted(message);
         ImGui::PopTextWrapPos();
         ImGui::TextDisabled("You can keep this window open; the game stays as it is until you restart.");
-        if (ImGui::Button("Hide", ImVec2(ImGui::GetFontSize() * 8, 0))) { dismissed = true; ImGui::CloseCurrentPopup(); }
+        if (ImGui::Button("Hide", ImVec2(ImGui::GetFontSize() * 8, 0))) ImGui::CloseCurrentPopup();
     } else if (state == UPDATER_INSTALLED) {
         ImGui::TextColored(k_green, "%s", message);
         ImGui::PushStyleColor(ImGuiCol_Button, k_red);
@@ -1816,14 +1820,14 @@ static void update_popup(UiResult &result)
         }
         ImGui::PopStyleColor(2);
         ImGui::SameLine();
-        if (ImGui::Button("Later", ImVec2(ImGui::GetFontSize() * 8, 0))) { dismissed = true; ImGui::CloseCurrentPopup(); }
+        if (ImGui::Button("Later", ImVec2(ImGui::GetFontSize() * 8, 0))) ImGui::CloseCurrentPopup();
     } else if (state == UPDATER_STARTED) {
         ImGui::TextWrapped("%s", message);
         result.leave = true;            // the setup takes over; it waits for this window to close
     } else if (!updater_can_install()) {
         ImGui::TextWrapped("This copy was built from a source checkout, not installed by setup: get the new version "
                            "from the source and build it again.");
-        if (ImGui::Button("OK", ImVec2(ImGui::GetFontSize() * 8, 0))) { dismissed = true; ImGui::CloseCurrentPopup(); }
+        if (ImGui::Button("OK", ImVec2(ImGui::GetFontSize() * 8, 0))) ImGui::CloseCurrentPopup();
     } else {
         if (state == UPDATER_FAILED) ImGui::TextColored(k_error, "%s", message);
         ImGui::TextWrapped("The update downloads (about 55 MB), is checked, and is built from your installed game "
@@ -1833,7 +1837,7 @@ static void update_popup(UiResult &result)
         if (ImGui::Button("Install now", ImVec2(ImGui::GetFontSize() * 10, 0))) updater_install();
         ImGui::PopStyleColor(2);
         ImGui::SameLine();
-        if (ImGui::Button("Later", ImVec2(ImGui::GetFontSize() * 8, 0))) { dismissed = true; ImGui::CloseCurrentPopup(); }
+        if (ImGui::Button("Later", ImVec2(ImGui::GetFontSize() * 8, 0))) ImGui::CloseCurrentPopup();
     }
     end_glass_modal();
 }
@@ -1962,8 +1966,14 @@ static UiResult draw_launcher(float x, float y, float width, float height)
     static int start_page = initial_page();
     static int tab = start_page == PAGE_COUNT || start_page < 0 ? 0 : 1;
     static int page = start_page >= 0 && start_page < PAGE_COUNT ? start_page : PAGE_DISPLAY;
-    static bool checked;
-    if (!checked) { checked = true; updater_check(); }
+    // At the start and every five minutes while it stays open: a build published meanwhile shows at
+    // once (the Game card, the update offer), without starting the launcher again.
+    static UiTick next_check;
+    if (ui_ticks() >= next_check) {
+        UpdaterState st = updater_state();
+        next_check = ui_ticks() + 5 * 60000;
+        if (st == UPDATER_IDLE || st == UPDATER_CURRENT || st == UPDATER_FAILED) updater_check();
+    }
     // One design pixel: the layout is drawn for 1100 x 688 and scaled to the window, centred.
     const float s = std::min(width / 1100.0f, height / 688.0f);
 
