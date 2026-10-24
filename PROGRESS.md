@@ -63,8 +63,8 @@
 | Picture options and setup progress fix (D136-D138; issues #40, #44, #47) | ✅ released v0.10.3 (latest, 2026-10-19) | PR #54 (setup progress-file contention, WinError 5) merged `c37bf34`; PR #55 (`[display] brightness`, `vignette`, `vignette_strength`, launcher/overlay Display → Picture, live; `docs/research/picture-options.md`) merged `1b04982`. Beta pre-release, owner's Deck play-test: brightness and vignette "work perfectly"; promoted to latest (D138). Windows not play-tested. Subtitles (#44) not started. |
 | Mac setup quarantine fix (D139; issue #59) | ✅ released v0.10.4 (latest, 2026-10-19) | PR #60 merged `1d4e13d`: the macOS setup unpacks its digest-checked payload with `ditto --noqtn` plus `xattr -d -r com.apple.quarantine`, so a browser-downloaded setup no longer stops on *"python3" Not Opened*. Owner confirmed with a quarantined test DMG. Tag `v0.10.4` on release PR #63 merge `110d50e`; game and toolkit identical to v0.10.3. |
 | Issue #72 / Windows startup crash | ⏳ reporter setup retry needed; PRs open | Correct patched candidate9e4f805/e818066 opened, but Clean Rebuild refused different installed version; old supplied log shows0.10.1/default location versus original0.10.5 elsewhere. Clarification6316443011: Clean Update + Bundled offline for0.10.1, or select original0.10.5 app/data and rebuild. Runtime not retested; no new runtime fix/artifact indicated. PR76/forkPR3 remain unmerged. Test-only toolkit8589f88 fixes Ubuntu fixture libm link; parent integration CI rerun pending. Setup policy tests72pass/1skip. |
-| Menu/UI restoration | ✅ v0.11.0 Preview / ⏳ owner Mac/Linux playtest | Five Windows aspect ratios and all eight Mode selections inspected in prior accepted combined code. D197 accepts paused HUD issue95 and fire-escape transition gap for preview; Select User ID/Choose Teams/Choose Venue backgrounds deferred to modpack1.1. No defect-fix claim; no stable promotion. |
-| Launcher mod catalogue | ⏳ v0.11.0 stable promotion | D198 owner Steam Deck acceptance; authorized headline Mod Support Beta and default pack visibility. Existing nine verified assets/tag stay unchanged. Catalogue stable1.0.0 appended with exact RC2 archive;13tests/22subtests pass, history/contract validation pass. Publication and release metadata update pending. |
+| Menu/UI restoration | ✅ v0.11.0 stable / owner Steam Deck accepted | D198 full stable approved; five Windows aspects/eight Mode selections and owner Deck playtest accepted. HUD95/fire-escape/three backgrounds deferred1.1 remain known limitations. Mod support is Beta; final Mac validation remains unconfirmed. |
+| Launcher mod catalogue | ✅ v0.11.0 stable/latest — Mod Support Beta | D198 owner Steam Deck acceptance. Release5775f3c/nine assets unchanged; catalogue PR3 merged5b4de77, signed publication40115951254 passed. Client verifies revision3 and default-channel1.0.0 with testing off; archive43bbb22c unchanged.13local tests/22subtests plus full Linux CI pass. Docs PR99 final record pending merge. |
 
 ## 1. Decisions log
 
@@ -335,7 +335,7 @@ D138–D140 were allocated independently on main and the launcher branch. Their 
 
 | D197 | 2026-10-24 | Owner authorizes merging PR91 and releasing v0.11.0 as Preview/prerelease, accepting paused-HUD issue #95, the fire-escape transition gap and three backgrounds deferred to modpack 1.1. Owner will playtest Mac/Linux. | Publish only game-free setup/checksum/provenance assets after green final CI and exact-source verification. Set prerelease=true and latest=false; retain v0.10.7 as latest stable. Catalogue PR2 merged and protected publication40100204475 succeeded; client verified signed live revision2 credits vyanhursky with existing trust pins. Released2026-10-24: PR91 merged5775f3c, tagv0.11.0; release40101113297 passed. Nine hashes/provenance verified; final Windows bundled install/UI smokes exit0, packaged helper catalogue/install/offline checks pass. Prerelease=true/latest=false verified; stable remainsv0.10.7. |
 
-| D198 | 2026-10-24 | Owner reports v0.11.0 working well on Steam Deck and authorizes full stable/latest promotion with headline Mod Support Beta, plus default catalogue visibility for HD Widescreen Menus. | Supersedes D197 preview-only publication restriction. Preserve release tag/installers/provenance and known visual issues; Mac validation is not inferred. Append stable1.0.0 metadata referencing the identical RC2 archive, retaining the immutable published candidate. Promotion/docs/catalogue PR and normal protected signing publication in progress. |
+| D198 | 2026-10-24 | Owner reports v0.11.0 working well on Steam Deck and authorizes full stable/latest promotion with headline Mod Support Beta, plus default catalogue visibility for HD Widescreen Menus. | Supersedes D197 preview-only publication restriction. Preserve release tag/installers/provenance and known visual issues; Mac validation is not inferred. Append stable1.0.0 metadata referencing the identical RC2 archive, retaining the immutable published candidate. Completed: release is stable/latest with title v0.11.0 — Mod Support Beta; tag5775f3c and nine asset IDs/hashes unchanged. Catalogue PR3 merged5b4de77, protected workflow40115951254 passed; real client verifies signedrev3 chooses1.0.0 with testing off. Game documentation PR99 follows the same authorization. |
 
 ## 2. Environment inventory (2026-09-17)
 
@@ -429,7 +429,6 @@ defjam-recomp/
 
 > Recent entries only; older entries remain unchanged in the local `docs/worklog/` archive.
 
-- 2026-10-23 14:23 — D193/UI: owner approved protected catalogue deployment39996850444; verify/publish SUCCESS, real signed revision1 verifies (expiry2026-11-22). Native fresh-root production launcher refresh/testingRC2/download421563157B/install/enable/shared order after Faithful/offline reopen all PASS, four exit0/save-equal;326installed hashes match, UI157overrides. Actual native UI Play from managed settings without root/pack overrides PASS32:9/1707x480,45anchors+17stretch/73side batches, no runtime faults, save equality, capture inspected (run-20261023-142158; hosted-menu-launcher-20261023-141908 receipts). PR91 Windows RC ready using verified artifact12521984699; prior17/62/73/82 closed superseded. Full15/18 baseline/known visual gates retained, no stable game merge/tag/art/exe/secret publication. No additional Cloudflare manual action needed.
 - 2026-10-23 19:44 — D194 Windows PR91 pass completed: fixed embedded Python import and transient progress-file rename failures2bbe9df; cp1252/symlink portability7ed7f66; lock regression863ea98.600units/26skip/1deselected, native helper6/6, texture/settings1/1each. Clean setup267f67c1 packaged offline rebuild exit0 with337files preserved; actual signed RC2 install/order/offline reopen/failed refresh/Play/F1Mods overlay pass. Full native12/13+4skip retained; m2 fixture corrected and retry1/1pass =>13applicable checks satisfied, combat27/27versus26/26/replay80records exact. Five aspects/eight Mode states inspected; same-frame fire-escape f1358 proves uncovered upper-left scene region, survives no-pack/sync/no-depth controls, remains open pending reference geometry. Original23save/settings files unchanged;326pack files intact. Report docs/research/windows-integrated-menu-mods-rc-2026-10-23.md. Local commits only, PR91draft, no push/merge/release.
 - 2026-10-23 19:47 - Owner authorizes pushing the verified Windows fixes and report to the existing PR91 head branch codex/integrated-menu-mods-rc (current remote66002541, fast-forward only). PR remains draft; no merge/release. Existing isolated app/DefJamLauncher.exe is ready for owner playtesting with RC2 and Faithful already enabled; no reinstall needed.
 - 2026-10-23 21:41 — D195 owner feedback: posted three-screen modpack1.1 backlog to PR91; created pause-HUD issue95. Implemented installed/descending-priority tables, one Recomp HD row/details, legacy missing-selection warning and catalogue authors.606units/26skip/1deselected, focused49pass, MSVC native preview builds. Original installed source/exe restored5/5; separate review fixture. Native visual/input acceptance blocked by computer-use kernel asset/path failure after reset; not claimed passed. Current redesign local for owner review; no release or new art. Report docs/research/mods-owner-feedback-2026-10-23.md.
@@ -437,25 +436,38 @@ defjam-recomp/
 - 2026-10-24 07:01 — D197 owner authorizes PR91 merge/v0.11.0 Preview only; accepted HUD95/fire-escape/modpack1.1 limitations, Mac/Linux owner playtest. Prior head44e4163 CI40099889633 green; catalogue publication40100204475 succeeded, real client verified signed revision2 authors=vyanhursky. Version/notes plus targeted release/packaging tests194pass/24platform skips (../logs/v011-release-policy-tests.log); source hygiene526files/0failures. Final CI/installer checks pending; latest stable stays0.10.7.
 - 2026-10-24 07:25 — v0.11.0 Preview published at5775f3c after exact-head PR91 CI40100689443/merge and tagged release40101113297 success. Nine game-free hashes/provenance and Windows embedded payload pass; final bundled/UI/preparation install exits0. Packaged helper verifies signedrev2/vyanhursky, installsRC2,326hashes/offline pass. Prerelease=true/latest=false; stable0.10.7 retained. Existing RC14files unchanged; original Partition5 changed during owner game, no concurrent native rerun. Mac/Linux owner playtest and accepted95/fire-escape/modpack1.1 limits retained. Release evidence ../logs/v011-*.json and published body.
 - 2026-10-24 10:23 — D198 owner Steam Deck acceptance; authorizes v0.11.0 stable/latest with Mod Support Beta headline and default catalogue visibility. Append stablepack1.0.0 retaining exact RC2 bytes/hash/history;13tests/22subtests and contract/history pass. Update source docs and normal protected publication in progress; existing release assets/tag unmodified.
+- 2026-10-24 10:29 — D198 completed: v0.11.0 promoted stable/latest, title Mod Support Beta, same release422772240/tag5775f3c/nine asset IDs/hashes. Catalogue PR3 merged5b4de77;13local tests/22subtests/full Linux CI40115895822 pass; archive scan/history verified and normal protected publication40115951254 passed. Actual client verifies signedrev3 selects stable1.0.0 with testing off, RC2 bytes/hash unchanged. DocsPR99 final record pending CI/merge; known issues retained, no Mac acceptance inferred. Evidence ../logs/v011-stable-verification.json.
 
 ## 7. Hand-off
 
-### v0.11.0 stable promotion authorized — 2026-10-24
+### v0.11.0 stable/latest — Mod Support Beta — 2026-10-24
 
-- D198: owner says working well on Steam Deck. Promote releasev0.11.0 to full
-  stable/latest, title "v0.11.0 — Mod Support Beta"; supersedes D197 preview-only
-  restriction. Preserve known HUD95/fire-escape/three backgrounds deferred1.1.
-  No claim of completed final Mac playtest. Existing verified installers and tag
-  5775f3c/toolkitbd8c633 must remain unchanged.
-- Catalogue branchrelease/menu-default-channel appends1.0.0/channelstable for
-  minruntime0.11.0 using exact accepted RC2 descriptor/hash43bbb22c…; existing
-  1.0.0-rc2 record untouched.13local tests/22subtests pass, one Windows symlink test
-  left to Linux CI. History/contract validation pass. Initial sandbox-temp
-  permission errors resolved using writable workspace scratch, no code changes.
-- Push/review/merge catalogue PR, dispatch publish.yml frommain with bootstrapfalse.
-  Existing owner protected environment and signing pins stay unchanged. Verify
-  live signed catalogue with real client without --prerelease, choosing1.0.0.
-- Update game release title/body/prereleasefalse/latesttrue and verify /latest,
-  nine asset IDs/hashes and tag unchanged. Source README/release/known-issue docs
-  on codex/v011-stable-promotion reflect the requested final state; merge docs PR
-  after light CI. Final publication results still pending.
+- D198: owner says v0.11.0 works well on Steam Deck and authorizes stable/latest,
+  headline Mod Support Beta, and default catalogue visibility. Supersedes D197's
+  preview-only restriction. Known HUD95/fire-escape/three missing backgrounds
+  deferred1.1 remain documented. Final Mac validation remains unconfirmed.
+- Live release: https://github.com/vyanhursky/DefJamFFNY-recomp/releases/tag/v0.11.0
+  Name v0.11.0 — Mod Support Beta; prerelease=false and /releases/latest=v0.11.0.
+  Release ID422772240, tag5775f3cabab13105abf01e4eb2cf8cc21ff7a904, all nine
+  asset IDs/sizes/SHA-256 digests unchanged by promotion. Toolkitbd8c633 unchanged.
+  No new installers/game code/artwork uploaded or rebuild required for promotion.
+- Catalogue PR3 merged5b4de774f53bc4a31601434fb8d0b7014830f4f7. Stable1.0.0 row
+  requires runtime0.11.0 and uses exact RC2 archive descriptor/hash43bbb22cd1419709
+  1143623551f350a0b7ff622f0efccb1da058f491e7157634. Prior1.0.0-rc2 row immutable.
+  Validation13pass/22subtests plus full Linux CI40115895822 pass. The first local
+  sandbox-temp permission errors were resolved using workspace scratch; symlink
+  fixture left to Linux CI, no tests or security checks weakened.
+- Signed publication40115951254 passed archive verification/scan and protected
+  owner review/sign/deploy. Prepared revision3 matched approved source/history;
+  user's explicit publication authorization applied through normal owner gate.
+  Trust pins, signatures, private keys and protected settings never modified.
+- Real client in ../stable-catalogue-check verifies live signedrev3, chooses
+  HD Widescreen Menus1.0.0 with testing disabled, and displays compatible=1.
+  Existing players need only Mods -> Refresh catalogue; no testing toggle needed.
+  Existing1.0.0-rc2 installs remain valid;1.0.0 reuses identical accepted bytes.
+- Game docs PR99: README, release notes, known issues and PROGRESS reflect stable
+  promotion. Final record commit is being pushed for documentation-only CI/merge.
+  Keep release tag/installers pinned to5775f3c; documentation merge is later.
+- Evidence ../logs/v011-stable-verification.json, v011-before-stable-release.json,
+  stable-prepared-index/index.json, stable-publication-approval.json. Historical
+  game-free packaging/Windows gameplay evidence remains in preview release record.
