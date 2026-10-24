@@ -8,18 +8,31 @@ ROOT=Path(__file__).resolve().parents[2]
 DRIVER=r'''
 #include "pc_ui_model.h"
 #include <iostream>
+#if defined(_WIN32)
+int wmain(int argc,wchar_t**argv){
+    auto list=pcui::inventory(std::filesystem::path(argv[1]),
+                            pcui::path_utf8(std::filesystem::path(argv[2])));
+#else
 int main(int argc,char**argv){
     auto list=pcui::inventory(std::filesystem::u8path(argv[1]),argv[2]);
-    auto groups=pcui::mod_groups(std::filesystem::u8path(argv[1]),list);
-    if(argc>3 && std::string(argv[3])=="toggle")
+#endif
+#if defined(_WIN32)
+    auto mods=std::filesystem::path(argv[1]);
+    std::string action=argc>3?pcui::path_utf8(std::filesystem::path(argv[3])):"";
+#else
+    auto mods=std::filesystem::u8path(argv[1]);
+    std::string action=argc>3?argv[3]:"";
+#endif
+    auto groups=pcui::mod_groups(mods,list);
+    if(argc>3 && action=="toggle")
         for(const auto &g:groups)if(g.builtin)pcui::select_mod(list,g,true);
-    if(argc>3 && std::string(argv[3])=="lower")pcui::move_priority(list,groups,0,false);
-    if(argc>3 && std::string(argv[3])=="higher")pcui::move_priority(list,groups,1,true);
-    groups=pcui::mod_groups(std::filesystem::u8path(argv[1]),list);
+    if(argc>3 && action=="lower")pcui::move_priority(list,groups,0,false);
+    if(argc>3 && action=="higher")pcui::move_priority(list,groups,1,true);
+    groups=pcui::mod_groups(mods,list);
     for(const auto &g:groups)if(g.builtin)std::cout<<"builtin="<<g.name<<"|"<<g.members.size()<<"\n";
     for(const auto &g:pcui::priority_groups(list,groups))std::cout<<"priority="<<g.name<<"|"<<g.members.size()<<"\n";
     for(const auto&p:list)std::cout<<p.name<<"|"<<p.selected<<"|"<<p.problem<<"\n";
-    for(const auto &pair:pcui::pack_conflicts(std::filesystem::u8path(argv[1]),list))std::cout<<"conflict="<<pair.first<<"|"<<pair.second<<"\n";
+    for(const auto &pair:pcui::pack_conflicts(mods,list))std::cout<<"conflict="<<pair.first<<"|"<<pair.second<<"\n";
     std::cout<<"chosen="<<pcui::selected_packs(list)<<"\n";
     std::cout<<"timing="<<pcui::aspect_next_launch(0,1)<<pcui::aspect_next_launch(1,0)
         <<pcui::aspect_next_launch(0,2)<<pcui::aspect_next_launch(2,0)
@@ -27,22 +40,22 @@ int main(int argc,char**argv){
 }
 '''
 
-@pytest.fixture(scope='module')
-def inventory_tool(tmp_path_factory):
+@pytest.fixture(scope='module', params=['c++17', 'c++20'])
+def inventory_tool(tmp_path_factory, request):
     folder=tmp_path_factory.mktemp('launcher-model')
     source=folder/'main.cpp';source.write_text(DRIVER)
     compiler=shutil.which('cl') or shutil.which('clang++') or shutil.which('g++')
     if not compiler:pytest.skip('C++ compiler required')
     exe=folder/('inventory.exe' if Path(compiler).stem.lower()=='cl' else 'inventory')
     if Path(compiler).stem.lower()=='cl':
-        cmd=[compiler,'/nologo','/std:c++17','/EHsc','/I'+str(ROOT/'src/hooks'),str(source),'/Fe:'+str(exe)]
-    else:cmd=[compiler,'-std=c++17','-I'+str(ROOT/'src/hooks'),str(source),'-o',str(exe)]
+        cmd=[compiler,'/nologo','/std:' + request.param,'/EHsc','/I'+str(ROOT/'src/hooks'),str(source),'/Fe:'+str(exe)]
+    else:cmd=[compiler,'-std=' + request.param,'-I'+str(ROOT/'src/hooks'),str(source),'-o',str(exe)]
     result=subprocess.run(cmd,cwd=folder,capture_output=True,text=True)
     assert result.returncode==0,result.stdout+result.stderr
     return exe
 
 def run(tool,mods,chosen,action=None):
-    result=subprocess.run([str(tool),str(mods),chosen]+([action] if action else []),capture_output=True,text=True,check=True)
+    result=subprocess.run([str(tool),str(mods),chosen]+([action] if action else []),capture_output=True,encoding='utf-8',check=True)
     return result.stdout
 
 def pack(mods,name,manifest='[pack]\nschema = 1\n[textures]\n'):

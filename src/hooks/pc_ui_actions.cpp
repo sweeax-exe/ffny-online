@@ -30,7 +30,7 @@ static std::string env(const char *name)
 #if defined(_WIN32)
     std::wstring key(name, name + strlen(name));
     const wchar_t *s = _wgetenv(key.c_str());
-    return s ? fs::path(s).u8string() : "";
+    return s ? path_utf8(fs::path(s)) : "";
 #else
     const char *s = getenv(name);
     return s ? s : "";
@@ -47,22 +47,22 @@ std::string folder_path(Folder which)
     switch (which)
     {
     case Folder::Settings:
-        return settings.u8string();
+        return path_utf8(settings);
     case Folder::Data:
-        return data.u8string();
+        return path_utf8(data);
     case Folder::Saves:
-        return (data / "save").u8string();
+        return path_utf8(data / "save");
     case Folder::Mods: {
         auto root = env("RECOMP_TEXTURE_ROOT");
-        return root.empty() ? (data / "mods").u8string() : root;
+        return root.empty() ? path_utf8(data / "mods") : root;
     }
     case Folder::Install: {
         auto root = env("DEFJAM_INSTALL_DIR");
-        return root.empty() ? fs::current_path().u8string() : root;
+        return root.empty() ? path_utf8(fs::current_path()) : root;
     }
     case Folder::Logs: {
         auto logs = env("DEFJAM_LOG_DIR");
-        return logs.empty() ? (fs::current_path() / "logs").u8string() : logs;
+        return logs.empty() ? path_utf8(fs::current_path() / "logs") : logs;
     }
     }
     return "";
@@ -203,7 +203,7 @@ bool open_path(const std::string &path, bool reveal)
     ok = spawn_detached("/usr/bin/open", reveal ? std::vector<std::string>{"open", "-R", path}
                                                 : std::vector<std::string>{"open", path});
 #else
-    std::string target = reveal ? fs::u8path(path).parent_path().u8string() : path;
+    std::string target = reveal ? path_utf8(fs::u8path(path).parent_path()) : path;
     ok = spawn_detached("xdg-open", {"xdg-open", target});
 #endif
     status = ok ? "Requested opening: " + path
@@ -308,7 +308,7 @@ bool setup_launch()
 #if defined(_WIN32)
     ok = (INT_PTR)ShellExecuteW(nullptr, L"open", wide(path).c_str(), nullptr, nullptr, SW_SHOWNORMAL) > 32;
 #else
-    auto program = setup_program(path).u8string();
+    auto program = path_utf8(setup_program(path));
     ok = spawn_detached(program, {program});
 #endif
     status = ok ? "Setup opened." : "Could not open setup. Check its permissions and path.";

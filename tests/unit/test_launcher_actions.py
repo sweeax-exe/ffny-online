@@ -25,8 +25,8 @@ int main(int argc,char**argv) {
 '''
 
 
-@pytest.fixture(scope='module')
-def action_tool(tmp_path_factory):
+@pytest.fixture(scope='module', params=['c++17', 'c++20'])
+def action_tool(tmp_path_factory, request):
     folder = tmp_path_factory.mktemp('launcher-actions')
     source = folder / 'main.cpp'
     source.write_text(DRIVER)
@@ -37,7 +37,7 @@ def action_tool(tmp_path_factory):
     exe = folder / ('actions.exe' if msvc else 'actions')
     actions = ROOT / 'src/hooks/pc_ui_actions.cpp'
     if msvc:
-        cmd = [compiler, '/nologo', '/std:c++17', '/EHsc', '/I' + str(ROOT / 'src/hooks'),
+        cmd = [compiler, '/nologo', '/std:' + request.param, '/EHsc', '/I' + str(ROOT / 'src/hooks'),
                str(source), str(actions), '/Fe:' + str(exe), '/link', 'shell32.lib', 'comdlg32.lib', 'user32.lib']
     else:
         if not shutil.which('pkg-config'):
@@ -45,7 +45,7 @@ def action_tool(tmp_path_factory):
         pkg = subprocess.run(['pkg-config', '--cflags', '--libs', 'sdl3'], capture_output=True, text=True)
         if pkg.returncode:
             pytest.skip('SDL3 development package required')
-        cmd = [compiler, '-std=c++17', '-pthread', '-I' + str(ROOT / 'src/hooks'), str(source), str(actions),
+        cmd = [compiler, '-std=' + request.param, '-pthread', '-I' + str(ROOT / 'src/hooks'), str(source), str(actions),
                '-o', str(exe)] + shlex.split(pkg.stdout)
     result = subprocess.run(cmd, cwd=folder, capture_output=True, text=True)
     assert result.returncode == 0, result.stdout + result.stderr

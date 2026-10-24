@@ -64,7 +64,7 @@
 | Mac setup quarantine fix (D139; issue #59) | ✅ released v0.10.4 (latest, 2026-10-19) | PR #60 merged `1d4e13d`: the macOS setup unpacks its digest-checked payload with `ditto --noqtn` plus `xattr -d -r com.apple.quarantine`, so a browser-downloaded setup no longer stops on *"python3" Not Opened*. Owner confirmed with a quarantined test DMG. Tag `v0.10.4` on release PR #63 merge `110d50e`; game and toolkit identical to v0.10.3. |
 | Issue #72 / Windows startup crash | ⏳ reporter setup retry needed; PRs open | Correct patched candidate9e4f805/e818066 opened, but Clean Rebuild refused different installed version; old supplied log shows0.10.1/default location versus original0.10.5 elsewhere. Clarification6316443011: Clean Update + Bundled offline for0.10.1, or select original0.10.5 app/data and rebuild. Runtime not retested; no new runtime fix/artifact indicated. PR76/forkPR3 remain unmerged. Test-only toolkit8589f88 fixes Ubuntu fixture libm link; parent integration CI rerun pending. Setup policy tests72pass/1skip. |
 | Menu/UI restoration | ✅ Windows five-aspect/eight-Mode inspection / ⏳ visual acceptance | RC2 managed157overrides/45wide/17stretch. Title/settled main menu4:3 through32:9, Options/Beatbox/pre-fight inspected; all8Mode spotlights/emblems render. Inherited fire-escape rectangle reproduces even without packs: same-frame trace proves upper-left scene-coverage gap. Reference geometry/fix and owner branding/late-Story/three-player signoff remain. |
-| Launcher mod catalogue | ✅ Windows manager / ⏳ Mods table visual acceptance | D195 owner chooses one Recomp HD row; installed and descending-priority tables, friendly component details and catalogue authors implemented.606units/26skip/1deselected and native MSVC build pass. Separate preview; original installed exe/source restored5/5. Computer-use kernel unavailable, so native visual/input/large-text acceptance pending. PR91 backlog updated; issue95 pause HUD logged. |
+| Launcher mod catalogue | ✅ owner layout review/native build / ⏳ final release gates | D196: owner accepts table revision; removes pack-specific recommendation, author vyanhursky via catalogue PR2 (CIpass, signed publication pending). Main/CachyOS conflicts resolved preserving Unicode/C++20 and group priorities;625units/26skip/1deselected,74focused pass. Final PR91 CI/artifact and large-text/platform UI checks remain, alongside rendering-defect disposition. |
 
 ## 1. Decisions log
 
@@ -329,6 +329,10 @@ D138–D140 were allocated independently on main and the launcher branch. Their 
 
 | D195 | 2026-10-23 | Owner playtest: defer Select User ID/Choose Teams/Choose Venue widescreen backgrounds to modpack1.1; pause crops are HUD evidence only. Choose one Recomp HD textures row, installed-mod table, priority-descending table (top overrides bottom), author below catalogue title. | PR91 backlog posted; pause HUD issue95 created. UI grouping uses generated ownership/recipe/policy metadata, preserves legacy IDs and missing selections, keeps interleaved component priorities separate.606tests pass, native build succeeds. Visual/input/large-text acceptance remains pending because computer-use kernel fails before inspection. Separate preview uses disposable settings/managed pack copy; normal app remains verified7ed7f66. See mods-owner-feedback-2026-10-23.md. |
 
+| D149 | 2026-10-23 | Issue #83: convert filesystem UTF-8 results explicitly to byte strings in the launcher; support C++17 and C++20 instead of forcing an older language mode. Native fixtures run in both modes. | GCC 16 on CachyOS defaults to C++20; `u8string()` then returns `char8_t`, incompatible with the launcher's `std::string` interfaces. Linux GCC C++20 reproduced the report. Preserve UTF-8 bytes on Windows and POSIX, keep existing CMake minimum and toolkit pin. Details: `docs/research/issue83-cachyos-notes.md`. Owner accepted 2026-10-23 after the GitHub reporter confirmed the intro plays and a second Discord user confirmed success (owner report); merge PR #90, close #83, include the fix in the owner's next release. |
+
+| D196 | 2026-10-24 | Owner accepts the revised Mods layout, removes the mod-specific Load Order recommendation, and requires GitHub handle vyanhursky for owned modpack author credits. | UI correction4f74f53 rebuilt; catalogue PR2/c8940e2 changes authoritative author metadata only (CIpass), live signature/cache deliberately unchanged pending reviewed republication. Resolve PR91 main conflicts preserving CachyOS UTF-8/C++20 behavior and new grouped priority tests. Release readiness report lists final CI/setup, large-text/platform UI, signed metadata and issue95/fire-escape fix-or-known-issue decisions; three missing screens remain owner-deferred1.1. No game PR merge/tag/release or catalogue publication. |
+
 ## 2. Environment inventory (2026-09-17)
 
 - Current Windows RC test host (2026-10-23): Windows11Pro10.0.26200, RTX4070TiSUPER/driver32.0.16.1088; VS2019/MSVC14.29, CMake3.20/Ninja1.10.2. D3D11 `win-x64-release`; isolated app/data and copied harness saves under C:/Users/Vlad/code/defjam-pr91-windows. No original user saves/settings changed. Normal Windows process/compiler access required outside the restricted execution sandbox; no OS security settings changed.
@@ -421,7 +425,6 @@ defjam-recomp/
 
 > Recent entries only; older entries remain unchanged in the local `docs/worklog/` archive.
 
-- 2026-10-22 12:20 — D148: v0.10.7 (Windows fixes) prepared on `release/0.10.7` = main a0c9109 + PR #80 (`/INCREMENTAL:NO`) + PR #76 (toolkit `8589f88`, checked memory layout); PR #73 left out by the owner. First Windows run since 2026-10-11 (RTX 4070 Ti SUPER, VS 2019 MSVC 14.29). Full regress 12/14, 4 skipped by design (SDL launcher/Vulkan overlay checks): combat and versus failed only `audio.dry_queue` (10, 23 dry), passed on stock v0.10.6 (27/27, 26/26) and on two reruns of the candidate. Quick 5/5 on the final build. Units 537 passed/25 skipped under the MSVC environment (was 1 failure, also on v0.10.6: `test_skip_intro_and_unlock_can_be_enabled_together`, 8 KB synthetic guest memory vs a store at 0x39C1DA that MSVC if-converts; fixture memory enlarged). Native fixtures windows_guest_layout, memory_regressions, settings, texture_pack, kernel_regressions pass. 10-boot soak 10/10, but every boot got RAM at 0x142B50000 (no layout variance here). Setup: published v0.10.6 setup installed from scratch (exit 0, no LNK1000 on this toolchain), then the 0.10.7 setup Clean Updated it with `--bundled-only` (exit 0, 125-file data inventory byte-identical, installed game boots to Game.StartMainMenu, exe 26,620,416 bytes with no .ilk). Windows launcher renders (v0.10.7, screenshot only). Note: `scripts/triage.py` raises UnicodeEncodeError on a cp1252 console (set PYTHONIOENCODING=utf-8). Logs: logs/regress-full-candidate.log, logs/regress-quick-final.log, logs/soak10.log, ../defjam-setup-test/logs.
 - 2026-10-22 20:30 — D148: v0.10.7 PUBLISHED (regular release, Latest) after the owner's Windows play-test. PR #86 merged as `009473a` (tree identical to the tested head `c13716e`), annotated tag `v0.10.7`, `check-release.py` verified 434 files, Source release run 39845952105 passed 31/31 and made the draft. Downloaded all nine assets into a fresh folder: each file hash equals GitHub's digest, each `.sha256` equals its file, all three provenance files say version 0.10.7, source `009473a`, toolkit `8589f88`, development false; rechecked after publishing (unchanged). Release title set to the notes heading; body = the tagged notes with two sentences updated (owner play-test, link to #88). PR #87 (`triage.py` UnicodeEncodeError on cp1252 consoles: errors='replace', subprocess test) merged `abb4bf5` after CI 27/27. Issue #84 (third-party promotion) closed as not planned; issue #88 filed for the intermittent Windows `audio.dry_queue` failures (2 of 8 runs). The reporters of #72 and #81 have not been asked to test yet.
 - 2026-10-23 10:49 — D193/UI: owner authorizes combined PR17/62/73/82 RC. Assembled source on current main dcd0df0; isolated toolkit8589f88+dd63e17 merge clean (wide+long settings+startup). Native build0.10.8 succeeds with wide capability, focused38tests pass, fast589pass/32skip/1deselected unrestricted, texture3/3/settings1/1 fixtures pass. Windows empty-lock sentinel write removed; native testing-channel checkbox/helper opt-in added; macOS DMG sizing headroom added pending CI. Exact realRC2 catalogue parser validates157IDs. Catalogue PR1 merged d1f8e79 with RC2 metadata, Pages configured, publish39996850444 validation/archive/malware scan passes; protected signing waits for owner approval (asked asynchronously). Full serial native regression running against preserved disposable fixture, hosted UI test utility prepared. No art/gameexe/secret publication, ordinary save/settings edits or game-PR merge.
 - 2026-10-23 11:39 — D193/UI: combined game candidate0279950 pushed, draftPR91 attached/conflict-free; published toolkitbd8c633 retains latest startup+wide+1023-byte settings. CI40003181247 passes29/29, Windows lock and macOS image fixed. Windows game-free artifact12521984699 downloaded,58819072B exe SHA8fbc03aee2a762c801c32f8dac299ac2bd92ebfb992992517a64c7bafc3a8212, provenance merge dd173611 parentsmain/candidate and toolkitpin verified;208exact+367CRLF source matches. Full native15/18 in44min (regress-20261023-112317.txt): historical stream callback in versus, duplicate-name intro fixture and wrong gym shop retained/triaged; fresh intro157s passes. Four native manager tours, all five exact-aspect menu captures and32:9 pre-fight loading with Faithful pass, save equality. Initial short ultrawide enum fallbacks excluded, exact-label reruns dimension-checked. Catalogue publish39996850444 archive/malware checks pass, owner protected approval still waiting; actual signed hosted native install/play not yet possible, no Windows-ready claim. No art/ordinary saves/gameexe/secret publication.
@@ -429,40 +432,39 @@ defjam-recomp/
 - 2026-10-23 19:44 — D194 Windows PR91 pass completed: fixed embedded Python import and transient progress-file rename failures2bbe9df; cp1252/symlink portability7ed7f66; lock regression863ea98.600units/26skip/1deselected, native helper6/6, texture/settings1/1each. Clean setup267f67c1 packaged offline rebuild exit0 with337files preserved; actual signed RC2 install/order/offline reopen/failed refresh/Play/F1Mods overlay pass. Full native12/13+4skip retained; m2 fixture corrected and retry1/1pass =>13applicable checks satisfied, combat27/27versus26/26/replay80records exact. Five aspects/eight Mode states inspected; same-frame fire-escape f1358 proves uncovered upper-left scene region, survives no-pack/sync/no-depth controls, remains open pending reference geometry. Original23save/settings files unchanged;326pack files intact. Report docs/research/windows-integrated-menu-mods-rc-2026-10-23.md. Local commits only, PR91draft, no push/merge/release.
 - 2026-10-23 19:47 - Owner authorizes pushing the verified Windows fixes and report to the existing PR91 head branch codex/integrated-menu-mods-rc (current remote66002541, fast-forward only). PR remains draft; no merge/release. Existing isolated app/DefJamLauncher.exe is ready for owner playtesting with RC2 and Faithful already enabled; no reinstall needed.
 - 2026-10-23 21:41 — D195 owner feedback: posted three-screen modpack1.1 backlog to PR91; created pause-HUD issue95. Implemented installed/descending-priority tables, one Recomp HD row/details, legacy missing-selection warning and catalogue authors.606units/26skip/1deselected, focused49pass, MSVC native preview builds. Original installed source/exe restored5/5; separate review fixture. Native visual/input acceptance blocked by computer-use kernel asset/path failure after reset; not claimed passed. Current redesign local for owner review; no release or new art. Report docs/research/mods-owner-feedback-2026-10-23.md.
+- 2026-10-24 06:50 — D196 owner approves Mods layout; extra recommendation removed4f74f53 and preview rebuilt. Authorvyanhursky correction cataloguePR2/c8940e2 validated13tests/22subtests, CIpass; live signed revision pending. Main0b3fa17 integrated locally, three conflicts resolved preserving C++17/C++20 Unicode and grouped priority behavior;74focused and625fast/26skip/1deselected pass, nativebuildpass. Release readiness report added. PR91 remains draft; final CI/setup/native-large-text/platform checks and issue95/fire-escape disposition remain; missingthree screens deferred1.1. No merge/tag/release or catalogue signing.
 
 ## 7. Hand-off
 
-### Owner feedback and Mods UI preview — 2026-10-23
+### Owner-accepted Mods UI and release follow-up — 2026-10-24
 
-- Repo C:/Users/Vlad/code/defjam-pr91-windows/source, branch codex/pr91-windows-validation.
-  Previous Windows commits through771840d are pushed to PR91/codex/integrated-menu-mods-rc.
-  Current table redesign is local for review. Keep PR91 draft, no merge/tag/release.
-- Read docs/research/mods-owner-feedback-2026-10-23.md. Owner chose one Recomp HD row.
-  Installed table/status/component details; Load Order high-to-low priority table,
-  Higher/Lower controls; authors projected from signed catalogue. Legacy IDs and
-  serialized low-to-high loader order remain compatible. Missing faithful-hd is
-  an unavailable saved alias, not another download; no selection silently removed.
-  Interleaved custom/component order is preserved and expanded in Load Order.
-- PR91 body records Select User ID, Choose Teams, Choose Venue for owner modpack1.1.
-  Pause close-ups only evidence: github.com/vyanhursky/DefJamFFNY-recomp/issues/95
-  records fighter HUD shifting to centered4:3 positions on pause. Bug logged, not
-  fixed or independently reproduced. Fire-escape gap remains separate/unresolved.
-- Validation606unit passes/26skip/1slow deselected; focused49pass; native MSVC build
-  pass. ../logs/mods-table-all-tests.log, mods-table-focused-tests.log,
-  mods-preview-build.log. No gameplay/kernel/lifter/renderer/toolkit changes.
-  The earlier full Windows regression evidence remains in its verification report.
-- Separate preview: ../mods-ui-preview/OpenModsPreview.cmd. It uses review-data/
-  disposable settings/cache/state and a copy of managed RC2, with local component
-  links. Native exe DefJamModsPreview.exe. Original installed source4files + exe
-  were restored byte-identically after borrowing build intermediates (5/5).
-  Normal ../app/DefJamLauncher.exe still opens verified7ed7f66/old UI; no reinstallation.
-- Next: visually inspect preview Mods/order/catalogue at100% and250%, test grouped
-  enable/disable and Higher/Lower on disposable settings, confirm authors and status.
-  Windows computer-use mcp__node_repl fails before any API call: failed to write
-  kernel assets / path not found, including reset. Preview opened, but visual/input
-  acceptance is NOT a pass. No custom UI automation workaround used. Preview closed.
-- Original user saves/settings and real managed pack untouched by redesign tests;
-  no game/art/capture bytes tracked. Keep games serial. Full prior Windows handoff
-  archived unchanged; docs/research/windows-integrated-menu-mods-rc-2026-10-23.md
-  retains all fixture-corrected13applicable checks, four platform skips, original
-  23-file hash verification and corrected setup267f67c1 provenance.
+- Work root C:/Users/Vlad/code/defjam-pr91-windows; source/ branch
+  codex/pr91-windows-validation publishes to PR91/codex/integrated-menu-mods-rc.
+  Keep PR91 draft; no game PR merge/tag/release authorized. Latest layout commit
+  e8d45be and wording4f74f53 are included in the main integration. Main0b3fa17
+  retains CachyOS Unicode/C++20 fixes; three conflicts resolved by preserving both
+  docs and native test coverage. Toolkitbd8c633 remains clean/unchanged.
+- Read docs/research/menu-mods-release-readiness-2026-10-24.md. Owner screenshot
+  accepts revised installed/priority tables and one Recomp HD row. Removed
+  Put-HD-Widescreen-Menus-above sentence; generic next-start notice retained.
+  Earlier computer-use failure remains a tooling limitation, not a visual pass;
+  owner normal-size review is accepted, large-text/platform/input checks remain.
+- Catalogue author source correction is github.com/vyanhursky/DefJamFFNY-mods/pull/2,
+  commitc8940e2, local catalogue-source/.13applicable tests/22subtests and CIpass;
+  symlink-only Windows test lacks privilege. Live signed revision1 still saysVlad.
+  Review/merge PR2 then normal signed publish (protected owner approval) and check
+  actual launcher credit vyanhursky. Never patch cached signed bytes/trust pin.
+- Final combined native build and74focused checks pass; full fast625pass/26skip/1slow deselected in
+  ../logs/mods-main-merge-all-tests.log. No guest/gameplay/renderer/lifter changes.
+  Rebuilt ../mods-ui-preview/DefJamModsPreview.exe / OpenModsPreview.cmd uses
+  review-data copy, not original app settings. Borrowed original source/exe inputs
+  restored afterward. Normal app/DefJamLauncher.exe remains verified7ed7f66/old UI.
+- Before stable: green latest PR91 platform CI and exact-source game-free artifacts;
+  fresh final bundled install/update/catalogue/order/Play; large-text/compact and
+  Mac/Linux shared UI checks; signed author metadata; fix or owner-explicitly defer
+  issue95 paused HUD and inherited fire-escape coverage gap. Neither defect fixed.
+  Select User ID/Choose Teams/Choose Venue already deferred to owner modpack1.1.
+- Preserve original user settings/saves and managed pack; original Windows full
+  regression13applicable checks across corrected m2retry, four platform skips and
+  23-file equality retained in Windows report. Game runs serial. Preview not a
+  stable installer; no artwork/game bytes/keys uploaded or staged.

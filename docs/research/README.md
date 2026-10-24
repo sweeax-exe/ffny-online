@@ -23,6 +23,7 @@ cite other development notes, logs and captures that are not published.
 
 - [Mod system design](mod-system-design.md): signed catalogue architecture and future override types (PR17).
 - [Integrated launcher/menu RC](integrated-menu-launcher-rc-2026-10-23.md): combined candidate, hosted delivery and acceptance evidence.
+- [CachyOS setup compile failure, issue #83](issue83-cachyos-notes.md): C++20 UTF-8 paths and native regression checks
 
 - [Launcher UI proposal, 2026-10-19](launcher-ui-proposal-2026-10-19.md): Home/Advanced organization and source review
 - [Launcher implementation and playtest, 2026-10-19](launcher-ui-implementation-2026-10-19.md): native UI, setup handoff and acceptance evidence
@@ -138,6 +139,8 @@ The plan built from these is in [docs/widescreen](../widescreen/README.md), whic
 - [Story scene performance on the Steam Deck, 2026-10-18](scene-perf-deck-2026-10-18.md): the same tour on a Deck OLED with and without the shader cache, and a retest by render scale and refresh rate
 
 ## Menu/UI artwork restoration and modpack handover
+
+- [Integrated release readiness](menu-mods-release-readiness-2026-10-24.md) — owner-approved Mods layout, final wording/author edits and remaining CI, packaging, catalogue and rendering gates.
 
 - [Owner feedback and Mods tables](mods-owner-feedback-2026-10-23.md) — modpack1.1 backlog, pause-HUD issue95, Recomp HD grouping, descending priority table and pending native visual acceptance.
 
