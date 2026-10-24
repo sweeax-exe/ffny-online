@@ -25,7 +25,7 @@ the game on your machine. PS2 and GameCube copies cannot be used.
 [Report a problem](https://github.com/vyanhursky/DefJamFFNY-recomp/issues/new/choose) ·
 [Join the Discord](https://discord.gg/xNvBs23ZBw)
 
-**[v0.11.0 Preview — widescreen menus and Mods tables](https://github.com/vyanhursky/DefJamFFNY-recomp/releases/tag/v0.11.0)** is available for testing. It includes accepted visual issues; final Mac/Linux playtesting is pending. The latest stable release remains v0.10.7.
+**[v0.11.0 — Mod Support Beta](https://github.com/vyanhursky/DefJamFFNY-recomp/releases/tag/v0.11.0)** is the latest stable release. Discover, download, enable and order mods in the launcher. HD Widescreen Menus is available in the default catalogue after refresh. See the release notes for known visual limitations.
 
 ## Gameplay
 
