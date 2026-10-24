@@ -837,12 +837,20 @@ static int arena_free_now(uint32_t a)
         if (s_blk[i].user != a || !s_blk[i].used) continue;
         s_blk[i].used = 0;
         s_arena_live -= s_blk[i].size;
-        if (i + 1 < s_nblk && !s_blk[i + 1].used) {             /* merge with the next */
+        /* Merged only with a neighbour that touches it: the arena is pieces of contiguous memory with
+         * other owners between them. Merged across a gap, a free block took in what lay between two
+         * pieces, DirectSound's voice memory among it, and the engine's next object went over it:
+         * the voice list read junk handles (0xEFFD) and the game crashed in DirectSound
+         * (sub_0025F509) and the host's voice processor (two-copy rollback tests, 2026-10-24; the
+         * players' sound crashes in builds 19 and 20 had the same shape). */
+        if (i + 1 < s_nblk && !s_blk[i + 1].used &&
+            s_blk[i].addr + s_blk[i].size == s_blk[i + 1].addr) {   /* merge with the next */
             s_blk[i].size += s_blk[i + 1].size;
             memmove(&s_blk[i + 1], &s_blk[i + 2], (size_t)(s_nblk - i - 2) * sizeof(Block));
             s_nblk--;
         }
-        if (i > 0 && !s_blk[i - 1].used) {                      /* and with the previous */
+        if (i > 0 && !s_blk[i - 1].used &&
+            s_blk[i - 1].addr + s_blk[i - 1].size == s_blk[i].addr) {   /* and with the previous */
             s_blk[i - 1].size += s_blk[i].size;
             memmove(&s_blk[i], &s_blk[i + 1], (size_t)(s_nblk - i - 1) * sizeof(Block));
             s_nblk--;
