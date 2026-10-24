@@ -205,6 +205,43 @@ def test_new_release_only_reuses_lift_after_pipeline_validation(tmp_path):
     assert json.loads((setup.source/'src/recomp/gen/lift-state.json').read_text()) == {'synthetic':'uncertified'}
 
 
+def test_unreadable_earlier_attempt_is_skipped_not_fatal(tmp_path, monkeypatch):
+    setup = installer(tmp_path)
+    good = setup.install / 'versions/0.4.0-good/source/src/recomp/gen'
+    good.mkdir(parents=True)
+    (good / 'lift-state.json').write_text('{"synthetic":"good"}')
+    stuck = setup.install / 'versions/0.4.1-stuck-attempt-633ae679/source/src/recomp/gen/lift-state.json'
+    stuck.parent.mkdir(parents=True)
+    stuck.write_text('{"synthetic":"stuck"}')
+    real_is_file = Path.is_file
+
+    def is_file(path, *args, **kwargs):
+        # Windows reports a delete-pending file as access denied; Python 3.13 raises it.
+        if path == stuck:
+            raise PermissionError(13, 'Access is denied', str(path))
+        return real_is_file(path, *args, **kwargs)
+    monkeypatch.setattr(Path, 'is_file', is_file)
+    setup.prepare_source()
+    assert json.loads((setup.source/'src/recomp/gen/lift-state.json').read_text()) == {'synthetic':'good'}
+
+
+def test_failed_reuse_copy_is_discarded_not_fatal(tmp_path, monkeypatch):
+    setup = installer(tmp_path)
+    old = setup.install / 'versions/old/source'
+    (old / 'src/recomp/gen').mkdir(parents=True)
+    (old / 'src/recomp/gen/lift-state.json').write_text('{"synthetic":"uncertified"}')
+    engine.write_json(setup.install/'installed.json', {'source': str(old)})
+
+    def copytree(src, dst, **kwargs):
+        Path(dst).mkdir(parents=True)
+        (Path(dst) / 'recomp_00.c').write_text('/* partial */')
+        raise PermissionError(13, 'Access is denied', str(src))
+    monkeypatch.setattr(engine.shutil, 'copytree', copytree)
+    setup.prepare_source()
+    assert not (setup.source/'src/recomp/gen').exists()
+    assert (setup.source/'src/maintained.c').read_text() == '/* synthetic source */'
+
+
 def test_update_cannot_switch_the_data_root(tmp_path):
     setup = installer(tmp_path)
     engine.write_json(setup.install/'installed.json', {'source':str(setup.source),
