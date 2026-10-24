@@ -116,6 +116,36 @@ byte-identical to `32aa980`'s; manual addresses 42/0. Full regression 14/14 agai
 in 16.5 min (30.5 on `32aa980`, disasm 155 s against 965), and the installed game reaches the main
 menu at median 60.
 
+
+## Windows audio in borderless fullscreen (2026-10-24, D150)
+
+The owner's play-test (pin `2b73d81`) crackled all through the opening scene. Every scripted run before
+it was windowed with default settings (`RECOMP_SETTINGS=none`, 4:3); his settings play borderless
+fullscreen, widescreen, render scale 3. Opening scene, 330 s, holes in the mix buffer
+(`scripts/audio-holes.py`, F8 / FA), no XAudio2 underruns in any run:
+
+| Build and settings | F8 | FA |
+|---|---|---|
+| migrated, owner's settings (fullscreen) | 381, 400 | 122, 96 |
+| v0.10.7, owner's settings | 6, 9 | 0, 2 |
+| migrated, owner's settings, render scale 2 | 219 | 48 |
+| migrated, owner's settings, 4:3 | 69 | 21 |
+| migrated, owner's settings, **windowed** | **5** | **0** |
+| migrated, fullscreen, XAudio2 3 x 1024 (64 ms) | 146 | 52 |
+| migrated, fullscreen, 6 x 512 (64 ms) | 5, 5 | 0, 0 |
+| migrated, fullscreen, 8 x 512 (85 ms) | 5, 4 | 0, 0 |
+| migrated, fullscreen, 4 x 512, upstream's in-thread APU interrupt (local experiment) | 270, 281 | 76, 73 |
+| **migrated with the D150 default (6 x 512), owner's settings, no overrides** | **5, 6** | **0, 0** |
+
+Cause: upstream #193 (v0.14.0, `a16163f`) moved XAudio2 from a fixed 1024 x 3 (64 ms) to 512 x 4 (43 ms)
+and paces the APU frame thread by the device queue, rendering ahead in a burst whenever the queue
+falls to its low mark. In borderless fullscreen each `Present` waits for the display; that jitter
+reaches the low mark of a 43 ms queue, and the burst moves the play cursor past the title's own
+stream writes. The fork's APU interrupt path is not the cause: upstream's in-thread delivery also
+crackles. Fix (D150): the port defaults `RECOMP_AUDIO_BUF_COUNT=6` on Windows (`src/main.c`), the
+smallest clean depth and v0.10.x's latency. Upstream issue https://github.com/sp00nznet/xboxrecomp/issues/259.
+Issue #93 (power throttling) is likely the same queue starvation by another route.
+
 ## Linux / Steam Deck results (2026-10-23)
 
 Steam Deck (LCD, 90 Hz panel, SteamOS 3.8, RADV VANGOGH), branch `7350962`, pin `2b73d81`, built in the pinned

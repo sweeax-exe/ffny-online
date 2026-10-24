@@ -663,6 +663,17 @@ static int host_main(void)
      * (D76). RECOMP_APU_HRTF=1 turns it on. */
     if (!getenv("RECOMP_APU_HRTF"))
         _putenv_s("RECOMP_APU_HRTF", "0");
+#ifdef _WIN32
+    /* XAudio2 queue: 6 x 512-sample buffers (64 ms, the depth v0.10.x had)
+     * instead of the toolkit's 4 x 512 (43 ms, D150). In borderless full
+     * screen each Present waits for the display, the queue then drops to its
+     * low mark, and the pacer renders ahead in a burst that overtakes the
+     * title's own stream writes: the opening scene clicked all through with 4
+     * (381-400 holes in 330 s of the mix buffer) and is clean with 6 (5), as
+     * in a window. RECOMP_AUDIO_BUF_COUNT overrides it; SDL3 hosts keep theirs. */
+    if (!getenv("RECOMP_AUDIO_BUF_COUNT"))
+        _putenv_s("RECOMP_AUDIO_BUF_COUNT", "6");
+#endif
 
     /* Acknowledge the audio DSP's command doorbell.
      *
