@@ -244,6 +244,7 @@ static struct {
     char report_names[MAXP][25];
     char report_key[32];
     int reported, fighting_seen, last_late;
+    int start_reported;             /* this match's "start" went to the account service */
     int seed_bypass;                /* crowd_reset seeds a generator with its own words */
     /* rollback (rollback.h): a fighting step runs on a prediction of each entry that has not
      * arrived (that player's last one); when the real one differs, the game goes back to the
@@ -762,6 +763,8 @@ static void on_data(int from, const uint8_t *p, int len)
     }
 }
 
+static void report_left(uint32_t left);
+
 /* ---- the hub's messages -------------------------------------------------------- */
 
 typedef struct { const uint8_t *p; int n, i, bad; } Reader;
@@ -937,10 +940,23 @@ static void on_room(const uint8_t *b, int len)
     }
     LeaveCriticalSection(&g_cs);
     if (gone && N.lockstep) {
+        uint32_t left = 0;
+        int k, j;
+        EnterCriticalSection(&g_cs);
+        for (k = 0; k < N.players; k++) {
+            int found = 0;
+            for (j = 0; j < count; j++) if (v.players[j].slot == N.start_slots[k]) found = 1;
+            if (!found) left |= 1u << k;
+        }
+        LeaveCriticalSection(&g_cs);
         InterlockedExchange(&N.lockstep, 0);
         fight_input();              /* their ports stay plugged in, at rest, until the match ends */
         SetEvent(N.arrived);
         set_status("A player left the match; it finishes offline.");
+        if (N.fighting_seen && MEM32(G_MATCH_PHASE) < 2u) {
+            report_left(left);
+            toast(10000, "A player left the fight: it counts as their loss if they were signed in. START quits.");
+        }
     }
 }
 
@@ -1624,24 +1640,23 @@ static int json_put(char *out, int size, int n, const char *s)
     return n;
 }
 
-/* The room match's result (winners as a mask of fighter slots; code 4 a draw), from
- * netplay_on_step. A signed-in player's game reports it to the account service (account.c),
- * once per START; the service counts it when every player's report agrees. Positions are the
- * fighters' controller slots: the room's players in slot order, then the CPU fighters. */
-void netplay_on_result(uint32_t winners, uint32_t losers, uint32_t code)
+/* The room match for the account service (account.c), from a signed-in player's game: "start"
+ * once the fight is loaded, then "result" when it is decided (winners as a mask of fighter slots,
+ * `draw`), or "left" naming the players (mask) who stopped answering before that. The service
+ * counts a result when every player's game reports it alike, and gives a player who left the
+ * loss (netplay/relay/accounts/stats.go). Positions are the fighters' controller slots: the
+ * room's players in slot order, then the CPU fighters. Called with g_cs not held. */
+static void report_event(const char *event, uint32_t winners, uint32_t left, int draw)
 {
     AutoMatch m;
     char names[MAXP][25], key[32], json[2048];
     const OnlineMode *mode;
     int i, n = 0, pos, players, first = 1;
-    (void)losers;
-    InitOnceExecuteOnce(&g_once, init_once, NULL, NULL);
     EnterCriticalSection(&g_cs);
-    if (!N.lobby || !N.match_live || N.reported || !N.report_key[0] || N.desync || !N.lockstep) {
+    if (!N.report_key[0]) {
         LeaveCriticalSection(&g_cs);
         return;
     }
-    N.reported = 1;
     m = N.report_m;
     memcpy(names, N.report_names, sizeof(names));
     memcpy(key, N.report_key, sizeof(key));
@@ -1665,11 +1680,50 @@ void netplay_on_result(uint32_t winners, uint32_t losers, uint32_t code)
     n += snprintf(json + n, sizeof(json) - n, "],\"winners\":[");
     for (i = 0; i < m.count && i < MAXP; i++)
         if (winners & (1u << i)) { n += snprintf(json + n, sizeof(json) - n, "%s%d", first ? "" : ",", i); first = 0; }
-    n += snprintf(json + n, sizeof(json) - n, "],\"draw\":%s}", (code & 4u) ? "true" : "false");
+    n += snprintf(json + n, sizeof(json) - n, "],\"draw\":%s,\"event\":\"%s\"", draw ? "true" : "false", event);
+    if (left) {
+        first = 1;
+        n += snprintf(json + n, sizeof(json) - n, ",\"left\":[");
+        for (i = 0; i < m.count && i < MAXP; i++)
+            if (left & (1u << i)) { n += snprintf(json + n, sizeof(json) - n, "%s%d", first ? "" : ",", i); first = 0; }
+        n += snprintf(json + n, sizeof(json) - n, "]");
+    }
+    n += snprintf(json + n, sizeof(json) - n, "}");
     if (n >= (int)sizeof(json)) return;
+    account_report_match(json);
+}
+
+/* The room match decided, from netplay_on_step (code 4 a draw); once per match. */
+void netplay_on_result(uint32_t winners, uint32_t losers, uint32_t code)
+{
+    (void)losers;
+    InitOnceExecuteOnce(&g_once, init_once, NULL, NULL);
+    EnterCriticalSection(&g_cs);
+    if (!N.lobby || !N.match_live || N.reported || !N.report_key[0] || N.desync || !N.lockstep) {
+        LeaveCriticalSection(&g_cs);
+        return;
+    }
+    N.reported = 1;
+    LeaveCriticalSection(&g_cs);
     fprintf(stderr, "[NETPLAY] match result: winners 0x%X, code 0x%X; reporting it when signed in\n",
             (unsigned)winners, (unsigned)code);
-    account_report_match(json);
+    report_event("result", winners, 0, (code & 4u) != 0);
+}
+
+/* Players stopped answering, or left the room, during this match's fight, before it was decided:
+ * a match left that way kept the leaver's record clean, and the one who stayed played on against
+ * an idle fighter for nothing (players' reports, 2026-10-24). Reported once, as "left". */
+static void report_left(uint32_t left)
+{
+    int send;
+    EnterCriticalSection(&g_cs);
+    send = N.lobby && N.match_live && N.match_seen && N.start_reported && !N.reported && !N.desync && left;
+    if (send) N.reported = 1;
+    LeaveCriticalSection(&g_cs);
+    if (!send) return;
+    fprintf(stderr, "[NETPLAY] left the match before it was decided: players 0x%X; reporting it when signed in\n",
+            (unsigned)left);
+    report_event("left", 0, left, 0);
 }
 
 void netplay_sync_point(void)
@@ -1929,7 +1983,7 @@ void netplay_on_match_start(void)
         snprintf(N.report_key + strlen(N.report_key), sizeof(N.report_key) - strlen(N.report_key), "-%u",
                  (unsigned)N.match_count);
     }
-    N.reported = N.fighting_seen = 0;
+    N.reported = N.fighting_seen = N.start_reported = 0;
     memset(N.latest_local, 0, sizeof(N.latest_local));
     N.desync = 0;
     if (N.match_live) N.match_seen = 1;
@@ -1947,6 +2001,10 @@ void netplay_on_match_start(void)
     fight_input();
     fprintf(stderr, "[NETPLAY] match %08X starts in lockstep (%d players, delay %d); loaded in %.1f s since the START\n",
             N.match, N.players, N.delay, N.start_tick ? (GetTickCount64() - N.start_tick) / 1000.0 : -1.0);
+    if (N.lobby && N.match_live && N.report_key[0]) {
+        N.start_reported = 1;
+        report_event("start", 0, 0, 0);
+    }
     log_contiguous("at the match start");
 }
 
@@ -2273,7 +2331,12 @@ void netplay_on_step(void)
                         late >= 0 ? g_steps_rx[late] : 0, late >= 0 ? g_steps_last[late] : 0);
                 InterlockedExchange(&N.lockstep, 0);
                 set_status("A player stopped answering during the fight; continuing offline.");
-                toast(10000, "%s stopped answering: the fight goes on offline and won't count.", player_name(late));
+                if (late >= 0 && N.fighting_seen && need > (uint32_t)N.delay + 60) {
+                    report_left(1u << late);
+                    toast(10000, "%s stopped answering: it counts as their loss if they were signed in. START quits.",
+                          player_name(late));
+                } else
+                    toast(10000, "%s stopped answering: the fight goes on offline and won't count.", player_name(late));
                 break;
             }
         }
