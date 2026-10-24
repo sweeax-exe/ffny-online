@@ -1199,6 +1199,40 @@ void sub_0021EB90_enter(void)
 }
 
 /*
+ * The screen manager (registry slot 0x17, docs/research/screen-swap-freeze.md). Its loader thread
+ * (sub_000771E0) loads the pending screen (+0x1C) and sets the state (+0x24) to 3; the main loop's
+ * sub_00077040 then swaps it in: the pending screen becomes current (+0x18) and the old one is
+ * deleted. When a second request woke the loader once more, it set 3 again with nothing pending,
+ * and the swap deleted the live screen and stored 0: nothing was drawn any more and the next match
+ * never loaded (two-copy tests and players: "a freeze after a few matches, the opponent stops
+ * answering"). A state of 3 with nothing pending is put back to 0, as after a finished swap.
+ */
+void sub_00077040_enter(void)
+{
+    static unsigned fixed;
+    uint32_t m = g_ecx;
+    if (m < 0x10000u || MEM32(m + 0x24) != 3 || MEM32(m + 0x1C) != 0)
+        return;
+    MEM32(m + 0x24) = 0;
+    if (fixed++ < 20)
+        fprintf(stderr, "[SCREEN] a swap with no screen loaded was skipped (current %08X, #%u)\n",
+                MEM32(m + 0x18), fixed);
+}
+
+/* sub_000773A0(kind): a new screen requested. Logged when one arrives while another is still loading
+ * (state not 0): the second requester the stray swap above follows. */
+void sub_000773A0_enter(void)
+{
+    static unsigned told;
+    uint32_t m = g_ecx;
+    if (m < 0x10000u || MEM32(m + 0x24) == 0 || told >= 40)
+        return;
+    told++;
+    fprintf(stderr, "[SCREEN] screen %d requested from %08X while state %u (pending %08X, current %08X)\n",
+            (int)MEM32(g_esp + 4), MEM32(g_esp), MEM32(m + 0x24), MEM32(m + 0x1C), MEM32(m + 0x18));
+}
+
+/*
  * The display's gamma ramp.
  *
  * Direct3D's SetGammaRamp ends in sub_002203C6(this, ramp): 256 bytes each of
