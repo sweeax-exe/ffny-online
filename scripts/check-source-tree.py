@@ -44,6 +44,10 @@ APPROVED_README_MEDIA = {
     'ffny-branding/icon-1024.png': '130658498e88dc1cb5e6f781bb08cb2dfbc9ca131aee09692ec2a976cf04d14b',
     'ffny-branding/icon-256.png': 'f640abfadaf49f3da32b726f795b4300df12aab60ce5fd27650dfdbebfc6536d',
     'ffny-branding/ffny.ico': '884d182c92b5d8269dfeaefcee68e8bbb8ff0e7fba82154cf04f59fb5739e46b',
+    # 2026-10-24, FFNY Online's owner, for the build 24 launcher: its background (a close-up from the
+    # game's own intro, graded, with a red rim light and smoke) and a blurred copy for the glass panels.
+    'ffny-branding/launcher-bg.jpg': '919760df1e6d599ee6b019d2d3c387a74d0615e1786d588e5ab0e26c5ff97225',
+    'ffny-branding/launcher-bg-blur.jpg': '483cfd22c413736321f35152470352e9f935e4f55fda88082075af1fc3c8c559',
 }
 # D98 (2026-10-10): the owner approved committing the application icons and the Steam artwork
 # rendered from the game's own textures (the shield, the title wordmark, the title-screen scene).

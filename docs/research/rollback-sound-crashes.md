@@ -39,3 +39,22 @@ presses) and `rb_matches.py` (two copies, fast KO, matches one after another).
   engine, a junk voice handle `0x8225`, an object at `0x8000A640` whose vtable read `0x0D0D0D0D` (called from the
   crowd's update), and a copy that stopped stepping at a KO. Rollback stays off by default until a 10-minute
   multi-match run is clean.
+
+## Tried on 2026-10-24 (not kept)
+
+* **Masks instead of skipped pages, per 16 bytes.** The pieces of a page the mixer changed stayed as they were
+  on a load and the rest was restored. Worse: a crash in the first match (`sub_0012E560` writing through junk,
+  voice handle `0xFA4C`). The mixer writes single 2-byte fields in small game-heap blocks (`0x4C`, `0xAC`
+  bytes: sound objects the game allocates through `operator new`, outer callers `0x11E75`, `0x12723`,
+  `0x28A93`); restoring the rest of such an object while the engine moved on breaks it.
+* **Masks widened to the whole live block** (a registry of the heap's live blocks fed by `sub_00029500` and
+  `sub_0002A180`). No crash in the sound engine, but one long match (6000+ steps, no KO with fast KO) ended
+  with a crash in `sub_000ABB70` on another thread's stack (`esp 0x00F7FD88`) and a stall of the other copy.
+  Kept as a diff in the session scratch (`rb_blocks_attempt.diff`); the log is `logs/mcp/blocks-crash-copy1.log.err`.
+* The allocation log now names the call chain (validated `E8` call sites): the mixer-written `0xAC4` block at
+  `0x8024BC60` comes from `sub_00011E40+0x8E3` <- `sub_001FDCAE` <- `sub_0020005D` <- `sub_00203A3A` <-
+  `sub_00203A77`; the music stream buffers from `sub_001E3F70` <- `sub_0001C320` (AEMS).
+
+Next: route these allocations into the arena by their call chain (an audio-code site among the first
+validated return addresses), so no sound object lives in restored memory; then find out why the match
+did not end with fast KO and what `sub_000ABB70` read.

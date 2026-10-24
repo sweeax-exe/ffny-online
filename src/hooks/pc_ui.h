@@ -52,6 +52,12 @@ void pc_ui_apply_settings(void);
  * on and start the game, 0 to quit. */
 int pc_launcher_run(void);
 
+/* While the game runs in its own process (game: its process handle), the launcher's process stays
+ * in the background with an icon in the notification area: it looks for a new build every five
+ * minutes and says so in a Windows notification. Returns 1 when the game has closed and an update
+ * is waiting (the launcher should open again to offer it), 0 otherwise. */
+int pc_launcher_watch(HANDLE game);
+
 #else
 /* ---- off Windows: SDL's window, the toolkit's Vulkan present (pc_ui.cpp, pc_launcher_sdl.cpp) ---- */
 

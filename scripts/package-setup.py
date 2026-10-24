@@ -56,13 +56,15 @@ def source_allowed(name, toolkit=False):
 
 
 # The part of branding/ each platform's setup uses at install time: the Windows game build embeds the
-# .ico and its launcher shows the banner and logo (src/hooks/pc_launcher.cpp), the POSIX game build the
+# .ico and its launcher shows the logo, the background with its blurred copy for the glass, and the
+# Anton display font (src/hooks/pc_launcher.cpp, pc_ui.cpp), the POSIX game build the
 # window icon, and the Linux setup also installs the 256 px icon, shows the 128 px one in its wizard and
 # places the Steam artwork. The rest (masters, macOS icons, previews) is for the repository, and a
 # payload that carried it would be megabytes larger.
 BRANDING_FOR = {
     'windows-x64': ('branding/icon/defjam.ico', 'branding/steam/hero.png', 'branding/fan/steam/logo.png',
-                    'ffny-branding/logo-512.png', 'ffny-branding/ffny.ico'),
+                    'ffny-branding/logo-512.png', 'ffny-branding/ffny.ico', 'ffny-branding/launcher-bg.jpg',
+                    'ffny-branding/launcher-bg-blur.jpg', 'ffny-branding/fonts/'),
     'macos-arm64': ('branding/icon/window/window-128-macos.rgba',),
     'linux-x64': ('branding/icon/window/window-128.rgba', 'branding/icon/png/defjam-128.png',
                   'branding/icon/png/defjam-256.png', 'branding/steam/', 'branding/fan/steam/'),

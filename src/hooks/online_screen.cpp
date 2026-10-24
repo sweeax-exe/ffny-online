@@ -39,6 +39,7 @@
 #include "online_data.h"
 #include "pc_settings.h"
 #include "recomp_settings.h"
+#include "updater.h"
 
 namespace {
 
@@ -355,6 +356,17 @@ float hint(ImDrawList *dl, const Frame &f, float x, float y, const char *button,
 void page_title(ImDrawList *dl, const Frame &f, const char *title)
 {
     text(dl, f, g_stencil, 30, 50, 24, CREAM, title, LEFT, 1.6f);
+    // A newer build stays announced on every online page, top right, until the player updates.
+    int build = 0;
+    if (updater_state() == UPDATER_AVAILABLE) updater_info(&build, nullptr, 0, nullptr, 0);
+    if (build > updater_local_build()) {
+        char line[96];
+        snprintf(line, sizeof(line), "UPDATE: BUILD %d IS OUT", build);
+        float w = text_width(f, g_title, 12, line);
+        rect(dl, f, 606 - w - 10, 8, w + 20, 20, IM_COL32(150, 14, 30, 230), 4);
+        text(dl, f, g_title, 12, 606, 11, WHITE, line, RIGHT, 1.0f);
+        text(dl, f, g_hand, 11, 606, 30, ORANGE, "close the game: the launcher installs it", RIGHT, 0.8f);
+    }
 }
 
 // The lit rolling shutter in the menu's door (the door art itself is see-through there).

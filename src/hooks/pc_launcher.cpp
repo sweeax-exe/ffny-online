@@ -10,12 +10,17 @@
 #include <d3d11.h>
 #include <dxgi.h>
 #include <wincodec.h>
+#include <windowsx.h>
+#include <dwmapi.h>
+#include <shellapi.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <algorithm>
 #include <vector>
 
 #pragma comment(lib, "windowscodecs.lib")
+#pragma comment(lib, "dwmapi.lib")
 
 #include "imgui.h"
 #include "imgui_impl_win32.h"
@@ -29,6 +34,7 @@ extern "C" {
 #include "pc_settings.h"
 #include "pc_ui.h"
 #include "pc_ui_internal.h"
+#include "updater.h"
 
 namespace {
 
@@ -90,7 +96,7 @@ struct Art {
     ID3D11ShaderResourceView *srv = nullptr;
     int width = 0, height = 0;
 };
-Art g_banner, g_logo;
+Art g_banner, g_logo, g_backdrop, g_backdrop_blur;
 
 // branding/<relative> in the working directory (the source tree: pc_settings_init makes the folder
 // that holds game\default.xbe current) or up to four folders above the executable.
@@ -110,7 +116,7 @@ bool find_branding(const wchar_t *relative, wchar_t *out, size_t size)
     return false;
 }
 
-// A PNG as an RGBA texture for ImGui, through Windows' own codecs.
+// A PNG or JPEG as an RGBA texture for ImGui, through Windows' own codecs.
 bool load_art(const wchar_t *relative, Art &art)
 {
     wchar_t path[MAX_PATH * 2];
@@ -161,6 +167,8 @@ void drop_art()
 {
     if (g_banner.srv) { g_banner.srv->Release(); g_banner = Art(); }
     if (g_logo.srv) { g_logo.srv->Release(); g_logo = Art(); }
+    if (g_backdrop.srv) { g_backdrop.srv->Release(); g_backdrop = Art(); }
+    if (g_backdrop_blur.srv) { g_backdrop_blur.srv->Release(); g_backdrop_blur = Art(); }
 }
 
 // RECOMP_WINDOW_SHOT=<file.bmp>: write the launcher's picture once it has settled (frame 30) and
@@ -248,6 +256,17 @@ LRESULT CALLBACK launcher_proc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
         SetWindowPos(h, nullptr, r->left, r->top, r->right - r->left, r->bottom - r->top, SWP_NOZORDER | SWP_NOACTIVATE);
         return 0;
     }
+    case WM_NCHITTEST: {
+        // The window has no frame: the strip along the top drags it.
+        POINT p = { GET_X_LPARAM(lp), GET_Y_LPARAM(lp) };
+        ScreenToClient(h, &p);
+        ui_lock();
+        bool caption = ui_launcher_caption((float)p.x, (float)p.y);
+        ui_unlock();
+        return caption ? HTCAPTION : HTCLIENT;
+    }
+    case WM_NCLBUTTONDBLCLK:
+        return 0;                                       // no maximising from the drag strip
     case WM_CLOSE:
         g_done = true;
         g_result = 0;
@@ -283,9 +302,10 @@ extern "C" int pc_launcher_run(void)
         HDC dc = GetDC(nullptr);
         if (dc) { dpi = GetDeviceCaps(dc, LOGPIXELSX); ReleaseDC(nullptr, dc); }
     }
-    RECT r = { 0, 0, MulDiv(1000, dpi, 96), MulDiv(720, dpi, 96) };
-    AdjustWindowRect(&r, WS_OVERLAPPEDWINDOW, FALSE);
-    int w = r.right - r.left, h = r.bottom - r.top;
+    // Borderless, drawn edge to edge (the layout is made for 1100 x 688); it has its own drag strip
+    // and buttons, and still minimises from the taskbar.
+    const DWORD style = WS_POPUP | WS_SYSMENU | WS_MINIMIZEBOX;
+    int w = MulDiv(1100, dpi, 96), h = MulDiv(688, dpi, 96);
     RECT work;
     int x = CW_USEDEFAULT, y = CW_USEDEFAULT;
     if (SystemParametersInfoW(SPI_GETWORKAREA, 0, &work, 0)) {
@@ -300,9 +320,15 @@ extern "C" int pc_launcher_run(void)
         x = GetSystemMetrics(SM_XVIRTUALSCREEN) - w - 64;
         y = GetSystemMetrics(SM_YVIRTUALSCREEN);
     }
-    HWND window = CreateWindowExW(background ? WS_EX_NOACTIVATE : 0, L"DefJamRecompLauncher", L"Def Jam: Fight for NY - Launcher",
-                                  WS_OVERLAPPEDWINDOW, x, y, w, h, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
+    HWND window = CreateWindowExW(background ? WS_EX_NOACTIVATE : 0, L"DefJamRecompLauncher", L"FFNY Online",
+                                  style, x, y, w, h, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
     if (!window) return 1;                       // no window: do not hold the game back
+    {
+        // Windows 11 rounds the corners of a borderless window when asked (33: DWMWA_WINDOW_CORNER_PREFERENCE,
+        // 2: round); older versions ignore it.
+        int round = 2;
+        DwmSetWindowAttribute(window, 33, &round, sizeof(round));
+    }
     if (!make_device(window)) {
         fprintf(stderr, "[UI] launcher: no Direct3D 11 device; starting the game\n");
         DestroyWindow(window);
@@ -320,8 +346,14 @@ extern "C" int pc_launcher_run(void)
     if (!g_logo.srv) load_art(L"fan\\steam\\logo.png", g_logo);
     ui_set_launcher_art((ImTextureID)(intptr_t)g_banner.srv, (float)g_banner.width, (float)g_banner.height,
                         (ImTextureID)(intptr_t)g_logo.srv, (float)g_logo.width, (float)g_logo.height);
-    fprintf(stderr, "[UI] launcher artwork: banner %s, logo %s\n", g_banner.srv ? "loaded" : "not found",
-            g_logo.srv ? "loaded" : "not found");
+    // The background (ffny-branding/launcher-bg.jpg) and its blurred copy for the glass.
+    load_art(L"..\\ffny-branding\\launcher-bg.jpg", g_backdrop);
+    load_art(L"..\\ffny-branding\\launcher-bg-blur.jpg", g_backdrop_blur);
+    ui_set_launcher_backdrop((ImTextureID)(intptr_t)g_backdrop.srv, (float)g_backdrop.width, (float)g_backdrop.height,
+                             (ImTextureID)(intptr_t)g_backdrop_blur.srv, (float)g_backdrop_blur.width,
+                             (float)g_backdrop_blur.height);
+    fprintf(stderr, "[UI] launcher artwork: banner %s, logo %s, background %s\n", g_banner.srv ? "loaded" : "not found",
+            g_logo.srv ? "loaded" : "not found", g_backdrop.srv && g_backdrop_blur.srv ? "loaded" : "not found");
     ui_unlock();
     ShowWindow(window, background ? SW_SHOWNOACTIVATE : SW_SHOW);
     if (!background) SetForegroundWindow(window);
@@ -374,6 +406,7 @@ extern "C" int pc_launcher_run(void)
 
     ui_lock();
     ui_set_launcher_art(0, 0, 0, 0, 0, 0);
+    ui_set_launcher_backdrop(0, 0, 0, 0, 0, 0);
     ImGui_ImplDX11_Shutdown();
     ImGui_ImplWin32_Shutdown();
     ui_context_end();
@@ -384,4 +417,84 @@ extern "C" int pc_launcher_run(void)
     fprintf(stderr, "[UI] launcher closed: %s\n", g_result ? "play" : "quit");
     fflush(stderr);
     return g_result;
+}
+
+// ---- in the background while the game runs ------------------------------------------------------
+
+namespace {
+
+const UINT k_watch_timer = 1, k_watch_poll = 2;
+
+LRESULT CALLBACK watch_proc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
+{
+    return DefWindowProcW(h, msg, wp, lp);
+}
+
+} // namespace
+
+extern "C" int pc_launcher_watch(HANDLE game)
+{
+    // RECOMP_WATCH_EVERY_MS: how often to look for a new build (tests); five minutes by default.
+    const char *every = getenv("RECOMP_WATCH_EVERY_MS");
+    DWORD period = every && atoi(every) > 0 ? (DWORD)atoi(every) : 5 * 60 * 1000;
+    WNDCLASSEXW wc = {};
+    wc.cbSize = sizeof(wc);
+    wc.lpfnWndProc = watch_proc;
+    wc.hInstance = GetModuleHandleW(nullptr);
+    wc.lpszClassName = L"DefJamRecompLauncherWatch";
+    RegisterClassExW(&wc);
+    HWND window = CreateWindowExW(0, wc.lpszClassName, L"FFNY Online", 0, 0, 0, 0, 0, HWND_MESSAGE, nullptr,
+                                  wc.hInstance, nullptr);
+    NOTIFYICONDATAW icon = {};
+    icon.cbSize = sizeof(icon);
+    icon.hWnd = window;
+    icon.uID = 1;
+    icon.uFlags = NIF_ICON | NIF_TIP;
+    icon.hIcon = (HICON)LoadImageW(wc.hInstance, MAKEINTRESOURCEW(1), IMAGE_ICON, GetSystemMetrics(SM_CXSMICON),
+                                   GetSystemMetrics(SM_CYSMICON), 0);
+    wcscpy(icon.szTip, L"FFNY Online: looking for updates while you play");
+    bool shown = window && Shell_NotifyIconW(NIM_ADD, &icon);
+    fprintf(stderr, "[UI] launcher in the background: looking for updates every %lu s%s\n", (unsigned long)(period / 1000),
+            shown ? "" : " (no notification icon)");
+    fflush(stderr);
+
+    bool told = updater_state() == UPDATER_AVAILABLE;       // the launcher already offered this one
+    int told_build = 0;
+    if (told) updater_info(&told_build, nullptr, 0, nullptr, 0);
+    ULONGLONG next = GetTickCount64() + period;
+    for (;;) {
+        ULONGLONG now = GetTickCount64();
+        DWORD wait = now >= next ? 0 : (DWORD)std::min<ULONGLONG>(next - now, 2000);
+        DWORD r = MsgWaitForMultipleObjects(1, &game, FALSE, wait, QS_ALLINPUT);
+        if (r == WAIT_OBJECT_0) break;
+        MSG msg;
+        while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) DispatchMessageW(&msg);
+        if (GetTickCount64() >= next) {
+            next = GetTickCount64() + period;
+            updater_check();
+        }
+        int build = 0;
+        if (updater_state() == UPDATER_AVAILABLE) updater_info(&build, nullptr, 0, nullptr, 0);
+        if (build > 0 && build != told_build) {
+            told_build = build;
+            if (shown) {
+                icon.uFlags = NIF_INFO | NIF_TIP;
+                icon.dwInfoFlags = NIIF_USER | NIIF_LARGE_ICON;
+                icon.hBalloonIcon = (HICON)LoadImageW(wc.hInstance, MAKEINTRESOURCEW(1), IMAGE_ICON, 48, 48, 0);
+                if (!icon.hBalloonIcon) icon.dwInfoFlags = NIIF_INFO;
+                _snwprintf(icon.szInfoTitle, ARRAYSIZE(icon.szInfoTitle), L"FFNY Online build %d is out", build);
+                wcscpy(icon.szInfo, L"Finish your match: when you close the game, the launcher opens with the update.");
+                _snwprintf(icon.szTip, ARRAYSIZE(icon.szTip), L"FFNY Online: build %d is ready to install", build);
+                Shell_NotifyIconW(NIM_MODIFY, &icon);
+            }
+            fprintf(stderr, "[UI] update found in the background: build %d\n", build);
+            fflush(stderr);
+        }
+    }
+    if (shown) Shell_NotifyIconW(NIM_DELETE, &icon);
+    if (icon.hIcon) DestroyIcon(icon.hIcon);
+    if (icon.hBalloonIcon) DestroyIcon(icon.hBalloonIcon);
+    if (window) DestroyWindow(window);
+    UnregisterClassW(wc.lpszClassName, wc.hInstance);
+    return told_build > 0 && updater_state() == UPDATER_AVAILABLE && updater_can_install();
 }

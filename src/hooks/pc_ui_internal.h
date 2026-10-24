@@ -93,6 +93,12 @@ UiResult ui_draw(UiMode mode, float x, float y, float width, float height);
 // the UI lock held; 0, 0, 0, 0, 0, 0 before the textures are released.
 void ui_set_launcher_art(ImTextureID banner, float banner_w, float banner_h,
                          ImTextureID logo, float logo_w, float logo_h);
+// The launcher's background picture and a blurred copy of it for the glass panels (0 for none).
+void ui_set_launcher_backdrop(ImTextureID picture, float picture_w, float picture_h,
+                              ImTextureID blurred, float blurred_w, float blurred_h);
+// Whether a point of the launcher window (client pixels) is on its drag strip: the borderless window
+// answers WM_NCHITTEST with the caption there. Call with the UI lock held.
+bool ui_launcher_caption(float x, float y);
 
 // The current frame's pad-press detection runs here, so it is only done while a screen is showing.
 bool ui_capturing();

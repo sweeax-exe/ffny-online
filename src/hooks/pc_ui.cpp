@@ -145,6 +145,9 @@ static const char *friendly(const char *section, const char *key)
         { "launcher", "skip", "Skip the launcher at start" }, { "ui", "scale", "Text and control size" },
         { "online", "server", "Server" }, { "online", "name", "Your name" },
         { "online", "input_delay", "Input delay (steps)" },
+        { "online", "voice", "Voice chat" }, { "online", "voice_key", "Push-to-talk key" },
+        { "online", "voice_pad", "Push-to-talk on the controller" }, { "online", "voice_volume", "Voices volume (%)" },
+        { "online", "voice_mic_volume", "Microphone volume (%)" }, { "online", "voice_auto_level", "Level my microphone" },
         { "ui", "overlay_pad", "Overlay pad buttons" }, { "ui", "overlay_key", "Overlay key" },
     };
     for (const Label &l : labels)
@@ -380,6 +383,7 @@ static const ImVec4 k_red(0.78f, 0.06f, 0.16f, 1.0f), k_red_hi(0.90f, 0.16f, 0.2
 static const ImVec4 k_gold(0.96f, 0.72f, 0.20f, 1.0f);
 static const ImVec4 k_bg(0.055f, 0.055f, 0.065f, 1.0f), k_panel(0.085f, 0.085f, 0.10f, 1.0f), k_sidebar(0.045f, 0.045f, 0.055f, 1.0f);
 static ImFont *g_font_bold, *g_font_black;     // Segoe UI Bold / Black when present
+static ImFont *g_font_display;                 // Anton (ffny-branding/fonts) for the launcher's headings and PLAY
 
 void ui_apply_scale(UiWindow window)
 {
@@ -430,8 +434,41 @@ void ui_apply_scale(UiWindow window)
     c[ImGuiCol_ScrollbarBg] = ImVec4(0, 0, 0, 0);
     c[ImGuiCol_ScrollbarGrab] = ImVec4(1, 1, 1, 0.12f);
     c[ImGuiCol_NavCursor] = k_gold;
+    c[ImGuiCol_ModalWindowDimBg] = ImVec4(0, 0, 0, 0.55f);
     style.ScaleAllSizes(s);
     style.FontScaleMain = s;
+}
+
+// Anton (SIL Open Font License, ffny-branding/fonts/ in the source tree, beside branding/) for the
+// launcher's headings and PLAY; without it they use the heaviest system cut.
+static ImFont *load_display_font(ImGuiIO &io)
+{
+    static const char relative[] = "ffny-branding/fonts/Anton-Regular.ttf";
+    char path[1100];
+    snprintf(path, sizeof(path), "%s", relative);
+#if defined(_WIN32)
+    char dir[MAX_PATH];
+    bool found = GetFileAttributesA(path) != INVALID_FILE_ATTRIBUTES;
+    DWORD n = found ? 0 : GetModuleFileNameA(nullptr, dir, MAX_PATH);
+    for (int up = 0; !found && n && n < MAX_PATH && up <= 4; up++) {
+        char *slash = strrchr(dir, '\\');
+        if (!slash) break;
+        *slash = 0;
+        snprintf(path, sizeof(path), "%s\\%s", dir, relative);
+        found = GetFileAttributesA(path) != INVALID_FILE_ATTRIBUTES;
+    }
+#else
+    struct stat st;
+    bool found = stat(path, &st) == 0;
+    const char *base = found ? nullptr : SDL_GetBasePath();
+    for (int up = 0; !found && base && up <= 4; up++) {
+        std::string dir = base;
+        for (int i = 0; i < up; i++) dir += "../";
+        snprintf(path, sizeof(path), "%s%s", dir.c_str(), relative);
+        found = stat(path, &st) == 0;
+    }
+#endif
+    return found ? io.Fonts->AddFontFromFileTTF(path, 17.0f) : nullptr;
 }
 
 void ui_context_begin(UiWindow window)
@@ -469,6 +506,8 @@ void ui_context_begin(UiWindow window)
     for (const char *font : fonts)
         if (stat(font, &st) == 0 && io.Fonts->AddFontFromFileTTF(font, 17.0f)) break;
 #endif
+    if (io.Fonts->Fonts.Size == 0) io.Fonts->AddFontDefault();     // the first font stays the default
+    g_font_display = load_display_font(io);
     ui_apply_scale(window);
     remember_start_values();
 }
@@ -508,11 +547,16 @@ static bool setting_widget(RecompSetting *s, const char *label = nullptr)
     }
     case RECOMP_SETTING_ENUM: {
         int v = s->stored;
-        const char *current = s->choices[v];
+        // The stored names (push_to_talk) read with spaces.
+        auto shown = [](const char *choice) {
+            std::string text = choice;
+            std::replace(text.begin(), text.end(), '_', ' ');
+            return text;
+        };
         ImGui::SetNextItemWidth(ImGui::GetFontSize() * 14);
-        if (ImGui::BeginCombo(label, current)) {
+        if (ImGui::BeginCombo(label, shown(s->choices[v]).c_str())) {
             for (int i = 0; s->choices[i]; i++)
-                if (ImGui::Selectable(s->choices[i], i == v)) { recomp_settings_set(s->section, s->key, i); changed = true; }
+                if (ImGui::Selectable(shown(s->choices[i]).c_str(), i == v)) { recomp_settings_set(s->section, s->key, i); changed = true; }
             ImGui::EndCombo();
         }
         break;
@@ -1032,6 +1076,32 @@ static void page_account()
 #endif
 }
 
+// Voice chat's settings, the microphone's level and what to know about it: the overlay's Online page
+// and the launcher's own Voice chat page (the launcher signs in on its start page, and the server and
+// the name are not for players to change there).
+static void voice_settings()
+{
+    settings_group("online", { "voice", "voice_key", "voice_pad", "voice_volume", "voice_mic_volume", "voice_auto_level" });
+    {
+        float meter = voice_mic_meter();
+        if (meter >= 0.0f) {
+            ImGui::ProgressBar(meter, ImVec2(ImGui::GetFontSize() * 16, 0), "your microphone");
+            ImGui::SameLine();
+            ImGui::TextDisabled(meter > 0.95f ? "too loud: lower your microphone volume" : "");
+        } else {
+            ImGui::PushTextWrapPos(0.0f);
+            ImGui::TextDisabled("The level of your microphone shows here while you are in a room and it is open "
+                                "(after your first push-to-talk press).");
+            ImGui::PopTextWrapPos();
+        }
+    }
+    ImGui::PushTextWrapPos(0.0f);
+    ImGui::TextDisabled("Everyone in your room hears you, in the room and in the fight. Push-to-talk: hold the key "
+                        "above while the game window has the focus. Your voice goes live through the project's server "
+                        "and is not recorded.");
+    ImGui::PopTextWrapPos();
+}
+
 // Online: the connection settings. The hub itself (quick match, rooms, the venue vote) is in the
 // game, behind the main menu's ONLINE entry (src/hooks/online_screen.cpp).
 static void page_online(UiMode mode)
@@ -1066,21 +1136,7 @@ static void page_online(UiMode mode)
         if (ImGui::Button("Go offline", ImVec2(ImGui::GetFontSize() * 7, 0))) netplay_stop();
     }
     ImGui::SeparatorText("Voice chat");
-    settings_group("online", { "voice", "voice_key", "voice_pad", "voice_volume", "voice_mic_volume", "voice_auto_level" });
-    {
-        float meter = voice_mic_meter();
-        if (meter >= 0.0f) {
-            ImGui::ProgressBar(meter, ImVec2(ImGui::GetFontSize() * 16, 0), "your microphone");
-            ImGui::SameLine();
-            ImGui::TextDisabled(meter > 0.95f ? "too loud: lower your microphone volume" : "");
-        } else {
-            ImGui::TextDisabled("The level of your microphone shows here while you are in a room and it is open "
-                                "(after your first push-to-talk press).");
-        }
-    }
-    ImGui::TextDisabled("Everyone in your room hears you, in the room and in the fight. Push-to-talk: hold the key "
-                        "above while the game window has the focus. Your voice goes live through the project's server "
-                        "and is not recorded.");
+    voice_settings();
     ImGui::SeparatorText("How it works");
     ImGui::TextWrapped("Everyone needs their own copy of the game and this same version. In a fight the games run in "
                        "lockstep through the relay server, so it is the same fight on every screen.");
@@ -1161,11 +1217,13 @@ static void page_general(UiMode mode)
 
 // ---- the launcher's own layout ------------------------------------------------------------------------
 //
-// A banner (the title screen's skyline and the logo, when the front end could load them), the pages
-// in a sidebar, and a footer with a large Play. The overlay keeps the compact tabbed screen below.
+// One screen over a living picture (the background breathes in a slow zoom and embers rise over it):
+// the logo and a large PLAY on the left, frosted-glass cards for the account, the game's build and the
+// news on the right. The settings open as a glass dialog: the few that matter first, every page under
+// Advanced. The overlay keeps the compact tabbed screen below.
 
 struct LauncherArt { ImTextureID tex; float w, h; };
-static LauncherArt g_banner_art, g_logo_art;
+static LauncherArt g_banner_art, g_logo_art, g_bg_art, g_blur_art;
 
 void ui_set_launcher_art(ImTextureID banner, float banner_w, float banner_h,
                          ImTextureID logo, float logo_w, float logo_h)
@@ -1174,36 +1232,393 @@ void ui_set_launcher_art(ImTextureID banner, float banner_w, float banner_h,
     g_logo_art = { logo, logo_w, logo_h };
 }
 
+void ui_set_launcher_backdrop(ImTextureID picture, float picture_w, float picture_h,
+                              ImTextureID blurred, float blurred_w, float blurred_h)
+{
+    g_bg_art = { picture, picture_w, picture_h };
+    g_blur_art = { blurred, blurred_w, blurred_h };
+}
+
 static ImU32 col(const ImVec4 &v, float alpha = 1.0f) { return ImGui::GetColorU32(ImVec4(v.x, v.y, v.z, v.w * alpha)); }
 
-// An image drawn to fill the rectangle, cropped to keep its shape.
-static void draw_cover(ImDrawList *dl, const LauncherArt &art, ImVec2 a, ImVec2 b)
+static const ImVec4 k_white(1, 1, 1, 1), k_black(0, 0, 0, 1), k_glass(0.07f, 0.07f, 0.085f, 1.0f);
+static const ImVec4 k_green(0.35f, 0.85f, 0.45f, 1.0f), k_error(1.0f, 0.45f, 0.4f, 1.0f);
+static const ImVec4 k_discord(0.345f, 0.396f, 0.949f, 1.0f);
+static const char *const k_discord_invite = "https://discord.gg/zCZKVDnKaP";
+
+// Where the background picture lies this frame, in screen pixels (larger than the window while it
+// zooms). The glass samples the blurred copy at the same place, so it looks like frosted glass over it.
+static ImVec2 g_pic_a, g_pic_b;
+// The strip along the top that drags the borderless window, and where its buttons start (pixels).
+static float g_caption_h, g_controls_x;
+
+static ImFont *display_font() { return g_font_display ? g_font_display : g_font_black ? g_font_black : ImGui::GetFont(); }
+static ImFont *bold_font() { return g_font_bold ? g_font_bold : ImGui::GetFont(); }
+
+static void open_url(const char *url)
 {
-    float rw = b.x - a.x, rh = b.y - a.y;
-    if (!art.tex || art.w <= 0 || art.h <= 0 || rw <= 0 || rh <= 0) return;
-    float img = art.w / art.h, box = rw / rh;
-    ImVec2 uv0(0, 0), uv1(1, 1);
-    if (img > box) { float f = box / img; uv0.x = (1 - f) / 2; uv1.x = 1 - uv0.x; }       // crop the sides
-    else           { float f = img / box; uv0.y = (1 - f) * 0.35f; uv1.y = uv0.y + f; }   // crop mostly below
-    dl->AddImage(art.tex, a, b, uv0, uv1);
+#if defined(_WIN32)
+    ShellExecuteA(nullptr, "open", url, nullptr, nullptr, SW_SHOWNORMAL);
+#else
+    SDL_OpenURL(url);
+#endif
+}
+
+// Frosted glass: the blurred picture behind the panel, a dark translucent fill in one even tone, a soft
+// highlight along the top edge that fades out to the sides, and a faint dark edge. No light frame and
+// no step across the middle.
+static void glass(ImDrawList *dl, ImVec2 a, ImVec2 b, float rounding, const ImVec4 &tint = k_glass, float alpha = 0.55f)
+{
+    float pw = g_pic_b.x - g_pic_a.x, ph = g_pic_b.y - g_pic_a.y;
+    if (g_blur_art.tex && pw > 0 && ph > 0)
+        dl->AddImageRounded(g_blur_art.tex, a, b, ImVec2((a.x - g_pic_a.x) / pw, (a.y - g_pic_a.y) / ph),
+                            ImVec2((b.x - g_pic_a.x) / pw, (b.y - g_pic_a.y) / ph), IM_COL32_WHITE, rounding);
+    dl->AddRectFilled(a, b, col(tint, alpha), rounding);
+    dl->AddRectFilled(a, b, col(k_white, 0.035f), rounding);       // one tone, the lighter one, top to bottom
+    float mid = (a.x + b.x) / 2, y = a.y + 1.0f, t = y + (rounding > 10 ? 1.5f : 1.0f);
+    dl->AddRectFilledMultiColor(ImVec2(a.x + rounding, y), ImVec2(mid, t), col(k_white, 0), col(k_white, 0.24f),
+                                col(k_white, 0.24f), col(k_white, 0));
+    dl->AddRectFilledMultiColor(ImVec2(mid, y), ImVec2(b.x - rounding, t), col(k_white, 0.24f), col(k_white, 0),
+                                col(k_white, 0), col(k_white, 0.24f));
+    dl->AddRect(a, b, col(k_black, 0.35f), rounding, 0, 1.0f);
+}
+
+// A soft light around a rectangle, for the PLAY button.
+static void glow(ImDrawList *dl, ImVec2 a, ImVec2 b, float rounding, const ImVec4 &c, float strength, float s)
+{
+    for (int i = 6; i >= 1; i--) {
+        float g = i * 3.5f * s;
+        dl->AddRectFilled(ImVec2(a.x - g, a.y - g), ImVec2(b.x + g, b.y + g), col(c, strength * 0.05f * (7 - i) / 6.0f), rounding + g);
+    }
+}
+
+static ImVec2 text_size(ImFont *font, float size, const char *s, float wrap = 0.0f)
+{
+    return font->CalcTextSizeA(size, FLT_MAX, wrap, s);
+}
+
+static void text_center(ImDrawList *dl, ImFont *font, float size, ImVec2 a, ImVec2 b, ImU32 c, const char *s)
+{
+    ImVec2 ts = text_size(font, size, s);
+    dl->AddText(font, size, ImVec2(floorf((a.x + b.x - ts.x) / 2), floorf((a.y + b.y - ts.y) / 2)), c, s);
+}
+
+enum GlassKind { GLASS_PLAIN, GLASS_RED, GLASS_DISCORD };
+
+// A button made of glass at a screen position; the label is drawn centred in the given font.
+static bool glass_button(const char *id, const char *label, ImVec2 a, ImVec2 size, float s, GlassKind kind = GLASS_PLAIN,
+                         ImFont *font = nullptr, float font_size = 0.0f, bool enabled = true)
+{
+    ImGui::SetCursorScreenPos(a);
+    if (!enabled) ImGui::BeginDisabled();
+    bool pressed = ImGui::InvisibleButton(id, size);
+    if (!enabled) ImGui::EndDisabled();
+    bool hot = enabled && (ImGui::IsItemHovered() || (ImGui::IsItemFocused() && ImGui::GetIO().NavVisible));
+    bool held = enabled && ImGui::IsItemActive();
+    ImDrawList *dl = ImGui::GetWindowDrawList();
+    ImVec2 b(a.x + size.x, a.y + size.y);
+    float r = std::min(9.0f * s, size.y * 0.3f);
+    if (kind == GLASS_RED) {
+        float pulse = 0.5f + 0.5f * sinf((float)ImGui::GetTime() * 2.2f);
+        if (enabled) glow(dl, a, b, r, k_red_hi, hot ? 1.0f : 0.5f + 0.3f * pulse, s);
+        glass(dl, a, b, r, !enabled ? ImVec4(0.30f, 0.30f, 0.32f, 1) : held ? k_red_lo : hot ? k_red_hi : k_red, 0.84f);
+    } else if (kind == GLASS_DISCORD) {
+        glass(dl, a, b, r, k_discord, hot ? 0.88f : 0.68f);
+    } else {
+        glass(dl, a, b, r, hot ? ImVec4(0.20f, 0.20f, 0.24f, 1) : k_glass, hot ? 0.62f : 0.5f);
+    }
+    text_center(dl, font ? font : ImGui::GetFont(), font_size > 0 ? font_size : ImGui::GetFontSize(), a, b,
+                col(k_white, enabled ? 1.0f : 0.45f), label);
+    return pressed && enabled;
+}
+
+// Embers rising over the right of the picture, drifting in a draught and cooling as they climb.
+struct Ember { float x, y, vx, vy, age, life, size, heat, phase; };
+
+static float ember_random()
+{
+    static unsigned seed = 0x2468ACEu;
+    seed = seed * 1664525u + 1013904223u;
+    return (float)(seed >> 8) * (1.0f / 16777216.0f);
+}
+
+static void ember_spawn(Ember &p, float w, float h, float s, bool anywhere)
+{
+    p.x = w * (0.28f + 0.74f * ember_random());
+    p.y = anywhere ? h * ember_random() : h + 8 * s;
+    p.vx = (3 + 10 * ember_random()) * s;
+    p.vy = -(20 + 48 * ember_random()) * s;
+    p.life = 4.0f + 6.0f * ember_random();
+    p.age = anywhere ? p.life * ember_random() : 0.0f;
+    p.size = (0.8f + 1.9f * ember_random() * ember_random()) * s;
+    p.heat = ember_random();
+    p.phase = 6.2832f * ember_random();
+}
+
+static void embers(ImDrawList *dl, ImVec2 o, float w, float h, float s)
+{
+    static Ember e[150];
+    static bool started;
+    if (!started) {
+        for (Ember &p : e) ember_spawn(p, w, h, s, true);
+        started = true;
+    }
+    float dt = std::min(ImGui::GetIO().DeltaTime, 0.05f), t = (float)ImGui::GetTime();
+    for (Ember &p : e) {
+        p.age += dt;
+        p.x += (p.vx + sinf(t * 1.3f + p.phase) * 9 * s) * dt;
+        p.y += p.vy * dt;
+        if (p.age >= p.life || p.y < -10 * s || p.x > w + 10 * s) { ember_spawn(p, w, h, s, false); continue; }
+        float k = p.age / p.life;
+        float a = std::min(1.0f, p.age / 0.6f) * (k > 0.6f ? (1.0f - k) / 0.4f : 1.0f);
+        a *= 0.7f + 0.3f * sinf(t * 11.0f + p.phase * 3.0f);
+        float cool = k * 0.6f + (1.0f - p.heat) * 0.4f;
+        ImVec4 c(1.0f, 0.78f - 0.45f * cool, 0.38f - 0.32f * cool, 1.0f);
+        ImVec2 q(o.x + p.x, o.y + p.y);
+        dl->AddCircleFilled(q, p.size * 4.5f, col(c, 0.07f * a), 10);
+        dl->AddCircleFilled(q, p.size * 2.0f, col(c, 0.22f * a), 8);
+        dl->AddLine(q, ImVec2(q.x - p.vx * 0.06f, q.y - p.vy * 0.06f), col(c, 0.5f * a), p.size);
+        dl->AddCircleFilled(q, p.size, col(ImVec4(1.0f, 0.92f - 0.4f * cool, 0.62f - 0.4f * cool, 1.0f), a), 6);
+    }
+}
+
+// The picture: it covers the window and breathes (a slow zoom in and out over 48 s, a little drift),
+// darker on the left under the logo and PLAY, with a fire's flicker along the bottom and the embers.
+static void backdrop(ImDrawList *dl, ImVec2 o, float w, float h, float s)
+{
+    float t = (float)ImGui::GetTime();
+    if (g_bg_art.tex && g_bg_art.w > 0 && g_bg_art.h > 0) {
+        float cover = std::max(w / g_bg_art.w, h / g_bg_art.h);
+        float zoom = 1.03f + 0.035f * (0.5f - 0.5f * cosf(t * 6.2832f / 48.0f));
+        float pw = g_bg_art.w * cover * zoom, ph = g_bg_art.h * cover * zoom;
+        float cx = o.x + w * 0.5f + sinf(t * 6.2832f / 70.0f) * 6 * s;
+        float cy = o.y + h * 0.5f + cosf(t * 6.2832f / 90.0f) * 4 * s;
+        g_pic_a = ImVec2(cx - pw * 0.5f, cy - ph * 0.5f);
+        g_pic_b = ImVec2(cx + pw * 0.5f, cy + ph * 0.5f);
+        dl->AddImage(g_bg_art.tex, g_pic_a, g_pic_b);
+    } else {
+        g_pic_a = g_pic_b = o;
+        dl->AddRectFilledMultiColor(o, ImVec2(o.x + w, o.y + h), col(k_bg), col(k_red_lo, 0.5f), col(k_red_lo, 0.7f), col(k_bg));
+    }
+    dl->AddRectFilledMultiColor(o, ImVec2(o.x + w * 0.45f, o.y + h), col(k_black, 0.35f), col(k_black, 0),
+                                col(k_black, 0), col(k_black, 0.35f));
+    float flicker = 0.75f + 0.15f * sinf(t * 1.7f) + 0.10f * sinf(t * 4.3f + 1.0f);
+    dl->AddRectFilledMultiColor(ImVec2(o.x, o.y + h * 0.6f), ImVec2(o.x + w, o.y + h), col(k_red, 0), col(k_red, 0),
+                                col(k_red, 0.16f * flicker), col(k_red, 0.08f * flicker));
+    embers(dl, o, w, h, s);
+}
+
+static void card_title(ImDrawList *dl, ImVec2 a, float s, const char *title)
+{
+    dl->AddText(display_font(), 17 * s, ImVec2(a.x + 20 * s, a.y + 11 * s), col(ImVec4(0.86f, 0.84f, 0.80f, 1)), title);
+}
+
+// One line of a card: a bold headline or a quieter detail, optionally wrapped to the card.
+static float card_line(ImDrawList *dl, ImVec2 at, float s, const ImVec4 &c, const char *text, bool bold, float wrap = 0.0f)
+{
+    ImFont *f = bold ? bold_font() : ImGui::GetFont();
+    float size = (bold ? 16.5f : 13.5f) * s;
+    dl->AddText(f, size, at, col(c), text, nullptr, wrap);
+    return text_size(f, size, text, wrap).y;
+}
+
+struct AccountNumbers { int rank = 0, wins = 0, losses = 0, matches = 0; bool have = false; };
+
+static AccountNumbers account_numbers()
+{
+    static char buf[16384];
+    AccountNumbers n;
+    if (!account_stats(buf, sizeof(buf))) return n;
+    n.have = true;
+    for (const char *line = buf; line && *line;) {
+        const char *eq = strchr(line, '='), *end = strchr(line, '\n');
+        if (eq && (!end || eq < end)) {
+            size_t k = (size_t)(eq - line);
+            int v = atoi(eq + 1);
+            if (k == 4 && !strncmp(line, "rank", 4)) n.rank = v;
+            else if (k == 4 && !strncmp(line, "wins", 4)) n.wins = v;
+            else if (k == 6 && !strncmp(line, "losses", 6)) n.losses = v;
+            else if (k == 7 && !strncmp(line, "matches", 7)) n.matches = v;
+        }
+        line = end ? end + 1 : nullptr;
+    }
+    return n;
+}
+
+static void account_card(ImVec2 a, ImVec2 b, float s)
+{
+    static bool fetched;
+    account_init();             // the launcher shows before main() loads the saved session
+    account_refresh();
+    enum AccountState state = account_state();
+    char text[256];
+    account_text(text, sizeof(text));
+    ImDrawList *dl = ImGui::GetWindowDrawList();
+    glass(dl, a, b, 14 * s);
+    card_title(dl, a, s, "ACCOUNT");
+    ImVec2 at(a.x + 20 * s, a.y + 40 * s);
+    float wrap = b.x - a.x - 40 * s;
+    if (state == ACCOUNT_IN) {
+        if (!fetched) { fetched = true; account_fetch_stats(); }
+        card_line(dl, at, s, k_white, text, true);
+        AccountNumbers n = account_numbers();
+        char line[160];
+        if (!n.have) snprintf(line, sizeof(line), "Signed in with Discord");
+        else if (n.matches == 0) snprintf(line, sizeof(line), "No online matches yet  \xC2\xB7  signed in with Discord");
+        else if (n.rank > 0) snprintf(line, sizeof(line), "Rank %d  \xC2\xB7  %d wins  \xC2\xB7  %d losses", n.rank, n.wins, n.losses);
+        else snprintf(line, sizeof(line), "%d wins  \xC2\xB7  %d losses", n.wins, n.losses);
+        card_line(dl, ImVec2(at.x, at.y + 26 * s), s, ImVec4(0.80f, 0.80f, 0.82f, 1), line, false);
+        if (glass_button("##signout", "Sign out", ImVec2(b.x - 96 * s, a.y + 10 * s), ImVec2(78 * s, 24 * s), s,
+                         GLASS_PLAIN, nullptr, 12.5f * s))
+            account_sign_out();
+    } else if (state == ACCOUNT_WAITING) {
+        card_line(dl, at, s, k_gold, "Finish signing in with Discord in your browser...", false, wrap);
+        if (glass_button("##cancel", "Cancel", ImVec2(at.x, b.y - 38 * s), ImVec2(100 * s, 28 * s), s))
+            account_cancel();
+    } else if (state == ACCOUNT_CHECKING) {
+        card_line(dl, at, s, ImVec4(0.75f, 0.75f, 0.78f, 1), "Checking your account...", false);
+    } else {
+#if defined(_WIN32)
+        card_line(dl, at, s, state == ACCOUNT_FAILED ? k_error : ImVec4(0.80f, 0.80f, 0.82f, 1),
+                  state == ACCOUNT_FAILED && text[0] ? text : "Sign in to play ranked and to fight under your Discord name.",
+                  false, wrap);
+        if (glass_button("##signin", "Sign in with Discord", ImVec2(at.x, b.y - 40 * s), ImVec2(190 * s, 30 * s), s,
+                         GLASS_DISCORD, bold_font(), 14 * s))
+            account_sign_in();
+#else
+        card_line(dl, at, s, ImVec4(0.80f, 0.80f, 0.82f, 1), "Signing in with Discord comes to this system with online play.",
+                  false, wrap);
+#endif
+    }
+}
+
+static void status_dot(ImDrawList *dl, ImVec2 at, float s, const ImVec4 &c)
+{
+    ImVec2 q(at.x + 5 * s, at.y + 10 * s);
+    dl->AddCircleFilled(q, 7 * s, col(c, 0.18f), 16);
+    dl->AddCircleFilled(q, 4 * s, col(c), 12);
+}
+
+static void game_card(ImVec2 a, ImVec2 b, float s, UiResult &result)
+{
+    UpdaterState state = updater_state();
+    int build = 0, local = updater_local_build();
+    char version[64], notes[8], message[256], line[200];
+    updater_info(&build, version, sizeof(version), notes, sizeof(notes));
+    updater_message(message, sizeof(message));
+    ImDrawList *dl = ImGui::GetWindowDrawList();
+    glass(dl, a, b, 14 * s);
+    card_title(dl, a, s, "GAME");
+    ImVec2 at(a.x + 20 * s, a.y + 40 * s), head(at.x + 18 * s, at.y);
+    ImVec4 detail(0.80f, 0.80f, 0.82f, 1);
+    snprintf(line, sizeof(line), "Build %d  \xC2\xB7  v%s", local, DEFJAM_VERSION);
+    switch (state) {
+    case UPDATER_CURRENT:
+        status_dot(dl, at, s, k_green);
+        card_line(dl, head, s, k_white, "Ready to play", true);
+        snprintf(line, sizeof(line), "Build %d  \xC2\xB7  up to date", local);
+        break;
+    case UPDATER_AVAILABLE: {
+        char title[64];
+        status_dot(dl, at, s, k_gold);
+        snprintf(title, sizeof(title), "Build %d is out", build);
+        card_line(dl, head, s, k_white, title, true);
+        snprintf(line, sizeof(line), "You have build %d", local);
+        if (glass_button("##update", "Update", ImVec2(b.x - 112 * s, a.y + 40 * s), ImVec2(92 * s, 30 * s), s, GLASS_RED,
+                         bold_font(), 14 * s))
+            ImGui::OpenPopup("Update available");
+        break;
+    }
+    case UPDATER_DOWNLOADING:
+    case UPDATER_INSTALLING: {
+        char title[64];
+        status_dot(dl, at, s, k_gold);
+        snprintf(title, sizeof(title), "%s build %d  %d%%", state == UPDATER_DOWNLOADING ? "Downloading" : "Installing",
+                 build, (int)(updater_progress() * 100.0 + 0.5));
+        card_line(dl, head, s, k_white, title, true);
+        ImVec2 ba(at.x, at.y + 30 * s), bb(b.x - 20 * s, at.y + 36 * s);
+        dl->AddRectFilled(ba, bb, col(k_white, 0.10f), 3 * s);
+        dl->AddRectFilled(ba, ImVec2(ba.x + (bb.x - ba.x) * (float)updater_progress(), bb.y), col(k_red_hi), 3 * s);
+        line[0] = 0;
+        break;
+    }
+    case UPDATER_INSTALLED: {
+        char title[64];
+        status_dot(dl, at, s, k_green);
+        snprintf(title, sizeof(title), "Build %d is installed", build);
+        card_line(dl, head, s, k_white, title, true);
+        snprintf(line, sizeof(line), "Restart the launcher to use it");
+        if (glass_button("##restart", "Restart", ImVec2(b.x - 112 * s, a.y + 40 * s), ImVec2(92 * s, 30 * s), s, GLASS_RED,
+                         bold_font(), 14 * s)) {
+            updater_restart();
+            result.leave = true;        // this copy closes; the helper starts the new launcher
+        }
+        break;
+    }
+    case UPDATER_FAILED:
+        status_dot(dl, at, s, k_error);
+        card_line(dl, head, s, k_white, "Ready to play", true);
+        snprintf(line, sizeof(line), "Update check failed: %s", message);
+        break;
+    case UPDATER_STARTED:
+        status_dot(dl, at, s, k_gold);
+        card_line(dl, head, s, k_white, "The update is starting", true);
+        break;
+    default:
+        status_dot(dl, at, s, ImVec4(0.6f, 0.6f, 0.64f, 1));
+        card_line(dl, head, s, k_white, "Ready to play", true);
+        snprintf(line, sizeof(line), "Build %d  \xC2\xB7  looking for updates...", local);
+        break;
+    }
+    if (line[0]) {
+        dl->PushClipRect(a, b, true);
+        card_line(dl, ImVec2(at.x, at.y + 26 * s), s, detail, line, false);
+        dl->PopClipRect();
+    }
+}
+
+static void news_card(ImVec2 a, ImVec2 b, float s)
+{
+    int build = 0, local = updater_local_build();
+    char version[64], notes[1024], title[64];
+    updater_info(&build, version, sizeof(version), notes, sizeof(notes));
+    ImDrawList *dl = ImGui::GetWindowDrawList();
+    glass(dl, a, b, 14 * s);
+    card_title(dl, a, s, "NEWS");
+    ImVec2 at(a.x + 20 * s, a.y + 40 * s);
+    float wrap = b.x - a.x - 40 * s;
+    dl->PushClipRect(a, ImVec2(b.x, b.y - 46 * s), true);
+    if (notes[0] && build > 0) {
+        snprintf(title, sizeof(title), build > local ? "New in build %d" : "What's new in build %d", build);
+        float y = card_line(dl, at, s, k_white, title, true);
+        card_line(dl, ImVec2(at.x, at.y + y + 8 * s), s, ImVec4(0.82f, 0.82f, 0.84f, 1), notes, false, wrap);
+    } else {
+        float y = card_line(dl, at, s, k_white, "News, events and the leaderboard", true);
+        card_line(dl, ImVec2(at.x, at.y + y + 8 * s), s, ImVec4(0.82f, 0.82f, 0.84f, 1),
+                  "Patch notes, tournaments and players to fight: the FFNY Online community is on Discord.", false, wrap);
+    }
+    dl->PopClipRect();
+    if (glass_button("##news_discord", "All news on Discord", ImVec2(at.x, b.y - 42 * s), ImVec2(170 * s, 28 * s), s,
+                     GLASS_PLAIN, nullptr, 13 * s))
+        open_url(k_discord_invite);
 }
 
 enum { PAGE_DISPLAY, PAGE_TEXTURES, PAGE_CONTROLLERS, PAGE_PAD, PAGE_KEYBOARD, PAGE_ONLINE, PAGE_GENERAL, PAGE_COUNT };
 static const char *const k_page_names[PAGE_COUNT] = {
-    "Display", "Textures", "Controllers", "Pad buttons", "Keyboard & mouse", "Online", "General" };
+    "Display", "Textures", "Controllers", "Pad buttons", "Keyboard & mouse", "Voice chat", "General" };
 static const char *const k_page_hints[PAGE_COUNT] = {
     "Window, picture shape, resolution and image quality",
     "HD texture packs and making your own",
     "Who plays with which pad, rumble and dead zones",
     "Remap every button of a gamepad",
     "Keys and mouse buttons for the keyboard player",
-    "Quick match, rooms and venue votes over the internet",
+    "Push-to-talk, the key and the volumes",
     "Start-up, the in-game overlay and files" };
 
 static void draw_page(int page, UiMode mode)
 {
     switch (page) {
-    case PAGE_ONLINE: page_online(mode); break;
+    case PAGE_ONLINE: voice_settings(); break;        // the rest of Online is the start page's Account card
     case PAGE_DISPLAY: page_display(); break;
     case PAGE_TEXTURES: page_textures(); break;
     case PAGE_CONTROLLERS: page_controllers(); break;
@@ -1211,6 +1626,101 @@ static void draw_page(int page, UiMode mode)
     case PAGE_KEYBOARD: page_keyboard(); break;
     default: page_general(mode); break;
     }
+}
+
+// The picture quality as one choice: render scale, anti-aliasing and texture filtering together.
+static void quality_widget()
+{
+    struct Preset { const char *name; int scale, aa, anisotropy; };
+    static const Preset presets[] = {
+        { "Low (fastest)", 1, 0, 0 }, { "Medium", 2, 1, 4 }, { "High", 3, 1, 4 }, { "Ultra (strong graphics cards)", 4, 1, 4 } };
+    int scale = recomp_settings_get("display", "render_scale", 2), aa = recomp_settings_get("display", "anti_aliasing", 1);
+    int anisotropy = recomp_settings_get("display", "anisotropy", 4), current = -1;
+    for (int i = 0; i < 4; i++)
+        if (presets[i].scale == scale && presets[i].aa == aa && presets[i].anisotropy == anisotropy) current = i;
+    ImGui::SetNextItemWidth(ImGui::GetFontSize() * 14);
+    if (ImGui::BeginCombo("Picture quality", current >= 0 ? presets[current].name : "Custom (see Advanced)")) {
+        for (int i = 0; i < 4; i++) {
+            if (ImGui::Selectable(presets[i].name, i == current) && i != current) {
+                recomp_settings_set("display", "render_scale", presets[i].scale);
+                recomp_settings_set("display", "anti_aliasing", presets[i].aa);
+                recomp_settings_set("display", "anisotropy", presets[i].anisotropy);
+                commit();
+            }
+            if (i == current) ImGui::SetItemDefaultFocus();
+        }
+        ImGui::EndCombo();
+    }
+    ImGui::SetItemTooltip("Render scale, anti-aliasing and texture filtering together. The render scale applies the "
+                          "next time the game starts.");
+}
+
+static void page_basics()
+{
+    ImGui::SeparatorText("Picture");
+    window_size_widget();
+    quality_widget();
+    settings_group("display", { "widescreen" });
+    ImGui::SeparatorText("Voice chat");
+    settings_group("online", { "voice", "voice_key", "voice_pad" });
+    ImGui::SeparatorText("HD textures");
+    settings_group("textures", { "enabled" });
+    ImGui::TextDisabled("Experimental: they can cause white screens or wrong pictures. Make them under Advanced, Textures.");
+}
+
+// RECOMP_LAUNCHER_PAGE=basics (or a page's name: display, voice, ...): open the settings there, for
+// screenshots.
+static int initial_page()
+{
+    static const char *const names[] = { "display", "textures", "controllers", "pad", "keyboard", "voice", "general" };
+    const char *want = getenv("RECOMP_LAUNCHER_PAGE");
+    if (want && !strcmp(want, "basics")) return PAGE_COUNT;
+    for (int i = 0; want && i < PAGE_COUNT; i++)
+        if (!strcmp(want, names[i])) return i;
+    return -1;
+}
+
+// The dialog's own style: translucent fields and buttons on the glass.
+static void push_glass_style()
+{
+    ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(1, 1, 1, 0.07f));
+    ImGui::PushStyleColor(ImGuiCol_FrameBgHovered, ImVec4(1, 1, 1, 0.12f));
+    ImGui::PushStyleColor(ImGuiCol_FrameBgActive, ImVec4(1, 1, 1, 0.16f));
+    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(1, 1, 1, 0.08f));
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(1, 1, 1, 0.15f));
+}
+
+static void pop_glass_style() { ImGui::PopStyleColor(5); }
+
+// A modal on glass, with its name (up to "##") as the heading in the display font.
+static bool begin_glass_modal(const char *name, float width)
+{
+    ImGui::SetNextWindowSize(ImVec2(width, 0));
+    ImGui::PushStyleColor(ImGuiCol_PopupBg, ImVec4(0, 0, 0, 0));
+    ImGui::PushStyleVar(ImGuiStyleVar_PopupBorderSize, 0.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(ImGui::GetFontSize() * 1.4f, ImGui::GetFontSize() * 1.2f));
+    bool open = ImGui::BeginPopupModal(name, nullptr, ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings |
+                                                      ImGuiWindowFlags_NoTitleBar);
+    ImGui::PopStyleVar(2);
+    ImGui::PopStyleColor();
+    if (!open) return false;
+    ImDrawList *dl = ImGui::GetWindowDrawList();
+    ImVec2 a = ImGui::GetWindowPos(), b(a.x + ImGui::GetWindowWidth(), a.y + ImGui::GetWindowHeight());
+    dl->PushClipRect(a, b, false);
+    glass(dl, a, b, 14 * ImGui::GetFontSize() / 17.0f, k_glass, 0.80f);
+    dl->PopClipRect();
+    const char *end = strstr(name, "##");
+    ImGui::PushFont(display_font(), ImGui::GetStyle().FontSizeBase * 1.45f);
+    ImGui::TextUnformatted(name, end);
+    ImGui::PopFont();
+    push_glass_style();
+    return true;
+}
+
+static void end_glass_modal()
+{
+    pop_glass_style();
+    ImGui::EndPopup();
 }
 
 // After a crash, an offer to send that run's log (bug_report.c); F9 cannot, the game is gone.
@@ -1226,10 +1736,8 @@ static void crash_popup()
         checked = true;
         if (bug_report_last_crash(log_path, sizeof(log_path))) ImGui::OpenPopup("The game crashed");
     }
-    ImGui::SetNextWindowSize(ImVec2(ImGui::GetFontSize() * 30, 0));
-    if (!ImGui::BeginPopupModal("The game crashed", nullptr, ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings))
-        return;
-    ImGui::PushTextWrapPos(ImGui::GetFontSize() * 29);
+    if (!begin_glass_modal("The game crashed", ImGui::GetFontSize() * 30)) return;
+    ImGui::PushTextWrapPos(ImGui::GetFontSize() * 28);
     ImGui::TextUnformatted("The game crashed last time. Send its log to the developers? It shows where the crash "
                            "happened, so it can be fixed.");
     ImGui::TextDisabled("Only that session's log is sent, with your Windows user folder blanked. See Privacy.");
@@ -1257,7 +1765,7 @@ static void crash_popup()
         if (ImGui::Button("Close", ImVec2(ImGui::GetFontSize() * 8, 0))) ImGui::CloseCurrentPopup();
         if (busy) ImGui::EndDisabled();
     }
-    ImGui::EndPopup();
+    end_glass_modal();
 }
 
 // The update offer: a modal over the launcher when a newer build is signed and published.
@@ -1271,19 +1779,17 @@ static void update_popup(UiResult &result)
         ImGui::OpenPopup("Update available");
         asked_once = true;
     }
-    ImGui::SetNextWindowSize(ImVec2(ImGui::GetFontSize() * 30, 0));
-    if (!ImGui::BeginPopupModal("Update available", nullptr, ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings))
-        return;
+    if (!begin_glass_modal("Update available", ImGui::GetFontSize() * 30)) return;
     int build = 0;
     char version[64], notes[1024];
     updater_info(&build, version, sizeof(version), notes, sizeof(notes));
-    ImGui::PushFont(g_font_black, ImGui::GetStyle().FontSizeBase * 1.4f);
+    ImGui::PushFont(g_font_bold, ImGui::GetStyle().FontSizeBase * 1.15f);
     ImGui::TextColored(k_gold, "Version %s", version);
     ImGui::PopFont();
     ImGui::TextDisabled("Build %d - you have build %d", build, updater_local_build());
     if (notes[0]) {
         ImGui::Spacing();
-        ImGui::PushTextWrapPos(ImGui::GetFontSize() * 29);
+        ImGui::PushTextWrapPos(ImGui::GetFontSize() * 28);
         ImGui::TextUnformatted(notes);
         ImGui::PopTextWrapPos();
     }
@@ -1295,12 +1801,13 @@ static void update_popup(UiResult &result)
         ImGui::PushStyleColor(ImGuiCol_PlotHistogram, k_red);
         ImGui::ProgressBar((float)updater_progress(), ImVec2(-1, 0), overlay);
         ImGui::PopStyleColor();
-        ImGui::PushTextWrapPos(ImGui::GetFontSize() * 29);
+        ImGui::PushTextWrapPos(ImGui::GetFontSize() * 28);
         ImGui::TextUnformatted(message);
         ImGui::PopTextWrapPos();
         ImGui::TextDisabled("You can keep this window open; the game stays as it is until you restart.");
+        if (ImGui::Button("Hide", ImVec2(ImGui::GetFontSize() * 8, 0))) { dismissed = true; ImGui::CloseCurrentPopup(); }
     } else if (state == UPDATER_INSTALLED) {
-        ImGui::TextColored(ImVec4(0.45f, 0.85f, 0.45f, 1), "%s", message);
+        ImGui::TextColored(k_green, "%s", message);
         ImGui::PushStyleColor(ImGuiCol_Button, k_red);
         ImGui::PushStyleColor(ImGuiCol_ButtonHovered, k_red_hi);
         if (ImGui::Button("Restart now", ImVec2(ImGui::GetFontSize() * 10, 0))) {
@@ -1318,7 +1825,7 @@ static void update_popup(UiResult &result)
                            "from the source and build it again.");
         if (ImGui::Button("OK", ImVec2(ImGui::GetFontSize() * 8, 0))) { dismissed = true; ImGui::CloseCurrentPopup(); }
     } else {
-        if (state == UPDATER_FAILED) ImGui::TextColored(ImVec4(1.0f, 0.45f, 0.4f, 1), "%s", message);
+        if (state == UPDATER_FAILED) ImGui::TextColored(k_error, "%s", message);
         ImGui::TextWrapped("The update downloads (about 55 MB), is checked, and is built from your installed game "
                            "files right here, usually in a few minutes. Saves, settings and HD textures stay.");
         ImGui::PushStyleColor(ImGuiCol_Button, k_red);
@@ -1328,27 +1835,137 @@ static void update_popup(UiResult &result)
         ImGui::SameLine();
         if (ImGui::Button("Later", ImVec2(ImGui::GetFontSize() * 8, 0))) { dismissed = true; ImGui::CloseCurrentPopup(); }
     }
+    end_glass_modal();
+}
+
+// The settings as a glass dialog over the launcher: Basics (window, quality, voice, HD), and every
+// page under Advanced.
+static void settings_dialog(ImVec2 o, float w, float h, float s, int &tab, int &page)
+{
+    ImVec2 size(std::min(w - 40 * s, 840 * s), std::min(h - 40 * s, 610 * s));
+    ImGui::SetNextWindowPos(ImVec2(o.x + (w - size.x) / 2, o.y + (h - size.y) / 2));
+    ImGui::SetNextWindowSize(size);
+    ImGui::PushStyleColor(ImGuiCol_PopupBg, ImVec4(0, 0, 0, 0));
+    ImGui::PushStyleVar(ImGuiStyleVar_PopupBorderSize, 0.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
+    bool open = ImGui::BeginPopupModal("Settings", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
+                                       ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoScrollbar);
+    ImGui::PopStyleVar(2);
+    ImGui::PopStyleColor();
+    if (!open) return;
+    ImDrawList *dl = ImGui::GetWindowDrawList();
+    ImVec2 a = ImGui::GetWindowPos(), b(a.x + size.x, a.y + size.y);
+    glass(dl, a, b, 16 * s, k_glass, 0.80f);
+    dl->AddText(display_font(), 30 * s, ImVec2(a.x + 30 * s, a.y + 18 * s), col(k_white), "SETTINGS");
+    static const char *const tabs[] = { "Basics", "Advanced" };
+    for (int i = 0; i < 2; i++) {
+        ImVec2 ta(b.x - 30 * s - (2 - i) * 118 * s, a.y + 22 * s);
+        if (glass_button(i ? "##tab_advanced" : "##tab_basics", tabs[i], ta, ImVec2(110 * s, 32 * s), s,
+                         tab == i ? GLASS_RED : GLASS_PLAIN, bold_font(), 14 * s))
+            tab = i;
+    }
+    push_glass_style();
+    float top = 72 * s, foot = 64 * s;
+    ImVec2 body(size.x - 60 * s, size.y - top - foot);
+    ImGui::SetCursorPos(ImVec2(30 * s, top));
+    if (tab == 0) {
+        ImGui::BeginChild("##basics", body, ImGuiChildFlags_None);
+        page_basics();
+        ImGui::EndChild();
+    } else {
+        float side = 180 * s;
+        ImGui::BeginChild("##pages", ImVec2(side, body.y), ImGuiChildFlags_None, ImGuiWindowFlags_NoScrollbar);
+        for (int i = 0; i < PAGE_COUNT; i++) {
+            ImVec2 pa = ImGui::GetCursorScreenPos();
+            float item_h = 34 * s;
+            ImGui::PushID(i);
+            if (ImGui::InvisibleButton("##page", ImVec2(side - 10 * s, item_h))) page = i;
+            bool hovered = ImGui::IsItemHovered();
+            ImGui::PopID();
+            ImDrawList *sd = ImGui::GetWindowDrawList();
+            ImVec2 pb(pa.x + side - 10 * s, pa.y + item_h);
+            if (page == i) {
+                sd->AddRectFilled(pa, pb, col(k_red, 0.55f), 7 * s);
+            } else if (hovered) {
+                sd->AddRectFilled(pa, pb, col(k_white, 0.06f), 7 * s);
+            }
+            float fs = 14.5f * s;
+            sd->AddText(page == i ? bold_font() : ImGui::GetFont(), fs, ImVec2(pa.x + 14 * s, pa.y + (item_h - fs) / 2 - 1 * s),
+                        col(k_white, page == i ? 1.0f : 0.72f), k_page_names[i]);
+        }
+        ImGui::EndChild();
+        ImGui::SameLine(0, 14 * s);
+        ImGui::BeginChild("##page", ImVec2(body.x - side - 14 * s, body.y), ImGuiChildFlags_None);
+        ImGui::TextDisabled("%s", k_page_hints[page]);
+        draw_page(page, UI_LAUNCHER);
+        ImGui::EndChild();
+    }
+    pop_glass_style();
+    {
+        std::string restart = restart_needed();
+        const char *note = restart.empty() ? "Changes are saved as you make them." : nullptr;
+        char buf[300];
+        if (!note) { snprintf(buf, sizeof(buf), "Applies at the next start: %s", restart.c_str()); note = buf; }
+        dl->PushClipRect(a, ImVec2(b.x - 170 * s, b.y), true);
+        dl->AddText(ImGui::GetFont(), 13.5f * s, ImVec2(a.x + 30 * s, b.y - foot / 2 - 8 * s),
+                    restart.empty() ? col(k_white, 0.55f) : col(k_gold), note);
+        dl->PopClipRect();
+    }
+    if (glass_button("##done", "DONE", ImVec2(b.x - 30 * s - 130 * s, b.y - foot / 2 - 19 * s), ImVec2(130 * s, 38 * s), s,
+                     GLASS_RED, display_font(), 18 * s) ||
+        (ImGui::IsKeyPressed(ImGuiKey_Escape) && !ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId)))
+        ImGui::CloseCurrentPopup();
     ImGui::EndPopup();
 }
 
-// RECOMP_LAUNCHER_PAGE=online (or another page's name): open on that page, for screenshots.
-static int initial_page()
+#if defined(_WIN32)
+// The borderless window's own minimise and close buttons, top right.
+static bool window_controls(ImVec2 o, float w, float s)
 {
-    static const char *const names[] = { "display", "textures", "controllers", "pad", "keyboard", "online", "general" };
-    const char *want = getenv("RECOMP_LAUNCHER_PAGE");
-    for (int i = 0; want && i < PAGE_COUNT; i++)
-        if (!strcmp(want, names[i])) return i;
-    return PAGE_DISPLAY;
+    ImDrawList *dl = ImGui::GetWindowDrawList();
+    float bw = 46 * s, bh = 34 * s;
+    bool close = false;
+    for (int i = 0; i < 2; i++) {
+        ImVec2 a(o.x + w - (2 - i) * bw, o.y), b(a.x + bw, a.y + bh);
+        ImGui::SetCursorScreenPos(a);
+        ImGui::PushID(i);
+        bool pressed = ImGui::InvisibleButton("##window", ImVec2(bw, bh), ImGuiButtonFlags_None);
+        ImGui::PopID();
+        bool hot = ImGui::IsItemHovered();
+        if (hot) dl->AddRectFilled(a, b, i ? col(ImVec4(0.85f, 0.10f, 0.15f, 1)) : col(k_white, 0.10f));
+        ImVec2 c((a.x + b.x) / 2, (a.y + b.y) / 2);
+        float r = 5 * s;
+        ImU32 ink = col(k_white, hot ? 1.0f : 0.75f);
+        if (i == 0) {
+            dl->AddLine(ImVec2(c.x - r, c.y), ImVec2(c.x + r, c.y), ink, 1.2f * s);
+            if (pressed) ShowWindow((HWND)ImGui::GetMainViewport()->PlatformHandleRaw, SW_MINIMIZE);
+        } else {
+            dl->AddLine(ImVec2(c.x - r, c.y - r), ImVec2(c.x + r, c.y + r), ink, 1.2f * s);
+            dl->AddLine(ImVec2(c.x - r, c.y + r), ImVec2(c.x + r, c.y - r), ink, 1.2f * s);
+            close = close || pressed;
+        }
+    }
+    return close;
+}
+#endif
+
+bool ui_launcher_caption(float x, float y)
+{
+    if (!ImGui::GetCurrentContext() || ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel))
+        return false;
+    return y >= 0 && y < g_caption_h && x < g_controls_x;
 }
 
 static UiResult draw_launcher(float x, float y, float width, float height)
 {
     UiResult result;
-    static int page = initial_page();
+    static int start_page = initial_page();
+    static int tab = start_page == PAGE_COUNT || start_page < 0 ? 0 : 1;
+    static int page = start_page >= 0 && start_page < PAGE_COUNT ? start_page : PAGE_DISPLAY;
     static bool checked;
     if (!checked) { checked = true; updater_check(); }
-    const float u = ImGui::GetFontSize() / 17.0f;           // one design pixel at the current scale
-    ImGuiStyle &style = ImGui::GetStyle();
+    // One design pixel: the layout is drawn for 1100 x 688 and scaled to the window, centred.
+    const float s = std::min(width / 1100.0f, height / 688.0f);
 
     ImGui::SetNextWindowPos(ImVec2(x, y));
     ImGui::SetNextWindowSize(ImVec2(width, height));
@@ -1360,121 +1977,71 @@ static UiResult draw_launcher(float x, float y, float width, float height)
     ImGui::PopStyleVar(2);
     ImDrawList *dl = ImGui::GetWindowDrawList();
     ImVec2 origin = ImGui::GetWindowPos();
+    backdrop(dl, origin, width, height, s);
+    ImVec2 o(origin.x + (width - 1100 * s) / 2, origin.y + (height - 688 * s) / 2);
+    auto at = [&](float dx, float dy) { return ImVec2(o.x + dx * s, o.y + dy * s); };
 
-    // Banner.
-    float banner_h = height * 0.27f;
-    if (banner_h < 130 * u) banner_h = 130 * u;
-    if (banner_h > 260 * u) banner_h = 260 * u;
-    ImVec2 ba = origin, bb(origin.x + width, origin.y + banner_h);
-    if (g_banner_art.tex)
-        draw_cover(dl, g_banner_art, ba, bb);
-    else
-        dl->AddRectFilledMultiColor(ba, bb, col(k_red_lo), col(k_bg), col(k_bg), col(k_red_lo, 0.6f));
-    // Fade into the page below and darken the left, where the logo sits.
-    dl->AddRectFilledMultiColor(ImVec2(ba.x, ba.y + banner_h * 0.45f), bb, col(k_bg, 0), col(k_bg, 0), col(k_bg), col(k_bg));
-    dl->AddRectFilledMultiColor(ba, ImVec2(ba.x + width * 0.6f, bb.y), col(k_bg, 0.75f), col(k_bg, 0), col(k_bg, 0), col(k_bg, 0.75f));
-    float pad = 28 * u;
-    if (g_logo_art.tex) {
-        // A wide wordmark at half the banner's height; a near-square emblem (FFNY Online's) larger.
-        float lh = banner_h * (g_logo_art.w < g_logo_art.h * 1.5f ? 0.86f : 0.52f), lw = lh * g_logo_art.w / g_logo_art.h;
-        if (lw > width * 0.55f) { lw = width * 0.55f; lh = lw * g_logo_art.h / g_logo_art.w; }
-        ImVec2 la(ba.x + pad, ba.y + (banner_h - lh) * 0.42f);
+    // The logo, or the name in the display font without it.
+    if (g_logo_art.tex && g_logo_art.w > 0) {
+        float lw = 300 * s, lh = lw * g_logo_art.h / g_logo_art.w;
+        if (lh > 300 * s) { lh = 300 * s; lw = lh * g_logo_art.w / g_logo_art.h; }
+        ImVec2 la = at(48, 64);
         dl->AddImage(g_logo_art.tex, la, ImVec2(la.x + lw, la.y + lh));
     } else {
-        ImGui::PushFont(g_font_black, style.FontSizeBase * 2.4f);
-        dl->AddText(ImVec2(ba.x + pad, ba.y + banner_h * 0.3f), col(k_gold), "DEF JAM: FIGHT FOR NY");
-        ImGui::PopFont();
+        dl->AddText(display_font(), 64 * s, at(48, 150), col(k_white), "FFNY");
+        dl->AddText(display_font(), 40 * s, at(48, 222), col(k_red_hi), "ONLINE");
     }
+
+    // The top strip: it drags the window; the name and build, and the window's buttons.
+    g_caption_h = 44 * s;
+    g_controls_x = width;
     {
-        char version[96];
-        snprintf(version, sizeof(version), "PC RECOMP  v%s  build %d", DEFJAM_VERSION, updater_local_build());
-        ImGui::PushFont(g_font_bold, style.FontSizeBase * 0.85f);
-        ImVec2 ts = ImGui::CalcTextSize(version);
-        dl->AddText(ImVec2(bb.x - ts.x - pad, ba.y + 14 * u), col(ImVec4(1, 1, 1, 0.55f)), version);
-        ImGui::PopFont();
+        char label[96];
+        snprintf(label, sizeof(label), "FFNY Online  \xC2\xB7  build %d", updater_local_build());
+        float right = width;
+#if defined(_WIN32)
+        right = width - 92 * s;
+        g_controls_x = right;
+        if (window_controls(origin, width, s)) result.leave = true;
+#endif
+        ImVec2 ts = text_size(ImGui::GetFont(), 13 * s, label);
+        dl->AddText(ImGui::GetFont(), 13 * s, ImVec2(origin.x + right - ts.x - 18 * s, origin.y + (34 * s - ts.y) / 2),
+                    col(k_white, 0.62f), label);
     }
-    dl->AddRectFilled(ImVec2(ba.x, bb.y - 3 * u), bb, col(k_red));
 
-    // Sidebar, page and footer.
-    float footer_h = 74 * u, side_w = 230 * u;
-    float body_top = banner_h, body_h = height - banner_h - footer_h;
-    dl->AddRectFilled(ImVec2(origin.x, origin.y + body_top), ImVec2(origin.x + side_w, origin.y + body_top + body_h), col(k_sidebar));
-
-    ImGui::SetCursorPos(ImVec2(0, body_top));
-    ImGui::BeginChild("##sidebar", ImVec2(side_w, body_h), ImGuiChildFlags_None, ImGuiWindowFlags_NoScrollbar);
-    ImGui::Dummy(ImVec2(0, 14 * u));
-    for (int i = 0; i < PAGE_COUNT; i++) {
-        ImVec2 a = ImGui::GetCursorScreenPos();
-        float item_h = 40 * u;
-        ImGui::PushID(i);
-        bool chosen = ImGui::InvisibleButton("##page", ImVec2(side_w, item_h));
-        bool hovered = ImGui::IsItemHovered() || ImGui::IsItemFocused();
-        ImGui::PopID();
-        if (chosen) page = i;
-        ImDrawList *sd = ImGui::GetWindowDrawList();
-        ImVec2 b(a.x + side_w, a.y + item_h);
-        if (page == i) {
-            sd->AddRectFilledMultiColor(a, b, col(k_red, 0.38f), col(k_red, 0.0f), col(k_red, 0.0f), col(k_red, 0.38f));
-            sd->AddRectFilled(a, ImVec2(a.x + 4 * u, b.y), col(k_red_hi));
-        } else if (hovered) {
-            sd->AddRectFilled(a, b, col(ImVec4(1, 1, 1, 0.05f)));
-        }
-        ImGui::PushFont(page == i ? g_font_bold : nullptr, style.FontSizeBase * 1.05f);
-        float th = ImGui::GetFontSize();
-        sd->AddText(ImVec2(a.x + 24 * u, a.y + (item_h - th) / 2), page == i ? col(ImVec4(1, 1, 1, 1)) :
-                    col(style.Colors[ImGuiCol_Text], 0.72f), k_page_names[i]);
-        ImGui::PopFont();
-    }
-    ImGui::EndChild();
-
-    ImGui::SetCursorPos(ImVec2(side_w, body_top));
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(30 * u, 22 * u));
-    ImGui::BeginChild("##page", ImVec2(width - side_w, body_h), ImGuiChildFlags_AlwaysUseWindowPadding);
-    ImGui::PushFont(g_font_black, style.FontSizeBase * 1.7f);
-    ImGui::TextUnformatted(k_page_names[page]);
-    ImGui::PopFont();
-    ImGui::TextDisabled("%s", k_page_hints[page]);
-    ImGui::Dummy(ImVec2(0, 6 * u));
-    draw_page(page, UI_LAUNCHER);
-    ImGui::EndChild();
-    ImGui::PopStyleVar();
-
-    // Footer.
-    float fy = origin.y + body_top + body_h;
-    dl->AddRectFilled(ImVec2(origin.x, fy), ImVec2(origin.x + width, origin.y + height), col(k_panel));
-    dl->AddLine(ImVec2(origin.x, fy), ImVec2(origin.x + width, fy), col(ImVec4(1, 1, 1, 0.06f)));
-    float play_w = 190 * u, play_h = 46 * u, quit_w = 110 * u;
-    float row = body_top + body_h + (footer_h - play_h) / 2;
-    ImGui::SetCursorPos(ImVec2(pad, body_top + body_h + 12 * u));
+    // PLAY and the two small buttons under it.
+    UpdaterState upd = updater_state();
+    bool busy = hd_build_status(nullptr, nullptr, nullptr, 0, nullptr, 0) == HD_BUILD_RUNNING ||
+                upd == UPDATER_DOWNLOADING || upd == UPDATER_INSTALLING;
     {
         std::string restart = restart_needed();
-        if (!restart.empty())
-            ImGui::TextColored(k_gold, "Applies at the next start: %s", restart.c_str());
-        else
-            ImGui::TextDisabled("Changes are saved as you make them.");
+        const char *note = busy ? (upd == UPDATER_DOWNLOADING || upd == UPDATER_INSTALLING ? "PLAY is back when the update is in."
+                                                                                           : "PLAY is back when the HD textures are made.")
+                                : nullptr;
+        char buf[300];
+        if (!note && !restart.empty()) { snprintf(buf, sizeof(buf), "Applies at the next start: %s", restart.c_str()); note = buf; }
+        if (note) dl->AddText(ImGui::GetFont(), 13 * s, at(48, 472), col(k_gold), note, nullptr, 270 * s);
     }
-    ImGui::SetCursorPos(ImVec2(width - pad - play_w - quit_w - 12 * u, row + (play_h - 36 * u) / 2));
-    if (ImGui::Button("Quit", ImVec2(quit_w, 36 * u))) result.leave = true;
-    ImGui::SetCursorPos(ImVec2(width - pad - play_w, row));
-    ImGui::PushStyleColor(ImGuiCol_Button, k_red);
-    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, k_red_hi);
-    ImGui::PushStyleColor(ImGuiCol_ButtonActive, k_red_lo);
-    ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 8 * u);
-    ImGui::PushFont(g_font_black, style.FontSizeBase * 1.35f);
-    UpdaterState upd = updater_state();
-    bool making_hd = hd_build_status(nullptr, nullptr, nullptr, 0, nullptr, 0) == HD_BUILD_RUNNING ||
-                     upd == UPDATER_DOWNLOADING || upd == UPDATER_INSTALLING;
-    if (making_hd) ImGui::BeginDisabled();
-    if (ImGui::Button("PLAY", ImVec2(play_w, play_h))) result.play = true;
-    if (making_hd) ImGui::EndDisabled();
-    ImGui::PopFont();
-    ImGui::PopStyleVar();
-    ImGui::PopStyleColor(3);
+    if (ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere();
+    if (glass_button("##play", "PLAY", at(48, 498), ImVec2(270 * s, 64 * s), s, GLASS_RED, display_font(), 36 * s, !busy))
+        result.play = true;
+    if (glass_button("##settings", "Settings", at(48, 578), ImVec2(130 * s, 36 * s), s, GLASS_PLAIN, nullptr, 15 * s))
+        ImGui::OpenPopup("Settings");
+    if (glass_button("##discord", "Discord", at(188, 578), ImVec2(130 * s, 36 * s), s, GLASS_PLAIN, nullptr, 15 * s))
+        open_url(k_discord_invite);
+    dl->AddText(ImGui::GetFont(), 12.5f * s, at(48, 648), col(k_white, 0.5f), "Fan project, not affiliated with EA.");
+
+    // The cards.
+    account_card(at(740, 64), at(1060, 168), s);
+    game_card(at(740, 184), at(1060, 288), s, result);
+    news_card(at(740, 304), at(1060, 520), s);
+
     {
-        ImVec2 a = ImGui::GetItemRectMin(), b = ImGui::GetItemRectMax();
-        dl->AddRect(a, b, col(k_gold, ImGui::IsItemHovered() ? 0.9f : 0.45f), 8 * u, 0, 2 * u);
+        static bool opened;
+        if (!opened && start_page >= 0) ImGui::OpenPopup("Settings");
+        opened = true;
     }
-    if (ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere(-1);
+    settings_dialog(origin, width, height, s, tab, page);
     update_popup(result);
     crash_popup();
     ImGui::End();
@@ -1770,15 +2337,16 @@ extern "C" int pc_ui_window_message(HWND window, UINT msg, WPARAM wp, LPARAM lp)
 
 // A newer build published while the game runs: say so in the menus. The launcher checks only at its
 // start, and players stay in the game for hours, so hotfixes went unseen. Checked a minute after start
-// and every fifteen minutes; shown once per build for fifteen seconds, never over a fight.
+// and every five minutes; shown for fifteen seconds when found and again every ten minutes, never over a
+// fight. The online pages keep a badge up meanwhile (online_screen.cpp).
 static bool update_notice(char *out, size_t size)
 {
-    static UiTick next_check, until;
+    static UiTick next_check, until, again;
     static int shown_build;
     UiTick now = ui_ticks();
     if (!next_check) next_check = now + 60000;
     if (now >= next_check) {
-        next_check = now + 15 * 60000;
+        next_check = now + 5 * 60000;
         UpdaterState st = updater_state();
         if (st != UPDATER_AVAILABLE && st != UPDATER_DOWNLOADING && st != UPDATER_INSTALLING && st != UPDATER_INSTALLED)
             updater_check();
@@ -1787,13 +2355,14 @@ static bool update_notice(char *out, size_t size)
         int build = 0;
         char version[64], notes[8];
         updater_info(&build, version, sizeof(version), notes, sizeof(notes));
-        if (build > updater_local_build() && build != shown_build) {
+        if (build > updater_local_build() && (build != shown_build || now >= again)) {
             shown_build = build;
             until = now + 15000;
+            again = now + 10 * 60000;
         }
     }
     if (!until || now >= until) return false;
-    snprintf(out, size, "Build %d is out: close the game and start the launcher to update.", shown_build);
+    snprintf(out, size, "Build %d is out: close the game and the launcher installs it.", shown_build);
     return true;
 }
 
