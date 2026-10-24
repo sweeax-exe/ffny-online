@@ -35,6 +35,9 @@
 #include <string.h>
 #include <stdlib.h>
 
+#if defined(_WIN32)
+#include <dxgi.h>
+#endif
 #include "d3d8_xbox.h"
 #include "nv2a_pgraph_d3d11.h"
 #include "pc_settings.h"
@@ -461,6 +464,25 @@ int d3d11_translator_init(void)
         return 0;
     }
 
+#if defined(_WIN32)
+    /* At most one frame queued ahead of the display (RECOMP_FRAME_LATENCY=1..3; DXGI's default is
+     * 3). With vsync on, the default let the title run three presents ahead of the screen, about
+     * 50 ms between a press and its picture, offline as well: counters and grabs came late
+     * (players' reports, 2026-10-24). */
+    {
+        extern void *d3d8_GetD3D11Device(void);
+        const char *e = getenv("RECOMP_FRAME_LATENCY");
+        int frames = e && *e >= '1' && *e <= '3' ? *e - '0' : 1;
+        IUnknown *device = (IUnknown *)d3d8_GetD3D11Device();
+        IDXGIDevice1 *dxgi = NULL;
+        if (device && SUCCEEDED(device->lpVtbl->QueryInterface(device, &IID_IDXGIDevice1, (void **)&dxgi))) {
+            HRESULT lr = dxgi->lpVtbl->SetMaximumFrameLatency(dxgi, (UINT)frames);
+            fprintf(stderr, "[TRANS] frames queued ahead of the display: at most %d%s\n", frames,
+                    SUCCEEDED(lr) ? "" : " (not taken)");
+            dxgi->lpVtbl->Release(dxgi);
+        }
+    }
+#endif
     pgraph_d3d11_init();
     s_ready = 1;
     fprintf(stderr, "[TRANS] translator ready: %ux%u picture in a %dx%d window, "
