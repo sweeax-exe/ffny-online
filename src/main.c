@@ -501,6 +501,18 @@ static LONG CALLBACK veh_handler(PEXCEPTION_POINTERS ep)
                 } else
                     fprintf(stderr, "  thread %lu, rsp 0x%llX\n", GetCurrentThreadId(),
                             (unsigned long long)ep->ContextRecord->Rsp);
+                {   /* Build 24: the online thread jumped to 0x1E. Whether a `ret` popped it (then it is the
+                     * word just below rsp) or a call went there needs the raw words, small ones included,
+                     * and how deep in its stack the thread was. */
+                    NT_TIB *tib = (NT_TIB *)NtCurrentTeb();
+                    fprintf(stderr, "  stack base 0x%llX limit 0x%llX (rsp %lld bytes below the base)\n",
+                            (unsigned long long)(uintptr_t)tib->StackBase, (unsigned long long)(uintptr_t)tib->StackLimit,
+                            (long long)((uintptr_t)tib->StackBase - ep->ContextRecord->Rsp));
+                    fprintf(stderr, "  raw words from rsp-16:");
+                    for (int i = -2; i < 22; i++)
+                        fprintf(stderr, "%s %llX", i % 6 == 4 ? "\n   " : "", (unsigned long long)sp[i]);
+                    fprintf(stderr, "\n");
+                }
                 shown = 0;
                 for (int i = 0; i < 64 && shown < 12; i++) {
                     HMODULE m = NULL;
