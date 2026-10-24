@@ -33,8 +33,8 @@ fixed or accepted**. PR91 remains draft; this report is not stable-release signo
   installation. `app/installed.json` resolves the exact activated build and
   immutable source folder. The final build is source7ed7f66, toolkitbd8c633.
 
-No source push, PR update, merge, tag, release, catalogue deployment or artwork
-publication was performed. All captures, game data, generated code and logs stay
+The verification phase performed no source push, PR update, merge, tag, release,
+catalogue deployment or artwork publication. All captures, game data, generated code and logs stay
 outside tracked source. No game executable is a deliverable.
 
 ## Fixed Windows failures
@@ -188,3 +188,11 @@ Use `app/DefJamLauncher.exe` for this isolated corrected RC. The ordinary user
 installation and existing public-preview/private checkouts remain untouched.
 The clean setup above is ready for another local RC install; publishing the
 source fixes or replacing the CI artifact requires a subsequent owner request.
+
+### Publication follow-up
+
+Vlad subsequently authorized pushing the verified fixes and report. They are
+delivered through the existing PR91 branch `codex/integrated-menu-mods-rc`;
+PR91 remains draft and the inherited transition gate remains open. This does
+not merge, tag or release the candidate. The already installed playtest build
+and launcher path above are unchanged; no reinstall is needed for local playtesting.
