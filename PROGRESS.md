@@ -64,7 +64,7 @@
 | Mac setup quarantine fix (D139; issue #59) | ✅ released v0.10.4 (latest, 2026-10-19) | PR #60 merged `1d4e13d`: the macOS setup unpacks its digest-checked payload with `ditto --noqtn` plus `xattr -d -r com.apple.quarantine`, so a browser-downloaded setup no longer stops on *"python3" Not Opened*. Owner confirmed with a quarantined test DMG. Tag `v0.10.4` on release PR #63 merge `110d50e`; game and toolkit identical to v0.10.3. |
 | Issue #72 / Windows startup crash | ⏳ reporter setup retry needed; PRs open | Correct patched candidate9e4f805/e818066 opened, but Clean Rebuild refused different installed version; old supplied log shows0.10.1/default location versus original0.10.5 elsewhere. Clarification6316443011: Clean Update + Bundled offline for0.10.1, or select original0.10.5 app/data and rebuild. Runtime not retested; no new runtime fix/artifact indicated. PR76/forkPR3 remain unmerged. Test-only toolkit8589f88 fixes Ubuntu fixture libm link; parent integration CI rerun pending. Setup policy tests72pass/1skip. |
 | Menu/UI restoration | ✅ v0.11.0 stable / owner Steam Deck accepted | D198 full stable approved; five Windows aspects/eight Mode selections and owner Deck playtest accepted. HUD95/fire-escape/three backgrounds deferred1.1 remain known limitations. Mod support is Beta; final Mac validation remains unconfirmed. |
-| Launcher mod catalogue | ✅ v0.11.0 stable/latest — Mod Support Beta | D198 owner Steam Deck acceptance. Release5775f3c/nine assets unchanged; catalogue PR3 merged5b4de77, signed publication40115951254 passed. Client verifies revision3 and default-channel1.0.0 with testing off; archive43bbb22c unchanged.13local tests/22subtests plus full Linux CI pass. Docs PR99 final record pending merge. |
+| Launcher mod catalogue | ✅ v0.11.0 stable/latest — Mod Support Beta | D198 owner Steam Deck acceptance. Release5775f3c/nine assets unchanged; catalogue PR3 merged5b4de77, signed publication40115951254 passed. Client verifies revision3 and default-channel1.0.0 with testing off; archive43bbb22c unchanged.13local tests/22subtests plus full Linux CI pass. Docs PR99 records stable promotion. |
 
 ## 1. Decisions log
 
@@ -466,8 +466,8 @@ defjam-recomp/
   Existing players need only Mods -> Refresh catalogue; no testing toggle needed.
   Existing1.0.0-rc2 installs remain valid;1.0.0 reuses identical accepted bytes.
 - Game docs PR99: README, release notes, known issues and PROGRESS reflect stable
-  promotion. Final record commit is being pushed for documentation-only CI/merge.
-  Keep release tag/installers pinned to5775f3c; documentation merge is later.
+  promotion and its final verification record, with documentation-only CI enforced.
+  Query PR99 for its merge commit. Release tag/installers stay pinned to5775f3c.
 - Evidence ../logs/v011-stable-verification.json, v011-before-stable-release.json,
   stable-prepared-index/index.json, stable-publication-approval.json. Historical
   game-free packaging/Windows gameplay evidence remains in preview release record.
