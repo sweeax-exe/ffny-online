@@ -494,7 +494,7 @@ void rollback_check_tables(const char *where)
 /* Tests (RECOMP_ROLLBACK_ALLOCLOG=1): every heap block with the code that asked for it, so a page
  * another thread turns out to write can be traced to its allocations. */
 #define ALLOCLOG 131072
-static struct { uint32_t block, size, caller, outer; } *s_alog;
+static struct { uint32_t block, size, caller, outer, chain[6]; } *s_alog;
 static unsigned s_alog_n;
 static int alloclog_on(void)
 {
@@ -515,11 +515,29 @@ static void alloclog_page(uint32_t page, const char *who)
         unsigned k = (s_alog_n - 1 - i) % ALLOCLOG;     /* newest first */
         uint32_t lo = page & (PAGE - 1) ? page : page, hi = page & (PAGE - 1) ? page + 1 : page + PAGE;
         if (s_alog[k].block < hi && s_alog[k].block + s_alog[k].size > lo) {   /* a page, or the block at an address */
-            fprintf(stderr, "[ROLLBACK]   %s's page %08X holds block %08X+%X from caller %08X (outer %08X)\n", who, page,
-                    s_alog[k].block, s_alog[k].size, s_alog[k].caller, s_alog[k].outer);
+            fprintf(stderr, "[ROLLBACK]   %s's page %08X holds block %08X+%X from caller %08X (outer %08X; calls %08X "
+                    "%08X %08X %08X %08X %08X)\n", who, page, s_alog[k].block, s_alog[k].size, s_alog[k].caller,
+                    s_alog[k].outer, s_alog[k].chain[0], s_alog[k].chain[1], s_alog[k].chain[2], s_alog[k].chain[3],
+                    s_alog[k].chain[4], s_alog[k].chain[5]);
             shown++;
         }
     }
+}
+
+/* Return addresses on the guest stack above sp that follow a direct call (E8 rel32 into .text): a
+ * scan, so a stale word can slip in, but only one a CALL produced. */
+static void call_chain(uint32_t sp, uint32_t *out, int max)
+{
+    uint32_t o;
+    int n = 0;
+    for (o = 0; o < 0x400u && n < max; o += 4) {
+        uint32_t r = MEM32(sp + o), target;
+        if (r < 0x00011005u || r >= 0x00210E00u || MEM8(r - 5) != 0xE8) continue;
+        target = r + MEM32(r - 4);
+        if (target < 0x00011000u || target >= 0x00210E00u) continue;
+        out[n++] = r;
+    }
+    while (n < max) out[n++] = 0;
 }
 
 void rollback_check_alloc(uint32_t caller, uint32_t size, uint32_t block)
@@ -533,6 +551,7 @@ void rollback_check_alloc(uint32_t caller, uint32_t size, uint32_t block)
         /* sub_00029680 / 000296B0 / 00029710 call with five words pushed: their caller is 20 bytes up
          * from here (the allocator has returned) */
         s_alog[k].outer = (caller == 0x00029696u || caller == 0x000296C6u || caller == 0x00029723u) ? MEM32(g_esp + 20) : 0;
+        call_chain(g_esp, s_alog[k].chain, 6);
     }
     if (!check_on() || !s_wobj || !block) return;
     if (!s_tracking || !watched_loaded()) { s_wobj = 0; return; }
@@ -1084,7 +1103,7 @@ static void mixer_end(void)
         uint32_t p = s_change[i];
         if (s_skip[p] || !memcmp(s_mix + (size_t)i * PAGE, XBOX_PTR(HEAP_LO + p * PAGE), PAGE)) continue;
         s_skip[p] = 1;
-        if (s_mix_found++ < 12) {
+        if (s_mix_found++ < 64) {
             const uint8_t *was = s_mix + (size_t)i * PAGE, *now = (const uint8_t *)XBOX_PTR(HEAP_LO + p * PAGE);
             unsigned lo = 0, hi = PAGE - 1;
             while (lo < PAGE && was[lo] == now[lo]) lo++;

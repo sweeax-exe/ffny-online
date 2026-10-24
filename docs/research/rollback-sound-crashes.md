@@ -58,3 +58,22 @@ presses) and `rb_matches.py` (two copies, fast KO, matches one after another).
 Next: route these allocations into the arena by their call chain (an audio-code site among the first
 validated return addresses), so no sound object lives in restored memory; then find out why the match
 did not end with fast KO and what `sub_000ABB70` read.
+
+## The blocks the mixer writes, by allocator (diagnostic run, 2026-10-24 evening)
+
+With the call-chain log (`RECOMP_ROLLBACK_ALLOCLOG=1`, logs `logs/mcp/diag-chains-copy0/1.log.err`), the baseline
+rollback (no masks) crashed again in the first match (`sub_0012E560`, `sub_0025FA4F`) at 70 ms lag. The blocks
+holding the first byte the mixer changed came from:
+
+| allocator (return address) | blocks | notes |
+|---|---|---|
+| `0x29821` (`sub_00029800`) | 76 | not routed by `rollback_route_alloc` at all, which hooks `sub_00029500` only |
+| `0x29696` (wrapper `sub_00029680`) | 28 | outer callers `0x28A93`, `0x28A71`, `0x61ECC`, `0x12723`, `0x12C56`, `0x11E75` |
+| `0x296C6` (wrapper `sub_000296B0`) | 6 | outer `0xA4024`, `0xA3189` |
+| `0x1E477A`, `0x1E3F20` (file layer) | 6 | stream buffers (0x47B80, 0x1A9C bytes) |
+| `0x6A4CC` | 4 | one 3.3 MB block (`0x333AB0`) |
+
+Most chains pass through `0x100000..0x114000` (`0x101F19`, `0x10192D`, `0x102145`, `0x113F42`, `0x10B41C`),
+which `audio_code()` does not count as audio (it has `0x11C000..0x142000`). Next: confirm that range is the
+sound engine, route `sub_00029800` like `sub_00029500`, and route by the validated call chain (an audio site
+among the first few return addresses) instead of the direct caller.
