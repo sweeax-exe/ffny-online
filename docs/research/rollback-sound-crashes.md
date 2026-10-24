@@ -77,3 +77,13 @@ Most chains pass through `0x100000..0x114000` (`0x101F19`, `0x10192D`, `0x102145
 which `audio_code()` does not count as audio (it has `0x11C000..0x142000`). Next: confirm that range is the
 sound engine, route `sub_00029800` like `sub_00029500`, and route by the validated call chain (an audio site
 among the first few return addresses) instead of the direct caller.
+
+**The 0x100000..0x11C000 range is not audio code.** Its 1012 functions call nothing in the sound engine, AEMS or
+the audio subsystem (811 calls stay in the range, 716 go elsewhere) and never use the sound allocator; they
+are called from all over the game (0x20000, 0x10000, 0xB0000-0xE0000, 0x170000-0x180000). So the blocks the
+mixer writes are the game's own objects (allocated through general code), into which the engine writes back
+small fields (two bytes, e.g. a voice handle or a playing flag). Routing by call chain cannot separate them:
+they are shared by design. What is left: (a) never restore those fields (the block masks of section "Tried",
+which moved the crash elsewhere), (b) roll the sound state back with the game (the arena, the engine's
+globals and the APU's voices together, with the mixer held during a load), or (c) find which fields the
+engine writes and keep exactly those live. (c) is the smallest; it needs the field offsets per object class.
