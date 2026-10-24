@@ -156,6 +156,19 @@ not committed.
 The Deck does not show the Windows crackle: the migrated build has fewer holes than the old one, and both are far below
 Windows' bad runs (F8 187-421). Run with nothing else playing audio; I did not log the minutes of the holes.
 
+**After the Deck pass (2026-10-23, branch `bf284cc`).** Rebuilt for the `pc_ui.cpp` change; port unit tests
+under MSVC 562 passed / 26 skipped (the six new `SaveGuard` tests included). Against v0.10.7 (`009473a`), the
+PR's own base, alternating:
+
+| Check | `bf284cc` | v0.10.7 |
+|---|---|---|
+| `repeat` (issue #98) | 2/2 ok: 80 records identical over 1,800 steps, matching the golden hash | 2/2 ok, the same |
+| `ffa-result` | 2/2 ok, 28/28 | 1 ok, 1 fails `combat.eliminations` |
+
+So Windows does not show #98, and the `combat.eliminations` failure exists before the migration. A guarded
+`crib` run on the real save went through the new guard's whole cycle (marker written, restored identical,
+marker removed, `.ok` written; `save-recover` finds nothing unresolved).
+
 **Two alias seeds have no effect.** `0x001F707B` and `0x001FF9B7` are in v0.10.7's dispatch table and
 missing from this lift although `config/seed_functions.json` seeds them. Each sits right after the end of a
 real function, in bytes only tail-jump alias bodies cover (`0x001F705D`, `0x001FF995`), and
