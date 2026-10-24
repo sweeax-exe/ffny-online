@@ -43,11 +43,18 @@ typedef struct { uint32_t lo, hi; } Range;
 /* .data/.bss kept; the gaps are the mailbox thread's blocks, the game's own sound globals
  * (0x33E778.., 0x340318..: voice handles and cue state, used only by its audio code 0x30000..0x3D000;
  * sound is not rolled back, so they stay in step with the engine) and the music refiller. */
+/* Also left out (2026-10-24): the AEMS layer's globals 0x331C20..0x3323C0 (written only by its code,
+ * 0x1C000..0x1E000) and the audio subsystem's 32 bus objects 0x3454A0..0x345968 (reached only through
+ * the audio code, e.g. the slow-motion effect sub_000388B0 links a record into 0x345600). Put back
+ * under the running mixer, a bus's effect list went back to before a KO's slow-motion effect was
+ * linked in and the mixer thread followed a junk pointer (sub_0011E530, a fast-KO rollback test). */
 static const Range k_data[] = {
     { 0x002D54E0u, 0x002EB5ACu },
-    { 0x002EBF1Cu, 0x0033E778u },
+    { 0x002EBF1Cu, 0x00331C20u },
+    { 0x003323C0u, 0x0033E778u },
     { 0x0033ECA0u, 0x00340318u },
-    { 0x00340D58u, 0x003A9324u },
+    { 0x00340D58u, 0x003454A0u },
+    { 0x00345968u, 0x003A9324u },
     { 0x003A9684u, 0x003B8070u },
     { 0x003B83BCu, 0x003C92C8u },
 };
@@ -484,9 +491,49 @@ void rollback_check_tables(const char *where)
     }
 }
 
+/* Tests (RECOMP_ROLLBACK_ALLOCLOG=1): every heap block with the code that asked for it, so a page
+ * another thread turns out to write can be traced to its allocations. */
+#define ALLOCLOG 131072
+static struct { uint32_t block, size, caller, outer; } *s_alog;
+static unsigned s_alog_n;
+static int alloclog_on(void)
+{
+    static int on = -1;
+    if (on < 0) {
+        on = getenv("RECOMP_ROLLBACK_ALLOCLOG") != NULL;
+        if (on) s_alog = calloc(ALLOCLOG, sizeof(*s_alog));
+        if (!s_alog) on = 0;
+    }
+    return on;
+}
+
+static void alloclog_page(uint32_t page, const char *who)
+{
+    unsigned i, n = s_alog_n < ALLOCLOG ? s_alog_n : ALLOCLOG, shown = 0;
+    if (!alloclog_on()) return;
+    for (i = 0; i < n && shown < 6; i++) {
+        unsigned k = (s_alog_n - 1 - i) % ALLOCLOG;     /* newest first */
+        uint32_t lo = page & (PAGE - 1) ? page : page, hi = page & (PAGE - 1) ? page + 1 : page + PAGE;
+        if (s_alog[k].block < hi && s_alog[k].block + s_alog[k].size > lo) {   /* a page, or the block at an address */
+            fprintf(stderr, "[ROLLBACK]   %s's page %08X holds block %08X+%X from caller %08X (outer %08X)\n", who, page,
+                    s_alog[k].block, s_alog[k].size, s_alog[k].caller, s_alog[k].outer);
+            shown++;
+        }
+    }
+}
+
 void rollback_check_alloc(uint32_t caller, uint32_t size, uint32_t block)
 {
     uint32_t end = block + size;
+    if (block && alloclog_on()) {
+        unsigned k = s_alog_n++ % ALLOCLOG;
+        s_alog[k].block = block;
+        s_alog[k].size = size;
+        s_alog[k].caller = caller;
+        /* sub_00029680 / 000296B0 / 00029710 call with five words pushed: their caller is 20 bytes up
+         * from here (the allocator has returned) */
+        s_alog[k].outer = (caller == 0x00029696u || caller == 0x000296C6u || caller == 0x00029723u) ? MEM32(g_esp + 20) : 0;
+    }
     if (!check_on() || !s_wobj || !block) return;
     if (!s_tracking || !watched_loaded()) { s_wobj = 0; return; }
     if ((block < s_wobj + 0x430u && end > s_wobj) || (block < s_wchain + s_wcount * 4u && end > s_wchain) ||
@@ -700,8 +747,10 @@ int rollback_save(int slot)
     size_t at;
     int k;
     if (!s_ready || slot < 0 || slot >= ROLLBACK_SLOTS) return -1;
-    while (s_foreign_told < 12 && s_foreign_told < s_foreign && s_foreign_page[s_foreign_told])
-        fprintf(stderr, "[ROLLBACK] another thread writes %08X: left alone from now on\n", s_foreign_page[s_foreign_told++]);
+    while (s_foreign_told < 12 && s_foreign_told < s_foreign && s_foreign_page[s_foreign_told]) {
+        fprintf(stderr, "[ROLLBACK] another thread writes %08X: left alone from now on\n", s_foreign_page[s_foreign_told]);
+        alloclog_page(s_foreign_page[s_foreign_told++], "another thread");
+    }
     while (s_reads_told < 8 && s_reads_told < (uint32_t)s_reads && s_read_at[s_reads_told]) {
         fprintf(stderr, "[ROLLBACK] a file read into the heap in the fight: %08X, %u bytes, %s thread, %u updates in\n",
                 s_read_at[s_reads_told], s_read_len[s_reads_told], s_read_game[s_reads_told] ? "the game" : "another",
@@ -1035,8 +1084,15 @@ static void mixer_end(void)
         uint32_t p = s_change[i];
         if (s_skip[p] || !memcmp(s_mix + (size_t)i * PAGE, XBOX_PTR(HEAP_LO + p * PAGE), PAGE)) continue;
         s_skip[p] = 1;
-        if (s_mix_found++ < 12)
-            fprintf(stderr, "[ROLLBACK] the mixer writes %08X: left alone from now on\n", HEAP_LO + p * PAGE);
+        if (s_mix_found++ < 12) {
+            const uint8_t *was = s_mix + (size_t)i * PAGE, *now = (const uint8_t *)XBOX_PTR(HEAP_LO + p * PAGE);
+            unsigned lo = 0, hi = PAGE - 1;
+            while (lo < PAGE && was[lo] == now[lo]) lo++;
+            while (hi > lo && was[hi] == now[hi]) hi--;
+            fprintf(stderr, "[ROLLBACK] the mixer writes %08X (bytes %08X..%08X): left alone from now on\n",
+                    HEAP_LO + p * PAGE, HEAP_LO + p * PAGE + lo, HEAP_LO + p * PAGE + hi + 1);
+            alloclog_page(HEAP_LO + p * PAGE + (lo & ~0xFu), "the mixer");
+        }
     }
 }
 

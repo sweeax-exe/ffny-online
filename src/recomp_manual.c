@@ -765,7 +765,9 @@ static void funccall_hook(void)
     }
     text[i] = 0;
     /* Online.Tick() comes every frame from the patched main menu (scripts/apt-patch.py). */
-    if (strcmp(text, "Online.Tick()") && printed++ < 4000)
+    /* the menu-list calls repeat a dozen times a screen; 4000 in all ran out early in a long online
+     * session, and the end of a session is where a report needs them */
+    if (strcmp(text, "Online.Tick()") && strcmp(text, "Game.GetNextMatchType()") && printed++ < 20000)
         fprintf(stderr, "[FUNCCALL] %s\n", text);
     xbox_NoteAnchorEvent(text);
     if (automatch_hold_funccall(text)) {    /* online: a rematch the others have not chosen yet */
