@@ -31,6 +31,7 @@ port traps.
 | `aa00125` feat(disasm) alias seeds | (new) | a seed entry marked `"alias": true` becomes an alias body, never a start |
 | `0988577`, `f30a713`, `81810c8` fix(recomp) switch slots | ed81613, 48268f5, c3e95e7 | cherry-picked; two upstream tests adjusted for the fallback's second path |
 | `2b73d81` perf(disasm) decode cache | (new) | fork copy of upstream PR #255 (issue #254): the callback probes share one decoder that decodes each instruction once; disasm 990 s -> 167 s here, output byte-identical. Drop at the next rebase once upstream has it |
+| `3e63e7b` fix(apu) named heap bytes | (new) | a page MmGetPhysicalAddress named from the heap is RAM only for the bytes of the live block that was named; the mix buffer's last page (shared with a named heap block) had read RAM and clicked once a lap. Upstream candidate (upstream's page map, #193) |
 
 ## Dropped
 
@@ -145,6 +146,32 @@ stream writes. The fork's APU interrupt path is not the cause: upstream's in-thr
 crackles. Fix (D150): the port defaults `RECOMP_AUDIO_BUF_COUNT=6` on Windows (`src/main.c`), the
 smallest clean depth and v0.10.x's latency. Upstream issue https://github.com/sp00nznet/xboxrecomp/issues/259.
 Issue #93 (power throttling) is likely the same queue starvation by another route.
+
+
+## Windows audio: the second cause (2026-10-24)
+
+The owner's re-test with D150 still crackled. What the device is given (`RECOMP_APU_PCM`) had step clicks at
+32-sample slice edges in the opening scene's first three minutes, in every display mode: 386-422 per 330 s,
+v0.10.7 2. They are already in voices 0xF8/0xFA's fetched samples, and sit at lap positions 2,371-2,399 of the
+2,400-frame six-channel buffer: its last page. The buffer is a window allocation (physical pages 0x01309-0x01310);
+its last 344 bytes share page 0x01310 with a heap block that starts after them (0x01310790) and that the title
+named through MmGetPhysicalAddress. Upstream's page map (#193) then sent the whole page to RAM, so those 28
+frames played what RAM held there. v0.10.7's allocator never put a window buffer next to a named heap block.
+
+Ruled out first, by local experiments since reverted: stream underruns, dropped resampler source, the
+render-ahead, v0.10.7's resampler in place of #193's, and the queue size.
+
+Fix `3e63e7b`: heap blocks remember being named and `xbox_PhysRamNamedAt` answers per byte; `apu_phys` gains the
+shared-page case (it fails without the change). Opening scene, device clicks per 330 s:
+
+| Build | windowed, defaults | owner settings, fullscreen |
+|---|---|---|
+| pin `2b73d81` + D150 | 386-422 | 386 |
+| with `3e63e7b` | 1 | 1, 1 |
+| v0.10.7 | | 2 |
+
+Full regression 14/14 with it (`logs/regress-20261024-112504.txt`); fixtures `apu_phys`, `memory_regressions`,
+`windows_guest_layout`, `kernel_regressions`, `kernel_physical_address` pass with MSVC.
 
 ## Linux / Steam Deck results (2026-10-23)
 
