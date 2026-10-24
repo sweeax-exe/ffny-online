@@ -193,7 +193,8 @@ Run the toolkit tests from inside `tools/xboxrecomp` if the imports need it, as 
 
 ```bash
 for t in mmio_trap_posix guest_cpu_posix memory_layout_posix windows_guest_layout kernel_memory_posix kernel_path_posix kernel_bridge nv2a_vsh settings texture_pack d3d8_vk_cache; do
-  djc cmake -S tools/xboxrecomp/tests/$t -B build/fx-$t -G Ninja -DCMAKE_BUILD_TYPE=Release &&
+  sdl3=; case $t in memory_layout_posix|kernel_memory_posix|kernel_path_posix|kernel_bridge) sdl3=-DXBOXRECOMP_SDL3=ON;; esac   # the Deck image has no SDL2
+  djc cmake -S tools/xboxrecomp/tests/$t -B build/fx-$t -G Ninja -DCMAKE_BUILD_TYPE=Release $sdl3 &&
   djc cmake --build build/fx-$t && djc ctest --test-dir build/fx-$t --output-on-failure --no-tests=error || echo "FAIL $t"
 done
 ```
@@ -218,7 +219,27 @@ ldd -r build/posix-release/defjam_recomp     # on SteamOS, outside the container
 python3 scripts/regress.py --preset posix-release
 ```
 
-Run it on SteamOS, not in the container; add numpy and pytest the way your setup does.
+Run it on SteamOS, not in the container. The system Python is read-only for packages, so make a venv
+(`python3 -m venv ~/djvenv && ~/djvenv/bin/pip install pytest numpy pillow pyxbe capstone`) and
+use its `python` for `regress.py`, `harness.py` and `audio-holes.py`.
+
+Run it from a Desktop Mode terminal inside `gamescope --backend headless`, which keeps the game windows
+off the screen you are working on and runs the whole table in one go (40 minutes):
+
+```bash
+export DEFJAM_DATA=~/Games/DefJamRecompiled/Data
+gamescope --backend headless -W 1280 -H 800 -r 90 -- ~/djvenv/bin/python -B scripts/regress.py --preset posix-release
+```
+
+Plain `gamescope` (nested in the desktop session) aborts on a second game launch, and the harness with it.
+The default table does not include `skipintro`, `fight-terrordome`, `ffa-result`, `two-matches`, `repeat`
+and `visual`; run those with `--only`. `repeat` is the one that says whether two identical fights play the
+same.
+
+If a run is killed anyway (a gamescope abort, a power loss), the save may be left changed. The
+next run then refuses to start and names the stale copy; `python scripts/harness.py save-recover`
+shows it, `--restore` puts the oldest copy back and `--accept` keeps the save as it is. Back up
+`save/` yourself first (section 3) all the same.
 
 **Deck baseline.** Before the migration, the Deck passed 12 of 14 checks; `combat` and
 `versus` failed only on audio-queue underruns (issue #11). For this pass:

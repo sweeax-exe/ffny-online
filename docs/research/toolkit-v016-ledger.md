@@ -130,18 +130,21 @@ not committed.
 | Native fixtures (11) | 11/11. `memory_layout_posix`, `kernel_memory_posix`, `kernel_path_posix` and `kernel_bridge` need `-DXBOXRECOMP_SDL3=ON` in the Deck image (no SDL2 there; CI's Ubuntu job has it). The handover command omits it |
 | Analyze / recomp / build `posix-release` | Analyze **4 min 10 s** (`--no-archive`), recomp 2 min 18 s, build 1 min 50 s. No SDL2 symbol, `ldd -r` clean on SteamOS |
 | `check-manual-addresses.py` | 42 checked, 0 missing |
-| Regression, per check (see below) | unit, m2, m3, m4a, launcher, overlay, fight, ffa, fight-terrordome, ffa-terrordome, combat 27/27, versus 26/26, two-matches 35/35, intro, crib, gym, soak 3/3: **ok**. `ffa-result`, `replay`: below. `unlockopt`, `picture`, `skipintro`, `repeat`: gamescope, below. `visual`: blocked (no baselines on this Deck) |
+| Regression, full table in one `gamescope --backend headless` (40 min, no abort) | 16 of 17 **ok**: unit, m2, m3, m4a, launcher, overlay, unlockopt, picture, fight, ffa, ffa-terrordome, combat 27/27, versus 26/26, intro, crib, gym, soak 3/3. `replay` fails the Mac golden (below). With `--only`: skipintro ok, fight-terrordome ok, two-matches 35/35 ok; `ffa-result` and `repeat`: below; `visual` blocked (no baselines on this Deck) |
 | Saves | crib and gym load the existing profile; `save/` has no `UDATA`/`TDATA`; the fresh Setup install creates `UserData`/`TitleData` |
 | Missing functions | No `[ICALL] Failed to resolve` in 35 run logs |
 | HRTF | `RECOMP_APU_HRTF` unset in the shell; no HRTF line in any log |
 | Setup (CI run 40035905816, SHA-256 checked, provenance toolkit `2b73d81`) | Silent install into a new folder (`--no-shortcuts --toolchain container`): exit 0 in **7 min 56 s**. The installed game runs 3,177 frames with no crash. Not run: Game Mode launch, pad and rumble, launcher rebinding (need a person) |
 
-**Not a regression of the migration (the baseline does the same on the Deck):**
-- `unlockopt` / `picture`: the launcher click on a checkbox does not reach `settings.ini` under gamescope. `unlockopt` gives the same result on `77714da`.
-- `skipintro` / `repeat`: gamescope itself aborts (SIGABRT, "X connection broken") on the second game launch, on both builds. The game then dies in `exit()` while `nv2a_ack_thread` still runs (a shutdown race that follows the X IO error). `repeat` is therefore not answered here, and neither is whether the Deck's replay record count is stable.
-- `replay`: fails the Mac golden on both builds: migrated 87 records, `77714da` 84 (golden 80). Replay is not a Deck-valid golden; compare within the Deck only.
+**Harness problems on the Deck, not regressions of the migration:**
+- Nested `gamescope` aborts (SIGABRT in one of its own threads) on a second game launch and kills the harness; the game then dies in `exit()` while `nv2a_ack_thread` still runs. `gamescope --backend headless` does not abort: `skipintro`, `unlockopt` (three launches) and the whole table pass in it.
+- `unlockopt` and `picture` failed on the migrated and the old build alike for another reason: the Deck's larger launcher font makes the layout "stacked", which draws an on/off setting as an Off/On list where the Mac draws a checkbox, so the click only opened the list. Fixed in the harness: the list items are test targets (`<section>.<key>.on`/`.off`) and the checks take an optional second click (`uiopt:`).
+- A run killed that way left the save changed, and the next guard copied the changed save as the original (this happened once here; the save was put back from a copy taken before the pass). `SaveGuard` now refuses to start behind an unresolved guard, ignores kill signals while restoring, and `harness.py save-recover` settles it.
+- `replay` fails the Mac golden on both builds: migrated 87, 84 and 79 records in three runs, `77714da` 84 (golden 80). It is not a Deck-valid golden.
 
-**Needs a decision:** `ffa-result` (4-fighter free for all). Migrated: 1 pass, 2 fail on `combat.eliminations` in 3 runs (fighter 1 put out, two fighters alive at the end, codes 32, 32, 33 instead of 32, 32, 9). `77714da`: 1 run, failed on `audio.dry_queue` only (issue #11). The failing assertion differs from the baseline's, but 1 run of the baseline says little about the rate. Not run: more baseline repeats.
+**Regression candidate: run-to-run determinism.** `repeat` (two identical scripted fights, the second compared with the first) fails on the migrated build in 2 of 2 runs: the states agree until record 24, where the first run has a hit on fighter 0 at step 532 and the second at step 541 (clock, cpu, event, fighters then differ). On `77714da` the same check shows the two runs identical (79 records over 1,800 steps) and fails only against the Mac golden. The fight outcome therefore depends on something that varies between runs of the migrated build on the Deck. It is not traced. It fits the next item. The Mac replay hash is unchanged, so this may be specific to Linux or to the Deck's timing.
+
+**`ffa-result`** (4-fighter free for all). Migrated: 1 pass, 2 fail on `combat.eliminations` in 3 runs (fighter 1 put out, two fighters alive at the end, codes 32, 32, 33 instead of 32, 32, 9). `77714da`, 4 runs: all 4 fail `audio.dry_queue` (issue #11), one of them also `audio.dropped_buffers`, one also `combat.eliminations`. So the elimination failure is not new, but it is 2 of 3 against 1 of 4, and the migrated build does not show the audio-queue failure at all.
 
 **Audio (opening scene, 330 s, `scripts/audio-holes.py`):**
 

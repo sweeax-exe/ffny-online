@@ -603,8 +603,11 @@ static bool setting_widget(RecompSetting *s, const char *label = nullptr, bool s
             if (ImGui::BeginCombo(control, value ? on : off))
             {
                 for (int i = 0; i < 2; i++)
+                {
                     if (ImGui::Selectable(i ? on : off, value == i))
                         changed = recomp_settings_set(s->section, s->key, i) > 0;
+                    ui_target((std::string(s->section) + "." + s->key + (i ? ".on" : ".off")).c_str());
+                }
                 ImGui::EndCombo();
             }
         }
