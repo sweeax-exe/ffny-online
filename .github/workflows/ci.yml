@@ -181,7 +181,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: { python-version: "3.12" }
-      - run: pip install pyxbe capstone pytest
+      - run: pip install pyxbe capstone pytest cryptography==50.0.2 cffi==2.0.0 pycparser==2.23 Pillow==12.3.0
       - run: python -m pytest -q tests/unit
       - run: python -m py_compile scripts/verify-dump.py
 
@@ -199,11 +199,11 @@ jobs:
       # Build the exact published fork commit checked out by the gitlink.
       - uses: actions/setup-python@v5
         with: { python-version: "3.12" }
-      - run: python -m pip install pyxbe capstone pytest
+      - run: python -m pip install pyxbe capstone pytest cryptography==50.0.2 cffi==2.0.0 pycparser==2.23 Pillow==12.3.0
       - name: Native legacy-save compatibility (MSVC, synthetic data)
         run: python -m pytest -q tests/unit/test_save_compat.py
       - name: Input, startup and launcher fixtures (MSVC)
-        run: python -m pytest -q tests/unit/test_input_native.py tests/unit/test_skip_intro.py tests/unit/test_launcher_model.py tests/unit/test_launcher_actions.py
+        run: python -m pytest -q tests/unit/test_input_native.py tests/unit/test_skip_intro.py tests/unit/test_launcher_model.py tests/unit/test_launcher_actions.py tests/unit/test_mod_manager.py tests/unit/test_mod_bridge.py
       - name: Play-test recorder, bundle analysis and scenario controls (MSVC, synthetic data)
         run: |
           python -m pip install Pillow==12.3.0 numpy==2.5.2

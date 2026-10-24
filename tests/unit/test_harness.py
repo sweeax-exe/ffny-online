@@ -202,6 +202,17 @@ def test_save_guard_restores_userdata_caches_and_original_absence(tmp_path, monk
     assert guard.restored_equal and not (absent / 'save').exists()
 
 
+def test_save_copy_is_independent_and_falls_back_if_clone_is_unavailable(tmp_path, monkeypatch):
+    src, dst = tmp_path/'source', tmp_path/'copy'
+    src.write_bytes(b'original')
+    harness.copy_save_file(str(src), str(dst))
+    dst.write_bytes(b'modified')
+    assert src.read_bytes() == b'original'  # A hard link would corrupt the protected save.
+    monkeypatch.setattr(harness, '_clone_save_file', lambda *_: False)
+    harness.copy_save_file(str(src), str(dst))
+    assert dst.read_bytes() == b'original'
+
+
 def test_runs_unlock_everything_unless_told_otherwise():
     assert harness.unlock_default({})["RECOMP_UNLOCK_ALL"] == "1"
     assert harness.unlock_default({"RECOMP_UNLOCK_ALL": "0"})["RECOMP_UNLOCK_ALL"] == "0"

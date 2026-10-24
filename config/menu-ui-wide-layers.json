@@ -1,0 +1,1078 @@
+{
+  "schema": 1,
+  "name": "Menu UI HD widescreen v1",
+  "status": "Owner-approved artwork and separately recorded technical loading derivatives. Local RC2 native coverage is recorded in docs/research/menu-ui-separate-release-candidate-2026-10-20.md; transition/Mode/branding owner signoff and unvisited Story/Tips routes remain open.",
+  "policy": "Mode Select sides use the dark composite only: the lit wall is masked by the live spotlight inside 4:3, and an unmasked lit slab painted fully lit brick beside it. x0 and per are the anchor's settled title-pixel geometry measured with RECOMP_WS_WIDE_TRACE=1 at 16:9 (2026-10-19). sides limits slabs to the left (x<0) or right (x>640) of the 4:3 picture. Results papers are not scenery and get no slabs. Newstory/loading/Profile use source-preserving approved masters; trans/t1 uses separate left/right part anchors and follows native vertical pan. Bitmap9 stays Faithful-only and is not a side anchor. Fractional UV spans produce integer source-texel shifts per runtime manifest grammar.",
+  "anchor_packs": [
+    "menu-ui-restored-test-v1",
+    "menu-ui-mode-conditional-test-v1",
+    "faithful-hd-a512d2429f11-opacity"
+  ],
+  "stretch": [
+    {
+      "id": "1a53ef318fdf63cf301d7fcaa8819d4c2618f9a07c2786c740214ab2af82bf99",
+      "note": "Menu header/footer band (256x4 gradient stretched over the top or bottom rows of every menu)"
+    },
+    {
+      "id": "b07ee96286a48143528d33c9bed13eebe6965176968bb3e978affd05ad3895f4",
+      "note": "Unlock Rewards vignette (256x256 over 640x480)"
+    },
+    {
+      "id": "085f04fe47a8a24df8520e42fee8ea3c9ef1e1793e0c0e38ec8efe6249e40f6f",
+      "note": "Unlock Fighters/Venues vignette (256x256 over 640x480)"
+    },
+    {
+      "id": "d6a245737ba685f8d0bec38e1af419a9ca83c971fdb20908adf4ed3825264bd7",
+      "note": "High Scores vignette (256x256 over 640x480)"
+    },
+    {
+      "id": "aafcbda27c079ee04d33f9b0c61f825fe5e793742a9838765348c558828ee33b",
+      "note": "Options vignette (256x256 over 640x480)"
+    },
+    {
+      "id": "235e3e91254b2c595c739d756915bb5c83ca695cdc476574e966380f057df4a4",
+      "note": "Jukebox vignette (256x256 over 640x480)"
+    },
+    {
+      "id": "4807e175bb7531ea7d2cc928ef8ccce87f9e7f76bf584e678ecda270a8865c46",
+      "note": "Press Start vignette (256x256 stretched over 640x480): across the whole widescreen picture, so its dark edge sits at the outer edges, not at the 4:3 seams"
+    },
+    {
+      "id": "3a3391187097863fc346959ba1cc2a1982384f247290056c791b68ad87170ca1",
+      "note": "black 256x256 vignette from the corpus scan (clear centre, dark border); not yet seen in a test route"
+    },
+    {
+      "id": "4fc429207b104aa2c438101ca1e6a49c1c24782b82f7e02fb741357865ee5d65",
+      "note": "black 256x256 vignette from the corpus scan (clear centre, dark border); not yet seen in a test route"
+    },
+    {
+      "id": "6876026e604ff573e9ce74c22561a6b7e67cc7f3780d7337c59e877663a655c6",
+      "note": "black 256x256 vignette from the corpus scan (clear centre, dark border); not yet seen in a test route"
+    },
+    {
+      "id": "78cefa77b7fdbb4e6d494a17cc96f86ced1007735629e7b7e514ea161e091bd6",
+      "note": "black 256x256 vignette from the corpus scan (clear centre, dark border); not yet seen in a test route"
+    },
+    {
+      "id": "7d8236b1f08ffa2683c689aa067ff72f7c96ff7e815ca4da3d394869d45d9b13",
+      "note": "black 256x256 vignette from the corpus scan (clear centre, dark border); not yet seen in a test route"
+    },
+    {
+      "id": "823ec87f36ef3ae43a789d2b0d58c29c915c39c8e17a035ad77c984f5a086aac",
+      "note": "black 256x256 vignette from the corpus scan (clear centre, dark border); not yet seen in a test route"
+    },
+    {
+      "id": "b5c1ce87938f59233cf75d24542ebbc68cd915e77a500732374eac7c03f7f379",
+      "note": "Battle setup / fighter-select vignette (seen in game)"
+    },
+    {
+      "id": "ce67340b748a485d1f3640b9df654f413ecca172bc88752a14b0842c0a679576",
+      "note": "black 256x256 vignette from the corpus scan (clear centre, dark border); not yet seen in a test route"
+    },
+    {
+      "id": "dbfa81ef0caf7994ea8d2af2c703a4e2a5453c3f8a4113dcf4a2416472c1d99d",
+      "note": "black 256x256 vignette from the corpus scan (clear centre, dark border); not yet seen in a test route"
+    },
+    {
+      "id": "11b71080a3890bb179763083899791bd5ad7537e73a4f9d6f79a3c18979fae91",
+      "note": "matchLoa original fullstage vignette; preserve alpha/liveforeground; fullwidthgeometry required"
+    }
+  ],
+  "layers": [
+    {
+      "label": "title-sky",
+      "screen": "intMain/preStart",
+      "anchor": "627117d2e69e0a56279f40cadd4397ffcb32192b8c110d40e2c54052e26ae168",
+      "master": "seam-v3/title-skyline-wide-master-v3.png",
+      "per": 1.0,
+      "x0": 0.0,
+      "sides": "both",
+      "hint": [
+        1600,
+        0
+      ]
+    },
+    {
+      "label": "title-city",
+      "screen": "intMain/preStart",
+      "anchor": "fdc3666e5aec15824bd2cb3fb8598f2f7047980c696c494035d019e7036680ba",
+      "master": "batch2/title-middle-wide-draft.png",
+      "per": 1.0,
+      "x0": 0.0,
+      "sides": "both",
+      "hint": [
+        1600,
+        0
+      ]
+    },
+    {
+      "label": "title-tower",
+      "screen": "intMain/preStart",
+      "anchor": "427424b7b670739f1a493dff7e53725299f72c718c7680aca3314b76247ca5ad",
+      "master": "batch2/title-tower-wide-draft.png",
+      "per": 1.0,
+      "x0": 0.0,
+      "sides": "both",
+      "hint": [
+        1600,
+        0
+      ]
+    },
+    {
+      "label": "mode-dark-left",
+      "screen": "intMain/mainMenu",
+      "anchor": "5b657a938f0808856b46cea8d42ee2548da7a5c15597f4704a1dfdf1f5947c24",
+      "master": "batch2/mode-environment-wide-draft.png",
+      "per": 1.0,
+      "x0": -2.72,
+      "sides": "left",
+      "conditional": true,
+      "hint": [
+        1592,
+        0
+      ]
+    },
+    {
+      "label": "mode-surround-right",
+      "screen": "intMain/mainMenu",
+      "anchor": "d543121c2fd1cada431cf25345d9d8efa1f25a02992f19cf49b49fa66f15fee6",
+      "master": "batch2/mode-environment-wide-draft.png",
+      "per": 1.0,
+      "x0": 316.21,
+      "sides": "right",
+      "match_u": [
+        260,
+        320
+      ],
+      "u_range": [
+        0,
+        449
+      ],
+      "conditional": true,
+      "hint": [
+        3329,
+        0
+      ]
+    },
+    {
+      "label": "options-left",
+      "screen": "options/options",
+      "anchor": "1806fe21639ed68aa1647dcc4d5e78bad6b03cb0369df3c1c25bb4a9f7a732e5",
+      "master": "options-softness-v4/options-wide-v4.png",
+      "per": 1.0,
+      "x0": 0.0,
+      "sides": "left",
+      "hint": [
+        1600,
+        0
+      ]
+    },
+    {
+      "label": "options-right",
+      "screen": "options/options (also cribOptions)",
+      "anchor": "1c2de449c28536a5491ef5828f81d171544917f2238a18c8a1474ea8685edbae",
+      "master": "options-softness-v4/options-wide-v4.png",
+      "per": 1.0,
+      "x0": 469.42,
+      "sides": "right",
+      "match_u": [
+        108,
+        171
+      ],
+      "u_range": [
+        0,
+        171
+      ],
+      "hint": [
+        3332,
+        0
+      ]
+    },
+    {
+      "label": "jukebox",
+      "screen": "jukebox/beatbox",
+      "anchor": "cc11d92079b1a81132faae6e64053f82e397ba78f4e097be11d409fb8f9c5d64",
+      "master": "menus-seams-v2/jukebox-wide-v2.png",
+      "per": 1.0,
+      "x0": 0.0,
+      "sides": "both",
+      "hint": [
+        1600,
+        0
+      ]
+    },
+    {
+      "label": "battle-setup",
+      "screen": "battle/cmtype",
+      "anchor": "06830e776d6cc6bb56c52925f42cf6ca19c72444049477f1d594cfedac4d7edd",
+      "master": "battle-left-light-v5/cmtype-wide-v5.png",
+      "per": 1.0,
+      "x0": 0.0,
+      "sides": "both",
+      "hint": [
+        1600,
+        0
+      ]
+    },
+    {
+      "label": "fighters-2",
+      "screen": "battle/chooseF2",
+      "anchor": "c49727c8650aaf13bb5d1a0aee11b3fc466d607a657b77a35b86bda6b99aa9e7",
+      "master": "battle-v1/chooseF2-wide-draft.png",
+      "per": 1.0,
+      "x0": 0.0,
+      "sides": "both",
+      "hint": [
+        1600,
+        0
+      ]
+    },
+    {
+      "label": "fighters-3",
+      "screen": "battle/chooseF3",
+      "anchor": "d628474a2f54474db0057e938f1c6b6aeb89d6003da7d1c6c79f76410d3725f1",
+      "master": "battle-v1/chooseF3-wide-draft.png",
+      "per": 1.0,
+      "x0": 0.0,
+      "sides": "both",
+      "hint": [
+        1600,
+        0
+      ]
+    },
+    {
+      "label": "fighters-4",
+      "screen": "battle/chooseF4",
+      "anchor": "82ec4995c69b506a022b461def716702ac593e21887a8a6ce853a91ffcc80dfb",
+      "master": "battle-v1/chooseF4-wide-draft.png",
+      "per": 1.0,
+      "x0": 0.0,
+      "sides": "both",
+      "hint": [
+        1600,
+        0
+      ]
+    },
+    {
+      "label": "rewards-wall",
+      "screen": "battle/buyrewards, unlockchar, unlockven",
+      "anchor": "fc7e7ea76a80243a701f35d9bfdb914e93a85549224e1a0557c65897cb35a33c",
+      "master": "rewards-v1/rewards-shared-world-v1.png",
+      "per": 1.0,
+      "x0": -29.0,
+      "sides": "both",
+      "match_u": [
+        60,
+        500
+      ],
+      "inner": true,
+      "hint": [
+        1716,
+        0
+      ]
+    },
+    {
+      "label": "rewards-wall-right",
+      "screen": "battle/buyrewards, unlockchar, unlockven",
+      "anchor": "6cd17deca34561c5990503898d85bcb47ad9c20e40dca641eea8962e5378cca8",
+      "master": "rewards-v1/rewards-shared-world-v1.png",
+      "per": 1.0,
+      "x0": 482.04,
+      "sides": "none",
+      "match_u": [
+        0,
+        150
+      ],
+      "u_range": [
+        0,
+        188
+      ],
+      "inner": true,
+      "hint": [
+        3069,
+        0
+      ]
+    },
+    {
+      "label": "high-scores",
+      "screen": "hiScores/hiScores",
+      "anchor": "bc0317c0ade0f0b0f2cd60f9ebf56e9301aa61960cf4ee95643dcc7fc4261728",
+      "master": "hiscores-v1/hiscores-wide-v1.png",
+      "per": 1.0,
+      "x0": 0.0,
+      "sides": "both",
+      "hint": [
+        1600,
+        0
+      ]
+    },
+    {
+      "label": "new-choosGF2-left",
+      "screen": "choosGF2",
+      "anchor": "ba60f610a2911adafc27adaa9555c092751ac272c0ffbe2f65fb14ec7454af3d",
+      "master": "wide-backgrounds-v1-20261020/choosGF2-wide-v1.png",
+      "per": 1.0,
+      "x0": 0.0,
+      "sides": "left",
+      "u_range": [
+        0,
+        512
+      ],
+      "match_u": [
+        0,
+        512
+      ],
+      "hint": [
+        1600,
+        0
+      ],
+      "offset": [
+        1600,
+        0
+      ]
+    },
+    {
+      "label": "new-choosGF2-right",
+      "screen": "choosGF2",
+      "anchor": "bfb532b238b18aa0f3fe26cd486f4246756e2f24cdde428c7c9e929fbcda931b",
+      "master": "wide-backgrounds-v1-20261020/choosGF2-wide-v1.png",
+      "per": 1.0,
+      "x0": 512.03125,
+      "sides": "right",
+      "u_range": [
+        0.03125,
+        128
+      ],
+      "match_u": [
+        0.03125,
+        128
+      ],
+      "hint": [
+        3136,
+        0
+      ],
+      "offset": [
+        3136,
+        0
+      ]
+    },
+    {
+      "label": "new-choosGF4-right",
+      "screen": "choosGF4",
+      "anchor": "7d0ce1a845a682f0a59b787a9cc5d90b1e83955036b60edb160d1acb930840fd",
+      "master": "wide-backgrounds-v1-20261020/choosGF4-wide-v1.png",
+      "per": 1.0,
+      "x0": 128.046875,
+      "sides": "right",
+      "u_range": [
+        0.046875,
+        512
+      ],
+      "match_u": [
+        0.046875,
+        512
+      ],
+      "hint": [
+        1984,
+        0
+      ],
+      "offset": [
+        1984,
+        0
+      ]
+    },
+    {
+      "label": "new-choosGF4-left",
+      "screen": "choosGF4",
+      "anchor": "42290375eda4db531edda2434ab77796cffbdff6a8e487e2504095ef8814d271",
+      "master": "wide-backgrounds-v1-20261020/choosGF4-wide-v1.png",
+      "per": 1.0,
+      "x0": 0.0,
+      "sides": "left",
+      "u_range": [
+        0,
+        128
+      ],
+      "match_u": [
+        0,
+        128
+      ],
+      "hint": [
+        1600,
+        0
+      ],
+      "offset": [
+        1600,
+        0
+      ]
+    },
+    {
+      "label": "new-choosPart-left",
+      "screen": "choosPart",
+      "anchor": "85a965889ad5c66d51d2c6d5d23b8f4162c8366d7232a9202407848a41e06ab9",
+      "master": "wide-backgrounds-v1-20261020/choosPart-wide-v1.png",
+      "per": 1.0,
+      "x0": 0.0,
+      "sides": "left",
+      "u_range": [
+        0,
+        512
+      ],
+      "match_u": [
+        0,
+        512
+      ],
+      "hint": [
+        1600,
+        0
+      ],
+      "offset": [
+        1600,
+        0
+      ]
+    },
+    {
+      "label": "new-choosPart-right",
+      "screen": "choosPart",
+      "anchor": "f924c4842d081a7d37d4112e64c7ce634380d8a2b4c3f172c0087942920a2aee",
+      "master": "wide-backgrounds-v1-20261020/choosPart-wide-v1.png",
+      "per": 1.0,
+      "x0": 512.03125,
+      "sides": "right",
+      "u_range": [
+        0.03125,
+        128
+      ],
+      "match_u": [
+        0.03125,
+        128
+      ],
+      "hint": [
+        3136,
+        0
+      ],
+      "offset": [
+        3136,
+        0
+      ]
+    },
+    {
+      "label": "new-charDec-left",
+      "screen": "charDec",
+      "anchor": "e2cdef62ca33d5a1d862fab5bf352014cd309f48543968eaca81db7a264ea5a2",
+      "master": "wide-backgrounds-v1-20261020/charDec-wide-v1.png",
+      "per": 1.0,
+      "x0": 0.0,
+      "sides": "left",
+      "u_range": [
+        0,
+        512
+      ],
+      "match_u": [
+        0,
+        512
+      ],
+      "hint": [
+        1600,
+        0
+      ],
+      "offset": [
+        1600,
+        0
+      ]
+    },
+    {
+      "label": "new-charDec-right",
+      "screen": "charDec",
+      "anchor": "4e14616005475a5f6ef45e94be97372ac82b202b9cd9a33b2f2c057db47952a4",
+      "master": "wide-backgrounds-v1-20261020/charDec-wide-v1.png",
+      "per": 1.0,
+      "x0": 512.03125,
+      "sides": "right",
+      "u_range": [
+        0.03125,
+        128
+      ],
+      "match_u": [
+        0.03125,
+        128
+      ],
+      "hint": [
+        3136,
+        0
+      ],
+      "offset": [
+        3136,
+        0
+      ]
+    },
+    {
+      "label": "new-cribOptions-left",
+      "screen": "cribOptions",
+      "anchor": "54845d31b4d5e066855854800aeea697144c022dfa6d27082ed6256488d46ddc",
+      "master": "wide-backgrounds-v1-20261020/cribOptions-wide-v1.png",
+      "per": 1.0,
+      "x0": 0.0,
+      "sides": "left",
+      "u_range": [
+        0,
+        512
+      ],
+      "match_u": [
+        0,
+        512
+      ],
+      "hint": [
+        1600,
+        0
+      ],
+      "offset": [
+        1600,
+        0
+      ]
+    },
+    {
+      "label": "new-matchLoa-both",
+      "screen": "matchLoa",
+      "anchor": "7a5d6ce31c47aec8fdd9bbe11c9561a7d8cb833ded7058ab05cb229fad76d185",
+      "master": "wide-backgrounds-v1-20261020/matchLoa-wide-v1.png",
+      "per": 1.0,
+      "x0": 0.0,
+      "sides": "both",
+      "u_range": [
+        0,
+        640.0
+      ],
+      "match_u": [
+        0,
+        640.0
+      ],
+      "hint": [
+        1600,
+        0
+      ],
+      "offset": [
+        1600,
+        0
+      ]
+    },
+    {
+      "label": "new-tips-left",
+      "screen": "tips",
+      "anchor": "a021919997cc9a50b377c257f6afed472242e7281e3f9ba8ca691525bba8ea77",
+      "master": "wide-backgrounds-v1-20261020/tips-wide-v3.png",
+      "per": 1.0,
+      "x0": 0.0,
+      "sides": "left",
+      "u_range": [
+        0,
+        512
+      ],
+      "match_u": [
+        0,
+        512
+      ],
+      "hint": [
+        1600,
+        0
+      ],
+      "offset": [
+        1600,
+        0
+      ]
+    },
+    {
+      "label": "new-tips-right",
+      "screen": "tips",
+      "anchor": "cc76ce61906858b8da3d522063f4a8d2e3cce1de51d7375a4db519f110676afb",
+      "master": "wide-backgrounds-v1-20261020/tips-wide-v3.png",
+      "per": 1.0,
+      "x0": 512.03125,
+      "sides": "right",
+      "u_range": [
+        0.03125,
+        128
+      ],
+      "match_u": [
+        0.03125,
+        128
+      ],
+      "hint": [
+        3136,
+        0
+      ],
+      "offset": [
+        3136,
+        0
+      ]
+    },
+    {
+      "label": "profile-wall",
+      "screen": "options/userID",
+      "anchor": "8665c0c50a69a7c334ad5ce6cbe53b026a60eb7b15a45477f37096020dae0ecb",
+      "master": "popup-profile-v1-20261020/profile-wall-wide-v3.png",
+      "per": 1,
+      "x0": 0,
+      "sides": "both",
+      "u_range": [
+        0,
+        640
+      ],
+      "match_u": [
+        0,
+        640
+      ],
+      "hint": [
+        1600,
+        0
+      ],
+      "offset": [
+        1600,
+        0
+      ]
+    },
+    {
+      "label": "transition-8",
+      "screen": "trans/t1",
+      "anchor": "dd4feccde8c4fa9dee63636252e21bcfbb1cc2efd74d03ac6cc40f5d25c39c1d",
+      "master": "transition-v1-20261020/transition-wide-v4.png",
+      "per": 1,
+      "x0": 512,
+      "sides": "right",
+      "u_range": [
+        0,
+        129
+      ],
+      "match_u": [
+        0,
+        129
+      ],
+      "hint": [
+        3136,
+        0
+      ],
+      "offset": [
+        3136,
+        0
+      ],
+      "conditional": true
+    },
+    {
+      "label": "transition-10",
+      "screen": "trans/t1",
+      "anchor": "90c3ba5f36d98cb7f5f1d80d9f6f819fb9e32891aa0656f70fe296a96c37f253",
+      "master": "transition-v1-20261020/transition-wide-v4.png",
+      "per": 1,
+      "x0": 0,
+      "sides": "left",
+      "u_range": [
+        0,
+        512
+      ],
+      "match_u": [
+        0,
+        512
+      ],
+      "hint": [
+        1600,
+        1536
+      ],
+      "offset": [
+        1600,
+        1536
+      ],
+      "conditional": true
+    },
+    {
+      "label": "transition-7",
+      "screen": "trans/t1",
+      "anchor": "b870dce8d1fd054e368f16d7da07bfecc886f99478f1e169820ac2c76633061b",
+      "master": "transition-v1-20261020/transition-wide-v4.png",
+      "per": 1,
+      "x0": 512,
+      "sides": "right",
+      "u_range": [
+        0,
+        129
+      ],
+      "match_u": [
+        0,
+        129
+      ],
+      "hint": [
+        3136,
+        1536
+      ],
+      "offset": [
+        3136,
+        1536
+      ],
+      "conditional": true
+    },
+    {
+      "label": "transition-6",
+      "screen": "trans/t1",
+      "anchor": "0d9299ca3f85f11cc13a2d97119e20e113bb2a08572e039db217db6ca962cdd0",
+      "master": "transition-v1-20261020/transition-wide-v4.png",
+      "per": 1,
+      "x0": 0,
+      "sides": "left",
+      "u_range": [
+        0,
+        512
+      ],
+      "match_u": [
+        0,
+        512
+      ],
+      "hint": [
+        1600,
+        3072
+      ],
+      "offset": [
+        1600,
+        3072
+      ],
+      "conditional": true
+    },
+    {
+      "label": "transition-5",
+      "screen": "trans/t1",
+      "anchor": "0a57126a98406d93fafe2a54aecb34b00c3a71fa16d54d36c6cc02bf1a8e4920",
+      "master": "transition-v1-20261020/transition-wide-v4.png",
+      "per": 1,
+      "x0": 512,
+      "sides": "right",
+      "u_range": [
+        0,
+        129
+      ],
+      "match_u": [
+        0,
+        129
+      ],
+      "hint": [
+        3136,
+        3072
+      ],
+      "offset": [
+        3136,
+        3072
+      ],
+      "conditional": true
+    },
+    {
+      "label": "transition-4",
+      "screen": "trans/t1",
+      "anchor": "8327612c6a9f057fdea610860b7fb745b180543cd65c5978b157c83a439905cd",
+      "master": "transition-v1-20261020/transition-wide-v4.png",
+      "per": 1,
+      "x0": 0,
+      "sides": "left",
+      "u_range": [
+        0,
+        512
+      ],
+      "match_u": [
+        0,
+        512
+      ],
+      "hint": [
+        1600,
+        4608
+      ],
+      "offset": [
+        1600,
+        4608
+      ],
+      "conditional": true
+    },
+    {
+      "label": "transition-3",
+      "screen": "trans/t1",
+      "anchor": "a4a02a3f44246c4bbc64bd8835522d29ce62be177314ae0aba6995ed6e4bafd1",
+      "master": "transition-v1-20261020/transition-wide-v4.png",
+      "per": 1,
+      "x0": 512,
+      "sides": "right",
+      "u_range": [
+        0,
+        129
+      ],
+      "match_u": [
+        0,
+        129
+      ],
+      "hint": [
+        3136,
+        4608
+      ],
+      "offset": [
+        3136,
+        4608
+      ],
+      "conditional": true
+    },
+    {
+      "label": "transition-2",
+      "screen": "trans/t1",
+      "anchor": "8736c571e654cccc4f533a7677af8e59431b9b9529a86c2677def42f1b392d40",
+      "master": "transition-v1-20261020/transition-wide-v4.png",
+      "per": 1,
+      "x0": 0,
+      "sides": "left",
+      "u_range": [
+        0,
+        512
+      ],
+      "match_u": [
+        0,
+        512
+      ],
+      "hint": [
+        1600,
+        6144
+      ],
+      "offset": [
+        1600,
+        6144
+      ],
+      "conditional": true
+    },
+    {
+      "label": "transition-1",
+      "screen": "trans/t1",
+      "anchor": "2f7823f2ca852076d94d4eb35a6f58f54706083e1bb2aadd1ec25c83f906b59c",
+      "master": "transition-v1-20261020/transition-wide-v4.png",
+      "per": 1,
+      "x0": 512,
+      "sides": "right",
+      "u_range": [
+        0,
+        129
+      ],
+      "match_u": [
+        0,
+        129
+      ],
+      "hint": [
+        3136,
+        6144
+      ],
+      "offset": [
+        3136,
+        6144
+      ],
+      "conditional": true
+    },
+    {
+      "label": "loading-paper_1v1-left",
+      "screen": "match/0_bg/paper_1v1",
+      "anchor": "6625f23fd120b86adb03e00fd91805d8652dcaa8cfa342b8a70e198024898145",
+      "master": "loading-native-registration-v1/paper_1v1-wide-v1.png",
+      "per": 1,
+      "x0": 0.0,
+      "sides": "left",
+      "u_range": [
+        0,
+        512
+      ],
+      "match_u": [
+        0,
+        12
+      ],
+      "hint": [
+        1600,
+        0
+      ],
+      "offset": [
+        1600,
+        0
+      ],
+      "registration": "native dynamicloader identity; no portrait/text flattening"
+    },
+    {
+      "label": "loading-paper_1v1-right",
+      "screen": "match/0_bg/paper_1v1",
+      "anchor": "e35fc9487db642b2f97adc883a5f9f001a9eea99ac8ab4f30113282cc5e231c7",
+      "master": "loading-native-registration-v1/paper_1v1-wide-v1.png",
+      "per": 1,
+      "x0": 512.03125,
+      "sides": "right",
+      "u_range": [
+        0.03125,
+        128
+      ],
+      "match_u": [
+        116,
+        128
+      ],
+      "hint": [
+        3484,
+        0
+      ],
+      "offset": [
+        3136,
+        0
+      ],
+      "registration": "native dynamicloader identity; no portrait/text flattening"
+    },
+    {
+      "label": "loading-paper_ffa3-left",
+      "screen": "match/0_bg/paper_ffa3",
+      "anchor": "7d0865734c55ce835cc76348e0e87472ee82bbdd23acf1a801496b1e08a9bb40",
+      "master": "loading-native-registration-v1/paper_ffa3-wide-v1.png",
+      "per": 1,
+      "x0": 0.0,
+      "sides": "left",
+      "u_range": [
+        0,
+        512
+      ],
+      "match_u": [
+        0,
+        12
+      ],
+      "hint": [
+        1600,
+        0
+      ],
+      "offset": [
+        1600,
+        0
+      ],
+      "registration": "native dynamicloader identity; no portrait/text flattening"
+    },
+    {
+      "label": "loading-paper_ffa3-right",
+      "screen": "match/0_bg/paper_ffa3",
+      "anchor": "abf733482ce82943700c7b23fd35f4d17705b1dcef1caa64c4faca9d0b60605e",
+      "master": "loading-native-registration-v1/paper_ffa3-wide-v1.png",
+      "per": 1,
+      "x0": 512.03125,
+      "sides": "right",
+      "u_range": [
+        0.03125,
+        128
+      ],
+      "match_u": [
+        116,
+        128
+      ],
+      "hint": [
+        3484,
+        0
+      ],
+      "offset": [
+        3136,
+        0
+      ],
+      "registration": "native dynamicloader identity; no portrait/text flattening"
+    },
+    {
+      "label": "loading-paper_ffa4-left",
+      "screen": "match/0_bg/paper_ffa4",
+      "anchor": "bc5bf680bd2174a98d12944b3e77c419f9eef658e23628ad2aeac8e2956d5f45",
+      "master": "loading-native-registration-v1/paper_ffa4-wide-v1.png",
+      "per": 1,
+      "x0": 0.0,
+      "sides": "left",
+      "u_range": [
+        0,
+        512
+      ],
+      "match_u": [
+        0,
+        12
+      ],
+      "hint": [
+        1600,
+        0
+      ],
+      "offset": [
+        1600,
+        0
+      ],
+      "registration": "native dynamicloader identity; no portrait/text flattening"
+    },
+    {
+      "label": "loading-paper_ffa4-right",
+      "screen": "match/0_bg/paper_ffa4",
+      "anchor": "ade1b662e4d2e3e0c931dce2e003536431804e5e889114e7d20c3b2ed0b6edfb",
+      "master": "loading-native-registration-v1/paper_ffa4-wide-v1.png",
+      "per": 1,
+      "x0": 512.03125,
+      "sides": "right",
+      "u_range": [
+        0.03125,
+        128
+      ],
+      "match_u": [
+        116,
+        128
+      ],
+      "hint": [
+        3484,
+        0
+      ],
+      "offset": [
+        3136,
+        0
+      ],
+      "registration": "native dynamicloader identity; no portrait/text flattening"
+    },
+    {
+      "label": "loading-paper_team-left",
+      "screen": "match/0_bg/paper_team",
+      "anchor": "5fa7c5dd27f07bbd9501a7350364c8ca02e59ec374465d21c9a1d8480fdfdad8",
+      "master": "loading-native-registration-v1/paper_team-wide-v1.png",
+      "per": 1,
+      "x0": 0.0,
+      "sides": "left",
+      "u_range": [
+        0,
+        512
+      ],
+      "match_u": [
+        0,
+        12
+      ],
+      "hint": [
+        1600,
+        0
+      ],
+      "offset": [
+        1600,
+        0
+      ],
+      "registration": "native dynamicloader identity; no portrait/text flattening"
+    },
+    {
+      "label": "loading-paper_team-right",
+      "screen": "match/0_bg/paper_team",
+      "anchor": "bdd6aac6e45a1ef93f19941e4136b93965383646ec89fb2e47b0fe5e4d7bbe88",
+      "master": "loading-native-registration-v1/paper_team-wide-v1.png",
+      "per": 1,
+      "x0": 512.03125,
+      "sides": "right",
+      "u_range": [
+        0.03125,
+        128
+      ],
+      "match_u": [
+        116,
+        128
+      ],
+      "hint": [
+        3484,
+        0
+      ],
+      "offset": [
+        3136,
+        0
+      ],
+      "registration": "native dynamicloader identity; no portrait/text flattening"
+    }
+  ],
+  "stretch_policy": "Overlays listed here stretch across the widescreen picture only when drawn across the full 640-pixel width. The corpus scan (2026-10-19) found 19 vignette-shaped 256x256 textures; the 15 black ones are listed, the 4 grey ones (possible spotlight masks) are not."
+}

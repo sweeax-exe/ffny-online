@@ -33,7 +33,7 @@ remains in Interface. Display DPI and the existing text/control size setting sti
 |---|---|
 | Display | Fullscreen, window dimensions, picture shape, filter, VSync, render scale; widescreen HUD/cutscene/side-fill/FOV options; brightness, game brightness curve and vignette |
 | Controls | Players/devices and live stick/button feedback, rumble test, keyboard player, startup controller count/backend, dead zones, thresholds, rumble and pointer behavior; expand Gamepad button mapping or Keyboard and mouse bindings for Detect/Add/Clear/Default |
-| Mods | Local texture packs, enablement and priority; Earlier/Later changes precedence, with later selected packs winning; Refresh packs, Open Mods Folder, Memory and manual pack list |
+| Mods | Installed local/project packs, enablement and overlap winners; shared Load Order window; verified project catalogue downloads/updates, rollback and removal; Refresh local mods, Open Mods Folder, Memory and manual pack list |
 | Interface | Launcher skip, startup movies, overlay key/pad chord, text/control size |
 | Diagnostics | Recorder/capture/retention settings, texture authoring, save-affecting unlock tools and, in-game, Story scenes and EA's developer menu |
 | Maintenance | Data/save/mod/install/settings/play-log paths with Open and Copy path; setup selection, reset settings, version and licenses |
@@ -46,12 +46,29 @@ pane follows the focused or hovered setting. Existing INI names and saved values
 
 ### Texture packs
 
-Mods lists selected packs first, including missing selections, then other local folders. Inventory checks
-the `manifest.ini` header; the texture loader validates image entries. Unchecking removes a pack from
-the active list and keeps its files. Later enabled packs take priority. Changes and memory budgets apply
-at the next launch. Lists exceeding the existing 95-byte string payload limit are rejected with a message.
-Texture capture is in Diagnostics. Home's HD switch is unavailable until at least one selected local pack
-has a supported manifest, but an already enabled switch can always be turned off.
+Mods lists selected packs first, including missing selections, then other local folders. The origin badge
+distinguishes manually installed packs from catalogue-managed downloads. Refresh local mods finds new
+folders without enabling them. Unchecking keeps files. **Load Order...** shows all enabled local and
+project packs together: low priority at the top, high priority at the bottom. Earlier/Later moves a pack;
+the overlap readout names which final pack wins the same texture ID. Changes apply on the next launch.
+Place HD Widescreen Menus after optional Faithful HD components. The advanced pack-list field and
+`RECOMP_TEXTURE_PACKS` environment locks remain available; overly long lists are rejected visibly.
+
+The **Project catalogue** uses a separate Python helper for network operations. Refresh verifies the
+signed catalogue; Install and Update verify archive size/hash and layout, then switch complete pack
+folders with recoverable rollback. Installed updates retain the same stable folder and load order.
+Installation does not enable a pack. Updates are your choice. A missing/expired catalogue never blocks
+offline Play; expired metadata cannot authorize new installs. Incompatible or revoked versions cannot
+be newly installed. **Restore previous version** retains one intact managed version. Disable a mod
+before **Remove download**; local folders and edited managed files are never silently overwritten.
+
+Catalogue mutation is launcher-only. During a helper job Play is disabled; Cancel keeps the prior
+installation unless its short final commit has already completed. An OS-held lock also protects games
+started without the launcher. An interrupted commit is recovered before Play; if recovery cannot safely
+recognize files, it preserves them and offers Retry recovery. A saved skip-launcher preference is
+bypassed for recovery without changing the preference. Old installations without the helper keep local
+mod controls and Play. The signing catalogue is not publicly deployed yet; no public menu download is
+advertised by this source change. See [mod manager implementation](mod-manager.md).
 
 ### Folders, logs and setup
 

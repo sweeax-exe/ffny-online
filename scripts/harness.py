@@ -429,6 +429,28 @@ def trees_equal(a, b):
     return all(trees_equal(os.path.join(a, d), os.path.join(b, d)) for d in c.common_dirs)
 
 
+def _clone_save_file(src, dst):
+    """Try the macOS clonefile syscall; unsupported filesystems use the normal copy path."""
+    if sys.platform == 'darwin':
+        try:
+            import ctypes
+            clone = ctypes.CDLL(None).clonefile
+            clone.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_int]
+            clone.restype = ctypes.c_int
+            return clone(os.fsencode(src), os.fsencode(dst), 0) == 0
+        except (AttributeError, OSError):
+            pass
+    return False
+
+
+def copy_save_file(src, dst):
+    """Clone on macOS/APFS when available; preserve independent bytes and metadata elsewhere."""
+    if _clone_save_file(src, dst):
+        shutil.copystat(src, dst)
+        return dst
+    return shutil.copy2(src, dst)
+
+
 class SaveGuard:
     """Copy the save area aside, and put it back when the block ends.
 
@@ -455,7 +477,7 @@ class SaveGuard:
         self.copy = os.path.join(self.backup, 'payload')
         os.mkdir(self.copy)
         if self.existed:
-            shutil.copytree(self.src, self.copy, dirs_exist_ok=True)
+            shutil.copytree(self.src, self.copy, dirs_exist_ok=True, copy_function=copy_save_file)
         return self
 
     def __exit__(self, *exc):
@@ -467,7 +489,7 @@ class SaveGuard:
         snapshot = os.environ.get("DEFJAM_HARNESS_SNAPSHOT_SAVE")
         if snapshot and os.path.isdir(self.src):
             shutil.rmtree(snapshot, ignore_errors=True)
-            shutil.copytree(self.src, snapshot)
+            shutil.copytree(self.src, snapshot, copy_function=copy_save_file)
         for attempt in range(5):
             try:
                 if os.path.isdir(self.src):
@@ -475,7 +497,7 @@ class SaveGuard:
                 elif os.path.lexists(self.src):
                     os.remove(self.src)
                 if self.existed:
-                    shutil.copytree(self.copy, self.src)
+                    shutil.copytree(self.copy, self.src, copy_function=copy_save_file)
                 break
             except OSError:
                 time.sleep(1.0)
