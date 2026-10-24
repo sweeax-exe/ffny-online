@@ -116,6 +116,43 @@ byte-identical to `32aa980`'s; manual addresses 42/0. Full regression 14/14 agai
 in 16.5 min (30.5 on `32aa980`, disasm 155 s against 965), and the installed game reaches the main
 menu at median 60.
 
+## Linux / Steam Deck results (2026-10-23)
+
+Steam Deck (LCD, 90 Hz panel, SteamOS 3.8, RADV VANGOGH), branch `7350962`, pin `2b73d81`, built in the pinned
+Arch container (`localhost/defjam-dev`). The regression ran on SteamOS under `gamescope -W 1280 -H 800 -r 90`.
+The comparison build is `77714da` (toolkit `5445b73`, built 2026-10-18), run the same way. Raw logs are
+not committed.
+
+| Check | Result |
+|---|---|
+| Toolkit tests (`djpy`, container) | 848 passed, 1 skipped (`test_fpdiff`: needs 32-bit MSVC). `tools/fusion/test_lifter_diff.py` does not collect (no `pefile`), as in CI's scope |
+| Port unit tests (`-m "not slow"`, `--init`) | 502 passed, 38 skipped. Without `podman run --init`, `test_cancellation_stops_the_whole_process_tree` fails |
+| Native fixtures (11) | 11/11. `memory_layout_posix`, `kernel_memory_posix`, `kernel_path_posix` and `kernel_bridge` need `-DXBOXRECOMP_SDL3=ON` in the Deck image (no SDL2 there; CI's Ubuntu job has it). The handover command omits it |
+| Analyze / recomp / build `posix-release` | Analyze **4 min 10 s** (`--no-archive`), recomp 2 min 18 s, build 1 min 50 s. No SDL2 symbol, `ldd -r` clean on SteamOS |
+| `check-manual-addresses.py` | 42 checked, 0 missing |
+| Regression, per check (see below) | unit, m2, m3, m4a, launcher, overlay, fight, ffa, fight-terrordome, ffa-terrordome, combat 27/27, versus 26/26, two-matches 35/35, intro, crib, gym, soak 3/3: **ok**. `ffa-result`, `replay`: below. `unlockopt`, `picture`, `skipintro`, `repeat`: gamescope, below. `visual`: blocked (no baselines on this Deck) |
+| Saves | crib and gym load the existing profile; `save/` has no `UDATA`/`TDATA`; the fresh Setup install creates `UserData`/`TitleData` |
+| Missing functions | No `[ICALL] Failed to resolve` in 35 run logs |
+| HRTF | `RECOMP_APU_HRTF` unset in the shell; no HRTF line in any log |
+| Setup (CI run 40035905816, SHA-256 checked, provenance toolkit `2b73d81`) | Silent install into a new folder (`--no-shortcuts --toolchain container`): exit 0 in **7 min 56 s**. The installed game runs 3,177 frames with no crash. Not run: Game Mode launch, pad and rumble, launcher rebinding (need a person) |
+
+**Not a regression of the migration (the baseline does the same on the Deck):**
+- `unlockopt` / `picture`: the launcher click on a checkbox does not reach `settings.ini` under gamescope. `unlockopt` gives the same result on `77714da`.
+- `skipintro` / `repeat`: gamescope itself aborts (SIGABRT, "X connection broken") on the second game launch, on both builds. The game then dies in `exit()` while `nv2a_ack_thread` still runs (a shutdown race that follows the X IO error). `repeat` is therefore not answered here, and neither is whether the Deck's replay record count is stable.
+- `replay`: fails the Mac golden on both builds: migrated 87 records, `77714da` 84 (golden 80). Replay is not a Deck-valid golden; compare within the Deck only.
+
+**Needs a decision:** `ffa-result` (4-fighter free for all). Migrated: 1 pass, 2 fail on `combat.eliminations` in 3 runs (fighter 1 put out, two fighters alive at the end, codes 32, 32, 33 instead of 32, 32, 9). `77714da`: 1 run, failed on `audio.dry_queue` only (issue #11). The failing assertion differs from the baseline's, but 1 run of the baseline says little about the rate. Not run: more baseline repeats.
+
+**Audio (opening scene, 330 s, `scripts/audio-holes.py`):**
+
+| Build | F8 | FA |
+|---|---|---|
+| migrated | 20 / 24 (0.06-0.07/s) | 0 / 0 |
+| `77714da` | 43 / 57 (0.13-0.17/s) | 0 / 0 |
+
+The Deck does not show the Windows crackle: the migrated build has fewer holes than the old one, and both are far below
+Windows' bad runs (F8 187-421). Run with nothing else playing audio; I did not log the minutes of the holes.
+
 **Two alias seeds have no effect.** `0x001F707B` and `0x001FF9B7` are in v0.10.7's dispatch table and
 missing from this lift although `config/seed_functions.json` seeds them. Each sits right after the end of a
 real function, in bytes only tail-jump alias bodies cover (`0x001F705D`, `0x001FF995`), and
