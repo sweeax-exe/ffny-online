@@ -63,8 +63,8 @@
 | Picture options and setup progress fix (D136-D138; issues #40, #44, #47) | ✅ released v0.10.3 (latest, 2026-10-19) | PR #54 (setup progress-file contention, WinError 5) merged `c37bf34`; PR #55 (`[display] brightness`, `vignette`, `vignette_strength`, launcher/overlay Display → Picture, live; `docs/research/picture-options.md`) merged `1b04982`. Beta pre-release, owner's Deck play-test: brightness and vignette "work perfectly"; promoted to latest (D138). Windows not play-tested. Subtitles (#44) not started. |
 | Mac setup quarantine fix (D139; issue #59) | ✅ released v0.10.4 (latest, 2026-10-19) | PR #60 merged `1d4e13d`: the macOS setup unpacks its digest-checked payload with `ditto --noqtn` plus `xattr -d -r com.apple.quarantine`, so a browser-downloaded setup no longer stops on *"python3" Not Opened*. Owner confirmed with a quarantined test DMG. Tag `v0.10.4` on release PR #63 merge `110d50e`; game and toolkit identical to v0.10.3. |
 | Issue #72 / Windows startup crash | ⏳ reporter setup retry needed; PRs open | Correct patched candidate9e4f805/e818066 opened, but Clean Rebuild refused different installed version; old supplied log shows0.10.1/default location versus original0.10.5 elsewhere. Clarification6316443011: Clean Update + Bundled offline for0.10.1, or select original0.10.5 app/data and rebuild. Runtime not retested; no new runtime fix/artifact indicated. PR76/forkPR3 remain unmerged. Test-only toolkit8589f88 fixes Ubuntu fixture libm link; parent integration CI rerun pending. Setup policy tests72pass/1skip. |
-| Menu/UI restoration | ✅ RC2 uploaded and verified on R2 / ⏳ native acceptance | D182–D184/UI: independent157native/164slab menu override,421.6MBZIP/423.4MBinstalled; Faithful optional/unbundled. Loading5aspects+FFA4, menu-only,3mainmenus andStorycharDec native pass. Transition inherited black first-tile rectangle under investigation; Story fixtures/owner native signoff remain. |
-| Launcher mod catalogue | ✅ integrated PR91/CI29 + actual hosted launcher/Play / ⏳ Windows acceptance | D193/UI: combined current-main0.10.8 candidate with testing-channel UI, native helper/shared order and wide loader. CI29/29 and verified game-free Windows artifact pass. Owner approved protected publish39996850444; live revision1 signature verifies. Native real R2 download/install/enable/order/offline reopen pass with Faithful first; actual Play at32:9 passes without pack/root overrides, save equality. Separate menu pack, no manual extraction. |
+| Menu/UI restoration | ✅ Windows five-aspect/eight-Mode inspection / ⏳ visual acceptance | RC2 managed157overrides/45wide/17stretch. Title/settled main menu4:3 through32:9, Options/Beatbox/pre-fight inspected; all8Mode spotlights/emblems render. Inherited fire-escape rectangle reproduces even without packs: same-frame trace proves upper-left scene-coverage gap. Reference geometry/fix and owner branding/late-Story/three-player signoff remain. |
+| Launcher mod catalogue | ✅ Windows packaged flow verified / ⏳ fixes local | D194: bundled helper import + transient progress rename failures fixed2bbe9df; clean setup7ed7f66 offline rebuild/real catalogue/install/order/offline Play/Win32 overlay pass.600units/26skip;326pack files intact. Corrected setup267f67c1; PR91 draft, no push/release. |
 
 ## 1. Decisions log
 
@@ -325,9 +325,12 @@ D138–D140 were allocated independently on main and the launcher branch. Their 
 
 | D193/UI | 2026-10-23 | Vlad authorizes combining PR17/62/73/82 into one integrated launcher/menu RC candidate PR, tested locally and prepared for Windows acceptance; no manual mod extraction. | Start from current main dcd0df0, preserve toolkit8589f88 startup fixes while combining dd63e17 wide+long settings, integrate manager, add explicit testing-channel UI and fix Windows lock failure. Candidate setup version0.10.8 is untagged. PR91/0279950 and toolkitbd8c633 published; CI29/29 passes, verified Windows installer. Owner approved protected catalogue publication39996850444; actual client verifies live revision1. Native real hosted refresh/install/enable/order/offline reopen pass; actual Play at32:9 passes, save equality. Windows game acceptance remains. Catalogue RC2 metadata merged with verified-source CI, first reviewed publication requires protected owner approval; bootstrap still refuses existing signed history. Full native regression and real hosted launcher install precede readiness claim. |
 
+| D194 | 2026-10-23 | Vlad authorizes full Windows PR91 setup/testing and fixing discovered issues. Keep isolated RC app/data and public-lineage worktree; retain draft status until visual gates are resolved. | Fix packaged Python sibling import and transient MoveFileEx progress locks (bounded retries only5/32/33,0.9s); add real embedded-helper smoke, cp1252/symlink test portability and deterministic locked-reader regression. Corrected clean setup7ed7f66 verified,600units/26skip,13applicable native checks satisfied across full run + corrected m2 retry; four SDL/Vulkan skips remain explicit. Actual hosted install/order/offline Play and Win32 overlay pass; original23files unchanged. Fire-escape defect is an uncovered scene region in same-frame f1358, persists with no packs/sync/no-depth: no speculative tile/art workaround retained. Full report docs/research/windows-integrated-menu-mods-rc-2026-10-23.md. Local commits only; no push/merge/tag/release. |
+
 ## 2. Environment inventory (2026-09-17)
 
-- Current test host (2026-10-17): macOS26.5.2 arm64, Apple Clang21.0.0, CMake4.4.4, Ninja and Python3.14.6 through `uv`. Build `posix-release`; data via the existing `game` symlink. Startup-skip tests use only disposable roots under `logs/startup-skip/`. Original Windows inventory below is retained for that machine.
+- Current Windows RC test host (2026-10-23): Windows11Pro10.0.26200, RTX4070TiSUPER/driver32.0.16.1088; VS2019/MSVC14.29, CMake3.20/Ninja1.10.2. D3D11 `win-x64-release`; isolated app/data and copied harness saves under C:/Users/Vlad/code/defjam-pr91-windows. No original user saves/settings changed. Normal Windows process/compiler access required outside the restricted execution sandbox; no OS security settings changed.
+- Previous Mac test host (2026-10-17): macOS26.5.2 arm64, Apple Clang21.0.0, CMake4.4.4, Ninja and Python3.14.6 through `uv`. Build `posix-release`; data via the existing `game` symlink. Startup-skip tests use only disposable roots under `logs/startup-skip/`. Original Windows inventory below is retained for that machine.
 - OS: Windows 11 Pro 10.0.26200
 - Compilers: MSVC 14.29.30133 (x64 + x86 host), no clang/gcc on PATH
 - CMake 3.20 + Ninja bundled with VS 2019 Build Tools (not on PATH; use `scripts/env.ps1`)
@@ -410,11 +413,11 @@ defjam-recomp/
 
 **2026-10-23 — Integrated menu/launcher RC (D193/UI).** Owner approved protected catalogue-release deployment; both verify/publish jobs succeeded and live revision1 verifies against the unchanged client public key. Real native launcher refresh/download/install/enable/order/offline reopen pass from a fresh disposable data root with Faithful before the managed menu pack. Actual native Play from managed settings passes at32:9 with no pack/root overrides,45anchors/17stretch and73side batches; all326installed file hashes match, saves unchanged. The verified game-free Windows candidate is ready for owner acceptance. No further Cloudflare upload/credential/deployment action is needed. PR17/62/73/82 are closed as superseded by PR91, with no game merge/tag.
 
+**2026-10-23 — Windows RC follow-up (D194).** Windows packaged manager failures fixed and clean setup verified locally. Catalogue/download/install/enable/order/offline reopening/Play and native overlay pass. Five aspect ratios and all8Mode states inspected. The inherited fire-escape coverage gap remains unresolved; final visual acceptance, branding and deferred late-Story/three-player consumers are still open. See the Windows report; no new Cloudflare action or credentials are needed.
+
 ## 6. Work log
 
 > Recent entries only; older entries remain unchanged in the local `docs/worklog/` archive.
-
-- 2026-10-21 12:00 — Discord report (reporter K11): Windows setup build fails at the final link, `defjam_recomp.rc.res : fatal error LNK1000: Internal error during IncrCalcPtrs`, access violation C0000005, setup exit 4. Cause found by reading the build config: the setup's preset is RelWithDebInfo, which CMake links with `/debug /INCREMENTAL` (confirmed in CMake's Windows-MSVC.cmake), and `link.exe`'s incremental code can crash on an image this large; the `.rc.res` is only the last link input. Fix on branch fix/msvc-link-incremental-off: `/INCREMENTAL:NO` in the MSVC link options, plus a known-issues entry with a workaround command. Not built or run on Windows here (macOS host); not yet confirmed with the reporter, whose setup log and Visual Studio version were requested.
 
 - 2026-10-20 20:22 — Owner requested a submitted PR and explicitly deferred release until reporter confirmation. Opened fork toolkit PR #3 targeting defjam/audio-fix (not upstream). Submitted parent PR #76, focused integration on current main7bb4bdf: published e818066 pin, permanent Windows/POSIX placement fixture CI, issue72 research/state only; original Windows candidate9e4f805/artifact unchanged. Windows candidate checks passed; integration PR CI will validate current-main combination. Branch-labelled concurrent D143/D144 decisions retained, beta handoff preserved. No merge/tag/release.
 - 2026-10-21 08:53 — Issue72 new reporter logs diagnosed as setup version mismatch, not new runtime crash: correct candidate9e4f805/e818066 stops at policy before rebuilding (5-line attachment51061AB7); older attachment2778FFCD is successful0.10.1 in default AppData, original0.10.5 was elsewhere. Posted clarification6316443011: Clean Update + bundled offline for selected0.10.1, or original0.10.5 folders + rebuild; no uninstall/new artifact needed. Policy checks reproduce refusal/update success; existing tests72pass/1skip. Separate PR76 Ubuntu standalone fixture link missing libm/feclearexcept fixed in published test-only toolkit8589f88; Mac fixture passes with shared-memory access. Integration pin/CI updated; runtime unchanged; PRs unmerged/release hold persists. Evidence logs/issue72/followup-20261021/.
@@ -423,65 +426,51 @@ defjam-recomp/
 - 2026-10-23 10:49 — D193/UI: owner authorizes combined PR17/62/73/82 RC. Assembled source on current main dcd0df0; isolated toolkit8589f88+dd63e17 merge clean (wide+long settings+startup). Native build0.10.8 succeeds with wide capability, focused38tests pass, fast589pass/32skip/1deselected unrestricted, texture3/3/settings1/1 fixtures pass. Windows empty-lock sentinel write removed; native testing-channel checkbox/helper opt-in added; macOS DMG sizing headroom added pending CI. Exact realRC2 catalogue parser validates157IDs. Catalogue PR1 merged d1f8e79 with RC2 metadata, Pages configured, publish39996850444 validation/archive/malware scan passes; protected signing waits for owner approval (asked asynchronously). Full serial native regression running against preserved disposable fixture, hosted UI test utility prepared. No art/gameexe/secret publication, ordinary save/settings edits or game-PR merge.
 - 2026-10-23 11:39 — D193/UI: combined game candidate0279950 pushed, draftPR91 attached/conflict-free; published toolkitbd8c633 retains latest startup+wide+1023-byte settings. CI40003181247 passes29/29, Windows lock and macOS image fixed. Windows game-free artifact12521984699 downloaded,58819072B exe SHA8fbc03aee2a762c801c32f8dac299ac2bd92ebfb992992517a64c7bafc3a8212, provenance merge dd173611 parentsmain/candidate and toolkitpin verified;208exact+367CRLF source matches. Full native15/18 in44min (regress-20261023-112317.txt): historical stream callback in versus, duplicate-name intro fixture and wrong gym shop retained/triaged; fresh intro157s passes. Four native manager tours, all five exact-aspect menu captures and32:9 pre-fight loading with Faithful pass, save equality. Initial short ultrawide enum fallbacks excluded, exact-label reruns dimension-checked. Catalogue publish39996850444 archive/malware checks pass, owner protected approval still waiting; actual signed hosted native install/play not yet possible, no Windows-ready claim. No art/ordinary saves/gameexe/secret publication.
 - 2026-10-23 14:23 — D193/UI: owner approved protected catalogue deployment39996850444; verify/publish SUCCESS, real signed revision1 verifies (expiry2026-11-22). Native fresh-root production launcher refresh/testingRC2/download421563157B/install/enable/shared order after Faithful/offline reopen all PASS, four exit0/save-equal;326installed hashes match, UI157overrides. Actual native UI Play from managed settings without root/pack overrides PASS32:9/1707x480,45anchors+17stretch/73side batches, no runtime faults, save equality, capture inspected (run-20261023-142158; hosted-menu-launcher-20261023-141908 receipts). PR91 Windows RC ready using verified artifact12521984699; prior17/62/73/82 closed superseded. Full15/18 baseline/known visual gates retained, no stable game merge/tag/art/exe/secret publication. No additional Cloudflare manual action needed.
+- 2026-10-23 19:44 — D194 Windows PR91 pass completed: fixed embedded Python import and transient progress-file rename failures2bbe9df; cp1252/symlink portability7ed7f66; lock regression863ea98.600units/26skip/1deselected, native helper6/6, texture/settings1/1each. Clean setup267f67c1 packaged offline rebuild exit0 with337files preserved; actual signed RC2 install/order/offline reopen/failed refresh/Play/F1Mods overlay pass. Full native12/13+4skip retained; m2 fixture corrected and retry1/1pass =>13applicable checks satisfied, combat27/27versus26/26/replay80records exact. Five aspects/eight Mode states inspected; same-frame fire-escape f1358 proves uncovered upper-left scene region, survives no-pack/sync/no-depth controls, remains open pending reference geometry. Original23save/settings files unchanged;326pack files intact. Report docs/research/windows-integrated-menu-mods-rc-2026-10-23.md. Local commits only, PR91draft, no push/merge/release.
 
 ## 7. Hand-off
 
-### PR91 integrated RC ready for Windows acceptance — 2026-10-23
+### Windows PR91 verification completed — visual gate remains open
 
-1. Public draft https://github.com/vyanhursky/DefJamFFNY-recomp/pull/91 combines
-   PR17/62/73/82 on main dcd0df0; old four PRs closed as superseded, no branch
-   deletion or game merge/tag. Branch codex/integrated-menu-mods-rc, code0279950,
-   docs followups only. Read docs/research/integrated-menu-launcher-rc-2026-10-23.md.
-   CMake version0.10.8 untagged; toolkitbd8c6336c268cf15783b480fce6869eb11d74ec0
-   published on vyanhursky/xboxrecomp defjam/integrated-menu-mods-rc, active clean.
-   Includes current8589f88 startup checks + dd63e17 wide/1023-byte settings.
-2. Owner approved protected catalogue-release deployment39996850444; verify and
-   publish SUCCESS. Live https://vyanhursky.github.io/DefJamFFNY-mods/index.json
-   and .sig verify with actual client pin, revision1, expiry2026-11-22T17:46:17Z.
-   Catalogue main d1f8e79/PR1 merged, local logs/mod-catalogue-foundation clean.
-   Republish/owner approve before expiry for new downloads; installed/offline
-   play unaffected. No upload/credential/deployment action remains for this RC.
-   Never read/print private backup <data>/private-signing/mod-catalogue/.
-3. Actual native hosted flow PASS, new disposable root:
-   logs/hosted-menu-launcher-20261023-141908/data. Reusable utility
-   scripts/test-hosted-menu-launcher.py: trusted refresh -> testing RC2 -> R2
-   download/install -> enable -> shared order after both Faithful -> offline
-   reopen. All four exit0/save-equal. receipt.json and installed-hash-receipt.json
-   in parent folder;326installed hashes match, native UI shows157overrides.
-   Actual Play from managed settings (no root/pack overrides) passes32:9,
-   1707x480,45anchors/17stretch/73side batches, faultsnone/save-equal.
-   logs/run-20261023-142158.log.err; parent play-receipt.json/captures inspected.
-   One-off check logs/integrated-hosted-play-check.py. No ordinary saves touched.
-4. Windows game-free artifact12521984699 from successful CI40003181247:
-   https://github.com/vyanhursky/DefJamFFNY-recomp/actions/runs/40003181247/artifacts/12521984699
-   DefJamSetup-0.10.8-windows-x64.exe,58819072B,
-   SHA2568fbc03aee2a762c801c32f8dac299ac2bd92ebfb992992517a64c7bafc3a8212.
-   Provenance CI merge dd173611 parents main/candidate, exact toolkitpin and
-   575source files verified (208exact/367Windows CRLF); private receipt
-   logs/integrated-rc-windows-verified.json and logs/integrated-rc-windows-assets/.
-   CI29/29 passes on implementation and docs-followup runs.
-5. Owner Windows test NEXT: download setup artifact, choose Bundled release
-   (offline), use separate install/data directories and own dump. Current stable
-   v0.10.7 lacks wide loader. Faithful optional/separate. Mods -> Refresh catalogue
-   -> Show testing versions -> HD Widescreen Menus1.0.0-rc2 -> Download/install ->
-   enable HD textures + menu pack -> Load Order after enabled Faithful -> Play.
-   Restart/offline persistence;4:3 and wide, title/fireescape/Main Menu, Options,
-   Jukebox/Battle/pre-fight loading. No manual texture extraction. Keep PR91 draft
-   until acceptance, do not merge/tag/release without owner direction.
-6. Full native15/18 in44min, logs/regress-20261023-112317.txt: historical stream
-   callback0x001E3C14 versus (run110256), copied-fixture duplicate intro name
-   (110952), wrong gym clothing route (111624) retained/triaged. Fresh intro157s
-   passes (regress112708). Four synthetic manager tours pass;589fast units pass,
-   texture3/3/settings1/1, all-platform CI29/29. All five native-aspect menus and
-   actual32:9 loading with Faithful pass, logs/integrated-rc-wide/receipts.json.
-   Rejected short ultrawide enum fallback attempts kept/excluded; use exact
-   "21:9 (experimental)" / "32:9 (experimental)" in scripted envs. No need rerun
-   full regression for docs-only changes. Game runs serial, check processes first.
-7. Preserve approved art logs/ui-restoration-20261017/pilot-v1/review51738; no new
-   artwork. Separate RC2 R2 URL/hash in report and upload receipt
-   logs/menu-ui-r2-20261023/upload-receipt.json;421563157B ZIP,423392524B installed,
-   326files/157native/164slabs/62wide. SHA43bbb22cd14197091143623551f350a0b7ff622f0efccb1da058f491e7157634.
-   Faithful unbundled; manager cache+install about845MB before backups.
-   All670pins/149reviewedIDs retained,19detail/shop drafts held. Inherited
-   transition first-left black tile, Mode lighting/branding/lateStory/Tips/3player/
-   team gates stay visible for owner testing, not new restoration authorizations.
+- Start with docs/research/windows-integrated-menu-mods-rc-2026-10-23.md. Work root
+  C:/Users/Vlad/code/defjam-pr91-windows; source/ branch codex/pr91-windows-validation,
+  base66002541. Local fixes2bbe9df/7ed7f66/test863ea98; toolkitbd8c633 clean/unchanged.
+  PR91 remains draft. No push, merge, tag, release or catalogue action performed.
+- Actual app/DefJamLauncher.exe uses isolated data/. app/installed.json resolves
+  source7ed7f66, attempt-b5aafd0d. Both Faithful81ddfce230ca components enabled,
+  managed menu-ui-hd-wide1.0.0-rc2 last. Offline proxy reopening + failed refresh
+  retain verified revision1/installed RC2/order. Actual Play and F1Mods overlay pass.
+  Missing checked faithful-hd placeholder retained after automatic review rejected
+  clearing it; harmless manifest warning, real components load. Do not bypass review.
+- Corrected game-free setup source/build/setup-assets/DefJamSetup-0.10.8-windows-x64.exe:
+  SHA267f67c1c190da312d38437f91bc05aee6b3c3ce7eb34ea0b3b5dda60fad5e39,
+  clean source7ed7f66/development=false/toolkitbd8c633. Embedded helper + UI smoke pass;
+  packaged offline rebuild exit0;337RC files identical across rebuild. Original CI
+  artifact8fbc03ae had helper import + progress replacement failures and is superseded
+  locally by this corrected installer. Test-only863ea98 does not change its code.
+- Validation:600unit passes/26skip/1slow deselected (../units-complete.log);
+  helper/locked-reader6/6; native texture1/1 and settings1/1 fixtures. Full Windows
+  run12/13pass +4explicit SDL/Vulkan skips (../logs/full-windows-regression.log);
+  initial m2 lacked intentionally unshipped tests/golden, corrected m2retry1/1pass
+  on rebuilt install. All13applicable gameplay checks satisfied across those runs;
+  retain original nonzero result. Combat27/27, versus26/26, replay80records exact,
+  intro/crib/gym/3boot soak pass. Mac15/18 historical failures remain documented.
+- Matrix9rows: title/pan/mainmenu4:3,16:10,16:9,21:9,32:9; Options/Beatbox/pre-fight
+  at32:9; no runtime faults, save guards equal. Captures inspected. Corrected Mode
+  route run20261023-193254 covers all8states (Story/Battle/Unlock/Extras/Beatbox/
+  Options/HighScores/Credits), spotlight/emblem changes correct. Receipts outside
+  source in ../logs/wide-matrix/receipts.json and transition-controls.json.
+- Remaining fire-escape defect is established coverage gap, not fixed. It survives
+  no packs, sync, no-depth and force-alpha controls. Fixed-flip run20261023-193721
+  in installed source logs: f1358 left tile82813880 startsy216.1(line7909), matching
+  black region's bottom in0.601sBMP; no color draw above it after clear. Bitmap9
+  sibling x512..1024/UV1..2 remains the lead. Compare console/reference top-left512
+  region and bitmap9transform before choosing guest/renderer geometry fix. Do not
+  retain diagnostic bypasses or paint a cover. Any runtime fix needs full regress.
+  Owner final branding/side-border and deferred late-Story/three-player gates remain.
+- Original user C:/Users/Vlad/code/defjam settings/save:23files byte-identical,
+  ../logs/original-user-data-verification.json. Final pack integrity326files,
+  all325listed content hashes match; files.json itself protected by rebuild inventory.
+  Final game closed. Captures/game bytes/generated code/logs remain untracked/local.
+  Ordinary installation, source preview/private checkouts and Faithful originals
+  preserved. Use separate RC roots for further runs, always one game at a time.

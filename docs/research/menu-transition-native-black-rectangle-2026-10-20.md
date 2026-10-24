@@ -45,3 +45,21 @@ Keep the existing route's pad script, anchor, and capture setup from the RC2 rec
 The no-replacement (`RECOMP_TEXTURE_PACKS=`) 16:9 control also captures the first-left-tile black rectangle; see `logs/menu-ui-v1-rc/menu-rc2-pan-16x9-original-receipt.json`. The synchronous Faithful control (`RECOMP_TEXTURE_SYNC=1`) captures a complete staircase at0.65s; see `menu-rc2-pan-sync-16x9-baseline-receipt.json`. That is useful evidence, but not yet causal proof of asynchronous loading: the timed shots are wall-clock-relative to the screen call, while synchronous decoding can shift which animation phase is actually presented. Compare source tile identity/position at the black region before claiming a timing fix. Both controls completed with restored save guards and no runtime fault signatures. Neither requires changing the approved artwork.
 
 The app shutdown interrupted the Options tour (`run-20261020-220927.log.err`) before its guard completed. The retained pre-run payload was restored byte-identically in the isolated data root after preserving the interrupted state separately. Receipt: `logs/menu-ui-v1-rc/interruption-recovery.json`. This is not a game hang or a passed tour. The ordinary user save root was unchanged.
+
+## Windows follow-up — 2026-10-23
+
+The [Windows RC verification](windows-integrated-menu-mods-rc-2026-10-23.md)
+reproduces the rectangle with no packs, normal managed packs, synchronous loads,
+depth testing disabled and forced alpha-blend diagnostic state. Fixed consecutive
+flip dumps resolve the earlier capture/dump mismatch: in f1358, the left tile
+starts at y216.1, exactly where the corresponding capture's black region ends.
+After the color clear, no color-writing draw covers x0..512,y0..216. Full-screen
+passes there have color writes disabled, and the later clear is depth-only.
+Thus source alpha of the leading tile and later color overdraw do not explain
+this frame: it has a scene-coverage gap above that tile.
+
+The bitmap9 placement noted in the mapping report remains a useful next lead.
+This does not establish the intended console geometry or which guest/runtime
+operation caused the gap. No renderer bypass, hardcoded tile move or artwork
+cover is retained; the defect remains open. Exact Windows log lines and local
+receipts are listed in the verification report.

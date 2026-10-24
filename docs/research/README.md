@@ -139,6 +139,8 @@ The plan built from these is in [docs/widescreen](../widescreen/README.md), whic
 
 ## Menu/UI artwork restoration and modpack handover
 
+- [Windows integrated menu/mods RC verification](windows-integrated-menu-mods-rc-2026-10-23.md) — packaged helper fixes, offline install/rebuild,600unit passes, native gameplay/menu results and the remaining transition coverage gap.
+
 - [Full menu image browser and widescreen focus](menu-inventory-browser-2026-10-20.md) — owner stops routine panel generation;1323/1834gallery and sourcecounts.
 - [Remaining Menu/UI census](menu-ui-remaining-census-2026-10-20.md) — scoped coverage/pending/untouched totals.
 - [Widescreen background gaps](menu-widescreen-background-gaps-2026-10-20.md) — ten unreviewed tiles in five candidate groups, native usage unverified.
