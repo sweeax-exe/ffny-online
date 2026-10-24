@@ -106,3 +106,15 @@ buffer (allocated at return `0x1E3F20` for AEMS).
   decides). Then: 10 minutes, ~1650 rollbacks, no mixer page at all, no crash, desync or stall.
 
 The sections above that read the mixer pages as the game's own objects were based on the spread runs.
+
+## Five room matches with rollback (2026-10-24, 21:25, 70 ms lag)
+
+`scripts/netplay-hub-test.ps1 -Route online5` with `RECOMP_ROLLBACK=on`: the first match ran with about 1500
+and 1850 rollbacks (1.0 ms average), no desync, no mixer page. At its KO, as rollback switched off for the
+rest of the match (`42 contiguous block(s) held through the fight given back`), copy 1 crashed in the sound
+engine (`sub_001317C0+0x34D`, `ecx 0x8A019D74`: outside guest memory, a junk pointer), so the second match
+never started there (`logs/run-20261024-212529.log.err`). Suspect: frees held during the fight and released
+at its end. A rollback to a step before a free brings back the game state that still points at the block; if
+the re-run does not free it again, releasing the held free at the end hands out memory still in use. Next:
+when a load goes back past a held free, drop that free from the list (the re-run frees it again if it should),
+and check the contiguous-memory frees the same way.
