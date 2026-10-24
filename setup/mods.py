@@ -19,11 +19,15 @@ import stat
 import struct
 import sys
 import tempfile
+import time
 import urllib.error
 import urllib.request
 import uuid
 import zipfile
 
+# Windows' bundled Python uses ._pth isolation and does not add the script's
+# directory to sys.path. Resolve the sibling contract from this installation.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 import mod_catalogue as contract
 
 CATALOGUE_URL = 'https://vyanhursky.github.io/DefJamFFNY-mods/index.json'
@@ -79,8 +83,16 @@ def durable_rename(source, target):
         kernel = ctypes.WinDLL('kernel32', use_last_error=True)
         kernel.MoveFileExW.argtypes = [ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.c_uint]
         kernel.MoveFileExW.restype = ctypes.c_int
-        if not kernel.MoveFileExW(str(source), str(target), 0x1 | 0x8):
-            raise ctypes.WinError(ctypes.get_last_error())
+        # Launcher polling and Windows file scanners can briefly deny replacing
+        # a snapshot. Retry only sharing/access errors, for at most 0.9 seconds;
+        # permanent errors still fail and preserve the previous installation.
+        for attempt in range(10):
+            if kernel.MoveFileExW(str(source), str(target), 0x1 | 0x8):
+                break
+            error = ctypes.get_last_error()
+            if error not in (5, 32, 33) or attempt == 9:
+                raise ctypes.WinError(error)
+            time.sleep(0.02 * (attempt + 1))
     else:
         os.replace(source, target)
         sync_directory(target.parent)

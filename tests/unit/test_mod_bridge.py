@@ -8,6 +8,18 @@ import time
 import pytest
 
 ROOT=Path(__file__).resolve().parents[2]
+
+
+def test_helper_status_with_isolated_python(tmp_path):
+    # -I reproduces embedded Windows Python omitting the script directory.
+    data=tmp_path/'isolated data'
+    result=subprocess.run([sys.executable,'-I',str(ROOT/'setup/mods.py'),'status',
+                           '--data-dir',str(data),'--runtime','0.10.8'],
+                          cwd=tmp_path,capture_output=True,text=True,timeout=20)
+    assert result.returncode==0,result.stdout+result.stderr
+    assert (data/'mod-manager/view.ini').is_file()
+
+
 DRIVER=r'''
 #include "pc_mods.h"
 #include "pc_ui_actions.h"
@@ -56,6 +68,29 @@ def test_async_status_and_space_paths(bridge,tmp_path):
     assert result.returncode==0,result.stdout+result.stderr
     assert 'inventory refreshed' in result.stdout
     assert (data/'mod-manager/view.ini').exists()
+
+
+def test_polling_does_not_block_atomic_progress_updates(bridge,tmp_path):
+    # The real download replaces progress.ini once per MiB while the launcher
+    # reads it. Brief Windows sharing/scanner locks must not abort the download.
+    source=tmp_path/'helper source';(source/'setup').mkdir(parents=True)
+    (source/'setup/mods.py').write_text(f'''
+import os, sys, tempfile
+from pathlib import Path
+sys.path.insert(0,{str(ROOT/'setup')!r})
+import mods
+root=Path(sys.argv[sys.argv.index('--data-dir')+1])/'mod-manager'
+sys.stderr=open(root/'helper-error.log','w')
+for i in range(500):
+    mods.atomic_bytes(root/'progress.ini',('[progress]\\nmessage=Downloading package\\ndone='+str(i)+'\\ntotal=5000\\n').encode())
+''')
+    env={**os.environ,'DEFJAM_MOD_PYTHON':sys.executable}
+    env.pop('DEFJAM_INSTALL_DIR',None)
+    result=subprocess.run([str(bridge),str(tmp_path/'data'),'status'],cwd=source,
+                          env=env,capture_output=True,text=True,timeout=20)
+    assert result.returncode==0,result.stdout+result.stderr
+    error=(tmp_path/'data/mod-manager/helper-error.log').read_text()
+    assert 'inventory refreshed' in result.stdout,result.stdout+result.stderr+error
 
 
 def test_runtime_lock_interoperates_with_python_helper(bridge,tmp_path):

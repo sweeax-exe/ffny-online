@@ -83,6 +83,9 @@ def inspect_payload(archive):
             subprocess.run([folder / 'python/python.exe', '-B',
                             folder / 'source/scripts/build-hd-pack.py', '--help'], check=True,
                            stdout=subprocess.DEVNULL)
+            subprocess.run([folder / 'python/python.exe', '-B',
+                            folder / 'source/setup/mods.py', '--help'], check=True,
+                           stdout=subprocess.DEVNULL)
         return manifest
 
 
