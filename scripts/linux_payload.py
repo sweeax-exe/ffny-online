@@ -21,7 +21,7 @@ import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
-PACKAGES = ['pyxbe==1.0.4', 'capstone==5.0.9', 'Pillow==12.3.0', 'numpy==2.5.2']
+PACKAGES = ['pyxbe==1.0.4', 'capstone==5.0.9', 'Pillow==12.3.0', 'numpy==2.5.2', 'cryptography==50.0.2', 'cffi==2.0.0', 'pycparser==2.23']
 PYTHON_PRUNE = ('bin/idle3', 'bin/idle3.13', 'bin/pip', 'bin/pip3', 'bin/pip3.13', 'bin/pydoc3', 'bin/pydoc3.13',
                 'bin/python3-config', 'bin/python3.13-config', 'bin/python', 'share', 'include', 'lib/pkgconfig')
 PYTHON_PRUNE_LIB = ('test', 'idlelib', 'turtledemo', 'ensurepip', 'lib2to3')

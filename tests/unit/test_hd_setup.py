@@ -227,3 +227,24 @@ def test_corrupt_linked_pack_edit_survives_corpus_resume_and_is_rejected(tmp_pat
     assert builder.file_hash(work/repaired['upscaled'])==record['upscaled_hash']
     assert installed.read_bytes()==b'owner-edited texture'
     with pytest.raises(ValueError,match='changed'):builder.assemble(work,tmp_path/'mods')
+
+
+def test_long_pack_lists_fit_what_the_game_reads(tmp_path):
+    # Two generated Faithful HD packs plus custom ones pass the old 95-character
+    # setting limit; setup writes the whole list, and its cap is the game's.
+    import re
+    header=(ROOT/'tools/xboxrecomp/src/settings/recomp_settings.h').read_text()
+    loader=(ROOT/'tools/xboxrecomp/src/nv2a/texture_pack.c').read_text()
+    text_max=int(re.search(r'#define RECOMP_SETTING_TEXT_MAX (\d+)',header).group(1))
+    list_cap=int(re.search(r'#define PACK_LIST_CAP (\d+)',loader).group(1))
+    assert engine.TEXTURE_PACK_LIST_MAX==text_max-1==list_cap-1
+    custom=['menu-ui-restored-test-v1','menu-ui-branding-registered-test-v1','menu-ui-mode-conditional-test-v1','menu-ui-wide-test-v1','my-own-pack','another-custom-pack']
+    names=['faithful-hd-'+'c'*12+'-opacity','faithful-hd-'+'c'*12+'-channels']
+    path=tmp_path/'settings.ini'
+    path.write_text('[textures]\nenabled=0\npacks='+';'.join(custom)+'\n')
+    engine.enable_hd_packs(tmp_path,names)
+    expected=';'.join(custom+names)
+    assert len(expected)>200 and 'packs='+expected+'\n' in path.read_text()
+    path.write_text('[textures]\npacks='+'x'*(engine.TEXTURE_PACK_LIST_MAX-len(';'.join(names)))+'\n')
+    with pytest.raises(engine.SetupError,match='too long'):
+        engine.enable_hd_packs(tmp_path,names)

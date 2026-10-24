@@ -1,0 +1,1132 @@
+{
+  "schema": 1,
+  "policy": "Source-shaped 4x exports of approved menu artwork for the existing schema-1 PNG loader. Paths are relative to the PRIVATE pilot-v1 art root and must be pinned in config/menu-ui-approved-artwork.json. crop is [left, top, right, bottom] in the 4x artwork; null uses the whole file. No artwork bytes are stored here.",
+  "retained_faithful": {
+    "title-skyline": "prestart #2/#1: only the wide master and art-space crops are approved; no approved source-shaped tile export yet.",
+    "title-logo-menu-emblems": "22 IDs: approved repaired canvases are not native-shaped; registration back to the original atlases is still required (handover blocker)."
+  },
+  "components": {
+    "menu-ui-restored-test-v1": {
+      "name": "Menu UI restored test v1",
+      "png_mips": "opacity",
+      "status": "owner-approved artwork (D128/UI-D156/UI); not yet game-accepted",
+      "entries": [
+        {
+          "source_id": "d3c334fa79ef7e76522ca90ac78a2034da9a76225e1e80a287fc393bb0864d68",
+          "label": "rematch #1",
+          "art": "results-v1/rematch-1-restrained.png",
+          "crop": null,
+          "size": [
+            2048,
+            1024
+          ]
+        },
+        {
+          "source_id": "aa11e92a08308b2c40780530b03f8ac0eced5cca4e85dbb0bce61787f640ac33",
+          "label": "matchSm1 #8",
+          "art": "results-v1/matchSm1-8-restrained.png",
+          "crop": null,
+          "size": [
+            64,
+            512
+          ]
+        },
+        {
+          "source_id": "386f604f3a51d0c1ece3c264ebf1c42a0b64052abebe522beaa5c1f084a78471",
+          "label": "matchSm1 #9",
+          "art": "results-v1/matchSm1-9-restrained.png",
+          "crop": null,
+          "size": [
+            1024,
+            512
+          ]
+        },
+        {
+          "source_id": "0d45174e4859eb9733273b65c52dac6dc07032ee5c015a045261eefa3a6cec8b",
+          "label": "matchSm1 #10",
+          "art": "results-v1/matchSm1-10-restrained.png",
+          "crop": null,
+          "size": [
+            64,
+            1024
+          ]
+        },
+        {
+          "source_id": "edc3c82749e8d0508f97c561e33a29364efbe6fc0160f8d9072c610c2a1d4147",
+          "label": "matchSm1 #11",
+          "art": "results-v1/matchSm1-11-restrained.png",
+          "crop": null,
+          "size": [
+            1024,
+            1024
+          ]
+        },
+        {
+          "source_id": "4acf8a4e5f30b06671b3e654739e12de3f0352ac3455df69e716badcb9e33444",
+          "label": "matchSm2 #16",
+          "art": "results-v1/matchSm2-16-restrained.png",
+          "crop": null,
+          "size": [
+            2048,
+            512
+          ]
+        },
+        {
+          "source_id": "b8223904337292ef721238b5cca3d59313ed8c74deb495ebde40728e9d647c2f",
+          "label": "matchSm2 #17",
+          "art": "results-v1/matchSm2-17-restrained.png",
+          "crop": null,
+          "size": [
+            128,
+            1024
+          ]
+        },
+        {
+          "source_id": "e692c2ce27084a0aa5e9a650e140bc1c75e8997852d6d861ec1d9aa7afb4196f",
+          "label": "matchSm2 #18",
+          "art": "results-v1/matchSm2-18-restrained.png",
+          "crop": null,
+          "size": [
+            2048,
+            1024
+          ]
+        },
+        {
+          "source_id": "a926b19ddf65cbecf9dae294ff8701a7fa243ab52b4c28ac5dafa76919d9d241",
+          "label": "matchSm2 #19",
+          "art": "results-v1/matchSm2-19-restrained.png",
+          "crop": null,
+          "size": [
+            128,
+            512
+          ]
+        },
+        {
+          "source_id": "70aa1175d3cffcef4409ee067aa8e6f8d755bb59a31f895a63bb0c6a29c7102e",
+          "label": "matchSm3 #18",
+          "art": "results-v1/matchSm3-18-restrained.png",
+          "crop": null,
+          "size": [
+            2048,
+            512
+          ]
+        },
+        {
+          "source_id": "251bd45d0911accf4ffd053af54007d46f3164be7ec6f15853e7fbdba7ef2990",
+          "label": "matchSm3 #19",
+          "art": "results-v1/matchSm3-19-restrained.png",
+          "crop": null,
+          "size": [
+            256,
+            1024
+          ]
+        },
+        {
+          "source_id": "6b321e718552fda75dbcfec60438b4f30766e0b3304219416aaf204ebeb3bd1e",
+          "label": "matchSm3 #20",
+          "art": "results-v1/matchSm3-20-restrained.png",
+          "crop": null,
+          "size": [
+            256,
+            512
+          ]
+        },
+        {
+          "source_id": "0cde4bd38a9f475481b7dea88b61acd4224d6f5c6b381281c60f1b656b618849",
+          "label": "matchSm3 #21",
+          "art": "results-v1/matchSm3-21-restrained.png",
+          "crop": null,
+          "size": [
+            2048,
+            1024
+          ]
+        },
+        {
+          "source_id": "21ae42111b8b8f30fd2d813cf72a710e01a1aadd3859f8a23aaeb8102ef5c269",
+          "label": "matchSm4 #13",
+          "art": "results-v1/matchSm4-13-restrained.png",
+          "crop": null,
+          "size": [
+            2048,
+            512
+          ]
+        },
+        {
+          "source_id": "f8fc3d8390906ded4f445a9e3ad529a715aa9ae84e009fed363aa38bcec2f0fc",
+          "label": "matchSm4 #14",
+          "art": "results-v1/matchSm4-14-restrained.png",
+          "crop": null,
+          "size": [
+            256,
+            1024
+          ]
+        },
+        {
+          "source_id": "47833e402cfbe60adf5e175b842162b5cbe782bea4a46b4b97a6a571678ec055",
+          "label": "matchSm4 #15",
+          "art": "results-v1/matchSm4-15-restrained.png",
+          "crop": null,
+          "size": [
+            2048,
+            1024
+          ]
+        },
+        {
+          "source_id": "982f62a0de74d880a86a78983dd4e9bcf41fabd9cd4b8415955cf639ef1dc437",
+          "label": "matchSm4 #16",
+          "art": "results-v1/matchSm4-16-restrained.png",
+          "crop": null,
+          "size": [
+            256,
+            512
+          ]
+        },
+        {
+          "source_id": "8f3eb5b34841c18723f8177ba5ae01d4d837a9a0cd3518297c7af840977da01a",
+          "label": "rewardun #1",
+          "art": "results-v1/rewardun-1-restrained.png",
+          "crop": null,
+          "size": [
+            2048,
+            2048
+          ]
+        },
+        {
+          "source_id": "d0e7ae35466ded72d9b99139b6684bfbd83e2967fdfd2139b224ca8f694ed524",
+          "label": "cmtype #1",
+          "art": "battle-v1/cmtype-1-restrained.png",
+          "crop": null,
+          "size": [
+            512,
+            2048
+          ]
+        },
+        {
+          "source_id": "06830e776d6cc6bb56c52925f42cf6ca19c72444049477f1d594cfedac4d7edd",
+          "label": "cmtype #2",
+          "art": "battle-v1/cmtype-2-restrained.png",
+          "crop": null,
+          "size": [
+            2048,
+            2048
+          ]
+        },
+        {
+          "source_id": "39406336dd035b74ae57e953a386c49500392da9f566bb6ed8c5fab56c8010c4",
+          "label": "chooseF2 #337",
+          "art": "battle-v1/chooseF2-337-restrained.png",
+          "crop": null,
+          "size": [
+            512,
+            2048
+          ]
+        },
+        {
+          "source_id": "c49727c8650aaf13bb5d1a0aee11b3fc466d607a657b77a35b86bda6b99aa9e7",
+          "label": "chooseF2 #338",
+          "art": "battle-v1/chooseF2-338-restrained.png",
+          "crop": null,
+          "size": [
+            2048,
+            2048
+          ]
+        },
+        {
+          "source_id": "96e7606df178d45d402e060a32e9d6f9033cc247cf86c02bc336aea7db0f3571",
+          "label": "chooseF3 #342",
+          "art": "battle-v1/chooseF3-342-restrained.png",
+          "crop": null,
+          "size": [
+            512,
+            2048
+          ]
+        },
+        {
+          "source_id": "d628474a2f54474db0057e938f1c6b6aeb89d6003da7d1c6c79f76410d3725f1",
+          "label": "chooseF3 #343",
+          "art": "battle-v1/chooseF3-343-restrained.png",
+          "crop": null,
+          "size": [
+            2048,
+            2048
+          ]
+        },
+        {
+          "source_id": "02f7125c71c22c6db9425f25763ef553904bad5a9a6f1e49d7a477f8da6ad119",
+          "label": "chooseF4 #343",
+          "art": "battle-v1/chooseF4-343-restrained.png",
+          "crop": null,
+          "size": [
+            512,
+            2048
+          ]
+        },
+        {
+          "source_id": "82ec4995c69b506a022b461def716702ac593e21887a8a6ce853a91ffcc80dfb",
+          "label": "chooseF4 #344",
+          "art": "battle-v1/chooseF4-344-restrained.png",
+          "crop": null,
+          "size": [
+            2048,
+            2048
+          ]
+        },
+        {
+          "source_id": "1806fe21639ed68aa1647dcc4d5e78bad6b03cb0369df3c1c25bb4a9f7a732e5",
+          "label": "options #71",
+          "art": "menus-v1/options-71-restrained.png",
+          "crop": null,
+          "size": [
+            2048,
+            2048
+          ]
+        },
+        {
+          "source_id": "8a8ca1c700e03288620aed2bb229d592521e518af2e7a9b9d3b698a9703f7d05",
+          "label": "options #70",
+          "art": "menus-v1/options-70-restrained.png",
+          "crop": null,
+          "size": [
+            256,
+            2048
+          ]
+        },
+        {
+          "source_id": "1c2de449c28536a5491ef5828f81d171544917f2238a18c8a1474ea8685edbae",
+          "label": "options #4",
+          "art": "menus-v1/options-wall-restrained.png",
+          "crop": null,
+          "size": [
+            1024,
+            2048
+          ]
+        },
+        {
+          "source_id": "cc11d92079b1a81132faae6e64053f82e397ba78f4e097be11d409fb8f9c5d64",
+          "label": "beatbox #20",
+          "art": "menus-v1/beatbox-20-restrained.png",
+          "crop": null,
+          "size": [
+            2048,
+            2048
+          ]
+        },
+        {
+          "source_id": "f8e71b8bc56f4d3a502fd09ccc526d33a6173173570b1595bf880185ffeacc6b",
+          "label": "beatbox #19",
+          "art": "menus-v1/beatbox-19-restrained.png",
+          "crop": null,
+          "size": [
+            512,
+            2048
+          ]
+        },
+        {
+          "source_id": "fc7e7ea76a80243a701f35d9bfdb914e93a85549224e1a0557c65897cb35a33c",
+          "label": "buyrewards #2",
+          "art": "rewards-v1/wall-0-restrained.png",
+          "crop": null,
+          "size": [
+            2048,
+            2048
+          ]
+        },
+        {
+          "source_id": "6cd17deca34561c5990503898d85bcb47ad9c20e40dca641eea8962e5378cca8",
+          "label": "buyrewards #1",
+          "art": "rewards-v1/wall-1-restrained.png",
+          "crop": null,
+          "size": [
+            1024,
+            2048
+          ]
+        },
+        {
+          "source_id": "bc0317c0ade0f0b0f2cd60f9ebf56e9301aa61960cf4ee95643dcc7fc4261728",
+          "label": "hiScores #2",
+          "art": "hiscores-v1/part-0-restrained.png",
+          "crop": null,
+          "size": [
+            2048,
+            2048
+          ]
+        },
+        {
+          "source_id": "553692a37819cf5d205bdfa6faa9229f4eefc742c418654c0ceeff688d0cb475",
+          "label": "hiScores #1",
+          "art": "hiscores-v1/part-1-restrained.png",
+          "crop": null,
+          "size": [
+            512,
+            2048
+          ]
+        },
+        {
+          "source_id": "fdc3666e5aec15824bd2cb3fb8598f2f7047980c696c494035d019e7036680ba",
+          "label": "prestart #6",
+          "art": "batch2/title-middle-restrained.png",
+          "crop": [
+            0,
+            0,
+            2048,
+            2048
+          ],
+          "size": [
+            2048,
+            2048
+          ]
+        },
+        {
+          "source_id": "99aa2410ae53d3edc92c89fbecf01d1adf5eab12b2d613338de66f0f03a92a33",
+          "label": "prestart #5",
+          "art": "batch2/title-middle-restrained.png",
+          "crop": [
+            2048,
+            0,
+            2560,
+            2048
+          ],
+          "size": [
+            512,
+            2048
+          ]
+        },
+        {
+          "source_id": "427424b7b670739f1a493dff7e53725299f72c718c7680aca3314b76247ca5ad",
+          "label": "prestart #11",
+          "art": "batch2/title-tower-restrained.png",
+          "crop": [
+            0,
+            0,
+            2048,
+            2048
+          ],
+          "size": [
+            2048,
+            2048
+          ]
+        },
+        {
+          "source_id": "682f298f59c1680b2bc7118a4768d685fa41dd16eb684b67cbfbf9077036c4e4",
+          "label": "prestart #10",
+          "art": "batch2/title-tower-restrained.png",
+          "crop": [
+            2048,
+            0,
+            2560,
+            2048
+          ],
+          "size": [
+            512,
+            2048
+          ]
+        }
+      ]
+    },
+    "menu-ui-mode-conditional-test-v1": {
+      "name": "Menu UI Mode Select conditional test v1",
+      "png_mips": "opacity",
+      "status": "conditionally approved (D132/UI): judge the right 4:3 border darkness in game",
+      "entries": [
+        {
+          "source_id": "44ac477e5bbedc831511b189da8e581c4beb01646ea12f119719fceb02482693",
+          "label": "mainMenu #14",
+          "art": "batch2/mode-wall-lit-restrained.png",
+          "crop": [
+            0,
+            0,
+            1024,
+            2048
+          ],
+          "size": [
+            1024,
+            2048
+          ]
+        },
+        {
+          "source_id": "2fca375e9466d772de13fa5cc53013e90d063ba8aa87c20d16a052b437aeccbb",
+          "label": "mainMenu #13",
+          "art": "batch2/mode-wall-lit-restrained.png",
+          "crop": [
+            1024,
+            0,
+            1280,
+            2048
+          ],
+          "size": [
+            256,
+            2048
+          ]
+        },
+        {
+          "source_id": "5b657a938f0808856b46cea8d42ee2548da7a5c15597f4704a1dfdf1f5947c24",
+          "label": "mainMenu #5",
+          "art": "mode-wall-dark-palette-constrained-trial.png",
+          "crop": [
+            0,
+            0,
+            1024,
+            2048
+          ],
+          "size": [
+            1024,
+            2048
+          ]
+        },
+        {
+          "source_id": "a3ef5488f84a7fd179fc0a610d7fdc1434afdf398a684df1b74637b9af3fcb1b",
+          "label": "mainMenu #4",
+          "art": "mode-wall-dark-palette-constrained-trial.png",
+          "crop": [
+            1024,
+            0,
+            1280,
+            2048
+          ],
+          "size": [
+            256,
+            2048
+          ]
+        },
+        {
+          "source_id": "5e6f2fec0b51311c14bea415934548dd946081c270abdfb4834746ffe633abff",
+          "label": "mainMenu #18",
+          "art": "batch2/mode-shutter-restrained.png",
+          "crop": [
+            0,
+            0,
+            1024,
+            1024
+          ],
+          "size": [
+            1024,
+            1024
+          ]
+        },
+        {
+          "source_id": "de1deb64a25f6ae1821fa0837bf2dd452b4dc27fd0a51bcadcaa28d3ea214260",
+          "label": "mainMenu #17",
+          "art": "batch2/mode-shutter-restrained.png",
+          "crop": [
+            0,
+            1024,
+            1024,
+            1536
+          ],
+          "size": [
+            1024,
+            512
+          ]
+        },
+        {
+          "source_id": "d543121c2fd1cada431cf25345d9d8efa1f25a02992f19cf49b49fa66f15fee6",
+          "label": "mainMenu #53",
+          "art": "batch2/mode-surround-restrained.png",
+          "crop": [
+            0,
+            0,
+            2048,
+            2048
+          ],
+          "size": [
+            2048,
+            2048
+          ]
+        },
+        {
+          "source_id": "832e9d0b1495f399e2d53408d3292b603a591ec6c927abd4b0bb1c9a00e07be4",
+          "label": "mainMenu #52",
+          "art": "batch2/mode-surround-restrained.png",
+          "crop": [
+            2048,
+            0,
+            2304,
+            2048
+          ],
+          "size": [
+            256,
+            2048
+          ]
+        }
+      ]
+    },
+    "menu-ui-extras-test-v1": {
+      "name": "Menu UI Extras approved art test v1",
+      "png_mips": "opacity",
+      "status": "owner-approved artwork D164/UI; native game validation pending",
+      "entries": [
+        {
+          "source_id": "0c2919237e16f1876e7588a787169ad17f6e82f15b552557ccb19e82e7576836",
+          "label": "Extras list-paper #35",
+          "art": "extras-v1-20261020/image-35-restrained.png",
+          "crop": null,
+          "size": [
+            512,
+            1024
+          ]
+        },
+        {
+          "source_id": "8c09111da4e717cb8432335c60e0f4384524da75c23ebd0d722fdf051dcb5521",
+          "label": "Extras list-paper #34",
+          "art": "extras-v1-20261020/image-34-restrained.png",
+          "crop": null,
+          "size": [
+            128,
+            1024
+          ]
+        },
+        {
+          "source_id": "b1c4be8a1c1f9e40b22b9d2c316d341e01ec02e3e43fd66c242889ab7ce0d887",
+          "label": "Extras list-paper #33",
+          "art": "extras-v1-20261020/image-33-restrained.png",
+          "crop": null,
+          "size": [
+            512,
+            512
+          ]
+        },
+        {
+          "source_id": "93b6753cd17a4dbd0a2f8400c190d9e16ab8ddf405bcb0573072614ad4ece993",
+          "label": "Extras list-paper #32",
+          "art": "extras-v1-20261020/image-32-restrained.png",
+          "crop": null,
+          "size": [
+            128,
+            512
+          ]
+        },
+        {
+          "source_id": "1b60b846487da1554dd4f0471d520cd0bbedb1b0e2af8edf8dd5ffcecc1eed14",
+          "label": "Extras note-37 #37",
+          "art": "extras-v1-20261020/image-37-restrained.png",
+          "crop": null,
+          "size": [
+            1024,
+            1024
+          ]
+        },
+        {
+          "source_id": "50f237f60c0100929d1c8ee086f89c92111cc582c4feacf402d703999087f9b8",
+          "label": "Extras note-42 #42",
+          "art": "extras-v1-20261020/image-42-restrained.png",
+          "crop": null,
+          "size": [
+            1024,
+            1024
+          ]
+        },
+        {
+          "source_id": "d00a7e7310f4a968761adea02dc384aec610cbc45e6b6c3d7e5ae7e2c24e8694",
+          "label": "Extras note-48 #48",
+          "art": "extras-v1-20261020/image-48-restrained.png",
+          "crop": null,
+          "size": [
+            1024,
+            1024
+          ]
+        },
+        {
+          "source_id": "bcb3263bd4f0784fbe0549459861ff99589aebfc966034224a8af3ecb3c47f06",
+          "label": "Extras note-52 #52",
+          "art": "extras-v1-20261020/image-52-restrained.png",
+          "crop": null,
+          "size": [
+            1024,
+            1024
+          ]
+        },
+        {
+          "source_id": "48bc259ac7067229816308a8783925f7702ab9f689c4d31bfeb13347e7b9781b",
+          "label": "Extras ribbon-58 #58",
+          "art": "extras-v1-20261020/image-58-restrained.png",
+          "crop": null,
+          "size": [
+            1024,
+            256
+          ]
+        }
+      ]
+    },
+    "menu-ui-phone-test-v1": {
+      "name": "Menu UI Story phone approved art test v1",
+      "png_mips": "opacity",
+      "status": "owner-approved artwork D168/UI; native game validation pending",
+      "entries": [
+        {
+          "source_id": "54b10930f972c0d5ae001c813724eca77efa75a8aed86439b646a9b2723c70f8",
+          "label": "Storyphone #110",
+          "art": "story-phone-v1-20261020/image-110-restrained.png",
+          "crop": null,
+          "size": [
+            2048,
+            2048
+          ]
+        },
+        {
+          "source_id": "e54d2ed820d536230ff2f1d0eab2229755a6e99bad7d8e1ab8577d2582602274",
+          "label": "Storyphone #111",
+          "art": "story-phone-v1-20261020/image-111-restrained.png",
+          "crop": null,
+          "size": [
+            512,
+            2048
+          ]
+        }
+      ]
+    },
+    "menu-ui-popup-profile-test-v1": {
+      "name": "Menu UI Popup Profile approved art test v1",
+      "png_mips": "opacity",
+      "status": "owner-approved artwork D172/UI; native game validation pending; wide wall not registered",
+      "entries": [
+        {
+          "source_id": "8665c0c50a69a7c334ad5ce6cbe53b026a60eb7b15a45477f37096020dae0ecb",
+          "label": "Popup/Profile 87",
+          "art": "popup-profile-v1-20261020/asset-8665c0c50a69-draft.png",
+          "crop": null,
+          "size": [
+            4096,
+            2048
+          ]
+        },
+        {
+          "source_id": "c01031c552e6e3d44288103060e2fe14272ba73106e758c61d09520bf9c6945f",
+          "label": "Popup/Profile 41",
+          "art": "popup-profile-v1-20261020/asset-c01031c552e6-draft.png",
+          "crop": null,
+          "size": [
+            2048,
+            1024
+          ]
+        },
+        {
+          "source_id": "5a3d8e51326626f4c2a147540235272fb9e7842e780e633757a3f639114e25f8",
+          "label": "Popup/Profile 42",
+          "art": "popup-profile-v1-20261020/asset-5a3d8e513266-draft.png",
+          "crop": null,
+          "size": [
+            2048,
+            1024
+          ]
+        },
+        {
+          "source_id": "efb020f18854bf4b72117d4e530e72c0b5eb17e27d77e08673e338074c6237e8",
+          "label": "Popup/Profile 46",
+          "art": "popup-profile-v1-20261020/asset-efb020f18854-draft.png",
+          "crop": null,
+          "size": [
+            2048,
+            1024
+          ]
+        },
+        {
+          "source_id": "6ddd1156e71d233b9928bb63e1290b009447943058a9a7d10556a236d6c5688a",
+          "label": "Popup/Profile 47",
+          "art": "popup-profile-v1-20261020/asset-6ddd1156e71d-draft.png",
+          "crop": null,
+          "size": [
+            2048,
+            1024
+          ]
+        },
+        {
+          "source_id": "ae557276c13b2fa7524b0b0248524e04058739dfdf440b5d9382a6a5318fd375",
+          "label": "Popup/Profile 60",
+          "art": "popup-profile-v1-20261020/asset-ae557276c13b-draft.png",
+          "crop": null,
+          "size": [
+            2048,
+            1024
+          ]
+        },
+        {
+          "source_id": "365c8f370ed80dd85e23919f0945a24b72570fc4f1bc8157d34132f1fa43f005",
+          "label": "Popup/Profile 67",
+          "art": "popup-profile-v1-20261020/asset-365c8f370ed8-draft.png",
+          "crop": null,
+          "size": [
+            2048,
+            1024
+          ]
+        },
+        {
+          "source_id": "1aff21d0cbba9f13a1dc50cba53f4a7bbf7cf8deb33ae1df9aac03f3480f1006",
+          "label": "Popup/Profile 59",
+          "art": "popup-profile-v1-20261020/asset-1aff21d0cbba-draft.png",
+          "crop": null,
+          "size": [
+            2048,
+            512
+          ]
+        },
+        {
+          "source_id": "b791ca1da12e6fda255d91d9cf02d774145707b9a07592d18d55f8622cf9a14f",
+          "label": "Popup/Profile 126",
+          "art": "popup-profile-v1-20261020/asset-b791ca1da12e-draft.png",
+          "crop": null,
+          "size": [
+            1024,
+            1024
+          ]
+        },
+        {
+          "source_id": "b4c0a0db45b63a646f10e58659f548b0fab579633811b431c645f0344d813d38",
+          "label": "Popup/Profile 127",
+          "art": "popup-profile-v1-20261020/asset-b4c0a0db45b6-draft.png",
+          "crop": null,
+          "size": [
+            1024,
+            1024
+          ]
+        },
+        {
+          "source_id": "d6a245737ba685f8d0bec38e1af419a9ca83c971fdb20908adf4ed3825264bd7",
+          "label": "Popup/Profile 150",
+          "art": "popup-profile-v1-20261020/asset-d6a245737ba6-draft.png",
+          "crop": null,
+          "size": [
+            1024,
+            1024
+          ]
+        },
+        {
+          "source_id": "46bf386a7c209c4e16713e5ac27ae16660a0c3df853838ce623bed6926ad1d7c",
+          "label": "Popup/Profile 127",
+          "art": "popup-profile-v1-20261020/asset-46bf386a7c20-draft.png",
+          "crop": null,
+          "size": [
+            1024,
+            1024
+          ]
+        },
+        {
+          "source_id": "51ea7afebe75920ce229b0f8feecb38a794ff60e09446bcc892a12881c1141dc",
+          "label": "Popup/Profile 91",
+          "art": "popup-profile-v1-20261020/asset-51ea7afebe75-draft.png",
+          "crop": null,
+          "size": [
+            1024,
+            1024
+          ]
+        },
+        {
+          "source_id": "807a290c7dec5edf4728faec4925c1112c4a069e788f79a1d15c936f51127769",
+          "label": "Popup/Profile 30",
+          "art": "popup-profile-v1-20261020/asset-807a290c7dec-draft.png",
+          "crop": null,
+          "size": [
+            1024,
+            512
+          ]
+        },
+        {
+          "source_id": "d318f085aa3ad74c19da979133c91117764eabbb503765bb3873c821c5ba9f40",
+          "label": "Popup/Profile 125",
+          "art": "popup-profile-v1-20261020/asset-d318f085aa3a-draft.png",
+          "crop": null,
+          "size": [
+            1024,
+            512
+          ]
+        },
+        {
+          "source_id": "436d0f5e4c1f3549755b801ba541b131398ed57e62c62533059bccad0536c4de",
+          "label": "Popup/Profile 2",
+          "art": "popup-profile-v1-20261020/asset-436d0f5e4c1f-draft.png",
+          "crop": null,
+          "size": [
+            1024,
+            512
+          ]
+        },
+        {
+          "source_id": "e56d6339c75c72074fd1e8590426a093cc0ebe34e16ecd8dc6dc43a4ce8cecd1",
+          "label": "Popup/Profile 6",
+          "art": "popup-profile-v1-20261020/asset-e56d6339c75c-draft.png",
+          "crop": null,
+          "size": [
+            1024,
+            512
+          ]
+        },
+        {
+          "source_id": "20cfe8c382af8a3e5e0577608ade27f0595e6a970dfed108296229deb7bffc30",
+          "label": "Popup/Profile 90",
+          "art": "popup-profile-v1-20261020/asset-20cfe8c382af-draft.png",
+          "crop": null,
+          "size": [
+            1024,
+            512
+          ]
+        },
+        {
+          "source_id": "b1cdc4d1ce950b939e320ab74b50426c47551b2471cc19d7b5a9418c3028373e",
+          "label": "Popup/Profile 220",
+          "art": "popup-profile-v1-20261020/asset-b1cdc4d1ce95-draft.png",
+          "crop": null,
+          "size": [
+            512,
+            512
+          ]
+        },
+        {
+          "source_id": "acf9559da275598298f9a0a1d52f2580b01eeb41823d68a027dd62b88c800980",
+          "label": "Popup/Profile 236",
+          "art": "popup-profile-v1-20261020/asset-acf9559da275-draft.png",
+          "crop": null,
+          "size": [
+            512,
+            512
+          ]
+        },
+        {
+          "source_id": "efdbaec32b07abd34f907688e17b907bed6731f5d3e27446a36fa04fd740a489",
+          "label": "Popup/Profile 244",
+          "art": "popup-profile-v1-20261020/asset-efdbaec32b07-draft.png",
+          "crop": null,
+          "size": [
+            512,
+            512
+          ]
+        },
+        {
+          "source_id": "4aebe3a6d599cbe5f176e545d4d8f28de10d632703c51be89ff127196408b037",
+          "label": "Popup/Profile 31",
+          "art": "popup-profile-v1-20261020/asset-4aebe3a6d599-draft.png",
+          "crop": null,
+          "size": [
+            512,
+            512
+          ]
+        }
+      ]
+    },
+    "menu-ui-gym-controls-test-v1": {
+      "name": "Menu UI Gym Controls approved art test v1",
+      "png_mips": "opacity",
+      "status": "owner-approved artwork D175/UI; native game validation pending",
+      "entries": [
+        {
+          "source_id": "31460303b1c7cc671c6b0355efb2f619a688fedf0c24f35aff8465e9db6ed2c7",
+          "label": "Gym/Controls 44",
+          "art": "controls-v1-20261020/31460303b1c7cc671c6b0355efb2f619a688fedf0c24f35aff8465e9db6ed2c7-draft.png",
+          "crop": null,
+          "size": [
+            1024,
+            1024
+          ]
+        },
+        {
+          "source_id": "05006f7ec4c10ac0910b104e5c6776c625444726194983e57ab08782116fda0c",
+          "label": "Gym/Controls 47",
+          "art": "controls-v1-20261020/05006f7ec4c10ac0910b104e5c6776c625444726194983e57ab08782116fda0c-draft.png",
+          "crop": null,
+          "size": [
+            1024,
+            1024
+          ]
+        },
+        {
+          "source_id": "9276f96f3218687f6587b3bfff8a1f848a435cd39cb896cdf247cce6069523be",
+          "label": "Gym/Controls 49",
+          "art": "controls-v1-20261020/9276f96f3218687f6587b3bfff8a1f848a435cd39cb896cdf247cce6069523be-draft.png",
+          "crop": null,
+          "size": [
+            1024,
+            1024
+          ]
+        },
+        {
+          "source_id": "0dd32b612b4047d3d475b4954973f686d6b4ad8f1fa8f4311281334d9b9cf7a6",
+          "label": "Gym/Controls texP",
+          "art": "controls-v1-20261020/0dd32b612b4047d3d475b4954973f686d6b4ad8f1fa8f4311281334d9b9cf7a6-draft.png",
+          "crop": null,
+          "size": [
+            1024,
+            1024
+          ]
+        },
+        {
+          "source_id": "2e624c292129efe4bf9ccf499ddbcca80b49f6a393454e18c9278055dc9fb64b",
+          "label": "Gym/Controls 42",
+          "art": "controls-v1-20261020/2e624c292129efe4bf9ccf499ddbcca80b49f6a393454e18c9278055dc9fb64b-draft.png",
+          "crop": null,
+          "size": [
+            1024,
+            512
+          ]
+        },
+        {
+          "source_id": "69b7f4c1d4a653c6502b6834b4faa45240071cfa2cdc880b796c00d4d913002f",
+          "label": "Gym/Controls 48",
+          "art": "controls-v1-20261020/69b7f4c1d4a653c6502b6834b4faa45240071cfa2cdc880b796c00d4d913002f-draft.png",
+          "crop": null,
+          "size": [
+            1024,
+            512
+          ]
+        },
+        {
+          "source_id": "f72dcdc83ade2fd316565909e95b1ff523449286350169861ade8898a1251716",
+          "label": "Gym/Controls 46",
+          "art": "controls-v1-20261020/f72dcdc83ade2fd316565909e95b1ff523449286350169861ade8898a1251716-draft.png",
+          "crop": null,
+          "size": [
+            512,
+            1024
+          ]
+        },
+        {
+          "source_id": "c263c20b240c4ec872e1c13e6b1fd0e7bf3489b7b5220989589f253d0cf80166",
+          "label": "Gym/Controls 48",
+          "art": "controls-v1-20261020/c263c20b240c4ec872e1c13e6b1fd0e7bf3489b7b5220989589f253d0cf80166-draft.png",
+          "crop": null,
+          "size": [
+            512,
+            1024
+          ]
+        },
+        {
+          "source_id": "92293188c12dd2449a864035e6b82e85fb5a034c730a84219469d9ca2f604aa1",
+          "label": "Gym/Controls 11",
+          "art": "controls-v1-20261020/92293188c12dd2449a864035e6b82e85fb5a034c730a84219469d9ca2f604aa1-draft.png",
+          "crop": null,
+          "size": [
+            512,
+            512
+          ]
+        },
+        {
+          "source_id": "526ab883927181a717592611416c2af371874cb26a2308a01228b421ed7244ca",
+          "label": "Gym/Controls 15",
+          "art": "controls-v1-20261020/526ab883927181a717592611416c2af371874cb26a2308a01228b421ed7244ca-draft.png",
+          "crop": null,
+          "size": [
+            512,
+            512
+          ]
+        },
+        {
+          "source_id": "f0c00e8ae417632a7cbf84610570fde36a01b3a6b9d29743762f4248b70a0063",
+          "label": "Gym/Controls 19",
+          "art": "controls-v1-20261020/f0c00e8ae417632a7cbf84610570fde36a01b3a6b9d29743762f4248b70a0063-draft.png",
+          "crop": null,
+          "size": [
+            512,
+            512
+          ]
+        },
+        {
+          "source_id": "5941f1679f89a478f57a2ad0d8f676bea37d83cb691f01cdae2372f5a8f0e42a",
+          "label": "Gym/Controls 23",
+          "art": "controls-v1-20261020/5941f1679f89a478f57a2ad0d8f676bea37d83cb691f01cdae2372f5a8f0e42a-draft.png",
+          "crop": null,
+          "size": [
+            512,
+            512
+          ]
+        },
+        {
+          "source_id": "3ee52b6d7769027b05212ab649c09cec32ad5649334d7f58eae2b9e8db463007",
+          "label": "Gym/Controls 27",
+          "art": "controls-v1-20261020/3ee52b6d7769027b05212ab649c09cec32ad5649334d7f58eae2b9e8db463007-draft.png",
+          "crop": null,
+          "size": [
+            512,
+            512
+          ]
+        },
+        {
+          "source_id": "1ae171126745ec77d2f8a6066217f5fa2fc9206e56a4b15da10eea8b431d3d60",
+          "label": "Gym/Controls 31",
+          "art": "controls-v1-20261020/1ae171126745ec77d2f8a6066217f5fa2fc9206e56a4b15da10eea8b431d3d60-draft.png",
+          "crop": null,
+          "size": [
+            512,
+            512
+          ]
+        },
+        {
+          "source_id": "42e7189a05971a7fe3a3e87645c0fb02bf20c38a9bdac54cd483482a6b003222",
+          "label": "Gym/Controls 37",
+          "art": "controls-v1-20261020/42e7189a05971a7fe3a3e87645c0fb02bf20c38a9bdac54cd483482a6b003222-draft.png",
+          "crop": null,
+          "size": [
+            512,
+            512
+          ]
+        },
+        {
+          "source_id": "a3fdb3fcb5d504db608865197a8c0dedfed9b1615ceeec372ee73c2600cbdc3d",
+          "label": "Gym/Controls 42",
+          "art": "controls-v1-20261020/a3fdb3fcb5d504db608865197a8c0dedfed9b1615ceeec372ee73c2600cbdc3d-draft.png",
+          "crop": null,
+          "size": [
+            512,
+            512
+          ]
+        },
+        {
+          "source_id": "3f74caf51ce9218f2e2929deb9a28f6b553281d29e3e0fef1701c17727e3b5f7",
+          "label": "Gym/Controls texN",
+          "art": "controls-v1-20261020/3f74caf51ce9218f2e2929deb9a28f6b553281d29e3e0fef1701c17727e3b5f7-draft.png",
+          "crop": null,
+          "size": [
+            1024,
+            256
+          ]
+        },
+        {
+          "source_id": "1ff57a715094afdf7804d5b6d764c8df6f277c9176c346a59218a4f03af942cf",
+          "label": "Gym/Controls texF",
+          "art": "controls-v1-20261020/1ff57a715094afdf7804d5b6d764c8df6f277c9176c346a59218a4f03af942cf-draft.png",
+          "crop": null,
+          "size": [
+            1024,
+            128
+          ]
+        },
+        {
+          "source_id": "684eb85fd7ac720a3d423b0cc1f4dd84e5c58efd08feb98f2ff144189b437900",
+          "label": "Gym/Controls texT",
+          "art": "controls-v1-20261020/684eb85fd7ac720a3d423b0cc1f4dd84e5c58efd08feb98f2ff144189b437900-draft.png",
+          "crop": null,
+          "size": [
+            1024,
+            128
+          ]
+        },
+        {
+          "source_id": "d62e0f39e7f6b815fe6a9233d46437c0eb00e107392908d28e8b6415cdc32a25",
+          "label": "Gym/Controls 43",
+          "art": "controls-v1-20261020/d62e0f39e7f6b815fe6a9233d46437c0eb00e107392908d28e8b6415cdc32a25-draft.png",
+          "crop": null,
+          "size": [
+            256,
+            1024
+          ]
+        },
+        {
+          "source_id": "a4c6ec9072766ae153acb406d41a51165289934ff5ab304c7dcf99a5cac8652a",
+          "label": "Gym/Controls 41",
+          "art": "controls-v1-20261020/a4c6ec9072766ae153acb406d41a51165289934ff5ab304c7dcf99a5cac8652a-draft.png",
+          "crop": null,
+          "size": [
+            256,
+            512
+          ]
+        },
+        {
+          "source_id": "6aabda07d86ca806082d23f93228cdb8df85095809d39739664cfccd9c10bc4d",
+          "label": "Gym/Controls 47",
+          "art": "controls-v1-20261020/6aabda07d86ca806082d23f93228cdb8df85095809d39739664cfccd9c10bc4d-draft.png",
+          "crop": null,
+          "size": [
+            256,
+            512
+          ]
+        }
+      ]
+    }
+  }
+}

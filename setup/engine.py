@@ -1048,6 +1048,9 @@ class Engine:
                 self.activate()
 
 
+TEXTURE_PACK_LIST_MAX = 1023
+
+
 def enable_hd_packs(data, packs, previous=()):
     """Change only texture enabled/pack keys; preserve other settings and comments."""
     if not packs or any(not re.fullmatch(r'faithful-hd-[0-9a-f]{12}-(opacity|channels)', p) for p in packs):
@@ -1061,7 +1064,8 @@ def enable_hd_packs(data, packs, previous=()):
     old = old_values[-1] if old_values else None
     retained = [p.strip() for p in old.group(1).split(';') if p.strip() and p.strip() not in previous and p.strip() not in packs] if old else []
     combined = ';'.join(retained + list(packs))
-    if len(combined.encode('ascii')) >= 256:
+    # The game holds TEXTURE_PACK_LIST_MAX bytes (RECOMP_SETTING_TEXT_MAX less its terminator).
+    if len(combined.encode('utf-8')) > TEXTURE_PACK_LIST_MAX:
         raise SetupError('Texture pack list is too long; shorten existing pack names', 2)
     def updated(body):
         for key, value in (('enabled','1'),('packs',combined)):

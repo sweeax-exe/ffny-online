@@ -151,6 +151,13 @@ def cmd_grep(text, args):
 
 
 def main(argv=None):
+    # Windows consoles and redirected output may use a legacy code page. Status
+    # symbols should degrade to a stand-in instead of preventing the hand-off.
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(errors='replace')
+        except (AttributeError, ValueError):
+            pass
     ap = argparse.ArgumentParser(description=__doc__.split('\n\n')[0],
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--file', default=DEFAULT)

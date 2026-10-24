@@ -31,6 +31,7 @@
 #include <vector>
 #include <map>
 #include "pc_ui_model.h"
+#include "pc_mods.h"
 #include "pc_ui_theme.h"
 #include "pc_ui_actions.h"
 #include "pc_launcher_home.h"
@@ -734,7 +735,9 @@ static void page_display()
 }
 
 static std::vector<pcui::Pack> g_packs;
+static std::vector<pcui::ModGroup> g_mod_groups;
 static std::string g_pack_key, g_pack_path, g_pack_status;
+static std::map<std::string,std::string> g_pack_conflicts;
 static void refresh_packs(bool force = false)
 {
     std::string key = get_text("textures", "packs"), path = pcui::folder_path(pcui::Folder::Mods);
@@ -743,6 +746,8 @@ static void refresh_packs(bool force = false)
         g_pack_key = key;
         g_pack_path = path;
         g_packs = pcui::inventory(std::filesystem::u8path(path), key);
+        g_mod_groups = pcui::mod_groups(std::filesystem::u8path(path),g_packs);
+        g_pack_conflicts = pcui::pack_conflicts(std::filesystem::u8path(path),g_packs);
     }
 }
 static bool packs_available()
@@ -765,71 +770,201 @@ static void save_packs()
     recomp_settings_set_text("textures", "packs", text.c_str());
     commit();
     g_pack_key = text;
-    g_pack_status = "Saved. Later packs take priority; applies at next launch.";
+    g_pack_conflicts = pcui::pack_conflicts(std::filesystem::u8path(g_pack_path),g_packs);
+    g_pack_status = "Saved. Higher priority overrides lower priority; applies at next launch.";
 }
 static void page_textures()
 {
-    ImGui::SeparatorText("Local texture packs");
-    settings_group("textures", {"enabled"});
+    const bool launcher = g_mode == UI_LAUNCHER;
+    static bool requested = false;
+    if (launcher && !requested) { pcui::mod_start("status"); requested = true; }
     refresh_packs();
     bool locked = find("textures", "packs")->source == RECOMP_SETTING_FROM_ENV;
-    if (locked)
-        ImGui::TextWrapped("Pack selection is set for this run by RECOMP_TEXTURE_PACKS.");
-    if (ImGui::Button("Refresh packs"))
-        refresh_packs(true);
-    ImGui::SameLine();
-    if (ImGui::Button("Open Mods Folder"))
-        pcui::open_path(g_pack_path);
-    ImGui::TextWrapped("Later selected packs take priority. Pack changes apply next launch.");
-    if (std::none_of(g_packs.begin(), g_packs.end(), [](const pcui::Pack &p) { return p.problem.empty(); }))
-        ImGui::TextWrapped(
-            "No local packs found. Setup can generate the faithful HD packs from your own dump.");
-    ImGui::BeginDisabled(locked);
-    for (size_t i = 0; i < g_packs.size(); i++)
-    {
-        auto &p = g_packs[i];
-        const std::string pack_id = p.name;
-        ImGui::PushID((int)i);
-        bool checked = p.selected;
-        ImGui::BeginDisabled(!p.problem.empty() && !p.selected);
-        if (ImGui::Checkbox(p.name.c_str(), &checked))
-        {
-            p.selected = checked;
-            save_packs();
-        }
-        ui_target(("pack." + pack_id).c_str());
+    ImGui::SeparatorText("Installed mods");
+    if (pcui::mod_recovery_needed()) {
+        ImGui::TextWrapped("An interrupted installation needs recovery before Play. If recovery fails, files are preserved in the data folder under mod-manager; see the status below.");
+        ImGui::BeginDisabled(!launcher || pcui::mod_busy());
+        if (ImGui::Button("Retry recovery")) pcui::mod_start("recover");
+        ui_target("mods.recover");
         ImGui::EndDisabled();
-        if (p.selected)
-        {
-            ImGui::SameLine();
-            ImGui::BeginDisabled(i == 0);
-            if (ImGui::SmallButton("Earlier"))
-            {
-                std::swap(g_packs[i], g_packs[i - 1]);
-                save_packs();
-            }
-            ui_target(("pack.earlier." + pack_id).c_str());
+    }
+    settings_group("textures", {"enabled"});
+    if (locked) ImGui::TextWrapped("Pack selection is set for this run by RECOMP_TEXTURE_PACKS.");
+    if (ImGui::Button("Refresh local mods")) {
+        refresh_packs(true);
+        if (launcher) pcui::mod_start("status");
+    }
+    ui_target("mods.local-refresh");
+    ImGui::SameLine();
+    if (ImGui::Button("Open Mods Folder")) pcui::open_path(g_pack_path);
+    if (ImGui::Button("Load Order...")) ImGui::OpenPopup("Load Order");
+    ui_target("mods.order");
+    ImGui::TextWrapped("Enable installed mods below. Load Order sets which mod wins when textures overlap.");
+    const auto &managed = pcui::mod_view().installed;
+    auto display_name = [&](const pcui::ModGroup &group) {
+        auto found=managed.find(g_packs[group.members.front()].name);
+        return found==managed.end() ? group.name : found->second.name;
+    };
+    const float scale=ImGui::GetStyle().FontScaleMain;
+    const float available=ImGui::GetContentRegionAvail().x;
+    ImGui::BeginDisabled(locked || pcui::mod_busy());
+    if(ImGui::BeginTable("installed mod table",3,ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) {
+        ImGui::TableSetupColumn("On",ImGuiTableColumnFlags_WidthFixed,ImGui::GetFrameHeight()+8);
+        ImGui::TableSetupColumn("Mod",ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableSetupColumn("Status",ImGuiTableColumnFlags_WidthFixed,std::min(145*scale,available*.30f));
+        ImGui::TableHeadersRow();
+        for(const auto &group:g_mod_groups) {
+            // Missing saved names are warnings, not installed mods to download.
+            if(!group.builtin && g_packs[group.members.front()].problem=="Not installed") continue;
+            auto &p=g_packs[group.members.front()];
+            const std::string pack_id=p.name;
+            auto found=managed.find(pack_id);
+            size_t selected=0; bool valid=true;
+            for(auto i:group.members) { selected+=g_packs[i].selected; valid &= g_packs[i].problem.empty(); }
+            ImGui::PushID(group.id.c_str());
+            ImGui::TableNextRow(); ImGui::TableNextColumn();
+            bool checked=selected==group.members.size();
+            ImGui::BeginDisabled(!valid && !selected);
+            if(ImGui::Checkbox("##enabled",&checked)) { pcui::select_mod(g_packs,group,checked); save_packs(); }
+            ui_target(("pack."+group.id).c_str());
             ImGui::EndDisabled();
-            ImGui::SameLine();
-            ImGui::BeginDisabled(i + 1 == g_packs.size());
-            if (ImGui::SmallButton("Later"))
-            {
-                std::swap(g_packs[i], g_packs[i + 1]);
-                save_packs();
+            ImGui::TableNextColumn();
+            ImGui::TextWrapped("%s",display_name(group).c_str());
+            ImGui::TextDisabled(group.builtin ? "Built-in / generated locally" : found==managed.end() ? "Local mod" : "Project catalogue");
+            if(group.builtin && ImGui::TreeNode("Components and details")) {
+                ImGui::TextWrapped("Generated from your own dump. Transparency textures preserve menu edges; material-channel textures preserve surface data. Both belong to Recomp HD.");
+                for(auto i:group.members) ImGui::TextWrapped("%s: %s",g_packs[i].name.c_str(),g_packs[i].selected?"Enabled":"Disabled");
+                ImGui::TreePop();
             }
-            ui_target(("pack.later." + pack_id).c_str());
-            ImGui::EndDisabled();
+            for(auto i:group.members) {
+                if(!g_packs[i].problem.empty()) ImGui::TextWrapped("%s",g_packs[i].problem.c_str());
+                if(!g_pack_conflicts[g_packs[i].name].empty()) ImGui::TextWrapped("%s",g_pack_conflicts[g_packs[i].name].c_str());
+            }
+            if(found!=managed.end() && launcher) {
+                if(found->second.rollback) {
+                    if(ImGui::SmallButton("Restore previous version")) pcui::mod_start("rollback",pack_id);
+                    ui_target(("mod.rollback."+pack_id).c_str());
+                }
+                ImGui::BeginDisabled(p.selected);
+                if(ImGui::SmallButton("Remove download")) pcui::mod_start("remove",pack_id);
+                ui_target(("mod.remove."+pack_id).c_str());
+                ImGui::EndDisabled();
+                if(p.selected) ImGui::TextWrapped("Disable before removing its download.");
+            }
+            ImGui::TableNextColumn();
+            ImGui::TextWrapped("%s",!valid?"Needs attention":selected && !checked?"Partly enabled":"Installed");
+            if(group.builtin) {
+                ImGui::TextWrapped("%zu component%s",group.members.size(),group.members.size()==1?"":"s");
+                if(group.members.size()==1) ImGui::TextWrapped("Only one generated component found. Setup can generate the full set.");
+            } else if(found!=managed.end()) ImGui::TextWrapped("%s",found->second.version.c_str());
+            ImGui::PopID();
         }
-        if (!p.problem.empty())
-            ImGui::TextWrapped("%s", p.problem.c_str());
-        ImGui::PopID();
+        ImGui::EndTable();
     }
     ImGui::EndDisabled();
-    if (!g_pack_status.empty())
-        ImGui::TextWrapped("%s", g_pack_status.c_str());
-    if (ImGui::CollapsingHeader("Memory and manual pack list"))
-        settings_group("textures", {"cache_mb", "packs"});
+    bool missing=false;
+    for(const auto &p:g_packs) if(p.problem=="Not installed") missing=true;
+    if(missing && ImGui::CollapsingHeader("Unavailable saved pack selections")) {
+        ImGui::TextWrapped("These saved names have no installed folder. They are not extra components that need downloading. Existing selections are kept until you change them.");
+        for(auto &p:g_packs) if(p.problem=="Not installed") {
+            ImGui::PushID(p.name.c_str());
+            bool selected=p.selected;
+            ImGui::BeginDisabled(locked || pcui::mod_busy());
+            if(ImGui::Checkbox(p.name.c_str(),&selected)) { p.selected=selected; save_packs(); }
+            ImGui::EndDisabled();
+            if(p.name=="faithful-hd") ImGui::TextWrapped("Legacy default name. The generated Recomp HD components appear together in the table above when installed.");
+            ImGui::PopID();
+        }
+    }
+    if(g_packs.empty()) ImGui::TextWrapped("No local packs found. Setup can generate Recomp HD textures from your own dump.");
+    const float modal_scale = ImGui::GetStyle().FontScaleMain;
+    const auto viewport = ImGui::GetMainViewport();
+    ImGui::SetNextWindowSize(ImVec2(std::min(760 * modal_scale, viewport->WorkSize.x - 24), std::min(460 * modal_scale, viewport->WorkSize.y - 24)), ImGuiCond_Appearing);
+    ImGui::SetNextWindowPos(ImVec2(viewport->WorkPos.x + viewport->WorkSize.x * .5f, viewport->WorkPos.y + viewport->WorkSize.y * .5f), ImGuiCond_Appearing, ImVec2(.5f,.5f));
+    if (ImGui::BeginPopupModal("Load Order", nullptr, ImGuiWindowFlags_None)) {
+        ImGui::TextWrapped("Highest priority at the top. Mods above override matching textures from mods below. Priority is shown in descending order.");
+        ImGui::BeginChild("ordered mods", ImVec2(0, std::min(250 * modal_scale, viewport->WorkSize.y * .35f)));
+        ImGui::BeginDisabled(locked || pcui::mod_busy());
+        auto order=pcui::priority_groups(g_packs,g_mod_groups);
+        size_t priority=0;
+        for(const auto &p:g_packs) if(p.selected) ++priority;
+        if(ImGui::BeginTable("priority table",3,ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) {
+            ImGui::TableSetupColumn("Priority",ImGuiTableColumnFlags_WidthFixed,75*modal_scale);
+            ImGui::TableSetupColumn("Mod",ImGuiTableColumnFlags_WidthStretch);
+            ImGui::TableSetupColumn("Change",ImGuiTableColumnFlags_WidthFixed,85*modal_scale);
+            ImGui::TableHeadersRow();
+            for(size_t n=0;n<order.size();++n) {
+                const auto &group=order[n];
+                ImGui::PushID(group.id.c_str());
+                ImGui::TableNextRow(); ImGui::TableNextColumn();
+                if(group.members.size()>1) ImGui::Text("%zu - %zu",priority,priority-group.members.size()+1);
+                else ImGui::Text("%zu",priority);
+                priority-=group.members.size();
+                ImGui::TableNextColumn();
+                ImGui::TextWrapped("%s",display_name(group).c_str());
+                if(group.builtin && group.members.size()>1) ImGui::TextWrapped("Both built-in components");
+                if(!g_packs[group.members.front()].problem.empty()) ImGui::TextWrapped("%s (saved selection)",g_packs[group.members.front()].problem.c_str());
+                ImGui::TableNextColumn();
+                bool moved=false;
+                ImGui::BeginDisabled(n==0);
+                if(ImGui::SmallButton("Higher")) moved=pcui::move_priority(g_packs,g_mod_groups,n,true);
+                ui_target(("pack.higher."+group.id).c_str());
+                ui_target(("pack.later."+group.id).c_str()); // Existing automation alias, same loader direction.
+                ImGui::EndDisabled();
+                ImGui::BeginDisabled(n+1==order.size());
+                if(ImGui::SmallButton("Lower")) moved=pcui::move_priority(g_packs,g_mod_groups,n,false);
+                ui_target(("pack.lower."+group.id).c_str());
+                ui_target(("pack.earlier."+group.id).c_str());
+                ImGui::EndDisabled(); ImGui::PopID();
+                if(moved) { save_packs(); refresh_packs(true); break; }
+            }
+            ImGui::EndTable();
+        }
+        ImGui::EndDisabled(); ImGui::EndChild();
+        ImGui::TextWrapped("Changes apply on the next game start.");
+        if (ImGui::Button("Done") || ImGui::IsKeyPressed(ImGuiKey_Escape) || ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight)) ImGui::CloseCurrentPopup();
+        ui_target("mods.order-done");
+        ImGui::EndPopup();
+    }
+    if (!g_pack_status.empty()) ImGui::TextWrapped("%s",g_pack_status.c_str());
+    ImGui::SeparatorText("Project catalogue");
+    if (!launcher) ImGui::TextWrapped("Return to the launcher to download, update or remove mods. Current packs stay in use during this game.");
+    ImGui::BeginDisabled(!launcher || pcui::mod_busy());
+    bool testing_versions = pcui::mod_prerelease();
+    if (ImGui::Checkbox("Show testing versions (release candidates)", &testing_versions)) {
+        pcui::mod_set_prerelease(testing_versions); pcui::mod_start("status");
+    }
+    ui_target("mods.testing-versions");
+    if (ImGui::Button("Refresh catalogue")) pcui::mod_start("refresh");
+    ui_target("mods.catalogue-refresh");
+    ImGui::EndDisabled();
+    if (pcui::mod_busy()) {
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel")) pcui::mod_cancel();
+        ui_target("mods.cancel");
+    }
+    if (!pcui::mod_status().empty()) ImGui::TextWrapped("%s",pcui::mod_status().c_str());
+    if (!pcui::mod_view().catalogue.empty()) ImGui::TextWrapped("%s",pcui::mod_view().catalogue.c_str());
+    for (const auto &mod : pcui::mod_view().catalogue_mods) {
+        ImGui::PushID(mod.id.c_str());
+        ImGui::Separator();
+        ImGui::TextUnformatted(mod.name.c_str());
+        if(!mod.authors.empty()) ImGui::TextWrapped("By %s",mod.authors.c_str());
+        ImGui::TextWrapped("%s",mod.description.c_str());
+        if (mod.revoked) ImGui::TextWrapped("Installed version withdrawn from the catalogue. Disable it or choose a reviewed replacement.");
+        if (!mod.installed.empty()) ImGui::Text("Installed: %s",mod.installed.c_str());
+        if (!mod.latest.empty()) ImGui::Text("Available: %s / %.1f MB",mod.latest.c_str(),mod.bytes/1000000.0);
+        else ImGui::TextWrapped("No compatible version for this runtime and selected channel.");
+        if (mod.channel == "prerelease") ImGui::TextWrapped("Testing version: please report problems before the final release.");
+        if (!mod.load_after.empty()) ImGui::TextWrapped("Suggested after: %s",mod.load_after.c_str());
+        ImGui::BeginDisabled(!launcher || pcui::mod_busy() || !mod.compatible || (!mod.installed.empty() && !mod.update));
+        if (ImGui::Button(mod.installed.empty() ? "Download and install" : "Update available")) pcui::mod_start("install",mod.id);
+        ui_target(("mod.install."+mod.id).c_str());
+        ImGui::EndDisabled(); ImGui::PopID();
+    }
+    if (ImGui::CollapsingHeader("Memory and manual pack list")) settings_group("textures", {"cache_mb", "packs"});
 }
+
 void ui_home_fields()
 {
     bool two = ImGui::GetContentRegionAvail().x > 390 * ImGui::GetStyle().FontScaleMain;
@@ -1281,6 +1416,12 @@ UiResult ui_draw(UiMode mode, float x, float y, float width, float height)
     g_targets.clear();
     g_help.clear();
     pcui::setup_poll();
+    if (pcui::mod_poll()) refresh_packs(true);
+    static bool recovery_attempted = false;
+    if (mode == UI_LAUNCHER && pcui::mod_recovery_needed() && !pcui::mod_busy() && !recovery_attempted) {
+        recovery_attempted = true; pcui::mod_start("recover");
+    }
+    if (!pcui::mod_recovery_needed()) recovery_attempted = false;
     float scale = ImGui::GetStyle().FontScaleMain;
     ImGui::SetNextWindowPos(ImVec2(x, y));
     ImGui::SetNextWindowSize(ImVec2(width, height));
@@ -1315,7 +1456,7 @@ UiResult ui_draw(UiMode mode, float x, float y, float width, float height)
         auto home = ui_launcher_home(ImGui::GetContentRegionAvail().x, ImGui::GetContentRegionAvail().y,
                                      g_return_focus ? g_home_return.c_str() : nullptr);
         g_return_focus = false;
-        result.play = home.play;
+        result.play = home.play && !pcui::mod_busy() && !pcui::mod_recovery_needed();
         if (home.route >= 1 && home.route <= 3)
         {
             g_advanced = true;
@@ -1465,10 +1606,12 @@ UiResult ui_draw(UiMode mode, float x, float y, float width, float height)
         ImGui::SameLine();
         if (advanced || width < 900 * scale)
         {
+            ImGui::BeginDisabled(pcui::mod_busy() || pcui::mod_recovery_needed());
             if (pcui::play_button("PLAY", ImVec2(100 * scale, 0),
                                   tight ? ImGui::GetFontSize() / scale : 30.0f))
                 result.play = true;
             ui_target("Play");
+            ImGui::EndDisabled();
             ImGui::SameLine();
         }
         if (!compact_footer)
@@ -1493,6 +1636,10 @@ UiResult ui_draw(UiMode mode, float x, float y, float width, float height)
             if (ImGui::GetContentRegionAvail().x >= ImGui::CalcTextSize(status).x)
                 ImGui::TextDisabled("%s", status);
         }
+    }
+    if (mode == UI_LAUNCHER && pcui::mod_busy()) {
+        result.play = false;
+        ImGui::TextWrapped("%s", pcui::mod_status().c_str());
     }
     if (g_setup_request)
     {

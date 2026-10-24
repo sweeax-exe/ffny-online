@@ -6,6 +6,10 @@ Fighters selection. They do not cover every mode or a full Story campaign.
 
 ## Remaining investigations
 
+- **v0.11.0: fighter HUD moves inward while paused ([#95](https://github.com/vyanhursky/DefJamFFNY-recomp/issues/95)).** In widescreen fights, opening the in-game pause menu can move the health/Blazin bars, names and scores to the centered 4:3 positions. The pause panel stays centered. This is an accepted release limitation, not a fixed issue.
+- **v0.11.0: fire-escape transition gap.** A black rectangle appears briefly above the leading left scenery tile during the title-to-main-menu pan. It also reproduces without texture packs. Windows draw traces establish an uncovered scene region; the underlying geometry/transform cause remains unresolved. Retained as a known limitation; see the [Windows report](research/windows-integrated-menu-mods-rc-2026-10-23.md).
+- **HD Widescreen Menus coverage.** Select User ID, Choose Teams and Choose Venue still use their original backgrounds and side-fill behavior. Their widescreen artwork is deferred to modpack 1.1. The menu pack is a default-channel download (`1.0.0`, using the accepted RC2 archive), separate from generated Recomp HD textures. The owner accepted Steam Deck playtesting; final macOS validation remains unconfirmed.
+
 - **Audio crackle (fixed in v0.9.3, [#30](https://github.com/vyanhursky/DefJamFFNY-recomp/issues/30)).**
   Cutscenes, menus and matches crackled because the game's audio thread refilled its 50 ms
   mix buffer late and old audio played again. v0.9.3 fixes the causes in the port (a game

@@ -51,7 +51,12 @@ mkdir "$OUT/image/Licenses"
 unzip -q -o "$OUT/setup-payload.zip" 'licenses/*' -d "$OUT/licenses-unpacked"
 cp "$OUT"/licenses-unpacked/licenses/* "$OUT/image/Licenses/"
 cp LICENSE "$OUT/image/Licenses/Def-Jam-Recompiled-MIT.txt"
-hdiutil create -volname "Def Jam Recompiled Setup" -srcfolder "$OUT/image" -ov -format UDZO "$OUT/DefJamSetup.dmg" > /dev/null
+# Leave filesystem metadata/headroom in the temporary image; hdiutil can
+# underestimate a small srcfolder containing an already-compressed payload.
+IMAGE_KIB=$(du -sk "$OUT/image" | cut -f1)
+IMAGE_MIB=$(( (IMAGE_KIB + 1023) / 1024 + 128 ))
+df -h "$OUT"
+hdiutil create -size "${IMAGE_MIB}m" -volname "Def Jam Recompiled Setup" -srcfolder "$OUT/image" -ov -format UDZO "$OUT/DefJamSetup.dmg" > /dev/null
 
 # 5. Inventory, checksum and provenance of exactly what a release would attach.
 "$PYTHON" scripts/check-setup-assets.py --payload "$OUT/setup-payload.zip" --installer "$OUT/DefJamSetup.dmg" \

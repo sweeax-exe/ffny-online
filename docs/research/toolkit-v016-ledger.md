@@ -118,7 +118,7 @@ in 16.5 min (30.5 on `32aa980`, disasm 155 s against 965), and the installed gam
 menu at median 60.
 
 
-## Windows audio in borderless fullscreen (2026-10-24, D150)
+## Windows audio in borderless fullscreen (2026-10-24, D199)
 
 The owner's play-test (pin `2b73d81`) crackled all through the opening scene. Every scripted run before
 it was windowed with default settings (`RECOMP_SETTINGS=none`, 4:3); his settings play borderless
@@ -136,21 +136,21 @@ fullscreen, widescreen, render scale 3. Opening scene, 330 s, holes in the mix b
 | migrated, fullscreen, 6 x 512 (64 ms) | 5, 5 | 0, 0 |
 | migrated, fullscreen, 8 x 512 (85 ms) | 5, 4 | 0, 0 |
 | migrated, fullscreen, 4 x 512, upstream's in-thread APU interrupt (local experiment) | 270, 281 | 76, 73 |
-| **migrated with the D150 default (6 x 512), owner's settings, no overrides** | **5, 6** | **0, 0** |
+| **migrated with the D199 default (6 x 512), owner's settings, no overrides** | **5, 6** | **0, 0** |
 
 Cause: upstream #193 (v0.14.0, `a16163f`) moved XAudio2 from a fixed 1024 x 3 (64 ms) to 512 x 4 (43 ms)
 and paces the APU frame thread by the device queue, rendering ahead in a burst whenever the queue
 falls to its low mark. In borderless fullscreen each `Present` waits for the display; that jitter
 reaches the low mark of a 43 ms queue, and the burst moves the play cursor past the title's own
 stream writes. The fork's APU interrupt path is not the cause: upstream's in-thread delivery also
-crackles. Fix (D150): the port defaults `RECOMP_AUDIO_BUF_COUNT=6` on Windows (`src/main.c`), the
+crackles. Fix (D199): the port defaults `RECOMP_AUDIO_BUF_COUNT=6` on Windows (`src/main.c`), the
 smallest clean depth and v0.10.x's latency. Upstream issue https://github.com/sp00nznet/xboxrecomp/issues/259.
 Issue #93 (power throttling) is likely the same queue starvation by another route.
 
 
 ## Windows audio: the second cause (2026-10-24)
 
-The owner's re-test with D150 still crackled. What the device is given (`RECOMP_APU_PCM`) had step clicks at
+The owner's re-test with D199 still crackled. What the device is given (`RECOMP_APU_PCM`) had step clicks at
 32-sample slice edges in the opening scene's first three minutes, in every display mode: 386-422 per 330 s,
 v0.10.7 2. They are already in voices 0xF8/0xFA's fetched samples, and sit at lap positions 2,371-2,399 of the
 2,400-frame six-channel buffer: its last page. The buffer is a window allocation (physical pages 0x01309-0x01310);
@@ -166,7 +166,7 @@ shared-page case (it fails without the change). Opening scene, device clicks per
 
 | Build | windowed, defaults | owner settings, fullscreen |
 |---|---|---|
-| pin `2b73d81` + D150 | 386-422 | 386 |
+| pin `2b73d81` + D199 | 386-422 | 386 |
 | with `3e63e7b` | 1 | 1, 1 |
 | v0.10.7 | | 2 |
 

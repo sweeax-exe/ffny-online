@@ -293,6 +293,11 @@ defined precedence order, and a decision about whether overrides sit at the arch
 level. The game's data is in EA archive containers, so entry-level replacement is the useful granularity.
 Do not grow this organically out of debugging hooks.
 
+The [mod-system design](research/mod-system-design.md) (D104) covers the curated
+catalogue and future override types. Its texture-only helper/launcher portion is
+implemented in the [integrated RC](research/integrated-menu-launcher-rc-2026-10-23.md);
+release acceptance and protected publication are tracked there.
+
 ## 5. Move to Clang before any native Linux work
 
 **Why.** The mature projects require Clang, including on Windows, where they use `clang-cl`. We are on the
