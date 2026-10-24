@@ -5,7 +5,9 @@ remove the mod-specific load-order recommendation and credit owned modpacks as
 **vyanhursky**. The first is implemented and rebuilt in the isolated preview;
 the second is in [catalogue PR2](https://github.com/vyanhursky/DefJamFFNY-mods/pull/2),
 commit`c8940e2`. It changes only the author field, not archive bytes or hashes.
-The live signed catalogue still credits `Vlad` until reviewed republication.
+The source correction was merged and publication40100204475 succeeded. On
+2026-10-24 the real client verified signed live revision2 and authors=vyanhursky
+with unchanged project trust pins.
 
 ## Completed
 
@@ -49,3 +51,13 @@ The live signed catalogue still credits `Vlad` until reviewed republication.
 PR91 stays draft while these gates remain. No game PR merge, version tag, stable
 release, catalogue merge or protected publication was performed by this follow-up.
 The ordinary user installation/saves remain separate from preview fixtures.
+
+
+## Preview authorization — 2026-10-24
+
+D197 supersedes the earlier no-merge/no-release disposition for a preview only.
+The owner authorizes merging PR91 and publishing v0.11.0 with prerelease=true
+and latest=false, accepting issue #95, the fire-escape gap and the three
+backgrounds deferred to modpack 1.1. The owner will playtest Mac/Linux.
+v0.10.7 remains latest stable. Final head CI, provenance/hash verification and
+isolated final Windows bundled-installer checks still gate publication.

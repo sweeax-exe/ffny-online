@@ -25,6 +25,8 @@ the game on your machine. PS2 and GameCube copies cannot be used.
 [Report a problem](https://github.com/vyanhursky/DefJamFFNY-recomp/issues/new/choose) ·
 [Join the Discord](https://discord.gg/xNvBs23ZBw)
 
+**[v0.11.0 Preview — widescreen menus and Mods tables](https://github.com/vyanhursky/DefJamFFNY-recomp/releases/tag/v0.11.0)** is available for testing. It includes accepted visual issues; final Mac/Linux playtesting is pending. The latest stable release remains v0.10.7.
+
 ## Gameplay
 
 ![Blaze and Doc face-off: original 4:3 framing versus wider 16:9, with faithful HD textures on both sides](docs/media/widescreen-comparison.png)
