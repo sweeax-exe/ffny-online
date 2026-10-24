@@ -31,6 +31,7 @@
 #include <string.h>
 #include <ctype.h>
 #include <mmsystem.h>
+#include "input_host.h"
 #pragma comment(lib, "winmm.lib")
 
 #define RATE        16000
@@ -142,6 +143,19 @@ static int key_held(int vk)
     if (!vk || !fg) return 0;
     GetWindowThreadProcessId(fg, &pid);
     return pid == GetCurrentProcessId() && (GetAsyncKeyState(vk) & 0x8000) != 0;
+}
+
+/* the controller's push-to-talk button (online.voice_pad) is held on this PC's pads (a player's wish:
+ * "map a ptt button on the controller", 2026-10-23); 0 when it is off */
+static int pad_held(void)
+{
+    static const WORD masks[] = { 0, 0x0020 /* back */, 0x0040 /* left stick */, 0x0080 /* right stick */,
+                                  0x0001 /* d-pad up */, 0x0002 /* d-pad down */ };
+    int which = recomp_settings_get("online", "voice_pad", 0);
+    XBOX_INPUT_STATE s;
+    if (which <= 0 || which >= (int)(sizeof(masks) / sizeof(masks[0]))) return 0;
+    memset(&s, 0, sizeof(s));
+    return xbox_HostInputGetLocalState(&s) == ERROR_SUCCESS && (s.Gamepad.wButtons & masks[which]) != 0;
 }
 
 /* ---- the speakers: open while in a room, fed 20 ms at a time ---------------------------------- */
@@ -366,6 +380,12 @@ static DWORD WINAPI voice_thread(LPVOID unused)
     double phase = 0;
     ULONGLONG next_tone = 0;
     (void)unused;
+    {   /* named for crash reports (main.c prints the thread's name) */
+        typedef HRESULT (WINAPI *SetThreadDescriptionFn)(HANDLE, PCWSTR);
+        SetThreadDescriptionFn name = (SetThreadDescriptionFn)(void *)GetProcAddress(GetModuleHandleW(L"kernel32.dll"),
+                                                                                    "SetThreadDescription");
+        if (name) name(GetCurrentThread(), L"voice chat");
+    }
     for (;;) {
         int mode = recomp_settings_get("online", "voice", 1);     /* 0 off, 1 push to talk, 2 open */
         int want = mode != 0 && netplay_voice_room();
@@ -390,14 +410,14 @@ static DWORD WINAPI voice_thread(LPVOID unused)
         }
         recomp_settings_get_text("online", "voice_key", keyname, sizeof(keyname), "T");
         vk = key_code(keyname);
-        if (mode == 1 && !s_in && key_held(vk)) open_mic();       /* the microphone opens at the first press */
+        if (mode == 1 && !s_in && (key_held(vk) || pad_held())) open_mic();   /* the microphone opens at the first press */
         if (mode == 2) open_mic();
         if (!s_in) { InterlockedExchange(&s_sending, 0); continue; }
         while ((got = read_mic(pcm)) != 0) {
             int send;
             if (got < 0) continue;
             if (mode == 1) {
-                send = key_held(vk);
+                send = key_held(vk) || pad_held();
             } else {                    /* open: send while the voice is above the room noise, and a moment after */
                 double sum = 0;
                 for (i = 0; i < FRAME; i++) sum += (double)pcm[i] * pcm[i];

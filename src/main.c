@@ -485,6 +485,37 @@ static LONG CALLBACK veh_handler(PEXCEPTION_POINTERS ep)
                     shown++;
                 }
             }
+            /* Which thread, and the words near the stack top that point into a system module: two
+             * players' build-22 crashes jumped to 0x1E and 0x111 on a thread that is not the game's,
+             * and nothing on the stack pointed into the exe, so the call came from a DLL (an audio
+             * callback, a thread pool) that the scan above cannot name. */
+            {
+                typedef HRESULT (WINAPI *GetThreadDescriptionFn)(HANDLE, PWSTR *);
+                GetThreadDescriptionFn describe = (GetThreadDescriptionFn)(void *)GetProcAddress(
+                    GetModuleHandleW(L"kernel32.dll"), "GetThreadDescription");
+                PWSTR desc = NULL;
+                if (describe && SUCCEEDED(describe(GetCurrentThread(), &desc)) && desc) {
+                    fprintf(stderr, "  thread %lu \"%ls\", rsp 0x%llX\n", GetCurrentThreadId(), desc,
+                            (unsigned long long)ep->ContextRecord->Rsp);
+                    LocalFree(desc);
+                } else
+                    fprintf(stderr, "  thread %lu, rsp 0x%llX\n", GetCurrentThreadId(),
+                            (unsigned long long)ep->ContextRecord->Rsp);
+                shown = 0;
+                for (int i = 0; i < 64 && shown < 12; i++) {
+                    HMODULE m = NULL;
+                    wchar_t name[MAX_PATH];
+                    if (sp[i] < 0x10000 || (sp[i] >= (uintptr_t)self && sp[i] < (uintptr_t)self + 0x10000000ULL))
+                        continue;
+                    if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                                            GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, (LPCWSTR)sp[i], &m) || !m)
+                        continue;
+                    if (!GetModuleFileNameW(m, name, MAX_PATH)) continue;
+                    fprintf(stderr, "    [%d] %ls+0x%llX\n", i, wcsrchr(name, L'\\') ? wcsrchr(name, L'\\') + 1 : name,
+                            (unsigned long long)(sp[i] - (uintptr_t)m));
+                    shown++;
+                }
+            }
         }
         fflush(stderr);
     }

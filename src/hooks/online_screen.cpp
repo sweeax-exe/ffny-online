@@ -1261,19 +1261,22 @@ void draw_voice(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r
     if (r.in_room)
         for (int i = 0; i < r.player_count && n_others < NETPLAY_MAX_PLAYERS; i++)
             if (r.players[i].slot != r.you) others[n_others++] = i;
-    const int fixed = 4, rows = fixed + n_others + 1;           // the settings, the players, BACK
+    static const char *const pads[] = { "OFF", "BACK", "LEFT STICK CLICK", "RIGHT STICK CLICK", "D-PAD UP", "D-PAD DOWN" };
+    const int fixed = 5, rows = fixed + n_others + 1;           // the settings, the players, BACK
     if (S.voice_sel >= rows) S.voice_sel = rows - 1;
     if (pad.up) S.voice_sel = (S.voice_sel + rows - 1) % rows;
     if (pad.down) S.voice_sel = (S.voice_sel + 1) % rows;
     int step = pad.right ? 1 : pad.left ? -1 : 0;
     int mode = recomp_settings_get("online", "voice", 1), vol = recomp_settings_get("online", "voice_volume", 100);
     int mic = recomp_settings_get("online", "voice_mic_volume", 100), agc = recomp_settings_get("online", "voice_auto_level", 1);
+    int vpad = recomp_settings_get("online", "voice_pad", 0);
     if (step) {
         switch (S.voice_sel) {
         case 0: recomp_settings_set("online", "voice", (mode + step + 3) % 3); break;
         case 1: recomp_settings_set("online", "voice_volume", std::max(0, std::min(200, vol + step * 10))); break;
         case 2: recomp_settings_set("online", "voice_mic_volume", std::max(0, std::min(400, mic + step * 10))); break;
         case 3: recomp_settings_set("online", "voice_auto_level", agc ? 0 : 1); break;
+        case 4: recomp_settings_set("online", "voice_pad", (vpad + step + 6) % 6); break;
         default:
             if (S.voice_sel - fixed < n_others) {
                 int slot = r.players[others[S.voice_sel - fixed]].slot;
@@ -1284,6 +1287,7 @@ void draw_voice(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r
         vol = recomp_settings_get("online", "voice_volume", 100);
         mic = recomp_settings_get("online", "voice_mic_volume", 100);
         agc = recomp_settings_get("online", "voice_auto_level", 1);
+        vpad = recomp_settings_get("online", "voice_pad", 0);
     }
 
     page_title(dl, f, "VOICE CHAT");
@@ -1312,6 +1316,9 @@ void draw_voice(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r
         } else if (i == 3) {
             snprintf(label, sizeof(label), "AUTO LEVEL");
             snprintf(value, sizeof(value), agc ? "ON  (quiet microphones louder)" : "OFF");
+        } else if (i == 4) {
+            snprintf(label, sizeof(label), "TALK BUTTON ON THE CONTROLLER");
+            snprintf(value, sizeof(value), "%s", pads[vpad >= 0 && vpad < 6 ? vpad : 0]);
         } else {
             const NetRoomPlayer &p = r.players[others[i - fixed]];
             int pv = voice_player_volume(p.slot);
@@ -1324,7 +1331,7 @@ void draw_voice(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r
     }
     // the door: how it works, and the microphone's level
     door_text(dl, f, &tex("ui/online_icon.png"), "VOICE CHAT", "TALK IN ROOMS AND FIGHTS",
-              "Everyone in your room hears you. Hold the key to talk (change it in the launcher). "
+              "Everyone in your room hears you. Hold the key, or the controller button you pick here, to talk. "
               "Turn a player to 0 to mute them.");
     // the microphone's level, under the rows
     float meter = voice_mic_meter(), my = 80 + rows * 39 + 6;

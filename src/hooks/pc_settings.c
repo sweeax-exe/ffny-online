@@ -36,6 +36,7 @@ static const char *const k_filter[] = { "smooth", "sharp", NULL };
 static const char *const k_aa[] = { "off", "on", NULL };
 static const char *const k_anisotropy[] = { "off", "2x", "4x", "8x", "16x", NULL };
 static const char *const k_voice[] = { "off", "push_to_talk", "open", NULL };
+static const char *const k_voice_pad[] = { "off", "back", "left_stick", "right_stick", "dpad_up", "dpad_down", NULL };
 
 static RecompSetting g_display_settings[] = {
     { "textures", "enabled", RECOMP_SETTING_BOOL, 0, 0, 0, NULL, NULL, RECOMP_SETTING_RESTART,
@@ -59,6 +60,9 @@ static RecompSetting g_display_settings[] = {
       "key below) or open (sends while you speak; use a headset)." },
     { "online", "voice_key", RECOMP_SETTING_STRING, 0, 0, 0, NULL, NULL, 0,
       "The push-to-talk key: a letter or digit, F1-F12, Tab, CapsLock, LAlt, Mouse4 or Mouse5.", "T" },
+    { "online", "voice_pad", RECOMP_SETTING_ENUM, 0, 0, 0, k_voice_pad, NULL, 0,
+      "Push to talk on the controller as well: off, back, left_stick or right_stick (a click), dpad_up or "
+      "dpad_down. The game sees the press too." },
     { "online", "voice_volume", RECOMP_SETTING_INT, 100, 0, 200, NULL, NULL, 0,
       "Volume of the other players' voices in percent; 0 mutes them." },
     { "online", "voice_mic_volume", RECOMP_SETTING_INT, 100, 0, 400, NULL, NULL, 0,

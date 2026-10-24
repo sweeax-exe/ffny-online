@@ -1066,7 +1066,7 @@ static void page_online(UiMode mode)
         if (ImGui::Button("Go offline", ImVec2(ImGui::GetFontSize() * 7, 0))) netplay_stop();
     }
     ImGui::SeparatorText("Voice chat");
-    settings_group("online", { "voice", "voice_key", "voice_volume", "voice_mic_volume", "voice_auto_level" });
+    settings_group("online", { "voice", "voice_key", "voice_pad", "voice_volume", "voice_mic_volume", "voice_auto_level" });
     {
         float meter = voice_mic_meter();
         if (meter >= 0.0f) {
