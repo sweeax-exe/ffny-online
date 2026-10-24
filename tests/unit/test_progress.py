@@ -66,6 +66,15 @@ def test_sections_are_split_on_their_numbers():
     assert s[7].strip().endswith('Do this next.')
 
 
+def test_brief_prints_on_a_legacy_windows_console(sample):
+    import subprocess
+    result = subprocess.run(
+        [sys.executable, spec.origin, '--file', sample, 'brief'],
+        env=dict(os.environ, PYTHONIOENCODING='cp1252'), capture_output=True)
+    assert result.returncode == 0, result.stderr.decode('ascii', 'replace')
+    assert b'Updater:' in result.stdout and b'Do this next.' in result.stdout
+
+
 def test_section_prints_the_whole_section(sample, capsys):
     out = run(capsys, sample, 'section', '7')
     assert out.startswith('## 7. Hand-off') and 'Do this next.' in out and '\r' not in out

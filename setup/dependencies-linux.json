@@ -7,13 +7,26 @@
     "capstone-5.0.9-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl": "273fd8d747d2e35c88f91450be51a603ecfaafb00d96d9f315dcb8689c86193e",
     "pyxbe-1.0.4-py3-none-any.whl": "8c8a354b824ab978ca088472adeb2395f0704c71c0347c94b1eda639a2e34416",
     "numpy-2.5.2-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl": "29b86ff8a6cc556b47ec6b64b194815cc80e6bf5eedcc6cddfd65318cb0b4eee",
-    "pillow-12.3.0-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl": "0847a763afefb695bc912d7c131e7e0632d4edc1d8698f58ddabec8e46b8b6d3"
+    "pillow-12.3.0-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl": "0847a763afefb695bc912d7c131e7e0632d4edc1d8698f58ddabec8e46b8b6d3",
+    "cryptography-50.0.2-cp311-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.whl": "630ebfea3bf689d075f82316324ff7433dc447fe6bc1bfc76524b74b4a9567d2",
+    "cffi-2.0.0-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.whl": "c8d3b5532fc71b7a77c09192b4a5a200ea992702734a2e9279a37f2478236f26",
+    "pycparser-2.23-py3-none-any.whl": "e5c6e8d3fbad53479cab09ac03729e0a9faf2bee3db8208a550daf5af81a5934"
   },
   "container": {
     "comment": "The build toolchain for hosts without one (SteamOS). Arch Linux as of the archive date below, which carries the same glibc, SDL3, shaderc and Vulkan loader as SteamOS 3.8, so the game it builds runs on the host's own libraries.",
     "image": "docker.io/library/archlinux@sha256:af82cf8d6d8e461701c28e339bb39de2f22376f06382c205fe22f86175889f4d",
     "image_tag": "base-devel-20250727.0.390543",
     "archive_date": "2025/07/27",
-    "packages": ["cmake", "ninja", "clang", "pkgconf", "sdl3", "shaderc", "vulkan-headers", "vulkan-icd-loader", "openssl"]
+    "packages": [
+      "cmake",
+      "ninja",
+      "clang",
+      "pkgconf",
+      "sdl3",
+      "shaderc",
+      "vulkan-headers",
+      "vulkan-icd-loader",
+      "openssl"
+    ]
   }
 }

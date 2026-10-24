@@ -18,6 +18,8 @@ python scripts/scenario_suite.py run fight-result --fixture logs/fixtures/NAME -
 - Every harness route and soak boot uses a complete-save-root guard, including profiles and caches.
   The run fails unless restoration is byte-identical. Keep only three successful backups; retain every
   failed backup. For rebase tests use the preserved disposable `runtime-data` root, never the original save.
+  macOS/APFS uses independent copy-on-write file clones for guard copies; other filesystems fall back
+  to a normal copy. Complete-tree byte verification still runs, and failed backups are still retained.
 - Harness runs have every fighter and venue unlocked: `harness.py` sets `RECOMP_UNLOCK_ALL=1` (`--env RECOMP_UNLOCK_ALL=0`, or `scenario_suite.py --no-unlock`, turns it off). `replay` and `repeat` run without it, because it changes the pinned fight. `RECOMP_START_FIGHTERS` / `RECOMP_START_VENUE` choose the match (`docs/09-testing-harness.md`).
 - Captures land in `logs/shots/<route>/` and remain local. Only the two owner-approved README visuals (D58) may be committed, with exact CI fingerprints.
 - `scripts/scenario_suite.py` runs one route on a throw-away copy of a hashed save fixture and writes a

@@ -1,6 +1,7 @@
 #include "pc_launcher_home.h"
 #include "pc_ui_theme.h"
 #include "pc_ui_actions.h"
+#include "pc_mods.h"
 #include "pc_ui_internal.h"
 #include <algorithm>
 #include <cstring>
@@ -29,8 +30,10 @@ UiHomeResult ui_launcher_home(float width, float height, const char *focus)
         ImGui::TextDisabled("FAN RECOMP / v%s", DEFJAM_VERSION);
         ImGui::SetCursorScreenPos(ImVec2(start.x, start.y + body - 95 * s));
         ImGui::TextUnformatted("Ready for the next round");
+        ImGui::BeginDisabled(pcui::mod_busy() || pcui::mod_recovery_needed());
         r.play = pcui::play_button("PLAY", ImVec2(left - 10 * s, 64 * s));
         ui_target("Play");
+        ImGui::EndDisabled();
         if (ImGui::IsWindowAppearing())
             ImGui::SetItemDefaultFocus();
         ImGui::EndChild();
