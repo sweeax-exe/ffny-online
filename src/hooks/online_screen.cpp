@@ -656,7 +656,8 @@ void draw_hub(ImDrawList *dl, const Frame &f, const Pad &pad)
                                         "RECORD AND LEADERBOARD", "WHO IS AROUND", "TALK IN ROOMS AND FIGHTS",
                                         "BACK TO THE MENU" };
     static const char *const descs[] = {
-        "You are put into an open room of this mode, or one is opened for the next players.",
+        "You are put into an open room of this mode, or one is opened for the next players. Online fights need a "
+        "Discord sign-in, so every match counts.",
         "Pick your fighter, then the server finds an opponent with a similar rating. Wins and losses move your "
         "rating. Sign in with Discord in the launcher to play ranked.",
         "Every listed room with its mode and players. Pick one and join it.",
@@ -681,6 +682,21 @@ void draw_hub(ImDrawList *dl, const Frame &f, const Pad &pad)
 
     page_title(dl, f, "ONLINE");
     online_count(dl, f);
+    // Online fights need a Discord sign-in: matches against signed-out players did not count, about
+    // half of them after the build-23 rules (2026-10-24). Y signs in from here (the browser opens).
+    enum AccountState acc = account_state();
+    bool signed_in = acc == ACCOUNT_IN;
+    if (!signed_in) {
+        const char *line = acc == ACCOUNT_WAITING ? "FINISH SIGNING IN WITH DISCORD IN YOUR BROWSER..."
+                         : acc == ACCOUNT_CHECKING ? "CHECKING YOUR DISCORD SIGN-IN..."
+                         : "SIGN IN WITH DISCORD TO FIGHT ONLINE";
+        text(dl, f, g_title, 14, 50, 60, ORANGE, line, LEFT, 1.2f);
+        if (acc == ACCOUNT_OUT || acc == ACCOUNT_FAILED) hint(dl, f, 50 + text_width(f, g_title, 14, line) + 14, 59, "y", "SIGN IN");
+        if (pad.y && (acc == ACCOUNT_OUT || acc == ACCOUNT_FAILED)) {
+            account_sign_in();
+            say("Your browser opens: sign in with Discord, then come back.");
+        }
+    }
     for (int k = 0; k < count; k++) {
         int i = shown[k];
         float x = 50, y = count > 6 ? 84 + k * 45 : 88 + k * 53, w = 262, h = count > 6 ? 42 : 46;
@@ -703,7 +719,11 @@ void draw_hub(ImDrawList *dl, const Frame &f, const Pad &pad)
     }
 
     if (pad.a) {
-        switch (S.hub_sel) {
+        bool needs_account = S.hub_sel == 0 || S.hub_sel == 2 || S.hub_sel == 3;
+        if (needs_account && !signed_in) {
+            say(acc == ACCOUNT_WAITING ? "Finish signing in with Discord in your browser first."
+                                       : "Sign in with Discord first (Y): online fights only count with an account.");
+        } else switch (S.hub_sel) {
         case 0:
             if (mode_count) {
                 netplay_lobby_quick(modes[S.quick_mode].type, std::min(4, modes[S.quick_mode].fighters));
