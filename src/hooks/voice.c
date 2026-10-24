@@ -147,15 +147,20 @@ static int key_held(int vk)
 
 /* the controller's push-to-talk button (online.voice_pad) is held on this PC's pads (a player's wish:
  * "map a ptt button on the controller", 2026-10-23); 0 when it is off */
+/* The physical button, from any pad, before the button mapping: the mapped state the game reads is
+ * blank while the online screens are open (the overlay has the pad), so in a room push-to-talk on
+ * the controller never fired (build 24, the owner's test). */
 static int pad_held(void)
 {
-    static const WORD masks[] = { 0, 0x0020 /* back */, 0x0040 /* left stick */, 0x0080 /* right stick */,
-                                  0x0001 /* d-pad up */, 0x0002 /* d-pad down */ };
-    int which = recomp_settings_get("online", "voice_pad", 0);
-    XBOX_INPUT_STATE s;
-    if (which <= 0 || which >= (int)(sizeof(masks) / sizeof(masks[0]))) return 0;
-    memset(&s, 0, sizeof(s));
-    return xbox_HostInputGetLocalState(&s) == ERROR_SUCCESS && (s.Gamepad.wButtons & masks[which]) != 0;
+    static const int sources[] = { INPUT_SRC_NONE, INPUT_SRC_BACK, INPUT_SRC_LEFT_STICK_CLICK,
+                                   INPUT_SRC_RIGHT_STICK_CLICK, INPUT_SRC_DPAD_UP, INPUT_SRC_DPAD_DOWN };
+    int which = recomp_settings_get("online", "voice_pad", 0), slot;
+    if (which <= 0 || which >= (int)(sizeof(sources) / sizeof(sources[0]))) return 0;
+    for (slot = 0; slot < 4; slot++) {
+        InputRaw raw;
+        if (xbox_HostInputRawPad(slot, &raw) && raw.src[sources[which]] >= 16384) return 1;
+    }
+    return 0;
 }
 
 /* ---- the speakers: open while in a room, fed 20 ms at a time ---------------------------------- */
