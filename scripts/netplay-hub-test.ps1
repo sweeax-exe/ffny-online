@@ -51,6 +51,9 @@ for ($i = 0; $i -lt $Players; $i++) {
               '--env', 'RECOMP_INPUT_HOST=1', '--env', 'RECOMP_INPUT_IGNORE_FOCUS=1', '--env', 'RECOMP_PAD_HOST=1',
               '--env', 'RECOMP_INPUT_NO_PADS=1', '--env', 'RECOMP_INPUT_VIRTUAL_PADS=1', '--env', 'RECOMP_PAD_SCRIPT_VIRTUAL=1')
     if ($i -gt 0) { $args += @('--env', 'RECOMP_AUDIO_MUTE=1') }
+    # Each copy's guest threads on a CPU of their own (2, 4, ...), as on a player's PC: on one shared CPU a
+    # copy that spins waiting for the other's input starves it, and both stand still (2026-10-24).
+    if (-not ($ExtraEnv -match '^RECOMP_GUEST_CORES?=')) { $args += @('--env', "RECOMP_GUEST_CORE=$(2 + 2 * $i)") }
     # Never the live account service: test results would land on the real leaderboard.
     if (-not ($ExtraEnv -match '^RECOMP_ACCOUNT_SERVER=')) { $args += @('--env', 'RECOMP_ACCOUNT_SERVER=127.0.0.1:9') }
     foreach ($e in $ExtraEnv) { $args += @('--env', $e) }

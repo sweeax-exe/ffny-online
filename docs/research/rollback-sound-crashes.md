@@ -118,3 +118,18 @@ at its end. A rollback to a step before a free brings back the game state that s
 the re-run does not free it again, releasing the held free at the end hands out memory still in use. Next:
 when a load goes back past a held free, drop that free from the list (the re-run frees it again if it should),
 and check the contiguous-memory frees the same way.
+
+## Held frees, and a test-setup stall (2026-10-24, 22:00-22:40)
+
+* `forget_frees_since` (on a load, frees held since that save are dropped: the restored state still uses
+  those blocks) removed the crash at the first KO.
+* Hub tests ran both copies' guest threads on CPU 2: one copy spinning for the other's input starved it
+  and both stood still (`logs/mcp/hang-221435.txt`: one game thread "Ready" with 0 ms, the other "Running").
+  `scripts/netplay-hub-test.ps1` now gives each copy its own CPU (`RECOMP_GUEST_CORE=2+2i`).
+* With that, five-match run: copy 0 crashed mid-fight in the heap (`sub_00029DE0+0x1F3`, junk pointer
+  `0xF8F18B56`, step ~5200, 708 rollbacks; `logs/rb-online5-heapcrash.log.err`). The same run logged
+  "the mixer writes 80003000 (bytes 800031A4..800031A5)" and "80007000 (80007190..800071B0)": the first heap
+  pages, written during mixer ticks and therefore left out of the save from then on. If those hold heap
+  bookkeeping or boot-time objects the game also changes, a load restores the game but not them. Next: name
+  the blocks on those two pages (allocation log) and who writes them (`RECOMP_ROLLBACK_WRITERS=1`); route
+  allocations made on non-game threads to the arena.

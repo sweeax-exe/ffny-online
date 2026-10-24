@@ -90,6 +90,7 @@ typedef struct {
     uint8_t *heap;              /* pages s_change[0 .. npages) */
     size_t heap_cap;
     unsigned npages;
+    LONG at;                    /* s_saves when it was taken: frees held after it are undone by its load */
 } Slot;
 
 static uint8_t s_skip[HEAP_PAGES];      /* 1: left alone */
@@ -340,6 +341,7 @@ static void track_read(void *host, size_t length)
 extern int (*xbox_contig_free_defer)(uint32_t addr);
 extern int xbox_ContiguousFreeNow(uint32_t addr);
 static uint32_t s_held_free[4096];
+static LONG s_held_free_at[4096];       /* s_saves at each held free */
 static unsigned s_nheld, s_held_over;
 static CRITICAL_SECTION s_held_cs;
 static LONG s_held_cs_ready;
@@ -348,7 +350,11 @@ static int hold_contig_free(uint32_t addr)
 {
     int kept = 0;
     EnterCriticalSection(&s_held_cs);
-    if (s_nheld < sizeof(s_held_free) / sizeof(s_held_free[0])) { s_held_free[s_nheld++] = addr; kept = 1; }
+    if (s_nheld < sizeof(s_held_free) / sizeof(s_held_free[0])) {
+        s_held_free_at[s_nheld] = s_saves;
+        s_held_free[s_nheld++] = addr;
+        kept = 1;
+    }
     else s_held_over++;
     LeaveCriticalSection(&s_held_cs);
     return kept;
@@ -890,6 +896,7 @@ int rollback_save(int slot)
     InterlockedIncrement(&s_saves);
     release_held_arena(0);
     s = &s_slot[slot];
+    s->at = s_saves;
     if (!s->data && !(s->data = (uint8_t *)malloc(s_dbytes))) return -1;
     if (s->heap_cap < (size_t)s_nchange * PAGE) {
         size_t cap = ((size_t)s_nchange + 256) * PAGE;
@@ -907,6 +914,8 @@ int rollback_save(int slot)
     return 0;
 }
 
+static void forget_frees_since(LONG at);
+
 int rollback_load(int slot)
 {
     Slot *s;
@@ -915,6 +924,7 @@ int rollback_load(int slot)
     int k;
     if (!s_ready || slot < 0 || slot >= ROLLBACK_SLOTS || !s_slot[slot].valid) return -1;
     s = &s_slot[slot];
+    forget_frees_since(s->at);
     for (k = 0, at = 0; k < s_ndseg; at += s_dseg[k].hi - s_dseg[k].lo, k++)
         memcpy(XBOX_PTR(s_dseg[k].lo), s->data + at, s_dseg[k].hi - s_dseg[k].lo);
     for (i = 0; i < s->npages; i++)
@@ -1087,6 +1097,45 @@ static void release_held_arena(int all)
         }
     }
     LeaveCriticalSection(&s_arena_cs);
+}
+
+/* A load goes back to before the frees held since that save: the state it brings back still uses those
+ * blocks. They stay allocated (the re-run frees them again if it does), instead of being handed out at the
+ * fight's end while the game holds them (the crash at the first KO of a five-match run). */
+static void forget_frees_since(LONG at)
+{
+    static unsigned told;
+    unsigned i = 0, contig = 0, arena = 0;
+    if (s_held_cs_ready) {
+        EnterCriticalSection(&s_held_cs);
+        while (i < s_nheld) {
+            if (s_held_free_at[i] >= at) {
+                s_nheld--;
+                s_held_free[i] = s_held_free[s_nheld];
+                s_held_free_at[i] = s_held_free_at[s_nheld];
+                contig++;
+            } else {
+                i++;
+            }
+        }
+        LeaveCriticalSection(&s_held_cs);
+    }
+    if (s_arena) {
+        EnterCriticalSection(&s_arena_cs);
+        i = 0;
+        while (i < s_nheld_arena) {
+            if (s_held_arena[i].at >= at) {
+                s_held_arena[i] = s_held_arena[--s_nheld_arena];
+                arena++;
+            } else {
+                i++;
+            }
+        }
+        LeaveCriticalSection(&s_arena_cs);
+    }
+    if ((contig || arena) && told++ < 20)
+        fprintf(stderr, "[ROLLBACK] a load went back before %u contiguous and %u audio frees: they stay allocated\n",
+                contig, arena);
 }
 
 static void arena_start(void)

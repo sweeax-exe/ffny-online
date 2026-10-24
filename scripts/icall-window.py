@@ -52,13 +52,14 @@ def main():
     ap.add_argument("--preset", default="win-x64-debug")
     ap.add_argument("--samples", type=int, default=10)
     ap.add_argument("--interval", type=float, default=0.5)
+    ap.add_argument("--pid", type=int, default=0, help="this process (two copies run in online tests)")
     args = ap.parse_args()
 
     map_path = f"build/{args.preset}/defjam_recomp.map"
     ring = map_symbol(map_path, "g_icall_trace")
     idx = map_symbol(map_path, "g_icall_trace_idx")
 
-    pid = find_pid()
+    pid = args.pid or find_pid()
     h = k32.OpenProcess(PROCESS_VM_READ | PROCESS_QUERY_INFORMATION, False, pid)
     if not h:
         sys.exit(f"could not open pid {pid} (error {ctypes.get_last_error()})")
