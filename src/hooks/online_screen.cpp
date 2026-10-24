@@ -656,8 +656,7 @@ void draw_hub(ImDrawList *dl, const Frame &f, const Pad &pad)
                                         "RECORD AND LEADERBOARD", "WHO IS AROUND", "TALK IN ROOMS AND FIGHTS",
                                         "BACK TO THE MENU" };
     static const char *const descs[] = {
-        "You are put into an open room of this mode, or one is opened for the next players. Online fights need a "
-        "Discord sign-in, so every match counts.",
+        "You are put into an open room of this mode, or one is opened for the next players.",
         "Pick your fighter, then the server finds an opponent with a similar rating. Wins and losses move your "
         "rating. Sign in with Discord in the launcher to play ranked.",
         "Every listed room with its mode and players. Pick one and join it.",
@@ -722,7 +721,7 @@ void draw_hub(ImDrawList *dl, const Frame &f, const Pad &pad)
         bool needs_account = S.hub_sel == 0 || S.hub_sel == 2 || S.hub_sel == 3;
         if (needs_account && !signed_in) {
             say(acc == ACCOUNT_WAITING ? "Finish signing in with Discord in your browser first."
-                                       : "Sign in with Discord first (Y): online fights only count with an account.");
+                                       : "Sign in with Discord first: press Y.");
         } else switch (S.hub_sel) {
         case 0:
             if (mode_count) {
