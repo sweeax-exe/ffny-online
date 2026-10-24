@@ -159,6 +159,7 @@ void netplay_on_step(void);                         /* sub_00087700: one simulat
 void netplay_on_update(void);                       /* sub_0002C530: a game update begins   */
 void netplay_sound_command(void);   /* the sound engine's command call, silent while steps re-run */
 void *netplay_sound_handler(uint32_t va);   /* the audio subsystem's bus handlers, or NULL */
+int netplay_rematch_request(void);   /* Game.Rematch() online: 1 to hold it for the others */
 int netplay_toast(char *text, int size);
 int netplay_debug_json(char *out, int size);    /* tests: the lockstep's state as JSON */   /* a notice for the fight right now (wait, desync, gone) */
 void netplay_crowd_update(void);  /* the crowd's update, as recomp_lookup_manual hands it out */

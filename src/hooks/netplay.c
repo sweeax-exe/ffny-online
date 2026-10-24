@@ -89,6 +89,7 @@ void netplay_on_pad_read(uint32_t a) { (void)a; }
 void netplay_on_seed(uint32_t e, int w, uint32_t x) { (void)e; (void)w; (void)x; }
 void netplay_on_result(uint32_t w, uint32_t l, uint32_t c) { (void)w; (void)l; (void)c; }
 int netplay_toast(char *t, int n) { (void)t; (void)n; return 0; }
+int netplay_rematch_request(void) { return 0; }
 int netplay_debug_json(char *o, int n) { return snprintf(o, (size_t)n, "{}"); }
 extern void sub_00081170(void);
 void netplay_crowd_update(void) { sub_00081170(); }
@@ -152,6 +153,8 @@ void netplay_crowd_update(void) { sub_00081170(); }
 #define RING          512           /* steps of input kept per player */
 #define REDUNDANT     8             /* steps repeated in every STEPS packet */
 #define HASH_EVERY    60
+#define P_REMATCH     8             /* u32 START seed, u32 match number: Rematch chosen; 0xFFFFFFFF: back to the room */
+#define REMATCH_NO    0xFFFFFFFFu
 #define HASH_PARTS    6             /* the checksum in parts: fighters 1-4, the AI generators, the rest */
 #define STALL_LIMIT_MS 10000        /* mid-fight: a player has gone */
 #define START_LIMIT_MS 90000        /* the first steps: another PC may still be loading the venue */
@@ -246,6 +249,7 @@ static struct {
     int reported, fighting_seen, last_late;
     int start_reported;             /* this match's "start" went to the account service */
     int seed_bypass;                /* crowd_reset seeds a generator with its own words */
+    uint32_t rematch_want[MAXP];    /* the match number each player chose Rematch after, REMATCH_NO: went back */
     /* rollback (rollback.h): a fighting step runs on a prediction of each entry that has not
      * arrived (that player's last one); when the real one differs, the game goes back to the
      * save state taken before that step and runs the steps again. */
@@ -317,6 +321,56 @@ static void toast(unsigned ms, const char *format, ...)
 static const char *player_name(int pos);
 static void put32(uint8_t *p, uint32_t v);
 static void send_data(const uint8_t *payload, int len);
+
+/* The results screen's Rematch (Game.Rematch()) starts the next match on this PC alone: with one
+ * player choosing Rematch and the other No, one game loaded a fight the other never joined and stood
+ * on "FIGHT!" for 90 seconds (five F9 reports, 2026-10-23/24). Online it goes through only once every
+ * player has chosen it after the same match; until then the call is held, the others are told, and
+ * whoever chose first chooses again once they accept. Returns 1 when the call is to be held. */
+int netplay_rematch_request(void)
+{
+    uint8_t p[9];
+    int i, all = 1, gone = -1;
+    uint32_t after;
+    if (!N.lobby || !N.match_live || !N.start_seed) return 0;
+    EnterCriticalSection(&g_cs);
+    after = N.match_count;
+    N.rematch_want[N.pos] = after;
+    for (i = 0; i < N.players; i++) {
+        if (i == N.pos) continue;
+        if (N.rematch_want[i] == REMATCH_NO) gone = i;
+        if (N.rematch_want[i] != after) all = 0;
+    }
+    LeaveCriticalSection(&g_cs);
+    p[0] = P_REMATCH;
+    put32(p + 1, N.start_seed);
+    put32(p + 5, after);
+    send_data(p, 9);
+    if (gone >= 0) {
+        toast(8000, "%s went back to the room: choose No to join them.", player_name(gone));
+        return 1;
+    }
+    if (all) {
+        fprintf(stderr, "[NETPLAY] rematch: every player chose it\n");
+        return 0;
+    }
+    for (i = 0; i < N.players; i++)
+        if (i != N.pos && N.rematch_want[i] != after) break;
+    fprintf(stderr, "[NETPLAY] rematch: waiting for player %d to choose it\n", i + 1);
+    toast(8000, "Waiting for %s to choose Rematch...", player_name(i));
+    return 1;
+}
+
+/* This PC left the results for the room: whoever waits on the rematch screen hears it. */
+static void rematch_declined(void)
+{
+    uint8_t p[9];
+    if (!N.lobby || !N.start_seed) return;
+    p[0] = P_REMATCH;
+    put32(p + 1, N.start_seed);
+    put32(p + 5, REMATCH_NO);
+    send_data(p, 9);
+}
 
 int netplay_toast(char *out, int size)
 {
@@ -514,9 +568,12 @@ static void log_contiguous(const char *when)
             xbox_ContiguousLiveBytes() / 1048576.0, xbox_ContiguousAllocatedBytes() / 1048576.0);
 }
 
+static void rematch_declined(void);
+
 static void end_hub_match(const char *why)
 {
     log_contiguous("at the match end");
+    rematch_declined();         /* whoever waits on the rematch screen goes back to the room too */
     InterlockedExchange(&N.lockstep, 0);
     assign_input(0);
     SetEvent(N.arrived);
@@ -742,6 +799,24 @@ static void on_data(int from, const uint8_t *p, int len)
             }
             SetEvent(N.arrived);
             if (N.delay_fixed && had < 0) send_rtt();   /* it may still be waiting for ours */
+        }
+        break;
+    case P_REMATCH:
+        if (N.lobby && len >= 9 && get32(p + 1) == N.start_seed && N.start_seed) {
+            uint32_t after = get32(p + 5);
+            int mine;
+            EnterCriticalSection(&g_cs);
+            N.rematch_want[from] = after;
+            mine = N.rematch_want[N.pos] == after;
+            LeaveCriticalSection(&g_cs);
+            fprintf(stderr, "[NETPLAY] rematch: player %d %s\n", from + 1,
+                    after == REMATCH_NO ? "went back to the room" : "chose Rematch");
+            if (after == REMATCH_NO)
+                toast(8000, "%s went back to the room: choose No to join them.", player_name(from));
+            else if (mine)
+                toast(6000, "%s accepted the rematch: choose Rematch again to start.", player_name(from));
+            else
+                toast(8000, "%s wants a rematch! Choose Rematch to accept.", player_name(from));
         }
         break;
     case P_HASH:
@@ -1005,6 +1080,7 @@ static void on_start(const uint8_t *b, int len)
         }
     }
     EnterCriticalSection(&g_cs);
+    memset(N.rematch_want, 0, sizeof(N.rematch_want));
     N.start_seed = seed;
     N.session = seed;
     N.players = count;
@@ -1207,6 +1283,12 @@ static DWORD WINAPI net_thread(LPVOID unused)
         lag_ms = v ? atoi(v) : 0;
         lag_jitter = v && strchr(v, ',') ? atoi(strchr(v, ',') + 1) : 0;
         if (lag_ms > 0) fprintf(stderr, "[NETPLAY] tests: arriving packets held %d ms (+0..%d)\n", lag_ms, lag_jitter);
+    }
+    {   /* named for crash reports (main.c prints the thread's name) */
+        typedef HRESULT (WINAPI *SetThreadDescriptionFn)(HANDLE, PCWSTR);
+        SetThreadDescriptionFn name = (SetThreadDescriptionFn)(void *)GetProcAddress(GetModuleHandleW(L"kernel32.dll"),
+                                                                                    "SetThreadDescription");
+        if (name) name(GetCurrentThread(), L"online play");
     }
     N.started = N.last_rx = GetTickCount64();
     if (!g_data_print) make_data_print();

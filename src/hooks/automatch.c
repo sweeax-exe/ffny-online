@@ -271,6 +271,14 @@ static void print_result(const char *text)
 
 void test_control_note_funccall(const char *text);     /* src/hooks/test_control.c */
 
+/* Before the front end runs a call: 1 when it is to be held (online, a rematch that the other
+ * players have not chosen yet). */
+int automatch_hold_funccall(const char *text)
+{
+    if (!strcmp(text, "Game.Rematch()")) return netplay_rematch_request();
+    return 0;
+}
+
 void automatch_on_funccall(const char *text)
 {
     test_control_note_funccall(text);

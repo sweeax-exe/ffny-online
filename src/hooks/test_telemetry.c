@@ -434,10 +434,14 @@ void defjam_test_step(void)
          * lockstep stays equal. Tests only. */
         static int pct = -1;
         if (pct < 0) pct = getenv("RECOMP_TEST_FAST_KO") ? atoi(getenv("RECOMP_TEST_FAST_KO")) : 0;
-        if (pct > 0 && pct < 100 && s_step == 120 && MEM32(G_PHASE) == 1)  /* step 120: after the intro; a rollback runs it again */
+        /* from step 120 (after the intro) on, every step of the fight: an online start can come
+         * later than step 120, and the bars refill (two-copy rematch tests, 2026-10-24) */
+        if (pct > 0 && pct < 100 && s_step >= 120 && MEM32(G_PHASE) == 1)
             for (slot = 0; slot < SLOTS; slot++)
-                if (active(slot))
-                    MEMF(record(slot) + F_HEALTH) = MEMF(record(slot) + F_HEALTH_MAX) * (float)pct / 100.0f;
+                if (active(slot)) {
+                    float cap = MEMF(record(slot) + F_HEALTH_MAX) * (float)pct / 100.0f;
+                    if (MEMF(record(slot) + F_HEALTH) > cap) MEMF(record(slot) + F_HEALTH) = cap;
+                }
     }
     if (s_step == 1 || s_step == 300 || s_step == 900) draws_report(s_step == 1 ? "step1" : s_step == 300 ? "step300" : "step900");
 

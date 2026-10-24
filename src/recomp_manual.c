@@ -768,6 +768,11 @@ static void funccall_hook(void)
     if (strcmp(text, "Online.Tick()") && printed++ < 4000)
         fprintf(stderr, "[FUNCCALL] %s\n", text);
     xbox_NoteAnchorEvent(text);
+    if (automatch_hold_funccall(text)) {    /* online: a rematch the others have not chosen yet */
+        g_eax = 0;
+        g_esp += 4;                         /* cdecl: only the return address is popped */
+        return;
+    }
     sub_00068BA0();
     automatch_on_funccall(text);    /* a requested match starts here (src/hooks/automatch.c) */
 }
