@@ -93,6 +93,27 @@ for i in range(500):
     assert 'inventory refreshed' in result.stdout,result.stdout+result.stderr+error
 
 
+@pytest.mark.skipif(os.name!='nt',reason='Windows readers deny replacing an open file')
+def test_progress_replacement_waits_for_a_windows_reader(tmp_path):
+    import threading
+    sys.path.insert(0,str(ROOT/'setup'))
+    try:
+        import mods
+    finally:
+        sys.path.pop(0)
+    target=tmp_path/'progress.ini'
+    target.write_bytes(b'previous snapshot')
+    reader=target.open('rb')
+    release=threading.Timer(0.1,reader.close)
+    release.start()
+    try:
+        mods.atomic_bytes(target,b'new snapshot')
+    finally:
+        release.join()
+        reader.close()
+    assert target.read_bytes()==b'new snapshot'
+
+
 def test_runtime_lock_interoperates_with_python_helper(bridge,tmp_path):
     sys.path.insert(0,str(ROOT/'setup'))
     try:
