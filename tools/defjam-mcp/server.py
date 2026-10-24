@@ -94,6 +94,10 @@ def launch(copies=1, online=False, quick="0,2", fighters=None, pads=1, fast_ko=0
             e["RECOMP_WINDOW_BACKGROUND"] = "1"
         if i:
             e["RECOMP_AUDIO_MUTE"] = "1"
+        # each copy's guest threads on a CPU of their own (2, 4, ...), as on a player's PC: two copies
+        # on CPU 2 starve each other, and spreading them (RECOMP_GUEST_CORES=all) runs the game thread
+        # beside the mixer, which rollback's page attribution assumes cannot happen
+        e["RECOMP_GUEST_CORE"] = str(2 + 2 * i)
         if fast_ko:
             e["RECOMP_TEST_FAST_KO"] = str(int(fast_ko))
         if online:

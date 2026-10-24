@@ -107,6 +107,12 @@ static uint64_t *s_boot_hash;
 static uint8_t s_audio_page[HEAP_PAGES];    /* 1: the audio subsystem's (left alone) */
 /* write tracking */
 static uint8_t s_guard[HEAP_PAGES];     /* 1: read-only, not written since the reference */
+/* Diagnostics: the saved pages are read-only for the length of a mixer tick, so the first write to each
+ * names its thread and address (RECOMP_ROLLBACK_WRITERS=1, with the allocation log on). */
+static uint8_t s_mixguard[HEAP_PAGES];
+static volatile LONG s_writers_on = -1;
+static DWORD s_mixer_tid;
+static void writer_seen(uint32_t addr, DWORD tid);
 static volatile LONG s_tracking;
 static CRITICAL_SECTION s_track_cs;
 static DWORD s_game_tid;
@@ -286,6 +292,12 @@ static LONG CALLBACK track_fault(PEXCEPTION_POINTERS e)
     a = (uintptr_t)r->ExceptionInformation[1];
     if (a < lo || a >= lo + (uintptr_t)HEAP_PAGES * PAGE) return EXCEPTION_CONTINUE_SEARCH;
     p = (uint32_t)((a - lo) / PAGE);
+    if (s_mixguard[p] && InterlockedExchange8((volatile char *)&s_mixguard[p], 0)) {
+        DWORD old;
+        VirtualProtect(page_host(p), PAGE, PAGE_READWRITE, &old);
+        writer_seen(HEAP_LO + (uint32_t)(a - lo), GetCurrentThreadId());
+        return EXCEPTION_CONTINUE_EXECUTION;
+    }
     /* a page still guarded counts even while tracking starts or stops (the flag and the
      * protection change one after the other while other threads run) */
     if (!s_tracking && !s_guard[p]) return EXCEPTION_CONTINUE_SEARCH;
@@ -540,6 +552,104 @@ static void call_chain(uint32_t sp, uint32_t *out, int max)
     while (n < max) out[n++] = 0;
 }
 
+/* Diagnostics (RECOMP_ROLLBACK_ALLOCLOG=1): the heap's live blocks (start -> size, call chain), so a
+ * byte the mixer changes can be named as a field of the block it lies in. Open addressing with linear
+ * probing; a free shifts the run back. */
+#define LIVE_BITS 18
+#define LIVE_CAP  (1u << LIVE_BITS)
+static struct LiveBlock { uint32_t at, size, chain[3]; } *s_live;
+static CRITICAL_SECTION s_live_cs;
+static unsigned s_live_n;
+
+static unsigned live_slot(uint32_t a) { return ((a >> 4) * 2654435761u) >> (32 - LIVE_BITS); }
+
+static void live_add(uint32_t a, uint32_t size, const uint32_t *chain)
+{
+    unsigned i;
+    if (!s_live) {
+        s_live = (struct LiveBlock *)calloc(LIVE_CAP, sizeof(*s_live));
+        InitializeCriticalSection(&s_live_cs);
+        if (!s_live) return;
+    }
+    EnterCriticalSection(&s_live_cs);
+    if (s_live_n < LIVE_CAP - LIVE_CAP / 8) {
+        for (i = live_slot(a); s_live[i].at && s_live[i].at != a; i = (i + 1) & (LIVE_CAP - 1)) {}
+        if (!s_live[i].at) s_live_n++;
+        s_live[i].at = a;
+        s_live[i].size = size;
+        memcpy(s_live[i].chain, chain, sizeof(s_live[i].chain));
+    }
+    LeaveCriticalSection(&s_live_cs);
+}
+
+/* the block starting at a (copied to *out), 1 if live; drop: forget it */
+static int live_get(uint32_t a, int drop, struct LiveBlock *out)
+{
+    unsigned i, j, k;
+    int found = 0;
+    if (!s_live || !a) return 0;
+    EnterCriticalSection(&s_live_cs);
+    for (i = live_slot(a); s_live[i].at && s_live[i].at != a; i = (i + 1) & (LIVE_CAP - 1)) {}
+    if (s_live[i].at) {
+        found = 1;
+        if (out) *out = s_live[i];
+        if (drop) {
+            s_live[i].at = 0;
+            s_live_n--;
+            for (j = (i + 1) & (LIVE_CAP - 1); s_live[j].at; j = (j + 1) & (LIVE_CAP - 1)) {
+                k = live_slot(s_live[j].at);
+                if ((j > i && (k <= i || k > j)) || (j < i && (k <= i && k > j))) {
+                    s_live[i] = s_live[j];
+                    s_live[j].at = 0;
+                    i = j;
+                }
+            }
+        }
+    }
+    LeaveCriticalSection(&s_live_cs);
+    return found;
+}
+
+/* the live block holding addr, searching 16-byte starts down to 256 KB below */
+static int live_find(uint32_t addr, struct LiveBlock *out)
+{
+    uint32_t a = addr & ~15u, lowest = addr > HEAP_LO + 0x40000u ? addr - 0x40000u : HEAP_LO;
+    for (; a >= lowest && a >= 16; a -= 16)
+        if (live_get(a, 0, out)) return addr < out->at + out->size;
+    return 0;
+}
+
+/* Each run of bytes the mixer changed on a page, as a field of its block; each (size, allocator, offset)
+ * once, up to 400 lines. */
+static void mixer_fields(uint32_t page, const uint8_t *was, const uint8_t *now)
+{
+    static struct { uint32_t size, chain0, off; } seen[2048];
+    static unsigned nseen, told;
+    unsigned o = 0, k;
+    while (o < PAGE && told < 400) {
+        unsigned lo, hi;
+        struct LiveBlock b;
+        uint32_t off;
+        if (was[o] == now[o]) { o++; continue; }
+        lo = o;
+        while (o < PAGE && was[o] != now[o]) o++;
+        hi = o;
+        if (!live_find(page + lo, &b)) {
+            fprintf(stderr, "[ROLLBACK-MIX] %08X (%u bytes): in no known block\n", page + lo, hi - lo);
+            told++;
+            continue;
+        }
+        off = page + lo - b.at;
+        for (k = 0; k < nseen; k++)
+            if (seen[k].size == b.size && seen[k].chain0 == b.chain[0] && seen[k].off == off) break;
+        if (k < nseen) continue;
+        if (nseen < 2048) { seen[nseen].size = b.size; seen[nseen].chain0 = b.chain[0]; seen[nseen].off = off; nseen++; }
+        told++;
+        fprintf(stderr, "[ROLLBACK-MIX] block size %X from %08X <- %08X <- %08X: +%X, %u bytes (%08X)\n", b.size,
+                b.chain[0], b.chain[1], b.chain[2], off, hi - lo, b.at);
+    }
+}
+
 void rollback_check_alloc(uint32_t caller, uint32_t size, uint32_t block)
 {
     uint32_t end = block + size;
@@ -552,6 +662,7 @@ void rollback_check_alloc(uint32_t caller, uint32_t size, uint32_t block)
          * from here (the allocator has returned) */
         s_alog[k].outer = (caller == 0x00029696u || caller == 0x000296C6u || caller == 0x00029723u) ? MEM32(g_esp + 20) : 0;
         call_chain(g_esp, s_alog[k].chain, 6);
+        live_add(block, size, s_alog[k].chain);
     }
     if (!check_on() || !s_wobj || !block) return;
     if (!s_tracking || !watched_loaded()) { s_wobj = 0; return; }
@@ -1007,7 +1118,17 @@ int rollback_route_alloc(void)
     if (s_arena_state != 1) return 0;
     /* sub_00029680 / 000296B0 / 00029710 call it with five words pushed: their caller is 24 bytes up */
     if (ret == 0x00029696u || ret == 0x000296C6u || ret == 0x00029723u) req = MEM32(g_esp + 24);
-    if (!audio_code(req)) return 0;
+    if (!audio_code(req)) {
+        /* The file layer's buffers (allocated at return 0x1E3F20) for a stream the audio code opens:
+         * the music stream's buffer is the one block outside the arena the mixer writes (two-copy runs
+         * with each copy on one CPU, 2026-10-24). Its caller is generic, so the call chain decides. */
+        uint32_t chain[4];
+        int k, audio = 0;
+        if (ret != 0x001E3F20u) return 0;
+        call_chain(g_esp, chain, 4);
+        for (k = 0; k < 4; k++) audio = audio || audio_code(chain[k]);
+        if (!audio) return 0;
+    }
     a = arena_alloc(MEM32(g_esp + 8));
     if (!a) {
         static int told;
@@ -1024,6 +1145,7 @@ extern void sub_0002A180(void);
 void rollback_heap_free(void)
 {
     if (s_arena_state == 1 && arena_free(MEM32(g_esp + 4))) { g_eax = 1; g_esp += 8; return; }
+    if (s_live) live_get(MEM32(g_esp + 4), 1, NULL);
     sub_0002A180();
 }
 
@@ -1091,17 +1213,73 @@ static void mixer_begin(void)
         memcpy(s_mix + (size_t)i * PAGE, XBOX_PTR(HEAP_LO + s_change[i] * PAGE), PAGE);
     s_mix_n = n;
     s_game_cycles = game_cycles();
+    if (s_writers_on < 0) s_writers_on = getenv("RECOMP_ROLLBACK_WRITERS") && s_live ? 1 : 0;
+    if (s_writers_on == 1) {
+        DWORD old;
+        s_mixer_tid = GetCurrentThreadId();
+        for (i = 0; i < n; i++) {
+            uint32_t q = s_change[i];
+            if (s_guard[q]) continue;           /* still guarded by the tracking itself */
+            s_mixguard[q] = 1;
+            if (!VirtualProtect(page_host(q), PAGE, PAGE_READONLY, &old)) s_mixguard[q] = 0;
+        }
+    }
     InterlockedExchange(&s_mix_on, 1);
+}
+
+/* The first write to a guarded page in a tick: which thread, which block and field. Each (thread kind,
+ * block size, allocator, offset) once, up to 500 lines. */
+static void writer_seen(uint32_t addr, DWORD tid)
+{
+    static struct { uint32_t size, chain0, off; int kind; } seen[4096];
+    static unsigned nseen, told;
+    static LONG lock;
+    struct LiveBlock b;
+    int kind = tid == s_mixer_tid ? 0 : tid == s_game_tid ? 1 : 2;
+    static const char *const kinds[] = { "mixer", "GAME", "other" };
+    unsigned k;
+    uint32_t off = 0;
+    int known;
+    if (kind == 1) return;      /* the game thread: mixer_end leaves such a tick out anyway */
+    while (InterlockedExchange(&lock, 1)) Sleep(0);
+    known = live_find(addr, &b);
+    if (known) off = addr - b.at;
+    for (k = 0; k < nseen; k++)
+        if (seen[k].kind == kind && seen[k].size == (known ? b.size : 0) && seen[k].chain0 == (known ? b.chain[0] : addr) &&
+            seen[k].off == off) break;
+    if (k == nseen && told < 500) {
+        if (nseen < 4096) {
+            seen[nseen].kind = kind; seen[nseen].size = known ? b.size : 0; seen[nseen].chain0 = known ? b.chain[0] : addr;
+            seen[nseen].off = off; nseen++;
+        }
+        told++;
+        if (known)
+            fprintf(stderr, "[ROLLBACK-WRITER] %s thread %lu: block size %X from %08X <- %08X <- %08X, +%X (%08X)\n",
+                    kinds[kind], (unsigned long)tid, b.size, b.chain[0], b.chain[1], b.chain[2], off, addr);
+        else
+            fprintf(stderr, "[ROLLBACK-WRITER] %s thread %lu: %08X, in no known block\n", kinds[kind], (unsigned long)tid, addr);
+    }
+    InterlockedExchange(&lock, 0);
 }
 
 static void mixer_end(void)
 {
     unsigned i;
     if (!InterlockedExchange(&s_mix_on, 0)) return;
+    if (s_writers_on == 1) {
+        DWORD old;
+        for (i = 0; i < s_mix_n; i++) {
+            uint32_t q = s_change[i];
+            if (s_mixguard[q] && InterlockedExchange8((volatile char *)&s_mixguard[q], 0))
+                VirtualProtect(page_host(q), PAGE, PAGE_READWRITE, &old);
+        }
+    }
     if (game_cycles() != s_game_cycles) return;     /* the game thread ran too: no telling who wrote */
     for (i = 0; i < s_mix_n; i++) {
         uint32_t p = s_change[i];
-        if (s_skip[p] || !memcmp(s_mix + (size_t)i * PAGE, XBOX_PTR(HEAP_LO + p * PAGE), PAGE)) continue;
+        if (!memcmp(s_mix + (size_t)i * PAGE, XBOX_PTR(HEAP_LO + p * PAGE), PAGE)) continue;
+        if (s_live) mixer_fields(HEAP_LO + p * PAGE, s_mix + (size_t)i * PAGE, (const uint8_t *)XBOX_PTR(HEAP_LO + p * PAGE));
+        if (s_skip[p]) continue;
         s_skip[p] = 1;
         if (s_mix_found++ < 64) {
             const uint8_t *was = s_mix + (size_t)i * PAGE, *now = (const uint8_t *)XBOX_PTR(HEAP_LO + p * PAGE);

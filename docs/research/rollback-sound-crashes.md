@@ -87,3 +87,22 @@ they are shared by design. What is left: (a) never restore those fields (the blo
 which moved the crash elsewhere), (b) roll the sound state back with the game (the arena, the engine's
 globals and the APU's voices together, with the mixer held during a load), or (c) find which fields the
 engine writes and keep exactly those live. (c) is the smallest; it needs the field offsets per object class.
+
+## The real picture (2026-10-24, late): one CPU per copy
+
+The rollback test runs used `RECOMP_GUEST_CORES=all`. Players' games run every guest thread on one CPU,
+and `mixer_end` relies on that: a page that changed between the mixer's lock and unlock while the game
+thread's cycle count did not move is the mixer's. With the threads spread over several CPUs the game
+thread ran beside the mixer without a context switch, its cycle count stayed, and pages the game wrote
+were taken for the mixer's and left out of the save: the game's own objects stopped being restored, and
+the runs crashed. A write-guard diagnostic (`RECOMP_ROLLBACK_WRITERS=1`: the saved pages read-only for a
+tick, each first write names its thread) showed the mixer writing one block only: the music stream's file
+buffer (allocated at return `0x1E3F20` for AEMS).
+
+* `tools/defjam-mcp/server.py` now puts each test copy's guest threads on a CPU of its own
+  (`RECOMP_GUEST_CORE=2+2i`); never use `RECOMP_GUEST_CORES=all` for rollback tests.
+* With that: 10 minutes, two copies, 70 ms lag, ~1900 rollbacks, no crash, desync or stall.
+* `rollback_route_alloc` sends the file layer's buffers for audio streams into the arena (the call chain
+  decides). Then: 10 minutes, ~1650 rollbacks, no mixer page at all, no crash, desync or stall.
+
+The sections above that read the mixer pages as the game's own objects were based on the spread runs.
