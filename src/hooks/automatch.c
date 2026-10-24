@@ -197,6 +197,10 @@ static void run_sequence(void)
     for (i = 0; i < m->count; i++) if (m->pad[i] >= 0) call("MemCard.SetBMCurrentUserIndex(%d,-1)", m->pad[i]);
     call("Battle.LoadCreatePlayerData(%d)", humans);
     call("Controller.ControllerSetup(-1,0,0,0)");
+    /* As the game's own versus screens do: each slot's controller number (setup entry byte 4), which
+     * the match summary reads; left at its reset value it showed "CPU" over both online players.
+     * Nothing in the fight reads it (docs/research/summary-cpu-tag.md). */
+    for (i = 0; i < m->count; i++) call("Controller.ControllerReturn(%d)", i);
     call("Game.ResetFighterList()");
     for (i = 0; i < m->count; i++) call("Controller.ControllerSetup(%d,%d,%d,%d)", i, m->pad[i], m->fighter[i], i);
     call("Game.ResetVenueList(0)");
@@ -258,7 +262,8 @@ static void print_result(const char *text)
     char out[400];
     if (g_results < 0) g_results = getenv("RECOMP_FE_RESULTS") != NULL;
     if (!g_results || !p) return;
-    if (strncmp(text, "Game.GetNext", 12) && strncmp(text, "Game.GetMatchInfo", 17) && strncmp(text, "Game.GetMatchType", 17))
+    if (strncmp(text, "Game.GetNext", 12) && strncmp(text, "Game.GetMatchInfo", 17) && strncmp(text, "Game.GetMatchType", 17) &&
+        strncmp(text, "Game.GetMatchSummary", 20))
         return;
     for (i = 0; i < sizeof(out) - 1; i++) {
         char c = (char)MEM8(p + i);
