@@ -156,3 +156,22 @@ func TestRankedEndpoints(t *testing.T) {
 }
 
 func jsonInt(n int64) string { b, _ := json.Marshal(n); return string(b) }
+
+func TestRankedNoContestMovesNoRating(t *testing.T) {
+	store, a, b, now := twoAccounts(t)
+	key := "ABC123-0000CAFE-1"
+	if !store.Pair(key[:15], map[int]int64{0: a.ID, 1: b.ID}, now) {
+		t.Fatal("pairing refused")
+	}
+	started(store, a, b, key, now)
+	store.Report(b.ID, event(oneOnOne(key, 1, 0), eventCrashed), now)
+	store.Report(a.ID, event(oneOnOne(key, 0, 0), eventLeft, 1), now)
+	if c, d := store.Settle(now.Add(ReportWindow)); c != 0 || d != 1 {
+		t.Fatalf("settle: %d counted, %d dropped", c, d)
+	}
+	for _, id := range []int64{a.ID, b.ID} {
+		if st, _ := store.StatsOf(id); st.Ranked != nil || st.Matches != 0 {
+			t.Fatalf("account %d after a no contest: %+v", id, st)
+		}
+	}
+}

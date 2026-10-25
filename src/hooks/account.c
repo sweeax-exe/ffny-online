@@ -47,9 +47,10 @@ static void set_reason(const char *text)
 }
 
 /* One HTTPS request to the account service, with a body of blen bytes of type ctype (if any).
- * Returns the HTTP status, 0 when the service could not be reached; the answer goes to buf. */
-static int request_body(const wchar_t *method, const wchar_t *path, const char *token, const char *ctype,
-                        const void *body, DWORD blen, char *buf, int size)
+ * Returns the HTTP status, 0 when the service could not be reached; the answer goes to buf.
+ * limit_ms > 0 caps each of WinHTTP's waits (the crash report); 0 keeps the usual ones. */
+static int request_body_ms(const wchar_t *method, const wchar_t *path, const char *token, const char *ctype,
+                           const void *body, DWORD blen, char *buf, int size, int limit_ms)
 {
     HINTERNET session = NULL, connect = NULL, req = NULL;
     DWORD status = 0, ssize = sizeof(status);
@@ -71,7 +72,8 @@ static int request_body(const wchar_t *method, const wchar_t *path, const char *
     session = WinHttpOpen(L"FFNY-Online-Launcher/1", test && *test ? WINHTTP_ACCESS_TYPE_NO_PROXY : WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
                           WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
     /* A bug report of a few MB may take a while on a slow line. */
-    if (session) WinHttpSetTimeouts(session, 5000, 5000, blen > 65536 ? 120000 : 10000, 15000);
+    if (session && limit_ms > 0) WinHttpSetTimeouts(session, limit_ms, limit_ms, limit_ms, limit_ms);
+    else if (session) WinHttpSetTimeouts(session, 5000, 5000, blen > 65536 ? 120000 : 10000, 15000);
     if (session) connect = WinHttpConnect(session, host, port, 0);
     if (connect) req = WinHttpOpenRequest(connect, method, path, NULL, WINHTTP_NO_REFERER,
                                           WINHTTP_DEFAULT_ACCEPT_TYPES, secure);
@@ -97,6 +99,12 @@ static int request_body(const wchar_t *method, const wchar_t *path, const char *
     if (connect) WinHttpCloseHandle(connect);
     if (session) WinHttpCloseHandle(session);
     return (int)status;
+}
+
+static int request_body(const wchar_t *method, const wchar_t *path, const char *token, const char *ctype,
+                        const void *body, DWORD blen, char *buf, int size)
+{
+    return request_body_ms(method, path, token, ctype, body, blen, buf, size, 0);
 }
 
 /* The same with a JSON body. */
@@ -568,6 +576,48 @@ void account_report_match(const char *json)
     if (copy) run(report_thread, copy);
 }
 
+/* The crash report: everything it needs is in these, copied before the request, so the request
+ * allocates nothing of ours (the crash may be in the heap). */
+static char g_crash_json[2048], g_crash_token[65];
+static volatile LONG g_crash_once, g_crash_status;
+
+static DWORD WINAPI crash_thread(LPVOID limit)
+{
+    char buf[256];
+    int status = request_body_ms(L"POST", L"/api/matches", g_crash_token, "application/json", g_crash_json,
+                                 (DWORD)strlen(g_crash_json), buf, sizeof(buf), (int)(INT_PTR)limit);
+    InterlockedExchange(&g_crash_status, status);
+    return 0;
+}
+
+int account_report_crash(const char *json, unsigned timeout_ms)
+{
+    HANDLE t;
+    DWORD waited;
+    size_t len = strlen(json);
+    if (g_state != ACCOUNT_IN && g_state != ACCOUNT_CHECKING) return -1;
+    if (len >= sizeof(g_crash_json) || InterlockedExchange(&g_crash_once, 1)) return -1;
+    memcpy(g_crash_json, json, len + 1);
+    /* Not a blocking acquire: the crashing thread may be the one holding the lock. The token only
+     * changes at sign-in and sign-out; a torn copy is refused by the service, nothing worse. */
+    if (TryAcquireSRWLockShared(&g_lock)) {
+        memcpy(g_crash_token, g_token, sizeof(g_crash_token));
+        ReleaseSRWLockShared(&g_lock);
+    } else {
+        memcpy(g_crash_token, g_token, sizeof(g_crash_token));
+    }
+    g_crash_token[sizeof(g_crash_token) - 1] = 0;
+    /* On a thread of its own, waited for at most timeout_ms: whatever WinHTTP waits on (a name
+     * lookup, a lock the crashed thread holds), the crash goes on after that. */
+    t = CreateThread(NULL, 256 * 1024, crash_thread, (LPVOID)(INT_PTR)timeout_ms, 0, NULL);
+    if (!t) return -1;
+    waited = WaitForSingleObject(t, timeout_ms);
+    CloseHandle(t);
+    if (waited != WAIT_OBJECT_0) return 0;      /* still trying: it may go out while the crash goes on */
+    SecureZeroMemory(g_crash_token, sizeof(g_crash_token));
+    return (int)g_crash_status;
+}
+
 #else   /* sign-in is Windows only for now, like online play */
 
 void account_init(void) {}
@@ -580,6 +630,7 @@ enum AccountState account_state(void) { return ACCOUNT_OUT; }
 int account_game_name(char *out, int size) { (void)out; (void)size; return 0; }
 void account_text(char *out, int size) { if (size > 0) out[0] = 0; }
 void account_report_match(const char *json) { (void)json; }
+int account_report_crash(const char *json, unsigned timeout_ms) { (void)json; (void)timeout_ms; return -1; }
 void account_fetch_stats(void) {}
 void account_fetch_stats_page(int page) { (void)page; }
 int account_stats_busy(void) { return 0; }

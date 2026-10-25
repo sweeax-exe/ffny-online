@@ -13,7 +13,9 @@ import (
 // Every signed-in player's game reports the match it plays (POST /api/matches). The reports of
 // one match share a key (room, seed and match id). Since build 23 a game reports three events:
 // "start" once the fight is loaded, then "result" when it is decided, or "left" naming the
-// players who stopped answering before that (builds before 23 send results only).
+// players who stopped answering before that (builds before 23 send results only). Since build 27
+// a game whose process crashes during the fight sends a fourth, "crashed", for its own slot from
+// the crash handler, before it dies.
 //
 // A match counts once the reports have had ReportWindow to arrive after the first result or
 // "left", and:
@@ -21,10 +23,18 @@ import (
 //     won. A match against a player who is not signed in, or whose game did not report, does not
 //     count (a second copy of the game, not signed in, gave free wins);
 //   - a player left: everyone who stayed says so and names the same players; each of those left
-//     after reporting the start (so they were signed in) and sent nothing else. They take a loss;
-//     in a one on one the one who stayed takes the win. Leaving before a loss kept records clean
-//     (players' reports, 2026-10-24). When the two games each say the other left, nothing counts.
-// Anything else is dropped. Casual statistics trust the games; ranked adds the relay's pairing.
+//     after reporting the start (so they were signed in) and sent nothing else but, perhaps,
+//     "crashed". They take a loss; in a one on one the one who stayed takes the win. Leaving
+//     before a loss kept records clean (players' reports, 2026-10-24). When the two games each say
+//     the other left, nothing counts;
+//   - no contest: a leaver whose own game reported "crashed" for the match takes nothing, and in a
+//     one on one the one who stayed takes nothing either (the owner's decision, 2026-10-25: players
+//     lost records to crashes of the rollback beta). When every leaver crashed the match counts for
+//     nobody and is logged as a no contest; a leaver who quit, was killed or lost the connection
+//     beside one who crashed still takes the loss. A "crashed" report from a player nobody named as
+//     a leaver, or for a match whose results are all in, changes nothing (the match was decided).
+// Anything else is dropped. Casual statistics trust the games; ranked adds the relay's pairing and
+// moves ratings on agreed results only, so neither a leaver nor a no contest changes a rating.
 
 // ReportWindow is how long the other players' reports may take after the first one.
 const ReportWindow = 45 * time.Second
@@ -57,14 +67,15 @@ type MatchReport struct {
 	Players   []MatchPlayer `json:"players"`
 	Winners   []int         `json:"winners"`
 	Draw      bool          `json:"draw"`
-	Event     string        `json:"event,omitempty"` // "start", "left" or "result" ("" is a result)
+	Event     string        `json:"event,omitempty"` // "start", "left", "crashed" or "result" ("" is a result)
 	Left      []int         `json:"left,omitempty"`  // "left": the slots that stopped answering
 }
 
 const (
-	eventStart  = "start"
-	eventLeft   = "left"
-	eventResult = "result"
+	eventStart   = "start"
+	eventLeft    = "left"
+	eventResult  = "result"
+	eventCrashed = "crashed" // the reporter's own game crashed during the fight
 )
 
 func (r *MatchReport) event() string {
@@ -120,7 +131,7 @@ func (r *MatchReport) valid() bool {
 		}
 	}
 	switch r.event() {
-	case eventStart:
+	case eventStart, eventCrashed:
 		return len(r.Winners) == 0 && !r.Draw && len(r.Left) == 0
 	case eventLeft:
 		if len(r.Winners) != 0 || r.Draw || len(r.Left) == 0 {
@@ -194,6 +205,7 @@ type pendingMatch struct {
 	starts  map[int64]MatchReport // by account
 	reports map[int64]MatchReport // the results, by account
 	lefts   map[int64]MatchReport // "left", by account
+	crashed map[int64]MatchReport // "crashed", by account: that player's own game crashed
 }
 
 // Report takes a game's report. It returns false when the report is malformed or the account
@@ -226,7 +238,7 @@ func (s *Store) Report(account int64, r MatchReport, now time.Time) bool {
 	p, ok := s.pending[r.Key]
 	if !ok {
 		p = &pendingMatch{created: now, starts: map[int64]MatchReport{}, reports: map[int64]MatchReport{},
-			lefts: map[int64]MatchReport{}}
+			lefts: map[int64]MatchReport{}, crashed: map[int64]MatchReport{}}
 		s.pending[r.Key] = p
 	}
 	into := p.reports
@@ -235,11 +247,15 @@ func (s *Store) Report(account int64, r MatchReport, now time.Time) bool {
 		into = p.starts
 	case eventLeft:
 		into = p.lefts
+	case eventCrashed:
+		into = p.crashed
 	}
 	if _, dup := into[account]; !dup {
 		into[account] = r
 	}
-	if r.event() != eventStart && p.first.IsZero() {
+	// A crash alone does not start the window: the other games say who left a few seconds later
+	// (a match where every game crashed expires like one that only started).
+	if r.event() != eventStart && r.event() != eventCrashed && p.first.IsZero() {
 		p.first = now
 	}
 	return true
@@ -264,8 +280,8 @@ func (s *Store) Settle(now time.Time) (counted, dropped int) {
 		if why := s.settle(key, p, now); why != "" {
 			dropped++
 			if len(s.drops) < 100 {
-				s.drops = append(s.drops, fmt.Sprintf("%s (%d start, %d result, %d left)", why, len(p.starts),
-					len(p.reports), len(p.lefts)))
+				s.drops = append(s.drops, fmt.Sprintf("%s (%d start, %d result, %d left, %d crashed)", why,
+					len(p.starts), len(p.reports), len(p.lefts), len(p.crashed)))
 			}
 			continue
 		}
@@ -281,9 +297,9 @@ func (s *Store) Settle(now time.Time) (counted, dropped int) {
 func (s *Store) settle(key string, p *pendingMatch, now time.Time) string {
 	var lineup string
 	var any MatchReport
-	seat := map[int]int64{}  // slot -> account
+	seat := map[int]int64{}   // slot -> account
 	seatOf := map[int64]int{} // account -> slot
-	for _, group := range []map[int64]MatchReport{p.starts, p.reports, p.lefts} {
+	for _, group := range []map[int64]MatchReport{p.starts, p.reports, p.lefts, p.crashed} {
 		for id, r := range group {
 			if lineup == "" {
 				lineup, any = r.lineup(), r
@@ -303,6 +319,15 @@ func (s *Store) settle(key string, p *pendingMatch, now time.Time) string {
 	switch {
 	case len(p.lefts) == 0:
 		if len(p.reports) != len(humans) {
+			var crashed []int
+			for id, r := range p.crashed {
+				if _, reported := p.reports[id]; !reported {
+					crashed = append(crashed, r.You)
+				}
+			}
+			if len(crashed) > 0 { // it would not count anyway; the log says why
+				return "no contest: " + slotNames(any, crashed) + " game crashed"
+			}
 			return fmt.Sprintf("%d of %d players reported a result (not signed in, or the game did not report)",
 				len(p.reports), len(humans))
 		}
@@ -333,6 +358,7 @@ func (s *Store) settle(key string, p *pendingMatch, now time.Time) string {
 			stayed = append(stayed, r.You)
 		}
 		var lost []int64
+		var crashed []int
 		for _, l := range leavers {
 			id, ok := seat[l]
 			if !ok {
@@ -344,10 +370,17 @@ func (s *Store) settle(key string, p *pendingMatch, now time.Time) string {
 			if _, started := p.starts[id]; !started {
 				return "a player who left never reported the start"
 			}
+			if _, crash := p.crashed[id]; crash {
+				crashed = append(crashed, l) // no contest for this one: no loss
+				continue
+			}
 			lost = append(lost, id)
 		}
 		if len(stayed)+len(leavers) != len(humans) {
 			return "not every player who stayed reported the leaver"
+		}
+		if len(lost) == 0 {
+			return "no contest: " + slotNames(any, crashed) + " game crashed"
 		}
 		for _, id := range lost {
 			r := p.starts[id]
@@ -356,7 +389,7 @@ func (s *Store) settle(key string, p *pendingMatch, now time.Time) string {
 				a.stats().add(r, p.first)
 			}
 		}
-		if len(humans) == 2 && len(any.Players) == 2 {
+		if len(humans) == 2 && len(any.Players) == 2 { // the one leaver, and its game did not crash
 			for id, r := range p.lefts {
 				r.Winners = []int{r.You}
 				if a, ok := s.accounts[id]; ok {
@@ -369,7 +402,23 @@ func (s *Store) settle(key string, p *pendingMatch, now time.Time) string {
 	return "both results and a player leaving were reported"
 }
 
-// TakeDrops returns why matches were dropped since the last call.
+// slotNames names the players in slots for the service's log: "slot 1 (DMX)'s".
+func slotNames(r MatchReport, slots []int) string {
+	sort.Ints(slots)
+	var parts []string
+	for _, slot := range slots {
+		name := ""
+		for _, p := range r.Players {
+			if p.Slot == slot {
+				name = p.Name
+			}
+		}
+		parts = append(parts, fmt.Sprintf("slot %d (%s)'s", slot, name))
+	}
+	return strings.Join(parts, ", ")
+}
+
+// TakeDrops returns why matches were dropped since the last call, no contests among them.
 func (s *Store) TakeDrops() []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()

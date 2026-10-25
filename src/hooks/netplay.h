@@ -205,6 +205,10 @@ int netplay_toast(char *text, int size);
 int netplay_debug_json(char *out, int size);    /* tests: the lockstep's state as JSON */   /* a notice for the fight right now (wait, desync, gone) */
 void netplay_crowd_update(void);  /* the crowd's update, as recomp_lookup_manual hands it out */
 void netplay_on_result(uint32_t winners, uint32_t losers, uint32_t code);  /* the room match decided */
+/* The crash handler (main.c), after the crash report is written: a running online match this
+ * game reported the start of becomes a no contest at the account service ("crashed"). Copies
+ * host memory only, waits at most 1.5 s, once. */
+void netplay_on_crash(void);
 void netplay_on_pad_read(uint32_t actor);           /* sub_001BAA00: a fighter reads its pad */
 /* Seed arguments on the stack at `esp` (after the return address); `which`
  * names the call site so the two sides derive the same value for it. */

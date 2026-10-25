@@ -141,6 +141,145 @@ func TestLeaverWithoutStartOrBothClaimingCountsNothing(t *testing.T) {
 	}
 }
 
+// started reports the start of a one on one from both accounts.
+func started(store *Store, a, b Account, key string, now time.Time) {
+	store.Report(a.ID, event(oneOnOne(key, 0, 0), eventStart), now)
+	store.Report(b.ID, event(oneOnOne(key, 1, 0), eventStart), now)
+}
+
+func TestCrashedLeaverIsNoContest(t *testing.T) {
+	store, a, b, now := twoAccounts(t)
+	started(store, a, b, "ROOM-4-1", now)
+	// b's game crashes mid-fight and says so; a's game reports b gone a few seconds later
+	if !store.Report(b.ID, event(oneOnOne("ROOM-4-1", 1, 0), eventCrashed), now.Add(time.Minute)) {
+		t.Fatal("crash report refused")
+	}
+	store.Report(a.ID, event(oneOnOne("ROOM-4-1", 0, 0), eventLeft, 1), now.Add(time.Minute+10*time.Second))
+	if c, d := store.Settle(now.Add(time.Minute + ReportWindow)); c+d != 0 {
+		t.Fatal("settled before the window after the left report ended")
+	}
+	if c, d := store.Settle(now.Add(time.Minute + 10*time.Second + ReportWindow)); c != 0 || d != 1 {
+		t.Fatalf("settle: %d counted, %d dropped", c, d)
+	}
+	for _, id := range []int64{a.ID, b.ID} {
+		if st, _ := store.StatsOf(id); st.Matches != 0 || st.Wins != 0 || st.Losses != 0 || len(st.Recent) != 0 {
+			t.Fatalf("account %d: %+v", id, st)
+		}
+	}
+	drops := store.TakeDrops()
+	if len(drops) != 1 || !strings.HasPrefix(drops[0], "no contest: slot 1 (DMX)'s game crashed") {
+		t.Fatalf("drops %q", drops)
+	}
+}
+
+func TestQuitWithoutCrashStillLoses(t *testing.T) {
+	// the crash report names the other match: this one is an ordinary leave
+	store, a, b, now := twoAccounts(t)
+	started(store, a, b, "ROOM-4-2", now)
+	started(store, a, b, "ROOM-4-3", now)
+	store.Report(b.ID, event(oneOnOne("ROOM-4-3", 1, 0), eventCrashed), now)
+	store.Report(a.ID, event(oneOnOne("ROOM-4-2", 0, 0), eventLeft, 1), now)
+	if c, _ := store.Settle(now.Add(ReportWindow)); c != 1 {
+		t.Fatalf("settle: %d counted", c)
+	}
+	sa, _ := store.StatsOf(a.ID)
+	sb, _ := store.StatsOf(b.ID)
+	if sa.Wins != 1 || sa.Matches != 1 || sb.Losses != 1 || sb.Matches != 1 {
+		t.Fatalf("stayed %+v, left %+v", sa, sb)
+	}
+}
+
+func TestCrashReportFromAPlayerWhoStayedChangesNothing(t *testing.T) {
+	store, a, b, now := twoAccounts(t)
+	started(store, a, b, "ROOM-4-4", now)
+	store.Report(a.ID, event(oneOnOne("ROOM-4-4", 0, 0), eventLeft, 1), now)
+	store.Report(a.ID, event(oneOnOne("ROOM-4-4", 0, 0), eventCrashed), now.Add(time.Second)) // the stayer, later
+	if c, d := store.Settle(now.Add(ReportWindow)); c != 1 || d != 0 {
+		t.Fatalf("settle: %d counted, %d dropped", c, d)
+	}
+	sa, _ := store.StatsOf(a.ID)
+	sb, _ := store.StatsOf(b.ID)
+	if sa.Wins != 1 || sb.Losses != 1 {
+		t.Fatalf("stayed %+v, left %+v", sa, sb)
+	}
+}
+
+func TestCrashAfterTheResultsChangesNothing(t *testing.T) {
+	store, a, b, now := twoAccounts(t)
+	started(store, a, b, "ROOM-4-5", now)
+	store.Report(a.ID, event(oneOnOne("ROOM-4-5", 0, 0), eventResult), now)
+	store.Report(b.ID, event(oneOnOne("ROOM-4-5", 1, 0), eventResult), now)
+	store.Report(b.ID, event(oneOnOne("ROOM-4-5", 1, 0), eventCrashed), now.Add(time.Second)) // within the window
+	if c, d := store.Settle(now.Add(ReportWindow)); c != 1 || d != 0 {
+		t.Fatalf("settle: %d counted, %d dropped", c, d)
+	}
+	// and one after the match was settled opens nothing that counts
+	store.Report(b.ID, event(oneOnOne("ROOM-4-5", 1, 0), eventCrashed), now.Add(ReportWindow+time.Second))
+	if c, d := store.Settle(now.Add(StartLifetime + time.Hour)); c != 0 || d != 0 {
+		t.Fatalf("late crash report: %d counted, %d dropped", c, d)
+	}
+	sa, _ := store.StatsOf(a.ID)
+	sb, _ := store.StatsOf(b.ID)
+	if sa.Wins != 1 || sa.Matches != 1 || sb.Losses != 1 || sb.Matches != 1 {
+		t.Fatalf("winner %+v, loser %+v", sa, sb)
+	}
+}
+
+func TestCrashReportShape(t *testing.T) {
+	store, a, _, now := twoAccounts(t)
+	r := event(oneOnOne("ROOM-4-6", 0, 0), eventCrashed)
+	r.Winners = []int{0}
+	if store.Report(a.ID, r, now) {
+		t.Fatal("took a crash report with a winner")
+	}
+	if store.Report(a.ID, event(oneOnOne("ROOM-4-6", 0, 0), eventCrashed, 1), now) {
+		t.Fatal("took a crash report naming a leaver")
+	}
+}
+
+// ffa is a free for all of the given humans (slots 0..) and CPU fighters up to four.
+func ffa(key string, you, humans int) MatchReport {
+	names := []string{"Masa", "DMX", "Redman", "Ice-T"}
+	r := MatchReport{Key: key, Mode: 3, ModeName: "Free for All", Venue: 19, VenueName: "Club", You: you}
+	for i := 0; i < 4; i++ {
+		r.Players = append(r.Players, MatchPlayer{Slot: i, Name: names[i], Fighter: 10 + i, CPU: i >= humans})
+	}
+	return r
+}
+
+func TestFreeForAllCrashAndQuit(t *testing.T) {
+	store, err := Open(filepath.Join(t.TempDir(), "a.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	var ids []int64
+	for i := 0; i < 3; i++ {
+		ids = append(ids, store.Upsert(string(rune('1'+i)), "p", "P", "", now).ID)
+	}
+	for i, id := range ids {
+		store.Report(id, event(ffa("ROOM-5-1", i, 3), eventStart), now)
+		store.Report(id, event(ffa("ROOM-5-2", i, 3), eventStart), now)
+	}
+	// ROOM-5-1: slot 2 crashes, the other two stay: nobody counts
+	store.Report(ids[2], event(ffa("ROOM-5-1", 2, 3), eventCrashed), now)
+	store.Report(ids[0], event(ffa("ROOM-5-1", 0, 3), eventLeft, 2), now)
+	store.Report(ids[1], event(ffa("ROOM-5-1", 1, 3), eventLeft, 2), now)
+	// ROOM-5-2: slot 2 crashes and slot 1 quits: slot 1 takes the loss, nobody else counts
+	store.Report(ids[2], event(ffa("ROOM-5-2", 2, 3), eventCrashed), now)
+	store.Report(ids[0], event(ffa("ROOM-5-2", 0, 3), eventLeft, 1, 2), now)
+	if c, d := store.Settle(now.Add(ReportWindow)); c != 1 || d != 1 {
+		t.Fatalf("settle: %d counted, %d dropped", c, d)
+	}
+	want := []struct{ matches, losses int }{{0, 0}, {1, 1}, {0, 0}}
+	for i, id := range ids {
+		st, _ := store.StatsOf(id)
+		if st.Matches != want[i].matches || st.Losses != want[i].losses || st.Wins != 0 {
+			t.Fatalf("slot %d: %+v", i, st)
+		}
+	}
+}
+
 func TestBadReportsAndFlooding(t *testing.T) {
 	store, a, _, now := twoAccounts(t)
 	bad := oneOnOne("ROOM-1-3", 3, 0) // reporter not in the match
