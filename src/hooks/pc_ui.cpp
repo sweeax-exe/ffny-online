@@ -2243,7 +2243,8 @@ void set_open(bool open)
 extern "C" void pc_ui_set_window(HWND window) { g_window = window; }
 
 // RECOMP_OVERLAY_SHOT_DIR=<folder>: test runs write the finished picture, the overlay included,
-// every RECOMP_OVERLAY_SHOT_MS (default 2000) while the overlay draws, as <ms since the first>.bmp.
+// every RECOMP_OVERLAY_SHOT_MS (default 2000) while the overlay draws, as <ms since the first>.bmp
+// (<ms>-<page>.bmp while RECOMP_TEST_ONLINE_GALLERY shows the online pages).
 // It reads the game's own back buffer, never the screen, so nothing else on the desktop gets in.
 static void overlay_shot(ID3D11Device *dev, ID3D11DeviceContext *ctx, ID3D11RenderTargetView *rtv)
 {
@@ -2279,7 +2280,9 @@ static void overlay_shot(ID3D11Device *dev, ID3D11DeviceContext *ctx, ID3D11Rend
         ctx->CopyResource(staging, back);
         if (SUCCEEDED(ctx->Map(staging, 0, D3D11_MAP_READ, 0, &map))) {
             char path[1024];
-            snprintf(path, sizeof(path), "%s/%06u.bmp", dir, (unsigned)(now - first));
+            const char *label = online_screen::shot_label();     // the online gallery's page
+            snprintf(path, sizeof(path), "%s/%06u%s%s.bmp", dir, (unsigned)(now - first), label ? "-" : "",
+                     label ? label : "");
             FILE *f = fopen(path, "wb");
             if (f) {
                 unsigned w = desc.Width, h = desc.Height, row = w * 4, size = 54 + row * h;

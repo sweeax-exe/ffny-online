@@ -460,6 +460,82 @@ struct State {
     uint32_t watch_hidden = 0;      // King of the Hill: the fight whose watching screen B closed
 } S;
 
+// ---- the test gallery ----------------------------------------------------------------------------
+//
+// RECOMP_TEST_ONLINE_GALLERY=<ms>: the online screens show every page in turn, <ms> each, with
+// sample players, rooms, a hill and statistics instead of the server's, and take no input. It
+// connects to nothing. With RECOMP_OVERLAY_SHOT_DIR the captures carry the page's name, so a
+// design change can be looked at page by page (before and after) without three copies and a relay.
+// The pages read the lobby through the wrappers below, which answer from the sample in the gallery.
+
+struct Gallery {
+    enum NetplayState state = NETPLAY_LOBBY;
+    bool in_lobby = true;
+    NetRoom room = {};
+    std::vector<NetRoomInfo> rooms;
+    std::vector<NetPlayer> players;
+    int queue = NETQUEUE_SEARCHING;
+    std::string stats;
+    const char *page = nullptr;     // the page shown, for the captures' names
+} G;
+
+bool gallery_on()
+{
+    static int ms = -1;
+    if (ms < 0) {
+        const char *e = getenv("RECOMP_TEST_ONLINE_GALLERY");
+        ms = e && atoi(e) > 0 ? atoi(e) : 0;
+    }
+    return ms > 0;
+}
+
+enum NetplayState net_state() { return gallery_on() ? G.state : netplay_state(); }
+bool net_in_lobby() { return gallery_on() ? G.in_lobby : netplay_in_lobby() != 0; }
+void lobby_room(NetRoom *r)
+{
+    if (gallery_on()) *r = G.room;
+    else netplay_lobby_room(r);
+}
+int lobby_rooms(NetRoomInfo *out, int max, unsigned *version)
+{
+    if (!gallery_on()) return netplay_lobby_rooms(out, max, version);
+    int n = std::min(max, (int)G.rooms.size());
+    for (int i = 0; i < n; i++) out[i] = G.rooms[i];
+    *version = 1;
+    return n;
+}
+int lobby_players(NetPlayer *out, int max, int *online, int *rooms)
+{
+    if (!gallery_on()) return netplay_lobby_players(out, max, online, rooms);
+    int n = std::min(max, (int)G.players.size());
+    for (int i = 0; out && i < n; i++) out[i] = G.players[i];
+    if (online) *online = 142;
+    if (rooms) *rooms = 12;
+    return n;
+}
+int lobby_queue(int *waited, int *searching, char *why, int size)
+{
+    if (!gallery_on()) return netplay_lobby_queue(waited, searching, why, size);
+    *waited = 37;
+    *searching = 4;
+    if (size > 0) why[0] = 0;
+    return G.queue;
+}
+int lobby_caps() { return gallery_on() ? NETPLAY_CAP_KOTH : netplay_lobby_caps(); }
+enum AccountState acc_state() { return gallery_on() ? ACCOUNT_IN : account_state(); }
+bool stats_busy() { return gallery_on() ? false : account_stats_busy() != 0; }
+bool stats_text(char *out, int size)
+{
+    if (!gallery_on()) return account_stats(out, size) != 0;
+    snprintf(out, (size_t)size, "%s", G.stats.c_str());
+    return true;
+}
+void status_text(char *out, int size)
+{
+    if (gallery_on()) snprintf(out, (size_t)size, "Online as Ann. Ping 38 ms.");
+    else netplay_status(out, size);
+}
+
 // Room codes use these characters (no 0/O, 1/I), as the server makes them.
 const char CODE_CHARS[] = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
@@ -505,7 +581,7 @@ const char *mode_name(int type)
 // The relay answered CAPS with King of the Hill (an older relay never offers it).
 bool koth_offered()
 {
-    int caps = netplay_lobby_caps();
+    int caps = lobby_caps();
     return caps > 0 && (caps & NETPLAY_CAP_KOTH);
 }
 
@@ -635,7 +711,7 @@ bool ranked_shown()
 void online_count(ImDrawList *dl, const Frame &f)
 {
     int online = -1, rooms = 0;
-    netplay_lobby_players(nullptr, 0, &online, &rooms);
+    lobby_players(nullptr, 0, &online, &rooms);
     if (online < 0) return;
     char line[64];
     snprintf(line, sizeof(line), "%d PLAYER%s ONLINE  -  %d ROOM%s", online, online == 1 ? "" : "S", rooms,
@@ -649,7 +725,7 @@ void draw_players(ImDrawList *dl, const Frame &f, const Pad &pad)
 {
     static NetPlayer list[40];
     int online = -1, rooms = 0;
-    int n = netplay_lobby_players(list, 40, &online, &rooms);
+    int n = lobby_players(list, 40, &online, &rooms);
     if (pad.x) netplay_lobby_who();
     page_title(dl, f, "PLAYERS ONLINE");
     online_count(dl, f);
@@ -707,7 +783,7 @@ void draw_hub(ImDrawList *dl, const Frame &f, const Pad &pad)
     online_count(dl, f);
     // Online fights need a Discord sign-in: matches against signed-out players did not count, about
     // half of them after the build-23 rules (2026-10-24). Y signs in from here (the browser opens).
-    enum AccountState acc = account_state();
+    enum AccountState acc = acc_state();
     bool signed_in = acc == ACCOUNT_IN;
     // A newer build is out: this one starts no new matches (the relay refuses them too, since build 26).
     int newer = 0;
@@ -772,7 +848,7 @@ void draw_hub(ImDrawList *dl, const Frame &f, const Pad &pad)
             }
             break;
         case 1:
-            if (account_state() != ACCOUNT_IN) { say("Sign in with Discord in the launcher to play ranked."); break; }
+            if (acc_state() != ACCOUNT_IN) { say("Sign in with Discord in the launcher to play ranked."); break; }
             S.ranked_pick = true;
             S.page = FIGHTERS;
             {
@@ -823,7 +899,7 @@ std::vector<std::string> split_bar(const std::string &v)
 bool read_stats(StatsView &v)
 {
     static char buf[16384];
-    if (!account_stats(buf, sizeof(buf))) return false;
+    if (!stats_text(buf, sizeof(buf))) return false;
     for (char *line = buf; line && *line;) {
         char *end = strchr(line, '\n');
         if (end) *end = 0;
@@ -868,7 +944,7 @@ void draw_stats(ImDrawList *dl, const Frame &f, const Pad &pad)
 {
     if (pad.x) account_fetch_stats_page(S.stats_page);
     page_title(dl, f, "MY STATS");
-    enum AccountState acc = account_state();
+    enum AccountState acc = acc_state();
     StatsView v;
     bool have = (acc == ACCOUNT_IN || acc == ACCOUNT_CHECKING) && read_stats(v);
     if (acc != ACCOUNT_IN && acc != ACCOUNT_CHECKING) {
@@ -880,8 +956,8 @@ void draw_stats(ImDrawList *dl, const Frame &f, const Pad &pad)
         return;
     }
     if (!have) {
-        text(dl, f, g_title, 22, 320, 200, CREAM, account_stats_busy() ? "LOADING..." : "NO STATS YET", CENTER, 1.6f);
-        if (!account_stats_busy())
+        text(dl, f, g_title, 22, 320, 200, CREAM, stats_busy() ? "LOADING..." : "NO STATS YET", CENTER, 1.6f);
+        if (!stats_busy())
             text(dl, f, g_hand, 14, 320, 236, ORANGE, "PRESS X TO TRY AGAIN", CENTER, 1.0f);
         return;
     }
@@ -924,7 +1000,7 @@ void draw_stats(ImDrawList *dl, const Frame &f, const Pad &pad)
         text(dl, f, g_title, 12, 64, y + 1, CREAM, line.c_str(), LEFT, 1.0f, 250);
     }
     // right: the leaderboard, ten places a page (left/right or LB/RB turn the page)
-    if (!account_stats_busy()) {
+    if (!stats_busy()) {
         int want = v.board_page;
         if ((pad.left || pad.lb) && v.board_page > 0) want = v.board_page - 1;
         if ((pad.right || pad.rb) && v.board_page + 1 < v.board_pages) want = v.board_page + 1;
@@ -936,7 +1012,7 @@ void draw_stats(ImDrawList *dl, const Frame &f, const Pad &pad)
         char pg[32];
         snprintf(pg, sizeof(pg), "%s  %d / %d  %s", v.board_page > 0 ? "<" : " ", v.board_page + 1, v.board_pages,
                  v.board_page + 1 < v.board_pages ? ">" : " ");
-        text(dl, f, g_title, 14, 468, 386, account_stats_busy() ? GREY : CREAM, pg, CENTER, 1.1f);
+        text(dl, f, g_title, 14, 468, 386, stats_busy() ? GREY : CREAM, pg, CENTER, 1.1f);
     }
     text(dl, f, g_title, 10, 592, 100, GREY, "MOST WINS", RIGHT, 1.0f);
     if (v.board.empty())
@@ -962,9 +1038,9 @@ void draw_rooms(ImDrawList *dl, const Frame &f, const Pad &pad)
 {
     NetRoomInfo rooms[32];
     unsigned version;
-    int n = netplay_lobby_rooms(rooms, 32, &version);
+    int n = lobby_rooms(rooms, 32, &version);
     unsigned long long now = GetTickCount64();
-    if (now - S.last_list > 3000) { netplay_lobby_list(0xFF); S.last_list = now; }
+    if (!gallery_on() && now - S.last_list > 3000) { netplay_lobby_list(0xFF); S.last_list = now; }
     if (pad.up && n) S.rooms_sel = (S.rooms_sel + n - 1) % n;
     if (pad.down && n) S.rooms_sel = (S.rooms_sel + 1) % n;
     if (S.rooms_sel >= n) S.rooms_sel = n ? n - 1 : 0;
@@ -1205,7 +1281,7 @@ void draw_ranked(ImDrawList *dl, const Frame &f, const Pad &pad)
 {
     int waited = 0, searching = 0;
     char why[96];
-    int st = netplay_lobby_queue(&waited, &searching, why, sizeof(why));
+    int st = lobby_queue(&waited, &searching, why, sizeof(why));
     int fighter = recomp_settings_get("online", "fighter", 55);
     page_title(dl, f, "RANKED MATCH");
     online_count(dl, f);
@@ -1794,15 +1870,162 @@ void draw_voice(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r
 void draw_status(ImDrawList *dl, const Frame &f)
 {
     char status[256];
-    netplay_status(status, sizeof(status));
+    status_text(status, sizeof(status));
     text(dl, f, g_body, 11, 54, 452, GREY, status, LEFT, 0.6f, 270);
     NetRoom r;
-    netplay_lobby_room(&r);
+    lobby_room(&r);
     unsigned long long now = GetTickCount64();
     const char *note = nullptr;
     if (r.error[0]) note = r.error;
     else if (now < S.note_until) note = S.note.c_str();
     if (note) text(dl, f, g_hand, 14, 54, 428, r.error[0] ? RED : ORANGE, note, LEFT, 0.8f, 270);
+}
+
+// The gallery's sample: a room of `count` with names and fighters, this PC in slot 0 and hosting.
+NetRoom sample_room(int mode, int max, int count)
+{
+    static const char *const names[] = { "Ann", "Ben", "Cal", "Dee", "Eve", "Fox", "Gus", "Hal" };
+    const auto &list = roster();
+    NetRoom r = {};
+    r.in_room = 1;
+    snprintf(r.code, sizeof(r.code), "GTEEAQ");
+    r.you = 0;
+    r.host = 0;
+    snprintf(r.settings.name, sizeof(r.settings.name), "Ann's room");
+    r.settings.is_public = 1;
+    r.settings.mode = mode;
+    r.settings.max = max;
+    apply_preset(r.settings, 1);
+    r.player_count = count;
+    for (int i = 0; i < count && i < 8; i++) {
+        NetRoomPlayer &p = r.players[i];
+        p.slot = i;
+        snprintf(p.name, sizeof(p.name), "%s", names[i]);
+        p.ready = i % 2;
+        p.fighter = list.empty() ? 0xFF : list[(i * 7 + 3) % list.size()].id;
+        p.voted = -1;
+    }
+    r.received = GetTickCount64();
+    r.version = 1;
+    return r;
+}
+
+// Which page the gallery shows now, and the sample it shows with it.
+void gallery_step()
+{
+    static const char *const pages[] = { "connecting", "offline", "hub", "rooms", "code", "create", "create-koth",
+                                         "ranked", "voice", "stats", "players", "fighters", "room", "vote", "hill",
+                                         "up", "watch", "room-voice", "match" };
+    const int count = (int)(sizeof(pages) / sizeof(pages[0]));
+    static unsigned long long start;
+    static int ms;
+    unsigned long long now = GetTickCount64();
+    if (!start) {
+        start = now;
+        ms = atoi(getenv("RECOMP_TEST_ONLINE_GALLERY"));
+        const auto &list = roster();
+        static const char *const room_names[] = { "Ann's room", "Uptown Brawl", "Hill of Pain", "Late night FFA", "Dee's rules" };
+        static const int room_modes[] = { 0, 0, NETPLAY_MODE_KOTH_RANDOM, 2, 1 };
+        for (int i = 0; i < 5; i++) {
+            NetRoomInfo info = {};
+            snprintf(info.code, sizeof(info.code), "ROOM%02d", i);
+            snprintf(info.name, sizeof(info.name), "%s", room_names[i]);
+            info.mode = room_modes[i];
+            info.max = NETPLAY_IS_KOTH(info.mode) ? 8 : i == 3 ? 4 : 2;
+            info.players = i == 1 ? 2 : 1 + i % 3;
+            info.phase = i == 1 ? 2 : 0;
+            G.rooms.push_back(info);
+        }
+        static const char *const who[] = { "Ann", "Ben", "Cal", "Dee", "Eve", "Fox", "Gus", "Hal", "Ivy", "Jay",
+                                           "Kaze", "Lou", "Mo", "Nia", "Oz", "Pia", "Quin", "Rex", "Sol", "Tia",
+                                           "Uma", "Vic" };
+        for (int i = 0; i < (int)(sizeof(who) / sizeof(who[0])); i++) {
+            NetPlayer p = {};
+            snprintf(p.name, sizeof(p.name), "%s", who[i]);
+            p.state = i % 3;
+            G.players.push_back(p);
+        }
+        const OnlineFighter *main = list.empty() ? nullptr : &list[5 % list.size()];
+        char buf[2048];
+        snprintf(buf, sizeof(buf),
+                 "name=Ann\nmatches=42\nwins=27\nlosses=14\ndraws=1\nwin_rate=64\nstreak=3\nbest_streak=7\nrank=12\nmin=3\n"
+                 "favorite=%d\nfavorite_name=%s\nranked=1520|10\n"
+                 "recent=win|Ann|Ben|0\nrecent=loss|Ann|Cal|0\nrecent=win|Ann|Dee|0\n"
+                 "board=1|Kaze|88|20|0\nboard=2|Rex|71|33|0\nboard=3|Nia|64|12|0\nboard=4|Jay|58|41|0\n"
+                 "board=5|Sol|51|27|0\nboard=6|Oz|47|30|0\nboard=7|Vic|40|22|0\nboard=8|Mo|38|19|0\n"
+                 "board=9|Tia|31|25|0\nboard=10|Ann|27|14|0\nboard_page=0\nboard_pages=4\n",
+                 main ? main->id : -1, main ? main->name : "");
+        G.stats = buf;
+    }
+    int index = (int)((now - start) / (unsigned long long)ms) % count;
+    const char *page = pages[index];
+    G.page = page;
+    G.state = NETPLAY_LOBBY;
+    G.in_lobby = true;
+    G.room = NetRoom();
+    G.queue = NETQUEUE_SEARCHING;
+    S.watch_hidden = 0;
+    S.note_until = 0;
+    S.settings_edit = false;
+    std::string p = page;
+    if (p == "connecting") { G.state = NETPLAY_CONNECTING; G.in_lobby = false; }
+    else if (p == "offline") { G.state = NETPLAY_FAILED; G.in_lobby = false; }
+    else if (p == "hub") { S.page = HUB; S.hub_sel = 0; S.quick_mode = 0; }
+    else if (p == "rooms") { S.page = ROOMS; S.rooms_sel = 1; }
+    else if (p == "code") { S.page = CODE; snprintf(S.code, sizeof(S.code), "GTE4AQ"); S.code_pos = 3; }
+    else if (p == "create" || p == "create-koth") {
+        S.page = SETTINGS;
+        default_settings(S.settings);
+        snprintf(S.settings.name, sizeof(S.settings.name), "Ann's room");
+        if (p == "create-koth") { S.settings.mode = NETPLAY_MODE_KOTH_RANDOM; S.settings.max = 8; }
+        S.settings_sel = 0;
+    }
+    else if (p == "ranked") S.page = RANKED;
+    else if (p == "voice") { S.page = VOICE; S.voice_sel = 1; }
+    else if (p == "stats") { S.page = STATS; S.stats_page = 0; }
+    else if (p == "players") S.page = PLAYERS;
+    else if (p == "fighters") { S.page = FIGHTERS; S.fighter_sel = 9; S.fighter_top = 0; }
+    else if (p == "room") { S.page = HUB; G.room = sample_room(2, 4, 3); }
+    else if (p == "vote") {
+        S.page = HUB;
+        G.room = sample_room(0, 2, 2);
+        G.room.phase = 1;
+        G.room.candidate_count = 3;
+        G.room.candidates[0] = 1; G.room.candidates[1] = 6; G.room.candidates[2] = 11;
+        G.room.votes[0] = 1; G.room.votes[2] = 1;
+        G.room.players[0].voted = 0;
+        G.room.ms_left = 9000;
+        S.vote_sel = 0;
+    } else if (p == "hill" || p == "up" || p == "watch") {
+        S.page = HUB;
+        NetRoom &r = G.room = sample_room(NETPLAY_MODE_KOTH_RANDOM, 8, 5);
+        NetHill &h = r.hill;
+        h.valid = 1;
+        h.king = 2;
+        h.streak = 3;
+        h.ms_left = 14000;
+        h.received = r.received;
+        h.last_winner = 2; h.last_loser = 3; h.last_how = NETHOW_WON;
+        h.count = 5;
+        const int order[5] = { 2, 1, 0, 3, 4 };
+        for (int i = 0; i < 5; i++) { h.line[i].slot = order[i]; h.line[i].state = NETLINE_WAITING; h.line[i].wins = i == 0 ? 5 : i == 1 ? 2 : i == 3 ? 1 : 0; }
+        h.line[4].state = NETLINE_AWAY;
+        if (p == "hill") { h.phase = NETHILL_CALLING; h.line[0].state = NETLINE_READY; h.line[1].state = NETLINE_CALLED; }
+        else if (p == "up") {
+            h.phase = NETHILL_CALLING;
+            h.line[0].state = NETLINE_READY;
+            std::swap(h.line[1], h.line[2]);    // this PC (slot 0) is called against the king
+            h.line[1].state = NETLINE_CALLED;
+        } else {
+            h.phase = NETHILL_FIGHTING;
+            h.line[0].state = h.line[1].state = NETLINE_FIGHTING;
+            h.seed = h.watch_seed = 1234;
+            h.watch_venue = 6;
+            h.watch_slots[0] = 1; h.watch_slots[1] = 2;
+            h.watch_fighters[0] = r.players[1].fighter; h.watch_fighters[1] = r.players[2].fighter;
+        }
+    } else if (p == "room-voice") { S.page = VOICE; S.voice_sel = 5; G.room = sample_room(0, 4, 4); }
+    else if (p == "match") { G.state = NETPLAY_CONNECTED; G.room = sample_room(0, 2, 2); G.room.phase = 2; }
 }
 
 } // namespace
@@ -1850,12 +2073,14 @@ void draw_decor(ImDrawList *dl, ImVec2 display)
 
 bool closed_for_match() { return g_closed_for_match; }
 
+const char *shot_label() { return gallery_on() ? G.page : nullptr; }
+
 bool take_open_request()
 {
     if (!g_open_req.exchange(0)) return false;
     S = State();
     S.opened = GetTickCount64();
-    connect_if_needed();
+    if (!gallery_on()) connect_if_needed();
     return true;
 }
 
@@ -1867,10 +2092,14 @@ bool draw(ImVec2 display)
     Pad pad = read_pad();
     // the first frame takes no choice: the A that opened the screens is still down
     if (GetTickCount64() - S.opened < 250) pad = Pad();
+    if (gallery_on()) {
+        gallery_step();
+        pad = Pad();
+    }
 
     NetRoom room;
-    netplay_lobby_room(&room);
-    enum NetplayState st = netplay_state();
+    lobby_room(&room);
+    enum NetplayState st = net_state();
     // Over any screen but the main menu (after a match: the battle menu) every page is full-screen.
     {   // who is online: asked every five seconds while the online screens are up
         static unsigned long long asked;
@@ -1882,7 +2111,7 @@ bool draw(ImVec2 display)
              !g_menu_up.load());
 
     // a match was agreed: show it, then give the menu back to the game, which starts it
-    if (st == NETPLAY_CONNECTED && netplay_in_lobby()) {
+    if (st == NETPLAY_CONNECTED && net_in_lobby()) {
         if (!S.start_seen) S.start_seen = GetTickCount64();
         page_title(dl, f, "MATCH FOUND");
         text(dl, f, g_hand, 22, 320, 200, ORANGE, "Get ready to fight!", CENTER, 1.2f);
@@ -1893,7 +2122,7 @@ bool draw(ImVec2 display)
     S.start_seen = 0;
     g_closed_for_match = false;
 
-    if (st == NETPLAY_CONNECTING || (!netplay_in_lobby() && st != NETPLAY_FAILED)) {
+    if (st == NETPLAY_CONNECTING || (!net_in_lobby() && st != NETPLAY_FAILED)) {
         page_title(dl, f, "ONLINE");
         text(dl, f, g_hand, 20, 54, 120, ORANGE, "Connecting...", LEFT, 1.0f);
         door_text(dl, f, &tex("ui/online_icon.png"), "ONLINE", "CONNECTING", "To the FFNY Online server.");
@@ -1902,7 +2131,7 @@ bool draw(ImVec2 display)
     }
     if (st == NETPLAY_FAILED || st == NETPLAY_OFF) {
         char status[256];
-        netplay_status(status, sizeof(status));
+        status_text(status, sizeof(status));
         page_title(dl, f, "ONLINE");
         text(dl, f, g_hand, 20, 54, 110, RED, "No connection", LEFT, 1.0f);
         text(dl, f, g_title, 14, 54, 145, WHITE, status, LEFT, 0.8f, 265);
@@ -1999,6 +2228,7 @@ void draw_decor(ImDrawList *, ImVec2) {}
 bool take_open_request() { return g_open_req.exchange(0) != 0 && false; }
 bool draw(ImVec2) { return false; }
 bool closed_for_match() { return false; }
+const char *shot_label() { return nullptr; }
 }
 
 #endif
