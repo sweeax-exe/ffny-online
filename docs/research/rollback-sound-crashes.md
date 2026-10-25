@@ -246,3 +246,15 @@ crash report prints the history of the arena blocks the guest registers point in
   live, the mixer's lists broke in match 1 (`sub_00139D80` from `sub_0011E530`, step 2860). Routing is now
   the default under rollback (`RECOMP_ROLLBACK_STREAMS_IN_HEAP=1` for the other way); a read-only study of
   the `0x3A9688` table and the 256 KB block goes to `stream-table-crash.md`.
+
+## State at the end of 2026-10-25
+
+Fixed today (each found from a crash or hang in the five-match hub runs, 70 ms lag each way): mixer-written
+heap words kept live, late frees from other threads, held XAPI heap frees, kept arena blocks freed by a
+conservative scan, stream buffers routed to the arena, dropped stream-packet events for released chunks,
+no stream channel stop in re-run steps, and the music overlay handle `[0x2DBC40]` kept live
+(`music-director-crash.md`). The first match now runs clean in nearly every run (4-7 minutes, 1000-2500
+rollbacks); crashes left: early in a fight a dynamic load (`sub_0010AC20` from `sub_0010B3E0`) of an object
+whose buffer the audio subsystem's async loader (`0x1AA99`, another thread) had allocated in the arena a
+moment before (run `run-20261025-154502`; the async-load class of `rollback-async-loads.md`), and occasional
+second-match faults not yet analysed. Rollback ships as an opt-in beta in build 26.
