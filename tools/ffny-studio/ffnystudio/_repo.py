@@ -15,10 +15,19 @@ def repo_root():
 
 
 def hd_assets():
-    """scripts/hd_assets.py as a module: the bounded RefPack decoder and the SHPX decoder."""
+    """scripts/hd_assets.py as a module: the bounded RefPack decoder and the SHPX decoder.
+
+    $FFNY_HD_ASSETS wins; then the copy tools/ffny-studio/build_addon.py bundles next to this package
+    (``_hd_assets.py``, in the Blender add-on); then the checkout's scripts/hd_assets.py."""
     if "hd" not in _cache:
         override = os.environ.get("FFNY_HD_ASSETS")
-        path = Path(override) if override else (repo_root() or Path(".")) / "scripts" / "hd_assets.py"
+        bundled = _HERE / "_hd_assets.py"
+        if override:
+            path = Path(override)
+        elif bundled.is_file():
+            path = bundled
+        else:
+            path = (repo_root() or Path(".")) / "scripts" / "hd_assets.py"
         if not path.is_file():
             raise RuntimeError("scripts/hd_assets.py not found (set FFNY_HD_ASSETS)")
         spec = importlib.util.spec_from_file_location("ffny_hd_assets", path)
