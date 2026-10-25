@@ -44,6 +44,11 @@
 
 #define G_MATCH_PHASE   0x003B8F30u     /* test_telemetry.c G_PHASE */
 #define G_MATCH_WINNER  0x003B8F40u     /* test_telemetry.c G_WINNER: the winner's fighter slot */
+#define G_MATCH_TWIN   0x003B8F3Cu     /* the winner slot the decision writes first (phase 2 copies it to G_MATCH_WINNER) */
+#define G_MATCH_FLAGS  0x003B9054u     /* bit 0x08: the match is over (sticky until the next match) */
+#define G_RESULTS      0x003BE130u     /* the result history: 16-byte records, u16 code at +0xE */
+#define G_RESULT_COUNT 0x003BE624u
+#define RESULTS_MAX    ((G_RESULT_COUNT - G_RESULTS) / 0x10u)
 #define G_CROWD_RECORDS 0x003494E0u     /* count of the crowd's "audience public" records */
 
 #if !defined(_WIN32)
@@ -2574,11 +2579,6 @@ static void crowd_reset(uint32_t arena)
  * ring and its code) says it in every case; a code without the decisive bit is an elimination
  * along the way. Also when the fight went on offline (one report decides after 10 s). `final`: the
  * game has left the fight; with nothing decisive recorded it counts as a draw, so the hill moves on. */
-#define G_MATCH_TWIN   0x003B8F3Cu     /* the winner slot the decision writes first (phase 2 copies it to G_MATCH_WINNER) */
-#define G_MATCH_FLAGS  0x003B9054u     /* bit 0x08: the match is over (sticky until the next match) */
-#define G_RESULTS      0x003BE130u     /* the result history: 16-byte records, u16 code at +0xE */
-#define G_RESULT_COUNT 0x003BE624u
-#define RESULTS_MAX    ((G_RESULT_COUNT - G_RESULTS) / 0x10u)
 static void koth_check_result(int final)
 {
     uint32_t phase, count, code = 0, w = 0xFFFFFFFFu;
@@ -2644,10 +2644,21 @@ void netplay_on_step(void)
      * test_telemetry.c): report its result. Only after this match was seen fighting, as the
      * phase still holds the last match's value for a moment after a START. */
     if (N.lobby && N.match_live && !N.reported && !N.resim && (!N.rb_on || N.step <= N.final_step)) {
-        uint32_t phase = MEM32(G_MATCH_PHASE);
+        /* The game's result record says draws too (a double knockout, a venue taking both out, a
+         * time-up tie): read only through the phase word, those were reported as "slot 0 won", and the
+         * venue endings that skip phases 2 and 3 not at all (docs/research/team-and-special-match-types.md
+         * 10; the same reading as koth_check_result). */
+        uint32_t phase = MEM32(G_MATCH_PHASE), count = MEM32(G_RESULT_COUNT), code = 0;
         if (phase == 1u) N.fighting_seen = 1;
-        else if (N.fighting_seen && phase >= 2u && phase <= 3u) {
+        if (N.fighting_seen && N.match_seen && count && count <= RESULTS_MAX)
+            code = MEM16(G_RESULTS + (count - 1u) * 0x10u + 0xEu);
+        if ((code & 1u) && (code & 4u)) {
+            netplay_on_result(0, 0, 4u);                            /* a decisive draw */
+        } else if (N.fighting_seen && phase != 1u && phase >= 2u && phase <= 3u) {
             uint32_t w = MEM32(G_MATCH_WINNER);
+            netplay_on_result(w < MAXP ? 1u << w : 0u, 0, w < MAXP ? 1u : 4u);
+        } else if ((code & 1u) && (MEM32(G_MATCH_FLAGS) & 8u)) {   /* decided, the phase word skipped */
+            uint32_t w = MEM32(G_MATCH_TWIN);
             netplay_on_result(w < MAXP ? 1u << w : 0u, 0, w < MAXP ? 1u : 4u);
         }
     }
