@@ -73,6 +73,12 @@ static const Range k_data_skip[] = {
  * in sub_0010A7D0 (stress runs, 2026-10-22/23; the 20-second soak shows it too). */
 static const Range k_data_hole[] = {
     { 0x003A56B8u, 0x003A56C0u },
+    /* The music overlay: its sound handle [0x2DBC40], buffer [0x2DBC44] and name (0x2DBC48, up to the next
+     * global at 0x2DBCC8). Rewound to -1 by a load just after an overlay track opened, while the engine kept
+     * the overlay player, the next track change left a stale bank instance over the shared MPF buffer, and
+     * the director walked the new tune.mpf with the old table (sub_001317C0 off the end of memory, six runs
+     * matched to the byte; docs/research/music-director-crash.md). Sound is not rolled back: kept live. */
+    { 0x002DBC40u, 0x002DBCC8u },
 };
 #define N_DATA_HOLE (sizeof(k_data_hole) / sizeof(k_data_hole[0]))
 
