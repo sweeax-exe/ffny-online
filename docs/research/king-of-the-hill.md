@@ -304,7 +304,12 @@ its game still shows the results and the summary (they outlast the 20 s ready ti
 three-copy test the king was skipped and lost the crown), so a fighter called while still on the
 results of the fight it just fought readies itself with the same fighter; the START that follows
 is held until its game is back in the menus (the new opponent's controller would otherwise drive
-its results menu as player 2), with the pings (P_RTT) sent meanwhile. Test switches for the autostart:
+its results menu as player 2), with the pings (P_RTT) sent meanwhile. The fighters judge the
+fight from the game's result record (`0x3BE130` ring, code bit 0 decisive, bit 2 draw;
+match-end-state.md), not the phase word alone: a fight where the venue killed both fighters (code
+`0x1105`) never reached the decided phases, no RESULT went out and the hill stood at "fighting".
+A fighter whose game leaves the fight with nothing decisive recorded reports a draw, so the hill
+always moves on. Test switches for the autostart:
 `RECOMP_NETPLAY_QUICK=65,3` (quick-join a hill), `RECOMP_NETPLAY_NAME`, `RECOMP_NETPLAY_READY_DELAY_MS`;
 harness route `online-koth-p2` for the first fight's player 2.
 

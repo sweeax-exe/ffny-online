@@ -871,6 +871,7 @@ static void on_data(int from, const uint8_t *p, int len)
 }
 
 static void report_left(uint32_t left);
+static void koth_check_result(int final);
 
 /* ---- the hub's messages -------------------------------------------------------- */
 
@@ -2094,8 +2095,10 @@ void netplay_on_main_menu(void)
         automatch_request(&N.deferred_m);
         return;
     }
-    if (N.lobby && N.match_live && N.match_seen)
+    if (N.lobby && N.match_live && N.match_seen) {
+        koth_check_result(1);   /* King of the Hill: the fight's RESULT, a draw if none was recorded */
         end_hub_match("Match over; back in the room.");
+    }
 }
 
 /* At the sync point, before the match is set up: the room's START came, but a player has left
@@ -2551,36 +2554,63 @@ static void crowd_reset(uint32_t arena)
             with_text ? "the game's restart" : "field by field");
 }
 
-/* King of the Hill: the fight decided (the game's phase word, as for the account report below),
- * so the relay can rotate the line: RESULT with the winner's room slot, or WINNER_DRAW. Also when
- * the fight went on offline (the other PC stopped answering): one report decides after 10 s. */
-static void koth_check_result(void)
+/* King of the Hill: the fight decided, so the relay can rotate the line: RESULT with the winner's
+ * room slot, or WINNER_DRAW. The phase word alone missed fights that end without the decided
+ * phases: both fighters killed by the venue (result code 0x1105, "everybody out", a draw) went from
+ * phase 1 straight to the summary, no RESULT went out and the hill stood at "fighting" (three-copy
+ * test, 2026-10-25). The game's own result record (docs/research/match-end-state.md: the history
+ * ring and its code) says it in every case; a code without the decisive bit is an elimination
+ * along the way. Also when the fight went on offline (one report decides after 10 s). `final`: the
+ * game has left the fight; with nothing decisive recorded it counts as a draw, so the hill moves on. */
+#define G_MATCH_TWIN   0x003B8F3Cu     /* the winner slot the decision writes first (phase 2 copies it to G_MATCH_WINNER) */
+#define G_MATCH_FLAGS  0x003B9054u     /* bit 0x08: the match is over (sticky until the next match) */
+#define G_RESULTS      0x003BE130u     /* the result history: 16-byte records, u16 code at +0xE */
+#define G_RESULT_COUNT 0x003BE624u
+#define RESULTS_MAX    ((G_RESULT_COUNT - G_RESULTS) / 0x10u)
+static void koth_check_result(int final)
 {
-    uint32_t phase, w;
-    int winner;
-    if (!N.lobby || !N.koth_match || !N.match_live || N.koth_done || N.resim) return;
-    if (N.lockstep && N.rb_on && N.step > N.final_step) return;    /* the phase may come from a prediction */
+    uint32_t phase, count, code = 0, w = 0xFFFFFFFFu;
+    int winner = -1;
+    const char *how = "";
+    /* match_seen: this START's match is set up (the last one's phase and records linger until then) */
+    if (!N.lobby || !N.koth_match || !N.match_live || !N.match_seen || N.koth_done || N.resim) return;
+    if (!final && N.lockstep && N.rb_on && N.step > N.final_step) return;  /* the state may come from a prediction */
     phase = MEM32(G_MATCH_PHASE);
-    if (phase == 1u) { N.koth_fought = 1; return; }
-    if (!N.koth_fought || phase < 2u || phase > 3u) return;
-    w = MEM32(G_MATCH_WINNER);
-    winner = w < (uint32_t)N.players && w < MAXP ? N.start_slots[w] : (int)WINNER_DRAW;
+    if (phase == 1u) N.koth_fought = 1;
+    if (!N.koth_fought) return;
+    count = MEM32(G_RESULT_COUNT);
+    if (count && count <= RESULTS_MAX) code = MEM16(G_RESULTS + (count - 1u) * 0x10u + 0xEu);
+    if ((code & 1u) && (code & 4u)) {
+        winner = (int)WINNER_DRAW;
+        how = "a draw";
+    } else if ((code & 1u) || (phase >= 2u && phase <= 3u)) {
+        /* the winner slot is written with the decision; wait for it if only the record says so */
+        if (phase == 3u) w = MEM32(G_MATCH_WINNER);
+        else if (phase == 2u || (MEM32(G_MATCH_FLAGS) & 8u)) w = MEM32(G_MATCH_TWIN);
+        else if (!final) return;
+        winner = w < (uint32_t)N.players && w < MAXP ? N.start_slots[w] : (int)WINNER_DRAW;
+        how = winner == (int)WINNER_DRAW ? "no winner slot" : "won";
+    } else if (final) {
+        winner = (int)WINNER_DRAW;
+        how = "left the fight with no result recorded, counted as a draw";
+    } else {
+        return;
+    }
     EnterCriticalSection(&g_cs);
     N.koth_done = 1;
     N.koth_tries = 0;
     N.koth_sent = 0;
     N.koth_winner = winner;
     LeaveCriticalSection(&g_cs);
-    fprintf(stderr, "[NETPLAY] King of the Hill: the fight is decided, winner %s %d; sending RESULT\n",
-            winner == (int)WINNER_DRAW ? "none (a draw), code" : "room slot", winner == (int)WINNER_DRAW ? (int)w : winner);
+    fprintf(stderr, "[NETPLAY] King of the Hill: the fight is decided (%s; code %04X, phase %u), winner %s %d; sending RESULT\n",
+            how, (unsigned)code, (unsigned)phase, winner == (int)WINNER_DRAW ? "none, slot" : "room slot", winner);
 }
-
 void netplay_on_step(void)
 {
     uint32_t s, target, k, need;
     ULONGLONG waited_since, last_send, last_note;
     fight_input();              /* also after a fight went on offline */
-    koth_check_result();
+    koth_check_result(0);
     if (!N.lockstep) {
         if (soak_depth()) {     /* tests: the soak counts steps and prepares the save states itself */
             s = ++N.step;
@@ -2960,6 +2990,7 @@ void netplay_on_update(void)
     uint32_t t, f = 0;
     int i;
     rollback_check_tables(N.resim ? "a re-run update starts" : "an update starts");
+    koth_check_result(0);       /* also between the fight's steps: an ending can stop them */
     if (N.resim || !N.rb_on) return;
     /* The fight is decided and every step ran on the real entries, or the match went on offline:
      * no more rollback in this match (write tracking off, no saves on the results screen). */
