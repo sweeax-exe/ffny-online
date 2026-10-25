@@ -78,14 +78,19 @@ checks below.
 
 ### With a local build
 
-| Change touches | Run |
+| Change touches | Run on the pull request |
 |---|---|
 | Docs, unit-tested scripts | the two commands above |
-| `src/`, settings, input, launcher or overlay | `python scripts/regress.py --quick` (about 10 minutes) |
-| Runtime, renderer, translator or generated code; a toolkit pin change | `python scripts/regress.py` (about an hour), on the Release preset |
-| Translator (lifter) changes | the full run, plus the toolkit's compiled CPU tests: `python scripts/test-toolkit-msvc.py` |
-| A toolkit migration | the full run on both Debug and Release, plus a boot soak (`--only soak --soak 20`) |
+| `src/`, settings, input, launcher or overlay | `python scripts/regress.py --quick` (about 10 minutes) on the platform the change targets |
+| Runtime, renderer, translator or generated code; a toolkit pin change | `--quick`, plus `python scripts/regress.py --only <checks>` for the area, on the Release preset |
+| Translator (lifter) changes | the same, plus the toolkit's compiled CPU tests: `python scripts/test-toolkit-msvc.py` |
+| A toolkit migration | one full `python scripts/regress.py` (about an hour) on one platform, plus a boot soak (`--only soak --soak 20`) |
 | Installer | `scripts/build-setup.ps1`, the setup unit tests, and one real installation from a dump |
+
+The full `python scripts/regress.py` runs once per platform on each release
+candidate, after the queued pull requests are combined, so a pull request does
+not repeat it. [Releasing](docs/releasing.md) describes the release trains and
+[the release playbook](docs/agent/release.md) lists the `--only` checks per area.
 
 `python scripts/regress.py --help` lists the checks, and `--only a,b` runs a
 subset. `python scripts/scenario_suite.py run <route> --fixture <folder>` plays
@@ -115,6 +120,10 @@ could not run a game test, say so; the maintainer will run it.
 - Keep existing license notices, and disclose AI assistance where it was used.
 - Update the guides your change affects, and add a line to
   [known issues](docs/known-issues.md) if you leave a limitation behind.
+- Leave `PROGRESS.md` alone; put decisions and results in the pull request
+  description. A change to the game, setup or launcher is queued for a release
+  (the maintainer sets its milestone) and merges with the other queued changes
+  once the release candidate passes; see [releasing](docs/releasing.md).
 
 The only images in the repository are the README visuals in `docs/media/`,
 approved by the owner: two of gameplay and two of the port's own interface. CI

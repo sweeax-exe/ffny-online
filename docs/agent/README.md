@@ -14,6 +14,7 @@ session loads only what it needs.
 | `lifter-overrides.md` | you are about to write or change something in `src/recomp_manual.c` |
 | `delegation.md` | you are considering a sub-agent |
 | `environment.md` | a build or a shell behaves oddly |
+| `release.md` | you are queueing a PR for a release, or cutting a release (release trains) |
 
 `skills/<name>/SKILL.md` and `briefs/<name>.md` are the single sources for the per-tool copies
 (`.claude/skills`, `.codex/skills`, `.claude/agents`). Edit these, then run

@@ -27,7 +27,7 @@
 | [Test plan](02-test-plan.md) | Milestone gates and regression discipline |
 | [Agent playbooks](agent/README.md) | Reading a failed run (`triage.py`), diagnostics, the harness, sub-agent briefs; what `AGENTS.md` points to |
 | [Texture processing and review](hd-texture-workflow.md) | Reproducing the HD texture census, upscale and review galleries |
-| [Release process](releasing.md) | Source releases, tag checks and GitHub CI |
+| [Release process](releasing.md) | Release trains (how PRs are queued and tested together), tag checks and GitHub CI |
 | [Maintaining the GitHub introduction](github-introduction.md) | About wording, README structure and the documentation release pass |
 | [Media capture plan](media/capture-plan.md) | Current-release screenshots/clips, export settings and capture handoff |
 
