@@ -144,3 +144,62 @@ match with about 2100 rollbacks, no mixer page, no crash at its KO; early in the
 crashed in the file layer (`sub_001E8340+0x6D`, `edx 0x832D7C94` in the arena, junk read
 `0xF6FE0F27`; `logs/rb-online5-filecrash.log.err`), likely a stream buffer the arena holds across the match
 change. Next: what the file layer keeps between matches that now lives in the arena.
+
+## Stream buffers back in the heap: worse (2026-10-25, morning)
+
+With the file layer's stream buffers in the heap again (`RECOMP_ROLLBACK_ROUTE_STREAMS` unset), every
+five-match run logged `the mixer writes 80255000 ... left alone from now on`: the music stream's buffer
+(`0x80254CF0`, 6.8 KB) shares that page with game objects, which then stopped being restored. Two runs
+failed in the first match: one copy stopped drawing at step ~700 (the game thread looping through
+`RtlEnterCriticalSection`/`Leave` at esp `0x01181730`, the GPU idle; `logs/run-20261025-103441.log.err`),
+and one crashed at step 1322 in `D3DDevice_SetStreamSource` (`sub_0021BB10`, called by EAGL's stream
+cache `sub_00119950`) with a vertex buffer pointer of `0x776F7263` ("crow", text where a render
+parameter block should be; `logs/run-20261025-111715.log.err`). So the buffers go back to the arena,
+and the crash at the second match's start (`sub_001E8340`, a stream handle in the arena reading junk)
+is the one to solve. The arena now logs every allocation and free (thread, call chain, save count); a
+crash report prints the history of the arena blocks the guest registers point into.
+
+## Frees from other threads wait for the fight's end (2026-10-25, 11:25-11:45)
+
+* Streams in the arena (`RECOMP_ROLLBACK_ROUTE_STREAMS=1`): match 1 ran 2.7 minutes (1800 rollbacks,
+  160 equal checksums), then `the mixer writes 80007000 / 80003000` (the heap's free lists, a mixer free
+  of a heap block, likely at the music's next track) and that copy stopped drawing at once.
+* `late_free`: a heap free on another thread than the game's during a fight (through `rollback_heap_free`
+  or the engine's `rollback_sound_free`) is held and run on the game thread when tracking stops. Next run:
+  no mixer page at all, the whole first match to its KO (step 11789, 1715 rollbacks, 190 equal checksums);
+  200 steps later, right after `50 heap frees from other threads ... given back now`, a crash in the
+  heap's allocator (`sub_00029DE0+0x1F3`, free-list link `0xAA53C5AA`, the same shape as the 10-24 22:40
+  crash).
+* Why: a block allocated during the fight and freed by the mixer can have been handed out again after a
+  load went back to before its allocation. Now every heap block allocated during a fight is remembered
+  (`fight_alloc_add`, from `sub_00029500`); a late free of one is dropped (a small leak), repeats are
+  dropped too, and only blocks from before the fight are given back.
+
+## Mixer words instead of mixer pages (2026-10-25, 11:45)
+
+* With late frees and the fight-allocation set, the next run passed the first rollback stretch, then at
+  step ~10000 (again the music's next track, ~2.8 minutes in) `the mixer writes 8000C000 / 8000B000 /
+  8000A000` (8 bytes each), and that copy vanished: a division by zero in `sub_00081170+0x246`
+  (`0xC0000094`, a ring of entries whose count at `+0x18` read 0). The crash report printed nothing:
+  `src/main.c` reported access violations only. It now reports divisions by zero, integer overflow and
+  illegal or privileged instructions the same way.
+* The other copy hit a game thread looping in the sound engine (`sub_0012BE20`, `sub_0012DBF0`) at step
+  1430 in the run before: sound commands that name an engine object the engine already gave back (a
+  load brought back game state that still holds its handle) are now silenced
+  (`rollback_sound_command_dead`, from `netplay_sound_command`).
+* A page the mixer writes is no longer left out of the saves: `s_mixmask` records the words it changed
+  (per page, one bit per word), and `load_page` restores the page around them.
+* The next run (mixer words kept live) ran 5.6 minutes of match 1 (step ~20100), then copy 0's game thread
+  looped in `sub_0013A380` (the audio subsystem's list code, from the screen manager through
+  `sub_0003D960` / `sub_000379E0` / `sub_0013A9E0`): the list object at `0x3454F0` in the game's `.data`
+  (restored by loads) named arena node `0x8331D388`, which the sound allocator had just handed out again
+  as the new node, so the node pointed at itself with a null callback. The heads of these lists
+  (`0x3454A0..0x345518`) are game state, their nodes were not. Nodes the container code (`0x139810..
+  0x13A430`, six allocation sites) asks for on the game thread outside a sound command now come from the
+  heap (`game_list_node`, `t_heap`). Reverted at once: the next run crashed on the mixer thread at step
+  ~1090 (`sub_0011D480` from the mixer tick) after 196 frees of those nodes by other threads in 18
+  seconds: the mixer uses these lists too, and the bus objects (`0x3454A0..0x345968`) were already left
+  out of the `.data` restore (2026-10-24). So the head was live, and the reused node is still unexplained.
+  `scripts/guest-regs.py` read the guest registers at the wrong TLS
+  offset (the `.tls` start inside its section was ignored), so `guest-stack.py` printed nothing for
+  release builds; fixed, and it named this loop.

@@ -94,6 +94,11 @@ typedef struct {
 } Slot;
 
 static uint8_t s_skip[HEAP_PAGES];      /* 1: left alone */
+/* Per page, the words the mixer thread writes (one bit each): a load restores the page around them. A
+ * whole page left alone for a few mixer words took the game objects beside them out of the saves (the
+ * music's next track, about 2.8 minutes in: three heap pages, 8 bytes each, then a division by zero in
+ * sub_00081170; five-match run, 2026-10-25). */
+static uint8_t *s_mixmask[HEAP_PAGES];
 static uint8_t s_known[HEAP_PAGES];     /* 1: in s_change */
 static uint32_t s_change[HEAP_PAGES];   /* heap pages known to change, in the order found */
 static unsigned s_nchange, s_cursor;
@@ -135,7 +140,7 @@ static int s_audio_state;               /* 0 before, 1 during, 2 after the audio
 #define ARENA_ALIGN  128u               /* what sub_00029500 gives at most */
 #define SND_ALLOCATOR 0x003ADB58u
 /* addr/size: the piece of the arena; user: the block handed out (aligned, 16-byte header before it) */
-typedef struct { uint32_t addr, size, user; int used; } Block;
+typedef struct { uint32_t addr, size, user; int used, freed; } Block;   /* freed: given back, held */
 static Block s_blk[ARENA_BLOCKS];
 static int s_nblk;
 static uint32_t s_arena, s_arena_live, s_arena_peak, s_arena_total;
@@ -382,6 +387,8 @@ static void hold_contig_frees(void)
     xbox_contig_free_defer = hold_contig_free;
 }
 
+static void run_late_frees(void);
+
 static void track_stop(void)
 {
     uint32_t p, q;
@@ -397,6 +404,7 @@ static void track_stop(void)
     LeaveCriticalSection(&s_track_cs);
     release_contig_frees();
     release_held_arena(1);
+    run_late_frees();
 }
 
 static int track_start(void)
@@ -656,9 +664,12 @@ static void mixer_fields(uint32_t page, const uint8_t *was, const uint8_t *now)
     }
 }
 
+static void fight_alloc_add(uint32_t block);
+
 void rollback_check_alloc(uint32_t caller, uint32_t size, uint32_t block)
 {
     uint32_t end = block + size;
+    if (s_tracking && block >= HEAP_LO && block < HEAP_HI) fight_alloc_add(block);
     if (block && alloclog_on()) {
         unsigned k = s_alog_n++ % ALLOCLOG;
         s_alog[k].block = block;
@@ -714,6 +725,10 @@ void rollback_reset(void)
     s_ready = 0;
     s_nchange = s_cursor = 0;
     memset(s_known, 0, sizeof(s_known));
+    {
+        unsigned p;
+        for (p = 0; p < HEAP_PAGES; p++) { free(s_mixmask[p]); s_mixmask[p] = NULL; }
+    }
     slots_free();
 }
 
@@ -916,6 +931,19 @@ int rollback_save(int slot)
 
 static void forget_frees_since(LONG at);
 
+/* A heap page back as it was, but for the words the mixer writes (s_mixmask). */
+static void load_page(uint32_t p, const uint8_t *saved)
+{
+    uint32_t *now = (uint32_t *)XBOX_PTR(HEAP_LO + p * PAGE), live[PAGE / 4];
+    const uint8_t *m = s_mixmask[p];
+    unsigned w;
+    if (!m) { memcpy(now, saved, PAGE); return; }
+    memcpy(live, now, PAGE);
+    memcpy(now, saved, PAGE);
+    for (w = 0; w < PAGE / 4; w++)
+        if (m[w >> 3] & (1u << (w & 7))) now[w] = live[w];
+}
+
 int rollback_load(int slot)
 {
     Slot *s;
@@ -929,10 +957,10 @@ int rollback_load(int slot)
         memcpy(XBOX_PTR(s_dseg[k].lo), s->data + at, s_dseg[k].hi - s_dseg[k].lo);
     for (i = 0; i < s->npages; i++)
         if (!s_skip[s_change[i]])
-            memcpy(XBOX_PTR(HEAP_LO + s_change[i] * PAGE), s->heap + (size_t)i * PAGE, PAGE);
+            load_page(s_change[i], s->heap + (size_t)i * PAGE);
     for (; i < s_nchange; i++)      /* found to change after this save: as it was at the reference */
         if (!s_skip[s_change[i]])
-            memcpy(XBOX_PTR(HEAP_LO + s_change[i] * PAGE), s_ref + (size_t)s_change[i] * PAGE, PAGE);
+            load_page(s_change[i], s_ref + (size_t)s_change[i] * PAGE);
     return 0;
 }
 
@@ -962,9 +990,16 @@ static int arena_grow(uint32_t need)
 {
     uint32_t size = need > ARENA_GROW ? (need + 0xFFFFu) & ~0xFFFFu : ARENA_GROW, base;
     int i;
-    if (s_nchunk >= ARENA_CHUNKS || s_nblk >= ARENA_BLOCKS || s_arena_total + size > ARENA_MAX) return 0;
+    if (s_nchunk >= ARENA_CHUNKS || s_nblk >= ARENA_BLOCKS || s_arena_total + size > ARENA_MAX) {
+        fprintf(stderr, "[ROLLBACK] the audio arena cannot grow: %d pieces, %d blocks, %u KB of %u\n", s_nchunk,
+                s_nblk, s_arena_total / 1024, ARENA_MAX / 1024);
+        return 0;
+    }
     base = xbox_ContiguousAlloc(size, 4096);
-    if (!base) return 0;
+    if (!base) {
+        fprintf(stderr, "[ROLLBACK] the audio arena cannot grow: no %u KB of contiguous memory\n", size / 1024);
+        return 0;
+    }
     s_chunk_lo[s_nchunk] = base;
     s_chunk_hi[s_nchunk++] = base + size;
     s_arena_total += size;
@@ -978,6 +1013,113 @@ static int arena_grow(uint32_t need)
     fprintf(stderr, "[ROLLBACK] the audio arena grows by %u KB at %08X (%u KB in all)\n", size / 1024, base,
             s_arena_total / 1024);
     return 1;
+}
+
+/* Every arena allocation and free with its thread and call chain, so a crash on an arena block can say
+ * who gave it back (the file layer's crash at the second match's start, 2026-10-24: a stream handle in
+ * the arena read junk). A alloc, F given back, H held, R a held one given back, D a held one kept. */
+#define ARENA_EVENTS 65536
+typedef struct { uint32_t user, size, chain[3]; LONG saves; DWORD tid; char op, tracking; } ArenaEvent;
+static ArenaEvent *s_aev;
+static volatile LONG s_aev_n;
+static void arena_event(char op, uint32_t user, uint32_t size)
+{
+    ArenaEvent *e;
+    if (!s_aev && !(s_aev = (ArenaEvent *)calloc(ARENA_EVENTS, sizeof(ArenaEvent)))) return;
+    e = &s_aev[(unsigned)(InterlockedIncrement(&s_aev_n) - 1) % ARENA_EVENTS];
+    e->user = user;
+    e->size = size;
+    e->op = op;
+    e->tracking = (char)s_tracking;
+    e->saves = s_saves;
+    e->tid = GetCurrentThreadId();
+    call_chain(g_esp, e->chain, 3);
+}
+
+static uint32_t arena_block_size(uint32_t user)
+{
+    int i;
+    for (i = 0; i < s_nblk; i++)
+        if (s_blk[i].user == user) return s_blk[i].size;
+    return 0;
+}
+
+/* A sound command (cmd, n, n words) naming an engine object the engine has already given back: a
+ * load brought back game state that still holds the object's handle, while the engine (never saved
+ * or loaded) had freed it. Run, such commands made the engine walk its own freed objects (a copy's
+ * game thread looping in sub_0012BE20 at step 1430, five-match run 2026-10-25); they are silenced. */
+int rollback_sound_command_dead(uint32_t sp)
+{
+    static unsigned told;
+    uint32_t cmd = MEM32(sp + 4u), n = MEM32(sp + 8u), k;
+    int dead = 0;
+    if (!s_tracking || !s_arena || n > 16u) return 0;
+    EnterCriticalSection(&s_arena_cs);
+    for (k = 0; k < n && !dead; k++) {
+        uint32_t v = MEM32(sp + 12u + k * 4u);
+        int lo = 0, hi = s_nblk - 1;
+        if (!in_arena(v)) continue;
+        while (lo <= hi) {          /* the blocks are in address order */
+            int mid = (lo + hi) / 2;
+            if (v < s_blk[mid].addr) hi = mid - 1;
+            else if (v >= s_blk[mid].addr + s_blk[mid].size) lo = mid + 1;
+            else { dead = s_blk[mid].used && s_blk[mid].freed; break; }
+        }
+    }
+    LeaveCriticalSection(&s_arena_cs);
+    if (dead && told++ < 40)
+        fprintf(stderr, "[ROLLBACK] a sound command (%08X, %u words) names an engine object already given back: "
+                "silenced (%ld saves in)\n", cmd, n, (long)s_saves);
+    return dead;
+}
+
+/* The crash report: the arena blocks the guest registers (and the words they point at) fall in, with
+ * their last events. */
+/* The arena block v lies in and its last events; 0 if no event names one. */
+static uint32_t arena_block_history(uint32_t v)
+{
+    uint32_t user = 0;
+    LONG n = s_aev_n, k;
+    int shown = 0;
+    if (!s_aev || !in_arena(v)) return 0;
+    for (k = n - 1; k >= 0 && k >= n - ARENA_EVENTS && !user; k--) {
+        const ArenaEvent *e = &s_aev[(unsigned)k % ARENA_EVENTS];
+        if (v >= e->user - 16u && v < e->user + e->size) user = e->user;
+    }
+    if (!user) return 0;
+    fprintf(stderr, "[ROLLBACK] %08X is in arena block %08X (%s), its last events:\n", v, user,
+            arena_block_size(user) ? "allocated" : "free");
+    for (k = n - 1; k >= 0 && k >= n - ARENA_EVENTS && shown < 10; k--) {
+        const ArenaEvent *e = &s_aev[(unsigned)k % ARENA_EVENTS];
+        if (e->user != user) continue;
+        fprintf(stderr, "[ROLLBACK]   %c size %X, thread %lu (%s), %s, save %ld, from %08X <- %08X <- %08X (event %ld of %ld)\n",
+                e->op, e->size, (unsigned long)e->tid,
+                e->tid == s_game_tid ? "game" : e->tid == s_mixer_tid ? "mixer" : "other",
+                e->tracking ? "in a fight" : "outside fights", (long)e->saves, e->chain[0], e->chain[1], e->chain[2],
+                (long)k, (long)n);
+        shown++;
+    }
+    return user;
+}
+
+void rollback_arena_history(void)
+{
+    uint32_t cand[7 * 9], done[16];
+    unsigned nc = 0, nd = 0, i, j;
+    const uint32_t regs[7] = { g_eax, g_ebx, g_ecx, g_edx, g_esi, g_edi, g_esp };
+    if (!s_aev || !s_arena) return;
+    for (i = 0; i < 7; i++) {
+        uint32_t r = regs[i];
+        cand[nc++] = r;
+        if (in_arena(r) || (r >= HEAP_LO && r < HEAP_HI) || (r >= 0x002D5000u && r < 0x003CA000u))
+            for (j = 0; j < 8; j++) cand[nc++] = MEM32((r & ~3u) + j * 4u);
+    }
+    for (i = 0; i < nc && nd < 16; i++) {
+        uint32_t user;
+        for (j = 0; j < nd && !(cand[i] >= done[j] - 16u && cand[i] < done[j] + arena_block_size(done[j])); j++) {}
+        if (j < nd) continue;
+        if ((user = arena_block_history(cand[i])) != 0) done[nd++] = user;
+    }
 }
 
 static uint32_t arena_alloc(uint32_t want)
@@ -998,8 +1140,10 @@ again:
             s_nblk++;
         }
         s_blk[i].used = 1;
+        s_blk[i].freed = 0;
         a = (s_blk[i].addr + 16u + ARENA_ALIGN - 1u) & ~(ARENA_ALIGN - 1u);
         s_blk[i].user = a;
+        arena_event('A', a, want);
         memset(XBOX_PTR(a - 16u), 0, (size_t)want + 16u);
         /* the pool free the game also calls directly (sub_001E9F90) reads the pool index at -14:
          * 0x3F names an empty pool slot, so it leaves an arena block alone */
@@ -1024,6 +1168,7 @@ static int arena_free_now(uint32_t a)
     EnterCriticalSection(&s_arena_cs);
     for (i = 0; i < s_nblk; i++) {
         if (s_blk[i].user != a || !s_blk[i].used) continue;
+        arena_event('F', a, s_blk[i].size);
         s_blk[i].used = 0;
         s_arena_live -= s_blk[i].size;
         /* Merged only with a neighbour that touches it: the arena is pieces of contiguous memory with
@@ -1058,7 +1203,7 @@ static int arena_free_now(uint32_t a)
  * later); a block freed again meanwhile (the game frees it once more after a load) just moves
  * its time on. */
 #define HELD_ARENA 4096
-static struct { uint32_t addr; LONG at; } s_held_arena[HELD_ARENA];
+static struct { uint32_t addr; LONG at; int game; } s_held_arena[HELD_ARENA];   /* game: freed on the game thread */
 static unsigned s_nheld_arena;
 
 static int arena_free(uint32_t a)
@@ -1068,11 +1213,17 @@ static int arena_free(uint32_t a)
     if (!s_arena || !in_arena(a)) return 0;
     if (!s_tracking) return arena_free_now(a);
     EnterCriticalSection(&s_arena_cs);
-    for (i = 0; i < s_nblk && !live; i++) live = s_blk[i].user == a && s_blk[i].used;
+    for (i = 0; i < s_nblk && !live; i++)
+        if (s_blk[i].user == a && s_blk[i].used) { live = 1; s_blk[i].freed = 1; }
     if (live) {
         for (k = 0; k < s_nheld_arena && s_held_arena[k].addr != a; k++) {}
         if (k == s_nheld_arena && s_nheld_arena < HELD_ARENA) s_nheld_arena++;
-        if (k < s_nheld_arena) { s_held_arena[k].addr = a; s_held_arena[k].at = s_saves; }
+        if (k < s_nheld_arena) {
+            s_held_arena[k].addr = a;
+            s_held_arena[k].at = s_saves;
+            s_held_arena[k].game = GetCurrentThreadId() == s_game_tid;
+            arena_event('H', a, 0);
+        }
         else live = 0;      /* the list is full: give it back now */
     }
     LeaveCriticalSection(&s_arena_cs);
@@ -1085,10 +1236,19 @@ static void release_held_arena(int all)
     unsigned k = 0;
     if (!s_arena) return;
     EnterCriticalSection(&s_arena_cs);
+    if (all) {      /* the fight is over: what the arena holds, and how much of it the engine gave back */
+        int i;
+        unsigned zombies = 0, zbytes = 0;
+        for (i = 0; i < s_nblk; i++)
+            if (s_blk[i].used && s_blk[i].freed) { zombies++; zbytes += s_blk[i].size; }
+        fprintf(stderr, "[ROLLBACK] the audio arena at the fight's end: %u KB live, %u held frees, %u blocks (%u KB) "
+                "freed before a load and kept\n", s_arena_live / 1024, s_nheld_arena, zombies - s_nheld_arena, zbytes / 1024);
+    }
     while (k < s_nheld_arena) {
         if (all || s_saves - s_held_arena[k].at > ROLLBACK_SLOTS + 2) {
             uint32_t a = s_held_arena[k].addr;
             s_held_arena[k] = s_held_arena[--s_nheld_arena];
+            arena_event('R', a, 0);
             LeaveCriticalSection(&s_arena_cs);
             arena_free_now(a);
             EnterCriticalSection(&s_arena_cs);
@@ -1124,7 +1284,11 @@ static void forget_frees_since(LONG at)
         EnterCriticalSection(&s_arena_cs);
         i = 0;
         while (i < s_nheld_arena) {
-            if (s_held_arena[i].at >= at) {
+            /* the mixer's own frees: no game state a load brings back names those blocks, so they
+             * keep their place in the queue (forgotten, they leaked: the arena grew by 3 MB in one
+             * match, ran full and the heap took the engine's blocks; five-match run 2026-10-25) */
+            if (s_held_arena[i].at >= at && s_held_arena[i].game) {
+                arena_event('D', s_held_arena[i].addr, 0);
                 s_held_arena[i] = s_held_arena[--s_nheld_arena];
                 arena++;
             } else {
@@ -1201,10 +1365,101 @@ int rollback_route_alloc(void)
 }
 
 extern void sub_0002A180(void);
+
+/* A heap block given back on another thread than the game's in a fight (the mixer, when the music
+ * moves to its next track about 2.7 minutes in) writes the heap's own free lists (0x800031A4,
+ * 0x80007130..0x80007220): those pages left the save from then on, and the copy stopped drawing
+ * a moment later (five-match run, 2026-10-25). Such frees wait for the fight's end and then run
+ * on the game thread. */
+#define LATE_FREES 2048
+static struct { uint32_t self, block; int sound; } s_late[LATE_FREES];
+static unsigned s_nlate, s_late_twice;
+static volatile LONG s_late_lock;
+
+/* Heap blocks allocated in this fight. A late free of one is dropped, not run: a load back to before
+ * its allocation gave its memory back to the heap, which may have handed it out again, and freeing
+ * it at the fight's end corrupted the heap's free list (sub_00029DE0, a junk link right after 50 late
+ * frees; five-match run, 2026-10-25). Dropped, it stays allocated: a small leak. */
+#define FIGHT_ALLOCS 65536u
+static uint32_t *s_fight_alloc;
+static unsigned s_nfight_alloc;
+
+static void fight_alloc_add(uint32_t block)
+{
+    unsigned h;
+    if (!s_fight_alloc && !(s_fight_alloc = (uint32_t *)calloc(FIGHT_ALLOCS, sizeof(uint32_t)))) return;
+    if (s_nfight_alloc >= FIGHT_ALLOCS / 2) return;
+    for (h = (block >> 3) * 2654435761u % FIGHT_ALLOCS; s_fight_alloc[h] && s_fight_alloc[h] != block; h = (h + 1) % FIGHT_ALLOCS) {}
+    if (!s_fight_alloc[h]) { s_fight_alloc[h] = block; s_nfight_alloc++; }
+}
+
+static int fight_alloc_has(uint32_t block)
+{
+    unsigned h;
+    if (!s_fight_alloc) return 0;
+    if (s_nfight_alloc >= FIGHT_ALLOCS / 2) return 1;      /* the set overflowed: every block may be one */
+    for (h = (block >> 3) * 2654435761u % FIGHT_ALLOCS; s_fight_alloc[h]; h = (h + 1) % FIGHT_ALLOCS)
+        if (s_fight_alloc[h] == block) return 1;
+    return 0;
+}
+
+static int late_free(uint32_t self, uint32_t block, int sound)
+{
+    int kept = 0;
+    if (!s_tracking || GetCurrentThreadId() == s_game_tid || block < HEAP_LO || block >= HEAP_HI) return 0;
+    while (InterlockedExchange(&s_late_lock, 1)) Sleep(0);
+    {
+        unsigned k;
+        for (k = 0; k < s_nlate && s_late[k].block != block; k++) {}
+        if (k < s_nlate) {      /* given back twice: the second is not run either */
+            s_late_twice++;
+            InterlockedExchange(&s_late_lock, 0);
+            return 1;
+        }
+    }
+    if (s_nlate < LATE_FREES) {
+        s_late[s_nlate].self = self;
+        s_late[s_nlate].block = block;
+        s_late[s_nlate].sound = sound;
+        s_nlate++;
+        kept = 1;
+    }
+    InterlockedExchange(&s_late_lock, 0);
+    return kept;
+}
+
+/* the fight is over: the held frees, on the game thread (thiscall (block), ret 4) */
+static void run_late_frees(void)
+{
+    uint32_t eax = g_eax, ecx = g_ecx, edx = g_edx;
+    unsigned i, n, dropped = 0, twice;
+    if (GetCurrentThreadId() != s_game_tid) return;
+    while (InterlockedExchange(&s_late_lock, 1)) Sleep(0);
+    n = s_nlate;
+    twice = s_late_twice;
+    s_nlate = s_late_twice = 0;
+    InterlockedExchange(&s_late_lock, 0);
+    for (i = 0; i < n; i++) dropped += fight_alloc_has(s_late[i].block);
+    if (n)
+        fprintf(stderr, "[ROLLBACK] %u heap frees from other threads in the fight: %u given back now, %u kept (allocated "
+                "in the fight), %u more were repeats\n", n, n - dropped, dropped, twice);
+    for (i = 0; i < n; i++) {
+        if (fight_alloc_has(s_late[i].block)) continue;
+        g_ecx = s_late[i].self;
+        g_esp -= 4; MEM32(g_esp) = s_late[i].block;
+        g_esp -= 4; MEM32(g_esp) = 0;
+        if (s_late[i].sound) sub_0001DC20(); else sub_0002A180();
+    }
+    g_eax = eax; g_ecx = ecx; g_edx = edx;
+    if (s_fight_alloc) memset(s_fight_alloc, 0, FIGHT_ALLOCS * sizeof(uint32_t));
+    s_nfight_alloc = 0;
+}
+
 /* thiscall (block), ret 4 */
 void rollback_heap_free(void)
 {
     if (s_arena_state == 1 && arena_free(MEM32(g_esp + 4))) { g_eax = 1; g_esp += 8; return; }
+    if (late_free(g_ecx, MEM32(g_esp + 4), 0)) { g_eax = 1; g_esp += 8; return; }
     if (s_live) live_get(MEM32(g_esp + 4), 1, NULL);
     sub_0002A180();
 }
@@ -1214,6 +1469,16 @@ void rollback_sound_alloc(void)
 {
     if (s_arena_state == 1 && g_ecx == MEM32(SND_ALLOCATOR)) {
         uint32_t a = arena_alloc(MEM32(g_esp + 4));
+        /* sub_0013A380 adds a node to the list at esi: a head that names the block just handed out
+         * is the self-linked node the game thread looped on (five-match run, 2026-10-25) */
+        if (a && MEM32(g_esp) == 0x0013A3CDu && g_esi >= 0x002D5000u && g_esi < 0x003CA000u && MEM32(g_esi) == a) {
+            static unsigned told;
+            if (told++ < 8) {
+                fprintf(stderr, "[ROLLBACK] the list at %08X still names arena block %08X, handed out again (%ld saves in)\n",
+                        g_esi, a, (long)s_saves);
+                arena_block_history(a);
+            }
+        }
         if (a) { g_eax = a; g_esp += 16; return; }
         {
             static int told;
@@ -1228,6 +1493,7 @@ void rollback_sound_alloc(void)
 void rollback_sound_free(void)
 {
     if (s_arena_state == 1 && arena_free(MEM32(g_esp + 4))) { g_esp += 8; return; }
+    if (late_free(g_ecx, MEM32(g_esp + 4), 1)) { g_esp += 8; return; }
     sub_0001DC20();
 }
 
@@ -1274,9 +1540,9 @@ static void mixer_begin(void)
     s_mix_n = n;
     s_game_cycles = game_cycles();
     if (s_writers_on < 0) s_writers_on = getenv("RECOMP_ROLLBACK_WRITERS") && s_live ? 1 : 0;
+    s_mixer_tid = GetCurrentThreadId();
     if (s_writers_on == 1) {
         DWORD old;
-        s_mixer_tid = GetCurrentThreadId();
         for (i = 0; i < n; i++) {
             uint32_t q = s_change[i];
             if (s_guard[q]) continue;           /* still guarded by the tracking itself */
@@ -1340,15 +1606,23 @@ static void mixer_end(void)
         if (!memcmp(s_mix + (size_t)i * PAGE, XBOX_PTR(HEAP_LO + p * PAGE), PAGE)) continue;
         if (s_live) mixer_fields(HEAP_LO + p * PAGE, s_mix + (size_t)i * PAGE, (const uint8_t *)XBOX_PTR(HEAP_LO + p * PAGE));
         if (s_skip[p]) continue;
-        s_skip[p] = 1;
-        if (s_mix_found++ < 64) {
-            const uint8_t *was = s_mix + (size_t)i * PAGE, *now = (const uint8_t *)XBOX_PTR(HEAP_LO + p * PAGE);
-            unsigned lo = 0, hi = PAGE - 1;
-            while (lo < PAGE && was[lo] == now[lo]) lo++;
-            while (hi > lo && was[hi] == now[hi]) hi--;
-            fprintf(stderr, "[ROLLBACK] the mixer writes %08X (bytes %08X..%08X): left alone from now on\n",
-                    HEAP_LO + p * PAGE, HEAP_LO + p * PAGE + lo, HEAP_LO + p * PAGE + hi + 1);
-            alloclog_page(HEAP_LO + p * PAGE + (lo & ~0xFu), "the mixer");
+        {
+            const uint32_t *was = (const uint32_t *)(s_mix + (size_t)i * PAGE);
+            const uint32_t *now = (const uint32_t *)XBOX_PTR(HEAP_LO + p * PAGE);
+            unsigned w, lo = PAGE, hi = 0, added = 0;
+            if (!s_mixmask[p] && !(s_mixmask[p] = (uint8_t *)calloc(PAGE / 32, 1))) { s_skip[p] = 1; continue; }
+            for (w = 0; w < PAGE / 4; w++) {
+                if (was[w] == now[w] || (s_mixmask[p][w >> 3] & (1u << (w & 7)))) continue;
+                s_mixmask[p][w >> 3] |= (uint8_t)(1u << (w & 7));
+                added++;
+                if (w * 4 < lo) lo = w * 4;
+                hi = w * 4 + 4;
+            }
+            if (added && s_mix_found++ < 64) {
+                fprintf(stderr, "[ROLLBACK] the mixer writes %08X (bytes %08X..%08X, %u words): they stay as they are through loads\n",
+                        HEAP_LO + p * PAGE, HEAP_LO + p * PAGE + lo, HEAP_LO + p * PAGE + hi, added);
+                alloclog_page(HEAP_LO + p * PAGE + (lo & ~0xFu), "the mixer");
+            }
         }
     }
 }
@@ -1361,6 +1635,8 @@ void rollback_mixer_unlock_b(void) { if (MEM32(g_esp) == MIX_UNLOCKS) mixer_end(
 #else
 int rollback_enabled(void) { return 0; }
 const char *rollback_page_state(uint32_t addr) { (void)addr; return "-"; }
+void rollback_arena_history(void) {}
+int rollback_sound_command_dead(uint32_t sp) { (void)sp; return 0; }
 void rollback_note_dynamic_load(uint32_t caller, uint32_t handle) { (void)caller; (void)handle; }
 unsigned rollback_dynamic_loads(void) { return 0; }
 void rollback_check_alloc(uint32_t caller, uint32_t size, uint32_t block) { (void)caller; (void)size; (void)block; }

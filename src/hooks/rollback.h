@@ -41,6 +41,10 @@ void rollback_check_tables(const char *where);
 /* Called by the crash report (src/main.c) when set: netplay prints the rollback state. */
 extern void (*rollback_crash_cb)(void);
 const char *rollback_page_state(uint32_t addr);
+/* The crash report: the arena blocks the guest registers point into, with their last allocations and frees. */
+void rollback_arena_history(void);
+/* A sound command (guest esp at its entry) that names an engine object already given back. */
+int rollback_sound_command_dead(uint32_t sp);
 /* The game heap's free (sub_0002A180), as recomp_lookup_manual hands it out. */
 void rollback_heap_free(void);
 /* The mixer's lock and unlock (0x2E61C0 / 0x2E61C4 point at one of two pairs). */

@@ -2511,6 +2511,7 @@ extern void sub_00137010(void);     /* the sound engine's command call */
 void netplay_sound_command(void)
 {
     if (N.resim) { g_eax = 0; g_esp += 4; return; }     /* cdecl: the caller pops the arguments */
+    if (N.rb_on && rollback_sound_command_dead(g_esp)) { g_eax = 0; g_esp += 4; return; }
     rollback_sound_context(1);
     sub_00137010();
     rollback_sound_context(0);
@@ -2554,6 +2555,7 @@ static void rollback_crash_state(void)
             o = MEM32(o + 4u);
         }
     }
+    rollback_arena_history();
     fflush(stderr);
 }
 
