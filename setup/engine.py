@@ -66,12 +66,27 @@ def write_json(path, value):
     os.replace(temporary, path)
 
 
+def replace_shown(temporary, path):
+    """os.replace for the files the wizard reads while setup runs (status, progress). On Windows the
+    rename fails with "Access is denied" while the wizard has the old file open, and a player's setup
+    stopped there (2026-10-25). It is retried for about a second, and then given up: these files only
+    feed the wizard's display, so a missed update must not stop the install."""
+    for attempt in range(20):
+        try:
+            os.replace(temporary, path)
+            return
+        except PermissionError:
+            time.sleep(0.05)
+    with contextlib.suppress(OSError):
+        os.remove(temporary)
+
+
 def write_status(path, message):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix('.pending')
     temporary.write_text(message, encoding='utf-8')
-    os.replace(temporary, path)
+    replace_shown(temporary, path)
 
 
 def write_progress(status_path, permille):
@@ -80,7 +95,7 @@ def write_progress(status_path, permille):
     path = Path(str(status_path) + '.progress')
     temporary = Path(str(status_path) + '.progress-pending')
     temporary.write_text(str(max(0, min(1000, int(permille)))), encoding='ascii')
-    os.replace(temporary, path)
+    replace_shown(temporary, path)
 
 
 # Share of the whole run each stage is given in the progress bar (permille, cumulative

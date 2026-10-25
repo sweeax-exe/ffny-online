@@ -483,3 +483,30 @@ def test_hd_textures_are_refused_on_a_host_whose_renderer_cannot_draw_them(tmp_p
 
 def test_hd_textures_are_supported_on_windows_macos_and_linux():
     assert engine.HD_SUPPORTED == (engine.IS_WINDOWS or engine.IS_MACOS or engine.IS_LINUX)
+
+
+def test_status_write_survives_a_wizard_holding_the_file(tmp_path, monkeypatch):
+    """The wizard reads status.txt while setup writes it; a refused rename must not stop setup."""
+    status = tmp_path / 'status.txt'
+    real = engine.os.replace
+    refusals = {'left': 3}
+
+    def flaky(src, dst):
+        if refusals['left']:
+            refusals['left'] -= 1
+            raise PermissionError(5, 'Access is denied')
+        return real(src, dst)
+
+    monkeypatch.setattr(engine.os, 'replace', flaky)
+    monkeypatch.setattr(engine.time, 'sleep', lambda s: None)
+    engine.write_status(status, 'Building')
+    assert status.read_text(encoding='utf-8') == 'Building'
+
+    def always(src, dst):
+        raise PermissionError(5, 'Access is denied')
+
+    monkeypatch.setattr(engine.os, 'replace', always)
+    engine.write_status(status, 'Still building')      # no exception: the display misses one update
+    engine.write_progress(status, 500)
+    assert status.read_text(encoding='utf-8') == 'Building'
+    assert not (tmp_path / 'status.pending').exists()
