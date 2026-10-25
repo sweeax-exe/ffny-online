@@ -96,10 +96,23 @@ to the lobby with the same token.
 |---|---|---|
 | `name` | string | 1..24 bytes, shown in the list |
 | `public` | u8 | 1: listed and found by quick match; 0: join by code only |
-| `mode` | u8 | front-end match type: 0 One on One, others as the game numbers them |
-| `max` | u8 | players 2..4 |
+| `mode` | u8 | front-end match type: 0 One on One, 1 Team (2 vs 2), 2 3-Way, 3 Free for All, 6..11 the special matches; 0x40/0x41 King of the Hill |
+| `max` | u8 | players 2..4 (a Team room: 4; a special match: 2) |
 | `rounds` | u8 | 0 = the game's default; otherwise the rules index the game takes |
 | `pool` | u8 count (1..32) + count x u8 | the venues to vote on (`venue.xml` feID) |
+
+Since FFNY Online build 28 the relay holds every room to its mode, in `CREATE` and `SETTINGS` alike:
+
+- **Team** (mode 1): `max` is 4, and the room starts (the vote) only with four players present and ready, room
+  slots 0 and 1 against 2 and 3 (`docs/research/team-and-special-match-types.md`).
+- **Special matches** (modes 6..11: Demolition, Inferno, Subway, Window, Cage, Ringout): `max` is 2 and `pool` is
+  the mode's own venue (feID 17, 24, 11, 26, 10, 8). With both ready there is no vote: `START` follows at once,
+  on that venue. `QUICK` of such a mode opens or joins a room of it.
+- **More than two fighters** (Team, 3-Way, Free for All): the pool loses Gun Hill Garage, Red Hook Tire Co. and
+  Crow's Office (feIDs 17, 24, 26), which have one-on-one start tables only; a pool of nothing else becomes the
+  mode's quick pool. One on One and King of the Hill keep them.
+
+A room can therefore come back in `ROOM` with other `max` and `pool` than were asked for.
 
 ### Client to server
 
