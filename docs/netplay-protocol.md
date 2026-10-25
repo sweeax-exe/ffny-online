@@ -178,6 +178,34 @@ Ranked play is One on One between signed-in players of a similar rating (`docs/r
 - `LEAVE` while searching leaves the queue (`QUEUE` 3); `CREATE`, `JOIN` or `QUICK` leave it
   silently; so does disconnecting. A repeated `RANKED` while queued only changes the fighter.
 
+## King of the Hill extension
+
+A room of up to 10 where two fight One on One and the others wait in a line and watch; the
+winner stays, the loser goes to the back. Full design, rules and layouts:
+`docs/research/king-of-the-hill.md`. Same header and version; types from 0x20, dropped silently
+by older relays.
+
+| Type | Name | Direction | Body after the header |
+|---|---|---|---|
+| 0x20 | `CAPS` | client -> server | `token` 8, `caps` u32 (bit 0: King of the Hill) |
+| 0x20 | `CAPS` | server -> client | `caps` u32 (what the relay supports) |
+| 0x21 | `HILL` | server -> client | `room` 6, `phase` u8 (0 waiting, 1 calling, 2 voting, 3 fighting), `king` u8 (slot, 0xFF none), `streak` u16, `ms_left` u16, `seed` u32, `fights` u16, `last_winner` u8, `last_loser` u8, `last_how` u8 (0 none, 1 won, 2 draw, 3 loser left, 4 void), `count` u8, per player in line order: `slot` u8, `state` u8 (0 waiting, 1 called, 2 ready, 3 fighting, 4 away), `wins` u16 |
+| 0x22 | `RESULT` | client -> server | `token` 8, `seed` u32, `winner` u8 (slot, 0xFF draw); from the two fighters, repeated until `HILL.fights` changes |
+| 0x23 | `WATCH` | server -> client | the body of `START`; to every member who is not fighting when the fight starts |
+
+- `Settings.mode` **0x40** (venue voted by the two fighters) and **0x41** (venue at random) are
+  King of the Hill rooms; their `max` is 2..10. Every fight is One on One (`START.mode` 0).
+- Only a client that sent `CAPS` with bit 0 can create, quick-match, join or list such a room
+  (otherwise `ERROR 8`, and LIST leaves them out); every other room behaves as before.
+- Such a room takes joiners in every phase. Each ROOM is followed by a HILL. The two called
+  players must `READY` within 20 s or are moved to the back (two skips in a row: away until
+  their next `READY 1`). Only they get `START`; everyone else present gets `WATCH`.
+- During the fight a fighter's `DATA` goes to the other fighter and the `WATCH` receivers; a
+  spectator's `DATA` goes to the other spectators only. Between fights it goes to everyone.
+- Two agreeing `RESULT`s decide the fight, two disagreeing ones void it (both to the back), a
+  single one decides after 10 s. A fighter who leaves during the fight loses it. `OVER` changes
+  nothing; `VOTE` during the fight re-sends the sender's `START` or `WATCH`.
+
 ## Server operation
 
 The relay is one static binary (`netplay/relay`, Go). `relay -listen :27777` serves; it logs
