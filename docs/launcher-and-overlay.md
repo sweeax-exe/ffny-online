@@ -137,7 +137,7 @@ Off-by-default test hooks:
 |---|---|
 | `RECOMP_WINDOW_SHOT=<file.bmp>` | Read back the launcher or overlay window to a 32-bit BMP; macOS/Linux |
 | `RECOMP_WINDOW_SHOT_FRAME` | Overlay frame to capture, default 20 |
-| `RECOMP_LAUNCHER_SCRIPT` | `<ms>:click:<x>:<y>`, `move`, `resize:<width>:<height>`, `shot:<file>`, `ui:<target>`, `play`, `quit`, separated by semicolons; positions in window points |
+| `RECOMP_LAUNCHER_SCRIPT` | `<ms>:click:<x>:<y>`, `move`, `resize:<width>:<height>`, `shot:<file>`, `ui:<target>`, `uiopt:<target>` (as `ui`, silent if absent), `play`, `quit`, separated by semicolons; positions in window points |
 | `RECOMP_HOST_SCRIPT` | Game window: `<ms>:key:<SDL name>`, `click`, `move`, `text`; times from opening |
 | `RECOMP_INPUT_VIRTUAL_PADS`, `RECOMP_INPUT_VIRTUAL_CHORD_MS` | SDL virtual pad tests, including overlay stick-click/B paths ([input guide](10-input.md)) |
 

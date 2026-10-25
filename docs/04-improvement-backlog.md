@@ -1,5 +1,53 @@
 # Improvement backlog
 
+## Frame pacing and executor performance on Windows — planned 2026-10-24
+
+Found while investigating #67 (choppy fights at 60 fps), #92 (exclusive full screen), #101 and #102, on the
+owner's PC (RTX 4070 Ti SUPER, 2560x1440, 143.91 Hz with VRR). The first fix is in PR #103: the frame is now
+flushed to the GPU before the executor's 60 Hz flip sleep (#102). Measure everything below with
+`RECOMP_PRESENT_PACING=1`, which logs `[PACING]`, `[ONSCREEN]` (time on screen per frame, `Present` call
+time) and `[GPUTIME]` (GPU busy, idle and finish times). Display-timing runs need the monitor awake and no
+screen saver: with the display asleep DXGI reports no frame statistics.
+
+Ordered by expected value:
+
+1. **What slows a human-played fight (#101).** The owner's manual fight dropped to 43–50 fps for about
+   30 s at 345–416 draws per frame. Scripted fights at the same draws per frame, and at the same settings,
+   held 60. Catch it with the play-test recorder (`[debug] record = true`, F9, or
+   `RECOMP_RECORD_AUTO_HITCH_MS=25`), then sample the executor thread during the slow stretch
+   (`scripts/sample-threads.py --samples 1`, repeated, tallying in-exe symbols). Candidates: per-draw cost
+   (item 2), shader compiles during play (the entry below), texture uploads (item 6). Done when the cause is
+   named with samples and the slow stretch is gone, or the item is merged into the one that fixes it.
+2. **Cost per draw in the translator.** A fight is about 370–400 draws per frame. Each is turned into
+   Direct3D 11 state changes and a constant-buffer upload on the one executor thread, and earlier profiles
+   found this cost hiding in the driver ("outside exe" samples). Count redundant state changes and
+   constant-buffer writes per frame; skip those that set what is already set. Measure with
+   `scripts/scene-perf.py` and the executor's share of a frame before and after. This also matters on
+   slower PCs and the Steam Deck. Done when a fight frame's executor time is measured before and after and
+   `regress.py` passes.
+3. **A precise frame timer.** `flip_pace()` (toolkit `src/kernel/nv2a_pb_exec.c`) on Windows sleeps to
+   about 1 ms before the deadline, then spins. The sleep depends on `timeBeginPeriod(1)` (called by the
+   input thread), which Windows can ignore under power throttling (#93). Use a high-resolution waitable
+   timer (`CREATE_WAITABLE_TIMER_HIGH_RESOLUTION`) for the wait and keep only a short spin. Done when
+   `[PACING]` intervals are as tight as now, the executor's CPU use during the wait is lower, and the #93
+   throttling repro no longer stretches frames.
+4. **Lower input latency.** With frames now ready when they are presented, the swap chain could queue
+   fewer of them: `IDXGIDevice1::SetMaximumFrameLatency(1)` or a waitable swap chain. Measure the delay
+   from present to screen first. The figure was dropped from the trace because its frame matching was off
+   by one, so fix that before using it. Done when latency is measured before and after with no loss of
+   evenness in `[ONSCREEN]`.
+5. **Widescreen side fill cost.** On frames that ask for it, the blurred side extension regenerates the
+   mip chain of the whole wide target. Compare `[GPUTIME]` busy time with `widescreen_side_fill = blur`
+   and `black`, at render scale 2 and 3. Probably small on a desktop GPU and more on the Deck. Done when
+   measured on both; change it only if it costs more than about 1 ms a frame.
+6. **HD texture uploads during play.** In the 2026-10-24 runs the pack did not load: its manifest is not
+   in that data folder. Run the same fight with a working pack and check `frames.csv` texture upload
+   columns and `[ONSCREEN]` for hitches at first use. Done when measured; plan streaming or upload
+   spreading only if uploads show up as late frames.
+
+Not on this list: frame rates above 60 (needs the game clock separated from rendering, deferred since M6),
+and exclusive full screen (#92: borderless full screen already gets VRR).
+
 ## One compiled pixel shader per HLSL text on Windows (Direct3D 11) — planned 2026-10-18
 
 Found during the 2026-10-18 scene performance pass (finding F4, first-use shader compile stutter). The
@@ -40,6 +88,42 @@ What to do (needs a Windows machine):
 
 Done when: sc00 on Windows compiles about 10 combiner shaders per launch instead of about 212, its late
 frames are measured before and after, and the toolkit commit is on its own fork branch with those numbers.
+
+## Executor CPU on Linux and the Steam Deck (Vulkan) — planned 2026-10-24
+
+Found in the 2026-10-24 Power Plant free-for-all pass on the Deck
+([report](research/deck-ffa-powerplant-2026-10-24.md)). The first fix is the PR that adds this entry (toolkit
+`defjam/vk-frame-overlap`): the Vulkan backend no longer waits for the GPU inside `Present`, so the
+CPU records the next frame while the GPU draws the last one. After it the push-buffer executor thread
+still needs about 13 ms of CPU a frame against a 16.67 ms budget (about 3.5 ms of slack), and `perf`
+puts 65% of all cycles in it. This is the same cost as item 2 of the Windows entry in PR #103
+(cost per draw in the translator); the measurements below are the Linux side of it. Measure with the
+report's method: `RECOMP_RECORD=1` and `RECOMP_RECORD_FPS=0` (frame times without the picture
+read-back), the `[VKPERF]` line, and `perf record -g -p <game pid>` on the Deck (works unprivileged).
+
+Ordered by expected value:
+
+1. **Faster method dispatch.** About 14,000 push-buffer methods a frame (half are vertex-program
+   constant writes) each go through two big switches: `nv2a_pb_exec_method` and then
+   `pgraph_d3d11_method`. Decode runs of consecutive constant-register methods (`NV097_SET_TRANSFORM_
+   CONSTANT` and the program-load window) as one block copy, and dispatch the common state methods
+   through a table indexed by `method >> 2` instead of a switch. Done when the executor's CPU per frame
+   drops by at least 1 ms in the report's benchmark with the golden frame signatures unchanged.
+2. **A batch path in `fetch_attr`.** The vertex fetch runs per vertex and per attribute with a bounds
+   check and a format switch every time. Resolve each attribute's stride, format and base once per
+   draw, then convert a whole range in a loop. Done when `fetch_attr`'s share of the executor thread
+   is measured before and after and `m2`, `m3`, `m4a` still match bit for bit.
+3. **The statistics fetch in `draw_primitive`.** It fetches a first vertex for statistics only. Make
+   it lazy (only when the statistics or trace are on).
+4. **Submit before the flip sleep.** PR #103 flushes the D3D11 context before `flip_pace()` so the
+   GPU works during the sleep. The Vulkan path still records and submits in `Present`, after the
+   sleep. With the frame slots a submit before `flip_pace()` is now possible without a stall; try it
+   and compare `[VKPERF]` present times and frame spacing on the Deck at 60 Hz. The Deck is not
+   variable-refresh, so expect little there; it matters for Linux desktops with VRR.
+5. **The 90 Hz Game Mode panel.** At a refresh that is not a multiple of 60 the game turns vsync off
+   and paces itself, so frames are shown for 11 or 22 ms. Measure on the real panel (the 2026-10-24
+   runs were headless) whether a software-paced 60 on 90 Hz can be made to look even, or whether the
+   launcher should say to set 60 Hz in Game Mode.
 
 ## Gameplay regression and cross-title upgrade testing — planned 2026-10-05
 

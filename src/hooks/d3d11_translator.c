@@ -565,6 +565,10 @@ static void recorder_frame_done(double present_ms, double capture_ms)
     recorder_frame_end(&in);
 }
 
+#if defined(_WIN32)
+/* Windows only: the refresh rate is read through Win32, and the presenter that
+ * paces frames (d3d8_present.c) is the Direct3D 11 one. */
+
 /* The refresh rate of the display the window is on, 0 when unknown. Whole
  * hertz, as the presenter reads it: a 59.94 Hz mode reads 59. */
 static unsigned window_refresh_hz(void)
@@ -624,6 +628,7 @@ static void log_display_pacing(void)
                 : hz ? " (refresh is not a multiple of 60 Hz; motion can judder)"
                      : " (refresh rate unknown)");
 }
+#endif /* _WIN32 */
 
 /* Put the frame on screen.
  *
@@ -662,7 +667,9 @@ void d3d11_translator_frame_end(void)
             extern void xbox_Nv2aSetFlipHz(int hz);
             xbox_Nv2aSetFlipHz(d3d8_present_display_paced() ? 63 : 0);
         }
+#if defined(_WIN32)
         log_display_pacing();
+#endif
     }
     d3d11_translator_pump();
     d3d11_translator_report();

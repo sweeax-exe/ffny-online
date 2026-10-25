@@ -300,7 +300,10 @@ def check_unlock_option(a):
     settings = ui_settings_file("unlockopt")
     # Open Diagnostics, click unlock, capture and click Play. The harness turns the
     # unlock on for its runs, which would lock the checkbox, so the variable is left unset here.
-    script = "800:ui:Advanced;1300:ui:Diagnostics;1900:ui:debug.unlock_all;2400:shot:%s;2800:ui:Play" % shot
+    # A narrow or large-text launcher (the Steam Deck's) draws the choice as an Off/On list: the first
+    # click opens it and the optional second picks On. With a checkbox the first click is enough.
+    script = ("800:ui:Advanced;1300:ui:Diagnostics;1900:ui:debug.unlock_all;2500:uiopt:debug.unlock_all.on;"
+              "3300:shot:%s;3700:ui:Play" % shot)
     run = harness.run_game("ui-unlockopt", secs=120, preset=a.preset, scripted=False, quiet=True, until_file=shot,
                            env={"RECOMP_SETTINGS": settings, "RECOMP_LAUNCHER_SCRIPT": script,
                                 "RECOMP_INPUT_IGNORE_FOCUS": "1", "RECOMP_UNLOCK_ALL": ""})
@@ -344,7 +347,9 @@ def check_picture_options(a):
     if os.path.exists(shot):
         os.remove(shot)
     settings = ui_settings_file("picture")
-    script = "800:ui:Advanced;1400:ui:display.brightness;2000:ui:display.vignette;2500:shot:%s;2900:ui:Play" % shot
+    # The vignette is a checkbox, or in a narrow or large-text launcher an Off/On list (see check_unlock_option).
+    script = ("800:ui:Advanced;1400:ui:display.brightness;2000:ui:display.vignette;2600:uiopt:display.vignette.off;"
+              "3300:shot:%s;3700:ui:Play" % shot)
     run = harness.run_game("ui-picture", secs=60, preset=a.preset, scripted=False, quiet=True,
                            env={"RECOMP_SETTINGS": settings, "RECOMP_LAUNCHER_SCRIPT": script,
                                 "RECOMP_INPUT_IGNORE_FOCUS": "1"})

@@ -364,23 +364,39 @@ class Engine:
         if self.operation in ('update', 'downgrade', 'rebuild'):
             return  # Fresh analysis, lift and objects are the clean operation contract.
         previous = self.install / 'installed.json'
-        candidates = [p for p in (self.install / 'versions').glob('*/source')
-                      if p != self.source and (p / 'src/recomp/gen/lift-state.json').is_file()]
-        if previous.is_file() or candidates:
-            old = (Path(json.loads(previous.read_text(encoding='utf-8'))['source']).resolve()
-                   if previous.is_file() else max(candidates, key=lambda p: p.stat().st_mtime).resolve())
-            versions = (self.install / 'versions').resolve()
-            if versions not in old.parents or old == self.source:
+        if previous.is_file():
+            old = Path(json.loads(previous.read_text(encoding='utf-8'))['source']).resolve()
+        else:
+            # Reuse only saves time, so an earlier folder that cannot be read is skipped. On
+            # Windows a half-deleted failed attempt answers access denied (WinError 5), and
+            # Python 3.13's is_file() raises that instead of returning False.
+            candidates = []
+            for p in (self.install / 'versions').glob('*/source'):
+                try:
+                    if p != self.source and (p / 'src/recomp/gen/lift-state.json').is_file():
+                        candidates.append((p.stat().st_mtime, p))
+                except OSError as ex:
+                    self.event('Skipped an unreadable earlier build folder: ' + str(ex))
+            if not candidates:
                 return
-            # Reuse only local analysis/lift artifacts; the incoming pipeline must
-            # validate all inputs/outputs before skipping a stage. Never reuse objects.
-            for relative in ('src/recomp/gen', 'tools/xboxrecomp/game_files',
-                             'tools/xboxrecomp/tools/disasm/output', 'tools/xboxrecomp/tools/func_id/output',
-                             'tools/xboxrecomp/tools/abi_analysis/output'):
-                src, dst = old / relative, self.source / relative
+            old = max(candidates)[1].resolve()
+        versions = (self.install / 'versions').resolve()
+        if versions not in old.parents or old == self.source:
+            return
+        # Reuse only local analysis/lift artifacts; the incoming pipeline must
+        # validate all inputs/outputs before skipping a stage. Never reuse objects.
+        for relative in ('src/recomp/gen', 'tools/xboxrecomp/game_files',
+                         'tools/xboxrecomp/tools/disasm/output', 'tools/xboxrecomp/tools/func_id/output',
+                         'tools/xboxrecomp/tools/abi_analysis/output'):
+            src, dst = old / relative, self.source / relative
+            try:
                 if src.is_dir() and (not dst.exists() or (relative == 'src/recomp/gen' and
                                                           not (dst / 'lift-state.json').exists())):
                     shutil.copytree(src, dst, dirs_exist_ok=True)
+            except OSError as ex:
+                # A partial copy is discarded so that stage starts from nothing.
+                shutil.rmtree(dst, ignore_errors=True)
+                self.event('Earlier ' + relative + ' not reused: ' + str(ex))
 
     def check_install_destination(self):
         marker = self.install / 'setup-owner.json'

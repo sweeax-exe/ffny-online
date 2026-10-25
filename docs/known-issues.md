@@ -27,6 +27,13 @@ Fighters selection. They do not cover every mode or a full Story campaign.
   the late frames of the heaviest scenes; at the default scale 2 the opening scene still drops
   about 11% of frames in its heaviest shots. Windows compiles each shader at first use in every
   launch (no Direct3D 11 shader cache yet).
+- **Uneven 40-60 fps in free-for-all fights on the Steam Deck at render scale 2-4 (improved in v0.12.0,
+  [report](research/deck-ffa-powerplant-2026-10-24.md)).** The Vulkan backend waited for
+  the GPU inside every `Present`, so the executor's CPU time and the GPU's time ran one after the
+  other against a 16.7 ms frame. Frames now overlap. In the scripted Power Plant fight on the Deck
+  (headless gamescope) render scale 3 went from 53 to 60 fps and scale 4 from 49 to 60; scale 2's
+  p99 frame time from 20.0 to 17.5 ms. Not yet seen on the real panel. Game Mode should be set to
+  60 Hz: at 90 Hz the game turns vsync off and motion is uneven even at a steady 60 fps.
 - **Scene loads freeze the picture for up to 2 s (to do).** When a Story scene loads, one frame
   lasts 0.8-1.8 s on the Mac in eleven scenes (sc07a 1.8 s; sc00 and sc03 1.4 s; sc06, sc16, sc09,
   sc13, sc05, sc17, gf1a, sc10) and up to 2.1 s on the Deck; the rest load in 0.2-0.75 s. The picture
@@ -178,7 +185,7 @@ improved; tracked in [#30](https://github.com/vyanhursky/DefJamFFNY-recomp/issue
 a build container (podman or distrobox) has no sound, because the container has no PipeWire library;
 start it from the host. On macOS and Linux, vsync is only used on a display refreshing at a
 multiple of 60 Hz (60, 120, 180, 240), as on Windows: on a 75, 90, 100 or 144 Hz display the
-game paces itself and the picture can tear. On Windows such a display does not tear, but a 60 fps frame stays up for an uneven number of refreshes (two, then three, on 144 Hz), so fights can look choppy while the frame counter says 60 ([#67](https://github.com/vyanhursky/DefJamFFNY-recomp/issues/67)); setting the display to 120 or 60 Hz avoids it. The game log's `[DISPLAY]` line records the refresh rate, the window mode and whether vsync paces the game. Network play is not supported.
+game paces itself and the picture can tear. On Windows such a display does not tear, but a 60 fps frame stays up for an uneven number of refreshes (two, then three, on 144 Hz), so fights can look choppy while the frame counter says 60 ([#67](https://github.com/vyanhursky/DefJamFFNY-recomp/issues/67)); setting the display to 120 or 60 Hz avoids it. The game log's `[DISPLAY]` line records the refresh rate, the window mode and whether vsync paces the game. With variable refresh (G-Sync, FreeSync) in borderless full screen the frames are shown evenly; exclusive full screen is not needed for it ([#92](https://github.com/vyanhursky/DefJamFFNY-recomp/issues/92)). Heavier picture settings (widescreen, render scale 3) made fight frames uneven there until the fix for [#102](https://github.com/vyanhursky/DefJamFFNY-recomp/issues/102), which hands each frame to the graphics card before the game's 60 fps timer waits. Network play is not supported.
 
 See the [improvement backlog](04-improvement-backlog.md) and
 [rebase acceptance](research/toolkit-rebase-acceptance.md) for details.

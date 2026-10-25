@@ -314,7 +314,7 @@ void capture_cancel() { g_capture.kind = Capture::NONE; }
 
 void capture_commit_key(int vk)
 {
-    const char *raw_name = input_key_name(vk);
+    const char *raw_name = xbox_InputMap_KeyName(vk);
     if (!raw_name) return;
     std::string name = raw_name;
     if (name.size() > 1) name[0] = (char)toupper((unsigned char)name[0]);     // "space" -> "Space"
@@ -323,7 +323,7 @@ void capture_commit_key(int vk)
         std::string old = get_text(g_capture.section.c_str(), g_capture.key.c_str());
         InputBindings b;
         memset(&b, 0, sizeof(b));
-        input_bindings_parse(&b, 0, old.c_str());
+        xbox_InputMap_BindingsParse(&b, 0, old.c_str());
         for (int i = 0; i < b.count[0]; i++)
             if (b.key[0][i] == vk) { capture_cancel(); return; }       // already there
         if (b.count[0] >= INPUT_BINDINGS_PER_CONTROL) { capture_cancel(); return; }
@@ -359,7 +359,7 @@ bool ui_capture_message(HWND, UINT msg, WPARAM wp, LPARAM lp)
         if (armed) capture_commit_key(HIWORD(wp) == XBUTTON1 ? VK_XBUTTON1 : VK_XBUTTON2);
         return true;
     case WM_MOUSEWHEEL:
-        if (armed) capture_commit_key(GET_WHEEL_DELTA_WPARAM(wp) > 0 ? INPUT_KEY_WHEEL_UP : INPUT_KEY_WHEEL_DOWN);
+        if (armed) capture_commit_key(GET_WHEEL_DELTA_WPARAM(wp) > 0 ? XBOX_VK_WHEEL_UP : XBOX_VK_WHEEL_DOWN);
         return true;
     }
     return false;
@@ -387,7 +387,7 @@ bool ui_capture_sdl_event(const SDL_Event *e)
         return false;
     case SDL_EVENT_MOUSE_WHEEL:
         if (armed && e->wheel.y != 0)
-            capture_commit_key(e->wheel.y > 0 ? INPUT_KEY_WHEEL_UP : INPUT_KEY_WHEEL_DOWN);
+            capture_commit_key(e->wheel.y > 0 ? XBOX_VK_WHEEL_UP : XBOX_VK_WHEEL_DOWN);
         return true;
     }
     return false;
@@ -404,7 +404,7 @@ static void capture_poll_pad()
         for (int s = INPUT_SRC_SOUTH; s < INPUT_SRC_COUNT; s++) {
             bool down = raw.src[s] >= 16384;
             if (down && !g_pad_prev[s] && ui_ticks() >= g_capture.armed_at) {
-                recomp_settings_set_text(g_capture.section.c_str(), g_capture.key.c_str(), input_source_name(s));
+                recomp_settings_set_text(g_capture.section.c_str(), g_capture.key.c_str(), xbox_InputMap_SourceName(s));
                 commit();
                 capture_cancel();
                 return;
@@ -604,8 +604,11 @@ static bool setting_widget(RecompSetting *s, const char *label = nullptr, bool s
             if (ImGui::BeginCombo(control, value ? on : off))
             {
                 for (int i = 0; i < 2; i++)
+                {
                     if (ImGui::Selectable(i ? on : off, value == i))
                         changed = recomp_settings_set(s->section, s->key, i) > 0;
+                    ui_target((std::string(s->section) + "." + s->key + (i ? ".on" : ".off")).c_str());
+                }
                 ImGui::EndCombo();
             }
         }
@@ -1071,21 +1074,21 @@ static void page_controllers()
             ImGui::SameLine();
             if (ImGui::SmallButton("Test rumble")) xbox_HostInputRumbleTest(slot);
             if (xbox_HostInputRawPad(slot, &raw)) {
-                InputPad pad;
-                input_pad_map(&map, &raw, &pad);
+                XBOX_GAMEPAD pad;
+                xbox_InputMap_PadMap(&map, &raw, &pad);
                 ImGui::Indent();
-                draw_stick("l", pad.lx / 32767.0f, pad.ly / 32767.0f, ImGui::GetFontSize() * 1.6f);
+                draw_stick("l", pad.sThumbLX / 32767.0f, pad.sThumbLY / 32767.0f, ImGui::GetFontSize() * 1.6f);
                 ImGui::SameLine();
-                draw_stick("r", pad.rx / 32767.0f, pad.ry / 32767.0f, ImGui::GetFontSize() * 1.6f);
+                draw_stick("r", pad.sThumbRX / 32767.0f, pad.sThumbRY / 32767.0f, ImGui::GetFontSize() * 1.6f);
                 ImGui::SameLine();
                 static const char *btn[8] = { "A", "B", "X", "Y", "Black", "White", "LT", "RT" };
                 ImGui::BeginGroup();
                 std::string pressed;
                 for (int i = 0; i < 8; i++)
-                    if (pad.analog[i] > 30) { pressed += btn[i]; pressed += ' '; }
+                    if (pad.bAnalogButtons[i] > 30) { pressed += btn[i]; pressed += ' '; }
                 static const char *dig[8] = { "Up", "Down", "Left", "Right", "Start", "Back", "LS", "RS" };
                 for (int i = 0; i < 8; i++)
-                    if (pad.buttons & (1 << i)) { pressed += dig[i]; pressed += ' '; }
+                    if (pad.wButtons & (1 << i)) { pressed += dig[i]; pressed += ' '; }
                 ImGui::TextDisabled("what the game sees:");
                 ImGui::TextUnformatted(pressed.empty() ? "-" : pressed.c_str());
                 ImGui::EndGroup();
@@ -1113,7 +1116,7 @@ static void page_pad_buttons()
                        "button on your pad. Names are positional: south is the bottom face button (Xbox A, PlayStation cross), "
                        "east the right one, west the left, north the top.");
     if (ImGui::Button("Reset all to default")) {
-        for (int i = 0; i < INPUT_PAD_CONTROL_COUNT; i++) recomp_settings_reset_to_default("gamepad", input_control_name(i));
+        for (int i = 0; i < INPUT_PAD_CONTROL_COUNT; i++) recomp_settings_reset_to_default("gamepad", xbox_InputMap_ControlName(i));
         commit();
     }
     ImGui::Spacing();
@@ -1122,7 +1125,7 @@ static void page_pad_buttons()
         ImGui::TableSetupColumn("Pad button", ImGuiTableColumnFlags_WidthStretch, 1.6f);
         ImGui::TableSetupColumn("", ImGuiTableColumnFlags_WidthFixed);
         for (int i = 0; i < INPUT_PAD_CONTROL_COUNT; i++) {
-            const char *key = input_control_name(i);
+            const char *key = xbox_InputMap_ControlName(i);
             RecompSetting *s = find("gamepad", key);
             if (!s) continue;
             ImGui::TableNextRow();
@@ -1131,16 +1134,16 @@ static void page_pad_buttons()
             ImGui::TextUnformatted(k_control_labels[i]);
             ImGui::TableNextColumn();
             ImGui::PushID(i);
-            int cur = input_source_from_name(s->stored_text);
+            int cur = xbox_InputMap_SourceFromName(s->stored_text);
             if (cur < 0) cur = 0;
             bool detecting = g_capture.kind == Capture::PAD && g_capture.key == key;
             ImGui::SetNextItemWidth(-1);
             if (detecting) {
                 ImGui::TextColored(ImVec4(1, 0.75f, 0.2f, 1), "Press a button on your pad...");
-            } else if (ImGui::BeginCombo("##src", input_source_name(cur))) {
+            } else if (ImGui::BeginCombo("##src", xbox_InputMap_SourceName(cur))) {
                 for (int n = 0; n < INPUT_SRC_COUNT; n++)
-                    if (ImGui::Selectable(input_source_name(n), n == cur)) {
-                        recomp_settings_set_text("gamepad", key, input_source_name(n));
+                    if (ImGui::Selectable(xbox_InputMap_SourceName(n), n == cur)) {
+                        recomp_settings_set_text("gamepad", key, xbox_InputMap_SourceName(n));
                         commit();
                     }
                 ImGui::EndCombo();
@@ -1165,7 +1168,7 @@ static void page_keyboard()
                        "a side or middle mouse button or a wheel notch (Esc cancels); the left and right buttons have buttons of "
                        "their own while you are adding. F11 and Alt+Enter are full screen and cannot be bound.");
     if (ImGui::Button("Reset all to default")) {
-        for (int i = 0; i < INPUT_CONTROL_COUNT; i++) recomp_settings_reset_to_default("keyboard", input_control_name(i));
+        for (int i = 0; i < INPUT_CONTROL_COUNT; i++) recomp_settings_reset_to_default("keyboard", xbox_InputMap_ControlName(i));
         commit();
     }
     ImGui::SameLine();
@@ -1180,7 +1183,7 @@ static void page_keyboard()
         ImGui::TableSetupColumn("Keys", ImGuiTableColumnFlags_WidthStretch, 1.8f);
         ImGui::TableSetupColumn("", ImGuiTableColumnFlags_WidthFixed);
         for (int i = 0; i < INPUT_CONTROL_COUNT; i++) {
-            const char *key = input_control_name(i);
+            const char *key = xbox_InputMap_ControlName(i);
             ImGui::TableNextRow();
             ImGui::TableNextColumn();
             ImGui::AlignTextToFramePadding();
@@ -1716,7 +1719,7 @@ void parse_chord_list(const std::string &text, std::vector<Chord> &chords)
             p = plus == std::string::npos ? alt.size() + 1 : plus + 1;
             size_t a = name.find_first_not_of(" \t"), b = name.find_last_not_of(" \t");
             if (a == std::string::npos) continue;
-            int src = input_source_from_name(name.substr(a, b - a + 1).c_str());
+            int src = xbox_InputMap_SourceFromName(name.substr(a, b - a + 1).c_str());
             if (src > INPUT_SRC_NONE) c.src[c.n++] = src;
         }
         if (c.n) chords.push_back(c);
@@ -1788,7 +1791,7 @@ extern "C" void pc_ui_apply_settings(void)
 {
     ui_lock();
     std::string key = get_text("ui", "overlay_key");
-    int vk = input_key_from_name(key.c_str());
+    int vk = xbox_InputMap_KeyFromName(key.c_str());
     g_overlay_vk = vk > 0 ? vk : VK_F1;
     parse_chords();
     if (g_ready) ui_apply_scale(g_window);
