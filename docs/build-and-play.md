@@ -29,7 +29,8 @@ preview build.
    `D:\Games\DefJam\App\DefJamLauncher.exe`. The wizard displays your exact
    launcher path; it supplies the correct data location and working directory.
 
-**Open logs** opens the current session file. Packaged setup logs default to
+**Show details** follows the current session log inside the setup window;
+**Open logs** opens the whole file. Packaged setup logs default to
 `%LOCALAPPDATA%\DefJamSetup\logs`, including failures before installation starts.
 Close the game and rerun setup with the same destinations to repair/update;
 saves/settings stay in the data folder.

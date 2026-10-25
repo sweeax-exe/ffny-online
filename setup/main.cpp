@@ -20,6 +20,11 @@ namespace fs = std::filesystem;
 // folders, which must not overlap, was the setup's most common way to fail.
 static HWND window, dumpEdit, installEdit, statusLabel, startButton, cancelButton, prerequisites, desktopShortcut, launchInfo;
 static HWND progressBar;    // overall progress, 0-1000, from the engine's <status>.progress file
+static HWND detailsButton, logView;     // Show details: the session log, followed live below the buttons
+static unsigned long long logOffset = 0;
+static std::string logPending;          // bytes after the last complete line, shown once it ends
+static bool detailsShown = false;
+static constexpr int WIZARD_HEIGHT = 560, LOG_VIEW_HEIGHT = 200, LOG_VIEW_CHARS = 200000;
 static HANDLE worker = nullptr;
 static fs::path payload, scratch, statusPath, cancelPath, logPath;
 static bool running = false;
@@ -249,7 +254,87 @@ static void setBusy(bool value) {
     SetWindowTextW(cancelButton, value ? L"Cancel" : L"Close");
 }
 
+// Appends what the engine has written to the session log since the last tick, whole lines only
+// (a UTF-8 character never splits), keeping the newest LOG_VIEW_CHARS. A reader scrolled up stays
+// where they are; at the bottom, the view follows the build.
+static void tailLog() {
+    if (logPath.empty()) return;
+    std::ifstream in(logPath, std::ios::binary);
+    if (!in) return;
+    in.seekg(0, std::ios::end);
+    auto size = (unsigned long long)in.tellg();
+    if (size < logOffset) { logOffset = 0; logPending.clear(); }
+    if (size == logOffset) return;
+    in.seekg((std::streamoff)logOffset);
+    std::string chunk((size_t)(size - logOffset), '\0');
+    in.read(chunk.data(), (std::streamsize)chunk.size());
+    chunk.resize((size_t)in.gcount());
+    logOffset += chunk.size();
+    logPending += chunk;
+    auto end = logPending.rfind('\n');
+    if (end == std::string::npos) return;
+    std::wstring text;
+    for (auto c : utf8(logPending.substr(0, end + 1))) {
+        if (c == L'\n') text += L"\r\n";
+        else if (c != L'\r') text += c;
+    }
+    logPending.erase(0, end + 1);
+    if (text.size() > (size_t)LOG_VIEW_CHARS) text.erase(0, text.size() - LOG_VIEW_CHARS);
+
+    SCROLLINFO si{sizeof(si), SIF_ALL};
+    bool follow = !GetScrollInfo(logView, SB_VERT, &si) || si.nPos + (int)si.nPage > si.nMax;
+    DWORD selStart = 0, selEnd = 0;
+    SendMessageW(logView, EM_GETSEL, (WPARAM)&selStart, (LPARAM)&selEnd);
+    int first = (int)SendMessageW(logView, EM_GETFIRSTVISIBLELINE, 0, 0);
+    SendMessageW(logView, WM_SETREDRAW, FALSE, 0);
+    int length = GetWindowTextLengthW(logView);
+    if (length + (int)text.size() > LOG_VIEW_CHARS) {
+        // Drop whole lines from the top.
+        int line = (int)SendMessageW(logView, EM_LINEFROMCHAR, length + (int)text.size() - LOG_VIEW_CHARS, 0) + 1;
+        int cut = (int)SendMessageW(logView, EM_LINEINDEX, line, 0);
+        if (cut < 0) { cut = length; line = (int)SendMessageW(logView, EM_GETLINECOUNT, 0, 0); }
+        SendMessageW(logView, EM_SETSEL, 0, cut);
+        SendMessageW(logView, EM_REPLACESEL, FALSE, (LPARAM)L"");
+        length -= cut; first = first > line ? first - line : 0;
+        selStart = selStart > (DWORD)cut ? selStart - cut : 0; selEnd = selEnd > (DWORD)cut ? selEnd - cut : 0;
+    }
+    SendMessageW(logView, EM_SETSEL, length, length);
+    SendMessageW(logView, EM_REPLACESEL, FALSE, (LPARAM)text.c_str());
+    if (follow) {
+        length = GetWindowTextLengthW(logView);
+        SendMessageW(logView, EM_SETSEL, length, length);
+        SendMessageW(logView, WM_VSCROLL, SB_BOTTOM, 0);
+    } else {
+        SendMessageW(logView, EM_SETSEL, selStart, selEnd);
+        SendMessageW(logView, EM_LINESCROLL, 0, first - (int)SendMessageW(logView, EM_GETFIRSTVISIBLELINE, 0, 0));
+    }
+    SendMessageW(logView, WM_SETREDRAW, TRUE, 0);
+    InvalidateRect(logView, nullptr, TRUE);
+}
+
+static void showDetails(bool show) {
+    detailsShown = show;
+    SetWindowTextW(detailsButton, show ? L"Hide details" : L"Show details");
+    ShowWindow(logView, show ? SW_SHOW : SW_HIDE);
+    RECT r; GetWindowRect(window, &r);
+    int height = WIZARD_HEIGHT + (show ? LOG_VIEW_HEIGHT + 12 : 0);
+    // Taller, the window moves up rather than hang below the taskbar.
+    RECT work; SystemParametersInfoW(SPI_GETWORKAREA, 0, &work, 0);
+    int top = r.top + height > work.bottom ? (std::max)((int)work.top, (int)work.bottom - height) : r.top;
+    SetWindowPos(window, nullptr, r.left, top, r.right - r.left, height, SWP_NOZORDER);
+    if (show) {
+        int length = GetWindowTextLengthW(logView);
+        SendMessageW(logView, EM_SETSEL, length, length);
+        SendMessageW(logView, WM_VSCROLL, SB_BOTTOM, 0);
+    }
+}
+
 static LRESULT CALLBACK windowProc(HWND hwnd, UINT message, WPARAM wp, LPARAM lp) {
+    if (message == WM_CTLCOLORSTATIC && (HWND)lp == logView) {
+        // Opaque: a transparent background smears when the log scrolls.
+        SetBkColor((HDC)wp, GetSysColor(COLOR_WINDOW));
+        return (LRESULT)GetSysColorBrush(COLOR_WINDOW);
+    }
     if (message == WM_CTLCOLORSTATIC) {
         // Labels (and the read-only status box) on the window's own white, not on grey boxes.
         SetBkMode((HDC)wp, TRANSPARENT);
@@ -281,6 +366,7 @@ static LRESULT CALLBACK windowProc(HWND hwnd, UINT message, WPARAM wp, LPARAM lp
                     args.push_back(L"--no-desktop-shortcut");
                 setBusy(true); timerTicks = 0; SetTimer(window, 1, 400, nullptr);
                 SendMessageW(progressBar, PBM_SETPOS, 0, 0);
+                SetWindowTextW(logView, L""); logOffset = 0; logPending.clear();
                 SetWindowTextW(statusLabel, L"Preparing setup files... You can move the window or cancel.");
                 std::thread([args]() {
                     try {
@@ -314,6 +400,7 @@ static LRESULT CALLBACK windowProc(HWND hwnd, UINT message, WPARAM wp, LPARAM lp
             fs::create_directories(logPath.empty() ? path : path.parent_path());
             ShellExecuteW(window, L"open", path.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
         }
+        if (id == 117) showDetails(!detailsShown);
         if (id == 112) {
             auto launcher = installDir() / L"DefJamLauncher.exe";
             ShellExecuteW(window, L"open", launcher.c_str(), L"--launch", nullptr, SW_SHOWNORMAL);
@@ -325,12 +412,14 @@ static LRESULT CALLBACK windowProc(HWND hwnd, UINT message, WPARAM wp, LPARAM lp
         auto error = reinterpret_cast<std::wstring*>(lp);
         auto text = *error + L"\n\nLog: " + logPath.wstring(); delete error;
         KillTimer(window, 1); setBusy(false); SetWindowTextW(statusLabel, text.c_str());
+        tailLog();
         if (preparationSmoke) DestroyWindow(window);
-        else MessageBoxW(window, text.c_str(), L"Setup", MB_OK | MB_ICONERROR);
+        else { showDetails(true); MessageBoxW(window, text.c_str(), L"Setup", MB_OK | MB_ICONERROR); }
         return 0;
     }
     if (message == WM_TIMER) {
         ++timerTicks;
+        tailLog();
         if (!worker) return 0;
         if (fs::exists(statusPath)) {
             std::ifstream in(statusPath); std::string text((std::istreambuf_iterator<char>(in)), {});
@@ -345,6 +434,7 @@ static LRESULT CALLBACK windowProc(HWND hwnd, UINT message, WPARAM wp, LPARAM lp
         if (WaitForSingleObject(worker, 0) == WAIT_OBJECT_0) {
             DWORD code; GetExitCodeProcess(worker, &code); CloseHandle(worker); worker = nullptr;
             KillTimer(window, 1); setBusy(false);
+            tailLog();     // the engine's last lines, written as it exited
             EnableWindow(GetDlgItem(window, 112), code == 0);
             if (code == 0) {
                 SendMessageW(progressBar, PBM_SETPOS, 1000, 0);
@@ -359,7 +449,9 @@ static LRESULT CALLBACK windowProc(HWND hwnd, UINT message, WPARAM wp, LPARAM lp
                 DestroyWindow(window); return 0;
             }
             if (code) {
-                auto text = L"Setup stopped (exit " + std::to_wstring(code) + L").\n\nLog: " + logPath.wstring() + L"\n\nSelect Open logs for details.";
+                showDetails(true);
+                auto text = L"Setup stopped (exit " + std::to_wstring(code) + L").\n\nLog: " + logPath.wstring() +
+                            L"\n\nIts last lines are shown under the buttons; Open logs opens the whole file.";
                 MessageBoxW(window, text.c_str(), L"Setup", MB_OK | MB_ICONINFORMATION);
             }
         }
@@ -413,7 +505,7 @@ static int wizard(HINSTANCE instance, bool smoke = false, bool preparation = fal
     wc.hIcon = LoadIcon(instance, MAKEINTRESOURCE(1));  // setup/app.rc.in
     wc.lpszClassName = L"DefJamSetupWizard"; RegisterClassW(&wc);
     window = CreateWindowW(wc.lpszClassName, L"FFNY Online \u2014 Setup", WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
-        CW_USEDEFAULT, CW_USEDEFAULT, 740, 560, nullptr, nullptr, instance, nullptr);
+        CW_USEDEFAULT, CW_USEDEFAULT, 740, WIZARD_HEIGHT, nullptr, nullptr, instance, nullptr);
     control(L"STATIC", L"Build and play from your own USA Xbox dump", 0, 24, 20, 660, 24, 0);
     control(L"STATIC", L"1. Choose your game image.  2. Keep or change the install folder.  3. Select Install. "
                        L"The first install can take up to an hour.", 0, 24, 46, 680, 36, 0);
@@ -442,7 +534,14 @@ static int wizard(HINSTANCE instance, bool smoke = false, bool preparation = fal
     control(L"BUTTON", L"Open logs", WS_TABSTOP, 180, 462, 110, 30, 111);
     control(L"BUTTON", L"Play", WS_TABSTOP, 306, 462, 90, 30, 112);
     EnableWindow(GetDlgItem(window, 112), FALSE);
+    detailsButton = control(L"BUTTON", L"Show details", WS_TABSTOP, 412, 462, 110, 30, 117);
     cancelButton = control(L"BUTTON", L"Close", WS_TABSTOP, 595, 462, 90, 30, 110);
+    logView = control(L"EDIT", L"", WS_TABSTOP | WS_VSCROLL | ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL,
+                      24, 504, 660, LOG_VIEW_HEIGHT, 118);
+    SendMessageW(logView, EM_SETLIMITTEXT, 2 * LOG_VIEW_CHARS, 0);
+    SendMessageW(logView, WM_SETFONT, (WPARAM)CreateFontW(-12, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
+        OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, FIXED_PITCH | FF_MODERN, L"Consolas"), TRUE);
+    ShowWindow(logView, SW_HIDE);
     if (!g_ui_shot.empty()) {
         SetWindowTextW(dumpEdit, L"D:\\Games\\Def Jam - Fight for NY (USA).iso");
         SetWindowTextW(installEdit, L"D:\\Games\\FFNY Online");
@@ -464,6 +563,7 @@ static int wizard(HINSTANCE instance, bool smoke = false, bool preparation = fal
         wchar_t title[128]{}; GetWindowTextW(window, title, 128);
         bool valid = wcscmp(title, L"FFNY Online \u2014 Setup") == 0 &&
                      window && dumpEdit && installEdit && prerequisites && desktopShortcut && launchInfo &&
+                     detailsButton && logView && !IsWindowVisible(logView) &&
                      SendMessageW(desktopShortcut, BM_GETCHECK, 0, 0) == BST_CHECKED &&
                      startButton && cancelButton && !editText(installEdit).empty() && IsWindowEnabled(startButton);
         DestroyWindow(window);
