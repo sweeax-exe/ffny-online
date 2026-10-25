@@ -515,3 +515,28 @@ def test_status_write_survives_a_wizard_holding_the_file(tmp_path, monkeypatch):
     engine.write_progress(status, 500)
     assert status.read_text(encoding='utf-8') == 'Building'
     assert not (tmp_path / 'status.pending').exists()
+
+
+def test_a_folder_around_the_dump_finds_the_one_image_or_game_folder(tmp_path):
+    around = tmp_path / 'around'
+    (around / 'notes').mkdir(parents=True)
+    image = around / 'game.ISO'
+    image.write_bytes(b'image')
+    assert engine.locate_dump(around) == image.resolve()
+    image.unlink()
+    game = around / 'dump' / 'Def Jam'
+    game.mkdir(parents=True)
+    (game / 'default.xbe').write_bytes(b'synthetic')
+    assert engine.locate_dump(around) == game.resolve()
+    assert engine.locate_dump(game) == game
+
+
+def test_a_folder_without_a_dump_says_what_to_choose(tmp_path):
+    empty = tmp_path / 'empty'
+    empty.mkdir()
+    with pytest.raises(engine.SetupError, match='Choose the Xbox disc image'):
+        engine.locate_dump(empty)
+    (empty / 'a.iso').write_bytes(b'1')
+    (empty / 'b.iso').write_bytes(b'2')
+    with pytest.raises(engine.SetupError, match='more than one'):
+        engine.locate_dump(empty)
