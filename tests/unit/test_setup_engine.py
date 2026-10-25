@@ -160,6 +160,11 @@ def test_release_payload_source_filter_excludes_game_and_binary_files(name):
     assert not package.source_allowed(name, True)
 
 
+def test_the_website_stays_out_of_the_setup_payload():
+    assert not package.source_allowed('website/index.html')
+    assert not package.source_allowed('website/build.py')
+
+
 def test_release_asset_exception_is_exact_and_cannot_admit_the_game():
     names = ['DefJamSetup-0.5.0-windows-x64' + ext for ext in ('.exe', '.sha256', '.provenance.json')]
     assets.validate_asset_names('0.5.0', names)
