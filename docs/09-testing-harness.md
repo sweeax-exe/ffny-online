@@ -212,6 +212,58 @@ match start, fighter positions, health, buttons, hits, damage, the result. `step
 in those lines counts the game's simulation steps, 60 a second in a fight. Normal
 play leaves the probes off. Adding or removing a probe point needs a re-lift.
 
+## Matches that end by themselves
+
+In this game zero health is not a knockout: the fighter has to be finished with a hit
+or a grab that carries the finishing flag, and blind pad scripts rarely manage it, so
+scripted matches lasted four to eleven minutes or never ended. Two test switches fix
+that; both turn the telemetry on by themselves and are off unless set.
+
+**`RECOMP_TEST_KO_STEP=<step>[,<winner slot>|alt]`**: from that fight step of every
+match (60 a second, counted from the match start) the loser is knocked out the game's
+own way. Every fighter but the winner gets zero health and the knockout state 0x18
+through the routine the game's knockout check uses (`sub_001B5420`), as soon as both
+stand free (state 1, so no grapple or throw holds the loser), and at the latest 180
+steps later. The game then records its usual decisive result (code 0x21), plays the
+slow motion and goes through the results and the summary. The winner is slot 0 by
+default; `alt` alternates it per match (slot 0 wins the first). It runs at the start
+of a step, before the step's checksum, and depends only on the step number, the match
+ordinal and the fighters' records, so both PCs of a room apply it at the same step;
+it keeps no state of its own, so a step run again by rollback does the same again.
+Lines `[TEST-KO]` say when it fired. (`RECOMP_TEST_FAST_KO=<percent>` is older: it caps
+health, but the fighter at zero still has to be finished.)
+
+**`RECOMP_TEST_BOT=1[,<aggression 0..100>]`**: a state-reading player
+(`src/hooks/test_bot.c`). Each fight step it reads its own and the opponent's position,
+health, stun and state, and presses pad buttons: it walks up, throws strings of
+strikes, grabs, blocks (more often when the opponent winds up a strike, and more
+with a low aggression), and once the opponent is under the knockout threshold or
+stunned it goes for grabs and heavy hits until the game decides the knockout. It
+writes the pad-table entry the fighter reads, as `RECOMP_TEST_INPUT` does. Online each
+copy drives only its own player, and netplay exchanges that input like a human's, so
+the lockstep is not at risk; offline it drives every human slot, or those in
+`RECOMP_TEST_BOT_SLOTS=0,1`. Its choices follow from the step, the slot, the fighters'
+records and the match seed (`RECOMP_TEST_BOT_SEED` adds to it); it learns what each pad
+direction moves its fighter by, since the camera turns. Pad bits it uses (found by a
+step-input probe): `0x80` and `0x40` strikes, `0x20` grab, `0x2000` block (held),
+`0x1000` held with strikes as the modifier (unconfirmed), `0x1`/`0x2`/`0x4`/`0x8` up, down, left, right.
+
+```powershell
+# offline: one One on One to the summary, knocked out at step 600 (or fought by the bot)
+python scripts/harness.py run fight-result --env RECOMP_TEST_KO_STEP=600
+python scripts/harness.py run fight-result --env RECOMP_TEST_BOT=1
+# online: five room matches in a row, two copies, a knockout at step 600 alternating the winner
+.\scripts\netplay-hub-test.ps1 -Route online5 -FastKo 600
+.\scripts\netplay-hub-test.ps1 -Route online5 -Bot
+# beside another test: its own relay port, CPUs (16 and 18) and data roots (<prefix>0, <prefix>1)
+.\scripts\netplay-hub-test.ps1 -Route online5 -FastKo 600 -RelayPort 27807 -BaseCore 16 -DataPrefix D:\DefJam\data-bot
+```
+
+The MCP test server's `launch` takes the same as `ko_step`, `ko_winner`, `bot`,
+`relay_port` and `base_core`. The hub test leaves the save area's cache partition
+images out of each copy's data root (the runtime makes sparse ones): copied, they are
+5 GB a root and again in each of the harness's save backups.
+
 ## HD pack validation
 
 For HD-pack checks, `scenario_suite.py run` accepts explicit `--texture-packs`
@@ -234,4 +286,9 @@ separate review evidence; they do not replace the original-texture goldens.
   skipping are not covered.
 - The live-input session recipes in `tests/scenarios/` are uncalibrated examples;
   the `two-matches` route uses the ordinary pad script instead.
-- Long sessions and many repeated matches are not measured.
+- Long sessions are not measured. Five online matches in a row (two copies, 2026-10-25): 4.9 min
+  with `-FastKo 600` (110 checksums equal), 4.2 min with it and `RECOMP_ROLLBACK=on`,
+  `RECOMP_NETPLAY_LAG_MS=70,70`, and 15.9 min with `-Bot` (four knockouts and a venue double
+  knockout, 3,052 to 15,254 steps a match, 730 checksums equal); scripted routes needed 40 minutes or
+  more. The bot is not a time bound: bot against bot a match can run past ten minutes, so add
+  `-FastKo` (for example 18000, five minutes) when a test needs one. Offline the CPU usually beats it.
