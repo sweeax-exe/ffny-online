@@ -51,6 +51,9 @@ def fetch(host, folder):
 
 
 def main():
+    # players' names can hold any character; a Windows console in cp1252 would stop the run halfway
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(errors="replace")
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--host", default="ffny-online")
     sub = ap.add_subparsers(dest="cmd", required=True)

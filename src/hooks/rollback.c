@@ -1170,6 +1170,14 @@ int rollback_route_alloc(void)
     /* Another thread than the game's (the mixer), or the game thread inside a sound command: the
      * block is the sound engine's whoever called. Through the heap such blocks put the heap's own
      * bookkeeping on pages the mixer writes (0x80003104 in a hub run), which then left the save. */
+    /* The file layer's buffers stay in the heap: routed to the arena (below, tests only with
+     * RECOMP_ROLLBACK_ROUTE_STREAMS=1) a five-match run crashed in the file layer early in its second match
+     * (sub_001E8340, an arena pointer), as its stream objects outlive the fight. */
+    {
+        static int streams = -1;
+        if (streams < 0) streams = getenv("RECOMP_ROLLBACK_ROUTE_STREAMS") != NULL;
+        if (ret == 0x001E3F20u && !streams) return 0;
+    }
     if (!audio_code(req) && !t_in_sound && !(s_tracking && GetCurrentThreadId() != s_game_tid)) {
         /* The file layer's buffers (allocated at return 0x1E3F20) for a stream the audio code opens:
          * the music stream's buffer is the one block outside the arena the mixer writes (two-copy runs
