@@ -226,3 +226,11 @@ crash report prints the history of the arena blocks the guest registers point in
   and freed) are freed when the next fight starts (`release_kept_arena`), after the match change has torn
   the game's sound handles down. The crash report's stack scan stops at the thread's stack base (it
   faulted past it inside the report).
+* Freeing every kept block at the next fight (10900 of them, 1.8 MB, after a 3-minute first match) crashed
+  the mixer 3800 steps into the second match in `sub_001E8340` (a stream handle in the arena read junk;
+  the same shape as the 10-24 file-layer crash): blocks freed on the game thread and kept by a load are
+  alive again (the restored state uses them; the music stream's handle lives on into the next match).
+  Held frees now remember their thread; a load that forgets a game-thread free clears the block's freed
+  mark, so only the mixer's kept frees are freed at the next fight (and only they make a sound command
+  "dead"). The crash report also prints the sound bank table `[0x3AD928]` and its arena blocks, for the
+  `sub_001317C0` crashes.

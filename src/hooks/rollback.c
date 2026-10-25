@@ -1128,11 +1128,22 @@ static uint32_t arena_block_history(uint32_t v)
 
 void rollback_arena_history(void)
 {
-    uint32_t cand[7 * 9], done[16];
+    uint32_t cand[8 * 9 + 4], done[16];
     unsigned nc = 0, nd = 0, i, j;
-    const uint32_t regs[7] = { g_eax, g_ebx, g_ecx, g_edx, g_esi, g_edi, g_esp };
+    /* and the sound engine's bank table [0x3AD928]: sub_001317C0 crashed three times reading a bank's cue
+     * table (+0x34 data, +0x4C index) through junk (2026-10-25) */
+    const uint32_t regs[8] = { g_eax, g_ebx, g_ecx, g_edx, g_esi, g_edi, g_esp, MEM32(0x003AD928u) };
     if (!s_aev || !s_arena) return;
-    for (i = 0; i < 7; i++) {
+    {
+        uint32_t bank = MEM32(0x003AD928u);
+        if (in_arena(bank) || (bank >= HEAP_LO && bank < HEAP_HI)) {
+            fprintf(stderr, "[ROLLBACK] the sound bank table %08X: +34 %08X, +4C %08X\n", bank, MEM32(bank + 0x34u),
+                    MEM32(bank + 0x4Cu));
+            cand[nc++] = MEM32(bank + 0x34u);
+            cand[nc++] = MEM32(bank + 0x4Cu);
+        }
+    }
+    for (i = 0; i < 8; i++) {
         uint32_t r = regs[i];
         cand[nc++] = r;
         if (in_arena(r) || (r >= HEAP_LO && r < HEAP_HI) || (r >= 0x002D5000u && r < 0x003CA000u))
@@ -1227,7 +1238,7 @@ static int arena_free_now(uint32_t a)
  * later); a block freed again meanwhile (the game frees it once more after a load) just moves
  * its time on. */
 #define HELD_ARENA 4096
-static struct { uint32_t addr; LONG at; } s_held_arena[HELD_ARENA];
+static struct { uint32_t addr; LONG at; int game; } s_held_arena[HELD_ARENA];   /* game: freed on the game thread */
 static unsigned s_nheld_arena;
 
 static int arena_free(uint32_t a)
@@ -1245,6 +1256,7 @@ static int arena_free(uint32_t a)
         if (k < s_nheld_arena) {
             s_held_arena[k].addr = a;
             s_held_arena[k].at = s_saves;
+            s_held_arena[k].game = GetCurrentThreadId() == s_game_tid;
             arena_event('H', a, 0);
         }
         else live = 0;      /* the list is full: give it back now */
@@ -1354,6 +1366,15 @@ static void forget_frees_since(LONG at)
              * new owner and the game's next command for the old handle broke it (sub_001317C0 as the
              * second match loaded, 2026-10-25). Kept, they are given back when the next fight starts. */
             if (s_held_arena[i].at >= at) {
+                /* freed on the game thread: the state the load brings back uses the block, so it is alive
+                 * again (the music stream's handle, used on into the next match: freeing such blocks at the
+                 * next fight crashed the mixer in sub_001E8340, 2026-10-25); the mixer's: the engine is done
+                 * with it, only a stale handle in the game can name it */
+                if (s_held_arena[i].game) {
+                    int b;
+                    for (b = 0; b < s_nblk; b++)
+                        if (s_blk[b].user == s_held_arena[i].addr) { s_blk[b].freed = 0; break; }
+                }
                 arena_event('D', s_held_arena[i].addr, 0);
                 s_held_arena[i] = s_held_arena[--s_nheld_arena];
                 arena++;
