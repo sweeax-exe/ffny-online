@@ -26,6 +26,7 @@ $data = if ($env:DEFJAM_DATA) { $env:DEFJAM_DATA } else { 'D:\DefJam\data' }
 $logs = Join-Path $repo 'logs\hub-test'
 New-Item -ItemType Directory -Force $logs | Out-Null
 
+$started = Get-Date
 $relay = Start-Process (Join-Path $repo 'netplay\relay\dist\relay.exe') -ArgumentList '-listen', '127.0.0.1:27777', '-log-interval', '30s' `
          -PassThru -WindowStyle Hidden -RedirectStandardError "$logs\relay.err" -RedirectStandardOutput "$logs\relay.out"
 Start-Sleep -Seconds 1
@@ -66,7 +67,11 @@ for ($i = 0; $i -lt $Players; $i++) {
 $env:DEFJAM_DATA = $data
 foreach ($p in $procs) { $p.WaitForExit(($Secs + 300) * 1000) | Out-Null }
 foreach ($p in $procs) { if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force } }
-Get-Process defjam_recomp -ErrorAction SilentlyContinue | Stop-Process -Force
+# only the copies this test started (this checkout's build, started after it began): another test's copies,
+# from a worktree, keep running
+Get-Process defjam_recomp -ErrorAction SilentlyContinue |
+    Where-Object { $_.Path -like (Join-Path $repo 'build\*') -and $_.StartTime -ge $started } |
+    Stop-Process -Force
 if (-not $relay.HasExited) { $relay.Kill() }
 
 for ($i = 0; $i -lt $Players; $i++) {
