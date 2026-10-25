@@ -32,7 +32,7 @@ port traps.
 | `0988577`, `f30a713`, `81810c8` fix(recomp) switch slots | ed81613, 48268f5, c3e95e7 | cherry-picked; two upstream tests adjusted for the fallback's second path |
 | `2b73d81` perf(disasm) decode cache | (new) | fork copy of upstream PR #255 (issue #254): the callback probes share one decoder that decodes each instruction once; disasm 990 s -> 167 s here, output byte-identical. Drop at the next rebase once upstream has it |
 | `3e63e7b` fix(apu) named heap bytes | (new) | a page MmGetPhysicalAddress named from the heap is RAM only for the bytes of the live block that was named; the mix buffer's last page (shared with a named heap block) had read RAM and clicked once a lap. Upstream candidate (upstream's page map, #193) |
-| `957c1ba` fix(apu) sequencer restart | (new) | a frame that reads SECTL while DirectSound's SSL service routine has the sequencer stopped (150-400 us every 43 ms) waits instead of playing a silent slice; one that stays off past 5 ms gets lightweight frames as before (`mcpx_apu_frame_kind`, D200) |
+| `957c1ba` fix(apu) sequencer restart | (new) | a frame that reads SECTL while DirectSound's SSL service routine has the sequencer stopped (150-400 us every 43 ms) waits instead of playing a silent slice; one that stays off past 5 ms gets lightweight frames as before (`mcpx_apu_frame_kind`, D201) |
 
 ## Dropped
 
@@ -264,7 +264,7 @@ v0.13.0 + fork `e818066`, built 2026-10-20). Old and new alternated:
 - The Mac had the Windows click defect too: 401 per 330 s on `2b73d81`, nearly all on slice edges and in the
   first three minutes, as on Windows. The 10-22 Mac pass did not catch it: it counted mix-buffer holes. `3e63e7b`
   fixes it here as well; what is left is close to the old build.
-- **One-slice zero gaps, found and fixed (`957c1ba`, D200).** The migrated build handed the device about 1,300
+- **One-slice zero gaps, found and fixed (`957c1ba`, D201).** The migrated build handed the device about 1,300
   gaps per 330 s that the old build does not (1): each one 32-sample slice of exact zero (0.67 ms; a few are 64),
   starting on a slice edge, a median 8,300 frames (0.17 s) apart through the whole scene, mostly in quiet passages
   (peak about 700 in the ms either side; the step into each gap is about 300, under the click threshold), on all
