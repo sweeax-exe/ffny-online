@@ -35,6 +35,10 @@ bool draw(ImVec2 display);
 /* The last false from draw() was a match starting, not a press: nothing to keep from the game. */
 bool closed_for_match();
 
+/* RECOMP_TEST_ONLINE_GALLERY: the name of the page the gallery shows, for the overlay's captures;
+ * nullptr otherwise. */
+const char *shot_label();
+
 }
 #endif
 

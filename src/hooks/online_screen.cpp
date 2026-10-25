@@ -377,10 +377,10 @@ void door_shutter(ImDrawList *dl, const Frame &f, ImU32 tint = IM_COL32_WHITE)
         rect(dl, f, 350, 106, 226, 366, IM_COL32(40, 38, 26, 255));
 }
 
-// Behind the lists: the game's own main menu, which keeps running under the overlay (wall, lamp,
+// Without the launcher's pictures, behind the lists: the game's own main menu, which keeps running under the overlay (wall, lamp,
 // the door), with its poster wall and title covered and its door's text hidden by the shutter.
 // The room, the fighter choice and the vote use the whole picture instead (`full`).
-void backdrop(ImDrawList *dl, const Frame &f, ImVec2 display, bool full)
+void plain_backdrop(ImDrawList *dl, const Frame &f, ImVec2 display, bool full)
 {
     if (full) {
         dl->AddRectFilled(ImVec2(0, 0), display, IM_COL32(4, 4, 4, 255));   // opaque: no menu showing through
@@ -415,6 +415,302 @@ bool portrait(ImDrawList *dl, const Frame &f, int id, float x, float y, float w,
     if (!t.srv || t.w <= 0 || t.h <= 0) return false;
     float v = std::min(1.0f, (t.w / t.h) / (w * f.sx / (h * f.sy)));
     return image(dl, f, t, x, y, w, h, tint, ImVec2(0, 0), ImVec2(1, v));
+}
+
+// ---- the launcher's look: its picture behind every page, glass panels ---------------------------
+//
+// The launcher's background, blurred (ffny-branding/launcher-bg-blur.jpg, shipped with the setup),
+// covers the window behind the online pages: darkened, with a coloured light and a framing per page so
+// the pages do not all look the same, a vignette, a little film grain and a few of the launcher's
+// embers. It moves very slowly (a drift and a breath over a minute or so) and eases to the next
+// page's framing. The content sits on glass panels as in the launcher: a dark translucent fill over
+// the picture, a light top edge and a faint border, with corners that scale with the menu. Without
+// the picture the pages keep the plain near-black background (and the game's door over the main
+// menu), and the panels are the same dark glass over it. Nothing is blurred per frame: the light,
+// the vignette and the grain are small textures made once.
+
+Tex g_bg_blur;                      // the launcher's blurred picture (a texture of this device's own)
+Tex g_light, g_vignette, g_grain;   // made here: a soft round light, the vignette, film grain
+bool g_look_tried = false;
+
+// ffny-branding/<file> in the working directory (the game's folder: the source tree, or the installed
+// copy, where ffny-branding sits beside branding/) or up to four folders above the executable, as
+// the launcher finds it.
+bool find_ffny_branding(const wchar_t *file, std::wstring &out)
+{
+    out = std::wstring(L"ffny-branding\\") + file;
+    if (GetFileAttributesW(out.c_str()) != INVALID_FILE_ATTRIBUTES) return true;
+    wchar_t dir[MAX_PATH];
+    DWORD n = GetModuleFileNameW(nullptr, dir, MAX_PATH);
+    if (!n || n >= MAX_PATH) return false;
+    for (int up = 0; up <= 4; up++) {
+        wchar_t *slash = wcsrchr(dir, L'\\');
+        if (!slash) return false;
+        *slash = 0;
+        out = std::wstring(dir) + L"\\ffny-branding\\" + file;
+        if (GetFileAttributesW(out.c_str()) != INVALID_FILE_ATTRIBUTES) return true;
+    }
+    return false;
+}
+
+bool make_texture(const std::vector<unsigned char> &rgba, int w, int h, Tex &t)
+{
+    D3D11_TEXTURE2D_DESC desc = {};
+    desc.Width = (UINT)w;
+    desc.Height = (UINT)h;
+    desc.MipLevels = 1;
+    desc.ArraySize = 1;
+    desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    desc.SampleDesc.Count = 1;
+    desc.Usage = D3D11_USAGE_IMMUTABLE;
+    desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+    D3D11_SUBRESOURCE_DATA init = { rgba.data(), (UINT)w * 4, 0 };
+    ID3D11Texture2D *texture = nullptr;
+    if (!g_dev || FAILED(g_dev->CreateTexture2D(&desc, &init, &texture))) return false;
+    bool ok = SUCCEEDED(g_dev->CreateShaderResourceView(texture, nullptr, &t.srv));
+    texture->Release();
+    if (ok) { t.w = (float)w; t.h = (float)h; }
+    return ok;
+}
+
+void load_look()
+{
+    if (g_look_tried || !g_dev) return;
+    g_look_tried = true;
+    std::wstring path;
+    if (find_ffny_branding(L"launcher-bg-blur.jpg", path)) load_png(path, g_bg_blur);
+    // a soft round light: white, its alpha falling off like a Gaussian
+    const int L = 128;
+    std::vector<unsigned char> px((size_t)L * L * 4);
+    for (int y = 0; y < L; y++)
+        for (int x = 0; x < L; x++) {
+            float dx = (x + 0.5f) / L * 2 - 1, dy = (y + 0.5f) / L * 2 - 1, d2 = dx * dx + dy * dy;
+            float a = d2 >= 1 ? 0 : expf(-d2 * 3.2f) * (1 - d2);
+            unsigned char *p = &px[((size_t)y * L + x) * 4];
+            p[0] = p[1] = p[2] = 255;
+            p[3] = (unsigned char)(a * 255 + 0.5f);
+        }
+    make_texture(px, L, L, g_light);
+    // the vignette: black, clear in the middle, darker toward the corners
+    const int V = 256;
+    px.assign((size_t)V * V * 4, 0);
+    for (int y = 0; y < V; y++)
+        for (int x = 0; x < V; x++) {
+            float dx = (x + 0.5f) / V * 2 - 1, dy = (y + 0.5f) / V * 2 - 1;
+            float d = sqrtf(dx * dx * 0.85f + dy * dy * 1.0f);
+            float a = d < 0.45f ? 0 : std::min(1.0f, (d - 0.45f) / 0.95f);
+            a = a * a * (3 - 2 * a);
+            px[((size_t)y * V + x) * 4 + 3] = (unsigned char)(a * 255 + 0.5f);
+        }
+    make_texture(px, V, V, g_vignette);
+    // film grain: light and dark specks in equal measure, so it adds texture and no haze
+    const int N = 256;
+    px.assign((size_t)N * N * 4, 0);
+    unsigned seed = 0x13579BDu;
+    for (int i = 0; i < N * N; i++) {
+        seed = seed * 1664525u + 1013904223u;
+        float r = (float)(seed >> 8) * (1.0f / 16777216.0f);
+        bool light = r > 0.5f;
+        float a = fabsf(r - 0.5f) * 2;
+        unsigned char *p = &px[(size_t)i * 4];
+        p[0] = p[1] = p[2] = light ? 255 : 0;
+        p[3] = (unsigned char)(a * a * 255);
+    }
+    make_texture(px, N, N, g_grain);
+    fprintf(stderr, "[ONLINE] launcher picture %s\n", g_bg_blur.srv ? "found" : "missing: the plain background");
+}
+
+// How a page frames and lights the picture.
+struct Look {
+    float fx, fy;       // the point of the picture (0..1) brought to the middle of the window
+    float zoom;         // over the size that just covers the window
+    float dim;          // black over the picture, 0..1
+    float r, g, b;      // the light's colour (0..1)
+    float lx, ly;       // its centre, as fractions of the window
+    float size;         // its radius, in window heights
+    float strength;     // its opacity
+};
+
+enum LookId { LOOK_HUB, LOOK_LIST, LOOK_ROOM, LOOK_HILL, LOOK_UP, LOOK_WATCH, LOOK_FIGHTERS, LOOK_VOTE,
+              LOOK_STATS, LOOK_PLAYERS, LOOK_VOICE, LOOK_SEARCH, LOOK_OFFLINE, LOOK_MATCH };
+
+// The picture is a fighter's chest in the dark: the jaw and an earring at the top, the chain and a
+// gloved fist in the middle, a red watch below, a tattooed arm on the right.
+const Look k_looks[] = {
+    //  fx     fy    zoom  dim    r     g     b     lx    ly     size  strength
+    { 0.55f, 0.45f, 1.10f, 0.30f, 1.00f, 0.40f, 0.06f, 0.92f, 1.00f, 1.15f, 0.48f },  // hub: amber from below right
+    { 0.30f, 0.55f, 1.25f, 0.32f, 1.00f, 0.48f, 0.10f, 0.88f, 0.95f, 1.05f, 0.42f },  // room list, code, create
+    { 0.52f, 0.58f, 1.30f, 0.30f, 0.90f, 0.08f, 0.16f, 0.95f, 0.95f, 1.20f, 0.55f },  // a room: crimson
+    { 0.60f, 0.40f, 1.20f, 0.25f, 0.90f, 0.10f, 0.05f, 0.92f, 1.05f, 1.30f, 0.62f },  // the hill: red rising (the mock-up)
+    { 0.45f, 0.62f, 1.45f, 0.28f, 1.00f, 0.12f, 0.05f, 0.70f, 1.05f, 1.40f, 0.70f },  // you're up: the fist, hot red
+    { 0.78f, 0.30f, 1.35f, 0.32f, 0.25f, 0.45f, 1.00f, 0.05f, 0.05f, 1.10f, 0.42f },  // watching: a cold broadcast light
+    { 0.64f, 0.18f, 1.55f, 0.34f, 1.00f, 0.32f, 0.08f, 0.15f, 1.05f, 1.15f, 0.46f },  // fighter choice: the earring
+    { 0.32f, 0.45f, 1.20f, 0.32f, 1.00f, 0.60f, 0.18f, 0.50f, -0.12f, 1.10f, 0.40f }, // venue vote: light from above
+    { 0.68f, 0.78f, 1.50f, 0.32f, 1.00f, 0.74f, 0.22f, 0.08f, 0.00f, 1.10f, 0.42f },  // my stats: the watch, gold
+    { 0.90f, 0.55f, 1.40f, 0.32f, 0.55f, 0.30f, 1.00f, 1.00f, 0.30f, 1.05f, 0.42f },  // players: the tattoo, violet
+    { 0.95f, 0.38f, 1.65f, 0.32f, 0.60f, 0.25f, 1.00f, 0.95f, 0.25f, 0.95f, 0.45f },  // voice chat: the purple light
+    { 0.50f, 0.30f, 1.25f, 0.30f, 1.00f, 0.42f, 0.08f, 0.85f, 1.00f, 1.20f, 0.50f },  // ranked search
+    { 0.40f, 0.12f, 1.15f, 0.40f, 0.70f, 0.30f, 0.20f, 0.80f, 1.00f, 1.00f, 0.30f },  // connecting, offline
+    { 0.50f, 0.40f, 1.08f, 0.22f, 1.00f, 0.25f, 0.05f, 0.50f, 1.10f, 1.45f, 0.65f },  // match found
+};
+
+Look g_look;            // the look shown, easing toward the page's
+bool g_look_set = false;
+
+float ease_to(float cur, float target, float k) { return cur + (target - cur) * k; }
+
+// The picture behind a page, covering `a`..`b` of the window (the whole window, or the menu's left
+// part over the main menu); `display` is the window, which the framing refers to.
+void picture(ImDrawList *dl, ImVec2 display, ImVec2 a, ImVec2 b, LookId id)
+{
+    const Look &want = k_looks[id];
+    float dt = std::min(ImGui::GetIO().DeltaTime, 0.1f), k = 1.0f - expf(-dt * 4.0f);
+    if (!g_look_set) { g_look = want; g_look_set = true; }
+    float *cur = &g_look.fx;
+    const float *to = &want.fx;
+    for (int i = 0; i < (int)(sizeof(Look) / sizeof(float)); i++) cur[i] = ease_to(cur[i], to[i], k);
+    const Look &L = g_look;
+    float t = (float)ImGui::GetTime(), W = display.x, H = display.y;
+    dl->AddRectFilled(a, b, IM_COL32(4, 4, 4, 255));
+    if (!g_bg_blur.srv || g_bg_blur.w <= 0 || W <= 0 || H <= 0) return;
+    // cover the window, the focus in the middle as far as the picture allows; a slow drift and breath
+    float zoom = L.zoom * (1.0f + 0.03f * (0.5f - 0.5f * cosf(t * 6.2832f / 64.0f)));
+    float cover = std::max(W / g_bg_blur.w, H / g_bg_blur.h) * zoom;
+    float pw = g_bg_blur.w * cover, ph = g_bg_blur.h * cover;
+    float fx = L.fx + 0.015f * sinf(t * 6.2832f / 83.0f), fy = L.fy + 0.012f * cosf(t * 6.2832f / 97.0f);
+    float x0 = std::min(0.0f, std::max(W - pw, W * 0.5f - fx * pw));
+    float y0 = std::min(0.0f, std::max(H - ph, H * 0.5f - fy * ph));
+    ImVec2 uv0((a.x - x0) / pw, (a.y - y0) / ph), uv1((b.x - x0) / pw, (b.y - y0) / ph);
+    dl->AddImage((ImTextureID)(intptr_t)g_bg_blur.srv, a, b, uv0, uv1);
+    dl->AddRectFilled(a, b, IM_COL32(0, 0, 0, (int)(L.dim * 255)));
+    // the coloured light, then the vignette and the grain over everything
+    if (g_light.srv) {
+        ImVec2 c(L.lx * W, L.ly * H);
+        float r = L.size * H;
+        dl->PushClipRect(a, b, true);
+        dl->AddImage((ImTextureID)(intptr_t)g_light.srv, ImVec2(c.x - r, c.y - r), ImVec2(c.x + r, c.y + r), ImVec2(0, 0),
+                     ImVec2(1, 1), ImGui::GetColorU32(ImVec4(L.r, L.g, L.b, L.strength)));
+        dl->PopClipRect();
+    }
+}
+
+// Over the page's background (and under its panels): the vignette and the grain.
+void finish_picture(ImDrawList *dl, ImVec2 display, ImVec2 a, ImVec2 b)
+{
+    if (!g_bg_blur.srv) return;
+    dl->PushClipRect(a, b, true);
+    if (g_vignette.srv)
+        dl->AddImage((ImTextureID)(intptr_t)g_vignette.srv, ImVec2(0, 0), display, ImVec2(0, 0), ImVec2(1, 1),
+                     IM_COL32(0, 0, 0, 205));
+    if (g_grain.srv) {
+        // one texel a pixel, tiled (the overlay's sampler clamps); it shifts every few frames like film
+        int frame = (int)(ImGui::GetTime() * 12.0);
+        float ox = (float)((frame * 97) % 256), oy = (float)((frame * 61) % 256);
+        for (float y = a.y - oy; y < b.y; y += g_grain.h)
+            for (float x = a.x - ox; x < b.x; x += g_grain.w)
+                dl->AddImage((ImTextureID)(intptr_t)g_grain.srv, ImVec2(x, y), ImVec2(x + g_grain.w, y + g_grain.h),
+                             ImVec2(0, 0), ImVec2(1, 1), IM_COL32(255, 255, 255, 34));
+    }
+    dl->PopClipRect();
+}
+
+// A glass panel in the menu's space, as the launcher's cards: a dark translucent tint over the blurred
+// picture (the page's light and grain show through it, as frosted glass), a light line along the top
+// that fades to the sides, and a faint light border. `tint` and `alpha` colour it (a selected row, the player's own card).
+void glass(ImDrawList *dl, const Frame &f, float x, float y, float w, float h, float round = 10,
+           ImU32 tint = IM_COL32(10, 10, 13, 255), float alpha = 0.62f)
+{
+    ImVec2 a = f.p(x, y), b = f.p(x + w, y + h);
+    float r = std::min(round * f.s(), std::min(b.x - a.x, b.y - a.y) * 0.5f);
+    dl->AddRectFilled(a, b, with_alpha(tint, alpha), r);
+    float mid = (a.x + b.x) / 2, t0 = a.y + 1.0f, t1 = t0 + std::max(1.0f, 0.7f * f.s());
+    float inset = std::max(r, 4.0f);
+    ImU32 hi = IM_COL32(255, 255, 255, 70), clear = IM_COL32(255, 255, 255, 0);
+    if (mid - inset > a.x + inset) {
+        dl->AddRectFilledMultiColor(ImVec2(a.x + inset, t0), ImVec2(mid, t1), clear, hi, hi, clear);
+        dl->AddRectFilledMultiColor(ImVec2(mid, t0), ImVec2(b.x - inset, t1), hi, clear, clear, hi);
+    }
+    dl->AddRect(a, b, IM_COL32(255, 255, 255, 34), r, 0, std::max(1.0f, 0.55f * f.s()));
+}
+
+// A few of the launcher's embers rising on the right of the picture, slower and fainter than there.
+struct Spark { float x, y, vx, vy, age, life, size, heat, phase; };
+
+float spark_random()
+{
+    static unsigned seed = 0x5EED1234u;
+    seed = seed * 1664525u + 1013904223u;
+    return (float)(seed >> 8) * (1.0f / 16777216.0f);
+}
+
+void spark_spawn(Spark &p, float w, float h, float s, bool anywhere)
+{
+    p.x = w * (0.40f + 0.62f * spark_random());
+    p.y = anywhere ? h * (0.25f + 0.75f * spark_random()) : h + 8 * s;
+    p.vx = (2 + 7 * spark_random()) * s;
+    p.vy = -(12 + 30 * spark_random()) * s;
+    p.life = 5.0f + 7.0f * spark_random();
+    p.age = anywhere ? p.life * spark_random() : 0.0f;
+    p.size = (0.7f + 1.5f * spark_random() * spark_random()) * s;
+    p.heat = spark_random();
+    p.phase = 6.2832f * spark_random();
+}
+
+void sparks(ImDrawList *dl, ImVec2 display, ImVec2 a, ImVec2 b)
+{
+    static Spark e[48];
+    static bool started;
+    static ImVec2 seen;
+    float w = display.x, h = display.y, s = h / 960.0f;
+    if (!started || seen.x != w || seen.y != h) {
+        for (Spark &p : e) spark_spawn(p, w, h, s, true);
+        started = true;
+        seen = display;
+    }
+    float dt = std::min(ImGui::GetIO().DeltaTime, 0.05f), t = (float)ImGui::GetTime();
+    dl->PushClipRect(a, b, true);
+    for (Spark &p : e) {
+        p.age += dt;
+        p.x += (p.vx + sinf(t * 1.1f + p.phase) * 7 * s) * dt;
+        p.y += p.vy * dt;
+        if (p.age >= p.life || p.y < -10 * s || p.x > w + 10 * s) { spark_spawn(p, w, h, s, false); continue; }
+        float k = p.age / p.life;
+        float al = std::min(1.0f, p.age / 0.8f) * (k > 0.55f ? (1.0f - k) / 0.45f : 1.0f);
+        al *= (0.7f + 0.3f * sinf(t * 9.0f + p.phase * 3.0f)) * 0.75f;
+        float cool = k * 0.6f + (1.0f - p.heat) * 0.4f;
+        ImVec4 c(1.0f, 0.78f - 0.45f * cool, 0.38f - 0.32f * cool, 1.0f);
+        ImVec2 q(p.x, p.y);
+        dl->AddCircleFilled(q, p.size * 4.0f, ImGui::GetColorU32(ImVec4(c.x, c.y, c.z, 0.06f * al)), 10);
+        dl->AddCircleFilled(q, p.size * 1.8f, ImGui::GetColorU32(ImVec4(c.x, c.y, c.z, 0.20f * al)), 8);
+        dl->AddCircleFilled(q, p.size, ImGui::GetColorU32(ImVec4(1.0f, 0.92f - 0.4f * cool, 0.62f - 0.4f * cool, al)), 6);
+    }
+    dl->PopClipRect();
+}
+
+// Behind the pages. The full pages (the room, the fighter choice, the vote, the stats, and every page
+// over a screen other than the main menu) get the whole window. Over the game's own main menu (the
+// hub, the room list, the code, a new room's settings, voice chat while not in a room) the picture
+// covers the window too, and the door's text, which the game's door used to frame, sits on a glass
+// panel where the door was: the game's wall and door beside the launcher's picture looked like two
+// screens at once (docs/launcher-and-overlay.md, "The online screens' look"). Without the picture it
+// is the plain background of before, the game's door included.
+bool g_game_door = false;   // this frame shows the game's own door (no picture, a page over the main menu)
+
+void backdrop(ImDrawList *dl, const Frame &f, ImVec2 display, bool full, LookId id)
+{
+    load_look();
+    g_game_door = !full && !g_bg_blur.srv;
+    if (!g_bg_blur.srv) { plain_backdrop(dl, f, display, full); return; }
+    ImVec2 a(0, 0), b = display;
+    picture(dl, display, a, b, id);
+    sparks(dl, display, a, b);
+    finish_picture(dl, display, a, b);
+}
+
+// Where the game's door was: a glass panel for the door's text (unless the game's door shows).
+void door_panel(ImDrawList *dl, const Frame &f)
+{
+    if (!g_game_door) glass(dl, f, 346, 84, 234, 360, 14, IM_COL32(10, 10, 13, 255), 0.58f);
 }
 
 // ---- input --------------------------------------------------------------------------------------
@@ -459,6 +755,83 @@ struct State {
     int code_pos = 0;
     uint32_t watch_hidden = 0;      // King of the Hill: the fight whose watching screen B closed
 } S;
+
+// ---- the test gallery ----------------------------------------------------------------------------
+//
+// RECOMP_TEST_ONLINE_GALLERY=<ms>: the online screens show every page in turn, <ms> each, with
+// sample players, rooms, a hill and statistics instead of the server's, and take no input. It
+// connects to nothing. With RECOMP_OVERLAY_SHOT_DIR the captures carry the page's name, so a
+// design change can be looked at page by page (before and after) without three copies and a relay.
+// The pages read the lobby through the wrappers below, which answer from the sample in the gallery.
+
+struct Gallery {
+    enum NetplayState state = NETPLAY_LOBBY;
+    bool in_lobby = true;
+    NetRoom room = {};
+    std::vector<NetRoomInfo> rooms;
+    std::vector<NetPlayer> players;
+    int queue = NETQUEUE_SEARCHING;
+    enum AccountState account = ACCOUNT_IN;
+    std::string stats;
+    const char *page = nullptr;     // the page shown, for the captures' names
+} G;
+
+bool gallery_on()
+{
+    static int ms = -1;
+    if (ms < 0) {
+        const char *e = getenv("RECOMP_TEST_ONLINE_GALLERY");
+        ms = e && atoi(e) > 0 ? atoi(e) : 0;
+    }
+    return ms > 0;
+}
+
+enum NetplayState net_state() { return gallery_on() ? G.state : netplay_state(); }
+bool net_in_lobby() { return gallery_on() ? G.in_lobby : netplay_in_lobby() != 0; }
+void lobby_room(NetRoom *r)
+{
+    if (gallery_on()) *r = G.room;
+    else netplay_lobby_room(r);
+}
+int lobby_rooms(NetRoomInfo *out, int max, unsigned *version)
+{
+    if (!gallery_on()) return netplay_lobby_rooms(out, max, version);
+    int n = std::min(max, (int)G.rooms.size());
+    for (int i = 0; i < n; i++) out[i] = G.rooms[i];
+    *version = 1;
+    return n;
+}
+int lobby_players(NetPlayer *out, int max, int *online, int *rooms)
+{
+    if (!gallery_on()) return netplay_lobby_players(out, max, online, rooms);
+    int n = std::min(max, (int)G.players.size());
+    for (int i = 0; out && i < n; i++) out[i] = G.players[i];
+    if (online) *online = 142;
+    if (rooms) *rooms = 12;
+    return n;
+}
+int lobby_queue(int *waited, int *searching, char *why, int size)
+{
+    if (!gallery_on()) return netplay_lobby_queue(waited, searching, why, size);
+    *waited = 37;
+    *searching = 4;
+    if (size > 0) why[0] = 0;
+    return G.queue;
+}
+int lobby_caps() { return gallery_on() ? NETPLAY_CAP_KOTH : netplay_lobby_caps(); }
+enum AccountState acc_state() { return gallery_on() ? G.account : account_state(); }
+bool stats_busy() { return gallery_on() ? false : account_stats_busy() != 0; }
+bool stats_text(char *out, int size)
+{
+    if (!gallery_on()) return account_stats(out, size) != 0;
+    snprintf(out, (size_t)size, "%s", G.stats.c_str());
+    return true;
+}
+void status_text(char *out, int size)
+{
+    if (gallery_on()) snprintf(out, (size_t)size, "Online as Ann. Ping 38 ms.");
+    else netplay_status(out, size);
+}
 
 // Room codes use these characters (no 0/O, 1/I), as the server makes them.
 const char CODE_CHARS[] = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -505,7 +878,7 @@ const char *mode_name(int type)
 // The relay answered CAPS with King of the Hill (an older relay never offers it).
 bool koth_offered()
 {
-    int caps = netplay_lobby_caps();
+    int caps = lobby_caps();
     return caps > 0 && (caps & NETPLAY_CAP_KOTH);
 }
 
@@ -635,12 +1008,13 @@ bool ranked_shown()
 void online_count(ImDrawList *dl, const Frame &f)
 {
     int online = -1, rooms = 0;
-    netplay_lobby_players(nullptr, 0, &online, &rooms);
+    lobby_players(nullptr, 0, &online, &rooms);
     if (online < 0) return;
     char line[64];
     snprintf(line, sizeof(line), "%d PLAYER%s ONLINE  -  %d ROOM%s", online, online == 1 ? "" : "S", rooms,
              rooms == 1 ? "" : "S");
-    text(dl, f, g_hand, 14, 606, 430, ORANGE, line, RIGHT, 1.0f);    // beside the status line, clear of the menu's hints
+    // beside the status line, clear of the menu's hints (and of the door's panel)
+    text(dl, f, g_hand, 14, 606, g_game_door ? 430 : 450, ORANGE, line, RIGHT, 1.0f);
 }
 
 // ---- players online ----
@@ -649,7 +1023,7 @@ void draw_players(ImDrawList *dl, const Frame &f, const Pad &pad)
 {
     static NetPlayer list[40];
     int online = -1, rooms = 0;
-    int n = netplay_lobby_players(list, 40, &online, &rooms);
+    int n = lobby_players(list, 40, &online, &rooms);
     if (pad.x) netplay_lobby_who();
     page_title(dl, f, "PLAYERS ONLINE");
     online_count(dl, f);
@@ -657,18 +1031,18 @@ void draw_players(ImDrawList *dl, const Frame &f, const Pad &pad)
         text(dl, f, g_title, 20, 320, 200, CREAM, "ASKING THE SERVER...", CENTER, 1.4f);
         return;
     }
-    dl->AddRectFilled(f.p(40, 84), f.p(606, 404), IM_COL32(0, 0, 0, 150));
+    glass(dl, f, 40, 78, 566, 334);
     static const char *const states[] = { "IN THE MENU", "IN A ROOM", "FIGHTING" };
     const ImU32 colours[] = { CREAM, ORANGE, GREEN };
     for (int i = 0; i < n; i++) {
-        float x = i < 20 ? 52 : 330, y = 94 + (i % 20) * 15.5f;
+        float x = i < 20 ? 52 : 330, y = 90 + (i % 20) * 15.0f;
         int st = list[i].state >= 0 && list[i].state <= 2 ? list[i].state : 0;
         text(dl, f, g_title, 13, x, y, WHITE, list[i].name, LEFT, 1.1f);
         text(dl, f, g_title, 10, x + 262, y + 2, colours[st], states[st], RIGHT, 1.0f);
     }
     if (n == 0) text(dl, f, g_title, 14, 320, 200, GREY, "Nobody else with this version right now.", CENTER, 1.0f);
     if (online > n)
-        text(dl, f, g_title, 10, 592, 392, GREY, "and others on other versions or not shown", RIGHT, 1.0f);
+        text(dl, f, g_title, 10, 592, 394, GREY, "and others on other versions or not shown", RIGHT, 1.0f);
 }
 
 void draw_hub(ImDrawList *dl, const Frame &f, const Pad &pad)
@@ -707,7 +1081,7 @@ void draw_hub(ImDrawList *dl, const Frame &f, const Pad &pad)
     online_count(dl, f);
     // Online fights need a Discord sign-in: matches against signed-out players did not count, about
     // half of them after the build-23 rules (2026-10-24). Y signs in from here (the browser opens).
-    enum AccountState acc = account_state();
+    enum AccountState acc = acc_state();
     bool signed_in = acc == ACCOUNT_IN;
     // A newer build is out: this one starts no new matches (the relay refuses them too, since build 26).
     int newer = 0;
@@ -719,21 +1093,27 @@ void draw_hub(ImDrawList *dl, const Frame &f, const Pad &pad)
     if (outdated) {
         char line[96];
         snprintf(line, sizeof(line), "BUILD %d IS OUT: UPDATE IN THE LAUNCHER TO PLAY ONLINE", newer);
-        text(dl, f, g_title, 14, 50, 60, ORANGE, line, LEFT, 1.2f);
+        text(dl, f, g_title, 14, 50, 56, ORANGE, line, LEFT, 1.2f);
     } else if (!signed_in) {
         const char *line = acc == ACCOUNT_WAITING ? "FINISH SIGNING IN WITH DISCORD IN YOUR BROWSER..."
                          : acc == ACCOUNT_CHECKING ? "CHECKING YOUR DISCORD SIGN-IN..."
                          : "SIGN IN WITH DISCORD TO FIGHT ONLINE";
-        text(dl, f, g_title, 14, 50, 60, ORANGE, line, LEFT, 1.2f);
-        if (acc == ACCOUNT_OUT || acc == ACCOUNT_FAILED) hint(dl, f, 50 + text_width(f, g_title, 14, line) + 14, 59, "y", "SIGN IN");
+        text(dl, f, g_title, 14, 50, 56, ORANGE, line, LEFT, 1.2f);
+        if (acc == ACCOUNT_OUT || acc == ACCOUNT_FAILED) hint(dl, f, 50 + text_width(f, g_title, 14, line) + 14, 55, "y", "SIGN IN");
         if (pad.y && (acc == ACCOUNT_OUT || acc == ACCOUNT_FAILED)) {
             account_sign_in();
             say("Your browser opens: sign in with Discord, then come back.");
         }
     }
+    {   // the items on one glass panel
+        float bottom = count > 7 ? 84 + (count - 1) * 41 + 39 : count > 6 ? 84 + (count - 1) * 45 + 42 : 88 + (count - 1) * 53 + 46;
+        glass(dl, f, 36, 74, 290, bottom - 74 + 10);
+    }
     for (int k = 0; k < count; k++) {
         int i = shown[k];
-        float x = 50, y = count > 6 ? 84 + k * 45 : 88 + k * 53, w = 262, h = count > 6 ? 42 : 46;
+        // eight items (ranked shown) sit closer, so the panel still ends above the hints
+        float x = 50, y = count > 7 ? 84 + k * 41 : count > 6 ? 84 + k * 45 : 88 + k * 53, w = 262;
+        float h = count > 7 ? 39 : count > 6 ? 42 : 46;
         if (mouse_in(f, x, y, w, h)) S.hub_sel = i;
         bool sel = S.hub_sel == i;
         if (sel) selector(dl, f, x, y, w, h);
@@ -742,6 +1122,7 @@ void draw_hub(ImDrawList *dl, const Frame &f, const Pad &pad)
         if (mouse_click(f, x, y, w, h)) const_cast<Pad &>(pad).a = true;
     }
     // the door: what the chosen item does
+    door_panel(dl, f);
     door_text(dl, f, &tex("ui/online_icon.png"), items[S.hub_sel], subs[S.hub_sel], descs[S.hub_sel]);
     if (S.hub_sel == 0 && mode_count) {
         int type = quick_modes[S.quick_mode];
@@ -772,7 +1153,7 @@ void draw_hub(ImDrawList *dl, const Frame &f, const Pad &pad)
             }
             break;
         case 1:
-            if (account_state() != ACCOUNT_IN) { say("Sign in with Discord in the launcher to play ranked."); break; }
+            if (acc_state() != ACCOUNT_IN) { say("Sign in with Discord in the launcher to play ranked."); break; }
             S.ranked_pick = true;
             S.page = FIGHTERS;
             {
@@ -823,7 +1204,7 @@ std::vector<std::string> split_bar(const std::string &v)
 bool read_stats(StatsView &v)
 {
     static char buf[16384];
-    if (!account_stats(buf, sizeof(buf))) return false;
+    if (!stats_text(buf, sizeof(buf))) return false;
     for (char *line = buf; line && *line;) {
         char *end = strchr(line, '\n');
         if (end) *end = 0;
@@ -868,7 +1249,7 @@ void draw_stats(ImDrawList *dl, const Frame &f, const Pad &pad)
 {
     if (pad.x) account_fetch_stats_page(S.stats_page);
     page_title(dl, f, "MY STATS");
-    enum AccountState acc = account_state();
+    enum AccountState acc = acc_state();
     StatsView v;
     bool have = (acc == ACCOUNT_IN || acc == ACCOUNT_CHECKING) && read_stats(v);
     if (acc != ACCOUNT_IN && acc != ACCOUNT_CHECKING) {
@@ -880,15 +1261,17 @@ void draw_stats(ImDrawList *dl, const Frame &f, const Pad &pad)
         return;
     }
     if (!have) {
-        text(dl, f, g_title, 22, 320, 200, CREAM, account_stats_busy() ? "LOADING..." : "NO STATS YET", CENTER, 1.6f);
-        if (!account_stats_busy())
+        text(dl, f, g_title, 22, 320, 200, CREAM, stats_busy() ? "LOADING..." : "NO STATS YET", CENTER, 1.6f);
+        if (!stats_busy())
             text(dl, f, g_hand, 14, 320, 236, ORANGE, "PRESS X TO TRY AGAIN", CENTER, 1.0f);
         return;
     }
     char num[32];
     // left: the main fighter and the record
-    if (v.favorite < 0 || !portrait(dl, f, v.favorite, 46, 84, 110, 165))
-        dl->AddRectFilled(f.p(46, 84), f.p(156, 249), IM_COL32(20, 20, 20, 200));
+    glass(dl, f, 34, 78, 286, 328);
+    rect(dl, f, 44, 86, 114, 155, IM_COL32(0, 0, 0, 120), 4);
+    if (v.favorite < 0 || !portrait(dl, f, v.favorite, 46, 88, 110, 151))
+        rect(dl, f, 46, 88, 110, 151, IM_COL32(20, 20, 20, 200), 3);
     text(dl, f, g_title, 22, 168, 92, CREAM, v.name.c_str(), LEFT, 1.6f);
     if (!v.favorite_name.empty()) {
         text(dl, f, g_hand, 13, 170, 124, ORANGE, "MAIN", LEFT, 1.0f);
@@ -900,43 +1283,43 @@ void draw_stats(ImDrawList *dl, const Frame &f, const Pad &pad)
     text(dl, f, g_title, 20, 170, 188, v.rank ? CREAM : GREY, num, LEFT, 1.4f);
     if (!v.rank) text(dl, f, g_title, 11, 170, 214, GREY, "matches to get on it", LEFT, 1.0f);
     snprintf(num, sizeof(num), "%d", v.wins);
-    big_number(dl, f, 78, 262, num, "WINS", GREEN);
+    big_number(dl, f, 78, 246, num, "WINS", GREEN);
     snprintf(num, sizeof(num), "%d", v.losses);
-    big_number(dl, f, 160, 262, num, "LOSSES", IM_COL32(235, 90, 80, 255));
+    big_number(dl, f, 160, 246, num, "LOSSES", IM_COL32(235, 90, 80, 255));
     snprintf(num, sizeof(num), "%d%%", v.win_rate);
-    big_number(dl, f, 248, 262, num, "WIN RATE", CREAM);
+    big_number(dl, f, 248, 246, num, "WIN RATE", CREAM);
     if (v.ranked_games)
         snprintf(num, sizeof(num), "STREAK %d   BEST %d   RANKED %d", v.streak, v.best, v.ranked_rating);
     else
         snprintf(num, sizeof(num), "STREAK %d   BEST %d", v.streak, v.best);
-    text(dl, f, g_title, 13, 46, 324, WHITE, num, LEFT, 1.1f);
-    // last fights
-    text(dl, f, g_hand, 13, 46, 344, ORANGE, "LAST FIGHTS", LEFT, 1.0f);
-    if (v.recent.empty()) text(dl, f, g_title, 12, 46, 362, GREY, "Play online while signed in.", LEFT, 1.0f);
+    text(dl, f, g_title, 13, 46, 306, WHITE, num, LEFT, 1.1f);
+    // last fights: the three lines end well inside the panel (bottom 406)
+    text(dl, f, g_hand, 13, 46, 326, ORANGE, "LAST FIGHTS", LEFT, 1.0f);
+    if (v.recent.empty()) text(dl, f, g_title, 12, 46, 344, GREY, "Play online while signed in.", LEFT, 1.0f);
     for (size_t i = 0; i < v.recent.size() && i < 3; i++) {
         const auto &r = v.recent[i];
         if (r.size() < 4) continue;
         bool win = r[0] == "win", draw = r[0] == "draw";
         std::string line = r[1] + " vs " + (r[2].empty() ? "?" : r[2]);
-        float y = 360 + i * 18;
+        float y = 342 + i * 17;
         text(dl, f, g_title, 13, 46, y, win ? GREEN : draw ? GREY : IM_COL32(235, 90, 80, 255), win ? "W" : draw ? "D" : "L",
              LEFT, 1.1f);
         text(dl, f, g_title, 12, 64, y + 1, CREAM, line.c_str(), LEFT, 1.0f, 250);
     }
     // right: the leaderboard, ten places a page (left/right or LB/RB turn the page)
-    if (!account_stats_busy()) {
+    if (!stats_busy()) {
         int want = v.board_page;
         if ((pad.left || pad.lb) && v.board_page > 0) want = v.board_page - 1;
         if ((pad.right || pad.rb) && v.board_page + 1 < v.board_pages) want = v.board_page + 1;
         if (want != v.board_page) { S.stats_page = want; account_fetch_stats_page(want); }
     }
-    dl->AddRectFilled(f.p(330, 84), f.p(606, 404), IM_COL32(0, 0, 0, 150));
+    glass(dl, f, 330, 78, 276, 328);
     text(dl, f, g_title, 20, 344, 92, ORANGE, "LEADERBOARD", LEFT, 1.4f);
     if (v.board_pages > 1) {
         char pg[32];
         snprintf(pg, sizeof(pg), "%s  %d / %d  %s", v.board_page > 0 ? "<" : " ", v.board_page + 1, v.board_pages,
                  v.board_page + 1 < v.board_pages ? ">" : " ");
-        text(dl, f, g_title, 14, 468, 386, account_stats_busy() ? GREY : CREAM, pg, CENTER, 1.1f);
+        text(dl, f, g_title, 14, 468, 382, stats_busy() ? GREY : CREAM, pg, CENTER, 1.1f);
     }
     text(dl, f, g_title, 10, 592, 100, GREY, "MOST WINS", RIGHT, 1.0f);
     if (v.board.empty())
@@ -945,9 +1328,9 @@ void draw_stats(ImDrawList *dl, const Frame &f, const Pad &pad)
     for (size_t i = 0; i < v.board.size() && i < 10; i++) {
         const auto &e = v.board[i];
         if (e.size() < 5) continue;
-        float y = 124 + i * 27;
+        float y = 120 + i * 26;
         bool me = e[1] == v.name;
-        if (me) dl->AddRectFilled(f.p(334, y - 3), f.p(602, y + 21), IM_COL32(255, 168, 26, 60));
+        if (me) rect(dl, f, 336, y - 3, 264, 24, IM_COL32(255, 168, 26, 60), 4);
         ImU32 col = e[0] == "1" ? IM_COL32(255, 205, 60, 255) : me ? CREAM : WHITE;
         text(dl, f, g_title, 16, 362, y, col, e[0].c_str(), RIGHT, 1.2f);
         text(dl, f, g_title, 15, 372, y + 1, col, e[1].c_str(), LEFT, 1.2f);
@@ -962,9 +1345,9 @@ void draw_rooms(ImDrawList *dl, const Frame &f, const Pad &pad)
 {
     NetRoomInfo rooms[32];
     unsigned version;
-    int n = netplay_lobby_rooms(rooms, 32, &version);
+    int n = lobby_rooms(rooms, 32, &version);
     unsigned long long now = GetTickCount64();
-    if (now - S.last_list > 3000) { netplay_lobby_list(0xFF); S.last_list = now; }
+    if (!gallery_on() && now - S.last_list > 3000) { netplay_lobby_list(0xFF); S.last_list = now; }
     if (pad.up && n) S.rooms_sel = (S.rooms_sel + n - 1) % n;
     if (pad.down && n) S.rooms_sel = (S.rooms_sel + 1) % n;
     if (S.rooms_sel >= n) S.rooms_sel = n ? n - 1 : 0;
@@ -972,6 +1355,8 @@ void draw_rooms(ImDrawList *dl, const Frame &f, const Pad &pad)
     if (pad.y) { S.page = CODE; S.code_pos = 0; return; }
 
     page_title(dl, f, "FIND A ROOM");
+    if (n) glass(dl, f, 36, 76, 290, (std::min(n, 6) - 1) * 52 + 44 + 20);
+    else glass(dl, f, 36, 112, 290, 76);
     if (!n) {
         text(dl, f, g_title, 16, 60, 130, GREY, "No open rooms right now.");
         text(dl, f, g_hand, 14, 60, 156, ORANGE, "Quick match, or open one yourself.", LEFT, 0.8f);
@@ -998,6 +1383,7 @@ void draw_rooms(ImDrawList *dl, const Frame &f, const Pad &pad)
                  NETPLAY_IS_KOTH(r.mode) ? (open ? "Winner stays on. Press A to join the line." : "Full.") :
                  r.phase == 1 ? "Voting on the venue right now." : r.phase == 2 ? "A match is on." :
                  open ? "Open: press A to join." : "Full.");
+        door_panel(dl, f);
         image_fit(dl, f, tex(mode_logo(r.mode)), 383, 150, 160, 34);
         door_text(dl, f, nullptr, r.name, mode_name(r.mode), players);
     }
@@ -1027,11 +1413,12 @@ void draw_code(ImDrawList *dl, const Frame &f, const Pad &pad)
 
     page_title(dl, f, "JOIN BY CODE");
     text(dl, f, g_hand, 15, 54, 70, ORANGE, "The code is shown in your friend's room.", LEFT, 0.8f, 270);
+    door_panel(dl, f);
     door_text(dl, f, nullptr, "JOIN BY CODE", "SIX CHARACTERS",
               "Up and down change a character, left and right move. Or type it. A joins the room.");
     for (int i = 0; i < 6; i++) {
         float x = 70 + i * 46, y = 150;
-        rect(dl, f, x, y, 40, 56, IM_COL32(15, 15, 15, 220));
+        glass(dl, f, x, y, 40, 56, 6, i == S.code_pos ? IM_COL32(40, 30, 22, 255) : IM_COL32(10, 10, 13, 255), 0.7f);
         char c[2] = { S.code[i], 0 };
         text(dl, f, g_stencil, 34, x + 20, y + 10, i == S.code_pos ? CREAM : GREY, c, CENTER, 1.4f);
         if (i == S.code_pos) {
@@ -1043,6 +1430,81 @@ void draw_code(ImDrawList *dl, const Frame &f, const Pad &pad)
     }
     if (pad.a) { netplay_lobby_join(S.code); say(std::string("Joining ") + S.code + "..."); S.page = HUB; }
     if (pad.b) S.page = ROOMS;
+}
+
+// ---- the venues of a room's pool, on the create page's glass panel ----
+
+// One venue: its card from the game's art (a tilted photo with the venue's logo under it, on a clear
+// ground), cut to the drawn part (a 1.2:1 box) on a dark backing, with its name banner under it; the
+// card and the banner as large as the cell allows, centred in it.
+void venue_tile(ImDrawList *dl, const Frame &f, int venue, float x, float y, float w, float h, float alpha,
+                bool lit = false)
+{
+    const float banner = h > 200 ? 24 : h > 120 ? 18 : h > 60 ? 13 : 0, pad = 3;
+    // the card's size in menu units, keeping 1.2:1 in pixels (a stretched picture scales x and y apart)
+    float k = std::min((w - 2 * pad) * f.sx / 1.2f, (h - banner - 2 * pad) * f.sy);
+    float cw = k * 1.2f / f.sx, ch = k / f.sy;
+    float bw = cw + 2 * pad, bh = ch + 2 * pad, bx = x + (w - bw) / 2, by = y + (h - bh - banner) / 2;
+    rect(dl, f, bx, by, bw, bh, IM_COL32(0, 0, 0, (int)(110 * alpha)), 6);
+    if (lit) dl->AddRect(f.p(bx, by), f.p(bx + bw, by + bh), with_alpha(ORANGE, 0.8f * alpha), 6 * f.s(), 0, 1.5f * f.s());
+    const Tex &t = venue_tex(venue);
+    ImU32 tint = IM_COL32(255, 255, 255, (int)(255 * alpha));
+    if (!image(dl, f, t, bx + pad, by + pad, cw, ch, tint, ImVec2(0.02f, 0.04f), ImVec2(0.98f, 0.84f)))
+        text(dl, f, g_title, 13, bx + bw / 2, by + bh / 2 - 8, with_alpha(CREAM, alpha), online_venue_name(venue), CENTER,
+             1.0f, bw - 8);
+    if (banner > 0) {
+        const Tex &name = venue_name_tex(venue);
+        if (name.srv) image_fit(dl, f, name, x, by + bh + 1, w, banner - 2, tint);
+        else text(dl, f, g_hand, banner - 4, x + w / 2, by + bh + 1, with_alpha(ORANGE, alpha), online_venue_name(venue),
+                  CENTER, 0.8f, w);
+    }
+}
+
+// The pool on the create page, filling the box under a caption (the preset and the count): one large
+// card; two to four in a 2x2 grid; five or six in a 2x3 grid where they stay large enough; more (every
+// venue: 22), or six where the grid would be small, as a showcase: one large card crossfading to the
+// next every three seconds over a strip of the next ones and the count.
+void venue_showcase(ImDrawList *dl, const Frame &f, const NetRoomSettings &s, float x, float y, float w, float h)
+{
+    int n = std::min(s.pool_count, 32);
+    if (n <= 0) return;
+    int p = preset_of(s);
+    char caption[64];
+    snprintf(caption, sizeof(caption), "%s  -  %d VENUE%s", upper(p >= 0 ? presets()[p].name : "Custom").c_str(), n,
+             n == 1 ? "" : "S");
+    text(dl, f, g_hand, 13, x + w / 2, y, ORANGE, caption, CENTER, 1.0f);
+    y += 18;
+    h -= 18;
+    if (n == 1) {
+        venue_tile(dl, f, s.pool[0], x, y, w, h, 1.0f);
+        return;
+    }
+    int rows = n <= 4 ? 2 : 3;
+    float gap = 6, cw = (w - gap) / 2, rh = (h - gap * (rows - 1)) / rows;
+    if (n <= 4 || (n <= 6 && rh - 13 >= 60)) {
+        for (int k = 0; k < n && k < rows * 2; k++) {
+            bool alone = k == n - 1 && n % 2;      // an odd last one in the middle of its row
+            float cx = alone ? x + (w - cw) / 2 : x + (k % 2) * (cw + gap);
+            venue_tile(dl, f, s.pool[k], cx, y + (k / 2) * (rh + gap), cw, rh, 1.0f);
+        }
+        return;
+    }
+    // the showcase
+    const float strip = 30, period = 3.0f, fade = 0.6f;
+    float t = (float)ImGui::GetTime(), phase = fmodf(t, period);
+    int cur = (int)(t / period) % n, next = (cur + 1) % n;
+    float big_h = h - strip - 8;
+    float mix = phase > period - fade ? (phase - (period - fade)) / fade : 0.0f;
+    venue_tile(dl, f, s.pool[cur], x, y, w, big_h, 1.0f - mix);
+    if (mix > 0) venue_tile(dl, f, s.pool[next], x, y, w, big_h, mix);
+    // the strip: the shown card and the next ones, then where in the pool it is
+    const int shown = 5;
+    float sw = 30, sgap = (w - 50 - shown * sw) / (shown - 1), sy = y + h - strip;
+    for (int k = 0; k < shown && k < n; k++)
+        venue_tile(dl, f, s.pool[(cur + k) % n], x + k * (sw + sgap), sy, sw, strip, k == 0 ? 1.0f : 0.55f, k == 0);
+    char count[16];
+    snprintf(count, sizeof(count), "%d / %d", cur + 1, n);
+    text(dl, f, g_title, 12, x + w, sy + 8, GREY, count, RIGHT, 0.8f);
 }
 
 // ---- room settings (new room, or the host's changes) ----
@@ -1104,7 +1566,7 @@ void draw_settings(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom
         float x = 50, y = 96 + i * row_step, w = 270, h = row_h;
         if (mouse_in(f, x, y, w, h)) S.settings_sel = i;
         bool sel = S.settings_sel == i;
-        rect(dl, f, x, y, w, h, sel ? IM_COL32(25, 22, 18, 235) : IM_COL32(15, 15, 15, 170));
+        glass(dl, f, x, y, w, h, 7, sel ? IM_COL32(44, 32, 22, 255) : IM_COL32(10, 10, 13, 255), sel ? 0.78f : 0.6f);
         if (sel) selector(dl, f, x, y, w, h);
         if (row == R_OPEN) {
             text(dl, f, g_title, 20, x + w / 2, y + h / 2 - 11, sel ? CREAM : GREY, S.settings_edit ? "SAVE" : "OPEN THE ROOM", CENTER);
@@ -1127,20 +1589,21 @@ void draw_settings(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom
         text(dl, f, g_title, 17, x + 12, y + 19, sel ? WHITE : GREY, value.c_str());
         if (sel) { text(dl, f, g_title, 17, x + w - 26, y + h / 2 - 10, ORANGE, "<", CENTER); text(dl, f, g_title, 17, x + w - 10, y + h / 2 - 10, ORANGE, ">", CENTER); }
     }
-    // the door: the mode's logo (King of the Hill: its rules) and a few of the venues
+    // the door: the mode's logo (King of the Hill: its rules), then the venues filling the panel
+    door_panel(dl, f);
+    float venues_y;
     if (koth) {
-        text(dl, f, g_title, 24, 463, 96, CREAM, "KING OF THE HILL", CENTER, 1.6f);
-        text(dl, f, g_hand, 13, 463, 126, ORANGE, "WINNER STAYS ON", CENTER, 1.0f);
-        text(dl, f, g_body, 13, 372, 146, WHITE,
+        text(dl, f, g_title, 24, 463, 92, CREAM, "KING OF THE HILL", CENTER, 1.6f);
+        text(dl, f, g_hand, 13, 463, 120, ORANGE, "WINNER STAYS ON", CENTER, 1.0f);
+        text(dl, f, g_body, 12, 362, 138, WHITE,
              "TWO FIGHT ONE ON ONE, THE OTHERS WAIT IN LINE. THE LOSER GOES TO THE BACK. "
-             "WHEN YOU'RE CALLED, PRESS A WITHIN 20 SECONDS.", LEFT, 1.0f, 182);
+             "WHEN YOU'RE CALLED, PRESS A WITHIN 20 SECONDS.", LEFT, 1.0f, 202);
+        venues_y = 196;
     } else {
         image_fit(dl, f, tex(mode_logo(s.mode)), 372, 96, 170, 36);
+        venues_y = 142;
     }
-    for (int k = 0; k < s.pool_count && k < 6; k++) {
-        float vx = 380 + (k % 2) * 80, vy = (koth ? 236 : 150) + (k / 2) * (koth ? 56 : 80);
-        image_fit(dl, f, venue_tex(s.pool[k]), vx, vy, koth ? 52 : 74, koth ? 52 : 74);
-    }
+    venue_showcase(dl, f, s, 356, venues_y, 214, 438 - venues_y);
     if (pad.a && rows_of[S.settings_sel] == R_OPEN) {
         if (S.settings_edit) { netplay_lobby_settings(&s); S.page = HUB; say("Settings saved; everyone readies again."); }
         else { netplay_lobby_create(&s); say("Opening the room..."); S.page = HUB; }
@@ -1172,13 +1635,14 @@ void draw_fighters(ImDrawList *dl, const Frame &f, const Pad &pad, bool *chosen,
     page_title(dl, f, "CHOOSE FIGHTER");
     const OnlineFighter &cur = list[S.fighter_sel];
     // the chosen fighter, large, with name and style
-    rect(dl, f, 40, 78, 172, 300, IM_COL32(10, 10, 10, 200));
+    glass(dl, f, 36, 74, 180, 308);
     if (!portrait(dl, f, cur.id, 46, 84, 160, 240))
         text(dl, f, g_title, 26, 126, 180, with_alpha(CREAM, 0.6f), cur.name, CENTER, 1.4f, 150);
     text(dl, f, g_hand, 22, 126, 330, ORANGE, cur.name, CENTER, 1.2f);
     text(dl, f, g_title, 13, 126, 356, WHITE, cur.style, CENTER);
     // the grid
-    float gx = 228, gy = 78, cw = 52, ch = 76;
+    float gx = 228, gy = 82, cw = 52, ch = 76;
+    glass(dl, f, gx - 8, gy - 8, cols * (cw + 4) + 12, rows * (ch + 6) + 26);
     for (int r = 0; r < rows; r++)
         for (int c = 0; c < cols; c++) {
             int i = (S.fighter_top + r) * cols + c;
@@ -1186,7 +1650,7 @@ void draw_fighters(ImDrawList *dl, const Frame &f, const Pad &pad, bool *chosen,
             float x = gx + c * (cw + 4), y = gy + r * (ch + 6);
             if (mouse_in(f, x, y, cw, ch)) S.fighter_sel = i;
             bool sel = i == S.fighter_sel;
-            rect(dl, f, x, y, cw, ch, IM_COL32(12, 12, 12, 220));
+            rect(dl, f, x, y, cw, ch, IM_COL32(0, 0, 0, 150), 3);
             if (!portrait(dl, f, list[i].id, x + 1, y + 1, cw - 2, ch - 2, sel ? IM_COL32_WHITE : IM_COL32(150, 150, 150, 255)))
                 text(dl, f, g_body, 9, x + 3, y + 30, GREY, list[i].name, LEFT, 0, cw - 4);
             if (sel) selector(dl, f, x, y, cw, ch);
@@ -1205,14 +1669,15 @@ void draw_ranked(ImDrawList *dl, const Frame &f, const Pad &pad)
 {
     int waited = 0, searching = 0;
     char why[96];
-    int st = netplay_lobby_queue(&waited, &searching, why, sizeof(why));
+    int st = lobby_queue(&waited, &searching, why, sizeof(why));
     int fighter = recomp_settings_get("online", "fighter", 55);
     page_title(dl, f, "RANKED MATCH");
     online_count(dl, f);
-    rect(dl, f, 40, 78, 172, 300, IM_COL32(10, 10, 10, 200));
+    glass(dl, f, 36, 74, 180, 308);
     if (!portrait(dl, f, fighter, 46, 84, 160, 240))
         text(dl, f, g_title, 26, 126, 180, with_alpha(CREAM, 0.6f), online_fighter_name(fighter), CENTER, 1.4f, 150);
     text(dl, f, g_hand, 22, 126, 330, ORANGE, online_fighter_name(fighter), CENTER, 1.2f);
+    glass(dl, f, 226, 86, 378, 206);
 
     float hx = 54;
     if (st == NETQUEUE_REFUSED || st == NETQUEUE_NONE) {
@@ -1229,7 +1694,7 @@ void draw_ranked(ImDrawList *dl, const Frame &f, const Pad &pad)
     const char *head = st == NETQUEUE_FOUND ? "OPPONENT FOUND!" : st == NETQUEUE_SEARCHING ? "SEARCHING" : "CHECKING YOUR ACCOUNT";
     text(dl, f, g_hand, 26, 240, 104, st == NETQUEUE_FOUND ? GREEN : ORANGE, head, LEFT, 1.0f);
     if (st == NETQUEUE_SEARCHING) {
-        rect(dl, f, 240, 148, 340, 4, IM_COL32(40, 40, 40, 255));
+        rect(dl, f, 240, 148, 340, 4, IM_COL32(255, 255, 255, 30), 2);
         rect(dl, f, 240 + 300 * (t < 0.5f ? t * 2 : 2 - t * 2), 148, 40, 4, ORANGE);
         char line[64];
         snprintf(line, sizeof(line), "%d:%02d", waited / 60, waited % 60);
@@ -1262,14 +1727,14 @@ void draw_vote(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
     char secs[16];
     snprintf(secs, sizeof(secs), "%d", (left + 999) / 1000);
     text(dl, f, g_title, 34, 590, 22, left < 5000 ? RED : CREAM, secs, RIGHT, 1.6f);
-    rect(dl, f, 50, 70, 540, 5, IM_COL32(40, 40, 40, 255));
-    rect(dl, f, 50, 70, 540 * (left / 15000.0f), 5, ORANGE);
+    rect(dl, f, 50, 70, 540, 5, IM_COL32(255, 255, 255, 30), 2.5f);
+    rect(dl, f, 50, 70, 540 * (left / 15000.0f), 5, ORANGE, 2.5f);
     float w = 170, gap = 15, x0 = 320 - (n * w + (n - 1) * gap) / 2;
     for (int i = 0; i < n; i++) {
         float x = x0 + i * (w + gap), y = 100;
         if (mouse_in(f, x, y, w, 290)) S.vote_sel = i;
         bool sel = i == S.vote_sel, mine = me && me->voted == i;
-        rect(dl, f, x, y, w, 290, mine ? IM_COL32(60, 8, 14, 235) : IM_COL32(12, 12, 12, 220));
+        glass(dl, f, x, y, w, 290, 10, mine ? IM_COL32(56, 14, 20, 255) : IM_COL32(10, 10, 13, 255), mine ? 0.68f : 0.62f);
         const Tex &photo = venue_tex(r.candidates[i]);
         if (!image(dl, f, photo, x + 5, y + 5, w - 10, w - 10, sel || mine ? IM_COL32_WHITE : IM_COL32(170, 170, 170, 255)))
             text(dl, f, g_title, 15, x + w / 2, y + 70, CREAM, online_venue_name(r.candidates[i]), CENTER, 1.2f, w - 10);
@@ -1396,14 +1861,14 @@ void draw_watch(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r
     for (int k = 0; k < 2; k++) {
         int slot = sides[k];
         float x = k == 0 ? 70 : 410, y = 84, w = 160, ph = 206;
-        rect(dl, f, x, y, w, ph + 64, IM_COL32(12, 12, 12, 220));
+        glass(dl, f, x, y, w, ph + 64);
         int fighter = slot >= 0 ? slot_fighter(r, slot) : -1;
         if (slot >= 0 && h.watch_seed && h.watch_seed == h.seed)      // the fight's own pick, from WATCH
             fighter = h.watch_slots[0] == slot ? h.watch_fighters[0] : h.watch_slots[1] == slot ? h.watch_fighters[1] : fighter;
         if (fighter < 0 || !portrait(dl, f, fighter, x + 5, y + 5, w - 10, ph - 10))
             text(dl, f, g_title, 40, x + w / 2, y + 80, GREY, "?", CENTER);
         if (slot >= 0 && slot == h.king) {
-            crown(dl, f, x + w / 2, y - 2, 44);
+            crown(dl, f, x + w / 2, y - 17, 40);
             char streak[32];
             snprintf(streak, sizeof(streak), "KING  x%d", h.streak);
             text(dl, f, g_title, 13, x + w - 8, y + 10, GOLD, streak, RIGHT, 1.2f);
@@ -1426,7 +1891,7 @@ void draw_watch(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r
         shown++;
     }
     if (!shown) line = "NOBODY ELSE IN THE LINE";
-    rect(dl, f, 40, 384, 560, 24, IM_COL32(0, 0, 0, 170));
+    glass(dl, f, 40, 382, 560, 28, 8);
     text(dl, f, g_title, 14, 52, 388, WHITE, line.c_str(), LEFT, 1.0f);
     if (v.next == r.you) text(dl, f, g_hand, 18, 588, 386, ORANGE, "YOU'RE UP NEXT", RIGHT, 1.2f);
     text(dl, f, g_title, 11, 320, 362, GREY, "The fight runs on the fighters' PCs. The result comes here when it is over.",
@@ -1444,8 +1909,8 @@ void draw_up(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r, c
     bool ready = v.my_state == NETLINE_READY;
     int other = v.pair[0] == r.you ? v.pair[1] : v.pair[0];
     float pulse = 0.65f + 0.35f * sinf((float)(GetTickCount64() % 1000) / 1000.0f * 6.2832f);
-    dl->AddRectFilled(f.p(0, 0), f.p(640, 480), IM_COL32(0, 0, 0, 215));
-    rect(dl, f, 40, 70, 172, 300, IM_COL32(10, 10, 10, 220));
+    glass(dl, f, 36, 66, 180, 308);
+    glass(dl, f, 226, 60, 384, 316);
     if (!portrait(dl, f, fighter, 46, 76, 160, 240))
         text(dl, f, g_title, 26, 126, 170, with_alpha(CREAM, 0.6f), online_fighter_name(fighter), CENTER, 1.4f, 150);
     text(dl, f, g_hand, 20, 126, 324, ORANGE, online_fighter_name(fighter), CENTER, 1.2f);
@@ -1460,9 +1925,9 @@ void draw_up(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r, c
     if (r.you == r.hill.king) text(dl, f, g_hand, 16, 242, 176, GOLD, "DEFEND THE HILL", LEFT, 1.0f);
     char secs[16];
     snprintf(secs, sizeof(secs), "%d", (v.ms_left + 999) / 1000);
-    text(dl, f, g_title, 64, 600, 206, v.ms_left < 6000 ? RED : CREAM, secs, RIGHT, 2.0f);
-    rect(dl, f, 242, 290, 358, 6, IM_COL32(40, 40, 40, 255));
-    rect(dl, f, 242, 290, 358 * std::min(1.0f, v.ms_left / 20000.0f), 6, v.ms_left < 6000 ? RED : ORANGE);
+    text(dl, f, g_title, 64, 594, 206, v.ms_left < 6000 ? RED : CREAM, secs, RIGHT, 2.0f);
+    rect(dl, f, 242, 290, 352, 6, IM_COL32(255, 255, 255, 30), 3);
+    rect(dl, f, 242, 290, 352 * std::min(1.0f, v.ms_left / 20000.0f), 6, v.ms_left < 6000 ? RED : ORANGE, 3);
     const char *say_line = ready ? "Waiting for your opponent to press A..."
                                  : "Press A now: not ready in time sends you to the back of the line.";
     text(dl, f, g_hand, 16, 242, 304, ORANGE, say_line, LEFT, 0.8f, 360);
@@ -1505,7 +1970,8 @@ void draw_hill(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
     text(dl, f, g_title, 14, 590, 58, ORANGE, code, RIGHT);
 
     // left: the line, numbered from the top
-    dl->AddRectFilled(f.p(40, 80), f.p(330, 384), IM_COL32(0, 0, 0, 160));
+    glass(dl, f, 36, 76, 296, 318, 12, IM_COL32(10, 10, 13, 255), 0.65f);
+    glass(dl, f, 346, 78, 252, 316, 12, IM_COL32(10, 10, 13, 255), 0.5f);
     text(dl, f, g_hand, 14, 52, 84, ORANGE, "THE LINE", LEFT, 1.0f);
     char cap[32];
     snprintf(cap, sizeof(cap), "%d / %d", h.valid ? h.count : r.player_count, r.settings.max);
@@ -1516,8 +1982,8 @@ void draw_hill(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
         float x = 46, y = 104 + i * 28, w = 278, rh = 26;
         bool me = e.slot == r.you, king = e.slot == h.king && i == 0;
         bool up = e.slot == v.pair[0] || e.slot == v.pair[1];
-        if (up) rect(dl, f, x, y, w, rh, e.state == NETLINE_FIGHTING ? IM_COL32(70, 10, 18, 230) : IM_COL32(60, 40, 8, 230), 2);
-        else if (me) rect(dl, f, x, y, w, rh, IM_COL32(255, 168, 26, 40), 2);
+        if (up) rect(dl, f, x, y, w, rh, e.state == NETLINE_FIGHTING ? IM_COL32(110, 14, 26, 170) : IM_COL32(120, 80, 14, 150), 5);
+        else if (me) rect(dl, f, x, y, w, rh, IM_COL32(255, 168, 26, 40), 5);
         ImU32 col = e.state == NETLINE_AWAY ? with_alpha(GREY, 0.7f) : me ? ORANGE : CREAM;
         if (king) crown(dl, f, x + 12, y + rh / 2, 18);
         else {
@@ -1545,13 +2011,13 @@ void draw_hill(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
     }
 
     // right: the king, with the crown and the streak
-    float kx = 412, ky = 96;
+    float kx = 412, ky = 100;
     if (h.valid && h.king >= 0) {
         int kf = slot_fighter(r, h.king);
-        rect(dl, f, kx, ky, 102, 152, IM_COL32(12, 12, 12, 220));
+        rect(dl, f, kx, ky, 102, 152, IM_COL32(0, 0, 0, 150), 4);
         if (kf < 0 || !portrait(dl, f, kf, kx + 3, ky + 3, 96, 146)) text(dl, f, g_title, 34, kx + 51, ky + 50, GREY, "?", CENTER);
         crown(dl, f, kx + 51, ky - 4, 40);
-        text(dl, f, g_hand, 20, 463, 254, h.king == r.you ? ORANGE : CREAM, slot_name(r, h.king), CENTER, 1.2f);
+        text(dl, f, g_hand, 20, 463, 256, h.king == r.you ? ORANGE : CREAM, slot_name(r, h.king), CENTER, 1.2f);
         char streak[48];
         snprintf(streak, sizeof(streak), h.streak == 1 ? "%d WIN IN A ROW" : "%d WINS IN A ROW", h.streak);
         text(dl, f, g_title, 15, 463, 280, GOLD, streak, CENTER, 1.2f);
@@ -1594,7 +2060,7 @@ void draw_hill(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
     else if (v.next == r.you)
         text(dl, f, g_hand, 18, 463, 368, ORANGE, "YOU'RE UP NEXT", CENTER, 1.2f);
 
-    float hx = 54, hy = 392;
+    float hx = 54, hy = 402;
     if (v.my_state == NETLINE_AWAY) hx += hint(dl, f, hx, hy, "a", "I'M BACK");
     hx += hint(dl, f, hx, hy, "x", "CHOOSE FIGHTER");
     bool fight_on = h.valid && h.phase == NETHILL_FIGHTING && !fighting_me;
@@ -1643,7 +2109,7 @@ void draw_room(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
     float w = 128, gap = 10, x0 = 320 - (places * w + (places - 1) * gap) / 2;
     for (int i = 0; i < places; i++) {
         float x = x0 + i * (w + gap), y = 86;
-        rect(dl, f, x, y, w, 270, IM_COL32(12, 12, 12, 215));
+        glass(dl, f, x, y, w, 270, 10, i < r.player_count && r.players[i].slot == r.you ?IM_COL32(44, 30, 20, 255) : IM_COL32(10, 10, 13, 255), 0.62f);
         if (i >= r.player_count) {
             text(dl, f, g_hand, 15, x + w / 2, y + 110, with_alpha(ORANGE, 0.6f), "WAITING", CENTER, 0.8f);
             text(dl, f, g_title, 11, x + w / 2, y + 134, GREY, "an open place", CENTER, 0.6f);
@@ -1659,7 +2125,7 @@ void draw_room(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
         text(dl, f, g_title, 11, x + w / 2, y + 222, GREY, known ? online_fighter_name(shown) : "choosing", CENTER, 0.6f);
         if (p.slot == r.host) text(dl, f, g_title, 10, x + 6, y + 6, ORANGE, "HOST", LEFT, 1.0f);
         if (p.ready) {
-            rect(dl, f, x + 14, y + 240, w - 28, 22, with_alpha(RED, 0.9f), 2);
+            rect(dl, f, x + 14, y + 240, w - 28, 22, with_alpha(RED, 0.9f), 5);
             text(dl, f, g_title, 15, x + w / 2, y + 242, WHITE, "READY", CENTER, 0.8f);
         }
     }
@@ -1730,13 +2196,14 @@ void draw_voice(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r
 
     page_title(dl, f, "VOICE CHAT");
     std::string key = setting_text("voice_key", "T");
-    // a full King of the Hill room has nine others: the rows get closer together
-    float row_step = rows > 9 ? 300.0f / rows : 39, row_h = row_step - 5;
+    // a room's players add rows (a full King of the Hill room nine): from eight rows on they get closer
+    // together, so the rows and the microphone's meter end above the hints
+    float row_step = rows > 7 ? 300.0f / rows : 39, row_h = row_step - 5;
     for (int i = 0; i < rows; i++) {
         float x = 50, y = 80 + i * row_step, w = 270, h = row_h;
         if (mouse_in(f, x, y, w, h)) S.voice_sel = i;
         bool sel = S.voice_sel == i;
-        rect(dl, f, x, y, w, h, sel ? IM_COL32(25, 22, 18, 235) : IM_COL32(15, 15, 15, 170));
+        glass(dl, f, x, y, w, h, 7, sel ? IM_COL32(44, 32, 22, 255) : IM_COL32(10, 10, 13, 255), sel ? 0.78f : 0.6f);
         if (sel) selector(dl, f, x, y, w, h);
         if (i == rows - 1) {
             text(dl, f, g_title, row_h < 30 ? 13 : 18, x + w / 2, y + (row_h < 30 ? (row_h - 14) / 2 : 7), sel ? CREAM : GREY, "BACK", CENTER);
@@ -1775,6 +2242,7 @@ void draw_voice(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r
         if (sel) { text(dl, f, g_title, 17, x + w - 26, y + row_h / 2 - 9, ORANGE, "<", CENTER); text(dl, f, g_title, 17, x + w - 10, y + row_h / 2 - 9, ORANGE, ">", CENTER); }
     }
     // the door: how it works, and the microphone's level
+    door_panel(dl, f);
     door_text(dl, f, &tex("ui/online_icon.png"), "VOICE CHAT", "TALK IN ROOMS AND FIGHTS",
               "Everyone in your room hears you. Hold the key, or the controller button you pick here, to talk. "
               "Turn a player to 0 to mute them.");
@@ -1782,8 +2250,8 @@ void draw_voice(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r
     float meter = voice_mic_meter(), my = 80 + rows * row_step + 6;
     if (meter >= 0.0f) {
         text(dl, f, g_title, 10, 52, my, GREY, meter > 0.95f ? "YOUR MICROPHONE: TOO LOUD" : "YOUR MICROPHONE");
-        rect(dl, f, 52, my + 14, 266, 9, IM_COL32(40, 40, 40, 255));
-        rect(dl, f, 52, my + 14, 266 * meter, 9, meter > 0.95f ? RED : GREEN);
+        rect(dl, f, 52, my + 14, 266, 9, IM_COL32(255, 255, 255, 30), 4);
+        rect(dl, f, 52, my + 14, 266 * meter, 9, meter > 0.95f ? RED : GREEN, 4);
     } else {
         text(dl, f, g_title, 10, 52, my, GREY, r.in_room ? "Press the talk key once: your microphone's level shows here."
                                                        : "Your microphone's level shows here in a room.");
@@ -1794,15 +2262,198 @@ void draw_voice(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r
 void draw_status(ImDrawList *dl, const Frame &f)
 {
     char status[256];
-    netplay_status(status, sizeof(status));
+    status_text(status, sizeof(status));
     text(dl, f, g_body, 11, 54, 452, GREY, status, LEFT, 0.6f, 270);
     NetRoom r;
-    netplay_lobby_room(&r);
+    lobby_room(&r);
     unsigned long long now = GetTickCount64();
     const char *note = nullptr;
     if (r.error[0]) note = r.error;
     else if (now < S.note_until) note = S.note.c_str();
     if (note) text(dl, f, g_hand, 14, 54, 428, r.error[0] ? RED : ORANGE, note, LEFT, 0.8f, 270);
+}
+
+// The gallery's sample: a room of `count` with names and fighters, this PC in slot 0 and hosting.
+NetRoom sample_room(int mode, int max, int count)
+{
+    static const char *const names[] = { "Ann", "Ben", "Cal", "Dee", "Eve", "Fox", "Gus", "Hal", "Ivy", "Jay" };
+    const auto &list = roster();
+    NetRoom r = {};
+    r.in_room = 1;
+    snprintf(r.code, sizeof(r.code), "GTEEAQ");
+    r.you = 0;
+    r.host = 0;
+    snprintf(r.settings.name, sizeof(r.settings.name), "Ann's room");
+    r.settings.is_public = 1;
+    r.settings.mode = mode;
+    r.settings.max = max;
+    apply_preset(r.settings, 1);
+    r.player_count = count;
+    for (int i = 0; i < count && i < 10; i++) {
+        NetRoomPlayer &p = r.players[i];
+        p.slot = i;
+        snprintf(p.name, sizeof(p.name), "%s", names[i]);
+        p.ready = i % 2;
+        p.fighter = list.empty() ? 0xFF : list[(i * 7 + 3) % list.size()].id;
+        p.voted = -1;
+    }
+    r.received = GetTickCount64();
+    r.version = 1;
+    return r;
+}
+
+// Which page the gallery shows now, and the sample it shows with it.
+void gallery_step()
+{
+    static const char *const pages[] = { "connecting", "offline", "hub", "hub-signin", "hub-voice", "rooms", "code",
+                                         "create", "create-3", "create-6", "create-1", "create-koth",
+                                         "create-koth-3", "create-koth-6", "create-koth-1",
+                                         "ranked", "voice", "stats", "players", "fighters", "room", "vote", "hill",
+                                         "up", "watch", "room-voice", "match" };
+    const int count = (int)(sizeof(pages) / sizeof(pages[0]));
+    static unsigned long long start;
+    static int ms;
+    unsigned long long now = GetTickCount64();
+    if (!start) {
+        start = now;
+        ms = atoi(getenv("RECOMP_TEST_ONLINE_GALLERY"));
+        const auto &list = roster();
+        static const char *const room_names[] = { "Ann's room", "Uptown Brawl", "Hill of Pain", "Late night FFA", "Dee's rules" };
+        static const int room_modes[] = { 0, 0, NETPLAY_MODE_KOTH_RANDOM, 2, 1 };
+        for (int i = 0; i < 5; i++) {
+            NetRoomInfo info = {};
+            snprintf(info.code, sizeof(info.code), "ROOM%02d", i);
+            snprintf(info.name, sizeof(info.name), "%s", room_names[i]);
+            info.mode = room_modes[i];
+            info.max = NETPLAY_IS_KOTH(info.mode) ? 8 : i == 3 ? 4 : 2;
+            info.players = i == 1 ? 2 : 1 + i % 3;
+            info.phase = i == 1 ? 2 : 0;
+            G.rooms.push_back(info);
+        }
+        static const char *const who[] = { "Ann", "Ben", "Cal", "Dee", "Eve", "Fox", "Gus", "Hal", "Ivy", "Jay",
+                                           "Kaze", "Lou", "Mo", "Nia", "Oz", "Pia", "Quin", "Rex", "Sol", "Tia",
+                                           "Uma", "Vic" };
+        for (int i = 0; i < (int)(sizeof(who) / sizeof(who[0])); i++) {
+            NetPlayer p = {};
+            snprintf(p.name, sizeof(p.name), "%s", who[i]);
+            p.state = i % 3;
+            G.players.push_back(p);
+        }
+        const OnlineFighter *main = list.empty() ? nullptr : &list[5 % list.size()];
+        char buf[2048];
+        snprintf(buf, sizeof(buf),
+                 "name=Ann\nmatches=42\nwins=27\nlosses=14\ndraws=1\nwin_rate=64\nstreak=3\nbest_streak=7\nrank=12\nmin=3\n"
+                 "favorite=%d\nfavorite_name=%s\nranked=1520|10\n"
+                 "recent=win|Ann|Ben|0\nrecent=loss|Ann|Cal|0\nrecent=win|Ann|Dee|0\n"
+                 "board=1|Kaze|88|20|0\nboard=2|Rex|71|33|0\nboard=3|Nia|64|12|0\nboard=4|Jay|58|41|0\n"
+                 "board=5|Sol|51|27|0\nboard=6|Oz|47|30|0\nboard=7|Vic|40|22|0\nboard=8|Mo|38|19|0\n"
+                 "board=9|Tia|31|25|0\nboard=10|Ann|27|14|0\nboard_page=0\nboard_pages=4\n",
+                 main ? main->id : -1, main ? main->name : "");
+        G.stats = buf;
+    }
+    int index = (int)((now - start) / (unsigned long long)ms) % count;
+    const char *page = pages[index];
+    G.page = page;
+    G.state = NETPLAY_LOBBY;
+    G.in_lobby = true;
+    G.room = NetRoom();
+    G.queue = NETQUEUE_SEARCHING;
+    G.account = ACCOUNT_IN;
+    S.watch_hidden = 0;
+    S.note_until = 0;
+    S.settings_edit = false;
+    std::string p = page;
+    if (p == "connecting") { G.state = NETPLAY_CONNECTING; G.in_lobby = false; }
+    else if (p == "offline") { G.state = NETPLAY_FAILED; G.in_lobby = false; }
+    else if (p == "hub") { S.page = HUB; S.hub_sel = 0; S.quick_mode = 0; }
+    else if (p == "hub-signin") { S.page = HUB; S.hub_sel = 3; G.account = ACCOUNT_OUT; }
+    else if (p == "hub-voice") { S.page = HUB; S.hub_sel = HUB_VOICE; }
+    else if (p == "rooms") { S.page = ROOMS; S.rooms_sel = 1; }
+    else if (p == "code") { S.page = CODE; snprintf(S.code, sizeof(S.code), "GTE4AQ"); S.code_pos = 3; }
+    else if (p.compare(0, 6, "create") == 0) {     // every venue; -3, -6: two presets; -1: one venue
+        S.page = SETTINGS;
+        default_settings(S.settings);
+        snprintf(S.settings.name, sizeof(S.settings.name), "Ann's room");
+        if (p.find("koth") != std::string::npos) { S.settings.mode = NETPLAY_MODE_KOTH_RANDOM; S.settings.max = 8; }
+        char last = p.back();
+        if (last == '3') apply_preset(S.settings, 1);
+        else if (last == '6') apply_preset(S.settings, 2);
+        else if (last == '1') S.settings.pool_count = 1;
+        S.settings_sel = 0;
+    }
+    else if (p == "ranked") S.page = RANKED;
+    else if (p == "voice") { S.page = VOICE; S.voice_sel = 1; }
+    else if (p == "stats") { S.page = STATS; S.stats_page = 0; }
+    else if (p == "players") S.page = PLAYERS;
+    else if (p == "fighters") { S.page = FIGHTERS; S.fighter_sel = 9; S.fighter_top = 0; }
+    else if (p == "room") { S.page = HUB; G.room = sample_room(2, 4, 3); }
+    else if (p == "vote") {
+        S.page = HUB;
+        G.room = sample_room(0, 2, 2);
+        G.room.phase = 1;
+        G.room.candidate_count = 3;
+        G.room.candidates[0] = 1; G.room.candidates[1] = 6; G.room.candidates[2] = 11;
+        G.room.votes[0] = 1; G.room.votes[2] = 1;
+        G.room.players[0].voted = 0;
+        G.room.ms_left = 9000;
+        S.vote_sel = 0;
+    } else if (p == "hill" || p == "up" || p == "watch") {
+        S.page = HUB;
+        NetRoom &r = G.room = sample_room(NETPLAY_MODE_KOTH_RANDOM, 10, 9);
+        NetHill &h = r.hill;
+        h.valid = 1;
+        h.king = 2;
+        h.streak = 3;
+        h.ms_left = 14000;
+        h.received = r.received;
+        h.last_winner = 2; h.last_loser = 3; h.last_how = NETHOW_WON;
+        h.count = 9;     // a long line: it must stay inside its panel
+        const int order[9] = { 2, 1, 0, 3, 4, 5, 6, 7, 8 };
+        for (int i = 0; i < 9; i++) { h.line[i].slot = order[i]; h.line[i].state = NETLINE_WAITING; h.line[i].wins = i == 0 ? 5 : i == 1 ? 2 : i == 3 ? 1 : 0; }
+        h.line[4].state = NETLINE_AWAY;
+        if (p == "hill") { h.phase = NETHILL_CALLING; h.line[0].state = NETLINE_READY; h.line[1].state = NETLINE_CALLED; }
+        else if (p == "up") {
+            h.phase = NETHILL_CALLING;
+            h.line[0].state = NETLINE_READY;
+            std::swap(h.line[1], h.line[2]);    // this PC (slot 0) is called against the king
+            h.line[1].state = NETLINE_CALLED;
+        } else {
+            h.phase = NETHILL_FIGHTING;
+            h.line[0].state = h.line[1].state = NETLINE_FIGHTING;
+            h.seed = h.watch_seed = 1234;
+            h.watch_venue = 6;
+            h.watch_slots[0] = 1; h.watch_slots[1] = 2;
+            h.watch_fighters[0] = r.players[1].fighter; h.watch_fighters[1] = r.players[2].fighter;
+        }
+    } else if (p == "room-voice") { S.page = VOICE; S.voice_sel = 5; G.room = sample_room(0, 4, 4); }
+    else if (p == "match") { G.state = NETPLAY_CONNECTED; G.room = sample_room(0, 2, 2); G.room.phase = 2; }
+}
+
+// The look of the page draw() shows (the same choices, in the same order).
+LookId page_look(const NetRoom &room, enum NetplayState st)
+{
+    if (st == NETPLAY_CONNECTED && net_in_lobby()) return LOOK_MATCH;
+    if (st == NETPLAY_CONNECTING || st == NETPLAY_FAILED || st == NETPLAY_OFF || !net_in_lobby()) return LOOK_OFFLINE;
+    switch (S.page) {
+    case FIGHTERS: return LOOK_FIGHTERS;
+    case SETTINGS: case CODE: return LOOK_LIST;
+    case PLAYERS: if (!room.in_room) return LOOK_PLAYERS; break;
+    case STATS: if (!room.in_room) return LOOK_STATS; break;
+    case RANKED: if (!room.in_room) return LOOK_SEARCH; break;
+    case VOICE: if (!(room.in_room && room.phase != 0)) return LOOK_VOICE; break;
+    default: break;
+    }
+    if (room.in_room) {
+        if (!NETPLAY_IS_KOTH(room.settings.mode)) return room.phase == 1 ? LOOK_VOTE : LOOK_ROOM;
+        HillView v = hill_view(room);
+        const NetHill &h = room.hill;
+        bool fighting_me = v.my_state == NETLINE_FIGHTING;
+        if (room.phase == 1 && fighting_me) return LOOK_VOTE;
+        if (h.valid && h.phase == NETHILL_FIGHTING && !fighting_me && S.watch_hidden != (h.seed ? h.seed : 1)) return LOOK_WATCH;
+        if (h.valid && h.phase == NETHILL_CALLING && (v.my_state == NETLINE_CALLED || v.my_state == NETLINE_READY)) return LOOK_UP;
+        return LOOK_HILL;
+    }
+    return S.page == ROOMS ? LOOK_LIST : LOOK_HUB;
 }
 
 } // namespace
@@ -1850,12 +2501,14 @@ void draw_decor(ImDrawList *dl, ImVec2 display)
 
 bool closed_for_match() { return g_closed_for_match; }
 
+const char *shot_label() { return gallery_on() ? G.page : nullptr; }
+
 bool take_open_request()
 {
     if (!g_open_req.exchange(0)) return false;
     S = State();
     S.opened = GetTickCount64();
-    connect_if_needed();
+    if (!gallery_on()) connect_if_needed();
     return true;
 }
 
@@ -1867,10 +2520,14 @@ bool draw(ImVec2 display)
     Pad pad = read_pad();
     // the first frame takes no choice: the A that opened the screens is still down
     if (GetTickCount64() - S.opened < 250) pad = Pad();
+    if (gallery_on()) {
+        gallery_step();
+        pad = Pad();
+    }
 
     NetRoom room;
-    netplay_lobby_room(&room);
-    enum NetplayState st = netplay_state();
+    lobby_room(&room);
+    enum NetplayState st = net_state();
     // Over any screen but the main menu (after a match: the battle menu) every page is full-screen.
     {   // who is online: asked every five seconds while the online screens are up
         static unsigned long long asked;
@@ -1879,12 +2536,13 @@ bool draw(ImVec2 display)
     }
     backdrop(dl, f, display, S.page == FIGHTERS || S.page == STATS || S.page == PLAYERS || room.in_room ||
              st == NETPLAY_CONNECTED ||
-             !g_menu_up.load());
+             !g_menu_up.load(), page_look(room, st));
 
     // a match was agreed: show it, then give the menu back to the game, which starts it
-    if (st == NETPLAY_CONNECTED && netplay_in_lobby()) {
+    if (st == NETPLAY_CONNECTED && net_in_lobby()) {
         if (!S.start_seen) S.start_seen = GetTickCount64();
         page_title(dl, f, "MATCH FOUND");
+        glass(dl, f, 170, 176, 300, 100, 14);
         text(dl, f, g_hand, 22, 320, 200, ORANGE, "Get ready to fight!", CENTER, 1.2f);
         text(dl, f, g_title, 14, 320, 240, WHITE, "The match starts by itself.", CENTER);
         g_closed_for_match = GetTickCount64() - S.start_seen >= 1800;
@@ -1893,19 +2551,23 @@ bool draw(ImVec2 display)
     S.start_seen = 0;
     g_closed_for_match = false;
 
-    if (st == NETPLAY_CONNECTING || (!netplay_in_lobby() && st != NETPLAY_FAILED)) {
+    if (st == NETPLAY_CONNECTING || (!net_in_lobby() && st != NETPLAY_FAILED)) {
         page_title(dl, f, "ONLINE");
+        glass(dl, f, 36, 104, 290, 52);
         text(dl, f, g_hand, 20, 54, 120, ORANGE, "Connecting...", LEFT, 1.0f);
+        door_panel(dl, f);
         door_text(dl, f, &tex("ui/online_icon.png"), "ONLINE", "CONNECTING", "To the FFNY Online server.");
         hint(dl, f, 54, 392, "b", "BACK");
         return !pad.b;
     }
     if (st == NETPLAY_FAILED || st == NETPLAY_OFF) {
         char status[256];
-        netplay_status(status, sizeof(status));
+        status_text(status, sizeof(status));
         page_title(dl, f, "ONLINE");
+        glass(dl, f, 36, 96, 290, 120);
         text(dl, f, g_hand, 20, 54, 110, RED, "No connection", LEFT, 1.0f);
         text(dl, f, g_title, 14, 54, 145, WHITE, status, LEFT, 0.8f, 265);
+        door_panel(dl, f);
         door_text(dl, f, &tex("ui/online_icon.png"), "OFFLINE", "NO CONNECTION",
                   "Check the internet connection, then press A to try again.");
         float hx = 54;
@@ -1981,7 +2643,12 @@ bool draw(ImVec2 display)
         hx += hint(dl, f, hx, 420, "y", "JOIN BY CODE");
         hint(dl, f, hx, 420, "b", "BACK");
     } else {
-        draw_hub(dl, f, pad);      // the menu's own "A SELECT  B BACK" stays visible above
+        draw_hub(dl, f, pad);      // the menu's own "A SELECT  B BACK" stays visible above while its door shows
+        if (!g_game_door) {
+            float hx = 54;
+            hx += hint(dl, f, hx, 424, "a", "SELECT");
+            hint(dl, f, hx, 424, "b", "BACK");
+        }
         if ((pad.a && S.hub_sel == HUB_LEAVE) || pad.b) keep = false;
     }
     draw_status(dl, f);
@@ -1999,6 +2666,7 @@ void draw_decor(ImDrawList *, ImVec2) {}
 bool take_open_request() { return g_open_req.exchange(0) != 0 && false; }
 bool draw(ImVec2) { return false; }
 bool closed_for_match() { return false; }
+const char *shot_label() { return nullptr; }
 }
 
 #endif
