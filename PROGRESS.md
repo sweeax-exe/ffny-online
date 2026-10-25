@@ -10,7 +10,7 @@
 
 | Area | State | Notes |
 |---|---|---|
-| Release v0.12.0 — Toolkit rebase and performance (D204, first release train, D203) | ✅ all gates passed; released from PR #106 | Branch `release/v0.12.0`, gates on `1e4d5db`, toolkit `8fb21d2` (fork `defjam/release-0.12.0`). Contents: #85 toolkit v0.16.0, #100 setup reuse (D202), #103 VRR flush (#102), #104 Deck frame overlap. Windows full regression 14/14 (`logs/regress-20261025-110936.txt`), opening-scene audio with the owner's settings clicks 1/0/1 dropouts 1/11/1, Setup fresh install and Clean Update from v0.11.0 (120 data files byte-identical); macOS full regression 18/18 in 40 min, `repeat` 2/2, audio clicks 5/2 dropouts 1/1; Steam Deck full regression pass (owner's Deck agent); owner play-test OK (2026-10-25). |
+| Release v0.12.0 — Toolkit rebase and performance (D204, first release train, D203) | ✅ stable/latest published from PR #106; Deck test limits recorded | Branch `release/v0.12.0`, gates on `1e4d5db`, toolkit `8fb21d2` (fork `defjam/release-0.12.0`). Contents: #85 toolkit v0.16.0, #100 setup reuse (D202), #103 VRR flush (#102), #104 Deck frame overlap. Windows full regression 14/14 (`logs/regress-20261025-110936.txt`), opening-scene audio with the owner's settings clicks 1/0/1 dropouts 1/11/1, Setup fresh install and Clean Update from v0.11.0 (120 data files byte-identical); macOS full regression 18/18 in 40 min, `repeat` 2/2, audio clicks 5/2 dropouts 1/1; Steam Deck regression 17/18: replay golden mismatch and separate repeat failure at step 541 (#98); detailed Deck report now retained. Owner play-test OK (2026-10-25). Published stable/latest at merge/tag `3414dc7`; nine asset digests/checksums and three provenance records verified; release workflow `40226940153` passed. |
 | Windows start-up and setup fixes (D148) | ✅ v0.10.7 published (stable/latest) | PR #86 merged `009473a`, tag `v0.10.7`, release run 39845952105 31/31, nine assets verified against GitHub digests and provenance (source `009473a`, toolkit `8589f88`). Contents: PR #76 (issue #72: reject incomplete Windows memory layouts, toolkit `8589f88`) and PR #80 (issue #81: `/INCREMENTAL:NO` link). Windows 11 / RTX 4070 Ti SUPER / VS 2019 (MSVC 14.29): full regression 12 of 14 (combat and versus failed only `audio.dry_queue`, passed on stock v0.10.6 and on two reruns), quick 5/5 on the final build, units 537 passed, native placement fixture and the memory/settings/texture/kernel fixtures pass, 10-boot soak 10/10, published v0.10.6 setup then this setup (Clean Update, bundled): exit 0, 125-file data inventory identical. Neither reporter has confirmed; neither crash reproduced here. PR #73 deliberately left out (owner: bundle with the mod release). Owner play-tested the final Windows build and found it good. Audio gate flake tracked in #88. |
 | Launcher redesign (D138-D140, D142-D145) | ✅ v0.10.6 stable/latest | PR #58, main `af0c03c` integrated; brighter slider tracks, Windowed 1920×1080 / Auto / 2× defaults, bounded render-scale help and usable 250% compact controls. Native fresh/saved settings and Auto boot pass; final quick 5/5 (units 528/32 skip/one slow deselected), picture/overlay 2/2. Saved preferences preserved; owner confirms physical controller works. PR #58 merged 2e8ec40 after candidate CI 28/28; v0.10.6 promoted stable/latest as Improved Game Launcher (D145); release run 39452474210 30/30, nine asset hashes/provenance verified and unchanged. Refreshed Home/Advanced docs images included; Windows/Deck GUI acceptance pending. |
 | Plan reviewed | ✅ | See `docs/01-plan-review.md` |
@@ -438,7 +438,6 @@ defjam-recomp/
 
 > Recent entries only; older entries remain unchanged in the local `docs/worklog/` archive.
 
-- 2026-10-24 10:23 — D198 owner Steam Deck acceptance; authorizes v0.11.0 stable/latest with Mod Support Beta headline and default catalogue visibility. Append stablepack1.0.0 retaining exact RC2 bytes/hash/history;13tests/22subtests and contract/history pass. Update source docs and normal protected publication in progress; existing release assets/tag unmodified.
 - 2026-10-24 10:29 — D198 completed: v0.11.0 promoted stable/latest, title Mod Support Beta, same release422772240/tag5775f3c/nine asset IDs/hashes. Catalogue PR3 merged5b4de77;13local tests/22subtests/full Linux CI40115895822 pass; archive scan/history verified and normal protected publication40115951254 passed. Actual client verifies signedrev3 selects stable1.0.0 with testing off, RC2 bytes/hash unchanged. DocsPR99 final record pending CI/merge; known issues retained, no Mac acceptance inferred. Evidence ../logs/v011-stable-verification.json.
 - 2026-10-24 11:45 — D147: the second Windows audio cause found and fixed. The clicks sat at lap positions 2,371-2,399 of the 2,400-frame six-channel buffer (voices 0xF8-0xFA, base 0x10D0/D4/D8, 12-byte frames): its last page, physical 0x01310, which it shares with a heap block (0x01310790..) the title named through MmGetPhysicalAddress, so upstream's per-page map read RAM for the buffer's last 344 bytes. Fix on fork `defjam/upstream-v0.16` `3e63e7b` (local, not pushed): heap blocks remember being named, `xbox_PhysRamNamedAt` decides per byte; `apu_phys` gains the case (fails without). Device clicks per 330 s: 386-422 before, 1 after (windowed defaults; owner settings fullscreen 1 and 1), v0.10.7 2. Full regress 14/14 (`logs/regress-20261024-112504.txt`); fixtures apu_phys, memory_regressions, windows_guest_layout, kernel_regressions, kernel_physical_address pass. Parent pinned locally. Owner re-test next.
 - 2026-10-24 15:20 — D147: owner's re-test of the second audio fix is clean; fork `defjam/upstream-v0.16` pushed at `3e63e7b`. Main (v0.11.0 Mod Support Beta) merged into the branch: pin kept at `3e63e7b` (main's `bd8c633` adds only 72bec86, 20e7ba7 and the #72 fix, all already on the v0.16 branch, files identical); `scripts/harness.py` keeps both the stale-guard recovery and main's macOS clone copy; this branch's D150 renumbered D199 (main has D150/UI, runs to D198). Built clean with the mod code and `DEFJAM_MOD_WIDE`; units under MSVC 632/27; owner-settings opening scene 2 clicks at the device, holes 5/0; full regress 14/14 (`logs/regress-20261024-151336.txt`). Test handover retired (Mac/Deck re-check steps in §7); new `scripts/audio-clicks.py`. Release number: v0.12.0.
@@ -446,65 +445,37 @@ defjam-recomp/
 - 2026-10-24 21:10 — D201: the Mac's one-slice zero gaps traced and fixed. A temporary trace put every gap on the frame thread's lightweight branch (60 of 60, none in `se_frame`): DirectSound's SSL service routine stops and restarts the sequencer every 43 ms (SECTL 0x07, then 0x0F 150-400 us later), and a frame that read SECTL in that gap played its slice silent. Fork `957c1ba` (`mcpx_apu_frame_kind`): such a frame waits, up to 5 ms, as for a trapped front end; longer stops get lightweight frames as before. Opening scene 330 s at the device, twice: dropouts 1, 1 (were 1,344, 1,307; v0.10.5 1, 1), clicks 1, 3 (were 7, 9). Full regression 18/18 (`logs/regress-20261024-204851.txt`), `repeat` 2/2; `apu_monitor` gains the case; seven APU fixtures pass on macOS. Pin moved to `957c1ba`; Windows and Deck re-check of it pending.
 - 2026-10-25 10:25 — D203/D204: first release train. Docs PR #105 (release trains). Milestone v0.12.0 holds #85, #100, #103, #104. Fork `defjam/release-0.12.0` `8fb21d2` = `957c1ba` + `70612f2`, `206b421` (#103) + `8d54440` (#104), all cherry-picked cleanly; parent `release/v0.12.0` merges the four branches (conflicts only PROGRESS.md and the gitlink, as predicted by `git merge-tree`), version 0.12.0 at `1e4d5db`; units 543 passed/123 skipped, source tree 533/0. #100's D199 -> D202. Windows re-lift and full regression on the candidate started; Deck run by the owner's Deck agent on `1e4d5db`.
 - 2026-10-25 12:20 — D204: macOS gate on the v0.12.0 candidate (`af59672`; later commits docs only, so it holds for `b20776e`), toolkit `8fb21d2`, fresh re-lift on the M1 Pro: analyze 1 min 54 s, recomp 1 min 5 s, build 41 s. Full regression **18/18** in 40 min (`logs/regress-20261025-114806.txt`; units 633 passed, goldens m2/m3/m4a, fights median 120 with minimum 119-120, Terrordome 242 s, combat 27/27, versus 26/26, replay hash unchanged, Story routes, soak 3/3), `repeat` 2/2 (`logs/regress-20261025-115454.txt`, `-120141.txt`). Opening scene 330 s at the device, defaults: clicks 5 and 2, dropouts 1 and 1. #104's Vulkan frame overlap shows no change on the Mac. Upstream PR https://github.com/sp00nznet/xboxrecomp/pull/264 posted for `957c1ba` (D201) with Vlad's approval.
+- 2026-10-25 13:10 — D204 publication completed: PR106 merge/tag3414dc7; Source release40226940153 success; nine GitHub asset SHA-256 digests, three checksums/provenance records verified against toolkit8fb21d2/version0.12.0. Published stable/latest, closed milestone, deferred97 to0.12.1 by owner choice. ForkPR3 merged76fc263; integration branch points8fb21d2. Preserved detailed Deck report17/18 and known replay/repeat98 limits; unqualified earlier pass corrected. Archived completed branches/worktrees before cleanup; active Windows recording checkout retained on bugfix/v0.12.1.
 
 ## 7. Hand-off
 
-**Release v0.12.0 (D204), the first release train (D203, `docs/releasing.md`, `docs/agent/release.md`).**
-Branch `release/v0.12.0` (worktree `code/defjam-release-0.12.0` on the owner's Windows PC), release PR in milestone v0.12.0.
-It merges #85 (toolkit v0.16.0), #100 (setup reuse, D202), #103 (Windows D3D11 flush before `flip_pace`, issue #102) and #104
-(Vulkan frame overlap for the Deck). Toolkit pin `8fb21d2`, fork branch `defjam/release-0.12.0`: `957c1ba` (#85) plus #103's
-`70612f2`, `206b421` and #104's `8d54440`, cherry-picked without conflicts. `.gitmodules` still names `defjam/upstream-v0.16`:
-fast-forward that branch to `8fb21d2` after the release. Gates are run on head `1e4d5db`; later commits are records and docs only.
+### v0.12.0 published stable/latest — 2026-10-25
 
-**All gates passed (2026-10-25)**: Windows full regression 14/14, audio, Setup install and Clean Update; macOS and Deck full
-regression; owner play-test OK. Gate table in PR #106.
+- Release: https://github.com/vyanhursky/DefJamFFNY-recomp/releases/tag/v0.12.0
+  PR #106 merged at `3414dc77cd3be47adf859d1f144e26402c083b10`; annotated tag
+  `68b54f8959d7b9de3bf7e4c26fff0b025f43c58c` resolves to that merge. Source release
+  workflow `40226940153` passed. Nine uploaded assets downloaded and hashed against
+  GitHub's digests; all three checksum/provenance records agree with the exact
+  tagged source, toolkit `8fb21d24d4f3ef1a49e7dcabf674e4d1dadd95ca` and version 0.12.0.
+- Included game PRs #85/#100/#103/#104 and release PR #106 are merged. Fork PR #3
+  (issue #72 memory layout) is now merged at `76fc263`; it targets the historical
+  audio-fix integration branch and does not change the released toolkit pin.
+  `defjam/upstream-v0.16` points to the release pin. Milestone v0.12.0 closed.
+- Validation qualification: Windows 14/14, macOS 18/18, Steam Deck **17/18**;
+  replay fails against the Mac golden and the separate `repeat` check diverges
+  at step 541 (#98). Earlier unqualified Deck “pass” records were incomplete.
+  See `docs/research/rc-v0.12.0-deck-2026-10-25.md`. These are recorded test limits,
+  not newly fixed defects. The owner's candidate play-test was accepted.
+- Owner explicitly deferred cheat-menu PR #97 to milestone v0.12.1. Its Windows/
+  Deck checks and remaining hands-on cases still need completion. Keep its branches.
+- The Windows candidate checkout `code/defjam-release-0.12.0` is now the active
+  `bugfix/v0.12.1` lane, based on the released merge. Its existing build, normal
+  play-test launcher, uncommitted triage note and all `logs/sessions/` recordings
+  remain in place for the separate “Def Jam 0.12.1 bugfix” chat. Do not delete it.
+- Cleanup recovery bundles, per-worktree patches/untracked files, asset audit and
+  branch manifests are local at `code/defjam-release-audit/v0.12.0`. Active cheat
+  and decomp lanes remain. Canonical toolkit checkout: `code/xboxrecomp`.
+- Upstream PRs #255/#256/#261/#264 remain open with sp00nznet. This account has
+  READ permission there; their maintainer must merge them. Preserve their heads.
 
-**Next (after publication):**
-1. Fast-forward fork branch `defjam/upstream-v0.16` to `8fb21d2` (the branch `.gitmodules` names) and close milestone v0.12.0.
-2. Delete the test installs `code/defjam-v012-setup` and the leftovers from #85's runs: worktrees `code/defjam-v016-win`,
-   `code/defjam-v0107-base`, `code/xboxrecomp-up-perf`, `code/xboxrecomp-up-throttle`, `code/xboxrecomp-named`,
-   `code/xboxrecomp-up-named` (unlink each `game` junction with `cmd /c rmdir` first), `code/defjam-v016-setup*`,
-   `defjam\save.bak-20261022-v016`; then the release worktree `code/defjam-release-0.12.0` and `code/xboxrecomp-release-0.12.0`.
-3. Next release: open milestone v0.12.1 or v0.13.0 when the first PR is queued.
-
-### v0.11.0 stable/latest — Mod Support Beta — 2026-10-24
-
-- D198: owner says v0.11.0 works well on Steam Deck and authorizes stable/latest,
-  headline Mod Support Beta, and default catalogue visibility. Supersedes D197's
-  preview-only restriction. Known HUD95/fire-escape/three missing backgrounds
-  deferred1.1 remain documented. Final Mac validation remains unconfirmed.
-- Live release: https://github.com/vyanhursky/DefJamFFNY-recomp/releases/tag/v0.11.0
-  Name v0.11.0 — Mod Support Beta; prerelease=false and /releases/latest=v0.11.0.
-  Release ID422772240, tag5775f3cabab13105abf01e4eb2cf8cc21ff7a904, all nine
-  asset IDs/sizes/SHA-256 digests unchanged by promotion. Toolkitbd8c633 unchanged.
-  No new installers/game code/artwork uploaded or rebuild required for promotion.
-- Catalogue PR3 merged5b4de774f53bc4a31601434fb8d0b7014830f4f7. Stable1.0.0 row
-  requires runtime0.11.0 and uses exact RC2 archive descriptor/hash43bbb22cd1419709
-  1143623551f350a0b7ff622f0efccb1da058f491e7157634. Prior1.0.0-rc2 row immutable.
-  Validation13pass/22subtests plus full Linux CI40115895822 pass. The first local
-  sandbox-temp permission errors were resolved using workspace scratch; symlink
-  fixture left to Linux CI, no tests or security checks weakened.
-- Signed publication40115951254 passed archive verification/scan and protected
-  owner review/sign/deploy. Prepared revision3 matched approved source/history;
-  user's explicit publication authorization applied through normal owner gate.
-  Trust pins, signatures, private keys and protected settings never modified.
-- Real client in ../stable-catalogue-check verifies live signedrev3, chooses
-  HD Widescreen Menus1.0.0 with testing disabled, and displays compatible=1.
-  Existing players need only Mods -> Refresh catalogue; no testing toggle needed.
-  Existing1.0.0-rc2 installs remain valid;1.0.0 reuses identical accepted bytes.
-- Game docs PR99: README, release notes, known issues and PROGRESS reflect stable
-  promotion and its final verification record, with documentation-only CI enforced.
-  Query PR99 for its merge commit. Release tag/installers stay pinned to5775f3c.
-- Evidence ../logs/v011-stable-verification.json, v011-before-stable-release.json,
-  stable-prepared-index/index.json, stable-publication-approval.json. Historical
-  game-free packaging/Windows gameplay evidence remains in preview release record.
-
-**Issues #67/#92/#101/#102 (frame pacing on 75-165 Hz and VRR displays):** PR #96
-(merged) logs `[DISPLAY]`. Without VRR a 60 fps frame stays up 2 or 3 refreshes on
-144 Hz; borderless full screen already gets VRR, so #92 needs no exclusive mode.
-#102's fix (PR #103: flush the frame to the GPU before `flip_pace()`, plus the
-`[ONSCREEN]`/`[GPUTIME]` trace under `RECOMP_PRESENT_PACING=1`) ships in v0.12.0;
-the owner's play-test of the candidate covers it. #101 is not reproduced in
-scripted runs; the owner plays with the recorder to catch it. Timing runs need the
-monitor awake and no screen saver (nudge the mouse first, with the owner's OK).
-#67: no reply posted yet, by the owner's choice.
+Decisions are read by number or keyword: `decision D<n>`, `decisions --grep TEXT`.
