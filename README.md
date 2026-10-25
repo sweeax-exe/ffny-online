@@ -25,7 +25,7 @@ the game on your machine. PS2 and GameCube copies cannot be used.
 [Report a problem](https://github.com/vyanhursky/DefJamFFNY-recomp/issues/new/choose) ·
 [Join the Discord](https://discord.gg/xNvBs23ZBw)
 
-**[v0.11.0 — Mod Support Beta](https://github.com/vyanhursky/DefJamFFNY-recomp/releases/tag/v0.11.0)** is the latest stable release. Discover, download, enable and order mods in the launcher. HD Widescreen Menus is available in the default catalogue after refresh. See the release notes for known visual limitations.
+**[v0.12.0 — Toolkit v0.16, smoother frames](https://github.com/vyanhursky/DefJamFFNY-recomp/releases/tag/v0.12.0)** is the latest stable release: the xboxrecomp v0.16 toolkit, audio fixes, and steadier frames on variable-refresh Windows displays and the Steam Deck. [v0.11.0](https://github.com/vyanhursky/DefJamFFNY-recomp/releases/tag/v0.11.0) brought Mod Support Beta. Discover, download, enable and order mods in the launcher. HD Widescreen Menus is available in the default catalogue after refresh. See the release notes for known visual limitations.
 
 ## Gameplay
 
@@ -49,7 +49,7 @@ performance measurement. [Download the longer 60-fps MP4](docs/media/hd-16x9-gam
 **Improved Game Launcher (v0.10.6)** brings a focused Home screen, with detailed options in
 [Advanced settings](docs/launcher-and-overlay.md). The brickwork and torn-paper
 style uses the game's charcoal, ivory, red and gold palette.
-[Get the latest setup](https://github.com/vyanhursky/DefJamFFNY-recomp/releases/tag/v0.10.7).
+[Get the latest setup](https://github.com/vyanhursky/DefJamFFNY-recomp/releases/tag/v0.12.0).
 
 ## Features
 

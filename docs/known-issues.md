@@ -27,7 +27,7 @@ Fighters selection. They do not cover every mode or a full Story campaign.
   the late frames of the heaviest scenes; at the default scale 2 the opening scene still drops
   about 11% of frames in its heaviest shots. Windows compiles each shader at first use in every
   launch (no Direct3D 11 shader cache yet).
-- **Uneven 40-60 fps in free-for-all fights on the Steam Deck at render scale 2-4 (fix proposed,
+- **Uneven 40-60 fps in free-for-all fights on the Steam Deck at render scale 2-4 (improved in v0.12.0,
   [report](research/deck-ffa-powerplant-2026-10-24.md)).** The Vulkan backend waited for
   the GPU inside every `Present`, so the executor's CPU time and the GPU's time ran one after the
   other against a 16.7 ms frame. Frames now overlap. In the scripted Power Plant fight on the Deck
