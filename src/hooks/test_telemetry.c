@@ -838,9 +838,11 @@ long defjam_test_shot_due(void)
  *
  * Reported as [TEST-SEED], not [TEST-EVENT]: some seedings happen before the
  * match's own events and are not part of the recorded state stream. */
+volatile int defjam_test_quiet_seed;
+
 void defjam_test_generator_seed(uint32_t generator, uint32_t stack)
 {
-    if (!defjam_test_observations_enabled() || !budget()) return;
+    if (defjam_test_quiet_seed || !defjam_test_observations_enabled() || !budget()) return;
     begin_line("TEST-SEED", "generator");
     put(",\"generator\":%u,\"high\":%u,\"low\":%u", generator, MEM32(stack + 4), MEM32(stack + 8));
     end_line();
