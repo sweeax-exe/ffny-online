@@ -228,7 +228,7 @@ guest offset), fault address 0xCE6669B4 = guest 0xBE6669B4 read as a pointer. [V
 
 ## 8. Fixes (question 5)
 
-Ordered by value for risk. None is implemented.
+Ordered by value for risk. P0 and P1 are implemented (2026-10-25, section 11); P3 is being done separately.
 
 | # | Change | Where | Effect | Risk |
 |---|---|---|---|---|
@@ -265,3 +265,59 @@ Order: P0 (so the next report is decisive) with P1 together, then P3 as the poli
 * The mechanism by which three extra draws change two fighters' positions by step 31 in the lab (no fighter-side reader was found).
 * Whether the time scale ever differed in any report.
 * Which heap block the `sub_000EDF90` crash read, and why the load left it stale.
+
+## 11. Measurements after P0 and P1 (2026-10-25)
+
+What was built: P1 in `netplay_on_step` (`shared_gen_reseed`), P0 in `fighter_hash` / `desync_detail` (`HASH_PARTS` 8). The seed routine
+was read in the lifted code before use: `sub_000AA0D0` (thiscall, `ret 8`) stores its two words at `this+0x80` (state) and `this+0x84`
+(increment), fills the 32 floats at `this+0..0x7C` from them and writes nothing else; esi/edi are pushed and popped, the x87 stack is
+balanced. The words are `mix32(match ^ mix32(step * 0x9E3779B9 ^ 0x39C0E0))` and `mix32(match ^ mix32(step * 0x85EBCA6B ^ 0x5EED39C1)) | 1`,
+the same on every PC and for a step rollback runs again (the re-run reaches `sub_00087700_enter` with `N.step` rewound). Lockstep only:
+offline play, the soak and the golden replay never reach it. `RECOMP_NETPLAY_GEN_PIN=off` (tests) turns it off.
+
+Set-up: two copies of one build on one PC (CPUs 28 and 30), a local relay with a fixed venue sequence (a scratch build of
+`netplay/relay` that answers every vote with the next venue of a list; not committed), `scripts/harness.py` routes `online5-p1/p2`
+and `online-p1/p2`, `RECOMP_TEST_OBSERVATIONS=1`, `RECOMP_TEST_DRAWS=1`, accounts at 127.0.0.1:9. "rng_util" is the state word
+`0x39C160` in the `[TEST-STATE]` sample, which `defjam_test_step` takes at the step's entry **before** the re-seed, so with P1 it still
+shows what was drawn outside the step since the last one. A temporary build also tagged each draw of `0x39C0E0` made between the
+update's start (`sub_0002C530`) and the step (`sub_00087700`) [not committed].
+
+| Run | Pin | Venues (match order) | Result |
+|---|---|---|---|
+| repro1 | off | Foundation, Terror Dome | Terror Dome: generator **different at step 1** (4280241561 / 1156477769) and in all 134 of 134 samples to step 3991; fighter checksums equal to the KO (step 3420). Foundation: 0 of 468 samples differ. |
+| fix1 | on | Foundation, Terror Dome, The Pit | 500 checksums equal, no desync (the session then stopped on a results screen, see below) |
+| fix2 | on | Foundation, Terror Dome, The Pit, Terror Dome, 125th Street | **1140 checksums equal, no desync**; Terror Dome samples different before the re-seed: 17 of 557 and 3 of 488, each one alone (the next sample equal again) |
+| rb1 | on, rollback on both, 60 ms (+0..10) lag | Foundation, Terror Dome | 680 checksums equal, no desync, no crash; 5839 and 7554 rollbacks (deepest 9 and 8 steps) |
+
+What the draw counts say ([TEST-DRAWS], generator 3784928):
+
+* **The loading-window drawer is `CArena`'s effect spawner** `sub_000937E0` (return address 0x93847), not the music director: in
+  repro1's Terror Dome match it had drawn 9 times on one PC and 17 on the other by step 1, with 473 and 926 screen updates since the
+  match set-up (`0x340538`). Every other site had equal counts at step 1 (music director 0x36EB6: 6 and 6). The offset is set by the
+  number of updates the venue's load took on each PC, so it changes from run to run: in fix1 and fix2 the counts happened to agree
+  (10 and 10) and step 1 was equal before the re-seed too.
+* **Order inside an update** (section 10, first open point): in a fight `CArena`'s draws (0x93847; its other sites 0x9398D.. did not draw) all fall **after**
+  the step; none came between the update's start and the step (the tagged count stayed at its loading-window value from step 1 to 900).
+  The music director (0x36EB6) draws **before** the step (6 -> 7 between steps 300 and 900 on one PC only in repro1; 11 -> 12 in fix2).
+  So the step-start re-seed is before every in-step reader and wipes the music director's host-timed draws; `CArena` then draws from
+  the pinned state plus the step's own draws. No gap that P2 would have to close was seen.
+* The isolated differences in fix2 are those music-director draws: one PC drew between two steps, the sample before the next step shows
+  it, the re-seed removes it. Without the pin the same event leaves a permanent offset (repro1).
+
+Not reproduced: the lab's fighter parting. In repro1 the generator was apart for the whole Terror Dome match and the fighters still
+stayed equal to the KO, so the generator offset is the precondition, not a sufficient cause, which fits section 10 ("mechanism ... not
+found"). With P1 the precondition cannot arise in a fight: the step sees a state that depends only on (match, step).
+
+P0, the next report's detail line:
+`desync detail: <fighters>; the CPU fighters' generators equal|differ|unused (no CPU fighters); the shared generator equal|differs;
+the time scale equal|differs (<here>, <there>); the match generator equal|differs`. With P1 the shared generator part is checked after
+the re-seed, so "differs" there means the re-seed itself failed; generator drift caused by draws inside the step shows in the fighters
+or the match generator.
+
+Seen on the way, not part of this fix: in a hub session the loser's results screen can stop for good. The summary takes the winner's
+pad only (on the loser's PC that is the remote live pad); when the winner's copy has already left the summary (`Match over; back in
+the room`) before the loser's copy shows it, nothing ever presses for the winner there, and the loser's own A presses do nothing (twice
+in two sessions, both times on the loser's side: winner 0x1 and copy 2 stuck, winner 0x2 and copy 1 stuck; the winner-only input is
+inferred from those two cases and the cases that passed, not read in the code). The runs above waited
+16 s instead of 4 s before pressing A on the summary (a local, uncommitted harness change), which avoided it. Whether real players hit it
+(the loser's summary waits for the other player's input) is open.

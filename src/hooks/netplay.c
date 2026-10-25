@@ -2690,6 +2690,45 @@ static void crowd_reset(uint32_t arena)
             with_text ? "the game's restart" : "field by field");
 }
 
+/* ---- the shared generator, pinned to the step ---------------------------------------------------
+ *
+ * The object-form generator at 0x39C0E0 is drawn inside the fight step (the camera director) and
+ * outside it at host timing: the music/ambience director when an audio voice is idle, the screen
+ * transition machine, a render-path effect, animation creation and CArena's update. On The Terror
+ * Dome, where it is drawn about once a second, two PCs came out of the loading window three draws
+ * apart and the fighters parted by step 31 (docs/research/generator-timescale-desync.md, the lab
+ * case). So at the start of every online step, and of every step rollback runs again, every PC
+ * seeds it the same way through the game's own seed routine (this = generator, state, odd
+ * increment; it writes the 32-float table and the two words, nothing else): whatever was drawn
+ * outside the step is gone before the step can read it. */
+/* RECOMP_NETPLAY_GEN_PIN=off (tests only): the generator as the game leaves it, to compare */
+static int shared_gen_pin(void)
+{
+    static int on = -1;
+    if (on < 0) on = !(getenv("RECOMP_NETPLAY_GEN_PIN") && !strcmp(getenv("RECOMP_NETPLAY_GEN_PIN"), "off"));
+    return on;
+}
+static void shared_gen_reseed(uint32_t step)
+{
+    uint32_t args[2];
+    uint32_t eax = g_eax, ecx = g_ecx, edx = g_edx, ebx = g_ebx, esi = g_esi, edi = g_edi, ebp = g_ebp, esp = g_esp;
+    double fp[8];
+    int fp_top = g_fp_top;
+    uint16_t fp_cw = g_fp_control_word;
+    memcpy(fp, g_fp_stack, sizeof(fp));
+    args[0] = mix32(N.match ^ mix32(step * 0x9E3779B9u ^ SHARED_GEN));
+    args[1] = mix32(N.match ^ mix32(step * 0x85EBCA6Bu ^ 0x5EED39C1u)) | 1u;   /* the increment stays odd */
+    N.seed_bypass = 1;
+    defjam_test_quiet_seed = 1;     /* not a [TEST-SEED] line a step */
+    guest_call(sub_000AA0D0, SHARED_GEN, 2, args);
+    defjam_test_quiet_seed = 0;
+    N.seed_bypass = 0;
+    g_eax = eax; g_ecx = ecx; g_edx = edx; g_ebx = ebx; g_esi = esi; g_edi = edi; g_ebp = ebp; g_esp = esp;
+    memcpy(g_fp_stack, fp, sizeof(fp));
+    g_fp_top = fp_top;
+    g_fp_control_word = fp_cw;
+}
+
 /* King of the Hill: the fight decided, so the relay can rotate the line: RESULT with the winner's
  * room slot, or WINNER_DRAW. The phase word alone missed fights that end without the decided
  * phases: both fighters killed by the venue (result code 0x1105, "everybody out", a draw) went from
@@ -2788,6 +2827,8 @@ void netplay_on_step(void)
         if (crowd_on) crowd_reset(g_ecx);
         if (!N.resim && match_rolls_back() && rollback_prepare() == 0) N.rb_on = N.rb_ref_due = 1;
     }
+    /* before anything in the step draws, and before the checksum: the same state on every PC */
+    if (shared_gen_pin()) shared_gen_reseed(s);
     {
         /* The arena hands its frame argument (edi, kept by sub_00087700 for the crowd update that
          * follows) to the crowd; it is the host's measured frame time, so the spectators' clips
