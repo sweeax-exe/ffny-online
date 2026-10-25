@@ -295,6 +295,7 @@ static struct {
     int rb_on, rb_ref_due, resim, predicting;
     int rb_fought;                      /* the phase word said "fighting" in this match */
     int peer_rb[MAXP];                  /* each position rolls back (its P_RTT says so) */
+    int rb_match;                       /* hub: this match rolls back (every peer_rb set at the sync point) */
     struct {
         int valid;
         uint32_t step, update;          /* the step about to run, the update about to start */
@@ -311,6 +312,11 @@ static struct {
 
 /* Rollback (rollback.h) is on with RECOMP_ROLLBACK=on (off by default since build 21); off, every step waits for every entry. */
 static int rollback_wanted(void) { return rollback_enabled(); }
+/* Whether this match rolls back. A hub match does only when every player has it on, decided with the
+ * delay at the sync point from the same P_RTT flags, so every PC reaches the same answer; in build 26
+ * a PC with it on rolled back alone, with the full lockstep delay the other PC needed. Code rooms
+ * (RECOMP_NETPLAY=host/join, tests only) exchange no flags: the local setting. */
+static int match_rolls_back(void) { return N.lobby ? N.rb_match : rollback_wanted(); }
 int netplay_rerunning(void) { return N.resim; }
 
 static BOOL CALLBACK init_once(PINIT_ONCE o, PVOID p, PVOID *c)
@@ -769,6 +775,13 @@ static void send_rtt(void)
 
 /* The delay every PC derives from the same pings: the slowest path between two players goes
  * through the relay, about half of each one's round trip, plus a step of margin. */
+static int every_player_rolls_back(void)
+{
+    int i;
+    for (i = 0; i < N.players; i++) if (!N.peer_rb[i]) return 0;
+    return 1;
+}
+
 static int agreed_delay(void)
 {
     int a = 0, b = 0, i, d;
@@ -777,11 +790,7 @@ static int agreed_delay(void)
         if (r > a) { b = a; a = r; } else if (r > b) b = r;
     }
     d = ((a + b) / 2 * 3 + 49) / 50 + 1;      /* ms to 1/60 s steps, rounded up, + 1 */
-    {   /* every PC rolls back: what the delay does not cover, a rollback does */
-        int all = 1;
-        for (i = 0; i < N.players; i++) if (!N.peer_rb[i]) all = 0;
-        if (all) d -= RB_LESS;
-    }
+    if (every_player_rolls_back()) d -= RB_LESS;   /* what the delay does not cover, a rollback does */
     return d < DELAY_MIN ? DELAY_MIN : d > DELAY_MAX ? DELAY_MAX : d;
 }
 
@@ -1258,6 +1267,7 @@ static void on_start(const uint8_t *b, int len)
     N.delay_fixed = 0;
     for (i = 0; i < MAXP; i++) N.peer_rtt[i] = -1, N.peer_rb[i] = 0;
     N.peer_rb[pos] = rollback_wanted();
+    N.rb_match = 0;                         /* decided at the sync point */
     {   /* this PC's ping as of now, with the worst of the last few as the jitter margin */
         int k, worst = N.rtt_ms > 0 ? N.rtt_ms : 0;
         for (k = 0; k < 5; k++) if (N.rtt_recent[k] > worst) worst = N.rtt_recent[k];
@@ -2143,10 +2153,24 @@ void netplay_sync_point(void)
             WaitForSingleObject(N.arrived, 20);
         }
         N.delay = agreed_delay();
+        N.rb_match = every_player_rolls_back();     /* from the same flags as the delay's discount */
         N.delay_fixed = 1;
         send_rtt();
         fprintf(stderr, "[NETPLAY] input delay %d steps (pings %d/%d/%d/%d ms%s)\n", N.delay,
                 N.peer_rtt[0], N.peer_rtt[1], N.peer_rtt[2], N.peer_rtt[3], known ? "" : ", some missing");
+        if (N.rb_match) {
+            fprintf(stderr, "[NETPLAY] rollback on for this match: every player has it on\n");
+        } else {
+            for (i = 0; i < N.players && i < MAXP; i++) {
+                char who[40];
+                if (N.peer_rb[i]) continue;
+                if (i == N.pos) snprintf(who, sizeof(who), "this PC (player %d)", i + 1);
+                else if (!netplay_room_name(N.start_slots[i], who, (int)sizeof(who)))
+                    snprintf(who, sizeof(who), "player %d", i + 1);
+                fprintf(stderr, "[NETPLAY] rollback off for this match: %s has it off%s; lockstep\n", who,
+                        N.peer_rtt[i] < 0 ? " (its ping did not arrive)" : "");
+            }
+        }
     }
     EnterCriticalSection(&g_cs);
     memset(N.seeds, 0, sizeof(N.seeds));
@@ -2722,7 +2746,7 @@ void netplay_on_step(void)
         static int crowd_on = -1;   /* RECOMP_ONLINE_CROWD=keep: tests compare without the restart */
         if (crowd_on < 0) crowd_on = !(getenv("RECOMP_ONLINE_CROWD") && !strcmp(getenv("RECOMP_ONLINE_CROWD"), "keep"));
         if (crowd_on) crowd_reset(g_ecx);
-        if (!N.resim && rollback_wanted() && rollback_prepare() == 0) N.rb_on = N.rb_ref_due = 1;
+        if (!N.resim && match_rolls_back() && rollback_prepare() == 0) N.rb_on = N.rb_ref_due = 1;
     }
     {
         /* The arena hands its frame argument (edi, kept by sub_00087700 for the crowd update that
