@@ -496,13 +496,13 @@ static int loader_bad(uint32_t *at, uint32_t *value)
     return -1;
 }
 
-/* whether the watched object is still loaded (in the list at 0x3A52A8, next at +4): one the game
+/* whether the watched object is still loaded (in the list at 0x3A52A8, next at +0, previous at +4): one the game
  * unloaded gives its memory back, and then a new block there is no error */
 static int watched_loaded(void)
 {
     uint32_t o = MEM32(0x003A52A8u);
     int k;
-    for (k = 0; k < 4096 && o >= 0x80003000u && o < 0x82A0D000u; k++, o = MEM32(o + 4u))
+    for (k = 0; k < 4096 && o >= 0x80003000u && o < 0x82A0D000u; k++, o = MEM32(o))
         if (o == s_wobj) return 1;
     return 0;
 }
