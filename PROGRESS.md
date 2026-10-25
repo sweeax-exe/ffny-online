@@ -429,8 +429,6 @@ defjam-recomp/
 
 > Recent entries only; older entries remain unchanged in the local `docs/worklog/` archive.
 
-- 2026-10-23 19:44 — D194 Windows PR91 pass completed: fixed embedded Python import and transient progress-file rename failures2bbe9df; cp1252/symlink portability7ed7f66; lock regression863ea98.600units/26skip/1deselected, native helper6/6, texture/settings1/1each. Clean setup267f67c1 packaged offline rebuild exit0 with337files preserved; actual signed RC2 install/order/offline reopen/failed refresh/Play/F1Mods overlay pass. Full native12/13+4skip retained; m2 fixture corrected and retry1/1pass =>13applicable checks satisfied, combat27/27versus26/26/replay80records exact. Five aspects/eight Mode states inspected; same-frame fire-escape f1358 proves uncovered upper-left scene region, survives no-pack/sync/no-depth controls, remains open pending reference geometry. Original23save/settings files unchanged;326pack files intact. Report docs/research/windows-integrated-menu-mods-rc-2026-10-23.md. Local commits only, PR91draft, no push/merge/release.
-- 2026-10-23 19:47 - Owner authorizes pushing the verified Windows fixes and report to the existing PR91 head branch codex/integrated-menu-mods-rc (current remote66002541, fast-forward only). PR remains draft; no merge/release. Existing isolated app/DefJamLauncher.exe is ready for owner playtesting with RC2 and Faithful already enabled; no reinstall needed.
 - 2026-10-23 20:53 — Issue #67 (choppy fights at 60 fps): reading the code, vsync paces only on a refresh rate that is a multiple of 60 (`d3d8_present_interval_for`); on 75/100/144/165 Hz the executor's 60 Hz timer paces and a frame stays up 2 or 3 refreshes, which judders. No ALLOW_TEARING, so VRR may not engage either (#92). Added a Windows `[DISPLAY]` log line (refresh, window mode, vsync, who paces; once a second, on change) in `src/hooks/d3d11_translator.c`; branch `fix/log-display-refresh`. Release build, boot route on this PC: `[DISPLAY] refresh 120 Hz, windowed, vsync on: the display paces frames (sync interval 2)` (run-20261023-204508), vsync off: `... the game's 60 fps timer paces frames` (run-20261023-204601), presents median 120 per 2 s in both. Quick regress 5/5 (regress-20261023-205429.txt). The 144 Hz branch is untested until the owner switches his monitor (it offers 143.91/165 Hz and FreeSync 49-120 Hz).
 - 2026-10-23 21:41 — D195 owner feedback: posted three-screen modpack1.1 backlog to PR91; created pause-HUD issue95. Implemented installed/descending-priority tables, one Recomp HD row/details, legacy missing-selection warning and catalogue authors.606units/26skip/1deselected, focused49pass, MSVC native preview builds. Original installed source/exe restored5/5; separate review fixture. Native visual/input acceptance blocked by computer-use kernel asset/path failure after reset; not claimed passed. Current redesign local for owner review; no release or new art. Report docs/research/mods-owner-feedback-2026-10-23.md.
 - 2026-10-24 06:50 — D196 owner approves Mods layout; extra recommendation removed4f74f53 and preview rebuilt. Authorvyanhursky correction cataloguePR2/c8940e2 validated13tests/22subtests, CIpass; live signed revision pending. Main0b3fa17 integrated locally, three conflicts resolved preserving C++17/C++20 Unicode and grouped priority behavior;74focused and625fast/26skip/1deselected pass, nativebuildpass. Release readiness report added. PR91 remains draft; final CI/setup/native-large-text/platform checks and issue95/fire-escape disposition remain; missingthree screens deferred1.1. No merge/tag/release or catalogue signing.
@@ -438,6 +436,7 @@ defjam-recomp/
 - 2026-10-24 07:25 — v0.11.0 Preview published at5775f3c after exact-head PR91 CI40100689443/merge and tagged release40101113297 success. Nine game-free hashes/provenance and Windows embedded payload pass; final bundled/UI/preparation install exits0. Packaged helper verifies signedrev2/vyanhursky, installsRC2,326hashes/offline pass. Prerelease=true/latest=false; stable0.10.7 retained. Existing RC14files unchanged; original Partition5 changed during owner game, no concurrent native rerun. Mac/Linux owner playtest and accepted95/fire-escape/modpack1.1 limits retained. Release evidence ../logs/v011-*.json and published body.
 - 2026-10-24 10:23 — D198 owner Steam Deck acceptance; authorizes v0.11.0 stable/latest with Mod Support Beta headline and default catalogue visibility. Append stablepack1.0.0 retaining exact RC2 bytes/hash/history;13tests/22subtests and contract/history pass. Update source docs and normal protected publication in progress; existing release assets/tag unmodified.
 - 2026-10-24 10:29 — D198 completed: v0.11.0 promoted stable/latest, title Mod Support Beta, same release422772240/tag5775f3c/nine asset IDs/hashes. Catalogue PR3 merged5b4de77;13local tests/22subtests/full Linux CI40115895822 pass; archive scan/history verified and normal protected publication40115951254 passed. Actual client verifies signedrev3 selects stable1.0.0 with testing off, RC2 bytes/hash unchanged. DocsPR99 final record pending CI/merge; known issues retained, no Mac acceptance inferred. Evidence ../logs/v011-stable-verification.json.
+- 2026-10-24 17:20 — Issues #101 (~49 fps under VRR) and #102 (late frames at heavier settings) filed from the #67 work; PR #96 merged (`c7ed105`). Owner PC, 143.91 Hz, VRR, borderless full screen, harness `fight` with `RECOMP_SETTINGS=<fullscreen ini>`, mouse nudged first (the screen saver after 10 min spoiled one run). #101: six clean runs held 60 fps, `Present` median 0.04 ms; the owner's manual run slowed to 43-50 fps at the same draws/frame, cause open. #102: GPU timestamps show 3-5 ms of work after 12-14 ms idle: the executor slept in `flip_pace()` with the frame unflushed, so the GPU started at `Present`. Flushing the context before the sleep (toolkit `defjam/flip-flush` `206b421`, on by default, `RECOMP_FLIP_KICK=0` off): widescreen scale 3 held frames 6% -> 2%, >2 ms off median 15% -> 6% (run-20261024-165920 vs -170310). Branch `fix/flip-flush`, draft PR; owner play-test, rebase and full regression still to do.
 
 ## 7. Hand-off
 
@@ -473,18 +472,13 @@ defjam-recomp/
   stable-prepared-index/index.json, stable-publication-approval.json. Historical
   game-free packaging/Windows gameplay evidence remains in preview release record.
 
-**Issue #67 (choppy fights at 60 fps) and #92 (exclusive full screen):** PR #96
-(`fix/log-display-refresh`) adds the Windows `[DISPLAY]` log line. On a
-75/100/144/165 Hz display vsync is not used; without VRR each 60 fps frame stays
-up 2 or 3 refreshes (measured 73/48 of 121 at 144 Hz windowed), and the owner
-sees 143.91 Hz as much choppier than 120 Hz. VRR already engages in borderless
-full screen (owner's RTX 4070 Ti SUPER, G-SYNC "full screen", FreeSync monitor):
-scripted fights there show 98% of frames at one 16.7 ms refresh in every present
-mode, so neither exclusive full screen nor ALLOW_TEARING is needed for #92.
-Open: heavier settings hold more fight frames 2 refreshes (4:3 scale 2: 2%,
-widescreen scale 2: 6%, widescreen scale 3: 8%), and one run (4:3, scale 3) and
-one manual run locked to ~49 fps, the panel's minimum VRR rate (game runs slow).
-Experiment toolkit branch `defjam/vrr-present` (local only: RECOMP_PRESENT_VRR,
-per-frame time on screen in RECOMP_PRESENT_PACING) in `code/defjam-refresh-log`.
-Runs need the monitor awake: with the display asleep DXGI reports no frame
-statistics and timings are meaningless. The #67 reporter has not re-attached the log.
+**Issues #67/#92/#101/#102 (frame pacing on 75-165 Hz and VRR displays):** PR #96
+(merged) logs `[DISPLAY]`. Without VRR a 60 fps frame stays up 2 or 3 refreshes on
+144 Hz; borderless full screen already gets VRR, so #92 needs no exclusive mode.
+#102 fix on branch `fix/flip-flush` (draft PR; toolkit `defjam/flip-flush`
+`206b421` on `bd8c633`): flush the frame to the GPU before `flip_pace()`, plus the
+`[ONSCREEN]`/`[GPUTIME]` trace under `RECOMP_PRESENT_PACING=1`. Waiting for the
+owner's play-test; then rebase on main, retest, full regression, merge. #101 is
+not reproduced in scripted runs; the owner plays with the recorder to catch it.
+Timing runs need the monitor awake and no screen saver (nudge the mouse first,
+with the owner's OK). #67: no reply posted yet, by the owner's choice.
