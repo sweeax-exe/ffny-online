@@ -122,12 +122,13 @@ Plain `gamescope` (nested in the desktop session) aborts on a second game launch
 harness. A run killed that way leaves the save changed: the next run refuses to start, and
 `python scripts/harness.py save-recover` shows the copy to restore (`--restore`) or keep (`--accept`).
 
-Python 3.12 or newer with `pyxbe`, `capstone` and `pytest`. With
+Python 3.12 or newer with `pyxbe`, `capstone` and `pytest`; the unit tests and the audio scripts also
+need `numpy`, `pillow` and `cryptography` (the mod manager). With
 [uv](https://docs.astral.sh/uv/) (`brew install uv`) nothing else has to be
 installed; the rest of this page uses this alias:
 
 ```bash
-alias djpy='uv run --no-project --with pyxbe --with capstone --with pytest python'
+alias djpy='uv run --no-project --with pyxbe --with capstone --with pytest --with numpy --with pillow --with cryptography python'
 ```
 
 ## Data folder
