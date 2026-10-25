@@ -56,7 +56,7 @@ static const char k_public_key[] =
 static CRITICAL_SECTION g_cs;
 static INIT_ONCE g_once = INIT_ONCE_STATIC_INIT;
 static volatile LONG g_state = UPDATER_IDLE;
-static char g_message[256];
+static char g_message[512];
 static int g_build;
 static char g_version[64], g_notes[1024], g_setup[96], g_sha256[65];
 static unsigned long long g_size;
@@ -246,7 +246,24 @@ static int json_string(const char *json, const char *key, char *out, size_t size
     snprintf(needle, sizeof(needle), "\"%s\"", key);
     if (!(p = strstr(json, needle)) || !(p = strchr(p + strlen(needle), ':')) || !(p = strchr(p, '"'))) return 0;
     for (p++; *p && *p != '"' && o + 1 < size; p++) {
-        if (*p == '\\' && p[1]) {
+        if (*p == '\\' && p[1] == 'u' && isxdigit((unsigned char)p[2]) && isxdigit((unsigned char)p[3])
+                && isxdigit((unsigned char)p[4]) && isxdigit((unsigned char)p[5])) {
+            /* \uXXXX: Go's encoder writes '>' and '&' this way ("Launcher > Settings" showed as
+             * "Launcher u003e Settings"); as UTF-8, surrogates left out */
+            char hex[5] = { p[2], p[3], p[4], p[5], 0 };
+            unsigned c = (unsigned)strtoul(hex, NULL, 16);
+            p += 5;
+            if (c < 0x80) {
+                out[o++] = (char)c;
+            } else if (c < 0x800 && o + 2 < size) {
+                out[o++] = (char)(0xC0 | (c >> 6));
+                out[o++] = (char)(0x80 | (c & 0x3F));
+            } else if (c >= 0x800 && (c < 0xD800 || c > 0xDFFF) && o + 3 < size) {
+                out[o++] = (char)(0xE0 | (c >> 12));
+                out[o++] = (char)(0x80 | ((c >> 6) & 0x3F));
+                out[o++] = (char)(0x80 | (c & 0x3F));
+            }
+        } else if (*p == '\\' && p[1]) {
             p++;
             out[o++] = *p == 'n' ? '\n' : *p;
         } else {
@@ -440,8 +457,23 @@ static DWORD WINAPI install_thread(LPVOID unused)
             InterlockedExchange(&g_permille, 1000);
             say(UPDATER_INSTALLED, "Version %s is installed. Restart to play it.", g_version);
         } else {
-            say(UPDATER_FAILED, "The update stopped (code %lu); your current version still plays. Details: %s\\update-log.txt",
-                (unsigned long)code, dir);
+            /* the setup's own reason, its last "Setup stopped: ..." line (players only saw a code) */
+            char why[200] = "";
+            FILE *f;
+            size_t n;
+            snprintf(line, sizeof(line), "%s\\update-log.txt", dir);
+            if ((f = fopen(line, "r")) != NULL) {
+                while (fgets(text, sizeof(text), f))
+                    if (!strncmp(text, "Setup stopped: ", 15)) snprintf(why, sizeof(why), "%s", text + 15);
+                fclose(f);
+            }
+            for (n = strlen(why); n && (why[n - 1] == '\n' || why[n - 1] == '\r' || why[n - 1] == '.'); ) why[--n] = 0;
+            if (why[0])
+                say(UPDATER_FAILED, "The update stopped: %s. Your current version still plays. Details: %s",
+                    why, line);
+            else
+                say(UPDATER_FAILED, "The update stopped (code %lu); your current version still plays. Details: %s",
+                    (unsigned long)code, line);
         }
     }
     return 0;
