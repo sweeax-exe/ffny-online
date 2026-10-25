@@ -389,6 +389,71 @@ void host_fatal(const char *message)
 }
 
 #if defined(_WIN32)
+/* The native side of a crash report: the exe words on the stack, the thread, the raw words at rsp
+ * and the system modules they point into. */
+static void crash_native_stack(PCONTEXT ctx)
+{
+    /* Print native stack return addresses for debugging */
+    {
+        /* every word in the next 4 KB of the stack that points into the exe (a scan, so stale
+         * frames show too); scripts/symbolize-host.py names them from the PDB */
+        uintptr_t *sp = (uintptr_t *)ctx->Rsp;
+        HMODULE self = GetModuleHandleW(NULL);
+        int shown = 0;
+        fprintf(stderr, "  Native stack (exe base 0x%llX, words pointing into it):\n", (unsigned long long)(uintptr_t)self);
+        fprintf(stderr, "    [rip] 0x%llX\n", (unsigned long long)ctx->Rip);
+        for (int i = 0; i < 512 && shown < 40; i++) {
+            if (sp[i] >= (uintptr_t)self && sp[i] < (uintptr_t)self + 0x10000000ULL) {
+                fprintf(stderr, "    [%d] 0x%llX\n", i, (unsigned long long)sp[i]);
+                shown++;
+            }
+        }
+        /* Which thread, and the words near the stack top that point into a system module: two
+         * players' build-22 crashes jumped to 0x1E and 0x111 on a thread that is not the game's,
+         * and nothing on the stack pointed into the exe, so the call came from a DLL (an audio
+         * callback, a thread pool) that the scan above cannot name. */
+        {
+            typedef HRESULT (WINAPI *GetThreadDescriptionFn)(HANDLE, PWSTR *);
+            GetThreadDescriptionFn describe = (GetThreadDescriptionFn)(void *)GetProcAddress(
+                GetModuleHandleW(L"kernel32.dll"), "GetThreadDescription");
+            PWSTR desc = NULL;
+            if (describe && SUCCEEDED(describe(GetCurrentThread(), &desc)) && desc) {
+                fprintf(stderr, "  thread %lu \"%ls\", rsp 0x%llX\n", GetCurrentThreadId(), desc,
+                        (unsigned long long)ctx->Rsp);
+                LocalFree(desc);
+            } else
+                fprintf(stderr, "  thread %lu, rsp 0x%llX\n", GetCurrentThreadId(),
+                        (unsigned long long)ctx->Rsp);
+            {   /* Build 24: the online thread jumped to 0x1E. Whether a `ret` popped it (then it is the
+                 * word just below rsp) or a call went there needs the raw words, small ones included,
+                 * and how deep in its stack the thread was. */
+                NT_TIB *tib = (NT_TIB *)NtCurrentTeb();
+                fprintf(stderr, "  stack base 0x%llX limit 0x%llX (rsp %lld bytes below the base)\n",
+                        (unsigned long long)(uintptr_t)tib->StackBase, (unsigned long long)(uintptr_t)tib->StackLimit,
+                        (long long)((uintptr_t)tib->StackBase - ctx->Rsp));
+                fprintf(stderr, "  raw words from rsp-16:");
+                for (int i = -2; i < 22; i++)
+                    fprintf(stderr, "%s %llX", i % 6 == 4 ? "\n   " : "", (unsigned long long)sp[i]);
+                fprintf(stderr, "\n");
+            }
+            shown = 0;
+            for (int i = 0; i < 64 && shown < 12; i++) {
+                HMODULE m = NULL;
+                wchar_t name[MAX_PATH];
+                if (sp[i] < 0x10000 || (sp[i] >= (uintptr_t)self && sp[i] < (uintptr_t)self + 0x10000000ULL))
+                    continue;
+                if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                                        GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, (LPCWSTR)sp[i], &m) || !m)
+                    continue;
+                if (!GetModuleFileNameW(m, name, MAX_PATH)) continue;
+                fprintf(stderr, "    [%d] %ls+0x%llX\n", i, wcsrchr(name, L'\\') ? wcsrchr(name, L'\\') + 1 : name,
+                        (unsigned long long)(sp[i] - (uintptr_t)m));
+                shown++;
+            }
+        }
+    }
+}
+
 static LONG CALLBACK veh_handler(PEXCEPTION_POINTERS ep)
 {
     /* A hardware watchpoint arrives as a single step. Answered before anything
@@ -470,66 +535,28 @@ static LONG CALLBACK veh_handler(PEXCEPTION_POINTERS ep)
          *   fprintf(stderr, "  Game state: %u\n", state);
          */
 
-        /* Print native stack return addresses for debugging */
-        {
-            /* every word in the next 4 KB of the stack that points into the exe (a scan, so stale
-             * frames show too); scripts/symbolize-host.py names them from the PDB */
-            uintptr_t *sp = (uintptr_t *)ep->ContextRecord->Rsp;
-            HMODULE self = GetModuleHandleW(NULL);
-            int shown = 0;
-            fprintf(stderr, "  Native stack (exe base 0x%llX, words pointing into it):\n", (unsigned long long)(uintptr_t)self);
-            fprintf(stderr, "    [rip] 0x%llX\n", (unsigned long long)ep->ContextRecord->Rip);
-            for (int i = 0; i < 512 && shown < 40; i++) {
-                if (sp[i] >= (uintptr_t)self && sp[i] < (uintptr_t)self + 0x10000000ULL) {
-                    fprintf(stderr, "    [%d] 0x%llX\n", i, (unsigned long long)sp[i]);
-                    shown++;
-                }
-            }
-            /* Which thread, and the words near the stack top that point into a system module: two
-             * players' build-22 crashes jumped to 0x1E and 0x111 on a thread that is not the game's,
-             * and nothing on the stack pointed into the exe, so the call came from a DLL (an audio
-             * callback, a thread pool) that the scan above cannot name. */
-            {
-                typedef HRESULT (WINAPI *GetThreadDescriptionFn)(HANDLE, PWSTR *);
-                GetThreadDescriptionFn describe = (GetThreadDescriptionFn)(void *)GetProcAddress(
-                    GetModuleHandleW(L"kernel32.dll"), "GetThreadDescription");
-                PWSTR desc = NULL;
-                if (describe && SUCCEEDED(describe(GetCurrentThread(), &desc)) && desc) {
-                    fprintf(stderr, "  thread %lu \"%ls\", rsp 0x%llX\n", GetCurrentThreadId(), desc,
-                            (unsigned long long)ep->ContextRecord->Rsp);
-                    LocalFree(desc);
-                } else
-                    fprintf(stderr, "  thread %lu, rsp 0x%llX\n", GetCurrentThreadId(),
-                            (unsigned long long)ep->ContextRecord->Rsp);
-                {   /* Build 24: the online thread jumped to 0x1E. Whether a `ret` popped it (then it is the
-                     * word just below rsp) or a call went there needs the raw words, small ones included,
-                     * and how deep in its stack the thread was. */
-                    NT_TIB *tib = (NT_TIB *)NtCurrentTeb();
-                    fprintf(stderr, "  stack base 0x%llX limit 0x%llX (rsp %lld bytes below the base)\n",
-                            (unsigned long long)(uintptr_t)tib->StackBase, (unsigned long long)(uintptr_t)tib->StackLimit,
-                            (long long)((uintptr_t)tib->StackBase - ep->ContextRecord->Rsp));
-                    fprintf(stderr, "  raw words from rsp-16:");
-                    for (int i = -2; i < 22; i++)
-                        fprintf(stderr, "%s %llX", i % 6 == 4 ? "\n   " : "", (unsigned long long)sp[i]);
-                    fprintf(stderr, "\n");
-                }
-                shown = 0;
-                for (int i = 0; i < 64 && shown < 12; i++) {
-                    HMODULE m = NULL;
-                    wchar_t name[MAX_PATH];
-                    if (sp[i] < 0x10000 || (sp[i] >= (uintptr_t)self && sp[i] < (uintptr_t)self + 0x10000000ULL))
-                        continue;
-                    if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
-                                            GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, (LPCWSTR)sp[i], &m) || !m)
-                        continue;
-                    if (!GetModuleFileNameW(m, name, MAX_PATH)) continue;
-                    fprintf(stderr, "    [%d] %ls+0x%llX\n", i, wcsrchr(name, L'\\') ? wcsrchr(name, L'\\') + 1 : name,
-                            (unsigned long long)(sp[i] - (uintptr_t)m));
-                    shown++;
-                }
-            }
-        }
+        crash_native_stack(ep->ContextRecord);
         fflush(stderr);
+    }
+
+    /* Faults other than an access violation ended the process with no report: a copy of a rollback
+     * test vanished on a division by zero in sub_00081170 (0xC0000094, only Windows' error log had it),
+     * and players have reported windows that just disappeared. */
+    {
+        DWORD code = ep->ExceptionRecord->ExceptionCode;
+        const char *what = code == EXCEPTION_INT_DIVIDE_BY_ZERO ? "Integer division by zero"
+                         : code == EXCEPTION_INT_OVERFLOW ? "Integer overflow"
+                         : code == EXCEPTION_ILLEGAL_INSTRUCTION ? "Illegal instruction"
+                         : code == EXCEPTION_PRIV_INSTRUCTION ? "Privileged instruction" : NULL;
+        if (what) {
+            if (rollback_crash_cb) rollback_crash_cb();
+            fprintf(stderr, "[CRASH] %s at RIP=0x%llX\n", what, (unsigned long long)ep->ContextRecord->Rip);
+            fprintf(stderr, "  Xbox regs: eax=0x%08X ecx=0x%08X edx=0x%08X esp=0x%08X\n", g_eax, g_ecx, g_edx, g_esp);
+            fprintf(stderr, "  Xbox regs: ebx=0x%08X esi=0x%08X edi=0x%08X\n", g_ebx, g_esi, g_edi);
+            print_guest_context((void *)ep->ContextRecord->Rip);
+            crash_native_stack(ep->ContextRecord);
+            fflush(stderr);
+        }
     }
 
     return EXCEPTION_CONTINUE_SEARCH;
