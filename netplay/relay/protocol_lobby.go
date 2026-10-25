@@ -97,9 +97,11 @@ func safeFighter(f uint8) uint8 {
 // 125th Street Station).
 var QuickPool = []uint8{1, 6, 11}
 
-// UnsafeVenues are venue feIDs left out of every vote: The Pit (19), reported to crash online
-// (2026-10-21), until it is tested. A pool of only unsafe venues votes on QuickPool.
-var UnsafeVenues = map[uint8]bool{19: true}
+// UnsafeVenues are venue feIDs left out of every vote. A pool of only unsafe venues votes on
+// QuickPool. Empty: The Pit (19), out from 2026-10-21 after a player's crash report, played
+// online and offline again on 2026-10-25 without a crash (the load freezes of that time were the
+// START-during-load and screen-swap bugs, both fixed since).
+var UnsafeVenues = map[uint8]bool{}
 
 // RoomSettings is the Settings block of CREATE, SETTINGS and ROOM.
 type RoomSettings struct {

@@ -909,7 +909,24 @@ func TestLobbyUnsafeFighterReplaced(t *testing.T) {
 	}
 }
 
+func TestLobbyPitVotable(t *testing.T) {
+	l := newLobby(t, Config{})
+	l.enter(pA, "a")
+	l.enter(pB, "b")
+	pit := RoomSettings{Name: "pit", Public: 1, Mode: 0, Max: 2, Pool: []uint8{19}}
+	code := roomOf(t, l.mkRoom(pA, pit), pA).Room
+	l.joinCode(pB, code)
+	l.setReady(pA, 1)
+	st := roomOf(t, l.setReady(pB, 2), pA)
+	if len(st.Candidates) != 1 || st.Candidates[0] != 19 {
+		t.Fatalf("candidates %v", st.Candidates)
+	}
+}
+
 func TestLobbyUnsafeVenueLeftOut(t *testing.T) {
+	saved := UnsafeVenues
+	UnsafeVenues = map[uint8]bool{19: true} // the mechanism, with The Pit as the example
+	defer func() { UnsafeVenues = saved }()
 	l := newLobby(t, Config{})
 	l.enter(pA, "a")
 	l.enter(pB, "b")
