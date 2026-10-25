@@ -1,5 +1,53 @@
 # Improvement backlog
 
+## Frame pacing and executor performance on Windows — planned 2026-10-24
+
+Found while investigating #67 (choppy fights at 60 fps), #92 (exclusive full screen), #101 and #102, on the
+owner's PC (RTX 4070 Ti SUPER, 2560x1440, 143.91 Hz with VRR). The first fix is in PR #103: the frame is now
+flushed to the GPU before the executor's 60 Hz flip sleep (#102). Measure everything below with
+`RECOMP_PRESENT_PACING=1`, which logs `[PACING]`, `[ONSCREEN]` (time on screen per frame, `Present` call
+time) and `[GPUTIME]` (GPU busy, idle and finish times). Display-timing runs need the monitor awake and no
+screen saver: with the display asleep DXGI reports no frame statistics.
+
+Ordered by expected value:
+
+1. **What slows a human-played fight (#101).** The owner's manual fight dropped to 43–50 fps for about
+   30 s at 345–416 draws per frame. Scripted fights at the same draws per frame, and at the same settings,
+   held 60. Catch it with the play-test recorder (`[debug] record = true`, F9, or
+   `RECOMP_RECORD_AUTO_HITCH_MS=25`), then sample the executor thread during the slow stretch
+   (`scripts/sample-threads.py --samples 1`, repeated, tallying in-exe symbols). Candidates: per-draw cost
+   (item 2), shader compiles during play (the entry below), texture uploads (item 6). Done when the cause is
+   named with samples and the slow stretch is gone, or the item is merged into the one that fixes it.
+2. **Cost per draw in the translator.** A fight is about 370–400 draws per frame. Each is turned into
+   Direct3D 11 state changes and a constant-buffer upload on the one executor thread, and earlier profiles
+   found this cost hiding in the driver ("outside exe" samples). Count redundant state changes and
+   constant-buffer writes per frame; skip those that set what is already set. Measure with
+   `scripts/scene-perf.py` and the executor's share of a frame before and after. This also matters on
+   slower PCs and the Steam Deck. Done when a fight frame's executor time is measured before and after and
+   `regress.py` passes.
+3. **A precise frame timer.** `flip_pace()` (toolkit `src/kernel/nv2a_pb_exec.c`) on Windows sleeps to
+   about 1 ms before the deadline, then spins. The sleep depends on `timeBeginPeriod(1)` (called by the
+   input thread), which Windows can ignore under power throttling (#93). Use a high-resolution waitable
+   timer (`CREATE_WAITABLE_TIMER_HIGH_RESOLUTION`) for the wait and keep only a short spin. Done when
+   `[PACING]` intervals are as tight as now, the executor's CPU use during the wait is lower, and the #93
+   throttling repro no longer stretches frames.
+4. **Lower input latency.** With frames now ready when they are presented, the swap chain could queue
+   fewer of them: `IDXGIDevice1::SetMaximumFrameLatency(1)` or a waitable swap chain. Measure the delay
+   from present to screen first. The figure was dropped from the trace because its frame matching was off
+   by one, so fix that before using it. Done when latency is measured before and after with no loss of
+   evenness in `[ONSCREEN]`.
+5. **Widescreen side fill cost.** On frames that ask for it, the blurred side extension regenerates the
+   mip chain of the whole wide target. Compare `[GPUTIME]` busy time with `widescreen_side_fill = blur`
+   and `black`, at render scale 2 and 3. Probably small on a desktop GPU and more on the Deck. Done when
+   measured on both; change it only if it costs more than about 1 ms a frame.
+6. **HD texture uploads during play.** In the 2026-10-24 runs the pack did not load: its manifest is not
+   in that data folder. Run the same fight with a working pack and check `frames.csv` texture upload
+   columns and `[ONSCREEN]` for hitches at first use. Done when measured; plan streaming or upload
+   spreading only if uploads show up as late frames.
+
+Not on this list: frame rates above 60 (needs the game clock separated from rendering, deferred since M6),
+and exclusive full screen (#92: borderless full screen already gets VRR).
+
 ## One compiled pixel shader per HLSL text on Windows (Direct3D 11) — planned 2026-10-18
 
 Found during the 2026-10-18 scene performance pass (finding F4, first-use shader compile stutter). The
