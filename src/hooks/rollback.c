@@ -136,7 +136,7 @@ static int s_audio_state;               /* 0 before, 1 during, 2 after the audio
 #define ARENA_GROW   (1u * 1024u * 1024u)
 #define ARENA_MAX    (12u * 1024u * 1024u)
 #define ARENA_CHUNKS 16
-#define ARENA_BLOCKS 8192
+#define ARENA_BLOCKS 65536     /* 8192 ran out in a 4.5-minute fight: the blocks a load keeps are many and small */
 #define ARENA_ALIGN  128u               /* what sub_00029500 gives at most */
 #define SND_ALLOCATOR 0x003ADB58u
 /* addr/size: the piece of the arena; user: the block handed out (aligned, 16-byte header before it) */
@@ -792,18 +792,15 @@ static void build_data(const uint8_t *data_bg, unsigned data_pages)
 static void release_kept_arena(void)
 {
     int i;
-    unsigned n = 0, bytes = 0;
-    if (!s_arena) return;
-    for (;;) {
-        uint32_t a = 0;
-        EnterCriticalSection(&s_arena_cs);
-        for (i = 0; i < s_nblk && !a; i++)
-            if (s_blk[i].used && s_blk[i].freed) { a = s_blk[i].user; bytes += s_blk[i].size; }
-        LeaveCriticalSection(&s_arena_cs);
-        if (!a) break;
-        arena_free_now(a);
-        n++;
-    }
+    unsigned n = 0, k, bytes = 0;
+    uint32_t *kept;
+    if (!s_arena || !(kept = (uint32_t *)malloc(ARENA_BLOCKS * sizeof(uint32_t)))) return;
+    EnterCriticalSection(&s_arena_cs);
+    for (i = 0; i < s_nblk; i++)
+        if (s_blk[i].used && s_blk[i].freed) { kept[n++] = s_blk[i].user; bytes += s_blk[i].size; }
+    LeaveCriticalSection(&s_arena_cs);
+    for (k = 0; k < n; k++) arena_free_now(kept[k]);
+    free(kept);
     if (n)
         fprintf(stderr, "[ROLLBACK] %u arena blocks (%u KB) the engine gave back in the last fight, freed now\n",
                 n, bytes / 1024);
