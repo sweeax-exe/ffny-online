@@ -103,7 +103,9 @@ Get-Process defjam_recomp -ErrorAction SilentlyContinue |
 if (-not $relay.HasExited) { $relay.Kill() }
 
 for ($i = 0; $i -lt $Players; $i++) {
-    $log = (Select-String -Path "$logs\copy$i.txt" -Pattern '^log\s+(\S+)' | Select-Object -First 1).Matches.Groups[1].Value
+    $hit = Select-String -Path "$logs\copy$i.txt" -Pattern '^log\s+(\S+)' | Select-Object -First 1
+    $log = if ($hit) { $hit.Matches.Groups[1].Value } else { $null }
+    if (-not $hit) { "== copy $i  no run (harness: $(Get-Content "$logs\copy$i.err" -Raw))"; continue }
     "== copy $i  $log"
     Get-Content "$logs\copy$i.txt" | Select-Object -First 4 | Select-Object -Skip 1
     if ($log -and (Test-Path $log)) {
