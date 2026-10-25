@@ -54,6 +54,28 @@ The d-pad or left stick moves, **A** (the bottom face button) activates, **B** g
 buttons switch pages, and the triggers change a slider faster. This works with any pad the game reads, with
 the first pad to press a button, and independently of the game's own button mapping.
 
+## The online screens' look
+
+The online screens (`src/hooks/online_screen.cpp`, opened from ONLINE in the game's main menu) wear the
+launcher's look: its background picture, blurred (`ffny-branding/launcher-bg-blur.jpg`), behind every page,
+and the launcher's glass for every block of content (a dark translucent fill over the picture, a light line
+along the top, a faint border, corners that scale with the menu). Each page frames and lights the picture
+its own way: the hill red rising from the lower right, the room crimson, watching a cold broadcast light,
+the stats gold, the players and voice chat violet, and so on; the framing eases from page to page and drifts
+very slowly. A vignette, a little film grain and a few of the launcher's embers finish it. The light, the
+vignette and the grain are small textures made once; nothing is blurred while the game runs.
+
+The pages that used to sit beside the game's own door (the hub, the room list, the code, a new room's
+settings, voice chat, connecting) now cover the whole window as well, and the door's text sits on a glass
+panel where the door was. Keeping the game's door was tried: its lit, yellow-green wall beside the warm
+launcher picture looked like two screens at once. The hub shows its own A SELECT / B BACK, since the game's
+are covered.
+
+Without `ffny-branding` (a source tree without it, a damaged installation) the pages keep the earlier plain
+near-black background, with the game's door beside the hub, and the panels are the same dark glass over it.
+The game finds the folder as the launcher does: in its working directory or up to four folders above the
+executable.
+
 ## Where it comes from
 
 The screen is [Dear ImGui](https://github.com/ocornut/imgui) (MIT; release 1.92.9b, fetched at build time at
@@ -79,6 +101,8 @@ nobody at it (a locked screen, a remote run):
 | `RECOMP_WINDOW_SHOT=<file.bmp>` | Writes what the launcher (first frame) or the game window (the overlay, after `RECOMP_WINDOW_SHOT_FRAME` overlay frames, 20 by default) shows, as a 32-bit BMP. macOS and Linux |
 | `RECOMP_LAUNCHER_SCRIPT` | The launcher's input: `<ms>:click:<x>:<y>`, `<ms>:move:<x>:<y>`, `<ms>:shot:<file>`, `<ms>:play`, `<ms>:quit`, separated by `;`, times from the window's first frame and positions in window points |
 | `RECOMP_HOST_SCRIPT` | The game window's input: `<ms>:key:<SDL key name>` (`F1`, `Escape`), `<ms>:click:<x>:<y>`, `<ms>:move:<x>:<y>`, `<ms>:text:<chars>`, times from the window's opening |
+| `RECOMP_OVERLAY_SHOT_DIR=<folder>`, `RECOMP_OVERLAY_SHOT_MS` | Windows: the finished picture with the overlay, every `RECOMP_OVERLAY_SHOT_MS` (2000 by default) while the overlay draws, as `<ms>.bmp` |
+| `RECOMP_TEST_ONLINE_GALLERY=<ms>` | Windows, with `RECOMP_TEST_OPEN_ONLINE=1`: the online screens show every page in turn, `<ms>` each, with sample players, rooms, a hill and statistics, take no input and connect to nothing; the overlay captures are then named `<ms>-<page>.bmp`. For comparing a design change page by page from one copy |
 | `RECOMP_INPUT_VIRTUAL_PADS`, `RECOMP_INPUT_VIRTUAL_CHORD_MS` | An SDL virtual gamepad, which also opens and closes the overlay with its stick clicks and B ([input guide](10-input.md)) |
 
 For example, `RECOMP_HOST_SCRIPT="14000:key:F1;15000:click:659:126" RECOMP_WINDOW_SHOT=/tmp/overlay.bmp
