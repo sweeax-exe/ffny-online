@@ -60,7 +60,8 @@ void sub_001A6870_enter(void)
 /* Online play (src/hooks/netplay.c) uses the same points: it counts the steps, and in a
  * session it replaces every seed with one both PCs derive from the session. */
 void sub_00087700_enter(void) { defjam_test_step(); netplay_on_step(); }
-void sub_001A4D90_enter(void) { defjam_test_match_start(); netplay_on_match_start(); }
+static void crowd_guard_match_start(void);
+void sub_001A4D90_enter(void) { defjam_test_match_start(); netplay_on_match_start(); crowd_guard_match_start(); }
 void sub_001BC690_enter(void) { defjam_test_rng(g_esp); netplay_on_seed(g_esp, 2, 0x1BC690u); }
 void sub_001AD220_enter(void) { defjam_test_ai_seed(g_esp); netplay_on_seed(g_esp, 1, 0x1AD220u); }
 /* The seeding routine every generator of this kind goes through (thiscall). */
@@ -71,7 +72,114 @@ void sub_00200820_enter(void) { defjam_test_draw(1, MEM32(g_esp)); }
 void sub_001BC6E0_enter(void) { defjam_test_draw(2, MEM32(g_esp)); }
 void sub_000AA300_enter(void) { defjam_test_draw(g_ecx, MEM32(g_esp)); }
 void sub_000AA340_enter(void) { defjam_test_draw(g_ecx, MEM32(g_esp)); }
-void sub_000DB870_enter(void) { defjam_test_crowd_update(); }
+/* The background crowd (CInstanceCrowd, model icrowd01.o) cannot run off its model
+ * (docs/research/setstreamsource-crash.md). Its render entry turns the accumulated time at +0x13C
+ * into whole 1/60 s frames (sub_000DB730) and advances each spectator's 16-bit frame number in the
+ * instance-state table (+0x124, 4 bytes each, frame at +2; +0x11C entries) with sub_000DB660, which
+ * is bounded only for small steps: one advance of about 140 frames or more stores a frame past the
+ * idle (+0x134) plus excited (+0x138) clips, the stream opcode then reads a "vertex buffer" past the
+ * model's 383 descriptors, and SetStreamSource (sub_0021BB10) faults on text from the model's tail
+ * (players' reports with rollback on). So, before the body: the time is capped at 0.1 s (6 frames,
+ * the clamped advance cannot overshoot) and a frame outside the clips is put back into the idle clip.
+ * Logged the first time per match with what it found, and as totals. */
+#define CROWD_ACC_MAX   0.1f        /* s: 6 frames */
+#define CROWD_ACC_LOUD  0.25f       /* s: more than any rollback re-runs (RB_AHEAD + delay steps) */
+#define CROWD_FRAMES    383         /* stream-0 descriptors in icrowd01.o */
+static struct {
+    unsigned match, seen_match, told_match, renders, fired, fired_total, clamps, loud, repairs;
+    float acc_max;
+    int frame_max;
+} s_cg;
+
+static int crowd_guest_ok(uint32_t a, uint32_t len) { return a >= 0x80000000u && a + len >= a && a + len <= 0x84000000u; }
+
+static void crowd_guard_match_start(void)
+{
+    if (s_cg.renders)
+        fprintf(stderr, "[CROWD] the last match: %u background crowd renders, the guard fired %u times (%u repaired "
+                "frames, %u times over %.2f s), %u small time clamps; largest time %.3f s, largest frame %d\n",
+                s_cg.renders, s_cg.fired, s_cg.repairs, s_cg.loud, (double)CROWD_ACC_LOUD, s_cg.clamps,
+                (double)s_cg.acc_max, s_cg.frame_max);
+    s_cg.match++;
+    s_cg.renders = s_cg.fired = s_cg.clamps = s_cg.loud = s_cg.repairs = 0;
+    s_cg.acc_max = 0.0f;
+    s_cg.frame_max = 0;
+}
+
+static void crowd_guard(uint32_t crowd)
+{
+    uint32_t n, states, i, bad_at = 0;
+    int32_t idle, excited, hi, bad_frame = 0, top = -1;
+    unsigned bad = 0;
+    float acc, acc_was;
+    int loud = 0;
+    if (!crowd_guest_ok(crowd, 0x148u) || MEM32(crowd) != 0x002B4760u) return;    /* the class's vtable */
+    n = MEM32(crowd + 0x11Cu);
+    states = MEM32(crowd + 0x124u);
+    idle = (int32_t)MEM32(crowd + 0x134u);
+    excited = (int32_t)MEM32(crowd + 0x138u);
+    if (!n || n > 4096u || !crowd_guest_ok(states, n * 4u)) return;
+    {   /* Tests: RECOMP_TEST_CROWD_TIME=<s> adds that much time every 600th render (the failure on demand);
+         * RECOMP_CROWD_GUARD=off leaves the crowd as the game has it. */
+        static int off = -1, every;
+        static float extra;
+        if (off < 0) {
+            const char *v = getenv("RECOMP_TEST_CROWD_TIME");
+            off = getenv("RECOMP_CROWD_GUARD") && !strcmp(getenv("RECOMP_CROWD_GUARD"), "off");
+            extra = v ? (float)atof(v) : 0.0f;
+        }
+        if (extra > 0.0f && ++every % 600 == 0) {
+            MEMF(crowd + 0x13Cu) = MEMF(crowd + 0x13Cu) + extra;
+            fprintf(stderr, "[CROWD] test: %.2f s added to the background crowd's time\n", (double)extra);
+        }
+        if (off) return;
+    }
+    /* The clips' range; a crowd whose own numbers are off is kept inside the model and to frame 0. */
+    hi = idle > 0 && excited >= 0 && idle + excited <= CROWD_FRAMES ? idle + excited : CROWD_FRAMES;
+    s_cg.renders++;
+    if (s_cg.seen_match != s_cg.match + 1u) {
+        s_cg.seen_match = s_cg.match + 1u;
+        fprintf(stderr, "[CROWD] background crowd %08X: %u spectators, clips %d+%d, guarded\n", crowd, n, idle, excited);
+    }
+    acc = acc_was = MEMF(crowd + 0x13Cu);
+    if (acc_was > s_cg.acc_max) s_cg.acc_max = acc_was;
+    if (!(acc <= CROWD_ACC_MAX)) {                       /* also NaN */
+        acc = acc_was != acc_was ? 0.0f : CROWD_ACC_MAX;
+        MEMF(crowd + 0x13Cu) = acc;
+        if (!(acc_was <= CROWD_ACC_LOUD)) loud = 1; else s_cg.clamps++;
+    }
+    for (i = 0; i < n; i++) {
+        int32_t f = (int32_t)SMEM16(states + i * 4u + 2u);
+        if (f > top) top = f;
+        if (f >= 0 && f < hi) continue;
+        if (!bad) { bad_at = i; bad_frame = f; }
+        bad++;
+        MEM16(states + i * 4u + 2u) = (uint16_t)(idle > 0 && idle <= hi ? ((f % idle) + idle) % idle : 0);
+    }
+    if (top > s_cg.frame_max) s_cg.frame_max = top;
+    if (!loud && !bad) return;
+    s_cg.fired++;
+    s_cg.fired_total++;
+    s_cg.repairs += bad;
+    if (loud) s_cg.loud++;
+    if (s_cg.told_match != s_cg.match + 1u) {
+        char rb[200];
+        s_cg.told_match = s_cg.match + 1u;
+        netplay_rollback_brief(rb, (int)sizeof(rb));
+        fprintf(stderr, "[CROWD] background crowd %08X: time %.3f s (%.0f frames)%s, %u of %u frames outside 0..%d "
+                "(the first: spectator %u at %d, largest %d), clips %d+%d, percent %d; state table %08X (%s), "
+                "time word (%s); %s\n",
+                crowd, (double)acc_was, (double)acc_was * 60.0, loud ? ", capped" : "", bad, n, hi - 1, bad_at, bad_frame, top, idle, excited,
+                (int32_t)MEM32(crowd + 0x140u), states, rollback_page_state(states + bad_at * 4u),
+                rollback_page_state(crowd + 0x13Cu), rb);
+    } else if ((s_cg.fired_total & (s_cg.fired_total - 1u)) == 0) {      /* 2, 4, 8, ...: the totals */
+        fprintf(stderr, "[CROWD] the background crowd guard has fired %u times (%u this match: %u repaired frames, "
+                "%u times over %.2f s; largest time %.3f s)\n", s_cg.fired_total, s_cg.fired, s_cg.repairs, s_cg.loud,
+                (double)CROWD_ACC_LOUD, (double)s_cg.acc_max);
+    }
+}
+
+void sub_000DB870_enter(void) { defjam_test_crowd_update(); crowd_guard(g_ecx); }
 /* The per-fighter pad reader: RECOMP_TEST_INPUT replaces what it is about to read, and so
  * does online play, with the entry both PCs agreed on for this step. */
 void sub_001BAA00_enter(void) { defjam_test_input(MEM32(g_esp + 4)); netplay_on_pad_read(MEM32(g_esp + 4)); }

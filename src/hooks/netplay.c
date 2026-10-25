@@ -99,6 +99,7 @@ void netplay_on_crash(void) {}
 int netplay_toast(char *t, int n) { (void)t; (void)n; return 0; }
 int netplay_rematch_request(void) { return 0; }
 int netplay_debug_json(char *o, int n) { return snprintf(o, (size_t)n, "{}"); }
+int netplay_rollback_brief(char *o, int n) { return snprintf(o, (size_t)n, "offline"); }
 extern void sub_00081170(void);
 void netplay_crowd_update(void) { sub_00081170(); }
 
@@ -2968,6 +2969,15 @@ void *netplay_sound_handler(uint32_t va)
 }
 
 static uint32_t g_last_rb_target, g_last_rb_from;
+
+/* For other diagnostics (the crowd guard in recomp_manual.c): where the fight and its rollback are. */
+int netplay_rollback_brief(char *out, int size)
+{
+    if (!N.lockstep) return snprintf(out, (size_t)size, "not in an online fight (update %u)", N.updates);
+    return snprintf(out, (size_t)size, "step %u, final %u, update %u, rollback %s, %u rollbacks (deepest %u, the last back to %u from %u)%s",
+                    N.step, N.final_step, N.updates, N.rb_on ? "on" : "off", N.rb_count, N.rb_deepest,
+                    g_last_rb_target, g_last_rb_from, N.resim ? ", running steps again" : "");
+}
 
 static void rollback_crash_state(void)
 {
