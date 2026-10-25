@@ -1197,7 +1197,7 @@ static void page_general(UiMode mode)
     }
     ImGui::SeparatorText("Updates");
     {
-        char message[256];
+        char message[512];
         UpdaterState state = updater_state();
         updater_message(message, sizeof(message));
         ImGui::Text("This is build %d.", updater_local_build());
@@ -1503,7 +1503,7 @@ static void game_card(ImVec2 a, ImVec2 b, float s, UiResult &result)
 {
     UpdaterState state = updater_state();
     int build = 0, local = updater_local_build();
-    char version[64], notes[8], message[256], line[200];
+    char version[64], notes[8], message[512], line[200];
     updater_info(&build, version, sizeof(version), notes, sizeof(notes));
     updater_message(message, sizeof(message));
     ImDrawList *dl = ImGui::GetWindowDrawList();
@@ -1776,7 +1776,7 @@ static void update_popup(UiResult &result)
 {
     static int offered;             // the build offered last: each new one is offered once
     UpdaterState state = updater_state();
-    char message[256];
+    char message[512];
     updater_message(message, sizeof(message));
     if (state == UPDATER_AVAILABLE) {
         int newest = 0;
