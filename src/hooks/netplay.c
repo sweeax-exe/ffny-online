@@ -217,6 +217,8 @@ static struct {
     ULONGLONG koth_sent;
     int koth_fought, koth_done;     /* the fight was seen fighting; its RESULT was made */
     int koth_ready_for;             /* HILL `fights` + 1 of the call this PC readied for by itself */
+    volatile LONG start_deferred;   /* a START taken while the last fight's results still show */
+    AutoMatch deferred_m;
     /* controllers */
     XBOX_GAMEPAD remote_pad[MAXP];
     uint32_t remote_seq[MAXP], local_seq;
@@ -1188,7 +1190,7 @@ static void on_start(const uint8_t *b, int len)
     Reader r = { b, len, 0, 0 };
     AutoMatch m;
     uint32_t seed;
-    int count, i, j, slots[MAXP], fighters[MAXP], pos = -1;
+    int count, i, j, slots[MAXP], fighters[MAXP], pos = -1, deferred;
     if (len < 4) return;
     seed = get32(b);
     r.i = 4;
@@ -1201,6 +1203,8 @@ static void on_start(const uint8_t *b, int len)
     for (i = 0; i < count; i++) { slots[i] = rd8(&r); fighters[i] = rd8(&r); }
     if (r.bad) return;
     if (N.start_seed && seed == N.start_seed) { N.start_this_play = 1; return; }     /* a repeat */
+    /* King of the Hill: the last fight of this PC is still on its results screen */
+    deferred = N.lobby && N.koth_match && N.match_live && N.match_seen && N.koth_done;
     /* positions follow the room slots in order */
     for (i = 1; i < count; i++)
         for (j = i; j > 0 && slots[j - 1] > slots[j]; j--) {
@@ -1265,10 +1269,23 @@ static void on_start(const uint8_t *b, int len)
     N.koth_fights = N.roomv.hill.fights;
     N.koth_winner = -1;
     N.koth_fought = N.koth_done = 0;
+    N.start_deferred = 0;
     LeaveCriticalSection(&g_cs);
     reset_remote_pads();
     fprintf(stderr, "[NETPLAY] START: seed %08X, type %d, rules %d, venue %d, %d players, this PC is player %d%s\n",
             seed, m.type, m.rules, m.venue, count, pos + 1, N.koth_match ? " (a King of the Hill fight)" : "");
+    if (deferred) {
+        /* The king's next fight while its game still shows the last one's results: the new
+         * opponent's controller would drive this PC's results menu as player 2 (it chose Rematch
+         * over and over in the three-copy test), so the match is set up only once the game is back
+         * in the menus (netplay_on_main_menu). The pings (P_RTT) go out meanwhile. */
+        InterlockedExchange(&N.lockstep, 0);
+        assign_input(0);
+        N.start_deferred = 1;
+        N.deferred_m = m;
+        fprintf(stderr, "[NETPLAY] the match starts once this game is back from the last fight's results\n");
+        return;
+    }
     become_connected();
     automatch_request(&m);
 }
@@ -1487,7 +1504,7 @@ static DWORD WINAPI net_thread(LPVOID unused)
         int got;
         /* The first match after the game starts reads everything from the disk: 20 to 40 s on the
          * menu's LOADING, which players took for a freeze (F9 reports, build 23). */
-        if (N.match_live && N.start_tick && !N.load_done && !N.load_hinted && now - N.start_tick > 8000) {
+        if (N.match_live && N.start_tick && !N.load_done && !N.load_hinted && !N.start_deferred && now - N.start_tick > 8000) {
             N.load_hinted = 1;
             toast(12000, "Loading the match... The first one after the game starts can take up to half a minute.");
         }
@@ -1584,7 +1601,7 @@ static DWORD WINAPI net_thread(LPVOID unused)
             send_data(p, 7);
             N.hello_sent = now;
         }
-        if (N.state == NETPLAY_CONNECTED || N.state == NETPLAY_SYNCING)
+        if ((N.state == NETPLAY_CONNECTED || N.state == NETPLAY_SYNCING) && !N.start_deferred)
             send_live_pad(now);
         got = recv(N.sock, (char *)b, sizeof(b), 0);
         if (got > 0 && lag_ms > 0) {        /* tests: hold every arriving packet for a while */
@@ -1670,6 +1687,7 @@ static int start(const char *server, const char *name, int creating, const char 
     N.relay_caps = -1;
     N.koth_match = 0;
     N.koth_winner = -1;
+    N.start_deferred = 0;
     reset_remote_pads();
     EnterCriticalSection(&g_cs);
     memset(N.in_tag, 0, sizeof(N.in_tag));
@@ -2067,6 +2085,15 @@ void netplay_sync_point(void)
 
 void netplay_on_main_menu(void)
 {
+    if (N.lobby && InterlockedExchange(&N.start_deferred, 0)) {
+        /* King of the Hill: back from the last fight's results; the next one, agreed meanwhile */
+        log_contiguous("at the match end");
+        fprintf(stderr, "[NETPLAY] back from the last fight's results: setting up the next King of the Hill fight\n");
+        N.start_tick = GetTickCount64();    /* the load starts now */
+        become_connected();
+        automatch_request(&N.deferred_m);
+        return;
+    }
     if (N.lobby && N.match_live && N.match_seen)
         end_hub_match("Match over; back in the room.");
 }
