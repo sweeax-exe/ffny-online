@@ -371,6 +371,21 @@ static DWORD WINAPI install_thread(LPVOID unused)
     GetTempPathA(sizeof(dir), dir);
     strncat(dir, "DefJamUpdate", sizeof(dir) - strlen(dir) - 1);
     CreateDirectoryA(dir, NULL);
+    {
+        /* the setups of earlier updates (about 56 MB each) stayed here for good */
+        WIN32_FIND_DATAA found;
+        HANDLE h;
+        snprintf(path, sizeof(path), "%s\\DefJamSetup-*.exe", dir);
+        if ((h = FindFirstFileA(path, &found)) != INVALID_HANDLE_VALUE) {
+            do {
+                if (_stricmp(found.cFileName, g_setup)) {
+                    snprintf(path, sizeof(path), "%s\\%s", dir, found.cFileName);
+                    DeleteFileA(path);
+                }
+            } while (FindNextFileA(h, &found));
+            FindClose(h);
+        }
+    }
     snprintf(path, sizeof(path), "%s\\%s", dir, g_setup);
     MultiByteToWideChar(CP_UTF8, 0, path, -1, wpath, MAX_PATH * 2);
     {

@@ -1119,7 +1119,22 @@ class Engine:
                     pending.write_bytes(content)
                     os.replace(pending, path)
             raise
+        self.prune_versions(before[previous])
         self.event('Setup complete. Select Play or double-click: ' + str(launcher))
+
+    def prune_versions(self, previous_receipt):
+        """Every update builds a new versions/<version>-<source>-<toolkit> folder (about 0.5 GB) and
+        none was ever removed: a player's install grew by one per build. Keep this one and the one
+        installed before it (it may still run while this update finishes); remove older ones."""
+        keep = {self.version_root.resolve()}
+        with contextlib.suppress(ValueError, KeyError, TypeError, OSError):
+            keep.add(Path(json.loads(previous_receipt)['source']).resolve().parent)
+        for folder in (self.install / 'versions').glob('*'):
+            if (folder.is_dir() and not folder.is_symlink() and folder.resolve() not in keep
+                    and re.fullmatch(r'\d+\.\d+\.\d+-[0-9a-f]{12}-[0-9a-f]{12}', folder.name)):
+                shutil.rmtree(folder, ignore_errors=True)
+                if not folder.exists():
+                    self.event('Removed an old version: ' + folder.name)
 
     def execute(self):
         if getattr(self.args, 'hd_textures', False) and not HD_SUPPORTED:
