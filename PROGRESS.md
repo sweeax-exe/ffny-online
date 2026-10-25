@@ -10,7 +10,7 @@
 
 | Area | State | Notes |
 |---|---|---|
-| Release v0.12.0 (D204, first release train, D203) | ⏳ candidate: ✅ Windows full regression, Setup, Clean Update and audio; ✅ macOS full regression 18/18, `repeat` 2/2, audio (2026-10-25) / ⏳ Deck full regression, owner play-test | Branch `release/v0.12.0` (head `1e4d5db` for the gates), toolkit `8fb21d2` (fork `defjam/release-0.12.0`). Contents: #85 toolkit v0.16.0, #100 setup reuse (D202), #103 VRR flush (#102), #104 Deck frame overlap. Gate table in the release PR. |
+| Release v0.12.0 — Toolkit rebase and performance (D204, first release train, D203) | ✅ all gates passed; released from PR #106 | Branch `release/v0.12.0`, gates on `1e4d5db`, toolkit `8fb21d2` (fork `defjam/release-0.12.0`). Contents: #85 toolkit v0.16.0, #100 setup reuse (D202), #103 VRR flush (#102), #104 Deck frame overlap. Windows full regression 14/14 (`logs/regress-20261025-110936.txt`), opening-scene audio with the owner's settings clicks 1/0/1 dropouts 1/11/1, Setup fresh install and Clean Update from v0.11.0 (120 data files byte-identical); macOS full regression 18/18 in 40 min, `repeat` 2/2, audio clicks 5/2 dropouts 1/1; Steam Deck full regression pass (owner's Deck agent); owner play-test OK (2026-10-25). |
 | Windows start-up and setup fixes (D148) | ✅ v0.10.7 published (stable/latest) | PR #86 merged `009473a`, tag `v0.10.7`, release run 39845952105 31/31, nine assets verified against GitHub digests and provenance (source `009473a`, toolkit `8589f88`). Contents: PR #76 (issue #72: reject incomplete Windows memory layouts, toolkit `8589f88`) and PR #80 (issue #81: `/INCREMENTAL:NO` link). Windows 11 / RTX 4070 Ti SUPER / VS 2019 (MSVC 14.29): full regression 12 of 14 (combat and versus failed only `audio.dry_queue`, passed on stock v0.10.6 and on two reruns), quick 5/5 on the final build, units 537 passed, native placement fixture and the memory/settings/texture/kernel fixtures pass, 10-boot soak 10/10, published v0.10.6 setup then this setup (Clean Update, bundled): exit 0, 125-file data inventory identical. Neither reporter has confirmed; neither crash reproduced here. PR #73 deliberately left out (owner: bundle with the mod release). Owner play-tested the final Windows build and found it good. Audio gate flake tracked in #88. |
 | Launcher redesign (D138-D140, D142-D145) | ✅ v0.10.6 stable/latest | PR #58, main `af0c03c` integrated; brighter slider tracks, Windowed 1920×1080 / Auto / 2× defaults, bounded render-scale help and usable 250% compact controls. Native fresh/saved settings and Auto boot pass; final quick 5/5 (units 528/32 skip/one slow deselected), picture/overlay 2/2. Saved preferences preserved; owner confirms physical controller works. PR #58 merged 2e8ec40 after candidate CI 28/28; v0.10.6 promoted stable/latest as Improved Game Launcher (D145); release run 39452474210 30/30, nine asset hashes/provenance verified and unchanged. Refreshed Home/Advanced docs images included; Windows/Deck GUI acceptance pending. |
 | Plan reviewed | ✅ | See `docs/01-plan-review.md` |
@@ -456,20 +456,16 @@ It merges #85 (toolkit v0.16.0), #100 (setup reuse, D202), #103 (Windows D3D11 f
 `70612f2`, `206b421` and #104's `8d54440`, cherry-picked without conflicts. `.gitmodules` still names `defjam/upstream-v0.16`:
 fast-forward that branch to `8fb21d2` after the release. Gates are run on head `1e4d5db`; later commits are records and docs only.
 
-**Next (the gate table in the release PR is the checklist):**
-1. Windows: full `regress.py` on the re-lifted Release build (the earlier per-PR results on `bd8c633` do not carry over); opening
-   scene at the device with the owner's settings (`audio-clicks.py`; Windows was 1 click on `3e63e7b`); Setup from the release
-   PR's CI artifacts and a Clean Update from v0.11.0.
-2. Steam Deck: the owner's Deck agent runs the full regression on `1e4d5db` (steps that were #85's §7 item 3: `DEFJAM_DATA` set,
-   pipeline in the pinned container, `regress.py --preset posix-release` in headless gamescope, `--only repeat` twice for #98,
-   the opening-scene audio check), plus #104's FFA frame-rate check at render scale 2-4.
-3. macOS: full regression on `1e4d5db` (needs the owner's Mac).
-4. Owner play-test of the candidate: Windows at 143.91 Hz VRR (#103), the Deck in Game Mode at 60 Hz (#104), audio (#85).
-5. Merge PR #105 (release-train docs) to main and merge main into the release branch before the release PR lands.
-6. Publish (`docs/agent/release.md` step 10), then fast-forward the fork branch, close milestone v0.12.0, and delete the
-   leftovers from #85's runs: worktrees `code/defjam-v016-win`, `code/defjam-v0107-base`, `code/xboxrecomp-up-perf`,
-   `code/xboxrecomp-up-throttle`, `code/xboxrecomp-named`, `code/xboxrecomp-up-named` (unlink each `game` junction with
-   `cmd /c rmdir` first), test installs `code/defjam-v016-setup*`, `defjam\save.bak-20261022-v016`.
+**All gates passed (2026-10-25)**: Windows full regression 14/14, audio, Setup install and Clean Update; macOS and Deck full
+regression; owner play-test OK. Gate table in PR #106.
+
+**Next (after publication):**
+1. Fast-forward fork branch `defjam/upstream-v0.16` to `8fb21d2` (the branch `.gitmodules` names) and close milestone v0.12.0.
+2. Delete the test installs `code/defjam-v012-setup` and the leftovers from #85's runs: worktrees `code/defjam-v016-win`,
+   `code/defjam-v0107-base`, `code/xboxrecomp-up-perf`, `code/xboxrecomp-up-throttle`, `code/xboxrecomp-named`,
+   `code/xboxrecomp-up-named` (unlink each `game` junction with `cmd /c rmdir` first), `code/defjam-v016-setup*`,
+   `defjam\save.bak-20261022-v016`; then the release worktree `code/defjam-release-0.12.0` and `code/xboxrecomp-release-0.12.0`.
+3. Next release: open milestone v0.12.1 or v0.13.0 when the first PR is queued.
 
 ### v0.11.0 stable/latest — Mod Support Beta — 2026-10-24
 

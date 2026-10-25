@@ -25,7 +25,7 @@ the game on your machine. PS2 and GameCube copies cannot be used.
 [Report a problem](https://github.com/vyanhursky/DefJamFFNY-recomp/issues/new/choose) ·
 [Join the Discord](https://discord.gg/xNvBs23ZBw)
 
-**[v0.12.0 — Toolkit v0.16, smoother frames](https://github.com/vyanhursky/DefJamFFNY-recomp/releases/tag/v0.12.0)** is the latest stable release: the xboxrecomp v0.16 toolkit, audio fixes, and steadier frames on variable-refresh Windows displays and the Steam Deck. [v0.11.0](https://github.com/vyanhursky/DefJamFFNY-recomp/releases/tag/v0.11.0) brought Mod Support Beta. Discover, download, enable and order mods in the launcher. HD Widescreen Menus is available in the default catalogue after refresh. See the release notes for known visual limitations.
+**[v0.12.0 — Toolkit rebase and performance](https://github.com/vyanhursky/DefJamFFNY-recomp/releases/tag/v0.12.0)** is the latest stable release: the toolkit rebased onto xboxrecomp v0.16, audio fixes, and performance work for steadier frames on variable-refresh Windows displays and the Steam Deck. [v0.11.0](https://github.com/vyanhursky/DefJamFFNY-recomp/releases/tag/v0.11.0) brought Mod Support Beta. Discover, download, enable and order mods in the launcher. HD Widescreen Menus is available in the default catalogue after refresh. See the release notes for known visual limitations.
 
 ## Gameplay
 
