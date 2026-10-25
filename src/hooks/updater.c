@@ -248,7 +248,7 @@ static int json_string(const char *json, const char *key, char *out, size_t size
     for (p++; *p && *p != '"' && o + 1 < size; p++) {
         if (*p == '\\' && p[1] == 'u' && isxdigit((unsigned char)p[2]) && isxdigit((unsigned char)p[3])
                 && isxdigit((unsigned char)p[4]) && isxdigit((unsigned char)p[5])) {
-            /* \uXXXX: Go's encoder writes '>' and '&' this way ("Launcher > Settings" showed as
+            /* \uXXXX: Go's encoder writes '>' and '&' this way ("Launcher \u003e Settings" showed as
              * "Launcher u003e Settings"); as UTF-8, surrogates left out */
             char hex[5] = { p[2], p[3], p[4], p[5], 0 };
             unsigned c = (unsigned)strtoul(hex, NULL, 16);
