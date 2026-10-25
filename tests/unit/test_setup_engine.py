@@ -540,3 +540,19 @@ def test_a_folder_without_a_dump_says_what_to_choose(tmp_path):
     (empty / 'b.iso').write_bytes(b'2')
     with pytest.raises(engine.SetupError, match='more than one'):
         engine.locate_dump(empty)
+
+
+def test_old_versions_are_pruned_keeping_this_and_the_previous_one(tmp_path):
+    setup = installer(tmp_path)
+    versions = setup.install / 'versions'
+    old = [versions / ('0.7.2-%012x-%012x' % (i, i)) for i in range(3)]
+    for folder in old:
+        (folder / 'source').mkdir(parents=True)
+    other = versions / 'notes'
+    other.mkdir()
+    previous = json.dumps({'source': str(old[1] / 'source')}).encode()
+    setup.prune_versions(previous)
+    assert setup.version_root.exists() and old[1].exists() and other.exists()
+    assert not old[0].exists() and not old[2].exists()
+    setup.prune_versions(None)
+    assert setup.version_root.exists() and not old[1].exists()
