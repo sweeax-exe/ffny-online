@@ -161,10 +161,31 @@ def nearest_existing(path):
     return path
 
 
+def locate_dump(dump):
+    """A chosen folder without default.xbe at its top is often the folder around the dump: the one the
+    disc image was saved in, or one level above the extracted files (players picked those). Use the
+    one image or the one game folder it holds; otherwise say what to choose."""
+    if not dump.is_dir() or (dump / 'default.xbe').is_file():
+        return dump
+    try:
+        images = [p for p in dump.iterdir() if p.is_file() and p.suffix.lower() in ('.iso', '.xiso')]
+        folders = [p for p in dump.iterdir() if p.is_dir() and (p / 'default.xbe').is_file()]
+        folders += [q for p in dump.iterdir() if p.is_dir() for q in p.iterdir()
+                    if q.is_dir() and (q / 'default.xbe').is_file()]
+    except OSError:
+        return dump
+    found = images + folders
+    if len(found) == 1:
+        return found[0].resolve()
+    raise SetupError('The chosen dump folder has no default.xbe' + (
+        ' and holds more than one possible dump' if found else '') + '. Choose the Xbox disc image (.iso) '
+        'itself, or the folder that contains default.xbe.', 2)
+
+
 def validate_locations(install, data, dump):
     """dump is None for an update that reuses the installed game files (--reuse-extracted)."""
     install, data = Path(install).resolve(), Path(data).resolve()
-    dump = Path(dump).resolve() if dump is not None else None
+    dump = locate_dump(Path(dump).resolve()) if dump is not None else None
     named = (('install', install), ('data', data)) + ((('dump', dump),) if dump is not None else ())
     for i, (first_name, first) in enumerate(named):
         for second_name, second in named[i + 1:]:
