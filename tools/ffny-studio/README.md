@@ -58,8 +58,10 @@ The game is +Y up and faces +Z; the importer turns that into Blender's +Z up, fa
 ### Status
 
 Stage 1 is import only. The add-on has unit tests for everything outside Blender (the decoding and the data it
-builds) and a stub-`bpy` test of its structure, but **it has not yet been run in a real Blender**; expect
-fixes after the first try. Export back to the game is the next stage.
+builds) and a stub-`bpy` test of its structure. Checked in Blender 5.2.2 (2026-10-25, background mode, from the
+built zip through the legacy installer): House imports with 94 bones, 40 meshes (4754 vertices, 5505 faces),
+textured materials and working skinning (a posed bone moves its mesh). The import dialogs have not been clicked
+through by hand yet. Export back to the game is the next stage.
 
 ### Developing
 
