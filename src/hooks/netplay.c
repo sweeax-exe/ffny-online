@@ -159,7 +159,8 @@ void netplay_crowd_update(void) { sub_00081170(); }
 #define P_GAMEACK     2     /* guest -> host */
 #define P_LIVEPAD     3     /* u32 sequence, 18 bytes XBOX_GAMEPAD */
 #define P_STEPS       4     /* u32 match, u32 last step, u8 count, count x 32 bytes */
-#define P_HASH        5     /* u32 match, u32 step, u32 hash; since build 23 also the HASH_PARTS words */
+#define P_HASH        5     /* u32 match, u32 step, u32 hash; since build 23 also the HASH_PARTS words
+                               * (6 of them until build 26, 8 since) */
 #define P_RTT         6     /* hub: u32 START seed, u16 this PC's ping to the relay in ms, u8 rollback,
                                * since build 23 u32 the game files' fingerprint */
 #define LOCKSTEP_VERSION 4     /* 3: builds 19-20, rollback on; 4: build 21, rollback off again, reclaim on */
@@ -176,7 +177,8 @@ void netplay_crowd_update(void) { sub_00081170(); }
 #define HASH_EVERY    60
 #define P_REMATCH     8             /* u32 START seed, u32 match number: Rematch chosen; 0xFFFFFFFF: back to the room */
 #define REMATCH_NO    0xFFFFFFFFu
-#define HASH_PARTS    6             /* the checksum in parts: fighters 1-4, the AI generators, the rest */
+#define HASH_PARTS    8             /* the checksum in parts: fighters 1-4, the AI generators, the shared
+                                     * generator, the time scale (the raw word), the match generator */
 #define STALL_LIMIT_MS 10000        /* mid-fight: a player has gone */
 #define START_LIMIT_MS 90000        /* the first steps: another PC may still be loading the venue */
 #define DECIDED_LIMIT_MS 1000       /* after the KO: a PC that went on ahead is not a lost player */
@@ -671,18 +673,26 @@ static void store_steps(int from, const uint8_t *p, int len)
 static unsigned g_hash_matches;     /* checksums compared and equal, this session */
 
 /* Which part of the checksum differs: a fighter (a player's or a CPU's), the CPU fighters'
- * generators, or the rest. Desyncs so far came from matches with CPU fighters only. */
+ * generators, the shared generator, the time scale, the match generator. Until build 26 the shared
+ * generator and the time scale were one part, and a report could not say which of the two differed
+ * (docs/research/generator-timescale-desync.md, P0). */
 static void desync_detail(const uint32_t *mine, const uint32_t *theirs)
 {
     char text[200];
+    float ts_mine, ts_theirs;
     int n = 0, slot, fighters = N.fighters > N.players ? N.fighters : N.players;
     for (slot = 0; slot < 4 && slot < fighters; slot++)
         if (mine[slot] != theirs[slot])
             n += snprintf(text + n, sizeof(text) - (size_t)n, "%sfighter %d (%s %d)", n ? ", " : "", slot + 1,
                           slot < N.players ? "player" : "CPU", slot < N.players ? slot + 1 : slot + 1 - N.players);
-    fprintf(stderr, "[NETPLAY] desync detail: %s; the CPU fighters' generators %s; the shared generator and time scale %s\n",
-            n ? text : "no fighter's fields", mine[4] == theirs[4] ? "equal" : "differ",
-            mine[5] == theirs[5] ? "equal" : "differ");
+    memcpy(&ts_mine, &mine[6], 4);
+    memcpy(&ts_theirs, &theirs[6], 4);
+    fprintf(stderr, "[NETPLAY] desync detail: %s; the CPU fighters' generators %s; the shared generator %s; "
+            "the time scale %s (%g here, %g there); the match generator %s\n",
+            n ? text : "no fighter's fields",
+            fighters <= N.players ? "unused (no CPU fighters)" : mine[4] == theirs[4] ? "equal" : "differ",
+            mine[5] == theirs[5] ? "equal" : "differs", mine[6] == theirs[6] ? "equal" : "differs",
+            (double)ts_mine, (double)ts_theirs, mine[7] == theirs[7] ? "equal" : "differs");
 }
 
 /* Compare every checksum this PC and another have for the same match and step, once each. */
@@ -2390,6 +2400,7 @@ int netplay_room_name(int slot, char *out, int size)
 #define AI_GENS       0x003BFC70u   /* the CPU fighters' four generators, 0x88 bytes each (docs/research/fight-determinism.md) */
 #define SHARED_GEN    0x0039C0E0u   /* the utility generator menus, camera and effects draw too */
 #define TIME_SCALE    0x00349764u   /* CLogic+4, the step's scale (slow motion) */
+#define MATCH_GEN     0x003C1400u   /* the match generator the fight handlers draw (0x88 bytes, state at +4) */
 
 static uint32_t fighter_hash(uint32_t parts[HASH_PARTS])
 {
@@ -2407,10 +2418,11 @@ static uint32_t fighter_hash(uint32_t parts[HASH_PARTS])
         }
         if (slot < 4) parts[slot] = one;
     }
-    parts[4] = parts[5] = 2166136261u;
+    parts[4] = parts[5] = parts[7] = 2166136261u;
     for (a = 0; a < 4u * 0x88u; a += 4) parts[4] = (parts[4] ^ MEM32(AI_GENS + a)) * 16777619u;
     for (a = 0; a < 0x88u; a += 4) parts[5] = (parts[5] ^ MEM32(SHARED_GEN + a)) * 16777619u;
-    parts[5] = (parts[5] ^ MEM32(TIME_SCALE)) * 16777619u;
+    parts[6] = MEM32(TIME_SCALE);       /* the word itself: the report prints both values */
+    for (a = 0; a < 0x88u; a += 4) parts[7] = (parts[7] ^ MEM32(MATCH_GEN + a)) * 16777619u;
     return h;
 }
 
