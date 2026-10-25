@@ -37,7 +37,7 @@
 #define RATE        16000
 #define FRAME       640                 /* samples: 40 ms */
 #define FRAME_BYTES (FRAME * 2)
-#define SLOTS       4                   /* NETPLAY_MAX_PLAYERS */
+#define SLOTS       NETPLAY_ROOM_SLOTS  /* relay room slots 0..9 (King of the Hill rooms hold ten) */
 #define TALK_MS     300                 /* "talking" this long after a packet */
 #define OPEN_HANG   12                  /* open microphone: frames sent after the voice stops (480 ms) */
 
@@ -108,7 +108,7 @@ static ULONGLONG s_heard[SLOTS];                /* when a packet from the slot l
 static uint16_t s_seq_in[SLOTS];
 static int s_seq_seen[SLOTS];
 static volatile LONG s_sending;                 /* this PC sends right now */
-static int s_player_vol[SLOTS] = { 100, 100, 100, 100 };    /* per room slot, for this room only */
+static int s_player_vol[SLOTS] = { 100, 100, 100, 100, 100, 100, 100, 100, 100, 100 };  /* per room slot, this room only */
 static int s_mic_failed, s_out_failed;
 static INIT_ONCE s_once = INIT_ONCE_STATIC_INIT;
 static const WAVEFORMATEX k_format = { WAVE_FORMAT_PCM, 1, RATE, RATE * 2, 2, 16, 0 };
