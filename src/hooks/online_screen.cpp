@@ -771,6 +771,7 @@ struct Gallery {
     std::vector<NetRoomInfo> rooms;
     std::vector<NetPlayer> players;
     int queue = NETQUEUE_SEARCHING;
+    enum AccountState account = ACCOUNT_IN;
     std::string stats;
     const char *page = nullptr;     // the page shown, for the captures' names
 } G;
@@ -818,7 +819,7 @@ int lobby_queue(int *waited, int *searching, char *why, int size)
     return G.queue;
 }
 int lobby_caps() { return gallery_on() ? NETPLAY_CAP_KOTH : netplay_lobby_caps(); }
-enum AccountState acc_state() { return gallery_on() ? ACCOUNT_IN : account_state(); }
+enum AccountState acc_state() { return gallery_on() ? G.account : account_state(); }
 bool stats_busy() { return gallery_on() ? false : account_stats_busy() != 0; }
 bool stats_text(char *out, int size)
 {
@@ -1030,18 +1031,18 @@ void draw_players(ImDrawList *dl, const Frame &f, const Pad &pad)
         text(dl, f, g_title, 20, 320, 200, CREAM, "ASKING THE SERVER...", CENTER, 1.4f);
         return;
     }
-    glass(dl, f, 40, 80, 566, 326);
+    glass(dl, f, 40, 78, 566, 334);
     static const char *const states[] = { "IN THE MENU", "IN A ROOM", "FIGHTING" };
     const ImU32 colours[] = { CREAM, ORANGE, GREEN };
     for (int i = 0; i < n; i++) {
-        float x = i < 20 ? 52 : 330, y = 94 + (i % 20) * 15.5f;
+        float x = i < 20 ? 52 : 330, y = 90 + (i % 20) * 15.0f;
         int st = list[i].state >= 0 && list[i].state <= 2 ? list[i].state : 0;
         text(dl, f, g_title, 13, x, y, WHITE, list[i].name, LEFT, 1.1f);
         text(dl, f, g_title, 10, x + 262, y + 2, colours[st], states[st], RIGHT, 1.0f);
     }
     if (n == 0) text(dl, f, g_title, 14, 320, 200, GREY, "Nobody else with this version right now.", CENTER, 1.0f);
     if (online > n)
-        text(dl, f, g_title, 10, 592, 392, GREY, "and others on other versions or not shown", RIGHT, 1.0f);
+        text(dl, f, g_title, 10, 592, 394, GREY, "and others on other versions or not shown", RIGHT, 1.0f);
 }
 
 void draw_hub(ImDrawList *dl, const Frame &f, const Pad &pad)
@@ -1092,25 +1093,27 @@ void draw_hub(ImDrawList *dl, const Frame &f, const Pad &pad)
     if (outdated) {
         char line[96];
         snprintf(line, sizeof(line), "BUILD %d IS OUT: UPDATE IN THE LAUNCHER TO PLAY ONLINE", newer);
-        text(dl, f, g_title, 14, 50, 60, ORANGE, line, LEFT, 1.2f);
+        text(dl, f, g_title, 14, 50, 56, ORANGE, line, LEFT, 1.2f);
     } else if (!signed_in) {
         const char *line = acc == ACCOUNT_WAITING ? "FINISH SIGNING IN WITH DISCORD IN YOUR BROWSER..."
                          : acc == ACCOUNT_CHECKING ? "CHECKING YOUR DISCORD SIGN-IN..."
                          : "SIGN IN WITH DISCORD TO FIGHT ONLINE";
-        text(dl, f, g_title, 14, 50, 60, ORANGE, line, LEFT, 1.2f);
-        if (acc == ACCOUNT_OUT || acc == ACCOUNT_FAILED) hint(dl, f, 50 + text_width(f, g_title, 14, line) + 14, 59, "y", "SIGN IN");
+        text(dl, f, g_title, 14, 50, 56, ORANGE, line, LEFT, 1.2f);
+        if (acc == ACCOUNT_OUT || acc == ACCOUNT_FAILED) hint(dl, f, 50 + text_width(f, g_title, 14, line) + 14, 55, "y", "SIGN IN");
         if (pad.y && (acc == ACCOUNT_OUT || acc == ACCOUNT_FAILED)) {
             account_sign_in();
             say("Your browser opens: sign in with Discord, then come back.");
         }
     }
     {   // the items on one glass panel
-        float bottom = count > 6 ? 84 + (count - 1) * 45 + 42 : 88 + (count - 1) * 53 + 46;
+        float bottom = count > 7 ? 84 + (count - 1) * 41 + 39 : count > 6 ? 84 + (count - 1) * 45 + 42 : 88 + (count - 1) * 53 + 46;
         glass(dl, f, 36, 74, 290, bottom - 74 + 10);
     }
     for (int k = 0; k < count; k++) {
         int i = shown[k];
-        float x = 50, y = count > 6 ? 84 + k * 45 : 88 + k * 53, w = 262, h = count > 6 ? 42 : 46;
+        // eight items (ranked shown) sit closer, so the panel still ends above the hints
+        float x = 50, y = count > 7 ? 84 + k * 41 : count > 6 ? 84 + k * 45 : 88 + k * 53, w = 262;
+        float h = count > 7 ? 39 : count > 6 ? 42 : 46;
         if (mouse_in(f, x, y, w, h)) S.hub_sel = i;
         bool sel = S.hub_sel == i;
         if (sel) selector(dl, f, x, y, w, h);
@@ -1266,9 +1269,9 @@ void draw_stats(ImDrawList *dl, const Frame &f, const Pad &pad)
     char num[32];
     // left: the main fighter and the record
     glass(dl, f, 34, 78, 286, 328);
-    rect(dl, f, 44, 86, 114, 169, IM_COL32(0, 0, 0, 120), 4);
-    if (v.favorite < 0 || !portrait(dl, f, v.favorite, 46, 88, 110, 165))
-        rect(dl, f, 46, 88, 110, 165, IM_COL32(20, 20, 20, 200), 3);
+    rect(dl, f, 44, 86, 114, 155, IM_COL32(0, 0, 0, 120), 4);
+    if (v.favorite < 0 || !portrait(dl, f, v.favorite, 46, 88, 110, 151))
+        rect(dl, f, 46, 88, 110, 151, IM_COL32(20, 20, 20, 200), 3);
     text(dl, f, g_title, 22, 168, 92, CREAM, v.name.c_str(), LEFT, 1.6f);
     if (!v.favorite_name.empty()) {
         text(dl, f, g_hand, 13, 170, 124, ORANGE, "MAIN", LEFT, 1.0f);
@@ -1280,25 +1283,25 @@ void draw_stats(ImDrawList *dl, const Frame &f, const Pad &pad)
     text(dl, f, g_title, 20, 170, 188, v.rank ? CREAM : GREY, num, LEFT, 1.4f);
     if (!v.rank) text(dl, f, g_title, 11, 170, 214, GREY, "matches to get on it", LEFT, 1.0f);
     snprintf(num, sizeof(num), "%d", v.wins);
-    big_number(dl, f, 78, 262, num, "WINS", GREEN);
+    big_number(dl, f, 78, 246, num, "WINS", GREEN);
     snprintf(num, sizeof(num), "%d", v.losses);
-    big_number(dl, f, 160, 262, num, "LOSSES", IM_COL32(235, 90, 80, 255));
+    big_number(dl, f, 160, 246, num, "LOSSES", IM_COL32(235, 90, 80, 255));
     snprintf(num, sizeof(num), "%d%%", v.win_rate);
-    big_number(dl, f, 248, 262, num, "WIN RATE", CREAM);
+    big_number(dl, f, 248, 246, num, "WIN RATE", CREAM);
     if (v.ranked_games)
         snprintf(num, sizeof(num), "STREAK %d   BEST %d   RANKED %d", v.streak, v.best, v.ranked_rating);
     else
         snprintf(num, sizeof(num), "STREAK %d   BEST %d", v.streak, v.best);
-    text(dl, f, g_title, 13, 46, 324, WHITE, num, LEFT, 1.1f);
-    // last fights
-    text(dl, f, g_hand, 13, 46, 344, ORANGE, "LAST FIGHTS", LEFT, 1.0f);
-    if (v.recent.empty()) text(dl, f, g_title, 12, 46, 362, GREY, "Play online while signed in.", LEFT, 1.0f);
+    text(dl, f, g_title, 13, 46, 306, WHITE, num, LEFT, 1.1f);
+    // last fights: the three lines end well inside the panel (bottom 406)
+    text(dl, f, g_hand, 13, 46, 326, ORANGE, "LAST FIGHTS", LEFT, 1.0f);
+    if (v.recent.empty()) text(dl, f, g_title, 12, 46, 344, GREY, "Play online while signed in.", LEFT, 1.0f);
     for (size_t i = 0; i < v.recent.size() && i < 3; i++) {
         const auto &r = v.recent[i];
         if (r.size() < 4) continue;
         bool win = r[0] == "win", draw = r[0] == "draw";
         std::string line = r[1] + " vs " + (r[2].empty() ? "?" : r[2]);
-        float y = 360 + i * 18;
+        float y = 342 + i * 17;
         text(dl, f, g_title, 13, 46, y, win ? GREEN : draw ? GREY : IM_COL32(235, 90, 80, 255), win ? "W" : draw ? "D" : "L",
              LEFT, 1.1f);
         text(dl, f, g_title, 12, 64, y + 1, CREAM, line.c_str(), LEFT, 1.0f, 250);
@@ -1316,7 +1319,7 @@ void draw_stats(ImDrawList *dl, const Frame &f, const Pad &pad)
         char pg[32];
         snprintf(pg, sizeof(pg), "%s  %d / %d  %s", v.board_page > 0 ? "<" : " ", v.board_page + 1, v.board_pages,
                  v.board_page + 1 < v.board_pages ? ">" : " ");
-        text(dl, f, g_title, 14, 468, 386, stats_busy() ? GREY : CREAM, pg, CENTER, 1.1f);
+        text(dl, f, g_title, 14, 468, 382, stats_busy() ? GREY : CREAM, pg, CENTER, 1.1f);
     }
     text(dl, f, g_title, 10, 592, 100, GREY, "MOST WINS", RIGHT, 1.0f);
     if (v.board.empty())
@@ -1325,7 +1328,7 @@ void draw_stats(ImDrawList *dl, const Frame &f, const Pad &pad)
     for (size_t i = 0; i < v.board.size() && i < 10; i++) {
         const auto &e = v.board[i];
         if (e.size() < 5) continue;
-        float y = 124 + i * 27;
+        float y = 120 + i * 26;
         bool me = e[1] == v.name;
         if (me) rect(dl, f, 336, y - 3, 264, 24, IM_COL32(255, 168, 26, 60), 4);
         ImU32 col = e[0] == "1" ? IM_COL32(255, 205, 60, 255) : me ? CREAM : WHITE;
@@ -1790,7 +1793,7 @@ void draw_watch(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r
         if (fighter < 0 || !portrait(dl, f, fighter, x + 5, y + 5, w - 10, ph - 10))
             text(dl, f, g_title, 40, x + w / 2, y + 80, GREY, "?", CENTER);
         if (slot >= 0 && slot == h.king) {
-            crown(dl, f, x + w / 2, y - 2, 44);
+            crown(dl, f, x + w / 2, y - 17, 40);
             char streak[32];
             snprintf(streak, sizeof(streak), "KING  x%d", h.streak);
             text(dl, f, g_title, 13, x + w - 8, y + 10, GOLD, streak, RIGHT, 1.2f);
@@ -1893,7 +1896,7 @@ void draw_hill(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
 
     // left: the line, numbered from the top
     glass(dl, f, 36, 76, 296, 318, 12, IM_COL32(10, 10, 13, 255), 0.65f);
-    glass(dl, f, 346, 84, 252, 310, 12, IM_COL32(10, 10, 13, 255), 0.5f);
+    glass(dl, f, 346, 78, 252, 316, 12, IM_COL32(10, 10, 13, 255), 0.5f);
     text(dl, f, g_hand, 14, 52, 84, ORANGE, "THE LINE", LEFT, 1.0f);
     char cap[32];
     snprintf(cap, sizeof(cap), "%d / %d", h.valid ? h.count : r.player_count, r.settings.max);
@@ -1933,13 +1936,13 @@ void draw_hill(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
     }
 
     // right: the king, with the crown and the streak
-    float kx = 412, ky = 96;
+    float kx = 412, ky = 100;
     if (h.valid && h.king >= 0) {
         int kf = slot_fighter(r, h.king);
         rect(dl, f, kx, ky, 102, 152, IM_COL32(0, 0, 0, 150), 4);
         if (kf < 0 || !portrait(dl, f, kf, kx + 3, ky + 3, 96, 146)) text(dl, f, g_title, 34, kx + 51, ky + 50, GREY, "?", CENTER);
         crown(dl, f, kx + 51, ky - 4, 40);
-        text(dl, f, g_hand, 20, 463, 254, h.king == r.you ? ORANGE : CREAM, slot_name(r, h.king), CENTER, 1.2f);
+        text(dl, f, g_hand, 20, 463, 256, h.king == r.you ? ORANGE : CREAM, slot_name(r, h.king), CENTER, 1.2f);
         char streak[48];
         snprintf(streak, sizeof(streak), h.streak == 1 ? "%d WIN IN A ROW" : "%d WINS IN A ROW", h.streak);
         text(dl, f, g_title, 15, 463, 280, GOLD, streak, CENTER, 1.2f);
@@ -2118,8 +2121,9 @@ void draw_voice(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r
 
     page_title(dl, f, "VOICE CHAT");
     std::string key = setting_text("voice_key", "T");
-    // a full King of the Hill room has nine others: the rows get closer together
-    float row_step = rows > 9 ? 300.0f / rows : 39, row_h = row_step - 5;
+    // a room's players add rows (a full King of the Hill room nine): from eight rows on they get closer
+    // together, so the rows and the microphone's meter end above the hints
+    float row_step = rows > 7 ? 300.0f / rows : 39, row_h = row_step - 5;
     for (int i = 0; i < rows; i++) {
         float x = 50, y = 80 + i * row_step, w = 270, h = row_h;
         if (mouse_in(f, x, y, w, h)) S.voice_sel = i;
@@ -2197,7 +2201,7 @@ void draw_status(ImDrawList *dl, const Frame &f)
 // The gallery's sample: a room of `count` with names and fighters, this PC in slot 0 and hosting.
 NetRoom sample_room(int mode, int max, int count)
 {
-    static const char *const names[] = { "Ann", "Ben", "Cal", "Dee", "Eve", "Fox", "Gus", "Hal" };
+    static const char *const names[] = { "Ann", "Ben", "Cal", "Dee", "Eve", "Fox", "Gus", "Hal", "Ivy", "Jay" };
     const auto &list = roster();
     NetRoom r = {};
     r.in_room = 1;
@@ -2210,7 +2214,7 @@ NetRoom sample_room(int mode, int max, int count)
     r.settings.max = max;
     apply_preset(r.settings, 1);
     r.player_count = count;
-    for (int i = 0; i < count && i < 8; i++) {
+    for (int i = 0; i < count && i < 10; i++) {
         NetRoomPlayer &p = r.players[i];
         p.slot = i;
         snprintf(p.name, sizeof(p.name), "%s", names[i]);
@@ -2226,7 +2230,7 @@ NetRoom sample_room(int mode, int max, int count)
 // Which page the gallery shows now, and the sample it shows with it.
 void gallery_step()
 {
-    static const char *const pages[] = { "connecting", "offline", "hub", "rooms", "code", "create", "create-koth",
+    static const char *const pages[] = { "connecting", "offline", "hub", "hub-signin", "hub-voice", "rooms", "code", "create", "create-koth",
                                          "ranked", "voice", "stats", "players", "fighters", "room", "vote", "hill",
                                          "up", "watch", "room-voice", "match" };
     const int count = (int)(sizeof(pages) / sizeof(pages[0]));
@@ -2277,6 +2281,7 @@ void gallery_step()
     G.in_lobby = true;
     G.room = NetRoom();
     G.queue = NETQUEUE_SEARCHING;
+    G.account = ACCOUNT_IN;
     S.watch_hidden = 0;
     S.note_until = 0;
     S.settings_edit = false;
@@ -2284,6 +2289,8 @@ void gallery_step()
     if (p == "connecting") { G.state = NETPLAY_CONNECTING; G.in_lobby = false; }
     else if (p == "offline") { G.state = NETPLAY_FAILED; G.in_lobby = false; }
     else if (p == "hub") { S.page = HUB; S.hub_sel = 0; S.quick_mode = 0; }
+    else if (p == "hub-signin") { S.page = HUB; S.hub_sel = 3; G.account = ACCOUNT_OUT; }
+    else if (p == "hub-voice") { S.page = HUB; S.hub_sel = HUB_VOICE; }
     else if (p == "rooms") { S.page = ROOMS; S.rooms_sel = 1; }
     else if (p == "code") { S.page = CODE; snprintf(S.code, sizeof(S.code), "GTE4AQ"); S.code_pos = 3; }
     else if (p == "create" || p == "create-koth") {
@@ -2311,7 +2318,7 @@ void gallery_step()
         S.vote_sel = 0;
     } else if (p == "hill" || p == "up" || p == "watch") {
         S.page = HUB;
-        NetRoom &r = G.room = sample_room(NETPLAY_MODE_KOTH_RANDOM, 8, 5);
+        NetRoom &r = G.room = sample_room(NETPLAY_MODE_KOTH_RANDOM, 10, 9);
         NetHill &h = r.hill;
         h.valid = 1;
         h.king = 2;
@@ -2319,9 +2326,9 @@ void gallery_step()
         h.ms_left = 14000;
         h.received = r.received;
         h.last_winner = 2; h.last_loser = 3; h.last_how = NETHOW_WON;
-        h.count = 5;
-        const int order[5] = { 2, 1, 0, 3, 4 };
-        for (int i = 0; i < 5; i++) { h.line[i].slot = order[i]; h.line[i].state = NETLINE_WAITING; h.line[i].wins = i == 0 ? 5 : i == 1 ? 2 : i == 3 ? 1 : 0; }
+        h.count = 9;     // a long line: it must stay inside its panel
+        const int order[9] = { 2, 1, 0, 3, 4, 5, 6, 7, 8 };
+        for (int i = 0; i < 9; i++) { h.line[i].slot = order[i]; h.line[i].state = NETLINE_WAITING; h.line[i].wins = i == 0 ? 5 : i == 1 ? 2 : i == 3 ? 1 : 0; }
         h.line[4].state = NETLINE_AWAY;
         if (p == "hill") { h.phase = NETHILL_CALLING; h.line[0].state = NETLINE_READY; h.line[1].state = NETLINE_CALLED; }
         else if (p == "up") {
@@ -2558,8 +2565,8 @@ bool draw(ImVec2 display)
         draw_hub(dl, f, pad);      // the menu's own "A SELECT  B BACK" stays visible above while its door shows
         if (!g_game_door) {
             float hx = 54;
-            hx += hint(dl, f, hx, 420, "a", "SELECT");
-            hint(dl, f, hx, 420, "b", "BACK");
+            hx += hint(dl, f, hx, 424, "a", "SELECT");
+            hint(dl, f, hx, 424, "b", "BACK");
         }
         if ((pad.a && S.hub_sel == HUB_LEAVE) || pad.b) keep = false;
     }
