@@ -153,3 +153,7 @@ python -m ffnystudio export-fighter V2IP_003A <out-dir>
 ```
 
 Output goes only to the folder given; exports are game data and stay local.
+
+The Blender add-on (import of fighters and clothing parts, 2026-10-25) is described in
+[tools/ffny-studio/README.md](../../tools/ffny-studio/README.md); it builds on the same views through
+`ffnystudio.blender_data` and decodes SHPX without Pillow (`ffnystudio.texture`).
