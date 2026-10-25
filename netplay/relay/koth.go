@@ -417,7 +417,7 @@ func (r *Relay) quickHill(now time.Time, c *client, m Quick, reqLen int) []Packe
 		best.place(c, slot)
 		return r.joined(now, best, c)
 	}
-	return r.create(now, c, RoomSettings{Name: quickName(c.name), Public: 1, Mode: m.Mode, Max: m.Max, Pool: QuickPool}, reqLen)
+	return r.create(now, c, RoomSettings{Name: quickName(c.name), Public: 1, Mode: m.Mode, Max: m.Max, Pool: quickPool(m.Mode)}, reqLen)
 }
 
 // ---- timers and forwarding ----

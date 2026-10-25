@@ -93,9 +93,33 @@ func safeFighter(f uint8) uint8 {
 	return f
 }
 
-// QuickPool is the venue pool of a room created by QUICK (The Foundation, The Terror Dome,
-// 125th Street Station).
+// QuickPool is the venue pool of a ranked room, and the fallback of a vote on unsafe venues only
+// (The Foundation, The Terror Dome, 125th Street Station).
 var QuickPool = []uint8{1, 6, 11}
+
+// QuickVenues is the venue pool of a room created by QUICK: every venue the game's online screens
+// offer (venue.xml's numbered venues), so the vote draws three different ones each time. Quick
+// rooms voted on QuickPool's three alone until 2026-10-25, which players found dull.
+var QuickVenues = []uint8{1, 2, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 21, 22, 24, 26}
+
+// OneOnOneVenues carry a special match's rules (Gun Hill Garage's cars, Red Hook's fire, Crow's
+// Office's window) and are for two fighters only: a 3-Way there desynced and crashed
+// (docs/research/team-and-special-match-types.md).
+var OneOnOneVenues = map[uint8]bool{17: true, 24: true, 26: true}
+
+// quickPool is QuickVenues for a quick room of this mode.
+func quickPool(mode uint8) []uint8 {
+	if mode == KothFightMode || IsKoth(mode) {
+		return QuickVenues
+	}
+	var pool []uint8
+	for _, v := range QuickVenues {
+		if !OneOnOneVenues[v] {
+			pool = append(pool, v)
+		}
+	}
+	return pool
+}
 
 // UnsafeVenues are venue feIDs left out of every vote. A pool of only unsafe venues votes on
 // QuickPool. Empty: The Pit (19), out from 2026-10-21 after a player's crash report, played

@@ -253,3 +253,24 @@ func FuzzDecodeLobby(f *testing.F) {
 		}
 	})
 }
+
+func TestQuickPoolEveryVenue(t *testing.T) {
+	one := quickPool(0)
+	if len(one) != len(QuickVenues) || len(one) > MaxPool {
+		t.Fatalf("one on one quick pool %v", one)
+	}
+	for _, mode := range []uint8{2, 3, ModeKoth} {
+		pool := quickPool(mode)
+		for _, v := range pool {
+			if mode != ModeKoth && OneOnOneVenues[v] {
+				t.Fatalf("mode %d offers one-on-one venue %d", mode, v)
+			}
+		}
+		if mode == ModeKoth && len(pool) != len(QuickVenues) {
+			t.Fatalf("hill quick pool %v", pool)
+		}
+	}
+	if !(RoomSettings{Name: "Quick: x", Public: 1, Mode: 2, Max: 4, Pool: quickPool(2)}).validShape() {
+		t.Fatal("a quick room's settings are refused")
+	}
+}

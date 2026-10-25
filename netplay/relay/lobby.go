@@ -567,7 +567,7 @@ func (r *Relay) create(now time.Time, c *client, s RoomSettings, reqLen int) []P
 
 // quick joins the public phase-0 room with that mode, the client's build and a
 // free slot that has the most players (then the oldest), whatever its size, or
-// creates one named "Quick: <player>" with QuickPool, so the room list shows it
+// creates one named "Quick: <player>" with quickPool (every venue), so the room list shows it
 // as a quick match.
 func (r *Relay) quick(now time.Time, c *client, m Quick, reqLen int) []Packet {
 	if c.room != nil {
@@ -594,7 +594,7 @@ func (r *Relay) quick(now time.Time, c *client, m Quick, reqLen int) []Packet {
 		best.place(c, slot)
 		return r.joined(now, best, c)
 	}
-	return r.create(now, c, RoomSettings{Name: quickName(c.name), Public: 1, Mode: m.Mode, Max: m.Max, Pool: QuickPool}, reqLen)
+	return r.create(now, c, RoomSettings{Name: quickName(c.name), Public: 1, Mode: m.Mode, Max: m.Max, Pool: quickPool(m.Mode)}, reqLen)
 }
 
 // quickName is a quick-match room's name: "Quick: " and the player's name, cut to

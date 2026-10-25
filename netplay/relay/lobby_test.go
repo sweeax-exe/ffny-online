@@ -359,7 +359,7 @@ func TestLobbyQuick(t *testing.T) {
 	}
 	// Nobody waiting: A gets a new public room named "Quick: <A>", with the quick pool.
 	st := onlyRoomTo(t, l.quickM(pA, 0, 2), pA)
-	want := RoomSettings{Name: "Quick: q10", Public: 1, Mode: 0, Max: 2, Rounds: 0, Pool: QuickPool}
+	want := RoomSettings{Name: "Quick: q10", Public: 1, Mode: 0, Max: 2, Rounds: 0, Pool: QuickVenues}
 	if st.You != 0 || st.Host != 0 || !st.Settings.equal(want) {
 		t.Fatalf("quick-created ROOM %#v", st)
 	}
