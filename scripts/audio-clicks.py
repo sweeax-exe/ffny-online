@@ -15,7 +15,9 @@ Per file: clicks (samples whose second difference is over 8x the local 5 ms RMS 
 differences and over 3000, at most one per 10 ms), how many sit on a slice edge, the clicks per
 minute, and dropouts (runs of 32 or more frames of exact zero with sound within 10 ms on both
 sides). On Windows in October 2026 the opening scene gave 386-422 clicks per 330 s, nearly all on
-slice edges, before the toolkit fix 3e63e7b, 1 after, and 2 on v0.10.7. Needs numpy.
+slice edges, before the toolkit fix 3e63e7b, 1 after, and 2 on v0.10.7. On macOS the same scene had
+about 1,300 dropouts of one slice before 957c1ba (the sequencer restart, D200), 1 after and on v0.10.5.
+Needs numpy.
 """
 import argparse
 import sys

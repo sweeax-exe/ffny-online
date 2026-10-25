@@ -32,6 +32,7 @@ port traps.
 | `0988577`, `f30a713`, `81810c8` fix(recomp) switch slots | ed81613, 48268f5, c3e95e7 | cherry-picked; two upstream tests adjusted for the fallback's second path |
 | `2b73d81` perf(disasm) decode cache | (new) | fork copy of upstream PR #255 (issue #254): the callback probes share one decoder that decodes each instruction once; disasm 990 s -> 167 s here, output byte-identical. Drop at the next rebase once upstream has it |
 | `3e63e7b` fix(apu) named heap bytes | (new) | a page MmGetPhysicalAddress named from the heap is RAM only for the bytes of the live block that was named; the mix buffer's last page (shared with a named heap block) had read RAM and clicked once a lap. Upstream candidate (upstream's page map, #193) |
+| `957c1ba` fix(apu) sequencer restart | (new) | a frame that reads SECTL while DirectSound's SSL service routine has the sequencer stopped (150-400 us every 43 ms) waits instead of playing a silent slice; one that stays off past 5 ms gets lightweight frames as before (`mcpx_apu_frame_kind`, D200) |
 
 ## Dropped
 
@@ -263,14 +264,35 @@ v0.13.0 + fork `e818066`, built 2026-10-20). Old and new alternated:
 - The Mac had the Windows click defect too: 401 per 330 s on `2b73d81`, nearly all on slice edges and in the
   first three minutes, as on Windows. The 10-22 Mac pass did not catch it: it counted mix-buffer holes. `3e63e7b`
   fixes it here as well; what is left is close to the old build.
-- **Open: one-slice zero gaps.** The migrated build hands the device about 1,300 gaps per 330 s that the old
-  build does not (1). Each is one 32-sample slice of exact zero (0.67 ms; a few are 64), starting on a slice
-  edge, a median 8,300 frames (0.17 s) apart through the whole scene, mostly in quiet passages (peak about 700
-  in the ms either side; the step into each gap is about 300, under the click threshold). About 0.9 s of
-  silence in all. They are already there on `2b73d81`, so they come with the migration, not with `3e63e7b`.
-  Not traced. Not yet known: whether they can be heard (the owner's Windows ear found the build clean), and
-  whether Windows and the Deck have them (their records count clicks or mix-buffer holes, not dropouts). A
-  whole silent slice points at the APU rendering a slice as silence rather than at the device queue;
-  `RECOMP_APU_VOICE_PCM` would tell whether the voices already have the gaps.
+- **One-slice zero gaps, found and fixed (`957c1ba`, D200).** The migrated build handed the device about 1,300
+  gaps per 330 s that the old build does not (1): each one 32-sample slice of exact zero (0.67 ms; a few are 64),
+  starting on a slice edge, a median 8,300 frames (0.17 s) apart through the whole scene, mostly in quiet passages
+  (peak about 700 in the ms either side; the step into each gap is about 300, under the click threshold), on all
+  eight slices of the period. They are already there on `2b73d81`, so they came with the migration, not with
+  `3e63e7b`.
+
+  Cause: DirectSound's sample-limit service routine (each SSL, 2048 samples, every 43 ms) stops the sequencer
+  and starts it again, SECTL `0x07` then `0x0F` 150-400 us later. The frame thread reads SECTL once per frame;
+  a frame that read it inside that gap took the lightweight branch (software mixer and test tone only), which
+  leaves the VP's slice silent. A temporary trace put all 60 logged gaps on that branch, none in `se_frame`,
+  and showed the SECTL pattern. The old toolkit has the same gate; its timing never caught the gap.
+
+  Fix: `mcpx_apu_frame_kind` makes the frame decision. A sequencer that was rendering and reads off is held
+  like a trapped front end (no frame; the title's next SECTL write ends the wait) for up to 5 ms; one that
+  stays off longer gets lightweight frames as before, and is not held again until the VP has rendered.
+  `apu_monitor` gains the case (ten simulated seconds of SSL stops: 0 frames played silent).
+
+  | Build, opening scene 330 s | Clicks (on slice edges) | Dropouts |
+  |---|---|---|
+  | pin `3e63e7b` (2 runs, above) | 7 (4), 9 (5) | 1,344, 1,307 |
+  | pin `957c1ba` (2 runs) | 1 (0), 3 (2) | **1, 1** |
+  | v0.10.5 (2 runs, above) | 1 (0), 5 (3) | 1, 1 |
+
+  With `957c1ba`: full regression 18/18 (`logs/regress-20261024-204851.txt`; replay hash unchanged,
+  Terrordome 242 s at median 120, combat 27/27, versus 26/26, soak 3/3), `repeat` 2/2
+  (`logs/regress-20261024-205538.txt`, `-210226.txt`); fixtures `apu_monitor`, `apu_irq`, `apu_lifecycle`,
+  `apu_phys`, `apu_mixdown`, `apu_dsp_ack`, `apu_wav` pass on macOS. The fight in `combat` lasted 265 s (116 s
+  earlier the same day, 193-194 s on 10-22); its length varies with how the fight goes, and all 27 assertions
+  pass. The code is shared: Windows and the Deck have not run it yet.
 
 Not run: the Setup from the newest green CI run and the Story intro with a pad (§7 step 5; needs a person).
