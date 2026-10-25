@@ -6,6 +6,8 @@ import importlib.util
 import json
 import os
 import pytest
+import sys
+import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -270,6 +272,92 @@ def test_backup_status_never_overwrites_save_content_or_prunes_failed_restore(tm
         with harness.SaveGuard(str(tmp_path)):
             pass
     assert harness.Path(failed.copy).is_dir()
+
+
+def _interrupted_guard(tmp_path, monkeypatch):
+    """A guard whose run was killed after the game changed the save."""
+    monkeypatch.setattr(harness, 'kill_stray', lambda: None)
+    save = tmp_path / 'save'
+    (save / 'UserData').mkdir(parents=True)
+    (save / 'UserData/profile').write_bytes(b'original')
+    guard = harness.SaveGuard(str(tmp_path))
+    guard.__enter__()
+    (save / 'UserData/profile').write_bytes(b'changed by the killed run')
+    monkeypatch.setattr(harness, 'pid_alive', lambda pid: False)     # the harness process is gone
+    return save, guard
+
+
+def test_a_killed_guard_blocks_the_next_one_instead_of_copying_the_changed_save(tmp_path, monkeypatch):
+    save, killed = _interrupted_guard(tmp_path, monkeypatch)
+    with pytest.raises(harness.StaleSaveGuard, match='save-recover'):
+        harness.SaveGuard(str(tmp_path)).__enter__()
+    assert (save / 'UserData/profile').read_bytes() == b'changed by the killed run'
+    assert harness.Path(killed.copy, 'UserData/profile').read_bytes() == b'original'
+
+
+def test_save_recover_restore_puts_the_oldest_copy_back(tmp_path, monkeypatch):
+    save, killed = _interrupted_guard(tmp_path, monkeypatch)
+    monkeypatch.setenv('DEFJAM_DATA', str(tmp_path))
+    assert harness.main(['save-recover']) == 1                     # lists, changes nothing
+    assert (save / 'UserData/profile').read_bytes() == b'changed by the killed run'
+    assert harness.main(['save-recover', '--restore']) == 0
+    assert (save / 'UserData/profile').read_bytes() == b'original'
+    with harness.SaveGuard(str(tmp_path)) as guard:                # runs again, and the copy can be pruned
+        pass
+    assert guard.restored_equal
+    assert (tmp_path / 'save-guard/.status' / (harness.Path(killed.backup).name + '.ok')).is_file()
+
+
+def test_save_recover_accept_keeps_the_save_as_it_is(tmp_path, monkeypatch):
+    save, killed = _interrupted_guard(tmp_path, monkeypatch)
+    monkeypatch.setenv('DEFJAM_DATA', str(tmp_path))
+    assert harness.main(['save-recover', '--accept']) == 0
+    assert (save / 'UserData/profile').read_bytes() == b'changed by the killed run'
+    with harness.SaveGuard(str(tmp_path)):
+        pass
+
+
+def test_a_killed_guard_that_changed_nothing_does_not_block(tmp_path, monkeypatch):
+    monkeypatch.setattr(harness, 'kill_stray', lambda: None)
+    (tmp_path / 'save').mkdir()
+    (tmp_path / 'save/profile').write_bytes(b'original')
+    killed = harness.SaveGuard(str(tmp_path))
+    killed.__enter__()                                             # e.g. a launcher check: the game wrote nothing
+    monkeypatch.setattr(harness, 'pid_alive', lambda pid: False)
+    with harness.SaveGuard(str(tmp_path)) as guard:
+        pass
+    assert guard.restored_equal
+    assert (tmp_path / 'save-guard/.status' / (harness.Path(killed.backup).name + '.ok')).is_file()
+
+
+def test_a_guard_that_is_still_running_blocks_a_new_one_and_is_never_settled(tmp_path, monkeypatch):
+    monkeypatch.setattr(harness, 'kill_stray', lambda: None)
+    (tmp_path / 'save').mkdir()
+    running = harness.SaveGuard(str(tmp_path))
+    running.__enter__()                                            # our own pid: alive
+    root = str(tmp_path / 'save-guard')
+    assert harness.unresolved_guards(root) == [(harness.Path(running.backup).name, 'running')]
+    with pytest.raises(harness.StaleSaveGuard, match='still doing so'):
+        harness.SaveGuard(str(tmp_path)).__enter__()
+    assert harness.resolve_guards(str(tmp_path), 'accept') == [harness.Path(running.backup).name]
+    monkeypatch.setenv('DEFJAM_DATA', str(tmp_path))
+    assert harness.main(['save-recover', '--restore']) == 3        # a wrapper waits on this
+    running.__exit__(None, None, None)
+    assert running.restored_equal and harness.unresolved_guards(root) == []
+
+
+@pytest.mark.skipif(not hasattr(harness.signal, 'SIGTERM') or sys.platform == 'win32', reason='POSIX signals')
+def test_termination_unwinds_through_the_guard_so_the_save_is_restored(tmp_path, monkeypatch):
+    monkeypatch.setattr(harness, 'kill_stray', lambda: None)
+    (tmp_path / 'save').mkdir()
+    (tmp_path / 'save/profile').write_bytes(b'original')
+    with pytest.raises(SystemExit):
+        with harness.SaveGuard(str(tmp_path)) as guard:
+            (tmp_path / 'save/profile').write_bytes(b'changed')
+            os.kill(os.getpid(), harness.signal.SIGTERM)
+            time.sleep(1)
+    assert guard.restored_equal
+    assert (tmp_path / 'save/profile').read_bytes() == b'original'
 
 
 @pytest.mark.parametrize('fault', ['crashes', 'watchdogs', 'debug_layer', 'truncated', 'icall_failures', 'unimplemented'])

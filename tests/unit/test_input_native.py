@@ -51,8 +51,8 @@ int main(int argc, char **argv)
         int rejected = 0, empty = 0, shared = 0, c;
         for (c = 0; c < INPUT_CONTROL_COUNT; c++) {
             int k;
-            recomp_settings_get_text("keyboard", input_control_name(c), text, sizeof(text), "");
-            rejected += input_bindings_parse(&b, c, text);
+            recomp_settings_get_text("keyboard", xbox_InputMap_ControlName(c), text, sizeof(text), "");
+            rejected += xbox_InputMap_BindingsParse(&b, c, text);
             if (!b.count[c]) empty++;
             for (k = 0; k < b.count[c]; k++) {
                 int code = b.key[c][k];
@@ -64,10 +64,10 @@ int main(int argc, char **argv)
     }
 
     /* The pad defaults are the identity map. */
-    input_padmap_defaults(&def);
+    xbox_InputMap_PadMapDefaults(&def);
     bad = 0;
     for (i = 0; i < INPUT_PAD_CONTROL_COUNT; i++)
-        if (input_source_from_name(recomp_settings_get_text("gamepad", input_control_name((int)i), text, sizeof(text), "")) != def.source[i]) bad++;
+        if (xbox_InputMap_SourceFromName(recomp_settings_get_text("gamepad", xbox_InputMap_ControlName((int)i), text, sizeof(text), "")) != def.source[i]) bad++;
     printf("padmap_differs %d\n", bad);
     printf("deadzone %d %d trigger %d\n", recomp_settings_get("gamepad", "left_deadzone", -1),
            recomp_settings_get("gamepad", "right_deadzone", -1),
@@ -75,8 +75,8 @@ int main(int argc, char **argv)
     printf("rumble %d players %d keyboard_player %d\n", recomp_settings_get("input", "rumble", -1),
            recomp_settings_get("input", "players", -1), recomp_settings_get("input", "keyboard_player", -1));
     printf("a=%s\n", recomp_settings_get_text("keyboard", "a", text, sizeof(text), "?"));
-    printf("source_a=%d\n", input_source_from_name(recomp_settings_get_text("gamepad", "a", text, sizeof(text), "")));
-    printf("source_b=%d\n", input_source_from_name(recomp_settings_get_text("gamepad", "b", text, sizeof(text), "")));
+    printf("source_a=%d\n", xbox_InputMap_SourceFromName(recomp_settings_get_text("gamepad", "a", text, sizeof(text), "")));
+    printf("source_b=%d\n", xbox_InputMap_SourceFromName(recomp_settings_get_text("gamepad", "b", text, sizeof(text), "")));
     /* The launcher shows on every launch unless skipped; flags and a held Shift override the setting; a test run never shows it. */
     printf("decision %d %d %d %d %d %d %d\n",
            pc_launcher_wanted(0, 0, 0, 0, 0), pc_launcher_wanted(1, 0, 0, 0, 0), pc_launcher_wanted(1, 0, 0, 1, 0),

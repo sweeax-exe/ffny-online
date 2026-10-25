@@ -12,6 +12,9 @@
 //   RECOMP_LAUNCHER_SCRIPT   "<ms>:move:<x>:<y>;<ms>:click:<x>:<y>;<ms>:shot:<file.bmp>;<ms>:play;<ms>:quit", times
 //                            from the window's first frame, in window points
 //   Named controls: "<ms>:ui:<id>" clicks; "<ms>:hover:<id>" hovers, revealing scrolled controls.
+//   "<ms>:uiopt:<id>" clicks it if it is there and says nothing if not: a control that only exists in
+//   one layout, such as the On/Off item of an on/off choice (`<section>.<key>.on`), which a narrow or
+//   large-text window shows in place of a checkbox.
 //   RECOMP_WINDOW_SHOT       a file to write the first full frame to, as a BMP
 
 #define _CRT_SECURE_NO_WARNINGS
@@ -58,6 +61,7 @@ struct ScriptStep {
     std::string file;
     bool done;
     unsigned attempts = 0;
+    bool optional = false;
 };
 
 std::vector<ScriptStep> parse_script(const char *text)
@@ -77,11 +81,12 @@ std::vector<ScriptStep> parse_script(const char *text)
             st.at_ms = ms;
             st.x = x;
             st.y = y;
-            if ((!strcmp(kind, "ui") || !strcmp(kind, "hover")) &&
+            if ((!strcmp(kind, "ui") || !strcmp(kind, "uiopt") || !strcmp(kind, "hover")) &&
                 sscanf(item.c_str(), "%llu:%*[^:]:%511[^;]", &ms, file) == 2)
             {
                 st.kind = !strcmp(kind, "hover") ? ScriptStep::HOVER : ScriptStep::TARGET;
                 st.file = file;
+                st.optional = !strcmp(kind, "uiopt");
             }
             else if (!strcmp(kind, "resize"))
                 st.kind = ScriptStep::RESIZE;
@@ -210,7 +215,7 @@ void launcher_main(void *arg)
                         st.done = false;
                         st.at_ms = now + 200;
                     }
-                    else
+                    else if (!st.optional)
                         fprintf(stderr, "[UI] script target missing: %s\n", st.file.c_str());
                     continue;
                 }
