@@ -101,11 +101,16 @@ def build(out):
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(ROOT / src, target)
     versions = {name: sha256(HERE / name)[:10] for name in ('style.css', 'site.js')}
+    # The server lets browsers keep pictures for a week: a picture replaced under the same name
+    # stayed old for visitors (2026-10-25), so every asset reference carries its content hash too.
+    asset_versions = {dest: sha256(ROOT / src)[:10] for dest, src in ASSETS.items()}
     for name in PAGE:
         text = (HERE / name).read_text(encoding='utf-8')
         if name == 'index.html':
             for ref, version in versions.items():
                 text = text.replace(f'"{ref}"', f'"{ref}?v={version}"')
+        for ref, version in asset_versions.items():
+            text = re.sub(r'''(["'(])((?:\./)?''' + re.escape(ref) + r''')(?=["')])''', rf'\g<1>\g<2>?v={version}', text)
         (out / name).write_text(text, encoding='utf-8', newline='\n')
     missing = sorted(r for r in local_refs(out) if not (out / r).is_file())
     if missing:
