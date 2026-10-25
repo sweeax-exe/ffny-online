@@ -84,6 +84,22 @@ void sub_0003C6E0_enter(void) { rollback_audio_init_begin(); }
 void sub_00012CC0_enter(void) { rollback_audio_init_end(); }
 /* EAGL's DynamicLoader::Resolve: a model, weapon or render object is linked in (rollback.c logs it in fights). */
 void sub_0010AC20_enter(void) { rollback_note_dynamic_load(MEM32(g_esp), g_ecx); }
+/* The music director's stream (re)opens and flushes, and the stream layer's flush (docs/research/
+ * stream-table-crash.md 8): whether rollback's re-run steps reach them. Logged with the re-run flag. */
+static void music_trace(const char *what)
+{
+    static unsigned told, rerun;
+    int r = netplay_rerunning();
+    if (r) rerun++;
+    if (told < 60 || (r && rerun <= 20)) {
+        told++;
+        fprintf(stderr, "[MUSIC] %s (%sfrom %08X)\n", what, r ? "RE-RUN STEP, " : "", MEM32(g_esp));
+    }
+}
+void sub_0003BE50_enter(void) { music_trace("the director rebuilds the stream (sub_0003BE50)"); }
+void sub_0001D5B0_enter(void) { music_trace("AEMS stream open (sub_0001D5B0)"); }
+void sub_0001D7C0_enter(void) { music_trace("AEMS stream stop (sub_0001D7C0)"); }
+void sub_001E8600_enter(void) { music_trace("a stream ring flushed (sub_001E8600)"); }
 
 
 /* The lifted body below uses the generated code's register names. */
@@ -939,6 +955,33 @@ static void trace_voice_render(void)
     }
 }
 
+/* The mixer's "packet retired" callback (type 1 in the deferred queue 0x3A9680, run by sub_00126300):
+ * chunk = [param - 4], channel = [chunk] & 0xFF, then sub_001E8340 on 0x3A92A0[channel]. A chunk released
+ * already ([chunk] = 0xFFFFFFFE) gave channel 0xFE, whose table slot is the queue itself, and the stream layer
+ * read audio samples as an object: the mixer's crash in sub_001E8340 at track changes in rollback tests
+ * (docs/research/stream-table-crash.md). Such an event, or one for a channel that is not there, is dropped,
+ * as sub_001E8340 itself drops a released chunk. cdecl. */
+extern void sub_0011EC80(void);
+static void stream_retire_guard(void)
+{
+    uint32_t p = MEM32(g_esp + 4u);
+    if (p >= 0x80000004u && p < 0x84000000u) {
+        uint32_t chunk = MEM32(p - 4u);
+        if (chunk >= 0x80000000u && chunk < 0x84000000u) {
+            uint32_t head = MEM32(chunk), id = head & 0xFFu;
+            if (head == 0xFFFFFFFEu || id >= MEM8(0x003A9386u) || !MEM32(0x003A92A0u + id * 4u)) {
+                static unsigned told;
+                if (told++ < 20)
+                    fprintf(stderr, "[AUDIO] a retired stream packet names chunk %08X = %08X: dropped (rollback re-run %d)\n",
+                            chunk, head, netplay_rerunning());
+                g_esp += 4;     /* ret */
+                return;
+            }
+        }
+    }
+    sub_0011EC80();
+}
+
 recomp_func_t recomp_lookup_manual(uint32_t xbox_va)
 {
     if (xbox_va == 0x0012C310u && getenv("RECOMP_TRACE_VOICE"))
@@ -957,6 +1000,8 @@ recomp_func_t recomp_lookup_manual(uint32_t xbox_va)
         return first_time_help_hook;
     if (xbox_va == 0x00081170u)         /* the crowd's update: its own generator copy online */
         return netplay_crowd_update;
+    if (xbox_va == 0x0011EC80u)         /* the mixer's stream packet callback: released chunks */
+        return stream_retire_guard;
     if (xbox_va == 0x00137010u)         /* the sound engine's commands: silent while steps re-run */
         return netplay_sound_command;
     if (netplay_sound_handler(xbox_va))  /* and the audio subsystem's bus handlers */

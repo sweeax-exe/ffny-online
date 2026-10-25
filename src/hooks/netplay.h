@@ -181,6 +181,7 @@ int netplay_active(void);
 
 /* 1 while a fight runs, online or not (the game's match phase): no notices over it. */
 int netplay_in_fight(void);
+int netplay_rerunning(void);    /* 1 while rollback runs steps again */
 
 /* Voice chat (voice.c): 1 while this PC is in a room of the online hub (its lobby or its match); a
  * voice packet to every other member; the name of the member in relay slot `slot` (0 if none). */
