@@ -144,7 +144,7 @@ static const char *friendly(const char *section, const char *key)
         { "gamepad", "left_stick", "Left stick comes from" }, { "gamepad", "right_stick", "Right stick comes from" },
         { "launcher", "skip", "Skip the launcher at start" }, { "ui", "scale", "Text and control size" },
         { "online", "server", "Server" }, { "online", "name", "Your name" },
-        { "online", "input_delay", "Input delay (steps)" },
+        { "online", "input_delay", "Input delay (steps)" }, { "online", "rollback", "Rollback netcode (beta)" },
         { "online", "voice", "Voice chat" }, { "online", "voice_key", "Push-to-talk key" },
         { "online", "voice_pad", "Push-to-talk on the controller" }, { "online", "voice_volume", "Voices volume (%)" },
         { "online", "voice_mic_volume", "Microphone volume (%)" }, { "online", "voice_auto_level", "Level my microphone" },
@@ -1663,6 +1663,9 @@ static void page_basics()
     settings_group("display", { "widescreen" });
     ImGui::SeparatorText("Voice chat");
     settings_group("online", { "voice", "voice_key", "voice_pad" });
+    ImGui::SeparatorText("Online");
+    settings_group("online", { "rollback" });
+    ImGui::TextDisabled("Beta: used only when the other player has it on too. Applies the next time the game starts.");
     ImGui::SeparatorText("HD textures");
     settings_group("textures", { "enabled" });
     ImGui::TextDisabled("Experimental: they can cause white screens or wrong pictures. Make them under Advanced, Textures.");

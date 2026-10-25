@@ -19,6 +19,7 @@
  * mode, where no exception comes: the toolkit calls xbox_guest_write_notify before each one. */
 #define _CRT_SECURE_NO_WARNINGS
 #include "rollback.h"
+#include "recomp_settings.h"
 
 #ifdef _WIN32
 #include "host.h"
@@ -165,14 +166,16 @@ static ULONG64 s_game_cycles;
 /* Off by default again since build 21: on for everyone in builds 19 and 20, players' games crashed
  * in the sound engine (sub_0012BE20, sub_00126150: engine objects with junk vtables in the audio
  * arena) a few seconds into online fights, and the 12 MiB arena left the GPU data too little room
- * (a freeze with 62.9 of 64 MiB in use). RECOMP_ROLLBACK=on (debug-env.txt) turns it on for tests;
- * off, nothing of it runs: no audio arena, no write tracking, no saves. */
+ * (a freeze with 62.9 of 64 MiB in use). Since build 26 a beta setting ([online] rollback, read once at
+ * start because the audio arena is set up with the sound engine); a match uses it only when every
+ * player has it on (netplay.c, peer_rb). RECOMP_ROLLBACK=on or off overrides it for tests; off, nothing
+ * of it runs: no audio arena, no write tracking, no saves. */
 int rollback_enabled(void)
 {
     static int on = -1;
     if (on < 0) {
         const char *v = getenv("RECOMP_ROLLBACK");
-        on = v && !strcmp(v, "on");
+        on = v ? !strcmp(v, "on") : recomp_settings_get("online", "rollback", 0) != 0;
     }
     return on;
 }

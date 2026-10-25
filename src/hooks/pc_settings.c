@@ -69,6 +69,9 @@ static RecompSetting g_display_settings[] = {
       "How loud your own voice goes out, in percent (after the automatic level, if that is on)." },
     { "online", "voice_auto_level", RECOMP_SETTING_BOOL, 1, 0, 0, NULL, NULL, 0,
       "Bring your voice to a common loudness automatically (quiet headset microphones up to 6x)." },
+    { "online", "rollback", RECOMP_SETTING_BOOL, 0, 0, 0, NULL, NULL, RECOMP_SETTING_RESTART,
+      "Beta: rollback netcode in online fights, used only when every player in the match has it on. Your presses "
+      "count at once and the game corrects itself when the other player's arrive late. It can still crash." },
     { "online", "input_delay", RECOMP_SETTING_INT, 3, 1, 8, NULL, NULL, 0,
       "Steps (1/60 s each) between a press and its effect in an online fight. More hides more ping; the host's value is used." },
     { "display", "fullscreen", RECOMP_SETTING_BOOL, 0, 0, 0, NULL, NULL, 0,
