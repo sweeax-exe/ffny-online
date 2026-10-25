@@ -21,7 +21,12 @@ param([ValidateRange(2, 4)][int]$Players = 2, [int]$Secs = 1200, [string[]]$Extr
 $ErrorActionPreference = 'Stop'
 $repo = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 Set-Location $repo
-if (Get-Process defjam_recomp -ErrorAction SilentlyContinue) { throw 'Close the game first.' }
+# the owner's own game (installed elsewhere) or this checkout's build (an earlier test) must be closed; a
+# worktree's test (under .claude\worktrees, its own CPUs and relay port) may run beside this one
+if (Get-Process defjam_recomp -ErrorAction SilentlyContinue | Where-Object {
+        $_.Path -notlike (Join-Path $repo '*') -or $_.Path -like (Join-Path $repo 'build\*') }) {
+    throw 'Close the game first.'
+}
 $data = if ($env:DEFJAM_DATA) { $env:DEFJAM_DATA } else { 'D:\DefJam\data' }
 $logs = Join-Path $repo 'logs\hub-test'
 New-Item -ItemType Directory -Force $logs | Out-Null
