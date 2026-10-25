@@ -235,3 +235,63 @@ This is correct behaviour for a mixed match, but two things are worth knowing:
 | constants | `0x2E3488` crowd enable (1), `0x2E348C` 50.0, `0x2E3490` 25.0, `0x296DDC` 60.0 |
 | model | `assets/icrowd.viv` `icrowd01.o` (245,712 bytes, `.data` 0x350D0, stream-0 grid `.data + 0x480 + 0x230*k`, k = 0..382), `icrowd01.xml`: idle 240, excited 140 |
 | rollback | `src/hooks/rollback.c` (`rollback_load`, `release_held_xapi`), `src/hooks/netplay.c` (`rollback_to` `~2936`, `rollback_crash_state` `~2893`, `agreed_delay` `~768`, `netplay_sync_point` `~2077`), `src/recomp_manual.c:74` (`sub_000DB870_enter`) |
+
+## 9. The fix and what it measured (2026-10-25, after the study)
+
+Changes (three commits): the guard of 6.1 in `sub_000DB870_enter` (`src/recomp_manual.c`: the time word capped at 0.1 s, a frame outside
+the clips put back into the idle clip, logged as `[CROWD]` lines); the EAGL list walks of section 3 now follow `+0`; and a hub match rolls
+back only when every player has it on (section 7: `N.rb_match`, decided at the sync point from the same `peer_rb` flags as the delay's discount).
+Test switches: `RECOMP_TEST_CROWD_TIME=<s>` adds that much crowd time every 600th crowd render, `RECOMP_CROWD_GUARD=off` leaves the game's behaviour.
+
+### 9.1 The cause: re-run snapshots keep crowd time that no render used up [V]
+
+`rollback_to` (netplay.c) takes a new save at the start of every re-run update but the first (`if (j) snap_save();`). Re-run updates
+add the step's time to the crowd's time word (`sub_000DB620`, through the step), but never draw the crowd, so nothing zeroes it: those
+snapshots hold the time word with every re-run step since the last real render in it. The next rollback that lands on such a snapshot
+restores that value, re-runs on top of it and saves again; chained rollbacks ratchet the value with no bound. The first live render
+after it advances by the whole sum. Measured in the two-copy test (run 1 below, guard on, so the cap is what was seen before it applied):
+
+| match | copy | rollbacks | crowd renders | time over 0.25 s | 0.1..0.25 s | largest time |
+|---|---|---|---|---|---|---|
+| 1 | 0 | 1775 | 20,927 | 219 | 745 | 0.517 s (31 frames) |
+| 1 | 1 | 900 | 21,429 | 12 | 63 | 0.583 s |
+| 2 | 0 | 1517 | 13,652 | 143 | 495 | 0.867 s |
+| 2 | 1 | 583 | 13,526 | 8 | 66 | 0.717 s |
+| 3 | 0 | 2877 | (no summary: the run ended) | | | |
+| 3 | 1 | 2301 | (no summary: the run ended) | >= 108 | | >= 1.100 s (66 frames) |
+
+A normal render takes 1 to 3 frames, a re-run of the deepest rollback (9) at most 10. The value grows while rollbacks keep landing on
+snapshots taken in an earlier re-run (each adds its depth) and falls back when one lands on a snapshot of a normal update; the overshoot
+needs one advance of about 140 frames (2.3 s), i.e. a chain of a few dozen such rollbacks. Here (delay 2 to 3) the largest was 66 frames.
+The reports' rollback sides ran with delay 9 or 10 and predicted up to 8 steps ahead, which makes deeper rollbacks that land on re-run
+snapshots more often [I]; 21aa93 crashed in its third match at 5,271 rollbacks, c90382 at 3,769, 0f9bbe after only 122. It is candidate 1 of section 5, with
+the re-run snapshot as the missing piece. Both pages (the time word and the state table) read "saved", never "left alone": not candidate 2.
+No frame number was ever outside the clips with the guard on (0 repaired frames in every run).
+
+All four player reports of this crash (and run 111715 is the fifth case) were mixed matches (input delay 9 or 10 without the rollback discount: 917ddc, 0f9bbe, 21aa93, c90382);
+the rollback side of a mixed match predicts through a long delay and rolls back more. With the third change such matches no longer roll back at all (run 2 in 9.3).
+Run 111715 shows two rollback PCs get there too.
+
+### 9.2 The failure on demand, and the guard against it
+
+| run | setting | result |
+|---|---|---|
+| 3 | `RECOMP_TEST_CROWD_TIME=5`, `RECOMP_CROWD_GUARD=off`, venue 10 | both copies crashed at the first injection (10 s): copy 0 `sub_0021BB10+0x8C`, `edi=0x776F4C00` ("\0Low", as in 917ddc), after 4 `[HEAP] free #n va=0x80000000` lines; copy 1 the same place with `edi=0xC51C0019` |
+| 4 | the same with the guard on | 9 injections per copy, each capped (time 5.017 s, 301 frames), no crash, no desync, the match finished (130 and 292 rollbacks; 32 firings on copy 1 as the injected time went into snapshots and came back) |
+
+So the study's whole chain (the advance, the frames past the model, the zero-word frees, the fault on text) is reproduced by one large advance, and the cap removes it.
+
+### 9.3 Runs (two copies, local relay on 127.0.0.1:27827 with a quick pool of venue 10 only, CPUs 24 and 26, 60 ms each way with 10 ms jitter, bot inputs)
+
+| run | rollback | matches | result |
+|---|---|---|---|
+| 1 | on / on | 3 on venue 10 (Club Murder), 20,097 + 12,449 + 20,858 steps | no crash, no desync (880 checksums equal), 6,169 and 3,784 rollbacks; both logged "rollback on for this match: every player has it on", delay 2 and 3 |
+| 2 | on / off | 1 on venue 10 | both logged "rollback off for this match: ssc-two has it off; lockstep" / "this PC (player 2) has it off", delay 6 (the lockstep delay for pings 79/78), no write tracking, no rollback, no desync (150 checksums) |
+| 3, 4 | on / on, provoked | see 9.2 | |
+
+`python scripts/regress.py --quick` passes (unit 658 passed, m2, m3, m4a, fight: 122 s, median 120 presents per 2 s), as does
+`python -m pytest tests/unit -q`.
+
+Not yet done: the frame repair path (a frame outside the clips in the table) never ran in a test, since with the cap no frame left the clips;
+it is the net for a damaged table. A proper fix for 9.1 would keep the crowd's time word out of what a load restores (it is render state), or
+zero it in the snapshots taken in re-runs; the cap makes that unnecessary for the crash.
