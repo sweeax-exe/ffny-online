@@ -79,6 +79,15 @@ static const Range k_data_hole[] = {
      * the director walked the new tune.mpf with the old table (sub_001317C0 off the end of memory, six runs
      * matched to the byte; docs/research/music-director-crash.md). Sound is not rolled back: kept live. */
     { 0x002DBC40u, 0x002DBCC8u },
+    /* EAGL's copies of what the D3D device has set, kept so that it calls D3D only on a change
+     * (sub_00100BC0): per stage the texture (0x3A5030[4]) and palette (0x3A5050[4]), the LOD bias,
+     * the bump-env floats (to 0x3A50A8) and the texture-stage states (seven arrays from 0x2E48B8).
+     * The device (object [0x234768], D3D's state from 0x2342C8) is not rewound and renders are not
+     * re-run, so its copies must not be either: put back by loads, they named another frame's
+     * bindings than the device held (152 of 500 loads in a test with pauses and knock-outs), and
+     * the next draw skipped the set it needed. See also rollback_unbind_textures. */
+    { 0x002E48B8u, 0x002E4998u },
+    { 0x003A5030u, 0x003A50A8u },
 };
 #define N_DATA_HOLE (sizeof(k_data_hole) / sizeof(k_data_hole[0]))
 
@@ -1054,6 +1063,52 @@ int rollback_load(int slot)
     return 0;
 }
 
+/* The D3D device holds a reference on each texture and palette it has bound (SetTexture sub_00215F60,
+ * SetPalette sub_00216140: the old one's Common word -0x80000, the new one's +0x80000, bits 19-22
+ * the internal count). The device's bindings ([0x234768] +0xF88 textures, +0xF98 palettes) are not
+ * rewound by a load, the objects' Common words in the heap are: a load back to a save taken while
+ * the device held another palette left the one it holds now one reference short, and the next
+ * SetPalette took that count below zero (a two-copy test: 628 device bindings without their reference
+ * in 500 loads, a palette at Common FFFB0001). Common then reads 0xFFF8xxxx, and SetPalette sends
+ * Data | Common >> 28 to the palette register, so its low bits became "32 entries" (and context 3):
+ * the vignette (interior index 125, drawn DST_COLOR x ZERO) was expanded through 32 entries and
+ * multiplied the whole fight scene by 0 (F9 reports of build 26, rollback on; their palette registers
+ * end in F only in rollback matches; docs/research/stuck-screen-fade.md 9). Textures go the same way
+ * (a count that reaches zero early frees one still in use, sub_0021DEE0). So at every update of a
+ * rollback match nothing stays bound: every save and every load then sees the device without references, the counts agree with any
+ * state a load puts back, and the next draw binds again (EAGL's copies of the bindings,
+ * 0x3A5030[4] and 0x3A5050[4], are cleared with them so that it does). */
+extern void sub_00215F60(void);     /* D3DDevice_SetTexture(stage, texture), stdcall */
+extern void sub_00216140(void);     /* D3DDevice_SetPalette(stage, palette), stdcall */
+#define D3D_DEVICE      0x00234768u
+#define EAGL_TEXTURES   0x003A5030u
+#define EAGL_PALETTES   0x003A5050u
+
+static void d3d_call2(void (*fn)(void), uint32_t a, uint32_t b)
+{
+    uint32_t sp = g_esp;
+    g_esp = (sp - 0x80u) & ~3u;         /* below the hook's frame */
+    PUSH32(g_esp, b);
+    PUSH32(g_esp, a);
+    PUSH32(g_esp, 0u);                  /* a return address the lifted ret only pops */
+    fn();
+    g_esp = sp;
+}
+
+void rollback_unbind_textures(void)
+{
+    uint32_t dev = MEM32(D3D_DEVICE), s;
+    uint32_t eax = g_eax, ecx = g_ecx, edx = g_edx, ebx = g_ebx, esi = g_esi, edi = g_edi, ebp = g_ebp;
+    if (!dev) return;
+    for (s = 0; s < 4; s++) {
+        if (MEM32(dev + 0xF88u + 4u * s)) d3d_call2(sub_00215F60, s, 0);
+        if (MEM32(dev + 0xF98u + 4u * s)) d3d_call2(sub_00216140, s, 0);
+        MEM32(EAGL_TEXTURES + 4u * s) = 0;
+        MEM32(EAGL_PALETTES + 4u * s) = 0;
+    }
+    g_eax = eax; g_ecx = ecx; g_edx = edx; g_ebx = ebx; g_esi = esi; g_edi = edi; g_ebp = ebp;
+}
+
 void rollback_stats(unsigned *save_kb, unsigned *changing, unsigned *skipped)
 {
     unsigned p, n = 0;
@@ -1825,5 +1880,6 @@ int rollback_ready(void) { return 0; }
 int rollback_save(int slot) { (void)slot; return -1; }
 int rollback_load(int slot) { (void)slot; return -1; }
 void rollback_reset(void) {}
+void rollback_unbind_textures(void) {}
 void rollback_stats(unsigned *a, unsigned *b, unsigned *c) { if (a) *a = 0; if (b) *b = 0; if (c) *c = 0; }
 #endif

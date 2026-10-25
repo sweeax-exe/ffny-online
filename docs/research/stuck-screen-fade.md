@@ -193,3 +193,48 @@ the XAPI heap are held; the audio arena exists. Build 26 differs from builds 19 
    zero-padded palette) in rollback matches; how that happens is the open item, with five probes above.
 3. No byte hole or per-word heap handling is called for by the evidence; the narrow options (skip the texture data pages, resync
    EAGL's dirty byte after a load, a host guard against short palettes) and their risks are in section 7.
+
+## 9. Measured: the palette's reference count goes below zero (2026-10-25, fixed in `rollback.c`)
+
+Two local copies of this worktree's build, a local relay, `RECOMP_ROLLBACK=on`, `RECOMP_NETPLAY_LAG_MS=70,10` or `70,20`
+(about 140 ms round trip), random fight inputs, captures every 8 s. Temporary probes (not committed): the host logged every
+bind of the vignette texture 8034DB80 with its palette address and length, and `rollback_load` compared EAGL's binding copies
+and the D3D reference counts with the device after each load.
+
+**The cause.** `D3DDevice_SetPalette` (`sub_00216140`) and `D3DDevice_SetTexture` (`sub_00215F60`) take a reference on what
+they bind and drop one on what they replace: the object's `Common` word, +0x80000 / -0x80000 (bits 19-22 the internal count).
+The device's bindings (`[0x234768]` +0xF88 textures, +0xF98 palettes) are not rewound; the objects' `Common` words, in heap
+pages, are. A load back to a save taken while the device held other textures and palettes leaves the ones it holds now
+without the reference it took, and the next set drops it again: the count goes to -1, `Common` reads `0xFFF8xxxx`. The palette
+register is `Data | Common >> 28` (the shift was hidden in the reading of section 4), so a wrapped count turns the register's
+low bits to `F`: length 32, context 3. A vignette palette bound at a count of -2 or less is expanded through 32 entries; its
+interior (index 125) becomes 0 and DST_COLOR x ZERO blacks out the scene (section 4, reading (a)). The count drifts by one
+at each load whose save had other bindings than the device has now, so it random-walks over a match: black stretches come and
+go, which fits the reports (`2e3f83`: one capture with wrapped registers, a later one without).
+
+Evidence:
+
+| | Result |
+|---|---|
+| F9 reports with a palette register ending in `F` (stage 1/3 lines of the batch dump) | 4 of the 13 reports whose log shows rollback loads (builds 19, 20, 26: `58b63c`, `cf1f5a`, `bc0563`, `2e3f83`), 0 of the 34 without (builds 18-25); `0024F2CF`, `0024E9CF`, the same addresses as the normal `...C0`. The dump prints stages 1-3 only, so the vignette's own stage-0 register is not in it |
+| Baseline, fix off, fights without pauses (8 min, 751 loads) | the frame-end bindings never differed: 0 of 500 loads with EAGL's copy unlike the device, no orphaned reference, vignette 256 entries in 27 000 binds, pictures normal |
+| Baseline, fix off, knock-outs and START presses (8 min, 3 matches, 532 loads) | 152 of 500 loads restored copies of texture 0 and palettes 0, 1, 3 unlike the device (save-time `80051180`/`80051100` against none, and back); 628 device bindings without their reference; palette object `8009A780` reached `Common FFFB0001` (count -1) with data `0034D640`, the stage-3 palette seen in the players' reports. The vignette's own palette was not among them in this run, so no black picture here |
+| Fix on, same scenario (9 min, 1562 loads) and fast knock-outs (9 min, 3 matches, 1318 loads) | 0 copies unlike the device, 0 orphaned references, 0 wrapped counts, vignette 256 entries in 30 000 binds, no crash, no desync (510 checksum rounds equal), pictures normal (darkest centre 15 of 255, a dark venue) |
+
+The vignette's palette register says 256 entries in every normal bind (its `Common` top bits are 0; the data block holds 128).
+
+**What section 7 assumed and is not so.** The byte `0x3A61F8` is not a "re-apply state" flag: `sub_0010EF00` runs `wbinvd` when
+it is set and clears it (a cache flush after vertex-buffer copies), so setting it after a load does nothing here. And
+`0x3A5050[4]` is EAGL's per-stage palette copy; the texture copy is `0x3A5030[4]`.
+
+**The fix** (`rollback_unbind_textures`, called at the start of every update of a rollback match, before the load, the save and
+the reference copy): the device lets go of every texture and palette (SetTexture/SetPalette with NULL, only for stages that
+hold one) and EAGL's copies `0x3A5030[4]`, `0x3A5050[4]` are cleared, so the next draw binds again. No save and no load then
+holds a device reference, so the counts agree with any state a load puts back. EAGL's other device-state copies
+(0x3A5030..0x3A50A8: bindings, LOD bias, bump-env floats; 0x2E48B8..0x2E4998: texture-stage states) are kept live through
+loads (`k_data_hole`), because the device they mirror is not rewound either.
+
+**Left open.** Vertex buffers and index buffers are referenced the same way (`sub_0021BB10`, `sub_002161D0`, `sub_002149B0`
+drop internal counts) and are not unbound yet; a drifted vertex-buffer count could free a buffer in use. EAGL's render-state
+copies (0x2E5148..0x2E519C, 0x2E4B6C..) are still rewound. The host-side guard of section 7 (expand a P8 texture through
+256 entries when its indices exceed the stated length by far) remains a useful second line in the toolkit.
