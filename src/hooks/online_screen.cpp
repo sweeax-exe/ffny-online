@@ -1432,6 +1432,81 @@ void draw_code(ImDrawList *dl, const Frame &f, const Pad &pad)
     if (pad.b) S.page = ROOMS;
 }
 
+// ---- the venues of a room's pool, on the create page's glass panel ----
+
+// One venue: its card from the game's art (a tilted photo with the venue's logo under it, on a clear
+// ground), cut to the drawn part (a 1.2:1 box) on a dark backing, with its name banner under it; the
+// card and the banner as large as the cell allows, centred in it.
+void venue_tile(ImDrawList *dl, const Frame &f, int venue, float x, float y, float w, float h, float alpha,
+                bool lit = false)
+{
+    const float banner = h > 200 ? 24 : h > 120 ? 18 : h > 60 ? 13 : 0, pad = 3;
+    // the card's size in menu units, keeping 1.2:1 in pixels (a stretched picture scales x and y apart)
+    float k = std::min((w - 2 * pad) * f.sx / 1.2f, (h - banner - 2 * pad) * f.sy);
+    float cw = k * 1.2f / f.sx, ch = k / f.sy;
+    float bw = cw + 2 * pad, bh = ch + 2 * pad, bx = x + (w - bw) / 2, by = y + (h - bh - banner) / 2;
+    rect(dl, f, bx, by, bw, bh, IM_COL32(0, 0, 0, (int)(110 * alpha)), 6);
+    if (lit) dl->AddRect(f.p(bx, by), f.p(bx + bw, by + bh), with_alpha(ORANGE, 0.8f * alpha), 6 * f.s(), 0, 1.5f * f.s());
+    const Tex &t = venue_tex(venue);
+    ImU32 tint = IM_COL32(255, 255, 255, (int)(255 * alpha));
+    if (!image(dl, f, t, bx + pad, by + pad, cw, ch, tint, ImVec2(0.02f, 0.04f), ImVec2(0.98f, 0.84f)))
+        text(dl, f, g_title, 13, bx + bw / 2, by + bh / 2 - 8, with_alpha(CREAM, alpha), online_venue_name(venue), CENTER,
+             1.0f, bw - 8);
+    if (banner > 0) {
+        const Tex &name = venue_name_tex(venue);
+        if (name.srv) image_fit(dl, f, name, x, by + bh + 1, w, banner - 2, tint);
+        else text(dl, f, g_hand, banner - 4, x + w / 2, by + bh + 1, with_alpha(ORANGE, alpha), online_venue_name(venue),
+                  CENTER, 0.8f, w);
+    }
+}
+
+// The pool on the create page, filling the box under a caption (the preset and the count): one large
+// card; two to four in a 2x2 grid; five or six in a 2x3 grid where they stay large enough; more (every
+// venue: 22), or six where the grid would be small, as a showcase: one large card crossfading to the
+// next every three seconds over a strip of the next ones and the count.
+void venue_showcase(ImDrawList *dl, const Frame &f, const NetRoomSettings &s, float x, float y, float w, float h)
+{
+    int n = std::min(s.pool_count, 32);
+    if (n <= 0) return;
+    int p = preset_of(s);
+    char caption[64];
+    snprintf(caption, sizeof(caption), "%s  -  %d VENUE%s", upper(p >= 0 ? presets()[p].name : "Custom").c_str(), n,
+             n == 1 ? "" : "S");
+    text(dl, f, g_hand, 13, x + w / 2, y, ORANGE, caption, CENTER, 1.0f);
+    y += 18;
+    h -= 18;
+    if (n == 1) {
+        venue_tile(dl, f, s.pool[0], x, y, w, h, 1.0f);
+        return;
+    }
+    int rows = n <= 4 ? 2 : 3;
+    float gap = 6, cw = (w - gap) / 2, rh = (h - gap * (rows - 1)) / rows;
+    if (n <= 4 || (n <= 6 && rh - 13 >= 60)) {
+        for (int k = 0; k < n && k < rows * 2; k++) {
+            bool alone = k == n - 1 && n % 2;      // an odd last one in the middle of its row
+            float cx = alone ? x + (w - cw) / 2 : x + (k % 2) * (cw + gap);
+            venue_tile(dl, f, s.pool[k], cx, y + (k / 2) * (rh + gap), cw, rh, 1.0f);
+        }
+        return;
+    }
+    // the showcase
+    const float strip = 30, period = 3.0f, fade = 0.6f;
+    float t = (float)ImGui::GetTime(), phase = fmodf(t, period);
+    int cur = (int)(t / period) % n, next = (cur + 1) % n;
+    float big_h = h - strip - 8;
+    float mix = phase > period - fade ? (phase - (period - fade)) / fade : 0.0f;
+    venue_tile(dl, f, s.pool[cur], x, y, w, big_h, 1.0f - mix);
+    if (mix > 0) venue_tile(dl, f, s.pool[next], x, y, w, big_h, mix);
+    // the strip: the shown card and the next ones, then where in the pool it is
+    const int shown = 5;
+    float sw = 30, sgap = (w - 50 - shown * sw) / (shown - 1), sy = y + h - strip;
+    for (int k = 0; k < shown && k < n; k++)
+        venue_tile(dl, f, s.pool[(cur + k) % n], x + k * (sw + sgap), sy, sw, strip, k == 0 ? 1.0f : 0.55f, k == 0);
+    char count[16];
+    snprintf(count, sizeof(count), "%d / %d", cur + 1, n);
+    text(dl, f, g_title, 12, x + w, sy + 8, GREY, count, RIGHT, 0.8f);
+}
+
 // ---- room settings (new room, or the host's changes) ----
 
 void draw_settings(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &room)
@@ -1514,21 +1589,21 @@ void draw_settings(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom
         text(dl, f, g_title, 17, x + 12, y + 19, sel ? WHITE : GREY, value.c_str());
         if (sel) { text(dl, f, g_title, 17, x + w - 26, y + h / 2 - 10, ORANGE, "<", CENTER); text(dl, f, g_title, 17, x + w - 10, y + h / 2 - 10, ORANGE, ">", CENTER); }
     }
-    // the door: the mode's logo (King of the Hill: its rules) and a few of the venues
+    // the door: the mode's logo (King of the Hill: its rules), then the venues filling the panel
     door_panel(dl, f);
+    float venues_y;
     if (koth) {
-        text(dl, f, g_title, 24, 463, 96, CREAM, "KING OF THE HILL", CENTER, 1.6f);
-        text(dl, f, g_hand, 13, 463, 126, ORANGE, "WINNER STAYS ON", CENTER, 1.0f);
-        text(dl, f, g_body, 13, 372, 146, WHITE,
+        text(dl, f, g_title, 24, 463, 92, CREAM, "KING OF THE HILL", CENTER, 1.6f);
+        text(dl, f, g_hand, 13, 463, 120, ORANGE, "WINNER STAYS ON", CENTER, 1.0f);
+        text(dl, f, g_body, 12, 362, 138, WHITE,
              "TWO FIGHT ONE ON ONE, THE OTHERS WAIT IN LINE. THE LOSER GOES TO THE BACK. "
-             "WHEN YOU'RE CALLED, PRESS A WITHIN 20 SECONDS.", LEFT, 1.0f, 182);
+             "WHEN YOU'RE CALLED, PRESS A WITHIN 20 SECONDS.", LEFT, 1.0f, 202);
+        venues_y = 196;
     } else {
         image_fit(dl, f, tex(mode_logo(s.mode)), 372, 96, 170, 36);
+        venues_y = 142;
     }
-    for (int k = 0; k < s.pool_count && k < 6; k++) {
-        float vx = 380 + (k % 2) * 80, vy = (koth ? 236 : 150) + (k / 2) * (koth ? 56 : 80);
-        image_fit(dl, f, venue_tex(s.pool[k]), vx, vy, koth ? 52 : 74, koth ? 52 : 74);
-    }
+    venue_showcase(dl, f, s, 356, venues_y, 214, 438 - venues_y);
     if (pad.a && rows_of[S.settings_sel] == R_OPEN) {
         if (S.settings_edit) { netplay_lobby_settings(&s); S.page = HUB; say("Settings saved; everyone readies again."); }
         else { netplay_lobby_create(&s); say("Opening the room..."); S.page = HUB; }
@@ -2230,7 +2305,9 @@ NetRoom sample_room(int mode, int max, int count)
 // Which page the gallery shows now, and the sample it shows with it.
 void gallery_step()
 {
-    static const char *const pages[] = { "connecting", "offline", "hub", "hub-signin", "hub-voice", "rooms", "code", "create", "create-koth",
+    static const char *const pages[] = { "connecting", "offline", "hub", "hub-signin", "hub-voice", "rooms", "code",
+                                         "create", "create-3", "create-6", "create-1", "create-koth",
+                                         "create-koth-3", "create-koth-6", "create-koth-1",
                                          "ranked", "voice", "stats", "players", "fighters", "room", "vote", "hill",
                                          "up", "watch", "room-voice", "match" };
     const int count = (int)(sizeof(pages) / sizeof(pages[0]));
@@ -2293,11 +2370,15 @@ void gallery_step()
     else if (p == "hub-voice") { S.page = HUB; S.hub_sel = HUB_VOICE; }
     else if (p == "rooms") { S.page = ROOMS; S.rooms_sel = 1; }
     else if (p == "code") { S.page = CODE; snprintf(S.code, sizeof(S.code), "GTE4AQ"); S.code_pos = 3; }
-    else if (p == "create" || p == "create-koth") {
+    else if (p.compare(0, 6, "create") == 0) {     // every venue; -3, -6: two presets; -1: one venue
         S.page = SETTINGS;
         default_settings(S.settings);
         snprintf(S.settings.name, sizeof(S.settings.name), "Ann's room");
-        if (p == "create-koth") { S.settings.mode = NETPLAY_MODE_KOTH_RANDOM; S.settings.max = 8; }
+        if (p.find("koth") != std::string::npos) { S.settings.mode = NETPLAY_MODE_KOTH_RANDOM; S.settings.max = 8; }
+        char last = p.back();
+        if (last == '3') apply_preset(S.settings, 1);
+        else if (last == '6') apply_preset(S.settings, 2);
+        else if (last == '1') S.settings.pool_count = 1;
         S.settings_sel = 0;
     }
     else if (p == "ranked") S.page = RANKED;
