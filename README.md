@@ -136,7 +136,7 @@ checks it, then translates and compiles the game on your machine. It bundles
 Python and the pinned build sources and can install Microsoft's C++ Build Tools
 if they are missing. The installer is unsigned, so Windows may warn about it.
 
-![The setup wizard: choose your dump, an install folder and a data folder](docs/media/setup-wizard.png)
+![The setup wizard: choose your game image and an install folder, then Install](docs/media/setup-wizard.png)
 
 See [Windows setup](docs/setup-installer.md) for folders, shortcuts, HD texture
 generation, silent mode, repair and removal.
@@ -199,7 +199,7 @@ The game opens a launcher window with display, controller and key settings and
 a Play button. The same settings are available in the game with F1, and in
 `settings.ini` in your data folder.
 
-![The launcher with the FFNY Online logo: the Online page, signed in with Discord](docs/media/launcher.png)
+![The launcher: the FFNY Online logo, a big PLAY button, and Account, Game and News cards](docs/media/launcher.png)
 
 - [Launcher and overlay](docs/launcher-and-overlay.md)
 - [Controllers, keyboard and mouse](docs/10-input.md)
