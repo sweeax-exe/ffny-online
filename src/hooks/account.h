@@ -27,6 +27,10 @@ const char *account_privacy_url(void);
  * only; json as POST /api/matches takes it); it counts once the other players' games agree, and
  * the statistics are fetched again a moment later. */
 void account_report_match(const char *json);
+/* From the crash handler: the same POST, synchronous on a thread of its own, waited for at most
+ * timeout_ms, once per run. Copies json first and allocates nothing of ours. Returns the HTTP
+ * status, 0 when no answer came in time, -1 when not sent (not signed in, already sent). */
+int account_report_crash(const char *json, unsigned timeout_ms);
 void account_fetch_stats(void);                 /* the statistics and the leaderboard, in the background */
 void account_fetch_stats_page(int page);        /* the same with that leaderboard page (10 places, 0 = top 10) */
 int account_stats_busy(void);

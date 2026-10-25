@@ -95,6 +95,7 @@ void *netplay_sound_handler(uint32_t va) { (void)va; return NULL; }
 void netplay_on_pad_read(uint32_t a) { (void)a; }
 void netplay_on_seed(uint32_t e, int w, uint32_t x) { (void)e; (void)w; (void)x; }
 void netplay_on_result(uint32_t w, uint32_t l, uint32_t c) { (void)w; (void)l; (void)c; }
+void netplay_on_crash(void) {}
 int netplay_toast(char *t, int n) { (void)t; (void)n; return 0; }
 int netplay_rematch_request(void) { return 0; }
 int netplay_debug_json(char *o, int n) { return snprintf(o, (size_t)n, "{}"); }
@@ -613,6 +614,8 @@ static void log_contiguous(const char *when)
 
 static void rematch_declined(void);
 
+static void disarm_crash_report(void);
+
 static void end_hub_match(const char *why)
 {
     log_contiguous("at the match end");
@@ -620,6 +623,7 @@ static void end_hub_match(const char *why)
     InterlockedExchange(&N.lockstep, 0);
     assign_input(0);
     SetEvent(N.arrived);
+    disarm_crash_report();
     N.match_live = N.match_seen = 0;
     N.over_pending = 1;
     request(T_OVER, NULL, 0);
@@ -1276,6 +1280,7 @@ static void on_start(const uint8_t *b, int len)
     }
     snprintf(N.report_key, sizeof(N.report_key), "%.6s-%08X", N.roomv.code[0] ? N.roomv.code : N.room, seed);
     N.reported = N.fighting_seen = 0;
+    disarm_crash_report();
     /* King of the Hill: one fight, then RESULT and back to the hill */
     N.koth_match = NETPLAY_IS_KOTH(N.roomv.settings.mode);
     N.koth_fights = N.roomv.hill.fights;
@@ -1715,6 +1720,7 @@ static int start(const char *server, const char *name, int creating, const char 
     N.match_live = N.match_seen = N.over_pending = N.start_this_play = 0;
     N.start_seed = 0;
     N.match_count = 0;
+    disarm_crash_report();
     LeaveCriticalSection(&g_cs);
     if (resolve(server)) { InterlockedExchange(&N.state, NETPLAY_FAILED); set_status("Cannot find the server %s.", server); return -1; }
     N.sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
@@ -1759,6 +1765,7 @@ void netplay_stop(void)
     N.have_token = 0;
     N.lobby = 0;
     N.match_live = N.match_seen = 0;
+    disarm_crash_report();
     InterlockedExchange(&N.state, NETPLAY_OFF);
     SetEvent(N.arrived);
 }
@@ -1992,20 +1999,23 @@ static int json_put(char *out, int size, int n, const char *s)
 
 /* The room match for the account service (account.c), from a signed-in player's game: "start"
  * once the fight is loaded, then "result" when it is decided (winners as a mask of fighter slots,
- * `draw`), or "left" naming the players (mask) who stopped answering before that. The service
- * counts a result when every player's game reports it alike, and gives a player who left the
- * loss (netplay/relay/accounts/stats.go). Positions are the fighters' controller slots: the
- * room's players in slot order, then the CPU fighters. Called with g_cs not held. */
-static void report_event(const char *event, uint32_t winners, uint32_t left, int draw)
+ * `draw`), or "left" naming the players (mask) who stopped answering before that; "crashed" from
+ * the crash handler when this game dies during the fight (netplay_on_crash). The service counts a
+ * result when every player's game reports it alike, gives a player who left the loss, and makes a
+ * match whose leaver's game crashed a no contest (netplay/relay/accounts/stats.go). Positions are
+ * the fighters' controller slots: the room's players in slot order, then the CPU fighters. The
+ * JSON goes to json; returns its length, 0 when there is no match to report. Called with g_cs
+ * not held. */
+static int report_json(const char *event, uint32_t winners, uint32_t left, int draw, char *json, int size)
 {
     AutoMatch m;
-    char names[MAXP][25], key[32], json[2048];
+    char names[MAXP][25], key[32];
     const OnlineMode *mode;
     int i, n = 0, pos, players, first = 1;
     EnterCriticalSection(&g_cs);
     if (!N.report_key[0]) {
         LeaveCriticalSection(&g_cs);
-        return;
+        return 0;
     }
     m = N.report_m;
     memcpy(names, N.report_names, sizeof(names));
@@ -2014,33 +2024,74 @@ static void report_event(const char *event, uint32_t winners, uint32_t left, int
     players = N.players;
     LeaveCriticalSection(&g_cs);
     mode = online_mode(m.type);
-    n += snprintf(json + n, sizeof(json) - n, "{\"key\":\"%s\",\"mode\":%d,\"mode_name\":", key, m.type);
-    n = json_put(json, (int)sizeof(json), n, mode ? mode->name : "");
-    n += snprintf(json + n, sizeof(json) - n, ",\"venue\":%d,\"venue_name\":", m.venue);
-    n = json_put(json, (int)sizeof(json), n, online_venue_name(m.venue));
-    n += snprintf(json + n, sizeof(json) - n, ",\"you\":%d,\"players\":[", pos);
-    for (i = 0; i < m.count && i < MAXP && n < (int)sizeof(json) - 200; i++) {
+    n += snprintf(json + n, (size_t)(size - n), "{\"key\":\"%s\",\"mode\":%d,\"mode_name\":", key, m.type);
+    n = json_put(json, size, n, mode ? mode->name : "");
+    n += snprintf(json + n, (size_t)(size - n), ",\"venue\":%d,\"venue_name\":", m.venue);
+    n = json_put(json, size, n, online_venue_name(m.venue));
+    n += snprintf(json + n, (size_t)(size - n), ",\"you\":%d,\"players\":[", pos);
+    for (i = 0; i < m.count && i < MAXP && n < size - 200; i++) {
         int cpu = i >= players;
-        n += snprintf(json + n, sizeof(json) - n, "%s{\"slot\":%d,\"name\":", i ? "," : "", i);
-        n = json_put(json, (int)sizeof(json), n, cpu ? "CPU" : names[i]);
-        n += snprintf(json + n, sizeof(json) - n, ",\"fighter\":%d,\"fighter_name\":", m.fighter[i]);
-        n = json_put(json, (int)sizeof(json), n, online_fighter_name(m.fighter[i]));
-        n += snprintf(json + n, sizeof(json) - n, ",\"cpu\":%s}", cpu ? "true" : "false");
+        n += snprintf(json + n, (size_t)(size - n), "%s{\"slot\":%d,\"name\":", i ? "," : "", i);
+        n = json_put(json, size, n, cpu ? "CPU" : names[i]);
+        n += snprintf(json + n, (size_t)(size - n), ",\"fighter\":%d,\"fighter_name\":", m.fighter[i]);
+        n = json_put(json, size, n, online_fighter_name(m.fighter[i]));
+        n += snprintf(json + n, (size_t)(size - n), ",\"cpu\":%s}", cpu ? "true" : "false");
     }
-    n += snprintf(json + n, sizeof(json) - n, "],\"winners\":[");
+    n += snprintf(json + n, (size_t)(size - n), "],\"winners\":[");
     for (i = 0; i < m.count && i < MAXP; i++)
-        if (winners & (1u << i)) { n += snprintf(json + n, sizeof(json) - n, "%s%d", first ? "" : ",", i); first = 0; }
-    n += snprintf(json + n, sizeof(json) - n, "],\"draw\":%s,\"event\":\"%s\"", draw ? "true" : "false", event);
+        if (winners & (1u << i)) { n += snprintf(json + n, (size_t)(size - n), "%s%d", first ? "" : ",", i); first = 0; }
+    n += snprintf(json + n, (size_t)(size - n), "],\"draw\":%s,\"event\":\"%s\"", draw ? "true" : "false", event);
     if (left) {
         first = 1;
-        n += snprintf(json + n, sizeof(json) - n, ",\"left\":[");
+        n += snprintf(json + n, (size_t)(size - n), ",\"left\":[");
         for (i = 0; i < m.count && i < MAXP; i++)
-            if (left & (1u << i)) { n += snprintf(json + n, sizeof(json) - n, "%s%d", first ? "" : ",", i); first = 0; }
-        n += snprintf(json + n, sizeof(json) - n, "]");
+            if (left & (1u << i)) { n += snprintf(json + n, (size_t)(size - n), "%s%d", first ? "" : ",", i); first = 0; }
+        n += snprintf(json + n, (size_t)(size - n), "]");
     }
-    n += snprintf(json + n, sizeof(json) - n, "}");
-    if (n >= (int)sizeof(json)) return;
-    account_report_match(json);
+    n += snprintf(json + n, (size_t)(size - n), "}");
+    return n < size ? n : 0;
+}
+
+static void report_event(const char *event, uint32_t winners, uint32_t left, int draw)
+{
+    char json[2048];
+    if (report_json(event, winners, left, draw, json, (int)sizeof(json))) account_report_match(json);
+}
+
+/* The "crashed" report of the running match, built when its "start" goes out so that the crash
+ * handler only copies host memory it owns: no guest memory, no g_cs (the crashed thread may hold
+ * it), no allocation. Armed from the start report until the match is reported or ends. */
+#define CRASH_REPORT_MS 1500        /* how long the crash handler waits for the service */
+static char g_crash_report[2048];
+static volatile LONG g_crash_armed;
+
+static void disarm_crash_report(void) { InterlockedExchange(&g_crash_armed, 0); }
+
+static void arm_crash_report(void)
+{
+    char json[2048];
+    int n;
+    disarm_crash_report();
+    n = report_json("crashed", 0, 0, 0, json, (int)sizeof(json));
+    if (n <= 0 || n >= (int)sizeof(g_crash_report)) return;
+    memcpy(g_crash_report, json, (size_t)n + 1);
+    InterlockedExchange(&g_crash_armed, 1);
+}
+
+/* From the crash handler (main.c), after the crash report is written: when an online match this
+ * game reported the start of is running and not yet decided, tell the account service that this
+ * game crashed, so the match counts for nobody instead of as this player's loss. Bounded
+ * (CRASH_REPORT_MS); once. */
+void netplay_on_crash(void)
+{
+    int status;
+    if (!InterlockedExchange(&g_crash_armed, 0)) return;
+    fprintf(stderr, "[NETPLAY] the game crashed during an online match: telling the account service (no contest)\n");
+    fflush(stderr);
+    status = account_report_crash(g_crash_report, CRASH_REPORT_MS);
+    if (status > 0) fprintf(stderr, "[ACCOUNT] crash report sent: HTTP %d\n", status);
+    else fprintf(stderr, "[ACCOUNT] crash report: %s\n", status < 0 ? "not sent (not signed in)" : "no answer in time");
+    fflush(stderr);
 }
 
 /* The room match decided, from netplay_on_step (code 4 a draw); once per match. */
@@ -2055,6 +2106,7 @@ void netplay_on_result(uint32_t winners, uint32_t losers, uint32_t code)
     }
     N.reported = 1;
     LeaveCriticalSection(&g_cs);
+    disarm_crash_report();
     fprintf(stderr, "[NETPLAY] match result: winners 0x%X, code 0x%X; reporting it when signed in\n",
             (unsigned)winners, (unsigned)code);
     report_event("result", winners, 0, (code & 4u) != 0);
@@ -2071,6 +2123,7 @@ static void report_left(uint32_t left)
     if (send) N.reported = 1;
     LeaveCriticalSection(&g_cs);
     if (!send) return;
+    disarm_crash_report();
     fprintf(stderr, "[NETPLAY] left the match before it was decided: players 0x%X; reporting it when signed in\n",
             (unsigned)left);
     report_event("left", 0, left, 0);
@@ -2374,6 +2427,7 @@ void netplay_on_match_start(void)
                  (unsigned)N.match_count);
     }
     N.reported = N.fighting_seen = N.start_reported = 0;
+    disarm_crash_report();
     memset(N.latest_local, 0, sizeof(N.latest_local));
     N.desync = 0;
     if (N.match_live) N.match_seen = 1;
@@ -2395,6 +2449,7 @@ void netplay_on_match_start(void)
     if (N.lobby && N.match_live && N.report_key[0]) {
         N.start_reported = 1;
         report_event("start", 0, 0, 0);
+        arm_crash_report();
     }
     log_contiguous("at the match start");
 }

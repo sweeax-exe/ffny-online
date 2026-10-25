@@ -137,8 +137,10 @@ repeated every 400 ms until a `HILL` shows the fight is over (`fights` advanced)
 
 **Accounts.** Only the two fighters report the match to the account service, as today
 (`POST /api/matches`, key `<room>-<SEED>-1`, the two fighters as players, `"start"` /
-`"result"` / `"left"` events). The stats count it like any hub match: both reports must agree,
-a leaver gets the loss. The report names match positions (0 and 1), not room slots, so a
+`"result"` / `"left"` / `"crashed"` events). The stats count it like any hub match: both reports must agree,
+a leaver gets the loss, unless the leaver's own game reported that it crashed (then the fight is a
+no contest for the stats; the hill itself still counts it as the leaver's loss, `HowLeft`, and the
+crashed player has left the room anyway). The report names match positions (0 and 1), not room slots, so a
 fighter in room slot 7 is still a valid report (the account service accepts positions 0..3
 only, `accounts/stats.go` `valid`); no account-service change is needed. Spectators never
 report: they have no position in the match (the client must not call `account_report_match`
