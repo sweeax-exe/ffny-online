@@ -203,3 +203,18 @@ crash report prints the history of the arena blocks the guest registers point in
   `scripts/guest-regs.py` read the guest registers at the wrong TLS
   offset (the `.tls` start inside its section was ignored), so `guest-stack.py` printed nothing for
   release builds; fixed, and it named this loop.
+
+## Match 1 runs clean; the second match broke XAPI's heap (2026-10-25, 12:10-12:40)
+
+* With the arena fixes, two runs played the whole first match on both copies (4.5 and 5.5 minutes, ~1000
+  rollbacks each, both copies with the same result; the arena at the fight's end about 5-6 MB). Both then
+  stopped early in the second match (steps ~1800 and ~700) with the same stack: the render path into
+  Direct3D's resource creation (`sub_00219E50`) -> `XMemAlloc` (`sub_001F9DC6`) -> `RtlAllocateHeap`
+  (`sub_001FE621`) on XAPI's process heap (`[0x3CD1D0]` = `0x00F81000`, outside the save states), looping.
+  Direct3D's fence word (`[device+0x30]` = `0x82A0D000`) being two fences behind in the first of these was a
+  side effect: the game thread never got to kick the push buffer.
+* Why: that heap holds Direct3D's resource headers. A load brings back game state that still holds a
+  resource the game had released; the game releases it again and the heap's free lists break. XAPI's heap
+  free (`sub_001FBE1E`) is now hand-written in `src/recomp_manual.c`, and frees on the game thread in a fight
+  are held (`rollback_hold_xapi_free`): forgotten by a load that goes back before them, given back once no
+  save older than them is left, and all at the fight's end (`release_held_xapi`).

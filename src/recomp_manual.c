@@ -1276,3 +1276,27 @@ void sub_002203C6_enter(void)
                 g_recomp_gamma[0][32], g_recomp_gamma[0][64], g_recomp_gamma[0][128],
                 g_recomp_gamma[0][192], g_recomp_gamma[0][224]);
 }
+
+/* XAPI's heap free (ptr), stdcall ret 4: RtlFreeHeap(the process heap at [0x3CD1D0], 0, ptr); returns 0 when
+ * freed, else ptr. Hand-written so a rollback fight can hold the game thread's frees: that heap (Direct3D's
+ * resource headers among it) is outside the save states, so a load brought back game state that still held a
+ * texture or buffer it had released, the game released it again, and the heap's lists broke (the game thread
+ * looping in RtlAllocateHeap, sub_001FE621, early in the second match of two five-match runs, 2026-10-25). */
+extern void sub_001FF616(void);
+void defjam_xapi_free_now(uint32_t ptr)
+{
+    g_esp -= 4; MEM32(g_esp) = ptr;
+    g_esp -= 4; MEM32(g_esp) = 0;
+    g_esp -= 4; MEM32(g_esp) = MEM32(0x003CD1D0u);
+    g_esp -= 4; MEM32(g_esp) = 0x001FBE2Fu;          /* the return address the original pushes */
+    sub_001FF616();                                     /* stdcall: pops it and the three arguments */
+    g_eax = (g_eax & 0xFFu) ? 0 : ptr;
+}
+
+void sub_001FBE1E(void)
+{
+    uint32_t ptr = MEM32(g_esp + 4);
+    if (rollback_hold_xapi_free(ptr)) g_eax = 0;
+    else defjam_xapi_free_now(ptr);
+    g_esp += 8;                                         /* ret 4 */
+}

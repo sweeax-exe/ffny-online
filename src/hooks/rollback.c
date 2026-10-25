@@ -388,6 +388,7 @@ static void hold_contig_frees(void)
 }
 
 static void run_late_frees(void);
+static void release_held_xapi(int all);
 
 static void track_stop(void)
 {
@@ -404,6 +405,7 @@ static void track_stop(void)
     LeaveCriticalSection(&s_track_cs);
     release_contig_frees();
     release_held_arena(1);
+    release_held_xapi(1);
     run_late_frees();
 }
 
@@ -910,6 +912,7 @@ int rollback_save(int slot)
     }
     InterlockedIncrement(&s_saves);
     release_held_arena(0);
+    release_held_xapi(0);
     s = &s_slot[slot];
     s->at = s_saves;
     if (!s->data && !(s->data = (uint8_t *)malloc(s_dbytes))) return -1;
@@ -1259,6 +1262,48 @@ static void release_held_arena(int all)
     LeaveCriticalSection(&s_arena_cs);
 }
 
+/* XAPI heap frees on the game thread in a fight (src/recomp_manual.c, sub_001FBE1E): held like the arena's,
+ * forgotten by a load that goes back before them, given back on the game thread once no save older than
+ * the free is left, and all at the fight's end. */
+extern void defjam_xapi_free_now(uint32_t ptr);
+#define HELD_XAPI 4096
+static struct { uint32_t ptr; LONG at; } s_held_xapi[HELD_XAPI];
+static unsigned s_nheld_xapi;
+
+int rollback_hold_xapi_free(uint32_t ptr)
+{
+    unsigned k;
+    if (!s_tracking || !ptr || GetCurrentThreadId() != s_game_tid) return 0;
+    for (k = 0; k < s_nheld_xapi && s_held_xapi[k].ptr != ptr; k++) {}
+    if (k == s_nheld_xapi) {
+        if (s_nheld_xapi == HELD_XAPI) return 0;
+        s_nheld_xapi++;
+    }
+    s_held_xapi[k].ptr = ptr;
+    s_held_xapi[k].at = s_saves;
+    return 1;
+}
+
+static void release_held_xapi(int all)
+{
+    unsigned k = 0, n = 0;
+    uint32_t eax = g_eax, ecx = g_ecx, edx = g_edx;
+    if (GetCurrentThreadId() != s_game_tid) return;
+    while (k < s_nheld_xapi) {
+        if (all || s_saves - s_held_xapi[k].at > ROLLBACK_SLOTS + 2) {
+            uint32_t ptr = s_held_xapi[k].ptr;
+            s_held_xapi[k] = s_held_xapi[--s_nheld_xapi];
+            defjam_xapi_free_now(ptr);
+            n++;
+        } else {
+            k++;
+        }
+    }
+    g_eax = eax; g_ecx = ecx; g_edx = edx;
+    if (all && n)
+        fprintf(stderr, "[ROLLBACK] %u XAPI heap frees held through the fight given back\n", n);
+}
+
 /* A load goes back to before the frees held since that save: the state it brings back still uses those
  * blocks. They stay allocated (the re-run frees them again if it does), instead of being handed out at the
  * fight's end while the game holds them (the crash at the first KO of a five-match run). */
@@ -1296,6 +1341,15 @@ static void forget_frees_since(LONG at)
             }
         }
         LeaveCriticalSection(&s_arena_cs);
+    }
+    {
+        unsigned xapi = 0;
+        i = 0;
+        while (i < s_nheld_xapi) {
+            if (s_held_xapi[i].at >= at) { s_held_xapi[i] = s_held_xapi[--s_nheld_xapi]; xapi++; }
+            else i++;
+        }
+        contig += xapi;     /* counted with the contiguous ones in the line below */
     }
     if ((contig || arena) && told++ < 20)
         fprintf(stderr, "[ROLLBACK] a load went back before %u contiguous and %u audio frees: they stay allocated\n",
@@ -1637,6 +1691,7 @@ int rollback_enabled(void) { return 0; }
 const char *rollback_page_state(uint32_t addr) { (void)addr; return "-"; }
 void rollback_arena_history(void) {}
 int rollback_sound_command_dead(uint32_t sp) { (void)sp; return 0; }
+int rollback_hold_xapi_free(uint32_t ptr) { (void)ptr; return 0; }
 void rollback_note_dynamic_load(uint32_t caller, uint32_t handle) { (void)caller; (void)handle; }
 unsigned rollback_dynamic_loads(void) { return 0; }
 void rollback_check_alloc(uint32_t caller, uint32_t size, uint32_t block) { (void)caller; (void)size; (void)block; }

@@ -45,6 +45,8 @@ const char *rollback_page_state(uint32_t addr);
 void rollback_arena_history(void);
 /* A sound command (guest esp at its entry) that names an engine object already given back. */
 int rollback_sound_command_dead(uint32_t sp);
+/* An XAPI heap free (sub_001FBE1E) on the game thread in a fight: held; 1 if it was. */
+int rollback_hold_xapi_free(uint32_t ptr);
 /* The game heap's free (sub_0002A180), as recomp_lookup_manual hands it out. */
 void rollback_heap_free(void);
 /* The mixer's lock and unlock (0x2E61C0 / 0x2E61C4 point at one of two pairs). */
