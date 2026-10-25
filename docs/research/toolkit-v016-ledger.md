@@ -295,4 +295,11 @@ v0.13.0 + fork `e818066`, built 2026-10-20). Old and new alternated:
   earlier the same day, 193-194 s on 10-22); its length varies with how the fight goes, and all 27 assertions
   pass. The code is shared: Windows and the Deck have not run it yet.
 
+  **Not specific to Def Jam.** A probe on the SECTL write (2026-10-25) put every recurring 0x07/0x0F write on
+  the APU interrupt worker's stack inside the DSOUND section (XDK 1.0.5849; return addresses 0x0025FB24 and
+  0x0025FB79, then 0x00260356, 0x002603C7); no title code was on it. The toggle is DirectSound's service routine,
+  so any title on that DirectSound behind the SSL tick (#205) can lose slices the same way. Upstream main
+  (`f0f8a46`) has the same frame-thread branch and `957c1ba` cherry-picks onto it cleanly: an upstream PR
+  candidate, pending approval.
+
 Not run: the Setup from the newest green CI run and the Story intro with a pad (§7 step 5; needs a person).
