@@ -781,6 +781,10 @@ static void send_rtt(void)
 static int every_player_rolls_back(void)
 {
     int i;
+    /* King of the Hill fights stay in lockstep for now: with rollback, players' games froze or
+     * crashed after the first fight of a hill in build 27, and the loser then never left the seat
+     * (2026-10-25). Both PCs of a fight know it from START, so the delay agrees too. */
+    if (N.koth_match) return 0;
     for (i = 0; i < N.players; i++) if (!N.peer_rb[i]) return 0;
     return 1;
 }
@@ -2163,6 +2167,8 @@ void netplay_sync_point(void)
                 N.peer_rtt[0], N.peer_rtt[1], N.peer_rtt[2], N.peer_rtt[3], known ? "" : ", some missing");
         if (N.rb_match) {
             fprintf(stderr, "[NETPLAY] rollback on for this match: every player has it on\n");
+        } else if (N.koth_match) {
+            fprintf(stderr, "[NETPLAY] rollback off for this match: King of the Hill fights play in lockstep\n");
         } else {
             for (i = 0; i < N.players && i < MAXP; i++) {
                 char who[40];
@@ -3107,8 +3113,10 @@ void netplay_on_update(void)
     rollback_check_tables(N.resim ? "a re-run update starts" : "an update starts");
     koth_check_result(0);       /* also between the fight's steps: an ending can stop them */
     if (N.resim || !N.rb_on) return;
-    /* before any save, load or the reference copy: the device holds no texture or palette */
-    rollback_unbind_textures();
+    /* before any save, load or the reference copy: the device holds no texture or palette. Only
+     * while the fight runs (its saves and loads): around it the game loads and frees the venue's
+     * textures itself, and releasing them under it is not needed. */
+    if (MEM32(G_MATCH_PHASE) == 1u) rollback_unbind_textures();
     /* The fight is decided and every step ran on the real entries, or the match went on offline:
      * no more rollback in this match (write tracking off, no saves on the results screen). */
     if (MEM32(G_MATCH_PHASE) == 1u) N.rb_fought = 1;   /* a rematch starts with the last match's phase */
