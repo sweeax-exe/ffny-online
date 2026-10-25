@@ -93,6 +93,7 @@ extern void sub_00137010(void);
 void netplay_sound_command(void) { sub_00137010(); }
 void *netplay_sound_handler(uint32_t va) { (void)va; return NULL; }
 void netplay_on_pad_read(uint32_t a) { (void)a; }
+int netplay_local_slot(void) { return -1; }
 void netplay_on_seed(uint32_t e, int w, uint32_t x) { (void)e; (void)w; (void)x; }
 void netplay_on_result(uint32_t w, uint32_t l, uint32_t c) { (void)w; (void)l; (void)c; }
 void netplay_on_crash(void) {}
@@ -319,6 +320,7 @@ static int rollback_wanted(void) { return rollback_enabled(); }
  * (RECOMP_NETPLAY=host/join, tests only) exchange no flags: the local setting. */
 static int match_rolls_back(void) { return N.lobby ? N.rb_match : rollback_wanted(); }
 int netplay_rerunning(void) { return N.resim; }
+int netplay_local_slot(void) { return N.lockstep ? N.pos : -1; }
 
 static BOOL CALLBACK init_once(PINIT_ONCE o, PVOID p, PVOID *c)
 {

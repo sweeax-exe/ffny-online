@@ -64,7 +64,8 @@ def prepare_root(i):
     return root
 
 
-def launch(copies=1, online=False, quick="0,2", fighters=None, pads=1, fast_ko=0, env=None, visible=False):
+def launch(copies=1, online=False, quick="0,2", fighters=None, pads=1, fast_ko=0, env=None, visible=False,
+           ko_step=0, ko_winner="alt", bot=0, relay_port=27777, base_core=2):
     global RELAY_PROC
     close()
     if not os.path.isfile(EXE):
@@ -73,7 +74,7 @@ def launch(copies=1, online=False, quick="0,2", fighters=None, pads=1, fast_ko=0
     copies = max(1, min(4, int(copies)))
     fighters = fighters or [55, 22, 9, 31]
     if online:
-        RELAY_PROC = subprocess.Popen([RELAY, "-listen", "127.0.0.1:27777", "-log-interval", "30s"],
+        RELAY_PROC = subprocess.Popen([RELAY, "-listen", "127.0.0.1:%d" % int(relay_port), "-log-interval", "30s"],
                                       stdout=open(os.path.join(LOGS, "relay.out"), "wb"),
                                       stderr=open(os.path.join(LOGS, "relay.err"), "wb"),
                                       creationflags=subprocess.CREATE_NO_WINDOW)
@@ -97,11 +98,15 @@ def launch(copies=1, online=False, quick="0,2", fighters=None, pads=1, fast_ko=0
         # each copy's guest threads on a CPU of their own (2, 4, ...), as on a player's PC: two copies
         # on CPU 2 starve each other, and spreading them (RECOMP_GUEST_CORES=all) runs the game thread
         # beside the mixer, which rollback's page attribution assumes cannot happen
-        e["RECOMP_GUEST_CORE"] = str(2 + 2 * i)
+        e["RECOMP_GUEST_CORE"] = str(int(base_core) + 2 * i)
         if fast_ko:
             e["RECOMP_TEST_FAST_KO"] = str(int(fast_ko))
+        if ko_step:     # the game knocks the loser out at that fight step (src/hooks/test_telemetry.c)
+            e["RECOMP_TEST_KO_STEP"] = "%d,%s" % (int(ko_step), ko_winner)
+        if bot:         # the state-reading bot drives the copy's fighter (src/hooks/test_bot.c)
+            e["RECOMP_TEST_BOT"] = "1,%d" % max(0, min(100, int(bot)))
         if online:
-            e.update({"RECOMP_NETPLAY": "quick", "RECOMP_NETPLAY_SERVER": "127.0.0.1",
+            e.update({"RECOMP_NETPLAY": "quick", "RECOMP_NETPLAY_SERVER": "127.0.0.1:%d" % int(relay_port),
                       "RECOMP_NETPLAY_QUICK": quick, "RECOMP_NETPLAY_FIGHTER": str(fighters[i % len(fighters)])})
         for k, v in (env or {}).items():
             e[str(k)] = str(v)
@@ -317,11 +322,16 @@ TOOLS = [
     {"name": "launch", "description": "Start 1..4 test copies of the built game (closes earlier ones). online=true adds "
      "a local relay and puts the copies into one quick-match room (quick='mode,players', e.g. '0,2' One on One, "
      "'3,2' Tag Team with CPUs). pads = virtual pads per copy (2 for an offline versus). fast_ko = health percent "
-     "every fighter starts a match with (e.g. 5) so matches end in seconds. env = extra RECOMP_ variables.",
+     "every fighter starts a match with (e.g. 5); the fighter at zero health still has to be finished. ko_step = the game "
+     "knocks the loser out at that fight step of every match (ko_winner: a slot, or 'alt' to alternate). bot = the "
+     "state-reading test bot drives each copy's fighter, with that aggression 1..100. relay_port and base_core (copy i "
+     "runs on CPU base_core + 2i) keep a second test apart from another one. env = extra RECOMP_ variables.",
      "inputSchema": {"type": "object", "properties": {
          "copies": {"type": "integer"}, "online": {"type": "boolean"}, "quick": {"type": "string"},
          "fighters": {"type": "array", "items": {"type": "integer"}}, "pads": {"type": "integer"},
-         "fast_ko": {"type": "integer"}, "env": {"type": "object"}, "visible": {"type": "boolean"}}}},
+         "fast_ko": {"type": "integer"}, "env": {"type": "object"}, "visible": {"type": "boolean"},
+         "ko_step": {"type": "integer"}, "ko_winner": {"type": "string"}, "bot": {"type": "integer"},
+         "relay_port": {"type": "integer"}, "base_core": {"type": "integer"}}}},
     {"name": "state", "description": "A copy's live state: current screen, the last front-end calls, the match (phase "
      "0 start/1 fighting/2 decided/3 done, clock, type, fighters with health) and the online status.",
      "inputSchema": {"type": "object", "properties": {"copy": {"type": "integer"}}}},
@@ -383,7 +393,9 @@ def call(name, a):
     copy = a.get("copy", 0)
     if name == "launch":
         return [text(launch(a.get("copies", 1), a.get("online", False), a.get("quick", "0,2"), a.get("fighters"),
-                            a.get("pads", 1), a.get("fast_ko", 0), a.get("env"), a.get("visible", False)))]
+                            a.get("pads", 1), a.get("fast_ko", 0), a.get("env"), a.get("visible", False),
+                            a.get("ko_step", 0), a.get("ko_winner", "alt"), a.get("bot", 0),
+                            a.get("relay_port", 27777), a.get("base_core", 2)))]
     if name == "state":
         return [text(control(copy, "state"))]
     if name == "press":

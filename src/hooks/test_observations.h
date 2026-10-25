@@ -29,4 +29,8 @@ long long defjam_test_snap_step(void);
 void defjam_test_request_freeze(unsigned ms);
 int defjam_test_snap_skip(uint32_t addr, uint32_t bytes);
 unsigned long long defjam_test_step_hash(long long step);
+/* test_bot.c: RECOMP_TEST_BOT, a state-reading player for a fighter's pad. */
+int defjam_test_bot_enabled(void);
+void defjam_test_bot_match_start(void);
+int defjam_test_bot_input(uint32_t actor, int slot, long long step);
 #endif
