@@ -121,3 +121,27 @@ Start-of-match hook: `sub_001A4D90` (called once from the setup copy `sub_000871
 - Log `0x3BE624` and the `+0xE` code of the last record after a played KO, a time-up (set `0x3B9080` nonzero) and a hazard KO. That tells which `+0x932` bit
   is the KO (candidates `0x04`/`0x81` and `0x01`/`0x21`).
 - Watch `+0x925` of the loser when health hits 0, and `+0x932` when the finishing move lands.
+
+## Addendum 2026-10-25: the knockout path, read and confirmed
+
+Read in the disassembly and confirmed by the test knockout (`RECOMP_TEST_KO_STEP`, `src/hooks/test_telemetry.c`)
+in offline and online fights; this settles the Q3 candidates.
+
+- The played knockout is result code `0x21` (decisive + defeat flag `+0x932` bit 1), with the loser in **state 0x18**
+  (handler `sub_001B39F0`, slot 24 of the table built in `sub_001B54D0`, index = (stack offset - 4) / 4 after its
+  `push esi`). Seen in every logged online knockout, and the loser stays in 0x18 through the result.
+- The decision is `sub_001C5FC0(attacker, defender, kind)`, called from the hit and grapple paths (`sub_001C3890`,
+  `sub_001C6CD0`, `sub_001D3100`, `sub_001D31D0`, `sub_001D5870` area): it needs the attacker's current move to carry the
+  finishing flag (`attacker+0xF68`, set by `sub_001B4930` from bit 0x8000 of the move's table entry), the defender under
+  the knockout threshold (`+0x927` bit 0x10, set by `sub_001A5DD0` while the health ratio `+0x35C` is below 0.1) and a
+  chance roll (`sub_001A5C30` mode 1, through `sub_001BC730`). It then writes the fall's variant bits to
+  `defender+0x943` (1, plus 2/4/8 by the defender's state and side, 0x10 for a special case that skips the state) and,
+  for `kind != 0`, puts the defender in state 0x18 through `sub_001B5420` (set-state and restart).
+- `sub_001B39F0` sub-state 0 picks the fall animation from `+0x943`, plays it and sets `+0x932` bit 1 (unless `+0x943`
+  bit 0x10). The phase machine's win check (`sub_001A7140`) then records the result on the next step.
+- So zero health alone is not a knockout because of the finishing flag and the chance roll; health under 10 % only
+  makes the fighter knockable. The test knockout does the game's last step itself: health and ratio 0, `+0x943 = 1`,
+  `sub_001B5420(loser, 0x18)` at the start of a step; the game takes it from there (result 0x21, slow motion, summary).
+- Pad bits seen in a step-input probe (One on One, slot 0): `0x80` strike (state 0x45), `0x40` strike (0x49), `0x20`
+  grab (0x1E, then 0x34 holding and 0x35 held), `0x2000` held block (state 2); `0x1000` alone changed no state (read as the modifier, unconfirmed); state 1 is
+  standing and walking (about 0.4 world units a step). Not settled: what `0x10` does.
