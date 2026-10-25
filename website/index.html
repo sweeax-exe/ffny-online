@@ -1,0 +1,276 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FFNY Online: Def Jam: Fight for NY on PC, online</title>
+<meta name="description" content="FFNY Online is a free, unofficial fan project: play Def Jam: Fight for NY natively on your PC from your own copy of the game, with online rooms, Quick Match, King of the Hill and voice chat.">
+<meta name="theme-color" content="#0b0808">
+<meta name="color-scheme" content="dark">
+<meta name="referrer" content="no-referrer">
+<link rel="canonical" href="https://defjam.online/">
+<link rel="icon" href="favicon.ico" sizes="any">
+<link rel="icon" type="image/png" sizes="256x256" href="img/icon-256.png">
+<link rel="apple-touch-icon" href="img/icon-256.png">
+<link rel="preload" href="fonts/Anton-Regular.ttf" as="font" type="font/ttf" crossorigin>
+<link rel="preload" href="img/launcher-bg.jpg" as="image">
+<link rel="stylesheet" href="style.css">
+
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="FFNY Online">
+<meta property="og:url" content="https://defjam.online/">
+<meta property="og:title" content="FFNY Online: Def Jam: Fight for NY on PC, online">
+<meta property="og:description" content="Play Def Jam: Fight for NY on PC from your own copy, and fight online: rooms, Quick Match, King of the Hill, voice chat. Free, unofficial fan project.">
+<meta property="og:image" content="https://defjam.online/media/online-fight.png">
+<meta property="og:image:width" content="640">
+<meta property="og:image:height" content="480">
+<meta property="og:image:alt" content="An online fight in FFNY Online">
+<meta name="twitter:card" content="summary_large_image">
+<script src="site.js" defer></script>
+</head>
+<body>
+<a class="skip" href="#start">Skip to download</a>
+
+<header class="top">
+  <a class="brand" href="#top" aria-label="FFNY Online, back to top">
+    <img src="img/icon-256.png" alt="" width="36" height="36">
+    <span>FFNY Online</span>
+  </a>
+  <nav aria-label="Sections">
+    <a href="#features">Features</a>
+    <a href="#screens">Screens</a>
+    <a href="#how">Get started</a>
+    <a class="pill" href="https://discord.gg/zCZKVDnKaP" rel="noopener">Discord</a>
+  </nav>
+</header>
+
+<main id="top">
+  <section class="hero">
+    <div class="hero-bg" aria-hidden="true"></div>
+    <canvas class="embers" aria-hidden="true"></canvas>
+    <div class="hero-inner">
+      <div class="hero-logo">
+        <img src="img/logo-512.png" alt="FFNY Online" width="512" height="482">
+      </div>
+      <div class="hero-copy">
+        <p class="eyebrow">Free · Unofficial fan project · Windows</p>
+        <h1>Fight for NY.<br><span>Now online.</span></h1>
+        <p class="lead">Play <strong>Def Jam: Fight for NY</strong> natively on your PC, built from
+          your own copy of the game, and take the fight online: rooms, Quick Match,
+          King of the Hill and voice chat, right in the game's main menu.</p>
+
+        <div class="glass download" id="start">
+          <a class="btn-download" id="dl-main" href="https://github.com/sweeax-exe/ffny-online/releases/latest">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v11m0 0-4.5-4.5M12 14l4.5-4.5M4 17v3h16v-3" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <span class="btn-text">
+              <span class="btn-label">Download for Windows</span>
+              <span class="btn-meta" id="dl-meta">Latest installer on GitHub</span>
+            </span>
+          </a>
+          <ul class="dl-more" id="dl-more" hidden></ul>
+          <p class="dl-note">The installer holds no game files: it builds the game from your own dump.
+            It is unsigned, so Windows may warn: choose <em>More info</em>, then <em>Run anyway</em>.</p>
+        </div>
+      </div>
+    </div>
+    <a class="scroll-cue" href="#features" aria-label="Scroll to the features"></a>
+  </section>
+
+  <section class="section" id="features" aria-labelledby="features-title">
+    <div class="wrap">
+      <p class="kicker">What you get</p>
+      <h2 id="features-title">The fighter you remember. The online it never had.</h2>
+      <div class="cards">
+        <article class="glass card">
+          <span class="card-num">01</span>
+          <h3>Online in the main menu</h3>
+          <p>Choose ONLINE on the game's own main menu. Quick Match drops you straight into a fight;
+            or browse the open rooms, open your own, or join a friend by code.</p>
+        </article>
+        <article class="glass card">
+          <span class="card-num">02</span>
+          <h3>Rooms and venue vote</h3>
+          <p>One on One, 3-Way and Free for All with up to four players, CPU fighters in the free
+            places. Pick from the roster, ready up, then the room votes on the venue.</p>
+        </article>
+        <article class="glass card">
+          <span class="card-num">03</span>
+          <h3>King of the Hill</h3>
+          <p>Up to ten players in one room. Two fight, the rest watch and wait in line.
+            The winner stays on; the loser goes to the back.</p>
+        </article>
+        <article class="glass card">
+          <span class="card-num">04</span>
+          <h3>Voice chat</h3>
+          <p>Talk in rooms and fights: push-to-talk on the keyboard or the controller, an open
+            microphone, or off, with a volume for every player.</p>
+        </article>
+        <article class="glass card">
+          <span class="card-num">05</span>
+          <h3>Stats and ranked</h3>
+          <p>Sign in with Discord for your record, main fighter, last fights and the leaderboard.
+            Ranked matches with a rating are on the way.</p>
+        </article>
+        <article class="glass card">
+          <span class="card-num">06</span>
+          <h3>Rollback netcode <small>beta</small></h3>
+          <p>Fights run in lockstep with an input delay set from your pings. Switch on rollback
+            (beta) in the launcher; it is used when everyone in the match has it on.</p>
+        </article>
+        <article class="glass card">
+          <span class="card-num">07</span>
+          <h3>Sharper than ever</h3>
+          <p>Up to four times the console's resolution, windowed or borderless, and optional
+            HD textures generated on your PC from your own dump.</p>
+        </article>
+        <article class="glass card">
+          <span class="card-num">08</span>
+          <h3>Any pad you own</h3>
+          <p>Xbox, DualSense, Switch Pro and most other gamepads, keyboard and mouse, rumble and
+            remapping, up to four players on one PC.</p>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="screens" aria-labelledby="screens-title">
+    <div class="wrap">
+      <p class="kicker">Screens</p>
+      <h2 id="screens-title">Straight from the game.</h2>
+      <div class="gallery">
+        <figure class="shot">
+          <a href="media/online-menu.png" data-full="media/online-menu.png"><img src="media/online-menu.png" alt="ONLINE in the game's main menu" width="800" height="600" loading="lazy" decoding="async"></a>
+          <figcaption>ONLINE, right in the main menu</figcaption>
+        </figure>
+        <figure class="shot">
+          <a href="media/online-hub.png" data-full="media/online-hub.png"><img src="media/online-hub.png" alt="The online hub: Quick Match, find a room, create a room" width="800" height="600" loading="lazy" decoding="async"></a>
+          <figcaption>Quick Match or a room of your own</figcaption>
+        </figure>
+        <figure class="shot">
+          <a href="media/online-fighters.png" data-full="media/online-fighters.png"><img src="media/online-fighters.png" alt="Choosing a fighter from the roster" width="800" height="600" loading="lazy" decoding="async"></a>
+          <figcaption>Pick your fighter from the roster</figcaption>
+        </figure>
+        <figure class="shot">
+          <a href="media/online-vote.png" data-full="media/online-vote.png"><img src="media/online-vote.png" alt="The room votes on the venue" width="800" height="600" loading="lazy" decoding="async"></a>
+          <figcaption>The room votes on the venue</figcaption>
+        </figure>
+        <figure class="shot">
+          <a href="media/online-fight.png" data-full="media/online-fight.png"><img src="media/online-fight.png" alt="An online fight" width="640" height="480" loading="lazy" decoding="async"></a>
+          <figcaption>Then you fight, online</figcaption>
+        </figure>
+        <figure class="shot">
+          <a href="media/online-stats.png" data-full="media/online-stats.png"><img src="media/online-stats.png" alt="MY STATS: record, main fighter, last fights and the leaderboard" width="960" height="720" loading="lazy" decoding="async"></a>
+          <figcaption>Your stats and the leaderboard</figcaption>
+        </figure>
+      </div>
+
+      <div class="clip glass">
+        <div class="clip-media">
+          <img id="clip-img" src="media/fight-screenshot.png" alt="Banner and Blaze fighting in the PC port" width="645" height="507" loading="lazy" decoding="async">
+          <a class="clip-play" id="clip-play" href="media/fight-gameplay.gif" data-gif="media/fight-gameplay.gif">
+            <span class="clip-icon" aria-hidden="true"></span>
+            <span>Play the gameplay clip <small>(6 s, 6.6 MB)</small></span>
+          </a>
+        </div>
+        <div class="clip-text">
+          <h3>60 fps, native on your PC</h3>
+          <p>The original Xbox game is translated into C and compiled on your own machine, so menus,
+            Story mode and fights run natively at 60 frames per second, with sound, drawn through
+            Direct3D 11.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="how" aria-labelledby="how-title">
+    <div class="wrap">
+      <p class="kicker">Get started</p>
+      <h2 id="how-title">Into the fight in three steps.</h2>
+      <ol class="steps">
+        <li class="glass step">
+          <span class="step-num">1</span>
+          <h3>Download the installer</h3>
+          <p>Get the Windows installer <a href="#start">above</a>. It is free and holds no game:
+            only the port's code and the tools to build it.</p>
+        </li>
+        <li class="glass step">
+          <span class="step-num">2</span>
+          <h3>Point it at your dump</h3>
+          <p>Choose your own dump of the <strong>USA Xbox</strong> version, a disc image or an
+            extracted folder. Setup checks it first.
+            <a href="https://github.com/sweeax-exe/ffny-online/blob/main/docs/dump-your-disc.md" rel="noopener">How to dump your disc</a></p>
+        </li>
+        <li class="glass step">
+          <span class="step-num">3</span>
+          <h3>It builds on your PC</h3>
+          <p>Setup translates and compiles the game locally, then the launcher opens. Press PLAY,
+            choose ONLINE. Updates arrive through the launcher, signed.</p>
+        </li>
+      </ol>
+      <div class="pair">
+        <figure class="shot">
+          <a href="media/setup-wizard.png" data-full="media/setup-wizard.png"><img src="media/setup-wizard.png" alt="The setup wizard: choose your dump, an install folder and a data folder" width="740" height="560" loading="lazy" decoding="async"></a>
+          <figcaption>The setup wizard</figcaption>
+        </figure>
+        <figure class="shot">
+          <a href="media/launcher.png" data-full="media/launcher.png"><img src="media/launcher.png" alt="The launcher with the FFNY Online logo, on its Online page" width="1000" height="720" loading="lazy" decoding="async"></a>
+          <figcaption>The launcher</figcaption>
+        </figure>
+      </div>
+      <p class="fine">No game files are distributed, ever. PS2 and GameCube copies cannot be used.
+        Online play is Windows only for now.</p>
+    </div>
+  </section>
+
+  <section class="section community" aria-labelledby="community-title">
+    <div class="wrap">
+      <div class="glass community-panel">
+        <div>
+          <p class="kicker">Community</p>
+          <h2 id="community-title">Find your next opponent.</h2>
+          <p>Questions, bug reports and people to fight: the FFNY Online Discord is where the
+            community meets. The code is open on GitHub.</p>
+        </div>
+        <div class="community-actions">
+          <a class="btn btn-discord" href="https://discord.gg/zCZKVDnKaP" rel="noopener">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M19.6 5.3A17 17 0 0 0 15.4 4l-.5 1a15.8 15.8 0 0 0-5.8 0l-.5-1a17 17 0 0 0-4.2 1.3C1.7 9.3 1 13.1 1.3 16.9A17 17 0 0 0 6.5 19.5l1.1-1.8a11 11 0 0 1-1.7-.8l.4-.3a12.2 12.2 0 0 0 11.4 0l.4.3c-.5.3-1.1.6-1.7.8l1.1 1.8a17 17 0 0 0 5.2-2.6c.4-4.4-.7-8.2-3.1-11.6ZM8.5 14.6c-1 0-1.9-1-1.9-2.1s.8-2.1 1.9-2.1 1.9 1 1.9 2.1-.8 2.1-1.9 2.1Zm7 0c-1 0-1.9-1-1.9-2.1s.8-2.1 1.9-2.1 1.9 1 1.9 2.1-.8 2.1-1.9 2.1Z"/></svg>
+            Join the Discord
+          </a>
+          <a class="btn btn-ghost" href="https://github.com/sweeax-exe/ffny-online" rel="noopener">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 1.5a10.5 10.5 0 0 0-3.3 20.5c.5.1.7-.2.7-.5v-1.8c-2.9.6-3.5-1.4-3.5-1.4-.5-1.2-1.2-1.5-1.2-1.5-.9-.6.1-.6.1-.6 1 .1 1.6 1.1 1.6 1.1.9 1.6 2.5 1.1 3.1.9.1-.7.4-1.1.6-1.4-2.3-.3-4.8-1.2-4.8-5.2 0-1.1.4-2.1 1.1-2.8-.1-.3-.5-1.3.1-2.8 0 0 .9-.3 2.9 1.1a10 10 0 0 1 5.2 0c2-1.4 2.9-1.1 2.9-1.1.6 1.5.2 2.5.1 2.8.7.7 1.1 1.7 1.1 2.8 0 4-2.5 4.9-4.8 5.2.4.3.7 1 .7 1.9v2.8c0 .3.2.6.7.5A10.5 10.5 0 0 0 12 1.5Z"/></svg>
+            Source on GitHub
+          </a>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="foot">
+  <div class="wrap foot-inner">
+    <img src="img/logo-512.png" alt="" width="96" height="90" loading="lazy" decoding="async">
+    <div>
+      <p class="disclaimer"><strong>FFNY Online is an unofficial fan project.</strong> It is not
+        affiliated with, endorsed or sponsored by Electronic Arts, AKI or Def Jam. Def Jam: Fight
+        for NY and its assets belong to their respective owners. You need your own legally obtained
+        copy of the game; no game data is distributed.</p>
+      <p>Built on <a href="https://github.com/vyanhursky/DefJamFFNY-recomp" rel="noopener">Def Jam: Fight
+        for NY Recompiled</a> by Vlad Yanhursky. Code under the MIT licence. Anton font under the
+        <a href="fonts/OFL.txt">SIL Open Font License</a>. This site sets no cookies and uses no trackers.</p>
+      <nav class="foot-links" aria-label="Links">
+        <a href="https://github.com/sweeax-exe/ffny-online/releases" rel="noopener">All releases</a>
+        <a href="https://github.com/sweeax-exe/ffny-online/blob/main/docs/known-issues.md" rel="noopener">Known issues</a>
+        <a href="https://play.defjam.online/privacy" rel="noopener">Privacy</a>
+        <a href="https://discord.gg/zCZKVDnKaP" rel="noopener">Discord</a>
+        <a href="https://github.com/sweeax-exe/ffny-online" rel="noopener">GitHub</a>
+      </nav>
+    </div>
+  </div>
+</footer>
+
+<dialog class="lightbox" id="lightbox" aria-label="Picture">
+  <form method="dialog"><button class="lightbox-close" aria-label="Close">×</button></form>
+  <img id="lightbox-img" alt="">
+</dialog>
+</body>
+</html>
