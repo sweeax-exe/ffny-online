@@ -445,6 +445,7 @@ static int track_start(void)
 }
 
 void rollback_sound_context(int on) { t_in_sound = on; }
+int rollback_on_game_thread(void) { return s_game_tid && GetCurrentThreadId() == s_game_tid; }
 
 /* For crash reports: how the save states treat the page of a guest address. */
 const char *rollback_page_state(uint32_t addr)
@@ -1799,6 +1800,7 @@ unsigned rollback_dynamic_loads(void) { return 0; }
 void rollback_check_alloc(uint32_t caller, uint32_t size, uint32_t block) { (void)caller; (void)size; (void)block; }
 void rollback_check_tables(const char *where) { (void)where; }
 void rollback_sound_context(int on) { (void)on; }
+int rollback_on_game_thread(void) { return 0; }
 void rollback_mixer_lock_a(void) {}
 void rollback_mixer_lock_b(void) {}
 void rollback_mixer_unlock_a(void) {}
