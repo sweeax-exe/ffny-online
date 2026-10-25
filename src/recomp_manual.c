@@ -1206,20 +1206,21 @@ static void trace_voice_render(void)
 extern void sub_0011EC80(void);
 static void stream_retire_guard(void)
 {
-    uint32_t p = MEM32(g_esp + 4u);
-    if (p >= 0x80000004u && p < 0x84000000u) {
-        uint32_t chunk = MEM32(p - 4u);
-        if (chunk >= 0x80000000u && chunk < 0x84000000u) {
-            uint32_t head = MEM32(chunk), id = head & 0xFFu;
-            if (head == 0xFFFFFFFEu || id >= MEM8(0x003A9386u) || !MEM32(0x003A92A0u + id * 4u)) {
-                static unsigned told;
-                if (told++ < 20)
-                    fprintf(stderr, "[AUDIO] a retired stream packet names chunk %08X = %08X: dropped (rollback re-run %d)\n",
-                            chunk, head, netplay_rerunning());
-                g_esp += 4;     /* ret */
-                return;
-            }
-        }
+    uint32_t p = MEM32(g_esp + 4u), chunk = 0, head = 0, id = 0;
+    int ok = p >= 0x80000004u && p < 0x84000000u;
+    /* the payload, its chunk and the chunk's channel must all be real: a junk chunk pointer at [p - 4]
+     * crashed inside this callback too (five-match run, 2026-10-25) */
+    if (ok) chunk = MEM32(p - 4u);
+    ok = ok && chunk >= 0x80000000u && chunk < 0x84000000u;
+    if (ok) head = MEM32(chunk), id = head & 0xFFu;
+    ok = ok && head != 0xFFFFFFFEu && id < MEM8(0x003A9386u) && MEM32(0x003A92A0u + id * 4u);
+    if (!ok) {
+        static unsigned told;
+        if (told++ < 20)
+            fprintf(stderr, "[AUDIO] a retired stream packet %08X names chunk %08X = %08X: dropped (rollback re-run %d)\n",
+                    p, chunk, head, netplay_rerunning());
+        g_esp += 4;     /* ret */
+        return;
     }
     sub_0011EC80();
 }
