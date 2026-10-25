@@ -3107,6 +3107,8 @@ void netplay_on_update(void)
     rollback_check_tables(N.resim ? "a re-run update starts" : "an update starts");
     koth_check_result(0);       /* also between the fight's steps: an ending can stop them */
     if (N.resim || !N.rb_on) return;
+    /* before any save, load or the reference copy: the device holds no texture or palette */
+    rollback_unbind_textures();
     /* The fight is decided and every step ran on the real entries, or the match went on offline:
      * no more rollback in this match (write tracking off, no saves on the results screen). */
     if (MEM32(G_MATCH_PHASE) == 1u) N.rb_fought = 1;   /* a rematch starts with the last match's phase */
