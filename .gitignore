@@ -54,3 +54,6 @@ logs/
 *.bmp
 *.ppm
 tests/golden/*.png
+
+# ---- the website build (website/build.py copies the approved pictures in) ----
+website/dist/
