@@ -4,6 +4,9 @@
 //
 //	accounts -listen 127.0.0.1:8090 -data /var/lib/ffny-accounts/accounts.json \
 //	         -public-url https://play.defjam.online -client-id ID -client-secret-file FILE
+//
+// Offline, with the service stopped: -reset-stats (a new season), -void-loss ID -at TIME (one
+// loss becomes a no contest; void.go).
 package main
 
 import (
@@ -32,7 +35,14 @@ func main() {
 	botTokenFile := flag.String("bot-token-file", "", "file holding the FFNY Online bot's token: server nicknames become player names (empty: off)")
 	guildID := flag.String("guild-id", "", "our Discord server's id, for the nicknames")
 	resetStats := flag.Bool("reset-stats", false, "clear every account's casual statistics in -data (a new leaderboard season), save and exit; stop the service first")
+	voidLoss := flag.Int64("void-loss", 0, "account id: turn its loss at -at into a no contest (and the one on one opponent's win) in -data, save and exit; without -at, list its history; stop the service first")
+	voidAt := flag.String("at", "", "with -void-loss: the loss's time as its history shows it (RFC 3339, within 5 s)")
+	dryRun := flag.Bool("dry-run", false, "with -void-loss: print what would change, write nothing")
 	flag.Parse()
+
+	if *voidLoss != 0 {
+		os.Exit(runVoidLoss(*data, *voidLoss, *voidAt, *dryRun))
+	}
 
 	if *resetStats {
 		store, err := accounts.Open(*data)
