@@ -74,14 +74,7 @@ the reader (`:70255-70330`).
 
 ### 1.4 The reader `sub_00126300` [V]
 
-```
-n = [0x3A9680]; for (i = 0, esi = 0x3A9688; i < n; i++, esi += 8) {   // n re-read each pass
-    q = MEM32(0x3A9984 + 4*MEM16(esi-2));                              // queue object S
-    if (MEM16(esi-4) == 0)  S[0x58](id, MEM32(esi), S[0x5C]);         // type 0: 0x11ECB0, 3 args (ret 0x12633D)
-    else                    S[0x54](MEM32(esi), S[0x5C]);             // type 1: 0x11EC80, 2 args (ret 0x12634C)
-}
-[0x3A9680] = 0;
-```
+Behaviour: it reads the count at `0x3A9680` (again on every pass), walks the 8-byte events from `0x3A9688`, looks up the queue object of each event's queue id in the table at `0x3A9984`, and calls that object's callback at `+0x58` (type 0, three arguments: `0x11ECB0`) or `+0x54` (type 1, two arguments: `0x11EC80`) with the event's param and the context at `+0x5C`; then it sets the count to 0.
 The callbacks are set once in `sub_00125B20` (queue create, called from `sub_0011F6E0`):
 `+0x54 = 0x11EC80`, `+0x58 = 0x11ECB0`, `+0x5C = ctx = the channel object C` (the call at 0x11F7DF pushes
 `0x11EC80, 0x11ECB0, esi`). [V]
@@ -98,19 +91,7 @@ The callbacks are set once in `sub_00125B20` (queue create, called from `sub_001
 
 ### 2.1 sub_001E8340(handle, chunk) [V] (cdecl, 2 args, `recomp_0013.c:9345`)
 
-```
-if (!handle) return;
-S = MEM32(handle);                         // the STRM object; handle is a 16-byte cell {STRM*, index, ..}
-if (MEM32(S) != 'STRM' /*0x4D525453*/) return;
-if (chunk <  S[0x40] || chunk > S[0x44] - 8) return;     // inside the ring (+0x40 = start, +0x44 = end)
-if (MEM32(chunk) == 0xFFFFFFFE) return;                  // already released: idempotent
-size = chunk[1];  chunk[0] = 0xFFFFFFFE;                 // mark released
-sub_001E7370(size)   (esi = S)   // S[0x5C] -= size; if it crossed the low-water mark S[0x54] and S[0x48]==1:
-                                 //   sub_001E56A0(S[0x184], S[0x50])  (ask the file layer for more)
-lock S+4 (sub_001ECF00); if (S[0x48] == 2) S[0x48] = 1; unlock (sub_001ECF10)
-sub_001E8080(S, S[0x58] ? S[0x50] : S[0x4C])             // reclaim: advance the tail over released chunks,
-                                                         // wrap at 0xFFFFFFFF, issue the next read
-```
+Behaviour: it returns at once for a null handle, for a handle cell whose object lacks the `'STRM'` magic (`0x4D525453`), for a chunk outside the ring (`+0x40` start, `+0x44` end), and for a chunk already marked released (`0xFFFFFFFE`). Otherwise it takes the size from the chunk's second word, marks the chunk released, lowers the buffered byte count (`+0x5C`; below the low-water mark `+0x54` it asks the file layer for more through `sub_001E56A0`), moves the state at `+0x48` from 2 back to 1 under the object's lock, and reclaims the ring through `sub_001E8080` (advance the tail over released chunks, wrap at `0xFFFFFFFF`, issue the next read).
 It reads: handle cell, `S` magic, ring bounds, the chunk tag. The first dereference is `esi = MEM32(handle)`; with
 `handle` = junk that is where the host fault lands (the "+0x6D" in the reports is the host offset of that load).
 
@@ -132,10 +113,7 @@ It reads: handle cell, `S` magic, ring bounds, the chunk tag. The first derefere
   pushes the packet. This is the back-pointer `sub_0011EC80` follows. [V that the stores exist, I that
   `eax` there is `desc[3]` = P0]
 * `sub_0011EC80(param, ctx)` = [V]
-  ```
-  chunk = MEM32(param - 4);  id = MEM32(chunk) & 0xFF;  obj = MEM32(0x3A92A0 + id*4);
-  tail-jump sub_001E8340(MEM32(obj), chunk)
-  ```
+  Behaviour: the chunk is the word before the payload; the channel is the low byte of the chunk's first word, used as an index into `0x3A92A0`; it tail-jumps to `sub_001E8340` with that channel object's stream handle and the chunk.
   No check of the tag, of `id < [0x3A9386]`, or of `obj != 0`.
 
 ## 3. The five crashes decoded [V]
@@ -267,12 +245,7 @@ silencing the director in re-run steps is the real fix.
 `recomp_lookup_manual` like `0x137010`. A guarded version is semantically what `sub_001E8340` already does for a
 released chunk:
 
-```
-chunk = MEM32(param-4); if (chunk is not guest memory) return;
-tag = MEM32(chunk); id = tag & 0xFF;
-if (tag == 0xFFFFFFFE || id >= MEM8(0x3A9386) || !MEM32(0x3A92A0 + 4*id)) return;   // retired already / junk
-sub_001E8340(MEM32(MEM32(0x3A92A0 + 4*id)), chunk);                                  // as before
-```
+Proposed guard, in words: return when the chunk word before the payload is not guest memory, when the chunk is already released (`0xFFFFFFFE`), when its channel byte is not below the channel count at `0x3A9386`, or when the channel's slot in `0x3A92A0` is empty; otherwise go on to `sub_001E8340` as before.
 `sub_0011ECB0` (type 0) can get a similar check (`ctx == 0`, `MEM32(ctx+0x11C) == 0`). The guard stops the
 crash; whether the stream then plays on correctly depends on why the chunk was released early (probably it does,
 since the ring bookkeeping was already updated by the first release).
