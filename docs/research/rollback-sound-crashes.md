@@ -234,3 +234,8 @@ crash report prints the history of the arena blocks the guest registers point in
   mark, so only the mixer's kept frees are freed at the next fight (and only they make a sound command
   "dead"). The crash report also prints the sound bank table `[0x3AD928]` and its arena blocks, for the
   `sub_001317C0` crashes.
+* Even with only the mixer's kept frees freed at the next fight, the mixer crashed the same way in the second
+  match (6618 freed). So kept blocks are now freed only when nothing points into them: at the next fight's
+  start guest memory is scanned for words naming a kept block, conservatively (the image's data, the thread
+  stacks and XAPI's heap below 0x01600000, then the heap and the contiguous window up to 0x84000000 less the
+  kept blocks themselves); the log line gives how many were freed, how many are still named, and the time.

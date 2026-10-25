@@ -786,24 +786,80 @@ static void build_data(const uint8_t *data_bg, unsigned data_pages)
     }
 }
 
-/* The next fight starts: the blocks the engine gave back during the last one and a load kept (used and
- * freed) can go. The match change tore down the game's sound handles, so nothing names them any more;
- * kept for ever, they filled the arena (3 MB in one match, then the heap served the engine). */
+/* The next fight starts: the blocks a load kept after the engine gave them back (used and freed) can go,
+ * but only those nothing points into any more. Freed blindly (10900 after one match), some were still in
+ * the engine's stream table and the mixer crashed in sub_001E8340 in the second match (2026-10-25); kept
+ * for ever they fill the arena (1-2 MB a fight in a 64 MB window that is 61 MB full). So guest memory is
+ * scanned for words that point into a kept block, the way a conservative collector marks: the image's
+ * data, the thread stacks and XAPI's heap up to 0x01600000, and the heap and contiguous window above. */
+typedef struct { uint32_t lo, hi; int ref; } Kept;
+static Kept *s_kept;
+static unsigned s_nkept;
+
+static void mark_words(const uint32_t *w, size_t n)
+{
+    size_t i;
+    for (i = 0; i < n; i++) {
+        uint32_t v = w[i];
+        unsigned lo = 0, hi = s_nkept;
+        if (v < s_kept[0].lo || v >= s_kept[s_nkept - 1].hi) continue;
+        while (lo < hi) {           /* the kept blocks are in address order */
+            unsigned mid = (lo + hi) / 2;
+            if (v < s_kept[mid].lo) hi = mid;
+            else if (v >= s_kept[mid].hi) lo = mid + 1;
+            else { s_kept[mid].ref = 1; break; }
+        }
+    }
+}
+
+static void mark_range(uint32_t lo, uint32_t hi)
+{
+    uint32_t a = lo;
+    while (a < hi) {
+        MEMORY_BASIC_INFORMATION mbi;
+        uint32_t end;
+        if (!VirtualQuery((void *)XBOX_PTR(a), &mbi, sizeof(mbi))) break;
+        end = a + (uint32_t)((uintptr_t)mbi.BaseAddress + mbi.RegionSize - XBOX_PTR(a));
+        if (end > hi || end <= a) end = hi;
+        if (mbi.State == MEM_COMMIT && !(mbi.Protect & (PAGE_NOACCESS | PAGE_GUARD)))
+            mark_words((const uint32_t *)XBOX_PTR(a), (end - a) / 4);
+        a = end;
+    }
+}
+
 static void release_kept_arena(void)
 {
     int i;
-    unsigned n = 0, k, bytes = 0;
-    uint32_t *kept;
-    if (!s_arena || !(kept = (uint32_t *)malloc(ARENA_BLOCKS * sizeof(uint32_t)))) return;
+    unsigned k, n = 0, freed = 0, bytes = 0;
+    DWORD t0 = GetTickCount();
+    if (!s_arena) return;
+    if (!s_kept && !(s_kept = (Kept *)malloc(ARENA_BLOCKS * sizeof(Kept)))) return;
     EnterCriticalSection(&s_arena_cs);
     for (i = 0; i < s_nblk; i++)
-        if (s_blk[i].used && s_blk[i].freed) { kept[n++] = s_blk[i].user; bytes += s_blk[i].size; }
+        if (s_blk[i].used && s_blk[i].freed) {
+            s_kept[n].lo = s_blk[i].user - 16u;
+            s_kept[n].hi = s_blk[i].addr + s_blk[i].size;
+            s_kept[n].ref = 0;
+            n++;
+        }
+    s_nkept = n;
+    if (n) {
+        uint32_t at = HEAP_LO;
+        mark_range(0x00010000u, 0x01600000u);
+        /* the heap and the whole contiguous window above it (the arena, DirectSound's voice memory, the GPU
+         * data), less the kept blocks themselves: one that only a kept block names is no less dead */
+        for (k = 0; k < n; k++) {
+            if (s_kept[k].lo > at) mark_range(at, s_kept[k].lo);
+            at = s_kept[k].hi;
+        }
+        mark_range(at, 0x84000000u);
+    }
     LeaveCriticalSection(&s_arena_cs);
-    for (k = 0; k < n; k++) arena_free_now(kept[k]);
-    free(kept);
+    for (k = 0; k < n; k++)
+        if (!s_kept[k].ref) { arena_free_now(s_kept[k].lo + 16u); freed++; bytes += s_kept[k].hi - s_kept[k].lo; }
     if (n)
-        fprintf(stderr, "[ROLLBACK] %u arena blocks (%u KB) the engine gave back in the last fight, freed now\n",
-                n, bytes / 1024);
+        fprintf(stderr, "[ROLLBACK] %u arena blocks the engine gave back in the last fight: %u (%u KB) freed, %u still "
+                "named somewhere (%lu ms)\n", n, freed, bytes / 1024, n - freed, (unsigned long)(GetTickCount() - t0));
 }
 
 int rollback_prepare(void)
