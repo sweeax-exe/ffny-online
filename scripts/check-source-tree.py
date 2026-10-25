@@ -22,21 +22,21 @@ APPROVED_README_MEDIA = {
     'docs/media/fight-screenshot.png': '9804400a61948f0d562809cf46f3da09a2aa310f4b1b37f98c167b92c8fad434',
     'docs/media/fight-gameplay.gif': '77012147d4fe73227222c988610dba82510df1abad4f2405f1164935920b4277',
     # 2026-10-09, at the owner's request: the port's own setup wizard and launcher. No game artwork.
-    'docs/media/setup-wizard.png': '0a9ee25b0e97751972cba83eea0b1b93a26ec12463c91f712d2fd9ef28b4b7ff',
-    'docs/media/launcher.png': 'c1341634388ba674aa3383a665c058b5e132cfa650264d685f6e7f99f4d8d496',
+    'docs/media/setup-wizard.png': '30ef7c4f396aa2383b234d02cd85c25c7bdf84e3f2b141c4eac986220b5560c7',
+    'docs/media/launcher.png': 'fab5f3f75768532324b0e577084420eab80c5db3406af6c98cfdd30ce00e9d25',
     # 2026-10-20, FFNY Online's owner, for the README and the release post: the online screens
     # (main menu entry, hub, room, fighter grid, venue vote) and an online fight, captured from the
     # game's own frames; the setup wizard and launcher pictures were retaken for FFNY Online.
     'docs/media/online-menu.png': 'd25b23b9d4fda22438089ff01dcd64b313f16f5df5db47277bf92de39d835639',
-    'docs/media/online-hub.png': '520d38027c22bed874e2649b124f2931a362422c275dac99e22244e2eefca0ed',
-    'docs/media/online-room.png': 'acc3add318ab278772d445042d6044da1f2dfe0ed48ef8c693cbc8c8aff6676a',
-    'docs/media/online-fighters.png': '6ff224a9e64b317be2166c9a086b6c087652e7ea2e906292c415a1ba0b15125f',
-    'docs/media/online-vote.png': '2a86d860bf5a202cc68e94ac2cafdd4d2913a0846781fdb17ec353afe6e85279',
+    'docs/media/online-hub.png': '3380e552d96006aed97363e22ac6671fd90cc3185522765fbcfedd32f099ec08',
+    'docs/media/online-room.png': 'abac899abc46008ebdf1bb9d3535cd6198ea2f33e776522b4ee37ca4ba09f9e3',
+    'docs/media/online-fighters.png': '7bb86b9687aa9f3e972e59074c131e08327378481d0a02532a2fc0c5ef95c706',
+    'docs/media/online-vote.png': 'c63d5be4073df649d3b86dd79a5c74c50464d84f5ae5eb3301f4680c17c800e0',
     'docs/media/online-fight.png': '17c30e63e490fd10e1f071d2b6a4390f98855936bb809c2450974ad3a8785a88',
     # 2026-10-21, build 13: MY STATS and PLAYERS ONLINE from the game's own frames (test accounts),
     # and the launcher retaken with the FFNY Online logo.
-    'docs/media/online-stats.png': '6bf29abdf7e036d8691b0f2d04004764afb12d2f6f4fc43afe32d01e956efee9',
-    'docs/media/online-players.png': '9b35c222581bbc6bb087415be07963447f8ef8888cbf1a29893f00d784cbd4f0',
+    'docs/media/online-stats.png': '81324f692b0077c85445a29f2a6f4386b3f42e91f73cd2921478f08cd4cfdb5c',
+    'docs/media/online-players.png': '8083b9ea8a68e87f318f9eb627dd7f4e095c597939715cf9c2c210402fe8d3c6',
     # 2026-10-21, FFNY Online's owner: the project's own logo (made for the project, no game artwork
     # and no EA or Def Jam marks), for the launcher, the README, the Discord and the web pages.
     'ffny-branding/logo.png': '33888212e2e025e40bfe2b570f340edadb619368d0a976d1f6e45488f0d3a799',
