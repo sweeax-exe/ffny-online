@@ -45,9 +45,9 @@ $size = (Get-Item $setup).Length
 
 $manifest = [ordered]@{ build = $build; version = $version; notes = $Notes; setup = $setupName; sha256 = $hash; size = $size }
 $json = $manifest | ConvertTo-Json -Compress
-# PowerShell 5.1 writes < > & ' as <...; launchers before build 27 showed them literally
+# PowerShell 5.1 writes < > & ' as \u003c and so on; launchers before build 27 showed them literally
 # ("Launcher u003e Settings"). They are plain characters in JSON strings.
-$json = $json.Replace('<', '<').Replace('>', '>').Replace('&', '&').Replace(''', "'")
+$json = $json.Replace('\u003c', '<').Replace('\u003e', '>').Replace('\u0026', '&').Replace('\u0027', "'")
 [IO.File]::WriteAllText((Join-Path $out 'latest.json'), $json, (New-Object Text.UTF8Encoding($false)))
 
 $sign = Join-Path $repo 'netplay\relay\dist\updatesign.exe'
