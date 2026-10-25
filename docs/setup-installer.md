@@ -26,7 +26,10 @@ no Git or system Python installation is needed. Missing compiler installation
 requires internet; SDL3/ImGui source is packaged for offline configuration.
 
 Install / Repair runs verification, extraction, analysis, lift and compile.
-Status shows the stage; **Open logs** reveals detailed output. **Cancel** stops
+Status shows the stage and the bar fills as it goes. **Show details** opens the
+session log under the buttons and follows it while setup runs (scroll up to read
+back; it opens by itself when setup stops on an error); **Open logs** opens the
+whole file. **Cancel** stops
 the process tree; rerun to resume verified completed work. Changed/corrupt dump
 contents are refused rather than merged into an existing extraction.
 **Create a desktop shortcut** is checked by default; clear it to create only a
