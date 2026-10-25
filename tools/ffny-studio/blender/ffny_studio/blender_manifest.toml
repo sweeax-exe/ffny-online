@@ -1,0 +1,19 @@
+schema_version = "1.0.0"
+
+id = "ffny_studio"
+version = "0.1.0"
+name = "FFNY Studio"
+tagline = "Import Fight for NY fighters from your own copy of the game"
+maintainer = "FFNY Online contributors"
+type = "add-on"
+website = "https://github.com/sweeax-exe/ffny-online"
+
+tags = ["Import-Export"]
+
+blender_version_min = "4.2.0"
+
+license = ["SPDX:MIT"]
+
+# The add-on reads the game folder chosen in its preferences; it writes nothing outside Blender.
+[permissions]
+files = "Read the fighters and textures of your own game folder"
