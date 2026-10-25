@@ -73,11 +73,13 @@ def u64(b): return int.from_bytes(b, "little") if b else None
 
 def parse_map(path):
     """TLS-relative offsets for the guest registers, plus _tls_index's address."""
-    tls_section = None
+    tls_section, tls_start = None, 0
     for line in open(path, encoding="utf-8", errors="replace"):
-        m = re.match(r"\s+([0-9a-f]{4}):[0-9a-f]{8}\s+[0-9a-fA-F]+H\s+(\S+)", line)
-        if m and m.group(2) == ".tls":
-            tls_section = m.group(1)
+        m = re.match(r"\s+([0-9a-f]{4}):([0-9a-f]{8})\s+[0-9a-fA-F]+H\s+(\S+)", line)
+        if m and m.group(3) == ".tls":
+            # the offsets are into the thread's TLS block, which starts where .tls does (it is
+            # not always at the start of its section: 0x14DF10 into it in a release build)
+            tls_section, tls_start = m.group(1), int(m.group(2), 16)
             break
     offsets, tls_index_va, funcs = {}, None, []
     sym = re.compile(r"^\s+([0-9a-f]{4}):([0-9a-f]{8})\s+(\S+)\s+([0-9a-fA-F]{16})\s")
@@ -88,7 +90,7 @@ def parse_map(path):
         sect, off, name, va = m.group(1), int(m.group(2), 16), m.group(3), int(m.group(4), 16)
         short = name[2:] if name.startswith("g_") else name.lstrip("_")
         if sect == tls_section and short in REGS:
-            offsets[short] = off
+            offsets[short] = off - tls_start
         elif name in ("_tls_index", "tls_index"):
             tls_index_va = va
         funcs.append((va, name))
