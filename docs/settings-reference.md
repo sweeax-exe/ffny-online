@@ -64,7 +64,7 @@ See [HD textures](hd-textures.md) for the pack format and local workflow.
 | Key | Default | Meaning |
 |---|---|---|
 | `keyboard_player` | `auto` | How the keyboard and mouse play. `auto`: their own player after the pads (player 1 when no pad is connected, player 2 with one pad, and so on; merged into player 1 if four pads are connected). `off`: not used. `merge`: added to player 1's pad. `1` to `4`: their own player in that slot. Restart. Env `RECOMP_KEYBOARD_PLAYER`. |
-| `players` | `0` | How many controllers the game sees at start, 0-4. `0` means one per pad plus one for a separate keyboard player. A pad plugged in later is added as a new controller when the game is running, so this rarely needs raising. Restart. |
+| `ports` | `4` | How many controller ports the game sees, 0-4 (`players` before build 17). Four lets an online room of three or four players use every port. `0` means one per pad plus one for a separate keyboard player. Restart. |
 | `backend` | `sdl` | Where pads are read: `sdl` (Xbox, DualSense, DualShock 4, Switch Pro and most others) or `xinput` (Xbox-style pads only, no extra library). Restart. Env `RECOMP_INPUT_BACKEND`. |
 | `rumble` | `100` | Rumble strength in percent, 0-100. `0` turns it off. |
 | `rumble_floor` | `60` | The game's rumble pulses are brief and often faint (40% strength is common). A pulse weaker than this percent of full strength is raised to it. `0` passes the game's strength through. |
