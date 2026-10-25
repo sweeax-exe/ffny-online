@@ -27,15 +27,22 @@ enum NetplayState {
     NETPLAY_LOBBY           /* online hub: in the lobby or a room, between matches */
 };
 
-#define NETPLAY_MAX_PLAYERS 4
+#define NETPLAY_MAX_PLAYERS 4      /* fighters in one match */
+#define NETPLAY_ROOM_SLOTS 10      /* members of one room: King of the Hill rooms hold up to ten */
+
+/* King of the Hill (docs/research/king-of-the-hill.md): NetRoomSettings.mode of such a room; every
+ * fight in it is One on One. The venue is voted on by the two fighters, or drawn at random. */
+#define NETPLAY_MODE_KOTH        0x40
+#define NETPLAY_MODE_KOTH_RANDOM 0x41
+#define NETPLAY_IS_KOTH(mode)    ((mode) == NETPLAY_MODE_KOTH || (mode) == NETPLAY_MODE_KOTH_RANDOM)
 
 /* ---- the online hub: rooms, quick match, venue voting (docs/netplay-protocol.md) ---- */
 
 typedef struct NetRoomSettings {
     char name[25];
     int is_public;          /* listed and found by quick match */
-    int mode;               /* front-end match type, 0 One on One */
-    int max;                /* players 2..4 */
+    int mode;               /* front-end match type, 0 One on One; or NETPLAY_MODE_KOTH* */
+    int max;                /* players 2..4; King of the Hill 2..10 */
     int rounds;             /* 0 the game's default */
     int pool_count;         /* venues to vote on (venue.xml feID) */
     unsigned char pool[32];
@@ -58,6 +65,33 @@ typedef struct NetRoomPlayer {
     int ready, fighter, voted;      /* voted: candidate index, -1 not yet */
 } NetRoomPlayer;
 
+/* King of the Hill: the line (HILL), in line order; line[0] is the king when there is one. */
+enum NetHillPhase { NETHILL_WAITING = 0, NETHILL_CALLING, NETHILL_VOTING, NETHILL_FIGHTING };
+enum NetLineState { NETLINE_WAITING = 0, NETLINE_CALLED, NETLINE_READY, NETLINE_FIGHTING, NETLINE_AWAY };
+enum NetHillHow { NETHOW_NONE = 0, NETHOW_WON, NETHOW_DRAW, NETHOW_LEFT, NETHOW_VOID };
+
+typedef struct NetHillEntry {
+    int slot, state, wins;          /* state: NETLINE_*; wins: fights won in this room */
+} NetHillEntry;
+
+typedef struct NetHill {
+    int valid;                      /* a HILL arrived for this room */
+    int phase;                      /* NETHILL_* */
+    int king;                       /* slot, -1 none */
+    int streak;                     /* the king's wins in a row */
+    int ms_left;                    /* calling: ready countdown; voting: vote countdown; as of `received` */
+    unsigned long long received;
+    uint32_t seed;                  /* fighting: the fight's START seed */
+    int fights;                     /* fights finished in this room (wraps at 65536) */
+    int last_winner, last_loser;    /* slots, -1 none */
+    int last_how;                   /* NETHOW_* */
+    int count;
+    NetHillEntry line[NETPLAY_ROOM_SLOTS];
+    /* the WATCH of the fight this PC watches (phase 1: the names only, no simulation) */
+    uint32_t watch_seed;            /* 0: none */
+    int watch_venue, watch_slots[2], watch_fighters[2];
+} NetHill;
+
 typedef struct NetRoom {
     int in_room;
     char code[7];
@@ -69,10 +103,16 @@ typedef struct NetRoom {
     int ms_left;                    /* voting countdown, as of `received` */
     unsigned long long received;    /* GetTickCount64 when this state arrived */
     int player_count;
-    NetRoomPlayer players[NETPLAY_MAX_PLAYERS];
+    NetRoomPlayer players[NETPLAY_ROOM_SLOTS];
+    NetHill hill;                   /* King of the Hill rooms only */
     char error[96];                 /* the last refusal, "" if none */
     unsigned version;               /* changes whenever anything here does */
 } NetRoom;
+
+/* What the relay supports (its answer to CAPS): -1 not known yet (or no answer: an older relay,
+ * then 0), else the bits; bit 0 King of the Hill. */
+#define NETPLAY_CAP_KOTH 1
+int netplay_lobby_caps(void);
 
 /* Enter the hub on `server`. The state becomes NETPLAY_LOBBY once the server answers; a room's
  * START makes it NETPLAY_CONNECTED for the match, which starts by itself (automatch.h), and it

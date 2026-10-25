@@ -5,8 +5,13 @@ players; two of them fight One on One, everyone else waits in a line and watches
 The winner stays on, the loser goes to the back of the line and everyone moves up one place.
 
 Status: the relay side is built (`netplay/relay/koth.go`, `protocol_koth.go`, tests in
-`koth_test.go` and `protocol_koth_test.go`). The game side (`src/hooks/netplay.c` and the
-online UI) is not started; section 9 lists what it needs. Nothing here is deployed.
+`koth_test.go` and `protocol_koth_test.go`). The game side, phase 1, is built: CAPS, HILL, WATCH
+and RESULT in `src/hooks/netplay.c`, room slots 0..9 (routing, names, voice), the fighters' one
+fight per START with RESULT and no rematch, and in `src/hooks/online_screen.cpp` the create screen
+(King of the Hill, venue by vote or random, 3..10 players), the hill screen, "YOU'RE UP" with
+one-press ready and a watching screen with the names, the line and the streak. Phase 2, spectators
+running the fight (section 9.2) and the spectator HUD over it, is not started. Nothing here is
+deployed.
 
 ## 1. What players see
 
@@ -288,7 +293,20 @@ room of another mode `ERROR 8`.
 | `PEER` | never sent (even with `max` 2) |
 | `DATA` | routed as in section 7.1 |
 
-## 9. What the game client needs (src/, not started)
+## 9. What the game client needs (src/; 9.1 and 9.3 built in phase 1, 9.2 and the spectator HUD not)
+
+Phase 1 notes: a client hides King of the Hill until the relay answers CAPS (5 tries, 400 ms
+apart). A watcher drops every DATA but voice while it does not fight (`N.match_live` 0), so the
+fighters' STEPS never touch its state. The VOTE that recovers a lost START is sent only by a fighter
+(HILL says who). The rematch call is refused with a notice; the fighter picks No and the summary
+leads back to the hill screen as after any hub match. The winner is called again at once, while
+its game still shows the results and the summary (they outlast the 20 s ready time: in the first
+three-copy test the king was skipped and lost the crown), so a fighter called while still on the
+results of the fight it just fought readies itself with the same fighter; the START that follows
+is held until its game is back in the menus (the new opponent's controller would otherwise drive
+its results menu as player 2), with the pings (P_RTT) sent meanwhile. Test switches for the autostart:
+`RECOMP_NETPLAY_QUICK=65,3` (quick-join a hill), `RECOMP_NETPLAY_NAME`, `RECOMP_NETPLAY_READY_DELAY_MS`;
+harness route `online-koth-p2` for the first fight's player 2.
 
 ### 9.1 Protocol and session (`src/hooks/netplay.c`)
 

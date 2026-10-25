@@ -306,6 +306,17 @@ ROUTES = {
         "until": "starts in lockstep#2", "after": 40, "secs": 1500,
         "shots": "",
     },
+    # King of the Hill (docs/research/king-of-the-hill.md): the fighters of a fight are player 1 and
+    # 2 in room-slot order, so the winner of the first fight (slot 0 or 1) is player 1 of the second
+    # against the third member (slot 2): the first fight's player 2 approaches with left, then right.
+    "online-koth-p2": {
+        "help": "online King of the Hill, slot 1: the first fight as player 2 (left), the next as player 1 (right)",
+        "stages": ["getscreeninfo(intmain/mainmenu=lt@0.5"],
+        "tail": ",".join([FIGHT_TAIL.replace("right:", "left:"), raw_stages(["game.getmatchsummary(=a@4+3x12"]),
+                          FIGHT_TAIL.replace("@game.startgame(", "@game.startgame(#2")]),
+        "until": "game.getmatchsummary(#3", "after": 6, "secs": 1500,
+        "shots": "",
+    },
     "online-p2": {
         "help": "online hub, player 2 of a room (approaches with left)",
         # the main menu's harmless LT ends the title's repeated A before it reaches the menu
