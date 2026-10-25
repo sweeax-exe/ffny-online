@@ -1126,6 +1126,8 @@ class Engine:
         """Every update builds a new versions/<version>-<source>-<toolkit> folder (about 0.5 GB) and
         none was ever removed: a player's install grew by one per build. Keep this one and the one
         installed before it (it may still run while this update finishes); remove older ones."""
+        if getattr(self, 'version_root', None) is None:
+            return
         keep = {self.version_root.resolve()}
         with contextlib.suppress(ValueError, KeyError, TypeError, OSError):
             keep.add(Path(json.loads(previous_receipt)['source']).resolve().parent)
