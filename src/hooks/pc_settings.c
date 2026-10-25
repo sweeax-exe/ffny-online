@@ -512,25 +512,25 @@ static void start_game_process(void)
             (unsigned long)pi.dwProcessId);
     fflush(stderr);
     CloseHandle(pi.hThread);
-    /* In the background meanwhile: an update found while the game runs opens the launcher again
-     * when it closes, which offers it. */
-    if (pc_launcher_watch(pi.hProcess)) {
-        n = wcslen(line) + 32;
-        cmd = (WCHAR *)malloc(n * sizeof(WCHAR));
-        if (cmd) {
-            swprintf(cmd, n, L"%ls --launcher", line);
-            memset(&si, 0, sizeof(si));
-            si.cb = sizeof(si);
-            PROCESS_INFORMATION again;
-            if (CreateProcessW(exe, cmd, NULL, NULL, FALSE, g_start_env ? CREATE_UNICODE_ENVIRONMENT : 0,
-                               g_start_env, g_start_dir[0] ? g_start_dir : NULL, &si, &again)) {
-                fprintf(stderr, "[UI] the game closed with an update waiting: the launcher opens again\n");
-                fflush(stderr);
-                CloseHandle(again.hThread);
-                CloseHandle(again.hProcess);
-            }
-            free(cmd);
+    /* In the background meanwhile (tray icon, update checks); when the game closes the launcher
+     * opens again, offering an update found in the meantime. */
+    int update = pc_launcher_watch(pi.hProcess);
+    n = wcslen(line) + 32;
+    cmd = (WCHAR *)malloc(n * sizeof(WCHAR));
+    if (cmd) {
+        swprintf(cmd, n, L"%ls --launcher", line);
+        memset(&si, 0, sizeof(si));
+        si.cb = sizeof(si);
+        PROCESS_INFORMATION again;
+        if (CreateProcessW(exe, cmd, NULL, NULL, FALSE, g_start_env ? CREATE_UNICODE_ENVIRONMENT : 0,
+                           g_start_env, g_start_dir[0] ? g_start_dir : NULL, &si, &again)) {
+            fprintf(stderr, "[UI] the game closed%s: the launcher opens again\n",
+                    update ? " with an update waiting" : "");
+            fflush(stderr);
+            CloseHandle(again.hThread);
+            CloseHandle(again.hProcess);
         }
+        free(cmd);
     }
     GetExitCodeProcess(pi.hProcess, &code);
     ExitProcess(code);
