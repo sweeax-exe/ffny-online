@@ -508,3 +508,19 @@ main checkout's `logs/aud-old1.pcm`, `logs/aud-old2.pcm`.
 - Evidence ../logs/v011-stable-verification.json, v011-before-stable-release.json,
   stable-prepared-index/index.json, stable-publication-approval.json. Historical
   game-free packaging/Windows gameplay evidence remains in preview release record.
+
+**Issue #67 (choppy fights at 60 fps) and #92 (exclusive full screen):** PR #96
+(`fix/log-display-refresh`) adds the Windows `[DISPLAY]` log line. On a
+75/100/144/165 Hz display vsync is not used; without VRR each 60 fps frame stays
+up 2 or 3 refreshes (measured 73/48 of 121 at 144 Hz windowed), and the owner
+sees 143.91 Hz as much choppier than 120 Hz. VRR already engages in borderless
+full screen (owner's RTX 4070 Ti SUPER, G-SYNC "full screen", FreeSync monitor):
+scripted fights there show 98% of frames at one 16.7 ms refresh in every present
+mode, so neither exclusive full screen nor ALLOW_TEARING is needed for #92.
+Open: heavier settings hold more fight frames 2 refreshes (4:3 scale 2: 2%,
+widescreen scale 2: 6%, widescreen scale 3: 8%), and one run (4:3, scale 3) and
+one manual run locked to ~49 fps, the panel's minimum VRR rate (game runs slow).
+Experiment toolkit branch `defjam/vrr-present` (local only: RECOMP_PRESENT_VRR,
+per-frame time on screen in RECOMP_PRESENT_PACING) in `code/defjam-refresh-log`.
+Runs need the monitor awake: with the display asleep DXGI reports no frame
+statistics and timings are meaningless. The #67 reporter has not re-attached the log.
