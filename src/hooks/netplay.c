@@ -35,6 +35,7 @@
 #include <string.h>
 #include "recomp/gen/recomp_types.h"
 #include "netplay.h"
+#include "updater.h"
 #include "automatch.h"
 #include "online_data.h"
 #include "account.h"
@@ -457,6 +458,10 @@ static void send_hello(void)
     memcpy(b + n, N.build, 8); n += 8;
     b[n++] = (uint8_t)len;
     memcpy(b + n, N.name, (size_t)len); n += len;
+    {   /* since build 26: the build number, so the relay can turn away builds older than the published one */
+        int build = updater_local_build();
+        if (build > 0) { put32(b + n, (uint32_t)build); n += 4; }
+    }
     send_raw(b, n);
 }
 
@@ -1405,10 +1410,11 @@ static void on_packet(const uint8_t *b, int len)
                 "The other player has a different version of the game.", "That name is not allowed.",
                 "The server is full.", "Too many attempts; wait a minute.", "The server lost this session.",
                 "Only the room's host can do that, and not while voting or playing.",
-                "Not possible here: not in a room, or already in one." };
+                "Not possible here: not in a room, or already in one.",
+                "A new build is out: close the game and update in the launcher to play online." };
             int code = b[6];
-            const char *text = code >= 1 && code <= 9 ? why[code] : "The server refused the request.";
-            if (N.lobby && (code == 1 || code == 2 || code == 3 || code == 8 || code == 9)) {
+            const char *text = code >= 1 && code <= 10 ? why[code] : "The server refused the request.";
+            if (N.lobby && (code == 1 || code == 2 || code == 3 || code == 8 || code == 9 || code == 10)) {
                 /* refused, but the session goes on */
                 EnterCriticalSection(&g_cs);
                 /* "not in a room" to a room action (a vote, ready, settings) while this side still
@@ -1674,8 +1680,13 @@ static int start(const char *server, const char *name, int creating, const char 
         if (i != 6) { InterlockedExchange(&N.state, NETPLAY_FAILED); set_status("A room code has 6 characters."); return -1; }
     }
     N.delay = delay >= 1 && delay <= 12 ? delay : 3;
-    /* The build's fingerprint: the version and the lockstep rules. */
+    /* The build's fingerprint: the version, the build number and the lockstep rules. Without the number
+     * (builds 21-25) every remaster build had the same one and old and new builds met in rooms. */
     for (v = DEFJAM_VERSION; *v; v++) h1 = (h1 ^ (uint8_t)*v) * 16777619u;
+    {
+        int k, build = updater_local_build();
+        for (k = 0; k < 4; k++) h1 = (h1 ^ (uint8_t)(build >> (8 * k))) * 16777619u;
+    }
     h2 = mix32(h1 ^ LOCKSTEP_VERSION);
     put32(N.build, h1); put32(N.build + 4, h2);
     N.have_token = 0;

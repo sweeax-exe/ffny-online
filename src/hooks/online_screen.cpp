@@ -709,7 +709,18 @@ void draw_hub(ImDrawList *dl, const Frame &f, const Pad &pad)
     // half of them after the build-23 rules (2026-10-24). Y signs in from here (the browser opens).
     enum AccountState acc = account_state();
     bool signed_in = acc == ACCOUNT_IN;
-    if (!signed_in) {
+    // A newer build is out: this one starts no new matches (the relay refuses them too, since build 26).
+    int newer = 0;
+    {
+        enum UpdaterState us = updater_state();
+        if (us >= UPDATER_AVAILABLE && us <= UPDATER_STARTED) updater_info(&newer, nullptr, 0, nullptr, 0);
+    }
+    bool outdated = updater_local_build() > 0 && newer > updater_local_build();
+    if (outdated) {
+        char line[96];
+        snprintf(line, sizeof(line), "BUILD %d IS OUT: UPDATE IN THE LAUNCHER TO PLAY ONLINE", newer);
+        text(dl, f, g_title, 14, 50, 60, ORANGE, line, LEFT, 1.2f);
+    } else if (!signed_in) {
         const char *line = acc == ACCOUNT_WAITING ? "FINISH SIGNING IN WITH DISCORD IN YOUR BROWSER..."
                          : acc == ACCOUNT_CHECKING ? "CHECKING YOUR DISCORD SIGN-IN..."
                          : "SIGN IN WITH DISCORD TO FIGHT ONLINE";
@@ -743,7 +754,11 @@ void draw_hub(ImDrawList *dl, const Frame &f, const Pad &pad)
 
     if (pad.a) {
         bool needs_account = S.hub_sel == 0 || S.hub_sel == 2 || S.hub_sel == 3;
-        if (needs_account && !signed_in) {
+        if ((needs_account || S.hub_sel == 1) && outdated) {
+            char line[120];
+            snprintf(line, sizeof(line), "Build %d is out: close the game and update in the launcher to play online.", newer);
+            say(line);
+        } else if (needs_account && !signed_in) {
             say(acc == ACCOUNT_WAITING ? "Finish signing in with Discord in your browser first."
                                        : "Sign in with Discord first: press Y.");
         } else switch (S.hub_sel) {
