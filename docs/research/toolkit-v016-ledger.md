@@ -299,7 +299,9 @@ v0.13.0 + fork `e818066`, built 2026-10-20). Old and new alternated:
   the APU interrupt worker's stack inside the DSOUND section (XDK 1.0.5849; return addresses 0x0025FB24 and
   0x0025FB79, then 0x00260356, 0x002603C7); no title code was on it. The toggle is DirectSound's service routine,
   so any title on that DirectSound behind the SSL tick (#205) can lose slices the same way. Upstream main
-  (`f0f8a46`) has the same frame-thread branch and `957c1ba` cherry-picks onto it cleanly: an upstream PR
-  candidate, pending approval.
+  (`f0f8a46`) has the same frame-thread branch and `957c1ba` cherry-picks onto it cleanly. Posted with the
+  owner's approval as https://github.com/sp00nznet/xboxrecomp/pull/264 (2026-10-25; on upstream main the APU
+  fixtures and `pytest tools/` pass on macOS, and `apu_monitor`'s new case fails without the hold). Drop
+  `957c1ba` at the next rebase once upstream merges it.
 
 Not run: the Setup from the newest green CI run and the Story intro with a pad (§7 step 5; needs a person).
