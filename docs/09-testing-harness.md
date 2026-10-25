@@ -13,7 +13,7 @@ game's artwork and stay under `logs/`, which git ignores.
 | Command | Time | What it is for |
 |---|---|---|
 | `python scripts/regress.py --quick` | about 10 min | after every change: unit tests, three golden frames, one fight |
-| `python scripts/regress.py` | about an hour | before a commit that touches the runtime, renderer or generated code |
+| `python scripts/regress.py` | about an hour | once per platform on each release candidate ([releasing](releasing.md)); a pull request runs `--only` checks for its area |
 | `python scripts/scenario_suite.py run <route> ...` | one launch | one scenario with all its evidence and a browsable report |
 
 Never run two of these at once: they share the save area, the window and the

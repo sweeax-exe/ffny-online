@@ -78,12 +78,13 @@ Silicon and Deck. No updater gate is complete until its results ledger has evide
   fight, Story from a new ID through both cutscenes to the creator, Story with a saved profile into the crib
   and into Learn Moves, and a boot soak. Each route also fails on a `[CRASH]`, a `[WATCHDOG]`, a Direct3D
   debug-layer message, a truncated batch, a directory search answered with the wrong name, or a save area
-  that is not byte-identical afterwards. `--quick` (unit, goldens, fight) after every change; the full run
-  before a commit that touches the runtime, the lifter or the renderer.
+  that is not byte-identical afterwards. `--quick` (unit, goldens, fight) and the area's `--only` checks on
+  every pull request; the full run once per platform on each release candidate (`docs/releasing.md`).
 - A new feature or a fixed bug that a run can show adds a check there, or a route in `scripts/harness.py`.
 - Every bring-up fix is one commit that names the guest function (`sub_XXXXXXXX`) and the symptom.
 - Logs cited by name in PROGRESS.md are kept by `scripts/prune-logs.py`; the rest go after three days.
-- Toolkit bumps (submodule) get the full regression run before merge.
+- Toolkit bumps (submodule) get the full regression on the release candidate that ships them; a toolkit
+  migration also gets one full run on one platform before it is queued.
 
 ## xemu reference baseline, and its hard limit
 
