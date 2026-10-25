@@ -218,3 +218,11 @@ crash report prints the history of the arena blocks the guest registers point in
   free (`sub_001FBE1E`) is now hand-written in `src/recomp_manual.c`, and frees on the game thread in a fight
   are held (`rollback_hold_xapi_free`): forgotten by a load that goes back before them, given back once no
   save older than them is left, and all at the fight's end (`release_held_xapi`).
+* With XAPI frees held, the next run played the first match for 7.2 minutes (2522 rollbacks), then copy 0
+  crashed in the sound engine (`sub_001317C0`, a boot-time engine block holding junk) as the second match
+  loaded. Likely the change of 11:55 that stopped forgetting the mixer's frees on a load: restored game
+  state can still hold a handle to an object whose sound ended after the save, and given back, the block
+  went to a new owner. Every held arena free is forgotten by a load again; the blocks kept that way (used
+  and freed) are freed when the next fight starts (`release_kept_arena`), after the match change has torn
+  the game's sound handles down. The crash report's stack scan stops at the thread's stack base (it
+  faulted past it inside the report).

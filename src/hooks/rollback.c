@@ -786,6 +786,29 @@ static void build_data(const uint8_t *data_bg, unsigned data_pages)
     }
 }
 
+/* The next fight starts: the blocks the engine gave back during the last one and a load kept (used and
+ * freed) can go. The match change tore down the game's sound handles, so nothing names them any more;
+ * kept for ever, they filled the arena (3 MB in one match, then the heap served the engine). */
+static void release_kept_arena(void)
+{
+    int i;
+    unsigned n = 0, bytes = 0;
+    if (!s_arena) return;
+    for (;;) {
+        uint32_t a = 0;
+        EnterCriticalSection(&s_arena_cs);
+        for (i = 0; i < s_nblk && !a; i++)
+            if (s_blk[i].used && s_blk[i].freed) { a = s_blk[i].user; bytes += s_blk[i].size; }
+        LeaveCriticalSection(&s_arena_cs);
+        if (!a) break;
+        arena_free_now(a);
+        n++;
+    }
+    if (n)
+        fprintf(stderr, "[ROLLBACK] %u arena blocks (%u KB) the engine gave back in the last fight, freed now\n",
+                n, bytes / 1024);
+}
+
 int rollback_prepare(void)
 {
     enum { DATA_PAGES = 0x003CA000u / PAGE };
@@ -795,6 +818,7 @@ int rollback_prepare(void)
     unsigned p, held_heap = 0, held_data = 0;
     uint32_t queue = MEM32(FRAME_QUEUE);
     rollback_reset();
+    release_kept_arena();
     if (!s_audio_lo) {
         fprintf(stderr, "[ROLLBACK] off for this match: the sound engine's memory is unknown\n");
         return -1;
@@ -1206,7 +1230,7 @@ static int arena_free_now(uint32_t a)
  * later); a block freed again meanwhile (the game frees it once more after a load) just moves
  * its time on. */
 #define HELD_ARENA 4096
-static struct { uint32_t addr; LONG at; int game; } s_held_arena[HELD_ARENA];   /* game: freed on the game thread */
+static struct { uint32_t addr; LONG at; } s_held_arena[HELD_ARENA];
 static unsigned s_nheld_arena;
 
 static int arena_free(uint32_t a)
@@ -1224,7 +1248,6 @@ static int arena_free(uint32_t a)
         if (k < s_nheld_arena) {
             s_held_arena[k].addr = a;
             s_held_arena[k].at = s_saves;
-            s_held_arena[k].game = GetCurrentThreadId() == s_game_tid;
             arena_event('H', a, 0);
         }
         else live = 0;      /* the list is full: give it back now */
@@ -1329,10 +1352,11 @@ static void forget_frees_since(LONG at)
         EnterCriticalSection(&s_arena_cs);
         i = 0;
         while (i < s_nheld_arena) {
-            /* the mixer's own frees: no game state a load brings back names those blocks, so they
-             * keep their place in the queue (forgotten, they leaked: the arena grew by 3 MB in one
-             * match, ran full and the heap took the engine's blocks; five-match run 2026-10-25) */
-            if (s_held_arena[i].at >= at && s_held_arena[i].game) {
+            /* the mixer's frees too: game state a load brings back can still hold a handle to the
+             * object (a sound that ended after the save). Given back in the fight, such a block went to a
+             * new owner and the game's next command for the old handle broke it (sub_001317C0 as the
+             * second match loaded, 2026-10-25). Kept, they are given back when the next fight starts. */
+            if (s_held_arena[i].at >= at) {
                 arena_event('D', s_held_arena[i].addr, 0);
                 s_held_arena[i] = s_held_arena[--s_nheld_arena];
                 arena++;

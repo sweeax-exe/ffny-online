@@ -400,9 +400,13 @@ static void crash_native_stack(PCONTEXT ctx)
         uintptr_t *sp = (uintptr_t *)ctx->Rsp;
         HMODULE self = GetModuleHandleW(NULL);
         int shown = 0;
+        /* words up to the stack's base only: past it the scan faulted inside this report (a guest
+         * thread near the top of its stack, 2026-10-25) */
+        int words = (int)(((uintptr_t)((NT_TIB *)NtCurrentTeb())->StackBase - ctx->Rsp) / sizeof(uintptr_t));
+        if (words > 512) words = 512;
         fprintf(stderr, "  Native stack (exe base 0x%llX, words pointing into it):\n", (unsigned long long)(uintptr_t)self);
         fprintf(stderr, "    [rip] 0x%llX\n", (unsigned long long)ctx->Rip);
-        for (int i = 0; i < 512 && shown < 40; i++) {
+        for (int i = 0; i < words && shown < 40; i++) {
             if (sp[i] >= (uintptr_t)self && sp[i] < (uintptr_t)self + 0x10000000ULL) {
                 fprintf(stderr, "    [%d] 0x%llX\n", i, (unsigned long long)sp[i]);
                 shown++;
@@ -432,12 +436,12 @@ static void crash_native_stack(PCONTEXT ctx)
                         (unsigned long long)(uintptr_t)tib->StackBase, (unsigned long long)(uintptr_t)tib->StackLimit,
                         (long long)((uintptr_t)tib->StackBase - ctx->Rsp));
                 fprintf(stderr, "  raw words from rsp-16:");
-                for (int i = -2; i < 22; i++)
+                for (int i = -2; i < 22 && i < words; i++)
                     fprintf(stderr, "%s %llX", i % 6 == 4 ? "\n   " : "", (unsigned long long)sp[i]);
                 fprintf(stderr, "\n");
             }
             shown = 0;
-            for (int i = 0; i < 64 && shown < 12; i++) {
+            for (int i = 0; i < 64 && i < words && shown < 12; i++) {
                 HMODULE m = NULL;
                 wchar_t name[MAX_PATH];
                 if (sp[i] < 0x10000 || (sp[i] >= (uintptr_t)self && sp[i] < (uintptr_t)self + 0x10000000ULL))
