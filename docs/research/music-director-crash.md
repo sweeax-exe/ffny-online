@@ -37,20 +37,7 @@ Addresses are guest addresses. Earlier notes: `stream-table-crash.md`, `rollback
 `sub_0001CBE0` (main music) and `sub_0001CD90` (a variant reached only indirectly). Lifted in `recomp_0009.c:18410`;
 real code at 0x1317C0..0x131A1D. [V]
 
-```
-if (!MEM8(0x3AD934) || MEM32(0x3AD938)) return -18;          // engine not initialised, or the API is "busy"
-if (!sub_00133920(-1)) return -18;                           // sets [3AD938] = -1 (busy sentinel)
-inst = sub_00133980(handle & 0xFF000000);                    // find instance by id; selects it:
-if (!inst) return 0;                                         //   [3AD928] = inst, [3AD938] = inst id   (see 3.1)
-idx = lowest set bit of (handle & 0x00FFFFFF)  (0..23, 24 if none)      // the player slot bit
-base = [inst+0x34];  N = MEM8(base+0xD);  if (idx > N) return 0;
-P    = [inst+0x4C];                                          // table of dword offsets, relative to base
-start = base + 4*P[idx];   end = base + 4*P[idx+1];          // an array of 8-byte records {u32 a, u32 b}
-for (r = start; r < end - 8; r += 8)                         // 4x unrolled (0x20 bytes, signed compare) + tail loop
-        ratio = (float)(((r[2]-r[0]) << 7) / r[1]);          // fild / fadd 2^32 for "unsigned" / fdivp / fstp float
-[3AD938] = 0; [3AD928] = 0;                                  // deselect (only on the fall-through exit!)
-return (int)(ms * last_ratio + 0.5);                         // x87 _ftol (0x200BCC); the running max is popped and unused
-```
+Behaviour, in words: it returns -18 when the engine is not initialised (`[0x3AD934]` is 0) or the API is busy (`[0x3AD938]` set); it marks the API busy (`sub_00133920`), finds the bank instance whose id is the handle's top byte and selects it (`sub_00133980`: `[0x3AD928]` = the instance, `[0x3AD938]` = its id; 0 if none); takes the player slot as the lowest set bit of the handle's low 24 bits; reads the instance's data base (`+0x34`, with the record count in the byte at base `+0xD`, returning 0 if the slot is above it) and its offset table (`+0x4C`); computes start and end of the slot's 8-byte records as the base plus four times the table's entries for this slot and the next; walks the records from start up to 8 bytes before end (an unrolled loop with a signed compare, then a tail loop), computing a ratio from each; deselects the instance (clears `[0x3AD938]` and `[0x3AD928]`, on the fall-through exit only) and returns the duration times the last ratio, rounded. Only the end pointer bounds the walk.
 
 * The result is a byte count: `sub_0001CBE0` adds it to `sub_00131780(2,100)` (the player's own structures) and passes
   the sum as the buffer size to `sub_00131310`. It is an estimate (3000 times the data rate of the last record),
@@ -266,13 +253,7 @@ id `handle & 0xFF000000`.** In the crash two are (the stale one in slot 0 and th
 
 * **Repair, at registration** (hook `sub_0001CBB0_enter`, direct callers `sub_0003BE50` and `sub_0003D060`; this is the
   point that fixes the state, not just the symptom). Before the new bank is registered:
-  ```
-  for i in 0..3: inst = 0x3AB488 + i*0x928
-      if (MEM32(inst+0x34) == MEM32(0x33EC2C)) {                       // still backed by the shared buffer
-          for slot in 0..23: if (MEM32(inst+0x58+4*slot)) sub_00131620(MEM32(inst+0x30) | (1 << slot));
-          if (MEM32(inst+0x34) == MEM32(0x33EC2C)) { MEM32(inst+0x34) = 0; MEM32(inst+0xB8) = 0; }   // last resort
-      }
-  ```
+  The guard, in words: for each of the four bank instances (from `0x3AB488`, `0x928` bytes apart) whose data base is still the shared MPF buffer (`[0x33EC2C]`), close every player slot that is in use through `sub_00131620` (instance id with the slot's bit); if the instance still points at the shared buffer after that, clear its data base and its `+0xB8` word as a last resort.
   `sub_00131620` is the engine's own close (it frees the instance with the last player), so nothing leaks; it needs
   `[0x3AD938] == 0`, which holds here (the game thread, no SND call in progress). It is a no-op in normal play (the
   buffer backs no instance then). Because the new instance does not exist yet, it also gets the right id
