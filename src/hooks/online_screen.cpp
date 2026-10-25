@@ -1573,11 +1573,11 @@ void draw_hill(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
         text(dl, f, g_hand, 13, 463, 352, h.last_how == NETHOW_WON || h.last_how == NETHOW_LEFT ? ORANGE : GREY,
              ("LAST FIGHT: " + res).c_str(), CENTER, 0.8f, 250);
     }
-    // this PC's place
+    // this PC's place, under the door (the line can fill the left panel)
     if (v.my_state == NETLINE_AWAY)
-        text(dl, f, g_hand, 16, 320, 366, RED, "YOU ARE AWAY: PRESS A TO GET BACK IN THE LINE", CENTER, 0.8f);
+        text(dl, f, g_hand, 13, 463, 370, RED, "YOU ARE AWAY: PRESS A TO GET BACK IN THE LINE", CENTER, 0.8f, 250);
     else if (v.next == r.you)
-        text(dl, f, g_hand, 18, 185, 388 - 22, ORANGE, "YOU'RE UP NEXT", CENTER, 1.2f);
+        text(dl, f, g_hand, 18, 463, 368, ORANGE, "YOU'RE UP NEXT", CENTER, 1.2f);
 
     float hx = 54, hy = 392;
     if (v.my_state == NETLINE_AWAY) hx += hint(dl, f, hx, hy, "a", "I'M BACK");
