@@ -2950,7 +2950,8 @@ static void rollback_crash_state(void)
     fprintf(stderr, "[ROLLBACK] at the crash: %s, step %u, final %u, update %u, %u rollbacks, the last back to %u from %u, thread %lu%s\n",
             N.resim ? "running steps again" : "a normal update", N.step, N.final_step, N.updates, N.rb_count,
             g_last_rb_target, g_last_rb_from, (unsigned long)GetCurrentThreadId(), N.predicting ? ", predicting" : "");
-    {   /* EAGL's loaded objects (list head 0x3A52A8, next at +4): which one is bad, and its page */
+    {   /* EAGL's loaded objects (list head 0x3A52A8, next at +0, previous at +4: the insert at 0x10A3DD
+         * stores the old head at +0 of the new one): which one is bad, and its page */
         uint32_t o = MEM32(0x003A52A8u);
         int k;
         for (k = 0; k < 48 && o; k++) {
@@ -2965,7 +2966,7 @@ static void rollback_crash_state(void)
                     fprintf(stderr, "[ROLLBACK]     +%03X = %08X (%s)\n", off[j], v, rollback_page_state(v));
                 }
             }
-            o = MEM32(o + 4u);
+            o = MEM32(o);
         }
     }
     rollback_arena_history();
