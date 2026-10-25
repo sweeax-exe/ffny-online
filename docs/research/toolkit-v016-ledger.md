@@ -232,3 +232,45 @@ real function, in bytes only tail-jump alias bodies cover (`0x001F705D`, `0x001F
 `_pass_seed_aliases` needs a real enclosing body. Both are SEH handler entries. The runtime has no guest SEH
 dispatch, so they are unreachable today. The third missing address, `0x001D5295`, is expected: the lifter now
 extends `0x001D5270` over its inline jump tables.
+
+## macOS re-check of the final pin (2026-10-24)
+
+M1 Pro, macOS 26.5.2, branch `4fd3293` (main v0.11.0 merged), pin `3e63e7b` from a fresh
+`git submodule update --init --recursive`. Python from the `djpy` alias plus `numpy`, `pillow` and
+`cryptography` (`docs/build-macos-linux.md`). Raw logs are not committed.
+
+| Check | Result |
+|---|---|
+| Analyze / recomp / build `posix-release` | Analyze **1 min 53 s** (`--no-archive`), recomp 1 min 2 s, build 33 s. 18,446 functions, as on Windows. `check-manual-addresses.py` 42 checked, 0 missing. Links SDL3 only |
+| Full regression | **18 of 18** in 37 min (`logs/regress-20261024-175105.txt`): unit 631 passed / 33 skipped (482 / 57 on 10-22; main's mod tests), m2, m3, m4a, launcher, overlay, unlockopt, picture, fight (median 120, minimum 120), ffa, Terrordome 242 s (median 120, minimum 120; 107 on 10-22), combat 27/27, versus 26/26, **replay 80 records over 1,800 steps, golden hash unchanged**, intro, crib, gym, soak 3/3 |
+| `--only repeat` (issue #98), twice | 2/2 ok: 80 records identical over 1,800 steps, matching the golden hash (`logs/regress-20261024-175753.txt`, `-180440.txt`). The Mac's first `repeat` run. Like Windows, it does not show the Deck's divergence |
+
+The first full pass was 12/18, for two reasons in the shell, neither in the branch: `DEFJAM_DATA` was not set, so
+`harness.py` used `../defjam`, which has no save (combat, versus, replay: no fixture; crib, gym: no Story
+profile), and the documented `djpy` alias has no `cryptography`, which main's `test_mod_manager.py` imports
+(unit: one collection error). With both set, 18/18 above.
+
+**Audio at the device** (opening scene, `harness.py run intro --secs 330 --to-end`, `RECOMP_APU_PCM`,
+`scripts/audio-clicks.py`). Same harness and route; the old build is the main checkout's v0.10.5 (toolkit
+v0.13.0 + fork `e818066`, built 2026-10-20). Old and new alternated:
+
+| Build | Clicks (on slice edges) | Dropouts |
+|---|---|---|
+| v0.10.5, toolkit `e818066` (2 runs) | 1 (0), 5 (3) | 1, 1 |
+| pin `2b73d81` (runtime rebuilt, same lift) | **401 (399)** | 1,495 |
+| pin `3e63e7b` (2 runs) | 7 (4), 9 (5) | 1,344, 1,307 |
+
+- The Mac had the Windows click defect too: 401 per 330 s on `2b73d81`, nearly all on slice edges and in the
+  first three minutes, as on Windows. The 10-22 Mac pass did not catch it: it counted mix-buffer holes. `3e63e7b`
+  fixes it here as well; what is left is close to the old build.
+- **Open: one-slice zero gaps.** The migrated build hands the device about 1,300 gaps per 330 s that the old
+  build does not (1). Each is one 32-sample slice of exact zero (0.67 ms; a few are 64), starting on a slice
+  edge, a median 8,300 frames (0.17 s) apart through the whole scene, mostly in quiet passages (peak about 700
+  in the ms either side; the step into each gap is about 300, under the click threshold). About 0.9 s of
+  silence in all. They are already there on `2b73d81`, so they come with the migration, not with `3e63e7b`.
+  Not traced. Not yet known: whether they can be heard (the owner's Windows ear found the build clean), and
+  whether Windows and the Deck have them (their records count clicks or mix-buffer holes, not dropouts). A
+  whole silent slice points at the APU rendering a slice as silence rather than at the device queue;
+  `RECOMP_APU_VOICE_PCM` would tell whether the voices already have the gaps.
+
+Not run: the Setup from the newest green CI run and the Story intro with a pad (§7 step 5; needs a person).
