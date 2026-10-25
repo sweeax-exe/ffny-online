@@ -2091,7 +2091,11 @@ static int report_json(const char *event, uint32_t winners, uint32_t left, int d
 static void report_event(const char *event, uint32_t winners, uint32_t left, int draw)
 {
     char json[2048];
-    if (report_json(event, winners, left, draw, json, (int)sizeof(json))) account_report_match(json);
+    static int show = -1;   /* RECOMP_NETPLAY_REPORT_LOG=1 (tests): every report as it is made */
+    if (!report_json(event, winners, left, draw, json, (int)sizeof(json))) return;
+    if (show < 0) show = getenv("RECOMP_NETPLAY_REPORT_LOG") != NULL;
+    if (show) fprintf(stderr, "[NETPLAY] report: %s\n", json);
+    account_report_match(json);
 }
 
 /* The "crashed" report of the running match, built when its "start" goes out so that the crash
@@ -2128,6 +2132,17 @@ void netplay_on_crash(void)
     if (status > 0) fprintf(stderr, "[ACCOUNT] crash report sent: HTTP %d\n", status);
     else fprintf(stderr, "[ACCOUNT] crash report: %s\n", status < 0 ? "not sent (not signed in)" : "no answer in time");
     fflush(stderr);
+}
+
+/* The winners of a room match whose decision named fighter slot w: that slot, or in a Team match
+ * (2 vs 2) its whole side. The game's decision names one fighter (the last one put out's primary
+ * opponent; docs/research/team-and-special-match-types.md 3.4), and the side is the slot's pair:
+ * slots 0 and 1 against 2 and 3. */
+static uint32_t winners_of(uint32_t w)
+{
+    if (w >= MAXP) return 0;
+    if (N.report_m.type == ONLINE_MODE_TEAM && N.fighters == 4) return 3u << (w & 2u);
+    return 1u << w;
 }
 
 /* The room match decided, from netplay_on_step (code 4 a draw); once per match. */
@@ -2763,10 +2778,10 @@ void netplay_on_step(void)
             netplay_on_result(0, 0, 4u);                            /* a decisive draw */
         } else if (N.fighting_seen && phase != 1u && phase >= 2u && phase <= 3u) {
             uint32_t w = MEM32(G_MATCH_WINNER);
-            netplay_on_result(w < MAXP ? 1u << w : 0u, 0, w < MAXP ? 1u : 4u);
+            netplay_on_result(winners_of(w), 0, w < MAXP ? 1u : 4u);
         } else if ((code & 1u) && (MEM32(G_MATCH_FLAGS) & 8u)) {   /* decided, the phase word skipped */
             uint32_t w = MEM32(G_MATCH_TWIN);
-            netplay_on_result(w < MAXP ? 1u << w : 0u, 0, w < MAXP ? 1u : 4u);
+            netplay_on_result(winners_of(w), 0, w < MAXP ? 1u : 4u);
         }
     }
     s = ++N.step;
@@ -2775,6 +2790,20 @@ void netplay_on_step(void)
         if (crowd_on < 0) crowd_on = !(getenv("RECOMP_ONLINE_CROWD") && !strcmp(getenv("RECOMP_ONLINE_CROWD"), "keep"));
         if (crowd_on) crowd_reset(g_ecx);
         if (!N.resim && match_rolls_back() && rollback_prepare() == 0) N.rb_on = N.rb_ref_due = 1;
+        {   /* what the fight made of the setup: the mode mask (1 one on one, 2 team, 4 3-way, 8 4-way), the
+             * arena kind, and per fighter its flags (+0x937: 4 = team side marker) and the slots its
+             * opponent (+0) and partner (+4) pointers name (docs/research/team-and-special-match-types.md 3.2) */
+            char line[200];
+            int n = 0, slot;
+            for (slot = 0; slot < N.fighters && slot < MAXP; slot++) {
+                uint32_t rec = ACTORS + (uint32_t)slot * STRIDE, opp = MEM32(rec), mate = MEM32(rec + 4u);
+                int o = opp >= ACTORS && (opp - ACTORS) % STRIDE == 0 ? (int)((opp - ACTORS) / STRIDE) : -1;
+                int m = mate >= ACTORS && (mate - ACTORS) % STRIDE == 0 ? (int)((mate - ACTORS) / STRIDE) : -1;
+                n += snprintf(line + n, sizeof(line) - (size_t)n, " %d:flags %02X opp %d mate %d", slot, MEM8(rec + 0x937u), o, m);
+            }
+            fprintf(stderr, "[NETPLAY] fight setup: type %d, mode mask %02X, arena kind %u;%s\n", N.report_m.type,
+                    MEM8(0x003B907Eu), MEM32(0x003B9084u), line);
+        }
     }
     {
         /* The arena hands its frame argument (edi, kept by sub_00087700 for the crowd update that
@@ -2810,6 +2839,23 @@ void netplay_on_step(void)
     k = s % RING;
     N.hash_at[k] = fighter_hash(N.hash_parts[k]);   /* the state as this step starts */
     N.hash_tag[k] = s + 1;
+    {   /* RECOMP_NETPLAY_STEPLOG=1 (tests): the checksum's fields of every fighter at every step, to find
+         * the step and the field where the PCs of a desynced match part (the checksum goes out every 60) */
+        static int steplog = -1;
+        if (steplog < 0) steplog = getenv("RECOMP_NETPLAY_STEPLOG") != NULL;
+        if (steplog && !N.resim) {
+            static const uint32_t fields[] = { 0x30, 0x44, 0x48, 0x4C, 0x54, 0x350 };
+            char line[400];
+            int n = snprintf(line, sizeof(line), "[STEPHASH] %08X %u", N.match, s), slot;
+            unsigned fi;
+            for (slot = 0; slot < N.fighters && slot < MAXP; slot++) {
+                n += snprintf(line + n, sizeof(line) - (size_t)n, " |");
+                for (fi = 0; fi < sizeof(fields) / sizeof(fields[0]); fi++)
+                    n += snprintf(line + n, sizeof(line) - (size_t)n, " %08X", MEM32(ACTORS + (uint32_t)slot * STRIDE + fields[fi]));
+            }
+            fprintf(stderr, "%s\n", line);
+        }
+    }
     if (N.resim) return;                /* a re-run: the entries are all known or predicted */
     target = s + (uint32_t)N.delay;
     k = target % RING;

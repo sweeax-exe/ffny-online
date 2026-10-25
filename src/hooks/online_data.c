@@ -12,10 +12,20 @@
 #define MAX_FIGHTERS 160
 #define MAX_VENUES   48
 
+/* Team is four humans (the relay starts a Team room with four only: netplay puts the humans in the
+ * first slots, so with fewer they would all be on one side). The special matches are One on One on
+ * their own venue; the room has no vote (docs/research/team-and-special-match-types.md). */
 static const OnlineMode k_modes[] = {
-    { 0, "One on One", 2 },
-    { 2, "3-Way", 3 },
-    { 3, "Free for All", 4 },
+    { 0, "One on One", 2, 0 },
+    { 1, "Team", 4, 0 },
+    { 2, "3-Way", 3, 0 },
+    { 3, "Free for All", 4, 0 },
+    { 6, "Demolition", 2, 17 },
+    { 7, "Inferno", 2, 24 },
+    { 8, "Subway", 2, 11 },
+    { 9, "Window", 2, 26 },
+    { 10, "Cage", 2, 10 },
+    { 11, "Ringout", 2, 8 },
 };
 
 static OnlineFighter g_fighters[MAX_FIGHTERS];
