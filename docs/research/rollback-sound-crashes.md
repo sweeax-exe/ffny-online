@@ -239,3 +239,10 @@ crash report prints the history of the arena blocks the guest registers point in
   start guest memory is scanned for words naming a kept block, conservatively (the image's data, the thread
   stacks and XAPI's heap below 0x01600000, then the heap and the contiguous window up to 0x84000000 less the
   kept blocks themselves); the log line gives how many were freed, how many are still named, and the time.
+* Two more runs (13:30-13:40): with streams routed, the first match ran clean again and the conservative
+  scan freed 407 of 489 kept blocks in 32 ms; the other copy crashed between the matches in `sub_001E8340`
+  (mixer thread) before the scan ran, `edx` pointing into a 256 KB boot-time arena block (allocated at
+  `0x3C8A2`) and reading what looks like audio samples. With streams in the heap and the mixer's words kept
+  live, the mixer's lists broke in match 1 (`sub_00139D80` from `sub_0011E530`, step 2860). Routing is now
+  the default under rollback (`RECOMP_ROLLBACK_STREAMS_IN_HEAP=1` for the other way); a read-only study of
+  the `0x3A9688` table and the 256 KB block goes to `stream-table-crash.md`.
