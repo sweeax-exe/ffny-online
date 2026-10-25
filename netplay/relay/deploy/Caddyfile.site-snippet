@@ -1,0 +1,32 @@
+# FFNY Online: the start page at defjam.online (static files from website/build.py).
+# Not installed by any script yet; see website/README.md. Caddy gets and renews the certificates.
+# Needs DNS A/AAAA records for defjam.online and www.defjam.online pointing at this server.
+
+www.defjam.online {
+	redir https://defjam.online{uri} 308
+}
+
+defjam.online {
+	root * /var/www/defjam.online
+	encode zstd gzip
+	file_server
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options nosniff
+		Referrer-Policy no-referrer
+		X-Frame-Options DENY
+		Permissions-Policy "camera=(), microphone=(), geolocation=(), interest-cohort=()"
+		# The page loads only its own files; its one outside request is the GitHub API for the
+		# newest release.
+		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; font-src 'self'; connect-src https://api.github.com; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; object-src 'none'"
+		-Server
+	}
+
+	# The page itself is always revalidated; style.css and site.js are linked with ?v=<hash>,
+	# so they and the pictures can be cached for a week.
+	@page path / /index.html
+	header @page Cache-Control "no-cache"
+	@static path /style.css /site.js /img/* /media/* /fonts/* /favicon.ico
+	header @static Cache-Control "public, max-age=604800"
+}

@@ -46,7 +46,7 @@ def source_allowed(name, toolkit=False):
         return False
     if any(p in {'game_files', 'gen', 'output', 'logs', 'build', 'game', 'assets', 'save', 'third_party'} for p in path.parts):
         return False
-    if not toolkit and path.parts[0] in {'docs', 'tests', 'patches', '.github', '.agents', '.codex'}:
+    if not toolkit and path.parts[0] in {'docs', 'tests', 'patches', 'website', '.github', '.agents', '.codex'}:
         return False
     if toolkit and path.parts[0] in {'tests', 'docs', 'examples', 'templates'}:
         # Runtime templates are required by the lifter.
