@@ -8,6 +8,8 @@ import shutil
 import subprocess
 import pytest
 
+import native_hooks_fixtures
+
 ROOT = Path(__file__).resolve().parents[2]
 
 DRIVER = r'''
@@ -57,22 +59,8 @@ bad line
 
 @pytest.fixture(scope='module')
 def input_tool(tmp_path_factory):
-    compiler = shutil.which('cl')
-    if not compiler:
-        pytest.skip('Windows native step-input fixture needs MSVC')
-    folder = tmp_path_factory.mktemp('step-input-native')
-    include = folder / 'recomp/gen'
-    include.mkdir(parents=True)
-    (include / 'recomp_types.h').write_text(
-        '#include <stdint.h>\nextern unsigned char memory[];\n#define MEM32(a) (*(uint32_t *)(memory+(a)))\n')
-    driver = folder / 'driver.c'
-    driver.write_text(DRIVER, encoding='utf-8')
-    exe = folder / 'input.exe'
-    result = subprocess.run([compiler, '/nologo', '/O2', '/TC', '/I' + str(folder), '/I' + str(ROOT / 'src/hooks'),
-                             '/I' + str(ROOT / 'src'), str(driver), str(ROOT / 'src/hooks/test_observations.c'),
-                             str(ROOT / 'src/hooks/test_telemetry.c'), '/Fe:' + str(exe)],
-                            cwd=folder, capture_output=True, text=True)
-    assert result.returncode == 0, result.stdout + result.stderr
+    exe = native_hooks_fixtures.build(tmp_path_factory, 'step-input-native', DRIVER)
+    folder = exe.parent
     script = folder / 'input.txt'
     script.write_text(SCRIPT, encoding='ascii')
     return exe, script

@@ -250,6 +250,7 @@ void defjam_test_match_start(void)
     s_in_match = 1;
     s_setup_due = 1;
     s_over_reported = 0;
+    if (defjam_test_bot_enabled()) defjam_test_bot_match_start();
     memset(s_moved, 0, sizeof(s_moved));
     memset(s_holding, 0, sizeof(s_holding));
     memset(s_press_step, 0, sizeof(s_press_step));
@@ -422,6 +423,101 @@ static void snapshot_point(void)
     }
 }
 
+/* ---- Knockout at a fight step (RECOMP_TEST_KO_STEP=<step>[,<winner slot>|alt]) -------------
+ *
+ * Tests that only need matches to end (stability, several matches in a row, rollback) ask for
+ * the knockout at a fixed step instead of waiting for scripted presses to land a finisher. In
+ * this game zero health is not a knockout: a hit with the finishing flag (+0xF68 of the
+ * attacker) on a fighter under 10 % health (+0x927 bit 0x10) passes a chance roll in
+ * sub_001C5FC0, which marks the knockout's animation in +0x943 and puts the loser in state
+ * 0x18 through sub_001B5420. That state's handler (sub_001B39F0) plays the fall and sets the
+ * defeat flag +0x932 bit 1; the match's win check (sub_001A7140) then records the decisive
+ * result 0x21 and the game runs its own slow motion, results and summary.
+ *
+ * This does the last part the game's way: from the given step of the fight on (phase 1), every
+ * fighter but the winner gets zero health and the knockout state through the same routine, as
+ * soon as both are standing free (state 1, so no grapple or throw holds the loser); after
+ * KO_GRACE steps it does not wait for that any more. The winner is slot 0 unless named, and
+ * "alt" alternates it per match (slot 0 wins the first, 1 the second, ...).
+ *
+ * Lockstep and rollback: it runs at the start of a step (sub_00087700), before the step's
+ * checksum, and depends only on the step number, the match ordinal and the fighters' records,
+ * all the same on every PC of a room. It keeps no state of its own: a fighter already knocked
+ * out (state 0x18 or the defeat flag) is left alone, so a step run again after a rollback does
+ * exactly what its first run did. Tests only. */
+extern void sub_001B5420(void);     /* (record, state): the state set and restarted */
+#define F_HEALTH_RATIO 0x35Cu
+#define F_DEFEAT      0x932u
+#define F_KO_ANIM     0x943u
+#define STATE_KO      0x18u
+#define KO_GRACE      180           /* steps it waits at most for a free stance */
+
+static void call_set_state(uint32_t rec, uint32_t state)
+{
+    uint32_t eax_ = g_eax, ecx_ = g_ecx, edx_ = g_edx, ebx_ = g_ebx, esi_ = g_esi, edi_ = g_edi,
+             ebp_ = g_ebp, sp = g_esp;
+    double fp[8];
+    int fp_top = g_fp_top;
+    uint16_t fp_cw = g_fp_control_word;
+    memcpy(fp, g_fp_stack, sizeof(fp));
+    g_esp = (sp - 0x80u) & ~3u;         /* below the hook's frame */
+    PUSH32(g_esp, state);
+    PUSH32(g_esp, rec);
+    PUSH32(g_esp, 0u);                  /* a return address the lifted ret only pops */
+    sub_001B5420();
+    g_eax = eax_; g_ecx = ecx_; g_edx = edx_; g_ebx = ebx_; g_esi = esi_; g_edi = edi_; g_ebp = ebp_;
+    g_esp = sp;
+    memcpy(g_fp_stack, fp, sizeof(fp));
+    g_fp_top = fp_top;
+    g_fp_control_word = fp_cw;
+}
+
+static int ko_free(uint32_t state) { return state == 1u; }      /* standing or walking */
+
+static void ko_step(void)
+{
+    static int parsed;
+    static LONG64 at;
+    static int winner_arg;              /* >= 0 a slot, -1 alternate */
+    int slot, winner, losers = 0, ready = 1;
+    if (!parsed) {
+        const char *v = getenv("RECOMP_TEST_KO_STEP");
+        parsed = 1;
+        at = v ? strtoll(v, NULL, 10) : 0;
+        winner_arg = 0;
+        if (v && strchr(v, ',')) {
+            const char *w = strchr(v, ',') + 1;
+            winner_arg = !strncmp(w, "alt", 3) ? -1 : atoi(w);
+        }
+        if (at > 0)
+            fprintf(stderr, "[TEST-KO] knockout from fight step %lld, winner %s%d\n", (long long)at,
+                    winner_arg < 0 ? "alternating from slot " : "slot ", winner_arg < 0 ? 0 : winner_arg);
+    }
+    if (at <= 0 || s_step < at || MEM32(G_PHASE) != 1u) return;
+    winner = winner_arg >= 0 ? winner_arg : (int)((s_match - 1) % 2);
+    if (winner < 0 || winner >= SLOTS || !active(winner)) return;
+    for (slot = 0; slot < SLOTS; slot++) {
+        uint32_t r = record(slot);
+        if (!active(slot) || slot == winner) continue;
+        if (MEM32(r + F_STATE) == STATE_KO || (MEM16(r + F_DEFEAT) & 1u)) continue;
+        losers |= 1 << slot;
+        if (!ko_free(MEM32(r + F_STATE))) ready = 0;
+    }
+    if (!losers) return;
+    if (!ko_free(MEM32(record(winner) + F_STATE))) ready = 0;
+    if (!ready && s_step < at + KO_GRACE) return;
+    for (slot = 0; slot < SLOTS; slot++) {
+        uint32_t r = record(slot);
+        if (!(losers & (1 << slot))) continue;
+        MEMF(r + F_HEALTH) = 0.0f;
+        MEMF(r + F_HEALTH_RATIO) = 0.0f;
+        MEM8(r + F_KO_ANIM) = 1;        /* the plain knockout fall (sub_001C5FC0's default) */
+        call_set_state(r, STATE_KO);
+        fprintf(stderr, "[TEST-KO] match %ld step %lld: slot %d knocked out (winner slot %d%s)\n", (long)s_match,
+                (long long)s_step, slot, winner, ready ? "" : ", not waiting any longer for a free stance");
+    }
+}
+
 void defjam_test_step(void)
 {
     int slot;
@@ -443,6 +539,7 @@ void defjam_test_step(void)
                     if (MEMF(record(slot) + F_HEALTH) > cap) MEMF(record(slot) + F_HEALTH) = cap;
                 }
     }
+    ko_step();
     if (s_step == 1 || s_step == 300 || s_step == 900) draws_report(s_step == 1 ? "step1" : s_step == 300 ? "step300" : "step900");
 
     if (s_setup_due) {
@@ -643,9 +740,11 @@ void defjam_test_input(uint32_t actor)
     uint32_t buttons = 0;
     if (!defjam_test_observations_enabled()) return;
     if (s_input_count < 0) input_load();
-    if (!s_input_slots || !s_in_match) return;
+    if (!s_in_match) return;
     if (actor < ACTORS || actor >= ACTORS + SLOTS * STRIDE || (actor - ACTORS) % STRIDE) return;
     slot = (int)((actor - ACTORS) / STRIDE);
+    if (defjam_test_bot_input(actor, slot, s_step)) return;     /* RECOMP_TEST_BOT (test_bot.c) */
+    if (!s_input_slots) return;
     if (!(s_input_slots & (1 << slot))) return;
     for (i = 0; i < s_input_count; i++)
         if (s_input[i].slot == slot && s_step >= s_input[i].first && s_step <= s_input[i].last)

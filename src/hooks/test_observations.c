@@ -27,6 +27,10 @@ int defjam_test_observations_enabled(void)
     if (enabled < 0) {
         const char *value = getenv("RECOMP_TEST_OBSERVATIONS");
         enabled = value && !strcmp(value, "1");
+        /* the fast knockout and the bot run in the telemetry's step hooks */
+        if (!enabled && ((getenv("RECOMP_TEST_KO_STEP") && atoi(getenv("RECOMP_TEST_KO_STEP")) > 0) ||
+                         (getenv("RECOMP_TEST_BOT") && getenv("RECOMP_TEST_BOT")[0] && getenv("RECOMP_TEST_BOT")[0] != '0')))
+            enabled = 1;
     }
     return enabled;
 }
