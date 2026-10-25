@@ -120,8 +120,8 @@ time. Do not change the owner's display refresh or profile progress.
   recorder pruning in `logs/v0121-triage/measurements/`.
 - The game submodule remains clean at its published pin. The tested executable
   is configured with `-ToolkitDir C:/Users/Vlad/code/defjam-v0121-aa-scissor`.
-  No gitlink may be committed before publishing the fork commit. Publishing
-  requires the owner's instruction under AGENTS.md; no push was requested.
+  The owner subsequently authorized publication; the fork commit is published
+  and this PR pins it.
 
 
 ## Decisions and hand-off
@@ -135,7 +135,8 @@ time. Do not change the owner's display refresh or profile progress.
 The renderer correction and synthetic fixture are committed locally as toolkit
 `bf9c97502b6ace99a6b2111a736deb2dc44b6125`, branch
 `defjam/fix-aa-host-scissor`, worktree `C:/Users/Vlad/code/defjam-v0121-aa-scissor`.
-It has not been pushed. The game gitlink remains at published `8fb21d2` and is clean.
+The owner authorized publication on 2026-10-25. The fork branch is now pushed and
+the game gitlink pins `bf9c975`; no game assets or recordings are published.
 
 To rebuild the tested candidate from the game worktree:
 
@@ -143,8 +144,7 @@ To rebuild the tested candidate from the game worktree:
 ./scripts/build.ps1 -Preset win-x64-release -ToolkitDir C:/Users/Vlad/code/defjam-v0121-aa-scissor
 ```
 
-After the owner requests publication, publish the reviewed fork commit first,
-then update the game gitlink and follow the v0.12.1 release workflow. Do not close
-#108 until integration is complete. Release checks on other platforms remain due.
+Follow the v0.12.1 release workflow for integration. Do not close #108 until
+integration is complete. Release checks on other platforms remain due.
 The Power Plant next step is a paired batch trace/time profile to identify the
 additional Story rendering work; no performance fix is claimed by this commit.
