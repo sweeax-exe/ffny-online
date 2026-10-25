@@ -72,6 +72,7 @@ typedef struct {
     float vx[4], vz[4];             /* world motion of up, down, left, right, as learned */
     float weight[4];
     float px, pz;
+    uint32_t pstate;                /* the state last step: walking is learned in state 1 only */
     uint32_t held_dir;
     long long held_step;
     int intent;
@@ -160,8 +161,10 @@ static int dir_index(uint32_t d)
 static void learn(BotMemory *m, int slot, long long step)
 {
     float x = f32(rec(slot) + F_POS_X), z = f32(rec(slot) + F_POS_Z);
+    uint32_t state = MEM32(rec(slot) + F_STATE);
     int d = dir_index(m->held_dir);
-    if (d >= 0 && m->held_step == step - 1 && !netplay_rerunning()) {
+    /* only plain walking (state 1 then and now): hits, throws and grapples move a fighter too */
+    if (d >= 0 && m->held_step == step - 1 && !netplay_rerunning() && state == 1u && m->pstate == 1u) {
         float dx = x - m->px, dz = z - m->pz, len = sqrtf(dx * dx + dz * dz);
         if (len > 0.02f && len < 1.0f) {         /* a walk, not a throw or a placement */
             float a = 0.15f;
@@ -174,6 +177,7 @@ static void learn(BotMemory *m, int slot, long long step)
     }
     m->px = x;
     m->pz = z;
+    m->pstate = state;
 }
 
 /* The pad direction (one or two of the four bits) whose learned motion points most along (wx, wz). */
@@ -228,7 +232,7 @@ static uint32_t decide(int slot, long long step)
     int phase_in = (int)(step % WINDOW), opp, r;
     float dist, ox, oz, x, z, ratio, opp_ratio;
     uint32_t me = rec(slot), them, buttons = 0, toward;
-    int opp_low, opp_stunned;
+    int opp_low, opp_stunned, opp_down;
 
     learn(m, slot, step);
     if (MEM32(G_PHASE) != 1u) return 0;
@@ -242,6 +246,10 @@ static uint32_t decide(int slot, long long step)
     opp_ratio = f32(them + F_HEALTH) / (f32(them + F_HEALTH_MAX) > 0 ? f32(them + F_HEALTH_MAX) : 1.0f);
     opp_low = (byte_at(them + F_FLAGS_927) & 0x10) || opp_ratio < 0.1f;
     opp_stunned = (byte_at(them + F_FLAGS_927) & 0x04) != 0;
+    {   /* knocked down or getting up (states seen after knockdowns: 0x10-0x12, 0x15, 0x17, 0x1A) */
+        uint32_t st = MEM32(them + F_STATE);
+        opp_down = (st >= 0x10u && st <= 0x12u) || st == 0x15u || st == 0x17u || st == 0x1Au;
+    }
     /* the opponent winds up a strike within reach (states 0x45..0x4B): block it, now and then */
     {
         uint32_t st = MEM32(them + F_STATE);
@@ -272,10 +280,10 @@ static uint32_t decide(int slot, long long step)
         r = roll(slot, window, 1);
         if (reblock) {
             m->intent = I_BLOCK;
+        } else if (opp_low || opp_stunned || opp_down) {     /* near or far: go and finish */
+            m->intent = dist > REACH ? I_FINISH : r < 55 ? I_FINISH : r < 80 ? I_GRAB : I_HEAVY;
         } else if (dist > REACH) {
-            m->intent = (r < 15 + (100 - s_aggr) / 5) ? I_CIRCLE : I_APPROACH;
-        } else if (opp_low || opp_stunned) {
-            m->intent = r < 55 ? I_FINISH : r < 80 ? I_GRAB : I_HEAVY;
+            m->intent = I_APPROACH;
         } else {
             int block = 8 + (100 - s_aggr) / 4 + (ratio < 0.3f ? 10 : 0);
             int grab = 22;
@@ -309,11 +317,11 @@ static uint32_t decide(int slot, long long step)
         else if (phase_in % 4 == 2) buttons = (roll(slot, step / 4, 5) < 50 ? BOT_PUNCH : BOT_KICK) |
                                               (roll(slot, step / 4, 6) < 50 ? toward : 0);
         break;
-    case I_FINISH:      /* the opponent can be knocked out: grab and heavy strikes toward them */
-        if (dist > REACH * 0.7f) buttons = toward;
-        else if (phase_in % 6 == 0) buttons = BOT_GRAB;
-        else if (phase_in % 6 == 3) buttons = BOT_MOD | (roll(slot, step / 6, 7) < 50 ? BOT_PUNCH : BOT_KICK);
-        else if (phase_in % 6 == 4) buttons = BOT_MOD;
+    case I_FINISH:      /* the opponent can be knocked out (or is down): close in, strike, grab */
+        if (dist > REACH * 0.8f) buttons = toward;
+        else if (window % 3 == 0) buttons = phase_in == 0 ? BOT_GRAB : (phase_in % 4 == 2 ? BOT_PUNCH : 0);
+        else if (phase_in % 4 == 0) buttons = (roll(slot, step / 4, 7) < 50 ? BOT_PUNCH : BOT_KICK) |
+                                              (window % 3 == 2 ? BOT_MOD : 0);
         break;
     }
     if (dist > REACH && m->intent != I_APPROACH && m->intent != I_CIRCLE && m->intent != I_FINISH)
