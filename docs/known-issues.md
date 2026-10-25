@@ -27,6 +27,13 @@ Fighters selection. They do not cover every mode or a full Story campaign.
   the late frames of the heaviest scenes; at the default scale 2 the opening scene still drops
   about 11% of frames in its heaviest shots. Windows compiles each shader at first use in every
   launch (no Direct3D 11 shader cache yet).
+- **Uneven 40-60 fps in free-for-all fights on the Steam Deck at render scale 2-4 (fix proposed,
+  [report](research/deck-ffa-powerplant-2026-10-24.md)).** The Vulkan backend waited for
+  the GPU inside every `Present`, so the executor's CPU time and the GPU's time ran one after the
+  other against a 16.7 ms frame. Frames now overlap. In the scripted Power Plant fight on the Deck
+  (headless gamescope) render scale 3 went from 53 to 60 fps and scale 4 from 49 to 60; scale 2's
+  p99 frame time from 20.0 to 17.5 ms. Not yet seen on the real panel. Game Mode should be set to
+  60 Hz: at 90 Hz the game turns vsync off and motion is uneven even at a steady 60 fps.
 - **Scene loads freeze the picture for up to 2 s (to do).** When a Story scene loads, one frame
   lasts 0.8-1.8 s on the Mac in eleven scenes (sc07a 1.8 s; sc00 and sc03 1.4 s; sc06, sc16, sc09,
   sc13, sc05, sc17, gf1a, sc10) and up to 2.1 s on the Deck; the rest load in 0.2-0.75 s. The picture
