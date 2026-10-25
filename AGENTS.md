@@ -20,6 +20,7 @@ file, not an import:
 | script a run, a route or a scenario | `docs/agent/harness.md` |
 | write or change something in `src/recomp_manual.c` | `docs/agent/lifter-overrides.md` |
 | consider a sub-agent | `docs/agent/delegation.md` (briefs in `docs/agent/briefs/`) |
+| open a PR for the game, setup or launcher, queue it for a release, or cut a release | `docs/agent/release.md` |
 | hit a build or shell oddity | `docs/agent/environment.md` |
 
 Skills and sub-agent files for each tool (`.claude/`, `.codex/`) are generated from `docs/agent/skills/` and
@@ -29,13 +30,13 @@ Skills and sub-agent files for each tool (`.claude/`, `.codex/`) are generated f
 
 | File | Role | Rule |
 |---|---|---|
-| `PROGRESS.md` | The single source of truth for status, decisions and history | Update it **in the same turn** as the work. Never let it lag. Vlad exports it, so it must stand alone. Read it in pieces with `scripts/progress.py` (`brief`, `section N`, `decision D<n>`, `decisions --grep TEXT`, `grep TEXT`). |
+| `PROGRESS.md` | The single source of truth for status, decisions and history | On `main`, release branches and main-only docs PRs, update it **in the same turn** as the work. **Feature branches do not edit it**: their decisions (`D-new: ...`), results and hand-off go in the PR description, and the release PR writes them here (`docs/releasing.md` §2). Vlad exports it, so it must stand alone. Read it in pieces with `scripts/progress.py` (`brief`, `section N`, `decision D<n>`, `decisions --grep TEXT`, `grep TEXT`). |
 | `docs/01-plan-review.md` | Roadmap M0..M8 with exit criteria | Change only when a milestone definition changes; log that change as a decision. |
 | `docs/02-test-plan.md` | What "done" means per milestone | Same rule. |
 
 `PROGRESS.md` sections and how to use them:
 - **§0 Status at a glance**: one row per area. Flip ✅/⏳/⬜ the moment it changes.
-- **§1 Decisions log**: `D<n>`, date, decision, rationale. Every choice Vlad makes and every non-obvious choice you make goes here. Never renumber.
+- **§1 Decisions log**: `D<n>`, date, decision, rationale. Every choice Vlad makes and every non-obvious choice you make goes here. Numbers are assigned on `main` (a PR uses `D-new`); never renumber one that has landed there.
 - **§2 Environment**, **§3 Layout**, **§4 Dump facts**: reference; edit when reality changes.
 - **§5 Open questions for Vlad**: things only he can answer. Ask in chat too, but log here so nothing is lost.
 - **§6 Work log**: `- YYYY-MM-DD HH:MM — what happened`, newest at the bottom. One line per iteration or notable event, with numbers (function counts, kernel calls, stage reached) and the log file name. Keep it to about eight entries; `python scripts/worklog-add.py <entry file>` appends one and moves the older ones, unchanged, to the bottom of `docs/worklog/<YYYY-MM>.md`.
@@ -96,11 +97,14 @@ Game data lives outside the repo at `<data>` (`$env:DEFJAM_DATA`): `xiso/`, `ext
    - missing function → `.\scripts\seed-from-log.ps1` then `analyze.ps1` → `recomp.ps1` → `build.ps1`;
    - runtime gap (kernel/D3D/NV2A) → make one logical source commit on our xboxrecomp fork branch, run its focused fixtures plus the game regression, then publish to the fork and update the parent gitlink to that published commit. Keep the submodule clean; the old numbered patches are retired and no longer in the tree. Every upstream PR needs Vlad's separate approval;
    - lifter bug → hand-write the function as `void sub_XXXXXXXX(void)` in `src/recomp_manual.c`; read `docs/agent/lifter-overrides.md` first (a direct caller never reaches a wrapper; the `_enter` hook and `RECOMP_WATCH_WRITE` are the ways to trace). A hardware poke we do not need gets stubbed in `src/hooks/`.
-4. Rebuild, re-run, then `python scripts/regress.py --quick` (unit tests, the three golden frames, a fight); the full
-   `python scripts/regress.py` (adds the Story routes and a boot soak, about 20 minutes) before a commit that touches
-   the runtime, the lifter or the renderer. A log worth keeping is cited by name in PROGRESS.md; `scripts/prune-logs.py`
+4. Rebuild, re-run, then `python scripts/regress.py --quick` (unit tests, the three golden frames, a fight) and the
+   `--only` checks for the area you changed (`docs/agent/release.md`). The full `python scripts/regress.py` (about an
+   hour) runs **once per platform on the release candidate** (release trains, `docs/releasing.md`), not on each PR;
+   the one exception is a toolkit migration, which gets one full run on one platform before it is queued. A log worth
+   keeping is cited by name (in PROGRESS.md, or the PR description on a feature branch); `scripts/prune-logs.py`
    keeps cited logs and clears the rest. Run the full regression in the background and read its table, not its logs; a failing row prints a `triage.py` line for the log it used.
-5. Log the iteration in `PROGRESS.md` §6 with numbers; update §0 if a stage changed; add a `D<n>` if you chose between real alternatives.
+5. Log the iteration with numbers: in `PROGRESS.md` §6 on `main` or a release branch (update §0 if a stage changed;
+   add a `D<n>` if you chose between real alternatives); on a feature branch, in the PR description (`D-new`).
 6. Commit: one commit per fix, message `fix(boot): <what> (<symptom>)` or `chore:`/`docs:`/`feat:`. Do not commit lifted code.
    Push only when Vlad asks. Write the
    message to a file and use `git commit -F <file>`; PowerShell 5.1 cannot pipe a here-string, and its

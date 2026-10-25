@@ -13,7 +13,9 @@ The loop is in `AGENTS.md` §4; this is the checklist.
    on macOS and Linux `python scripts/harness.py`). Digest the log with skill `triage-run`.
 3. Fix in this order: missing function -> seed, analyze, recomp, build; runtime gap -> one commit on the
    toolkit fork, published before the gitlink moves; lifter bug -> `docs/agent/lifter-overrides.md`.
-4. `python scripts/regress.py --quick`; the full run before touching the runtime, lifter or renderer.
-5. Log it in `PROGRESS.md` §6 with numbers (`python scripts/worklog-add.py <file>`), add a `D<n>` for a
-   real choice, rewrite §7 for the next agent.
+4. `python scripts/regress.py --quick` and the area's `--only` checks; the full run belongs to the release
+   candidate (`docs/agent/release.md`), except one run before queueing a toolkit migration.
+5. On `main` or a release branch: log it in `PROGRESS.md` §6 with numbers (`python scripts/worklog-add.py
+   <file>`), add a `D<n>` for a real choice, rewrite §7 for the next agent. On a feature branch: the same
+   content goes in the PR description (`D-new: ...`, `## Hand-off`); do not edit `PROGRESS.md`.
 6. One commit per fix; `git add -A --dry-run` first (no game data, ever); message in a file with `git commit -F`.
