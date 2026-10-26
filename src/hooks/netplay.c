@@ -41,6 +41,7 @@
 #include "account.h"
 #include "rollback.h"
 #include "test_observations.h"
+#include "netplay_servers.h"
 
 #define G_MATCH_PHASE   0x003B8F30u     /* test_telemetry.c G_PHASE */
 #define G_MATCH_WINNER  0x003B8F40u     /* test_telemetry.c G_WINNER: the winner's fighter slot */
@@ -81,6 +82,10 @@ void netplay_lobby_room(NetRoom *o) { memset(o, 0, sizeof(*o)); }
 void netplay_lobby_ranked(int f) { (void)f; }
 int netplay_lobby_queue(int *w, int *s, char *t, int n) { (void)w; (void)s; if (t && n > 0) t[0] = 0; return NETQUEUE_NONE; }
 int netplay_in_lobby(void) { return 0; }
+int netplay_lobby_address(char *o, int n) { (void)o; (void)n; return 0; }
+int netplay_rtt(void) { return -1; }
+void netplay_build_fingerprint(uint8_t o[8]) { memset(o, 0, 8); }
+int netplay_room_ping(int s) { (void)s; return -1; }
 int netplay_lobby_caps(void) { return 0; }
 void netplay_sync_point(void) {}
 void netplay_on_main_menu(void) {}
@@ -116,6 +121,8 @@ void netplay_crowd_update(void) { sub_00081170(); }
 #define DEFAULT_PORT  27777
 #define PROJECT_SERVER_NAME    "play.defjam.online"
 #define PROJECT_SERVER_ADDRESS "49.12.78.32"
+#define PROJECT_NA_NAME        "na.defjam.online"     /* the North America relay (build 30) */
+#define PROJECT_NA_ADDRESS     "5.161.206.134"
 #define PROTO         1
 #define T_HELLO       0x01
 #define T_WELCOME     0x02
@@ -176,6 +183,8 @@ void netplay_crowd_update(void) { sub_00081170(); }
 #define HASH_EVERY    60
 #define P_REMATCH     8             /* u32 START seed, u32 match number: Rematch chosen; 0xFFFFFFFF: back to the room */
 #define REMATCH_NO    0xFFFFFFFFu
+#define P_PINGINFO    9             /* in a room, every PINGINFO_MS: u16 this PC's ping to the relay (builds from 30) */
+#define PINGINFO_MS   2000
 #define HASH_PARTS    6             /* the checksum in parts: fighters 1-4, the AI generators, the rest */
 #define STALL_LIMIT_MS 10000        /* mid-fight: a player has gone */
 #define START_LIMIT_MS 90000        /* the first steps: another PC may still be loading the venue */
@@ -262,6 +271,8 @@ static struct {
     char queue_text[96];
     int room_count;
     unsigned rooms_version;
+    int slot_rtt[ROOMSLOTS];        /* each room member's reported ping (P_PINGINFO), -1 none */
+    ULONGLONG last_pinginfo;
     uint8_t pend[300];              /* the request waiting for an answer */
     int pend_len, pend_tries;
     ULONGLONG pend_sent;
@@ -1068,6 +1079,10 @@ static void on_room(const uint8_t *b, int len)
     v.in_room = 1;
     v.received = GetTickCount64();
     EnterCriticalSection(&g_cs);
+    if (!N.roomv.in_room || memcmp(N.roomv.code, v.code, 6)) {      /* another room: its pings come anew */
+        for (i = 0; i < ROOMSLOTS; i++) N.slot_rtt[i] = -1;
+        N.last_pinginfo = 0;
+    }
     memcpy(v.error, N.roomv.error, sizeof(v.error));
     v.version = N.roomv.version + 1;
     /* the line comes in its own message (HILL, after every ROOM of such a room): keep the last */
@@ -1391,6 +1406,12 @@ static void on_packet(const uint8_t *b, int len)
             voice_on_packet(b[6], b + 7, len - 7);
             break;
         }
+        if (len >= 10 && b[7] == P_PINGINFO && N.lobby && b[6] < ROOMSLOTS) {   /* a member's ping, by relay slot */
+            if (N.slot_rtt[b[6]] < 0)
+                fprintf(stderr, "[NETPLAY] room: the player in slot %d reports a ping of %d ms\n", b[6], b[8] | b[9] << 8);
+            N.slot_rtt[b[6]] = b[8] | b[9] << 8;
+            break;
+        }
         if (len >= 7) {
             int from = N.lobby ? (b[6] < ROOMSLOTS ? N.pos_of_slot[b[6]] : -1) : (b[6] ? 1 : 0);
             /* King of the Hill: a fight this PC does not play in (it watches, or waits) is not its
@@ -1620,6 +1641,16 @@ static DWORD WINAPI net_thread(LPVOID unused)
             }
             N.koth_sent = now;
         }
+        /* Hub: in a room, this PC's ping for the others' player cards and the high-ping warning */
+        if (N.lobby && N.have_token && N.roomv.in_room && !N.match_live && N.rtt_ms >= 0 && now - N.last_pinginfo >= PINGINFO_MS) {
+            uint8_t p[3];
+            int rtt = N.rtt_ms > 0xFFFF ? 0xFFFF : N.rtt_ms;
+            p[0] = P_PINGINFO;
+            p[1] = (uint8_t)rtt;
+            p[2] = (uint8_t)(rtt >> 8);
+            send_data(p, 3);
+            N.last_pinginfo = now;
+        }
         /* Hub: our ping for this START, until the match is under way. */
         if (N.lobby && N.match_live && !N.match_seen && now - N.last_rtt_sent >= 100)
             send_rtt();
@@ -1694,10 +1725,12 @@ static int resolve(const char *server)
     if (getaddrinfo(host, port, &hints, &res) || !res) {
         /* The project's server by its address when its name does not resolve (a resolver that
          * still remembers the name as missing, or a DNS outage). */
+        const char *known = !_stricmp(host, PROJECT_SERVER_NAME) ? PROJECT_SERVER_ADDRESS :
+                            !_stricmp(host, PROJECT_NA_NAME) ? PROJECT_NA_ADDRESS : NULL;
         res = NULL;
-        if (_stricmp(host, PROJECT_SERVER_NAME) || getaddrinfo(PROJECT_SERVER_ADDRESS, port, &hints, &res) || !res)
+        if (!known || getaddrinfo(known, port, &hints, &res) || !res)
             return -1;
-        fprintf(stderr, "[NETPLAY] %s did not resolve; using %s\n", host, PROJECT_SERVER_ADDRESS);
+        fprintf(stderr, "[NETPLAY] %s did not resolve; using %s\n", host, known);
     }
     memcpy(&N.server, res->ai_addr, res->ai_addrlen);
     N.server_len = (int)res->ai_addrlen;
@@ -1705,10 +1738,21 @@ static int resolve(const char *server)
     return 0;
 }
 
-static int start(const char *server, const char *name, int creating, const char *room, int delay, int lobby)
+/* The build's fingerprint: the version, the build number and the lockstep rules. Without the number
+ * (builds 21-25) every remaster build had the same one and old and new builds met in rooms. */
+void netplay_build_fingerprint(uint8_t out[8])
 {
     uint32_t h1 = 2166136261u, h2;
     const char *v;
+    int k, build = updater_local_build();
+    for (v = DEFJAM_VERSION; *v; v++) h1 = (h1 ^ (uint8_t)*v) * 16777619u;
+    for (k = 0; k < 4; k++) h1 = (h1 ^ (uint8_t)(build >> (8 * k))) * 16777619u;
+    h2 = mix32(h1 ^ LOCKSTEP_VERSION);
+    put32(out, h1); put32(out + 4, h2);
+}
+
+static int start(const char *server, const char *name, int creating, const char *room, int delay, int lobby)
+{
     int i;
     InitOnceExecuteOnce(&g_once, init_once, NULL, NULL);
     netplay_stop();
@@ -1723,15 +1767,7 @@ static int start(const char *server, const char *name, int creating, const char 
         if (i != 6) { InterlockedExchange(&N.state, NETPLAY_FAILED); set_status("A room code has 6 characters."); return -1; }
     }
     N.delay = delay >= 1 && delay <= 12 ? delay : 3;
-    /* The build's fingerprint: the version, the build number and the lockstep rules. Without the number
-     * (builds 21-25) every remaster build had the same one and old and new builds met in rooms. */
-    for (v = DEFJAM_VERSION; *v; v++) h1 = (h1 ^ (uint8_t)*v) * 16777619u;
-    {
-        int k, build = updater_local_build();
-        for (k = 0; k < 4; k++) h1 = (h1 ^ (uint8_t)(build >> (8 * k))) * 16777619u;
-    }
-    h2 = mix32(h1 ^ LOCKSTEP_VERSION);
-    put32(N.build, h1); put32(N.build + 4, h2);
+    netplay_build_fingerprint(N.build);
     N.have_token = 0;
     N.peer_name[0] = 0;
     N.rtt_ms = -1;
@@ -1739,7 +1775,8 @@ static int start(const char *server, const char *name, int creating, const char 
     N.local_seq = 0;
     N.players = N.fighters = 2;
     N.pos = 0;
-    for (i = 0; i < ROOMSLOTS; i++) N.pos_of_slot[i] = i < 2 ? i : -1;
+    for (i = 0; i < ROOMSLOTS; i++) { N.pos_of_slot[i] = i < 2 ? i : -1; N.slot_rtt[i] = -1; }
+    N.last_pinginfo = 0;
     N.relay_caps = -1;
     N.koth_match = 0;
     N.koth_winner = -1;
@@ -1843,6 +1880,23 @@ int netplay_debug_json(char *out, int size)
 /* ---- the hub, for the launcher and overlay ------------------------------------ */
 
 int netplay_in_lobby(void) { return N.lobby; }
+
+int netplay_lobby_address(char *out, int size)
+{
+    enum NetplayState st = (enum NetplayState)N.state;
+    if (!N.lobby || st == NETPLAY_OFF || st == NETPLAY_FAILED || size <= 0) return 0;
+    snprintf(out, (size_t)size, "%s", N.server_text);
+    return 1;
+}
+
+int netplay_rtt(void) { return N.state != NETPLAY_OFF && N.state != NETPLAY_FAILED ? N.rtt_ms : -1; }
+
+int netplay_room_ping(int slot)
+{
+    if (!N.lobby || !N.roomv.in_room || slot < 0 || slot >= ROOMSLOTS) return -1;
+    if (slot == N.roomv.you) return N.rtt_ms;
+    return N.slot_rtt[slot];
+}
 
 int netplay_lobby_caps(void) { return N.lobby ? N.relay_caps : 0; }
 
@@ -2248,8 +2302,15 @@ static DWORD WINAPI autostart_thread(LPVOID unused)
 {
     const char *mode = getenv("RECOMP_NETPLAY"), *server = getenv("RECOMP_NETPLAY_SERVER");
     const char *file = getenv("RECOMP_NETPLAY_CODE_FILE");
+    static char chosen[128];
     int i;
     (void)unused;
+    /* RECOMP_NETPLAY_SERVER=auto|eu|na: the server choice as a player makes it (build 30), with
+     * RECOMP_NETPLAY_SERVER_EU/_NA for the two relays' addresses; anything else is the address */
+    if (netservers_choice() != NETCHOICE_CUSTOM) {
+        server = netservers_address_wait(chosen, sizeof(chosen), 4000);
+        fprintf(stderr, "[NETPLAY] tests: server %s\n", server);
+    }
     if (!strcmp(mode, "lobby")) {
         netplay_lobby(server, "Test player");
         return 0;
@@ -2262,6 +2323,20 @@ static DWORD WINAPI autostart_thread(LPVOID unused)
         ULONGLONG called_at = 0;
         netplay_lobby(server, name && *name ? name : "Test player");
         for (i = 0; i < 600 && N.state == NETPLAY_CONNECTING; i++) Sleep(100);
+        {   /* RECOMP_TEST_SERVER_SWITCH="<ms>,<eu|na|auto>": after that long in the lobby, switch the
+             * server the way the hub's server picker does (netservers_reconnect), then quick-match there */
+            const char *sw = getenv("RECOMP_TEST_SERVER_SWITCH");
+            if (sw && *sw && strchr(sw, ',')) {
+                const char *to = strchr(sw, ',') + 1;
+                Sleep((DWORD)atoi(sw));
+                fprintf(stderr, "[NETPLAY] tests: switching the server to %s\n", to);
+                if (!_stricmp(to, "auto")) netservers_set_choice(NETCHOICE_AUTO);
+                else netservers_use(!_stricmp(to, "na") ? NETSERVER_NA : NETSERVER_EU);
+                netservers_reconnect(name && *name ? name : "Test player");
+                for (i = 0; i < 600 && N.state != NETPLAY_LOBBY && N.state != NETPLAY_FAILED; i++) Sleep(100);
+                fprintf(stderr, "[NETPLAY] tests: now on %s\n", N.server_text);
+            }
+        }
         {   /* RECOMP_NETPLAY_QUICK="mode,players", default "0,2" (One on One) */
             const char *q = getenv("RECOMP_NETPLAY_QUICK");
             int qmode = 0, qmax = 2;

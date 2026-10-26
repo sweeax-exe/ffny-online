@@ -150,6 +150,14 @@ void netplay_lobby_ranked(int fighter);
  * when not NULL. */
 int netplay_lobby_queue(int *waited, int *searching, char *text, int size);
 int netplay_in_lobby(void);     /* 1 while the session came from netplay_lobby */
+/* The relay address of the hub session ("host:port" as given to netplay_lobby); 0 when there is
+ * none (offline, or a failed connection). */
+int netplay_lobby_address(char *out, int size);
+int netplay_rtt(void);          /* this PC's last ping to its relay in ms, -1 unknown */
+void netplay_build_fingerprint(uint8_t out[8]);     /* HELLO's build field: rooms meet only the same one */
+/* A room member's ping to the relay in ms, as it reports it (relay slot), -1 not known; this PC's
+ * own slot gives netplay_rtt(). Players report it every two seconds in a room (builds from 30). */
+int netplay_room_ping(int slot);
 
 /* From automatch: the agreed match is about to be set up (every PC reaches this point at the
  * same place in the front end), and the front end is back in the menus (the main menu, or the

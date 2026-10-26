@@ -34,6 +34,7 @@
 #include "imgui.h"
 #include "online_screen.h"
 #include "netplay.h"
+#include "netplay_servers.h"
 #include "voice.h"
 #include "account.h"
 #include "online_data.h"
@@ -736,7 +737,7 @@ std::string upper(const char *s)
 
 // ---- the screens --------------------------------------------------------------------------------
 
-enum Page { HUB, ROOMS, SETTINGS, FIGHTERS, CODE, STATS, PLAYERS, RANKED, VOICE };
+enum Page { HUB, ROOMS, SETTINGS, FIGHTERS, CODE, STATS, PLAYERS, RANKED, VOICE, SERVERS };
 
 struct State {
     Page page = HUB;
@@ -754,6 +755,16 @@ struct State {
     char code[7] = "AAAAAA";
     int code_pos = 0;
     uint32_t watch_hidden = 0;      // King of the Hill: the fight whose watching screen B closed
+    // the server (netplay_servers.h)
+    int servers_sel = 0;            // SERVERS: 0 Automatic, 1 Europe, 2 North America
+    bool connect_pending = false;   // Automatic waits for the relays' first answers before connecting
+    bool fallback_tried = false;    // Automatic: the other relay was tried once after a failed connection
+    int pending_quick = -1;         // a quick match to start once the hub is on the other relay (mode), -1 none
+    int pending_quick_max = 2;
+    bool quick_wanted = false;      // QUICK MATCH pressed: the next room is a quick room
+    int last_quick = 0, last_quick_max = 2;     // that quick match's mode and players
+    char quick_room[7] = "";        // the quick room this PC waits in (for the other relay's hint)
+    unsigned long long alone_since = 0;
 } S;
 
 // ---- the test gallery ----------------------------------------------------------------------------
@@ -774,6 +785,12 @@ struct Gallery {
     enum AccountState account = ACCOUNT_IN;
     std::string stats;
     const char *page = nullptr;     // the page shown, for the captures' names
+    NetServerInfo servers[NETSERVER_COUNT] = {};
+    int server_cur = NETSERVER_EU;  // the relay the sample hub is on
+    enum NetServerChoice choice = NETCHOICE_AUTO;
+    bool ranked = false;            // RANKED MATCH shown in the sample hub
+    bool pending = false;           // the sample waits for the relays' first answers
+    int room_pings[NETPLAY_ROOM_SLOTS] = {};
 } G;
 
 bool gallery_on()
@@ -806,8 +823,8 @@ int lobby_players(NetPlayer *out, int max, int *online, int *rooms)
     if (!gallery_on()) return netplay_lobby_players(out, max, online, rooms);
     int n = std::min(max, (int)G.players.size());
     for (int i = 0; out && i < n; i++) out[i] = G.players[i];
-    if (online) *online = 142;
-    if (rooms) *rooms = 12;
+    if (online) *online = G.servers[G.server_cur].online;
+    if (rooms) *rooms = G.servers[G.server_cur].rooms;
     return n;
 }
 int lobby_queue(int *waited, int *searching, char *why, int size)
@@ -831,6 +848,49 @@ void status_text(char *out, int size)
 {
     if (gallery_on()) snprintf(out, (size_t)size, "Online as Ann. Ping 38 ms.");
     else netplay_status(out, size);
+}
+
+// The relays (Europe, North America): their state, the one the hub is on, the choice.
+int servers(NetServerInfo *out)
+{
+    if (gallery_on()) { for (int i = 0; i < NETSERVER_COUNT; i++) out[i] = G.servers[i]; return NETSERVER_COUNT; }
+    netservers_probe();     // a new round when the last is older than 10 s
+    return netservers_get(out, NETSERVER_COUNT);
+}
+// The relay the hub session is on, -1 none (offline), -2 a custom address.
+int connected_server()
+{
+    if (gallery_on()) return G.state == NETPLAY_LOBBY || G.state == NETPLAY_CONNECTED ? G.server_cur : -1;
+    char address[128];
+    if (!netplay_lobby_address(address, sizeof(address))) return -1;
+    int i = netservers_index_of(address);
+    return i >= 0 ? i : -2;
+}
+enum NetServerChoice server_choice() { return gallery_on() ? G.choice : netservers_choice(); }
+int room_ping(int slot)
+{
+    if (gallery_on()) return slot >= 0 && slot < NETPLAY_ROOM_SLOTS ? G.room_pings[slot] : -1;
+    return netplay_room_ping(slot);
+}
+
+// Ping colours: good, fair, high.
+ImU32 ping_colour(int ms) { return ms < 0 ? GREY : ms < 80 ? GREEN : ms < 150 ? ORANGE : IM_COL32(235, 70, 60, 255); }
+
+// The relay a player meets the most others on, besides `than` (for the quick-match hint), -1 none.
+int other_server(const NetServerInfo *s, int than)
+{
+    int o = than == NETSERVER_EU ? NETSERVER_NA : than == NETSERVER_NA ? NETSERVER_EU : -1;
+    return o >= 0 && s[o].state == NETSERVER_UP ? o : -1;
+}
+
+// Signal bars for a ping: four for a good one, one for a high one, none (grey) offline.
+void ping_bars(ImDrawList *dl, const Frame &f, float x, float y, float h, int ms)
+{
+    int lit = ms < 0 ? 0 : ms < 60 ? 4 : ms < 100 ? 3 : ms < 150 ? 2 : 1;
+    for (int i = 0; i < 4; i++) {
+        float bh = h * (i + 1) / 4.0f;
+        rect(dl, f, x + i * 5, y + h - bh, 3.5f, bh, i < lit ? ping_colour(ms) : IM_COL32(255, 255, 255, 40), 1);
+    }
 }
 
 // Room codes use these characters (no 0/O, 1/I), as the server makes them.
@@ -979,16 +1039,44 @@ void default_settings(NetRoomSettings &s)
     apply_preset(s, 0);
 }
 
+// The name the hub shows: the Discord name when signed in, else the setting.
+std::string hub_name()
+{
+    std::string name = setting_text("name", "Player");
+    char discord[32];
+    if (account_game_name(discord, sizeof(discord))) name = discord;
+    return name;
+}
+
+// Into the hub on the chosen relay (netplay_servers.h). Automatic waits for the relays' first
+// answers (about a second, at most 2.5 s): S.connect_pending, and the caller asks again.
 void connect_if_needed()
 {
     enum NetplayState st = netplay_state();
-    if (netplay_in_lobby() && st != NETPLAY_OFF && st != NETPLAY_FAILED) return;
-    std::string server = setting_text("server", "play.defjam.online"), name = setting_text("name", "Player");
-    char discord[32];
+    if (netplay_in_lobby() && st != NETPLAY_OFF && st != NETPLAY_FAILED) { S.connect_pending = false; return; }
     account_init();
     account_refresh();
-    if (account_game_name(discord, sizeof(discord))) name = discord;    // signed in: the Discord name
-    netplay_lobby(server.c_str(), name.c_str());
+    netservers_probe();
+    if (netservers_reconsider() == -1) { S.connect_pending = true; return; }
+    S.connect_pending = false;
+    netservers_reconnect(hub_name().c_str());
+}
+
+// Move the hub to the relay chosen now (the picker, the quick-match hint, ranked).
+void switch_server(const char *why)
+{
+    S.connect_pending = false;
+    S.fallback_tried = true;            // a choice the player made: no automatic second try
+    int r = netservers_reconnect(hub_name().c_str());
+    if (r < 0) S.connect_pending = true;
+    if (why && r != 0) say(why);
+}
+
+void open_servers()
+{
+    S.page = SERVERS;
+    enum NetServerChoice c = server_choice();
+    S.servers_sel = c == NETCHOICE_EU ? 1 : c == NETCHOICE_NA ? 2 : 0;
 }
 
 // ---- hub ----
@@ -1001,20 +1089,51 @@ bool ranked_shown()
 {
     static int on = -1;
     if (on < 0) on = getenv("RECOMP_RANKED") != nullptr;
-    return on != 0;
+    return on != 0 || (gallery_on() && G.ranked);
 }
 
-// "142 PLAYERS ONLINE - 12 ROOMS" at the bottom right, once the relay has answered a WHO.
-void online_count(ImDrawList *dl, const Frame &f)
+// The server chip at the bottom right, beside the status line: the relay the hub is on, its ping
+// and who is online ("NORTH AMERICA  42 MS  -  12 ONLINE"); with `button` the X glyph
+// in front says it opens the server picker (a click on it does too). Returns true when clicked.
+bool online_count(ImDrawList *dl, const Frame &f, bool button = false)
 {
     int online = -1, rooms = 0;
     lobby_players(nullptr, 0, &online, &rooms);
-    if (online < 0) return;
-    char line[64];
-    snprintf(line, sizeof(line), "%d PLAYER%s ONLINE  -  %d ROOM%s", online, online == 1 ? "" : "S", rooms,
-             rooms == 1 ? "" : "S");
-    // beside the status line, clear of the menu's hints (and of the door's panel)
-    text(dl, f, g_hand, 14, 606, g_game_door ? 430 : 450, ORANGE, line, RIGHT, 1.0f);
+    NetServerInfo s[NETSERVER_COUNT];
+    servers(s);
+    int cur = connected_server();
+    char line[128];
+    int ping = -1;
+    if (cur >= 0) {
+        ping = s[cur].state == NETSERVER_UP ? s[cur].ping_ms : -1;
+        if (online < 0 && s[cur].state == NETSERVER_UP) { online = s[cur].online; rooms = s[cur].rooms; }
+        if (online >= 0)
+            snprintf(line, sizeof(line), "%s  %s  %d ONLINE", upper(s[cur].name).c_str(),
+                     ping >= 0 ? (std::to_string(ping) + " MS  -").c_str() : "-", online);
+        else
+            snprintf(line, sizeof(line), "%s", upper(s[cur].name).c_str());
+    } else if (online >= 0) {
+        snprintf(line, sizeof(line), "%d PLAYER%s ONLINE  -  %d ROOM%s", online, online == 1 ? "" : "S", rooms,
+                 rooms == 1 ? "" : "S");
+    } else {
+        return false;
+    }
+    float size = 12, y = g_game_door ? 428 : 450, w = text_width(f, g_title, size, line);
+    float label = button ? text_width(f, g_title, 10, "SERVER") + 8 : 0;
+    float bars = cur >= 0 ? 24 : 0, glyph = button ? 22 : 0, x1 = 606, x0 = x1 - w - bars - glyph - label - 16;
+    glass(dl, f, x0, y - 3, x1 - x0, 21, 10, IM_COL32(10, 10, 13, 255), 0.62f);
+    bool hot = button && mouse_in(f, x0, y - 3, x1 - x0, 21);
+    if (hot) frame_rect(dl, f, x0, y - 3, x1 - x0, 21, with_alpha(ORANGE, 0.8f), 1.2f);
+    float x = x0 + 8;
+    if (button) {
+        hint(dl, f, x, y - 1, "x", "");
+        x += glyph;
+        text(dl, f, g_title, 10, x, y + 1, ORANGE, "SERVER", LEFT, 0.8f);
+        x += label;
+    }
+    if (cur >= 0) { ping_bars(dl, f, x, y + 1, 11, ping); x += bars; }
+    text(dl, f, g_title, size, x, y, cur >= 0 ? CREAM : ORANGE, line, LEFT, 1.0f);
+    return hot && ImGui::IsMouseClicked(0);
 }
 
 // ---- players online ----
@@ -1043,6 +1162,114 @@ void draw_players(ImDrawList *dl, const Frame &f, const Pad &pad)
     if (n == 0) text(dl, f, g_title, 14, 320, 200, GREY, "Nobody else with this version right now.", CENTER, 1.0f);
     if (online > n)
         text(dl, f, g_title, 10, 592, 394, GREY, "and others on other versions or not shown", RIGHT, 1.0f);
+}
+
+// ---- the server picker: Automatic, Europe, North America, each with its ping and players ----
+
+void draw_servers(ImDrawList *dl, const Frame &f, const Pad &pad)
+{
+    NetServerInfo s[NETSERVER_COUNT];
+    servers(s);
+    const int rows = 1 + NETSERVER_COUNT;
+    int cur = connected_server();
+    enum NetServerChoice choice = server_choice();
+    int chosen_row = choice == NETCHOICE_EU ? 1 : choice == NETCHOICE_NA ? 2 : choice == NETCHOICE_AUTO ? 0 : -1;
+    int nearest = -1;
+    for (int i = 0; i < NETSERVER_COUNT; i++)
+        if (s[i].state == NETSERVER_UP && (nearest < 0 || s[i].ping_ms < s[nearest].ping_ms)) nearest = i;
+    bool checking = !gallery_on() && netservers_probing();
+    if (pad.up) S.servers_sel = (S.servers_sel + rows - 1) % rows;
+    if (pad.down) S.servers_sel = (S.servers_sel + 1) % rows;
+
+    page_title(dl, f, "SERVER");
+    text(dl, f, g_hand, 15, 54, 58, ORANGE, "Where you play online. Pick the one with the lowest ping.", LEFT, 0.8f, 280);
+    glass(dl, f, 36, 82, 290, rows * 74 + 12);
+    for (int k = 0; k < rows; k++) {
+        float x = 50, y = 92 + k * 74, w = 262, h = 64;
+        if (mouse_in(f, x, y, w, h)) S.servers_sel = k;
+        bool sel = S.servers_sel == k;
+        if (sel) selector(dl, f, x, y, w, h);
+        const NetServerInfo *si = k ? &s[k - 1] : nullptr;
+        const char *title = k == 0 ? "AUTOMATIC" : si->name;
+        text(dl, f, g_title, 21, x + 14, y + 4, sel ? CREAM : with_alpha(GREY, 0.9f), upper(title).c_str(), LEFT, 1.5f);
+        // right: the ping, large, in its colour, with its bars (OFFLINE in red for a relay that did not answer)
+        char big[32] = "", sub[96] = "";
+        ImU32 tone = GREY;
+        int ms = -1;
+        const NetServerInfo *shown = k == 0 ? (nearest >= 0 ? &s[nearest] : nullptr) : si;
+        if (shown && shown->state == NETSERVER_UP) {
+            ms = shown->ping_ms;
+            snprintf(big, sizeof(big), "%d MS", ms);
+            tone = ping_colour(ms);
+        } else if (shown && shown->state == NETSERVER_OFFLINE) {
+            snprintf(big, sizeof(big), "OFFLINE");
+            tone = IM_COL32(235, 70, 60, 255);
+        } else {
+            snprintf(big, sizeof(big), "...");
+        }
+        if (k == 0 && nearest >= 0)
+            snprintf(sub, sizeof(sub), "THE LOWEST PING: %s", upper(s[nearest].name).c_str());
+        else if (k == 0)
+            snprintf(sub, sizeof(sub), "%s", checking ? "CHECKING THE SERVERS..." : "THE LOWEST PING");
+        else if (si->state == NETSERVER_UP && si->waiting > 0)
+            snprintf(sub, sizeof(sub), "%d ONLINE  -  %d WAITING FOR A MATCH", si->online, si->waiting);
+        else if (si->state == NETSERVER_UP)
+            snprintf(sub, sizeof(sub), "%d ONLINE  -  %d ROOM%s", si->online, si->rooms, si->rooms == 1 ? "" : "S");
+        else if (si->state == NETSERVER_OFFLINE)
+            snprintf(sub, sizeof(sub), "NO ANSWER RIGHT NOW");
+        else
+            snprintf(sub, sizeof(sub), "CHECKING...");
+        bool bars = !(shown && shown->state == NETSERVER_OFFLINE);
+        float bx = x + w - (bars ? 30 : 8);
+        if (bars) ping_bars(dl, f, bx + 6, y + 8, 14, ms);
+        text(dl, f, g_title, 17, bx - (bars ? 4 : 0), y + 5, sel ? tone : with_alpha(tone, 0.75f), big, RIGHT, 1.2f);
+        text(dl, f, g_hand, 13, x + 16, y + 29, sel ? ORANGE : with_alpha(ORANGE, 0.6f), sub, LEFT, 1.0f);
+        // the tags: the player's choice, and where the hub is now
+        float tx = x + 16;
+        if (k > 0 && cur == k - 1) {
+            const char *tag = "YOU ARE HERE";
+            float tw = text_width(f, g_title, 9, tag);
+            rect(dl, f, tx, y + 46, tw + 10, 13, IM_COL32(40, 120, 60, 230), 4);
+            text(dl, f, g_title, 9, tx + 5, y + 47, WHITE, tag, LEFT, 0.6f);
+            tx += tw + 16;
+        }
+        if (k == chosen_row) {
+            const char *tag = "YOUR CHOICE";
+            float tw = text_width(f, g_title, 9, tag);
+            rect(dl, f, tx, y + 46, tw + 10, 13, with_alpha(RED, 0.9f), 4);
+            text(dl, f, g_title, 9, tx + 5, y + 47, WHITE, tag, LEFT, 0.6f);
+            tx += tw + 16;
+        }
+        if (mouse_click(f, x, y, w, h)) const_cast<Pad &>(pad).a = true;
+    }
+    door_panel(dl, f);
+    door_text(dl, f, &tex("ui/online_icon.png"), "SERVER", "EUROPE OR NORTH AMERICA",
+              "You meet the players on the same server. The nearest one gives the lowest ping. Your account, stats and "
+              "the leaderboard are the same on both.");
+    if (checking) {
+        float t = (float)(GetTickCount64() % 1200) / 1200.0f;
+        rect(dl, f, 50, 92 + rows * 74 - 6, 262, 2, IM_COL32(255, 255, 255, 25), 1);
+        rect(dl, f, 50 + 222 * (t < 0.5f ? t * 2 : 2 - t * 2), 92 + rows * 74 - 6, 40, 2, ORANGE, 1);
+    }
+    if (pad.x && !gallery_on()) { netservers_probe(); say("Checking the servers..."); }
+    if (pad.a && !gallery_on()) {
+        int k = S.servers_sel;
+        if (k == 0) netservers_set_choice(NETCHOICE_AUTO);
+        else netservers_set_choice(k == 1 ? NETCHOICE_EU : NETCHOICE_NA);
+        int to = netservers_current();
+        S.page = HUB;
+        if (to < 0) {
+            S.connect_pending = true;
+            say("Automatic: checking the servers...");
+        } else if (to == cur && netplay_state() != NETPLAY_FAILED) {
+            say(std::string("You stay on ") + s[to].name + ".");
+        } else {
+            std::string why = std::string("Connecting to ") + s[to].name +
+                              (s[to].state == NETSERVER_OFFLINE ? " (it did not answer the last check)..." : "...");
+            switch_server(why.c_str());
+        }
+    }
+    if (pad.b) S.page = HUB;
 }
 
 void draw_hub(ImDrawList *dl, const Frame &f, const Pad &pad)
@@ -1078,7 +1305,16 @@ void draw_hub(ImDrawList *dl, const Frame &f, const Pad &pad)
         S.quick_mode = (S.quick_mode + (pad.right ? 1 : mode_count - 1)) % mode_count;
 
     page_title(dl, f, "ONLINE");
-    online_count(dl, f);
+    if (online_count(dl, f, true) || pad.x) open_servers();
+    // Ranked needs the account service's internal listener, which only the Europe relay has: on
+    // North America the entry says so and switches over.
+    bool ranked_elsewhere = false;
+    {
+        NetServerInfo s[NETSERVER_COUNT];
+        servers(s);
+        int cur = connected_server();
+        ranked_elsewhere = cur == NETSERVER_NA && !(s[cur].state == NETSERVER_UP && s[cur].version && (s[cur].flags & NETSERVER_RANKED));
+    }
     // Online fights need a Discord sign-in: matches against signed-out players did not count, about
     // half of them after the build-23 rules (2026-10-24). Y signs in from here (the browser opens).
     enum AccountState acc = acc_state();
@@ -1123,7 +1359,12 @@ void draw_hub(ImDrawList *dl, const Frame &f, const Pad &pad)
     }
     // the door: what the chosen item does
     door_panel(dl, f);
-    door_text(dl, f, &tex("ui/online_icon.png"), items[S.hub_sel], subs[S.hub_sel], descs[S.hub_sel]);
+    if (S.hub_sel == HUB_RANKED && ranked_elsewhere)
+        door_text(dl, f, &tex("ui/online_icon.png"), items[S.hub_sel], "ON THE EUROPE SERVER",
+                  "Ranked runs on the Europe server: your rating and the leaderboard live there. Press A to switch to "
+                  "Europe, then choose Ranked Match again.");
+    else
+        door_text(dl, f, &tex("ui/online_icon.png"), items[S.hub_sel], subs[S.hub_sel], descs[S.hub_sel]);
     if (S.hub_sel == 0 && mode_count) {
         int type = quick_modes[S.quick_mode];
         const Tex &logo = tex(mode_logo(type));
@@ -1149,10 +1390,18 @@ void draw_hub(ImDrawList *dl, const Frame &f, const Pad &pad)
                 const OnlineMode *qm = online_mode(type);
                 // King of the Hill: the fullest open hill, or a new one with room for eight
                 netplay_lobby_quick(type, NETPLAY_IS_KOTH(type) ? 8 : qm ? std::min(4, qm->fighters) : 2);
+                S.quick_wanted = !NETPLAY_IS_KOTH(type);
+                S.last_quick = type;
+                S.last_quick_max = NETPLAY_IS_KOTH(type) ? 8 : qm ? std::min(4, qm->fighters) : 2;
                 say("Looking for a room...");
             }
             break;
         case 1:
+            if (ranked_elsewhere) {
+                netservers_use(NETSERVER_EU);
+                switch_server("Switching to the Europe server for ranked...");
+                break;
+            }
             if (acc_state() != ACCOUNT_IN) { say("Sign in with Discord in the launcher to play ranked."); break; }
             S.ranked_pick = true;
             S.page = FIGHTERS;
@@ -1355,6 +1604,7 @@ void draw_rooms(ImDrawList *dl, const Frame &f, const Pad &pad)
     if (pad.y) { S.page = CODE; S.code_pos = 0; return; }
 
     page_title(dl, f, "FIND A ROOM");
+    online_count(dl, f);
     if (n) glass(dl, f, 36, 76, 290, (std::min(n, 6) - 1) * 52 + 44 + 20);
     else glass(dl, f, 36, 112, 290, 76);
     if (!n) {
@@ -1383,6 +1633,10 @@ void draw_rooms(ImDrawList *dl, const Frame &f, const Pad &pad)
                  NETPLAY_IS_KOTH(r.mode) ? (open ? "Winner stays on. Press A to join the line." : "Full.") :
                  r.phase == 1 ? "Voting on the venue right now." : r.phase == 2 ? "A match is on." :
                  open ? "Open: press A to join." : "Full.");
+        {   // this PC's ping to the server the rooms are on
+            int ms = gallery_on() ? 38 : netplay_rtt();
+            if (ms >= 0) snprintf(players + strlen(players), sizeof(players) - strlen(players), " Your ping: %d ms.", ms);
+        }
         door_panel(dl, f);
         image_fit(dl, f, tex(mode_logo(r.mode)), 383, 150, 160, 34);
         door_text(dl, f, nullptr, r.name, mode_name(r.mode), players);
@@ -2104,6 +2358,30 @@ void draw_room(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
     snprintf(code, sizeof(code), "CODE  %s", r.code);
     text(dl, f, g_title, 14, 590, 58, ORANGE, code, RIGHT);
 
+    // The server, and a warning when a match here would have a high ping: the path between two
+    // players goes through the relay, about half of each one's round trip.
+    NetServerInfo sv[NETSERVER_COUNT];
+    servers(sv);
+    int cur = connected_server();
+    int worst = -1;
+    {
+        int a = -1, b = -1;     // the two highest known pings
+        for (int i = 0; i < r.player_count; i++) {
+            int p = room_ping(r.players[i].slot);
+            if (p < 0) continue;
+            if (p > a) { b = a; a = p; } else if (p > b) b = p;
+        }
+        if (a >= 0 && b >= 0) worst = (a + b) / 2;
+    }
+    if (cur >= 0) text(dl, f, g_title, 10, 590, 73, GREY, (upper(sv[cur].name) + " SERVER").c_str(), RIGHT, 0.6f);
+    if (worst > 150) {
+        char warn[96];
+        snprintf(warn, sizeof(warn), "HIGH PING (ABOUT %d MS): INPUTS WILL FEEL DELAYED", worst);
+        float ww = text_width(f, g_title, 11, warn);
+        rect(dl, f, 48, 61, ww + 14, 18, IM_COL32(150, 14, 30, 220), 5);
+        text(dl, f, g_title, 11, 55, 63, WHITE, warn, LEFT, 0.8f);
+    }
+
     // the players' cards
     int places = std::max(r.settings.max, r.player_count);
     float w = 128, gap = 10, x0 = 320 - (places * w + (places - 1) * gap) / 2;
@@ -2124,6 +2402,17 @@ void draw_room(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
         text(dl, f, g_hand, 15, x + w / 2, y + 200, p.slot == r.you ? ORANGE : CREAM, p.name, CENTER, 1.0f);
         text(dl, f, g_title, 11, x + w / 2, y + 222, GREY, known ? online_fighter_name(shown) : "choosing", CENTER, 0.6f);
         if (p.slot == r.host) text(dl, f, g_title, 10, x + 6, y + 6, ORANGE, "HOST", LEFT, 1.0f);
+        {   // the player's ping to the server, when it is known (builds from 30 report it)
+            int ms = room_ping(p.slot);
+            if (ms >= 0) {
+                char line[16];
+                snprintf(line, sizeof(line), "%d MS", ms);
+                float lw = text_width(f, g_title, 10, line);
+                rect(dl, f, x + w - lw - 31, y + 4, lw + 27, 15, IM_COL32(0, 0, 0, 160), 4);
+                ping_bars(dl, f, x + w - lw - 28, y + 6, 10, ms);
+                text(dl, f, g_title, 10, x + w - 5, y + 6, ping_colour(ms), line, RIGHT, 1.0f);
+            }
+        }
         if (p.ready) {
             rect(dl, f, x + 14, y + 240, w - 28, 22, with_alpha(RED, 0.9f), 5);
             text(dl, f, g_title, 15, x + w / 2, y + 242, WHITE, "READY", CENTER, 0.8f);
@@ -2132,7 +2421,38 @@ void draw_room(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
     // hints
     bool ready = me && me->ready;
     float hx = 54, hy = 392;
-    if (r.player_count < 2) text(dl, f, g_hand, 15, 320, 366, ORANGE, "Waiting for another player...", CENTER, 0.8f);
+    // Alone in a quick room for 30 s while the other server has players: offer to search there (one
+    // press; never by itself). A room this PC opened or joined by its code is not a quick room.
+    if (S.quick_wanted && r.phase == 0) { snprintf(S.quick_room, sizeof(S.quick_room), "%s", r.code); S.quick_wanted = false; }
+    bool alone = r.player_count < 2 && r.phase == 0 && !strcmp(S.quick_room, r.code);
+    if (!alone) S.alone_since = 0;
+    else if (!S.alone_since) S.alone_since = GetTickCount64();
+    int there = alone && GetTickCount64() - S.alone_since >= 30000 ? other_server(sv, cur) : -1;
+    int others = there >= 0 ? sv[there].waiting + sv[there].idle : 0;
+    if (there >= 0 && others > 0) {
+        char line[128];
+        if (sv[there].waiting > 0)
+            snprintf(line, sizeof(line), "%d player%s waiting for a match on %s (%d ms).", sv[there].waiting,
+                     sv[there].waiting == 1 ? " is" : "s are", sv[there].name, sv[there].ping_ms);
+        else
+            snprintf(line, sizeof(line), "%d player%s online on %s (%d ms).", sv[there].idle,
+                     sv[there].idle == 1 ? " is" : "s are", sv[there].name, sv[there].ping_ms);
+        float lw = text_width(f, g_hand, 14, line), bw = lw + 150, bx = 320 - bw / 2;
+        glass(dl, f, bx, 359, bw, 27, 8, IM_COL32(44, 30, 20, 255), 0.8f);
+        bool hot = mouse_in(f, bx, 359, bw, 27);
+        if (hot) frame_rect(dl, f, bx, 359, bw, 27, with_alpha(ORANGE, 0.8f), 1.2f);
+        text(dl, f, g_hand, 14, bx + 10, 364, CREAM, line, LEFT, 0.8f);
+        hint(dl, f, bx + lw + 18, 364, "lb", "SEARCH THERE");
+        if (pad.lb || (hot && ImGui::IsMouseClicked(0))) {
+            S.pending_quick = S.last_quick;
+            S.pending_quick_max = S.last_quick_max;
+            S.quick_room[0] = 0;
+            netservers_use(there);
+            switch_server((std::string("Searching on ") + sv[there].name + "...").c_str());
+            S.page = HUB;
+            return;
+        }
+    } else if (r.player_count < 2) text(dl, f, g_hand, 15, 320, 366, ORANGE, "Waiting for another player...", CENTER, 0.8f);
     else if (!ready) text(dl, f, g_hand, 15, 320, 366, ORANGE, "Ready up: when everyone is, the venue vote starts.", CENTER, 0.8f);
     hx += hint(dl, f, hx, hy, "a", ready ? "NOT READY" : "READY");
     if (!ready) hx += hint(dl, f, hx, hy, "x", "CHOOSE FIGHTER");
@@ -2309,7 +2629,10 @@ void gallery_step()
                                          "create", "create-3", "create-6", "create-1", "create-koth",
                                          "create-koth-3", "create-koth-6", "create-koth-1",
                                          "ranked", "voice", "stats", "players", "fighters", "room", "vote", "hill",
-                                         "up", "watch", "room-voice", "match" };
+                                         "up", "watch", "room-voice", "match",
+                                         // build 30: the server choice
+                                         "connecting-auto", "hub-server", "servers", "servers-offline", "hub-ranked-na",
+                                         "room-ping", "room-quick-hint", "offline-server" };
     const int count = (int)(sizeof(pages) / sizeof(pages[0]));
     static unsigned long long start;
     static int ms;
@@ -2362,6 +2685,22 @@ void gallery_step()
     S.watch_hidden = 0;
     S.note_until = 0;
     S.settings_edit = false;
+    {   // the relays as a player in North America sees them, the hub on Europe
+        NetServerInfo eu = {}, na = {};
+        eu.id = "eu"; eu.name = "Europe"; eu.short_name = "EU"; eu.state = NETSERVER_UP; eu.ping_ms = 38;
+        eu.online = 142; eu.rooms = 12; eu.waiting = 2; eu.idle = 5; eu.flags = NETSERVER_RANKED | NETSERVER_KOTH; eu.version = 1;
+        na.id = "na"; na.name = "North America"; na.short_name = "NA"; na.state = NETSERVER_UP; na.ping_ms = 112;
+        na.online = 12; na.rooms = 3; na.waiting = 3; na.idle = 1; na.flags = NETSERVER_KOTH; na.version = 1;
+        G.servers[NETSERVER_EU] = eu;
+        G.servers[NETSERVER_NA] = na;
+        G.server_cur = NETSERVER_EU;
+        G.choice = NETCHOICE_AUTO;
+        G.ranked = false;
+        G.pending = false;
+        for (int i = 0; i < NETPLAY_ROOM_SLOTS; i++) G.room_pings[i] = -1;
+        S.quick_room[0] = 0;
+        S.alone_since = 0;
+    }
     std::string p = page;
     if (p == "connecting") { G.state = NETPLAY_CONNECTING; G.in_lobby = false; }
     else if (p == "offline") { G.state = NETPLAY_FAILED; G.in_lobby = false; }
@@ -2427,6 +2766,30 @@ void gallery_step()
         }
     } else if (p == "room-voice") { S.page = VOICE; S.voice_sel = 5; G.room = sample_room(0, 4, 4); }
     else if (p == "match") { G.state = NETPLAY_CONNECTED; G.room = sample_room(0, 2, 2); G.room.phase = 2; }
+    else if (p == "connecting-auto") {
+        S.page = HUB; G.state = NETPLAY_OFF; G.in_lobby = false; G.pending = true;
+        G.servers[NETSERVER_NA].state = NETSERVER_UNKNOWN; G.servers[NETSERVER_NA].ping_ms = -1;
+    } else if (p == "hub-server") {     // a player in North America, on North America
+        S.page = HUB; S.hub_sel = 0; S.quick_mode = 0;
+        G.servers[NETSERVER_EU].ping_ms = 104; G.servers[NETSERVER_NA].ping_ms = 31;
+        G.server_cur = NETSERVER_NA;
+    } else if (p == "servers") {
+        S.page = SERVERS; S.servers_sel = 2; G.server_cur = NETSERVER_EU; G.choice = NETCHOICE_AUTO;
+    } else if (p == "servers-offline") {
+        S.page = SERVERS; S.servers_sel = 1; G.server_cur = NETSERVER_EU; G.choice = NETCHOICE_EU;
+        G.servers[NETSERVER_NA].state = NETSERVER_OFFLINE; G.servers[NETSERVER_NA].ping_ms = -1;
+    } else if (p == "hub-ranked-na") {
+        S.page = HUB; S.hub_sel = HUB_RANKED; G.ranked = true; G.server_cur = NETSERVER_NA;
+    } else if (p == "room-ping") {      // one player far away: the high-ping warning
+        S.page = HUB; G.room = sample_room(2, 4, 3);
+        G.room_pings[0] = 38; G.room_pings[1] = 96; G.room_pings[2] = 263;
+    } else if (p == "room-quick-hint") {    // alone in a quick room for 30 s; North America has players
+        S.page = HUB; G.room = sample_room(0, 2, 1);
+        G.room.players[0].ready = 1;
+        G.room_pings[0] = 38;
+        snprintf(S.quick_room, sizeof(S.quick_room), "%s", G.room.code);
+        S.alone_since = now - 31000;
+    } else if (p == "offline-server") { S.page = HUB; G.state = NETPLAY_FAILED; G.in_lobby = false; }
 }
 
 // The look of the page draw() shows (the same choices, in the same order).
@@ -2437,6 +2800,7 @@ LookId page_look(const NetRoom &room, enum NetplayState st)
     switch (S.page) {
     case FIGHTERS: return LOOK_FIGHTERS;
     case SETTINGS: case CODE: return LOOK_LIST;
+    case SERVERS: if (!room.in_room) return LOOK_LIST; break;
     case PLAYERS: if (!room.in_room) return LOOK_PLAYERS; break;
     case STATS: if (!room.in_room) return LOOK_STATS; break;
     case RANKED: if (!room.in_room) return LOOK_SEARCH; break;
@@ -2551,16 +2915,81 @@ bool draw(ImVec2 display)
     S.start_seen = 0;
     g_closed_for_match = false;
 
-    if (st == NETPLAY_CONNECTING || (!net_in_lobby() && st != NETPLAY_FAILED)) {
+    // the server: Automatic connects once the relays have answered; a quick match chosen on the
+    // other server starts once the hub is there
+    if (!gallery_on()) {
+        if (S.connect_pending) connect_if_needed();
+        if (S.pending_quick >= 0 && st == NETPLAY_LOBBY && netplay_in_lobby() && !room.in_room &&
+            (!NETPLAY_IS_KOTH(S.pending_quick) || lobby_caps() >= 0)) {
+            netplay_lobby_quick(S.pending_quick, S.pending_quick_max);
+            S.quick_wanted = !NETPLAY_IS_KOTH(S.pending_quick);
+            S.pending_quick = -1;
+            say("Looking for a room...");
+        }
+        if (st == NETPLAY_LOBBY) S.fallback_tried = false;
+    }
+    // The picker works without a connection: a server that does not answer is left from here.
+    if (S.page == SERVERS && !room.in_room && st != NETPLAY_CONNECTED) {
+        draw_servers(dl, f, pad);
+        float hx = 54;
+        hx += hint(dl, f, hx, 392, "a", "CHOOSE");
+        hx += hint(dl, f, hx, 392, "x", "CHECK AGAIN");
+        hint(dl, f, hx, 392, "b", "BACK");
+        draw_status(dl, f);
+        return true;
+    }
+
+    bool pending = gallery_on() ? G.pending : S.connect_pending;
+    if (pending || st == NETPLAY_CONNECTING || (!net_in_lobby() && st != NETPLAY_FAILED)) {
+        NetServerInfo sv[NETSERVER_COUNT];
+        servers(sv);
+        int to = gallery_on() ? G.server_cur : -1;
+        if (!gallery_on() && !pending) {
+            char address[128];
+            to = netplay_lobby_address(address, sizeof(address)) ? netservers_index_of(address) : -1;
+        }
         page_title(dl, f, "ONLINE");
-        glass(dl, f, 36, 104, 290, 52);
-        text(dl, f, g_hand, 20, 54, 120, ORANGE, "Connecting...", LEFT, 1.0f);
+        glass(dl, f, 36, 104, 290, 76);
+        std::string head = pending ? "Finding the nearest server..." :
+                           to >= 0 ? std::string("Connecting to ") + sv[to].name + "..." : "Connecting...";
+        text(dl, f, g_hand, 20, 54, 116, ORANGE, head.c_str(), LEFT, 1.0f, 265);
+        if (pending) {      // the answers so far
+            float y = 146;
+            for (int i = 0; i < NETSERVER_COUNT; i++) {
+                char line[64];
+                snprintf(line, sizeof(line), sv[i].state == NETSERVER_UP ? "%s %d MS" : sv[i].state == NETSERVER_OFFLINE ?
+                         "%s OFFLINE" : "%s ...", upper(sv[i].short_name).c_str(), sv[i].ping_ms);
+                float x = 56 + i * 130;
+                ping_bars(dl, f, x, y + 1, 11, sv[i].state == NETSERVER_UP ? sv[i].ping_ms : -1);
+                text(dl, f, g_title, 12, x + 24, y, sv[i].state == NETSERVER_UP ? ping_colour(sv[i].ping_ms) : GREY, line, LEFT, 1.0f);
+            }
+        }
         door_panel(dl, f);
-        door_text(dl, f, &tex("ui/online_icon.png"), "ONLINE", "CONNECTING", "To the FFNY Online server.");
-        hint(dl, f, 54, 392, "b", "BACK");
+        door_text(dl, f, &tex("ui/online_icon.png"), "ONLINE", pending ? "CHOOSING A SERVER" : "CONNECTING",
+                  pending ? "Europe or North America: the one with the lowest ping. Change it any time with X in the online menu."
+                          : "To the FFNY Online server.");
+        float hx = 54;
+        hx += hint(dl, f, hx, 392, "x", "SERVER");
+        hint(dl, f, hx, 392, "b", "BACK");
+        if (pad.x) open_servers();
         return !pad.b;
     }
     if (st == NETPLAY_FAILED || st == NETPLAY_OFF) {
+        // Automatic: one more try on the other server when it answers its status (a relay that is
+        // down, or blocked on this network), before the player sees "no connection"
+        if (!gallery_on() && st == NETPLAY_FAILED && !S.fallback_tried && server_choice() == NETCHOICE_AUTO) {
+            NetServerInfo sv[NETSERVER_COUNT];
+            servers(sv);
+            int failed = netservers_current(), other = failed >= 0 ? other_server(sv, failed) : -1;
+            S.fallback_tried = true;
+            if (other >= 0) {
+                netservers_use(other);
+                fprintf(stderr, "[ONLINE] %s did not connect; trying %s\n", sv[failed].name, sv[other].name);
+                say(std::string(sv[failed].name) + " did not answer: trying " + sv[other].name + "...");
+                netservers_reconnect(hub_name().c_str());
+                return true;
+            }
+        }
         char status[256];
         status_text(status, sizeof(status));
         page_title(dl, f, "ONLINE");
@@ -2569,11 +2998,13 @@ bool draw(ImVec2 display)
         text(dl, f, g_title, 14, 54, 145, WHITE, status, LEFT, 0.8f, 265);
         door_panel(dl, f);
         door_text(dl, f, &tex("ui/online_icon.png"), "OFFLINE", "NO CONNECTION",
-                  "Check the internet connection, then press A to try again.");
+                  "Check the internet connection, then press A to try again, or X to pick another server.");
         float hx = 54;
         hx += hint(dl, f, hx, 392, "a", "TRY AGAIN");
+        hx += hint(dl, f, hx, 392, "x", "SERVER");
         hint(dl, f, hx, 392, "b", "BACK");
-        if (pad.a) connect_if_needed();
+        if (pad.a) { S.fallback_tried = true; connect_if_needed(); }
+        if (pad.x) open_servers();
         return !pad.b;
     }
 

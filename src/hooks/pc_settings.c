@@ -50,7 +50,8 @@ static RecompSetting g_display_settings[] = {
     { "textures", "dump_limit", RECOMP_SETTING_INT, 2000, 0, 65536, NULL, "RECOMP_TEXTURE_DUMP_LIMIT", RECOMP_SETTING_RESTART,
       "Maximum new source images captured in one run." },
     { "online", "server", RECOMP_SETTING_STRING, 0, 0, 0, NULL, "RECOMP_NETPLAY_SERVER", 0,
-      "The relay server for online play, as host or host:port (port 27777 if left out).", "play.defjam.online" },
+      "The server for online play: auto (the one with the lowest ping, Europe or North America), eu, na, or a "
+      "relay's own address as host or host:port (port 27777 if left out). Accounts and stats stay on Europe.", "auto" },
     { "online", "name", RECOMP_SETTING_STRING, 0, 0, 0, NULL, NULL, 0,
       "Your name, shown to the other player.", "Player" },
     { "online", "fighter", RECOMP_SETTING_INT, 55, 0, 255, NULL, NULL, 0,
@@ -681,7 +682,11 @@ int pc_settings_init(void)
     {   /* The first server was known by its address; installs that saved it move to the name. */
         char server[128];
         recomp_settings_get_text("online", "server", server, sizeof(server), "");
-        if (!strcmp(server, "142.132.178.17") && recomp_settings_reset_to_default("online", "server") > 0 && g_path[0])
+        /* Build 30: the old default, the Europe relay's name, becomes "auto" (the nearest of Europe and
+         * North America); a player who wants Europe only picks it again in the hub or the launcher. */
+        if ((!strcmp(server, "142.132.178.17") || !_stricmp(server, "play.defjam.online") ||
+             !_stricmp(server, "play.defjam.online:27777")) && !getenv("RECOMP_NETPLAY_SERVER") &&
+            recomp_settings_reset_to_default("online", "server") > 0 && g_path[0])
             recomp_settings_save(g_path);
     }
     /* "Skip the launcher at start" left the players' menus (2026-10-22): players who had ticked it
