@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-PINNED_HELPER_SHA256 = '3ca69720f1337ae9bdcfd458a3003bcff19108a356212ca781de42164cf56c95'
+PINNED_HELPER_SHA256 = '34c3c0529e5fb63fd5417c84ccb4c6850ce40d50c535f7c95b7d7b8c40d53505'
 
 
 class MSVCFixtures:

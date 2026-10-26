@@ -32,6 +32,10 @@ published on `vyanhursky/xboxrecomp`, branch `defjam/ui-preview-eyes-meters`.
   afterwards. The CFG regression covers two different setters meeting at a
   join, a later destination overwrite, and both JE and JNE consumers.
 - Full lifter suite: 679 passed, 20 skipped, 133 subtests passed with MSVC.
+- The exact CI MSVC runner (lifter plus disassembler) passes 832 tests,
+  with 20 skipped and 133 subtests. Its helper fingerprint is updated only
+  after reviewing the compiler selector, unchanged builder and new join cases;
+  the fail-closed fingerprint check remains enabled.
 - Native game unit suite with MSVC: 639 passed, 27 skipped, one slow test
   deselected (`logs/v0121-ui/unit-meters-msvc.txt`).
 - Analysis, regeneration of 18,446 functions, and Windows Release build pass.
