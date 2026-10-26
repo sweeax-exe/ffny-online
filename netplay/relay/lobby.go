@@ -678,6 +678,11 @@ func (r *Relay) vote(now time.Time, c *client, choice uint8, reqLen int) []Packe
 // drawCandidates picks up to MaxCandidates different venues from pool at
 // random (a partial Fisher-Yates shuffle of its distinct values).
 func (r *Relay) drawCandidates(pool []uint8) []uint8 {
+	if n := len(r.cfg.TestVenues); n > 0 {
+		v := r.cfg.TestVenues[r.testVenue%n]
+		r.testVenue++
+		return []uint8{v}
+	}
 	var seen [256]bool
 	var distinct []uint8
 	safe := false

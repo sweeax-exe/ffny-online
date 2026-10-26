@@ -248,7 +248,12 @@ SECOND_MATCH_FFA = raw_stages([
 # (automatch reports its calls to the anchors), the scripted fighter fights it, the summary
 # goes back to the match-type screen, the room readies again and a second match follows.
 # Player 2 faces the other way, so its approach is "left".
-ONLINE_TAIL = ",".join([FIGHT_TAIL, raw_stages(["game.getmatchsummary(=a@4+3x12"]),
+# HARNESS_SUMMARY_WAIT=<s> (default 4): when the summary's first A comes. The summary takes the
+# winner's pad, which on the loser's copy is the remote one: a winner's copy that left before the
+# loser's showed it left that copy on its summary for good (hub tests, 2026-10-25); a longer wait
+# keeps the winner there until both show it.
+SUMMARY_WAIT = os.environ.get("HARNESS_SUMMARY_WAIT", "4")
+ONLINE_TAIL = ",".join([FIGHT_TAIL, raw_stages([f"game.getmatchsummary(=a@{SUMMARY_WAIT}+3x12"]),
                         FIGHT_TAIL.replace("@game.startgame(", "@game.startgame(#2")])
 
 
@@ -257,7 +262,7 @@ def online_tail(matches):
     parts = [FIGHT_TAIL]
     for k in range(2, matches + 1):
         nth = f"#{2 * k - 3}" if k > 2 else ""
-        parts.append(raw_stages([f"game.getmatchsummary({nth}=a@4+3x12"]))
+        parts.append(raw_stages([f"game.getmatchsummary({nth}=a@{SUMMARY_WAIT}+3x12"]))
         parts.append(FIGHT_TAIL.replace("@game.startgame(", f"@game.startgame(#{k}"))
     return ",".join(parts)
 
@@ -288,6 +293,20 @@ ROUTES = {
         "stages": ["getscreeninfo(intmain/mainmenu=lt@0.5"],
         "tail": online_tail(5).replace("right:", "left:"),
         "until": "game.getmatchsummary(#9", "after": 6, "secs": 3600,
+        "shots": "",
+    },
+    "online8-p1": {
+        "help": "online hub, player 1: eight room matches in a row",
+        "stages": ["getscreeninfo(intmain/mainmenu=lt@0.5"],
+        "tail": online_tail(8),
+        "until": "game.getmatchsummary(#15", "after": 6, "secs": 5400,
+        "shots": "",
+    },
+    "online8-p2": {
+        "help": "online hub, player 2: eight room matches in a row",
+        "stages": ["getscreeninfo(intmain/mainmenu=lt@0.5"],
+        "tail": online_tail(8).replace("right:", "left:"),
+        "until": "game.getmatchsummary(#15", "after": 6, "secs": 5400,
         "shots": "",
     },
     "online-rematch-p1": {

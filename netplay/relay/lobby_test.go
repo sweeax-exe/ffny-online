@@ -7,6 +7,20 @@ import (
 	"time"
 )
 
+// TestVenues (tests): each vote offers the next listed venue alone, in turn.
+func TestDrawCandidatesTestVenues(t *testing.T) {
+	r, err := NewRelay(Config{TestVenues: []uint8{1, 6, 19}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, w := range []uint8{1, 6, 19, 1} {
+		got := r.drawCandidates(QuickVenues)
+		if len(got) != 1 || got[0] != w {
+			t.Fatalf("vote %d: candidates %v, want [%d]", i+1, got, w)
+		}
+	}
+}
+
 // lobbyHarness adds lobby clients (by address) to the harness.
 type lobbyHarness struct {
 	*harness

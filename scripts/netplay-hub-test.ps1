@@ -11,7 +11,7 @@
 .PARAMETER Players  2..4 (3 and 4 play Free for All).
 .PARAMETER Secs     Upper bound per copy.
 .PARAMETER ExtraEnv Extra NAME=VALUE pairs for every copy.
-.PARAMETER Route    harness route family: online (two matches) or online5 (five in a row).
+.PARAMETER Route    harness route family: online (two matches), online5 or online8 (five or eight in a row).
 .PARAMETER Fighters fighter.xml IDs, one per copy.
 .PARAMETER Stage    extra harness stages for every copy (e.g. a START press during the fight).
 .PARAMETER FastKo   tests: the game knocks the loser out at this fight step of every match
@@ -23,14 +23,17 @@
 .PARAMETER RelayPort  the local relay's port (default 27777); another port lets a worktree's test run
                     beside the main checkout's.
 .PARAMETER BaseCore first copy's guest CPU; copy i gets BaseCore + 2i (default 2).
+.PARAMETER Venues   tests: comma-separated venue feIDs the relay's votes offer in turn (relay -test-venues),
+                    e.g. 1,6,19,6 for The Foundation, The Terror Dome, The Pit, The Terror Dome.
+.PARAMETER SummaryWait  seconds before the first A on each summary (HARNESS_SUMMARY_WAIT, default 4).
 .PARAMETER DataPrefix  every copy's data root is <DataPrefix><i> (made like the -hub roots: the dump as a
                     junction, a copy of the saves); default: the data root itself and <data>-hub<i>.
 #>
 param([ValidateRange(2, 4)][int]$Players = 2, [int]$Secs = 1200, [string[]]$ExtraEnv = @(),
-      [ValidateSet('online', 'online5', 'online-rematch')][string]$Route = 'online', [int[]]$Fighters = @(55, 22, 9, 31),
+      [ValidateSet('online', 'online5', 'online8', 'online-rematch')][string]$Route = 'online', [int[]]$Fighters = @(55, 22, 9, 31),
       [string[]]$Stage = @(), [int]$FastKo = 0, [string]$FastKoWinner = 'alt', [switch]$Bot,
       [ValidateRange(0, 100)][int]$BotAggression = 60, [int]$RelayPort = 27777, [int]$BaseCore = 2,
-      [string]$DataPrefix = '')
+      [string]$DataPrefix = '', [string]$Venues = '', [int]$SummaryWait = 4)
 $ErrorActionPreference = 'Stop'
 $repo = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 Set-Location $repo
@@ -52,6 +55,8 @@ $started = Get-Date
 # RECOMP_ROLLBACK=on in ExtraEnv: the test relay allows rollback (the live one only with its switch file)
 $relayArgs = @('-listen', "127.0.0.1:$RelayPort", '-log-interval', '30s')
 if ($ExtraEnv -match '^RECOMP_ROLLBACK=on') { $relayArgs += '-rollback' }
+if ($Venues) { $relayArgs += @('-test-venues', $Venues) }
+$env:HARNESS_SUMMARY_WAIT = "$SummaryWait"
 $relay = Start-Process (Join-Path $repo 'netplay\relay\dist\relay.exe') -ArgumentList $relayArgs `
          -PassThru -WindowStyle Hidden -RedirectStandardError "$logs\relay.err" -RedirectStandardOutput "$logs\relay.out"
 Start-Sleep -Seconds 1

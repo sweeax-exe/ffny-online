@@ -53,6 +53,10 @@ type Config struct {
 	// Tests may inject a scripted function.
 	Intn func(n int) int
 
+	// TestVenues (tests): every vote offers only the next venue of this list, in turn, so a scripted
+	// session plays a known venue order. Empty: the drawn candidates.
+	TestVenues []uint8
+
 	// Logf receives one line per room event. Nil disables event logging.
 	Logf func(format string, args ...any)
 }
@@ -204,15 +208,16 @@ type source struct {
 // the Server serialises calls with a mutex. All methods take the current time
 // as an argument, so tests can drive it with a fake clock.
 type Relay struct {
-	cfg     Config
-	clients map[netip.AddrPort]*client
-	byToken map[Token]*client // the same clients by token, for a client whose address changed
-	rooms   map[RoomCode]*room
-	sources map[netip.Addr]*source
-	salt    [16]byte // per-process salt for anonymised log ids
-	stats   Stats
-	lastGC  time.Time
-	roomSeq uint64
+	cfg       Config
+	clients   map[netip.AddrPort]*client
+	byToken   map[Token]*client // the same clients by token, for a client whose address changed
+	rooms     map[RoomCode]*room
+	sources   map[netip.Addr]*source
+	salt      [16]byte // per-process salt for anonymised log ids
+	stats     Stats
+	lastGC    time.Time
+	roomSeq   uint64
+	testVenue int // the next index into cfg.TestVenues
 
 	queue    []*queued // the ranked queue, in arrival order
 	lookups  []RankedLookup

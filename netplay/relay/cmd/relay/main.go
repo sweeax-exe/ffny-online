@@ -18,6 +18,8 @@ import (
 	"os/signal"
 	"path/filepath"
 	"regexp"
+	"strconv"
+	"strings"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -83,6 +85,7 @@ func main() {
 	updatesListen := flag.String("updates-listen", "", "TCP address for the launcher's update files, e.g. :27778 (empty: off)")
 	updatesDir := flag.String("updates-dir", "", "folder holding latest.json, latest.json.sig and the setups")
 	rollback := flag.Bool("rollback", false, "let clients roll back always (tests); otherwise only while <updates-dir>/rollback-allowed exists")
+	testVenues := flag.String("test-venues", "", "tests: comma-separated venue feIDs every vote offers in turn, one at a time (empty: drawn)")
 	accountsURL := flag.String("accounts-internal", "", "the account service's local internal listener for ranked play, e.g. http://127.0.0.1:8091 (empty: ranked off)")
 	flag.Parse()
 
@@ -131,6 +134,19 @@ func main() {
 	}
 	if *rollback {
 		cfg.Relay.RollbackAllowed = func() bool { return true }
+	}
+	for _, f := range strings.Split(*testVenues, ",") {
+		if f = strings.TrimSpace(f); f == "" {
+			continue
+		}
+		v, err := strconv.Atoi(f)
+		if err != nil || v < 1 || v > 255 {
+			log.Fatalf("relay: bad -test-venues entry %q", f)
+		}
+		cfg.Relay.TestVenues = append(cfg.Relay.TestVenues, uint8(v))
+	}
+	if len(cfg.Relay.TestVenues) > 0 {
+		log.Printf("relay: tests: votes offer the venues %v in turn", cfg.Relay.TestVenues)
 	}
 	srv, err := relay.NewServer(cfg)
 	if err != nil {
