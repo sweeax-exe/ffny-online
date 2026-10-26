@@ -280,7 +280,25 @@ void test_control_note_funccall(const char *text);     /* src/hooks/test_control
  * players have not chosen yet). */
 int automatch_hold_funccall(const char *text)
 {
+    /* The front end's own calls that set up a match, while the room's match is agreed, set up or
+     * fought: the menu under the match (the battle match-type screen a summary returns to) still takes
+     * presses, and an A pressed there during the load went on to the controller screen, which cleared
+     * every controller binding (Controller.ControllerBind(-1)) and looked for a memory card while the
+     * venue loaded; that game crashed in the load (four-copy Team test, 2026-10-25). The match is
+     * automatch's: these calls are dropped until the game is back in the room. */
+    static const char *const setup[] = { "Controller.ControllerBind(", "Controller.ControllerSetup(",
+        "Controller.ControllerRemove(", "Controller.ControllerSelect(", "Game.SetMatchType(", "Game.SetMatchRules(",
+        "Game.ChooseVenue(", "Game.StartGame(", "Game.StartBattleMode(", "Game.ResetMatchData(",
+        "Battle.LoadCreatePlayerData(", "MemCard.ChooseMCDevice(", "MemCard.SetBMCurrentUserIndex(" };
+    unsigned i;
     if (!strcmp(text, "Game.Rematch()")) return netplay_rematch_request();
+    if (!netplay_match_locked() && !automatch_pending()) return 0;
+    for (i = 0; i < sizeof(setup) / sizeof(setup[0]); i++)
+        if (!strncmp(text, setup[i], strlen(setup[i]))) {
+            static unsigned told;
+            if (told++ < 20) fprintf(stderr, "[AUTOMATCH] the room's match is on: the menu's %s is dropped\n", text);
+            return 1;
+        }
     return 0;
 }
 

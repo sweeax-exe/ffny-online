@@ -62,6 +62,7 @@ void netplay_room(char *c, int size) { if (size > 0) c[0] = 0; }
 void netplay_autostart(void) {}
 int netplay_active(void) { return 0; }
 int netplay_in_fight(void) { return 0; }
+int netplay_match_locked(void) { return 0; }
 int netplay_voice_room(void) { return 0; }
 void netplay_send_voice(const uint8_t *p, int n) { (void)p; (void)n; }
 int netplay_room_name(int s, char *o, int n) { (void)s; if (n > 0) o[0] = 0; return 0; }
@@ -2313,6 +2314,31 @@ static DWORD WINAPI autostart_thread(LPVOID unused)
                 Sleep(100);
                 continue;
             }
+            {   /* RECOMP_NETPLAY_TEST_POOL="4,6" (tests): the host makes its room vote on these venues */
+                const char *tp = getenv("RECOMP_NETPLAY_TEST_POOL");
+                if (tp && *tp && r.in_room && r.phase == 0 && r.you == r.host && !N.match_live) {
+                    NetRoomSettings want = r.settings;
+                    const char *c = tp;
+                    want.pool_count = 0;
+                    while (*c && want.pool_count < 32) {
+                        int v = atoi(c);
+                        if (v > 0 && v < 256) want.pool[want.pool_count++] = (unsigned char)v;
+                        while (*c && *c != ',') c++;
+                        if (*c == ',') c++;
+                    }
+                    if (want.pool_count && (want.pool_count != r.settings.pool_count ||
+                                            memcmp(want.pool, r.settings.pool, (size_t)want.pool_count))) {
+                        static ULONGLONG asked;
+                        if (GetTickCount64() - asked > 1000) {
+                            asked = GetTickCount64();
+                            fprintf(stderr, "[NETPLAY] tests: the room votes on venues %s\n", tp);
+                            netplay_lobby_settings(&want);
+                        }
+                        Sleep(100);
+                        continue;
+                    }
+                }
+            }
             if (r.in_room && r.phase == 0 && !N.match_live) {
                 /* Ready again whenever this player shows as not ready: after a
                    match, or after a scripted press toggled it in the overlay. */
@@ -2373,6 +2399,7 @@ void netplay_autostart(void)
 
 int netplay_active(void) { return N.lockstep != 0; }
 int netplay_in_fight(void) { return MEM32(G_MATCH_PHASE) == 1u; }
+int netplay_match_locked(void) { return N.lobby && N.match_live; }
 
 int netplay_voice_room(void)
 {
@@ -2739,6 +2766,48 @@ static void koth_check_result(int final)
     fprintf(stderr, "[NETPLAY] King of the Hill: the fight is decided (%s; code %04X, phase %u), winner %s %d; sending RESULT\n",
             how, (unsigned)code, (unsigned)phase, winner == (int)WINNER_DRAW ? "none, slot" : "room slot", winner);
 }
+/* RECOMP_NETPLAY_STEPLOG (tests): the fighter records, the match globals (0x3B8F28..0x3B9074), the
+ * fight's weapon table (0x3BE778, 16 x 0xA4) and the weapon manager (0x376144) of the last STEPLOG_RING
+ * steps, kept in memory and written to logs/desync-<match>-p<position>.bin when this PC sees a desync,
+ * so the copies' files show the first step and the very fields where they parted (the checksum covers
+ * six fields a fighter). Each record: u32 step, then the ranges' bytes in this order. */
+#define STEPLOG_RING 256
+static const uint32_t k_steplog_ranges[][2] = {
+    { ACTORS, ACTORS + 4u * STRIDE }, { 0x003B8F28u, 0x003B9074u }, { 0x003BE778u, 0x003BF1B8u },
+    { 0x00376144u, 0x00376E70u },
+};
+#define STEPLOG_BYTES (4u * STRIDE + (0x003B9074u - 0x003B8F28u) + (0x003BF1B8u - 0x003BE778u) + \
+                       (0x00376E70u - 0x00376144u))
+static uint8_t *g_steplog;
+static uint32_t g_steplog_step[STEPLOG_RING], g_steplog_dumped;
+
+static void steplog_keep(uint32_t s)
+{
+    uint8_t *at;
+    uint32_t i, r, n = 0;
+    if (!g_steplog && !(g_steplog = (uint8_t *)malloc((size_t)STEPLOG_RING * STEPLOG_BYTES))) return;
+    at = g_steplog + (size_t)(s % STEPLOG_RING) * STEPLOG_BYTES;
+    for (r = 0; r < sizeof(k_steplog_ranges) / sizeof(k_steplog_ranges[0]); r++)
+        for (i = k_steplog_ranges[r][0]; i < k_steplog_ranges[r][1]; i++) at[n++] = MEM8(i);
+    g_steplog_step[s % STEPLOG_RING] = s;
+    if (N.desync && g_steplog_dumped != N.match) {     /* the game thread writes it, once per match */
+        char path[96];
+        FILE *f;
+        uint32_t first = s >= STEPLOG_RING ? s - STEPLOG_RING + 1 : 1, t;
+        g_steplog_dumped = N.match;
+        snprintf(path, sizeof(path), "logs\\desync-%08X-p%d.bin", N.match, N.pos + 1);
+        if ((f = fopen(path, "wb")) != NULL) {
+            for (t = first; t <= s; t++) {
+                if (g_steplog_step[t % STEPLOG_RING] != t) continue;
+                fwrite(&t, 4, 1, f);
+                fwrite(g_steplog + (size_t)(t % STEPLOG_RING) * STEPLOG_BYTES, 1, STEPLOG_BYTES, f);
+            }
+            fclose(f);
+            fprintf(stderr, "[NETPLAY] the last %u steps' fighter records are in %s\n", s - first + 1, path);
+        }
+    }
+}
+
 void netplay_on_step(void)
 {
     uint32_t s, target, k, need;
@@ -2846,14 +2915,20 @@ void netplay_on_step(void)
         if (steplog && !N.resim) {
             static const uint32_t fields[] = { 0x30, 0x44, 0x48, 0x4C, 0x54, 0x350 };
             char line[400];
-            int n = snprintf(line, sizeof(line), "[STEPHASH] %08X %u", N.match, s), slot;
+            int n, slot;
             unsigned fi;
+            {   /* and the crowd's records the fighters read (spectator-shove.md): a part of its own */
+                uint32_t h = 2166136261u, kk, recs = MEM32(0x003494E4u), count = MEM32(0x003494E0u);
+                for (kk = 0; recs && kk < count * 0x34u && kk < 0x4000u; kk++) h = (h ^ MEM8(recs + kk)) * 16777619u;
+                n = snprintf(line, sizeof(line), "[STEPHASH] %08X %u crowd %08X", N.match, s, h);
+            }
             for (slot = 0; slot < N.fighters && slot < MAXP; slot++) {
                 n += snprintf(line + n, sizeof(line) - (size_t)n, " |");
                 for (fi = 0; fi < sizeof(fields) / sizeof(fields[0]); fi++)
                     n += snprintf(line + n, sizeof(line) - (size_t)n, " %08X", MEM32(ACTORS + (uint32_t)slot * STRIDE + fields[fi]));
             }
             fprintf(stderr, "%s\n", line);
+            steplog_keep(s);
         }
     }
     if (N.resim) return;                /* a re-run: the entries are all known or predicted */
