@@ -15,6 +15,7 @@ cite other development notes, logs and captures that are not published.
 
 - [v0.12.1 Story portraits and Power Plant](v0121-portrait-viewport-read.md) — logical versus AA surface clipping, verified portrait correction, and VY3 FFA performance measurements.
 - [v0.12.1 right-side meters](v0121-right-meters-fix.md) — a merged zero-flag snapshot correction and native health/Blazin fill validation.
+- [v0.12.1 eye-color previews](v0121-eye-preview-cache.md) — small-texture cache signature collisions and independently verified palette refresh.
 
 - [Render path: push-buffer executor and the D3D8 intercept](m2-render-path.md)
 - [Vertical-blank interrupt hang](m2-vblank-isr.md)
