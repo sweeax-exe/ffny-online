@@ -50,7 +50,8 @@ static RecompSetting g_display_settings[] = {
     { "textures", "dump_limit", RECOMP_SETTING_INT, 2000, 0, 65536, NULL, "RECOMP_TEXTURE_DUMP_LIMIT", RECOMP_SETTING_RESTART,
       "Maximum new source images captured in one run." },
     { "online", "server", RECOMP_SETTING_STRING, 0, 0, 0, NULL, "RECOMP_NETPLAY_SERVER", 0,
-      "The server for online play: auto (the one with the lowest ping, Europe or North America), eu, na, or a "
+      "The server for online play: auto (the one with the lowest ping, Europe or North America), eu, na, both "
+      "(the rooms and quick matches of both; the hub connects to the lower ping and moves to join), or a "
       "relay's own address as host or host:port (port 27777 if left out). Accounts and stats stay on Europe.", "auto" },
     { "online", "name", RECOMP_SETTING_STRING, 0, 0, 0, NULL, NULL, 0,
       "Your name, shown to the other player.", "Player" },
