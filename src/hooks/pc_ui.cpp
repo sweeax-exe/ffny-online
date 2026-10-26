@@ -49,6 +49,7 @@ extern "C" {
 #include "pc_ui.h"
 #include "pc_ui_internal.h"
 #include "netplay.h"
+#include "netplay_servers.h"
 #include "account.h"
 #include "bug_report.h"
 #include "voice.h"
@@ -1655,6 +1656,47 @@ static void quality_widget()
                           "next time the game starts.");
 }
 
+// The online server (build 30): Automatic, Europe or North America, each with its ping and players
+// as the relays answer (netplay_servers.c). A custom address (Advanced, Online) shows as such.
+static std::string server_line(const NetServerInfo &s)
+{
+    char line[128];
+    if (s.state == NETSERVER_UP)
+        snprintf(line, sizeof(line), "%s  \xC2\xB7  %d ms  \xC2\xB7  %d online", s.name, s.ping_ms, s.online);
+    else if (s.state == NETSERVER_OFFLINE)
+        snprintf(line, sizeof(line), "%s  \xC2\xB7  offline", s.name);
+    else
+        snprintf(line, sizeof(line), "%s  \xC2\xB7  checking...", s.name);
+    return line;
+}
+
+static void server_widget()
+{
+    netservers_probe();
+    NetServerInfo s[NETSERVER_COUNT];
+    int n = netservers_get(s, NETSERVER_COUNT);
+    enum NetServerChoice choice = netservers_choice();
+    int nearest = -1;
+    for (int i = 0; i < n; i++)
+        if (s[i].state == NETSERVER_UP && (nearest < 0 || s[i].ping_ms < s[nearest].ping_ms)) nearest = i;
+    std::string automatic = nearest >= 0 ? std::string("Automatic (now ") + s[nearest].name + ")" : "Automatic (lowest ping)";
+    char buf[128];
+    std::string preview = choice == NETCHOICE_AUTO ? automatic : choice == NETCHOICE_CUSTOM ?
+        std::string("Custom: ") + recomp_settings_get_text("online", "server", buf, sizeof(buf), "") :
+        server_line(s[choice == NETCHOICE_EU ? NETSERVER_EU : NETSERVER_NA]);
+    ImGui::SetNextItemWidth(ImGui::GetFontSize() * 20);
+    if (ImGui::BeginCombo("Server", preview.c_str())) {
+        if (ImGui::Selectable(automatic.c_str(), choice == NETCHOICE_AUTO)) netservers_set_choice(NETCHOICE_AUTO);
+        for (int i = 0; i < n; i++) {
+            enum NetServerChoice c = i == NETSERVER_EU ? NETCHOICE_EU : NETCHOICE_NA;
+            if (ImGui::Selectable(server_line(s[i]).c_str(), choice == c)) netservers_set_choice(c);
+        }
+        ImGui::EndCombo();
+    }
+    ImGui::SetItemTooltip("Where you play online. Automatic takes the server with the lowest ping when you go online. "
+                          "Players on one server meet only players on the same server; accounts and stats are shared.");
+}
+
 static void page_basics()
 {
     ImGui::SeparatorText("Picture");
@@ -1664,6 +1706,7 @@ static void page_basics()
     ImGui::SeparatorText("Voice chat");
     settings_group("online", { "voice", "voice_key", "voice_pad" });
     ImGui::SeparatorText("Online");
+    server_widget();
     settings_group("online", { "rollback" });
     ImGui::TextDisabled("Beta: used only when the other player has it on too. Applies the next time the game starts.");
     ImGui::SeparatorText("HD textures");
