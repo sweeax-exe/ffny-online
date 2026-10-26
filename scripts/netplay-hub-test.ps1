@@ -27,6 +27,8 @@
                     e.g. 1,6,19,6 for The Foundation, The Terror Dome, The Pit, The Terror Dome.
 .PARAMETER SummaryPresses  the A presses on each summary, <first s>+<gap s>x<count> (HARNESS_SUMMARY_PRESSES,
                     default 4+3x12); e.g. 16+6x10 keeps both copies on the same screen.
+.PARAMETER FightSecs  when the route's blind fight presses end, in seconds from the match start (HARNESS_FIGHT_SECS,
+                    default 1200); with -Bot, 9 keeps them off the fight and the results screens.
 .PARAMETER DataPrefix  every copy's data root is <DataPrefix><i> (made like the -hub roots: the dump as a
                     junction, a copy of the saves); default: the data root itself and <data>-hub<i>.
 #>
@@ -34,7 +36,7 @@ param([ValidateRange(2, 4)][int]$Players = 2, [int]$Secs = 1200, [string[]]$Extr
       [ValidateSet('online', 'online5', 'online8', 'online-rematch')][string]$Route = 'online', [int[]]$Fighters = @(55, 22, 9, 31),
       [string[]]$Stage = @(), [int]$FastKo = 0, [string]$FastKoWinner = 'alt', [switch]$Bot,
       [ValidateRange(0, 100)][int]$BotAggression = 60, [int]$RelayPort = 27777, [int]$BaseCore = 2,
-      [string]$DataPrefix = '', [string]$Venues = '', [string]$SummaryPresses = '4+3x12')
+      [string]$DataPrefix = '', [string]$Venues = '', [string]$SummaryPresses = '4+3x12', [int]$FightSecs = 1200)
 $ErrorActionPreference = 'Stop'
 $repo = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 Set-Location $repo
@@ -58,6 +60,7 @@ $relayArgs = @('-listen', "127.0.0.1:$RelayPort", '-log-interval', '30s')
 if ($ExtraEnv -match '^RECOMP_ROLLBACK=on') { $relayArgs += '-rollback' }
 if ($Venues) { $relayArgs += @('-test-venues', $Venues) }
 $env:HARNESS_SUMMARY_PRESSES = $SummaryPresses
+$env:HARNESS_FIGHT_SECS = "$FightSecs"
 $relay = Start-Process (Join-Path $repo 'netplay\relay\dist\relay.exe') -ArgumentList $relayArgs `
          -PassThru -WindowStyle Hidden -RedirectStandardError "$logs\relay.err" -RedirectStandardOutput "$logs\relay.out"
 Start-Sleep -Seconds 1

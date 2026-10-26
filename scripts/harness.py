@@ -167,8 +167,12 @@ def build_pad_script(stages, raw_tail=""):
 # ---------------------------------------------------------------------------
 
 # A fighter that walks right and throws every attack, for as long as the run lasts.
-FIGHT_TAIL = ("@game.startgame(,right:8:1200:4:1.2,x:10:1200:0.8:0.15,y:10.2:1200:0.8:0.15,"
-              "a:10.4:1200:0.8:0.15,b:10.6:1200:0.8:0.15")
+# HARNESS_FIGHT_SECS=<s> (default 1200): when the blind fight presses end, counted from the start of
+# the match. They go on through the results screens otherwise; a hub test whose fighters are driven by
+# the bot (RECOMP_TEST_BOT) ends them before the fight, so the results screens see only their own presses.
+FIGHT_END = os.environ.get("HARNESS_FIGHT_SECS", "1200")
+FIGHT_TAIL = (f"@game.startgame(,right:8:{FIGHT_END}:4:1.2,x:10:{FIGHT_END}:0.8:0.15,y:10.2:{FIGHT_END}:0.8:0.15,"
+              f"a:10.4:{FIGHT_END}:0.8:0.15,b:10.6:{FIGHT_END}:0.8:0.15")
 
 # Typing "AAA" on the user-ID screen and taking DONE.
 NEW_ID_KEYS = "a@5;a@7;a@8;a@9;down@11+0.6x9;right@17.5;a@19;a@23+3x6"
