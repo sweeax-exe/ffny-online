@@ -61,23 +61,45 @@ void sub_001A6870_enter(void)
     if (defjam_test_observations_enabled())
         defjam_test_health_notify(MEM32(g_esp + 4), MEM32(g_esp + 8));
 }
-/* Match telemetry (src/hooks/test_telemetry.c): the fight's simulation step,
- * match set-up, the result recorder and the random number generator's seeding.
- * Read-only, except that RECOMP_TEST_RNG_SEED replaces the seed argument. */
-void sub_00087700_enter(void)
+/* Widescreen: a fight HUD is up (src/patches/widescreen.c). The four fighter
+ * slots the fight camera reads (0x340D70, stride 0xC8; a slot counts when set
+ * and bit 3 of +0xC0 is clear): with 3 or 4 fighters the HUD has bottom rows. */
+static int s_ws_hud_live;      /* the simulation step ran since the match last left a fighting state */
+static void ws_hud_heartbeat(void)
 {
     extern void nv2a_ws_hud_heartbeat(int bottom_rows);
     uint32_t i, fighters = 0;
-    defjam_crowd_step();
-    defjam_test_step();
-    /* Widescreen: a fight HUD is up (src/patches/widescreen.c). The four fighter
-     * slots the fight camera reads (0x340D70, stride 0xC8; a slot counts when set
-     * and bit 3 of +0xC0 is clear): with 3 or 4 fighters the HUD has bottom rows. */
     for (i = 0; i < 4; i++)
         if (MEM32(0x340D70 + i * 0xC8) != 0 && (MEM8(0x340D70 + i * 0xC8 + 0xC0) & 8) == 0)
             fighters++;
     nv2a_ws_hud_heartbeat(fighters >= 3);
 }
+/* Match telemetry (src/hooks/test_telemetry.c): the fight's simulation step,
+ * match set-up, the result recorder and the random number generator's seeding.
+ * Read-only, except that RECOMP_TEST_RNG_SEED replaces the seed argument. */
+void sub_00087700_enter(void)
+{
+    defjam_crowd_step();
+    defjam_test_step();
+    s_ws_hud_live = 1;
+    ws_hud_heartbeat();
+}
+/* The match's update (thiscall; the match at 0x349760, its state at +0x2D820).
+ * Only states 5 and 8 run the simulation step above; any other state (intro,
+ * special-move camera, match end) ends the live HUD. */
+void sub_0008BE60_enter(void)
+{
+    uint32_t state = MEM32(g_ecx + 0x2D820);
+    if (state != 5 && state != 8)
+        s_ws_hud_live = 0;
+}
+/* A fight mode's per-frame tick: 0x79B60 in Battle (measured), 0x7A8F0 the other
+ * mode built the same way (same match update and HUD calls; no route reaches it).
+ * While the pause menu is open it skips the match update, so the step stops, but
+ * it keeps running and the HUD stays on screen. Keep the widescreen HUD anchored
+ * through a pause that began in a live fight (issue #95); otherwise no change. */
+void sub_00079B60_enter(void) { if (s_ws_hud_live) ws_hud_heartbeat(); }
+void sub_0007A8F0_enter(void) { if (s_ws_hud_live) ws_hud_heartbeat(); }
 void sub_001A4D90_enter(void) { defjam_test_match_start(); defjam_crowd_match_start(); }
 void sub_001BC690_enter(void) { defjam_test_rng(g_esp); }
 void sub_001AD220_enter(void) { defjam_test_ai_seed(g_esp); }
