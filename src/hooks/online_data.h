@@ -8,7 +8,9 @@ extern "C" {
 #endif
 
 typedef struct OnlineFighter {
-    int id;             /* fighter.xml ID: what Controller.ControllerSetup takes */
+    int id;             /* Battle-mode ID (the Character record's front-end ID in assets/djv2.sod):
+                         * what Controller.ControllerSetup takes. The fighter.xml ID, but for four
+                         * fighters (online_data.c, k_battle_ids) */
     char name[32];
     const char *style;  /* "Street fighting", ...; "" if none */
 } OnlineFighter;
@@ -31,6 +33,9 @@ int online_venues(const OnlineVenue **out);
 int online_modes(const OnlineMode **out);
 
 const char *online_fighter_name(int id);    /* "Fighter 12" if unknown */
+/* A fighter ID as saved by builds that offered Teck, Santos, O.E and Eric Sermon under their
+ * fighter.xml IDs (13 and 14), as the Battle-mode ID; any other ID unchanged. */
+int online_fighter_id(int id);
 const char *online_venue_name(int fe_id);
 const OnlineMode *online_mode(int type);    /* NULL if not offered */
 

@@ -14,7 +14,7 @@ typedef struct AutoMatch {
     int rules;          /* 0 as the front end sends */
     int venue;          /* venue.xml feID: 1 The Foundation */
     int count;          /* fighters, 2..4 */
-    int fighter[4];     /* fighter.xml ID */
+    int fighter[4];     /* Battle-mode ID (src/hooks/online_data.h) */
     int pad[4];         /* controller port, -1 for the CPU */
 } AutoMatch;
 

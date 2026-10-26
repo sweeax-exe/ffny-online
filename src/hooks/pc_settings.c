@@ -56,7 +56,7 @@ static RecompSetting g_display_settings[] = {
     { "online", "name", RECOMP_SETTING_STRING, 0, 0, 0, NULL, NULL, 0,
       "Your name, shown to the other player.", "Player" },
     { "online", "fighter", RECOMP_SETTING_INT, 55, 0, 255, NULL, NULL, 0,
-      "The fighter you pick in online rooms (fighter.xml ID); chosen in the room." },
+      "The fighter you pick in online rooms (its Battle-mode ID); chosen in the room." },
     { "online", "voice", RECOMP_SETTING_ENUM, 1, 0, 0, k_voice, NULL, 0,
       "Voice chat with the players in your online room, in the room and in the fight: off, push_to_talk (hold the "
       "key below) or open (sends while you speak; use a headset)." },
