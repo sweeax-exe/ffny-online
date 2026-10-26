@@ -38,6 +38,7 @@ Two ways in:
 |---|---|
 | `protocol.go` | Message encoding/decoding (no state). |
 | `protocol_status.go`, `status.go` | `STATUS`: version, load and quick-match players for a client choosing between relays (no token). |
+| `protocol_roomlist.go`, `roomlist.go` | `ROOMLIST`: the public rooms with their age for a client of another relay ("Both servers"; no token, answer no larger than the request). |
 | `protocol_lobby.go` | The same for the lobby messages (0x10..0x1B) and the `Settings` block. |
 | `relay.go` | Room/client state machine. No sockets; the current time is a parameter, so it is tested with a fake clock. |
 | `lobby.go` | The lobby part of the state machine: rooms of up to four, phases, voting, the lobby requests. |
@@ -188,6 +189,15 @@ location close to the players. Below, `SERVER` is the server's public IP.
    ```
 
    An older relay without `STATUS` never answers (`FAIL: ... did not answer STATUS`).
+
+   To check `ROOMLIST` (build 31: what a game on "Both servers" asks the relay it is not
+   connected to; no HELLO, nothing registered), with every public room of every build:
+
+   ```sh
+   relayprobe -server SERVER:27777 -mode roomlist
+   ```
+
+   A relay before build 31 never answers (`FAIL: ... did not answer ROOMLIST`).
 
 Optional check of the sandbox: `systemd-analyze security defjam-relay`.
 

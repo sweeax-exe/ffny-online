@@ -9,6 +9,7 @@
 //	relayprobe -server HOST:27777 -mode join -room ABCDEF      # join that room from another machine
 //	relayprobe -server HOST:27777 -mode lobby                  # lobby flow: two clients, create, list, join, ready, vote, START
 //	relayprobe -server HOST:27777 -mode status                 # three STATUS probes: round trip, version, players (no HELLO)
+//	relayprobe -server HOST:27777 -mode roomlist               # one ROOMLIST: the public rooms of every build (no HELLO)
 //
 // In every mode it pings once a second and prints the round-trip time from
 // PING/PONG, sends -n DATA packets once a peer is present, and prints every
@@ -36,7 +37,7 @@ import (
 
 func main() {
 	server := flag.String("server", fmt.Sprintf("127.0.0.1:%d", relay.DefaultPort), "relay address host:port")
-	mode := flag.String("mode", "pair", "pair | create | join | lobby | status")
+	mode := flag.String("mode", "pair", "pair | create | join | lobby | status | roomlist")
 	roomFlag := flag.String("room", "", "room code to join (-mode join)")
 	name := flag.String("name", "probe", "player name sent in HELLO (1..24 bytes)")
 	buildHex := flag.String("build", "5052-4f42-4500-0000", "build fingerprint, 8 bytes as hex (dashes ignored)")
@@ -64,6 +65,14 @@ func main() {
 		ok = runLobby(*server, build, *name, *timeout)
 	case "status":
 		ok = runStatus(*server, build, *timeout)
+	case "roomlist":
+		any := relay.Build{} // every build, unless -build names one
+		flag.Visit(func(f *flag.Flag) {
+			if f.Name == "build" {
+				any = build
+			}
+		})
+		ok = runRoomList(*server, any, *timeout)
 	case "create", "join":
 		var code relay.RoomCode
 		if *mode == "join" {
@@ -753,4 +762,49 @@ func runStatus(server string, build relay.Build, timeout time.Duration) bool {
 	}
 	fmt.Printf("PASS: %s answers STATUS (%d of 3)\n", server, answered)
 	return true
+}
+
+// runRoomList sends one ROOMLIST (padded to a full datagram, so the whole list fits) and prints
+// the rooms. It registers nothing on the relay.
+func runRoomList(server string, build relay.Build, timeout time.Duration) bool {
+	addr, err := net.ResolveUDPAddr("udp", server)
+	if err != nil {
+		fmt.Printf("FAIL: resolve %s: %v\n", server, err)
+		return false
+	}
+	conn, err := net.DialUDP("udp", nil, addr)
+	if err != nil {
+		fmt.Printf("FAIL: %v\n", err)
+		return false
+	}
+	defer conn.Close()
+	nonce := uint32(time.Now().UnixNano())
+	req, _ := relay.Encode(relay.RoomList{Nonce: nonce, Build: build, Mode: relay.ModeAny, Caps: relay.CapKoth,
+		Pad: relay.MaxDatagram - relay.HeaderLen - relay.RoomListBodyMin})
+	sent := time.Now()
+	if _, err := conn.Write(req); err != nil {
+		fmt.Printf("FAIL: send: %v\n", err)
+		return false
+	}
+	_ = conn.SetReadDeadline(sent.Add(timeout))
+	buf := make([]byte, 2048)
+	for {
+		n, err := conn.Read(buf)
+		if err != nil {
+			fmt.Printf("FAIL: %s did not answer ROOMLIST within %v (a relay before build 31, or unreachable)\n", server, timeout)
+			return false
+		}
+		m, err := relay.DecodeServer(buf[:n])
+		rl, ok := m.(relay.RoomListReply)
+		if err != nil || !ok || rl.Nonce != nonce {
+			continue
+		}
+		fmt.Printf("%d ms  %d public rooms, %d listed (%d bytes for a %d-byte request)\n", time.Since(sent).Milliseconds(),
+			rl.Total, len(rl.Rooms), n, len(req))
+		for _, r := range rl.Rooms {
+			fmt.Printf("  room=%s name=%q mode=%d players=%d/%d phase=%d age=%ds\n", r.Room, r.Name, r.Mode, r.Players, r.Max, r.Phase, r.Age)
+		}
+		fmt.Printf("PASS: %s answers ROOMLIST\n", server)
+		return true
+	}
 }

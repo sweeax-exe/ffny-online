@@ -385,12 +385,14 @@ func DecodeClient(b []byte) (Message, error) {
 		return decodeLobbyClient(t, body)
 	case TypeStatus:
 		return decodeStatusClient(body)
+	case TypeRoomList:
+		return decodeRoomListClient(body)
 	}
 	return nil, ErrMalformed
 }
 
 // DecodeServer parses a server-to-client datagram (WELCOME, PEER, DATA, PONG,
-// ERROR, ROOMS, ROOM, START, PLAYERS, QUEUE, the King of the Hill CAPS, HILL, WATCH, and STATUS).
+// ERROR, ROOMS, ROOM, START, PLAYERS, QUEUE, the King of the Hill CAPS, HILL, WATCH, STATUS and ROOMLIST).
 // Used by clients and tests. ServerData.Payload
 // aliases b; the lobby messages' slices are copies.
 func DecodeServer(b []byte) (Message, error) {
@@ -440,6 +442,8 @@ func DecodeServer(b []byte) (Message, error) {
 		return decodeLobbyServer(t, body)
 	case TypeStatus:
 		return decodeStatusServer(body)
+	case TypeRoomList:
+		return decodeRoomListServer(body)
 	}
 	return nil, ErrMalformed
 }

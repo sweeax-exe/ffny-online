@@ -146,8 +146,8 @@ func TestStatusLeavesClientsAlone(t *testing.T) {
 	if c := h.r.clients[host]; c == nil || !c.lastSeen.Equal(seen) || c.room == nil {
 		t.Fatalf("STATUS changed the client: %#v", c)
 	}
-	// an unknown type a later client might send (0x25) is still dropped silently
-	b := cat(hdr(0x25), make([]byte, 20))
+	// an unknown type a later client might send (0x2F) is still dropped silently
+	b := cat(hdr(0x2F), make([]byte, 20))
 	expectNone(t, h.sendRaw(host, b))
 	// a reply is never larger than the request
 	req, _ := Encode(Status{Nonce: 1, Build: build})

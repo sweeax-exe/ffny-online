@@ -141,11 +141,11 @@ func (s *Server) timerLoop(ctx context.Context, conn *net.UDPConn) {
 				secs = 1
 			}
 			lastLog = now
-			s.cfg.Logf("summary rooms=%d clients=%d in=%.1fpkt/s %.0fB/s out=%.1fpkt/s %.0fB/s dropped=%d status=%d",
+			s.cfg.Logf("summary rooms=%d clients=%d in=%.1fpkt/s %.0fB/s out=%.1fpkt/s %.0fB/s dropped=%d status=%d roomlist=%d",
 				rooms, clients,
 				float64(st.PacketsIn)/secs, float64(st.BytesIn)/secs,
 				float64(st.PacketsOut)/secs, float64(st.BytesOut)/secs,
-				st.Dropped, st.Status)
+				st.Dropped, st.Status, st.RoomList)
 		}
 	}
 }

@@ -22,6 +22,7 @@ type Config struct {
 	HellosPerMinute   int           // HELLOs per source IP per sliding minute (default 10); beyond: ERROR 6
 	MsgsPerSecond     int           // datagrams per source IP per second (default 400); beyond: silent drop
 	StatusPerSecond   int           // STATUS answers per source IP per second (default 4); beyond: silent drop
+	RoomListPerSecond int           // ROOMLIST answers per source IP per second (default 4); beyond: silent drop
 	MaxTrackedSources int           // size cap of the per-IP rate-limit table (default 100000)
 	VoteTime          time.Duration // length of the venue vote (default 15 s)
 	PlayTimeout       time.Duration // a match without every OVER returns to the lobby after this (default 30 min)
@@ -80,6 +81,9 @@ func (c *Config) setDefaults() {
 	if c.StatusPerSecond <= 0 {
 		c.StatusPerSecond = 4
 	}
+	if c.RoomListPerSecond <= 0 {
+		c.RoomListPerSecond = 4
+	}
 	if c.MaxTrackedSources <= 0 {
 		c.MaxTrackedSources = 100000
 	}
@@ -128,6 +132,8 @@ type Stats struct {
 	Moved uint64
 	// Status counts answered STATUS requests (a client choosing between relays).
 	Status uint64
+	// RoomList counts answered ROOMLIST requests (a client of another relay showing this one's rooms).
+	RoomList uint64
 }
 
 // client is one registered player.
@@ -205,6 +211,10 @@ type source struct {
 	// Fixed one-second window for STATUS answers.
 	statusWin   time.Time
 	statusCount int
+
+	// Fixed one-second window for ROOMLIST answers.
+	roomListWin   time.Time
+	roomListCount int
 
 	lastErr6 time.Time // ERROR 6 is sent at most once per second per source
 	lastErr7 time.Time // ERROR 7 is sent at most once per second per source
@@ -291,6 +301,8 @@ func (r *Relay) handle(now time.Time, from netip.AddrPort, b []byte) []Packet {
 	switch m := msg.(type) {
 	case Status:
 		return r.status(now, from, src, m, len(b))
+	case RoomList:
+		return r.roomList(now, from, src, m, len(b))
 	case Hello:
 		return r.hello(now, from, src, m, len(b))
 	case ClientData:
