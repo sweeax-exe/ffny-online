@@ -17,6 +17,7 @@ cite other development notes, logs and captures that are not published.
 - [v0.12.1 created-fighter thumbnails](v0121-created-fighter-thumbnail.md) — small guest capture surfaces and normal save/reload recovery for empty profile images.
 - [v0.12.1 right-side meters](v0121-right-meters-fix.md) — a merged zero-flag snapshot correction and native health/Blazin fill validation.
 - [v0.12.1 eye-color previews](v0121-eye-preview-cache.md) — small-texture cache signature collisions and independently verified palette refresh.
+- [v0.12.1 widescreen song notification](v0121-menu-song-banner.md) — feloader's `chyron` clip tagged in-band and anchored left by the renderer (#118).
 
 - [Render path: push-buffer executor and the D3D8 intercept](m2-render-path.md)
 - [Vertical-blank interrupt hang](m2-vblank-isr.md)

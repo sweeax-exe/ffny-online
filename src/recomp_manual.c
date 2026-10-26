@@ -79,6 +79,14 @@ void sub_00087700_enter(void)
     nv2a_ws_hud_heartbeat(fighters >= 3);
 }
 void sub_001A4D90_enter(void) { defjam_test_match_start(); defjam_crowd_match_start(); }
+/* Widescreen song notification (src/patches/widescreen.c, issue #118): the APT
+ * movie loader (archive, name, &apt, &const), and the next step of the load,
+ * which its only caller runs straight after it with the .apt data as its second
+ * stack argument. */
+void ws_apt_load_begin(uint32_t name);
+void ws_apt_load_done(uint32_t apt);
+void sub_001810B0_enter(void) { ws_apt_load_begin(MEM32(g_esp + 8)); }
+void sub_00056F50_enter(void) { ws_apt_load_done(MEM32(g_esp + 8)); }
 void sub_001BC690_enter(void) { defjam_test_rng(g_esp); }
 void sub_001AD220_enter(void) { defjam_test_ai_seed(g_esp); }
 /* The seeding routine every generator of this kind goes through (thiscall). */
@@ -983,3 +991,4 @@ extern void ws_trace_pos(void), ws_trace_vtx_arr(void), ws_trace_vtx(void);
 void sub_00028F90_enter(void) { ws_trace_pos(); }
 void sub_0002E390_enter(void) { ws_trace_vtx_arr(); }
 void sub_0002E470_enter(void) { ws_trace_vtx(); }
+

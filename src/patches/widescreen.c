@@ -107,6 +107,10 @@ float ws_init(int window_w, int window_h, int fullscreen)
             extern void nv2a_ws_set_side_fill(int on);
             nv2a_ws_set_side_fill(g_fill == WS_FILL_BLUR);
         }
+        {
+            extern void nv2a_ws_set_left_tag(float y_offset);
+            nv2a_ws_set_left_tag((float)WS_MENU_LEFT_TAG);
+        }
         fprintf(stderr, "[WS] widescreen %.4f (k %.4f), HUD %s, cutscenes %s, sides %s, FOV cap %.0f\n",
                 a, g_k, g_hud == WS_HUD_EDGE ? "edge" : "centred",
                 g_cutscenes == WS_CUTSCENES_FILL ? "fill" : "authored",
@@ -115,6 +119,79 @@ float ws_init(int window_w, int window_h, int fullscreen)
         d3d8_present_set_canvas_aspect(0, 0);
     }
     return a;
+}
+
+/* The song notification (issue #118). feloader, the front end's persistent
+ * root movie, attaches the `chyron` clip at the lower left and parks it there
+ * between songs with only its torn-paper tab showing; LaunchChyron slides the
+ * card out with the song, artist and album. Centred like all menu art, the tab
+ * and card sit at the 4:3 box's left edge, and the part left of it is clipped
+ * away. The renderer cannot tell this clip's batches from other menu art, so
+ * the movie tags them: its set-up stores `chyron._y = 385` and every launch
+ * reuses that stored y, so changing that one literal to 385 + WS_MENU_LEFT_TAG
+ * moves the whole clip -- tab, card, text and its slide -- into the renderer's
+ * tag band, from where it is moved back and anchored left. The literal is the
+ * operand of a PushShort in the movie's first-frame action, patched in memory
+ * after the loader resolves feloader.apt and before any of it runs. A hash of
+ * the instruction window guards against any other build of the movie. */
+#define WS_FELOADER_Y_AT 0xCD1Fu        /* the PushShort operand in feloader.apt */
+#define WS_FELOADER_WINDOW_AT 0xCD10u   /* chyron._x = 0; chyron._y = 385 */
+#define WS_FELOADER_WINDOW_LEN 18u
+#define WS_FELOADER_WINDOW_FNV 0xB6C9DEB3u
+#define WS_CHYRON_Y 385
+
+static int g_apt_feloader;               /* the loader is resolving feloader */
+
+static int guest_name_is(uint32_t s, const char *want)
+{
+    uint32_t i, base = 0;
+    for (i = 0; i < 256 && MEM8(s + i); i++)
+        if (MEM8(s + i) == '/' || MEM8(s + i) == '\\')
+            base = i + 1;
+    for (i = 0; want[i]; i++) {
+        uint8_t c = MEM8(s + base + i);
+        if (c >= 'A' && c <= 'Z')
+            c = (uint8_t)(c - 'A' + 'a');
+        if (c != (uint8_t)want[i])
+            return 0;
+    }
+    return MEM8(s + base + i) == 0;
+}
+
+void ws_apt_load_begin(uint32_t name)
+{
+    g_apt_feloader = g_k < 1.0f && name && guest_name_is(name, "feloader");
+}
+
+void ws_apt_load_done(uint32_t apt)
+{
+    static const char magic[] = "Apt Data";
+    uint32_t h = 0x811C9DC5u, i;
+    int y;
+    if (!g_apt_feloader)
+        return;
+    g_apt_feloader = 0;
+    for (i = 0; i < 8; i++)
+        if (!apt || MEM8(apt + i) != (uint8_t)magic[i])
+            return;
+    y = (int16_t)(MEM8(apt + WS_FELOADER_Y_AT) | (MEM8(apt + WS_FELOADER_Y_AT + 1) << 8));
+    for (i = 0; i < WS_FELOADER_WINDOW_LEN; i++) {
+        uint32_t at = WS_FELOADER_WINDOW_AT + i;
+        uint8_t b = at == WS_FELOADER_Y_AT ? (uint8_t)(WS_CHYRON_Y & 0xFF)
+                  : at == WS_FELOADER_Y_AT + 1 ? (uint8_t)(WS_CHYRON_Y >> 8) : MEM8(apt + at);
+        h = (h ^ b) * 0x01000193u;      /* the y operand hashed as authored */
+    }
+    if (h == WS_FELOADER_WINDOW_FNV && y == WS_CHYRON_Y + WS_MENU_LEFT_TAG)
+        return;                         /* this data is already tagged */
+    if (h != WS_FELOADER_WINDOW_FNV || y != WS_CHYRON_Y) {
+        fprintf(stderr, "[WS] song notification: feloader.apt at %08X is not the known build (%08X, y %d); left centred\n",
+                apt, h, y);
+        return;
+    }
+    y += WS_MENU_LEFT_TAG;
+    MEM8(apt + WS_FELOADER_Y_AT) = (uint8_t)(y & 0xFF);
+    MEM8(apt + WS_FELOADER_Y_AT + 1) = (uint8_t)((y >> 8) & 0xFF);
+    fprintf(stderr, "[WS] song notification: anchored left (feloader.apt %08X)\n", apt);
 }
 
 float ws_widen_fov(float fov_deg, float from, float to, float cap)
