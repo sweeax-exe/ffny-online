@@ -786,7 +786,13 @@ class Engine:
                      vs / 'Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja']
         self.env['PATH'] = os.pathsep.join(map(str, additions)) + os.pathsep + self.env.get('PATH', '')
         for executable in ('cl.exe', 'cmake.exe', 'ninja.exe', 'rc.exe'):
-            if not shutil.which(executable, path=self.env['PATH']):
+            found = shutil.which(executable, path=self.env['PATH'])
+            if found and executable in ('cmake.exe', 'ninja.exe') and vs.resolve() not in Path(found).resolve().parents:
+                # Only Visual Studio's own CMake and Ninja: another CMake on PATH (a player's had one from a
+                # third-party toolchain without cmcldeps) built the resource file as "RC ..." and stopped
+                # with RC1107. Without Visual Studio's, add that part as for a missing one.
+                found = None
+            if not found:
                 if self.args.install_prerequisites and not provisioned:
                     # Build Tools are there but lack a part (CMake and Ninja, usually): add it to
                     # that installation; a fresh install would leave it as it is.
