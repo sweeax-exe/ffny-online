@@ -290,6 +290,20 @@ ROUTES = {
         "until": "game.getmatchsummary(#9", "after": 6, "secs": 3600,
         "shots": "",
     },
+    "online8-p1": {
+        "help": "online hub, player 1: eight room matches in a row (the start race on the match-type screen)",
+        "stages": ["getscreeninfo(intmain/mainmenu=lt@0.5"],
+        "tail": online_tail(8),
+        "until": "game.getmatchsummary(#15", "after": 6, "secs": 5400,
+        "shots": "",
+    },
+    "online8-p2": {
+        "help": "online hub, player 2: eight room matches in a row",
+        "stages": ["getscreeninfo(intmain/mainmenu=lt@0.5"],
+        "tail": online_tail(8).replace("right:", "left:"),
+        "until": "game.getmatchsummary(#15", "after": 6, "secs": 5400,
+        "shots": "",
+    },
     "online-rematch-p1": {
         "help": "online hub, player 1: a match, then Rematch from the results menu (both copies choose it)",
         "stages": ["getscreeninfo(intmain/mainmenu=lt@0.5"],
