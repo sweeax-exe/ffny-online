@@ -248,12 +248,12 @@ SECOND_MATCH_FFA = raw_stages([
 # (automatch reports its calls to the anchors), the scripted fighter fights it, the summary
 # goes back to the match-type screen, the room readies again and a second match follows.
 # Player 2 faces the other way, so its approach is "left".
-# HARNESS_SUMMARY_WAIT=<s> (default 4): when the summary's first A comes. The summary takes the
-# winner's pad, which on the loser's copy is the remote one: a winner's copy that left before the
-# loser's showed it left that copy on its summary for good (hub tests, 2026-10-25); a longer wait
-# keeps the winner there until both show it.
-SUMMARY_WAIT = os.environ.get("HARNESS_SUMMARY_WAIT", "4")
-ONLINE_TAIL = ",".join([FIGHT_TAIL, raw_stages([f"game.getmatchsummary(=a@{SUMMARY_WAIT}+3x12"]),
+# HARNESS_SUMMARY_PRESSES=<first>+<gap>x<count> (default 4+3x12): the A presses on the summary and
+# rewards screens. Those screens take the winner's pad, which on the loser's copy is the remote one:
+# a winner's copy that went on before the loser's showed the screen left that copy there for good
+# (hub tests, 2026-10-25/26); later and slower presses keep the two copies on the same screen.
+SUMMARY_PRESSES = os.environ.get("HARNESS_SUMMARY_PRESSES", "4+3x12")
+ONLINE_TAIL = ",".join([FIGHT_TAIL, raw_stages([f"game.getmatchsummary(=a@{SUMMARY_PRESSES}"]),
                         FIGHT_TAIL.replace("@game.startgame(", "@game.startgame(#2")])
 
 
@@ -262,7 +262,7 @@ def online_tail(matches):
     parts = [FIGHT_TAIL]
     for k in range(2, matches + 1):
         nth = f"#{2 * k - 3}" if k > 2 else ""
-        parts.append(raw_stages([f"game.getmatchsummary({nth}=a@{SUMMARY_WAIT}+3x12"]))
+        parts.append(raw_stages([f"game.getmatchsummary({nth}=a@{SUMMARY_PRESSES}"]))
         parts.append(FIGHT_TAIL.replace("@game.startgame(", f"@game.startgame(#{k}"))
     return ",".join(parts)
 
