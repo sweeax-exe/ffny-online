@@ -65,7 +65,24 @@ the PR is merged as `2b4e76bd89fa1d4e5a53f029536262983d585f25`.
 
 [Protected publication run](https://github.com/vyanhursky/DefJamFFNY-mods/actions/runs/40415849187)
 uses the existing verification, signing and Pages workflow with `bootstrap=false`.
-Publication outcome and released-helper update result are recorded below when complete.
+Both verification and publish jobs succeeded. The normal required-reviewer gate
+was approved as authenticated owner `vyanhursky` under the explicit publication
+request; self-review is permitted by the existing environment. No protection,
+workflow or signing-key change or bypass was made.
+
+The live signed catalogue is now revision4. The exact released v0.12.1 helper
+verified its pinned Ed25519 signature, selected stable1.1.0, downloaded the public
+ZIP, and performed a real managed update over signed1.0.0 in a disposable data
+root. All404 installed files match the receipt; previous1.0.0 remains available
+for rollback and the isolated save marker is unchanged. Result:
+`logs/menu-ui-v1.1/publication/released-helper-update-result.json`.
+Live index/signature copies and the workflow result remain beside it.
+
+Player action: open launcher Mods, refresh the catalogue, update HD Widescreen
+Menus to1.1.0, ensure the pack is enabled with its intended load order, and
+restart the game. No game reinstall is needed. The separate game repair is in
+[game PR #131](https://github.com/vyanhursky/DefJamFFNY-recomp/pull/131), milestone
+v0.12.2, for normal release-train integration rather than direct game publication.
 
 ## Hand-off
 

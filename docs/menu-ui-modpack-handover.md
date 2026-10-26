@@ -1,6 +1,6 @@
 # Menu/UI modpack implementation handover
 
-**1.1 publication — 2026-10-26:** [publication and compatibility report](research/menu-ui-v1.1-publication-2026-10-26.md).
+**1.1 published — 2026-10-26 (signed catalogue revision 4):** [publication and compatibility report](research/menu-ui-v1.1-publication-2026-10-26.md).
 The final stable archive supersedes local RC1: 180 native textures (17 unchanged
 original anchors added for installer validation), 80 wide/stretch entries,
 404 files. See `config/menu-ui-v1.1-release.json` for its immutable hash and URL.
