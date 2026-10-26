@@ -1680,9 +1680,11 @@ static void server_widget()
     for (int i = 0; i < n; i++)
         if (s[i].state == NETSERVER_UP && (nearest < 0 || s[i].ping_ms < s[nearest].ping_ms)) nearest = i;
     std::string automatic = nearest >= 0 ? std::string("Automatic (now ") + s[nearest].name + ")" : "Automatic (lowest ping)";
+    // Both (build 31): the rooms and quick matches of Europe and North America
+    std::string both = nearest >= 0 ? std::string("Both servers (home: ") + s[nearest].name + ")" : "Both servers";
     char buf[128];
-    std::string preview = choice == NETCHOICE_AUTO ? automatic : choice == NETCHOICE_CUSTOM ?
-        std::string("Custom: ") + recomp_settings_get_text("online", "server", buf, sizeof(buf), "") :
+    std::string preview = choice == NETCHOICE_AUTO ? automatic : choice == NETCHOICE_BOTH ? both :
+        choice == NETCHOICE_CUSTOM ? std::string("Custom: ") + recomp_settings_get_text("online", "server", buf, sizeof(buf), "") :
         server_line(s[choice == NETCHOICE_EU ? NETSERVER_EU : NETSERVER_NA]);
     ImGui::SetNextItemWidth(ImGui::GetFontSize() * 20);
     if (ImGui::BeginCombo("Server", preview.c_str())) {
@@ -1691,10 +1693,13 @@ static void server_widget()
             enum NetServerChoice c = i == NETSERVER_EU ? NETCHOICE_EU : NETCHOICE_NA;
             if (ImGui::Selectable(server_line(s[i]).c_str(), choice == c)) netservers_set_choice(c);
         }
+        if (ImGui::Selectable(both.c_str(), choice == NETCHOICE_BOTH)) netservers_set_choice(NETCHOICE_BOTH);
         ImGui::EndCombo();
     }
     ImGui::SetItemTooltip("Where you play online. Automatic takes the server with the lowest ping when you go online. "
-                          "Players on one server meet only players on the same server; accounts and stats are shared.");
+                          "Players on one server meet only players on the same server; accounts and stats are shared. "
+                          "Both servers: rooms and Quick Match on Europe and North America; matches across the ocean "
+                          "have higher ping.");
 }
 
 static void page_basics()

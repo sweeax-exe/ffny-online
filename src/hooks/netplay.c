@@ -2337,19 +2337,80 @@ static DWORD WINAPI autostart_thread(LPVOID unused)
                 fprintf(stderr, "[NETPLAY] tests: now on %s\n", N.server_text);
             }
         }
-        {   /* RECOMP_NETPLAY_QUICK="mode,players", default "0,2" (One on One) */
-            const char *q = getenv("RECOMP_NETPLAY_QUICK");
-            int qmode = 0, qmax = 2;
-            if (q && *q) sscanf(q, "%d,%d", &qmode, &qmax);
-            /* the relay lets only a client that announced King of the Hill into such a room */
-            for (i = 0; i < 50 && NETPLAY_IS_KOTH(qmode) && N.relay_caps < 0; i++) Sleep(100);
-            if (!strcmp(mode, "ranked")) netplay_lobby_ranked(fighter);
-            else netplay_lobby_quick(qmode, qmax);
+        /* RECOMP_NETPLAY_QUICK="mode,players", default "0,2" (One on One) */
+        const char *q = getenv("RECOMP_NETPLAY_QUICK"), *listed = getenv("RECOMP_TEST_JOIN_LISTED");
+        const char *who = name && *name ? name : "Test player";
+        int qmode = 0, qmax = 2, moves = 0;
+        char alone_in[7] = "";
+        ULONGLONG alone_since = 0;
+        if (q && *q) sscanf(q, "%d,%d", &qmode, &qmax);
+        /* the relay lets only a client that announced King of the Hill into such a room */
+        for (i = 0; i < 50 && NETPLAY_IS_KOTH(qmode) && N.relay_caps < 0; i++) Sleep(100);
+        if (listed && *listed) {
+            /* RECOMP_TEST_JOIN_LISTED=<s>: no quick match; join the first open room the room list shows
+             * (with RECOMP_NETPLAY_SERVER=both the other relay's rooms too, moving there to join), as a
+             * player does from FIND A ROOM. Every change of the list is logged; nothing is joined when
+             * no room shows within <s> seconds. */
+            NetServerRoom list[32];
+            ULONGLONG until = GetTickCount64() + (ULONGLONG)atoi(listed) * 1000, asked = 0;
+            int shown = -1, joined = 0;
+            while (!N.stop && GetTickCount64() < until && !joined) {
+                int n, k;
+                if (GetTickCount64() - asked >= 3000) { netplay_lobby_list(0xFF); asked = GetTickCount64(); }
+                netservers_fetch_rooms();
+                n = netservers_rooms(list, 32, NULL);
+                if (n != shown) {
+                    shown = n;
+                    fprintf(stderr, "[NETPLAY] tests: the room list shows %d room%s", n, n == 1 ? "" : "s");
+                    for (k = 0; k < n && k < 6; k++)
+                        fprintf(stderr, "%s %s on %s (mode %d, %d/%d, %d ms)", k ? "," : ":", list[k].room.code,
+                                list[k].server == NETSERVER_EU ? "EU" : list[k].server == NETSERVER_NA ? "NA" : "custom",
+                                list[k].room.mode, list[k].room.players, list[k].room.max, list[k].ping_ms);
+                    fprintf(stderr, "\n");
+                }
+                for (k = 0; k < n; k++) {
+                    const NetRoomInfo *x = &list[k].room;
+                    if (x->phase != 0 || x->players >= x->max || NETPLAY_IS_KOTH(x->mode)) continue;
+                    fprintf(stderr, "[NETPLAY] tests: joining the listed room %s on %s\n", x->code,
+                            list[k].server == NETSERVER_EU ? "EU" : list[k].server == NETSERVER_NA ? "NA" : "custom");
+                    if (list[k].server == netservers_connected()) netplay_lobby_join(x->code);
+                    else netservers_join_on(list[k].server, x->code, x->mode, who);
+                    joined = 1;
+                    break;
+                }
+                Sleep(250);
+            }
+            if (!joined) fprintf(stderr, "[NETPLAY] tests: no open room listed within %s s; joining nothing\n", listed);
+        } else if (!strcmp(mode, "ranked")) {
+            netplay_lobby_ranked(fighter);
+        } else {
+            netplay_lobby_quick(qmode, qmax);
         }
         ULONGLONG koth_readied = 0;
-        while (!N.stop && N.state != NETPLAY_FAILED && N.state != NETPLAY_OFF) {
+        /* a move to the other relay (Both servers) ends this session and starts the next: go on */
+        while (netservers_moving() || (!N.stop && N.state != NETPLAY_FAILED && N.state != NETPLAY_OFF)) {
             NetRoom r;
+            netservers_tick(NULL);
             netplay_lobby_room(&r);
+            /* Both servers: alone in the quick room for 20 s while the other relay has a player waiting
+             * for this mode, move there (as the online screens do; at most three moves) */
+            if (!listed && !strcmp(mode, "quick") && r.in_room && r.phase == 0 && r.player_count < 2 &&
+                !NETPLAY_IS_KOTH(r.settings.mode) && !netservers_moving() && moves < 3) {
+                int waiting = 0, ping = -1, to;
+                if (strcmp(alone_in, r.code)) { snprintf(alone_in, sizeof(alone_in), "%s", r.code); alone_since = GetTickCount64(); }
+                to = netservers_quick_move(qmode, (int)((GetTickCount64() - alone_since) / 1000), r.code, &waiting, &ping);
+                if (to >= 0) {
+                    moves++;
+                    toast(8000, "Nobody here yet: moving to %s (%d ms), where %d player%s waiting.",
+                          to == NETSERVER_NA ? "North America" : "Europe", ping, waiting, waiting == 1 ? " is" : "s are");
+                    fprintf(stderr, "[NETPLAY] tests: Both servers: moving the quick match to %s\n", to == NETSERVER_NA ? "NA" : "EU");
+                    alone_in[0] = 0;
+                    netservers_quick_on(to, qmode, qmax, who);
+                    continue;
+                }
+            } else if (!r.in_room || r.player_count >= 2) {
+                alone_in[0] = 0;
+            }
             if (r.in_room && NETPLAY_IS_KOTH(r.settings.mode)) {
                 /* King of the Hill: ready when called (back from the last fight), after
                  * RECOMP_NETPLAY_READY_DELAY_MS (tests: the "YOU'RE UP" screen shows meanwhile);
