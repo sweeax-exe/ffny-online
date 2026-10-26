@@ -225,6 +225,31 @@ silently (an unknown type), so no answer within about 2 s means "older relay or 
   per-IP message limit of the base protocol applies as well.
 - The summary log line counts the answers (`status=N` at its end).
 
+## Public room list without a session (both servers)
+
+Since build 31 a player can choose **Both servers**: the game stays in the lobby of one relay and
+also lists the rooms of the other, then moves over to join one. It asks the other relay with
+`ROOMLIST`, which, like `STATUS`, needs no token and registers nothing. Same header and version; a
+relay before build 31 drops it silently (an unknown type), and the game then shows no rooms of
+that relay.
+
+| Type | Name | Direction | Body after the header |
+|---|---|---|---|
+| 0x25 | `ROOMLIST` | client -> server | `nonce` u32, `build` 8 (the asker's fingerprint, zeros: any), `mode` u8 (0xFF any), `caps` u32 (bit 0: list King of the Hill rooms), then zero bytes (padding, see below) |
+| 0x25 | `ROOMLIST` | server -> client | `nonce` u32 (the request's), `total` u16 (rooms that match), `count` u8, then per room: `room` 6, `name` string, `mode` u8, `players` u8, `max` u8, `phase` u8 (as in `ROOMS`), `age` u16 (seconds since the room was opened, 65535 at most) |
+
+- The rooms are those `LIST` gives a registered client of that build: public rooms, newest first,
+  King of the Hill rooms only with caps bit 0, at most 30.
+- **The answer is never larger than the request.** A client pads its request with zero bytes to
+  the size of the answer it wants (the game sends a full 1200-byte datagram); the relay lists as
+  many rooms as fit in that size and says in `total` how many there are. Padding that is not zero
+  is malformed (dropped).
+- Each source IP gets at most 4 answers a second (separate from `STATUS`); further requests are
+  dropped silently. The per-IP message limit of the base protocol applies as well.
+- The summary log line counts the answers (`roomlist=N` at its end).
+- The game asks every 3 s while its room list shows, and every 5 s while it waits alone in a quick
+  room on Both servers (the `age` lets two such players decide who moves; see `docs/netplay.md`).
+
 ## Server operation
 
 The relay is one static binary (`netplay/relay`, Go). `relay -listen :27777` serves; it logs
