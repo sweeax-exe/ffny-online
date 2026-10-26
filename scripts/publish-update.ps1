@@ -14,12 +14,15 @@
 .PARAMETER Notes   One or two sentences for the update dialog.
 .PARAMETER Server  The ssh hosts (entries in ~/.ssh/config), comma-separated: the project's server,
                    and the first one for as long as older installs ask there.
+.PARAMETER RelayOnly Relays that serve no downloads but need the manifest for their build gate
+                   (the North America relay): latest.json and its signature only.
 .PARAMETER NoUpload  Build and sign only (build/update/).
 .PARAMETER NoGitHub  Upload to the servers but make no GitHub release.
 #>
 param(
     [Parameter(Mandatory = $true)][string]$Notes,
     [string[]]$Server = @('ffny-online', 'hetzner-sweeax'),
+    [string[]]$RelayOnly = @('ffny-na'),
     [string]$Key = "$env:USERPROFILE\.defjam\update-signing-key.pem",
     [switch]$NoUpload,
     [switch]$NoGitHub
@@ -75,6 +78,16 @@ ssh -o BatchMode=yes $host_ ("set -e; install -d -m 0755 $remote; " +
     "mv $remote/latest.json.sig.new $remote/latest.json.sig; mv $remote/latest.json.new $remote/latest.json; " +
     "rm -f /tmp/$setupName /tmp/defjam-latest.json /tmp/defjam-latest.json.sig; ls -l $remote")
 if ($LASTEXITCODE) { throw "Upload to $host_ failed" }
+}
+foreach ($host_ in $RelayOnly) {
+scp -o BatchMode=yes (Join-Path $out 'latest.json') "$($host_):/tmp/defjam-latest.json"
+scp -o BatchMode=yes (Join-Path $out 'latest.json.sig') "$($host_):/tmp/defjam-latest.json.sig"
+ssh -o BatchMode=yes $host_ ("set -e; install -d -m 0755 $remote; " +
+    "install -m 0644 /tmp/defjam-latest.json.sig $remote/latest.json.sig.new; " +
+    "install -m 0644 /tmp/defjam-latest.json $remote/latest.json.new; " +
+    "mv $remote/latest.json.sig.new $remote/latest.json.sig; mv $remote/latest.json.new $remote/latest.json; " +
+    "rm -f /tmp/defjam-latest.json /tmp/defjam-latest.json.sig")
+if ($LASTEXITCODE) { throw "Manifest upload to $host_ failed" }
 }
 "Published $version. Launchers will offer it at their next start."
 if ($NoGitHub) { return }
