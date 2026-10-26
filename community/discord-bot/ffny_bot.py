@@ -624,14 +624,46 @@ async def relay_summary():
     return core.parse_relay_summary(out.decode("utf-8", "replace"))
 
 
+def relay_status_blocking(host, timeout=2.0):
+    """(rooms, online) of one relay by STATUS, or None when it does not answer."""
+    import random
+    import socket
+    nonce = random.getrandbits(32)
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+            sock.settimeout(timeout)
+            addr = (socket.gethostbyname(host), core.RELAY_PORT)
+            for _ in range(2):
+                sock.sendto(core.status_request(nonce), addr)
+                try:
+                    data, _ = sock.recvfrom(1500)
+                except socket.timeout:
+                    continue
+                counts = core.parse_status_reply(data, nonce)
+                if counts is not None:
+                    return counts
+    except OSError:
+        return None
+    return None
+
+
+async def relay_totals():
+    """Every relay's (label, (rooms, online) or None), asked in parallel."""
+    loop = asyncio.get_running_loop()
+    results = await asyncio.gather(*(loop.run_in_executor(None, relay_status_blocking, host)
+                                     for _, host in core.RELAYS))
+    return [(label, counts) for (label, _), counts in zip(core.RELAYS, results)]
+
+
 @bot.tree.command(name="status", description="FFNY Online: the newest build and who is online")
 async def status_cmd(interaction):
     await interaction.response.defer(thinking=True)
-    manifest, summary = await fetch_manifest(), await relay_summary()
+    manifest, totals = await fetch_manifest(), await relay_totals()
     embed = discord.Embed(title="FFNY Online", colour=ORANGE)
     embed.add_field(name="Newest build", value=("%d (%s)" % (manifest["build"], manifest["version"]))
                     if manifest else "unknown")
-    embed.add_field(name="Server", value=core.status_name(summary))
+    for label, counts in totals:
+        embed.add_field(name=label, value=core.status_name(counts))
     embed.add_field(name="Links", value="[Download](%s) · [Disc guide](%s) · [GitHub](%s) · [Support the servers](%s)" % (
         core.DOWNLOAD, core.DISC_GUIDE, core.GITHUB, core.KOFI), inline=False)
     await interaction.followup.send(embed=embed)
@@ -787,7 +819,7 @@ async def update_status(client):
     channel = guild.get_channel(client.state.get("status_channel", 0)) if guild else None
     if channel is None:
         return
-    name = core.status_name(await relay_summary())
+    name = core.status_name(await relay_totals())
     if channel.name != name:
         try:
             await channel.edit(name=name, reason="player count")

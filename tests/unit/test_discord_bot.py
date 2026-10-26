@@ -138,3 +138,15 @@ def test_poll_form_parsing():
     assert core.parse_poll("", "a\nb")[0] is None
     assert core.parse_poll("Q", "\n".join(str(i) for i in range(11)))[0] is None
     assert len(core.parse_poll("Q", "x" * 80 + "\nb")[0][1][0]) == core.POLL_ANSWER_LEN
+
+
+def test_status_of_several_relays():
+    req = core.status_request(0x01020304)
+    assert req[:6] == b"DJNP\x01\x24" and len(req) == 26 and req[6:10] == bytes([4, 3, 2, 1])
+    reply = b"DJNP\x01\x24" + bytes([4, 3, 2, 1]) + bytes([1, 3]) + (12).to_bytes(2, "little") + (3).to_bytes(2, "little") + bytes(10)
+    assert core.parse_status_reply(reply, 0x01020304) == (3, 12)
+    assert core.parse_status_reply(reply, 7) is None
+    name = core.status_name([("Europe", (2, 9)), ("North America", (1, 3))])
+    assert name == "🟢 12 online · 3 rooms · EU 9 · NA 3" and len(name) <= 100
+    assert core.status_name([("Europe", None), ("North America", None)]) == "🔴 Server offline"
+    assert core.status_name([("Europe", (1, 4)), ("North America", None)]) == "🟢 4 online · 1 room · EU 4"

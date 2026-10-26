@@ -225,11 +225,47 @@ def parse_relay_summary(text):
 
 
 def status_name(summary):
-    """The status channel's name for a parse_relay_summary() result."""
+    """The status channel's name for a parse_relay_summary() result, or for relay_totals() of
+    several relays: (rooms, clients) or a list of (label, (rooms, clients) or None)."""
+    if isinstance(summary, list):
+        up = [(label, counts) for label, counts in summary if counts is not None]
+        if not up:
+            return "🔴 Server offline"
+        rooms = sum(c[0] for _, c in up)
+        clients = sum(c[1] for _, c in up)
+        parts = " · ".join("%s %d" % (RELAY_SHORT.get(label, label), c[1]) for label, c in summary
+                           if c is not None)
+        return "🟢 %d online · %d room%s · %s" % (clients, rooms, "" if rooms == 1 else "s", parts)
     if summary is None:
         return "🔴 Server offline"
     rooms, clients = summary
     return "🟢 %d online · %d room%s" % (clients, rooms, "" if rooms == 1 else "s")
+
+
+# The relays the game offers (src/hooks/netplay_servers.c): label, host. The bot asks each with
+# STATUS (docs/netplay-protocol.md, "Relay status") for its players online and rooms.
+RELAYS = [("Europe", "play.defjam.online"), ("North America", "na.defjam.online")]
+RELAY_SHORT = {"Europe": "EU", "North America": "NA"}
+RELAY_PORT = 27777
+STATUS_TYPE = 0x24
+PROTOCOL_VERSION = 1
+
+
+def status_request(nonce):
+    """A STATUS request: header, nonce, an all-zero build (any), 8 reserved zero bytes."""
+    return b"DJNP" + bytes([PROTOCOL_VERSION, STATUS_TYPE]) + int(nonce & 0xFFFFFFFF).to_bytes(4, "little") + bytes(16)
+
+
+def parse_status_reply(data, nonce):
+    """(rooms, online) from a STATUS answer to the request with this nonce, or None."""
+    if len(data) < 6 + 4 + 2 + 2 + 2 or data[:4] != b"DJNP" or data[5] != STATUS_TYPE:
+        return None
+    body = data[6:]
+    if int.from_bytes(body[0:4], "little") != (nonce & 0xFFFFFFFF):
+        return None
+    online = int.from_bytes(body[6:8], "little")
+    rooms = int.from_bytes(body[8:10], "little")
+    return rooms, online
 
 
 def parse_manifest(raw):
