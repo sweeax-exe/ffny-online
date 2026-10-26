@@ -24,6 +24,16 @@ copy of the game, `scripts/apt-patch.py`; the art and fonts of the online screen
    ping and players; a server that does not answer shows OFFLINE). The launcher's settings (Basics,
    Online) have the same choice. Players meet only players on the same server; accounts, statistics,
    the leaderboard and updates are the same on both (they stay on the Europe server).
+   **Both servers** (build 31, `[online] server = both`) lets the player decide whom to play: the hub
+   connects like Automatic (the chip says BOTH SERVERS and the server it is on), FIND A ROOM lists the
+   rooms (King of the Hill too) of Europe and North America, the lower ping first, each with its
+   server and this PC's ping there, and joining a room on the other server moves the hub there by
+   itself (leave, connect, join by code). QUICK MATCH searches on the lower-ping server; alone there
+   for 20 seconds while the other server has a player waiting in a quick room of the same mode, it
+   moves over with a notice (the player chose Both, so a higher ping is fine). Of two such players
+   the one whose room is younger moves (within 2 s, the one on North America); the other moves only
+   once that room has waited 35 s, so a player there who is not on Both is still met and two players
+   on Both never swap. The other choices keep the hint below and never move by themselves.
 2. **QUICK MATCH** (left/right picks the mode) puts you straight into an open room of that mode, or
    opens one that the next players are put into. **FIND A ROOM** lists the open rooms; **CREATE A
    ROOM** sets the mode, the players, the venues to vote on and whether the room is listed.
@@ -80,3 +90,11 @@ The server choice: `RECOMP_NETPLAY_SERVER=auto|eu|na` with `RECOMP_NETPLAY_SERVE
 one); `RECOMP_TEST_SERVER_SWITCH=<ms>,<eu|na|auto>` switches the server in the lobby the way the picker
 does before quick-matching. `scripts/netplay-hub-test.ps1 -NaRelayPort 27858 -EuLagMs 150 -Server auto`
 runs it end to end; `relayprobe -mode status` asks one relay for its `STATUS`.
+
+Both servers: `RECOMP_NETPLAY_SERVER=both`; `RECOMP_TEST_JOIN_LISTED=<s>` makes a `quick` copy join the
+first open room its room list shows instead (moving to the other relay when the room is there).
+`scripts/netplay-hub-test.ps1 -NaRelayPort 27858 -NaLagMs 150 -Servers na,both -JoinListed 1` has a copy
+on North America open a room that a copy on Both finds and joins; `-Servers na,both` alone has the Both
+copy quick-match on Europe and move to the North America copy after 20 s; `-Servers na,eu -JoinListed 1`
+shows that a copy on Europe never lists North America's room. `relayprobe -mode roomlist` asks one relay
+for its `ROOMLIST`.

@@ -28,7 +28,15 @@
 .PARAMETER NaRelayPort  build 30's server choice: a second local relay on this port plays "North America"
                     (RECOMP_NETPLAY_SERVER_NA), the one on -RelayPort "Europe" (RECOMP_NETPLAY_SERVER_EU);
                     0 (default): one relay, as before.
-.PARAMETER Server   with -NaRelayPort: every copy's server choice, auto (default), eu or na.
+.PARAMETER Server   with -NaRelayPort: every copy's server choice, auto (default), eu, na or both (build 31:
+                    the rooms of both relays; Quick Match moves to the other relay when only it has a player
+                    waiting).
+.PARAMETER Servers  with -NaRelayPort: one server choice per copy (auto, eu, na, both), beating -Server; e.g.
+                    -Servers na,both: copy 0 waits in a quick room on North America, copy 1 is on both.
+.PARAMETER JoinListed  copy numbers that do not quick-match but join the first open room their room list
+                    shows (RECOMP_TEST_JOIN_LISTED; with both, a room on the other relay too, moving there),
+                    giving up after -JoinListedSecs.
+.PARAMETER CopyGapSecs  seconds between starting two copies (default 3: the first copy opens the room).
 .PARAMETER EuLagMs  with -NaRelayPort: the "Europe" relay holds what it sends this long (relay -test-lag).
 .PARAMETER NaLagMs  the same for "North America".
 .PARAMETER SwitchTo with -NaRelayPort: every copy switches the server in the lobby (eu, na or auto) the way
@@ -38,9 +46,10 @@ param([ValidateRange(2, 4)][int]$Players = 2, [int]$Secs = 1200, [string[]]$Extr
       [ValidateSet('online', 'online5', 'online-rematch')][string]$Route = 'online', [int[]]$Fighters = @(55, 22, 9, 31),
       [string[]]$Stage = @(), [int]$FastKo = 0, [string]$FastKoWinner = 'alt', [switch]$Bot,
       [ValidateRange(0, 100)][int]$BotAggression = 60, [int]$RelayPort = 27777, [int]$BaseCore = 2,
-      [string]$DataPrefix = '', [int]$NaRelayPort = 0, [ValidateSet('auto', 'eu', 'na')][string]$Server = 'auto',
+      [string]$DataPrefix = '', [int]$NaRelayPort = 0, [ValidateSet('auto', 'eu', 'na', 'both')][string]$Server = 'auto',
       [int]$EuLagMs = 0, [int]$NaLagMs = 0, [ValidateSet('', 'auto', 'eu', 'na')][string]$SwitchTo = '',
-      [int]$SwitchAfterMs = 3000)
+      [int]$SwitchAfterMs = 3000, [ValidateSet('auto', 'eu', 'na', 'both')][string[]]$Servers = @(),
+      [int[]]$JoinListed = @(), [int]$JoinListedSecs = 90, [int]$CopyGapSecs = 3)
 $ErrorActionPreference = 'Stop'
 $repo = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 Set-Location $repo
@@ -91,11 +100,13 @@ for ($i = 0; $i -lt $Players; $i++) {
                  /XF Partition1.img Partition2.img Partition3.img Partition4.img Partition5.img | Out-Null
     }
     $copyRoute = if ($i % 2 -eq 0) { "$Route-p1" } else { "$Route-p2" }
+    $choice = if ($i -lt $Servers.Count) { $Servers[$i] } else { $Server }
     $serverEnv = if ($NaRelayPort) {
-        @('--env', "RECOMP_NETPLAY_SERVER=$Server", '--env', "RECOMP_NETPLAY_SERVER_EU=127.0.0.1:$RelayPort",
+        @('--env', "RECOMP_NETPLAY_SERVER=$choice", '--env', "RECOMP_NETPLAY_SERVER_EU=127.0.0.1:$RelayPort",
           '--env', "RECOMP_NETPLAY_SERVER_NA=127.0.0.1:$NaRelayPort")
     } else { @('--env', "RECOMP_NETPLAY_SERVER=127.0.0.1:$RelayPort") }
     if ($NaRelayPort -and $SwitchTo) { $serverEnv += @('--env', "RECOMP_TEST_SERVER_SWITCH=$SwitchAfterMs,$SwitchTo") }
+    if ($JoinListed -contains $i) { $serverEnv += @('--env', "RECOMP_TEST_JOIN_LISTED=$JoinListedSecs") }
     $args = @('scripts/harness.py', 'run', $copyRoute, '--preset', 'win-x64-release', '--secs', "$Secs",
               '--env', 'RECOMP_NETPLAY=quick') + $serverEnv + @(
               '--env', "RECOMP_NETPLAY_QUICK=$quick", '--env', "RECOMP_NETPLAY_FIGHTER=$($fighters[$i])",
@@ -116,7 +127,7 @@ for ($i = 0; $i -lt $Players; $i++) {
     $env:DEFJAM_DATA = $root
     $procs += Start-Process python -ArgumentList $args -PassThru -WindowStyle Hidden `
               -RedirectStandardOutput "$logs\copy$i.txt" -RedirectStandardError "$logs\copy$i.err"
-    Start-Sleep -Seconds 3       # the first copy opens the room and is player 1
+    Start-Sleep -Seconds $CopyGapSecs       # the first copy opens the room and is player 1
 }
 $env:DEFJAM_DATA = $data
 foreach ($p in $procs) { $p.WaitForExit(($Secs + 300) * 1000) | Out-Null }
@@ -133,10 +144,11 @@ for ($i = 0; $i -lt $Players; $i++) {
     $hit = Select-String -Path "$logs\copy$i.txt" -Pattern '^log\s+(\S+)' | Select-Object -First 1
     $log = if ($hit) { $hit.Matches.Groups[1].Value } else { $null }
     if (-not $hit) { "== copy $i  no run (harness: $(Get-Content "$logs\copy$i.err" -Raw))"; continue }
-    "== copy $i  $log"
+    $choice = if ($i -lt $Servers.Count) { $Servers[$i] } else { $Server }
+    "== copy $i  $log" + $(if ($NaRelayPort) { "  (server $choice$(if ($JoinListed -contains $i) { ', joins from the room list' }))" } else { '' })
     Get-Content "$logs\copy$i.txt" | Select-Object -First 4 | Select-Object -Skip 1
     if ($log -and (Test-Path $log)) {
-        Select-String -Path $log -Pattern '\[SERVERS\]|\[NETPLAY\] (tests: (server|switching|now)|room: the player|START|match|sync|Match over|A player|refused|desync)|\[AUTOMATCH\] sequence|"event":"(match_over|result)"|CRASH' |
+        Select-String -Path $log -Pattern '\[SERVERS\]|\[NETPLAY\] (tests: (server|switching|now|the room list|joining|no open room|Both servers)|room: the player|START|match|sync|Match over|A player|refused|desync)|\[AUTOMATCH\] sequence|"event":"(match_over|result)"|CRASH' |
             ForEach-Object { $_.Line.Substring(0, [Math]::Min(170, $_.Line.Length)) }
         Select-String -Path $log -Pattern 'checksums compared' | Select-Object -Last 1 | ForEach-Object Line
         if ($FastKo -gt 0) { "fast knockouts: " + @(Select-String -Path $log -Pattern '\[TEST-KO\] match').Count }
