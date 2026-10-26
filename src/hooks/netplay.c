@@ -2164,6 +2164,34 @@ void netplay_on_result(uint32_t winners, uint32_t losers, uint32_t code)
     report_event("result", winners, 0, (code & 4u) != 0);
 }
 
+/* Back in the menus after a room match whose decision was recorded but never reported: a ring out
+ * (result code 0x801) ends the fight without the decided phases and without the decided flag, so the
+ * step's reading saw no winner and the match went unreported (two-copy Ringout test, 2026-10-26). The
+ * game marks every fighter it put out as ended (+0x932 bit 0x200, team-and-special-match-types.md
+ * 3.4); the ones still standing are the winners, a Team match's side among them. */
+#define F_DEFEAT_WORD 0x932u
+static void report_missed_result(void)
+{
+    uint32_t count = MEM32(G_RESULT_COUNT), code = 0, standing = 0;
+    int slot;
+    if (N.reported || !N.fighting_seen || N.koth_match || !N.lockstep || N.desync) return;
+    if (count && count <= RESULTS_MAX) code = MEM16(G_RESULTS + (count - 1u) * 0x10u + 0xEu);
+    if (!(code & 1u)) return;                           /* nothing decisive recorded */
+    if (code & 4u) { netplay_on_result(0, 0, 4u); return; }
+    for (slot = 0; slot < N.fighters && slot < MAXP; slot++)
+        if (!(MEM16(ACTORS + (uint32_t)slot * STRIDE + F_DEFEAT_WORD) & 0x200u)) standing |= 1u << slot;
+    if (!standing) return;
+    if (N.report_m.type == ONLINE_MODE_TEAM && N.fighters == 4) {
+        standing = (standing & 3u ? 3u : 0u) | (standing & 0xCu ? 0xCu : 0u);
+        if (standing == 0xFu) return;                   /* both sides standing: no side decided */
+    } else if (standing & (standing - 1u)) {
+        return;                                         /* more than one standing: not one winner */
+    }
+    fprintf(stderr, "[NETPLAY] the decision (code %04X) came without the decided phase: the fighters standing win\n",
+            (unsigned)code);
+    netplay_on_result(standing, 0, 1u);
+}
+
 /* Players stopped answering, or left the room, during this match's fight, before it was decided:
  * a match left that way kept the leaver's record clean, and the one who stayed played on against
  * an idle fighter for nothing (players' reports, 2026-10-24). Reported once, as "left". */
@@ -2234,6 +2262,7 @@ void netplay_on_main_menu(void)
         return;
     }
     if (N.lobby && N.match_live && N.match_seen) {
+        report_missed_result();     /* a decision the phase word never showed (a ring out) */
         koth_check_result(1);   /* King of the Hill: the fight's RESULT, a draw if none was recorded */
         end_hub_match("Match over; back in the room.");
     }
@@ -2771,6 +2800,8 @@ static void koth_check_result(int final)
  * steps, kept in memory and written to logs/desync-<match>-p<position>.bin when this PC sees a desync,
  * so the copies' files show the first step and the very fields where they parted (the checksum covers
  * six fields a fighter). Each record: u32 step, then the ranges' bytes in this order. */
+static uint32_t weapon_hash(void);      /* the weapon manager, below with its update */
+static unsigned g_weapon_waits;
 #define STEPLOG_RING 256
 static const uint32_t k_steplog_ranges[][2] = {
     { ACTORS, ACTORS + 4u * STRIDE }, { 0x003B8F28u, 0x003B9074u }, { 0x003BE778u, 0x003BF1B8u },
@@ -2872,6 +2903,9 @@ void netplay_on_step(void)
             }
             fprintf(stderr, "[NETPLAY] fight setup: type %d, mode mask %02X, arena kind %u;%s\n", N.report_m.type,
                     MEM8(0x003B907Eu), MEM32(0x003B9084u), line);
+            fprintf(stderr, "[NETPLAY] weapons at the first step: %08X (their update waited %u times)\n", weapon_hash(),
+                    g_weapon_waits);
+            g_weapon_waits = 0;
         }
     }
     {
@@ -3109,8 +3143,38 @@ void netplay_sound_command(void)
 #define SOUND_WRAP(a) extern void sub_##a(void);     static void snd_##a(void) { if (N.resim) { g_eax = 0; g_esp += 4; return; } sub_##a(); }
 SOUND_HANDLERS(SOUND_WRAP)
 
+/* The weapon manager (CLogic+0x2C9E4 = 0x376144, 16 slots of 0xD0; docs/research/weapon-position-timing.md):
+ * its update (vtable+8, called once per game update through the task list, so recomp_lookup_manual
+ * hands it out through netplay_sound_handler) moves the weapons lying in the arena. While a room's match
+ * loads, the game updates at each PC's own pace, so the weapons had settled differently by the first
+ * fight step (four-copy Team test, 2026-10-26: their matrices differed at step 1, the fighters at step
+ * 2). In a lockstep room match the update waits for the first fight step; from then on it runs once a
+ * step on every PC. */
+extern void sub_000BCC50(void);
+#define WEAPON_MANAGER 0x00376144u
+static unsigned g_weapon_waits;
+
+static uint32_t weapon_hash(void)
+{
+    uint32_t h = 2166136261u, slot, k;
+    for (slot = 0; slot < 16; slot++)
+        for (k = 0; k < 16; k++) h = (h ^ MEM32(WEAPON_MANAGER + slot * 0xD0u + 0xCu + 4u * k)) * 16777619u;
+    return h;
+}
+
+static void weapon_update(void)
+{
+    if (N.lockstep && N.lobby && N.match_live && (!N.match_seen || N.step == 0)) {
+        g_weapon_waits++;
+        g_esp += 8;                 /* thiscall, ret 4: the dt argument and the return address */
+        return;
+    }
+    sub_000BCC50();
+}
+
 void *netplay_sound_handler(uint32_t va)
 {
+    if (va == 0x000BCC50u) return (void *)weapon_update;
 #define SOUND_CASE(a) if (va == 0x##a##u) return (void *)snd_##a;
     SOUND_HANDLERS(SOUND_CASE)
     return NULL;

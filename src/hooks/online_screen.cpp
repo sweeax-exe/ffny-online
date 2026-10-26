@@ -1448,7 +1448,11 @@ void draw_rooms(ImDrawList *dl, const Frame &f, const Pad &pad)
         const NetRoomInfo &r = rooms[S.rooms_sel];
         bool open = (r.phase == 0 || NETPLAY_IS_KOTH(r.mode)) && r.players < r.max;
         char players[160], where[80] = "";
-        if (int v = fixed_venue(r.mode)) snprintf(where, sizeof(where), "At %s. ", online_venue_name(v));
+        if (int v = fixed_venue(r.mode)) {      // "At Red Hook Tire Co. " (no second full stop)
+            const char *vn = online_venue_name(v);
+            size_t len = strlen(vn);
+            snprintf(where, sizeof(where), "At %s%s ", vn, len && vn[len - 1] == '.' ? "" : ".");
+        }
         else if (is_team(r.mode)) snprintf(where, sizeof(where), "Two on two. ");
         snprintf(players, sizeof(players), "%s%d of %d players. %s", where, r.players, r.max,
                  NETPLAY_IS_KOTH(r.mode) ? (open ? "Winner stays on. Press A to join the line." : "Full.") :
