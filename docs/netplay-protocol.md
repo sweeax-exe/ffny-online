@@ -247,8 +247,8 @@ that relay.
 - Each source IP gets at most 4 answers a second (separate from `STATUS`); further requests are
   dropped silently. The per-IP message limit of the base protocol applies as well.
 - The summary log line counts the answers (`roomlist=N` at its end).
-- The game asks every 3 s while its room list shows, and every 5 s while it waits alone in a quick
-  room on Both servers (the `age` lets two such players decide who moves; see `docs/netplay.md`).
+- The game asks at most every 3 s per relay, while its room list shows or while it waits alone in a
+  quick room on Both servers (the `age` lets two such players decide who moves; see `docs/netplay.md`).
 
 ## Server operation
 
