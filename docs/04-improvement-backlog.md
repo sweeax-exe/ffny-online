@@ -25,7 +25,16 @@ Ordered by expected value:
    `scripts/scene-perf.py` and the executor's share of a frame before and after. This also matters on
    slower PCs and the Steam Deck. Done when a fight frame's executor time is measured before and after and
    `regress.py` passes.
-3. **A precise frame timer.** `flip_pace()` (toolkit `src/kernel/nv2a_pb_exec.c`) on Windows sleeps to
+   **Partly done 2026-10-26 (#109):** the executor's `[EXECTIME]` line (`RECOMP_PRESENT_PACING=1`) measures
+   it. In the Story Power Plant fight the executor was busy 15.5 ms of 16.7 ms a frame and never waited
+   for the title. Three shared-code changes took it to 11.6 ms: a fast path for shader-constant words
+   (about 200,000 a frame, 70% of all words; `RECOMP_PB_CONST_FAST=0`), a per-batch vertex-attribute plan
+   (gather 2.2 -> 1.1 ms; `RECOMP_GATHER_PLAN=0`) and four-lane texture/combiner signatures
+   (`RECOMP_FAST_SIG=0`). Frames over 18 ms went from 6.2% to 0.2%. Left: redundant D3D11 state changes,
+   the remaining dispatch for non-constant words, and item 7.
+3. **A precise frame timer.** **Done 2026-10-26 (#109)** with a high-resolution waitable timer
+   (`RECOMP_PACE_TIMER=0` for `Sleep()`); scripted runs, which have no input thread, had frame medians of
+   17.1 ms before it. The #93 throttling repro is still to be run against it. `flip_pace()` (toolkit `src/kernel/nv2a_pb_exec.c`) on Windows sleeps to
    about 1 ms before the deadline, then spins. The sleep depends on `timeBeginPeriod(1)` (called by the
    input thread), which Windows can ignore under power throttling (#93). Use a high-resolution waitable
    timer (`CREATE_WAITABLE_TIMER_HIGH_RESOLUTION`) for the wait and keep only a short spin. Done when
@@ -44,6 +53,16 @@ Ordered by expected value:
    in that data folder. Run the same fight with a working pack and check `frames.csv` texture upload
    columns and `[ONSCREEN]` for hitches at first use. Done when measured; plan streaming or upload
    spreading only if uploads show up as late frames.
+
+7. **A decoded CPU vertex-program runner.** In widescreen, `ws_place_batch()` classifies every batch by
+   running the title's vertex program on the CPU for its first vertex (more for 2D batches), and
+   `nv2a_vsh_run_ready()` goes through the canonical interpreter (`nv2a_vsh_interp.c`), which decodes every
+   field of every instruction for each vertex. The port's own decoded runner was dropped in the v0.16
+   rebase (toolkit `e5557ed`: decode is kept only for HLSL). After the #109 changes this interpreter was the
+   largest single item in the executor profile (about 18% of its in-exe samples, roughly 1.3 ms a frame in
+   Story Power Plant at 16:9). Run the already decoded `s_dec` instructions instead, with a check mode that
+   runs both and compares outputs. Done when outputs match on recorded programs and the executor's time
+   is measured before and after.
 
 Not on this list: frame rates above 60 (needs the game clock separated from rendering, deferred since M6),
 and exclusive full screen (#92: borderless full screen already gets VRR).
@@ -103,13 +122,15 @@ read-back), the `[VKPERF]` line, and `perf record -g -p <game pid>` on the Deck 
 
 Ordered by expected value:
 
-1. **Faster method dispatch.** About 14,000 push-buffer methods a frame (half are vertex-program
+1. **Faster method dispatch.** (Shader constants done 2026-10-26 in shared code, #109; measure on the Deck.)
+   About 14,000 push-buffer methods a frame (half are vertex-program
    constant writes) each go through two big switches: `nv2a_pb_exec_method` and then
    `pgraph_d3d11_method`. Decode runs of consecutive constant-register methods (`NV097_SET_TRANSFORM_
    CONSTANT` and the program-load window) as one block copy, and dispatch the common state methods
    through a table indexed by `method >> 2` instead of a switch. Done when the executor's CPU per frame
    drops by at least 1 ms in the report's benchmark with the golden frame signatures unchanged.
-2. **A batch path in `fetch_attr`.** The vertex fetch runs per vertex and per attribute with a bounds
+2. **A batch path in `fetch_attr`.** (Done 2026-10-26 in shared code as the per-batch attribute plan, #109;
+   measure on the Deck.) The vertex fetch runs per vertex and per attribute with a bounds
    check and a format switch every time. Resolve each attribute's stride, format and base once per
    draw, then convert a whole range in a loop. Done when `fetch_attr`'s share of the executor thread
    is measured before and after and `m2`, `m3`, `m4a` still match bit for bit.
