@@ -109,6 +109,45 @@ void ws_apt_load_begin(uint32_t name);
 void ws_apt_load_done(uint32_t apt);
 void sub_001810B0_enter(void) { ws_apt_load_begin(MEM32(g_esp + 8)); }
 void sub_00056F50_enter(void) { ws_apt_load_done(MEM32(g_esp + 8)); }
+
+/* ---- Story shops: no LOADING frame on an item change (issue #119) ------
+ *
+ * Changing an item in a shop, the Sketch Artist or the wardrobe ends with
+ * CreatePlayer.ForceUpdate, whose callback (guest 0x0004A1A0) reconciles the
+ * created player's parts and loads what changed. The part loaders
+ * (0x000992E0, 0x0009A050, 0x0009AB90) announce a blocking load with event
+ * 0xF0000038, and the observer registered for it (0x0005AF80) clears the frame,
+ * draws the LOADING caption at the lower right, presents it and returns. On
+ * the console the load came off the disc and the card was the feedback for
+ * it; here it takes a few dozen milliseconds, so every item change flashes one
+ * black LOADING frame over the 4:3 picture before the preview comes back.
+ *
+ * Within a ForceUpdate -- from its callback's entry until the game presents
+ * its next ordinary frame -- the LOADING frame is skipped, so the preview
+ * stays on screen until the new item is ready. The load, the event and its
+ * other observers are untouched, and every other load keeps its card.
+ * RECOMP_SHOP_LOADING_CARD=1 restores the card. */
+static uint32_t s_presents;                     /* frames the game has presented */
+static uint32_t s_refresh_at = 0xFFFFFFFFu;     /* s_presents when a ForceUpdate began */
+void sub_00018DF0_enter(void) { s_presents++; }
+void sub_0004A1A0_enter(void) { s_refresh_at = s_presents; }
+extern void sub_0005AF80_gen(void);
+void sub_0005AF80(void)
+{
+    static int keep = -1;
+    if (keep < 0) {
+        const char *e = getenv("RECOMP_SHOP_LOADING_CARD");
+        keep = e && *e == '1';
+    }
+    if (!keep && s_refresh_at == s_presents) {
+        static unsigned skipped;
+        if (++skipped <= 4 || (skipped & (skipped - 1)) == 0)
+            fprintf(stderr, "[SHOP] item refresh: LOADING frame skipped (%u so far)\n", skipped);
+        g_esp += 4;     /* cdecl observer: consume the return address; the dispatcher pops its two args */
+        return;
+    }
+    sub_0005AF80_gen();
+}
 void sub_001BC690_enter(void) { defjam_test_rng(g_esp); }
 void sub_001AD220_enter(void) { defjam_test_ai_seed(g_esp); }
 /* The seeding routine every generator of this kind goes through (thiscall). */
