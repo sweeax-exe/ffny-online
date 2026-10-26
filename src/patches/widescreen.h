@@ -42,6 +42,17 @@ static inline float ws_x_center(float x, float k) { return 320.0f + (x - 320.0f)
 static inline float ws_x_left(float x, float k) { return x * k; }
 static inline float ws_x_right(float x, float k) { return 640.0f - (640.0f - x) * k; }
 
+/* The front end's song notification (feloader's `chyron` clip, issue #118) is
+ * drawn this far below its authored place; the renderer moves it back and
+ * anchors it to the left edge (nv2a_ws_set_left_tag). */
+#define WS_MENU_LEFT_TAG 8192
+
+/* The APT movie loader (sub_001810B0) is about to resolve `name`.apt; then the
+ * next step of the load (sub_00056F50) is handed the resolved data at `apt`,
+ * before any of the movie's actions run. */
+void ws_apt_load_begin(uint32_t name);
+void ws_apt_load_done(uint32_t apt);
+
 /* Hor+: the horizontal field of view (the game's FOV is horizontal, degrees)
  * that shows the same vertical extent at aspect `to` as `fov` does at `from`,
  * capped at `cap`. Unchanged when `to` is not wider. */
