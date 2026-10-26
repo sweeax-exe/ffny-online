@@ -50,6 +50,17 @@ double updater_progress(void);
 /* A line for the screen: what happened or went wrong. */
 void updater_message(char *text, int size);
 
+/* The step an update is on, for "Step 6 of 8 - Translating the game code": 1 is the download, then
+ * the setup's steps (setup/engine.py STAGE_NAMES). Returns 0 (index 0) while no step is known, as
+ * with an older setup that does not report its steps. */
+int updater_stage(int *index, int *total, char *name, int size);
+
+/* Seconds since the update was started (download included); 0 before. */
+int updater_elapsed(void);
+
+/* Bytes of the setup downloaded so far, and its size from the signed manifest. */
+int updater_download(unsigned long long *got, unsigned long long *total);
+
 #ifdef __cplusplus
 }
 #endif

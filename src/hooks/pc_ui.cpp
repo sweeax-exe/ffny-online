@@ -1143,6 +1143,73 @@ static void page_online(UiMode mode)
                        "lockstep through the relay server, so it is the same fight on every screen.");
 }
 
+// An update in progress, as the launcher's GAME card and its "Update available" window show it:
+// "Step 6 of 8 · Translating the game code", the setup's own line of what it is doing (or the MB
+// downloaded), the percentage and the time so far. The steps come from updater_stage (1 is the
+// download, then setup/engine.py STAGE_NAMES); with a setup that reports none, "Installing build N".
+struct UpdateProgress {
+    float fraction = 0;
+    int percent = 0;
+    char step[128] = "";        // "Step 6 of 8 · Translating the game code"
+    char step_short[128] = "";  // the same without a "(...)" remark, for narrow places
+    char detail[256] = "";
+    char elapsed[32] = "";      // "2:41 so far"
+};
+
+static UpdateProgress update_progress(UpdaterState state, int build)
+{
+    UpdateProgress p;
+    int index = 0, total = 0;
+    char name[64];
+    p.fraction = (float)updater_progress();
+    p.percent = (int)(p.fraction * 100.0f + 0.5f);
+    if (updater_stage(&index, &total, name, sizeof(name)) && total >= index) {
+        snprintf(p.step, sizeof(p.step), "Step %d of %d  \xC2\xB7  %s", index, total, name);
+        snprintf(p.step_short, sizeof(p.step_short), "%s", p.step);
+        if (char *remark = strstr(p.step_short, " (")) *remark = 0;
+    } else {
+        snprintf(p.step, sizeof(p.step), "%s build %d", state == UPDATER_DOWNLOADING ? "Downloading" : "Installing", build);
+        snprintf(p.step_short, sizeof(p.step_short), "%s", p.step);
+    }
+    unsigned long long got = 0, size = 0;
+    if (state == UPDATER_DOWNLOADING && updater_download(&got, &size) && size)
+        snprintf(p.detail, sizeof(p.detail), "%.1f MB of %.1f MB", got / 1048576.0, size / 1048576.0);
+    else
+        updater_message(p.detail, sizeof(p.detail));
+    for (char *c = p.detail; *c; c++)
+        if (*c == '\n' || *c == '\r' || *c == '\t') *c = ' ';
+    int secs = updater_elapsed();
+    if (secs >= 3600)
+        snprintf(p.elapsed, sizeof(p.elapsed), "%d:%02d:%02d so far", secs / 3600, secs / 60 % 60, secs % 60);
+    else if (secs > 0)
+        snprintf(p.elapsed, sizeof(p.elapsed), "%d:%02d so far", secs / 60, secs % 60);
+    return p;
+}
+
+// text cut to one line of at most max_w, ending in "..." when it had to be cut (never inside a
+// UTF-8 sequence).
+static void fit_line(ImFont *font, float size, const char *text, float max_w, char *out, size_t out_size)
+{
+    snprintf(out, out_size, "%s", text);
+    if (font->CalcTextSizeA(size, FLT_MAX, 0, out).x <= max_w) return;
+    size_t n = strlen(out);
+    while (n > 0) {
+        do n--; while (n > 0 && ((unsigned char)out[n] & 0xC0) == 0x80);
+        while (n > 0 && out[n - 1] == ' ') n--;
+        if (n + 4 > out_size) continue;
+        memcpy(out + n, "...", 4);
+        if (font->CalcTextSizeA(size, FLT_MAX, 0, out).x <= max_w) return;
+    }
+    snprintf(out, out_size, "...");
+}
+
+// The step for a place max_w wide: whole, then without its remark, then cut.
+static void fit_step(ImFont *font, float size, const UpdateProgress &p, float max_w, char *out, size_t out_size)
+{
+    if (font->CalcTextSizeA(size, FLT_MAX, 0, p.step).x <= max_w) snprintf(out, out_size, "%s", p.step);
+    else fit_line(font, size, p.step_short, max_w, out, out_size);
+}
+
 static void page_general(UiMode mode)
 {
     (void)mode;
@@ -1202,8 +1269,15 @@ static void page_general(UiMode mode)
         UpdaterState state = updater_state();
         updater_message(message, sizeof(message));
         ImGui::Text("This is build %d.", updater_local_build());
-        if (message[0]) { ImGui::SameLine(); ImGui::TextDisabled("%s", message); }
-        if (state != UPDATER_CHECKING && state != UPDATER_DOWNLOADING && state != UPDATER_STARTED) {
+        if (state == UPDATER_DOWNLOADING || state == UPDATER_INSTALLING) {
+            int build = 0;
+            updater_info(&build, nullptr, 0, nullptr, 0);
+            UpdateProgress p = update_progress(state, build);
+            ImGui::SameLine();
+            ImGui::TextDisabled("%s  %d%%%s%s", p.step, p.percent, p.elapsed[0] ? "  \xC2\xB7  " : "", p.elapsed);
+        } else if (message[0]) { ImGui::SameLine(); ImGui::TextDisabled("%s", message); }
+        if (state != UPDATER_CHECKING && state != UPDATER_DOWNLOADING && state != UPDATER_INSTALLING
+                && state != UPDATER_STARTED) {
             if (ImGui::Button("Check for updates")) updater_check();
             if (state == UPDATER_AVAILABLE && mode == UI_LAUNCHER) {
                 ImGui::SameLine();
@@ -1532,14 +1606,29 @@ static void game_card(ImVec2 a, ImVec2 b, float s, UiResult &result)
     }
     case UPDATER_DOWNLOADING:
     case UPDATER_INSTALLING: {
-        char title[64];
+        // Step and percentage, what the setup is doing, the bar, then the build and the time so far
+        // (the card is taller while an update runs: launcher_screen).
+        UpdateProgress p = update_progress(state, build);
+        char text[256], pct[16];
+        float right = b.x - 20 * s, head_px = 16.5f * s, detail_px = 13.5f * s, note_px = 12.5f * s;
         status_dot(dl, at, s, k_gold);
-        snprintf(title, sizeof(title), "%s build %d  %d%%", state == UPDATER_DOWNLOADING ? "Downloading" : "Installing",
-                 build, (int)(updater_progress() * 100.0 + 0.5));
-        card_line(dl, head, s, k_white, title, true);
-        ImVec2 ba(at.x, at.y + 30 * s), bb(b.x - 20 * s, at.y + 36 * s);
+        snprintf(pct, sizeof(pct), "%d%%", p.percent);
+        float pw = text_size(bold_font(), head_px, pct).x;
+        dl->AddText(bold_font(), head_px, ImVec2(right - pw, head.y), col(k_gold), pct);
+        fit_step(bold_font(), head_px, p, right - pw - 12 * s - head.x, text, sizeof(text));
+        card_line(dl, head, s, k_white, text, true);
+        fit_line(ImGui::GetFont(), detail_px, p.detail, right - at.x, text, sizeof(text));
+        card_line(dl, ImVec2(at.x, at.y + 26 * s), s, detail, text, false);
+        ImVec2 ba(at.x, at.y + 49 * s), bb(right, at.y + 55 * s);
         dl->AddRectFilled(ba, bb, col(k_white, 0.10f), 3 * s);
-        dl->AddRectFilled(ba, ImVec2(ba.x + (bb.x - ba.x) * (float)updater_progress(), bb.y), col(k_red_hi), 3 * s);
+        if (p.fraction > 0)
+            dl->AddRectFilled(ba, ImVec2(ba.x + (bb.x - ba.x) * std::min(p.fraction, 1.0f), bb.y), col(k_red_hi), 3 * s);
+        snprintf(text, sizeof(text), "Updating to build %d", build);
+        dl->AddText(ImGui::GetFont(), note_px, ImVec2(at.x, at.y + 63 * s), col(k_white, 0.55f), text);
+        if (p.elapsed[0]) {
+            float ew = text_size(ImGui::GetFont(), note_px, p.elapsed).x;
+            dl->AddText(ImGui::GetFont(), note_px, ImVec2(right - ew, at.y + 63 * s), col(k_white, 0.55f), p.elapsed);
+        }
         line[0] = 0;
         break;
     }
@@ -1850,15 +1939,22 @@ static void update_popup(UiResult &result)
     }
     ImGui::Spacing();
     if (state == UPDATER_DOWNLOADING || state == UPDATER_INSTALLING) {
-        char overlay[48];
-        snprintf(overlay, sizeof(overlay), "%s %d%%", state == UPDATER_DOWNLOADING ? "Download" : "Installing",
-                 (int)(updater_progress() * 100.0 + 0.5));
+        // "Step 6 of 8 · Translating the game code", the bar with the percentage, what the setup is
+        // doing on one line, and the time so far.
+        UpdateProgress p = update_progress(state, build);
+        char text[256], overlay[16];
+        float width = ImGui::GetFontSize() * 28;
+        ImGui::PushFont(g_font_bold, 0.0f);
+        fit_step(ImGui::GetFont(), ImGui::GetFontSize(), p, width, text, sizeof(text));
+        ImGui::TextUnformatted(text);
+        ImGui::PopFont();
+        snprintf(overlay, sizeof(overlay), "%d%%", p.percent);
         ImGui::PushStyleColor(ImGuiCol_PlotHistogram, k_red);
-        ImGui::ProgressBar((float)updater_progress(), ImVec2(-1, 0), overlay);
+        ImGui::ProgressBar(std::min(p.fraction, 1.0f), ImVec2(width, 0), overlay);
         ImGui::PopStyleColor();
-        ImGui::PushTextWrapPos(ImGui::GetFontSize() * 28);
-        ImGui::TextUnformatted(message);
-        ImGui::PopTextWrapPos();
+        fit_line(ImGui::GetFont(), ImGui::GetFontSize(), p.detail, width, text, sizeof(text));
+        ImGui::TextUnformatted(text);
+        if (p.elapsed[0]) ImGui::TextDisabled("%s", p.elapsed);
         ImGui::TextDisabled("You can keep this window open; the game stays as it is until you restart.");
         if (ImGui::Button("Hide", ImVec2(ImGui::GetFontSize() * 8, 0))) ImGui::CloseCurrentPopup();
     } else if (state == UPDATER_INSTALLED) {
@@ -2092,10 +2188,12 @@ static UiResult draw_launcher(float x, float y, float width, float height)
         open_url(k_discord_invite);
     dl->AddText(ImGui::GetFont(), 12.5f * s, at(48, 648), col(k_white, 0.5f), "Fan project, not affiliated with EA.");
 
-    // The cards.
+    // The cards. While an update runs the GAME card is taller (step, what it is doing, bar, time)
+    // and the news gives it the room.
+    float grow = upd == UPDATER_DOWNLOADING || upd == UPDATER_INSTALLING ? 24 : 0;
     account_card(at(740, 64), at(1060, 168), s);
-    game_card(at(740, 184), at(1060, 288), s, result);
-    news_card(at(740, 304), at(1060, 520), s);
+    game_card(at(740, 184), at(1060, 288 + grow), s, result);
+    news_card(at(740, 304 + grow), at(1060, 520), s);
 
     {
         static bool opened;

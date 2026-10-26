@@ -30,6 +30,9 @@ int updater_can_install(void) { return 0; }
 void updater_install(void) {}
 double updater_progress(void) { return 0; }
 void updater_message(char *t, int size) { if (size > 0) t[0] = 0; }
+int updater_stage(int *i, int *t, char *n, int size) { if (i) *i = 0; if (t) *t = 0; if (size > 0) n[0] = 0; return 0; }
+int updater_elapsed(void) { return 0; }
+int updater_download(unsigned long long *got, unsigned long long *total) { if (got) *got = 0; if (total) *total = 0; return 0; }
 
 #else
 
@@ -61,6 +64,15 @@ static int g_build;
 static char g_version[64], g_notes[1024], g_setup[96], g_sha256[65];
 static unsigned long long g_size;
 static volatile LONG g_permille;
+/* The step shown as "Step n of m": 1 is the download, then the setup's own steps from its
+ * <status>.stage file ("<index> <total> <key> <name>", setup/engine.py write_stage), one later.
+ * g_step 0 = no step known (an older setup writes no stage file). */
+#define SETUP_STEPS_DEFAULT 7      /* setup/engine.py stage_steps() without HD textures */
+static int g_step, g_steps;
+static char g_step_name[64];
+static volatile LONG64 g_got;      /* bytes of the setup downloaded */
+static volatile ULONGLONG g_started;   /* GetTickCount64 when the update began, 0 before */
+static volatile ULONGLONG g_test_offer;   /* RECOMP_TEST_UPDATE_PROGRESS=<step>,popup: "available" until then */
 
 static BOOL CALLBACK init_once(PINIT_ONCE o, PVOID p, PVOID *c)
 {
@@ -80,6 +92,15 @@ static void say(enum UpdaterState state, const char *format, ...)
     InterlockedExchange(&g_state, state);
     fprintf(stderr, "[UPDATE] %s\n", g_message);
     fflush(stderr);
+}
+
+static void set_step(int step, int steps, const char *name)
+{
+    EnterCriticalSection(&g_cs);
+    g_step = step;
+    g_steps = steps;
+    snprintf(g_step_name, sizeof(g_step_name), "%s", name);
+    LeaveCriticalSection(&g_cs);
 }
 
 int updater_local_build(void)
@@ -328,11 +349,49 @@ static DWORD WINAPI check_thread(LPVOID unused)
     return 0;
 }
 
+/* Tests: RECOMP_TEST_UPDATE_PROGRESS=<step>[,popup] shows a made-up update in progress, with no
+ * network and no setup: step 1 is the download, 2..8 the setup's steps (setup/engine.py STAGE_NAMES).
+ * ",popup" offers it first, so the launcher opens its "Update available" window, which then shows
+ * the progress. Off by default; meant for pictures of the launcher (RECOMP_WINDOW_SHOT). */
+static int test_progress(void)
+{
+    static const char *const names[] = {
+        "Downloading the update", "Getting the new version", "Checking your game files", "Checking the build tools",
+        "Preparing the game code", "Translating the game code", "Building the game (the longest step)", "Finishing up" };
+    static const char *const messages[] = {
+        "Downloading the setup for version test...", "Verifying the setup payload", "Verifying and preparing your dump",
+        "Checking C++ compiler, Windows SDK, CMake and Ninja", "Analysis in progress (this may take several minutes)",
+        "Lift in progress (this may take several minutes)", "Build in progress (this may take several minutes)",
+        "Creating launch shortcuts and install receipt" };
+    static const int permille[] = { 370, 10, 60, 110, 150, 215, 640, 975 };
+    const char *test = getenv("RECOMP_TEST_UPDATE_PROGRESS");
+    int step;
+    if (!test || (step = atoi(test)) < 1 || step > 8) return 0;
+    EnterCriticalSection(&g_cs);
+    g_build = updater_local_build() + 1;
+    g_size = 56u * 1024 * 1024;
+    snprintf(g_version, sizeof(g_version), "%s", "test");
+    snprintf(g_notes, sizeof(g_notes), "%s", "A made-up update for pictures of the launcher (RECOMP_TEST_UPDATE_PROGRESS).");
+    LeaveCriticalSection(&g_cs);
+    set_step(step, 8, names[step - 1]);
+    g_started = GetTickCount64() - (ULONGLONG)(step == 1 ? 9 : 161) * 1000;
+    InterlockedExchange64(&g_got, step == 1 ? (LONG64)(g_size * 37 / 100) : (LONG64)g_size);
+    InterlockedExchange(&g_permille, permille[step - 1]);
+    say(step == 1 ? UPDATER_DOWNLOADING : UPDATER_INSTALLING, "%s", messages[step - 1]);
+    if (strstr(test, "popup")) {
+        g_test_offer = GetTickCount64() + 1500;
+        InterlockedExchange(&g_state, UPDATER_AVAILABLE);
+    }
+    return 1;
+}
+
 void updater_check(void)
 {
     HANDLE t;
     InitOnceExecuteOnce(&g_once, init_once, NULL, NULL);
-    if (g_state == UPDATER_CHECKING || g_state == UPDATER_DOWNLOADING || g_state == UPDATER_STARTED) return;
+    if (test_progress()) return;
+    if (g_state == UPDATER_CHECKING || g_state == UPDATER_DOWNLOADING || g_state == UPDATER_INSTALLING
+            || g_state == UPDATER_STARTED) return;
     if (getenv("RECOMP_NO_UPDATE_CHECK")) return;
     InterlockedExchange(&g_state, UPDATER_CHECKING);
     t = CreateThread(NULL, 0, check_thread, NULL, 0, NULL);
@@ -344,6 +403,20 @@ void updater_check(void)
 
 typedef struct { HANDLE file; BCRYPT_HASH_HANDLE hash; unsigned long long got, total; } Download;
 
+/* "<index> <total> <key> <name>" from the setup, e.g. "5 7 lift Translating the game code";
+ * anything else leaves the step as it was. */
+static void read_stage_line(char *text)
+{
+    int index = 0, total = 0, used = 0;
+    char key[32];
+    size_t n = strlen(text);
+    while (n && (text[n - 1] == '\n' || text[n - 1] == '\r' || text[n - 1] == ' ')) text[--n] = 0;
+    if (sscanf(text, "%d %d %31s %n", &index, &total, key, &used) < 3 || !used || index < 1 || total < index
+            || total > 30 || !text[used])
+        return;
+    set_step(index + 1, total + 1, text + used);
+}
+
 static int to_file(const void *data, DWORD size, void *user)
 {
     Download *d = (Download *)user;
@@ -352,6 +425,7 @@ static int to_file(const void *data, DWORD size, void *user)
     if (!WriteFile(d->file, data, size, &written, NULL) || written != size) return 0;
     BCryptHashData(d->hash, (PUCHAR)data, size, 0);
     d->got += size;
+    InterlockedExchange64(&g_got, (LONG64)d->got);
     if (d->total) InterlockedExchange(&g_permille, (LONG)(d->got * 1000 / d->total));
     return 1;
 }
@@ -402,6 +476,7 @@ static DWORD WINAPI install_thread(LPVOID unused)
         return 0;
     }
     InterlockedExchange(&g_permille, 0);
+    InterlockedExchange64(&g_got, 0);
     say(UPDATER_DOWNLOADING, "Downloading the setup for version %s...", g_version);
     ok = http_get(url, to_file, &d, NULL);
     CloseHandle(d.file);
@@ -427,6 +502,8 @@ static DWORD WINAPI install_thread(LPVOID unused)
         DeleteFileA(status);
         snprintf(line, sizeof(line), "%s.progress", status);
         DeleteFileA(line);
+        snprintf(line, sizeof(line), "%s.stage", status);
+        DeleteFileA(line);
         MultiByteToWideChar(CP_UTF8, 0, install, -1, winstall, MAX_PATH * 2);
         MultiByteToWideChar(CP_UTF8, 0, data, -1, wdata, MAX_PATH * 2);
         MultiByteToWideChar(CP_UTF8, 0, status, -1, wstatus, MAX_PATH * 2);
@@ -445,6 +522,7 @@ static DWORD WINAPI install_thread(LPVOID unused)
         }
         CloseHandle(pi.hThread);
         InterlockedExchange(&g_permille, 0);
+        set_step(0, 0, "");             /* until the setup names its first step */
         say(UPDATER_INSTALLING, "Installing version %s...", g_version);
         while (WaitForSingleObject(pi.hProcess, 500) == WAIT_TIMEOUT) {
             FILE *f = fopen(status, "r");
@@ -463,6 +541,11 @@ static DWORD WINAPI install_thread(LPVOID unused)
                 int permille;
                 if (fscanf(f, "%d", &permille) == 1 && permille >= 0 && permille <= 1000)
                     InterlockedExchange(&g_permille, permille);
+                fclose(f);
+            }
+            snprintf(line, sizeof(line), "%s.stage", status);
+            if ((f = fopen(line, "r")) != NULL) {
+                if (fgets(text, sizeof(text), f)) read_stage_line(text);
                 fclose(f);
             }
         }
@@ -519,13 +602,25 @@ void updater_install(void)
     HANDLE t;
     InitOnceExecuteOnce(&g_once, init_once, NULL, NULL);
     if (g_state != UPDATER_AVAILABLE && g_state != UPDATER_FAILED) return;
-    if (!g_build) return;
+    if (!g_build || getenv("RECOMP_TEST_UPDATE_PROGRESS")) return;
+    InterlockedExchange64(&g_got, 0);
+    set_step(1, 1 + SETUP_STEPS_DEFAULT, "Downloading the update");
+    g_started = GetTickCount64();
     InterlockedExchange(&g_state, UPDATER_DOWNLOADING);
     t = CreateThread(NULL, 0, install_thread, NULL, 0, NULL);
     if (t) CloseHandle(t);
 }
 
-enum UpdaterState updater_state(void) { return (enum UpdaterState)g_state; }
+enum UpdaterState updater_state(void)
+{
+    /* RECOMP_TEST_UPDATE_PROGRESS=<step>,popup: offered for a moment (the launcher opens its
+     * window), then in progress */
+    if (g_test_offer && GetTickCount64() >= g_test_offer) {
+        g_test_offer = 0;
+        InterlockedExchange(&g_state, g_step == 1 ? UPDATER_DOWNLOADING : UPDATER_INSTALLING);
+    }
+    return (enum UpdaterState)g_state;
+}
 
 void updater_info(int *build, char *version, int version_size, char *notes, int notes_size)
 {
@@ -538,6 +633,32 @@ void updater_info(int *build, char *version, int version_size, char *notes, int 
 }
 
 double updater_progress(void) { return g_permille / 1000.0; }
+
+int updater_stage(int *index, int *total, char *name, int size)
+{
+    int step;
+    InitOnceExecuteOnce(&g_once, init_once, NULL, NULL);
+    EnterCriticalSection(&g_cs);
+    step = g_step;
+    if (index) *index = g_step;
+    if (total) *total = g_steps;
+    if (size > 0) snprintf(name, (size_t)size, "%s", g_step_name);
+    LeaveCriticalSection(&g_cs);
+    return step > 0;
+}
+
+int updater_elapsed(void)
+{
+    ULONGLONG started = g_started;
+    return started ? (int)((GetTickCount64() - started) / 1000) : 0;
+}
+
+int updater_download(unsigned long long *got, unsigned long long *total)
+{
+    if (got) *got = (unsigned long long)InterlockedCompareExchange64(&g_got, 0, 0);
+    if (total) *total = g_size;
+    return g_size > 0;
+}
 
 void updater_message(char *text, int size)
 {
