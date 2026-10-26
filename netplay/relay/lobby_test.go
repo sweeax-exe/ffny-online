@@ -902,19 +902,28 @@ func TestLobbyWhoLimit(t *testing.T) {
 	}
 }
 
-func TestLobbyUnsafeFighterReplaced(t *testing.T) {
+func TestLobbyOldFighterIDTranslated(t *testing.T) {
 	l := newLobby(t, Config{})
 	l.room4(1, pA, pB)
-	l.setReady(pA, 40) // Teck: crashes the game's match load
-	res := l.setReady(pB, 12)
+	l.setReady(pA, 40)        // Teck's fighter.xml ID (builds 13/14): Battle mode knows him as 85
+	res := l.setReady(pB, 93) // Santos's Battle-mode ID passes unchanged
 	st := roomOf(t, res, pA)
-	if st.Players[0].Fighter != SafeFighter || st.Players[1].Fighter != 12 {
+	if st.Players[0].Fighter != 85 || st.Players[1].Fighter != 93 {
 		t.Fatalf("fighters %+v", st.Players)
 	}
 	l.castVote(pA, 0)
 	start := startOf(t, l.castVote(pB, 0), pA)
-	if start.Players[0].Fighter != SafeFighter {
+	if start.Players[0].Fighter != 85 || start.Players[1].Fighter != 93 {
 		t.Fatalf("START %+v", start)
+	}
+}
+
+func TestSafeFighter(t *testing.T) {
+	for in, want := range map[uint8]uint8{40: 85, 41: 93, 52: 92, 78: 91, 85: 85, 91: 91, 92: 92, 93: 93,
+		80: 80, 81: 81, 82: 82, 83: 83, 84: 84, 55: 55, 0: 0, 70: 70} {
+		if got := safeFighter(in); got != want {
+			t.Errorf("safeFighter(%d) = %d, want %d", in, got, want)
+		}
 	}
 }
 

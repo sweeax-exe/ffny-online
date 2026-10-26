@@ -12,7 +12,7 @@
 .PARAMETER Secs     Upper bound per copy.
 .PARAMETER ExtraEnv Extra NAME=VALUE pairs for every copy.
 .PARAMETER Route    harness route family: online (two matches), online5 or online8 (five or eight in a row).
-.PARAMETER Fighters fighter.xml IDs, one per copy.
+.PARAMETER Fighters Battle-mode fighter IDs (src/hooks/online_data.c), one per copy.
 .PARAMETER Stage    extra harness stages for every copy (e.g. a START press during the fight).
 .PARAMETER FastKo   tests: the game knocks the loser out at this fight step of every match
                     (RECOMP_TEST_KO_STEP, src/hooks/test_telemetry.c); 0 = off.

@@ -78,17 +78,17 @@ const (
 	ErrRoomState  uint8 = 9 // not in a room, or already in one
 )
 
-// UnsafeFighters are fighter.xml IDs that crash the game when loaded into a Battle-mode match
-// (Teck, Santos, O.E, Eric Sermon: story figures without a select portrait). FFNY Online builds
-// 13 and 14 offered them; the relay plays SafeFighter instead, the same on every PC.
-var UnsafeFighters = map[uint8]bool{40: true, 41: true, 52: true, 78: true}
-
-// SafeFighter replaces an unsafe fighter.
-const SafeFighter uint8 = 55
+// BattleIDs translates the fighter.xml IDs of Teck, Santos, O.E and Eric Sermon to their
+// Battle-mode IDs. Battle mode takes a fighter's record from the game's database (djv2.sod) by
+// its front-end ID, which is the fighter.xml ID for everyone but these four; with the fighter.xml
+// ID the slot stayed empty and the match load crashed. FFNY Online builds 13 and 14 offered the
+// four with those IDs (later ones played Doc instead); the relay sends the working ID, the same
+// to every PC.
+var BattleIDs = map[uint8]uint8{40: 85, 41: 93, 52: 92, 78: 91}
 
 func safeFighter(f uint8) uint8 {
-	if UnsafeFighters[f] {
-		return SafeFighter
+	if id, ok := BattleIDs[f]; ok {
+		return id
 	}
 	return f
 }
@@ -212,7 +212,7 @@ type SetSettings struct {
 type Ready struct {
 	Token   Token
 	Ready   uint8 // 0 or 1
-	Fighter uint8 // fighter.xml ID
+	Fighter uint8 // Battle-mode fighter ID (the game database's front-end ID)
 }
 
 // Vote picks one of the candidates (0..2).
