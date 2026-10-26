@@ -2860,11 +2860,43 @@ static void koth_check_result(int final)
     fprintf(stderr, "[NETPLAY] King of the Hill: the fight is decided (%s; code %04X, phase %u), winner %s %d; sending RESULT\n",
             how, (unsigned)code, (unsigned)phase, winner == (int)WINNER_DRAW ? "none, slot" : "room slot", winner);
 }
+/* A player's own controller dropped mid-fight and the game showed "Controller Disconnected"
+ * (port 2) that START could not close (players' report, 2026-10-26). Our input layer never
+ * unplugs a port (a lost pad reads as a pad at rest), so this logs when the title itself sees a
+ * room port unplugged (the XAPI handle sub_001EB960 tests) and tells the player when the PC's
+ * last controller goes and comes back. */
+#define G_PAD_HANDLE(port) (0x3C9340u + (uint32_t)(port) * 0x90u)
+int xbox_HostInputSlotInfo(int slot, char *name, int size);
+static void watch_pads(void)
+{
+    static int had_pad = -1;
+    static unsigned told;
+    unsigned gone = 0;
+    int i, pads = 0;
+    if (!N.lobby || !N.match_seen) { had_pad = -1; told = 0; return; }
+    for (i = 0; i < 4; i++)
+        if (xbox_HostInputSlotInfo(i, NULL, 0) & 1) pads++;
+    for (i = 0; i < N.players && i < 4; i++)
+        if (!MEM32(G_PAD_HANDLE(i))) gone |= 1u << i;
+    if (gone != told) {
+        fprintf(stderr, "[NETPLAY] the game sees ports %X unplugged (this PC is player %d; lockstep %d, live %d, step %u)\n",
+                gone, N.pos + 1, (int)N.lockstep, N.match_live, (unsigned)N.step);
+        told = gone;
+    }
+    if (had_pad == 1 && !pads) {
+        fprintf(stderr, "[NETPLAY] this PC's last controller disconnected during an online match\n");
+        toast(10000, "Your controller disconnected: reconnect it to keep fighting.");
+    }
+    if (had_pad == 0 && pads) toast(4000, "Controller connected again.");
+    had_pad = pads > 0;
+}
+
 void netplay_on_step(void)
 {
     uint32_t s, target, k, need;
     ULONGLONG waited_since, last_send, last_note;
     fight_input();              /* also after a fight went on offline */
+    if (!N.resim) watch_pads();
     koth_check_result(0);
     if (!N.lockstep) {
         if (soak_depth()) {     /* tests: the soak counts steps and prepares the save states itself */
