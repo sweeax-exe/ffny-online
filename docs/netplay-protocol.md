@@ -206,6 +206,25 @@ by older relays.
   single one decides after 10 s. A fighter who leaves during the fight loses it. `OVER` changes
   nothing; `VOTE` during the fight re-sends the sender's `START` or `WATCH`.
 
+## Relay status (choosing a relay)
+
+Since build 30 there is more than one relay (Europe `play.defjam.online`, North America
+`na.defjam.online`, both port 27777). A client asks each one with `STATUS` before it registers
+anywhere, and picks by round trip. Same header and version; a relay without it drops `STATUS`
+silently (an unknown type), so no answer within about 2 s means "older relay or unreachable".
+
+| Type | Name | Direction | Body after the header |
+|---|---|---|---|
+| 0x24 | `STATUS` | client -> server | `nonce` u32, `build` 8 (the asker's fingerprint, zeros: any), 8 zero bytes (reserved) |
+| 0x24 | `STATUS` | server -> client | `nonce` u32 (the request's), `version` u8 (the protocol byte it speaks), `flags` u8 (bit 0 ranked queue, bit 1 King of the Hill, bit 2 rollback allowed), `online` u16 (registered clients, any build), `rooms` u16, `waiting` u16 (players of that build in public lobby-phase rooms with a free place: who a quick match meets), `idle` u16 (players of that build in the lobby, not in a room), `published` u32 (newest published build, 0 unknown), 2 zero bytes |
+
+- No token, no registration, no effect on any client (not even its idle timer). The request is
+  exactly 26 bytes (reserved bytes zero, anything else is dropped) and the answer is 26 bytes, never
+  larger, so it cannot amplify traffic.
+- Each source IP gets at most 4 answers a second; further requests are dropped silently. The
+  per-IP message limit of the base protocol applies as well.
+- The summary log line counts the answers (`status=N` at its end).
+
 ## Server operation
 
 The relay is one static binary (`netplay/relay`, Go). `relay -listen :27777` serves; it logs
