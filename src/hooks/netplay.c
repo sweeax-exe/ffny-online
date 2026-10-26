@@ -1645,7 +1645,17 @@ static DWORD WINAPI net_thread(LPVOID unused)
         }
         if ((N.state == NETPLAY_CONNECTED || N.state == NETPLAY_SYNCING) && !N.start_deferred)
             send_live_pad(now);
-        got = recv(N.sock, (char *)b, sizeof(b), 0);
+        {   /* wait up to 20 ms for a datagram, then take it; select() returns only when it is done,
+             * unlike a blocking recv with SO_RCVTIMEO, whose timed-out request could still complete
+             * later and write its status block into a stack slot another frame then used (the
+             * "RIP=0x1E" crashes on this thread: 0x1E is a 30-byte packet's length;
+             * docs/research/rip-1e-crash.md) */
+            fd_set rd;
+            struct timeval tv = { 0, 20000 };
+            FD_ZERO(&rd);
+            FD_SET(N.sock, &rd);
+            got = select(0, &rd, NULL, NULL, &tv) > 0 ? recv(N.sock, (char *)b, sizeof(b), 0) : 0;
+        }
         if (got > 0 && lag_ms > 0) {        /* tests: hold every arriving packet for a while */
             if (lag_n < LAG_QUEUE) {
                 int at = (lag_head + lag_n++) % LAG_QUEUE;
@@ -1697,7 +1707,6 @@ static int resolve(const char *server)
 
 static int start(const char *server, const char *name, int creating, const char *room, int delay, int lobby)
 {
-    DWORD timeout = 20;
     uint32_t h1 = 2166136261u, h2;
     const char *v;
     int i;
@@ -1749,7 +1758,10 @@ static int start(const char *server, const char *name, int creating, const char 
     if (resolve(server)) { InterlockedExchange(&N.state, NETPLAY_FAILED); set_status("Cannot find the server %s.", server); return -1; }
     N.sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     if (N.sock == INVALID_SOCKET) { InterlockedExchange(&N.state, NETPLAY_FAILED); set_status("No network socket."); return -1; }
-    setsockopt(N.sock, SOL_SOCKET, SO_RCVTIMEO, (const char *)&timeout, sizeof(timeout));
+    {   /* non-blocking: net_thread waits in select(), never in recv */
+        u_long nonblocking = 1;
+        ioctlsocket(N.sock, FIONBIO, &nonblocking);
+    }
     N.stop = 0;
     N.hello_sent = 0;
     InterlockedExchange(&N.state, NETPLAY_CONNECTING);
