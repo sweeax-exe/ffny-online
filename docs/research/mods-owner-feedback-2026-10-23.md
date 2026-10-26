@@ -44,7 +44,7 @@ toolkit or lifter change. Gameplay regression was not repeated for these UI-only
 changes; the earlier Windows runtime report remains the gameplay evidence.
 
 A separate executable was built at
-`C:/Users/Vlad/code/defjam-pr91-windows/mods-ui-preview/DefJamModsPreview.exe`;
+`<work root>/mods-ui-preview/DefJamModsPreview.exe`;
 `OpenModsPreview.cmd` starts it with disposable settings and cached catalogue.
 The existing RC app executable and four temporarily used source inputs were
 restored byte-for-byte (5files,0mismatches). The review-data fixture has its own

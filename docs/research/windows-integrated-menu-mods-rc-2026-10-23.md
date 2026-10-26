@@ -18,7 +18,7 @@ fixed or accepted**. PR91 remains draft; this report is not stable-release signo
 
 - Windows 11 Pro 10.0.26200; RTX 4070 Ti SUPER, driver32.0.16.1088.
 - VS2019 Build Tools/MSVC14.29, CMake3.20, Ninja1.10.2. Native D3D11 runtime.
-- Isolated work root: `C:/Users/Vlad/code/defjam-pr91-windows`; `source/` is a
+- Isolated work root: `<work root>`; `source/` is a
   public-lineage worktree, branch `codex/pr91-windows-validation`, based on
   PR91 head`66002541fa523e5cd216ce02ce517c6dc42d7d2a`. Toolkit remains
   `bd8c6336c268cf15783b480fce6869eb11d74ec0`, clean and unchanged.

@@ -119,7 +119,7 @@ time. Do not change the owner's display refresh or profile progress.
 - Comparison frame/event/session files are retained independently of automatic
   recorder pruning in `logs/v0121-triage/measurements/`.
 - The game submodule remains clean at its published pin. The tested executable
-  is configured with `-ToolkitDir C:/Users/Vlad/code/defjam-v0121-aa-scissor`.
+  is configured with `-ToolkitDir <toolkit worktree>`.
   The owner subsequently authorized publication; the fork commit is published
   and this PR pins it.
 
@@ -134,14 +134,14 @@ time. Do not change the owner's display refresh or profile progress.
 
 The renderer correction and synthetic fixture are committed locally as toolkit
 `bf9c97502b6ace99a6b2111a736deb2dc44b6125`, branch
-`defjam/fix-aa-host-scissor`, worktree `C:/Users/Vlad/code/defjam-v0121-aa-scissor`.
+`defjam/fix-aa-host-scissor`, worktree `<toolkit worktree>`.
 The owner authorized publication on 2026-10-25. The fork branch is now pushed and
 the game gitlink pins `bf9c975`; no game assets or recordings are published.
 
 To rebuild the tested candidate from the game worktree:
 
 ```powershell
-./scripts/build.ps1 -Preset win-x64-release -ToolkitDir C:/Users/Vlad/code/defjam-v0121-aa-scissor
+./scripts/build.ps1 -Preset win-x64-release -ToolkitDir <toolkit worktree>
 ```
 
 Follow the v0.12.1 release workflow for integration. Do not close #108 until
