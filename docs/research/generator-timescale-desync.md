@@ -314,10 +314,43 @@ the time scale equal|differs (<here>, <there>); the match generator equal|differ
 the re-seed, so "differs" there means the re-seed itself failed; generator drift caused by draws inside the step shows in the fighters
 or the match generator.
 
-Seen on the way, not part of this fix: in a hub session the loser's results screen can stop for good. The summary takes the winner's
-pad only (on the loser's PC that is the remote live pad); when the winner's copy has already left the summary (`Match over; back in
-the room`) before the loser's copy shows it, nothing ever presses for the winner there, and the loser's own A presses do nothing (twice
-in two sessions, both times on the loser's side: winner 0x1 and copy 2 stuck, winner 0x2 and copy 1 stuck; the winner-only input is
-inferred from those two cases and the cases that passed, not read in the code). The runs above waited
-16 s instead of 4 s before pressing A on the summary (a local, uncommitted harness change), which avoided it. Whether real players hit it
-(the loser's summary waits for the other player's input) is open.
+Seen on the way, not part of this fix: in a hub session the **loser's results screen can stop for good** (section 11b has the
+cases). Every time it was the loser's copy, and its own A presses on the summary did nothing.
+
+### 11b. After the rebase onto build 29 (2026-10-26)
+
+Rebased onto `remaster` 077bbe4 (builds 27 to 29: rollback server switch, King of the Hill lockstep, select() receive, crowd
+guard) without conflicts; re-lifted and rebuilt. Runs with `scripts/netplay-hub-test.ps1` (lockstep: the relay's rollback switch is
+off), CPUs 28 and 30, relay port 27847, the venue order fixed with the new `-Venues` (relay `-test-venues`).
+
+| Run | Pin | Settings | Venues played | Result |
+|---|---|---|---|---|
+| repro3 | off | `-FastKo 600` | Foundation, Terror Dome, The Pit, Terror Dome, Terror Dome | all checksums equal; 5th match (Terror Dome after Terror Dome): generator **different in 32 of 32 samples from step 1** (offset from the loading window); the 4th: 2 of 33 |
+| fix3 | on | `-FastKo 600` | Foundation | equal (session stopped on the results screen) |
+| fix3c | on | `-FastKo 600` | Foundation, Terror Dome | equal; Terror Dome **different at step 1 before the re-seed, equal in all 32 samples after** |
+| fix4 | on | natural fights | Foundation, Terror Dome, The Pit, Terror Dome | **980 checksums equal**, no desync; 2nd Terror Dome **different at step 1** (state 813727448 / 1237985602; draws so far: music director 40 / 41, CArena 284 / 291) and in 6 isolated samples later, fighters equal to the KO (step 3840) |
+| fix5 | on | `-Bot -FastKo 600 -FightSecs 9` | Foundation, Terror Dome, The Pit, Terror Dome | all checksums equal, all 109 generator samples equal |
+
+So on build 29 the pin was seen to erase a loading-window offset at step 1 twice (fix3c, fix4) and the fights stayed in step; without
+it the offset stayed for the whole match (repro3, as repro1). No desync in any run, with or without the pin: the fighters' parting of
+the lab case was not reproduced in four Terror Dome matches without the pin (repro1 one, repro3 three).
+
+Not reached: six matches in a row in one session after the rebase. Five sessions stopped on a results screen after 1, 2, 4, 4 and
+(before the rebase) 3 matches; fix2 before the rebase got through 5. What was seen at each stop:
+
+* It is always the loser's copy. Its summary stays up; its own scripted A presses (from 4 or 16 s, every 3 or 6 s, 10 to 12 of
+  them) do nothing, and `Game.UpdateMatchRewardsPoints()` never comes. The winner's copy is through and back in the room.
+* After the knockout each copy logs `the match is decided and player N went on ahead ... the rest runs on this PC alone`, so the
+  results screens run outside the lockstep, and on the loser's copy the winner's port then reads as a pad at rest (`fight_input`,
+  `REST_ONLY`).
+* The first guess, that the summary takes only the winner's pad and the winner had left before the loser's copy showed it, does not
+  hold for fix5: there the loser's copy showed its summary about 8 s before the winner's copy and was stuck anyway.
+* The routes' blind fight presses run 1200 s and so go on through the results screens; on the winner's copy they took the summary
+  and rewards in two seconds (fix3c, fix4). `-FightSecs` stops them, which did not prevent the fix5 stop.
+
+Whether real players hit it, and why the loser's copy takes no input there, is open; it does not touch the generator fix. The hub
+test gained `-Venues`, `-SummaryPresses`, `-FightSecs` and the route family `online8` for these runs.
+
+`regress.py --quick` on the rebased build: 5 of 5 passed (661 unit tests). Also: `regress.py --only replay` fails on this base as on the fixed build with the same numbers (76 records, golden 80, hash
+3495378e7de7...; measured 2026-10-25 on 747bffb with and without the fix): the golden stream does not match the current base, and the
+pin does not change it (offline never reaches it).
