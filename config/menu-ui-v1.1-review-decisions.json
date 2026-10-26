@@ -11,7 +11,8 @@
   },
   "accepted_team_master": {
     "file": "choose-teams-wide-v1.png",
-    "sha256": "8485e02e9b615d855c7cd8f8ac547afda4337944f06ac37f1556c18715de8494"
+    "sha256": "8485e02e9b615d855c7cd8f8ac547afda4337944f06ac37f1556c18715de8494",
+    "status": "historical v1 acceptance; latest request asks to repair joins"
   },
   "selected_text": [
     {
@@ -47,5 +48,34 @@
   ],
   "battle_v1_status": "rejected; regenerate",
   "map_v1_status": "initially accepted visually; latest request supersedes selection with reference-guided regeneration",
-  "preserve_previous_versions": true
+  "preserve_previous_versions": true,
+  "followup_join_request": "Keep working on the map joins. Also fix the joins on the Choose Teams background, using the Battle wall as reference",
+  "current_team_revision": {
+    "file": "choose-teams-wide-v2.png",
+    "sha256": "37ba3e0631b1610a71fef5493e0fac01bf5209f84a7e35553d34f8a8739e48ac",
+    "status": "owner-approved artwork"
+  },
+  "current_map_revision": {
+    "file": "choose-venue-map-wide-v6.png",
+    "sha256": "0bc0df7bec3446a0498d4dd292e396f83ff81df926f01683a4ee0cad79541aca",
+    "status": "owner-approved artwork"
+  },
+  "final_background_approval": {
+    "owner_quote": "These revised backgrounds look good to me. I approve them",
+    "files": [
+      {
+        "path": "artwork/battle-user-id-wide-v4.png",
+        "sha256": "125bc7366e529b818eb398d8e5f89297a1bb0c0e0a7cf2ed0a2535056f119214"
+      },
+      {
+        "path": "artwork/choose-teams-wide-v2.png",
+        "sha256": "37ba3e0631b1610a71fef5493e0fac01bf5209f84a7e35553d34f8a8739e48ac"
+      },
+      {
+        "path": "artwork/choose-venue-map-wide-v6.png",
+        "sha256": "0bc0df7bec3446a0498d4dd292e396f83ff81df926f01683a4ee0cad79541aca"
+      }
+    ],
+    "status": "owner-approved artwork; publication not requested"
+  }
 }

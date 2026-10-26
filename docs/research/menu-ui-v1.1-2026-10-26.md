@@ -1,5 +1,9 @@
 # HD widescreen menu continuation — 2026-10-26
 
+**Latest:** [join follow-up](menu-ui-joins-2026-10-26.md) records Team v2 and
+map v6 repairs, native1440p/32:9 checks, and current review assets. It supersedes
+the map-v3 join failure and Team-v1 selection below; earlier records are retained.
+
 Branch `codex/hd-widescreen-menu-v1.1` starts at release PR #123,
 `53e5d8baf38029e66b24639ae50f49052b1de968`. Toolkit stays at the release pin
 `7a0f2f60ac2f8671e6f34ce4ff61a77759ec8a7f`; no toolkit edits or publication.

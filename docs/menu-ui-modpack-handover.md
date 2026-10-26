@@ -1,5 +1,16 @@
 # Menu/UI modpack implementation handover
 
+**Latest join repairs — 2026-10-26:** [join follow-up report](research/menu-ui-joins-2026-10-26.md).
+Choose Teams v2 uses Battle wall v4 exterior art and preserves its complete center.
+Map v6 repairs both exterior connections and the obsolete inset with narrow
+inpaints; wide copies allow 24px source-border corrections, central draws stay
+original. Team native 1440p and map directional 1440p/32:9 checks pass. The owner
+approved the current revised backgrounds; nine new master/text pins are in the
+separate `config/menu-ui-v1.1-approved-artwork.json` ledger. Review at 51739 retains
+before/after sliders and join crops. A local 1.1 RC1 is built; see the follow-up report for hashes and integrated native checks.
+Prompts/recipes/receipts are private in `logs/menu-ui-v1.1/revision-v3/`.
+This supersedes the earlier map-v3 failure and Team-v1 selection below.
+
 **2026-10-26 continuation:** branch `codex/hd-widescreen-menu-v1.1`, based on
 v0.12.1 release PR #123. The first fire-escape tile has a fingerprinted runtime
 geometry repair and five-aspect native checks; missing Battle ID/Team walls,
@@ -9,7 +20,7 @@ Read [the current session report](research/menu-ui-v1.1-2026-10-26.md) and
 The older checkpoints below retain their original historical status.
 
 **Owner feedback follow-up:** Stronger text selected (six exact pilot hashes),
-Choose Teams v1 accepted. Battle ID wall v4 has revised joins and a native1440p
+Choose Teams v1 accepted. Battle ID wall v4 has revised joins and a native 1440p
 capture, awaiting visual review. Map v3 uses the owner's Long Island/New Jersey
 reference; its 32:9 directional tour runs normally, but road joins remain a
 visual failure and must be finished before acceptance. Latest decisions are in

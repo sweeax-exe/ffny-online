@@ -1,0 +1,59 @@
+{
+  "schema": 1,
+  "art_root_policy": "Relative to the PRIVATE menu-ui-v1.1 authoring root or its approved-art checkpoint. No PNG/game bytes in Git. Separate additive 1.1 ledger; all 670 prior pins remain unchanged.",
+  "approval_records": [
+    {
+      "decision": "D-new/UI: 2026-10-26 background join review",
+      "status": "owner-approved artwork",
+      "owner_quote": "These revised backgrounds look good to me. I approve them",
+      "scope": "Current revised background masters shown in the review: Battle ID v4 reference, Choose Teams v2, map v6. No raw generations/history; no publication or platform acceptance.",
+      "files": [
+        {
+          "path": "artwork/battle-user-id-wide-v4.png",
+          "sha256": "125bc7366e529b818eb398d8e5f89297a1bb0c0e0a7cf2ed0a2535056f119214"
+        },
+        {
+          "path": "artwork/choose-teams-wide-v2.png",
+          "sha256": "37ba3e0631b1610a71fef5493e0fac01bf5209f84a7e35553d34f8a8739e48ac"
+        },
+        {
+          "path": "artwork/choose-venue-map-wide-v6.png",
+          "sha256": "0bc0df7bec3446a0498d4dd292e396f83ff81df926f01683a4ee0cad79541aca"
+        }
+      ]
+    },
+    {
+      "decision": "D-new/UI: 2026-10-26 clarity selection",
+      "status": "owner-approved selection",
+      "owner_quote": "Stronger edge clarity",
+      "scope": "Six reviewed heading/banner pilots only.",
+      "files": [
+        {
+          "path": "font-pilot/704503561725bca42e9c4f7489ff018dcbb3808b5ee2c23755b02cb06508ee64-strong.png",
+          "sha256": "4a4eac83054b1d33f730681911fecaa2d6a3fb29bdeb53fadf4a87549b8e0ea1"
+        },
+        {
+          "path": "font-pilot/3b134347309d63879072eabe1e4eeb21ae84756a4a591c89465bef2a22d63445-strong.png",
+          "sha256": "138ffb6716799ffeffd29d38cff2091c3ced8876c189520c07e8f8de7028728e"
+        },
+        {
+          "path": "font-pilot/3a0d7988ecf41040ce5d04991a23930051555a66c0c5cb110803fec199c0a582-strong.png",
+          "sha256": "5f5d70da9647a7c9021dabeae513789405dec13cda3b14574a49cb480de12029"
+        },
+        {
+          "path": "font-pilot/397df2b795f12a9d18ae4ad3dba3ce7012abef3a4e8757ee77cba78ede6154ee-strong.png",
+          "sha256": "649dd4e824695c14eeb6b63a692a883901beb851fe946d813c3614e675a6c9cc"
+        },
+        {
+          "path": "font-pilot/3b0aa865be4e6fd0e074eacb94763cd7ebdf6fe5a40510182b7c06136ad6840e-strong.png",
+          "sha256": "06074603cff82c61adfd8946c748802bd3e7312551984433f226bd8a971f9894"
+        },
+        {
+          "path": "font-pilot/f478da831318290565c2f5e122ceb66eba171f69ab8c01f583aebc4e401b8032-strong.png",
+          "sha256": "928b751fb0a80ff523e9aa493e7248e386c1ec3ddf13b180dd405f54e4933213"
+        }
+      ]
+    }
+  ],
+  "unique_pinned_files": 9
+}
