@@ -2,7 +2,7 @@
   "schema": 1,
   "name": "Menu UI HD widescreen v1",
   "status": "Owner-approved artwork and separately recorded technical loading derivatives. Local RC2 native coverage is recorded in docs/research/menu-ui-separate-release-candidate-2026-10-20.md; transition/Mode/branding owner signoff and unvisited Story/Tips routes remain open.",
-  "policy": "Mode Select sides use the dark composite only: the lit wall is masked by the live spotlight inside 4:3, and an unmasked lit slab painted fully lit brick beside it. x0 and per are the anchor's settled title-pixel geometry measured with RECOMP_WS_WIDE_TRACE=1 at 16:9 (2026-10-19). sides limits slabs to the left (x<0) or right (x>640) of the 4:3 picture. Results papers are not scenery and get no slabs. Newstory/loading/Profile use source-preserving approved masters; trans/t1 uses separate left/right part anchors and follows native vertical pan. Bitmap9 stays Faithful-only and is not a side anchor. Fractional UV spans produce integer source-texel shifts per runtime manifest grammar.",
+  "policy": "Mode Select sides use the dark composite only: the lit wall is masked by the live spotlight inside 4:3, and an unmasked lit slab painted fully lit brick beside it. x0 and per are the anchor's settled title-pixel geometry measured with RECOMP_WS_WIDE_TRACE=1 at 16:9 (2026-10-19). sides limits slabs to the left (x<0) or right (x>640) of the 4:3 picture. Results papers are not scenery and get no slabs. Newstory/loading/Profile use source-preserving approved masters; trans/t1 uses separate left/right part anchors and follows native vertical pan. Bitmap9 retains its Faithful center and becomes a left-side anchor only with the runtime first-cell geometry repair (menu_geometry.c). Fractional UV spans produce integer source-texel shifts per runtime manifest grammar.",
   "anchor_packs": [
     "menu-ui-restored-test-v1",
     "menu-ui-mode-conditional-test-v1",
@@ -630,6 +630,33 @@
         1600,
         0
       ]
+    },
+    {
+      "label": "transition-9",
+      "screen": "trans/t1",
+      "anchor": "51ebe2dcf268b05f3ee49ced46d270f0607a766fa776d83e853d07e171f920de",
+      "master": "transition-v1-20261020/transition-wide-v4.png",
+      "per": 1,
+      "x0": 0,
+      "sides": "left",
+      "u_range": [
+        0,
+        512
+      ],
+      "match_u": [
+        0,
+        512
+      ],
+      "hint": [
+        1600,
+        0
+      ],
+      "offset": [
+        1600,
+        0
+      ],
+      "conditional": true,
+      "note": "Requires the runtime t1 first-cell geometry repair; original center remains Faithful."
     },
     {
       "label": "transition-8",

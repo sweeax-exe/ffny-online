@@ -1,5 +1,13 @@
 # Menu/UI modpack implementation handover
 
+**2026-10-26 continuation:** branch `codex/hd-widescreen-menu-v1.1`, based on
+v0.12.1 release PR #123. The first fire-escape tile has a fingerprinted runtime
+geometry repair and five-aspect native checks; missing Battle ID/Team walls,
+wide-map scenery and heading/fighter-banner clarity have local review drafts.
+Read [the current session report](research/menu-ui-v1.1-2026-10-26.md) and
+`config/menu-ui-v1.1-worklist.json` for evidence, remaining acceptance and hand-off.
+The older checkpoints below retain their original historical status.
+
 Current checkpoint — 2026-10-20 (D182–D184/UI): a **separate menu-only RC2** is built
 and being tested on this Mac. Faithful HD is optional and earlier-loaded; its library
 is not bundled. Download421.6MB / installed423.4MB,157nativePNGs/164sideslabs.
