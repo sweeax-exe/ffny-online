@@ -17,6 +17,10 @@ type ServerConfig struct {
 	Now          func() time.Time
 	Logf         func(format string, args ...any) // default log.Printf
 
+	// TestLag holds every datagram the relay sends this long (tests only: a local relay that
+	// answers like one far away). Zero: none.
+	TestLag time.Duration
+
 	// Accounts checks ranked tickets and takes the ranked pairings (ranked play is off
 	// without it).
 	Accounts Accounts
@@ -97,7 +101,7 @@ func (s *Server) Serve(ctx context.Context, conn *net.UDPConn) error {
 		out := s.relay.Handle(s.cfg.Now(), from, buf[:n])
 		lookups, pairings := s.relay.TakeRankedWork()
 		s.mu.Unlock()
-		send(conn, out)
+		s.send(conn, out)
 		s.rankedWork(ctx, conn, lookups, pairings)
 	}
 }
@@ -124,7 +128,7 @@ func (s *Server) timerLoop(ctx context.Context, conn *net.UDPConn) {
 			out := s.relay.Tick(s.cfg.Now())
 			lookups, pairings := s.relay.TakeRankedWork()
 			s.mu.Unlock()
-			send(conn, out)
+			s.send(conn, out)
 			s.rankedWork(ctx, conn, lookups, pairings)
 		case <-logC:
 			now := s.cfg.Now()
@@ -137,11 +141,11 @@ func (s *Server) timerLoop(ctx context.Context, conn *net.UDPConn) {
 				secs = 1
 			}
 			lastLog = now
-			s.cfg.Logf("summary rooms=%d clients=%d in=%.1fpkt/s %.0fB/s out=%.1fpkt/s %.0fB/s dropped=%d",
+			s.cfg.Logf("summary rooms=%d clients=%d in=%.1fpkt/s %.0fB/s out=%.1fpkt/s %.0fB/s dropped=%d status=%d",
 				rooms, clients,
 				float64(st.PacketsIn)/secs, float64(st.BytesIn)/secs,
 				float64(st.PacketsOut)/secs, float64(st.BytesOut)/secs,
-				st.Dropped)
+				st.Dropped, st.Status)
 		}
 	}
 }
@@ -163,7 +167,7 @@ func (s *Server) rankedWork(ctx context.Context, conn *net.UDPConn, lookups []Ra
 			s.mu.Lock()
 			out := s.relay.RankedChecked(s.cfg.Now(), l.Token, p, err == nil)
 			s.mu.Unlock()
-			send(conn, out)
+			s.send(conn, out)
 		}()
 	}
 	for _, p := range pairings {
@@ -182,6 +186,15 @@ func (s *Server) Snapshot() (rooms, clients int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.relay.Rooms(), s.relay.Clients()
+}
+
+// send writes the datagrams, after TestLag when it is set.
+func (s *Server) send(conn *net.UDPConn, out []Packet) {
+	if s.cfg.TestLag > 0 && len(out) > 0 {
+		time.AfterFunc(s.cfg.TestLag, func() { send(conn, out) })
+		return
+	}
+	send(conn, out)
 }
 
 // send writes the datagrams. UDP send errors are not actionable here (the

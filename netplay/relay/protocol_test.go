@@ -212,6 +212,7 @@ func FuzzDecodeClient(f *testing.F) {
 		ClientData{Token: tok, Payload: []byte{1, 2, 3}},
 		Ping{Token: tok, Nonce: 5},
 		Bye{Token: tok},
+		Status{Nonce: 3, Build: build},
 	} {
 		b, _ := Encode(m)
 		f.Add(b)

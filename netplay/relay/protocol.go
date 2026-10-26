@@ -322,7 +322,7 @@ func readTrailingString(body []byte) (string, bool) {
 
 // DecodeClient parses a client-to-server datagram (HELLO, DATA, PING, BYE and
 // the lobby requests LIST, CREATE, JOIN, QUICK, SETTINGS, READY, VOTE, LEAVE, OVER, WHO, RANKED,
-// and the King of the Hill requests CAPS and RESULT).
+// the King of the Hill requests CAPS and RESULT, and STATUS).
 // Lengths must be exact. Slices in the result (ClientData.Payload) alias b.
 //
 // A HELLO whose name length is 0 or above 24, or whose name is not UTF-8, is
@@ -383,12 +383,14 @@ func DecodeClient(b []byte) (Message, error) {
 	case TypeList, TypeCreate, TypeJoin, TypeQuick, TypeSettings, TypeReady, TypeVote, TypeLeave, TypeOver, TypeWho, TypeRanked,
 		TypeCaps, TypeResult:
 		return decodeLobbyClient(t, body)
+	case TypeStatus:
+		return decodeStatusClient(body)
 	}
 	return nil, ErrMalformed
 }
 
 // DecodeServer parses a server-to-client datagram (WELCOME, PEER, DATA, PONG,
-// ERROR, ROOMS, ROOM, START, PLAYERS, QUEUE, and the King of the Hill CAPS, HILL, WATCH).
+// ERROR, ROOMS, ROOM, START, PLAYERS, QUEUE, the King of the Hill CAPS, HILL, WATCH, and STATUS).
 // Used by clients and tests. ServerData.Payload
 // aliases b; the lobby messages' slices are copies.
 func DecodeServer(b []byte) (Message, error) {
@@ -436,6 +438,8 @@ func DecodeServer(b []byte) (Message, error) {
 		return Error{Code: body[0], Text: text}, nil
 	case TypeRooms, TypeRoom, TypeStart, TypePlayers, TypeQueue, TypeCaps, TypeHill, TypeWatch:
 		return decodeLobbyServer(t, body)
+	case TypeStatus:
+		return decodeStatusServer(body)
 	}
 	return nil, ErrMalformed
 }

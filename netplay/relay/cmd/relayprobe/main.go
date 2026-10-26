@@ -8,6 +8,7 @@
 //	relayprobe -server HOST:27777 -mode create                 # create a room, print its code, wait for a peer
 //	relayprobe -server HOST:27777 -mode join -room ABCDEF      # join that room from another machine
 //	relayprobe -server HOST:27777 -mode lobby                  # lobby flow: two clients, create, list, join, ready, vote, START
+//	relayprobe -server HOST:27777 -mode status                 # three STATUS probes: round trip, version, players (no HELLO)
 //
 // In every mode it pings once a second and prints the round-trip time from
 // PING/PONG, sends -n DATA packets once a peer is present, and prints every
@@ -35,7 +36,7 @@ import (
 
 func main() {
 	server := flag.String("server", fmt.Sprintf("127.0.0.1:%d", relay.DefaultPort), "relay address host:port")
-	mode := flag.String("mode", "pair", "pair | create | join | lobby")
+	mode := flag.String("mode", "pair", "pair | create | join | lobby | status")
 	roomFlag := flag.String("room", "", "room code to join (-mode join)")
 	name := flag.String("name", "probe", "player name sent in HELLO (1..24 bytes)")
 	buildHex := flag.String("build", "5052-4f42-4500-0000", "build fingerprint, 8 bytes as hex (dashes ignored)")
@@ -61,6 +62,8 @@ func main() {
 		ok = runPair(*server, build, *name, *n, *interval, *timeout)
 	case "lobby":
 		ok = runLobby(*server, build, *name, *timeout)
+	case "status":
+		ok = runStatus(*server, build, *timeout)
 	case "create", "join":
 		var code relay.RoomCode
 		if *mode == "join" {
@@ -699,4 +702,55 @@ func runLobby(server string, build relay.Build, name string, timeout time.Durati
 	check(okA && okB, "OVER from both: back to phase 0")
 
 	return finish(a, b)
+}
+
+// runStatus sends three STATUS requests (no HELLO, nothing registered) and prints each answer's
+// round trip and contents. A relay older than STATUS never answers.
+func runStatus(server string, build relay.Build, timeout time.Duration) bool {
+	addr, err := net.ResolveUDPAddr("udp", server)
+	if err != nil {
+		fmt.Printf("FAIL: resolve %s: %v\n", server, err)
+		return false
+	}
+	conn, err := net.DialUDP("udp", nil, addr)
+	if err != nil {
+		fmt.Printf("FAIL: %v\n", err)
+		return false
+	}
+	defer conn.Close()
+	answered := 0
+	buf := make([]byte, 2048)
+	for i := 0; i < 3; i++ {
+		nonce := uint32(time.Now().UnixNano()) ^ uint32(i)
+		req, _ := relay.Encode(relay.Status{Nonce: nonce, Build: build})
+		sent := time.Now()
+		if _, err := conn.Write(req); err != nil {
+			fmt.Printf("send: %v\n", err)
+			continue
+		}
+		_ = conn.SetReadDeadline(sent.Add(timeout))
+		for {
+			n, err := conn.Read(buf)
+			if err != nil {
+				fmt.Printf("probe %d: no answer within %v (an older relay without STATUS, or unreachable)\n", i+1, timeout)
+				break
+			}
+			m, err := relay.DecodeServer(buf[:n])
+			st, ok := m.(relay.StatusReply)
+			if err != nil || !ok || st.Nonce != nonce {
+				continue
+			}
+			answered++
+			fmt.Printf("probe %d: %d ms  protocol v%d  flags %#02x  online %d  rooms %d  waiting %d  idle %d  published build %d\n",
+				i+1, time.Since(sent).Milliseconds(), st.Version, st.Flags, st.Online, st.Rooms, st.Waiting, st.Idle, st.Published)
+			break
+		}
+		time.Sleep(300 * time.Millisecond)
+	}
+	if answered == 0 {
+		fmt.Printf("FAIL: %s did not answer STATUS\n", server)
+		return false
+	}
+	fmt.Printf("PASS: %s answers STATUS (%d of 3)\n", server, answered)
+	return true
 }

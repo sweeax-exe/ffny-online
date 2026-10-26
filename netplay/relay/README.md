@@ -37,6 +37,7 @@ Two ways in:
 | Path | What |
 |---|---|
 | `protocol.go` | Message encoding/decoding (no state). |
+| `protocol_status.go`, `status.go` | `STATUS`: version, load and quick-match players for a client choosing between relays (no token). |
 | `protocol_lobby.go` | The same for the lobby messages (0x10..0x1B) and the `Settings` block. |
 | `relay.go` | Room/client state machine. No sockets; the current time is a parameter, so it is tested with a fake clock. |
 | `lobby.go` | The lobby part of the state machine: rooms of up to four, phases, voting, the lobby requests. |
@@ -90,6 +91,7 @@ Server flags:
 | `-max-rooms` | `512` | Open rooms; beyond that `HELLO` mode 0, `CREATE` and a creating `QUICK` get `ERROR 5`. |
 | `-max-clients` | `1024` | Connected clients; beyond that `HELLO` gets `ERROR 5`. |
 | `-log-interval` | `60s` | Summary line period; `0` disables it. |
+| `-test-lag` | `0` | Tests only: hold every datagram the relay sends this long, so a local relay answers like one far away (the game's server choice tests). |
 
 ## Deploy on a fresh Hetzner Ubuntu 24.04 server
 
@@ -177,6 +179,15 @@ location close to the players. Below, `SERVER` is the server's public IP.
    line per check, and ends with `PASS: lobby at ... works` (exit 0) or `FAIL: ...`
    (exit 1). Against a relay without the extension it fails at the first step: such a
    relay drops `HELLO` mode 2 silently.
+
+   To check `STATUS` (what the game asks every relay to pick the nearest; no HELLO, nothing
+   registered), with the round trip and the player counts:
+
+   ```sh
+   relayprobe -server SERVER:27777 -mode status
+   ```
+
+   An older relay without `STATUS` never answers (`FAIL: ... did not answer STATUS`).
 
 Optional check of the sandbox: `systemd-analyze security defjam-relay`.
 

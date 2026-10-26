@@ -83,6 +83,7 @@ func main() {
 	updatesListen := flag.String("updates-listen", "", "TCP address for the launcher's update files, e.g. :27778 (empty: off)")
 	updatesDir := flag.String("updates-dir", "", "folder holding latest.json, latest.json.sig and the setups")
 	rollback := flag.Bool("rollback", false, "let clients roll back always (tests); otherwise only while <updates-dir>/rollback-allowed exists")
+	testLag := flag.Duration("test-lag", 0, "tests only: hold every datagram the relay sends this long (a local relay that answers like one far away)")
 	accountsURL := flag.String("accounts-internal", "", "the account service's local internal listener for ranked play, e.g. http://127.0.0.1:8091 (empty: ranked off)")
 	flag.Parse()
 
@@ -109,6 +110,10 @@ func main() {
 	cfg := relay.ServerConfig{
 		Relay:       relay.Config{MaxRooms: *maxRooms, MaxClients: *maxClients},
 		LogInterval: li,
+		TestLag:     *testLag,
+	}
+	if *testLag > 0 {
+		log.Printf("relay: tests: every datagram held %v", *testLag)
 	}
 	if *accountsURL != "" {
 		cfg.Accounts = relay.AccountsHTTP{Base: *accountsURL, Client: &http.Client{Timeout: 10 * time.Second}}
