@@ -5,6 +5,14 @@ update is a new **setup** (source and tools, no game data): the launcher downloa
 it in update mode, which rebuilds the game from the game files the installation already
 extracted, with a progress bar. Saves, settings and HD textures stay.
 
+While it runs, the GAME card and the update window show the step ("Step 6 of 8 · Translating the
+game code"), the setup's current line, the percentage and the time so far. The setup runs hidden
+with `--status-file <status>` and writes three small files the launcher reads every half second:
+`<status>` (the current line), `<status>.progress` (0-1000) and `<status>.stage`
+(`<index> <total> <key> <name>`, e.g. `5 7 lift Translating the game code`; the launcher counts its
+download as step 1, so that is step 6 of 8). A launcher that does not read the stage file, or a setup
+that does not write it, still shows the line and the bar.
+
 ## How it is trusted
 
 - `latest.json` on the update server names the newest build, its version, release notes, the setup
