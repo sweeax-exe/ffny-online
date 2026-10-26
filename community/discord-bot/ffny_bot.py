@@ -114,7 +114,8 @@ class FfnyBot(discord.Client):
         if getattr(channel, "name", None) == core.HONEYPOT_CHANNEL:
             await self.softban(guild, author, "posted in #%s" % core.HONEYPOT_CHANNEL, message.content)
             return True
-        copies = self.spam.add(author.id, now.timestamp(), channel.id, message.content, message.id)
+        files = [(a.filename, a.size) for a in message.attachments]
+        copies = self.spam.add(author.id, now.timestamp(), channel.id, message.content, message.id, files)
         if copies:
             for channel_id, message_id in copies:
                 ch = guild.get_channel(channel_id)

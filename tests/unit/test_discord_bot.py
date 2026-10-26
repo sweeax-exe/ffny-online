@@ -180,3 +180,18 @@ def test_spam_tracker_finds_the_same_text_in_three_channels():
     t3 = core.SpamTracker()
     for ch in (1, 2, 3):
         assert t3.add(6, ch, ch, "gg", ch) is None                         # too short to count
+
+
+def test_automod_catches_hijacked_accounts():
+    j = core.judge_message
+    # old member with roles: still caught for the MrBeast / casino scams
+    assert j("MrBeast is giving away $2,500! https://beast-gift.xyz", 0, False, False, True)[0] == "timeout"
+    assert j("crypto casino promo code FFNY gives 500 USDT bonus", 0, False, False, True)[0] == "timeout"
+    assert j("mr beast games was crazy last night", 0, False, False, True) is None   # talk, no link/code
+    t = core.SpamTracker()
+    for ch in (1, 2):
+        assert t.add(9, ch, ch, "", ch, [("giveaway.png", 81234)]) is None
+    copies = t.add(9, 3, 3, "", 3, [("giveaway.png", 81234)])
+    assert copies and len(copies) == 3                     # the same picture in three channels
+    t2 = core.SpamTracker()
+    assert all(t2.add(4, ch, ch, "", ch, [("clip%d.mp4" % ch, ch)]) is None for ch in (1, 2, 3))

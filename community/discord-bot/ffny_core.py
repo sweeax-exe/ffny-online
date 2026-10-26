@@ -414,6 +414,12 @@ SCAM_WORDS = re.compile(
     r"(free\s*nitro|nitro\s*(gift|free|giveaway)|steam\s*gift|gift\s*card|airdrop|crypto\s*(giveaway|bonus)|"
     r"\$\s*\d+\s*(gift|free)|onlyfans|18\+\s*(content|leak)|nudes?\b|leaked\s*(pics|video)|"
     r"claim\s*(your|now)|first\s*\d+\s*(people|users)|i'?m\s*leaving\s*cs|selling\s*(my\s*)?(skins|account))", re.I)
+# Hijacked accounts (stolen login tokens, e.g. after the Double Counter breach) post these from old,
+# trusted-looking members: fake MrBeast/crypto giveaways and casino "promo codes". Judged for everyone.
+HIJACK_WORDS = re.compile(
+    r"(mr\.?\s*beast|beast\s*(games|giveaway|casino)|crypto\s*casino|casino\s*(bonus|promo)|promo\s*code|"
+    r"bonus\s*code|withdraw(al)?\s*(now|instantly|your)|\$\d{3,}[\d,]*\s*(free|bonus|giveaway|reward)|"
+    r"(usdt|btc|eth|solana)\s*(giveaway|bonus|reward)|i\s*just\s*won\s*\$)", re.I)
 LOOKALIKE = re.compile(r"(d[il1]sc[o0]r[dcl][^.\s/]*\.(?!com\b|gg\b)[a-z]{2,}|st[e3]am(?!community\.com|powered\.com)"
                        r"[a-z0-9-]*\.(com|ru|net|org|xyz|gift|link|io|cc)|dlscord|disc0rd|discorcl|steamcornmunity)", re.I)
 
@@ -443,6 +449,8 @@ def judge_message(text, mentions, everyone_attempt, is_new, has_roles):
         return "timeout", "@everyone with a link"
     if LOOKALIKE.search(text):
         return "timeout", "a fake Discord/Steam link"
+    if HIJACK_WORDS.search(text) and (URL.search(text) or INVITE.search(text) or "code" in text.lower()):
+        return "timeout", "a giveaway/casino scam (hijacked account?)"
     newcomer = is_new and not has_roles
     if newcomer and SCAM_WORDS.search(text) and URL.search(text):
         return "timeout", "a scam message with a link"
@@ -459,10 +467,14 @@ class SpamTracker:
     def __init__(self):
         self.recent = {}        # user id -> list of (time, channel id, normalized text, message id)
 
-    def add(self, user_id, now, channel_id, text, message_id):
+    def add(self, user_id, now, channel_id, text, message_id, attachments=()):
         """Records a message; returns the (channel id, message id) of every copy when the same text has
-        now been posted in SPAM_CHANNELS different channels within SPAM_WINDOW_S, else None."""
+        now been posted in SPAM_CHANNELS different channels within SPAM_WINDOW_S, else None.
+        attachments: (filename, size) pairs, so image-only spam (the usual fake-giveaway picture)
+        counts as the same message too."""
         norm = normalize_text(text)
+        if attachments:
+            norm += " [files " + ",".join("%s:%d" % (n.lower(), sz) for n, sz in sorted(attachments)) + "]"
         items = [x for x in self.recent.get(user_id, []) if now - x[0] <= SPAM_WINDOW_S]
         items.append((now, channel_id, norm, message_id))
         self.recent[user_id] = items[-30:]
