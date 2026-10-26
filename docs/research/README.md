@@ -13,6 +13,8 @@ cite other development notes, logs and captures that are not published.
 
 ## Rendering
 
+- [v0.12.1 Story portraits and Power Plant](v0121-portrait-viewport-read.md) — logical versus AA surface clipping, verified portrait correction, and VY3 FFA performance measurements.
+
 - [Render path: push-buffer executor and the D3D8 intercept](m2-render-path.md)
 - [Vertical-blank interrupt hang](m2-vblank-isr.md)
 - [Push-buffer space reservation and ring wrap](d3d-pushbuffer-wrap.md)
