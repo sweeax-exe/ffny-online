@@ -35,6 +35,10 @@ type Config struct {
 	// Nil: no check.
 	PublishedBuild func() uint32
 
+	// RollbackAllowed says whether clients may roll back (CapRollback in the CAPS answer); nil or
+	// false: every match plays in lockstep. Read at each CAPS, so it switches without a restart.
+	RollbackAllowed func() bool
+
 	// Ranked enables the ranked queue (RANKED); the Server sets it when it has an account
 	// service to check tickets with. Off, RANKED is answered QUEUE refused.
 	Ranked bool
@@ -324,6 +328,14 @@ func (r *Relay) handle(now time.Time, from netip.AddrPort, b []byte) []Packet {
 }
 
 // hello handles HELLO: an idempotent re-send, a create, a join, or a lobby entry.
+// caps is the relay's CAPS answer: RelayCaps, plus CapRollback while rollback is allowed.
+func (r *Relay) caps() uint32 {
+	if r.cfg.RollbackAllowed != nil && r.cfg.RollbackAllowed() {
+		return RelayCaps | CapRollback
+	}
+	return RelayCaps
+}
+
 // outdated says whether a client of build number b is older than the published build. Builds before
 // FirstNumberedBuild say no number (b == 0); they pass until that build is published.
 func (r *Relay) outdated(b uint32) bool {

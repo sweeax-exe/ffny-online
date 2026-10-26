@@ -49,7 +49,10 @@ $logs = Join-Path $repo 'logs\hub-test'
 New-Item -ItemType Directory -Force $logs | Out-Null
 
 $started = Get-Date
-$relay = Start-Process (Join-Path $repo 'netplay\relay\dist\relay.exe') -ArgumentList '-listen', "127.0.0.1:$RelayPort", '-log-interval', '30s' `
+# RECOMP_ROLLBACK=on in ExtraEnv: the test relay allows rollback (the live one only with its switch file)
+$relayArgs = @('-listen', "127.0.0.1:$RelayPort", '-log-interval', '30s')
+if ($ExtraEnv -match '^RECOMP_ROLLBACK=on') { $relayArgs += '-rollback' }
+$relay = Start-Process (Join-Path $repo 'netplay\relay\dist\relay.exe') -ArgumentList $relayArgs `
          -PassThru -WindowStyle Hidden -RedirectStandardError "$logs\relay.err" -RedirectStandardOutput "$logs\relay.out"
 Start-Sleep -Seconds 1
 

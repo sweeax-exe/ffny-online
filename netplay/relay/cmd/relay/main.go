@@ -82,6 +82,7 @@ func main() {
 	logInterval := flag.Duration("log-interval", 60*time.Second, "period of the summary log line (0 disables)")
 	updatesListen := flag.String("updates-listen", "", "TCP address for the launcher's update files, e.g. :27778 (empty: off)")
 	updatesDir := flag.String("updates-dir", "", "folder holding latest.json, latest.json.sig and the setups")
+	rollback := flag.Bool("rollback", false, "let clients roll back always (tests); otherwise only while <updates-dir>/rollback-allowed exists")
 	accountsURL := flag.String("accounts-internal", "", "the account service's local internal listener for ranked play, e.g. http://127.0.0.1:8091 (empty: ranked off)")
 	flag.Parse()
 
@@ -118,11 +119,18 @@ func main() {
 	if *updatesDir != "" {
 		readPublished(filepath.Join(*updatesDir, "latest.json"), &published)
 		cfg.Relay.PublishedBuild = published.Load
+		// The rollback switch: the file rollback-allowed in the updates folder lets clients roll
+		// back; without it every match plays in lockstep. No restart needed.
+		allowFile := filepath.Join(*updatesDir, "rollback-allowed")
+		cfg.Relay.RollbackAllowed = func() bool { _, err := os.Stat(allowFile); return err == nil }
 		go func() {
 			for range time.Tick(30 * time.Second) {
 				readPublished(filepath.Join(*updatesDir, "latest.json"), &published)
 			}
 		}()
+	}
+	if *rollback {
+		cfg.Relay.RollbackAllowed = func() bool { return true }
 	}
 	srv, err := relay.NewServer(cfg)
 	if err != nil {

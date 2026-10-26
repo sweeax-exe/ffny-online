@@ -20,7 +20,10 @@ const (
 
 	// CapKoth is the CAPS bit for King of the Hill.
 	CapKoth uint32 = 1 << 0
-	// RelayCaps is what this relay answers to CAPS.
+	// CapRollback in the relay's answer lets clients roll back (their beta setting still decides);
+	// without it every match plays in lockstep. Config.RollbackAllowed switches it.
+	CapRollback uint32 = 1 << 1
+	// RelayCaps is what this relay always answers to CAPS.
 	RelayCaps = CapKoth
 
 	WinnerDraw uint8 = 0xFF // RESULT winner and HILL last_winner: a draw / nobody

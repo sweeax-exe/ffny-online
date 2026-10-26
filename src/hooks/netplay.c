@@ -149,6 +149,7 @@ void netplay_crowd_update(void) { sub_00081170(); }
 #define T_RESULT      0x22      /* a fighter's outcome: START seed, the winner's room slot (0xFF a draw) */
 #define T_WATCH       0x23      /* START's body, for a fight this PC only watches */
 #define CAPS_KOTH     1u
+#define CAPS_ROLLBACK 2u        /* the relay lets matches roll back (its switch; off: lockstep only) */
 #define CAPS_TRIES    5         /* CAPS every RETRY_MS; no answer after these: an older relay */
 #define WINNER_DRAW   0xFFu
 #define RESULT_TRIES  75        /* RESULT every RETRY_MS until a HILL shows the fight over (30 s) */
@@ -1273,7 +1274,12 @@ static void on_start(const uint8_t *b, int len)
     N.delay = LOBBY_DELAY;
     N.delay_fixed = 0;
     for (i = 0; i < MAXP; i++) N.peer_rtt[i] = -1, N.peer_rb[i] = 0;
-    N.peer_rb[pos] = rollback_wanted();
+    /* This PC rolls back only when its player has the beta on and the relay allows it: the relay's
+     * switch turns the beta off for everyone without a new build (2026-10-26, after rollback
+     * crashes). Sent in P_RTT, so every PC of the match decides from the same flags. */
+    N.peer_rb[pos] = rollback_wanted() && N.relay_caps > 0 && (N.relay_caps & CAPS_ROLLBACK);
+    if (rollback_wanted() && !N.peer_rb[pos])
+        fprintf(stderr, "[NETPLAY] rollback is switched off on the server: this match plays in lockstep\n");
     N.rb_match = 0;                         /* decided at the sync point */
     {   /* this PC's ping as of now, with the worst of the last few as the jitter margin */
         int k, worst = N.rtt_ms > 0 ? N.rtt_ms : 0;
@@ -1398,8 +1404,9 @@ static void on_packet(const uint8_t *b, int len)
             int had = N.relay_caps;
             N.relay_caps = (int)(get32(b + 6) & 0x7FFFFFFFu);
             if (had != N.relay_caps)
-                fprintf(stderr, "[NETPLAY] the relay supports %08X%s\n", (unsigned)N.relay_caps,
-                        N.relay_caps & CAPS_KOTH ? " (King of the Hill)" : "");
+                fprintf(stderr, "[NETPLAY] the relay supports %08X%s%s\n", (unsigned)N.relay_caps,
+                        N.relay_caps & CAPS_KOTH ? " (King of the Hill)" : "",
+                        N.relay_caps & CAPS_ROLLBACK ? " (rollback allowed)" : "");
         }
         break;
     case T_HILL:

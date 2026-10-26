@@ -274,3 +274,18 @@ func TestQuickPoolEveryVenue(t *testing.T) {
 		t.Fatal("a quick room's settings are refused")
 	}
 }
+
+func TestCapsCarryTheRollbackSwitch(t *testing.T) {
+	allowed := false
+	r := &Relay{cfg: Config{RollbackAllowed: func() bool { return allowed }}}
+	if r.caps() != RelayCaps {
+		t.Fatalf("switch off: caps %x", r.caps())
+	}
+	allowed = true
+	if r.caps() != RelayCaps|CapRollback {
+		t.Fatalf("switch on: caps %x", r.caps())
+	}
+	if (&Relay{}).caps() != RelayCaps {
+		t.Fatal("no switch: rollback must stay off")
+	}
+}

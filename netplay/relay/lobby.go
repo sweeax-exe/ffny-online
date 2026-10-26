@@ -376,7 +376,7 @@ func (r *Relay) lobbyRequest(now time.Time, c *client, m lobbyRequest, reqLen in
 		return r.ranked(now, c, m, reqLen)
 	case Caps:
 		c.caps = m.Caps
-		return []Packet{{To: c.addr, Data: mustEncode(RelayCapsMsg{Caps: RelayCaps})}}
+		return []Packet{{To: c.addr, Data: mustEncode(RelayCapsMsg{Caps: r.caps()})}}
 	case Result:
 		if c.room == nil {
 			return r.errorTo(c.addr, ErrRoomState, reqLen)
