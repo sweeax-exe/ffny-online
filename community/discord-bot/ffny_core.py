@@ -25,17 +25,19 @@ TICKET_CATEGORY = "🎫 TICKETS"
 TICKET_LOG = "ticket-log"
 REPORTS_CHANNEL = "bug-reports"   # F9 reports and crash logs from the games (team only)
 ANNOUNCEMENTS = "announcements"
+POLLS_CHANNEL = "polls"     # polls only: players may post polls; the bot removes anything else
 HELP_CHANNEL = "get-help"
 MAX_OPEN_TICKETS = 2
 LEADERBOARD_MIN = 3        # the account service's LeaderboardMin
 
-# Channel kinds: read (everyone reads, only the team and the bot write), chat, team (team only),
+# Channel kinds: read (everyone reads, only the team and the bot write), chat, polls (everyone may
+# post a poll, the bot removes other messages), team (team only),
 # voice, and stat (the player count in its name; nobody joins it).
 LAYOUT = [
     ("📢 INFO", [("welcome", "read"), ("rules", "read"), ("announcements", "read"), (SUPPORT_CHANNEL, "read"),
                 ("status", "stat")]),
     ("💬 COMMUNITY", [("general", "chat"), ("find-a-match", "chat"), ("clips-and-screens", "chat"),
-                     ("ideas-and-feedback", "chat"), ("off-topic", "chat")]),
+                     ("ideas-and-feedback", "chat"), ("off-topic", "chat"), (POLLS_CHANNEL, "polls")]),
     ("🛠️ SUPPORT", [("get-help", "read"), ("faq", "read"), (APPLY_CHANNEL, "read")]),
     ("🎮 VOICE", [("Lobby", "voice"), ("Match 1", "voice"), ("Match 2", "voice")]),
     (TICKET_CATEGORY, []),
@@ -298,3 +300,11 @@ def report_fields(info):
     if info.get("crash"):
         fields.append(("Crash", "```%s```" % info["crash"][:900].replace("`", "'")))
     return fields
+
+
+def keep_in_polls(has_poll, by_bot, by_team):
+    """Whether a message in the polls channel stays: polls, and anything the bot or the team posts."""
+    return bool(has_poll or by_bot or by_team)
+
+
+POLLS_ONLY_NOTE = "This channel is for polls only, so your message was removed. Start a poll with the + button → Poll, or chat in #general."

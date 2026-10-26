@@ -84,6 +84,24 @@ class FfnyBot(discord.Client):
             return
         await self.start_in(guild)
 
+    async def on_message(self, message):
+        """#polls holds polls only: any other message from a player is removed, with a short note."""
+        channel = message.channel
+        if getattr(channel, "name", None) != core.POLLS_CHANNEL or message.guild is None:
+            return
+        author = message.author
+        team = self.role(message.guild, core.TEAM_ROLE)
+        by_team = isinstance(author, discord.Member) and (
+            author.guild_permissions.manage_messages or (team is not None and team in author.roles))
+        if core.keep_in_polls(getattr(message, "poll", None) is not None, author.bot, by_team):
+            return
+        try:
+            await message.delete()
+            await channel.send(f"{author.mention} {core.POLLS_ONLY_NOTE}", delete_after=10,
+                               allowed_mentions=discord.AllowedMentions(users=[author]))
+        except discord.HTTPException as error:
+            log.warning("could not tidy #%s: %s", core.POLLS_CHANNEL, error)
+
     async def on_guild_join(self, guild):
         log.info("joined %s", guild.name)
         if guild == self.guild():
@@ -227,6 +245,10 @@ class FfnyBot(discord.Client):
         if existing:
             return existing
         over = {me: bot_all}
+        if kind == "polls":
+            over[everyone] = discord.PermissionOverwrite(send_messages=True, send_polls=True, add_reactions=True,
+                                                         create_public_threads=False, create_private_threads=False,
+                                                         send_messages_in_threads=False)
         if kind == "read":
             over[everyone] = discord.PermissionOverwrite(send_messages=False, add_reactions=True,
                                                          create_public_threads=False)

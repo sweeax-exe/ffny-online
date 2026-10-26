@@ -16,8 +16,8 @@ def test_layout_names_are_valid_discord_names():
     for category, channels in core.LAYOUT:
         assert 0 < len(category) <= 100
         for name, kind in channels:
-            assert kind in {"read", "chat", "team", "voice", "stat"}
-            if kind in {"read", "chat", "team"}:
+            assert kind in {"read", "chat", "polls", "team", "voice", "stat"}
+            if kind in {"read", "chat", "polls", "team"}:
                 assert re.fullmatch(r"[a-z0-9-]{1,100}", name), name
             assert name not in seen
             seen.add(name)
@@ -120,3 +120,11 @@ def test_report_texts():
     assert core.report_title(f9) == "🐞 F9 report d4e5f6"
     assert "Crash" not in dict(core.report_fields(f9))
     assert all(len(v) <= 1024 for _, v in core.report_fields(dict(crash, crash="x" * 5000)))
+
+
+def test_polls_channel_keeps_polls_and_team_posts_only():
+    assert core.keep_in_polls(True, False, False)
+    assert core.keep_in_polls(False, True, False)
+    assert core.keep_in_polls(False, False, True)
+    assert not core.keep_in_polls(False, False, False)
+    assert any(name == core.POLLS_CHANNEL and kind == "polls" for _, chans in core.LAYOUT for name, kind in chans)
