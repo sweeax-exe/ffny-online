@@ -1,5 +1,13 @@
 # Menu/UI modpack implementation handover
 
+**1.1 publication — 2026-10-26:** [publication and compatibility report](research/menu-ui-v1.1-publication-2026-10-26.md).
+The final stable archive supersedes local RC1: 180 native textures (17 unchanged
+original anchors added for installer validation), 80 wide/stretch entries,
+404 files. See `config/menu-ui-v1.1-release.json` for its immutable hash and URL.
+Artwork loads on v0.12.1 without a game reinstall. The fire-escape geometry
+repair is separate game code queued for v0.12.2. Earlier no-publication and
+local-RC1 statements below are historical.
+
 **Latest join repairs — 2026-10-26:** [join follow-up report](research/menu-ui-joins-2026-10-26.md).
 Choose Teams v2 uses Battle wall v4 exterior art and preserves its complete center.
 Map v6 repairs both exterior connections and the obsolete inset with narrow

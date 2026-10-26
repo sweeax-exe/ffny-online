@@ -1,5 +1,9 @@
 # Menu wall/map joins — 2026-10-26 follow-up
 
+**Publication follow-up:** the [stable publication report](menu-ui-v1.1-publication-2026-10-26.md)
+supersedes the local-RC1 packaging and no-publication state below. Its final
+installer-valid archive adds 17 unchanged native anchors and a hyphenated root.
+
 Feature branch `codex/hd-widescreen-menu-v1.1`, still based on release PR #123
 (`53e5d8b`), toolkit `7a0f2f6`; no runtime changes in this follow-up.
 This supersedes the previous report's map-v3 join failure and Team-v1 selection
