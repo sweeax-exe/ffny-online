@@ -18,6 +18,7 @@ ACCOUNTS_URL = "http://127.0.0.1:8091"      # the account service's local listen
 
 TEAM_ROLE = "FFNY Team"
 MOD_ROLE = "Moderator"
+SUPPORTER_ROLE = "Supporter"   # a thank-you for donors: shown in the member list, no other perks
 APPLY_CHANNEL = "join-the-team"
 ALERT_ROLE = "Build Alerts"
 MATCH_ROLE = "Match Ping"
@@ -99,11 +100,13 @@ TICKET_TYPES = {
 }
 
 SUPPORT_TEXT = f"""# Support the project ❤️
-**FFNY Online is free and stays free.** Support only pays for the servers: the online relay, the accounts and stats, this Discord bot, and later servers in North America and other regions so everyone gets a good ping.
+**FFNY Online is free and stays free.** Support only pays for the servers: the online relays in Europe and North America, the accounts and stats, and this Discord bot.
 
 ☕ **Ko-fi:** {KOFI}
 
-No perks and no paywalls: supporting is completely voluntary, and everyone gets the same game. Thank you!"""
+💖 As a thank-you, supporters get the **Supporter** role here on Discord and show up in their own group in the member list. Mention your Discord name in the Ko-fi message, or open a ticket in #get-help after supporting, and the team adds it.
+
+No perks in the game and no paywalls: supporting is completely voluntary, and everyone gets the same game. Thank you!"""
 
 APPLY_TEXT = """# Join the FFNY Team 🛡️
 FFNY Online is growing fast, and we'd love some help keeping the community a good place: welcoming new players, answering questions, helping in tickets and keeping the chat clean.

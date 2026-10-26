@@ -131,6 +131,9 @@ class FfnyBot(discord.Client):
         for name in (core.ALERT_ROLE, core.MATCH_ROLE):
             if not self.role(guild, name):
                 await guild.create_role(name=name, mentionable=True, reason="FFNY bot layout")
+        if not self.role(guild, core.SUPPORTER_ROLE):
+            await guild.create_role(name=core.SUPPORTER_ROLE, colour=discord.Colour(0xFF5E8A), hoist=True,
+                                    mentionable=False, reason="FFNY bot layout: donors")
         if not self.role(guild, core.MOD_ROLE):
             # Moderation without kicks or bans: those stay with the owner.
             perms = discord.Permissions(manage_messages=True, moderate_members=True, manage_threads=True,
