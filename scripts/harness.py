@@ -992,6 +992,11 @@ def run_game(name, stages=(), tail="", shots="", secs=240, preset=RELEASE_PRESET
         e["RECOMP_TRANS_SHOT"] = os.path.join(shots_dir, name + ".bmp")
         e["RECOMP_TRANS_SHOT_SECS"] = shots
     e.update(env or {})
+    # HARNESS_GUEST_CORE=<n>: every run's guest threads on that CPU, also in the checks that do not
+    # inherit RECOMP_* (regress, scenario_suite), so a test beside other copies on a shared PC keeps
+    # off their CPUs. A route or caller that names its own core keeps it.
+    if os.environ.get("HARNESS_GUEST_CORE"):
+        e.setdefault("RECOMP_GUEST_CORE", os.environ["HARNESS_GUEST_CORE"])
     unlock_default(e)
     startup_default(e)
     e['DEFJAM_DATA'] = guarded_data_root(e['DEFJAM_DATA'])
