@@ -62,6 +62,7 @@ class FfnyBot(discord.Client):
         self.state.setdefault("tickets", {})
         self.state.setdefault("messages", {})
         self.ready_once = False
+        self.last_poll = {}             # user id -> when they last started a poll (cooldown)
 
     async def setup_hook(self):
         self.add_view(HelpPanel())
@@ -69,6 +70,7 @@ class FfnyBot(discord.Client):
         self.add_view(AlertToggle())
         self.add_view(ApplyPanel())
         self.add_view(ApplicationControls())
+        self.add_view(PollPanel())
 
     def guild(self):
         want = os.environ.get("FFNY_BOT_GUILD")
@@ -300,6 +302,7 @@ class FfnyBot(discord.Client):
         await self.put(guild, "alerts", core.ANNOUNCEMENTS, content=core.ALERTS_TEXT, view=AlertToggle())
         await self.put(guild, "apply", core.APPLY_CHANNEL, content=core.APPLY_TEXT, view=ApplyPanel())
         await self.put(guild, "support", core.SUPPORT_CHANNEL, content=core.SUPPORT_TEXT)
+        await self.put(guild, "polls", core.POLLS_CHANNEL, content=core.POLL_PANEL, view=PollPanel(), pin=True)
 
     # -- tickets --
 
@@ -532,6 +535,50 @@ class ApplicationControls(discord.ui.View):
     @discord.ui.button(label="Close", emoji="🔒", style=discord.ButtonStyle.danger, custom_id="ffny:apply:close")
     async def close(self, interaction, button):
         await bot.close_ticket(interaction)
+
+
+class PollForm(discord.ui.Modal, title="Share an idea or start a poll"):
+    question = discord.ui.TextInput(label="Your idea or question", max_length=core.POLL_QUESTION_LEN,
+                                    placeholder="Add a tournament mode with brackets")
+    answers = discord.ui.TextInput(label="Answers (optional, empty = 👍 / 👎)", style=discord.TextStyle.paragraph,
+                                   required=False, max_length=700,
+                                   placeholder="Leave empty to vote yes or no, or one answer per line")
+
+    async def on_submit(self, interaction):
+        parsed, error = core.parse_poll(self.question.value, self.answers.value)
+        if error:
+            await interaction.response.send_message(error, ephemeral=True)
+            return
+        question, answers, hours = parsed
+        poll = discord.Poll(question=question, duration=datetime.timedelta(hours=hours))
+        for text in answers:
+            poll.add_answer(text=text)
+        channel = bot.text_channel(interaction.guild, core.POLLS_CHANNEL) or interaction.channel
+        try:
+            await channel.send(content="Poll by %s" % interaction.user.mention, poll=poll,
+                               allowed_mentions=discord.AllowedMentions.none())
+        except discord.HTTPException as error:
+            log.warning("poll by %s failed: %s", interaction.user, error)
+            await interaction.response.send_message("Discord did not take that poll, please try again.", ephemeral=True)
+            return
+        bot.last_poll[interaction.user.id] = datetime.datetime.now(datetime.timezone.utc)
+        await interaction.response.send_message("Your poll is up! 🗳️", ephemeral=True)
+
+
+class PollPanel(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="Start a poll", emoji="🗳️", style=discord.ButtonStyle.primary, custom_id="ffny:poll:start")
+    async def start(self, interaction, button):
+        last = bot.last_poll.get(interaction.user.id)
+        now = datetime.datetime.now(datetime.timezone.utc)
+        if last and (now - last).total_seconds() < core.POLL_COOLDOWN_S:
+            wait = int(core.POLL_COOLDOWN_S - (now - last).total_seconds()) // 60 + 1
+            await interaction.response.send_message("You just started a poll. Try again in %d min." % wait,
+                                                    ephemeral=True)
+            return
+        await interaction.response.send_modal(PollForm())
 
 
 class AlertToggle(discord.ui.View):

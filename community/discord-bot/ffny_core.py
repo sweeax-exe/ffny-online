@@ -308,3 +308,40 @@ def keep_in_polls(has_poll, by_bot, by_team):
 
 
 POLLS_ONLY_NOTE = "This channel is for polls only, so your message was removed. Start a poll with the + button → Poll, or chat in #general."
+
+
+POLL_PANEL = """# 🗳️ Ideas & polls
+Got an idea for FFNY Online? A new mode, a feature, a change? Put it to the community!
+
+**How it works:** press **Start a poll**, describe your idea in one line and send. Everyone votes 👍 or 👎.
+Want other choices (for example which venue or which mode first)? Add your own answers, one per line.
+
+Every poll runs for 48 hours. The ideas with the most votes go on our list for the next builds."""
+
+POLL_MAX_ANSWERS = 10       # Discord's limit
+POLL_ANSWER_LEN = 55        # Discord's limit for an answer's text
+POLL_QUESTION_LEN = 300     # Discord's limit for the question
+POLL_COOLDOWN_S = 600       # one poll per player every ten minutes
+POLL_HOURS = 48             # every poll runs this long: the same for all, no field to fill in
+POLL_IDEA_ANSWERS = ("👍 Yes, add it", "👎 No")   # the answers when the form leaves them empty
+
+
+def parse_poll(question, answers_text):
+    """The poll form's fields as (question, answers, hours), or (None, error) when they do not make a
+    poll: 2 to 10 different non-empty answers, one per line. Every poll runs POLL_HOURS."""
+    question = " ".join((question or "").split())
+    if not question:
+        return None, "Your poll needs a question."
+    answers, seen = [], set()
+    for line in (answers_text or "").splitlines():
+        text = " ".join(line.split()).lstrip("-*• ").strip()
+        if text and text.lower() not in seen:
+            seen.add(text.lower())
+            answers.append(text[:POLL_ANSWER_LEN])
+    if not answers:
+        answers = list(POLL_IDEA_ANSWERS)      # an idea: thumbs up or down
+    if len(answers) < 2:
+        return None, "Give at least two different answers, one per line (or none for 👍 / 👎)."
+    if len(answers) > POLL_MAX_ANSWERS:
+        return None, "At most %d answers, please." % POLL_MAX_ANSWERS
+    return (question[:POLL_QUESTION_LEN], answers, POLL_HOURS), None

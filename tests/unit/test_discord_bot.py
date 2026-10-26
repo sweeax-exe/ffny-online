@@ -128,3 +128,13 @@ def test_polls_channel_keeps_polls_and_team_posts_only():
     assert core.keep_in_polls(False, False, True)
     assert not core.keep_in_polls(False, False, False)
     assert any(name == core.POLLS_CHANNEL and kind == "polls" for _, chans in core.LAYOUT for name, kind in chans)
+
+
+def test_poll_form_parsing():
+    ok, err = core.parse_poll("  Next  mode? ", "Team\n- Cage\n\nteam\nInferno")
+    assert err is None and ok == ("Next mode?", ["Team", "Cage", "Inferno"], core.POLL_HOURS)
+    assert core.parse_poll("Q", "Only one")[0] is None
+    assert core.parse_poll("Add tournaments", "")[0][1] == list(core.POLL_IDEA_ANSWERS)
+    assert core.parse_poll("", "a\nb")[0] is None
+    assert core.parse_poll("Q", "\n".join(str(i) for i in range(11)))[0] is None
+    assert len(core.parse_poll("Q", "x" * 80 + "\nb")[0][1][0]) == core.POLL_ANSWER_LEN
