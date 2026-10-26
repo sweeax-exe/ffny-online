@@ -771,6 +771,7 @@ int netservers_quick_move(int mode, int alone_s, const char *code, int *waiting,
                 const NetRoomInfo *x = &R.rooms[o][k];
                 int age = R.age[o][k] + (int)((now - R.got[o]) / 1000);
                 if (x->mode != mode || x->phase != 0 || x->players < 1 || x->players >= x->max) continue;
+                if (strncmp(x->name, "Quick: ", 7)) continue;   /* the relay quick-joins only quick rooms */
                 /* The younger room's player moves after 20 s alone (within 2 s of each other, the one
                  * on North America moves to Europe); the other one only once that room has waited 35 s,
                  * so a player there who cannot move (not on Both) is still met, and two players on Both

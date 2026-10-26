@@ -40,13 +40,13 @@ func (r *Relay) status(now time.Time, from netip.AddrPort, src *source, m Status
 	return []Packet{{To: from, Data: data}}
 }
 
-// statusCounts counts, for build b (zeros: every build), the players in public rooms that wait in
-// the lobby phase with a free place (rooms a quick match fills; not King of the Hill, ranked or
-// code-only rooms), and the players in the lobby outside any room.
+// statusCounts counts, for build b (zeros: every build), the players in quick rooms that wait in
+// the lobby phase with a free place (rooms a quick match fills; not King of the Hill, ranked,
+// player-made or code-only rooms), and the players in the lobby outside any room.
 func (r *Relay) statusCounts(b Build) (waiting, idle int) {
 	every := b == Build{}
 	for _, rm := range r.rooms {
-		if rm.legacy || rm.ranked || rm.koth != nil || rm.settings.Public != 1 || rm.phase != PhaseLobby ||
+		if !rm.quick || rm.legacy || rm.ranked || rm.koth != nil || rm.settings.Public != 1 || rm.phase != PhaseLobby ||
 			(!every && rm.build != b) {
 			continue
 		}

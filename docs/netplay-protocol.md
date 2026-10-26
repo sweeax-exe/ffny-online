@@ -95,7 +95,7 @@ to the lobby with the same token.
 | Field | Size | Meaning |
 |---|---|---|
 | `name` | string | 1..24 bytes, shown in the list |
-| `public` | u8 | 1: listed and found by quick match; 0: join by code only |
+| `public` | u8 | 1: listed; 0: join by code only. Quick match joins only rooms QUICK made ("Quick: <player>"), never a player's own room |
 | `mode` | u8 | front-end match type: 0 One on One, others as the game numbers them |
 | `max` | u8 | players 2..4 |
 | `rounds` | u8 | 0 = the game's default; otherwise the rules index the game takes |

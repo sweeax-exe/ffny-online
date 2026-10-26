@@ -388,6 +388,7 @@ func TestLobbyQuick(t *testing.T) {
 	}
 	old := onlyRoomTo(t, l2.quickM(pA, 1, 4), pA).Room
 	newer := roomOf(t, l2.mkRoom(pB, RoomSettings{Name: "n", Public: 1, Mode: 1, Max: 4, Pool: []uint8{1}}), pB).Room
+	l2.r.rooms[newer].quick = true // stands in for a second quick room
 	if st := roomOf(t, l2.quickM(pC, 1, 4), pC); st.Room != old {
 		t.Fatalf("tie on players should pick the oldest, got %s", st.Room)
 	}
@@ -395,6 +396,14 @@ func TestLobbyQuick(t *testing.T) {
 	roomOf(t, l2.joinCode(pD, newer), pD)
 	if st := roomOf(t, l2.quickM(pE, 1, 4), pE); st.Room != newer {
 		t.Fatalf("quick should pick the room with the most players, got %s", st.Room)
+	}
+	// A public room a player made himself is never quick-matched: the quick player gets his own.
+	l4 := newLobby(t, Config{})
+	l4.enter(pA, "a")
+	own := roomOf(t, l4.mkRoom(pA, RoomSettings{Name: "friends", Public: 1, Mode: 0, Max: 2, Pool: []uint8{1}}), pA).Room
+	l4.enter(pB, "b")
+	if st := onlyRoomTo(t, l4.quickM(pB, 0, 2), pB); st.Room == own {
+		t.Fatal("quick joined a player's own public room")
 	}
 	// Private, voting and other-mode rooms are never quick-matched.
 	l3 := newLobby(t, Config{})

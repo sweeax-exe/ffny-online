@@ -40,7 +40,7 @@ enum NetplayState {
 
 typedef struct NetRoomSettings {
     char name[25];
-    int is_public;          /* listed and found by quick match */
+    int is_public;          /* listed; join by code only when 0 */
     int mode;               /* front-end match type, 0 One on One; or NETPLAY_MODE_KOTH* */
     int max;                /* players 2..4; King of the Hill 2..10 */
     int rounds;             /* 0 the game's default */

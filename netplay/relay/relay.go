@@ -193,6 +193,10 @@ type room struct {
 
 	// koth is the King of the Hill state (koth.go); nil in every other room.
 	koth *hill
+
+	// quick rooms were made by QUICK; only they take quick-match players (King of the Hill aside),
+	// so nobody is dropped into a room a player opened for someone else.
+	quick bool
 }
 
 // source is the rate-limit state of one source IP (IPv6: one /64).

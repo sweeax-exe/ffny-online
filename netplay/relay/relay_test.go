@@ -611,9 +611,10 @@ func TestGarbageGetsNoReply(t *testing.T) {
 	for _, b := range inputs {
 		for _, g := range h.sendRaw(thirdAddr, b) {
 			// Random bytes can form a valid PING/DATA/BYE with an unknown token
-			// (ERROR 7, rate-limited) or a valid HELLO; nothing else may answer.
+			// (ERROR 7, rate-limited), a valid HELLO, or the session-less STATUS and
+			// ROOMLIST (rate-limited); nothing else may answer.
 			switch g.msg.(type) {
-			case Error, Welcome:
+			case Error, Welcome, StatusReply, RoomListReply:
 				replies++
 			default:
 				t.Fatalf("garbage % x answered with %#v", b, g.msg)
