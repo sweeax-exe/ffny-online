@@ -25,12 +25,22 @@
 .PARAMETER BaseCore first copy's guest CPU; copy i gets BaseCore + 2i (default 2).
 .PARAMETER DataPrefix  every copy's data root is <DataPrefix><i> (made like the -hub roots: the dump as a
                     junction, a copy of the saves); default: the data root itself and <data>-hub<i>.
+.PARAMETER NaRelayPort  build 30's server choice: a second local relay on this port plays "North America"
+                    (RECOMP_NETPLAY_SERVER_NA), the one on -RelayPort "Europe" (RECOMP_NETPLAY_SERVER_EU);
+                    0 (default): one relay, as before.
+.PARAMETER Server   with -NaRelayPort: every copy's server choice, auto (default), eu or na.
+.PARAMETER EuLagMs  with -NaRelayPort: the "Europe" relay holds what it sends this long (relay -test-lag).
+.PARAMETER NaLagMs  the same for "North America".
+.PARAMETER SwitchTo with -NaRelayPort: every copy switches the server in the lobby (eu, na or auto) the way
+                    the hub's picker does, -SwitchAfterMs after entering it, then quick-matches there.
 #>
 param([ValidateRange(2, 4)][int]$Players = 2, [int]$Secs = 1200, [string[]]$ExtraEnv = @(),
       [ValidateSet('online', 'online5', 'online-rematch')][string]$Route = 'online', [int[]]$Fighters = @(55, 22, 9, 31),
       [string[]]$Stage = @(), [int]$FastKo = 0, [string]$FastKoWinner = 'alt', [switch]$Bot,
       [ValidateRange(0, 100)][int]$BotAggression = 60, [int]$RelayPort = 27777, [int]$BaseCore = 2,
-      [string]$DataPrefix = '')
+      [string]$DataPrefix = '', [int]$NaRelayPort = 0, [ValidateSet('auto', 'eu', 'na')][string]$Server = 'auto',
+      [int]$EuLagMs = 0, [int]$NaLagMs = 0, [ValidateSet('', 'auto', 'eu', 'na')][string]$SwitchTo = '',
+      [int]$SwitchAfterMs = 3000)
 $ErrorActionPreference = 'Stop'
 $repo = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 Set-Location $repo
@@ -52,8 +62,16 @@ $started = Get-Date
 # RECOMP_ROLLBACK=on in ExtraEnv: the test relay allows rollback (the live one only with its switch file)
 $relayArgs = @('-listen', "127.0.0.1:$RelayPort", '-log-interval', '30s')
 if ($ExtraEnv -match '^RECOMP_ROLLBACK=on') { $relayArgs += '-rollback' }
+if ($NaRelayPort -and $EuLagMs) { $relayArgs += @('-test-lag', "$($EuLagMs)ms") }
 $relay = Start-Process (Join-Path $repo 'netplay\relay\dist\relay.exe') -ArgumentList $relayArgs `
          -PassThru -WindowStyle Hidden -RedirectStandardError "$logs\relay.err" -RedirectStandardOutput "$logs\relay.out"
+$relayNa = $null
+if ($NaRelayPort) {
+    $naArgs = @('-listen', "127.0.0.1:$NaRelayPort", '-log-interval', '30s')
+    if ($NaLagMs) { $naArgs += @('-test-lag', "$($NaLagMs)ms") }
+    $relayNa = Start-Process (Join-Path $repo 'netplay\relay\dist\relay.exe') -ArgumentList $naArgs `
+               -PassThru -WindowStyle Hidden -RedirectStandardError "$logs\relay-na.err" -RedirectStandardOutput "$logs\relay-na.out"
+}
 Start-Sleep -Seconds 1
 
 $quick = if ($Players -eq 2) { '0,2' } else { "3,$Players" }
@@ -73,8 +91,13 @@ for ($i = 0; $i -lt $Players; $i++) {
                  /XF Partition1.img Partition2.img Partition3.img Partition4.img Partition5.img | Out-Null
     }
     $copyRoute = if ($i % 2 -eq 0) { "$Route-p1" } else { "$Route-p2" }
+    $serverEnv = if ($NaRelayPort) {
+        @('--env', "RECOMP_NETPLAY_SERVER=$Server", '--env', "RECOMP_NETPLAY_SERVER_EU=127.0.0.1:$RelayPort",
+          '--env', "RECOMP_NETPLAY_SERVER_NA=127.0.0.1:$NaRelayPort")
+    } else { @('--env', "RECOMP_NETPLAY_SERVER=127.0.0.1:$RelayPort") }
+    if ($NaRelayPort -and $SwitchTo) { $serverEnv += @('--env', "RECOMP_TEST_SERVER_SWITCH=$SwitchAfterMs,$SwitchTo") }
     $args = @('scripts/harness.py', 'run', $copyRoute, '--preset', 'win-x64-release', '--secs', "$Secs",
-              '--env', 'RECOMP_NETPLAY=quick', '--env', "RECOMP_NETPLAY_SERVER=127.0.0.1:$RelayPort",
+              '--env', 'RECOMP_NETPLAY=quick') + $serverEnv + @(
               '--env', "RECOMP_NETPLAY_QUICK=$quick", '--env', "RECOMP_NETPLAY_FIGHTER=$($fighters[$i])",
               '--env', 'RECOMP_TEST_OBSERVATIONS=1',
               '--env', 'RECOMP_INPUT_HOST=1', '--env', 'RECOMP_INPUT_IGNORE_FOCUS=1', '--env', 'RECOMP_PAD_HOST=1',
@@ -104,6 +127,7 @@ Get-Process defjam_recomp -ErrorAction SilentlyContinue |
     Where-Object { $_.Path -like (Join-Path $repo 'build\*') -and $_.StartTime -ge $started } |
     Stop-Process -Force
 if (-not $relay.HasExited) { $relay.Kill() }
+if ($relayNa -and -not $relayNa.HasExited) { $relayNa.Kill() }
 
 for ($i = 0; $i -lt $Players; $i++) {
     $hit = Select-String -Path "$logs\copy$i.txt" -Pattern '^log\s+(\S+)' | Select-Object -First 1
@@ -112,7 +136,7 @@ for ($i = 0; $i -lt $Players; $i++) {
     "== copy $i  $log"
     Get-Content "$logs\copy$i.txt" | Select-Object -First 4 | Select-Object -Skip 1
     if ($log -and (Test-Path $log)) {
-        Select-String -Path $log -Pattern '\[NETPLAY\] (START|match|sync|Match over|A player|refused|desync)|\[AUTOMATCH\] sequence|"event":"(match_over|result)"|CRASH' |
+        Select-String -Path $log -Pattern '\[SERVERS\]|\[NETPLAY\] (tests: (server|switching|now)|room: the player|START|match|sync|Match over|A player|refused|desync)|\[AUTOMATCH\] sequence|"event":"(match_over|result)"|CRASH' |
             ForEach-Object { $_.Line.Substring(0, [Math]::Min(170, $_.Line.Length)) }
         Select-String -Path $log -Pattern 'checksums compared' | Select-Object -Last 1 | ForEach-Object Line
         if ($FastKo -gt 0) { "fast knockouts: " + @(Select-String -Path $log -Pattern '\[TEST-KO\] match').Count }
@@ -120,3 +144,4 @@ for ($i = 0; $i -lt $Players; $i++) {
 }
 "elapsed: {0:N1} min" -f ((Get-Date) - $started).TotalMinutes
 "relay:"; Get-Content "$logs\relay.err", "$logs\relay.out" -ErrorAction SilentlyContinue | Select-String 'room|START|summary' | Select-Object -Last 12 | ForEach-Object Line
+if ($relayNa) { "relay NA:"; Get-Content "$logs\relay-na.err", "$logs\relay-na.out" -ErrorAction SilentlyContinue | Select-String 'room|START|summary' | Select-Object -Last 12 | ForEach-Object Line }

@@ -17,8 +17,13 @@ The game's main menu has an **ONLINE** entry in its bottom-left slot (made by th
 copy of the game, `scripts/apt-patch.py`; the art and fonts of the online screens come from it too,
 `scripts/online-art.py`). Choose it with A:
 
-1. The online screens open over the menu and connect to the server set in the launcher (Online page:
-   server and your name).
+1. The online screens open over the menu and connect to the **server**: Europe (`play.defjam.online`)
+   or North America (`na.defjam.online`). **Automatic** (the default) asks both for their ping when the
+   screens open and takes the lower one, once per session; the chip at the bottom right shows the server,
+   its ping and who is online, and **X** opens the picker (Automatic, Europe, North America, each with its
+   ping and players; a server that does not answer shows OFFLINE). The launcher's settings (Basics,
+   Online) have the same choice. Players meet only players on the same server; accounts, statistics,
+   the leaderboard and updates are the same on both (they stay on the Europe server).
 2. **QUICK MATCH** (left/right picks the mode) puts you straight into an open room of that mode, or
    opens one that the next players are put into. **FIND A ROOM** lists the open rooms; **CREATE A
    ROOM** sets the mode, the players, the venues to vote on and whether the room is listed.
@@ -28,6 +33,12 @@ copy of the game, `scripts/apt-patch.py`; the art and fonts of the online screen
    15 seconds. The most votes win; a tie is decided at random.
 5. The match then starts by itself on every PC. Modes with more fighters than players fill the free
    places with CPU fighters. After the summary press A: the room readies for the next one.
+
+In a room every player's card shows their ping to the server (players of build 30 and later report it),
+and a red line warns when a match would have a high ping (above 150 ms between the two slowest players:
+inputs will feel delayed). Alone in a quick-match room for 30 seconds while the other server has players,
+the room offers to search there (LB, or a click); it never switches by itself. Ranked play runs on the
+Europe server only: on North America the RANKED MATCH entry says so and switches over with A.
 
 Modes offered online: One on One, 3-Way, Free for All (more follow once tested online). The
 fight's first-time help cards (BLAZIN', weapon, KO) are skipped in online matches: they depend on
@@ -63,3 +74,9 @@ start a session without the launcher: the host writes its room code to the file 
 reads it. `RECOMP_NETPLAY=quick` (with `RECOMP_NETPLAY_FIGHTER=<id>`) enters the hub, quick-matches,
 readies and votes by itself. Run a local relay (`go run ./cmd/relay` in `netplay/relay`) and two
 copies of the game.
+
+The server choice: `RECOMP_NETPLAY_SERVER=auto|eu|na` with `RECOMP_NETPLAY_SERVER_EU` and
+`RECOMP_NETPLAY_SERVER_NA` naming two local relays (one started with `-test-lag 150ms` answers like a far
+one); `RECOMP_TEST_SERVER_SWITCH=<ms>,<eu|na|auto>` switches the server in the lobby the way the picker
+does before quick-matching. `scripts/netplay-hub-test.ps1 -NaRelayPort 27858 -EuLagMs 150 -Server auto`
+runs it end to end; `relayprobe -mode status` asks one relay for its `STATUS`.
