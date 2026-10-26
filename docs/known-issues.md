@@ -8,7 +8,8 @@ Fighters selection. They do not cover every mode or a full Story campaign.
 
 - **Steam Deck deterministic test failures ([#98](https://github.com/vyanhursky/DefJamFFNY-recomp/issues/98)).** The v0.12.0 candidate passes 17/18 regression checks: replay differs from the Mac golden, and the separate repeat check diverges at step 541. Windows and macOS pass their repeat checks. This remains unresolved; see the [Deck candidate report](research/rc-v0.12.0-deck-2026-10-25.md).
 
-- **v0.11.0: fighter HUD moves inward while paused ([#95](https://github.com/vyanhursky/DefJamFFNY-recomp/issues/95)).** In widescreen fights, opening the in-game pause menu can move the health/Blazin bars, names and scores to the centered 4:3 positions. The pause panel stays centered. This is an accepted release limitation, not a fixed issue.
+- **Story shops pause briefly on an item change ([#119](https://github.com/vyanhursky/DefJamFFNY-recomp/issues/119)).** v0.12.1 removed the black LOADING frame that flashed when changing an item. The game still loads the chosen part synchronously: about 55-70 ms on a Mac, and 146-333 ms with both HD packs on Windows, where audio can underrun. A Windows comparison of no packs, Faithful only and both packs is the next step. Power Plant Story free-for-all pacing is tracked separately in [#109](https://github.com/vyanhursky/DefJamFFNY-recomp/issues/109).
+- **Created-fighter thumbnails saved blank before v0.12.1 ([#113](https://github.com/vyanhursky/DefJamFFNY-recomp/issues/113), fixed in v0.12.1).** The game now generates the snapshot, but a profile saved with an empty one keeps it until a new snapshot: load Story, enter and leave the Wardrobe, then Crib, Exit, Yes to save. Only small snapshot surfaces (up to 64 KiB) are filled on the CPU; other render-to-texture cases still draw on the GPU only.
 - **v0.11.0: fire-escape transition gap.** A black rectangle appears briefly above the leading left scenery tile during the title-to-main-menu pan. It also reproduces without texture packs. Windows draw traces establish an uncovered scene region; the underlying geometry/transform cause remains unresolved. Retained as a known limitation; see the [Windows report](research/windows-integrated-menu-mods-rc-2026-10-23.md).
 - **HD Widescreen Menus coverage.** Select User ID, Choose Teams and Choose Venue still use their original backgrounds and side-fill behavior. Their widescreen artwork is deferred to modpack 1.1. The menu pack is a default-channel download (`1.0.0`, using the accepted RC2 archive), separate from generated Recomp HD textures. The owner accepted Steam Deck playtesting; final macOS validation remains unconfirmed.
 
@@ -89,7 +90,7 @@ Fighters selection. They do not cover every mode or a full Story campaign.
 - Earlier builds had a rare silent boot and a rare crash at guest `sub_001A3310`.
   The clean rebase soak does not prove those are eliminated.
 - Previously recorded visual issues include a loading-bar glitch, black profile
-  thumbnails, Blazin' film grain and half-pixel alignment. None was observed in
+  thumbnails (created fighters fixed in v0.12.1), Blazin' film grain and half-pixel alignment. None was observed in
   the owner's accepted play-test; wider coverage remains backlog.
 - Optional CPU vertex-program fallback performance is unmeasured after rebase.
 - Audio counters do not prove fidelity of every track/effect; owner listening

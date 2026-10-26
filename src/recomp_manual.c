@@ -61,24 +61,93 @@ void sub_001A6870_enter(void)
     if (defjam_test_observations_enabled())
         defjam_test_health_notify(MEM32(g_esp + 4), MEM32(g_esp + 8));
 }
-/* Match telemetry (src/hooks/test_telemetry.c): the fight's simulation step,
- * match set-up, the result recorder and the random number generator's seeding.
- * Read-only, except that RECOMP_TEST_RNG_SEED replaces the seed argument. */
-void sub_00087700_enter(void)
+/* Widescreen: a fight HUD is up (src/patches/widescreen.c). The four fighter
+ * slots the fight camera reads (0x340D70, stride 0xC8; a slot counts when set
+ * and bit 3 of +0xC0 is clear): with 3 or 4 fighters the HUD has bottom rows. */
+static int s_ws_hud_live;      /* the simulation step ran since the match last left a fighting state */
+static void ws_hud_heartbeat(void)
 {
     extern void nv2a_ws_hud_heartbeat(int bottom_rows);
     uint32_t i, fighters = 0;
-    defjam_crowd_step();
-    defjam_test_step();
-    /* Widescreen: a fight HUD is up (src/patches/widescreen.c). The four fighter
-     * slots the fight camera reads (0x340D70, stride 0xC8; a slot counts when set
-     * and bit 3 of +0xC0 is clear): with 3 or 4 fighters the HUD has bottom rows. */
     for (i = 0; i < 4; i++)
         if (MEM32(0x340D70 + i * 0xC8) != 0 && (MEM8(0x340D70 + i * 0xC8 + 0xC0) & 8) == 0)
             fighters++;
     nv2a_ws_hud_heartbeat(fighters >= 3);
 }
+/* Match telemetry (src/hooks/test_telemetry.c): the fight's simulation step,
+ * match set-up, the result recorder and the random number generator's seeding.
+ * Read-only, except that RECOMP_TEST_RNG_SEED replaces the seed argument. */
+void sub_00087700_enter(void)
+{
+    defjam_crowd_step();
+    defjam_test_step();
+    s_ws_hud_live = 1;
+    ws_hud_heartbeat();
+}
+/* The match's update (thiscall; the match at 0x349760, its state at +0x2D820).
+ * Only states 5 and 8 run the simulation step above; any other state (intro,
+ * special-move camera, match end) ends the live HUD. */
+void sub_0008BE60_enter(void)
+{
+    uint32_t state = MEM32(g_ecx + 0x2D820);
+    if (state != 5 && state != 8)
+        s_ws_hud_live = 0;
+}
+/* A fight mode's per-frame tick: 0x79B60 in Battle (measured), 0x7A8F0 the other
+ * mode built the same way (same match update and HUD calls; no route reaches it).
+ * While the pause menu is open it skips the match update, so the step stops, but
+ * it keeps running and the HUD stays on screen. Keep the widescreen HUD anchored
+ * through a pause that began in a live fight (issue #95); otherwise no change. */
+void sub_00079B60_enter(void) { if (s_ws_hud_live) ws_hud_heartbeat(); }
+void sub_0007A8F0_enter(void) { if (s_ws_hud_live) ws_hud_heartbeat(); }
 void sub_001A4D90_enter(void) { defjam_test_match_start(); defjam_crowd_match_start(); }
+/* Widescreen song notification (src/patches/widescreen.c, issue #118): the APT
+ * movie loader (archive, name, &apt, &const), and the next step of the load,
+ * which its only caller runs straight after it with the .apt data as its second
+ * stack argument. */
+void ws_apt_load_begin(uint32_t name);
+void ws_apt_load_done(uint32_t apt);
+void sub_001810B0_enter(void) { ws_apt_load_begin(MEM32(g_esp + 8)); }
+void sub_00056F50_enter(void) { ws_apt_load_done(MEM32(g_esp + 8)); }
+
+/* ---- Story shops: no LOADING frame on an item change (issue #119) ------
+ *
+ * Changing an item in a shop, the Sketch Artist or the wardrobe ends with
+ * CreatePlayer.ForceUpdate, whose callback (guest 0x0004A1A0) reconciles the
+ * created player's parts and loads what changed. The part loaders
+ * (0x000992E0, 0x0009A050, 0x0009AB90) announce a blocking load with event
+ * 0xF0000038, and the observer registered for it (0x0005AF80) clears the frame,
+ * draws the LOADING caption at the lower right, presents it and returns. On
+ * the console the load came off the disc and the card was the feedback for
+ * it; here it takes a few dozen milliseconds, so every item change flashes one
+ * black LOADING frame over the 4:3 picture before the preview comes back.
+ *
+ * Within a ForceUpdate -- from its callback's entry until the game presents
+ * its next ordinary frame -- the LOADING frame is skipped, so the preview
+ * stays on screen until the new item is ready. The load, the event and its
+ * other observers are untouched, and every other load keeps its card.
+ * RECOMP_SHOP_LOADING_CARD=1 restores the card. */
+static uint32_t s_presents;                     /* frames the game has presented */
+static uint32_t s_refresh_at = 0xFFFFFFFFu;     /* s_presents when a ForceUpdate began */
+void sub_00018DF0_enter(void) { s_presents++; }
+void sub_0004A1A0_enter(void) { s_refresh_at = s_presents; }
+extern void sub_0005AF80_gen(void);
+void sub_0005AF80(void)
+{
+    static int keep = -1;
+    if (keep < 0) {
+        const char *e = getenv("RECOMP_SHOP_LOADING_CARD");
+        keep = e && *e == '1';
+    }
+    if (!keep && s_refresh_at == s_presents) {
+        static unsigned skipped;
+        if (++skipped <= 4 || (skipped & (skipped - 1)) == 0)
+            fprintf(stderr, "[SHOP] item refresh: LOADING frame skipped (%u so far)\n", skipped);
+        g_esp += 4;     /* cdecl observer: consume the return address; the dispatcher pops its two args */
+        return;
+    }
+    sub_0005AF80_gen();
+}
 void sub_001BC690_enter(void) { defjam_test_rng(g_esp); }
 void sub_001AD220_enter(void) { defjam_test_ai_seed(g_esp); }
 /* The seeding routine every generator of this kind goes through (thiscall). */
@@ -983,3 +1052,4 @@ extern void ws_trace_pos(void), ws_trace_vtx_arr(void), ws_trace_vtx(void);
 void sub_00028F90_enter(void) { ws_trace_pos(); }
 void sub_0002E390_enter(void) { ws_trace_vtx_arr(); }
 void sub_0002E470_enter(void) { ws_trace_vtx(); }
+
