@@ -27,12 +27,13 @@ TICKET_LOG = "ticket-log"
 REPORTS_CHANNEL = "bug-reports"   # F9 reports and crash logs from the games (team only)
 ANNOUNCEMENTS = "announcements"
 POLLS_CHANNEL = "polls"     # polls only: players may post polls; the bot removes anything else
+HONEYPOT_CHANNEL = "honeypot"   # a trap for spam bots: whoever posts here is removed (softban)
 HELP_CHANNEL = "get-help"
 MAX_OPEN_TICKETS = 2
 LEADERBOARD_MIN = 3        # the account service's LeaderboardMin
 
 # Channel kinds: read (everyone reads, only the team and the bot write), chat, polls (everyone may
-# post a poll, the bot removes other messages), team (team only),
+# post a poll, the bot removes other messages), honeypot (a spam-bot trap), team (team only),
 # voice, and stat (the player count in its name; nobody joins it).
 LAYOUT = [
     ("📢 INFO", [("welcome", "read"), ("rules", "read"), ("announcements", "read"), (SUPPORT_CHANNEL, "read"),
@@ -43,6 +44,7 @@ LAYOUT = [
     ("🎮 VOICE", [("Lobby", "voice"), ("Match 1", "voice"), ("Match 2", "voice")]),
     (TICKET_CATEGORY, []),
     ("🔒 TEAM", [("team-chat", "team"), (TICKET_LOG, "team"), (REPORTS_CHANNEL, "team")]),
+    ("🍯 DO NOT POST", [(HONEYPOT_CHANNEL, "honeypot")]),
 ]
 
 # The ticket forms. A Discord form holds at most five fields; a label is at most 45 characters
@@ -384,3 +386,90 @@ def parse_poll(question, answers_text):
     if len(answers) > POLL_MAX_ANSWERS:
         return None, "At most %d answers, please." % POLL_MAX_ANSWERS
     return (question[:POLL_QUESTION_LEN], answers, POLL_HOURS), None
+
+
+# ---- automatic moderation (spam bots) ----
+
+HONEYPOT_TEXT = """# 🍯 Do not post here
+This channel is a trap for spam bots. **Anything posted here gets you removed from the server automatically.**
+Real members: please just ignore this channel."""
+
+SPAM_CHANNELS = 3            # the same message in this many channels ...
+SPAM_WINDOW_S = 60           # ... within this many seconds: a spam bot
+NEW_MEMBER_S = 24 * 3600     # members this new (and without roles) get the strict link rules
+MASS_MENTIONS = 5            # this many user/role mentions in one message
+TIMEOUT_S = 3600             # a timeout lasts an hour
+STRIKE_WINDOW_S = 24 * 3600  # a second strike within this long: softban
+
+SAFE_DOMAINS = (
+    "defjam.online", "github.com", "githubusercontent.com", "ko-fi.com", "youtube.com", "youtu.be",
+    "twitch.tv", "clips.twitch.tv", "medal.tv", "streamable.com", "imgur.com", "tenor.com", "giphy.com",
+    "klipy.com", "discord.com/channels", "cdn.discordapp.com", "media.discordapp.net", "x.com", "twitter.com",
+    "reddit.com", "tiktok.com", "instagram.com", "google.com", "steamcommunity.com", "store.steampowered.com",
+    "microsoft.com", "nvidia.com", "amd.com",
+)
+INVITE = re.compile(r"(discord\.gg|discord(?:app)?\.com/invite|dsc\.gg|discord\.me)/\S+", re.I)
+URL = re.compile(r"https?://([^\s/<>]+)(/\S*)?", re.I)
+SCAM_WORDS = re.compile(
+    r"(free\s*nitro|nitro\s*(gift|free|giveaway)|steam\s*gift|gift\s*card|airdrop|crypto\s*(giveaway|bonus)|"
+    r"\$\s*\d+\s*(gift|free)|onlyfans|18\+\s*(content|leak)|nudes?\b|leaked\s*(pics|video)|"
+    r"claim\s*(your|now)|first\s*\d+\s*(people|users)|i'?m\s*leaving\s*cs|selling\s*(my\s*)?(skins|account))", re.I)
+LOOKALIKE = re.compile(r"(d[il1]sc[o0]r[dcl][^.\s/]*\.(?!com\b|gg\b)[a-z]{2,}|st[e3]am(?!community\.com|powered\.com)"
+                       r"[a-z0-9-]*\.(com|ru|net|org|xyz|gift|link|io|cc)|dlscord|disc0rd|discorcl|steamcornmunity)", re.I)
+
+
+def normalize_text(text):
+    """A message's text for comparing copies: lower case, single spaces, no zero-width characters."""
+    text = re.sub(r"[\u200b-\u200f\u2060\ufeff]", "", text or "")
+    return " ".join(text.lower().split())
+
+
+def link_domains(text):
+    return [m.group(1).lower().split("@")[-1] for m in URL.finditer(text or "")]
+
+
+def is_safe_domain(domain):
+    domain = domain.lower().removeprefix("www.")
+    return any(domain == d.split("/")[0] or domain.endswith("." + d.split("/")[0]) for d in SAFE_DOMAINS)
+
+
+def judge_message(text, mentions, everyone_attempt, is_new, has_roles):
+    """What a member's message deserves: None, or (action, reason) with action "timeout" or
+    "softban". Team members are never judged (the caller skips them)."""
+    text = text or ""
+    if mentions >= MASS_MENTIONS:
+        return "timeout", "mass mentions (%d)" % mentions
+    if everyone_attempt and URL.search(text):
+        return "timeout", "@everyone with a link"
+    if LOOKALIKE.search(text):
+        return "timeout", "a fake Discord/Steam link"
+    newcomer = is_new and not has_roles
+    if newcomer and SCAM_WORDS.search(text) and URL.search(text):
+        return "timeout", "a scam message with a link"
+    if newcomer and INVITE.search(text):
+        return "timeout", "a server invite from a new member"
+    if newcomer and any(not is_safe_domain(d) for d in link_domains(text)) and SCAM_WORDS.search(text):
+        return "timeout", "an unknown link with scam words"
+    return None
+
+
+class SpamTracker:
+    """Remembers each member's recent messages to spot the same text in several channels."""
+
+    def __init__(self):
+        self.recent = {}        # user id -> list of (time, channel id, normalized text, message id)
+
+    def add(self, user_id, now, channel_id, text, message_id):
+        """Records a message; returns the (channel id, message id) of every copy when the same text has
+        now been posted in SPAM_CHANNELS different channels within SPAM_WINDOW_S, else None."""
+        norm = normalize_text(text)
+        items = [x for x in self.recent.get(user_id, []) if now - x[0] <= SPAM_WINDOW_S]
+        items.append((now, channel_id, norm, message_id))
+        self.recent[user_id] = items[-30:]
+        if len(norm) < 6 and not URL.search(norm):
+            return None
+        same = [x for x in items if x[2] == norm]
+        if len({x[1] for x in same}) >= SPAM_CHANNELS:
+            self.recent[user_id] = [x for x in items if x[2] != norm]
+            return [(x[1], x[3]) for x in same]
+        return None

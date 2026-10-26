@@ -63,6 +63,8 @@ class FfnyBot(discord.Client):
         self.state.setdefault("messages", {})
         self.ready_once = False
         self.last_poll = {}             # user id -> when they last started a poll (cooldown)
+        self.spam = core.SpamTracker()
+        self.strikes = {}               # user id -> when they last got a timeout (a second one: softban)
 
     async def setup_hook(self):
         self.add_view(HelpPanel())
@@ -86,10 +88,89 @@ class FfnyBot(discord.Client):
             return
         await self.start_in(guild)
 
+    def trusted(self, member):
+        """The team, moderators and supporters: never touched by the automatic moderation."""
+        if not isinstance(member, discord.Member):
+            return False
+        if member.guild_permissions.manage_messages or member.guild_permissions.administrator:
+            return True
+        names = {core.TEAM_ROLE, core.MOD_ROLE, core.SUPPORTER_ROLE}
+        return any(r.name in names for r in member.roles)
+
     async def on_message(self, message):
+        if message.guild is None or message.author.bot or message.webhook_id:
+            return
+        if await self.automod(message):
+            return
+        await self.polls_only(message)
+
+    async def automod(self, message):
+        """Spam bots: the honeypot channel, the same text in several channels, scam links and mass
+        mentions. Returns True when it acted on the message."""
+        author, guild, channel = message.author, message.guild, message.channel
+        if self.trusted(author) or not isinstance(author, discord.Member):
+            return False
+        now = datetime.datetime.now(datetime.timezone.utc)
+        if getattr(channel, "name", None) == core.HONEYPOT_CHANNEL:
+            await self.softban(guild, author, "posted in #%s" % core.HONEYPOT_CHANNEL, message.content)
+            return True
+        copies = self.spam.add(author.id, now.timestamp(), channel.id, message.content, message.id)
+        if copies:
+            for channel_id, message_id in copies:
+                ch = guild.get_channel(channel_id)
+                if ch:
+                    try:
+                        await ch.get_partial_message(message_id).delete()
+                    except discord.HTTPException:
+                        pass
+            await self.softban(guild, author, "the same message in %d channels" % len({c for c, _ in copies}),
+                               message.content)
+            return True
+        joined = author.joined_at or now
+        is_new = (now - joined).total_seconds() < core.NEW_MEMBER_S
+        has_roles = len(author.roles) > 1
+        mentions = len(message.raw_mentions) + len(message.raw_role_mentions)
+        everyone = "@everyone" in message.content or "@here" in message.content
+        verdict = core.judge_message(message.content, mentions, everyone, is_new, has_roles)
+        if not verdict:
+            return False
+        _, reason = verdict
+        try:
+            await message.delete()
+        except discord.HTTPException:
+            pass
+        last = self.strikes.get(author.id)
+        if last and (now - last).total_seconds() < core.STRIKE_WINDOW_S:
+            await self.softban(guild, author, reason + " (second time)", message.content)
+        else:
+            self.strikes[author.id] = now
+            try:
+                await author.timeout(datetime.timedelta(seconds=core.TIMEOUT_S), reason="FFNY automod: " + reason)
+            except discord.HTTPException as error:
+                log.warning("timeout of %s failed: %s", author, error)
+            await self.automod_log(guild, author, "timed out for 1 hour", reason, message.content)
+        return True
+
+    async def softban(self, guild, member, reason, content):
+        """Ban (deleting their messages of the last hour) and unban at once: they are out and can come back."""
+        try:
+            await guild.ban(member, reason="FFNY automod: " + reason, delete_message_seconds=3600)
+            await guild.unban(member, reason="FFNY automod: softban")
+        except discord.HTTPException as error:
+            log.warning("softban of %s failed: %s", member, error)
+            return
+        await self.automod_log(guild, member, "removed (softban, may rejoin)", reason, content)
+
+    async def automod_log(self, guild, member, action, reason, content):
+        excerpt = (content or "").replace("`", "'")[:300]
+        log.info("automod: %s %s: %s", member, action, reason)
+        await self.ticket_log(guild, "🛡️ **Automod:** %s (`%s`) %s: %s\n> %s" % (
+            member.mention, member.id, action, reason, excerpt or "(no text)"))
+
+    async def polls_only(self, message):
         """#polls holds polls only: any other message from a player is removed, with a short note."""
         channel = message.channel
-        if getattr(channel, "name", None) != core.POLLS_CHANNEL or message.guild is None:
+        if getattr(channel, "name", None) != core.POLLS_CHANNEL:
             return
         author = message.author
         team = self.role(message.guild, core.TEAM_ROLE)
@@ -250,6 +331,9 @@ class FfnyBot(discord.Client):
         if existing:
             return existing
         over = {me: bot_all}
+        if kind == "honeypot":
+            over[everyone] = discord.PermissionOverwrite(view_channel=True, send_messages=True, add_reactions=False,
+                                                         create_public_threads=False, create_private_threads=False)
         if kind == "polls":
             over[everyone] = discord.PermissionOverwrite(send_messages=True, send_polls=True, add_reactions=True,
                                                          create_public_threads=False, create_private_threads=False,
@@ -306,6 +390,7 @@ class FfnyBot(discord.Client):
         await self.put(guild, "apply", core.APPLY_CHANNEL, content=core.APPLY_TEXT, view=ApplyPanel())
         await self.put(guild, "support", core.SUPPORT_CHANNEL, content=core.SUPPORT_TEXT)
         await self.put(guild, "polls", core.POLLS_CHANNEL, content=core.POLL_PANEL, view=PollPanel(), pin=True)
+        await self.put(guild, "honeypot", core.HONEYPOT_CHANNEL, content=core.HONEYPOT_TEXT, pin=True)
 
     # -- tickets --
 

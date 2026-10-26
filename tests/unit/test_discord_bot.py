@@ -16,8 +16,8 @@ def test_layout_names_are_valid_discord_names():
     for category, channels in core.LAYOUT:
         assert 0 < len(category) <= 100
         for name, kind in channels:
-            assert kind in {"read", "chat", "polls", "team", "voice", "stat"}
-            if kind in {"read", "chat", "polls", "team"}:
+            assert kind in {"read", "chat", "polls", "honeypot", "team", "voice", "stat"}
+            if kind in {"read", "chat", "polls", "honeypot", "team"}:
                 assert re.fullmatch(r"[a-z0-9-]{1,100}", name), name
             assert name not in seen
             seen.add(name)
@@ -150,3 +150,33 @@ def test_status_of_several_relays():
     assert name == "🟢 12 online · 3 rooms · EU 9 · NA 3" and len(name) <= 100
     assert core.status_name([("Europe", None), ("North America", None)]) == "🔴 Server offline"
     assert core.status_name([("Europe", (1, 4)), ("North America", None)]) == "🟢 4 online · 1 room · EU 4"
+
+
+def test_automod_judges_spam_but_not_normal_chat():
+    j = core.judge_message
+    assert j("gg that was close", 0, False, True, False) is None
+    assert j("check my clip https://medal.tv/games/x", 0, False, True, False) is None
+    assert j("new build? https://github.com/sweeax-exe/ffny-online", 0, False, True, False) is None
+    assert j("join my server discord.gg/abc123", 0, False, False, True) is None          # members with roles may
+    assert j("join discord.gg/abc123", 0, False, True, False)[0] == "timeout"             # new, no roles
+    assert j("Free Nitro for everyone! https://dlscord-gift.com/x", 0, False, False, True)[0] == "timeout"
+    assert j("@everyone free stuff https://x.ru/a", 0, True, False, True)[0] == "timeout"
+    assert j("hi", 6, False, False, True)[0] == "timeout"
+    assert j("steam gift for you https://steamcommunity.com/gift", 0, False, True, False)[0] == "timeout"
+    assert j("I'm leaving CS, selling my skins https://some-site.xyz/trade", 0, False, True, False)[0] == "timeout"
+    assert not core.is_safe_domain("web.com") and core.is_safe_domain("www.youtube.com")
+
+
+def test_spam_tracker_finds_the_same_text_in_three_channels():
+    t = core.SpamTracker()
+    assert t.add(1, 0, 10, "Buy now https://x.xyz", 100) is None
+    assert t.add(1, 5, 11, "buy   NOW https://x.xyz", 101) is None
+    assert t.add(2, 6, 12, "Buy now https://x.xyz", 200) is None          # another user
+    copies = t.add(1, 9, 12, "Buy now https://x.xyz", 102)
+    assert copies and {c for c, _ in copies} == {10, 11, 12}
+    t2 = core.SpamTracker()
+    for ch in (1, 2, 3):
+        assert t2.add(5, ch * 100, ch, "same text again", ch) is None      # 100 s apart: not within a minute
+    t3 = core.SpamTracker()
+    for ch in (1, 2, 3):
+        assert t3.add(6, ch, ch, "gg", ch) is None                         # too short to count
