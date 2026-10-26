@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "target": "HD Widescreen Menus 1.1",
-  "status": "work in progress; new art and text clarity are unapproved",
+  "status": "owner selected stronger text and accepted Choose Teams; Battle wall and map under revision",
   "runtime_base": {
     "game_release_pr": 123,
     "commit": "53e5d8baf38029e66b24639ae50f49052b1de968",
@@ -11,9 +11,9 @@
   "backgrounds": [
     {
       "label": "battle-user-id",
-      "status": "unapproved draft",
-      "master": "battle-user-id-wide-v1.png",
-      "master_sha256": "9603330ec91e81d9bb8ec07b9a158cc6f599efc4c965d95ab6623b47c72cd855",
+      "status": "revised draft v4; owner review pending",
+      "master": "battle-user-id-wide-v4.png",
+      "master_sha256": "125bc7366e529b818eb398d8e5f89297a1bb0c0e0a7cf2ed0a2535056f119214",
       "source_core_sha256": "6ec6d0c0d878099b8f805d9b56c250d7d9d602ad7c70a97c7a7bbc8eaa8e6800",
       "source_core_exact_at_master_scale": true,
       "master_origin": [
@@ -111,11 +111,17 @@
           "side": "right",
           "slabs": 5
         }
-      ]
+      ],
+      "previous_master": {
+        "file": "battle-user-id-wide-v1.png",
+        "sha256": "9603330ec91e81d9bb8ec07b9a158cc6f599efc4c965d95ab6623b47c72cd855",
+        "status": "owner rejected joins"
+      },
+      "exterior_join_band_source_pixels": 32
     },
     {
       "label": "choose-teams",
-      "status": "unapproved draft",
+      "status": "owner approved artwork 2026-10-26; release/platform gates pending",
       "master": "choose-teams-wide-v1.png",
       "master_sha256": "8485e02e9b615d855c7cd8f8ac547afda4337944f06ac37f1556c18715de8494",
       "source_core_sha256": "a872d29fa7b39a9dff86702b06eb906b8d8e0e5d676657ba3063024877a65877",
@@ -160,7 +166,7 @@
     {
       "label": "choose-venue",
       "resource": "screens/battle/map.big",
-      "status": "original-map reveal verified at16:9; ultrawide draft unapproved, native/pan checks pending",
+      "status": "reference-guided regeneration requested 2026-10-26; v1 retained for comparison",
       "policy": "Reveal existing authored geometry with dt=0 slabs; keep controls/pins centered. Old battle/venueMap.big is not the active map.",
       "sources": [
         {
@@ -404,6 +410,13 @@
             ]
           }
         ]
+      },
+      "reference_guided_revision": {
+        "master": "choose-venue-map-wide-v3.png",
+        "master_sha256": "bb5ad37c9049ca6d15e0fbc1e6c80805456452293b45f350540264ac9dfccc14",
+        "reference_sha256": "68ff3a365533cff535cebb8e7593e366eb854b403c2b8f65b86f372d59cbbc1e",
+        "status": "draft; road joins fail visual acceptance; no release approval",
+        "native_run": "logs/run-20261026-131129.log.err"
       }
     }
   ],
@@ -415,7 +428,7 @@
         512,
         64
       ],
-      "status": "unapproved pilot",
+      "status": "owner selected strong 2026-10-26; six reviewed pilots only",
       "recipe": "4x Lanczos RGBA; alpha edge ramp 1.35/1.8 about127.5 only where 9px max-min>=192; RGB and >=128 silhouette exact",
       "variants": [
         {
@@ -426,7 +439,8 @@
           "strength": "strong",
           "sha256": "4a4eac83054b1d33f730681911fecaa2d6a3fb29bdeb53fadf4a87549b8e0ea1"
         }
-      ]
+      ],
+      "selected_strength": "strong"
     },
     {
       "label": "Choose Match Type",
@@ -435,7 +449,7 @@
         512,
         64
       ],
-      "status": "unapproved pilot",
+      "status": "owner selected strong 2026-10-26; six reviewed pilots only",
       "recipe": "4x Lanczos RGBA; alpha edge ramp 1.35/1.8 about127.5 only where 9px max-min>=192; RGB and >=128 silhouette exact",
       "variants": [
         {
@@ -446,7 +460,8 @@
           "strength": "strong",
           "sha256": "138ffb6716799ffeffd29d38cff2091c3ced8876c189520c07e8f8de7028728e"
         }
-      ]
+      ],
+      "selected_strength": "strong"
     },
     {
       "label": "Select User ID",
@@ -455,7 +470,7 @@
         512,
         64
       ],
-      "status": "unapproved pilot",
+      "status": "owner selected strong 2026-10-26; six reviewed pilots only",
       "recipe": "4x Lanczos RGBA; alpha edge ramp 1.35/1.8 about127.5 only where 9px max-min>=192; RGB and >=128 silhouette exact",
       "variants": [
         {
@@ -466,7 +481,8 @@
           "strength": "strong",
           "sha256": "5f5d70da9647a7c9021dabeae513789405dec13cda3b14574a49cb480de12029"
         }
-      ]
+      ],
+      "selected_strength": "strong"
     },
     {
       "label": "Choose Venue",
@@ -475,7 +491,7 @@
         512,
         64
       ],
-      "status": "unapproved pilot",
+      "status": "owner selected strong 2026-10-26; six reviewed pilots only",
       "recipe": "4x Lanczos RGBA; alpha edge ramp 1.35/1.8 about127.5 only where 9px max-min>=192; RGB and >=128 silhouette exact",
       "variants": [
         {
@@ -486,7 +502,8 @@
           "strength": "strong",
           "sha256": "649dd4e824695c14eeb6b63a692a883901beb851fe946d813c3614e675a6c9cc"
         }
-      ]
+      ],
+      "selected_strength": "strong"
     },
     {
       "label": "Method Man as Blaze",
@@ -495,7 +512,7 @@
         512,
         128
       ],
-      "status": "unapproved pilot",
+      "status": "owner selected strong 2026-10-26; six reviewed pilots only",
       "recipe": "4x Lanczos RGBA; alpha edge ramp 1.35/1.8 about127.5 only where 9px max-min>=192; RGB and >=128 silhouette exact",
       "variants": [
         {
@@ -506,7 +523,8 @@
           "strength": "strong",
           "sha256": "06074603cff82c61adfd8946c748802bd3e7312551984433f226bd8a971f9894"
         }
-      ]
+      ],
+      "selected_strength": "strong"
     },
     {
       "label": "Fat Joe as Crack",
@@ -515,7 +533,7 @@
         512,
         128
       ],
-      "status": "unapproved pilot",
+      "status": "owner selected strong 2026-10-26; six reviewed pilots only",
       "recipe": "4x Lanczos RGBA; alpha edge ramp 1.35/1.8 about127.5 only where 9px max-min>=192; RGB and >=128 silhouette exact",
       "variants": [
         {
@@ -526,7 +544,8 @@
           "strength": "strong",
           "sha256": "928b751fb0a80ff523e9aa493e7248e386c1ec3ddf13b180dd405f54e4933213"
         }
-      ]
+      ],
+      "selected_strength": "strong"
     }
   ]
 }

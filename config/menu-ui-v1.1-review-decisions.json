@@ -1,0 +1,51 @@
+{
+  "schema": 1,
+  "review_date": "2026-10-26",
+  "reviewer": "Vlad",
+  "scope": "Artwork/text review decisions only, not pack publication or platform acceptance",
+  "feedback": {
+    "text": "Stronger edge clarity",
+    "battle_wall": "The battle select wall outpaint/joins do not look perfect. Especially the right border is obvious where the outpaint begins. Can you try to generate it again to have more seamless borders for the outpaint?",
+    "teams": "Everything else looks good to me.",
+    "map_followup": "Also for the Widescreen Map, try to generate it again, and use a real picture of Long Island and New Jersey for reference"
+  },
+  "accepted_team_master": {
+    "file": "choose-teams-wide-v1.png",
+    "sha256": "8485e02e9b615d855c7cd8f8ac547afda4337944f06ac37f1556c18715de8494"
+  },
+  "selected_text": [
+    {
+      "label": "Main Menu",
+      "source_id": "704503561725bca42e9c4f7489ff018dcbb3808b5ee2c23755b02cb06508ee64",
+      "sha256": "4a4eac83054b1d33f730681911fecaa2d6a3fb29bdeb53fadf4a87549b8e0ea1"
+    },
+    {
+      "label": "Choose Match Type",
+      "source_id": "3b134347309d63879072eabe1e4eeb21ae84756a4a591c89465bef2a22d63445",
+      "sha256": "138ffb6716799ffeffd29d38cff2091c3ced8876c189520c07e8f8de7028728e"
+    },
+    {
+      "label": "Select User ID",
+      "source_id": "3a0d7988ecf41040ce5d04991a23930051555a66c0c5cb110803fec199c0a582",
+      "sha256": "5f5d70da9647a7c9021dabeae513789405dec13cda3b14574a49cb480de12029"
+    },
+    {
+      "label": "Choose Venue",
+      "source_id": "397df2b795f12a9d18ae4ad3dba3ce7012abef3a4e8757ee77cba78ede6154ee",
+      "sha256": "649dd4e824695c14eeb6b63a692a883901beb851fe946d813c3614e675a6c9cc"
+    },
+    {
+      "label": "Method Man as Blaze",
+      "source_id": "3b0aa865be4e6fd0e074eacb94763cd7ebdf6fe5a40510182b7c06136ad6840e",
+      "sha256": "06074603cff82c61adfd8946c748802bd3e7312551984433f226bd8a971f9894"
+    },
+    {
+      "label": "Fat Joe as Crack",
+      "source_id": "f478da831318290565c2f5e122ceb66eba171f69ab8c01f583aebc4e401b8032",
+      "sha256": "928b751fb0a80ff523e9aa493e7248e386c1ec3ddf13b180dd405f54e4933213"
+    }
+  ],
+  "battle_v1_status": "rejected; regenerate",
+  "map_v1_status": "initially accepted visually; latest request supersedes selection with reference-guided regeneration",
+  "preserve_previous_versions": true
+}

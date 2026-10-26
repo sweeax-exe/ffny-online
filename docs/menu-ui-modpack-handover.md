@@ -8,6 +8,15 @@ Read [the current session report](research/menu-ui-v1.1-2026-10-26.md) and
 `config/menu-ui-v1.1-worklist.json` for evidence, remaining acceptance and hand-off.
 The older checkpoints below retain their original historical status.
 
+**Owner feedback follow-up:** Stronger text selected (six exact pilot hashes),
+Choose Teams v1 accepted. Battle ID wall v4 has revised joins and a native1440p
+capture, awaiting visual review. Map v3 uses the owner's Long Island/New Jersey
+reference; its 32:9 directional tour runs normally, but road joins remain a
+visual failure and must be finished before acceptance. Latest decisions are in
+`config/menu-ui-v1.1-review-decisions.json`; private prompts/art/receipts are in
+`logs/menu-ui-v1.1/revision-v2/`. The report above supersedes earlier all-unapproved
+status and the earlier native-run deferral.
+
 Current checkpoint — 2026-10-20 (D182–D184/UI): a **separate menu-only RC2** is built
 and being tested on this Mac. Faithful HD is optional and earlier-loaded; its library
 is not bundled. Download421.6MB / installed423.4MB,157nativePNGs/164sideslabs.

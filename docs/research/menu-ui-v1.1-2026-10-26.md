@@ -7,6 +7,14 @@ The owner prioritizes headings and fighter banners for sharpness; the existing
 approved backgrounds already feel faithful. The missing backgrounds remain
 modpack 1.1 work, separate from the v0.12.1 release train.
 
+**Latest owner feedback and revisions:** Stronger edge clarity selected for the
+six reviewed pilots; Choose Teams v1 accepted. Battle ID v1 was rejected for
+obvious outpaint joins, especially the right edge. A revised v4 wall is ready
+for review. The owner then requested another map generation using their real
+Long Island/New Jersey reference, superseding the earlier map selection.
+Map v3 is a geography draft with road joins still failing visual acceptance.
+See the final section and `config/menu-ui-v1.1-review-decisions.json`.
+
 ## Fire-escape rectangle: source geometry repair
 
 The supported dump's `screens/trans/t1.big::t1.o` already contains the misplaced
@@ -183,3 +191,71 @@ RC2, transition-top, background-draft and `menu-ui-venue-wide-draft-v1` overlays
 after that game has finished. This probe contains four directional venue
 selections and six map checkpoints. The 32:9 **original-map** result above
 must not be confused with acceptance of the new map-art draft.
+
+## Owner review follow-up and regenerated artwork
+
+- **D-new (owner):** select Stronger edge clarity, scoped to the six reviewed
+  heading/banner pilots; do not infer approval for every unmapped text atlas.
+  The six exact PNG hashes and accepted Choose Teams v1 master hash are in
+  `config/menu-ui-v1.1-review-decisions.json`. Earlier gentle pilots remain intact.
+- **D-new (owner):** regenerate Battle ID exterior joins. Two built-in imagegen
+  passes were retained; restoring the exact source core still exposed a material
+  change. The v4 integration uses the first new generation, matches each wing's
+  channel mean/variance to source border wall material and joins it through a
+  32-source-pixel exterior band using reflected source wall only. The core is
+  unchanged, no paper enters the join band, and no core pixels are blurred.
+  Master `battle-user-id-wide-v4.png`, SHA-256
+  `125bc7366e529b818eb398d8e5f89297a1bb0c0e0a7cf2ed0a2535056f119214`.
+- **D-new (owner):** use the supplied regional map for a further map generation.
+  Three built-in passes retain the game's palette while changing exterior
+  geography. The latest prompt explicitly keeps eastern Long Island's forks
+  offscreen at the existing close-up zoom. The final map is
+  `choose-venue-map-wide-v3.png`, SHA-256
+  `bb5ad37c9049ca6d15e0fbc1e6c80805456452293b45f350540264ac9dfccc14`.
+  The source core is exact except the previously documented obsolete inset
+  rectangle in wide side copies; native central textures stay original.
+  **Road connections at the two restored-core edges remain visibly discontinuous.**
+  This is not an approved/finished map or release candidate. A measured global
+  registration attempt was rejected and retained; it did not fix local geometry.
+
+All generation targets, raw outputs, exact prompts, reference roles and technical
+integration scripts remain private in `logs/menu-ui-v1.1/revision-v2/`. Tools:
+built-in imagegen; Pillow/NumPy for source restoration, export and integrity
+checks. No generated art enters Git. The accepted Team art is byte unchanged.
+
+Serial native evidence (all restore disposable saves byte-identically):
+
+| Run | Result |
+|---|---|
+| `logs/run-20261026-125731.log.err` | Stronger text at 1440p: all six exact source-key uploads; 38 present intervals, median118/min76; no crashes/watchdogs/unresolved calls. |
+| `logs/run-20261026-130826.log.err` | Revised wall v4 at 1440p: 38 intervals, median121/min99; no runtime faults; live Select User ID capture retained for review. |
+| `logs/run-20261026-131129.log.err` | New map v3 at 32:9, four directional selections and six map checkpoints: 45 intervals, median120/min99; no runtime faults. Full side coverage, but road joins remain a visual failure. |
+
+Digests continue to list the inherited optional-file/kernel diagnostics; bounded
+original inspection confirms the familiar `NtFsControlFile(0x90020)` stub at the
+first unclassified return. A normal run is not artwork acceptance.
+
+Review: `http://127.0.0.1:51739/review.html#map`, with revised wall aspects, exact
+join crops, prior versions, native captures and selected text comparisons.
+`review-v1.html` preserves the previous review. Latest browser check: 28 images,
+zero broken images or page-width overflow; aspect controls and text scaling
+checked. Original released/approved packs, saves and other review servers stay
+unchanged. Do not run the older gallery builder over the revision page.
+
+Next: finish connecting map roads/coasts in the **exterior** to the fixed source
+core before approving/exporting it. The revised Battle wall is available for
+owner visual review; Choose Teams and the six strong text pilots already have
+owner selections. No new pack archive, signed catalogue change or publication
+was performed. Earlier runtime regression results remain applicable; this
+follow-up changes artwork previews and source-only review records.
+
+Private immutable follow-up checkpoint:
+`/Users/vlad/Code/defjam-data/scratch/menu-ui-v1.1-revision2-20261026`,
+1,172 files / 692,935,685 bytes, manifest SHA-256
+`dfddc34f033f235b6e966be4c51fe748b1742a422fa0060a152ee915d821c772`.
+It preserves previous drafts and approved/selected variants together with exact
+prompts, local references, recipes, new preview overlays and the three cited
+native logs; excludes saves, caches and built/generated guest code. Its source
+report copy precedes this checkpoint paragraph. The earlier checkpoint remains
+untouched. Integrity checks assert exact wall core, exact map core outside the
+explicit inset, accepted Team hash and all six Stronger RGB/silhouette/hash pins.
