@@ -2,6 +2,7 @@
 import argparse
 import importlib.util
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -556,3 +557,24 @@ def test_old_versions_are_pruned_keeping_this_and_the_previous_one(tmp_path):
     assert not old[0].exists() and not old[2].exists()
     setup.prune_versions(None)
     assert setup.version_root.exists() and not old[1].exists()
+
+
+def test_a_dangling_game_link_is_replaced(tmp_path):
+    setup = installer(tmp_path)
+    game = setup.source / 'game'
+    gone = tmp_path / 'gone'
+    gone.mkdir()
+    try:
+        game.symlink_to(gone, target_is_directory=True)
+    except OSError:
+        pytest.skip('symbolic links need privileges here')
+    gone.rmdir()
+    calls = []
+    setup.run = lambda *a, **k: calls.append(a)
+    if engine.IS_WINDOWS:
+        setup.link_game()
+        assert not os.path.lexists(game) and calls
+    else:
+        (setup.data / 'extracted').mkdir()
+        setup.link_game()
+        assert game.resolve() == (setup.data / 'extracted').resolve()

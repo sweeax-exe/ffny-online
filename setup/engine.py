@@ -146,6 +146,16 @@ def load_module(name, path):
     return module
 
 
+def volume_filesystem(path):
+    """The file system of the drive holding path ('NTFS', 'exFAT', ...), None when unknown or not Windows."""
+    if not IS_WINDOWS:
+        return None
+    name = ctypes.create_unicode_buffer(64)
+    root = Path(path).resolve().anchor
+    ok = ctypes.windll.kernel32.GetVolumeInformationW(ctypes.c_wchar_p(root), None, 0, None, None, None, name, 64)
+    return name.value if ok and name.value else None
+
+
 def validate_dump(folder, source):
     module = load_module('setup_verify_dump', source / 'scripts/verify-dump.py')
     manifest = json.loads((source / 'config/dump-manifest.json').read_text(encoding='utf-8'))
@@ -812,9 +822,18 @@ class Engine:
             if game.resolve() != (self.data / 'extracted').resolve():
                 raise SetupError('Existing game link points to different data', 2)
             return
+        if os.path.lexists(game):
+            # A link left by an earlier attempt whose target is gone: New-Item refused to replace it
+            # ("Stage failed with exit 1" after a New-Item error on ...\source\game).
+            with contextlib.suppress(OSError):
+                os.rmdir(game) if IS_WINDOWS else game.unlink()
         if not IS_WINDOWS:
             game.symlink_to(self.data / 'extracted', target_is_directory=True)
             return
+        filesystem = volume_filesystem(self.source)
+        if filesystem and filesystem.upper() not in ('NTFS', 'REFS'):
+            raise SetupError(f'{self.source.anchor} is formatted as {filesystem}, which cannot hold the folder link the '
+                             'game needs. Choose an install folder on an NTFS drive (for example on C:).', 2)
         self.env['DEFJAM_SETUP_LINK'] = str(game)
         self.env['DEFJAM_SETUP_TARGET'] = str(self.data / 'extracted')
         self.run(['powershell.exe', '-NoProfile', '-Command',
