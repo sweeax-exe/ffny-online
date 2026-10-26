@@ -253,11 +253,13 @@ ONLINE_TAIL = ",".join([FIGHT_TAIL, raw_stages(["game.getmatchsummary(=a@4+3x12"
 
 
 def online_tail(matches):
-    """ONLINE_TAIL for that many room matches in a row (each match asks for the summary twice)."""
+    """ONLINE_TAIL for that many room matches in a row. The summary asks once per fighter
+    (GetMatchSummary(0), (1), ...: two calls in a One on One, four in Team or Free for All), so each
+    match's summary is anchored on its first call, the one for fighter 0."""
     parts = [FIGHT_TAIL]
     for k in range(2, matches + 1):
-        nth = f"#{2 * k - 3}" if k > 2 else ""
-        parts.append(raw_stages([f"game.getmatchsummary({nth}=a@4+3x12"]))
+        nth = f"#{k - 1}" if k > 2 else ""
+        parts.append(raw_stages([f"game.getmatchsummary(0{nth}=a@4+3x12"]))
         parts.append(FIGHT_TAIL.replace("@game.startgame(", f"@game.startgame(#{k}"))
     return ",".join(parts)
 
@@ -280,14 +282,43 @@ ROUTES = {
         "help": "online hub, player 1: five room matches in a row (the load of a later match)",
         "stages": ["getscreeninfo(intmain/mainmenu=lt@0.5"],
         "tail": online_tail(5),
-        "until": "game.getmatchsummary(#9", "after": 6, "secs": 3600,
+        "until": "game.getmatchsummary(0#5", "after": 6, "secs": 3600,
         "shots": "",
     },
     "online5-p2": {
         "help": "online hub, player 2: five room matches in a row",
         "stages": ["getscreeninfo(intmain/mainmenu=lt@0.5"],
         "tail": online_tail(5).replace("right:", "left:"),
-        "until": "game.getmatchsummary(#9", "after": 6, "secs": 3600,
+        "until": "game.getmatchsummary(0#5", "after": 6, "secs": 3600,
+        "shots": "",
+    },
+    # One and three room matches (a special match's single fight; Team's three, with four copies).
+    "online1-p1": {
+        "help": "online hub, player 1: one room match to its summary",
+        "stages": ["getscreeninfo(intmain/mainmenu=lt@0.5"],
+        "tail": online_tail(1),
+        "until": "game.getmatchsummary(0", "after": 6, "secs": 1500,
+        "shots": "",
+    },
+    "online1-p2": {
+        "help": "online hub, player 2: one room match to its summary",
+        "stages": ["getscreeninfo(intmain/mainmenu=lt@0.5"],
+        "tail": online_tail(1).replace("right:", "left:"),
+        "until": "game.getmatchsummary(", "after": 6, "secs": 1500,
+        "shots": "",
+    },
+    "online3-p1": {
+        "help": "online hub, player 1 (Team: the left side): three room matches in a row",
+        "stages": ["getscreeninfo(intmain/mainmenu=lt@0.5"],
+        "tail": online_tail(3),
+        "until": "game.getmatchsummary(0#3", "after": 6, "secs": 2700,
+        "shots": "",
+    },
+    "online3-p2": {
+        "help": "online hub, player 2 (Team: the right side): three room matches in a row",
+        "stages": ["getscreeninfo(intmain/mainmenu=lt@0.5"],
+        "tail": online_tail(3).replace("right:", "left:"),
+        "until": "game.getmatchsummary(0#3", "after": 6, "secs": 2700,
         "shots": "",
     },
     "online-rematch-p1": {
