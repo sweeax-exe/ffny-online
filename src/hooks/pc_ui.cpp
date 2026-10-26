@@ -1150,8 +1150,11 @@ static void page_online(UiMode mode)
 struct UpdateProgress {
     float fraction = 0;
     int percent = 0;
+    char counter[32] = "";      // "Step 6 of 8", or "" when the setup reports no steps
+    char name[96] = "";         // "Translating the game code" (or "Installing build 32")
+    char name_short[96] = "";   // the name without a "(...)" remark, for narrow places
     char step[128] = "";        // "Step 6 of 8 · Translating the game code"
-    char step_short[128] = "";  // the same without a "(...)" remark, for narrow places
+    char step_short[128] = "";  // the same with the short name
     char detail[256] = "";
     char elapsed[32] = "";      // "2:41 so far"
 };
@@ -1160,17 +1163,16 @@ static UpdateProgress update_progress(UpdaterState state, int build)
 {
     UpdateProgress p;
     int index = 0, total = 0;
-    char name[64];
     p.fraction = (float)updater_progress();
     p.percent = (int)(p.fraction * 100.0f + 0.5f);
-    if (updater_stage(&index, &total, name, sizeof(name)) && total >= index) {
-        snprintf(p.step, sizeof(p.step), "Step %d of %d  \xC2\xB7  %s", index, total, name);
-        snprintf(p.step_short, sizeof(p.step_short), "%s", p.step);
-        if (char *remark = strstr(p.step_short, " (")) *remark = 0;
-    } else {
-        snprintf(p.step, sizeof(p.step), "%s build %d", state == UPDATER_DOWNLOADING ? "Downloading" : "Installing", build);
-        snprintf(p.step_short, sizeof(p.step_short), "%s", p.step);
-    }
+    if (updater_stage(&index, &total, p.name, sizeof(p.name)) && total >= index)
+        snprintf(p.counter, sizeof(p.counter), "Step %d of %d", index, total);
+    else
+        snprintf(p.name, sizeof(p.name), "%s build %d", state == UPDATER_DOWNLOADING ? "Downloading" : "Installing", build);
+    snprintf(p.name_short, sizeof(p.name_short), "%s", p.name);
+    if (char *remark = strstr(p.name_short, " (")) *remark = 0;
+    snprintf(p.step, sizeof(p.step), "%s%s%s", p.counter, p.counter[0] ? "  \xC2\xB7  " : "", p.name);
+    snprintf(p.step_short, sizeof(p.step_short), "%s%s%s", p.counter, p.counter[0] ? "  \xC2\xB7  " : "", p.name_short);
     unsigned long long got = 0, size = 0;
     if (state == UPDATER_DOWNLOADING && updater_download(&got, &size) && size)
         snprintf(p.detail, sizeof(p.detail), "%.1f MB of %.1f MB", got / 1048576.0, size / 1048576.0);
@@ -1203,11 +1205,12 @@ static void fit_line(ImFont *font, float size, const char *text, float max_w, ch
     snprintf(out, out_size, "...");
 }
 
-// The step for a place max_w wide: whole, then without its remark, then cut.
-static void fit_step(ImFont *font, float size, const UpdateProgress &p, float max_w, char *out, size_t out_size)
+// A step name for a place max_w wide: whole, then without its remark, then cut.
+static void fit_step(ImFont *font, float size, const char *whole, const char *shorter, float max_w, char *out,
+                     size_t out_size)
 {
-    if (font->CalcTextSizeA(size, FLT_MAX, 0, p.step).x <= max_w) snprintf(out, out_size, "%s", p.step);
-    else fit_line(font, size, p.step_short, max_w, out, out_size);
+    if (font->CalcTextSizeA(size, FLT_MAX, 0, whole).x <= max_w) snprintf(out, out_size, "%s", whole);
+    else fit_line(font, size, shorter, max_w, out, out_size);
 }
 
 static void page_general(UiMode mode)
@@ -1615,7 +1618,8 @@ static void game_card(ImVec2 a, ImVec2 b, float s, UiResult &result)
         snprintf(pct, sizeof(pct), "%d%%", p.percent);
         float pw = text_size(bold_font(), head_px, pct).x;
         dl->AddText(bold_font(), head_px, ImVec2(right - pw, head.y), col(k_gold), pct);
-        fit_step(bold_font(), head_px, p, right - pw - 12 * s - head.x, text, sizeof(text));
+        // the card is narrow: the step's name heads it, "Step 6 of 8" goes on the line under the bar
+        fit_step(bold_font(), head_px, p.name, p.name_short, right - pw - 12 * s - head.x, text, sizeof(text));
         card_line(dl, head, s, k_white, text, true);
         fit_line(ImGui::GetFont(), detail_px, p.detail, right - at.x, text, sizeof(text));
         card_line(dl, ImVec2(at.x, at.y + 26 * s), s, detail, text, false);
@@ -1623,7 +1627,10 @@ static void game_card(ImVec2 a, ImVec2 b, float s, UiResult &result)
         dl->AddRectFilled(ba, bb, col(k_white, 0.10f), 3 * s);
         if (p.fraction > 0)
             dl->AddRectFilled(ba, ImVec2(ba.x + (bb.x - ba.x) * std::min(p.fraction, 1.0f), bb.y), col(k_red_hi), 3 * s);
-        snprintf(text, sizeof(text), "Updating to build %d", build);
+        if (p.counter[0])
+            snprintf(text, sizeof(text), "%s  \xC2\xB7  build %d", p.counter, build);
+        else
+            snprintf(text, sizeof(text), "Updating to build %d", build);
         dl->AddText(ImGui::GetFont(), note_px, ImVec2(at.x, at.y + 63 * s), col(k_white, 0.55f), text);
         if (p.elapsed[0]) {
             float ew = text_size(ImGui::GetFont(), note_px, p.elapsed).x;
@@ -1945,7 +1952,7 @@ static void update_popup(UiResult &result)
         char text[256], overlay[16];
         float width = ImGui::GetFontSize() * 28;
         ImGui::PushFont(g_font_bold, 0.0f);
-        fit_step(ImGui::GetFont(), ImGui::GetFontSize(), p, width, text, sizeof(text));
+        fit_step(ImGui::GetFont(), ImGui::GetFontSize(), p.step, p.step_short, width, text, sizeof(text));
         ImGui::TextUnformatted(text);
         ImGui::PopFont();
         snprintf(overlay, sizeof(overlay), "%d%%", p.percent);

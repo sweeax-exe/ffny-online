@@ -6,7 +6,8 @@ it in update mode, which rebuilds the game from the game files the installation 
 extracted, with a progress bar. Saves, settings and HD textures stay.
 
 While it runs, the GAME card and the update window show the step ("Step 6 of 8 · Translating the
-game code"), the setup's current line, the percentage and the time so far. The setup runs hidden
+game code"; the narrow card heads with the name and puts "Step 6 of 8" under the bar), the setup's
+current line, the percentage and the time so far. The setup runs hidden
 with `--status-file <status>` and writes three small files the launcher reads every half second:
 `<status>` (the current line), `<status>.progress` (0-1000) and `<status>.stage`
 (`<index> <total> <key> <name>`, e.g. `5 7 lift Translating the game code`; the launcher counts its
