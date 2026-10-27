@@ -155,8 +155,9 @@ int updater_can_install(void)
 
 typedef int (*Sink)(const void *data, DWORD size, void *user);
 
-/* One host; *started says whether data reached the sink (then no other host may be tried). */
-static int http_get_from(const wchar_t *host, const wchar_t *path, Sink sink, void *user,
+/* One host; *started says whether data reached the sink (then no other host may be tried).
+ * port 0 is the update port over plain HTTP; any other port is HTTPS. */
+static int http_get_from(const wchar_t *host, INTERNET_PORT port, const wchar_t *path, Sink sink, void *user,
                          unsigned long long *length, int *started)
 {
     HINTERNET session = NULL, connect = NULL, request = NULL;
@@ -165,9 +166,9 @@ static int http_get_from(const wchar_t *host, const wchar_t *path, Sink sink, vo
     session = WinHttpOpen(L"DefJamRecomp-Updater/1", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
                           WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
     if (session) WinHttpSetTimeouts(session, 5000, 5000, 10000, 30000);
-    if (session) connect = WinHttpConnect(session, host, UPDATE_PORT, 0);
+    if (session) connect = WinHttpConnect(session, host, port ? port : UPDATE_PORT, 0);
     if (connect) request = WinHttpOpenRequest(connect, L"GET", path, NULL, WINHTTP_NO_REFERER,
-                                              WINHTTP_DEFAULT_ACCEPT_TYPES, 0);
+                                              WINHTTP_DEFAULT_ACCEPT_TYPES, port ? WINHTTP_FLAG_SECURE : 0);
     if (request && WinHttpSendRequest(request, WINHTTP_NO_ADDITIONAL_HEADERS, 0, WINHTTP_NO_REQUEST_DATA, 0, 0, 0) &&
         WinHttpReceiveResponse(request, NULL) &&
         WinHttpQueryHeaders(request, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER, NULL, &status, &size, NULL) &&
@@ -198,13 +199,23 @@ static int http_get_from(const wchar_t *host, const wchar_t *path, Sink sink, vo
     return ok;
 }
 
+/* The update port first; where a firewall, VPN or school network blocks it, the same files over
+ * HTTPS on port 443 (play.defjam.online/updates/..., served by Caddy). The manifest's signature
+ * check is the same either way. */
 static int http_get(const wchar_t *path, Sink sink, void *user, unsigned long long *length)
 {
+    wchar_t secure[512];
+    int started = 0;
     size_t i;
     for (i = 0; i < sizeof(k_update_hosts) / sizeof(k_update_hosts[0]); i++) {
-        int started = 0;
-        if (http_get_from(k_update_hosts[i], path, sink, user, length, &started)) return 1;
+        if (http_get_from(k_update_hosts[i], 0, path, sink, user, length, &started)) return 1;
         if (started) return 0;
+    }
+    _snwprintf(secure, sizeof(secure) / sizeof(secure[0]), L"/updates%ls", path);
+    secure[sizeof(secure) / sizeof(secure[0]) - 1] = 0;
+    if (http_get_from(L"play.defjam.online", INTERNET_DEFAULT_HTTPS_PORT, secure, sink, user, length, &started)) {
+        fprintf(stderr, "[UPDATE] the update port was unreachable; used HTTPS instead\n");
+        return 1;
     }
     return 0;
 }
