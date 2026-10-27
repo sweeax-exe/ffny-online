@@ -1208,10 +1208,11 @@ class Engine:
                 self.event('Setup ' + json.dumps({k: self.manifest[k] for k in ('version', 'source_commit', 'toolkit_commit')}))
                 self.check_install_destination()
                 self.check_existing_install()
-                # At least 12 GiB build headroom plus extracted files; measured later on clean VM.
-                required = 12 * 1024**3
+                # Build headroom plus extracted files: players needed about 16 GB in practice (2026-10-28 reports;
+                # with less the build stopped part-way), so ask for that up front.
+                required = 16 * 1024**3
                 if shutil.disk_usage(nearest_existing(self.install)).free < required:
-                    raise SetupError('At least 12 GiB free space is required on the install drive', 2)
+                    raise SetupError('At least 16 GB free space is required on the install drive (the game is compiled on your PC); free some space and run setup again', 2)
                 if self.dump is None:
                     dump_size = 0       # an update reuses the extracted files already on the data drive
                 elif not self.dump.exists():

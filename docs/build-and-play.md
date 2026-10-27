@@ -14,7 +14,7 @@ preview build.
 1. Run the setup executable and select your ISO/XISO or extracted dump folder.
 2. Choose separate sibling folders, such as `D:\Games\DefJam\App` for the
    installation and `D:\Games\DefJam\Data` for the dump copy, settings and saves.
-   Data must not be inside the install folder. Keep 12 GiB build headroom plus
+   Data must not be inside the install folder. Keep 16 GB build headroom plus
    space for the copied dump and compiler.
 3. Choose **Create a desktop shortcut** if wanted. Clearing it keeps the
    Start-menu shortcut. Enable **Install missing Microsoft Build Tools** only
