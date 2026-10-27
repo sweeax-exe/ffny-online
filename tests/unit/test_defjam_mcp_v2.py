@@ -288,6 +288,27 @@ def test_online_tail_counts_summaries_per_match():
     assert "@game.getmatchsummary(#5," in t4 and "right:" not in t4
 
 
+def test_bot_summary_line():
+    line = ("[TEST-BOT] summary slot 0 (counter): strikes 3, grabs 0, block steps 64, counters 9 of 11 "
+            "wind-ups (6 clean), held 1 (mashed 10, broke 0)")
+    assert logparse.bot_line(line) == ("s0 counter: 3 strikes, 0 grabs, 64 block steps, counters 9/11 wind-ups, "
+                                       "6 clean, held 1 broke 0")
+    a = logparse.analyze_copy(ONLINE.replace("[TEST-KO] match 1 step 600: slot 1 knocked out", line))
+    assert a["started"][0]["bot"][0].startswith("s0 counter")
+
+
+def test_menu_navigation_by_the_reported_cursor():
+    from djlib import nav
+    assert nav.path(0, 6) == ["dpad_down", "dpad_down"]
+    assert nav.path(7, 1) == ["dpad_up", "dpad_up"]
+    assert nav.path(2, 3) == ["dpad_down", "dpad_left", "dpad_left"]
+    assert nav.focus_of({"calls": ["Online.Focus(1)", "Audio.Play(1)", "Online.Focus(4)", "Audio.Play(2)"]}) == 4
+    assert nav.focus_of({"calls": ["Audio.Play(1)"]}) is None
+    assert nav.target_slot("Online") == 6 and nav.target_slot("slot8") == 8
+    with pytest.raises(ValueError):
+        nav.target_slot("options")
+
+
 def test_compact_json_is_one_line_per_match():
     r = {"scenario": "online", "ok": True, "matches": [{"n": k} for k in range(8)], "problems": []}
     text = scenarios.compact_json(r)
