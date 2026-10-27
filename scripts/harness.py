@@ -775,6 +775,14 @@ def run_game(name, stages=(), tail="", shots="", secs=240, preset=RELEASE_PRESET
             os.remove(os.path.join(shots_dir, f))
     stamp = time.strftime("%Y%m%d-%H%M%S")
     log = os.path.join(logs, "run-%s.log" % stamp)
+    # Two copies of a hub test can start their games in the same second: both wrote one log
+    # (2026-10-27). The name is claimed by creating the .err file exclusively.
+    for n in range(2, 100):
+        try:
+            os.close(os.open(log + ".err", os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+            break
+        except FileExistsError:
+            log = os.path.join(logs, "run-%s-%d.log" % (stamp, n))
 
     e = {k: v for k, v in os.environ.items() if inherit_recomp or not k.upper().startswith('RECOMP_')}
     e.update(BASE_ENV)
