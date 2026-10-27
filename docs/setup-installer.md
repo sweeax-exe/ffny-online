@@ -16,7 +16,7 @@ Setup copies the dump into the data location and leaves the original untouched.
 Saves/settings stay in the data location through updates and uninstall.
 
 Folders must be writable and at most 140 characters because the game/toolchain
-still have path-length limits. Allow 12 GiB build headroom plus extracted dump
+still have path-length limits. Allow 16 GB build headroom plus extracted dump
 storage and compiler disk space. Exact clean-machine peak usage is still to be measured.
 
 **Install missing Microsoft Build Tools** allows Microsoft's publisher-verified
