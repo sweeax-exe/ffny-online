@@ -8,7 +8,7 @@ the exit code is 1 on any failure.
     python tools/defjam-mcp/dj.py scenario online --matches 3 [--mode 1v1|ffa|team|koth] [--players 2]
            [--fighters 55,22] [--rollback on|off] [--fast-ko 600|0] [--bot [60|p1=aggressive,p2=counter]]
     python tools/defjam-mcp/dj.py scenario offline [--type 0] [--venue 1] [--f0 55] [--f1 22] [--human]
-           [--bot] [--fast-ko 600] [--no-turbo] [--fixture <save folder>]
+           [--bot] [--fast-ko 600] [--turbo] [--fixture <save folder>]
     python tools/defjam-mcp/dj.py scenario boot [--goto battle|story|rewards|online|slotN]
     python tools/defjam-mcp/dj.py scenario gallery [--page-ms 1500]
     python tools/defjam-mcp/dj.py digest <log> [<log> ...] [--max 60]     (a run log, or logs/bug-reports/*/log.txt)
@@ -45,10 +45,10 @@ def cmd_scenario(a):
                              require_hits=a.require_hits, quick=a.quick, **common)
     elif a.kind == "offline":
         r = scenarios.offline(type=a.type, venue=a.venue, f0=a.f0, f1=a.f1, cpu=not a.human, bot=a.bot,
-                              fast_ko=a.fast_ko, turbo=not a.no_turbo, timeout=a.timeout or 420,
+                              fast_ko=a.fast_ko, turbo=a.turbo, timeout=a.timeout or 420,
                               extra_env=env, fixture=a.fixture, **common)
     elif a.kind == "boot":
-        r = scenarios.boot(turbo=not a.no_turbo, timeout=a.timeout or 240, extra_env=env, goto=a.goto, **common)
+        r = scenarios.boot(turbo=a.turbo, timeout=a.timeout or 240, extra_env=env, goto=a.goto, **common)
     else:
         r = scenarios.gallery(page_ms=a.page_ms, timeout=a.timeout or 300, **common)
     print(scenarios.format_result(r))
@@ -158,7 +158,7 @@ def main(argv=None):
     sc.add_argument("--f0", type=int, default=55)
     sc.add_argument("--f1", type=int, default=22)
     sc.add_argument("--human", action="store_true", help="offline: the second fighter is a human slot, not a CPU")
-    sc.add_argument("--no-turbo", action="store_true")
+    sc.add_argument("--turbo", action="store_true", help="no flip pacing or vsync wait (measured: no gain, the fight runs on the guest timer)")
     sc.add_argument("--fixture", help="a folder of save files copied over the copy's saves")
     sc.add_argument("--page-ms", type=int, default=1500)
     sc.add_argument("--goto", help="boot: then this main-menu entry by name (story, battle, rewards, online, slotN)")

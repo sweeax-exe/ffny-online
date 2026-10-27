@@ -43,7 +43,7 @@ Logs and pictures go to `logs/dj/<stamp>-<scenario>/` (git-ignored).
 | `roots list\|create NAME\|destroy PATH\|clean`, `cleanup` | managed data roots; stray copies of this checkout |
 
 Exit code 1 on any failure. Other options: `--timeout`, `--lock-timeout`, `--keep-going` (online:
-past a desync), `--require-hits`, `--keep-roots`, `--env NAME=VALUE` (checked), `--no-turbo`.
+past a desync), `--require-hits`, `--keep-roots`, `--env NAME=VALUE` (checked), `--turbo`.
 
 ### Examples
 
@@ -75,9 +75,22 @@ match that never started, a summary not accepted, controller ids of -99, disagre
 
 ```
 $ python tools/defjam-mcp/dj.py scenario offline --type 0 --venue 1 --f0 55 --f1 22
-{"scenario":"offline","ok":true, "times_s":{"menu":..,"start_game":..,"fight":..,"result":..,"summary_done":..},
- "fight":{"fighters":[55,22],"hits":{"0":..,"1":..},"result":{"winners":[0],"code":33,...},"fight_s":..,"ko":true,...}, ...}
+{
+  "scenario": "offline",
+  "ok": true,
+  "params": {"type":0,"venue":1,"f0":55,"f1":22,"cpu":true,"bot":null,"fast_ko":600,"turbo":false},
+  "times_s": {"menu":28.5,"start_game":28.5,"fight":39.1,"result":51.9,"summary_done":62.0},
+  "fight": {"characters":[9,10],"hits":{"0":2},"result":{"winners":[0],"code":33,"step":781,"time_up":false},"fight_s":13.0,"ko":true,"summary_cids":{"0":0,"1":-2},"rewards":true,"bot":[]},
+  "problems": [],
+  "log": "logs\\dj\\20261028-002325-offline\\copy0.log.err",
+  "shots": ["logs\\dj\\20261028-002325-offline\\fight.png", "logs\\dj\\20261028-002325-offline\\end.png"],
+  "elapsed_s": 64.2, "lock_wait_s": ..., "dir": "logs\\dj\\20261028-002325-offline"
+}
+```
 
+`characters` are the telemetry's character numbers (not fighter.xml ids); a CPU's summary `cid` is -2.
+
+```
 $ python tools/defjam-mcp/dj.py scenario boot --goto battle      # menu_s, faults, goto {"ok":true,"screen":"battle/cmtype.swf"}
 $ python tools/defjam-mcp/dj.py scenario gallery                 # pages: N, dir: logs/dj/.../gallery
 $ python tools/defjam-mcp/dj.py digest logs/bug-reports/20261027-033506.997-45ea37
@@ -96,12 +109,13 @@ The digest's callers are the crash block's stack scan filtered against the lifte
 
 ## Faster tests
 
-- **Turbo** (offline, boot; on by default, `--no-turbo` off): no flip pacing and no vsync wait
-  (`RECOMP_FLIP_HZ=0`, `RECOMP_PRESENT_VSYNC=0`), the intro movies skipped, the match started by
-  automatch without the menus, and the test knockout (`--fast-ko 600`: the loser is knocked out at
-  fight step 600, ten seconds in). The fight itself runs on the guest's own timer (PTIMER, real
-  time), so the knockout step, not the frame rate, sets its length. Online scenarios keep real
-  pacing (the lockstep needs it).
+- **Where the time goes.** An offline scenario skips the intro movies, starts the match by
+  automatch without the menus and knocks the loser out at fight step 600 (`--fast-ko`, ten
+  seconds in): boot to the menu 28 s, load 10 s, fight 13 s, summary 10 s -- about 62 s from
+  launch to the accepted summary. The fight runs on the guest's own timer (PTIMER, real time), so
+  `--turbo` (no flip pacing, no vsync wait: `RECOMP_FLIP_HZ=0`, `RECOMP_PRESENT_VSYNC=0`) gains
+  nothing measurable (61.1 s against 62.0 s, one run each) and is off by default; a faster-than-real
+  fight would need a time scale on the toolkit's PTIMER. Online scenarios keep real pacing.
 - **Bot behaviours** (`--bot p1=aggressive,p2=counter`, or one name for all; `RECOMP_TEST_BOT_PLAN`):
   balanced, aggressive, defensive, block, grapple, counter (blocks from the first step of the
   opponent's strike wind-up), mash, idle; all but idle mash strikes while held. Each match reports

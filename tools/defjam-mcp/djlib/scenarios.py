@@ -108,7 +108,7 @@ def _faults(text):
 
 # ---- boot -----------------------------------------------------------------------------------------
 
-def boot(timeout=240, turbo=True, extra_env=None, lock_timeout=None, log=None, keep_roots=False, goto=None):
+def boot(timeout=240, turbo=False, extra_env=None, lock_timeout=None, log=None, keep_roots=False, goto=None):
     """To the main menu; with goto (story, battle, rewards, online, slotN) on to that entry by name."""
     t0 = time.time()
     s = copies.Session("boot", lock_timeout=lock_timeout, log=log, keep_roots=keep_roots).open()
@@ -153,7 +153,7 @@ def boot(timeout=240, turbo=True, extra_env=None, lock_timeout=None, log=None, k
 
 # ---- offline --------------------------------------------------------------------------------------
 
-def offline(type=0, venue=1, f0=55, f1=22, cpu=True, bot=None, fast_ko=600, turbo=True, timeout=420,
+def offline(type=0, venue=1, f0=55, f1=22, cpu=True, bot=None, fast_ko=600, turbo=False, timeout=420,
             extra_env=None, lock_timeout=None, log=None, fixture=None, keep_roots=False, summary=True):
     """One match from the main menu by automatch: type (0 One on One, 1 Tag, 2/3 FFA), venue (feID),
     fighters f0/f1 (fighter.xml IDs), the second one a CPU unless cpu=False (then the bot or a second
