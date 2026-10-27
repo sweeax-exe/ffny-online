@@ -13,7 +13,7 @@ High level (one compact JSON result each, the main token saver):
   lock_status who holds the machine (test-lock.txt, test-priority.txt, running copies)
 
 Live driving (launch first; it waits for the machine lock and makes disposable data roots):
-  launch, state, press, screenshot, log, wait_for, to_menu, wait_state, inject, match, fe,
+  launch, state, press, screenshot, log, wait_for, to_menu, goto, wait_state, inject, match, fe,
   peek, poke, memdiff, save_state / load_state (the fight snapshot of the rollback code), close
 
 Copies never touch the player's save or the dump (each runs on its own data root), never report to
@@ -26,7 +26,7 @@ import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from djlib import copies as djcopies, logparse, machine, roots, scenarios  # noqa: E402
+from djlib import copies as djcopies, logparse, machine, nav, roots, scenarios  # noqa: E402
 
 REPO = machine.REPO
 DATA = machine.DATA
@@ -306,6 +306,9 @@ TOOLS = [
      "inputSchema": {"type": "object", "properties": {"copy": INT, "text": STR, "timeout": NUM}, "required": ["text"]}},
     {"name": "to_menu", "description": "Take a copy from the title / legal / memory-card screens to the main menu.",
      "inputSchema": _p(copy=INT, timeout=NUM)},
+    {"name": "goto", "description": "Main menu entry by name: target menu, story, battle, rewards, online or slot0..slot8. "
+     "Moves the cursor until the menu reports it (Online.Focus) on the entry, presses A and waits for the next screen.",
+     "inputSchema": {"type": "object", "properties": {"copy": INT, "target": STR, "timeout": NUM}, "required": ["target"]}},
     {"name": "wait_state", "description": "Wait until a field of the copy's state meets a condition. path is dotted "
      "(match.phase, match.step, match.fighters.1.state, online.lockstep.step, screen), op one of == != > >= < <= "
      "contains, value compared as the field's type (hex strings like 0x37 compare as numbers).",
@@ -412,6 +415,8 @@ def call(name, a):
         return [text_(wait_for(copy, a["text"], a.get("timeout", 120)))]
     if name == "to_menu":
         return [text_(to_menu(copy, a.get("timeout", 180)))]
+    if name == "goto":
+        return [text_(nav.goto(control, a["target"], copy, a.get("timeout", 120)))]
     if name == "wait_state":
         return [text_(wait_state(copy, a["path"], a["op"], a["value"], a.get("timeout", 60)))]
     if name == "inject":

@@ -92,6 +92,18 @@ int main(int argc, char **argv)
             defjam_test_input(ACTOR(1));
             printf("%d %x %x %x\n", step, get32(PAD(0)), get32(PAD(1)), get32(PAD(0) + 28));
         }
+    } else if (!strcmp(mode, "plan")) {         /* the opponent winds up at 50, holds slot 0 at 100 */
+        fighters(6.0f);
+        defjam_test_match_start();
+        for (step = 1; step <= 140; step++) {
+            put32(ACTOR(1) + 0x30, step >= 50 && step < 56 ? 0x45 : 1);
+            put32(ACTOR(0) + 0x30, step >= 100 && step < 110 ? 0x35 : 1);
+            if (step == 140) put32(0x3b8f30, 2);                       /* decided */
+            put32(PAD(0), 0xAAAA);
+            defjam_test_step();
+            defjam_test_input(ACTOR(0));
+            printf("%d %x\n", step, get32(PAD(0)));
+        }
     }
     return 0;
 }
@@ -161,6 +173,23 @@ def test_bot_online_drives_only_this_pcs_player(tool):
     rows, _ = run(tool, 'bot', RECOMP_TEST_BOT='1', STUB_LOCAL_SLOT='1')
     assert all(r[1] == 'aaaa' for r in rows)
     assert any(r[2] != 'bbbb' for r in rows)
+
+
+def test_bot_plan_counter_blocks_the_windup_and_mashes_out_of_a_hold(tool):
+    rows, err = run(tool, 'plan', RECOMP_TEST_BOT='1', RECOMP_TEST_BOT_PLAN='p1=counter')
+    pad = {int(r[0]): int(r[1], 16) for r in rows}
+    assert '[TEST-BOT] plan: slot 0 counter' in err
+    assert all(pad[s] == 0x2000 for s in range(50, 58))            # block from the wind-up's first step
+    assert all(pad[s] & 0xC0 and not pad[s] & 0x2000 for s in range(100, 110))   # mashing strikes
+    assert not any(pad[s] & 0xE0 for s in range(60, 99))           # waits in reach otherwise
+    assert 'summary slot 0 (counter):' in err
+    assert 'counters 1 of 1 wind-ups (1 clean), held 1 (mashed 10, broke 1)' in err
+
+
+def test_bot_plan_idle_presses_nothing(tool):
+    rows, err = run(tool, 'plan', RECOMP_TEST_BOT='1', RECOMP_TEST_BOT_PLAN='idle')
+    assert all(r[1] == '0' for r in rows[:139])
+    assert 'summary' not in err
 
 
 def test_bot_off_without_the_switch(tool):

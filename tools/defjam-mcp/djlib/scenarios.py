@@ -15,7 +15,7 @@ import json
 import os
 import time
 
-from . import copies, logparse, machine
+from . import copies, logparse, machine, nav
 
 _harness = None
 
@@ -75,7 +75,7 @@ def _bot_env(bot):
     s = str(bot)
     if s.isdigit():
         return {"RECOMP_TEST_BOT": "1,%d" % max(0, min(100, int(s)))}
-    return {"RECOMP_TEST_BOT": "1,60", "RECOMP_TEST_BOT_PLAN": s}
+    return {"RECOMP_TEST_BOT": "1,60", "RECOMP_TEST_BOT_PLAN": s}   # src/hooks/test_bot.c behaviours
 
 
 def _png(session, i, name, shots):
@@ -108,7 +108,8 @@ def _faults(text):
 
 # ---- boot -----------------------------------------------------------------------------------------
 
-def boot(timeout=240, turbo=True, extra_env=None, lock_timeout=None, log=None, keep_roots=False):
+def boot(timeout=240, turbo=True, extra_env=None, lock_timeout=None, log=None, keep_roots=False, goto=None):
+    """To the main menu; with goto (story, battle, rewards, online, slotN) on to that entry by name."""
     t0 = time.time()
     s = copies.Session("boot", lock_timeout=lock_timeout, log=log, keep_roots=keep_roots).open()
     result = {"scenario": "boot", "ok": False}
@@ -119,6 +120,9 @@ def boot(timeout=240, turbo=True, extra_env=None, lock_timeout=None, log=None, k
                "RECOMP_PAD_SCRIPT": h.build_pad_script(["getscreeninfo(intmain/mainmenu=back@9999"])}
         if turbo:
             env.update(TURBO_ENV)
+        if goto:
+            env.update(VIRTUAL_PAD_ENV)
+            env["RECOMP_INPUT_VIRTUAL_PADS"] = "1"
         env.update(extra_env or {})
         c = s.launch(0, env=env, watch=WATCH)
         deadline = time.time() + timeout
@@ -127,12 +131,18 @@ def boot(timeout=240, turbo=True, extra_env=None, lock_timeout=None, log=None, k
             if c.watch.count(MAIN_MENU) or c.watch.count("[CRASH]") or c.watch.count("[WATCHDOG]"):
                 break
             time.sleep(0.5)
+        nav_result = None
         if c.watch.count(MAIN_MENU):
             time.sleep(3)
             _png(s, 0, "menu", shots)
+            if goto:
+                nav_result = nav.goto(s.control, goto, 0, timeout=90)
+                time.sleep(2)
+                _png(s, 0, "goto-" + goto, shots)
+                result["goto"] = nav_result
         s.poll()
         text = logparse.read_text(c.log)
-        result.update({"ok": bool(c.watch.count(MAIN_MENU)) and not _faults(text),
+        result.update({"ok": bool(c.watch.count(MAIN_MENU)) and not _faults(text) and (not goto or bool(nav_result and nav_result.get("ok"))),
                        "menu_s": c.watch.first.get(MAIN_MENU), "exited": None if c.alive() else c.proc.returncode,
                        "faults": _faults(text), "gpu": next((l[7:90] for l in text.splitlines() if l.startswith("D3D8: graphics card")), None),
                        "log": _relpath(c.log), "shots": shots})
@@ -219,7 +229,7 @@ def offline(type=0, venue=1, f0=55, f1=22, cpu=True, bot=None, fast_ko=600, turb
                         "fight": w.first.get('"event":"match_start"'), "result": w.first.get('"event":"result"'),
                         "summary_done": w.first.get("[FUNCCALL] Game.UpdateMatchRewardsPoints()")},
             "fight": {"fighters": o["fighters"], "hits": hits, "result": o["result"], "fight_s": o["fight_s"],
-                      "ko": o["ko"], "summary_cids": o["summary_cids"], "rewards": o["rewards"]},
+                      "ko": o["ko"], "summary_cids": o["summary_cids"], "rewards": o["rewards"], "bot": o["bot"]},
             "problems": problems, "log": _relpath(c.log), "shots": shots,
         })
     finally:
@@ -364,6 +374,9 @@ def online_rows(analyses, matches, require_hits=False, problems=None):
         row["winners"] = m0.get("winners")
         row["ko"] = m0.get("ko")
         row["checks"] = min(m.get("checks", 0) for m in per.values())
+        bots = [b for m in per.values() for b in m.get("bot", [])]
+        if bots:
+            row["bot"] = bots
         row["summary"] = ["%s%s" % ("cid " + ",".join(str(v) for _, v in sorted(m["summary"].items())) if m.get("summary") else "none",
                                     "" if m.get("rewards") else " NOT accepted") for m in per.values()]
         for i, m in per.items():
