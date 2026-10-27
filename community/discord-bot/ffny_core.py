@@ -357,19 +357,33 @@ Got an idea for FFNY Online? A new mode, a feature, a change? Put it to the comm
 **How it works:** press **Start a poll**, describe your idea in one line and send. Everyone votes 👍 or 👎.
 Want other choices (for example which venue or which mode first)? Add your own answers, one per line.
 
-Every poll runs for 48 hours. The ideas with the most votes go on our list for the next builds."""
+A poll runs 2 days unless you pick another length (1 to 14 days) in the form. The ideas with the most votes go on our list for the next builds."""
 
 POLL_MAX_ANSWERS = 10       # Discord's limit
 POLL_ANSWER_LEN = 55        # Discord's limit for an answer's text
 POLL_QUESTION_LEN = 300     # Discord's limit for the question
 POLL_COOLDOWN_S = 600       # one poll per player every ten minutes
-POLL_HOURS = 48             # every poll runs this long: the same for all, no field to fill in
+POLL_DAYS = 2               # a poll's length when the form leaves it empty
+POLL_MAX_DAYS = 14          # the longest a player may pick (Discord allows 32)
 POLL_IDEA_ANSWERS = ("👍 Yes, add it", "👎 No")   # the answers when the form leaves them empty
 
 
-def parse_poll(question, answers_text):
+def parse_days(text):
+    """The poll length field as days: empty is POLL_DAYS; "7", "7d", "7 days", "2w" or "1 week" count;
+    None when it is not a whole number of days from 1 to POLL_MAX_DAYS."""
+    text = " ".join((text or "").lower().split())
+    if not text:
+        return POLL_DAYS
+    m = re.fullmatch(r"(\d{1,3})\s*(d|day|days|w|wk|week|weeks)?", text)
+    if not m:
+        return None
+    days = int(m.group(1)) * (7 if (m.group(2) or "d").startswith("w") else 1)
+    return days if 1 <= days <= POLL_MAX_DAYS else None
+
+
+def parse_poll(question, answers_text, days_text=""):
     """The poll form's fields as (question, answers, hours), or (None, error) when they do not make a
-    poll: 2 to 10 different non-empty answers, one per line. Every poll runs POLL_HOURS."""
+    poll: 2 to 10 different non-empty answers, one per line, and a length of 1 to POLL_MAX_DAYS days."""
     question = " ".join((question or "").split())
     if not question:
         return None, "Your poll needs a question."
@@ -385,7 +399,11 @@ def parse_poll(question, answers_text):
         return None, "Give at least two different answers, one per line (or none for 👍 / 👎)."
     if len(answers) > POLL_MAX_ANSWERS:
         return None, "At most %d answers, please." % POLL_MAX_ANSWERS
-    return (question[:POLL_QUESTION_LEN], answers, POLL_HOURS), None
+    days = parse_days(days_text)
+    if days is None:
+        return None, "Pick a length from 1 to %d days (for example 3 or 1w), or leave it empty for %d." % (
+            POLL_MAX_DAYS, POLL_DAYS)
+    return (question[:POLL_QUESTION_LEN], answers, days * 24), None
 
 
 # ---- automatic moderation (spam bots) ----

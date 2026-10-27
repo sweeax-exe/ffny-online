@@ -632,9 +632,11 @@ class PollForm(discord.ui.Modal, title="Share an idea or start a poll"):
     answers = discord.ui.TextInput(label="Answers (optional, empty = 👍 / 👎)", style=discord.TextStyle.paragraph,
                                    required=False, max_length=700,
                                    placeholder="Leave empty to vote yes or no, or one answer per line")
+    days = discord.ui.TextInput(label="How long? (days, 1-%d)" % core.POLL_MAX_DAYS, required=False, max_length=10,
+                                placeholder="Empty = %d days, or for example 7 or 2w" % core.POLL_DAYS)
 
     async def on_submit(self, interaction):
-        parsed, error = core.parse_poll(self.question.value, self.answers.value)
+        parsed, error = core.parse_poll(self.question.value, self.answers.value, self.days.value)
         if error:
             await interaction.response.send_message(error, ephemeral=True)
             return

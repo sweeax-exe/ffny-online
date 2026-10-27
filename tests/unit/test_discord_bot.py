@@ -132,7 +132,10 @@ def test_polls_channel_keeps_polls_and_team_posts_only():
 
 def test_poll_form_parsing():
     ok, err = core.parse_poll("  Next  mode? ", "Team\n- Cage\n\nteam\nInferno")
-    assert err is None and ok == ("Next mode?", ["Team", "Cage", "Inferno"], core.POLL_HOURS)
+    assert err is None and ok == ("Next mode?", ["Team", "Cage", "Inferno"], core.POLL_DAYS * 24)
+    assert core.parse_poll("Q", "", "7")[0][2] == 7 * 24 and core.parse_poll("Q", "", "2w")[0][2] == 14 * 24
+    assert core.parse_poll("Q", "", " 1 day ")[0][2] == 24 and core.parse_poll("Q", "", "3 Weeks")[0] is None
+    assert core.parse_poll("Q", "", "0")[0] is None and core.parse_poll("Q", "", "soon")[0] is None
     assert core.parse_poll("Q", "Only one")[0] is None
     assert core.parse_poll("Add tournaments", "")[0][1] == list(core.POLL_IDEA_ANSWERS)
     assert core.parse_poll("", "a\nb")[0] is None
