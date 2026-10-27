@@ -25,7 +25,7 @@ the game on your machine. PS2 and GameCube copies cannot be used.
 [Report a problem](https://github.com/vyanhursky/DefJamFFNY-recomp/issues/new/choose) ·
 [Join the Discord](https://discord.gg/xNvBs23ZBw)
 
-**[v0.12.1 — Created fighters and widescreen fixes](https://github.com/vyanhursky/DefJamFFNY-recomp/releases/tag/v0.12.1)** is the latest stable release: created-fighter portraits, eye colours and thumbnails, the right-side meters, and widescreen placement of the paused HUD and the menu song notification. [v0.12.0](https://github.com/vyanhursky/DefJamFFNY-recomp/releases/tag/v0.12.0) rebased the toolkit onto xboxrecomp v0.16, with audio fixes and steadier frames on variable-refresh Windows displays and the Steam Deck. [v0.11.0](https://github.com/vyanhursky/DefJamFFNY-recomp/releases/tag/v0.11.0) brought Mod Support Beta. Discover, download, enable and order mods in the launcher. HD Widescreen Menus is available in the default catalogue after refresh. See the release notes for known visual limitations.
+**[v0.12.2 — Steadier Story frames and the fire-escape fix](https://github.com/vyanhursky/DefJamFFNY-recomp/releases/tag/v0.12.2)** is the latest stable release: Story Power Plant free-for-all paces like Battle Mode, and the black rectangle in the fire-escape pan is gone. [v0.12.1](https://github.com/vyanhursky/DefJamFFNY-recomp/releases/tag/v0.12.1) fixed created-fighter portraits, eye colours and thumbnails, the right-side meters, and widescreen placement of the paused HUD and the menu song notification. [v0.12.0](https://github.com/vyanhursky/DefJamFFNY-recomp/releases/tag/v0.12.0) rebased the toolkit onto xboxrecomp v0.16, with audio fixes and steadier frames on variable-refresh Windows displays and the Steam Deck. [v0.11.0](https://github.com/vyanhursky/DefJamFFNY-recomp/releases/tag/v0.11.0) brought Mod Support Beta. Discover, download, enable and order mods in the launcher. HD Widescreen Menus is available in the default catalogue after refresh. See the release notes for known visual limitations.
 
 ## Gameplay
 
@@ -49,7 +49,7 @@ performance measurement. [Download the longer 60-fps MP4](docs/media/hd-16x9-gam
 **Improved Game Launcher (v0.10.6)** brings a focused Home screen, with detailed options in
 [Advanced settings](docs/launcher-and-overlay.md). The brickwork and torn-paper
 style uses the game's charcoal, ivory, red and gold palette.
-[Get the latest setup](https://github.com/vyanhursky/DefJamFFNY-recomp/releases/tag/v0.12.1).
+[Get the latest setup](https://github.com/vyanhursky/DefJamFFNY-recomp/releases/tag/v0.12.2).
 
 ## Features
 

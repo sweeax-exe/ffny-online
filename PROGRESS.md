@@ -10,6 +10,7 @@
 
 | Area | State | Notes |
 |---|---|---|
+| Release v0.12.2 — Steadier Story frames and the fire-escape fix (D216-D227) | ⏳ candidate cut; macOS gate passed, Windows, Steam Deck/Linux and owner play-test pending | `release/v0.12.2` from `main` (`a686049`) merges #129, #131, #135, #134; toolkit `be83eb9` (fork `defjam/perf-109`). macOS full regression 18/18 (`logs/regress-20261026-225818.txt`). |
 | Release v0.12.1 — Created fighters and widescreen fixes (D205-D213) | ✅ stable/latest published from PR #123 | Tag at merge `9c5c2d2`, toolkit `7a0f2f6` (fork `defjam/release-0.12.1`, `defjam/upstream-v0.16` fast-forwarded). Contents: #110 portraits (#108), #114 right meters (#112), #115 eye colours (#111), #116 thumbnails (#113), #117 paused HUD (#95), #121 song notification (#118), #122 shop LOADING flash (#119). Windows regression 14/14 + opt-in 6/6 (`logs/regress-20261026-072421.txt`), setup install + Clean Update; macOS and Deck full regression pass; owner play-test pass. #97 and #109 moved to v0.13.0. |
 | Release v0.12.0 — Toolkit rebase and performance (D204, first release train, D203) | ✅ stable/latest published from PR #106; Deck test limits recorded | Branch `release/v0.12.0`, gates on `1e4d5db`, toolkit `8fb21d2` (fork `defjam/release-0.12.0`). Contents: #85 toolkit v0.16.0, #100 setup reuse (D202), #103 VRR flush (#102), #104 Deck frame overlap. Windows full regression 14/14 (`logs/regress-20261025-110936.txt`), opening-scene audio with the owner's settings clicks 1/0/1 dropouts 1/11/1, Setup fresh install and Clean Update from v0.11.0 (120 data files byte-identical); macOS full regression 18/18 in 40 min, `repeat` 2/2, audio clicks 5/2 dropouts 1/1; Steam Deck regression 17/18: replay golden mismatch and separate repeat failure at step 541 (#98); detailed Deck report now retained. Owner play-test OK (2026-10-25). Published stable/latest at merge/tag `3414dc7`; nine asset digests/checksums and three provenance records verified; release workflow `40226940153` passed. |
 | Windows start-up and setup fixes (D148) | ✅ v0.10.7 published (stable/latest) | PR #86 merged `009473a`, tag `v0.10.7`, release run 39845952105 31/31, nine assets verified against GitHub digests and provenance (source `009473a`, toolkit `8589f88`). Contents: PR #76 (issue #72: reject incomplete Windows memory layouts, toolkit `8589f88`) and PR #80 (issue #81: `/INCREMENTAL:NO` link). Windows 11 / RTX 4070 Ti SUPER / VS 2019 (MSVC 14.29): full regression 12 of 14 (combat and versus failed only `audio.dry_queue`, passed on stock v0.10.6 and on two reruns), quick 5/5 on the final build, units 537 passed, native placement fixture and the memory/settings/texture/kernel fixtures pass, 10-boot soak 10/10, published v0.10.6 setup then this setup (Clean Update, bundled): exit 0, 125-file data inventory identical. Neither reporter has confirmed; neither crash reproduced here. PR #73 deliberately left out (owner: bundle with the mod release). Owner play-tested the final Windows build and found it good. Audio gate flake tracked in #88. |
@@ -354,6 +355,18 @@ D138–D140 were allocated independently on main and the launcher branch. Their 
 | D211 | 2026-10-26 | Widescreen menu song notification (PR #121, issue #118): tag the chyron in-band (feloader's set-up literal y 385 becomes 385+8192, guarded by the `Apt Data` magic and an FNV-1a hash) and let the renderer undo and left-anchor tagged 2D batches (fork `7a0f2f6`, `nv2a_ws_set_left_tag`). | The clip cannot be told apart by geometry and the executor is asynchronous, so a game-side switch would race; moving the root keeps tab, card, text and slide together. |
 | D212 | 2026-10-26 | Story shop LOADING flash (PR #122, part of #119): skip the part loader's LOADING frame (`0x0005AF80`) only within a `CreatePlayer.ForceUpdate`, until the game's next present; `RECOMP_SHOP_LOADING_CARD=1` restores it. | The card covered a console disc read; scoping the skip to the refresh keeps shop entry, every other load, the event and its other observer unchanged. The load hitch itself is not changed. |
 | D213 | 2026-10-26 | v0.12.1 release train: PRs #110, #114, #115, #116, #117, #121, #122 on `release/v0.12.1`, merged in stack order; cheat menu #97 left out on the owner's instruction (stays in milestone v0.12.1 for now). Toolkit pin `7a0f2f6` on fork branch `defjam/release-0.12.1`: the PRs' fork commits form one linear chain on `8fb21d2`, so no cherry-picks. | The stacked PRs already carry each other's toolkit commits; #97's Windows/Deck checks and hands-on cases are incomplete (§7 of v0.12.0). |
+| D216 | 2026-10-26 | Executor performance (PR #129, issue #109): executor changes ship on by default, each with an opt-out switch (`RECOMP_PB_CONST_FAST`, `RECOMP_GATHER_PLAN`, `RECOMP_FAST_SIG`, `RECOMP_PS_TEXT_CACHE`, `RECOMP_VSH_DECODED`, `RECOMP_PACE_TIMER`). | The measured gains are large and general; the switches allow an A/B and a quick way back. |
+| D217 | 2026-10-26 | The GPU thread's `PCRTC_START` poll and its log line run only with `RECOMP_NV2A_TRACE` (PR #129). | The read is trapped and was on whenever the executor ran; it costs about 0.7 ms a frame and is a diagnostic. |
+| D218 | 2026-10-26 | Fire-escape pan (PR #131): repair the exact retail source object in guest memory before resource registration (`src/patches/menu_geometry.c`, `RECOMP_MENU_TRANSITION_REPAIR=0` disables). | The blank tile reproduces without mods; texture changes cannot fix its misplaced geometry. |
+| D219 | 2026-10-26 | HD Widescreen Menus 1.1.0 stays compatible with game v0.12.1 while the geometry repair ships in v0.12.2 (PR #131). | The released loader already supports the artwork; users do not need a game reinstall to update the mod. |
+| D220 | 2026-10-26 | Menu pack 1.1: use the owner-approved Battle v4 / Team v2 / map v6 joins and six Stronger text selections (PR #131). | The owner approved the revised joins and requested publication. |
+| D221 | 2026-10-26 | Menu pack 1.1: add 17 unchanged original native anchor textures and a hyphenated release root (PR #131). | Standalone installer validation requires these even though the local RC1 rendered successfully. |
+| D222 | 2026-10-26 | Menu text 1.2 (PR #135): apply the exact approved Stronger edge recipe to the full inspected text census. | The owner selected this treatment and approved 1.2 shipment. |
+| D223 | 2026-10-26 | Menu text 1.2: keep overlapping restored 1.1 cards as baselines and preserve six pilot outputs byte-exactly. | Retains accepted artwork and silhouettes. |
+| D224 | 2026-10-26 | Menu text 1.2: export fixed text and the observed glyph atlas; exclude player names and unclassified generated rasters. | Finite source-ID overrides cannot enumerate every live font state. |
+| D225 | 2026-10-26 | Menu text 1.2: publish through immutable Cloudflare objects and the existing protected signed-catalogue workflow. | The owner explicitly authorized shipment; prior catalogue history and trust pins are preserved. |
+| D226 | 2026-10-26 | Setup handoff (PR #134): if `ps` cannot be started during a release handoff, stage tracking is turned off for that run rather than failing the handoff. | Tracking only exists to kill stages left behind by a crashed engine; a capable engine cleans its own stages on cancel, and the cleanup path must always kill the engine. |
+| D227 | 2026-10-26 | v0.12.2 release train: PRs #129, #131, #135 (stacked on #131) and #134 on `release/v0.12.2`, merged in that order; toolkit pin `be83eb9` (fork branch `defjam/perf-109`, linear on `7a0f2f6`, so no cherry-picks). D214 and D215 are taken by docs PR #125, so this train starts at D216. | #129 is the only PR with toolkit commits and its pin descends from v0.12.1's; the others change the game (#131), the setup (#134) or only records (#135). |
 
 ## 2. Environment inventory (2026-09-17)
 
@@ -456,29 +469,29 @@ defjam-recomp/
 - 2026-10-26 10:40 — D213: owner reports the macOS and Steam Deck full regressions on the v0.12.1 candidate passed. Windows play-test launcher `Play Def Jam v0.12.1 RC.bat` (release worktree exe, recorder and present pacing on); the owner play-test is the last open gate.
 - 2026-10-26 10:54 — D213: owner play-test of the v0.12.1 candidate on Windows passed; all gates complete. The owner's Xbox One pad was not seen by SDL that day in this build or in the 10-25 build that had found it (XInput saw it; DualSense found), so it is a local state, not the release. #97 moves to milestone v0.13.0.
 - 2026-10-26 11:13 — D213 publication completed: PR #123 merged `9c5c2d2`, annotated tag v0.12.1 at the merge, Source release run 40374051676 success; nine asset SHA-256 digests, three checksum files and three provenance records verified (version 0.12.1, toolkit `7a0f2f6`, source `9c5c2d2`). Published stable/latest. Issues #95/#108/#111/#112/#113/#118/#119 closed with release comments; fork `defjam/upstream-v0.16` fast-forwarded to `7a0f2f6`; milestone v0.12.1 closed; v0.13.0 opened (#97, #109).
+- 2026-10-26 22:10 — D216-D227: v0.12.2 release train cut. `release/v0.12.2` from `main` (`a686049`) merges #129, #131, #135 (stacked on #131) and #134 with merge commits, no conflicts. Toolkit pin `be83eb9` (#129's fork branch `defjam/perf-109`; descends from v0.12.1's `7a0f2f6`, so no cherry-picks and no `defjam/release-0.12.2` branch yet). D214/D215 belong to docs PR #125, so decisions start at D216. Version 0.12.2 (`0141bfa`), release notes, README, known issues.
+- 2026-10-26 23:12 — D227: macOS gate on the v0.12.2 candidate (`0141bfa`, toolkit `be83eb9`, fresh re-lift on the M1 Pro: analyze 118 s, recomp 64 s, build 40 s; no other game process or session active). Full regression **18/18** in 38 min (`logs/regress-20261026-225818.txt`; units 636 passed/33 skipped, goldens m2/m3/m4a, fight/ffa/Terrordome median 120-121 with minimum 120, combat 27/27, versus 26/26, replay hash unchanged, intro, crib, gym, soak 3/3). `repeat` 2/2 (`logs/regress-20261026-230517.txt`, `-231204.txt`, 80 records identical, golden hash). `visual` blocked: no approved baselines on this Mac. Story Power Plant pacing was not measured on the Mac (#129's numbers are Windows).
 
 ## 7. Hand-off
 
-### v0.12.1 published stable/latest — 2026-10-26
+### v0.12.2 release candidate — macOS gate passed, 2026-10-26
 
-- Release: https://github.com/vyanhursky/DefJamFFNY-recomp/releases/tag/v0.12.1
-  PR #123 merged at `9c5c2d276a67d79d0386ca2dc82c25458b2f5f3a`; annotated tag
-  `eeed26d4ae6871e78bcfae751437cb00e8b282a0` resolves to that merge. Source release workflow
-  `40374051676` passed. All nine assets downloaded and hashed against GitHub's digests and their
-  `.sha256` files; all three provenance records name version 0.12.1, toolkit
-  `7a0f2f60ac2f8671e6f34ce4ff61a77759ec8a7f`, source `9c5c2d2` and the installer's hash.
-- Included PRs #110, #114, #115, #116, #117, #121, #122 are merged (D205-D212; train D213).
-  Issues #95, #108, #111, #112, #113, #118 and #119 are closed, each with a comment linking the
-  release. #119 keeps a known issue: the shop item-load pause (Windows recorder comparison of no
-  packs / Faithful / both packs is the next step).
-- Fork `defjam/upstream-v0.16` fast-forwarded to the release pin `7a0f2f6`. Milestone v0.12.1
-  closed. Milestone v0.13.0 opened: cheat menu #97 (owner, 2026-10-26) and Power Plant pacing #109.
-- Gates: Windows full regression 14/14, opt-in 6/6 (ffa-result and visual pass on rerun; run
-  `visual` with `--fixture <...>/logs/fixtures/vy2-hour-v1`, current saves differ in Learn Moves
-  labels), setup install and Clean Update from v0.12.0; macOS and Steam Deck full regression pass
-  (owner's runs); owner Windows play-test pass. Evidence `<data>/release-evidence-0.12.1`.
-- Release worktree `code/defjam-release-0.12.1` deleted after publication. The separate bugfix
-  lane `code/defjam-release-0.12.0` (another chat) is untouched.
-- Upstream PRs #255/#256/#261/#264 remain open with sp00nznet; preserve their heads.
+- Branch `release/v0.12.2` (worktree `code/DefJamFFNY-recomp-v0122-rc`): `main` `a686049` plus merges of
+  #129 (executor performance, issue #109), #131 (fire-escape pan repair), #135 (menu text 1.2 records,
+  stacked on #131) and #134 (setup handoff test leak), then `chore: version 0.12.2` `0141bfa` and the records.
+  Toolkit pin `be83eb9` is on fork branch `defjam/perf-109` (commits `689df92`, `34c871d`, `be83eb9` on
+  `7a0f2f6`). Create fork branch `defjam/release-0.12.2` at that pin before publishing.
+- macOS gate done (D227, §6): full regression 18/18, `repeat` 2/2. **Still open:** Windows and Steam Deck/Linux
+  full `regress.py` (owner), setup install and Clean Update from v0.12.1 on Windows, owner play-test of
+  Story Power Plant (#129 is a draft until then), CI on the release PR.
+- Windows check for #129: `RECOMP_PRESENT_PACING=1` prints `[EXECTIME]` every 2 s; Story Power Plant with the VY3
+  fixture should show about 10 ms executor time per frame and under 1% of frames over 18 ms. Opt-outs:
+  `RECOMP_PB_CONST_FAST=0`, `RECOMP_GATHER_PLAN=0`, `RECOMP_FAST_SIG=0`, `RECOMP_PS_TEXT_CACHE=0`,
+  `RECOMP_VSH_DECODED=0`, `RECOMP_PACE_TIMER=0`, `RECOMP_PCRTC_POLL=1`. Windows `visual` needs
+  `--fixture <...>/logs/fixtures/vy2-hour-v1`.
+- Fire-escape (#131): play the title-to-main-menu pan; no black rectangle should appear at any window aspect.
+  `RECOMP_MENU_TRANSITION_REPAIR=0` shows the old behaviour.
+- Not in the candidate: cheat menu #97 and the unified-app stack (#125-#128, #130, #132, #133), which belong to v0.13.0.
+- The v0.12.1 hand-off (published 2026-10-26, tag `v0.12.1` at `9c5c2d2`) is complete; see the work log.
 
 Decisions are read by number or keyword: `decision D<n>`, `decisions --grep TEXT`.
