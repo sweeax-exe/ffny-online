@@ -518,6 +518,36 @@ def test_status_write_survives_a_wizard_holding_the_file(tmp_path, monkeypatch):
     assert not (tmp_path / 'status.pending').exists()
 
 
+def test_each_stage_writes_its_step_beside_the_status_and_progress_files(tmp_path):
+    """The launcher shows "Step n of m" from <status>.stage; status and progress keep their formats."""
+    setup = installer(tmp_path)
+    status = tmp_path / 'status.txt'
+    setup.args.status_file = str(status)
+    stage = Path(str(status) + '.stage')
+    progress = Path(str(status) + '.progress')
+    setup.stage('source')
+    assert stage.read_text(encoding='utf-8') == '1 7 source Getting the new version'
+    setup.stage('lift')
+    assert stage.read_text(encoding='utf-8') == '5 7 lift Translating the game code'
+    assert progress.read_text(encoding='ascii') == '170'
+    setup.event('Lift in progress (this may take several minutes)')
+    assert status.read_text(encoding='utf-8') == 'Lift in progress (this may take several minutes)'
+    setup.stage('hd')                       # no HD textures: not a step, the step shown stays
+    assert stage.read_text(encoding='utf-8') == '5 7 lift Translating the game code'
+    setup.stage('activate')
+    assert stage.read_text(encoding='utf-8') == '7 7 activate Finishing up'
+    assert not Path(str(status) + '.stage-pending').exists()
+
+    setup.args.hd_textures = True
+    setup.stage('hd')
+    assert stage.read_text(encoding='utf-8') == '7 8 hd HD textures'
+    setup.stage('activate')
+    assert stage.read_text(encoding='utf-8') == '8 8 activate Finishing up'
+    # every stage the progress bar knows has a name, and the names fit one line on the card
+    assert set(engine.STAGE_NAMES) == set(engine.PROGRESS_STAGES)
+    assert all(len(name) <= 40 and ' ' not in name[:1] for name in engine.STAGE_NAMES.values())
+
+
 def test_a_folder_around_the_dump_finds_the_one_image_or_game_folder(tmp_path):
     around = tmp_path / 'around'
     (around / 'notes').mkdir(parents=True)

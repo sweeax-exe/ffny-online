@@ -98,6 +98,17 @@ def write_progress(status_path, permille):
     replace_shown(temporary, path)
 
 
+def write_stage(status_path, index, total, key, name):
+    """The step being worked on, beside the status file (<status>.stage), one line:
+    "<index> <total> <key> <name>", e.g. "5 7 lift Translating the game code". The launcher's
+    updater shows it as "Step 5 of 7"; a front end that does not read it loses nothing, and the
+    status and progress files keep their formats."""
+    path = Path(str(status_path) + '.stage')
+    temporary = Path(str(status_path) + '.stage-pending')
+    temporary.write_text(f'{int(index)} {int(total)} {key} {name}', encoding='utf-8')
+    replace_shown(temporary, path)
+
+
 # Share of the whole run each stage is given in the progress bar (permille, cumulative
 # starts). The build is most of an install; with HD textures their upscale takes a slice of it.
 PROGRESS_STAGES = {
@@ -105,6 +116,19 @@ PROGRESS_STAGES = {
     'lift': (170, 260), 'build': (260, 950), 'hd': (950, 950), 'activate': (950, 1000),
 }
 PROGRESS_STAGES_HD = dict(PROGRESS_STAGES, build=(260, 800), hd=(800, 960), activate=(960, 1000))
+# What each stage is called on screen (the launcher's update card), in run order. 'hd' only
+# counts as a step when HD textures are built.
+STAGE_NAMES = {
+    'source': 'Getting the new version', 'extract': 'Checking your game files',
+    'toolchain': 'Checking the build tools', 'analysis': 'Preparing the game code',
+    'lift': 'Translating the game code', 'build': 'Building the game (the longest step)',
+    'hd': 'HD textures', 'activate': 'Finishing up',
+}
+
+
+def stage_steps(hd):
+    """The stages that count as steps, in order."""
+    return [key for key in STAGE_NAMES if hd or key != 'hd']
 
 
 def safe_relative(name):
@@ -321,8 +345,13 @@ class Engine:
     def stage(self, name):
         """Enter a progress stage: the bar jumps to its start, and steps reported while it
         runs (run(progress=True)) fill it towards its end."""
-        stages = PROGRESS_STAGES_HD if getattr(self.args, 'hd_textures', False) else PROGRESS_STAGES
+        hd = getattr(self.args, 'hd_textures', False)
+        stages = PROGRESS_STAGES_HD if hd else PROGRESS_STAGES
         self.progress_span = stages[name]
+        steps = stage_steps(hd)
+        if self.args.status_file and name in steps:
+            with contextlib.suppress(OSError):
+                write_stage(self.args.status_file, steps.index(name) + 1, len(steps), name, STAGE_NAMES[name])
         self.progress(0, 1)
 
     def progress(self, done, total):
