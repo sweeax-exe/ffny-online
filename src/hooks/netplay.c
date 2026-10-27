@@ -103,6 +103,7 @@ void netplay_on_seed(uint32_t e, int w, uint32_t x) { (void)e; (void)w; (void)x;
 void netplay_on_result(uint32_t w, uint32_t l, uint32_t c) { (void)w; (void)l; (void)c; }
 void netplay_on_crash(void) {}
 int netplay_toast(char *t, int n) { (void)t; (void)n; return 0; }
+int netplay_versus(NetVersus *o) { (void)o; return 0; }
 int netplay_rematch_request(void) { return 0; }
 int netplay_debug_json(char *o, int n) { return snprintf(o, (size_t)n, "{}"); }
 int netplay_rollback_brief(char *o, int n) { return snprintf(o, (size_t)n, "offline"); }
@@ -322,6 +323,10 @@ static struct {
     double rb_ms_max, rb_ms_total;
     char toast[160];                /* a notice for the fight (netplay_toast), until toast_until */
     ULONGLONG toast_until;
+    /* the versus screen (netplay_versus): shown since vs_start (0: not shown), the fight under way
+     * since vs_end (0: not yet); the king's position and streak as of the START */
+    ULONGLONG vs_start, vs_end;
+    int vs_king, vs_streak;
 } N;
 
 /* Rollback (rollback.h) is on with RECOMP_ROLLBACK=on (off by default since build 21); off, every step waits for every entry. */
@@ -442,6 +447,63 @@ int netplay_toast(char *out, int size)
     if (on) snprintf(out, size, "%s", N.toast);
     LeaveCriticalSection(&g_cs);
     return on;
+}
+
+/* The versus screen (netplay.h). Called by the overlay every frame; it reads the session and the
+ * step counter and writes only vs_start/vs_end, which nothing in the match reads. */
+#define VS_MIN_MS   2500u           /* shown at least this long after the START, when a load is instant */
+#define VS_FADE_MS  400u
+#define VS_LIMIT_MS 120000u         /* a match that never got going: the screen does not stay up for ever */
+int netplay_versus(NetVersus *out)
+{
+    ULONGLONG now, start, end, from;
+    int i, gone, under_way;
+    InitOnceExecuteOnce(&g_once, init_once, NULL, NULL);
+    start = N.vs_start;
+    if (!N.lobby || !start) return 0;
+    now = GetTickCount64();
+    EnterCriticalSection(&g_cs);
+    /* the match went away (abandoned, a player lost before the fight, the room's match over), or this
+     * PC waits on its last fight's results (King of the Hill): no screen */
+    gone = !N.match_live || N.start_deferred || N.state != NETPLAY_CONNECTED || now - start > VS_LIMIT_MS;
+    /* under way: this START's fight has run the step after the input delay, which waits for every
+     * other PC's first entry, so every game is past its load; or the fight went on offline */
+    under_way = N.match_seen && (N.step > (uint32_t)N.delay + 1u || !N.lockstep);
+    if (gone) {
+        N.vs_start = N.vs_end = 0;
+        LeaveCriticalSection(&g_cs);
+        return 0;
+    }
+    if (under_way && !N.vs_end) N.vs_end = now;
+    end = N.vs_end;
+    from = end ? (end > start + VS_MIN_MS ? end : start + VS_MIN_MS) : 0;
+    if (end && now >= from + VS_FADE_MS) {
+        N.vs_start = N.vs_end = 0;
+        LeaveCriticalSection(&g_cs);
+        return 0;
+    }
+    if (out) {
+        memset(out, 0, sizeof(*out));
+        out->count = N.report_m.count < 2 ? 2 : N.report_m.count > 4 ? 4 : N.report_m.count;
+        for (i = 0; i < out->count; i++) {
+            out->fighter[i] = N.report_m.fighter[i];
+            out->cpu[i] = i >= N.players || N.report_m.pad[i] < 0;
+            out->ping[i] = out->cpu[i] ? -1 : N.peer_rtt[i];
+            if (!out->cpu[i]) snprintf(out->name[i], sizeof(out->name[i]), "%s", N.report_names[i]);
+        }
+        out->you = N.pos;
+        out->type = N.report_m.type;
+        out->venue = N.report_m.venue;
+        out->room_mode = N.roomv.settings.mode;
+        out->king = N.koth_match ? N.vs_king : -1;
+        out->streak = N.vs_streak;
+        snprintf(out->room, sizeof(out->room), "%s", N.roomv.settings.name);
+        out->ms = (int)(now - start);
+        out->loaded = N.match_seen;
+        out->alpha = !end || now < from ? 1.0f : 1.0f - (float)(now - from) / (float)VS_FADE_MS;
+    }
+    LeaveCriticalSection(&g_cs);
+    return 1;
 }
 
 static const char *player_name(int pos)
@@ -599,6 +661,10 @@ static void become_connected(void)
     InterlockedExchange(&N.state, NETPLAY_CONNECTED);
     InterlockedExchange(&N.lockstep, 1);
     assign_input(1);
+    if (N.lobby) {
+        N.vs_end = 0;
+        N.vs_start = GetTickCount64();      /* the versus screen, until the fight is under way */
+    }
     if (N.lobby)
         set_status("Match found: %d players, you are player %d. It starts by itself.", N.players, N.pos + 1);
     else
@@ -1326,6 +1392,10 @@ static void on_start(const uint8_t *b, int len)
     N.koth_winner = -1;
     N.koth_fought = N.koth_done = 0;
     N.start_deferred = 0;
+    N.vs_king = -1;                 /* the versus screen's crown: the king as the START found it */
+    N.vs_streak = N.roomv.hill.streak;
+    if (N.koth_match && N.roomv.hill.valid)
+        for (i = 0; i < count; i++) if (slots[i] == N.roomv.hill.king) N.vs_king = i;
     LeaveCriticalSection(&g_cs);
     reset_remote_pads();
     fprintf(stderr, "[NETPLAY] START: seed %08X, type %d, rules %d, venue %d, %d players, this PC is player %d%s\n",
@@ -1568,7 +1638,9 @@ static DWORD WINAPI net_thread(LPVOID unused)
         int got;
         /* The first match after the game starts reads everything from the disk: 20 to 40 s on the
          * menu's LOADING, which players took for a freeze (F9 reports, build 23). */
-        if (N.match_live && N.start_tick && !N.load_done && !N.load_hinted && !N.start_deferred && now - N.start_tick > 8000) {
+        /* (the versus screen says it itself while it is up) */
+        if (N.match_live && N.start_tick && !N.load_done && !N.load_hinted && !N.start_deferred && !N.vs_start &&
+            now - N.start_tick > 8000) {
             N.load_hinted = 1;
             toast(12000, "Loading the match... The first one after the game starts can take up to half a minute.");
         }
