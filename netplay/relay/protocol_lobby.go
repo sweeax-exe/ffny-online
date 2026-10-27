@@ -86,9 +86,33 @@ const (
 // to every PC.
 var BattleIDs = map[uint8]uint8{40: 85, 41: 93, 52: 92, 78: 91}
 
+// ValidFighters are the front-end IDs with a Character record in the game's database: the only
+// fighters a Battle-mode match can load (tests/unit/test_battle_roster.py keeps this list equal to
+// the game's own, src/hooks/online_data.c, and to the database).
+var ValidFighters = func() map[uint8]bool {
+	m := map[uint8]bool{}
+	for _, id := range []uint8{
+		0, 1, 2, 3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26,
+		27, 28, 30, 31, 32, 33, 34, 35, 36, 38, 43, 44, 45, 46, 47, 48, 50, 51, 54, 55, 56, 57, 58,
+		59, 60, 61, 62, 64, 65, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 80, 81, 82, 83, 84, 85,
+		91, 92, 93, 98,
+	} {
+		m[id] = true
+	}
+	return m
+}()
+
+// SafeFighter replaces a fighter the game cannot load.
+const SafeFighter uint8 = 55
+
+// safeFighter is the fighter the relay plays for the one a player asked for: the Battle-mode ID of
+// an old fighter.xml ID, Doc for any other ID without a database record (FighterNone stays).
 func safeFighter(f uint8) uint8 {
 	if id, ok := BattleIDs[f]; ok {
 		return id
+	}
+	if f != FighterNone && !ValidFighters[f] {
+		return SafeFighter
 	}
 	return f
 }

@@ -77,7 +77,7 @@ func TestRankedPairAndStart(t *testing.T) {
 		t.Fatalf("lookups %#v", lk)
 	}
 	l.checked(pA, 11, 1500, true)
-	l.searching(pB, "b", 22, 1560, 42)
+	l.searching(pB, "b", 22, 1560, 43)
 	l.r.TakeRankedWork()
 
 	res := l.advance(time.Second)
@@ -86,7 +86,7 @@ func TestRankedPairAndStart(t *testing.T) {
 	}
 	st := roomOf(t, res, pB)
 	if st.Phase != PhaseVoting || st.Settings.Name != RankedRoomName || st.Settings.Public != 0 || st.Settings.Mode != RankedMode ||
-		st.Settings.Max != 2 || len(st.Players) != 2 || st.Players[0].Fighter != 59 || st.Players[1].Fighter != 42 {
+		st.Settings.Max != 2 || len(st.Players) != 2 || st.Players[0].Fighter != 59 || st.Players[1].Fighter != 43 {
 		t.Fatalf("ranked room %#v", st)
 	}
 	if countType(l.advance(time.Second), TypeQueue) != 0 {
@@ -109,7 +109,7 @@ func TestRankedPairAndStart(t *testing.T) {
 	l.over(pA)
 	l.over(pB)
 	l.setReady(pA, 59)
-	l.setReady(pB, 42)
+	l.setReady(pB, 43)
 	l.castVote(pA, 0)
 	l.castVote(pB, 0)
 	if _, p := l.r.TakeRankedWork(); len(p) != 1 {

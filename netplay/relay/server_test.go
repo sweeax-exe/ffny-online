@@ -255,7 +255,7 @@ func TestServerLobbyIntegration(t *testing.T) {
 
 	// Ready, vote, START.
 	a.send(Ready{Token: wa.Token, Ready: 1, Fighter: 4})
-	b.send(Ready{Token: wb.Token, Ready: 1, Fighter: 5})
+	b.send(Ready{Token: wb.Token, Ready: 1, Fighter: 6})
 	for {
 		if st := a.recvType(TypeRoom).(RoomState); st.Phase == PhaseVoting {
 			if len(st.Candidates) != 3 || st.MsLeft == 0 {
@@ -268,7 +268,7 @@ func TestServerLobbyIntegration(t *testing.T) {
 	b.send(Vote{Token: wb.Token, Choice: 2})
 	sa := a.recvType(TypeStart).(Start)
 	sb := b.recvType(TypeStart).(Start)
-	if !msgEqual(sa, sb) || len(sa.Players) != 2 || sa.Players[0] != (StartPlayer{0, 4}) || sa.Players[1] != (StartPlayer{1, 5}) {
+	if !msgEqual(sa, sb) || len(sa.Players) != 2 || sa.Players[0] != (StartPlayer{0, 4}) || sa.Players[1] != (StartPlayer{1, 6}) {
 		t.Fatalf("START %#v / %#v", sa, sb)
 	}
 

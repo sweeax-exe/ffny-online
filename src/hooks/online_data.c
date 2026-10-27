@@ -85,15 +85,30 @@ static const struct { int xml_id, fe_id; } k_battle_ids[] = {
     { 78, 91 },     /* Eric Sermon */
 };
 
-/* The Battle-mode ID of a fighter.xml entry; -1 for a placeholder that takes another's ID. */
+/* Every front-end ID that has a Character record in the database (scripts/sod-characters.py lists
+ * them from the player's dump; tests/unit/test_battle_roster.py pins this list to it and to the
+ * relay's ValidFighters). A fighter.xml entry with a style but no record is not a Battle-mode
+ * fighter: Gwen (39) crashed a live Free for All as the CPU that filled a free place (build 31,
+ * WrestlerSpecInit with character index -2). */
+static const unsigned char k_sod_fighters[] = {
+    0, 1, 2, 3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26,
+    27, 28, 30, 31, 32, 33, 34, 35, 36, 38, 43, 44, 45, 46, 47, 48, 50, 51, 54, 55, 56, 57, 58,
+    59, 60, 61, 62, 64, 65, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 80, 81, 82, 83, 84, 85,
+    91, 92, 93, 98,
+};
+
+/* The Battle-mode ID of a fighter.xml entry; -1 if Battle mode has no such fighter (a placeholder,
+ * or an entry without a database record). */
 static int battle_id(int xml_id)
 {
     unsigned i;
+    int id = xml_id;
     for (i = 0; i < sizeof(k_battle_ids) / sizeof(k_battle_ids[0]); i++) {
-        if (k_battle_ids[i].xml_id == xml_id) return k_battle_ids[i].fe_id;
+        if (k_battle_ids[i].xml_id == xml_id) id = k_battle_ids[i].fe_id;
         if (k_battle_ids[i].fe_id == xml_id) return -1;
     }
-    return xml_id;
+    for (i = 0; i < sizeof(k_sod_fighters); i++) if (k_sod_fighters[i] == id) return id;
+    return -1;
 }
 
 /* "Doc (MAR)" -> name "Doc", style "Martial arts". Entries without a known style are not
