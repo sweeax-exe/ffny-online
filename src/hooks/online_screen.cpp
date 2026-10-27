@@ -1037,10 +1037,12 @@ void apply_preset(NetRoomSettings &s, int index)
     for (int id : p[index].ids) if (s.pool_count < 32) s.pool[s.pool_count++] = (unsigned char)id;
 }
 
+std::string hub_name();
+
 void default_settings(NetRoomSettings &s)
 {
     memset(&s, 0, sizeof(s));
-    std::string player = setting_text("name", "Player");
+    std::string player = hub_name();          /* the Discord name when signed in, as everywhere else */
     snprintf(s.name, sizeof(s.name), "%s's room", player.empty() ? "Player" : player.c_str());
     s.is_public = 1;
     s.mode = 0;
