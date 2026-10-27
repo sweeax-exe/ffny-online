@@ -116,8 +116,12 @@ Full table with source references: `docs/research/toolkit-bringup-notes.md`. Eve
 | `RECOMP_FE_INJECT="anchor#N=>command"` | send the front end's FuncCall handler a command after the Nth call containing the anchor ([scenario launching](research/scenario-launching.md)) |
 | `RECOMP_TEST_CROWD=hold[:N],reseed` | crowd test controls, with `RECOMP_TEST_OBSERVATIONS=1`; measured by `scripts/crowd-lab.py` |
 | `RECOMP_TICK_THREAD=0`, `RECOMP_PRECISE_SLEEP=0`, `RECOMP_GUEST_TURN_PRIO=0`, `RECOMP_GUEST_QOS=0`, `RECOMP_APU_SLICE_PACE=0` | turn off one of the audio crackle fixes (D120-D122), each on by default, to compare; `RECOMP_APU_VOICE_PCM=<prefix>` dumps voices `0xF8`-`0xFA` for `scripts/audio-holes.py` |
-| `RECOMP_PRESENT_PACING=1` | Windows: every 2 s, how evenly frames were presented (`[PACING]`), how long `Present` blocked and how long each frame stayed on screen from DXGI frame statistics (`[ONSCREEN]`; needs the monitor awake), and GPU busy/idle/finish times from timestamp queries (`[GPUTIME]`) |
+| `RECOMP_PRESENT_PACING=1` | Windows: every 2 s, how evenly frames were presented (`[PACING]`), how long `Present` blocked and how long each frame stayed on screen from DXGI frame statistics (`[ONSCREEN]`; needs the monitor awake), and GPU busy/idle/finish times from timestamp queries (`[GPUTIME]`); on every platform, where the executor's time goes per frame (`[EXECTIME]`: batches, vertex gather, draw calls, present, sleep, time spent waiting for the title, frames with no sleep left, and push-buffer words by kind) |
 | `RECOMP_FLIP_KICK=0` | Windows: do not flush the frame to the GPU before the executor's 60 Hz flip sleep (the old order; with it, frames finish unevenly and judder on variable-refresh displays, #102) |
+| `RECOMP_PB_CONST_FAST=0` | turn off the executor's fast path for shader-constant words (`TRANSFORM_CONSTANT`, about 70% of a fight's push-buffer words), which skips the general method dispatch (#109) |
+| `RECOMP_GATHER_PLAN=0` | turn off the per-batch vertex-attribute plan in the GPU path and read every attribute through `fetch_attr` again (#109) |
+| `RECOMP_FAST_SIG=0` | use the single-chain texture and combiner signatures instead of the four-lane ones (#109) |
+| `RECOMP_PACE_TIMER=0` | Windows: pace flips with `Sleep()` instead of a high-resolution waitable timer; `Sleep()` is only as fine as the process's timer resolution (#109, #93) |
 
 Game-side switches (`src/patches/dev_unlock.c`; off unless set; the test harness turns the first on):
 
