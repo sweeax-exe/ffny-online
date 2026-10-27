@@ -250,7 +250,7 @@ RULES = [
     (2, re.compile(r"^\[MEM\] (guest address|contiguous memory at the match end)|^\[MEM\] (?!contiguous memory at the match start)")),
     (2, re.compile(r"^\[ACCOUNT\] (crash report)")),
     (2, re.compile(r"^\[ROLLBACK\] (slow:|the audio arena cannot grow|no room)")),
-    (2, re.compile(r"^\[TEST-KO\] match")),
+    (2, re.compile(r"^\[TEST-KO\] match|^\[TEST-BOT\] (summary|plan|unknown)")),
     (2, re.compile(r"^\[(UI|NETPLAY)\] .*(stuck|timed out|timeout|failed)", re.I)),
     (1, re.compile(r"^\[MEM\]")),
     (1, re.compile(r"^\[SETTINGS\]")),
@@ -353,6 +353,24 @@ def digest(text, max_lines=60, sites=None, source=None):
 
 TEST_EVENT_RE = re.compile(r"^\[TEST-EVENT\] (\{.*\})\s*$")
 SUMMARY_RE = re.compile(r"^\[FE-RESULT\] Game\.GetMatchSummary\((\d+)\) = (.*)")
+BOT_RE = re.compile(r"^\[TEST-BOT\] summary slot (\d+) \((\w+)\): strikes (\d+), grabs (\d+), block steps (\d+), "
+                    r"counters (\d+) of (\d+) wind-ups \((\d+) clean\), held (\d+) \(mashed (\d+), broke (\d+)\)")
+
+
+def bot_line(l):
+    """'[TEST-BOT] summary ...' -> a short text: what the bot tried and what came of it."""
+    m = BOT_RE.match(l)
+    if not m:
+        return None
+    g = [m.group(1), m.group(2)] + [int(x) for x in m.groups()[2:]]
+    out = "s%s %s: %d strikes, %d grabs, %d block steps" % tuple(g[:5])
+    if g[6] or g[5]:
+        out += ", counters %d/%d wind-ups, %d clean" % (g[5], g[6], g[7])
+    if g[8]:
+        out += ", held %d broke %d" % (g[8], g[10])
+    return out
+
+
 SCREEN_RE = re.compile(r"^\[FUNCCALL\] Control\.GetScreenInfo\(([^)]*)\)")
 
 
@@ -473,6 +491,11 @@ def analyze_copy(text):
             k = owner(i)
             if k >= 0:
                 per[k]["ko"] = True
+        elif l.startswith("[TEST-BOT] summary"):
+            k = owner(i)
+            b = bot_line(l)
+            if k >= 0 and b:
+                per[k].setdefault("bot", []).append(b)
     for s in fe_sequences(lines):
         k = next_start(s["begin"])
         if k >= 0 and per[k]["fe"] is None:
@@ -526,5 +549,6 @@ def offline_summary(text):
         "summary_cids": summary,
         "rewards": any(l.startswith("[FUNCCALL] Game.UpdateMatchRewardsPoints()") for l in lines),
         "ko": any(l.startswith("[TEST-KO] match") for l in lines),
+        "bot": [b for b in (bot_line(l) for l in lines if l.startswith("[TEST-BOT] summary")) if b],
         "crashes": [condense_crash(b) for _, b in crash_blocks(lines)],
     }

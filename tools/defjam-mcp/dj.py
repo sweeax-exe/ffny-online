@@ -9,7 +9,7 @@ the exit code is 1 on any failure.
            [--fighters 55,22] [--rollback on|off] [--fast-ko 600|0] [--bot [60|p1=aggressive,p2=counter]]
     python tools/defjam-mcp/dj.py scenario offline [--type 0] [--venue 1] [--f0 55] [--f1 22] [--human]
            [--bot] [--fast-ko 600] [--no-turbo] [--fixture <save folder>]
-    python tools/defjam-mcp/dj.py scenario boot
+    python tools/defjam-mcp/dj.py scenario boot [--goto battle|story|rewards|online|slotN]
     python tools/defjam-mcp/dj.py scenario gallery [--page-ms 1500]
     python tools/defjam-mcp/dj.py digest <log> [<log> ...] [--max 60]     (a run log, or logs/bug-reports/*/log.txt)
     python tools/defjam-mcp/dj.py analyze <copy logs...> [--matches N]   (an online result from existing logs)
@@ -48,7 +48,7 @@ def cmd_scenario(a):
                               fast_ko=a.fast_ko, turbo=not a.no_turbo, timeout=a.timeout or 420,
                               extra_env=env, fixture=a.fixture, **common)
     elif a.kind == "boot":
-        r = scenarios.boot(turbo=not a.no_turbo, timeout=a.timeout or 240, extra_env=env, **common)
+        r = scenarios.boot(turbo=not a.no_turbo, timeout=a.timeout or 240, extra_env=env, goto=a.goto, **common)
     else:
         r = scenarios.gallery(page_ms=a.page_ms, timeout=a.timeout or 300, **common)
     print(scenarios.format_result(r))
@@ -161,6 +161,7 @@ def main(argv=None):
     sc.add_argument("--no-turbo", action="store_true")
     sc.add_argument("--fixture", help="a folder of save files copied over the copy's saves")
     sc.add_argument("--page-ms", type=int, default=1500)
+    sc.add_argument("--goto", help="boot: then this main-menu entry by name (story, battle, rewards, online, slotN)")
     sc.add_argument("--env", action="append", default=[], help="extra NAME=VALUE (checked against the machine rules)")
     sc.add_argument("--lock-timeout", type=float, help="give up waiting for the machine after this many s")
     sc.add_argument("--keep-roots", action="store_true", help="leave the data roots for a look (dj roots clean)")
