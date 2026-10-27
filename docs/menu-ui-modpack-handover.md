@@ -1,5 +1,13 @@
 # Menu/UI modpack implementation handover
 
+**1.2 text candidate — 2026-10-26:** [text pass and native report](research/menu-ui-text-v1.2-2026-10-26.md).
+Local branch `codex/menu-text-1-2-0`; 1,140 Stronger text overrides including214
+fighter-banner variants. Standalone RC1 retains the1.1 scenery; released0.12.1
+installer validation and final1440p/32:9 native checks pass. Allsix prior text
+pins remain exact. Review `http://127.0.0.1:51740/review.html`; public catalogue
+remains1.1. Live player names/counters/font-cache permutations are not exhaustively
+covered by a source-ID texture pack. Pins: `config/menu-ui-text-v1.2-candidate.json`.
+
 **1.1 published — 2026-10-26 (signed catalogue revision 4):** [publication and compatibility report](research/menu-ui-v1.1-publication-2026-10-26.md).
 The final stable archive supersedes local RC1: 180 native textures (17 unchanged
 original anchors added for installer validation), 80 wide/stretch entries,
