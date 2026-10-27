@@ -1,5 +1,10 @@
 # Menu text 1.2 candidate — 2026-10-26
 
+**Subsequent approval:** the owner approved 1.2 and requested shipment. The stable
+package preserves all candidate artwork byte-for-byte; publication is recorded
+separately in the 1.2 publication report. The candidate status and RC hashes below
+describe the earlier review checkpoint.
+
 The owner requested all menu text textures for the next 1.2.0 modpack using the
 previously selected **Stronger edge clarity** treatment. Local branch
 `codex/menu-text-1-2-0` starts from the completed 1.1 publication records, with

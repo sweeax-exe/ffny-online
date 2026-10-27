@@ -1,5 +1,16 @@
 # Menu/UI modpack implementation handover
 
+**1.2 published — 2026-10-26 (signed catalogue revision 5):** [publication report](research/menu-ui-v1.2-publication-2026-10-26.md).
+The owner approved and requested shipment. Stable 1.2 includes 1,140 Stronger text
+overrides, including 214 fighter-banner variants; 1,304 native mappings, 80 wide
+mappings and all approved 1.1 scenery. Every non-metadata file matches the approved
+candidate exactly. Cloudflare hash/range checks, catalogue content/ClamAV checks
+and signed deployment pass. A real released-0.12.1 managed update verifies all
+1,528 installed files, 404 rollback files and the unchanged isolated save marker. Pins: `config/menu-ui-v1.2-release.json`. Compatible
+with game 0.12.1 without reinstalling. Live names/counters retain the runtime font
+path; fire-escape geometry repair remains game PR #131 for v0.12.2. Earlier
+candidate/no-publication statements below describe historical checkpoints.
+
 **1.2 text candidate — 2026-10-26:** [text pass and native report](research/menu-ui-text-v1.2-2026-10-26.md).
 Local branch `codex/menu-text-1-2-0`; 1,140 Stronger text overrides including214
 fighter-banner variants. Standalone RC1 retains the1.1 scenery; released0.12.1
