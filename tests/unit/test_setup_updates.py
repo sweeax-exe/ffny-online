@@ -1,10 +1,12 @@
 """Game-free updater policy, network/archive integrity and native crash recovery."""
 import argparse
+import contextlib
 import importlib.util
 import io
 import json
 import os
 from pathlib import Path
+import signal
 import subprocess
 import sys
 import zipfile
@@ -252,29 +254,58 @@ def test_failure_during_recovery_can_be_retried_without_losing_backup(tmp_path, 
     assert target.read_text()=='old'
 
 
-def test_cancelled_handoff_lets_child_clean_separate_stage_session(tmp_path):
-    import time
+@pytest.fixture
+def handoff_children(monkeypatch):
+    """Record run_selected's engine children and stop any that a failing test leaves running."""
+    started = []
+    original = releases.start_selected
+    def start(*args):
+        child, job = original(*args)
+        started.append(child)
+        return child, job
+    monkeypatch.setattr(releases, 'start_selected', start)
+    yield started
+    for child in started:
+        if child.poll() is None:
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(child.pid, signal.SIGKILL)
+            child.wait()
+
+
+@pytest.mark.parametrize('ps_denied', [False, True], ids=['ps', 'ps-denied'])
+def test_cancelled_handoff_lets_child_clean_separate_stage_session(tmp_path, monkeypatch, handoff_children, ps_denied):
     folder=tmp_path/'payload';(folder/'engine').mkdir(parents=True);(folder/'python/bin').mkdir(parents=True)
     interpreter=folder/'python/bin/python3'
     if os.name=='nt':pytest.skip('POSIX separate sessions; Windows taskkill exercised by native CI')
     interpreter.symlink_to(sys.executable)
     (folder/'manifest.json').write_text(json.dumps({'updater':releases.CONTRACT}))
     cancel=tmp_path/'cancel';ready=tmp_path/'ready';done=tmp_path/'done'
+    # Like the real engine, the stand-in gives up when its handoff parent is gone, and its stage
+    # when the engine is gone, so not even a killed pytest leaves either running.
     (folder/'engine/engine.py').write_text('''import subprocess,sys,time,os,signal
 from pathlib import Path
 args=sys.argv
 cancel=Path(args[args.index('--cancel-file')+1]);root=Path(args[args.index('--install-dir')+1])
-stage=subprocess.Popen([sys.executable,'-c','import time;time.sleep(60)'],start_new_session=True)
+parent=int(args[args.index('--handoff-parent')+1])
+stage=subprocess.Popen([sys.executable,'-c','import os,time\\np=os.getppid();end=time.time()+60\\nwhile os.getppid()==p and time.time()<end:time.sleep(.05)'],start_new_session=True)
 (root/'ready').write_text(str(stage.pid))
-while not cancel.exists():time.sleep(.02)
+while not cancel.exists() and os.getppid()==parent:time.sleep(.02)
 os.killpg(stage.pid,signal.SIGTERM);stage.wait();(root/'done').write_text('cleaned');sys.exit(6)
 ''')
+    if ps_denied:
+        # Some sandboxes (Codex on macOS) refuse to start ps; the handoff must still cancel cleanly.
+        real_run=subprocess.run
+        def run(argv,*a,**k):
+            if argv[0]=='ps':raise PermissionError(1,'Operation not permitted','ps')
+            return real_run(argv,*a,**k)
+        monkeypatch.setattr(releases.subprocess,'run',run)
     args=argparse.Namespace(install_dir=str(tmp_path),data_dir=None,dump=None,operation='update',toolchain=None,
                            log=None,status_file=None,cancel_file=str(cancel))
     def cancelled():
         if ready.exists():cancel.touch();raise ValueError('cancelled')
     with pytest.raises(ValueError):releases.run_selected(args,'macos-arm64',folder,cancelled)
     assert done.read_text()=='cleaned'
+    assert [child.poll() for child in handoff_children]==[6]
     with pytest.raises(ProcessLookupError):os.kill(int(ready.read_text()),0)
 
 
