@@ -290,6 +290,20 @@ ROUTES = {
         "until": "game.getmatchsummary(#9", "after": 6, "secs": 3600,
         "shots": "",
     },
+    "online8-p1": {
+        "help": "online hub, player 1: eight room matches in a row (the start race on the match-type screen)",
+        "stages": ["getscreeninfo(intmain/mainmenu=lt@0.5"],
+        "tail": online_tail(8),
+        "until": "game.getmatchsummary(#15", "after": 6, "secs": 5400,
+        "shots": "",
+    },
+    "online8-p2": {
+        "help": "online hub, player 2: eight room matches in a row",
+        "stages": ["getscreeninfo(intmain/mainmenu=lt@0.5"],
+        "tail": online_tail(8).replace("right:", "left:"),
+        "until": "game.getmatchsummary(#15", "after": 6, "secs": 5400,
+        "shots": "",
+    },
     "online-rematch-p1": {
         "help": "online hub, player 1: a match, then Rematch from the results menu (both copies choose it)",
         "stages": ["getscreeninfo(intmain/mainmenu=lt@0.5"],
@@ -761,6 +775,14 @@ def run_game(name, stages=(), tail="", shots="", secs=240, preset=RELEASE_PRESET
             os.remove(os.path.join(shots_dir, f))
     stamp = time.strftime("%Y%m%d-%H%M%S")
     log = os.path.join(logs, "run-%s.log" % stamp)
+    # Two copies of a hub test can start their games in the same second: both wrote one log
+    # (2026-10-27). The name is claimed by creating the .err file exclusively.
+    for n in range(2, 100):
+        try:
+            os.close(os.open(log + ".err", os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+            break
+        except FileExistsError:
+            log = os.path.join(logs, "run-%s-%d.log" % (stamp, n))
 
     e = {k: v for k, v in os.environ.items() if inherit_recomp or not k.upper().startswith('RECOMP_')}
     e.update(BASE_ENV)
