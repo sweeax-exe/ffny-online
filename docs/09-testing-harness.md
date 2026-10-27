@@ -19,6 +19,35 @@ game's artwork and stay under `logs/`, which git ignores.
 Never run two of these at once: they share the save area, the window and the
 frame-rate measurements.
 
+## Quick game tests for agents (defjam-mcp v2)
+
+`tools/defjam-mcp/dj.py` (Bash) and the `defjam` MCP server run whole tests with one compact
+JSON result and condense any log, under the machine lock (`D:\DefJam\test-lock.txt`,
+`test-priority.txt`, no other game copy running) and on disposable data roots, with the safe
+environment set (local addresses only, one guest CPU per copy). Details and the full option
+list: [tools/defjam-mcp/README.md](../tools/defjam-mcp/README.md).
+
+```
+python tools/defjam-mcp/dj.py scenario online --matches 3                 # 2 copies, 3 room matches, KO at step 600
+python tools/defjam-mcp/dj.py scenario online --matches 5 --mode koth --bot p1=aggressive,p2=counter
+python tools/defjam-mcp/dj.py scenario online --matches 3 --rollback on --fast-ko 0 --bot
+python tools/defjam-mcp/dj.py scenario offline --type 0 --venue 6 --f0 58 --f1 40   # one fight, CPU opponent
+python tools/defjam-mcp/dj.py scenario offline --fixture logs/fixtures/created-fighter
+python tools/defjam-mcp/dj.py scenario boot --goto battle
+python tools/defjam-mcp/dj.py scenario gallery
+python tools/defjam-mcp/dj.py digest logs/bug-reports/<id>                # a player's F9 report in <= 60 lines
+python tools/defjam-mcp/dj.py analyze logs/run-A.log.err logs/run-B.log.err   # the online result of an older run
+python tools/defjam-mcp/dj.py lock run -- python scripts/regress.py --quick   # any other test under the lock
+```
+
+An online result has one line per match: `{"n":2,"start":"lockstep d2","venue":18,"load_s":[0.2,0.8],
+"fe":["ok","ok"],"hits":[3,4],"winners":[1],"ko":true,"checks":20,"summary":["cid 0,1","cid 0,1"]}`
+-- the start mode and input delay, the front-end order (the match-type screen's own
+`ResetMatchData` before automatch's `StartBattleMode`), hits landed per slot, the winners, checksums
+compared and equal, the summary's controller ids and whether it was accepted
+(`UpdateMatchRewardsPoints`). Problems (desync with its detail, gave-ups, crashes with their `sub_`,
+summaries not accepted) are listed under `problems`, and the exit code is 1.
+
 The full regression is the quick one plus a four-fighter Free For All, the same
 at the Terrordome for four minutes, the **combat check**, a **two-pad match**, the
 **replay check**, the Story intro, crib, gym and a boot soak. `--only a,b` picks
@@ -260,7 +289,11 @@ python scripts/harness.py run fight-result --env RECOMP_TEST_BOT=1
 ```
 
 The MCP test server's `launch` takes the same as `ko_step`, `ko_winner`, `bot`,
-`relay_port` and `base_core`. The hub test leaves the save area's cache partition
+`relay_port` and `base_core`; `dj.py scenario ... --fast-ko N --bot` does it in one command.
+`RECOMP_TEST_BOT_PLAN="p1=aggressive,p2=counter"` gives each slot a behaviour (balanced,
+aggressive, defensive, block, grapple, counter, mash, idle; see `src/hooks/test_bot.c`), and a
+`[TEST-BOT] summary` line per slot and fight says what the bot tried (strikes, grabs, block steps,
+counters on the opponent's wind-ups and how many took no damage, holds broken). The hub test leaves the save area's cache partition
 images out of each copy's data root (the runtime makes sparse ones): copied, they are
 5 GB a root and again in each of the harness's save backups.
 
