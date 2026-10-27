@@ -115,7 +115,7 @@ bool mod_start(const std::string &command, const std::string &id) {
 #endif
     if (!fs::is_regular_file(script, error)) { status = "This installation has no mod helper; local mods still work."; return false; }
     std::string interpreter;
-    if (fs::is_regular_file(python,error)) interpreter = python.u8string();
+    if (fs::is_regular_file(python,error)) interpreter = path_utf8(python);
     else {
         const char *dev = getenv("DEFJAM_MOD_PYTHON");
         if (dev && *dev) interpreter = dev;
@@ -133,8 +133,8 @@ bool mod_start(const std::string &command, const std::string &id) {
     if (error) { status = "Could not create mod-manager state directory."; return false; }
     fs::remove(job_root / "cancel",error);
     fs::remove(job_root / "progress.ini",error);
-    std::vector<std::string> args = {interpreter, script.u8string(), command, "--data-dir", folder_path(Folder::Data), "--runtime", DEFJAM_VERSION,
-                                   "--cancel-file", (job_root / "cancel").u8string()};
+    std::vector<std::string> args = {interpreter, path_utf8(script), command, "--data-dir", folder_path(Folder::Data), "--runtime", DEFJAM_VERSION,
+                                   "--cancel-file", path_utf8(job_root / "cancel")};
 #if defined(DEFJAM_MOD_WIDE)
     args.insert(args.end(), {"--capability", "wide-v1"});
 #endif
