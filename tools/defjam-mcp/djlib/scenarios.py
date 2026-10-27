@@ -228,7 +228,7 @@ def offline(type=0, venue=1, f0=55, f1=22, cpu=True, bot=None, fast_ko=600, turb
             "times_s": {"menu": w.first.get(MAIN_MENU), "start_game": w.first.get("[AUTOMATCH] Game.StartGame()"),
                         "fight": w.first.get('"event":"match_start"'), "result": w.first.get('"event":"result"'),
                         "summary_done": w.first.get("[FUNCCALL] Game.UpdateMatchRewardsPoints()")},
-            "fight": {"fighters": o["fighters"], "hits": hits, "result": o["result"], "fight_s": o["fight_s"],
+            "fight": {"characters": o["fighters"], "hits": hits, "result": o["result"], "fight_s": o["fight_s"],
                       "ko": o["ko"], "summary_cids": o["summary_cids"], "rewards": o["rewards"], "bot": o["bot"]},
             "problems": problems, "log": _relpath(c.log), "shots": shots,
         })
