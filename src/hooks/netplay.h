@@ -213,6 +213,28 @@ void netplay_sound_command(void);   /* the sound engine's command call, silent w
 void *netplay_sound_handler(uint32_t va);   /* the audio subsystem's bus handlers, or NULL */
 int netplay_rematch_request(void);   /* Game.Rematch() online: 1 to hold it for the others */
 int netplay_toast(char *text, int size);
+
+/* The pre-fight versus screen (online_screen.cpp) of a room's match: what its START set up, copied
+ * out of the session. Returns 1 while the screen is to be drawn: from the START (match found) until
+ * the fight's first steps have run on every PC (the step after the input delay, which waits for the
+ * slowest loader), at least VS_MIN_MS, then a short fade. It only reads: nothing here touches the
+ * match, its inputs or its timing. Never offline, in Story or for a King of the Hill watcher. */
+typedef struct NetVersus {
+    int count;                  /* fighters, 2..4 */
+    int fighter[4];             /* fighter.xml IDs */
+    char name[4][25];           /* each player's room name; "" for a CPU */
+    int cpu[4];                 /* 1: a CPU takes the place */
+    int ping[4];                /* each player's ping to the server, as it reported it; -1 unknown */
+    int you;                    /* this PC's position */
+    int type, venue;            /* front-end match type, venue feID */
+    int room_mode;              /* the room's mode: NETPLAY_MODE_KOTH* for King of the Hill */
+    int king, streak;           /* King of the Hill: the king's position (-1 none), wins in a row */
+    char room[25];              /* the room's name */
+    int ms;                     /* since the START */
+    int loaded;                 /* this PC's fight is set up; the others may still be loading */
+    float alpha;                /* 1, falling to 0 over the fade */
+} NetVersus;
+int netplay_versus(NetVersus *out);
 int netplay_debug_json(char *out, int size);    /* tests: the lockstep's state as JSON */   /* a notice for the fight right now (wait, desync, gone) */
 void netplay_crowd_update(void);  /* the crowd's update, as recomp_lookup_manual hands it out */
 void netplay_on_result(uint32_t winners, uint32_t losers, uint32_t code);  /* the room match decided */

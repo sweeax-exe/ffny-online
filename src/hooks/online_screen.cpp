@@ -793,6 +793,8 @@ struct Gallery {
     bool pending = false;           // the sample waits for the relays' first answers
     int room_pings[NETPLAY_ROOM_SLOTS] = {};
     std::vector<NetServerRoom> other_rooms;     // Both servers: the sample's rooms on North America
+    NetVersus versus = {};          // the versus pages' sample (count 0: the plain MATCH FOUND)
+    int page_ms = 0;                // how long the page has been up
 } G;
 
 bool gallery_on()
@@ -2691,6 +2693,242 @@ void draw_status(ImDrawList *dl, const Frame &f)
     if (note) text(dl, f, g_hand, 14, 54, 428, r.error[0] ? RED : ORANGE, note, LEFT, 0.8f, 270);
 }
 
+// ---- the versus screen: who fights whom, where, while the match loads ----------------------------
+//
+// The original game shows the fighters and the venue before a fight; online the room's START goes
+// straight from the room into the load (automatch.c drives the game's own selection screens), so the
+// port draws its own: from the START until the fight's first steps have run on every PC
+// (netplay_versus), first over the MATCH FOUND moment of the online screens, then with the online
+// screens closed, over the game's loading screen. Drawing only: it reads a copy of what the START
+// set up and takes no input, so the player's controller belongs to the game the whole time the
+// screens are closed, and nothing about the match, its inputs or its timing changes. The music
+// under it is the game's own: StartGame stops the menu music and the game plays the loading part of
+// the fight's track (docs/launcher-and-overlay.md, "The versus screen").
+
+float ease_out(float t)
+{
+    t = t < 0 ? 0 : t > 1 ? 1 : t;
+    return 1 - (1 - t) * (1 - t) * (1 - t);
+}
+
+// Moves and fades what was drawn since `from` (an index into the draw list's vertices): the
+// entrance and the fade work on whole groups (a card, the venue) without a parameter on every helper.
+void shift_fade(ImDrawList *dl, const Frame &f, int from, float dx, float dy, float alpha)
+{
+    if (alpha >= 0.999f && dx == 0 && dy == 0) return;
+    float ox = dx * f.sx, oy = dy * f.sy;
+    unsigned scale = (unsigned)((alpha < 0 ? 0 : alpha > 1 ? 1 : alpha) * 256.0f + 0.5f);
+    for (int i = from; i < dl->VtxBuffer.Size; i++) {
+        ImDrawVert &v = dl->VtxBuffer[i];
+        v.pos.x += ox;
+        v.pos.y += oy;
+        unsigned a = (v.col >> IM_COL32_A_SHIFT) & 0xFF;
+        v.col = (v.col & ~IM_COL32_A_MASK) | (((a * scale) >> 8) << IM_COL32_A_SHIFT);
+    }
+}
+
+const char *fighter_style(int id)
+{
+    for (const OnlineFighter &o : roster()) if (o.id == id) return o.style ? o.style : "";
+    const OnlineFighter *all;
+    int n = online_fighters(&all);
+    for (int i = 0; i < n; i++) if (all[i].id == id) return all[i].style ? all[i].style : "";
+    return "";
+}
+
+// One fighter's card: the portrait, the player's name, the fighter and the style; the king of the
+// hill gets the crown and his streak. `ph`: the portrait's height.
+void versus_card(ImDrawList *dl, const Frame &f, const NetVersus &v, int i, float x, float y, float w, float ph, bool big)
+{
+    bool me = i == v.you && !v.cpu[i], king = i == v.king;
+    float h = ph + (big ? 92 : 78);
+    glass(dl, f, x, y, w, h, 12, me ? IM_COL32(56, 14, 20, 255) : IM_COL32(10, 10, 13, 255), me ? 0.70f : 0.62f);
+    if (king) frame_rect(dl, f, x + 1, y + 1, w - 2, h - 2, with_alpha(GOLD, 0.55f), 1.5f);
+    rect(dl, f, x + 6, y + 6, w - 12, ph, IM_COL32(0, 0, 0, 120), 6);
+    if (!portrait(dl, f, v.fighter[i], x + 6, y + 6, w - 12, ph))
+        text(dl, f, g_title, 40, x + w / 2, y + ph / 2 - 20, GREY, "?", CENTER);
+    // the portrait fades into the card at its foot, so the name plate reads as part of it
+    dl->AddRectFilledMultiColor(f.p(x + 6, y + 6 + ph * 0.72f), f.p(x + w - 6, y + 6 + ph), IM_COL32(8, 8, 10, 0),
+                                IM_COL32(8, 8, 10, 0), IM_COL32(8, 8, 10, 215), IM_COL32(8, 8, 10, 215));
+    if (king) {
+        crown(dl, f, x + w / 2, y - 14, big ? 46 : 34);
+        char streak[40];
+        snprintf(streak, sizeof(streak), v.streak == 1 ? "%d WIN IN A ROW" : "%d WINS IN A ROW", v.streak);
+        rect(dl, f, x + 6, y + 6, w - 12, 20, IM_COL32(60, 40, 4, 200), 6);
+        text(dl, f, g_title, big ? 13 : 11, x + w / 2, y + (big ? 9 : 10), GOLD, streak, CENTER, 1.0f);
+    }
+    if (me) {   // "YOU" on the portrait's corner
+        text(dl, f, g_title, 11, x + w - 12, y + (king ? 30 : 12), ORANGE, "YOU", RIGHT, 1.0f);
+    }
+    float ty = y + 6 + ph - (big ? 26 : 22);
+    const char *who = v.cpu[i] ? "CPU" : v.name[i][0] ? v.name[i] : "?";
+    text(dl, f, g_hand, big ? 24 : 18, x + w / 2, ty, v.cpu[i] ? GREY : me ? ORANGE : CREAM, who, CENTER, 1.3f, 0);
+    std::string fighter = upper(online_fighter_name(v.fighter[i]));
+    text(dl, f, g_title, big ? 18 : 14, x + w / 2, ty + (big ? 34 : 28), WHITE, fighter.c_str(), CENTER, 1.2f);
+    std::string style = upper(fighter_style(v.fighter[i]));
+    if (!style.empty())
+        text(dl, f, g_body, big ? 14 : 12, x + w / 2, ty + (big ? 58 : 48), with_alpha(CREAM, 0.75f), style.c_str(), CENTER, 0.8f);
+    if (!v.cpu[i] && v.ping[i] >= 0) {     // the player's own ping to the server, as it reported it
+        char ms[16];
+        snprintf(ms, sizeof(ms), "%d MS", v.ping[i]);
+        float pw = text_width(f, g_title, 10, ms);
+        ping_bars(dl, f, x + w - 14 - pw - 22, y + h - 17, 9, v.ping[i]);
+        text(dl, f, g_title, 10, x + w - 12, y + h - 18, ping_colour(v.ping[i]), ms, RIGHT, 0.8f);
+    }
+}
+
+// "VS", the game's stencil over a soft red light (steady: no flashing), `s` its scale.
+void versus_mark(ImDrawList *dl, const Frame &f, float cx, float cy, float size, float s)
+{
+    if (g_light.srv) {
+        float r = size * 1.6f * s;
+        dl->AddImage((ImTextureID)(intptr_t)g_light.srv, f.p(cx - r, cy - r * 0.8f), f.p(cx + r, cy + r * 0.8f),
+                     ImVec2(0, 0), ImVec2(1, 1), IM_COL32(220, 20, 30, 150));
+    }
+    float px = size * s;
+    text(dl, f, g_stencil, px, cx, cy - px * 0.55f, CREAM, "VS", CENTER, 2.4f * s);
+}
+
+// The venue: its photo and name banner (the vote's art), or its name in words without the art.
+void versus_venue(ImDrawList *dl, const Frame &f, int venue, float x, float y, float w, float photo, bool row)
+{
+    const Tex &pic = venue_tex(venue), &banner = venue_name_tex(venue);
+    std::string name = upper(online_venue_name(venue));
+    if (row) {      // a wide panel: the photo left, the label and banner right
+        glass(dl, f, x, y, w, photo + 12, 12);
+        if (!image(dl, f, pic, x + 6, y + 6, photo, photo)) text(dl, f, g_title, 12, x + 6 + photo / 2, y + photo / 2, GREY, "?", CENTER);
+        float bx = x + photo + 18, bw = w - photo - 30;
+        text(dl, f, g_title, 11, bx, y + 10, GREY, "TONIGHT'S VENUE", LEFT, 0.8f);
+        if (banner.srv) image_fit(dl, f, banner, bx - 4, y + 24, bw, photo - 26);
+        else text(dl, f, g_hand, 22, bx, y + 30, ORANGE, name.c_str(), LEFT, 1.2f, bw);
+        return;
+    }
+    glass(dl, f, x, y, w, photo + 62, 12);
+    text(dl, f, g_title, 11, x + w / 2, y + 7, GREY, "TONIGHT'S VENUE", CENTER, 0.8f);
+    if (!image(dl, f, pic, x + (w - photo) / 2, y + 22, photo, photo))
+        text(dl, f, g_title, 14, x + w / 2, y + 22 + photo / 2 - 8, CREAM, name.c_str(), CENTER, 1.2f, photo);
+    if (banner.srv) image_fit(dl, f, banner, x + 4, y + photo + 26, w - 8, 30);
+    else text(dl, f, g_hand, 16, x + w / 2, y + photo + 30, ORANGE, name.c_str(), CENTER, 1.0f, w - 8);
+}
+
+// The versus page, full screen. `v.ms` drives the entrance, `v.alpha` the fade at the fight's start.
+void versus_page(ImDrawList *dl, ImVec2 display, const NetVersus &v)
+{
+    Frame f = menu_frame(display);
+    float t = v.ms / 1000.0f;
+    int all = dl->VtxBuffer.Size;
+    backdrop(dl, f, display, true, LOOK_MATCH);
+    bool koth = NETPLAY_IS_KOTH(v.room_mode) || v.king >= 0;
+    int n = v.count < 2 ? 2 : v.count > 4 ? 4 : v.count;
+
+    // the header: the mode's logo (King of the Hill: the crown and its name), the room, the server
+    int k = dl->VtxBuffer.Size;
+    if (koth) {
+        crown(dl, f, 320, 24, 30);
+        text(dl, f, g_title, 22, 320, 38, GOLD, "KING OF THE HILL", CENTER, 1.4f);
+    } else if (v.type != 2 && tex(mode_logo(v.type)).srv) {    // (3-Way shares Free for All's logo: in words)
+        image_fit(dl, f, tex(mode_logo(v.type)), 200, 12, 240, 46);
+    } else {
+        text(dl, f, g_stencil, 30, 320, 20, CREAM, upper(mode_name(v.type)).c_str(), CENTER, 1.6f);
+    }
+    if (v.room[0]) text(dl, f, g_hand, 15, 44, 26, ORANGE, v.room, LEFT, 0.9f, 150);
+    {
+        NetServerInfo sv[NETSERVER_COUNT];
+        int cur = connected_server(), ms = gallery_on() ? (cur >= 0 ? G.servers[cur].ping_ms : -1) : netplay_rtt();
+        if (gallery_on()) { for (int i = 0; i < NETSERVER_COUNT; i++) sv[i] = G.servers[i]; }
+        else netservers_get(sv, NETSERVER_COUNT);
+        std::string where = cur >= 0 ? upper(sv[cur].name) : "ONLINE";
+        char line[64];
+        if (ms >= 0) snprintf(line, sizeof(line), "%s  %d MS", where.c_str(), ms);
+        else snprintf(line, sizeof(line), "%s", where.c_str());
+        float lw = text_width(f, g_title, 11, line);
+        text(dl, f, g_title, 11, 596, 28, ms >= 0 ? ping_colour(ms) : GREY, line, RIGHT, 0.8f);
+        ping_bars(dl, f, 596 - lw - 24, 28, 10, ms);
+    }
+    shift_fade(dl, f, k, 0, -12 * (1 - ease_out(t / 0.35f)), ease_out(t / 0.35f));
+
+    // the fighters
+    int order[4] = { 0, 1, 2, 3 };
+    if (n == 2 && v.king == 0) std::swap(order[0], order[1]);     // the king on the right, as on the hill
+    if (n == 2) {
+        const float w = 196, ph = 214, y = 70;
+        for (int s = 0; s < 2; s++) {
+            k = dl->VtxBuffer.Size;
+            versus_card(dl, f, v, order[s], s == 0 ? 36 : 640 - 36 - w, y, w, ph, true);
+            float e = ease_out((t - 0.05f - 0.08f * s) / 0.45f);
+            shift_fade(dl, f, k, (s == 0 ? -70.0f : 70.0f) * (1 - e), 0, e);
+        }
+        k = dl->VtxBuffer.Size;
+        float e = ease_out((t - 0.30f) / 0.30f);
+        versus_mark(dl, f, 320, 128, 64, 1.0f + 0.35f * (1 - e));
+        shift_fade(dl, f, k, 0, 0, e);
+        k = dl->VtxBuffer.Size;
+        versus_venue(dl, f, v.venue, 246, 186, 148, 116, false);
+        e = ease_out((t - 0.45f) / 0.40f);
+        shift_fade(dl, f, k, 0, 16 * (1 - e), e);
+    } else {
+        const float w = n == 3 ? 172 : 136, gap = n == 3 ? 18 : 12, ph = n == 3 ? 168 : 150, y = 72;
+        float x0 = 320 - (n * w + (n - 1) * gap) / 2;
+        for (int s = 0; s < n; s++) {
+            k = dl->VtxBuffer.Size;
+            versus_card(dl, f, v, order[s], x0 + s * (w + gap), y, w, ph, false);
+            float e = ease_out((t - 0.05f - 0.07f * s) / 0.45f);
+            shift_fade(dl, f, k, 0, 40 * (1 - e), e);
+        }
+        k = dl->VtxBuffer.Size;
+        float e = ease_out((t - 0.40f) / 0.30f);
+        for (int s = 0; s + 1 < n; s++)     // a small VS between each pair of cards
+            versus_mark(dl, f, x0 + (s + 1) * (w + gap) - gap / 2, y + ph * 0.55f, 26, 1.0f + 0.35f * (1 - e));
+        shift_fade(dl, f, k, 0, 0, e);
+        k = dl->VtxBuffer.Size;
+        versus_venue(dl, f, v.venue, 150, y + ph + 92, 340, 64, true);
+        e = ease_out((t - 0.50f) / 0.40f);
+        shift_fade(dl, f, k, 0, 16 * (1 - e), e);
+    }
+
+    // the load: what this PC waits for (no flashing: the dots step slowly)
+    k = dl->VtxBuffer.Size;
+    glass(dl, f, 36, 418, 568, 30, 8);
+    static const char *const dots[] = { "", ".", "..", "..." };
+    std::string status = v.loaded ? std::string("WAITING FOR THE OTHER PLAYERS") : std::string("LOADING THE FIGHT");
+    status += dots[(v.ms / 450) % 4];
+    text(dl, f, g_title, 13, 50, 425, WHITE, status.c_str(), LEFT, 1.0f);
+    const char *sub = !v.loaded && v.ms > 8000 ? "The first match after the game starts can take up to half a minute."
+                                               : "The fight starts by itself.";
+    text(dl, f, g_hand, 13, 590, 426, ORANGE, sub, RIGHT, 0.8f);
+    shift_fade(dl, f, k, 0, 0, ease_out((t - 0.2f) / 0.4f));
+
+    shift_fade(dl, f, all, 0, 0, v.alpha);     // the fade as the fight starts
+}
+
+// The gallery's versus samples: "versus-1v1", "versus-3way", "versus-ffa", "versus-koth".
+NetVersus sample_versus(const std::string &page)
+{
+    static const char *const names[] = { "Ann", "Ben", "Cal", "Dee" };
+    const auto &list = roster();
+    NetVersus v = {};
+    v.count = page == "versus-3way" ? 3 : page == "versus-ffa" ? 4 : 2;
+    v.type = page == "versus-3way" ? 2 : page == "versus-ffa" ? 3 : 0;
+    v.venue = page == "versus-koth" ? 6 : page == "versus-ffa" ? 11 : 1;
+    v.you = 0;
+    v.king = -1;
+    snprintf(v.room, sizeof(v.room), "%s", page == "versus-koth" ? "Hill of Pain" : "Ann's room");
+    for (int i = 0; i < v.count; i++) {
+        v.fighter[i] = list.empty() ? 55 : list[(i * 7 + 3) % list.size()].id;
+        v.cpu[i] = page == "versus-ffa" && i == 3;
+        if (!v.cpu[i]) snprintf(v.name[i], sizeof(v.name[i]), "%s", names[i]);
+        v.ping[i] = v.cpu[i] ? -1 : 38 + 41 * i;
+    }
+    if (page == "versus-koth") {
+        v.room_mode = NETPLAY_MODE_KOTH_RANDOM;
+        v.king = 1;
+        v.streak = 3;
+    }
+    v.alpha = 1;
+    v.loaded = 0;
+    return v;
+}
+
 // The gallery's sample: a room of `count` with names and fighters, this PC in slot 0 and hosting.
 NetRoom sample_room(int mode, int max, int count)
 {
@@ -2734,7 +2972,9 @@ void gallery_step()
                                          "connecting-auto", "hub-server", "servers", "servers-offline", "hub-ranked-na",
                                          "room-ping", "room-quick-hint", "offline-server",
                                          // build 31: both servers
-                                         "hub-both", "servers-both", "rooms-both", "rooms-both-na", "room-both-move" };
+                                         "hub-both", "servers-both", "rooms-both", "rooms-both-na", "room-both-move",
+                                         // the versus screen while a match loads
+                                         "versus-1v1", "versus-3way", "versus-ffa", "versus-koth" };
     const int count = (int)(sizeof(pages) / sizeof(pages[0]));
     static unsigned long long start;
     static int ms;
@@ -2791,8 +3031,17 @@ void gallery_step()
             G.other_rooms.push_back(e);
         }
     }
-    int index = (int)((now - start) / (unsigned long long)ms) % count;
+    // RECOMP_TEST_ONLINE_GALLERY_ONLY=<prefix>: only the pages whose names start with it ("versus")
+    static std::vector<int> shown;
+    if (shown.empty()) {
+        const char *only = getenv("RECOMP_TEST_ONLINE_GALLERY_ONLY");
+        for (int i = 0; i < count; i++)
+            if (!only || !*only || !strncmp(pages[i], only, strlen(only))) shown.push_back(i);
+        if (shown.empty()) for (int i = 0; i < count; i++) shown.push_back(i);
+    }
+    int index = shown[(size_t)((now - start) / (unsigned long long)ms) % shown.size()];
     const char *page = pages[index];
+    G.page_ms = (int)((now - start) % (unsigned long long)ms);
     G.page = page;
     G.state = NETPLAY_LOBBY;
     G.in_lobby = true;
@@ -2890,7 +3139,14 @@ void gallery_step()
             h.watch_fighters[0] = r.players[1].fighter; h.watch_fighters[1] = r.players[2].fighter;
         }
     } else if (p == "room-voice") { S.page = VOICE; S.voice_sel = 5; G.room = sample_room(0, 4, 4); }
-    else if (p == "match") { G.state = NETPLAY_CONNECTED; G.room = sample_room(0, 2, 2); G.room.phase = 2; }
+    else if (p == "match") { G.state = NETPLAY_CONNECTED; G.room = sample_room(0, 2, 2); G.room.phase = 2; G.versus.count = 0; }
+    else if (p.compare(0, 6, "versus") == 0) {
+        G.state = NETPLAY_CONNECTED;
+        G.room = sample_room(0, 2, 2);
+        G.room.phase = 2;
+        G.versus = sample_versus(p);
+        G.versus.ms = G.page_ms;
+    }
     else if (p == "connecting-auto") {
         S.page = HUB; G.state = NETPLAY_OFF; G.in_lobby = false; G.pending = true;
         G.servers[NETSERVER_NA].state = NETSERVER_UNKNOWN; G.servers[NETSERVER_NA].ping_ms = -1;
@@ -3005,7 +3261,22 @@ void draw_decor(ImDrawList *dl, ImVec2 display)
 
 bool closed_for_match() { return g_closed_for_match; }
 
-const char *shot_label() { return gallery_on() ? G.page : nullptr; }
+// The versus screen with the online screens closed: read once a frame, drawn by draw_versus.
+NetVersus g_versus;
+bool g_versus_up = false;
+
+bool versus_wanted()
+{
+    g_versus_up = !gallery_on() && netplay_versus(&g_versus) != 0;
+    return g_versus_up;
+}
+
+void draw_versus(ImDrawList *dl, ImVec2 display)
+{
+    if (g_versus_up) versus_page(dl, display, g_versus);
+}
+
+const char *shot_label() { return gallery_on() ? G.page : g_versus_up ? "versus" : nullptr; }
 
 bool take_open_request()
 {
@@ -3038,20 +3309,32 @@ bool draw(ImVec2 display)
         unsigned long long now = GetTickCount64();
         if (netplay_in_lobby() && now - asked > 5000) { asked = now; netplay_lobby_who(); }
     }
+
+    // A match was agreed: the versus screen, then the menu goes back to the game, which starts it.
+    // The versus screen stays up with the online screens closed (draw_versus) until the fight is
+    // under way; closing them here gives the controller back to the game as before, after 1.8 s,
+    // or at once when this PC's fight is already set up (a quick load).
+    if (st == NETPLAY_CONNECTED && net_in_lobby()) {
+        if (!S.start_seen) S.start_seen = GetTickCount64();
+        NetVersus v;
+        bool have = gallery_on() ? G.versus.count > 0 : netplay_versus(&v) != 0;
+        if (gallery_on()) v = G.versus;
+        if (have) {
+            versus_page(dl, display, v);
+        } else {
+            backdrop(dl, f, display, true, LOOK_MATCH);
+            page_title(dl, f, "MATCH FOUND");
+            glass(dl, f, 170, 176, 300, 100, 14);
+            text(dl, f, g_hand, 22, 320, 200, ORANGE, "Get ready to fight!", CENTER, 1.2f);
+            text(dl, f, g_title, 14, 320, 240, WHITE, "The match starts by itself.", CENTER);
+        }
+        // (the gallery keeps the page up: it is there to be looked at)
+        g_closed_for_match = !gallery_on() && (GetTickCount64() - S.start_seen >= 1800 || (have && v.loaded));
+        return !g_closed_for_match;
+    }
     backdrop(dl, f, display, S.page == FIGHTERS || S.page == STATS || S.page == PLAYERS || room.in_room ||
              st == NETPLAY_CONNECTED ||
              !g_menu_up.load(), page_look(room, st));
-
-    // a match was agreed: show it, then give the menu back to the game, which starts it
-    if (st == NETPLAY_CONNECTED && net_in_lobby()) {
-        if (!S.start_seen) S.start_seen = GetTickCount64();
-        page_title(dl, f, "MATCH FOUND");
-        glass(dl, f, 170, 176, 300, 100, 14);
-        text(dl, f, g_hand, 22, 320, 200, ORANGE, "Get ready to fight!", CENTER, 1.2f);
-        text(dl, f, g_title, 14, 320, 240, WHITE, "The match starts by itself.", CENTER);
-        g_closed_for_match = GetTickCount64() - S.start_seen >= 1800;
-        return !g_closed_for_match;
-    }
     S.start_seen = 0;
     g_closed_for_match = false;
 
@@ -3240,6 +3523,8 @@ void draw_decor(ImDrawList *, ImVec2) {}
 bool take_open_request() { return g_open_req.exchange(0) != 0 && false; }
 bool draw(ImVec2) { return false; }
 bool closed_for_match() { return false; }
+bool versus_wanted() { return false; }
+void draw_versus(ImDrawList *, ImVec2) {}
 const char *shot_label() { return nullptr; }
 }
 
