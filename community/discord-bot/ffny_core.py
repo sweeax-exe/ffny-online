@@ -185,7 +185,7 @@ Everyone in a match needs the same build. Want the pings yourself? Pick *Match c
 # Discord's onboarding for new members (needs a Community server). Default channels everyone
 # sees: Discord asks for at least seven, five of them ones @everyone can write in.
 ONBOARDING_DEFAULTS = ["welcome", "rules", "announcements", SUPPORT_CHANNEL, "get-help", "faq", APPLY_CHANNEL, "general", "find-a-match",
-                       "clips-and-screens", "ideas-and-feedback", "off-topic"]
+                       "clips-and-screens", "ideas-and-feedback", "off-topic", "ffny-studio", "mod-showcase"]
 # Questions: (key, title, [(key, emoji, title, description, roles, channels)]).
 ONBOARDING_PROMPTS = [
     ("pings", "What should we ping you for?", [
