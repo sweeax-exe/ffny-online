@@ -36,6 +36,7 @@
 #include "hooks/scene_launcher.h"
 #include "hooks/dev_module.h"
 #include "patches/picture.h"
+#include "patches/menu_geometry.h"
 
 /* Crowd test controls (src/hooks/crowd_control.c, RECOMP_TEST_CROWD; off unless set). */
 void defjam_crowd_match_start(void);
@@ -109,6 +110,9 @@ void ws_apt_load_begin(uint32_t name);
 void ws_apt_load_done(uint32_t apt);
 void sub_001810B0_enter(void) { ws_apt_load_begin(MEM32(g_esp + 8)); }
 void sub_00056F50_enter(void) { ws_apt_load_done(MEM32(g_esp + 8)); }
+/* DynamicLoader's ELF parser: the input descriptor's +0x10 is the raw header,
+ * still before section fixup, relocation and vertex-buffer upload. */
+void sub_00109F80_enter(void) { menu_geometry_register(MEM32(g_ecx + 0x10)); }
 
 /* ---- Story shops: no LOADING frame on an item change (issue #119) ------
  *
