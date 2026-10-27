@@ -213,6 +213,9 @@ class FfnyBot(discord.Client):
         for name in (core.ALERT_ROLE, core.MATCH_ROLE):
             if not self.role(guild, name):
                 await guild.create_role(name=name, mentionable=True, reason="FFNY bot layout")
+        if not self.role(guild, core.MODDER_ROLE):
+            await guild.create_role(name=core.MODDER_ROLE, colour=discord.Colour(0x9B59B6), hoist=True,
+                                    mentionable=True, reason="FFNY bot layout: modders and Studio testers")
         if not self.role(guild, core.SUPPORTER_ROLE):
             await guild.create_role(name=core.SUPPORTER_ROLE, colour=discord.Colour(0xFF5E8A), hoist=True,
                                     mentionable=False, reason="FFNY bot layout: donors")

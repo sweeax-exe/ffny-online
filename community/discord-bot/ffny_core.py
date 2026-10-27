@@ -18,6 +18,7 @@ ACCOUNTS_URL = "http://127.0.0.1:8091"      # the account service's local listen
 
 TEAM_ROLE = "FFNY Team"
 MOD_ROLE = "Moderator"
+MODDER_ROLE = "Modder"         # modders and FFNY Studio testers; given by the team
 SUPPORTER_ROLE = "Supporter"   # a thank-you for donors: shown in the member list, no other perks
 APPLY_CHANNEL = "join-the-team"
 ALERT_ROLE = "Build Alerts"
@@ -40,6 +41,7 @@ LAYOUT = [
                 ("status", "stat")]),
     ("💬 COMMUNITY", [("general", "chat"), ("find-a-match", "chat"), ("clips-and-screens", "chat"),
                      ("ideas-and-feedback", "chat"), ("off-topic", "chat"), (POLLS_CHANNEL, "polls")]),
+    ("🎨 MODDING", [("ffny-studio", "chat"), ("mod-showcase", "chat")]),
     ("🛠️ SUPPORT", [("get-help", "read"), ("faq", "read"), (APPLY_CHANNEL, "read")]),
     ("🎮 VOICE", [("Lobby", "voice"), ("Match 1", "voice"), ("Match 2", "voice")]),
     (TICKET_CATEGORY, []),
