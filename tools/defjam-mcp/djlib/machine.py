@@ -296,6 +296,7 @@ BASE_ENV = {
     "RECOMP_SKIP_FILES": INTRO_MOVIES,          # the intro movies (80 s of every boot)
     "RECOMP_WINDOW_BACKGROUND": "1",            # off the desktop, no focus taken
     "RECOMP_TEST_OBSERVATIONS": "1",            # [TEST-EVENT] telemetry
+    "RECOMP_FE_RESULTS": "1",                   # [FE-RESULT] lines: the summary's controller ids
     "RECOMP_ACCOUNT_SERVER": "127.0.0.1:9",     # never the live account service / leaderboard
     "RECOMP_NETPLAY_SERVER_EU": "127.0.0.1:9",  # never the live relays (also not their pings)
     "RECOMP_NETPLAY_SERVER_NA": "127.0.0.1:9",
