@@ -493,7 +493,12 @@ def run_selected(args, platform, payload, cancelled):
     def processes():
         if os.name == 'nt':
             return {}
-        rows = subprocess.run(['ps', '-axo', 'pid=,ppid=,pgid=,lstart='], capture_output=True, text=True).stdout.splitlines()
+        try:
+            rows = subprocess.run(['ps', '-axo', 'pid=,ppid=,pgid=,lstart='], capture_output=True, text=True).stdout.splitlines()
+        except OSError:
+            # Some sandboxes refuse to start ps. Stage tracking is only a backstop for a crashed
+            # engine; losing it must not abort the handoff or skip killing the engine.
+            return {}
         result = {}
         for row in rows:
             fields = row.split(None, 3)
@@ -546,7 +551,8 @@ def run_selected(args, platform, payload, cancelled):
             if os.name != 'nt':
                 stop_stages(signal.SIGKILL)
             raise
-        sample()
+        with contextlib.suppress(Exception):
+            sample()  # A failed sample must never skip the kill below and leave the engine running.
         if os.name == 'nt':
             subprocess.run(['taskkill', '/PID', str(child.pid), '/T', '/F'], capture_output=True)
         else:

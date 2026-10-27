@@ -1,5 +1,60 @@
 # Menu/UI modpack implementation handover
 
+**1.2 published — 2026-10-26 (signed catalogue revision 5):** [publication report](research/menu-ui-v1.2-publication-2026-10-26.md).
+The owner approved and requested shipment. Stable 1.2 includes 1,140 Stronger text
+overrides, including 214 fighter-banner variants; 1,304 native mappings, 80 wide
+mappings and all approved 1.1 scenery. Every non-metadata file matches the approved
+candidate exactly. Cloudflare hash/range checks, catalogue content/ClamAV checks
+and signed deployment pass. A real released-0.12.1 managed update verifies all
+1,528 installed files, 404 rollback files and the unchanged isolated save marker. Pins: `config/menu-ui-v1.2-release.json`. Compatible
+with game 0.12.1 without reinstalling. Live names/counters retain the runtime font
+path; fire-escape geometry repair remains game PR #131 for v0.12.2. Earlier
+candidate/no-publication statements below describe historical checkpoints.
+
+**1.2 text candidate — 2026-10-26:** [text pass and native report](research/menu-ui-text-v1.2-2026-10-26.md).
+Local branch `codex/menu-text-1-2-0`; 1,140 Stronger text overrides including214
+fighter-banner variants. Standalone RC1 retains the1.1 scenery; released0.12.1
+installer validation and final1440p/32:9 native checks pass. Allsix prior text
+pins remain exact. Review `http://127.0.0.1:51740/review.html`; public catalogue
+remains1.1. Live player names/counters/font-cache permutations are not exhaustively
+covered by a source-ID texture pack. Pins: `config/menu-ui-text-v1.2-candidate.json`.
+
+**1.1 published — 2026-10-26 (signed catalogue revision 4):** [publication and compatibility report](research/menu-ui-v1.1-publication-2026-10-26.md).
+The final stable archive supersedes local RC1: 180 native textures (17 unchanged
+original anchors added for installer validation), 80 wide/stretch entries,
+404 files. See `config/menu-ui-v1.1-release.json` for its immutable hash and URL.
+Artwork loads on v0.12.1 without a game reinstall. The fire-escape geometry
+repair is separate game code queued for v0.12.2. Earlier no-publication and
+local-RC1 statements below are historical.
+
+**Latest join repairs — 2026-10-26:** [join follow-up report](research/menu-ui-joins-2026-10-26.md).
+Choose Teams v2 uses Battle wall v4 exterior art and preserves its complete center.
+Map v6 repairs both exterior connections and the obsolete inset with narrow
+inpaints; wide copies allow 24px source-border corrections, central draws stay
+original. Team native 1440p and map directional 1440p/32:9 checks pass. The owner
+approved the current revised backgrounds; nine new master/text pins are in the
+separate `config/menu-ui-v1.1-approved-artwork.json` ledger. Review at 51739 retains
+before/after sliders and join crops. A local 1.1 RC1 is built; see the follow-up report for hashes and integrated native checks.
+Prompts/recipes/receipts are private in `logs/menu-ui-v1.1/revision-v3/`.
+This supersedes the earlier map-v3 failure and Team-v1 selection below.
+
+**2026-10-26 continuation:** branch `codex/hd-widescreen-menu-v1.1`, based on
+v0.12.1 release PR #123. The first fire-escape tile has a fingerprinted runtime
+geometry repair and five-aspect native checks; missing Battle ID/Team walls,
+wide-map scenery and heading/fighter-banner clarity have local review drafts.
+Read [the current session report](research/menu-ui-v1.1-2026-10-26.md) and
+`config/menu-ui-v1.1-worklist.json` for evidence, remaining acceptance and hand-off.
+The older checkpoints below retain their original historical status.
+
+**Owner feedback follow-up:** Stronger text selected (six exact pilot hashes),
+Choose Teams v1 accepted. Battle ID wall v4 has revised joins and a native 1440p
+capture, awaiting visual review. Map v3 uses the owner's Long Island/New Jersey
+reference; its 32:9 directional tour runs normally, but road joins remain a
+visual failure and must be finished before acceptance. Latest decisions are in
+`config/menu-ui-v1.1-review-decisions.json`; private prompts/art/receipts are in
+`logs/menu-ui-v1.1/revision-v2/`. The report above supersedes earlier all-unapproved
+status and the earlier native-run deferral.
+
 Current checkpoint — 2026-10-20 (D182–D184/UI): a **separate menu-only RC2** is built
 and being tested on this Mac. Faithful HD is optional and earlier-loaded; its library
 is not bundled. Download421.6MB / installed423.4MB,157nativePNGs/164sideslabs.
