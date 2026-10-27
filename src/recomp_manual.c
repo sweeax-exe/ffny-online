@@ -377,6 +377,125 @@ void sub_0025FB7C(void)
  *
  * sub_0025F394 posts command 3 to the same block and waits the same way; it
  * has not been seen to run, so it is left alone. */
+/* ---- Fight judder: the frame clock's phase (issue #140) ------------------
+ *
+ * The game does not step once per drawn frame. Its frame clock (the timer
+ * chain below, 60 Hz on the host's counter) queues one record per tick, and
+ * the main loop's step gate (sub_000D75E0) runs one simulation step per queued
+ * record before each frame it draws, 0 to 4 of them. The frames themselves
+ * follow the guest vblank, which in the paced mode follows the display. Two
+ * clocks of almost the same rate: their phase drifts slowly, and while a tick
+ * falls within a millisecond of the gate's first check, host jitter puts it
+ * before one check and after the next. A frame then runs no step and the next
+ * two, at an even present rate: the fight's motion judders, for as long as a
+ * minute until the phase drifts on (the owner's Club 357 fight: 43% of frames,
+ * 73% at worst; some scripted fights 0%, others 40%; v0.12.1 alike).
+ *
+ * So each tick is steered, by at most 1% of a period, towards the middle
+ * between two first checks of the gate. The title's own schedule is absolute
+ * (each deadline is the last one plus a period, its lateness measured against
+ * the delay it stored at +0x1A90), so the same shift goes into that stored
+ * delay and the title keeps it instead of correcting it away. Only while the
+ * loop runs at the clock's rate (its period within 2%), so a slow host still
+ * catches up as before. RECOMP_FRAME_CLOCK_LOCK=0 (or RECOMP_TEST_FRAME_CLOCK_LOCK=0)
+ * turns the steering off; RECOMP_FRAME_CLOCK_TRACE=1 (or RECOMP_TEST_...) logs the
+ * steps per frame every 10 s either way. */
+#define FRAME_CLOCK_OBJ    0x003A0178u   /* the clock: period +0x1A80, last arm +0x1A88, stored delay +0x1A90 */
+#define FRAME_CLOCK_CB     0x000D7EA0u   /* its callback */
+static volatile LONG64 s_fc_check;       /* TSC of the gate's latest first check */
+static volatile LONG64 s_fc_frame;       /* smoothed time between two first checks, TSC ticks */
+static unsigned s_fc_calls;              /* gate calls since the latest first check */
+static unsigned s_fc_hist[4], s_fc_pairs, s_fc_frames, s_fc_prev_steps = 1;
+static LONG64 s_fc_shift;                /* steering applied since the last report, TSC ticks */
+static int fc_env(const char *name, const char *test_name)
+{
+    const char *e = getenv(name);
+    if (!e || !*e) e = getenv(test_name);
+    return !e || !*e ? -1 : *e != '0';
+}
+static int fc_lock_on(void)
+{
+    static int on = -1;
+    if (on < 0) on = fc_env("RECOMP_FRAME_CLOCK_LOCK", "RECOMP_TEST_FRAME_CLOCK_LOCK") != 0;
+    return on;
+}
+static int fc_trace_on(void)
+{
+    static int on = -1;
+    if (on < 0) on = fc_env("RECOMP_FRAME_CLOCK_TRACE", "RECOMP_TEST_FRAME_CLOCK_TRACE") == 1;
+    return on;
+}
+extern uint64_t xbox_ReadTimeStampCounter(void);
+/* The step gate, thiscall on the frame queue: +0x1A5C counts this frame's
+ * steps and is 0 on the frame's first check (the gate zeroes it when it says
+ * stop), so a 0 there is the moment this frame starts taking steps. */
+void sub_000D75E0_enter(void)
+{
+    LONG64 now, prev, d, f;
+    unsigned steps;
+    s_fc_calls++;
+    if (MEM32(g_ecx + 0x1A5C) != 0)
+        return;
+    now = (LONG64)xbox_ReadTimeStampCounter();
+    prev = s_fc_check;
+    if (prev && now > prev) {
+        d = now - prev;
+        f = s_fc_frame;
+        if (d < 12222222 * 4)                        /* a frame, not a pause */
+            s_fc_frame = f ? f + (d - f) / 16 : d;
+    }
+    s_fc_check = now;
+    /* The frame that just ended made s_fc_calls - 1 calls (this one is the new
+     * frame's), the last of which said stop: one step fewer than its calls. */
+    steps = s_fc_calls >= 2 ? s_fc_calls - 2 : 0;
+    s_fc_calls = 1;
+    if (!fc_trace_on() || !prev)
+        return;
+    s_fc_hist[steps < 3 ? steps : 3]++;
+    if ((steps == 0 && s_fc_prev_steps == 2) || (steps == 2 && s_fc_prev_steps == 0))
+        s_fc_pairs++;
+    s_fc_prev_steps = steps;
+    if (++s_fc_frames >= 600) {
+        fprintf(stderr, "[FRAMECLOCK] %u frames: steps 0:%u 1:%u 2:%u 3+:%u, 0/2 alternations %u;"
+                        " frame %.3f ms, lock %s, steering %+.3f ms\n",
+                s_fc_frames, s_fc_hist[0], s_fc_hist[1], s_fc_hist[2], s_fc_hist[3], s_fc_pairs,
+                (double)s_fc_frame / 733333.333, fc_lock_on() ? "on" : "off",
+                (double)s_fc_shift / 733333.333);
+        memset(s_fc_hist, 0, sizeof s_fc_hist);
+        s_fc_pairs = s_fc_frames = 0;
+        s_fc_shift = 0;
+    }
+}
+/* The shift for a frame-clock tick due at `target`, or 0. Also writes it into
+ * the title's stored delay so its next lateness correction keeps it. */
+static LONG64 fc_steer(uint64_t target, uint64_t now)
+{
+    uint32_t clock = MEM32(FRAME_CLOCK_OBJ);
+    LONG64 check = s_fc_check, frame = s_fc_frame, period, phase, err, shift;
+    uint64_t stored;
+    if (!clock || !check || frame <= 0)
+        return 0;
+    period = (LONG64)(((uint64_t)MEM32(clock + 0x1A84) << 32) | MEM32(clock + 0x1A80));
+    if (period <= 0 || frame < period - period / 50 || frame > period + period / 50)
+        return 0;                                    /* not running at the clock's rate */
+    if ((LONG64)now - check > 3 * frame)
+        return 0;                                    /* the loop is not taking steps now */
+    phase = ((LONG64)target - check) % frame;
+    if (phase < 0) phase += frame;
+    err = phase - frame / 2;                         /* -frame/2 .. +frame/2: 0 is mid-frame */
+    shift = -err / 8;
+    if (shift > period / 100) shift = period / 100;
+    if (shift < -period / 100) shift = -period / 100;
+    if (!shift)
+        return 0;
+    stored = ((uint64_t)MEM32(clock + 0x1A94) << 32) | MEM32(clock + 0x1A90);
+    stored += (uint64_t)shift;
+    MEM32(clock + 0x1A90) = (uint32_t)stored;
+    MEM32(clock + 0x1A94) = (uint32_t)(stored >> 32);
+    s_fc_shift += shift;
+    return shift;
+}
+
 /* Direct3D's timer callback (0x00216410, D3DDevice_SetTimerCallback's body:
  * time in TSC ticks, callback, context), with one change: a time already
  * past is armed at once instead of refused.
@@ -408,6 +527,8 @@ void sub_00216410(void)
     if (cb) {
         uint64_t target = ((uint64_t)t_hi << 32) | t_lo;
         uint64_t now = xbox_ReadTimeStampCounter();
+        if (cb == FRAME_CLOCK_CB && fc_lock_on())
+            target += (uint64_t)fc_steer(target, now);   /* issue #140, above */
         if (target <= now + 0x28) {
             static unsigned late;
             if (late++ < 8 || (late & (late - 1)) == 0)

@@ -122,6 +122,8 @@ Full table with source references: `docs/research/toolkit-bringup-notes.md`. Eve
 | `RECOMP_GATHER_PLAN=0` | turn off the per-batch vertex-attribute plan in the GPU path and read every attribute through `fetch_attr` again (#109) |
 | `RECOMP_FAST_SIG=0` | use the single-chain texture and combiner signatures instead of the four-lane ones (#109) |
 | `RECOMP_PACE_TIMER=0` | Windows: pace flips with `Sleep()` instead of a high-resolution waitable timer; `Sleep()` is only as fine as the process's timer resolution (#109, #93) |
+| `RECOMP_FRAME_CLOCK_LOCK=0` | do not steer the title's 60 Hz frame clock towards the middle of the main loop's frames. Without the steering, a fight can run 0 and 2 simulation steps on alternate frames for up to a minute while frames still present evenly, which looks like judder (#140). `RECOMP_TEST_FRAME_CLOCK_LOCK=0` does the same through `scenario_suite.py --test-env` |
+| `RECOMP_FRAME_CLOCK_TRACE=1` | every 600 frames, how many simulation steps each frame ran (`[FRAMECLOCK]`: frames with 0, 1, 2 and 3+ steps, 0/2 alternations, the measured frame time and the steering applied); `RECOMP_TEST_FRAME_CLOCK_TRACE=1` for the harness |
 
 Game-side switches (`src/patches/dev_unlock.c`; off unless set; the test harness turns the first on):
 
