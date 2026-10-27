@@ -35,6 +35,24 @@ static int g_on_menu, g_quiet, g_ticks, g_running, g_env_read, g_results = -1;
  * menu sits idle still starts. */
 #define SETTLE_TICKS 45
 
+/* battle/cmtype (where a match's summary leads) sets itself up after its music:
+ * Audio.PlayMusic(), Game.ResetMatchTypeList(), Game.ResetMatchData(). A sequence run at the
+ * music had its setup wiped after StartGame: each slot's controller number back to -99, so that
+ * match's summary took no controller and the player stood on the results screen for ever (King
+ * of the Hill's deferred match every time, 2026-10-26). On cmtype the sequence waits for the
+ * screen's ResetMatchData and settles after it; the ticks (patched cmtype, apt-patch version 4)
+ * start it anyway if that never comes. */
+#define CMTYPE_FALLBACK_TICKS (8 * SETTLE_TICKS)
+static int g_cmtype, g_cmtype_reset;
+
+static int settled(const char *text)
+{
+    if (g_cmtype)
+        return (g_cmtype_reset && (g_quiet >= SETTLE_CALLS || g_ticks >= SETTLE_TICKS)) ||
+               g_ticks >= CMTYPE_FALLBACK_TICKS;
+    return g_quiet >= SETTLE_CALLS || g_ticks >= SETTLE_TICKS || !strcmp(text, "Audio.PlayMusic()");
+}
+
 void automatch_request(const AutoMatch *m)
 {
     g_req = *m;
@@ -297,23 +315,28 @@ void automatch_on_funccall(const char *text)
     if (strstr(text, "intMain/mainMenu.swf") || strstr(text, "GetScreenInfo(battle/cmtype")) {
         g_on_menu = 1;
         g_quiet = g_ticks = 0;
+        g_cmtype = strstr(text, "GetScreenInfo(battle/cmtype") != NULL;
+        g_cmtype_reset = 0;
         if (!g_armed) netplay_on_main_menu();       /* an online match has ended */
         if (!g_armed && strstr(text, "intMain/mainMenu.swf") && !netplay_in_lobby())
             difficulty_back();                      /* the online session is over */
     }
-    else if (strstr(text, "GetScreenInfo(")) g_on_menu = 0;
+    else if (strstr(text, "GetScreenInfo(")) g_on_menu = g_cmtype = 0;
+    if (g_cmtype && !strcmp(text, "Game.ResetMatchData()")) {
+        g_cmtype_reset = 1;                         /* the screen's own setup is done */
+        g_quiet = g_ticks = 0;
+    }
     if (!strncmp(text, "MemCard.", 8)) g_quiet = g_ticks = 0;
     else if (!strcmp(text, "Online.Tick()")) { if (g_on_menu) g_ticks++; }
     else if (g_on_menu) g_quiet++;
     {
         static int probed;
-        if (!probed && g_on_menu && (g_quiet >= SETTLE_CALLS || g_ticks >= SETTLE_TICKS || !strcmp(text, "Audio.PlayMusic()")) &&
-            getenv("RECOMP_FE_PROBE")) {
+        if (!probed && g_on_menu && settled(text) && getenv("RECOMP_FE_PROBE")) {
             probed = 1;
             run_probe();
         }
     }
-    if (g_armed && g_on_menu && (g_quiet >= SETTLE_CALLS || g_ticks >= SETTLE_TICKS || !strcmp(text, "Audio.PlayMusic()"))) {
+    if (g_armed && g_on_menu && settled(text)) {
         g_on_menu = 0;
         run_sequence();
     }

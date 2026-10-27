@@ -11,7 +11,7 @@
 .PARAMETER Players  2..4 (3 and 4 play Free for All).
 .PARAMETER Secs     Upper bound per copy.
 .PARAMETER ExtraEnv Extra NAME=VALUE pairs for every copy.
-.PARAMETER Route    harness route family: online (two matches) or online5 (five in a row).
+.PARAMETER Route    harness route family: online (two matches), online5 or online8 (five or eight in a row).
 .PARAMETER Fighters fighter.xml IDs, one per copy.
 .PARAMETER Stage    extra harness stages for every copy (e.g. a START press during the fight).
 .PARAMETER FastKo   tests: the game knocks the loser out at this fight step of every match
@@ -43,7 +43,7 @@
                     the hub's picker does, -SwitchAfterMs after entering it, then quick-matches there.
 #>
 param([ValidateRange(2, 4)][int]$Players = 2, [int]$Secs = 1200, [string[]]$ExtraEnv = @(),
-      [ValidateSet('online', 'online5', 'online-rematch')][string]$Route = 'online', [int[]]$Fighters = @(55, 22, 9, 31),
+      [ValidateSet('online', 'online5', 'online8', 'online-rematch')][string]$Route = 'online', [int[]]$Fighters = @(55, 22, 9, 31),
       [string[]]$Stage = @(), [int]$FastKo = 0, [string]$FastKoWinner = 'alt', [switch]$Bot,
       [ValidateRange(0, 100)][int]$BotAggression = 60, [int]$RelayPort = 27777, [int]$BaseCore = 2,
       [string]$DataPrefix = '', [int]$NaRelayPort = 0, [ValidateSet('auto', 'eu', 'na', 'both')][string]$Server = 'auto',
