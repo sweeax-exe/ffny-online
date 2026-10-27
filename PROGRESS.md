@@ -10,7 +10,7 @@
 
 | Area | State | Notes |
 |---|---|---|
-| Release v0.12.2 — Steadier Story frames and the fire-escape fix (D216-D228) | ⏳ publishing; Windows, macOS and Steam Deck/Linux regressions passed | `release/v0.12.2` from `main` (`a686049`) merges #129, #131, #135, #134; toolkit `be83eb9` (fork `defjam/release-0.12.2`). Windows 14/14 (`logs/regress-20261027-055128.txt`), repeat 2/2, visual 4/4; macOS 18/18 (`logs/regress-20261026-225818.txt`); Deck/Linux pass (owner). Owner play-test and local Windows setup gate after publication (D228). |
+| Release v0.12.2 — Steadier Story frames and the fire-escape fix (D216-D228) | ✅ stable/latest published from PR #136 | Tag at merge `4fc0f24`, toolkit `be83eb9` (fork `defjam/release-0.12.2`, `defjam/upstream-v0.16` fast-forwarded). Contents: #129 executor performance (#109), #131 fire-escape pan, #135 menu text 1.2 records, #134 setup handoff. Windows regression 14/14 (`logs/regress-20261027-055128.txt`), repeat 2/2, visual 4/4; macOS 18/18; Steam Deck/Linux pass (owner). Owner play-test and a local Windows setup install/Clean Update follow publication (D228). |
 | Release v0.12.1 — Created fighters and widescreen fixes (D205-D213) | ✅ stable/latest published from PR #123 | Tag at merge `9c5c2d2`, toolkit `7a0f2f6` (fork `defjam/release-0.12.1`, `defjam/upstream-v0.16` fast-forwarded). Contents: #110 portraits (#108), #114 right meters (#112), #115 eye colours (#111), #116 thumbnails (#113), #117 paused HUD (#95), #121 song notification (#118), #122 shop LOADING flash (#119). Windows regression 14/14 + opt-in 6/6 (`logs/regress-20261026-072421.txt`), setup install + Clean Update; macOS and Deck full regression pass; owner play-test pass. #97 and #109 moved to v0.13.0. |
 | Release v0.12.0 — Toolkit rebase and performance (D204, first release train, D203) | ✅ stable/latest published from PR #106; Deck test limits recorded | Branch `release/v0.12.0`, gates on `1e4d5db`, toolkit `8fb21d2` (fork `defjam/release-0.12.0`). Contents: #85 toolkit v0.16.0, #100 setup reuse (D202), #103 VRR flush (#102), #104 Deck frame overlap. Windows full regression 14/14 (`logs/regress-20261025-110936.txt`), opening-scene audio with the owner's settings clicks 1/0/1 dropouts 1/11/1, Setup fresh install and Clean Update from v0.11.0 (120 data files byte-identical); macOS full regression 18/18 in 40 min, `repeat` 2/2, audio clicks 5/2 dropouts 1/1; Steam Deck regression 17/18: replay golden mismatch and separate repeat failure at step 541 (#98); detailed Deck report now retained. Owner play-test OK (2026-10-25). Published stable/latest at merge/tag `3414dc7`; nine asset digests/checksums and three provenance records verified; release workflow `40226940153` passed. |
 | Windows start-up and setup fixes (D148) | ✅ v0.10.7 published (stable/latest) | PR #86 merged `009473a`, tag `v0.10.7`, release run 39845952105 31/31, nine assets verified against GitHub digests and provenance (source `009473a`, toolkit `8589f88`). Contents: PR #76 (issue #72: reject incomplete Windows memory layouts, toolkit `8589f88`) and PR #80 (issue #81: `/INCREMENTAL:NO` link). Windows 11 / RTX 4070 Ti SUPER / VS 2019 (MSVC 14.29): full regression 12 of 14 (combat and versus failed only `audio.dry_queue`, passed on stock v0.10.6 and on two reruns), quick 5/5 on the final build, units 537 passed, native placement fixture and the memory/settings/texture/kernel fixtures pass, 10-boot soak 10/10, published v0.10.6 setup then this setup (Clean Update, bundled): exit 0, 125-file data inventory identical. Neither reporter has confirmed; neither crash reproduced here. PR #73 deliberately left out (owner: bundle with the mod release). Owner play-tested the final Windows build and found it good. Audio gate flake tracked in #88. |
@@ -462,7 +462,6 @@ defjam-recomp/
 
 > Recent entries only; older entries remain unchanged in the local `docs/worklog/` archive.
 
-- 2026-10-26 06:50 — D205-D213: v0.12.1 release train cut. `release/v0.12.1` from `main` (`e419415`) merges #110, #114, #115, #116, #117, #121, #122 (one conflict, the research index; both lines kept); #97 left out on the owner's instruction. Toolkit pin `7a0f2f6` on fork `defjam/release-0.12.1` (linear on `8fb21d2`, no cherry-picks). Three local `C:/Users/...` paths in research notes and one in §2 replaced with placeholders. Version 0.12.1, release notes, README, known issues.
 - 2026-10-26 08:45 — D213: Windows gates on the v0.12.1 candidate (`54b229b`, toolkit `7a0f2f6`, fresh re-lift: analyze 162 s, recomp 71 s, build 112 s; 18,440/18,446 functions). Full regression **14/14** in 36 min (`logs/regress-20261026-072421.txt`; fight/FFA/Terrordome median 120 presents per 2 s, replay hash unchanged, combat 27/27, versus 26/26, soak 3/3). Opt-in: skipintro, fight-terrordome, two-matches 35/35, repeat pass; ffa-result 27/28 then 28/28 on rerun (player put out with 12.7 health; the assertion expects zero), visual 2/4 on current saves (Learn Moves labels only) then 4/4 on fixture vy2-hour-v1. Setup from CI run 40333420402 (sha256 `54786f88…`): install 6 min 31 s, Clean Update from v0.12.0 6 min 28 s with the data folder byte-identical (120 files); both boot to the front end in 75 s with no faults.
 - 2026-10-26 10:40 — D213: owner reports the macOS and Steam Deck full regressions on the v0.12.1 candidate passed. Windows play-test launcher `Play Def Jam v0.12.1 RC.bat` (release worktree exe, recorder and present pacing on); the owner play-test is the last open gate.
 - 2026-10-26 10:54 — D213: owner play-test of the v0.12.1 candidate on Windows passed; all gates complete. The owner's Xbox One pad was not seen by SDL that day in this build or in the 10-25 build that had found it (XInput saw it; DualSense found), so it is a local state, not the release. #97 moves to milestone v0.13.0.
@@ -470,29 +469,24 @@ defjam-recomp/
 - 2026-10-26 22:10 — D216-D227: v0.12.2 release train cut. `release/v0.12.2` from `main` (`a686049`) merges #129, #131, #135 (stacked on #131) and #134 with merge commits, no conflicts. Toolkit pin `be83eb9` (#129's fork branch `defjam/perf-109`; descends from v0.12.1's `7a0f2f6`, so no cherry-picks and no `defjam/release-0.12.2` branch yet). D214/D215 belong to docs PR #125, so decisions start at D216. Version 0.12.2 (`0141bfa`), release notes, README, known issues.
 - 2026-10-26 23:12 — D227: macOS gate on the v0.12.2 candidate (`0141bfa`, toolkit `be83eb9`, fresh re-lift on the M1 Pro: analyze 118 s, recomp 64 s, build 40 s; no other game process or session active). Full regression **18/18** in 38 min (`logs/regress-20261026-225818.txt`; units 636 passed/33 skipped, goldens m2/m3/m4a, fight/ffa/Terrordome median 120-121 with minimum 120, combat 27/27, versus 26/26, replay hash unchanged, intro, crib, gym, soak 3/3). `repeat` 2/2 (`logs/regress-20261026-230517.txt`, `-231204.txt`, 80 records identical, golden hash). `visual` blocked: no approved baselines on this Mac. Story Power Plant pacing was not measured on the Mac (#129's numbers are Windows).
 - 2026-10-27 10:40 — D228: Windows gates on the v0.12.2 candidate (`8152382`, toolkit `be83eb9`, fresh re-lift: analyze 159 s, recomp 71 s, build 109 s; 18,440/18,446 functions). Full regression **14/14** in 37 min (`logs/regress-20261027-055128.txt`; fight/FFA/Terrordome median 120 presents per 2 s, minimum 113/105/102, combat 27/27, versus 26/26, replay hash unchanged, soak 3/3), `repeat` 2/2 (`logs/regress-20261027-055832.txt`, `-060517.txt`), `visual` 4/4 on `vy2-hour-v1` (`logs/regress-20261027-060657.txt`); save area identical to its pre-run backup. Owner: Steam Deck/Linux regression passed. CI 32/32 on `8152382`. Fork branch `defjam/release-0.12.2` created at `be83eb9`. Setup install/Clean Update not run: both the candidate (CI run 40459960068, sha256 `0bd5b000…`) and the published v0.12.1 setup stop with "create_directories: Access is denied" on `%LOCALAPPDATA%\DefJamSetup\{GUID}` from the agent session (cmd can create it; Defender CFA off, no ASR rules). Owner chose to publish before his play-test (D228).
+- 2026-10-27 10:55 — D228 publication completed: PR #136 merged `4fc0f24`, annotated tag v0.12.2 at the merge, Source release run 40551893568 success; nine asset SHA-256 digests, three checksum files and three provenance records verified (version 0.12.2, toolkit `be83eb9`, source `4fc0f24`). Published stable/latest. Milestone v0.12.2 closed; fork `defjam/upstream-v0.16` fast-forwarded `7a0f2f6` -> `be83eb9`. CI on the release head needed one re-run (no macOS arm64 runner picked up the setup job). Owner play-test and a local Windows setup install follow (D228).
 
 ## 7. Hand-off
 
-### v0.12.2 — all platform regressions passed; publishing, 2026-10-27
+### v0.12.2 published, 2026-10-27
 
-- Branch `release/v0.12.2` (Windows worktree `code/defjam-rc-0.12.2`, which has a `game` junction: unlink it
-  with `cmd /c rmdir game` before deleting the worktree): `main` `a686049` plus #129, #131, #135 and #134, the
-  version bump and records. Toolkit pin `be83eb9`, now also on fork branch `defjam/release-0.12.2`.
-- Gates (D227, D228): Windows full regression 14/14 (`logs/regress-20261027-055128.txt`), `repeat` 2/2,
-  `visual` 4/4 on `vy2-hour-v1`; macOS 18/18 and `repeat` 2/2; Steam Deck/Linux pass (owner); CI 32/32.
-  Not done before publishing (D228): the Windows setup install and Clean Update (setup could not create its
-  `%LOCALAPPDATA%\DefJamSetup\{GUID}` folder from the agent's session; the published v0.12.1 setup failed the
-  same way, while `cmd` could create the folder) and the owner play-test.
-- Next: merge the release PR with a merge commit, annotated tag `v0.12.2` at the merge, verify the nine assets
-  (digests, `.sha256`, provenance), publish stable/latest, fast-forward fork `defjam/upstream-v0.16` to
-  `be83eb9`, close the milestone, publication record PR.
-- After publishing: the owner play-tests the published build (`Play Def Jam v0.12.2 RC.bat` runs the same
-  source; slow stretches are captured to `logs/perf109/slow-<run>/`) and reports issues for a follow-up. One
-  real Windows setup install and Clean Update from v0.12.1 should be run from a normal desktop session.
-- Windows check for #129: `RECOMP_PRESENT_PACING=1` prints `[EXECTIME]` every 2 s; Story Power Plant with the VY3
-  fixture should show about 10 ms executor time per frame and under 1% of frames over 18 ms. Opt-outs:
-  `RECOMP_PB_CONST_FAST=0`, `RECOMP_GATHER_PLAN=0`, `RECOMP_FAST_SIG=0`, `RECOMP_PS_TEXT_CACHE=0`,
-  `RECOMP_VSH_DECODED=0`, `RECOMP_PACE_TIMER=0`, `RECOMP_PCRTC_POLL=1`.
-- Not in this release: cheat menu #97 and the unified-app stack (#125-#128, #130, #132, #133), which belong to v0.13.0.
+- v0.12.2 is stable/latest: release PR #136 merged `4fc0f24`, annotated tag `v0.12.2` at the merge, Source release
+  run 40551893568; nine assets verified (GitHub digests, `.sha256`, provenance: version 0.12.2, toolkit `be83eb9`,
+  source `4fc0f24`). Milestone v0.12.2 closed; fork `defjam/upstream-v0.16` fast-forwarded to `be83eb9`.
+- Open after publication (D228): the owner's play-test of the published build (Windows launcher
+  `Play Def Jam v0.12.2 RC.bat` runs the same source; slow stretches are captured to `logs/perf109/slow-<run>/`
+  in the Windows worktree `code/defjam-rc-0.12.2`) and one real Windows setup install plus Clean Update from
+  v0.12.1 from a normal desktop session (from the agent's session both the new and the v0.12.1 setup stopped
+  with "create_directories: Access is denied" on `%LOCALAPPDATA%\DefJamSetup\{GUID}`).
+- Issue #109 stays open until the owner confirms the published build; a reply draft exists in the perf-109
+  worktree (`logs/issue-109-comment-draft.md`, local). #101 is a known issue, probably helped by #129.
+- Windows release worktree `code/defjam-rc-0.12.2` has a `game` junction: unlink it with `cmd /c rmdir game`
+  before deleting the worktree. Keep it until the owner's play-test is done.
+- Next train: v0.13.0 (cheat menu #97, the unified-app stack #125-#128, #130, #132, #133).
 
 Decisions are read by number or keyword: `decision D<n>`, `decisions --grep TEXT`.
