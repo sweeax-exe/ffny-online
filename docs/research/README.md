@@ -169,3 +169,7 @@ The plan built from these is in [docs/widescreen](../widescreen/README.md), whic
 - [Menu RC2 R2 upload and Windows playtest](menu-ui-r2-windows-playtest-2026-10-23.md) — authorized test upload, integrity receipt and compatible-runtime prerequisite.
 
 - [HD Widescreen Menus 1.1 publication](menu-ui-v1.1-publication-2026-10-26.md) — approved art, installer-valid immutable archive, signed catalogue and game v0.12.1 compatibility.
+
+- [Menu text 1.2 candidate](menu-ui-text-v1.2-2026-10-26.md) — Stronger treatment across the text census, 1,140 pinned outputs, standalone installer validation and native checks.
+
+- [Menu 1.2 publication](menu-ui-v1.2-publication-2026-10-26.md) — approved stable text pack, Cloudflare pins, signed catalogue and released-helper compatibility.
