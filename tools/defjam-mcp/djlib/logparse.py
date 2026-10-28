@@ -123,6 +123,7 @@ STARTS_RE = re.compile(r"\[NETPLAY\] match (\w+) starts in (\w+) \((\d+) players
 CHECKS_RE = re.compile(r"\[NETPLAY\] in step: (\d+) checksums compared and equal \(match (\w+), step (\d+)\)")
 DESYNC_RE = re.compile(r"\[NETPLAY\] desync in match (\w+) at step (\d+) \(local (\w+), remote (\w+)\)")
 DETAIL_RE = re.compile(r"\[NETPLAY\] desync detail: (.*)")
+FIELDS_RE = re.compile(r"\[NETPLAY\] desync fields: (.*)")      # build 34 on: the raw words that differ
 GAVEUP_RE = re.compile(r"\[NETPLAY\] gave up at step (\d+)(.*)")
 WAITED_RE = re.compile(r"\[NETPLAY\] waited ([\d.]+) s at the fight's start for player (\d+)")
 DELAY_RE = re.compile(r"\[NETPLAY\] input delay (\d+) steps \(pings ([^)]*)\)")
@@ -144,7 +145,7 @@ def parse_matches(lines):
     def new(i, start=None):
         m = {"line": i, "start": start, "id": None, "mode": None, "delay": None, "load_s": None,
              "input_delay": None, "pings": None, "rollback_off_why": None, "checks": 0, "desync": None,
-             "desync_detail": None, "gave_up": [], "waited": [], "result": None, "over": None,
+             "desync_detail": None, "desync_fields": None, "gave_up": [], "waited": [], "result": None, "over": None,
              "rollbacks": None, "unplugged": [], "refused": [], "koth": bool(start and "King of the Hill" in start.get("note", ""))}
         matches.append(m)
         return m
@@ -184,6 +185,8 @@ def parse_matches(lines):
             cur["desync"] = {"match": m.group(1), "step": int(m.group(2)), "local": m.group(3), "remote": m.group(4)}
         elif DETAIL_RE.match(l):
             cur["desync_detail"] = DETAIL_RE.match(l).group(1)[:200]
+        elif FIELDS_RE.match(l):
+            cur["desync_fields"] = FIELDS_RE.match(l).group(1)[:300]
         elif GAVEUP_RE.match(l):
             cur["gave_up"].append(l[len("[NETPLAY] "):][:160])
         elif WAITED_RE.match(l):
@@ -303,6 +306,8 @@ def digest(text, max_lines=60, sites=None, source=None):
             entries.append([2.5, i, match_line(m), 1])
             if m["desync_detail"]:
                 entries.append([3, i + 1e-3, "  desync detail: " + m["desync_detail"], 1])
+            if m["desync_fields"]:
+                entries.append([3, i + 2e-3, "  desync fields: " + m["desync_fields"], 1])
             continue
         if MATCH_FOLDED.match(l):
             continue
