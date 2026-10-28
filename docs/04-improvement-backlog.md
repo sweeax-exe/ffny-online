@@ -1,5 +1,151 @@
 # Improvement backlog
 
+## Frame pacing and executor performance on Windows — planned 2026-10-24
+
+Found while investigating #67 (choppy fights at 60 fps), #92 (exclusive full screen), #101 and #102, on the
+owner's PC (RTX 4070 Ti SUPER, 2560x1440, 143.91 Hz with VRR). The first fix is in PR #103: the frame is now
+flushed to the GPU before the executor's 60 Hz flip sleep (#102). Measure everything below with
+`RECOMP_PRESENT_PACING=1`, which logs `[PACING]`, `[ONSCREEN]` (time on screen per frame, `Present` call
+time) and `[GPUTIME]` (GPU busy, idle and finish times). Display-timing runs need the monitor awake and no
+screen saver: with the display asleep DXGI reports no frame statistics.
+
+Ordered by expected value:
+
+1. **What slows a human-played fight (#101).** The owner's manual fight dropped to 43–50 fps for about
+   30 s at 345–416 draws per frame. Scripted fights at the same draws per frame, and at the same settings,
+   held 60. Catch it with the play-test recorder (`[debug] record = true`, F9, or
+   `RECOMP_RECORD_AUTO_HITCH_MS=25`), then sample the executor thread during the slow stretch
+   (`scripts/sample-threads.py --samples 1`, repeated, tallying in-exe symbols). Candidates: per-draw cost
+   (item 2), shader compiles during play (the entry below), texture uploads (item 6). Done when the cause is
+   named with samples and the slow stretch is gone, or the item is merged into the one that fixes it.
+2. **Cost per draw in the translator.** A fight is about 370–400 draws per frame. Each is turned into
+   Direct3D 11 state changes and a constant-buffer upload on the one executor thread, and earlier profiles
+   found this cost hiding in the driver ("outside exe" samples). Count redundant state changes and
+   constant-buffer writes per frame; skip those that set what is already set. Measure with
+   `scripts/scene-perf.py` and the executor's share of a frame before and after. This also matters on
+   slower PCs and the Steam Deck. Done when a fight frame's executor time is measured before and after and
+   `regress.py` passes.
+   **Partly done 2026-10-26 (#109):** the executor's `[EXECTIME]` line (`RECOMP_PRESENT_PACING=1`) measures
+   it. In the Story Power Plant fight the executor was busy 15.5 ms of 16.7 ms a frame and never waited
+   for the title. Three shared-code changes took it to 11.6 ms: a fast path for shader-constant words
+   (about 200,000 a frame, 70% of all words; `RECOMP_PB_CONST_FAST=0`), a per-batch vertex-attribute plan
+   (gather 2.2 -> 1.1 ms; `RECOMP_GATHER_PLAN=0`) and four-lane texture/combiner signatures
+   (`RECOMP_FAST_SIG=0`). Frames over 18 ms went from 6.2% to 0.2%. Left: redundant D3D11 state changes,
+   the remaining dispatch for non-constant words, and item 7.
+3. **A precise frame timer.** **Done 2026-10-26 (#109)** with a high-resolution waitable timer
+   (`RECOMP_PACE_TIMER=0` for `Sleep()`); scripted runs, which have no input thread, had frame medians of
+   17.1 ms before it. The #93 throttling repro is still to be run against it. `flip_pace()` (toolkit `src/kernel/nv2a_pb_exec.c`) on Windows sleeps to
+   about 1 ms before the deadline, then spins. The sleep depends on `timeBeginPeriod(1)` (called by the
+   input thread), which Windows can ignore under power throttling (#93). Use a high-resolution waitable
+   timer (`CREATE_WAITABLE_TIMER_HIGH_RESOLUTION`) for the wait and keep only a short spin. Done when
+   `[PACING]` intervals are as tight as now, the executor's CPU use during the wait is lower, and the #93
+   throttling repro no longer stretches frames.
+4. **Lower input latency.** With frames now ready when they are presented, the swap chain could queue
+   fewer of them: `IDXGIDevice1::SetMaximumFrameLatency(1)` or a waitable swap chain. Measure the delay
+   from present to screen first. The figure was dropped from the trace because its frame matching was off
+   by one, so fix that before using it. Done when latency is measured before and after with no loss of
+   evenness in `[ONSCREEN]`.
+5. **Widescreen side fill cost.** On frames that ask for it, the blurred side extension regenerates the
+   mip chain of the whole wide target. Compare `[GPUTIME]` busy time with `widescreen_side_fill = blur`
+   and `black`, at render scale 2 and 3. Probably small on a desktop GPU and more on the Deck. Done when
+   measured on both; change it only if it costs more than about 1 ms a frame.
+6. **HD texture uploads during play.** In the 2026-10-24 runs the pack did not load: its manifest is not
+   in that data folder. Run the same fight with a working pack and check `frames.csv` texture upload
+   columns and `[ONSCREEN]` for hitches at first use. Done when measured; plan streaming or upload
+   spreading only if uploads show up as late frames.
+
+7. **A decoded CPU vertex-program runner.** In widescreen, `ws_place_batch()` classifies every batch by
+   running the title's vertex program on the CPU for its first vertex (more for 2D batches), and
+   `nv2a_vsh_run_ready()` goes through the canonical interpreter (`nv2a_vsh_interp.c`), which decodes every
+   field of every instruction for each vertex. The port's own decoded runner was dropped in the v0.16
+   rebase (toolkit `e5557ed`: decode is kept only for HLSL). After the #109 changes this interpreter was the
+   largest single item in the executor profile (about 18% of its in-exe samples, roughly 1.3 ms a frame in
+   Story Power Plant at 16:9). Run the already decoded `s_dec` instructions instead, with a check mode that
+   runs both and compares outputs. Done when outputs match on recorded programs and the executor's time
+   is measured before and after.
+
+Not on this list: frame rates above 60 (needs the game clock separated from rendering, deferred since M6),
+and exclusive full screen (#92: borderless full screen already gets VRR).
+
+## One compiled pixel shader per HLSL text on Windows (Direct3D 11) — planned 2026-10-18
+
+Found during the 2026-10-18 scene performance pass (finding F4, first-use shader compile stutter). The
+Vulkan fix is on branch `perf/shader-cache`: toolkit `defjam/shader-cache`, commits `adb67f7` (disk cache)
+and `2edf96f` (one module per text), not yet published. That fix does not touch the Windows path, and
+nobody has measured this on Windows yet; the reading below is from the code and one Mac run.
+
+The problem. `d3d8_combiners_get_shader()` (toolkit `src/d3d/d3d8_combiners.c`) looks up its 128-slot
+cache by a hash of the whole `NV2ACombinerState`. That struct includes the constant colours `c0[8]`,
+`c1[8]`, `final_c0` and `final_c1`. The generated HLSL does not contain them: it reads them from the
+constant buffer that `d3d8_combiners_apply` uploads on every draw. So every new constant colour is
+another `D3DCompile(ps_5_0, O3)` of a text that has already been compiled. Vulkan used the same key and
+the same generator, and that is where its duplicate compiles came from.
+
+Measured on the Mac (sc00, 16:9, scale 3, `RECOMP_COMBINER_DUMP` printing each new combiner state before
+the Vulkan text dedup): 212 combiner states, 10 distinct texts, one text 201 times. The new states keep
+arriving through the scene rather than only at its start, so on Windows they are compiles during play.
+212 states also overflow the 128-slot table, and LRU eviction can then compile the same text again;
+there is no disk cache on Windows to soften it.
+
+Not affected: NV2A vertex programs (`d3d8_extvs.c`). Their text includes the program's start slot and
+every decoded field, so different program hashes do not give the same text; the same run made 14
+vertex-program compiles from 14 distinct texts. `d3d8_vsh.c` hashes the microcode its text comes from.
+
+What to do (needs a Windows machine):
+
+1. In `d3d8_combiners.c`, generate the text on a state-cache miss, hash it (64 bits plus a check hash, as
+   `shader_seen()` does in `d3d8_vk.c`), and reuse the `ID3D11PixelShader` already compiled from that text
+   (`AddRef`, so eviction's `Release` stays correct). Compile only texts not seen before.
+2. A `[D3D11CACHE]` log line like Vulkan's `[VKCACHE]`: compiles, compile milliseconds and reuses for
+   pixel shaders and for vertex programs (the second confirms the zero-duplicate reading on Windows).
+3. Optional: leave the constant colours out of the state hash, so constant changes do not fill the state
+   table at all. That is safe only while the generator never writes constants into the text; the text table
+   is what guarantees it.
+4. Measure with `python scripts/scene-perf.py run sc00 gf1a sc13 --no-audio --every 0` before and after,
+   then `python scripts/regress.py --quick`. A DXBC disk cache is not part of this; it needs its own
+   measurement once the duplicates are gone.
+
+Done when: sc00 on Windows compiles about 10 combiner shaders per launch instead of about 212, its late
+frames are measured before and after, and the toolkit commit is on its own fork branch with those numbers.
+
+## Executor CPU on Linux and the Steam Deck (Vulkan) — planned 2026-10-24
+
+Found in the 2026-10-24 Power Plant free-for-all pass on the Deck
+([report](research/deck-ffa-powerplant-2026-10-24.md)). The first fix is the PR that adds this entry (toolkit
+`defjam/vk-frame-overlap`): the Vulkan backend no longer waits for the GPU inside `Present`, so the
+CPU records the next frame while the GPU draws the last one. After it the push-buffer executor thread
+still needs about 13 ms of CPU a frame against a 16.67 ms budget (about 3.5 ms of slack), and `perf`
+puts 65% of all cycles in it. This is the same cost as item 2 of the Windows entry in PR #103
+(cost per draw in the translator); the measurements below are the Linux side of it. Measure with the
+report's method: `RECOMP_RECORD=1` and `RECOMP_RECORD_FPS=0` (frame times without the picture
+read-back), the `[VKPERF]` line, and `perf record -g -p <game pid>` on the Deck (works unprivileged).
+
+Ordered by expected value:
+
+1. **Faster method dispatch.** (Shader constants done 2026-10-26 in shared code, #109; measure on the Deck.)
+   About 14,000 push-buffer methods a frame (half are vertex-program
+   constant writes) each go through two big switches: `nv2a_pb_exec_method` and then
+   `pgraph_d3d11_method`. Decode runs of consecutive constant-register methods (`NV097_SET_TRANSFORM_
+   CONSTANT` and the program-load window) as one block copy, and dispatch the common state methods
+   through a table indexed by `method >> 2` instead of a switch. Done when the executor's CPU per frame
+   drops by at least 1 ms in the report's benchmark with the golden frame signatures unchanged.
+2. **A batch path in `fetch_attr`.** (Done 2026-10-26 in shared code as the per-batch attribute plan, #109;
+   measure on the Deck.) The vertex fetch runs per vertex and per attribute with a bounds
+   check and a format switch every time. Resolve each attribute's stride, format and base once per
+   draw, then convert a whole range in a loop. Done when `fetch_attr`'s share of the executor thread
+   is measured before and after and `m2`, `m3`, `m4a` still match bit for bit.
+3. **The statistics fetch in `draw_primitive`.** It fetches a first vertex for statistics only. Make
+   it lazy (only when the statistics or trace are on).
+4. **Submit before the flip sleep.** PR #103 flushes the D3D11 context before `flip_pace()` so the
+   GPU works during the sleep. The Vulkan path still records and submits in `Present`, after the
+   sleep. With the frame slots a submit before `flip_pace()` is now possible without a stall; try it
+   and compare `[VKPERF]` present times and frame spacing on the Deck at 60 Hz. The Deck is not
+   variable-refresh, so expect little there; it matters for Linux desktops with VRR.
+5. **The 90 Hz Game Mode panel.** At a refresh that is not a multiple of 60 the game turns vsync off
+   and paces itself, so frames are shown for 11 or 22 ms. Measure on the real panel (the 2026-10-24
+   runs were headless) whether a software-paced 60 on 90 Hz can be made to look even, or whether the
+   launcher should say to set 60 Hz in Game Mode.
+
 ## Gameplay regression and cross-title upgrade testing — planned 2026-10-05
 
 Owner-requested future To-Do: [testing roadmap](08-testing-roadmap.md). Extend
@@ -12,8 +158,8 @@ This is deferred planning; existing milestone gates and dependency pins are unch
 ## The launcher and the overlay on macOS — planned 2026-10-08, done in v0.6.2
 
 Done in v0.6.2 as planned below, with two differences: the launcher uses SDL's renderer (Metal) rather than a Vulkan device of its own,
-and the SDL events are fed to ImGui by a small piece of glue instead of `imgui_impl_sdl3`. Linux compiles from the same sources and
-has not been run. What follows is the plan as written.
+and the SDL events are fed to ImGui by a small piece of glue instead of `imgui_impl_sdl3`. Linux uses the same sources and has
+shipped it since v0.7.0. What follows is the plan as written.
 
 Asked for by Vlad at the v0.5.0 release. The start-up launcher and the in-game overlay (v0.4.0,
 `src/hooks/pc_ui.cpp`, `pc_launcher.cpp`) are Dear ImGui on its Win32 and Direct3D 11 backends, so the
@@ -102,7 +248,7 @@ code on the player's machine from the player's dump, which is what the repositor
 releases of the game itself stay off the table (no legal advice has been taken; treat it as policy). Hosted CI also
 cannot build the game (no dump), so it could not produce one anyway.
 
-**What it does** (Windows only; Linux and Steam Deck run the Windows build under Proton, macOS is M9):
+**What it does** (as first written: Windows only, with Linux and Steam Deck under Proton and macOS as M9; the macOS (v0.6.1) and Linux/Steam Deck (v0.7.0, native) setups have since shipped, see [the installer guide](setup-installer.md)):
 
 1. Ask for the dump: an ISO, an XISO or an extracted folder. Verify `default.xbe` against
    `config/dump-manifest.json` (SHA-256 `31cc0d11...`) and explain wrong-version dumps in plain language. Extraction
@@ -252,6 +398,11 @@ defined precedence order, and a decision about whether overrides sit at the arch
 level. The game's data is in EA archive containers, so entry-level replacement is the useful granularity.
 Do not grow this organically out of debugging hooks.
 
+The [mod-system design](research/mod-system-design.md) (D104) covers the curated
+catalogue and future override types. Its texture-only helper/launcher portion is
+implemented in the [integrated RC](research/integrated-menu-launcher-rc-2026-10-23.md);
+release acceptance and protected publication are tracked there.
+
 ## 5. Move to Clang before any native Linux work
 
 **Why.** The mature projects require Clang, including on Windows, where they use `clang-cl`. We are on the
@@ -259,8 +410,8 @@ Microsoft compiler because it was already installed. That is fine for a Windows-
 being fine when the same source has to produce a consistent result on two platforms.
 
 **What to do.** Add a `clang-cl` preset, get it building and passing the smoke test, and make it the
-default before starting the Linux target. Steam Deck is planned via Proton first, so this is not urgent,
-but it should land before M7.
+default before starting the Linux target. Native Linux and the Steam Deck have since shipped (v0.7.0, D95) with Clang,
+so what remains open is the `clang-cl` preset for Windows.
 
 ## 6. Upstream what belongs upstream
 
@@ -319,6 +470,6 @@ Kept for context when revisiting the above.
 | Lifter validation | recompiler run against an instruction test suite | none in CI |
 | Renderer | a serious modern renderer | a translation layer plus a diagnostic executor |
 | Mods | defined format with template and build tool | not designed yet |
-| Steam Deck | native Linux build plus Flatpak | Windows build under Proton, native deferred |
+| Steam Deck | native Linux build plus Flatpak | native Linux build since v0.7.0 (Vulkan, SDL3, PipeWire), installed by the Linux setup; no Flatpak, Proton untried |
 
 The renderer row is the one that decides the project. Everything else on this page is ordinary work.

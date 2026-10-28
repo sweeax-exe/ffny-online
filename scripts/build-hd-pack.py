@@ -94,7 +94,7 @@ def assemble(corpus_root, mods, aliases=None):
             count += 1
             total += original.stat().st_size
         pending = pack / 'manifest.ini.pending'
-        pending.write_text('[pack]\nschema=1\nname=Faithful Lanczos HD\npng_mips=' + policy +
+        pending.write_text('[pack]\nschema=1\nname=Recomp HD textures\npng_mips=' + policy +
                            '\n[textures]\n' + ''.join(key+'=textures/'+source+'.png\n' for key, source in sorted(selected.items())), encoding='utf-8')
         pending.replace(pack / 'manifest.ini')
         names.append(name)

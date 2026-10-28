@@ -4,6 +4,9 @@
     "capstone-5.0.9-py3-none-win_amd64.whl": "732cedbbb56d42e723f14d7af6387f1454194a820b4b96b56d1e53f865ef85d0",
     "pyxbe-1.0.4-py3-none-any.whl": "8c8a354b824ab978ca088472adeb2395f0704c71c0347c94b1eda639a2e34416",
     "numpy-2.5.2-cp313-cp313-win_amd64.whl": "85aaccb24182c25df891ad0ec333585967e115269d5f1b17f2c9ae005bc96657",
-    "pillow-12.3.0-cp313-cp313-win_amd64.whl": "1cca606cd25738df4ed873d5ad46bbdb3d83b5cbca291f6b4ff13a4df6b0bbe8"
+    "pillow-12.3.0-cp313-cp313-win_amd64.whl": "1cca606cd25738df4ed873d5ad46bbdb3d83b5cbca291f6b4ff13a4df6b0bbe8",
+    "cryptography-50.0.2-cp311-abi3-win_amd64.whl": "7afa5a6602a9f29af1f3a2965f831bae7c9d5d597b7cbb716d41ab3b7d89879c",
+    "cffi-2.0.0-cp313-cp313-win_amd64.whl": "19f705ada2530c1167abacb171925dd886168931e0a7b78f5bffcae5c6b5be75",
+    "pycparser-2.23-py3-none-any.whl": "e5c6e8d3fbad53479cab09ac03729e0a9faf2bee3db8208a550daf5af81a5934"
   }
 }

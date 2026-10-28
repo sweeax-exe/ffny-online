@@ -24,6 +24,9 @@
     "capstone-5.0.9-py3-none-macosx_11_0_arm64.whl": "fc269c5082e17d7f9f265cd6980e2fdc6ab572df913951d76db0357e06b8001d",
     "pyxbe-1.0.4-py3-none-any.whl": "8c8a354b824ab978ca088472adeb2395f0704c71c0347c94b1eda639a2e34416",
     "numpy-2.5.2-cp313-cp313-macosx_11_0_arm64.whl": "52c808f96484f5571a5cc863775ce50247c17dfb3b0361f8ed6b4b0456f80080",
-    "pillow-12.3.0-cp313-cp313-macosx_11_0_arm64.whl": "d69141514cc30b774ceea5e3ed3a6635c8d8a96edf664689b890f4089111fb35"
+    "pillow-12.3.0-cp313-cp313-macosx_11_0_arm64.whl": "d69141514cc30b774ceea5e3ed3a6635c8d8a96edf664689b890f4089111fb35",
+    "cryptography-50.0.2-cp311-abi3-macosx_11_0_arm64.whl": "fa8f5efb344d6908a1ce62f4a24e2e5780f825d6f53f5f50ec5ffacac72936cb",
+    "cffi-2.0.0-cp313-cp313-macosx_11_0_arm64.whl": "45d5e886156860dc35862657e1494b9bae8dfa63bf56796f2fb56e1679fc0bca",
+    "pycparser-2.23-py3-none-any.whl": "e5c6e8d3fbad53479cab09ac03729e0a9faf2bee3db8208a550daf5af81a5934"
   }
 }

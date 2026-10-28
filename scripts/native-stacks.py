@@ -11,25 +11,33 @@ called it and from where.
     python scripts/native-stacks.py                 # every thread, 24 frames
     python scripts/native-stacks.py --grep nv2a     # only threads whose stack mentions nv2a
     python scripts/native-stacks.py --depth 40
-    python scripts/native-stacks.py --pid 1234      # one process when several copies run
-    python scripts/native-stacks.py --tid 11,12     # only these threads
+    python scripts/native-stacks.py --pid 1234      # one process (default: the newest game)
+    python scripts/native-stacks.py --tid 11,12     # only these threads (Windows)
 
 Each thread is suspended for the few milliseconds its walk takes and resumed;
-threads that were using CPU are walked first and held until the end, which
-frees their CPUs for the rest, and a starved thread is skipped (a suspension
+on Windows, threads that were using CPU are walked first and held until the end,
+which frees their CPUs for the rest, and a starved thread is skipped (a suspension
 only completes when the thread runs; scripts/thread-sched.py, plan_walk).
-Reads only. No debugger needed: dbghelp.dll ships with Windows.
+Reads only. No debugger needed on Windows: dbghelp.dll ships with it. On macOS
+the stacks come from lldb (Xcode's command-line tools; macOS may ask once to
+allow developer-tool access), on Linux from gdb or elfutils' eu-stack (ptrace:
+as root, or with kernel.yama.ptrace_scope at 0). Names come from the build's
+own symbols there.
 """
 
 import ctypes
-import ctypes.wintypes as wt
 import importlib.util
 import glob
 import os
+import shutil
+import signal
+import subprocess
 import sys
 
-k32 = ctypes.WinDLL("kernel32", use_last_error=True)
-dbg = ctypes.WinDLL("dbghelp", use_last_error=True)
+if os.name == "nt":
+    import ctypes.wintypes as wt
+    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    dbg = ctypes.WinDLL("dbghelp", use_last_error=True)
 
 TH32CS_SNAPTHREAD = 0x4
 PROCESS_ALL = 0x001F0FFF
@@ -38,11 +46,12 @@ CONTEXT_FULL = 0x0010000B
 IMAGE_FILE_MACHINE_AMD64 = 0x8664
 
 
-class THREADENTRY32(ctypes.Structure):
-    _fields_ = [("dwSize", wt.DWORD), ("cntUsage", wt.DWORD),
-                ("th32ThreadID", wt.DWORD), ("th32OwnerProcessID", wt.DWORD),
-                ("tpBasePri", ctypes.c_long), ("tpDeltaPri", ctypes.c_long),
-                ("dwFlags", wt.DWORD)]
+if os.name == "nt":
+    class THREADENTRY32(ctypes.Structure):
+        _fields_ = [("dwSize", wt.DWORD), ("cntUsage", wt.DWORD),
+                    ("th32ThreadID", wt.DWORD), ("th32OwnerProcessID", wt.DWORD),
+                    ("tpBasePri", ctypes.c_long), ("tpDeltaPri", ctypes.c_long),
+                    ("dwFlags", wt.DWORD)]
 
 
 def plan_for(pid):
@@ -55,7 +64,10 @@ def plan_for(pid):
 
 
 def find_pid(name="defjam_recomp.exe"):
-    import subprocess
+    if os.name != "nt":
+        # The newest process whose name is exactly the game's.
+        out = subprocess.run(["pgrep", "-n", "-x", "defjam_recomp"], capture_output=True, text=True).stdout
+        return int(out.split()[0]) if out.split() else None
     out = subprocess.run(["tasklist", "/FI", "IMAGENAME eq " + name, "/FO", "CSV", "/NH"],
                          capture_output=True, text=True).stdout
     for line in out.splitlines():
@@ -80,9 +92,71 @@ def threads_of(pid):
     return tids
 
 
+def debugger_command(pid, depth):
+    """(command, its standard input) that prints every thread's stack of `pid` on this host, or None."""
+    if sys.platform == "darwin":
+        if shutil.which("lldb"):
+            # On-demand symbols: indexing the generated code's debug info first takes minutes. The
+            # commands go in on stdin, not --batch -o: the game traps memory accesses on purpose
+            # (EXC_BAD_ACCESS), batch mode takes the one it attaches into for a crash and stops there.
+            return (["lldb", "-O", "settings set symbols.load-on-demand true", "-p", str(pid)],
+                    "thread backtrace all -c %d\nprocess detach\nquit\n" % depth)
+        return None
+    if shutil.which("gdb"):
+        return (["gdb", "-p", str(pid), "-batch", "-nx", "-ex", "set pagination off",
+                 "-ex", "thread apply all bt %d" % depth], None)
+    if shutil.which("eu-stack"):
+        return (["eu-stack", "-p", str(pid), "-n", str(depth)], None)
+    return None
+
+
+def split_threads(text):
+    """The debugger's output cut into one block a thread (lldb `thread #`, gdb `Thread `, eu-stack `TID `)."""
+    blocks, cur = [], None
+    # lldb echoes its commands; only what `thread backtrace` printed counts (attaching prints a stop too).
+    if "(lldb) thread backtrace" in text:
+        text = text.split("(lldb) thread backtrace", 1)[1].split("\n", 1)[-1].split("(lldb) ", 1)[0]
+    for line in text.splitlines():
+        head = line.lstrip("* ").startswith(("thread #", "Thread ", "TID "))
+        if head:
+            cur = [line]
+            blocks.append(cur)
+        elif cur is not None and line.strip():
+            cur.append(line)
+    return ["\n".join(b) for b in blocks]
+
+
+def posix_stacks(pid, depth, grep):
+    found = debugger_command(pid, depth)
+    if not found:
+        raise SystemExit("no debugger found: install Xcode's command-line tools (lldb) on macOS, "
+                         "gdb or elfutils (eu-stack) on Linux")
+    try:
+        cmd, stdin = found
+        r = subprocess.run(cmd, input=stdin, capture_output=True, text=True, errors="replace", timeout=60)
+    except subprocess.TimeoutExpired:
+        # A debugger killed while attached can leave the game stopped: let it run on.
+        os.kill(pid, signal.SIGCONT)
+        if sys.platform == "darwin" and shutil.which("sample"):
+            print("lldb did not answer in 60 s; macOS `sample` instead (a call tree per thread):")
+            r = subprocess.run(["sample", str(pid), "1", "-mayDie"], capture_output=True, text=True,
+                               errors="replace", timeout=120)
+            sys.stdout.write(r.stdout)
+            return
+        raise SystemExit("%s did not answer in 60 s" % found[0][0])
+    blocks = split_threads(r.stdout)
+    if not blocks:
+        sys.stdout.write(r.stdout + r.stderr)
+        raise SystemExit("%s printed no thread stacks for pid %d (exit %d)" % (cmd[0], pid, r.returncode))
+    for b in blocks:
+        if grep and grep not in b.lower():
+            continue
+        print(b)
+
+
 def main():
     argv = sys.argv[1:]
-    depth, grep = 24, None
+    depth, grep, pid = 24, None, None
     if "--depth" in argv:
         i = argv.index("--depth"); depth = int(argv[i + 1]); del argv[i:i + 2]
     if "--grep" in argv:
@@ -96,7 +170,10 @@ def main():
 
     pid = pid or find_pid()
     if not pid:
-        raise SystemExit("defjam_recomp.exe is not running")
+        raise SystemExit("defjam_recomp is not running")
+    if os.name != "nt":
+        posix_stacks(pid, depth, grep)
+        return
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     builds = sorted(glob.glob(os.path.join(root, "build", "*")), key=os.path.getmtime, reverse=True)
     search = ";".join(builds).encode()

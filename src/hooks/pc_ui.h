@@ -15,7 +15,7 @@ extern "C" {
 
 /* ---- settings and the decision to show the launcher (pc_ui_settings.c) ------ */
 
-/* Fill `out` with the [launcher] and [ui] settings. Returns the count. */
+/* Fill `out` with the [launcher], [debug] and [ui] settings. Returns the count. */
 size_t pc_ui_settings(RecompSetting *out, size_t max);
 
 /* Whether to show the launcher before the game starts. It is shown on every

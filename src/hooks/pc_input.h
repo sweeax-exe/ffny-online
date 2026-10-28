@@ -8,7 +8,11 @@
 #include <windows.h>
 #endif
 #include "recomp_settings.h"
-#include "input_map.h"
+
+/* input_map.h (the toolkit's mapping rules) is included where its types are
+ * used, not here: since toolkit v0.16 it brings in the toolkit's Win32
+ * vocabulary, which collides with macOS's Carbon headers in host_posix.c. */
+struct InputPadMap;
 
 #ifdef __cplusplus
 extern "C" {
@@ -57,7 +61,7 @@ int pc_input_vk_from_message(WPARAM wp, LPARAM lp);
 #endif
 
 /* The pad map the settings describe, for a screen that shows what the game sees. */
-void pc_input_current_padmap(InputPadMap *map);
+void pc_input_current_padmap(struct InputPadMap *map);
 
 /* Stop and start the host input layer again from the settings, so changes that are read
  * only at start (who plays, how many controllers, the backend) take effect. Used after

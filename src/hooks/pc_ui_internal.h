@@ -54,6 +54,7 @@ enum UiMode { UI_OVERLAY, UI_LAUNCHER };
 
 struct UiResult {
     bool play = false;      // launcher: the Play button
+    bool setup = false;     // open setup after launcher teardown
     bool leave = false;     // launcher: Quit; overlay: Close
 };
 
@@ -106,3 +107,6 @@ bool ui_capturing();
 // The lock that keeps the window thread's input events and the drawing thread out of ImGui at once.
 void ui_lock();
 void ui_unlock();
+
+void ui_target(const char *name);
+bool ui_test_target(const char *name, float *x, float *y);

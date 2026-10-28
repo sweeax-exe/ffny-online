@@ -72,9 +72,12 @@ def fight_contexts(log):
     contexts, fighters = [], {}
     venue = match_type = None
     for line in log.splitlines():
-        if not line.startswith('[FUNCCALL] '):
+        if line.startswith('[FUNCCALL] '):
+            call = line[11:].strip().lower()
+        elif line.startswith('[FE-INJECT] after ') and ': ' in line:
+            call = line.split(': ', 1)[1].strip().lower()
+        else:
             continue
-        call = line[11:].strip().lower()
         if 'game.resetmatchdata(' in call:
             fighters, venue, match_type = {}, None, None
         if match := re.search(r'controller\.controllersetup\(\s*(-?\d+),\s*(-?\d+),\s*(\d+),\s*(-?\d+)\s*\)', call):

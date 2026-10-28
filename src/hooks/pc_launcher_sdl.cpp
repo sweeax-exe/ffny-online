@@ -11,6 +11,10 @@
 // nobody at it (a locked screen, a remote run):
 //   RECOMP_LAUNCHER_SCRIPT   "<ms>:move:<x>:<y>;<ms>:click:<x>:<y>;<ms>:shot:<file.bmp>;<ms>:play;<ms>:quit", times
 //                            from the window's first frame, in window points
+//   Named controls: "<ms>:ui:<id>" clicks; "<ms>:hover:<id>" hovers, revealing scrolled controls.
+//   "<ms>:uiopt:<id>" clicks it if it is there and says nothing if not: a control that only exists in
+//   one layout, such as the On/Off item of an on/off choice (`<section>.<key>.on`), which a narrow or
+//   large-text window shows in place of a checkbox.
 //   RECOMP_WINDOW_SHOT       a file to write the first full frame to, as a BMP
 
 #define _CRT_SECURE_NO_WARNINGS
@@ -32,6 +36,7 @@ extern "C" {
 #include "pc_input.h"
 #include "pc_settings.h"
 #include "pc_ui.h"
+#include "pc_ui_actions.h"
 #include "pc_ui_internal.h"
 
 extern "C" void host_posix_call_on_main(void (*fn)(void *), void *arg);
@@ -41,10 +46,22 @@ namespace {
 
 struct ScriptStep {
     unsigned long long at_ms;
-    enum Kind { CLICK, MOVE, SHOT, PLAY, QUIT } kind;
+    enum Kind
+    {
+        CLICK,
+        TARGET,
+        HOVER,
+        RESIZE,
+        MOVE,
+        SHOT,
+        PLAY,
+        QUIT
+    } kind;
     float x, y;
     std::string file;
     bool done;
+    unsigned attempts = 0;
+    bool optional = false;
 };
 
 std::vector<ScriptStep> parse_script(const char *text)
@@ -64,7 +81,17 @@ std::vector<ScriptStep> parse_script(const char *text)
             st.at_ms = ms;
             st.x = x;
             st.y = y;
-            if (!strcmp(kind, "click")) st.kind = ScriptStep::CLICK;
+            if ((!strcmp(kind, "ui") || !strcmp(kind, "uiopt") || !strcmp(kind, "hover")) &&
+                sscanf(item.c_str(), "%llu:%*[^:]:%511[^;]", &ms, file) == 2)
+            {
+                st.kind = !strcmp(kind, "hover") ? ScriptStep::HOVER : ScriptStep::TARGET;
+                st.file = file;
+                st.optional = !strcmp(kind, "uiopt");
+            }
+            else if (!strcmp(kind, "resize"))
+                st.kind = ScriptStep::RESIZE;
+            else if (!strcmp(kind, "click"))
+                st.kind = ScriptStep::CLICK;
             else if (!strcmp(kind, "move")) st.kind = ScriptStep::MOVE;
             else if (!strcmp(kind, "play")) st.kind = ScriptStep::PLAY;
             else if (!strcmp(kind, "quit")) st.kind = ScriptStep::QUIT;
@@ -97,7 +124,7 @@ void launcher_main(void *arg)
     int *result = (int *)arg;
     *result = 1;                                        // no window: do not hold the game back
 
-    SDL_Window *window = SDL_CreateWindow("Def Jam: Fight for NY - Launcher", 1000, 720,
+    SDL_Window *window = SDL_CreateWindow("Def Jam: Fight for NY - Launcher", 1100, 720,
                                           SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
     if (!window) {
         fprintf(stderr, "[UI] launcher: no window (%s); starting the game\n", SDL_GetError());
@@ -125,6 +152,7 @@ void launcher_main(void *arg)
     std::vector<ScriptStep> script = parse_script(getenv("RECOMP_LAUNCHER_SCRIPT"));
     unsigned long long start = SDL_GetTicks();
     unsigned frames = 0;
+    bool open_setup = false;
     bool done = false;
     std::string shot_file;
     *result = 1;
@@ -175,25 +203,62 @@ void launcher_main(void *arg)
             if (st.done || now < st.at_ms) continue;
             if (st.kind == ScriptStep::SHOT && frames < 3) continue;       // after the screen has been drawn
             st.done = true;
-            if (st.kind == ScriptStep::CLICK) {
+            if (st.kind == ScriptStep::TARGET || st.kind == ScriptStep::HOVER)
+            {
+                ui_lock();
+                bool found = ui_test_target(st.file.c_str(), &st.x, &st.y);
+                ui_unlock();
+                if (!found)
+                {
+                    if (++st.attempts < 12)
+                    {
+                        st.done = false;
+                        st.at_ms = now + 200;
+                    }
+                    else if (!st.optional)
+                        fprintf(stderr, "[UI] script target missing: %s\n", st.file.c_str());
+                    continue;
+                }
+            }
+            if (st.kind == ScriptStep::RESIZE)
+                SDL_SetWindowSize(window, (int)st.x, (int)st.y);
+            else if (st.kind == ScriptStep::CLICK || st.kind == ScriptStep::TARGET)
+            {
                 SDL_Event m;
                 SDL_zero(m);
                 m.type = SDL_EVENT_MOUSE_MOTION;
-                m.motion.x = st.x; m.motion.y = st.y;
-                ui_lock(); ui_sdl_event(&m, 1.0f, 1.0f); ui_unlock();
-                click_x = st.x; click_y = st.y;
-                press_at = now + 60; release_at = now + 160;
-            } else if (st.kind == ScriptStep::MOVE) {
+                m.motion.x = st.x;
+                m.motion.y = st.y;
+                ui_lock();
+                ui_sdl_event(&m, 1.0f, 1.0f);
+                ui_unlock();
+                click_x = st.x;
+                click_y = st.y;
+                press_at = now + 60;
+                release_at = now + 160;
+            }
+            else if (st.kind == ScriptStep::MOVE || st.kind == ScriptStep::HOVER)
+            {
                 SDL_Event m;
                 SDL_zero(m);
                 m.type = SDL_EVENT_MOUSE_MOTION;
-                m.motion.x = st.x; m.motion.y = st.y;
-                ui_lock(); ui_sdl_event(&m, 1.0f, 1.0f); ui_unlock();
-            } else if (st.kind == ScriptStep::PLAY) {
-                done = true; *result = 1;
-            } else if (st.kind == ScriptStep::QUIT) {
+                m.motion.x = st.x;
+                m.motion.y = st.y;
+                ui_lock();
+                ui_sdl_event(&m, 1.0f, 1.0f);
+                ui_unlock();
+            }
+            else if (st.kind == ScriptStep::PLAY)
+            {
+                done = true;
+                *result = 1;
+            }
+            else if (st.kind == ScriptStep::QUIT)
+            {
                 done = true; *result = 0;
-            } else if (st.kind == ScriptStep::SHOT) {
+            }
+            else if (st.kind == ScriptStep::SHOT)
+            {
                 shot_file = st.file;                    // written after this frame is drawn
             }
         }
@@ -221,7 +286,12 @@ void launcher_main(void *arg)
         frames++;
         SDL_Delay(1);
         if (res.play) { done = true; *result = 1; }
-        if (res.leave) { done = true; *result = 0; }
+        if (res.leave)
+        {
+            done = true;
+            *result = 0;
+            open_setup = res.setup;
+        }
     }
 
     ui_lock();
@@ -233,6 +303,8 @@ void launcher_main(void *arg)
     SDL_DestroyWindow(window);
     fprintf(stderr, "[UI] launcher closed: %s\n", *result ? "play" : "quit");
     fflush(stderr);
+    if (open_setup)
+        pcui::setup_launch();
 }
 
 } // namespace

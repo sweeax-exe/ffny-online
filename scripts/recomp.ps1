@@ -11,8 +11,8 @@ if (-not (Test-Path (Join-Path $tk "tools\abi_analysis\output\abi_functions.json
 # recomp_manual.c is the single source of truth for what this project
 # implements by hand: a plain definition replaces the generated body, and a
 # definition plus an "extern void sub_X_gen(void);" retains the generated body
-# under that name. Direct calls use sub_X_gen and bypass the wrapper; use an
-# entry hook to intercept every caller (see AGENTS.md).
+# under that name. Since toolkit v0.16 direct calls reach the wrapper as well;
+# an entry hook is the other way to see every caller (docs/agent/lifter-overrides.md).
 python (Join-Path $PSScriptRoot "pipeline-state.py") lift --toolkit $tk --split $Split -- @ExtraArgs
 if ($LASTEXITCODE) { throw "recompilation failed; previous generated sources preserved" }
 Write-Host ("Generated: " + (Get-ChildItem $gen -Filter *.c).Count + " C files, " + [math]::Round((Get-ChildItem $gen | Measure-Object Length -Sum).Sum/1MB) + " MB")

@@ -15,7 +15,7 @@ and one risk was missing.** Corrected roadmap at the bottom.
 |---|---|---|
 | Recomp gives a mature, "natively supported" path | Toolkit is 6 months old, one maintainer, AI-co-authored; only Burnout 3 boots to rendering; lifter semantics bugs were fixed as recently as 2026-09-16 | **Treat as R&D.** Keep xemu as the reference baseline; pause and re-evaluate if bring-up stalls (decision D4). |
 | Config is `.toml` | It is JSON (`functions.json`, `abi_functions.json`, ...) | Docs and scripts use the real files. |
-| "Steam Deck / Linux compiled via GCC/Clang" | Runtime is D3D11-first; the Linux/OpenGL backend is far less tested | **Windows build under Proton first** (decision D6); native Linux is a later milestone. |
+| "Steam Deck / Linux compiled via GCC/Clang" | Runtime is D3D11-first; the Linux/OpenGL backend is far less tested | **Windows build under Proton first** (decision D6); native Linux is a later milestone. (Superseded by D95: native Linux and the Deck shipped in v0.7.0.) |
 | Windows = MSVC (any) | README requires **VS 2022**; the machine had only VS 2019 Build Tools | VS 2022 install pending (UAC); VS 2019 tried in parallel. |
 | "60+ FPS: AI writes delta-time patches" rated Medium | The Xbox is x86, so recomp gives no free speed. The AKI engine is almost certainly fixed-tick; unlocking a fighting game touches hit-frames, animation timing and input windows | Re-rated **High**. Do it after boot and gameplay are stable, as an opt-in patch validated against xemu reference footage. |
 
@@ -47,7 +47,7 @@ N64Recomp and XenonRecomp projects.
 | M4e | Vertex programs on the GPU (D43) | a fight presents 60 frames a second in the debug build at the round clock's design rate, no new crash over three fights; M2, M3, M4a goldens match; the CPU path stays behind `RECOMP_VSH_GPU=0`. Design: `docs/research/m4e-gpu-vertex-programs.md` |
 | M4f | Looks like the console (D44) | on the fight and the Story route up to the tutorial fight, Vlad finds no difference from console video worth fixing; M2, M3, M4a goldens match |
 | M6 | PC features and enhancements (in progress, D63/D84; `docs/07-m6-plan.md`) | a settings file, hotkeys, an overlay and a launcher sharing one settings core; fullscreen, window size, render scale and aspect-correct presentation; non-Xbox pads, keyboard play, remapping, rumble and local multiplayer; HD texture replacement packs next (proposed v0.6.0 after native v0.5.0); true 16:9 remains unscheduled ToDo; each feature has a check in `docs/02-test-plan.md` and leaves `scripts/regress.py` green |
-| M5 | Steam Deck via Proton (after M6) | the M4 checklist on the Deck; controller glyphs; 16:10 handling |
+| M5 | Steam Deck via Proton (after M6; superseded by D95: native Linux, v0.7.0) | the M4 checklist on the Deck; controller glyphs; 16:10 handling |
 | M9 | macOS (after M5, D45) | the M4 checklist on macOS. The renderer is Direct3D 11 only, so this needs a second graphics backend or a translation layer; to be scoped before it starts |
 | M7 | Native Linux (stretch) | OpenGL backend or Vulkan bridge; Flatpak |
 | M8 | Decomp phase (stretch) | matching C++ for gameplay systems, enabling custom fighters and netcode |

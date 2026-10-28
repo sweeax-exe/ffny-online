@@ -1,30 +1,48 @@
 # Agent instructions for defjam-recomp
 
-You are continuing a static-recompilation port of **Def Jam: Fight for NY** (Xbox, 2004) to native Windows
-using `sp00nznet/xboxrecomp`. Previous agents worked this way; keep doing the same so the owner (Vlad) can hand
-the project between agents without losing state. Read this file, then `PROGRESS.md`, before doing anything.
+You are continuing a static-recompilation port of **Def Jam: Fight for NY** (Xbox, 2004) to native Windows,
+macOS and Linux using `sp00nznet/xboxrecomp`. Previous agents worked this way; keep doing the same so the
+owner (Vlad) can hand the project between agents without losing state. Read this file, then run
+`python scripts/progress.py brief` (status, open questions, latest work log, hand-off), before doing anything.
+Open the rest of `PROGRESS.md` by section or by decision number only when you need it (§1).
 
-`CLAUDE.md` and `AGENTS.md` are the same file, kept as two copies so that every agent finds its own
-(Claude Code reads `CLAUDE.md`, Codex and others read `AGENTS.md`). Edit one, then copy it over the other
-in the same commit: `tests/unit/test_agent_instructions.py` fails if they differ.
+`AGENTS.md` is the one instructions file for every agent. Codex reads it directly; `CLAUDE.md` imports it
+and adds only notes that apply to Claude Code. Edit this file, not a copy. It is kept under 30 KiB (Codex's default limit for the combined project instructions it discovers is 32 KiB,
+`project_doc_max_bytes`, which can be changed; `tests/unit/test_agent_instructions.py` checks this one file), so
+longer how-to material lives in `docs/agent/` and is read on request. A pointer is an instruction to read the
+file, not an import:
+
+| When you ... | Read |
+|---|---|
+| see a failed or odd run, a failed `regress.py` row, a smoke test failure | `docs/agent/triage.md` (and run `python scripts/triage.py`) |
+| need the watch/trace tools, or the digest did not explain a stop | `docs/agent/diagnostics.md` |
+| get a play-test fault report (a hitch, a glitch, a pop) or a bug bundle | `docs/agent/playtest.md` (and run `python scripts/bug-bundle.py latest`) |
+| script a run, a route or a scenario | `docs/agent/harness.md` |
+| write or change something in `src/recomp_manual.c` | `docs/agent/lifter-overrides.md` |
+| consider a sub-agent | `docs/agent/delegation.md` (briefs in `docs/agent/briefs/`) |
+| open a PR for the game, setup or launcher, queue it for a release, or cut a release | `docs/agent/release.md` |
+| hit a build or shell oddity | `docs/agent/environment.md` |
+
+Skills and sub-agent files for each tool (`.claude/`, `.codex/`) are generated from `docs/agent/skills/` and
+`docs/agent/briefs/` by `python scripts/sync-agent-adapters.py`. Edit the sources, then run it.
 
 ## 1. The three files that carry state
 
 | File | Role | Rule |
 |---|---|---|
-| `PROGRESS.md` | The single source of truth for status, decisions and history | Update it **in the same turn** as the work. Never let it lag. Vlad exports it, so it must stand alone. |
+| `PROGRESS.md` | The single source of truth for status, decisions and history | On `main`, release branches and main-only docs PRs, update it **in the same turn** as the work. **Feature branches do not edit it**: their decisions (`D-new: ...`), results and hand-off go in the PR description, and the release PR writes them here (`docs/releasing.md` §2). Vlad exports it, so it must stand alone. Read it in pieces with `scripts/progress.py` (`brief`, `section N`, `decision D<n>`, `decisions --grep TEXT`, `grep TEXT`). |
 | `docs/01-plan-review.md` | Roadmap M0..M8 with exit criteria | Change only when a milestone definition changes; log that change as a decision. |
 | `docs/02-test-plan.md` | What "done" means per milestone | Same rule. |
 
 `PROGRESS.md` sections and how to use them:
 - **§0 Status at a glance**: one row per area. Flip ✅/⏳/⬜ the moment it changes.
-- **§1 Decisions log**: `D<n>`, date, decision, rationale. Every choice Vlad makes and every non-obvious choice you make goes here. Never renumber.
+- **§1 Decisions log**: `D<n>`, date, decision, rationale. Every choice Vlad makes and every non-obvious choice you make goes here. Numbers are assigned on `main` (a PR uses `D-new`); never renumber one that has landed there.
 - **§2 Environment**, **§3 Layout**, **§4 Dump facts**: reference; edit when reality changes.
 - **§5 Open questions for Vlad**: things only he can answer. Ask in chat too, but log here so nothing is lost.
 - **§6 Work log**: `- YYYY-MM-DD HH:MM — what happened`, newest at the bottom. One line per iteration or notable event, with numbers (function counts, kernel calls, stage reached) and the log file name. Keep it to about eight entries; `python scripts/worklog-add.py <entry file>` appends one and moves the older ones, unchanged, to the bottom of `docs/worklog/<YYYY-MM>.md`.
 - **§7 Hand-off**: exact next steps with addresses, env vars and file names. Rewrite it at the end of every session so the next agent can start in five minutes. The block it replaces goes to the top of `docs/worklog/<YYYY-MM>-handoffs.md`; do not stack superseded blocks in §7.
 
-`PROGRESS.md` is read at the start of every session, so it has to stay short (about 300 lines). The archive
+`PROGRESS.md` is read at the start of every session (`progress.py brief`), so it has to stay short. Its lines are long, so count bytes, not lines: §1 alone is most of it. The archive
 under `docs/worklog/` is for searching, not for reading end to end. It is a development record and is
 not part of the published tree; `worklog-add.py` creates the folder when it is missing.
 
@@ -42,10 +60,15 @@ src/patches/                        opt-in gameplay patches (only after M4)
 config/dump-manifest.json           hashes of the expected dump (no game bytes ever)
 config/seed_functions.json          runtime-discovered function addresses fed back to the lifter
 scripts/                            env, extract-disc, verify-dump, analyze, recomp, build, run, seed-from-log;
-                                    harness (scripted runs), regress (the regression run), pipeline-state, worklog-add
-tests/unit (pytest) · tests/smoke/boot-smoke.ps1 · tests/golden
+                                    harness (scripted runs), regress (the regression run), pipeline-state, worklog-add,
+                                    triage (digest a run log), progress (read PROGRESS.md in pieces),
+                                    sync-agent-adapters (skills and briefs for each tool), bug-bundle (read a play-test
+                                    bundle), scenarios (fixtures, generated fight routes, cutscenes), crowd-lab
+tests/unit (pytest; `-m "not slow"` skips the one slow test) · tests/smoke/boot-smoke.ps1 · tests/golden
+docs/agent/                         playbooks, skills and briefs for agents (index in its README)
 docs/research/                      investigation reports; the published set is indexed in its README
-logs/                               run logs, gitignored; keep milestone/iteration copies as logs/iterN-*.log
+logs/                               run logs, gitignored; keep milestone/iteration copies as logs/iterN-*.log;
+                                    logs/sessions/ holds play-test recordings and bug bundles (docs/playtest-recorder.md)
 game/                               junction to the extracted dump, gitignored
 ```
 Game data lives outside the repo at `<data>` (`$env:DEFJAM_DATA`): `xiso/`, `extracted/`,
@@ -55,26 +78,41 @@ Game data lives outside the repo at `<data>` (`$env:DEFJAM_DATA`): `xiso/`, `ext
 - Never track disc images, XBEs, `.viv/.mad/.xsh`, lifted C, logs, or build output. `git add -A --dry-run` before every commit; CI job `hygiene` also checks.
 - Never mention the site the dump came from, anywhere. Refer to "the user's own dump".
 - Never distribute built game executables (they embed lifted EA code). Ship tools, patches, docs.
-- Release setup exception: only the standalone game-free `DefJamSetup-<version>-windows-x64.exe`, `DefJamSetup-<version>-macos-arm64.dmg` (Vlad approved the macOS one on 2026-10-09, unsigned) and `DefJamSetup-<version>-linux-x64.tar.gz` (approved 2026-10-10, D96), each with its SHA-256 and provenance, may be attached by the tagged release workflow after `check-setup-assets.py` passes. Setup compiles the player's dump locally. No binary is tracked in source; no game executable, generated guest code or game data enters the setup payload. The macOS payload carries only pinned third-party tools and libraries (Python, CMake, Ninja, SDL3, shaderc, MoltenVK) next to the reviewed source. The Linux payload carries only pinned Python (python-build-standalone, with Tk) and four wheels (pyxbe and capstone; Pillow and NumPy for the HD upscale since v0.7.2, D99) next to the reviewed source; its build container is fetched on the player's computer, never shipped.
-- D58 (2026-10-04): Vlad explicitly approved the two README visuals in `docs/media/`. Only their exact paths and SHA-256 fingerprints in `scripts/check-source-tree.py` are permitted; no general capture/asset exception. The project license does not cover game artwork. On 2026-10-09 he asked for two screenshots of the port's own interface (the setup wizard and the launcher, no game artwork); they are fingerprinted the same way.
+- Release setup exception: only the standalone game-free `DefJamSetup-<version>-windows-x64.exe`, `DefJamSetup-<version>-macos-arm64.dmg` (Vlad approved the macOS one on 2026-10-09, unsigned) and `DefJamSetup-<version>-linux-x64.tar.gz` (approved 2026-10-10, D96), each with its SHA-256 and provenance, may be attached by the tagged release workflow after `check-setup-assets.py` passes. Setup compiles the player's dump locally. No binary is tracked in source; no game executable, generated guest code or game data enters the setup payload. The macOS payload carries only pinned third-party tools and libraries (Python, CMake, Ninja, SDL3, shaderc, MoltenVK) next to the reviewed source. The Linux payload carries only pinned Python (python-build-standalone, with Tk) and seven pinned wheels (pyxbe, capstone, Pillow and NumPy; cryptography, cffi and pycparser for the signed mod catalogue, D189/UI) next to the reviewed source; its build container is fetched on the player's computer, never shipped.
+- D58 (2026-10-04): Vlad explicitly approved the two README visuals in `docs/media/`. Only their exact paths and SHA-256 fingerprints in `scripts/check-source-tree.py` are permitted; no general capture/asset exception. The project license does not cover game artwork. On 2026-10-09 he asked for two screenshots of the port's own interface (the setup wizard and the launcher, no game artwork); they are fingerprinted the same way. On 2026-10-20 he requested replacing the older launcher screenshots throughout the README/docs and showing the new launcher on the front page; the exact Home and Advanced exports (`docs/media/launcher.png`, `docs/media/launcher-advanced.png`) are pinned under D144. This permits these UI-only replacements, not arbitrary captures.
 - D98 (2026-10-10): Vlad approved committing the application icons and the Steam artwork rendered from the game's own textures, under `branding/` only (the shield, the title wordmark, the title-screen scene and what `scripts/make-branding.py` renders from them). `scripts/check-source-tree.py` pins the set by the SHA-256 of `branding/SHA256SUMS`, which lists every file; changing any of them, or adding one, needs his approval of a new pin. It is not a general asset exception, and the licence still does not cover the artwork.
 - Hashes are fine, bytes are not. `config/dump-manifest.json` is the pattern.
+- Branch cleanup after a merge: GitHub deletes the remote head branch itself (`delete_branch_on_merge` is on). Run `git fetch --prune`, then delete the local branch once its PR is merged, including squash merges, which `git branch --merged` misses, so check the PR state with `gh pr view`. Never delete a branch checked out in a worktree or one that still has unmerged commits.
 
 ## 4. The working loop (how every bring-up iteration goes)
-1. `.\scripts\run.ps1 -WatchdogSecs 10` then `.\tests\smoke\boot-smoke.ps1` (exit code = stage S0..S4). Read `logs\run-*.log.err`.
-2. Classify the stop: `[CRASH]` (VEH block names `sub_XXXXXXXX`), `[WATCHDOG]` (hang; guest stack follows), `[ICALL] Failed to resolve` (missing function), `[FILE]`/`[PATH]` failures.
-   **The "guest stack" in both blocks is a scan, not a walk.** It lists every stack word that looks like a code address, including stale ones from calls that already returned, so it suggests callers that were never on the path. Use `scripts/guest-stack.py` instead: it filters the same scan against the complete set of return addresses the lifter emitted, so every line is a real call site and says which function it is in and what it was calling. To locate a hang, use `scripts/sample-threads.py`, which reads each thread's actual instruction pointer, then `scripts/guest-stack.py` for the chain above it. `scripts/icall-window.py` reads the last indirect-call targets out of the running process, which is the only cheap view of game-level activity: direct calls compile away into ordinary C calls and are invisible.
+1. `.\scripts\run.ps1 -WatchdogSecs 10` then `.\tests\smoke\boot-smoke.ps1` (exit code = stage S0..S4).
+2. Read the run with `python scripts/triage.py` (newest run; or pass a log path). It prints one screen: the stop signature
+   (`[CRASH]` with the `sub_XXXXXXXX` it names, `[WATCHDOG]` hang, `[ICALL] Failed to resolve` missing function, `[FILE]`/`[PATH]`
+   failures), frames presented, unclassified lines, a verdict and the exact next commands. `clean`/`explained`: act on it.
+   **`partial`/`unexplained`, or a fix based on `explained` that does not change the outcome: go to the original log**, sliced and
+   bounded, with the line numbers the digest printed (`triage.py LOG --around LINE --context 30`, `--lines A:B`, `--grep REGEX
+   --max 40`, `--tail 80`). Never `cat`/`type`/`Get-Content` or read a whole run log; it is hundreds of megabytes. `docs/agent/triage.md`.
+   **The "guest stack" in the crash and watchdog blocks is a scan, not a walk.** It lists every stack word that looks like a code address, including stale ones from calls that already returned, so it suggests callers that were never on the path. Use `scripts/guest-stack.py` instead: it filters the same scan against the complete set of return addresses the lifter emitted, so every line is a real call site and says which function it is in and what it was calling. To locate a hang, use `scripts/sample-threads.py`, which reads each thread's actual instruction pointer, then `scripts/guest-stack.py` for the chain above it. `scripts/icall-window.py` reads the last indirect-call targets out of the running process, which is the only cheap view of game-level activity: direct calls compile away into ordinary C calls and are invisible. (These live-process tools are Windows-only today, except `scripts/native-stacks.py`, which uses lldb on macOS and gdb on Linux.)
 3. Pick the fix in this order of preference:
    - missing function → `.\scripts\seed-from-log.ps1` then `analyze.ps1` → `recomp.ps1` → `build.ps1`;
    - runtime gap (kernel/D3D/NV2A) → make one logical source commit on our xboxrecomp fork branch, run its focused fixtures plus the game regression, then publish to the fork and update the parent gitlink to that published commit. Keep the submodule clean; the old numbered patches are retired and no longer in the tree. Every upstream PR needs Vlad's separate approval;
-   - lifter bug → hand-write the function as `void sub_XXXXXXXX(void)` in `src/recomp_manual.c`. The lifter reads that file (`--exclude-manual`) and stops generating the body, so yours links in its place for direct callers too. Adding `extern void sub_XXXXXXXX_gen(void);` emits the real body under that name so yours can bracket it, but **it also rewrites every direct call site to call `sub_XXXXXXXX_gen`**, so a direct caller never reaches your wrapper. It only intercepts calls arriving through `recomp_lookup_manual()`, which sees indirect calls only. To trace or hold a function with direct callers, define `void sub_XXXXXXXX_enter(void)` in the same file: since patch 0095 the generated function calls it first, from every caller, and keeps its own generated body (re-lift after adding one; `sub_0021EB90_enter` is the example). Or replace it outright, or watch something it writes with `RECOMP_WATCH_WRITE` (`src/hooks/watchpoint.c`) and read the chain with `scripts/guest-stack.py`. `#if 0` regions are ignored, so a retired override can stay as documentation. `recomp_lookup_manual()` only sees indirect calls and will not replace a function with direct callers. A hardware poke we do not need gets stubbed in `src/hooks/`.
-4. Rebuild, re-run, then `python scripts/regress.py --quick` (unit tests, the three golden frames, a fight); the full
-   `python scripts/regress.py` (adds the Story routes and a boot soak, about 20 minutes) before a commit that touches
-   the runtime, the lifter or the renderer. A log worth keeping is cited by name in PROGRESS.md; `scripts/prune-logs.py`
-   keeps cited logs and clears the rest.
-5. Log the iteration in `PROGRESS.md` §6 with numbers; update §0 if a stage changed; add a `D<n>` if you chose between real alternatives.
+   - lifter bug → hand-write the function as `void sub_XXXXXXXX(void)` in `src/recomp_manual.c`; read `docs/agent/lifter-overrides.md` first (a direct caller never reaches a wrapper; the `_enter` hook and `RECOMP_WATCH_WRITE` are the ways to trace). A hardware poke we do not need gets stubbed in `src/hooks/`.
+   **Quick checks first: `tools/defjam-mcp/dj.py`** (the `defjam` MCP server has the same). It takes the shared
+   machine lock itself (waits for `D:\DefJam\test-lock.txt`, `test-priority.txt` and any running copy), runs on
+   disposable data roots with the safe environment, and answers with one compact JSON result: `scenario online
+   --matches 3`, `scenario offline`, `scenario boot [--goto battle]`, `scenario gallery`. `digest <log>` condenses
+   any log or F9 report to about 60 lines; `analyze` gives the online result of existing logs; `lock run -- <cmd>`
+   runs any other test under the lock. Read the digest, not the log.
+4. Rebuild, re-run, then `python scripts/regress.py --quick` (unit tests, the three golden frames, a fight) and the
+   `--only` checks for the area you changed (`docs/agent/release.md`). The full `python scripts/regress.py` (about an
+   hour) runs **once per platform on the release candidate** (release trains, `docs/releasing.md`), not on each PR;
+   the one exception is a toolkit migration, which gets one full run on one platform before it is queued. A log worth
+   keeping is cited by name (in PROGRESS.md, or the PR description on a feature branch); `scripts/prune-logs.py`
+   keeps cited logs and clears the rest. Run the full regression in the background and read its table, not its logs; a failing row prints a `triage.py` line for the log it used.
+5. Log the iteration with numbers: in `PROGRESS.md` §6 on `main` or a release branch (update §0 if a stage changed;
+   add a `D<n>` if you chose between real alternatives); on a feature branch, in the PR description (`D-new`).
 6. Commit: one commit per fix, message `fix(boot): <what> (<symptom>)` or `chore:`/`docs:`/`feat:`. Do not commit lifted code.
-   The private working checkout and the clean public checkout (`DefJamFFNY-recomp`) each have their own `origin`. Never push private history to the public remote. Then push to `origin main` (the private repo): Vlad gave standing permission on 2026-09-23. Write the
+   Push only when Vlad asks. Write the
    message to a file and use `git commit -F <file>`; PowerShell 5.1 cannot pipe a here-string, and its
    `Set-Content -Encoding utf8` adds a BOM to the subject.
 7. Toolkit changes live on `vyanhursky/xboxrecomp`, branch `defjam/m6` (D63; started at the accepted
@@ -85,121 +123,14 @@ Game data lives outside the repo at `<data>` (`$env:DEFJAM_DATA`): `xiso/`, `ext
    Keep `docs/research/toolkit-rebase-ledger.md` as the mapping for the 108 retired patches. Game-specific
    fixes belong in `src/`. Never publish game data or built executables. Upstream PRs require separate approval.
 
-Diagnostics env vars are tabled in `docs/03-workflows.md`; full list in `docs/research/toolkit-bringup-notes.md`.
-
-## 4a. The diagnostics, and how to read them
-
-These were all built while chasing real bugs in this title; each exists because a question had no other
-answer. Reach for them before writing a new one.
-
-| Tool | Answers |
-|---|---|
-| `RECOMP_WATCH_EXEC=a,b,c,d` | Was this guest function entered, and how often? Up to four addresses across DR0-DR3, resolved through `recomp_lookup`, so it sees direct and indirect calls alike. |
-| `RECOMP_WATCH_EXEC_STR=1` | The string at `ecx` and at the first argument. Half the interesting functions take a name. |
-| `RECOMP_WATCH_EXEC_FIELD=0x20` | `MEM32(ecx + 0x20)` at the call. The ordinary shape of a member read. |
-| `RECOMP_WATCH_EXEC_CHAIN=0,8` | Follows a pointer chain from `ecx` **at the instant of the call**. |
-| `RECOMP_WATCH_WRITE` / `_LEN` / `_RW` | Who wrote this address. Prints the guest registers and a stack scan. |
-| `RECOMP_GUARD_CODE=1` | What is writing over the image. Noisy by construction -- XBE sections mix code and data -- and the reports that matter are the ones on jump tables. |
-| `RECOMP_PEEK` (toolkit) | The current value of a few guest addresses. Covers both memory windows. |
-| `RECOMP_POST_CMD` | Feeds the front end a synthetic command, to separate "the machinery is broken" from "nothing triggers it". |
-| `scripts/string-va.py` | A byte string's guest address. **The most useful of these.** The lifted C has no string literals -- a format string is a bare `PUSH32(esp, 0x29C0DC)` -- so searching for `.big` finds nothing while searching for the address finds every user. |
-| `scripts/callers.py` | Direct callers, N levels up. Says "reached only indirectly" as an answer. |
-| `scripts/gap-seeds.py` | Functions the lifter never reached (vtable slots, driver tables): code-shaped starts in the gaps between lifted functions. `--write` seeds them. Check `Original:` extents before and after the re-lift. |
-| `scripts/stub-targets.py` | Which unresolved stubs are real code a lifted function jumps into, and which can be seeded. A stub reached at run time skips code and leaves the stack wrong; the failure shows up callers away (the Terrordome crash, v0.2.1). `[ABI] ... esp(epilogue never ran)` from the `win-x64-abicheck` preset names the function. |
-| `scripts/mem-find.py` | Searches a live process's guest memory for a byte pattern. |
-| `scripts/native-stacks.py` | Every thread's **host** call stack, named from the PDB (dbghelp, no debugger). The answer when a thread is "outside the exe": which lock or wait, and which of our functions got it there. |
-| `scripts/big-entry.py`, `scripts/refpack.py` | Read the dump offline: list a BIG4 directory, decompress RefPack and list the nested archive. Metadata only -- they never write game bytes anywhere. |
-
-**Three rules, each learned by getting it wrong.**
-
-1. **A hit is evidence; a miss is not.** An entry breakpoint fires on the edge, so a long-running loop
-   entered once during start-up is invisible to it for ever -- that produced a confident "the front-end
-   loop never runs" about a loop that was running the whole time. A data watchpoint has missed a write this
-   runtime provably made. Confirm a miss another way: `scripts/guest-stack.py` reads stacks as they are.
-2. **Read totals, not printed lines.** Every per-event log here is budgeted. `RECOMP_WATCH_EXEC` prints a
-   running total every five seconds -- use that. Reading a capped counter as a measurement has produced two
-   retractions: a DPC that looked queued once and was queued ten times, and a tick that looked like exactly
-   8 and was 9, 17 or 41 depending on the run.
-3. **Ask which address space a number is in.** `symbolize.py` reports a **host** offset into compiled code;
-   it is not a guest offset and must never be pasted into a brief as one. A physical address from a
-   hardware model is not a guest address -- `phys_to_guest` exists for that, and getting it wrong cost a day
-   on USB. Run-to-run variance is also large here: frame counts and call counts differ between identical
-   runs, so one run is never a measurement.
-
-## 4b. Driving the game unattended
-
-`scripts/harness.py` runs the game with scripted pad input, takes captures and summarises the log; its
-docstring has the syntax. The front end logs each call into the game as a `[FUNCCALL]` line, and a stage is
-`<anchor>=<presses>`: the presses start when a line containing the anchor appears.
-
-```
-python scripts/harness.py routes                    # boot, fight, crib, gym, intro
-python scripts/harness.py run intro --png           # Story from a new ID: the cutscenes, to the creator
-python scripts/harness.py run gym --stage "getscreeninfo(story/gym=down@4;down@6;a@9;x@16"
-python scripts/harness.py soak --boots 20           # stops at a boot that stops presenting and dumps its state
-python scripts/regress.py [--quick] [--only fight,intro]
-python scripts/scenario_suite.py run fight-result --fixture logs/fixtures/NAME --require-combat
-```
-
-- **Quick checks first: `tools/defjam-mcp/dj.py`** (the `defjam` MCP server has the same). It takes the
-  shared machine lock itself (waits for `D:\DefJam\test-lock.txt`, `test-priority.txt` and any running
-  copy), runs on disposable data roots with the safe environment, and answers with one compact JSON
-  result: `scenario online --matches 3`, `scenario offline`, `scenario boot [--goto battle]`,
-  `scenario gallery`. `digest <log>` condenses any log or F9 report to about 60 lines; `analyze` gives
-  the online result of existing logs; `lock run -- <cmd>` runs any other test under the lock. Read the
-  digest, not the log.
-
-- Every harness route and soak boot uses a complete-save-root guard, including profiles and caches.
-  The run fails unless restoration is byte-identical. Keep only three successful backups; retain every
-  failed backup. For rebase tests use the preserved disposable `runtime-data` root, never the original save.
-- Captures land in `logs/shots/<route>/` and remain local. Only the two owner-approved README visuals (D58) may be committed, with exact CI fingerprints.
-- `scripts/scenario_suite.py` runs one route on a throw-away copy of a hashed save fixture and writes a
-  JSON/JUnit/HTML report under `logs/scenarios/`. `--require-combat` asserts movement, a player attack,
-  damage and the match result from game state (`src/hooks/test_telemetry.c`, on with
-  `RECOMP_TEST_OBSERVATIONS=1`). The full `regress.py` runs it as the `combat` check, with the
-  four-fighter Terrordome match. `--step-input default --rng-seed N` makes a fight repeat; the `replay`
-  check compares thirty seconds of game state with `tests/golden/fight-stream.json` and fails when a
-  change alters the simulation (`--only repeat --update-golden` if that is intended).
-  `versus` (two emulated pads, in the full run), `ffa-result`, `two-matches` and `visual` (still screens
-  against reviewed baselines in `<data>/test-baselines/`, never committed) are further checks; the last
-  three are `--only`. In a pad script `anchor#N` waits for the Nth call; an anchor cannot contain a comma.
-  Guide: `docs/09-testing-harness.md`.
-- Input (v0.3.0, `docs/10-input.md`). `settings.ini` and `RECOMP_SETTINGS=none` runs leave the host input layer off so the harness keeps its one scripted pad. To exercise the real paths in a route add `--env RECOMP_INPUT_HOST=1 --env RECOMP_INPUT_IGNORE_FOCUS=1 --env RECOMP_PAD_HOST=1`, then either `--env RECOMP_INPUT_NO_PADS=1 --env RECOMP_PAD_SCRIPT_KEYS=1` (the scripted pad of the keyboard's player becomes key presses; `--env RECOMP_KEYBOARD_PLAYER=2` makes the keyboard player 2 beside a scripted pad 1) or `--env RECOMP_INPUT_NO_PADS=1 --env RECOMP_INPUT_VIRTUAL_PADS=2 --env RECOMP_PAD_SCRIPT_VIRTUAL=1` (SDL virtual gamepads pressed by the script, through the real SDL path); `--env RECOMP_RUMBLE_LOG=1` logs the rumble the game sends. The launcher never shows in a `RECOMP_SETTINGS=none` or scripted run; to test the overlay add `--env RECOMP_INPUT_VIRTUAL_CHORD_MS=40000` (virtual pad 1 opens it with both stick clicks and closes it with B; see `docs/launcher-and-overlay.md`).
-- A new screen to reach: run the nearest route with extra `--stage`s and `--shots`, look at the captures
-  (`harness.py montage`), and add the stage to `ROUTES` once it is right.
-- Scripts written for one investigation belong in the session's scratch directory. Anything used twice
-  belongs in `scripts/`, with a docstring and, if it has logic worth breaking, a test in `tests/unit`.
+Diagnostics env vars are tabled in `docs/03-workflows.md`; full list in `docs/research/toolkit-bringup-notes.md`. The watch and trace tools, and the three rules about reading their results (a hit is evidence, a miss is not; read totals, not printed lines; ask which address space a number is in), are in `docs/agent/diagnostics.md`.
 
 ## 5. Orchestration style
-- The main agent orchestrates; delegate reading/parsing/exploration to **Sonnet sub-agents** (toolkit docs, disassembly, web research). Give them a precise question, ask for a Markdown report in `docs/research/`, and a 10-line summary.
+- The main agent orchestrates. Delegate only read-only, bounded reading (lifted C, the image, logs, docs, web research) to a sub-agent on a smaller, cheaper model, and never the measure-change-rebuild loop; rules, the brief checklist and ready briefs are in `docs/agent/delegation.md`. Treat a sub-agent's report as evidence, not as fact.
 - Do the work that does not depend on Vlad first; put blocking questions in chat **and** in `PROGRESS.md` §5.
 - Milestone exit criteria are in `docs/02-test-plan.md`. Do not declare a milestone done without meeting them.
+- Game runs are serial: never start two at once (timing floors, audio, input and the save area are shared).
 
-### 5a. When to launch a Sonnet sub-agent (and when not to)
-Vlad asked for this explicitly, and the deciding question is whether the task is **serial or independent**, not whether it is hard.
-
-**Delegate** when all of these hold. Spawn with `subagent_type: general-purpose`, `model: sonnet`, in the background, and keep working meanwhile.
-- It is **read-only**: reading lifted C, the image, logs or docs. No edits, no builds, no runs.
-- It is **bounded**: a named starting address or file and a question with an end, not "investigate the front end".
-- It does **not need the build loop**: nothing it concludes depends on a measurement it would have to take itself.
-- Two or more such tasks can run **at once**, or one can run while the main agent keeps measuring.
-- Its output is a **written finding** — `docs/research/<topic>.md` plus a short summary — that the main agent can act on.
-
-Reverse-engineering reads are the archetype: "read `sub_00284476` and its callees; report what it checks and under what conditions it would judge the transfer a failure."
-
-**Do not delegate** the measure-change-rebuild loop. It is serial by nature — each step needs the previous result — and a cold agent re-deriving context costs more than the step is worth. Same for anything that must hold state across many runs, and for interpreting a contradictory measurement, which is where wrong-but-plausible conclusions get made.
-
-**Write the brief as if the reader has never seen this repo**, because it has not. Include: the repo path, one line on what the project is, the exact question, the addresses to start from, **what has already been ruled out** (so it is not redone), the lifted-C conventions it needs, where to put the report, and an explicit "do not edit code, do not build, do not run the game".
-
-Treat a sub-agent's report as evidence, not as fact. Check any claim that would change what gets built.
-
-## 6. Environment gotchas
-- Build with `scripts\build.ps1` (finds the newest VS Build Tools via vswhere; VS 2019 works, VS 2022 not required so far). CMake is 3.20, so `CMakePresets.json` must stay at version 2.
-- The toolkit forces `/O2` on its kernel library; `CMakeLists.txt` strips `/RTC1` from Debug so MSVC accepts it.
-- The Bash tool in Claude Code collapses `\\` to `\` in commands. Use raw Python strings or forward slashes when writing Windows paths from a heredoc, or use the Edit/Write tools for files with backslashes.
-  The same collapsing eats `\n` inside a C string literal written from a heredoc, which the compiler then reports as "newline in constant". Write the script to a file in the scratchpad and run it, or build the escape as `chr(92) + 'n'`.
+## 6. Environment gotchas (the two that cost the most; the rest in `docs/agent/environment.md`)
 - Kill `defjam_recomp.exe` **before** building. A running process holds the exe and the link fails with LNK1168, which reads like a build error and is not.
 - A full re-lift (`recomp.ps1`) plus build is about 20 minutes. Changing the lifter means re-lifting all 17k functions, so batch lifter changes rather than testing them one at a time.
-- The runtime writes `xbox_kernel.log` into the CWD; it is gitignored.
-- Ghidra 12.1.3 and JDK 21 are installed; the Ghidra naming pass is optional but makes logs readable.
-- xemu is installed as the reference emulator but needs Vlad's own BIOS/MCPX/EEPROM.

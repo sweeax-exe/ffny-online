@@ -46,7 +46,7 @@ build-validation CI, local "does it boot" gates, and manual gameplay checklists.
 - **M4e GPU vertex programs**: a round presents 60 frames a second in the debug build (`[D3D] 2.0s` lines), the round clock at 1.2 ticks a step, no crash over three fights; the M2, M3 and M4a goldens match; a fight capture differs from `RECOMP_VSH_GPU=0` only by perspective-correct interpolation.
 - **M4f looks like the console**: captures of a fight and of the Story intro (scripted, `RECOMP_TRANS_SHOT_SECS`) set beside console video frames; Vlad signs off the route up to the tutorial fight; the M2, M3 and M4a goldens match after every graphics change.
 - **M4d match (the full M4 checklist)**: checklist. Two pads detected via XInput. Music, announcer and hit SFX audible. FMV intro plays or is skippable. Load Battle, Free for All. Complete a KO. Return to menu. Private bytes stable over three fights.
-- **M5 Deck**: the M4 checklist under Proton on SteamOS; Steam Input mapping; no keyboard needed; 1280x800 letterboxing correct.
+- **M5 Deck** (superseded by D95: the Deck runs the native Linux build, not Proton): the M4 checklist under Proton on SteamOS; Steam Input mapping; no keyboard needed; 1280x800 letterboxing correct.
 - **M6 PC features** (D63, one gate per release). v0.2.0: the executable starts with no environment set and no `run.ps1`; `settings.ini` round-trips (unit test) and an environment variable overrides it; Alt+Enter and F11 toggle borderless fullscreen and back without a crash or a lost frame counter; in a 16:9 window the picture is 4:3 with black bars (letterbox maths unit-tested, a window capture confirms); a fight still presents 60 frames a second with `vsync` on and off, with `RECOMP_PRESENT_PACING=1` showing a 16.67 ms median and no window of two seconds with more than two late presents; the goldens match. v0.3.0 (input): unit tests for binding parsing and resolution, deadzone arithmetic and pad remapping (`tools/xboxrecomp/tests/input_map`), for slot assignment, hot-plug, remapping, focus and rumble against SDL's virtual gamepads (`tests/input_host`), and for the settings defaults and file round trip (`tests/unit/test_input_native.py`); scripted matches that drive the keyboard path end to end (`RECOMP_PAD_SCRIPT_KEYS=1`: One on One as player 1, `versus` with the keyboard as player 2) and a scripted match that still passes with a second, idle controller on the hub; the rumble the game sends decodes (`RECOMP_RUMBLE_LOG=1`); `scripts/regress.py` stays green. By hand, the owner's: a DualSense and an Xbox pad each play a match, the keyboard plays a match, rebinding in `settings.ini` survives a restart, rumble is felt, a pad and the keyboard play against each other, and two pads fight each other. v0.4.0 (launcher and overlay): the launcher shows on every launch unless skipped (`pc_launcher_wanted` unit-tested for the flags, Shift and test runs), edits settings by mouse, keyboard and pad, captures a key binding and saves it to `settings.ini`, and its Play starts the game; the overlay opens with F1 or the pad chord (a virtual pad in the real game), draws over the picture without appearing in captures, applies full screen and window size live, polls the game at rest while open (host-layer unit test) and closes again; every setting is in the settings reference (unit test); `scripts/regress.py` stays green. By hand, the owner's: the launcher and overlay with a mouse, a keyboard and a pad; changing a key binding and a pad button and seeing them work in a match; that the overlay's controllers page shows the pads and tests rumble. D84/D85: HD precedes widescreen; public v0.5.0 is the native platform release, so HD is proposed as v0.6.0. Widescreen remains unscheduled ToDo: a 16:9 fight shows more arena at the sides with round characters and the HUD in place.
 
 ## HD texture release gates (D83–D86)
@@ -60,20 +60,31 @@ Renderer support and art coverage are separate claims. The initial Windows proto
 - A representative 30–50-image pilot covers UI/logos, palette/atlas/cutout, fighter faces/clothes/tattoos, venue/props and repeat seams. Compare 2x/4x world assets; preserve identities and branded lettering.
 - Release and Debug quick/full regressions pass on reconciled public v0.5.0 sources. Packs off retain existing 4:3 goldens. Pack-on evidence is separately reviewed, including creator/name entry, fight HUD, multiple fighters/venues, Story/movie transitions and multi-fight soak.
 - Record solo-baseline versus enabled cold/warm load time, frame pacing and memory with dumping/inference off. Keep the game's existing simulation and frame-rate gates; investigate any additional hitch or sustained regression.
-- Preserve macOS/Linux build compatibility after reconciling the native port; disclose that initial WIC/CNG replacement loading is Windows-only unless a backend-neutral implementation is completed and tested.
+- Preserve macOS/Linux build compatibility after reconciling the native port; disclose that initial WIC/CNG replacement loading is Windows-only unless a backend-neutral implementation is completed and tested. (Superseded: texture packs load on macOS since v0.6.1 and on Linux since v0.7.2.)
 - Fresh-checkout source hygiene/CI pass. Owner accepts the concrete pack/gameplay build before release. Ship source tooling/docs/recipes only; full texture coverage, font host integration and HD video playback must not be claimed from a small pilot.
+
+## Setup updater release gates (D100–D101)
+
+The [setup update acceptance plan](setup-update-test-plan.md) defines required
+operation, option, network, integrity, interruption and native platform coverage.
+Clean updates preserve player data; historical releases are not downgrade targets.
+Future capable versions need explicit downgrade compatibility and acceptance.
+Linux product acceptance targets Steam Deck; Ubuntu CI is portable validation.
+Game-free CI and packaged smoke cannot replace owner-dump runs on Windows, Apple
+Silicon and Deck. No updater gate is complete until its results ledger has evidence.
 
 ## Regression discipline
 - `python scripts/regress.py` is the regression run: unit tests, the M2/M3/M4a golden frames, a scripted
   fight, Story from a new ID through both cutscenes to the creator, Story with a saved profile into the crib
   and into Learn Moves, and a boot soak. Each route also fails on a `[CRASH]`, a `[WATCHDOG]`, a Direct3D
   debug-layer message, a truncated batch, a directory search answered with the wrong name, or a save area
-  that is not byte-identical afterwards. `--quick` (unit, goldens, fight) after every change; the full run
-  before a commit that touches the runtime, the lifter or the renderer.
+  that is not byte-identical afterwards. `--quick` (unit, goldens, fight) and the area's `--only` checks on
+  every pull request; the full run once per platform on each release candidate (`docs/releasing.md`).
 - A new feature or a fixed bug that a run can show adds a check there, or a route in `scripts/harness.py`.
 - Every bring-up fix is one commit that names the guest function (`sub_XXXXXXXX`) and the symptom.
 - Logs cited by name in PROGRESS.md are kept by `scripts/prune-logs.py`; the rest go after three days.
-- Toolkit bumps (submodule) get the full regression run before merge.
+- Toolkit bumps (submodule) get the full regression on the release candidate that ships them; a toolkit
+  migration also gets one full run on one platform before it is queued.
 
 ## xemu reference baseline, and its hard limit
 

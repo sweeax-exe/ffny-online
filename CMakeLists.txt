@@ -15,7 +15,7 @@ cmake_minimum_required(VERSION 3.20)
 # (a junction/symlink is fine) and run scripts/verify-dump.py first.
 # ============================================================================
 
-project(defjam_recomp VERSION 0.7.2 LANGUAGES C CXX)
+project(defjam_recomp VERSION 0.12.2 LANGUAGES C CXX)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -90,6 +90,10 @@ if(DEFJAM_BUILD_GAME)
         # in pc_ui.cpp; pc_launcher.cpp is the Direct3D 11 one.
         list(FILTER HOOK_SOURCES EXCLUDE REGEX "/(watchpoint\\.c|pc_launcher\\.cpp)$")
         set(HOST_SOURCES src/host_posix.c)
+        if(APPLE)
+            enable_language(OBJC)
+            list(APPEND HOST_SOURCES src/host_macos.m)
+        endif()
         find_package(SDL3 REQUIRED CONFIG)
         find_package(Vulkan REQUIRED)
         include(imgui)
@@ -103,8 +107,9 @@ if(DEFJAM_BUILD_GAME)
         ${PATCH_SOURCES}
         ${RECOMP_GEN_SOURCES}
     )
+    target_compile_features(${PROJECT_NAME} PRIVATE cxx_std_17)
     if(WIN32)
-        target_link_libraries(${PROJECT_NAME} PRIVATE xboxrecomp recomp_settings defjam_imgui d3d11 dxgi dxguid xinput winmm dbghelp shell32)
+        target_link_libraries(${PROJECT_NAME} PRIVATE xboxrecomp recomp_settings defjam_imgui d3d11 dxgi dxguid xinput winmm dbghelp shell32 comdlg32)
     else()
         # One SDL for the window, the sound and the pads: SDL3, the system's.
         defjam_app_icon(${PROJECT_NAME})
@@ -112,11 +117,15 @@ if(DEFJAM_BUILD_GAME)
                               SDL3::SDL3 Vulkan::Vulkan ${CMAKE_DL_LIBS} m)
         if(APPLE)
             # Shift held at start-up (src/host_posix.c) is read from the window server.
-            target_link_libraries(${PROJECT_NAME} PRIVATE "-framework ApplicationServices")
+            target_link_libraries(${PROJECT_NAME} PRIVATE "-framework ApplicationServices" "-framework AppKit")
+            # SDL opens the Vulkan loader by name, and macOS's search does not
+            # reach a package manager's prefix; tell it where this build's is.
+            # Not on Linux: there the game is often built in a container whose
+            # /lib is not the player's (on Fedora it holds 32-bit libraries),
+            # and SDL's own libvulkan.so.1 is found by the system's loader.
+            target_compile_definitions(${PROJECT_NAME} PRIVATE
+                DEFJAM_VULKAN_LIBRARY="${Vulkan_LIBRARY}")
         endif()
-        # SDL opens the Vulkan loader by name; tell it where this build's is.
-        target_compile_definitions(${PROJECT_NAME} PRIVATE
-            DEFJAM_VULKAN_LIBRARY="${Vulkan_LIBRARY}")
         # The lifted code was written against a compiler that does none of
         # these: it reads memory through casts of every width, relies on
         # wrapping arithmetic, and must not have a multiply and an add fused
@@ -134,6 +143,12 @@ if(DEFJAM_BUILD_GAME)
         set_target_properties(${PROJECT_NAME} PROPERTIES ENABLE_EXPORTS ON)
     endif()
     target_compile_definitions(${PROJECT_NAME} PRIVATE DEFJAM_VERSION=\"${PROJECT_VERSION}\")
+    target_compile_definitions(${PROJECT_NAME} PRIVATE DEFJAM_MOD_SOURCE_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}\")
+    file(READ "${XBOXRECOMP_DIR}/src/nv2a/texture_pack.c" _mod_texture_loader)
+    string(FIND "${_mod_texture_loader}" "texture_pack_wide_slabs" _mod_has_wide)
+    if(NOT _mod_has_wide EQUAL -1)
+        target_compile_definitions(${PROJECT_NAME} PRIVATE DEFJAM_MOD_WIDE=1)
+    endif()
     target_include_directories(${PROJECT_NAME} PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
         ${CMAKE_CURRENT_SOURCE_DIR}/src/recomp
@@ -160,8 +175,8 @@ if(DEFJAM_BUILD_GAME)
         # functions translate to byte-identical code, and folding makes a crash report name whichever of
         # them won the merge rather than the one that ran.
         # /INCREMENTAL:NO: CMake gives RelWithDebInfo "/debug /INCREMENTAL", and link.exe's incremental
-        # linker can crash on an image this large (LNK1000, internal error during IncrCalcPtrs). The setup
-        # builds from scratch, so an incremental link has nothing to reuse (upstream v0.10.7, issue #81).
+        # linker can crash on an image this large (LNK1000, internal error during IncrCalcPtrs, access
+        # violation). The setup builds from scratch, so an incremental link has nothing to reuse.
         target_link_options(${PROJECT_NAME} PRIVATE /DEBUG /INCREMENTAL:NO /MAP:${CMAKE_BINARY_DIR}/defjam_recomp.map
                             /DYNAMICBASE:NO /OPT:NOICF)
     endif()

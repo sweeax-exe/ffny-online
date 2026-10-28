@@ -1,0 +1,37 @@
+{
+  "schema": 1,
+  "status": "Published to Cloudflare R2 and signed catalogue revision 5",
+  "version": "1.2.0",
+  "archive": {
+    "size": 643020896,
+    "unpacked_size": 646222232,
+    "file_count": 1528,
+    "sha256": "bb9109ef1fa77f78796afd051c4d6c602f5dbfa0554e698f3b8746be4cbd3589",
+    "root": "menu-ui-hd-wide-v1-2-0",
+    "urls": [
+      "https://pub-9167b11f83f24f2a9e21af7f0e225057.r2.dev/menu-ui-hd-wide/1.2.0/bb9109ef1fa77f78796afd051c4d6c602f5dbfa0554e698f3b8746be4cbd3589/menu-ui-hd-wide-v1.2.0.zip"
+    ]
+  },
+  "text_overrides": 1140,
+  "fighter_banners": 214,
+  "textures": 1304,
+  "wide_entries": 80,
+  "approved_candidate_assets_preserved": 1526,
+  "strict_installer_validated": true,
+  "min_recomp": "0.12.1",
+  "capabilities": [
+    "textures-v1",
+    "wide-v1"
+  ],
+  "text_pins": "config/menu-ui-text-v1.2-candidate.json",
+  "candidate_sha256": "d8249d6e184f53eae5d62bac508097e6d56125b76cdb2ccf9ceae61a5264d2d4",
+  "fire_escape_fix": "Separate game PR #131, queued for v0.12.2",
+  "catalogue_pr": "https://github.com/vyanhursky/DefJamFFNY-mods/pull/5",
+  "publication_workflow": "https://github.com/vyanhursky/DefJamFFNY-mods/actions/runs/40450457830",
+  "catalogue_source_commit": "5c43ffc8bbac2a1a81ffc7a5e434716e8b3e8529",
+  "catalogue_url": "https://vyanhursky.github.io/DefJamFFNY-mods/index.json",
+  "catalogue_revision": 5,
+  "catalogue_sha256": "28c145a4ea535b59b2ee59a8679cb72ee88e97acda78300f13da56bef0786918",
+  "released_helper_update_verified": true,
+  "rollback_files_verified": 404
+}

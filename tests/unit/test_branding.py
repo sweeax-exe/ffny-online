@@ -121,6 +121,7 @@ def test_the_png_icons_the_steam_art_and_the_window_icons_have_the_sizes_their_r
         assert (BRANDING / 'icon/window' / name).stat().st_size == 128 * 128 * 4
 
 
+@pytest.mark.slow
 def test_the_generator_rebuilds_the_whole_set_from_the_masters(tmp_path):
     pytest.importorskip('PIL')
     pytest.importorskip('numpy')

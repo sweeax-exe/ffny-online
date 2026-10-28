@@ -53,6 +53,7 @@ func makeAlias(target: String, alias: String) -> Int32 {
 func openSessionLog() {
     let logs = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Logs/DefJamRecompiled")
     try? FileManager.default.createDirectory(at: logs, withIntermediateDirectories: true)
+    setenv("DEFJAM_LOG_DIR", logs.path, 1)
     let stamp = DateFormatter()
     stamp.dateFormat = "yyyyMMdd-HHmmss"
     stamp.locale = Locale(identifier: "en_US_POSIX")
@@ -82,19 +83,22 @@ if arguments.count > 1 && arguments[1] != "--launch" && !gameFlags.contains(argu
 }
 
 let root = installRoot()
+// Acquire the lifetime lock before reading activation state or receipt.
+let lock = open(root.appendingPathComponent("play.lock").path, O_RDWR | O_CREAT, 0o644)
+if lock < 0 || flock(lock, LOCK_EX | LOCK_NB) != 0 {
+    fail("The game or an update is already running.")
+}
+if FileManager.default.fileExists(atPath: root.appendingPathComponent(".setup-transaction").path) {
+    fail("An update was interrupted. Run setup again to recover the installation.")
+}
 guard let bytes = try? Data(contentsOf: root.appendingPathComponent("installed.json")),
       let receipt = try? JSONDecoder().decode(Receipt.self, from: bytes),
       FileManager.default.isExecutableFile(atPath: receipt.executable) else {
     fail("No completed installation was found. Run Def Jam Setup to install or repair it.")
 }
 
-// Held for the life of the game: an update or repair cannot replace a running game.
-let lock = open(root.appendingPathComponent("play.lock").path, O_RDWR | O_CREAT, 0o644)
-if lock < 0 || flock(lock, LOCK_EX | LOCK_NB) != 0 {
-    fail("The game or an update is already running.")
-}
-
 setenv("DEFJAM_DATA", receipt.data, 1)
+setenv("DEFJAM_INSTALL_DIR", root.path, 1)
 guard chdir(receipt.source) == 0 else { fail("The installed game folder is missing. Run Def Jam Setup to repair it.") }
 openSessionLog()
 let program = strdup(receipt.executable)

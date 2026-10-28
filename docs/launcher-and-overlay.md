@@ -103,6 +103,7 @@ nobody at it (a locked screen, a remote run):
 | `RECOMP_HOST_SCRIPT` | The game window's input: `<ms>:key:<SDL key name>` (`F1`, `Escape`), `<ms>:click:<x>:<y>`, `<ms>:move:<x>:<y>`, `<ms>:text:<chars>`, times from the window's opening |
 | `RECOMP_OVERLAY_SHOT_DIR=<folder>`, `RECOMP_OVERLAY_SHOT_MS` | Windows: the finished picture with the overlay, every `RECOMP_OVERLAY_SHOT_MS` (2000 by default) while the overlay draws, as `<ms>.bmp` |
 | `RECOMP_TEST_ONLINE_GALLERY=<ms>` | Windows, with `RECOMP_TEST_OPEN_ONLINE=1`: the online screens show every page in turn, `<ms>` each, with sample players, rooms, a hill and statistics, take no input and connect to nothing; the overlay captures are then named `<ms>-<page>.bmp`. For comparing a design change page by page from one copy |
+| `RECOMP_MODS_PAGE=1` | The Textures page becomes upstream's Mods page (installed packs, load order, the signed project catalogue through the mod helper). Upstream's mod support is beta and not wired into FFNY Online's launcher and updater yet, so it is off by default |
 | `RECOMP_TEST_UPDATE_PROGRESS=<step>[,popup]` | Windows: a made-up update in progress at step 1 (the download) to 8 (finishing up), with no network and no setup, for pictures of the GAME card; `,popup` opens the "Update available" window first, which then shows the same progress |
 | `RECOMP_INPUT_VIRTUAL_PADS`, `RECOMP_INPUT_VIRTUAL_CHORD_MS` | An SDL virtual gamepad, which also opens and closes the overlay with its stick clicks and B ([input guide](10-input.md)) |
 

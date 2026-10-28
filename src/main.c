@@ -59,6 +59,7 @@
 #include "nv2a/nv2a_pgraph_d3d11.h"
 #include "hooks/save_compat.h"
 #include "hooks/rollback.h"
+#include "hooks/recorder.h"
 
 /*
  * If xboxrecomp.h is not an umbrella header in your setup, include
@@ -542,6 +543,14 @@ static LONG CALLBACK veh_handler(PEXCEPTION_POINTERS ep)
 
         crash_native_stack(ep->ContextRecord);
         fflush(stderr);
+        /* With [debug] record on, the last seconds of the run, the log's end and a
+         * minidump go to a bug bundle (src/hooks/recorder.c). */
+        {
+            char rec_what[96];
+            snprintf(rec_what, sizeof rec_what, "access violation at guest 0x%08X (%s)", fault_va,
+                     is_write ? "write" : "read");
+            recorder_on_crash_os(rec_what, ep);
+        }
         /* After the report is on disk: a running online match counts for nobody instead of as
          * this player's loss (at most 1.5 s, host memory only; netplay.c). */
         netplay_on_crash();
@@ -564,6 +573,7 @@ static LONG CALLBACK veh_handler(PEXCEPTION_POINTERS ep)
             print_guest_context((void *)ep->ContextRecord->Rip);
             crash_native_stack(ep->ContextRecord);
             fflush(stderr);
+            recorder_on_crash_os(what, ep);
             netplay_on_crash();
         }
     }
@@ -623,6 +633,11 @@ static void fault_handler(int sig, siginfo_t *si, void *ctx)
     print_guest_context((void *)(uintptr_t)HOST_PC(ctx));
     fflush(stdout);
     fflush(stderr);
+    {
+        char what[96];
+        snprintf(what, sizeof what, "signal %d at fault address 0x%llX", sig, (unsigned long long)fault_addr);
+        recorder_on_crash(what);
+    }
     /* Put the default action back; the instruction faults again and the
      * process ends with the signal, as an unhandled exception would. */
     signal(sig, SIG_DFL);
@@ -764,6 +779,23 @@ static int host_main(void)
     /* Preserve this title's six-speaker balance when using the newer toolkit. */
     if (!getenv("RECOMP_APU_MIXDOWN"))
         _putenv_s("RECOMP_APU_MIXDOWN", "six");
+    /* Toolkit v0.16 renders 3D voices through HRTF by default (as xemu does).
+     * Off for this title until a listening comparison says otherwise (D147):
+     * a new default stays off for the migration's acceptance, as with v0.13
+     * (D76). RECOMP_APU_HRTF=1 turns it on. */
+    if (!getenv("RECOMP_APU_HRTF"))
+        _putenv_s("RECOMP_APU_HRTF", "0");
+#ifdef _WIN32
+    /* XAudio2 queue: 6 x 512-sample buffers (64 ms, the depth v0.10.x had)
+     * instead of the toolkit's 4 x 512 (43 ms, D199). In borderless full
+     * screen each Present waits for the display, the queue then drops to its
+     * low mark, and the pacer renders ahead in a burst that overtakes the
+     * title's own stream writes: the opening scene clicked all through with 4
+     * (381-400 holes in 330 s of the mix buffer) and is clean with 6 (5), as
+     * in a window. RECOMP_AUDIO_BUF_COUNT overrides it; SDL3 hosts keep theirs. */
+    if (!getenv("RECOMP_AUDIO_BUF_COUNT"))
+        _putenv_s("RECOMP_AUDIO_BUF_COUNT", "6");
+#endif
 
     /* Acknowledge the audio DSP's command doorbell.
      *

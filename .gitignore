@@ -50,6 +50,9 @@ __pycache__/
 logs/
 *.log
 
+# ---- local development history (not part of the published tree) ----
+/docs/worklog/
+
 # ---- rendered frames are game artwork; captures stay local ----
 *.bmp
 *.ppm
@@ -57,3 +60,10 @@ tests/golden/*.png
 
 # ---- the website build (website/build.py copies the approved pictures in) ----
 website/dist/
+# ---- personal agent settings (the shared .claude/skills, .claude/agents, .codex/skills are generated and tracked) ----
+.claude/settings.local.json
+CLAUDE.local.md
+
+# Mod manager local verification state
+/mod-manager/
+/mods/

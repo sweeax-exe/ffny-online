@@ -51,6 +51,21 @@ APPROVED_README_MEDIA = {
     # 2026-10-24, chosen by FFNY Online's owner: the Anton display font (SIL Open Font License 1.1, its
     # licence beside it in OFL.txt), from google/fonts, for the launcher's headings and PLAY.
     'ffny-branding/fonts/Anton-Regular.ttf': 'a4ba3a92350ebb031da0cb47630ac49eb265082ca1bc0450442f4a83ab947cab',
+
+    # 2026-10-13: owner requested curated PR22 media from the Mac capture set.
+    'docs/media/gameplay-hero.png': 'f0f9f8524913594e7b0d676bbe241c5733f6f4fd4eba2206c4f593638e0814e4',
+    'docs/media/gameplay-preview-compact.gif': '88b8c8747d6b3936203191aca261ed0ca85108e2ae4bb914f0b0773495f641ec',
+    'docs/media/textures-comparison.png': 'bfb4bfdd75b28268cf2cea5638f1fe6962e9ac2e30f2b275dc800c13a8fd9e8a',
+    'docs/media/widescreen-comparison.png': 'dd8b23a051e8ef98516ea6aa349ef450f441e58669efc67a56fb2273dfbeaf67',
+    # D144 (2026-10-20): owner requested current Home/Advanced screenshots in README and docs
+    # (FFNY Online keeps its own launcher.png above).
+    'docs/media/launcher-advanced.png': '2b314e1d96c797a56e475b2d18cae0d502e5a6c944b07af2c8307bbd0dc3060a',
+    'docs/media/overlay.png': 'a137a13fa65cbbfc765897aa9d51d3ef84523e5cabd0fe934f6e477f446ca09b',
+    'docs/media/hd-16x9-gameplay.mp4': '385b041f57b7ddd61feb99e0ce726f6e4a5856f1e9936c416aca81949ee428f0',
+    'docs/media/textures-comparison.mp4': '0659c294460c00fafd69552a2f4fb0c70d161b5d6206e78c902cdd4ca3a03383',
+    'docs/media/widescreen-comparison.mp4': '2916fc4efd72b6d109d829157c01479c9ef50d84c5bbb94437d3fd87060f7d2c',
+    # D130 (2026-10-17): the owner's own screenshot of EA's developer menu (text only) for docs/developer-menu.md.
+    'docs/media/developer-menu.png': '86a3a91ae252ff9692003e3b88ee8bbc68af176ab74bb7fa0db4e4fd5add9077',
 }
 # D98 (2026-10-10): the owner approved committing the application icons and the Steam artwork
 # rendered from the game's own textures (the shield, the title wordmark, the title-screen scene).

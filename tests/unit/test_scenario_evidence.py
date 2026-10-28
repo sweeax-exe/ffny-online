@@ -56,6 +56,16 @@ def pcm_checks(tmp_path, value, **kwargs):
     return ev.audio_checks(p, text, sample_rate=10, min_seconds=1, **kwargs)
 
 
+def test_injected_venue_request_replaces_menu_choice_before_start():
+    text = ('[FUNCCALL] Game.ChooseVenue(14)\n'
+            '[FE-INJECT] 1 rule(s) armed: Game.ChooseVenue(99)\n'
+            '[FE-INJECT] after "game.choosevenue" #1: Game.ChooseVenue(6)\n'
+            '[FUNCCALL] Game.StartGame()\n'
+            '[FUNCCALL] Game.ResetMatchData()\n'
+            '[FUNCCALL] Game.StartGame()\n')
+    assert [c['venue'] for c in ev.fight_contexts(text)] == [6, None]
+
+
 def test_audio_healthy_silent_and_clipped_controls(tmp_path):
     assert all(c['status'] == 'pass' for c in pcm_checks(tmp_path, 200))
     assert next(c for c in pcm_checks(tmp_path, 0, max_silent_seconds=1) if c['name'] == 'audio.silence')['status'] == 'fail'
@@ -157,12 +167,21 @@ def test_fixture_output_inside_source_is_rejected(tmp_path):
 
 def test_scenario_settings_are_explicit_and_reject_ambiguous_values(tmp_path):
     settings, env = suite.scenario_settings()
-    assert settings == {'render_scale': 2, 'gamma': True, 'vsync': True}
+    assert settings == {'render_scale': 2, 'gamma': True, 'vsync': True,
+                        'brightness': 100, 'vignette': True, 'vignette_strength': 100}
     assert env['RECOMP_RENDER_SCALE'] == '2' and env['RECOMP_GAMMA'] == '1'
+    assert env['RECOMP_BRIGHTNESS'] == '100' and env['RECOMP_VIGNETTE'] == '1' and env['RECOMP_VIGNETTE_STRENGTH'] == '100'
     p = tmp_path / 'settings.json'
     p.write_text(json.dumps({'render_scale': 3, 'gamma': False}))
     settings, env = suite.scenario_settings(p)
     assert env['RECOMP_RENDER_SCALE'] == '3' and env['RECOMP_GAMMA'] == '0'
+    p.write_text(json.dumps({'brightness': 150, 'vignette': False, 'vignette_strength': 40}))
+    settings, env = suite.scenario_settings(p)
+    assert env['RECOMP_BRIGHTNESS'] == '150' and env['RECOMP_VIGNETTE'] == '0' and env['RECOMP_VIGNETTE_STRENGTH'] == '40'
+    for bad in ({'brightness': 49}, {'brightness': 201}, {'vignette_strength': 101}, {'brightness': '120'}):
+        p.write_text(json.dumps(bad))
+        with pytest.raises(ValueError, match='integer'):
+            suite.scenario_settings(p)
     p.write_text(json.dumps({'gamma': 'false'}))
     with pytest.raises(ValueError, match='booleans'):
         suite.scenario_settings(p)

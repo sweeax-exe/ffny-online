@@ -20,6 +20,13 @@ size_t pc_ui_settings(RecompSetting *out, size_t max)
     ADD("launcher", "skip", RECOMP_SETTING_BOOL, 0, 0, 0, NULL, "RECOMP_NO_LAUNCHER", 0,
         "Skip the launcher and start the game at once. Hold Shift while the game starts, start it with "
         "--launcher, or turn this off in the in-game overlay to see the launcher again.");
+    ADD("debug", "unlock_all", RECOMP_SETTING_BOOL, 0, 0, 0, NULL, "RECOMP_UNLOCK_ALL", RECOMP_SETTING_RESTART,
+        "Debug: every fighter and venue is available on any profile, through the developers' own unlock "
+        "routine in the game. Meant for testing; it changes the profile in memory and asks the game to save "
+        "it, so do not use it on a save you care about.");
+    ADD("debug", "skip_intro", RECOMP_SETTING_BOOL, 0, 0, 0, NULL, "RECOMP_SKIP_INTRO", RECOMP_SETTING_RESTART,
+        "Start at Press Start, skipping the startup legal screen and movies. Story cutscenes still play. "
+        "Applies when starting the game; changing it in the overlay requires a restart.");
     ADD("ui", "overlay_key", RECOMP_SETTING_STRING, 0, 0, 0, NULL, NULL, 0,
         "The key that opens and closes the in-game overlay, one key name (see the [keyboard] section).",
         "F1");

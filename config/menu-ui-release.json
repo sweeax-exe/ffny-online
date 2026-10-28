@@ -1,0 +1,75 @@
+{
+  "schema": 1,
+  "name": "Def Jam HD Widescreen Menus",
+  "version": "1.0.0-rc2",
+  "pack_id": "menu-ui-hd-wide-v1-rc2",
+  "status": "local release candidate; native signoff pending",
+  "bundles_faithful_hd": false,
+  "load_order": "after any Faithful HD components; disable superseded menu-ui testcomponents",
+  "base_components": [
+    "menu-ui-restored-test-v1",
+    "menu-ui-branding-registered-test-v1",
+    "menu-ui-mode-conditional-test-v1"
+  ],
+  "approved_components": [
+    "menu-ui-extras-test-v1",
+    "menu-ui-phone-test-v1",
+    "menu-ui-popup-profile-test-v1",
+    "menu-ui-gym-controls-test-v1"
+  ],
+  "transition_sources": "transition-v1-20261020/references.json",
+  "wide_table": "config/menu-ui-wide-layers.json",
+  "expected_source_ids": 157,
+  "retained_core_policy": "Only approved scenic/title source IDs absent from sparse art components use unchanged baseline HD canvases; no general Faithful library is included.",
+  "conditional_native": [
+    "Mode specific lighting",
+    "complete trans/t1 pan",
+    "title/emblem registration derivatives"
+  ],
+  "supported_aspects": [
+    "4:3",
+    "16:10",
+    "16:9",
+    "21:9",
+    "32:9"
+  ],
+  "runtime_registrations": "config/menu-ui-runtime-registrations.json",
+  "component_receipt_sha256": {
+    "menu-ui-restored-test-v1": "ca4d3f78f0bf4c0298014baa6e75df7da91cbe45d9a85898f71df42f897c2133",
+    "menu-ui-branding-registered-test-v1": "f0a6f49462502c45fd468265dd5be4b0038710223a394e5b02acd1368bcc2c0d",
+    "menu-ui-mode-conditional-test-v1": "9533e83fc193771870770258501a497e22bc31a3658a07456251eee8f5bdf049",
+    "menu-ui-extras-test-v1": "a0a9506ad2acdce18c37439fa4e336a56f9774789f2e846a1789ed64601d40b0",
+    "menu-ui-phone-test-v1": "7e9866ba17abde64220c520183fab9d08bff67ffae40efd8772b7531509431f1",
+    "menu-ui-popup-profile-test-v1": "a40dfbac9ea770223b8909450af258c9fd8fe12cde5a87292ff8498ab248f7f5",
+    "menu-ui-gym-controls-test-v1": "8ea4598faeeb0e34e62e158f6dda631a792fe218eca695c44cc8ffe3e5075559"
+  },
+  "retained_core_inputs": [
+    "faithful-hd-a512d2429f11-opacity",
+    "faithful-hd-a512d2429f11-channels"
+  ],
+  "retained_core_sha256": {
+    "0fbf5fd04abb0da6f5f3bf480edd362f68642c43551127b7f49a48e1ce425ea8": "fa056f144bc6f49f7a08012e6ca19e652197ab175817e4ba4df4a87e4acdc25b",
+    "42290375eda4db531edda2434ab77796cffbdff6a8e487e2504095ef8814d271": "b641d244ae05ac6f5801bcf3d466da94b4c4a48b3bd91edbfa0373a5df818958",
+    "4e14616005475a5f6ef45e94be97372ac82b202b9cd9a33b2f2c057db47952a4": "b7a0a17e7bd371930c1c12cbba426622136a5a59185a75077a32794155956e98",
+    "54845d31b4d5e066855854800aeea697144c022dfa6d27082ed6256488d46ddc": "de07d49ff5a9d290c343de0dc28570348804ad83075a0413f32bcb38ea5b9191",
+    "5fa7c5dd27f07bbd9501a7350364c8ca02e59ec374465d21c9a1d8480fdfdad8": "fef6d4d82422babc510e9be87634793c5c408b128879ae6e340f17e7ba3f3eb8",
+    "627117d2e69e0a56279f40cadd4397ffcb32192b8c110d40e2c54052e26ae168": "0e88f9e8655999ee1e43d6b060b8df1ff30badc9ebedd51c304f46b3071df26b",
+    "6625f23fd120b86adb03e00fd91805d8652dcaa8cfa342b8a70e198024898145": "33584201a3d8386107fbb529e69b2b9fc5c5242a97c0803763731a7ff34eef0c",
+    "7a5d6ce31c47aec8fdd9bbe11c9561a7d8cb833ded7058ab05cb229fad76d185": "54dc1248d58b5e97f5c7ce48d707c0001d62734a83d06cdd7009ffdcf7fc168b",
+    "7d0865734c55ce835cc76348e0e87472ee82bbdd23acf1a801496b1e08a9bb40": "fba17a82a826eee52059a2f956a1d02ccb31b1ab13916e56c3cd077a539bbd3e",
+    "7d0ce1a845a682f0a59b787a9cc5d90b1e83955036b60edb160d1acb930840fd": "bd53134d97c1d5793c0b7fea78ba64e3493bbfa9d6cc9caaf12e8434e12e06fd",
+    "85a965889ad5c66d51d2c6d5d23b8f4162c8366d7232a9202407848a41e06ab9": "9a2d7e4318476a450a8af96e7cfc401fd6b1bb10e1adaaf6aaac68932673b032",
+    "919550631f96c060cf70102059d3d185ac79b83e0d3f9d37949d731cc11c5bfd": "525ddfc56ca1e2abd909529b690b6226647fc7d11691a6ac713374e5d7850b52",
+    "a021919997cc9a50b377c257f6afed472242e7281e3f9ba8ca691525bba8ea77": "a5c7ec26ae0772d79e83f44ac7aba428fb2a877898ad1a3b8c3c9f495d98973b",
+    "abf733482ce82943700c7b23fd35f4d17705b1dcef1caa64c4faca9d0b60605e": "a672f58f1610549945d2237b3fbebc3486992995b7be3c2fd37ed39231969369",
+    "ade1b662e4d2e3e0c931dce2e003536431804e5e889114e7d20c3b2ed0b6edfb": "066fb4488af5427f3e6a00baf44435130e2e78832c9c4a998f62e6c95b9a3865",
+    "ba60f610a2911adafc27adaa9555c092751ac272c0ffbe2f65fb14ec7454af3d": "cb106105dee6e8f31dfd7eda4989adf71c6def475ab29d3c72c55407e888b4a1",
+    "bc5bf680bd2174a98d12944b3e77c419f9eef658e23628ad2aeac8e2956d5f45": "a0bc044986be8a81f5af9a5878e50856cd1e4d9f36b1a4b0a2cdb41b4cdd3703",
+    "bdd6aac6e45a1ef93f19941e4136b93965383646ec89fb2e47b0fe5e4d7bbe88": "ff4d4b4eb530c740cc3d8bc64328e33cb1ae7238e71d61e9e9fa0f5bc4244de5",
+    "bfb532b238b18aa0f3fe26cd486f4246756e2f24cdde428c7c9e929fbcda931b": "d98f57ade8bc6aecda8503cbeded2067b14e34fd9f4caa4f823d41beb618cec6",
+    "cc76ce61906858b8da3d522063f4a8d2e3cce1de51d7375a4db519f110676afb": "41d3fbc553fd2dd7dbeb7258fcc6e5a6e8a88cd4a0ec463310293d60c04c8eff",
+    "e2cdef62ca33d5a1d862fab5bf352014cd309f48543968eaca81db7a264ea5a2": "efb4c996556d1f842cd2b5c5361c8d96f2eb3358ca0dccab8944a5ea882fec9a",
+    "e35fc9487db642b2f97adc883a5f9f001a9eea99ac8ab4f30113282cc5e231c7": "a4bf39c04a9532396d0b1cbfcb9097440f580976c7c0b2f17db7a373b0d94dca",
+    "f924c4842d081a7d37d4112e64c7ce634380d8a2b4c3f172c0087942920a2aee": "8c596fc4d39f0e2eae661b24e469d6a313a5df9f0d434b8cae75592739f647a1"
+  }
+}

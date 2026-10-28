@@ -29,7 +29,7 @@ def inspect_payload(archive):
         folder = Path(temporary)
         package.safe_unpack(archive, folder)
         manifest = engine.verify_payload(folder, platform_of(archive))
-        for name in package.HD_SOURCES:
+        for name in package.HD_SOURCES + package.MOD_SOURCES:
             if 'source/' + name not in manifest['files']:
                 raise ValueError('Required HD setup source missing: ' + name)
         for name in manifest['files']:
@@ -61,7 +61,7 @@ def inspect_payload(archive):
                 python = folder / 'python/bin/python3'
                 python.chmod(0o755)   # safe_unpack keeps no modes; the shipped folder does
                 subprocess.run([python, '-B', '-c',
-                    'import capstone, xbe, tkinter, PIL, numpy, tools.disasm, tools.recomp, tools.xiso; print("Bundled runtime imports OK")'],
+                    'import capstone, xbe, tkinter, PIL, numpy, tools.disasm, tools.recomp, tools.xiso; from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey; print("Bundled runtime imports OK")'],
                     check=True, env={'PATH': '/usr/bin:/bin'})
                 subprocess.run([python, '-B', folder / 'source/scripts/build-hd-pack.py', '--help'], check=True,
                                stdout=subprocess.DEVNULL, env={'PATH': '/usr/bin:/bin'})
@@ -70,7 +70,7 @@ def inspect_payload(archive):
                 import subprocess
                 python = folder / 'python/bin/python3'
                 subprocess.run([python, '-B', '-c',
-                    'import capstone, xbe, PIL, numpy, tools.disasm, tools.recomp, tools.xiso; print("Bundled runtime imports OK")'],
+                    'import capstone, xbe, PIL, numpy, tools.disasm, tools.recomp, tools.xiso; from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey; print("Bundled runtime imports OK")'],
                     check=True, env={'PATH': '/usr/bin:/bin'})
                 subprocess.run([python, '-B', folder / 'source/scripts/build-hd-pack.py', '--help'], check=True,
                                stdout=subprocess.DEVNULL, env={'PATH': '/usr/bin:/bin'})
@@ -79,9 +79,12 @@ def inspect_payload(archive):
         elif sys.platform == 'win32':
             import subprocess
             subprocess.run([folder / 'python/python.exe', '-B', '-c',
-                'import capstone, xbe, PIL, numpy, tools.disasm, tools.recomp, tools.xiso; print("Embedded runtime imports OK")'], check=True)
+                'import capstone, xbe, PIL, numpy, tools.disasm, tools.recomp, tools.xiso; from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey; print("Embedded runtime imports OK")'], check=True)
             subprocess.run([folder / 'python/python.exe', '-B',
                             folder / 'source/scripts/build-hd-pack.py', '--help'], check=True,
+                           stdout=subprocess.DEVNULL)
+            subprocess.run([folder / 'python/python.exe', '-B',
+                            folder / 'source/setup/mods.py', '--help'], check=True,
                            stdout=subprocess.DEVNULL)
         return manifest
 

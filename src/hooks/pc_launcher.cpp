@@ -33,6 +33,7 @@ extern "C" {
 #include "pc_input.h"
 #include "pc_settings.h"
 #include "pc_ui.h"
+#include "pc_ui_actions.h"
 #include "pc_ui_internal.h"
 #include "updater.h"
 
@@ -360,6 +361,7 @@ extern "C" int pc_launcher_run(void)
     fprintf(stderr, "[UI] launcher shown\n");
     fflush(stderr);
 
+    bool open_setup = false;
     g_done = false;
     g_result = 1;
     const char *shot = getenv("RECOMP_WINDOW_SHOT");
@@ -401,7 +403,12 @@ extern "C" int pc_launcher_run(void)
         g_swap->Present(1, 0);
         if (play_frame && ++frames >= play_frame) res.play = true;
         if (res.play) { g_done = true; g_result = 1; }
-        if (res.leave) { g_done = true; g_result = 0; }
+        if (res.leave)
+        {
+            g_done = true;
+            g_result = 0;
+            open_setup = res.setup;
+        }
     }
 
     ui_lock();
@@ -416,6 +423,8 @@ extern "C" int pc_launcher_run(void)
     UnregisterClassW(L"DefJamRecompLauncher", GetModuleHandleW(nullptr));
     fprintf(stderr, "[UI] launcher closed: %s\n", g_result ? "play" : "quit");
     fflush(stderr);
+    if (open_setup)
+        pcui::setup_launch();
     return g_result;
 }
 

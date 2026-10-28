@@ -29,6 +29,7 @@
 #include <string.h>
 #include <math.h>
 #include "recomp/gen/recomp_types.h"
+#include "recorder.h"
 #include "test_observations.h"
 
 #define ACTORS        0x003B92E0u
@@ -100,8 +101,20 @@ static void put(const char *format, ...)
 static void end_line(void)
 {
     /* A line that filled the buffer was cut short and is not valid JSON: drop it. */
-    if (s_len < sizeof(s_line) - 1)
+    if (s_len < sizeof(s_line) - 1) {
         fprintf(stderr, "%s}\n", s_line);
+        /* And into the play-test recorder's events.jsonl, as {"kind":"game","tag":...}. */
+        if (recorder_on() && s_line[0] == '[') {
+            const char *close = strchr(s_line, ']');
+            const char *brace = close ? strchr(close, '{') : NULL;
+            if (brace) {
+                char fields[4200];
+                snprintf(fields, sizeof fields, "\"tag\":\"%.*s\",%s", (int)(close - s_line - 1), s_line + 1,
+                         brace + 1);
+                recorder_event("game", fields);
+            }
+        }
+    }
     s_len = 0;
     s_line[0] = 0;
 }
@@ -729,6 +742,8 @@ void defjam_test_input_clear(void)
     s_input_slots = 0;
 }
 
+/* The fight step: online play (netplay.c), the test controls and the recorder's frame rows (upstream);
+ * -1 outside a fight. */
 long long defjam_test_current_step(void) { return s_in_match ? (long long)s_step : -1; }
 /* Rollback (netplay.c): the step count goes back with a load. */
 void defjam_test_set_step(long long step) { if (s_in_match && step >= 0) s_step = step; }

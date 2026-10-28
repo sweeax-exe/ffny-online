@@ -68,7 +68,8 @@ well - see `src/recomp_manual.c`.
 6. **The save area is `$DEFJAM_DATA/save`** (TDATA and UDATA). Every harness run/soak guards the
    complete tree, including caches and the absence of a save root, and fails on unequal restoration.
    `save-guard/` retains three successful payloads and every failed backup; status markers live outside
-   payloads. Rebase runs use the preserved disposable save copy. Legacy name-hash compatibility verifies
+   payloads. A guard whose run was killed leaves a `state.json` in its stamp, and the next guard refuses to
+   start until `harness.py save-recover` settles it (`--restore` or `--accept`). Rebase runs use the preserved disposable save copy. Legacy name-hash compatibility verifies
    exact UTF-16 metadata and prefers canonical folders; it never renames or merges player folders (D52).
 7. **M4d items never formally met** (D45): two pads, private bytes stable over three fights, the rare
    `sub_001A3310` crash at a fight's start, the loading-bar glitch, a rare boot with no sound.
