@@ -228,7 +228,7 @@ guest offset), fault address 0xCE6669B4 = guest 0xBE6669B4 read as a pointer. [V
 
 ## 8. Fixes (question 5)
 
-Ordered by value for risk. None is implemented.
+Ordered by value for risk. P0 and P1 are implemented (2026-10-25, section 11); P3 is being done separately.
 
 | # | Change | Where | Effect | Risk |
 |---|---|---|---|---|
@@ -265,3 +265,92 @@ Order: P0 (so the next report is decisive) with P1 together, then P3 as the poli
 * The mechanism by which three extra draws change two fighters' positions by step 31 in the lab (no fighter-side reader was found).
 * Whether the time scale ever differed in any report.
 * Which heap block the `sub_000EDF90` crash read, and why the load left it stale.
+
+## 11. Measurements after P0 and P1 (2026-10-25)
+
+What was built: P1 in `netplay_on_step` (`shared_gen_reseed`), P0 in `fighter_hash` / `desync_detail` (`HASH_PARTS` 8; merged into build 35 as three words appended to the P_HASH extras of `src/hooks/netplay_check.h` instead, part 5 unchanged, so the first 37 bytes stay what builds 23..34 read). The seed routine
+was read in the lifted code before use: `sub_000AA0D0` (thiscall, `ret 8`) stores its two words at `this+0x80` (state) and `this+0x84`
+(increment), fills the 32 floats at `this+0..0x7C` from them and writes nothing else; esi/edi are pushed and popped, the x87 stack is
+balanced. The words are `mix32(match ^ mix32(step * 0x9E3779B9 ^ 0x39C0E0))` and `mix32(match ^ mix32(step * 0x85EBCA6B ^ 0x5EED39C1)) | 1`,
+the same on every PC and for a step rollback runs again (the re-run reaches `sub_00087700_enter` with `N.step` rewound). Lockstep only:
+offline play, the soak and the golden replay never reach it. `RECOMP_NETPLAY_GEN_PIN=off` (tests) turns it off.
+
+Set-up: two copies of one build on one PC (CPUs 28 and 30), a local relay with a fixed venue sequence (a scratch build of
+`netplay/relay` that answers every vote with the next venue of a list; not committed), `scripts/harness.py` routes `online5-p1/p2`
+and `online-p1/p2`, `RECOMP_TEST_OBSERVATIONS=1`, `RECOMP_TEST_DRAWS=1`, accounts at 127.0.0.1:9. "rng_util" is the state word
+`0x39C160` in the `[TEST-STATE]` sample, which `defjam_test_step` takes at the step's entry **before** the re-seed, so with P1 it still
+shows what was drawn outside the step since the last one. A temporary build also tagged each draw of `0x39C0E0` made between the
+update's start (`sub_0002C530`) and the step (`sub_00087700`) [not committed].
+
+| Run | Pin | Venues (match order) | Result |
+|---|---|---|---|
+| repro1 | off | Foundation, Terror Dome | Terror Dome: generator **different at step 1** (4280241561 / 1156477769) and in all 134 of 134 samples to step 3991; fighter checksums equal to the KO (step 3420). Foundation: 0 of 468 samples differ. |
+| fix1 | on | Foundation, Terror Dome, The Pit | 500 checksums equal, no desync (the session then stopped on a results screen, see below) |
+| fix2 | on | Foundation, Terror Dome, The Pit, Terror Dome, 125th Street | **1140 checksums equal, no desync**; Terror Dome samples different before the re-seed: 17 of 557 and 3 of 488, each one alone (the next sample equal again) |
+| rb1 | on, rollback on both, 60 ms (+0..10) lag | Foundation, Terror Dome | 680 checksums equal, no desync, no crash; 5839 and 7554 rollbacks (deepest 9 and 8 steps) |
+
+What the draw counts say ([TEST-DRAWS], generator 3784928):
+
+* **The loading-window drawer is `CArena`'s effect spawner** `sub_000937E0` (return address 0x93847), not the music director: in
+  repro1's Terror Dome match it had drawn 9 times on one PC and 17 on the other by step 1, with 473 and 926 screen updates since the
+  match set-up (`0x340538`). Every other site had equal counts at step 1 (music director 0x36EB6: 6 and 6). The offset is set by the
+  number of updates the venue's load took on each PC, so it changes from run to run: in fix1 and fix2 the counts happened to agree
+  (10 and 10) and step 1 was equal before the re-seed too.
+* **Order inside an update** (section 10, first open point): in a fight `CArena`'s draws (0x93847; its other sites 0x9398D.. did not draw) all fall **after**
+  the step; none came between the update's start and the step (the tagged count stayed at its loading-window value from step 1 to 900).
+  The music director (0x36EB6) draws **before** the step (6 -> 7 between steps 300 and 900 on one PC only in repro1; 11 -> 12 in fix2).
+  So the step-start re-seed is before every in-step reader and wipes the music director's host-timed draws; `CArena` then draws from
+  the pinned state plus the step's own draws. No gap that P2 would have to close was seen.
+* The isolated differences in fix2 are those music-director draws: one PC drew between two steps, the sample before the next step shows
+  it, the re-seed removes it. Without the pin the same event leaves a permanent offset (repro1).
+
+Not reproduced: the lab's fighter parting. In repro1 the generator was apart for the whole Terror Dome match and the fighters still
+stayed equal to the KO, so the generator offset is the precondition, not a sufficient cause, which fits section 10 ("mechanism ... not
+found"). With P1 the precondition cannot arise in a fight: the step sees a state that depends only on (match, step).
+
+P0, the next report's detail line:
+`desync detail: <fighters>; the CPU fighters' generators equal|differ|unused (no CPU fighters); the shared generator equal|differs;
+the time scale equal|differs (<here>, <there>); the match generator equal|differs`. With P1 the shared generator part is checked after
+the re-seed, so "differs" there means the re-seed itself failed; generator drift caused by draws inside the step shows in the fighters
+or the match generator.
+
+Seen on the way, not part of this fix: in a hub session the **loser's results screen can stop for good** (section 11b has the
+cases). Every time it was the loser's copy, and its own A presses on the summary did nothing.
+
+### 11b. After the rebase onto build 29 (2026-10-26)
+
+Rebased onto `remaster` 077bbe4 (builds 27 to 29: rollback server switch, King of the Hill lockstep, select() receive, crowd
+guard) without conflicts; re-lifted and rebuilt. Runs with `scripts/netplay-hub-test.ps1` (lockstep: the relay's rollback switch is
+off), CPUs 28 and 30, relay port 27847, the venue order fixed with the new `-Venues` (relay `-test-venues`).
+
+| Run | Pin | Settings | Venues played | Result |
+|---|---|---|---|---|
+| repro3 | off | `-FastKo 600` | Foundation, Terror Dome, The Pit, Terror Dome, Terror Dome | all checksums equal; 5th match (Terror Dome after Terror Dome): generator **different in 32 of 32 samples from step 1** (offset from the loading window); the 4th: 2 of 33 |
+| fix3 | on | `-FastKo 600` | Foundation | equal (session stopped on the results screen) |
+| fix3c | on | `-FastKo 600` | Foundation, Terror Dome | equal; Terror Dome **different at step 1 before the re-seed, equal in all 32 samples after** |
+| fix4 | on | natural fights | Foundation, Terror Dome, The Pit, Terror Dome | **980 checksums equal**, no desync; 2nd Terror Dome **different at step 1** (state 813727448 / 1237985602; draws so far: music director 40 / 41, CArena 284 / 291) and in 6 isolated samples later, fighters equal to the KO (step 3840) |
+| fix5 | on | `-Bot -FastKo 600 -FightSecs 9` | Foundation, Terror Dome, The Pit, Terror Dome | all checksums equal, all 109 generator samples equal |
+
+So on build 29 the pin was seen to erase a loading-window offset at step 1 twice (fix3c, fix4) and the fights stayed in step; without
+it the offset stayed for the whole match (repro3, as repro1). No desync in any run, with or without the pin: the fighters' parting of
+the lab case was not reproduced in four Terror Dome matches without the pin (repro1 one, repro3 three).
+
+Not reached: six matches in a row in one session after the rebase. Five sessions stopped on a results screen after 1, 2, 4, 4 and
+(before the rebase) 3 matches; fix2 before the rebase got through 5. What was seen at each stop:
+
+* It is always the loser's copy. Its summary stays up; its own scripted A presses (from 4 or 16 s, every 3 or 6 s, 10 to 12 of
+  them) do nothing, and `Game.UpdateMatchRewardsPoints()` never comes. The winner's copy is through and back in the room.
+* After the knockout each copy logs `the match is decided and player N went on ahead ... the rest runs on this PC alone`, so the
+  results screens run outside the lockstep, and on the loser's copy the winner's port then reads as a pad at rest (`fight_input`,
+  `REST_ONLY`).
+* The first guess, that the summary takes only the winner's pad and the winner had left before the loser's copy showed it, does not
+  hold for fix5: there the loser's copy showed its summary about 8 s before the winner's copy and was stuck anyway.
+* The routes' blind fight presses run 1200 s and so go on through the results screens; on the winner's copy they took the summary
+  and rewards in two seconds (fix3c, fix4). `-FightSecs` stops them, which did not prevent the fix5 stop.
+
+Whether real players hit it, and why the loser's copy takes no input there, is open; it does not touch the generator fix. The hub
+test gained `-Venues`, `-SummaryPresses`, `-FightSecs` and the route family `online8` for these runs.
+
+`regress.py --quick` on the rebased build: 5 of 5 passed (661 unit tests). Also: `regress.py --only replay` fails on this base as on the fixed build with the same numbers (76 records, golden 80, hash
+3495378e7de7...; measured 2026-10-25 on 747bffb with and without the fix): the golden stream does not match the current base, and the
+pin does not change it (offline never reaches it).

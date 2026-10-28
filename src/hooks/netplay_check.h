@@ -6,9 +6,14 @@
  *   13 bytes  (builds before 23)  u8 P_HASH, u32 match, u32 step, u32 hash
  *   37 bytes  (builds 23..33)     + NETCHECK_PARTS words: fighters 1-4, the CPU fighters' generators,
  *                                   the shared generator and time scale
- *   145 bytes (build 34 on)       + NETCHECK_EXTRA words, diagnostic only: per fighter slot 1-4 the
+ *   157 bytes (build 35 on)       + NETCHECK_EXTRA words, diagnostic only: per fighter slot 1-4 the
  *                                   six raw fields the hash covers, the hashes of the two pre-fight
- *                                   CLogic generators (0x376FDC, 0x375F68), the crowd hash
+ *                                   CLogic generators (0x376FDC, 0x375F68), the crowd hash, then the
+ *                                   shared generator's hash alone (0x39C0E0), the time scale word
+ *                                   (CLogic+4, 0x349764) and the match generator's hash (0x3C1400):
+ *                                   part 5 folds the first two together, and the King of the Hill
+ *                                   and Terror Dome reports could not say which of them parted
+ *                                   (docs/research/generator-timescale-desync.md, P0)
  * Only `hash` decides whether two PCs are in step; the rest says where they part. */
 #ifndef NETPLAY_CHECK_H
 #define NETPLAY_CHECK_H
@@ -22,7 +27,7 @@
 #define NETCHECK_SLOTS    4
 #define NETCHECK_FIELDS   6
 #define NETCHECK_GENS     2
-#define NETCHECK_EXTRA    (NETCHECK_SLOTS * NETCHECK_FIELDS + NETCHECK_GENS + 1)
+#define NETCHECK_EXTRA    (NETCHECK_SLOTS * NETCHECK_FIELDS + NETCHECK_GENS + 4)
 #define NETCHECK_LEN_OLD  13
 #define NETCHECK_LEN_PARTS (NETCHECK_LEN_OLD + 4 * NETCHECK_PARTS)
 #define NETCHECK_LEN_FULL (NETCHECK_LEN_PARTS + 4 * NETCHECK_EXTRA)
@@ -38,6 +43,7 @@ typedef struct NetCheck {
     uint32_t fields[NETCHECK_SLOTS][NETCHECK_FIELDS];
     uint32_t gens[NETCHECK_GENS];
     uint32_t crowd;
+    uint32_t shared, time_scale, match_gen;     /* part 5 split, and the match generator */
     int has_parts, has_extra;       /* what the sender's build sent */
 } NetCheck;
 
@@ -77,7 +83,10 @@ static int netcheck_pack(uint8_t *p, int size, uint8_t type, const NetCheck *c)
     for (k = 0; k < NETCHECK_SLOTS; k++)
         for (f = 0; f < NETCHECK_FIELDS; f++, at += 4) netcheck_put32(p + at, c->fields[k][f]);
     for (k = 0; k < NETCHECK_GENS; k++, at += 4) netcheck_put32(p + at, c->gens[k]);
-    netcheck_put32(p + at, c->crowd);
+    netcheck_put32(p + at, c->crowd); at += 4;
+    netcheck_put32(p + at, c->shared); at += 4;
+    netcheck_put32(p + at, c->time_scale); at += 4;
+    netcheck_put32(p + at, c->match_gen);
     return n;
 }
 
@@ -100,7 +109,10 @@ static int netcheck_unpack(const uint8_t *p, int len, NetCheck *c)
     for (k = 0; k < NETCHECK_SLOTS; k++)
         for (f = 0; f < NETCHECK_FIELDS; f++, at += 4) c->fields[k][f] = netcheck_get32(p + at);
     for (k = 0; k < NETCHECK_GENS; k++, at += 4) c->gens[k] = netcheck_get32(p + at);
-    c->crowd = netcheck_get32(p + at);
+    c->crowd = netcheck_get32(p + at); at += 4;
+    c->shared = netcheck_get32(p + at); at += 4;
+    c->time_scale = netcheck_get32(p + at); at += 4;
+    c->match_gen = netcheck_get32(p + at);
     return 1;
 }
 
@@ -130,13 +142,15 @@ static int netcheck_parts_text(char *out, int size, const NetCheck *mine, const 
             any = 1;
         }
     n = netcheck_cat(out, size, n, "%s; the CPU fighters' generators %s; the shared generator and time scale %s",
-                     any ? "" : "no fighter's fields", mine->parts[4] == theirs->parts[4] ? "equal" : "differ",
+                     any ? "" : "no fighter's fields",
+                     fighters <= players ? "unused (no CPU fighters)" : mine->parts[4] == theirs->parts[4] ? "equal" : "differ",
                      mine->parts[5] == theirs->parts[5] ? "equal" : "differ");
     return n;
 }
 
-/* The fields' line (build 34 on, both sides): every raw word that differs, "fighter 1 0x44 here X
- * there Y" (positions also as floats), then the pre-fight generators and the crowd. Returns 0 and
+/* The fields' line (build 35 on, both sides): every raw word that differs, "fighter 1 0x44 here X
+ * there Y" (positions also as floats), then the pre-fight generators, the crowd, the shared
+ * generator, the time scale (both values) and the match generator. Returns 0 and
  * writes nothing when either side sent no fields. */
 static int netcheck_fields_text(char *out, int size, const NetCheck *mine, const NetCheck *theirs, int fighters)
 {
@@ -168,6 +182,15 @@ static int netcheck_fields_text(char *out, int size, const NetCheck *mine, const
     n = netcheck_cat(out, size, n, "; crowd %s", mine->crowd == theirs->crowd ? "equal" : "differ");
     if (mine->crowd != theirs->crowd)
         n = netcheck_cat(out, size, n, " (here %08X there %08X)", (unsigned)mine->crowd, (unsigned)theirs->crowd);
+    {
+        float ts_mine, ts_theirs;
+        memcpy(&ts_mine, &mine->time_scale, 4);
+        memcpy(&ts_theirs, &theirs->time_scale, 4);
+        n = netcheck_cat(out, size, n, "; the shared generator %s; the time scale %s (%g here, %g there); "
+                         "the match generator %s", mine->shared == theirs->shared ? "equal" : "differs",
+                         mine->time_scale == theirs->time_scale ? "equal" : "differs", (double)ts_mine,
+                         (double)ts_theirs, mine->match_gen == theirs->match_gen ? "equal" : "differs");
+    }
     return n;
 }
 
