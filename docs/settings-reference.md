@@ -22,6 +22,7 @@ and what to do when something misbehaves, see [Controllers, keyboard and mouse](
 | Key | Default | Meaning |
 |---|---|---|
 | `skip` | `false` | Skip the launcher and start the game at once. The launcher shows on every launch unless this is on. Hold **Shift** while the game starts, or start it with `--launcher`, to see it anyway; turn this off in the overlay's Interface page or the launcher's own checkbox. Env `RECOMP_NO_LAUNCHER=1` skips it for one run. |
+| `gpu_notice_seen` | `false` | The launcher has shown its one-time notice for an integrated or small graphics card (Intel, or less than 1 GB of its own memory) with HD textures on: it recommends HD textures off and render scale 1. Either answer sets this; `false` shows the notice again. |
 
 ## [debug]
 
