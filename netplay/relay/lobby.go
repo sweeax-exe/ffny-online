@@ -154,6 +154,7 @@ func (r *Relay) leaveRoom(now time.Time, c *client, reason string) []Packet {
 		r.cfg.Logf("room %s closed (empty)", rm.code)
 		return nil
 	}
+	r.renameQuick(rm, c)
 	if rm.koth != nil {
 		r.hillLeft(now, rm, c, slot)
 		return r.changed(now, rm)
@@ -610,6 +611,25 @@ func quickName(player string) string {
 		name = name[:len(name)-size]
 	}
 	return name
+}
+
+// renameQuick renames a quick-match room ("Quick: <player>", made by QUICK) after the player it
+// is named after left or timed out: it becomes "Quick: <host>", so the room list never shows a
+// player who is gone. The settings are otherwise unchanged and nobody's ready flag is cleared.
+func (r *Relay) renameQuick(rm *room, gone *client) {
+	if !rm.quick && rm.koth == nil {
+		return
+	}
+	h := rm.host()
+	if h == nil || rm.settings.Name != quickName(gone.name) {
+		return
+	}
+	name := quickName(h.name)
+	if name == rm.settings.Name || !validName(name) {
+		return
+	}
+	rm.settings.Name = name
+	r.cfg.Logf("room %s renamed (quick room of a player who left)", rm.code)
 }
 
 // setSettings replaces the room settings (the host only, in phase 0, not in a

@@ -1004,3 +1004,62 @@ func TestLobbyUnsafeVenueLeftOut(t *testing.T) {
 		t.Fatalf("candidates %v", st.Candidates)
 	}
 }
+
+// A quick room is renamed after the player it is named after: "Quick: <host>" when that player
+// leaves or times out; a room a player made and named, or a quick room whose namesake is still
+// there, keeps its name.
+func TestQuickRoomRename(t *testing.T) {
+	l := newLobby(t, Config{IdleTimeout: 10 * time.Second})
+	l.enter(pA, "anna")
+	l.enter(pB, "ben")
+	l.enter(pC, "cleo")
+	code := onlyRoomTo(t, l.quickM(pA, 2, 4), pA).Room
+	roomOf(t, l.quickM(pB, 2, 4), pB)
+	roomOf(t, l.quickM(pC, 2, 4), pC)
+
+	// C (not the namesake) leaves: the name stays.
+	if st := roomOf(t, l.leave(pC), pA); st.Settings.Name != "Quick: anna" {
+		t.Fatalf("after C left %#v", st.Settings)
+	}
+	// A leaves: B is the host, and the room is B's.
+	st := roomOf(t, l.leave(pA), pB)
+	if st.Room != code || st.Settings.Name != "Quick: ben" || st.Host != 1 || st.Settings.Max != 4 || st.Settings.Mode != 2 {
+		t.Fatalf("after A left %#v", st)
+	}
+	if rs := l.listM(pC, ModeAny); len(rs.Rooms) != 1 || rs.Rooms[0].Name != "Quick: ben" {
+		t.Fatalf("list %#v", rs)
+	}
+	// A comes back by quick match; then B times out (a crash): the room becomes A's.
+	if st := roomOf(t, l.quickM(pA, 2, 4), pA); st.Room != code {
+		t.Fatalf("quick rejoin %#v", st)
+	}
+	var res []got
+	for i := 0; i < 10; i++ {
+		l.send(pA, Ping{Token: l.tok[pA]})
+		l.send(pC, Ping{Token: l.tok[pC]})
+		res = l.advance(time.Second)
+	}
+	if st := roomOf(t, res, pA); st.Settings.Name != "Quick: anna" || len(st.Players) != 1 {
+		t.Fatalf("after B timed out %#v", st)
+	}
+
+	// A King of the Hill quick room too.
+	l3 := newLobby(t, Config{})
+	l3.kenter(pA, "kim")
+	l3.kenter(pB, "lou")
+	roomOf(t, l3.quickM(pA, ModeKothRandom, 8), pA)
+	roomOf(t, l3.quickM(pB, ModeKothRandom, 8), pB)
+	if st := roomOf(t, l3.leave(pA), pB); st.Settings.Name != "Quick: lou" {
+		t.Fatalf("hill after A left %#v", st.Settings)
+	}
+
+	// A room made with CREATE keeps its name, even one that looks like a quick room.
+	l2 := newLobby(t, Config{})
+	l2.enter(pD, "dora")
+	l2.enter(pE, "eli")
+	code2 := roomOf(t, l2.mkRoom(pD, settings4("Quick: dora", 1)), pD).Room
+	roomOf(t, l2.joinCode(pE, code2), pE)
+	if st := roomOf(t, l2.leave(pD), pE); st.Settings.Name != "Quick: dora" {
+		t.Fatalf("created room renamed %#v", st.Settings)
+	}
+}

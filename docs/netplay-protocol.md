@@ -149,6 +149,7 @@ voting (for the countdown).
 - `QUICK` joins the public room in phase 0 with that mode (any `max`), a free slot and the most
   players (then the oldest); if there is none it creates a public room of that `max` named
   "Quick: <player>" (cut to 24 bytes) with `pool` = 1, 6, 19 and makes the client its host.
+  When that player leaves or times out, the room is renamed "Quick: <new host>" (since build 36).
   (Before FFNY Online build 15 the `max` had to match too and the room was named after the player.)
 - Errors as before: 1 room not found, 2 room full; new: **8** not allowed (not host, wrong phase),
   **9** not in a room / already in one.
