@@ -384,6 +384,8 @@ def online_rows(analyses, matches, require_hits=False, problems=None):
             if m.get("desync"):
                 d = m["desync"]
                 problems.append(tag + "desync at step %d (%s)" % (d["step"], (m.get("desync_detail") or "no detail")[:110]))
+                if m.get("desync_fields"):
+                    problems.append(tag + "desync fields: " + m["desync_fields"][:200])
                 row["desync"] = d["step"]
             for g in m.get("gave_up", []):
                 problems.append(tag + g[:120])
