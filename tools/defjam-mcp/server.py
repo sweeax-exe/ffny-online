@@ -1,145 +1,127 @@
 #!/usr/bin/env python3
-"""defjam-mcp: drive test copies of the game live, as an MCP server over stdio.
+"""defjam-mcp v2: drive test copies of the game, as an MCP server over stdio.
 
-Claude Code starts it from the repository's .mcp.json. Tools:
+Claude Code starts it from the repository's .mcp.json. The same features work from Bash through
+tools/defjam-mcp/dj.py (subagents often have no MCP tools); both use djlib/.
 
-  launch      start 1..4 copies (optionally online: a local relay, quick match), each with the
-              live control channel (src/hooks/test_control.c) and virtual pads
-  state       one copy's screen, last front-end calls, match (phase, clock, fighters' health) and
-              online status
-  press       press / hold / release controls on a copy's virtual pad
-  screenshot  the copy's window as a picture
-  log         lines of a copy's log, filtered
-  wait_for    wait until a copy's log has a line containing a text
-  to_menu     from wherever the copy is (title, legal screens) to the main menu
-  wait_state  wait until a state field meets a condition (e.g. match.phase == 1)
-  inject      pad bits for a fighter on exact fight steps (offline; frame-accurate tests)
-  match       start any match at once (mode, venue, fighters, CPUs) from the main menu
-  fe          run a front-end command (Game.*, Controller.*, ...) on the game thread
-  peek/poke   read / write guest memory
-  close       stop every copy and the relay this server started
+High level (one compact JSON result each, the main token saver):
+  scenario    online / offline / boot / gallery: runs the whole test under the machine lock and
+              answers with one line per match (start, front-end order, hits, summary, checksums,
+              desync detail, crash lines with sub_ names, load times, log and picture paths)
+  digest      the key events of any game log (also a player's F9 log) in <= ~60 lines
+  analyze     the online result of existing copy logs (e.g. a netplay-hub-test.ps1 run)
+  lock_status who holds the machine (test-lock.txt, test-priority.txt, running copies)
 
-Copies never touch the player's save: each runs on its own data folder beside the main one
-(<data>-mcp<N>: the dump and the generated folders as junctions, a fresh copy of the saves), and
-never reports to the live account service. Standard library only, plus Pillow for pictures.
+Live driving (launch first; it waits for the machine lock and makes disposable data roots):
+  launch, state, press, screenshot, log, wait_for, to_menu, goto, wait_state, inject, match, fe,
+  peek, poke, memdiff, save_state / load_state (the fight snapshot of the rollback code), close
+
+Copies never touch the player's save or the dump (each runs on its own data root), never report to
+the live account service or relays, and stop with this server. Standard library only (Pillow for
+pictures).
 """
-import base64
-import ctypes
-import io
 import json
 import os
-import shutil
-import socket
-import subprocess
 import sys
 import time
 
-REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-DATA = os.environ.get("DEFJAM_DATA") or r"D:\DefJam\data"
-EXE = os.path.join(REPO, "build", "win-x64-release", "defjam_recomp.exe")
-RELAY = os.path.join(REPO, "netplay", "relay", "dist", "relay.exe")
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from djlib import copies as djcopies, logparse, machine, nav, roots, scenarios  # noqa: E402
+
+REPO = machine.REPO
+DATA = machine.DATA
+EXE = machine.exe_path()
+RELAY = machine.relay_path()
 LOGS = os.path.join(REPO, "logs", "mcp")
 BASE_PORT = 4900
-INTRO_MOVIES = r"movies\eagames.mad;movies\thx.mad;movies\intro.mad"
-LINKED = ("extracted", "override", "online-art", "mods")
+INTRO_MOVIES = machine.INTRO_MOVIES
 
-COPIES = {}         # index -> dict(proc, port, log, sock)
-RELAY_PROC = None
+SESSION = None      # djcopies.Session of the live tools
+COPIES = {}         # index -> {"proc", "port", "log", "sock"} (also used by scripts/play-vs-bot.py)
+RELAY_PROC = None   # scripts/play-vs-bot.py starts its own relay here
+
+
+def log_stderr(msg):
+    print(msg, file=sys.stderr, flush=True)
 
 
 # ---- the copies -----------------------------------------------------------------------------
 
 def prepare_root(i):
-    root = DATA.rstrip("\\/") + "-mcp%d" % i
-    os.makedirs(root, exist_ok=True)
-    for name in LINKED:
-        src, dst = os.path.join(DATA, name), os.path.join(root, name)
-        if os.path.isdir(src) and not os.path.exists(dst):
-            subprocess.run(["cmd", "/c", "mklink", "/J", dst, src], capture_output=True)
-    save = os.path.join(root, "save")
-    if os.path.isdir(save):
-        shutil.rmtree(save)
-    if os.path.isdir(os.path.join(DATA, "save")):
-        shutil.copytree(os.path.join(DATA, "save"), save)
-    return root
+    """A managed data root for copy i (scripts/play-vs-bot.py)."""
+    return roots.create("mcp%d" % i)
 
 
 def launch(copies=1, online=False, quick="0,2", fighters=None, pads=1, fast_ko=0, env=None, visible=False,
-           ko_step=0, ko_winner="alt", bot=0, relay_port=27777, base_core=2):
-    global RELAY_PROC
+           ko_step=0, ko_winner="alt", bot=0, relay_port=27777, base_core=2, rollback="off", lock_timeout=900,
+           fixture=None):
+    global SESSION
     close()
-    if not os.path.isfile(EXE):
-        return {"error": "not built: " + EXE}
-    os.makedirs(LOGS, exist_ok=True)
     copies = max(1, min(4, int(copies)))
     fighters = fighters or [55, 22, 9, 31]
-    if online:
-        RELAY_PROC = subprocess.Popen([RELAY, "-listen", "127.0.0.1:%d" % int(relay_port), "-log-interval", "30s"],
-                                      stdout=open(os.path.join(LOGS, "relay.out"), "wb"),
-                                      stderr=open(os.path.join(LOGS, "relay.err"), "wb"),
-                                      creationflags=subprocess.CREATE_NO_WINDOW)
-        time.sleep(0.5)
-    started = []
-    for i in range(copies):
-        e = {k: v for k, v in os.environ.items() if not k.upper().startswith("RECOMP_")}
-        e.update({
-            "RECOMP_VBLANK": "1", "RECOMP_PB_EXEC": "1", "RECOMP_PB_D3D11": "1", "RECOMP_USB": "1",
-            "RECOMP_SETTINGS": "none", "RECOMP_SKIP_FILES": INTRO_MOVIES,
-            "RECOMP_TEST_OBSERVATIONS": "1", "RECOMP_ACCOUNT_SERVER": "127.0.0.1:9",
-            "RECOMP_INPUT_HOST": "1", "RECOMP_INPUT_IGNORE_FOCUS": "1", "RECOMP_PAD_HOST": "1",
-            "RECOMP_INPUT_NO_PADS": "1", "RECOMP_INPUT_VIRTUAL_PADS": str(max(1, min(4, int(pads)))),
-            "RECOMP_CONTROL_PORT": str(BASE_PORT + i),
-            "DEFJAM_DATA": prepare_root(i),
-        })
-        if not visible:
-            e["RECOMP_WINDOW_BACKGROUND"] = "1"
-        if i:
-            e["RECOMP_AUDIO_MUTE"] = "1"
-        # each copy's guest threads on a CPU of their own (2, 4, ...), as on a player's PC: two copies
-        # on CPU 2 starve each other, and spreading them (RECOMP_GUEST_CORES=all) runs the game thread
-        # beside the mixer, which rollback's page attribution assumes cannot happen
-        e["RECOMP_GUEST_CORE"] = str(int(base_core) + 2 * i)
-        if fast_ko:
-            e["RECOMP_TEST_FAST_KO"] = str(int(fast_ko))
-        if ko_step:     # the game knocks the loser out at that fight step (src/hooks/test_telemetry.c)
-            e["RECOMP_TEST_KO_STEP"] = "%d,%s" % (int(ko_step), ko_winner)
-        if bot:         # the state-reading bot drives the copy's fighter (src/hooks/test_bot.c)
-            e["RECOMP_TEST_BOT"] = "1,%d" % max(0, min(100, int(bot)))
+    SESSION = djcopies.Session("mcp", lock_timeout=lock_timeout, log=log_stderr)
+    try:
+        SESSION.open()
+    except TimeoutError as ex:
+        SESSION = None
+        return {"error": str(ex) + " (lock_status says who holds it)"}
+    try:
         if online:
-            e.update({"RECOMP_NETPLAY": "quick", "RECOMP_NETPLAY_SERVER": "127.0.0.1:%d" % int(relay_port),
-                      "RECOMP_NETPLAY_QUICK": quick, "RECOMP_NETPLAY_FIGHTER": str(fighters[i % len(fighters)])})
-        for k, v in (env or {}).items():
-            e[str(k)] = str(v)
-        log = os.path.join(LOGS, "copy%d.log.err" % i)
-        p = subprocess.Popen([EXE], cwd=REPO, env=e, stdout=open(os.path.join(LOGS, "copy%d.log" % i), "wb"),
-                             stderr=open(log, "wb"))
-        COPIES[i] = {"proc": p, "port": BASE_PORT + i, "log": log, "sock": None}
-        started.append({"copy": i, "pid": p.pid, "port": BASE_PORT + i, "log": log})
-        if online and i == 0:
-            time.sleep(3)       # the first copy opens the room and is player 1
-    return {"started": started, "online": bool(online)}
+            SESSION.relay(int(relay_port), rollback=(rollback == "on"))
+        started = []
+        for i in range(copies):
+            e = {"RECOMP_INPUT_HOST": "1", "RECOMP_INPUT_IGNORE_FOCUS": "1", "RECOMP_PAD_HOST": "1",
+                 "RECOMP_INPUT_NO_PADS": "1", "RECOMP_INPUT_VIRTUAL_PADS": str(max(1, min(4, int(pads)))),
+                 "RECOMP_CONTROL_PORT": str(BASE_PORT + i)}
+            if visible:
+                e["RECOMP_WINDOW_BACKGROUND"] = None
+            if fast_ko:
+                e["RECOMP_TEST_FAST_KO"] = str(int(fast_ko))
+            if ko_step:
+                e["RECOMP_TEST_KO_STEP"] = "%d,%s" % (int(ko_step), ko_winner)
+            if bot:
+                e["RECOMP_TEST_BOT"] = "1,%d" % max(0, min(100, int(bot)))
+            if online:
+                e.update({"RECOMP_NETPLAY": "quick", "RECOMP_NETPLAY_SERVER": "127.0.0.1:%d" % int(relay_port),
+                          "RECOMP_NETPLAY_QUICK": quick, "RECOMP_NETPLAY_FIGHTER": str(fighters[i % len(fighters)]),
+                          "RECOMP_ROLLBACK": "on" if rollback == "on" else "off"})
+            e.update(env or {})
+            c = SESSION.launch(i, env=e, core=int(base_core) + 2 * i, fixture=fixture)
+            COPIES[i] = {"proc": c.proc, "port": c.port, "log": c.log, "sock": None}
+            started.append({"copy": i, "pid": c.proc.pid, "port": c.port, "log": os.path.relpath(c.log, REPO)})
+            if online and i == 0:
+                time.sleep(3)       # the first copy opens the room and is player 1
+        return {"started": started, "online": bool(online), "lock_wait_s": SESSION.lock.waited_s}
+    except Exception as ex:     # noqa: BLE001 -- a failed launch leaves nothing behind
+        close()
+        return {"error": str(ex)}
 
 
 def close():
-    global RELAY_PROC
-    stopped = []
+    global SESSION, RELAY_PROC
+    out = {"stopped": []}
     for i, c in list(COPIES.items()):
         try:
-            if c["sock"]:
+            if c.get("sock"):
                 c["sock"].close()
         except OSError:
             pass
-        if c["proc"].poll() is None:
+        if SESSION is None and c["proc"].poll() is None:     # started outside a session (play-vs-bot)
             c["proc"].kill()
-            stopped.append(i)
+            out["stopped"].append(i)
         del COPIES[i]
-    if RELAY_PROC and RELAY_PROC.poll() is None:
+    if SESSION is not None:
+        out = SESSION.close()
+        SESSION = None
+    if RELAY_PROC is not None and RELAY_PROC.poll() is None:
         RELAY_PROC.kill()
     RELAY_PROC = None
-    return {"stopped": stopped}
+    return out
 
 
 def control(i, line, timeout=5.0):
+    """One control-channel command (src/hooks/test_control.c) to copy i, one JSON answer."""
+    import socket
     c = COPIES.get(int(i))
     if not c:
         return {"error": "no copy %s (launch first)" % i}
@@ -147,7 +129,7 @@ def control(i, line, timeout=5.0):
         return {"error": "copy %s exited with %s" % (i, c["proc"].returncode)}
     for attempt in range(2):
         try:
-            if not c["sock"]:
+            if not c.get("sock"):
                 c["sock"] = socket.create_connection(("127.0.0.1", c["port"]), timeout=timeout)
                 c["buf"] = b""
             c["sock"].sendall((line + "\n").encode())
@@ -161,7 +143,7 @@ def control(i, line, timeout=5.0):
             return json.loads(text.decode("utf-8", "replace"))
         except (OSError, ValueError) as ex:
             try:
-                if c["sock"]:
+                if c.get("sock"):
                     c["sock"].close()
             except OSError:
                 pass
@@ -176,13 +158,12 @@ def read_log(i, grep=None, last=40):
     c = COPIES.get(int(i))
     if not c:
         return {"error": "no copy %s" % i}
-    with open(c["log"], "rb") as f:
-        lines = f.read().decode("utf-8", "replace").splitlines()
-    noise = ("[NV2A]", "[TRANS]", "[GPU]", "[READ]", "[KERNEL]", "[D3D]", "[KTRAIL]", "[OHCI")
+    lines = logparse.read_text(c["log"]).splitlines()
+    noise = ("[NV2A]", "[TRANS]", "[GPU]", "[READ]", "[KERNEL]", "[D3D]", "[KTRAIL]", "[OHCI", "[TEST-STATE]")
     lines = [l for l in lines if not l.strip().startswith(noise)]
     if grep:
         lines = [l for l in lines if grep.lower() in l.lower()]
-    return {"lines": lines[-int(last):], "total": len(lines)}
+    return {"lines": [l[:220] for l in lines[-int(last):]], "total": len(lines)}
 
 
 def wait_for(i, text, timeout=120):
@@ -200,7 +181,7 @@ def wait_for(i, text, timeout=120):
         if k >= 0:
             start = data.rfind(b"\n", 0, k) + 1
             end = data.find(b"\n", k)
-            return {"found": True, "line": data[start:end if end > 0 else None].decode("utf-8", "replace"),
+            return {"found": True, "line": data[start:end if end > 0 else None].decode("utf-8", "replace")[:220],
                     "after_s": round(float(timeout) - (deadline - time.time()), 1)}
         time.sleep(0.5)
     return {"found": False, "timeout_s": timeout}
@@ -262,198 +243,227 @@ def to_menu(i, timeout=180):
     return {"ok": False, "error": "not at the main menu after %ss" % timeout}
 
 
-# ---- pictures --------------------------------------------------------------------------------
-
 def screenshot(i, scale=0.5):
-    from PIL import Image
     c = COPIES.get(int(i))
     if not c:
         return None, "no copy %s" % i
-    user32, gdi32 = ctypes.windll.user32, ctypes.windll.gdi32
-    pid = c["proc"].pid
-    found = []
-
-    class RECT(ctypes.Structure):
-        _fields_ = [("l", ctypes.c_long), ("t", ctypes.c_long), ("r", ctypes.c_long), ("b", ctypes.c_long)]
-
-    @ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
-    def each(hwnd, _):
-        p = ctypes.c_ulong()
-        user32.GetWindowThreadProcessId(ctypes.c_void_p(hwnd), ctypes.byref(p))
-        if p.value == pid:
-            r = RECT()
-            user32.GetClientRect(ctypes.c_void_p(hwnd), ctypes.byref(r))
-            found.append((r.r * r.b, hwnd))       # the game's window is the largest of its windows
-        return True
-    user32.EnumWindows(each, 0)
-    if not found:
-        return None, "no window yet"
-    hwnd = ctypes.c_void_p(max(found)[1])
-    rc = RECT()
-    user32.GetClientRect(hwnd, ctypes.byref(rc))
-    w, h = max(1, rc.r), max(1, rc.b)
-    hdc = user32.GetDC(hwnd)
-    mem = gdi32.CreateCompatibleDC(hdc)
-    bmp = gdi32.CreateCompatibleBitmap(hdc, w, h)
-    gdi32.SelectObject(mem, bmp)
-    user32.PrintWindow(hwnd, mem, 3)
-
-    class BMI(ctypes.Structure):
-        _fields_ = [("size", ctypes.c_uint32), ("w", ctypes.c_int32), ("h", ctypes.c_int32), ("planes", ctypes.c_uint16),
-                    ("bits", ctypes.c_uint16), ("comp", ctypes.c_uint32), ("img", ctypes.c_uint32), ("xp", ctypes.c_int32),
-                    ("yp", ctypes.c_int32), ("used", ctypes.c_uint32), ("imp", ctypes.c_uint32)]
-    bmi = BMI(ctypes.sizeof(BMI), w, -h, 1, 32, 0, 0, 0, 0, 0, 0)
-    buf = ctypes.create_string_buffer(w * h * 4)
-    gdi32.GetDIBits(mem, bmp, 0, h, buf, ctypes.byref(bmi), 0)
-    gdi32.DeleteObject(bmp)
-    gdi32.DeleteDC(mem)
-    user32.ReleaseDC(hwnd, hdc)
-    img = Image.frombuffer("RGBA", (w, h), buf.raw, "raw", "BGRA", 0, 1).convert("RGB")
-    if scale and float(scale) != 1.0:
-        img = img.resize((max(1, int(w * float(scale))), max(1, int(h * float(scale)))))
-    out = io.BytesIO()
-    img.save(out, "PNG")
-    return base64.b64encode(out.getvalue()).decode(), None
+    return djcopies.window_png(c["proc"].pid, None, scale)
 
 
 # ---- MCP over stdio --------------------------------------------------------------------------
 
+def _p(**props):
+    return {"type": "object", "properties": props}
+
+
+INT, NUM, STR, BOOL, ANY = {"type": "integer"}, {"type": "number"}, {"type": "string"}, {"type": "boolean"}, {}
+
 TOOLS = [
-    {"name": "launch", "description": "Start 1..4 test copies of the built game (closes earlier ones). online=true adds "
-     "a local relay and puts the copies into one quick-match room (quick='mode,players', e.g. '0,2' One on One, "
-     "'3,2' Tag Team with CPUs). pads = virtual pads per copy (2 for an offline versus). fast_ko = health percent "
-     "every fighter starts a match with (e.g. 5); the fighter at zero health still has to be finished. ko_step = the game "
-     "knocks the loser out at that fight step of every match (ko_winner: a slot, or 'alt' to alternate). bot = the "
-     "state-reading test bot drives each copy's fighter, with that aggression 1..100. relay_port and base_core (copy i "
-     "runs on CPU base_core + 2i) keep a second test apart from another one. env = extra RECOMP_ variables.",
-     "inputSchema": {"type": "object", "properties": {
-         "copies": {"type": "integer"}, "online": {"type": "boolean"}, "quick": {"type": "string"},
-         "fighters": {"type": "array", "items": {"type": "integer"}}, "pads": {"type": "integer"},
-         "fast_ko": {"type": "integer"}, "env": {"type": "object"}, "visible": {"type": "boolean"},
-         "ko_step": {"type": "integer"}, "ko_winner": {"type": "string"}, "bot": {"type": "integer"},
-         "relay_port": {"type": "integer"}, "base_core": {"type": "integer"}}}},
+    {"name": "scenario", "description": "Run a whole test under the machine lock and get one compact JSON result "
+     "(ok false on any failure). kind: online (args: matches, mode 1v1|ffa|team|koth, players, fighters [ids], "
+     "rollback on|off, fast_ko step (default 600, 0 off), ko_winner, bot (aggression or true), keep_going, "
+     "require_hits, timeout), offline (type, venue, f0, f1, cpu (default true), bot, fast_ko, turbo, fixture), "
+     "boot, gallery (page_ms). Online checks per match: started (lockstep/rollback, delay), the front-end order "
+     "(the screen's ResetMatchData before StartBattleMode), hits landed per slot (telemetry), the summary "
+     "accepted (UpdateMatchRewardsPoints, controller ids), checksums equal, desync detail, crashes with sub_ names, "
+     "load times; plus log and picture paths. Takes minutes; waits for other agents' tests first.",
+     "inputSchema": {"type": "object", "properties": {"kind": STR, "args": {"type": "object"}}, "required": ["kind"]}},
+    {"name": "digest", "description": "The key events of a game log in <= ~60 lines: settings/GPU/input, the screens, "
+     "one line per online match, waits and gave-ups, desync detail, the crash block with its sub_ and the real "
+     "callers (lifted-C filtered), [MEM], [INPUT] removed, [REPORT]. path: a log, or a logs/bug-reports/<id> folder.",
+     "inputSchema": {"type": "object", "properties": {"path": STR, "max": INT}, "required": ["path"]}},
+    {"name": "analyze", "description": "The online scenario's per-match result for existing copy logs (one per copy, "
+     "e.g. from scripts/netplay-hub-test.ps1).",
+     "inputSchema": {"type": "object", "properties": {"logs": {"type": "array", "items": STR}, "matches": INT},
+                     "required": ["logs"]}},
+    {"name": "lock_status", "description": "Who holds the machine: test-lock.txt, test-priority.txt, running game copies.",
+     "inputSchema": _p()},
+    {"name": "launch", "description": "Start 1..4 live test copies (closes earlier ones). Waits for the machine lock "
+     "(lock_timeout s, default 900) and makes a disposable data root per copy (fixture: a folder of save files copied "
+     "over it). online=true adds a local relay and puts the copies into one quick-match room (quick='mode,players', "
+     "e.g. '0,2' One on One, '64,2' King of the Hill; rollback on|off). pads = virtual pads per copy. ko_step = the "
+     "game knocks the loser out at that fight step (ko_winner: a slot or 'alt'); fast_ko = health percent at the start; "
+     "bot = the state-reading test bot fights (aggression 1..100). env = extra RECOMP_ variables (checked: local "
+     "addresses only, never RECOMP_GUEST_CORES=all).",
+     "inputSchema": _p(copies=INT, online=BOOL, quick=STR, fighters={"type": "array", "items": INT}, pads=INT,
+                       fast_ko=INT, env={"type": "object"}, visible=BOOL, ko_step=INT, ko_winner=STR, bot=INT,
+                       relay_port=INT, base_core=INT, rollback=STR, lock_timeout=NUM, fixture=STR)},
     {"name": "state", "description": "A copy's live state: current screen, the last front-end calls, the match (phase "
-     "0 start/1 fighting/2 decided/3 done, clock, type, fighters with health) and the online status.",
-     "inputSchema": {"type": "object", "properties": {"copy": {"type": "integer"}}}},
+     "0 start/1 fighting/2 decided/3 done, clock, type, step, fighters with health, state, position) and online status.",
+     "inputSchema": _p(copy=INT)},
     {"name": "press", "description": "Press controls on a copy's virtual pad. controls: names joined with + (a, b, x, y, "
      "start, back, black, white, left_trigger, right_trigger, dpad_up/down/left/right, left_stick_up/down/left/right, "
      "right_stick_..., left_thumb, right_thumb). mode: press (for ms, default 120), hold, release ('all' releases all).",
-     "inputSchema": {"type": "object", "properties": {"copy": {"type": "integer"}, "slot": {"type": "integer"},
-                     "controls": {"type": "string"}, "ms": {"type": "integer"}, "mode": {"type": "string"}},
+     "inputSchema": {"type": "object", "properties": {"copy": INT, "slot": INT, "controls": STR, "ms": INT, "mode": STR},
                      "required": ["controls"]}},
-    {"name": "screenshot", "description": "The copy's window as a PNG (scale 0.1..1, default 0.5).",
-     "inputSchema": {"type": "object", "properties": {"copy": {"type": "integer"}, "scale": {"type": "number"}}}},
-    {"name": "log", "description": "The last lines of a copy's log without GPU/kernel noise, optionally filtered by text.",
-     "inputSchema": {"type": "object", "properties": {"copy": {"type": "integer"}, "grep": {"type": "string"},
-                     "last": {"type": "integer"}}}},
+    {"name": "screenshot", "description": "The copy's own window as a PNG (scale 0.1..1, default 0.5).",
+     "inputSchema": _p(copy=INT, scale=NUM)},
+    {"name": "log", "description": "The last lines of a copy's log without GPU/kernel noise, optionally filtered by text. "
+     "Prefer digest for an overview.",
+     "inputSchema": _p(copy=INT, grep=STR, last=INT)},
     {"name": "wait_for", "description": "Wait until a copy's log has a line containing text (case-insensitive), e.g. "
      "'Match over', 'GetScreenInfo(intMain/mainMenu', '[CRASH]'. Returns that line.",
-     "inputSchema": {"type": "object", "properties": {"copy": {"type": "integer"}, "text": {"type": "string"},
-                     "timeout": {"type": "number"}}, "required": ["text"]}},
+     "inputSchema": {"type": "object", "properties": {"copy": INT, "text": STR, "timeout": NUM}, "required": ["text"]}},
     {"name": "to_menu", "description": "Take a copy from the title / legal / memory-card screens to the main menu.",
-     "inputSchema": {"type": "object", "properties": {"copy": {"type": "integer"}, "timeout": {"type": "number"}}}},
+     "inputSchema": _p(copy=INT, timeout=NUM)},
+    {"name": "goto", "description": "Main menu entry by name: target menu, story, battle, rewards, online or slot0..slot8. "
+     "Moves the cursor until the menu reports it (Online.Focus) on the entry, presses A and waits for the next screen.",
+     "inputSchema": {"type": "object", "properties": {"copy": INT, "target": STR, "timeout": NUM}, "required": ["target"]}},
     {"name": "wait_state", "description": "Wait until a field of the copy's state meets a condition. path is dotted "
      "(match.phase, match.step, match.fighters.1.state, online.lockstep.step, screen), op one of == != > >= < <= "
      "contains, value compared as the field's type (hex strings like 0x37 compare as numbers).",
-     "inputSchema": {"type": "object", "properties": {"copy": {"type": "integer"}, "path": {"type": "string"},
-                     "op": {"type": "string"}, "value": {}, "timeout": {"type": "number"}},
+     "inputSchema": {"type": "object", "properties": {"copy": INT, "path": STR, "op": STR, "value": ANY, "timeout": NUM},
                      "required": ["path", "op", "value"]}},
     {"name": "inject", "description": "Frame-accurate input for offline tests: from `start` steps after the current fight "
-     "step, for `steps` steps, fighter `slot` reads these pad-table bits instead of its pad (hex: 0x1 up? 0x8 right, 0x2, "
-     "0x4 directions; 0x10 0x20 0x40 0x80 0x1000 0x2000 the six action buttons; 0x10000 left stick active). "
-     "clear=true drops every interval. Online matches use their own lockstep input; use press there.",
-     "inputSchema": {"type": "object", "properties": {"copy": {"type": "integer"}, "slot": {"type": "integer"},
-                     "start": {"type": "integer"}, "steps": {"type": "integer"}, "bits": {"type": "string"},
-                     "clear": {"type": "boolean"}}}},
+     "step, for `steps` steps, fighter `slot` reads these pad-table bits instead of its pad (hex: 0x1 up, 0x2 down, "
+     "0x4 left, 0x8 right; 0x80 0x40 strikes, 0x20 grab, 0x2000 block, 0x1000 modifier). clear=true drops every "
+     "interval. Online matches use their own lockstep input; use press there.",
+     "inputSchema": _p(copy=INT, slot=INT, start=INT, steps=INT, bits=STR, clear=BOOL)},
     {"name": "match", "description": "Start a match on a copy as soon as it is at the main menu, without the menus: "
-     "spec like 'type=0,venue=6,f0=58,p0=0,f1=40,p1=-1' (type 0 One on One, 3 Tag Team, ...; venue = venue.xml feID; "
+     "spec like 'type=0,venue=6,f0=58,p0=0,f1=85,p1=-1' (type 0 One on One, 1 Tag, 2/3 FFA; venue = venue.xml feID; "
      "fN = Battle-mode fighter ID (fighter.xml ID; Teck 85, Santos 93, O.E 92, Eric Sermon 91); pN = controller port, -1 for the CPU; up to f3/p3).",
-     "inputSchema": {"type": "object", "properties": {"copy": {"type": "integer"}, "spec": {"type": "string"}},
-                     "required": ["spec"]}},
+     "inputSchema": {"type": "object", "properties": {"copy": INT, "spec": STR}, "required": ["spec"]}},
     {"name": "fe", "description": "Run one front-end command on a copy's game thread at the front end's next call "
-     "(e.g. 'Game.GetMatchInfo()', 'Control.GetScreenInfo(intMain/mainMenu.swf)'); the result is a [CONTROL] log line.",
-     "inputSchema": {"type": "object", "properties": {"copy": {"type": "integer"}, "command": {"type": "string"}},
-                     "required": ["command"]}},
+     "(e.g. 'Game.GetMatchInfo()'); the result is a [CONTROL] log line.",
+     "inputSchema": {"type": "object", "properties": {"copy": INT, "command": STR}, "required": ["command"]}},
+    {"name": "save_state", "description": "Snapshot the fight at the start of the next fight step (the rollback "
+     "code's save; offline test copies only). load_state goes back to it, to replay a moment (e.g. before a desync).",
+     "inputSchema": _p(copy=INT)},
+    {"name": "load_state", "description": "Go back to the last save_state snapshot at the start of the next fight step.",
+     "inputSchema": _p(copy=INT)},
     {"name": "peek", "description": "Read guest memory: address (e.g. 0x3B92E0), bytes up to 512. Returns hex.",
-     "inputSchema": {"type": "object", "properties": {"copy": {"type": "integer"}, "address": {"type": "string"},
-                     "bytes": {"type": "integer"}}, "required": ["address"]}},
+     "inputSchema": {"type": "object", "properties": {"copy": INT, "address": STR, "bytes": INT}, "required": ["address"]}},
     {"name": "memdiff", "description": "Which 4 KB pages of guest RAM change: call with phase 'begin', let the game "
      "run, then 'end'. Returns the changed ranges [address, KB] and the totals.",
-     "inputSchema": {"type": "object", "properties": {"copy": {"type": "integer"}, "phase": {"type": "string"}},
-                     "required": ["phase"]}},
+     "inputSchema": {"type": "object", "properties": {"copy": INT, "phase": STR}, "required": ["phase"]}},
     {"name": "poke", "description": "Write one aligned 32-bit word of guest memory (tests only).",
-     "inputSchema": {"type": "object", "properties": {"copy": {"type": "integer"}, "address": {"type": "string"},
-                     "value": {"type": "string"}}, "required": ["address", "value"]}},
-    {"name": "close", "description": "Stop every copy and the relay this server started.",
-     "inputSchema": {"type": "object", "properties": {}}},
+     "inputSchema": {"type": "object", "properties": {"copy": INT, "address": STR, "value": STR},
+                     "required": ["address", "value"]}},
+    {"name": "close", "description": "Stop every copy and relay this server started, delete their data roots and give "
+     "the machine lock back.", "inputSchema": _p()},
 ]
+
+
+def run_scenario(kind, a):
+    a = dict(a or {})
+    a.setdefault("log", log_stderr)
+    if kind == "online":
+        r = scenarios.online(**a)
+    elif kind == "offline":
+        r = scenarios.offline(**a)
+    elif kind == "boot":
+        r = scenarios.boot(**a)
+    elif kind == "gallery":
+        r = scenarios.gallery(**a)
+    else:
+        raise ValueError("kind: online, offline, boot or gallery")
+    return scenarios.format_result(r)
 
 
 def call(name, a):
     copy = a.get("copy", 0)
+    if name == "scenario":
+        close()
+        return [raw(run_scenario(a["kind"], a.get("args")))]
+    if name == "digest":
+        path = a["path"]
+        if os.path.isdir(path):
+            path = os.path.join(path, "log.txt")
+        lines = logparse.digest(logparse.read_text(path), max_lines=int(a.get("max", 60)),
+                                sites=logparse.load_call_sites(REPO), source=path)
+        return [raw("\n".join(lines))]
+    if name == "analyze":
+        analyses = {i: logparse.analyze_copy(logparse.read_text(p)) for i, p in enumerate(a["logs"])}
+        n = a.get("matches") or min(len(x["started"]) for x in analyses.values())
+        problems = []
+        rows, ok = scenarios.online_rows(analyses, n, False, problems)
+        return [raw(scenarios.compact_json({"ok": ok and not problems, "matches": rows, "problems": problems}))]
+    if name == "lock_status":
+        lock = machine.MachineLock()
+        text = lock.read()
+        try:
+            with open(lock.priority_path, encoding="utf-8", errors="replace") as f:
+                prio = f.read().strip()
+        except OSError:
+            prio = None
+        return [text_({"lock": machine.parse_lock(text)["who"] if text else None,
+                       "priority": prio.splitlines()[0][:150] if prio else None,
+                       "games": machine.games(), "this_agent": machine.agent_id(),
+                       "held_here": bool(SESSION and SESSION.lock.held)})]
     if name == "launch":
-        return [text(launch(a.get("copies", 1), a.get("online", False), a.get("quick", "0,2"), a.get("fighters"),
-                            a.get("pads", 1), a.get("fast_ko", 0), a.get("env"), a.get("visible", False),
-                            a.get("ko_step", 0), a.get("ko_winner", "alt"), a.get("bot", 0),
-                            a.get("relay_port", 27777), a.get("base_core", 2)))]
+        return [text_(launch(a.get("copies", 1), a.get("online", False), a.get("quick", "0,2"), a.get("fighters"),
+                             a.get("pads", 1), a.get("fast_ko", 0), a.get("env"), a.get("visible", False),
+                             a.get("ko_step", 0), a.get("ko_winner", "alt"), a.get("bot", 0),
+                             a.get("relay_port", 27777), a.get("base_core", 2), a.get("rollback", "off"),
+                             a.get("lock_timeout", 900), a.get("fixture")))]
     if name == "state":
-        return [text(control(copy, "state"))]
+        return [text_(control(copy, "state"))]
     if name == "press":
         mode = a.get("mode", "press")
         line = "%s %d %s" % (mode, int(a.get("slot", 0)), a.get("controls", "all"))
         if mode == "press":
             line += " %d" % int(a.get("ms", 120))
-        return [text(control(copy, line))]
+        return [text_(control(copy, line))]
     if name == "screenshot":
         data, err = screenshot(copy, a.get("scale", 0.5))
         if err:
-            return [text({"error": err})]
+            return [text_({"error": err})]
         return [{"type": "image", "data": data, "mimeType": "image/png"}]
     if name == "log":
-        return [text(read_log(copy, a.get("grep"), a.get("last", 40)))]
+        return [text_(read_log(copy, a.get("grep"), a.get("last", 40)))]
     if name == "wait_for":
-        return [text(wait_for(copy, a["text"], a.get("timeout", 120)))]
+        return [text_(wait_for(copy, a["text"], a.get("timeout", 120)))]
     if name == "to_menu":
-        return [text(to_menu(copy, a.get("timeout", 180)))]
+        return [text_(to_menu(copy, a.get("timeout", 180)))]
+    if name == "goto":
+        return [text_(nav.goto(control, a["target"], copy, a.get("timeout", 120)))]
     if name == "wait_state":
-        return [text(wait_state(copy, a["path"], a["op"], a["value"], a.get("timeout", 60)))]
+        return [text_(wait_state(copy, a["path"], a["op"], a["value"], a.get("timeout", 60)))]
     if name == "inject":
         if a.get("clear"):
-            return [text(control(copy, "inject clear"))]
-        return [text(control(copy, "inject %d %d %d %s" % (int(a.get("slot", 0)), int(a.get("start", 0)),
-                                                          int(a.get("steps", 1)), a.get("bits", "0"))))]
+            return [text_(control(copy, "inject clear"))]
+        return [text_(control(copy, "inject %d %d %d %s" % (int(a.get("slot", 0)), int(a.get("start", 0)),
+                                                           int(a.get("steps", 1)), a.get("bits", "0"))))]
     if name == "match":
-        return [text(control(copy, "match " + a["spec"]))]
+        return [text_(control(copy, "match " + a["spec"]))]
     if name == "fe":
-        return [text(control(copy, "fe " + a["command"]))]
+        return [text_(control(copy, "fe " + a["command"]))]
+    if name == "save_state":
+        return [text_(control(copy, "save"))]
+    if name == "load_state":
+        return [text_(control(copy, "load"))]
     if name == "peek":
-        return [text(control(copy, "peek %s %d" % (a["address"], int(a.get("bytes", 64)))))]
+        return [text_(control(copy, "peek %s %d" % (a["address"], int(a.get("bytes", 64)))))]
     if name == "memdiff":
-        return [text(control(copy, "memdiff " + a.get("phase", "begin"), timeout=30))]
+        return [text_(control(copy, "memdiff " + a.get("phase", "begin"), timeout=30))]
     if name == "poke":
-        return [text(control(copy, "poke %s %s" % (a["address"], a["value"])))]
+        return [text_(control(copy, "poke %s %s" % (a["address"], a["value"])))]
     if name == "close":
-        return [text(close())]
+        return [text_(close())]
     raise ValueError("unknown tool " + name)
 
 
-def text(obj):
+def text_(obj):
     return {"type": "text", "text": json.dumps(obj, ensure_ascii=False)}
 
 
+def raw(s):
+    return {"type": "text", "text": s}
+
+
 def main():
-    for raw in sys.stdin:
-        raw = raw.strip()
-        if not raw:
+    for line in sys.stdin:
+        line = line.strip()
+        if not line:
             continue
-        msg = json.loads(raw)
+        msg = json.loads(line)
         mid, method = msg.get("id"), msg.get("method")
         if mid is None:
             continue        # notifications
         try:
             if method == "initialize":
                 result = {"protocolVersion": msg.get("params", {}).get("protocolVersion", "2024-11-05"),
-                          "capabilities": {"tools": {}}, "serverInfo": {"name": "defjam", "version": "1"}}
+                          "capabilities": {"tools": {}}, "serverInfo": {"name": "defjam", "version": "2"}}
             elif method == "tools/list":
                 result = {"tools": TOOLS}
             elif method == "tools/call":
@@ -461,7 +471,7 @@ def main():
                 try:
                     result = {"content": call(p.get("name"), p.get("arguments") or {})}
                 except Exception as ex:     # a tool error goes back to the model, not over the protocol
-                    result = {"content": [text({"error": str(ex)})], "isError": True}
+                    result = {"content": [text_({"error": str(ex)})], "isError": True}
             elif method == "ping":
                 result = {}
             else:

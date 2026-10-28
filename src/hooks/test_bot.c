@@ -26,6 +26,16 @@
  * BOT_PUNCH, BOT_KICK, BOT_GRAB, BOT_BLOCK below were found by pressing each action bit beside
  * the opponent in a step-input probe and reading the fighter's state afterwards.
  *
+ * Behaviours (RECOMP_TEST_BOT_PLAN="p1=aggressive,p2=counter", or slots "0=...,1=...", or one name for
+ * all): balanced (the default above), aggressive (aggression 100), defensive (20), block (holds block
+ * within reach), grapple (mostly grabs and their follow-ups), counter (waits in reach and presses
+ * block on the first step of the opponent's strike wind-up, states 0x45..0x4B; an attempt is clean
+ * when no damage follows within 30 steps), mash (strings of strikes only) and idle (presses nothing).
+ * Every behaviour but idle mashes strikes while its fighter is held (state 0x35). When a fight is
+ * decided, each slot the bot drove gets a "[TEST-BOT] summary" line: what it tried (strikes, grabs,
+ * block steps, counters) against what came of it (clean counters, holds broken within 20 steps); the
+ * hits that landed are in the telemetry. Steps rollback runs again are not counted.
+ *
  * Tests only: nothing here runs unless RECOMP_TEST_BOT is set. */
 #include "host.h"
 #include <stdio.h>
@@ -83,7 +93,24 @@ typedef struct {
     uint32_t detour_dir;
 } BotMemory;
 
+enum { B_BALANCED, B_AGGRESSIVE, B_DEFENSIVE, B_BLOCK, B_GRAPPLE, B_COUNTER, B_MASH, B_IDLE, B_COUNT };
+static const char *const k_behaviour[B_COUNT] = { "balanced", "aggressive", "defensive", "block", "grapple",
+                                                  "counter", "mash", "idle" };
+
+typedef struct {
+    unsigned strikes, grabs, blocks;        /* a strike / the grab newly pressed; steps block held */
+    unsigned windups, counters, clean;      /* wind-ups in reach seen, counters tried, no damage after */
+    unsigned held, mashed, broke;           /* times held (0x35), mash presses, holds left within 20 steps */
+    long long ctr_until, ctr_hold_until, held_since;
+    float ctr_health;
+    uint32_t last_buttons, last_opp_state;
+    int driven;
+} BotStats;
+
 static BotMemory s_mem[SLOTS];
+static BotStats s_stats[SLOTS];
+static int s_beh[SLOTS];
+static int s_fighting;
 static int s_on = -1, s_aggr = 60, s_slots_mask = -1;
 static uint32_t s_seed_extra;
 static LONG s_lines = 400;
@@ -125,6 +152,35 @@ static void configure(void)
     }
     seed = getenv("RECOMP_TEST_BOT_SEED");
     s_seed_extra = seed ? (uint32_t)strtoul(seed, NULL, 0) : 0;
+    {   /* RECOMP_TEST_BOT_PLAN="p1=aggressive,p2=counter" (p1 = slot 0), "0=...,1=..." or one name for all */
+        const char *plan = getenv("RECOMP_TEST_BOT_PLAN");
+        char buf[160], *tok, *ctx = NULL;
+        int i, b;
+        for (i = 0; i < SLOTS; i++) s_beh[i] = B_BALANCED;
+        if (plan && *plan) {
+            snprintf(buf, sizeof(buf), "%s", plan);
+            for (tok = strtok_s(buf, ",;", &ctx); tok; tok = strtok_s(NULL, ",;", &ctx)) {
+                char *eq = strchr(tok, '=');
+                const char *name = eq ? eq + 1 : tok;
+                int slot = -1;
+                if (eq) {
+                    *eq = 0;
+                    slot = (tok[0] == 'p' || tok[0] == 'P') ? atoi(tok + 1) - 1 : atoi(tok);
+                }
+                for (b = 0; b < B_COUNT; b++)
+                    if (!_stricmp(name, k_behaviour[b])) break;
+                if (b == B_COUNT) {
+                    fprintf(stderr, "[TEST-BOT] unknown behaviour '%s' (balanced, aggressive, defensive, block, "
+                                    "grapple, counter, mash, idle)\n", name);
+                    continue;
+                }
+                if (slot < 0) { for (i = 0; i < SLOTS; i++) s_beh[i] = b; }
+                else if (slot < SLOTS) s_beh[slot] = b;
+            }
+            fprintf(stderr, "[TEST-BOT] plan: slot 0 %s, slot 1 %s, slot 2 %s, slot 3 %s\n", k_behaviour[s_beh[0]],
+                    k_behaviour[s_beh[1]], k_behaviour[s_beh[2]], k_behaviour[s_beh[3]]);
+        }
+    }
     fprintf(stderr, "[TEST-BOT] on: aggression %d, slots %s\n", s_aggr,
             s_slots_mask < 0 ? "the human ones (online: this PC's)" : getenv("RECOMP_TEST_BOT_SLOTS"));
 }
@@ -139,6 +195,8 @@ void defjam_test_bot_match_start(void)
 {
     int i, d;
     memset(s_mem, 0, sizeof(s_mem));
+    memset(s_stats, 0, sizeof(s_stats));
+    s_fighting = 0;
     /* a first guess before anything is learned, from the camera at the start (it looks along +z,
      * player 1 on the left): right is +x (the scripted routes walk player 1 to player 2 with
      * "right"), left -x, up +z, down -z. Walking corrects it as the camera turns. */
@@ -234,10 +292,15 @@ static uint32_t decide(int slot, long long step)
     uint32_t me = rec(slot), them, buttons = 0, toward;
     int opp_low, opp_stunned, opp_down;
 
+    BotStats *bs = &s_stats[slot];
+    int beh = s_beh[slot], counting = !netplay_rerunning();
+    int aggr = beh == B_AGGRESSIVE ? 100 : beh == B_DEFENSIVE ? 20 : s_aggr;
+    uint32_t mine_state;
+
     learn(m, slot, step);
     if (MEM32(G_PHASE) != 1u) return 0;
     opp = nearest_opponent(slot, &dist);
-    if (opp < 0) return 0;
+    if (opp < 0 || beh == B_IDLE) return 0;
     them = rec(opp);
     x = f32(me + F_POS_X); z = f32(me + F_POS_Z);
     ox = f32(them + F_POS_X); oz = f32(them + F_POS_Z);
@@ -254,7 +317,7 @@ static uint32_t decide(int slot, long long step)
     {
         uint32_t st = MEM32(them + F_STATE);
         if (st >= 0x45u && st <= 0x4Bu && dist < REACH * 1.3f && m->intent != I_BLOCK &&
-            roll(slot, window, 8) < 15 + (100 - s_aggr) / 3 && phase_in == 0)
+            roll(slot, window, 8) < 15 + (100 - aggr) / 3 && phase_in == 0)
             m->intent_window = -1;      /* choose again below, as a block */
     }
 
@@ -285,13 +348,52 @@ static uint32_t decide(int slot, long long step)
         } else if (dist > REACH) {
             m->intent = I_APPROACH;
         } else {
-            int block = 8 + (100 - s_aggr) / 4 + (ratio < 0.3f ? 10 : 0);
-            int grab = 22;
+            int block = 8 + (100 - aggr) / 4 + (ratio < 0.3f ? 10 : 0);
+            int grab = beh == B_GRAPPLE ? 70 : 22;
+            if (beh == B_MASH) block = grab = 0;
             if (r < block) m->intent = I_BLOCK;
             else if (r < block + grab) m->intent = I_GRAB;
             else if (r < block + grab + 15) m->intent = I_HEAVY;
             else if (r < block + grab + 15 + 6) m->intent = I_CIRCLE;
             else m->intent = I_STRIKE;
+        }
+    }
+    mine_state = MEM32(me + F_STATE);
+    /* held in a grapple (0x35): every behaviour mashes strikes to break it */
+    if (mine_state == 0x35u) {
+        if (!bs->held_since) { bs->held_since = step; if (counting) bs->held++; }
+        buttons = (step & 1) ? BOT_PUNCH : BOT_KICK;
+        if (counting) bs->mashed++;
+        goto chosen;
+    }
+    if (bs->held_since) {
+        if (step - bs->held_since < 20 && counting) bs->broke++;
+        bs->held_since = 0;
+    }
+    if (beh == B_BLOCK) {
+        buttons = dist < REACH * 1.5f ? BOT_BLOCK : 0;
+        goto chosen;
+    }
+    if (beh == B_COUNTER) {
+        uint32_t st = MEM32(them + F_STATE);
+        int windup = st >= 0x45u && st <= 0x4Bu && dist < REACH * 1.3f;
+        int was = bs->last_opp_state >= 0x45u && bs->last_opp_state <= 0x4Bu;
+        if (windup && !was && counting) bs->windups++;
+        if (bs->ctr_until && step >= bs->ctr_until) {        /* an attempt is over: did damage follow? */
+            if (f32(me + F_HEALTH) >= bs->ctr_health && counting) bs->clean++;
+            bs->ctr_until = 0;
+        }
+        if (windup && !was && !bs->ctr_until) {               /* the wind-up's first step: block now */
+            bs->ctr_until = step + 30;
+            bs->ctr_hold_until = step + 8;
+            bs->ctr_health = f32(me + F_HEALTH);
+            if (counting) bs->counters++;
+        }
+        bs->last_opp_state = st;
+        if (step < bs->ctr_hold_until) { buttons = BOT_BLOCK; goto chosen; }
+        if (!(opp_low || opp_stunned || opp_down)) {         /* otherwise wait in reach for the next strike */
+            buttons = dist > REACH * 0.9f ? toward : 0;
+            goto chosen;
         }
     }
     switch (m->intent) {
@@ -327,6 +429,16 @@ static uint32_t decide(int slot, long long step)
     if (dist > REACH && m->intent != I_APPROACH && m->intent != I_CIRCLE && m->intent != I_FINISH)
         buttons |= toward;      /* never stand off out of reach */
     if (step < m->detour_until && dist > REACH) buttons = m->detour_dir;
+chosen:
+    if (counting) {
+        uint32_t fresh = buttons & ~bs->last_buttons;
+        if (fresh & (BOT_PUNCH | BOT_KICK)) bs->strikes++;
+        if (fresh & BOT_GRAB) bs->grabs++;
+        if (buttons & BOT_BLOCK) bs->blocks++;
+        bs->last_buttons = buttons;
+        bs->driven = 1;
+        s_fighting = 1;
+    }
     m->held_dir = buttons & 0xFu;
     m->held_step = step;
     if (s_lines > 0 && step % 300 == 7) {
@@ -338,6 +450,20 @@ static uint32_t decide(int slot, long long step)
     return buttons;
 }
 
+/* One line per slot the bot drove, once the fight is decided. */
+static void print_summary(void)
+{
+    int i;
+    for (i = 0; i < SLOTS; i++) {
+        const BotStats *b = &s_stats[i];
+        if (!b->driven) continue;
+        fprintf(stderr, "[TEST-BOT] summary slot %d (%s): strikes %u, grabs %u, block steps %u, counters %u of %u "
+                        "wind-ups (%u clean), held %u (mashed %u, broke %u)\n", i, k_behaviour[s_beh[i]], b->strikes,
+                b->grabs, b->blocks, b->counters, b->windups, b->clean, b->held, b->mashed, b->broke);
+    }
+    s_fighting = 0;
+}
+
 /* sub_001BAA00's entry (through defjam_test_input): 1 when the bot wrote this fighter's pad. */
 int defjam_test_bot_input(uint32_t actor, int slot, long long step)
 {
@@ -345,6 +471,7 @@ int defjam_test_bot_input(uint32_t actor, int slot, long long step)
     int local;
     (void)actor;
     if (!defjam_test_bot_enabled() || slot < 0 || slot >= SLOTS || step < 1) return 0;
+    if (s_fighting && MEM32(G_PHASE) != 1u) print_summary();
     /* Only while the fight runs: the fighters still read their pads under the winner's scene and
      * the results, and an entry cleared there took the menu's presses away (online, 2026-10-25). */
     if (MEM32(G_PHASE) != 1u) return 0;
