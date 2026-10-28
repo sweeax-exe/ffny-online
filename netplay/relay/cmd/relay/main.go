@@ -116,7 +116,8 @@ func main() {
 		log.Printf("relay: tests: every datagram held %v", *testLag)
 	}
 	if *accountsURL != "" {
-		cfg.Accounts = relay.AccountsHTTP{Base: *accountsURL, Client: &http.Client{Timeout: 10 * time.Second}}
+		// A remote account service (the Cloudflare Worker) wants a shared secret; the local one does not.
+		cfg.Accounts = relay.AccountsHTTP{Base: *accountsURL, Token: os.Getenv("ACCOUNTS_INTERNAL_TOKEN"), Client: &http.Client{Timeout: 10 * time.Second}}
 		log.Printf("relay: ranked play on, accounts at %s", *accountsURL)
 	}
 	// The published build: older builds may not start online sessions, rooms or matches.

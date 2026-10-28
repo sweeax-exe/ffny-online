@@ -57,17 +57,25 @@ static int request_body_ms(const wchar_t *method, const wchar_t *path, const cha
     int n = 0;
     buf[0] = 0;
     /* RECOMP_ACCOUNT_SERVER=127.0.0.1:8095: tests talk plain HTTP to a local service with test
-     * accounts, so they never touch the players' real statistics. */
+     * accounts, so they never touch the players' real statistics. "https://host" talks TLS to
+     * another deployment of the service (a test Worker), on port 443 unless one is given. */
     const char *test = getenv("RECOMP_ACCOUNT_SERVER");
     wchar_t host[64] = ACCOUNT_HOST;
     INTERNET_PORT port = INTERNET_DEFAULT_HTTPS_PORT;
     DWORD secure = WINHTTP_FLAG_SECURE;
     if (test && *test) {
-        const char *colon = strchr(test, ':');
-        int len = colon ? (int)(colon - test) : (int)strlen(test);
+        int tls = strncmp(test, "https://", 8) == 0;
+        const char *colon, *slash;
+        int len;
+        if (tls) test += 8;
+        else if (strncmp(test, "http://", 7) == 0) test += 7;
+        colon = strchr(test, ':');
+        slash = strchr(test, '/');
+        if (colon && slash && slash < colon) colon = NULL;
+        len = colon ? (int)(colon - test) : slash ? (int)(slash - test) : (int)strlen(test);
         swprintf(host, 64, L"%.*hs", len, test);
-        port = (INTERNET_PORT)(colon ? atoi(colon + 1) : 80);
-        secure = 0;
+        port = (INTERNET_PORT)(colon ? atoi(colon + 1) : tls ? 443 : 80);
+        secure = tls ? WINHTTP_FLAG_SECURE : 0;
     }
     session = WinHttpOpen(L"FFNY-Online-Launcher/1", test && *test ? WINHTTP_ACCESS_TYPE_NO_PROXY : WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
                           WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
@@ -302,7 +310,14 @@ static DWORD WINAPI sign_in_thread(LPVOID unused)
     (void)unused;
     random_hex(secret);
     if (!sha256_hex(secret, login)) { set_reason("Windows could not start the sign-in."); set_state(ACCOUNT_FAILED); return 0; }
-    snprintf(url, sizeof(url), ACCOUNT_URL "/auth/discord/start?login=%s", login);
+    {
+        /* The browser goes where the requests go (a test service), else to the real one. */
+        const char *test = getenv("RECOMP_ACCOUNT_SERVER");
+        char base[96] = ACCOUNT_URL;
+        if (test && *test)
+            snprintf(base, sizeof(base), "%s%s", strstr(test, "://") ? "" : "http://", test);
+        snprintf(url, sizeof(url), "%s/auth/discord/start?login=%s", base, login);
+    }
     if ((INT_PTR)ShellExecuteA(NULL, "open", url, NULL, NULL, SW_SHOWNORMAL) <= 32) {
         set_reason("The browser did not open.");
         set_state(ACCOUNT_FAILED);

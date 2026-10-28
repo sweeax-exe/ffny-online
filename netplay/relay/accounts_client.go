@@ -27,6 +27,7 @@ var ErrTicketRefused = errors.New("ranked ticket refused")
 // AccountsHTTP talks to the account service's local internal listener (never the public one).
 type AccountsHTTP struct {
 	Base   string // e.g. "http://127.0.0.1:8091"
+	Token  string // sent as X-Internal-Token when the service is remote and wants one
 	Client *http.Client
 }
 
@@ -40,6 +41,9 @@ func (a AccountsHTTP) post(ctx context.Context, path string, in, out any) (int, 
 		return 0, err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if a.Token != "" {
+		req.Header.Set("X-Internal-Token", a.Token)
+	}
 	client := a.Client
 	if client == nil {
 		client = http.DefaultClient
