@@ -650,6 +650,32 @@ static void load_debug_env(const char *root)
     fclose(f);
 }
 
+/* Players started defjam_recomp.exe from <install>\build-cache\... (where setup compiles it) instead
+ * of the launcher: no data folder is found from there, so the game runs as build 0, never updates
+ * and cannot play online. Seen by the exe's own path; RECOMP_TEST_OUTSIDE_LAUNCHER=1 for tests. */
+static int g_outside_launcher;
+int pc_settings_started_outside_launcher(void) { return g_outside_launcher; }
+
+static void check_started_outside_launcher(int have_root)
+{
+#if defined(_WIN32)
+    if (!have_root) {
+        char exe[MAX_PATH];
+        DWORD n = GetModuleFileNameA(NULL, exe, MAX_PATH);
+        if (n && n < MAX_PATH) {
+            _strlwr(exe);
+            g_outside_launcher = strstr(exe, "\\build-cache\\") != NULL;
+        }
+    }
+#else
+    (void)have_root;
+#endif
+    if (getenv("RECOMP_TEST_OUTSIDE_LAUNCHER")) g_outside_launcher = 1;
+    if (g_outside_launcher)
+        fprintf(stderr, "[SETTINGS] started from the setup's build folder, not with the launcher: no data folder, "
+                        "build 0, no updates\n");
+}
+
 int pc_settings_init(void)
 {
     char root[MAX_PATH * 2];
@@ -746,6 +772,7 @@ int pc_settings_init(void)
         fprintf(stderr, "[SETTINGS] data folder %s\n", root);
     else
         fprintf(stderr, "[SETTINGS] no data folder found; saves use the runtime's default location\n");
+    check_started_outside_launcher(have_root);
 
     pc_input_start();
     run_launcher_if_wanted();
