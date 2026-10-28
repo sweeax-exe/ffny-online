@@ -134,6 +134,8 @@ static void read_env(void)
 }
 
 int  dev_module_active(void) { uint32_t m = MEM32(MANAGER_SLOT); return s_object && m && MEM32(m + MGR_CURRENT) == s_object; }
+/* Only the front end (type 0) can be left for it: from the Story crib it crashed at Load (report b185a7). */
+int  dev_module_can_start(void) { uint32_t m = MEM32(MANAGER_SLOT); return m && module_type(MEM32(m + MGR_CURRENT)) == 0; }
 void dev_module_request(int for_scene)
 {
     if (s_mode < 0) read_env();

@@ -1929,19 +1929,22 @@ static void page_debug(UiMode mode)
         }
         int playing = scene_launcher_playing();
         bool active = dev_module_active() != 0;
-        ImGui::BeginDisabled(playing >= 0);
+        bool can_start = active || dev_module_can_start() != 0;
+        ImGui::BeginDisabled(playing >= 0 || !can_start);
         ImGui::SameLine();
         if (ImGui::Button("Play scene")) {
             scene_launcher_request(pick);
             dev_module_request(active ? 0 : 1);
         }
         item_tooltip("Plays the scene in the game's developer cinema mode, then returns to the main menu. "
-                              "Whatever is running now (a fight, the Story) is left. Close the overlay to watch.");
+                              "Only from the main menu. Close the overlay to watch.");
         ImGui::EndDisabled();
         if (!active) {
+            ImGui::BeginDisabled(!can_start);
             if (ImGui::Button("Developer menu")) dev_module_request(0);
             item_tooltip("EA's own debug menu, driven by pad 1 (try the d-pad and A). "
-                                  "Leaves what is running now.");
+                                  "Only from the main menu: the Story and fights cannot be left for it.");
+            ImGui::EndDisabled();
         } else if (ImGui::Button("Back to the main menu")) {
             dev_module_leave();
         }
