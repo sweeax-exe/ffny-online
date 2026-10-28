@@ -2553,6 +2553,7 @@ static void end_glass_modal()
 }
 
 // After a crash, an offer to send that run's log (bug_report.c); F9 cannot, the game is gone.
+static bool g_crash_checked;        // crash_popup has looked: the one-time notices may come after it
 static void crash_popup()
 {
     static bool checked, sent;
@@ -2563,6 +2564,7 @@ static void crash_popup()
     if (ImGui::IsPopupOpen("Update available")) return;
     if (!checked && ((upd != UPDATER_IDLE && upd != UPDATER_CHECKING) || ImGui::GetTime() > 8.0)) {
         checked = true;
+        g_crash_checked = true;
         if (bug_report_last_crash(log_path, sizeof(log_path))) ImGui::OpenPopup("The game crashed");
     }
     if (!begin_glass_modal("The game crashed", ImGui::GetFontSize() * 30)) return;
@@ -2593,6 +2595,104 @@ static void crash_popup()
         if (busy) ImGui::BeginDisabled();
         if (ImGui::Button("Close", ImVec2(ImGui::GetFontSize() * 8, 0))) ImGui::CloseCurrentPopup();
         if (busy) ImGui::EndDisabled();
+    }
+    end_glass_modal();
+}
+
+// RECOMP_TEST_NOTICE=gpu|launcher (screenshots): that one-time notice at once, whatever the PC.
+static bool notice_test(const char *which)
+{
+    const char *t = getenv("RECOMP_TEST_NOTICE");
+    return t && !strcmp(t, which);
+}
+
+// A one-time notice may open: the update offer and the crash report came first, nothing else is open.
+static bool notice_may_open()
+{
+    return (g_crash_checked || getenv("RECOMP_TEST_NOTICE")) &&
+           !ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel);
+}
+
+// The graphics card the game draws with: the first adapter, as the game's D3D11 device takes it
+// (its log says "D3D8: graphics card ..."). False when it cannot be read (or off Windows).
+static bool first_gpu(char *name, size_t size, unsigned *vendor, unsigned *mb)
+{
+    const char *t = getenv("RECOMP_TEST_GPU");     // tests: "vendor,MB", e.g. 8086,128
+    if (t && *t) {
+        *vendor = (unsigned)strtoul(t, nullptr, 16);
+        const char *c = strchr(t, ',');
+        *mb = c ? (unsigned)atoi(c + 1) : 128;
+        snprintf(name, size, "Intel(R) UHD Graphics (test)");
+        return true;
+    }
+#if defined(_WIN32)
+    IDXGIFactory1 *factory = nullptr;
+    IDXGIAdapter1 *adapter = nullptr;
+    DXGI_ADAPTER_DESC1 desc;
+    bool ok = false;
+    if (SUCCEEDED(CreateDXGIFactory1(__uuidof(IDXGIFactory1), (void **)&factory)) &&
+        SUCCEEDED(factory->EnumAdapters1(0, &adapter)) && SUCCEEDED(adapter->GetDesc1(&desc))) {
+        WideCharToMultiByte(CP_UTF8, 0, desc.Description, -1, name, (int)size, nullptr, nullptr);
+        *vendor = desc.VendorId;
+        *mb = (unsigned)(desc.DedicatedVideoMemory / (1024 * 1024));
+        ok = true;
+    }
+    if (adapter) adapter->Release();
+    if (factory) factory->Release();
+    return ok;
+#else
+    (void)name; (void)size; (void)vendor; (void)mb;
+    return false;
+#endif
+}
+
+// Players on laptops with an integrated graphics card (Intel, or less than 1 GB of its own memory)
+// got a slow game or white boxes with HD textures on. Once, while HD textures are on: recommend
+// them off and render scale 1; either answer is remembered in settings.ini ([launcher]
+// gpu_notice_seen).
+static void gpu_notice()
+{
+    static bool decided;
+    static char name[128];
+    static unsigned vendor, mb;
+    if (!decided && notice_may_open()) {
+        decided = true;
+        bool test = notice_test("gpu");
+        bool weak = first_gpu(name, sizeof(name), &vendor, &mb) && (vendor == 0x8086 || mb < 1024);
+        if (test || (weak && recomp_settings_get("textures", "enabled", 0) &&
+                     !recomp_settings_get("launcher", "gpu_notice_seen", 0))) {
+            fprintf(stderr, "[UI] graphics card notice: %s (vendor %04X, %u MB)\n", name, vendor, mb);
+            ImGui::OpenPopup("Graphics card");
+        }
+    }
+    if (!begin_glass_modal("Graphics card", ImGui::GetFontSize() * 30)) return;
+    ImGui::PushTextWrapPos(ImGui::GetFontSize() * 28);
+    ImGui::PushFont(g_font_bold, ImGui::GetStyle().FontSizeBase * 1.15f);
+    ImGui::TextColored(k_gold, "%s", name);
+    ImGui::PopFont();
+    ImGui::TextDisabled(vendor == 0x8086 ? "Built into the processor, %u MB of its own memory" : "%u MB of its own memory", mb);
+    ImGui::Spacing();
+    ImGui::TextUnformatted("This graphics card is on the weak side for HD textures. With them on, the game can run "
+                           "slowly or show white boxes. We recommend HD textures off and render scale 1.");
+    ImGui::TextDisabled("You can change both any time under Settings.");
+    ImGui::PopTextWrapPos();
+    ImGui::Spacing();
+    bool close = false;
+    ImGui::PushStyleColor(ImGuiCol_Button, k_red);
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, k_red_hi);
+    if (ImGui::Button("Use the recommended settings", ImVec2(ImGui::GetFontSize() * 14, 0))) {
+        recomp_settings_set("textures", "enabled", 0);
+        recomp_settings_set("display", "render_scale", 1);
+        fprintf(stderr, "[UI] graphics card notice: HD textures off, render scale 1\n");
+        close = true;
+    }
+    ImGui::PopStyleColor(2);
+    ImGui::SameLine();
+    if (ImGui::Button("Keep my settings", ImVec2(ImGui::GetFontSize() * 9, 0))) close = true;
+    if (close) {
+        recomp_settings_set("launcher", "gpu_notice_seen", 1);
+        commit();
+        ImGui::CloseCurrentPopup();
     }
     end_glass_modal();
 }
@@ -2892,6 +2992,7 @@ static UiResult draw_launcher(float x, float y, float width, float height)
     settings_dialog(origin, width, height, s, tab, page);
     update_popup(result);
     crash_popup();
+    gpu_notice();
     ImGui::End();
     return result;
 }

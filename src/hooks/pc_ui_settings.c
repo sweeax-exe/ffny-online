@@ -37,6 +37,9 @@ size_t pc_ui_settings(RecompSetting *out, size_t max)
         "guide, left_stick_click+right_stick_click");
     ADD("ui", "scale", RECOMP_SETTING_INT, 100, 60, 250, NULL, NULL, 0,
         "Size of the launcher and overlay text and controls in percent, on top of your display's scaling.");
+    ADD("launcher", "gpu_notice_seen", RECOMP_SETTING_BOOL, 0, 0, 0, NULL, NULL, 0,
+        "The launcher told you once that an integrated or small graphics card runs better with HD textures "
+        "off and render scale 1 (0 shows the notice again).");
 #undef ADD
     return n;
 }
