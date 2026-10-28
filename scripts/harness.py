@@ -643,6 +643,31 @@ def resolve_guards(data_root, mode=None):
     return left
 
 
+def tree_changes(before, after, rel=""):
+    """Relative paths that differ between two trees (added, removed or other bytes)."""
+    c = filecmp.dircmp(before, after, ignore=[])
+    out = [os.path.join(rel, f) for f in c.left_only + c.right_only + c.funny_files + c.common_funny]
+    for f in c.common_files:
+        if not trees_equal_file(os.path.join(before, f), os.path.join(after, f)):
+            out.append(os.path.join(rel, f))
+    for d in c.common_dirs:
+        out += tree_changes(os.path.join(before, d), os.path.join(after, d), os.path.join(rel, d))
+    return sorted(out)
+
+
+def trees_equal_file(a, b):
+    try:
+        with open(a, "rb") as fa, open(b, "rb") as fb:
+            while True:
+                left, right = fa.read(1024 * 1024), fb.read(1024 * 1024)
+                if left != right:
+                    return False
+                if not left:
+                    return True
+    except OSError:
+        return False
+
+
 class SaveGuard:
     """Copy the save area aside, and put it back when the block ends.
 
@@ -661,6 +686,7 @@ class SaveGuard:
         self.copy = None
         self.backup = None
         self.restored_equal = None
+        self.changed = None         # what the run wrote: the save area's files that differ from the copy
         self.existed = False
         self._signals = {}
 
@@ -708,6 +734,11 @@ class SaveGuard:
         if snapshot and os.path.isdir(self.src):
             shutil.rmtree(snapshot, ignore_errors=True)
             shutil.copytree(self.src, snapshot, copy_function=copy_save_file)
+        try:
+            self.changed = (tree_changes(self.copy, self.src) if self.existed
+                            else (["(the save area appeared)"] if os.path.exists(self.src) else []))
+        except OSError:
+            self.changed = None
         for attempt in range(5):
             try:
                 if os.path.isdir(self.src):
@@ -1080,6 +1111,7 @@ def run_game(name, stages=(), tail="", shots="", secs=240, preset=RELEASE_PRESET
     finally:
         guard.__exit__(None, None, None)
         run.save_ok = guard.restored_equal
+        run.save_changed = guard.changed
     run.text = read_log(run.log)
     run.summary = summarise(run.text)
     global LAST_LOG
@@ -1118,6 +1150,8 @@ def print_run(run):
         print("HUNG     presenting stopped")
     if run.save_ok is not None:
         print("save     %s" % ("restored, identical" if run.save_ok else "RESTORE FAILED: see save-guard/ beside the save area"))
+    if getattr(run, 'save_changed', None) is not None:
+        print("written  %s" % (", ".join(run.save_changed) if run.save_changed else "nothing (the save area was unchanged)"))
     faults = run_faults(run)
     if faults:
         print("FAIL     " + "; ".join(faults))

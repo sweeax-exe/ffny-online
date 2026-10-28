@@ -204,6 +204,19 @@ int netplay_voice_room(void);
 void netplay_send_voice(const uint8_t *payload, int len);
 int netplay_room_name(int slot, char *out, int size);
 
+/* Created fighters (created_fighter.c, docs/research/created-fighter-online.md). The fighter id a
+ * player sends to play the fighter they made in Story mode. */
+#define NETPLAY_CREATED_FIGHTER 99
+/* 1 when this player may pick their created fighter now: the relay's switch is on and it keeps
+ * this player's record. */
+int netplay_created_available(void);
+/* The checked record of match position `pos` as START named it (CP_REC_LEN bytes into out); 0 if
+ * that position plays no created fighter or the record is not here. */
+int netplay_created_record(int pos, uint8_t *out);
+/* The created fighter of the room member in relay slot `slot` (this player's own included): its
+ * name and fighting styles; 0 if the member has none. */
+int netplay_slot_created(int slot, char *name, int size, const char **style);
+
 /* Tests: start a session from RECOMP_NETPLAY=host|join, RECOMP_NETPLAY_SERVER and
  * RECOMP_NETPLAY_CODE_FILE, if they are set. Call once at start-up. */
 void netplay_autostart(void);
@@ -237,6 +250,8 @@ typedef struct NetVersus {
     int ms;                     /* since the START */
     int loaded;                 /* this PC's fight is set up; the others may still be loading */
     float alpha;                /* 1, falling to 0 over the fade */
+    char cp_name[4][16];        /* a created fighter (fighter 99): its name; "" otherwise */
+    char cp_style[4][64];       /* and its fighting styles ("KICKBOXING / STREETFIGHTING") */
 } NetVersus;
 int netplay_versus(NetVersus *out);
 int netplay_debug_json(char *out, int size);    /* tests: the lockstep's state as JSON */   /* a notice for the fight right now (wait, desync, gone) */

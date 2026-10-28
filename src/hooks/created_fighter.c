@@ -1,30 +1,30 @@
-/* Created (Story mode) fighters in Battle setups: step 1 of fighting online with one's own
- * created fighter. See docs/research/created-fighter-online.md.
+/* Created (Story mode) fighters online. See docs/research/created-fighter-online.md.
  *
  * Battle mode already builds a created fighter for a slot whose ControllerSetup fighter byte is
  * 99: StartGame (sub_00020270, the branch at 0x2096D) finds the profile through the slot's pad
  * (GS+0x1AAB+5*slot -> GS+0x1ABD[pad]), takes the name, the archetype (P+0x143), the move keys
  * and the stats from it, and the match load (sub_0008B730) builds the body and the clothes from
- * the profile's recipe into the pad's CP-Fighter holder. This file only proves that a record
- * copied into a spare profile slot is enough for that; nothing here runs unless the test switch
- * below is set.
+ * the profile's recipe into the pad's CP-Fighter holder. Online, every PC writes the same record
+ * (the relay's copy, validated and clamped here the same way on every PC) into a spare profile
+ * slot, points the pad at it and sets the slot up with 99.
  *
- * RECOMP_TEST_CP="slot=1,from=0,to=15[,file=<profile dump>][,mod=<n>:<i>:<hex>][,keep=<n>][,nounlink=1]"
- *   at each automatch sequence (RECOMP_AUTOMATCH or the control channel's `match`): copy the
- *   record subset of profile `from` (or of a raw 0x5950-byte profile dump, `file`, as a record
- *   from the network would arrive) into profile `to`, point the pad of `slot` at `to`, clear the
- *   pad holder's "built" byte (so the match load rebuilds the look) and set the slot's fighter to
- *   99. `mod`: from the n-th injection on write recipe dword i of the copy (a different colour);
- *   `keep`: on the n-th injection leave the built byte alone (the setup calls before it have
- *   cleared it already, so the look is rebuilt anyway); `nounlink`: keep the pad linked to the
- *   copy through the summary's reward step, which then saves the copy to disk (see
- *   created_fighter_before_funccall). The slot needs a pad (>= 0): the holder and the profile are
- *   found through it. */
+ * The record (CP_REC_LEN bytes, netplay/relay/protocol_created.go): version, then the payload
+ *   +0x000 name (0x20)          profile +0xC
+ *   +0x020 profile +0xFC..+0x143 (0x48): base stats, bonus stats, move keys, voice, styles, archetype
+ *   +0x068 created flag (1)     profile +0x4D8A
+ *   +0x069 recipe (0x98)        profile +0x5564
+ *   +0x101 options (0x26)       profile +0x55FC
+ * then the CRC-32 of version and payload.
+ *
+ * The summary's reward step saves the profile linked to each pad: linked, a copy would go to disk
+ * as a user ID named after the fighter (measured). So the pads are unlinked before it, and linked
+ * again for a rematch. */
 #define _CRT_SECURE_NO_WARNINGS
 #include "host.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <ctype.h>
 #include "recomp/gen/recomp_types.h"
 #include "created_fighter.h"
 
@@ -35,24 +35,485 @@
 #define PROFILE_COUNT   16
 #define GS_PAD_PROFILE  0x1ABDu                     /* s8 per pad: profile index, -1 none */
 #define GS_HOLDERS      0x1A9Cu                     /* 4 x 0x1C per pad; +1 = look built */
+#define SAVE_FILE_SIZE  0x5990u                     /* a user ID's save: 0x80 header + profile 0..0x5910 */
+#define SAVE_HEADER     0x80u
 
-/* The record subset Battle reads from a profile (offsets from the profile's start). */
-static const struct { unsigned off, len; } k_record[] = {
-    { 0x00C, CP_NAME_BYTES },   /* name, NUL-terminated */
-    { 0x0FC, 0x18 },            /* six base stats (u32) */
-    { 0x114, 0x18 },            /* six bonus stats (s32) */
-    { 0x12C, 0x10 },            /* four move keys */
-    { 0x13C, 0x04 },            /* voice */
-    { 0x140, 0x04 },            /* style bytes 0x140..0x142, archetype 0x143 (fighter.xml id) */
-    { 0x4D8A, 0x01 },           /* created-fighter flag */
-    { 0x5564, 0x98 },           /* recipe: 38 dwords (table<<24 | colour<<16 | row, -1 default) */
-    { 0x55FC, 0x26 },           /* options: 38 bytes */
-};
+/* payload offsets (after the version byte) */
+#define R_NAME      0x000
+#define R_PROFILE   0x020       /* profile +0xFC */
+#define R_BASE      (R_PROFILE + 0x00)
+#define R_BONUS     (R_PROFILE + 0x18)
+#define R_MOVES     (R_PROFILE + 0x30)
+#define R_VOICE     (R_PROFILE + 0x40)
+#define R_STYLE     (R_PROFILE + 0x44)
+#define R_ARCH      (R_PROFILE + 0x47)
+#define R_FLAG      0x068
+#define R_RECIPE    0x069
+#define R_OPTIONS   0x101
 
-static int g_parsed, g_slot = -1, g_from, g_to = 15, g_mod_n, g_mod_i, g_keep_n, g_count;
+#define MIN_ARCHETYPE   86      /* fighter.xml: CP B__ .. CP MW_, CP_HERO */
+#define MAX_ARCHETYPE   141
+#define MAX_BASE        50      /* the gym's cost table (0x2DBB70) has ten tiers of five */
+#define MAX_BONUS       38      /* with MAX_BASE: the attribute screen's 100 % (stat 30) */
+#define DEFAULT_MOVE    0x06000033u     /* a fresh fighter's four move keys */
+
+/* ---- CRC-32 (IEEE) ---- */
+
+static uint32_t crc32_ieee(const uint8_t *p, size_t n)
+{
+    uint32_t c = 0xFFFFFFFFu;
+    size_t i;
+    int k;
+    for (i = 0; i < n; i++) {
+        c ^= p[i];
+        for (k = 0; k < 8; k++) c = (c >> 1) ^ (0xEDB88320u & (0u - (c & 1u)));
+    }
+    return ~c;
+}
+
+static uint32_t rd32(const uint8_t *p) { return p[0] | (p[1] << 8) | (p[2] << 16) | ((uint32_t)p[3] << 24); }
+static void wr32(uint8_t *p, uint32_t v) { p[0] = (uint8_t)v; p[1] = (uint8_t)(v >> 8); p[2] = (uint8_t)(v >> 16); p[3] = (uint8_t)(v >> 24); }
+
+static void seal(uint8_t rec[CP_REC_LEN])
+{
+    rec[0] = CP_REC_VERSION;
+    wr32(rec + CP_REC_LEN - 4, crc32_ieee(rec, CP_REC_LEN - 4));
+}
+
+uint32_t cp_record_crc(const uint8_t rec[CP_REC_LEN]) { return rd32(rec + CP_REC_LEN - 4); }
+
+int cp_record_sealed(const uint8_t rec[CP_REC_LEN])
+{
+    return rec[0] == CP_REC_VERSION && crc32_ieee(rec, CP_REC_LEN - 4) == cp_record_crc(rec);
+}
+
+void cp_record_from_profile(const uint8_t *profile, uint8_t rec[CP_REC_LEN])
+{
+    uint8_t *p = rec + 1;
+    memset(rec, 0, CP_REC_LEN);
+    memcpy(p + R_NAME, profile + 0xC, CP_NAME_BYTES);
+    memcpy(p + R_PROFILE, profile + 0xFC, 0x48);
+    p[R_FLAG] = profile[0x4D8A];
+    memcpy(p + R_RECIPE, profile + 0x5564, 0x98);
+    memcpy(p + R_OPTIONS, profile + 0x55FC, 0x26);
+    seal(rec);
+}
+
+/* ---- the game files the check needs: record counts of the database tables, archetype names ---- */
+
+#define SOD_TABLES 64
+static int g_sod_loaded, g_sod_tables;
+static uint32_t g_sod_count[SOD_TABLES];
+
+static FILE *open_game_file(const char *name)
+{
+    const char *data = getenv("DEFJAM_DATA");
+    char path[MAX_PATH];
+    FILE *f = NULL;
+    if (data && *data) {        /* a mod's copy, as the game reads it */
+        snprintf(path, sizeof(path), "%s\\override\\%s", data, name);
+        f = fopen(path, "rb");
+    }
+    if (!f) {
+        snprintf(path, sizeof(path), "game\\%s", name);
+        f = fopen(path, "rb");
+    }
+    return f;
+}
+
+static uint8_t *read_game_file(const char *name, size_t *size)
+{
+    FILE *f = open_game_file(name);
+    uint8_t *buf;
+    long n;
+    if (!f) return NULL;
+    fseek(f, 0, SEEK_END);
+    n = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    if (n <= 0 || n > 64 * 1024 * 1024 || !(buf = (uint8_t *)malloc((size_t)n + 1))) { fclose(f); return NULL; }
+    *size = fread(buf, 1, (size_t)n, f);
+    buf[*size] = 0;
+    fclose(f);
+    return buf;
+}
+
+/* djv2.sod (layout as scripts/sod-characters.py reads it): the tables at header +0x10, each with
+ * its classes' record blocks; a database key is (table index << 24) | (colour << 16) | row. */
+static void load_sod(void)
+{
+    size_t size = 0, t;
+    uint8_t *d;
+    if (g_sod_loaded) return;
+    g_sod_loaded = 1;
+    d = read_game_file("assets\\djv2.sod", &size);
+    if (!d) return;
+    if (size > 0x20 && !memcmp(d, "SODB", 4)) {
+        uint32_t tables = rd32(d + 0x10), nt;
+        if (tables + 12 <= size) {
+            nt = rd32(d + tables + 4);
+            if (nt <= SOD_TABLES && tables + 12 + 8 * (size_t)nt <= size) {
+                for (t = 0; t < nt; t++) {
+                    uint32_t off = rd32(d + tables + 12 + 4 * nt + 4 * t), ncls, block;
+                    if (off + 0x1C > size) break;
+                    ncls = rd32(d + off + 0x10);
+                    if (!ncls || off + 0x18 + 8 * (size_t)ncls > size) continue;
+                    block = rd32(d + off + 0x18 + 4 * ncls);
+                    if (block + 12 > size) continue;
+                    g_sod_count[t] = rd32(d + block + 4);
+                }
+                g_sod_tables = (int)nt;
+            }
+        }
+    }
+    free(d);
+    fprintf(stderr, "[CREATED] database: %d tables\n", g_sod_tables);
+}
+
+/* A database key the game can look up: a table that exists and a row it has. The colour byte is
+ * kept below 16 (unknown colours are not checked further; see the report). */
+static int key_ok(uint32_t key)
+{
+    uint32_t table = key >> 24, colour = (key >> 16) & 0xFF, row = key & 0xFFFF;
+    load_sod();
+    return (int)table < g_sod_tables && row < g_sod_count[table] && colour < 16;
+}
+
+/* fighter.xml's created archetypes: "CP KB_" -> letters per ID */
+static char g_arch_letters[MAX_ARCHETYPE + 1][4];
+static int g_xml_loaded;
+
+static void load_archetypes(void)
+{
+    size_t size = 0;
+    char *x, *p;
+    if (g_xml_loaded) return;
+    g_xml_loaded = 1;
+    x = (char *)read_game_file("fighter.xml", &size);
+    if (!x) return;
+    for (p = strstr(x, "<dispname>CP "); p; p = strstr(p + 1, "<dispname>CP ")) {
+        const char *id = strstr(p, "<ID>");
+        const char *next = strstr(p + 1, "<dispname>");
+        int n;
+        if (!id || (next && id > next)) continue;
+        n = atoi(id + 4);
+        if (n >= MIN_ARCHETYPE && n <= MAX_ARCHETYPE) {
+            memcpy(g_arch_letters[n], p + 13, 3);
+            g_arch_letters[n][3] = 0;
+        }
+    }
+    free(x);
+}
+
+const char *cp_record_style(const uint8_t rec[CP_REC_LEN])
+{
+    static char out[96];
+    int arch = rec[1 + R_ARCH], k;
+    load_archetypes();
+    out[0] = 0;
+    if (arch < MIN_ARCHETYPE || arch > MAX_ARCHETYPE) return out;
+    for (k = 0; k < 3 && g_arch_letters[arch][k]; k++) {
+        const char *w = NULL;
+        switch (g_arch_letters[arch][k]) {
+        case 'B': w = "STREETFIGHTING"; break;
+        case 'K': w = "KICKBOXING"; break;
+        case 'S': w = "SUBMISSIONS"; break;
+        case 'W': w = "WRESTLING"; break;
+        case 'M': w = "MARTIAL ARTS"; break;
+        }
+        if (!w) continue;
+        if (out[0]) strncat(out, " / ", sizeof(out) - strlen(out) - 1);
+        strncat(out, w, sizeof(out) - strlen(out) - 1);
+    }
+    return out;
+}
+
+/* ---- the check every PC makes ---- */
+
+static int32_t clamp32(int32_t v, int32_t lo, int32_t hi) { return v < lo ? lo : v > hi ? hi : v; }
+
+int cp_record_sanitize(const uint8_t in[CP_REC_LEN], uint8_t out[CP_REC_LEN])
+{
+    uint8_t *p;
+    int i, n;
+    if (!cp_record_sealed(in)) return 0;
+    memcpy(out, in, CP_REC_LEN);
+    p = out + 1;
+    /* name: printable ASCII, 1..8 characters, the rest zero */
+    for (n = 0; n < CP_NAME_MAX && p[R_NAME + n]; n++)
+        if (p[R_NAME + n] < 0x20 || p[R_NAME + n] > 0x7E) p[R_NAME + n] = '?';
+    memset(p + R_NAME + n, 0, CP_NAME_BYTES - n);
+    if (!n) return 0;
+    if (p[R_ARCH] < MIN_ARCHETYPE || p[R_ARCH] > MAX_ARCHETYPE || p[R_FLAG] != 1) return 0;
+    if (p[R_STYLE] > 4) return 0;
+    for (i = 1; i < 3; i++) if (p[R_STYLE + i] > 4) p[R_STYLE + i] = 0xFF;
+    if (p[R_VOICE] < 1 || p[R_VOICE] > 6) wr32(p + R_VOICE, 1);
+    else wr32(p + R_VOICE, p[R_VOICE]);
+    for (i = 0; i < 6; i++) {
+        uint32_t base = rd32(p + R_BASE + 4 * i);
+        int32_t bonus = (int32_t)rd32(p + R_BONUS + 4 * i);
+        wr32(p + R_BASE + 4 * i, base > MAX_BASE ? MAX_BASE : base);
+        wr32(p + R_BONUS + 4 * i, (uint32_t)clamp32(bonus, 0, MAX_BONUS));
+    }
+    for (i = 0; i < 4; i++)
+        if (!key_ok(rd32(p + R_MOVES + 4 * i))) wr32(p + R_MOVES + 4 * i, DEFAULT_MOVE);
+    for (i = 0; i < 38; i++) {
+        uint32_t v = rd32(p + R_RECIPE + 4 * i);
+        if (i < 12) { if (v > 0xFF) wr32(p + R_RECIPE + 4 * i, 0); }      /* body and face values */
+        else if (v != 0xFFFFFFFFu && !key_ok(v)) wr32(p + R_RECIPE + 4 * i, 0xFFFFFFFFu);
+    }
+    seal(out);
+    return 1;
+}
+
+void cp_record_name(const uint8_t rec[CP_REC_LEN], char *out, int size)
+{
+    int n;
+    if (size <= 0) return;
+    for (n = 0; n < CP_NAME_MAX && n < size - 1 && rec[1 + R_NAME + n]; n++) out[n] = (char)rec[1 + R_NAME + n];
+    out[n] = 0;
+}
+
+void cp_record_stats(const uint8_t rec[CP_REC_LEN], int out[6])
+{
+    int i;
+    for (i = 0; i < 6; i++) {
+        uint32_t base = rd32(rec + 1 + R_BASE + 4 * i);
+        int32_t bonus = (int32_t)rd32(rec + 1 + R_BONUS + 4 * i);
+        out[i] = (int)((float)(base / 5u) * 1.275f + (float)bonus * 0.45f + 0.5f);
+    }
+}
+
+/* ---- the player's own ---- */
+
+static int g_local_state;           /* 0 not read, 1 have, -1 none */
+static uint8_t g_local[CP_REC_LEN];
+static CRITICAL_SECTION g_local_cs;
+static INIT_ONCE g_local_once = INIT_ONCE_STATIC_INIT;
+static BOOL CALLBACK local_init(PINIT_ONCE o, PVOID p, PVOID *c) { (void)o; (void)p; (void)c; InitializeCriticalSection(&g_local_cs); return TRUE; }
+
+/* a profile image from a save file (0x5990: header + profile) or a dump (0x5950) */
+static int profile_from_file(const char *path, uint8_t *profile, FILETIME *when)
+{
+    FILE *f = fopen(path, "rb");
+    long n;
+    size_t got;
+    if (!f) return 0;
+    fseek(f, 0, SEEK_END);
+    n = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    memset(profile, 0, PROFILE_SIZE);
+    if (n == SAVE_FILE_SIZE) { fseek(f, SAVE_HEADER, SEEK_SET); got = fread(profile, 1, SAVE_FILE_SIZE - SAVE_HEADER, f); got = got == SAVE_FILE_SIZE - SAVE_HEADER; }
+    else if (n == PROFILE_SIZE) got = fread(profile, 1, PROFILE_SIZE, f) == PROFILE_SIZE;
+    else got = 0;
+    fclose(f);
+    if (got && when) {
+        WIN32_FILE_ATTRIBUTE_DATA a;
+        if (GetFileAttributesExA(path, GetFileExInfoStandard, &a)) *when = a.ftLastWriteTime;
+    }
+    return (int)got;
+}
+
+static void read_local(void)
+{
+    static uint8_t profile[PROFILE_SIZE];
+    uint8_t rec[CP_REC_LEN], best[CP_REC_LEN];
+    const char *test = getenv("RECOMP_CP_RECORD"), *data = getenv("DEFJAM_DATA");
+    char root[MAX_PATH], pattern[MAX_PATH];
+    FILETIME best_time = { 0, 0 };
+    int have = 0;
+    WIN32_FIND_DATAA dir;
+    HANDLE h;
+    if (test && *test) {
+        if (profile_from_file(test, profile, NULL)) {
+            cp_record_from_profile(profile, rec);
+            have = cp_record_sanitize(rec, best);
+        }
+        fprintf(stderr, "[CREATED] test record %s: %s\n", test, have ? "usable" : "not usable");
+        goto done;
+    }
+    if (data && *data) snprintf(root, sizeof(root), "%s\\save\\UserData\\45410049", data);
+    else {
+        const char *la = getenv("LOCALAPPDATA");
+        snprintf(root, sizeof(root), "%s\\xboxrecomp\\UserData\\45410049", la ? la : ".");
+    }
+    snprintf(pattern, sizeof(pattern), "%s\\*", root);
+    h = FindFirstFileA(pattern, &dir);
+    if (h == INVALID_HANDLE_VALUE) goto done;
+    do {
+        char inner[MAX_PATH];
+        WIN32_FIND_DATAA file;
+        HANDLE g;
+        if (!(dir.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) || dir.cFileName[0] == '.') continue;
+        snprintf(inner, sizeof(inner), "%s\\%s\\*", root, dir.cFileName);
+        g = FindFirstFileA(inner, &file);
+        if (g == INVALID_HANDLE_VALUE) continue;
+        do {
+            char path[MAX_PATH];
+            FILETIME when;
+            uint8_t ok[CP_REC_LEN];
+            if (file.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY || file.nFileSizeLow != SAVE_FILE_SIZE) continue;
+            snprintf(path, sizeof(path), "%s\\%s\\%s", root, dir.cFileName, file.cFileName);
+            if (!profile_from_file(path, profile, &when) || profile[0x4D8A] != 1) continue;
+            cp_record_from_profile(profile, rec);
+            if (!cp_record_sanitize(rec, ok)) continue;
+            if (!have || CompareFileTime(&when, &best_time) > 0) {
+                memcpy(best, ok, CP_REC_LEN);
+                best_time = when;
+                have = 1;
+            }
+        } while (FindNextFileA(g, &file));
+        FindClose(g);
+    } while (FindNextFileA(h, &dir));
+    FindClose(h);
+done:
+    if (have) {
+        char name[16];
+        cp_record_name(best, name, sizeof(name));
+        memcpy(g_local, best, CP_REC_LEN);
+        fprintf(stderr, "[CREATED] the player's fighter: %s (%s), record %08X\n", name, cp_record_style(best), cp_record_crc(best));
+    }
+    g_local_state = have ? 1 : -1;
+}
+
+int cp_local_record(uint8_t rec[CP_REC_LEN])
+{
+    int have;
+    InitOnceExecuteOnce(&g_local_once, local_init, NULL, NULL);
+    EnterCriticalSection(&g_local_cs);
+    if (!g_local_state) read_local();
+    have = g_local_state > 0;
+    if (have && rec) memcpy(rec, g_local, CP_REC_LEN);
+    LeaveCriticalSection(&g_local_cs);
+    return have;
+}
+
+void created_fighter_reload(void)
+{
+    InitOnceExecuteOnce(&g_local_once, local_init, NULL, NULL);
+    EnterCriticalSection(&g_local_cs);
+    g_local_state = 0;
+    LeaveCriticalSection(&g_local_cs);
+}
+
+/* ---- in a match ---- */
+
+uint32_t created_fighter_profile(int index)
+{
+    uint32_t gs = MEM32(GS_PTR), base;
+    if (!gs || index < 0 || index >= PROFILE_COUNT) return 0;
+    base = MEM32(gs + GS_PROFILES);
+    return base ? base + PROFILE_BASE + (uint32_t)index * PROFILE_SIZE : 0;
+}
+
+static void record_to_profile(const uint8_t rec[CP_REC_LEN], uint32_t dst)
+{
+    const uint8_t *p = rec + 1;
+    memcpy((void *)XBOX_PTR(dst + 0xC), p + R_NAME, CP_NAME_BYTES);
+    memcpy((void *)XBOX_PTR(dst + 0xFC), p + R_PROFILE, 0x48);
+    MEM8(dst + 0x4D8A) = p[R_FLAG];
+    memcpy((void *)XBOX_PTR(dst + 0x5564), p + R_RECIPE, 0x98);
+    memcpy((void *)XBOX_PTR(dst + 0x55FC), p + R_OPTIONS, 0x26);
+}
+
+static int g_slot_of_pad[4] = { -1, -1, -1, -1 };     /* profile slot each pad plays from */
+static int g_linked;                                  /* the pads point at their slots now */
+static unsigned g_ours;                               /* profile slots this file wrote */
+static unsigned g_used_now;                           /* slots taken in the current sequence */
+
+static void link_pads(int on)
+{
+    uint32_t gs = MEM32(GS_PTR);
+    int pad;
+    if (!gs) return;
+    for (pad = 0; pad < 4; pad++)
+        if (g_slot_of_pad[pad] >= 0) MEM8(gs + GS_PAD_PROFILE + (uint32_t)pad) = on ? (uint8_t)g_slot_of_pad[pad] : 0xFF;
+    g_linked = on;
+}
+
+void created_fighter_begin(void)
+{
+    int k;
+    for (k = 0; k < 4; k++) g_slot_of_pad[k] = -1;
+    g_used_now = 0;
+    g_linked = 0;
+}
+
+int created_fighter_inject(int slot, int pad, const uint8_t rec[CP_REC_LEN])
+{
+    uint32_t gs = MEM32(GS_PTR), dst = 0, holder;
+    int index;
+    char name[16];
+    if (!gs || pad < 0 || pad > 3 || !rec) return -1;
+    /* a spare profile slot: the highest without a user ID loaded in it (or one written here) */
+    for (index = PROFILE_COUNT - 1; index >= 0; index--) {
+        uint32_t p = created_fighter_profile(index);
+        if (!p || (g_used_now & (1u << index))) continue;
+        if (!MEM8(p + 0xC) || (g_ours & (1u << index))) { dst = p; break; }
+    }
+    if (!dst) {
+        fprintf(stderr, "[CREATED] no spare profile slot for pad %d\n", pad);
+        return -1;
+    }
+    record_to_profile(rec, dst);
+    g_ours |= 1u << index;
+    g_used_now |= 1u << index;
+    g_slot_of_pad[pad] = index;
+    MEM8(gs + GS_PAD_PROFILE + (uint32_t)pad) = (uint8_t)index;
+    g_linked = 1;
+    holder = MEM32(gs + GS_HOLDERS);
+    if (holder) MEM8(holder + (uint32_t)pad * 0x1Cu + 1) = 0;     /* the match load builds this look */
+    cp_record_name(rec, name, sizeof(name));
+    fprintf(stderr, "[CREATED] slot %d pad %d plays %s (archetype %d, record %08X) from profile slot %d\n",
+            slot, pad, name, rec[1 + R_ARCH], cp_record_crc(rec), index);
+    return CP_FIGHTER_ID;
+}
+
+/* Every fight step: once the match is finished (phase 3), the pads are unlinked. The game's
+ * post-fight reward pass walks each slot's profile (sub_00064ED0 -> sub_00014C20: Story rewards,
+ * level-ups of the sixth stat, database lookups of its fields) and crashed in a two-created-fighter
+ * match. Not earlier: unlinked as soon as the looks were built (the first version), the fight
+ * still reached the profiles through the pads and read low guest memory instead, and about one
+ * created-fighter match in six desynced by a few float ulps of the fighters' positions (stock
+ * matches never). The phase is simulated state, so every PC unlinks at the same step.
+ * Game.Rematch() links them again for the rematch's setup. */
+#define G_MATCH_PHASE   0x003B8F30u     /* 0 start, 1 fighting, 2 decided, 3 finished */
+void created_fighter_on_step(void)
+{
+    if (!g_linked || MEM32(G_MATCH_PHASE) < 3u) return;
+    link_pads(0);
+    fprintf(stderr, "[CREATED] the match is finished: pads unlinked from the records\n");
+}
+
+int created_fighter_before_funccall(const char *text)
+{
+    int any = 0, pad;
+    for (pad = 0; pad < 4; pad++) if (g_slot_of_pad[pad] >= 0) any = 1;
+    if (!any) return 0;
+    if (!strcmp(text, "Game.Rematch()")) {
+        if (!g_linked) {
+            link_pads(1);
+            fprintf(stderr, "[CREATED] rematch: the pads play their records again\n");
+        }
+        return 0;
+    }
+    if (g_linked && (!strncmp(text, "Game.UpdateMatchRewardsPoints", 29) || !strncmp(text, "MemCard.Save", 12) ||
+                     !strncmp(text, "MemCard.QuerySave", 17) || !strncmp(text, "Game.Quit", 9) ||
+                     !strncmp(text, "Game.StartBattleMode", 20))) {
+        link_pads(0);
+        fprintf(stderr, "[CREATED] pads unlinked from the records before %s\n", text);
+    }
+    if (!strncmp(text, "Game.Quit", 9) || !strncmp(text, "Game.StartBattleMode", 20))
+        for (pad = 0; pad < 4; pad++) g_slot_of_pad[pad] = -1;     /* the match is over for good */
+    return 0;
+}
+
+/* ---- tests: RECOMP_TEST_CP="slot=1,from=0[,file=<profile dump>][,mod=<n>:<i>:<hex>]" ----
+ * At each automatch sequence, slot `slot` plays the record of profile `from` (or of a profile
+ * dump or save file, `file`); `mod` changes recipe dword i from the n-th injection on. */
+
+static int g_parsed, g_slot = -1, g_from, g_mod_n, g_mod_i, g_count;
 static unsigned g_mod_v;
 static char g_file[260];
-static int g_linked_pad = -1, g_nounlink;      /* see created_fighter_before_funccall */
 
 static void parse(void)
 {
@@ -66,112 +527,42 @@ static void parse(void)
             snprintf(g_file, sizeof(g_file), "%.*s", (int)(k < sizeof(g_file) ? k : sizeof(g_file) - 1), e + 5);
             e += 5 + k;
         } else if (sscanf(e, "slot=%d%n", &g_slot, &n) == 1 || sscanf(e, "from=%d%n", &g_from, &n) == 1 ||
-            sscanf(e, "to=%d%n", &g_to, &n) == 1 || sscanf(e, "keep=%d%n", &g_keep_n, &n) == 1 ||
-            sscanf(e, "nounlink=%d%n", &g_nounlink, &n) == 1 ||
-            sscanf(e, "mod=%d:%d:%x%n", &g_mod_n, &g_mod_i, &g_mod_v, &n) == 3) {
+                   sscanf(e, "mod=%d:%d:%x%n", &g_mod_n, &g_mod_i, &g_mod_v, &n) == 3) {
             e += n;
         } else e++;
         while (*e == ',' || *e == ' ') e++;
     }
-    if (g_from < 0 || g_from >= PROFILE_COUNT || g_to < 0 || g_to >= PROFILE_COUNT || g_from == g_to) g_slot = -1;
-    fprintf(stderr, "[CP-TEST] slot %d: profile %d%s%s -> %d, mod #%d recipe[%d]=%08X, keep #%d\n",
-            g_slot, g_from, g_file[0] ? " / file " : "", g_file, g_to, g_mod_n, g_mod_i, g_mod_v, g_keep_n);
-}
-
-uint32_t created_fighter_profile(int index)
-{
-    uint32_t gs = MEM32(GS_PTR), base;
-    if (!gs || index < 0 || index >= PROFILE_COUNT) return 0;
-    base = MEM32(gs + GS_PROFILES);
-    return base ? base + PROFILE_BASE + (uint32_t)index * PROFILE_SIZE : 0;
-}
-
-void created_fighter_write_record(uint32_t dst, const uint8_t *profile)
-{
-    size_t i;
-    for (i = 0; i < sizeof(k_record) / sizeof(k_record[0]); i++)
-        memcpy((void *)XBOX_PTR(dst + k_record[i].off), profile + k_record[i].off, k_record[i].len);
-    MEM8(dst + 0xC + CP_NAME_BYTES - 1) = 0;
-}
-
-void created_fighter_copy_record(uint32_t dst, uint32_t src)
-{
-    created_fighter_write_record(dst, (const uint8_t *)XBOX_PTR(src));
-}
-
-/* The test's profile dump: a raw 0x5950-byte profile, as the network would deliver a record. */
-static int load_file(uint8_t *buf)
-{
-    FILE *f = fopen(g_file, "rb");
-    size_t got;
-    if (!f) return 0;
-    got = fread(buf, 1, PROFILE_SIZE, f);
-    fclose(f);
-    return got == PROFILE_SIZE;
-}
-
-/* Battle's stat formula (sub_0001EE80): round(base/5 * 1.275 + bonus * 0.45) per stat. */
-static int stat(uint32_t base, int32_t bonus)
-{
-    double v = (double)(base / 5u) * (double)1.275f + (double)bonus * (double)0.45f + 0.5;
-    return (int)v;
-}
-
-/* The pad an injected profile is linked to, -1 when none. After the match the summary's reward
- * step saves the profile behind each pad (Game.UpdateMatchRewardsPoints, then MemCard.Save):
- * linked, the copied record went to disk as a user ID named after the copied fighter, replacing a
- * local user of that name (measured, section 4 of the report). So the link is undone before the
- * reward step, once the match load has built the look and the summary has shown the name.
- * `nounlink` in the test switch keeps the link, to show the save. */
-
-int created_fighter_before_funccall(const char *text)
-{
-    uint32_t gs;
-    if (g_linked_pad < 0 || g_nounlink) return 0;
-    if (strncmp(text, "Game.UpdateMatchRewardsPoints", 29) && strncmp(text, "MemCard.", 8) &&
-        strncmp(text, "Game.Quit", 9) && strncmp(text, "Game.StartBattleMode", 20))
-        return 0;
-    gs = MEM32(GS_PTR);
-    if (gs) MEM8(gs + GS_PAD_PROFILE + (uint32_t)g_linked_pad) = 0xFF;
-    fprintf(stderr, "[CP-TEST] pad %d unlinked from the copied profile before %s\n", g_linked_pad, text);
-    g_linked_pad = -1;
-    return 0;
+    fprintf(stderr, "[CP-TEST] slot %d: profile %d%s%s, mod #%d recipe[%d]=%08X\n",
+            g_slot, g_from, g_file[0] ? " / file " : "", g_file, g_mod_n, g_mod_i, g_mod_v);
 }
 
 int created_fighter_test_slot(int slot, int pad)
 {
-    uint32_t gs, src, dst, holder;
-    int k;
+    static uint8_t profile[PROFILE_SIZE];
+    uint8_t rec[CP_REC_LEN], ok[CP_REC_LEN];
     if (!g_parsed) parse();
     if (slot != g_slot) return -1;
-    if (pad < 0 || pad > 3) {
-        fprintf(stderr, "[CP-TEST] slot %d has no pad; a created fighter needs one\n", slot);
-        return -1;
-    }
-    gs = MEM32(GS_PTR);
-    src = created_fighter_profile(g_from);
-    dst = created_fighter_profile(g_to);
-    if (!gs || !src || !dst) return -1;
-    g_count++;
     if (g_file[0]) {
-        static uint8_t buf[PROFILE_SIZE];
-        if (!load_file(buf)) {
-            fprintf(stderr, "[CP-TEST] cannot read the profile dump %s\n", g_file);
+        if (!profile_from_file(g_file, profile, NULL)) {
+            fprintf(stderr, "[CP-TEST] cannot read %s\n", g_file);
             return -1;
         }
-        created_fighter_write_record(dst, buf);
-    } else
-        created_fighter_copy_record(dst, src);
-    if (g_mod_n && g_count >= g_mod_n) MEM32(dst + 0x5564 + 4u * (uint32_t)g_mod_i) = g_mod_v;
-    MEM8(gs + GS_PAD_PROFILE + (uint32_t)pad) = (uint8_t)g_to;
-    g_linked_pad = pad;
-    holder = MEM32(gs + GS_HOLDERS);
-    if (holder && g_keep_n != g_count) MEM8(holder + (uint32_t)pad * 0x1Cu + 1) = 0;
-    fprintf(stderr, "[CP-TEST] #%d slot %d pad %d: profile %d (%08X) -> %d (%08X) \"%s\" archetype %d, holder %08X built=%d\n",
-            g_count, slot, pad, g_from, src, g_to, dst, (const char *)XBOX_PTR(dst + 0xC), MEM8(dst + 0x143),
-            holder ? holder + (uint32_t)pad * 0x1Cu : 0, holder ? MEM8(holder + (uint32_t)pad * 0x1Cu + 1) : -1);
-    fprintf(stderr, "[CP-TEST] expected stats:");
-    for (k = 0; k < 6; k++) fprintf(stderr, " %d", stat(MEM32(dst + 0xFC + 4u * k), (int32_t)MEM32(dst + 0x114 + 4u * k)));
-    fprintf(stderr, "\n");
-    return CP_FIGHTER_ID;
+    } else {
+        uint32_t src = created_fighter_profile(g_from);
+        if (!src) return -1;
+        memcpy(profile, (const void *)XBOX_PTR(src), PROFILE_SIZE);
+    }
+    g_count++;
+    if (g_mod_n && g_count >= g_mod_n) wr32(profile + 0x5564 + 4 * g_mod_i, g_mod_v);
+    cp_record_from_profile(profile, rec);
+    if (!cp_record_sanitize(rec, ok)) {
+        fprintf(stderr, "[CP-TEST] the record is not playable\n");
+        return -1;
+    }
+    {
+        int s[6];
+        cp_record_stats(ok, s);
+        fprintf(stderr, "[CP-TEST] #%d expected stats: %d %d %d %d %d %d\n", g_count, s[0], s[1], s[2], s[3], s[4], s[5]);
+    }
+    return created_fighter_inject(slot, pad, ok);
 }

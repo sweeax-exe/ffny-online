@@ -92,16 +92,16 @@ The profiles are not loaded at boot: all 16 slots are empty until a user ID is c
 sequence (`automatch.c`) for each slot after the pads are bound, and before every front-end call.
 
 ```
-RECOMP_TEST_CP="slot=1,from=0,to=15[,file=<0x5950-byte profile dump>][,mod=<n>:<i>:<hex>][,nounlink=1]"
+RECOMP_TEST_CP="slot=1,from=0[,file=<profile dump or user ID save>][,mod=<n>:<i>:<hex>]"
 ```
 
-For `slot`: write the record subset (from profile `from`, or from `file` as a received record would
-arrive) into profile `to`, `GS+0x1ABD[pad] = to` (directly, **not** SetBMCurrentUserIndex, which
-would also move the current profile index), clear `holder+1`, and set the slot up with fighter 99.
-`mod` changes one recipe dword from the n-th match on. The slot needs a pad: the profile and the
-holder are found through the port, so a created fighter cannot sit in a CPU slot (port -1 would
-index `GS+0x1ABC` and `holder - 0x1C`). Before `Game.UpdateMatchRewardsPoints`, any `MemCard.*`,
-`Game.Quit` or `Game.StartBattleMode` it puts `GS+0x1ABD[pad]` back to -1 (section 4.3).
+For `slot`: make a record from profile `from` (or from `file`, as a received record would arrive),
+check it as every PC does, and inject it as in section 5 (spare profile slot, `GS+0x1ABD[pad]`
+written directly, **not** with SetBMCurrentUserIndex, which would also move the current profile
+index; `holder+1` cleared; fighter 99). `mod` changes one recipe dword from the n-th match on. The
+slot needs a pad: the profile and the holder are found through the port, so a created fighter
+cannot sit in a CPU slot (port -1 would index `GS+0x1ABC` and `holder - 0x1C`). The step-1 version
+of this hook also took `to=`, `keep=` and `nounlink=`; section 4 used those.
 
 ## 4. The offline experiment (one PC, automatch, no relay)
 
@@ -162,7 +162,112 @@ type=0,venue=1,f0=55,p0=0,f1=22,p1=1`, `RECOMP_TEST_CP=slot=1,from=0,to=15,file=
 - Rematch: `Game.Rematch` keeps the setup; whether `holder+1` is cleared there [U] (same fighters, so
   harmless).
 
-## 5. Plan for steps 2-4
+## 5. Steps 2-4 as built (build 37 candidate)
+
+**Protocol** (`docs/netplay-protocol.md`, "Created fighters"; `netplay/relay/protocol_created.go`,
+`created.go`): the 300-byte record (version, the 0x127-byte payload of section 2, CRC-32) goes up
+with `FIGHTER` (0x26), comes back as `RECORD` slot 0xFE (the relay's copy), and reaches the other
+room members as `RECORD` (0x27) on upload, on joining and right before `START`; `RECGET` (0x28)
+asks again. `START` gets a trailer naming, per created fighter, the slot and the CRC of the
+record, so every PC injects the same bytes. `READY` 99 plays the record only with the switch on
+and a kept record (otherwise Doc, as for any fighter without a database record); King of the Hill
+and ranked stay roster-only.
+
+**Server switch**: `CAPS` bit 2. The relay answers it while the file `created-fighters-allowed`
+exists in its updates folder (read at every request; `-created` forces it on for tests), like
+`rollback-allowed`. Off: no upload is kept, 99 plays Doc, the clients offer no created fighter.
+
+**Validation and clamp** (`cp_record_sanitize`, `src/hooks/created_fighter.c`, identical on every
+PC, the sender included): sealed (version, CRC); name 1..8 characters, non-printable ones become
+`?`; archetype 86..141, created flag 1, first style 0..4 (else the record is refused: Doc); other
+styles 0..4 or 0xFF; voice 1..6 (else 1); **base stats at most 50** [V: the gym's cost table at
+0x2DBB70 has ten tiers of five, `sub_0004EB60`], **bonus stats 0..38** [I: with base 50 that is
+the Battle attribute screen's 100 %, which shows `stat * 3.333`, `sub_0004A3D0`]; move keys and
+recipe parts must be keys the game's database has (`(table<<24)|(colour<<16)|row`: a table of
+djv2.sod, a row below its record count, colour below 16 [I]), else the fresh-fighter move
+0x06000033 / the default part (-1); the twelve body/face values at most 0xFF. The relay checks only
+the shape (size, version, CRC, name, archetype, first style, flag).
+
+**The player's own record** (`cp_local_record`): the newest user ID save in
+`<data>/save/UserData/45410049/*/` (0x5990 bytes: a 0x80-byte header, then the profile) whose
+created flag is set; read at every hub session, so a fighter made meanwhile shows up.
+`RECOMP_CP_RECORD=<profile dump or save>` replaces it for tests.
+
+**Injection** (`created_fighter_inject`, from the automatch sequence for each slot whose START
+fighter is 99): the record into the highest profile slot without a loaded user ID, the pad linked
+to it, the pad's holder marked unbuilt, ControllerSetup with 99. The pads are unlinked before
+`Game.UpdateMatchRewardsPoints`, `MemCard.Save/QuerySave`, `Game.Quit`, `Game.StartBattleMode`
+(the reward save of section 4.3) and linked again on `Game.Rematch()`. A CPU fill never plays 99
+(it draws from the roster, which has no 99).
+
+**UI** (`online_screen.cpp`): the fighter grid shows "your fighter" first (a silhouette card with
+an orange YOURS ribbon; the large card names the fighter and its styles from the archetype's
+fighter.xml letters: B streetfighting, K kickboxing, S submissions, W wrestling, M martial arts
+[I]) while the relay keeps the record; room cards show a created fighter's name and styles; gallery
+pages `grid-created` and `room-created`. `netplay_slot_created(slot, ...)` gives the versus
+screen the same name and styles.
+
+**Two more things the tests found** (both fixed):
+
+- *A crash after the knockout with two created fighters* (`sub_000BE3D0` from `sub_00014C20`, via
+  `sub_00064ED0` / `sub_00065FD0` / `sub_0001E1B0` / `sub_00079190`, the screen loader's worker):
+  the game's post-fight reward pass walks every slot's profile (Story rewards; it is also what
+  raised the sixth base stat from 6 to 50 in section 4.3) and does database lookups with the
+  profile's other fields. So the pads are unlinked once the match is finished (phase word
+  `0x3B8F30` = 3, checked each step by `created_fighter_on_step`; simulated state, so every PC
+  unlinks at the same step), and before the reward step's front-end calls. `Game.Rematch()` links
+  them again; the rematch's fight and summary ran clean (offline check, below). A first version
+  unlinked as soon as the looks were built; that did not change the desync below.
+- *Rollback*: a rollback at step 4 of a created-fighter match crashed in `sub_0008BE60` (the
+  runtime-built looks are outside what a rollback restores). A match whose START names a record now
+  plays in lockstep on every PC (`match_has_created`, decided from the START, so the input delay and
+  the decision agree); the log says "rollback off for this match: a created fighter plays".
+  Rollback for created fighters is future work.
+
+**Tests** (first on build 35 base c470302, then rebased onto e1866fe; `tools/defjam-mcp/dj.py scenario online` with
+`--created --cp-records`; two copies, local relay, knockout at step 600; the save area of each
+copy's root hashed before and after, cache partitions left out):
+
+| Run | Matches | Result |
+|---|---|---|
+| created (AW5J3555) vs stock (Doc), lockstep | 2 | all played to the summary, checksums equal (10/20 compared), the remote PC shows the same look |
+| created vs created (AW5J3555 vs CPTWO: other name, base stat, jacket colour) | 5 | 5/5, checksums equal, both PCs render the same two looks; (before the early unlink: a crash after the first knockout) |
+| created vs created, both copies with rollback on | 3 | 3/3 in lockstep (created-fighter rule), checksums equal; see the open desync below |
+| stock vs stock, rollback on (baseline) | 2 | match 1 fine; match 2 never started (room flow; not investigated here) |
+| stock vs stock, lockstep (regression) | 3 | 3/3, checksums equal |
+| offline Rematch (RECOMP_TEST_CP, one PC) | 2 | Rematch relinks, the created fighter fights the rematch, both summaries reached, no crash |
+
+Save area in every run: only `UserData/45410049/1A3F1B2E4ADD/Options` changed on each copy, as in
+the stock baseline (the reward step saves the options); no user ID save was written or created.
+The scripted online rematch of `dj.py --rematch` did not reach the Rematch choice (the fight's
+button mashing chose Quit), so the online rematch is covered by the offline check only.
+
+**Open: a lockstep desync that only created fighters cause (build 36 base e1866fe).** Over about
+35 two-copy matches with a created fighter on at least one side, 8 desynced (several runs of 3
+matches each; a desync ends the run): created vs created and created vs stock, at drawn venues and
+at Crow's Office (26), first seen at checks from step 60 to step 600. Stock vs stock under the same
+harness: 0 desyncs in 26 matches (21 of them at venue 26). Every report: the two PCs' fighter
+positions (`+0x44`, `+0x4C`, `+0x54` of the fight record) differ by 1 to 150 float ulps, both
+fighters, with the generators, the crowd and the time scale equal. Ruled out: the pads' link to
+the profiles during the fight (unlinked early or kept to the end: same rate), audio timing (both
+copies muted: 3 of 4 runs desynced), rollback (these matches play in lockstep), the HD pack (with
+and without). Not yet looked at: something in the created fighter's runtime-built model or its
+per-frame update that the simulation reads (collision or hit volumes from the composed skeleton),
+an x87 control-word change on the game thread by the created-player code (the lifter's
+`g_fp_control_word` is per thread, but a render-frame path that sets it between steps would make
+the step's rounding depend on frame timing). Until this is fixed the server switch stays off.
+
+**KOTH note** (not about created fighters): `dj.py scenario online --mode koth --players 3
+--matches 4` stops on this base and on e1866fe alone (checked by building e1866fe without this
+branch): the king's next fight never starts on its PC ("Match found ... starts by itself" on
+`battle/cmtype`), the third copy gives up at step 3. Also, a stock match with rollback on at venue
+26 crashed (`RIP 0x1408203D2`) once; rollback is off by default.
+
+Screenshots (local only): `logs/dj/20261028-143000-online/fight-m1-copy1.png` (AW5J3555 on the
+other PC), `logs/dj/20261028-143601-online/fight-m1-copy0/1.png` (created vs created, same on both),
+the gallery pages `grid-created`, `room-created`, `versus-created`.
+
+## 6. Plan for steps 2-4 (as written after step 1)
 
 **Step 2, protocol and validation (about 1.5 days).** Room/quick join carries an optional
 "created fighter" record (0x127 bytes + version + CRC) from the player's chosen user ID; the relay
