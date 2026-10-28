@@ -314,9 +314,21 @@ static DWORD WINAPI control_thread(LPVOID param)
     SOCKET ls = (SOCKET)(UINT_PTR)param;
     static char out[16384];
     for (;;) {
-        SOCKET c = accept(ls, NULL, NULL);
+        SOCKET c;
         char buf[512];
         int have = 0;
+        {   /* a timed press ends on time with no client connected too: a client that sends one
+             * line and disconnects otherwise left the button held until the next connection */
+            fd_set rd;
+            struct timeval tv = { 0, 20000 };
+            release_due();
+            FD_ZERO(&rd);
+            FD_SET(ls, &rd);
+            int ready = select(0, &rd, NULL, NULL, &tv);
+            if (ready < 0) Sleep(20);
+            if (ready <= 0) continue;
+        }
+        c = accept(ls, NULL, NULL);
         if (c == INVALID_SOCKET) { Sleep(100); continue; }
         for (;;) {
             fd_set rd;
