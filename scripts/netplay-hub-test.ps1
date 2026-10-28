@@ -39,6 +39,8 @@
 .PARAMETER CopyGapSecs  seconds between starting two copies (default 3: the first copy opens the room).
 .PARAMETER EuLagMs  with -NaRelayPort: the "Europe" relay holds what it sends this long (relay -test-lag).
 .PARAMETER NaLagMs  the same for "North America".
+.PARAMETER NoOverride  the copies' own data folders get no menu patch (<data>\override; copied by default), as
+                    for a player whose dump apt-patch did not recognise: no ONLINE entry, no Online.Tick().
 .PARAMETER SwitchTo with -NaRelayPort: every copy switches the server in the lobby (eu, na or auto) the way
                     the hub's picker does, -SwitchAfterMs after entering it, then quick-matches there.
 #>
@@ -49,7 +51,7 @@ param([ValidateRange(2, 4)][int]$Players = 2, [int]$Secs = 1200, [string[]]$Extr
       [string]$DataPrefix = '', [int]$NaRelayPort = 0, [ValidateSet('auto', 'eu', 'na', 'both')][string]$Server = 'auto',
       [int]$EuLagMs = 0, [int]$NaLagMs = 0, [ValidateSet('', 'auto', 'eu', 'na')][string]$SwitchTo = '',
       [int]$SwitchAfterMs = 3000, [ValidateSet('auto', 'eu', 'na', 'both')][string[]]$Servers = @(),
-      [int[]]$JoinListed = @(), [int]$JoinListedSecs = 90, [int]$CopyGapSecs = 3)
+      [int[]]$JoinListed = @(), [int]$JoinListedSecs = 90, [int]$CopyGapSecs = 3, [switch]$NoOverride)
 $ErrorActionPreference = 'Stop'
 $repo = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 Set-Location $repo
@@ -98,6 +100,17 @@ for ($i = 0; $i -lt $Players; $i++) {
         # the runtime makes new sparse ones), or every root and each of its harness backups fills the disk
         robocopy (Join-Path $data 'save') "$root\save" /MIR /NFL /NDL /NJH /NJS /NP `
                  /XF Partition1.img Partition2.img Partition3.img Partition4.img Partition5.img | Out-Null
+        # the menu patch a player's setup writes (scripts/apt-patch.py): without it the match-type screen
+        # sends no Online.Tick() and a room match agreed while it sits idle never started (2026-10-28).
+        # A copy, never a junction: nothing of a test may write into the main data folder.
+        $over = Join-Path $root 'override'
+        if ($NoOverride) {
+            if (Test-Path $over) {
+                if ((Get-Item $over).LinkType) { cmd /c rmdir "$over" } else { Remove-Item $over -Recurse -Force }
+            }
+        } elseif (Test-Path (Join-Path $data 'override')) {
+            robocopy (Join-Path $data 'override') $over /MIR /NFL /NDL /NJH /NJS /NP | Out-Null
+        }
     }
     $copyRoute = if ($i % 2 -eq 0) { "$Route-p1" } else { "$Route-p2" }
     $choice = if ($i -lt $Servers.Count) { $Servers[$i] } else { $Server }
