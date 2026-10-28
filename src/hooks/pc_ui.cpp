@@ -3474,8 +3474,10 @@ extern "C" void pc_ui_overlay(void *device, void *context, void *window_rtv, uns
         set_open(true);
         g_online = true;
     }
-    // Closed, the overlay still draws the ONLINE entry's art on the main menu.
-    bool decor = !g_open.load() && online_screen::decor_wanted();
+    // Closed, the overlay still draws the versus screen while a room's match loads (it takes no
+    // input), and the ONLINE entry's art on the main menu.
+    bool versus = !g_open.load() && online_screen::versus_wanted();
+    bool decor = !g_open.load() && !versus && online_screen::decor_wanted();
     char notice[160];
     // F9's notice shows over everything, the online screens and the settings included (pressed in
     // the online menu, it was hidden there); the netplay notices are for the fight only.
@@ -3484,7 +3486,7 @@ extern "C" void pc_ui_overlay(void *device, void *context, void *window_rtv, uns
                  update_notice(notice, sizeof(notice));                         // a newer build is out
     char talk[160];
     bool talking = voice_overlay(talk, sizeof(talk)) != 0;               // voice chat: who talks
-    if (!g_open.load() && !decor && !toast && !talking) { ui_unlock(); return; }
+    if (!g_open.load() && !decor && !versus && !toast && !talking) { ui_unlock(); return; }
 
     ID3D11Device *dev = (ID3D11Device *)device;
     ID3D11DeviceContext *ctx = (ID3D11DeviceContext *)context;
@@ -3505,14 +3507,16 @@ extern "C" void pc_ui_overlay(void *device, void *context, void *window_rtv, uns
     }
     ui_apply_scale(g_window);
     online_screen::prepare(dev);
-    if (!decor) ui_feed_gamepad();
+    if (!decor && !versus) ui_feed_gamepad();
     ImGui_ImplDX11_NewFrame();
     ImGui_ImplWin32_NewFrame();
     ImGui::NewFrame();
 
     ImGuiIO &io = ImGui::GetIO();
     bool close_request = false;
-    if (decor) {
+    if (versus) {
+        online_screen::draw_versus(ImGui::GetForegroundDrawList(), io.DisplaySize);
+    } else if (decor) {
         online_screen::draw_decor(ImGui::GetForegroundDrawList(), io.DisplaySize);
     } else if (g_online) {
         if (!online_screen::draw(io.DisplaySize)) close_request = true;

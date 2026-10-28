@@ -76,6 +76,34 @@ near-black background, with the game's door beside the hub, and the panels are t
 The game finds the folder as the launcher does: in its working directory or up to four folders above the
 executable.
 
+### The versus screen
+
+The original game shows the fighters and the venue before a fight. Online, the room's START goes from the
+room straight into the load (`src/hooks/automatch.c` drives the game's own selection screens), so the port
+draws its own versus screen while an online match loads: each fighter's portrait (the online art), the
+player's name (`CPU` for a CPU fill), the fighter and the fighting style, each player's ping, `VS` in the
+game's stencil over a soft red light, the venue's photo (the vote's art, with the venue's name on its sign)
+and its subtitle banner ("OLD SCHOOL CLUB" under The Terror Dome; none where the game's banner only repeats
+the name, as for The Foundation), the mode's logo, the room and the server. In King of the Hill the king stands on the right with the crown and "N WINS IN A ROW".
+One on One has two large cards with the venue between them; 3-Way and Free for All a row of cards with the
+venue below. The cards slide in, `VS` and the venue fade in; nothing flashes.
+
+It shows from the START (it replaces the old MATCH FOUND card) until the fight's first steps have run on
+every PC: the step after the input delay, which waits for the slowest game to finish loading (at least
+2.5 s after the START when a load is instant), then fades out in 0.4 s. For the first 1.8 s (or until this
+PC's fight is set up) it is the online screens' page, as MATCH FOUND was; then the online screens close, the
+controller belongs to the game again, and the overlay keeps drawing the same page without taking any input
+over the game's loading screen. It is drawing only: `netplay_versus` copies what the START set up and
+nothing about the match, its inputs or its timing changes. Never offline, in Story, after a rematch from the
+results (no new START) or for a King of the Hill watcher; a King of the Hill fight that waits for the king's
+results screen shows it once the king is back in the menus.
+
+The music under it is the game's own. Game.StartGame stops the menu music, and the game itself streams
+the loading part of the fight's track (`music\<track>\loading0.mus`) while the venue loads, then the
+fight's music; the versus screen does not touch the audio. Starting the venue's music any other way would
+go through the music director, which draws from the match's shared generator, or would need a decoder of
+the game's music streams of our own; neither is needed while the game already plays the track.
+
 ## Where it comes from
 
 The screen is [Dear ImGui](https://github.com/ocornut/imgui) (MIT; release 1.92.9b, fetched at build time at
@@ -102,7 +130,7 @@ nobody at it (a locked screen, a remote run):
 | `RECOMP_LAUNCHER_SCRIPT` | The launcher's input: `<ms>:click:<x>:<y>`, `<ms>:move:<x>:<y>`, `<ms>:shot:<file>`, `<ms>:play`, `<ms>:quit`, separated by `;`, times from the window's first frame and positions in window points |
 | `RECOMP_HOST_SCRIPT` | The game window's input: `<ms>:key:<SDL key name>` (`F1`, `Escape`), `<ms>:click:<x>:<y>`, `<ms>:move:<x>:<y>`, `<ms>:text:<chars>`, times from the window's opening |
 | `RECOMP_OVERLAY_SHOT_DIR=<folder>`, `RECOMP_OVERLAY_SHOT_MS` | Windows: the finished picture with the overlay, every `RECOMP_OVERLAY_SHOT_MS` (2000 by default) while the overlay draws, as `<ms>.bmp` |
-| `RECOMP_TEST_ONLINE_GALLERY=<ms>` | Windows, with `RECOMP_TEST_OPEN_ONLINE=1`: the online screens show every page in turn, `<ms>` each, with sample players, rooms, a hill and statistics, take no input and connect to nothing; the overlay captures are then named `<ms>-<page>.bmp`. For comparing a design change page by page from one copy |
+| `RECOMP_TEST_ONLINE_GALLERY=<ms>` | Windows, with `RECOMP_TEST_OPEN_ONLINE=1`: the online screens show every page in turn, `<ms>` each, with sample players, rooms, a hill and statistics, take no input and connect to nothing; the overlay captures are then named `<ms>-<page>.bmp`. For comparing a design change page by page from one copy. `RECOMP_TEST_ONLINE_GALLERY_ONLY=<prefix>` shows only the pages whose names start with it (`versus`: the versus screen for One on One, 3-Way, Free for All and King of the Hill, the entrance replaying on each page) |
 | `RECOMP_MODS_PAGE=1` | The Textures page becomes upstream's Mods page (installed packs, load order, the signed project catalogue through the mod helper). Upstream's mod support is beta and not wired into FFNY Online's launcher and updater yet, so it is off by default |
 | `RECOMP_TEST_UPDATE_PROGRESS=<step>[,popup]` | Windows: a made-up update in progress at step 1 (the download) to 8 (finishing up), with no network and no setup, for pictures of the GAME card; `,popup` opens the "Update available" window first, which then shows the same progress |
 | `RECOMP_INPUT_VIRTUAL_PADS`, `RECOMP_INPUT_VIRTUAL_CHORD_MS` | An SDL virtual gamepad, which also opens and closes the overlay with its stick clicks and B ([input guide](10-input.md)) |
