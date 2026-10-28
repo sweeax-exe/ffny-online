@@ -72,6 +72,45 @@ static const char *style_name(const char *code)
     return NULL;
 }
 
+/* Battle mode resolves a fighter by the front-end ID of its record in the compiled database
+ * (assets/djv2.sod, the Character table), not by fighter.xml. The two agree for every fighter but
+ * four: Teck, Santos, O.E and Eric Sermon have other front-end IDs there, and their fighter.xml
+ * IDs exist in no record, so a match set up with those left the slot empty and crashed at the
+ * load (docs/research/crash-001B2480.md, section 11). The fighter.xml IDs those four's database
+ * IDs have are unused placeholders ("EMPTY", "CP ..."), never offered. */
+static const struct { int xml_id, fe_id; } k_battle_ids[] = {
+    { 40, 85 },     /* Teck */
+    { 41, 93 },     /* Santos */
+    { 52, 92 },     /* O.E */
+    { 78, 91 },     /* Eric Sermon */
+};
+
+/* Every front-end ID that has a Character record in the database (scripts/sod-characters.py lists
+ * them from the player's dump; tests/unit/test_battle_roster.py pins this list to it and to the
+ * relay's ValidFighters). A fighter.xml entry with a style but no record is not a Battle-mode
+ * fighter: Gwen (39) crashed a live Free for All as the CPU that filled a free place (build 31,
+ * WrestlerSpecInit with character index -2). */
+static const unsigned char k_sod_fighters[] = {
+    0, 1, 2, 3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26,
+    27, 28, 30, 31, 32, 33, 34, 35, 36, 38, 43, 44, 45, 46, 47, 48, 50, 51, 54, 55, 56, 57, 58,
+    59, 60, 61, 62, 64, 65, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 80, 81, 82, 83, 84, 85,
+    91, 92, 93, 98,
+};
+
+/* The Battle-mode ID of a fighter.xml entry; -1 if Battle mode has no such fighter (a placeholder,
+ * or an entry without a database record). */
+static int battle_id(int xml_id)
+{
+    unsigned i;
+    int id = xml_id;
+    for (i = 0; i < sizeof(k_battle_ids) / sizeof(k_battle_ids[0]); i++) {
+        if (k_battle_ids[i].xml_id == xml_id) id = k_battle_ids[i].fe_id;
+        if (k_battle_ids[i].fe_id == xml_id) return -1;
+    }
+    for (i = 0; i < sizeof(k_sod_fighters); i++) if (k_sod_fighters[i] == id) return id;
+    return -1;
+}
+
 /* "Doc (MAR)" -> name "Doc", style "Martial arts". Entries without a known style are not
  * selectable fighters (placeholders, story figures). */
 static void load_fighters(void)
@@ -82,6 +121,7 @@ static void load_fighters(void)
         char *end = strstr(p, "</fighter>"), disp[64], id[16], *paren;
         const char *style;
         OnlineFighter *f;
+        int fe_id;
         if (!end) break;
         if (!field(p, end, "dispname", disp, sizeof(disp)) || !field(p, end, "ID", id, sizeof(id))) continue;
         paren = strrchr(disp, '(');
@@ -96,13 +136,10 @@ static void load_fighters(void)
             while (paren > disp && paren[-1] == ' ') paren--;
             *paren = 0;
         }
-        /* Teck, Santos, O.E and Eric Sermon: story figures without a select portrait. A match with
-         * any of them crashes the load (WrestlerSpecInit, docs/research/crash-001B2480.md), also as
-         * the CPU that fills a mode's free places, so they are in no list at all (the relay plays
-         * them as Doc for older builds). */
-        if (atoi(id) == 40 || atoi(id) == 41 || atoi(id) == 52 || atoi(id) == 78) continue;
+        fe_id = battle_id(atoi(id));
+        if (fe_id < 0) continue;
         f = &g_fighters[g_fighter_count++];
-        f->id = atoi(id);
+        f->id = fe_id;
         snprintf(f->name, sizeof(f->name), "%s", disp);
         f->style = style;
     }
@@ -162,6 +199,14 @@ static void load(void)
 int online_fighters(const OnlineFighter **out) { load(); *out = g_fighters; return g_fighter_count; }
 int online_venues(const OnlineVenue **out) { load(); *out = g_venues; return g_venue_count; }
 int online_modes(const OnlineMode **out) { *out = k_modes; return (int)(sizeof(k_modes) / sizeof(k_modes[0])); }
+
+int online_fighter_id(int id)
+{
+    unsigned i;
+    for (i = 0; i < sizeof(k_battle_ids) / sizeof(k_battle_ids[0]); i++)
+        if (k_battle_ids[i].xml_id == id) return k_battle_ids[i].fe_id;
+    return id;
+}
 
 const char *online_fighter_name(int id)
 {

@@ -78,16 +78,40 @@ const (
 	ErrRoomState  uint8 = 9 // not in a room, or already in one
 )
 
-// UnsafeFighters are fighter.xml IDs that crash the game when loaded into a Battle-mode match
-// (Teck, Santos, O.E, Eric Sermon: story figures without a select portrait). FFNY Online builds
-// 13 and 14 offered them; the relay plays SafeFighter instead, the same on every PC.
-var UnsafeFighters = map[uint8]bool{40: true, 41: true, 52: true, 78: true}
+// BattleIDs translates the fighter.xml IDs of Teck, Santos, O.E and Eric Sermon to their
+// Battle-mode IDs. Battle mode takes a fighter's record from the game's database (djv2.sod) by
+// its front-end ID, which is the fighter.xml ID for everyone but these four; with the fighter.xml
+// ID the slot stayed empty and the match load crashed. FFNY Online builds 13 and 14 offered the
+// four with those IDs (later ones played Doc instead); the relay sends the working ID, the same
+// to every PC.
+var BattleIDs = map[uint8]uint8{40: 85, 41: 93, 52: 92, 78: 91}
 
-// SafeFighter replaces an unsafe fighter.
+// ValidFighters are the front-end IDs with a Character record in the game's database: the only
+// fighters a Battle-mode match can load (tests/unit/test_battle_roster.py keeps this list equal to
+// the game's own, src/hooks/online_data.c, and to the database).
+var ValidFighters = func() map[uint8]bool {
+	m := map[uint8]bool{}
+	for _, id := range []uint8{
+		0, 1, 2, 3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26,
+		27, 28, 30, 31, 32, 33, 34, 35, 36, 38, 43, 44, 45, 46, 47, 48, 50, 51, 54, 55, 56, 57, 58,
+		59, 60, 61, 62, 64, 65, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 80, 81, 82, 83, 84, 85,
+		91, 92, 93, 98,
+	} {
+		m[id] = true
+	}
+	return m
+}()
+
+// SafeFighter replaces a fighter the game cannot load.
 const SafeFighter uint8 = 55
 
+// safeFighter is the fighter the relay plays for the one a player asked for: the Battle-mode ID of
+// an old fighter.xml ID, Doc for any other ID without a database record (FighterNone stays).
 func safeFighter(f uint8) uint8 {
-	if UnsafeFighters[f] {
+	if id, ok := BattleIDs[f]; ok {
+		return id
+	}
+	if f != FighterNone && !ValidFighters[f] {
 		return SafeFighter
 	}
 	return f
@@ -212,7 +236,7 @@ type SetSettings struct {
 type Ready struct {
 	Token   Token
 	Ready   uint8 // 0 or 1
-	Fighter uint8 // fighter.xml ID
+	Fighter uint8 // Battle-mode fighter ID (the game database's front-end ID)
 }
 
 // Vote picks one of the candidates (0..2).

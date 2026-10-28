@@ -973,6 +973,9 @@ int cycle_index(const std::vector<int> &cycle, int type)
 }
 
 
+// The fighter the player last chose (a fighter.xml ID saved by build 13 or 14 as its Battle-mode ID).
+static int saved_fighter() { return online_fighter_id(recomp_settings_get("online", "fighter", 55)); }
+
 // The fighters that have a portrait, by name.
 const std::vector<OnlineFighter> &roster()
 {
@@ -980,9 +983,9 @@ const std::vector<OnlineFighter> &roster()
     static bool built = false;
     if (!built) {
         built = true;
-        // The fighters with a select portrait in the game. The few without one (Santos, Teck, O.E,
-        // Eric Sermon) are not Battle-mode fighters: a match with them crashes at the load (build 13
-        // offered them; players reported it).
+        // The fighters with a select portrait in the online art (fighters/<Battle-mode ID>.png,
+        // from the game's choose-character portraits; Teck, Santos, O.E and Eric Sermon are
+        // 85, 93, 92 and 91 there, as in the game's database).
         const OnlineFighter *all;
         int n = online_fighters(&all);
         for (int i = 0; i < n; i++) {
@@ -1450,7 +1453,7 @@ void draw_hub(ImDrawList *dl, const Frame &f, const Pad &pad)
             S.ranked_pick = true;
             S.page = FIGHTERS;
             {
-                int fighter = recomp_settings_get("online", "fighter", 55);
+                int fighter = saved_fighter();
                 const auto &list = roster();
                 for (size_t i = 0; i < list.size(); i++) if (list[i].id == fighter) S.fighter_sel = (int)i;
             }
@@ -1997,7 +2000,7 @@ void draw_ranked(ImDrawList *dl, const Frame &f, const Pad &pad)
     int waited = 0, searching = 0;
     char why[96];
     int st = lobby_queue(&waited, &searching, why, sizeof(why));
-    int fighter = recomp_settings_get("online", "fighter", 55);
+    int fighter = saved_fighter();
     page_title(dl, f, "RANKED MATCH");
     online_count(dl, f);
     glass(dl, f, 36, 74, 180, 308);
@@ -2132,7 +2135,7 @@ int slot_fighter(const NetRoom &r, int slot)
 {
     const NetRoomPlayer *p = room_player(r, slot);
     if (p && p->fighter != 0xFF) return p->fighter;
-    return slot == r.you ? recomp_settings_get("online", "fighter", 55) : -1;
+    return slot == r.you ? saved_fighter() : -1;
 }
 
 HillView hill_view(const NetRoom &r)
@@ -2420,7 +2423,7 @@ void draw_room(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
     const NetRoomPlayer *me = nullptr;
     for (int i = 0; i < r.player_count; i++) if (r.players[i].slot == r.you) me = &r.players[i];
     bool host = r.you == r.host;
-    int fighter = recomp_settings_get("online", "fighter", 55);
+    int fighter = saved_fighter();
     if (S.room_version != r.version) S.room_version = r.version;
 
     if (r.phase == 1) { draw_vote(dl, f, pad, r); return; }
@@ -2721,7 +2724,9 @@ void gallery_step()
     static const char *const pages[] = { "connecting", "offline", "hub", "hub-signin", "hub-voice", "rooms", "code",
                                          "create", "create-3", "create-6", "create-1", "create-koth",
                                          "create-koth-3", "create-koth-6", "create-koth-1",
-                                         "ranked", "voice", "stats", "players", "fighters", "room", "vote", "hill",
+                                         "ranked", "voice", "stats", "players", "fighters",
+                                         // build 33: the grid at Eric Sermon, O.E, Santos and Teck
+                                         "fighters-91", "fighters-92", "fighters-93", "fighters-85", "room", "vote", "hill",
                                          "up", "watch", "room-voice", "match",
                                          // build 30: the server choice
                                          "connecting-auto", "hub-server", "servers", "servers-offline", "hub-ranked-na",
@@ -2835,6 +2840,14 @@ void gallery_step()
     else if (p == "stats") { S.page = STATS; S.stats_page = 0; }
     else if (p == "players") S.page = PLAYERS;
     else if (p == "fighters") { S.page = FIGHTERS; S.fighter_sel = 9; S.fighter_top = 0; }
+    else if (p.rfind("fighters-", 0) == 0) {    // the grid scrolled to one fighter (by Battle-mode ID)
+        const auto &list = roster();
+        int id = atoi(p.c_str() + 9);
+        S.page = FIGHTERS;
+        S.fighter_sel = 0;
+        S.fighter_top = 0;
+        for (size_t i = 0; i < list.size(); i++) if (list[i].id == id) S.fighter_sel = (int)i;
+    }
     else if (p == "room") { S.page = HUB; G.room = sample_room(2, 4, 3); }
     else if (p == "vote") {
         S.page = HUB;

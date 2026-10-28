@@ -367,7 +367,7 @@ TOOLS = [
                      "clear": {"type": "boolean"}}}},
     {"name": "match", "description": "Start a match on a copy as soon as it is at the main menu, without the menus: "
      "spec like 'type=0,venue=6,f0=58,p0=0,f1=40,p1=-1' (type 0 One on One, 3 Tag Team, ...; venue = venue.xml feID; "
-     "fN = fighter.xml ID; pN = controller port, -1 for the CPU; up to f3/p3).",
+     "fN = Battle-mode fighter ID (fighter.xml ID; Teck 85, Santos 93, O.E 92, Eric Sermon 91); pN = controller port, -1 for the CPU; up to f3/p3).",
      "inputSchema": {"type": "object", "properties": {"copy": {"type": "integer"}, "spec": {"type": "string"}},
                      "required": ["spec"]}},
     {"name": "fe", "description": "Run one front-end command on a copy's game thread at the front end's next call "
