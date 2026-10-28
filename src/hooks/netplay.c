@@ -42,6 +42,7 @@
 #include "rollback.h"
 #include "test_observations.h"
 #include "netplay_servers.h"
+#include "netplay_check.h"
 
 #define G_MATCH_PHASE   0x003B8F30u     /* test_telemetry.c G_PHASE */
 #define G_MATCH_WINNER  0x003B8F40u     /* test_telemetry.c G_WINNER: the winner's fighter slot */
@@ -167,7 +168,8 @@ void netplay_crowd_update(void) { sub_00081170(); }
 #define P_GAMEACK     2     /* guest -> host */
 #define P_LIVEPAD     3     /* u32 sequence, 18 bytes XBOX_GAMEPAD */
 #define P_STEPS       4     /* u32 match, u32 last step, u8 count, count x 32 bytes */
-#define P_HASH        5     /* u32 match, u32 step, u32 hash; since build 23 also the HASH_PARTS words */
+#define P_HASH        5     /* u32 match, u32 step, u32 hash; since build 23 also the HASH_PARTS words; since
+                               * build 34 the raw fields, pre-fight generators and crowd (netplay_check.h) */
 #define P_RTT         6     /* hub: u32 START seed, u16 this PC's ping to the relay in ms, u8 rollback,
                                * since build 23 u32 the game files' fingerprint */
 #define LOCKSTEP_VERSION 4     /* 3: builds 19-20, rollback on; 4: build 21, rollback off again, reclaim on */
@@ -186,7 +188,7 @@ void netplay_crowd_update(void) { sub_00081170(); }
 #define REMATCH_NO    0xFFFFFFFFu
 #define P_PINGINFO    9             /* in a room, every PINGINFO_MS: u16 this PC's ping to the relay (builds from 30) */
 #define PINGINFO_MS   2000
-#define HASH_PARTS    6             /* the checksum in parts: fighters 1-4, the AI generators, the rest */
+#define HASH_PARTS    NETCHECK_PARTS    /* the checksum in parts: fighters 1-4, the AI generators, the rest */
 #define STALL_LIMIT_MS 10000        /* mid-fight: a player has gone */
 #define START_LIMIT_MS 90000        /* the first steps: another PC may still be loading the venue */
 #define DECIDED_LIMIT_MS 1000       /* after the KO: a PC that went on ahead is not a lost player */
@@ -239,6 +241,11 @@ static struct {
     int koth_ready_for;             /* HILL `fights` + 1 of the call this PC readied for by itself */
     volatile LONG start_deferred;   /* a START taken while the last fight's results still show */
     AutoMatch deferred_m;
+    int koth_results;               /* this game still shows the results of a hill fight it fought (until the menu) */
+    int koth_quit;                  /* Rematch on those results already took this PC back to the hill */
+    ULONGLONG deferred_toast;       /* the last "... is waiting for you" notice */
+    int peer_results[MAXP];         /* each position said (P_RTT) it was still on the last fight's results */
+    int peer_on_results[MAXP];      /* ... and says so in its latest P_RTT */
     /* controllers */
     XBOX_GAMEPAD remote_pad[MAXP];
     uint32_t remote_seq[MAXP], local_seq;
@@ -258,8 +265,9 @@ static struct {
     uint32_t in_tag[MAXP][RING];    /* step + 1 (0 = empty) */
     uint32_t in_match[MAXP][RING];
     HANDLE arrived;
-    /* match, step, hash, its HASH_PARTS parts, 1 when the parts came along (builds before 23 send none) */
-    uint32_t local_hash[16][4 + HASH_PARTS], remote_hash[16][4 + HASH_PARTS];
+    /* this PC's checksums and the others', the last 16 each (netplay_check.h; builds before 23 send
+     * no parts, builds before 34 no fields) */
+    NetCheck local_hash[16], remote_hash[16];
     int desync;
     uint32_t desync_step;
     struct { uint32_t which, count; } seeds[32];
@@ -307,6 +315,8 @@ static struct {
     uint32_t updates;                   /* game updates since the match's reference copy */
     uint32_t hash_at[RING], hash_tag[RING], hash_sent;
     uint32_t hash_parts[RING][HASH_PARTS];
+    uint32_t hash_fields[RING][NETCHECK_SLOTS][NETCHECK_FIELDS];    /* the raw words the hash covers */
+    uint32_t hash_gens[RING][NETCHECK_GENS], hash_crowd[RING];      /* steps a checksum goes out for */
     int rb_on, rb_ref_due, resim, predicting;
     int rb_fought;                      /* the phase word said "fighting" in this match */
     int peer_rb[MAXP];                  /* each position rolls back (its P_RTT says so) */
@@ -393,12 +403,24 @@ int netplay_rematch_request(void)
     uint8_t p[9];
     int i, all = 1, gone = -1;
     uint32_t after;
-    if (!N.lobby || !N.match_live || !N.start_seed) return 0;
-    /* King of the Hill: one fight per START, the winner stays on and the hill calls the next pair */
-    if (N.koth_match) {
-        toast(8000, "King of the Hill has no rematch: choose No to go back to the hill.");
+    if (!N.lobby) return 0;
+    /* King of the Hill: one fight per START, the winner stays on and the hill calls the next pair.
+     * Holding Rematch with a notice kept kings on the results pressing it again and again while the
+     * next challenger waited, loaded (13, 14 and 61 s in build 33's reports): Rematch now does what
+     * No does there, on this game thread inside the front end's call, as the results screen's own
+     * No path runs it (MemCard.QuerySave(battle/rewardun.swf), then Game.Quit()). Also after a
+     * deferred next fight was called off (match_live is 0 then, koth_results still 1). */
+    if (N.koth_results || (N.match_live && N.koth_match)) {
+        unsigned saved;
+        if (N.koth_quit) return 1;      /* already on the way back */
+        N.koth_quit = 1;
+        fprintf(stderr, "[NETPLAY] King of the Hill: Rematch on the results goes back to the hill (as No)\n");
+        saved = defjam_fe_call("MemCard.QuerySave( battle/rewardun.swf )");
+        fprintf(stderr, "[NETPLAY] King of the Hill: MemCard.QuerySave -> %08X; Game.Quit()\n", saved);
+        defjam_fe_call("Game.Quit()");
         return 1;
     }
+    if (!N.match_live || !N.start_seed) return 0;
     EnterCriticalSection(&g_cs);
     after = N.match_count;
     N.rematch_want[N.pos] = after;
@@ -748,43 +770,43 @@ static void store_steps(int from, const uint8_t *p, int len)
 static unsigned g_hash_matches;     /* checksums compared and equal, this session */
 
 /* Which part of the checksum differs: a fighter (a player's or a CPU's), the CPU fighters'
- * generators, or the rest. Desyncs so far came from matches with CPU fighters only. */
-static void desync_detail(const uint32_t *mine, const uint32_t *theirs)
+ * generators, or the rest; since build 34 (both sides) also which raw word, here and there, and
+ * whether the pre-fight generators and the crowd still agree. Early desyncs (steps 60-180, both
+ * fighters, every generator equal) carried no more than "fighter 1, fighter 2" before. */
+static void desync_detail(const NetCheck *mine, const NetCheck *theirs)
 {
-    char text[200];
-    int n = 0, slot, fighters = N.fighters > N.players ? N.fighters : N.players;
-    for (slot = 0; slot < 4 && slot < fighters; slot++)
-        if (mine[slot] != theirs[slot])
-            n += snprintf(text + n, sizeof(text) - (size_t)n, "%sfighter %d (%s %d)", n ? ", " : "", slot + 1,
-                          slot < N.players ? "player" : "CPU", slot < N.players ? slot + 1 : slot + 1 - N.players);
-    fprintf(stderr, "[NETPLAY] desync detail: %s; the CPU fighters' generators %s; the shared generator and time scale %s\n",
-            n ? text : "no fighter's fields", mine[4] == theirs[4] ? "equal" : "differ",
-            mine[5] == theirs[5] ? "equal" : "differ");
+    char text[700];
+    int fighters = N.fighters > N.players ? N.fighters : N.players;
+    netcheck_parts_text(text, (int)sizeof(text), mine, theirs, fighters, N.players);
+    fprintf(stderr, "[NETPLAY] desync detail: %s\n", text);
+    if (netcheck_fields_text(text, (int)sizeof(text), mine, theirs, fighters))
+        fprintf(stderr, "[NETPLAY] desync fields: %s\n", text);
 }
 
-/* Compare every checksum this PC and another have for the same match and step, once each. */
+/* Compare every checksum this PC and another have for the same match and step, once each. Only
+ * the hash decides; the parts and fields say where the games parted. */
 static void check_hashes(void)
 {
     int i, j;
     for (i = 0; i < 16; i++)
         for (j = 0; j < 16; j++) {
-            if (!N.local_hash[i][1] || N.local_hash[i][0] != N.remote_hash[j][0] ||
-                N.local_hash[i][1] != N.remote_hash[j][1])
+            if (!N.local_hash[i].step || N.local_hash[i].match != N.remote_hash[j].match ||
+                N.local_hash[i].step != N.remote_hash[j].step)
                 continue;
-            if (N.local_hash[i][2] != N.remote_hash[j][2]) {
+            if (N.local_hash[i].hash != N.remote_hash[j].hash) {
                 if (!N.desync) {
                     N.desync = 1;
-                    N.desync_step = N.local_hash[i][1];
+                    N.desync_step = N.local_hash[i].step;
                     fprintf(stderr, "[NETPLAY] desync in match %08X at step %u (local %08X, remote %08X)\n",
-                            N.local_hash[i][0], N.local_hash[i][1], N.local_hash[i][2], N.remote_hash[j][2]);
-                    if (N.remote_hash[j][3 + HASH_PARTS]) desync_detail(N.local_hash[i] + 3, N.remote_hash[j] + 3);
+                            N.local_hash[i].match, N.local_hash[i].step, N.local_hash[i].hash, N.remote_hash[j].hash);
+                    if (N.remote_hash[j].has_parts) desync_detail(&N.local_hash[i], &N.remote_hash[j]);
                     toast(8000, "The games went out of sync: this match won't count.");
                 }
             } else if (++g_hash_matches % 10 == 0) {
                 fprintf(stderr, "[NETPLAY] in step: %u checksums compared and equal (match %08X, step %u)\n",
-                        g_hash_matches, N.local_hash[i][0], N.local_hash[i][1]);
+                        g_hash_matches, N.local_hash[i].match, N.local_hash[i].step);
             }
-            N.remote_hash[j][1] = 0;    /* compared */
+            N.remote_hash[j].step = 0;  /* compared */
         }
 }
 
@@ -843,7 +865,7 @@ static void make_data_print(void)
 /* Hub: this PC's ping for the current START, so every PC derives the same input delay. */
 static void send_rtt(void)
 {
-    uint8_t p[12];
+    uint8_t p[13];
     int rtt = N.peer_rtt[N.pos] < 0 ? 0 : N.peer_rtt[N.pos];
     p[0] = P_RTT;
     put32(p + 1, N.start_seed);
@@ -851,7 +873,8 @@ static void send_rtt(void)
     p[6] = (uint8_t)(rtt >> 8);
     p[7] = (uint8_t)N.peer_rb[N.pos];   /* builds before 17 send 7 bytes: no rollback */
     put32(p + 8, g_data_print);         /* builds before 23 send 8 bytes */
-    send_data(p, 12);
+    p[12] = N.start_deferred ? 1 : 0;   /* builds before 34 send 12: 1, still on the last fight's results */
+    send_data(p, 13);
     N.last_rtt_sent = GetTickCount64();
 }
 
@@ -939,6 +962,17 @@ static void on_data(int from, const uint8_t *p, int len)
                     toast(8000, "%s's game files differ from yours (a mod?): this match may go out of sync.", who);
                 }
             }
+            N.peer_on_results[from] = len >= 13 && (p[12] & 1);
+            if (N.peer_on_results[from] && !N.peer_results[from]) {
+                /* King of the Hill: that player's game still shows its last fight's results (the
+                 * king, on the results screen); this fight starts once it leaves them. Said only to
+                 * a player who is not on results too (with two in the room both are, every time). */
+                N.peer_results[from] = 1;
+                fprintf(stderr, "[NETPLAY] player %d is still on the last fight's results\n", from + 1);
+                if (!N.start_deferred)
+                    toast(8000, "%s is still on the last fight's results: the fight starts when they leave them.",
+                          player_name(from));
+            }
             SetEvent(N.arrived);
             if (N.delay_fixed && had < 0) send_rtt();   /* it may still be waiting for ours */
         }
@@ -961,22 +995,17 @@ static void on_data(int from, const uint8_t *p, int len)
                 toast(8000, "%s wants a rematch! Choose Rematch to accept.", player_name(from));
         }
         break;
-    case P_HASH:
-        if (len >= 13) {
+    case P_HASH: {
+        NetCheck in;     /* as much as the sender's build sent: 13, 37 or 145 bytes */
+        if (netcheck_unpack(p, len, &in)) {
             EnterCriticalSection(&g_cs);
-            memmove(N.remote_hash[1], N.remote_hash[0], sizeof(N.remote_hash[0]) * 15);
-            N.remote_hash[0][0] = get32(p + 1);
-            N.remote_hash[0][1] = get32(p + 5);
-            N.remote_hash[0][2] = get32(p + 9);
-            N.remote_hash[0][3 + HASH_PARTS] = len >= 13 + 4 * HASH_PARTS;
-            if (N.remote_hash[0][3 + HASH_PARTS]) {
-                int k;
-                for (k = 0; k < HASH_PARTS; k++) N.remote_hash[0][3 + k] = get32(p + 13 + 4 * k);
-            }
+            memmove(&N.remote_hash[1], &N.remote_hash[0], sizeof(N.remote_hash[0]) * 15);
+            N.remote_hash[0] = in;
             check_hashes();
             LeaveCriticalSection(&g_cs);
         }
         break;
+    }
     }
 }
 
@@ -1198,7 +1227,7 @@ static void on_hill(const uint8_t *b, int len)
     Reader r = { b, len, 0, 0 };
     NetHill h;
     char code[7];
-    int i, v, auto_ready = -1;
+    int i, v, auto_ready = -1, called_off = 0;
     memset(&h, 0, sizeof(h));
     rdbytes(&r, code, 6);
     code[6] = 0;
@@ -1255,15 +1284,35 @@ static void on_hill(const uint8_t *b, int len)
     /* Called again while still on the results of the fight this PC just fought (the winner stays
      * on; with two in the room, both): the results and the summary take longer than the ready time,
      * so the king was skipped and lost the crown before its game was back on the hill (three-copy
-     * test, 2026-10-25). Whoever has just fought is there: ready at once, with the same fighter. */
-    if (h.phase == NETHILL_CALLING && N.match_live && N.koth_match && N.koth_done && N.koth_ready_for != h.fights + 1) {
+     * test, 2026-10-25). Whoever has just fought is there: ready at once, with the same fighter.
+     * koth_results: also after a deferred fight was called off (below), while the results still show. */
+    if (h.phase == NETHILL_CALLING && N.koth_results && N.koth_ready_for != h.fights + 1) {
         for (i = 0; i < h.count; i++)
             if (h.line[i].slot == N.roomv.you && h.line[i].state == NETLINE_CALLED) {
                 auto_ready = N.report_m.fighter[N.pos];
                 N.koth_ready_for = h.fights + 1;
             }
     }
+    /* The next fight was agreed while this game still showed the last one's results (a deferred
+     * START), and the relay has ended it since: the opponent left (how 3) or did not come. Nothing
+     * may be set up for it any more: this PC loaded a fight against a gone opponent once back from
+     * the results, ran to step 8 and gave up (Farouk's F9 report 3d59ef, 2026-10-28). Over means the
+     * hill's fight count moved on, or another fight runs: a HILL sent before the START (still
+     * "calling", the same count) can arrive after it and must not end it. */
+    if (N.start_deferred && N.koth_match &&
+        (h.fights != N.koth_fights || (h.phase == NETHILL_FIGHTING && h.seed != N.start_seed)) &&
+        InterlockedExchange(&N.start_deferred, 0))
+        called_off = 1;
     LeaveCriticalSection(&g_cs);
+    if (called_off) {
+        fprintf(stderr, "[NETPLAY] hill: the deferred fight is over on the relay (fights %d, how %d, phase %d); not started\n",
+                h.fights, h.last_how, h.phase);
+        end_hub_match("The next fight was called off: back on the hill.");
+        if (h.last_how == NETHOW_LEFT)
+            toast(8000, "The next fight was called off (%s left): back on the hill.", player_name(1 - N.pos));
+        else
+            toast(8000, "The next fight was called off: back on the hill.");
+    }
     if (auto_ready >= 0) {
         fprintf(stderr, "[NETPLAY] hill: called again straight after the fight; ready with fighter %d\n", auto_ready);
         netplay_lobby_ready(1, auto_ready);
@@ -1318,8 +1367,9 @@ static void on_start(const uint8_t *b, int len)
     for (i = 0; i < count; i++) { slots[i] = rd8(&r); fighters[i] = rd8(&r); }
     if (r.bad) return;
     if (N.start_seed && seed == N.start_seed) { N.start_this_play = 1; return; }     /* a repeat */
-    /* King of the Hill: the last fight of this PC is still on its results screen */
-    deferred = N.lobby && N.koth_match && N.match_live && N.match_seen && N.koth_done;
+    /* King of the Hill: the last fight of this PC is still on its results screen (also when a
+     * START deferred there was called off since: its match is over, the results still show) */
+    deferred = N.lobby && N.koth_results && NETPLAY_IS_KOTH(N.roomv.settings.mode);
     /* positions follow the room slots in order */
     for (i = 1; i < count; i++)
         for (j = i; j > 0 && slots[j - 1] > slots[j]; j--) {
@@ -1355,7 +1405,7 @@ static void on_start(const uint8_t *b, int len)
     N.pos = pos;
     N.delay = LOBBY_DELAY;
     N.delay_fixed = 0;
-    for (i = 0; i < MAXP; i++) N.peer_rtt[i] = -1, N.peer_rb[i] = 0;
+    for (i = 0; i < MAXP; i++) N.peer_rtt[i] = -1, N.peer_rb[i] = 0, N.peer_results[i] = N.peer_on_results[i] = 0;
     /* This PC rolls back only when its player has the beta on and the relay allows it: the relay's
      * switch turns the beta off for everyone without a new build (2026-10-26, after rollback
      * crashes). Sent in P_RTT, so every PC of the match decides from the same flags. */
@@ -1409,6 +1459,8 @@ static void on_start(const uint8_t *b, int len)
         assign_input(0);
         N.start_deferred = 1;
         N.deferred_m = m;
+        N.deferred_toast = GetTickCount64() - 4500;     /* the first notice in 1.5 s (the other's P_RTT first), then every 6 s */
+        send_rtt();                 /* and the opponent, who otherwise sees only a long load (P_RTT's flag) */
         fprintf(stderr, "[NETPLAY] the match starts once this game is back from the last fight's results\n");
         return;
     }
@@ -1644,6 +1696,15 @@ static DWORD WINAPI net_thread(LPVOID unused)
             N.load_hinted = 1;
             toast(12000, "Loading the match... The first one after the game starts can take up to half a minute.");
         }
+        /* King of the Hill: the next opponent waits, loaded, while this player stays on the last
+         * fight's results (13, 14 and 61 s in build 33, pressing Rematch): say so until they leave */
+        if (N.start_deferred && now - N.deferred_toast >= 6000) {
+            int other = N.players == 2 ? 1 - N.pos : -1;
+            N.deferred_toast = now;
+            /* not while the other one is on its results too (its P_RTT says so): nobody waits yet */
+            if (other < 0 || !N.peer_on_results[other])
+                toast(6500, "%s is waiting for you: choose No to start the next fight.", player_name(other));
+        }
         if (N.state == NETPLAY_CONNECTING) {
             if (now - N.hello_sent >= 500) { send_hello(); N.hello_sent = now; }
             if (now - N.started > 10000) {
@@ -1854,6 +1915,7 @@ static int start(const char *server, const char *name, int creating, const char 
     N.koth_match = 0;
     N.koth_winner = -1;
     N.start_deferred = 0;
+    N.koth_results = 0;
     reset_remote_pads();
     EnterCriticalSection(&g_cs);
     memset(N.in_tag, 0, sizeof(N.in_tag));
@@ -2337,6 +2399,7 @@ void netplay_on_main_menu(void)
 {
     if (N.lobby && InterlockedExchange(&N.start_deferred, 0)) {
         /* King of the Hill: back from the last fight's results; the next one, agreed meanwhile */
+        N.koth_results = N.koth_quit = 0;
         log_contiguous("at the match end");
         fprintf(stderr, "[NETPLAY] back from the last fight's results: setting up the next King of the Hill fight\n");
         N.start_tick = GetTickCount64();    /* the load starts now */
@@ -2348,6 +2411,10 @@ void netplay_on_main_menu(void)
         koth_check_result(1);   /* King of the Hill: the fight's RESULT, a draw if none was recorded */
         end_hub_match("Match over; back in the room.");
     }
+    if (N.koth_results)         /* also after the next fight was called off meanwhile */
+        fprintf(stderr, "[NETPLAY] back from the last fight's results: on the hill\n");
+    N.koth_results = 0;
+    N.koth_quit = 0;
 }
 
 /* At the sync point, before the match is set up: the room's START came, but a player has left
@@ -2600,19 +2667,22 @@ int netplay_room_name(int slot, char *out, int size)
 #define SHARED_GEN    0x0039C0E0u   /* the utility generator menus, camera and effects draw too */
 #define TIME_SCALE    0x00349764u   /* CLogic+4, the step's scale (slow motion) */
 
-static uint32_t fighter_hash(uint32_t parts[HASH_PARTS])
+/* The checksum of the state a step starts from, its parts, and the raw fighter words it covers
+ * (netcheck_field: action, position x/y/z, facing, health). */
+static uint32_t fighter_hash(uint32_t parts[HASH_PARTS], uint32_t raw[NETCHECK_SLOTS][NETCHECK_FIELDS])
 {
-    static const uint32_t fields[] = { 0x30, 0x44, 0x48, 0x4C, 0x54, 0x350 };
     uint32_t h = 2166136261u, a;
     int slot;
     unsigned i;
     memset(parts, 0, sizeof(uint32_t) * HASH_PARTS);
+    memset(raw, 0, sizeof(uint32_t) * NETCHECK_SLOTS * NETCHECK_FIELDS);
     for (slot = 0; slot < (N.fighters > N.players ? N.fighters : N.players); slot++) {
         uint32_t one = 2166136261u;
-        for (i = 0; i < sizeof(fields) / sizeof(fields[0]); i++) {
-            uint32_t v = MEM32(ACTORS + (uint32_t)slot * STRIDE + fields[i]);
+        for (i = 0; i < NETCHECK_FIELDS; i++) {
+            uint32_t v = MEM32(ACTORS + (uint32_t)slot * STRIDE + netcheck_field[i]);
             h = (h ^ v) * 16777619u;
             one = (one ^ v) * 16777619u;
+            if (slot < NETCHECK_SLOTS) raw[slot][i] = v;
         }
         if (slot < 4) parts[slot] = one;
     }
@@ -2628,21 +2698,23 @@ static void send_hashes(uint32_t upto)
 {
     uint32_t t;
     for (t = N.hash_sent + 1; t <= upto; t++) {
-        uint8_t p[13 + 4 * HASH_PARTS];
-        uint32_t h;
-        int k;
-        if (t % HASH_EVERY || N.hash_tag[t % RING] != t + 1) continue;
-        h = N.hash_at[t % RING];
+        uint8_t p[NETCHECK_LEN_FULL];
+        NetCheck c;
+        uint32_t k = t % RING;
+        if (t % HASH_EVERY || N.hash_tag[k] != t + 1) continue;
+        memset(&c, 0, sizeof(c));
+        c.match = N.match; c.step = t; c.hash = N.hash_at[k];
+        memcpy(c.parts, N.hash_parts[k], sizeof(c.parts));
+        memcpy(c.fields, N.hash_fields[k], sizeof(c.fields));
+        memcpy(c.gens, N.hash_gens[k], sizeof(c.gens));
+        c.crowd = N.hash_crowd[k];
+        c.has_parts = c.has_extra = 1;
         EnterCriticalSection(&g_cs);
-        memmove(N.local_hash[1], N.local_hash[0], sizeof(N.local_hash[0]) * 15);
-        N.local_hash[0][0] = N.match; N.local_hash[0][1] = t; N.local_hash[0][2] = h;
-        for (k = 0; k < HASH_PARTS; k++) N.local_hash[0][3 + k] = N.hash_parts[t % RING][k];
-        N.local_hash[0][3 + HASH_PARTS] = 1;
+        memmove(&N.local_hash[1], &N.local_hash[0], sizeof(N.local_hash[0]) * 15);
+        N.local_hash[0] = c;
         check_hashes();
         LeaveCriticalSection(&g_cs);
-        p[0] = P_HASH; put32(p + 1, N.match); put32(p + 5, t); put32(p + 9, h);
-        for (k = 0; k < HASH_PARTS; k++) put32(p + 13 + 4 * k, N.hash_parts[t % RING][k]);
-        send_data(p, (int)sizeof(p));
+        send_data(p, netcheck_pack(p, (int)sizeof(p), P_HASH, &c));     /* older builds read the first 37 bytes */
     }
     if (upto > N.hash_sent) N.hash_sent = upto;
 }
@@ -2926,6 +2998,7 @@ static void koth_check_result(int final)
     }
     EnterCriticalSection(&g_cs);
     N.koth_done = 1;
+    N.koth_results = 1;         /* the winner's scene, the summary and the results follow, until the menu */
     N.koth_tries = 0;
     N.koth_sent = 0;
     N.koth_winner = winner;
@@ -3040,16 +3113,25 @@ void netplay_on_step(void)
         for (k = 0; k < 6u; k++) hu = (hu ^ g_crowd_gen[k]) * 16777619u;
         fprintf(stderr, "[NETPLAY] crowd parts at step %u: records %08X crowd-gen %08X global-gen %08X\n", s, hr, hg, hu);
     }
-    if (s == 1 || s == 2 || s == 60 || s == 300 || s == 900 || s == 1800) {
-        /* the crowd's state, to compare between the PCs: the records, its generator, the global one */
-        uint32_t h = 2166136261u, k, recs = MEM32(0x003494E4u), count = MEM32(0x003494E0u);
-        for (k = 0; recs && k < count * 0x34u && k < 0x4000u; k++) h = (h ^ MEM8(recs + k)) * 16777619u;
-        for (k = 0; k < 0x88u; k++) h = (h ^ MEM8(g_ecx + CROWD_MANAGER + 0xE18u + k)) * 16777619u;
-        for (k = 0; k < 6u; k++) h = (h ^ g_crowd_gen[k]) * 16777619u;     /* the crowd's copy, not the real one */
-        fprintf(stderr, "[NETPLAY] crowd hash at step %u: %08X (%u records)\n", s, h, count);
-    }
     k = s % RING;
-    N.hash_at[k] = fighter_hash(N.hash_parts[k]);   /* the state as this step starts */
+    if (s == 1 || s == 2 || s % HASH_EVERY == 0) {
+        /* the crowd's state, to compare between the PCs: the records, its generator, the global one;
+         * on every checksum's step it goes out with the checksum (diagnostic only), and the two
+         * pre-fight CLogic generators with it (docs/research/fight-determinism.md) */
+        uint32_t h = 2166136261u, j, recs = MEM32(0x003494E4u), count = MEM32(0x003494E0u);
+        for (j = 0; recs && j < count * 0x34u && j < 0x4000u; j++) h = (h ^ MEM8(recs + j)) * 16777619u;
+        for (j = 0; j < 0x88u; j++) h = (h ^ MEM8(g_ecx + CROWD_MANAGER + 0xE18u + j)) * 16777619u;
+        for (j = 0; j < 6u; j++) h = (h ^ g_crowd_gen[j]) * 16777619u;     /* the crowd's copy, not the real one */
+        if (s == 1 || s == 2 || s == 60 || s == 300 || s == 900 || s == 1800)
+            fprintf(stderr, "[NETPLAY] crowd hash at step %u: %08X (%u records)\n", s, h, count);
+        N.hash_crowd[k] = h;
+        for (j = 0; j < NETCHECK_GENS; j++) {
+            uint32_t g = 2166136261u, a;
+            for (a = 0; a < 0x88u; a += 4) g = (g ^ MEM32(netcheck_gen[j] + a)) * 16777619u;
+            N.hash_gens[k][j] = g;
+        }
+    }
+    N.hash_at[k] = fighter_hash(N.hash_parts[k], N.hash_fields[k]);   /* the state as this step starts */
     N.hash_tag[k] = s + 1;
     if (N.resim) return;                /* a re-run: the entries are all known or predicted */
     target = s + (uint32_t)N.delay;
@@ -3088,9 +3170,13 @@ void netplay_on_step(void)
             if (ready && waited >= 500 && s > (uint32_t)N.delay + 1 && !last_note)
                 toast(4000, "Waited %.1f s for %s (connection).", waited / 1000.0, player_name(N.last_late));
             if (waited >= 1000 && last_note) {     /* the screen could not say it meanwhile: say it now */
-                toast(5000, "Waited %.1f s for %s to finish loading the fight.", waited / 1000.0, player_name(N.last_late));
-                fprintf(stderr, "[NETPLAY] waited %.1f s at the fight's start for player %d to finish loading\n",
-                        waited / 1000.0, N.last_late);
+                /* King of the Hill: the other one (the king) sat on the last fight's results, which
+                 * its P_RTT said; the 13 to 61 s waits of build 33 were that, not a slow load */
+                int results = N.last_late >= 0 && N.last_late < MAXP && N.peer_results[N.last_late];
+                const char *why = results ? "leave the last fight's results" : "finish loading the fight";
+                toast(5000, "Waited %.1f s for %s to %s.", waited / 1000.0, player_name(N.last_late), why);
+                fprintf(stderr, "[NETPLAY] waited %.1f s at the fight's start for player %d to %s\n",
+                        waited / 1000.0, N.last_late, results ? "leave the last fight's results" : "finish loading");
             }
             break;
         }

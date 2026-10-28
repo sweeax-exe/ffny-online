@@ -73,7 +73,10 @@ each round trip plus one step, between 2 and 10. A code match uses the host's se
 - **Fights:** every simulation step uses, for every human fighter, the controller entry their player's PC
   captured `delay` steps earlier. Every random generator is seeded from the session instead of the
   clock. Every 60 steps the PCs compare a checksum of both fighters (state, position, facing,
-  health); a mismatch is logged as `[NETPLAY] desync` and shown on the Online page.
+  health); a mismatch is logged as `[NETPLAY] desync` and shown on the Online page. Since build 34
+  the checksum message also carries the raw fields per fighter, the two pre-fight CLogic generators'
+  hashes and the crowd hash (`src/hooks/netplay_check.h`); they do not decide anything, but
+  `[NETPLAY] desync fields:` then names each word that differs, here and there.
 - **Known limit:** the crowd is animated during loading on the host's own clock, and spectators
   can push fighters, so a long fight can still drift apart. The checksum reports it when it happens.
 
