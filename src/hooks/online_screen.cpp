@@ -2724,7 +2724,9 @@ void gallery_step()
     static const char *const pages[] = { "connecting", "offline", "hub", "hub-signin", "hub-voice", "rooms", "code",
                                          "create", "create-3", "create-6", "create-1", "create-koth",
                                          "create-koth-3", "create-koth-6", "create-koth-1",
-                                         "ranked", "voice", "stats", "players", "fighters", "room", "vote", "hill",
+                                         "ranked", "voice", "stats", "players", "fighters",
+                                         // build 33: the grid at Eric Sermon, O.E, Santos and Teck
+                                         "fighters-91", "fighters-92", "fighters-93", "fighters-85", "room", "vote", "hill",
                                          "up", "watch", "room-voice", "match",
                                          // build 30: the server choice
                                          "connecting-auto", "hub-server", "servers", "servers-offline", "hub-ranked-na",
@@ -2838,6 +2840,14 @@ void gallery_step()
     else if (p == "stats") { S.page = STATS; S.stats_page = 0; }
     else if (p == "players") S.page = PLAYERS;
     else if (p == "fighters") { S.page = FIGHTERS; S.fighter_sel = 9; S.fighter_top = 0; }
+    else if (p.rfind("fighters-", 0) == 0) {    // the grid scrolled to one fighter (by Battle-mode ID)
+        const auto &list = roster();
+        int id = atoi(p.c_str() + 9);
+        S.page = FIGHTERS;
+        S.fighter_sel = 0;
+        S.fighter_top = 0;
+        for (size_t i = 0; i < list.size(); i++) if (list[i].id == id) S.fighter_sel = (int)i;
+    }
     else if (p == "room") { S.page = HUB; G.room = sample_room(2, 4, 3); }
     else if (p == "vote") {
         S.page = HUB;
