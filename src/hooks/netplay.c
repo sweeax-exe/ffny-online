@@ -241,6 +241,10 @@ static struct {
     volatile LONG start_deferred;   /* a START taken while the last fight's results still show */
     AutoMatch deferred_m;
     int koth_results;               /* this game still shows the results of a hill fight it fought (until the menu) */
+    int koth_quit;                  /* Rematch on those results already took this PC back to the hill */
+    ULONGLONG deferred_toast;       /* the last "... is waiting for you" notice */
+    int peer_results[MAXP];         /* each position said (P_RTT) it was still on the last fight's results */
+    int peer_on_results[MAXP];      /* ... and says so in its latest P_RTT */
     /* controllers */
     XBOX_GAMEPAD remote_pad[MAXP];
     uint32_t remote_seq[MAXP], local_seq;
@@ -394,12 +398,24 @@ int netplay_rematch_request(void)
     uint8_t p[9];
     int i, all = 1, gone = -1;
     uint32_t after;
-    if (!N.lobby || !N.match_live || !N.start_seed) return 0;
-    /* King of the Hill: one fight per START, the winner stays on and the hill calls the next pair */
-    if (N.koth_match) {
-        toast(8000, "King of the Hill has no rematch: choose No to go back to the hill.");
+    if (!N.lobby) return 0;
+    /* King of the Hill: one fight per START, the winner stays on and the hill calls the next pair.
+     * Holding Rematch with a notice kept kings on the results pressing it again and again while the
+     * next challenger waited, loaded (13, 14 and 61 s in build 33's reports): Rematch now does what
+     * No does there, on this game thread inside the front end's call, as the results screen's own
+     * No path runs it (MemCard.QuerySave(battle/rewardun.swf), then Game.Quit()). Also after a
+     * deferred next fight was called off (match_live is 0 then, koth_results still 1). */
+    if (N.koth_results || (N.match_live && N.koth_match)) {
+        unsigned saved;
+        if (N.koth_quit) return 1;      /* already on the way back */
+        N.koth_quit = 1;
+        fprintf(stderr, "[NETPLAY] King of the Hill: Rematch on the results goes back to the hill (as No)\n");
+        saved = defjam_fe_call("MemCard.QuerySave( battle/rewardun.swf )");
+        fprintf(stderr, "[NETPLAY] King of the Hill: MemCard.QuerySave -> %08X; Game.Quit()\n", saved);
+        defjam_fe_call("Game.Quit()");
         return 1;
     }
+    if (!N.match_live || !N.start_seed) return 0;
     EnterCriticalSection(&g_cs);
     after = N.match_count;
     N.rematch_want[N.pos] = after;
@@ -783,7 +799,7 @@ static void make_data_print(void)
 /* Hub: this PC's ping for the current START, so every PC derives the same input delay. */
 static void send_rtt(void)
 {
-    uint8_t p[12];
+    uint8_t p[13];
     int rtt = N.peer_rtt[N.pos] < 0 ? 0 : N.peer_rtt[N.pos];
     p[0] = P_RTT;
     put32(p + 1, N.start_seed);
@@ -791,7 +807,8 @@ static void send_rtt(void)
     p[6] = (uint8_t)(rtt >> 8);
     p[7] = (uint8_t)N.peer_rb[N.pos];   /* builds before 17 send 7 bytes: no rollback */
     put32(p + 8, g_data_print);         /* builds before 23 send 8 bytes */
-    send_data(p, 12);
+    p[12] = N.start_deferred ? 1 : 0;   /* builds before 34 send 12: 1, still on the last fight's results */
+    send_data(p, 13);
     N.last_rtt_sent = GetTickCount64();
 }
 
@@ -878,6 +895,17 @@ static void on_data(int from, const uint8_t *p, int len)
                         snprintf(who, sizeof(who), "player %d", from + 1);
                     toast(8000, "%s's game files differ from yours (a mod?): this match may go out of sync.", who);
                 }
+            }
+            N.peer_on_results[from] = len >= 13 && (p[12] & 1);
+            if (N.peer_on_results[from] && !N.peer_results[from]) {
+                /* King of the Hill: that player's game still shows its last fight's results (the
+                 * king, on the results screen); this fight starts once it leaves them. Said only to
+                 * a player who is not on results too (with two in the room both are, every time). */
+                N.peer_results[from] = 1;
+                fprintf(stderr, "[NETPLAY] player %d is still on the last fight's results\n", from + 1);
+                if (!N.start_deferred)
+                    toast(8000, "%s is still on the last fight's results: the fight starts when they leave them.",
+                          player_name(from));
             }
             SetEvent(N.arrived);
             if (N.delay_fixed && had < 0) send_rtt();   /* it may still be waiting for ours */
@@ -1311,7 +1339,7 @@ static void on_start(const uint8_t *b, int len)
     N.pos = pos;
     N.delay = LOBBY_DELAY;
     N.delay_fixed = 0;
-    for (i = 0; i < MAXP; i++) N.peer_rtt[i] = -1, N.peer_rb[i] = 0;
+    for (i = 0; i < MAXP; i++) N.peer_rtt[i] = -1, N.peer_rb[i] = 0, N.peer_results[i] = N.peer_on_results[i] = 0;
     /* This PC rolls back only when its player has the beta on and the relay allows it: the relay's
      * switch turns the beta off for everyone without a new build (2026-10-26, after rollback
      * crashes). Sent in P_RTT, so every PC of the match decides from the same flags. */
@@ -1361,6 +1389,8 @@ static void on_start(const uint8_t *b, int len)
         assign_input(0);
         N.start_deferred = 1;
         N.deferred_m = m;
+        N.deferred_toast = GetTickCount64() - 4500;     /* the first notice in 1.5 s (the other's P_RTT first), then every 6 s */
+        send_rtt();                 /* and the opponent, who otherwise sees only a long load (P_RTT's flag) */
         fprintf(stderr, "[NETPLAY] the match starts once this game is back from the last fight's results\n");
         return;
     }
@@ -1593,6 +1623,15 @@ static DWORD WINAPI net_thread(LPVOID unused)
         if (N.match_live && N.start_tick && !N.load_done && !N.load_hinted && !N.start_deferred && now - N.start_tick > 8000) {
             N.load_hinted = 1;
             toast(12000, "Loading the match... The first one after the game starts can take up to half a minute.");
+        }
+        /* King of the Hill: the next opponent waits, loaded, while this player stays on the last
+         * fight's results (13, 14 and 61 s in build 33, pressing Rematch): say so until they leave */
+        if (N.start_deferred && now - N.deferred_toast >= 6000) {
+            int other = N.players == 2 ? 1 - N.pos : -1;
+            N.deferred_toast = now;
+            /* not while the other one is on its results too (its P_RTT says so): nobody waits yet */
+            if (other < 0 || !N.peer_on_results[other])
+                toast(6500, "%s is waiting for you: choose No to start the next fight.", player_name(other));
         }
         if (N.state == NETPLAY_CONNECTING) {
             if (now - N.hello_sent >= 500) { send_hello(); N.hello_sent = now; }
@@ -2288,7 +2327,7 @@ void netplay_on_main_menu(void)
 {
     if (N.lobby && InterlockedExchange(&N.start_deferred, 0)) {
         /* King of the Hill: back from the last fight's results; the next one, agreed meanwhile */
-        N.koth_results = 0;
+        N.koth_results = N.koth_quit = 0;
         log_contiguous("at the match end");
         fprintf(stderr, "[NETPLAY] back from the last fight's results: setting up the next King of the Hill fight\n");
         N.start_tick = GetTickCount64();    /* the load starts now */
@@ -2303,6 +2342,7 @@ void netplay_on_main_menu(void)
     if (N.koth_results)         /* also after the next fight was called off meanwhile */
         fprintf(stderr, "[NETPLAY] back from the last fight's results: on the hill\n");
     N.koth_results = 0;
+    N.koth_quit = 0;
 }
 
 /* At the sync point, before the match is set up: the room's START came, but a player has left
@@ -3058,9 +3098,13 @@ void netplay_on_step(void)
             if (ready && waited >= 500 && s > (uint32_t)N.delay + 1 && !last_note)
                 toast(4000, "Waited %.1f s for %s (connection).", waited / 1000.0, player_name(N.last_late));
             if (waited >= 1000 && last_note) {     /* the screen could not say it meanwhile: say it now */
-                toast(5000, "Waited %.1f s for %s to finish loading the fight.", waited / 1000.0, player_name(N.last_late));
-                fprintf(stderr, "[NETPLAY] waited %.1f s at the fight's start for player %d to finish loading\n",
-                        waited / 1000.0, N.last_late);
+                /* King of the Hill: the other one (the king) sat on the last fight's results, which
+                 * its P_RTT said; the 13 to 61 s waits of build 33 were that, not a slow load */
+                int results = N.last_late >= 0 && N.last_late < MAXP && N.peer_results[N.last_late];
+                const char *why = results ? "leave the last fight's results" : "finish loading the fight";
+                toast(5000, "Waited %.1f s for %s to %s.", waited / 1000.0, player_name(N.last_late), why);
+                fprintf(stderr, "[NETPLAY] waited %.1f s at the fight's start for player %d to %s\n",
+                        waited / 1000.0, N.last_late, results ? "leave the last fight's results" : "finish loading");
             }
             break;
         }

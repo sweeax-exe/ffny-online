@@ -75,3 +75,18 @@ def test_room_slots_are_apart_from_match_fighters():
     assert re.search(r'#define SLOTS\s+NETPLAY_ROOM_SLOTS', VOICE_C)
     init = re.search(r's_player_vol\[SLOTS\] = \{([^}]*)\}', VOICE_C).group(1)
     assert init.count('100') == c_define(NETPLAY_H, 'NETPLAY_ROOM_SLOTS')
+
+
+def test_the_results_screen_never_holds_the_next_fight():
+    # build 34: a deferred START is called off once the relay ended that fight (the fight count moved
+    # on), Rematch on a hill fight's results does what No does, the king hears who waits, and P_RTT
+    # tells the waiting challenger why (byte 12; older builds send and read 12 bytes)
+    assert re.search(r'N\.start_deferred && N\.koth_match &&\s*\(h\.fights != N\.koth_fights \|\| '
+                     r'\(h\.phase == NETHILL_FIGHTING && h\.seed != N\.start_seed\)\)', NETPLAY_C)
+    assert 'end_hub_match("The next fight was called off: back on the hill.")' in NETPLAY_C
+    assert 'deferred = N.lobby && N.koth_results && NETPLAY_IS_KOTH(N.roomv.settings.mode);' in NETPLAY_C
+    assert 'defjam_fe_call("MemCard.QuerySave( battle/rewardun.swf )")' in NETPLAY_C
+    assert 'defjam_fe_call("Game.Quit()")' in NETPLAY_C
+    assert 'is waiting for you: choose No to start the next fight.' in NETPLAY_C
+    assert 'p[12] = N.start_deferred ? 1 : 0;' in NETPLAY_C and 'send_data(p, 13);' in NETPLAY_C
+    assert "leave the last fight's results" in NETPLAY_C
