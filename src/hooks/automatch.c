@@ -19,6 +19,7 @@
 #include "automatch.h"
 #include "netplay.h"
 #include "online_screen.h"
+#include "created_fighter.h"
 
 extern void xbox_NoteAnchorEvent(const char *text);
 
@@ -225,7 +226,10 @@ static void run_sequence(void)
      * Nothing in the fight reads it (docs/research/summary-cpu-tag.md). */
     for (i = 0; i < m->count; i++) call("Controller.ControllerReturn(%d)", i);
     call("Game.ResetFighterList()");
-    for (i = 0; i < m->count; i++) call("Controller.ControllerSetup(%d,%d,%d,%d)", i, m->pad[i], m->fighter[i], i);
+    for (i = 0; i < m->count; i++) {
+        int fighter = created_fighter_test_slot(i, m->pad[i]);      /* RECOMP_TEST_CP only */
+        call("Controller.ControllerSetup(%d,%d,%d,%d)", i, m->pad[i], fighter >= 0 ? fighter : m->fighter[i], i);
+    }
     call("Game.ResetVenueList(0)");
     call("Game.ChooseVenue(%d)", m->venue);
     call("Controller.GetCustomControlMap()");
@@ -303,6 +307,7 @@ void test_control_note_funccall(const char *text);     /* src/hooks/test_control
  * players have not chosen yet). */
 int automatch_hold_funccall(const char *text)
 {
+    created_fighter_before_funccall(text);      /* RECOMP_TEST_CP only */
     if (!strcmp(text, "Game.Rematch()")) return netplay_rematch_request();
     return 0;
 }
