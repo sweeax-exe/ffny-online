@@ -34,6 +34,7 @@
 #include "hooks/pc_settings.h"
 #include "hooks/netplay.h"
 #include "hooks/automatch.h"
+#include "hooks/options_audio.h"
 #include "hooks/rollback.h"
 #include "hooks/recorder.h"
 #include "hooks/fe_inject.h"
@@ -1226,7 +1227,9 @@ static void funccall_hook(void)
         return;
     }
     defjam_unlock_all_on_funccall(text);   /* RECOMP_UNLOCK_ALL, src/patches/dev_unlock.c */
+    options_audio_before_funccall(text);   /* the saved volumes, once loaded (options_audio.c) */
     sub_00068BA0();
+    options_audio_after_funccall(text);
     /* RECOMP_FE_INJECT: commands of a test's own, after a chosen call (src/hooks/fe_inject.c). */
     fe_inject_after_call(text);
     dev_module_after_call(text);

@@ -11,6 +11,7 @@ editing it. CMake picks up every `.c` and `.cpp` file in this directory.
 | `pc_input.c`, `pc_input.h` | Gamepad, keyboard and mouse input and their settings |
 | `pc_ui.cpp`, `pc_launcher.cpp`, `pc_ui_settings.c`, `pc_ui*.h` | The settings screen, shared by the launcher and the in-game overlay |
 | `save_compat.c`, `save_compat.h` | Keeps profiles from earlier builds readable |
+| `options_audio.c`, `options_audio.h` | Hands the saved music / effects / announcer volumes to the sound system after the save is read |
 | `test_telemetry.c`, `test_observations.c` | Read-only game-state probes for the test harness (`RECOMP_TEST_OBSERVATIONS=1`) |
 | `watchpoint.c`, `codeguard.c`, `postcmd.c` | Diagnostics: write watchpoints, code-overwrite detection, synthetic front-end commands |
 
