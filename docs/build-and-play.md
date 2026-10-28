@@ -193,3 +193,9 @@ the complete save root after testing.
 
 Report your version/commit and reproduction steps. Review logs for personal
 paths; do not upload game data, saves, generated source or memory dumps.
+
+For a fault that is hard to describe (a hitch, a picture wrong for a moment, a pop in
+the sound), turn on *Record play-tests* in the launcher's Diagnostics tab and press **F9**
+just after it happens; `python scripts/bug-bundle.py latest` then writes a report of
+those seconds ([Play-test recorder](playtest-recorder.md)). A bundle holds the game's
+own pictures and sound: share the report's text and numbers, not the bundle.

@@ -6,7 +6,7 @@
     python scripts/pipeline.py build [--preset posix-release] [--clean]
 
 The data folder comes from --data or DEFJAM_DATA and holds `extracted/`.
-Analysis outputs are archived to `<data>/analysis`. The XBE working copy and
+Analysis outputs are archived to `<data>/analysis` unless --no-archive is passed. The XBE working copy and
 the generated C stay local and ignored, as on Windows. Needs pyxbe and capstone.
 """
 import argparse
@@ -49,6 +49,8 @@ def analyze(args):
     run('function identification', ['-m', 'tools.func_id', xbe, '-v'], tk)
     run('ABI analysis', ['-m', 'tools.abi_analysis', xbe, '-v'], tk)
     run('analysis state validation', [SCRIPTS / 'pipeline-state.py', 'record-analysis', '--toolkit', tk])
+    if getattr(args, 'no_archive', False):
+        return  # Setup candidates keep analysis local; preserve player data caches.
     archive = data / 'analysis'
     archive.mkdir(exist_ok=True)
     for d in ANALYSIS_DIRS:
@@ -64,6 +66,7 @@ def recomp(args):
         sys.exit('run "pipeline.py analyze" first')
     run('recompilation (previous generated sources preserved)',
         [SCRIPTS / 'pipeline-state.py', 'lift', '--toolkit', tk, '--split', args.split, '--', *args.extra])
+    run('manual override addresses', [SCRIPTS / 'check-manual-addresses.py', '--toolkit', tk])
     gen = [p for p in (REPO / 'src/recomp/gen').iterdir() if p.is_file()]
     print(f"Generated: {sum(p.suffix == '.c' for p in gen)} C files, "
           f"{round(sum(p.stat().st_size for p in gen) / 2**20)} MB")
@@ -94,6 +97,7 @@ def main():
     sub = ap.add_subparsers(dest='cmd', required=True)
     a = sub.add_parser('analyze')
     a.add_argument('--data')
+    a.add_argument('--no-archive', action='store_true', help='Keep analysis in the candidate toolkit; do not write data/analysis')
     a.set_defaults(fn=analyze)
     r = sub.add_parser('recomp')
     r.add_argument('--split', type=int, default=1000)

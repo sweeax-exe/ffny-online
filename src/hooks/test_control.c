@@ -78,7 +78,7 @@ static int parse_controls(const char *spec, int *out, int max)
     snprintf(buf, sizeof(buf), "%s", spec);
     for (tok = strtok_s(buf, "+", &ctx); tok && n < max; tok = strtok_s(NULL, "+", &ctx))
         for (c = 0; c < INPUT_CONTROL_COUNT; c++)
-            if (!_stricmp(tok, input_control_name(c))) { out[n++] = c; break; }
+            if (!_stricmp(tok, xbox_InputMap_ControlName(c))) { out[n++] = c; break; }
     return n;
 }
 

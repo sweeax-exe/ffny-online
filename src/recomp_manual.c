@@ -35,6 +35,18 @@
 #include "hooks/netplay.h"
 #include "hooks/automatch.h"
 #include "hooks/rollback.h"
+#include "hooks/recorder.h"
+#include "hooks/fe_inject.h"
+#include "hooks/scene_launcher.h"
+#include "hooks/dev_module.h"
+#include "patches/picture.h"
+#include "patches/menu_geometry.h"
+
+/* Crowd test controls (src/hooks/crowd_control.c, RECOMP_TEST_CROWD; off unless set). */
+void defjam_crowd_match_start(void);
+void defjam_crowd_update(void);
+void defjam_crowd_seed(uint32_t generator, uint32_t stack);
+void defjam_crowd_step(void);
 
 /* Read-only probes use the lifter's universal entry hooks. They do not alter
  * guest registers, stack, memory or the generated body. Off in normal play. */
@@ -54,18 +66,115 @@ void sub_001A6870_enter(void)
     if (defjam_test_observations_enabled())
         defjam_test_health_notify(MEM32(g_esp + 4), MEM32(g_esp + 8));
 }
+/* Widescreen: a fight HUD is up (src/patches/widescreen.c). The four fighter
+ * slots the fight camera reads (0x340D70, stride 0xC8; a slot counts when set
+ * and bit 3 of +0xC0 is clear): with 3 or 4 fighters the HUD has bottom rows. */
+static int s_ws_hud_live;      /* the simulation step ran since the match last left a fighting state */
+static void ws_hud_heartbeat(void)
+{
+    extern void nv2a_ws_hud_heartbeat(int bottom_rows);
+    uint32_t i, fighters = 0;
+    for (i = 0; i < 4; i++)
+        if (MEM32(0x340D70 + i * 0xC8) != 0 && (MEM8(0x340D70 + i * 0xC8 + 0xC0) & 8) == 0)
+            fighters++;
+    nv2a_ws_hud_heartbeat(fighters >= 3);
+}
 /* Match telemetry (src/hooks/test_telemetry.c): the fight's simulation step,
  * match set-up, the result recorder and the random number generator's seeding.
  * Read-only, except that RECOMP_TEST_RNG_SEED replaces the seed argument. */
 /* Online play (src/hooks/netplay.c) uses the same points: it counts the steps, and in a
  * session it replaces every seed with one both PCs derive from the session. */
-void sub_00087700_enter(void) { defjam_test_step(); netplay_on_step(); }
+void sub_00087700_enter(void)
+{
+    defjam_crowd_step();
+    defjam_test_step();
+    netplay_on_step();
+    s_ws_hud_live = 1;
+    ws_hud_heartbeat();
+}
+/* The match's update (thiscall; the match at 0x349760, its state at +0x2D820).
+ * Only states 5 and 8 run the simulation step above; any other state (intro,
+ * special-move camera, match end) ends the live HUD. */
+void sub_0008BE60_enter(void)
+{
+    uint32_t state = MEM32(g_ecx + 0x2D820);
+    if (state != 5 && state != 8)
+        s_ws_hud_live = 0;
+}
+/* A fight mode's per-frame tick: 0x79B60 in Battle (measured), 0x7A8F0 the other
+ * mode built the same way (same match update and HUD calls; no route reaches it).
+ * While the pause menu is open it skips the match update, so the step stops, but
+ * it keeps running and the HUD stays on screen. Keep the widescreen HUD anchored
+ * through a pause that began in a live fight (issue #95); otherwise no change. */
+void sub_00079B60_enter(void) { if (s_ws_hud_live) ws_hud_heartbeat(); }
+void sub_0007A8F0_enter(void) { if (s_ws_hud_live) ws_hud_heartbeat(); }
 static void crowd_guard_match_start(void);
-void sub_001A4D90_enter(void) { defjam_test_match_start(); netplay_on_match_start(); crowd_guard_match_start(); }
+void sub_001A4D90_enter(void)
+{
+    defjam_test_match_start();
+    defjam_crowd_match_start();
+    netplay_on_match_start();
+    crowd_guard_match_start();
+}
+/* Widescreen song notification (src/patches/widescreen.c, issue #118): the APT
+ * movie loader (archive, name, &apt, &const), and the next step of the load,
+ * which its only caller runs straight after it with the .apt data as its second
+ * stack argument. */
+void ws_apt_load_begin(uint32_t name);
+void ws_apt_load_done(uint32_t apt);
+void sub_001810B0_enter(void) { ws_apt_load_begin(MEM32(g_esp + 8)); }
+void sub_00056F50_enter(void) { ws_apt_load_done(MEM32(g_esp + 8)); }
+/* DynamicLoader's ELF parser: the input descriptor's +0x10 is the raw header,
+ * still before section fixup, relocation and vertex-buffer upload. */
+void sub_00109F80_enter(void) { menu_geometry_register(MEM32(g_ecx + 0x10)); }
+
+/* ---- Story shops: no LOADING frame on an item change (issue #119) ------
+ *
+ * Changing an item in a shop, the Sketch Artist or the wardrobe ends with
+ * CreatePlayer.ForceUpdate, whose callback (guest 0x0004A1A0) reconciles the
+ * created player's parts and loads what changed. The part loaders
+ * (0x000992E0, 0x0009A050, 0x0009AB90) announce a blocking load with event
+ * 0xF0000038, and the observer registered for it (0x0005AF80) clears the frame,
+ * draws the LOADING caption at the lower right, presents it and returns. On
+ * the console the load came off the disc and the card was the feedback for
+ * it; here it takes a few dozen milliseconds, so every item change flashes one
+ * black LOADING frame over the 4:3 picture before the preview comes back.
+ *
+ * Within a ForceUpdate -- from its callback's entry until the game presents
+ * its next ordinary frame -- the LOADING frame is skipped, so the preview
+ * stays on screen until the new item is ready. The load, the event and its
+ * other observers are untouched, and every other load keeps its card.
+ * RECOMP_SHOP_LOADING_CARD=1 restores the card. */
+static uint32_t s_presents;                     /* frames the game has presented */
+static uint32_t s_refresh_at = 0xFFFFFFFFu;     /* s_presents when a ForceUpdate began */
+void sub_00018DF0_enter(void) { s_presents++; }
+void sub_0004A1A0_enter(void) { s_refresh_at = s_presents; }
+extern void sub_0005AF80_gen(void);
+void sub_0005AF80(void)
+{
+    static int keep = -1;
+    if (keep < 0) {
+        const char *e = getenv("RECOMP_SHOP_LOADING_CARD");
+        keep = e && *e == '1';
+    }
+    if (!keep && s_refresh_at == s_presents) {
+        static unsigned skipped;
+        if (++skipped <= 4 || (skipped & (skipped - 1)) == 0)
+            fprintf(stderr, "[SHOP] item refresh: LOADING frame skipped (%u so far)\n", skipped);
+        g_esp += 4;     /* cdecl observer: consume the return address; the dispatcher pops its two args */
+        return;
+    }
+    sub_0005AF80_gen();
+}
 void sub_001BC690_enter(void) { defjam_test_rng(g_esp); netplay_on_seed(g_esp, 2, 0x1BC690u); }
 void sub_001AD220_enter(void) { defjam_test_ai_seed(g_esp); netplay_on_seed(g_esp, 1, 0x1AD220u); }
 /* The seeding routine every generator of this kind goes through (thiscall). */
-void sub_000AA0D0_enter(void) { defjam_test_generator_seed(g_ecx, g_esp); netplay_on_seed(g_esp, 2, g_ecx); }
+void sub_000AA0D0_enter(void)
+{
+    defjam_test_generator_seed(g_ecx, g_esp);
+    defjam_crowd_seed(g_ecx, g_esp);
+    netplay_on_seed(g_esp, 2, g_ecx);
+}
 /* Every draw (RECOMP_TEST_DRAWS): the C runtime's rand, the match generator, and the two
  * wrappers the object-form generators are drawn through; then the background crowd's update. */
 void sub_00200820_enter(void) { defjam_test_draw(1, MEM32(g_esp)); }
@@ -179,7 +288,7 @@ static void crowd_guard(uint32_t crowd)
     }
 }
 
-void sub_000DB870_enter(void) { defjam_test_crowd_update(); crowd_guard(g_ecx); }
+void sub_000DB870_enter(void) { defjam_test_crowd_update(); defjam_crowd_update(); crowd_guard(g_ecx); }
 /* The per-fighter pad reader: RECOMP_TEST_INPUT replaces what it is about to read, and so
  * does online play, with the entry both PCs agreed on for this step. */
 void sub_001BAA00_enter(void) { defjam_test_input(MEM32(g_esp + 4)); netplay_on_pad_read(MEM32(g_esp + 4)); }
@@ -637,51 +746,6 @@ void sub_0011F0D0(void)
 #undef esi
 #undef edi
 
-/* The screen camera's projection shape, written out by hand so it can answer
- * 16:9 (docs/research/widescreen.md). thiscall, ret 20:
- *   (mode, float *fov, float *aspect, float *top, float *height)
- * mode 0 is the console's 4:3 over the whole viewport and is the only one this
- * title asks for (one camera, at 0x80017200, built at start-up); mode 1 is a
- * 16:9 letterbox inside it (height less a quarter, moved down an eighth);
- * mode 2 takes the shape from the camera's own rectangle. With [display]
- * widescreen on, mode 0 answers 16:9 instead: the engine builds a wider
- * projection (and culls to it) into the same 640x480 target, and the present
- * pass shows that target at 16:9 -- anamorphic, as console widescreen was.
- * Everything else is what the lifted body did. Read once: a restart setting. */
-void sub_0001A4E0(void)
-{
-    uint32_t cam = g_ecx, mode = MEM32(g_esp + 4);
-    uint32_t p_fov = MEM32(g_esp + 8), p_aspect = MEM32(g_esp + 0xC);
-    uint32_t p_top = MEM32(g_esp + 0x10), p_height = MEM32(g_esp + 0x14);
-    int widescreen = pc_widescreen_latch();
-
-    switch (mode) {
-    case 0:
-        MEM32(p_fov) = MEM32(cam + 0xC);
-        MEM32(p_aspect) = widescreen ? 0x3FE38E39u /* 16/9 */ : 0x3FAAAAABu /* 4/3 */;
-        MEM32(p_top) = MEM32(cam + 0x18);
-        MEM32(p_height) = MEM32(cam + 0x20);
-        break;
-    case 1: {
-        float h = MEMF(cam + 0x20), cut = h * MEMF(0x286D30);   /* 0.25: a quarter of the height */
-        MEM32(p_fov) = MEM32(cam + 0xC);
-        MEM32(p_aspect) = 0x3FE38E39u;
-        MEMF(p_top) = MEMF(0x286D2C) * cut + MEMF(cam + 0x18);  /* 0.5: half of it above */
-        MEMF(p_height) = h - cut;
-        break;
-    }
-    case 2:
-        MEM32(p_fov) = MEM32(cam + 0xC);
-        MEMF(p_aspect) = MEMF(cam + 0x1C) / MEMF(cam + 0x20);
-        MEM32(p_top) = MEM32(cam + 0x18);
-        MEM32(p_height) = MEM32(cam + 0x20);
-        break;
-    default:
-        break;
-    }
-    g_esp += 24;    /* ret 20 */
-}
-
 /* The music ring's refill (docs/research/music-ring-mixer.md). The menu music
  * plays from a 50 ms looping DirectSound ring (2,400 frames, [0x3A965C]); a
  * time-critical thread wakes 100 times a second, reads the write cursor and
@@ -708,6 +772,19 @@ void sub_001241A0_enter(void)
     if (MEM32(0x3A965C) == 2400 && MEM32(0x3A9660) == 960)
         MEM32(0x3A9660) = lead;
 }
+/* Story scenes (src/hooks/scene_launcher.c): the scene loader names every scene it loads, and
+ * the mode system's update plays one on request (RECOMP_SCENE, the overlay) through the game's
+ * own developer cinema mode. */
+void sub_00073FD0_enter(void) { scene_launcher_loader_enter(); }
+void sub_0002DFF0_enter(void) { scene_launcher_mode_enter(); }
+/* The developer run module, rebuilt from the host (src/hooks/dev_module.c): the manager's tick
+ * queues it on request; its methods are traced. RECOMP_DEV_MODULE; off unless set. */
+static void screen_swap_guard(void);    /* below: a swap with no screen loaded */
+void sub_00077040_enter(void) { screen_swap_guard(); dev_module_manager_enter(); }
+void sub_00077C40_enter(void) { dev_module_trace(1); }
+void sub_00077A40_enter(void) { dev_module_trace(3); }
+void sub_00077B20_enter(void) { dev_module_trace(4); }
+void sub_00077DD0_enter(void) { dev_module_trace(7); }
 void sub_001A6A80_enter(void)
 {
     if (defjam_test_observations_enabled())
@@ -749,8 +826,9 @@ void recomp_unimpl(const char *text, uint32_t va)
      * omissions; repeated IRQ/cache instructions must not exhaust that budget. */
     int known = !strcmp(text, "cli") || !strcmp(text, "sti") || !strcmp(text, "wbinvd");
     /* Exact PUSHFD/POPFD sites from the preserved baseline's lift summary and
-     * generated TODOs. Other sites remain failures. Implementing their flags
-     * and interrupt effects is a separate runtime project, not this migration. */
+     * generated TODOs. Other sites remain failures. Since toolkit v0.16 the
+     * lifter translates both through a g_eflags image (#186), so these no
+     * longer reach here; kept for code lifted by an older toolkit. */
     if (!strcmp(text, "pushfd"))
         known = va == 0x00088500u || va == 0x0009F2C0u || va == 0x00130B46u
              || va == 0x002470B8u || va == 0x002470C4u;
@@ -1033,12 +1111,12 @@ done:
  * returned. Neither ever printed anything, and the reason is worth keeping.
  *
  * Declaring `extern void sub_X_gen(void);` does emit the real body under that
- * name -- and it also rewrites every direct call site to call `sub_X_gen`
- * instead. So a direct caller goes straight to the original body and the
- * wrapper is never on the path. It only intercepts calls that arrive through
- * recomp_lookup_manual(), which sees indirect calls only. The sleep trace
- * below works for exactly that reason: its target is reached through a
- * function pointer.
+ * name -- and with toolkit v0.13 it also rewrote every direct call site to call
+ * `sub_X_gen` instead, so a direct caller went straight to the original body
+ * and the wrapper was never on the path. Since v0.16 (upstream #175) a direct
+ * call to a wrapped function goes through the manual lookup and does reach the
+ * wrapper; these two were not retried. The sleep trace below is reached
+ * through a function pointer either way.
  *
  * To trace a function with direct callers, either replace it outright (define
  * it here without the `_gen` declaration and implement the behaviour), or put
@@ -1113,8 +1191,12 @@ static void trace_sleep_caller(void)
  * offered to the script anchors, so a pad script can wait for a screen:
  * "@getscreeninfo(intmain/mainmenu" (matched without case).
  */
+extern void defjam_skip_intro_enter(void);
+void sub_0006BC90_enter(void) { defjam_skip_intro_enter(); }
+
 extern void sub_00068BA0(void);
 extern void xbox_NoteAnchorEvent(const char *text);
+extern void defjam_unlock_all_on_funccall(const char *text);
 
 static void funccall_hook(void)
 {
@@ -1135,13 +1217,19 @@ static void funccall_hook(void)
      * session, and the end of a session is where a report needs them */
     if (strcmp(text, "Online.Tick()") && strcmp(text, "Game.GetNextMatchType()") && printed++ < 20000)
         fprintf(stderr, "[FUNCCALL] %s\n", text);
+    /* The play-test recorder keeps every one, with its time (the log stops at 4000). */
+    recorder_event_text("fe", "text", text);
     xbox_NoteAnchorEvent(text);
     if (automatch_hold_funccall(text)) {    /* online: a rematch the others have not chosen yet */
         g_eax = 0;
         g_esp += 4;                         /* cdecl: only the return address is popped */
         return;
     }
+    defjam_unlock_all_on_funccall(text);   /* RECOMP_UNLOCK_ALL, src/patches/dev_unlock.c */
     sub_00068BA0();
+    /* RECOMP_FE_INJECT: commands of a test's own, after a chosen call (src/hooks/fe_inject.c). */
+    fe_inject_after_call(text);
+    dev_module_after_call(text);
     automatch_on_funccall(text);    /* a requested match starts here (src/hooks/automatch.c) */
 }
 
@@ -1371,6 +1459,12 @@ recomp_func_t recomp_lookup_manual(uint32_t xbox_va)
         return rollback_mixer_unlock_a;
     if (xbox_va == 0x00121C90u)
         return rollback_mixer_unlock_b;
+    if (xbox_va == 0x00046E40u) {   /* Game.StartGame, src/patches/dev_unlock.c */
+        extern recomp_func_t defjam_start_game_hook(void);
+        recomp_func_t w = defjam_start_game_hook();
+        if (w)
+            return w;
+    }
 
     if (s_trace_count < 0)
         trace_parse();
@@ -1602,8 +1696,9 @@ void sub_0021EB90_enter(void)
  * and the swap deleted the live screen and stored 0: nothing was drawn any more and the next match
  * never loaded (two-copy tests and players: "a freeze after a few matches, the opponent stops
  * answering"). A state of 3 with nothing pending is put back to 0, as after a finished swap.
+ * Called from sub_00077040_enter, which upstream's developer module also uses.
  */
-void sub_00077040_enter(void)
+static void screen_swap_guard(void)
 {
     static unsigned fixed;
     uint32_t m = g_ecx;
@@ -1638,20 +1733,17 @@ void sub_000773A0_enter(void)
  * 64 -> 52, 128 -> 125, 192 -> 198, 224 -> 233) that deepens the shadows,
  * which is why everything looked lighter than the console. The runtime's
  * Direct3D layer already applies a ramp at presentation (d3d8_gamma.c); this
- * hands it the title's. g_recomp_gamma is the same ramp for captures, which
- * are read before presentation. RECOMP_GAMMA=0 leaves the picture as drawn.
+ * hands it the title's, after the player's brightness (src/patches/picture.c, which
+ * also keeps g_recomp_gamma, the same ramp for captures, which are read before
+ * presentation). RECOMP_GAMMA=0 leaves the title's ramp out.
  */
-uint8_t g_recomp_gamma[3][256];
-int g_recomp_gamma_on;
-
 void sub_002203C6_enter(void)
 {
-    struct { uint16_t c[3][256]; } ramp;
-    extern void d3d8_gamma_set(const void *ramp);
+    uint8_t ramp[3 * 256];
     static int on = -1;
     static unsigned sets;
     uint32_t src = MEM32(g_esp + 4);
-    int c, i;
+    int i;
 
     if (on < 0) {
         const char *e = getenv("RECOMP_GAMMA");
@@ -1659,18 +1751,12 @@ void sub_002203C6_enter(void)
     }
     if (!on || src < 0x10000u)
         return;
-    for (c = 0; c < 3; c++)
-        for (i = 0; i < 256; i++) {
-            uint8_t v = MEM8(src + c * 256 + i);
-            g_recomp_gamma[c][i] = v;
-            ramp.c[c][i] = (uint16_t)(v * 257);
-        }
-    g_recomp_gamma_on = 1;
-    d3d8_gamma_set(&ramp);
+    for (i = 0; i < 3 * 256; i++)
+        ramp[i] = MEM8(src + i);
+    picture_title_ramp(ramp);
     if (sets++ < 4)
         fprintf(stderr, "[GAMMA] ramp set: 32 -> %u, 64 -> %u, 128 -> %u, 192 -> %u, 224 -> %u\n",
-                g_recomp_gamma[0][32], g_recomp_gamma[0][64], g_recomp_gamma[0][128],
-                g_recomp_gamma[0][192], g_recomp_gamma[0][224]);
+                ramp[32], ramp[64], ramp[128], ramp[192], ramp[224]);
 }
 
 /* XAPI's heap free (ptr), stdcall ret 4: RtlFreeHeap(the process heap at [0x3CD1D0], 0, ptr); returns 0 when
@@ -1696,3 +1782,41 @@ void sub_001FBE1E(void)
     else defjam_xapi_free_now(ptr);
     g_esp += 8;                                         /* ret 4 */
 }
+/*
+ * The venue vignette ([display] vignette, vignette_strength; src/patches/picture.c).
+ * sub_000D9AF0 is the platform tint's per-frame draw, whose last argument turns the
+ * "Vignette Quad" on; sub_00028460 sets a quad's colour, where a weaker vignette
+ * gets its alpha and blend.
+ */
+void sub_000D9AF0_enter(void) { picture_tint_draw_enter(); }
+void sub_00028460_enter(void) { picture_quad_color_enter(); }
+
+/*
+ * Widescreen (src/patches/widescreen.c, docs/widescreen/02-design.md).
+ *
+ * sub_0001A4E0 is the scene viewport's GetViewParams(this, mode, &fov, &aspect,
+ * &y, &height), thiscall, `ret 0x14`, and the one place every 3D view gets its
+ * aspect: a 4:3 literal (mode 0), the cutscenes' 16:9 letterbox (mode 1) or the
+ * viewport's own width/height (mode 2). With widescreen off it does exactly what
+ * the original did; on, full-screen views are widened (Hor+) and cutscenes follow
+ * the cutscene setting.
+ */
+#include "patches/widescreen.h"
+
+/* Sub-view rectangles follow the centred 2D (src/patches/widescreen.c). */
+extern void ws_view_rect_enter(void);
+void sub_0001A7A0_enter(void) { ws_view_rect_enter(); }
+
+void sub_0001A4E0(void)
+{
+    ws_view_params(g_ecx, MEM32(g_esp + 4), MEM32(g_esp + 8), MEM32(g_esp + 12),
+                   MEM32(g_esp + 16), MEM32(g_esp + 20));
+    g_esp += 24; /* thiscall: return address and five arguments */
+}
+
+/* Investigation probes for the 2D placement work (RECOMP_WS_TRACE2D=1; off: nothing). */
+extern void ws_trace_pos(void), ws_trace_vtx_arr(void), ws_trace_vtx(void);
+void sub_00028F90_enter(void) { ws_trace_pos(); }
+void sub_0002E390_enter(void) { ws_trace_vtx_arr(); }
+void sub_0002E470_enter(void) { ws_trace_vtx(); }
+

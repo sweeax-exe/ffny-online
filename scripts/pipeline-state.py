@@ -158,7 +158,7 @@ def lift(repo, toolkit, split, extra):
 
 def build_inputs(repo, toolkit):
     verify_lift(repo, toolkit)
-    paths = source_files(repo / 'src', {'.c', '.cpp', '.h', '.inc', '.hlsl'})
+    paths = source_files(repo / 'src', {'.c', '.cpp', '.m', '.h', '.inc', '.hlsl'})
     paths += [repo / 'CMakeLists.txt', repo / 'CMakePresets.json']
     runtime = source_files(toolkit / 'src', {'.c', '.cpp', '.h', '.inc', '.hlsl', '.txt', '.in'})
     runtime += source_files(toolkit / 'include', {'.h'}) + [toolkit / 'CMakeLists.txt']

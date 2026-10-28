@@ -1,4 +1,4 @@
 [submodule "tools/xboxrecomp"]
 	path = tools/xboxrecomp
 	url = https://github.com/sweeax-exe/ffny-xboxrecomp.git
-	branch = main
+	branch = ffny/v0.16

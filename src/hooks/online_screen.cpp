@@ -39,6 +39,7 @@
 #include "account.h"
 #include "online_data.h"
 #include "pc_settings.h"
+#include "patches/widescreen.h"
 #include "recomp_settings.h"
 #include "updater.h"
 
@@ -222,12 +223,13 @@ struct Frame {
     float s() const { return sy; }
 };
 
-// The picture is 4:3, or 16:9 with the menus drawn three quarters as wide (pc_settings.c), so a
-// menu is 4:3 inside it; with "fill the window" the picture is stretched to the window.
+// The picture is 4:3, or in widescreen the canvas's shape with the menus centred at 4:3 inside it
+// (src/patches/widescreen.c); with "stretch" the 4:3 picture is stretched to the window.
 Frame menu_frame(ImVec2 display)
 {
-    int keep = pc_display("aspect", 0) == 0, wide = pc_widescreen_latch();
-    float num = wide ? 16.0f : 4.0f, den = wide ? 9.0f : 3.0f;
+    float wide = ws_aspect();
+    int keep = wide > 0.0f || pc_display("aspect", 0) != 1;
+    float num = wide > 0.0f ? wide : 4.0f, den = wide > 0.0f ? 1.0f : 3.0f;
     float px = 0, py = 0, pw = display.x, ph = display.y;
     if (keep && pw > 0 && ph > 0) {
         if (pw * den > ph * num) { float w = ph * num / den; px = (pw - w) / 2; pw = w; }

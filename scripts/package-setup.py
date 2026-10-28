@@ -21,7 +21,8 @@ import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 PYTHON_VERSION = '3.13.5'
-PACKAGES = ['pyxbe==1.0.4', 'capstone==5.0.9', 'Pillow==12.3.0', 'numpy==2.5.2']
+PACKAGES = ['pyxbe==1.0.4', 'capstone==5.0.9', 'Pillow==12.3.0', 'numpy==2.5.2', 'cryptography==50.0.2', 'cffi==2.0.0', 'pycparser==2.23']
+MOD_SOURCES = ('setup/mods.py', 'setup/mod_catalogue.py', 'config/mods/catalogue-keys.json')
 HD_SOURCES = ('scripts/build-hd-pack.py', 'scripts/hd_assets.py',
               'scripts/hd_corpus.py', 'scripts/hd_corpus.html',
               'config/hd-runtime-aliases.json')
@@ -154,7 +155,8 @@ def stage_macos(args, staging, source, toolkit):
     cache = args.cache / 'macos'
     cache.mkdir(parents=True, exist_ok=True)
     (staging / 'engine').mkdir()
-    shutil.copyfile(ROOT / 'setup/engine.py', staging / 'engine/engine.py')
+    for name in ('engine.py', 'releases.py', 'transaction.py'):
+        shutil.copyfile(ROOT / 'setup' / name, staging / 'engine' / name)
     if not (args.launcher / 'Contents/MacOS/DefJamLauncher').is_file():
         raise ValueError('--launcher must be the built Def Jam Recompiled.app')
     shutil.copytree(args.launcher, staging / 'launcher' / args.launcher.name, symlinks=True)
@@ -197,7 +199,7 @@ def stage_linux(args, staging, source, toolkit):
 def stage_windows(args, staging, source, toolkit):
     """Embedded Python, wheels, offline SDL3/ImGui source and the native launcher."""
     (staging / 'engine').mkdir()
-    for name in ('engine.py', 'install-prerequisites.ps1', 'shortcuts.ps1'):
+    for name in ('engine.py', 'releases.py', 'transaction.py', 'install-prerequisites.ps1', 'shortcuts.ps1'):
         shutil.copyfile(ROOT / 'setup' / name, staging / 'engine' / name)
     shutil.copyfile(args.launcher, staging / 'DefJamLauncher.exe')
     provenance = []
@@ -261,7 +263,7 @@ def main(argv=None):
         source.mkdir()
         copy_sources(ROOT, source, platform=args.platform)
         copy_sources(toolkit, source / 'tools/xboxrecomp', True)
-        for name in HD_SOURCES:
+        for name in HD_SOURCES + MOD_SOURCES:
             if not (source / name).is_file():
                 raise ValueError('Required HD setup source is not tracked: ' + name)
         # Source archives contain no Git metadata and never receive the user's bytes.
@@ -273,7 +275,7 @@ def main(argv=None):
         inventory = {p.relative_to(staging).as_posix(): digest(p) for p in sorted(staging.rglob('*')) if p.is_file()}
         manifest = {'schema': 1, 'platform': args.platform, 'version': version,
                     'source_commit': commit, 'toolkit_commit': pin,
-                    'development': args.development, 'files': inventory}
+                    'development': args.development, 'updater': {'protocol': 1, 'data_schema': 1}, 'files': inventory}
         (staging / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n', encoding='utf-8')
         with zipfile.ZipFile(args.output, 'w', zipfile.ZIP_DEFLATED) as package:
             for p in sorted(staging.rglob('*')):

@@ -62,15 +62,27 @@ final class Session {
         guard actual == payloadSHA256 else {
             throw SetupFailure(message: "Installer payload verification failed. Download it again.", code: 4)
         }
-        let ditto = Process()
-        ditto.executableURL = URL(fileURLWithPath: "/usr/bin/ditto")
-        ditto.arguments = ["-x", "-k", archive.path, payload.path]
-        try ditto.run()
-        ditto.waitUntilExit()
-        guard ditto.terminationStatus == 0 else {
+        // A downloaded copy runs from a quarantined disk image, and plain ditto copies that
+        // quarantine onto every unpacked file. Gatekeeper then refuses the bundled python3,
+        // CMake, Ninja and libraries, which are signed ad hoc, not notarized (issue #59).
+        // The player has already approved this app and the payload matches the digest
+        // compiled into it, so the unpacked files are not quarantined again.
+        guard tool("/usr/bin/ditto", ["-x", "-k", "--noqtn", archive.path, payload.path]) else {
             throw SetupFailure(message: "Cannot unpack setup payload. Check the free disk space.", code: 4)
         }
+        guard tool("/usr/bin/xattr", ["-d", "-r", "com.apple.quarantine", payload.path]) else {
+            throw SetupFailure(message: "Cannot clear the download quarantine from the setup payload.", code: 4)
+        }
         note("Setup payload prepared.")
+    }
+
+    private func tool(_ path: String, _ arguments: [String]) -> Bool {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: path)
+        process.arguments = arguments
+        guard (try? process.run()) != nil else { return false }
+        process.waitUntilExit()
+        return process.terminationStatus == 0
     }
 
     func engineProcess(_ arguments: [String]) -> Process {
@@ -89,7 +101,7 @@ final class Session {
 
 func helpText() -> String {
     "Silent setup:\n  DefJamSetup --silent --dump PATH --install-dir PATH --data-dir PATH "
-    + "[--no-shortcuts] [--no-desktop-shortcut] [--hd-textures] [--log PATH]\n"
+    + "[--release TAG|latest] [--operation install|repair|update|downgrade|rebuild] [--bundled-only] [--no-shortcuts] [--no-desktop-shortcut] [--hd-textures] [--log PATH]\n"
     + "Remove the app (keeps your dump, saves and settings):\n  DefJamSetup --silent --uninstall --install-dir PATH\n\n"
     + "Exit codes: 0 success, 2 invalid input, 3 prerequisites missing (Xcode Command Line Tools), 4 failure, "
     + "5 busy, 6 cancelled."
@@ -122,6 +134,12 @@ func runSilent(_ arguments: [String]) -> Int32 {
 final class Wizard: NSObject, NSApplicationDelegate, NSWindowDelegate {
     let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 740, height: 520),
                           styleMask: [.titled, .closable, .miniaturizable], backing: .buffered, defer: false)
+    let releaseChoice = NSPopUpButton(frame: .zero, pullsDown: false)
+    let operationChoice = NSPopUpButton(frame: .zero, pullsDown: false)
+    let refreshButton = NSButton(title: "Fetch GitHub releases", target: nil, action: nil)
+    let installedLabel = NSTextField(wrappingLabelWithString: "Bundled release is available offline. Select an install folder to repair or update.")
+    let operations = ["auto", "install", "repair", "update", "downgrade", "rebuild"]
+    var releaseTags: [String?] = [nil]
     let dumpField = NSTextField(string: "")
     let installField = NSTextField(string: "")
     let dataField = NSTextField(string: "")
@@ -168,15 +186,15 @@ final class Wizard: NSObject, NSApplicationDelegate, NSWindowDelegate {
         window.delegate = self
         window.isReleasedWhenClosed = false
         let support = home.appendingPathComponent("Library/Application Support/DefJamRecompiled")
-        installField.stringValue = support.appendingPathComponent("app").path
-        dataField.stringValue = support.appendingPathComponent("data").path
+        installField.stringValue = ProcessInfo.processInfo.environment["DEFJAM_INSTALL_DIR"] ?? support.appendingPathComponent("app").path
+        dataField.stringValue = ProcessInfo.processInfo.environment["DEFJAM_DATA"] ?? support.appendingPathComponent("data").path
         desktopShortcut.state = .on
         hdUpscale.state = .off
         launchInfo.isSelectable = true
 
         let heading = label("Build and play from your own USA Xbox dump")
         heading.font = .boldSystemFont(ofSize: 15)
-        let intro = label("Setup builds the game on this Mac from your dump. The first setup can take about an hour and needs no internet connection.")
+        let intro = label("Setup builds locally from your own dump. Clean updates preserve your saves, settings and mods. Fetch releases to choose an online version, or use the bundled release offline.")
         let tools = NSTextField(labelWithString: "")
         tools.allowsEditingTextAttributes = true
         tools.isSelectable = true
@@ -193,7 +211,10 @@ final class Wizard: NSObject, NSApplicationDelegate, NSWindowDelegate {
         logsButton.target = self; logsButton.action = #selector(openLogs)
         playButton.target = self; playButton.action = #selector(play); playButton.isEnabled = false
         closeButton.target = self; closeButton.action = #selector(closePressed)
-        controls = [dumpField, installField, dataField, imageButton, folderButton, installBrowse, dataBrowse, hdUpscale, desktopShortcut, installButton]
+        releaseChoice.addItem(withTitle: "Bundled release (offline)")
+        operationChoice.addItems(withTitles: ["Automatic install / repair / update", "Install", "Repair", "Clean Update", "Downgrade (future compatible releases)", "Clean Rebuild (same version)"])
+        refreshButton.target = self; refreshButton.action = #selector(fetchReleases)
+        controls = [releaseChoice, operationChoice, refreshButton, dumpField, installField, dataField, imageButton, folderButton, installBrowse, dataBrowse, hdUpscale, desktopShortcut, installButton]
         let hdNote = label("Adds about 6.2 GB; needs extra working space. No GPU needed.")
         hdNote.textColor = .secondaryLabelColor
         hdNote.font = .systemFont(ofSize: 11)
@@ -202,8 +223,8 @@ final class Wizard: NSObject, NSApplicationDelegate, NSWindowDelegate {
         buttons.orientation = .horizontal
         buttons.spacing = 10
         let stack = NSStackView(views: [
-            heading, intro, tools,
-            label("Your ISO/XISO or extracted dump"), row(dumpField, [imageButton, folderButton]),
+            heading, intro, tools, installedLabel, NSStackView(views: [releaseChoice, refreshButton]), operationChoice,
+            label("Your ISO/XISO or extracted dump (optional for an installed game)"), row(dumpField, [imageButton, folderButton]),
             label("Install location"), row(installField, [installBrowse]),
             label("Data location (dump copy, saves and settings; preserved across updates)"), row(dataField, [dataBrowse]),
             hdUpscale, hdNote, desktopShortcut, status, launchInfo, buttons])
@@ -269,7 +290,68 @@ final class Wizard: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     @objc func chooseImage() { choose(files: true, folders: false, into: dumpField) }
     @objc func chooseDumpFolder() { choose(files: false, folders: true, into: dumpField) }
-    @objc func chooseInstall() { choose(files: false, folders: true, into: installField) }
+    @objc func chooseInstall() {
+        choose(files: false, folders: true, into: installField)
+        readInstalled()
+    }
+
+    func readInstalled() {
+        let receiptURL = URL(fileURLWithPath: installField.stringValue).appendingPathComponent("installed.json")
+        if let bytes = try? Data(contentsOf: receiptURL), let receipt = try? JSONSerialization.jsonObject(with: bytes) as? [String: Any] {
+            installedLabel.stringValue = "Installed version: " + (receipt["version"] as? String ?? "unknown")
+            if let data = receipt["data"] as? String { dataField.stringValue = data }
+        } else { installedLabel.stringValue = "No completed installation at this location. A dump is required for first install." }
+    }
+
+    @objc func fetchReleases() {
+        guard !running else { return }
+        readInstalled()
+        let canPlay = playButton.isEnabled
+        let session = Session()
+        self.session = session
+        setBusy(true)
+        status.stringValue = "Fetching GitHub releases… Bundled setup remains available offline."
+        DispatchQueue.global().async {
+            do {
+                try session.unpack()
+                if fs.fileExists(atPath: session.cancel.path) { throw SetupFailure(message: "Release fetch cancelled.", code: 6) }
+                let result = session.scratch.appendingPathComponent("releases.json")
+                let process = session.engineProcess(["--list-releases", "--releases-file", result.path, "--cancel-file", session.cancel.path])
+                try process.run()
+                process.waitUntilExit()
+                guard process.terminationStatus == 0 else { throw SetupFailure(message: "Cannot fetch releases. Use the bundled release or retry. See Open logs.", code: 4) }
+                let bytes = try Data(contentsOf: result)
+                let catalog = try JSONSerialization.jsonObject(with: bytes) as? [String: Any]
+                let rows = catalog?["releases"] as? [[String: Any]] ?? []
+                DispatchQueue.main.async {
+                    self.setBusy(false)
+                    self.playButton.isEnabled = canPlay
+                    self.releaseChoice.removeAllItems()
+                    self.releaseChoice.addItem(withTitle: "Bundled " + (catalog?["bundled"] as? String ?? "release") + " (offline)")
+                    self.releaseTags = [nil]
+                    for row in rows {
+                        let tag = row["tag"] as? String ?? ""
+                        let available = row["available"] as? Bool ?? false
+                        self.releaseChoice.addItem(withTitle: tag + (available ? "" : " — unavailable on this Mac"))
+                        self.releaseChoice.lastItem?.isEnabled = available
+                        self.releaseTags.append(tag)
+                    }
+                    self.releaseChoice.autoenablesItems = false
+                    if let index = rows.firstIndex(where: { $0["available"] as? Bool == true }) { self.releaseChoice.selectItem(at: index + 1) }
+                    self.status.stringValue = rows.contains(where: { $0["cached"] as? Bool == true }) ? "Cached release list (offline). Only previously verified downloads can be installed." : "Choose a release and operation. Downgrade requires compatible future releases."
+                }
+            } catch {
+                session.note("Release fetch stopped: \(error)")
+                DispatchQueue.main.async {
+                    self.setBusy(false)
+                    self.playButton.isEnabled = canPlay
+                    self.status.stringValue = fs.fileExists(atPath: session.cancel.path)
+                        ? "Release fetch cancelled. Bundled setup is available offline."
+                        : "Release fetch failed. Bundled setup is available offline. See Open logs."
+                }
+            }
+        }
+    }
     @objc func chooseData() { choose(files: false, folders: true, into: dataField) }
 
     func setBusy(_ value: Bool) {
@@ -292,11 +374,16 @@ final class Wizard: NSObject, NSApplicationDelegate, NSWindowDelegate {
     @objc func start() {
         guard !running else { return }
         let dump = dumpField.stringValue.trimmingCharacters(in: .whitespaces)
-        if dump.isEmpty { alert("Choose your Xbox dump first."); return }
+        let existing = fs.fileExists(atPath: URL(fileURLWithPath: installField.stringValue).appendingPathComponent("installed.json").path)
+        if dump.isEmpty && !existing && !fs.fileExists(atPath: URL(fileURLWithPath: installField.stringValue).appendingPathComponent(".setup-transaction").path) { alert("Choose your Xbox dump for the first installation."); return }
         let session = Session()
         self.session = session
-        var arguments = ["--dump", dump, "--install-dir", installField.stringValue, "--data-dir", dataField.stringValue,
+        var arguments = ["--install-dir", installField.stringValue, "--data-dir", dataField.stringValue,
                          "--status-file", session.status.path, "--cancel-file", session.cancel.path]
+        if !dump.isEmpty { arguments += ["--dump", dump] }
+        arguments += ["--operation", operations[operationChoice.indexOfSelectedItem]]
+        if let tag = releaseTags[releaseChoice.indexOfSelectedItem] { arguments += ["--release", tag] }
+        else { arguments.append("--bundled-only") }
         if desktopShortcut.state != .on { arguments.append("--no-desktop-shortcut") }
         if hdUpscale.state == .on { arguments.append("--hd-textures") }
         setBusy(true)
@@ -354,6 +441,7 @@ final class Wizard: NSObject, NSApplicationDelegate, NSWindowDelegate {
             return
         }
         if code == 0 {
+            readInstalled()
             let launcher = URL(fileURLWithPath: installField.stringValue).appendingPathComponent("Def Jam Recompiled.app")
             playButton.isEnabled = true
             launchInfo.stringValue = "To play, select Play or open this app:\n" + launcher.path
@@ -372,7 +460,10 @@ final class Wizard: NSObject, NSApplicationDelegate, NSWindowDelegate {
         box.messageText = "Cancel setup? Completed steps can be resumed."
         box.addButton(withTitle: "Cancel setup")
         box.addButton(withTitle: "Keep going")
-        if box.runModal() == .alertFirstButtonReturn, let session = session {
+        if box.runModal() == .alertFirstButtonReturn {
+            // The operation can finish while AppKit runs the modal alert's event loop.
+            // Preserve its completed state rather than displaying a stale cancellation.
+            guard running, let session = session else { return }
             fs.createFile(atPath: session.cancel.path, contents: Data("cancel".utf8))
             status.stringValue = "Cancelling the current step\u{2026}"
         }
@@ -408,7 +499,7 @@ final class Wizard: NSObject, NSApplicationDelegate, NSWindowDelegate {
     func uiSmoke() -> Int32 {
         let valid = window.title == wizardTitle && !installField.stringValue.isEmpty && !dataField.stringValue.isEmpty
             && desktopShortcut.state == .on && hdUpscale.state == .off && installButton.isEnabled
-            && dumpField.stringValue.isEmpty && !playButton.isEnabled && controls.count == 10
+            && dumpField.stringValue.isEmpty && !playButton.isEnabled && controls.count == 13
         return valid ? 0 : 4
     }
 }

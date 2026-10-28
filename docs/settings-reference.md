@@ -21,7 +21,14 @@ and what to do when something misbehaves, see [Controllers, keyboard and mouse](
 
 | Key | Default | Meaning |
 |---|---|---|
-| `skip` | `false` | Skip the launcher and start the game at once. The launcher shows on every launch unless this is on. Hold **Shift** while the game starts, or start it with `--launcher`, to see it anyway; turn this off in the overlay's General page or the launcher's own checkbox. Env `RECOMP_NO_LAUNCHER=1` skips it for one run. |
+| `skip` | `false` | Skip the launcher and start the game at once. The launcher shows on every launch unless this is on. Hold **Shift** while the game starts, or start it with `--launcher`, to see it anyway; turn this off in the overlay's Interface page or the launcher's own checkbox. Env `RECOMP_NO_LAUNCHER=1` skips it for one run. |
+
+## [debug]
+
+| Key | Default | Meaning |
+|---|---|---|
+| `unlock_all` | `false` | Every fighter and venue is available on any profile, through the developers' own unlock routine in the game. For testing: it changes the profile in memory and asks the game to save it, so keep it off for a save you care about. Restart. Shown in the launcher and the overlay's Diagnostics page as "Unlock all fighters and venues". Env `RECOMP_UNLOCK_ALL` (`1` on, `0` off). The test harness turns it on for its runs. [How it works](research/unlock-everything.md). |
+| `skip_intro` | `false` | Skip the startup legal screen and EA/THX/intro movies and start at **Press Start**. A brief resource-loading screen and the title's own animation still run. Story cutscenes and idle attract playback keep working. Choose **Interface → Skip startup movies and legal screen** before Play, or restart after changing it in the overlay. Env `RECOMP_SKIP_INTRO` (`1` on, `0` off) overrides the file. [How it works](research/startup-skip-flow.md). |
 
 ## [ui]
 
@@ -31,21 +38,46 @@ and what to do when something misbehaves, see [Controllers, keyboard and mouse](
 | `overlay_pad` | `guide, left_stick_click+right_stick_click` | Pad buttons that open and close the overlay, any pad. Alternatives are separated by commas; buttons joined with `+` must all be held for half a second. Button names are the physical names used in `[gamepad]`. Empty for none. |
 | `scale` | `100` | Size of the launcher's and overlay's text and controls in percent, 60-250, on top of your display's scaling (full screen on a large monitor is scaled up automatically). |
 
+## [debug]
+
+The play-test recorder: see [Play-test recorder](playtest-recorder.md). Off by default; `--record` on the command
+line turns it on for one run. Every key here is read at start-up.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `record` | `false` | Keep a session under `logs/sessions/` for every run: frame times, events, the sound and the last seconds of pictures. Env `RECOMP_RECORD`. |
+| `mark_key` | `F9` | While recording, the key that saves a bug bundle of the seconds before it. |
+| `mark_pad` | `back+left_stick_click` | While recording, pad buttons that do the same (on a Steam Deck: hold **View** and press the **left stick** for half a second). Alternatives separated by commas, a combination joined with `+`, button names as in `[gamepad]`; empty for none. |
+| `record_fps` | `10` | Pictures a second kept for bundles, 0-30. Each is a read-back from the graphics card. Env `RECOMP_RECORD_FPS`. |
+| `record_seconds` | `30` | Seconds before a mark a bundle holds, 5-120. Env `RECOMP_RECORD_SECONDS`. |
+| `record_audio` | `true` | Keep the mixed sound (about 11 MB a minute). |
+| `record_game_state` | `true` | Log fighters, health and match events (read-only). |
+| `auto_bundle_hitch_ms` | `0` | A frame at least this long saves a bundle by itself (five a run at most); 0 is off. Env `RECOMP_RECORD_AUTO_HITCH_MS`. |
+| `hang_seconds` | `15` | No frame for this many seconds saves a hang bundle; 0 is off. Env `RECOMP_RECORD_HANG_SECS`. |
+| `keep_sessions` | `20` | Sessions kept whole; older ones keep their bundles and events only. |
+| `record_guest_ram` | `false` | Crash and hang bundles also hold the game's 64 MB of memory. |
+
 ## [display]
 
 | Key | Default | Meaning |
 |---|---|---|
 | `fullscreen` | `false` | Borderless full screen. **Alt+Enter** or **F11** switches while playing, and the choice is saved. |
-| `window_width`, `window_height` | `1280`, `960` | Window size when not full screen (320-16384 by 240-16384). Resizing the window updates both. |
-| `aspect` | `4:3` | `4:3` keeps the console's picture shape with black bars; `stretch` fills the window. |
-| `render_scale` | `2` | Internal resolution as a multiple of the console's 640x480, 1-4. Higher is sharper and costs GPU time. Restart. Env `RECOMP_RENDER_SCALE`. |
+| `window_width`, `window_height` | `1920`, `1080` | Window size when not full screen (320-16384 by 240-16384). Resizing the window updates both. |
+| `aspect` | `widescreen (auto)` | Picture shape. `4:3` keeps the console's picture shape with black bars; `stretch` fills the window; **widescreen (beta):** `widescreen (auto)` (the screen's shape: 16:9 or 16:10; wider screens get 16:9), `16:9`, `16:10`, `21:9 (experimental)`, `32:9 (experimental)` widen the 3D view (more of the arena at the sides, same vertical view) while menus, HUD and movies keep their shape. Widescreen starts with the game (4:3 and stretch apply at once). Env `RECOMP_ASPECT` (a choice name). See [widescreen](widescreen/README.md). |
+| `widescreen_hud` | `auto` | Fight HUD in widescreen: `edges` (screen corners), `centered` (corners of a centred 16:9 box) or `auto` (edges up to 16:9, the box when wider). Restart. |
+| `widescreen_cutscenes` | `authored` | Story cutscenes in widescreen: `authored` keeps the game's own 16:9 framing (full screen at 16:9, thin bars at 16:10); `fill` always fills the screen. Restart. |
+| `widescreen_side_fill` | `blur` | What is beside 4:3 pictures (movies, menu backgrounds) in widescreen: `blur` (a soft blurred extension) or `black`. Restart. |
+| `widescreen_fov_cap` | `150` | The widest horizontal field of view widescreen may use, 90-170 degrees. Restart. |
+| `render_scale` | `2` | Internal render height: 1× = 480p, 2× = 960p, 3× = 1440p, 4× = 1920p; width follows Picture shape. For 1080p output, 2× balances sharpness and cost, or 3× renders above the output height for extra sharpness. For 1440p, 3× matches the height. Window size is separate; higher scales cost GPU time. Restart. Env `RECOMP_RENDER_SCALE`. |
 | `filter` | `smooth` | How the picture is scaled to the window: `smooth` or `sharp`. |
-| `widescreen` | `false` | Experimental. The game's camera is given a 16:9 shape (a wider view of the 3D scene, culled to match) and the picture is shown at 16:9, anamorphic as console widescreen was. Menus, movies and the HUD are drawn wider as well. Restart. Env `RECOMP_WIDESCREEN`. |
 | `anti_aliasing` | `on` | `on` averages every rendered pixel into the window (no skipped texels when the render scale is above the window size) and softens remaining jagged edges; `off` is the plain single-sample scale. Direct3D 11 (Windows). |
 | `sharpen` | `30` | 0-100. Sharpens the scaled picture, less on strong edges and never past the neighbouring pixels' range, so no halos. 0 turns it off. Direct3D 11 (Windows). |
 | `anisotropy` | `16x` | `off`, `2x`, `4x`, `8x`, `16x`: anisotropic filtering of the textures the game filters linearly, so floors and walls at a slant keep their detail. Unfiltered sprites keep their texels. Direct3D 11 (Windows). |
-| `vsync` | `true` | Pace frames on the display. Used when the refresh rate is a multiple of 60 Hz; other displays use the game's own 60 fps timer. Env `RECOMP_PRESENT_VSYNC`. |
+| `vsync` | `true` | Pace frames on the display. Used when the refresh rate is a multiple of 60 Hz; other displays use the game's own 60 fps timer, and on those (75, 100, 144, 165 Hz) motion can judder because each frame stays up for an uneven number of refreshes. The log's `[DISPLAY]` line names the refresh rate and which of the two paces the game. Env `RECOMP_PRESENT_VSYNC`. |
 | `gamma` | `true` | Apply the game's own brightness curve, as the console does. Restart. Env `RECOMP_GAMMA`. |
+| `brightness` | `100` | Picture brightness, 50-200, on top of the game's curve: a power curve that moves the mid-tones and keeps black and white where they are. 100 is the console's picture; higher is brighter. Applies at once. Env `RECOMP_BRIGHTNESS`. |
+| `vignette` | `true` | The darkened screen edges that venues and some scenes draw (part of the game's post effects). `false` removes them. Applies at once. Env `RECOMP_VIGNETTE` (`1` on, `0` off). |
+| `vignette_strength` | `100` | How dark the vignette is, 0-100 percent of the game's own; 0 is the same as off. Applies at once. Env `RECOMP_VIGNETTE_STRENGTH`. [How both work](research/picture-options.md). |
 
 ## [textures]
 
@@ -53,7 +85,7 @@ and what to do when something misbehaves, see [Controllers, keyboard and mouse](
 |---|---|---|
 | `enabled` | `false` | Use local HD texture packs. Restart. |
 | `packs` | `faithful-hd` | Folder names beneath `<data>/mods`, separated by semicolons. Later packs win. Restart. An explicit `RECOMP_TEXTURE_PACKS` enables those packs for one run. |
-| `cache_mb` | `512` | Replacement memory budget in MiB (32–4096), accounting for GPU resources and retained upload data. Restart. Env `RECOMP_TEXTURE_CACHE_MB`. |
+| `cache_mb` | `2048` | Replacement memory budget in MiB (32–4096), accounting for GPU resources and retained upload data. A budget smaller than a scene's textures makes the game evict and reload them during play. Restart. Env `RECOMP_TEXTURE_CACHE_MB`. |
 | `dump` | `false` | Write lossless source PNGs and texture identities to `<data>/hd-work/runtime`. Restart. Env `RECOMP_TEXTURE_DUMP_DIR` can select a different destination. |
 | `dump_limit` | `2000` | Maximum new images captured per run (0–65536). Restart. Env `RECOMP_TEXTURE_DUMP_LIMIT`. |
 

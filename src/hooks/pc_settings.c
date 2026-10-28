@@ -26,24 +26,39 @@
 
 #include "recomp_settings.h"
 #include "d3d8_present.h"
+#if !defined(_WIN32)
+#include "d3d8_vk.h"
+#endif
 #include "pc_settings.h"
 #include "pc_input.h"
 #include "pc_ui.h"
 #include "netplay.h"
+#include "pc_debug.h"
+#include "patches/widescreen.h"
+#include "patches/picture.h"
 
-static const char *const k_aspect[] = { "4:3", "stretch", NULL };
+/* Picture shape: the console's 4:3, stretched, or widescreen (docs/widescreen); the widescreen
+ * choices are indices 2.. and are read once at start-up (src/patches/widescreen.c). */
+static const char *const k_aspect[] = { "4:3", "stretch", "widescreen (auto)", "16:9", "16:10",
+                                        "21:9 (experimental)", "32:9 (experimental)", NULL };
 static const char *const k_filter[] = { "smooth", "sharp", NULL };
 static const char *const k_aa[] = { "off", "on", NULL };
 static const char *const k_anisotropy[] = { "off", "2x", "4x", "8x", "16x", NULL };
 static const char *const k_voice[] = { "off", "push_to_talk", "open", NULL };
 static const char *const k_voice_pad[] = { "off", "back", "left_stick", "right_stick", "dpad_up", "dpad_down", NULL };
+static const char *const k_ws_hud[] = { "auto", "edges", "centered", NULL };
+static const char *const k_ws_cutscenes[] = { "authored", "fill", NULL };
+static const char *const k_ws_fill[] = { "blur", "black", NULL };
 
+/* A four-fighter match holds about 2 GiB of replacements. At 512 MiB the cache evicted and
+ * re-decoded dozens of textures every two seconds in a fight on the Steam Deck. */
+#define TEXTURE_CACHE_MB 2048
 static RecompSetting g_display_settings[] = {
     { "textures", "enabled", RECOMP_SETTING_BOOL, 0, 0, 0, NULL, NULL, RECOMP_SETTING_RESTART,
       "Use texture packs from the data folder's mods directory." },
     { "textures", "packs", RECOMP_SETTING_STRING, 0, 0, 0, NULL, "RECOMP_TEXTURE_PACKS", RECOMP_SETTING_RESTART,
       "Pack folder names separated by semicolons. Later packs take precedence.", "faithful-hd" },
-    { "textures", "cache_mb", RECOMP_SETTING_INT, 512, 32, 4096, NULL, "RECOMP_TEXTURE_CACHE_MB", RECOMP_SETTING_RESTART,
+    { "textures", "cache_mb", RECOMP_SETTING_INT, TEXTURE_CACHE_MB, 32, 4096, NULL, "RECOMP_TEXTURE_CACHE_MB", RECOMP_SETTING_RESTART,
       "Memory budget for replacement textures in MiB, including their retained upload data." },
     { "textures", "dump", RECOMP_SETTING_BOOL, 0, 0, 0, NULL, NULL, RECOMP_SETTING_RESTART,
       "Capture source textures for making a pack, in hd-work/runtime under the data folder." },
@@ -78,16 +93,26 @@ static RecompSetting g_display_settings[] = {
       "Steps (1/60 s each) between a press and its effect in an online fight. More hides more ping; the host's value is used." },
     { "display", "fullscreen", RECOMP_SETTING_BOOL, 0, 0, 0, NULL, NULL, 0,
       "Borderless full screen. Alt+Enter or F11 switches while playing." },
-    { "display", "window_width", RECOMP_SETTING_INT, 1280, 320, 16384, NULL, NULL, 0,
+    { "display", "window_width", RECOMP_SETTING_INT, 1920, 320, 16384, NULL, NULL, 0,
       "Window size when not full screen. Resizing the window updates these." },
-    { "display", "window_height", RECOMP_SETTING_INT, 960, 240, 16384, NULL, NULL, 0, NULL },
-    { "display", "aspect", RECOMP_SETTING_ENUM, 0, 0, 0, k_aspect, NULL, 0,
-      "4:3 keeps the console's picture shape with black bars; stretch fills the window." },
-    { "display", "widescreen", RECOMP_SETTING_BOOL, 0, 0, 0, NULL, "RECOMP_WIDESCREEN", RECOMP_SETTING_RESTART,
-      "Experimental: a 16:9 picture with a wider view of the 3D scene. Menus and the HUD are drawn wider too." },
+    { "display", "window_height", RECOMP_SETTING_INT, 1080, 240, 16384, NULL, NULL, 0, NULL },
+    { "display", "aspect", RECOMP_SETTING_ENUM, 2, 0, 0, k_aspect, "RECOMP_ASPECT", 0,
+      "4:3 keeps the console's picture shape with black bars; stretch fills the window; the widescreen shapes "
+      "(beta) widen the 3D view and keep menus, HUD and movies in shape, and start with the game." },
+    { "display", "widescreen_hud", RECOMP_SETTING_ENUM, 0, 0, 0, k_ws_hud, NULL, RECOMP_SETTING_RESTART,
+      "Where the fight HUD goes in widescreen: the screen edges, or a centred 16:9 box (auto: edges up to 16:9)." },
+    { "display", "widescreen_cutscenes", RECOMP_SETTING_ENUM, 0, 0, 0, k_ws_cutscenes, NULL, RECOMP_SETTING_RESTART,
+      "Story cutscenes in widescreen: authored keeps the game's own 16:9 framing, fill always fills the screen." },
+    { "display", "widescreen_side_fill", RECOMP_SETTING_ENUM, 0, 0, 0, k_ws_fill, NULL, RECOMP_SETTING_RESTART,
+      "Beside 4:3 pictures (movies, menu backgrounds) in widescreen: a soft blurred extension, or black." },
+    { "display", "widescreen_fov_cap", RECOMP_SETTING_INT, 150, 90, 170, NULL, NULL, RECOMP_SETTING_RESTART,
+      "Widest horizontal field of view widescreen may use, in degrees (only very wide screens reach it)." },
     { "display", "render_scale", RECOMP_SETTING_INT, 2, 1, 4, NULL, "RECOMP_RENDER_SCALE",
       RECOMP_SETTING_RESTART,
-      "Internal resolution as a multiple of the console's 640x480. Higher is sharper and costs GPU time." },
+      "Internal render height: 1x = 480p, 2x = 960p, 3x = 1440p, 4x = 1920p. "
+      "1080p output: 2x balances speed and clarity; 3x is sharper. 1440p output: 3x. "
+      "Width follows Picture shape; window size is separate. Higher scales cost GPU time. "
+      "Applies on Play/next launch." },
     { "display", "filter", RECOMP_SETTING_ENUM, 0, 0, 0, k_filter, NULL, 0,
       "How the picture is scaled to the window." },
     { "display", "anti_aliasing", RECOMP_SETTING_ENUM, 1, 0, 0, k_aa, NULL, 0,
@@ -101,15 +126,23 @@ static RecompSetting g_display_settings[] = {
     { "display", "gamma", RECOMP_SETTING_BOOL, 1, 0, 0, NULL, "RECOMP_GAMMA",
       RECOMP_SETTING_RESTART,
       "Apply the game's own brightness curve, as the console does." },
+    { "display", "brightness", RECOMP_SETTING_INT, 100, 50, 200, NULL, "RECOMP_BRIGHTNESS", 0,
+      "Brightness of the picture's mid-tones; black and white stay as they are. 100 is the console's picture, "
+      "higher is brighter." },
+    { "display", "vignette", RECOMP_SETTING_BOOL, 1, 0, 0, NULL, "RECOMP_VIGNETTE", 0,
+      "The darkened screen edges that venues and scenes draw. Off removes them." },
+    { "display", "vignette_strength", RECOMP_SETTING_INT, 100, 0, 100, NULL, "RECOMP_VIGNETTE_STRENGTH", 0,
+      "How dark the vignette is, in percent of the game's own (100)." },
 };
 #define DISPLAY_SETTING_COUNT (sizeof(g_display_settings) / sizeof(g_display_settings[0]))
 
 /* The display table followed by the input tables (pc_input.c): one array, one
  * registration, one file. */
-static RecompSetting g_settings[DISPLAY_SETTING_COUNT + 64 + 16];
+static RecompSetting g_settings[DISPLAY_SETTING_COUNT + 64 + 16 + 16];
 static size_t g_setting_count;
 
 static char g_path[MAX_PATH * 4];   /* empty: do not load or save */
+static char g_log_name[MAX_PATH * 2];   /* the log this program opened for itself, if it did */
 static void (*g_fullscreen_notify)(int fullscreen);
 static void (*g_window_size_notify)(int width, int height);
 
@@ -205,6 +238,7 @@ static void open_log_if_needed(void)
     freopen(name, "w", stdout);
     strcat(name, ".err");
     freopen(name, "w", stderr);
+    snprintf(g_log_name, sizeof g_log_name, "%s", name);
     /* Buffered, as main.c sets the streams it was given. */
     setvbuf(stdout, NULL, _IOFBF, 1 << 16);
     setvbuf(stderr, NULL, _IOFBF, 1 << 16);
@@ -321,6 +355,7 @@ static void open_log_if_needed(void)
     freopen(name, "w", stdout);
     strcat(name, ".err");
     freopen(name, "w", stderr);
+    snprintf(g_log_name, sizeof g_log_name, "%s", name);
     setvbuf(stdout, NULL, _IOFBF, 1 << 16);
     setvbuf(stderr, NULL, _IOFBF, 1 << 16);
 }
@@ -349,6 +384,13 @@ static void supply_runtime_defaults(void)
     for (i = 0; i < sizeof(names) / sizeof(names[0]); i++)
         if (!getenv(names[i]))
             _putenv_s(names[i], "1");
+    /* The 64 MiB contiguous window, where this title keeps textures and vertex
+     * data, is a bump allocator that never frees unless reclaim is on. A long
+     * session ran it dry (576 "[CONTIG] arena exhausted" lines across a match
+     * load, then UI corruption until restart; issue #26). RECOMP_NO_HEAP_RECLAIM=1
+     * restores the old behaviour for comparison. */
+    if (!getenv("RECOMP_HEAP_RECLAIM") && !getenv("RECOMP_NO_HEAP_RECLAIM"))
+        _putenv_s("RECOMP_HEAP_RECLAIM", "1");
 }
 
 int pc_display(const char *key, int fallback)
@@ -358,36 +400,21 @@ int pc_display(const char *key, int fallback)
 
 #if defined(_WIN32)
 void pgraph_d3d11_set_anisotropy(int max_anisotropy);   /* toolkit nv2a_pgraph_d3d11.h */
-void d3d8_Nv2aSetFlatSqueeze(float squeeze);           /* toolkit nv2a_pb_exec.c */
 #endif
-
-/* The widescreen camera (src/recomp_manual.c sub_0001A4E0) takes the setting once, when the
- * title first builds its camera, after the launcher. From then on the picture's shape follows
- * what the camera took, not a later change in the overlay (that one waits for a restart). */
-static volatile LONG g_widescreen_latched = -1;
-
-int pc_widescreen_latch(void)
-{
-    if (g_widescreen_latched < 0) {
-        InterlockedCompareExchange(&g_widescreen_latched, pc_display("widescreen", 0) != 0, -1);
-        pc_settings_apply_display();
-    }
-    return (int)g_widescreen_latched;
-}
 
 void pc_settings_apply_display(void)
 {
-    int widescreen = g_widescreen_latched >= 0 ? (int)g_widescreen_latched : pc_display("widescreen", 0) != 0;
-    d3d8_present_set_aspect(pc_display("aspect", 0) == 0, widescreen ? 16 : 4, widescreen ? 9 : 3);
+    if (ws_aspect() > 0.0f)       /* widescreen: the canvas's shape, with bars if the window differs */
+        d3d8_present_set_aspect(1, (unsigned)(ws_aspect() * 10000.0f + 0.5f), 10000);
+    else
+        d3d8_present_set_aspect(pc_display("aspect", 0) != 1, 4, 3);   /* only "stretch" fills the window */
     d3d8_present_set_linear_filter(pc_display("filter", 0) == 0);
     d3d8_present_set_vsync(pc_display("vsync", 1));
+    picture_apply_settings();
 #if defined(_WIN32)
     /* Direct3D 11 only for now; the Vulkan renderer keeps its plain scale. */
     d3d8_present_set_post(pc_display("anti_aliasing", 1), pc_display("sharpen", 30));
     pgraph_d3d11_set_anisotropy(1 << pc_display("anisotropy", 4));   /* off, 2x .. 16x */
-    /* Anamorphic 16:9: menus, HUD and movies are drawn three quarters as wide, so the
-     * stretch to 16:9 gives them back their shape, centred. */
-    d3d8_Nv2aSetFlatSqueeze(widescreen ? 0.75f : 1.0f);
 #endif
 }
 
@@ -540,6 +567,7 @@ static void start_game_process(void)
 #endif
 
 void test_control_start(void);  /* src/hooks/test_control.c */
+extern int pc_mods_needs_recovery(void);
 
 static void run_launcher_if_wanted(void)
 {
@@ -554,7 +582,7 @@ static void run_launcher_if_wanted(void)
     int no = cmd && strstr(cmd, "--no-launcher") != NULL;
     int shift = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
 
-    if (!pc_launcher_wanted(recomp_settings_get("launcher", "skip", 0), force && !no, no, shift, test_run))
+    if (!pc_launcher_wanted(pc_mods_needs_recovery() ? 0 : recomp_settings_get("launcher", "skip", 0), force && !no, no, shift, test_run))
         return;
     if (!pc_launcher_run()) {
         fprintf(stderr, "[UI] the launcher was closed; not starting the game\n");
@@ -574,7 +602,7 @@ static void run_launcher_if_wanted(void)
     /* Nothing to show it in without a display; the game itself then runs off screen. */
     if (!host_posix_have_video())
         return;
-    if (!pc_launcher_wanted(recomp_settings_get("launcher", "skip", 0), force && !no, no,
+    if (!pc_launcher_wanted(pc_mods_needs_recovery() ? 0 : recomp_settings_get("launcher", "skip", 0), force && !no, no,
                             host_posix_shift_held(), test_run))
         return;
     if (!pc_launcher_run()) {
@@ -677,6 +705,7 @@ int pc_settings_init(void)
     g_setting_count = DISPLAY_SETTING_COUNT +
         pc_input_settings(g_settings + DISPLAY_SETTING_COUNT, 64);
     g_setting_count += pc_ui_settings(g_settings + g_setting_count, 16);
+    g_setting_count += pc_debug_settings(g_settings + g_setting_count, 16);
     recomp_settings_register(g_settings, g_setting_count);
     recomp_settings_set_log(settings_log);
     read = g_path[0] ? recomp_settings_load(g_path) : 0;
@@ -724,6 +753,13 @@ int pc_settings_init(void)
             pc_display("vsync", 1) ? "on" : "off", pc_display("anti_aliasing", 1) ? "on" : "off",
             pc_display("anisotropy", 0), pc_display("sharpen", 30), pc_display("aspect", 0),
             recomp_settings_get("textures", "enabled", 0) ? "on" : "off", recomp_settings_get("online", "voice", 1));
+    {
+        extern int pc_mods_game_lock(void);
+        if (!pc_mods_game_lock()) {
+            host_fatal("Mods are being installed or need recovery.\n\nOpen the launcher Mods page and wait for recovery before playing.");
+            return 0;
+        }
+    }
 
     /* Settings read once at start-up by code that looks at the environment (after the launcher,
      * which may have changed them). */
@@ -737,7 +773,7 @@ int pc_settings_init(void)
             _putenv_s("RECOMP_TEXTURE_PACKS",recomp_settings_get("textures","enabled",0) ? packs : "");
         }
         if (!getenv("RECOMP_TEXTURE_CACHE_MB")) {
-            snprintf(value,sizeof value,"%d",recomp_settings_get("textures","cache_mb",512));
+            snprintf(value,sizeof value,"%d",recomp_settings_get("textures","cache_mb",TEXTURE_CACHE_MB));
             _putenv_s("RECOMP_TEXTURE_CACHE_MB",value);
         }
         if (!getenv("RECOMP_TEXTURE_DUMP_LIMIT")) {
@@ -750,11 +786,32 @@ int pc_settings_init(void)
         }
     }
 
+    /* The play-test recorder ([debug] record): after the launcher, which can turn it on,
+     * and before the audio starts, whose capture it points into the session. */
+#if defined(_WIN32)
+    pc_debug_start(g_log_name[0] ? g_log_name : NULL,
+                   GetCommandLineA() && strstr(GetCommandLineA(), "--record") != NULL);
+#else
+    pc_debug_start(g_log_name[0] ? g_log_name : NULL, has_arg("--record"));
+#endif
+    /* [debug] unlock_all: src/patches/dev_unlock.c reads the variable once the game runs. */
+    if (!getenv("RECOMP_UNLOCK_ALL") && recomp_settings_get("debug", "unlock_all", 0))
+        _putenv_s("RECOMP_UNLOCK_ALL", "1");
+
     d3d8_present_enable_scaling(1);
+    ws_init(pc_display("window_width", 1280), pc_display("window_height", 960), pc_display("fullscreen", 0));
 #if defined(_WIN32)
     d3d8_present_set_overlay(pc_ui_overlay, NULL);
 #else
     pc_ui_register_overlay();
+    /* Compiled shaders and the driver's pipeline cache are kept in
+     * <data>/cache/vulkan, so a shader met in an earlier run is not compiled
+     * again at its first draw. */
+    if (have_root) {
+        char cache[PATH_MAX];
+        snprintf(cache, sizeof(cache), "%s/cache/vulkan", root);
+        d3d8_vk_set_cache_dir(cache);
+    }
 #endif
     d3d8_present_set_render_scale((unsigned)pc_display("render_scale", 2));
     pc_settings_apply_display();

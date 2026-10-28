@@ -35,13 +35,14 @@ files `<stem>-200s.bmp`. Frame counts drift by hundreds between runs, so a frame
 the screen a scripted press leads to.
 
 Even seconds since process start drift by a minute (the title appears anywhere from 100 to 190 s), so
-anchor the clock to the title instead: `RECOMP_SCRIPT_ANCHOR=feflow.xml#2` starts both the pad script's
-and the capture's clock at the second open of `screens\feflow.xml`, which is the title loading after the
-intro. The main-menu capture:
+anchor the clock to the title instead: `RECOMP_SCRIPT_ANCHOR=getscreeninfo(intmain/prestart` starts both
+the pad script's and the capture's clock at the Press Start screen request. This works with normal
+startup and with `[debug] skip_intro`; the old `feflow.xml#2` counter needs the legal/movie path.
+The main-menu capture:
 
 ```
-$env:RECOMP_SCRIPT_ANCHOR="feflow.xml#2"; $env:RECOMP_TRANS_SHOT="$PWD\logs\menu.bmp"; $env:RECOMP_TRANS_SHOT_SECS=50
-$env:RECOMP_PAD_SCRIPT="start:8:8.4,start:11:11.4,a:14:14.3,a:18:18.3,a:22:22.3,a:26:26.3,a:30:30.3,a:34:34.3,a:38:38.3,b:42:42.3,b:46:46.3"
+$env:RECOMP_SCRIPT_ANCHOR="getscreeninfo(intmain/prestart"; $env:RECOMP_TRANS_SHOT="$PWD\logs\menu.bmp"; $env:RECOMP_TRANS_SHOT_SECS=50
+$env:RECOMP_PAD_SCRIPT="start:14:14.3,start:17:17.3,a:20:20.3,a:23:23.3,a:26:26.3,a:29:29.3,a:32:32.3,a:35:35.3,a:38:38.3,b:42:42.3,b:46:46.3"
 .\scripts\run.ps1 -TimeoutSecs 280
 python scripts\frame-signature.py logs\menu-50s.bmp --check tests\golden\m4a-main-menu.json
 ```
@@ -53,7 +54,7 @@ opens the user-ID screen and sometimes its keyboard, and each B backs out one le
 | Baseline | What it is |
 |---|---|
 | `m2-loading-screen.json` | The game's first loading screen — crest logo and LOADING wordmark, centred, on black. The first screen this port has ever rendered, and the same screen xemu reaches before it freezes. |
-| `m3-title-screen.json` | The title screen: skyline, logo, "Press START", copyright. Capture it 5 s after the anchor (`RECOMP_SCRIPT_ANCHOR=feflow.xml#2`, `RECOMP_TRANS_SHOT_SECS=5`); frame 3,600 used to land on it but now and then lands on a black transition instead. |
+| `m3-title-screen.json` | The title screen: skyline, logo, "Press START", copyright. Capture it 5 s after the screen-request anchor (`RECOMP_TRANS_SHOT_SECS=5`); frame 3,600 used to land on it but now and then lands on a black transition instead. |
 | `m4a-main-menu.json` | The main menu, idle, captured as above: "MAIN MENU" header, the eight mode tiles, the Story panel. Loose by design (region and drawn-pixel count within 5%): it also accepts the menu with another tile selected and the match-type screen, and rejects the title. |
 
 ## Checking all three
@@ -61,6 +62,8 @@ opens the user-ID screen and sometimes its keyboard, and each B backs out one le
 `python scripts/regress.py --only m2,m3,m4a` runs the game three times and checks each signature. The
 loading screen (M2) has no front-end call to anchor a capture on, and which frame it is on depends on how
 fast the build starts, so that check captures several frames and passes if one of them is the screen.
+M3 explicitly retains the complete legal/EA/THX/intro sequence and asserts its order; the other runs
+skip startup. Both quick and full regression therefore check the normal startup once per set.
 
 ## fight-stream.json
 

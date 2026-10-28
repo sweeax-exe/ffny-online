@@ -16,6 +16,7 @@ Checks, in order:
            file, and Play goes on into the game
   overlay  the F1 overlay (macOS, Linux): opened by a key event, a tab clicked, drawn over
            the picture, and the window's frame read back (RECOMP_WINDOW_SHOT)
+  skipintro (--only) default/file/environment startup skip, first screen, title golden and Start
   fight    a scripted One on One: reaches the fight, holds the frame rate, no crash
   ffa      a scripted four-fighter Free For All at the default venue, the same checks
   ffa-terrordome  the same at the Terrordome for four minutes (the v0.2.1 crash)
@@ -44,6 +45,11 @@ The golden frames were taken without the title's gamma ramp, so those three runs
 set RECOMP_GAMMA=0. Every run uses the harness's complete-save-root guard and
 fails if the save area is not byte-identical afterwards.
 
+Quick and full sets each play legal and all startup movies once, in m3, with
+ordered log assertions and the title golden. Other runs use the harness's startup
+skip default and anchor input/captures to the actual Press Start screen request.
+Story cutscenes and move previews still play in their own checks.
+
 A check that does not apply on this host (the launcher and overlay checks on Windows) reports SKIP:
 it is counted as skipped, never as passed. Exit code 0 only if every check that ran passed. The
 table is also written to logs/regress-<stamp>.txt.
@@ -67,11 +73,11 @@ evidence = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(evidence)
 REPO = harness.REPO
 
-ORDER = ["unit", "m2", "m3", "m4a", "launcher", "overlay", "fight", "ffa", "fight-terrordome", "ffa-terrordome", "combat", "versus", "ffa-result", "two-matches", "replay", "repeat", "visual",
+ORDER = ["unit", "m2", "m3", "m4a", "launcher", "overlay", "unlockopt", "picture", "skipintro", "fight", "ffa", "fight-terrordome", "ffa-terrordome", "combat", "versus", "ffa-result", "two-matches", "replay", "repeat", "visual",
          "intro", "crib", "gym", "soak"]
 # Opt-in (--only): the One on One at the Terrordome, which the Free For All covers, and
 # the repeatability check, which is two more fights.
-DEFAULT = [n for n in ORDER if n not in ("fight-terrordome", "ffa-result", "two-matches", "repeat", "visual")]
+DEFAULT = [n for n in ORDER if n not in ("fight-terrordome", "ffa-result", "two-matches", "repeat", "visual", "skipintro")]
 QUICK = ["unit", "m2", "m3", "m4a", "fight"]
 
 # A 2 s line of a 60 Hz title holds 120 presents. Loading screens run at 30, so the
@@ -87,7 +93,10 @@ def median(xs):
 
 def common_faults(run):
     """What no run should show, whatever it was for."""
-    return harness.run_faults(run)
+    faults = harness.run_faults(run)
+    if "[UI] script target missing:" in run.text:
+        faults.append("a scripted launcher control was unavailable")
+    return faults
 
 
 def verdict(faults, detail):
@@ -102,18 +111,25 @@ def not_applicable(why):
 # --- checks ----------------------------------------------------------------
 
 def check_unit(a):
-    r = subprocess.run([sys.executable, "-m", "pytest", "-q", "tests/unit"], cwd=REPO, capture_output=True, text=True)
-    last = (r.stdout.strip().splitlines() or ["no output"])[-1]
+    # The slow tests (rebuilding the branding set) run in CI and with `pytest tests/unit`; the
+    # regression run is about the game, and a seven-second unit check is worth running first.
+    r = subprocess.run([sys.executable, "-m", "pytest", "-q", "-m", "not slow", "tests/unit"],
+                       cwd=REPO, capture_output=True, text=True)
+    last = (r.stdout.strip().splitlines() or r.stderr.strip().splitlines() or ["no output"])[-1]
     return r.returncode == 0, last
 
 
-def golden(a, name, frame, json_name, env, secs):
+def golden(a, name, frame, json_name, env, secs, normal_startup=False):
     e = {"RECOMP_GAMMA": "0"}
+    if normal_startup and os.environ.get('RECOMP_HEADLESS'):
+        e['RECOMP_HEADLESS'] = os.environ['RECOMP_HEADLESS']
     e.update(env)
     path = os.path.join(REPO, "logs", "shots", "golden-" + name, frame)
     run = harness.run_game("golden-" + name, secs=secs, preset=a.preset, env=e, scripted=False, quiet=True,
-                           until_file=path)
+                           until_file=path, inherit_recomp=not normal_startup)
     faults = common_faults(run)
+    if normal_startup:
+        faults += normal_startup_faults(run.text)
     if not os.path.isfile(path):
         return False, "; ".join(faults + ["no capture (%s)" % os.path.relpath(run.log, REPO)])
     r = subprocess.run([sys.executable, os.path.join(HERE, "frame-signature.py"), path, "--check",
@@ -121,7 +137,7 @@ def golden(a, name, frame, json_name, env, secs):
     line = (r.stdout.strip().splitlines() or [r.stderr.strip() or "no output"])[-1]
     if r.returncode != 0 or not line.startswith("OK"):
         faults.append(line)
-    return verdict(faults, line)
+    return verdict(faults, ('legal, EA/THX/intro movies, Press Start; ' if normal_startup else '') + line)
 
 
 # The loading screen has no [FUNCCALL] to anchor on, and which frame it is on
@@ -142,7 +158,7 @@ def check_m2(a):
         r = subprocess.run([sys.executable, os.path.join(HERE, "frame-signature.py"), path, "--check",
                             os.path.join(REPO, "tests", "golden", "m2-loading-screen.json")],
                            cwd=REPO, capture_output=True, text=True)
-        line = (r.stdout.strip().splitlines() or ["no output"])[-1]
+        line = (r.stdout.strip().splitlines() or r.stderr.strip().splitlines() or ["no output"])[-1]
         if r.returncode == 0 and line.startswith("OK"):
             return verdict(faults, "%s matches" % os.path.basename(path))
         seen.append("%s: %s" % (os.path.basename(path), line))
@@ -153,14 +169,17 @@ def check_m2(a):
 def check_m3(a):
     shot = os.path.join(REPO, "logs", "shots", "golden-m3", "title.bmp")
     return golden(a, "m3", "title-5s.bmp", "m3-title-screen.json",
-                  {"RECOMP_SCRIPT_ANCHOR": harness.TITLE_ANCHOR, "RECOMP_TRANS_SHOT": shot,
-                   "RECOMP_TRANS_SHOT_SECS": "5"}, 150)
+                  {"RECOMP_SKIP_INTRO": "0", "RECOMP_SCRIPT_ANCHOR": harness.TITLE_ANCHOR,
+                   "RECOMP_TRANS_SHOT": shot, "RECOMP_TRANS_SHOT_SECS": "5"}, 150,
+                  normal_startup=True)
 
 
 def check_m4a(a):
     shot = os.path.join(REPO, "logs", "shots", "golden-m4a", "menu.bmp")
-    pad = ("start:8:8.4,start:11:11.4,a:14:14.3,a:18:18.3,a:22:22.3,a:26:26.3,a:30:30.3,a:34:34.3,"
-           "a:38:38.3,b:42:42.3,b:46:46.3")
+    # Screen-request time precedes the old flow-file anchor. Keep the title's
+    # native input delay, then dismiss storage notices and back out of Story.
+    pad = ("start:14:14.3,start:17:17.3,a:20:20.3,a:23:23.3,a:26:26.3,a:29:29.3,"
+           "a:32:32.3,a:35:35.3,a:38:38.3,b:42:42.3,b:46:46.3")
     return golden(a, "m4a", "menu-50s.bmp", "m4a-main-menu.json",
                   {"RECOMP_SCRIPT_ANCHOR": harness.TITLE_ANCHOR, "RECOMP_TRANS_SHOT": shot,
                    "RECOMP_TRANS_SHOT_SECS": "50", "RECOMP_PAD_SCRIPT": pad}, 200)
@@ -168,8 +187,8 @@ def check_m4a(a):
 
 # --- the launcher and the overlay (drawn through SDL and Vulkan: macOS and Linux) -----------------
 
-UI_TAB = (158, 43, 33)          # the selected tab: (0.62, 0.17, 0.13)
-UI_PLAY = (46, 140, 56)         # the launcher's Play button: (0.18, 0.55, 0.22)
+UI_TAB = (141, 45, 42)          # selected category, oxblood
+UI_PLAY = (214, 173, 82)         # Play, ochre
 
 
 def bmp_color_count(path, colors, tolerance=3):
@@ -215,8 +234,8 @@ def check_launcher(a):
     if os.path.exists(shot):
         os.remove(shot)
     settings = ui_settings_file("launcher")
-    # The General tab, then "Skip the launcher at start"; a frame; Play. Window points.
-    script = "800:click:540:60;1500:click:21:675;2200:shot:%s;2600:play" % shot
+    # Visit direct routes, save skip in Interface, return Home, capture and click Play.
+    script = "800:ui:Mods;1300:ui:Back;1800:ui:Configure;2300:ui:Back;2800:ui:Advanced;3300:ui:Interface;3800:ui:launcher.skip;4300:ui:Back;4700:move:1050:25;5100:shot:%s;5600:ui:Play" % shot
     run = harness.run_game("ui-launcher", secs=120, preset=a.preset, scripted=False, quiet=True, until_file=shot,
                            env={"RECOMP_SETTINGS": settings, "RECOMP_LAUNCHER_SCRIPT": script,
                                 "RECOMP_INPUT_IGNORE_FOCUS": "1"})
@@ -226,9 +245,7 @@ def check_launcher(a):
             faults.append("no %r in the log" % needle)
     if not os.path.isfile(shot):
         return False, "; ".join(faults + ["no frame captured"])
-    width, height, (tab, play) = bmp_color_count(shot, [UI_TAB, UI_PLAY])
-    if tab < 300:
-        faults.append("the General tab is not selected in the captured frame (%d tab-coloured pixels)" % tab)
+    width, height, (play,) = bmp_color_count(shot, [UI_PLAY])
     if play < 300:
         faults.append("no Play button in the captured frame (%d pixels)" % play)
     with open(settings, encoding="utf-8") as f:
@@ -237,7 +254,7 @@ def check_launcher(a):
         faults.append("the click on \"Skip the launcher at start\" did not reach settings.ini")
     if "[UI] launcher closed: play" not in run.text:
         faults.append("Play did not close the launcher")
-    return verdict(faults, "%dx%d frame, General tab and Play drawn, skip saved, Play went on" % (width, height))
+    return verdict(faults, "%dx%d frame, Home and Play drawn, skip saved, Play went on" % (width, height))
 
 
 def check_overlay(a):
@@ -248,8 +265,8 @@ def check_overlay(a):
     if os.path.exists(shot):
         os.remove(shot)
     settings = ui_settings_file("overlay", "[launcher]\nskip = true\n")
-    # F1 once the game is drawing, then the General tab (overlay pixels: the window is 1280x960 points).
-    script = "20000:key:F1;21500:click:659:126;28000:key:F1"
+    # F1 opens the shared Advanced screen on Display; capture its selected category.
+    script = "20000:key:F1;28000:key:F1"
     run = harness.run_game("ui-overlay", secs=150, preset=a.preset, scripted=False, quiet=True, until_file=shot,
                            env={"RECOMP_SETTINGS": settings, "RECOMP_HOST_SCRIPT": script,
                                 "RECOMP_WINDOW_SHOT": shot, "RECOMP_WINDOW_SHOT_FRAME": "150"})
@@ -264,12 +281,221 @@ def check_overlay(a):
     width, height, (tab,) = bmp_color_count(shot, [UI_TAB])
     if tab < 300:
         faults.append("no selected tab in the captured window (%d tab-coloured pixels): the overlay is not drawn or its tab was not clicked" % tab)
-    return verdict(faults, "opened by F1, General tab clicked, %dx%d window frame has the overlay" % (width, height))
+    return verdict(faults, "opened by F1, Display category drawn, %dx%d window frame has the overlay" % (width, height))
+
+
+def check_unlock_option(a):
+    """The launcher's "Debug - Unlock all Fighters and Venues" checkbox, and what it does.
+
+    Part one clicks it in the launcher and expects `unlock_all = true` under [debug] in the settings
+    file. Part two starts the game from a file that says so, with no environment variable, and expects
+    the unlock routine to run; a file without it must leave the routine alone."""
+    if sys.platform == "win32":
+        return not_applicable("this check is for the SDL launcher (macOS, Linux); the Windows one is Direct3D 11")
+    faults = []
+    shot = os.path.join(REPO, "logs", "shots", "ui-unlockopt", "launcher.bmp")
+    os.makedirs(os.path.dirname(shot), exist_ok=True)
+    if os.path.exists(shot):
+        os.remove(shot)
+    settings = ui_settings_file("unlockopt")
+    # Open Diagnostics, click unlock, capture and click Play. The harness turns the
+    # unlock on for its runs, which would lock the checkbox, so the variable is left unset here.
+    # A narrow or large-text launcher (the Steam Deck's) draws the choice as an Off/On list: the first
+    # click opens it and the optional second picks On. With a checkbox the first click is enough.
+    script = ("800:ui:Advanced;1300:ui:Diagnostics;1900:ui:debug.unlock_all;2500:uiopt:debug.unlock_all.on;"
+              "3300:shot:%s;3700:ui:Play" % shot)
+    run = harness.run_game("ui-unlockopt", secs=120, preset=a.preset, scripted=False, quiet=True, until_file=shot,
+                           env={"RECOMP_SETTINGS": settings, "RECOMP_LAUNCHER_SCRIPT": script,
+                                "RECOMP_INPUT_IGNORE_FOCUS": "1", "RECOMP_UNLOCK_ALL": ""})
+    faults += common_faults(run)
+    with open(settings, encoding="utf-8") as f:
+        ini = f.read()
+    if not re.search(r"^\[debug\][^\[]*^unlock_all\s*=\s*true\s*$", ini, re.M | re.S):
+        faults.append("the click on the Debug checkbox did not reach settings.ini")
+    if "[UI] launcher closed: play" not in run.text:
+        faults.append("Play did not close the launcher")
+    if faults:
+        return False, "; ".join(faults)
+    # Part two: the saved choice reaches the game, and its absence leaves the game alone.
+    for want, text in ((True, "[launcher]\nskip = true\n[debug]\nunlock_all = true\n"),
+                       (False, "[launcher]\nskip = true\n")):
+        path = ui_settings_file("unlockopt-" + ("on" if want else "off"), text)
+        run = harness.run_route("boot", preset=a.preset, quiet=True,
+                                env={"RECOMP_SETTINGS": path, "RECOMP_UNLOCK_ALL": ""})
+        faults += common_faults(run)
+        started = "[UNLOCK] RECOMP_UNLOCK_ALL:" in run.text
+        ran = "[UNLOCK] sub_000158F0 run" in run.text
+        if want and not (started and ran):
+            faults.append("unlock_all = true in the file, but the unlock routine did not run")
+        if not want and (started or ran):
+            faults.append("unlock_all is off in the file, but the unlock routine ran")
+    return verdict(faults, "the checkbox saves [debug] unlock_all; from the file alone the unlock runs, and without it does not")
+
+
+def check_picture_options(a):
+    """The launcher's Picture controls (issues #44 and #47) and what reaches the game.
+
+    Clicks the Brightness slider at three quarters of its track and the Vignette checkbox, then
+    Play. Expects [display] brightness above 100 and vignette = false in the settings file, and the
+    game to start with them ([PICTURE] line). What they do to the picture is measured by
+    docs/research/picture-options.md, not here: a fight is too long for this check."""
+    if sys.platform == "win32":
+        return not_applicable("this check is for the SDL launcher (macOS, Linux); the Windows one is Direct3D 11")
+    faults = []
+    shot = os.path.join(REPO, "logs", "shots", "ui-picture", "launcher.bmp")
+    os.makedirs(os.path.dirname(shot), exist_ok=True)
+    if os.path.exists(shot):
+        os.remove(shot)
+    settings = ui_settings_file("picture")
+    # The vignette is a checkbox, or in a narrow or large-text launcher an Off/On list (see check_unlock_option).
+    script = ("800:ui:Advanced;1400:ui:display.brightness;2000:ui:display.vignette;2600:uiopt:display.vignette.off;"
+              "3300:shot:%s;3700:ui:Play" % shot)
+    run = harness.run_game("ui-picture", secs=60, preset=a.preset, scripted=False, quiet=True,
+                           env={"RECOMP_SETTINGS": settings, "RECOMP_LAUNCHER_SCRIPT": script,
+                                "RECOMP_INPUT_IGNORE_FOCUS": "1"})
+    faults += common_faults(run)
+    with open(settings, encoding="utf-8") as f:
+        ini = f.read()
+    display = re.search(r"^\[display\]([^\[]*)", ini, re.M)
+    display = display.group(1) if display else ""
+    brightness = re.search(r"^brightness\s*=\s*(\d+)\s*$", display, re.M)
+    if not brightness or not 100 < int(brightness.group(1)) <= 200:
+        faults.append("the Brightness slider did not reach settings.ini (%s)" % (brightness.group(0) if brightness else "missing"))
+    if not re.search(r"^vignette\s*=\s*false\s*$", display, re.M):
+        faults.append("the Vignette checkbox did not reach settings.ini")
+    if "[UI] launcher closed: play" not in run.text:
+        faults.append("Play did not close the launcher")
+    started = re.search(r"^\[PICTURE\] brightness (\d+), vignette off", run.text, re.M)
+    if not started or not brightness or started.group(1) != brightness.group(1):
+        faults.append("the game did not start with the saved brightness and the vignette off")
+    return verdict(faults, "Brightness %s and Vignette off saved by the launcher and applied when the game started"
+                   % (brightness.group(1) if brightness else "?"))
+
+
+def startup_skip_faults(text, enabled):
+    """Require a positive first-screen observation; only inspect the startup interval."""
+    startup = re.split(r'^\[FUNCCALL\] Control\.GetScreenInfo\(intMain/mainMenu', text,
+                       maxsplit=1, flags=re.M | re.I)[0]
+    screens = re.findall(r'^\[FUNCCALL\] Control\.GetScreenInfo\(([^)]*)\)', startup, re.M | re.I)
+    want = 'intmain/prestart.swf' if enabled else 'intmain/legal1.swf'
+    faults = []
+    if not screens or screens[0].lower() != want:
+        faults.append('first front-end screen %r, expected %s' % (screens[0] if screens else None, want))
+    redirects = startup.count('[STARTUP] skip_intro: controller boot initialized;')
+    if redirects != int(enabled):
+        faults.append('startup redirect count %d, expected %d' % (redirects, int(enabled)))
+    if enabled:
+        if any(s.lower() in ('intmain/legal1.swf', 'intmain/bootload.swf') for s in screens):
+            faults.append('legal or bootLoad requested with skip enabled')
+        if re.search(r'\[PATH\][^\r\n]*[\\/]movies[\\/](eagames|thx|intro)\.mad', startup, re.I):
+            faults.append('a startup movie opened with skip enabled')
+    return faults
+
+
+# Guest 0x00340320 is 1 once the full audio initialization (AudioInit(1)) has run. A normal
+# boot makes it after the startup movies; skipping them must not lose it, or the Press Start
+# and menu transition sound effects never play (v0.10.1 to v0.10.4).
+AUDIO_MODE_PEEK = '0x340320'
+
+
+def audio_init_faults(text):
+    values = re.findall(r'\[PEEK\] 0x00340320 = ([0-9A-Fa-f]{8})', text)
+    if not values:
+        return ['no audio mode observation; the run ended before the first state sample']
+    if int(values[-1], 16) != 1:
+        return ['full audio initialization missing (0x00340320 = %s); menu sound effects would be silent' % values[-1]]
+    return []
+
+
+def normal_startup_faults(text):
+    """The one complete normal boot in both quick/full sets must positively prove each stage."""
+    faults = startup_skip_faults(text, False)
+    stages = (
+        ('legal', r'^\[FUNCCALL\] Control\.GetScreenInfo\(intMain/legal1\.swf\)'),
+        ('bootLoad', r'^\[FUNCCALL\] Control\.GetScreenInfo\(intMain/bootLoad\.swf\)'),
+        ('movie controller', r'^\[FUNCCALL\] Game\.StartMainMenu\(\s*0\s*\)'),
+        ('EA movie', r'\[PATH\][^\r\n]*[\\/]movies[\\/]eagames\.mad'),
+        ('THX movie', r'\[PATH\][^\r\n]*[\\/]movies[\\/]thx\.mad'),
+        ('intro movie', r'\[PATH\][^\r\n]*[\\/]movies[\\/]intro\.mad'),
+        ('Press Start', r'^\[FUNCCALL\] Control\.GetScreenInfo\(intMain/preStart\.swf\)'),
+    )
+    end = 0
+    for label, pattern in stages:
+        match = re.search(pattern, text[end:], re.M | re.I)
+        if not match:
+            faults.append('normal startup missing or out of order: ' + label)
+            break
+        end += match.end()
+    return faults
+
+
+def check_skip_intro(a):
+    """Actual startup with defaults, INI alone, and both directions of the env override."""
+    faults = []
+    title = 'getscreeninfo(intmain/prestart'
+    menu = 'getscreeninfo(intmain/mainmenu'
+    for name, ini_value, override, enabled in (
+            ('default', None, None, False), ('file', True, None, True),
+            ('env-off', True, '0', False), ('env-on', False, '1', True),
+            ('with-unlock', True, None, True)):
+        combined = name == 'with-unlock'
+        env = {'RECOMP_UNLOCK_ALL': '1' if combined else '0', 'RECOMP_SKIP_INTRO': ''}
+        if os.environ.get('RECOMP_HEADLESS'):
+            env['RECOMP_HEADLESS'] = os.environ['RECOMP_HEADLESS']
+        if ini_value is not None:
+            env['RECOMP_SETTINGS'] = ui_settings_file('skipintro-' + name,
+                '[launcher]\nskip = true\n[debug]\nskip_intro = %s\n' % str(ini_value).lower())
+        if override is not None:
+            env['RECOMP_SKIP_INTRO'] = override
+        if enabled:
+            # Skipping the first flow load invalidates feflow.xml#2. Anchor to the
+            # actual title request, keep its native animation/input delay, then Start.
+            env['RECOMP_SCRIPT_ANCHOR'] = title
+            env['RECOMP_PEEK'] = AUDIO_MODE_PEEK
+            env['RECOMP_PAD_SCRIPT'] = ','.join(harness.title_presses())
+            env['RECOMP_GAMMA'] = '0'
+        run = harness.run_game('skipintro-' + name, preset=a.preset, scripted=False, quiet=True,
+            env=env, inherit_recomp=False, secs=170,
+            until='getscreeninfo(options/userid' if combined else (menu if enabled else 'getscreeninfo(intmain/legal1'),
+            after=4 if enabled else 2, shots='@' + title + ',5' if enabled else '')
+        faults += [name + ': ' + f for f in common_faults(run) + startup_skip_faults(run.text, enabled)]
+        if enabled:
+            if not harness.reached(run.summary, menu):
+                faults.append(name + ': Start did not reach the main menu')
+            faults += [name + ': ' + f for f in audio_init_faults(run.text)]
+            if combined and '[UNLOCK] sub_000158F0 run' not in run.text:
+                faults.append(name + ': startup skip prevented the unlock routine from running')
+            shot = os.path.join(run.shots_dir, 'skipintro-' + name + '-5s.bmp')
+            result = subprocess.run([sys.executable, os.path.join(HERE, 'frame-signature.py'),
+                                     shot, '--check', os.path.join(REPO, 'tests/golden/m3-title-screen.json')],
+                                    capture_output=True, text=True)
+            if result.returncode:
+                faults.append(name + ': skipped title does not match the existing golden: ' +
+                              (result.stdout + result.stderr).strip())
+    return verdict(faults, '5 startup cases: defaults, INI, both env overrides, combined unlock; title golden and Start to menu')
+
+
+def start_venue_faults(text, expected):
+    """Require early venue selection and the final value given to StartGame."""
+    match = re.search(r'^\[START\] venue\(script\)=(-?\d+)\b', text, re.M)
+    if not match:
+        return ['no final StartGame venue observation']
+    faults = []
+    actual = int(match.group(1))
+    if actual != expected:
+        faults.append('StartGame venue %d, expected %d' % (actual, expected))
+    early = re.search(r'^\[FE-INJECT\][^\r\n]*: Game\.ChooseVenue\(%d\)' % expected, text, re.M)
+    if not early or early.start() > match.start():
+        faults.append('no venue selection before StartGame')
+    return faults
 
 
 def check_fight(a, route="fight"):
     run = harness.run_route(route, preset=a.preset, quiet=True)
     faults = common_faults(run)
+    expected = harness.ROUTES[route].get('expected_venue')
+    if expected is not None:
+        faults += start_venue_faults(run.text, expected)
     if not harness.reached(run.summary, "game.startgame("):
         faults.append("never reached the fight")
     p = harness.presents_after(run.text, "game.startgame(")
@@ -371,7 +597,7 @@ def check_replay(a):
     folder = os.path.join(REPO, "logs", "scenarios", "regress-replay-" + stamp)
     stream = os.path.join(REPO, "logs", "scenarios", "regress-replay-%s.stream" % stamp)
     code = suite.main(["run", "fight", "--fixture", fixture, "--no-audio", "--observe-combat", "--step-input", "default",
-                       "--rng-seed", "20261006", "--preset", a.preset, "--stream-out", stream, "--output", folder])
+                       "--rng-seed", "20261006", "--no-unlock", "--preset", a.preset, "--stream-out", stream, "--output", folder])
     try:
         with open(stream, encoding="utf-8") as f:
             lines = [line for line in f.read().splitlines() if line]
@@ -401,7 +627,7 @@ def check_repeat(a):
     second = os.path.join(REPO, "logs", "scenarios", "regress-repeat-b-" + stamp)
     stream = os.path.join(REPO, "logs", "scenarios", "regress-repeat-%s.stream" % stamp)
     common = ["run", "fight", "--fixture", fixture, "--no-audio", "--observe-combat", "--step-input", "default",
-              "--rng-seed", "20261006", "--preset", a.preset]
+              "--rng-seed", "20261006", "--no-unlock", "--preset", a.preset]
     if suite.main(common + ["--stream-out", stream, "--output", first]) != 0:
         return False, "the recording run failed  " + os.path.relpath(first, REPO)
     code = suite.main(common + ["--stream-expect", stream, "--output", second])
@@ -476,7 +702,7 @@ def check_soak(a):
 
 
 CHECKS = {"unit": check_unit, "m2": check_m2, "m3": check_m3, "m4a": check_m4a, "launcher": check_launcher,
-          "overlay": check_overlay, "fight": check_fight, "ffa": check_ffa,
+          "overlay": check_overlay, "unlockopt": check_unlock_option, "picture": check_picture_options, "skipintro": check_skip_intro, "fight": check_fight, "ffa": check_ffa,
           "fight-terrordome": lambda a: check_fight(a, 'fight-terrordome'),
           "ffa-terrordome": lambda a: check_fight(a, 'ffa-terrordome'),
           "combat": check_combat, "versus": check_versus, "ffa-result": check_ffa_result, "two-matches": check_two_matches, "replay": check_replay, "visual": check_visual, "repeat": check_repeat, "intro": check_intro, "crib": check_crib, "gym": check_gym, "soak": check_soak}
@@ -510,6 +736,7 @@ def main(argv=None):
     t_all = time.time()
     for n in names:
         t0 = time.time()
+        log_before = harness.LAST_LOG
         try:
             if a.shared_story and n in ('crib', 'gym'):
                 if shared_story is None:
@@ -527,6 +754,8 @@ def main(argv=None):
             ok, detail = False, str(ex)
         rows.append((n, ok, detail, time.time() - t0))
         print("%-6s %-4s %4d s  %s" % (n, status_word(ok), rows[-1][3], detail), flush=True)
+        if ok is False and harness.LAST_LOG and harness.LAST_LOG != log_before:
+            print("       " + harness.triage_hint(harness.LAST_LOG), flush=True)
     harness.kill_stray()
 
     failed = [r for r in rows if r[1] is not None and not r[1]]

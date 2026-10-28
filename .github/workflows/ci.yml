@@ -9,9 +9,35 @@ on:
 permissions:
   contents: read
 
+# A newer push to the same pull request supersedes the older run. Pushes to main and tag builds (the
+# release workflow calls this one) are never cancelled: each commit keeps its own result.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
+  # The three setup builds, the MSVC and POSIX runtimes and the native fixtures cannot be affected by a change
+  # that only touches Markdown, so those jobs wait for this one and skip. `hygiene` and `python-tools` always
+  # run (they read some Markdown), and `CI result` below fails if anything that ran failed. When this job
+  # cannot tell, it says "code" and everything runs (see scripts/ci-digest.py).
+  changes:
+    name: Which parts changed
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.diff.outputs.code }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - id: diff
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: python3 scripts/ci-digest.py changes --base "$BASE" --head "$HEAD" >> "$GITHUB_OUTPUT"
+
   windows-setup:
     name: Game-free Windows setup
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -20,7 +46,7 @@ jobs:
         with: { python-version: '3.13' }
       - run: python -m pip install pytest Pillow==12.3.0 numpy==2.5.2
       - name: Installer recovery and input boundaries
-        run: python -m pytest -q tests/unit/test_setup_engine.py tests/unit/test_linux_setup.py tests/unit/test_hd_assets.py tests/unit/test_hd_corpus.py tests/unit/test_hd_setup.py
+        run: python -m pytest -q --junitxml=build/setup-unit-results.xml tests/unit/test_setup_updates.py tests/unit/test_setup_engine.py tests/unit/test_setup_status.py tests/unit/test_linux_setup.py tests/unit/test_hd_assets.py tests/unit/test_hd_corpus.py tests/unit/test_hd_setup.py
       - name: Build and inventory standalone setup (no dump)
         shell: pwsh
         run: ./scripts/build-setup.ps1
@@ -37,6 +63,12 @@ jobs:
           $process = Start-Process -FilePath $setupPath -ArgumentList "--silent --dump missing.iso --install-dir `"$app`" --data-dir `"$data`"" -WindowStyle Hidden -Wait -PassThru
           if ($process.ExitCode -ne 2) { throw "Expected invalid-input exit 2, got $($process.ExitCode)" }
       - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-updater-test-reports
+          path: build/setup-unit-results.xml
+          if-no-files-found: warn
+      - uses: actions/upload-artifact@v4
         with:
           name: windows-setup-assets
           path: build/setup-assets/*
@@ -44,6 +76,8 @@ jobs:
 
   macos-setup:
     name: Game-free macOS setup
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
@@ -52,7 +86,7 @@ jobs:
         with: { python-version: '3.13' }
       - run: python -m pip install pytest pyxbe capstone Pillow==12.3.0 numpy==2.5.2
       - name: Installer recovery, input boundaries and payload builder
-        run: python -m pytest -q tests/unit/test_setup_engine.py tests/unit/test_hd_setup.py tests/unit/test_macos_payload.py
+        run: python -m pytest -q --junitxml=build/setup-unit-results.xml tests/unit/test_setup_updates.py tests/unit/test_setup_engine.py tests/unit/test_setup_status.py tests/unit/test_hd_setup.py tests/unit/test_macos_payload.py
       # SDL3 and shaderc are built from pinned source; keep them between runs.
       - uses: actions/cache@v4
         with:
@@ -60,6 +94,11 @@ jobs:
           key: macos-setup-${{ hashFiles('setup/dependencies-macos.json', 'scripts/macos_payload.py', '.gitmodules') }}-${{ hashFiles('tools/xboxrecomp/cmake/xbox_sdl3.cmake') }}
       - name: Build and inventory the setup image (no dump)
         run: ./scripts/build-setup.sh
+      - name: Native game-free install, update, downgrade, repair and rebuild
+        run: |
+          python -c "import zipfile; zipfile.ZipFile('build/setup-macos/setup-payload.zip').extractall('build/native-update-payload')"
+          python -c "from pathlib import Path; [p.chmod(p.stat().st_mode | 0o111) for p in Path('build/native-update-payload').rglob('*') if p.is_file() and (p.name in ('python3', 'cmake', 'ninja', 'DefJamLauncher') or p.name.startswith('python3.'))]"
+          python scripts/test-setup-updates-macos.py --payload build/native-update-payload --work "$RUNNER_TEMP/setup-update-native"
       - name: Wizard smoke and invalid input exit safely
         run: |
           app="build/setup-macos/image/Def Jam Setup.app/Contents/MacOS/DefJamSetup"
@@ -70,6 +109,16 @@ jobs:
           code=$?
           if [ "$code" -ne 2 ]; then echo "Expected invalid-input exit 2, got $code"; exit 1; fi
       - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: macos-updater-test-reports
+          path: |
+            build/setup-unit-results.xml
+            ${{ runner.temp }}/setup-update-native/*.json
+            ${{ runner.temp }}/setup-update-native/*.log
+            ${{ runner.temp }}/setup-update-native/*.out
+          if-no-files-found: warn
+      - uses: actions/upload-artifact@v4
         with:
           name: macos-setup-assets
           path: build/setup-macos/setup-assets/*
@@ -77,6 +126,8 @@ jobs:
 
   linux-setup:
     name: Game-free Linux setup
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -85,7 +136,7 @@ jobs:
         with: { python-version: '3.13' }
       - run: python -m pip install pytest pyxbe capstone Pillow==12.3.0 numpy==2.5.2
       - name: Installer recovery, input boundaries, launcher and payload checks
-        run: python -m pytest -q tests/unit/test_setup_engine.py tests/unit/test_linux_setup.py tests/unit/test_hd_setup.py
+        run: python -m pytest -q --junitxml=build/setup-unit-results.xml tests/unit/test_setup_updates.py tests/unit/test_setup_engine.py tests/unit/test_setup_status.py tests/unit/test_linux_setup.py tests/unit/test_hd_setup.py
       - uses: actions/cache@v4
         with:
           path: build/setup-downloads/linux
@@ -101,6 +152,12 @@ jobs:
           "$folder/DefJamSetup.sh" --silent --dump missing.iso --install-dir "$RUNNER_TEMP/defjam-test-app" --data-dir "$RUNNER_TEMP/defjam-test-data"
           code=$?
           if [ "$code" -ne 2 ]; then echo "Expected invalid-input exit 2, got $code"; exit 1; fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: linux-updater-test-reports
+          path: build/setup-unit-results.xml
+          if-no-files-found: warn
       - uses: actions/upload-artifact@v4
         with:
           name: linux-setup-assets
@@ -124,12 +181,14 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: { python-version: "3.12" }
-      - run: pip install pyxbe capstone pytest
+      - run: pip install pyxbe capstone pytest cryptography==50.0.2 cffi==2.0.0 pycparser==2.23 Pillow==12.3.0
       - run: python -m pytest -q tests/unit
       - run: python -m py_compile scripts/verify-dump.py
 
   runtime-windows:
     name: Release runtime + CPU tests (Windows, MSVC)
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -140,11 +199,15 @@ jobs:
       # Build the exact published fork commit checked out by the gitlink.
       - uses: actions/setup-python@v5
         with: { python-version: "3.12" }
-      - run: python -m pip install pyxbe capstone pytest
+      - run: python -m pip install pyxbe capstone pytest cryptography==50.0.2 cffi==2.0.0 pycparser==2.23 Pillow==12.3.0
       - name: Native legacy-save compatibility (MSVC, synthetic data)
         run: python -m pytest -q tests/unit/test_save_compat.py
-      - name: Input settings and defaults (MSVC)
-        run: python -m pytest -q tests/unit/test_input_native.py
+      - name: Input, startup and launcher fixtures (MSVC)
+        run: python -m pytest -q tests/unit/test_input_native.py tests/unit/test_skip_intro.py tests/unit/test_launcher_model.py tests/unit/test_launcher_actions.py tests/unit/test_mod_manager.py tests/unit/test_mod_bridge.py
+      - name: Play-test recorder, bundle analysis and scenario controls (MSVC, synthetic data)
+        run: |
+          python -m pip install Pillow==12.3.0 numpy==2.5.2
+          python -m pytest -q tests/unit/test_recorder_native.py tests/unit/test_scenario_controls_native.py
       - run: cmake --preset ci-runtime-only
       - name: Verify Release configuration without game code
         shell: pwsh
@@ -158,9 +221,15 @@ jobs:
       - run: cmake --build --preset ci-runtime-only
       - name: Toolkit compiled CPU semantics
         run: python scripts/test-toolkit-msvc.py
+      # The game's own sources (hooks, patches, main.c) are otherwise compiled first on a player's
+      # machine, by Setup. No game code: the toolkit's template header and an empty dispatch stand in.
+      - name: Game-side sources compile (MSVC, no game code)
+        run: python scripts/compile-game-sources.py
 
   runtime-posix:
     name: Runtime + fixtures (${{ matrix.os }})
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -169,6 +238,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: { submodules: recursive }
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: python -m pip install pytest
+      - name: Startup skip settings and guest-call ABI
+        run: python -m pytest -q tests/unit/test_skip_intro.py
       - name: Dependencies (Linux)
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y ninja-build pkg-config libsdl2-dev libepoxy-dev libssl-dev libvulkan-dev libshaderc-dev
@@ -181,7 +255,7 @@ jobs:
       - run: cmake --build --preset ci-runtime-only
       - name: Hardware-free fixtures
         run: |
-          for t in mmio_trap_posix guest_cpu_posix memory_layout_posix kernel_memory_posix kernel_path_posix kernel_bridge nv2a_vsh settings texture_pack; do
+          for t in mmio_trap_posix guest_cpu_posix memory_layout_posix windows_guest_layout kernel_memory_posix kernel_path_posix kernel_bridge nv2a_vsh settings texture_pack nv2a_texture_signature nv2a_small_capture nv2a_ws_left_tag d3d8_vk_cache; do
             cmake -S tools/xboxrecomp/tests/$t -B build/fx-$t -G Ninja -DCMAKE_BUILD_TYPE=Release
             cmake --build build/fx-$t
             ctest --test-dir build/fx-$t --output-on-failure --no-tests=error
@@ -189,11 +263,13 @@ jobs:
 
   native-fixtures:
     name: Release fixture (${{ matrix.fixture }})
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: windows-latest
     strategy:
       fail-fast: false
       matrix:
-        fixture: [kernel_bridge, kernel_directory, usb_transfer, nv2a_vsh, settings, d3d8_present_fit, input_map, input_host, kernel_events, memory_regressions, kernel_regressions, kernel_object_paths, kernel_dispatch, kernel_irql_abi, kernel_physical_address, texture_pack]
+        fixture: [kernel_bridge, kernel_directory, usb_transfer, nv2a_vsh, settings, d3d8_present_fit, d3d8_readback, input_map, input_host, kernel_events, memory_regressions, windows_guest_layout, kernel_regressions, kernel_object_paths, kernel_dispatch, kernel_irql_abi, kernel_physical_address, texture_pack, nv2a_texture_signature, nv2a_small_capture, nv2a_ws_left_tag]
         include:
           - fixture: kernel_regressions
             configure_args: -DXBOX_SLOW_TESTS=ON
@@ -213,3 +289,20 @@ jobs:
         run: cmake --build build/ci-${{ matrix.fixture }}
       - name: Run registered tests (empty suites fail)
         run: ctest --test-dir build/ci-${{ matrix.fixture }} --output-on-failure --no-tests=error
+
+  # One result for the whole run, and a table that lists a failing job first. Skipped jobs (a Markdown-only
+  # change) count as passed; a failed, cancelled or missing `changes` job does not.
+  ci-result:
+    name: CI result
+    if: always()
+    needs: [changes, windows-setup, macos-setup, linux-setup, hygiene, python-tools, runtime-windows, runtime-posix, native-fixtures]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Summarise
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: >-
+          python3 scripts/ci-digest.py summary
+          --always changes,hygiene,python-tools
+          --heavy windows-setup,macos-setup,linux-setup,runtime-windows,runtime-posix,native-fixtures

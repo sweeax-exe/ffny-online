@@ -1,4 +1,4 @@
-"""Builds the test hooks (src/hooks/test_observations.c, test_telemetry.c, test_bot.c) natively
+"""Builds the test hooks (src/hooks/test_observations.c, test_telemetry.c, test_bot.c, recorder.c) natively
 against synthetic guest memory, for the *_native tests. Needs MSVC (`cl` on PATH); the tests skip
 without it.
 
@@ -50,7 +50,9 @@ int netplay_local_slot(void) { const char *v = getenv("STUB_LOCAL_SLOT"); return
 int netplay_rerunning(void) { return 0; }
 '''
 
-HOOK_SOURCES = ('src/hooks/test_observations.c', 'src/hooks/test_telemetry.c', 'src/hooks/test_bot.c')
+# recorder.c: test_telemetry.c copies its lines into the play-test recorder's events (upstream v0.10).
+HOOK_SOURCES = ('src/hooks/test_observations.c', 'src/hooks/test_telemetry.c', 'src/hooks/test_bot.c',
+                'src/hooks/recorder.c')
 
 
 def build(tmp_path_factory, name, driver_text):

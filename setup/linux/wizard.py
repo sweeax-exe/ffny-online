@@ -11,6 +11,8 @@ with --silent or --uninstall goes straight to the engine instead. Nothing here
 reads the dump; the engine verifies it and builds it on this computer.
 """
 import os
+import json
+import threading
 from pathlib import Path
 import shutil
 import subprocess
@@ -28,7 +30,8 @@ def state_home():
 
 def default_locations():
     root = Path.home() / 'Games' / 'DefJamRecompiled'
-    return root / 'App', root / 'Data'
+    return (Path(os.environ.get("DEFJAM_INSTALL_DIR") or root / "App"),
+            Path(os.environ.get("DEFJAM_DATA") or root / "Data"))
 
 
 def run_engine(argv):
@@ -80,7 +83,7 @@ def wizard(payload, smoke=False):
     steam = tk.BooleanVar(value=bool(shutil.which('steam')))
     hd = tk.BooleanVar(value=False)
     status = tk.StringVar(value='Choose your Def Jam: Fight for NY (USA, Xbox) disc image or extracted folder.')
-    session = {'child': None, 'cancel': None, 'status': None, 'log': None}
+    session = {'child': None, 'cancel': None, 'status': None, 'log': None, 'closing': False}
 
     frame = ttk.Frame(root, padding=16)
     frame.grid(sticky='nsew')
@@ -134,6 +137,78 @@ def wizard(payload, smoke=False):
     for i, button in enumerate((logs_button, cancel_button, install_button, play_button)):
         button.grid(row=0, column=i, padx=4)
 
+    release_tags = [None]
+    release_kinds = ['ok']
+
+    def installed():
+        return (Path(install.get()).expanduser() / 'installed.json').is_file()
+
+    def choosable(kind):
+        return kind == 'ok' or (kind == 'fresh' and not installed())
+
+    def release_picked(_event=None):
+        index = release_choice.current()
+        if index > 0 and not choosable(release_kinds[index]):
+            release_choice.current(0)
+            status.set('This release has no complete Linux setup. Choose a compatible release.'
+                       if release_kinds[index] == 'unavailable' else
+                       'This release predates the updater, so it cannot update or repair an existing installation. '
+                       'Choose a newer release.')
+    release_choice = ttk.Combobox(frame, state='readonly', values=['Bundled release (offline)'])
+    release_choice.current(0)
+    release_choice.bind('<<ComboboxSelected>>', release_picked)
+    operation_choice = ttk.Combobox(frame, state='readonly', values=['Automatic', 'Install', 'Repair', 'Clean Update', 'Downgrade (future releases)', 'Clean Rebuild'])
+    operation_choice.current(0)
+    operations = ['auto', 'install', 'repair', 'update', 'downgrade', 'rebuild']
+    # Insert two rows above the existing buttons without growing individual controls.
+    for child in frame.winfo_children():
+        info = child.grid_info()
+        if info and int(info['row']) >= 8: child.grid_configure(row=int(info['row']) + 2)
+    release_choice.grid(row=8, column=0, columnspan=2, sticky='ew', pady=3)
+    operation_choice.grid(row=9, column=0, columnspan=3, sticky='ew', pady=3)
+    def mutable(enabled):
+        for widget in list(frame.winfo_children()) + list(options.winfo_children()):
+            if widget in (buttons, progress): continue
+            if isinstance(widget, (ttk.Entry, ttk.Button, ttk.Checkbutton, ttk.Combobox)):
+                widget.configure(state=('readonly' if isinstance(widget, ttk.Combobox) else 'normal') if enabled else 'disabled')
+    def fetch():
+        if session['child'] is not None: return
+        work = Path(tempfile.mkdtemp(prefix='defjam-releases-'))
+        session['cancel'] = work / 'cancel'
+        mutable(False); install_button.configure(state='disabled'); play_button.configure(state='disabled')
+        cancel_button.configure(state='normal'); progress.start(12); status.set('Fetching GitHub releases…')
+        listing = [sys.executable, '-B', str(HERE / 'wizard.py'), '--silent', '--payload', str(payload),
+                   '--list-releases', '--cancel-file', str(session['cancel'])]
+        if installed(): listing += ['--install-dir', str(Path(install.get()).expanduser())]
+        child = subprocess.Popen(listing,
+                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True)
+        session['child'] = child
+        def background():
+            output, errors = child.communicate()
+            def complete():
+                if session['closing']: return
+                session['child'] = None; session['cancel'] = None
+                shutil.rmtree(work, ignore_errors=True)
+                progress.stop(); cancel_button.configure(state='disabled')
+                mutable(True); install_button.configure(state='normal'); refresh_play()
+                if child.returncode:
+                    status.set('Fetch stopped. Bundled release is available offline.'); return
+                try: rows = json.loads(output)['releases']
+                except (ValueError, KeyError): status.set('Invalid release list.'); return
+                release_tags[:] = [None] + [row['tag'] for row in rows]
+                # 'unavailable' has no setup for this platform; 'fresh' predates the updater (updater == False)
+                # and cannot update or repair an existing installation.
+                release_kinds[:] = ['ok'] + ['unavailable' if not row['available'] else 'fresh' if row.get('updater') is False else 'ok' for row in rows]
+                release_choice.configure(values=['Bundled release (offline)'] + [
+                    row['tag'] + {'ok': '', 'unavailable': ' (unavailable)', 'fresh': ' (update unavailable)'}[kind]
+                    for row, kind in zip(rows, release_kinds[1:])])
+                release_choice.current(next((i for i, kind in enumerate(release_kinds) if i and choosable(kind)), 0))
+                status.set('Select a release and operation; unavailable releases will be refused.')
+            if not session['closing']: root.after(0, complete)
+        threading.Thread(target=background, daemon=True).start()
+    refresh_button = ttk.Button(frame, text='Fetch GitHub releases', command=fetch)
+    refresh_button.grid(row=8, column=2, padx=4)
+
     def launcher():
         return Path(install.get()).expanduser() / 'Def Jam Recompiled'
 
@@ -141,7 +216,7 @@ def wizard(payload, smoke=False):
         play_button.configure(state='normal' if launcher().is_file() and session['child'] is None else 'disabled')
 
     def start():
-        if not dump.get():
+        if not dump.get() and not (Path(install.get()).expanduser() / 'installed.json').is_file() and not (Path(install.get()).expanduser() / '.setup-transaction').exists():
             messagebox.showwarning(TITLE, 'Choose your disc image or extracted game folder first.')
             return
         logs = state_home() / 'DefJamSetup' / 'logs'
@@ -150,9 +225,14 @@ def wizard(payload, smoke=False):
         work = Path(tempfile.mkdtemp(prefix='defjam-setup-'))
         session['status'], session['cancel'] = work / 'status.txt', work / 'cancel'
         argv = [sys.executable, '-I', '-B', str(HERE / 'wizard.py'), '--silent', '--payload', str(payload),
-                '--dump', str(Path(dump.get()).expanduser()), '--install-dir', str(Path(install.get()).expanduser()),
+                '--install-dir', str(Path(install.get()).expanduser()),
                 '--data-dir', str(Path(data.get()).expanduser()), '--log', str(session['log']),
                 '--status-file', str(session['status']), '--cancel-file', str(session['cancel'])]
+        if dump.get(): argv += ['--dump', str(Path(dump.get()).expanduser())]
+        argv += ['--operation', operations[operation_choice.current()]]
+        tag = release_tags[release_choice.current()]
+        argv += ['--release', tag] if tag else ['--bundled-only']
+        mutable(False)
         if not shortcuts.get():
             argv.append('--no-shortcuts')
         elif not desktop.get():
@@ -184,11 +264,14 @@ def wizard(payload, smoke=False):
         progress.stop()
         session['child'] = None
         cancel_button.configure(state='disabled')
+        mutable(True)
         install_button.configure(state='normal')
         refresh_play()
         code = child.returncode
         if code == 0:
             status.set('Setup complete. Select Play, or start Def Jam Recompiled from the menu, the desktop or Steam.')
+        elif code == 6:
+            status.set('Setup cancelled. Run it again to resume completed work.')
         else:
             messagebox.showerror(TITLE, status.get() + '\n\nThe setup log is ' + str(session['log']))
 
@@ -208,11 +291,16 @@ def wizard(payload, smoke=False):
         if session['child'] is not None:
             if not messagebox.askyesno(TITLE, 'Setup is still running. Cancel it and quit?'):
                 return
+            session['closing'] = True
             cancel()
             try:
                 session['child'].wait(timeout=30)
             except subprocess.TimeoutExpired:
-                pass
+                session['child'].terminate()
+                try: session['child'].wait(timeout=3)
+                except subprocess.TimeoutExpired:
+                    session['child'].kill(); session['child'].wait()
+        session['closing'] = True
         root.destroy()
 
     install_button.configure(command=start)
@@ -229,7 +317,7 @@ def wizard(payload, smoke=False):
 
 
 def main(argv):
-    if '--silent' in argv or '--uninstall' in argv:
+    if '--silent' in argv or '--uninstall' in argv or '--list-releases' in argv:
         return run_engine(argv)
     if '--payload' not in argv:
         print('usage: DefJamSetup.sh [--silent ...]', file=sys.stderr)

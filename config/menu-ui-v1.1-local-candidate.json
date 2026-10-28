@@ -1,0 +1,55 @@
+{
+  "schema": 1,
+  "status": "LOCAL integrated candidate, no catalogue publication",
+  "runtime_base_pr": 123,
+  "runtime_repair_commit": "8f526ec",
+  "approval_ledger": "config/menu-ui-v1.1-approved-artwork.json",
+  "approval_ledger_sha256": "2e8be50cd539bc87b1328da82af5d142a2515ae79f611784fc27691042284b45",
+  "inputs": {
+    "menu-ui-hd-wide-v1-rc2": {
+      "manifest_sha256": "1684cdc2185cd3a5da17f8a044e1dcb9e0b5a3d3560c09dda4bac142bbaa3f9b",
+      "referenced_files": 321
+    },
+    "menu-ui-transition-top-test-v1": {
+      "manifest_sha256": "e92652f260a01d1e62726c30d5143de13719cd94e1f0641eb15e76948e44e0f9",
+      "referenced_files": 2
+    },
+    "menu-ui-v11-background-drafts-v3": {
+      "manifest_sha256": "77fd4cb58a43889e3f0d04a3a441dae2fa346a9b09ee6f1ac9484c5dac3a52c1",
+      "referenced_files": 32
+    },
+    "menu-ui-venue-wide-draft-v6": {
+      "manifest_sha256": "e0f6337a8c3d8f980753f6e73127445ba476063b9f54dba8ff46ae5273ce7bb3",
+      "referenced_files": 24
+    },
+    "menu-ui-text-clarity-strong-v1": {
+      "manifest_sha256": "c038ca01bb3b3929fcd8367ecb374d3882f245e13334629d2cb098df84178f78",
+      "referenced_files": 6
+    }
+  },
+  "result": {
+    "pack": "logs/menu-ui-v1.1/runtime-data/mods/menu-ui-hd-wide-v1.1.0-rc1",
+    "textures": 163,
+    "wide_and_stretch": 80,
+    "files": 386,
+    "zip": "logs/menu-ui-v1.1/menu-ui-hd-wide-v1.1.0-rc1.zip",
+    "zip_bytes": 503829023,
+    "zip_sha256": "a37087217f662d0bafaece5749d5d2e3073de141ae3ab82c1f5dcafd8d082fac"
+  },
+  "pack_receipt_sha256": "4cc658293b0bc53fbd4a2bdd65d260e785af00dd591233edf5a1f17191d50a35",
+  "crc_and_file_hashes_verified": true,
+  "native_checks": [
+    {
+      "scope": "integrated Team at 2560x1440",
+      "log": "logs/run-20261026-141650.log.err",
+      "save_restored_identical": true,
+      "runtime_faults": 0
+    },
+    {
+      "scope": "integrated Battle/fighter/map route at 32:9; four directional venue selections",
+      "log": "logs/run-20261026-141932.log.err",
+      "save_restored_identical": true,
+      "runtime_faults": 0
+    }
+  ]
+}

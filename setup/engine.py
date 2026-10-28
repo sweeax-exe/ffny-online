@@ -66,27 +66,37 @@ def write_json(path, value):
     os.replace(temporary, path)
 
 
-def replace_shown(temporary, path):
-    """os.replace for the files the wizard reads while setup runs (status, progress). On Windows the
-    rename fails with "Access is denied" while the wizard has the old file open, and a player's setup
-    stopped there (2026-10-25). It is retried for about a second, and then given up: these files only
-    feed the wizard's display, so a missed update must not stop the install."""
-    for attempt in range(20):
+STATUS_ATTEMPTS = 5
+
+
+def replace_shown(temporary, path, attempts=STATUS_ATTEMPTS):
+    """Publish one of the files the wizard reads while setup runs (status, progress), best effort.
+    On Windows the rename fails with "Access is denied" while the wizard has the old file open, and
+    a player's setup stopped there (2026-10-25; upstream issue #40). It is retried a few times with
+    a growing pause and then given up: these files only feed the wizard's display, so a missed
+    update must not stop the install. Returns whether the file was published."""
+    for attempt in range(attempts):
         try:
             os.replace(temporary, path)
-            return
-        except PermissionError:
-            time.sleep(0.05)
+            return True
+        except OSError:
+            if attempt + 1 < attempts:
+                time.sleep(0.01 * 2 ** attempt)
     with contextlib.suppress(OSError):
         os.remove(temporary)
+    return False
 
 
 def write_status(path, message):
+    """One progress line for the wizard, best effort: never raises, returns whether it was shown."""
     path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix('.pending')
-    temporary.write_text(message, encoding='utf-8')
-    replace_shown(temporary, path)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary.write_text(message, encoding='utf-8')
+    except OSError:
+        return False
+    return replace_shown(temporary, path)
 
 
 def write_progress(status_path, permille):
@@ -94,8 +104,11 @@ def write_progress(status_path, permille):
     wizard draws it as a bar; a front end that does not read it loses nothing."""
     path = Path(str(status_path) + '.progress')
     temporary = Path(str(status_path) + '.progress-pending')
-    temporary.write_text(str(max(0, min(1000, int(permille)))), encoding='ascii')
-    replace_shown(temporary, path)
+    try:
+        temporary.write_text(str(max(0, min(1000, int(permille)))), encoding='ascii')
+    except OSError:
+        return False
+    return replace_shown(temporary, path)
 
 
 def write_stage(status_path, index, total, key, name):
@@ -448,24 +461,40 @@ class Engine:
                 # copy, not copyfile: the bundled interpreter and tools keep their execute bit.
                 shutil.copy(self.payload / name, destination)
         previous = self.install / 'installed.json'
-        candidates = [p for p in (self.install / 'versions').glob('*/source')
-                      if p != self.source and (p / 'src/recomp/gen/lift-state.json').is_file()]
-        if previous.is_file() or candidates:
-            old = (Path(json.loads(previous.read_text(encoding='utf-8'))['source']).resolve()
-                   if previous.is_file() else max(candidates, key=lambda p: p.stat().st_mtime).resolve())
-            versions = (self.install / 'versions').resolve()
-            if versions not in old.parents or old == self.source:
+        if previous.is_file():
+            old = Path(json.loads(previous.read_text(encoding='utf-8'))['source']).resolve()
+        else:
+            # Reuse only saves time, so an earlier folder that cannot be read is skipped. On
+            # Windows a half-deleted failed attempt answers access denied (WinError 5), and
+            # Python 3.13's is_file() raises that instead of returning False (upstream D199).
+            candidates = []
+            for p in (self.install / 'versions').glob('*/source'):
+                try:
+                    if p != self.source and (p / 'src/recomp/gen/lift-state.json').is_file():
+                        candidates.append((p.stat().st_mtime, p))
+                except OSError as ex:
+                    self.event('Skipped an unreadable earlier build folder: ' + str(ex))
+            if not candidates:
                 return
-            # Reuse only local analysis/lift artifacts; the incoming pipeline must
-            # validate all inputs/outputs before skipping a stage. Never reuse objects.
-            for relative in ('src/recomp/gen', 'tools/xboxrecomp/game_files',
-                             'tools/xboxrecomp/tools/disasm/output', 'tools/xboxrecomp/tools/func_id/output',
-                             'tools/xboxrecomp/tools/abi_analysis/output'):
-                src, dst = old / relative, self.source / relative
+            old = max(candidates)[1].resolve()
+        versions = (self.install / 'versions').resolve()
+        if versions not in old.parents or old == self.source:
+            return
+        # Reuse only local analysis/lift artifacts; the incoming pipeline must
+        # validate all inputs/outputs before skipping a stage. Never reuse objects.
+        for relative in ('src/recomp/gen', 'tools/xboxrecomp/game_files',
+                         'tools/xboxrecomp/tools/disasm/output', 'tools/xboxrecomp/tools/func_id/output',
+                         'tools/xboxrecomp/tools/abi_analysis/output'):
+            src, dst = old / relative, self.source / relative
+            try:
                 if src.is_dir() and (not dst.exists() or (relative == 'src/recomp/gen' and
                                                           not (dst / 'lift-state.json').exists())):
                     shutil.copytree(src, dst, dirs_exist_ok=True)
-            self.keep_unchanged_times(old.parent)
+            except OSError as ex:
+                # A partial copy is discarded so that stage starts from nothing.
+                shutil.rmtree(dst, ignore_errors=True)
+                self.event('Earlier ' + relative + ' not reused: ' + str(ex))
+        self.keep_unchanged_times(old.parent)
 
     def keep_unchanged_times(self, old_root):
         """A file the new version ships byte for byte as the old one had it takes the old
@@ -1242,6 +1271,9 @@ class Engine:
                 self.progress(1, 1)
 
 
+TEXTURE_PACK_LIST_MAX = 1023
+
+
 def enable_hd_packs(data, packs, previous=()):
     """Change only texture enabled/pack keys; preserve other settings and comments."""
     if not packs or any(not re.fullmatch(r'faithful-hd-[0-9a-f]{12}-(opacity|channels)', p) for p in packs):
@@ -1255,7 +1287,8 @@ def enable_hd_packs(data, packs, previous=()):
     old = old_values[-1] if old_values else None
     retained = [p.strip() for p in old.group(1).split(';') if p.strip() and p.strip() not in previous and p.strip() not in packs] if old else []
     combined = ';'.join(retained + list(packs))
-    if len(combined.encode('ascii')) >= 256:
+    # The game holds TEXTURE_PACK_LIST_MAX bytes (RECOMP_SETTING_TEXT_MAX less its terminator).
+    if len(combined.encode('utf-8')) > TEXTURE_PACK_LIST_MAX:
         raise SetupError('Texture pack list is too long; shorten existing pack names', 2)
     def updated(body):
         for key, value in (('enabled','1'),('packs',combined)):

@@ -30,11 +30,15 @@ fail() {
 exec 9>> "$ROOT/play.lock" || fail "The install folder is not writable."
 flock -n 9 || fail "The game or an update is already running."
 
+[ ! -e "$ROOT/.setup-transaction" ] || fail "An update was interrupted. Run setup again to recover it."
+
 cd "$SOURCE" || fail "The installed game folder is missing. Run Def Jam Setup to repair it."
 export DEFJAM_DATA="$DATA"
+export DEFJAM_INSTALL_DIR="$ROOT"
 
 # Keep the ten newest session logs so a problem report always has the last run.
 LOGS="${XDG_STATE_HOME:-$HOME/.local/state}/DefJamRecompiled/logs"
+export DEFJAM_LOG_DIR="$LOGS"
 if mkdir -p "$LOGS" 2> /dev/null; then
     ls -1 "$LOGS" 2> /dev/null | grep '^play-.*\.log$' | sort | head -n -9 | while read -r old; do
         rm -f "$LOGS/$old" "$LOGS/$old.err"
