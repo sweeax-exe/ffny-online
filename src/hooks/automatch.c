@@ -40,15 +40,20 @@ static int g_on_menu, g_quiet, g_ticks, g_running, g_env_read, g_results = -1;
  * music had its setup wiped after StartGame: each slot's controller number back to -99, so that
  * match's summary took no controller and the player stood on the results screen for ever (King
  * of the Hill's deferred match every time, 2026-10-26). On cmtype the sequence waits for the
- * screen's ResetMatchData and settles after it; the ticks (patched cmtype, apt-patch version 4)
- * start it anyway if that never comes. */
+ * screen's ResetMatchData: armed by then, it runs right after that call, as it ran after the music
+ * before; armed later, it settles as on the main menu. The ticks (patched cmtype, apt-patch
+ * version 4) start it anyway if the reset never comes. Without the patch (a dump apt-patch does
+ * not recognise; about 2 in 114 player logs) the idle screen makes no calls at all, so a match
+ * armed before the reset must not wait for calls or ticks after it. One armed after the reset
+ * still needs the ticks there (or the player's own menu sounds), as before build 32. */
 #define CMTYPE_FALLBACK_TICKS (8 * SETTLE_TICKS)
 static int g_cmtype, g_cmtype_reset;
 
 static int settled(const char *text)
 {
     if (g_cmtype)
-        return (g_cmtype_reset && (g_quiet >= SETTLE_CALLS || g_ticks >= SETTLE_TICKS)) ||
+        return (g_cmtype_reset && (g_quiet >= SETTLE_CALLS || g_ticks >= SETTLE_TICKS ||
+                                   !strcmp(text, "Game.ResetMatchData()"))) ||
                g_ticks >= CMTYPE_FALLBACK_TICKS;
     return g_quiet >= SETTLE_CALLS || g_ticks >= SETTLE_TICKS || !strcmp(text, "Audio.PlayMusic()");
 }
