@@ -35,6 +35,11 @@ bool draw(ImVec2 display);
 /* The last false from draw() was a match starting, not a press: nothing to keep from the game. */
 bool closed_for_match();
 
+/* A room's match loads: the versus screen (the fighters, the venue, the mode) is up, drawn over the
+ * game with the online screens closed and no input taken; draw it with draw_versus this frame. */
+bool versus_wanted();
+void draw_versus(ImDrawList *dl, ImVec2 display);
+
 /* RECOMP_TEST_ONLINE_GALLERY: the name of the page the gallery shows, for the overlay's captures;
  * nullptr otherwise. */
 const char *shot_label();
