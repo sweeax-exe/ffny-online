@@ -82,8 +82,9 @@ The original game shows the fighters and the venue before a fight. Online, the r
 room straight into the load (`src/hooks/automatch.c` drives the game's own selection screens), so the port
 draws its own versus screen while an online match loads: each fighter's portrait (the online art), the
 player's name (`CPU` for a CPU fill), the fighter and the fighting style, each player's ping, `VS` in the
-game's stencil over a soft red light, the venue's photo and name banner (the vote's art), the mode's logo, the
-room and the server. In King of the Hill the king stands on the right with the crown and "N WINS IN A ROW".
+game's stencil over a soft red light, the venue's photo (the vote's art, with the venue's name on its sign)
+and its subtitle banner ("OLD SCHOOL CLUB" under The Terror Dome; none where the game's banner only repeats
+the name, as for The Foundation), the mode's logo, the room and the server. In King of the Hill the king stands on the right with the crown and "N WINS IN A ROW".
 One on One has two large cards with the venue between them; 3-Way and Free for All a row of cards with the
 venue below. The cards slide in, `VS` and the venue fade in; nothing flashes.
 

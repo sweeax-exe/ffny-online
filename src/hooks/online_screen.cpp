@@ -2790,25 +2790,38 @@ void versus_mark(ImDrawList *dl, const Frame &f, float cx, float cy, float size,
 }
 
 // The venue: its photo and name banner (the vote's art), or its name in words without the art.
+// Every venue photo carries the venue's name on its sign. The banner the game keeps beside it is
+// mostly the venue's subtitle ("OLD SCHOOL CLUB" under The Terror Dome, "BLAZE'S GYM" under
+// Stapleton Athletics), but for these venue.xml feIDs it only repeats the name: The Foundation,
+// The Limit and its Intense, Chopshop, Ambush Alley, Red Hook Tire Co. Shown, the name read twice.
+bool banner_repeats_name(int fe)
+{
+    switch (fe) { case 1: case 2: case 3: case 13: case 23: case 24: return true; }
+    return false;
+}
+
+// The venue: its photo and, when it says something the photo does not, its subtitle banner.
 void versus_venue(ImDrawList *dl, const Frame &f, int venue, float x, float y, float w, float photo, bool row)
 {
     const Tex &pic = venue_tex(venue), &banner = venue_name_tex(venue);
+    bool subtitle = banner.srv && !banner_repeats_name(venue);
     std::string name = upper(online_venue_name(venue));
-    if (row) {      // a wide panel: the photo left, the label and banner right
+    if (row) {      // a wide panel: the photo left (small: its sign is hard to read), the label and banner right
         glass(dl, f, x, y, w, photo + 12, 12);
         if (!image(dl, f, pic, x + 6, y + 6, photo, photo)) text(dl, f, g_title, 12, x + 6 + photo / 2, y + photo / 2, GREY, "?", CENTER);
         float bx = x + photo + 18, bw = w - photo - 30;
         text(dl, f, g_title, 11, bx, y + 10, GREY, "TONIGHT'S VENUE", LEFT, 0.8f);
-        if (banner.srv) image_fit(dl, f, banner, bx - 4, y + 24, bw, photo - 26);
+        if (subtitle) image_fit(dl, f, banner, bx - 4, y + 24, bw, photo - 26);
         else text(dl, f, g_hand, 22, bx, y + 30, ORANGE, name.c_str(), LEFT, 1.2f, bw);
         return;
     }
     glass(dl, f, x, y, w, photo + 62, 12);
     text(dl, f, g_title, 11, x + w / 2, y + 7, GREY, "TONIGHT'S VENUE", CENTER, 0.8f);
-    if (!image(dl, f, pic, x + (w - photo) / 2, y + 22, photo, photo))
+    // without a subtitle the photo takes the banner's place too
+    float side = subtitle ? photo : std::min(photo + 32, w - 12), top = y + 22 + (subtitle ? 0 : (photo + 32 - side) / 2);
+    if (!image(dl, f, pic, x + (w - side) / 2, top, side, side))
         text(dl, f, g_title, 14, x + w / 2, y + 22 + photo / 2 - 8, CREAM, name.c_str(), CENTER, 1.2f, photo);
-    if (banner.srv) image_fit(dl, f, banner, x + 4, y + photo + 26, w - 8, 30);
-    else text(dl, f, g_hand, 16, x + w / 2, y + photo + 30, ORANGE, name.c_str(), CENTER, 1.0f, w - 8);
+    if (subtitle) image_fit(dl, f, banner, x + 4, y + photo + 26, w - 8, 30);
 }
 
 // The versus page, full screen. `v.ms` drives the entrance, `v.alpha` the fade at the fight's start.
@@ -2909,7 +2922,9 @@ NetVersus sample_versus(const std::string &page)
     NetVersus v = {};
     v.count = page == "versus-3way" ? 3 : page == "versus-ffa" ? 4 : 2;
     v.type = page == "versus-3way" ? 2 : page == "versus-ffa" ? 3 : 0;
-    v.venue = page == "versus-koth" ? 6 : page == "versus-ffa" ? 11 : 1;
+    // The Foundation and Red Hook Tire Co. (no subtitle: the photo alone, the name in words in a row),
+    // The Subway and The Terror Dome (their subtitle banners)
+    v.venue = page == "versus-koth" ? 6 : page == "versus-ffa" ? 11 : page == "versus-3way" ? 24 : 1;
     v.you = 0;
     v.king = -1;
     snprintf(v.room, sizeof(v.room), "%s", page == "versus-koth" ? "Hill of Pain" : "Ann's room");
