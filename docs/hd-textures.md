@@ -1,5 +1,8 @@
 # HD textures: support and local workflow
 
+New to making packs? Start with [Texture Modding — Getting Started](texture-modding-getting-started.md)
+for a capture-to-pack walkthrough. This page is the format and processing reference.
+
 v0.6.0 added optional Windows Direct3D 11 texture packs and local
 Lanczos 4x generation; v0.6.1 draws the same packs through Vulkan on macOS
 (Apple Silicon), and v0.7.2 offers them in the Linux setup (the Steam Deck included),
@@ -34,7 +37,7 @@ The first time a screen is drawn with the packs, its HD textures are decoded and
 menu on a Steam Deck. On the Deck a one-on-one fight runs at 60 frames a second with the packs
 and a four-fighter Free For All at about 56 (both 60 without them).
 
-In the launcher or F1 overlay (Windows, macOS since v0.6.2, Linux since v0.7.0), open **Textures** to disable HD
+In the launcher or F1 overlay (Windows, macOS since v0.6.2, Linux since v0.7.0), open **Mods** to disable HD
 packs, change the pack list or adjust the cache. Restart after changes. Or edit `[textures]` in
 `settings.ini` in your data folder (`enabled=0` turns the packs off, `enabled=1` on; `packs` and
 `cache_mb` are the pack list and memory budget; the [settings reference](settings-reference.md) lists
@@ -56,14 +59,17 @@ For manual generation, review galleries and future processing experiments, see
 
 ## Install and enable a pack
 
-Put the pack beneath the data folder, then use the launcher's or overlay's **Textures** page:
+Put the pack beneath the data folder, then use the launcher's or overlay's **Mods** page:
 
 ```text
 <data>/mods/faithful-hd/manifest.ini
 <data>/mods/faithful-hd/textures/<source-id>.png
 ```
 
-Turn **Use HD texture packs** on, enter `faithful-hd` under **Pack folders**, and restart the game.
+Choose **Refresh local mods**, turn **Use HD texture packs** on, enable the pack and restart the game.
+The current **Load Order…** window shows highest priority at the top; use **Higher** to make a pack
+override matching textures in the packs below it. For manual configuration, **Pack folders** is under
+**Memory and manual pack list** and uses the stored order described below.
 Multiple names use semicolons; the last listed pack wins. The list holds up to 1023 characters; a longer
 one is reported in the log as a `[SETTINGS]` line and no pack loads until it is shortened. (Up to v0.10.5
 the limit was 95 characters, which a setup install with one added pack already passed.) Turn packs off and restart to restore original
@@ -98,7 +104,7 @@ BC7, DX10 headers, arrays, cubes and volumes are unsupported. DDS replacements f
 row padding currently fall back. Use PNG to keep alpha exact during review; use DirectXTex `texconv`
 only after choosing suitable compression/mips per material. No automatic sRGB format change is made.
 
-The cache defaults to 512 MiB, accounting for retained upload data and GPU texture bytes. It protects
+The cache defaults to 2048 MiB, accounting for retained upload data and GPU texture bytes. It protects
 textures bound on all four stages when evicting; temporary pressure falls back and retries. Cube maps,
 YUV/movie and depth formats and tracked render surfaces stay on their original path. Generated text
 is not approved for static replacement. Restart is required to reload manifests or edited files.
@@ -231,10 +237,10 @@ model experiments and saved-review behavior are in [workflow guide](hd-texture-w
 
 ## Download independent menu mods through the launcher
 
-The integrated0.10.8 RC adds the signed project catalogue to Mods. Refresh the
-catalogue, opt into testing versions for menu RC2, download/install, then enable
-the pack and put it after any Faithful components in Load Order. The menu pack
-is separate; Faithful generation stays optional. No manual mod ZIP extraction
+The signed project catalogue is available in Mods. Refresh the catalogue,
+download/install a compatible version, then enable the pack and give it higher
+priority than Recomp HD in Load Order. Testing versions require an explicit opt-in.
+The menu pack is separate; Faithful generation stays optional. No manual mod ZIP extraction
 is needed. See [mod management](mod-manager.md) and the
-[integrated RC acceptance record](research/integrated-menu-launcher-rc-2026-10-23.md).
-Catalogue publication and Windows acceptance are tracked in that record.
+[original integration acceptance record](research/integrated-menu-launcher-rc-2026-10-23.md).
+That record describes the initial RC; current release behavior is documented above.

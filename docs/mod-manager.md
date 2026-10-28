@@ -1,9 +1,14 @@
 # Mod management
 
+Making your first pack? See [Texture Modding — Getting Started](texture-modding-getting-started.md).
+This page explains the manager and its implementation details.
+
 The Mods page has installed local/project packs, a curated project catalogue and
-one shared Load Order window. Later enabled packs win. Downloaded packs are separate
-from locally generated Faithful HD; install HD Widescreen Menus after its optional
-Faithful baseline. Mod installation never changes the enabled list automatically.
+one shared Load Order window. **Highest priority is shown at the top**: use Higher/Lower
+to choose which pack overrides matching textures. In the underlying semicolon-separated
+INI list, later entries win; the launcher handles that conversion. Downloaded packs are
+separate from locally generated Recomp HD (Faithful HD components). Give HD Widescreen
+Menus higher priority than that optional baseline. Installing a pack does not enable it.
 
 The launcher starts `setup/mods.py` with the installed version's retained Python.
 It passes argv directly, polls a bounded atomic INI projection and stays responsive.
@@ -27,8 +32,8 @@ The CLI equivalent is `--prerelease` for status, refresh and install.
 These commands are examples; catalogue publication is tracked separately.
 `--capability wide-v1` is appropriate only for a runtime with the wide-layer loader.
 The launcher derives that capability from the toolkit compiled into the game.
-Current main's toolkit lacks it; the separate menu/PR73 integration must land before
-wide menu downloads can be offered as compatible. Unsupported game data/code/recipe
+Released builds with the wide-layer loader advertise it, allowing compatible wide
+menu downloads to be offered. Unsupported game data/code/recipe
 mods are outside this first texture-only installer. General schema-2 overrides are
 future work. Full storefront/Quiver adapters are also future work; see the
 [storefront assessment](research/mod-storefront-integration-2026-10-21.md).
