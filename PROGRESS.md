@@ -70,6 +70,8 @@
 | Menu/UI restoration | ✅ v0.11.0 stable / owner Steam Deck accepted | D198 full stable approved; five Windows aspects/eight Mode selections and owner Deck playtest accepted. HUD95/fire-escape/three backgrounds deferred1.1 remain known limitations. Mod support is Beta; final Mac validation remains unconfirmed. |
 | Launcher mod catalogue | ✅ v0.11.0 stable/latest — Mod Support Beta | D198 owner Steam Deck acceptance. Release5775f3c/nine assets unchanged; catalogue PR3 merged5b4de77, signed publication40115951254 passed. Client verifies revision3 and default-channel1.0.0 with testing off; archive43bbb22c unchanged.13local tests/22subtests plus full Linux CI pass. Docs PR99 records stable promotion. |
 
+| Texture modding getting started | ✅ written and examples checked / ⏳ review | D229: human-readable first-pack guide links runtime capture, archive extraction/gallery, original IDs, PNG/atlas/alpha rules, manifest/ZIP, current priority UI, testing/sharing and troubleshooting. README/index/reference links refreshed; synthetic CLI/manifest/ZIP smoke pass,89local links and23focused tests pass. Docs only; no game/artwork/workspace changes. |
+
 ## 1. Decisions log
 
 | # | Date | Decision | Rationale |
@@ -369,6 +371,8 @@ D138–D140 were allocated independently on main and the launcher branch. Their 
 | D227 | 2026-10-26 | v0.12.2 release train: PRs #129, #131, #135 (stacked on #131) and #134 on `release/v0.12.2`, merged in that order; toolkit pin `be83eb9` (fork branch `defjam/perf-109`, linear on `7a0f2f6`, so no cherry-picks). D214 and D215 are taken by docs PR #125, so this train starts at D216. | #129 is the only PR with toolkit commits and its pin descends from v0.12.1's; the others change the game (#131), the setup (#134) or only records (#135). |
 | D228 | 2026-10-27 | v0.12.2 is published before the owner's play-test and without the local Windows setup install and Clean Update. | Owner: "dont wait for my playtest, just do the release"; he play-tests the published build and reports issues for a follow-up. The setup gate could not run from the agent's session (setup was refused creating its temporary folder; the published v0.12.1 setup failed the same way), the release's only setup change (#134) is covered by CI, and CI built all three setups. |
 
+| D229 | 2026-10-28 | Vlad requests a human-readable Texture Modding — Getting Started guide covering originals/atlases, IDs, pack format/archive/manifests, mod manager/load order/locations and supporting docs. | Put the public first-pack walkthrough in docs/texture-modding-getting-started.md, with runtime capture as the small initial route and optional standalone extraction/corpus commands. Keep original IDs separate from edited-file hashes, ordinary packs separate from widescreen registration and shared ZIPs separate from catalogue metadata. Verify current highest-first GUI versus last-wins stored INI order. Correct stale linked docs rather than repeat outdated RC/proposed wording; scope is Markdown only. |
+
 ## 2. Environment inventory (2026-09-17)
 
 - Current Windows RC test host (2026-10-23): Windows11Pro10.0.26200, RTX4070TiSUPER/driver32.0.16.1088; VS2019/MSVC14.29, CMake3.20/Ninja1.10.2. D3D11 `win-x64-release`; isolated app/data and copied harness saves in an isolated local work root. No original user saves/settings changed. Normal Windows process/compiler access required outside the restricted execution sandbox; no OS security settings changed.
@@ -462,7 +466,6 @@ defjam-recomp/
 
 > Recent entries only; older entries remain unchanged in the local `docs/worklog/` archive.
 
-- 2026-10-26 08:45 — D213: Windows gates on the v0.12.1 candidate (`54b229b`, toolkit `7a0f2f6`, fresh re-lift: analyze 162 s, recomp 71 s, build 112 s; 18,440/18,446 functions). Full regression **14/14** in 36 min (`logs/regress-20261026-072421.txt`; fight/FFA/Terrordome median 120 presents per 2 s, replay hash unchanged, combat 27/27, versus 26/26, soak 3/3). Opt-in: skipintro, fight-terrordome, two-matches 35/35, repeat pass; ffa-result 27/28 then 28/28 on rerun (player put out with 12.7 health; the assertion expects zero), visual 2/4 on current saves (Learn Moves labels only) then 4/4 on fixture vy2-hour-v1. Setup from CI run 40333420402 (sha256 `54786f88…`): install 6 min 31 s, Clean Update from v0.12.0 6 min 28 s with the data folder byte-identical (120 files); both boot to the front end in 75 s with no faults.
 - 2026-10-26 10:40 — D213: owner reports the macOS and Steam Deck full regressions on the v0.12.1 candidate passed. Windows play-test launcher `Play Def Jam v0.12.1 RC.bat` (release worktree exe, recorder and present pacing on); the owner play-test is the last open gate.
 - 2026-10-26 10:54 — D213: owner play-test of the v0.12.1 candidate on Windows passed; all gates complete. The owner's Xbox One pad was not seen by SDL that day in this build or in the 10-25 build that had found it (XInput saw it; DualSense found), so it is a local state, not the release. #97 moves to milestone v0.13.0.
 - 2026-10-26 11:13 — D213 publication completed: PR #123 merged `9c5c2d2`, annotated tag v0.12.1 at the merge, Source release run 40374051676 success; nine asset SHA-256 digests, three checksum files and three provenance records verified (version 0.12.1, toolkit `7a0f2f6`, source `9c5c2d2`). Published stable/latest. Issues #95/#108/#111/#112/#113/#118/#119 closed with release comments; fork `defjam/upstream-v0.16` fast-forwarded to `7a0f2f6`; milestone v0.12.1 closed; v0.13.0 opened (#97, #109).
@@ -470,10 +473,26 @@ defjam-recomp/
 - 2026-10-26 23:12 — D227: macOS gate on the v0.12.2 candidate (`0141bfa`, toolkit `be83eb9`, fresh re-lift on the M1 Pro: analyze 118 s, recomp 64 s, build 40 s; no other game process or session active). Full regression **18/18** in 38 min (`logs/regress-20261026-225818.txt`; units 636 passed/33 skipped, goldens m2/m3/m4a, fight/ffa/Terrordome median 120-121 with minimum 120, combat 27/27, versus 26/26, replay hash unchanged, intro, crib, gym, soak 3/3). `repeat` 2/2 (`logs/regress-20261026-230517.txt`, `-231204.txt`, 80 records identical, golden hash). `visual` blocked: no approved baselines on this Mac. Story Power Plant pacing was not measured on the Mac (#129's numbers are Windows).
 - 2026-10-27 10:40 — D228: Windows gates on the v0.12.2 candidate (`8152382`, toolkit `be83eb9`, fresh re-lift: analyze 159 s, recomp 71 s, build 109 s; 18,440/18,446 functions). Full regression **14/14** in 37 min (`logs/regress-20261027-055128.txt`; fight/FFA/Terrordome median 120 presents per 2 s, minimum 113/105/102, combat 27/27, versus 26/26, replay hash unchanged, soak 3/3), `repeat` 2/2 (`logs/regress-20261027-055832.txt`, `-060517.txt`), `visual` 4/4 on `vy2-hour-v1` (`logs/regress-20261027-060657.txt`); save area identical to its pre-run backup. Owner: Steam Deck/Linux regression passed. CI 32/32 on `8152382`. Fork branch `defjam/release-0.12.2` created at `be83eb9`. Setup install/Clean Update not run: both the candidate (CI run 40459960068, sha256 `0bd5b000…`) and the published v0.12.1 setup stop with "create_directories: Access is denied" on `%LOCALAPPDATA%\DefJamSetup\{GUID}` from the agent session (cmd can create it; Defender CFA off, no ASR rules). Owner chose to publish before his play-test (D228).
 - 2026-10-27 10:55 — D228 publication completed: PR #136 merged `4fc0f24`, annotated tag v0.12.2 at the merge, Source release run 40551893568 success; nine asset SHA-256 digests, three checksum files and three provenance records verified (version 0.12.2, toolkit `be83eb9`, source `4fc0f24`). Published stable/latest. Milestone v0.12.2 closed; fork `defjam/upstream-v0.16` fast-forwarded `7a0f2f6` -> `be83eb9`. CI on the release head needed one re-run (no macOS arm64 runner picked up the setup job). Owner play-test and a local Windows setup install follow (D228).
+- 2026-10-28 09:32 — D229: wrote Texture Modding — Getting Started, linked from README/docs index and supporting guides; verified current source priority UI (highest first/Higher-Lower) vs stored INI last-wins, capture original IDs, strict schema1 pack/ZIP and authoring CLI. Corrected stale catalogue/RC/Textures-tab/cache reference wording. Synthetic inventory1image/corpus4x + serve-help PASS; exact guide manifest +3file ZIP validates/unpacks in current helper (logs/guide-smoke/receipt.json);89local link targets/anchors and23progress/CI-digest tests pass. Markdown-only; no live gallery/art/corpus/game/runtime/save/settings changes.
 
 ## 7. Hand-off
 
-### v0.12.2 published, 2026-10-27
+### Texture modding guide ready for review — 2026-10-28
+
+- Docs-only branch codex/texture-modding-getting-started, based on main b94fde6.
+  New docs/texture-modding-getting-started.md is the public beginner entry point;
+  README/docs index/texture reference/manager/launcher pages link it. Current UI
+  highest-first/Higher-Lower and stored INI last-wins are explained consistently.
+- Synthetic CLI inventory/corpus build and serve-help pass; manifest from guide
+  and three-file ZIP round-trip pass actual setup/mods.py validation. Receipt
+  logs/guide-smoke/receipt.json (private, synthetic only). No corpus/art generation,
+  real-game test/build, installed pack/save/settings or live8768writer change.
+- Local links89/89, focused progress/CI-digest tests23/23, whitespace clean.
+  Review prose/examples; publication is a main-only docs PR, no release-train or
+  runtime changes. Read linked technical references for advanced wide registration;
+  the guide does not claim new-fighter/gameplay import support.
+
+### Retained v0.12.2 release checkpoint
 
 - v0.12.2 is stable/latest: release PR #136 merged `4fc0f24`, annotated tag `v0.12.2` at the merge, Source release
   run 40551893568; nine assets verified (GitHub digests, `.sha256`, provenance: version 0.12.2, toolkit `be83eb9`,
