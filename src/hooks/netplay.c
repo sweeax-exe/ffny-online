@@ -2721,10 +2721,67 @@ void netplay_crowd_update(void)
     for (i = 0; i < 6; i++) { g_crowd_gen[i] = MEM32(GLOBAL_GEN + 4u * i); MEM32(GLOBAL_GEN + 4u * i) = real[i]; }
 }
 
+/* The spectators' draw lists. Each member's animation object (member + 0xE0) is "shown" by
+ * sub_00084110, which appends it, without looking, to two arrays: the draw list of the crowd
+ * renderer at [A+4] (entries +0x130, count +0x220; drawn by sub_00083BD0) and the list at
+ * [A+0x10] + 0x510 (entries +0x440, count +0x530; sub_000838E0). "Hide" (sub_00084140) takes it out
+ * again. The game pairs them: the match-end cleanup hides every member (sub_00086F40 ->
+ * sub_0007E710) before a light restart shows them again (sub_000891A0 -> sub_00080880 ->
+ * sub_0007D240). The restart below runs on a crowd that is shown, so without this every spectator
+ * was listed, and drawn, once more per match (2-3 identical draws per frame online: faded
+ * spectators near the camera looked solid, alpha 0.2 drawn twice is 0.36, and the GPU did the
+ * work twice; F9 reports 81db9e, a91ed1, 04723a, 83a66d, 2026-10-28). The lists are render
+ * bookkeeping only (read by the renderers at draw time, not by the crowd's update), so taking the
+ * members out before the restart puts them back exactly once and leaves the simulation alone. */
+#define CROWD_DRAW_CAP  60u     /* entries of either array (0x130..0x220, 0x440..0x530) */
+static int crowd_list_ok(uint32_t a) { return a >= 0x80000000u && a < 0x84000000u; }
+
+/* Takes every listed spectator out of (drop != 0), or counts them and their repeats in, both lists. */
+static void crowd_draw_lists(uint32_t mgr, uint32_t n, int drop, unsigned *entries, unsigned *repeats)
+{
+    uint32_t owners[2][16], i, j, k;
+    unsigned nown[2] = { 0, 0 };
+    static const uint32_t base[2] = { 0x130u, 0x440u }, cnt[2] = { 0x220u, 0x530u };
+    if (entries) *entries = 0;
+    if (repeats) *repeats = 0;
+    for (i = 0; i < n; i++) {           /* the lists the members are on (one renderer per model kind) */
+        uint32_t m = MEM32(mgr + 0xA90u + 4u * i), a, o[2];
+        int t;
+        if (!crowd_list_ok(m)) continue;
+        a = m + 0xE0u;
+        o[0] = MEM32(a + 4u);
+        o[1] = MEM32(a + 0x10u) + 0x510u;
+        for (t = 0; t < 2; t++) {
+            if (!crowd_list_ok(o[t]) || MEM32(o[t] + cnt[t]) > CROWD_DRAW_CAP) continue;
+            for (k = 0; k < nown[t] && owners[t][k] != o[t]; k++) {}
+            if (k == nown[t] && nown[t] < 16) owners[t][nown[t]++] = o[t];
+        }
+    }
+    for (j = 0; j < 2; j++)
+        for (k = 0; k < nown[j]; k++) {
+            uint32_t o = owners[j][k], c = MEM32(o + cnt[j]), out = 0, e, u;
+            for (e = 0; e < c; e++) {
+                uint32_t v = MEM32(o + base[j] + 4u * e);
+                int member = 0, seen = 0;
+                for (i = 0; i < n && !member; i++) member = MEM32(mgr + 0xA90u + 4u * i) + 0xE0u == v;
+                for (u = 0; u < e && !seen; u++) seen = MEM32(o + base[j] + 4u * u) == v;
+                if (entries && member) (*entries)++;
+                if (repeats && member && seen) (*repeats)++;
+                if (drop && member) continue;               /* the order of the rest is kept */
+                MEM32(o + base[j] + 4u * out) = v;
+                out++;
+            }
+            if (drop) MEM32(o + cnt[j]) = out;
+        }
+}
+
 static void crowd_reset(uint32_t arena)
 {
     uint32_t mgr = arena + CROWD_MANAGER, xml, n, i, args[2];
+    unsigned listed = 0, repeats = 0, listed_after = 0, repeats_after = 0;
     int with_text;
+    static int crowd_dedupe = -1;   /* RECOMP_CROWD_LISTS=keep (tests only): the old repeated listing */
+    if (crowd_dedupe < 0) crowd_dedupe = !(getenv("RECOMP_CROWD_LISTS") && !strcmp(getenv("RECOMP_CROWD_LISTS"), "keep"));
     uint32_t eax = g_eax, ecx = g_ecx, edx = g_edx, ebx = g_ebx, esi = g_esi, edi = g_edi, ebp = g_ebp, esp = g_esp;
     double fp[8];
     int fp_top = g_fp_top;
@@ -2758,7 +2815,10 @@ static void crowd_reset(uint32_t arena)
         for (i = 0; i < 6; i++) { g_crowd_gen[i] = MEM32(GLOBAL_GEN + 4u * i); MEM32(GLOBAL_GEN + 4u * i) = real[i]; }
         g_crowd_gen_on = 1;
     }
-    /* 2. the game's own restart: states, clip times, variants, offers, intensity */
+    /* 2. the game's own restart: states, clip times, variants, offers, intensity. It shows every
+     * member again, so they leave the draw lists first (the game hides them at a match's end). */
+    crowd_draw_lists(mgr, n, 0, &listed, &repeats);
+    if (crowd_dedupe) crowd_draw_lists(mgr, n, 1, NULL, NULL);
     if (with_text) {
         guest_call(sub_00080880, mgr, 0, NULL);
     } else {
@@ -2807,6 +2867,9 @@ static void crowd_reset(uint32_t arena)
     }
     /* 4. the records the fighters read, before the step's first update */
     guest_call(sub_0007F030, mgr, 0, NULL);
+    crowd_draw_lists(mgr, n, 0, &listed_after, &repeats_after);
+    fprintf(stderr, "[NETPLAY] crowd draw lists: %u spectator entries (%u repeated) before the restart, %u (%u repeated) "
+            "after%s\n", listed, repeats, listed_after, repeats_after, crowd_dedupe ? "" : " (RECOMP_CROWD_LISTS=keep)");
     g_eax = eax; g_ecx = ecx; g_edx = edx; g_ebx = ebx; g_esi = esi; g_edi = edi; g_ebp = ebp; g_esp = esp;
     memcpy(g_fp_stack, fp, sizeof(fp));
     g_fp_top = fp_top;
