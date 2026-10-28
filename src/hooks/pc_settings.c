@@ -49,6 +49,7 @@ static const char *const k_voice_pad[] = { "off", "back", "left_stick", "right_s
 static const char *const k_ws_hud[] = { "auto", "edges", "centered", NULL };
 static const char *const k_ws_cutscenes[] = { "authored", "fill", NULL };
 static const char *const k_ws_fill[] = { "blur", "black", NULL };
+static const char *const k_crowd_near[] = { "fade", "hide", NULL };
 
 /* A four-fighter match holds about 2 GiB of replacements. At 512 MiB the cache evicted and
  * re-decoded dozens of textures every two seconds in a fight on the Steam Deck. */
@@ -133,6 +134,9 @@ static RecompSetting g_display_settings[] = {
       "The darkened screen edges that venues and scenes draw. Off removes them." },
     { "display", "vignette_strength", RECOMP_SETTING_INT, 100, 0, 100, NULL, "RECOMP_VIGNETTE_STRENGTH", 0,
       "How dark the vignette is, in percent of the game's own (100)." },
+    { "display", "crowd_near", RECOMP_SETTING_ENUM, 0, 0, 0, k_crowd_near, "RECOMP_CROWD_NEAR", 0,
+      "Spectators close to the camera: fade (the game's own, they stay faintly see-through) or hide (not drawn "
+      "until the camera moves away). Only the picture changes; online matches are unaffected." },
 };
 #define DISPLAY_SETTING_COUNT (sizeof(g_display_settings) / sizeof(g_display_settings[0]))
 

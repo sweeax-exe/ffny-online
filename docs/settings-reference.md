@@ -78,6 +78,7 @@ line turns it on for one run. Every key here is read at start-up.
 | `brightness` | `100` | Picture brightness, 50-200, on top of the game's curve: a power curve that moves the mid-tones and keeps black and white where they are. 100 is the console's picture; higher is brighter. Applies at once. Env `RECOMP_BRIGHTNESS`. |
 | `vignette` | `true` | The darkened screen edges that venues and some scenes draw (part of the game's post effects). `false` removes them. Applies at once. Env `RECOMP_VIGNETTE` (`1` on, `0` off). |
 | `vignette_strength` | `100` | How dark the vignette is, 0-100 percent of the game's own; 0 is the same as off. Applies at once. Env `RECOMP_VIGNETTE_STRENGTH`. [How both work](research/picture-options.md). |
+| `crowd_near` | `fade` | Spectators close to the camera. `fade` is the game's own: they fade out but stay faintly see-through (alpha 0.2) in front of the fight; `hide` drops them until the camera moves away. Only the picture changes (online checksums are unaffected). Applies at once. Launcher: Basics and Advanced, Display ("Crowd near the camera"). Env `RECOMP_CROWD_NEAR` (`fade`, `hide`). |
 
 ## [textures]
 

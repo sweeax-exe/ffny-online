@@ -32,6 +32,7 @@
 #include "hooks/save_compat.h"
 #include "hooks/test_observations.h"
 #include "hooks/pc_settings.h"
+#include "recomp_settings.h"
 #include "hooks/netplay.h"
 #include "hooks/automatch.h"
 #include "hooks/options_audio.h"
@@ -166,6 +167,32 @@ void sub_0005AF80(void)
         return;
     }
     sub_0005AF80_gen();
+}
+/* The crowd member's near-camera fade (thiscall, ecx = the member's animation object). Close to
+ * the camera the game fades a spectator out but keeps it at alpha 0.2 at least (writes 0x3E4CCCCD,
+ * 0.2f, to +0x48), so it stays faintly see-through in front of the fight. [display] crowd_near =
+ * hide (RECOMP_CROWD_NEAR=hide) writes 0 there instead, and the alpha test drops the member. The
+ * alpha is read by the renderers only: not by the crowd's update, the records or anything the
+ * online checksums cover; the return value (+0x42, on screen) is the game's own. */
+extern void sub_000849C0_gen(void);
+void sub_000849C0(void)
+{
+    static int hide = -1;
+    static unsigned asked;
+    uint32_t member = g_ecx;
+    if (hide < 0 || (++asked & 1023u) == 0) {     /* the setting applies as it changes */
+        int was = hide;
+        hide = recomp_settings_get("display", "crowd_near", 0) == 1;
+        if (hide != was)
+            fprintf(stderr, "[CROWD] near-camera spectators: %s\n", hide ? "hidden" : "faded (original)");
+    }
+    sub_000849C0_gen();
+    if (hide && MEM32(member + 0x48u) == 0x3E4CCCCDu) {
+        static unsigned hidden;
+        MEM32(member + 0x48u) = 0;
+        if (++hidden == 1 || hidden == 1000)
+            fprintf(stderr, "[CROWD] near-camera spectator hidden (%u so far)\n", hidden);
+    }
 }
 void sub_001BC690_enter(void) { defjam_test_rng(g_esp); netplay_on_seed(g_esp, 2, 0x1BC690u); }
 void sub_001AD220_enter(void) { defjam_test_ai_seed(g_esp); netplay_on_seed(g_esp, 1, 0x1AD220u); }

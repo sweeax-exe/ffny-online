@@ -204,6 +204,7 @@ static const char *friendly(const char *section, const char *key)
         {"display", "brightness", "Brightness"},
         {"display", "vignette", "Vignette"},
         {"display", "vignette_strength", "Vignette strength (%)"},
+        {"display", "crowd_near", "Crowd near the camera"},
         {"display", "widescreen_hud", "Fight HUD position"},
         {"display", "widescreen_cutscenes", "Story cutscenes"},
         {"display", "widescreen_side_fill", "Beside 4:3 pictures"},
@@ -767,8 +768,10 @@ static bool setting_widget(RecompSetting *s, const char *label = nullptr, bool s
         if (!stacked)
             ImGui::SetNextItemWidth(ImGui::GetFontSize() * 14);
     {
-        // The stored names (push_to_talk) read with spaces.
-        auto shown = [](const char *choice) {
+        // The stored names (push_to_talk) read with spaces; a few read as their own words.
+        auto shown = [s](const char *choice) {
+            if (!strcmp(s->key, "crowd_near"))
+                return std::string(!strcmp(choice, "fade") ? "Fade (original)" : "Hide");
             std::string text = choice;
             std::replace(text.begin(), text.end(), '_', ' ');
             return text;
@@ -997,6 +1000,7 @@ static void page_display()
         settings_group("display", { "vignette_strength" });
         ImGui::Unindent();
     }
+    settings_group("display", { "crowd_near" });
     ImGui::TextWrapped("Full screen, window size, filter, vsync, anti-aliasing, sharpening, anisotropic filtering, "
                        "the 4:3 and stretch shapes, brightness and the vignette apply as you change them. The widescreen shapes, render scale and the brightness curve apply the "
                        "next time the game starts. F11 or Alt+Enter switches full screen while playing.");
@@ -2481,7 +2485,7 @@ static void page_basics()
     ImGui::SeparatorText("Picture");
     window_size_widget();
     quality_widget();
-    settings_group("display", { "widescreen" });
+    settings_group("display", { "widescreen", "crowd_near" });
     ImGui::SeparatorText("Voice chat");
     settings_group("online", { "voice", "voice_key", "voice_pad" });
     ImGui::SeparatorText("Online");
