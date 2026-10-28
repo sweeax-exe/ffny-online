@@ -47,22 +47,39 @@ past a desync), `--require-hits`, `--keep-roots`, `--env NAME=VALUE` (checked), 
 
 ### Examples
 
+A real run on a build without the match-type fix (bcdab58): the third match started before the
+screen's own reset, its fighters had no controllers and the copies stood on the match-type screen.
+
 ```
 $ python tools/defjam-mcp/dj.py scenario online --matches 3
 {
   "scenario": "online",
-  "ok": true,
+  "ok": false,
   "params": {"matches":3,"mode":"1v1","players":2,"fighters":[55,22],"rollback":"off","fast_ko":600,"bot":null},
-  "elapsed_s": ...,
+  "elapsed_s": 2134.2,
+  "lock_wait_s": 1680.3,
+  "dir": "logs\\dj\\20261027-225646-online",
+  "stop": "stalled: no front-end, netplay or telemetry line for 300 s",
   "matches": [
-    {"n":1,"start":"lockstep d2","venue":12,"load_s":[25.3,25.0],"fe":["menu","menu"],"hits":[3,3],"winners":[0],"ko":true,"checks":10,"summary":["cid 0,1","cid 0,1"]},
-    {"n":2,"start":"lockstep d2","venue":18,"load_s":[0.2,0.8],"fe":["ok","ok"],"hits":[3,4],"winners":[1],"ko":true,"checks":20,"summary":["cid 0,1","cid 0,1"]},
+    {"n":1,"start":"lockstep d2","venue":24,"load_s":[26.0,26.0],"fe":["menu","menu"],"hits":[2,2],"winners":[0],"ko":true,"checks":10,"summary":["cid 0,1","cid 0,1"]},
+    {"n":2,"start":"lockstep d2","venue":11,"load_s":[0.2,0.3],"fe":["ok","ok"],"hits":[4,2],"winners":[1],"ko":true,"checks":20,"summary":["cid 0,1","cid 0,1"]},
+    {"n":3,"start":"lockstep d2","venue":14,"load_s":[0.3,0.3],"fe":["BAD: the screen's reset came after StartGame","BAD: ..."],"hits":[],"winners":[0],"ko":true,"checks":10,"summary":["none NOT accepted","none NOT accepted"],"note":"no hits landed"}
+  ],
+  "problems": [
+    "stopped: stalled: no front-end, netplay or telemetry line for 300 s",
+    "copy 0 at stop: screen battle/cmtype.swf, Match found: 2 players, you are player 1. It starts by itself.  Ping 0 ms, input",
+    "m3 copy 0: front-end order BAD: the screen's reset came after StartGame",
+    "m3 copy 0: summary not accepted (no UpdateMatchRewardsPoints)",
     ...
   ],
-  "problems": [],
-  "logs": [...], "shots": [...]
+  "logs": ["logs\\dj\\20261027-225646-online\\copy0.log.err", "logs\\dj\\20261027-225646-online\\copy1.log.err"],
+  "shots": ["...fight-m1-copy0.png", "...stop-copy0.png", "...stop-copy1.png"]
 }
 ```
+
+The same check over the eight-match logs of a fixed build (`dj.py analyze <copy0> <copy1>`, 30 MB of
+logs) is 15 lines: `"ok": true` and rows like `{"n":2,"start":"lockstep d2","venue":18,"load_s":[0.2,0.8],
+"fe":["ok","ok"],"hits":[3,4],"winners":[1],"ko":true,"checks":20,"summary":["cid 0,1","cid 0,1"]}`.
 
 Per match: `start` (lockstep or rollback, input delay), `load_s` per copy, `fe` the front-end order
 per copy (`menu`: from the main menu; `ok`: on the match-type screen after its own
