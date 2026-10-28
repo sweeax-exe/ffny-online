@@ -722,12 +722,13 @@ static void check_hashes(void)
         }
 }
 
-/* The game files a fight reads (fighters, moves, the CPU fighters' AI), as this PC has them: the
- * override folder's copy where there is one (a mod). Two PCs whose files differ play the same
- * inputs differently, and the setup checks only default.xbe. Made once, on the network thread. */
+/* The game files a fight reads (fighters, moves, the CPU fighters' AI, and the database Battle
+ * mode takes each fighter's record from), as this PC has them: the override folder's copy where
+ * there is one (a mod). Two PCs whose files differ play the same inputs differently, and the setup
+ * checks only default.xbe. Made once, on the network thread. */
 static const char *const k_fight_files[] = {
     "fighter.xml", "gamedata.xml", "gconfig.xml", "venue.xml", "assets\\gamecore.xml", "assets\\combs.xml",
-    "assets\\ai\\ai.viv", "motion\\main_all.dat",
+    "assets\\ai\\ai.viv", "motion\\main_all.dat", "assets\\djv2.sod",
 };
 static uint32_t g_data_print;
 

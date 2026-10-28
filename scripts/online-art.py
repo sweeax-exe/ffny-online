@@ -11,7 +11,8 @@ the repository contains game bytes: only archive entry names and image names.
     python scripts/online-art.py [--data <DEFJAM_DATA>] [--check]
 
 Layout of the output: fighters/<id>.png (the choose-character portrait without its padding; `id` is the
-fighter.xml ID), venues/<feID>.png (venue.xml feID: its photo with
+Battle-mode ID, the front-end ID of the fighter's record in assets/djv2.sod: the fighter.xml ID except
+for Teck 85, Santos 93, O.E 92 and Eric Sermon 91), venues/<feID>.png (venue.xml feID: its photo with
 its sign, 256x256) and venues/<feID>_name.png (the gold name banner), ui/<name>.png, fonts/<file>.ttf,
 and manifest.json. Needs Pillow (the installed Python has it for the HD textures).
 """
@@ -110,7 +111,7 @@ def build(data, out):
 
     for name, blob_entry in entries.items():
         m = re.fullmatch(r"screens/portrait/p_CT/p_CT_(\d+)\.big", name)
-        if m:      # p_CT_<n> is fighter.xml ID n-1 (the battle roster's FE_ID + 1)
+        if m:      # p_CT_<n> is Battle-mode ID n-1 (the battle roster's FE_ID + 1)
             fid = int(m.group(1)) - 1
             imgs = images(blob_entry)
             if imgs:   # the 128x256 texture holds the portrait and padding to its right and below
