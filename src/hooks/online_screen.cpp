@@ -718,7 +718,7 @@ void door_panel(ImDrawList *dl, const Frame &f)
 
 // ---- input --------------------------------------------------------------------------------------
 
-struct Pad { bool up, down, left, right, a, b, x, y, lb, rb; };
+struct Pad { bool up, down, left, right, a, b, x, y, lb, rb, lb_once, lb_down; };
 
 // Mouse: hovering a box picks it, a click chooses it.
 bool mouse_in(const Frame &f, float x, float y, float w, float h)
@@ -757,6 +757,8 @@ struct State {
     char code[7] = "AAAAAA";
     int code_pos = 0;
     uint32_t watch_hidden = 0;      // King of the Hill: the fight whose watching screen B closed
+    unsigned long long give_up_at = 0, lb_since = 0;    // King of the Hill: LB gave up the spot; LB held since
+    bool lb_long_done = false;      // the long LB press has acted
     // the server (netplay_servers.h)
     int servers_sel = 0;            // SERVERS: 0 Automatic, 1 Europe, 2 North America, 3 Both servers
     bool connect_pending = false;   // Automatic waits for the relays' first answers before connecting
@@ -831,7 +833,7 @@ int lobby_queue(int *waited, int *searching, char *why, int size)
     if (size > 0) why[0] = 0;
     return G.queue;
 }
-int lobby_caps() { return gallery_on() ? NETPLAY_CAP_KOTH : netplay_lobby_caps(); }
+int lobby_caps() { return gallery_on() ? NETPLAY_CAP_KOTH | NETPLAY_CAP_YIELD : netplay_lobby_caps(); }
 enum AccountState acc_state() { return gallery_on() ? G.account : account_state(); }
 bool stats_busy() { return gallery_on() ? false : account_stats_busy() != 0; }
 bool stats_text(char *out, int size)
@@ -929,6 +931,8 @@ Pad read_pad()
     p.y = any({ ImGuiKey_GamepadFaceUp, key(ImGuiKey_I), key(ImGuiKey_R) }, false);
     p.lb = any({ ImGuiKey_GamepadL1, ImGuiKey_PageUp, ImGuiKey_Q }, true);
     p.rb = any({ ImGuiKey_GamepadR1, ImGuiKey_PageDown, ImGuiKey_E }, true);
+    p.lb_once = any({ ImGuiKey_GamepadL1, ImGuiKey_PageUp, ImGuiKey_Q }, false);
+    p.lb_down = ImGui::IsKeyDown(ImGuiKey_GamepadL1) || ImGui::IsKeyDown(ImGuiKey_PageUp) || ImGui::IsKeyDown(ImGuiKey_Q);
     return p;
 }
 
@@ -2177,6 +2181,54 @@ std::string last_result(const NetRoom &r)
     return "";
 }
 
+// "Give up my spot" (LB), on every King of the Hill screen this PC is not fighting on: the first
+// press sends it to the back of the line (a king gives up the crown); a second press within 5 s,
+// or holding LB, leaves the hill. Only on a relay that takes YIELD (build 36 on). Draws the hint
+// at (x, y) and returns its width; *left says LB left the hill (the caller takes no more input).
+bool yield_offered()
+{
+    int caps = lobby_caps();
+    return caps > 0 && (caps & NETPLAY_CAP_YIELD);
+}
+
+void leave_hill(const char *why)
+{
+    netplay_lobby_leave();
+    S.page = HUB;
+    S.give_up_at = 0;
+    say(why);
+}
+
+float give_up(ImDrawList *dl, const Frame &f, const Pad &pad, float x, float y, bool *left)
+{
+    *left = false;
+    if (!yield_offered()) return 0;
+    unsigned long long now = GetTickCount64();
+    bool armed = S.give_up_at && now - S.give_up_at < 5000;
+    if (!pad.lb_down) { S.lb_since = 0; S.lb_long_done = false; }
+    else if (!S.lb_since) S.lb_since = now;
+    bool held = pad.lb_down && S.lb_since && now - S.lb_since >= 1200 && !S.lb_long_done;
+    float w = hint(dl, f, x, y, "lb", armed ? "AGAIN: LEAVE THE HILL" : "GIVE UP MY SPOT");
+    if ((pad.lb_once && armed) || held) {
+        S.lb_long_done = true;
+        *left = true;
+        leave_hill("You left the hill.");
+    } else if (pad.lb_once) {
+        netplay_lobby_yield();
+        S.give_up_at = now;
+        say("You gave up your spot: back of the line. LB again (or hold LB) leaves the hill.", 5000);
+    }
+    return w;
+}
+
+// Opens the fighter list on this PC's fighter (King of the Hill: the pick counts from the next fight).
+void choose_fighter(int fighter)
+{
+    S.page = FIGHTERS;
+    const auto &list = roster();
+    for (size_t i = 0; i < list.size(); i++) if (list[i].id == fighter) S.fighter_sel = (int)i;
+}
+
 // The watching screen: the fight this PC does not play in. Phase 1 shows who fights, the king's
 // crown and streak, and the line; the fight itself runs on the fighters' PCs only.
 void draw_watch(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r, const HillView &v)
@@ -2231,9 +2283,14 @@ void draw_watch(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r
     text(dl, f, g_title, 11, 320, 362, GREY, "The fight runs on the fighters' PCs. The result comes here when it is over.",
          CENTER, 0.8f);
     float hx = 54;
+    bool left = false;
+    hx += hint(dl, f, hx, 414, "x", "CHOOSE FIGHTER");
+    hx += give_up(dl, f, pad, hx, 414, &left);
     hx += hint(dl, f, hx, 414, "b", "BACK TO THE HILL");
     (void)hx;
-    if (pad.b) S.watch_hidden = h.seed ? h.seed : 1;
+    if (left) return;
+    if (pad.x) choose_fighter(slot_fighter(r, r.you));
+    else if (pad.b) S.watch_hidden = h.seed ? h.seed : 1;
 }
 
 // "YOU'RE UP": this PC is called; one press readies it with its fighter.
@@ -2267,14 +2324,16 @@ void draw_up(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r, c
     text(dl, f, g_hand, 16, 242, 304, ORANGE, say_line, LEFT, 0.8f, 360);
     float hx = 242;
     if (!ready) hx += hint(dl, f, hx, 352, "a", "READY");
-    if (!ready) hx += hint(dl, f, hx, 352, "x", "CHOOSE FIGHTER");
+    hx += hint(dl, f, hx, 352, "x", "CHOOSE FIGHTER");
+    hx = 242;
+    bool left = false;
+    hx += give_up(dl, f, pad, hx, 396, &left);
+    hx += hint(dl, f, hx, 396, "b", "LEAVE ROOM");
     (void)hx;
+    if (left) return;
     if (pad.a && !ready) netplay_lobby_ready(1, fighter);
-    if (pad.x && !ready) {
-        S.page = FIGHTERS;
-        const auto &list = roster();
-        for (size_t i = 0; i < list.size(); i++) if (list[i].id == fighter) S.fighter_sel = (int)i;
-    }
+    if (pad.x) choose_fighter(fighter);
+    else if (pad.b) leave_hill("You left the room.");
 }
 
 // The hill screen: the line, the king, who is up, the countdown.
@@ -2394,22 +2453,23 @@ void draw_hill(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
     else if (v.next == r.you)
         text(dl, f, g_hand, 18, 463, 368, ORANGE, "YOU'RE UP NEXT", CENTER, 1.2f);
 
-    float hx = 54, hy = 402;
+    // two rows: what this PC can do in the line, then the room
+    float hx = 54, hy = 398;
+    bool left = false;
     if (v.my_state == NETLINE_AWAY) hx += hint(dl, f, hx, hy, "a", "I'M BACK");
     hx += hint(dl, f, hx, hy, "x", "CHOOSE FIGHTER");
+    if (h.valid && v.my_index >= 0) hx += give_up(dl, f, pad, hx, hy, &left);
+    hint(dl, f, hx, hy, "b", "LEAVE ROOM");
+    if (left) return;
     bool fight_on = h.valid && h.phase == NETHILL_FIGHTING && !fighting_me;
     bool settings_ok = host && h.valid && h.phase != NETHILL_VOTING && h.phase != NETHILL_FIGHTING;
+    hx = 54, hy = 414;
     if (fight_on) hx += hint(dl, f, hx, hy, "y", "WATCH");
     else if (settings_ok) hx += hint(dl, f, hx, hy, "y", "ROOM SETTINGS");
-    hx += hint(dl, f, hx, hy, "rb", "VOICE");
-    hint(dl, f, hx, hy, "b", "LEAVE ROOM");
+    hint(dl, f, hx, hy, "rb", "VOICE");
 
     if (pad.a && v.my_state == NETLINE_AWAY) netplay_lobby_ready(1, fighter);
-    if (pad.x) {
-        S.page = FIGHTERS;
-        const auto &list = roster();
-        for (size_t i = 0; i < list.size(); i++) if (list[i].id == fighter) S.fighter_sel = (int)i;
-    }
+    if (pad.x) choose_fighter(fighter);
     if (pad.y && fight_on) S.watch_hidden = 0;
     else if (pad.y && settings_ok) {
         S.settings = r.settings;
@@ -3468,7 +3528,8 @@ bool draw(ImVec2 display)
                         if (room.players[i].slot == room.you) ready = room.players[i].ready;
                     netplay_lobby_ready(ready, fighter);
                 }
-                say(std::string(online_fighter_name(fighter)) + " it is.");
+                say(std::string(online_fighter_name(fighter)) +
+                    (room.in_room && NETPLAY_IS_KOTH(room.settings.mode) ? " it is, from your next fight." : " it is."));
                 S.page = HUB;
             }
             S.ranked_pick = false;

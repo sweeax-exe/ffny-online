@@ -79,6 +79,7 @@ void netplay_lobby_settings(const NetRoomSettings *s) { (void)s; }
 void netplay_lobby_ready(int r, int f) { (void)r; (void)f; }
 void netplay_lobby_vote(int c) { (void)c; }
 void netplay_lobby_leave(void) {}
+void netplay_lobby_yield(void) {}
 void netplay_lobby_room(NetRoom *o) { memset(o, 0, sizeof(*o)); }
 void netplay_lobby_ranked(int f) { (void)f; }
 int netplay_lobby_queue(int *w, int *s, char *t, int n) { (void)w; (void)s; if (t && n > 0) t[0] = 0; return NETQUEUE_NONE; }
@@ -157,6 +158,7 @@ void netplay_crowd_update(void) { sub_00081170(); }
 #define T_HILL        0x21      /* the room's line, king and countdowns */
 #define T_RESULT      0x22      /* a fighter's outcome: START seed, the winner's room slot (0xFF a draw) */
 #define T_WATCH       0x23      /* START's body, for a fight this PC only watches */
+#define T_YIELD       0x26      /* give up my spot in the line (relays since build 36, CAPS bit 2) */
 #define CAPS_KOTH     1u
 #define CAPS_ROLLBACK 2u        /* the relay lets matches roll back (its switch; off: lockstep only) */
 #define CAPS_TRIES    5         /* CAPS every RETRY_MS; no answer after these: an older relay */
@@ -2181,6 +2183,11 @@ void netplay_lobby_vote(int choice)
     request(T_VOTE, &b, 1);
 }
 
+void netplay_lobby_yield(void)
+{
+    request(T_YIELD, NULL, 0);
+}
+
 void netplay_lobby_leave(void)
 {
     EnterCriticalSection(&g_cs);
@@ -2432,6 +2439,35 @@ int netplay_match_abandoned(void)
     return 1;
 }
 
+/* Tests (RECOMP_TEST_KOTH_SCRIPT): the actions of `script` due now. Each is "fighter:N@k",
+ * "yield@k" or "leave@k" (while watching the k-th fight this copy is not in), or the same with
+ * "@cK" (when called for the K-th time, before readying). Returns 1 when one acted. */
+static int koth_script_run(const char *script, int called, int n, int *fighter)
+{
+    const char *p = script;
+    int acted = 0;
+    while (p && *p) {
+        const char *at = strchr(p, '@'), *next = strchr(p, ',');
+        if (at && (!next || at < next) && (at[1] == 'c') == (called != 0) && atoi(at + 1 + (called != 0)) == n) {
+            const char *when = called ? "called" : "watching";
+            if (!strncmp(p, "fighter:", 8)) {
+                *fighter = atoi(p + 8);
+                fprintf(stderr, "[NETPLAY] tests: %s (%d); fighter %d from the next fight\n", when, n, *fighter);
+                netplay_lobby_ready(0, *fighter);
+            } else if (!strncmp(p, "yield", 5)) {
+                fprintf(stderr, "[NETPLAY] tests: %s (%d); giving up the spot\n", when, n);
+                netplay_lobby_yield();
+            } else if (!strncmp(p, "leave", 5)) {
+                fprintf(stderr, "[NETPLAY] tests: %s (%d); leaving the hill\n", when, n);
+                netplay_lobby_leave();
+            }
+            acted = 1;
+        }
+        p = next ? next + 1 : NULL;
+    }
+    return acted;
+}
+
 /* Unattended sessions for tests: RECOMP_NETPLAY=host or join, RECOMP_NETPLAY_SERVER, and
  * RECOMP_NETPLAY_CODE_FILE, where the host writes its room code once it has one and the
  * guest waits for it (up to a minute). RECOMP_NETPLAY=quick enters the hub, quick-matches
@@ -2529,6 +2565,12 @@ static DWORD WINAPI autostart_thread(LPVOID unused)
             netplay_lobby_quick(qmode, qmax);
         }
         ULONGLONG koth_readied = 0;
+        /* RECOMP_TEST_KOTH_SCRIPT="fighter:22@1,yield@c2,leave@3" (tests, koth_script_run): change the
+         * fighter (from the next fight), give up the spot or leave the hill while watching a fight or
+         * when called, as the hill screens' X, LB and a second LB do */
+        const char *kscript = getenv("RECOMP_TEST_KOTH_SCRIPT");
+        uint32_t watched_seed = 0;
+        int watched = 0, calls = 0, in_call = 0;
         /* a move to the other relay (Both servers) ends this session and starts the next: go on */
         while (netservers_moving() || (!N.stop && N.state != NETPLAY_FAILED && N.state != NETPLAY_OFF)) {
             NetRoom r;
@@ -2562,6 +2604,21 @@ static DWORD WINAPI autostart_thread(LPVOID unused)
                     if (r.hill.line[me].slot == r.you) state = r.hill.line[me].state;
                 if (state != NETLINE_CALLED || N.match_live) called_at = 0;
                 else if (!called_at) called_at = GetTickCount64();
+                if (kscript && *kscript && r.hill.valid && r.hill.phase == NETHILL_FIGHTING && state >= 0 &&
+                    state != NETLINE_FIGHTING && r.hill.seed && r.hill.seed != watched_seed) {
+                    watched_seed = r.hill.seed;
+                    koth_script_run(kscript, 0, ++watched, &fighter);
+                }
+                {
+                    int now_called = r.hill.valid && r.hill.phase == NETHILL_CALLING &&
+                                     (state == NETLINE_CALLED || state == NETLINE_READY) && !N.match_live;
+                    if (now_called && !in_call && kscript && *kscript && koth_script_run(kscript, 1, ++calls, &fighter)) {
+                        in_call = 1;
+                        Sleep(300);
+                        continue;
+                    }
+                    in_call = now_called;
+                }
                 if (r.hill.valid && r.hill.phase == NETHILL_CALLING && state == NETLINE_CALLED && !N.match_live &&
                     GetTickCount64() - called_at >= (ULONGLONG)ready_delay && GetTickCount64() - koth_readied > 1000) {
                     fprintf(stderr, "[NETPLAY] tests: called on the hill; ready with fighter %d\n", fighter);

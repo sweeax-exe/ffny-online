@@ -381,7 +381,7 @@ func DecodeClient(b []byte) (Message, error) {
 		copy(y.Token[:], body)
 		return y, nil
 	case TypeList, TypeCreate, TypeJoin, TypeQuick, TypeSettings, TypeReady, TypeVote, TypeLeave, TypeOver, TypeWho, TypeRanked,
-		TypeCaps, TypeResult:
+		TypeCaps, TypeResult, TypeYield:
 		return decodeLobbyClient(t, body)
 	case TypeStatus:
 		return decodeStatusClient(body)

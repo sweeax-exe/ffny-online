@@ -332,6 +332,32 @@ func (r *Relay) hillReady(now time.Time, c *client, m Ready) []Packet {
 	return r.changed(now, rm)
 }
 
+// hillYield handles YIELD: the sender gives up its place and goes to the back of the line (a
+// king gives up the crown; a called player is replaced by the next in the line). Not while it
+// votes or fights (ERROR 8). Already last (and not called): nothing changes.
+func (r *Relay) hillYield(now time.Time, c *client, reqLen int) []Packet {
+	rm := c.room
+	h := rm.koth
+	if (h.phase == HillVoting || h.phase == HillFighting) && h.inPair(c) {
+		return r.errorTo(c.addr, ErrNotAllowed, reqLen)
+	}
+	called := h.phase == HillCalling && h.inPair(c)
+	last := len(h.line) > 0 && h.line[len(h.line)-1] == c
+	if last && !called && h.king != c {
+		return r.stateTo(now, c)
+	}
+	if h.king == c {
+		h.king, h.streak = nil, 0
+	}
+	h.toBack(c)
+	c.ready = false
+	if called {
+		h.recall() // hillAdvance calls the next pair, with a fresh ready time
+	}
+	r.cfg.Logf("room %s koth: c=%s gave up its spot (called=%v)", rm.code, c.id, called)
+	return r.changed(now, rm)
+}
+
 // hillVote handles VOTE: the two fighters vote on the venue; during the fight a VOTE re-sends
 // the sender's START or WATCH (a lost one is recovered by voting again, as in other rooms).
 func (r *Relay) hillVote(now time.Time, c *client, choice uint8, reqLen int) []Packet {

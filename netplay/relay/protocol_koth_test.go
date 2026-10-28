@@ -23,7 +23,7 @@ func TestKothCodec(t *testing.T) {
 	if b, err := Encode(h); err != nil || string(b) != string(want) {
 		t.Fatalf("HILL % x, want % x (%v)", b, want, err)
 	}
-	for _, m := range []Message{Caps{Token: tok, Caps: CapKoth}, Result{Token: tok, Seed: 7, Winner: WinnerDraw}} {
+	for _, m := range []Message{Caps{Token: tok, Caps: CapKoth}, Result{Token: tok, Seed: 7, Winner: WinnerDraw}, Yield{Token: tok}} {
 		b, _ := Encode(m)
 		d, err := DecodeClient(b)
 		if err != nil || !reflect.DeepEqual(d, m) {
@@ -42,6 +42,7 @@ func TestKothCodec(t *testing.T) {
 	for _, b := range [][]byte{
 		cat(hdr(TypeCaps), tok[:], []byte{1, 0, 0}),
 		cat(hdr(TypeResult), tok[:], []byte{1, 0, 0, 0}),
+		cat(hdr(TypeYield), tok[:], []byte{0}),
 	} {
 		if _, err := DecodeClient(b); err == nil {
 			t.Fatalf("client accepted % x", b)

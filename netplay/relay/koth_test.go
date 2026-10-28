@@ -22,7 +22,7 @@ func (l *lobbyHarness) kenter(addr netip.AddrPort, name string) {
 	l.t.Helper()
 	l.enter(addr, name)
 	res := l.send(addr, Caps{Token: l.tok[addr], Caps: CapKoth})
-	if len(res) != 1 || res[0].to != addr || !msgEqual(res[0].msg, RelayCapsMsg{Caps: CapKoth}) {
+	if len(res) != 1 || res[0].to != addr || !msgEqual(res[0].msg, RelayCapsMsg{Caps: RelayCaps}) {
 		l.t.Fatalf("CAPS answered %#v", res)
 	}
 }
@@ -505,5 +505,73 @@ func TestKothQuick(t *testing.T) {
 	l.fight(pA, pC)
 	if st3 := roomOf(t, l.quickM(pD, ModeKoth, 4), pD); st3.Room != st.Room || st3.Phase != PhasePlaying {
 		t.Fatalf("quick during the fight %#v", st3)
+	}
+}
+
+func (l *lobbyHarness) yield(addr netip.AddrPort) []got {
+	return l.send(addr, Yield{Token: l.tok[addr]})
+}
+
+// YIELD ("give up my spot"): to the back of the line; a king gives up the crown; a called player
+// is replaced by the next in the line; not while voting or fighting; the fighter changes for the
+// next fight while waiting or watching.
+func TestKothYield(t *testing.T) {
+	l := newLobby(t, Config{IdleTimeout: time.Hour})
+	l.kroom(kothSettings(ModeKothRandom), pA, pB, pC, pD)
+
+	// A and B are called; C (waiting) gives up its spot: behind D.
+	h := hillOf(t, l.yield(pC), pC)
+	wantLine(t, h, 0, 1, 3, 2)
+	if h.Phase != HillCalling {
+		t.Fatalf("calling %#v", h)
+	}
+	// Already last: nothing changes (ROOM and HILL to C alone).
+	res := l.yield(pC)
+	if len(res) != 2 {
+		t.Fatalf("last yields %#v", res)
+	}
+	roomOf(t, res, pC)
+	wantLine(t, hillOf(t, res, pC), 0, 1, 3, 2)
+
+	// B is called and ready, then gives up: D is called with A; B goes to the back, not ready.
+	l.setReady(pB, 11)
+	h = hillOf(t, l.yield(pB), pB)
+	wantLine(t, h, 0, 3, 2, 1)
+	if _, st := line(h); h.Phase != HillCalling || st[0] != LineCalled || st[1] != LineCalled || st[3] != LineWaiting {
+		t.Fatalf("after B gave up %#v", h)
+	}
+
+	// A vs D. While they fight, neither may give up; C (watching) changes its fighter and gives up.
+	seed := l.fight(pA, pD)
+	expectError(t, l.yield(pA), pA, ErrNotAllowed)
+	if st := roomOf(t, l.send(pC, Ready{Token: l.tok[pC], Ready: 0, Fighter: 22}), pC); st.Players[2].Fighter != 22 {
+		t.Fatalf("watcher fighter %#v", st)
+	}
+	wantLine(t, hillOf(t, l.yield(pC), pC), 0, 3, 1, 2)
+	h = l.decide(seed, pA, pD, 0) // A wins: A, then the waiting B and C, then D
+	wantLine(t, h, 0, 1, 2, 3)
+	if h.King != 0 || h.Streak != 1 {
+		t.Fatalf("after the fight %#v", h)
+	}
+
+	// The king, called, gives up the hill: no king, B and C are called; C's new fighter fights.
+	h = hillOf(t, l.yield(pA), pA)
+	wantLine(t, h, 1, 2, 3, 0)
+	if h.King != WinnerDraw || h.Streak != 0 || h.Phase != HillCalling {
+		t.Fatalf("after the king gave up %#v", h)
+	}
+	l.setReady(pB, 11)
+	s := startOf(t, l.send(pC, Ready{Token: l.tok[pC], Ready: 1, Fighter: 22}), pC)
+	if s.Players[1] != (StartPlayer{2, 22}) {
+		t.Fatalf("START %#v", s)
+	}
+
+	// Not in a King of the Hill room, or not in a room: refused.
+	l.enter(pE, "e")
+	expectError(t, l.yield(pE), pE, ErrRoomState)
+	roomOf(t, l.mkRoom(pE, settings4("plain", 0)), pE)
+	expectError(t, l.yield(pE), pE, ErrNotAllowed)
+	if !containsLog(l.logs, "gave up its spot") {
+		t.Errorf("logs %q", l.logs)
 	}
 }

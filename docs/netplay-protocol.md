@@ -189,10 +189,11 @@ by older relays.
 | Type | Name | Direction | Body after the header |
 |---|---|---|---|
 | 0x20 | `CAPS` | client -> server | `token` 8, `caps` u32 (bit 0: King of the Hill) |
-| 0x20 | `CAPS` | server -> client | `caps` u32 (what the relay supports) |
+| 0x20 | `CAPS` | server -> client | `caps` u32 (what the relay supports: bit 0 King of the Hill, bit 1 rollback allowed, bit 2 `YIELD`, since build 36) |
 | 0x21 | `HILL` | server -> client | `room` 6, `phase` u8 (0 waiting, 1 calling, 2 voting, 3 fighting), `king` u8 (slot, 0xFF none), `streak` u16, `ms_left` u16, `seed` u32, `fights` u16, `last_winner` u8, `last_loser` u8, `last_how` u8 (0 none, 1 won, 2 draw, 3 loser left, 4 void), `count` u8, per player in line order: `slot` u8, `state` u8 (0 waiting, 1 called, 2 ready, 3 fighting, 4 away), `wins` u16 |
 | 0x22 | `RESULT` | client -> server | `token` 8, `seed` u32, `winner` u8 (slot, 0xFF draw); from the two fighters, repeated until `HILL.fights` changes |
 | 0x23 | `WATCH` | server -> client | the body of `START`; to every member who is not fighting when the fight starts |
+| 0x26 | `YIELD` | client -> server | `token` 8; "give up my spot": the sender goes to the back of the line (a king gives up the crown, a called player is replaced by the next). `ERROR 8` while the sender votes or fights, or outside a King of the Hill room. Answered with ROOM and HILL. Relays since build 36 (`CAPS` bit 2) |
 
 - `Settings.mode` **0x40** (venue voted by the two fighters) and **0x41** (venue at random) are
   King of the Hill rooms; their `max` is 2..10. Every fight is One on One (`START.mode` 0).
@@ -206,6 +207,8 @@ by older relays.
 - Two agreeing `RESULT`s decide the fight, two disagreeing ones void it (both to the back), a
   single one decides after 10 s. A fighter who leaves during the fight loses it. `OVER` changes
   nothing; `VOTE` during the fight re-sends the sender's `START` or `WATCH`.
+- Any member who is not voting or fighting may change its fighter with `READY` (its ready flag as
+  it is); the change counts from its next fight. Leaving is `LEAVE` at any time.
 
 ## Relay status (choosing a relay)
 

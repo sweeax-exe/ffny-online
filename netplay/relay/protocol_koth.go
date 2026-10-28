@@ -23,8 +23,11 @@ const (
 	// CapRollback in the relay's answer lets clients roll back (their beta setting still decides);
 	// without it every match plays in lockstep. Config.RollbackAllowed switches it.
 	CapRollback uint32 = 1 << 1
+	// CapYield in the relay's answer says it takes YIELD ("give up my spot"); a client shows the
+	// choice only then (relays before build 36 drop the message).
+	CapYield uint32 = 1 << 2
 	// RelayCaps is what this relay always answers to CAPS.
-	RelayCaps = CapKoth
+	RelayCaps = CapKoth | CapYield
 
 	WinnerDraw uint8 = 0xFF // RESULT winner and HILL last_winner: a draw / nobody
 )
@@ -35,6 +38,7 @@ const (
 	TypeHill   MsgType = 0x21 // server -> client
 	TypeResult MsgType = 0x22 // client -> server
 	TypeWatch  MsgType = 0x23 // server -> client
+	TypeYield  MsgType = 0x26 // client -> server: give up my spot (to the back of the line)
 )
 
 // HILL phases.
@@ -95,6 +99,12 @@ type Result struct {
 	Winner uint8
 }
 
+// Yield gives up the sender's place in the King of the Hill line: it goes to the back (a king
+// gives up the crown). Not while the sender votes or fights. Answered with ROOM and HILL.
+type Yield struct {
+	Token Token
+}
+
 // ---- server -> client ----
 
 // RelayCapsMsg answers CAPS with what the relay supports.
@@ -130,12 +140,14 @@ type Watch Start
 
 func (Caps) Type() MsgType         { return TypeCaps }
 func (Result) Type() MsgType       { return TypeResult }
+func (Yield) Type() MsgType        { return TypeYield }
 func (RelayCapsMsg) Type() MsgType { return TypeCaps }
 func (Hill) Type() MsgType         { return TypeHill }
 func (Watch) Type() MsgType        { return TypeWatch }
 
 func (m Caps) token() Token   { return m.Token }
 func (m Result) token() Token { return m.Token }
+func (m Yield) token() Token  { return m.Token }
 
 func (m Caps) appendBody(b []byte) ([]byte, error) {
 	return binary.LittleEndian.AppendUint32(append(b, m.Token[:]...), m.Caps), nil
@@ -145,6 +157,8 @@ func (m Result) appendBody(b []byte) ([]byte, error) {
 	b = binary.LittleEndian.AppendUint32(append(b, m.Token[:]...), m.Seed)
 	return append(b, m.Winner), nil
 }
+
+func (m Yield) appendBody(b []byte) ([]byte, error) { return append(b, m.Token[:]...), nil }
 
 func (m RelayCapsMsg) appendBody(b []byte) ([]byte, error) {
 	return binary.LittleEndian.AppendUint32(b, m.Caps), nil
@@ -170,13 +184,15 @@ func (m Hill) appendBody(b []byte) ([]byte, error) {
 	return b, nil
 }
 
-// decodeKothClient parses CAPS and RESULT (the token is already read).
+// decodeKothClient parses CAPS, RESULT and YIELD (the token is already read).
 func decodeKothClient(t MsgType, tok Token, c *cursor) (Message, bool) {
 	switch t {
 	case TypeCaps:
 		return Caps{Token: tok, Caps: c.u32()}, true
 	case TypeResult:
 		return Result{Token: tok, Seed: c.u32(), Winner: c.u8()}, true
+	case TypeYield:
+		return Yield{Token: tok}, true
 	}
 	return nil, false
 }

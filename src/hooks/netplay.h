@@ -110,8 +110,9 @@ typedef struct NetRoom {
 } NetRoom;
 
 /* What the relay supports (its answer to CAPS): -1 not known yet (or no answer: an older relay,
- * then 0), else the bits; bit 0 King of the Hill. */
+ * then 0), else the bits; bit 0 King of the Hill, bit 2 YIELD (relays since build 36). */
 #define NETPLAY_CAP_KOTH 1
+#define NETPLAY_CAP_YIELD 4
 int netplay_lobby_caps(void);
 
 /* Enter the hub on `server`. The state becomes NETPLAY_LOBBY once the server answers; a room's
@@ -131,6 +132,9 @@ void netplay_lobby_settings(const NetRoomSettings *settings);   /* host only */
 void netplay_lobby_ready(int ready, int fighter);
 void netplay_lobby_vote(int choice);
 void netplay_lobby_leave(void);
+/* King of the Hill: give up this PC's place in the line (to the back; a king gives up the crown).
+ * Only when netplay_lobby_caps() has NETPLAY_CAP_YIELD and this PC neither votes nor fights. */
+void netplay_lobby_yield(void);
 void netplay_lobby_room(NetRoom *out);
 
 /* Ranked (One on One against a player of a similar rating; signed-in players only). The search

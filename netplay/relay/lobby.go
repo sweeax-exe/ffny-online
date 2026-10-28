@@ -386,6 +386,14 @@ func (r *Relay) lobbyRequest(now time.Time, c *client, m lobbyRequest, reqLen in
 			return r.errorTo(c.addr, ErrNotAllowed, reqLen)
 		}
 		return r.hillResult(now, c, m)
+	case Yield:
+		if c.room == nil {
+			return r.errorTo(c.addr, ErrRoomState, reqLen)
+		}
+		if c.room.koth == nil {
+			return r.errorTo(c.addr, ErrNotAllowed, reqLen)
+		}
+		return r.hillYield(now, c, reqLen)
 	case Create:
 		r.dequeue(c)
 		if r.outdated(c.buildNo) { // a new build came out while this client was in the lobby
