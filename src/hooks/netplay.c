@@ -42,6 +42,7 @@
 #include "rollback.h"
 #include "test_observations.h"
 #include "netplay_servers.h"
+#include "netplay_check.h"
 
 #define G_MATCH_PHASE   0x003B8F30u     /* test_telemetry.c G_PHASE */
 #define G_MATCH_WINNER  0x003B8F40u     /* test_telemetry.c G_WINNER: the winner's fighter slot */
@@ -166,7 +167,8 @@ void netplay_crowd_update(void) { sub_00081170(); }
 #define P_GAMEACK     2     /* guest -> host */
 #define P_LIVEPAD     3     /* u32 sequence, 18 bytes XBOX_GAMEPAD */
 #define P_STEPS       4     /* u32 match, u32 last step, u8 count, count x 32 bytes */
-#define P_HASH        5     /* u32 match, u32 step, u32 hash; since build 23 also the HASH_PARTS words */
+#define P_HASH        5     /* u32 match, u32 step, u32 hash; since build 23 also the HASH_PARTS words; since
+                               * build 34 the raw fields, pre-fight generators and crowd (netplay_check.h) */
 #define P_RTT         6     /* hub: u32 START seed, u16 this PC's ping to the relay in ms, u8 rollback,
                                * since build 23 u32 the game files' fingerprint */
 #define LOCKSTEP_VERSION 4     /* 3: builds 19-20, rollback on; 4: build 21, rollback off again, reclaim on */
@@ -185,7 +187,7 @@ void netplay_crowd_update(void) { sub_00081170(); }
 #define REMATCH_NO    0xFFFFFFFFu
 #define P_PINGINFO    9             /* in a room, every PINGINFO_MS: u16 this PC's ping to the relay (builds from 30) */
 #define PINGINFO_MS   2000
-#define HASH_PARTS    6             /* the checksum in parts: fighters 1-4, the AI generators, the rest */
+#define HASH_PARTS    NETCHECK_PARTS    /* the checksum in parts: fighters 1-4, the AI generators, the rest */
 #define STALL_LIMIT_MS 10000        /* mid-fight: a player has gone */
 #define START_LIMIT_MS 90000        /* the first steps: another PC may still be loading the venue */
 #define DECIDED_LIMIT_MS 1000       /* after the KO: a PC that went on ahead is not a lost player */
@@ -257,8 +259,9 @@ static struct {
     uint32_t in_tag[MAXP][RING];    /* step + 1 (0 = empty) */
     uint32_t in_match[MAXP][RING];
     HANDLE arrived;
-    /* match, step, hash, its HASH_PARTS parts, 1 when the parts came along (builds before 23 send none) */
-    uint32_t local_hash[16][4 + HASH_PARTS], remote_hash[16][4 + HASH_PARTS];
+    /* this PC's checksums and the others', the last 16 each (netplay_check.h; builds before 23 send
+     * no parts, builds before 34 no fields) */
+    NetCheck local_hash[16], remote_hash[16];
     int desync;
     uint32_t desync_step;
     struct { uint32_t which, count; } seeds[32];
@@ -306,6 +309,8 @@ static struct {
     uint32_t updates;                   /* game updates since the match's reference copy */
     uint32_t hash_at[RING], hash_tag[RING], hash_sent;
     uint32_t hash_parts[RING][HASH_PARTS];
+    uint32_t hash_fields[RING][NETCHECK_SLOTS][NETCHECK_FIELDS];    /* the raw words the hash covers */
+    uint32_t hash_gens[RING][NETCHECK_GENS], hash_crowd[RING];      /* steps a checksum goes out for */
     int rb_on, rb_ref_due, resim, predicting;
     int rb_fought;                      /* the phase word said "fighting" in this match */
     int peer_rb[MAXP];                  /* each position rolls back (its P_RTT says so) */
@@ -682,43 +687,43 @@ static void store_steps(int from, const uint8_t *p, int len)
 static unsigned g_hash_matches;     /* checksums compared and equal, this session */
 
 /* Which part of the checksum differs: a fighter (a player's or a CPU's), the CPU fighters'
- * generators, or the rest. Desyncs so far came from matches with CPU fighters only. */
-static void desync_detail(const uint32_t *mine, const uint32_t *theirs)
+ * generators, or the rest; since build 34 (both sides) also which raw word, here and there, and
+ * whether the pre-fight generators and the crowd still agree. Early desyncs (steps 60-180, both
+ * fighters, every generator equal) carried no more than "fighter 1, fighter 2" before. */
+static void desync_detail(const NetCheck *mine, const NetCheck *theirs)
 {
-    char text[200];
-    int n = 0, slot, fighters = N.fighters > N.players ? N.fighters : N.players;
-    for (slot = 0; slot < 4 && slot < fighters; slot++)
-        if (mine[slot] != theirs[slot])
-            n += snprintf(text + n, sizeof(text) - (size_t)n, "%sfighter %d (%s %d)", n ? ", " : "", slot + 1,
-                          slot < N.players ? "player" : "CPU", slot < N.players ? slot + 1 : slot + 1 - N.players);
-    fprintf(stderr, "[NETPLAY] desync detail: %s; the CPU fighters' generators %s; the shared generator and time scale %s\n",
-            n ? text : "no fighter's fields", mine[4] == theirs[4] ? "equal" : "differ",
-            mine[5] == theirs[5] ? "equal" : "differ");
+    char text[700];
+    int fighters = N.fighters > N.players ? N.fighters : N.players;
+    netcheck_parts_text(text, (int)sizeof(text), mine, theirs, fighters, N.players);
+    fprintf(stderr, "[NETPLAY] desync detail: %s\n", text);
+    if (netcheck_fields_text(text, (int)sizeof(text), mine, theirs, fighters))
+        fprintf(stderr, "[NETPLAY] desync fields: %s\n", text);
 }
 
-/* Compare every checksum this PC and another have for the same match and step, once each. */
+/* Compare every checksum this PC and another have for the same match and step, once each. Only
+ * the hash decides; the parts and fields say where the games parted. */
 static void check_hashes(void)
 {
     int i, j;
     for (i = 0; i < 16; i++)
         for (j = 0; j < 16; j++) {
-            if (!N.local_hash[i][1] || N.local_hash[i][0] != N.remote_hash[j][0] ||
-                N.local_hash[i][1] != N.remote_hash[j][1])
+            if (!N.local_hash[i].step || N.local_hash[i].match != N.remote_hash[j].match ||
+                N.local_hash[i].step != N.remote_hash[j].step)
                 continue;
-            if (N.local_hash[i][2] != N.remote_hash[j][2]) {
+            if (N.local_hash[i].hash != N.remote_hash[j].hash) {
                 if (!N.desync) {
                     N.desync = 1;
-                    N.desync_step = N.local_hash[i][1];
+                    N.desync_step = N.local_hash[i].step;
                     fprintf(stderr, "[NETPLAY] desync in match %08X at step %u (local %08X, remote %08X)\n",
-                            N.local_hash[i][0], N.local_hash[i][1], N.local_hash[i][2], N.remote_hash[j][2]);
-                    if (N.remote_hash[j][3 + HASH_PARTS]) desync_detail(N.local_hash[i] + 3, N.remote_hash[j] + 3);
+                            N.local_hash[i].match, N.local_hash[i].step, N.local_hash[i].hash, N.remote_hash[j].hash);
+                    if (N.remote_hash[j].has_parts) desync_detail(&N.local_hash[i], &N.remote_hash[j]);
                     toast(8000, "The games went out of sync: this match won't count.");
                 }
             } else if (++g_hash_matches % 10 == 0) {
                 fprintf(stderr, "[NETPLAY] in step: %u checksums compared and equal (match %08X, step %u)\n",
-                        g_hash_matches, N.local_hash[i][0], N.local_hash[i][1]);
+                        g_hash_matches, N.local_hash[i].match, N.local_hash[i].step);
             }
-            N.remote_hash[j][1] = 0;    /* compared */
+            N.remote_hash[j].step = 0;  /* compared */
         }
 }
 
@@ -895,22 +900,17 @@ static void on_data(int from, const uint8_t *p, int len)
                 toast(8000, "%s wants a rematch! Choose Rematch to accept.", player_name(from));
         }
         break;
-    case P_HASH:
-        if (len >= 13) {
+    case P_HASH: {
+        NetCheck in;     /* as much as the sender's build sent: 13, 37 or 145 bytes */
+        if (netcheck_unpack(p, len, &in)) {
             EnterCriticalSection(&g_cs);
-            memmove(N.remote_hash[1], N.remote_hash[0], sizeof(N.remote_hash[0]) * 15);
-            N.remote_hash[0][0] = get32(p + 1);
-            N.remote_hash[0][1] = get32(p + 5);
-            N.remote_hash[0][2] = get32(p + 9);
-            N.remote_hash[0][3 + HASH_PARTS] = len >= 13 + 4 * HASH_PARTS;
-            if (N.remote_hash[0][3 + HASH_PARTS]) {
-                int k;
-                for (k = 0; k < HASH_PARTS; k++) N.remote_hash[0][3 + k] = get32(p + 13 + 4 * k);
-            }
+            memmove(&N.remote_hash[1], &N.remote_hash[0], sizeof(N.remote_hash[0]) * 15);
+            N.remote_hash[0] = in;
             check_hashes();
             LeaveCriticalSection(&g_cs);
         }
         break;
+    }
     }
 }
 
@@ -2528,19 +2528,22 @@ int netplay_room_name(int slot, char *out, int size)
 #define SHARED_GEN    0x0039C0E0u   /* the utility generator menus, camera and effects draw too */
 #define TIME_SCALE    0x00349764u   /* CLogic+4, the step's scale (slow motion) */
 
-static uint32_t fighter_hash(uint32_t parts[HASH_PARTS])
+/* The checksum of the state a step starts from, its parts, and the raw fighter words it covers
+ * (netcheck_field: action, position x/y/z, facing, health). */
+static uint32_t fighter_hash(uint32_t parts[HASH_PARTS], uint32_t raw[NETCHECK_SLOTS][NETCHECK_FIELDS])
 {
-    static const uint32_t fields[] = { 0x30, 0x44, 0x48, 0x4C, 0x54, 0x350 };
     uint32_t h = 2166136261u, a;
     int slot;
     unsigned i;
     memset(parts, 0, sizeof(uint32_t) * HASH_PARTS);
+    memset(raw, 0, sizeof(uint32_t) * NETCHECK_SLOTS * NETCHECK_FIELDS);
     for (slot = 0; slot < (N.fighters > N.players ? N.fighters : N.players); slot++) {
         uint32_t one = 2166136261u;
-        for (i = 0; i < sizeof(fields) / sizeof(fields[0]); i++) {
-            uint32_t v = MEM32(ACTORS + (uint32_t)slot * STRIDE + fields[i]);
+        for (i = 0; i < NETCHECK_FIELDS; i++) {
+            uint32_t v = MEM32(ACTORS + (uint32_t)slot * STRIDE + netcheck_field[i]);
             h = (h ^ v) * 16777619u;
             one = (one ^ v) * 16777619u;
+            if (slot < NETCHECK_SLOTS) raw[slot][i] = v;
         }
         if (slot < 4) parts[slot] = one;
     }
@@ -2556,21 +2559,23 @@ static void send_hashes(uint32_t upto)
 {
     uint32_t t;
     for (t = N.hash_sent + 1; t <= upto; t++) {
-        uint8_t p[13 + 4 * HASH_PARTS];
-        uint32_t h;
-        int k;
-        if (t % HASH_EVERY || N.hash_tag[t % RING] != t + 1) continue;
-        h = N.hash_at[t % RING];
+        uint8_t p[NETCHECK_LEN_FULL];
+        NetCheck c;
+        uint32_t k = t % RING;
+        if (t % HASH_EVERY || N.hash_tag[k] != t + 1) continue;
+        memset(&c, 0, sizeof(c));
+        c.match = N.match; c.step = t; c.hash = N.hash_at[k];
+        memcpy(c.parts, N.hash_parts[k], sizeof(c.parts));
+        memcpy(c.fields, N.hash_fields[k], sizeof(c.fields));
+        memcpy(c.gens, N.hash_gens[k], sizeof(c.gens));
+        c.crowd = N.hash_crowd[k];
+        c.has_parts = c.has_extra = 1;
         EnterCriticalSection(&g_cs);
-        memmove(N.local_hash[1], N.local_hash[0], sizeof(N.local_hash[0]) * 15);
-        N.local_hash[0][0] = N.match; N.local_hash[0][1] = t; N.local_hash[0][2] = h;
-        for (k = 0; k < HASH_PARTS; k++) N.local_hash[0][3 + k] = N.hash_parts[t % RING][k];
-        N.local_hash[0][3 + HASH_PARTS] = 1;
+        memmove(&N.local_hash[1], &N.local_hash[0], sizeof(N.local_hash[0]) * 15);
+        N.local_hash[0] = c;
         check_hashes();
         LeaveCriticalSection(&g_cs);
-        p[0] = P_HASH; put32(p + 1, N.match); put32(p + 5, t); put32(p + 9, h);
-        for (k = 0; k < HASH_PARTS; k++) put32(p + 13 + 4 * k, N.hash_parts[t % RING][k]);
-        send_data(p, (int)sizeof(p));
+        send_data(p, netcheck_pack(p, (int)sizeof(p), P_HASH, &c));     /* older builds read the first 37 bytes */
     }
     if (upto > N.hash_sent) N.hash_sent = upto;
 }
@@ -2968,16 +2973,25 @@ void netplay_on_step(void)
         for (k = 0; k < 6u; k++) hu = (hu ^ g_crowd_gen[k]) * 16777619u;
         fprintf(stderr, "[NETPLAY] crowd parts at step %u: records %08X crowd-gen %08X global-gen %08X\n", s, hr, hg, hu);
     }
-    if (s == 1 || s == 2 || s == 60 || s == 300 || s == 900 || s == 1800) {
-        /* the crowd's state, to compare between the PCs: the records, its generator, the global one */
-        uint32_t h = 2166136261u, k, recs = MEM32(0x003494E4u), count = MEM32(0x003494E0u);
-        for (k = 0; recs && k < count * 0x34u && k < 0x4000u; k++) h = (h ^ MEM8(recs + k)) * 16777619u;
-        for (k = 0; k < 0x88u; k++) h = (h ^ MEM8(g_ecx + CROWD_MANAGER + 0xE18u + k)) * 16777619u;
-        for (k = 0; k < 6u; k++) h = (h ^ g_crowd_gen[k]) * 16777619u;     /* the crowd's copy, not the real one */
-        fprintf(stderr, "[NETPLAY] crowd hash at step %u: %08X (%u records)\n", s, h, count);
-    }
     k = s % RING;
-    N.hash_at[k] = fighter_hash(N.hash_parts[k]);   /* the state as this step starts */
+    if (s == 1 || s == 2 || s % HASH_EVERY == 0) {
+        /* the crowd's state, to compare between the PCs: the records, its generator, the global one;
+         * on every checksum's step it goes out with the checksum (diagnostic only), and the two
+         * pre-fight CLogic generators with it (docs/research/fight-determinism.md) */
+        uint32_t h = 2166136261u, j, recs = MEM32(0x003494E4u), count = MEM32(0x003494E0u);
+        for (j = 0; recs && j < count * 0x34u && j < 0x4000u; j++) h = (h ^ MEM8(recs + j)) * 16777619u;
+        for (j = 0; j < 0x88u; j++) h = (h ^ MEM8(g_ecx + CROWD_MANAGER + 0xE18u + j)) * 16777619u;
+        for (j = 0; j < 6u; j++) h = (h ^ g_crowd_gen[j]) * 16777619u;     /* the crowd's copy, not the real one */
+        if (s == 1 || s == 2 || s == 60 || s == 300 || s == 900 || s == 1800)
+            fprintf(stderr, "[NETPLAY] crowd hash at step %u: %08X (%u records)\n", s, h, count);
+        N.hash_crowd[k] = h;
+        for (j = 0; j < NETCHECK_GENS; j++) {
+            uint32_t g = 2166136261u, a;
+            for (a = 0; a < 0x88u; a += 4) g = (g ^ MEM32(netcheck_gen[j] + a)) * 16777619u;
+            N.hash_gens[k][j] = g;
+        }
+    }
+    N.hash_at[k] = fighter_hash(N.hash_parts[k], N.hash_fields[k]);   /* the state as this step starts */
     N.hash_tag[k] = s + 1;
     if (N.resim) return;                /* a re-run: the entries are all known or predicted */
     target = s + (uint32_t)N.delay;
