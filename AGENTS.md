@@ -141,6 +141,14 @@ python scripts/regress.py [--quick] [--only fight,intro]
 python scripts/scenario_suite.py run fight-result --fixture logs/fixtures/NAME --require-combat
 ```
 
+- **Quick checks first: `tools/defjam-mcp/dj.py`** (the `defjam` MCP server has the same). It takes the
+  shared machine lock itself (waits for `D:\DefJam\test-lock.txt`, `test-priority.txt` and any running
+  copy), runs on disposable data roots with the safe environment, and answers with one compact JSON
+  result: `scenario online --matches 3`, `scenario offline`, `scenario boot [--goto battle]`,
+  `scenario gallery`. `digest <log>` condenses any log or F9 report to about 60 lines; `analyze` gives
+  the online result of existing logs; `lock run -- <cmd>` runs any other test under the lock. Read the
+  digest, not the log.
+
 - Every harness route and soak boot uses a complete-save-root guard, including profiles and caches.
   The run fails unless restoration is byte-identical. Keep only three successful backups; retain every
   failed backup. For rebase tests use the preserved disposable `runtime-data` root, never the original save.
