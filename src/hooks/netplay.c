@@ -240,6 +240,7 @@ static struct {
     int koth_ready_for;             /* HILL `fights` + 1 of the call this PC readied for by itself */
     volatile LONG start_deferred;   /* a START taken while the last fight's results still show */
     AutoMatch deferred_m;
+    int koth_results;               /* this game still shows the results of a hill fight it fought (until the menu) */
     /* controllers */
     XBOX_GAMEPAD remote_pad[MAXP];
     uint32_t remote_seq[MAXP], local_seq;
@@ -1132,7 +1133,7 @@ static void on_hill(const uint8_t *b, int len)
     Reader r = { b, len, 0, 0 };
     NetHill h;
     char code[7];
-    int i, v, auto_ready = -1;
+    int i, v, auto_ready = -1, called_off = 0;
     memset(&h, 0, sizeof(h));
     rdbytes(&r, code, 6);
     code[6] = 0;
@@ -1189,15 +1190,35 @@ static void on_hill(const uint8_t *b, int len)
     /* Called again while still on the results of the fight this PC just fought (the winner stays
      * on; with two in the room, both): the results and the summary take longer than the ready time,
      * so the king was skipped and lost the crown before its game was back on the hill (three-copy
-     * test, 2026-10-25). Whoever has just fought is there: ready at once, with the same fighter. */
-    if (h.phase == NETHILL_CALLING && N.match_live && N.koth_match && N.koth_done && N.koth_ready_for != h.fights + 1) {
+     * test, 2026-10-25). Whoever has just fought is there: ready at once, with the same fighter.
+     * koth_results: also after a deferred fight was called off (below), while the results still show. */
+    if (h.phase == NETHILL_CALLING && N.koth_results && N.koth_ready_for != h.fights + 1) {
         for (i = 0; i < h.count; i++)
             if (h.line[i].slot == N.roomv.you && h.line[i].state == NETLINE_CALLED) {
                 auto_ready = N.report_m.fighter[N.pos];
                 N.koth_ready_for = h.fights + 1;
             }
     }
+    /* The next fight was agreed while this game still showed the last one's results (a deferred
+     * START), and the relay has ended it since: the opponent left (how 3) or did not come. Nothing
+     * may be set up for it any more: this PC loaded a fight against a gone opponent once back from
+     * the results, ran to step 8 and gave up (Farouk's F9 report 3d59ef, 2026-10-28). Over means the
+     * hill's fight count moved on, or another fight runs: a HILL sent before the START (still
+     * "calling", the same count) can arrive after it and must not end it. */
+    if (N.start_deferred && N.koth_match &&
+        (h.fights != N.koth_fights || (h.phase == NETHILL_FIGHTING && h.seed != N.start_seed)) &&
+        InterlockedExchange(&N.start_deferred, 0))
+        called_off = 1;
     LeaveCriticalSection(&g_cs);
+    if (called_off) {
+        fprintf(stderr, "[NETPLAY] hill: the deferred fight is over on the relay (fights %d, how %d, phase %d); not started\n",
+                h.fights, h.last_how, h.phase);
+        end_hub_match("The next fight was called off: back on the hill.");
+        if (h.last_how == NETHOW_LEFT)
+            toast(8000, "The next fight was called off (%s left): back on the hill.", player_name(1 - N.pos));
+        else
+            toast(8000, "The next fight was called off: back on the hill.");
+    }
     if (auto_ready >= 0) {
         fprintf(stderr, "[NETPLAY] hill: called again straight after the fight; ready with fighter %d\n", auto_ready);
         netplay_lobby_ready(1, auto_ready);
@@ -1252,8 +1273,9 @@ static void on_start(const uint8_t *b, int len)
     for (i = 0; i < count; i++) { slots[i] = rd8(&r); fighters[i] = rd8(&r); }
     if (r.bad) return;
     if (N.start_seed && seed == N.start_seed) { N.start_this_play = 1; return; }     /* a repeat */
-    /* King of the Hill: the last fight of this PC is still on its results screen */
-    deferred = N.lobby && N.koth_match && N.match_live && N.match_seen && N.koth_done;
+    /* King of the Hill: the last fight of this PC is still on its results screen (also when a
+     * START deferred there was called off since: its match is over, the results still show) */
+    deferred = N.lobby && N.koth_results && NETPLAY_IS_KOTH(N.roomv.settings.mode);
     /* positions follow the room slots in order */
     for (i = 1; i < count; i++)
         for (j = i; j > 0 && slots[j - 1] > slots[j]; j--) {
@@ -1782,6 +1804,7 @@ static int start(const char *server, const char *name, int creating, const char 
     N.koth_match = 0;
     N.koth_winner = -1;
     N.start_deferred = 0;
+    N.koth_results = 0;
     reset_remote_pads();
     EnterCriticalSection(&g_cs);
     memset(N.in_tag, 0, sizeof(N.in_tag));
@@ -2265,6 +2288,7 @@ void netplay_on_main_menu(void)
 {
     if (N.lobby && InterlockedExchange(&N.start_deferred, 0)) {
         /* King of the Hill: back from the last fight's results; the next one, agreed meanwhile */
+        N.koth_results = 0;
         log_contiguous("at the match end");
         fprintf(stderr, "[NETPLAY] back from the last fight's results: setting up the next King of the Hill fight\n");
         N.start_tick = GetTickCount64();    /* the load starts now */
@@ -2276,6 +2300,9 @@ void netplay_on_main_menu(void)
         koth_check_result(1);   /* King of the Hill: the fight's RESULT, a draw if none was recorded */
         end_hub_match("Match over; back in the room.");
     }
+    if (N.koth_results)         /* also after the next fight was called off meanwhile */
+        fprintf(stderr, "[NETPLAY] back from the last fight's results: on the hill\n");
+    N.koth_results = 0;
 }
 
 /* At the sync point, before the match is set up: the room's START came, but a player has left
@@ -2859,6 +2886,7 @@ static void koth_check_result(int final)
     }
     EnterCriticalSection(&g_cs);
     N.koth_done = 1;
+    N.koth_results = 1;         /* the winner's scene, the summary and the results follow, until the menu */
     N.koth_tries = 0;
     N.koth_sent = 0;
     N.koth_winner = winner;
