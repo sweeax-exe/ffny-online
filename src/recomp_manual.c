@@ -34,6 +34,7 @@
 #include "hooks/pc_settings.h"
 #include "hooks/netplay.h"
 #include "hooks/automatch.h"
+#include "hooks/options_audio.h"
 #include "hooks/rollback.h"
 
 /* Read-only probes use the lifter's universal entry hooks. They do not alter
@@ -1141,7 +1142,9 @@ static void funccall_hook(void)
         g_esp += 4;                         /* cdecl: only the return address is popped */
         return;
     }
+    options_audio_before_funccall(text);   /* the saved volumes, once loaded (options_audio.c) */
     sub_00068BA0();
+    options_audio_after_funccall(text);
     automatch_on_funccall(text);    /* a requested match starts here (src/hooks/automatch.c) */
 }
 
