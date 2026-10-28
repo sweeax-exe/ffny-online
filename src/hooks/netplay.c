@@ -169,7 +169,8 @@ void netplay_crowd_update(void) { sub_00081170(); }
 #define P_LIVEPAD     3     /* u32 sequence, 18 bytes XBOX_GAMEPAD */
 #define P_STEPS       4     /* u32 match, u32 last step, u8 count, count x 32 bytes */
 #define P_HASH        5     /* u32 match, u32 step, u32 hash; since build 23 also the HASH_PARTS words; since
-                               * build 34 the raw fields, pre-fight generators and crowd (netplay_check.h) */
+                               * build 35 the raw fields, pre-fight generators, crowd, the shared generator, time
+                               * scale and match generator apart (netplay_check.h); the first 37 bytes unchanged */
 #define P_RTT         6     /* hub: u32 START seed, u16 this PC's ping to the relay in ms, u8 rollback,
                                * since build 23 u32 the game files' fingerprint */
 #define LOCKSTEP_VERSION 4     /* 3: builds 19-20, rollback on; 4: build 21, rollback off again, reclaim on */
@@ -317,6 +318,7 @@ static struct {
     uint32_t hash_parts[RING][HASH_PARTS];
     uint32_t hash_fields[RING][NETCHECK_SLOTS][NETCHECK_FIELDS];    /* the raw words the hash covers */
     uint32_t hash_gens[RING][NETCHECK_GENS], hash_crowd[RING];      /* steps a checksum goes out for */
+    uint32_t hash_split[RING][3];       /* the shared generator, the time scale word, the match generator */
     int rb_on, rb_ref_due, resim, predicting;
     int rb_fought;                      /* the phase word said "fighting" in this match */
     int peer_rb[MAXP];                  /* each position rolls back (its P_RTT says so) */
@@ -770,7 +772,7 @@ static void store_steps(int from, const uint8_t *p, int len)
 static unsigned g_hash_matches;     /* checksums compared and equal, this session */
 
 /* Which part of the checksum differs: a fighter (a player's or a CPU's), the CPU fighters'
- * generators, or the rest; since build 34 (both sides) also which raw word, here and there, and
+ * generators, or the rest; since build 35 (both sides) also which raw word, here and there, and
  * whether the pre-fight generators and the crowd still agree. Early desyncs (steps 60-180, both
  * fighters, every generator equal) carried no more than "fighter 1, fighter 2" before. */
 static void desync_detail(const NetCheck *mine, const NetCheck *theirs)
@@ -996,7 +998,7 @@ static void on_data(int from, const uint8_t *p, int len)
         }
         break;
     case P_HASH: {
-        NetCheck in;     /* as much as the sender's build sent: 13, 37 or 145 bytes */
+        NetCheck in;     /* as much as the sender's build sent: 13, 37 or 157 bytes */
         if (netcheck_unpack(p, len, &in)) {
             EnterCriticalSection(&g_cs);
             memmove(&N.remote_hash[1], &N.remote_hash[0], sizeof(N.remote_hash[0]) * 15);
@@ -2666,10 +2668,12 @@ int netplay_room_name(int slot, char *out, int size)
 #define AI_GENS       0x003BFC70u   /* the CPU fighters' four generators, 0x88 bytes each (docs/research/fight-determinism.md) */
 #define SHARED_GEN    0x0039C0E0u   /* the utility generator menus, camera and effects draw too */
 #define TIME_SCALE    0x00349764u   /* CLogic+4, the step's scale (slow motion) */
+#define MATCH_GEN     0x003C1400u   /* the match generator the fight handlers draw (0x88 bytes, state at +4) */
 
 /* The checksum of the state a step starts from, its parts, and the raw fighter words it covers
  * (netcheck_field: action, position x/y/z, facing, health). */
-static uint32_t fighter_hash(uint32_t parts[HASH_PARTS], uint32_t raw[NETCHECK_SLOTS][NETCHECK_FIELDS])
+static uint32_t fighter_hash(uint32_t parts[HASH_PARTS], uint32_t raw[NETCHECK_SLOTS][NETCHECK_FIELDS],
+                             uint32_t split[3])
 {
     uint32_t h = 2166136261u, a;
     int slot;
@@ -2689,7 +2693,11 @@ static uint32_t fighter_hash(uint32_t parts[HASH_PARTS], uint32_t raw[NETCHECK_S
     parts[4] = parts[5] = 2166136261u;
     for (a = 0; a < 4u * 0x88u; a += 4) parts[4] = (parts[4] ^ MEM32(AI_GENS + a)) * 16777619u;
     for (a = 0; a < 0x88u; a += 4) parts[5] = (parts[5] ^ MEM32(SHARED_GEN + a)) * 16777619u;
-    parts[5] = (parts[5] ^ MEM32(TIME_SCALE)) * 16777619u;
+    split[0] = parts[5];                /* the shared generator alone (P_HASH extras, build 35 on) */
+    parts[5] = (parts[5] ^ MEM32(TIME_SCALE)) * 16777619u;     /* part 5 as builds 23..34 send it */
+    split[1] = MEM32(TIME_SCALE);       /* the word itself: the report prints both values */
+    split[2] = 2166136261u;
+    for (a = 0; a < 0x88u; a += 4) split[2] = (split[2] ^ MEM32(MATCH_GEN + a)) * 16777619u;
     return h;
 }
 
@@ -2708,6 +2716,7 @@ static void send_hashes(uint32_t upto)
         memcpy(c.fields, N.hash_fields[k], sizeof(c.fields));
         memcpy(c.gens, N.hash_gens[k], sizeof(c.gens));
         c.crowd = N.hash_crowd[k];
+        c.shared = N.hash_split[k][0]; c.time_scale = N.hash_split[k][1]; c.match_gen = N.hash_split[k][2];
         c.has_parts = c.has_extra = 1;
         EnterCriticalSection(&g_cs);
         memmove(&N.local_hash[1], &N.local_hash[0], sizeof(N.local_hash[0]) * 15);
@@ -3022,6 +3031,45 @@ static void crowd_reset(uint32_t arena)
             with_text ? "the game's restart" : "field by field");
 }
 
+/* ---- the shared generator, pinned to the step ---------------------------------------------------
+ *
+ * The object-form generator at 0x39C0E0 is drawn inside the fight step (the camera director) and
+ * outside it at host timing: the music/ambience director when an audio voice is idle, the screen
+ * transition machine, a render-path effect, animation creation and CArena's update. On The Terror
+ * Dome, where it is drawn about once a second, two PCs came out of the loading window three draws
+ * apart and the fighters parted by step 31 (docs/research/generator-timescale-desync.md, the lab
+ * case). So at the start of every online step, and of every step rollback runs again, every PC
+ * seeds it the same way through the game's own seed routine (this = generator, state, odd
+ * increment; it writes the 32-float table and the two words, nothing else): whatever was drawn
+ * outside the step is gone before the step can read it. */
+/* RECOMP_NETPLAY_GEN_PIN=off (tests only): the generator as the game leaves it, to compare */
+static int shared_gen_pin(void)
+{
+    static int on = -1;
+    if (on < 0) on = !(getenv("RECOMP_NETPLAY_GEN_PIN") && !strcmp(getenv("RECOMP_NETPLAY_GEN_PIN"), "off"));
+    return on;
+}
+static void shared_gen_reseed(uint32_t step)
+{
+    uint32_t args[2];
+    uint32_t eax = g_eax, ecx = g_ecx, edx = g_edx, ebx = g_ebx, esi = g_esi, edi = g_edi, ebp = g_ebp, esp = g_esp;
+    double fp[8];
+    int fp_top = g_fp_top;
+    uint16_t fp_cw = g_fp_control_word;
+    memcpy(fp, g_fp_stack, sizeof(fp));
+    args[0] = mix32(N.match ^ mix32(step * 0x9E3779B9u ^ SHARED_GEN));
+    args[1] = mix32(N.match ^ mix32(step * 0x85EBCA6Bu ^ 0x5EED39C1u)) | 1u;   /* the increment stays odd */
+    N.seed_bypass = 1;
+    defjam_test_quiet_seed = 1;     /* not a [TEST-SEED] line a step */
+    guest_call(sub_000AA0D0, SHARED_GEN, 2, args);
+    defjam_test_quiet_seed = 0;
+    N.seed_bypass = 0;
+    g_eax = eax; g_ecx = ecx; g_edx = edx; g_ebx = ebx; g_esi = esi; g_edi = edi; g_ebp = ebp; g_esp = esp;
+    memcpy(g_fp_stack, fp, sizeof(fp));
+    g_fp_top = fp_top;
+    g_fp_control_word = fp_cw;
+}
+
 /* King of the Hill: the fight decided, so the relay can rotate the line: RESULT with the winner's
  * room slot, or WINNER_DRAW. The phase word alone missed fights that end without the decided
  * phases: both fighters killed by the venue (result code 0x1105, "everybody out", a draw) went from
@@ -3153,6 +3201,8 @@ void netplay_on_step(void)
         if (crowd_on) crowd_reset(g_ecx);
         if (!N.resim && match_rolls_back() && rollback_prepare() == 0) N.rb_on = N.rb_ref_due = 1;
     }
+    /* before anything in the step draws, and before the checksum: the same state on every PC */
+    if (shared_gen_pin()) shared_gen_reseed(s);
     {
         /* The arena hands its frame argument (edi, kept by sub_00087700 for the crowd update that
          * follows) to the crowd; it is the host's measured frame time, so the spectators' clips
@@ -3194,7 +3244,7 @@ void netplay_on_step(void)
             N.hash_gens[k][j] = g;
         }
     }
-    N.hash_at[k] = fighter_hash(N.hash_parts[k], N.hash_fields[k]);   /* the state as this step starts */
+    N.hash_at[k] = fighter_hash(N.hash_parts[k], N.hash_fields[k], N.hash_split[k]);   /* the state as this step starts */
     N.hash_tag[k] = s + 1;
     if (N.resim) return;                /* a re-run: the entries are all known or predicted */
     target = s + (uint32_t)N.delay;

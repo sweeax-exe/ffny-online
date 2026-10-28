@@ -193,8 +193,12 @@ def build_pad_script(stages, raw_tail=""):
 # ---------------------------------------------------------------------------
 
 # A fighter that walks right and throws every attack, for as long as the run lasts.
-FIGHT_TAIL = ("@game.startgame(,right:8:1200:4:1.2,x:10:1200:0.8:0.15,y:10.2:1200:0.8:0.15,"
-              "a:10.4:1200:0.8:0.15,b:10.6:1200:0.8:0.15")
+# HARNESS_FIGHT_SECS=<s> (default 1200): when the blind fight presses end, counted from the start of
+# the match. They go on through the results screens otherwise; a hub test whose fighters are driven by
+# the bot (RECOMP_TEST_BOT) ends them before the fight, so the results screens see only their own presses.
+FIGHT_END = os.environ.get("HARNESS_FIGHT_SECS", "1200")
+FIGHT_TAIL = (f"@game.startgame(,right:8:{FIGHT_END}:4:1.2,x:10:{FIGHT_END}:0.8:0.15,y:10.2:{FIGHT_END}:0.8:0.15,"
+              f"a:10.4:{FIGHT_END}:0.8:0.15,b:10.6:{FIGHT_END}:0.8:0.15")
 
 # Typing "AAA" on the user-ID screen and taking DONE.
 NEW_ID_KEYS = "a@5;a@7;a@8;a@9;down@11+0.6x9;right@17.5;a@19;a@23+3x6"
@@ -274,7 +278,12 @@ SECOND_MATCH_FFA = raw_stages([
 # (automatch reports its calls to the anchors), the scripted fighter fights it, the summary
 # goes back to the match-type screen, the room readies again and a second match follows.
 # Player 2 faces the other way, so its approach is "left".
-ONLINE_TAIL = ",".join([FIGHT_TAIL, raw_stages(["game.getmatchsummary(=a@4+3x12"]),
+# HARNESS_SUMMARY_PRESSES=<first>+<gap>x<count> (default 4+3x12): the A presses on the summary and
+# rewards screens. Those screens take the winner's pad, which on the loser's copy is the remote one:
+# a winner's copy that went on before the loser's showed the screen left that copy there for good
+# (hub tests, 2026-10-25/26); later and slower presses keep the two copies on the same screen.
+SUMMARY_PRESSES = os.environ.get("HARNESS_SUMMARY_PRESSES", "4+3x12")
+ONLINE_TAIL = ",".join([FIGHT_TAIL, raw_stages([f"game.getmatchsummary(=a@{SUMMARY_PRESSES}"]),
                         FIGHT_TAIL.replace("@game.startgame(", "@game.startgame(#2")])
 
 
@@ -283,7 +292,7 @@ def online_tail(matches):
     parts = [FIGHT_TAIL]
     for k in range(2, matches + 1):
         nth = f"#{2 * k - 3}" if k > 2 else ""
-        parts.append(raw_stages([f"game.getmatchsummary({nth}=a@4+3x12"]))
+        parts.append(raw_stages([f"game.getmatchsummary({nth}=a@{SUMMARY_PRESSES}"]))
         parts.append(FIGHT_TAIL.replace("@game.startgame(", f"@game.startgame(#{k}"))
     return ",".join(parts)
 

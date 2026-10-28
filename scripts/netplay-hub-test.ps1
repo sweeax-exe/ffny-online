@@ -23,6 +23,12 @@
 .PARAMETER RelayPort  the local relay's port (default 27777); another port lets a worktree's test run
                     beside the main checkout's.
 .PARAMETER BaseCore first copy's guest CPU; copy i gets BaseCore + 2i (default 2).
+.PARAMETER Venues   tests: comma-separated venue feIDs the relay's votes offer in turn (relay -test-venues),
+                    e.g. 1,6,19,6 for The Foundation, The Terror Dome, The Pit, The Terror Dome.
+.PARAMETER SummaryPresses  the A presses on each summary, <first s>+<gap s>x<count> (HARNESS_SUMMARY_PRESSES,
+                    default 4+3x12); e.g. 16+6x10 keeps both copies on the same screen.
+.PARAMETER FightSecs  when the route's blind fight presses end, in seconds from the match start (HARNESS_FIGHT_SECS,
+                    default 1200); with -Bot, 9 keeps them off the fight and the results screens.
 .PARAMETER DataPrefix  every copy's data root is <DataPrefix><i> (made like the -hub roots: the dump as a
                     junction, a copy of the saves); default: the data root itself and <data>-hub<i>.
 .PARAMETER NaRelayPort  build 30's server choice: a second local relay on this port plays "North America"
@@ -51,7 +57,8 @@ param([ValidateRange(2, 4)][int]$Players = 2, [int]$Secs = 1200, [string[]]$Extr
       [string]$DataPrefix = '', [int]$NaRelayPort = 0, [ValidateSet('auto', 'eu', 'na', 'both')][string]$Server = 'auto',
       [int]$EuLagMs = 0, [int]$NaLagMs = 0, [ValidateSet('', 'auto', 'eu', 'na')][string]$SwitchTo = '',
       [int]$SwitchAfterMs = 3000, [ValidateSet('auto', 'eu', 'na', 'both')][string[]]$Servers = @(),
-      [int[]]$JoinListed = @(), [int]$JoinListedSecs = 90, [int]$CopyGapSecs = 3, [switch]$NoOverride)
+      [int[]]$JoinListed = @(), [int]$JoinListedSecs = 90, [int]$CopyGapSecs = 3, [switch]$NoOverride,
+      [string]$Venues = '', [string]$SummaryPresses = '4+3x12', [int]$FightSecs = 1200)
 $ErrorActionPreference = 'Stop'
 $repo = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 Set-Location $repo
@@ -74,12 +81,16 @@ $started = Get-Date
 $relayArgs = @('-listen', "127.0.0.1:$RelayPort", '-log-interval', '30s')
 if ($ExtraEnv -match '^RECOMP_ROLLBACK=on') { $relayArgs += '-rollback' }
 if ($NaRelayPort -and $EuLagMs) { $relayArgs += @('-test-lag', "$($EuLagMs)ms") }
+if ($Venues) { $relayArgs += @('-test-venues', $Venues) }
+$env:HARNESS_SUMMARY_PRESSES = $SummaryPresses
+$env:HARNESS_FIGHT_SECS = "$FightSecs"
 $relay = Start-Process (Join-Path $repo 'netplay\relay\dist\relay.exe') -ArgumentList $relayArgs `
          -PassThru -WindowStyle Hidden -RedirectStandardError "$logs\relay.err" -RedirectStandardOutput "$logs\relay.out"
 $relayNa = $null
 if ($NaRelayPort) {
     $naArgs = @('-listen', "127.0.0.1:$NaRelayPort", '-log-interval', '30s')
     if ($NaLagMs) { $naArgs += @('-test-lag', "$($NaLagMs)ms") }
+    if ($Venues) { $naArgs += @('-test-venues', $Venues) }
     $relayNa = Start-Process (Join-Path $repo 'netplay\relay\dist\relay.exe') -ArgumentList $naArgs `
                -PassThru -WindowStyle Hidden -RedirectStandardError "$logs\relay-na.err" -RedirectStandardOutput "$logs\relay-na.out"
 }

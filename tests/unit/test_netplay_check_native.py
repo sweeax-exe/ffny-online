@@ -1,5 +1,5 @@
 """The lockstep checksum message (src/hooks/netplay_check.h, P_HASH in netplay.c), compiled natively:
-a full message round-trips, the two older lengths (13 bytes before build 23, 37 bytes for builds 23..33)
+a full message round-trips, the two older lengths (13 bytes before build 23, 37 bytes for builds 23..34)
 are read as far as they go, a newer build's message keeps the old offsets an older build reads, and the
 desync report names the differing raw words. Needs MSVC (`cl` on PATH); skips without it."""
 import re
@@ -25,6 +25,7 @@ static void fill(NetCheck *c, uint32_t base)
     for (k = 0; k < NETCHECK_SLOTS; k++)
         for (f = 0; f < NETCHECK_FIELDS; f++) c->fields[k][f] = base + 0x1000u * (uint32_t)k + (uint32_t)f;
     c->gens[0] = base + 0x77u; c->gens[1] = base + 0x88u; c->crowd = base + 0x99u;
+    c->shared = base + 0xAAu; c->time_scale = 0x3F800000u; c->match_gen = base + 0xBBu;
     c->has_parts = c->has_extra = 1;
 }
 
@@ -32,7 +33,7 @@ int main(void)
 {
     uint8_t buf[256];
     NetCheck a, b, c;
-    char text[600];
+    char text[800];
     int n, k, f, same;
 
     printf("lengths %d %d %d extra %d\n", NETCHECK_LEN_OLD, NETCHECK_LEN_PARTS, NETCHECK_LEN_FULL, NETCHECK_EXTRA);
@@ -43,20 +44,21 @@ int main(void)
     netcheck_unpack(buf, n, &b);
     same = b.match == a.match && b.step == a.step && b.hash == a.hash && b.has_parts && b.has_extra &&
            !memcmp(b.parts, a.parts, sizeof(a.parts)) && !memcmp(b.fields, a.fields, sizeof(a.fields)) &&
-           !memcmp(b.gens, a.gens, sizeof(a.gens)) && b.crowd == a.crowd;
+           !memcmp(b.gens, a.gens, sizeof(a.gens)) && b.crowd == a.crowd && b.shared == a.shared &&
+           b.time_scale == a.time_scale && b.match_gen == a.match_gen;
     printf("full len %d type %d roundtrip %d\n", n, buf[0], same);
     /* the old offsets an older build reads stay where they were */
     printf("old offsets %d\n", netcheck_get32(buf + 9) == a.hash && netcheck_get32(buf + 13) == a.parts[0] &&
                                 netcheck_get32(buf + 33) == a.parts[5]);
     printf("too small %d\n", netcheck_pack(buf, NETCHECK_LEN_FULL - 1, 5, &a));
 
-    /* a builds 23..33 message: the parts, no fields */
+    /* a builds 23..34 message: the parts, no fields */
     netcheck_unpack(buf, NETCHECK_LEN_PARTS, &c);
     printf("len37 parts %d extra %d part5 %d field %08X crowd %08X\n", c.has_parts, c.has_extra,
            c.parts[5] == a.parts[5], c.fields[0][0], c.crowd);
-    /* anything between 37 and 145 is read as a 37-byte one */
+    /* anything between 37 and the full length is read as a 37-byte one */
     netcheck_unpack(buf, NETCHECK_LEN_FULL - 1, &c);
-    printf("len144 parts %d extra %d\n", c.has_parts, c.has_extra);
+    printf("lenshort parts %d extra %d\n", c.has_parts, c.has_extra);
     /* a message from before build 23: the hash only */
     netcheck_unpack(buf, NETCHECK_LEN_OLD, &c);
     printf("len13 ok hash %d parts %d extra %d\n", c.hash == a.hash, c.has_parts, c.has_extra);
@@ -81,6 +83,8 @@ int main(void)
     b.parts[0] ^= 1; b.parts[1] ^= 1;
     b.gens[0] ^= 1;
     b.crowd ^= 1;
+    b.shared ^= 1;
+    b.time_scale = 0x3F000000u;     /* 0.5 there, 1 here */
     netcheck_fields_text(text, sizeof(text), &a, &b, 2);
     printf("fields: %s\n", text);
     netcheck_parts_text(text, sizeof(text), &a, &b, 2, 2);
@@ -126,18 +130,18 @@ def line(out, key):
 
 
 def test_lengths(output):
-    assert line(output, 'lengths') == '13 37 145 extra 27'
+    assert line(output, 'lengths') == '13 37 157 extra 30'
 
 
 def test_full_message_round_trips_and_keeps_the_old_offsets(output):
-    assert line(output, 'full len') == '145 type 5 roundtrip 1'
+    assert line(output, 'full len') == '157 type 5 roundtrip 1'
     assert line(output, 'old offsets') == '1'
     assert line(output, 'too small') == '0'
 
 
 def test_older_lengths_are_read_as_far_as_they_go(output):
     assert line(output, 'len37') == 'parts 1 extra 0 part5 1 field 00000000 crowd 00000000'
-    assert line(output, 'len144') == 'parts 1 extra 0'
+    assert line(output, 'lenshort') == 'parts 1 extra 0'
     assert line(output, 'len13 ok') == 'hash 1 parts 0 extra 0'
     assert line(output, 'len12') == '0'
     assert line(output, 'pack37') == '37'
@@ -151,9 +155,12 @@ def test_report_names_the_differing_words(output):
     assert '; pre-fight generators differ (00376FDC here ' in fields
     assert '00375F68' not in fields
     assert '; crowd differ (here ' in fields
-    assert line(output, 'parts:') == ("fighter 1 (player 1), fighter 2 (player 2); the CPU fighters' generators equal; "
+    assert fields.endswith('; the shared generator differs; the time scale differs (1 here, 0.5 there); '
+                           'the match generator equal')
+    assert line(output, 'parts:') == ("fighter 1 (player 1), fighter 2 (player 2); the CPU fighters' generators unused (no CPU fighters); "
                                       "the shared generator and time scale equal")
-    assert line(output, 'equal:') == 'no fighter field differs; pre-fight generators equal; crowd equal'
+    assert line(output, 'equal:') == ('no fighter field differs; pre-fight generators equal; crowd equal; the shared generator equal; '
+                                      'the time scale equal (1 here, 1 there); the match generator equal')
     assert line(output, 'old peer') == '0'
     n, length = line(output, 'bounded').split()
     assert n == length and int(n) <= 63
@@ -161,7 +168,7 @@ def test_report_names_the_differing_words(output):
 
 
 def test_netplay_sends_and_reads_the_full_message():
-    # the sender packs every part (the whole 145 bytes), the receiver unpacks by length, and only the
+    # the sender packs every part (the whole 157 bytes), the receiver unpacks by length, and only the
     # hash decides a desync: the extra words are diagnostic
     assert 'uint8_t p[NETCHECK_LEN_FULL];' in NETPLAY_C
     assert 'netcheck_pack(p, (int)sizeof(p), P_HASH, &c)' in NETPLAY_C
