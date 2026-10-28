@@ -43,6 +43,10 @@ void pc_settings_on_window_size(void (*notify)(int width, int height));
 const char *pc_settings_path(void);
 void pc_settings_save(void);
 
+/* The game was started from the setup's build folder (build-cache) instead of with the launcher:
+ * no data folder, so build 0 and no updates. The launcher says how to start it. */
+int pc_settings_started_outside_launcher(void);
+
 #ifdef __cplusplus
 }
 #endif

@@ -2697,6 +2697,30 @@ static void gpu_notice()
     end_glass_modal();
 }
 
+// Started from the setup's build folder instead of with the launcher (pc_settings.c): say how to
+// start it properly, every time; the game still plays.
+static void outside_launcher_notice()
+{
+    static bool decided;
+    if (!decided && notice_may_open()) {
+        decided = true;
+        if (pc_settings_started_outside_launcher() || notice_test("launcher")) ImGui::OpenPopup("Start with the launcher");
+    }
+    if (!begin_glass_modal("Start with the launcher", ImGui::GetFontSize() * 30)) return;
+    ImGui::PushTextWrapPos(ImGui::GetFontSize() * 28);
+    ImGui::PushFont(g_font_bold, ImGui::GetStyle().FontSizeBase * 1.15f);
+    ImGui::TextColored(k_gold, "Start FFNY Online with the launcher");
+    ImGui::PopFont();
+    ImGui::TextUnformatted("Use the desktop shortcut, or DefJamLauncher.exe in your install folder.");
+    ImGui::Spacing();
+    ImGui::TextDisabled("This copy was started from the setup's build folder. From there it finds none of your "
+                        "data: it runs as build 0, gets no updates and cannot play online.");
+    ImGui::PopTextWrapPos();
+    ImGui::Spacing();
+    if (ImGui::Button("OK", ImVec2(ImGui::GetFontSize() * 8, 0))) ImGui::CloseCurrentPopup();
+    end_glass_modal();
+}
+
 // The update offer: a modal over the launcher when a newer build is signed and published.
 static void update_popup(UiResult &result)
 {
@@ -2992,6 +3016,7 @@ static UiResult draw_launcher(float x, float y, float width, float height)
     settings_dialog(origin, width, height, s, tab, page);
     update_popup(result);
     crash_popup();
+    outside_launcher_notice();
     gpu_notice();
     ImGui::End();
     return result;
