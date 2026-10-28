@@ -342,6 +342,23 @@ Chain: `sub_00080A00` (116211-116259) -> `sub_0007EA70` (decision) -> `sub_0007E
 5. After the reset, log `sub_0002A770` draw counts per caller (use `sub_0002A770_enter` with the return address) to see
    how much the crowd draws in play.
 
+## 8a. The restart and the draw lists (2026-10-28)
+
+The member restart `sub_0007D240` ends in a tail jump to `sub_00084110` ("show" on the member's animation object
+`member+0xE0`), which appends the object, without checking, to two arrays: the draw list of the crowd renderer at
+`[A+4]` (entries `+0x130`, count `+0x220`, 60 slots; `sub_00081860`, drawn per frame by `sub_00083BD0`, the render slot
+of vtable `0x2A08F8`, and walked by `sub_00083590`) and the list at `[A+0x10]+0x510` (entries `+0x440`, count `+0x530`;
+`sub_000839E0`, drawn by `sub_000838E0`). "Hide" is `sub_0007D260 -> sub_00084140` (swap-removes, `sub_00081890` /
+`sub_00083A00`). The game pairs them: the match-end cleanup `sub_00086F40 -> sub_0007E710` hides every member before
+the light restart `sub_000891A0 -> sub_00080880` shows them. `crowd_reset` restarted a crowd that was shown, so every
+member went on both lists once more per online match: each foreground spectator was drawn 2-3 times identically a
+frame (F9 reports 81db9e, a91ed1, 04723a, 83a66d: 87 of 289 skinned batches twice, later matches up to three times; a
+faded spectator at alpha 0.2 drawn twice is 0.36). The swap-remove skips the element it swaps in, so a hide after
+such a repeat can leave one copy, which is why later matches show three. Neither list is read by the crowd's update
+(only by the renderers), so `crowd_reset` now takes the members off both lists before the restart
+(`crowd_draw_lists`, `src/hooks/netplay.c`) and the restart puts each back once; `RECOMP_CROWD_LISTS=keep` (tests)
+keeps the old repeat for comparison.
+
 ## 9. Function index
 
 | Function | File:line | Role |
