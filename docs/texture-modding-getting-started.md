@@ -81,8 +81,8 @@ provides archive extraction, a searchable texture gallery and original/Faithful 
 comparisons. Its [README](https://github.com/vyanhursky/DefJam-Modding-Tools#install-and-resume)
 explains installation with Python 3.11+ and a virtual environment. The commands
 below use `defjam-tools` from that environment. If it is not on your PATH, replace
-that name with `.venv\Scripts\defjam-tools.exe` on Windows or
-`.venv/bin/defjam-tools` on macOS/Linux, running from the tools repository.
+that name with `.\.venv\Scripts\defjam-tools.exe` on Windows or
+`./.venv/bin/defjam-tools` on macOS/Linux, running from the tools repository.
 Paths in quotes are examples to replace; use your actual extracted-game and work
 folders. The argument syntax is the same in PowerShell and a macOS/Linux shell.
 
