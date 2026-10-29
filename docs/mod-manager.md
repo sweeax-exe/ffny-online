@@ -34,7 +34,9 @@ These commands are examples; catalogue publication is tracked separately.
 The launcher derives that capability from the toolkit compiled into the game.
 Released builds with the wide-layer loader advertise it, allowing compatible wide
 menu downloads to be offered. Unsupported game data/code/recipe
-mods are outside this first texture-only installer. General schema-2 overrides are
+mods are outside this first texture-only installer. Translations are
+[language packs](language-packs.md), installed in `<data>/languages` and chosen
+under Interface → Language; they are not in the Mods load order. General schema-2 overrides are
 future work. Full storefront/Quiver adapters are also future work; see the
 [storefront assessment](research/mod-storefront-integration-2026-10-21.md).
 

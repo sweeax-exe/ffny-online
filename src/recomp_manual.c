@@ -707,6 +707,17 @@ static void trace_sleep_caller(void)
 extern void defjam_skip_intro_enter(void);
 void sub_0006BC90_enter(void) { defjam_skip_intro_enter(); }
 
+/* A cutscene's subtitle set-up: show them in every Story cutscene when asked
+ * (src/patches/subtitles.c). ecx is the subtitle state; read it before the body. */
+extern void sub_000DA8A0_gen(void);
+extern void defjam_subtitles_after_nis_setup(uint32_t state);
+void sub_000DA8A0(void)
+{
+    uint32_t state = g_ecx;
+    sub_000DA8A0_gen();
+    defjam_subtitles_after_nis_setup(state);
+}
+
 extern void sub_00068BA0(void);
 extern void xbox_NoteAnchorEvent(const char *text);
 extern void defjam_unlock_all_on_funccall(const char *text);

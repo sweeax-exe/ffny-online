@@ -54,6 +54,7 @@ extern "C" {
 }
 #include "pc_input.h"
 #include "pc_settings.h"
+#include "pc_language.h"
 #include "pc_ui.h"
 #include "pc_ui_internal.h"
 
@@ -184,6 +185,8 @@ static const char *friendly(const char *section, const char *key)
 {
     struct Label { const char *section, *key, *text; };
     static const Label labels[] = {
+        {"language", "pack", "Language"},
+        {"language", "story_subtitles", "Story cutscene subtitles"},
         {"display", "fullscreen", "Full screen"},
         {"display", "window_width", "Window width"},
         {"display", "window_height", "Window height"},
@@ -1223,6 +1226,59 @@ static void open_folder()
 {
     pcui::open_path(pcui::folder_path(pcui::Folder::Settings), true);
 }
+// [language] pack as a choice of the installed packs (<data>/languages); the folder is what is stored.
+static void language_picker()
+{
+    static std::vector<PcLanguagePack> packs;
+    static UiTick scanned;
+    static bool ever;
+    RecompSetting *s = find("language", "pack");
+    if (!s) return;
+    if (!ever || ui_ticks() - scanned > 2000) {
+        std::string data = pcui::folder_path(pcui::Folder::Data);
+        packs.assign(32, PcLanguagePack{});
+        packs.resize((size_t)pc_language_list(data.c_str(), packs.data(), (int)packs.size()));
+        scanned = ui_ticks();
+        ever = true;
+    }
+    bool locked = s->source == RECOMP_SETTING_FROM_ENV;
+    std::string current = locked ? s->value_text : s->stored_text, label = "English (the game's own)";
+    if (!current.empty()) {
+        label = current + " (not installed)";
+        for (auto &p : packs)
+            if (current == p.folder) label = p.name;
+    }
+    ImGui::PushID("language.pack");
+    ImGui::BeginDisabled(locked);
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextUnformatted("Language");
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(ImGui::GetFontSize() * 16);
+    if (ImGui::BeginCombo("##language", label.c_str())) {
+        if (ImGui::Selectable("English (the game's own)", current.empty())) {
+            recomp_settings_set_text("language", "pack", "");
+            commit();
+        }
+        for (auto &p : packs) {
+            ImGui::BeginDisabled(p.problem[0] != 0);
+            std::string name = std::string(p.name) + "##" + p.folder;
+            if (ImGui::Selectable(name.c_str(), current == p.folder)) {
+                recomp_settings_set_text("language", "pack", p.folder);
+                commit();
+            }
+            ImGui::EndDisabled();
+            if (p.problem[0]) item_tooltip(p.problem);
+        }
+        ImGui::EndCombo();
+    }
+    ui_target("language.pack");
+    ImGui::EndDisabled();
+    if (s->help) item_tooltip(s->help);
+    ImGui::SameLine();
+    ImGui::TextDisabled(locked ? "Set for this run by RECOMP_LANGUAGE_PACK" : g_mode == UI_LAUNCHER ? "(on Play)" : "(next launch)");
+    ImGui::PopID();
+}
+
 static void page_general(UiMode mode)
 {
     ImGui::SeparatorText("Start-up");
@@ -1251,6 +1307,11 @@ static void page_general(UiMode mode)
                            "example left_stick_click+right_stick_click) is held for half a second. While it is open the game "
                            "sees no input and keeps running.");
     }
+    ImGui::SeparatorText("Language");
+    language_picker();
+    settings_group("language", { "story_subtitles" });
+    ImGui::TextWrapped("Language packs go in the languages folder of your data folder (docs/language-packs.md). "
+                       "The first start with a pack rebuilds its files from your dump, which takes a few seconds.");
     ImGui::SeparatorText("Appearance");
     settings_group("ui", { "scale" });
     ImGui::SeparatorText("Startup movies");

@@ -76,6 +76,13 @@ line turns it on for one run. Every key here is read at start-up.
 | `vignette` | `true` | The darkened screen edges that venues and some scenes draw (part of the game's post effects). `false` removes them. Applies at once. Env `RECOMP_VIGNETTE` (`1` on, `0` off). |
 | `vignette_strength` | `100` | How dark the vignette is, 0-100 percent of the game's own; 0 is the same as off. Applies at once. Env `RECOMP_VIGNETTE_STRENGTH`. [How both work](research/picture-options.md). |
 
+## [language]
+
+| Key | Default | Meaning |
+|---|---|---|
+| `pack` | *(empty)* | A language pack's folder beneath `<data>/languages`; empty plays the game in its own English. The first start with a pack rebuilds its files from your dump into `<data>/cache/language`. Restart. Shown in the launcher as **Interface → Language**. Env `RECOMP_LANGUAGE_PACK`. [Language packs](language-packs.md). |
+| `story_subtitles` | `auto` | Story cutscene subtitles: `auto` (what the language pack asks for; without one, as the game does), `all cutscenes` (every cutscene, English included), `as the game does` (the opening cutscene only). Restart. Env `RECOMP_STORY_SUBTITLES`. |
+
 ## [textures]
 
 | Key | Default | Meaning |
