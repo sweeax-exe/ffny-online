@@ -81,7 +81,8 @@ style uses the game's charcoal, ivory, red and gold palette.
   match type, play any Story scene, or look at a venue in the stage viewer. See
   [The developer menu](docs/developer-menu.md).
 - **Local saves.** Profiles, settings and generated texture packs live in your
-  data folder, which setup preserves through updates and repairs.
+  data folder, which setup preserves through updates and repairs. Profiles from an original
+  Xbox can be brought over; see [Importing Xbox saves](docs/importing-xbox-saves.md).
 
 ## Get started
 
