@@ -725,6 +725,13 @@ bool mouse_in(const Frame &f, float x, float y, float w, float h)
 {
     return ImGui::IsMouseHoveringRect(f.p(x, y), f.p(x + w, y + h), false);
 }
+// Hover picks only when the mouse moved (or clicked) this frame: a pointer resting on a row must not
+// pull the selection back every frame, which left the pad stuck on that row (owner, 2026-10-30).
+bool mouse_pick(const Frame &f, float x, float y, float w, float h)
+{
+    ImVec2 d = ImGui::GetIO().MouseDelta;
+    return (d.x != 0 || d.y != 0 || ImGui::IsMouseClicked(0)) && mouse_in(f, x, y, w, h);
+}
 bool mouse_click(const Frame &f, float x, float y, float w, float h)
 {
     return mouse_in(f, x, y, w, h) && ImGui::IsMouseClicked(0);
@@ -1216,7 +1223,7 @@ void draw_servers(ImDrawList *dl, const Frame &f, const Pad &pad)
     glass(dl, f, 36, 82, 290, rows * pitch + 12);
     for (int k = 0; k < rows; k++) {
         float x = 50, y = 92 + k * pitch, w = 262, h = row_h;
-        if (mouse_in(f, x, y, w, h)) S.servers_sel = k;
+        if (mouse_pick(f, x, y, w, h)) S.servers_sel = k;
         bool sel = S.servers_sel == k;
         if (sel) selector(dl, f, x, y, w, h);
         bool both = k == BOTH_ROW;
@@ -1393,7 +1400,7 @@ void draw_hub(ImDrawList *dl, const Frame &f, const Pad &pad)
         // eight items (ranked shown) sit closer, so the panel still ends above the hints
         float x = 50, y = count > 7 ? 84 + k * 41 : count > 6 ? 84 + k * 45 : 88 + k * 53, w = 262;
         float h = count > 7 ? 39 : count > 6 ? 42 : 46;
-        if (mouse_in(f, x, y, w, h)) S.hub_sel = i;
+        if (mouse_pick(f, x, y, w, h)) S.hub_sel = i;
         bool sel = S.hub_sel == i;
         if (sel) selector(dl, f, x, y, w, h);
         text(dl, f, g_title, 23, x + 16, y + 3, sel ? CREAM : with_alpha(GREY, 0.85f), items[i], LEFT, 1.6f);
@@ -1678,7 +1685,7 @@ void draw_rooms(ImDrawList *dl, const Frame &f, const Pad &pad)
     for (int i = top; i < n && i < top + 6; i++) {
         const NetRoomInfo &r = list[i].room;
         float x = 50, y = 86 + (i - top) * 52, w = 262, h = 44;
-        if (mouse_in(f, x, y, w, h)) S.rooms_sel = i;
+        if (mouse_pick(f, x, y, w, h)) S.rooms_sel = i;
         bool sel = i == S.rooms_sel;
         // a King of the Hill room takes players in any phase: they join the back of the line
         bool open = (r.phase == 0 || NETPLAY_IS_KOTH(r.mode)) && r.players < r.max;
@@ -1902,7 +1909,7 @@ void draw_settings(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom
     for (int i = 0; i < rows && i < (int)rows_of.size(); i++) {
         int row = rows_of[i];
         float x = 50, y = 96 + i * row_step, w = 270, h = row_h;
-        if (mouse_in(f, x, y, w, h)) S.settings_sel = i;
+        if (mouse_pick(f, x, y, w, h)) S.settings_sel = i;
         bool sel = S.settings_sel == i;
         glass(dl, f, x, y, w, h, 7, sel ? IM_COL32(44, 32, 22, 255) : IM_COL32(10, 10, 13, 255), sel ? 0.78f : 0.6f);
         if (sel) selector(dl, f, x, y, w, h);
@@ -1986,7 +1993,7 @@ void draw_fighters(ImDrawList *dl, const Frame &f, const Pad &pad, bool *chosen,
             int i = (S.fighter_top + r) * cols + c;
             if (i >= n) break;
             float x = gx + c * (cw + 4), y = gy + r * (ch + 6);
-            if (mouse_in(f, x, y, cw, ch)) S.fighter_sel = i;
+            if (mouse_pick(f, x, y, cw, ch)) S.fighter_sel = i;
             bool sel = i == S.fighter_sel;
             rect(dl, f, x, y, cw, ch, IM_COL32(0, 0, 0, 150), 3);
             if (!portrait(dl, f, list[i].id, x + 1, y + 1, cw - 2, ch - 2, sel ? IM_COL32_WHITE : IM_COL32(150, 150, 150, 255)))
@@ -2070,7 +2077,7 @@ void draw_vote(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
     float w = 170, gap = 15, x0 = 320 - (n * w + (n - 1) * gap) / 2;
     for (int i = 0; i < n; i++) {
         float x = x0 + i * (w + gap), y = 100;
-        if (mouse_in(f, x, y, w, 290)) S.vote_sel = i;
+        if (mouse_pick(f, x, y, w, 290)) S.vote_sel = i;
         bool sel = i == S.vote_sel, mine = me && me->voted == i;
         glass(dl, f, x, y, w, 290, 10, mine ? IM_COL32(56, 14, 20, 255) : IM_COL32(10, 10, 13, 255), mine ? 0.68f : 0.62f);
         const Tex &photo = venue_tex(r.candidates[i]);
@@ -2681,7 +2688,7 @@ void draw_voice(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r
     float row_step = rows > 7 ? 300.0f / rows : 39, row_h = row_step - 5;
     for (int i = 0; i < rows; i++) {
         float x = 50, y = 80 + i * row_step, w = 270, h = row_h;
-        if (mouse_in(f, x, y, w, h)) S.voice_sel = i;
+        if (mouse_pick(f, x, y, w, h)) S.voice_sel = i;
         bool sel = S.voice_sel == i;
         glass(dl, f, x, y, w, h, 7, sel ? IM_COL32(44, 32, 22, 255) : IM_COL32(10, 10, 13, 255), sel ? 0.78f : 0.6f);
         if (sel) selector(dl, f, x, y, w, h);
