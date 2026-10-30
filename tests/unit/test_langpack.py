@@ -108,7 +108,7 @@ def dump(tmp_path):
     game = tmp_path / 'game'
     make_game(game)
     make_translation(game, tmp_path / 'modified')
-    pack = tmp_path / 'data' / 'languages' / 'xx-test'
+    pack = tmp_path / 'data' / 'mods' / 'xx-test'
     assert lp.main(['make', str(game), str(tmp_path / 'modified'), '--out', str(pack)]) == 0
     return tmp_path, game, pack
 
@@ -346,6 +346,19 @@ def test_runtime_without_a_pack_changes_nothing(runtime_tool, dump):
     lines, _ = run_runtime(runtime_tool, tmp / 'data', game, RECOMP_LANGUAGE_PACK='xx-test',
                            RECOMP_STORY_SUBTITLES='as the game does')
     assert lines[-1] == 'subtitles game'
+
+
+def test_runtime_finds_the_mod_in_the_texture_root(runtime_tool, dump):
+    # The language mod sits in the mods folder the launcher and the texture loader use.
+    tmp, game, pack = dump
+    elsewhere = tmp / 'elsewhere'
+    elsewhere.mkdir()
+    shutil.move(str(pack), str(elsewhere / 'xx-test'))
+    lines, err = run_runtime(runtime_tool, tmp / 'data', game, 'gconfig.xml', RECOMP_LANGUAGE_PACK='xx-test')
+    assert lines[0] == 'keep gconfig.xml' and 'not used' in err
+    lines, err = run_runtime(runtime_tool, tmp / 'data', game, 'gconfig.xml', RECOMP_LANGUAGE_PACK='xx-test',
+                             RECOMP_TEXTURE_ROOT=str(elsewhere))
+    assert lines[0].startswith('serve gconfig.xml'), err
 
 
 def test_runtime_refuses_a_different_dump(runtime_tool, dump):

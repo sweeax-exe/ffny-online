@@ -11,7 +11,7 @@
 | [Controllers, keyboard and mouse](10-input.md) | Gamepads, the keyboard player, default keys, remapping and rumble |
 | [settings.ini and keybinds](settings-reference.md) | Every setting, the default keys and key names, with examples |
 | [HD textures](hd-textures.md) | Optional texture packs on Windows, macOS and Linux: generation, settings and fallback |
-| [Language packs](language-packs.md) | Playing in another language, subtitles in every Story cutscene, use with texture packs, and making a pack |
+| [Language packs](language-packs.md) | Playing in another language with a language mod, subtitles in every Story cutscene, use with texture packs, and making a pack |
 | [Known issues](known-issues.md) | Current limitations and what has not been tested |
 
 ## Develop and test

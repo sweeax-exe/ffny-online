@@ -11,10 +11,11 @@ DRIVER=r'''
 #if defined(_WIN32)
 int wmain(int argc,wchar_t**argv){
     auto list=pcui::inventory(std::filesystem::path(argv[1]),
-                            pcui::path_utf8(std::filesystem::path(argv[2])));
+                            pcui::path_utf8(std::filesystem::path(argv[2])),
+                            argc>4?pcui::path_utf8(std::filesystem::path(argv[4])):"");
 #else
 int main(int argc,char**argv){
-    auto list=pcui::inventory(std::filesystem::u8path(argv[1]),argv[2]);
+    auto list=pcui::inventory(std::filesystem::u8path(argv[1]),argv[2],argc>4?argv[4]:"");
 #endif
 #if defined(_WIN32)
     auto mods=std::filesystem::path(argv[1]);
@@ -28,12 +29,16 @@ int main(int argc,char**argv){
         for(const auto &g:groups)if(g.builtin)pcui::select_mod(list,g,true);
     if(argc>3 && action=="lower")pcui::move_priority(list,groups,0,false);
     if(argc>3 && action=="higher")pcui::move_priority(list,groups,1,true);
+    if(argc>3 && action.rfind("on:",0)==0)
+        for(const auto &g:groups)if(g.id==action.substr(3))pcui::select_mod(list,g,true);
     groups=pcui::mod_groups(mods,list);
     for(const auto &g:groups)if(g.builtin)std::cout<<"builtin="<<g.name<<"|"<<g.members.size()<<"\n";
     for(const auto &g:pcui::priority_groups(list,groups))std::cout<<"priority="<<g.name<<"|"<<g.members.size()<<"\n";
     for(const auto&p:list)std::cout<<p.name<<"|"<<p.selected<<"|"<<p.problem<<"\n";
     for(const auto &pair:pcui::pack_conflicts(mods,list))std::cout<<"conflict="<<pair.first<<"|"<<pair.second<<"\n";
+    for(const auto&p:list)if(p.language)std::cout<<"language="<<p.name<<"|"<<p.selected<<"|"<<p.title<<"|"<<p.problem<<"\n";
     std::cout<<"chosen="<<pcui::selected_packs(list)<<"\n";
+    std::cout<<"selected_language="<<pcui::selected_language(list)<<"\n";
     std::cout<<"timing="<<pcui::aspect_next_launch(0,1)<<pcui::aspect_next_launch(1,0)
         <<pcui::aspect_next_launch(0,2)<<pcui::aspect_next_launch(2,0)
         <<pcui::aspect_next_launch(2,3)<<pcui::aspect_next_launch(3,3)<<"\n";
@@ -54,8 +59,9 @@ def inventory_tool(tmp_path_factory, request):
     assert result.returncode==0,result.stdout+result.stderr
     return exe
 
-def run(tool,mods,chosen,action=None):
-    result=subprocess.run([str(tool),str(mods),chosen]+([action] if action else []),capture_output=True,encoding='utf-8',check=True)
+def run(tool,mods,chosen,action=None,language=None):
+    extra=[action or '']+([language] if language is not None else []) if action or language is not None else []
+    result=subprocess.run([str(tool),str(mods),chosen]+extra,capture_output=True,encoding='utf-8',check=True)
     return result.stdout
 
 def pack(mods,name,manifest='[pack]\nschema = 1\n[textures]\n'):
@@ -164,3 +170,32 @@ def test_lookalike_or_mismatched_marker_is_not_a_builtin(inventory_tool,tmp_path
     marker=tmp_path/opacity/'builder.json'
     value=json.loads(marker.read_text());value['png_mips']='channels';marker.write_text(json.dumps(value))
     assert 'builtin=' not in run(inventory_tool,tmp_path,'')
+
+def language(mods,name,header='[language]\nschema=1\nname=Espa\u00f1ol\nlanguage=es\n[files]\n'):
+    folder=mods/name;folder.mkdir(parents=True)
+    (folder/'language.ini').write_text(header,encoding='utf-8')
+
+def test_language_mod_is_listed_off_and_outside_the_texture_list(inventory_tool,tmp_path):
+    pack(tmp_path,'menu');language(tmp_path,'es-zarf')
+    out=run(inventory_tool,tmp_path,'menu')
+    assert 'language=es-zarf|0|Espa\u00f1ol|\n' in out
+    assert 'chosen=menu\n' in out and 'selected_language=\n' in out
+
+def test_language_mod_on_is_saved_apart_from_the_load_order(inventory_tool,tmp_path):
+    pack(tmp_path,'menu');language(tmp_path,'es-zarf')
+    out=run(inventory_tool,tmp_path,'menu',language='es-zarf')
+    assert 'language=es-zarf|1|' in out and 'selected_language=es-zarf\n' in out
+    assert 'chosen=menu\n' in out
+    assert [line for line in out.splitlines() if line.startswith('priority=')]==['priority=menu|1']
+
+def test_only_one_language_mod_is_on(inventory_tool,tmp_path):
+    language(tmp_path,'es-zarf');language(tmp_path,'fr-test','[language]\nschema=1\nname=Fran\u00e7ais\nlanguage=fr\n')
+    out=run(inventory_tool,tmp_path,'','on:fr-test','es-zarf')
+    assert 'language=es-zarf|0|' in out and 'language=fr-test|1|' in out
+    assert 'selected_language=fr-test\n' in out
+
+def test_language_mod_problems_and_missing_choice(inventory_tool,tmp_path):
+    language(tmp_path,'future','[language]\nschema=2\n')
+    out=run(inventory_tool,tmp_path,'',language='gone')
+    assert 'future|0|Unsupported language.ini schema (expected 1)' in out
+    assert 'gone|1|Not installed' in out

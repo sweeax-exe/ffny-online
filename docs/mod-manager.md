@@ -33,11 +33,13 @@ These commands are examples; catalogue publication is tracked separately.
 `--capability wide-v1` is appropriate only for a runtime with the wide-layer loader.
 The launcher derives that capability from the toolkit compiled into the game.
 Released builds with the wide-layer loader advertise it, allowing compatible wide
-menu downloads to be offered. Unsupported game data/code/recipe
-mods are outside this first texture-only installer. Translations are
-[language packs](language-packs.md), installed in `<data>/languages` and chosen
-under Interface → Language; they are not in the Mods load order. General schema-2 overrides are
-future work. Full storefront/Quiver adapters are also future work; see the
+menu downloads to be offered. Builds from 0.12.4 also pass `--capability language-v1`:
+translations are [language mods](language-packs.md), a folder with `language.ini` and
+binary deltas (`.djd`) instead of `manifest.ini`. They install into the same mods
+folder, are ticked on the same page (one language at a time, saved as
+`[language] pack`), and are not in the Load Order: they change the game's own data
+beneath every texture mod. Other game data/code/recipe mods are outside this
+installer. General schema-2 overrides are future work. Full storefront/Quiver adapters are also future work; see the
 [storefront assessment](research/mod-storefront-integration-2026-10-21.md).
 
 State lives at `<data>/mod-manager/`, outside runtime pack discovery:

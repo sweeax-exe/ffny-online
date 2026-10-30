@@ -1,9 +1,11 @@
 /*
  * Language packs (docs/language-packs.md).
  *
- * A pack is a folder in <data>/languages with language.ini and small binary
- * deltas, one per translated file or archive entry. It carries only what the
- * translator changed. At start-up the game rebuilds the files the pack lists
+ * A pack is a mod: a folder in the mods folder (<data>/mods, or
+ * RECOMP_TEXTURE_ROOT) with language.ini and small binary deltas, one per
+ * translated file or archive entry. It carries only what the translator
+ * changed. The launcher's Mods page turns one on ([language] pack); with none
+ * the game plays in its own English. At start-up the game rebuilds the files the pack lists
  * from the player's own dump, once, into <data>/cache/language/<pack>, and the
  * kernel's path layer then opens those copies whenever the title asks for the
  * originals (g_xbox_game_file_redirect). The dump itself is never written.
@@ -66,7 +68,8 @@ size_t pc_language_settings(RecompSetting *out, size_t max)
     memset(out, 0, sizeof(*out) * 2);
 #define ADD(...) do { RecompSetting s_ = { __VA_ARGS__ }; out[n++] = s_; } while (0)
     ADD("language", "pack", RECOMP_SETTING_STRING, 0, 0, 0, NULL, "RECOMP_LANGUAGE_PACK", RECOMP_SETTING_RESTART,
-        "Language pack folder in the data folder's languages directory; empty plays the game in its own English.");
+        "Language mod: a folder in the mods folder with language.ini (the Mods page sets it); empty plays the "
+        "game in its own English.");
     ADD("language", "story_subtitles", RECOMP_SETTING_ENUM, 0, 0, 0, k_subtitles, "RECOMP_STORY_SUBTITLES",
         RECOMP_SETTING_RESTART,
         "Subtitles in Story cutscenes: auto follows the language pack (a translation shows them in every "
@@ -779,7 +782,12 @@ void pc_language_start(const char *data_root, const char *game_dir)
         fprintf(stderr, "[LANG] '%s' is not a pack folder name; playing in the game's own language\n", folder);
         return;
     }
-    snprintf(dir, sizeof dir, "%s" HOST_SEP "languages" HOST_SEP "%s", data_root, folder);
+    {
+        /* The mods folder, as the launcher's Mods page and the texture loader find it. */
+        const char *mods = getenv("RECOMP_TEXTURE_ROOT");
+        if (mods && *mods) snprintf(dir, sizeof dir, "%s" HOST_SEP "%s", mods, folder);
+        else snprintf(dir, sizeof dir, "%s" HOST_SEP "mods" HOST_SEP "%s", data_root, folder);
+    }
     g_error[0] = 0;
     if (!pack_load(dir, folder, &g_pack, 1)) {
         fprintf(stderr, "[LANG] language pack '%s' not used: %s\n", folder, g_error);
@@ -932,50 +940,4 @@ int pc_language_all_subtitles(void)
     if (choice == 1) return 1;
     if (choice == 2) return 0;
     return g_active && g_pack_subtitles;
-}
-
-int pc_language_list(const char *data_root, PcLanguagePack *out, int max)
-{
-    char root[LANG_PATH];
-    int n = 0;
-    if (!data_root || !*data_root) return 0;
-    snprintf(root, sizeof root, "%s" HOST_SEP "languages", data_root);
-#if defined(_WIN32)
-    char pattern[LANG_PATH];
-    WIN32_FIND_DATAA fd;
-    snprintf(pattern, sizeof pattern, "%s\\*", root);
-    HANDLE h = FindFirstFileA(pattern, &fd);
-    if (h == INVALID_HANDLE_VALUE) return 0;
-    do {
-        const char *name = fd.cFileName;
-        if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) continue;
-#else
-    DIR *d = opendir(root);
-    struct dirent *ent;
-    if (!d) return 0;
-    while ((ent = readdir(d))) {
-        const char *name = ent->d_name;
-#endif
-        char dir[LANG_PATH];
-        Pack *p;
-        if (name[0] == '.' || n >= max || !safe_name(name, 0) || strlen(name) >= sizeof out[n].folder) continue;
-        snprintf(dir, sizeof dir, "%s" HOST_SEP "%s", root, name);
-        p = (Pack *)calloc(1, sizeof *p);
-        if (!p) continue;
-        memset(&out[n], 0, sizeof out[n]);
-        snprintf(out[n].folder, sizeof out[n].folder, "%s", name);
-        g_error[0] = 0;
-        if (pack_load(dir, name, p, 0)) snprintf(out[n].name, sizeof out[n].name, "%s", p->name);
-        else { snprintf(out[n].name, sizeof out[n].name, "%s", name); snprintf(out[n].problem, sizeof out[n].problem, "%s", g_error); }
-        pack_free(p);
-        free(p);
-        n++;
-#if defined(_WIN32)
-    } while (FindNextFileA(h, &fd));
-    FindClose(h);
-#else
-    }
-    closedir(d);
-#endif
-    return n;
 }

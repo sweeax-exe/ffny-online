@@ -1,8 +1,9 @@
 # Language packs
 
-A language pack plays the game in another language: menus, Story subtitles, memory-card messages, the
-fonts that draw them and the menu artwork with words in it. The game was released in English (and, on the
-USA disc, French text that the game never offers); fan translations exist, and this is how the port loads them.
+A language pack is a **mod** that plays the game in another language: menus, Story subtitles, memory-card
+messages, the fonts that draw them and the menu artwork with words in it. With no language mod on, the game
+is in its own English. The port ships no translation; packs are made and hosted by their translators, and
+this page is how they work.
 
 A pack holds **only what its translator changed**, as small binary differences. At start-up the game
 rebuilds the files the pack lists from **your own dump**, once, and opens those copies instead of the
@@ -10,15 +11,16 @@ originals. Your dump is never modified, and a pack can be shared without sharing
 
 ## Playing in another language
 
-1. Put the pack's folder in the `languages` folder of your data folder:
+1. Install the pack like any other mod: from the **Mods** page's project catalogue when it is listed
+   there, or by unzipping its folder into the mods folder (**Mods → Open Mods Folder**):
 
    ```text
-   <data>/languages/es-zarf/language.ini
-   <data>/languages/es-zarf/patches/...
+   <data>/mods/es-zarf/language.ini
+   <data>/mods/es-zarf/patches/...
    ```
 
-   `<data>` is the folder with `settings.ini` in it (the launcher's **Maintenance → Files** opens it).
-2. In the launcher, **Interface → Language**, choose the pack. Or in `settings.ini`:
+2. On the **Mods** page, tick it under **Installed mods**. Only one language is on at a time: ticking
+   another turns the first off. Untick it to play in English. It is saved in `settings.ini` as:
 
    ```ini
    [language]
@@ -29,14 +31,15 @@ originals. Your dump is never modified, and a pack can be shared without sharing
    a pack that translates menu art, go in `<data>/cache/language/<pack>`). Later starts reuse them until the
    pack or your dump changes.
 
-Choose **English (the game's own)** to switch back; deleting the pack's folder and its cache folder removes it
-completely. A pack that does not match your dump is not used: the game starts in English and the log says
-why (`[LANG] language pack '...' not used: ...`). Packs are made for the USA dump that Setup asks for.
+Deleting the pack's folder and its cache folder removes it completely. A pack that does not match your dump
+is not used: the game starts in English and the log says why (`[LANG] language pack '...' not used: ...`).
+Packs are made for the USA dump that Setup asks for.
 
 ### Subtitles in every Story cutscene
 
-The game shows Story subtitles only in the opening cutscene (and in every cutscene when its language is
-French). `[language] story_subtitles` changes that:
+The game has English subtitles for every Story cutscene (40 scenes, timed in `assets/subtitle.viv`) but
+shows them only in the opening one, unless its language is French. `[language] story_subtitles` changes
+that, with or without a language mod:
 
 | Value | Meaning |
 |---|---|
@@ -44,14 +47,15 @@ French). `[language] story_subtitles` changes that:
 | `all cutscenes` | Subtitles in every Story cutscene, in any language, English included |
 | `as the game does` | The opening cutscene only |
 
-The launcher has it under **Interface → Story cutscene subtitles**. Env `RECOMP_STORY_SUBTITLES` and
-`RECOMP_LANGUAGE_PACK` override the file for one run.
+The launcher has it under **Interface → Subtitles**. Env `RECOMP_STORY_SUBTITLES` and
+`RECOMP_LANGUAGE_PACK` override the file for one run (the Mods page then shows the language as locked).
 
 ## With texture packs (HD, widescreen menus)
 
 The two never touch the same files: a language pack replaces game data (string tables, fonts, archives),
-a texture pack replaces images as they are drawn. A language pack is **not part of the Mods load order**:
-it changes the game's own images before any texture pack sees them, so it always sits beneath every pack.
+a texture pack replaces images as they are drawn. A language mod is therefore **not part of the Load
+Order**: it changes the game's own images before any texture pack sees them, so it always sits beneath every
+texture mod, wherever the others are.
 
 Texture packs find what to replace by the original image's content. An image the translator redrew is a
 different image, so:
@@ -88,8 +92,12 @@ You need the USA dump's files, a copy of them with your translation in place, an
 
    `make` finds every changed file, and every changed entry inside the archives (nested ones included,
    compressed or not), and writes one delta per entry. `info` shows how many bytes of each are yours.
-3. Copy the folder to `<data>/languages/`, choose it and play. Look for the `[LANG]` lines in the log.
-4. Share the folder (zipped) with a licence and credits file. It contains your changes only.
+3. Copy the folder to the mods folder, tick it on the **Mods** page and play. Look for the `[LANG]` lines in
+   the log.
+4. Share the folder (zipped, the folder at the root of the zip) with a licence and credits file. It contains
+   your changes only. For the project catalogue, a version declares the capability `language-v1` and a
+   `min_recomp` of 0.12.4 or later; the installer accepts `.ini`, `.djd`, `.md`, `.txt` and `.json` files
+   in it.
 
 Where things are, on the USA disc:
 
@@ -109,19 +117,22 @@ need a runtime patch in the port, like the Story subtitle option above.
 
 ## Format
 
-A pack folder holds `language.ini`, its deltas, and any other files (credits, licence, readme).
+A pack folder holds `language.ini`, its deltas, and any other files (credits, licence, readme). A folder
+with `language.ini` and no `manifest.ini` is a language mod; one with `manifest.ini` is a texture pack.
 
 ```ini
 [language]
 schema=1
-name=Español                      ; shown in the launcher
-language=es                       ; ISO 639 code
+; name is shown on the Mods page; language is the ISO 639 code
+name=Español
+language=es
 version=1.1.0
 authors=ZARF (MOD-ZARF)
 licence=CC BY-NC-SA 4.0
 homepage=https://...
 description=...
-story_subtitles=all               ; all: subtitles in every Story cutscene (with [language] story_subtitles = auto)
+; all: subtitles in every Story cutscene (with [language] story_subtitles = auto)
+story_subtitles=all
 
 [files]
 assets/misc.viv|cmusen.loc = patches/001-cmusen.loc.djd
@@ -129,6 +140,7 @@ screens/screens.viv|screens/intMain/mainMenu.big|mainMenu.xsh = patches/010-main
 default.xbe = patches/005-default.xbe.djd
 ```
 
+- Comments are whole lines starting with `;` or `#`; text after a value is part of it.
 - A target is a path in the dump (forward slashes, matched without regard to case), then `|` and an entry
   name for each archive level, as the game names them itself. ASCII letters, digits, `_`, `-`, `.` and `/`;
   no `..`. Delta paths are relative to the pack and end in `.djd`.

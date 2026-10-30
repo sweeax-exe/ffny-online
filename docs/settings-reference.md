@@ -80,8 +80,8 @@ line turns it on for one run. Every key here is read at start-up.
 
 | Key | Default | Meaning |
 |---|---|---|
-| `pack` | *(empty)* | A language pack's folder beneath `<data>/languages`; empty plays the game in its own English. The first start with a pack rebuilds its files from your dump into `<data>/cache/language`. Restart. Shown in the launcher as **Interface → Language**. Env `RECOMP_LANGUAGE_PACK`. [Language packs](language-packs.md). |
-| `story_subtitles` | `auto` | Story cutscene subtitles: `auto` (what the language pack asks for; without one, as the game does), `all cutscenes` (every cutscene, English included), `as the game does` (the opening cutscene only). Restart. Env `RECOMP_STORY_SUBTITLES`. |
+| `pack` | *(empty)* | The language mod that is on: its folder in the mods folder (`<data>/mods`, or `RECOMP_TEXTURE_ROOT`); empty plays the game in its own English. The first start with a pack rebuilds its files from your dump into `<data>/cache/language`. Restart. Set by ticking the mod on the launcher's **Mods** page (one language at a time). Env `RECOMP_LANGUAGE_PACK`. [Language packs](language-packs.md). |
+| `story_subtitles` | `auto` | Story cutscene subtitles: `auto` (what the language mod asks for; without one, as the game does), `all cutscenes` (every cutscene, English included: the game has English subtitles for all of them), `as the game does` (the opening cutscene only). Restart. Shown in the launcher as **Interface → Subtitles**. Env `RECOMP_STORY_SUBTITLES`. |
 
 ## [textures]
 
