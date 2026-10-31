@@ -14,6 +14,13 @@ and the [widescreen map selector border does not account for the Shops area](htt
 Their causes and cross-platform reproduction remain unconfirmed. The approval
 does not replace the pending automated all-pack/platform and setup gates.
 
+The all-pack Windows suite completed16/17 with four platform-inapplicable skips.
+Combat memory growth failed at96.7MiB and at375.6MiB on the same-fixture targeted
+repeat against the unchanged64MiB limit. Longer held-menu all-pack observations
+pass, while the Lanczos-only control fails at122.3MiB. These do not waive the
+failed gate or establish a leak's cause. French/English-subtitle captures and
+controller tracing pass. See the [measured memory report](research/rc-v0.13.0-hd-memory.md#post-playtest-full-lanczos-configuration).
+
 The combined candidate has not completed its full Windows/macOS/Linux acceptance. French interface and English subtitle state checks retain captures for separate rendered-text review. The requested Menus1.4.0/Fighters1.0.0 profile uses a 2048 MiB texture budget; it does not close the default-budget issue #141. Late controller refresh remains optional/off by default. See [candidate commands and evidence requirements](regression-v0.13.0.md).
 
 ## Remaining investigations

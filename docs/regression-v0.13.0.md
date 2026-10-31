@@ -42,8 +42,12 @@ both generated mip-policy folders against their retained corpus image hashes,
 recipe identity and runtime aliases. It records corpus/manifest digests and loads
 Lanczos first, then Menus, then Fighters, so the specialized mods retain priority.
 Keep the generation cache and receipt together on each test host. The first
-Windows two-mod results do not certify this expanded configuration: a full retest
-and a memory-growth comparison are pending until the owner finishes the playtest.
+Windows two-mod results do not certify this expanded configuration. The owner
+approved the playtest; the all-pack Windows retest finished16/17 with memory
+growth failing again on a targeted repeat. The longer all-pack menu observations
+pass, while the Lanczos-only control fails. Keep every result and the64MiB gate;
+see the [post-playtest memory report](research/rc-v0.13.0-hd-memory.md#post-playtest-full-lanczos-configuration).
+Mac/Linux full regression and setup acceptance remain pending.
 
 Every gameplay, scenario, soak and controller run receives 16:9 and all selected packs,
 even when scenario isolation clears inherited diagnostics. Original-image
