@@ -8,6 +8,9 @@
 #ifndef DEFJAM_VERSION
 #define DEFJAM_VERSION "dev"
 #endif
+#if defined(DEFJAM_APP)
+const char *pc_app_game_version();      // src/app/app_update.cpp: the installed game's version
+#endif
 
 UiHomeResult ui_launcher_home(float width, float height, const char *focus)
 {
@@ -27,7 +30,11 @@ UiHomeResult ui_launcher_home(float width, float height, const char *focus)
         float ph = std::min(300 * s, body - 175 * s);
         pcui::poster(paper, ImVec2(left - 10 * s, ph), s);
         ImGui::SetCursorScreenPos(ImVec2(start.x, paper.y + ph + 15 * s));
+#if defined(DEFJAM_APP)
+        ImGui::TextDisabled("FAN RECOMP / v%s", pc_app_game_version());   // the game Play starts
+#else
         ImGui::TextDisabled("FAN RECOMP / v%s", DEFJAM_VERSION);
+#endif
         ImGui::SetCursorScreenPos(ImVec2(start.x, start.y + body - 95 * s));
         ImGui::TextUnformatted("Ready for the next round");
         ImGui::BeginDisabled(pcui::mod_busy() || pcui::mod_recovery_needed());
