@@ -41,6 +41,8 @@ struct Steam
     bool running = false, added = false;
     bool confirm = false;               // asking whether Steam may be closed
     std::string confirm_action;
+    bool added_here = false;            // added in this session: Home keeps showing it (IN STEAM)
+    std::string failed;                 // why the last add or remove failed, for Home's dialog
 } g_steam;
 
 fs::path folder() { return os::user_base() / "DefJamRecompiled"; }
@@ -84,6 +86,10 @@ void poll()
         g_steam.confirm = true;
         g_steam.confirm_action = g_steam.action;
         g_steam.details.clear();
+    } else if (code != 0 && g_steam.action != "status") {
+        g_steam.failed = g_steam.message;
+    } else if (g_steam.action == "add" && g_steam.added) {
+        g_steam.added_here = true;
     }
     g_steam.action.clear();
 }
@@ -157,6 +163,78 @@ void steam_section()
         ImGui::TextWrapped("%s", g_steam.details.c_str());
     else if (!g_steam.message.empty() && !g_steam.added && g_steam.action.empty() && g_steam.user.empty())
         ImGui::TextWrapped("%s", g_steam.message.c_str());
+}
+
+float steam_play_width()
+{
+    poll();
+    if (!g_steam.asked) {
+        g_steam.asked = true;
+        ask("status", false);
+    }
+    // Nothing until Steam's state is known, without Steam or an account in it, or once the game is
+    // in the library (unless it was added here, which IN STEAM confirms).
+    if (!g_steam.known || g_steam.root.empty() || g_steam.user.empty()) return 0;
+    if (g_steam.added && !g_steam.added_here) return 0;
+    return ImGui::CalcTextSize("ADD TO STEAM").x + ImGui::GetStyle().FramePadding.x * 4;
+}
+
+void steam_play_button(float width, float height)
+{
+    ImVec2 size(width, height);
+    if (g_steam.added) {
+        ImGui::BeginDisabled();
+        ImGui::Button("IN STEAM", size);
+        ImGui::EndDisabled();
+        ui_target("home.steam");
+        return;
+    }
+    bool working = g_steam.process.id != 0 && g_steam.action != "status";
+    ImGui::BeginDisabled(g_steam.process.id != 0);
+    if (ImGui::Button(working ? "ADDING..." : "ADD TO STEAM", size)) {
+        g_steam.failed.clear();
+        request("add");
+    }
+    ImGui::EndDisabled();
+    ui_target("home.steam");
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+        ImGui::SetTooltip("Adds the game to %s's Steam library with its artwork, so Steam starts it directly.",
+                          g_steam.user.c_str());
+    // Steam is running (it has to be closed while its list changes), or the add failed.
+    const char *popup = "Add to Steam##ask";
+    if (((g_steam.confirm && g_steam.confirm_action == "add") || !g_steam.failed.empty()) &&
+        !ImGui::IsPopupOpen(popup))
+        ImGui::OpenPopup(popup);
+    if (ImGui::BeginPopupModal(popup, nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::PushTextWrapPos(ImGui::GetFontSize() * 28);
+        if (!g_steam.failed.empty()) {
+            ImGui::TextWrapped("The game was not added to Steam: %s", g_steam.failed.c_str());
+            if (ImGui::Button("OK")) {
+                g_steam.failed.clear();
+                ImGui::CloseCurrentPopup();
+            }
+            ui_target("steam.ok");
+        } else if (!g_steam.confirm) {
+            ImGui::CloseCurrentPopup();     // answered on Maintenance meanwhile
+        } else {
+            ImGui::TextWrapped("Steam is running. It has to be closed while the game is added, because it "
+                               "rewrites its list of games when it exits. It is started again afterwards.");
+            if (ImGui::Button("Close Steam and continue")) {
+                g_steam.confirm = false;
+                ask("add", true);
+                ImGui::CloseCurrentPopup();
+            }
+            ui_target("steam.close");
+            ImGui::SameLine();
+            if (ImGui::Button("Cancel##steam")) {
+                g_steam.confirm = false;
+                ImGui::CloseCurrentPopup();
+            }
+            ui_target("steam.cancel");
+        }
+        ImGui::PopTextWrapPos();
+        ImGui::EndPopup();
+    }
 }
 
 void steam_section_reset()

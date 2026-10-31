@@ -123,6 +123,11 @@ void steam_section();
 void steam_section_reset();
 // The engine is changing Steam's library (the window may not close meanwhile).
 bool steam_busy();
+// Add to Steam beside Play (Home, and the page that ends an install or update): the width it needs,
+// or 0 when there is nothing to show (no Steam, Steam's state not known yet, or already added).
+float steam_play_width();
+// Draw it, asking in a dialog before Steam is closed. Then IN STEAM, once added in this session.
+void steam_play_button(float width, float height);
 
 // ---- the app's own updates (app_update.cpp) ----------------------------------------------------
 

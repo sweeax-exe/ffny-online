@@ -643,6 +643,13 @@ void finished_page(float width, float height, UiResult *result)
         if (ok) {
             ImGui::SameLine();
             if (ImGui::Button("Play")) result->play = true;
+            ui_target("setup.play");
+#if defined(_WIN32)
+            if (float beside = steam_play_width(); beside > 0) {       // the owner's choice: right by Play
+                ImGui::SameLine();
+                steam_play_button(beside, 0);
+            }
+#endif
         }
     } else {
         if (ImGui::Button("Back")) g_screen = app::install().problem.empty() ? Screen::FirstRun : Screen::Maintenance;
@@ -749,3 +756,24 @@ void screen_request_cancel()
 }
 
 } // namespace app
+
+// Home's Play row (pc_launcher_home.cpp, DEFJAM_APP): Add to Steam beside Play, on Windows once the
+// game is installed. The width it needs, or 0.
+float pc_app_beside_play_width()
+{
+#if defined(_WIN32)
+    return app::install().installed ? app::steam_play_width() : 0;
+#else
+    return 0;
+#endif
+}
+
+void pc_app_beside_play(float width, float height)
+{
+#if defined(_WIN32)
+    app::steam_play_button(width, height);
+#else
+    (void)width;
+    (void)height;
+#endif
+}
