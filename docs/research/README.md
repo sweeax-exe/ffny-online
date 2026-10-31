@@ -13,6 +13,7 @@ cite other development notes, logs and captures that are not published.
 
 ## Rendering
 
+- [v0.13.0 HD memory investigation](rc-v0.13.0-hd-memory.md) — pack-by-pack Windows controls, steady-fight versus result/menu growth, and the unchanged 64 MiB gate.
 - [v0.12.1 Story portraits and Power Plant](v0121-portrait-viewport-read.md) — logical versus AA surface clipping, verified portrait correction, and VY3 FFA performance measurements.
 - [v0.12.1 created-fighter thumbnails](v0121-created-fighter-thumbnail.md) — small guest capture surfaces and normal save/reload recovery for empty profile images.
 - [v0.12.1 right-side meters](v0121-right-meters-fix.md) — a merged zero-flag snapshot correction and native health/Blazin fill validation.
