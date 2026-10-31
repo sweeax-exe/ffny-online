@@ -184,8 +184,19 @@ void default_locations(fs::path *root, fs::path *data)
 #endif
 }
 
+// The install folder the player chose when it is not the usual one (the first run's Install into
+// another folder, or an installation found in the folder chosen there), kept in the app's own
+// per-user folder beside the usual install so the next start finds it.
+fs::path install_record()
+{
+    fs::path root, data;
+    default_locations(&root, &data);
+    return root.parent_path() / "install.json";
+}
+
 // --install DIR, else DEFJAM_INSTALL_DIR, else the nearest folder above this program that holds
-// installed.json, else the usual place (where the first run proposes to install).
+// installed.json, else the folder the player chose (install.json), else the usual place (where the
+// first run proposes to install).
 fs::path find_install(const char *named)
 {
     if (named && *named) return fs::path(named);
@@ -196,6 +207,13 @@ fs::path find_install(const char *named)
         if (fs::is_regular_file(dir / "installed.json", ec)) return dir;
         if (dir == dir.parent_path()) break;
         dir = dir.parent_path();
+    }
+    if (std::ifstream record(install_record(), std::ios::binary); record) {
+        std::stringstream text;
+        text << record.rdbuf();
+        fs::path chosen = json_strings(text.str())["install"];
+        std::error_code ec;
+        if (!chosen.empty() && fs::is_regular_file(chosen / "installed.json", ec)) return chosen;
     }
     fs::path root, data;
     default_locations(&root, &data);
@@ -363,6 +381,41 @@ void unlock_install()
 {
     os::unlock_file(g_lock);                                    // closing the handle lets the lock go
     g_lock = -1;
+}
+
+std::string receipt_version(const fs::path &root)
+{
+    std::ifstream file(root / "installed.json", std::ios::binary);
+    if (!file) return "";
+    std::stringstream text;
+    text << file.rdbuf();
+    return json_strings(text.str())["version"];
+}
+
+void remember_install(const fs::path &root)
+{
+    fs::path usual, data, record = install_record();
+    default_locations(&usual, &data);
+    std::error_code ec;
+    if (fs::equivalent(root, usual, ec)) {                      // the usual place needs no record
+        fs::remove(record, ec);
+        return;
+    }
+    std::string text = root.string(), escaped;
+    for (char c : text) {
+        if (c == '\\' || c == '"') escaped += '\\';
+        escaped += c;
+    }
+    fs::create_directories(record.parent_path(), ec);
+    fs::path temp = record;
+    temp += ".new";
+    {
+        std::ofstream out(temp, std::ios::binary | std::ios::trunc);
+        out << "{\"install\": \"" << escaped << "\"}\n";
+        if (!out) return;
+    }
+    fs::rename(temp, record, ec);
+    fprintf(stderr, "[APP] remembering the install folder %s\n", text.c_str());
 }
 
 bool load_install(std::string *why)

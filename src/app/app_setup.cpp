@@ -298,6 +298,8 @@ void finish(int code)
         fprintf(stderr, "[APP] %s\n", why.c_str());
     fflush(stderr);
     if (code == 0) g_tools_missing = false;                 // setup found or installed them
+    if (code == 0 && g_run.operation == "install")
+        app::remember_install(app::install().root);         // found again at the next start
     g_screen = Screen::Finished;
 }
 
@@ -388,6 +390,47 @@ void path_row(const char *label, const char *id, char *value, bool folder, bool 
     ImGui::PopID();
 }
 
+// An installation already in the folder chosen on the first run (an older setup's, say): the app
+// takes it over instead of installing there, which setup would refuse, and offers to update it
+// when it is older than this app.
+struct Found
+{
+    std::string root, version;      // the folder last looked at, and the version installed there
+} g_found;
+
+void probe_root()
+{
+    if (g_found.root == g_root) return;
+    g_found.root = g_root;
+    g_found.version = g_root[0] ? app::receipt_version(g_root) : "";
+}
+
+// Take over the installation in g_root (and remember it for the next start), then update it when
+// it is older than this app, or go to the launcher.
+void adopt_found()
+{
+    g_form_error.clear();
+    app::unlock_install();
+    app::install().root = g_root;
+    if (!app::lock_install()) {
+        g_form_error = "The game in this folder is running. Close it, then try again.";
+        return;
+    }
+    std::string why;
+    bool loaded = app::load_install(&why);
+    app::remember_install(g_root);
+    fprintf(stderr, "[APP] using the installation in %s (v%s) %s\n", g_root, app::install().version.c_str(),
+            why.c_str());
+    if (!loaded) {
+        g_form_error = why;
+        g_screen = Screen::Maintenance;
+    } else if (app::newer(app::payload_version(), app::install().version)) {
+        start_update_build();
+    } else {
+        g_screen = Screen::None;
+    }
+}
+
 void first_run_page(float width, float height, UiResult *result)
 {
     page_begin(width, height, "SET UP THE GAME");
@@ -398,21 +441,38 @@ void first_run_page(float width, float height, UiResult *result)
     path_row("Your dump (disc image or extracted folder)", "setup.dump", g_dump, true, true);
     path_row("Install folder (the built game)", "setup.install", g_root, true, false);
     path_row("Data folder (your extracted dump, saves and settings)", "setup.data", g_data, true, false);
+    probe_root();
+    bool found = !g_found.version.empty();
+    bool older = found && app::newer(app::payload_version(), g_found.version);
+    if (older)
+        ImGui::TextColored(pcui::gold(), "This folder already has Def Jam Recompiled v%s. Update it to v%s: it keeps "
+                           "its own data folder, saves and settings, so the dump and data folder above are not "
+                           "needed.", g_found.version.c_str(), app::payload_version().c_str());
+    else if (found)
+        ImGui::TextColored(pcui::gold(), "This folder already has Def Jam Recompiled v%s. Use it as it is, with its "
+                           "own data folder, saves and settings.", g_found.version.c_str());
     ImGui::Spacing();
-    ImGui::Checkbox("Generate HD textures (adds several minutes and about 15 GB)", &g_hd);
-    ui_target("setup.hd");
+    if (!found) {
+        ImGui::Checkbox("Generate HD textures (adds several minutes and about 15 GB)", &g_hd);
+        ui_target("setup.hd");
+    }
     tools_row();
     ImGui::Spacing();
     if (!g_form_error.empty()) ImGui::TextColored(ImVec4(1, 0.45f, 0.4f, 1), "%s", g_form_error.c_str());
-    bool ready = g_dump[0] && g_root[0] && g_data[0];
+    bool ready = found ? g_root[0] != 0 : g_dump[0] && g_root[0] && g_data[0];
+    std::string label = !found ? "INSTALL" : older ? "UPDATE TO V" + app::payload_version() : "USE THIS INSTALL";
     ImGui::BeginDisabled(!ready);
-    if (pcui::play_button("INSTALL", ImVec2(ImGui::GetFontSize() * 10, ImGui::GetFrameHeight() * 1.8f), 26))
+    if (pcui::play_button(label.c_str(), ImVec2(ImGui::GetFontSize() * 13, ImGui::GetFrameHeight() * 1.8f), 26))
     {
-        g_form_error.clear();
-        app::install().root = g_root;
-        start("install", "Installing", g_root, g_data, g_dump, g_hd);
+        if (found) {
+            adopt_found();
+        } else {
+            g_form_error.clear();
+            app::install().root = g_root;
+            start("install", "Installing", g_root, g_data, g_dump, g_hd);
+        }
     }
-    ui_target("setup.start");
+    ui_target(!found ? "setup.start" : older ? "setup.update" : "setup.use");
     ImGui::EndDisabled();
     ImGui::SameLine();
     if (ImGui::Button("Quit")) result->leave = true;
@@ -431,6 +491,19 @@ void maintenance_page(float width, float height, UiResult *result)
     tools_row();
     ImGui::Spacing();
     if (!g_form_error.empty()) ImGui::TextColored(ImVec4(1, 0.45f, 0.4f, 1), "%s", g_form_error.c_str());
+    // An older game: Repair and Clean Rebuild work on the version this app builds, so the update
+    // comes first (setup refuses them across versions).
+    bool older = in.installed && app::newer(app::payload_version(), in.version);
+    if (older) {
+        ImGui::SeparatorText("Update");
+        ImGui::TextWrapped("Your game is v%s; this app builds v%s. Update builds the game again from your dump "
+                           "with the new version, in about three to ten minutes. Your saves, settings and mods "
+                           "are kept, and v%s stays playable until the new build is ready.",
+                           in.version.c_str(), app::payload_version().c_str(), in.version.c_str());
+        if (ImGui::Button(("Update to v" + app::payload_version()).c_str())) start_update_build();
+        ui_target("setup.update");
+    }
+    ImGui::BeginDisabled(older);
     ImGui::SeparatorText("Repair");
     ImGui::TextWrapped("Checks every file of this version and rebuilds only what is missing or changed. Your "
                        "saves and settings are kept.");
@@ -447,6 +520,10 @@ void maintenance_page(float width, float height, UiResult *result)
         start("rebuild", "Rebuilding", in.root.string(), in.data.string(), "", g_hd);
     }
     ui_target("setup.rebuild");
+    ImGui::EndDisabled();
+    if (older)
+        ImGui::TextDisabled("Repair and Clean Rebuild work on v%s, the version this app builds: update first.",
+                            app::payload_version().c_str());
     ImGui::Spacing();
     ImGui::Separator();
     if (in.installed) {
@@ -464,13 +541,18 @@ void maintenance_page(float width, float height, UiResult *result)
 void update_ready_page(float width, float height)
 {
     const Install &in = app::install();
-    page_begin(width, height, "UPDATE READY");
-    ImGui::TextWrapped("Def Jam Recompiled is now v%s. Your game is still built from v%s: build v%s now "
-                       "(about three to ten minutes) to play it. Until then Play starts the v%s build.",
-                       app::payload_version().c_str(), in.version.c_str(), app::payload_version().c_str(),
-                       in.version.c_str());
+    page_begin(width, height, "UPDATE YOUR GAME");
+    if (app::just_updated())
+        ImGui::TextWrapped("Def Jam Recompiled is now v%s.", app::payload_version().c_str());
+    ImGui::TextWrapped("Your game is v%s. Update it to v%s now: it is built again from your dump with the new "
+                       "version, in about three to ten minutes. Your saves, settings and mods are kept.",
+                       in.version.c_str(), app::payload_version().c_str());
+    ImGui::TextWrapped("Later opens the launcher, where Play starts v%s and Update / Repair offers the update "
+                       "again.", in.version.c_str());
+    tools_row();
     ImGui::Spacing();
-    if (pcui::play_button("BUILD UPDATE", ImVec2(ImGui::GetFontSize() * 12, ImGui::GetFrameHeight() * 1.8f), 26))
+    if (!g_form_error.empty()) ImGui::TextColored(ImVec4(1, 0.45f, 0.4f, 1), "%s", g_form_error.c_str());
+    if (pcui::play_button("UPDATE GAME", ImVec2(ImGui::GetFontSize() * 12, ImGui::GetFrameHeight() * 1.8f), 26))
         start_update_build();
     ui_target("update.build");
     ImGui::SameLine();
@@ -606,7 +688,9 @@ bool screen_draw(float width, float height, UiResult *result)
         if (!in.installed) {
             g_screen = in.problem.empty() ? Screen::FirstRun : Screen::Maintenance;
             g_form_error = in.problem;
-        } else if (app::just_updated() && app::newer(app::payload_version(), in.version)) {
+        } else if (app::newer(app::payload_version(), in.version)) {
+            // An older game than this app builds (after the app's own update, or the first time a
+            // newer app opens an older setup's installation): offer the update before the launcher.
             g_screen = Screen::UpdateReady;
         }
         start_tools_check();
