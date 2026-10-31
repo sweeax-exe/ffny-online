@@ -608,6 +608,9 @@ static int host_main(void)
      * behind two writers doing single-character system calls. */
     setvbuf(stdout, NULL, _IOFBF, 1 << 16);
     setvbuf(stderr, NULL, _IOFBF, 1 << 16);
+    { extern void input_latency_start(void); input_latency_start(); }
+    { extern void input_consumption_start(void); input_consumption_start(); }
+    { extern void input_late_start(void); input_late_start(); }
 
     /* Find the game folder, open a log if nothing captures the output, supply
      * the runtime's required switches and load settings.ini -- before anything

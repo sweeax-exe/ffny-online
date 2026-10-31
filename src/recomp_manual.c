@@ -32,6 +32,9 @@
 #include "hooks/save_compat.h"
 #include "hooks/test_observations.h"
 #include "hooks/recorder.h"
+#include "hooks/input_latency.h"
+#include "hooks/input_consumption.h"
+#include "hooks/input_late.h"
 #include "hooks/fe_inject.h"
 #include "hooks/scene_launcher.h"
 #include "hooks/dev_module.h"
@@ -177,6 +180,92 @@ void sub_00077B20_enter(void) { dev_module_trace(4); }
 void sub_00077DD0_enter(void) { dev_module_trace(7); }
 /* The per-fighter pad reader: RECOMP_TEST_INPUT replaces what it is about to read. */
 void sub_001BAA00_enter(void) { defjam_test_input(MEM32(g_esp + 4)); }
+/* Observe both sides of the calibrated fighter pad-consumption routine.
+ * v0.16's manual dispatch sends direct calls through this wrapper too. */
+extern void sub_001BAA00_gen(void);
+void sub_001BAA00(void)
+{
+    uint32_t actor = MEM32(g_esp + 4);
+    sub_001BAA00_gen();
+    defjam_input_latency_actor(actor, 1);
+}
+extern void sub_0027E075_gen(void);
+void sub_0027E075(void)
+{
+    if (input_latency_on() || input_consumption_on()) {
+        uint32_t handle = MEM32(g_esp + 4), state = MEM32(g_esp + 8);
+        input_latency_xdk_begin(handle);
+        sub_0027E075_gen();
+        input_consumption_xdk_end(handle, state, g_eax);
+        input_late_capture(handle, state, g_eax);
+    } else sub_0027E075_gen();
+}
+/* Optional fresh report at the controller manager's existing update, before
+ * DD930/DCE00 advance history. Lifecycle functions serialize with this read. */
+extern void sub_000DC970_gen(void);
+void sub_000DC970(void)
+{
+    uint32_t device=g_ecx, report=MEM32(g_esp+4);
+    sub_000DC970_gen();
+    if ((g_eax&0xFFu) && input_late_on()) input_late_refresh(device,report);
+}
+extern void sub_001EB980_gen(void);
+void sub_001EB980(void)
+{
+    uint32_t raw=input_late_raw();
+    if (raw) { g_eax=raw;g_esp+=4; } else sub_001EB980_gen();
+}
+extern void sub_000D7BF0_gen(void);
+void sub_000D7BF0(void)
+{
+    uint32_t port=MEM32(g_esp+8);
+    sub_000D7BF0_gen();
+    input_late_validate(port);
+}
+extern void sub_001EBBE0_gen(void);
+void sub_001EBBE0(void)
+{
+    input_late_lock();sub_001EBBE0_gen();input_late_unlock();
+}
+extern void sub_001EBE10_gen(void);
+void sub_001EBE10(void)
+{
+    input_late_lock();sub_001EBE10_gen();input_late_unlock();
+}
+extern void sub_001EBEA0_gen(void);
+void sub_001EBEA0(void)
+{
+    input_late_lock();sub_001EBEA0_gen();input_late_unlock();
+}
+/* Equivalent human input producers for the three game-mode update paths.
+ * sub_001AD380 is CPU-only. Include writer VA in each cache observation. */
+extern void sub_0002D9E0_gen(void);
+void sub_0002D9E0(void)
+{
+    if (input_latency_on()) {
+        input_latency_pad_cache(0x003B8F48u, 0, 0x0002D9E0u);
+        sub_0002D9E0_gen();
+        input_latency_pad_cache(0x003B8F48u, 1, 0x0002D9E0u);
+    } else sub_0002D9E0_gen();
+}
+extern void sub_00079280_gen(void);
+void sub_00079280(void)
+{
+    if (input_latency_on()) {
+        input_latency_pad_cache(0x003B8F48u, 0, 0x00079280u);
+        sub_00079280_gen();
+        input_latency_pad_cache(0x003B8F48u, 1, 0x00079280u);
+    } else sub_00079280_gen();
+}
+extern void sub_00079FA0_gen(void);
+void sub_00079FA0(void)
+{
+    if (input_latency_on()) {
+        input_latency_pad_cache(0x003B8F48u, 0, 0x00079FA0u);
+        sub_00079FA0_gen();
+        input_latency_pad_cache(0x003B8F48u, 1, 0x00079FA0u);
+    } else sub_00079FA0_gen();
+}
 void sub_001A6A80_enter(void)
 {
     if (defjam_test_observations_enabled())
@@ -886,6 +975,18 @@ static void trace_voice_render(void)
 
 recomp_func_t recomp_lookup_manual(uint32_t xbox_va)
 {
+    if (xbox_va == 0x001BAA00u && input_latency_on())
+        return sub_001BAA00;
+    if (xbox_va == 0x0027E075u && (input_latency_on() || input_consumption_on())) return sub_0027E075;
+    if (xbox_va == 0x000DC970u && input_late_on()) return sub_000DC970;
+    if (xbox_va == 0x001EB980u && input_late_on()) return sub_001EB980;
+    if (xbox_va == 0x000D7BF0u && input_late_on()) return sub_000D7BF0;
+    if (xbox_va == 0x001EBBE0u && input_late_on()) return sub_001EBBE0;
+    if (xbox_va == 0x001EBE10u && input_late_on()) return sub_001EBE10;
+    if (xbox_va == 0x001EBEA0u && input_late_on()) return sub_001EBEA0;
+    if (xbox_va == 0x0002D9E0u && input_latency_on()) return sub_0002D9E0;
+    if (xbox_va == 0x00079280u && input_latency_on()) return sub_00079280;
+    if (xbox_va == 0x00079FA0u && input_latency_on()) return sub_00079FA0;
     if (xbox_va == 0x0012C310u && getenv("RECOMP_TRACE_VOICE"))
         return trace_voice_render;
     /* This hook sees indirect calls only, so it suits a trace wrapper or a
