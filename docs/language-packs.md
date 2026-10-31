@@ -47,8 +47,22 @@ that, with or without a language mod:
 | `all cutscenes` | Subtitles in every Story cutscene, in any language, English included |
 | `as the game does` | The opening cutscene only |
 
-The launcher has it under **Interface → Subtitles**. Env `RECOMP_STORY_SUBTITLES` and
+The launcher has it under **Interface → Language and subtitles**. Env `RECOMP_STORY_SUBTITLES` and
 `RECOMP_LANGUAGE_PACK` override the file for one run (the Mods page then shows the language as locked).
+
+### The game's own French
+
+The disc has a French translation of its own, `cmfren.loc` (2,825 of its 3,068 strings translated; the
+other entries are names, song titles and 69 gym tips left as "WAITING FOR TRANSLATION"), with French
+memory-card messages. The USA release never uses it: it always starts in US English. `[language] game =
+french` (launcher: **Interface → Language and subtitles → Game language**, env `RECOMP_GAME_LANGUAGE`)
+starts the game in French: menus, create-a-fighter, results and the Story subtitles, which the game then
+shows in every cutscene by itself. The voices are English, and so is the menu icon art, which the disc has
+in English only. No download is needed.
+
+A language mod takes the place of this setting: a pack translates the English string table, so while one is
+on the game starts in English for the pack to replace, and the log says `[LANG] game language french not
+used: ...`. A French language mod could still carry art or text the built-in translation lacks.
 
 ## With texture packs (HD, widescreen menus)
 

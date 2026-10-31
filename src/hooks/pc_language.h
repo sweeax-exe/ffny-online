@@ -9,7 +9,7 @@
 extern "C" {
 #endif
 
-/* Register [language] pack and story_subtitles. Returns how many were added. */
+/* Register [language] pack, story_subtitles and game. Returns how many were added. */
 struct RecompSetting;
 size_t pc_language_settings(struct RecompSetting *out, size_t max);
 
@@ -27,6 +27,10 @@ void pc_language_patch_xbe(void *xbe, size_t size);
 /* Whether every Story cutscene should show subtitles: [language] story_subtitles,
  * or with "auto" what the active pack asks for (src/patches/subtitles.c). */
 int pc_language_all_subtitles(void);
+
+/* Whether the game should start in its own French ([language] game = french): never while a
+ * language mod is on, which keeps the English slot it translates (src/patches/game_language.c). */
+int pc_language_french(void);
 
 #ifdef __cplusplus
 }

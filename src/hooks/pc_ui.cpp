@@ -186,6 +186,7 @@ static const char *friendly(const char *section, const char *key)
     static const Label labels[] = {
         {"language", "pack", "Language mod"},
         {"language", "story_subtitles", "Story cutscene subtitles"},
+        {"language", "game", "Game language"},
         {"display", "fullscreen", "Full screen"},
         {"display", "window_width", "Window width"},
         {"display", "window_height", "Window height"},
@@ -1265,11 +1266,15 @@ static void page_general(UiMode mode)
                            "example left_stick_click+right_stick_click) is held for half a second. While it is open the game "
                            "sees no input and keeps running.");
     }
-    ImGui::SeparatorText("Subtitles");
-    settings_group("language", { "story_subtitles" });
-    ImGui::TextWrapped("The game has English subtitles for every Story cutscene but shows them only in the opening "
-                       "one. Choose all cutscenes to see them everywhere; a language mod (Mods page) asks for them "
-                       "itself.");
+    ImGui::SeparatorText("Language and subtitles");
+    settings_group("language", { "game", "story_subtitles" });
+    if (!get_text("language", "pack").empty())
+        ImGui::TextWrapped("A language mod is on (Mods page), so the game uses its language; the game language "
+                           "above applies when no language mod is on.");
+    ImGui::TextWrapped("French is built into the game: menus and Story subtitles in French, with the voices and "
+                       "menu icons in English. The game has English subtitles for every Story cutscene but shows "
+                       "them only in the opening one (in French, in all of them). Choose all cutscenes to see them "
+                       "everywhere; a language mod asks for them itself. Both apply on the next launch.");
     ImGui::SeparatorText("Appearance");
     settings_group("ui", { "scale" });
     ImGui::SeparatorText("Startup movies");

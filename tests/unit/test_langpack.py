@@ -224,6 +224,7 @@ BOOL (*g_xbox_game_file_redirect)(const char *relative, wchar_t *host_path, DWOR
 BOOL (*g_xbox_game_file_redirect)(const char *relative, char *host_path, DWORD size);
 #endif
 void defjam_subtitles_after_nis_setup(uint32_t state);
+uint32_t defjam_game_language_at_boot(uint32_t asked);
 
 int main(int argc, char **argv)
 {
@@ -263,6 +264,7 @@ int main(int argc, char **argv)
     MEM32(0x108) = 0;
     defjam_subtitles_after_nis_setup(0x100);
     printf("subtitles %s\n", MEM32(0x108) == 0x1234 ? "all" : "game");
+    printf("language %u\n", defjam_game_language_at_boot(1));   /* the boot call asks for US English */
     return 0;
 }
 '''
@@ -293,7 +295,7 @@ def runtime_tool(tmp_path_factory):
     exe = folder / ('language.exe' if os.name == 'nt' else 'language')
     includes = [folder, ROOT / 'src/hooks', ROOT / 'tools/xboxrecomp/src/settings']
     sources = [driver, ROOT / 'src/hooks/pc_language.c', ROOT / 'src/patches/subtitles.c',
-               ROOT / 'tools/xboxrecomp/src/settings/recomp_settings.c']
+               ROOT / 'src/patches/game_language.c', ROOT / 'tools/xboxrecomp/src/settings/recomp_settings.c']
     if os.name == 'nt':
         cmd = [compiler, '/nologo', '/O2', '/TC', *['/I' + str(p) for p in includes], *map(str, sources),
                '/Fe:' + str(exe)]
@@ -330,6 +332,7 @@ def test_runtime_matches_reference(runtime_tool, dump):
         assert Path(served[asked]).read_bytes() == reference[rel], rel
     assert 'xbe CARGANDO' in lines
     assert 'subtitles all' in lines            # the pack's default story_subtitles=all
+    assert lines[-1] == 'language 1'
     # The dump is untouched, and a second start reuses the cache.
     assert (game / 'gconfig.xml').read_bytes().startswith(b'<config lang="en"/>')
     lines, err = run_runtime(runtime_tool, data, game, 'gconfig.xml', RECOMP_LANGUAGE_PACK='xx-test')
@@ -339,13 +342,32 @@ def test_runtime_matches_reference(runtime_tool, dump):
 def test_runtime_without_a_pack_changes_nothing(runtime_tool, dump):
     tmp, game, _ = dump
     lines, err = run_runtime(runtime_tool, tmp / 'data', game, 'assets/misc.viv')
-    assert lines == ['keep assets/misc.viv', 'xbe LOADING', 'subtitles game']
+    assert lines == ['keep assets/misc.viv', 'xbe LOADING', 'subtitles game', 'language 1']
     assert "the game's own language" in err
     lines, _ = run_runtime(runtime_tool, tmp / 'data', game, RECOMP_STORY_SUBTITLES='all cutscenes')
-    assert lines[-1] == 'subtitles all'
+    assert lines[-2] == 'subtitles all'
     lines, _ = run_runtime(runtime_tool, tmp / 'data', game, RECOMP_LANGUAGE_PACK='xx-test',
                            RECOMP_STORY_SUBTITLES='as the game does')
-    assert lines[-1] == 'subtitles game'
+    assert lines[-2] == 'subtitles game'
+
+
+@pytest.mark.parametrize('value', ['french', 'French'])
+def test_runtime_starts_in_the_games_own_french(runtime_tool, dump, value):
+    tmp, game, _ = dump
+    lines, err = run_runtime(runtime_tool, tmp / 'data', game, 'assets/misc.viv', RECOMP_GAME_LANGUAGE=value)
+    assert lines[0] == 'keep assets/misc.viv'          # nothing to rebuild: the French is on the disc
+    assert lines[-1] == 'language 3' and "the game's own French" in err
+    lines, _ = run_runtime(runtime_tool, tmp / 'data', game, RECOMP_GAME_LANGUAGE='english')
+    assert lines[-1] == 'language 1'
+
+
+def test_a_language_mod_takes_the_place_of_french(runtime_tool, dump):
+    # A pack translates the English slot, so the game must start in English for it.
+    tmp, game, _ = dump
+    lines, err = run_runtime(runtime_tool, tmp / 'data', game, 'gconfig.xml', RECOMP_LANGUAGE_PACK='xx-test',
+                             RECOMP_GAME_LANGUAGE='french')
+    assert lines[0].startswith('serve gconfig.xml') and lines[-1] == 'language 1'
+    assert "game language french not used: the language mod" in err
 
 
 def test_runtime_finds_the_mod_in_the_texture_root(runtime_tool, dump):
