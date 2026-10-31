@@ -510,9 +510,9 @@ defjam-recomp/
   kernel_path first exited2 before assertions because inherited TEMP did not
   exist; rerun with logs/native-tmp passes. Logs: logs/rc-unit.txt,
   logs/rc-focused-tests.txt, logs/toolkit-*-test.txt and kernel_path-retest.txt.
-- Full Windows regression started from prepared head56a0c63, using DEFJAM_DATA=<checkout>/data:
+- Initial stock checks passed on56a0c63 (unit/m2/m3), then batch stopped before HD gameplay to correct pack-list delimiter. Disposable save guard restored. Full Windows regression restarting after17a40f2, using DEFJAM_DATA=<checkout>/data:
   `python scripts/regress.py --preset win-x64-release --release-profile`.
-  logs/rc-full-windows.txt holds the running table. GitHub pushes/release PR await explicit publication approval after automatic review rejection. Owner runs macOS/Linux from the release PR; exact instructions in
+  Profile now also requires1962 runtime entries, the exact sum from both verified manifests; focused60pass/1skip after correction. logs/rc-full-windows.txt holds the restarted table. GitHub pushes/release PR await explicit publication approval after automatic review rejection. Owner runs macOS/Linux from the release PR; exact instructions in
   docs/regression-v0.13.0.md. New french/subtitles-en rows retain captures for
   separate visual review; input-trace tests refresh off/on with loss rejection.
 - Both HD mods verified/installed in the disposable data root: Menus1.4.0
