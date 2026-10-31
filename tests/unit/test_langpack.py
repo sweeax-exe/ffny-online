@@ -137,11 +137,20 @@ def test_delta_round_trip(seed):
         lp.delta_apply(delta, source + b'x')
 
 
-def test_delta_carries_only_changes():
-    source = os.urandom(50000)
-    target = source[:20000] + b'translated text' + source[20000:]
-    copied, added = lp.delta_stats(lp.delta_make(source, target))
-    assert copied == len(source) and added == len(b'translated text')
+@pytest.mark.parametrize('matching_boundary', [False, True])
+def test_delta_carries_only_changes(matching_boundary):
+    source = bytearray(random.Random(20261031).randbytes(50000))
+    source[20000:20002] = b't\0' if matching_boundary else b'\0\0'
+    source = bytes(source)
+    inserted = b'translated text'
+    target = source[:20000] + inserted + source[20000:]
+    delta = lp.delta_make(source, target)
+    copied, added = lp.delta_stats(delta)
+    # An insertion may share its first byte with the source at the boundary;
+    # reusing that byte is valid and reduces the literal payload further.
+    assert copied + added == len(target)
+    assert added <= len(inserted)
+    assert lp.delta_apply(delta, source) == target
 
 
 def test_refpack():

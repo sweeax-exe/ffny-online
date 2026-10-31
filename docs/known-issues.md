@@ -6,6 +6,14 @@ Fighters selection. They do not cover every mode or a full Story campaign.
 
 ## v0.13.0 candidate validation
 
+The owner approved the Windows combined-candidate playtest with full Lanczos4x,
+HD Widescreen Menus1.4.0 and HD Fighters1.0.0 on October31. Two owner-reported
+Story bugs are queued for future fixes in v0.14.0: [SC04 audio falls behind the
+video part way through](https://github.com/vyanhursky/DefJamFFNY-recomp/issues/161),
+and the [widescreen map selector border does not account for the Shops area](https://github.com/vyanhursky/DefJamFFNY-recomp/issues/162).
+Their causes and cross-platform reproduction remain unconfirmed. The approval
+does not replace the pending automated all-pack/platform and setup gates.
+
 The combined candidate has not completed its full Windows/macOS/Linux acceptance. French interface and English subtitle state checks retain captures for separate rendered-text review. The requested Menus1.4.0/Fighters1.0.0 profile uses a 2048 MiB texture budget; it does not close the default-budget issue #141. Late controller refresh remains optional/off by default. See [candidate commands and evidence requirements](regression-v0.13.0.md).
 
 ## Remaining investigations
