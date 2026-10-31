@@ -63,7 +63,71 @@ def test_runtime_must_really_initialize_widescreen_and_texture_packs(tmp_path, m
     run.text += '\n[WS] widescreen 1.7778\n[TEXPACK] schema=1 entries=2'
     assert profile.faults(run) == []
     run.text = run.text.replace('entries=2', 'entries=1')
-    assert 'both verified manifests' in profile.faults(run)[0]
+    assert 'all verified manifests' in profile.faults(run)[0]
     run.text = run.text.replace('entries=1', 'entries=2')
     run.identity['environment']['RECOMP_ASPECT'] = '4:3'
     assert 'RECOMP_ASPECT differs' in profile.faults(run)[0]
+
+
+def generated_lanczos(tmp_path, root):
+    aliases = json.loads((ROOT / 'config/hd-runtime-aliases.json').read_text())['aliases']
+    sources = sorted(set(aliases.values()) | {'b' * 64})
+    recipe = 'c' * 64
+    corpus_dir = tmp_path / 'corpus'
+    corpus_dir.mkdir()
+    assets, names = [], []
+    for policy in ('opacity', 'channels'):
+        name = 'faithful-hd-' + recipe[:12] + '-' + policy
+        names.append(name)
+        folder = root / name
+        (folder / 'textures').mkdir(parents=True)
+        entries = []
+        for index, source in enumerate(sources):
+            if ('opacity' if index % 2 else 'channels') != policy:
+                continue
+            image = folder / 'textures' / (source + '.png')
+            image.write_bytes(('image:' + source).encode())
+            assets.append({'id': source, 'upscaled_hash': profile.digest(image)})
+            entries.append(source + '=textures/' + source + '.png\n')
+            entries.extend(key + '=textures/' + source + '.png\n'
+                           for key, target in aliases.items() if target == source)
+        (folder / 'manifest.ini').write_text('[pack]\nschema=1\npng_mips=' + policy +
+                                            '\n[textures]\n' + ''.join(entries))
+        (folder / 'builder.json').write_text(json.dumps(dict(schema=1,
+            product='DefJamFaithfulHD', recipe_id=recipe, png_mips=policy)))
+    (corpus_dir / 'corpus.json').write_text(json.dumps({'corpus_id': recipe, 'assets': assets}))
+    receipt = tmp_path / 'lanczos.json'
+    receipt.write_text(json.dumps({'recipe_id': recipe, 'corpus': str(corpus_dir), 'packs': names}))
+    return receipt, names
+
+
+def test_lanczos_profile_verifies_all_images_and_preserves_override_order(tmp_path, monkeypatch):
+    monkeypatch.setenv(profile.PROFILE_ENV, '')
+    root, _ = installed(tmp_path)
+    receipt, names = generated_lanczos(tmp_path, root)
+    result = profile.prepare(root, tmp_path / 'profile.json', receipt)
+    assert result['environment']['RECOMP_TEXTURE_PACKS'].split(';') == names + list(profile.PACKS)
+    assert result['expected_entries'] == 2 + sum(result['packs'][name]['entries'] for name in names)
+    image = next((root / names[0] / 'textures').glob('*.png'))
+    image.write_bytes(b'changed')
+    with pytest.raises(ValueError, match='differs from verified corpus'):
+        profile.prepare(root, tmp_path / 'profile.json', receipt)
+
+
+def test_lanczos_profile_rejects_partial_corpus(tmp_path):
+    root, _ = installed(tmp_path)
+    receipt, names = generated_lanczos(tmp_path, root)
+    manifest = root / names[0] / 'manifest.ini'
+    manifest.write_text(manifest.read_text().rsplit('\n', 2)[0] + '\n')
+    with pytest.raises(ValueError, match='do not cover the full corpus'):
+        profile.prepare(root, tmp_path / 'profile.json', receipt)
+
+
+def test_lanczos_profile_rejects_different_recipe(tmp_path):
+    root, _ = installed(tmp_path)
+    receipt, _ = generated_lanczos(tmp_path, root)
+    value = json.loads(receipt.read_text())
+    value['recipe_id'] = 'd' * 64
+    receipt.write_text(json.dumps(value))
+    with pytest.raises(ValueError, match='recipe does not match'):
+        profile.prepare(root, tmp_path / 'profile.json', receipt)

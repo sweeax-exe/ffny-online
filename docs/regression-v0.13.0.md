@@ -18,14 +18,16 @@ python3 scripts/pipeline.py build --preset posix-release
 python3 setup/mods.py refresh --data-dir "$DEFJAM_DATA" --runtime 0.13.0 --capability wide-v1
 python3 setup/mods.py install --data-dir "$DEFJAM_DATA" --runtime 0.13.0 --capability wide-v1 --id menu-ui-hd-wide --version 1.4.0
 python3 setup/mods.py install --data-dir "$DEFJAM_DATA" --runtime 0.13.0 --capability wide-v1 --id hd-fighters --version 1.0.0
-python3 scripts/regress.py --preset posix-release --release-profile
+python3 scripts/build-hd-pack.py --root "$DEFJAM_DATA/extracted" --work "$DEFJAM_DATA/hd-work/setup-lanczos" --mods "$DEFJAM_DATA/mods" --receipt "$DEFJAM_DATA/lanczos-pack-build.json" --aliases config/hd-runtime-aliases.json
+python3 scripts/regress.py --preset posix-release --release-profile --lanczos-receipt "$DEFJAM_DATA/lanczos-pack-build.json"
 ```
 
 On Windows use `python`, `scripts/env.ps1`, `pipeline.py analyze/recomp` and
 `scripts/build.ps1 -Preset win-x64-release`, then the same mod commands and:
 
 ```powershell
-python scripts/regress.py --preset win-x64-release --release-profile
+python scripts/build-hd-pack.py --root "$env:DEFJAM_DATA/extracted" --work "$env:DEFJAM_DATA/hd-work/setup-lanczos" --mods "$env:DEFJAM_DATA/mods" --receipt "$env:DEFJAM_DATA/lanczos-pack-build.json" --aliases config/hd-runtime-aliases.json
+python scripts/regress.py --preset win-x64-release --release-profile --lanczos-receipt "$env:DEFJAM_DATA/lanczos-pack-build.json"
 ```
 
 `--texture-root PATH` can point to an existing managed mods folder. The profile
@@ -34,7 +36,16 @@ file against its receipt. It records archive/manifest identities in
 `logs/release-profile.json` and in each regression run. The HD lane uses a 2048 MiB
 texture cache explicitly; report that budget with results (#141 remains open).
 
-Every gameplay, scenario, soak and controller run receives 16:9 and both packs,
+The owner added full Lanczos 4x textures to the candidate on October 31, after the
+initial two-mod regression and memory investigation. `--lanczos-receipt` verifies
+both generated mip-policy folders against their retained corpus image hashes,
+recipe identity and runtime aliases. It records corpus/manifest digests and loads
+Lanczos first, then Menus, then Fighters, so the specialized mods retain priority.
+Keep the generation cache and receipt together on each test host. The first
+Windows two-mod results do not certify this expanded configuration: a full retest
+and a memory-growth comparison are pending until the owner finishes the playtest.
+
+Every gameplay, scenario, soak and controller run receives 16:9 and all selected packs,
 even when scenario isolation clears inherited diagnostics. Original-image
 `m2/m3/m4a` checks run separately with stock 4:3. Their reference hashes stay intact.
 The native launcher/overlay checks keep their existing Windows SKIP qualifications.
@@ -74,3 +85,13 @@ compares no packs/Menus/Fighters/both serially, and preserves each scenario's
 failure status. `--groups both --result-tail 60 --hold-menu` records a longer
 post-match menu observation. Compare Windows private bytes and POSIX RSS only
 within the same host; the harness uses different memory metrics on those hosts.
+
+After the owner finishes the Lanczos playtest, compare the previous two-mod lane,
+Lanczos alone, and the combined configuration (same fixture, host and native build):
+
+```sh
+python3 scripts/memory-pack-audit.py --fixture logs/fixtures/YOUR_FIXTURE --texture-root "$DEFJAM_DATA/mods" --lanczos-receipt "$DEFJAM_DATA/lanczos-pack-build.json" --groups both,lanczos,all --result-tail 60 --hold-menu --output logs/lanczos-memory-comparison
+```
+
+Do not overlap the owner's playtest and automated runs. The existing 64 MiB memory
+growth limit and original-image goldens remain unchanged.

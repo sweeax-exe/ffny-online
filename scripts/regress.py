@@ -779,12 +779,15 @@ def main(argv=None):
     ap.add_argument("--shared-story", action="store_true", help="evaluate crib and gym from one story-tour launch")
     ap.add_argument('--release-profile', action='store_true', help='16:9, verified Menus 1.4.0 + Fighters 1.0.0 for every game route; original-image goldens stay stock')
     ap.add_argument('--texture-root', help='managed mods folder for --release-profile (default DEFJAM_DATA/mods)')
+    ap.add_argument('--lanczos-receipt', help='build-hd-pack.py receipt; verify and prepend the full local Lanczos packs to --release-profile')
     a = ap.parse_args(argv)
     profile = None
+    if a.lanczos_receipt and not a.release_profile:
+        ap.error('--lanczos-receipt requires --release-profile')
     if a.release_profile:
         root = a.texture_root or os.path.join(harness.data_dir(), 'mods')
         try:
-            profile = regression_profile.prepare(root, Path(REPO) / 'logs/release-profile.json')
+            profile = regression_profile.prepare(root, Path(REPO) / 'logs/release-profile.json', a.lanczos_receipt)
         except (OSError, ValueError, KeyError) as ex:
             ap.error(str(ex))
 

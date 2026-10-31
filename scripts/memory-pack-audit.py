@@ -71,6 +71,7 @@ def main():
     parser.add_argument('--groups', default='none,menus,fighters,both')
     parser.add_argument('--fixture', type=Path, required=True)
     parser.add_argument('--texture-root', type=Path, required=True)
+    parser.add_argument('--lanczos-receipt', type=Path, help='include verified locally generated Lanczos packs; enables groups lanczos and all')
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--preset')
     parser.add_argument('--seed', type=int, default=20261031)
@@ -80,8 +81,10 @@ def main():
     args = parser.parse_args()
     if args.result_tail < 6 or args.result_tail > 120:
         parser.error('--result-tail must be 6..120 seconds')
-    if set(args.groups.split(',')) - {'none', 'menus', 'fighters', 'both'}:
-        parser.error('--groups must select none,menus,fighters,both')
+    if set(args.groups.split(',')) - {'none', 'menus', 'fighters', 'both', 'lanczos', 'all'}:
+        parser.error('--groups must select none,menus,fighters,both,lanczos,all')
+    if set(args.groups.split(',')) & {'lanczos', 'all'} and not args.lanczos_receipt:
+        parser.error('groups lanczos/all require --lanczos-receipt')
     if len(set(args.groups.split(','))) != len(args.groups.split(',')):
         parser.error('--groups must not repeat a label')
     if args.hold_menu and args.hold_results:
@@ -102,7 +105,9 @@ def main():
              'both': 'menu-ui-hd-wide;hd-fighters'}
     folder = args.output.resolve()
     folder.mkdir(parents=True, exist_ok=False)
-    profile = suite.harness.regression_profile.prepare(args.texture_root, folder / 'verified-packs.json')
+    profile = suite.harness.regression_profile.prepare(args.texture_root, folder / 'verified-packs.json', args.lanczos_receipt)
+    packs['all'] = profile['environment']['RECOMP_TEXTURE_PACKS']
+    packs['lanczos'] = ';'.join(name for name in profile['packs'] if name not in suite.harness.regression_profile.PACKS)
     os.environ.pop('DEFJAM_REGRESSION_PROFILE', None)
     (folder / 'plan.json').write_text(json.dumps({'parameters': vars(args), 'fixture': str(fixture),
         'aspect': '16:9', 'texture_budget_mb': 2048, 'verified_packs': profile['packs'],
