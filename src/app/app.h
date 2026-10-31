@@ -29,6 +29,13 @@ Install &install();
 // installation there.
 bool load_install(std::string *why);
 
+// The version in root/installed.json, or "" when there is no installation there.
+std::string receipt_version(const std::filesystem::path &root);
+
+// Remember an install folder the player chose, so the next start finds it (nothing is kept for the
+// usual place).
+void remember_install(const std::filesystem::path &root);
+
 // play.lock, held while the app shows the launcher and, through the exec, while the game runs.
 // Setup takes it itself, so it is let go while an operation runs.
 bool lock_install();
