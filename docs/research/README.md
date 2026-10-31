@@ -50,6 +50,10 @@ cite other development notes, logs and captures that are not published.
 
 ## Controllers and sound
 
+- [v0.12.3 controller latency baseline](input-latency-2026-10-30.md) and [tracing follow-up](input-latency-tracing-2026-10-30.md): reproduced rapid-tap merging, measured input boundaries and regression evidence; [capture instructions](../input-latency-tracing.md).
+- [Controller input across 15 recomp projects](recomp-controller-input-practices-2026-10-30.md): pinned source audits and fighting-game design targets.
+- [Controller transition correction](input-transition-fix-2026-10-30.md): guest-consumption retention, measured 1 ms acquisition, controller calibration and regression evidence.
+- [Optional late controller refresh](late-input-refresh-2026-10-30.md): refresh at the existing manager update, queue-generation acknowledgements, A/B timing and validation.
 - [USB enumeration state machine](m4-usb-enumeration.md)
 - [Controller ports and slots](m4b-controller-ports.md)
 - [DirectSound voice-list crash](dsound-voice-list-crash.md)
