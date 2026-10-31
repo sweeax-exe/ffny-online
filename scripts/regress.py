@@ -836,7 +836,7 @@ def main(argv=None):
     ran = len(rows) - len(skipped)
     lines = ["regress %s  preset %s" % (time.strftime("%Y-%m-%d %H:%M"), a.preset)]
     if profile:
-        lines.append('HD profile: 16:9; Menus 1.4.0 + Fighters 1.0.0; m2/m3/m4a use original-image goldens')
+        lines.append('HD profile: 16:9; ' + ';'.join(profile['packs']) + '; m2/m3/m4a use original-image goldens')
     lines += ["%-6s %-4s %4d s  %s" % (n, status_word(ok), dt, d) for n, ok, d, dt in rows]
     lines.append("%d of %d passed%s in %d min" % (ran - len(failed), ran,
                  (", %d skipped (%s)" % (len(skipped), ", ".join(r[0] for r in skipped))) if skipped else "",
