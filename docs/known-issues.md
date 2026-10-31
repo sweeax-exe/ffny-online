@@ -4,6 +4,10 @@ Playable Windows x64 was accepted by the maintainer on October 4, 2026. Test
 routes cover menus, setup, a fight, Story intro/creator, crib/gym and Unlock
 Fighters selection. They do not cover every mode or a full Story campaign.
 
+## v0.13.0 candidate validation
+
+The combined candidate has not completed its full Windows/macOS/Linux acceptance. French interface and English subtitle state checks retain captures for separate rendered-text review. The requested Menus1.4.0/Fighters1.0.0 profile uses a 2048 MiB texture budget; it does not close the default-budget issue #141. Late controller refresh remains optional/off by default. See [candidate commands and evidence requirements](regression-v0.13.0.md).
+
 ## Remaining investigations
 
 - **Steam Deck deterministic test failures ([#98](https://github.com/vyanhursky/DefJamFFNY-recomp/issues/98)).** The v0.12.0 candidate passes 17/18 regression checks: replay differs from the Mac golden, and the separate repeat check diverges at step 541. Windows and macOS pass their repeat checks. This remains unresolved; see the [Deck candidate report](research/rc-v0.12.0-deck-2026-10-25.md).

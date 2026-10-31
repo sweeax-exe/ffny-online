@@ -67,6 +67,7 @@ def axes_script():
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--name', required=True)
+    parser.add_argument('--preset', default=harness.RELEASE_PRESET)
     parser.add_argument('--pairs', type=int, default=10)
     parser.add_argument('--hold-ms', type=int, default=120)
     parser.add_argument('--poll-ms', type=int, choices=(1, 2), default=2)
@@ -100,7 +101,7 @@ def main():
         'RECOMP_INPUT_LATE_REFRESH': args.late_refresh}
     route = 'fight' if args.ai_opponent else 'versus'
     run = harness.run_game('input-' + args.name, stages=harness.ROUTES[route]['stages'], tail=script,
-        secs=400, until='game.startgame(', after=after, shots='', env=env, quiet=True)
+        secs=400, until='game.startgame(', after=after, shots='', env=env, quiet=True, preset=args.preset)
     events,bad=test_evidence.telemetry_events(run.text)
     starts=[e for e in events if e.get('event')=='match_start']
     roster=starts[0].get('fighters',[]) if starts else []
@@ -118,7 +119,13 @@ def main():
         report['fixture']['valid']=fixture_ok
         report['combat']=test_evidence.combat_checks(run.text,require_result=False,humans=1 if args.ai_opponent else 2)
     if args.edges=='1' and not args.scripted_combat and not args.calibrate_buttons and not args.calibrate_axes:
-        report['registration']=pulse_checks(pulse_analysis(path),args.pairs)
+        analysis = pulse_analysis(path)
+        report['registration']=pulse_checks(analysis,args.pairs)
+        if args.late_refresh in ('1', 'shadow'):
+            late = analysis['late_refresh']
+            report['registration']['valid'] = report['registration']['valid'] and bool(late['shadow_comparisons']) and late['shadow_mismatches'] == 0 and late['read_errors'] == 0
+            if args.late_refresh == '1':
+                report['registration']['valid'] = report['registration']['valid'] and late['applied_reports'] > 0
     (folder / f'{args.name}.json').write_text(json.dumps(report, indent=2) + '\n')
     print(json.dumps({k: report[k] for k in ('name', 'save_ok', 'reached', 'faults', 'fixture', 'pacing','registration','combat') if k in report}, indent=2))
     return 0 if fixture_ok and report.get('registration',{}).get('valid',True) and report['reached'] and report['save_ok'] and not report['faults'] and all(

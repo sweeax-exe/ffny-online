@@ -40,6 +40,9 @@ Checks, in order:
   crib     Story with the first saved profile reaches the crib
   gym      Learn Moves opens and a move's preview movie is requested
   soak     N boots to the main menu, none hung
+  french   built-in French table, main menu and interface captures for visual review
+  subtitles-en  English sc05 with subtitles enabled, plus captures for visual review
+  input-trace   phase-swept 20 ms SDL presses through the fighter, late refresh off/on
 
 The golden frames were taken without the title's gamma ramp, so those three runs
 set RECOMP_GAMMA=0. Every run uses the harness's complete-save-root guard and
@@ -63,18 +66,20 @@ import re
 import subprocess
 import sys
 import time
+from pathlib import Path
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 spec = importlib.util.spec_from_file_location("harness", os.path.join(HERE, "harness.py"))
 harness = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(harness)
+regression_profile = harness.regression_profile
 spec = importlib.util.spec_from_file_location('test_evidence', os.path.join(HERE, 'test_evidence.py'))
 evidence = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(evidence)
 REPO = harness.REPO
 
 ORDER = ["unit", "m2", "m3", "m4a", "launcher", "overlay", "unlockopt", "picture", "skipintro", "fight", "ffa", "fight-terrordome", "ffa-terrordome", "combat", "versus", "ffa-result", "two-matches", "replay", "repeat", "visual",
-         "intro", "crib", "gym", "soak"]
+         "intro", "crib", "gym", "soak", "french", "subtitles-en", "input-trace"]
 # Opt-in (--only): the One on One at the Terrordome, which the Free For All covers, and
 # the repeatability check, which is two more fights.
 DEFAULT = [n for n in ORDER if n not in ("fight-terrordome", "ffa-result", "two-matches", "repeat", "visual", "skipintro")]
@@ -701,6 +706,53 @@ def check_soak(a):
     return (ok == a.soak and hung == 0 and failed == 0), "%d of %d boots reached the main menu" % (ok, a.soak)
 
 
+def check_french(a):
+    run = harness.run_route('boot', preset=a.preset, quiet=True,
+        env={'RECOMP_GAME_LANGUAGE': 'french', 'RECOMP_LANGUAGE_PACK': ''})
+    faults = common_faults(run)
+    if "[LANG] the game's own French (language 3 in place of 1)" not in run.text:
+        faults.append('French language table was not selected')
+    if not harness.reached(run.summary, 'getscreeninfo(intmain/main'):
+        faults.append('French main menu not reached')
+    if not run.shots():
+        faults.append('French interface capture missing')
+    return verdict(faults, 'French table and main menu; review MENU PRINCIPAL/CHOISIR/RETOUR in ' +
+                   os.path.relpath(run.shots_dir, REPO))
+
+
+def check_subtitles_en(a):
+    run = harness.run_game('subtitles-en', preset=a.preset, secs=150, scripted=False, quiet=True,
+        shots='@sc05.viv#1,4,8,12,16,20,24',
+        env={'RECOMP_SCENE': 'sc05', 'RECOMP_GAME_LANGUAGE': 'english',
+             'RECOMP_LANGUAGE_PACK': '', 'RECOMP_STORY_SUBTITLES': 'all cutscenes'})
+    faults = common_faults(run)
+    for needle in ('[SCENE] playing sc05 ', '[LANG] cutscene subtitles shown (story_subtitles)'):
+        if needle not in run.text:
+            faults.append('missing ' + needle)
+    if "[LANG] the game's own French" in run.text:
+        faults.append('English subtitle check started in French')
+    if len(run.shots()) < 3:
+        faults.append('too few subtitle captures')
+    return verdict(faults, 'English sc05 subtitle state enabled; review rendered lines in ' +
+                   os.path.relpath(run.shots_dir, REPO))
+
+
+def check_input_trace(a):
+    stamp = time.strftime('%Y%m%d-%H%M%S')
+    results = []
+    for late in ('0', '1'):
+        name = 'regress-' + stamp + '-late' + late
+        out = Path(REPO) / 'logs/input-audit' / (name + '.stdout.txt')
+        out.parent.mkdir(parents=True, exist_ok=True)
+        with out.open('w', encoding='utf-8') as stream:
+            result = subprocess.run([sys.executable, str(Path(HERE) / 'input-latency-fight.py'),
+                '--name', name, '--preset', a.preset, '--pairs', '10', '--poll-ms', '1',
+                '--phase-step-ms', '7', '--late-refresh', late], cwd=REPO,
+                stdout=stream, stderr=subprocess.STDOUT)
+        results.append(result.returncode == 0)
+    return all(results), 'rapid 20 ms paired presses through SDL/USB/XDK/fighter, refresh off/on: %s; logs/input-audit/regress-%s-*' % (results, stamp)
+
+
 CHECKS = {"unit": check_unit, "m2": check_m2, "m3": check_m3, "m4a": check_m4a, "launcher": check_launcher,
           "overlay": check_overlay, "unlockopt": check_unlock_option, "picture": check_picture_options, "skipintro": check_skip_intro, "fight": check_fight, "ffa": check_ffa,
           "fight-terrordome": lambda a: check_fight(a, 'fight-terrordome'),
@@ -710,6 +762,9 @@ CHECKS = {"unit": check_unit, "m2": check_m2, "m3": check_m3, "m4a": check_m4a, 
 
 def status_word(ok):
     return "SKIP" if ok is None else "ok" if ok else "FAIL"
+
+
+CHECKS.update({'french': check_french, 'subtitles-en': check_subtitles_en, 'input-trace': check_input_trace})
 
 
 def main(argv=None):
@@ -722,7 +777,16 @@ def main(argv=None):
     ap.add_argument("--update-golden", action="store_true",
                     help="repeat check: record the new state-stream hash instead of comparing with it")
     ap.add_argument("--shared-story", action="store_true", help="evaluate crib and gym from one story-tour launch")
+    ap.add_argument('--release-profile', action='store_true', help='16:9, verified Menus 1.4.0 + Fighters 1.0.0 for every game route; original-image goldens stay stock')
+    ap.add_argument('--texture-root', help='managed mods folder for --release-profile (default DEFJAM_DATA/mods)')
     a = ap.parse_args(argv)
+    profile = None
+    if a.release_profile:
+        root = a.texture_root or os.path.join(harness.data_dir(), 'mods')
+        try:
+            profile = regression_profile.prepare(root, Path(REPO) / 'logs/release-profile.json')
+        except (OSError, ValueError, KeyError) as ex:
+            ap.error(str(ex))
 
     names = QUICK if a.quick else DEFAULT
     if a.only:
@@ -735,6 +799,9 @@ def main(argv=None):
     shared_story = None
     t_all = time.time()
     for n in names:
+        # The source-image goldens are a separate compatibility lane. Every
+        # gameplay/UI/soak/language/input run retains the HD widescreen profile.
+        saved_profile = os.environ.pop(regression_profile.PROFILE_ENV, None) if n in ('m2', 'm3', 'm4a') else None
         t0 = time.time()
         log_before = harness.LAST_LOG
         try:
@@ -750,8 +817,11 @@ def main(argv=None):
                 ok, detail = verdict(faults, n + ' reached in shared Story launch')
             else:
                 ok, detail = CHECKS[n](a)
-        except SystemExit as ex:                 # not built, no dump: say so and stop
+        except (SystemExit, OSError, ValueError) as ex:
             ok, detail = False, str(ex)
+        finally:
+            if saved_profile:
+                os.environ[regression_profile.PROFILE_ENV] = saved_profile
         rows.append((n, ok, detail, time.time() - t0))
         print("%-6s %-4s %4d s  %s" % (n, status_word(ok), rows[-1][3], detail), flush=True)
         if ok is False and harness.LAST_LOG and harness.LAST_LOG != log_before:
@@ -762,6 +832,8 @@ def main(argv=None):
     skipped = [r for r in rows if r[1] is None]
     ran = len(rows) - len(skipped)
     lines = ["regress %s  preset %s" % (time.strftime("%Y-%m-%d %H:%M"), a.preset)]
+    if profile:
+        lines.append('HD profile: 16:9; Menus 1.4.0 + Fighters 1.0.0; m2/m3/m4a use original-image goldens')
     lines += ["%-6s %-4s %4d s  %s" % (n, status_word(ok), dt, d) for n, ok, d, dt in rows]
     lines.append("%d of %d passed%s in %d min" % (ran - len(failed), ran,
                  (", %d skipped (%s)" % (len(skipped), ", ".join(r[0] for r in skipped))) if skipped else "",
@@ -774,7 +846,7 @@ def main(argv=None):
     evidence.write_report(report_dir, {'schema': 1, 'name': 'regression',
                           'seconds': time.time() - t_all,
                           'identity': {'preset': a.preset, 'shared_story': a.shared_story,
-                                       'checks': names, 'text_log': out},
+                                       'checks': names, 'text_log': out, 'release_profile': profile},
                           'assertions': [dict(evidence.assertion(n, ok, d), seconds=dt)
                                          for n, ok, d, dt in rows]})
     print(lines[-1] + "  (" + os.path.relpath(out, REPO) + ")")

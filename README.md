@@ -25,6 +25,8 @@ the game on your machine. PS2 and GameCube copies cannot be used.
 [Report a problem](https://github.com/vyanhursky/DefJamFFNY-recomp/issues/new/choose) ·
 [Join the Discord](https://discord.gg/xNvBs23ZBw)
 
+**v0.13.0 release candidate:** language support, audio and controller fixes; [candidate notes](docs/releases/v0.13.0.md) and [platform test instructions](docs/regression-v0.13.0.md). Platform acceptance is pending.
+
 **[v0.12.3 — Smoother fights and the CachyOS build fix](https://github.com/vyanhursky/DefJamFFNY-recomp/releases/tag/v0.12.3)** is the latest stable release: fights step their simulation evenly every frame (no more 30 fps-like judder), and setup builds again under C++20 compilers such as GCC 16 on CachyOS. [v0.12.2](https://github.com/vyanhursky/DefJamFFNY-recomp/releases/tag/v0.12.2) made Story Power Plant free-for-all pace like Battle Mode and removed the black rectangle in the fire-escape pan. [v0.12.1](https://github.com/vyanhursky/DefJamFFNY-recomp/releases/tag/v0.12.1) fixed created-fighter portraits, eye colours and thumbnails, the right-side meters, and widescreen placement of the paused HUD and the menu song notification. [v0.12.0](https://github.com/vyanhursky/DefJamFFNY-recomp/releases/tag/v0.12.0) rebased the toolkit onto xboxrecomp v0.16, with audio fixes and steadier frames on variable-refresh Windows displays and the Steam Deck. [v0.11.0](https://github.com/vyanhursky/DefJamFFNY-recomp/releases/tag/v0.11.0) brought Mod Support Beta. Discover, download, enable and order mods in the launcher. HD Widescreen Menus is available in the default catalogue after refresh. See the release notes for known visual limitations.
 
 ## Gameplay

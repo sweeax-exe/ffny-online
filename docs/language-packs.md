@@ -110,7 +110,7 @@ You need the USA dump's files, a copy of them with your translation in place, an
    the log.
 4. Share the folder (zipped, the folder at the root of the zip) with a licence and credits file. It contains
    your changes only. For the project catalogue, a version declares the capability `language-v1` and a
-   `min_recomp` of 0.12.4 or later; the installer accepts `.ini`, `.djd`, `.md`, `.txt` and `.json` files
+   `min_recomp` of 0.13.0 or later; the installer accepts `.ini`, `.djd`, `.md`, `.txt` and `.json` files
    in it.
 
 Where things are, on the USA disc:

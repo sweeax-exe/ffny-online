@@ -72,6 +72,8 @@
 | Launcher mod catalogue | ✅ v0.11.0 stable/latest — Mod Support Beta | D198 owner Steam Deck acceptance. Release5775f3c/nine assets unchanged; catalogue PR3 merged5b4de77, signed publication40115951254 passed. Client verifies revision3 and default-channel1.0.0 with testing off; archive43bbb22c unchanged.13local tests/22subtests plus full Linux CI pass. Docs PR99 records stable promotion. |
 
 | Texture modding getting started | ✅ owner-approved and merged PR148 | D232: human-readable first-pack guide links runtime capture, archive extraction/gallery, original IDs, PNG/atlas/alpha rules, manifest/ZIP, current priority UI, testing/sharing and troubleshooting. README/index/reference links refreshed; synthetic CLI/manifest/ZIP smoke pass,89local links and23focused tests pass; CI green, owner approved, PR148 merged852aa43. Docs only; no game/artwork/workspace changes. |
+| v0.13.0 candidate (D233-D245) | ⏳ prepared; full platform gates pending | PRs #156/#153/#158 combined on release/v0.13.0; toolkit d569ca1. Fresh Windows analyze/lift/build complete, units739pass/28skip/1slow deselected, focused80pass/1skip, six toolkit fixture suites pass. Both requested HD mods downloaded and verified. Windows full suite next; owner runs Mac/Linux from release PR. |
+
 
 ## 1. Decisions log
 
@@ -375,6 +377,20 @@ D138–D140 were allocated independently on main and the launcher branch. Their 
 | D230 | 2026-10-27 | C++20 build (PR #139, issue #138): convert `path::u8string()` through `pcui::path_utf8()` in `pc_mods.cpp` and guard raw `.u8string()` under `src/` with a compiler-free unit test, rather than pin `CMAKE_CXX_STANDARD`. | The code supports both C++17 and C++20 (#90); a pin would hide the problem for one compiler setup. |
 | D231 | 2026-10-27 | v0.12.3 release train: PRs #139 and #143 on `release/v0.12.3`, merged in PR order, then docs PR #149 (#98 record corrections) after the Windows gate; #146 (`--isolate-crowd`, #98) moves to v0.12.4. No toolkit change: fork branch `defjam/release-0.12.3` = `be83eb9` (the v0.12.2 pin). Issue #141 (HD menu side bars, 512 MiB texture budget) is in the milestone without a PR and is not in this release. | Only the two PRs are queued; #143 adds an entry hook, so the candidate needs a fresh re-lift. |
 | D232 | 2026-10-28 | Vlad requests a human-readable Texture Modding — Getting Started guide covering originals/atlases, IDs, pack format/archive/manifests, mod manager/load order/locations and supporting docs. | Put the public first-pack walkthrough in docs/texture-modding-getting-started.md, with runtime capture as the small initial route and optional standalone extraction/corpus commands. Keep original IDs separate from edited-file hashes, ordinary packs separate from widescreen registration and shared ZIPs separate from catalogue metadata. Verify current highest-first GUI versus last-wins stored INI order. Correct stale linked docs rather than repeat outdated RC/proposed wording; scope is Markdown only. Owner approved and PR148 merged852aa43 after green CI; public main guide available. |
+| D233 | 2026-10-31 | v0.13.0 candidate combines only PRs #156, #153 and #158; rename milestone 3 v0.13.0 to v0.14.0, then milestone 6 v0.12.4 to v0.13.0, preserving assignments. | Owner request October 31. PR #146 and issue #141 remain queued but are excluded from this candidate. |
+| D234 | 2026-10-31 | PR #156: heap pages below 64 MB use first-mirror physical aliases; window buffers keep their low physical names. | Prevents heap/window collisions after language-table layout changes; RECOMP_PHYS_RAM_ALIAS=0 retains comparison behavior. |
+| D235 | 2026-10-31 | PR #153: language mods are deltas rebuilt from the player dump into a cache and served by the toolkit file redirect. | No original or translated game files ship with the port; dump bytes stay unchanged. |
+| D236 | 2026-10-31 | PR #153: select one language mod on Mods, separately from texture load order, under language-v1. | Language data applies beneath texture replacements; launcher saves [language] pack. |
+| D237 | 2026-10-31 | PR #153: append rebuilt archive entries, literal RefPack when originally compressed. | Preserve untouched archive offsets and bytes. |
+| D238 | 2026-10-31 | PR #153: language packs may patch only XBE data sections. | Lifted code cannot consume an on-disk code delta. |
+| D239 | 2026-10-31 | PR #153: [language] game=french selects the disc French at boot, unless a language mod is active. | Built-in French needs no download; packs translate the English slot. |
+| D240 | 2026-10-31 | PR #153: [language] story_subtitles controls the existing subtitle state after NIS setup, with auto unchanged by default. | English players may opt into all Story cutscenes; no guest code patch is distributed. |
+| D241 | 2026-10-31 | PR #158: retain bounded ordered controller transitions until guest consumption with generation-bound acknowledgement. | Avoid merging rapid presses; reset/expiry/overflow resynchronize stale work. |
+| D242 | 2026-10-31 | PR #158: target 1 ms host acquisition without changing simulation/combat rules. | Higher sampling resolution does not mean 1000 simulation steps or physical latency guarantees. |
+| D243 | 2026-10-31 | PR #158: late report refresh remains optional and uses opportunistic dispatch/lifecycle ownership. | Preserve the normal report under contention; measure software delivery separately from physical display response. |
+| D244 | 2026-10-31 | PR #158: move macOS setup CI to macos-15. | The macos-14 runner retirement interrupts required setup checks. |
+| D245 | 2026-10-31 | Candidate full regressions use explicit 16:9 and verified HD Widescreen Menus 1.4.0 + HD Fighters 1.0.0, with 2048 MiB texture cache; stock frame goldens remain separate. | Owner requests HD widescreen regression plus French interface, English subtitles and controller tracing. Mac/Linux runs belong to the owner; Windows runs here. Visual review remains separate from state/log checks. |
+
 
 ## 2. Environment inventory (2026-09-17)
 
@@ -480,35 +496,29 @@ defjam-recomp/
 
 ## 7. Hand-off
 
-### v0.12.3 published — 2026-10-28
+### v0.13.0 release candidate — 2026-10-31
 
-- v0.12.3 is stable/latest: release PR #145 merged `65038d0`, annotated tag `v0.12.3` at the merge, Source release
-  run 40744335843; nine assets verified (GitHub digests, `.sha256`, provenance: version 0.12.3, toolkit `be83eb9`,
-  source `65038d0`). Milestone v0.12.3 closed; issues #138 (by #139) and #140 (fixed by #143) closed.
-- Toolkit unchanged; fork `defjam/upstream-v0.16` already equals `defjam/release-0.12.3` (`be83eb9`).
-- Next: milestone v0.12.4 holds #146 (`--isolate-crowd`, #98; draft, not merged) and #141 (HD menu side bars,
-  no PR). v0.13.0 holds the cheat menu (#97) and the unified-app stack.
-- The release worktree `code/defjam-release-0.12.3` is removed after this record merges (unlink its `game`
-  junction first with `cmd /c rmdir game`).
-- Setup gotcha seen in the Windows gate: `--operation update` without `--no-shortcuts` writes Start Menu and
-  desktop shortcuts to the test folder; uninstall removes them.
-- Upstream PRs #255/#256/#261/#264 remain open with sp00nznet; preserve their heads.
-
-Decisions are read by number or keyword: `decision D<n>`, `decisions --grep TEXT`.
-
-### Texture modding guide merged — 2026-10-28
-
-- Owner approved PR148; merged to main as852aa43407c329baaa7b37ccccc458e5bbbd23e4.
-  Merge tree equals tested headf8204c9; CI40727659902 passes (docs-only skips
-  runtime/setup builds). Remote head auto-deleted; fetch/prune and local merged
-  branch cleanup complete. Public guide: https://github.com/vyanhursky/DefJamFFNY-recomp/blob/main/docs/texture-modding-getting-started.md.
-  New docs/texture-modding-getting-started.md is the public beginner entry point;
-  README/docs index/texture reference/manager/launcher pages link it. Current UI
-  highest-first/Higher-Lower and stored INI last-wins are explained consistently.
-- Synthetic CLI inventory/corpus build and serve-help pass; manifest from guide
-  and three-file ZIP round-trip pass actual setup/mods.py validation. Receipt
-  logs/guide-smoke/receipt.json (private, synthetic only). No corpus/art generation,
-  real-game test/build, installed pack/save/settings or live8768writer change.
-- Local links89/89, focused progress/CI-digest tests23/23, whitespace clean.
-  Publication is complete on main, with no release-train or runtime changes. Read linked technical references for advanced wide registration;
-  the guide does not claim new-fighter/gameplay import support.
+- Branch `release/v0.13.0`, isolated Windows checkout `code/defjam-release-0.13.0`.
+  Base `6414027`; merge commits for #156/#153/#158; toolkit `d569ca1` combines
+  `7d98332`, `efde320` and `b7db8c1` on `defjam/release-0.13.0`.
+- Milestone 3 renamed v0.14.0, milestone 6 renamed v0.13.0. Existing memberships
+  preserved. #146 and #141 are outside this candidate, pending their own resolution.
+- Fresh Windows analysis/lift/build complete: 18,446 functions, 21 C files,
+  64 manual addresses/0 missing. Unit suite739pass/28skip/1slow deselected;
+  focused80pass/1skip. Native toolkit apu_phys2/2, kernel_path1/1,
+  input_edges, input_host_edges, usb_transfer and kernel_irql_abi pass.
+  kernel_path first exited2 before assertions because inherited TEMP did not
+  exist; rerun with logs/native-tmp passes. Logs: logs/rc-unit.txt,
+  logs/rc-focused-tests.txt, logs/toolkit-*-test.txt and kernel_path-retest.txt.
+- Full Windows regression: next command with DEFJAM_DATA=<checkout>/data:
+  `python scripts/regress.py --preset win-x64-release --release-profile`.
+  Owner runs macOS/Linux from the release PR; exact instructions in
+  docs/regression-v0.13.0.md. New french/subtitles-en rows retain captures for
+  separate visual review; input-trace tests refresh off/on with loss rejection.
+- Both HD mods verified/installed in the disposable data root: Menus1.4.0
+  archive f3d79f86a024b5786919ef2d6f38b1f599cb49a151d031b4a85023a5f480848d;
+  Fighters1.0.0 archive1bea1239abb8e6b86fff85ecb9fbd0d805df2b1567183e6e8a16b6f131725e0f.
+- Do not publish a tag/release until platform regressions, French/subtitle visual
+  review, setup install/Clean Update and combined owner playtest are accepted.
+  The release candidate is prepared, not accepted. No binaries/assets/logs/saves
+  enter commits. Stable download links still identify published v0.12.3.
