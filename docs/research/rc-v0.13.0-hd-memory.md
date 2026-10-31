@@ -1,8 +1,9 @@
 # v0.13.0 Windows HD memory investigation — 2026-10-31
 
-Status: all four controlled pack comparisons and the extended menu-settling
-test passed the existing gate. The original failing result is
-retained; neither the 64 MiB limit nor the runtime has been changed.
+Status: the initial two-mod controls below passed, but the later full-Lanczos
+regression and its targeted confirmation **fail the unchanged 64 MiB gate**.
+The post-playtest section records both failures and the longer menu observations.
+No runtime or limit change has been made; the Windows candidate is not all-green.
 
 ## What the gate measured
 
@@ -144,3 +145,98 @@ separate measurements and keeps every original assertion.
 Validation for the new diagnostic helper and existing evidence/profile logic:
 **73 focused tests pass**, including synthetic transition-spike and settling
 cases. Game runtime, toolkit pin and goldens are unchanged.
+
+## Post-playtest full Lanczos configuration
+
+The owner approved the Windows playtest with full Lanczos4x, Menus1.4.0 and
+Fighters1.0.0. The requested automated retest then ran on source/test head
+`5771350dadb027eb04b4db9f030370cfc23f6693`, toolkit `d569ca1`, with the same
+native executable SHA-256 `8649e815237232b23296579e8521e0b715e6f83715f8e399d52ae92e3d96be11`.
+The host remains Windows11/RTX4070TiSUPER/driver32.0.16.1088. All gameplay lanes
+use 16:9, render scale2 and a 2048 MiB replacement-texture budget. This budget
+is not a total-process memory cap.
+
+Lanczos recipe `81ddfce230cae3c81100c324d2b0f552bd6668a8b534e84c57677b717c48a0e3`
+contains 18,971 generated images and 13 runtime aliases. Its opacity/channels
+folders load before Menus and Fighters. Runtime logs verify **20,946** entries
+with all packs, **18,984** with Lanczos alone, and **1,962** with the two managed
+mods. The signed mod receipts and all generated image hashes were checked.
+
+### Full suite and targeted confirmation
+
+`logs/regress-20261031-160305.txt` finished in46 minutes: **16/17 passed**, with
+four Windows-inapplicable SDL UI checks skipped. Units745pass/28skip/1slow
+deselected; source-image goldens/replay pass unchanged. All gameplay assertions,
+audio and frame checks pass. The sole failure is combat memory growth:
+
+| Observation | Baseline MiB | Last fight MiB | Final MiB | Gate growth MiB | Result |
+|---|---:|---:|---:|---:|---|
+| Full-suite combat | 2475.13 | 2426.72 | 2571.80 | +96.68 | FAIL |
+| Targeted combat, same fixture | 2480.36 | 2465.09 | 2855.93 | +375.58 | FAIL |
+
+Reports: `logs/scenarios/regress-combat-20261031-153606/report.json` and
+`logs/scenarios/regress-combat-20261031-161905/report.json`; targeted driver
+summary `logs/regress-20261031-162353.txt`. Both have27 assertions,26 pass,
+all7 combat assertions pass, and save restoration passes. The fixture manifest is
+`fc722fe2d427e54dbf901a1979237873402455367dae9016a3951fc464fe80a3`.
+RNG is uncontrolled in these normal regression routes; this is a confirmation
+of the same gate/configuration/fixture, not a deterministic replay.
+
+Both failed endpoints occur about2 seconds after returning to the match-selection
+menu. Their final fight samples are below the initial fight baseline. Triage
+finds no crash/watchdog/unresolved indirect call; continued render activity is
+visible in the bounded log tails. The original failures remain recorded.
+
+French menu text (MENU PRINCIPAL, CHOISIR, RETOUR) and English sc05 subtitle lines
+at16s/24s were visually reviewed and pass. These still captures do not establish
+audio/video synchronization in SC04. Both controller-tracing trials pass all40
+presses through all9 required stages, no faults, and guarded save restoration.
+The largest measured step gap is22.46 ms with refresh off and68.17 ms with refresh
+on, below100 ms. Refresh-on conversions/applications pass the runner checks.
+Evidence: `logs/input-audit/regress-20261031-155736-late{0,1}*`.
+
+### Serial pack comparison and longer returned menu
+
+The comparison uses the original fixed fixture manifest
+`e6635fa30e3b67d650851aea384e58456756df10475f95e2a3930a51a76707b2`, seed20261031,
+the same executable/roster/venue and a60 second held menu. Inputs use host timing;
+match durations vary. It is not a statistical benchmark or whole-roster limit.
+
+| Pack selection | Fight baseline MiB | Final MiB | Gate growth MiB | Settled-menu growth MiB | Assertions |
+|---|---:|---:|---:|---:|---|
+| Menus + Fighters | 2387.07 | 2356.18 | -30.89 | -18.26 | 27/27 PASS |
+| Lanczos alone | 2291.71 | 2413.98 | +122.27 | -16.62 | 26/27; memory FAIL |
+| Lanczos + Menus + Fighters | 2472.30 | 2434.00 | -38.30 | -16.12 | 27/27 PASS |
+
+All three restore saves byte-for-byte. Each reaches exactly one match and holds
+the returned menu; each has8 settled samples. Reports and summary are under
+`logs/lanczos-memory-postplaytest-20261031/`. Lanczos alone remains above the
+fight baseline after60 seconds even though the observed settled-menu trend is
+downward. The two managed mods and the all-pack cases pass the existing gate.
+
+One final all-pack observation uses the **post-playtest fixture from the failed
+regression**, seed20261031 and a60 second held menu. It passes27/27: baseline
+2475.04MiB, final2453.29MiB, growth**-21.74MiB**, highest sample2529.71MiB.
+Eight settled samples alternate between2437.26 and2453.29MiB; final growth
+against the maximum of their first3samples is**0.00MiB**. The fitted slope is
++13.332 MiB/min because of that oscillation; it is not a monotonically rising
+sequence. Report: `logs/lanczos-memory-currentfixture-20261031/all/report.json`.
+This run did not reproduce the375.58 MiB spike and cannot prove how long that
+particular earlier allocation would have survived.
+
+### Interpretation and remaining gate
+
+Lanczos materially increases footprint. In this fixed-fixture comparison it
+alone starts around2292MiB, while all packs start around2472MiB; cache reuse
+and overlapping replacements mean pack footprints do not add linearly. Scene
+transitions affect the short endpoint gate, and a longer all-pack observation
+can pass after the menu settles. The measurements do not identify an allocator
+or prove the absence of a slower campaign leak.
+
+**The Windows memory gate remains failed and reproduced.** Longer passing runs
+do not waive it, and the Lanczos-only control also fails. Keep the64 MiB limit,
+runtime and goldens unchanged. Investigate allocation lifetime or review a
+same-scene settled-memory test separately before calling this candidate
+all-green. macOS/Linux full regression and setup install/Clean Update are still
+separate pending gates; the owner's playtest is approved. CI is green on the
+tested5771350head. No merge, tag or release was performed.

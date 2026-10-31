@@ -72,7 +72,7 @@
 | Launcher mod catalogue | ✅ v0.11.0 stable/latest — Mod Support Beta | D198 owner Steam Deck acceptance. Release5775f3c/nine assets unchanged; catalogue PR3 merged5b4de77, signed publication40115951254 passed. Client verifies revision3 and default-channel1.0.0 with testing off; archive43bbb22c unchanged.13local tests/22subtests plus full Linux CI pass. Docs PR99 records stable promotion. |
 
 | Texture modding getting started | ✅ owner-approved and merged PR148 | D232: human-readable first-pack guide links runtime capture, archive extraction/gallery, original IDs, PNG/atlas/alpha rules, manifest/ZIP, current priority UI, testing/sharing and troubleshooting. README/index/reference links refreshed; synthetic CLI/manifest/ZIP smoke pass,89local links and23focused tests pass; CI green, owner approved, PR148 merged852aa43. Docs only; no game/artwork/workspace changes. |
-| v0.13.0 candidate (D233-D247) | ⏳ prepared; full platform gates pending | PRs #156/#153/#158 combined on release/v0.13.0; toolkit d569ca1. Fresh Windows analyze/lift/build complete, units739pass/28skip/1slow deselected, focused80pass/1skip, six toolkit fixture suites pass. Both requested HD mods downloaded and verified. Windows full suite16/17pass (44min),4SKIP: initial combat memory gate failed265.7MiB; exact repeat,4pack controls and60s menu observation pass unchanged64MiB gate (D246). French/English subtitles visually pass, input tracing passes. Owner runs Mac/Linux. Both source branches published; draft release PR #160 open, CI05f8b05 green. D247 adds full local Lanczos4x; combined-pack full retest and memory comparison pending owner playtest completion. |
+| v0.13.0 candidate (D233-D249) | ⏳ Windows retest complete; memory gate failed | Owner approved all-pack playtest; toolkit d569ca1/native8649e815 unchanged. Tested5771350: Windows16/17 in46min,4inapplicable skips, units745pass/28skip/1slow deselected. Only memory growth fails96.7MiB; same-fixture confirmation375.6MiB vs64MiB. Longer all-pack held-menu runs pass, Lanczos-only fails122.3MiB; failures preserved (D249). French/subtitle visual and input-trace off/on pass. CI green on5771350. Mac/Linux and setup install/Clean Update pending; future bugs161/162 queuedv0.14.0. Release PR160 remains unmerged. |
 
 
 ## 1. Decisions log
@@ -393,6 +393,7 @@ D138–D140 were allocated independently on main and the launcher branch. Their 
 | D246 | 2026-10-31 | Investigate Windows HD memory on the same candidate, fixture, roster and 2048 MiB cache: no packs/Menus/Fighters/both plus a 60-second held returned menu; keep the 64 MiB growth gate and preserve the original failure. Add a reusable memory-pack-audit.py diagnostic. | Original +265.7 MiB was after the result, with flat combat. Exact rerun +8.1 MiB; controlled growth +1.4/+54.8/+4.2/+45.4 MiB, all 27/27; held-menu settled growth0.0 MiB over8samples, final18.5 MiB below fight baseline. Menu pack dominates this matchup footprint. Evidence supports transient scene allocation, not an identified sustained leak; no runtime or limit change. Report docs/research/rc-v0.13.0-hd-memory.md; focused73pass. |
 | D247 | 2026-10-31 | Owner adds full locally generated Lanczos 4x textures to the candidate playtest and requests a full retest after the playtest. Load both generated mip-policy packs before Menus1.4.0 and Fighters1.0.0. | Keep specialized mod priority. Verify the retained corpus/image hashes, recipe, manifests and runtime aliases through --lanczos-receipt; preserve original two-mod results as historical evidence. Full regression plus both/Lanczos/all memory comparison is pending owner playtest completion. No automated game launch during owner playtest; 64 MiB growth gate remains unchanged. |
 | D248 | 2026-10-31 | Owner approves the Windows all-pack playtest; file SC04 audio/video lag as issue161 and map-selector Shops widescreen border as issue162, both bug/v0.14.0. Proceed with the requested post-playtest full Windows regression and serial memory comparison. | Owner says playtest is great/approved and defers both reported bugs to future fixing. Mac/Linux regressions remain owner-run; no merge/tag/release authorization inferred. CI3322cdf failed an existing randomized delta test: coincident boundary bytes can validly increase copy length. Make that test deterministic, cover matching/nonmatching boundaries, require exact round trip and no excess literals; no runtime change. |
+| D249 | 2026-10-31 | Complete the owner-requested post-playtest all-pack Windows regression and bounded memory confirmation; preserve the failed64MiB gate and report longer observations separately. | Tested5771350/native8649e815/toolkitd569ca1: full16/17 in46min with4inapplicable skips, units745pass; memory96.68MiB and same-fixture repeat375.58MiB fail. Fixed-fixture Menus+Fighters/Lanczos/all end growth-30.89/+122.27/-38.30MiB; only Lanczos fails. Extra same-current-fixture all-pack60s menu passes27/27, end-21.74MiB,8settled samples2437.26–2453.29MiB. No allocator attribution or leak-free campaign claim; no threshold/runtime/golden change. French/subtitle visual review and trace40presses/9stages off/on pass; saves restored. Publish evidence, leave memory/platform/setup gates pending; stop completed test monitor. |
 
 
 ## 2. Environment inventory (2026-09-17)
@@ -488,7 +489,6 @@ defjam-recomp/
 
 > Recent entries only; older entries remain unchanged in the local `docs/worklog/` archive.
 
-- 2026-10-31 11:06 — D233/D234, PR156: renamed GitHub milestones3→v0.14.0 and6→v0.13.0 (memberships preserved); merged audio fix into candidate, integrated toolkit7d98332. Combined apu_phys2/2 passes; logs/toolkit-apu_phys-test.txt.
 - 2026-10-31 11:06 — D235-D240, PR153: merged language mods/French/subtitles, toolkit redirect cherry-picked efde320→2a84422; Windows kernel_path1/1 passes with valid TEMP (initial fixture exited2 before assertions). logs/toolkit-kernel_path-retest.txt.
 - 2026-10-31 11:06 — D241-D244, PR158: merged controller transitions/tracing and macos-15 CI; toolkit input b7db8c1→d569ca1. Native input_edges10/10, input_host_edges1/1, usb_transfer2/2, kernel_irql_abi2/2 pass. Fresh candidate build,739unit pass/28skip/1slow deselected; logs/rc-unit.txt.
 - 2026-10-31 11:06 — D245: verified/downloaded Menus1.4.0 (1746 files) and Fighters1.0.0 (221 files); added explicit HD16:9 profile and French/English-subtitle/controller rows. Focused80pass/1skip and final14pass. Full Windows regression started, unit739pass and m2 pass so far (logs/rc-full-windows.txt). Owner runs Mac/Linux. Source audit608files/0failures; branch pushes/release PR blocked by automatic approval review, explicit user permission requested; no release/tag/main merge.
@@ -496,41 +496,41 @@ defjam-recomp/
 - 2026-10-31 14:36 — D246 memory investigation: same executable8649e815/fixturee6635fa3/16:9/cache2048MiB, no packs/Menus1.4/Fighters1.0/both: baseline303.7/2390.0/394.2/2390.1MiB; original64MiB gate growth1.4/54.8/4.2/45.4MiB,27/27each. Exact repeat27/27(+8.1MiB). Held returned menu60s also27/27:8settled samples,0.0MiB growth,final18.5MiB below fight baseline. Original265.7MiB post-match failure retained; no sustained fight/menu growth observed, exact allocator not traced. Added portable memory-pack-audit.py with preserved failures/phase metrics; focused73pass. Report docs/research/rc-v0.13.0-hd-memory.md. No runtime, toolkit, golden or64MiB threshold changes; PR160 records updated.
 - 2026-10-31 14:49 — D247: owner adds full Lanczos4x to playtest and requests post-playtest retest. Assembled/verified 18,971 local images (6,212,168,677 bytes),13runtime aliases, recipe81ddfce230ca into candidate mods; Lanczos opacity/channels precede Menus1.4.0/Fighters1.0.0. Shortcut now uses editable stored pack selection and Picture shape. Added --lanczos-receipt corpus checks and memory groups lanczos/all; focused132pass/1skip, source611files/0policy failures. Full combined-pack game regression and memory comparison wait for owner playtest completion; previous two-mod results retained. Local receipt data/lanczos-pack-build.json and handoff logs/owner-playtest-handoff.md.
 - 2026-10-31 15:14 — D248: owner approves Windows all-pack playtest; submitted future bugs #161 SC04 A/V lag and #162 map-selector Shops widescreen border, both bug/v0.14.0. Reviewed local latest session report (10504frames/51hitches/no retained pictures; no independent cutscene/map reproduction). CI3322cdf failure is an existing random delta-test boundary coincidence; deterministic matching/nonmatching fixtures and payload/round-trip assertions pass18/8skip locally. Full all-pack regression and memory comparison authorized; Mac/Linux owner-run.
+- 2026-10-31 16:40 — D249: all-pack Windows retest on5771350 finished16/17 in46min,4inapplicable skips; units745pass/28skip/1slow deselected. Only combat memory96.68MiB fails64MiB; same-fixture repeat375.58MiB confirms. Longer fixed-fixture controls growth-30.89/+122.27/-38.30MiB for Menus+Fighters/Lanczos/all; Lanczos-only fails. Extra current-fixture all-pack60s menu passes27/27, final-21.74MiB,8settled samples2437.26–2453.29MiB. French/subtitle visual and trace off/on pass, save restoration passes. CI5771350green. Report docs/research/rc-v0.13.0-hd-memory.md; source-only result update, no runtime/gate/golden changes. Mac/Linux and setup gates pending; test monitor finished.
 
 ## 7. Hand-off
 
-### v0.13.0 release candidate — 2026-10-31
+### v0.13.0 release candidate — Windows post-playtest result, 2026-10-31
 
-- Owner approved the all-pack Windows playtest (D248). Future bugs filed as
-  #161 SC04 audio falls behind video, #162 widescreen Shops map border; both
-  v0.14.0. The local latest session summary has no cutscene/map evidence and
-  does not independently reproduce these reports. Automated all-pack regression
-  and serial both/Lanczos/all memory comparison are now authorized to run.
-- Owner added full Lanczos4x (D247): recipe81ddfce230ca, both opacity/channels
-  packs load before Menus1.4.0/Fighters1.0.0. Local build receipt:
-  data/lanczos-pack-build.json. Wait until the owner finishes the playtest, then
-  run the full Windows suite with --release-profile --lanczos-receipt
-  data/lanczos-pack-build.json; repeat the memory comparison with --groups
-  both,lanczos,all --result-tail 60 --hold-menu.
-  Commands for each OS are in docs/regression-v0.13.0.md. Previous results cover
-  the two managed mods only. The native game build and toolkit are unchanged.
-- Branch `release/v0.13.0`, isolated Windows checkout `code/defjam-release-0.13.0`.
-  Base `6414027`; merge commits for #156/#153/#158; toolkit `d569ca1` combines
-  `7d98332`, `efde320` and `b7db8c1` on `defjam/release-0.13.0`.
-- Milestone 3 renamed v0.14.0, milestone 6 renamed v0.13.0. Existing memberships
-  preserved. #146 and #141 are outside this candidate, pending their own resolution.
-- Fresh Windows analysis/lift/build complete: 18,446 functions, 21 C files,
-  64 manual addresses/0 missing. Unit suite739pass/28skip/1slow deselected;
-  focused80pass/1skip. Native toolkit apu_phys2/2, kernel_path1/1,
-  input_edges, input_host_edges, usb_transfer and kernel_irql_abi pass.
-  kernel_path first exited2 before assertions because inherited TEMP did not
-  exist; rerun with logs/native-tmp passes. Logs: logs/rc-unit.txt,
-  logs/rc-focused-tests.txt, logs/toolkit-*-test.txt and kernel_path-retest.txt.
-- Windows full regression finished on7be9133:16/17pass,4Windows-inapplicable skips,44min; logs/regress-20261031-115227.txt. Only combat memory growth fails (265.7MiB vs64MiB); all gameplay assertions pass. Confirmation passes27/27; four controlled pack selections and60s held-menu run also pass27/27 each. Settled-menu growth0.0MiB. D246 report docs/research/rc-v0.13.0-hd-memory.md; no runtime/threshold change. French menu and English sc05 subtitle captures16s/24s visually reviewed/pass; input-trace refresh0/1 passes. Mac/Linux owner-run. Owner explicitly approved both branch pushes; published toolkit d569ca1 and game release/v0.13.0. Draft release PR #160 is open with full platform commands and result table; CI started (run41242529320). See docs/regression-v0.13.0.md for commands.
-- Both HD mods verified/installed in the disposable data root: Menus1.4.0
-  archive f3d79f86a024b5786919ef2d6f38b1f599cb49a151d031b4a85023a5f480848d;
-  Fighters1.0.0 archive1bea1239abb8e6b86fff85ecb9fbd0d805df2b1567183e6e8a16b6f131725e0f.
-- Do not publish a tag/release until platform regressions, French/subtitle visual
-  review, setup install/Clean Update and combined owner playtest are accepted.
-  The release candidate is prepared, not accepted. No binaries/assets/logs/saves
-  enter commits. Stable download links still identify published v0.12.3.
+- Tested head5771350dadb027eb04b4db9f030370cfc23f6693, toolkit
+  d569ca10811cef67ec4e9fa2173088c2f9fd0580. Native executable SHA256
+  8649e815237232b23296579e8521e0b715e6f83715f8e399d52ae92e3d96be11.
+  Current follow-up changes record results only; no native/toolkit change.
+- Owner approved the Windows Lanczos4x/Menus1.4.0/Fighters1.0.0 playtest.
+  Full Windows retest finished16/17 in46min,4Windows-inapplicable SDL UI skips.
+  logs/regress-20261031-160305.txt; units745pass/28skip/1slow deselected.
+  French menu and English sc05 captures16s/24s visually pass. Tracing
+  logs/input-audit/regress-20261031-155736-late{0,1}*:40presses/9stages,
+  no faults, maximum step gaps22.46/68.17ms; saved roots restored.
+- Remaining Windows gate: combat memory96.68MiB vs64MiB; same fixture
+  confirmation375.58MiB also fails. Reports regress-combat-20261031-153606
+  and regress-combat-20261031-161905 under logs/scenarios. Do not waive.
+- Serial matrix logs/lanczos-memory-postplaytest-20261031: Menus+Fighters
+  growth-30.89MiB PASS; Lanczos-only+122.27MiB FAIL; all packs-38.30MiB PASS.
+  Extra same-current-fixture all-pack60s menu in
+  logs/lanczos-memory-currentfixture-20261031 passes27/27, final-21.74MiB.
+  These observations distinguish scene endpoint effects but do not attribute
+  allocations, reproduce the375.58MiB spike's lifetime, or prove no campaign leak.
+  Full report: docs/research/rc-v0.13.0-hd-memory.md (post-playtest section).
+- All20946manifest entries/16:9/cache2048MiB confirmed, Lanczos folders first,
+  then Menus/Fighters. Original-image goldens remain stock4:3. Managed mod
+  versions/receipts and generated corpus files verified. Original two-mod
+  findings retained separately. Gates/limits/runtime/goldens unchanged.
+- CI green on tested5771350. PR160 records owner approval, all results and
+  limitations. Mac/Linux agents have the5771350 prompt; their results plus
+  setup real install/Clean Update remain pending. Future bugs161SC04A/V and
+  162Shops widescreen border are bug/v0.14.0, not fixed by this work.
+- All authorized Windows tests/confirmations finished; no more game runs planned.
+  Review the failed cross-scene memory gate/allocator lifetime separately before
+  calling Windows all-green. Never infer a waiver from longer passing runs.
+  Keep source-only hygiene. Do not merge/tag/publish before remaining acceptance.
