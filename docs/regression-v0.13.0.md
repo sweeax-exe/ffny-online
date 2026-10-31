@@ -59,3 +59,18 @@ logs, saves, screenshots, audio and built game executables local.
 The full regression does not replace setup install/Clean Update from v0.12.3 or
 the owner's combined-candidate playtest. Leave those release gates pending until
 they are actually performed. Confirm failures with `--only`, without updating goldens.
+
+For the Windows combat memory-growth failure, the exact rerun and all four pack
+controls passed the existing 64 MiB gate. The original full run's failure is
+retained. See the [HD memory investigation](research/rc-v0.13.0-hd-memory.md) for
+phase measurements and limits. A reusable comparison on any configured host is:
+
+```sh
+python3 scripts/memory-pack-audit.py --fixture logs/fixtures/YOUR_FIXTURE --texture-root "$DEFJAM_DATA/mods" --output logs/memory-pack-comparison
+```
+
+It keeps 16:9 and a 2048 MiB texture budget, verifies both exact mod versions,
+compares no packs/Menus/Fighters/both serially, and preserves each scenario's
+failure status. `--groups both --result-tail 60 --hold-menu` records a longer
+post-match menu observation. Compare Windows private bytes and POSIX RSS only
+within the same host; the harness uses different memory metrics on those hosts.
