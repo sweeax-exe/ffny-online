@@ -3,9 +3,11 @@
 The profile path is carried separately from RECOMP_* so scenario isolation cannot
 silently remove it. Source-image goldens run in a separate, recorded stock lane.
 """
+import configparser
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 
 PROFILE_ENV = 'DEFJAM_REGRESSION_PROFILE'
@@ -21,6 +23,7 @@ def prepare(root, output):
     root = Path(root).resolve()
     state = json.loads((root.parent / 'mod-manager/state.json').read_text(encoding='utf-8'))
     receipts = {}
+    expected_entries = 0
     for name, version in PACKS.items():
         receipt = state['installed'].get(name, {})
         if receipt.get('version') != version or receipt.get('folder') != name:
@@ -30,8 +33,13 @@ def prepare(root, output):
             raise ValueError('Installed pack differs from verified receipt: ' + name)
         receipts[name] = {'version': version, 'archive_sha256': receipt['archive_sha256'],
                           'manifest_sha256': digest(root / name / 'manifest.ini'), 'files': len(files)}
-    profile = {'schema': 1, 'packs': receipts, 'environment': {
-        'RECOMP_ASPECT': '16:9', 'RECOMP_TEXTURE_PACKS': ','.join(PACKS),
+        manifest = configparser.ConfigParser(interpolation=None)
+        manifest.read(root / name / 'manifest.ini', encoding='utf-8-sig')
+        expected_entries += len(manifest['textures']) if manifest.has_section('textures') else 0
+        if manifest.has_section('wide'):
+            expected_entries += sum(len(value.split(';')) for value in manifest['wide'].values() if value != 'stretch')
+    profile = {'schema': 1, 'packs': receipts, 'expected_entries': expected_entries, 'environment': {
+        'RECOMP_ASPECT': '16:9', 'RECOMP_TEXTURE_PACKS': ';'.join(PACKS),
         'RECOMP_TEXTURE_ROOT': str(root), 'RECOMP_TEXTURE_CACHE_MB': '2048',
         'RECOMP_GAME_LANGUAGE': 'english', 'RECOMP_LANGUAGE_PACK': '',
         'RECOMP_STORY_SUBTITLES': 'auto'}}
@@ -59,6 +67,7 @@ def faults(run):
     if '[FUNCCALL]' in run.text:
         if '[WS] widescreen 1.7778' not in run.text:
             bad.append('16:9 widescreen was not initialized')
-        if '[TEXPACK] schema=1 entries=' not in run.text:
-            bad.append('HD texture packs were not initialized')
+        count = re.search(r'\[TEXPACK\] schema=1 entries=(\d+)', run.text)
+        if not count or int(count[1]) != profile['expected_entries']:
+            bad.append('HD texture entry count does not match both verified manifests')
     return bad

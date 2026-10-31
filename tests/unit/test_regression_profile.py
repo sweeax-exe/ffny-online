@@ -18,7 +18,7 @@ def installed(tmp_path):
         folder = root / name
         folder.mkdir(parents=True)
         manifest = folder / 'manifest.ini'
-        manifest.write_text('[pack]\nschema=1\n')
+        manifest.write_text('[pack]\nschema=1\n[textures]\nid=image.png\n')
         state['installed'][name] = {'version': version, 'folder': name,
             'archive_sha256': 'a' * 64, 'files': {'manifest.ini': profile.digest(manifest)}}
     (tmp_path / 'mod-manager').mkdir()
@@ -47,7 +47,7 @@ def test_profile_is_explicit_and_records_both_archive_identities(tmp_path, monke
     result = profile.prepare(root, tmp_path / 'profile.json')
     assert profile.current() == result
     assert result['environment']['RECOMP_ASPECT'] == '16:9'
-    assert result['environment']['RECOMP_TEXTURE_PACKS'] == 'menu-ui-hd-wide,hd-fighters'
+    assert result['environment']['RECOMP_TEXTURE_PACKS'] == 'menu-ui-hd-wide;hd-fighters'
     assert {key: value['version'] for key, value in result['packs'].items()} == profile.PACKS
     # The profile is outside the RECOMP_* diagnostics suppressed by scenarios.
     assert not profile.PROFILE_ENV.startswith('RECOMP_')
@@ -60,7 +60,10 @@ def test_runtime_must_really_initialize_widescreen_and_texture_packs(tmp_path, m
     run = SimpleNamespace(identity={'regression_profile': result, 'environment': result['environment'].copy()},
                           text='[FUNCCALL] menu')
     assert len(profile.faults(run)) == 2
-    run.text += '\n[WS] widescreen 1.7778\n[TEXPACK] schema=1 entries=1561'
+    run.text += '\n[WS] widescreen 1.7778\n[TEXPACK] schema=1 entries=2'
     assert profile.faults(run) == []
+    run.text = run.text.replace('entries=2', 'entries=1')
+    assert 'both verified manifests' in profile.faults(run)[0]
+    run.text = run.text.replace('entries=1', 'entries=2')
     run.identity['environment']['RECOMP_ASPECT'] = '4:3'
     assert 'RECOMP_ASPECT differs' in profile.faults(run)[0]
