@@ -366,3 +366,50 @@ def test_testing_channel_is_explicit_for_view_and_install(manager, tmp_path):
     manager.view()
     assert manager.state()['installed']['paper']['version'] == '1.0.0-rc2'
     assert 'compatible=0' in (manager.root/'view.ini').read_text()
+
+
+def language_package(tmp, name='es-test', ini=None, delta=b'DJDELTA1' + bytes(72) + b'\0'):
+    ini = ini if ini is not None else ('[language]\nschema=1\nname=Español\nlanguage=es\n'
+                                       'story_subtitles=all\n[files]\nassets/misc.viv|cmusen.loc = patches/001.djd\n')
+    entries = {f'{name}/language.ini': ini.encode('utf-8'), f'{name}/patches/001.djd': delta,
+               f'{name}/CREDITS.md': b'# Credits\n'}
+    path = tmp / f'{name}.zip'
+    with zipfile.ZipFile(path, 'w') as archive:
+        for key, data in entries.items():
+            archive.writestr(key, data)
+    descriptor = dict(root=name, size=path.stat().st_size, sha256=mods.sha(path),
+                      unpacked_size=sum(map(len, entries.values())), file_count=len(entries),
+                      urls=['https://example.invalid/test.zip'])
+    mod = dict(id=name, name='Spanish test', description='Synthetic language fixture', authors=['Test'],
+               licence='Test fixture', homepage='https://example.invalid', **{'class': 'linked'},
+               revoked_versions=[], versions=[dict(version='1.0.0', channel='stable', min_recomp='0.1.0',
+               capabilities=['language-v1'], reviewed='2026-10-29', depends=[], conflicts=[], load_after=[],
+               archive=descriptor)])
+    return path, mod
+
+
+def test_language_mod_needs_its_capability_and_installs_beside_textures(manager, tmp_path):
+    manager, key = manager
+    source, row = language_package(tmp_path)
+    signed(manager, key, [row])
+    with pytest.raises(ValueError, match='compatible'):
+        manager.install('es-test', archive_path=source)
+    manager.capabilities.add('language-v1')
+    manager.install('es-test', archive_path=source)
+    assert (manager.mods/'es-test/language.ini').exists() and (manager.mods/'es-test/patches/001.djd').exists()
+    assert manager.state()['installed']['es-test']['capabilities'] == ['language-v1']
+    assert not (manager.data/'settings.ini').exists()  # installing never turns it on
+
+
+@pytest.mark.parametrize('ini,delta,message', [
+    ('[language]\nschema=2\nname=X\nlanguage=x\n[files]\na = patches/001.djd\n', None, 'schema'),
+    ('[language]\nschema=1\nname=X\nlanguage=x\n[files]\n../a = patches/001.djd\n', None, 'target'),
+    ('[language]\nschema=1\nname=X\nlanguage=x\n[files]\na = ../001.djd\n', None, 'delta path'),
+    ('[language]\nschema=1\nname=X\nlanguage=x\n[files]\na = patches/missing.djd\n', None, 'Missing delta'),
+    (None, b'not a delta', 'Not a language delta'),
+])
+def test_language_package_shape_rejected(tmp_path, ini, delta, message):
+    source, row = language_package(tmp_path, ini=ini, **({'delta': delta} if delta else {}))
+    target = tmp_path/'unpacked'
+    with pytest.raises(ValueError, match=message):
+        mods.unpack_archive(source, row['versions'][0]['archive'], target)

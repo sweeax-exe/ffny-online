@@ -36,7 +36,7 @@ MAX_INDEX = 8 * 1024**2
 MAX_FILE = 512 * 1024**2
 MAX_ARCHIVE = 8 * 1024**3
 MAX_FILES = 65536
-ALLOWED = {'.ini', '.png', '.dds', '.json', '.txt'}
+ALLOWED = {'.ini', '.png', '.dds', '.json', '.txt', '.md', '.djd'}  # .djd: language deltas
 
 
 class ModError(ValueError):
@@ -200,7 +200,46 @@ def image_shape(path, png_only=False):
     return struct.unpack_from('<I', head, 16)[0], struct.unpack_from('<I', head, 12)[0]
 
 
+LANGUAGE_TARGET = re.compile(r'[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)*')
+LANGUAGE_DELTA = re.compile(r'[A-Za-z0-9_-]+(/[A-Za-z0-9_.-]+)*\.djd')
+
+
+def validate_language(folder):
+    """A language mod (docs/language-packs.md): language.ini and its deltas. The game checks each delta
+    against the player's dump when it builds the pack; here only the shape and the files' presence."""
+    ini = folder / 'language.ini'
+    check(ini.is_file() and not linked(ini) and ini.stat().st_size <= 1024**2, 'Missing/oversized language.ini')
+    raw = ini.read_text(encoding='utf-8-sig')
+    check(all(len(line.encode('utf-8')) < 1900 for line in raw.splitlines()), 'language.ini line too long')
+    parser = configparser.ConfigParser(interpolation=None, comment_prefixes=(';', '#'),
+                                       inline_comment_prefixes=None, strict=True)
+    parser.optionxform = str
+    parser.read_string(raw)
+    check(not parser.defaults() and set(parser.sections()) <= {'language', 'files'}, 'Unsupported language.ini section')
+    check(parser.get('language', 'schema', fallback='') == '1', 'Unsupported language.ini schema')
+    check(parser.get('language', 'name', fallback='').strip() and parser.get('language', 'language', fallback='').strip(),
+          'language.ini needs name and language')
+    check(parser.has_section('files') and 0 < len(parser['files']) <= 256, 'Missing language file entries')
+    targets = set()
+    for target, delta in parser['files'].items():
+        parts = [part.strip() for part in target.split('|')]
+        check(all(LANGUAGE_TARGET.fullmatch(part) and '..' not in part.split('/') for part in parts),
+              'Invalid language target')
+        check('|'.join(parts).casefold() not in targets, 'Language target listed twice')
+        targets.add('|'.join(parts).casefold())
+        delta = delta.strip()
+        check(LANGUAGE_DELTA.fullmatch(delta), 'Invalid language delta path')
+        safe_relative(delta)
+        path = folder.joinpath(*PurePosixPath(delta).parts)
+        check(path.is_file() and not linked(path), 'Missing delta: ' + delta)
+        with path.open('rb') as stream:
+            check(stream.read(8) == b'DJDELTA1', 'Not a language delta: ' + delta)
+    return {'capabilities': ['language-v1'], 'texture_ids': [], 'wide_ids': []}
+
+
 def validate_pack(folder):
+    if (folder / 'language.ini').exists() and not (folder / 'manifest.ini').exists():
+        return validate_language(folder)
     manifest = folder / 'manifest.ini'
     check(manifest.is_file() and not manifest.is_symlink() and manifest.stat().st_size <= 16 * 1024**2,
           'Missing/oversized manifest')

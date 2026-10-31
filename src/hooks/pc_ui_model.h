@@ -55,6 +55,10 @@ struct Pack
 {
     std::string name, problem;
     bool selected = false;
+    // A language mod (language.ini, docs/language-packs.md): at most one is on, saved as
+    // [language] pack rather than in the texture load order. title is its name= line.
+    bool language = false;
+    std::string title;
 };
 struct ModGroup {
     std::string id, name;
@@ -97,13 +101,17 @@ inline std::vector<ModGroup> mod_groups(const fs::path &mods, const std::vector<
     return groups;
 }
 inline void select_mod(std::vector<Pack> &packs,const ModGroup &group,bool selected) {
+    // One language at a time: turning one on turns any other off.
+    if (selected && packs[group.members.front()].language)
+        for (auto &p:packs) if (p.language) p.selected=false;
     for (auto i:group.members) packs[i].selected=selected;
 }
 // Highest priority first. Keep an interleaved component separate so a custom
 // mod's existing precedence is never silently normalized by UI grouping.
 inline std::vector<ModGroup> priority_groups(const std::vector<Pack> &packs,const std::vector<ModGroup> &groups) {
     std::vector<size_t> active;
-    for(size_t i=0;i<packs.size();++i) if(packs[i].selected) active.push_back(i);
+    // Language mods change the game's data beneath every texture pack: not in the order.
+    for(size_t i=0;i<packs.size();++i) if(packs[i].selected && !packs[i].language) active.push_back(i);
     std::vector<ModGroup> out;
     while(!active.empty()) {
         size_t i=active.back();
@@ -128,7 +136,7 @@ inline bool move_priority(std::vector<Pack> &packs,const std::vector<ModGroup> &
     for(auto group=order.rbegin();group!=order.rend();++group)
         indices.insert(indices.end(),group->members.begin(),group->members.end());
     size_t next=0;
-    for(size_t i=0;i<packs.size();++i) if(original[i].selected) packs[i]=original[indices[next++]];
+    for(size_t i=0;i<packs.size();++i) if(original[i].selected && !original[i].language) packs[i]=original[indices[next++]];
     return true;
 }
 inline std::string manifest_problem(const fs::path &folder)
@@ -160,11 +168,51 @@ inline std::string manifest_problem(const fs::path &folder)
     }
     return schema ? "" : "Unsupported manifest schema (expected 1)";
 }
-inline std::vector<Pack> inventory(const fs::path &mods, const std::string &chosen)
+// language.ini's header: schema 1, and the name the launcher shows. The game checks the rest.
+inline std::string language_problem(const fs::path &folder, std::string &title)
+{
+    std::ifstream in(folder / "language.ini");
+    if (!in)
+        return "Missing language.ini";
+    std::string line, section;
+    bool schema = false;
+    for (int n = 0; n < 128 && std::getline(in, line); n++)
+    {
+        if (line.size() > 2048)
+            return "language.ini header line too long";
+        if (line.compare(0, 3, "\xef\xbb\xbf") == 0)
+            line.erase(0, 3);
+        line = trim(line);
+        if (line.empty() || line[0] == ';' || line[0] == '#')
+            continue;
+        if (line[0] == '[')
+        {
+            if (section == "[language]")
+                break;
+            section = line;
+            continue;
+        }
+        auto eq = line.find('=');
+        if (section != "[language]" || eq == std::string::npos)
+            continue;
+        auto key = trim(line.substr(0, eq)), value = trim(line.substr(eq + 1));
+        if (key == "schema")
+            schema = value == "1";
+        else if (key == "name")
+            title = value.substr(0, 96);
+    }
+    return schema ? "" : "Unsupported language.ini schema (expected 1)";
+}
+// `language` is [language] pack: the one language mod that is on, if any.
+inline std::vector<Pack> inventory(const fs::path &mods, const std::string &chosen, const std::string &language = "")
 {
     std::vector<Pack> out;
+    const std::string chosen_language = trim(language);
     for (const auto &name : split_packs(chosen))
         out.push_back({name, "", true});
+    if (!chosen_language.empty() &&
+        std::none_of(out.begin(), out.end(), [&](const Pack &p) { return p.name == chosen_language; }))
+        out.push_back({chosen_language, "", true, true});
     std::error_code ec;
     std::vector<std::string> available;
     for (fs::directory_iterator it(mods, ec), end; !ec && it != end; it.increment(ec))
@@ -185,7 +233,16 @@ inline std::vector<Pack> inventory(const fs::path &mods, const std::string &chos
         {
             std::error_code folder_error;
             auto folder = mods / fs::u8path(p.name);
-            p.problem = fs::is_directory(folder, folder_error) ? manifest_problem(folder) : "Not installed";
+            if (!fs::is_directory(folder, folder_error))
+                p.problem = "Not installed";
+            else if (fs::exists(folder / "language.ini", folder_error) && !fs::exists(folder / "manifest.ini", folder_error))
+            {
+                p.language = true;
+                p.selected = p.name == chosen_language;
+                p.problem = language_problem(folder, p.title);
+            }
+            else
+                p.problem = manifest_problem(folder);
         }
     }
     return out;
@@ -194,13 +251,21 @@ inline std::string selected_packs(const std::vector<Pack> &packs)
 {
     std::string result;
     for (const auto &p : packs)
-        if (p.selected)
+        if (p.selected && !p.language)
         {
             if (!result.empty())
                 result += ';';
             result += p.name;
         }
     return result;
+}
+// [language] pack: the language mod that is on, or empty for the game's own English.
+inline std::string selected_language(const std::vector<Pack> &packs)
+{
+    for (const auto &p : packs)
+        if (p.selected && p.language)
+            return p.name;
+    return "";
 }
 // Bounded, refresh-time metadata only. No image bytes are loaded by the launcher.
 inline std::set<std::string> pack_texture_ids(const fs::path &folder)
@@ -227,7 +292,7 @@ inline std::map<std::string,std::string> pack_conflicts(const fs::path &mods,con
 {
     std::map<std::string,std::set<std::string>> keys;
     std::map<std::string,std::string> winner, result;
-    for (const auto &pack:packs) if (pack.selected && pack.problem.empty()) {
+    for (const auto &pack:packs) if (pack.selected && pack.problem.empty() && !pack.language) {
         keys[pack.name]=pack_texture_ids(mods/fs::u8path(pack.name));
         for (const auto &key:keys[pack.name]) winner[key]=pack.name;
     }

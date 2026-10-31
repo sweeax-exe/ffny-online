@@ -138,6 +138,8 @@ bool mod_start(const std::string &command, const std::string &id) {
 #if defined(DEFJAM_MOD_WIDE)
     args.insert(args.end(), {"--capability", "wide-v1"});
 #endif
+    // Language mods (src/hooks/pc_language.c): every build with this launcher loads them.
+    args.insert(args.end(), {"--capability", "language-v1"});
     if (testing_versions) args.push_back("--prerelease");
     if (!id.empty()) args.insert(args.end(), {"--id",id});
 #if defined(_WIN32)
