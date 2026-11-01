@@ -15,7 +15,7 @@ BLOCKED_EXTENSIONS = {
     '.exe', '.dll', '.pdb', '.obj', '.o', '.lib', '.a', '.so', '.dmp',
     '.bmp', '.png', '.gif', '.jpg', '.jpeg', '.ppm', '.pcm', '.wav', '.mp3', '.mp4', '.log',
 }
-BLOCKED_ROOTS = {'game', 'assets', 'extracted', 'logs', 'build', 'out', 'save', 'private'}
+BLOCKED_ROOTS = {'game', 'assets', 'extracted', 'logs', 'build', 'out', 'save', 'private', 'authoring', 'workspaces', 'candidates'}
 # D58: the owner explicitly approved these two README visuals for publication.
 # Exact hashes prevent the exception from admitting other captures or game data.
 APPROVED_README_MEDIA = {
@@ -67,6 +67,8 @@ def path_problem(name, approved=None):
     if name in APPROVED_README_MEDIA or name in (approved or {}):
         return None
     path = PurePosixPath(name)
+    if name.startswith('config/menu-ui-') or name.endswith(('.local.json', '.local.md')):
+        return 'private authoring record or local machine configuration'
     if path.parts[0] in BLOCKED_ROOTS:
         return 'local game/build/evidence directory'
     if name.startswith('src/recomp/gen/') and name != 'src/recomp/gen/.gitkeep':
