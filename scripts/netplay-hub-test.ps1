@@ -102,6 +102,14 @@ if ($NaRelayPort -and $EuLagMs) { $relayArgs += @('-test-lag', "$($EuLagMs)ms") 
 if ($Venues) { $relayArgs += @('-test-venues', $Venues) }
 $env:HARNESS_SUMMARY_PRESSES = $SummaryPresses
 $env:HARNESS_FIGHT_SECS = "$FightSecs"
+# The local relay is built when a Go source is newer than it (an Oct 28 relay once tested Nov 1 rooms).
+$relayExe = Join-Path $repo 'netplay\relay\dist\relay.exe'
+$relaySrc = Get-ChildItem (Join-Path $repo 'netplay\relay') -Recurse -Include *.go, go.mod, go.sum |
+            Sort-Object LastWriteTime -Descending | Select-Object -First 1
+if (-not (Test-Path $relayExe) -or $relaySrc.LastWriteTime -gt (Get-Item $relayExe).LastWriteTime) {
+    Push-Location (Join-Path $repo 'netplay\relay'); go build -o dist\relay.exe ./cmd/relay; $built = $LASTEXITCODE; Pop-Location
+    if ($built) { throw 'building the local relay failed' }
+}
 $relay = Start-Process (Join-Path $repo 'netplay\relay\dist\relay.exe') -ArgumentList $relayArgs `
          -PassThru -WindowStyle Hidden -RedirectStandardError "$logs\relay.err" -RedirectStandardOutput "$logs\relay.out"
 $relayNa = $null

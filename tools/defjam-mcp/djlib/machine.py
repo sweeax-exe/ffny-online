@@ -34,6 +34,25 @@ def relay_path():
     return os.path.join(REPO, "netplay", "relay", "dist", "relay.exe" if WINDOWS else "relay")
 
 
+def ensure_relay():
+    """Builds the local relay when a Go source is newer than it (or it is missing): the tests ran an
+    Oct 28 relay on Nov 1 without the rooms they meant to test. Returns the relay's path."""
+    import subprocess
+    src = os.path.join(REPO, "netplay", "relay")
+    exe = relay_path()
+    built = os.path.getmtime(exe) if os.path.isfile(exe) else 0
+    newest = 0
+    for root, _, files in os.walk(src):
+        if os.path.join(src, "dist") in root:
+            continue
+        for f in files:
+            if f.endswith(".go") or f in ("go.mod", "go.sum"):
+                newest = max(newest, os.path.getmtime(os.path.join(root, f)))
+    if newest > built:
+        subprocess.run(["go", "build", "-o", exe, "./cmd/relay"], cwd=src, check=True)
+    return exe
+
+
 def agent_id():
     """Who holds the lock: DEFJAM_AGENT, else the checkout's folder (a worktree's agent name)."""
     return os.environ.get("DEFJAM_AGENT") or os.path.basename(REPO)

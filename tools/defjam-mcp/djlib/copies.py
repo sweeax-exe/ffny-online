@@ -194,8 +194,7 @@ class Session:
 
     # ---- the pieces ----
     def relay(self, port=27900, rollback=False, extra=()):
-        if not os.path.isfile(machine.relay_path()):
-            raise FileNotFoundError("no local relay: go build -o netplay/relay/dist/relay.exe ./cmd/relay (in netplay/relay)")
+        machine.ensure_relay()
         if not machine.free_port(port):
             raise OSError("relay port %d is taken" % port)
         args = [machine.relay_path(), "-listen", "127.0.0.1:%d" % port, "-log-interval", "30s"]
