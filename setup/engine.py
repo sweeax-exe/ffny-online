@@ -480,6 +480,7 @@ class Engine:
         versions = (self.install / 'versions').resolve()
         if versions not in old.parents or old == self.source:
             return
+        self.previous_source = old
         # Reuse only local analysis/lift artifacts; the incoming pipeline must
         # validate all inputs/outputs before skipping a stage. Never reuse objects.
         for relative in ('src/recomp/gen', 'tools/xboxrecomp/game_files',
@@ -984,6 +985,30 @@ class Engine:
                 continue
             self.run(argv, cwd=self.source)
             verify()
+            if action == 'recomp':
+                self.keep_generated_times()
+
+    def keep_generated_times(self):
+        """After a new lift, a generated file that came out byte for byte as the previous
+        version's takes that file's modification time, like keep_unchanged_times does for the
+        shipped source: an override in recomp_manual.c changes one or two of the 21 files, and
+        Ninja then recompiles those instead of all the generated code (build 37 to 38)."""
+        old = getattr(self, 'previous_source', None)
+        if old is None:
+            return
+        gen, old_gen = self.source / 'src/recomp/gen', old / 'src/recomp/gen'
+        kept = 0
+        for new in gen.iterdir():
+            prev = old_gen / new.name
+            try:
+                if (new.suffix in ('.c', '.h') and prev.is_file() and prev.stat().st_size == new.stat().st_size
+                        and digest(prev) == digest(new)):
+                    st = prev.stat()
+                    os.utime(new, ns=(st.st_atime_ns, st.st_mtime_ns))
+                    kept += 1
+            except OSError:
+                pass
+        self.event('Generated code: ' + str(kept) + ' files unchanged since the previous version')
 
     def place_executable(self):
         """Windows: this version's own copy of the game, <source>\\bin, which the receipt names.

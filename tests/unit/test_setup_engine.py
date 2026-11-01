@@ -645,3 +645,23 @@ def test_a_dangling_game_link_is_replaced(tmp_path):
         (setup.data / 'extracted').mkdir()
         setup.link_game()
         assert game.resolve() == (setup.data / 'extracted').resolve()
+
+
+def test_generated_files_unchanged_since_the_previous_version_keep_their_time(tmp_path):
+    """After a new lift only the generated files that really changed look new to Ninja."""
+    old, new = tmp_path / 'old/source', tmp_path / 'new/source'
+    for root in (old, new):
+        (root / 'src/recomp/gen').mkdir(parents=True)
+    for name, before, after in (('recomp_0001.c', b'same', b'same'), ('recomp_0002.c', b'old', b'new!'),
+                                ('lift-state.json', b'{}', b'{}')):
+        (old / 'src/recomp/gen' / name).write_bytes(before)
+        (new / 'src/recomp/gen' / name).write_bytes(after)
+        os.utime(old / 'src/recomp/gen' / name, ns=(1_000_000_000, 1_000_000_000))
+    setup = engine.Engine.__new__(engine.Engine)
+    setup.source, setup.previous_source = new, old
+    setup.event = lambda text: None
+    setup.keep_generated_times()
+    gen = new / 'src/recomp/gen'
+    assert (gen / 'recomp_0001.c').stat().st_mtime_ns == 1_000_000_000
+    assert (gen / 'recomp_0002.c').stat().st_mtime_ns != 1_000_000_000
+    assert (gen / 'lift-state.json').stat().st_mtime_ns != 1_000_000_000
