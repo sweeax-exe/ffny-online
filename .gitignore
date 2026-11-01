@@ -65,6 +65,7 @@ CLAUDE.local.md
 # Mod manager local verification state
 /mod-manager/
 /mods/
+/data/
 
 # Private authoring data stays outside source even when stored near a worktree.
 /authoring/
