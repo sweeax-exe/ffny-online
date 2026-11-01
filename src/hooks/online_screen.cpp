@@ -3253,21 +3253,34 @@ void versus_page(ImDrawList *dl, ImVec2 display, const NetVersus &v)
         e = ease_out((t - 0.45f) / 0.40f);
         shift_fade(dl, f, k, 0, 16 * (1 - e), e);
     } else {
-        const float w = n == 3 ? 172 : 136, gap = n == 3 ? 18 : 12, ph = n == 3 ? 168 : 150, y = 72;
-        float x0 = 320 - (n * w + (n - 1) * gap) / 2;
+        // Team (2 vs 2): fighters 0 and 1 against 2 and 3, the sides apart with one VS between them
+        bool team = n == 4 && is_team(v.type);
+        const float w = n == 3 ? 172 : team ? 128 : 136, gap = n == 3 ? 18 : team ? 8 : 12, ph = n == 3 ? 168 : 150, y = 72;
+        const float split = team ? 56 : 0;
+        float x0 = 320 - (n * w + (n - 1) * gap + split) / 2;
+        auto card_x = [&](int s) { return x0 + s * (w + gap) + (team && s >= 2 ? split : 0); };
         for (int s = 0; s < n; s++) {
             k = dl->VtxBuffer.Size;
-            versus_card(dl, f, v, order[s], x0 + s * (w + gap), y, w, ph, false);
+            versus_card(dl, f, v, order[s], card_x(s), y, w, ph, false);
             float e = ease_out((t - 0.05f - 0.07f * s) / 0.45f);
             shift_fade(dl, f, k, 0, 40 * (1 - e), e);
         }
         k = dl->VtxBuffer.Size;
         float e = ease_out((t - 0.40f) / 0.30f);
-        for (int s = 0; s + 1 < n; s++)     // a small VS between each pair of cards
-            versus_mark(dl, f, x0 + (s + 1) * (w + gap) - gap / 2, y + ph * 0.55f, 26, 1.0f + 0.35f * (1 - e));
+        if (team) {
+            for (int side = 0; side < 2; side++) {
+                float bx = card_x(2 * side), bw = 2 * w + gap;
+                rect(dl, f, bx, y + ph + 82, bw, 16, side ? IM_COL32(150, 14, 30, 210) : IM_COL32(20, 70, 150, 210), 5);
+                text(dl, f, g_title, 12, bx + bw / 2, y + ph + 83, WHITE, side ? "TEAM 2" : "TEAM 1", CENTER, 1.0f);
+            }
+            versus_mark(dl, f, 320, y + ph * 0.55f, 40, 1.0f + 0.35f * (1 - e));
+        } else {
+            for (int s = 0; s + 1 < n; s++)     // a small VS between each pair of cards
+                versus_mark(dl, f, x0 + (s + 1) * (w + gap) - gap / 2, y + ph * 0.55f, 26, 1.0f + 0.35f * (1 - e));
+        }
         shift_fade(dl, f, k, 0, 0, e);
         k = dl->VtxBuffer.Size;
-        versus_venue(dl, f, v.venue, 150, y + ph + 92, 340, 64, true);
+        versus_venue(dl, f, v.venue, 150, y + ph + (team ? 104 : 92), 340, 64, true);
         e = ease_out((t - 0.50f) / 0.40f);
         shift_fade(dl, f, k, 0, 16 * (1 - e), e);
     }
@@ -3287,14 +3300,14 @@ void versus_page(ImDrawList *dl, ImVec2 display, const NetVersus &v)
     shift_fade(dl, f, all, 0, 0, v.alpha);     // the fade as the fight starts
 }
 
-// The gallery's versus samples: "versus-1v1", "versus-3way", "versus-ffa", "versus-koth".
+// The gallery's versus samples: "versus-1v1", "versus-3way", "versus-ffa", "versus-team", "versus-koth".
 NetVersus sample_versus(const std::string &page)
 {
     static const char *const names[] = { "Ann", "Ben", "Cal", "Dee" };
     const auto &list = roster();
     NetVersus v = {};
-    v.count = page == "versus-3way" ? 3 : page == "versus-ffa" ? 4 : 2;
-    v.type = page == "versus-3way" ? 2 : page == "versus-ffa" ? 3 : 0;
+    v.count = page == "versus-3way" ? 3 : page == "versus-ffa" || page == "versus-team" ? 4 : 2;
+    v.type = page == "versus-3way" ? 2 : page == "versus-ffa" ? 3 : page == "versus-team" ? 1 : 0;
     // The Foundation and Red Hook Tire Co. (no subtitle: the photo alone, the name in words in a row),
     // The Subway and The Terror Dome (their subtitle banners)
     v.venue = page == "versus-koth" ? 6 : page == "versus-ffa" ? 11 : page == "versus-3way" ? 24 : 1;
@@ -3377,7 +3390,7 @@ void gallery_step()
                                          // build 38: the staged quick-match search
                                          "room-quick-near", "room-quick-wide",
                                          // the versus screen while a match loads
-                                         "versus-1v1", "versus-3way", "versus-ffa", "versus-koth",
+                                         "versus-1v1", "versus-3way", "versus-ffa", "versus-team", "versus-koth",
                                          // build 37: created fighters
                                          "grid-created", "room-created", "versus-created",
                                          // several created fighters, the second one picked
