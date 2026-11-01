@@ -6,6 +6,7 @@ Run: python scripts/check-source-tree.py [--repo PATH]
 """
 import argparse
 import hashlib
+import json
 import re
 import subprocess
 from pathlib import Path, PurePosixPath
@@ -90,6 +91,21 @@ def text_problem(data, name, approved=None):
         text = data.decode('utf-8-sig')
     except UnicodeDecodeError:
         return 'non-UTF-8 content'
+    if name.startswith('config/') and name.endswith('.json'):
+        try:
+            record = json.loads(text)
+        except ValueError:
+            record = None
+        if isinstance(record, dict):
+            keys = set(record)
+            production_fields = (
+                {'approval_records', 'reviewed_sources'},
+                {'recovery_path', 'manifest_sha256'},
+                {'owner_message', 'approved_records'},
+                {'generation_records', 'selected_exports'},
+            )
+            if any(fields <= keys for fields in production_fields):
+                return 'production authoring/recovery ledger belongs in the private workspace'
     if name.endswith('.md'):
         for language, block in re.findall(r'^[ \t]*```([^\n]*)\n(.*?)^[ \t]*```', text, re.M | re.S):
             if language.strip().lower() in {'asm', 'assembly', 'nasm'}:
