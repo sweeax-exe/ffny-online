@@ -43,7 +43,7 @@ Logs and pictures go to `logs/dj/<stamp>-<scenario>/` (git-ignored).
 | `roots list\|create NAME\|destroy PATH\|clean`, `cleanup` | managed data roots; stray copies of this checkout |
 
 Exit code 1 on any failure. Other options: `--timeout`, `--lock-timeout`, `--keep-going` (online:
-past a desync), `--require-hits`, `--keep-roots`, `--env NAME=VALUE` (checked), `--turbo`.
+past a desync), `--require-hits`, `--keep-roots`, `--env NAME=VALUE` (checked; online: `NAME@N=VALUE` for copy N only), `--turbo`.
 
 Three or four copies (`--players 3`, `--mode team --players 4`): each copy readies only once the room
 holds all of them (`RECOMP_TEST_READY_PLAYERS`), so no copy is left to open a room of its own. On the
