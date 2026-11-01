@@ -82,6 +82,8 @@ int netplay_lobby_rooms(NetRoomInfo *o, int m, unsigned *v) { (void)o; (void)m; 
 void netplay_lobby_create(const NetRoomSettings *s) { (void)s; }
 void netplay_lobby_join(const char *c) { (void)c; }
 void netplay_lobby_quick(int m, int x) { (void)m; (void)x; }
+void netplay_lobby_spectate(const char *c) { (void)c; }
+int netplay_spectating(void) { return 0; }
 void netplay_lobby_settings(const NetRoomSettings *s) { (void)s; }
 void netplay_lobby_ready(int r, int f) { (void)r; (void)f; }
 void netplay_lobby_vote(int c) { (void)c; }
@@ -114,6 +116,7 @@ void netplay_on_crash(void) {}
 int netplay_toast(char *t, int n) { (void)t; (void)n; return 0; }
 int netplay_versus(NetVersus *o) { (void)o; return 0; }
 int netplay_rematch_request(void) { return 0; }
+void netplay_spectator_funccall(const char *t) { (void)t; }
 int netplay_debug_json(char *o, int n) { return snprintf(o, (size_t)n, "{}"); }
 int netplay_rollback_brief(char *o, int n) { return snprintf(o, (size_t)n, "offline"); }
 extern void sub_00081170(void);
@@ -172,10 +175,13 @@ void netplay_crowd_update(void) { sub_00081170(); }
 #define T_FIGHTER     0x28      /* created fighters (build 38): this client's record, u16 length + record */
 #define T_RECORD      0x29      /* a room member's record (slot, u16 length, record); slot 0xFE: the relay's copy of ours */
 #define T_RECGET      0x2A      /* the record of the member in a slot, again */
+#define T_SPECTATE    0x2B      /* watch a room (spectator mode, relays with CAPS bit 4) */
+#define SLOT_SPECTATOR 0xFD     /* ROOM `you` of a spectator */
 #define RECORD_SELF   0xFE
 #define CAPS_KOTH     1u
 #define CAPS_ROLLBACK 2u        /* the relay lets matches roll back (its switch; off: lockstep only) */
 #define CAPS_CREATED  8u        /* created fighters (client: can play them; relay: its switch is on) */
+#define CAPS_SPECTATE 16u       /* spectator mode (docs/research/spectator-mode.md) */
 #define CP_WAIT_MS    10000     /* START: how long to wait for a created fighter's missing record */
 #define CAPS_TRIES    5         /* CAPS every RETRY_MS; no answer after these: an older relay */
 #define WINNER_DRAW   0xFFu
@@ -374,7 +380,19 @@ static struct {
      * since vs_end (0: not yet); the king's position and streak as of the START */
     ULONGLONG vs_start, vs_end;
     int vs_king, vs_streak;
+    /* spectator mode (docs/research/spectator-mode.md): this START came as a WATCH, so this PC has
+     * no position (pos -1) and only runs the players' entries; the delay each player announced in
+     * its P_RTT (0 none yet); since when the room plays (a lost WATCH is asked for again only at
+     * first); the results gone through by itself (A on player 1's port) since spec_results */
+    int watching;
+    int peer_delay[MAXP];
+    ULONGLONG playing_since;
+    ULONGLONG spec_results;
+    int spec_start_down;
 } N;
+
+/* This PC is in its room as a spectator (the relay's ROOM says `you` 0xFD). */
+#define SPECTATOR_HERE() (N.roomv.in_room && N.roomv.you == SLOT_SPECTATOR)
 
 /* Rollback (rollback.h) is on with RECOMP_ROLLBACK=on (off by default since build 21); off, every step waits for every entry. */
 static int rollback_wanted(void) { return rollback_enabled(); }
@@ -384,7 +402,7 @@ static int rollback_wanted(void) { return rollback_enabled(); }
  * (RECOMP_NETPLAY=host/join, tests only) exchange no flags: the local setting. */
 static int match_rolls_back(void) { return N.lobby ? N.rb_match : rollback_wanted(); }
 int netplay_rerunning(void) { return N.resim; }
-int netplay_local_slot(void) { return N.lockstep ? N.pos : -1; }
+int netplay_local_slot(void) { return N.lockstep && !N.watching ? N.pos : -1; }
 
 static BOOL CALLBACK init_once(PINIT_ONCE o, PVOID p, PVOID *c)
 {
@@ -447,7 +465,7 @@ int netplay_rematch_request(void)
      * No does there, on this game thread inside the front end's call, as the results screen's own
      * No path runs it (MemCard.QuerySave(battle/rewardun.swf), then Game.Quit()). Also after a
      * deferred next fight was called off (match_live is 0 then, koth_results still 1). */
-    if (N.koth_results || (N.match_live && N.koth_match)) {
+    if (N.koth_results || (N.match_live && N.koth_match) || N.watching) {
         unsigned saved;
         if (N.koth_quit) return 1;      /* already on the way back */
         N.koth_quit = 1;
@@ -486,11 +504,20 @@ int netplay_rematch_request(void)
     return 1;
 }
 
+/* Spectator mode: the summary of a watched match is gone through by itself (remote_slot_state taps
+ * A on player 1's port until the game is back in the menus). */
+void netplay_spectator_funccall(const char *text)
+{
+    if (!N.watching || N.spec_results || !N.match_seen || strncmp(text, "Game.GetMatchSummary(", 21)) return;
+    N.spec_results = GetTickCount64();
+    fprintf(stderr, "[NETPLAY] watching: the match's summary; going through it to the room\n");
+}
+
 /* This PC left the results for the room: whoever waits on the rematch screen hears it. */
 static void rematch_declined(void)
 {
     uint8_t p[9];
-    if (!N.lobby || !N.start_seed || N.koth_match) return;
+    if (!N.lobby || !N.start_seed || N.koth_match || N.watching) return;
     p[0] = P_REMATCH;
     put32(p + 1, N.start_seed);
     put32(p + 5, REMATCH_NO);
@@ -504,6 +531,13 @@ int netplay_toast(char *out, int size)
     EnterCriticalSection(&g_cs);
     on = N.toast[0] && GetTickCount64() < N.toast_until;
     if (on) snprintf(out, size, "%s", N.toast);
+    else if (N.watching && N.match_seen && N.lockstep && !N.spec_results && size > 0) {
+        /* spectator mode: who fights, over the whole watched fight */
+        int i, n = snprintf(out, (size_t)size, "SPECTATING:");
+        for (i = 0; i < N.players && i < MAXP && n > 0 && n < size; i++)
+            n += snprintf(out + n, (size_t)(size - n), "%s%s", i ? " vs " : " ", N.report_names[i][0] ? N.report_names[i] : "?");
+        on = 1;
+    }
     LeaveCriticalSection(&g_cs);
     return on;
 }
@@ -739,6 +773,23 @@ static void intro_pad(int slot, XBOX_INPUT_STATE *state)
 
 static DWORD remote_slot_state(int slot, XBOX_INPUT_STATE *state)
 {
+    if (N.watching) {
+        /* Spectator mode: the players' live pads are not here (the relay sends a spectator only the
+         * lockstep's entries), so their ports read at rest; through the summary and the results,
+         * which this game goes through by itself, player 1's port taps A (100 ms every 500 ms). */
+        ULONGLONG since = N.spec_results;
+        if (slot < 0 || slot >= N.players) return ERROR_DEVICE_NOT_CONNECTED;
+        memset(state, 0, sizeof(*state));
+        state->dwPacketNumber = 1;
+        if (since && slot == 0) {
+            ULONGLONG t = GetTickCount64() - since;
+            int down = t % 500u < 100u;
+            if (down) state->Gamepad.bAnalogButtons[0] = 255;
+            state->dwPacketNumber = 2u + (DWORD)(t / 500u) * 2u + (DWORD)down;
+        }
+        if (N.lockstep) intro_pad(slot, state);
+        return ERROR_SUCCESS;
+    }
     if (N.state != NETPLAY_CONNECTED || !N.lockstep || slot < 0 || slot >= N.players || slot == N.pos)
         return ERROR_DEVICE_NOT_CONNECTED;
     EnterCriticalSection(&g_cs);
@@ -771,11 +822,14 @@ static void fight_input(void)
 static void assign_input(int on)
 {
     unsigned mask = 0;
-    int i;
+    int i, local = N.pos;
     if (!on) { xbox_HostInputSetNetplay(0, 0, 0, NULL); fight_input(); return; }
+    /* a spectator drives no fighter: its own pad goes on the first port no player uses (with four
+     * players the fourth, which the fight's entries override; spectator-mode.md 9) */
+    if (local < 0) local = N.players < 4 ? N.players : 3;
     for (i = 0; i < N.players; i++)
-        if (i != N.pos) mask |= 1u << i;
-    xbox_HostInputSetNetplayMulti(1, N.pos, mask, remote_slot_state);
+        if (i != local) mask |= 1u << i;
+    xbox_HostInputSetNetplayMulti(1, local, mask, remote_slot_state);
     fight_input();
 }
 
@@ -802,7 +856,9 @@ static void become_connected(void)
         N.vs_end = 0;
         N.vs_start = GetTickCount64();      /* the versus screen, until the fight is under way */
     }
-    if (N.lobby)
+    if (N.lobby && N.watching)
+        set_status("Watching a match of %d players. It starts by itself.", N.players);
+    else if (N.lobby)
         set_status("Match found: %d players, you are player %d. It starts by itself.", N.players, N.pos + 1);
     else
         set_status("Connected to %s. You are player %d. Both choose Versus; player 1 picks first.",
@@ -850,12 +906,101 @@ static void end_hub_match(const char *why)
     disarm_crash_report();
     N.match_live = N.match_seen = 0;
     N.over_pending = 1;
-    request(T_OVER, NULL, 0);
+    if (N.watching) {
+        N.watching = 0;         /* a spectator's match counts for nobody: no OVER */
+        N.pos = 0;
+    } else {
+        request(T_OVER, NULL, 0);
+    }
     InterlockedExchange(&N.state, NETPLAY_LOBBY);
     set_status("%s", why);
 }
 
 /* ---- what arrives -------------------------------------------------------------- */
+
+/* ---- spectator mode: every entry of the watched match, and the checksums ----------
+ *
+ * A spectator keeps every player's entries of the match it watches, not only the players' ring of
+ * RING steps: its venue may load seconds after theirs, and it then runs the fight from step 1 that
+ * much later. In chunks of SPEC_CHUNK steps, allocated as the fight goes on, up to SPEC_CHUNKS (30
+ * minutes). The players' checksums are kept SPEC_HASHES checkpoints back (a minute), its own too:
+ * a spectator can run a few steps ahead of a player's checksum (it gets the entries `delay` steps
+ * early) as well as far behind. docs/research/spectator-mode.md 5. Under g_cs. */
+#define SPEC_CHUNK  4096u
+#define SPEC_CHUNKS 27u
+#define SPEC_HASHES 64u
+#define SPEC_DELAY_WAIT_MS 20000    /* the sync point: how long a spectator waits for the players' delay */
+typedef struct { uint32_t match[SPEC_CHUNK]; uint8_t e[SPEC_CHUNK][ENTRY]; } SpecChunk;
+static SpecChunk *g_spec[MAXP][SPEC_CHUNKS];
+static NetCheck g_spec_rh[MAXP][SPEC_HASHES], g_spec_lh[SPEC_HASHES];
+static unsigned g_hash_matches;     /* checksums compared and equal, this session */
+static void desync_detail(const NetCheck *mine, const NetCheck *theirs);
+
+static void spec_reset(void)
+{
+    unsigned i, c;
+    for (i = 0; i < MAXP; i++)
+        for (c = 0; c < SPEC_CHUNKS; c++)
+            if (g_spec[i][c]) memset(g_spec[i][c]->match, 0, sizeof(g_spec[i][c]->match));
+    memset(g_spec_rh, 0, sizeof(g_spec_rh));
+    memset(g_spec_lh, 0, sizeof(g_spec_lh));
+}
+
+static void spec_store(int from, uint32_t match, uint32_t s, const uint8_t *e)
+{
+    uint32_t c = s / SPEC_CHUNK;
+    SpecChunk *k;
+    if (from < 0 || from >= MAXP || !s || c >= SPEC_CHUNKS) return;
+    if (!g_spec[from][c] && !(g_spec[from][c] = (SpecChunk *)calloc(1, sizeof(SpecChunk)))) return;
+    k = g_spec[from][c];
+    memcpy(k->e[s % SPEC_CHUNK], e, ENTRY);
+    k->match[s % SPEC_CHUNK] = match;
+}
+
+/* Player `pos`'s entry for step s of the running match into out (NULL: only whether it is here). */
+static int spec_entry(int pos, uint32_t s, uint8_t *out)
+{
+    uint32_t c = s / SPEC_CHUNK;
+    SpecChunk *k;
+    if (pos < 0 || pos >= MAXP || c >= SPEC_CHUNKS || !(k = g_spec[pos][c]) || k->match[s % SPEC_CHUNK] != N.match)
+        return 0;
+    if (out) memcpy(out, k->e[s % SPEC_CHUNK], ENTRY);
+    return 1;
+}
+
+/* Compare this PC's checksum of checkpoint slot k with every player's, once each. */
+static void spec_compare(unsigned k)
+{
+    const NetCheck *l = &g_spec_lh[k];
+    int i;
+    for (i = 0; i < MAXP; i++) {
+        NetCheck *r = &g_spec_rh[i][k];
+        if (!l->step || r->step != l->step || r->match != l->match) continue;
+        if (r->hash != l->hash) {
+            if (!N.desync) {
+                N.desync = 1;
+                N.desync_step = l->step;
+                fprintf(stderr, "[NETPLAY] desync in match %08X at step %u (local %08X, remote %08X; this PC watches, "
+                        "player %d)\n", l->match, l->step, l->hash, r->hash, i + 1);
+                if (r->has_parts) desync_detail(l, r);
+                toast(8000, "This picture went out of sync with the players' (their match is not affected).");
+            }
+        } else if (++g_hash_matches % 10 == 0) {
+            fprintf(stderr, "[NETPLAY] in step: %u checksums compared and equal (match %08X, step %u)\n",
+                    g_hash_matches, l->match, l->step);
+        }
+        r->step = 0;    /* compared */
+    }
+}
+
+static void spec_remote_hash(int from, const NetCheck *in)
+{
+    unsigned k;
+    if (from < 0 || from >= MAXP || !in->step || in->step % HASH_EVERY) return;
+    k = (in->step / HASH_EVERY) % SPEC_HASHES;
+    g_spec_rh[from][k] = *in;
+    spec_compare(k);
+}
 
 static unsigned g_steps_rx[MAXP], g_steps_last[MAXP];
 static uint32_t g_steps_match[MAXP];       /* the match of each player's latest STEPS: 0 or older while it still loads */
@@ -877,12 +1022,11 @@ static void store_steps(int from, const uint8_t *p, int len)
         memcpy(N.in[from][k], p + 9 + i * ENTRY, ENTRY);
         N.in_tag[from][k] = s + 1;
         N.in_match[from][k] = match;
+        if (N.watching) spec_store(from, match, s, p + 9 + i * ENTRY);
     }
     LeaveCriticalSection(&g_cs);
     SetEvent(N.arrived);
 }
-
-static unsigned g_hash_matches;     /* checksums compared and equal, this session */
 
 /* Which part of the checksum differs: a fighter (a player's or a CPU's), the CPU fighters'
  * generators, or the rest; since build 35 (both sides) also which raw word, here and there, and
@@ -982,8 +1126,10 @@ static void make_data_print(void)
 /* Hub: this PC's ping for the current START, so every PC derives the same input delay. */
 static void send_rtt(void)
 {
-    uint8_t p[13];
-    int rtt = N.peer_rtt[N.pos] < 0 ? 0 : N.peer_rtt[N.pos];
+    uint8_t p[14];
+    int rtt;
+    if (N.pos < 0 || N.watching) return;    /* a spectator: nothing of the lockstep goes out */
+    rtt = N.peer_rtt[N.pos] < 0 ? 0 : N.peer_rtt[N.pos];
     p[0] = P_RTT;
     put32(p + 1, N.start_seed);
     p[5] = (uint8_t)rtt;
@@ -991,7 +1137,8 @@ static void send_rtt(void)
     p[7] = (uint8_t)N.peer_rb[N.pos];   /* builds before 17 send 7 bytes: no rollback */
     put32(p + 8, g_data_print);         /* builds before 23 send 8 bytes */
     p[12] = N.start_deferred ? 1 : 0;   /* builds before 34 send 12: 1, still on the last fight's results */
-    send_data(p, 13);
+    p[13] = (uint8_t)(N.delay_fixed ? N.delay : 0);    /* builds before 40 send 13: the agreed delay, for spectators */
+    send_data(p, 14);
     N.last_rtt_sent = GetTickCount64();
 }
 
@@ -1051,7 +1198,7 @@ static void on_data(int from, const uint8_t *p, int len)
         }
         break;
     case P_LIVEPAD:
-        if (len >= 5 + (int)sizeof(XBOX_GAMEPAD)) {
+        if (len >= 5 + (int)sizeof(XBOX_GAMEPAD) && !N.watching) {
             uint32_t seq = get32(p + 1);
             EnterCriticalSection(&g_cs);
             if ((int32_t)(seq - N.remote_seq[from]) > 0) {
@@ -1091,6 +1238,11 @@ static void on_data(int from, const uint8_t *p, int len)
                 }
             }
             N.peer_on_results[from] = len >= 13 && (p[12] & 1);
+            if (len >= 14 && p[13] >= 1 && p[13] <= DELAY_MAX + 2 && N.peer_delay[from] != p[13]) {
+                N.peer_delay[from] = p[13];         /* the delay that player's PC agreed */
+                if (N.watching)
+                    fprintf(stderr, "[NETPLAY] watching: player %d plays with input delay %d\n", from + 1, p[13]);
+            }
             if (N.peer_on_results[from] && !N.peer_results[from]) {
                 /* King of the Hill: that player's game still shows its last fight's results (the
                  * king, on the results screen); this fight starts once it leaves them. Said only to
@@ -1102,11 +1254,11 @@ static void on_data(int from, const uint8_t *p, int len)
                           player_name(from));
             }
             SetEvent(N.arrived);
-            if (N.delay_fixed && had < 0) send_rtt();   /* it may still be waiting for ours */
+            if (N.delay_fixed && had < 0 && !N.watching) send_rtt();   /* it may still be waiting for ours */
         }
         break;
     case P_REMATCH:
-        if (N.lobby && len >= 9 && get32(p + 1) == N.start_seed && N.start_seed) {
+        if (N.lobby && len >= 9 && get32(p + 1) == N.start_seed && N.start_seed && !N.watching) {
             uint32_t after = get32(p + 5);
             int mine;
             EnterCriticalSection(&g_cs);
@@ -1125,7 +1277,11 @@ static void on_data(int from, const uint8_t *p, int len)
         break;
     case P_HASH: {
         NetCheck in;     /* as much as the sender's build sent: 13, 37 or 157 bytes */
-        if (netcheck_unpack(p, len, &in)) {
+        if (netcheck_unpack(p, len, &in) && N.watching) {
+            EnterCriticalSection(&g_cs);
+            spec_remote_hash(from, &in);
+            LeaveCriticalSection(&g_cs);
+        } else if (netcheck_unpack(p, len, &in)) {
             EnterCriticalSection(&g_cs);
             memmove(&N.remote_hash[1], &N.remote_hash[0], sizeof(N.remote_hash[0]) * 15);
             N.remote_hash[0] = in;
@@ -1300,6 +1456,16 @@ static void on_room(const uint8_t *b, int len)
         if (v.players[i].voted == 0xFF) v.players[i].voted = -1;
     }
     if (r.bad) return;
+    if (r.i < r.n) {    /* spectator mode: the spectators' names (relays answering CAPS bit 4) */
+        int sc = rd8(&r);
+        for (i = 0; i < sc && !r.bad; i++) {
+            char name[25];
+            rdstr(&r, name, sizeof(name));
+            if (i < NETPLAY_MAX_SPECTATORS) snprintf(v.spectators[i], sizeof(v.spectators[i]), "%s", name);
+        }
+        v.spectator_count = sc < NETPLAY_MAX_SPECTATORS ? sc : NETPLAY_MAX_SPECTATORS;
+        if (r.bad) return;
+    }
     v.in_room = 1;
     v.received = GetTickCount64();
     EnterCriticalSection(&g_cs);
@@ -1325,6 +1491,8 @@ static void on_room(const uint8_t *b, int len)
     memcpy(N.room, v.code, 7);
     if (N.pend_len && N.pend[5] != T_LIST && N.pend[5] != T_LEAVE) answered();
     if (v.phase != 2) N.over_pending = N.start_this_play = 0;
+    if (v.phase == 2 && (N.roomv.phase != 2 || !N.playing_since)) N.playing_since = GetTickCount64();
+    if (v.phase != 2) N.playing_since = 0;
     /* A player of the running match has left: the others cannot go on in lockstep. */
     if (N.match_live) {
         int k, j;
@@ -1457,9 +1625,14 @@ static void on_hill(const uint8_t *b, int len)
 
 /* King of the Hill: a fight this PC watches (START's body). Phase 1: the names only; the fight is
  * not run here (docs/research/king-of-the-hill.md 9.2 is phase 2). */
+static void on_start_as(const uint8_t *b, int len, int watching);
 static void on_watch(const uint8_t *b, int len)
 {
     Reader r = { b, len, 0, 0 };
+    if (!NETPLAY_IS_KOTH(N.roomv.settings.mode)) {     /* spectator mode: the match this PC watches */
+        if (SPECTATOR_HERE()) on_start_as(b, len, 1);
+        return;
+    }
     uint32_t seed;
     int count, venue, i, slots[2], fighters[2];
     if (len < 8) return;
@@ -1600,7 +1773,7 @@ int netplay_created_pick(int index)
     return 1;
 }
 
-static void on_start(const uint8_t *b, int len)
+static void on_start_as(const uint8_t *b, int len, int watching)
 {
     Reader r = { b, len, 0, 0 };
     AutoMatch m;
@@ -1654,7 +1827,8 @@ static void on_start(const uint8_t *b, int len)
         m.fighter[i] = fighters[i];
         m.pad[i] = i;
     }
-    if (pos < 0) return;
+    if (pos < 0 && !watching) return;
+    if (watching) pos = -1;         /* spectator mode: no position, every player is remote */
     m.count = count;
     {   /* the mode's free places go to CPU fighters, the same on every PC */
         const OnlineMode *mode = online_mode(m.type);
@@ -1673,17 +1847,21 @@ static void on_start(const uint8_t *b, int len)
     N.players = count;
     N.fighters = m.count;
     N.pos = pos;
+    N.watching = watching;
+    N.spec_start_down = 1;          /* a START held from before does not stop the watching */
     N.delay = LOBBY_DELAY;
     N.delay_fixed = 0;
     for (i = 0; i < MAXP; i++) N.peer_rtt[i] = -1, N.peer_rb[i] = 0, N.peer_results[i] = N.peer_on_results[i] = 0;
+    for (i = 0; i < MAXP; i++) N.peer_delay[i] = 0;
+    spec_reset();
     /* This PC rolls back only when its player has the beta on and the relay allows it: the relay's
      * switch turns the beta off for everyone without a new build (2026-10-26, after rollback
      * crashes). Sent in P_RTT, so every PC of the match decides from the same flags. */
-    N.peer_rb[pos] = rollback_wanted() && N.relay_caps > 0 && (N.relay_caps & CAPS_ROLLBACK);
-    if (rollback_wanted() && !N.peer_rb[pos])
+    if (pos >= 0) N.peer_rb[pos] = rollback_wanted() && N.relay_caps > 0 && (N.relay_caps & CAPS_ROLLBACK);
+    if (pos >= 0 && rollback_wanted() && !N.peer_rb[pos])
         fprintf(stderr, "[NETPLAY] rollback is switched off on the server: this match plays in lockstep\n");
     N.rb_match = 0;                         /* decided at the sync point */
-    {   /* this PC's ping as of now, with the worst of the last few as the jitter margin */
+    if (pos >= 0) {   /* this PC's ping as of now, with the worst of the last few as the jitter margin */
         int k, worst = N.rtt_ms > 0 ? N.rtt_ms : 0;
         for (k = 0; k < 5; k++) if (N.rtt_recent[k] > worst) worst = N.rtt_recent[k];
         N.peer_rtt[pos] = worst > 2000 ? 2000 : worst;
@@ -1718,8 +1896,12 @@ static void on_start(const uint8_t *b, int len)
         for (i = 0; i < count; i++) if (slots[i] == N.roomv.hill.king) N.vs_king = i;
     LeaveCriticalSection(&g_cs);
     reset_remote_pads();
-    fprintf(stderr, "[NETPLAY] START: seed %08X, type %d, rules %d, venue %d, %d players, this PC is player %d%s\n",
-            seed, m.type, m.rules, m.venue, count, pos + 1, N.koth_match ? " (a King of the Hill fight)" : "");
+    if (watching)
+        fprintf(stderr, "[NETPLAY] START: seed %08X, type %d, rules %d, venue %d, %d players, this PC watches (spectator)\n",
+                seed, m.type, m.rules, m.venue, count);
+    else
+        fprintf(stderr, "[NETPLAY] START: seed %08X, type %d, rules %d, venue %d, %d players, this PC is player %d%s\n",
+                seed, m.type, m.rules, m.venue, count, pos + 1, N.koth_match ? " (a King of the Hill fight)" : "");
     if (deferred) {
         /* The king's next fight while its game still shows the last one's results: the new
          * opponent's controller would drive this PC's results menu as player 2 (it chose Rematch
@@ -1749,6 +1931,8 @@ static void on_start(const uint8_t *b, int len)
     LeaveCriticalSection(&g_cs);
     automatch_request(&m);
 }
+
+static void on_start(const uint8_t *b, int len) { on_start_as(b, len, 0); }
 
 static void on_packet(const uint8_t *b, int len)
 {
@@ -1832,10 +2016,11 @@ static void on_packet(const uint8_t *b, int len)
             int had = N.relay_caps;
             N.relay_caps = (int)(get32(b + 6) & 0x7FFFFFFFu);
             if (had != N.relay_caps)
-                fprintf(stderr, "[NETPLAY] the relay supports %08X%s%s%s\n", (unsigned)N.relay_caps,
+                fprintf(stderr, "[NETPLAY] the relay supports %08X%s%s%s%s\n", (unsigned)N.relay_caps,
                         N.relay_caps & CAPS_KOTH ? " (King of the Hill)" : "",
                         N.relay_caps & CAPS_ROLLBACK ? " (rollback allowed)" : "",
-                        N.relay_caps & CAPS_CREATED ? " (created fighters allowed)" : "");
+                        N.relay_caps & CAPS_CREATED ? " (created fighters allowed)" : "",
+                        N.relay_caps & CAPS_SPECTATE ? " (spectators)" : "");
         }
         break;
     case T_HILL:
@@ -1899,7 +2084,15 @@ static void on_packet(const uint8_t *b, int len)
                  * shows the room: the server let us go and the news was lost, e.g. the other
                  * player quit during the vote. Its word counts: back to the lobby, or the vote
                  * screen stays up with no way out (a player's report, 2026-10-22). */
-                if (code == 9 && N.roomv.in_room && N.pend_len && N.pend[5] != T_CREATE &&
+                if (code == 1 && SPECTATOR_HERE() && !(N.pend_len && N.pend[5] == T_SPECTATE)) {
+                    /* spectator mode: the room this PC watched closed (its last player left) */
+                    unsigned version = N.roomv.version;
+                    memset(&N.roomv, 0, sizeof(N.roomv));
+                    N.roomv.version = version + 1;
+                    N.room[0] = 0;
+                    text = "The room closed: its players left.";
+                    if (N.watching) InterlockedExchange(&N.lockstep, 0);
+                } else if (code == 9 && N.roomv.in_room && N.pend_len && N.pend[5] != T_CREATE &&
                     N.pend[5] != T_JOIN && N.pend[5] != T_QUICK) {
                     unsigned version = N.roomv.version;
                     memset(&N.roomv, 0, sizeof(N.roomv));
@@ -2065,7 +2258,7 @@ static DWORD WINAPI net_thread(LPVOID unused)
                 uint8_t cb[6 + 8 + 4];
                 int n = header(cb, T_CAPS);
                 memcpy(cb + n, N.token, 8); n += 8;
-                put32(cb + n, CAPS_KOTH | CAPS_CREATED); n += 4;
+                put32(cb + n, CAPS_KOTH | CAPS_CREATED | CAPS_SPECTATE); n += 4;
                 send_raw(cb, n);
             } else {
                 N.relay_caps = 0;
@@ -2134,7 +2327,8 @@ static DWORD WINAPI net_thread(LPVOID unused)
             N.koth_sent = now;
         }
         /* Hub: in a room, this PC's ping for the others' player cards and the high-ping warning */
-        if (N.lobby && N.have_token && N.roomv.in_room && !N.match_live && N.rtt_ms >= 0 && now - N.last_pinginfo >= PINGINFO_MS) {
+        if (N.lobby && N.have_token && N.roomv.in_room && !SPECTATOR_HERE() && !N.match_live && N.rtt_ms >= 0 &&
+            now - N.last_pinginfo >= PINGINFO_MS) {
             uint8_t p[3];
             int rtt = N.rtt_ms > 0xFFFF ? 0xFFFF : N.rtt_ms;
             p[0] = P_PINGINFO;
@@ -2149,7 +2343,8 @@ static DWORD WINAPI net_thread(LPVOID unused)
         /* The room is playing but this PC never got its START: a VOTE makes the server send it again.
          * In a King of the Hill room only a fighter has a START to get (the HILL says who fights). */
         if (N.lobby && N.roomv.in_room && N.roomv.phase == 2 && !N.start_this_play && !N.over_pending &&
-            koth_fighting_here() && now - N.last_recover >= 500) {
+            koth_fighting_here() && now - N.last_recover >= 500 &&
+            (!SPECTATOR_HERE() || (N.playing_since && now - N.playing_since < 10000))) {
             uint8_t vb[6 + 8 + 1];
             int n = header(vb, T_VOTE);
             memcpy(vb + n, N.token, 8); n += 8;
@@ -2166,7 +2361,7 @@ static DWORD WINAPI net_thread(LPVOID unused)
             send_data(p, 7);
             N.hello_sent = now;
         }
-        if ((N.state == NETPLAY_CONNECTED || N.state == NETPLAY_SYNCING) && !N.start_deferred)
+        if ((N.state == NETPLAY_CONNECTED || N.state == NETPLAY_SYNCING) && !N.start_deferred && !N.watching)
             send_live_pad(now);
         {   /* wait up to 20 ms for a datagram, then take it; select() returns only when it is done,
              * unlike a blocking recv with SO_RCVTIMEO, whose timed-out request could still complete
@@ -2460,6 +2655,24 @@ void netplay_lobby_join(const char *code)
     request(T_JOIN, b, 6);
 }
 
+void netplay_lobby_spectate(const char *code)
+{
+    uint8_t b[6];
+    int i;
+    for (i = 0; i < 6; i++) b[i] = (uint8_t)toupper((unsigned char)(code && code[i] ? code[i] : 0));
+    request(T_SPECTATE, b, 6);
+}
+
+int netplay_spectating(void)
+{
+    int on;
+    InitOnceExecuteOnce(&g_once, init_once, NULL, NULL);
+    EnterCriticalSection(&g_cs);
+    on = N.watching || (N.lobby && SPECTATOR_HERE());
+    LeaveCriticalSection(&g_cs);
+    return on;
+}
+
 void netplay_lobby_quick(int mode, int max)
 {
     int most = room_max(mode);
@@ -2729,7 +2942,7 @@ void netplay_on_result(uint32_t winners, uint32_t losers, uint32_t code)
     (void)losers;
     InitOnceExecuteOnce(&g_once, init_once, NULL, NULL);
     EnterCriticalSection(&g_cs);
-    if (!N.lobby || !N.match_live || N.reported || !N.report_key[0] || N.desync || !N.lockstep) {
+    if (!N.lobby || !N.match_live || N.reported || !N.report_key[0] || N.desync || !N.lockstep || N.watching) {
         LeaveCriticalSection(&g_cs);
         return;
     }
@@ -2776,7 +2989,7 @@ static void report_left(uint32_t left)
 {
     int send;
     EnterCriticalSection(&g_cs);
-    send = N.lobby && N.match_live && N.match_seen && N.start_reported && !N.reported && !N.desync && left;
+    send = N.lobby && N.match_live && N.match_seen && N.start_reported && !N.reported && !N.desync && left && !N.watching;
     if (send) N.reported = 1;
     LeaveCriticalSection(&g_cs);
     if (!send) return;
@@ -2789,7 +3002,24 @@ static void report_left(uint32_t left)
 void netplay_sync_point(void)
 {
     if (!N.lockstep) return;
-    if (N.lobby && N.match_live && !N.delay_fixed) {
+    if (N.lobby && N.match_live && !N.delay_fixed && N.watching) {
+        /* Spectator mode: the delay the players agreed, from their P_RTT (byte 13, once their sync
+         * point fixed it); players of older builds do not send it: then from their pings, as they
+         * derive it. It never rolls back. */
+        ULONGLONG t0 = GetTickCount64();
+        int i, from = -1;
+        for (;;) {
+            for (i = 0; i < N.players && from < 0; i++) if (N.peer_delay[i] > 0) from = i;
+            if (from >= 0 || GetTickCount64() - t0 > SPEC_DELAY_WAIT_MS || !N.lockstep) break;
+            WaitForSingleObject(N.arrived, 20);
+        }
+        N.delay = from >= 0 ? N.peer_delay[from] : agreed_delay();
+        N.rb_match = 0;
+        N.delay_fixed = 1;
+        fprintf(stderr, "[NETPLAY] input delay %d steps (pings %d/%d/%d/%d ms) (watching: %s)\n", N.delay,
+                N.peer_rtt[0], N.peer_rtt[1], N.peer_rtt[2], N.peer_rtt[3],
+                from >= 0 ? "the players' agreed delay" : "derived from the players' pings");
+    } else if (N.lobby && N.match_live && !N.delay_fixed) {
         /* Every player's ping for this START, then the delay they all derive from them. */
         ULONGLONG t0 = GetTickCount64();
         int known, i;
@@ -2839,6 +3069,12 @@ void netplay_on_main_menu(void)
         N.start_tick = GetTickCount64();    /* the load starts now */
         become_connected();
         automatch_request(&N.deferred_m);
+        return;
+    }
+    N.spec_results = 0;         /* spectator mode: the results are behind it */
+    if (N.lobby && N.match_live && N.match_seen && N.watching) {
+        end_hub_match("Back in the room; watching the next match when it starts.");
+        N.koth_results = N.koth_quit = 0;
         return;
     }
     if (N.lobby && N.match_live && N.match_seen) {
@@ -2919,6 +3155,42 @@ static DWORD WINAPI autostart_thread(LPVOID unused)
         netplay_lobby(server, "Test player");
         return 0;
     }
+    if (!strcmp(mode, "spectate")) {
+        /* RECOMP_NETPLAY=spectate (tests, spectator mode): enter the hub and watch the first listed room
+         * that is not a King of the Hill (RECOMP_NETPLAY_SPECTATE=<code>: that room), from the room list
+         * as a player does with WATCH; again whenever this PC is in no room (its room closed). */
+        const char *name = getenv("RECOMP_NETPLAY_NAME"), *want = getenv("RECOMP_NETPLAY_SPECTATE");
+        ULONGLONG asked = 0, tried = 0;
+        netplay_lobby(server, name && *name ? name : "Test spectator");
+        for (i = 0; i < 600 && N.state == NETPLAY_CONNECTING; i++) Sleep(100);
+        for (i = 0; i < 50 && N.relay_caps < 0; i++) Sleep(100);
+        if (!(N.relay_caps > 0 && (N.relay_caps & CAPS_SPECTATE))) {
+            fprintf(stderr, "[NETPLAY] tests: the relay does not take spectators (caps %d)\n", N.relay_caps);
+            return 0;
+        }
+        while (!N.stop && N.state != NETPLAY_FAILED && N.state != NETPLAY_OFF) {
+            NetRoom r;
+            ULONGLONG now = GetTickCount64();
+            netplay_lobby_room(&r);
+            if (!r.in_room && now - tried >= 1000) {
+                const char *code = NULL;
+                NetRoomInfo list[32];
+                int n, k;
+                if (now - asked >= 1000) { netplay_lobby_list(0xFF); asked = now; }
+                n = netplay_lobby_rooms(list, 32, NULL);
+                if (want && *want) code = want;
+                for (k = 0; k < n && !code; k++)
+                    if (!NETPLAY_IS_KOTH(list[k].mode) && list[k].players > 0) code = list[k].code;
+                if (code) {
+                    fprintf(stderr, "[NETPLAY] tests: watching room %.6s\n", code);
+                    netplay_lobby_spectate(code);
+                    tried = now;
+                }
+            }
+            Sleep(100);
+        }
+        return 0;
+    }
     if (!strcmp(mode, "quick") || !strcmp(mode, "ranked")) {
         const char *f = getenv("RECOMP_NETPLAY_FIGHTER"), *name = getenv("RECOMP_NETPLAY_NAME");
         const char *delay = getenv("RECOMP_NETPLAY_READY_DELAY_MS");
@@ -2929,6 +3201,9 @@ static DWORD WINAPI autostart_thread(LPVOID unused)
         const char *rp = getenv("RECOMP_TEST_READY_PLAYERS");
         int fighter = f && *f ? atoi(f) : 55, readied = 0, ready_delay = delay ? atoi(delay) : 0;
         int ready_players = rp && *rp ? atoi(rp) : 0, told_wait = 0;
+        /* RECOMP_TEST_READY_SPECTATORS=<n> (spectator tests): ready only while n spectators watch the room */
+        const char *rs = getenv("RECOMP_TEST_READY_SPECTATORS");
+        int ready_spectators = rs && *rs ? atoi(rs) : 0, told_spec = 0;
         unsigned voted_in = 0;
         ULONGLONG called_at = 0;
         netplay_lobby(server, name && *name ? name : "Test player");
@@ -3081,6 +3356,20 @@ static DWORD WINAPI autostart_thread(LPVOID unused)
                 Sleep(100);
                 continue;
             }
+            if (r.in_room && ready_spectators > 0 && r.spectator_count < ready_spectators && !N.match_live &&
+                !NETPLAY_IS_KOTH(r.settings.mode)) {
+                if (!told_spec) {
+                    fprintf(stderr, "[NETPLAY] tests: %d of %d spectators in the room; not ready until all are\n",
+                            r.spectator_count, ready_spectators);
+                    told_spec = 1;
+                }
+                Sleep(100);
+                continue;
+            }
+            if (told_spec) {
+                fprintf(stderr, "[NETPLAY] tests: %d spectators watch the room; readying\n", r.spectator_count);
+                told_spec = 0;
+            }
             if (r.in_room && r.player_count >= ready_players && told_wait) {
                 fprintf(stderr, "[NETPLAY] tests: the room holds %d players; readying\n", r.player_count);
                 told_wait = 0;
@@ -3201,7 +3490,8 @@ void netplay_autostart(void)
     static LONG once;
     HANDLE t;
     if (InterlockedExchange(&once, 1)) return;
-    if (!mode || !server || (strcmp(mode, "host") && strcmp(mode, "join") && strcmp(mode, "quick") && strcmp(mode, "ranked") && strcmp(mode, "lobby"))) return;
+    if (!mode || !server || (strcmp(mode, "host") && strcmp(mode, "join") && strcmp(mode, "quick") && strcmp(mode, "ranked") && strcmp(mode, "lobby") &&
+                               strcmp(mode, "spectate"))) return;
     t = CreateThread(NULL, 0, autostart_thread, NULL, 0, NULL);
     if (t) CloseHandle(t);
 }
@@ -3359,9 +3649,10 @@ void netplay_on_match_start(void)
      * the longest). */
     fight_input();
     N.load_done = 1;
-    fprintf(stderr, "[NETPLAY] match %08X starts in lockstep (%d players, delay %d); loaded in %.1f s since the START\n",
-            N.match, N.players, N.delay, N.start_tick ? (GetTickCount64() - N.start_tick) / 1000.0 : -1.0);
-    if (N.lobby && N.match_live && N.report_key[0]) {
+    fprintf(stderr, "[NETPLAY] match %08X starts in lockstep (%d players, delay %d); loaded in %.1f s since the START%s\n",
+            N.match, N.players, N.delay, N.start_tick ? (GetTickCount64() - N.start_tick) / 1000.0 : -1.0,
+            N.watching ? " (watching)" : "");
+    if (N.lobby && N.match_live && N.report_key[0] && !N.watching) {
         N.start_reported = 1;
         ac_match_begin();
         report_event("start", 0, 0, 0);
@@ -3780,6 +4071,90 @@ static void steplog_keep(uint32_t s)
     }
 }
 
+/* START pressed on this PC's own controller (an edge): a spectator stops watching with it. */
+static int spec_stop_pressed(void)
+{
+    XBOX_INPUT_STATE st;
+    int down;
+    memset(&st, 0, sizeof(st));
+    down = xbox_HostInputGetLocalState(&st) == ERROR_SUCCESS && (st.Gamepad.wButtons & 0x0010);
+    if (down && !N.spec_start_down) { N.spec_start_down = 1; return 1; }
+    if (!down) N.spec_start_down = 0;
+    return 0;
+}
+
+/* Spectator mode, step s (its checksum taken): compare it with the players', then wait for every
+ * player's entry of the step. Never a give-up that counts for anyone: a feed that stops only stops
+ * the watching, and the game goes on on its own (START, then Quit, goes back to the room). */
+static void spec_step(uint32_t s)
+{
+    ULONGLONG since;
+    int waited_long = 0;
+    if (s % HASH_EVERY == 0 && N.hash_tag[s % RING] == s + 1) {
+        uint32_t k = s % RING;
+        unsigned slot = (s / HASH_EVERY) % SPEC_HASHES;
+        NetCheck c;
+        memset(&c, 0, sizeof(c));
+        c.match = N.match; c.step = s; c.hash = N.hash_at[k];
+        memcpy(c.parts, N.hash_parts[k], sizeof(c.parts));
+        memcpy(c.fields, N.hash_fields[k], sizeof(c.fields));
+        memcpy(c.gens, N.hash_gens[k], sizeof(c.gens));
+        c.crowd = N.hash_crowd[k];
+        c.shared = N.hash_split[k][0]; c.time_scale = N.hash_split[k][1]; c.match_gen = N.hash_split[k][2];
+        c.has_parts = c.has_extra = 1;
+        EnterCriticalSection(&g_cs);
+        g_spec_lh[slot] = c;
+        spec_compare(slot);
+        LeaveCriticalSection(&g_cs);
+    }
+    if (spec_stop_pressed()) {
+        fprintf(stderr, "[NETPLAY] watching: stopped with START at step %u\n", s);
+        InterlockedExchange(&N.lockstep, 0);
+        toast(10000, "You stopped watching. START, then Quit, goes back to the room.");
+        return;
+    }
+    if (s <= (uint32_t)N.delay) return;
+    since = GetTickCount64();
+    for (;;) {
+        int ready = 1, i, late = -1;
+        ULONGLONG now;
+        EnterCriticalSection(&g_cs);
+        for (i = 0; i < N.players; i++) if (!spec_entry(i, s, NULL)) { ready = 0; late = i; }
+        LeaveCriticalSection(&g_cs);
+        if (ready || !N.lockstep) {
+            if (ready && waited_long)
+                fprintf(stderr, "[NETPLAY] watching: waited %.1f s for player %d's entries at step %u\n",
+                        (GetTickCount64() - since) / 1000.0, N.last_late + 1, s);
+            break;
+        }
+        N.last_late = late;
+        WaitForSingleObject(N.arrived, 4);
+        now = GetTickCount64();
+        if (now - since >= 1000) waited_long = 1;
+        if (spec_stop_pressed()) {
+            fprintf(stderr, "[NETPLAY] watching: stopped with START at step %u\n", s);
+            InterlockedExchange(&N.lockstep, 0);
+            toast(10000, "You stopped watching. START, then Quit, goes back to the room.");
+            break;
+        }
+        {
+            int decided = N.fighting_seen && MEM32(G_MATCH_PHASE) >= 2u;
+            if (now - since > (decided ? DECIDED_LIMIT_MS : s <= (uint32_t)N.delay + 1 ? START_LIMIT_MS : STALL_LIMIT_MS)) {
+                InterlockedExchange(&N.lockstep, 0);
+                if (decided) {
+                    fprintf(stderr, "[NETPLAY] watching: the match is decided and the players went on (step %u): "
+                            "the rest runs on this PC\n", s);
+                } else {
+                    fprintf(stderr, "[NETPLAY] watching: the feed stopped at step %u (player %d's entries); not "
+                            "watching any more\n", s, late + 1);
+                    toast(10000, "The match's feed stopped. START, then Quit, goes back to the room.");
+                }
+                break;
+            }
+        }
+    }
+}
+
 void netplay_on_step(void)
 {
     uint32_t s, target, k, need;
@@ -3921,6 +4296,7 @@ void netplay_on_step(void)
         }
     }
     if (N.resim) return;                /* a re-run: the entries are all known or predicted */
+    if (N.watching) { spec_step(s); return; }
     target = s + (uint32_t)N.delay;
     k = target % RING;
     EnterCriticalSection(&g_cs);
@@ -4036,7 +4412,9 @@ void netplay_on_pad_read(uint32_t actor)
         uint32_t k = s % RING;
         int predicted = 0;
         EnterCriticalSection(&g_cs);
-        if (N.in_tag[slot][k] == s + 1 && N.in_match[slot][k] == N.match)
+        if (N.watching)
+            spec_entry((int)slot, s, entry);    /* spectator mode: the whole match is kept */
+        else if (N.in_tag[slot][k] == s + 1 && N.in_match[slot][k] == N.match)
             memcpy(entry, N.in[slot][k], ENTRY);
         else if (N.predicting || N.resim) {     /* not here yet: that player's last entry */
             uint32_t t;
@@ -4047,7 +4425,7 @@ void netplay_on_pad_read(uint32_t actor)
                     break;
                 }
         }
-        if ((int)slot != N.pos) {
+        if ((int)slot != N.pos && !N.watching) {
             memcpy(N.used[slot][k], entry, ENTRY);
             N.used_tag[slot][k] = s + 1;
             N.used_pred[slot][k] = (uint8_t)predicted;

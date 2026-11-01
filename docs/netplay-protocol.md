@@ -223,6 +223,35 @@ by older relays.
 - Any member who is not voting or fighting may change its fighter with `READY` (its ready flag as
   it is); the change counts from its next fight. Leaving is `LEAVE` at any time.
 
+## Spectator extension (watching a room's matches)
+
+A client may watch an ordinary room's matches without playing in them; its game runs each match
+from the `START` body and the players' entries (design and limits: `docs/research/spectator-mode.md`).
+Same header and version; a relay without it drops `SPECTATE` silently.
+
+| Type | Name | Direction | Body after the header |
+|---|---|---|---|
+| 0x20 | `CAPS` | both | bit 4 (`16`): from a client, "I can watch"; in the relay's answer (only to a client that sent it), "rooms here can be watched" |
+| 0x2B | `SPECTATE` | client -> server | `token` 8, `room` 6 |
+| 0x19 | `ROOM` | server -> client | `you` = **0xFD** for a spectator; to clients that sent bit 4, after the players: `count` u8, per spectator `name` string |
+| 0x23 | `WATCH` | server -> client | the `START` body (with its created-fighter trailer), to every spectator present when the match starts |
+
+- `SPECTATE` puts a lobby client into the room as a spectator, answered with `ROOM` (to everyone in the
+  room) and the players' `RECORD`s. Errors: 1 no such room, 2 the room's spectator places are taken
+  (`relay -spectators N`, default 4; 0 turns spectating off), 3 another build, 8 not allowed (no bit 4,
+  a King of the Hill, ranked or legacy room, a room without players), 9 already in a room. A repeated
+  `SPECTATE` of the same room answers `ROOM` again.
+- A spectator is never a player: not in `ROOM.players`, `START`, the ready check, the vote, `OVER` or
+  the player count of `ROOMS`. Its `READY`, `SETTINGS` and lobby-phase `VOTE` get `ERROR 8`; its `OVER`
+  changes nothing; its `DATA` is dropped. `LEAVE` takes it out; when the room's last player leaves, the
+  room closes and its spectators get `ERROR 1`.
+- At the vote's end the spectators get `WATCH` and are the match's watchers: during the match every
+  player `DATA` whose payload type is `P_STEPS` (4), `P_HASH` (5) or `P_RTT` (6) goes to them too, with
+  the player's slot. A watcher's `VOTE` while the room plays re-sends its `WATCH`. A spectator who
+  enters during a match watches from the next one.
+- `P_RTT` (game payload 6) gains byte 13 since build 40: the input delay the sender's game agreed at
+  its sync point (0 before), which a spectator plays with.
+
 ## Relay status (choosing a relay)
 
 Since build 30 there is more than one relay (Europe `play.defjam.online`, US East

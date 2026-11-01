@@ -311,7 +311,7 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
            bot=None, timeout=None, relay_port=27900, base_core=2, keep_going=False, extra_env=None,
            lock_timeout=None, log=None, require_hits=False, stall=300, keep_roots=False, quick=None,
            created=False, cp_records=None, rematch=False, venues=None, cp_pick=None, cp_names=None,
-           more_shots=False):
+           more_shots=False, spectators=0):
     """created: the relay plays created fighters (relay -created); cp_records: per copy the profile dumps or
     user ID saves (RECOMP_CP_RECORD; several separated by ';', newest first; '' none), for fighter 99;
     cp_pick: per copy which of them it plays (RECOMP_CP_PICK, an index; '' the newest); cp_names: per copy
@@ -319,7 +319,9 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
     more_shots: besides each copy's fight in match 1, its versus screen and its results screen. The result's `save_written` lists, per copy,
     the save files a run changed (the cache partitions left out). rematch: every match after the first is
     a Rematch from the results menu instead of a new room match. venues: "26" or "1,6": every vote
-    offers these in turn (relay -test-venues)."""
+    offers these in turn (relay -test-venues). spectators: that many more copies watch the players' room
+    (RECOMP_NETPLAY=spectate, docs/research/spectator-mode.md); the players ready only once they are in it,
+    and every match is checked on them as on the players (checksums, winners, summary)."""
     t0 = time.time()
     mode = mode.lower()
     if mode not in MODES:
@@ -332,7 +334,7 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
     s = copies.Session("online", lock_timeout=lock_timeout, log=log, keep_roots=keep_roots).open()
     result = {"scenario": "online", "ok": False,
               "params": {"matches": matches, "mode": mode, "players": players, "fighters": fighters[:players],
-                         "rollback": rollback, "fast_ko": fast_ko, "bot": bot}}
+                         "rollback": rollback, "fast_ko": fast_ko, "bot": bot, "spectators": spectators}}
     shots, problems = [], []
     stop_reason = None
     logs = {}
@@ -363,6 +365,8 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
                 # first pair) as soon as two are there and ready, and a later copy then opened a room of
                 # its own (src/hooks/netplay.c autostart_thread)
                 env["RECOMP_TEST_READY_PLAYERS"] = str(players)
+            if spectators:      # the spectators watch from the first match on
+                env["RECOMP_TEST_READY_SPECTATORS"] = str(spectators)
             if fast_ko:
                 env["RECOMP_TEST_KO_STEP"] = "%d,%s" % (int(fast_ko), winner)
             env.update(_bot_env(bot))
@@ -383,6 +387,25 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
             before[i] = _save_files(root)
             s.launch(i, env=env, root=root, core=base_core + 2 * i, watch=WATCH)
             time.sleep(3)           # the first copy opens the room and is player 1
+        for k in range(spectators):
+            # a spectator: no fighter, no presses after the main menu (its game goes through the results by
+            # itself); the same test knockout as the players, since that is applied on every PC
+            i = players + k
+            env = dict(VIRTUAL_PAD_ENV)
+            env.update({
+                "RECOMP_INPUT_VIRTUAL_PADS": "1",
+                "RECOMP_NETPLAY": "spectate", "RECOMP_NETPLAY_SERVER": "127.0.0.1:%d" % relay_port,
+                "RECOMP_NETPLAY_NAME": "Spectator %d" % k,
+                "RECOMP_ROLLBACK": "off",
+                "RECOMP_SCRIPT_ANCHOR": TITLE_ANCHOR,
+                "RECOMP_PAD_SCRIPT": harness().build_pad_script(["getscreeninfo(intmain/mainmenu=lt@0.5"]),
+            })
+            if fast_ko:
+                env["RECOMP_TEST_KO_STEP"] = "%d,%s" % (int(fast_ko), winner)
+            env.update(extra_env or {})
+            root = s.make_root(i)
+            before[i] = _save_files(root)
+            s.launch(i, env=env, root=root, core=base_core + 2 * i, watch=WATCH)
         deadline = time.time() + timeout
         shot_due = None
         more_done = {}

@@ -29,6 +29,8 @@ enum NetplayState {
 
 #define NETPLAY_MAX_PLAYERS 4      /* fighters in one match */
 #define NETPLAY_ROOM_SLOTS 10      /* members of one room: King of the Hill rooms hold up to ten */
+#define NETPLAY_MAX_SPECTATORS 16  /* spectators a room names (docs/research/spectator-mode.md) */
+#define NETPLAY_SLOT_SPECTATOR 0xFD     /* NetRoom.you of a spectator */
 
 /* King of the Hill (docs/research/king-of-the-hill.md): NetRoomSettings.mode of such a room; every
  * fight in it is One on One. The venue is voted on by the two fighters, or drawn at random. */
@@ -105,6 +107,8 @@ typedef struct NetRoom {
     int player_count;
     NetRoomPlayer players[NETPLAY_ROOM_SLOTS];
     NetHill hill;                   /* King of the Hill rooms only */
+    int spectator_count;            /* spectator mode: who watches (relays with NETPLAY_CAP_SPECTATE) */
+    char spectators[NETPLAY_MAX_SPECTATORS][25];
     char error[96];                 /* the last refusal, "" if none */
     unsigned version;               /* changes whenever anything here does */
 } NetRoom;
@@ -113,6 +117,7 @@ typedef struct NetRoom {
  * then 0), else the bits; bit 0 King of the Hill, bit 2 YIELD (relays since build 36). */
 #define NETPLAY_CAP_KOTH 1
 #define NETPLAY_CAP_YIELD 4
+#define NETPLAY_CAP_SPECTATE 16    /* spectator mode: rooms can be watched (netplay_lobby_spectate) */
 int netplay_lobby_caps(void);
 
 /* Enter the hub on `server`. The state becomes NETPLAY_LOBBY once the server answers; a room's
@@ -128,6 +133,11 @@ int netplay_lobby_players(NetPlayer *out, int max, int *online, int *rooms);
 void netplay_lobby_create(const NetRoomSettings *settings);
 void netplay_lobby_join(const char *code);
 void netplay_lobby_quick(int mode, int max);
+/* Spectator mode (docs/research/spectator-mode.md): watch the room with this code; the room's
+ * NetRoom.you is then NETPLAY_SLOT_SPECTATOR and every match that starts in it is run here from the
+ * players' inputs, with no local player. Only when netplay_lobby_caps() has NETPLAY_CAP_SPECTATE. */
+void netplay_lobby_spectate(const char *code);
+int netplay_spectating(void);   /* 1 while this PC watches a room or one of its matches */
 void netplay_lobby_settings(const NetRoomSettings *settings);   /* host only */
 void netplay_lobby_ready(int ready, int fighter);
 void netplay_lobby_vote(int choice);
@@ -237,6 +247,9 @@ void netplay_on_update(void);                       /* sub_0002C530: a game upda
 void netplay_sound_command(void);   /* the sound engine's command call, silent while steps re-run */
 void *netplay_sound_handler(uint32_t va);   /* the audio subsystem's bus handlers, or NULL */
 int netplay_rematch_request(void);   /* Game.Rematch() online: 1 to hold it for the others */
+/* Every front-end call (automatch_hold_funccall): a spectator's game goes through the summary of a
+ * watched match by itself from its first Game.GetMatchSummary on. */
+void netplay_spectator_funccall(const char *text);
 int netplay_toast(char *text, int size);
 
 /* The pre-fight versus screen (online_screen.cpp) of a room's match: what its START set up, copied

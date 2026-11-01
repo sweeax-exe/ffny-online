@@ -7,6 +7,7 @@ the exit code is 1 on any failure.
 
     python tools/defjam-mcp/dj.py scenario online --matches 3 [--mode 1v1|ffa|team|koth] [--players 2]
            [--fighters 55,22] [--rollback on|off] [--fast-ko 600|0] [--bot [60|p1=aggressive,p2=counter]]
+           [--spectators 1]
     python tools/defjam-mcp/dj.py scenario offline [--type 0] [--venue 1] [--f0 55] [--f1 22] [--human]
            [--bot] [--fast-ko 600] [--turbo] [--fixture <save folder>]
     python tools/defjam-mcp/dj.py scenario boot [--goto battle|story|rewards|online|slotN]
@@ -46,7 +47,7 @@ def cmd_scenario(a):
                              cp_records=a.cp_records.split(",") if a.cp_records else None,
                              cp_pick=a.cp_pick.split(",") if a.cp_pick else None,
                              cp_names=a.cp_names.split(",") if a.cp_names else None, more_shots=a.more_shots,
-                             rematch=a.rematch, venues=a.venues, **common)
+                             rematch=a.rematch, venues=a.venues, spectators=a.spectators, **common)
     elif a.kind == "offline":
         r = scenarios.offline(type=a.type, venue=a.venue, f0=a.f0, f1=a.f1, cpu=not a.human, bot=a.bot,
                               fast_ko=a.fast_ko, turbo=a.turbo, timeout=a.timeout or 420,
@@ -166,6 +167,7 @@ def main(argv=None):
     sc.add_argument("--more-shots", action="store_true", help="online: also each copy's versus and results screens of match 1")
     sc.add_argument("--venues", help="online: the venue feIDs every vote offers in turn (relay -test-venues), e.g. 26")
     sc.add_argument("--rematch", action="store_true", help="online: matches after the first are Rematch from the results menu")
+    sc.add_argument("--spectators", type=int, default=0, help="online: this many more copies watch the room (spectator mode)")
     sc.add_argument("--type", type=int, default=0)
     sc.add_argument("--venue", type=int, default=1)
     sc.add_argument("--f0", type=int, default=55)
