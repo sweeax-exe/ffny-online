@@ -4,24 +4,33 @@ Playable Windows x64 was accepted by the maintainer on October 4, 2026. Test
 routes cover menus, setup, a fight, Story intro/creator, crib/gym and Unlock
 Fighters selection. They do not cover every mode or a full Story campaign.
 
-## v0.13.0 candidate validation
+## v0.13.0 release qualifications
 
-The owner approved the Windows combined-candidate playtest with full Lanczos4x,
-HD Widescreen Menus1.4.0 and HD Fighters1.0.0 on October31. Two owner-reported
-Story bugs are queued for future fixes in v0.14.0: [SC04 audio falls behind the
-video part way through](https://github.com/vyanhursky/DefJamFFNY-recomp/issues/161),
-and the [widescreen map selector border does not account for the Shops area](https://github.com/vyanhursky/DefJamFFNY-recomp/issues/162).
-Their causes and cross-platform reproduction remain unconfirmed. The approval
-does not replace the pending automated all-pack/platform and setup gates.
+The owner approved the Windows all-pack playtest and authorized merging/tagging
+v0.13.0 on November 1, 2026 after reviewing the regression comments. Testing is
+complete on Windows, macOS and Linux; not every gate passed. See the
+[release notes](releases/v0.13.0.md) for the platform results.
 
-The all-pack Windows suite completed16/17 with four platform-inapplicable skips.
-Combat memory growth failed at96.7MiB and at375.6MiB on the same-fixture targeted
-repeat against the unchanged64MiB limit. Longer held-menu all-pack observations
-pass, while the Lanczos-only control fails at122.3MiB. These do not waive the
-failed gate or establish a leak's cause. French/English-subtitle captures and
-controller tracing pass. See the [measured memory report](research/rc-v0.13.0-hd-memory.md#post-playtest-full-lanczos-configuration).
+- [Memory-growth investigation #166](https://github.com/vyanhursky/DefJamFFNY-recomp/issues/166)
+  retains the positive Windows and Deck deltas, differing memory metrics and
+  longer HD scene observations. The 64 MiB threshold is unchanged. This is not a
+  confirmed leak diagnosis; the owner's accepted Windows release record does not
+  establish a Linux fix. [Windows measurements](research/rc-v0.13.0-hd-memory.md).
+- [Mac input test](research/rc-v0.13.0-macos.md): latest awake refresh-off trial
+  generated 38/40 scheduled pulses; every generated pulse reached the game.
+  Refresh-on passed 40/40. The strict test remains failed; no runtime-loss claim.
+- Deck replay/repeat golden discrepancy remains under #98. Repeat runs now agree
+  with each other at 79 records, but the stored golden has 80.
+- Owner-reported [SC04 A/V lag #161](https://github.com/vyanhursky/DefJamFFNY-recomp/issues/161)
+  and [Shops map border #162](https://github.com/vyanhursky/DefJamFFNY-recomp/issues/162)
+  remain queued for future fixes. PR #164 is not part of this release.
+- Real setup install/Clean Update and separate Deck playtest were not performed
+  for this train. Game-free setup CI is distinct from those local acceptance steps.
 
-The combined candidate has not completed its full Windows/macOS/Linux acceptance. French interface and English subtitle state checks retain captures for separate rendered-text review. The requested Menus1.4.0/Fighters1.0.0 profile uses a 2048 MiB texture budget; it does not close the default-budget issue #141. Late controller refresh remains optional/off by default. See [candidate commands and evidence requirements](regression-v0.13.0.md).
+French interface and rendered English subtitles passed review on all three
+platforms. HD testing used a 2048 MiB cache, full local Lanczos4x, Menus1.4.0 and
+Fighters1.0.0. This does not fix the old 512 MiB setting issue #141. Late refresh
+remains optional/off by default. No goldens or memory thresholds were relaxed.
 
 ## Remaining investigations
 

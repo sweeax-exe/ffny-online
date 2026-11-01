@@ -11,3 +11,10 @@ There is deliberately no list of hand-written functions here. `src/recomp_manual
 ## Current manual overrides
 
 - **`0x002016B0` — CRT `memmove`/`memcpy`.** MSVC dispatches this routine's alignment and tail cases through jump tables embedded in its body. Function detection ends the body at `0x00201952`, but those arms live at `0x0020194C`–`0x002019D4`, past that end, so the lifter emitted indirect calls instead of local jumps and the tail bytes of every affected copy were dropped. Reimplemented natively; also a large speed-up.
+
+## Texture authoring boundary
+
+Runtime aliases and schema examples needed by Setup belong here. Pack-specific
+menu recipes, approvals, candidate ledgers and checkpoint pointers belong in the
+private authoring workspace. Modding Tools consumes them through explicit paths;
+published version metadata belongs in DefJamFFNY-mods.

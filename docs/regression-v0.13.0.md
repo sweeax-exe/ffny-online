@@ -1,4 +1,4 @@
-# v0.13.0 candidate regression
+# v0.13.0 regression reproduction
 
 Run the same release PR head and toolkit `d569ca1` on Windows, macOS and Linux.
 The owner runs macOS/Linux; the release agent runs Windows. Keep games serial
@@ -47,7 +47,9 @@ approved the playtest; the all-pack Windows retest finished16/17 with memory
 growth failing again on a targeted repeat. The longer all-pack menu observations
 pass, while the Lanczos-only control fails. Keep every result and the64MiB gate;
 see the [post-playtest memory report](research/rc-v0.13.0-hd-memory.md#post-playtest-full-lanczos-configuration).
-Mac/Linux full regression and setup acceptance remain pending.
+Mac/Linux runs are now complete with recorded qualifications; see the release
+notes and PR160 comments. The owner authorized release on November1. Local setup
+install/Clean Update was not performed; memory follow-up is issue166.
 
 Every gameplay, scenario, soak and controller run receives 16:9 and all selected packs,
 even when scenario isolation clears inherited diagnostics. Original-image

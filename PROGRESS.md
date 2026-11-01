@@ -72,7 +72,7 @@
 | Launcher mod catalogue | ✅ v0.11.0 stable/latest — Mod Support Beta | D198 owner Steam Deck acceptance. Release5775f3c/nine assets unchanged; catalogue PR3 merged5b4de77, signed publication40115951254 passed. Client verifies revision3 and default-channel1.0.0 with testing off; archive43bbb22c unchanged.13local tests/22subtests plus full Linux CI pass. Docs PR99 records stable promotion. |
 
 | Texture modding getting started | ✅ owner-approved and merged PR148 | D232: human-readable first-pack guide links runtime capture, archive extraction/gallery, original IDs, PNG/atlas/alpha rules, manifest/ZIP, current priority UI, testing/sharing and troubleshooting. README/index/reference links refreshed; synthetic CLI/manifest/ZIP smoke pass,89local links and23focused tests pass; CI green, owner approved, PR148 merged852aa43. Docs only; no game/artwork/workspace changes. |
-| v0.13.0 candidate (D233-D249) | ⏳ Windows memory resolved; Mac pulse-injection test fails | Owner approved all-pack playtest; toolkit d569ca1/native8649e815 unchanged. Tested5771350: Windows16/17 in46min,4inapplicable skips, units745pass/28skip/1slow deselected. Only memory growth fails96.7MiB; same-fixture confirmation375.6MiB vs64MiB. Longer all-pack held-menu runs pass, Lanczos-only fails122.3MiB; failures preserved (D249). French/subtitle visual and input-trace off/on pass. CI green on5771350. Mac/Linux and setup install/Clean Update pending; future bugs161/162 queuedv0.14.0. Release PR160 remains unmerged. Mac: two-cast local build43b1a7d on5d22e8b/d569ca1, full16/21, targeted4/5, awake input offFAIL39/40/onPASS40/40; RSS gate3/3PASS, combined dry1 then confirmationPASS; visualsPASS, saves21unchanged. `docs/research/rc-v0.13.0-macos.md`. Owner follow-up: Windows memory resolved. Mac commitcfcc5e6 confirmed; input repeat212639 off38/40FAIL (first pair not injected, all38delivered), on40/40PASS; no loss/discards/sleep, saves restored. |
+| v0.13.0 release (D233-D251) | ⏳ owner-authorized merge/tag in progress | All platform RC runs complete with documented exceptions. Owner approves release Nov1; issue166 tracks memory limit/HD scene allocation. Windows historical memory failures retained, Mac short-pulse injection38/40, Deck memory and known golden mismatch accepted as qualifications; no gate threshold/golden change. PR160 merges tested153/156/158 plus Clang casts; excluded146/141 move to0.14.0. Main source-boundary cleanup integrated. Setup real install/Clean Update not performed; CI setup builds checked. |
 
 
 ## 1. Decisions log
@@ -395,6 +395,8 @@ D138–D140 were allocated independently on main and the launcher branch. Their 
 | D248 | 2026-10-31 | Owner approves the Windows all-pack playtest; file SC04 audio/video lag as issue161 and map-selector Shops widescreen border as issue162, both bug/v0.14.0. Proceed with the requested post-playtest full Windows regression and serial memory comparison. | Owner says playtest is great/approved and defers both reported bugs to future fixing. Mac/Linux regressions remain owner-run; no merge/tag/release authorization inferred. CI3322cdf failed an existing randomized delta test: coincident boundary bytes can validly increase copy length. Make that test deterministic, cover matching/nonmatching boundaries, require exact round trip and no excess literals; no runtime change. |
 | D249 | 2026-10-31 | Complete the owner-requested post-playtest all-pack Windows regression and bounded memory confirmation; preserve the failed64MiB gate and report longer observations separately. | Tested5771350/native8649e815/toolkitd569ca1: full16/17 in46min with4inapplicable skips, units745pass; memory96.68MiB and same-fixture repeat375.58MiB fail. Fixed-fixture Menus+Fighters/Lanczos/all end growth-30.89/+122.27/-38.30MiB; only Lanczos fails. Extra same-current-fixture all-pack60s menu passes27/27, end-21.74MiB,8settled samples2437.26–2453.29MiB. No allocator attribution or leak-free campaign claim; no threshold/runtime/golden change. French/subtitle visual review and trace40presses/9stages off/on pass; saves restored. Publish evidence, leave memory/platform/setup gates pending; stop completed test monitor. |
 | D250 | 2026-10-31 | Owner authorizes two explicit `(const void *)XBOX_PTR(state)` casts in the isolated Mac RC checkout and continued tests of that identified build. Keep the unchanged RC build failure and every runtime failure recorded; no unrelated fix or release action. | Fresh Apple Clang 21 build of5d22e8b/d569ca1 rejects integer-to-pointer arguments in input_late.c45/149. Patched executable43b1a7d was tested; report docs/research/rc-v0.13.0-macos.md. Sleep-affected controls rerun awake with permission; input gate remains failed. |
+| D251 | 2026-11-01 | Owner explicitly authorizes merging the tested v0.13.0 PRs and tagging/publishing the release after reading the platform comments; track the cross-platform memory-limit investigation in issue166/v0.14.0. Keep PR146 and the v0.14.0 train out. | Platform runs are complete but not all-green: Windows historical memory deltas accepted for release, Mac strict scripted-input off38/40 (generated38all delivered), Deck memory+73.2/+67.8MiB and known79vs80 replay golden remain qualified. Setup real install/Clean Update and separate Deck playtest were not performed; release proceeds under explicit owner direction, not a fabricated PASS. Preserve thresholds/goldens; merge current main source-authoring boundary cleanup without restoring private production records, retain only the tested Clang pointer casts. |
+
 
 ## 2. Environment inventory (2026-09-17)
 
@@ -491,7 +493,6 @@ defjam-recomp/
 
 > Recent entries only; older entries remain unchanged in the local `docs/worklog/` archive.
 
-- 2026-10-31 14:36 — D246 memory investigation: same executable8649e815/fixturee6635fa3/16:9/cache2048MiB, no packs/Menus1.4/Fighters1.0/both: baseline303.7/2390.0/394.2/2390.1MiB; original64MiB gate growth1.4/54.8/4.2/45.4MiB,27/27each. Exact repeat27/27(+8.1MiB). Held returned menu60s also27/27:8settled samples,0.0MiB growth,final18.5MiB below fight baseline. Original265.7MiB post-match failure retained; no sustained fight/menu growth observed, exact allocator not traced. Added portable memory-pack-audit.py with preserved failures/phase metrics; focused73pass. Report docs/research/rc-v0.13.0-hd-memory.md. No runtime, toolkit, golden or64MiB threshold changes; PR160 records updated.
 - 2026-10-31 14:49 — D247: owner adds full Lanczos4x to playtest and requests post-playtest retest. Assembled/verified 18,971 local images (6,212,168,677 bytes),13runtime aliases, recipe81ddfce230ca into candidate mods; Lanczos opacity/channels precede Menus1.4.0/Fighters1.0.0. Shortcut now uses editable stored pack selection and Picture shape. Added --lanczos-receipt corpus checks and memory groups lanczos/all; focused132pass/1skip, source611files/0policy failures. Full combined-pack game regression and memory comparison wait for owner playtest completion; previous two-mod results retained. Local receipt data/lanczos-pack-build.json and handoff logs/owner-playtest-handoff.md.
 - 2026-10-31 15:14 — D248: owner approves Windows all-pack playtest; submitted future bugs #161 SC04 A/V lag and #162 map-selector Shops widescreen border, both bug/v0.14.0. Reviewed local latest session report (10504frames/51hitches/no retained pictures; no independent cutscene/map reproduction). CI3322cdf failure is an existing random delta-test boundary coincidence; deterministic matching/nonmatching fixtures and payload/round-trip assertions pass18/8skip locally. Full all-pack regression and memory comparison authorized; Mac/Linux owner-run.
 - 2026-10-31 16:40 — D249: all-pack Windows retest on5771350 finished16/17 in46min,4inapplicable skips; units745pass/28skip/1slow deselected. Only combat memory96.68MiB fails64MiB; same-fixture repeat375.58MiB confirms. Longer fixed-fixture controls growth-30.89/+122.27/-38.30MiB for Menus+Fighters/Lanczos/all; Lanczos-only fails. Extra current-fixture all-pack60s menu passes27/27, final-21.74MiB,8settled samples2437.26–2453.29MiB. French/subtitle visual and trace off/on pass, save restoration passes. CI5771350green. Report docs/research/rc-v0.13.0-hd-memory.md; source-only result update, no runtime/gate/golden changes. Mac/Linux and setup gates pending; test monitor finished.
@@ -499,37 +500,31 @@ defjam-recomp/
 - 2026-10-31 21:00 — D250 Mac v0.13.0 RC observations complete on5d22e8b/d569ca1 plus owner-approved2casts, exe43b1a7d. Full16/21PASS/5FAIL/0SKIP (53min), units719pass54skip1deselected; targeted4/5. Sleep-correlated startup/subtitle failures pass awake reruns; French/English16s24s visuallyPASS. Awake input off39/40FAIL/on40/40PASS: no waiver. Same-fixture awake RSS gates3/3PASS (-136.30/-49.28/-50.94MiB vs64); combined dry1 then all-only confirmationPASS (-298.48MiB), originals retained. Source/disposable21save hashes unchanged/all restoration checksPASS; goldens/limits unchanged. Reports docs/research/rc-v0.13.0-macos.md, logs/regress-20261031-180020.txt, logs/regress-20261031-181550.txt, logs/lanczos-memory-comparison-awake and logs/lanczos-memory-all-confirm. No unrelated fix/push/merge/tag/release/setup acceptance.
 - 2026-10-31 21:36 — Owner confirms Windows memory gate already resolved. Mac build fix committedcfcc5e6, source/build freshness verified; requested input repeat logs/regress-20261031-213153.txt FAIL(off38/40,on40/40), on AC/awake/no sleep. Off first scheduled25.00/25.07s pair absent before SDL injection, all38generated rises delivered to every stage; max gaps92.630/70.486ms, no trace loss/discards, both saves restored. No downstream game input loss shown; injection-window cause unproven, no unrelated code fix. Report docs/research/rc-v0.13.0-macos.md and logs/rc-input-owner-confirm.json. No push/merge/tag/release.
 - 2026-10-31 21:55 — Owner authorized commit/push and comments on PR160. Published cfcc5e6 Mac Clang two-cast build fix/report plus da8bcd7 input confirmation/Windows correction by normal fast-forward push to release/v0.13.0; remote base5d22e8b unchanged before push. Findings posted https://github.com/vyanhursky/DefJamFFNY-recomp/pull/160#issuecomment-6553622809; input test FAIL(off38/40,on40/40), no downstream loss shown, Windows memory resolved per owner, other historical results preserved. Source audit612files/0failures, no game data/generated code/logs/captures/binaries published. No merge/tag/release.
+- 2026-11-01 07:06 — D251: reviewed both platform comments onPR160; owner authorizes release with explicit qualifications. Created memory investigation166/v0.14.0 (Windows historical deltas, Deck73.2/67.8MiB, Mac RSS controls; no allocator/leak claim). Integrated main source-authoring boundary cleanup, preserving frozen generator and data ignore; only merge conflict was.gitignore. Finalized release notes/README/known issues with Mac38/40 injection and Deck golden gap, unperformed local setup gates, and owner approval. CI/source/unit checks before merge/tag; no runtime threshold/golden changes.
 
 ## 7. Hand-off
 
-### v0.13.0 Mac source and findings published — 2026-10-31
+### v0.13.0 owner-authorized release — 2026-11-01
 
-- Owner confirms Windows memory gate was already resolved; do not keep reporting it
-  as open. Historical measurements remain unchanged in the reports.
-- Owner requested commit/push and comments on release PR160. Mac build fix
-  `cfcc5e642c3a76e2e3fbecba55280b2f2f3f4e42` and confirmation record
-  `da8bcd7cd6119f3d86e2b7ff0d0a0a600897c80c` are pushed to `release/v0.13.0`.
-  Two explicit const-void-pointer casts; fresh build passed. No merge/tag/release.
-  Findings: https://github.com/vyanhursky/DefJamFFNY-recomp/pull/160#issuecomment-6553622809
-  A publication-record commit follows; fetch the branch for current source.
-  Original checkout preserved; no game data/logs/binaries/captures published.
-- Owner-requested input repeat `logs/regress-20261031-213153.txt`: row FAIL,
-  refresh off38/40FAIL, on40/40PASS. AC/awake assertions; no sleep during the run.
-  Off missed the first scheduled pair25.00/25.07s at script_virtual and sampled log;
-  every generated rise reached all downstream stages. Max gaps92.630/70.486ms,
-  no trace loss, no retention discard. On5274applied/17795shadow/0mismatch/0read errors.
-- Remaining issue is reliability of the20ms scripted pulse injection/check; no
-  downstream game-side loss shown by this repeat. Exact missed-window cause remains
-  unproven (sampler/host-poll gaps6.206/3.334ms). No extra input/game code changed.
-  If investigating, start with apply_script's anchored wall-clock20ms windows in
-  toolkit src/usb/usb_gamepad.c and the first missing pair; preserve strict thresholds.
-- Both input save restorations PASS; final baseline hashes verified separately.
-  Main report docs/research/rc-v0.13.0-macos.md; new evidence
-  logs/rc-input-owner-confirm.json, logs/rc-input-owner-confirm-sampled.txt,
-  logs/rc-input-owner-confirm-triage.txt and input-audit/regress-20261031-212639-*.
-- Earlier full16/21 and targeted4/5 retained. French/English subtitle visuals pass;
-  all3Mac RSS growth gates pass; one combined audio dry interval, confirmation passed.
-  Existing exact build/pack identities and save evidence remain in the report.
-- Authorized confirmation finished; no game/helper running, no persistent power
-  settings changed. Setup install/Clean Update remains a separate gate, not performed
-  here. Keep game assets, captures, binaries and raw logs ignored and local.
+- Owner directs merging/tagging v0.13.0 after reviewing PR160 comments. Release
+  content is153/156/158 plus tested Apple Clang pointer casts cfcc5e6. Do not
+  merge146,164 or the v0.14.0 app/graphics feature train into this release.
+- All platform runs finished with qualifications preserved in release notes:
+  Windows16/17 and memory confirmation; Mac16/21 with later targeted4/5,
+  strict awake refresh-off38/40 generated pulses (all38 delivered), on40/40;
+  Linux gameplay/controller routes pass, two-match memory+73.2/+67.8MiB fails,
+  replay/repeat79vs80 golden remains#98. No thresholds or goldens relaxed.
+- New issue166/v0.14.0 tracks growth measurement/allocator lifetime and HD scene
+  effects. POSIX sampler is RSS even though JSON says private_bytes. Keep all
+  old evidence; Windows release acceptance does not imply a Linux fix.
+- Source main PR163 separates private texture-authoring history from game runtime.
+  Integrate its removals, checker/tests and ignores; keep the frozen HD Setup
+  generator/runtime aliases. `.gitignore` also retains this RC's ignored data/.
+- Release notes/README/known issues record owner approval and platform limits.
+  Setup real install/Clean Update and a separate Deck playtest were not performed.
+  Proceed under explicit Nov1 owner release authorization, not invented passes.
+- Finish source/unit checks and CI, merge PR160 with a merge commit (its existing
+  merge history closes153/156/158), tag that exact main merge commit v0.13.0,
+  verify release workflow setup assets/digests/provenance, then publish.
+  Move unshipped146/141 to0.14.0 before closing0.13.0. Preserve local captures,
+  logs, saves and built executables; never put them in source or release assets.
