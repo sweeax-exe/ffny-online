@@ -235,11 +235,18 @@ inline std::vector<Pack> inventory(const fs::path &mods, const std::string &chos
             auto folder = mods / fs::u8path(p.name);
             if (!fs::is_directory(folder, folder_error))
                 p.problem = "Not installed";
-            else if (fs::exists(folder / "language.ini", folder_error) && !fs::exists(folder / "manifest.ini", folder_error))
+            else if (fs::exists(folder / "language.ini", folder_error))
             {
+                // A manifest.ini beside language.ini holds the mod's own images (texture-pack format).
                 p.language = true;
                 p.selected = p.name == chosen_language;
                 p.problem = language_problem(folder, p.title);
+                if (p.problem.empty() && fs::exists(folder / "manifest.ini", folder_error))
+                {
+                    auto images = manifest_problem(folder);
+                    if (!images.empty())
+                        p.problem = "Its images: " + images;
+                }
             }
             else
                 p.problem = manifest_problem(folder);

@@ -194,6 +194,14 @@ def test_only_one_language_mod_is_on(inventory_tool,tmp_path):
     assert 'language=es-zarf|0|' in out and 'language=fr-test|1|' in out
     assert 'selected_language=fr-test\n' in out
 
+def test_language_mod_with_its_own_images_is_still_a_language_mod(inventory_tool,tmp_path):
+    language(tmp_path,'es-hd');(tmp_path/'es-hd'/'manifest.ini').write_text('[pack]\nschema=1\nname=HD\n')
+    language(tmp_path,'es-bad');(tmp_path/'es-bad'/'manifest.ini').write_text('[pack]\nschema=9\n')
+    out=run(inventory_tool,tmp_path,'')
+    assert 'language=es-hd|0|Espa\u00f1ol|\n' in out
+    assert 'language=es-bad|0|Espa\u00f1ol|Its images: Unsupported manifest schema (expected 1)\n' in out
+    assert not [line for line in out.splitlines() if line.startswith('priority=')]
+
 def test_language_mod_problems_and_missing_choice(inventory_tool,tmp_path):
     language(tmp_path,'future','[language]\nschema=2\n')
     out=run(inventory_tool,tmp_path,'',language='gone')
