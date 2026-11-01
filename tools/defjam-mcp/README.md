@@ -36,7 +36,7 @@ Logs and pictures go to `logs/dj/<stamp>-<scenario>/` (git-ignored).
 | `scenario online --matches 3 [--mode 1v1\|ffa\|team\|koth] [--players 2] [--fighters 55,22] [--rollback on\|off] [--fast-ko 600] [--bot [p1=aggressive,p2=counter]]` | a local relay and 2..4 copies in one quick-match room, N room matches |
 | `scenario offline [--type 0] [--venue 1] [--f0 55] [--f1 22] [--human] [--bot] [--fast-ko 600] [--fixture DIR]` | one match from the main menu by automatch, fought to the summary |
 | `scenario boot [--goto battle]` | to the main menu (boot time, faults, a picture); optionally on to a menu entry by name |
-| `scenario gallery [--page-ms 1500]` | the online screens' sample pages, one PNG each |
+| `scenario gallery [--page-ms 1500] [--env RECOMP_TEST_ONLINE_GALLERY_ONLY=stats]` | the online screens' sample pages, one PNG each (`--env`: only some pages, or another test switch) |
 | `digest <log or logs/bug-reports/<id>> [--max 60]` | the key events of any game log, also a player's F9 report |
 | `analyze <copy0 log> <copy1 log> [--matches N]` | the online result of logs from another run (e.g. `netplay-hub-test.ps1`) |
 | `lock status` / `lock run -- <command>` | who holds the machine / run any other test under the lock |
