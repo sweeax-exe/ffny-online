@@ -271,9 +271,10 @@ def _save_files(root):
 def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast_ko=600, ko_winner=None,
            bot=None, timeout=None, relay_port=27900, base_core=2, keep_going=False, extra_env=None,
            lock_timeout=None, log=None, require_hits=False, stall=300, keep_roots=False, quick=None,
-           created=False, cp_records=None, rematch=False, venues=None):
-    """created: the relay plays created fighters (relay -created); cp_records: one profile dump or user ID
-    save per copy (RECOMP_CP_RECORD, '' none), for fighter 99. The result's `save_written` lists, per copy,
+           created=False, cp_records=None, rematch=False, venues=None, cp_pick=None):
+    """created: the relay plays created fighters (relay -created); cp_records: per copy the profile dumps or
+    user ID saves (RECOMP_CP_RECORD; several separated by ';', newest first; '' none), for fighter 99;
+    cp_pick: per copy which of them it plays (RECOMP_CP_PICK, an index; '' the newest). The result's `save_written` lists, per copy,
     the save files a run changed (the cache partitions left out). rematch: every match after the first is
     a Rematch from the results menu instead of a new room match. venues: "26" or "1,6": every vote
     offers these in turn (relay -test-venues)."""
@@ -314,7 +315,9 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
                 env["RECOMP_TEST_KO_STEP"] = "%d,%s" % (int(fast_ko), winner)
             env.update(_bot_env(bot))
             if cp_records and i < len(cp_records) and cp_records[i]:
-                env["RECOMP_CP_RECORD"] = os.path.abspath(cp_records[i])
+                env["RECOMP_CP_RECORD"] = ";".join(os.path.abspath(r) for r in cp_records[i].split(";") if r)
+            if cp_pick and i < len(cp_pick) and str(cp_pick[i]).strip():
+                env["RECOMP_CP_PICK"] = str(int(cp_pick[i]))
             if rematch:
                 env["RECOMP_PAD_SCRIPT"] = harness().build_pad_script(["getscreeninfo(intmain/mainmenu=lt@0.5"],
                                                                        rematch_tail(matches, i % 2 == 1))
