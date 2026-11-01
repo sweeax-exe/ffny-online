@@ -255,6 +255,7 @@ int main(int argc, char **argv)
         else
             printf("keep %s\n", argv[i]);
     }
+    printf("texpacks %s\n", getenv("RECOMP_TEXTURE_PACKS") ? getenv("RECOMP_TEXTURE_PACKS") : "(unset)");
     {
         /* The XBE as main.c has it, patched in memory. */
         char xbe[2048];
@@ -351,13 +352,32 @@ def test_runtime_matches_reference(runtime_tool, dump):
 def test_runtime_without_a_pack_changes_nothing(runtime_tool, dump):
     tmp, game, _ = dump
     lines, err = run_runtime(runtime_tool, tmp / 'data', game, 'assets/misc.viv')
-    assert lines == ['keep assets/misc.viv', 'xbe LOADING', 'subtitles game', 'language 1']
+    assert lines == ['keep assets/misc.viv', 'texpacks (unset)', 'xbe LOADING', 'subtitles game', 'language 1']
     assert "the game's own language" in err
     lines, _ = run_runtime(runtime_tool, tmp / 'data', game, RECOMP_STORY_SUBTITLES='all cutscenes')
     assert lines[-2] == 'subtitles all'
     lines, _ = run_runtime(runtime_tool, tmp / 'data', game, RECOMP_LANGUAGE_PACK='xx-test',
                            RECOMP_STORY_SUBTITLES='as the game does')
     assert lines[-2] == 'subtitles game'
+
+
+def test_runtime_adds_the_mods_own_images_beneath_the_texture_packs(runtime_tool, dump):
+    tmp, game, pack = dump
+    data = tmp / 'data'
+    lines, _ = run_runtime(runtime_tool, data, game, RECOMP_LANGUAGE_PACK='xx-test')
+    assert 'texpacks (unset)' in lines                  # no manifest.ini: nothing to add
+    (pack / 'manifest.ini').write_text('[pack]\nschema=1\nname=HD\n')
+    try:
+        lines, err = run_runtime(runtime_tool, data, game, RECOMP_LANGUAGE_PACK='xx-test')
+        assert 'texpacks xx-test' in lines and 'its own images load beneath the texture packs' in err
+        lines, _ = run_runtime(runtime_tool, data, game, RECOMP_LANGUAGE_PACK='xx-test', RECOMP_TEXTURE_PACKS='menu;hd')
+        assert 'texpacks xx-test;menu;hd' in lines      # first in the list ranks lowest
+        lines, _ = run_runtime(runtime_tool, data, game, RECOMP_LANGUAGE_PACK='xx-test', RECOMP_TEXTURE_PACKS='xx-test;hd')
+        assert 'texpacks xx-test;hd' in lines           # listed by hand: left as it is
+        lines, _ = run_runtime(runtime_tool, data, game, RECOMP_TEXTURE_PACKS='hd')
+        assert 'texpacks hd' in lines                   # the mod is off
+    finally:
+        (pack / 'manifest.ini').unlink()
 
 
 @pytest.mark.parametrize('value', ['french', 'French'])

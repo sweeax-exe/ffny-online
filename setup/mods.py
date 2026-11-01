@@ -238,8 +238,17 @@ def validate_language(folder):
 
 
 def validate_pack(folder):
-    if (folder / 'language.ini').exists() and not (folder / 'manifest.ini').exists():
-        return validate_language(folder)
+    if (folder / 'language.ini').exists():
+        result = validate_language(folder)
+        if (folder / 'manifest.ini').exists():
+            # The language mod's own images, in the texture-pack format (docs/language-packs.md).
+            images = validate_textures(folder)
+            result = dict(images, capabilities=result['capabilities'] + images['capabilities'])
+        return result
+    return validate_textures(folder)
+
+
+def validate_textures(folder):
     manifest = folder / 'manifest.ini'
     check(manifest.is_file() and not manifest.is_symlink() and manifest.stat().st_size <= 16 * 1024**2,
           'Missing/oversized manifest')
