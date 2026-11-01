@@ -144,7 +144,7 @@ def test_defaults_are_valid_and_complete(tool):
     out, ini = run(tool, None)
     assert out['count'] == 'count 61'
     assert out['decision'] == 'decision 1 0 1 1 0 0 0'
-    assert out['ui'] == 'ui F1|guide, left_stick_click+right_stick_click|100|0'
+    assert out['ui'] == 'ui F1|left_stick_click+right_stick_click|100|0'
     assert out['duplicate_keys'] == 'duplicate_keys 0'
     assert out['keyboard'] == 'keyboard rejected 0 empty 0 shared 0'
     assert out['padmap_differs'] == 'padmap_differs 0'

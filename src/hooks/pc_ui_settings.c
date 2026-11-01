@@ -34,7 +34,7 @@ size_t pc_ui_settings(RecompSetting *out, size_t max)
         "Pad buttons that open and close the overlay. Alternatives are separated by commas; a combination "
         "of buttons joined with + must be held for half a second. Button names as in [gamepad]. "
         "Empty for none.",
-        "guide, left_stick_click+right_stick_click");
+        "left_stick_click+right_stick_click");
     ADD("ui", "scale", RECOMP_SETTING_INT, 100, 60, 250, NULL, NULL, 0,
         "Size of the launcher and overlay text and controls in percent, on top of your display's scaling.");
     ADD("launcher", "gpu_notice_seen", RECOMP_SETTING_BOOL, 0, 0, 0, NULL, NULL, 0,

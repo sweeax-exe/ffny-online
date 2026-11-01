@@ -43,6 +43,7 @@
 #include "test_observations.h"
 #include "netplay_servers.h"
 #include "netplay_check.h"
+#include "anticheat.h"
 
 #define G_MATCH_PHASE   0x003B8F30u     /* test_telemetry.c G_PHASE */
 #define G_MATCH_WINNER  0x003B8F40u     /* test_telemetry.c G_WINNER: the winner's fighter slot */
@@ -159,6 +160,7 @@ void netplay_crowd_update(void) { sub_00081170(); }
 #define T_RESULT      0x22      /* a fighter's outcome: START seed, the winner's room slot (0xFF a draw) */
 #define T_WATCH       0x23      /* START's body, for a fight this PC only watches */
 #define T_YIELD       0x26      /* give up my spot in the line (relays since build 36, CAPS bit 2) */
+#define T_NOTICE      0x27      /* relay -> game: a countdown before a relay restart (build 37 on) */
 #define CAPS_KOTH     1u
 #define CAPS_ROLLBACK 2u        /* the relay lets matches roll back (its switch; off: lockstep only) */
 #define CAPS_TRIES    5         /* CAPS every RETRY_MS; no answer after these: an older relay */
@@ -337,6 +339,8 @@ static struct {
     double rb_ms_max, rb_ms_total;
     char toast[160];                /* a notice for the fight (netplay_toast), until toast_until */
     ULONGLONG toast_until;
+    char notice[96];                /* the relay's maintenance NOTICE text, counted down to notice_at */
+    ULONGLONG notice_at, notice_shown;
     /* the versus screen (netplay_versus): shown since vs_start (0: not shown), the fight under way
      * since vs_end (0: not yet); the king's position and streak as of the START */
     ULONGLONG vs_start, vs_end;
@@ -477,7 +481,7 @@ int netplay_toast(char *out, int size)
 
 /* The versus screen (netplay.h). Called by the overlay every frame; it reads the session and the
  * step counter and writes only vs_start/vs_end, which nothing in the match reads. */
-#define VS_MIN_MS   2500u           /* shown at least this long after the START, when a load is instant */
+#define VS_MIN_MS   4000u           /* shown at least this long after the START, when a load is instant */
 #define VS_FADE_MS  400u
 #define VS_LIMIT_MS 120000u         /* a match that never got going: the screen does not stay up for ever */
 int netplay_versus(NetVersus *out)
@@ -823,6 +827,7 @@ static const char *const k_fight_files[] = {
     "assets\\ai\\ai.viv", "motion\\main_all.dat", "assets\\djv2.sod",
 };
 static uint32_t g_data_print;
+static char g_data_over[160];       /* the fight files read from the override folder, for the reports */
 
 static uint32_t file_print(const char *name, int *overridden)
 {
@@ -863,6 +868,7 @@ static void make_data_print(void)
         if (overridden && o < (int)sizeof(over)) o += snprintf(over + o, sizeof(over) - (size_t)o, " %s", k_fight_files[i]);
     }
     g_data_print = h ? h : 1;
+    snprintf(g_data_over, sizeof(g_data_over), "%s", o ? over + 1 : "");
     fprintf(stderr, "[NETPLAY] game files %08X: %s%s%s\n", g_data_print, text, o ? "; from the override folder:" : "", over);
 }
 
@@ -1563,6 +1569,18 @@ static void on_packet(const uint8_t *b, int len)
     case T_WATCH:
         if (N.lobby) on_watch(b + 6, len - 6);
         break;
+    case T_NOTICE:      /* u16 seconds left, u8 length, text: the relay restarts soon (maintenance) */
+        if (len >= 9 && b[8] == len - 9) {
+            unsigned secs = (unsigned)b[6] | (unsigned)b[7] << 8, tl = b[8] < sizeof(N.notice) ? b[8] : sizeof(N.notice) - 1;
+            EnterCriticalSection(&g_cs);
+            memcpy(N.notice, b + 9, tl);
+            N.notice[tl] = 0;
+            N.notice_at = GetTickCount64() + (ULONGLONG)secs * 1000u;
+            N.notice_shown = 0;
+            LeaveCriticalSection(&g_cs);
+            fprintf(stderr, "[NETPLAY] the relay restarts in %u s: %s\n", secs, N.notice);
+        }
+        break;
     case T_PONG:
         if (len >= 10 && get32(b + 6) == N.ping_nonce)
         {
@@ -1692,6 +1710,18 @@ static DWORD WINAPI net_thread(LPVOID unused)
     while (!N.stop) {
         ULONGLONG now = GetTickCount64();
         int got;
+        ac_net_tick(now);       /* a late pass: the whole game stood still (anticheat.c) */
+        /* the relay's restart countdown (T_NOTICE): the notice, refreshed every second, until then */
+        if (N.notice_at && now - N.notice_shown >= 1000) {
+            unsigned left = now < N.notice_at ? (unsigned)((N.notice_at - now + 999) / 1000) : 0;
+            EnterCriticalSection(&g_cs);
+            snprintf(N.toast, sizeof(N.toast), "%s in %u:%02u. Fights already running are played to the end; "
+                     "no new fight starts until then.", N.notice, left / 60, left % 60);
+            N.toast_until = now + 1500;
+            N.notice_shown = now;
+            if (!left) N.notice_at = 0;
+            LeaveCriticalSection(&g_cs);
+        }
         /* The first match after the game starts reads everything from the disk: 20 to 40 s on the
          * menu's LOADING, which players took for a freeze (F9 reports, build 23). */
         /* (the versus screen says it itself while it is up) */
@@ -2282,6 +2312,22 @@ static int report_json(const char *event, uint32_t winners, uint32_t left, int d
             if (left & (1u << i)) { n += snprintf(json + n, (size_t)(size - n), "%s%d", first ? "" : ",", i); first = 0; }
         n += snprintf(json + n, (size_t)(size - n), "]");
     }
+    if (strcmp(event, "start") && strcmp(event, "crashed")) {
+        /* build 37: the fight as it stood (time, each fighter's health in percent) and this PC's
+         * anti-cheat facts, for the account service and the team's #cheat-flags */
+        n += snprintf(json + n, (size_t)(size - n), ",\"fight\":{\"steps\":%u,\"health\":[", (unsigned)N.step);
+        for (i = 0; i < m.count && i < MAXP && n < size - 40; i++) {
+            float h = MEMF(ACTORS + (uint32_t)i * STRIDE + 0x350u), top = MEMF(ACTORS + (uint32_t)i * STRIDE + 0x354u);
+            int pct = top > 0.0f && h == h ? (int)(100.0f * h / top + 0.5f) : -1;
+            n += snprintf(json + n, (size_t)(size - n), "%s%d", i ? "," : "", pct < -1 ? -1 : pct > 100 ? 100 : pct);
+        }
+        n += snprintf(json + n, (size_t)(size - n), "]}");
+        /* build 37: the fingerprint of the fight files and the ones read from the override folder */
+        n += snprintf(json + n, (size_t)(size - n), ",\"files\":{\"print\":\"%08X\",\"override\":", (unsigned)g_data_print);
+        n = json_put(json, size, n, g_data_over);
+        n += snprintf(json + n, (size_t)(size - n), "}");
+        n = ac_json(json, size - 2, n);
+    }
     n += snprintf(json + n, (size_t)(size - n), "}");
     return n < size ? n : 0;
 }
@@ -2847,6 +2893,7 @@ void netplay_on_match_start(void)
             N.match, N.players, N.delay, N.start_tick ? (GetTickCount64() - N.start_tick) / 1000.0 : -1.0);
     if (N.lobby && N.match_live && N.report_key[0]) {
         N.start_reported = 1;
+        ac_match_begin();
         report_event("start", 0, 0, 0);
         arm_crash_report();
     }
@@ -3205,10 +3252,25 @@ static void watch_pads(void)
     had_pad = pads > 0;
 }
 
+/* The fight's first step waits until the versus screen has been up VS_MIN_MS: with an instant load
+ * it covered the venue intro (the fighters walking in, the announcer) and was gone in a moment.
+ * Nothing of the fight has run yet, so the state is the same on every PC; the others wait for this
+ * PC's entries as for a slower load (START_LIMIT_MS). RECOMP_VERSUS_HOLD=0 turns it off (tests). */
+static void versus_hold(void)
+{
+    static int off = -1;
+    ULONGLONG start = N.vs_start;
+    if (off < 0) off = getenv("RECOMP_VERSUS_HOLD") && !strcmp(getenv("RECOMP_VERSUS_HOLD"), "0");
+    if (off || N.step != 0 || N.resim || !N.lobby || !start) return;
+    while (N.lockstep && N.match_live && N.vs_start == start && GetTickCount64() - start < VS_MIN_MS)
+        WaitForSingleObject(N.arrived, 10);
+}
+
 void netplay_on_step(void)
 {
     uint32_t s, target, k, need;
     ULONGLONG waited_since, last_send, last_note;
+    if (N.lockstep) versus_hold();
     fight_input();              /* also after a fight went on offline */
     if (!N.resim) watch_pads();
     koth_check_result(0);

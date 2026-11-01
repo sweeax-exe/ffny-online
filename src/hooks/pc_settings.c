@@ -757,6 +757,15 @@ int pc_settings_init(void)
         recomp_settings_save(g_path);
         fprintf(stderr, "[SETTINGS] the launcher shows again at start (the skip setting is gone)\n");
     }
+    /* Build 37: the Guide button no longer opens the overlay by default (it opened mid-fight, a
+     * player's report 2026-10-30). Only the old default itself moves; a player's own choice stays. */
+    if (!env && g_path[0]) {
+        char pad[96];
+        recomp_settings_get_text("ui", "overlay_pad", pad, sizeof(pad), "");
+        if (!strcmp(pad, "guide, left_stick_click+right_stick_click") &&
+            recomp_settings_reset_to_default("ui", "overlay_pad") > 0)
+            recomp_settings_save(g_path);
+    }
     if (!g_path[0])
         fprintf(stderr, "[SETTINGS] defaults only (RECOMP_SETTINGS=none)\n");
     else if (read < 0)
