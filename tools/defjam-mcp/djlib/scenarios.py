@@ -423,10 +423,10 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
             if shot_due and time.time() >= shot_due and not any("fight-m1" in p for p in shots):
                 for k in range(len(cs)):
                     _png(s, k, "fight-m1-copy%d" % k, shots)
-            if more_shots:      # the results: two seconds after each copy's first reward step
+            if more_shots:      # the results: three seconds after each copy's match summary is asked for
                 for k, c in enumerate(cs):
-                    if rewards[k] >= 1 and ("summary", k) not in more_done:
-                        more_done[("summary", k)] = time.time() + 2
+                    if c.watch.count("[FUNCCALL] Game.GetMatchSummary(") and ("summary", k) not in more_done:
+                        more_done[("summary", k)] = time.time() + 3
                     due = more_done.get(("summary", k))
                     if isinstance(due, float) and time.time() >= due:
                         more_done[("summary", k)] = True

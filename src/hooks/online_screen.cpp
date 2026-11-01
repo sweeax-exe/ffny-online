@@ -2071,8 +2071,12 @@ void draw_name(ImDrawList *dl, const Frame &f, const Pad &pad)
     const char *shown = own ? clean : card.user_id.c_str();
     float size = fit_size(f, g_hand, 24, shown, 270);
     text(dl, f, g_hand, size, 186, 236 + (24 - size) * 0.5f, own ? ORANGE : with_alpha(CREAM, 0.6f), shown, CENTER, 1.2f);
-    text(dl, f, g_title, 11, 186, 272, GREY, own ? "THE OTHER PLAYERS SEE THIS NAME" : "NO ONLINE NAME: THE USER ID IS USED",
-         CENTER, 0.8f);
+    // The fight HUD writes the name in capitals and has room for about sixteen M; sixteen W ran under the
+    // timer (measured, build 39). The summary cuts a name that wide to about thirteen letters.
+    bool wide = own && text_width(f, g_title, 11, upper(clean).c_str()) > text_width(f, g_title, 11, "MMMMMMMMMMMMMMMM");
+    text(dl, f, g_title, 11, 186, 272, wide ? ORANGE : GREY,
+         wide ? "VERY WIDE: IT MAY RUN UNDER THE FIGHT'S CLOCK" :
+         own ? "THE OTHER PLAYERS SEE THIS NAME" : "NO ONLINE NAME: THE USER ID IS USED", CENTER, 0.8f);
     if (pad.a) {
         if (gallery_on()) G.cp_online[S.name_cp] = clean;
         else if (cp_local_set_name(S.name_cp, clean)) {
@@ -2385,8 +2389,22 @@ void draw_fighters(ImDrawList *dl, const Frame &f, const Pad &pad, bool *chosen,
             if (list[i].id == NETPLAY_CREATED_FIGHTER) {     // the fighter's name on an orange band
                 float tw = text_width(f, g_title, 9, list[i].name);
                 float size = tw > cw - 6 ? 9 * (cw - 6) / tw : 9;
-                rect(dl, f, x + 1, y + ch - 15, cw - 2, 14, with_alpha(ORANGE, sel ? 0.95f : 0.6f));
-                text(dl, f, g_title, size, x + cw / 2, y + ch - 14 + (9 - size) * 0.5f, WHITE, list[i].name, CENTER, 0.6f);
+                if (size >= 7) {
+                    rect(dl, f, x + 1, y + ch - 15, cw - 2, 14, with_alpha(ORANGE, sel ? 0.95f : 0.6f));
+                    text(dl, f, g_title, size, x + cw / 2, y + ch - 14 + (9 - size) * 0.5f, WHITE, list[i].name, CENTER, 0.6f);
+                } else {    // a long online name: two lines, split at the blank nearest the middle
+                    std::string s = list[i].name;
+                    size_t cut = s.size() / 2, best = std::string::npos;
+                    for (size_t k = 1; k + 1 < s.size(); k++)
+                        if (s[k] == ' ' && (best == std::string::npos || (k > cut ? k - cut : cut - k) < (best > cut ? best - cut : cut - best)))
+                            best = k;
+                    std::string a = best != std::string::npos ? s.substr(0, best) : s.substr(0, cut);
+                    std::string b = best != std::string::npos ? s.substr(best + 1) : s.substr(cut);
+                    float sz = std::min(fit_size(f, g_title, 9, a.c_str(), cw - 6), fit_size(f, g_title, 9, b.c_str(), cw - 6));
+                    rect(dl, f, x + 1, y + ch - 23, cw - 2, 22, with_alpha(ORANGE, sel ? 0.95f : 0.6f));
+                    text(dl, f, g_title, sz, x + cw / 2, y + ch - 22 + (9 - sz) * 0.5f, WHITE, a.c_str(), CENTER, 0.6f);
+                    text(dl, f, g_title, sz, x + cw / 2, y + ch - 12 + (9 - sz) * 0.5f, WHITE, b.c_str(), CENTER, 0.6f);
+                }
                 text(dl, f, g_title, 8, x + cw / 2, y + 3, with_alpha(ORANGE, sel ? 1.0f : 0.7f), "YOURS", CENTER, 0.6f);
             }
             if (sel) selector(dl, f, x, y, cw, ch);
@@ -2970,7 +2988,11 @@ void draw_room(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
         if (!known || !portrait(dl, f, shown, x + 4, y + 4, w - 8, (w - 8) * 1.5f))
             text(dl, f, g_title, 40, x + w / 2, y + 70, GREY, "?", CENTER);
         text(dl, f, g_hand, 15, x + w / 2, y + 200, p.slot == r.you ? ORANGE : CREAM, p.name, CENTER, 1.0f);
-        text(dl, f, g_title, 11, x + w / 2, y + 222, GREY, known ? fighter_label(shown, p.slot).c_str() : "choosing", CENTER, 0.6f);
+        {
+            std::string label = known ? fighter_label(shown, p.slot) : "choosing";
+            float size = fit_size(f, g_title, 11, label.c_str(), w - 10);     // a 16-character online name
+            text(dl, f, g_title, size, x + w / 2, y + 222 + (11 - size) * 0.5f, GREY, label.c_str(), CENTER, 0.6f);
+        }
         if (shown == NETPLAY_CREATED_FIGHTER) {     // a created fighter: its styles under the name
             char cn[CP_NAME_MAX + 1];
             const char *st = "";
@@ -3262,7 +3284,11 @@ void versus_card(ImDrawList *dl, const Frame &f, const NetVersus &v, int i, floa
     text(dl, f, g_hand, big ? 24 : 18, x + w / 2, ty, v.cpu[i] ? GREY : me ? ORANGE : CREAM, who, CENTER, 1.3f, 0);
     bool created = v.fighter[i] == NETPLAY_CREATED_FIGHTER;     // a Story-mode fighter: its record's name
     std::string fighter = upper(created ? (v.cp_name[i][0] ? v.cp_name[i] : "Created fighter") : online_fighter_name(v.fighter[i]));
-    text(dl, f, g_title, big ? 18 : 14, x + w / 2, ty + (big ? 34 : 28), created ? ORANGE : WHITE, fighter.c_str(), CENTER, 1.2f);
+    {
+        float size = fit_size(f, g_title, big ? 18 : 14, fighter.c_str(), w - 8);     // a 16-character online name
+        text(dl, f, g_title, size, x + w / 2, ty + (big ? 34 : 28) + ((big ? 18 : 14) - size) * 0.5f,
+             created ? ORANGE : WHITE, fighter.c_str(), CENTER, 1.2f);
+    }
     std::string style = created ? std::string(v.cp_style[i]) : upper(fighter_style(v.fighter[i]));
     if (!style.empty())
         text(dl, f, g_body, big ? 14 : 12, x + w / 2, ty + (big ? 58 : 48), with_alpha(CREAM, 0.75f), style.c_str(), CENTER, 0.8f);
@@ -3521,7 +3547,8 @@ void gallery_step()
                                          // several created fighters, the second one picked
                                          "grid-created-pick",
                                          // build 39: online names of 16 characters, and their entry
-                                         "name-created", "grid-created-long", "room-created-long", "versus-created-long" };
+                                         "name-created", "name-created-wide", "grid-created-long", "room-created-long",
+                                         "versus-created-long" };
     const int count = (int)(sizeof(pages) / sizeof(pages[0]));
     static unsigned long long start;
     static int ms;
@@ -3626,7 +3653,7 @@ void gallery_step()
     // the "-long" pages: Ann's first card plays as the widest 16 characters, Ben's as "Brooklyn Bruiser"
     G.cp_long = p.size() > 5 && p.compare(p.size() - 5, 5, "-long") == 0;
     for (auto &o : G.cp_online) o.clear();
-    if (G.cp_long) G.cp_online[0] = "WWWWWWWWWWWWWWWW";
+    if (G.cp_long) { G.cp_online[0] = "WWWWWWWWWWWWWWWW"; G.cp_online[1] = "Brooklyn Bruiser"; }
     if (p == "connecting") { G.state = NETPLAY_CONNECTING; G.in_lobby = false; }
     else if (p == "offline") { G.state = NETPLAY_FAILED; G.in_lobby = false; }
     else if (p == "hub") { S.page = HUB; S.hub_sel = 0; S.quick_mode = 0; }
@@ -3673,11 +3700,11 @@ void gallery_step()
         for (size_t i = 0; i < list.size(); i++) if (list[i].id == id) S.fighter_sel = (int)i;
     }
     else if (p == "room") { S.page = HUB; G.room = sample_room(2, 4, 3); }
-    else if (p == "name-created") {         // the online name of the first card, half typed
+    else if (p == "name-created" || p == "name-created-wide") {     // the first card's online name: half typed, or too wide
         G.cp_slots = 1;
         G.room = sample_room(0, 2, 2);
         S.page = NAME; S.name_cp = 0;
-        snprintf(S.name, sizeof(S.name), "%s", "Brooklyn Bruis");
+        snprintf(S.name, sizeof(S.name), "%s", p == "name-created" ? "Brooklyn Bruis" : "WWWWWWWWWWWWWWWW");
         S.name_pos = (int)strlen(S.name);
     }
     else if (p == "grid-created-long") {    // the grid: the first card with a 16-character online name
