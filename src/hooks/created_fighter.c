@@ -178,7 +178,10 @@ static int key_ok(uint32_t key)
     return (int)table < g_sod_tables && row < g_sod_count[table] && colour < 16;
 }
 
-/* fighter.xml's created archetypes: "CP KB_" -> letters per ID */
+/* fighter.xml's created archetypes: "CP KB_" -> letters per coreID. The profile's archetype byte
+ * (P+0x143) is a coreID, which is the entry's ID + 1 here: a fighter with Martial Arts, Kickboxing
+ * and Submissions holds 137, the coreID of "CP MKS" (ID 136); read as an ID it named "CP MKW"
+ * (Ryzing, 2026-11-01). */
 static char g_arch_letters[MAX_ARCHETYPE + 1][4];
 static int g_xml_loaded;
 
@@ -191,11 +194,11 @@ static void load_archetypes(void)
     x = (char *)read_game_file("fighter.xml", &size);
     if (!x) return;
     for (p = strstr(x, "<dispname>CP "); p; p = strstr(p + 1, "<dispname>CP ")) {
-        const char *id = strstr(p, "<ID>");
+        const char *id = strstr(p, "<coreID>");
         const char *next = strstr(p + 1, "<dispname>");
         int n;
         if (!id || (next && id > next)) continue;
-        n = atoi(id + 4);
+        n = atoi(id + 8);
         if (n >= MIN_ARCHETYPE && n <= MAX_ARCHETYPE) {
             memcpy(g_arch_letters[n], p + 13, 3);
             g_arch_letters[n][3] = 0;
