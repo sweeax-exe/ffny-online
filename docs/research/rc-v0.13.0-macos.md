@@ -1,5 +1,22 @@
 # v0.13.0 RC — macOS observations, 2026-10-31
 
+## Owner-requested input confirmation and Windows correction
+
+The owner confirms the Windows memory gate was already resolved on Windows; it is no longer an open blocker. Older Windows failure measurements remain historical evidence.
+
+The Mac build fix is committed locally as `cfcc5e642c3a76e2e3fbecba55280b2f2f3f4e42`; no push. No additional runtime code changed. The same executable/profile was retested on AC with temporary awake assertions, and no sleep event occurred during the retest.
+
+| Late refresh | Result | Generated / required presses | Delivered to every downstream stage | Maximum game-step gap | Trace loss / retention discards |
+|---|---|---|---|---|---|
+| off | FAIL | 38 / 40 | 38 / 38 | 92.630 ms | 0 / 0 |
+| on | PASS | 40 / 40 | 40 / 40 | 70.486 ms | 0 / 0 |
+
+Off failed only pulse registration: the first scheduled pair (25.00s and25.07s after the fight anchor) never appears at `script_virtual` or in the sampled-press log. All38generated presses reached every required downstream stage. This localizes the observed loss before SDL injection; it does not demonstrate the game discarding received input. The script samples fixed20ms time windows. The exact reason those windows were missed is not yet established; the failing phase's measured sampler/host-poll gaps were only6.206/3.334ms, so a simple long sampler stall is not proven. An injection/anchor/clock investigation remains appropriate before declaring this test reliable.
+
+On passed with5,274applied reports,17,795shadow comparisons,0mismatches and0read errors. Both fixtures were valid and both saves restored. No game or awake helper remains running. Thresholds and goldens are unchanged.
+
+Evidence: `logs/regress-20261031-213153.txt`, `logs/rc-input-owner-confirm.json`, `logs/rc-input-owner-confirm-sampled.txt`, `logs/rc-input-owner-confirm-triage.txt`, `logs/rc-input-owner-confirm-power.txt`, and `logs/input-audit/regress-20261031-212639-late{0,1}*`. The earlier full-suite, visual and memory observations below are retained unchanged.
+
 **The full run finished 16/21 PASS, 5 FAIL, 0 SKIP. The five-check targeted run passed 4/5. An additional awake controller pair still failed (off FAIL/on PASS).** The input gate remains open. Original failures and sleep-affected memory controls are retained. No release acceptance or waiver is implied.
 
 ## Exact candidate and build
