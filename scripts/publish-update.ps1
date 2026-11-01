@@ -22,7 +22,7 @@
 param(
     [Parameter(Mandatory = $true)][string]$Notes,
     [string[]]$Server = @('ffny-online', 'hetzner-sweeax'),
-    [string[]]$RelayOnly = @('ffny-na'),
+    [string[]]$RelayOnly = @('ffny-na', 'ffny-west'),
     [string]$Key = "$env:USERPROFILE\.defjam\update-signing-key.pem",
     [switch]$NoUpload,
     [switch]$NoGitHub
