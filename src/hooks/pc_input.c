@@ -157,6 +157,8 @@ static void build_config(InputHostConfig *cfg)
     xbox_HostInputDefaults(cfg);
     cfg->keyboard = modes[mode >= 0 && mode < 7 ? mode : 0];
     cfg->players = geti("input", "ports", 4);
+    if (getenv("RECOMP_TEST_INPUT_PORTS"))      /* tests: a player's "ports" setting (test runs read no settings.ini) */
+        cfg->players = atoi(getenv("RECOMP_TEST_INPUT_PORTS"));
     cfg->use_sdl = geti("input", "backend", 0) == 0;
     cfg->rumble_percent = geti("input", "rumble", 100);
     cfg->rumble_floor = geti("input", "rumble_floor", 60);
@@ -201,6 +203,30 @@ static void build_config(InputHostConfig *cfg)
  * which the title sees as an ordinary hot-plug. */
 void xbox_UsbSetPadCount(int n);
 
+static int g_hub_pads;          /* controllers on the emulated hub: at the start, raised by each hot-plug */
+
+static void hub_need(int n)
+{
+    if (n > g_hub_pads) g_hub_pads = n;
+    xbox_UsbSetPadCount(n);
+}
+
+/* Online rooms hold up to four players, and the title binds a port to each of them (Team: four). With
+ * the "ports" setting below that, the hub had no controller in port 3 or 4: that PC's game stopped on
+ * "Controller Disconnected - port 3" before the fight's first step (its START is held back in an online
+ * match, so nothing closed it) and never sent a step, and every other PC of the room waited on the
+ * loading screen until it gave up (Team match on US East, F9 report df0d6a, 2026-11-01). Online, the
+ * hub gets all four, plugged in the way a pad switched on later is. */
+void pc_input_online_ports(void)
+{
+    if (!g_started || g_hub_pads >= 4) return;
+    if (getenv("RECOMP_TEST_ONLINE_PORTS") && !strcmp(getenv("RECOMP_TEST_ONLINE_PORTS"), "keep")) return;  /* tests: the old hang */
+    fprintf(stderr, "[INPUT] online: the hub gets 4 controllers (it had %d from the ports setting), so a room "
+            "of three or four finds one in every port\n", g_hub_pads);
+    fflush(stderr);
+    hub_need(4);
+}
+
 void pc_input_start(void)
 {
     InputHostConfig cfg;
@@ -223,7 +249,7 @@ void pc_input_start(void)
     build_config(&cfg);
     if (usb_pads && atoi(usb_pads) > cfg.players)
         cfg.players = atoi(usb_pads);       /* the caller asked for at least this many */
-    xbox_HostInputOnPadSlot(xbox_UsbSetPadCount);
+    xbox_HostInputOnPadSlot(hub_need);
     found = xbox_HostInputStart(&cfg);
     g_started = 1;
     atexit(pc_input_stop);
@@ -232,6 +258,7 @@ void pc_input_start(void)
         _putenv_s("RECOMP_USB_PADS", count);
         g_usb_env_ours = 1;
     }
+    if (atoi(getenv("RECOMP_USB_PADS")) > g_hub_pads) g_hub_pads = atoi(getenv("RECOMP_USB_PADS"));
     fprintf(stderr, "[INPUT] %d pad(s), %s controller(s) on the hub\n", found, count);
     fflush(stderr);
 }

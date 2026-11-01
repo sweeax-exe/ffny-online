@@ -68,6 +68,11 @@ void pc_input_current_padmap(struct InputPadMap *map);
  * the launcher. */
 void pc_input_restart(void);
 
+/* Online (the hub's lobby): plug controllers into the emulated hub until it has four, so a room
+ * of three or four finds one in every port whatever the "ports" setting says. Once is enough;
+ * later calls do nothing. Safe from any thread. */
+void pc_input_online_ports(void);
+
 #ifdef __cplusplus
 }
 #endif

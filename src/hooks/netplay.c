@@ -45,6 +45,7 @@
 #include "netplay_check.h"
 #include "anticheat.h"
 #include "created_fighter.h"
+#include "pc_input.h"
 
 #define G_MATCH_PHASE   0x003B8F30u     /* test_telemetry.c G_PHASE */
 #define G_MATCH_WINNER  0x003B8F40u     /* test_telemetry.c G_WINNER: the winner's fighter slot */
@@ -1763,6 +1764,7 @@ static void on_packet(const uint8_t *b, int len)
                 if (N.state == NETPLAY_CONNECTING) {
                     InterlockedExchange(&N.state, NETPLAY_LOBBY);
                     set_status("In the lobby of %s.", N.server_text);
+                    pc_input_online_ports();    /* a room of four needs a controller in every port */
                     netplay_lobby_list(0xFF);
                     /* what this client supports; the network thread repeats it until the relay
                      * answers (an older relay never does: then no King of the Hill) */
@@ -3994,11 +3996,13 @@ void netplay_on_step(void)
                 }
                 fprintf(stderr, "[NETPLAY] gave up at step %u waiting for the entries up to %u (final %u, phase %u, "
                         "predicting %d, rollback %d); player %d has:", s, need, N.final_step, MEM32(G_MATCH_PHASE),
-                        N.predicting, N.rb_on, late);
+                        N.predicting, N.rb_on, late + 1);
+                /* entries of another match are an earlier match's leftovers in the ring, never used */
                 for (u = N.final_step + 1; u <= need + 2 && late >= 0; u++)
                     fprintf(stderr, " %u:%u/%08X", u, N.in_tag[late][u % RING], N.in_match[late][u % RING]);
-                fprintf(stderr, " (match %08X; STEPS packets from it %u, last step %u)\n", N.match,
-                        late >= 0 ? g_steps_rx[late] : 0, late >= 0 ? g_steps_last[late] : 0);
+                fprintf(stderr, " (match %08X; STEPS packets from it %u this session, the latest for match %08X "
+                        "step %u)\n", N.match, late >= 0 ? g_steps_rx[late] : 0, late >= 0 ? g_steps_match[late] : 0,
+                        late >= 0 ? g_steps_last[late] : 0);
                 InterlockedExchange(&N.lockstep, 0);
                 set_status("A player stopped answering during the fight; continuing offline.");
                 if (late >= 0 && N.fighting_seen && need > (uint32_t)N.delay + 60) {
