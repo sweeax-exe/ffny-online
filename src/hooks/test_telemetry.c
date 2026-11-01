@@ -451,7 +451,8 @@ static void snapshot_point(void)
  * fighter but the winner gets zero health and the knockout state through the same routine, as
  * soon as both are standing free (state 1, so no grapple or throw holds the loser); after
  * KO_GRACE steps it does not wait for that any more. The winner is slot 0 unless named, and
- * "alt" alternates it per match (slot 0 wins the first, 1 the second, ...).
+ * "alt" alternates it per match (slot 0 wins the first, 1 the second, ...). In a Team match the
+ * winner's partner stands too, and "alt" alternates the sides (slot 0, then slot 2).
  *
  * Lockstep and rollback: it runs at the start of a step (sub_00087700), before the step's
  * checksum, and depends only on the step number, the match ordinal and the fighters' records,
@@ -492,7 +493,7 @@ static void ko_step(void)
     static int parsed;
     static LONG64 at;
     static int winner_arg;              /* >= 0 a slot, -1 alternate */
-    int slot, winner, losers = 0, ready = 1;
+    int slot, winner, losers = 0, ready = 1, team;
     if (!parsed) {
         const char *v = getenv("RECOMP_TEST_KO_STEP");
         parsed = 1;
@@ -507,11 +508,14 @@ static void ko_step(void)
                     winner_arg < 0 ? "alternating from slot " : "slot ", winner_arg < 0 ? 0 : winner_arg);
     }
     if (at <= 0 || s_step < at || MEM32(G_PHASE) != 1u) return;
-    winner = winner_arg >= 0 ? winner_arg : (int)((s_match - 1) % 2);
+    /* Team (the mode mask 0x3B907E is 2): the side of the winner stands, the other side (slots 0 and 1
+     * against 2 and 3) is knocked out, and "alt" alternates the sides (slot 0's, then slot 2's) */
+    team = MEM8(0x003B907Eu) == 2u;
+    winner = winner_arg >= 0 ? winner_arg : (int)((s_match - 1) % 2) * (team ? 2 : 1);
     if (winner < 0 || winner >= SLOTS || !active(winner)) return;
     for (slot = 0; slot < SLOTS; slot++) {
         uint32_t r = record(slot);
-        if (!active(slot) || slot == winner) continue;
+        if (!active(slot) || slot == winner || (team && slot / 2 == winner / 2)) continue;
         if (MEM32(r + F_STATE) == STATE_KO || (MEM16(r + F_DEFEAT) & 1u)) continue;
         losers |= 1 << slot;
         if (!ko_free(MEM32(r + F_STATE))) ready = 0;
