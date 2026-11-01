@@ -832,6 +832,7 @@ struct Gallery {
     NetVersus versus = {};          // the versus pages' sample (count 0: the plain MATCH FOUND)
     int page_ms = 0;                // how long the page has been up
     unsigned cp_slots = 0;          // created fighters: the sample's room slots that have one (0: none offered)
+    int cp_pick = 0;                // the sample player's picked created fighter (cp_cards index)
 } G;
 
 bool gallery_on()
@@ -852,18 +853,49 @@ void lobby_room(NetRoom *r)
     else netplay_lobby_room(r);
 }
 // Created fighters: whether this player may pick theirs, and a room member's (name and styles). The
-// gallery's samples use this PC's own created fighter when it has one (RECOMP_CP_RECORD).
+// gallery's samples use this PC's own created fighters when it has some (RECOMP_CP_RECORD).
 bool cp_available() { return gallery_on() ? (G.cp_slots & 1u) != 0 : netplay_created_available() != 0; }
+
+// This player's created fighters, one card each: every Story save with one, newest first; the
+// gallery shows three samples when this PC has none.
+struct CpCard { std::string name, style, saved; };
+const std::vector<CpCard> &cp_cards()
+{
+    static std::vector<CpCard> cards;
+    static CpLocal local[CP_LOCAL_MAX];
+    int n = std::min(cp_local_list(local, CP_LOCAL_MAX), (int)CP_LOCAL_MAX);
+    cards.clear();
+    for (int i = 0; i < n; i++) cards.push_back({ local[i].name, cp_record_style(local[i].rec), local[i].saved });
+    if (gallery_on() && cards.empty()) {
+        cards.push_back({ "AW5J3555", "KICKBOXING / STREETFIGHTING", "2026-10-28 14:30" });
+        cards.push_back({ "CPTWO", "WRESTLING / SUBMISSIONS", "2026-10-27 21:05" });
+        cards.push_back({ "NIGHTOWL", "MARTIAL ARTS / KICKBOXING", "2026-10-20 18:12" });
+    }
+    return cards;
+}
+// The card the player picked (remembered across sessions; the newest until one is picked).
+int cp_picked()
+{
+    if (gallery_on()) return std::max(0, std::min(G.cp_pick, (int)cp_cards().size() - 1));
+    return std::max(0, cp_local_pick());
+}
+void cp_choose(int index)
+{
+    if (gallery_on()) G.cp_pick = index;
+    else netplay_created_pick(index);
+}
+
 bool cp_slot(int slot, char *name, int size, const char **style)
 {
     if (!gallery_on()) return netplay_slot_created(slot, name, size, style) != 0;
     if (slot < 0 || slot >= 32 || !(G.cp_slots & (1u << slot))) return false;
-    static uint8_t rec[CP_REC_LEN];
-    static int have = -1;
-    if (have < 0) have = cp_local_record(rec);
-    if (slot == 0 && have) {
-        cp_record_name(rec, name, size);
-        *style = cp_record_style(rec);
+    static std::string st;
+    const auto &cards = cp_cards();
+    if (slot == 0 && !cards.empty()) {
+        const CpCard &c = cards[cp_picked()];
+        snprintf(name, (size_t)size, "%s", c.name.c_str());
+        st = c.style;
+        *style = st.c_str();
     } else {
         snprintf(name, (size_t)size, "%s", slot == 0 ? "AW5J3555" : "CPTWO");
         *style = slot == 0 ? "KICKBOXING / STREETFIGHTING" : "WRESTLING / SUBMISSIONS";
@@ -2051,26 +2083,46 @@ void draw_settings(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom
 
 // ---- fighter choice: the game's portrait grid ----
 
-// The grid's fighters: the roster, with this player's created fighter first when the relay plays
-// it here (not in ranked play, not in King of the Hill rooms).
+// The grid's fighters: the roster, with this player's created fighters first (one card each,
+// newest first) when the relay plays them here (not in ranked play, not in King of the Hill rooms).
+// g_grid_cp: per grid entry, the created fighter's cp_cards index, -1 for a roster fighter.
+std::vector<int> g_grid_cp;
 const std::vector<OnlineFighter> &grid_fighters()
 {
     static std::vector<OnlineFighter> list;
-    static std::string style;
+    static std::vector<std::string> styles;
     list = roster();
+    g_grid_cp.assign(list.size(), -1);
     NetRoom r;
     lobby_room(&r);
     if (cp_available() && !S.ranked_pick && !(r.in_room && NETPLAY_IS_KOTH(r.settings.mode))) {
-        OnlineFighter cp{};
-        const char *st = "";
-        cp.id = NETPLAY_CREATED_FIGHTER;
-        cp_slot(r.in_room ? r.you : 0, cp.name, sizeof(cp.name), &st);
-        if (!cp.name[0]) snprintf(cp.name, sizeof(cp.name), "Your fighter");
-        style = std::string("YOUR FIGHTER") + (st && st[0] ? std::string(": ") + st : std::string());
-        cp.style = style.c_str();
-        list.insert(list.begin(), cp);
+        const std::vector<CpCard> cards = cp_cards();
+        styles.assign(cards.size(), std::string());
+        for (size_t i = 0; i < cards.size(); i++)
+            styles[i] = "YOUR FIGHTER" + (cards[i].style.empty() ? std::string() : ": " + cards[i].style);
+        for (size_t i = cards.size(); i-- > 0;) {
+            OnlineFighter cp{};
+            cp.id = NETPLAY_CREATED_FIGHTER;
+            snprintf(cp.name, sizeof(cp.name), "%s", cards[i].name.empty() ? "Your fighter" : cards[i].name.c_str());
+            cp.style = styles[i].c_str();
+            list.insert(list.begin(), cp);
+            g_grid_cp.insert(g_grid_cp.begin(), (int)i);
+        }
     }
     return list;
+}
+
+// Where `fighter` sits in the grid list (a created fighter: the picked card); 0 if not there.
+int grid_pos(const std::vector<OnlineFighter> &list, int fighter)
+{
+    int pick = fighter == NETPLAY_CREATED_FIGHTER ? cp_picked() : -1, at = 0;
+    bool seen = false;
+    for (size_t i = 0; i < list.size(); i++) {
+        if (list[i].id != fighter) continue;
+        if (pick < 0 || (i < g_grid_cp.size() && g_grid_cp[i] == pick)) return (int)i;
+        if (!seen) { at = (int)i; seen = true; }
+    }
+    return at;
 }
 
 void draw_fighters(ImDrawList *dl, const Frame &f, const Pad &pad, bool *chosen, int *fighter)
@@ -2093,10 +2145,16 @@ void draw_fighters(ImDrawList *dl, const Frame &f, const Pad &pad, bool *chosen,
 
     page_title(dl, f, "CHOOSE FIGHTER");
     const OnlineFighter &cur = list[S.fighter_sel];
+    int cur_cp = S.fighter_sel < (int)g_grid_cp.size() ? g_grid_cp[S.fighter_sel] : -1;
     // the chosen fighter, large, with name and style
     glass(dl, f, 36, 74, 180, 308);
     if (!portrait(dl, f, cur.id, 46, 84, 160, 240))
         text(dl, f, g_title, 26, 126, 180, with_alpha(CREAM, 0.6f), cur.name, CENTER, 1.4f, 150);
+    if (cur_cp >= 0) {      // a created fighter: which Story save it comes from
+        const auto &cards = cp_cards();
+        if (cur_cp < (int)cards.size() && !cards[cur_cp].saved.empty())
+            text(dl, f, g_title, 10, 126, 304, with_alpha(CREAM, 0.8f), ("SAVED " + cards[cur_cp].saved).c_str(), CENTER, 1.0f);
+    }
     text(dl, f, g_hand, 22, 126, 330, ORANGE, cur.name, CENTER, 1.2f);
     text(dl, f, g_title, 13, 126, 356, WHITE, cur.style, CENTER, 0, 170);
     // the grid
@@ -2112,9 +2170,12 @@ void draw_fighters(ImDrawList *dl, const Frame &f, const Pad &pad, bool *chosen,
             rect(dl, f, x, y, cw, ch, IM_COL32(0, 0, 0, 150), 3);
             if (!portrait(dl, f, list[i].id, x + 1, y + 1, cw - 2, ch - 2, sel ? IM_COL32_WHITE : IM_COL32(150, 150, 150, 255)))
                 text(dl, f, g_body, 9, x + 3, y + 30, GREY, list[i].name, LEFT, 0, cw - 4);
-            if (list[i].id == NETPLAY_CREATED_FIGHTER) {
+            if (list[i].id == NETPLAY_CREATED_FIGHTER) {     // the fighter's name on an orange band
+                float tw = text_width(f, g_title, 9, list[i].name);
+                float size = tw > cw - 6 ? 9 * (cw - 6) / tw : 9;
                 rect(dl, f, x + 1, y + ch - 15, cw - 2, 14, with_alpha(ORANGE, sel ? 0.95f : 0.6f));
-                text(dl, f, g_title, 9, x + cw / 2, y + ch - 14, WHITE, "YOURS", CENTER, 0.6f);
+                text(dl, f, g_title, size, x + cw / 2, y + ch - 14 + (9 - size) * 0.5f, WHITE, list[i].name, CENTER, 0.6f);
+                text(dl, f, g_title, 8, x + cw / 2, y + 3, with_alpha(ORANGE, sel ? 1.0f : 0.7f), "YOURS", CENTER, 0.6f);
             }
             if (sel) selector(dl, f, x, y, cw, ch);
             if (mouse_click(f, x, y, cw, ch)) const_cast<Pad &>(pad).a = true;
@@ -2122,7 +2183,11 @@ void draw_fighters(ImDrawList *dl, const Frame &f, const Pad &pad, bool *chosen,
     char page[32];
     snprintf(page, sizeof(page), "%d / %d", S.fighter_sel + 1, n);
     text(dl, f, g_title, 12, gx + cols * (cw + 4) - 4, gy + rows * (ch + 6), GREY, page, RIGHT, 0.8f);
-    if (pad.a) { *chosen = true; *fighter = cur.id; }
+    if (pad.a) {
+        if (cur_cp >= 0) cp_choose(cur_cp);     // which created fighter: remembered, and sent to the relay
+        *chosen = true;
+        *fighter = cur.id;
+    }
     if (pad.b) S.page = HUB;
 }
 
@@ -2749,8 +2814,7 @@ void draw_room(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
     if (pad.a) netplay_lobby_ready(ready ? 0 : 1, fighter);
     if (pad.x && !ready) {
         S.page = FIGHTERS;
-        const auto &list = grid_fighters();
-        for (size_t i = 0; i < list.size(); i++) if (list[i].id == fighter) S.fighter_sel = (int)i;
+        S.fighter_sel = grid_pos(grid_fighters(), fighter);
     }
     if (pad.y && host && !ready) {
         S.settings = r.settings;
@@ -3189,7 +3253,9 @@ void gallery_step()
                                          // the versus screen while a match loads
                                          "versus-1v1", "versus-3way", "versus-ffa", "versus-koth",
                                          // build 37: created fighters
-                                         "grid-created", "room-created", "versus-created" };
+                                         "grid-created", "room-created", "versus-created",
+                                         // several created fighters, the second one picked
+                                         "grid-created-pick" };
     const int count = (int)(sizeof(pages) / sizeof(pages[0]));
     static unsigned long long start;
     static int ms;
@@ -3288,6 +3354,7 @@ void gallery_step()
         S.last_quick = 0;
     }
     G.cp_slots = 0;
+    G.cp_pick = 0;
     std::string p = page;
     if (p == "connecting") { G.state = NETPLAY_CONNECTING; G.in_lobby = false; }
     else if (p == "offline") { G.state = NETPLAY_FAILED; G.in_lobby = false; }
@@ -3325,6 +3392,13 @@ void gallery_step()
         G.cp_slots = 1;
         G.room = sample_room(0, 2, 2);
         S.page = FIGHTERS; S.fighter_sel = 0; S.fighter_top = 0;
+    }
+    else if (p == "grid-created-pick") {    // three created fighters, the second one picked and remembered
+        G.cp_slots = 1;
+        G.cp_pick = 1;
+        G.room = sample_room(0, 2, 2);
+        S.page = FIGHTERS; S.fighter_top = 0;
+        S.fighter_sel = grid_pos(grid_fighters(), NETPLAY_CREATED_FIGHTER);
     }
     else if (p == "room-created") {         // One on One: Ann with her created fighter, Ben with his
         G.cp_slots = 3;
