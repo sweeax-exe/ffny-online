@@ -178,8 +178,8 @@ exists in its updates folder (read at every request; `-created` forces it on for
 `rollback-allowed`. Off: no upload is kept, 99 plays Doc, the clients offer no created fighter.
 
 **Validation and clamp** (`cp_record_sanitize`, `src/hooks/created_fighter.c`, identical on every
-PC, the sender included): sealed (version, CRC); name 1..8 characters, non-printable ones become
-`?`; archetype 86..141, created flag 1, first style 0..4 (else the record is refused: Doc); other
+PC, the sender included): sealed (version, CRC); name 1..16 characters (8 before build 39), the
+rest of the field zero, non-printable ones become `?`; archetype 86..141, created flag 1, first style 0..4 (else the record is refused: Doc); other
 styles 0..4 or 0xFF; voice 1..6 (else 1); **base stats at most 50** [V: the gym's cost table at
 0x2DBB70 has ten tiers of five, `sub_0004EB60`], **bonus stats 0..38** [I: with base 50 that is
 the Battle attribute screen's 100 %, which shows `stat * 3.333`, `sub_0004A3D0`]; move keys and
@@ -218,6 +218,25 @@ time), while the relay keeps a record of the player; the cursor opens on the pic
 cards show a created fighter's name and styles; gallery pages `grid-created` (three sample
 fighters when the PC has none), `grid-created-pick` (the second picked) and `room-created`. `netplay_slot_created(slot, ...)` gives the versus
 screen the same name and styles.
+
+**Online names** (build 39, owner's request, 2026-11-01): the user ID is at most 8 characters (the
+game's own entry), so a player may give each created fighter an online name of up to 16 printable
+ASCII characters (as long as the longest stock name, "Ghostface Killah"). Only the record carries
+it, in its 0x20-byte name field; the Story save keeps its user ID (nothing writes the record back:
+the injected copy lives in a spare profile slot whose pad is unlinked before the reward step, 4.3).
+Set on the fighter grid: Y on a created fighter's card opens ONLINE NAME, sixteen boxes typed on
+the keyboard or stepped with up and down (letters, digits, space and `. - _ ' ! ? &`; typing takes
+any printable ASCII), X clears (the user ID again), A saves. Kept per save in the string setting
+`online.created_names` (`<save key>=<name>` entries separated by `;`, `% ; =` as `%25 %3B %3D`;
+`RECOMP_CP_NAMES` overrides it for tests); `cp_local_list` puts the name into each entry's record
+(`CpLocal.name` the online name, `.user_id` the save's), so the upload, the cards and the injection
+all use it; renaming the picked fighter uploads the new record at once. Every PC cuts a longer
+name to 16 (`CP_NAME_MAX`), and the relay refuses one longer than 16 (`MaxRecordName`), so no PC
+ever reads a different name. A relay older than build 39 refuses names of 9..16 characters (the
+upload is acknowledged empty and the player plays without a created fighter), so the relays are
+updated before the build goes out. Gallery pages `name-created`, `grid-created-long`,
+`room-created-long`, `versus-created-long` show the entry and 16-character names
+(`WWWWWWWWWWWWWWWW`, the widest, and "Brooklyn Bruiser").
 
 **Two more things the tests found** (both fixed):
 

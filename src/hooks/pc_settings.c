@@ -79,6 +79,9 @@ static RecompSetting g_display_settings[] = {
     { "online", "created", RECOMP_SETTING_STRING, 0, 0, 0, NULL, NULL, 0,
       "Which of your Story-mode fighters you play online when you pick a created fighter: its save, as "
       "user ID folder/name; chosen in the room. Empty: the newest.", "" },
+    { "online", "created_names", RECOMP_SETTING_STRING, 0, 0, 0, NULL, "RECOMP_CP_NAMES", 0,
+      "The names your Story-mode fighters use online (up to 16 characters; the save keeps its user ID), per save "
+      "as save=name separated by ';' (% ; = written as %25 %3B %3D); set on the fighter card in the room.", "" },
     { "online", "voice", RECOMP_SETTING_ENUM, 1, 0, 0, k_voice, NULL, 0,
       "Voice chat with the players in your online room, in the room and in the fight: off, push_to_talk (hold the "
       "key below) or open (sends while you speak; use a headset)." },
@@ -470,6 +473,19 @@ void cp_pick_setting_get(char *out, int size)
 void cp_pick_setting_set(const char *key)
 {
     if (recomp_settings_set_text("online", "created", key) > 0) pc_settings_save();
+}
+
+/* created_fighter.h: the online names of the created fighters, by save */
+void cp_names_setting_get(char *out, int size)
+{
+    if (size <= 0) return;
+    out[0] = 0;
+    recomp_settings_get_text("online", "created_names", out, (size_t)size, "");
+}
+
+void cp_names_setting_set(const char *text)
+{
+    if (recomp_settings_set_text("online", "created_names", text) > 0) pc_settings_save();
 }
 
 void pc_display_set(const char *key, int value)

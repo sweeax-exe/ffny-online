@@ -258,7 +258,7 @@ typedef struct NetVersus {
     int ms;                     /* since the START */
     int loaded;                 /* this PC's fight is set up; the others may still be loading */
     float alpha;                /* 1, falling to 0 over the fade */
-    char cp_name[4][16];        /* a created fighter (fighter 99): its name; "" otherwise */
+    char cp_name[4][17];        /* a created fighter (fighter 99): its name (up to 16, CP_NAME_MAX); "" otherwise */
     char cp_style[4][64];       /* and its fighting styles ("KICKBOXING / STREETFIGHTING") */
 } NetVersus;
 int netplay_versus(NetVersus *out);

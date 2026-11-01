@@ -292,7 +292,8 @@ types from 0x27, dropped silently by older relays.
   tests). `STATUS` does not report it.
 - `FIGHTER` is answered with `RECORD` slot 0xFE: the record the relay keeps (empty when the switch is
   off, the client did not announce bit 3, or the record is malformed: wrong size or version, bad
-  CRC, a name that is not 1..8 printable ASCII characters, an archetype outside 86..141, no first
+  CRC, a name that is not 1..16 printable ASCII characters (8 before build 39: the user ID; since
+  build 39 the player's online name for the fighter), an archetype outside 86..141, no first
   style, no created flag). A kept record goes to the other members of the client's room as
   `RECORD`; a client joining a room gets every member's record and the members get its own.
   Clearing a record while ready with it in a lobby-phase room makes the fighter Doc (55).
@@ -305,8 +306,8 @@ types from 0x27, dropped silently by older relays.
   `START`; a client that lacks one asks with `RECGET` and sets the match up only once it has it
   (after 10 s it leaves the match).
 - The relay checks only the record's shape. Every client checks and clamps the record the same way
-  before the game sees it (`cp_record_sanitize`, `src/hooks/created_fighter.c`): name cut to
-  printable ASCII, voice 1..6, styles 0..4, base stats at most 50, bonus stats 0..38, move keys and
+  before the game sees it (`cp_record_sanitize`, `src/hooks/created_fighter.c`): name cut to 16
+  printable ASCII characters, voice 1..6, styles 0..4, base stats at most 50, bonus stats 0..38, move keys and
   recipe parts that the game's database has (others become the defaults). The sender plays the
   checked copy too.
 

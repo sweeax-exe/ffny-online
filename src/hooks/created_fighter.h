@@ -11,7 +11,8 @@ extern "C" {
 
 #define CP_FIGHTER_ID   99      /* ControllerSetup fighter byte for "this pad's created fighter" */
 #define CP_NAME_BYTES   0x20    /* name field at profile+0xC */
-#define CP_NAME_MAX     8       /* what the game's user ID screen allows */
+#define CP_NAME_MAX     16      /* a record's name: the online name (16, as "Ghostface Killah") or the user ID */
+#define CP_USER_ID_MAX  8       /* what the game's user ID screen allows */
 #define CP_PAYLOAD      0x127   /* name, profile +0xFC..+0x143, flag, recipe, options */
 #define CP_REC_LEN      (1 + CP_PAYLOAD + 4)    /* version, payload, CRC-32 (netplay/relay/protocol_created.go) */
 #define CP_REC_VERSION  1
@@ -44,8 +45,10 @@ void cp_record_stats(const uint8_t rec[CP_REC_LEN], int out[6]);
  * once, then again after created_fighter_reload(). */
 #define CP_LOCAL_MAX    8
 typedef struct CpLocal {
-    uint8_t rec[CP_REC_LEN];        /* the checked record */
-    char name[CP_NAME_MAX + 1];     /* the fighter's name (the user ID) */
+    uint8_t rec[CP_REC_LEN];        /* the checked record, carrying the online name when one is set */
+    char name[CP_NAME_MAX + 1];     /* the name it plays under online: the online name, else the user ID */
+    char user_id[CP_NAME_MAX + 1];  /* the user ID (the save's own name, never changed) */
+    char online[CP_NAME_MAX + 1];   /* the online name set for this save; "" none */
     char key[260];                  /* which save: "<user ID folder>/<file>" (tests: the path) */
     char saved[20];                 /* the save's time, "2026-10-28 14:30" local; "" for tests */
 } CpLocal;
@@ -64,6 +67,22 @@ void created_fighter_reload(void);
  * the settings file (pc_settings.c). */
 void cp_pick_setting_get(char *out, int size);
 void cp_pick_setting_set(const char *key);
+
+/* Online names (owner, 2026-11-01): a created fighter may play online under a longer name than its
+ * 8-character user ID, at most CP_NAME_MAX printable ASCII characters. Only the record carries it;
+ * the Story save keeps its user ID. Kept per save in the setting online.created_names as
+ * "<save key>=<name>" entries separated by ';' ('%', ';' and '=' written as %25, %3B, %3D);
+ * RECOMP_CP_NAMES overrides it for tests. */
+#define CP_NAMES_TEXT_MAX 1024  /* the setting's room (RECOMP_SETTING_TEXT_MAX), terminator included */
+/* The name as a record takes it: printable ASCII only (other bytes dropped), blanks trimmed at both
+ * ends, cut to CP_NAME_MAX. Returns its length (0: none, the user ID is used). */
+int cp_name_clean(const char *in, char *out, int size);
+/* Sets (or with "" clears) the online name of entry `index` of the list: remembered in the setting
+ * and put into the entry's record. 0 if there is no such entry or the setting is full. */
+int cp_local_set_name(int index, const char *name);
+/* The setting's text, read and written through the settings file (pc_settings.c). */
+void cp_names_setting_get(char *out, int size);
+void cp_names_setting_set(const char *text);
 
 /* ---- in a match (game thread) ---- */
 
