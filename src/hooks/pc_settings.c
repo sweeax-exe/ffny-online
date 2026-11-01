@@ -33,6 +33,7 @@
 #include "pc_input.h"
 #include "pc_ui.h"
 #include "netplay.h"
+#include "created_fighter.h"
 #include "pc_debug.h"
 #include "patches/widescreen.h"
 #include "patches/picture.h"
@@ -75,6 +76,9 @@ static RecompSetting g_display_settings[] = {
       "Your name, shown to the other player.", "Player" },
     { "online", "fighter", RECOMP_SETTING_INT, 55, 0, 255, NULL, NULL, 0,
       "The fighter you pick in online rooms (its Battle-mode ID); chosen in the room." },
+    { "online", "created", RECOMP_SETTING_STRING, 0, 0, 0, NULL, NULL, 0,
+      "Which of your Story-mode fighters you play online when you pick a created fighter: its save, as "
+      "user ID folder/name; chosen in the room. Empty: the newest.", "" },
     { "online", "voice", RECOMP_SETTING_ENUM, 1, 0, 0, k_voice, NULL, 0,
       "Voice chat with the players in your online room, in the room and in the fight: off, push_to_talk (hold the "
       "key below) or open (sends while you speak; use a headset)." },
@@ -453,6 +457,19 @@ void pc_settings_save(void)
 {
     if (g_path[0] && recomp_settings_save(g_path))
         fprintf(stderr, "[SETTINGS] could not write %s\n", g_path);
+}
+
+/* created_fighter.h: the created fighter picked for online play, by its save */
+void cp_pick_setting_get(char *out, int size)
+{
+    if (size <= 0) return;
+    out[0] = 0;
+    recomp_settings_get_text("online", "created", out, (size_t)size, "");
+}
+
+void cp_pick_setting_set(const char *key)
+{
+    if (recomp_settings_set_text("online", "created", key) > 0) pc_settings_save();
 }
 
 void pc_display_set(const char *key, int value)
