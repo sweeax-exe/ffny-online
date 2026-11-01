@@ -188,10 +188,20 @@ djv2.sod, a row below its record count, colour below 16 [I]), else the fresh-fig
 0x06000033 / the default part (-1); the twelve body/face values at most 0xFF. The relay checks only
 the shape (size, version, CRC, name, archetype, first style, flag).
 
-**The player's own record** (`cp_local_record`): the newest user ID save in
+**The player's own records** (`cp_local_list`, `cp_local_record`): every user ID save in
 `<data>/save/UserData/45410049/*/` (0x5990 bytes: a 0x80-byte header, then the profile) whose
-created flag is set; read at every hub session, so a fighter made meanwhile shows up.
-`RECOMP_CP_RECORD=<profile dump or save>` replaces it for tests.
+created flag is set and whose record passes the check, newest first, at most 8 (`CP_LOCAL_MAX`),
+each with its name, its save (`<user ID folder>/<file>`) and the save's time; read at every hub
+session, so a fighter made meanwhile shows up. The record uploaded is the player's pick: the save
+the string setting `online.created` names, the newest when it is empty or that save is gone. A
+pick in the fighter select (`netplay_created_pick`) writes the setting and uploads the new record
+with `FIGHTER` in place of the one the relay keeps (still one record per player; the relay is
+unchanged). Until the relay acknowledges it, the cards stay available and the record it kept
+before is held, so a `START` that still names the old CRC plays the old record on every PC.
+Tests: `RECOMP_CP_RECORD=<dump or save>[;<dump or save>...]` replaces the list (in that order),
+`RECOMP_CP_PICK=<index>` the pick, `RECOMP_TEST_CP_REPICK=<index>` picks another once the relay
+keeps the first (the test autostart, as the fighter select does); `dj.py scenario online
+--cp-records "a;b;c,d" --cp-pick 2,`.
 
 **Injection** (`created_fighter_inject`, from the automatch sequence for each slot whose START
 fighter is 99): the record into the highest profile slot without a loaded user ID, the pad linked
@@ -200,11 +210,13 @@ to it, the pad's holder marked unbuilt, ControllerSetup with 99. The pads are un
 (the reward save of section 4.3) and linked again on `Game.Rematch()`. A CPU fill never plays 99
 (it draws from the roster, which has no 99).
 
-**UI** (`online_screen.cpp`): the fighter grid shows "your fighter" first (a silhouette card with
-an orange YOURS ribbon; the large card names the fighter and its styles from the archetype's
-fighter.xml letters: B streetfighting, K kickboxing, S submissions, W wrestling, M martial arts
-[I]) while the relay keeps the record; room cards show a created fighter's name and styles; gallery
-pages `grid-created` and `room-created`. `netplay_slot_created(slot, ...)` gives the versus
+**UI** (`online_screen.cpp`): the fighter grid shows the player's created fighters first, one
+silhouette card each, newest first (the fighter's name on an orange band, a small YOURS tag; the
+large card names the fighter, its styles from the archetype's fighter.xml letters: B
+streetfighting, K kickboxing, S submissions, W wrestling, M martial arts [I], and the save's
+time), while the relay keeps a record of the player; the cursor opens on the picked one. Room
+cards show a created fighter's name and styles; gallery pages `grid-created` (three sample
+fighters when the PC has none), `grid-created-pick` (the second picked) and `room-created`. `netplay_slot_created(slot, ...)` gives the versus
 screen the same name and styles.
 
 **Two more things the tests found** (both fixed):

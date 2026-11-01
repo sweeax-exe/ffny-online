@@ -2843,6 +2843,27 @@ static DWORD WINAPI autostart_thread(LPVOID unused)
         for (i = 0; i < 100 && fighter == NETPLAY_CREATED_FIGHTER && !netplay_created_available(); i++) Sleep(100);
         if (fighter == NETPLAY_CREATED_FIGHTER)
             fprintf(stderr, "[NETPLAY] tests: the created fighter is %savailable\n", netplay_created_available() ? "" : "NOT ");
+        /* RECOMP_TEST_CP_REPICK=<index>: once the relay keeps the first pick, pick another created
+         * fighter as the fighter select does, and wait until the relay keeps that one */
+        {
+            const char *repick = getenv("RECOMP_TEST_CP_REPICK");
+            if (repick && *repick && fighter == NETPLAY_CREATED_FIGHTER && netplay_created_available()) {
+                uint32_t want = 0, kept = 0;
+                int picked = netplay_created_pick(atoi(repick));
+                EnterCriticalSection(&g_cs);
+                want = cp_record_crc(N.cp_mine);
+                LeaveCriticalSection(&g_cs);
+                for (i = 0; i < 100 && picked; i++) {
+                    EnterCriticalSection(&g_cs);
+                    kept = N.cp_acked;
+                    LeaveCriticalSection(&g_cs);
+                    if (kept == want) break;
+                    Sleep(100);
+                }
+                fprintf(stderr, "[NETPLAY] tests: picked created fighter %s: record %08X, the relay keeps %08X\n",
+                        repick, want, kept);
+            }
+        }
         if (listed && *listed) {
             /* RECOMP_TEST_JOIN_LISTED=<s>: no quick match; join the first open room the room list shows
              * (with RECOMP_NETPLAY_SERVER=all the other relays' rooms too, moving there to join), as a
