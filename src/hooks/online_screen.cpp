@@ -285,6 +285,14 @@ float text_width(const Frame &f, ImFont *font, float size, const char *s)
     return font_or_default(font)->CalcTextSizeA(size * f.s(), FLT_MAX, 0, s).x / f.sx;
 }
 
+// The size at which `s` fits into `w` (never larger than `size`): a created fighter's online name of
+// 16 characters is wider than the 8 of a user ID.
+float fit_size(const Frame &f, ImFont *font, float size, const char *s, float w)
+{
+    float tw = text_width(f, font, size, s);
+    return tw > w && tw > 0 ? size * w / tw : size;
+}
+
 bool image(ImDrawList *dl, const Frame &f, const Tex &t, float x, float y, float w, float h,
            ImU32 tint = IM_COL32_WHITE, ImVec2 uv0 = ImVec2(0, 0), ImVec2 uv1 = ImVec2(1, 1))
 {
@@ -769,7 +777,7 @@ std::string upper(const char *s)
 
 // ---- the screens --------------------------------------------------------------------------------
 
-enum Page { HUB, ROOMS, SETTINGS, FIGHTERS, CODE, STATS, PLAYERS, RANKED, VOICE, SERVERS };
+enum Page { HUB, ROOMS, SETTINGS, FIGHTERS, CODE, STATS, PLAYERS, RANKED, VOICE, SERVERS, NAME };
 
 struct State {
     Page page = HUB;
@@ -786,6 +794,10 @@ struct State {
     unsigned room_version = 0;
     char code[7] = "AAAAAA";
     int code_pos = 0;
+    // NAME: the online name of a created fighter (cp_cards index name_cp), edited in name[]
+    char name[CP_NAME_MAX + 1] = "";
+    int name_pos = 0, name_cp = -1;
+    int fighters_cp = -1;           // FIGHTERS: the selected card's cp_cards index, -1 a roster fighter
     uint32_t watch_hidden = 0;      // King of the Hill: the fight whose watching screen B closed
     unsigned long long give_up_at = 0, lb_since = 0;    // King of the Hill: LB gave up the spot; LB held since
     bool lb_long_done = false;      // the long LB press has acted
@@ -833,6 +845,8 @@ struct Gallery {
     int page_ms = 0;                // how long the page has been up
     unsigned cp_slots = 0;          // created fighters: the sample's room slots that have one (0: none offered)
     int cp_pick = 0;                // the sample player's picked created fighter (cp_cards index)
+    bool cp_long = false;           // the samples use 16-character online names (the "-long" pages)
+    std::string cp_online[3];       // the sample cards' online names ("" the user ID; NAME saves here)
 } G;
 
 bool gallery_on()
@@ -858,18 +872,24 @@ bool cp_available() { return gallery_on() ? (G.cp_slots & 1u) != 0 : netplay_cre
 
 // This player's created fighters, one card each: every Story save with one, newest first; the
 // gallery shows three samples when this PC has none.
-struct CpCard { std::string name, style, saved; };
+// name: what it plays under online (the online name, else the user ID); online: "" when none is set.
+struct CpCard { std::string name, style, saved, user_id, online; };
 const std::vector<CpCard> &cp_cards()
 {
     static std::vector<CpCard> cards;
     static CpLocal local[CP_LOCAL_MAX];
     int n = std::min(cp_local_list(local, CP_LOCAL_MAX), (int)CP_LOCAL_MAX);
     cards.clear();
-    for (int i = 0; i < n; i++) cards.push_back({ local[i].name, cp_record_style(local[i].rec), local[i].saved });
+    for (int i = 0; i < n; i++)
+        cards.push_back({ local[i].name, cp_record_style(local[i].rec), local[i].saved, local[i].user_id, local[i].online });
     if (gallery_on() && cards.empty()) {
-        cards.push_back({ "AW5J3555", "KICKBOXING / STREETFIGHTING", "2026-10-28 14:30" });
-        cards.push_back({ "CPTWO", "WRESTLING / SUBMISSIONS", "2026-10-27 21:05" });
-        cards.push_back({ "NIGHTOWL", "MARTIAL ARTS / KICKBOXING", "2026-10-20 18:12" });
+        static const char *const ids[] = { "AW5J3555", "CPTWO", "NIGHTOWL" };
+        static const char *const styles[] = { "KICKBOXING / STREETFIGHTING", "WRESTLING / SUBMISSIONS", "MARTIAL ARTS / KICKBOXING" };
+        static const char *const saved[] = { "2026-10-28 14:30", "2026-10-27 21:05", "2026-10-20 18:12" };
+        for (int i = 0; i < 3; i++) {
+            const std::string &on = G.cp_online[i];
+            cards.push_back({ on.empty() ? ids[i] : on, styles[i], saved[i], ids[i], on });
+        }
     }
     return cards;
 }
@@ -897,7 +917,7 @@ bool cp_slot(int slot, char *name, int size, const char **style)
         st = c.style;
         *style = st.c_str();
     } else {
-        snprintf(name, (size_t)size, "%s", slot == 0 ? "AW5J3555" : "CPTWO");
+        snprintf(name, (size_t)size, "%s", slot == 0 ? "AW5J3555" : G.cp_long ? "Brooklyn Bruiser" : "CPTWO");
         *style = slot == 0 ? "KICKBOXING / STREETFIGHTING" : "WRESTLING / SUBMISSIONS";
     }
     return true;
@@ -1027,8 +1047,8 @@ Pad read_pad()
         for (ImGuiKey k : keys) if (k != ImGuiKey_None && ImGui::IsKeyPressed(k, repeat)) return true;
         return false;
     };
-    // Letter keys follow the game's keyboard layout (WASD, K/L/J/I); on the code page they type.
-    bool letters = S.page != CODE;
+    // Letter keys follow the game's keyboard layout (WASD, K/L/J/I); on the code and name pages they type.
+    bool letters = S.page != CODE && S.page != NAME;
     auto key = [&](ImGuiKey k) { return letters ? k : ImGuiKey_None; };
     p.up = any({ ImGuiKey_GamepadDpadUp, ImGuiKey_GamepadLStickUp, ImGuiKey_UpArrow, key(ImGuiKey_W) }, true);
     p.down = any({ ImGuiKey_GamepadDpadDown, ImGuiKey_GamepadLStickDown, ImGuiKey_DownArrow, key(ImGuiKey_S) }, true);
@@ -1132,7 +1152,7 @@ static int saved_fighter()
 std::string fighter_label(int id, int slot = -1)
 {
     if (id != NETPLAY_CREATED_FIGHTER) return online_fighter_name(id);
-    char name[16];
+    char name[CP_NAME_MAX + 1];
     const char *style = "";
     NetRoom r;
     lobby_room(&r);
@@ -1975,6 +1995,98 @@ void draw_code(ImDrawList *dl, const Frame &f, const Pad &pad)
     if (pad.b) S.page = ROOMS;
 }
 
+// ---- a created fighter's online name: up to 16 characters, typed or picked with the pad ----
+//
+// Only the record the other players get carries it; the Story save keeps its user ID (8 characters,
+// the game's own limit). Empty: the user ID. Typing takes any printable ASCII character; up and
+// down step through these.
+const char NAME_CHARS[] = " ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.-_'!?&";
+
+void draw_name(ImDrawList *dl, const Frame &f, const Pad &pad)
+{
+    const auto &cards = cp_cards();
+    if (S.name_cp < 0 || S.name_cp >= (int)cards.size()) { S.page = FIGHTERS; return; }
+    const CpCard card = cards[S.name_cp];
+    const int nc = (int)sizeof(NAME_CHARS) - 1;
+    auto index = [&](char c) { const char *p = c ? strchr(NAME_CHARS, c) : nullptr; return p ? (int)(p - NAME_CHARS) : 0; };
+    auto len = [&]() { return (int)strlen(S.name); };
+    auto last = [&]() { return std::min(len(), CP_NAME_MAX - 1); };     // the cursor: on a character, or after the last
+    S.name_pos = std::max(0, std::min(S.name_pos, last()));
+    if (pad.left) S.name_pos = std::max(0, S.name_pos - 1);
+    if (pad.right) S.name_pos = std::min(last(), S.name_pos + 1);
+    if (pad.up || pad.down) {
+        if (S.name_pos == len()) S.name[S.name_pos + 1] = 0;     // a new character at the end
+        char &c = S.name[S.name_pos];
+        c = NAME_CHARS[(index(c) + (pad.up ? 1 : nc - 1)) % nc];
+    }
+    if (pad.x) { memset(S.name, 0, sizeof(S.name)); S.name_pos = 0; }
+    ImGuiIO &io = ImGui::GetIO();
+    for (int i = 0; i < io.InputQueueCharacters.Size; i++) {
+        ImWchar ch = io.InputQueueCharacters[i];
+        int n = len();
+        if (ch < 0x20 || ch > 0x7E) continue;
+        if (n < CP_NAME_MAX) {          // inserted at the cursor
+            memmove(S.name + S.name_pos + 1, S.name + S.name_pos, (size_t)(n - S.name_pos + 1));
+            S.name[S.name_pos] = (char)ch;
+        } else S.name[S.name_pos] = (char)ch;   // full: over the character at the cursor
+        S.name_pos = std::min(S.name_pos + 1, last());
+    }
+    if (!gallery_on() && ImGui::IsKeyPressed(ImGuiKey_Backspace, true) && S.name_pos > 0) {
+        int at = S.name_pos < len() && S.name_pos == CP_NAME_MAX - 1 && len() == CP_NAME_MAX ? S.name_pos : S.name_pos - 1;
+        memmove(S.name + at, S.name + at + 1, (size_t)(len() - at));
+        S.name_pos = at;
+    }
+    if (!gallery_on() && ImGui::IsKeyPressed(ImGuiKey_Delete, true) && S.name_pos < len())
+        memmove(S.name + S.name_pos, S.name + S.name_pos + 1, (size_t)(len() - S.name_pos));
+
+    char clean[CP_NAME_MAX + 1];
+    bool own = cp_name_clean(S.name, clean, (int)sizeof(clean)) > 0;
+    page_title(dl, f, "ONLINE NAME");
+    text(dl, f, g_hand, 15, 54, 70, ORANGE, "The name your fighter fights under online.", LEFT, 0.8f, 280);
+    door_panel(dl, f);
+    door_text(dl, f, nullptr, "ONLINE NAME", "UP TO 16 CHARACTERS",
+              "Type it, or pick each letter with up and down. Empty uses the user ID. Your Story save keeps its user ID.");
+    // the characters, one box each
+    glass(dl, f, 36, 104, 300, 214);
+    text(dl, f, g_title, 12, 48, 116, GREY, ("USER ID  " + card.user_id).c_str(), LEFT, 0.8f);
+    for (int i = 0; i < CP_NAME_MAX; i++) {
+        float x = 48 + i * 17.5f, y = 150, w = 15.5f, h = 34;
+        bool at = i == S.name_pos, filled = i < len();
+        glass(dl, f, x, y, w, h, 3, at ? IM_COL32(40, 30, 22, 255) : IM_COL32(10, 10, 13, 255), 0.7f);
+        if (filled) {
+            char c[2] = { S.name[i], 0 };
+            text(dl, f, g_title, 18, x + w / 2, y + 7, at ? CREAM : WHITE, c, CENTER, 0.8f);
+        }
+        if (at) {
+            selector(dl, f, x, y, w, h);
+            text(dl, f, g_title, 12, x + w / 2, y - 16, ORANGE, "^", CENTER);
+            text(dl, f, g_title, 12, x + w / 2, y + h + 1, ORANGE, "v", CENTER);
+        }
+        if (mouse_click(f, x, y, w, h)) S.name_pos = std::min(i, last());
+    }
+    char count[16];
+    snprintf(count, sizeof(count), "%d / %d", len(), CP_NAME_MAX);
+    text(dl, f, g_title, 11, 328, 202, GREY, count, RIGHT, 0.8f);
+    // how it shows: the card's orange name, and the user ID when none is set
+    const char *shown = own ? clean : card.user_id.c_str();
+    float size = fit_size(f, g_hand, 24, shown, 270);
+    text(dl, f, g_hand, size, 186, 236 + (24 - size) * 0.5f, own ? ORANGE : with_alpha(CREAM, 0.6f), shown, CENTER, 1.2f);
+    text(dl, f, g_title, 11, 186, 272, GREY, own ? "THE OTHER PLAYERS SEE THIS NAME" : "NO ONLINE NAME: THE USER ID IS USED",
+         CENTER, 0.8f);
+    if (pad.a) {
+        if (gallery_on()) G.cp_online[S.name_cp] = clean;
+        else if (cp_local_set_name(S.name_cp, clean)) {
+            if (S.name_cp == cp_picked()) cp_choose(S.name_cp);     // the relay gets the record with the new name
+        } else {
+            say("The name could not be saved.");
+            return;
+        }
+        say(own ? std::string("Online you are ") + clean + "." : "Online you use your user ID, " + card.user_id + ".");
+        S.page = FIGHTERS;
+    }
+    if (pad.b) S.page = FIGHTERS;
+}
+
 // ---- the venues of a room's pool, on the create page's glass panel ----
 
 // One venue: its card from the game's art (a tilted photo with the venue's logo under it, on a clear
@@ -2237,12 +2349,25 @@ void draw_fighters(ImDrawList *dl, const Frame &f, const Pad &pad, bool *chosen,
     glass(dl, f, 36, 74, 180, 308);
     if (!portrait(dl, f, cur.id, 46, 84, 160, 240))
         text(dl, f, g_title, 26, 126, 180, with_alpha(CREAM, 0.6f), cur.name, CENTER, 1.4f, 150);
-    if (cur_cp >= 0) {      // a created fighter: which Story save it comes from
+    S.fighters_cp = cur_cp;
+    if (cur_cp >= 0) {      // a created fighter: which Story save it comes from, and its user ID under an online name
         const auto &cards = cp_cards();
+        if (cur_cp < (int)cards.size() && !cards[cur_cp].online.empty())
+            text(dl, f, g_title, 10, 126, 290, with_alpha(CREAM, 0.8f), ("USER ID " + cards[cur_cp].user_id).c_str(), CENTER, 1.0f);
         if (cur_cp < (int)cards.size() && !cards[cur_cp].saved.empty())
             text(dl, f, g_title, 10, 126, 304, with_alpha(CREAM, 0.8f), ("SAVED " + cards[cur_cp].saved).c_str(), CENTER, 1.0f);
+        if (pad.y && cur_cp < (int)cards.size()) {     // Y: the online name of this card
+            S.name_cp = cur_cp;
+            snprintf(S.name, sizeof(S.name), "%s", cards[cur_cp].online.c_str());
+            S.name_pos = std::min((int)strlen(S.name), CP_NAME_MAX - 1);
+            S.page = NAME;
+            return;
+        }
     }
-    text(dl, f, g_hand, 22, 126, 330, ORANGE, cur.name, CENTER, 1.2f);
+    {
+        float size = fit_size(f, g_hand, 22, cur.name, 168);
+        text(dl, f, g_hand, size, 126, 330 + (22 - size) * 0.5f, ORANGE, cur.name, CENTER, 1.2f);
+    }
     text(dl, f, g_title, 13, 126, 356, WHITE, cur.style, CENTER, 0, 170);
     // the grid
     float gx = 228, gy = 82, cw = 52, ch = 76;
@@ -2847,7 +2972,7 @@ void draw_room(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
         text(dl, f, g_hand, 15, x + w / 2, y + 200, p.slot == r.you ? ORANGE : CREAM, p.name, CENTER, 1.0f);
         text(dl, f, g_title, 11, x + w / 2, y + 222, GREY, known ? fighter_label(shown, p.slot).c_str() : "choosing", CENTER, 0.6f);
         if (shown == NETPLAY_CREATED_FIGHTER) {     // a created fighter: its styles under the name
-            char cn[16];
+            char cn[CP_NAME_MAX + 1];
             const char *st = "";
             if (cp_slot(p.slot, cn, sizeof(cn), &st) && st[0])
                 text(dl, f, g_title, 9, x + w / 2, y + 236, with_alpha(ORANGE, 0.8f), st, CENTER, 0.5f, w - 10);
@@ -3325,7 +3450,7 @@ NetVersus sample_versus(const std::string &page)
         v.king = 1;
         v.streak = 3;
     }
-    if (page == "versus-created") {     // Ann with her created fighter against Ben's
+    if (page == "versus-created" || page == "versus-created-long") {     // Ann with her created fighter against Ben's
         for (int i = 0; i < 2; i++) {
             const char *st = "";
             v.fighter[i] = NETPLAY_CREATED_FIGHTER;
@@ -3394,7 +3519,9 @@ void gallery_step()
                                          // build 37: created fighters
                                          "grid-created", "room-created", "versus-created",
                                          // several created fighters, the second one picked
-                                         "grid-created-pick" };
+                                         "grid-created-pick",
+                                         // build 39: online names of 16 characters, and their entry
+                                         "name-created", "grid-created-long", "room-created-long", "versus-created-long" };
     const int count = (int)(sizeof(pages) / sizeof(pages[0]));
     static unsigned long long start;
     static int ms;
@@ -3496,6 +3623,10 @@ void gallery_step()
     G.cp_slots = 0;
     G.cp_pick = 0;
     std::string p = page;
+    // the "-long" pages: Ann's first card plays as the widest 16 characters, Ben's as "Brooklyn Bruiser"
+    G.cp_long = p.size() > 5 && p.compare(p.size() - 5, 5, "-long") == 0;
+    for (auto &o : G.cp_online) o.clear();
+    if (G.cp_long) G.cp_online[0] = "WWWWWWWWWWWWWWWW";
     if (p == "connecting") { G.state = NETPLAY_CONNECTING; G.in_lobby = false; }
     else if (p == "offline") { G.state = NETPLAY_FAILED; G.in_lobby = false; }
     else if (p == "hub") { S.page = HUB; S.hub_sel = 0; S.quick_mode = 0; }
@@ -3542,6 +3673,24 @@ void gallery_step()
         for (size_t i = 0; i < list.size(); i++) if (list[i].id == id) S.fighter_sel = (int)i;
     }
     else if (p == "room") { S.page = HUB; G.room = sample_room(2, 4, 3); }
+    else if (p == "name-created") {         // the online name of the first card, half typed
+        G.cp_slots = 1;
+        G.room = sample_room(0, 2, 2);
+        S.page = NAME; S.name_cp = 0;
+        snprintf(S.name, sizeof(S.name), "%s", "Brooklyn Bruis");
+        S.name_pos = (int)strlen(S.name);
+    }
+    else if (p == "grid-created-long") {    // the grid: the first card with a 16-character online name
+        G.cp_slots = 1;
+        G.room = sample_room(0, 2, 2);
+        S.page = FIGHTERS; S.fighter_sel = 0; S.fighter_top = 0;
+    }
+    else if (p == "room-created-long") {    // One on One: both created fighters with 16-character names
+        G.cp_slots = 3;
+        S.page = HUB;
+        G.room = sample_room(0, 2, 2);
+        G.room.players[0].fighter = G.room.players[1].fighter = NETPLAY_CREATED_FIGHTER;
+    }
     else if (p == "grid-created") {         // the grid with this player's created fighter first
         G.cp_slots = 1;
         G.room = sample_room(0, 2, 2);
@@ -3676,7 +3825,7 @@ LookId page_look(const NetRoom &room, enum NetplayState st)
     if (st == NETPLAY_CONNECTED && net_in_lobby()) return LOOK_MATCH;
     if (st == NETPLAY_CONNECTING || st == NETPLAY_FAILED || st == NETPLAY_OFF || !net_in_lobby()) return LOOK_OFFLINE;
     switch (S.page) {
-    case FIGHTERS: return LOOK_FIGHTERS;
+    case FIGHTERS: case NAME: return LOOK_FIGHTERS;
     case SETTINGS: case CODE: return LOOK_LIST;
     case SERVERS: if (!room.in_room) return LOOK_LIST; break;
     case PLAYERS: if (!room.in_room) return LOOK_PLAYERS; break;
@@ -3814,7 +3963,7 @@ bool draw(ImVec2 display)
         g_closed_for_match = !gallery_on() && (GetTickCount64() - S.start_seen >= 1800 || (have && v.loaded));
         return !g_closed_for_match;
     }
-    backdrop(dl, f, display, S.page == FIGHTERS || S.page == STATS || S.page == PLAYERS || room.in_room ||
+    backdrop(dl, f, display, S.page == FIGHTERS || S.page == NAME || S.page == STATS || S.page == PLAYERS || room.in_room ||
              st == NETPLAY_CONNECTED ||
              !g_menu_up.load(), page_look(room, st));
     S.start_seen = 0;
@@ -3941,7 +4090,18 @@ bool draw(ImVec2 display)
             S.ranked_pick = false;
         }
         if (S.page == HUB) S.ranked_pick = false;
-        if (S.page == FIGHTERS) { hint(dl, f, 54, 420, "a", "PICK"); hint(dl, f, 140, 420, "b", "BACK"); }
+        if (S.page == FIGHTERS) {
+            float hx = 54;
+            hx += hint(dl, f, hx, 420, "a", "PICK");
+            if (S.fighters_cp >= 0) hx += hint(dl, f, hx, 420, "y", "ONLINE NAME");     // a created fighter's card
+            hint(dl, f, hx, 420, "b", "BACK");
+        }
+    } else if (S.page == NAME) {
+        draw_name(dl, f, pad);
+        float hx = 54;
+        hx += hint(dl, f, hx, 392, "a", "SAVE");
+        hx += hint(dl, f, hx, 392, "x", "CLEAR");
+        hint(dl, f, hx, 392, "b", "BACK");
     } else if (S.page == SETTINGS) {
         draw_settings(dl, f, pad, room);
         float hx = 54;

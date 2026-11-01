@@ -238,7 +238,8 @@ int cp_record_sanitize(const uint8_t in[CP_REC_LEN], uint8_t out[CP_REC_LEN])
     if (!cp_record_sealed(in)) return 0;
     memcpy(out, in, CP_REC_LEN);
     p = out + 1;
-    /* name: printable ASCII, 1..8 characters, the rest zero */
+    /* name: printable ASCII, 1..CP_NAME_MAX (16) characters, the rest zero (the relay refuses a
+     * longer one: netplay/relay/protocol_created.go, ValidRecord) */
     for (n = 0; n < CP_NAME_MAX && p[R_NAME + n]; n++)
         if (p[R_NAME + n] < 0x20 || p[R_NAME + n] > 0x7E) p[R_NAME + n] = '?';
     memset(p + R_NAME + n, 0, CP_NAME_BYTES - n);
@@ -283,8 +284,6 @@ void cp_record_stats(const uint8_t rec[CP_REC_LEN], int out[6])
     }
 }
 
-/* ---- the player's own ---- */
-
 /* Every created fighter of the save area, newest first (at most CP_LOCAL_MAX), and the one the
  * player picked: the save the setting names (cp_pick_setting_get), the newest if it is gone. */
 static int g_local_state;           /* 0 not read, 1 read */
@@ -294,6 +293,151 @@ static int g_local_count;
 static CRITICAL_SECTION g_local_cs;
 static INIT_ONCE g_local_once = INIT_ONCE_STATIC_INIT;
 static BOOL CALLBACK local_init(PINIT_ONCE o, PVOID p, PVOID *c) { (void)o; (void)p; (void)c; InitializeCriticalSection(&g_local_cs); return TRUE; }
+
+/* ---- online names (created_fighter.h) ---- */
+
+int cp_name_clean(const char *in, char *out, int size)
+{
+    int n = 0, end = 0;
+    if (size <= 0) return 0;
+    for (; in && *in && n < CP_NAME_MAX && n < size - 1; in++) {
+        unsigned char c = (unsigned char)*in;
+        if (c < 0x20 || c > 0x7E || (c == ' ' && !n)) continue;     /* other bytes, leading blanks */
+        out[n++] = (char)c;
+        if (c != ' ') end = n;
+    }
+    out[end] = 0;                                                   /* trailing blanks */
+    return end;
+}
+
+/* The setting's text: '%', ';' and '=' as %XX. */
+static void names_escape(const char *s, char *out, size_t size)
+{
+    size_t n = 0;
+    for (; *s && n + 4 < size; s++) {
+        if (*s == '%' || *s == ';' || *s == '=') n += (size_t)snprintf(out + n, size - n, "%%%02X", (unsigned char)*s);
+        else out[n++] = *s;
+    }
+    out[n] = 0;
+}
+
+static int hexval(char c)
+{
+    return c >= '0' && c <= '9' ? c - '0' : c >= 'A' && c <= 'F' ? c - 'A' + 10 : c >= 'a' && c <= 'f' ? c - 'a' + 10 : -1;
+}
+
+static void names_unescape(const char *s, size_t len, char *out, size_t size)
+{
+    size_t i, n = 0;
+    if (!size) return;
+    for (i = 0; i < len && n + 1 < size; i++) {
+        if (s[i] == '%' && i + 2 < len && hexval(s[i + 1]) >= 0 && hexval(s[i + 2]) >= 0) {
+            out[n++] = (char)(hexval(s[i + 1]) * 16 + hexval(s[i + 2]));
+            i += 2;
+        } else out[n++] = s[i];
+    }
+    out[n] = 0;
+}
+
+/* Calls `each` for every "key=name" entry of the setting's text, in order, with the entry's own
+ * text (start, length) and its decoded key and name; stops when it returns nonzero. */
+typedef int (*NameEntryFn)(const char *raw, size_t len, const char *key, const char *name, void *user);
+static void names_each(const char *text, NameEntryFn each, void *user)
+{
+    const char *p = text;
+    while (*p) {
+        const char *end = strchr(p, ';'), *eq;
+        size_t len;
+        char key[sizeof(((CpLocal *)0)->key)], name[64];
+        if (!end) end = p + strlen(p);
+        len = (size_t)(end - p);
+        eq = (const char *)memchr(p, '=', len);
+        if (eq) {
+            names_unescape(p, (size_t)(eq - p), key, sizeof(key));
+            names_unescape(eq + 1, (size_t)(end - eq - 1), name, sizeof(name));
+            if (each(p, len, key, name, user)) return;
+        }
+        p = *end ? end + 1 : end;
+    }
+}
+
+struct NameFind { const char *key; char *out; int size; };
+static int name_find(const char *raw, size_t len, const char *key, const char *name, void *user)
+{
+    struct NameFind *f = (struct NameFind *)user;
+    (void)raw; (void)len;
+    if (strcmp(key, f->key)) return 0;
+    cp_name_clean(name, f->out, f->size);
+    return 1;
+}
+
+/* The online name the setting keeps for save `key`, cleaned; "" none. */
+static void online_name_of(const char *key, char *out, int size)
+{
+    char text[CP_NAMES_TEXT_MAX];
+    struct NameFind f;
+    if (size <= 0) return;
+    out[0] = 0;
+    text[0] = 0;
+    cp_names_setting_get(text, (int)sizeof(text));
+    f.key = key; f.out = out; f.size = size;
+    names_each(text, name_find, &f);
+}
+
+/* The setting with save `key`'s entry replaced (removed when `name` is ""); with `only_listed`,
+ * entries of saves that are not in the list now are dropped too (to make room). */
+struct NameKeep { const char *key; int only_listed; char *out; size_t n, size; int full; };
+static int name_keep(const char *raw, size_t len, const char *key, const char *name, void *user)
+{
+    struct NameKeep *k = (struct NameKeep *)user;
+    int i, listed = 0;
+    (void)name;
+    if (!strcmp(key, k->key)) return 0;
+    if (k->only_listed) {
+        for (i = 0; i < g_local_count; i++) if (!strcmp(g_local[i].key, key)) listed = 1;
+        if (!listed) return 0;
+    }
+    if (k->n + (k->n ? 1 : 0) + len + 1 > k->size) { k->full = 1; return 1; }
+    if (k->n) k->out[k->n++] = ';';
+    memcpy(k->out + k->n, raw, len);
+    k->n += len;
+    k->out[k->n] = 0;
+    return 0;
+}
+
+static int names_store(const char *key, const char *name)       /* lock held */
+{
+    char old[CP_NAMES_TEXT_MAX], out[CP_NAMES_TEXT_MAX], ek[2 * sizeof(((CpLocal *)0)->key)], en[3 * CP_NAME_MAX + 1];
+    int pass;
+    old[0] = 0;
+    cp_names_setting_get(old, (int)sizeof(old));
+    names_escape(key, ek, sizeof(ek));
+    names_escape(name, en, sizeof(en));
+    for (pass = 0; pass < 2; pass++) {
+        struct NameKeep k;
+        k.key = key; k.only_listed = pass; k.out = out; k.n = 0; k.size = sizeof(out); k.full = 0;
+        out[0] = 0;
+        names_each(old, name_keep, &k);
+        if (k.full) continue;
+        if (!name[0]) { cp_names_setting_set(out); return 1; }
+        if (k.n + (k.n ? 1 : 0) + strlen(ek) + 1 + strlen(en) + 1 > sizeof(out)) continue;
+        snprintf(out + k.n, sizeof(out) - k.n, "%s%s=%s", k.n ? ";" : "", ek, en);
+        cp_names_setting_set(out);
+        return 1;
+    }
+    fprintf(stderr, "[CREATED] the online names setting is full\n");
+    return 0;
+}
+
+static void record_set_name(uint8_t rec[CP_REC_LEN], const char *name)
+{
+    size_t n = strlen(name);
+    memset(rec + 1 + R_NAME, 0, CP_NAME_BYTES);
+    memcpy(rec + 1 + R_NAME, name, n < CP_NAME_MAX ? n : CP_NAME_MAX);
+    seal(rec);
+}
+
+/* ---- the player's own ---- */
 
 /* a profile image from a save file (0x5990: header + profile) or a dump (0x5950) */
 static int profile_from_file(const char *path, uint8_t *profile, FILETIME *when)
@@ -333,8 +477,16 @@ static void local_add(const uint8_t rec[CP_REC_LEN], const char *key, ULONGLONG 
     e = &g_local[at];
     memset(e, 0, sizeof(*e));
     memcpy(e->rec, rec, CP_REC_LEN);
-    cp_record_name(rec, e->name, sizeof(e->name));
+    cp_record_name(rec, e->user_id, sizeof(e->user_id));
     snprintf(e->key, sizeof(e->key), "%s", key);
+    online_name_of(key, e->online, sizeof(e->online));
+    if (e->online[0]) {             /* the online name goes into the record, not into the save */
+        uint8_t ok[CP_REC_LEN];
+        record_set_name(e->rec, e->online);
+        if (cp_record_sanitize(e->rec, ok)) memcpy(e->rec, ok, CP_REC_LEN);
+        else { memcpy(e->rec, rec, CP_REC_LEN); e->online[0] = 0; }
+    }
+    cp_record_name(e->rec, e->name, sizeof(e->name));
     g_local_when[at] = when;
     if (dated) {
         FILETIME ft, lt;
@@ -412,8 +564,8 @@ static void read_local(void)
     FindClose(h);
 done:
     for (i = 0; i < g_local_count; i++)
-        fprintf(stderr, "[CREATED] the player's fighter %d: %s (%s), saved %s, record %08X\n", i, g_local[i].name,
-                cp_record_style(g_local[i].rec), g_local[i].saved[0] ? g_local[i].saved : "-", cp_record_crc(g_local[i].rec));
+        fprintf(stderr, "[CREATED] the player's fighter %d: %s%s%s (%s), saved %s, record %08X\n", i, g_local[i].name,
+                g_local[i].online[0] ? ", user ID " : "", g_local[i].online[0] ? g_local[i].user_id : "", cp_record_style(g_local[i].rec), g_local[i].saved[0] ? g_local[i].saved : "-", cp_record_crc(g_local[i].rec));
     if (!g_local_count) fprintf(stderr, "[CREATED] the player has no created fighter\n");
     g_local_state = 1;
 }
@@ -483,6 +635,30 @@ int cp_local_set_pick(int index)
     return ok;
 }
 
+int cp_local_set_name(int index, const char *name)
+{
+    char clean[CP_NAME_MAX + 1], shown[CP_NAME_MAX + 1] = "";
+    int ok = 0;
+    cp_name_clean(name, clean, sizeof(clean));
+    local_lock();
+    if (index >= 0 && index < g_local_count && names_store(g_local[index].key, clean)) {
+        CpLocal *e = &g_local[index];
+        uint8_t checked[CP_REC_LEN], before[CP_REC_LEN];
+        memcpy(before, e->rec, CP_REC_LEN);
+        record_set_name(e->rec, clean[0] ? clean : e->user_id);
+        if (cp_record_sanitize(e->rec, checked)) {
+            memcpy(e->rec, checked, CP_REC_LEN);
+            snprintf(e->online, sizeof(e->online), "%s", clean);
+        } else memcpy(e->rec, before, CP_REC_LEN);
+        cp_record_name(e->rec, e->name, sizeof(e->name));
+        snprintf(shown, sizeof(shown), "%s", e->name);
+        ok = 1;
+    }
+    LeaveCriticalSection(&g_local_cs);
+    if (ok) fprintf(stderr, "[CREATED] fighter %d plays online as \"%s\"%s\n", index, shown, clean[0] ? "" : " (its user ID)");
+    return ok;
+}
+
 int cp_local_record(uint8_t rec[CP_REC_LEN])
 {
     int i;
@@ -548,7 +724,7 @@ int created_fighter_inject(int slot, int pad, const uint8_t rec[CP_REC_LEN])
 {
     uint32_t gs = MEM32(GS_PTR), dst = 0, holder;
     int index;
-    char name[16];
+    char name[CP_NAME_MAX + 1];
     if (!gs || pad < 0 || pad > 3 || !rec) return -1;
     /* a spare profile slot: the highest without a user ID loaded in it (or one written here) */
     for (index = PROFILE_COUNT - 1; index >= 0; index--) {

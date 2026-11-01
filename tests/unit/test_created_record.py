@@ -25,6 +25,9 @@ def test_record_size_and_types_agree():
     total = 1 + payload_c + 4
     assert "`len` u16 (0 or %d)" % total in doc
 
+    # the name: every PC cuts it to the length the relay accepts (online names, build 39: 16)
+    assert _int(header, r"#define CP_NAME_MAX\s+(\d+)") == _int(go, r"MaxRecordName = (\d+)") == 16
+    assert _int(header, r"#define CP_NAME_BYTES\s+(0x[0-9A-Fa-f]+)") == _int(go, r"recNameLen\s+= (0x[0-9A-Fa-f]+)")
     assert _int(header, r"#define CP_FIGHTER_ID\s+(\d+)") == _int(go, r"CreatedFighter uint8 = (\d+)")
     assert _int(header, r"#define CP_REC_VERSION\s+(\d+)") == _int(go, r"RecordVersion uint8 = (\d+)")
     for name, go_name in (("T_FIGHTER", "TypeFighter"), ("T_RECORD", "TypeRecord"), ("T_RECGET", "TypeRecGet")):

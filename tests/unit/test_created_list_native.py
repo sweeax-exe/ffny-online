@@ -39,15 +39,31 @@ void cp_pick_setting_get(char *out, int size)
 }
 void cp_pick_setting_set(const char *key) { printf("setting|%s\n", key); }
 
+/* the setting online.created_names: STUB_NAMES, and what a set writes */
+static char g_names[CP_NAMES_TEXT_MAX];
+static int g_names_read;
+void cp_names_setting_get(char *out, int size)
+{
+    const char *v = getenv("STUB_NAMES");
+    if (!g_names_read) { snprintf(g_names, sizeof(g_names), "%s", v ? v : ""); g_names_read = 1; }
+    snprintf(out, (size_t)size, "%s", g_names);
+}
+void cp_names_setting_set(const char *text)
+{
+    snprintf(g_names, sizeof(g_names), "%s", text);
+    printf("names|%s\n", text);
+}
+
 static void dump(void)
 {
     static CpLocal l[CP_LOCAL_MAX];
     uint8_t rec[CP_REC_LEN];
-    char name[16];
+    char name[CP_NAME_MAX + 1];
     int n = cp_local_list(l, CP_LOCAL_MAX), i;
     printf("count|%d|%d\n", n, cp_local_list(NULL, 0));
     for (i = 0; i < n; i++)
-        printf("entry|%d|%s|%s|%d|%08X\n", i, l[i].name, l[i].key, l[i].saved[0] != 0, cp_record_crc(l[i].rec));
+        printf("entry|%d|%s|%s|%d|%08X|%s|%s\n", i, l[i].name, l[i].key, l[i].saved[0] != 0, cp_record_crc(l[i].rec),
+               l[i].user_id, l[i].online);
     printf("pick|%d\n", cp_local_pick());
     if (cp_local_record(rec)) {
         cp_record_name(rec, name, sizeof(name));
@@ -57,8 +73,36 @@ static void dump(void)
 
 int main(int argc, char **argv)
 {
+    if (argc > 2 && !strcmp(argv[1], "clean")) {     /* cp_name_clean of argv[2] */
+        char out[CP_NAME_MAX + 1];
+        int n = cp_name_clean(argv[2], out, sizeof(out));
+        printf("clean|%d|[%s]\n", n, out);
+        return 0;
+    }
+    if (argc > 2 && !strcmp(argv[1], "sanitize")) {  /* a record named argv[2] (escapes \\xNN), checked */
+        static uint8_t p[0x5950];
+        uint8_t rec[CP_REC_LEN], ok[CP_REC_LEN];
+        char name[CP_NAME_MAX + 1];
+        const char *s = argv[2];
+        int k = 0;
+        while (*s && k < 0x20) {
+            unsigned v;
+            if (s[0] == '\\' && s[1] == 'x' && sscanf(s + 2, "%2x", &v) == 1) { p[0xC + k++] = (uint8_t)v; s += 4; }
+            else p[0xC + k++] = (uint8_t)*s++;
+        }
+        p[0x143] = 98; p[0x140] = 1; p[0x141] = p[0x142] = 0xFF; p[0x13C] = 3; p[0x4D8A] = 1;
+        memset(p + 0x5564, 0xFF, 0x98);
+        cp_record_from_profile(p, rec);
+        if (!cp_record_sanitize(rec, ok)) { printf("sanitize|0\n"); return 0; }
+        cp_record_name(ok, name, sizeof(name));
+        printf("sanitize|1|[%s]|%d\n", name, (int)strlen((const char *)ok + 1));
+        return 0;
+    }
     dump();
-    if (argc > 1) {
+    if (argc > 2 && !strcmp(argv[1], "name")) {      /* online name argv[3] for entry argv[2] */
+        printf("named|%d\n", cp_local_set_name(atoi(argv[2]), argc > 3 ? argv[3] : ""));
+        dump();
+    } else if (argc > 1) {
         int index = atoi(argv[1]);
         printf("set|%d\n", cp_local_set_pick(index));
     }
@@ -107,7 +151,7 @@ def exe(tmp_path_factory):
 
 def run(exe, cwd, env_extra, *args):
     env = {k: v for k, v in os.environ.items()
-           if k not in ('RECOMP_CP_RECORD', 'RECOMP_CP_PICK', 'STUB_PICK_KEY', 'DEFJAM_DATA')}
+           if k not in ('RECOMP_CP_RECORD', 'RECOMP_CP_PICK', 'STUB_PICK_KEY', 'STUB_NAMES', 'DEFJAM_DATA')}
     env.update(env_extra)
     out = subprocess.run([str(exe), *map(str, args)], cwd=cwd, env=env, capture_output=True, text=True, check=True)
     rows = {}
@@ -206,3 +250,77 @@ def test_test_records_in_given_order(exe, tmp_path):
     env['RECOMP_CP_PICK'] = '2'
     rows = run(exe, tmp_path, env)
     assert rows['record'] == [['THIRD', '1']]
+
+
+# ---- online names (build 39): up to 16 characters in the record, the save keeps its user ID ----
+
+def test_record_name_up_to_sixteen(exe, tmp_path):
+    rows = run(exe, tmp_path, {}, 'sanitize', 'Brooklyn Bruiser')
+    assert rows['sanitize'] == [['1', '[Brooklyn Bruiser]', '16']]
+    rows = run(exe, tmp_path, {}, 'sanitize', 'Brooklyn Bruisers')       # 17: cut to 16, the rest zero
+    assert rows['sanitize'] == [['1', '[Brooklyn Bruiser]', '16']]
+    rows = run(exe, tmp_path, {}, 'sanitize', 'ABCDEFGHIJKLMNOPQRSTUVWXYZ012345')    # the whole field
+    assert rows['sanitize'] == [['1', '[ABCDEFGHIJKLMNOP]', '16']]
+    rows = run(exe, tmp_path, {}, 'sanitize', 'AW5J3555')
+    assert rows['sanitize'] == [['1', '[AW5J3555]', '8']]
+    rows = run(exe, tmp_path, {}, 'sanitize', r'AB\x07CD\xC9')               # not printable: '?'
+    assert rows['sanitize'] == [['1', '[AB?CD?]', '6']]
+
+
+def test_name_clean(exe, tmp_path):
+    for given, want in (('  Ann  ', 'Ann'), ('Brooklyn Bruiser', 'Brooklyn Bruiser'),
+                        ('Brooklyn Bruisers', 'Brooklyn Bruiser'), ('ABCDEFGHIJKLMNO Q', 'ABCDEFGHIJKLMNO'),
+                        ('A\tB', 'AB'), ('   ', ''), ('a;b=c%d', 'a;b=c%d')):
+        rows = run(exe, tmp_path, {}, 'clean', given)
+        assert rows['clean'] == [[str(len(want)), '[%s]' % want]], given
+
+
+def test_online_name_from_setting(exe, save_area):
+    env = {'DEFJAM_DATA': str(save_area / 'data')}
+    plain = run(exe, save_area, env)
+    env.update(STUB_NAMES='9999/GONE=Old one;3C3C3C3C3C3C/NIGHTOWL=Night Owl Rising',
+               STUB_PICK_KEY='3C3C3C3C3C3C/NIGHTOWL')
+    rows = run(exe, save_area, env)
+    owl = rows['entry'][2]
+    assert owl[1] == 'Night Owl Rising' and owl[5] == 'NIGHTOWL' and owl[6] == 'Night Owl Rising'
+    assert owl[4] != plain['entry'][2][4]                       # another record: the name is in it
+    others = [e[4] for i, e in enumerate(rows['entry']) if i != 2]
+    assert others == [e[4] for i, e in enumerate(plain['entry']) if i != 2]
+    assert [e[1] for e in rows['entry']] == ['LATEST', 'CPTWO', 'Night Owl Rising', 'AW5J3555']
+    assert all(e[6] == '' for i, e in enumerate(rows['entry']) if i != 2)
+    assert rows['record'] == [['Night Owl Rising', '1']]       # the relay gets the online name
+    # a name longer than 16 in the file is cut as the editor cuts it
+    env['STUB_NAMES'] = '3C3C3C3C3C3C/NIGHTOWL=  Night Owl Rising Again  '
+    assert run(exe, save_area, env)['entry'][2][1] == 'Night Owl Rising'
+
+
+def test_set_and_clear_online_name(exe, save_area):
+    env = {'DEFJAM_DATA': str(save_area / 'data')}
+    save = save_area / 'data/save/UserData/45410049/1A3F1B2E4ADD/CPTWO'
+    before = save.read_bytes()
+    rows = run(exe, save_area, env, 'name', 1, 'Brooklyn Bruiser')
+    assert rows['named'] == [['1']]
+    assert rows['names'] == [['1A3F1B2E4ADD/CPTWO=Brooklyn Bruiser']]
+    first, second = rows['entry'][:4], rows['entry'][4:]
+    assert first[1][1] == 'CPTWO' and second[1][1] == 'Brooklyn Bruiser' and second[1][5] == 'CPTWO'
+    assert second[1][4] != first[1][4]
+    assert save.read_bytes() == before                         # the Story save keeps its user ID
+    # read back from the setting: the same record
+    env['STUB_NAMES'] = rows['names'][0][0]
+    again = run(exe, save_area, env)
+    assert again['entry'][1][1] == 'Brooklyn Bruiser' and again['entry'][1][4] == second[1][4]
+    # cleared: the entry leaves the setting, the record is the user ID's again (the same bytes)
+    rows = run(exe, save_area, env, 'name', 1, '')
+    assert rows['named'] == [['1']] and rows['names'] == [['']]
+    assert rows['entry'][5][1] == 'CPTWO' and rows['entry'][5][6] == '' and rows['entry'][5][4] == first[1][4]
+    # no such entry
+    assert run(exe, save_area, env, 'name', 7, 'X')['named'] == [['0']]
+
+
+def test_online_name_escaped_in_setting(exe, save_area):
+    env = {'DEFJAM_DATA': str(save_area / 'data'), 'STUB_NAMES': '0C6F8520AAF5/AW5J3555=Ace'}
+    rows = run(exe, save_area, env, 'name', 0, 'a;b=c%d')
+    assert rows['names'] == [['0C6F8520AAF5/AW5J3555=Ace;4D4D4D4D4D4D/LATEST=a%3Bb%3Dc%25d']]
+    env['STUB_NAMES'] = rows['names'][0][0]
+    rows = run(exe, save_area, env)
+    assert rows['entry'][0][1] == 'a;b=c%d' and rows['entry'][3][1] == 'Ace'
