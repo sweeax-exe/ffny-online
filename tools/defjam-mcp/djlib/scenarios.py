@@ -253,9 +253,30 @@ def online_tail(matches, per, p2):
     return ",".join(parts)
 
 
+def _save_files(root):
+    """{relative path: SHA-256} of a data root's save area, without the cache partitions' images."""
+    import hashlib
+    out = {}
+    save = os.path.join(root, "save")
+    for d, _, files in os.walk(save):
+        for f in files:
+            p = os.path.join(d, f)
+            if f.lower().startswith("partition") and os.path.getsize(p) > 1 << 20:
+                continue
+            with open(p, "rb") as fh:
+                out[os.path.relpath(p, save)] = hashlib.sha256(fh.read()).hexdigest()
+    return out
+
+
 def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast_ko=600, ko_winner=None,
            bot=None, timeout=None, relay_port=27900, base_core=2, keep_going=False, extra_env=None,
-           lock_timeout=None, log=None, require_hits=False, stall=300, keep_roots=False, quick=None):
+           lock_timeout=None, log=None, require_hits=False, stall=300, keep_roots=False, quick=None,
+           created=False, cp_records=None, rematch=False, venues=None):
+    """created: the relay plays created fighters (relay -created); cp_records: one profile dump or user ID
+    save per copy (RECOMP_CP_RECORD, '' none), for fighter 99. The result's `save_written` lists, per copy,
+    the save files a run changed (the cache partitions left out). rematch: every match after the first is
+    a Rematch from the results menu instead of a new room match. venues: "26" or "1,6": every vote
+    offers these in turn (relay -test-venues)."""
     t0 = time.time()
     mode = mode.lower()
     if mode not in MODES:
@@ -273,7 +294,9 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
     stop_reason = None
     logs = {}
     try:
-        s.relay(relay_port, rollback=(rollback == "on"))
+        relay_extra = (["-created"] if created else []) + (["-test-venues", str(venues)] if venues else [])
+        s.relay(relay_port, rollback=(rollback == "on"), extra=relay_extra)
+        before = {}
         for i in range(players):
             env = dict(VIRTUAL_PAD_ENV)
             env.update({
@@ -290,8 +313,15 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
             if fast_ko:
                 env["RECOMP_TEST_KO_STEP"] = "%d,%s" % (int(fast_ko), winner)
             env.update(_bot_env(bot))
+            if cp_records and i < len(cp_records) and cp_records[i]:
+                env["RECOMP_CP_RECORD"] = os.path.abspath(cp_records[i])
+            if rematch:
+                env["RECOMP_PAD_SCRIPT"] = harness().build_pad_script(["getscreeninfo(intmain/mainmenu=lt@0.5"],
+                                                                       rematch_tail(matches, i % 2 == 1))
             env.update(extra_env or {})
-            s.launch(i, env=env, core=base_core + 2 * i, watch=WATCH)
+            root = s.make_root(i)
+            before[i] = _save_files(root)
+            s.launch(i, env=env, root=root, core=base_core + 2 * i, watch=WATCH)
             time.sleep(3)           # the first copy opens the room and is player 1
         deadline = time.time() + timeout
         shot_due = None
@@ -316,7 +346,8 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
             if shot_due is None and cs[0].watch.count(" starts in "):
                 shot_due = time.time() + 8
             if shot_due and time.time() >= shot_due and not shots:
-                _png(s, 0, "fight-m1-copy0", shots)
+                for k in range(len(cs)):
+                    _png(s, k, "fight-m1-copy%d" % k, shots)
             if stall and time.time() - max(c.watch.last_change for c in cs) > stall:
                 stop_reason = "stalled: no front-end, netplay or telemetry line for %d s" % stall
                 break
@@ -332,6 +363,16 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
                     _png(s, c.index, "stop-copy%d" % c.index, shots)
         s.poll()
         logs = {i: c.log for i, c in s.copies.items()}
+        for c in s.copies.values():
+            if c.alive():
+                c.proc.kill()
+                c.proc.wait(60)
+        written = {}
+        for i, c in s.copies.items():
+            after = _save_files(c.root)
+            changed = sorted(k for k in set(after) | set(before.get(i, {})) if after.get(k) != before.get(i, {}).get(k))
+            written[str(i)] = changed
+        result["save_written"] = written
     finally:
         _finish(s, result, t0)
     analyses = {i: logparse.analyze_copy(logparse.read_text(p)) for i, p in logs.items()}
@@ -342,6 +383,21 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
     result.update({"ok": ok and not problems, "stop": stop_reason, "matches": rows, "problems": problems,
                    "logs": [_relpath(p) for p in logs.values()], "shots": shots})
     return result
+
+
+def rematch_tail(matches, p2):
+    """The fights of an online rematch series: the first match, then Rematch from the results menu
+    (the harness's online-rematch routes) for each further one."""
+    h = harness()
+    tail = h.FIGHT_TAIL.replace("right:", "left:") if p2 else h.FIGHT_TAIL
+    parts = [tail]
+    for k in range(2, matches + 1):
+        nth = "#%d" % (2 * k - 3) if k > 2 else ""
+        downs = "down@14;down@15;a@16" if p2 else "down@6;down@7;a@8"
+        parts.append(h.raw_stages(["game.getmatchsummary(%s=a@4+3x2" % nth,
+                                   "game.updatematchrewardspoints(%s=a@3;%s" % ("#%d" % (k - 1) if k > 2 else "", downs)]))
+        parts.append(tail.replace("@game.startgame(", "@game.startgame(#%d" % k))
+    return ",".join(parts)
 
 
 def online_rows(analyses, matches, require_hits=False, problems=None):

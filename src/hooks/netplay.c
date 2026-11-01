@@ -44,6 +44,7 @@
 #include "netplay_servers.h"
 #include "netplay_check.h"
 #include "anticheat.h"
+#include "created_fighter.h"
 
 #define G_MATCH_PHASE   0x003B8F30u     /* test_telemetry.c G_PHASE */
 #define G_MATCH_WINNER  0x003B8F40u     /* test_telemetry.c G_WINNER: the winner's fighter slot */
@@ -68,6 +69,9 @@ int netplay_in_fight(void) { return 0; }
 int netplay_voice_room(void) { return 0; }
 void netplay_send_voice(const uint8_t *p, int n) { (void)p; (void)n; }
 int netplay_room_name(int s, char *o, int n) { (void)s; if (n > 0) o[0] = 0; return 0; }
+int netplay_created_record(int p, uint8_t *o) { (void)p; (void)o; return 0; }
+int netplay_slot_created(int s, char *n, int ns, const char **st) { (void)s; if (ns > 0) n[0] = 0; if (st) *st = ""; return 0; }
+int netplay_created_available(void) { return 0; }
 int netplay_lobby(const char *s, const char *n) { (void)s; (void)n; return -1; }
 void netplay_lobby_list(int m) { (void)m; }
 void netplay_lobby_who(void) {}
@@ -161,8 +165,14 @@ void netplay_crowd_update(void) { sub_00081170(); }
 #define T_WATCH       0x23      /* START's body, for a fight this PC only watches */
 #define T_YIELD       0x26      /* give up my spot in the line (relays since build 36, CAPS bit 2) */
 #define T_NOTICE      0x27      /* relay -> game: a countdown before a relay restart (build 37 on) */
+#define T_FIGHTER     0x28      /* created fighters (build 38): this client's record, u16 length + record */
+#define T_RECORD      0x29      /* a room member's record (slot, u16 length, record); slot 0xFE: the relay's copy of ours */
+#define T_RECGET      0x2A      /* the record of the member in a slot, again */
+#define RECORD_SELF   0xFE
 #define CAPS_KOTH     1u
 #define CAPS_ROLLBACK 2u        /* the relay lets matches roll back (its switch; off: lockstep only) */
+#define CAPS_CREATED  8u        /* created fighters (client: can play them; relay: its switch is on) */
+#define CP_WAIT_MS    10000     /* START: how long to wait for a created fighter's missing record */
 #define CAPS_TRIES    5         /* CAPS every RETRY_MS; no answer after these: an older relay */
 #define WINNER_DRAW   0xFFu
 #define RESULT_TRIES  75        /* RESULT every RETRY_MS until a HILL shows the fight over (30 s) */
@@ -237,6 +247,19 @@ static struct {
     int relay_caps;                 /* the relay's CAPS answer, -1 not yet */
     int caps_tries;
     ULONGLONG caps_sent;
+    /* created fighters (created_fighter.c): every room member's record as the relay sent it, this
+     * client's own upload, and the records the last START named */
+    uint8_t cp_rec[ROOMSLOTS][CP_REC_LEN];
+    int cp_have[ROOMSLOTS];
+    uint8_t cp_mine[CP_REC_LEN];
+    int cp_mine_state;              /* 0 not read, 1 have one, -1 none */
+    uint32_t cp_acked;              /* CRC the relay keeps for us, 0 none */
+    ULONGLONG cp_sent;
+    int cp_tries;
+    uint32_t cp_start_crc[ROOMSLOTS];   /* by room slot: the record START named, 0 none */
+    volatile LONG cp_waiting;       /* START waits for records (cp_wait_m) */
+    ULONGLONG cp_wait_since, cp_get_sent;
+    AutoMatch cp_wait_m;
     int koth_match;                 /* this START is a King of the Hill fight */
     int koth_fights;                /* HILL `fights` when it started: a change means it is over */
     int koth_winner;                /* the RESULT to repeat: the winner's slot, WINNER_DRAW; -1 none */
@@ -520,6 +543,16 @@ int netplay_versus(NetVersus *out)
             out->cpu[i] = i >= N.players || N.report_m.pad[i] < 0;
             out->ping[i] = out->cpu[i] ? -1 : N.peer_rtt[i];
             if (!out->cpu[i]) snprintf(out->name[i], sizeof(out->name[i]), "%s", N.report_names[i]);
+        }
+        for (i = 0; i < out->count; i++) {     /* created fighters: the record START named */
+            int slot = N.start_slots[i];
+            uint8_t ok[CP_REC_LEN];
+            if (out->fighter[i] != CP_FIGHTER_ID || out->cpu[i] || slot < 0 || slot >= ROOMSLOTS) continue;
+            if (N.cp_start_crc[slot] && N.cp_have[slot] && cp_record_crc(N.cp_rec[slot]) == N.cp_start_crc[slot] &&
+                cp_record_sanitize(N.cp_rec[slot], ok)) {
+                cp_record_name(ok, out->cp_name[i], sizeof(out->cp_name[i]));
+                snprintf(out->cp_style[i], sizeof(out->cp_style[i]), "%s", cp_record_style(ok));
+            }
         }
         out->you = N.pos;
         out->type = N.report_m.type;
@@ -890,6 +923,16 @@ static void send_rtt(void)
 
 /* The delay every PC derives from the same pings: the slowest path between two players goes
  * through the relay, about half of each one's round trip, plus a step of margin. */
+/* A match with a created fighter (its START names a record) plays in lockstep: a rollback at
+ * step 4 of a created-fighter match crashed in sub_0008BE60 (the created fighters' runtime-built
+ * looks are not in what a rollback restores; 2026-10-28). Every PC knows it from the START. */
+static int match_has_created(void)
+{
+    int k;
+    for (k = 0; k < ROOMSLOTS; k++) if (N.cp_start_crc[k]) return 1;
+    return 0;
+}
+
 static int every_player_rolls_back(void)
 {
     int i;
@@ -897,6 +940,7 @@ static int every_player_rolls_back(void)
      * crashed after the first fight of a hill in build 27, and the loser then never left the seat
      * (2026-10-25). Both PCs of a fight know it from START, so the delay agrees too. */
     if (N.koth_match) return 0;
+    if (match_has_created()) return 0;
     for (i = 0; i < N.players; i++) if (!N.peer_rb[i]) return 0;
     return 1;
 }
@@ -1196,6 +1240,14 @@ static void on_room(const uint8_t *b, int len)
         v.hill = N.roomv.hill;
     N.roomv = v;
     N.slot = v.you;
+    {   /* created fighters: a slot nobody holds any more has no record */
+        int k, j;
+        for (k = 0; k < ROOMSLOTS; k++) {
+            int present = 0;
+            for (j = 0; j < v.player_count; j++) if (v.players[j].slot == k) present = 1;
+            if (!present) N.cp_have[k] = 0;
+        }
+    }
     memcpy(N.room, v.code, 7);
     if (N.pend_len && N.pend[5] != T_LIST && N.pend[5] != T_LEAVE) answered();
     if (v.phase != 2) N.over_pending = N.start_this_play = 0;
@@ -1359,6 +1411,94 @@ static void on_watch(const uint8_t *b, int len)
     LeaveCriticalSection(&g_cs);
 }
 
+/* ---- created fighters (docs/research/created-fighter-online.md) ---- */
+
+/* RECORD: a member's record (an empty one: none), or the relay's copy of ours. */
+static void on_record(const uint8_t *b, int len)
+{
+    int slot, n;
+    if (len < 3) return;
+    slot = b[0];
+    n = b[1] | b[2] << 8;
+    if ((n != 0 && n != CP_REC_LEN) || len != 3 + n) return;
+    if (n && !cp_record_sealed(b + 3)) return;
+    EnterCriticalSection(&g_cs);
+    if (slot == RECORD_SELF) {
+        uint32_t crc = n ? cp_record_crc(b + 3) : 0;
+        if (crc != N.cp_acked)
+            fprintf(stderr, "[NETPLAY] the relay %s\n", crc ? "keeps this player's created fighter" : "keeps no created fighter for this player");
+        N.cp_acked = crc;
+        if (!crc && N.cp_mine_state > 0) N.cp_tries = 99;     /* refused: do not repeat */
+    } else if (slot < ROOMSLOTS) {
+        if (n) memcpy(N.cp_rec[slot], b + 3, CP_REC_LEN);
+        if (N.cp_have[slot] != (n != 0) || (n && memcmp(N.cp_rec[slot], b + 3, CP_REC_LEN))) N.roomv.version++;
+        N.cp_have[slot] = n != 0;
+    }
+    LeaveCriticalSection(&g_cs);
+}
+
+/* Whether every record the last START named is here (the own one included). */
+static int cp_records_complete(int ask)
+{
+    int slot, complete = 1;
+    for (slot = 0; slot < ROOMSLOTS; slot++) {
+        if (!N.cp_start_crc[slot]) continue;
+        if (slot == N.slot && N.cp_mine_state > 0 && cp_record_crc(N.cp_mine) == N.cp_start_crc[slot]) {
+            memcpy(N.cp_rec[slot], N.cp_mine, CP_REC_LEN);
+            N.cp_have[slot] = 1;
+        }
+        if (N.cp_have[slot] && cp_record_crc(N.cp_rec[slot]) == N.cp_start_crc[slot]) continue;
+        complete = 0;
+        if (ask)
+            fprintf(stderr, "[NETPLAY] slot %d plays record %08X; this PC has %s%08X\n", slot, N.cp_start_crc[slot],
+                    N.cp_have[slot] ? "" : "none, last ", N.cp_have[slot] ? cp_record_crc(N.cp_rec[slot]) : 0u);
+        if (ask && N.have_token) {
+            uint8_t gb[6 + 8 + 1];
+            int k = header(gb, T_RECGET);
+            memcpy(gb + k, N.token, 8); k += 8;
+            gb[k++] = (uint8_t)slot;
+            send_raw(gb, k);
+        }
+    }
+    return complete;
+}
+
+int netplay_created_record(int pos, uint8_t *out)
+{
+    int slot, ok = 0;
+    if (pos < 0 || pos >= MAXP) return 0;
+    EnterCriticalSection(&g_cs);
+    slot = N.start_slots[pos];
+    if (slot >= 0 && slot < ROOMSLOTS && N.cp_start_crc[slot] && N.cp_have[slot] &&
+        cp_record_crc(N.cp_rec[slot]) == N.cp_start_crc[slot])
+        ok = cp_record_sanitize(N.cp_rec[slot], out);
+    LeaveCriticalSection(&g_cs);
+    return ok;
+}
+
+int netplay_slot_created(int slot, char *name, int size, const char **style)
+{
+    uint8_t rec[CP_REC_LEN], ok[CP_REC_LEN];
+    int have = 0;
+    if (size > 0) name[0] = 0;
+    if (style) *style = "";
+    if (slot < 0 || slot >= ROOMSLOTS) return 0;
+    EnterCriticalSection(&g_cs);
+    if (slot == N.slot && N.cp_mine_state > 0) { memcpy(rec, N.cp_mine, CP_REC_LEN); have = 1; }
+    else if (N.cp_have[slot]) { memcpy(rec, N.cp_rec[slot], CP_REC_LEN); have = 1; }
+    LeaveCriticalSection(&g_cs);
+    if (!have || !cp_record_sanitize(rec, ok)) return 0;
+    cp_record_name(ok, name, size);
+    if (style) *style = cp_record_style(ok);
+    return 1;
+}
+
+int netplay_created_available(void)
+{
+    return N.lobby && N.relay_caps > 0 && (N.relay_caps & CAPS_CREATED) && N.cp_mine_state > 0 &&
+           N.cp_acked && N.cp_acked == cp_record_crc(N.cp_mine);
+}
+
 static void on_start(const uint8_t *b, int len)
 {
     Reader r = { b, len, 0, 0 };
@@ -1376,6 +1516,25 @@ static void on_start(const uint8_t *b, int len)
     if (count < 2 || count > MAXP) return;
     for (i = 0; i < count; i++) { slots[i] = rd8(&r); fighters[i] = rd8(&r); }
     if (r.bad) return;
+    {   /* created fighters: the records START names (absent: none) */
+        uint32_t named[ROOMSLOTS];
+        memset(named, 0, sizeof(named));
+        if (r.i < r.n) {
+            int nc = rd8(&r), k;
+            for (k = 0; k < nc && !r.bad; k++) {
+                int s = rd8(&r), j;
+                uint32_t crc = 0;
+                for (j = 0; j < 4; j++) crc |= (uint32_t)rd8(&r) << (8 * j);     /* in order: no reads in one expression */
+                if (s < ROOMSLOTS) named[s] = crc;
+            }
+            if (r.bad) return;
+        }
+        if (!(N.start_seed && seed == N.start_seed)) {
+            EnterCriticalSection(&g_cs);
+            memcpy(N.cp_start_crc, named, sizeof(named));
+            LeaveCriticalSection(&g_cs);
+        }
+    }
     if (N.start_seed && seed == N.start_seed) { N.start_this_play = 1; return; }     /* a repeat */
     /* King of the Hill: the last fight of this PC is still on its results screen (also when a
      * START deferred there was called off since: its match is over, the results still show) */
@@ -1475,6 +1634,18 @@ static void on_start(const uint8_t *b, int len)
         return;
     }
     become_connected();
+    EnterCriticalSection(&g_cs);
+    if (!cp_records_complete(1)) {
+        /* a created fighter's record has not arrived: the match is set up once it has (the network
+         * thread asks again), so every PC writes the same one */
+        N.cp_wait_m = m;
+        N.cp_wait_since = N.cp_get_sent = GetTickCount64();
+        InterlockedExchange(&N.cp_waiting, 1);
+        LeaveCriticalSection(&g_cs);
+        fprintf(stderr, "[NETPLAY] waiting for a created fighter's record\n");
+        return;
+    }
+    LeaveCriticalSection(&g_cs);
     automatch_request(&m);
 }
 
@@ -1497,6 +1668,8 @@ static void on_packet(const uint8_t *b, int len)
                     N.caps_tries = 0;
                     N.caps_sent = 0;
                     N.relay_caps = -1;
+                    N.cp_acked = 0;         /* the relay forgot our record with the session */
+                    N.cp_tries = 0;
                 }
                 break;
             }
@@ -1558,13 +1731,17 @@ static void on_packet(const uint8_t *b, int len)
             int had = N.relay_caps;
             N.relay_caps = (int)(get32(b + 6) & 0x7FFFFFFFu);
             if (had != N.relay_caps)
-                fprintf(stderr, "[NETPLAY] the relay supports %08X%s%s\n", (unsigned)N.relay_caps,
+                fprintf(stderr, "[NETPLAY] the relay supports %08X%s%s%s\n", (unsigned)N.relay_caps,
                         N.relay_caps & CAPS_KOTH ? " (King of the Hill)" : "",
-                        N.relay_caps & CAPS_ROLLBACK ? " (rollback allowed)" : "");
+                        N.relay_caps & CAPS_ROLLBACK ? " (rollback allowed)" : "",
+                        N.relay_caps & CAPS_CREATED ? " (created fighters allowed)" : "");
         }
         break;
     case T_HILL:
         if (N.lobby) on_hill(b + 6, len - 6);
+        break;
+    case T_RECORD:
+        if (N.lobby) on_record(b + 6, len - 6);
         break;
     case T_WATCH:
         if (N.lobby) on_watch(b + 6, len - 6);
@@ -1787,13 +1964,49 @@ static DWORD WINAPI net_thread(LPVOID unused)
                 uint8_t cb[6 + 8 + 4];
                 int n = header(cb, T_CAPS);
                 memcpy(cb + n, N.token, 8); n += 8;
-                put32(cb + n, CAPS_KOTH); n += 4;
+                put32(cb + n, CAPS_KOTH | CAPS_CREATED); n += 4;
                 send_raw(cb, n);
             } else {
                 N.relay_caps = 0;
                 fprintf(stderr, "[NETPLAY] the relay did not answer CAPS: an older relay, no King of the Hill\n");
             }
             N.caps_sent = now;
+        }
+        /* created fighters: upload this player's record once the relay allows them, until it is kept */
+        if (N.lobby && N.have_token && N.state == NETPLAY_LOBBY && N.relay_caps > 0 && (N.relay_caps & CAPS_CREATED)) {
+            if (!N.cp_mine_state) {
+                N.cp_mine_state = cp_local_record(N.cp_mine) ? 1 : -1;
+                N.cp_tries = 0;
+            }
+            if (N.cp_mine_state > 0 && N.cp_acked != cp_record_crc(N.cp_mine) && N.cp_tries < RETRIES &&
+                now - N.cp_sent >= RETRY_MS) {
+                uint8_t fb[6 + 8 + 2 + CP_REC_LEN];
+                int n = header(fb, T_FIGHTER);
+                memcpy(fb + n, N.token, 8); n += 8;
+                fb[n++] = (uint8_t)CP_REC_LEN; fb[n++] = (uint8_t)(CP_REC_LEN >> 8);
+                memcpy(fb + n, N.cp_mine, CP_REC_LEN); n += CP_REC_LEN;
+                send_raw(fb, n);
+                N.cp_tries++;
+                N.cp_sent = now;
+            }
+        }
+        if (N.cp_waiting) {
+            int complete, late;
+            AutoMatch wm;
+            EnterCriticalSection(&g_cs);
+            complete = cp_records_complete(now - N.cp_get_sent >= RETRY_MS);
+            if (now - N.cp_get_sent >= RETRY_MS) N.cp_get_sent = now;
+            late = now - N.cp_wait_since >= CP_WAIT_MS;
+            wm = N.cp_wait_m;
+            if (complete || late) InterlockedExchange(&N.cp_waiting, 0);
+            LeaveCriticalSection(&g_cs);
+            if (complete) {
+                fprintf(stderr, "[NETPLAY] the created fighters' records are here\n");
+                automatch_request(&wm);
+            } else if (late) {
+                fprintf(stderr, "[NETPLAY] a created fighter's record never came: the match is left\n");
+                end_hub_match("a created fighter's record never came");
+            }
         }
         /* King of the Hill: this PC's RESULT, repeated until a HILL shows the fight over */
         if (N.lobby && N.have_token && N.koth_winner >= 0 && now - N.koth_sent >= RETRY_MS) {
@@ -1946,6 +2159,14 @@ static int start(const char *server, const char *name, int creating, const char 
     for (i = 0; i < ROOMSLOTS; i++) { N.pos_of_slot[i] = i < 2 ? i : -1; N.slot_rtt[i] = -1; }
     N.last_pinginfo = 0;
     N.relay_caps = -1;
+    /* created fighters: read the player's own again (a new one may have been made meanwhile) */
+    N.cp_mine_state = 0;
+    N.cp_acked = 0;
+    N.cp_tries = 0;
+    memset(N.cp_have, 0, sizeof(N.cp_have));
+    memset(N.cp_start_crc, 0, sizeof(N.cp_start_crc));
+    N.cp_waiting = 0;
+    created_fighter_reload();
     N.koth_match = 0;
     N.koth_winner = -1;
     N.start_deferred = 0;
@@ -2432,6 +2653,8 @@ void netplay_sync_point(void)
             fprintf(stderr, "[NETPLAY] rollback on for this match: every player has it on\n");
         } else if (N.koth_match) {
             fprintf(stderr, "[NETPLAY] rollback off for this match: King of the Hill fights play in lockstep\n");
+        } else if (match_has_created()) {
+            fprintf(stderr, "[NETPLAY] rollback off for this match: a created fighter plays; lockstep\n");
         } else {
             for (i = 0; i < N.players && i < MAXP; i++) {
                 char who[40];
@@ -2570,6 +2793,10 @@ static DWORD WINAPI autostart_thread(LPVOID unused)
         if (q && *q) sscanf(q, "%d,%d", &qmode, &qmax);
         /* the relay lets only a client that announced King of the Hill into such a room */
         for (i = 0; i < 50 && NETPLAY_IS_KOTH(qmode) && N.relay_caps < 0; i++) Sleep(100);
+        /* a created fighter (fighter 99): only once the relay keeps this player's record */
+        for (i = 0; i < 100 && fighter == NETPLAY_CREATED_FIGHTER && !netplay_created_available(); i++) Sleep(100);
+        if (fighter == NETPLAY_CREATED_FIGHTER)
+            fprintf(stderr, "[NETPLAY] tests: the created fighter is %savailable\n", netplay_created_available() ? "" : "NOT ");
         if (listed && *listed) {
             /* RECOMP_TEST_JOIN_LISTED=<s>: no quick match; join the first open room the room list shows
              * (with RECOMP_NETPLAY_SERVER=both the other relay's rooms too, moving there to join), as a
@@ -3271,6 +3498,7 @@ void netplay_on_step(void)
     uint32_t s, target, k, need;
     ULONGLONG waited_since, last_send, last_note;
     if (N.lockstep) versus_hold();
+    created_fighter_on_step();  /* created fighters: unlinked once their looks are built */
     fight_input();              /* also after a fight went on offline */
     if (!N.resim) watch_pads();
     koth_check_result(0);

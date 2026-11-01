@@ -42,7 +42,9 @@ def cmd_scenario(a):
                              fighters=ints(a.fighters) if a.fighters else None, rollback=a.rollback,
                              fast_ko=a.fast_ko, ko_winner=a.ko_winner, bot=a.bot, timeout=a.timeout,
                              relay_port=a.relay_port, keep_going=a.keep_going, extra_env=env,
-                             require_hits=a.require_hits, quick=a.quick, **common)
+                             require_hits=a.require_hits, quick=a.quick, created=a.created,
+                             cp_records=a.cp_records.split(",") if a.cp_records else None,
+                             rematch=a.rematch, venues=a.venues, **common)
     elif a.kind == "offline":
         r = scenarios.offline(type=a.type, venue=a.venue, f0=a.f0, f1=a.f1, cpu=not a.human, bot=a.bot,
                               fast_ko=a.fast_ko, turbo=a.turbo, timeout=a.timeout or 420,
@@ -153,6 +155,10 @@ def main(argv=None):
     sc.add_argument("--keep-going", action="store_true", help="online: do not stop at the first desync")
     sc.add_argument("--require-hits", action="store_true", help="online: a match where a slot landed no hit fails")
     sc.add_argument("--quick", help="online: raw RECOMP_NETPLAY_QUICK 'mode,players'")
+    sc.add_argument("--created", action="store_true", help="online: the relay plays created fighters (fighter 99)")
+    sc.add_argument("--cp-records", help="online: per copy a profile dump or user ID save (RECOMP_CP_RECORD), comma-separated, '' for none")
+    sc.add_argument("--venues", help="online: the venue feIDs every vote offers in turn (relay -test-venues), e.g. 26")
+    sc.add_argument("--rematch", action="store_true", help="online: matches after the first are Rematch from the results menu")
     sc.add_argument("--type", type=int, default=0)
     sc.add_argument("--venue", type=int, default=1)
     sc.add_argument("--f0", type=int, default=55)

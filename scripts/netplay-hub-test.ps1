@@ -47,6 +47,10 @@
 .PARAMETER NaLagMs  the same for "North America".
 .PARAMETER NoOverride  the copies' own data folders get no menu patch (<data>\override; copied by default), as
                     for a player whose dump apt-patch did not recognise: no ONLINE entry, no Online.Tick().
+.PARAMETER Created  the relay lets players fight with their created fighters (relay -created; the live one only
+                    with its switch file); give a copy fighter 99 in -Fighters and a record in -CpRecords.
+.PARAMETER CpRecords one profile dump or user ID save per copy (RECOMP_CP_RECORD): that copy's created fighter
+                    ('' for none).
 .PARAMETER SwitchTo with -NaRelayPort: every copy switches the server in the lobby (eu, na or auto) the way
                     the hub's picker does, -SwitchAfterMs after entering it, then quick-matches there.
 #>
@@ -58,7 +62,8 @@ param([ValidateRange(2, 4)][int]$Players = 2, [int]$Secs = 1200, [string[]]$Extr
       [int]$EuLagMs = 0, [int]$NaLagMs = 0, [ValidateSet('', 'auto', 'eu', 'na')][string]$SwitchTo = '',
       [int]$SwitchAfterMs = 3000, [ValidateSet('auto', 'eu', 'na', 'both')][string[]]$Servers = @(),
       [int[]]$JoinListed = @(), [int]$JoinListedSecs = 90, [int]$CopyGapSecs = 3, [switch]$NoOverride,
-      [string]$Venues = '', [string]$SummaryPresses = '4+3x12', [int]$FightSecs = 1200)
+      [string]$Venues = '', [string]$SummaryPresses = '4+3x12', [int]$FightSecs = 1200,
+      [switch]$Created, [string[]]$CpRecords = @())
 $ErrorActionPreference = 'Stop'
 $repo = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 Set-Location $repo
@@ -80,6 +85,7 @@ $started = Get-Date
 # RECOMP_ROLLBACK=on in ExtraEnv: the test relay allows rollback (the live one only with its switch file)
 $relayArgs = @('-listen', "127.0.0.1:$RelayPort", '-log-interval', '30s')
 if ($ExtraEnv -match '^RECOMP_ROLLBACK=on') { $relayArgs += '-rollback' }
+if ($Created) { $relayArgs += '-created' }
 if ($NaRelayPort -and $EuLagMs) { $relayArgs += @('-test-lag', "$($EuLagMs)ms") }
 if ($Venues) { $relayArgs += @('-test-venues', $Venues) }
 $env:HARNESS_SUMMARY_PRESSES = $SummaryPresses
@@ -131,6 +137,7 @@ for ($i = 0; $i -lt $Players; $i++) {
     } else { @('--env', "RECOMP_NETPLAY_SERVER=127.0.0.1:$RelayPort") }
     if ($NaRelayPort -and $SwitchTo) { $serverEnv += @('--env', "RECOMP_TEST_SERVER_SWITCH=$SwitchAfterMs,$SwitchTo") }
     if ($JoinListed -contains $i) { $serverEnv += @('--env', "RECOMP_TEST_JOIN_LISTED=$JoinListedSecs") }
+    if ($i -lt $CpRecords.Count -and $CpRecords[$i]) { $serverEnv += @('--env', "RECOMP_CP_RECORD=$($CpRecords[$i])") }
     $args = @('scripts/harness.py', 'run', $copyRoute, '--preset', 'win-x64-release', '--secs', "$Secs",
               '--env', 'RECOMP_NETPLAY=quick') + $serverEnv + @(
               '--env', "RECOMP_NETPLAY_QUICK=$quick", '--env', "RECOMP_NETPLAY_FIGHTER=$($fighters[$i])",
@@ -171,8 +178,9 @@ for ($i = 0; $i -lt $Players; $i++) {
     $choice = if ($i -lt $Servers.Count) { $Servers[$i] } else { $Server }
     "== copy $i  $log" + $(if ($NaRelayPort) { "  (server $choice$(if ($JoinListed -contains $i) { ', joins from the room list' }))" } else { '' })
     Get-Content "$logs\copy$i.txt" | Select-Object -First 4 | Select-Object -Skip 1
+    Select-String -Path "$logs\copy$i.txt" -Pattern '^(save|written|FAIL)\s' | ForEach-Object Line
     if ($log -and (Test-Path $log)) {
-        Select-String -Path $log -Pattern '\[SERVERS\]|\[NETPLAY\] (tests: (server|switching|now|the room list|joining|no open room|Both servers)|room: the player|START|match|sync|Match over|A player|refused|desync)|\[AUTOMATCH\] sequence|"event":"(match_over|result)"|CRASH' |
+        Select-String -Path $log -Pattern '\[SERVERS\]|\[NETPLAY\] (tests: (server|switching|now|the room list|joining|no open room|Both servers)|room: the player|START|match|sync|Match over|A player|refused|desync|the relay keeps|waiting for a created|the created)|\[CREATED\]|\[AUTOMATCH\] sequence|"event":"(match_over|result)"|CRASH' |
             ForEach-Object { $_.Line.Substring(0, [Math]::Min(170, $_.Line.Length)) }
         Select-String -Path $log -Pattern 'checksums compared' | Select-Object -Last 1 | ForEach-Object Line
         if ($FastKo -gt 0) { "fast knockouts: " + @(Select-String -Path $log -Pattern '\[TEST-KO\] match').Count }

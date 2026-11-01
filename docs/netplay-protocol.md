@@ -254,6 +254,47 @@ that relay.
 - The game asks at most every 3 s per relay, while its room list shows or while it waits alone in a
   quick room on Both servers (the `age` lets two such players decide who moves; see `docs/netplay.md`).
 
+## Created fighters (Story-mode fighters online)
+
+Since build 37 a player may fight with the fighter they made in Story mode
+(`docs/research/created-fighter-online.md`). The fighter is a fixed-size **record** the client
+uploads; the relay keeps it with the player, hands it to the other members of the player's room,
+and names it in `START`, so every PC writes the same bytes into the game. Same header and version;
+types from 0x27, dropped silently by older relays.
+
+| Type | Name | Direction | Body after the header |
+|---|---|---|---|
+| 0x27 | `FIGHTER` | client -> server | `token` 8, `len` u16 (0 or 300), `record` (len bytes; empty: clear) |
+| 0x28 | `RECORD` | server -> client | `slot` u8 (a room member's slot, or 0xFE: the relay's copy of the sender's own), `len` u16 (0 or 300), `record` |
+| 0x29 | `RECGET` | client -> server | `token` 8, `slot` u8 (send the record of that member again) |
+
+- The **record** (300 bytes): `version` u8 (1), a 0x127-byte payload (name 0x20, the profile's
+  bytes +0xFC..+0x143: base stats, bonus stats, move keys, voice, styles, archetype; the created
+  flag 1; recipe 0x98; options 0x26), `crc` u32 (CRC-32/IEEE of version and payload).
+- `CAPS` bit 3 (`8`): from a client, "I can play created fighters"; in the relay's answer, "the
+  switch is on". The switch is the file `created-fighters-allowed` in the relay's updates folder
+  (read at every request, so it turns on and off without a restart; `-created` forces it on for
+  tests). `STATUS` does not report it.
+- `FIGHTER` is answered with `RECORD` slot 0xFE: the record the relay keeps (empty when the switch is
+  off, the client did not announce bit 3, or the record is malformed: wrong size or version, bad
+  CRC, a name that is not 1..8 printable ASCII characters, an archetype outside 86..141, no first
+  style, no created flag). A kept record goes to the other members of the client's room as
+  `RECORD`; a client joining a room gets every member's record and the members get its own.
+  Clearing a record while ready with it in a lobby-phase room makes the fighter Doc (55).
+- `READY` with fighter **99** plays the record when the relay keeps one and the switch is on;
+  otherwise 99 is replaced like any fighter without a database record (Doc). King of the Hill
+  rooms never play records (99 becomes Doc there).
+- `START` gains a trailer when a player plays a record: after the players, `count` u8, then per
+  such player `slot` u8, `crc` u32 (the record the relay sent). Without created fighters `START`
+  is unchanged. The relay sends the named records (`RECORD`) to every other member right before
+  `START`; a client that lacks one asks with `RECGET` and sets the match up only once it has it
+  (after 10 s it leaves the match).
+- The relay checks only the record's shape. Every client checks and clamps the record the same way
+  before the game sees it (`cp_record_sanitize`, `src/hooks/created_fighter.c`): name cut to
+  printable ASCII, voice 1..6, styles 0..4, base stats at most 50, bonus stats 0..38, move keys and
+  recipe parts that the game's database has (others become the defaults). The sender plays the
+  checked copy too.
+
 ## Server operation
 
 The relay is one static binary (`netplay/relay`, Go). `relay -listen :27777` serves; it logs

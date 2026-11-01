@@ -19,6 +19,7 @@
 #include "automatch.h"
 #include "netplay.h"
 #include "online_screen.h"
+#include "created_fighter.h"
 
 extern void xbox_NoteAnchorEvent(const char *text);
 
@@ -225,7 +226,22 @@ static void run_sequence(void)
      * Nothing in the fight reads it (docs/research/summary-cpu-tag.md). */
     for (i = 0; i < m->count; i++) call("Controller.ControllerReturn(%d)", i);
     call("Game.ResetFighterList()");
-    for (i = 0; i < m->count; i++) call("Controller.ControllerSetup(%d,%d,%d,%d)", i, m->pad[i], m->fighter[i], i);
+    created_fighter_begin();
+    for (i = 0; i < m->count; i++) {
+        int fighter = m->fighter[i];
+        if (fighter == CP_FIGHTER_ID) {
+            /* a created fighter: the record START named (online), or this player's own; every PC
+             * of the match writes the same checked record. Without one the slot plays Doc. */
+            uint8_t rec[CP_REC_LEN];
+            int have = netplay_active() ? netplay_created_record(i, rec) : cp_local_record(rec);
+            fighter = have && m->pad[i] >= 0 ? created_fighter_inject(i, m->pad[i], rec) : -1;
+            if (fighter < 0) fighter = 55;
+        } else {
+            int test = created_fighter_test_slot(i, m->pad[i]);     /* RECOMP_TEST_CP only */
+            if (test >= 0) fighter = test;
+        }
+        call("Controller.ControllerSetup(%d,%d,%d,%d)", i, m->pad[i], fighter, i);
+    }
     call("Game.ResetVenueList(0)");
     call("Game.ChooseVenue(%d)", m->venue);
     call("Controller.GetCustomControlMap()");
@@ -303,6 +319,7 @@ void test_control_note_funccall(const char *text);     /* src/hooks/test_control
  * players have not chosen yet). */
 int automatch_hold_funccall(const char *text)
 {
+    created_fighter_before_funccall(text);      /* unlinks created fighters before the reward step */
     if (!strcmp(text, "Game.Rematch()")) return netplay_rematch_request();
     return 0;
 }
