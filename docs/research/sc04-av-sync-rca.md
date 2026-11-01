@@ -16,9 +16,11 @@ appears late.
 This is a confirmed video-side drift mechanism. Raw-XBE disassembly, live
 cinema/audio counters and an intervention in an isolated RC process agree.
 The intervention removed the positive drift with both normal frame-clock
-steering and the steering-disabled diagnostic. **No production fix is shipped
-by this investigation.** The remaining small offsets are not a measured
-speaker-to-mouth synchronization result.
+steering and the steering-disabled diagnostic. The subsequent
+[source fix and validation](sc04-fix-validation.md) preserve nonzero deltas and
+bound the affected scene set. The RC experiments below remain the original
+diagnostic record. Their small offsets are not a measured speaker-to-mouth
+synchronization result.
 
 ## Exact baseline and isolation
 
@@ -147,7 +149,7 @@ anomaly, not the basis for this RCA or a proven HD-pack defect. Low-cache
 texture churn alone did not reproduce it. Audio dropout counters alone would
 also miss the video-side fallback identified here.
 
-## Reproduction and next implementation
+## Reproduction and source follow-up
 
 For a normal local run, use `RECOMP_SCENE=sc04`, the reported HD packs,
 `RECOMP_FRAME_CLOCK_TRACE=1`, `RECOMP_AUDIO_HOST=1`, and recording with
@@ -159,16 +161,14 @@ script are `logs/run_baseline.py` and `logs/summarize_sync.py` in the
 samples, device-input WAV and stderr log under `logs/<trial>/`. Recorder
 session IDs are in the dataset. All recordings and raw samples remain local.
 
-The production fix should prevent **zero pending simulation time from
-becoming positive animation time for SC04**, while preserving actual positive
-deltas and shot/blackout transitions. Prefer a narrow game-side correction;
-do not compensate by changing global audio speed or buffer sizes. The live
-threshold intervention demonstrates a candidate, but it also removes the
-fallback for every positive delta below 1/120 and needs review before shipping.
+The [implemented game-side guard](sc04-fix-validation.md) prevents **zero pending
+simulation time from becoming positive animation time for SC04**, while
+preserving actual positive deltas and shot/blackout transitions. It does not
+change audio speed or buffer sizes. Unlike the live threshold intervention,
+it retains the fallback for positive deltas below 1/120.
 
-Before closing #161: implement a source fix, add a focused zero-step/two-step
-cinema timing regression, build it, repeat SC04 under normal/stressed pacing,
-check adjacent scenes and the final blackout, and run the appropriate quick
-and audio/Story regression gates. Validate macOS/Linux and have the owner
-confirm the later dialogue in a Story-mode playtest. This draft RCA leaves
-the issue open and does not claim those gates have passed.
+The follow-up records the native fixture, new source build, normal/stressed
+SC04 runs, other-scene controls and quick regression separately. Full regression
+is deferred at the owner's request. Before release closure, validate
+macOS/Linux and have the owner confirm the later dialogue in a Story-mode
+playtest; those results are not inferred from the clock counters.
