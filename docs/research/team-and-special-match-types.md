@@ -6,6 +6,7 @@ own dump), the lifted C in `src/recomp/gen/recomp_00NN.c` read with `grep`, a fe
 XBE image (capstone, to settle flag questions the lifter marks "unsupported"), `game/assets/gamecore.xml`,
 `game/venue.xml`, the run logs in `logs/` (telemetry `match_type`, `[AUTOMATCH]`, `[FUNCCALL]`, `[FE-PROBE]`),
 and `src/hooks/{automatch,netplay,online_data,online_screen}`, `netplay/relay/`. No game bytes are reproduced.
+Sections 10 and 11 (added 2026-10-25/26) are what the online Team and special-match modes built on it and measured.
 
 Tags: **[V]** verified by reading the exact code, script or log line; **[I]** inferred (reasoning given);
 **[U]** unknown, needs a run. Fighter record = `0x003B92E0 + slot * 0x12E8`.
@@ -395,3 +396,132 @@ The relay needs no change for either: `Mode` is any byte except 0xFF, `Max` 2..4
 * online-match-setup.md: the fight's `0x3B9084` being "a different number" than the front-end id is explained here (it is
   an arena kind from the venue); the free-for-all ids are 2 (3 fighters) and 3 (4 fighters).
 * fighter-record-fields.md `+0x937` bit 2 "team or partner flag": it is the side marker for slots 2 and 3 in team mode.
+
+## 10. Measured with the online Team and special-match modes (2026-10-25 and 26)
+
+Built on this study: Team (mode 1, four humans) and the six special matches (modes 6..11, each on its venue) as room
+modes, played through the local relay by two and four copies of the game on one PC (`scripts/netplay-hub-test.ps1
+-Mode N`, one guest CPU per copy, `RECOMP_TEST_OBSERVATIONS=1`). Every lockstep match logs `[NETPLAY] fight setup:`
+at its first step: the mode mask `0x3B907E`, the arena kind `0x3B9084`, and per fighter `+0x937` and the slots its
+`+0` (opponent) and `+4` (partner) pointers name.
+
+**Team (experiment 2, with four humans instead of two pads and CPUs) [V].** Every Team match on all four PCs:
+
+```
+mode mask 02; 0:flags 02 opp 3 mate 1  1:flags 02 opp 2 mate 0  2:flags 06 opp 1 mate 3  3:flags 06 opp 0 mate 2
+```
+
+So `0x3B907E` = 2, the side marker 4 on slots 2 and 3 only, opponent slot^3, partner slot^1, as section 3.2 read it.
+The result records follow section 3.4: in the generic branch each defeated fighter gets a record of its own (code 0x20,
+not decisive, winners = its primary opponent) until a side is out, then the decisive one (0x21) names one winner and
+one loser, e.g. `0x20 [0] vs [2]` then `0x21 [0] vs [3]`. At 125th Street Station the train took slots 0 and 3 in one
+record (`0x1100`, losers [0, 3], no winner) and the decisive `0x21 [2] vs [1]` followed. The winner word names one
+fighter; the online report expands it to the side (`winners_of` in netplay.c), and all four PCs reported
+`"winners":[2,3]` / `[0,1]` alike. `Game.GetMatchSummary(i)` is asked once per fighter (four times after a Team match),
+which the harness's per-match anchors now use (`game.getmatchsummary(0#N`).
+
+Team in lockstep (four copies, delay 2):
+
+| run | venue (feID) | arena kind | steps to the result | checksum comparisons per PC (3 other PCs every 60 steps), all equal | result |
+|---|---|---|---|---|---|
+| 1, match 1 | 125th Street Station (11) | 4 | 16 045 | 810 | winners 2+3 on all four |
+| 1, match 2 | Terror Dome (6) | 21 | none: no input after step 13 000 (the old summary anchors) | 2 000 to step 39 960 | stopped by hand |
+| 2, match 1 | Club 357 (4) | 9 | desync at 3 120 | 150, then different on all four | void (not reported); one PC later went ahead, the others gave up as designed |
+| 3, match 1 | Hunt's Point Scrapyard (14) | 0 | 21 132 | 1 060 | winners 0+1 on all four |
+| 3, match 2 | Syn Energy Power Plant (7) | 3 | 10 227 | 520 | winners 0+1 on all four |
+| 3, match 3 | Gauntlet (21) | 11 | 14 603 | 730 | winners 0+1 on all four |
+
+Runs 1 to 3 were on the build before the rebase onto build 29; the table below them is after it.
+
+**Desyncs in Team, and what they were [V for the measurements, I for the causes].** With
+`RECOMP_NETPLAY_STEPLOG=1` every PC keeps its last 256 steps of the four fighter records, the match globals, the
+weapon table `0x3BE778` and the weapon manager `0x376144`, and writes them to `logs/desync-<match>-p<N>.bin` when
+it sees a desync; comparing the four files names the first step and field where they part.
+
+1. *Club 357 (feID 4), thousands of steps in* (3 of 4 Team matches there: steps 3 120, 3 720, 6 480): the first
+   field to part was fighter 0's `+0x81C`, set in fighter state `0x69` (walk to a weapon on the floor and pick it
+   up, `sub_001AAD40`) to the yaw toward the weapon (-23.2 / -25.8 / -24.0 on three PCs); in another match the same
+   step put fighter 0 into state `0x69` on three PCs and `0x1E` on the fourth. The weapon's position comes through
+   the weapon table (`weapon-position-timing.md`).
+2. *The weapons at the first step*: the weapon manager's slots (their matrices, velocities) already differed at step
+   1 between PCs whose match loads had taken different times. Its update runs once a game update through the task
+   list, also while the match loads, at each PC's own pace. Fix (`weapon_update` in netplay.c): in a lockstep room
+   match the update waits for the first fight step. Measured since: the weapon state hashes alike at step 1 on all
+   four PCs of every match.
+3. *Fighter 0's pose at step 2* (3 of 6 Team matches after the rebase, all three in the second or third match of a
+   session): every byte compared was equal at step 1; at step 2 fighter 0's twenty joint copies (`+0xDC..`) differed
+   on exactly one PC, then `+0x68`/`+0x78` of every fighter at step 6, the facing `+0x54` at step 14, and the
+   checksum at step 60 or 120. The odd PC was each time the one whose match load (from the START) had taken a
+   different time from the others' (4.7 s against 2.1 s; 6.0 against 2.1; 2.1 against 4.8). Second and third matches
+   whose four loads took the same time (9AC781FF below; 53985071, 2D38F1BB, 709A280E before the rebase) were clean,
+   and so was a first match with unequal loads (697F92CA: 9.8 s against 21). So something fighter 0's model or
+   animation uses is advanced at the host's pace while the match loads, like the crowd (`crowd-lockstep-reset.md`)
+   and the weapons above; it is not in the data compared (all equal at step 1). Not found yet. Next: list the task
+   list's objects (`sub_0001B100`, vtable+8) that run between `netplay_on_match_start` and the first step, and hold
+   them as the weapon manager is held.
+
+Team after the rebase onto build 29 (four copies, `-FastKo 1200 -FastKoWinner 3`: slot 3 wins at step 1 200 of the
+fight, so side 2+3):
+
+| match | venue (feID) | loads (s) | result |
+|---|---|---|---|
+| AC2A3975 | Hunt's Point Scrapyard (14) | 21.7 / 21.7 / 28.3 / 22.0 | clean, winners 2+3 on all four |
+| 37EB7E4C | Gauntlet Round Two (22) | 2.1 / 4.7 / 2.1 / 2.1 | desync at step 60 (case 3, the weapons too: before the fix) |
+| 9AC781FF | Syn Energy Power Plant (7) | 2.1 / 2.1 / 2.1 / 2.1 | clean, winners 2+3 on all four |
+| 697F92CA | Terror Dome (6) | 9.8 / 20.9 / 21.2 / 20.8 | clean, winners 2+3 on all four (weapons waited) |
+| 78D38DE5 | 125th Street Station (11) | 2.1 / 6.0 / 2.1 / 2.1 | desync at step 60 (case 3) |
+| A46FE8C8 | The Heights (18) | 2.1 / 4.9 / 4.8 / 4.7 | desync at step 120 (case 3) |
+
+**Special matches (experiment 4, online) [V].** One full match each, two copies, real front-end type sent
+(`Game.SetMatchType(6..11)`), the relay's fixed venue, no vote:
+
+| mode | venue (feID) | mode mask | arena kind | steps to the result | checksums compared, all equal | result record (both PCs) |
+|---|---|---|---|---|---|---|
+| 6 Demolition | Gun Hill Garage (17) | 01 | 19 | 11 708 | 190 | 0x21, slot 0 beat slot 1 |
+| 7 Inferno | Red Hook Tire Co. (24) | 01 | 7 | 10 017 | 160 | 0x81, slot 1 beat slot 0 |
+| 8 Subway | 125th Street Station (11) | 01 | 4 | 15 710 | 260 | 0x21, slot 0 beat slot 1 |
+| 9 Window | Crow's Office (26) | 01 | 17 | 13 985 | 230 | 0x21, slot 1 beat slot 0 |
+| 10 Cage | Club Murder (10) | 01 | 16 | 16 024 | 270 | 0x21, slot 0 beat slot 1 |
+| 11 Ringout | The Dragon House (8) | 01 | 5 | 12 611 | 210 | 0x21, slot 0 beat slot 1 |
+
+After the rebase, once each again (two copies, full matches): Demolition 0x21 at step 20 802 (340 checksums),
+Inferno 0x81 at 9 956 (160), Subway 0x21 at 12 548 (210), Window 0x21 at 12 345 (200), Cage 0x21 at 10 180 (170),
+Ringout **0x801** at 12 940 (210): a ring out. Both PCs agreed, but the match was not reported: a ring out ends the
+fight without the decided phases (2, 3) and without the decided flag, which is all the step's reading looked at. Fixed
+(`report_missed_result`: back in the menus, a decisive record nobody reported counts the fighters not marked ended,
+`+0x932` bit 0x200, as the winners). Four Ringout reruns ended by knockout (0x21, reported), so the ring-out path of
+the fix is not yet seen live. King of the Hill's own reading (`koth_check_result`) still counts a ring out as a draw.
+
+No crash, no desync; both PCs reported the same winner; the summary led back to the battle match-type screen and the
+room as after a One on One (Demolition's room started its next match at once, without a vote). The mode mask is 1 for
+every special type (class 0, section 2), and the arena kinds 19, 7, 4, 17, 16, 5 confirm the [I] column of section 4.
+Inferno's decisive record carries 0x80 (the fire's kill). The state comparison of type 6..11 against type 0 at the same
+venue (the first half of experiment 4) was not run: sending the real type changes only what `GetMatchType` and the
+summary see, and these matches played and ended normally with it.
+
+**Arena kind per venue (part of experiment 1) [V]:** feID 1 → 2, 4 → 9, 6 → 21, 7 → 3, 8 → 5, 10 → 16, 11 → 4, 14 → 0,
+17 → 19, 19 → 15, 21 → 11, 24 → 7, 26 → 17: venue.xml `<ID>`, minus one above the cut venue (section 2).
+
+**3-Way quick room:** its vote drew venues 19, 7, 6 (the relay's quick pool for modes with more than two fighters
+leaves out 17, 24 and 26; `TestRoomSettingsNormalised` checks every pool, `TestQuickVotesNeverOneOnOneVenues` draws
+6 000 votes of Team, 3-Way and Free for All quick rooms with the real random source: never 17, 24, 26, every other
+venue drawn). The Team runs' relay logs show votes on [11 22 8], [18 5 15], [6 5 19], [11 16 2]. The test's third copy came three seconds
+after the vote had started and opened a room of its own, so the match was two humans and a CPU: clean in lockstep
+(350 checksums), mode mask 04, the CPU fighter's flags 03.
+
+## 11. What the online modes do (the design, for the code)
+
+* **Relay** (`protocol_lobby.go` `roomSettings`, `lobby.go`): a Team room always has `max` 4 and starts its vote
+  only with four present and ready; a special match's room has `max` 2 and the pool of its venue, and starts at once
+  (START, no vote) when both are ready; Team, 3-Way and Free for All rooms never vote on 17, 24, 26, whatever pool
+  CREATE or SETTINGS sends (a pool of only those becomes the mode's quick pool). QUICK and LIST work by mode as before.
+* **Game**: `online_data.c` lists Team and the six specials (with their venue); automatch sends the real match type.
+  Teams are the room slots in order (slots 0 and 1 against 2 and 3, section 6.1 option 1); no human+CPU teams.
+* **Accounts** (`stats.go`): results already take a winners list. A Team leaver takes the loss; when the leavers are
+  all of one side and none of their games crashed, the other side takes the win and the leaver's partner takes
+  nothing; leavers on both sides lose and nobody wins; a crashed leaver is a no contest (`team_test.go`).
+* **Room match setup**: from a room's START until the game is back in the room, the menu's own match-setup calls
+  (ControllerBind/Setup, SetMatchType, ChooseVenue, ChooseMCDevice, ...) are dropped: an A pressed on the battle
+  menu during a load cleared the controller bindings and that game crashed in the load (`sub_00142D20`, a Team test).
+* Not done: the fighter-pose desync of section 10 (case 3), draws in Team (the existing draw reading, untested),
+  Team rematch, human+CPU teams, experiment 3 (a captured front-end Team match), experiment 5 (draw records).

@@ -8,10 +8,14 @@
   as a junction, a copy of the saves). Prints the [NETPLAY] and [AUTOMATCH] lines of every log.
   Copies need the real input path (virtual pads): the harness's plain scripted pad is one device
   only, and the game would wait for the missing players' controllers.
-.PARAMETER Players  2..4 (3 and 4 play Free for All).
+.PARAMETER Players  2..4 (3 and 4 play Free for All unless -Mode says otherwise).
+.PARAMETER Mode     the quick-match mode: 0 One on One, 1 Team (four players: copies 0 and 1 on the left
+                    side, 2 and 3 on the right), 2 3-Way, 3 Free for All, 6..11 a special match; -1 (the
+                    default): One on One for two players, Free for All for more.
+.PARAMETER LogName  the folder under logs\ for the relay's log and the copies' summaries.
 .PARAMETER Secs     Upper bound per copy.
 .PARAMETER ExtraEnv Extra NAME=VALUE pairs for every copy.
-.PARAMETER Route    harness route family: online (two matches), online5 or online8 (five or eight in a row).
+.PARAMETER Route    harness route family: online (two matches), online1, online3, online5 or online8 (one, three, five or eight in a row).
 .PARAMETER Fighters Battle-mode fighter IDs (src/hooks/online_data.c), one per copy.
 .PARAMETER Stage    extra harness stages for every copy (e.g. a START press during the fight).
 .PARAMETER FastKo   tests: the game knocks the loser out at this fight step of every match
@@ -62,7 +66,7 @@
                     the hub's picker does, -SwitchAfterMs after entering it, then quick-matches there.
 #>
 param([ValidateRange(2, 4)][int]$Players = 2, [int]$Secs = 1200, [string[]]$ExtraEnv = @(),
-      [ValidateSet('online', 'online5', 'online8', 'online-rematch')][string]$Route = 'online', [int[]]$Fighters = @(55, 22, 9, 31),
+      [ValidateSet('online', 'online1', 'online3', 'online5', 'online8', 'online-rematch')][string]$Route = 'online', [int[]]$Fighters = @(55, 22, 9, 31),
       [string[]]$Stage = @(), [int]$FastKo = 0, [string]$FastKoWinner = 'alt', [switch]$Bot,
       [ValidateRange(0, 100)][int]$BotAggression = 60, [int]$RelayPort = 27777, [int]$BaseCore = 2,
       [string]$DataPrefix = '', [int]$NaRelayPort = 0, [int]$WestRelayPort = 0,
@@ -72,22 +76,21 @@ param([ValidateRange(2, 4)][int]$Players = 2, [int]$Secs = 1200, [string[]]$Extr
       [ValidateSet('', 'auto', 'eu', 'na', 'west')][string[]]$SwitchTos = @(),
       [int[]]$JoinListed = @(), [int]$JoinListedSecs = 90, [int]$CopyGapSecs = 3, [switch]$NoOverride,
       [string]$Venues = '', [string]$SummaryPresses = '4+3x12', [int]$FightSecs = 1200,
-      [switch]$Created, [string[]]$CpRecords = @())
+      [switch]$Created, [string[]]$CpRecords = @(), [int]$Mode = -1, [string]$LogName = 'hub-test')
 $ErrorActionPreference = 'Stop'
 $repo = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 Set-Location $repo
-# the owner's own game (installed elsewhere) or this checkout's build (an earlier test) must be closed; a
-# test of another checkout of this repository (the main one or a worktree under .claude\worktrees, on its
-# own CPUs and relay port) may run beside this one
+# the owner's own game (installed elsewhere) or the main checkout's build must be closed; a test of a
+# worktree under .claude\worktrees (on its own CPUs and relay port; this one's own too) may run beside this one
 $main = $repo
 $common = (git -C $repo rev-parse --path-format=absolute --git-common-dir 2>$null)
 if ($common) { $main = [IO.Path]::GetFullPath((Split-Path $common.Trim() -Parent)) }
 if (Get-Process defjam_recomp -ErrorAction SilentlyContinue | Where-Object {
-        $_.Path -notlike (Join-Path $main '*') -or $_.Path -like (Join-Path $repo 'build\*') }) {
+        $_.Path -notlike (Join-Path $main '*') -or $_.Path -like (Join-Path $main 'build\*') }) {
     throw 'Close the game first.'
 }
 $data = if ($env:DEFJAM_DATA) { $env:DEFJAM_DATA } else { 'D:\DefJam\data' }
-$logs = Join-Path $repo 'logs\hub-test'
+$logs = Join-Path $repo "logs\$LogName"
 New-Item -ItemType Directory -Force $logs | Out-Null
 
 $started = Get-Date
@@ -119,7 +122,9 @@ if ($NaRelayPort -and $WestRelayPort) {
 }
 Start-Sleep -Seconds 1
 
-$quick = if ($Players -eq 2) { '0,2' } else { "3,$Players" }
+if ($Mode -lt 0) { $Mode = if ($Players -eq 2) { 0 } else { 3 } }
+if ($Mode -eq 1 -and $Players -ne 4) { throw 'Team needs four players.' }
+$quick = "$Mode,$Players"
 $fighters = $Fighters
 $procs = @()
 for ($i = 0; $i -lt $Players; $i++) {
@@ -146,7 +151,9 @@ for ($i = 0; $i -lt $Players; $i++) {
             robocopy (Join-Path $data 'override') $over /MIR /NFL /NDL /NJH /NJS /NP | Out-Null
         }
     }
-    $copyRoute = if ($i % 2 -eq 0) { "$Route-p1" } else { "$Route-p2" }
+    # Team: room slots 0 and 1 start on the left (they approach with right), 2 and 3 on the right
+    $left = if ($Mode -eq 1) { $i -lt 2 } else { $i % 2 -eq 0 }
+    $copyRoute = if ($left) { "$Route-p1" } else { "$Route-p2" }
     $choice = if ($i -lt $Servers.Count) { $Servers[$i] } else { $Server }
     # every relay address local: a relay not started here is 127.0.0.1:9, which never answers
     $westAt = if ($WestRelayPort) { "127.0.0.1:$WestRelayPort" } else { '127.0.0.1:9' }
@@ -164,6 +171,7 @@ for ($i = 0; $i -lt $Players; $i++) {
     $args = @('scripts/harness.py', 'run', $copyRoute, '--preset', 'win-x64-release', '--secs', "$Secs",
               '--env', 'RECOMP_NETPLAY=quick') + $serverEnv + @(
               '--env', "RECOMP_NETPLAY_QUICK=$quick", '--env', "RECOMP_NETPLAY_FIGHTER=$($fighters[$i])",
+              '--env', "RECOMP_NETPLAY_NAME=Copy$i", '--env', 'RECOMP_NETPLAY_REPORT_LOG=1',
               '--env', 'RECOMP_TEST_OBSERVATIONS=1',
               '--env', 'RECOMP_INPUT_HOST=1', '--env', 'RECOMP_INPUT_IGNORE_FOCUS=1', '--env', 'RECOMP_PAD_HOST=1',
               '--env', 'RECOMP_INPUT_NO_PADS=1', '--env', 'RECOMP_INPUT_VIRTUAL_PADS=1', '--env', 'RECOMP_PAD_SCRIPT_VIRTUAL=1')
@@ -185,12 +193,13 @@ for ($i = 0; $i -lt $Players; $i++) {
 }
 $env:DEFJAM_DATA = $data
 foreach ($p in $procs) { $p.WaitForExit(($Secs + 300) * 1000) | Out-Null }
+# only the copies this test started, by id (the games its harnesses started): another test's copies, from
+# this checkout too (two tests on their own ports and CPUs), keep running
+$ids = @($procs | ForEach-Object { $_.Id })
+$games = @(Get-CimInstance Win32_Process -Filter "Name = 'defjam_recomp.exe'" -ErrorAction SilentlyContinue |
+           Where-Object { $ids -contains [int]$_.ParentProcessId } | ForEach-Object { [int]$_.ProcessId })
 foreach ($p in $procs) { if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force } }
-# only the copies this test started (this checkout's build, started after it began): another test's copies,
-# from a worktree, keep running
-Get-Process defjam_recomp -ErrorAction SilentlyContinue |
-    Where-Object { $_.Path -like (Join-Path $repo 'build\*') -and $_.StartTime -ge $started } |
-    Stop-Process -Force
+foreach ($id in $games) { Stop-Process -Id $id -Force -ErrorAction SilentlyContinue }
 if (-not $relay.HasExited) { $relay.Kill() }
 if ($relayNa -and -not $relayNa.HasExited) { $relayNa.Kill() }
 if ($relayWest -and -not $relayWest.HasExited) { $relayWest.Kill() }
@@ -205,7 +214,7 @@ for ($i = 0; $i -lt $Players; $i++) {
     Get-Content "$logs\copy$i.txt" | Select-Object -First 4 | Select-Object -Skip 1
     Select-String -Path "$logs\copy$i.txt" -Pattern '^(save|written|FAIL)\s' | ForEach-Object Line
     if ($log -and (Test-Path $log)) {
-        Select-String -Path $log -Pattern '\[SERVERS\]|\[NETPLAY\] (tests: (server|switching|now|the room list|joining|no open room|quick match searching|moving the quick match)|room: the player|START|match|sync|Match over|A player|refused|desync|the relay keeps|waiting for a created|the created)|\[CREATED\]|\[AUTOMATCH\] sequence|"event":"(match_over|result)"|CRASH' |
+        Select-String -Path $log -Pattern '\[SERVERS\]|\[NETPLAY\] (tests: (server|switching|now|the room list|joining|no open room|quick match searching|moving the quick match)|room: the player|START|match|sync|fight setup|report: .*"result"|Match over|A player|refused|desync|the relay keeps|waiting for a created|the created)|\[CREATED\]|\[AUTOMATCH\] sequence|"event":"(match_over|result)"|CRASH' |
             ForEach-Object { $_.Line.Substring(0, [Math]::Min(170, $_.Line.Length)) }
         Select-String -Path $log -Pattern 'checksums compared' | Select-Object -Last 1 | ForEach-Object Line
         if ($FastKo -gt 0) { "fast knockouts: " + @(Select-String -Path $log -Pattern '\[TEST-KO\] match').Count }

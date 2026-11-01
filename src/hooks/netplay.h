@@ -191,6 +191,10 @@ void netplay_room(char *code, int size);
 /* 1 while a session is connected and the game should run in lockstep. */
 int netplay_active(void);
 
+/* 1 from a hub room's START until the game is back in the room: the match is automatch's, and the
+ * menu's own match-setup calls are dropped (automatch_hold_funccall). */
+int netplay_match_locked(void);
+
 /* 1 while a fight runs, online or not (the game's match phase): no notices over it. */
 int netplay_in_fight(void);
 int netplay_rerunning(void);    /* 1 while rollback runs steps again */
