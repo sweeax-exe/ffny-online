@@ -66,6 +66,7 @@ void netplay_room(char *c, int size) { if (size > 0) c[0] = 0; }
 void netplay_autostart(void) {}
 int netplay_active(void) { return 0; }
 int netplay_in_fight(void) { return 0; }
+int netplay_match_locked(void) { return 0; }
 int netplay_voice_room(void) { return 0; }
 void netplay_send_voice(const uint8_t *p, int n) { (void)p; (void)n; }
 int netplay_room_name(int s, char *o, int n) { (void)s; if (n > 0) o[0] = 0; return 0; }
@@ -2668,7 +2669,11 @@ static int report_json(const char *event, uint32_t winners, uint32_t left, int d
 static void report_event(const char *event, uint32_t winners, uint32_t left, int draw)
 {
     char json[2048];
-    if (report_json(event, winners, left, draw, json, (int)sizeof(json))) account_report_match(json);
+    static int show = -1;   /* RECOMP_NETPLAY_REPORT_LOG=1 (tests): every report as it is made */
+    if (!report_json(event, winners, left, draw, json, (int)sizeof(json))) return;
+    if (show < 0) show = getenv("RECOMP_NETPLAY_REPORT_LOG") != NULL;
+    if (show) fprintf(stderr, "[NETPLAY] report: %s\n", json);
+    account_report_match(json);
 }
 
 /* The "crashed" report of the running match, built when its "start" goes out so that the crash
@@ -2707,6 +2712,17 @@ void netplay_on_crash(void)
     fflush(stderr);
 }
 
+/* The winners of a room match whose decision named fighter slot w: that slot, or in a Team match
+ * (2 vs 2) its whole side. The game's decision names one fighter (the last one put out's primary
+ * opponent; docs/research/team-and-special-match-types.md 3.4), and the side is the slot's pair:
+ * slots 0 and 1 against 2 and 3. */
+static uint32_t winners_of(uint32_t w)
+{
+    if (w >= MAXP) return 0;
+    if (N.report_m.type == ONLINE_MODE_TEAM && N.fighters == 4) return 3u << (w & 2u);
+    return 1u << w;
+}
+
 /* The room match decided, from netplay_on_step (code 4 a draw); once per match. */
 void netplay_on_result(uint32_t winners, uint32_t losers, uint32_t code)
 {
@@ -2723,6 +2739,34 @@ void netplay_on_result(uint32_t winners, uint32_t losers, uint32_t code)
     fprintf(stderr, "[NETPLAY] match result: winners 0x%X, code 0x%X; reporting it when signed in\n",
             (unsigned)winners, (unsigned)code);
     report_event("result", winners, 0, (code & 4u) != 0);
+}
+
+/* Back in the menus after a room match whose decision was recorded but never reported: a ring out
+ * (result code 0x801) ends the fight without the decided phases and without the decided flag, so the
+ * step's reading saw no winner and the match went unreported (two-copy Ringout test, 2026-10-26). The
+ * game marks every fighter it put out as ended (+0x932 bit 0x200, team-and-special-match-types.md
+ * 3.4); the ones still standing are the winners, a Team match's side among them. */
+#define F_DEFEAT_WORD 0x932u
+static void report_missed_result(void)
+{
+    uint32_t count = MEM32(G_RESULT_COUNT), code = 0, standing = 0;
+    int slot;
+    if (N.reported || !N.fighting_seen || N.koth_match || !N.lockstep || N.desync) return;
+    if (count && count <= RESULTS_MAX) code = MEM16(G_RESULTS + (count - 1u) * 0x10u + 0xEu);
+    if (!(code & 1u)) return;                           /* nothing decisive recorded */
+    if (code & 4u) { netplay_on_result(0, 0, 4u); return; }
+    for (slot = 0; slot < N.fighters && slot < MAXP; slot++)
+        if (!(MEM16(ACTORS + (uint32_t)slot * STRIDE + F_DEFEAT_WORD) & 0x200u)) standing |= 1u << slot;
+    if (!standing) return;
+    if (N.report_m.type == ONLINE_MODE_TEAM && N.fighters == 4) {
+        standing = (standing & 3u ? 3u : 0u) | (standing & 0xCu ? 0xCu : 0u);
+        if (standing == 0xFu) return;                   /* both sides standing: no side decided */
+    } else if (standing & (standing - 1u)) {
+        return;                                         /* more than one standing: not one winner */
+    }
+    fprintf(stderr, "[NETPLAY] the decision (code %04X) came without the decided phase: the fighters standing win\n",
+            (unsigned)code);
+    netplay_on_result(standing, 0, 1u);
 }
 
 /* Players stopped answering, or left the room, during this match's fight, before it was decided:
@@ -2798,6 +2842,7 @@ void netplay_on_main_menu(void)
         return;
     }
     if (N.lobby && N.match_live && N.match_seen) {
+        report_missed_result();     /* a decision the phase word never showed (a ring out) */
         koth_check_result(1);   /* King of the Hill: the fight's RESULT, a draw if none was recorded */
         end_hub_match("Match over; back in the room.");
     }
@@ -2877,7 +2922,13 @@ static DWORD WINAPI autostart_thread(LPVOID unused)
     if (!strcmp(mode, "quick") || !strcmp(mode, "ranked")) {
         const char *f = getenv("RECOMP_NETPLAY_FIGHTER"), *name = getenv("RECOMP_NETPLAY_NAME");
         const char *delay = getenv("RECOMP_NETPLAY_READY_DELAY_MS");
+        /* RECOMP_TEST_READY_PLAYERS=<n> (tests of three or four copies): ready (or, on the hill, answer
+         * a call) only while the room holds n players. The relay starts a room's vote once two are
+         * present and every one of them is ready, so the first two copies of a three-copy test started
+         * their match before the third joined, and the third opened a room of its own. */
+        const char *rp = getenv("RECOMP_TEST_READY_PLAYERS");
         int fighter = f && *f ? atoi(f) : 55, readied = 0, ready_delay = delay ? atoi(delay) : 0;
+        int ready_players = rp && *rp ? atoi(rp) : 0, told_wait = 0;
         unsigned voted_in = 0;
         ULONGLONG called_at = 0;
         netplay_lobby(server, name && *name ? name : "Test player");
@@ -3021,6 +3072,19 @@ static DWORD WINAPI autostart_thread(LPVOID unused)
             } else if (!r.in_room) {
                 alone_in[0] = 0;
             }
+            if (r.in_room && ready_players > 0 && r.player_count < ready_players && !N.match_live) {
+                if (!told_wait) {
+                    fprintf(stderr, "[NETPLAY] tests: %d of %d players in the room; not ready until all are\n",
+                            r.player_count, ready_players);
+                    told_wait = 1;
+                }
+                Sleep(100);
+                continue;
+            }
+            if (r.in_room && r.player_count >= ready_players && told_wait) {
+                fprintf(stderr, "[NETPLAY] tests: the room holds %d players; readying\n", r.player_count);
+                told_wait = 0;
+            }
             if (r.in_room && NETPLAY_IS_KOTH(r.settings.mode)) {
                 /* King of the Hill: ready when called (back from the last fight), after
                  * RECOMP_NETPLAY_READY_DELAY_MS (tests: the "YOU'RE UP" screen shows meanwhile);
@@ -3058,6 +3122,31 @@ static DWORD WINAPI autostart_thread(LPVOID unused)
                 }
                 Sleep(100);
                 continue;
+            }
+            {   /* RECOMP_NETPLAY_TEST_POOL="4,6" (tests): the host makes its room vote on these venues */
+                const char *tp = getenv("RECOMP_NETPLAY_TEST_POOL");
+                if (tp && *tp && r.in_room && r.phase == 0 && r.you == r.host && !N.match_live) {
+                    NetRoomSettings want = r.settings;
+                    const char *c = tp;
+                    want.pool_count = 0;
+                    while (*c && want.pool_count < 32) {
+                        int v = atoi(c);
+                        if (v > 0 && v < 256) want.pool[want.pool_count++] = (unsigned char)v;
+                        while (*c && *c != ',') c++;
+                        if (*c == ',') c++;
+                    }
+                    if (want.pool_count && (want.pool_count != r.settings.pool_count ||
+                                            memcmp(want.pool, r.settings.pool, (size_t)want.pool_count))) {
+                        static ULONGLONG asked;
+                        if (GetTickCount64() - asked > 1000) {
+                            asked = GetTickCount64();
+                            fprintf(stderr, "[NETPLAY] tests: the room votes on venues %s\n", tp);
+                            netplay_lobby_settings(&want);
+                        }
+                        Sleep(100);
+                        continue;
+                    }
+                }
             }
             if (r.in_room && r.phase == 0 && !N.match_live) {
                 /* Ready again whenever this player shows as not ready: after a
@@ -3119,6 +3208,7 @@ void netplay_autostart(void)
 
 int netplay_active(void) { return N.lockstep != 0; }
 int netplay_in_fight(void) { return MEM32(G_MATCH_PHASE) == 1u; }
+int netplay_match_locked(void) { return N.lobby && N.match_live; }
 
 int netplay_voice_room(void)
 {
@@ -3646,6 +3736,50 @@ static void versus_hold(void)
         WaitForSingleObject(N.arrived, 10);
 }
 
+/* RECOMP_NETPLAY_STEPLOG (tests): the fighter records, the match globals (0x3B8F28..0x3B9074), the
+ * fight's weapon table (0x3BE778, 16 x 0xA4) and the weapon manager (0x376144) of the last STEPLOG_RING
+ * steps, kept in memory and written to logs/desync-<match>-p<position>.bin when this PC sees a desync,
+ * so the copies' files show the first step and the very fields where they parted (the checksum covers
+ * six fields a fighter). Each record: u32 step, then the ranges' bytes in this order. */
+static uint32_t weapon_hash(void);      /* the weapon manager, below with its update */
+static unsigned g_weapon_waits;
+#define STEPLOG_RING 256
+static const uint32_t k_steplog_ranges[][2] = {
+    { ACTORS, ACTORS + 4u * STRIDE }, { 0x003B8F28u, 0x003B9074u }, { 0x003BE778u, 0x003BF1B8u },
+    { 0x00376144u, 0x00376E70u },
+};
+#define STEPLOG_BYTES (4u * STRIDE + (0x003B9074u - 0x003B8F28u) + (0x003BF1B8u - 0x003BE778u) + \
+                       (0x00376E70u - 0x00376144u))
+static uint8_t *g_steplog;
+static uint32_t g_steplog_step[STEPLOG_RING], g_steplog_dumped;
+
+static void steplog_keep(uint32_t s)
+{
+    uint8_t *at;
+    uint32_t i, r, n = 0;
+    if (!g_steplog && !(g_steplog = (uint8_t *)malloc((size_t)STEPLOG_RING * STEPLOG_BYTES))) return;
+    at = g_steplog + (size_t)(s % STEPLOG_RING) * STEPLOG_BYTES;
+    for (r = 0; r < sizeof(k_steplog_ranges) / sizeof(k_steplog_ranges[0]); r++)
+        for (i = k_steplog_ranges[r][0]; i < k_steplog_ranges[r][1]; i++) at[n++] = MEM8(i);
+    g_steplog_step[s % STEPLOG_RING] = s;
+    if (N.desync && g_steplog_dumped != N.match) {     /* the game thread writes it, once per match */
+        char path[96];
+        FILE *f;
+        uint32_t first = s >= STEPLOG_RING ? s - STEPLOG_RING + 1 : 1, t;
+        g_steplog_dumped = N.match;
+        snprintf(path, sizeof(path), "logs\\desync-%08X-p%d.bin", N.match, N.pos + 1);
+        if ((f = fopen(path, "wb")) != NULL) {
+            for (t = first; t <= s; t++) {
+                if (g_steplog_step[t % STEPLOG_RING] != t) continue;
+                fwrite(&t, 4, 1, f);
+                fwrite(g_steplog + (size_t)(t % STEPLOG_RING) * STEPLOG_BYTES, 1, STEPLOG_BYTES, f);
+            }
+            fclose(f);
+            fprintf(stderr, "[NETPLAY] the last %u steps' fighter records are in %s\n", s - first + 1, path);
+        }
+    }
+}
+
 void netplay_on_step(void)
 {
     uint32_t s, target, k, need;
@@ -3688,10 +3822,10 @@ void netplay_on_step(void)
             netplay_on_result(0, 0, 4u);                            /* a decisive draw */
         } else if (N.fighting_seen && phase != 1u && phase >= 2u && phase <= 3u) {
             uint32_t w = MEM32(G_MATCH_WINNER);
-            netplay_on_result(w < MAXP ? 1u << w : 0u, 0, w < MAXP ? 1u : 4u);
+            netplay_on_result(winners_of(w), 0, w < MAXP ? 1u : 4u);
         } else if ((code & 1u) && (MEM32(G_MATCH_FLAGS) & 8u)) {   /* decided, the phase word skipped */
             uint32_t w = MEM32(G_MATCH_TWIN);
-            netplay_on_result(w < MAXP ? 1u << w : 0u, 0, w < MAXP ? 1u : 4u);
+            netplay_on_result(winners_of(w), 0, w < MAXP ? 1u : 4u);
         }
     }
     s = ++N.step;
@@ -3700,6 +3834,23 @@ void netplay_on_step(void)
         if (crowd_on < 0) crowd_on = !(getenv("RECOMP_ONLINE_CROWD") && !strcmp(getenv("RECOMP_ONLINE_CROWD"), "keep"));
         if (crowd_on) crowd_reset(g_ecx);
         if (!N.resim && match_rolls_back() && rollback_prepare() == 0) N.rb_on = N.rb_ref_due = 1;
+        {   /* what the fight made of the setup: the mode mask (1 one on one, 2 team, 4 3-way, 8 4-way), the
+             * arena kind, and per fighter its flags (+0x937: 4 = team side marker) and the slots its
+             * opponent (+0) and partner (+4) pointers name (docs/research/team-and-special-match-types.md 3.2) */
+            char line[200];
+            int n = 0, slot;
+            for (slot = 0; slot < N.fighters && slot < MAXP; slot++) {
+                uint32_t rec = ACTORS + (uint32_t)slot * STRIDE, opp = MEM32(rec), mate = MEM32(rec + 4u);
+                int o = opp >= ACTORS && (opp - ACTORS) % STRIDE == 0 ? (int)((opp - ACTORS) / STRIDE) : -1;
+                int m = mate >= ACTORS && (mate - ACTORS) % STRIDE == 0 ? (int)((mate - ACTORS) / STRIDE) : -1;
+                n += snprintf(line + n, sizeof(line) - (size_t)n, " %d:flags %02X opp %d mate %d", slot, MEM8(rec + 0x937u), o, m);
+            }
+            fprintf(stderr, "[NETPLAY] fight setup: type %d, mode mask %02X, arena kind %u;%s\n", N.report_m.type,
+                    MEM8(0x003B907Eu), MEM32(0x003B9084u), line);
+            fprintf(stderr, "[NETPLAY] weapons at the first step: %08X (their update waited %u times)\n", weapon_hash(),
+                    g_weapon_waits);
+            g_weapon_waits = 0;
+        }
     }
     /* before anything in the step draws, and before the checksum: the same state on every PC */
     if (shared_gen_pin()) shared_gen_reseed(s);
@@ -3746,6 +3897,29 @@ void netplay_on_step(void)
     }
     N.hash_at[k] = fighter_hash(N.hash_parts[k], N.hash_fields[k], N.hash_split[k]);   /* the state as this step starts */
     N.hash_tag[k] = s + 1;
+    {   /* RECOMP_NETPLAY_STEPLOG=1 (tests): the checksum's fields of every fighter at every step, to find
+         * the step and the field where the PCs of a desynced match part (the checksum goes out every 60) */
+        static int steplog = -1;
+        if (steplog < 0) steplog = getenv("RECOMP_NETPLAY_STEPLOG") != NULL;
+        if (steplog && !N.resim) {
+            static const uint32_t fields[] = { 0x30, 0x44, 0x48, 0x4C, 0x54, 0x350 };
+            char line[400];
+            int n, slot;
+            unsigned fi;
+            {   /* and the crowd's records the fighters read (spectator-shove.md): a part of its own */
+                uint32_t h = 2166136261u, kk, recs = MEM32(0x003494E4u), count = MEM32(0x003494E0u);
+                for (kk = 0; recs && kk < count * 0x34u && kk < 0x4000u; kk++) h = (h ^ MEM8(recs + kk)) * 16777619u;
+                n = snprintf(line, sizeof(line), "[STEPHASH] %08X %u crowd %08X", N.match, s, h);
+            }
+            for (slot = 0; slot < N.fighters && slot < MAXP; slot++) {
+                n += snprintf(line + n, sizeof(line) - (size_t)n, " |");
+                for (fi = 0; fi < sizeof(fields) / sizeof(fields[0]); fi++)
+                    n += snprintf(line + n, sizeof(line) - (size_t)n, " %08X", MEM32(ACTORS + (uint32_t)slot * STRIDE + fields[fi]));
+            }
+            fprintf(stderr, "%s\n", line);
+            steplog_keep(s);
+        }
+    }
     if (N.resim) return;                /* a re-run: the entries are all known or predicted */
     target = s + (uint32_t)N.delay;
     k = target % RING;
@@ -3928,8 +4102,38 @@ void netplay_sound_command(void)
 #define SOUND_WRAP(a) extern void sub_##a(void);     static void snd_##a(void) { if (N.resim) { g_eax = 0; g_esp += 4; return; } sub_##a(); }
 SOUND_HANDLERS(SOUND_WRAP)
 
+/* The weapon manager (CLogic+0x2C9E4 = 0x376144, 16 slots of 0xD0; docs/research/weapon-position-timing.md):
+ * its update (vtable+8, called once per game update through the task list, so recomp_lookup_manual
+ * hands it out through netplay_sound_handler) moves the weapons lying in the arena. While a room's match
+ * loads, the game updates at each PC's own pace, so the weapons had settled differently by the first
+ * fight step (four-copy Team test, 2026-10-26: their matrices differed at step 1, the fighters at step
+ * 2). In a lockstep room match the update waits for the first fight step; from then on it runs once a
+ * step on every PC. */
+extern void sub_000BCC50(void);
+#define WEAPON_MANAGER 0x00376144u
+static unsigned g_weapon_waits;
+
+static uint32_t weapon_hash(void)
+{
+    uint32_t h = 2166136261u, slot, k;
+    for (slot = 0; slot < 16; slot++)
+        for (k = 0; k < 16; k++) h = (h ^ MEM32(WEAPON_MANAGER + slot * 0xD0u + 0xCu + 4u * k)) * 16777619u;
+    return h;
+}
+
+static void weapon_update(void)
+{
+    if (N.lockstep && N.lobby && N.match_live && (!N.match_seen || N.step == 0)) {
+        g_weapon_waits++;
+        g_esp += 8;                 /* thiscall, ret 4: the dt argument and the return address */
+        return;
+    }
+    sub_000BCC50();
+}
+
 void *netplay_sound_handler(uint32_t va)
 {
+    if (va == 0x000BCC50u) return (void *)weapon_update;
 #define SOUND_CASE(a) if (va == 0x##a##u) return (void *)snd_##a;
     SOUND_HANDLERS(SOUND_CASE)
     return NULL;

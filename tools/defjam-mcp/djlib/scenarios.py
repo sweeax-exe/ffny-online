@@ -277,13 +277,16 @@ def offline(type=0, venue=1, f0=55, f1=22, cpu=True, bot=None, fast_ko=600, turb
 
 def online_tail(matches, per, p2):
     """Pad presses for N room matches: fight presses from each StartGame, A through each summary
-    (the Nth GetMatchSummary call: `per` of them a match), the last match's summary included."""
+    (anchored on the Nth GetMatchSummary(0): the summary asks once per fighter, `per` calls a match in
+    One on One and King of the Hill, three or four in 3-Way, Free for All and Team, and only the one
+    for fighter 0 counts the matches whatever the room's size), the last match's summary included."""
+    del per     # kept for callers; the fighter-0 anchor needs no count of fighters
     h = harness()
     fight = h.FIGHT_TAIL.replace("right:", "left:") if p2 else h.FIGHT_TAIL
     parts = [fight]
     for m in range(1, matches + 1):
-        nth = "#%d" % (per * (m - 1) + 1) if m > 1 else ""
-        parts.append(h.raw_stages(["game.getmatchsummary(%s=a@4+3x12" % nth]))
+        nth = "#%d" % m if m > 1 else ""
+        parts.append(h.raw_stages(["game.getmatchsummary(0%s=a@4+3x12" % nth]))
         if m < matches:
             parts.append(fight.replace("@game.startgame(", "@game.startgame(#%d" % (m + 1)))
     return ",".join(parts)
@@ -334,7 +337,12 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
         relay_extra = (["-created"] if created else []) + (["-test-venues", str(venues)] if venues else [])
         s.relay(relay_port, rollback=(rollback == "on"), extra=relay_extra)
         before = {}
+        koth = mode == "koth"
         for i in range(players):
+            # which way the copy's fighter approaches: Team puts room slots 0 and 1 on the left and 2 and
+            # 3 on the right; on the hill (the KO winner is slot 0) copy 0 stays king on the left and
+            # the others come in as player 2 on the right
+            p2 = i >= 2 if mode == "team" else i >= 1 if koth else i % 2 == 1
             env = dict(VIRTUAL_PAD_ENV)
             env.update({
                 "RECOMP_INPUT_VIRTUAL_PADS": "1",
@@ -345,8 +353,13 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
                 "RECOMP_ROLLBACK": "on" if rollback == "on" else "off",
                 "RECOMP_SCRIPT_ANCHOR": TITLE_ANCHOR,
                 "RECOMP_PAD_SCRIPT": harness().build_pad_script(["getscreeninfo(intmain/mainmenu=lt@0.5"],
-                                                                online_tail(matches, per, i % 2 == 1)),
+                                                                online_tail(matches, per, p2)),
             })
+            if players > 2:
+                # ready only once every copy is in the room: the relay starts a vote (or calls the hill's
+                # first pair) as soon as two are there and ready, and a later copy then opened a room of
+                # its own (src/hooks/netplay.c autostart_thread)
+                env["RECOMP_TEST_READY_PLAYERS"] = str(players)
             if fast_ko:
                 env["RECOMP_TEST_KO_STEP"] = "%d,%s" % (int(fast_ko), winner)
             env.update(_bot_env(bot))
@@ -356,7 +369,7 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
                 env["RECOMP_CP_PICK"] = str(int(cp_pick[i]))
             if rematch:
                 env["RECOMP_PAD_SCRIPT"] = harness().build_pad_script(["getscreeninfo(intmain/mainmenu=lt@0.5"],
-                                                                       rematch_tail(matches, i % 2 == 1))
+                                                                       rematch_tail(matches, p2))
             env.update(extra_env or {})
             root = s.make_root(i)
             before[i] = _save_files(root)
@@ -367,7 +380,13 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
         while time.time() < deadline:
             s.poll()
             cs = list(s.copies.values())
-            done = all(c.watch.count("[FUNCCALL] Game.UpdateMatchRewardsPoints()") >= matches for c in cs)
+            rewards = [c.watch.count("[FUNCCALL] Game.UpdateMatchRewardsPoints()") for c in cs]
+            if koth and len(cs) > 2:
+                # the hill: copy 0 (the knockout winner's slot) fights every match, the others take turns
+                # as the challenger, so the matches are done when the king's and the challengers' are
+                done = rewards[0] >= matches and sum(rewards[1:]) >= matches
+            else:
+                done = all(n >= matches for n in rewards)
             if done:
                 time.sleep(3)
                 stop_reason = "done"
@@ -451,10 +470,32 @@ def online_rows(analyses, matches, require_hits=False, problems=None):
         for cr in a["crashes"]:
             problems.append("copy %d: %s" % (i, cr[1][0]))
     n = matches
+    # King of the Hill with more than two copies: each match is fought by two of them (the others
+    # watch), so a copy's k-th match is not the room's k-th; the matches go by their START seed, in
+    # the order the copies saw them, each checked on the copies that fought it.
+    by_seed = None
+    if len(analyses) > 2 and any(m.get("koth") for a in analyses.values() for m in a["started"]):
+        by_seed = []
+        for i in sorted(analyses):
+            for m in analyses[i]["started"]:
+                seed = (m.get("start") or {}).get("seed")
+                if seed and seed not in by_seed:
+                    by_seed.append(seed)
     for k in range(n):
-        per = {i: a["started"][k] for i, a in analyses.items() if k < len(a["started"])}
-        row = {"n": k + 1}
-        if len(per) < len(analyses):
+        if by_seed is not None:
+            if k >= len(by_seed):
+                problems.append("m%d: never started" % (k + 1))
+                rows.append({"n": k + 1, "started": False})
+                continue
+            per = {i: m for i, a in analyses.items() for m in a["started"]
+                   if (m.get("start") or {}).get("seed") == by_seed[k]}
+            row = {"n": k + 1, "copies": sorted(per)}
+            if len(per) < 2:
+                problems.append("m%d: started on copy %s only" % (k + 1, ",".join(map(str, sorted(per)))))
+        else:
+            per = {i: a["started"][k] for i, a in analyses.items() if k < len(a["started"])}
+            row = {"n": k + 1}
+        if by_seed is None and len(per) < len(analyses):
             missing = [i for i in analyses if i not in per]
             problems.append("m%d: never started on copy %s" % (k + 1, ",".join(map(str, missing))))
             row["started"] = False
@@ -503,6 +544,16 @@ def online_rows(analyses, matches, require_hits=False, problems=None):
         wins = {json.dumps(m.get("winners")) for m in per.values() if m.get("winners") is not None}
         if len(wins) > 1:
             problems.append("m%d: the copies disagree on the winners: %s" % (k + 1, ", ".join(sorted(wins))))
+        # what each game reports to the accounts service ("match result: winners 0x..."): the same on
+        # every copy, and in Team the whole winning side
+        reported = {json.dumps(m.get("reported")) for m in per.values() if m.get("reported") is not None}
+        if reported:
+            row["reported"] = m0.get("reported") if m0.get("reported") is not None else json.loads(sorted(reported)[0])
+        if len(reported) > 1:
+            problems.append("m%d: the copies report different winners: %s" % (k + 1, ", ".join(sorted(reported))))
+        if (st.get("type") == 1 and st.get("players") == 4 and row.get("reported") is not None
+                and row["reported"] not in ([0, 1], [2, 3]) and not any(m.get("desync") for m in per.values())):
+            problems.append("m%d: a Team result names %s, not a whole side" % (k + 1, row["reported"]))
         landed = [x for x in row["hits"] if x]
         if not landed:
             msg = "m%d: no hits landed (telemetry)" % (k + 1)
@@ -515,7 +566,8 @@ def online_rows(analyses, matches, require_hits=False, problems=None):
             if require_hits:
                 problems.append("m%d: only one slot landed hits" % (k + 1))
         rows.append(row)
-    more = max([0] + [len(a["started"]) - matches for a in analyses.values()])
+    more = (len(by_seed) - matches if by_seed is not None
+            else max([0] + [len(a["started"]) - matches for a in analyses.values()]))
     if more > 0 and rows:
         rows[-1]["then"] = "%d more match(es) started (not checked)" % more
     return rows, not problems

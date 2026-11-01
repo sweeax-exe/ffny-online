@@ -1061,6 +1061,36 @@ const char *mode_name(int type)
     return m ? m->name : "Match";
 }
 
+// A special match's own venue (Demolition, Inferno, Subway, Window, Cage, Ringout), 0 when the room
+// votes; whether a mode has more than two fighters (Team, 3-Way, Free for All: never on the venues
+// with a one-on-one start table only); Team, 2 vs 2.
+int fixed_venue(int type)
+{
+    const OnlineMode *m = online_mode(type);
+    return m ? m->venue : 0;
+}
+bool many_fighters(int type)
+{
+    const OnlineMode *m = online_mode(type);
+    return m && m->fighters > 2;
+}
+bool is_team(int type) { return type == ONLINE_MODE_TEAM; }
+
+// What a mode is, in a line, for the create page's door and a room of it.
+const char *mode_blurb(int type)
+{
+    switch (type) {
+    case 1: return "Two on two: places 1 and 2 against 3 and 4. Four players, no CPU.";
+    case 6: return "One on one in the underground parkade. The cars are part of the fight.";
+    case 7: return "One on one in the burning tire warehouse. The fire is part of the fight.";
+    case 8: return "One on one on the subway platform. Mind the train.";
+    case 9: return "One on one in Crow's office, high over the street. Mind the windows.";
+    case 10: return "One on one in Crow's cage at Club Murder.";
+    case 11: return "One on one at The Dragon House. Ring out rules are always in effect.";
+    }
+    return nullptr;
+}
+
 // The relay answered CAPS with King of the Hill (an older relay never offers it).
 bool koth_offered()
 {
@@ -1152,14 +1182,26 @@ const std::vector<Preset> &presets()
     return list;
 }
 
+// A preset's venues for a mode: a mode with more than two fighters leaves out the venues with a
+// one-on-one start table only (the relay does the same with any pool it gets).
+std::vector<int> preset_ids(int index, int mode)
+{
+    std::vector<int> out;
+    for (int id : presets()[index].ids)
+        if (!many_fighters(mode) || !ONLINE_ONE_ON_ONE_VENUE(id)) out.push_back(id);
+    return out;
+}
+
 int preset_of(const NetRoomSettings &s)
 {
     const auto &p = presets();
+    if (fixed_venue(s.mode)) return -1;
     for (size_t i = 0; i < p.size(); i++) {
-        if ((int)p[i].ids.size() != s.pool_count) continue;
+        std::vector<int> ids = preset_ids((int)i, s.mode);
+        if ((int)ids.size() != s.pool_count) continue;
         bool same = true;
         for (int k = 0; k < s.pool_count; k++)
-            if (std::find(p[i].ids.begin(), p[i].ids.end(), (int)s.pool[k]) == p[i].ids.end()) same = false;
+            if (std::find(ids.begin(), ids.end(), (int)s.pool[k]) == ids.end()) same = false;
         if (same) return (int)i;
     }
     return -1;
@@ -1169,9 +1211,26 @@ void apply_preset(NetRoomSettings &s, int index)
 {
     const auto &p = presets();
     if (p.empty()) return;
-    index = (index % (int)p.size() + (int)p.size()) % (int)p.size();
     s.pool_count = 0;
-    for (int id : p[index].ids) if (s.pool_count < 32) s.pool[s.pool_count++] = (unsigned char)id;
+    if (int v = fixed_venue(s.mode)) {      // a special match: its own venue, nothing to choose
+        s.pool[s.pool_count++] = (unsigned char)v;
+        return;
+    }
+    index = (index % (int)p.size() + (int)p.size()) % (int)p.size();
+    for (int id : preset_ids(index, s.mode)) if (s.pool_count < 32) s.pool[s.pool_count++] = (unsigned char)id;
+}
+
+// After the mode changed from `old_mode`: the pool the new mode votes on, the same preset where there
+// is one (a custom pool loses the venues the mode cannot have), every venue after a special match.
+void fit_pool(NetRoomSettings &s, int old_mode, int old_preset)
+{
+    if (fixed_venue(s.mode) || fixed_venue(old_mode)) { apply_preset(s, 0); return; }
+    if (old_preset >= 0) { apply_preset(s, old_preset); return; }
+    int n = 0;
+    for (int k = 0; k < s.pool_count; k++)
+        if (!many_fighters(s.mode) || !ONLINE_ONE_ON_ONE_VENUE(s.pool[k])) s.pool[n++] = s.pool[k];
+    s.pool_count = n;
+    if (!n) apply_preset(s, 0);
 }
 
 std::string hub_name();
@@ -1544,6 +1603,12 @@ void draw_hub(ImDrawList *dl, const Frame &f, const Pad &pad)
         else image_fit(dl, f, logo, 383, 396, 160, 30);
         text(dl, f, g_title, 22, 370, 398, ORANGE, "<", CENTER, 1.2f);
         text(dl, f, g_title, 22, 556, 398, ORANGE, ">", CENTER, 1.2f);
+        // Team and the special matches: what the mode is (a special match: where), over the logo
+        if (int v = fixed_venue(type)) {
+            std::string at = "ONE ON ONE AT " + upper(online_venue_name(v));
+            text(dl, f, g_hand, 12, 463, 378, ORANGE, at.c_str(), CENTER, 0.8f, 200);
+        } else if (is_team(type))
+            text(dl, f, g_hand, 12, 463, 378, ORANGE, "TWO ON TWO, FOUR PLAYERS", CENTER, 0.8f, 200);
     }
 
     if (pad.a) {
@@ -1815,8 +1880,11 @@ void draw_rooms(ImDrawList *dl, const Frame &f, const Pad &pad)
         bool open = (r.phase == 0 || NETPLAY_IS_KOTH(r.mode)) && r.players < r.max;
         if (sel) selector(dl, f, x, y, w, h);
         text(dl, f, g_title, 19, x + 12, y + 3, sel ? CREAM : with_alpha(GREY, 0.9f), r.name, LEFT, 1.2f);
-        char line[64];
-        snprintf(line, sizeof(line), "%s  %d/%d", mode_name(r.mode), r.players, r.max);
+        char line[96];
+        if (int v = fixed_venue(r.mode))        // a special match: where it is fought
+            snprintf(line, sizeof(line), "%s at %s  %d/%d", mode_name(r.mode), online_venue_name(v), r.players, r.max);
+        else
+            snprintf(line, sizeof(line), "%s  %d/%d", mode_name(r.mode), r.players, r.max);
         text(dl, f, g_hand, 13, x + 14, y + 26, open ? ORANGE : with_alpha(ORANGE, 0.45f), line, LEFT, 0.8f);
         if (all && list[i].server >= 0) {      // the server's tag and this PC's ping there, bottom right
             int ms = list[i].ping_ms;
@@ -1834,8 +1902,14 @@ void draw_rooms(ImDrawList *dl, const Frame &f, const Pad &pad)
         const NetServerRoom &e = list[S.rooms_sel];
         const NetRoomInfo &r = e.room;
         bool open = (r.phase == 0 || NETPLAY_IS_KOTH(r.mode)) && r.players < r.max;
-        char players[160];
-        snprintf(players, sizeof(players), "%d of %d players. %s", r.players, r.max,
+        char players[160], where[80] = "";
+        if (int v = fixed_venue(r.mode)) {      // "At Red Hook Tire Co. " (no second full stop)
+            const char *vn = online_venue_name(v);
+            size_t len = strlen(vn);
+            snprintf(where, sizeof(where), "At %s%s ", vn, len && vn[len - 1] == '.' ? "" : ".");
+        }
+        else if (is_team(r.mode)) snprintf(where, sizeof(where), "Two on two. ");
+        snprintf(players, sizeof(players), "%s%d of %d players. %s", where, r.players, r.max,
                  NETPLAY_IS_KOTH(r.mode) ? (open ? "Winner stays on. Press A to join the line." : "Full.") :
                  r.phase == 1 ? "Voting on the venue right now." : r.phase == 2 ? "A match is on." :
                  open ? "Open: press A to join." : "Full.");
@@ -1939,8 +2013,9 @@ void venue_showcase(ImDrawList *dl, const Frame &f, const NetRoomSettings &s, fl
     if (n <= 0) return;
     int p = preset_of(s);
     char caption[64];
-    snprintf(caption, sizeof(caption), "%s  -  %d VENUE%s", upper(p >= 0 ? presets()[p].name : "Custom").c_str(), n,
-             n == 1 ? "" : "S");
+    if (fixed_venue(s.mode)) snprintf(caption, sizeof(caption), "ALWAYS AT THIS VENUE");
+    else snprintf(caption, sizeof(caption), "%s  -  %d VENUE%s", upper(p >= 0 ? presets()[p].name : "Custom").c_str(), n,
+                  n == 1 ? "" : "S");
     text(dl, f, g_hand, 13, x + w / 2, y, ORANGE, caption, CENTER, 1.0f);
     y += 18;
     h -= 18;
@@ -1996,7 +2071,8 @@ void draw_settings(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom
     int step = pad.right ? 1 : pad.left ? -1 : 0;
     const OnlineMode *m = online_mode(s.mode);
     // King of the Hill: 3..10 in the line (two fight, the others wait their turn)
-    auto least_of = [](int mode) { return NETPLAY_IS_KOTH(mode) ? 3 : 2; };
+    // Team: four, no CPU partners (the relay starts a Team room with four only)
+    auto least_of = [](int mode) { return NETPLAY_IS_KOTH(mode) ? 3 : is_team(mode) ? 4 : 2; };
     auto most_of = [](int mode) {
         if (NETPLAY_IS_KOTH(mode)) return NETPLAY_ROOM_SLOTS;
         const OnlineMode *om = online_mode(mode);
@@ -2006,15 +2082,17 @@ void draw_settings(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom
         switch (rows_of[S.settings_sel]) {
         case R_MODE:
             if (!cycle.empty()) {
+                int old_mode = s.mode, old_preset = preset_of(s);
                 s.mode = cycle[(cycle_index(cycle, s.mode) + step + (int)cycle.size()) % (int)cycle.size()];
                 if (NETPLAY_IS_KOTH(s.mode) && !was_koth) s.max = 6;     // a fresh hill: room for a line
+                fit_pool(s, old_mode, old_preset);
             }
             break;
         case R_VENUE_CHOICE:
             s.mode = s.mode == NETPLAY_MODE_KOTH ? NETPLAY_MODE_KOTH_RANDOM : NETPLAY_MODE_KOTH;
             break;
         case R_PLAYERS: s.max = std::max(least_of(s.mode), std::min(most_of(s.mode), s.max + step)); break;
-        case R_POOL: apply_preset(s, (preset_of(s) < 0 ? 0 : preset_of(s)) + step); break;
+        case R_POOL: if (!fixed_venue(s.mode)) apply_preset(s, (preset_of(s) < 0 ? 0 : preset_of(s)) + step); break;
         case R_LISTED: s.is_public = !s.is_public; break;
         }
     }
@@ -2042,7 +2120,8 @@ void draw_settings(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom
             if (mouse_click(f, x, y, w, h)) const_cast<Pad &>(pad).a = true;
             continue;
         }
-        text(dl, f, g_title, 12, x + 12, y + 4, GREY, labels[row]);
+        text(dl, f, g_title, 12, x + 12, y + 4, GREY,
+             row == R_POOL && fixed_venue(s.mode) ? "VENUE (THE MODE'S OWN)" : labels[row]);
         std::string value;
         char buf[64];
         switch (row) {
@@ -2050,13 +2129,17 @@ void draw_settings(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom
         case R_VENUE_CHOICE: value = s.mode == NETPLAY_MODE_KOTH ? "The two fighters vote" : "At random"; break;
         case R_PLAYERS:
             if (koth) { snprintf(buf, sizeof(buf), "Up to %d in the line", s.max); value = buf; break; }
-            snprintf(buf, sizeof(buf), "%d players", s.max); value = buf;
+            snprintf(buf, sizeof(buf), is_team(s.mode) ? "%d players, 2 vs 2" : "%d players", s.max); value = buf;
             if (m && s.max < m->fighters) { snprintf(buf, sizeof(buf), " + %d CPU", m->fighters - s.max); value += buf; } break;
-        case R_POOL: { int p = preset_of(s); value = p >= 0 ? presets()[p].name : "Custom"; snprintf(buf, sizeof(buf), " (%d)", s.pool_count); value += buf; } break;
+        case R_POOL:
+            if (int v = fixed_venue(s.mode)) { value = online_venue_name(v); break; }
+            { int p = preset_of(s); value = p >= 0 ? presets()[p].name : "Custom"; snprintf(buf, sizeof(buf), " (%d)", s.pool_count); value += buf; } break;
         case R_LISTED: value = s.is_public ? "In the room list" : "By code only"; break;
         }
         text(dl, f, g_title, 17, x + 12, y + 19, sel ? WHITE : GREY, value.c_str());
-        if (sel) { text(dl, f, g_title, 17, x + w - 26, y + h / 2 - 10, ORANGE, "<", CENTER); text(dl, f, g_title, 17, x + w - 10, y + h / 2 - 10, ORANGE, ">", CENTER); }
+        // a fixed row (a special match's venue and players) has nothing to step through
+        bool fixed = (fixed_venue(s.mode) && (row == R_POOL || row == R_PLAYERS)) || (is_team(s.mode) && row == R_PLAYERS);
+        if (sel && !fixed) { text(dl, f, g_title, 17, x + w - 26, y + h / 2 - 10, ORANGE, "<", CENTER); text(dl, f, g_title, 17, x + w - 10, y + h / 2 - 10, ORANGE, ">", CENTER); }
     }
     // the door: the mode's logo (King of the Hill: its rules), then the venues filling the panel
     door_panel(dl, f);
@@ -2071,6 +2154,10 @@ void draw_settings(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom
     } else {
         image_fit(dl, f, tex(mode_logo(s.mode)), 372, 96, 170, 36);
         venues_y = 142;
+        if (const char *blurb = mode_blurb(s.mode)) {   // Team and the special matches: what they are
+            text(dl, f, g_body, 12, 362, 138, WHITE, upper(blurb).c_str(), LEFT, 1.0f, 202);
+            venues_y = 178;
+        }
     }
     venue_showcase(dl, f, s, 356, venues_y, 214, 438 - venues_y);
     if (pad.a && rows_of[S.settings_sel] == R_OPEN) {
@@ -2712,18 +2799,46 @@ void draw_room(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
         text(dl, f, g_title, 11, 55, 63, WHITE, warn, LEFT, 0.8f);
     }
 
-    // the players' cards
+    // the players' cards. Team: the two sides apart, with their names under them (room slots 0 and 1
+    // against 2 and 3; the room holds four, in slot order). A special match: the two players on the
+    // left, its venue on the right.
     int places = std::max(r.settings.max, r.player_count);
-    float w = 128, gap = 10, x0 = 320 - (places * w + (places - 1) * gap) / 2;
+    bool team = is_team(r.settings.mode) && places == 4;
+    int venue = fixed_venue(r.settings.mode);
+    float w = 128, gap = 10, x0 = 320 - (places * w + (places - 1) * gap) / 2, top = 86;
+    if (team) { gap = 6; x0 = 320 - (4 * w + 2 * gap + 30) / 2; top = 80; }
+    if (venue) x0 = 52;
+    auto card_x = [&](int i) { return x0 + i * (w + gap) + (team && i >= 2 ? 30 - gap : 0); };
+    if (team) {
+        for (int side = 0; side < 2; side++) {
+            float bx = card_x(2 * side), bw = 2 * w + gap;
+            rect(dl, f, bx, top + 272, bw, 18, side ? IM_COL32(150, 14, 30, 210) : IM_COL32(20, 70, 150, 210), 5);
+            text(dl, f, g_title, 13, bx + bw / 2, top + 273, WHITE, side ? "TEAM 2" : "TEAM 1", CENTER, 1.0f);
+        }
+        text(dl, f, g_stencil, 24, 320, top + 120, CREAM, "VS", CENTER, 1.4f);
+    }
+    if (venue) {
+        glass(dl, f, 346, 86, 254, 270, 10);
+        venue_tile(dl, f, venue, 356, 96, 234, 168, 1.0f);
+        text(dl, f, g_hand, 15, 473, 272, ORANGE, ("ALWAYS AT " + upper(online_venue_name(venue))).c_str(), CENTER, 1.0f, 240);
+        if (const char *blurb = mode_blurb(r.settings.mode))
+            text(dl, f, g_body, 12, 360, 294, WHITE, upper(blurb).c_str(), LEFT, 1.0f, 226);
+    }
     for (int i = 0; i < places; i++) {
-        float x = x0 + i * (w + gap), y = 86;
-        glass(dl, f, x, y, w, 270, 10, i < r.player_count && r.players[i].slot == r.you ?IM_COL32(44, 30, 20, 255) : IM_COL32(10, 10, 13, 255), 0.62f);
-        if (i >= r.player_count) {
+        float x = card_x(i), y = top;
+        // a Team room's card is its room slot (the side), the others list the players in order
+        int at = i;
+        if (team) {
+            at = r.player_count;
+            for (int k = 0; k < r.player_count; k++) if (r.players[k].slot == i) at = k;
+        }
+        glass(dl, f, x, y, w, 270, 10, at < r.player_count && r.players[at].slot == r.you ?IM_COL32(44, 30, 20, 255) : IM_COL32(10, 10, 13, 255), 0.62f);
+        if (at >= r.player_count) {
             text(dl, f, g_hand, 15, x + w / 2, y + 110, with_alpha(ORANGE, 0.6f), "WAITING", CENTER, 0.8f);
             text(dl, f, g_title, 11, x + w / 2, y + 134, GREY, "an open place", CENTER, 0.6f);
             continue;
         }
-        const NetRoomPlayer &p = r.players[i];
+        const NetRoomPlayer &p = r.players[at];
         // the server knows a fighter from the first READY; until then this PC shows its own pick
         int shown = p.fighter != 0xFF ? p.fighter : p.slot == r.you ? fighter : -1;
         bool known = shown >= 0;
@@ -2800,11 +2915,18 @@ void draw_room(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
         }
         if (scope) S.quick_scope = scope;
     }
+    float my = team ? 374 : 366;
     if (alone && scope) {       // where it searches now
         std::string line = "Waiting for another player on " + scope_words(sv, scope) + "...";
-        text(dl, f, g_hand, 15, 320, 366, ORANGE, line.c_str(), CENTER, 0.8f);
-    } else if (r.player_count < 2) text(dl, f, g_hand, 15, 320, 366, ORANGE, "Waiting for another player...", CENTER, 0.8f);
-    else if (!ready) text(dl, f, g_hand, 15, 320, 366, ORANGE, "Ready up: when everyone is, the venue vote starts.", CENTER, 0.8f);
+        text(dl, f, g_hand, 15, 320, my, ORANGE, line.c_str(), CENTER, 0.8f);
+    } else if (team && r.player_count < 4) {
+        char line[96];
+        snprintf(line, sizeof(line), "Team is two on two: waiting for %d more player%s...", 4 - r.player_count,
+                 4 - r.player_count == 1 ? "" : "s");
+        text(dl, f, g_hand, 15, 320, my, ORANGE, line, CENTER, 0.8f);
+    } else if (r.player_count < 2) text(dl, f, g_hand, 15, 320, my, ORANGE, "Waiting for another player...", CENTER, 0.8f);
+    else if (!ready) text(dl, f, g_hand, 15, 320, my, ORANGE, venue ? "Ready up: when both are, the fight starts."
+                                                              : "Ready up: when everyone is, the venue vote starts.", CENTER, 0.8f);
     hx += hint(dl, f, hx, hy, "a", ready ? "NOT READY" : "READY");
     if (!ready) hx += hint(dl, f, hx, hy, "x", "CHOOSE FIGHTER");
     if (host && !ready) hx += hint(dl, f, hx, hy, "y", "ROOM SETTINGS");
@@ -3131,21 +3253,34 @@ void versus_page(ImDrawList *dl, ImVec2 display, const NetVersus &v)
         e = ease_out((t - 0.45f) / 0.40f);
         shift_fade(dl, f, k, 0, 16 * (1 - e), e);
     } else {
-        const float w = n == 3 ? 172 : 136, gap = n == 3 ? 18 : 12, ph = n == 3 ? 168 : 150, y = 72;
-        float x0 = 320 - (n * w + (n - 1) * gap) / 2;
+        // Team (2 vs 2): fighters 0 and 1 against 2 and 3, the sides apart with one VS between them
+        bool team = n == 4 && is_team(v.type);
+        const float w = n == 3 ? 172 : team ? 128 : 136, gap = n == 3 ? 18 : team ? 8 : 12, ph = n == 3 ? 168 : 150, y = 72;
+        const float split = team ? 56 : 0;
+        float x0 = 320 - (n * w + (n - 1) * gap + split) / 2;
+        auto card_x = [&](int s) { return x0 + s * (w + gap) + (team && s >= 2 ? split : 0); };
         for (int s = 0; s < n; s++) {
             k = dl->VtxBuffer.Size;
-            versus_card(dl, f, v, order[s], x0 + s * (w + gap), y, w, ph, false);
+            versus_card(dl, f, v, order[s], card_x(s), y, w, ph, false);
             float e = ease_out((t - 0.05f - 0.07f * s) / 0.45f);
             shift_fade(dl, f, k, 0, 40 * (1 - e), e);
         }
         k = dl->VtxBuffer.Size;
         float e = ease_out((t - 0.40f) / 0.30f);
-        for (int s = 0; s + 1 < n; s++)     // a small VS between each pair of cards
-            versus_mark(dl, f, x0 + (s + 1) * (w + gap) - gap / 2, y + ph * 0.55f, 26, 1.0f + 0.35f * (1 - e));
+        if (team) {
+            for (int side = 0; side < 2; side++) {
+                float bx = card_x(2 * side), bw = 2 * w + gap;
+                rect(dl, f, bx, y + ph + 82, bw, 16, side ? IM_COL32(150, 14, 30, 210) : IM_COL32(20, 70, 150, 210), 5);
+                text(dl, f, g_title, 12, bx + bw / 2, y + ph + 83, WHITE, side ? "TEAM 2" : "TEAM 1", CENTER, 1.0f);
+            }
+            versus_mark(dl, f, 320, y + ph * 0.55f, 40, 1.0f + 0.35f * (1 - e));
+        } else {
+            for (int s = 0; s + 1 < n; s++)     // a small VS between each pair of cards
+                versus_mark(dl, f, x0 + (s + 1) * (w + gap) - gap / 2, y + ph * 0.55f, 26, 1.0f + 0.35f * (1 - e));
+        }
         shift_fade(dl, f, k, 0, 0, e);
         k = dl->VtxBuffer.Size;
-        versus_venue(dl, f, v.venue, 150, y + ph + 92, 340, 64, true);
+        versus_venue(dl, f, v.venue, 150, y + ph + (team ? 104 : 92), 340, 64, true);
         e = ease_out((t - 0.50f) / 0.40f);
         shift_fade(dl, f, k, 0, 16 * (1 - e), e);
     }
@@ -3165,14 +3300,14 @@ void versus_page(ImDrawList *dl, ImVec2 display, const NetVersus &v)
     shift_fade(dl, f, all, 0, 0, v.alpha);     // the fade as the fight starts
 }
 
-// The gallery's versus samples: "versus-1v1", "versus-3way", "versus-ffa", "versus-koth".
+// The gallery's versus samples: "versus-1v1", "versus-3way", "versus-ffa", "versus-team", "versus-koth".
 NetVersus sample_versus(const std::string &page)
 {
     static const char *const names[] = { "Ann", "Ben", "Cal", "Dee" };
     const auto &list = roster();
     NetVersus v = {};
-    v.count = page == "versus-3way" ? 3 : page == "versus-ffa" ? 4 : 2;
-    v.type = page == "versus-3way" ? 2 : page == "versus-ffa" ? 3 : 0;
+    v.count = page == "versus-3way" ? 3 : page == "versus-ffa" || page == "versus-team" ? 4 : 2;
+    v.type = page == "versus-3way" ? 2 : page == "versus-ffa" ? 3 : page == "versus-team" ? 1 : 0;
     // The Foundation and Red Hook Tire Co. (no subtitle: the photo alone, the name in words in a row),
     // The Subway and The Terror Dome (their subtitle banners)
     v.venue = page == "versus-koth" ? 6 : page == "versus-ffa" ? 11 : page == "versus-3way" ? 24 : 1;
@@ -3236,9 +3371,13 @@ NetRoom sample_room(int mode, int max, int count)
 // Which page the gallery shows now, and the sample it shows with it.
 void gallery_step()
 {
-    static const char *const pages[] = { "connecting", "offline", "hub", "hub-signin", "hub-voice", "rooms", "code",
+    static const char *const pages[] = { "connecting", "offline", "hub", "hub-signin", "hub-voice", "hub-team",
+                                         "hub-special", "rooms", "rooms-special", "code",
                                          "create", "create-3", "create-6", "create-1", "create-koth",
                                          "create-koth-3", "create-koth-6", "create-koth-1",
+                                         // Team (2 vs 2) and the special matches
+                                         "create-team", "create-special", "create-subway", "room-team", "room-team-3",
+                                         "room-special", "vote-team",
                                          "ranked", "voice", "stats", "players", "fighters",
                                          // build 33: the grid at Eric Sermon, O.E, Santos and Teck
                                          "fighters-91", "fighters-92", "fighters-93", "fighters-85", "room", "vote", "hill",
@@ -3251,7 +3390,7 @@ void gallery_step()
                                          // build 38: the staged quick-match search
                                          "room-quick-near", "room-quick-wide",
                                          // the versus screen while a match loads
-                                         "versus-1v1", "versus-3way", "versus-ffa", "versus-koth",
+                                         "versus-1v1", "versus-3way", "versus-ffa", "versus-team", "versus-koth",
                                          // build 37: created fighters
                                          "grid-created", "room-created", "versus-created",
                                          // several created fighters, the second one picked
@@ -3264,15 +3403,16 @@ void gallery_step()
         start = now;
         ms = atoi(getenv("RECOMP_TEST_ONLINE_GALLERY"));
         const auto &list = roster();
-        static const char *const room_names[] = { "Ann's room", "Uptown Brawl", "Hill of Pain", "Late night FFA", "Dee's rules" };
-        static const int room_modes[] = { 0, 0, NETPLAY_MODE_KOTH_RANDOM, 2, 1 };
-        for (int i = 0; i < 5; i++) {
+        static const char *const room_names[] = { "Ann's room", "Uptown Brawl", "Hill of Pain", "Late night FFA", "Dee's rules",
+                                                  "Burn it down" };
+        static const int room_modes[] = { 0, 0, NETPLAY_MODE_KOTH_RANDOM, 2, 1, 7 };
+        for (int i = 0; i < 6; i++) {
             NetRoomInfo info = {};
             snprintf(info.code, sizeof(info.code), "ROOM%02d", i);
             snprintf(info.name, sizeof(info.name), "%s", room_names[i]);
             info.mode = room_modes[i];
-            info.max = NETPLAY_IS_KOTH(info.mode) ? 8 : i == 3 ? 4 : 2;
-            info.players = i == 1 ? 2 : 1 + i % 3;
+            info.max = NETPLAY_IS_KOTH(info.mode) ? 8 : i == 3 || i == 4 ? 4 : 2;
+            info.players = i == 1 ? 2 : i == 5 ? 1 : 1 + i % 3;
             info.phase = i == 1 ? 2 : 0;
             G.rooms.push_back(info);
         }
@@ -3361,7 +3501,13 @@ void gallery_step()
     else if (p == "hub") { S.page = HUB; S.hub_sel = 0; S.quick_mode = 0; }
     else if (p == "hub-signin") { S.page = HUB; S.hub_sel = 3; G.account = ACCOUNT_OUT; }
     else if (p == "hub-voice") { S.page = HUB; S.hub_sel = HUB_VOICE; }
-    else if (p == "rooms") { S.page = ROOMS; S.rooms_sel = 1; }
+    else if (p == "hub-team" || p == "hub-special") {     // QUICK MATCH with Team, or Inferno, chosen
+        S.page = HUB;
+        S.hub_sel = 0;
+        std::vector<int> cycle = mode_cycle();
+        S.quick_mode = cycle_index(cycle, p == "hub-team" ? 1 : 7);
+    }
+    else if (p == "rooms" || p == "rooms-special") { S.page = ROOMS; S.rooms_sel = p == "rooms" ? 1 : 5; }
     else if (p == "code") { S.page = CODE; snprintf(S.code, sizeof(S.code), "GTE4AQ"); S.code_pos = 3; }
     else if (p.compare(0, 6, "create") == 0) {     // every venue; -3, -6: two presets; -1: one venue
         S.page = SETTINGS;
@@ -3372,7 +3518,15 @@ void gallery_step()
         if (last == '3') apply_preset(S.settings, 1);
         else if (last == '6') apply_preset(S.settings, 2);
         else if (last == '1') S.settings.pool_count = 1;
-        S.settings_sel = 0;
+        // Team (every venue but the one-on-one ones); a special match on its own venue
+        if (p == "create-team") { S.settings.mode = 1; S.settings.max = 4; apply_preset(S.settings, 0); }
+        if (p == "create-special" || p == "create-subway") {
+            S.settings.mode = p == "create-subway" ? 8 : 7;
+            S.settings.max = 2;
+            apply_preset(S.settings, 0);
+        }
+        // the venue row of a special match, which cannot be changed
+        S.settings_sel = p == "create-special" ? 2 : 0;
     }
     else if (p == "ranked") S.page = RANKED;
     else if (p == "voice") { S.page = VOICE; S.voice_sel = 1; }
@@ -3406,6 +3560,14 @@ void gallery_step()
         G.room = sample_room(0, 2, 2);
         G.room.players[0].fighter = G.room.players[1].fighter = NETPLAY_CREATED_FIGHTER;
     }
+    else if (p == "room-team") { S.page = HUB; G.room = sample_room(1, 4, 4); }
+    else if (p == "room-team-3") {      // three in, the one in room slot 2 gone: its card waits
+        S.page = HUB;
+        G.room = sample_room(1, 4, 4);
+        G.room.players[2] = G.room.players[3];
+        G.room.player_count = 3;
+    }
+    else if (p == "room-special") { S.page = HUB; G.room = sample_room(10, 2, 2); }
     else if (p == "vote") {
         S.page = HUB;
         G.room = sample_room(0, 2, 2);
@@ -3416,6 +3578,16 @@ void gallery_step()
         G.room.players[0].voted = 0;
         G.room.ms_left = 9000;
         S.vote_sel = 0;
+    } else if (p == "vote-team") {
+        S.page = HUB;
+        G.room = sample_room(1, 4, 4);
+        G.room.phase = 1;
+        G.room.candidate_count = 3;
+        G.room.candidates[0] = 4; G.room.candidates[1] = 10; G.room.candidates[2] = 18;
+        G.room.votes[1] = 2; G.room.votes[2] = 1;
+        G.room.players[0].voted = 1;
+        G.room.ms_left = 11000;
+        S.vote_sel = 1;
     } else if (p == "hill" || p == "up" || p == "watch") {
         S.page = HUB;
         NetRoom &r = G.room = sample_room(NETPLAY_MODE_KOTH_RANDOM, 10, 9);

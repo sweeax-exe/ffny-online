@@ -319,8 +319,46 @@ void test_control_note_funccall(const char *text);     /* src/hooks/test_control
  * players have not chosen yet). */
 int automatch_hold_funccall(const char *text)
 {
+    /* The front end's own calls that set up a match, while the room's match is agreed, set up or
+     * fought: the menu under the match (the battle match-type screen a summary returns to) still takes
+     * presses, and an A pressed there during the load went on to the controller screen, which cleared
+     * every controller binding (Controller.ControllerBind(-1)) and looked for a memory card while the
+     * venue loaded; that game crashed in the load (four-copy Team test, 2026-10-25). The match is
+     * automatch's: these calls are dropped from its sequence until the game is back in the room.
+     * Not while the room's match only waits for the menu to settle (armed): the match-type screen's
+     * own Game.ResetMatchData() is what automatch waits for, and a King of the Hill king called
+     * straight after his fight gets the next START while still on the results; with the screen's
+     * setup dropped automatch never started that fight (three-copy hill test, 2026-11-01). */
+    static const char *const setup[] = { "Controller.ControllerBind(", "Controller.ControllerSetup(",
+        "Controller.ControllerRemove(", "Controller.ControllerSelect(", "Game.SetMatchType(", "Game.SetMatchRules(",
+        "Game.ChooseVenue(", "Game.StartGame(", "Game.StartBattleMode(", "Game.ResetMatchData(",
+        "Battle.LoadCreatePlayerData(", "MemCard.ChooseMCDevice(", "MemCard.SetBMCurrentUserIndex(" };
+    unsigned i;
+    /* Game.Quit() leaves the results for the match-type screen (screen 9). An A held for a few frames
+     * on the results' last page called it once a frame, and each call requested screen 9 again while
+     * the first was still loading: the screen manager's left-open race (docs/research/screen-swap-freeze.md)
+     * then froze the game on that page for good (four-copy Team test, 2026-11-01: three requests, no
+     * frame after them). A Game.Quit() while a screen loads (the manager, registry slot 0x17, in a
+     * state other than 0) is dropped; the first one goes on. */
+    if (!strcmp(text, "Game.Quit()")) {
+        uint32_t sm = MEM32(0x002FB148u + 0x17u * 4u);
+        if (sm >= 0x10000u && MEM32(sm + 0x24u) != 0) {
+            static unsigned dropped;
+            if (dropped++ < 20)
+                fprintf(stderr, "[SCREEN] Game.Quit() while screen %08X loads (state %u): dropped (#%u)\n",
+                        MEM32(sm + 0x1Cu), MEM32(sm + 0x24u), dropped);
+            return 1;
+        }
+    }
     created_fighter_before_funccall(text);      /* unlinks created fighters before the reward step */
     if (!strcmp(text, "Game.Rematch()")) return netplay_rematch_request();
+    if (g_armed || (!netplay_match_locked() && !g_running)) return 0;
+    for (i = 0; i < sizeof(setup) / sizeof(setup[0]); i++)
+        if (!strncmp(text, setup[i], strlen(setup[i]))) {
+            static unsigned told;
+            if (told++ < 20) fprintf(stderr, "[AUTOMATCH] the room's match is on: the menu's %s is dropped\n", text);
+            return 1;
+        }
     return 0;
 }
 

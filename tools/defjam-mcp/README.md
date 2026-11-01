@@ -45,6 +45,12 @@ Logs and pictures go to `logs/dj/<stamp>-<scenario>/` (git-ignored).
 Exit code 1 on any failure. Other options: `--timeout`, `--lock-timeout`, `--keep-going` (online:
 past a desync), `--require-hits`, `--keep-roots`, `--env NAME=VALUE` (checked), `--turbo`.
 
+Three or four copies (`--players 3`, `--mode team --players 4`): each copy readies only once the room
+holds all of them (`RECOMP_TEST_READY_PLAYERS`), so no copy is left to open a room of its own. On the
+hill with three or more copies each match is checked by its START seed on the two copies that fought it
+(the others watch), and `--matches N` is N hill fights. Every row shows `reported`, the winners each game
+sends to the accounts service (in Team the whole side, `[0,1]` or `[2,3]`); the copies must agree.
+
 ### Examples
 
 A real run on a build without the match-type fix (bcdab58): the third match started before the

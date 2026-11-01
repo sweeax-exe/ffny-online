@@ -281,11 +281,43 @@ def test_offline_summary():
 
 
 def test_online_tail_counts_summaries_per_match():
+    # each match's summary is anchored on its GetMatchSummary(0), whatever the number of fighters
     t2 = scenarios.online_tail(3, 2, False)
-    assert "@game.getmatchsummary(,a" in t2 and "@game.getmatchsummary(#3," in t2 and "@game.getmatchsummary(#5," in t2
+    assert "@game.getmatchsummary(0,a" in t2 and "@game.getmatchsummary(0#2," in t2 and "@game.getmatchsummary(0#3," in t2
     assert "@game.startgame(#2," in t2 and "@game.startgame(#3," in t2 and "@game.startgame(#4" not in t2
     t4 = scenarios.online_tail(2, 4, True)
-    assert "@game.getmatchsummary(#5," in t4 and "right:" not in t4
+    assert "@game.getmatchsummary(0#2," in t4 and "right:" not in t4 and t4 == scenarios.online_tail(2, 3, True)
+
+
+def test_online_rows_koth_three_copies_by_seed():
+    def started(seed, winners):
+        return {"start": {"seed": seed, "type": 0, "players": 2, "venue": 1}, "koth": True, "mode": "lockstep",
+                "delay": 2, "rewards": True, "summary": {0: 0, 1: 1}, "hits": {0: 1, 1: 1}, "winners": winners,
+                "reported": winners, "checks": 5, "fe": "ok"}
+    a0 = {"started": [started("A", [0]), started("B", [0]), started("C", [0])], "crashes": []}
+    a1 = {"started": [started("A", [0]), started("C", [0])], "crashes": []}
+    a2 = {"started": [started("B", [0])], "crashes": []}
+    problems = []
+    rows, ok = scenarios.online_rows({0: a0, 1: a1, 2: a2}, 3, False, problems)
+    assert ok, problems
+    assert [r["copies"] for r in rows] == [[0, 1], [0, 2], [0, 1]]
+    a2["started"] = []
+    rows, ok = scenarios.online_rows({0: a0, 1: a1, 2: a2}, 3, False, [])
+    assert not ok and rows[1]["copies"] == [0]
+
+
+def test_online_rows_team_reports_a_side():
+    def started(reported):
+        return {"start": {"seed": "T", "type": 1, "players": 4, "venue": 4}, "mode": "lockstep", "delay": 2,
+                "rewards": True, "summary": {0: 0, 1: 1, 2: 2, 3: 3}, "hits": {0: 1, 2: 1}, "winners": [2],
+                "reported": reported, "checks": 5, "fe": "ok"}
+    copies = {i: {"started": [started([2, 3])], "crashes": []} for i in range(4)}
+    rows, ok = scenarios.online_rows(copies, 1, False, [])
+    assert ok and rows[0]["reported"] == [2, 3]
+    copies[3]["started"][0]["reported"] = [2]
+    problems = []
+    rows, ok = scenarios.online_rows(copies, 1, False, problems)
+    assert not ok and any("report different winners" in p for p in problems)
 
 
 def test_bot_summary_line():
