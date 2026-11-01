@@ -119,3 +119,32 @@ def test_tag_validation_against_a_real_synthetic_repository(tmp_path, case):
     result = subprocess.run([sys.executable, str(tmp_path / 'scripts/check-release.py'), 'v0.1.0'],
                             cwd=tmp_path, capture_output=True, text=True)
     assert (result.returncode == 0) == (case == 'valid'), result.stdout + result.stderr
+
+
+@pytest.mark.parametrize('name', [
+    'config/menu-ui-release.json', 'config/menu-ui-wave01-approval.json',
+    'authoring/review.json', 'workspaces/menu/revisions.json', 'candidates/draft.json',
+    'project.local.json', 'notes.local.md',
+])
+def test_authoring_records_and_machine_paths_stay_private(name):
+    assert source.path_problem(name)
+
+
+@pytest.mark.parametrize('name', ['config/hd-runtime-aliases.json', 'config/mods/catalogue-keys.json',
+                                 'docs/menu-ui-modpack-handover.md'])
+def test_runtime_texture_contracts_and_integration_notes_remain_allowed(name):
+    assert source.path_problem(name) is None
+
+
+@pytest.mark.parametrize('record', [
+    b'{"approval_records": [], "reviewed_sources": []}',
+    b'{"recovery_path": "/private/example", "manifest_sha256": "abc"}',
+    b'{"owner_message": "approved", "approved_records": []}',
+    b'{"generation_records": [], "selected_exports": []}',
+])
+def test_production_ledgers_cannot_hide_under_other_config_names(record):
+    assert source.text_problem(record, 'config/custom-pack.json')
+
+
+def test_public_runtime_alias_config_is_not_an_authoring_ledger():
+    assert source.text_problem(b'{"schema": 1, "aliases": []}', 'config/hd-runtime-aliases.json') is None
