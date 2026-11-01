@@ -194,6 +194,53 @@ void sub_000849C0(void)
             fprintf(stderr, "[CROWD] near-camera spectator hidden (%u so far)\n", hidden);
     }
 }
+/* XInputSetState (stdcall: handle, feedback; ret 8). The XDK's rule is that a feedback block is
+ * not sent again while its last request is pending (status ERROR_IO_PENDING, 0x3E5), and the
+ * driver does not check: the same request block (feedback + 0x10) goes into its queue a second
+ * time. The title's own pad-poll path checks (sub_001EBB50), but the rumble stop of every
+ * controller object (sub_000DC9C0) does not, and the battle setup runs it twice in a row: the
+ * match-type screen's Game.ResetMatchData() and then the online match setup's own, a millisecond
+ * apart, for all four ports. On the console the first SET_REPORT has finished by then; here the
+ * USB model completes it a few milliseconds later, so the second call queued a request that was
+ * still queued. Now and then that left the request linked to itself in the driver's waiting list
+ * (+0x41C, linked through +0x24), and the USB deferred routine (sub_00285078) sent it again
+ * forever on the timer thread: no more GPU interrupts, Direct3D waiting on its fence for good, a
+ * copy that froze as an online fight loaded (build 38 tests, 2026-11-01; [OHCI0] "interrupts
+ * masked for 2 s" is the sign).
+ * So a call whose block is still pending first waits for it (normally a few ms; DPCs run on the
+ * timer thread meanwhile), and is dropped if it is still pending after 200 ms or this thread is at
+ * DISPATCH_LEVEL (it would hold the lock the completion needs). The block keeps the newest motor
+ * speeds either way: the callers write them in before the call. */
+extern void sub_0027E0E8_gen(void);
+extern int xbox_IrqlPreemptible(void);
+#define XINPUT_PENDING 0x3E5u
+void sub_0027E0E8(void)
+{
+    uint32_t feedback = MEM32(g_esp + 8);
+    if (feedback && MEM32(feedback) == XINPUT_PENDING) {
+        static unsigned waited, dropped;
+        static uint64_t longest;
+        uint64_t t0 = GetTickCount64(), took;
+        if (xbox_IrqlPreemptible())
+            while (MEM32(feedback) == XINPUT_PENDING && GetTickCount64() - t0 < 200) Sleep(1);
+        took = GetTickCount64() - t0;
+        if (MEM32(feedback) == XINPUT_PENDING) {
+            if (++dropped <= 8)
+                fprintf(stderr, "[PAD] rumble request at 0x%08X dropped: the last one is still pending after %llu ms\n",
+                        feedback, (unsigned long long)took);
+            g_eax = XINPUT_PENDING;
+            g_esp += 12;        /* stdcall: the return address and the two arguments */
+            return;
+        }
+        waited++;
+        if (took > longest || waited <= 4) {
+            if (took > longest) longest = took;
+            fprintf(stderr, "[PAD] rumble request at 0x%08X waited %llu ms for the last one (%u waits, longest %llu ms)\n",
+                    feedback, (unsigned long long)took, waited, (unsigned long long)longest);
+        }
+    }
+    sub_0027E0E8_gen();
+}
 void sub_001BC690_enter(void) { defjam_test_rng(g_esp); netplay_on_seed(g_esp, 2, 0x1BC690u); }
 void sub_001AD220_enter(void) { defjam_test_ai_seed(g_esp); netplay_on_seed(g_esp, 1, 0x1AD220u); }
 /* The seeding routine every generator of this kind goes through (thiscall). */
