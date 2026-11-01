@@ -324,7 +324,11 @@ int automatch_hold_funccall(const char *text)
      * presses, and an A pressed there during the load went on to the controller screen, which cleared
      * every controller binding (Controller.ControllerBind(-1)) and looked for a memory card while the
      * venue loaded; that game crashed in the load (four-copy Team test, 2026-10-25). The match is
-     * automatch's: these calls are dropped until the game is back in the room. */
+     * automatch's: these calls are dropped from its sequence until the game is back in the room.
+     * Not while the room's match only waits for the menu to settle (armed): the match-type screen's
+     * own Game.ResetMatchData() is what automatch waits for, and a King of the Hill king called
+     * straight after his fight gets the next START while still on the results; with the screen's
+     * setup dropped automatch never started that fight (three-copy hill test, 2026-11-01). */
     static const char *const setup[] = { "Controller.ControllerBind(", "Controller.ControllerSetup(",
         "Controller.ControllerRemove(", "Controller.ControllerSelect(", "Game.SetMatchType(", "Game.SetMatchRules(",
         "Game.ChooseVenue(", "Game.StartGame(", "Game.StartBattleMode(", "Game.ResetMatchData(",
@@ -332,7 +336,7 @@ int automatch_hold_funccall(const char *text)
     unsigned i;
     created_fighter_before_funccall(text);      /* unlinks created fighters before the reward step */
     if (!strcmp(text, "Game.Rematch()")) return netplay_rematch_request();
-    if (!netplay_match_locked() && !automatch_pending()) return 0;
+    if (g_armed || (!netplay_match_locked() && !g_running)) return 0;
     for (i = 0; i < sizeof(setup) / sizeof(setup[0]); i++)
         if (!strncmp(text, setup[i], strlen(setup[i]))) {
             static unsigned told;
