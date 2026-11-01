@@ -285,8 +285,12 @@ void cp_record_stats(const uint8_t rec[CP_REC_LEN], int out[6])
 
 /* ---- the player's own ---- */
 
-static int g_local_state;           /* 0 not read, 1 have, -1 none */
-static uint8_t g_local[CP_REC_LEN];
+/* Every created fighter of the save area, newest first (at most CP_LOCAL_MAX), and the one the
+ * player picked: the save the setting names (cp_pick_setting_get), the newest if it is gone. */
+static int g_local_state;           /* 0 not read, 1 read */
+static CpLocal g_local[CP_LOCAL_MAX];
+static ULONGLONG g_local_when[CP_LOCAL_MAX];
+static int g_local_count;
 static CRITICAL_SECTION g_local_cs;
 static INIT_ONCE g_local_once = INIT_ONCE_STATIC_INIT;
 static BOOL CALLBACK local_init(PINIT_ONCE o, PVOID p, PVOID *c) { (void)o; (void)p; (void)c; InitializeCriticalSection(&g_local_cs); return TRUE; }
@@ -313,24 +317,68 @@ static int profile_from_file(const char *path, uint8_t *profile, FILETIME *when)
     return (int)got;
 }
 
+static ULONGLONG ft64(FILETIME t) { return ((ULONGLONG)t.dwHighDateTime << 32) | t.dwLowDateTime; }
+
+/* One checked record into the list, kept newest first (a tie keeps the order found); past
+ * CP_LOCAL_MAX the oldest drops out. `when` is a FILETIME; 0 shows no date. */
+static void local_add(const uint8_t rec[CP_REC_LEN], const char *key, ULONGLONG when, int dated)
+{
+    int at = g_local_count, k;
+    CpLocal *e;
+    while (at > 0 && g_local_when[at - 1] < when) at--;
+    if (at >= CP_LOCAL_MAX) return;
+    k = g_local_count < CP_LOCAL_MAX ? g_local_count : CP_LOCAL_MAX - 1;
+    for (; k > at; k--) { g_local[k] = g_local[k - 1]; g_local_when[k] = g_local_when[k - 1]; }
+    if (g_local_count < CP_LOCAL_MAX) g_local_count++;
+    e = &g_local[at];
+    memset(e, 0, sizeof(*e));
+    memcpy(e->rec, rec, CP_REC_LEN);
+    cp_record_name(rec, e->name, sizeof(e->name));
+    snprintf(e->key, sizeof(e->key), "%s", key);
+    g_local_when[at] = when;
+    if (dated) {
+        FILETIME ft, lt;
+        SYSTEMTIME st;
+        ft.dwLowDateTime = (DWORD)when;
+        ft.dwHighDateTime = (DWORD)(when >> 32);
+        if (FileTimeToLocalFileTime(&ft, &lt) && FileTimeToSystemTime(&lt, &st))
+            snprintf(e->saved, sizeof(e->saved), "%04u-%02u-%02u %02u:%02u", st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute);
+    }
+}
+
+/* RECOMP_CP_RECORD (tests): profile dumps or user ID saves separated by ';', newest first. */
+static void read_test_records(const char *list)
+{
+    static uint8_t profile[PROFILE_SIZE];
+    char buf[2048], *p, *next;
+    int i = 0;
+    snprintf(buf, sizeof(buf), "%s", list);
+    for (p = buf; p && *p; p = next, i++) {
+        uint8_t rec[CP_REC_LEN], ok[CP_REC_LEN];
+        int have = 0;
+        next = strchr(p, ';');
+        if (next) *next++ = 0;
+        if (!*p) continue;
+        if (profile_from_file(p, profile, NULL)) {
+            cp_record_from_profile(profile, rec);
+            have = cp_record_sanitize(rec, ok);
+        }
+        fprintf(stderr, "[CREATED] test record %s: %s\n", p, have ? "usable" : "not usable");
+        if (have) local_add(ok, p, (ULONGLONG)(64 - i), 0);     /* the order given */
+    }
+}
+
 static void read_local(void)
 {
     static uint8_t profile[PROFILE_SIZE];
-    uint8_t rec[CP_REC_LEN], best[CP_REC_LEN];
+    uint8_t rec[CP_REC_LEN];
     const char *test = getenv("RECOMP_CP_RECORD"), *data = getenv("DEFJAM_DATA");
     char root[MAX_PATH], pattern[MAX_PATH];
-    FILETIME best_time = { 0, 0 };
-    int have = 0;
     WIN32_FIND_DATAA dir;
     HANDLE h;
-    if (test && *test) {
-        if (profile_from_file(test, profile, NULL)) {
-            cp_record_from_profile(profile, rec);
-            have = cp_record_sanitize(rec, best);
-        }
-        fprintf(stderr, "[CREATED] test record %s: %s\n", test, have ? "usable" : "not usable");
-        goto done;
-    }
+    int i;
+    g_local_count = 0;
+    if (test && *test) { read_test_records(test); goto done; }
     if (data && *data) snprintf(root, sizeof(root), "%s\\save\\UserData\\45410049", data);
     else {
         const char *la = getenv("LOCALAPPDATA");
@@ -348,43 +396,101 @@ static void read_local(void)
         g = FindFirstFileA(inner, &file);
         if (g == INVALID_HANDLE_VALUE) continue;
         do {
-            char path[MAX_PATH];
-            FILETIME when;
+            char path[MAX_PATH], key[sizeof(g_local[0].key)];
+            FILETIME when = { 0, 0 };
             uint8_t ok[CP_REC_LEN];
             if (file.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY || file.nFileSizeLow != SAVE_FILE_SIZE) continue;
             snprintf(path, sizeof(path), "%s\\%s\\%s", root, dir.cFileName, file.cFileName);
             if (!profile_from_file(path, profile, &when) || profile[0x4D8A] != 1) continue;
             cp_record_from_profile(profile, rec);
             if (!cp_record_sanitize(rec, ok)) continue;
-            if (!have || CompareFileTime(&when, &best_time) > 0) {
-                memcpy(best, ok, CP_REC_LEN);
-                best_time = when;
-                have = 1;
-            }
+            snprintf(key, sizeof(key), "%s/%s", dir.cFileName, file.cFileName);
+            local_add(ok, key, ft64(when), 1);
         } while (FindNextFileA(g, &file));
         FindClose(g);
     } while (FindNextFileA(h, &dir));
     FindClose(h);
 done:
-    if (have) {
-        char name[16];
-        cp_record_name(best, name, sizeof(name));
-        memcpy(g_local, best, CP_REC_LEN);
-        fprintf(stderr, "[CREATED] the player's fighter: %s (%s), record %08X\n", name, cp_record_style(best), cp_record_crc(best));
+    for (i = 0; i < g_local_count; i++)
+        fprintf(stderr, "[CREATED] the player's fighter %d: %s (%s), saved %s, record %08X\n", i, g_local[i].name,
+                cp_record_style(g_local[i].rec), g_local[i].saved[0] ? g_local[i].saved : "-", cp_record_crc(g_local[i].rec));
+    if (!g_local_count) fprintf(stderr, "[CREATED] the player has no created fighter\n");
+    g_local_state = 1;
+}
+
+/* Takes the list's lock, reading the list first if needed. */
+static void local_lock(void)
+{
+    InitOnceExecuteOnce(&g_local_once, local_init, NULL, NULL);
+    EnterCriticalSection(&g_local_cs);
+    if (!g_local_state) read_local();
+}
+
+/* The picked entry (lock held): RECOMP_CP_PICK (tests), else the save the setting names, else the
+ * newest; -1 with no entry. */
+static int local_pick(void)
+{
+    const char *test = getenv("RECOMP_CP_PICK");
+    char key[sizeof(g_local[0].key)];
+    int i;
+    if (!g_local_count) return -1;
+    if (test && *test) {
+        i = atoi(test);
+        return i >= 0 && i < g_local_count ? i : 0;
     }
-    g_local_state = have ? 1 : -1;
+    key[0] = 0;
+    cp_pick_setting_get(key, (int)sizeof(key));
+    if (key[0])
+        for (i = 0; i < g_local_count; i++)
+            if (!strcmp(g_local[i].key, key)) return i;
+    return 0;
+}
+
+int cp_local_list(CpLocal *out, int max)
+{
+    int n, count;
+    local_lock();
+    count = g_local_count;
+    n = count < max ? count : max;
+    if (out && n > 0) memcpy(out, g_local, sizeof(CpLocal) * (size_t)n);
+    LeaveCriticalSection(&g_local_cs);
+    return count;
+}
+
+int cp_local_pick(void)
+{
+    int i;
+    local_lock();
+    i = local_pick();
+    LeaveCriticalSection(&g_local_cs);
+    return i;
+}
+
+int cp_local_set_pick(int index)
+{
+    char key[sizeof(g_local[0].key)];
+    int ok = 0;
+    local_lock();
+    if (index >= 0 && index < g_local_count) {
+        snprintf(key, sizeof(key), "%s", g_local[index].key);
+        ok = 1;
+    }
+    LeaveCriticalSection(&g_local_cs);
+    if (ok) {
+        cp_pick_setting_set(key);
+        fprintf(stderr, "[CREATED] picked fighter %d (%s)\n", index, key);
+    }
+    return ok;
 }
 
 int cp_local_record(uint8_t rec[CP_REC_LEN])
 {
-    int have;
-    InitOnceExecuteOnce(&g_local_once, local_init, NULL, NULL);
-    EnterCriticalSection(&g_local_cs);
-    if (!g_local_state) read_local();
-    have = g_local_state > 0;
-    if (have && rec) memcpy(rec, g_local, CP_REC_LEN);
+    int i;
+    local_lock();
+    i = local_pick();
+    if (i >= 0 && rec) memcpy(rec, g_local[i].rec, CP_REC_LEN);
     LeaveCriticalSection(&g_local_cs);
-    return have;
+    return i >= 0;
 }
 
 void created_fighter_reload(void)

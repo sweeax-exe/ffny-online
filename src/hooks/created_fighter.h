@@ -39,11 +39,31 @@ void cp_record_stats(const uint8_t rec[CP_REC_LEN], int out[6]);
 
 /* ---- the player's own ---- */
 
-/* The player's created fighter, sanitized: the newest Story save of the save area with a created
- * fighter (or RECOMP_CP_RECORD, a profile dump, for tests). 1 if there is one. Read once, then
- * on created_fighter_reload(). */
+/* Every Story save of the save area with a created fighter, sanitized, newest first (or, for
+ * tests, RECOMP_CP_RECORD: profile dumps or user ID saves separated by ';', in that order). Read
+ * once, then again after created_fighter_reload(). */
+#define CP_LOCAL_MAX    8
+typedef struct CpLocal {
+    uint8_t rec[CP_REC_LEN];        /* the checked record */
+    char name[CP_NAME_MAX + 1];     /* the fighter's name (the user ID) */
+    char key[260];                  /* which save: "<user ID folder>/<file>" (tests: the path) */
+    char saved[20];                 /* the save's time, "2026-10-28 14:30" local; "" for tests */
+} CpLocal;
+/* Copies up to `max` entries into `out` (NULL: none); returns how many there are. */
+int cp_local_list(CpLocal *out, int max);
+/* The player's pick: the entry whose save the setting online.created names, else the newest
+ * (0); RECOMP_CP_PICK=<index> overrides it for tests. -1 when there is none. */
+int cp_local_pick(void);
+/* Picks entry `index` and remembers its save in the setting (saved to the settings file).
+ * 0 if there is no such entry. */
+int cp_local_set_pick(int index);
+/* The picked record (CP_REC_LEN bytes). 1 if there is one. */
 int cp_local_record(uint8_t rec[CP_REC_LEN]);
 void created_fighter_reload(void);
+/* The remembered pick (setting online.created; "" none): read and written through
+ * the settings file (pc_settings.c). */
+void cp_pick_setting_get(char *out, int size);
+void cp_pick_setting_set(const char *key);
 
 /* ---- in a match (game thread) ---- */
 

@@ -210,6 +210,10 @@ int netplay_room_name(int slot, char *out, int size);
 /* 1 when this player may pick their created fighter now: the relay's switch is on and it keeps
  * this player's record. */
 int netplay_created_available(void);
+/* The player picks created fighter `index` of cp_local_list (created_fighter.h): remembered, and
+ * uploaded to the relay in place of the one it keeps (one record per player, as before). 0 if
+ * there is no such fighter. */
+int netplay_created_pick(int index);
 /* The checked record of match position `pos` as START named it (CP_REC_LEN bytes into out); 0 if
  * that position plays no created fighter or the record is not here. */
 int netplay_created_record(int pos, uint8_t *out);

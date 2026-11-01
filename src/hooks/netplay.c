@@ -72,6 +72,7 @@ int netplay_room_name(int s, char *o, int n) { (void)s; if (n > 0) o[0] = 0; ret
 int netplay_created_record(int p, uint8_t *o) { (void)p; (void)o; return 0; }
 int netplay_slot_created(int s, char *n, int ns, const char **st) { (void)s; if (ns > 0) n[0] = 0; if (st) *st = ""; return 0; }
 int netplay_created_available(void) { return 0; }
+int netplay_created_pick(int i) { (void)i; return 0; }
 int netplay_lobby(const char *s, const char *n) { (void)s; (void)n; return -1; }
 void netplay_lobby_list(int m) { (void)m; }
 void netplay_lobby_who(void) {}
@@ -256,6 +257,8 @@ static struct {
     uint8_t cp_mine[CP_REC_LEN];
     int cp_mine_state;              /* 0 not read, 1 have one, -1 none */
     uint32_t cp_acked;              /* CRC the relay keeps for us, 0 none */
+    uint8_t cp_prev[CP_REC_LEN];    /* the record the relay kept before the player picked another */
+    uint32_t cp_prev_crc;           /* its CRC, 0 none: a START may still name it */
     ULONGLONG cp_sent;
     int cp_tries;
     uint32_t cp_start_crc[ROOMSLOTS];   /* by room slot: the record START named, 0 none */
@@ -1448,6 +1451,10 @@ static int cp_records_complete(int ask)
         if (slot == N.slot && N.cp_mine_state > 0 && cp_record_crc(N.cp_mine) == N.cp_start_crc[slot]) {
             memcpy(N.cp_rec[slot], N.cp_mine, CP_REC_LEN);
             N.cp_have[slot] = 1;
+        } else if (slot == N.slot && N.cp_prev_crc && N.cp_prev_crc == N.cp_start_crc[slot]) {
+            /* the relay started the match before the new pick reached it: every PC plays the old one */
+            memcpy(N.cp_rec[slot], N.cp_prev, CP_REC_LEN);
+            N.cp_have[slot] = 1;
         }
         if (N.cp_have[slot] && cp_record_crc(N.cp_rec[slot]) == N.cp_start_crc[slot]) continue;
         complete = 0;
@@ -1497,8 +1504,31 @@ int netplay_slot_created(int slot, char *name, int size, const char **style)
 
 int netplay_created_available(void)
 {
+    /* the relay keeps the picked record, or kept the one before and the new pick is on its way */
     return N.lobby && N.relay_caps > 0 && (N.relay_caps & CAPS_CREATED) && N.cp_mine_state > 0 &&
-           N.cp_acked && N.cp_acked == cp_record_crc(N.cp_mine);
+           ((N.cp_acked && N.cp_acked == cp_record_crc(N.cp_mine)) || (N.cp_prev_crc && N.cp_tries < RETRIES));
+}
+
+int netplay_created_pick(int index)
+{
+    uint8_t rec[CP_REC_LEN];
+    if (!cp_local_set_pick(index) || !cp_local_record(rec)) return 0;
+    InitOnceExecuteOnce(&g_once, init_once, NULL, NULL);
+    EnterCriticalSection(&g_cs);
+    if (N.cp_mine_state <= 0 || memcmp(rec, N.cp_mine, CP_REC_LEN)) {
+        if (N.cp_mine_state > 0 && N.cp_acked && N.cp_acked == cp_record_crc(N.cp_mine)) {
+            memcpy(N.cp_prev, N.cp_mine, CP_REC_LEN);
+            N.cp_prev_crc = N.cp_acked;
+        }
+        memcpy(N.cp_mine, rec, CP_REC_LEN);
+        if (N.cp_mine_state) N.cp_mine_state = 1;     /* not read yet (0): the session reads the pick */
+        N.cp_tries = 0;
+        N.cp_sent = 0;      /* the upload goes out with the next pass */
+        N.roomv.version++;
+        fprintf(stderr, "[NETPLAY] created fighter picked: record %08X\n", cp_record_crc(rec));
+    }
+    LeaveCriticalSection(&g_cs);
+    return 1;
 }
 
 static void on_start(const uint8_t *b, int len)
@@ -1976,21 +2006,31 @@ static DWORD WINAPI net_thread(LPVOID unused)
         }
         /* created fighters: upload this player's record once the relay allows them, until it is kept */
         if (N.lobby && N.have_token && N.state == NETPLAY_LOBBY && N.relay_caps > 0 && (N.relay_caps & CAPS_CREATED)) {
+            uint8_t fb[6 + 8 + 2 + CP_REC_LEN];
+            int n = 0;
             if (!N.cp_mine_state) {
-                N.cp_mine_state = cp_local_record(N.cp_mine) ? 1 : -1;
-                N.cp_tries = 0;
+                uint8_t rec[CP_REC_LEN];
+                int have = cp_local_record(rec);    /* the player's pick (outside g_cs: it reads files) */
+                EnterCriticalSection(&g_cs);
+                if (!N.cp_mine_state) {
+                    if (have) memcpy(N.cp_mine, rec, CP_REC_LEN);
+                    N.cp_mine_state = have ? 1 : -1;
+                    N.cp_tries = 0;
+                }
+                LeaveCriticalSection(&g_cs);
             }
+            EnterCriticalSection(&g_cs);
             if (N.cp_mine_state > 0 && N.cp_acked != cp_record_crc(N.cp_mine) && N.cp_tries < RETRIES &&
                 now - N.cp_sent >= RETRY_MS) {
-                uint8_t fb[6 + 8 + 2 + CP_REC_LEN];
-                int n = header(fb, T_FIGHTER);
+                n = header(fb, T_FIGHTER);
                 memcpy(fb + n, N.token, 8); n += 8;
                 fb[n++] = (uint8_t)CP_REC_LEN; fb[n++] = (uint8_t)(CP_REC_LEN >> 8);
                 memcpy(fb + n, N.cp_mine, CP_REC_LEN); n += CP_REC_LEN;
-                send_raw(fb, n);
                 N.cp_tries++;
                 N.cp_sent = now;
             }
+            LeaveCriticalSection(&g_cs);
+            if (n) send_raw(fb, n);
         }
         if (N.cp_waiting) {
             int complete, late;
@@ -2165,6 +2205,7 @@ static int start(const char *server, const char *name, int creating, const char 
     /* created fighters: read the player's own again (a new one may have been made meanwhile) */
     N.cp_mine_state = 0;
     N.cp_acked = 0;
+    N.cp_prev_crc = 0;
     N.cp_tries = 0;
     memset(N.cp_have, 0, sizeof(N.cp_have));
     memset(N.cp_start_crc, 0, sizeof(N.cp_start_crc));
@@ -2802,6 +2843,27 @@ static DWORD WINAPI autostart_thread(LPVOID unused)
         for (i = 0; i < 100 && fighter == NETPLAY_CREATED_FIGHTER && !netplay_created_available(); i++) Sleep(100);
         if (fighter == NETPLAY_CREATED_FIGHTER)
             fprintf(stderr, "[NETPLAY] tests: the created fighter is %savailable\n", netplay_created_available() ? "" : "NOT ");
+        /* RECOMP_TEST_CP_REPICK=<index>: once the relay keeps the first pick, pick another created
+         * fighter as the fighter select does, and wait until the relay keeps that one */
+        {
+            const char *repick = getenv("RECOMP_TEST_CP_REPICK");
+            if (repick && *repick && fighter == NETPLAY_CREATED_FIGHTER && netplay_created_available()) {
+                uint32_t want = 0, kept = 0;
+                int picked = netplay_created_pick(atoi(repick));
+                EnterCriticalSection(&g_cs);
+                want = cp_record_crc(N.cp_mine);
+                LeaveCriticalSection(&g_cs);
+                for (i = 0; i < 100 && picked; i++) {
+                    EnterCriticalSection(&g_cs);
+                    kept = N.cp_acked;
+                    LeaveCriticalSection(&g_cs);
+                    if (kept == want) break;
+                    Sleep(100);
+                }
+                fprintf(stderr, "[NETPLAY] tests: picked created fighter %s: record %08X, the relay keeps %08X\n",
+                        repick, want, kept);
+            }
+        }
         if (listed && *listed) {
             /* RECOMP_TEST_JOIN_LISTED=<s>: no quick match; join the first open room the room list shows
              * (with RECOMP_NETPLAY_SERVER=all the other relays' rooms too, moving there to join), as a
