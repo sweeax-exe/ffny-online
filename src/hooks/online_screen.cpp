@@ -945,7 +945,14 @@ bool stats_busy() { return gallery_on() ? false : account_stats_busy() != 0; }
 bool stats_text(char *out, int size)
 {
     if (!gallery_on()) return account_stats(out, size) != 0;
-    snprintf(out, (size_t)size, "%s", G.stats.c_str());
+    std::string s = G.stats;
+    if (G.page && !strcmp(G.page, "stats-1v1")) {     // an account service before Team and FFA had records
+        for (const char *key : { "team=", "ffa=" }) {
+            size_t at = s.find(std::string("\n") + key);
+            if (at != std::string::npos) s.erase(at + 1, s.find('\n', at + 1) - at);
+        }
+    }
+    snprintf(out, (size_t)size, "%s", s.c_str());
     return true;
 }
 void status_text(char *out, int size)
@@ -1705,6 +1712,9 @@ struct StatsView {
     int matches = 0, wins = 0, losses = 0, draws = 0, win_rate = 0, streak = 0, best = 0, rank = 0, min = 3;
     int favorite = -1;
     int ranked_rating = 0, ranked_games = 0;    // 0 games: not played ranked yet
+    // Team (2 vs 2) and Free for All / 3-Way, kept apart from the record above (which, like the
+    // leaderboard, is one on one): matches, wins, losses, draws; [0] < 0 when the service sent none.
+    int team[4] = { -1, 0, 0, 0 }, ffa[4] = { -1, 0, 0, 0 };
     int board_page = 0, board_pages = 1;        // the leaderboard page shown (10 places each)
     std::vector<std::vector<std::string>> recent, board;
 };
@@ -1752,6 +1762,12 @@ bool read_stats(StatsView &v)
             else if (k == "ranked") {
                 auto r = split_bar(val);
                 if (r.size() >= 2) { v.ranked_rating = atoi(r[0].c_str()); v.ranked_games = atoi(r[1].c_str()); }
+            }
+            else if (k == "team" || k == "ffa") {       // matches|wins|losses|draws (accounts StatsText)
+                auto r = split_bar(val);
+                int *rec = k == "team" ? v.team : v.ffa;
+                if (r.size() >= 4)
+                    for (int i = 0; i < 4; i++) rec[i] = std::max(0, atoi(r[i].c_str()));
             }
         }
         line = end ? end + 1 : nullptr;
@@ -1802,6 +1818,8 @@ void draw_stats(ImDrawList *dl, const Frame &f, const Pad &pad)
     text(dl, f, g_hand, 13, 170, 172, ORANGE, "LEADERBOARD", LEFT, 1.0f);
     text(dl, f, g_title, 20, 170, 188, v.rank ? CREAM : GREY, num, LEFT, 1.4f);
     if (!v.rank) text(dl, f, g_title, 11, 170, 214, GREY, "matches to get on it", LEFT, 1.0f);
+    // the record above and the leaderboard are one on one; Team and Free for All have their own rows below
+    text(dl, f, g_hand, 13, 308, 227, ORANGE, "ONE ON ONE", RIGHT, 1.0f);
     snprintf(num, sizeof(num), "%d", v.wins);
     big_number(dl, f, 78, 246, num, "WINS", GREEN);
     snprintf(num, sizeof(num), "%d", v.losses);
@@ -1813,15 +1831,31 @@ void draw_stats(ImDrawList *dl, const Frame &f, const Pad &pad)
     else
         snprintf(num, sizeof(num), "STREAK %d   BEST %d", v.streak, v.best);
     text(dl, f, g_title, 13, 46, 306, WHITE, num, LEFT, 1.1f);
-    // last fights: the three lines end well inside the panel (bottom 406)
-    text(dl, f, g_hand, 13, 46, 326, ORANGE, "LAST FIGHTS", LEFT, 1.0f);
-    if (v.recent.empty()) text(dl, f, g_title, 12, 46, 344, GREY, "Play online while signed in.", LEFT, 1.0f);
-    for (size_t i = 0; i < v.recent.size() && i < 3; i++) {
+    // Team and Free for All keep their own records (accounts, build 40): a small row each, only when
+    // the service sends them (an older one does not, and nothing shows).
+    float y0 = 326;
+    for (int k = 0; k < 2; k++) {
+        const int *rec = k == 0 ? v.team : v.ffa;
+        if (rec[0] < 0) continue;
+        char wl[48];
+        if (rec[3]) snprintf(wl, sizeof(wl), "%d W   %d L   %d D", rec[1], rec[2], rec[3]);
+        else snprintf(wl, sizeof(wl), "%d W   %d L", rec[1], rec[2]);
+        text(dl, f, g_hand, 12, 46, y0, ORANGE, k == 0 ? "TEAM 2 VS 2" : "FREE FOR ALL", LEFT, 1.0f);
+        text(dl, f, g_title, 12, 118, y0, WHITE, wl, LEFT, 1.0f);
+        y0 += 15;
+    }
+    // last fights: the lines end inside the panel (bottom 406); below Team or Free for All, two of them
+    bool extra = y0 > 326;
+    int fights = extra ? 2 : 3;
+    float pitch = extra ? 16.0f : 17.0f;
+    text(dl, f, g_hand, 13, 46, y0, ORANGE, "LAST FIGHTS", LEFT, 1.0f);
+    if (v.recent.empty()) text(dl, f, g_title, 12, 46, y0 + 18, GREY, "Play online while signed in.", LEFT, 1.0f);
+    for (size_t i = 0; i < v.recent.size() && (int)i < fights; i++) {
         const auto &r = v.recent[i];
         if (r.size() < 4) continue;
         bool win = r[0] == "win", draw = r[0] == "draw";
         std::string line = r[1] + " vs " + (r[2].empty() ? "?" : r[2]);
-        float y = 342 + i * 17;
+        float y = y0 + 16 + i * pitch;
         text(dl, f, g_title, 13, 46, y, win ? GREEN : draw ? GREY : IM_COL32(235, 90, 80, 255), win ? "W" : draw ? "D" : "L",
              LEFT, 1.1f);
         text(dl, f, g_title, 12, 64, y + 1, CREAM, line.c_str(), LEFT, 1.0f, 250);
@@ -1841,7 +1875,7 @@ void draw_stats(ImDrawList *dl, const Frame &f, const Pad &pad)
                  v.board_page + 1 < v.board_pages ? ">" : " ");
         text(dl, f, g_title, 14, 468, 382, stats_busy() ? GREY : CREAM, pg, CENTER, 1.1f);
     }
-    text(dl, f, g_title, 10, 592, 100, GREY, "MOST WINS", RIGHT, 1.0f);
+    text(dl, f, g_title, 10, 592, 100, GREY, "ONE ON ONE, MOST WINS", RIGHT, 1.0f);
     if (v.board.empty())
         text(dl, f, g_title, 12, 344, 130, GREY, "Nobody yet. Three online matches signed in put you on it.", LEFT,
              1.0f, 250);
@@ -3529,7 +3563,7 @@ void gallery_step()
                                          // Team (2 vs 2) and the special matches
                                          "create-team", "create-special", "create-subway", "room-team", "room-team-3",
                                          "room-special", "vote-team",
-                                         "ranked", "voice", "stats", "players", "fighters",
+                                         "ranked", "voice", "stats", "stats-1v1", "players", "fighters",
                                          // build 33: the grid at Eric Sermon, O.E, Santos and Teck
                                          "fighters-91", "fighters-92", "fighters-93", "fighters-85", "room", "vote", "hill",
                                          "up", "watch", "room-voice", "match",
@@ -3583,7 +3617,7 @@ void gallery_step()
         char buf[2048];
         snprintf(buf, sizeof(buf),
                  "name=Ann\nmatches=42\nwins=27\nlosses=14\ndraws=1\nwin_rate=64\nstreak=3\nbest_streak=7\nrank=12\nmin=3\n"
-                 "favorite=%d\nfavorite_name=%s\nranked=1520|10\n"
+                 "favorite=%d\nfavorite_name=%s\nranked=1520|10\nteam=12|8|4|0\nffa=9|3|5|1\n"
                  "recent=win|Ann|Ben|0\nrecent=loss|Ann|Cal|0\nrecent=win|Ann|Dee|0\n"
                  "board=1|Kaze|88|20|0\nboard=2|Rex|71|33|0\nboard=3|Nia|64|12|0\nboard=4|Jay|58|41|0\n"
                  "board=5|Sol|51|27|0\nboard=6|Oz|47|30|0\nboard=7|Vic|40|22|0\nboard=8|Mo|38|19|0\n"
@@ -3688,7 +3722,7 @@ void gallery_step()
     }
     else if (p == "ranked") S.page = RANKED;
     else if (p == "voice") { S.page = VOICE; S.voice_sel = 1; }
-    else if (p == "stats") { S.page = STATS; S.stats_page = 0; }
+    else if (p == "stats" || p == "stats-1v1") { S.page = STATS; S.stats_page = 0; }
     else if (p == "players") S.page = PLAYERS;
     else if (p == "fighters") { S.page = FIGHTERS; S.fighter_sel = 9; S.fighter_top = 0; }
     else if (p.rfind("fighters-", 0) == 0) {    // the grid scrolled to one fighter (by Battle-mode ID)

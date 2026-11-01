@@ -26,6 +26,11 @@ size_t pc_ui_settings(RecompSetting *out, size_t max);
 int pc_launcher_wanted(int skip_setting, int force_flag, int no_flag, int shift_held,
                        int test_run);
 
+/* F9's picture report (d3d11_translator.c) saved the game's frame to `path`: replace it with the
+ * window's picture, the overlay included, when this frame's overlay is drawn (Windows; elsewhere
+ * nothing happens and the game's frame is sent). */
+void pc_ui_report_shot(const char *path);
+
 #if defined(_WIN32)
 /* ---- the in-game overlay (pc_ui.cpp) ------------------------------------------ */
 

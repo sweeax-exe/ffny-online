@@ -792,6 +792,28 @@ static void capture_backbuffer(IDirect3DDevice8 *dev)
             path = named;
         }
     }
+    {
+        /* RECOMP_TEST_PICTURE_REPORT_SECS=<secs>: a test presses F9 once at that point on the pad
+         * script's clock (RECOMP_SCRIPT_ANCHOR). Only with RECOMP_ACCOUNT_SERVER set, so a test's
+         * report goes to a local service (or a closed port), never to the players' one. */
+        static double test_f9 = -2.0;
+        if (test_f9 == -2.0) {
+            const char *e = getenv("RECOMP_TEST_PICTURE_REPORT_SECS");
+            const char *acc = getenv("RECOMP_ACCOUNT_SERVER");
+            test_f9 = (e && *e && acc && *acc) ? atof(e) : -1.0;
+        }
+        if (test_f9 >= 0.0) {
+            extern double xbox_ScriptSeconds(void);
+            extern int bug_report_f9(void);
+            double t = xbox_ScriptSeconds();
+            if (t >= test_f9) {
+                test_f9 = -1.0;
+                fprintf(stderr, "[REPORT] test: F9 at %.1f s\n", t);
+                if (bug_report_f9())
+                    InterlockedExchange(&s_report_shot, 1);
+            }
+        }
+    }
     if (!step_shot && InterlockedExchange(&s_report_shot, 0)) {
         const char *ini = pc_settings_path(), *slash;
         SYSTEMTIME t;
@@ -940,6 +962,11 @@ static void capture_backbuffer(IDirect3DDevice8 *dev)
         }
         if (step_shot == -1) {      /* F9: send it with the log */
             extern void bug_report_send(const char *kind, const char *log_path, const char *picture_path);
+            /* This is the game's frame alone. The overlay (the online screens, the settings) is drawn
+             * over it in this frame's Present, and pc_ui.cpp replaces the file with the window's
+             * picture then, before the report reads it. The [BATCH] draws stay the game's. */
+            extern void pc_ui_report_shot(const char *path);
+            pc_ui_report_shot(path);
             bug_report_send("picture", NULL, path);
         }
         if (!step_shot && ++next >= nwant)
