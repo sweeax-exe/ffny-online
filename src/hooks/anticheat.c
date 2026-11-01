@@ -40,7 +40,35 @@ static uint32_t g_froze_ms, g_freezes, g_longest_ms;
 static char g_tools[AC_TOOLS_MAX][40];
 static int g_ntools;
 static int g_instances;
+static int g_games;
+static HANDLE g_game_mark;
 static char g_hwid[33];
+
+/* Games running on the PC. The launcher is defjam_recomp.exe too and stays in the background while
+ * it runs the game, so counting processes counted every player twice (build 37, MrRenoldz and
+ * marcelo). Each game in a fight holds one of these named mutexes; the launcher never takes one,
+ * and Windows drops them with their process. Called with g_lock held. */
+#define AC_GAME_MARKS 16
+static void count_games(void)
+{
+    wchar_t name[48];
+    int n, games = 0;
+    if (!g_game_mark)
+        for (n = 0; n < AC_GAME_MARKS && !g_game_mark; n++) {
+            HANDLE h;
+            swprintf(name, 48, L"Local\\FFNY-game-%d", n);
+            h = CreateMutexW(NULL, FALSE, name);
+            if (h && GetLastError() == ERROR_ALREADY_EXISTS) CloseHandle(h);
+            else g_game_mark = h;
+        }
+    for (n = 0; n < AC_GAME_MARKS; n++) {
+        HANDLE h;
+        swprintf(name, 48, L"Local\\FFNY-game-%d", n);
+        h = OpenMutexW(SYNCHRONIZE, FALSE, name);
+        if (h) { games++; CloseHandle(h); }
+    }
+    if (games > g_games) g_games = games;
+}
 
 static void lower(char *s)
 {
@@ -102,14 +130,15 @@ void ac_match_begin(void)
 {
     AcquireSRWLockExclusive(&g_lock);
     g_froze_ms = g_freezes = g_longest_ms = 0;
-    g_ntools = g_instances = 0;
+    g_ntools = g_instances = g_games = 0;
     g_armed = 1;
     g_last_tick = 0;
     scan_processes();
+    count_games();
     make_hwid();
     ReleaseSRWLockExclusive(&g_lock);
-    fprintf(stderr, "[ANTICHEAT] match armed: %d game cop%s running, %d known tool%s\n", g_instances,
-            g_instances == 1 ? "y" : "ies", g_ntools, g_ntools == 1 ? "" : "s");
+    fprintf(stderr, "[ANTICHEAT] match armed: %d game%s running (%d process%s), %d known tool%s\n", g_games,
+            g_games == 1 ? "" : "s", g_instances, g_instances == 1 ? "" : "es", g_ntools, g_ntools == 1 ? "" : "s");
 }
 
 void ac_net_tick(uint64_t now_ms)
@@ -144,8 +173,9 @@ int ac_json(char *json, int size, int n)
     int i;
     AcquireSRWLockExclusive(&g_lock);
     scan_processes();
-    n += snprintf(json + n, (size_t)(size - n), ",\"ac\":{\"froze_ms\":%u,\"freezes\":%u,\"longest_ms\":%u,\"copies\":%d,\"pc\":\"%s\",\"tools\":[",
-                  g_froze_ms, g_freezes, g_longest_ms, g_instances, g_hwid);
+    count_games();
+    n += snprintf(json + n, (size_t)(size - n), ",\"ac\":{\"froze_ms\":%u,\"freezes\":%u,\"longest_ms\":%u,\"copies\":%d,\"game_copies\":%d,\"pc\":\"%s\",\"tools\":[",
+                  g_froze_ms, g_freezes, g_longest_ms, g_instances, g_games, g_hwid);
     for (i = 0; i < g_ntools && n < size - 60; i++) {
         if (i) json[n++] = ',';
         n = put_name(json, size, n, g_tools[i]);
