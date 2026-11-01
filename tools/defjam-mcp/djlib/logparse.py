@@ -119,6 +119,7 @@ def condense_crash(block, sites=None, callers=6):
 
 START_RE = re.compile(r"\[NETPLAY\] START: seed (\w+), type (\d+), rules (\d+), venue (\d+), (\d+) players, "
                       r"this PC is player (\d+)(.*)")
+REPORTED_RE = re.compile(r"\[NETPLAY\] match result: winners 0x([0-9A-Fa-f]+)")
 STARTS_RE = re.compile(r"\[NETPLAY\] match (\w+) starts in (\w+) \((\d+) players, delay (\d+)\); loaded in ([\d.]+) s")
 CHECKS_RE = re.compile(r"\[NETPLAY\] in step: (\d+) checksums compared and equal \(match (\w+), step (\d+)\)")
 DESYNC_RE = re.compile(r"\[NETPLAY\] desync in match (\w+) at step (\d+) \(local (\w+), remote (\w+)\)")
@@ -496,6 +497,13 @@ def analyze_copy(text):
             k = owner(i)
             if k >= 0:
                 per[k]["ko"] = True
+        elif l.startswith("[NETPLAY] match result: winners 0x"):
+            # what this game reports to the accounts service (a Team side expanded to both slots)
+            k = owner(i)
+            mm = REPORTED_RE.match(l)
+            if k >= 0 and mm and per[k].get("reported") is None:
+                mask = int(mm.group(1), 16)
+                per[k]["reported"] = [slot for slot in range(8) if mask >> slot & 1]
         elif l.startswith("[TEST-BOT] summary"):
             k = owner(i)
             b = bot_line(l)

@@ -98,7 +98,11 @@ each round trip plus one step, between 2 and 10. A code match uses the host's se
 start a session without the launcher: the host writes its room code to the file and the guest
 reads it. `RECOMP_NETPLAY=quick` (with `RECOMP_NETPLAY_FIGHTER=<id>`) enters the hub, quick-matches,
 readies and votes by itself. Run a local relay (`go run ./cmd/relay` in `netplay/relay`) and two
-copies of the game.
+copies of the game. Three or four copies also get `RECOMP_TEST_READY_PLAYERS=<n>`: a copy readies (or,
+on the hill, answers a call) only while its room holds `n` players. The relay starts a room's vote as
+soon as two are in and every one of them is ready, so without it the first two copies started their
+match before the third joined, and that one opened a room of its own (`dj.py scenario online --players
+3` and `scripts/netplay-hub-test.ps1 -Players 3` set it).
 
 The server choice: `RECOMP_NETPLAY_SERVER=auto|eu|na|west|all` with `RECOMP_NETPLAY_SERVER_EU`,
 `RECOMP_NETPLAY_SERVER_NA` and `RECOMP_NETPLAY_SERVER_WEST` naming local relays (one started with

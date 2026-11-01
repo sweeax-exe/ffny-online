@@ -176,6 +176,9 @@ for ($i = 0; $i -lt $Players; $i++) {
               '--env', 'RECOMP_INPUT_HOST=1', '--env', 'RECOMP_INPUT_IGNORE_FOCUS=1', '--env', 'RECOMP_PAD_HOST=1',
               '--env', 'RECOMP_INPUT_NO_PADS=1', '--env', 'RECOMP_INPUT_VIRTUAL_PADS=1', '--env', 'RECOMP_PAD_SCRIPT_VIRTUAL=1')
     if ($i -gt 0) { $args += @('--env', 'RECOMP_AUDIO_MUTE=1') }
+    # three or four copies: each readies only once the room holds all of them (the relay starts a room's
+    # vote once two are in and ready, and a later copy opened a room of its own; netplay.c autostart_thread)
+    if ($Players -gt 2) { $args += @('--env', "RECOMP_TEST_READY_PLAYERS=$Players") }
     # Each copy's guest threads on a CPU of their own (2, 4, ...), as on a player's PC: on one shared CPU a
     # copy that spins waiting for the other's input starves it, and both stand still (2026-10-24).
     if (-not ($ExtraEnv -match '^RECOMP_GUEST_CORES?=')) { $args += @('--env', "RECOMP_GUEST_CORE=$($BaseCore + 2 * $i)") }

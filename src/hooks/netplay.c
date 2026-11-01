@@ -2854,7 +2854,13 @@ static DWORD WINAPI autostart_thread(LPVOID unused)
     if (!strcmp(mode, "quick") || !strcmp(mode, "ranked")) {
         const char *f = getenv("RECOMP_NETPLAY_FIGHTER"), *name = getenv("RECOMP_NETPLAY_NAME");
         const char *delay = getenv("RECOMP_NETPLAY_READY_DELAY_MS");
+        /* RECOMP_TEST_READY_PLAYERS=<n> (tests of three or four copies): ready (or, on the hill, answer
+         * a call) only while the room holds n players. The relay starts a room's vote once two are
+         * present and every one of them is ready, so the first two copies of a three-copy test started
+         * their match before the third joined, and the third opened a room of its own. */
+        const char *rp = getenv("RECOMP_TEST_READY_PLAYERS");
         int fighter = f && *f ? atoi(f) : 55, readied = 0, ready_delay = delay ? atoi(delay) : 0;
+        int ready_players = rp && *rp ? atoi(rp) : 0, told_wait = 0;
         unsigned voted_in = 0;
         ULONGLONG called_at = 0;
         netplay_lobby(server, name && *name ? name : "Test player");
@@ -2997,6 +3003,19 @@ static DWORD WINAPI autostart_thread(LPVOID unused)
                 search_since = 0;           /* met: a later wait alone starts over */
             } else if (!r.in_room) {
                 alone_in[0] = 0;
+            }
+            if (r.in_room && ready_players > 0 && r.player_count < ready_players && !N.match_live) {
+                if (!told_wait) {
+                    fprintf(stderr, "[NETPLAY] tests: %d of %d players in the room; not ready until all are\n",
+                            r.player_count, ready_players);
+                    told_wait = 1;
+                }
+                Sleep(100);
+                continue;
+            }
+            if (r.in_room && r.player_count >= ready_players && told_wait) {
+                fprintf(stderr, "[NETPLAY] tests: the room holds %d players; readying\n", r.player_count);
+                told_wait = 0;
             }
             if (r.in_room && NETPLAY_IS_KOTH(r.settings.mode)) {
                 /* King of the Hill: ready when called (back from the last fight), after
