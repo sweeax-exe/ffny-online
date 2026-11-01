@@ -334,6 +334,22 @@ int automatch_hold_funccall(const char *text)
         "Game.ChooseVenue(", "Game.StartGame(", "Game.StartBattleMode(", "Game.ResetMatchData(",
         "Battle.LoadCreatePlayerData(", "MemCard.ChooseMCDevice(", "MemCard.SetBMCurrentUserIndex(" };
     unsigned i;
+    /* Game.Quit() leaves the results for the match-type screen (screen 9). An A held for a few frames
+     * on the results' last page called it once a frame, and each call requested screen 9 again while
+     * the first was still loading: the screen manager's left-open race (docs/research/screen-swap-freeze.md)
+     * then froze the game on that page for good (four-copy Team test, 2026-11-01: three requests, no
+     * frame after them). A Game.Quit() while a screen loads (the manager, registry slot 0x17, in a
+     * state other than 0) is dropped; the first one goes on. */
+    if (!strcmp(text, "Game.Quit()")) {
+        uint32_t sm = MEM32(0x002FB148u + 0x17u * 4u);
+        if (sm >= 0x10000u && MEM32(sm + 0x24u) != 0) {
+            static unsigned dropped;
+            if (dropped++ < 20)
+                fprintf(stderr, "[SCREEN] Game.Quit() while screen %08X loads (state %u): dropped (#%u)\n",
+                        MEM32(sm + 0x1Cu), MEM32(sm + 0x24u), dropped);
+            return 1;
+        }
+    }
     created_fighter_before_funccall(text);      /* unlinks created fighters before the reward step */
     if (!strcmp(text, "Game.Rematch()")) return netplay_rematch_request();
     if (g_armed || (!netplay_match_locked() && !g_running)) return 0;
