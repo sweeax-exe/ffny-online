@@ -1,14 +1,17 @@
-"""Both servers (build 31): the game's ROOMLIST client (src/hooks/netplay_servers.c) and the relay
-(netplay/relay/protocol_roomlist.go) must agree on the message type, the request's fields and its
-padding (the relay never answers with more bytes than it was sent), and the answer's layout; the
-setting must accept "both", the move rule must stay the one the docs describe, and the hub test
-must offer the switches the Both tests use."""
+"""Every relay's rooms (build 31 "both"; build 38 "all", three relays): the game's ROOMLIST client
+(src/hooks/netplay_servers.c) and the relay (netplay/relay/protocol_roomlist.go) must agree on the
+message type, the request's fields and its padding (the relay never answers with more bytes than it
+was sent), and the answer's layout; the setting must accept "all" and the old "both", the staged
+quick-match rule must stay the one the docs describe, and the hub test must offer the switches the
+tests use."""
 import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 SERVERS_C = (ROOT / 'src/hooks/netplay_servers.c').read_text(encoding='utf-8')
 SERVERS_H = (ROOT / 'src/hooks/netplay_servers.h').read_text(encoding='utf-8')
+RULES_H = (ROOT / 'src/hooks/netplay_servers_rules.h').read_text(encoding='utf-8')
+RULES_C = (ROOT / 'src/hooks/netplay_servers_rules.c').read_text(encoding='utf-8')
 NETPLAY_C = (ROOT / 'src/hooks/netplay.c').read_text(encoding='utf-8')
 SETTINGS_C = (ROOT / 'src/hooks/pc_settings.c').read_text(encoding='utf-8')
 SCREEN = (ROOT / 'src/hooks/online_screen.cpp').read_text(encoding='utf-8')
@@ -60,28 +63,39 @@ def test_the_client_reads_the_answer_at_the_relays_offsets():
     assert go_const(GO_LOBBY, 'MaxListed') == c_define(SERVERS_C, 'LISTED_MAX') == 30
 
 
-def test_setting_and_launcher_offer_both():
-    assert 'NETCHOICE_BOTH' in SERVERS_H
-    assert '!strcmp(low, "both")' in SERVERS_C and '"both"' in SERVERS_C
+def test_setting_and_launcher_offer_all():
+    assert 'NETCHOICE_ALL' in RULES_H and 'NETCHOICE_BOTH' not in SERVERS_H + RULES_H
+    # "all" is saved; the "both" of builds 31..37 still reads as all
+    assert '{ "all", NETCHOICE_ALL }' in RULES_C and '{ "both", NETCHOICE_ALL }' in RULES_C
+    assert 'case NETCHOICE_ALL: return "all";' in RULES_C
     m = re.search(r'\{ "online", "server", RECOMP_SETTING_STRING, .*?\}', SETTINGS_C, re.S)
-    assert m and 'both' in m.group(0)
-    assert 'netservers_set_choice(NETCHOICE_BOTH)' in PC_UI and 'netservers_set_choice(NETCHOICE_BOTH)' in SCREEN
-    # the picker explains Both in one line
-    assert 'Rooms and Quick Match on Europe and North America; matches across the ocean have higher ping.' in SCREEN
+    assert m and 'all' in m.group(0) and 'west' in m.group(0)
+    assert 'netservers_set_choice(NETCHOICE_ALL)' in PC_UI and 'netservers_set_choice(NETCHOICE_ALL)' in SCREEN
+    # the picker explains All in one line
+    assert 'The rooms of Europe, US East and US West in one list; joining one moves you there.' in SCREEN
 
 
-def test_move_rule_and_gallery():
-    # the younger room's player moves after 20 s; the other only once that room waited 35 s
-    assert 'if (alone_s < 20) return -1;' in SERVERS_C
-    assert 'int mover = age > my_age + 2 || (age >= my_age - 2 && cur > o);' in SERVERS_C
-    assert 'if (mover || age >= 35) n += x->players;' in SERVERS_C
-    for page in ('hub-both', 'servers-both', 'rooms-both', 'rooms-both-na', 'room-both-move'):
+def test_staged_search_rule_and_gallery():
+    # its own relay; the other US relay from 10 s (Automatic, All); every relay from 30 s (any choice);
+    # the older room's side only once the younger room waited 40 s
+    assert c_define(RULES_H, 'QUICK_NEAR_S') == 10
+    assert c_define(RULES_H, 'QUICK_ALL_S') == 30
+    assert c_define(RULES_H, 'QUICK_LAST_S') == 40
+    assert 'if (their_age > my_age + 2 || (their_age >= my_age - 2 && my_relay > their_relay)) return 1;' in RULES_C
+    assert 'if (netservers_should_move(cur, my_age, o, age)) n += x->players;' in SERVERS_C
+    assert 'scope = netservers_scope(c, cur, search_s, up);' in SERVERS_C
+    # the screens and the test thread both run it, for every choice but a custom address
+    assert 'netservers_quick_move(S.last_quick, search_s, alone_s, r.code, &waiting, &ping, &scope)' in SCREEN
+    assert 'netservers_quick_move(qmode, search_s, alone_s, r.code, &waiting, &ping, &scope)' in NETPLAY_C
+    assert '"Looking on every server..."' in SCREEN and '"Looking on " + added + " too..."' in SCREEN
+    for page in ('hub-both', 'servers-both', 'rooms-both', 'rooms-both-na', 'room-both-move',
+                 'room-quick-near', 'room-quick-wide'):
         assert '"%s"' % page in SCREEN, page
 
 
 def test_hub_test_switches():
     assert 'RECOMP_TEST_JOIN_LISTED' in NETPLAY_C
-    for param in ('Servers', 'JoinListed', 'JoinListedSecs', 'CopyGapSecs'):
+    for param in ('Servers', 'JoinListed', 'JoinListedSecs', 'CopyGapSecs', 'WestRelayPort', 'WestLagMs'):
         assert re.search(r'\$%s\b' % param, HUB_TEST), param
-    assert "'both'" in HUB_TEST
+    assert "'both'" in HUB_TEST and "'all'" in HUB_TEST and "'west'" in HUB_TEST
     assert '0x25' in PROTOCOL_DOC and '`ROOMLIST`' in PROTOCOL_DOC

@@ -129,8 +129,10 @@ void netplay_crowd_update(void) { sub_00081170(); }
 #define DEFAULT_PORT  27777
 #define PROJECT_SERVER_NAME    "play.defjam.online"
 #define PROJECT_SERVER_ADDRESS "49.12.78.32"
-#define PROJECT_NA_NAME        "na.defjam.online"     /* the North America relay (build 30) */
+#define PROJECT_NA_NAME        "na.defjam.online"     /* US East (build 30; "North America" until 37) */
 #define PROJECT_NA_ADDRESS     "5.161.206.134"
+#define PROJECT_WEST_NAME      "west.defjam.online"   /* US West (build 38) */
+#define PROJECT_WEST_ADDRESS   "5.78.214.178"
 #define PROTO         1
 #define T_HELLO       0x01
 #define T_WELCOME     0x02
@@ -2107,7 +2109,8 @@ static int resolve(const char *server)
         /* The project's server by its address when its name does not resolve (a resolver that
          * still remembers the name as missing, or a DNS outage). */
         const char *known = !_stricmp(host, PROJECT_SERVER_NAME) ? PROJECT_SERVER_ADDRESS :
-                            !_stricmp(host, PROJECT_NA_NAME) ? PROJECT_NA_ADDRESS : NULL;
+                            !_stricmp(host, PROJECT_NA_NAME) ? PROJECT_NA_ADDRESS :
+                            !_stricmp(host, PROJECT_WEST_NAME) ? PROJECT_WEST_ADDRESS : NULL;
         res = NULL;
         if (!known || getaddrinfo(known, port, &hints, &res) || !res)
             return -1;
@@ -2752,8 +2755,8 @@ static DWORD WINAPI autostart_thread(LPVOID unused)
     static char chosen[128];
     int i;
     (void)unused;
-    /* RECOMP_NETPLAY_SERVER=auto|eu|na: the server choice as a player makes it (build 30), with
-     * RECOMP_NETPLAY_SERVER_EU/_NA for the two relays' addresses; anything else is the address */
+    /* RECOMP_NETPLAY_SERVER=auto|eu|na|west|all: the server choice as a player makes it (build 30), with
+     * RECOMP_NETPLAY_SERVER_EU/_NA/_WEST for the relays' addresses; anything else is the address */
     if (netservers_choice() != NETCHOICE_CUSTOM) {
         server = netservers_address_wait(chosen, sizeof(chosen), 4000);
         fprintf(stderr, "[NETPLAY] tests: server %s\n", server);
@@ -2770,7 +2773,7 @@ static DWORD WINAPI autostart_thread(LPVOID unused)
         ULONGLONG called_at = 0;
         netplay_lobby(server, name && *name ? name : "Test player");
         for (i = 0; i < 600 && N.state == NETPLAY_CONNECTING; i++) Sleep(100);
-        {   /* RECOMP_TEST_SERVER_SWITCH="<ms>,<eu|na|auto>": after that long in the lobby, switch the
+        {   /* RECOMP_TEST_SERVER_SWITCH="<ms>,<eu|na|west|auto>": after that long in the lobby, switch the
              * server the way the hub's server picker does (netservers_reconnect), then quick-match there */
             const char *sw = getenv("RECOMP_TEST_SERVER_SWITCH");
             if (sw && *sw && strchr(sw, ',')) {
@@ -2778,7 +2781,8 @@ static DWORD WINAPI autostart_thread(LPVOID unused)
                 Sleep((DWORD)atoi(sw));
                 fprintf(stderr, "[NETPLAY] tests: switching the server to %s\n", to);
                 if (!_stricmp(to, "auto")) netservers_set_choice(NETCHOICE_AUTO);
-                else netservers_use(!_stricmp(to, "na") ? NETSERVER_NA : NETSERVER_EU);
+                else netservers_use(netservers_choice_relay(netservers_parse_choice(to)) >= 0 ?
+                                    netservers_choice_relay(netservers_parse_choice(to)) : NETSERVER_EU);
                 netservers_reconnect(name && *name ? name : "Test player");
                 for (i = 0; i < 600 && N.state != NETPLAY_LOBBY && N.state != NETPLAY_FAILED; i++) Sleep(100);
                 fprintf(stderr, "[NETPLAY] tests: now on %s\n", N.server_text);
@@ -2789,7 +2793,8 @@ static DWORD WINAPI autostart_thread(LPVOID unused)
         const char *who = name && *name ? name : "Test player";
         int qmode = 0, qmax = 2, moves = 0;
         char alone_in[7] = "";
-        ULONGLONG alone_since = 0;
+        ULONGLONG alone_since = 0, search_since = 0;
+        unsigned scope_seen = 0;
         if (q && *q) sscanf(q, "%d,%d", &qmode, &qmax);
         /* the relay lets only a client that announced King of the Hill into such a room */
         for (i = 0; i < 50 && NETPLAY_IS_KOTH(qmode) && N.relay_caps < 0; i++) Sleep(100);
@@ -2799,7 +2804,7 @@ static DWORD WINAPI autostart_thread(LPVOID unused)
             fprintf(stderr, "[NETPLAY] tests: the created fighter is %savailable\n", netplay_created_available() ? "" : "NOT ");
         if (listed && *listed) {
             /* RECOMP_TEST_JOIN_LISTED=<s>: no quick match; join the first open room the room list shows
-             * (with RECOMP_NETPLAY_SERVER=both the other relay's rooms too, moving there to join), as a
+             * (with RECOMP_NETPLAY_SERVER=all the other relays' rooms too, moving there to join), as a
              * player does from FIND A ROOM. Every change of the list is logged; nothing is joined when
              * no room shows within <s> seconds. */
             NetServerRoom list[32];
@@ -2815,7 +2820,7 @@ static DWORD WINAPI autostart_thread(LPVOID unused)
                     fprintf(stderr, "[NETPLAY] tests: the room list shows %d room%s", n, n == 1 ? "" : "s");
                     for (k = 0; k < n && k < 6; k++)
                         fprintf(stderr, "%s %s on %s (mode %d, %d/%d, %d ms)", k ? "," : ":", list[k].room.code,
-                                list[k].server == NETSERVER_EU ? "EU" : list[k].server == NETSERVER_NA ? "NA" : "custom",
+                                netservers_short(list[k].server),
                                 list[k].room.mode, list[k].room.players, list[k].room.max, list[k].ping_ms);
                     fprintf(stderr, "\n");
                 }
@@ -2823,7 +2828,7 @@ static DWORD WINAPI autostart_thread(LPVOID unused)
                     const NetRoomInfo *x = &list[k].room;
                     if (x->phase != 0 || x->players >= x->max || NETPLAY_IS_KOTH(x->mode)) continue;
                     fprintf(stderr, "[NETPLAY] tests: joining the listed room %s on %s\n", x->code,
-                            list[k].server == NETSERVER_EU ? "EU" : list[k].server == NETSERVER_NA ? "NA" : "custom");
+                            netservers_short(list[k].server));
                     if (list[k].server == netservers_connected()) netplay_lobby_join(x->code);
                     else netservers_join_on(list[k].server, x->code, x->mode, who);
                     joined = 1;
@@ -2844,28 +2849,46 @@ static DWORD WINAPI autostart_thread(LPVOID unused)
         const char *kscript = getenv("RECOMP_TEST_KOTH_SCRIPT");
         uint32_t watched_seed = 0;
         int watched = 0, calls = 0, in_call = 0;
-        /* a move to the other relay (Both servers) ends this session and starts the next: go on */
+        /* a move to another relay ends this session and starts the next: go on */
         while (netservers_moving() || (!N.stop && N.state != NETPLAY_FAILED && N.state != NETPLAY_OFF)) {
             NetRoom r;
             netservers_tick(NULL);
             netplay_lobby_room(&r);
-            /* Both servers: alone in the quick room for 20 s while the other relay has a player waiting
-             * for this mode, move there (as the online screens do; at most three moves) */
+            /* The staged search (build 38), as the online screens do it: alone in the quick room, this
+             * relay first, then the other North American one from 10 s (Automatic, All), every relay from
+             * 30 s; a player waiting there for this mode is met (at most three moves). The search time
+             * runs from the first wait alone and is kept across moves. */
             if (!listed && !strcmp(mode, "quick") && r.in_room && r.phase == 0 && r.player_count < 2 &&
                 !NETPLAY_IS_KOTH(r.settings.mode) && !netservers_moving() && moves < 3) {
-                int waiting = 0, ping = -1, to;
-                if (strcmp(alone_in, r.code)) { snprintf(alone_in, sizeof(alone_in), "%s", r.code); alone_since = GetTickCount64(); }
-                to = netservers_quick_move(qmode, (int)((GetTickCount64() - alone_since) / 1000), r.code, &waiting, &ping);
+                int waiting = 0, ping = -1, to, search_s, alone_s;
+                unsigned scope = 0;
+                ULONGLONG now = GetTickCount64();
+                if (strcmp(alone_in, r.code)) { snprintf(alone_in, sizeof(alone_in), "%s", r.code); alone_since = now; }
+                if (!search_since) search_since = now;
+                search_s = (int)((now - search_since) / 1000);
+                alone_s = (int)((now - alone_since) / 1000);
+                to = netservers_quick_move(qmode, search_s, alone_s, r.code, &waiting, &ping, &scope);
+                if (scope && scope != scope_seen) {
+                    int k;
+                    fprintf(stderr, "[NETPLAY] tests: quick match searching on");
+                    for (k = 0; k < NETSERVER_COUNT; k++) if (scope >> k & 1u) fprintf(stderr, " %s", netservers_short(k));
+                    fprintf(stderr, " after %d s\n", search_s);
+                    scope_seen = scope;
+                }
                 if (to >= 0) {
                     moves++;
                     toast(8000, "Nobody here yet: moving to %s (%d ms), where %d player%s waiting.",
-                          to == NETSERVER_NA ? "North America" : "Europe", ping, waiting, waiting == 1 ? " is" : "s are");
-                    fprintf(stderr, "[NETPLAY] tests: Both servers: moving the quick match to %s\n", to == NETSERVER_NA ? "NA" : "EU");
+                          netservers_name(to), ping, waiting, waiting == 1 ? " is" : "s are");
+                    fprintf(stderr, "[NETPLAY] tests: moving the quick match to %s after %d s\n", netservers_short(to), search_s);
                     alone_in[0] = 0;
+                    scope_seen = 0;
                     netservers_quick_on(to, qmode, qmax, who);
                     continue;
                 }
-            } else if (!r.in_room || r.player_count >= 2) {
+            } else if (r.in_room && r.player_count >= 2) {
+                alone_in[0] = 0;
+                search_since = 0;           /* met: a later wait alone starts over */
+            } else if (!r.in_room) {
                 alone_in[0] = 0;
             }
             if (r.in_room && NETPLAY_IS_KOTH(r.settings.mode)) {

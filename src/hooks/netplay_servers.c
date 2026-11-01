@@ -19,40 +19,31 @@ static const struct {
     const char *id, *name, *short_name, *address, *fallback_ip, *env;
 } k_relays[NETSERVER_COUNT] = {
     { "eu", "Europe", "EU", "play.defjam.online:27777", "49.12.78.32", "RECOMP_NETPLAY_SERVER_EU" },
-    { "na", "North America", "NA", "na.defjam.online:27777", "5.161.206.134", "RECOMP_NETPLAY_SERVER_NA" },
+    /* build 38: the North American relay of builds 30..37 is US East; its id stays "na" */
+    { "na", "US East", "US EAST", "na.defjam.online:27777", "5.161.206.134", "RECOMP_NETPLAY_SERVER_NA" },
+    { "west", "US West", "US WEST", "west.defjam.online:27777", "5.78.214.178", "RECOMP_NETPLAY_SERVER_WEST" },
 };
-
-/* The setting's text: auto, eu, na; the project's two names count as their relay, and the old
- * default (play.defjam.online, written by every build before 30) counts as auto. */
-static enum NetServerChoice parse_choice(const char *s)
-{
-    char low[128];
-    size_t i;
-    while (*s == ' ') s++;
-    for (i = 0; s[i] && i < sizeof(low) - 1; i++) low[i] = (char)tolower((unsigned char)s[i]);
-    low[i] = 0;
-    while (i && low[i - 1] == ' ') low[--i] = 0;
-    if (!low[0] || !strcmp(low, "auto") || !strcmp(low, "automatic") || !strcmp(low, "play.defjam.online") ||
-        !strcmp(low, "play.defjam.online:27777"))
-        return NETCHOICE_AUTO;
-    if (!strcmp(low, "eu") || !strcmp(low, "europe")) return NETCHOICE_EU;
-    if (!strcmp(low, "na") || !strcmp(low, "north_america") || !strcmp(low, "us") || !strcmp(low, "na.defjam.online") ||
-        !strcmp(low, "na.defjam.online:27777"))
-        return NETCHOICE_NA;
-    if (!strcmp(low, "both") || !strcmp(low, "both servers") || !strcmp(low, "both_servers"))
-        return NETCHOICE_BOTH;
-    return NETCHOICE_CUSTOM;
-}
 
 static const char *setting_server(char *buf, int size)
 {
     return recomp_settings_get_text("online", "server", buf, (size_t)size, "auto");
 }
 
+/* The setting's text (netservers_parse_choice): auto, eu, na, west, all; the old "both" is all. */
 enum NetServerChoice netservers_choice(void)
 {
     char buf[128];
-    return parse_choice(setting_server(buf, sizeof(buf)));
+    return netservers_parse_choice(setting_server(buf, sizeof(buf)));
+}
+
+const char *netservers_name(int index)
+{
+    return index >= 0 && index < NETSERVER_COUNT ? k_relays[index].name : "custom";
+}
+
+const char *netservers_short(int index)
+{
+    return index >= 0 && index < NETSERVER_COUNT ? k_relays[index].short_name : "custom";
 }
 
 #if defined(_WIN32)
@@ -228,10 +219,12 @@ static void run_round(void)
     }
     P.rounds++;
     P.round_done = GetTickCount64();
-    if (P.rounds == 1)
-        fprintf(stderr, "[SERVERS] %s %s, %s %s\n",
-                P.s[0].name, P.s[0].state == NETSERVER_UP ? "up" : "no answer",
-                P.s[1].name, P.s[1].state == NETSERVER_UP ? "up" : "no answer");
+    if (P.rounds == 1) {
+        fprintf(stderr, "[SERVERS]");
+        for (i = 0; i < NETSERVER_COUNT; i++)
+            fprintf(stderr, "%s %s %s", i ? "," : "", P.s[i].name, P.s[i].state == NETSERVER_UP ? "up" : "no answer");
+        fprintf(stderr, "\n");
+    }
     for (i = 0; i < NETSERVER_COUNT; i++)
         if (P.s[i].state == NETSERVER_UP && P.rounds == 1)
             fprintf(stderr, "[SERVERS] %s: %d ms, %d online, %d rooms, %d waiting (%d/%d answers)\n",
@@ -325,15 +318,14 @@ int netservers_get(NetServerInfo *out, int max)
 
 void netservers_set_choice(enum NetServerChoice c)
 {
-    const char *text = c == NETCHOICE_AUTO ? "auto" : c == NETCHOICE_EU ? "eu" : c == NETCHOICE_NA ? "na" :
-                       c == NETCHOICE_BOTH ? "both" : NULL;
+    const char *text = netservers_choice_text(c);
     init();
     if (!text) return;
     recomp_settings_set_text("online", "server", text);
     pc_settings_save();
     EnterCriticalSection(&g_cs);
-    P.override = c == NETCHOICE_EU ? NETSERVER_EU : c == NETCHOICE_NA ? NETSERVER_NA : -1;
-    if (c == NETCHOICE_AUTO || c == NETCHOICE_BOTH) P.pick = -1;   /* decided again, by the pings at hand */
+    P.override = netservers_choice_relay(c);
+    if (c == NETCHOICE_AUTO || c == NETCHOICE_ALL) P.pick = -1;    /* decided again, by the pings at hand */
     LeaveCriticalSection(&g_cs);
     fprintf(stderr, "[SERVERS] choice: %s\n", text);
 }
@@ -365,8 +357,7 @@ int netservers_current(void)
     init();
     EnterCriticalSection(&g_cs);
     if (P.override >= 0) r = P.override;
-    else if (c == NETCHOICE_EU) r = NETSERVER_EU;
-    else if (c == NETCHOICE_NA) r = NETSERVER_NA;
+    else if (netservers_choice_relay(c) >= 0) r = netservers_choice_relay(c);
     else if (c == NETCHOICE_CUSTOM) r = -2;
     else {
         if (P.pick < 0) {
@@ -378,8 +369,10 @@ int netservers_current(void)
             if (all || P.rounds > 0 || now - P.first_ask > DECIDE_MS + 1000 ||
                 (P.running && now - P.round_started > DECIDE_MS)) {
                 P.pick = best_relay();
-                fprintf(stderr, "[SERVERS] automatic: %s (%s %d ms, %s %d ms)\n", P.s[P.pick].name,
-                        P.s[0].short_name, P.s[0].ping_ms, P.s[1].short_name, P.s[1].ping_ms);
+                fprintf(stderr, "[SERVERS] automatic: %s (", P.s[P.pick].name);
+                for (i = 0; i < NETSERVER_COUNT; i++)
+                    fprintf(stderr, "%s%s %d ms", i ? ", " : "", P.s[i].short_name, P.s[i].ping_ms);
+                fprintf(stderr, ")\n");
             } else if (!P.running) {
                 kick = 1;
             }
@@ -395,12 +388,14 @@ int netservers_reconsider(void)
 {
     int cur = netservers_current();
     enum NetServerChoice c = netservers_choice();
-    if (cur < 0 || (c != NETCHOICE_AUTO && c != NETCHOICE_BOTH)) return cur;
+    if (cur < 0 || (c != NETCHOICE_AUTO && c != NETCHOICE_ALL)) return cur;
     EnterCriticalSection(&g_cs);
     if (P.override < 0 && P.pick >= 0) {
-        int other = 1 - P.pick;
-        const NetServerInfo *a = &P.s[P.pick], *b = &P.s[other];
-        int better = b->state == NETSERVER_UP && (a->state == NETSERVER_OFFLINE ||
+        int other = -1, i;
+        for (i = 0; i < NETSERVER_COUNT; i++)     /* the answering relay with the lowest ping besides the pick */
+            if (i != P.pick && P.s[i].state == NETSERVER_UP && (other < 0 || P.s[i].ping_ms < P.s[other].ping_ms)) other = i;
+        const NetServerInfo *a = &P.s[P.pick], *b = &P.s[other < 0 ? P.pick : other];
+        int better = other >= 0 && (a->state == NETSERVER_OFFLINE ||
                      (a->state == NETSERVER_UP && b->ping_ms + 40 <= a->ping_ms && b->ping_ms * 10 <= a->ping_ms * 7));
         if (better) {
             fprintf(stderr, "[SERVERS] automatic: %s now (%d ms) instead of %s (%s)\n", b->name, b->ping_ms, a->name,
@@ -444,7 +439,7 @@ int netservers_reconnect(const char *name)
     return 1;
 }
 
-/* ---- Both servers (build 31): the other relays' rooms, and moving between relays ----------------- */
+/* ---- Every relay's rooms (build 31; build 38: three), and moving between relays ---------------- */
 
 #define ROOMLIST_TYPE   0x25
 #define ROOMLIST_EVERY  3000    /* ms between two asks of one relay */
@@ -555,7 +550,7 @@ static void list_round(void)
         R.version++;
         if (R.logged[who] != count + 1) {
             R.logged[who] = count + 1;
-            fprintf(stderr, "[SERVERS] both: %s lists %d room%s", P.s[who].name, count, count == 1 ? "" : "s");
+            fprintf(stderr, "[SERVERS] rooms: %s lists %d room%s", P.s[who].name, count, count == 1 ? "" : "s");
             for (k = 0; k < count && k < 4; k++)
                 fprintf(stderr, "%s %s (mode %d, %d/%d, phase %d, %d s)", k ? "," : ":", list[k].code, list[k].mode,
                         list[k].players, list[k].max, list[k].phase, ages[k]);
@@ -600,16 +595,36 @@ int netservers_best(void)
     return best;
 }
 
-void netservers_fetch_rooms(void)
+int netservers_home(void)
+{
+    enum NetServerChoice c = netservers_choice();
+    int best;
+    if (c == NETCHOICE_CUSTOM) return -1;
+    if (netservers_choice_relay(c) >= 0) return netservers_choice_relay(c);
+    best = netservers_best();
+    return best >= 0 ? best : netservers_current();
+}
+
+unsigned netservers_up(void)
+{
+    NetServerInfo s[NETSERVER_COUNT];
+    int i, n = netservers_get(s, NETSERVER_COUNT);
+    unsigned up = 0;
+    for (i = 0; i < n; i++) if (s[i].state == NETSERVER_UP) up |= 1u << i;
+    return up;
+}
+
+/* Asks the relays in `mask` for their rooms (ROOMLIST) when their last ask is 3 s old. */
+static void fetch_rooms(unsigned mask)
 {
     ULONGLONG now;
     int i, any = 0;
     init();
-    if (netservers_choice() != NETCHOICE_BOTH || R.busy) return;
+    if (R.busy) return;
     now = GetTickCount64();
     EnterCriticalSection(&g_cs);
     for (i = 0; i < NETSERVER_COUNT; i++)
-        if (P.s[i].state != NETSERVER_OFFLINE && now - R.asked[i] >= ROOMLIST_EVERY) {
+        if ((mask >> i & 1u) && P.s[i].state != NETSERVER_OFFLINE && now - R.asked[i] >= ROOMLIST_EVERY) {
             R.want[i] = 1;
             R.asked[i] = now;
             any = 1;
@@ -625,12 +640,17 @@ void netservers_fetch_rooms(void)
     LeaveCriticalSection(&g_cs);
 }
 
+void netservers_fetch_rooms(void)
+{
+    if (netservers_choice() == NETCHOICE_ALL) fetch_rooms((1u << NETSERVER_COUNT) - 1);
+}
+
 int netservers_rooms(NetServerRoom *out, int max, unsigned *version)
 {
     NetServerInfo sv[NETSERVER_COUNT];
     NetRoomInfo own[32];
     int ping[NETSERVER_COUNT], order[NETSERVER_COUNT], cur = netservers_connected(), own_n = 0, n = 0, i, j, k;
-    int both = netservers_choice() == NETCHOICE_BOTH, rtt = netplay_rtt();
+    int all = netservers_choice() == NETCHOICE_ALL, rtt = netplay_rtt();
     unsigned v = 0;
     ULONGLONG now = GetTickCount64();
     init();
@@ -641,7 +661,7 @@ int netservers_rooms(NetServerRoom *out, int max, unsigned *version)
         if (i == cur && rtt >= 0) ping[i] = rtt;
         order[i] = i;
     }
-    /* the relays by ping, the unknown last (a stable insertion sort of two or three) */
+    /* the relays by ping, the unknown last (a stable insertion sort of three) */
     for (i = 1; i < NETSERVER_COUNT; i++)
         for (j = i; j > 0; j--) {
             int a = ping[order[j - 1]], b = ping[order[j]];
@@ -663,7 +683,7 @@ int netservers_rooms(NetServerRoom *out, int max, unsigned *version)
                     if (!strcmp(R.rooms[r][m].code, own[k].code)) out[n].age_s = R.age[r][m] + (int)((now - R.got[r]) / 1000);
                 n++;
             }
-        } else if (both && fresh) {
+        } else if (all && fresh) {
             for (k = 0; k < R.count[r] && n < max; k++) {
                 out[n].room = R.rooms[r][k]; out[n].server = r; out[n].ping_ms = ping[r];
                 out[n].age_s = R.age[r][k] + (int)((now - R.got[r]) / 1000);
@@ -687,7 +707,7 @@ int netservers_tick(int *mode)
     EnterCriticalSection(&g_cs);
     kind = A.kind;
     if (kind && GetTickCount64() - A.since > MOVE_WAIT) {
-        fprintf(stderr, "[SERVERS] both: the move to %s did not reach its lobby; the %s is dropped\n",
+        fprintf(stderr, "[SERVERS] move: the move to %s did not reach its lobby; the %s is dropped\n",
                 P.s[A.server].name, kind == 1 ? "join" : "quick match");
         A.kind = 0;
         LeaveCriticalSection(&g_cs);
@@ -702,10 +722,10 @@ int netservers_tick(int *mode)
     A.kind = 0;
     LeaveCriticalSection(&g_cs);
     if (kind == 1) {
-        fprintf(stderr, "[SERVERS] both: joining room %s on %s\n", A.code, P.s[A.server].name);
+        fprintf(stderr, "[SERVERS] move: joining room %s on %s\n", A.code, P.s[A.server].name);
         netplay_lobby_join(A.code);
     } else if (kind == 2) {
-        fprintf(stderr, "[SERVERS] both: quick match (mode %d) on %s\n", A.mode, P.s[A.server].name);
+        fprintf(stderr, "[SERVERS] move: quick match (mode %d) on %s\n", A.mode, P.s[A.server].name);
         netplay_lobby_quick(A.mode, A.max);
     }
     if (mode) *mode = A.mode;
@@ -726,7 +746,7 @@ static void move_to(int kind, int server, const char *code, int mode, int max, c
     A.since = GetTickCount64();
     LeaveCriticalSection(&g_cs);
     if (netservers_connected() != server) {
-        fprintf(stderr, "[SERVERS] both: moving the hub to %s for a %s\n", P.s[server].name, kind == 1 ? "join" : "quick match");
+        fprintf(stderr, "[SERVERS] move: moving the hub to %s for a %s\n", P.s[server].name, kind == 1 ? "join" : "quick match");
         netservers_use(server);
         netservers_reconnect(name);
     }
@@ -745,17 +765,28 @@ void netservers_quick_on(int server, int mode, int max, const char *name)
     move_to(2, server, NULL, mode, max, name);
 }
 
-int netservers_quick_move(int mode, int alone_s, const char *code, int *waiting, int *ping)
+#define MOVE_FRESH      6000    /* a quick match moves only on a room list this fresh */
+
+int netservers_quick_move(int mode, int search_s, int alone_s, const char *code, int *waiting, int *ping,
+                          unsigned *scope_out)
 {
     NetServerInfo sv[NETSERVER_COUNT];
     int cur = netservers_connected(), my_age = alone_s, best = -1, best_n = 0, o, k;
+    unsigned up = 0, scope, soon;
+    enum NetServerChoice c = netservers_choice();
     ULONGLONG now;
     if (waiting) *waiting = 0;
     if (ping) *ping = -1;
-    if (netservers_choice() != NETCHOICE_BOTH || cur < 0 || NETPLAY_IS_KOTH(mode)) return -1;
-    netservers_fetch_rooms();
-    if (alone_s < 20) return -1;
+    if (scope_out) *scope_out = 0;
+    if (c == NETCHOICE_CUSTOM || cur < 0 || NETPLAY_IS_KOTH(mode)) return -1;
     netservers_get(sv, NETSERVER_COUNT);
+    for (o = 0; o < NETSERVER_COUNT; o++) if (sv[o].state == NETSERVER_UP) up |= 1u << o;
+    scope = netservers_scope(c, cur, search_s, up);
+    if (scope_out) *scope_out = scope;
+    /* the lists of the relays searched now and in 3 s (this room's own for its age), every 3 s */
+    soon = netservers_scope(c, cur, search_s + 3, up);
+    if (soon != (1u << cur)) fetch_rooms(soon);
+    if (scope == (1u << cur)) return -1;
     now = GetTickCount64();
     EnterCriticalSection(&g_cs);
     /* this room's age as its own relay counts it: the clock the other player's view of it uses */
@@ -764,32 +795,28 @@ int netservers_quick_move(int mode, int alone_s, const char *code, int *waiting,
             if (!strcmp(R.rooms[cur][k].code, code)) my_age = R.age[cur][k] + (int)((now - R.got[cur]) / 1000);
     for (o = 0; o < NETSERVER_COUNT; o++) {
         int n = 0;
-        if (o == cur || sv[o].state != NETSERVER_UP) continue;
+        if (o == cur || !(scope >> o & 1u)) continue;
         if (R.answered[o]) {
-            if (!R.got[o] || now - R.got[o] >= ROOMLIST_FRESH) continue;
+            if (!R.got[o] || now - R.got[o] >= MOVE_FRESH) continue;
             for (k = 0; k < R.count[o]; k++) {
                 const NetRoomInfo *x = &R.rooms[o][k];
                 int age = R.age[o][k] + (int)((now - R.got[o]) / 1000);
                 if (x->mode != mode || x->phase != 0 || x->players < 1 || x->players >= x->max) continue;
                 if (strncmp(x->name, "Quick: ", 7)) continue;   /* the relay quick-joins only quick rooms */
-                /* The younger room's player moves after 20 s alone (within 2 s of each other, the one
-                 * on North America moves to Europe); the other one only once that room has waited 35 s,
-                 * so a player there who cannot move (not on Both) is still met, and two players on Both
-                 * never move at once and swap. */
-                int mover = age > my_age + 2 || (age >= my_age - 2 && cur > o);
-                if (mover || age >= 35) n += x->players;
+                if (netservers_should_move(cur, my_age, o, age)) n += x->players;
             }
-        } else if (sv[o].waiting > 0 && alone_s >= 35) {
+        } else if (sv[o].waiting > 0 && alone_s >= QUICK_LAST_S) {
             n = sv[o].waiting;      /* a relay before build 31: its STATUS, a little later */
         }
-        if (n > best_n) { best = o; best_n = n; }
+        /* the most players waiting; between equals the lower ping */
+        if (n > best_n || (n && n == best_n && sv[o].ping_ms >= 0 && sv[o].ping_ms < sv[best].ping_ms)) { best = o; best_n = n; }
     }
     LeaveCriticalSection(&g_cs);
     if (best >= 0) {
         if (waiting) *waiting = best_n;
         if (ping) *ping = sv[best].ping_ms;
-        fprintf(stderr, "[SERVERS] both: alone %d s (room age %d s); %d waiting on %s (%d ms): moving there\n", alone_s,
-                my_age, best_n, sv[best].name, sv[best].ping_ms);
+        fprintf(stderr, "[SERVERS] quick: searching %d s, alone %d s (room age %d s) on %s; %d waiting on %s (%d ms): "
+                "moving there\n", search_s, alone_s, my_age, sv[cur].name, best_n, sv[best].name, sv[best].ping_ms);
     }
     return best;
 }
@@ -805,13 +832,17 @@ void netservers_join_on(int server, const char *code, int mode, const char *name
 void netservers_quick_on(int server, int mode, int max, const char *name) { (void)server; (void)mode; (void)max; (void)name; }
 int netservers_tick(int *mode) { (void)mode; return 0; }
 int netservers_moving(void) { return 0; }
-int netservers_quick_move(int mode, int alone_s, const char *code, int *waiting, int *ping)
+int netservers_quick_move(int mode, int search_s, int alone_s, const char *code, int *waiting, int *ping,
+                          unsigned *scope)
 {
-    (void)mode; (void)alone_s; (void)code;
+    (void)mode; (void)search_s; (void)alone_s; (void)code;
     if (waiting) *waiting = 0;
     if (ping) *ping = -1;
+    if (scope) *scope = 0;
     return -1;
 }
+int netservers_home(void) { return -1; }
+unsigned netservers_up(void) { return 0; }
 
 void netservers_probe(void) {}
 int netservers_get(NetServerInfo *out, int max) { (void)out; (void)max; return 0; }

@@ -2437,8 +2437,9 @@ static void quality_widget()
                           "next time the game starts.");
 }
 
-// The online server (build 30): Automatic, Europe or North America, each with its ping and players
-// as the relays answer (netplay_servers.c). A custom address (Advanced, Online) shows as such.
+// The online server (build 30; build 38: three relays): Automatic, Europe, US East or US West, each with
+// its ping and players as the relays answer (netplay_servers.c), or All servers. A custom address
+// (Advanced, Online) shows as such.
 static std::string server_line(const NetServerInfo &s)
 {
     char line[128];
@@ -2461,26 +2462,27 @@ static void server_widget()
     for (int i = 0; i < n; i++)
         if (s[i].state == NETSERVER_UP && (nearest < 0 || s[i].ping_ms < s[nearest].ping_ms)) nearest = i;
     std::string automatic = nearest >= 0 ? std::string("Automatic (now ") + s[nearest].name + ")" : "Automatic (lowest ping)";
-    // Both (build 31): the rooms and quick matches of Europe and North America
-    std::string both = nearest >= 0 ? std::string("Both servers (home: ") + s[nearest].name + ")" : "Both servers";
+    // All (build 31 "both"; build 38 three relays): the rooms of every relay in one list
+    std::string all = nearest >= 0 ? std::string("All servers (home: ") + s[nearest].name + ")" : "All servers";
     char buf[128];
-    std::string preview = choice == NETCHOICE_AUTO ? automatic : choice == NETCHOICE_BOTH ? both :
+    int fixed = netservers_choice_relay(choice);
+    std::string preview = choice == NETCHOICE_AUTO ? automatic : choice == NETCHOICE_ALL ? all :
         choice == NETCHOICE_CUSTOM ? std::string("Custom: ") + recomp_settings_get_text("online", "server", buf, sizeof(buf), "") :
-        server_line(s[choice == NETCHOICE_EU ? NETSERVER_EU : NETSERVER_NA]);
+        fixed >= 0 && fixed < n ? server_line(s[fixed]) : automatic;
     ImGui::SetNextItemWidth(ImGui::GetFontSize() * 20);
     if (ImGui::BeginCombo("Server", preview.c_str())) {
         if (ImGui::Selectable(automatic.c_str(), choice == NETCHOICE_AUTO)) netservers_set_choice(NETCHOICE_AUTO);
         for (int i = 0; i < n; i++) {
-            enum NetServerChoice c = i == NETSERVER_EU ? NETCHOICE_EU : NETCHOICE_NA;
+            enum NetServerChoice c = netservers_relay_choice(i);
             if (ImGui::Selectable(server_line(s[i]).c_str(), choice == c)) netservers_set_choice(c);
         }
-        if (ImGui::Selectable(both.c_str(), choice == NETCHOICE_BOTH)) netservers_set_choice(NETCHOICE_BOTH);
+        if (ImGui::Selectable(all.c_str(), choice == NETCHOICE_ALL)) netservers_set_choice(NETCHOICE_ALL);
         ImGui::EndCombo();
     }
     ImGui::SetItemTooltip("Where you play online. Automatic takes the server with the lowest ping when you go online. "
-                          "Players on one server meet only players on the same server; accounts and stats are shared. "
-                          "Both servers: rooms and Quick Match on Europe and North America; matches across the ocean "
-                          "have higher ping.");
+                          "Quick Match looks on your server first, then (when nobody is there) on the other US server "
+                          "after 10 s and on every server after 30 s; accounts and stats are shared. All servers: the "
+                          "rooms of Europe, US East and US West in one list; matches across the ocean have higher ping.");
 }
 
 static void page_basics()
