@@ -763,6 +763,34 @@ static void hex(const uint8_t *h, char *out)
     for (int i = 0; i < 32; i++) sprintf(out + 2 * i, "%02x", h[i]);
 }
 
+/* A pack's own images: a manifest.ini beside language.ini, in the texture-pack format (HD versions of
+ * the images it translates). The texture loader reads RECOMP_TEXTURE_PACKS once, at its first texture;
+ * the pack goes first there, so it ranks beneath every texture pack (later names win). */
+static void language_texture_layer(const char *dir, const char *folder)
+{
+    char manifest[LANG_PATH], list[4096];
+    const char *old = getenv("RECOMP_TEXTURE_PACKS");
+    FILE *f;
+    snprintf(manifest, sizeof manifest, "%s" HOST_SEP "manifest.ini", dir);
+    if (!(f = fopen(manifest, "rb"))) return;
+    fclose(f);
+    if (old && *old) {
+        size_t n = strlen(folder);
+        for (const char *p = old; p; p = strchr(p, ';') ? strchr(p, ';') + 1 : NULL)
+            if (!strncmp(p, folder, n) && (p[n] == ';' || !p[n])) return;     /* listed by hand already */
+    }
+    if (snprintf(list, sizeof list, "%s%s%s", folder, old && *old ? ";" : "", old ? old : "") >= (int)sizeof list) {
+        fprintf(stderr, "[LANG] %s: its images are not used (texture pack list too long)\n", folder);
+        return;
+    }
+#if defined(_WIN32)
+    _putenv_s("RECOMP_TEXTURE_PACKS", list);
+#else
+    setenv("RECOMP_TEXTURE_PACKS", list, 1);
+#endif
+    fprintf(stderr, "[LANG] %s: its own images load beneath the texture packs\n", folder);
+}
+
 void pc_language_start(const char *data_root, const char *game_dir)
 {
     char folder[RECOMP_SETTING_TEXT_MAX], dir[LANG_PATH], cache[LANG_PATH], stamp_path[LANG_PATH];
@@ -886,6 +914,7 @@ void pc_language_start(const char *data_root, const char *game_dir)
     g_xbox_game_file_redirect = lang_redirect;
     fprintf(stderr, "[LANG] %s (%s, %s): %d file(s) served from %s%s\n", g_pack.name, g_pack.language, folder,
             g_served_count, cache, fresh ? "" : " (built now)");
+    language_texture_layer(dir, folder);
     /* Keep only what pc_language_patch_xbe still needs. */
     for (int i = 0; i < g_pack.count; i++) {
         char file[256];

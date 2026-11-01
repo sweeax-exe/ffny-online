@@ -35,7 +35,9 @@ The launcher derives that capability from the toolkit compiled into the game.
 Released builds with the wide-layer loader advertise it, allowing compatible wide
 menu downloads to be offered. Builds from 0.12.4 also pass `--capability language-v1`:
 translations are [language mods](language-packs.md), a folder with `language.ini` and
-binary deltas (`.djd`) instead of `manifest.ini`. They install into the same mods
+binary deltas (`.djd`), optionally with a `manifest.ini` and PNGs for HD versions of the
+images they translate (checked like a texture pack's; the version then also declares
+`textures-v1`). They install into the same mods
 folder, are ticked on the same page (one language at a time, saved as
 `[language] pack`), and are not in the Load Order: they change the game's own data
 beneath every texture mod. Other game data/code/recipe mods are outside this

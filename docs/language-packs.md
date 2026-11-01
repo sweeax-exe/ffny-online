@@ -85,9 +85,10 @@ different image, so:
 Measured for the Spanish pack (177 translated images): Faithful HD has HD versions of 176 of them,
 HD Widescreen Menus 1.3.0 of 170 (one also anchors the main menu's left brick wall), 1.1.0 of 4, and
 HD Fighters of none. Those screens mix HD and original-resolution images until someone upscales the
-translated ones. Such a pack (HD images keyed to the *translated* originals) is an ordinary texture pack:
-put it anywhere in the load order, since its images are ones no English pack replaces; by convention at
-the top. Keep the usual order for the rest (HD Widescreen Menus above Faithful HD).
+translated ones. HD versions of the translated images belong **in the language mod itself** (see
+[Its own HD images](#its-own-hd-images)): they load whenever the mod is on, beneath every texture pack,
+and since no English pack replaces a translated image, nothing covers them. Keep the usual order for the
+rest (HD Widescreen Menus above Faithful HD).
 
 ## Making a pack
 
@@ -110,8 +111,8 @@ You need the USA dump's files, a copy of them with your translation in place, an
    the log.
 4. Share the folder (zipped, the folder at the root of the zip) with a licence and credits file. It contains
    your changes only. For the project catalogue, a version declares the capability `language-v1` and a
-   `min_recomp` of 0.12.4 or later; the installer accepts `.ini`, `.djd`, `.md`, `.txt` and `.json` files
-   in it.
+   `min_recomp` of 0.12.4 or later (plus `textures-v1` when it has its own images); the installer accepts
+   `.ini`, `.djd`, `.png`, `.dds`, `.md`, `.txt` and `.json` files in it.
 
 Where things are, on the USA disc:
 
@@ -129,10 +130,33 @@ Where things are, on the USA disc:
 its data sections (an embedded image, a string). `make` refuses a change anywhere else; behaviour changes
 need a runtime patch in the port, like the Story subtitle option above.
 
+### Its own HD images
+
+A language mod may carry higher-resolution versions of the images it translates, so players install one
+mod and get the translation in HD. Put a `manifest.ini` beside `language.ini`, in the texture-pack format
+([texture modding](texture-modding-getting-started.md)), and the PNGs it lists:
+
+```ini
+[pack]
+schema=1
+name=Español HD images
+png_mips=opacity
+
+[textures]
+<texture ID of the translated image>=textures/<texture ID>.png
+```
+
+The key is the ID of the **translated** image as the game draws it (capture it with the Spanish mod on, or
+take the archive `source_id` of the translated entry), never an ID computed from the HD PNG. When the mod
+is on, the game adds its folder to the texture-pack list beneath every texture pack (log:
+`[LANG] es-zarf: its own images load beneath the texture packs`), even with texture packs switched off.
+The Mods page and the installer check this manifest like any texture pack's. A `[wide]` section works too.
+
 ## Format
 
-A pack folder holds `language.ini`, its deltas, and any other files (credits, licence, readme). A folder
-with `language.ini` and no `manifest.ini` is a language mod; one with `manifest.ini` is a texture pack.
+A pack folder holds `language.ini`, its deltas, optionally its own images (`manifest.ini` and PNGs, above),
+and any other files (credits, licence, readme). A folder with `language.ini` is a language mod, with or
+without `manifest.ini`; one with only `manifest.ini` is a texture pack.
 
 ```ini
 [language]
