@@ -300,11 +300,14 @@ BASE_ENV = {
     "RECOMP_ACCOUNT_SERVER": "127.0.0.1:9",     # never the live account service / leaderboard
     "RECOMP_NETPLAY_SERVER_EU": "127.0.0.1:9",  # never the live relays (also not their pings)
     "RECOMP_NETPLAY_SERVER_NA": "127.0.0.1:9",
+    "RECOMP_NETPLAY_SERVER_WEST": "127.0.0.1:9",
     "RECOMP_NO_UPDATE_CHECK": "1",
 }
 
 LOCAL_HOSTS = ("127.0.0.1", "localhost", "::1", "[::1]")
-ADDRESS_VARS = ("RECOMP_ACCOUNT_SERVER", "RECOMP_NETPLAY_SERVER", "RECOMP_NETPLAY_SERVER_EU", "RECOMP_NETPLAY_SERVER_NA")
+ADDRESS_VARS = ("RECOMP_ACCOUNT_SERVER", "RECOMP_NETPLAY_SERVER", "RECOMP_NETPLAY_SERVER_EU", "RECOMP_NETPLAY_SERVER_NA",
+                "RECOMP_NETPLAY_SERVER_WEST")
+SERVER_CHOICES = ("auto", "eu", "na", "west", "all", "both")
 
 
 def check_env(env):
@@ -314,13 +317,13 @@ def check_env(env):
         bad.append("RECOMP_GUEST_CORES=all is not allowed (one guest CPU per copy)")
     for k in ADDRESS_VARS:
         v = str(env.get(k, "")).strip()
-        if not v or v.lower() in ("auto", "eu", "na", "both"):
+        if not v or v.lower() in SERVER_CHOICES:
             continue
         host = v.rsplit(":", 1)[0] if v.count(":") == 1 else v
         if host.lower() not in LOCAL_HOSTS:
             bad.append("%s=%s is not a local address" % (k, v))
-    if env.get("RECOMP_NETPLAY_SERVER", "").lower() in ("auto", "eu", "na", "both"):
-        for k in ("RECOMP_NETPLAY_SERVER_EU", "RECOMP_NETPLAY_SERVER_NA"):
+    if env.get("RECOMP_NETPLAY_SERVER", "").lower() in SERVER_CHOICES:
+        for k in ("RECOMP_NETPLAY_SERVER_EU", "RECOMP_NETPLAY_SERVER_NA", "RECOMP_NETPLAY_SERVER_WEST"):
             if not env.get(k):
                 bad.append("RECOMP_NETPLAY_SERVER=%s needs a local %s" % (env["RECOMP_NETPLAY_SERVER"], k))
     return bad

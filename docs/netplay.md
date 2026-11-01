@@ -17,23 +17,33 @@ The game's main menu has an **ONLINE** entry in its bottom-left slot (made by th
 copy of the game, `scripts/apt-patch.py`; the art and fonts of the online screens come from it too,
 `scripts/online-art.py`). Choose it with A:
 
-1. The online screens open over the menu and connect to the **server**: Europe (`play.defjam.online`)
-   or North America (`na.defjam.online`). **Automatic** (the default) asks both for their ping when the
-   screens open and takes the lower one, once per session; the chip at the bottom right shows the server,
-   its ping and who is online, and **X** opens the picker (Automatic, Europe, North America, each with its
-   ping and players; a server that does not answer shows OFFLINE). The launcher's settings (Basics,
-   Online) have the same choice. Players meet only players on the same server; accounts, statistics,
-   the leaderboard and updates are the same on both (they stay on the Europe server).
-   **Both servers** (build 31, `[online] server = both`) lets the player decide whom to play: the hub
-   connects like Automatic (the chip says BOTH SERVERS and the server it is on), FIND A ROOM lists the
-   rooms (King of the Hill too) of Europe and North America, the lower ping first, each with its
-   server and this PC's ping there, and joining a room on the other server moves the hub there by
-   itself (leave, connect, join by code). QUICK MATCH searches on the lower-ping server; alone there
-   for 20 seconds while the other server has a player waiting in a quick room of the same mode, it
-   moves over with a notice (the player chose Both, so a higher ping is fine). Of two such players
-   the one whose room is younger moves (within 2 s, the one on North America); the other moves only
-   once that room has waited 35 s, so a player there who is not on Both is still met and two players
-   on Both never swap. The other choices keep the hint below and never move by themselves.
+1. The online screens open over the menu and connect to the **server**: Europe (`play.defjam.online`),
+   US East (`na.defjam.online`, Ashburn; "North America" until build 37) or US West
+   (`west.defjam.online`, Hillsboro; build 38). **Automatic** (the default) asks every server for its
+   ping when the screens open and takes the lowest, once per session; the chip at the bottom right shows
+   the server, its ping and who is online, and **X** opens the picker (Automatic, Europe, US East, US
+   West, each with its ping and players; a server that does not answer shows OFFLINE). The launcher's
+   settings (Basics, Online) have the same choice; `[online] server` is `auto`, `eu`, `na` (US East),
+   `west`, `all` or a relay's address (the `both` of builds 31..37 reads as `all`). Accounts, statistics,
+   the leaderboard and updates are the same everywhere (they stay on the Europe server).
+   **All servers** (build 31 "Both servers"; `[online] server = all`) lets the player decide whom to play:
+   the hub connects like Automatic (the chip says ALL SERVERS and the server it is on), FIND A ROOM lists
+   the rooms (King of the Hill too) of all three servers, the lowest ping first, each with its server and
+   this PC's ping there, and joining a room on another server moves the hub there by itself (leave,
+   connect, join by code).
+   **QUICK MATCH searches in stages** (build 38, for every choice but a relay's own address; not King of
+   the Hill): it starts on the home server (the chosen one; with Automatic and All the lowest ping) and
+   waits there alone for 10 seconds; then, with Automatic and All, the other US server is searched too
+   (US East and US West are about 65 ms apart; Europe has no such neighbour); from 30 seconds on every
+   server is searched, a fixed choice too, so nobody waits forever. The room says where it searches
+   ("Waiting for another player on US East and US West...") and a notice says when the search widens
+   ("Looking on US West too...", "Looking on every server..."). A player waiting in a quick room of the
+   same mode on a searched server is met there: of two such players the one whose room is younger moves
+   to the older room's server (within 2 s of each other, the one on US West moves to US East or Europe,
+   the one on US East to Europe), with a notice and the ping there; the older one moves only once the
+   younger room has waited 40 s, so two players never move at once and swap. At most three moves per
+   QUICK MATCH; the search time is kept across a move, and the next QUICK MATCH starts on the home
+   server again.
 2. **QUICK MATCH** (left/right picks the mode) puts you straight into an open room of that mode, or
    opens one that the next players are put into. **FIND A ROOM** lists the open rooms; **CREATE A
    ROOM** sets the mode, the players, the venues to vote on and whether the room is listed.
@@ -46,9 +56,8 @@ copy of the game, `scripts/apt-patch.py`; the art and fonts of the online screen
 
 In a room every player's card shows their ping to the server (players of build 30 and later report it),
 and a red line warns when a match would have a high ping (above 150 ms between the two slowest players:
-inputs will feel delayed). Alone in a quick-match room for 30 seconds while the other server has players,
-the room offers to search there (LB, or a click); it never switches by itself. Ranked play runs on the
-Europe server only: on North America the RANKED MATCH entry says so and switches over with A.
+inputs will feel delayed). Ranked play runs on the Europe server only: on US East and US West the RANKED
+MATCH entry says so and switches over with A.
 
 Modes offered online: One on One, 3-Way, Free for All (more follow once tested online). The
 fight's first-time help cards (BLAZIN', weapon, KO) are skipped in online matches: they depend on
@@ -91,16 +100,19 @@ reads it. `RECOMP_NETPLAY=quick` (with `RECOMP_NETPLAY_FIGHTER=<id>`) enters the
 readies and votes by itself. Run a local relay (`go run ./cmd/relay` in `netplay/relay`) and two
 copies of the game.
 
-The server choice: `RECOMP_NETPLAY_SERVER=auto|eu|na` with `RECOMP_NETPLAY_SERVER_EU` and
-`RECOMP_NETPLAY_SERVER_NA` naming two local relays (one started with `-test-lag 150ms` answers like a far
-one); `RECOMP_TEST_SERVER_SWITCH=<ms>,<eu|na|auto>` switches the server in the lobby the way the picker
-does before quick-matching. `scripts/netplay-hub-test.ps1 -NaRelayPort 27858 -EuLagMs 150 -Server auto`
-runs it end to end; `relayprobe -mode status` asks one relay for its `STATUS`.
+The server choice: `RECOMP_NETPLAY_SERVER=auto|eu|na|west|all` with `RECOMP_NETPLAY_SERVER_EU`,
+`RECOMP_NETPLAY_SERVER_NA` and `RECOMP_NETPLAY_SERVER_WEST` naming local relays (one started with
+`-test-lag 150ms` answers like a far one; a test sets all three, `127.0.0.1:9` for one it does not run, so
+no copy reaches a live relay); `RECOMP_TEST_SERVER_SWITCH=<ms>,<eu|na|west|auto>` switches the server in
+the lobby the way the picker does before quick-matching. `scripts/netplay-hub-test.ps1 -NaRelayPort 27858
+-EuLagMs 150 -Server auto` runs it end to end (`-WestRelayPort 27859` adds US West); `relayprobe -mode
+status` asks one relay for its `STATUS`.
 
-Both servers: `RECOMP_NETPLAY_SERVER=both`; `RECOMP_TEST_JOIN_LISTED=<s>` makes a `quick` copy join the
-first open room its room list shows instead (moving to the other relay when the room is there).
-`scripts/netplay-hub-test.ps1 -NaRelayPort 27858 -NaLagMs 150 -Servers na,both -JoinListed 1` has a copy
-on North America open a room that a copy on Both finds and joins; `-Servers na,both` alone has the Both
-copy quick-match on Europe and move to the North America copy after 20 s; `-Servers na,eu -JoinListed 1`
-shows that a copy on Europe never lists North America's room. `relayprobe -mode roomlist` asks one relay
-for its `ROOMLIST`.
+All servers: `RECOMP_NETPLAY_SERVER=all`; `RECOMP_TEST_JOIN_LISTED=<s>` makes a `quick` copy join the
+first open room its room list shows instead (moving to another relay when the room is there).
+`scripts/netplay-hub-test.ps1 -NaRelayPort 27858 -NaLagMs 150 -Servers na,all -JoinListed 1` has a copy
+on US East open a room that a copy on All finds and joins; `-Servers na,eu -JoinListed 1` shows that a
+copy on Europe never lists US East's room. The staged quick match: `-NaRelayPort 27858 -WestRelayPort
+27859 -Servers na,west` starts the copies on US East and US West, and the younger one moves to the other
+after 10 s (`[NETPLAY] tests: quick match searching on ...` and `moving the quick match to ...`);
+`-Servers eu,west` meets after 30 s. `relayprobe -mode roomlist` asks one relay for its `ROOMLIST`.

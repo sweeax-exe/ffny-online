@@ -212,8 +212,8 @@ by older relays.
 
 ## Relay status (choosing a relay)
 
-Since build 30 there is more than one relay (Europe `play.defjam.online`, North America
-`na.defjam.online`, both port 27777). A client asks each one with `STATUS` before it registers
+Since build 30 there is more than one relay (Europe `play.defjam.online`, US East
+`na.defjam.online`, and since build 38 US West `west.defjam.online`, all port 27777). A client asks each one with `STATUS` before it registers
 anywhere, and picks by round trip. Same header and version; a relay without it drops `STATUS`
 silently (an unknown type), so no answer within about 2 s means "older relay or unreachable".
 
@@ -229,10 +229,11 @@ silently (an unknown type), so no answer within about 2 s means "older relay or 
   per-IP message limit of the base protocol applies as well.
 - The summary log line counts the answers (`status=N` at its end).
 
-## Public room list without a session (both servers)
+## Public room list without a session (all servers)
 
-Since build 31 a player can choose **Both servers**: the game stays in the lobby of one relay and
-also lists the rooms of the other, then moves over to join one. It asks the other relay with
+Since build 31 a player can choose **Both servers** (build 38: **All servers**, three relays): the
+game stays in the lobby of one relay and also lists the rooms of the others, then moves over to join
+one. It asks the other relay with
 `ROOMLIST`, which, like `STATUS`, needs no token and registers nothing. Same header and version; a
 relay before build 31 drops it silently (an unknown type), and the game then shows no rooms of
 that relay.
@@ -252,7 +253,8 @@ that relay.
   dropped silently. The per-IP message limit of the base protocol applies as well.
 - The summary log line counts the answers (`roomlist=N` at its end).
 - The game asks at most every 3 s per relay, while its room list shows or while it waits alone in a
-  quick room on Both servers (the `age` lets two such players decide who moves; see `docs/netplay.md`).
+  quick room once its quick match searches other relays (build 38: any choice but a custom address; the
+  `age` lets two such players decide who moves; see `docs/netplay.md`).
 
 ## Created fighters (Story-mode fighters online)
 

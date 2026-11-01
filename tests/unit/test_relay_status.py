@@ -70,11 +70,15 @@ def test_room_ping_payload_is_its_own_type():
 
 def test_relays_setting_and_test_switches():
     assert '"play.defjam.online:27777"' in SERVERS_C and '"na.defjam.online:27777"' in SERVERS_C
-    assert 'RECOMP_NETPLAY_SERVER_EU' in SERVERS_C and 'RECOMP_NETPLAY_SERVER_NA' in SERVERS_C
+    assert '"west.defjam.online:27777", "5.78.214.178"' in SERVERS_C
+    for env in ('RECOMP_NETPLAY_SERVER_EU', 'RECOMP_NETPLAY_SERVER_NA', 'RECOMP_NETPLAY_SERVER_WEST'):
+        assert env in SERVERS_C, env
+    # the session's own DNS fallback knows the third relay too
+    assert '"west.defjam.online"' in NETPLAY_C and '"5.78.214.178"' in NETPLAY_C
     # [online] server defaults to auto, and RECOMP_NETPLAY_SERVER still overrides it
     m = re.search(r'\{ "online", "server", RECOMP_SETTING_STRING, .*?"RECOMP_NETPLAY_SERVER".*?\}', SETTINGS_C, re.S)
     assert m and m.group(0).rstrip('} ').endswith('"auto"')
     assert 'RECOMP_TEST_SERVER_SWITCH' in NETPLAY_C
-    for param in ('NaRelayPort', 'Server', 'EuLagMs', 'NaLagMs', 'SwitchTo'):
+    for param in ('NaRelayPort', 'WestRelayPort', 'Server', 'EuLagMs', 'NaLagMs', 'WestLagMs', 'SwitchTo'):
         assert re.search(r'\$%s\b' % param, HUB_TEST), param
     assert '0x24' in PROTOCOL_DOC and '`STATUS`' in PROTOCOL_DOC

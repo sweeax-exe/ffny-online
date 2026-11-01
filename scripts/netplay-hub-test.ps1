@@ -31,36 +31,45 @@
                     default 1200); with -Bot, 9 keeps them off the fight and the results screens.
 .PARAMETER DataPrefix  every copy's data root is <DataPrefix><i> (made like the -hub roots: the dump as a
                     junction, a copy of the saves); default: the data root itself and <data>-hub<i>.
-.PARAMETER NaRelayPort  build 30's server choice: a second local relay on this port plays "North America"
-                    (RECOMP_NETPLAY_SERVER_NA), the one on -RelayPort "Europe" (RECOMP_NETPLAY_SERVER_EU);
-                    0 (default): one relay, as before.
-.PARAMETER Server   with -NaRelayPort: every copy's server choice, auto (default), eu, na or both (build 31:
-                    the rooms of both relays; Quick Match moves to the other relay when only it has a player
-                    waiting).
-.PARAMETER Servers  with -NaRelayPort: one server choice per copy (auto, eu, na, both), beating -Server; e.g.
-                    -Servers na,both: copy 0 waits in a quick room on North America, copy 1 is on both.
+.PARAMETER NaRelayPort  build 30's server choice: a second local relay on this port plays "US East" (the "na"
+                    relay, "North America" until build 37; RECOMP_NETPLAY_SERVER_NA), the one on -RelayPort
+                    "Europe" (RECOMP_NETPLAY_SERVER_EU); 0 (default): one relay, as before.
+.PARAMETER WestRelayPort  build 38: with -NaRelayPort, a third local relay on this port plays "US West"
+                    (RECOMP_NETPLAY_SERVER_WEST); 0 (default): none (the copies' US West is 127.0.0.1:9, which
+                    never answers, so no test reaches the live one).
+.PARAMETER Server   with -NaRelayPort: every copy's server choice, auto (default), eu, na, west or all (build 31
+                    "both", which still works: the rooms of every relay). Quick Match searches the copy's relay,
+                    then (auto, all) the other US relay from 10 s and every relay from 30 s (build 38).
+.PARAMETER Servers  with -NaRelayPort: one server choice per copy (auto, eu, na, west, all, both), beating
+                    -Server; e.g. -Servers na,west: copy 0 waits in a quick room on US East, copy 1 on US West.
 .PARAMETER JoinListed  copy numbers that do not quick-match but join the first open room their room list
-                    shows (RECOMP_TEST_JOIN_LISTED; with both, a room on the other relay too, moving there),
+                    shows (RECOMP_TEST_JOIN_LISTED; with all, a room on another relay too, moving there),
                     giving up after -JoinListedSecs.
 .PARAMETER CopyGapSecs  seconds between starting two copies (default 3: the first copy opens the room).
 .PARAMETER EuLagMs  with -NaRelayPort: the "Europe" relay holds what it sends this long (relay -test-lag).
-.PARAMETER NaLagMs  the same for "North America".
+.PARAMETER NaLagMs  the same for "US East".
+.PARAMETER WestLagMs  the same for "US West".
 .PARAMETER NoOverride  the copies' own data folders get no menu patch (<data>\override; copied by default), as
                     for a player whose dump apt-patch did not recognise: no ONLINE entry, no Online.Tick().
 .PARAMETER Created  the relay lets players fight with their created fighters (relay -created; the live one only
                     with its switch file); give a copy fighter 99 in -Fighters and a record in -CpRecords.
 .PARAMETER CpRecords one profile dump or user ID save per copy (RECOMP_CP_RECORD): that copy's created fighter
                     ('' for none).
-.PARAMETER SwitchTo with -NaRelayPort: every copy switches the server in the lobby (eu, na or auto) the way
+.PARAMETER SwitchTos with -NaRelayPort: one -SwitchTo per copy ('' for none), beating -SwitchTo; e.g. -Servers
+                    auto,auto -SwitchTos na,west: two Automatic copies whose sessions start on US East and US
+                    West (the staged quick match: the younger one moves to the other after 10 s).
+.PARAMETER SwitchTo with -NaRelayPort: every copy switches the server in the lobby (eu, na, west or auto) the way
                     the hub's picker does, -SwitchAfterMs after entering it, then quick-matches there.
 #>
 param([ValidateRange(2, 4)][int]$Players = 2, [int]$Secs = 1200, [string[]]$ExtraEnv = @(),
       [ValidateSet('online', 'online5', 'online8', 'online-rematch')][string]$Route = 'online', [int[]]$Fighters = @(55, 22, 9, 31),
       [string[]]$Stage = @(), [int]$FastKo = 0, [string]$FastKoWinner = 'alt', [switch]$Bot,
       [ValidateRange(0, 100)][int]$BotAggression = 60, [int]$RelayPort = 27777, [int]$BaseCore = 2,
-      [string]$DataPrefix = '', [int]$NaRelayPort = 0, [ValidateSet('auto', 'eu', 'na', 'both')][string]$Server = 'auto',
-      [int]$EuLagMs = 0, [int]$NaLagMs = 0, [ValidateSet('', 'auto', 'eu', 'na')][string]$SwitchTo = '',
-      [int]$SwitchAfterMs = 3000, [ValidateSet('auto', 'eu', 'na', 'both')][string[]]$Servers = @(),
+      [string]$DataPrefix = '', [int]$NaRelayPort = 0, [int]$WestRelayPort = 0,
+      [ValidateSet('auto', 'eu', 'na', 'west', 'all', 'both')][string]$Server = 'auto',
+      [int]$EuLagMs = 0, [int]$NaLagMs = 0, [int]$WestLagMs = 0, [ValidateSet('', 'auto', 'eu', 'na', 'west')][string]$SwitchTo = '',
+      [int]$SwitchAfterMs = 3000, [ValidateSet('auto', 'eu', 'na', 'west', 'all', 'both')][string[]]$Servers = @(),
+      [ValidateSet('', 'auto', 'eu', 'na', 'west')][string[]]$SwitchTos = @(),
       [int[]]$JoinListed = @(), [int]$JoinListedSecs = 90, [int]$CopyGapSecs = 3, [switch]$NoOverride,
       [string]$Venues = '', [string]$SummaryPresses = '4+3x12', [int]$FightSecs = 1200,
       [switch]$Created, [string[]]$CpRecords = @())
@@ -100,6 +109,14 @@ if ($NaRelayPort) {
     $relayNa = Start-Process (Join-Path $repo 'netplay\relay\dist\relay.exe') -ArgumentList $naArgs `
                -PassThru -WindowStyle Hidden -RedirectStandardError "$logs\relay-na.err" -RedirectStandardOutput "$logs\relay-na.out"
 }
+$relayWest = $null
+if ($NaRelayPort -and $WestRelayPort) {
+    $westArgs = @('-listen', "127.0.0.1:$WestRelayPort", '-log-interval', '30s')
+    if ($WestLagMs) { $westArgs += @('-test-lag', "$($WestLagMs)ms") }
+    if ($Venues) { $westArgs += @('-test-venues', $Venues) }
+    $relayWest = Start-Process (Join-Path $repo 'netplay\relay\dist\relay.exe') -ArgumentList $westArgs `
+                 -PassThru -WindowStyle Hidden -RedirectStandardError "$logs\relay-west.err" -RedirectStandardOutput "$logs\relay-west.out"
+}
 Start-Sleep -Seconds 1
 
 $quick = if ($Players -eq 2) { '0,2' } else { "3,$Players" }
@@ -131,11 +148,17 @@ for ($i = 0; $i -lt $Players; $i++) {
     }
     $copyRoute = if ($i % 2 -eq 0) { "$Route-p1" } else { "$Route-p2" }
     $choice = if ($i -lt $Servers.Count) { $Servers[$i] } else { $Server }
+    # every relay address local: a relay not started here is 127.0.0.1:9, which never answers
+    $westAt = if ($WestRelayPort) { "127.0.0.1:$WestRelayPort" } else { '127.0.0.1:9' }
     $serverEnv = if ($NaRelayPort) {
         @('--env', "RECOMP_NETPLAY_SERVER=$choice", '--env', "RECOMP_NETPLAY_SERVER_EU=127.0.0.1:$RelayPort",
-          '--env', "RECOMP_NETPLAY_SERVER_NA=127.0.0.1:$NaRelayPort")
-    } else { @('--env', "RECOMP_NETPLAY_SERVER=127.0.0.1:$RelayPort") }
-    if ($NaRelayPort -and $SwitchTo) { $serverEnv += @('--env', "RECOMP_TEST_SERVER_SWITCH=$SwitchAfterMs,$SwitchTo") }
+          '--env', "RECOMP_NETPLAY_SERVER_NA=127.0.0.1:$NaRelayPort", '--env', "RECOMP_NETPLAY_SERVER_WEST=$westAt")
+    } else {
+        @('--env', "RECOMP_NETPLAY_SERVER=127.0.0.1:$RelayPort", '--env', 'RECOMP_NETPLAY_SERVER_EU=127.0.0.1:9',
+          '--env', 'RECOMP_NETPLAY_SERVER_NA=127.0.0.1:9', '--env', 'RECOMP_NETPLAY_SERVER_WEST=127.0.0.1:9')
+    }
+    $switch = if ($i -lt $SwitchTos.Count) { $SwitchTos[$i] } else { $SwitchTo }
+    if ($NaRelayPort -and $switch) { $serverEnv += @('--env', "RECOMP_TEST_SERVER_SWITCH=$SwitchAfterMs,$switch") }
     if ($JoinListed -contains $i) { $serverEnv += @('--env', "RECOMP_TEST_JOIN_LISTED=$JoinListedSecs") }
     if ($i -lt $CpRecords.Count -and $CpRecords[$i]) { $serverEnv += @('--env', "RECOMP_CP_RECORD=$($CpRecords[$i])") }
     $args = @('scripts/harness.py', 'run', $copyRoute, '--preset', 'win-x64-release', '--secs', "$Secs",
@@ -170,17 +193,19 @@ Get-Process defjam_recomp -ErrorAction SilentlyContinue |
     Stop-Process -Force
 if (-not $relay.HasExited) { $relay.Kill() }
 if ($relayNa -and -not $relayNa.HasExited) { $relayNa.Kill() }
+if ($relayWest -and -not $relayWest.HasExited) { $relayWest.Kill() }
 
 for ($i = 0; $i -lt $Players; $i++) {
     $hit = Select-String -Path "$logs\copy$i.txt" -Pattern '^log\s+(\S+)' | Select-Object -First 1
     $log = if ($hit) { $hit.Matches.Groups[1].Value } else { $null }
     if (-not $hit) { "== copy $i  no run (harness: $(Get-Content "$logs\copy$i.err" -Raw))"; continue }
     $choice = if ($i -lt $Servers.Count) { $Servers[$i] } else { $Server }
-    "== copy $i  $log" + $(if ($NaRelayPort) { "  (server $choice$(if ($JoinListed -contains $i) { ', joins from the room list' }))" } else { '' })
+    $switch = if ($i -lt $SwitchTos.Count) { $SwitchTos[$i] } else { $SwitchTo }
+    "== copy $i  $log" + $(if ($NaRelayPort) { "  (server $choice$(if ($switch) { ", starts on $switch" })$(if ($JoinListed -contains $i) { ', joins from the room list' }))" } else { '' })
     Get-Content "$logs\copy$i.txt" | Select-Object -First 4 | Select-Object -Skip 1
     Select-String -Path "$logs\copy$i.txt" -Pattern '^(save|written|FAIL)\s' | ForEach-Object Line
     if ($log -and (Test-Path $log)) {
-        Select-String -Path $log -Pattern '\[SERVERS\]|\[NETPLAY\] (tests: (server|switching|now|the room list|joining|no open room|Both servers)|room: the player|START|match|sync|Match over|A player|refused|desync|the relay keeps|waiting for a created|the created)|\[CREATED\]|\[AUTOMATCH\] sequence|"event":"(match_over|result)"|CRASH' |
+        Select-String -Path $log -Pattern '\[SERVERS\]|\[NETPLAY\] (tests: (server|switching|now|the room list|joining|no open room|quick match searching|moving the quick match)|room: the player|START|match|sync|Match over|A player|refused|desync|the relay keeps|waiting for a created|the created)|\[CREATED\]|\[AUTOMATCH\] sequence|"event":"(match_over|result)"|CRASH' |
             ForEach-Object { $_.Line.Substring(0, [Math]::Min(170, $_.Line.Length)) }
         Select-String -Path $log -Pattern 'checksums compared' | Select-Object -Last 1 | ForEach-Object Line
         if ($FastKo -gt 0) { "fast knockouts: " + @(Select-String -Path $log -Pattern '\[TEST-KO\] match').Count }
@@ -188,4 +213,5 @@ for ($i = 0; $i -lt $Players; $i++) {
 }
 "elapsed: {0:N1} min" -f ((Get-Date) - $started).TotalMinutes
 "relay:"; Get-Content "$logs\relay.err", "$logs\relay.out" -ErrorAction SilentlyContinue | Select-String 'room|START|summary' | Select-Object -Last 12 | ForEach-Object Line
-if ($relayNa) { "relay NA:"; Get-Content "$logs\relay-na.err", "$logs\relay-na.out" -ErrorAction SilentlyContinue | Select-String 'room|START|summary' | Select-Object -Last 12 | ForEach-Object Line }
+if ($relayNa) { "relay US East:"; Get-Content "$logs\relay-na.err", "$logs\relay-na.out" -ErrorAction SilentlyContinue | Select-String 'room|START|summary' | Select-Object -Last 12 | ForEach-Object Line }
+if ($relayWest) { "relay US West:"; Get-Content "$logs\relay-west.err", "$logs\relay-west.out" -ErrorAction SilentlyContinue | Select-String 'room|START|summary' | Select-Object -Last 12 | ForEach-Object Line }

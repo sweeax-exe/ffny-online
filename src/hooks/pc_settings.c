@@ -66,9 +66,11 @@ static RecompSetting g_display_settings[] = {
     { "textures", "dump_limit", RECOMP_SETTING_INT, 2000, 0, 65536, NULL, "RECOMP_TEXTURE_DUMP_LIMIT", RECOMP_SETTING_RESTART,
       "Maximum new source images captured in one run." },
     { "online", "server", RECOMP_SETTING_STRING, 0, 0, 0, NULL, "RECOMP_NETPLAY_SERVER", 0,
-      "The server for online play: auto (the one with the lowest ping, Europe or North America), eu, na, both "
-      "(the rooms and quick matches of both; the hub connects to the lower ping and moves to join), or a "
-      "relay's own address as host or host:port (port 27777 if left out). Accounts and stats stay on Europe.", "auto" },
+      "The server for online play: auto (the one with the lowest ping of Europe, US East and US West), eu, na "
+      "(US East), west (US West), all (the rooms of every server; the hub connects to the lowest ping and moves "
+      "to join; \"both\" of older builds means all), or a relay's own address as host or host:port (port 27777 "
+      "if left out). Quick Match widens to the other servers when nobody is waiting. Accounts and stats stay on "
+      "Europe.", "auto" },
     { "online", "name", RECOMP_SETTING_STRING, 0, 0, 0, NULL, NULL, 0,
       "Your name, shown to the other player.", "Player" },
     { "online", "fighter", RECOMP_SETTING_INT, 55, 0, 255, NULL, NULL, 0,
@@ -742,8 +744,8 @@ int pc_settings_init(void)
     {   /* The first server was known by its address; installs that saved it move to the name. */
         char server[128];
         recomp_settings_get_text("online", "server", server, sizeof(server), "");
-        /* Build 30: the old default, the Europe relay's name, becomes "auto" (the nearest of Europe and
-         * North America); a player who wants Europe only picks it again in the hub or the launcher. */
+        /* Build 30: the old default, the Europe relay's name, becomes "auto" (the nearest relay); a
+         * player who wants Europe only picks it again in the hub or the launcher. */
         if ((!strcmp(server, "142.132.178.17") || !_stricmp(server, "play.defjam.online") ||
              !_stricmp(server, "play.defjam.online:27777")) && !getenv("RECOMP_NETPLAY_SERVER") &&
             recomp_settings_reset_to_default("online", "server") > 0 && g_path[0])
