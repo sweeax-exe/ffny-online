@@ -280,6 +280,7 @@ static uint32_t s_read_at[8], s_read_len[8], s_reads_told;
 static int s_read_game[8];
 static uint32_t s_read_save[8];
 static volatile LONG s_saves;           /* saves since the reference: a clock for the log */
+static unsigned s_nrerun;               /* heap blocks allocated in re-runs this fight (s_rerun) */
 static void release_held_arena(int all);
 static uint8_t *s_data_before;          /* rollback_prepare: .data before the hold, to name what changed */
 
@@ -443,6 +444,7 @@ static int track_start(void)
     s_reads = 0;
     s_saves = 0;
     s_reads_told = 0;
+    s_nrerun = 0;
     xbox_guest_write_notify = track_read;
     InterlockedExchange(&s_tracking, 1);
     hold_contig_frees();
@@ -687,10 +689,78 @@ static void mixer_fields(uint32_t page, const uint8_t *was, const uint8_t *now)
 
 static void fight_alloc_add(uint32_t block);
 
+/* Heap blocks allocated while steps run again (netplay.c's rollback_to), newest last: a crash on one says
+ * so (B5 of rollback-plan-2026-11.md; generator-timescale-desync.md 7). */
+#define RERUN_ALLOCS 4096
+static struct { uint32_t block, size, caller, chain0; LONG saves; } s_rerun[RERUN_ALLOCS];
+static volatile int s_resim;
+uint32_t rollback_crash_va;
+
+void rollback_set_resim(int on) { s_resim = on; }
+
+static int rerun_block(uint32_t v, unsigned *k_out)
+{
+    unsigned i, n = s_nrerun < RERUN_ALLOCS ? s_nrerun : RERUN_ALLOCS;
+    for (i = 0; i < n; i++) {
+        unsigned k = (s_nrerun - 1 - i) % RERUN_ALLOCS;
+        if (v >= s_rerun[k].block && v < s_rerun[k].block + (s_rerun[k].size ? s_rerun[k].size : 1)) { *k_out = k; return 1; }
+    }
+    return 0;
+}
+
+static void crash_word(const char *what, uint32_t v)
+{
+    unsigned k;
+    uint32_t pool = MEM32(POOL_BASE), psize = MEM32(POOL_SIZE);
+    char extra[160] = "";
+    if (rerun_block(v, &k))
+        snprintf(extra, sizeof(extra), "; in block %08X+%X allocated in a re-run (caller %08X <- %08X, %ld saves in, now %ld)",
+                 s_rerun[k].block, s_rerun[k].size, s_rerun[k].caller, s_rerun[k].chain0, (long)s_rerun[k].saves, (long)s_saves);
+    else if (pool && v >= pool && v < pool + psize)
+        snprintf(extra, sizeof(extra), "; in the system pool %08X+%X", pool, psize);
+    else if (in_arena(v))
+        snprintf(extra, sizeof(extra), "; in the audio arena");
+    fprintf(stderr, "[ROLLBACK]   %s = %08X (%s%s)\n", what, v, rollback_page_state(v), extra);
+}
+
+/* The crash report: the objects the guest registers name, with the page state of the object, its vtable,
+ * +0xC and +0x10 (the container node of the sub_000EDF90 crash: +0xC descriptor, +0x10 child array). */
+void rollback_crash_objects(void)
+{
+    static const char *const names[] = { "ecx", "esi", "edi", "ebx", "eax", "edx" };
+    const uint32_t regs[6] = { g_ecx, g_esi, g_edi, g_ebx, g_eax, g_edx };
+    int i;
+    fprintf(stderr, "[ROLLBACK] at the crash: %s, %u heap blocks allocated in re-runs this fight; fault VA %08X\n",
+            s_resim ? "running steps again" : "a normal update", s_nrerun, rollback_crash_va);
+    if (rollback_crash_va) crash_word("fault", rollback_crash_va);
+    for (i = 0; i < 6; i++) {
+        uint32_t v = regs[i];
+        char what[24];
+        crash_word(names[i], v);
+        if (v < HEAP_LO || v >= HEAP_HI - 0x14u) continue;
+        snprintf(what, sizeof(what), "  [%s]", names[i]);
+        crash_word(what, MEM32(v));
+        snprintf(what, sizeof(what), "  [%s+C]", names[i]);
+        crash_word(what, MEM32(v + 0xCu));
+        snprintf(what, sizeof(what), "  [%s+10]", names[i]);
+        crash_word(what, MEM32(v + 0x10u));
+    }
+}
+
 void rollback_check_alloc(uint32_t caller, uint32_t size, uint32_t block)
 {
     uint32_t end = block + size;
     if (s_tracking && block >= HEAP_LO && block < HEAP_HI) fight_alloc_add(block);
+    if (s_resim && block >= HEAP_LO && block < HEAP_HI) {
+        unsigned k = s_nrerun++ % RERUN_ALLOCS;
+        uint32_t chain[1];
+        call_chain(g_esp, chain, 1);
+        s_rerun[k].block = block;
+        s_rerun[k].size = size;
+        s_rerun[k].caller = caller;
+        s_rerun[k].chain0 = chain[0];
+        s_rerun[k].saves = s_saves;
+    }
     if (block && alloclog_on()) {
         unsigned k = s_alog_n++ % ALLOCLOG;
         s_alog[k].block = block;
@@ -955,7 +1025,11 @@ int rollback_reference(void)
 {
     if (!s_game_thread)     /* called on the game thread */
         s_game_thread = OpenThread(THREAD_QUERY_LIMITED_INFORMATION, FALSE, GetCurrentThreadId());
-    if (!s_ref || !s_ndseg) return -1;
+    if (!s_ref || !s_ndseg) {
+        fprintf(stderr, "[ROLLBACK] off for this match: no reference copy (%s)\n",
+                !s_ref ? "no memory for the 42 MB copy" : "no .data segments were built");
+        return -1;
+    }
     memcpy(s_ref, XBOX_PTR(HEAP_LO), (size_t)HEAP_PAGES * PAGE);
     s_nchange = s_cursor = 0;
     memset(s_known, 0, sizeof(s_known));
@@ -1061,6 +1135,108 @@ int rollback_load(int slot)
         if (!s_skip[s_change[i]])
             load_page(s_change[i], s_ref + (size_t)s_change[i] * PAGE);
     return 0;
+}
+
+/* Tests (RECOMP_ROLLBACK_SOAK_DIFF=1, with RECOMP_ROLLBACK_SOAK): the whole of .data and the heap before
+ * the soak goes back, compared with what the re-run made of them. A re-run on the same PC must come out
+ * exactly as the first run did; a word that differs in memory the saves keep is state a load did not put
+ * back, or a step that read something outside the saves (B5 of rollback-plan-2026-11.md). Memory the
+ * saves leave alone (other threads', the sound engine's) is listed too, marked as such. */
+#define SD_DATA_LO 0x002D5000u
+#define SD_DATA_HI 0x003CA000u
+static uint8_t *s_sd_data, *s_sd_heap;
+static unsigned s_sd_soaks, s_sd_bad, s_sd_told;
+static struct { uint32_t key; unsigned n; } s_sd_seen[4096];
+static unsigned s_sd_nseen;
+
+int rollback_soak_diff_on(void)
+{
+    static int on = -1;
+    if (on < 0) on = getenv("RECOMP_ROLLBACK_SOAK_DIFF") != NULL;
+    return on;
+}
+
+void rollback_soak_before(void)
+{
+    if (!s_ready) return;
+    if (!s_sd_data) s_sd_data = (uint8_t *)malloc(SD_DATA_HI - SD_DATA_LO);
+    if (!s_sd_heap) s_sd_heap = (uint8_t *)malloc((size_t)HEAP_PAGES * PAGE);
+    if (!s_sd_data || !s_sd_heap) return;
+    memcpy(s_sd_data, XBOX_PTR(SD_DATA_LO), SD_DATA_HI - SD_DATA_LO);
+    memcpy(s_sd_heap, XBOX_PTR(HEAP_LO), (size_t)HEAP_PAGES * PAGE);
+}
+
+/* how the saves treat a .data address */
+static const char *data_kind(uint32_t a)
+{
+    unsigned j;
+    int k;
+    for (j = 0; j < N_DATA_HOLE; j++) if (a >= k_data_hole[j].lo && a < k_data_hole[j].hi) return "hole (kept live)";
+    for (k = 0; k < s_ndseg; k++) if (a >= s_dseg[k].lo && a < s_dseg[k].hi) return "saved";
+    for (j = 0; j < N_DATA_SKIP; j++) if (a >= k_data_skip[j].lo && a < k_data_skip[j].hi) return "skipped page (sound)";
+    for (j = 0; j < N_DATA; j++) if (a >= k_data[j].lo && a < k_data[j].hi) return "page other threads wrote";
+    return "gap (never saved)";
+}
+
+/* 1 the first time this key is seen */
+static int sd_new(uint32_t key)
+{
+    unsigned i;
+    for (i = 0; i < s_sd_nseen; i++) if (s_sd_seen[i].key == key) { s_sd_seen[i].n++; return 0; }
+    if (s_sd_nseen < sizeof(s_sd_seen) / sizeof(s_sd_seen[0])) { s_sd_seen[s_sd_nseen].key = key; s_sd_seen[s_sd_nseen++].n = 1; }
+    return 1;
+}
+
+void rollback_soak_after(int depth, long long step)
+{
+    uint32_t a, p;
+    unsigned saved_words = 0, other_words = 0, saved_pages = 0, other_pages = 0;
+    if (!s_ready || !s_sd_data || !s_sd_heap) return;
+    s_sd_soaks++;
+    for (a = SD_DATA_LO; a < SD_DATA_HI; a += 4) {
+        uint32_t lo, was, now;
+        const char *kind;
+        if (*(uint32_t *)(s_sd_data + a - SD_DATA_LO) == MEM32(a)) continue;
+        lo = a;
+        was = *(uint32_t *)(s_sd_data + a - SD_DATA_LO);
+        now = MEM32(a);
+        while (a + 4 < SD_DATA_HI && *(uint32_t *)(s_sd_data + a + 4 - SD_DATA_LO) != MEM32(a + 4)) a += 4;
+        kind = data_kind(lo);
+        if (kind[0] == 's' && kind[1] == 'a') saved_words += (a + 4 - lo) / 4; else other_words += (a + 4 - lo) / 4;
+        if (sd_new(lo) && s_sd_told < 300) {
+            s_sd_told++;
+            fprintf(stderr, "[SOAKDIFF] soak %u (back %d, step %lld): .data %08X..%08X differs after the re-run (%s): "
+                    "%08X, was %08X\n", s_sd_soaks, depth, step, lo, a + 4, kind, now, was);
+        }
+    }
+    for (p = 0; p < HEAP_PAGES; p++) {
+        const uint32_t *was = (const uint32_t *)(s_sd_heap + (size_t)p * PAGE);
+        const uint32_t *now = (const uint32_t *)XBOX_PTR(HEAP_LO + p * PAGE);
+        unsigned w, first = PAGE, last = 0, n = 0;
+        const char *kind;
+        if (!memcmp(was, now, PAGE)) continue;
+        for (w = 0; w < PAGE / 4; w++)
+            if (was[w] != now[w]) { if (first == PAGE) first = w * 4; last = w * 4; n++; }
+        kind = rollback_page_state(HEAP_LO + p * PAGE);
+        if (s_mixmask[p]) {     /* only the mixer's words? */
+            unsigned m = 0;
+            for (w = 0; w < PAGE / 4; w++) if (was[w] != now[w] && !(s_mixmask[p][w >> 3] & (1u << (w & 7)))) m++;
+            if (!m) continue;
+        }
+        if (!s_skip[p]) saved_pages++; else other_pages++;
+        if (sd_new(HEAP_LO + p * PAGE) && s_sd_told < 300) {
+            s_sd_told++;
+            fprintf(stderr, "[SOAKDIFF] soak %u (back %d, step %lld): heap page %08X differs after the re-run (%s): %u words, "
+                    "%08X..%08X, first %08X was %08X\n", s_sd_soaks, depth, step, HEAP_LO + p * PAGE, kind, n,
+                    HEAP_LO + p * PAGE + first, HEAP_LO + p * PAGE + last + 4, now[first / 4], was[first / 4]);
+            if (!s_skip[p]) alloclog_page(HEAP_LO + p * PAGE + (first & ~0xFu), "soak diff");
+        }
+    }
+    if (saved_words || saved_pages) s_sd_bad++;
+    if (s_sd_soaks % 100 == 0)
+        fprintf(stderr, "[SOAKDIFF] %u soaks, %u with saved memory that came out otherwise (this one: %u .data words, %u heap "
+                "pages saved; %u words, %u pages left alone)\n", s_sd_soaks, s_sd_bad, saved_words, saved_pages,
+                other_words, other_pages);
 }
 
 /* The D3D device holds a reference on each texture and palette it has bound (SetTexture sub_00215F60,
@@ -1852,6 +2028,12 @@ void rollback_mixer_unlock_b(void) { if (MEM32(g_esp) == MIX_UNLOCKS) mixer_end(
 
 #else
 int rollback_enabled(void) { return 0; }
+int rollback_soak_diff_on(void) { return 0; }
+void rollback_soak_before(void) {}
+void rollback_soak_after(int depth, long long step) { (void)depth; (void)step; }
+uint32_t rollback_crash_va;
+void rollback_crash_objects(void) {}
+void rollback_set_resim(int on) { (void)on; }
 const char *rollback_page_state(uint32_t addr) { (void)addr; return "-"; }
 void rollback_arena_history(void) {}
 int rollback_sound_command_dead(uint32_t sp) { (void)sp; return 0; }

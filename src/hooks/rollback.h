@@ -40,6 +40,12 @@ void rollback_check_alloc(uint32_t caller, uint32_t size, uint32_t block);
 void rollback_check_tables(const char *where);
 /* Called by the crash report (src/main.c) when set: netplay prints the rollback state. */
 extern void (*rollback_crash_cb)(void);
+int rollback_soak_diff_on(void);            /* tests: RECOMP_ROLLBACK_SOAK_DIFF=1 */
+void rollback_soak_before(void);            /* the whole .data and heap before a soak goes back */
+void rollback_soak_after(int depth, long long step);    /* what the re-run made otherwise */
+extern uint32_t rollback_crash_va;          /* src/main.c: the guest address of the fault, before the callback */
+void rollback_crash_objects(void);          /* the registers' objects and their pages (crash reports) */
+void rollback_set_resim(int on);            /* netplay.c: steps are being run again */
 const char *rollback_page_state(uint32_t addr);
 /* The crash report: the arena blocks the guest registers point into, with their last allocations and frees. */
 void rollback_arena_history(void);

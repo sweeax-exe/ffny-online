@@ -366,6 +366,9 @@ static struct {
     } snap[ROLLBACK_SLOTS];
     unsigned rb_count, rb_steps, rb_deepest, rb_failed;
     double rb_ms_max, rb_ms_total;
+    /* the same for this match alone (rb_* above run on for the whole session), the step of its first
+     * prediction (0: none yet) and whether its summary line went out */
+    struct { unsigned count, steps, deepest, slow; double ms_max, ms_total; uint32_t first_pred; int on, told; } rbm;
     char toast[160];                /* a notice for the fight (netplay_toast), until toast_until */
     ULONGLONG toast_until;
     char notice[96];                /* the relay's maintenance NOTICE text, counted down to notice_at */
@@ -1835,8 +1838,7 @@ static void on_packet(const uint8_t *b, int len)
                 fprintf(stderr, "[NETPLAY] the relay supports %08X%s%s%s\n", (unsigned)N.relay_caps,
                         N.relay_caps & CAPS_KOTH ? " (King of the Hill)" : "",
                         N.relay_caps & CAPS_ROLLBACK ? " (rollback allowed)" : "",
-                        N.relay_caps & CAPS_CREATED ? " (created fighters allowed)" : "");
-        }
+                        N.relay_caps & CAPS_CREATED ? " (created fighters allowed)" : "");        }
         break;
     case T_HILL:
         if (N.lobby) on_hill(b + 6, len - 6);
@@ -3316,8 +3318,28 @@ static int soak_depth(void)
     return d;
 }
 
+static void rollback_crash_state(void);
+
+/* One line per match with rollback: its own counts, not the session's (B7 of rollback-plan-2026-11.md). */
+static void rbm_summary(const char *why)
+{
+    if (!N.rbm.on || N.rbm.told) return;
+    N.rbm.told = 1;
+    fprintf(stderr, "[ROLLBACK] match %u %s: %u rollbacks, %u steps run again, deepest %u, %.2f ms average, %.2f ms longest, "
+            "%u slow; first prediction %s%u\n", N.match_count, why, N.rbm.count, N.rbm.steps, N.rbm.deepest,
+            N.rbm.count ? N.rbm.ms_total / N.rbm.count : 0.0, N.rbm.ms_max, N.rbm.slow,
+            N.rbm.first_pred ? "at step " : "never", N.rbm.first_pred);
+}
+
+static void rbm_reset(void)
+{
+    rbm_summary("ended with rollback still on (the next match started)");
+    memset(&N.rbm, 0, sizeof(N.rbm));
+}
+
 static void soak_match_start(void)
 {
+    rbm_reset();
     N.step = 0;
     N.final_step = N.hash_sent = N.updates = 0;
     N.rb_on = N.rb_ref_due = N.resim = N.predicting = 0;
@@ -3329,6 +3351,7 @@ static void soak_match_start(void)
 void netplay_on_match_start(void)
 {
     if (!N.lockstep) { if (soak_depth()) soak_match_start(); return; }
+    rbm_reset();        /* the last match's line, if it never said "off for the rest" (B3, G2) */
     EnterCriticalSection(&g_cs);
     N.match_count++;
     N.match = mix32(N.session ^ (N.match_count * 0x9E3779B9u));   /* the same on every PC, new per match */
@@ -3792,7 +3815,10 @@ void netplay_on_step(void)
     if (!N.lockstep) {
         if (soak_depth()) {     /* tests: the soak counts steps and prepares the save states itself */
             s = ++N.step;
-            if (s == 1 && !N.resim && rollback_prepare() == 0) N.rb_on = N.rb_ref_due = 1;
+            if (s == 1 && !N.resim && rollback_prepare() == 0) {
+                N.rb_on = N.rb_ref_due = N.rbm.on = 1;
+                rollback_crash_cb = rollback_crash_state;
+            }
         }
         return;
     }
@@ -3833,7 +3859,10 @@ void netplay_on_step(void)
         static int crowd_on = -1;   /* RECOMP_ONLINE_CROWD=keep: tests compare without the restart */
         if (crowd_on < 0) crowd_on = !(getenv("RECOMP_ONLINE_CROWD") && !strcmp(getenv("RECOMP_ONLINE_CROWD"), "keep"));
         if (crowd_on) crowd_reset(g_ecx);
-        if (!N.resim && match_rolls_back() && rollback_prepare() == 0) N.rb_on = N.rb_ref_due = 1;
+        if (!N.resim && match_rolls_back() && rollback_prepare() == 0) {
+            N.rb_on = N.rb_ref_due = N.rbm.on = 1;
+            rollback_crash_cb = rollback_crash_state;   /* a crash before the first rollback says its state too */
+        }
         {   /* what the fight made of the setup: the mode mask (1 one on one, 2 team, 4 3-way, 8 4-way), the
              * arena kind, and per fighter its flags (+0x937: 4 = team side marker) and the slots its
              * opponent (+0) and partner (+4) pointers name (docs/research/team-and-special-match-types.md 3.2) */
@@ -3938,6 +3967,11 @@ void netplay_on_step(void)
     /* only once every other PC is under way (an entry of its own has arrived): one may still be
      * loading the venue, and a PC that ran ahead would give up on it after STALL_LIMIT_MS */
     N.predicting = N.rb_on && rollback_ready() && MEM32(G_MATCH_PHASE) == 1u && N.final_step > (uint32_t)N.delay;
+    if (N.predicting && !N.rbm.first_pred) {   /* B3/G4: whether a match predicts at all, and from when */
+        N.rbm.first_pred = s;
+        fprintf(stderr, "[ROLLBACK] first prediction in match %u at step %u (final %u, delay %d)\n", N.match_count, s,
+                N.final_step, N.delay);
+    }
     need = N.predicting ? (s > RB_AHEAD ? s - RB_AHEAD : 0) : s;
     if (need <= (uint32_t)N.delay) return;
     waited_since = last_send = GetTickCount64();
@@ -4155,6 +4189,9 @@ static void rollback_crash_state(void)
     fprintf(stderr, "[ROLLBACK] at the crash: %s, step %u, final %u, update %u, %u rollbacks, the last back to %u from %u, thread %lu%s\n",
             N.resim ? "running steps again" : "a normal update", N.step, N.final_step, N.updates, N.rb_count,
             g_last_rb_target, g_last_rb_from, (unsigned long)GetCurrentThreadId(), N.predicting ? ", predicting" : "");
+    fprintf(stderr, "[ROLLBACK] this match: %u rollbacks, deepest %u, first prediction at step %u\n", N.rbm.count,
+            N.rbm.deepest, N.rbm.first_pred);
+    rollback_crash_objects();   /* the registers' objects: vtable, +0xC, +0x10, their pages, made in a re-run? */
     {   /* EAGL's loaded objects (list head 0x3A52A8, next at +0, previous at +4: the insert at 0x10A3DD
          * stores the old head at +0 of the new one): which one is bad, and its page */
         uint32_t o = MEM32(0x003A52A8u);
@@ -4235,6 +4272,7 @@ static void rollback_to(uint32_t f)
     memcpy(N.seeds, N.snap[slot].seeds, sizeof(N.snap[slot].seeds));
     LeaveCriticalSection(&g_cs);
     N.resim = 1;
+    rollback_set_resim(1);
     for (j = 0; j < n; j++) {
         if (j) snap_save();
         guest_call(sub_000DD930, input, 1, &dt);
@@ -4247,6 +4285,7 @@ static void rollback_to(uint32_t f)
         N.updates++;
     }
     N.resim = 0;
+    rollback_set_resim(0);
     g_eax = eax; g_ecx = ecx; g_edx = edx; g_ebx = ebx; g_esi = esi; g_edi = edi; g_ebp = ebp; g_esp = esp;
     memcpy(g_fp_stack, fp, sizeof(fp));
     g_fp_top = fp_top;
@@ -4257,14 +4296,20 @@ static void rollback_to(uint32_t f)
     N.rb_steps += depth;
     if (depth > N.rb_deepest) N.rb_deepest = depth;
     if (ms > N.rb_ms_max) N.rb_ms_max = ms;
+    N.rbm.count++;
+    N.rbm.steps += depth;
+    if (depth > N.rbm.deepest) N.rbm.deepest = depth;
+    if (ms > N.rbm.ms_max) N.rbm.ms_max = ms;
+    N.rbm.ms_total += ms;
     if (ms > 30.0) {        /* a stutter: say how deep, and whether models were loaded in it */
         static unsigned told;
+        N.rbm.slow++;
         if (told++ < 60)
             fprintf(stderr, "[ROLLBACK] slow: back %u step(s) in %.1f ms, %u model load(s) in it, step %u\n",
                     depth, ms, rollback_dynamic_loads() - loads_before, f);
     }
     N.rb_ms_total += ms;
-    if (N.rb_count <= 10 || N.rb_count % 200 == 0)
+    if (N.rb_count <= 10 || N.rbm.count <= 3 || N.rb_count % 200 == 0)
         fprintf(stderr, "[ROLLBACK] #%u: back to step %u, %u updates again in %.2f ms (now at step %u)\n",
                 N.rb_count, f, n, ms, N.step);
 }
@@ -4289,6 +4334,7 @@ void netplay_on_update(void)
         N.rb_on = 0;
         rollback_reset();
         fprintf(stderr, "[ROLLBACK] off for the rest of this match (step %u, %u rollbacks)\n", N.step, N.rb_count);
+        rbm_summary(N.lockstep ? "decided" : "went on offline");
         return;
     }
     if (N.rb_ref_due) {
@@ -4323,7 +4369,9 @@ void netplay_on_update(void)
             unsigned long long before[16];
             int k;
             for (k = 0; k < d; k++) before[k] = defjam_test_step_hash(t - d + k);
+            if (rollback_soak_diff_on()) rollback_soak_before();
             rollback_to(N.step + 1 - (uint32_t)d);
+            if (rollback_soak_diff_on()) rollback_soak_after(d, t);
             soaks++;
             for (k = 0; k < d; k++) {       /* k = 0: the state the load put back */
                 unsigned long long after = defjam_test_step_hash(t - d + k);
