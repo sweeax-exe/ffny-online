@@ -31,6 +31,42 @@ def harness():
 
 
 MAIN_MENU = "Control.GetScreenInfo(intMain/mainMenu"
+HANG_MARK = "interrupts masked for 2 s"     # [OHCI0]: the game thread has stopped polling the pad
+
+
+def capture_hang(s, c):
+    """A copy whose game thread stopped: where its threads are, before anything kills it
+    (scripts/sample-threads.py, guest-stack.py, native-stacks.py into hang-copyN.txt)."""
+    import subprocess, sys
+    out = os.path.join(s.dir, "hang-copy%d.txt" % c.index)
+    pid = str(c.proc.pid)
+    cmds = [["sample-threads.py", "--preset", "win-x64-release", "--pid", pid, "--samples", "6"],
+            ["guest-stack.py", "--preset", "win-x64-release", "--pid", pid],
+            ["native-stacks.py", "--pid", pid, "--depth", "40"],
+            ["icall-window.py", "--preset", "win-x64-release", "--pid", pid, "--samples", "2"],
+            # the USB host controller driver's extension (OHCI deferred routine context; its pending
+            # URB list head/tail at +0x41C/+0x420) and the pad's interrupt URB, TDs around it
+            ["peek-guest.py", "--preset", "win-x64-release", "--pid", pid, "0x80000784", "0x4A0"],
+            ["peek-guest.py", "--preset", "win-x64-release", "--pid", pid, "0x80000784", "0x4A0", "--diff", "3"],
+            ["peek-guest.py", "--preset", "win-x64-release", "--pid", pid, "0x80002800", "0x400"],
+            ["peek-guest.py", "--preset", "win-x64-release", "--pid", pid, "0x80003E00", "0x200"],
+            ["peek-guest.py", "--preset", "win-x64-release", "--pid", pid, "0x003CC800", "0x300"],
+            # the TD pool's counters (0x3CD0A0..) and the four pads' rumble blocks (XINPUT_FEEDBACK at
+            # 0x3C92E0 + 0x90 * port, their request block at +0x10)
+            ["peek-guest.py", "--preset", "win-x64-release", "--pid", pid, "0x003CD080", "0x60"],
+            ["peek-guest.py", "--preset", "win-x64-release", "--pid", pid, "0x003C92B0", "0x250"]]
+    with open(out, "w", encoding="utf-8") as f:
+        for cmd in cmds:
+            f.write("==== %s\n" % " ".join(cmd))
+            f.flush()
+            try:
+                subprocess.run([sys.executable, os.path.join(machine.REPO, "scripts", cmd[0])] + cmd[1:],
+                               stdout=f, stderr=subprocess.STDOUT, timeout=180)
+            except Exception as e:      # a diagnostic must never end the test
+                f.write("failed: %r\n" % (e,))
+    return out
+
+
 TITLE_ANCHOR = "feflow.xml#2"
 VIRTUAL_PAD_ENV = {"RECOMP_INPUT_HOST": "1", "RECOMP_INPUT_IGNORE_FOCUS": "1", "RECOMP_PAD_HOST": "1",
                    "RECOMP_INPUT_NO_PADS": "1", "RECOMP_PAD_SCRIPT_VIRTUAL": "1"}
@@ -45,7 +81,7 @@ MODES = {   # name: (match type for the quick match, summaries per match = fight
 WATCH = ["[CRASH]", "[WATCHDOG]", "[NETPLAY] desync in", "[NETPLAY] gave up", " starts in ",
          "[FUNCCALL] Game.UpdateMatchRewardsPoints()", "[FUNCCALL] Game.GetMatchSummary(", MAIN_MENU,
          '"event":"match_start"', '"event":"result"', '"event":"match_over"', "[AUTOMATCH] Game.StartGame()",
-         "[NETPLAY] START:", "[TEST-KO] match"]
+         "[NETPLAY] START:", "[TEST-KO] match", HANG_MARK]
 
 
 def compact_json(obj):
@@ -342,6 +378,10 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
                 time.sleep(3)
                 stop_reason = "copy %s %s" % ((dead or crashed)[0].index, "exited" if dead else "crashed")
                 break
+            for c in cs:      # before the stop below: the other copy gives up on a hung one
+                if c.watch.count(HANG_MARK) >= 2 and not getattr(c, "hang_captured", False):
+                    c.hang_captured = True
+                    problems.append("copy %d hung; threads in %s" % (c.index, _relpath(capture_hang(s, c))))
             if not keep_going and any(c.watch.count("[NETPLAY] desync in") or c.watch.count("[NETPLAY] gave up") for c in cs):
                 time.sleep(5)
                 stop_reason = "desync or gave up"

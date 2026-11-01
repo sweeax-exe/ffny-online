@@ -60,10 +60,11 @@ def main():
     ap.add_argument("size", nargs="?", default="0x100", help="bytes to read")
     ap.add_argument("--diff", type=int, default=0, metavar="N", help="sample N times, 1 s apart, report changes")
     ap.add_argument("--preset", default="win-x64-debug")
+    ap.add_argument("--pid", type=int, help="this process, when more than one copy runs")
     a = ap.parse_args()
     addr, size = int(a.addr, 0), int(str(a.size), 0)
 
-    pid = find_pid()
+    pid = a.pid or find_pid()
     if not pid:
         print("defjam_recomp.exe is not running"); return 1
     h = k32.OpenProcess(PROCESS_VM_READ | PROCESS_QUERY_INFORMATION, False, pid)
