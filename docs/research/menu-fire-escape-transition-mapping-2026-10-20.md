@@ -32,9 +32,9 @@ For widescreen side art, extend this shared master horizontally while preserving
 
 ## Existing exporter registration
 
-`scripts/export-menu-ui-wide.py` reads layers from `config/menu-ui-wide-layers.json`. For each source anchor it requires: a source ID present in the approved artwork catalogue's `reviewed_sources` (for dimensions); an approved, hash-pinned master path; a replacement for the anchor source ID in one of the configured `anchor_packs`; measured `per` and `x0`; and the side policy (`sides`, plus any needed `match_u`/`u_range`). It matches the replacement against the master, cuts slabs using that anchor's geometry, and writes the `[wide]` registration as `source_id=dt:path;...` into the new component's `manifest.ini`.
+`defjam-tools menu-wide` reads layers from the private wide-layer table (`--layers`). For each source anchor it requires: a source ID present in the approved artwork catalogue's `reviewed_sources` (for dimensions); an approved, hash-pinned master path; a replacement for the anchor source ID in one of the configured `anchor_packs`; measured `per` and `x0`; and the side policy (`sides`, plus any needed `match_u`/`u_range`). It matches the replacement against the master, cuts slabs using that anchor's geometry, and writes the `[wide]` registration as `source_id=dt:path;...` into the new component's `manifest.ini`.
 
-Therefore, supply five (preferably all ten, for the shared scene) layer entries against the same approved tall widescreen master, and supply those entries' source-shaped replacement textures through a configured anchor pack. The master must be pinned in `config/menu-ui-approved-artwork.json`, and every chosen anchor must be present in its reviewed-source size table. The existing exporter does not infer transition-pan placement, add the source IDs to its configuration automatically, or register arbitrary scene groups without those layer entries. No transition anchors are currently listed in `config/menu-ui-wide-layers.json`; its existing menu slabs and packet-list fix are separate and already working.
+Therefore, supply five (preferably all ten, for the shared scene) layer entries against the same approved tall widescreen master, and supply those entries' source-shaped replacement textures through a configured anchor pack. The master must be pinned in the private approval ledger (`--catalogue`), and every chosen anchor must be present in its reviewed-source size table. The existing exporter does not infer transition-pan placement, add the source IDs to its configuration automatically, or register arbitrary scene groups without those layer entries. That was the original dated configuration state; later pack versions add their own independently reviewed registrations.
 
 ## Evidence read
 
@@ -43,7 +43,7 @@ Therefore, supply five (preferably all ten, for the shared scene) layer entries 
 - `scripts/apt-dump.py screens/screens.viv screens/trans/t1.big --frames`: 640×2000 movie, two frames, Shape 11 at origin.
 - `logs/ui-restoration-20261017/fresh-screens-metadata.json` and `all-menu-texture-aliases.csv`: SHPX names, indices, dimensions, source IDs.
 - `logs/ui-restoration-20261017/uv-audit/audit_pilot_uv.py` and `logs/ui-restoration-20261017/next-scope/audit-result-panels.py`: existing archive, ELF, APT, relocation, vertex and UV audit conventions; the latter path is under `logs/ui-restoration-20261017/next-scope/`.
-- `scripts/export-menu-ui-wide.py`, `config/menu-ui-wide-layers.json`, and `config/menu-ui-approved-artwork.json`: current wide-slab matching, sizing, approval-pin, and pack-registration requirements.
+- `defjam-tools menu-wide`, the private wide-layer table (`--layers`), and the private approval ledger (`--catalogue`): current wide-slab matching, sizing, approval-pin, and pack-registration requirements.
 
 ## Ten-line handoff
 
@@ -79,5 +79,5 @@ placement below the viewport; its cause/visibility is not settled. Thus the
 continuous top-left image reconstruction is a **texel-space art study**, not
 a proven runtime render. Bitmap9 stays Faithful-only; no geometry patch was
 made. Restoration/side artwork now proceeds separately; see
-[the artwork report](menu-fire-escape-artwork-2026-10-20.md). This supersedes
+[the artwork report](https://github.com/vyanhursky/DefJam-Modding-Tools/blob/main/docs/menu-text-restoration.md). This supersedes
 the earlier note that no transition artwork has been generated.
