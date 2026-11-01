@@ -54,7 +54,7 @@ def cmd_scenario(a):
     elif a.kind == "boot":
         r = scenarios.boot(turbo=a.turbo, timeout=a.timeout or 240, extra_env=env, goto=a.goto, **common)
     else:
-        r = scenarios.gallery(page_ms=a.page_ms, timeout=a.timeout or 300, **common)
+        r = scenarios.gallery(page_ms=a.page_ms, timeout=a.timeout or 300, extra_env=env, **common)
     print(scenarios.format_result(r))
     return 0 if r.get("ok") else 1
 

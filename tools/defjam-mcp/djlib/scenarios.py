@@ -600,8 +600,9 @@ def format_result(r):
 
 # ---- gallery --------------------------------------------------------------------------------------
 
-def gallery(page_ms=1500, timeout=300, lock_timeout=None, log=None, keep_roots=False):
-    """The online screens' sample pages (RECOMP_TEST_ONLINE_GALLERY), one PNG each."""
+def gallery(page_ms=1500, timeout=300, lock_timeout=None, log=None, keep_roots=False, extra_env=None):
+    """The online screens' sample pages (RECOMP_TEST_ONLINE_GALLERY), one PNG each. `extra_env`, e.g.
+    RECOMP_BUTTON_ICONS=playstation, is checked like the other scenarios'."""
     t0 = time.time()
     s = copies.Session("gallery", lock_timeout=lock_timeout, log=log, keep_roots=keep_roots).open()
     result = {"scenario": "gallery", "ok": False}
@@ -613,6 +614,7 @@ def gallery(page_ms=1500, timeout=300, lock_timeout=None, log=None, keep_roots=F
                "RECOMP_OVERLAY_SHOT_DIR": out, "RECOMP_OVERLAY_SHOT_MS": str(int(page_ms)),
                "RECOMP_SCRIPT_ANCHOR": TITLE_ANCHOR,
                "RECOMP_PAD_SCRIPT": h.build_pad_script(["getscreeninfo(intmain/mainmenu=back@9999"])}
+        env.update(extra_env or {})
         c = s.launch(0, env=env, watch=WATCH)
         deadline = time.time() + timeout
         last_n, last_t = 0, time.time()
