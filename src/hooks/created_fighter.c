@@ -690,6 +690,46 @@ uint32_t created_fighter_profile(int index)
     return base ? base + PROFILE_BASE + (uint32_t)index * PROFILE_SIZE : 0;
 }
 
+/* The profile bytes outside what record_to_profile writes and outside the slot's own pointers
+ * (+0x5910..+0x5924): a hash and how many are not zero (diagnostic). */
+static int in_record(uint32_t o)
+{
+    return (o >= 0xC && o < 0xC + CP_NAME_BYTES) || (o >= 0xFC && o < 0x144) || o == 0x4D8A ||
+           (o >= 0x5564 && o < 0x5564 + 0x98) || (o >= 0x55FC && o < 0x55FC + 0x26) || (o >= 0x5910 && o < 0x5924);
+}
+
+static uint32_t rest_hash(uint32_t p, unsigned *nonzero)
+{
+    uint32_t h = 2166136261u, o;
+    unsigned nz = 0;
+    for (o = 0; o < PROFILE_SIZE; o++) {
+        uint8_t b;
+        if (in_record(o)) continue;
+        b = MEM8(p + o);
+        if (b) nz++;
+        h = (h ^ b) * 16777619u;
+    }
+    *nonzero = nz;
+    return h;
+}
+
+/* RECOMP_TEST_CP_DIRT=<seed> (tests): fills the slot's bytes outside the record with a pattern
+ * before the record goes in, as stale data in the slot would be. */
+static void test_dirt(uint32_t p)
+{
+    static int seed = -2;
+    uint32_t o, x;
+    if (seed == -2) { const char *e = getenv("RECOMP_TEST_CP_DIRT"); seed = e && *e ? atoi(e) : -1; }
+    if (seed < 0) return;
+    x = 0x9E3779B9u * (uint32_t)(seed + 1);
+    for (o = 0; o < PROFILE_SIZE; o++) {
+        if (in_record(o)) continue;
+        x ^= x << 13; x ^= x >> 17; x ^= x << 5;
+        MEM8(p + o) = (uint8_t)x;
+    }
+    fprintf(stderr, "[CP-TEST] profile slot at %08X filled with pattern %d outside the record\n", p, seed);
+}
+
 static void record_to_profile(const uint8_t rec[CP_REC_LEN], uint32_t dst)
 {
     const uint8_t *p = rec + 1;
@@ -739,6 +779,12 @@ int created_fighter_inject(int slot, int pad, const uint8_t rec[CP_REC_LEN])
         fprintf(stderr, "[CREATED] no spare profile slot for pad %d\n", pad);
         return -1;
     }
+    test_dirt(dst);
+    {
+        unsigned nz;
+        uint32_t h = rest_hash(dst, &nz);
+        fprintf(stderr, "[CREATED] profile slot %d before the record: rest %08X, %u bytes not zero\n", index, h, nz);
+    }
     record_to_profile(rec, dst);
     g_ours |= 1u << index;
     g_used_now |= 1u << index;
@@ -764,9 +810,18 @@ int created_fighter_inject(int slot, int pad, const uint8_t rec[CP_REC_LEN])
 #define G_MATCH_PHASE   0x003B8F30u     /* 0 start, 1 fighting, 2 decided, 3 finished */
 void created_fighter_on_step(void)
 {
+    int pad;
     if (!g_linked || MEM32(G_MATCH_PHASE) < 3u) return;
     link_pads(0);
     fprintf(stderr, "[CREATED] the match is finished: pads unlinked from the records\n");
+    for (pad = 0; pad < 4; pad++)
+        if (g_slot_of_pad[pad] >= 0) {
+            unsigned nz;
+            uint32_t p = created_fighter_profile(g_slot_of_pad[pad]);
+            uint32_t h = p ? rest_hash(p, &nz) : 0;
+            fprintf(stderr, "[CREATED] profile slot %d after the fight: rest %08X, %u bytes not zero\n",
+                    g_slot_of_pad[pad], h, p ? nz : 0);
+        }
 }
 
 int created_fighter_before_funccall(const char *text)

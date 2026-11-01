@@ -311,8 +311,10 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
            bot=None, timeout=None, relay_port=27900, base_core=2, keep_going=False, extra_env=None,
            lock_timeout=None, log=None, require_hits=False, stall=300, keep_roots=False, quick=None,
            created=False, cp_records=None, rematch=False, venues=None, cp_pick=None, cp_names=None,
-           more_shots=False):
-    """created: the relay plays created fighters (relay -created); cp_records: per copy the profile dumps or
+           more_shots=False, copy_env=None, fixtures=None):
+    """copy_env: {copy index: {NAME: VALUE}}, extra variables for one copy only; fixtures: per copy a save
+    fixture folder ('' none), so the copies' save areas can differ as two players' PCs do.
+    created: the relay plays created fighters (relay -created); cp_records: per copy the profile dumps or
     user ID saves (RECOMP_CP_RECORD; several separated by ';', newest first; '' none), for fighter 99;
     cp_pick: per copy which of them it plays (RECOMP_CP_PICK, an index; '' the newest); cp_names: per copy
     the online names of its records, ';' between them in the same order ('' the user ID; RECOMP_CP_NAMES).
@@ -379,7 +381,9 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
                 env["RECOMP_PAD_SCRIPT"] = harness().build_pad_script(["getscreeninfo(intmain/mainmenu=lt@0.5"],
                                                                        rematch_tail(matches, p2))
             env.update(extra_env or {})
-            root = s.make_root(i)
+            env.update((copy_env or {}).get(i, {}))
+            fx = fixtures[i] if fixtures and i < len(fixtures) and fixtures[i] else None
+            root = s.make_root(i, fixture=os.path.abspath(fx) if fx else None)
             before[i] = _save_files(root)
             s.launch(i, env=env, root=root, core=base_core + 2 * i, watch=WATCH)
             time.sleep(3)           # the first copy opens the room and is player 1

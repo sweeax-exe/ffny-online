@@ -34,6 +34,16 @@ def ints(text):
     return [int(x) for x in str(text).split(",") if x.strip()]
 
 
+def copy_env(items):
+    """["1:NAME=VALUE", ...] -> {1: {NAME: VALUE}}"""
+    out = {}
+    for e in items or []:
+        idx, kv = e.split(":", 1)
+        k, v = kv.split("=", 1)
+        out.setdefault(int(idx), {})[k] = v
+    return out
+
+
 def cmd_scenario(a):
     common = {"lock_timeout": a.lock_timeout, "log": say, "keep_roots": a.keep_roots}
     env = dict(e.split("=", 1) for e in a.env)
@@ -46,7 +56,8 @@ def cmd_scenario(a):
                              cp_records=a.cp_records.split(",") if a.cp_records else None,
                              cp_pick=a.cp_pick.split(",") if a.cp_pick else None,
                              cp_names=a.cp_names.split(",") if a.cp_names else None, more_shots=a.more_shots,
-                             rematch=a.rematch, venues=a.venues, **common)
+                             rematch=a.rematch, venues=a.venues, copy_env=copy_env(a.copy_env),
+                             fixtures=a.fixtures.split(",") if a.fixtures else None, **common)
     elif a.kind == "offline":
         r = scenarios.offline(type=a.type, venue=a.venue, f0=a.f0, f1=a.f1, cpu=not a.human, bot=a.bot,
                               fast_ko=a.fast_ko, turbo=a.turbo, timeout=a.timeout or 420,
@@ -176,6 +187,9 @@ def main(argv=None):
     sc.add_argument("--page-ms", type=int, default=1500)
     sc.add_argument("--goto", help="boot: then this main-menu entry by name (story, battle, rewards, online, slotN)")
     sc.add_argument("--env", action="append", default=[], help="extra NAME=VALUE (checked against the machine rules)")
+    sc.add_argument("--copy-env", action="append", default=[],
+                    help="online: COPY:NAME=VALUE, an extra variable for one copy only (checked as --env)")
+    sc.add_argument("--fixtures", help="online: per copy a save fixture folder, comma-separated ('' none)")
     sc.add_argument("--lock-timeout", type=float, help="give up waiting for the machine after this many s")
     sc.add_argument("--keep-roots", action="store_true", help="leave the data roots for a look (dj roots clean)")
     sc.set_defaults(fn=cmd_scenario)
