@@ -664,6 +664,73 @@ static void answered(void)
 
 /* ---- the other players' controllers, as the title's other pads ---------------- */
 
+/* The intros before a lockstep fight: the venue's (CLogic state 1) and the fighters' (state 3).
+ * Every PC plays them on its own before the first step, and the title cuts them short when its
+ * skip check (sub_00088B90) sees a face button on any port: this PC's pad, or another player's
+ * live pad, which arrives whenever the network brings it. So one PC skipped an intro and another
+ * did not, or later, and the fighters came out of the intro with different animation state (the
+ * pose buffers and the blend from the intro clip into the fight stance; nothing the checksums
+ * cover, every checksummed field was equal at the first step). A few steps in the poses parted,
+ * then the joint positions the step reads for reach and pushes (fighter +0xDC, +0x834), then the
+ * positions: by ulps when the intros ended a little apart, by whole units at step 60 when a
+ * player skipped (owner's test 2026-10-28). The open "positions only" desync.
+ *
+ * Online every PC now skips both intros itself, from their first update: the first other player's
+ * port presses A on every second update while one runs, so the skip check sees a press or a
+ * release on every update, and the other players' ports read at rest otherwise until the first
+ * step. Every PC then ends each intro at the first update the title takes the skip, and nothing
+ * pressed on any PC makes a difference. The updates an intro takes can still differ by a few
+ * between PCs, but a skipped intro leaves the same state: in tests the joints were equal from the
+ * second step on.
+ *   RECOMP_NETPLAY_INTROS=play (tests only): intros as before, left to the players.
+ *   RECOMP_TEST_INTRO_PRESS=<player index> (tests only): on that PC the first other player's port
+ *   holds A during the fighters' intro, as a press of that player arriving there and not on the
+ *   other PCs (with =play: the desync on demand). */
+#define G_LOGIC_STATE   0x00376F80u     /* CLogic (0x349760) + 0x2D820: 1 venue intro, 3 fighters' intros */
+static uint32_t g_intro_state = 0xFFFFFFFFu, g_intro_updates;     /* the pre-fight state, its updates */
+
+static int intro_window(void)       /* from the match start to the first step of a lockstep match */
+{
+    return N.lockstep && N.load_done && N.step == 0;
+}
+
+/* At the start of every game update (netplay_on_update): which pre-fight state runs, how long. */
+static void intro_update(void)
+{
+    uint32_t st;
+    if (!intro_window()) { g_intro_state = 0xFFFFFFFFu; return; }
+    st = MEM32(G_LOGIC_STATE);
+    if (st != g_intro_state) { g_intro_state = st; g_intro_updates = 0; }
+    else g_intro_updates++;
+}
+
+/* What another player's port reads before the fight. */
+static void intro_pad(int slot, XBOX_INPUT_STATE *state)
+{
+    static int play = -1, test = -2;
+    static uint32_t told;
+    int press;
+    if (play < 0) play = getenv("RECOMP_NETPLAY_INTROS") && !strcmp(getenv("RECOMP_NETPLAY_INTROS"), "play");
+    if (test == -2) test = getenv("RECOMP_TEST_INTRO_PRESS") ? atoi(getenv("RECOMP_TEST_INTRO_PRESS")) : -1;
+    if (!intro_window()) return;
+    if (play) {
+        if (test == N.pos && slot == (N.pos == 0 ? 1 : 0) && g_intro_state == 3u) {
+            state->Gamepad.bAnalogButtons[0] = 255;
+            state->dwPacketNumber++;
+        }
+        return;
+    }
+    press = (g_intro_state == 1u || g_intro_state == 3u) && slot == (N.pos == 0 ? 1 : 0) && !(g_intro_updates & 1u);
+    memset(&state->Gamepad, 0, sizeof(state->Gamepad));
+    state->dwPacketNumber = 0x40000000u + (g_intro_state << 8) + (uint32_t)press;
+    if (!press) return;
+    state->Gamepad.bAnalogButtons[0] = 255;
+    if (told != N.match) {
+        told = N.match;
+        fprintf(stderr, "[NETPLAY] skipping the intros on every PC (match %08X)\n", N.match);
+    }
+}
+
 static DWORD remote_slot_state(int slot, XBOX_INPUT_STATE *state)
 {
     if (N.state != NETPLAY_CONNECTED || !N.lockstep || slot < 0 || slot >= N.players || slot == N.pos)
@@ -672,6 +739,7 @@ static DWORD remote_slot_state(int slot, XBOX_INPUT_STATE *state)
     state->dwPacketNumber = N.remote_packet[slot];
     state->Gamepad = N.remote_pad[slot];
     LeaveCriticalSection(&g_cs);
+    intro_pad(slot, state);
     return ERROR_SUCCESS;
 }
 
@@ -3917,6 +3985,7 @@ void netplay_on_update(void)
     uint32_t t, f = 0;
     int i;
     rollback_check_tables(N.resim ? "a re-run update starts" : "an update starts");
+    intro_update();
     koth_check_result(0);       /* also between the fight's steps: an ending can stop them */
     if (N.resim || !N.rb_on) return;
     /* before any save, load or the reference copy: the device holds no texture or palette. Only
