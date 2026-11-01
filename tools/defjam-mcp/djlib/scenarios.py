@@ -310,10 +310,13 @@ def _save_files(root):
 def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast_ko=600, ko_winner=None,
            bot=None, timeout=None, relay_port=27900, base_core=2, keep_going=False, extra_env=None,
            lock_timeout=None, log=None, require_hits=False, stall=300, keep_roots=False, quick=None,
-           created=False, cp_records=None, rematch=False, venues=None, cp_pick=None):
+           created=False, cp_records=None, rematch=False, venues=None, cp_pick=None, cp_names=None,
+           more_shots=False):
     """created: the relay plays created fighters (relay -created); cp_records: per copy the profile dumps or
     user ID saves (RECOMP_CP_RECORD; several separated by ';', newest first; '' none), for fighter 99;
-    cp_pick: per copy which of them it plays (RECOMP_CP_PICK, an index; '' the newest). The result's `save_written` lists, per copy,
+    cp_pick: per copy which of them it plays (RECOMP_CP_PICK, an index; '' the newest); cp_names: per copy
+    the online names of its records, ';' between them in the same order ('' the user ID; RECOMP_CP_NAMES).
+    more_shots: besides each copy's fight in match 1, its versus screen and its results screen. The result's `save_written` lists, per copy,
     the save files a run changed (the cache partitions left out). rematch: every match after the first is
     a Rematch from the results menu instead of a new room match. venues: "26" or "1,6": every vote
     offers these in turn (relay -test-venues)."""
@@ -364,7 +367,12 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
                 env["RECOMP_TEST_KO_STEP"] = "%d,%s" % (int(fast_ko), winner)
             env.update(_bot_env(bot))
             if cp_records and i < len(cp_records) and cp_records[i]:
-                env["RECOMP_CP_RECORD"] = ";".join(os.path.abspath(r) for r in cp_records[i].split(";") if r)
+                recs = [os.path.abspath(r) for r in cp_records[i].split(";") if r]
+                env["RECOMP_CP_RECORD"] = ";".join(recs)
+                names = cp_names[i].split(";") if cp_names and i < len(cp_names) and cp_names[i] else []
+                if any(names):      # the setting online.created_names, keyed by each record's path
+                    esc = lambda s: s.replace("%", "%25").replace(";", "%3B").replace("=", "%3D")
+                    env["RECOMP_CP_NAMES"] = ";".join("%s=%s" % (esc(r), esc(n)) for r, n in zip(recs, names) if n)
             if cp_pick and i < len(cp_pick) and str(cp_pick[i]).strip():
                 env["RECOMP_CP_PICK"] = str(int(cp_pick[i]))
             if rematch:
@@ -377,6 +385,7 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
             time.sleep(3)           # the first copy opens the room and is player 1
         deadline = time.time() + timeout
         shot_due = None
+        more_done = {}
         while time.time() < deadline:
             s.poll()
             cs = list(s.copies.values())
@@ -407,9 +416,21 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
                 break
             if shot_due is None and cs[0].watch.count(" starts in "):
                 shot_due = time.time() + 8
-            if shot_due and time.time() >= shot_due and not shots:
+            if more_shots and shot_due and not more_done.get("versus") and time.time() >= shot_due - 7:
+                more_done["versus"] = True      # the versus screen while the match loads
+                for k in range(len(cs)):
+                    _png(s, k, "versus-m1-copy%d" % k, shots)
+            if shot_due and time.time() >= shot_due and not any("fight-m1" in p for p in shots):
                 for k in range(len(cs)):
                     _png(s, k, "fight-m1-copy%d" % k, shots)
+            if more_shots:      # the results: two seconds after each copy's first reward step
+                for k, c in enumerate(cs):
+                    if rewards[k] >= 1 and ("summary", k) not in more_done:
+                        more_done[("summary", k)] = time.time() + 2
+                    due = more_done.get(("summary", k))
+                    if isinstance(due, float) and time.time() >= due:
+                        more_done[("summary", k)] = True
+                        _png(s, k, "summary-m1-copy%d" % k, shots)
             if stall and time.time() - max(c.watch.last_change for c in cs) > stall:
                 stop_reason = "stalled: no front-end, netplay or telemetry line for %d s" % stall
                 break
