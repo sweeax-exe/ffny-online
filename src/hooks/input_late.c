@@ -42,7 +42,7 @@ void input_late_capture(uint32_t handle, uint32_t state, uint32_t status)
         if (handle && MEM32(0x3C9340u + port*0x90u) == handle) {
             uint32_t context=MEM32(handle+0xA3u);
             if (!context || MEM8(MEM32(context+8u))!=18) return;
-            memcpy(captured[port], XBOX_PTR(state), 22);
+            memcpy(captured[port], (const void *)XBOX_PTR(state), 22);
             captured_valid |= 1u << port;
             break;
         }
@@ -146,7 +146,7 @@ void input_late_refresh(uint32_t device, uint32_t report)
         PUSH32(g_esp,port);PUSH32(g_esp,report);PUSH32(g_esp,0x000DC9B1u);
         sub_000D7BF0_gen(); /* original title conversion and button ordering */
         private_raw=0;
-        xbox_InputTraceEmit("late_report",port,XBOX_PTR(state),22,device,MEM32(state));
+        xbox_InputTraceEmit("late_report",port,(const void *)XBOX_PTR(state),22,device,MEM32(state));
     } else xbox_InputTraceEmit("late_read_error",port,NULL,0,handle,status);
     restore_context(&c);
 done:
