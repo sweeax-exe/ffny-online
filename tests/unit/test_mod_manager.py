@@ -368,11 +368,17 @@ def test_testing_channel_is_explicit_for_view_and_install(manager, tmp_path):
     assert 'compatible=0' in (manager.root/'view.ini').read_text()
 
 
-def language_package(tmp, name='es-test', ini=None, delta=b'DJDELTA1' + bytes(72) + b'\0'):
+def language_package(tmp, name='es-test', ini=None, delta=b'DJDELTA1' + bytes(72) + b'\0', manifest=None,
+                     capabilities=('language-v1',)):
     ini = ini if ini is not None else ('[language]\nschema=1\nname=Español\nlanguage=es\n'
                                        'story_subtitles=all\n[files]\nassets/misc.viv|cmusen.loc = patches/001.djd\n')
     entries = {f'{name}/language.ini': ini.encode('utf-8'), f'{name}/patches/001.djd': delta,
                f'{name}/CREDITS.md': b'# Credits\n'}
+    if manifest is not None:   # the mod's own HD images
+        content = io.BytesIO()
+        Image.new('RGBA', (8, 8), 'red').save(content, format='PNG')
+        entries[f'{name}/manifest.ini'] = manifest.encode()
+        entries[f'{name}/textures/test.png'] = content.getvalue()
     path = tmp / f'{name}.zip'
     with zipfile.ZipFile(path, 'w') as archive:
         for key, data in entries.items():
@@ -383,7 +389,7 @@ def language_package(tmp, name='es-test', ini=None, delta=b'DJDELTA1' + bytes(72
     mod = dict(id=name, name='Spanish test', description='Synthetic language fixture', authors=['Test'],
                licence='Test fixture', homepage='https://example.invalid', **{'class': 'linked'},
                revoked_versions=[], versions=[dict(version='1.0.0', channel='stable', min_recomp='0.1.0',
-               capabilities=['language-v1'], reviewed='2026-10-29', depends=[], conflicts=[], load_after=[],
+               capabilities=list(capabilities), reviewed='2026-10-29', depends=[], conflicts=[], load_after=[],
                archive=descriptor)])
     return path, mod
 
@@ -399,6 +405,28 @@ def test_language_mod_needs_its_capability_and_installs_beside_textures(manager,
     assert (manager.mods/'es-test/language.ini').exists() and (manager.mods/'es-test/patches/001.djd').exists()
     assert manager.state()['installed']['es-test']['capabilities'] == ['language-v1']
     assert not (manager.data/'settings.ini').exists()  # installing never turns it on
+
+
+def test_language_mod_with_its_own_images_installs(manager, tmp_path):
+    manager, key = manager
+    manifest = f'[pack]\nschema=1\nname=HD\n[textures]\n{ID}=textures/test.png\n'
+    source, row = language_package(tmp_path, manifest=manifest, capabilities=('language-v1', 'textures-v1'))
+    signed(manager, key, [row])
+    manager.capabilities.add('language-v1')
+    manager.install('es-test', archive_path=source)
+    installed = manager.state()['installed']['es-test']
+    assert installed['capabilities'] == ['language-v1', 'textures-v1']
+    assert (manager.mods/'es-test/textures/test.png').exists()
+
+
+@pytest.mark.parametrize('manifest,message', [
+    ('[pack]\nschema=2\n[textures]\n' + 'a' * 64 + '=textures/test.png\n', 'manifest schema'),
+    ('[pack]\nschema=1\n[textures]\n' + 'a' * 64 + '=textures/missing.png\n', 'Missing image'),
+])
+def test_language_mod_images_are_checked_like_a_texture_pack(tmp_path, manifest, message):
+    source, row = language_package(tmp_path, manifest=manifest)
+    with pytest.raises(ValueError, match=message):
+        mods.unpack_archive(source, row['versions'][0]['archive'], tmp_path/'unpacked')
 
 
 @pytest.mark.parametrize('ini,delta,message', [
