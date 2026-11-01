@@ -654,7 +654,9 @@ void d3d11_translator_frame_end(void)
             capture_ms = recorder_capture(dev);
             present_at = recorder_now_ms();
         }
+        { extern void input_latency_present(int before); input_latency_present(1); }
         dev->lpVtbl->Present(dev, NULL, NULL, NULL, NULL);
+        { extern void input_latency_present(int before); input_latency_present(0); }
         if (recording)
             recorder_frame_done(recorder_now_ms() - present_at, capture_ms);
         /* While the display paces the presents (display.vsync on a 60, 120,

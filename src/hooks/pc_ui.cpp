@@ -184,6 +184,9 @@ static const char *friendly(const char *section, const char *key)
 {
     struct Label { const char *section, *key, *text; };
     static const Label labels[] = {
+        {"language", "pack", "Language mod"},
+        {"language", "story_subtitles", "Story cutscene subtitles"},
+        {"language", "game", "Game language"},
         {"display", "fullscreen", "Full screen"},
         {"display", "window_width", "Window width"},
         {"display", "window_height", "Window height"},
@@ -740,12 +743,13 @@ static std::string g_pack_key, g_pack_path, g_pack_status;
 static std::map<std::string,std::string> g_pack_conflicts;
 static void refresh_packs(bool force = false)
 {
-    std::string key = get_text("textures", "packs"), path = pcui::folder_path(pcui::Folder::Mods);
+    std::string packs = get_text("textures", "packs"), language = get_text("language", "pack");
+    std::string key = packs + "\n" + language, path = pcui::folder_path(pcui::Folder::Mods);
     if (force || key != g_pack_key || path != g_pack_path)
     {
         g_pack_key = key;
         g_pack_path = path;
-        g_packs = pcui::inventory(std::filesystem::u8path(path), key);
+        g_packs = pcui::inventory(std::filesystem::u8path(path), packs, language);
         g_mod_groups = pcui::mod_groups(std::filesystem::u8path(path),g_packs);
         g_pack_conflicts = pcui::pack_conflicts(std::filesystem::u8path(path),g_packs);
     }
@@ -754,7 +758,7 @@ static bool packs_available()
 {
     refresh_packs();
     for (auto &p : g_packs)
-        if (p.selected && p.problem.empty())
+        if (p.selected && p.problem.empty() && !p.language)
             return true;
     return false;
 }
@@ -767,9 +771,13 @@ static void save_packs()
         g_pack_path.clear(); // Reload inventory next frame, even when the saved list is empty.
         return;
     }
+    auto language = pcui::selected_language(g_packs);
     recomp_settings_set_text("textures", "packs", text.c_str());
+    // A language mod is on or off here too; it is saved as [language] pack, not in the order.
+    if (find("language", "pack")->source != RECOMP_SETTING_FROM_ENV)
+        recomp_settings_set_text("language", "pack", language.c_str());
     commit();
-    g_pack_key = text;
+    g_pack_key = text + "\n" + get_text("language", "pack");
     g_pack_conflicts = pcui::pack_conflicts(std::filesystem::u8path(g_pack_path),g_packs);
     g_pack_status = "Saved. Higher priority overrides lower priority; applies at next launch.";
 }
@@ -780,6 +788,7 @@ static void page_textures()
     if (launcher && !requested) { pcui::mod_start("status"); requested = true; }
     refresh_packs();
     bool locked = find("textures", "packs")->source == RECOMP_SETTING_FROM_ENV;
+    bool language_locked = find("language", "pack")->source == RECOMP_SETTING_FROM_ENV;
     ImGui::SeparatorText("Installed mods");
     if (pcui::mod_recovery_needed()) {
         ImGui::TextWrapped("An interrupted installation needs recovery before Play. If recovery fails, files are preserved in the data folder under mod-manager; see the status below.");
@@ -790,6 +799,7 @@ static void page_textures()
     }
     settings_group("textures", {"enabled"});
     if (locked) ImGui::TextWrapped("Pack selection is set for this run by RECOMP_TEXTURE_PACKS.");
+    if (language_locked) ImGui::TextWrapped("The language is set for this run by RECOMP_LANGUAGE_PACK.");
     if (ImGui::Button("Refresh local mods")) {
         refresh_packs(true);
         if (launcher) pcui::mod_start("status");
@@ -799,15 +809,19 @@ static void page_textures()
     if (ImGui::Button("Open Mods Folder")) pcui::open_path(g_pack_path);
     if (ImGui::Button("Load Order...")) ImGui::OpenPopup("Load Order");
     ui_target("mods.order");
-    ImGui::TextWrapped("Enable installed mods below. Load Order sets which mod wins when textures overlap.");
+    ImGui::TextWrapped("Enable installed mods below. Load Order sets which mod wins when textures overlap. "
+                       "A language mod translates the game itself, sits beneath every texture mod, and only one is on "
+                       "at a time; with none the game is in English.");
     const auto &managed = pcui::mod_view().installed;
     auto display_name = [&](const pcui::ModGroup &group) {
-        auto found=managed.find(g_packs[group.members.front()].name);
-        return found==managed.end() ? group.name : found->second.name;
+        const auto &first=g_packs[group.members.front()];
+        auto found=managed.find(first.name);
+        if (found!=managed.end()) return found->second.name;
+        return first.language && !first.title.empty() ? first.title : group.name;
     };
     const float scale=ImGui::GetStyle().FontScaleMain;
     const float available=ImGui::GetContentRegionAvail().x;
-    ImGui::BeginDisabled(locked || pcui::mod_busy());
+    ImGui::BeginDisabled(pcui::mod_busy());
     if(ImGui::BeginTable("installed mod table",3,ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) {
         ImGui::TableSetupColumn("On",ImGuiTableColumnFlags_WidthFixed,ImGui::GetFrameHeight()+8);
         ImGui::TableSetupColumn("Mod",ImGuiTableColumnFlags_WidthStretch);
@@ -824,13 +838,14 @@ static void page_textures()
             ImGui::PushID(group.id.c_str());
             ImGui::TableNextRow(); ImGui::TableNextColumn();
             bool checked=selected==group.members.size();
-            ImGui::BeginDisabled(!valid && !selected);
+            ImGui::BeginDisabled((p.language ? language_locked : locked) || (!valid && !selected));
             if(ImGui::Checkbox("##enabled",&checked)) { pcui::select_mod(g_packs,group,checked); save_packs(); }
             ui_target(("pack."+group.id).c_str());
             ImGui::EndDisabled();
             ImGui::TableNextColumn();
             ImGui::TextWrapped("%s",display_name(group).c_str());
-            ImGui::TextDisabled(group.builtin ? "Built-in / generated locally" : found==managed.end() ? "Local mod" : "Project catalogue");
+            if(p.language) ImGui::TextDisabled(found==managed.end() ? "Language mod (local)" : "Language mod (project catalogue)");
+            else ImGui::TextDisabled(group.builtin ? "Built-in / generated locally" : found==managed.end() ? "Local mod" : "Project catalogue");
             if(group.builtin && ImGui::TreeNode("Components and details")) {
                 ImGui::TextWrapped("Generated from your own dump. Transparency textures preserve menu edges; material-channel textures preserve surface data. Both belong to Recomp HD.");
                 for(auto i:group.members) ImGui::TextWrapped("%s: %s",g_packs[i].name.c_str(),g_packs[i].selected?"Enabled":"Disabled");
@@ -869,7 +884,7 @@ static void page_textures()
         for(auto &p:g_packs) if(p.problem=="Not installed") {
             ImGui::PushID(p.name.c_str());
             bool selected=p.selected;
-            ImGui::BeginDisabled(locked || pcui::mod_busy());
+            ImGui::BeginDisabled((p.language ? language_locked : locked) || pcui::mod_busy());
             if(ImGui::Checkbox(p.name.c_str(),&selected)) { p.selected=selected; save_packs(); }
             ImGui::EndDisabled();
             if(p.name=="faithful-hd") ImGui::TextWrapped("Legacy default name. The generated Recomp HD components appear together in the table above when installed.");
@@ -887,7 +902,7 @@ static void page_textures()
         ImGui::BeginDisabled(locked || pcui::mod_busy());
         auto order=pcui::priority_groups(g_packs,g_mod_groups);
         size_t priority=0;
-        for(const auto &p:g_packs) if(p.selected) ++priority;
+        for(const auto &p:g_packs) if(p.selected && !p.language) ++priority;
         if(ImGui::BeginTable("priority table",3,ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) {
             ImGui::TableSetupColumn("Priority",ImGuiTableColumnFlags_WidthFixed,75*modal_scale);
             ImGui::TableSetupColumn("Mod",ImGuiTableColumnFlags_WidthStretch);
@@ -1251,6 +1266,15 @@ static void page_general(UiMode mode)
                            "example left_stick_click+right_stick_click) is held for half a second. While it is open the game "
                            "sees no input and keeps running.");
     }
+    ImGui::SeparatorText("Language and subtitles");
+    settings_group("language", { "game", "story_subtitles" });
+    if (!get_text("language", "pack").empty())
+        ImGui::TextWrapped("A language mod is on (Mods page), so the game uses its language; the game language "
+                           "above applies when no language mod is on.");
+    ImGui::TextWrapped("French is built into the game: menus and Story subtitles in French, with the voices and "
+                       "menu icons in English. The game has English subtitles for every Story cutscene but shows "
+                       "them only in the opening one (in French, in all of them). Choose all cutscenes to see them "
+                       "everywhere; a language mod asks for them itself. Both apply on the next launch.");
     ImGui::SeparatorText("Appearance");
     settings_group("ui", { "scale" });
     ImGui::SeparatorText("Startup movies");

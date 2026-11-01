@@ -13,6 +13,7 @@ cite other development notes, logs and captures that are not published.
 
 ## Rendering
 
+- [v0.13.0 HD memory investigation](rc-v0.13.0-hd-memory.md) — pack-by-pack Windows controls, steady-fight versus result/menu growth, and the unchanged 64 MiB gate.
 - [v0.12.1 Story portraits and Power Plant](v0121-portrait-viewport-read.md) — logical versus AA surface clipping, verified portrait correction, and VY3 FFA performance measurements.
 - [v0.12.1 created-fighter thumbnails](v0121-created-fighter-thumbnail.md) — small guest capture surfaces and normal save/reload recovery for empty profile images.
 - [v0.12.1 right-side meters](v0121-right-meters-fix.md) — a merged zero-flag snapshot correction and native health/Blazin fill validation.
@@ -50,6 +51,10 @@ cite other development notes, logs and captures that are not published.
 
 ## Controllers and sound
 
+- [v0.12.3 controller latency baseline](input-latency-2026-10-30.md) and [tracing follow-up](input-latency-tracing-2026-10-30.md): reproduced rapid-tap merging, measured input boundaries and regression evidence; [capture instructions](../input-latency-tracing.md).
+- [Controller input across 15 recomp projects](recomp-controller-input-practices-2026-10-30.md): pinned source audits and fighting-game design targets.
+- [Controller transition correction](input-transition-fix-2026-10-30.md): guest-consumption retention, measured 1 ms acquisition, controller calibration and regression evidence.
+- [Optional late controller refresh](late-input-refresh-2026-10-30.md): refresh at the existing manager update, queue-generation acknowledgements, A/B timing and validation.
 - [USB enumeration state machine](m4-usb-enumeration.md)
 - [Controller ports and slots](m4b-controller-ports.md)
 - [DirectSound voice-list crash](dsound-voice-list-crash.md)
