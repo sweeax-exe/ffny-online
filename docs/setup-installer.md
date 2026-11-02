@@ -6,42 +6,49 @@ exists for Windows x64, macOS on Apple Silicon (see
 (see [Linux setup](#linux-setup)). The Windows sections come first; all three share
 one engine.
 
-## Wizard and destinations
+## Wizard and destinations (Windows)
 
-Choose an ISO/XISO or extracted folder, then choose **Install location** and
-**Data location** independently. Defaults are under your LocalAppData folder.
-Install, data and original dump locations must be separate and non-nested.
-Choose an empty install folder or an existing recognized Def Jam installation.
-Setup copies the dump into the data location and leaves the original untouched.
-Saves/settings stay in the data location through updates and uninstall.
+The Windows wizard has three steps and an end screen, in FFNY Online's own look (no game artwork):
 
-Folders must be writable and at most 140 characters because the game/toolchain
-still have path-length limits. Allow 16 GB build headroom plus extracted dump
-storage and compiler disk space. Exact clean-machine peak usage is still to be measured.
+1. **Your game.** Drag the ISO/XISO onto the window, use **Browse...**, or pick a copy under
+   **Found on this PC** (setup looks in Downloads, Desktop, Documents and the usual game folders
+   on every fixed drive, for at most about ten seconds, while the window stays usable). A folder
+   with the extracted game works too ("folder with the extracted game" in **What works**).
+2. **Recognized / wrong version.** The engine (`engine.py --identify`) checks the file the way the
+   install does: `default.xbe` byte for byte as `config/dump-manifest.json` records it, every
+   required path, the file count and, for an image, that no file lies past its end. Anything else
+   gets a plain explanation: the European (PAL) or Japanese release, another Xbox game (named from
+   its certificate), a PlayStation, GameCube or Wii image, a Dolphin-compressed image, a ZIP/7z/RAR
+   archive, an incomplete copy, or, when it cannot tell, "This isn't the USA Xbox version".
+3. **Where to install.** One folder holds everything (`<folder>\app` and `<folder>\data`). Setup
+   suggests `<fixed NTFS drive with the most free space>:\Games\FFNY Online`, or an earlier
+   installation it finds, and checks it (`engine.py --plan-folder`): enough free space (16 GB build
+   headroom, the game copy, 1 GB, and 15 GB more with HD textures), writable without admin rights,
+   not in OneDrive, Program Files or a Windows folder, the game file outside it, an NTFS/ReFS drive,
+   a path of at most about 130 plain characters. A failing check says why and what to do. **Change**
+   opens a folder picker; a folder that already has other files gets its own `FFNY Online` folder
+   inside. An earlier installation is updated in place with its own data folder. The switches map
+   to the silent options: **HD textures** (`--hd-textures`, on by default), **Desktop shortcut**
+   (off = `--no-desktop-shortcut`), **Missing Windows parts** (`--install-prerequisites`, which lets
+   Microsoft's publisher-verified Build Tools installer ask for consent).
+4. **Installing.** Percent, bar and steps from the engine's status, stage and progress files; an
+   estimate only once the build has run a minute (Ninja's file count, so "about"). **Show details**
+   shows the session log; **Cancel** asks first, then stops after the current step (rerun resumes
+   verified work). When setup finishes in the background, Windows shows a notification.
+5. **Ready to fight.** **Play** starts `<install>\DefJamLauncher.exe --launch` and closes setup.
 
-**Install missing Microsoft Build Tools** allows Microsoft's publisher-verified
-installer to request consent/UAC. Without that option, missing tools stop setup.
-Setup runs as your user. Python, dependencies and source/toolkit are bundled;
-no Git or system Python installation is needed. Missing compiler installation
-requires internet; SDL3/ImGui source is packaged for offline configuration.
+Setup copies the dump into the data folder and never changes the original. Saves and settings
+stay in the data folder through updates and uninstall. Folders must be writable and at most 140
+characters because the game/toolchain still have path-length limits.
 
-Install / Repair runs verification, extraction, analysis, lift and compile.
-Status shows the stage and the bar fills as it goes. **Show details** opens the
-session log under the buttons and follows it while setup runs (scroll up to read
-back; it opens by itself when setup stops on an error); **Open logs** opens the
-whole file. **Cancel** stops
-the process tree; rerun to resume verified completed work. Changed/corrupt dump
-contents are refused rather than merged into an existing extraction.
-**Create a desktop shortcut** is checked by default; clear it to create only a
-Start-menu shortcut. Shortcuts launch through the stable native launcher.
-After setup, select **Play**, use the shortcut, or double-click
-`<install>\DefJamLauncher.exe`. The wizard displays the exact launcher path in a
-selectable field. It supplies the correct data location and working directory.
-There is no automatic game launch.
+Under Wine the wizard says FFNY Online supports Windows only for now and unpacks nothing (silent
+mode exits 3). Review images of every screen: `DefJamSetup.exe --ui-snapshot all <folder>` (or one
+state, e.g. `--ui-snapshot folder-problem out.png`); `--ui-demo <dump> <folder>` runs the real
+search, identification and folder check offscreen and pictures each step, installing nothing.
 
 ## Optional HD textures (v0.6.0)
 
-FFNY Online's Windows wizard no longer offers HD textures: make them in the launcher, on its
+On Windows the wizard's **HD textures** switch is on by default (see above); they can also be made later in the launcher, on its
 **Textures** page, after the first install (the silent `--hd-textures` below still works).
 On macOS, **Apply HD texture upscale during install (increases install time)** is unchecked
 by default. It generates Lanczos4x from your verified dump locally after the game
@@ -153,11 +160,13 @@ remain. No arbitrary destination folder is recursively removed.
 
 Use `scripts/build-setup.ps1` from a clean recursive Windows checkout, or add
 `-Development` for local feature prototypes. Production validation rejects
-development payloads. Setup is a standalone native-controls wizard, statically
-linked to its C++ runtime and independent of generated code/game renderer.
+development payloads. Setup is a standalone Win32 wizard drawn with Direct2D and DirectWrite
+(setup/wizard.cpp), statically linked to its C++ runtime and independent of generated code/game
+renderer; its heading font, Anton (OFL, ffny-branding/fonts), is embedded as a resource.
 
-The executable contains a SHA-256-checked ZIP resource. After unpacking in a unique
-local folder, the engine checks its complete file inventory before running stages.
+The executable contains a SHA-256-checked ZIP resource. It is unpacked in this process into a unique
+local folder (setup/unzip.cpp; every entry's CRC-32 checked, no PowerShell), and the engine checks its
+complete file inventory before running stages.
 It uses the pinned toolkit XDVDFS reader with additional path/bounds/cycle checks.
 Python, pyxbe, capstone, Pillow, NumPy, SDL3 and ImGui inputs have pinned checksums and notices.
 
