@@ -220,8 +220,12 @@ class Session:
             if not machine.free_port(p):
                 raise OSError("account service port %d is taken" % p)
         data = os.path.join(self.dir, "accounts.json")
+        secret = os.path.join(self.dir, "discord-secret.txt")     # no Discord sign-in: the test sessions only
+        with open(secret, "w") as f:
+            f.write("tests-no-discord")
         args = [exe, "-listen", "127.0.0.1:%d" % port, "-internal-listen", "127.0.0.1:%d" % (port + 1),
                 "-data", data, "-public-url", "http://127.0.0.1:%d" % port, "-ranked",
+                "-client-id", "0", "-client-secret-file", secret,
                 "-test-accounts", ",".join(names)]
         tag = "accounts%d" % len(self.relays)
         p = subprocess.Popen(args, stdout=open(os.path.join(self.dir, tag + ".out"), "wb"),

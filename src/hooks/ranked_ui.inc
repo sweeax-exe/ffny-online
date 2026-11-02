@@ -401,11 +401,9 @@ void ranked_versus(ImDrawList *dl, const Frame &f, const NetVersus &v, float alp
     // positions follow the room's slots (a ranked room holds slots 0 and 1)
     const NetRankPlayer *p0 = netranked_player(&ri, 0), *p1 = netranked_player(&ri, 1);
     char line[96];
-    snprintf(line, sizeof(line), "RANKED %s  -  GAME %d", netranked_mode_title(ri.mode), ri.game);
-    text(dl, f, g_title, 14, 320, 60, ORANGE, line, CENTER, 1.0f);
-    snprintf(line, sizeof(line), "%d - %d", p0 ? p0->set_wins : 0, p1 ? p1->set_wins : 0);
-    text(dl, f, g_stencil, 30, 320, 268, CREAM, line, CENTER, 1.6f);
-    text(dl, f, g_title, 10, 320, 300, GREY, "SET, BEST OF THREE", CENTER, 0.8f);
+    snprintf(line, sizeof(line), "RANKED %s  -  GAME %d  -  SET %d-%d", netranked_mode_title(ri.mode), ri.game,
+             p0 ? p0->set_wins : 0, p1 ? p1->set_wins : 0);
+    text(dl, f, g_title, 14, 320, 58, ORANGE, line, CENTER, 1.0f);
     for (int s = 0; s < 2; s++) {
         const NetRankPlayer *p = s == 0 ? p0 : p1;
         if (!p) continue;
@@ -413,10 +411,11 @@ void ranked_versus(ImDrawList *dl, const Frame &f, const NetVersus &v, float alp
         netranked_player_label(p, 5, label, sizeof(label));
         bool placing = p->division == NETRANK_PLACEMENT || p->placements > 0;
         float x = s == 0 ? 36 : 640 - 36 - 196;
-        rank_plate(dl, f, x + 98, 78, 172, upper(label).c_str(), netranked_tier_of(placing ? 0 : p->division), placing);
+        // on the portrait's top left ("YOU" sits on its right corner)
+        rank_plate(dl, f, x + 72, 78, 120, upper(label).c_str(), netranked_tier_of(placing ? 0 : p->division), placing);
         if (!placing) {
             snprintf(rating, sizeof(rating), "%d", p->rating);
-            text(dl, f, g_title, 11, x + 98, 98, CREAM, rating, CENTER, 0.8f);
+            text(dl, f, g_title, 11, x + 72, 97, CREAM, rating, CENTER, 0.8f);
         }
     }
     for (int i = k; i < dl->VtxBuffer.Size; i++) {      // the page's fade
@@ -516,9 +515,15 @@ void draw_ranked_results(ImDrawList *dl, const Frame &f, const Pad &pad)
         text(dl, f, g_title, 12, 320, 340, GREY, line, CENTER, 0.8f);
     }
     float hx = 54;
-    hx += hint(dl, f, hx, 392, "a", "SEARCH AGAIN");
+    // A (search again) only once the rating shows, and 3 s after: the A pressed through the game's
+    // own results screens must not skip this one
+    static unsigned long long rated_at;
+    if (!rated) rated_at = 0;
+    else if (!rated_at) rated_at = t;
+    bool take_a = gallery_on() || (rated && t - rated_at > 3000);
+    if (take_a) hx += hint(dl, f, hx, 392, "a", "SEARCH AGAIN");
     hint(dl, f, hx, 392, "b", "BACK");
-    if (pad.a) open_ranked_modes();
+    if (pad.a && take_a) open_ranked_modes();
     else if (pad.b) S.page = HUB;
 }
 

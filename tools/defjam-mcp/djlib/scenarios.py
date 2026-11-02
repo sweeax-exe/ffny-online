@@ -480,6 +480,21 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
             time.sleep(1.0)
         else:
             stop_reason = "timeout after %d s" % timeout
+        if ranked and stop_reason == "done":
+            # the set is rated once the last game's reports are in (the account service's report window,
+            # 45 s): wait for ranked-sets.jsonl, then each copy's results page and its MY STATS tab
+            sets = os.path.join(s.dir, "ranked-sets.jsonl")
+            until = time.time() + 150
+            while time.time() < until and not (os.path.isfile(sets) and os.path.getsize(sets) > 0):
+                s.poll()
+                time.sleep(2)
+            rated = os.path.isfile(sets) and os.path.getsize(sets) > 0
+            result["ranked_sets"] = open(sets, encoding="utf-8").read().strip().splitlines() if rated else []
+            if not rated:
+                problems.append("the set was not rated within 150 s of its last game")
+            time.sleep(8)       # the results page asks the account service again every 3 s
+            for k in range(len(s.copies)):
+                _png(s, k, "results-copy%d" % k, shots)
         if stop_reason != "done":
             for c in s.copies.values():
                 if c.alive():
