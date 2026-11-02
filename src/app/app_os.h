@@ -35,6 +35,8 @@ bool change_dir(const std::filesystem::path &path);
 // An exclusive, non-blocking lock on `path` (created if missing), as setup/engine.py takes it:
 // flock off Windows, a file opened with no sharing on Windows. -1 when another process holds it.
 // The lock goes with the handle when it is closed or the process ends.
+// Off Windows the descriptor is close-on-exec, so the programs start() runs never inherit it;
+// run_in_place hands it to the game.
 intptr_t lock_file(const std::filesystem::path &path);
 void unlock_file(intptr_t handle);
 
@@ -68,13 +70,14 @@ int wait(Process &process);
 std::string read_shared(const std::filesystem::path &path, uint64_t offset = 0, size_t max = 65536);
 
 // Start `argv` (argv[0] is the program) in `dir`. Off Windows the program replaces this one
-// (exec): open descriptors, such as play.lock's, stay with it. On Windows the program is started
+// (exec), keeping play.lock's descriptor (lock_file), so the lock lives as long as the game. On Windows the program is started
 // and waited for, and this process then exits with its exit code: the app's handles, play.lock's
 // among them, stay open until then. Returns only when the program could not be started, with
 // the reason.
 std::string run_in_place(const std::vector<std::string> &argv, const std::filesystem::path &dir);
 
-// Become `argv` (the app's own updated copy): exec off Windows; on Windows it is started and this
+// Become `argv` (the app's own updated copy, which takes the lock itself): exec off Windows, with no
+// lock passed on; on Windows it is started and this
 // process exits at once, so the new copy can remove the old program file. Returns only on failure.
 std::string replace_with(const std::vector<std::string> &argv);
 

@@ -24,6 +24,7 @@
 extern char **environ;
 #endif
 
+#include <algorithm>
 #include <fstream>
 
 namespace fs = std::filesystem;
@@ -67,20 +68,29 @@ bool is_program(const fs::path &path) { return access(path.c_str(), X_OK) == 0; 
 
 bool change_dir(const fs::path &path) { return chdir(path.c_str()) == 0; }
 
+// The locks this process holds. Opened close-on-exec: the engines the app starts (the update check,
+// Steam's status, setup itself) must not inherit play.lock, or the lock would outlive the app's own
+// unlock_file for as long as such a child runs, and setup, which takes the lock itself, would find
+// the game "running". Only the game is handed the lock (run_in_place).
+static std::vector<int> g_locks;
+
 intptr_t lock_file(const fs::path &path)
 {
-    int fd = open(path.c_str(), O_RDWR | O_CREAT, 0644);
+    int fd = open(path.c_str(), O_RDWR | O_CREAT | O_CLOEXEC, 0644);
     if (fd < 0) return -1;
     if (flock(fd, LOCK_EX | LOCK_NB) != 0) {
         close(fd);
         return -1;
     }
+    g_locks.push_back(fd);
     return fd;
 }
 
 void unlock_file(intptr_t handle)
 {
-    if (handle >= 0) close((int)handle);                // closing the descriptor lets the lock go
+    if (handle < 0) return;
+    close((int)handle);                                 // closing the descriptor lets the lock go
+    g_locks.erase(std::remove(g_locks.begin(), g_locks.end(), (int)handle), g_locks.end());
 }
 
 void redirect_output(const fs::path &base)
@@ -144,19 +154,31 @@ std::string read_shared(const fs::path &path, uint64_t offset, size_t max)
     return out;
 }
 
-std::string run_in_place(const std::vector<std::string> &argv, const fs::path &dir)
+static std::string exec_program(const std::vector<std::string> &argv, const fs::path &dir, bool keep_locks)
 {
     if (!dir.empty() && chdir(dir.c_str()) != 0) return strerror(errno);
+    // The game keeps play.lock for as long as it runs: its descriptor survives this exec.
+    if (keep_locks)
+        for (int fd : g_locks) fcntl(fd, F_SETFD, 0);
     std::vector<char *> args;
     for (const std::string &a : argv) args.push_back(strdup(a.c_str()));
     args.push_back(nullptr);
     fflush(stdout);
     fflush(stderr);
     execv(args[0], args.data());
-    return strerror(errno);
+    int failed = errno;
+    if (keep_locks)
+        for (int fd : g_locks) fcntl(fd, F_SETFD, FD_CLOEXEC);
+    return strerror(failed);
 }
 
-std::string replace_with(const std::vector<std::string> &argv) { return run_in_place(argv, {}); }
+std::string run_in_place(const std::vector<std::string> &argv, const fs::path &dir)
+{
+    return exec_program(argv, dir, true);
+}
+
+// The app's own new copy takes the lock itself.
+std::string replace_with(const std::vector<std::string> &argv) { return exec_program(argv, {}, false); }
 
 bool writable(const fs::path &dir) { return access(dir.c_str(), W_OK) == 0; }
 
