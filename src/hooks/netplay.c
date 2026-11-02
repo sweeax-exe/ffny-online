@@ -1127,6 +1127,14 @@ static const char *const k_fight_files[] = {
 static uint32_t g_data_print;
 static char g_data_over[160];       /* the fight files read from the override folder, for the reports */
 
+/* The toolkit's game-file redirect (kernel.h): a language mod's rebuilt copy of a file
+ * (src/hooks/pc_language.c), which the game opens before the override folder's. */
+#if defined(_WIN32)
+extern BOOL (*g_xbox_game_file_redirect)(const char *relative, WCHAR *host_path, DWORD size);
+#else
+extern BOOL (*g_xbox_game_file_redirect)(const char *relative, char *host_path, DWORD size);
+#endif
+
 static uint32_t file_print(const char *name, int *overridden)
 {
     static uint8_t buf[65536];
@@ -1136,7 +1144,18 @@ static uint32_t file_print(const char *name, int *overridden)
     uint32_t h = 2166136261u;
     size_t got, i;
     *overridden = 0;
-    if (data && *data) {
+    /* A language mod that rebuilds one of these files changes what the fight reads: printed as
+     * the game opens it, so two PCs with different such mods are told apart (a pack that only
+     * translates text archives leaves the print alone). */
+    if (g_xbox_game_file_redirect) {
+#if defined(_WIN32)
+        WCHAR wide[MAX_PATH];
+        if (g_xbox_game_file_redirect(name, wide, MAX_PATH) && (f = _wfopen(wide, L"rb")) != NULL) *overridden = 1;
+#else
+        if (g_xbox_game_file_redirect(name, path, MAX_PATH) && (f = fopen(path, "rb")) != NULL) *overridden = 1;
+#endif
+    }
+    if (!f && data && *data) {
         snprintf(path, sizeof(path), "%s\\override\\%s", data, name);
         if ((f = fopen(path, "rb")) != NULL) *overridden = 1;
     }
