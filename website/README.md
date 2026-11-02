@@ -38,6 +38,16 @@ does the installer's `.sha256` file. The answer is kept in `sessionStorage` for 
 because the API allows 60 requests an hour per address; if the API fails, the fallback link stays.
 Nothing on the page needs changing for a new release.
 
+## Tournaments
+
+Right below the hero, `site.js` lists the tournaments from the account service
+(`GET https://play.defjam.online/api/tournaments`, no cookies sent) as cards linking to their pages on
+`play.defjam.online/tournaments`. The section and its nav link stay hidden while tournaments are off
+(the API answers 404) or the service does not answer. The site's CSP must allow
+`connect-src https://play.defjam.online` (in `Caddyfile.site-snippet`). A local preview reads a local
+account service with `http://localhost:8000/?api=http://localhost:8095`. Design, API and deploy
+steps: `docs/tournaments.md`.
+
 ## Deploy
 
 The page is served by Caddy on the FFNY server, from `/var/www/defjam.online`. The site block is

@@ -120,6 +120,78 @@
       .catch(function () { /* keep the fallback link to the latest release */ });
   }
 
+  // ---- tournaments, from the account service (docs/tournaments.md) ----
+  var TOURNAMENTS = 'https://play.defjam.online';
+
+  // A local preview may point at a local account service: http://localhost:8000/?api=http://localhost:8095
+  function tournamentsBase() {
+    var host = window.location.hostname;
+    var m = /[?&]api=(http:\/\/(?:localhost|127\.0\.0\.1):\d+)/.exec(window.location.search);
+    return (m && (host === 'localhost' || host === '127.0.0.1')) ? m[1] : TOURNAMENTS;
+  }
+
+  function el(tag, cls, text) {
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text != null) e.textContent = text;
+    return e;
+  }
+
+  function localWhen(iso) {
+    try {
+      return new Date(iso).toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZoneName: 'short' });
+    } catch (e) {
+      return iso;
+    }
+  }
+
+  function tournamentCard(t, base) {
+    var a = el('a', 'glass tourney');
+    var id = Number(t.id);
+    a.href = base + '/tournaments/' + (id > 0 ? id : '');
+    var top = el('div', 'tourney-top');
+    var status = el('span', 'status s-' + String(t.status).replace(/[^a-z_]/g, ''), t.status_label);
+    top.appendChild(status);
+    top.appendChild(el('span', 'tourney-region', t.region_label));
+    a.appendChild(top);
+    a.appendChild(el('h3', null, t.name));
+    var when = el('p', 'tourney-when', localWhen(t.start));
+    a.appendChild(when);
+    a.appendChild(el('p', 'tourney-meta', t.format_label + ' · Bo' + t.set_length));
+    var slots = el('div', 'tourney-slots');
+    var bar = el('progress');
+    bar.max = Math.max(1, t.max_players);
+    bar.value = Math.min(t.accepted, t.max_players);
+    slots.appendChild(bar);
+    var count = el('span');
+    count.appendChild(el('b', null, String(t.accepted)));
+    count.appendChild(document.createTextNode('/' + t.max_players + ' players'));
+    slots.appendChild(count);
+    a.appendChild(slots);
+    a.appendChild(el('p', 'tourney-by', 'by ' + t.creator));
+    return a;
+  }
+
+  function loadTournaments() {
+    var section = document.getElementById('tournaments');
+    var cards = document.getElementById('tournament-cards');
+    if (!section || !cards || !window.fetch) return;
+    var base = tournamentsBase();
+    fetch(base + '/api/tournaments', { credentials: 'omit', referrerPolicy: 'no-referrer' })
+      .then(function (r) { if (!r.ok) throw new Error('tournaments ' + r.status); return r.json(); })
+      .then(function (data) {
+        var list = (data && data.tournaments) || [];
+        cards.textContent = '';
+        list.slice(0, 6).forEach(function (t) { cards.appendChild(tournamentCard(t, base)); });
+        document.getElementById('tournaments-empty').hidden = list.length > 0;
+        document.getElementById('tournaments-all').href = base + '/tournaments';
+        section.hidden = false;
+        var nav = document.getElementById('nav-tournaments');
+        if (nav) nav.hidden = false;
+      })
+      .catch(function () { /* tournaments off or the service away: the section stays hidden */ });
+  }
+
   // ---- screenshots open in a lightbox ----
   function setupLightbox() {
     var box = document.getElementById('lightbox');
@@ -230,6 +302,7 @@
 
   function start() {
     loadRelease();
+    loadTournaments();
     setupLightbox();
     setupClip();
     setupEmbers();

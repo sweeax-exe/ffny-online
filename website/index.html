@@ -37,6 +37,7 @@
     <span>FFNY Online</span>
   </a>
   <nav aria-label="Sections">
+    <a href="#tournaments" id="nav-tournaments" hidden>Tournaments</a>
     <a href="#features">Features</a>
     <a href="#screens">Screens</a>
     <a href="#how">Get started</a>
@@ -74,6 +75,23 @@
       </div>
     </div>
     <a class="scroll-cue" href="#features" aria-label="Scroll to the features"></a>
+  </section>
+
+  <!-- Filled by site.js from the account service (GET https://play.defjam.online/api/tournaments);
+       stays hidden when tournaments are off or the service does not answer. -->
+  <section class="section tourneys" id="tournaments" aria-labelledby="tournaments-title" hidden>
+    <div class="wrap">
+      <div class="tourneys-head">
+        <div>
+          <p class="kicker">Compete</p>
+          <h2 id="tournaments-title">Tournaments</h2>
+        </div>
+        <a class="btn btn-ghost" id="tournaments-all" href="https://play.defjam.online/tournaments">All tournaments · Sign up</a>
+      </div>
+      <div class="tourney-cards" id="tournament-cards"></div>
+      <p class="fine" id="tournaments-empty" hidden>No tournaments are scheduled right now. Hosts with the Creator role
+        on the Discord can set one up.</p>
+    </div>
   </section>
 
   <section class="section" id="features" aria-labelledby="features-title">
