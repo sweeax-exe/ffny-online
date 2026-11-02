@@ -101,7 +101,7 @@ Tags: **[V]** seen in code, a log or a commit. **[I]** inferred, with the reason
 | B5 | **Crashes from inconsistent restored state** (not sound) | Build 26: `sub_000EDF90`, a model node tree walk into a reused child array, at step 4039 (`generator-timescale-desync.md` §7). Build 28, 1v1 with rollback on for every player, after all the 10-25 fixes:<br>• 9fd9bd: `sub_000E61E0+0x67`, **during a re-run**, step 145, 47 rollbacks; `edi` 0x80129778 is inside the system pool 80120D80+256 KB<br>• 22ecc8: `sub_000EE000+0x215`, **during a re-run**, step 813, 4441 rollbacks<br>• 7b829d: native `RIP` in `sub_001EE3C0+0x3E9`, a normal update, step 806, in the third rollback match.<br>A rollback stock match at venue 26 crashed once on 10-28 (`RIP 0x1408203D2`). [V] | **Not analysed.** Best guesses: [G] the small-block pool (`0x3A4000..0x3A7000` together with its heap block) and model nodes allocated or freed inside a re-run. The `sub_000E61E0` and `sub_000EE000` names come from the lifted headers only. |
 | B6 | **Performance** | Saves of 4.0-4.3 MB every update, about 250 MB/s of `memcpy` at 60 Hz. Rollbacks average 1.0 ms in local tests and 5.3-6.4 ms in a player's log; the longest was 20.9 ms and the deepest 9 steps. Rollbacks over 30 ms are logged with their model loads (`ROLLBACK slow`). Step 1 holds the game for 150 ms and copies the 42 MB reference. [V] | Not measured on a weak PC. Not a known crash cause. |
 | B7 | **Gaps in observability** | `rb_count` and `rb_steps` are never reset per match (B3 needed arithmetic to see this). `rollback_reference` fails silently when `!s_ref || !s_ndseg`. No hang dump comes from players. [V] | Easy to fix. |
-| B8 | **Code drift since the last rollback test** | The last rollback runs were 10-26 to 10-28. Since then: upstream v0.12.x merges with re-lifts, KOTH changes, versus hold, created fighters, build 36/37 changes. `rollback.c` hard-codes guest addresses and return addresses (`0x29696`, `0x1E3F20`, `0x1284B`, ...). The guest image is the same, so they should hold [I], but the hooks (`recomp_manual.c` `sub_00029500`, `sub_001FBE1E`) have not been run since. | Needs a fresh baseline (step 0). |
+| B8 | **Code drift since the last rollback test** | The last rollback runs were 10-26 to 10-28. Since then: upstream v0.12.x merges with re-lifts, KOTH changes, versus hold, created fighters, build 36/37 changes. `rollback.c` hard-codes guest addresses and return addresses (`0x29696`, `0x1E3F20`, `0x1284B`, ...). The guest image is the same, so they should hold [I], but the hooks (`recomp_manual.c` `sub_00029500`, `sub_001FBE1E`) have not been run since. | Step 0 done (§5): the game's heap had moved to `0x81000000`, every rollback match crashed at step 80; fixed in 70f9219. |
 
 ---
 
@@ -218,3 +218,90 @@ the base desync. [I]
   live in `netplay_on_step`. If the position fix changes that order or adds per-step pins, `rollback_to` must run them in
   re-runs too (they run there now because a re-run goes through `netplay_on_step` with `N.step` rewound; check `N.resim` guards
   in any new code).
+
+---
+
+## 5. Results (branch work from 2026-11-02, on `remaster` 60b3134)
+
+All runs: `dj.py`, release preset, two copies on the local relay with `-rollback`, logs under `logs/dj/`.
+
+### Step 0, baseline: every rollback match crashed at step 80 (B8)
+* `20261102-003545-online` (5 matches, `--fast-ko 0 --bot 60`, 70+10 ms lag): both copies crashed at step 79/80 of match 1,
+  4-5 rollbacks in, in the sound engine on the mixer thread (`sub_0011E530+0x282`, a wild indirect call just before).
+  [V]
+* Cause [V]: since the toolkit's v0.12 merge the contiguous allocator keeps a low reserve, so the game's 42 MB heap moved from
+  `0x80003000..0x82A0D000` to `0x81000000..0x83A09000` (`[CONTIG] alloc 0x81000000 43044 KB`). `rollback.c` still saved and
+  restored the old range: the audio arena (`0x807A7000`, `0x80B0D000`, ...) and GPU blocks below 16 MB were rewound by every
+  load, and the heap's top 16 MB were never saved. The prepare line showed it too: "heap 43 pages left alone (40 written by
+  other threads)" against 6 / 1 in October. XAPI's heap also grew to `0x00F80000..0x04000000`, past the `0x01600000` the
+  kept-arena scan stopped at.
+* Fix 70f9219: the heap is found at run time (the largest block of the contiguous window), the scan covers XAPI's heap to
+  `0x04000000`.
+
+### Step 1, diagnostics (e2b8853)
+Per-match line `[ROLLBACK] match N decided|went on offline|ended with rollback still on: ...` (rollbacks, steps run again,
+deepest, average/longest ms, slow count, first prediction step), `[ROLLBACK] first prediction in match N at step S`, a line when
+the reference copy fails, the crash state with the registers' objects (vtable, +0xC, +0x10, page state, system pool / arena,
+allocated in a re-run), the crash callback armed when rollback starts. Test tools: `RECOMP_ROLLBACK_SOAK_DIFF=1` (memory
+before a soak goes back against the re-run), `RECOMP_ROLLBACK_SOAK_TWICE=1` (a second re-run of the same steps compared with
+the first), and the soak now replays each step's pad words in re-runs.
+
+### After the heap fix
+* `20261102-004911-online` (same settings): match 1 (venue 2, 8522 steps, 1323 / 448 rollbacks, deepest 9) clean; match 2
+  (venue 9, a bot fight without a knockout, 41 800 steps = 11.6 min, 3210 rollbacks on one copy) ran without a crash but
+  **desynced at step 37 440** (fighter positions 0x44/0x4C apart by 0.02; the last equal checksum at step 37 380). The copy that
+  went on offline afterwards never ended the fight, so the run was stopped by hand.
+* Contiguous memory: 56.5 MB at the first match start, 58.2-60.2 MB at its end, 59.2 / 61.2 MB reached at the second start,
+  62.3 MB reached at the second end (arena 7.2-7.4 MB live, 6339-7058 blocks freed before a load and kept). B2 is real.
+* `ROLLBACK slow`: two lines, 654 ms and 1414 ms with no model loads (machine shared with other agents' builds) [I].
+
+### Step 3, the offline soak
+* `20261102-013956-offline` (depth 9, bot): 1500 soaks, **6% of steps came out otherwise**; the memory diff shows hundreds of
+  saved words differing after every re-run (render counters, EAGL matrices, per-object frame stamps).
+* `20261102-021149-offline` (`SOAK_TWICE`): two re-runs of the same steps agreed on **all 9900 steps**, while the first pass and
+  the re-run differed on 6%. So loads restore consistently; the difference came from the first pass. Cause [V in code]: the test
+  bot decides a re-run's buttons again with memory that is not rewound (`test_bot.c`), so the soak's re-runs had other inputs.
+  Online, re-runs replay the entries, so this was a test artefact; the soak now replays the pad words.
+* `20261102-022059-offline` (pad words replayed): **0 of 10 442 steps otherwise** at depth 9 (1900 soaks). The plan's step 3
+  test is met for re-runs on the same inputs.
+* The case the soak never covered is the online one: a re-run after a pass that ran on a **wrong prediction**.
+  `RECOMP_ROLLBACK_SOAK_WRONG=1` runs, between two correct re-runs, one on the buttons of 23 steps earlier:
+  * `20261102-022953-offline`: 37 of 9300 steps differ between the two correct re-runs (all in one stretch, steps 1717-1723:
+    the fighter's input-history words `+0x9F8`, `+0xA3C`, `+0xA4C`, `+0xA50`, written by `sub_001BA800`, differ by one
+    button bit), then a **crash at step 8676 in a re-run**: a weapon teardown (`sub_000BA920 -> sub_000BA810 -> sub_00025B40
+    -> sub_0010B490 -> sub_00109F00`, the model loader's clean-up list) walked a list node holding junk (`esi 0D0D0D0B`); the
+    list's owner (a 16-byte block at `81012060`) was allocated in a re-run.
+  * `20261102-033004-offline` (same, with `RECOMP_TEST_RNG_SEED=12345`, `ALLOCLOG`, `CHECK`): 39 of 9900 steps differ, then a
+    **crash at step 8728 on the mixer thread** in `sub_0011D480+0xF3` (from `sub_0011E530`, registers in the audio arena): the
+    sound-engine class of B1.
+  * So both open crash classes (B5: models / weapons; B1: the sound engine) come back within about 9000 steps of a soak that
+    makes wrong predictions (5300 rollbacks, three passes each), on one PC, in about 3 minutes. That is the test bench for them;
+    the two-copy runs need 10+ minutes per crash. Not yet analysed further.
+
+### Step 2 (0b99275) and step 5 (ed3512b)
+* Step 2, option B chosen and implemented behind `[online] rollback_follows_server` (default 1): the game keeps the relay's
+  `CAPS_ROLLBACK` from its last session in `[online] rollback_server` and uses the beta setting at the next start only if it was
+  set. Reason: no launcher or relay change, it also holds for a player who starts the exe directly, and the relay switch stays
+  the one source. A switch change takes effect at the next start in both options. Test: boots with a settings file
+  (`rollback = 1`): `rollback_server = 0` gives "the rollback setting is on, but the server did not allow rollback ... no audio
+  arena" and no arena line (`20261102-033423-boot`); `rollback_server = 1` starts the arena (`20261102-033455-boot`). An online
+  copy writes the flag at the relay's CAPS answer ("the server allows rollback: the rollback setting applies from the next
+  start").
+* Step 5, first part: the held contiguous, arena and XAPI free lists grow instead of giving frees back at once past 4096 (none
+  overflowed in the runs above; it was a latent use-twice).
+* `20261102-033916-online` (`--matches 10 --fast-ko 600`, 70+10 ms, build ed3512b): **ok, 10 of 10 matches**, no crash or
+  desync, 1-151 rollbacks a match. Contiguous memory flat: 56.6 MB in use at the first start, 56.8 / 57.8 MB at the last
+  (copy 0's arena grew once more, by 1 MB, before match 9), 58.8 / 59.7 MB reached; the arena 4.0-5.0 MB live at each fight's
+  end, kept blocks 0-650. So short fights do not leak; the growth seen above (62.3 MB reached) came with the 11-minute fight
+  (6000-7000 kept blocks, arena 7.4 MB). The arena never gives a piece back.
+
+### Next
+1. B1 / B5 with the wrong-prediction soak: name the block behind the loader list node and the mixer's voice (the
+   `ALLOCLOG` lines next to the crash), fix, then the soak must run 10 minutes clean.
+2. The input-history difference after a wrong pass (steps 1717-1723 above): which state outside the saves carries a button
+   into the next pass.
+3. The two-copy desync at step 37 440 of a 11.6-minute fight: compare with a lockstep run of the same length (`--rollback off
+   --fast-ko 0 --bot 60`, venue 9) before blaming rollback.
+4. Step 5: long fights. Measure `[MEM]` over several 5-10 minute fights (`--fast-ko 0 --bot 60`); candidates are the blocks a
+   load keeps (thousands per long fight) and arena pieces that could be given back between fights.
+5. Then the target runs (step 4 bar), King of the Hill (step 6).

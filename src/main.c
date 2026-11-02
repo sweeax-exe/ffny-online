@@ -516,6 +516,7 @@ static LONG CALLBACK veh_handler(PEXCEPTION_POINTERS ep)
             return EXCEPTION_CONTINUE_SEARCH;
         }
 
+        rollback_crash_va = fault_va;
         if (rollback_crash_cb) rollback_crash_cb();     /* online: whether steps were being run again */
         fprintf(stderr, "[CRASH] Access violation at RIP=0x%llX, fault addr=0x%llX (%s)\n",
             (unsigned long long)ep->ContextRecord->Rip,

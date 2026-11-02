@@ -104,6 +104,11 @@ static RecompSetting g_display_settings[] = {
     { "online", "rollback", RECOMP_SETTING_BOOL, 0, 0, 0, NULL, NULL, RECOMP_SETTING_RESTART,
       "Beta: rollback netcode in online fights, used only when every player in the match has it on. Your presses "
       "count at once and the game corrects itself when the other player's arrive late. It can still crash." },
+    { "online", "rollback_server", RECOMP_SETTING_BOOL, 0, 0, 0, NULL, NULL, RECOMP_SETTING_RESTART,
+      "Kept by the game: whether the online server allowed rollback the last time this PC was connected. The "
+      "rollback setting takes effect only when it did (its sound memory is set up at start)." },
+    { "online", "rollback_follows_server", RECOMP_SETTING_BOOL, 1, 0, 0, NULL, NULL, RECOMP_SETTING_RESTART,
+      "Use the rollback setting only when the server allowed rollback last time (off: the setting alone decides)." },
     { "online", "input_delay", RECOMP_SETTING_INT, 3, 1, 8, NULL, NULL, 0,
       "Steps (1/60 s each) between a press and its effect in an online fight. More hides more ping; the host's value is used." },
     { "display", "fullscreen", RECOMP_SETTING_BOOL, 0, 0, 0, NULL, NULL, 0,

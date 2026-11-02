@@ -31,6 +31,7 @@
 #include "recomp/gen/recomp_types.h"
 #include "recorder.h"
 #include "test_observations.h"
+#include "rollback.h"
 
 #define ACTORS        0x003B92E0u
 #define STRIDE        0x12E8u
@@ -302,7 +303,7 @@ void defjam_test_rng(uint32_t stack)
  * step's fingerprint (the fighter records, the match globals and the generators) is kept so a
  * replay can be compared with the first pass. */
 typedef struct { uint32_t lo, hi; } Range;
-static const Range k_keep[] = {             /* saved and restored */
+static Range k_keep[] = {                   /* saved and restored (the heap's entry: build_segments) */
     { 0x002D54E0u, 0x002EB5ACu },           /* .data, up to the mailbox thread's block */
     { 0x002EBF1Cu, 0x003A9324u },           /* .data/.bss with the small-block free lists at 0x3A4B60.. */
     { 0x003A9684u, 0x003B8070u },           /* past the music refiller, up to the mailbox block */
@@ -346,8 +347,10 @@ static void build_segments(void)
     Range skip[MAX_SKIP + 1];
     int n = (int)s_skip_count, i, j, k;
     uint32_t queue = MEM32(0x003A017Cu);
+    /* the heap block moves with the toolkit's contiguous layout (rollback.c, find_heap) */
+    rollback_heap_range(&k_keep[KEEP_COUNT - 1].lo, &k_keep[KEEP_COUNT - 1].hi);
     memcpy(skip, s_skip, (size_t)n * sizeof(Range));
-    if (queue >= 0x80003000u && queue < 0x82A0D000u) { skip[n].lo = queue; skip[n].hi = queue + 0x1AA0u; n++; }
+    if (queue >= k_keep[KEEP_COUNT - 1].lo && queue < k_keep[KEEP_COUNT - 1].hi) { skip[n].lo = queue; skip[n].hi = queue + 0x1AA0u; n++; }
     for (i = 1; i < n; i++)                 /* sort by start */
         for (j = i; j > 0 && skip[j].lo < skip[j - 1].lo; j--) { Range t = skip[j]; skip[j] = skip[j - 1]; skip[j - 1] = t; }
     s_seg_count = 0;
