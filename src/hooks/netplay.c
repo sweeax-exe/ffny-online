@@ -365,6 +365,7 @@ static struct {
     uint32_t hash_split[RING][3];       /* the shared generator, the time scale word, the match generator */
     int rb_on, rb_ref_due, resim, predicting;
     int rb_fought;                      /* the phase word said "fighting" in this match */
+    uint32_t rb_decided_step;           /* the step at which this PC saw the match decided (0: not yet) */
     int peer_rb[MAXP];                  /* each position rolls back (its P_RTT says so) */
     int rb_match;                       /* hub: this match rolls back (every peer_rb set at the sync point) */
     struct {
@@ -3707,6 +3708,7 @@ void netplay_on_match_start(void)
     if (N.match_live) N.match_seen = 1;
     N.final_step = N.hash_sent = N.updates = 0;
     N.rb_on = N.rb_ref_due = N.resim = N.predicting = N.rb_fought = 0;
+    N.rb_decided_step = 0;
     memset(N.used_tag, 0, sizeof(N.used_tag));
     memset(N.hash_tag, 0, sizeof(N.hash_tag));
     memset(N.snap, 0, sizeof(N.snap));
@@ -4257,7 +4259,19 @@ void netplay_on_step(void)
     /* The room match decided (the game's phase word: 1 fighting, 2 decided, 3 finished; see
      * test_telemetry.c): report its result. Only after this match was seen fighting, as the
      * phase still holds the last match's value for a moment after a START. */
-    if (N.lobby && N.match_live && !N.reported && !N.resim && (!N.rb_on || N.step <= N.final_step)) {
+    /* With rollback: the step at which the match was decided, by any ending. Some endings stop the fight steps
+     * at once and skip the phase words 2 and 3 (venue 26, code 0x201): a PC that had predicted a step past
+     * the others' last one never saw it final, so it never reported the result nor switched rollback off, and
+     * the room's next match never started (two-copy run at venue 26, 2026-11-02). The decision counts once
+     * the step it was seen at is final. */
+    if (N.lobby && N.match_live && N.rb_on && !N.resim && !N.rb_decided_step && N.rb_fought) {
+        uint32_t phase = MEM32(G_MATCH_PHASE), count = MEM32(G_RESULT_COUNT), code = 0;
+        if (count && count <= RESULTS_MAX) code = MEM16(G_RESULTS + (count - 1u) * 0x10u + 0xEu);
+        if ((phase >= 2u && phase <= 3u) || ((code & 1u) && ((code & 4u) || (MEM32(G_MATCH_FLAGS) & 8u))))
+            N.rb_decided_step = N.step;
+    }
+    if (N.lobby && N.match_live && !N.reported && !N.resim &&
+        (!N.rb_on || N.step <= N.final_step || (N.rb_decided_step && N.final_step >= N.rb_decided_step))) {
         /* The game's result record says draws too (a double knockout, a venue taking both out, a
          * time-up tie): read only through the phase word, those were reported as "slot 0 won", and the
          * venue endings that skip phases 2 and 3 not at all (docs/research/team-and-special-match-types.md
@@ -4772,6 +4786,7 @@ static void rollback_to(uint32_t f)
             for (i = 0; i < MAXP; i++) N.used_tag[i][t % RING] = 0;
         LeaveCriticalSection(&g_cs);
     }
+    if (N.rb_decided_step && f <= N.rb_decided_step) N.rb_decided_step = 0;    /* seen again after the re-run */
     N.step = f - 1;
     N.updates = N.snap[slot].update;
     defjam_test_set_step(N.snap[slot].test_step);
@@ -4842,7 +4857,8 @@ void netplay_on_update(void)
      * no more rollback in this match (write tracking off, no saves on the results screen). */
     if (MEM32(G_MATCH_PHASE) == 1u) N.rb_fought = 1;   /* a rematch starts with the last match's phase */
     if ((!N.lockstep && !soak_depth()) ||
-        (N.lockstep && N.rb_fought && MEM32(G_MATCH_PHASE) >= 2u && N.final_step >= N.step && !N.predicting)) {
+        (N.lockstep && N.rb_fought && MEM32(G_MATCH_PHASE) >= 2u && N.final_step >= N.step && !N.predicting) ||
+        (N.lockstep && N.rb_decided_step && N.final_step >= N.rb_decided_step)) {
         N.rb_on = 0;
         rollback_reset();
         fprintf(stderr, "[ROLLBACK] off for the rest of this match (step %u, %u rollbacks)\n", N.step, N.rb_count);
