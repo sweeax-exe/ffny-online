@@ -1,5 +1,5 @@
 /* FFNY Online account: sign-in with Discord through the project's account service
- * (netplay/relay/accounts). Optional; online play works without it. Windows only for now. */
+ * (server/relay/accounts). Optional; online play works without it. Windows only for now. */
 #pragma once
 
 #ifdef __cplusplus

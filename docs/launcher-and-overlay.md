@@ -41,7 +41,7 @@ lists the changes that are waiting for a restart. Keys: `[ui] overlay_key` and `
 ### F9: a picture report
 
 **F9** (Windows) takes a picture of the window as it is, overlay included, and sends it with this session's
-log to the developers (`src/hooks/bug_report.c`, `netplay/relay/accounts/reports.go`; one a minute). Once the
+log to the developers (`src/hooks/bug_report.c`, `server/relay/accounts/reports.go`; one a minute). Once the
 picture is taken a small box asks **What's wrong? (optional)**: one line of up to 200 characters, typed, or
 picked letter by letter with the pad (up and down change the letter, left and right move, X deletes, Y adds a
 space). **Enter** or **A** sends it, **Esc** or **B** sends the report without text, and so does a minute with

@@ -1,15 +1,21 @@
 """King of the Hill (docs/research/king-of-the-hill.md): the game client (src/hooks/netplay.c, netplay.h)
-and the relay (netplay/relay/protocol_koth.go) must agree on the message types, the mode values, the
+and the relay (server/relay/protocol_koth.go) must agree on the message types, the mode values, the
 room size, the line states and the HILL phases. The two are written in different languages, so this
 reads both sources and compares the numbers."""
 import re
 from pathlib import Path
+import pytest
+
+from server_src import RELAY as RELAY_SRC, SKIP
+
+if RELAY_SRC is None:
+    pytest.skip(SKIP, allow_module_level=True)
 
 ROOT = Path(__file__).resolve().parents[2]
 NETPLAY_C = (ROOT / 'src/hooks/netplay.c').read_text(encoding='utf-8')
 NETPLAY_H = (ROOT / 'src/hooks/netplay.h').read_text(encoding='utf-8')
 VOICE_C = (ROOT / 'src/hooks/voice.c').read_text(encoding='utf-8')
-GO = (ROOT / 'netplay/relay/protocol_koth.go').read_text(encoding='utf-8')
+GO = (RELAY_SRC / 'protocol_koth.go').read_text(encoding='utf-8')
 
 
 def c_define(text, name):

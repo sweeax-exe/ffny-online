@@ -99,5 +99,8 @@ def test_the_tournaments_section_stays_hidden_until_the_service_answers():
 
 
 def test_the_site_csp_allows_the_tournament_api():
-    snippet = (ROOT / 'netplay/relay/deploy/Caddyfile.site-snippet').read_text(encoding='utf-8')
+    from server_src import RELAY, SKIP
+    if RELAY is None:
+        pytest.skip(SKIP)
+    snippet = (RELAY / 'deploy/Caddyfile.site-snippet').read_text(encoding='utf-8')
     assert 'connect-src https://api.github.com https://play.defjam.online;' in snippet

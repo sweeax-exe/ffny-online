@@ -1,5 +1,5 @@
 /* Ranked play, the game's side of the wire and the rank ladder (ranked phase 2a;
- * docs/netplay-protocol.md "Ranked queue", docs/ranked-design.md). Pure C with no Windows or game
+ * docs/netplay-protocol.md "Ranked queue", server/docs/ranked-design.md). Pure C with no Windows or game
  * dependencies, so tests/unit/test_netplay_ranked_native.py compiles it natively:
  *   - the long RANKED form (modes, primary, rollback flag, pings to the three relays, a MOVE's code),
  *   - the long QUEUE (searching counts per mode, ACCEPT's mode/seconds/opponent rating, MOVE's code

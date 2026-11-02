@@ -37,7 +37,7 @@ that does not write it, still shows the line and the bar.
 
 ## The server side
 
-The relay (`netplay/relay`) serves the update folder over HTTP on TCP **27778** when started with
+The relay (`server/relay`) serves the update folder over HTTP on TCP **27778** when started with
 `-updates-listen :27778 -updates-dir /opt/defjam-relay/updates` (the systemd unit does). It answers
 only GET and HEAD for plain file names in that folder.
 

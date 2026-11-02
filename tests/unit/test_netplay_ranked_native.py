@@ -1,6 +1,6 @@
 """Ranked play's wire forms and ladder on the game's side (src/hooks/netplay_ranked.c, ranked phase 2a),
 compiled natively: the long RANKED the relay's decodeRankedExt reads, the long QUEUE and RANKINFO as the
-relay's appendExt / RankInfo.appendBody write them (netplay/relay/protocol_ranked.go, draft.go), the stats
+relay's appendExt / RankInfo.appendBody write them (server/relay/protocol_ranked.go, draft.go), the stats
 text's ranked_<mode>= lines (old ten fields and the thirteen of phase 2a), and the divisions of
 accounts/ranks.go. Needs MSVC (`cl` on PATH, e.g. after scripts/env.ps1); skips without it."""
 import shutil

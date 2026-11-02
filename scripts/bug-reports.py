@@ -1,7 +1,7 @@
 """Lists and fetches the players' bug reports from the account service's server.
 
 F9 in the game, or "Send crash report" in the launcher after a crash, sends the run's log and
-(F9) a picture to POST /api/report (netplay/relay/accounts/reports.go). The service keeps each
+(F9) a picture to POST /api/report (server/relay/accounts/reports.go). The service keeps each
 report as a folder <reports>/<YYYYMMDD-HHMMSS>-<id>/ with info.txt, log.txt and picture.png.
 info.txt has a "note:" line when the player wrote what is wrong in F9's box.
 

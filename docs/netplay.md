@@ -8,7 +8,7 @@ sees game data.
 
 - A relay server everyone can reach. One small Linux VPS is plenty (for example a Hetzner CX22):
   the relay uses a few MB of memory and a few kB/s per match. Setup steps:
-  [netplay/relay/README.md](../netplay/relay/README.md). The default port is **27777/udp**.
+  the relay's README in the private server repository (sweeax-exe/ffny-server). The default port is **27777/udp**.
 - Both players: this port installed from their own dump, the same version.
 
 ## Playing: ONLINE in the main menu
@@ -117,7 +117,7 @@ each round trip plus one step, between 2 and 10. A code match uses the host's se
 `RECOMP_NETPLAY=host|join`, `RECOMP_NETPLAY_SERVER=127.0.0.1` and `RECOMP_NETPLAY_CODE_FILE=<file>`
 start a session without the launcher: the host writes its room code to the file and the guest
 reads it. `RECOMP_NETPLAY=quick` (with `RECOMP_NETPLAY_FIGHTER=<id>`) enters the hub, quick-matches,
-readies and votes by itself. Run a local relay (`go run ./cmd/relay` in `netplay/relay`) and two
+readies and votes by itself. Run a local relay (`go run ./cmd/relay` in `server/relay`) and two
 copies of the game. Three or four copies also get `RECOMP_TEST_READY_PLAYERS=<n>`: a copy readies (or,
 on the hill, answers a call) only while its room holds `n` players. The relay starts a room's vote as
 soon as two are in and every one of them is ready, so without it the first two copies started their

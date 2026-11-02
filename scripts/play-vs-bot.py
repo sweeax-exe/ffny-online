@@ -37,7 +37,7 @@ def main():
         sys.exit("not built: " + m.EXE)
     os.makedirs(m.LOGS, exist_ok=True)
     m.close()
-    m.RELAY_PROC = subprocess.Popen([m.RELAY, "-listen", "127.0.0.1:27777", "-log-interval", "30s"],
+    m.RELAY_PROC = subprocess.Popen([m.machine.relay_path(), "-listen", "127.0.0.1:27777", "-log-interval", "30s"],
                                     stdout=open(os.path.join(m.LOGS, "relay.out"), "wb"),
                                     stderr=open(os.path.join(m.LOGS, "relay.err"), "wb"),
                                     creationflags=subprocess.CREATE_NO_WINDOW)

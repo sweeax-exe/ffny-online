@@ -4,7 +4,7 @@ A new FFNY Online room mode after Mortal Kombat's King of the Hill: a room of up
 players; two of them fight One on One, everyone else waits in a line and watches the fight.
 The winner stays on, the loser goes to the back of the line and everyone moves up one place.
 
-Status: the relay side is built (`netplay/relay/koth.go`, `protocol_koth.go`, tests in
+Status: the relay side is built (`server/relay/koth.go`, `protocol_koth.go`, tests in
 `koth_test.go` and `protocol_koth_test.go`). The game side, phase 1, is built: CAPS, HILL, WATCH
 and RESULT in `src/hooks/netplay.c`, room slots 0..9 (routing, names, voice), the fighters' one
 fight per START with RESULT and no rematch, and in `src/hooks/online_screen.cpp` the create screen

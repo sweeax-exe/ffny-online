@@ -5,7 +5,7 @@ Read-only study (2026-10-25). Nothing was built or run. Sources: the front-end s
 own dump), the lifted C in `src/recomp/gen/recomp_00NN.c` read with `grep`, a few instruction-level reads of the
 XBE image (capstone, to settle flag questions the lifter marks "unsupported"), `game/assets/gamecore.xml`,
 `game/venue.xml`, the run logs in `logs/` (telemetry `match_type`, `[AUTOMATCH]`, `[FUNCCALL]`, `[FE-PROBE]`),
-and `src/hooks/{automatch,netplay,online_data,online_screen}`, `netplay/relay/`. No game bytes are reproduced.
+and `src/hooks/{automatch,netplay,online_data,online_screen}`, `server/relay/`. No game bytes are reproduced.
 Sections 10 and 11 (added 2026-10-25/26) are what the online Team and special-match modes built on it and measured.
 
 Tags: **[V]** verified by reading the exact code, script or log line; **[I]** inferred (reasoning given);

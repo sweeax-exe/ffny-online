@@ -164,7 +164,7 @@ type=0,venue=1,f0=55,p0=0,f1=22,p1=1`, `RECOMP_TEST_CP=slot=1,from=0,to=15,file=
 
 ## 5. Steps 2-4 as built (build 37 candidate)
 
-**Protocol** (`docs/netplay-protocol.md`, "Created fighters"; `netplay/relay/protocol_created.go`,
+**Protocol** (`docs/netplay-protocol.md`, "Created fighters"; `server/relay/protocol_created.go`,
 `created.go`): the 300-byte record (version, the 0x127-byte payload of section 2, CRC-32) goes up
 with `FIGHTER` (0x26), comes back as `RECORD` slot 0xFE (the relay's copy), and reaches the other
 room members as `RECORD` (0x27) on upload, on joining and right before `START`; `RECGET` (0x28)

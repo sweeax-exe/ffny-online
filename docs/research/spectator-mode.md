@@ -11,7 +11,7 @@ third copy watched both from the room. The spectator took the players' delay (2)
 behind them from its own entry store; it compared 60 checksums with the players' (30 checkpoints
 x 2 players, steps 60..900+ of both matches), all equal, no desync; the winners agreed; it went
 through both summaries by itself and was back in the room for the second match. Relay unit tests:
-`netplay/relay/spectate_test.go`.
+`server/relay/spectate_test.go`.
 
 ## 1. Why a spectator needs no game state
 

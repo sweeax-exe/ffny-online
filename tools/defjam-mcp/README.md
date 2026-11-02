@@ -169,4 +169,4 @@ The digest's callers are the crash block's stack scan filtered against the lifte
 | `close` | stop everything this server started, delete its roots, give the lock back |
 
 Build the game first (`scripts/build.ps1 -Preset win-x64-release`) and the local relay
-(`go build -o dist/relay.exe ./cmd/relay` in `netplay/relay`). Tests: `tests/unit/test_defjam_mcp_v2.py`.
+(`go build -o dist/relay.exe ./cmd/relay` in `server/relay`). Tests: `tests/unit/test_defjam_mcp_v2.py`.

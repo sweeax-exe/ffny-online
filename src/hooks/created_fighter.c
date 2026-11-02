@@ -8,7 +8,7 @@
  * (the relay's copy, validated and clamped here the same way on every PC) into a spare profile
  * slot, points the pad at it and sets the slot up with 99.
  *
- * The record (CP_REC_LEN bytes, netplay/relay/protocol_created.go): version, then the payload
+ * The record (CP_REC_LEN bytes, server/relay/protocol_created.go): version, then the payload
  *   +0x000 name (0x20)          profile +0xC
  *   +0x020 profile +0xFC..+0x143 (0x48): base stats, bonus stats, move keys, voice, styles, archetype
  *   +0x068 created flag (1)     profile +0x4D8A
@@ -242,7 +242,7 @@ int cp_record_sanitize(const uint8_t in[CP_REC_LEN], uint8_t out[CP_REC_LEN])
     memcpy(out, in, CP_REC_LEN);
     p = out + 1;
     /* name: printable ASCII, 1..CP_NAME_MAX (16) characters, the rest zero (the relay refuses a
-     * longer one: netplay/relay/protocol_created.go, ValidRecord) */
+     * longer one: server/relay/protocol_created.go, ValidRecord) */
     for (n = 0; n < CP_NAME_MAX && p[R_NAME + n]; n++)
         if (p[R_NAME + n] < 0x20 || p[R_NAME + n] > 0x7E) p[R_NAME + n] = '?';
     memset(p + R_NAME + n, 0, CP_NAME_BYTES - n);

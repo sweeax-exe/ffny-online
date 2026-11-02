@@ -30,18 +30,38 @@ def exe_path(preset="win-x64-release"):
     return os.path.join(REPO, "build", preset, GAME_IMAGE)
 
 
+def relay_src():
+    """The relay's Go module: the private server repository (sweeax-exe/ffny-server) cloned as
+    <checkout>/server, or the folder FFNY_SERVER_DIR names. A worktree uses the main checkout's."""
+    named = os.environ.get("FFNY_SERVER_DIR")
+    roots = [named] if named else []
+    roots.append(os.path.join(REPO, "server"))
+    try:
+        import subprocess
+        common = subprocess.run(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"], cwd=REPO,
+                                capture_output=True, text=True, check=True).stdout.strip()
+        roots.append(os.path.join(os.path.dirname(common), "server"))
+    except (OSError, subprocess.CalledProcessError):
+        pass
+    for root in roots:
+        if os.path.isfile(os.path.join(root, "relay", "go.mod")):
+            return os.path.join(root, "relay")
+    raise SystemExit("The relay's source is missing: clone sweeax-exe/ffny-server as <checkout>/server "
+                     "or set FFNY_SERVER_DIR")
+
+
 def relay_path():
-    return os.path.join(REPO, "netplay", "relay", "dist", "relay.exe" if WINDOWS else "relay")
+    return os.path.join(relay_src(), "dist", "relay.exe" if WINDOWS else "relay")
 
 
 def accounts_path():
-    return os.path.join(REPO, "netplay", "relay", "dist", "accounts.exe" if WINDOWS else "accounts")
+    return os.path.join(relay_src(), "dist", "accounts.exe" if WINDOWS else "accounts")
 
 
 def ensure_accounts():
     """Builds the local account service (ranked tests) when a Go source is newer than it."""
     import subprocess
-    src = os.path.join(REPO, "netplay", "relay")
+    src = relay_src()
     exe = accounts_path()
     built = os.path.getmtime(exe) if os.path.isfile(exe) else 0
     newest = 0
@@ -60,7 +80,7 @@ def ensure_relay():
     """Builds the local relay when a Go source is newer than it (or it is missing): the tests ran an
     Oct 28 relay on Nov 1 without the rooms they meant to test. Returns the relay's path."""
     import subprocess
-    src = os.path.join(REPO, "netplay", "relay")
+    src = relay_src()
     exe = relay_path()
     built = os.path.getmtime(exe) if os.path.isfile(exe) else 0
     newest = 0

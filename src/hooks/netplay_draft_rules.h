@@ -1,5 +1,5 @@
 /* Draft mode's pick and ban on the game's side (ranked phase 2b; docs/netplay-protocol.md "Ranked
- * queue", relay netplay/relay/draft.go). The relay is the authority; this is pure C with no Windows
+ * queue", relay server/relay/draft.go). The relay is the authority; this is pure C with no Windows
  * or game dependencies (tests/unit/test_netplay_draft_native.py compiles it natively):
  *   - DRAFT (0x2D) decoded, DRAFTACT (0x2E) encoded after its token,
  *   - the rules the pages draw from: whose turn, which action, each fighter tile's and venue

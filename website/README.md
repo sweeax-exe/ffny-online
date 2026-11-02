@@ -46,12 +46,12 @@ Right below the hero, `site.js` lists the tournaments from the account service
 (the API answers 404) or the service does not answer. The site's CSP must allow
 `connect-src https://play.defjam.online` (in `Caddyfile.site-snippet`). A local preview reads a local
 account service with `http://localhost:8000/?api=http://localhost:8095`. Design, API and deploy
-steps: `docs/tournaments.md`.
+steps: `server/docs/tournaments.md`.
 
 ## Deploy
 
 The page is served by Caddy on the FFNY server, from `/var/www/defjam.online`. The site block is
-`netplay/relay/deploy/Caddyfile.site-snippet` (`defjam.online`, with `www.defjam.online`
+`server/relay/deploy/Caddyfile.site-snippet` (`defjam.online`, with `www.defjam.online`
 redirected to it; HTTPS certificates are automatic, a strict Content-Security-Policy allows only
 the page's own files and the GitHub API).
 

@@ -5,7 +5,7 @@ Battle mode does not take a fighter from fighter.xml: Game.StartGame (sub_00046E
 Character records of this database and copies the one whose front-end ID equals the fighter ID
 Controller.ControllerSetup was given (docs/research/crash-001B2480.md, section 11). An ID without a
 record leaves the match slot empty and the load crashes, so the IDs printed here are the only
-fighters an online match may use (src/hooks/online_data.c, netplay/relay/protocol_lobby.go;
+fighters an online match may use (src/hooks/online_data.c, server/relay/protocol_lobby.go;
 tests/unit/test_battle_roster.py compares them).
 
     python scripts/sod-characters.py [--data <DEFJAM_DATA>] [--ids]

@@ -76,3 +76,7 @@ CLAUDE.local.md
 *.local.json
 *.local.md
 /config/menu-ui-*.json
+
+# The server (relay, account service, Discord bot) lives in the private repository
+# sweeax-exe/ffny-server, cloned here as server/.
+/server/

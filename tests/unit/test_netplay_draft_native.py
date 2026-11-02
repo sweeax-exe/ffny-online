@@ -1,5 +1,5 @@
 """Draft mode's pick and ban on the game's side (src/hooks/netplay_draft_rules.c, ranked phase 2b),
-compiled natively: DRAFT as the relay's DraftMsg.appendBody writes it (netplay/relay/draft.go; the
+compiled natively: DRAFT as the relay's DraftMsg.appendBody writes it (server/relay/draft.go; the
 example is the one draft_test.go pins), DRAFTACT's bytes, and the rules the Draft pages and the
 tests' automatic choice use (turns, ban owners A B B A A B, tile and venue states, banners). Needs
 MSVC (`cl` on PATH, e.g. after scripts/env.ps1); skips without it."""

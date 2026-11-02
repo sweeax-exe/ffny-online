@@ -14,7 +14,7 @@ extern "C" {
 #define CP_NAME_MAX     16      /* a record's name: the online name (16, as "Ghostface Killah") or the user ID */
 #define CP_USER_ID_MAX  8       /* what the game's user ID screen allows */
 #define CP_PAYLOAD      0x127   /* name, profile +0xFC..+0x143, flag, recipe, options */
-#define CP_REC_LEN      (1 + CP_PAYLOAD + 4)    /* version, payload, CRC-32 (netplay/relay/protocol_created.go) */
+#define CP_REC_LEN      (1 + CP_PAYLOAD + 4)    /* version, payload, CRC-32 (server/relay/protocol_created.go) */
 #define CP_REC_VERSION  1
 
 /* ---- the record (pure functions, no guest memory) ---- */

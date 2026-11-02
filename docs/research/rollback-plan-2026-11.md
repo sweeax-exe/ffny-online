@@ -1,7 +1,7 @@
 # Rollback netcode: where it stands and a plan to finish it (2026-11-01)
 
 A read-only study of `remaster` at e105db6. Nothing was built or run. Sources: `src/hooks/rollback.c`, `src/hooks/netplay.c`,
-`netplay/relay/cmd/relay/main.go`, `docs/research/rollback-*.md`, `rollback-sound-crashes.md`, `music-director-crash.md`,
+`server/relay/cmd/relay/main.go`, `docs/research/rollback-*.md`, `rollback-sound-crashes.md`, `music-director-crash.md`,
 `stream-table-crash.md`, `setstreamsource-crash.md`, `stuck-screen-fade.md`, `generator-timescale-desync.md`,
 `created-fighter-online.md`, `crash-001B2480.md`, git history from 2026-10-22, and the player reports in `logs/bug-reports/`.
 `PROGRESS.md` on this branch has no rollback entries (only D53, which is unrelated), and `docs/worklog/2026-10.md` has none either. The history is in the

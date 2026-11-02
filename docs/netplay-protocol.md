@@ -173,7 +173,7 @@ voting (for the countdown).
 Ranked play is best-of-three sets between signed-in players in three modes, each with its own
 rating and ladder: **Open** (every fighter, created and Story ones too), **Classic** (stock fighters
 only) and **Draft** (pick and ban). It is off in production until the account service's switch is on
-(`docs/ranked-design.md`). One central matchmaker on the account service pairs the queues of every
+(`server/docs/ranked-design.md`). One central matchmaker on the account service pairs the queues of every
 relay (EU, NA, West).
 
 - The game asks the account service for a **ticket** (`POST /api/ranked/ticket` with the launcher's
@@ -410,6 +410,6 @@ types from 0x27, dropped silently by older relays.
 
 ## Server operation
 
-The relay is one static binary (`netplay/relay`, Go). `relay -listen :27777` serves; it logs
+The relay is one static binary (`server/relay`, Go). `relay -listen :27777` serves; it logs
 one line per room event and a summary every minute, and keeps no state on disk. A systemd
-unit and Hetzner setup notes live beside it in `netplay/relay/README.md`.
+unit and Hetzner setup notes live beside it in `server/relay/README.md`.

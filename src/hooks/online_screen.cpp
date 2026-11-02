@@ -1397,7 +1397,7 @@ void open_servers()
 const int HUB_ITEMS = 8, HUB_LEAVE = 7, HUB_RANKED = 1, HUB_VOICE = 6;
 
 // RANKED MATCH shows once a relay's STATUS says its ranked queue is on (the account service's switch,
-// docs/ranked-design.md); RECOMP_RANKED=1 shows it for tests (a local relay is not probed).
+// server/docs/ranked-design.md); RECOMP_RANKED=1 shows it for tests (a local relay is not probed).
 bool ranked_shown()
 {
     if (gallery_on()) return G.ranked;

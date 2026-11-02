@@ -276,7 +276,7 @@ the same on every PC and for a step rollback runs again (the re-run reaches `sub
 offline play, the soak and the golden replay never reach it. `RECOMP_NETPLAY_GEN_PIN=off` (tests) turns it off.
 
 Set-up: two copies of one build on one PC (CPUs 28 and 30), a local relay with a fixed venue sequence (a scratch build of
-`netplay/relay` that answers every vote with the next venue of a list; not committed), `scripts/harness.py` routes `online5-p1/p2`
+`server/relay` that answers every vote with the next venue of a list; not committed), `scripts/harness.py` routes `online5-p1/p2`
 and `online-p1/p2`, `RECOMP_TEST_OBSERVATIONS=1`, `RECOMP_TEST_DRAWS=1`, accounts at 127.0.0.1:9. "rng_util" is the state word
 `0x39C160` in the `[TEST-STATE]` sample, which `defjam_test_step` takes at the step's entry **before** the re-seed, so with P1 it still
 shows what was drawn outside the step since the last one. A temporary build also tagged each draw of `0x39C0E0` made between the

@@ -2,7 +2,7 @@
  *
  * Trust: latest.json is only believed when latest.json.sig is a valid ECDSA P-256
  * signature over its exact bytes by the key whose public half is below (made with
- * netplay/relay/cmd/updatesign; the private half stays with whoever publishes). The
+ * server/relay/cmd/updatesign; the private half stays with whoever publishes). The
  * setup it names is only run when its SHA-256 is the one the signed manifest states.
  * The server and the connection are therefore not trusted; plain HTTP is enough.
  *
@@ -42,7 +42,7 @@ int updater_download(unsigned long long *got, unsigned long long *total) { if (g
 #pragma comment(lib, "winhttp.lib")
 #pragma comment(lib, "bcrypt.lib")
 
-/* The update service on the project's server (netplay/relay -updates-listen): its name, its address
+/* The update service on the project's server (server/relay -updates-listen): its name, its address
  * (for a resolver that does not know the name yet), then the first server, for as long as installs
  * from before the name still ask there.
  * The manifest is signed (below), so the host only needs to be reachable, not trusted. */

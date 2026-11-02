@@ -31,7 +31,6 @@ from djlib import copies as djcopies, logparse, machine, nav, roots, scenarios  
 REPO = machine.REPO
 DATA = machine.DATA
 EXE = machine.exe_path()
-RELAY = machine.relay_path()
 LOGS = os.path.join(REPO, "logs", "mcp")
 BASE_PORT = 4900
 INTRO_MOVIES = machine.INTRO_MOVIES

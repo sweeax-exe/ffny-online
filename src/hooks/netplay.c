@@ -3205,7 +3205,7 @@ static int json_put(char *out, int size, int n, const char *s)
  * `draw`), or "left" naming the players (mask) who stopped answering before that; "crashed" from
  * the crash handler when this game dies during the fight (netplay_on_crash). The service counts a
  * result when every player's game reports it alike, gives a player who left the loss, and makes a
- * match whose leaver's game crashed a no contest (netplay/relay/accounts/stats.go). Positions are
+ * match whose leaver's game crashed a no contest (server/relay/accounts/stats.go). Positions are
  * the fighters' controller slots: the room's players in slot order, then the CPU fighters. The
  * JSON goes to json; returns its length, 0 when there is no match to report. Called with g_cs
  * not held. */

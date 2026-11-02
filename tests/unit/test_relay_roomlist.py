@@ -1,11 +1,17 @@
 """Every relay's rooms (build 31 "both"; build 38 "all", three relays): the game's ROOMLIST client
-(src/hooks/netplay_servers.c) and the relay (netplay/relay/protocol_roomlist.go) must agree on the
+(src/hooks/netplay_servers.c) and the relay (server/relay/protocol_roomlist.go) must agree on the
 message type, the request's fields and its padding (the relay never answers with more bytes than it
 was sent), and the answer's layout; the setting must accept "all" and the old "both", the staged
 quick-match rule must stay the one the docs describe, and the hub test must offer the switches the
 tests use."""
 import re
 from pathlib import Path
+import pytest
+
+from server_src import RELAY as RELAY_SRC, SKIP
+
+if RELAY_SRC is None:
+    pytest.skip(SKIP, allow_module_level=True)
 
 ROOT = Path(__file__).resolve().parents[2]
 SERVERS_C = (ROOT / 'src/hooks/netplay_servers.c').read_text(encoding='utf-8')
@@ -16,9 +22,9 @@ NETPLAY_C = (ROOT / 'src/hooks/netplay.c').read_text(encoding='utf-8')
 SETTINGS_C = (ROOT / 'src/hooks/pc_settings.c').read_text(encoding='utf-8')
 SCREEN = (ROOT / 'src/hooks/online_screen.cpp').read_text(encoding='utf-8')
 PC_UI = (ROOT / 'src/hooks/pc_ui.cpp').read_text(encoding='utf-8')
-GO = (ROOT / 'netplay/relay/protocol_roomlist.go').read_text(encoding='utf-8')
-GO_BASE = (ROOT / 'netplay/relay/protocol.go').read_text(encoding='utf-8')
-GO_LOBBY = (ROOT / 'netplay/relay/protocol_lobby.go').read_text(encoding='utf-8')
+GO = (RELAY_SRC / 'protocol_roomlist.go').read_text(encoding='utf-8')
+GO_BASE = (RELAY_SRC / 'protocol.go').read_text(encoding='utf-8')
+GO_LOBBY = (RELAY_SRC / 'protocol_lobby.go').read_text(encoding='utf-8')
 HUB_TEST = (ROOT / 'scripts/netplay-hub-test.ps1').read_text(encoding='utf-8')
 PROTOCOL_DOC = (ROOT / 'docs/netplay-protocol.md').read_text(encoding='utf-8')
 

@@ -269,7 +269,7 @@ Cannot be proven by software, only made hard to get wrong; the server's signing 
 ### 3.5 Signing and trust
 
 Reuse the updater's scheme: ECDSA P-256 over SHA-256, verified with BCrypt (`src/hooks/updater.c`, `signature_ok`, public key
-compiled in, private half kept with the publisher; `netplay/relay/cmd/updatesign` is the signing tool). Use a **separate
+compiled in, private half kept with the publisher; `server/relay/cmd/updatesign` is the signing tool). Use a **separate
 key pair** for packs so a pack-signing mistake cannot sign an update. The server publishes a signed `packs/index.json`
 (`id`, `version`, `sha256` of the pack file, revoked flag), so a pack can be withdrawn. The launcher downloads by `id`, checks
 the signature and hashes, and only then installs. The game process refuses to enable an installed pack whose receipt does not
@@ -351,6 +351,6 @@ folder, the settings line, the ID computation and the Blender export code that s
 
 Files touched by this design (none changed by this study): `tools/ffny-studio/ffnystudio/{texture,game,viv,blender_data,__main__}.py`,
 new `texpack.py` and later `pack.py`, `blender/ffny_studio/{build,operators,ui,preferences}.py`, `src/hooks/pc_settings.c`
-(a `[mods]` section for the launcher), `src/hooks/netplay.c` and `netplay/relay` (content fingerprint), `src/main.c` (override
+(a `[mods]` section for the launcher), `src/hooks/netplay.c` and `server/relay` (content fingerprint), `src/main.c` (override
 directory, unchanged), `tools/xboxrecomp/src/kernel/kernel_path.c` and `kernel_file.c` (only for options B or C and the POSIX
 override).

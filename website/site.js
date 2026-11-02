@@ -120,7 +120,7 @@
       .catch(function () { /* keep the fallback link to the latest release */ });
   }
 
-  // ---- tournaments, from the account service (docs/tournaments.md) ----
+  // ---- tournaments, from the account service (server/docs/tournaments.md) ----
   var TOURNAMENTS = 'https://play.defjam.online';
 
   // A local preview may point at a local account service: http://localhost:8000/?api=http://localhost:8095

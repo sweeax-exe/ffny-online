@@ -1,6 +1,6 @@
 /*
  * FFNY Online account: sign-in with Discord, through the project's account service
- * (netplay/relay/accounts, behind https://play.defjam.online).
+ * (server/relay/accounts, behind https://play.defjam.online).
  *
  * The launcher never holds Discord's client secret. It makes a random secret, opens the browser
  * on /auth/discord/start with only the secret's SHA-256, and polls /auth/poll with the secret

@@ -3,18 +3,22 @@ record in the game's database (assets/djv2.sod). A fighter.xml ID without one le
 empty and crashes the load (docs/research/crash-001B2480.md, section 11): Teck, Santos, O.E and
 Eric Sermon under their fighter.xml IDs (builds 13/14), and Gwen (39) as the CPU that filled a free
 place of a live Free for All (build 31). The game (src/hooks/online_data.c) and the relay
-(netplay/relay/protocol_lobby.go) keep the same list; with the user's dump present it is compared
+(server/relay/protocol_lobby.go) keep the same list; with the user's dump present it is compared
 with the database itself and with what the game would offer from fighter.xml."""
 import importlib.util
 import os
 import re
 from pathlib import Path
-
 import pytest
+
+from server_src import RELAY as RELAY_SRC, SKIP
+
+if RELAY_SRC is None:
+    pytest.skip(SKIP, allow_module_level=True)
 
 ROOT = Path(__file__).resolve().parents[2]
 ONLINE_DATA = (ROOT / 'src/hooks/online_data.c').read_text(encoding='utf-8')
-RELAY = (ROOT / 'netplay/relay/protocol_lobby.go').read_text(encoding='utf-8')
+RELAY = (RELAY_SRC / 'protocol_lobby.go').read_text(encoding='utf-8')
 
 # The 75 Character records of the reference dump's djv2.sod, by front-end ID (numbers only).
 SOD_FE_IDS = [
