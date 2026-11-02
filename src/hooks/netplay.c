@@ -4796,7 +4796,7 @@ void netplay_on_update(void)
             for (k = 0; k < d; k++) before[k] = defjam_test_step_hash(t - d + k);
             if (rollback_soak_diff_on() && !twice) rollback_soak_before();
             rollback_to(N.step + 1 - (uint32_t)d);
-            if (rollback_soak_diff_on() && !twice) rollback_soak_after(d, t);
+            if (rollback_soak_diff_on() && !twice) rollback_soak_after(d, t, 0);
             if (twice) {
                 /* Both re-runs draw nothing, so what the first pass's renders wrote is no difference here:
                  * a step or a word that differs between them is state the load did not put back, or a
@@ -4811,14 +4811,21 @@ void netplay_on_update(void)
                     s_soak_wrong = 0;
                 }
                 rollback_to(N.step + 1 - (uint32_t)d);
-                if (rollback_soak_diff_on()) rollback_soak_after(d, t);
-                for (k = 0; k < d; k++) {
-                    unsigned long long again = defjam_test_step_hash(t - d + k);
-                    if (!first[k] || !again) continue;
-                    if (first[k] == again) twice_same++;
-                    else if (twice_differ++ < 20)
-                        fprintf(stderr, "[ROLLBACK] soak #%u: step %lld came out otherwise in the second re-run (back %d)\n",
-                                soaks + 1, t - d + k, d);
+                {
+                    int differ_here = 0;
+                    for (k = 0; k < d; k++) {
+                        unsigned long long again = defjam_test_step_hash(t - d + k);
+                        if (!first[k] || !again) continue;
+                        if (first[k] == again) twice_same++;
+                        else {
+                            differ_here = 1;
+                            if (twice_differ++ < 20)
+                                fprintf(stderr, "[ROLLBACK] soak #%u: step %lld came out otherwise in the second re-run (back %d)\n",
+                                        soaks + 1, t - d + k, d);
+                        }
+                    }
+                    /* every saved word that differs, when a step did (the first such soaks) */
+                    if (rollback_soak_diff_on()) rollback_soak_after(d, t, differ_here);
                 }
                 if ((soaks + 1) % 100 == 0)
                     fprintf(stderr, "[ROLLBACK] soak, two re-runs: %u steps the same, %u otherwise\n", twice_same, twice_differ);
