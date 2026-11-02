@@ -429,6 +429,25 @@ the first), and the soak now replays each step's pad words in re-runs.
   hoodiebatman's crash (F9 3ee301, a rollback rematch, step 1230, mixer thread then `sub_001EE3C0` writing to 0x84000000)
   and goloom's black venue-24 scene (F9 09d35d, the palette count wrap of `stuck-screen-fade.md` §9) are not fixed here.
 
+### Sixth round (on `remaster` eedecef): the three live rollback-beta reports
+* **Sound-engine crash after loads** (hoodiebatman F9 3ee301; reproduced): two-copy rollback at venue 24 (70+10 ms,
+  bots, `--rematch`) crashed in match 1 in both runs (`20261102-172650-online` step 1469, `-172928-online` step 1674),
+  normal updates, in the sound engine walking lists of nodes the game thread had made in the fight (0x24 from
+  `sub_00034FD0`, 0x10 via `sub_000379E0`), with the engine pool from audio start-up (arena block 80886480, 0x4B000)
+  involved as in 3ee301. Cause [V for the chains, I for the mechanism]: those two bus handlers were not in the list
+  silenced in re-runs (it came from the subscription call sites), so they rebuilt engine objects on payloads a load had
+  brought back. Fix ff5aa6b; after it `-173220-online` (3 matches) and `-174907-online` (4 matches, 107-270 rollbacks a
+  match): no crash, no desync. A bus audit (logged once per process) names 20 more audio handlers that still run in
+  re-runs; silencing all of them made both PCs leave each other after the knockout (`-173704-online`), so they stay.
+  The rematch runs are the cross-match test: rollback goes on through two and three rematches.
+* **Black venue-24 scene** (goloom F9 09d35d): the palette count wrap of `stuck-screen-fade.md` §9 by its signature.
+  The unbind ran only in phase 1, while saves and loads also happen in phase 0 (the lead-in) and in a rematch (phase 3
+  carried over); it now runs at every rollback update (7ee9b63), with probes for a save that sees device bindings and
+  for a bound object already one reference short. Neither probe fired in five venue-24 runs, and the black scene was not
+  reproduced: the cause is closed as a possible route, not proven. No toolkit change.
+* **Story crash** (goloom F9 64c4c2; also 875ad7, build 28): a NULL string view parsed by the C runtime; not the arena.
+  `sub_000BD440` now returns 0 for an empty view (0bbf8d1, re-lift).
+
 ### Next (after the third round)
 1. More two-copy long runs (the desyncs at steps 10 200 and 37 440 came once in two runs each; three later runs were clean),
    always with `RECOMP_NETPLAY_FINALLOG=1` so a desync can be traced to its first step.
