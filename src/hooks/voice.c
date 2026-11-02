@@ -4,7 +4,9 @@
  * The relay already forwards DATA from a room member to every other member, in any phase, so a
  * voice packet is one more DATA payload type and the server needs nothing new. 16 kHz mono,
  * 40 ms (640 samples) a packet, IMA ADPCM (4 bits a sample: 320 bytes, about 8 KB/s while a
- * player talks, nothing while they don't); no codec library to ship.
+ * player talks, nothing while they don't); no codec library to ship. A spectator (spectator mode)
+ * hears the room the same way and never talks: no microphone, nothing sent; the relay forwards the
+ * players' voice to the room's spectators and nothing a spectator sends.
  *
  * A thread of its own polls every 10 ms. While this PC is in a room it keeps the default speakers
  * fed (waveOut, 20 ms blocks, at most 80 ms queued) with the talkers mixed from a ring each; it
@@ -165,6 +167,16 @@ static int pad_held(void)
 
 /* ---- the speakers: open while in a room, fed 20 ms at a time ---------------------------------- */
 
+static void close_mic(void)
+{
+    int i;
+    if (!s_in) return;
+    waveInReset(s_in);
+    for (i = 0; i < IN_BUFS; i++) waveInUnprepareHeader(s_in, &s_ihdr[i], sizeof(WAVEHDR));
+    waveInClose(s_in);
+    s_in = NULL;
+}
+
 static void close_all(void)
 {
     int i;
@@ -175,12 +187,7 @@ static void close_all(void)
         waveOutClose(s_out);
         s_out = NULL;
     }
-    if (s_in) {
-        waveInReset(s_in);
-        for (i = 0; i < IN_BUFS; i++) waveInUnprepareHeader(s_in, &s_ihdr[i], sizeof(WAVEHDR));
-        waveInClose(s_in);
-        s_in = NULL;
-    }
+    close_mic();
     InterlockedExchange(&s_sending, 0);
     AcquireSRWLockExclusive(&s_lock);
     memset(s_rd, 0, sizeof(s_rd));
@@ -403,6 +410,11 @@ static DWORD WINAPI voice_thread(LPVOID unused)
         }
         if (!s_open && !open_playback()) continue;
         feed_speakers();
+        if (netplay_spectating()) {     /* spectator mode: it hears the room, it never talks */
+            if (s_in) close_mic();
+            InterlockedExchange(&s_sending, 0);
+            continue;
+        }
 
         if (test) {                     /* a 440 Hz tone, 40 ms at a time, as if someone talked all along */
             ULONGLONG now = GetTickCount64();
