@@ -5405,6 +5405,14 @@ static void snap_save(void)
     N.snap[slot].step = step;
     N.snap[slot].update = N.updates;
     N.snap[slot].test_step = defjam_test_current_step();
+    /* Every save without device bindings, also the saves inside a re-run and the first one after it:
+     * a created fighter's pose pass (cp_pose_in_step, which runs in re-runs since build 45) binds the
+     * model's textures and palettes, netplay_on_update's unbind does not run between re-run updates,
+     * and the saves took the device's references with them. The owner's created-fighter rollback match
+     * (2026-11-02, 109 ms): "a save with 4 device binding(s) ... running steps again", then textures
+     * and palettes bound without their reference (counts wrapping: black and white flicker), and a
+     * crash 6 s after the knockout (F9 03ccd0). */
+    rollback_unbind_textures();
     memcpy(N.snap[slot].crowd_gen, g_crowd_gen, sizeof(g_crowd_gen));
     N.snap[slot].crowd_gen_on = g_crowd_gen_on;
     EnterCriticalSection(&g_cs);
@@ -5454,6 +5462,7 @@ static void rollback_to(uint32_t f)
     rollback_check_tables("right after a load");
     {   /* the steps run again record anew which entries they read (netplay_on_pad_read) */
         uint32_t t;
+    rollback_unbind_textures();     /* a re-run just before (the soak's passes) may have bound some */
         int i;
         EnterCriticalSection(&g_cs);
         for (t = f - 1; t <= N.step + 1 && t + RING > N.step; t++)
