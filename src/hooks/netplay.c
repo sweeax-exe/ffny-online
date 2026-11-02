@@ -110,6 +110,7 @@ int netplay_room_ping(int s) { (void)s; return -1; }
 int netplay_room_results_wait(unsigned *s) { if (s) *s = 0; return 0; }
 int netplay_room_rollback(int s) { (void)s; return -1; }
 int netplay_lobby_caps(void) { return 0; }
+int netplay_online_twice(void) { return 0; }
 void netplay_sync_point(void) {}
 void netplay_on_main_menu(void) {}
 int netplay_match_abandoned(void) { return 0; }
@@ -194,6 +195,8 @@ void netplay_crowd_update(void) { sub_00081170(); }
 #define T_RECORD      0x29      /* a room member's record (slot, u16 length, record); slot 0xFE: the relay's copy of ours */
 #define T_RECGET      0x2A      /* the record of the member in a slot, again */
 #define T_SPECTATE    0x2B      /* watch a room (spectator mode, relays with CAPS bit 4) */
+#define T_PC          0x30      /* one session per PC (build 46): this PC's fingerprint; the relay acks or ERROR 11 */
+#define PC_TRIES      5         /* PC every RETRY_MS until the relay answers; none after these: an older relay */
 #define SLOT_SPECTATOR 0xFD     /* ROOM `you` of a spectator */
 #define RECORD_SELF   0xFE
 #define CAPS_KOTH     1u
@@ -278,6 +281,9 @@ static struct {
     int relay_caps;                 /* the relay's CAPS answer, -1 not yet */
     int caps_tries;
     ULONGLONG caps_sent;
+    int pc_tries, pc_done;          /* one session per PC (T_PC): sent, and answered or given up */
+    int online_twice;               /* the relay refused this session: this PC is already online there (ERROR 11) */
+    ULONGLONG pc_sent;
     /* created fighters (created_fighter.c): every room member's record as the relay sent it, this
      * client's own upload, and the records the last START named */
     uint8_t cp_rec[ROOMSLOTS][CP_REC_LEN];
@@ -2215,6 +2221,9 @@ static void on_packet(const uint8_t *b, int len)
                     N.caps_tries = 0;
                     N.caps_sent = 0;
                     N.relay_caps = -1;
+                    N.pc_tries = 0;         /* this PC's fingerprint, for one session per PC (T_PC) */
+                    N.pc_sent = 0;
+                    N.pc_done = 0;
                     N.cp_acked = 0;         /* the relay forgot our record with the session */
                     N.cp_tries = 0;
                 }
@@ -2290,6 +2299,12 @@ static void on_packet(const uint8_t *b, int len)
     case T_HILL:
         if (N.lobby) on_hill(b + 6, len - 6);
         break;
+    case T_PC:          /* the relay took this PC's fingerprint (build 46 relays) */
+        if (N.lobby && len >= 7 && !N.pc_done) {
+            N.pc_done = 1;
+            fprintf(stderr, "[NETPLAY] the relay knows this PC (one session per PC)\n");
+        }
+        break;
     case T_RECORD:
         if (N.lobby) on_record(b + 6, len - 6);
         break;
@@ -2344,9 +2359,10 @@ static void on_packet(const uint8_t *b, int len)
                 "The server is full.", "Too many attempts; wait a minute.", "The server lost this session.",
                 "Only the room's host can do that, and not while voting or playing.",
                 "Not possible here: not in a room, or already in one.",
-                "A new build is out: close the game and update in the launcher to play online." };
+                "A new build is out: close the game and update in the launcher to play online.",
+                "FFNY Online is already online on this PC." };
             int code = b[6];
-            const char *text = code >= 1 && code <= 10 ? why[code] : "The server refused the request.";
+            const char *text = code >= 1 && code <= 11 ? why[code] : "The server refused the request.";
             if (N.lobby && (code == 1 || code == 2 || code == 3 || code == 8 || code == 9 || code == 10)) {
                 /* refused, but the session goes on */
                 EnterCriticalSection(&g_cs);
@@ -2384,6 +2400,10 @@ static void on_packet(const uint8_t *b, int len)
                 InterlockedExchange(&N.state, NETPLAY_CONNECTING);
                 set_status("Reconnecting to %s...", N.server_text);
                 break;
+            }
+            if (code == 11) {
+                N.online_twice = 1;
+                fprintf(stderr, "[NETPLAY] the relay refused this session: this PC is already online there\n");
             }
             InterlockedExchange(&N.lockstep, 0);
             InterlockedExchange(&N.state, NETPLAY_FAILED);
@@ -2423,6 +2443,28 @@ static int koth_fighting_here(void)
             if (N.roomv.hill.line[i].slot == N.roomv.you && N.roomv.hill.line[i].state == NETLINE_FIGHTING) on = 1;
     LeaveCriticalSection(&g_cs);
     return on;
+}
+
+/* The fingerprint PC sends (ac_pc_id), or 0 for none. None to a relay on this PC (127.x: test copies,
+ * several on one PC, as pc_settings.c's may_run_beside_another lets them run). RECOMP_NETPLAY_PCID
+ * (tests): "off" none, "force" the real one even to a local relay, 32 hex digits that one instead. */
+static int pc_id_for_relay(uint8_t id[16])
+{
+    const char *v = getenv("RECOMP_NETPLAY_PCID");
+    const struct sockaddr_in *sa = (const struct sockaddr_in *)&N.server;
+    int local = sa->sin_family == AF_INET && (ntohl(sa->sin_addr.s_addr) >> 24) == 127;
+    if (v && !_stricmp(v, "off")) return 0;
+    if (v && strlen(v) == 32) {
+        int i;
+        for (i = 0; i < 16; i++) {
+            unsigned x;
+            if (sscanf(v + 2 * i, "%2x", &x) != 1) return 0;
+            id[i] = (uint8_t)x;
+        }
+        return 1;
+    }
+    if (local && !(v && !_stricmp(v, "force"))) return 0;
+    return ac_pc_id(id);
 }
 
 #define LAG_QUEUE 1024
@@ -2535,6 +2577,21 @@ static DWORD WINAPI net_thread(LPVOID unused)
                 fprintf(stderr, "[NETPLAY] the relay did not answer CAPS: an older relay, no King of the Hill\n");
             }
             N.caps_sent = now;
+        }
+        /* One session per PC (build 46): this PC's fingerprint, until the relay answers (a relay before
+         * build 46 never does: PC_TRIES); a second live session from this PC gets ERROR 11 */
+        if (N.lobby && N.have_token && N.state == NETPLAY_LOBBY && !N.pc_done && now - N.pc_sent >= RETRY_MS) {
+            uint8_t id[16], pb[6 + 8 + 1 + 16];
+            if (N.pc_tries++ < PC_TRIES && pc_id_for_relay(id)) {
+                int n = header(pb, T_PC);
+                memcpy(pb + n, N.token, 8); n += 8;
+                pb[n++] = 16;
+                memcpy(pb + n, id, 16); n += 16;
+                send_raw(pb, n);
+            } else {
+                N.pc_done = 1;
+            }
+            N.pc_sent = now;
         }
         /* created fighters: upload this player's record once the relay allows them, until it is kept */
         if (N.lobby && N.have_token && N.state == NETPLAY_LOBBY && N.relay_caps > 0 && (N.relay_caps & CAPS_CREATED)) {
@@ -2737,6 +2794,7 @@ static int start(const char *server, const char *name, int creating, const char 
     for (i = 0; i < ROOMSLOTS; i++) { N.pos_of_slot[i] = i < 2 ? i : -1; N.slot_rtt[i] = N.slot_rb[i] = -1; }
     N.last_pinginfo = 0;
     N.relay_caps = -1;
+    N.online_twice = 0;
     /* created fighters: read the player's own again (a new one may have been made meanwhile) */
     N.cp_mine_state = 0;
     N.cp_acked = 0;
@@ -2907,6 +2965,7 @@ int netplay_room_results_wait(unsigned *slots)
 }
 
 int netplay_lobby_caps(void) { return N.lobby ? N.relay_caps : 0; }
+int netplay_online_twice(void) { return N.state == NETPLAY_FAILED && N.online_twice; }
 
 void netplay_lobby_list(int mode)
 {

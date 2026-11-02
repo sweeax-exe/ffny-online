@@ -17,5 +17,8 @@ void ac_net_tick(uint64_t now_ms);
 /* Appends ,"ac":{...} for the running fight to json at n and returns the new length; the PC is
  * looked at again first, so a tool started during the fight is seen. */
 int ac_json(char *json, int size, int n);
+/* The PC fingerprint (the same hash the reports carry as "pc") as 16 bytes, for the relay's one session
+ * per PC (build 46); 0 when there is none (no MachineGuid, or not Windows). */
+int ac_pc_id(uint8_t out[16]);
 
 #endif

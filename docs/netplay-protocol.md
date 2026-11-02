@@ -51,7 +51,8 @@ silently (no reply), so the server cannot be used to reflect traffic.
 | 0x08 | `ERROR` | `code` u8, `text` string |
 
 Error codes: 1 room not found, 2 room full, 3 build mismatch, 4 bad name, 5 server full,
-6 rate limited, 7 unknown token (the client should start over with `HELLO`).
+6 rate limited, 7 unknown token (the client should start over with `HELLO`); 11 this PC is already
+online on this relay (build 46, "One session per PC" below).
 
 ## Rooms
 
@@ -412,6 +413,27 @@ types from 0x27, dropped silently by older relays.
   printable ASCII characters, voice 1..6, styles 0..4, base stats at most 50, bonus stats 0..38, move keys and
   recipe parts that the game's database has (others become the defaults). The sender plays the
   checked copy too.
+
+## One session per PC (build 46)
+
+The game refuses a second local copy (`one_instance_only`, `src/hooks/pc_settings.c`); the relay also
+refuses a second live hub session from one PC, for builds that skip that.
+
+| Type | Name | Direction | Body after the header |
+|---|---|---|---|
+| 0x30 | `PC` | client -> server | `token` 8, `len` u8 (1..32), the PC's fingerprint (16 bytes: the anti-cheat's machine hash, `ac_pc_id`) |
+| 0x30 | `PC` | server -> client | `status` u8 (0 accepted) |
+
+- The game sends `PC` right after its lobby `WELCOME`, every 400 ms until the answer, at most five
+  times (relays before build 46 drop the unknown type silently). It sends none to a relay on 127.x
+  (test copies run several sessions from one PC); `RECOMP_NETPLAY_PCID` = `off`, `force` or 32 hex
+  digits overrides that for tests.
+- A `PC` whose fingerprint another live session of the relay already has is answered **`ERROR 11`**
+  ("online twice") and the session is removed; the first one stays. The game shows "FFNY Online is
+  already online on this PC." and does not try another relay by itself. A session with that
+  fingerprint that has sent nothing for 5 s (a crashed game, a lost `BYE`) is replaced instead. The
+  relay logs who and where (names, anonymised ids, builds), no verdict.
+- Sessions that never send `PC` (builds before 46, local test copies) are never refused.
 
 ## Server operation
 

@@ -168,6 +168,21 @@ static int put_name(char *json, int size, int n, const char *s)
     return n;
 }
 
+int ac_pc_id(uint8_t out[16])
+{
+    int i, ok;
+    AcquireSRWLockExclusive(&g_lock);
+    make_hwid();
+    ok = g_hwid[0] != 0;
+    for (i = 0; ok && i < 16; i++) {
+        unsigned v = 0;
+        if (sscanf(g_hwid + 2 * i, "%2x", &v) != 1) ok = 0;
+        out[i] = (uint8_t)v;
+    }
+    ReleaseSRWLockExclusive(&g_lock);
+    return ok;
+}
+
 int ac_json(char *json, int size, int n)
 {
     int i;
@@ -190,5 +205,6 @@ int ac_json(char *json, int size, int n)
 void ac_match_begin(void) {}
 void ac_net_tick(uint64_t now_ms) { (void)now_ms; }
 int ac_json(char *json, int size, int n) { (void)json; (void)size; return n; }
+int ac_pc_id(uint8_t out[16]) { (void)out; return 0; }
 
 #endif

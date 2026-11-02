@@ -4364,7 +4364,8 @@ bool draw(ImVec2 display)
     if (st == NETPLAY_FAILED || st == NETPLAY_OFF) {
         // Automatic: one more try on the other server when it answers its status (a relay that is
         // down, or blocked on this network), before the player sees "no connection"
-        if (!gallery_on() && st == NETPLAY_FAILED && !S.fallback_tried &&
+        // (not when the relay refused a second session from this PC: another relay would only hide it)
+        if (!gallery_on() && st == NETPLAY_FAILED && !S.fallback_tried && !netplay_online_twice() &&
             (server_choice() == NETCHOICE_AUTO || server_choice() == NETCHOICE_ALL)) {
             NetServerInfo sv[NETSERVER_COUNT];
             servers(sv);

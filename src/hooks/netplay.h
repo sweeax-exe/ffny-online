@@ -122,6 +122,9 @@ typedef struct NetRoom {
 #define NETPLAY_CAP_YIELD 4
 #define NETPLAY_CAP_SPECTATE 16    /* spectator mode: rooms can be watched (netplay_lobby_spectate) */
 int netplay_lobby_caps(void);
+/* 1 when the relay refused the hub session because this PC already has a live session there (ERROR 11,
+ * build 46 relays): another copy of the game is online on this PC. Not a connection problem. */
+int netplay_online_twice(void);
 
 /* Enter the hub on `server`. The state becomes NETPLAY_LOBBY once the server answers; a room's
  * START makes it NETPLAY_CONNECTED for the match, which starts by itself (automatch.h), and it
