@@ -245,6 +245,7 @@ void netplay_crowd_update(void) { sub_00081170(); }
 #define RETRIES       8
 #define RB_AHEAD      8             /* rollback: steps a PC runs on predicted entries before it waits */
 #define RB_LESS       4             /* hub matches where every PC rolls back: the delay is this much shorter */
+#define MULTI_MARGIN  1             /* lockstep matches of three or four players: this much longer (build 46) */
 
 static CRITICAL_SECTION g_cs;
 static INIT_ONCE g_once = INIT_ONCE_STATIC_INIT;
@@ -1353,13 +1354,18 @@ static int every_player_rolls_back(void)
 
 static int agreed_delay(void)
 {
-    int a = 0, b = 0, i, d;
+    int a = 0, b = 0, i, d, rb = every_player_rolls_back();
     for (i = 0; i < N.players; i++) {
         int r = N.peer_rtt[i] < 0 ? 0 : N.peer_rtt[i];
         if (r > a) { b = a; a = r; } else if (r > b) b = r;
     }
     d = ((a + b) / 2 * 3 + 49) / 50 + 1;      /* ms to 1/60 s steps, rounded up, + 1 */
-    if (every_player_rolls_back()) d -= RB_LESS;   /* what the delay does not cover, a rollback does */
+    if (rb) d -= RB_LESS;                       /* what the delay does not cover, a rollback does */
+    /* Lockstep with three or four players: every step waits for every player, so a packet gap of any
+     * one of them stalls all, and with two or three others the gaps add up (a 3-way of good pings at
+     * delay 3 froze for every ~100 ms gap of any player, 2026-11-02). One step more of margin there.
+     * From N.players and the P_RTT flags alone, which every PC of the match has the same. */
+    if (!rb && N.players >= 3) d += MULTI_MARGIN;
     return d < DELAY_MIN ? DELAY_MIN : d > DELAY_MAX ? DELAY_MAX : d;
 }
 
