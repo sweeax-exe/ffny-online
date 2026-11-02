@@ -6,7 +6,7 @@
  *    thread's blocks, the music refiller) and the pages the sound engine, the loader and the
  *    frame producer write. The small-block allocator's free lists (0x3A4B60..) are in it: a load
  *    that restores the heap without them crashes in the next allocation.
- *  - the heap block 0x80003000..0x82A0D000, page by page, less the sound engine's memory (the
+ *  - the game's heap block (found at run time, find_heap), page by page, less the sound engine's memory (the
  *    pages the audio subsystem's start-up writes, from AudioManagedRAM on), the frame-record
  *    queue the 60 Hz producer fills, and the pages the other threads write while the game
  *    thread is held at the first step. Only 2-3 MB of the 42 MB change in a fight.
@@ -29,9 +29,18 @@
 #include "recomp/gen/recomp_types.h"
 
 #define PAGE        4096u
-#define HEAP_LO     0x80003000u
-#define HEAP_HI     0x82A0D000u
+/* The game's heap: the one big block it takes from the contiguous window at start (all that
+ * MmQueryStatistics says is free, about 42 MB). It was 0x80003000..0x82A0D000 until the toolkit's
+ * low reserve (v0.12 merge) moved it to 0x81000000..0x83A09000: with the old constants the saves
+ * rewound the audio arena and GPU blocks below 16 MB and left the heap's top 16 MB out (the sound
+ * engine crashed in sub_0011E530 80 steps into every rollback match, 2026-11-02). So it is found at
+ * run time, as the largest block in the window (find_heap). */
+static uint32_t s_heap_lo = 0x80003000u, s_heap_hi = 0x82A0D000u;
+static int s_heap_found;
+#define HEAP_LO     s_heap_lo
+#define HEAP_HI     s_heap_hi
 #define HEAP_PAGES  ((HEAP_HI - HEAP_LO) / PAGE)
+#define HEAP_PAGES_MAX (0x04000000u / PAGE)     /* the whole 64 MB window */
 #define AUDIO_RAM   0x0033E9E4u     /* AudioManagedRAM, the sound engine's first block */
 #define FRAME_QUEUE 0x003A017Cu     /* the frame-record queue object (registry 0x27) */
 #define QUEUE_BYTES 0x1AA0u
@@ -109,14 +118,14 @@ typedef struct {
     LONG at;                    /* s_saves when it was taken: frees held after it are undone by its load */
 } Slot;
 
-static uint8_t s_skip[HEAP_PAGES];      /* 1: left alone */
+static uint8_t s_skip[HEAP_PAGES_MAX];      /* 1: left alone */
 /* Per page, the words the mixer thread writes (one bit each): a load restores the page around them. A
  * whole page left alone for a few mixer words took the game objects beside them out of the saves (the
  * music's next track, about 2.8 minutes in: three heap pages, 8 bytes each, then a division by zero in
  * sub_00081170; five-match run, 2026-10-25). */
-static uint8_t *s_mixmask[HEAP_PAGES];
-static uint8_t s_known[HEAP_PAGES];     /* 1: in s_change */
-static uint32_t s_change[HEAP_PAGES];   /* heap pages known to change, in the order found */
+static uint8_t *s_mixmask[HEAP_PAGES_MAX];
+static uint8_t s_known[HEAP_PAGES_MAX];     /* 1: in s_change */
+static uint32_t s_change[HEAP_PAGES_MAX];   /* heap pages known to change, in the order found */
 static unsigned s_nchange, s_cursor;
 static uint8_t *s_ref;                  /* the heap at the reference point */
 static Range s_dseg[MAX_DSEG];
@@ -126,12 +135,12 @@ static Slot s_slot[ROLLBACK_SLOTS];
 static int s_ready;
 static uint32_t s_audio_lo, s_audio_hi;
 static uint64_t *s_boot_hash;
-static uint8_t s_audio_page[HEAP_PAGES];    /* 1: the audio subsystem's (left alone) */
+static uint8_t s_audio_page[HEAP_PAGES_MAX];    /* 1: the audio subsystem's (left alone) */
 /* write tracking */
-static uint8_t s_guard[HEAP_PAGES];     /* 1: read-only, not written since the reference */
+static uint8_t s_guard[HEAP_PAGES_MAX];     /* 1: read-only, not written since the reference */
 /* Diagnostics: the saved pages are read-only for the length of a mixer tick, so the first write to each
  * names its thread and address (RECOMP_ROLLBACK_WRITERS=1, with the allocation log on). */
-static uint8_t s_mixguard[HEAP_PAGES];
+static uint8_t s_mixguard[HEAP_PAGES_MAX];
 static volatile LONG s_writers_on = -1;
 static DWORD s_mixer_tid;
 static void writer_seen(uint32_t addr, DWORD tid);
@@ -195,6 +204,34 @@ int rollback_enabled(void)
     return on;
 }
 
+/* The game's heap block: the largest block of the contiguous window (the game takes it at start, before
+ * the sound engine's start-up). Until it is there the old constants stand. */
+extern uint32_t xbox_ContiguousBlockSize(uint32_t va);
+static void find_heap(void)
+{
+    uint32_t va = 0x80000000u + PAGE, best = 0, best_size = 0;
+    if (s_heap_found) return;
+    while (va < 0x84000000u) {
+        uint32_t s = xbox_ContiguousBlockSize(va);
+        if (!s) { va += PAGE; continue; }
+        if (s > best_size) { best = va; best_size = s; }
+        va += (s + PAGE - 1) & ~(PAGE - 1);
+    }
+    best_size &= ~(PAGE - 1);
+    if (best_size < 16u * 1024u * 1024u || best_size / PAGE > HEAP_PAGES_MAX) return;
+    s_heap_lo = best;
+    s_heap_hi = best + best_size;
+    s_heap_found = 1;
+    fprintf(stderr, "[ROLLBACK] the game's heap: %08X..%08X (%u KB)\n", s_heap_lo, s_heap_hi, best_size / 1024);
+}
+
+void rollback_heap_range(uint32_t *lo, uint32_t *hi)
+{
+    find_heap();
+    if (lo) *lo = HEAP_LO;
+    if (hi) *hi = HEAP_HI;
+}
+
 static uint64_t page_hash(uint32_t addr)
 {
     const uint64_t *w = (const uint64_t *)XBOX_PTR(addr);
@@ -209,6 +246,7 @@ void rollback_audio_init_begin(void)
     unsigned p;
     if (s_audio_state) return;
     if (!rollback_enabled()) { s_audio_state = 2; return; }
+    find_heap();
     s_boot_hash = (uint64_t *)malloc(HEAP_PAGES * sizeof(uint64_t));
     if (!s_boot_hash) { s_audio_state = 2; return; }
     for (p = 0; p < HEAP_PAGES; p++) s_boot_hash[p] = page_hash(HEAP_LO + p * PAGE);
@@ -513,7 +551,7 @@ static int watched_loaded(void)
 {
     uint32_t o = MEM32(0x003A52A8u);
     int k;
-    for (k = 0; k < 4096 && o >= 0x80003000u && o < 0x82A0D000u; k++, o = MEM32(o))
+    for (k = 0; k < 4096 && o >= HEAP_LO && o < HEAP_HI; k++, o = MEM32(o))
         if (o == s_wobj) return 1;
     return 0;
 }
@@ -798,7 +836,7 @@ void rollback_note_dynamic_load(uint32_t caller, uint32_t handle)
     if (check_on() && s_tracking && handle >= 0x10000u) {
         uint32_t obj = MEM32(handle);
         rollback_check_tables("before the next load");
-        if (obj >= 0x80003000u && obj < 0x82A0D000u) {
+        if (obj >= HEAP_LO && obj < HEAP_HI) {
             s_wobj = obj;
             s_wcount = MEM32(obj + 0x10u);
             s_wchain = MEM32(obj + 0x420u);
@@ -880,7 +918,7 @@ static void build_data(const uint8_t *data_bg, unsigned data_pages)
  * the engine's stream table and the mixer crashed in sub_001E8340 in the second match (2026-10-25); kept
  * for ever they fill the arena (1-2 MB a fight in a 64 MB window that is 61 MB full). So guest memory is
  * scanned for words that point into a kept block, the way a conservative collector marks: the image's
- * data, the thread stacks and XAPI's heap up to 0x01600000, and the heap and contiguous window above. */
+ * data, the thread stacks and XAPI's heap up to 0x04000000, and the heap and contiguous window above. */
 typedef struct { uint32_t lo, hi; int ref; } Kept;
 static Kept *s_kept;
 static unsigned s_nkept;
@@ -934,7 +972,9 @@ static void release_kept_arena(void)
     s_nkept = n;
     if (n) {
         uint32_t at = HEAP_LO;
-        mark_range(0x00010000u, 0x01600000u);
+        /* below the window: the image, the stacks and XAPI's heap, which runs to 0x04000000 since the
+         * toolkit's v0.12 layout ("Heap: 48 MB at 0x00F80000-0x04000000"; it ended at 0x01600000 before) */
+        mark_range(0x00010000u, 0x04000000u);
         /* the heap and the whole contiguous window above it (the arena, DirectSound's voice memory, the GPU
          * data), less the kept blocks themselves: one that only a kept block names is no less dead */
         for (k = 0; k < n; k++) {
@@ -960,6 +1000,13 @@ int rollback_prepare(void)
     unsigned p, held_heap = 0, held_data = 0;
     uint32_t queue = MEM32(FRAME_QUEUE);
     rollback_reset();
+    if (!s_heap_found) {
+        find_heap();
+        if (!s_heap_found) {
+            fprintf(stderr, "[ROLLBACK] off for this match: the game's heap block was not found\n");
+            return -1;
+        }
+    }
     release_kept_arena();
     if (!s_audio_lo) {
         fprintf(stderr, "[ROLLBACK] off for this match: the sound engine's memory is unknown\n");
@@ -2028,6 +2075,7 @@ void rollback_mixer_unlock_b(void) { if (MEM32(g_esp) == MIX_UNLOCKS) mixer_end(
 
 #else
 int rollback_enabled(void) { return 0; }
+void rollback_heap_range(uint32_t *lo, uint32_t *hi) { if (lo) *lo = 0x80003000u; if (hi) *hi = 0x82A0D000u; }
 int rollback_soak_diff_on(void) { return 0; }
 void rollback_soak_before(void) {}
 void rollback_soak_after(int depth, long long step) { (void)depth; (void)step; }

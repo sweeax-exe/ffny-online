@@ -368,7 +368,8 @@ static struct {
     double rb_ms_max, rb_ms_total;
     /* the same for this match alone (rb_* above run on for the whole session), the step of its first
      * prediction (0: none yet) and whether its summary line went out */
-    struct { unsigned count, steps, deepest, slow; double ms_max, ms_total; uint32_t first_pred; int on, told; } rbm;
+    struct { unsigned count, steps, deepest, slow; double ms_max, ms_total; uint32_t first_pred; int on, told; unsigned num; } rbm;
+    unsigned rb_matches;                /* rollback matches this session (rbm.num) */
     char toast[160];                /* a notice for the fight (netplay_toast), until toast_until */
     ULONGLONG toast_until;
     char notice[96];                /* the relay's maintenance NOTICE text, counted down to notice_at */
@@ -1838,7 +1839,8 @@ static void on_packet(const uint8_t *b, int len)
                 fprintf(stderr, "[NETPLAY] the relay supports %08X%s%s%s\n", (unsigned)N.relay_caps,
                         N.relay_caps & CAPS_KOTH ? " (King of the Hill)" : "",
                         N.relay_caps & CAPS_ROLLBACK ? " (rollback allowed)" : "",
-                        N.relay_caps & CAPS_CREATED ? " (created fighters allowed)" : "");        }
+                        N.relay_caps & CAPS_CREATED ? " (created fighters allowed)" : "");
+        }
         break;
     case T_HILL:
         if (N.lobby) on_hill(b + 6, len - 6);
@@ -3326,7 +3328,7 @@ static void rbm_summary(const char *why)
     if (!N.rbm.on || N.rbm.told) return;
     N.rbm.told = 1;
     fprintf(stderr, "[ROLLBACK] match %u %s: %u rollbacks, %u steps run again, deepest %u, %.2f ms average, %.2f ms longest, "
-            "%u slow; first prediction %s%u\n", N.match_count, why, N.rbm.count, N.rbm.steps, N.rbm.deepest,
+            "%u slow; first prediction %s%u\n", N.rbm.num, why, N.rbm.count, N.rbm.steps, N.rbm.deepest,
             N.rbm.count ? N.rbm.ms_total / N.rbm.count : 0.0, N.rbm.ms_max, N.rbm.slow,
             N.rbm.first_pred ? "at step " : "never", N.rbm.first_pred);
 }
@@ -3817,6 +3819,7 @@ void netplay_on_step(void)
             s = ++N.step;
             if (s == 1 && !N.resim && rollback_prepare() == 0) {
                 N.rb_on = N.rb_ref_due = N.rbm.on = 1;
+                N.rbm.num = ++N.rb_matches;
                 rollback_crash_cb = rollback_crash_state;
             }
         }
@@ -3861,6 +3864,7 @@ void netplay_on_step(void)
         if (crowd_on) crowd_reset(g_ecx);
         if (!N.resim && match_rolls_back() && rollback_prepare() == 0) {
             N.rb_on = N.rb_ref_due = N.rbm.on = 1;
+            N.rbm.num = ++N.rb_matches;
             rollback_crash_cb = rollback_crash_state;   /* a crash before the first rollback says its state too */
         }
         {   /* what the fight made of the setup: the mode mask (1 one on one, 2 team, 4 3-way, 8 4-way), the
@@ -3969,7 +3973,7 @@ void netplay_on_step(void)
     N.predicting = N.rb_on && rollback_ready() && MEM32(G_MATCH_PHASE) == 1u && N.final_step > (uint32_t)N.delay;
     if (N.predicting && !N.rbm.first_pred) {   /* B3/G4: whether a match predicts at all, and from when */
         N.rbm.first_pred = s;
-        fprintf(stderr, "[ROLLBACK] first prediction in match %u at step %u (final %u, delay %d)\n", N.match_count, s,
+        fprintf(stderr, "[ROLLBACK] first prediction in match %u at step %u (final %u, delay %d)\n", N.rbm.num, s,
                 N.final_step, N.delay);
     }
     need = N.predicting ? (s > RB_AHEAD ? s - RB_AHEAD : 0) : s;
@@ -4194,10 +4198,11 @@ static void rollback_crash_state(void)
     rollback_crash_objects();   /* the registers' objects: vtable, +0xC, +0x10, their pages, made in a re-run? */
     {   /* EAGL's loaded objects (list head 0x3A52A8, next at +0, previous at +4: the insert at 0x10A3DD
          * stores the old head at +0 of the new one): which one is bad, and its page */
-        uint32_t o = MEM32(0x003A52A8u);
+        uint32_t o = MEM32(0x003A52A8u), heap_lo, heap_hi;
         int k;
+        rollback_heap_range(&heap_lo, &heap_hi);
         for (k = 0; k < 48 && o; k++) {
-            int sane = o >= 0x80003000u && o < 0x82A0D000u;
+            int sane = o >= heap_lo && o < heap_hi;
             fprintf(stderr, "[ROLLBACK]   loaded object %08X (%s)%s\n", o, rollback_page_state(o), sane ? "" : " NOT A HEAP ADDRESS");
             if (!sane) break;
             {   /* dlsym's pointers: +8 string table, +0x10 symbol count, +0x14 symbol table, +0x420 chain, +0x424 flags */
