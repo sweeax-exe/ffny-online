@@ -31,6 +31,21 @@ int pc_launcher_wanted(int skip_setting, int force_flag, int no_flag, int shift_
  * nothing happens and the game's frame is sent). */
 void pc_ui_report_shot(const char *path);
 
+/* ui.button_icons: which button symbols the online screens draw. */
+enum { PC_UI_ICONS_AUTO = 0, PC_UI_ICONS_XBOX = 1, PC_UI_ICONS_PLAYSTATION = 2 };
+
+/* Whether a pad's name (xbox_HostInputSlotInfo, from SDL) is a PlayStation pad's. */
+int pc_ui_pad_is_playstation(const char *name);
+
+/* The set to draw (PC_UI_ICONS_XBOX or _PLAYSTATION) for the setting and what drives player 1:
+ * slot_what/slot_name as xbox_HostInputSlotInfo(0) gives them, sdl_playstation 1 when SDL says
+ * that pad is a PS3/PS4/PS5 pad (0 not, -1 unknown). Auto: PlayStation only for a PlayStation pad;
+ * the keyboard alone, or nothing, is Xbox. */
+int pc_ui_button_icons_pick(int setting, int slot_what, const char *slot_name, int sdl_playstation);
+
+/* The set to draw now (pc_ui.cpp): the setting, and for auto player 1's pad, looked at twice a second. */
+int pc_ui_button_icons(void);
+
 #if defined(_WIN32)
 /* ---- the in-game overlay (pc_ui.cpp) ------------------------------------------ */
 

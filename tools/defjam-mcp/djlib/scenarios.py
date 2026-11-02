@@ -605,7 +605,7 @@ def format_result(r):
 
 def gallery(page_ms=1500, timeout=300, lock_timeout=None, log=None, keep_roots=False, extra_env=None):
     """The online screens' sample pages (RECOMP_TEST_ONLINE_GALLERY), one PNG each. extra_env adds
-    switches, e.g. RECOMP_TEST_ONLINE_GALLERY_ONLY=stats for some pages only."""
+    switches, e.g. RECOMP_TEST_ONLINE_GALLERY_ONLY=stats or RECOMP_BUTTON_ICONS=playstation."""
     t0 = time.time()
     s = copies.Session("gallery", lock_timeout=lock_timeout, log=log, keep_roots=keep_roots).open()
     result = {"scenario": "gallery", "ok": False}

@@ -23,11 +23,15 @@
 #include <mutex>
 #include <SDL3/SDL.h>
 #endif
+#if defined(_WIN32) && defined(XBOXRECOMP_HAVE_SDL3)
+#include <SDL3/SDL.h>       // the pads' types, for the button icons (pc_ui_button_icons)
+#endif
 #include <ctype.h>
 #include <stdio.h>
 #include <string.h>
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <string>
 #include <vector>
 #include <map>
@@ -238,6 +242,7 @@ static const char *friendly(const char *section, const char *key)
         {"debug", "skip_intro", "Skip startup movies and legal screen"},
         {"ui", "overlay_pad", "Overlay pad buttons"},
         {"ui", "overlay_key", "Overlay key"},
+        {"ui", "button_icons", "Button icons"},
         {"online", "server", "Server"},
         {"online", "name", "Your name"},
         {"online", "input_delay", "Input delay (steps)"},
@@ -772,6 +777,9 @@ static bool setting_widget(RecompSetting *s, const char *label = nullptr, bool s
         auto shown = [s](const char *choice) {
             if (!strcmp(s->key, "crowd_near"))
                 return std::string(!strcmp(choice, "fade") ? "Fade (original)" : "Hide");
+            if (!strcmp(s->key, "button_icons"))
+                return std::string(!strcmp(choice, "auto") ? "Auto (from player 1's controller)" :
+                                   !strcmp(choice, "xbox") ? "Xbox" : "PlayStation");
             std::string text = choice;
             std::replace(text.begin(), text.end(), '_', ' ');
             return text;
@@ -1403,6 +1411,48 @@ void ui_home_devices()
         ImGui::TextDisabled("No controller connected / keyboard available");
 }
 
+// ui.button_icons, for the online screens: the setting, and for auto what drives player 1. The pad's
+// name comes from the input host (SDL's name); SDL's own type of the pad by that name settles a
+// PlayStation-compatible pad with another name. Looked at twice a second; logged when it changes.
+extern "C" int pc_ui_button_icons(void)
+{
+    int setting = recomp_settings_get("ui", "button_icons", PC_UI_ICONS_AUTO);
+    if (setting != PC_UI_ICONS_AUTO) return setting == PC_UI_ICONS_PLAYSTATION ? PC_UI_ICONS_PLAYSTATION : PC_UI_ICONS_XBOX;
+    static std::atomic<int> cached{-1};
+    static std::atomic<long long> next{0};
+    static std::string last_name;           // the drawing thread's only (the hub and the overlay draw there)
+    static int last_sdl = -1;
+    long long now = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+    int have = cached.load();
+    if (have >= 0 && now < next.load()) return have;
+    next = now + 500;
+    char name[96];
+    int what = xbox_HostInputSlotInfo(0, name, sizeof name);
+    if (!(what & 1)) name[0] = 0;
+    if (last_name != name) {        // a new pad on player 1: ask SDL what it is
+        last_name = name;
+        last_sdl = -1;
+#if defined(XBOXRECOMP_HAVE_SDL3)
+        int count = 0;
+        SDL_JoystickID *ids = name[0] ? SDL_GetGamepads(&count) : nullptr;
+        for (int i = 0; ids && i < count; i++) {
+            const char *n = SDL_GetGamepadNameForID(ids[i]);
+            if (!n || !*n || strncmp(name, n, strlen(n))) continue;      // "<name>" or "<name> + keyboard"
+            SDL_GamepadType t = SDL_GetGamepadTypeForID(ids[i]);
+            last_sdl = t == SDL_GAMEPAD_TYPE_PS3 || t == SDL_GAMEPAD_TYPE_PS4 || t == SDL_GAMEPAD_TYPE_PS5;
+            break;
+        }
+        SDL_free(ids);
+#endif
+    }
+    int pick = pc_ui_button_icons_pick(setting, what, name, last_sdl);
+    if (pick != cached.exchange(pick))
+        fprintf(stderr, "[UI] button icons: %s (player 1: %s)\n", pick == PC_UI_ICONS_PLAYSTATION ? "PlayStation" : "Xbox",
+                name[0] ? name : (what & 2) ? "keyboard" : "nothing");
+    return pick;
+}
+
 static void draw_stick(const char *id, float x, float y, float radius)
 {
     ImVec2 c = ImGui::GetCursorScreenPos();
@@ -1459,6 +1509,7 @@ static void page_controllers()
 
     ImGui::SeparatorText("Who plays");
     settings_group("input", { "keyboard_player", "ports", "backend" });
+    settings_group("ui", { "button_icons" });
     ImGui::SeparatorText("Sticks and triggers");
     settings_group("gamepad", { "left_deadzone", "right_deadzone", "trigger_threshold", "button_threshold",
                                 "left_stick", "right_stick" });
@@ -2495,6 +2546,7 @@ static void page_basics()
     settings_group("online", { "voice", "voice_key", "voice_pad" });
     ImGui::SeparatorText("Online");
     server_widget();
+    settings_group("ui", { "button_icons" });
     settings_group("online", { "rollback" });
     ImGui::TextDisabled("Beta: used only when the other player has it on too. Applies the next time the game starts.");
     ImGui::SeparatorText("HD textures");

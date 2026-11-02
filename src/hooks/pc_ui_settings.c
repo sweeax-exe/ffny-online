@@ -10,6 +10,8 @@
 
 #include "pc_ui.h"
 
+static const char *const k_button_icons[] = { "auto", "xbox", "playstation", NULL };
+
 size_t pc_ui_settings(RecompSetting *out, size_t max)
 {
     size_t n = 0;
@@ -40,8 +42,39 @@ size_t pc_ui_settings(RecompSetting *out, size_t max)
     ADD("launcher", "gpu_notice_seen", RECOMP_SETTING_BOOL, 0, 0, 0, NULL, NULL, 0,
         "The launcher told you once that an integrated or small graphics card runs better with HD textures "
         "off and render scale 1 (0 shows the notice again).");
+    ADD("ui", "button_icons", RECOMP_SETTING_ENUM, 0, 0, 0, k_button_icons, "RECOMP_BUTTON_ICONS", 0,
+        "The button symbols on the online screens: auto shows PlayStation symbols (cross, circle, square, "
+        "triangle) when player 1 plays with a PlayStation controller and Xbox letters otherwise, also on "
+        "the keyboard. The game's own menus keep their Xbox letters.");
 #undef ADD
     return n;
+}
+
+/* A pad's name says PlayStation: SDL's names (PS3/PS4/PS5 Controller, DualSense Wireless Controller),
+ * Sony's own ("Wireless Controller", the DualShock 4 over USB) and the common drivers' (DualShock,
+ * Sixaxis). Case does not matter. */
+int pc_ui_pad_is_playstation(const char *name)
+{
+    static const char *const words[] = { "dualsense", "dualshock", "playstation", "sixaxis", "sony",
+                                         "ps3", "ps4", "ps5", NULL };
+    char low[128];
+    size_t i;
+    if (!name || !*name) return 0;
+    for (i = 0; name[i] && i + 1 < sizeof(low); i++)
+        low[i] = (char)(name[i] >= 'A' && name[i] <= 'Z' ? name[i] + 32 : name[i]);
+    low[i] = 0;
+    if (!strcmp(low, "wireless controller") || !strcmp(low, "wireless controller + keyboard")) return 1;
+    for (i = 0; words[i]; i++)
+        if (strstr(low, words[i])) return 1;
+    return 0;
+}
+
+int pc_ui_button_icons_pick(int setting, int slot_what, const char *slot_name, int sdl_playstation)
+{
+    if (setting == PC_UI_ICONS_XBOX) return PC_UI_ICONS_XBOX;
+    if (setting == PC_UI_ICONS_PLAYSTATION) return PC_UI_ICONS_PLAYSTATION;
+    if (!(slot_what & 1)) return PC_UI_ICONS_XBOX;      /* no pad: the keyboard (or nothing) */
+    return sdl_playstation > 0 || pc_ui_pad_is_playstation(slot_name) ? PC_UI_ICONS_PLAYSTATION : PC_UI_ICONS_XBOX;
 }
 
 int pc_launcher_wanted(int skip_setting, int force_flag, int no_flag, int shift_held, int test_run)
