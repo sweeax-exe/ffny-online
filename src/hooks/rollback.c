@@ -1286,6 +1286,18 @@ int rollback_prepare(void)
         for (p = 0; p < HEAP_PAGES; p++) skipped += s_skip[p];
         fprintf(stderr, "[ROLLBACK] prepared: .data %zu KB in %d pieces (%u pages other threads wrote), heap %u pages "
                 "left alone (%u written by other threads)\n", s_dbytes / 1024, s_ndseg, held_data, skipped, held_heap);
+        {   /* which: the heap pages no save or load touches */
+            char line[300];
+            int n = 0, shown = 0;
+            for (p = 0; p < HEAP_PAGES && shown < 24; p++)
+                if (s_skip[p]) {
+                    n += snprintf(line + n, sizeof(line) - (size_t)n, " %08X%s", HEAP_LO + p * PAGE,
+                                  s_audio_page[p] ? "(audio)" : "");
+                    shown++;
+                    alloclog_page(HEAP_LO + p * PAGE, "left alone");
+                }
+            if (shown) fprintf(stderr, "[ROLLBACK] heap pages left alone:%s\n", line);
+        }
     }
     return 0;
 }

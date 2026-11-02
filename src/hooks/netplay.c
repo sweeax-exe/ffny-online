@@ -4071,6 +4071,7 @@ static void rbm_reset(void)
     memset(&N.rbm, 0, sizeof(N.rbm));
 }
 
+static void bus_audit(void);
 static int g_cp_stale = 1;     /* created fighters' controllers: collect them again at the next step */
 static unsigned g_ndynvb;       /* EAGL draw commands whose dynamic vertex buffer grew in this fight (below) */
 
@@ -4774,6 +4775,7 @@ void netplay_on_step(void)
             N.rb_on = N.rb_ref_due = N.rbm.on = 1;
             N.rbm.num = ++N.rb_matches;
             rollback_crash_cb = rollback_crash_state;   /* a crash before the first rollback says its state too */
+            bus_audit();
         }
         {   /* what the fight made of the setup: the mode mask (1 one on one, 2 team, 4 3-way, 8 4-way), the
              * arena kind, and per fighter its flags (+0x937: 4 = team side marker) and the slots its
@@ -5147,9 +5149,45 @@ void netplay_sound_command(void)
 
 /* The audio subsystem's message-bus handlers (rollback-step-structure.md 2.1): while steps run
  * again they do nothing, so the game's sound state stays what the sound engine was told. cdecl. */
-#define SOUND_HANDLERS(X) X(00034A60) X(00038440) X(00035250) X(00035670) X(00035890)                           X(00035970) X(00035A20) X(00035AE0) X(00038620) X(00038760)
+/* 00034FD0 (the current-ambience object at [0x33EBC4]: stops and frees it, makes a new 0x24 one in
+ * the arena and hands it to the engine) and 000379E0 were missing from the list taken from the
+ * subscription call sites: run again in re-runs they rebuilt engine objects on payloads a load had
+ * brought back, and a normal update after them walked junk in the engine's lists (sub_0013A750 from
+ * sub_0013A430 <- sub_00034FD0, sub_0013A270, fault values like C9742400 = -1e6f; two-copy runs at
+ * venue 24, 2026-11-02; hoodiebatman's F9 3ee301 and the build-28 7b829d are this class). The bus
+ * audit below names 20 more of the audio code's handlers on the bus (F0000000/01/0A-0F/24/27-2E,
+ * F1000003/05-07/0C, logs/dj/20261102-173220-online); silencing all of them as well made both PCs
+ * leave each other after the knockout ("the match is decided and player N went on ahead", the
+ * rematches then offline; -173704-online): some of them feed the fight's end sequence. Not silenced. */
+#define SOUND_HANDLERS(X) X(00034A60) X(00038440) X(00035250) X(00035670) X(00035890)                           X(00035970) X(00035A20) X(00035AE0) X(00038620) X(00038760) X(00034FD0) X(000379E0)
 #define SOUND_WRAP(a) extern void sub_##a(void);     static void snd_##a(void) { if (N.resim) { g_eax = 0; g_esp += 4; return; } sub_##a(); }
 SOUND_HANDLERS(SOUND_WRAP)
+
+/* Once per process, at the first rollback fight: every message-bus handler in the audio code
+ * (0x30000..0x3E200) that is not silenced in re-runs (rollback-step-structure.md 2.1: entries at
+ * [0x39E84C], [0x39E844] of them, [0x39E850] apart; +4 the message, +8 the handler count, +0xC on the
+ * handlers). Each one named here runs again in re-runs. */
+static void bus_audit(void)
+{
+    static int done;
+    uint32_t n = MEM32(0x0039E844u), arr = MEM32(0x0039E84Cu), stride = MEM32(0x0039E850u), i, k, told = 0;
+    if (done++ || !arr || !stride || n > 512) return;
+    for (i = 0; i < n; i++) {
+        uint32_t e = arr + i * stride, cnt = MEM32(e + 8u);
+        if (!MEM8(e) || cnt > 32) continue;
+        for (k = 0; k < cnt; k++) {
+            uint32_t h = MEM32(e + 0xCu + 4u * k);
+            int known = 0;
+#define SOUND_KNOWN(a) if (h == 0x##a##u) known = 1;
+            SOUND_HANDLERS(SOUND_KNOWN)
+#undef SOUND_KNOWN
+            if (h >= 0x00030000u && h < 0x0003E200u && !known && told++ < 24)
+                fprintf(stderr, "[ROLLBACK] bus handler %08X of the audio code (message %08X) runs in re-runs\n", h,
+                        MEM32(e + 4u));
+        }
+    }
+    fprintf(stderr, "[ROLLBACK] message bus: %u entries, %u audio handlers not silenced in re-runs\n", n, told);
+}
 
 /* The weapon manager (CLogic+0x2C9E4 = 0x376144, 16 slots of 0xD0; docs/research/weapon-position-timing.md):
  * its update (vtable+8, called once per game update through the task list, so recomp_lookup_manual
