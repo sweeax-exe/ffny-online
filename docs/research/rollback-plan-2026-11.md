@@ -97,7 +97,7 @@ Tags: **[V]** seen in code, a log or a commit. **[I]** inferred, with the reason
 | B1 | **Sound engine crashes** (the reason for build 21) | Builds 19 and 20: junk vtables in `sub_0012BE20` and `sub_00126150`. Root causes found and fixed on 10-24 and 10-25 (commits 0db202f … 0bc7a6b, 3cfd77b):<br>• `arena_free_now` merged free blocks across the gaps between arena pieces<br>• the toolkit APU's unchecked voice handles<br>• audio `.data` restored under the running mixer<br>• the mixer's heap words<br>• late frees<br>• held XAPI frees<br>• kept arena blocks<br>• stream buffers<br>• the music overlay handle.<br>Result: the first match runs clean in nearly every run (4-7 min, 1000-2500 rollbacks). [V `rollback-sound-crashes.md` "State at the end of 2026-10-25"] | **Mostly fixed. Open:** (a) a dynamic load early in a fight, `sub_0010AC20` from `sub_0010B3E0`, of a buffer the audio async loader `0x1AA99` had just put in the arena (run-20261025-154502; `rollback-async-loads.md`); (b) "occasional second-match faults not yet analysed". The 10-minute multi-match run without a crash, set as the bar in that note, was never recorded. |
 | B2 | **Contiguous memory / audio arena** | Build 20: a fixed 12 MiB arena left the GPU too little room (froze at 62.9 of 64 MiB). Fixed by an arena that grows. [V comment `rollback.c:150`]<br>Now: reports with the arena reach 59-63.9 MB, without it 58.0 MB. In 6dbf17 the arena grew to 7.9 MB over two hill fights. Each fight leaves blocks still named (142 after fight 1 in 6dbf17), and fight-allocated late frees are dropped (a leak by design). If more than 4096 contiguous frees are held, the rest are freed at once (`s_held_over`), which is unsafe. [V] | **Open, never measured over many matches.** Whether the white-block / out-of-memory symptom comes back after 5-10 rollback matches is [U]. |
 | B3 | **King of the Hill freeze** (the reason for build 28) | Build 27: with rollback, games froze or crashed early in the second consecutive hill fight. The relay logged the fighter `reason=timeout` (`how=3`). Not reproduced locally. No log from a frozen game exists. [V memory notes, 369e8d9]<br>The only build-27 hill log (6dbf17, F9 picture, the winner's PC):<br>• the next START arrived before rollback switched off for fight 1 (lines 2440-2446)<br>• fight 2 prepared and tracked normally<br>• the cumulative `rb_count` stayed at 514 through update 1800 of fight 2: **no rollback in that fight at all**, against 333 by the same point in fight 1 at the same ping<br>• the game was still running at step 2820.<br>Also: "the next match never starts" happens **without** rollback as well. On 10-28, KOTH in lockstep: the king's next fight never starts and the third copy gives up at step 3 (`created-fighter-online.md`). In the rollback rematch run both copies sat on `battle/cmtype` with the automatch armed (`crash-001B2480.md`, run-20261028-015026). [V] | **Cause unknown.** Candidates: [G1] a general room-flow stall between fights (it exists in lockstep too); [G2] rollback state from fight 1 carried into a START that comes straight after it; [G3] `netplay_on_crash` (CreateThread and WinHTTP inside the exception handler) hanging a crashing game instead of closing it; [G4] prediction never re-armed in fight 2 (the zero-rollback observation). |
-| B4 | **Desyncs under rollback** | Fixed: mixed rollback/lockstep rooms (all-on rule, e42fa46). The Terror Dome shared-generator drift is fixed by the per-step re-seed (f82aa19; run rb1: 680 equal checksums, 5839 and 7554 rollbacks, `generator-timescale-desync.md` §9). Created fighters crashed at step 4 under rollback, so they are excluded. [V]<br>**Open:** the lockstep position desync (`lockstep-desync-positions` memory: bot vs bot, venue 9, step 6120, a few ulps; a real pad vs bot, venue 6, step 60, large). It is the same simulation, so rollback inherits it. | Waits for the position-desync fix (§4). |
+| B4 | **Desyncs under rollback** | Fixed: mixed rollback/lockstep rooms (all-on rule, e42fa46). The Terror Dome shared-generator drift is fixed by the per-step re-seed (f82aa19; run rb1: 680 equal checksums, 5839 and 7554 rollbacks, `generator-timescale-desync.md` §9). Created fighters crashed at step 4 under rollback, so they were excluded; since the fifth round (build 45) they roll back (§5). [V]<br>**Open:** the lockstep position desync (`lockstep-desync-positions` memory: bot vs bot, venue 9, step 6120, a few ulps; a real pad vs bot, venue 6, step 60, large). It is the same simulation, so rollback inherits it. | Waits for the position-desync fix (§4). |
 | B5 | **Crashes from inconsistent restored state** (not sound) | Build 26: `sub_000EDF90`, a model node tree walk into a reused child array, at step 4039 (`generator-timescale-desync.md` §7). Build 28, 1v1 with rollback on for every player, after all the 10-25 fixes:<br>• 9fd9bd: `sub_000E61E0+0x67`, **during a re-run**, step 145, 47 rollbacks; `edi` 0x80129778 is inside the system pool 80120D80+256 KB<br>• 22ecc8: `sub_000EE000+0x215`, **during a re-run**, step 813, 4441 rollbacks<br>• 7b829d: native `RIP` in `sub_001EE3C0+0x3E9`, a normal update, step 806, in the third rollback match.<br>A rollback stock match at venue 26 crashed once on 10-28 (`RIP 0x1408203D2`). [V] | **Not analysed.** Best guesses: [G] the small-block pool (`0x3A4000..0x3A7000` together with its heap block) and model nodes allocated or freed inside a re-run. The `sub_000E61E0` and `sub_000EE000` names come from the lifted headers only. |
 | B6 | **Performance** | Saves of 4.0-4.3 MB every update, about 250 MB/s of `memcpy` at 60 Hz. Rollbacks average 1.0 ms in local tests and 5.3-6.4 ms in a player's log; the longest was 20.9 ms and the deepest 9 steps. Rollbacks over 30 ms are logged with their model loads (`ROLLBACK slow`). Step 1 holds the game for 150 ms and copies the 42 MB reference. [V] | Not measured on a weak PC. Not a known crash cause. |
 | B7 | **Gaps in observability** | `rb_count` and `rb_steps` are never reset per match (B3 needed arithmetic to see this). `rollback_reference` fails silently when `!s_ref || !s_ndseg`. No hang dump comes from players. [V] | Easy to fix. |
@@ -379,6 +379,55 @@ the first), and the soak now replays each step's pad words in re-runs.
   * Lockstep, the same `--ko-winner 1` (`20261102-105039-online`): **the same stall at fight 5** (started on one copy only).
     So the hill's stall is the room flow's (B3 G1), not rollback's; in the fights that did run, rollback on the hill had no
     crash, hang or desync. G2 (rollback still on at the next START) was not seen: "off for the rest" came before each START.
+
+### Fifth round (on `remaster` 2d09e81, build 44 base): step 9, created fighters, and the rematch flow
+* **Created fighters under rollback.** The offline wrong-prediction soak with a created fighter
+  (`RECOMP_ROLLBACK_SOAK=9 RECOMP_ROLLBACK_SOAK_WRONG=1 RECOMP_TEST_CP=slot=1,from=0,file=aw.bin`, bots on both slots) ran
+  clean until step 1698 and then crashed there in every run (deterministic: `20261102-141226-offline`, `-143242`,
+  `-143531`, `-144810`), in a normal update right after a load: `sub_001ED010` (memcpy) from `sub_001189B0+0x116`, EAGL's
+  dynamic-vertex copy, writing through junk. The stock control on the same build: 13 minutes, 48 400 steps compared, 0
+  differing, no crash (`20261102-141907-offline`). [V]
+* **Cause** [V, traced with the crash dump of the draw command, `RECOMP_WATCH_WRITE` on its buffer object and a trace of
+  EAGL's allocation callback]: a render-method draw command (game heap) that copies its vertices each frame keeps a
+  buffer object at +0x10 (0x30 bytes from EAGL's allocation callback `[0x2E3988]` = `sub_00029800`, the game allocator),
+  whose three D3D buffers live in the XAPI heap and contiguous memory. Drawing happens only in normal updates, never in
+  re-runs. At step 1695 the beaten created fighter's low-health HUD drew for the first time; every soak load went back to
+  before that, gave the commands "no buffer" again, and the next frame made another object (in a heap block the load had
+  freed, same address each time) plus three more D3D buffers. Within a few loads the small-block free list held junk:
+  the allocator returned `80F92F00`, `00FA1270`, `01080001`, and a frame copied vertices through it. Not specific to
+  created fighters: any HUD element or model that first draws inside the rollback window; the weak record (AW5J3555)
+  only made its low-health HUD appear inside a soak. [I for the general claim]
+* **Fix** (bd14862): in a rollback fight the draw's buffer objects come from the arena (`rollback_live_alloc`; the two
+  call sites in `sub_001189B0`, return addresses 0x118A29 / 0x118A52, through the EAGL callback hooks in
+  `netplay_sound_handler`; frees of arena blocks go back to the arena), and after every load each such command keeps the
+  words it had before (+0x10/+0x14/+0x18), when both are its own ("no buffer" or an object made here; a first version
+  that did not check the live side wrote a freed command's `0D0D0D0D` back four times). Also: `cp_pose_in_step` runs in
+  re-runs and in the soak; `created_fighter_on_step` unlinks by memory; P_RTT byte 14 says a build rolls back created
+  fighters, so a room with an older build stays in lockstep (`docs/netplay-protocol.md`). Result:
+  `20261102-152908-offline`, 13 minutes, 46 742 steps compared, 0 differing, no crash (first version);
+  `20261102-165354-offline` (as committed), 11 minutes, 40 142 steps, 0 differing, no crash, the commands kept their
+  arena objects over the loaded "no buffer" (-1) four times.
+* **Two-copy runs with created fighters** (70+10 ms, `--bot 60`, rollback on every copy, the relay with `-created`):
+  created vs created, no knockout, 2 matches (`20261102-164030-online`): **ok**, 450 checksums equal, 1614 and 652
+  rollbacks, no crash or desync; rollbacks average 10.6-12.9 ms (stock about 1 ms: the pose pass and the created model
+  cost; worth a look in step 7). Created vs stock (Doc), KO at step 2400, 3 matches with two rematches
+  (`20261102-164937-online`): **ok**, 130 checksums equal.
+* **Rematch hang** (live F9 40f4d1, test runs `20261102-101951-online`, `-104408-online`): three real causes and one test
+  bug. (1) A held Rematch needed a second press; the last to choose started at once, so a first chooser who then took No
+  left the other alone in a frozen fight for START_LIMIT_MS (90 s). Now the held choice starts by itself when the others'
+  arrives (`netplay_rematch_tick`, 06d16bd), the results' No is sent at once, and a fight waiting for a player who went
+  back to the room stops waiting. (2) In lockstep the other players' live pads stayed on their ports through the summary
+  and the results menu, so every press went to every PC's menu: each copy's one cursor press undid the other's (0edb28e:
+  their ports read at rest from `Game.GetMatchSummary`). (3) The test route never reached Rematch: the menu reads left and
+  right, and 0.3 s A presses on an unpaced copy passed through two or three screens (d9380ba). Results:
+  rollback, 70+10 ms, bots, 3 matches with two rematches: **ok** (`20261102-162513-online`); lockstep with copy 1
+  unpaced: **ok**, 3 of 3 (`20261102-162906-online`); rollback without bots (`20261102-161012-online`): all three
+  matches played (the run's end check needed the last summary, fixed in d9380ba).
+* **Own connection dropped** (ca3ca13): a give-up names no player when this PC heard nobody (no relay packet, or no STEPS
+  from any of two or more players, for 4 s): "Your connection is unstable", nobody reported as having left.
+* **Open:** a soak with wrong predictions across a match end into the next match (the offline soak covers one match);
+  hoodiebatman's crash (F9 3ee301, a rollback rematch, step 1230, mixer thread then `sub_001EE3C0` writing to 0x84000000)
+  and goloom's black venue-24 scene (F9 09d35d, the palette count wrap of `stuck-screen-fade.md` §9) are not fixed here.
 
 ### Next (after the third round)
 1. More two-copy long runs (the desyncs at steps 10 200 and 37 440 came once in two runs each; three later runs were clean),

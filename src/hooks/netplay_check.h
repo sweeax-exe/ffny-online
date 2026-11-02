@@ -194,4 +194,33 @@ static int netcheck_fields_text(char *out, int size, const NetCheck *mine, const
     return n;
 }
 
+/* A fight gave up waiting for a player's entries. Whom to name: the player waited for (late), unless
+ * this PC heard nobody: no packet from the relay for quiet_ms, or, with two or more other players, no
+ * STEPS from any of them for quiet_ms. Then this PC's own connection dropped, and naming one player
+ * blamed the wrong one ("marcelo stopped answering" when Cashmoney's mobile connection dropped,
+ * 3-Way TMG7QT, 2026-11-02). With one other player and the relay still heard, nothing tells the two
+ * apart: that player is named. silent_ms[i]: how long since player i's last STEPS (self: ignored).
+ * Returns NETCHECK_OWN_LINK or late. */
+#define NETCHECK_OWN_LINK (-2)
+static int netcheck_silent_cause(int players, int self, int late, const uint32_t *silent_ms,
+                                 uint32_t relay_silent_ms, uint32_t quiet_ms)
+{
+    int i, others = 0, quiet = 0;
+    if (relay_silent_ms >= quiet_ms) return NETCHECK_OWN_LINK;
+    for (i = 0; i < players; i++) {
+        if (i == self) continue;
+        others++;
+        if (silent_ms[i] >= quiet_ms) quiet++;
+    }
+    return others >= 2 && quiet == others ? NETCHECK_OWN_LINK : late;
+}
+
+/* The shortest silence among the other players, for the notice ("no data ... for N s"). */
+static uint32_t netcheck_least_silence(int players, int self, const uint32_t *silent_ms, uint32_t relay_silent_ms)
+{
+    int i;
+    uint32_t least = 0xFFFFFFFFu;
+    for (i = 0; i < players; i++) if (i != self && silent_ms[i] < least) least = silent_ms[i];
+    return least == 0xFFFFFFFFu ? relay_silent_ms : least;
+}
 #endif

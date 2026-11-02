@@ -622,6 +622,11 @@ const char *rollback_page_state(uint32_t addr)
     if (addr < HEAP_LO || addr >= HEAP_HI) return "outside the heap";
     p = (addr - HEAP_LO) / PAGE;
     if (s_skip[p]) return s_audio_page[p] ? "left alone (audio)" : "left alone";
+    if (s_mixmask[p]) {
+        uint32_t w = ((addr - HEAP_LO) % PAGE) / 4u;
+        if (s_mixmask[p][w >> 3] & (1u << (w & 7))) return "a mixer word (kept live)";
+        if (s_known[p]) return "saved (page with mixer words)";
+    }
     if (s_known[p]) return "saved";
     if (s_guard[p]) return "unchanged since the reference";
     return "not tracked";
@@ -2046,6 +2051,20 @@ int rollback_route_alloc(void)
     return 1;
 }
 
+/* Live memory for state that follows the device rather than the fight (netplay.c: EAGL's dynamic
+ * vertex buffer objects): from the arena, which no load touches. 0 when there is none. */
+uint32_t rollback_live_alloc(uint32_t size)
+{
+    uint32_t a = s_arena_state == 1 ? arena_alloc(size) : 0;
+    if (a) memset((void *)XBOX_PTR(a), 0, size);
+    return a;
+}
+
+int rollback_live_free(uint32_t a)
+{
+    return s_arena_state == 1 && arena_free(a);
+}
+
 extern void sub_0002A180(void);
 
 /* A heap block given back on another thread than the game's in a fight (the mixer, when the music
@@ -2343,6 +2362,8 @@ void rollback_mixer_unlock_b(void) {}
 void rollback_sound_alloc(void) {}
 void rollback_sound_free(void) {}
 int rollback_route_alloc(void) { return 0; }
+uint32_t rollback_live_alloc(uint32_t s) { (void)s; return 0; }
+int rollback_live_free(uint32_t a) { (void)a; return 0; }
 extern void sub_0002A180(void);
 void rollback_heap_free(void) { sub_0002A180(); }
 void rollback_audio_init_begin(void) {}

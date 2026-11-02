@@ -32,6 +32,7 @@ void automatch_on_funccall(const char *text);
  * string or 0. Defined in src/recomp_manual.c; call only from automatch_on_funccall. */
 unsigned int defjam_fe_call(const char *command);
 int automatch_hold_funccall(const char *text);     /* 1: the front end's call waits (online rematch) */
+unsigned int defjam_menu_call(const char *text);  /* a command as the menu would call it, with the hooks */
 /* Tests: a match from "type=0,venue=1,f0=55,p0=0,f1=22,p1=-1" (as RECOMP_AUTOMATCH); a front-end
  * command run on the game thread at the front end's next call. 1 if taken. */
 int automatch_request_text(const char *spec);
