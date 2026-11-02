@@ -23,7 +23,8 @@ APPROVED_README_MEDIA = {
     'docs/media/fight-screenshot.png': '9804400a61948f0d562809cf46f3da09a2aa310f4b1b37f98c167b92c8fad434',
     'docs/media/fight-gameplay.gif': '77012147d4fe73227222c988610dba82510df1abad4f2405f1164935920b4277',
     # 2026-10-09, at the owner's request: the port's own setup wizard and launcher. No game artwork.
-    'docs/media/setup-wizard.png': '30ef7c4f396aa2383b234d02cd85c25c7bdf84e3f2b141c4eac986220b5560c7',
+    # 2026-11-02, FFNY Online's owner: the redesigned setup (its "game recognized" screen, sample path).
+    'docs/media/setup-wizard.png': 'b315250c90323c0c78e72547c70f61bbc217c263aa969d2bfa32381d8e5f8e58',
     'docs/media/launcher.png': 'fab5f3f75768532324b0e577084420eab80c5db3406af6c98cfdd30ce00e9d25',
     # 2026-10-20, FFNY Online's owner, for the README and the release post: the online screens
     # (main menu entry, hub, room, fighter grid, venue vote) and an online fight, captured from the

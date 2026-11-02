@@ -129,7 +129,9 @@ struct State {
     Verdict id;
     bool planning = false;
     Plan plan;
-    bool hd = true, shortcut = true, prereq = true;
+    // HD textures off by default (owner, 2026-11-02): the first install is faster and needs less space;
+    // the launcher turns them on later
+    bool hd = false, shortcut = true, prereq = true;
     // Installing
     int permille = 0;
     std::string stageKey;
@@ -737,7 +739,7 @@ void drawFolder() {
     sy += 18;
     struct Option { int id; const wchar_t* title; const wchar_t* help; bool on; };
     Option options[] = {
-        {A_HD, L"HD textures", L"Sharper fighters and venues. Recommended; adds about 6 GB.", st.hd},
+        {A_HD, L"HD textures", L"Sharper fighters and venues. Makes the install longer and adds about 6 GB; you can also turn it on later in the launcher.", st.hd},
         {A_SHORTCUT, L"Desktop shortcut", L"Start FFNY Online from your desktop.", st.shortcut},
         {A_PREREQ, L"Missing Windows parts", L"Installs what the game needs, if anything is missing.", st.prereq},
     };
@@ -1844,7 +1846,7 @@ int wizardMain(HINSTANCE instance, const std::vector<std::wstring>& args) {
         sampleState(L"game");
         paintWindow();
         valid = valid && windowTarget && windowDrawn;
-        valid = valid && st.hd && st.shortcut && st.prereq;
+        valid = valid && !st.hd && st.shortcut && st.prereq;
         DestroyWindow(window);
         return valid ? 0 : 4;
     }

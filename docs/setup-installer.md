@@ -28,7 +28,7 @@ The Windows wizard has three steps and an end screen, in FFNY Online's own look 
    a path of at most about 130 plain characters. A failing check says why and what to do. **Change**
    opens a folder picker; a folder that already has other files gets its own `FFNY Online` folder
    inside. An earlier installation is updated in place with its own data folder. The switches map
-   to the silent options: **HD textures** (`--hd-textures`, on by default), **Desktop shortcut**
+   to the silent options: **HD textures** (`--hd-textures`, off by default), **Desktop shortcut**
    (off = `--no-desktop-shortcut`), **Missing Windows parts** (`--install-prerequisites`, which lets
    Microsoft's publisher-verified Build Tools installer ask for consent).
 4. **Installing.** Percent, bar and steps from the engine's status, stage and progress files; an
@@ -48,7 +48,7 @@ search, identification and folder check offscreen and pictures each step, instal
 
 ## Optional HD textures (v0.6.0)
 
-On Windows the wizard's **HD textures** switch is on by default (see above); they can also be made later in the launcher, on its
+On Windows the wizard's **HD textures** switch is off by default (see above; a faster first install); they can also be made later in the launcher, on its
 **Textures** page, after the first install (the silent `--hd-textures` below still works).
 On macOS, **Apply HD texture upscale during install (increases install time)** is unchecked
 by default. It generates Lanczos4x from your verified dump locally after the game

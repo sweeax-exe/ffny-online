@@ -136,7 +136,7 @@ checks it, then translates and compiles the game on your machine. It bundles
 Python and the pinned build sources and can install Microsoft's C++ Build Tools
 if they are missing. The installer is unsigned, so Windows may warn about it.
 
-![The setup wizard: choose your game image and an install folder, then Install](docs/media/setup-wizard.png)
+![The setup: it finds and checks your game, picks an install folder, then installs](docs/media/setup-wizard.png)
 
 See [Windows setup](docs/setup-installer.md) for folders, shortcuts, HD texture
 generation, silent mode, repair and removal.
