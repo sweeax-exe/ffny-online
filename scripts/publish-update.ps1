@@ -53,9 +53,12 @@ $json = $manifest | ConvertTo-Json -Compress
 $json = $json.Replace('\u003c', '<').Replace('\u003e', '>').Replace('\u0026', '&').Replace('\u0027', "'")
 [IO.File]::WriteAllText((Join-Path $out 'latest.json'), $json, (New-Object Text.UTF8Encoding($false)))
 
-$sign = Join-Path $repo 'netplay\relay\dist\updatesign.exe'
+# updatesign is in the private server repository, cloned as server\ (or where FFNY_SERVER_DIR points)
+$relaySrc = if ($env:FFNY_SERVER_DIR) { Join-Path $env:FFNY_SERVER_DIR 'relay' } else { Join-Path $repo 'server\relay' }
+if (-not (Test-Path (Join-Path $relaySrc 'go.mod'))) { throw "The server repository is missing: clone sweeax-exe/ffny-server as $repo\server" }
+$sign = Join-Path $relaySrc 'dist\updatesign.exe'
 if (-not (Test-Path $sign)) {
-    Push-Location netplay\relay
+    Push-Location $relaySrc
     & "C:\Program Files\Go\bin\go.exe" build -o dist\updatesign.exe .\cmd\updatesign
     Pop-Location
 }
