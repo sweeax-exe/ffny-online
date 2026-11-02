@@ -12,6 +12,7 @@
 #define DEFJAM_NETPLAY_H
 
 #include <stdint.h>
+#include "netplay_ranked.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -149,7 +150,8 @@ void netplay_lobby_room(NetRoom *out);
 
 /* Ranked (One on One against a player of a similar rating; signed-in players only). The search
  * runs until a match is found (the ranked room's ROOM arrives, both players ready, the vote
- * starts) or netplay_lobby_leave. */
+ * starts) or netplay_lobby_leave. Ranked phase 2a: three modes (netplay_ranked.h), the long
+ * RANKED form, ACCEPT, MOVE to the host relay, and RANKINFO in the set's room. */
 enum NetQueueState {
     NETQUEUE_NONE = -1,     /* not searching */
     NETQUEUE_CHECKING = 0,  /* the server checks the account */
@@ -157,9 +159,27 @@ enum NetQueueState {
     NETQUEUE_REFUSED = 2,   /* see the text */
     NETQUEUE_OFF = 3,
     NETQUEUE_FOUND = 4,
-    NETQUEUE_TICKET = 5     /* asking the account service for a ticket */
+    NETQUEUE_TICKET = 5,    /* asking the account service for a ticket */
+    NETQUEUE_ACCEPT = 6,    /* a set is found: accept it (netplay_lobby_accept) within the seconds left */
+    NETQUEUE_MOVE = 7       /* the set is hosted on another relay: netservers_ranked_move */
 };
+/* Classic only (the original entry and the tests' RECOMP_NETPLAY=ranked without RECOMP_TEST_RANKED_MODES). */
 void netplay_lobby_ranked(int fighter);
+/* The search in modes (bit per NETRANK_* mode) with primary first; fighter 99 (a created fighter)
+ * plays in Open only. */
+void netplay_lobby_ranked_ex(int fighter, unsigned modes, int primary);
+/* After a MOVE, on the host relay: the same search again with the reservation code. */
+void netplay_lobby_ranked_again(const char *code);
+/* netservers_ranked_move took the MOVE (1: the hub moves; 0: it cannot, the search ends). */
+void netplay_lobby_ranked_moved(int ok);
+/* Answers a found set (NETQUEUE_ACCEPT): 1 accept, 0 decline (a dodge). */
+void netplay_lobby_accept(int yes);
+/* The answer given to the found set shown now: 1 accepted, 0 declined, -1 none yet. */
+int netplay_lobby_accepted(void);
+/* The long QUEUE's part (counts per mode, the found set, a move); 0 when there is none. */
+int netplay_lobby_queue_ext(NetQueueExt *out);
+/* RANKINFO of the ranked room this PC is in (ranks, the set's score); 0 none. */
+int netplay_lobby_rankinfo(NetRankInfo *out);
 /* The queue state; waited (seconds), searching (players in the queue) and text (why refused)
  * when not NULL. */
 int netplay_lobby_queue(int *waited, int *searching, char *text, int size);

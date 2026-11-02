@@ -119,6 +119,11 @@ void netservers_quick_on(int server, int mode, int max, const char *name);
  * frame of the online screens, the test thread). Returns 0 nothing happened, 1 the JOIN went out,
  * 2 the QUICK went out (*mode: its match type), -1 the move failed (no lobby within 15 s). */
 int netservers_tick(int *mode);
+/* Ranked: the queue said MOVE (QUEUE 6): the hub moves to the host relay and queues there again with
+ * the reservation code (netplay_lobby_ranked_again). Call it every frame of the online screens and the
+ * test thread. Returns 1 when a move started, -1 when the host relay is unknown (the search ends), 0
+ * nothing to do. */
+int netservers_ranked_move(const char *name);
 /* 1 while a join or quick match waits for the move to its relay. */
 int netservers_moving(void);
 

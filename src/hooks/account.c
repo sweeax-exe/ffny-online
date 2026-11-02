@@ -196,6 +196,19 @@ static int load(void)
     DATA_BLOB in, out = { 0 };
     size_t got;
     FILE *f;
+    {   /* tests: RECOMP_ACCOUNT_TEST_TOKEN, a session of a local test account service (accounts
+         * -test-accounts), only with RECOMP_ACCOUNT_SERVER on this machine; never saved */
+        const char *srv = getenv("RECOMP_ACCOUNT_SERVER"), *tok = getenv("RECOMP_ACCOUNT_TEST_TOKEN");
+        if (srv && tok && strlen(tok) == 64 && (!strncmp(srv, "127.0.0.1:", 10) || !strncmp(srv, "localhost:", 10))) {
+            const char *who = getenv("RECOMP_NETPLAY_NAME");
+            AcquireSRWLockExclusive(&g_lock);
+            snprintf(g_token, sizeof(g_token), "%s", tok);
+            snprintf(g_name, sizeof(g_name), "%s", who && *who ? who : "Test player");
+            snprintf(g_username, sizeof(g_username), "%s", g_name);
+            ReleaseSRWLockExclusive(&g_lock);
+            return 1;
+        }
+    }
     data_path(path, sizeof(path));
     f = fopen(path, "rb");
     if (!f) return 0;

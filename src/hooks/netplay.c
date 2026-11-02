@@ -92,6 +92,13 @@ void netplay_lobby_leave(void) {}
 void netplay_lobby_yield(void) {}
 void netplay_lobby_room(NetRoom *o) { memset(o, 0, sizeof(*o)); }
 void netplay_lobby_ranked(int f) { (void)f; }
+void netplay_lobby_ranked_ex(int f, unsigned m, int p) { (void)f; (void)m; (void)p; }
+void netplay_lobby_ranked_again(const char *c) { (void)c; }
+void netplay_lobby_ranked_moved(int ok) { (void)ok; }
+void netplay_lobby_accept(int y) { (void)y; }
+int netplay_lobby_accepted(void) { return -1; }
+int netplay_lobby_queue_ext(NetQueueExt *o) { (void)o; return 0; }
+int netplay_lobby_rankinfo(NetRankInfo *o) { (void)o; return 0; }
 int netplay_lobby_queue(int *w, int *s, char *t, int n) { (void)w; (void)s; if (t && n > 0) t[0] = 0; return NETQUEUE_NONE; }
 int netplay_in_lobby(void) { return 0; }
 int netplay_lobby_address(char *o, int n) { (void)o; (void)n; return 0; }
@@ -167,6 +174,8 @@ void netplay_crowd_update(void) { sub_00081170(); }
 #define T_RANKED      0x1E      /* the ranked queue (relays since build 15) */
 #define T_QUEUE       0x1F
 #define TICKET_LEN    16        /* RANKED: the account service's one-time ticket */
+#define T_ACCEPT      0x2C      /* ranked phase 2a: answer a found set */
+#define T_RANKINFO    0x2F      /* ranked phase 2a: the set room's ranks and score */
 /* King of the Hill (docs/research/king-of-the-hill.md section 8) */
 #define T_CAPS        0x20      /* both ways: what this client / the relay supports */
 #define T_HILL        0x21      /* the room's line, king and countdowns */
@@ -320,6 +329,15 @@ static struct {
     int who_count, who_online, who_rooms;
     int queue_state, queue_waited, queue_searching;     /* the ranked queue (NETQUEUE_*) */
     char queue_text[96];
+    NetQueueExt queue_ext;          /* the long QUEUE's part (counts, the found set, a move) */
+    int queue_accepted;             /* the answer to the found set shown: 1, 0, -1 none */
+    char queue_match[7];            /* the found set it answers */
+    int rk_fighter, rk_primary;     /* the search, for the MOVE's second RANKED */
+    unsigned rk_modes;
+    char rk_code[7];                /* a MOVE's reservation code ("" none) */
+    NetRankInfo rank;               /* the last RANKINFO, of the room rank_room */
+    char rank_room[7];
+    int set_match, set_game;        /* this START is a ranked set's game (its RESULT goes out); RANKINFO's game then */
     int room_count;
     unsigned rooms_version;
     int slot_rtt[ROOMSLOTS];        /* each room member's reported ping (P_PINGINFO), -1 none */
@@ -424,6 +442,7 @@ static BOOL CALLBACK init_once(PINIT_ONCE o, PVOID p, PVOID *c)
     N.arrived = CreateEventW(NULL, FALSE, FALSE, NULL);
     N.who_online = -1;              /* no PLAYERS yet */
     N.queue_state = NETQUEUE_NONE;
+    N.queue_accepted = -1;
     N.relay_caps = -1;
     N.koth_winner = -1;
     return TRUE;
@@ -1478,21 +1497,60 @@ static void on_players(const uint8_t *b, int len)
 
 static void on_queue(const uint8_t *b, int len)
 {
+    /* by wire state: 0 checking, 1 searching, 2 refused, 3 off, 4 found, 5 accept, 6 move */
     static const char *const say[] = { "Checking your account...", "Searching for an opponent...",
-        "Ranked play needs a signed-in account (sign in with Discord in the launcher).", "", "Opponent found!" };
-    int state;
-    if (len < 5 || b[0] > NETQUEUE_FOUND) return;
-    state = b[0];
+        "Ranked play needs a signed-in account (sign in with Discord in the launcher).", "", "Opponent found!",
+        "Opponent found: accept the set?", "The set is on another server: moving there..." };
+    static const int as[] = { NETQUEUE_CHECKING, NETQUEUE_SEARCHING, NETQUEUE_REFUSED, NETQUEUE_OFF, NETQUEUE_FOUND,
+                              NETQUEUE_ACCEPT, NETQUEUE_MOVE };
+    NetQueueExt ext;
+    int wire, state;
+    if (len < 5 || b[0] > 6) return;
+    wire = b[0];
+    state = as[wire];
+    netranked_decode_queue_ext(b + 5, len - 5, &ext);
+    if (state == NETQUEUE_MOVE && (!ext.valid || !ext.code[0])) return;
     EnterCriticalSection(&g_cs);
     if (N.pend_len && N.pend[5] == T_RANKED) answered();
+    /* a move under way: the old relay's last QUEUEs change nothing */
+    if (N.queue_state == NETQUEUE_MOVE && state != NETQUEUE_FOUND) { LeaveCriticalSection(&g_cs); return; }
     if (N.queue_state != NETQUEUE_NONE || state == NETQUEUE_FOUND) {
         if (state != N.queue_state)
-            fprintf(stderr, "[NETPLAY] ranked queue: state %d\n", state);
+            fprintf(stderr, "[NETPLAY] ranked queue: state %d%s%s\n", wire, ext.code[0] ? ", set " : "", ext.code);
         N.queue_state = state == NETQUEUE_OFF ? NETQUEUE_NONE : state;
         N.queue_waited = b[1] | b[2] << 8;
         N.queue_searching = b[3] | b[4] << 8;
-        snprintf(N.queue_text, sizeof(N.queue_text), "%s", say[state]);
+        if (ext.valid) N.queue_ext = ext;
+        if (state == NETQUEUE_ACCEPT && strcmp(N.queue_match, ext.code)) {
+            snprintf(N.queue_match, sizeof(N.queue_match), "%s", ext.code);
+            N.queue_accepted = -1;      /* a new set: not answered yet */
+        }
+        if (state != NETQUEUE_ACCEPT && state != NETQUEUE_SEARCHING) N.queue_accepted = -1;
+        if (state == NETQUEUE_SEARCHING) N.queue_match[0] = 0;
+        snprintf(N.queue_text, sizeof(N.queue_text), "%s", say[wire]);
     }
+    LeaveCriticalSection(&g_cs);
+}
+
+/* RANKINFO: the ranked room's ranks and its set's score, after every ROOM of the room. */
+static void on_rankinfo(const uint8_t *b, int len)
+{
+    NetRankInfo ri;
+    if (!netranked_decode_rankinfo(b, len, &ri)) return;
+    EnterCriticalSection(&g_cs);
+    if (!N.roomv.in_room) { LeaveCriticalSection(&g_cs); return; }
+    if (!N.rank.valid || memcmp(&N.rank, &ri, sizeof(ri)))
+        fprintf(stderr, "[NETPLAY] ranked set: %s game %d, score %d-%d, picker %d, winner %d\n",
+                netranked_mode_title(ri.mode), ri.game, ri.count > 0 ? ri.p[0].set_wins : 0,
+                ri.count > 1 ? ri.p[1].set_wins : 0, ri.picker, ri.winner);
+    N.rank = ri;
+    memcpy(N.rank_room, N.roomv.code, 7);
+    /* this PC's RESULT got through: the game counted (or the set ended) */
+    if (N.set_match && N.koth_winner >= 0 && (ri.game != N.set_game || ri.winner != NETRANK_SET_RUNNING)) {
+        fprintf(stderr, "[NETPLAY] ranked set: the result is in\n");
+        N.koth_winner = -1;
+    }
+    N.roomv.version++;
     LeaveCriticalSection(&g_cs);
 }
 
@@ -1956,6 +2014,9 @@ static void on_start_as(const uint8_t *b, int len, int watching)
     disarm_crash_report();
     /* King of the Hill: one fight, then RESULT and back to the hill */
     N.koth_match = NETPLAY_IS_KOTH(N.roomv.settings.mode);
+    /* a ranked set's game: its RESULT goes to the relay too (the set's score, the loser's venue pick) */
+    N.set_match = !watching && !N.koth_match && N.rank.valid && N.rank.has_set && !memcmp(N.rank_room, N.roomv.code, 6);
+    N.set_game = N.rank.game;
     N.koth_fights = N.roomv.hill.fights;
     N.koth_winner = -1;
     N.koth_fought = N.koth_done = 0;
@@ -2132,6 +2193,9 @@ static void on_packet(const uint8_t *b, int len)
         break;
     case T_QUEUE:
         if (N.lobby) on_queue(b + 6, len - 6);
+        break;
+    case T_RANKINFO:
+        if (N.lobby) on_rankinfo(b + 6, len - 6);
         break;
     case T_ROOM:
         if (N.lobby) on_room(b + 6, len - 6);
@@ -2548,9 +2612,11 @@ static int start(const char *server, const char *name, int creating, const char 
     N.cp_waiting = 0;
     created_fighter_reload();
     N.koth_match = 0;
+    N.set_match = 0;
     N.koth_winner = -1;
     N.start_deferred = 0;
     N.koth_results = 0;
+    memset(&N.rank, 0, sizeof(N.rank));
     reset_remote_pads();
     EnterCriticalSection(&g_cs);
     memset(N.in_tag, 0, sizeof(N.in_tag));
@@ -2756,8 +2822,12 @@ void netplay_lobby_quick(int mode, int max)
 static DWORD WINAPI ranked_thread(LPVOID param)
 {
     char ticket[33];
-    uint8_t b[TICKET_LEN + 1];
-    int i, fighter = (int)(INT_PTR)param;
+    uint8_t b[TICKET_LEN + 1 + NETRANK_EXT_LEN];
+    int i, fighter = (int)(INT_PTR)param, pings[3] = { 0, 0, 0 }, n;
+    NetServerInfo sv[NETSERVER_COUNT];
+    unsigned modes;
+    int primary;
+    char code[7];
     if (!account_ranked_ticket(ticket)) {
         EnterCriticalSection(&g_cs);
         if (N.queue_state == NETQUEUE_TICKET) {
@@ -2776,6 +2846,17 @@ static DWORD WINAPI ranked_thread(LPVOID param)
     }
     SecureZeroMemory(ticket, sizeof(ticket));
     b[TICKET_LEN] = (uint8_t)fighter;
+    /* the long form: the modes, the primary, rollback, the pings to the three relays, a MOVE's code */
+    n = netservers_get(sv, NETSERVER_COUNT);
+    for (i = 0; i < n && i < 3; i++) pings[i] = sv[i].state == NETSERVER_UP ? sv[i].ping_ms : 0;
+    EnterCriticalSection(&g_cs);
+    modes = N.rk_modes;
+    primary = N.rk_primary;
+    memcpy(code, N.rk_code, sizeof(code));
+    LeaveCriticalSection(&g_cs);
+    netranked_encode_ext(b + TICKET_LEN + 1, modes, primary, rollback_enabled(), pings, code);
+    fprintf(stderr, "[NETPLAY] ranked: queueing for %s (modes %u)%s%s, pings %d/%d/%d ms\n", netranked_mode_title(primary),
+            modes, code[0] ? ", set " : "", code, pings[0], pings[1], pings[2]);
     EnterCriticalSection(&g_cs);
     i = N.queue_state == NETQUEUE_TICKET;   /* not cancelled meanwhile */
     if (i) N.queue_state = NETQUEUE_CHECKING;
@@ -2786,19 +2867,108 @@ static DWORD WINAPI ranked_thread(LPVOID param)
 
 void netplay_lobby_ranked(int fighter)
 {
+    netplay_lobby_ranked_ex(fighter, 1u << NETRANK_CLASSIC, NETRANK_CLASSIC);
+}
+
+static void ranked_start(int fighter, int again)
+{
     HANDLE h;
     if (!N.lobby || !N.have_token) return;
     EnterCriticalSection(&g_cs);
-    if (N.queue_state != NETQUEUE_NONE && N.queue_state != NETQUEUE_REFUSED) {
+    if (!again && N.queue_state != NETQUEUE_NONE && N.queue_state != NETQUEUE_REFUSED) {
         LeaveCriticalSection(&g_cs);
         return;                             /* already searching */
     }
+    N.queue_accepted = -1;
+    N.queue_match[0] = 0;
+    memset(&N.queue_ext, 0, sizeof(N.queue_ext));
     N.queue_state = NETQUEUE_TICKET;
     N.queue_waited = N.queue_searching = 0;
     snprintf(N.queue_text, sizeof(N.queue_text), "Checking your account...");
     LeaveCriticalSection(&g_cs);
     h = CreateThread(NULL, 0, ranked_thread, (LPVOID)(INT_PTR)fighter, 0, NULL);
     if (h) CloseHandle(h);
+}
+
+void netplay_lobby_ranked_ex(int fighter, unsigned modes, int primary)
+{
+    if (primary < 0 || primary >= NETRANK_MODES) primary = NETRANK_CLASSIC;
+    modes |= 1u << primary;
+    if (fighter == 99 && primary != NETRANK_OPEN) fighter = 55;    /* a created fighter plays in Open only */
+    EnterCriticalSection(&g_cs);
+    N.rk_fighter = fighter;
+    N.rk_modes = modes & 7u;
+    N.rk_primary = primary;
+    N.rk_code[0] = 0;
+    LeaveCriticalSection(&g_cs);
+    ranked_start(fighter, 0);
+}
+
+void netplay_lobby_ranked_again(const char *code)
+{
+    EnterCriticalSection(&g_cs);
+    snprintf(N.rk_code, sizeof(N.rk_code), "%s", code ? code : "");
+    LeaveCriticalSection(&g_cs);
+    ranked_start(N.rk_fighter, 1);
+}
+
+void netplay_lobby_ranked_moved(int ok)
+{
+    EnterCriticalSection(&g_cs);
+    if (N.queue_state == NETQUEUE_MOVE) {
+        N.queue_state = ok ? NETQUEUE_TICKET : NETQUEUE_REFUSED;    /* TICKET: the new relay's RANKED follows */
+        snprintf(N.queue_text, sizeof(N.queue_text), "%s", ok ? "Moving to the set's server..." :
+                 "The set's server could not be reached; search again.");
+    }
+    LeaveCriticalSection(&g_cs);
+}
+
+void netplay_lobby_accept(int yes)
+{
+    uint8_t b[6 + 8 + 1];
+    int n;
+    EnterCriticalSection(&g_cs);
+    if (N.queue_state != NETQUEUE_ACCEPT || !N.lobby || !N.have_token) { LeaveCriticalSection(&g_cs); return; }
+    N.queue_accepted = yes ? 1 : 0;
+    LeaveCriticalSection(&g_cs);
+    fprintf(stderr, "[NETPLAY] ranked: %s set %s\n", yes ? "accepting" : "declining", N.queue_match);
+    n = header(b, T_ACCEPT);
+    memcpy(b + n, N.token, 8); n += 8;
+    b[n++] = (uint8_t)(yes ? 1 : 0);
+    send_raw(b, n);     /* no answer comes: the next QUEUE says how it went; sent twice against a loss */
+    send_raw(b, n);
+}
+
+int netplay_lobby_accepted(void)
+{
+    int a;
+    EnterCriticalSection(&g_cs);
+    a = N.queue_state == NETQUEUE_ACCEPT || N.queue_state == NETQUEUE_SEARCHING ? N.queue_accepted : -1;
+    LeaveCriticalSection(&g_cs);
+    return a;
+}
+
+int netplay_lobby_queue_ext(NetQueueExt *out)
+{
+    int ok;
+    InitOnceExecuteOnce(&g_once, init_once, NULL, NULL);
+    EnterCriticalSection(&g_cs);
+    *out = N.queue_ext;
+    ok = out->valid;
+    LeaveCriticalSection(&g_cs);
+    return ok;
+}
+
+int netplay_lobby_rankinfo(NetRankInfo *out)
+{
+    int ok;
+    InitOnceExecuteOnce(&g_once, init_once, NULL, NULL);
+    EnterCriticalSection(&g_cs);
+    ok = N.rank.valid && N.roomv.in_room && !memcmp(N.rank_room, N.roomv.code, 6);
+    if (ok) *out = N.rank;
+    else memset(out, 0, sizeof(*out));
+    LeaveCriticalSection(&g_cs);
+    return ok;
 }
 
 int netplay_lobby_queue(int *waited, int *searching, char *text, int size)
@@ -2845,6 +3015,7 @@ void netplay_lobby_leave(void)
     N.room[0] = 0;
     N.pend_len = 0;                 /* whatever was waiting belonged to the room */
     N.queue_state = NETQUEUE_NONE;  /* LEAVE also ends a ranked search */
+    memset(&N.rank, 0, sizeof(N.rank));
     LeaveCriticalSection(&g_cs);
     /* The relay never answers LEAVE (docs/netplay-protocol.md), so it is sent twice and not
      * waited for; if both are lost the server still has this client in the room and says so
@@ -3366,7 +3537,20 @@ static DWORD WINAPI autostart_thread(LPVOID unused)
             }
             if (!joined) fprintf(stderr, "[NETPLAY] tests: no open room listed within %s s; joining nothing\n", listed);
         } else if (!strcmp(mode, "ranked")) {
-            netplay_lobby_ranked(fighter);
+            /* RECOMP_TEST_RANKED_MODES="open" or "classic,open": the modes, the first the primary
+             * (default Classic); the found set is accepted (RECOMP_TEST_RANKED_ACCEPT=0 declines) */
+            const char *rm = getenv("RECOMP_TEST_RANKED_MODES");
+            unsigned mask = 0;
+            int primary = -1, k;
+            for (k = 0; rm && k < NETRANK_MODES; k++) {
+                const char *at = strstr(rm, netranked_mode_id(k));
+                if (at) {
+                    mask |= 1u << k;
+                    if (primary < 0 || at < strstr(rm, netranked_mode_id(primary))) primary = k;
+                }
+            }
+            if (primary < 0) netplay_lobby_ranked(fighter);
+            else netplay_lobby_ranked_ex(fighter, mask, primary);
         } else {
             netplay_lobby_quick(qmode, qmax);
         }
@@ -3382,6 +3566,15 @@ static DWORD WINAPI autostart_thread(LPVOID unused)
             NetRoom r;
             netservers_tick(NULL);
             netplay_lobby_room(&r);
+            if (!strcmp(mode, "ranked")) {
+                /* the found set: accept it (as the ACCEPT popup's A); a move to the host relay: go */
+                if (netplay_lobby_queue(NULL, NULL, NULL, 0) == NETQUEUE_ACCEPT && netplay_lobby_accepted() < 0) {
+                    const char *acc = getenv("RECOMP_TEST_RANKED_ACCEPT");
+                    Sleep(1500);    /* the popup shows a moment (gallery and screenshots) */
+                    netplay_lobby_accept(!(acc && !strcmp(acc, "0")));
+                }
+                netservers_ranked_move(who);
+            }
             /* The staged search (build 38), as the online screens do it: alone in the quick room, this
              * relay first, then the other North American one from 10 s (Automatic, All), every relay from
              * 30 s; a player waiting there for this mode is met (at most three moves). The search time
@@ -4107,7 +4300,7 @@ static void koth_check_result(int final)
     int winner = -1;
     const char *how = "";
     /* match_seen: this START's match is set up (the last one's phase and records linger until then) */
-    if (!N.lobby || !N.koth_match || !N.match_live || !N.match_seen || N.koth_done || N.resim) return;
+    if (!N.lobby || !(N.koth_match || N.set_match) || !N.match_live || !N.match_seen || N.koth_done || N.resim) return;
     if (!final && N.lockstep && N.rb_on && N.step > N.final_step) return;  /* the state may come from a prediction */
     phase = MEM32(G_MATCH_PHASE);
     if (phase == 1u) N.koth_fought = 1;
@@ -4132,13 +4325,14 @@ static void koth_check_result(int final)
     }
     EnterCriticalSection(&g_cs);
     N.koth_done = 1;
-    N.koth_results = 1;         /* the winner's scene, the summary and the results follow, until the menu */
+    if (N.koth_match)
+        N.koth_results = 1;     /* the winner's scene, the summary and the results follow, until the menu */
     N.koth_tries = 0;
     N.koth_sent = 0;
     N.koth_winner = winner;
     LeaveCriticalSection(&g_cs);
-    fprintf(stderr, "[NETPLAY] King of the Hill: the fight is decided (%s; code %04X, phase %u), winner %s %d; sending RESULT\n",
-            how, (unsigned)code, (unsigned)phase, winner == (int)WINNER_DRAW ? "none, slot" : "room slot", winner);
+    fprintf(stderr, "[NETPLAY] %s: the fight is decided (%s; code %04X, phase %u), winner %s %d; sending RESULT\n",
+            N.koth_match ? "King of the Hill" : "ranked set", how, (unsigned)code, (unsigned)phase, winner == (int)WINNER_DRAW ? "none, slot" : "room slot", winner);
 }
 /* A player's own controller dropped mid-fight and the game showed "Controller Disconnected"
  * (port 2) that START could not close (players' report, 2026-10-26). Our input layer never
