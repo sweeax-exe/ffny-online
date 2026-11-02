@@ -38,6 +38,7 @@ and what to do when something misbehaves, see [Controllers, keyboard and mouse](
 | `overlay_key` | `F1` | The key that opens and closes the in-game overlay: one key name from the list below. |
 | `overlay_pad` | `left_stick_click+right_stick_click` | Pad buttons that open and close the overlay, any pad (the Guide button no longer by default since build 37). Alternatives are separated by commas; buttons joined with `+` must all be held for half a second. Button names are the physical names used in `[gamepad]`. Empty for none. |
 | `scale` | `100` | Size of the launcher's and overlay's text and controls in percent, 60-250, on top of your display's scaling (full screen on a large monitor is scaled up automatically). |
+| `button_icons` | `auto` | The button symbols on the online screens: `auto` (PlayStation symbols when the controller that plays as player 1 is a PlayStation pad, DualShock 3/4 or DualSense; Xbox letters for any other pad and for the keyboard), `xbox` or `playstation` (cross for A, circle for B, square for X, triangle for Y, L1/R1 for LB/RB). Applies at once. The game's own menus keep their Xbox letters. The symbols are `online-art/ui/ps_*.png`, which setup draws. Launcher **Basics** and **Controls**; overlay **Controls**. Env `RECOMP_BUTTON_ICONS` (a choice name). |
 
 ## [debug]
 

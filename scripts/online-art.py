@@ -14,7 +14,8 @@ Layout of the output: fighters/<id>.png (the choose-character portrait without i
 Battle-mode ID, the front-end ID of the fighter's record in assets/djv2.sod: the fighter.xml ID except
 for Teck 85, Santos 93, O.E 92 and Eric Sermon 91), venues/<feID>.png (venue.xml feID: its photo with
 its sign, 256x256) and venues/<feID>_name.png (the gold name banner), ui/<name>.png, fonts/<file>.ttf,
-and manifest.json. Needs Pillow (the installed Python has it for the HD textures).
+and manifest.json. ui/ps_cross.png, ps_circle.png, ps_square.png and ps_triangle.png are not from the
+dump: this script draws them (PlayStation-style glyphs for the "Button icons" setting). Needs Pillow (the installed Python has it for the HD textures).
 """
 import argparse
 import json
@@ -26,7 +27,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import hd_assets  # noqa: E402
 
-VERSION = 4
+VERSION = 5       # 5: the PlayStation-style glyphs ui/ps_*.png
 
 # (output name, screens.viv entry, SHPX image name). See docs/research/frontend-menu-integration.md §6.
 UI_IMAGES = [
@@ -93,6 +94,61 @@ def trim_padding(image, threshold=3.0):
     return image.crop((0, 0, right, bottom))
 
 
+# PlayStation-style button glyphs for the "Button icons" setting (ui.button_icons): drawn here, not
+# taken from anywhere, in the round-badge style of the dump's Xbox glyphs (button_a.png etc.: a
+# 32x32 texture with a shaded disc of about 21 px at its top left and a black rim). A dark disc with
+# the symbol in its classic colour, as on the pad. Mapping: A cross, B circle, X square, Y triangle.
+PS_GLYPHS = [("ps_cross", "cross", (110, 168, 238)), ("ps_circle", "circle", (255, 96, 104)),
+             ("ps_square", "square", (246, 120, 220)), ("ps_triangle", "triangle", (70, 222, 170))]
+
+
+def ps_glyph(shape, colour, size=32, scale=8):
+    """One 32x32 RGBA glyph: drawn `scale` times larger, then reduced (smooth edges)."""
+    from PIL import Image, ImageDraw
+    big = size * scale
+    cx = cy = 10.5 * scale              # the Xbox badge's centre and radius in the same texture
+    r_out, r_rim, r_in = 10.5 * scale, 9.4 * scale, 8.4 * scale
+    image = Image.new("RGBA", (big, big), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(image)
+    draw.ellipse((cx - r_out, cy - r_out, cx + r_out, cy + r_out), fill=(0, 0, 0, 255))
+    # a light rim inside the black edge, so the dark disc stands out on the hub's dark walls
+    draw.ellipse((cx - r_rim, cy - r_rim, cx + r_rim, cy + r_rim), fill=(150, 150, 160, 255))
+    # the disc: lit at the top left, darker towards the bottom right, as the Xbox badges are
+    steps = 24
+    for i in range(steps):
+        t = i / (steps - 1)
+        r = r_in * (1 - 0.55 * t)
+        ox, oy = cx - 0.22 * r_in * t, cy - 0.26 * r_in * t
+        shade = int(40 + 56 * t)
+        draw.ellipse((ox - r, oy - r, ox + r, oy + r), fill=(shade, shade, shade + 6, 255))
+    stroke = 2.6 * scale
+    col = colour + (255,)
+    if shape == "cross":
+        d = 4.4 * scale
+        for a, b in (((-d, -d), (d, d)), ((-d, d), (d, -d))):
+            draw.line((cx + a[0], cy + a[1], cx + b[0], cy + b[1]), fill=col, width=int(stroke))
+        for x, y in ((-d, -d), (d, d), (-d, d), (d, -d)):     # round line ends
+            draw.ellipse((cx + x - stroke / 2, cy + y - stroke / 2, cx + x + stroke / 2, cy + y + stroke / 2), fill=col)
+    elif shape == "circle":
+        r = 5.0 * scale
+        draw.ellipse((cx - r, cy - r, cx + r, cy + r), outline=col, width=int(stroke))
+    elif shape == "square":
+        h = 4.4 * scale
+        draw.rectangle((cx - h, cy - h, cx + h, cy + h), outline=col, width=int(stroke))
+    else:   # triangle, its centre of mass on the disc's centre
+        h = 5.6 * scale
+        top, left, right = (cx, cy - h), (cx - h * 0.95, cy + h * 0.62), (cx + h * 0.95, cy + h * 0.62)
+        draw.line((top, left, right, top, left), fill=col, width=int(stroke), joint="curve")
+    return image.reduce(scale)          # box average: smooth edges, nothing outside the badge
+
+
+def write_ps_glyphs(ui_dir):
+    """Writes ui/ps_*.png; returns their names."""
+    for name, shape, colour in PS_GLYPHS:
+        ps_glyph(shape, colour).save(Path(ui_dir) / (name + ".png"))
+    return [name for name, _, _ in PS_GLYPHS]
+
+
 def maybe_refpack(blob):
     return hd_assets.unpack_refpack(blob) if blob[:2] in (b"\x10\xfb", b"\x11\xfb", b"\x90\xfb", b"\x91\xfb") else blob
 
@@ -143,6 +199,7 @@ def build(data, out):
             continue
         image.save(tmp / "ui" / (out_name + ".png"))
         manifest["ui"].append(out_name)
+    manifest["ui"] += write_ps_glyphs(tmp / "ui")
 
     for name in entries:
         m = re.fullmatch(MATCH_LOGO.replace(".", r"\.").replace("%s", r"(\w+?)"), name)

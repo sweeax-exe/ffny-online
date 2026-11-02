@@ -40,6 +40,7 @@
 #include "account.h"
 #include "online_data.h"
 #include "pc_settings.h"
+#include "pc_ui.h"
 #include "patches/widescreen.h"
 #include "recomp_settings.h"
 #include "updater.h"
@@ -342,19 +343,73 @@ void selector(ImDrawList *dl, const Frame &f, float x, float y, float w, float h
                          ImVec2(us[i] / t.w, vs[j] / t.h), ImVec2(us[i + 1] / t.w, vs[j + 1] / t.h));
 }
 
-// A button glyph and its word, as in the game's header ("A SELECT").
+// The button symbols the player chose (ui.button_icons): PlayStation's, or the game's Xbox letters.
+bool ps_icons() { return pc_ui_button_icons() == PC_UI_ICONS_PLAYSTATION; }
+
+// Button names in on-screen text: {A} {B} {X} {Y} {LB} {RB} as the chosen set writes them, the Xbox
+// letter or the PlayStation name: CROSS for {A} in capitals, Cross for {a} in a sentence.
+std::string pad_text(const char *s)
+{
+    static const char *const xbox[] = { "A", "B", "X", "Y", "LB", "RB" };
+    static const char *const ps[] = { "Cross", "Circle", "Square", "Triangle", "L1", "R1" };
+    bool on = ps_icons();
+    std::string out;
+    for (const char *p = s; *p; p++) {
+        const char *end = *p == '{' ? strchr(p, '}') : nullptr;
+        int i = 6;
+        if (end && end - p <= 3) {
+            std::string key(p + 1, end);
+            for (char &c : key) c = (char)toupper((unsigned char)c);
+            for (i = 0; i < 6 && key != xbox[i]; i++) {}
+        }
+        if (i == 6) { out += *p; continue; }
+        std::string name = on ? ps[i] : xbox[i];
+        if (on && isupper((unsigned char)p[1]))
+            for (char &c : name) c = (char)toupper((unsigned char)c);
+        out += name;
+        p = end;
+    }
+    return out;
+}
+
+// A PlayStation symbol drawn without its picture (an install whose online art predates them): a dark
+// disc with the symbol in its colour, as scripts/online-art.py draws ui/ps_*.png.
+void ps_symbol(ImDrawList *dl, const Frame &f, float x, float y, char button)
+{
+    float s = f.s(), r = 2.3f * s, w = 1.3f * s;
+    ImVec2 c = f.p(x + 5.25f, y + 5.25f);      // where the 16-unit picture has its badge
+    dl->AddCircleFilled(c, 5.25f * s, BLACK);
+    dl->AddCircleFilled(c, 4.7f * s, IM_COL32(150, 150, 160, 255));
+    dl->AddCircleFilled(c, 4.2f * s, IM_COL32(56, 56, 62, 255));
+    switch (button) {
+    case 'a': dl->AddLine(ImVec2(c.x - r, c.y - r), ImVec2(c.x + r, c.y + r), IM_COL32(110, 168, 238, 255), w);
+              dl->AddLine(ImVec2(c.x - r, c.y + r), ImVec2(c.x + r, c.y - r), IM_COL32(110, 168, 238, 255), w); break;
+    case 'b': dl->AddCircle(c, r * 1.1f, IM_COL32(255, 96, 104, 255), 16, w); break;
+    case 'x': dl->AddRect(ImVec2(c.x - r, c.y - r), ImVec2(c.x + r, c.y + r), IM_COL32(246, 120, 220, 255), 0, 0, w); break;
+    default:  dl->AddTriangle(ImVec2(c.x, c.y - r * 1.2f), ImVec2(c.x - r * 1.15f, c.y + r * 0.8f),
+                              ImVec2(c.x + r * 1.15f, c.y + r * 0.8f), IM_COL32(70, 222, 170, 255), w); break;
+    }
+}
+
+// A button glyph and its word, as in the game's header ("A SELECT"); PlayStation's symbol instead
+// of the letter with ui.button_icons (A cross, B circle, X square, Y triangle, LB L1, RB R1).
 float hint(ImDrawList *dl, const Frame &f, float x, float y, const char *button, const char *word)
 {
+    bool ps = ps_icons();
+    static const char *const ps_files[] = { "ui/ps_cross.png", "ui/ps_circle.png", "ui/ps_square.png", "ui/ps_triangle.png" };
     std::string name = std::string("ui/button_") + button + ".png";
+    if (ps && !button[1]) name = ps_files[button[0] == 'a' ? 0 : button[0] == 'b' ? 1 : button[0] == 'x' ? 2 : 3];
     const Tex &t = tex(name);
-    if (button[0] && button[1] && !t.srv) {     // "rb", "lb": a small plate with both letters
-        char up[3] = { (char)(button[0] - 32), (char)(button[1] - 32), 0 };
+    if (button[0] && button[1] && !t.srv) {     // "rb", "lb": a small plate with both letters (R1, L1)
+        char up[3] = { (char)(button[0] - 32), ps ? '1' : (char)(button[1] - 32), 0 };
         rect(dl, f, x - 2, y + 1, 22, 14, IM_COL32(70, 70, 70, 255), 4);
         text(dl, f, g_body, 10, x + 9, y + 2, WHITE, up, CENTER, 0);
         text(dl, f, g_title, 13, x + 24, y + 1, WHITE, word, LEFT, 1.0f);
         return 24 + text_width(f, g_title, 13, word) + 12;
     }
-    if (!image(dl, f, t, x, y, 16, 16)) {
+    if (!image(dl, f, t, x, y, 16, 16) && ps) {
+        ps_symbol(dl, f, x, y, button[0]);
+    } else if (!t.srv) {
         dl->AddCircleFilled(f.p(x + 8, y + 8), 8 * f.s(), button[0] == 'a' ? GREEN : button[0] == 'b' ? RED :
                             button[0] == 'x' ? IM_COL32(60, 120, 230, 255) : IM_COL32(230, 200, 40, 255));
         char up[2] = { (char)(button[0] - 32), 0 };
@@ -1612,8 +1667,8 @@ void draw_hub(ImDrawList *dl, const Frame &f, const Pad &pad)
     door_panel(dl, f);
     if (S.hub_sel == HUB_RANKED && ranked_elsewhere)
         door_text(dl, f, &tex("ui/online_icon.png"), items[S.hub_sel], "ON THE EUROPE SERVER",
-                  "Ranked runs on the Europe server: your rating and the leaderboard live there. Press A to switch to "
-                  "Europe, then choose Ranked Match again.");
+                  pad_text("Ranked runs on the Europe server: your rating and the leaderboard live there. Press {a} to "
+                           "switch to Europe, then choose Ranked Match again.").c_str());
     else
         door_text(dl, f, &tex("ui/online_icon.png"), items[S.hub_sel], subs[S.hub_sel], descs[S.hub_sel]);
     if (S.hub_sel == 0 && mode_count) {
@@ -1639,7 +1694,7 @@ void draw_hub(ImDrawList *dl, const Frame &f, const Pad &pad)
             say(line);
         } else if (needs_account && !signed_in) {
             say(acc == ACCOUNT_WAITING ? "Finish signing in with Discord in your browser first."
-                                       : "Sign in with Discord first: press Y.");
+                                       : pad_text("Sign in with Discord first: press {y}."));
         } else switch (S.hub_sel) {
         case 0:
             if (mode_count) {
@@ -1783,7 +1838,7 @@ void draw_stats(ImDrawList *dl, const Frame &f, const Pad &pad)
     if (!have) {
         text(dl, f, g_title, 22, 320, 200, CREAM, stats_busy() ? "LOADING..." : "NO STATS YET", CENTER, 1.6f);
         if (!stats_busy())
-            text(dl, f, g_hand, 14, 320, 236, ORANGE, "PRESS X TO TRY AGAIN", CENTER, 1.0f);
+            text(dl, f, g_hand, 14, 320, 236, ORANGE, pad_text("PRESS {X} TO TRY AGAIN").c_str(), CENTER, 1.0f);
         return;
     }
     char num[32];
@@ -1930,9 +1985,9 @@ void draw_rooms(ImDrawList *dl, const Frame &f, const Pad &pad)
         }
         else if (is_team(r.mode)) snprintf(where, sizeof(where), "Two on two. ");
         snprintf(players, sizeof(players), "%s%d of %d players. %s", where, r.players, r.max,
-                 NETPLAY_IS_KOTH(r.mode) ? (open ? "Winner stays on. Press A to join the line." : "Full.") :
-                 r.phase == 1 ? "Voting on the venue right now." : r.phase == 2 ? "A match is on." :
-                 open ? "Open: press A to join." : "Full.");
+                 pad_text(NETPLAY_IS_KOTH(r.mode) ? (open ? "Winner stays on. Press {a} to join the line." : "Full.") :
+                          r.phase == 1 ? "Voting on the venue right now." : r.phase == 2 ? "A match is on." :
+                          open ? "Open: press {a} to join." : "Full.").c_str());
         {   // this PC's ping to the server the room is on; on the other server, that joining moves there
             int ms = gallery_on() ? e.ping_ms : e.server == here ? netplay_rtt() : e.ping_ms;
             size_t at = strlen(players);
@@ -2264,8 +2319,8 @@ void draw_settings(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom
         text(dl, f, g_title, 24, 463, 92, CREAM, "KING OF THE HILL", CENTER, 1.6f);
         text(dl, f, g_hand, 13, 463, 120, ORANGE, "WINNER STAYS ON", CENTER, 1.0f);
         text(dl, f, g_body, 12, 362, 138, WHITE,
-             "TWO FIGHT ONE ON ONE, THE OTHERS WAIT IN LINE. THE LOSER GOES TO THE BACK. "
-             "WHEN YOU'RE CALLED, PRESS A WITHIN 20 SECONDS.", LEFT, 1.0f, 202);
+             pad_text("TWO FIGHT ONE ON ONE, THE OTHERS WAIT IN LINE. THE LOSER GOES TO THE BACK. "
+                      "WHEN YOU'RE CALLED, PRESS {A} WITHIN 20 SECONDS.").c_str(), LEFT, 1.0f, 202);
         venues_y = 196;
     } else {
         image_fit(dl, f, tex(mode_logo(s.mode)), 372, 96, 170, 36);
@@ -2636,7 +2691,7 @@ float give_up(ImDrawList *dl, const Frame &f, const Pad &pad, float x, float y, 
     } else if (pad.lb_once) {
         netplay_lobby_yield();
         S.give_up_at = now;
-        say("You gave up your spot: back of the line. LB again (or hold LB) leaves the hill.", 5000);
+        say(pad_text("You gave up your spot: back of the line. {LB} again (or hold {LB}) leaves the hill."), 5000);
     }
     return w;
 }
@@ -2739,9 +2794,9 @@ void draw_up(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r, c
     text(dl, f, g_title, 64, 594, 206, v.ms_left < 6000 ? RED : CREAM, secs, RIGHT, 2.0f);
     rect(dl, f, 242, 290, 352, 6, IM_COL32(255, 255, 255, 30), 3);
     rect(dl, f, 242, 290, 352 * std::min(1.0f, v.ms_left / 20000.0f), 6, v.ms_left < 6000 ? RED : ORANGE, 3);
-    const char *say_line = ready ? "Waiting for your opponent to press A..."
-                                 : "Press A now: not ready in time sends you to the back of the line.";
-    text(dl, f, g_hand, 16, 242, 304, ORANGE, say_line, LEFT, 0.8f, 360);
+    std::string say_line = pad_text(ready ? "Waiting for your opponent to press {a}..."
+                                          : "Press {a} now: not ready in time sends you to the back of the line.");
+    text(dl, f, g_hand, 16, 242, 304, ORANGE, say_line.c_str(), LEFT, 0.8f, 360);
     float hx = 242;
     if (!ready) hx += hint(dl, f, hx, 352, "a", "READY");
     hx += hint(dl, f, hx, 352, "x", "CHOOSE FIGHTER");
@@ -2849,7 +2904,8 @@ void draw_hill(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
         break;
     case NETHILL_CALLING:
         now_line = "UP: " + upper(slot_name(r, v.pair[0])) + " VS " + upper(slot_name(r, v.pair[1]));
-        snprintf(buf, sizeof(buf), "Both press A within %d s or go to the back.", (v.ms_left + 999) / 1000);
+        snprintf(buf, sizeof(buf), "Both press %s within %d s or go to the back.", pad_text("{a}").c_str(),
+                 (v.ms_left + 999) / 1000);
         sub = buf;
         break;
     case NETHILL_VOTING:
@@ -2869,7 +2925,7 @@ void draw_hill(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
     }
     // this PC's place, under the door (the line can fill the left panel)
     if (v.my_state == NETLINE_AWAY)
-        text(dl, f, g_hand, 13, 463, 370, RED, "YOU ARE AWAY: PRESS A TO GET BACK IN THE LINE", CENTER, 0.8f, 250);
+        text(dl, f, g_hand, 13, 463, 370, RED, pad_text("YOU ARE AWAY: PRESS {A} TO GET BACK IN THE LINE").c_str(), CENTER, 0.8f, 250);
     else if (v.next == r.you)
         text(dl, f, g_hand, 18, 463, 368, ORANGE, "YOU'RE UP NEXT", CENTER, 1.2f);
 
@@ -4048,7 +4104,8 @@ bool draw(ImVec2 display)
         }
         door_panel(dl, f);
         door_text(dl, f, &tex("ui/online_icon.png"), "ONLINE", pending ? "CHOOSING A SERVER" : "CONNECTING",
-                  pending ? "Europe, US East or US West: the one with the lowest ping. Change it any time with X in the online menu."
+                  pending ? pad_text("Europe, US East or US West: the one with the lowest ping. Change it any time with "
+                                     "{x} in the online menu.").c_str()
                           : "To the FFNY Online server.");
         float hx = 54;
         hx += hint(dl, f, hx, 392, "x", "SERVER");
@@ -4081,7 +4138,8 @@ bool draw(ImVec2 display)
         text(dl, f, g_title, 14, 54, 145, WHITE, status, LEFT, 0.8f, 265);
         door_panel(dl, f);
         door_text(dl, f, &tex("ui/online_icon.png"), "OFFLINE", "NO CONNECTION",
-                  "Check the internet connection, then press A to try again, or X to pick another server.");
+                  pad_text("Check the internet connection, then press {a} to try again, or {x} to pick another "
+                           "server.").c_str());
         float hx = 54;
         hx += hint(dl, f, hx, 392, "a", "TRY AGAIN");
         hx += hint(dl, f, hx, 392, "x", "SERVER");

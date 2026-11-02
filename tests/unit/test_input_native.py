@@ -142,7 +142,7 @@ def run(tool, ini_text):
 
 def test_defaults_are_valid_and_complete(tool):
     out, ini = run(tool, None)
-    assert out['count'] == 'count 62'   # gpu_notice_seen since build 36
+    assert out['count'] == 'count 63'   # gpu_notice_seen since build 36, ui.button_icons
     assert out['decision'] == 'decision 1 0 1 1 0 0 0'
     assert out['ui'] == 'ui F1|left_stick_click+right_stick_click|100|0'
     assert out['duplicate_keys'] == 'duplicate_keys 0'
