@@ -803,6 +803,9 @@ void backdrop(ImDrawList *dl, const Frame &f, ImVec2 display, bool full, LookId 
 }
 
 // Where the game's door was: a glass panel for the door's text (unless the game's door shows).
+// How far our glass door's content sits right of where the game's door has it (centre 463).
+float door_dx() { return g_game_door ? 0 : DOOR_X + DOOR_W / 2 - 463; }
+
 void door_panel(ImDrawList *dl, const Frame &f)
 {
     if (!g_game_door) glass(dl, f, DOOR_X, DOOR_Y, DOOR_W, DOOR_H, 14, IM_COL32(10, 10, 13, 255), 0.58f);
@@ -1714,16 +1717,17 @@ void draw_hub(ImDrawList *dl, const Frame &f, const Pad &pad)
     if (S.hub_sel == 0 && mode_count) {
         int type = quick_modes[S.quick_mode];
         const Tex &logo = tex(mode_logo(type));
-        if (!logo.srv) text(dl, f, g_title, 16, 463, 404, CREAM, mode_name(type), CENTER);
-        else image_fit(dl, f, logo, 383, 396, 160, 30);
-        text(dl, f, g_title, 22, 370, 398, ORANGE, "<", CENTER, 1.2f);
-        text(dl, f, g_title, 22, 556, 398, ORANGE, ">", CENTER, 1.2f);
+        float dx = door_dx();
+        if (!logo.srv) text(dl, f, g_title, 16, 463 + dx, 404, CREAM, mode_name(type), CENTER);
+        else image_fit(dl, f, logo, 383 + dx, 396, 160, 30);
+        text(dl, f, g_title, 22, 370 + dx, 398, ORANGE, "<", CENTER, 1.2f);
+        text(dl, f, g_title, 22, 556 + dx, 398, ORANGE, ">", CENTER, 1.2f);
         // Team and the special matches: what the mode is (a special match: where), over the logo
         if (int v = fixed_venue(type)) {
             std::string at = "ONE ON ONE AT " + upper(online_venue_name(v));
-            text(dl, f, g_hand, 12, 463, 378, ORANGE, at.c_str(), CENTER, 0.8f, 200);
+            text(dl, f, g_hand, 12, 463 + door_dx(), 378, ORANGE, at.c_str(), CENTER, 0.8f, 200);
         } else if (is_team(type))
-            text(dl, f, g_hand, 12, 463, 378, ORANGE, "TWO ON TWO, FOUR PLAYERS", CENTER, 0.8f, 200);
+            text(dl, f, g_hand, 12, 463 + door_dx(), 378, ORANGE, "TWO ON TWO, FOUR PLAYERS", CENTER, 0.8f, 200);
     }
 
     if (pad.a) {
@@ -2076,7 +2080,7 @@ void draw_rooms(ImDrawList *dl, const Frame &f, const Pad &pad)
                 snprintf(players + at, sizeof(players) - at, " Your ping: %d ms.", ms);
         }
         door_panel(dl, f);
-        image_fit(dl, f, tex(mode_logo(r.mode)), 383, 150, 160, 34);
+        image_fit(dl, f, tex(mode_logo(r.mode)), 383 + door_dx(), 150, 160, 34);
         door_text(dl, f, nullptr, r.name, mode_name(r.mode), players);
     }
     if (pad.rb && n && can_watch()) {     // spectator mode: watch the chosen room's matches
@@ -2404,23 +2408,23 @@ void draw_settings(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom
     }
     // the door: the mode's logo (King of the Hill: its rules), then the venues filling the panel
     door_panel(dl, f);
-    float venues_y;
+    float venues_y, dx = door_dx();
     if (koth) {
-        text(dl, f, g_title, 24, 463, 92, CREAM, "KING OF THE HILL", CENTER, 1.6f);
-        text(dl, f, g_hand, 13, 463, 120, ORANGE, "WINNER STAYS ON", CENTER, 1.0f);
-        text(dl, f, g_body, 12, 362, 138, WHITE,
+        text(dl, f, g_title, 24, 463 + dx, 92, CREAM, "KING OF THE HILL", CENTER, 1.6f);
+        text(dl, f, g_hand, 13, 463 + dx, 120, ORANGE, "WINNER STAYS ON", CENTER, 1.0f);
+        text(dl, f, g_body, 12, 362 + dx, 138, WHITE,
              pad_text("TWO FIGHT ONE ON ONE, THE OTHERS WAIT IN LINE. THE LOSER GOES TO THE BACK. "
                       "WHEN YOU'RE CALLED, PRESS {A} WITHIN 20 SECONDS.").c_str(), LEFT, 1.0f, 202);
         venues_y = 196;
     } else {
-        image_fit(dl, f, tex(mode_logo(s.mode)), 372, 96, 170, 36);
+        image_fit(dl, f, tex(mode_logo(s.mode)), 372 + dx, 96, 170, 36);
         venues_y = 142;
         if (const char *blurb = mode_blurb(s.mode)) {   // Team and the special matches: what they are
-            text(dl, f, g_body, 12, 362, 138, WHITE, upper(blurb).c_str(), LEFT, 1.0f, 202);
+            text(dl, f, g_body, 12, 362 + dx, 138, WHITE, upper(blurb).c_str(), LEFT, 1.0f, 202);
             venues_y = 178;
         }
     }
-    venue_showcase(dl, f, s, 356, venues_y, 214, 438 - venues_y);
+    venue_showcase(dl, f, s, 356 + dx, venues_y, 214, (g_game_door ? 438 : DOOR_Y + DOOR_H - 6) - venues_y);
     if (pad.a && rows_of[S.settings_sel] == R_OPEN) {
         if (S.settings_edit) { netplay_lobby_settings(&s); S.page = HUB; say("Settings saved; everyone readies again."); }
         else { netplay_lobby_create(&s); say("Opening the room..."); S.page = HUB; }
