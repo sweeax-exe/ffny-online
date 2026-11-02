@@ -1,0 +1,4 @@
+// The wizard's heading font, Anton (SIL Open Font License 1.1), with its licence beside it. Both are
+// tracked under ffny-branding/fonts and pinned by scripts/check-source-tree.py.
+102 RCDATA "@ANTON_FONT@"
+103 RCDATA "@ANTON_LICENCE@"

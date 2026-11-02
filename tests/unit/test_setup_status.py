@@ -101,9 +101,9 @@ def test_error_reporting_survives_a_denied_status_file(tmp_path, monkeypatch):
 
 def test_wizard_reads_status_with_delete_sharing():
     """The Windows wizard must not hold status.txt in a way that refuses the engine's replace."""
-    source = (ROOT / 'setup' / 'main.cpp').read_text(encoding='utf-8')
-    assert 'FILE_SHARE_DELETE' in source
-    timer = source[source.index('if (message == WM_TIMER)'):]
+    assert 'FILE_SHARE_DELETE' in (ROOT / 'setup' / 'main.cpp').read_text(encoding='utf-8')     # readShared
+    source = (ROOT / 'setup' / 'wizard.cpp').read_text(encoding='utf-8')
+    timer = source[source.index('if (message == WM_TIMER && wp == 2)'):]
     timer = timer[:timer.index('WaitForSingleObject')]
     assert 'readShared(statusPath' in timer and 'ifstream' not in timer
 
