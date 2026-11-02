@@ -248,6 +248,7 @@ static const char *friendly(const char *section, const char *key)
         {"online", "voice_volume", "Voices volume (%)"},
         {"online", "voice_mic_volume", "Microphone volume (%)"},
         {"online", "voice_auto_level", "Level my microphone"},
+        {"online", "discord_status", "Discord status"},
         {"debug", "record", "Record play-tests"},
         {"debug", "mark_key", "Mark key"},
         {"debug", "mark_pad", "Mark pad buttons"},
@@ -1650,6 +1651,14 @@ static void voice_settings()
     ImGui::PopTextWrapPos();
 }
 
+// Discord status (discord_presence.c): on and off at once, in the launcher's options and the overlay.
+static void discord_status_setting()
+{
+    settings_group("online", { "discord_status" });
+    ImGui::SameLine();
+    ImGui::TextDisabled("Shows what you play in your Discord profile, with your fighter and opponents online.");
+}
+
 // Online: the connection settings. The hub itself (quick match, rooms, the venue vote) is in the
 // game, behind the main menu's ONLINE entry (src/hooks/online_screen.cpp).
 static void page_online(UiMode mode)
@@ -1667,6 +1676,7 @@ static void page_online(UiMode mode)
         if (account_game_name(shown, sizeof(shown)))
             ImGui::TextDisabled("Online you appear as %s, from your Discord account.", shown);
     }
+    discord_status_setting();
     ImGui::Spacing();
     ImGui::PushFont(g_font_bold, ImGui::GetStyle().FontSizeBase * 1.1f);
     ImGui::TextColored(k_gold, "Online play is in the game: choose ONLINE in the main menu.");
@@ -2495,6 +2505,7 @@ static void page_basics()
     settings_group("online", { "voice", "voice_key", "voice_pad" });
     ImGui::SeparatorText("Online");
     server_widget();
+    discord_status_setting();
     settings_group("online", { "rollback" });
     ImGui::TextDisabled("Beta: used only when the other player has it on too. Applies the next time the game starts.");
     ImGui::SeparatorText("HD textures");

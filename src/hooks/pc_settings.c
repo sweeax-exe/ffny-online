@@ -35,6 +35,7 @@
 #include "netplay.h"
 #include "created_fighter.h"
 #include "pc_debug.h"
+#include "discord_presence.h"
 #include "patches/widescreen.h"
 #include "patches/picture.h"
 
@@ -96,6 +97,10 @@ static RecompSetting g_display_settings[] = {
       "How loud your own voice goes out, in percent (after the automatic level, if that is on)." },
     { "online", "voice_auto_level", RECOMP_SETTING_BOOL, 1, 0, 0, NULL, NULL, 0,
       "Bring your voice to a common loudness automatically (quiet headset microphones up to 6x)." },
+    { "online", "discord_status", RECOMP_SETTING_BOOL, 1, 0, 0, NULL, "RECOMP_DISCORD_PRESENCE", 0,
+      "Show \"Playing FFNY Online\" in your Discord profile while the Discord app runs on this PC: where you are "
+      "(launcher, menus, Story, Battle, the online lobby or a room), and in an online match the mode, the venue, your "
+      "fighter and the other players' names. Everyone who can see your Discord profile sees it." },
     { "online", "rollback", RECOMP_SETTING_BOOL, 0, 0, 0, NULL, NULL, RECOMP_SETTING_RESTART,
       "Beta: rollback netcode in online fights, used only when every player in the match has it on. Your presses "
       "count at once and the game corrects itself when the other player's arrive late. It can still crash." },
@@ -623,12 +628,17 @@ static void run_launcher_if_wanted(void)
 
     if (!pc_launcher_wanted(pc_mods_needs_recovery() ? 0 : recomp_settings_get("launcher", "skip", 0), force && !no, no, shift, test_run))
         return;
+    discord_presence_launcher();
     if (!pc_launcher_run()) {
         fprintf(stderr, "[UI] the launcher was closed; not starting the game\n");
         fflush(stderr);
+        discord_presence_end();
         ExitProcess(0);
     }
-    if (!getenv("RECOMP_LAUNCHER_SAME_PROCESS")) start_game_process();
+    if (!getenv("RECOMP_LAUNCHER_SAME_PROCESS")) {
+        discord_presence_end();     /* the game's process shows its own */
+        start_game_process();
+    }
     pc_input_restart();
 #else
     const char *settings = getenv("RECOMP_SETTINGS");
@@ -644,9 +654,11 @@ static void run_launcher_if_wanted(void)
     if (!pc_launcher_wanted(pc_mods_needs_recovery() ? 0 : recomp_settings_get("launcher", "skip", 0), force && !no, no,
                             host_posix_shift_held(), test_run))
         return;
+    discord_presence_launcher();
     if (!pc_launcher_run()) {
         fprintf(stderr, "[UI] the launcher was closed; not starting the game\n");
         fflush(stderr);
+        discord_presence_end();
         pc_input_stop();
         fflush(stdout);
         _Exit(0);
@@ -891,6 +903,7 @@ int pc_settings_init(void)
     d3d8_present_set_render_scale((unsigned)pc_display("render_scale", 2));
     pc_settings_apply_display();
     recomp_settings_on_change(setting_changed, NULL);
+    discord_presence_game();    /* Discord status ([online] discord_status, discord_presence.c) */
     netplay_autostart();        /* tests only: RECOMP_NETPLAY (src/hooks/netplay.c) */
     fflush(stderr);
     return 1;
