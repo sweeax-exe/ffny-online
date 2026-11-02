@@ -250,6 +250,7 @@ int netplay_rematch_request(void);   /* Game.Rematch() online: 1 to hold it for 
 /* Every front-end call (automatch_hold_funccall): a spectator's game goes through the summary of a
  * watched match by itself from its first Game.GetMatchSummary on. */
 void netplay_spectator_funccall(const char *text);
+void netplay_results_funccall(const char *text);   /* the results' No (the tip screen): said to the others at once */
 int netplay_toast(char *text, int size);
 
 /* The pre-fight versus screen (online_screen.cpp) of a room's match: what its START set up, copied

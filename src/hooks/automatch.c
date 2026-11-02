@@ -353,6 +353,7 @@ int automatch_hold_funccall(const char *text)
     }
     created_fighter_before_funccall(text);      /* unlinks created fighters before the reward step */
     netplay_spectator_funccall(text);           /* spectator mode: the summary goes by by itself */
+    netplay_results_funccall(text);             /* the results' No: the others hear it at once */
     if (!strcmp(text, "Game.Rematch()")) return netplay_rematch_request();
     if (g_armed || (!netplay_match_locked() && !g_running)) return 0;
     for (i = 0; i < sizeof(setup) / sizeof(setup[0]); i++)
@@ -362,6 +363,34 @@ int automatch_hold_funccall(const char *text)
             return 1;
         }
     return 0;
+}
+
+void recorder_event_text(const char *kind, const char *key, const char *text);     /* recorder.h */
+
+/* A front-end command as if the menu had called it: logged, and through the same hooks before and
+ * after as the FuncCall hook in recomp_manual.c (held calls, created fighters' links, this file's
+ * sequence). Online, a Rematch that the others accepted while this PC's was held starts with it
+ * (netplay.c, netplay_rematch_tick). Registers and the x87 state are put back. */
+unsigned int defjam_menu_call(const char *text)
+{
+    uint32_t eax = g_eax, ecx = g_ecx, edx = g_edx, ebx = g_ebx, esi = g_esi, edi = g_edi, ebp = g_ebp, esp = g_esp;
+    double fp[8];
+    int fp_top = g_fp_top;
+    uint16_t fp_cw = g_fp_control_word;
+    unsigned int r = 0;
+    memcpy(fp, g_fp_stack, sizeof(fp));
+    fprintf(stderr, "[FUNCCALL] %s (for the menu)\n", text);
+    recorder_event_text("fe", "text", text);
+    xbox_NoteAnchorEvent(text);
+    if (!automatch_hold_funccall(text)) {
+        r = defjam_fe_call(text);
+        automatch_on_funccall(text);
+    }
+    g_eax = eax; g_ecx = ecx; g_edx = edx; g_ebx = ebx; g_esi = esi; g_edi = edi; g_ebp = ebp; g_esp = esp;
+    memcpy(g_fp_stack, fp, sizeof(fp));
+    g_fp_top = fp_top;
+    g_fp_control_word = fp_cw;
+    return r;
 }
 
 void automatch_on_funccall(const char *text)

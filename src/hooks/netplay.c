@@ -119,6 +119,7 @@ int netplay_versus(NetVersus *o) { (void)o; return 0; }
 int netplay_match_info(NetVersus *o) { (void)o; return 0; }
 int netplay_rematch_request(void) { return 0; }
 void netplay_spectator_funccall(const char *t) { (void)t; }
+void netplay_results_funccall(const char *t) { (void)t; }
 int netplay_debug_json(char *o, int n) { return snprintf(o, (size_t)n, "{}"); }
 int netplay_rollback_brief(char *o, int n) { return snprintf(o, (size_t)n, "offline"); }
 extern void sub_00081170(void);
@@ -347,6 +348,8 @@ static struct {
     int start_reported;             /* this match's "start" went to the account service */
     int seed_bypass;                /* crowd_reset seeds a generator with its own words */
     uint32_t rematch_want[MAXP];    /* the match number each player chose Rematch after, REMATCH_NO: went back */
+    volatile LONG rematch_held;     /* this PC chose Rematch and waits for the others (its call was held) */
+    volatile LONG rematch_go;       /* ... and they all have now: the game thread starts the rematch */
     /* rollback (rollback.h): a fighting step runs on a prediction of each entry that has not
      * arrived (that player's last one); when the real one differs, the game goes back to the
      * save state taken before that step and runs the steps again. */
@@ -457,6 +460,7 @@ static void toast(unsigned ms, const char *format, ...)
 static const char *player_name(int pos);
 static void put32(uint8_t *p, uint32_t v);
 static void send_data(const uint8_t *payload, int len);
+static void rematch_declined(void);
 
 /* The results screen's Rematch (Game.Rematch()) starts the next match on this PC alone: with one
  * player choosing Rematch and the other No, one game loaded a fight the other never joined and stood
@@ -490,6 +494,7 @@ int netplay_rematch_request(void)
     after = N.match_count;
     N.rematch_want[N.pos] = after;
     for (i = 0; i < N.players; i++) {
+    InterlockedExchange(&N.rematch_go, 0);
         if (i == N.pos) continue;
         if (N.rematch_want[i] == REMATCH_NO) gone = i;
         if (N.rematch_want[i] != after) all = 0;
@@ -505,9 +510,16 @@ int netplay_rematch_request(void)
     }
     if (all) {
         fprintf(stderr, "[NETPLAY] rematch: every player chose it\n");
+        InterlockedExchange(&N.rematch_held, 0);
         return 0;
     }
     for (i = 0; i < N.players; i++)
+    /* Held. Before build 45 the player had to choose Rematch once more after the others accepted,
+     * while the last one to choose started at once: a first chooser who then chose No (or never
+     * pressed again) left the other in a fight alone, frozen until START_LIMIT_MS gave up on it (F9
+     * report 40f4d1, 2026-11-02). Now this PC starts by itself once every player has chosen it
+     * (netplay_rematch_tick). */
+    InterlockedExchange(&N.rematch_held, (LONG)(after + 1u));
         if (i != N.pos && N.rematch_want[i] != after) break;
     fprintf(stderr, "[NETPLAY] rematch: waiting for player %d to choose it\n", i + 1);
     toast(8000, "Waiting for %s to choose Rematch...", player_name(i));
@@ -515,6 +527,42 @@ int netplay_rematch_request(void)
 }
 
 /* Spectator mode: the summary of a watched match is gone through by itself (remote_slot_state taps
+/* The results' No: the tip screen that leads back to the room comes up (Game.GetHeroFighterNumber,
+ * then Game.GetTips and Game.Quit). Said at once, not when the room is reached a few seconds and a
+ * press later: a player who chose Rematch first hears it before it starts, and one whose rematch
+ * already started stops waiting for this PC (the fight's wait below). */
+void netplay_results_funccall(const char *text)
+{
+    if (strncmp(text, "Game.GetHeroFighterNumber(", 26) || !N.lobby || !N.match_live || N.watching ||
+        MEM32(G_MATCH_PHASE) < 3u)
+        return;
+    InterlockedExchange(&N.rematch_held, 0);
+    InterlockedExchange(&N.rematch_go, 0);
+    if (N.rematch_want[N.pos] != REMATCH_NO) {
+        fprintf(stderr, "[NETPLAY] rematch: this PC chose No on the results\n");
+        rematch_declined();
+    }
+}
+
+/* Once per game update, on the game thread, between two updates: a held Rematch that every player
+ * has now chosen runs here, as the menu's own call would (the same hooks, so created fighters are
+ * linked again). Not while a screen loads. */
+static void netplay_rematch_tick(void)
+{
+    uint32_t sm;
+    if (!N.rematch_go) return;
+    if (!N.lobby || !N.match_live || N.watching) {
+        InterlockedExchange(&N.rematch_go, 0);
+        InterlockedExchange(&N.rematch_held, 0);
+        return;
+    }
+    sm = MEM32(0x002FB148u + 0x17u * 4u);
+    if (sm >= 0x10000u && MEM32(sm + 0x24u) != 0) return;
+    InterlockedExchange(&N.rematch_go, 0);
+    fprintf(stderr, "[NETPLAY] rematch: every player has chosen it; it starts on this PC too\n");
+    defjam_menu_call("Game.Rematch()");
+}
+
  * A on player 1's port until the game is back in the menus). */
 void netplay_spectator_funccall(const char *text)
 {
@@ -529,6 +577,9 @@ static void rematch_declined(void)
     uint8_t p[9];
     if (!N.lobby || !N.start_seed || N.koth_match || N.watching) return;
     p[0] = P_REMATCH;
+    N.rematch_want[N.pos] = REMATCH_NO;
+    InterlockedExchange(&N.rematch_held, 0);
+    InterlockedExchange(&N.rematch_go, 0);
     put32(p + 1, N.start_seed);
     put32(p + 5, REMATCH_NO);
     send_data(p, 9);
@@ -1330,17 +1381,22 @@ static void on_data(int from, const uint8_t *p, int len)
     case P_REMATCH:
         if (N.lobby && len >= 9 && get32(p + 1) == N.start_seed && N.start_seed && !N.watching) {
             uint32_t after = get32(p + 5);
-            int mine;
+            int mine, all = 1, i;
             EnterCriticalSection(&g_cs);
             N.rematch_want[from] = after;
             mine = N.rematch_want[N.pos] == after;
             LeaveCriticalSection(&g_cs);
             fprintf(stderr, "[NETPLAY] rematch: player %d %s\n", from + 1,
                     after == REMATCH_NO ? "went back to the room" : "chose Rematch");
-            if (after == REMATCH_NO)
+            if (after == REMATCH_NO) {
+                InterlockedExchange(&N.rematch_go, 0);
+                SetEvent(N.arrived);    /* a fight that waits for its first entries stops waiting (below) */
                 toast(8000, "%s went back to the room: choose No to join them.", player_name(from));
-            else if (mine)
-                toast(6000, "%s accepted the rematch: choose Rematch again to start.", player_name(from));
+            } else if (mine && all && N.rematch_held == (LONG)(after + 1u)) {
+                InterlockedExchange(&N.rematch_go, 1);      /* netplay_rematch_tick starts it */
+                toast(6000, "%s accepted the rematch: it starts now.", player_name(from));
+            } else if (mine)
+                toast(6000, "%s accepted the rematch.", player_name(from));
             else
                 toast(8000, "%s wants a rematch! Choose Rematch to accept.", player_name(from));
         }
@@ -1351,6 +1407,7 @@ static void on_data(int from, const uint8_t *p, int len)
             EnterCriticalSection(&g_cs);
             spec_remote_hash(from, &in);
             LeaveCriticalSection(&g_cs);
+            for (i = 0; i < N.players; i++) if (N.rematch_want[i] != after) all = 0;
         } else if (netcheck_unpack(p, len, &in)) {
             EnterCriticalSection(&g_cs);
             memmove(&N.remote_hash[1], &N.remote_hash[0], sizeof(N.remote_hash[0]) * 15);
@@ -4582,6 +4639,19 @@ void netplay_on_step(void)
                           player_name(late));
                 } else
                     toast(10000, "%s stopped answering: the fight goes on offline and won't count.", player_name(late));
+            /* A rematch that started on this PC (every player chose it) while that player went back
+             * to the room instead (its results' No, or it never started the rematch): nothing of
+             * this match will come from it. Waiting START_LIMIT_MS froze the picture for 90 s
+             * (F9 report 40f4d1, 2026-11-02). */
+            int declined = late >= 0 && late < MAXP && N.rematch_want[late] == REMATCH_NO && g_steps_match[late] != N.match;
+            if (declined) {
+                fprintf(stderr, "[NETPLAY] player %d went back to the room instead of the rematch (step %u)\n", late + 1, s);
+                InterlockedExchange(&N.lockstep, 0);
+                set_status("The other player went back to the room; this fight runs offline.");
+                toast(10000, "%s went back to the room instead of the rematch: START, then Quit, goes back too.",
+                      player_name(late));
+                break;
+            }
                 break;
             }
         }
@@ -4960,6 +5030,7 @@ void netplay_on_update(void)
         memset(N.snap, 0, sizeof(N.snap));
     }
     rollback_discover(MEM32(G_MATCH_PHASE) == 1u ? 16 : 4);
+    if (!N.resim) netplay_rematch_tick();
     /* which steps ran on the real entries; the first that ran on a wrong prediction */
     EnterCriticalSection(&g_cs);
     for (t = N.final_step + 1; t <= N.step; t++) {
