@@ -44,7 +44,8 @@ def zig_archive(path):
     names = ['zig', 'LICENSE', 'doc/langref.html', 'lib/std/std.zig', 'lib/compiler_rt.zig', 'lib/libcxx/LICENSE.TXT',
              'lib/libc/glibc/abilists', 'lib/libc/musl/x.c', 'lib/libc/mingw/x.c', 'lib/libc/darwin/x.h',
              'lib/libc/include/generic-glibc/stdio.h', 'lib/libc/include/any-linux-any/linux/types.h',
-             'lib/libc/include/x86-linux-any/asm/x.h', 'lib/libc/include/any-windows-any/windows.h',
+             'lib/libc/include/x86-linux-any/asm/x.h', 'lib/libc/include/x86-linux-gnu/bits/wordsize.h',
+             'lib/libc/include/any-windows-any/windows.h',
              'lib/libc/include/aarch64-macos-none/x.h', 'lib/libtsan/x.cpp', 'lib/fuzzer.zig']
     with tarfile.open(path, 'w:xz') as archive:
         for name in names:
@@ -64,7 +65,8 @@ def test_zig_is_pruned_to_linux_glibc_and_wrapped_for_glibc_2_31(tmp_path, monke
     kept = {p.relative_to(tools / 'zig').as_posix() for p in (tools / 'zig').rglob('*') if p.is_file()}
     assert kept == {'zig', 'LICENSE', 'lib/std/std.zig', 'lib/compiler_rt.zig', 'lib/libcxx/LICENSE.TXT',
                     'lib/libc/glibc/abilists', 'lib/libc/include/generic-glibc/stdio.h',
-                    'lib/libc/include/any-linux-any/linux/types.h', 'lib/libc/include/x86-linux-any/asm/x.h'}
+                    'lib/libc/include/any-linux-any/linux/types.h', 'lib/libc/include/x86-linux-any/asm/x.h',
+                    'lib/libc/include/x86-linux-gnu/bits/wordsize.h'}
     assert (tools / 'zig/zig').stat().st_mode & 0o111
     assert provenance['glibc'] == '2.31' and provenance['url'] == pin['url']
     for name in ('zig-cc', 'zig-c++', 'zig-ar', 'zig-ranlib'):

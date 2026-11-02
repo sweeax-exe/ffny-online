@@ -116,7 +116,7 @@ def stage(staging, cache):
 ZIG_PRUNE = ('doc', 'lib/docs', 'lib/build-web', 'lib/lldb', 'lib/libtsan', 'lib/init', 'lib/fuzzer.zig',
              'lib/libc/musl', 'lib/libc/mingw', 'lib/libc/wasi', 'lib/libc/darwin', 'lib/libc/freebsd',
              'lib/libc/netbsd')
-ZIG_HEADERS = ('generic-glibc', 'x86-linux-any', 'any-linux-any')
+ZIG_HEADERS = ('generic-glibc', 'x86-linux-gnu', 'x86-linux-any', 'any-linux-any')
 # What CMake is given as the compiler, archiver and indexer. -fno-sanitize=all: zig cc turns the
 # undefined-behaviour sanitizer on in unoptimized builds, and the lifted code relies on behaviour it
 # would trap (the game is compiled with -fno-strict-aliasing -fwrapv -ffp-contract=off).
