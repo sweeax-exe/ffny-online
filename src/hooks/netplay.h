@@ -275,6 +275,10 @@ typedef struct NetVersus {
     char cp_style[4][64];       /* and its fighting styles ("KICKBOXING / STREETFIGHTING") */
 } NetVersus;
 int netplay_versus(NetVersus *out);
+/* Discord's presence (discord_presence.c): the hub room's match as its START set it up, from the
+ * START until the game is back in the room, with the same fields as netplay_versus (ms: since the
+ * START; alpha 1). Only reads, from any thread. 0 when there is no such match. */
+int netplay_match_info(NetVersus *out);
 int netplay_debug_json(char *out, int size);    /* tests: the lockstep's state as JSON */   /* a notice for the fight right now (wait, desync, gone) */
 void netplay_crowd_update(void);  /* the crowd's update, as recomp_lookup_manual hands it out */
 void netplay_on_result(uint32_t winners, uint32_t losers, uint32_t code);  /* the room match decided */

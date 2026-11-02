@@ -20,6 +20,7 @@
 #include "netplay.h"
 #include "online_screen.h"
 #include "created_fighter.h"
+#include "discord_presence.h"
 
 extern void xbox_NoteAnchorEvent(const char *text);
 
@@ -366,6 +367,7 @@ int automatch_hold_funccall(const char *text)
 void automatch_on_funccall(const char *text)
 {
     test_control_note_funccall(text);
+    discord_presence_on_funccall(text);     /* the screen, for the Discord status */
     run_fe_queue();
     unsigned int keep = g_eax;
     if (!g_env_read) read_env();

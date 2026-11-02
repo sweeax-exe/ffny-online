@@ -116,6 +116,7 @@ void netplay_on_result(uint32_t w, uint32_t l, uint32_t c) { (void)w; (void)l; (
 void netplay_on_crash(void) {}
 int netplay_toast(char *t, int n) { (void)t; (void)n; return 0; }
 int netplay_versus(NetVersus *o) { (void)o; return 0; }
+int netplay_match_info(NetVersus *o) { (void)o; return 0; }
 int netplay_rematch_request(void) { return 0; }
 void netplay_spectator_funccall(const char *t) { (void)t; }
 int netplay_debug_json(char *o, int n) { return snprintf(o, (size_t)n, "{}"); }
@@ -4748,6 +4749,44 @@ void netplay_on_seed(uint32_t esp, int words, uint32_t which)
         if (i == 1) v |= 1;     /* an additive term stays odd */
         MEM32(esp + 4 + 4 * (uint32_t)i) = v;
     }
+}
+
+/* Discord's presence (netplay.h): the room match as START set it up. Reads only. */
+int netplay_match_info(NetVersus *out)
+{
+    int i, live;
+    InitOnceExecuteOnce(&g_once, init_once, NULL, NULL);
+    if (!N.lobby || !out) return 0;
+    EnterCriticalSection(&g_cs);
+    live = N.match_live && !N.start_deferred && N.state == NETPLAY_CONNECTED;
+    if (live) {
+        memset(out, 0, sizeof(*out));
+        out->count = N.report_m.count < 2 ? 2 : N.report_m.count > 4 ? 4 : N.report_m.count;
+        for (i = 0; i < out->count; i++) {
+            int slot = N.start_slots[i];
+            uint8_t ok[CP_REC_LEN];
+            out->fighter[i] = N.report_m.fighter[i];
+            out->cpu[i] = i >= N.players || N.report_m.pad[i] < 0;
+            out->ping[i] = -1;
+            if (!out->cpu[i]) snprintf(out->name[i], sizeof(out->name[i]), "%s", N.report_names[i]);
+            if (out->fighter[i] == CP_FIGHTER_ID && !out->cpu[i] && slot >= 0 && slot < ROOMSLOTS &&
+                N.cp_start_crc[slot] && N.cp_have[slot] && cp_record_crc(N.cp_rec[slot]) == N.cp_start_crc[slot] &&
+                cp_record_sanitize(N.cp_rec[slot], ok))
+                cp_record_name(ok, out->cp_name[i], sizeof(out->cp_name[i]));
+        }
+        out->you = N.pos;
+        out->type = N.report_m.type;
+        out->venue = N.report_m.venue;
+        out->room_mode = N.roomv.settings.mode;
+        out->king = N.koth_match ? N.vs_king : -1;
+        out->streak = N.vs_streak;
+        snprintf(out->room, sizeof(out->room), "%s", N.roomv.settings.name);
+        out->ms = (int)(GetTickCount64() - N.start_tick);
+        out->loaded = N.match_seen;
+        out->alpha = 1.0f;
+    }
+    LeaveCriticalSection(&g_cs);
+    return live;
 }
 
 #endif
