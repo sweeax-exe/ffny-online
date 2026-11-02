@@ -1498,8 +1498,49 @@ static void stream_retire_guard(void)
     sub_0011EC80();
 }
 
+/* The front end's custom-control draw (sub_000689B0, reached only through the pointer at
+ * 0x3B1E58) walks the 24 control slots at 0x345248 and calls each match's vtable. Twice a slot
+ * still named a hero thumb control that had been freed and its memory reused for a new heap
+ * block: the "vtable" read was the game heap's block magic 0xAA53C5AA, and the call crashed
+ * (Ryzing build 39 after a Story fight, daboii build 24 in Battle's fighter choice;
+ * docs/research/crash-000689B0.md). A slot whose object is outside guest memory or whose vtable
+ * is outside .rdata (every control vtable lives there) is cleared before the draw. */
+extern void sub_000689B0(void);
+#define FE_CTRL_SLOTS   0x345248u
+#define FE_RDATA_LO     0x285240u
+#define FE_RDATA_HI     0x2D54E0u
+
+static int guest_object(uint32_t p)
+{
+    uint32_t a = p & 0x7FFFFFFFu;               /* the 0x80000000 mirror is the same RAM */
+    return a >= 0x10000u && a < 0x04000000u - 4u;
+}
+
+static void fe_custom_ctrl_guard(void)
+{
+    static uint32_t logged;
+    int i;
+    for (i = 0; i < 24; i++) {
+        uint32_t slot = FE_CTRL_SLOTS + 4u * (uint32_t)i, p = MEM32(slot), vt;
+        if (!p)
+            continue;
+        vt = guest_object(p) ? MEM32(p) : 0;
+        if (vt >= FE_RDATA_LO && vt < FE_RDATA_HI)
+            continue;
+        MEM32(slot) = 0;
+        if (!(logged & (1u << i))) {
+            logged |= 1u << i;
+            fprintf(stderr, "[FE] custom control slot %d dropped: object %08X has no control vtable (%08X); "
+                    "it was freed and its memory reused\n", i, p, vt);
+        }
+    }
+    sub_000689B0();
+}
+
 recomp_func_t recomp_lookup_manual(uint32_t xbox_va)
 {
+    if (xbox_va == 0x000689B0u)         /* the front end's custom-control draw: freed controls */
+        return fe_custom_ctrl_guard;
     if (xbox_va == 0x0012C310u && getenv("RECOMP_TRACE_VOICE"))
         return trace_voice_render;
     /* This hook sees indirect calls only, so it suits a trace wrapper or a
