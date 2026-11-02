@@ -2,8 +2,9 @@
 
 For branch `feat/graphics-enhancements` (toolkit `defjam/graphics-enhancements`). What was built and why:
 [graphics-enhancements.md](graphics-enhancements.md). macOS (Vulkan through MoltenVK) was tested on the M1 Pro;
-this plan covers the two platforms that were not: **Windows (Direct3D 11)**, whose D3D11 code was only
-compiled against MinGW headers and never run, and **Linux / Steam Deck (native Vulkan)**.
+this plan originally covered the two remaining platforms: **Windows (Direct3D 11)** and
+**Linux / Steam Deck (native Vulkan)**. The [Windows validation report](graphics-enhancements-windows-2026-11-01.md)
+now records native MSVC builds, runtime tests and a D3D11 texture compatibility fix.
 
 Every new setting defaults to the old picture. Run part A first: if anything in it changes with the
 defaults, stop and report, because nothing new should be active yet.
@@ -12,7 +13,7 @@ Allow about 90 minutes per platform: 30 for the build and part A, 60 for parts B
 
 ## 0. Get the build
 
-Both branches have to be on GitHub first (they are local to the Mac until pushed).
+Both branches are published on GitHub. The game is PR #151 and the toolkit is fork PR #4.
 
 ```
 git fetch origin
@@ -23,7 +24,9 @@ git submodule update --init --recursive
 The branch adds a new entry hook (`sub_000D8C40_enter`) and a wrapper (`sub_000D8AD0`), so the game must be
 **re-lifted**, not only rebuilt:
 
-- Windows: `.\scripts\recomp.ps1` then `.\scripts\build.ps1` (kill `defjam_recomp.exe` first).
+- Windows: `.\scripts\recomp.ps1` then `.\scripts\build.ps1 -Preset win-x64-release`, matching the
+  regression runner's Release default. The build script stops only the executable owned by that checkout
+  and preset; do not terminate another checkout's running game.
 - Linux / Deck: `djpy scripts/pipeline.py recomp` then `djpy scripts/pipeline.py build`.
 
 Pass: the build finishes with no new errors or warnings in `d3d8_present.c`, `d3d8_device.c`, `d3d8_states.c`,
@@ -39,6 +42,10 @@ python scripts/regress.py --only fight,ffa,visual,launcher,overlay,unlockopt,pic
 Pass: every row passes, including the three golden frames and `visual`. On the Deck run them under headless
 gamescope as `docs/build-macos-linux.md` describes.
 
+On Windows, the current `launcher`, `overlay`, `unlockopt` and `picture` rows explicitly skip because
+they exercise the SDL/Vulkan host. Check the Windows app and native D3D11 overlay separately; a skip
+is not a pass. Approved visual comparisons also require the matching saved-profile progression.
+
 Every run's log (`logs/run-*.log.err`) now has one line saying which options are on; with the defaults it reads
 `[DISPLAY] filter smooth, texture levels off, anisotropy 1x, MSAA 1x asked`. Linux also logs
 `[D3D8-VK] anisotropic filtering: up to 16x` (the GPU's limit, whatever the setting).
@@ -51,12 +58,13 @@ path): `[display]` has `msaa = off`, `texture_mips = false`, `anisotropy = off`,
 
 Use one seeded fight so pictures can be compared pixel for pixel (crowds aside):
 
-```
-python scripts/scenario_suite.py run fight --step-input default --rng-seed 20261006 --no-unlock ^
+```powershell
+python scripts/scenario_suite.py run fight --step-input default --rng-seed 20261006 --no-unlock `
   --fixture <your profiles fixture> --step-shots 300,900,1500 --settings <file>.json
 ```
 
-(`^` is PowerShell/cmd line continuation; use `\` on Linux.) Captures land in
+PowerShell uses a backtick for line continuation; cmd uses `^`, and Linux shells use `\`.
+Replace the angle-bracket placeholders with local paths before running. Captures land in
 `logs/scenarios/fight-<time>/captures/fight-step*.png`. Each settings file is a small JSON object, e.g.
 `{"render_scale": 1, "texture_mips": true}`.
 
