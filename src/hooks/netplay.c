@@ -5393,6 +5393,13 @@ static void snap_save(void)
 {
     uint32_t step = N.step + 1;
     int slot = (int)(step % ROLLBACK_SLOTS);
+    {   /* a save while the device holds a texture or palette: a load back to it leaves a count short */
+        int b = rollback_device_bindings();
+        static unsigned told;
+        if (b && told++ < 8)
+            fprintf(stderr, "[ROLLBACK] a save with %d device binding(s): step %u, phase %u%s\n", b, step,
+                    MEM32(G_MATCH_PHASE), N.resim ? ", running steps again" : "");
+    }
     if (rollback_save(slot)) { N.snap[slot].valid = 0; return; }
     N.snap[slot].valid = 1;
     N.snap[slot].step = step;
@@ -5517,10 +5524,17 @@ void netplay_on_update(void)
     intro_variants();
     koth_check_result(0);       /* also between the fight's steps: an ending can stop them */
     if (N.resim || !N.rb_on) return;
-    /* before any save, load or the reference copy: the device holds no texture or palette. Only
-     * while the fight runs (its saves and loads): around it the game loads and frees the venue's
-     * textures itself, and releasing them under it is not needed. */
-    if (MEM32(G_MATCH_PHASE) == 1u) rollback_unbind_textures();
+    /* before any save, load or the reference copy: the device holds no texture or palette. At every
+     * update while rollback is on, not only in the phase "fighting": the lead-in before it (phase 0,
+     * where the first predictions and loads come, steps 4..60) and a rematch, which starts with the
+     * last match's phase 3, saved and loaded with the device holding the venue's palettes, and the
+     * counts wrapped as before the fix (the black venue-24 scene of F9 09d35d: its first loads went
+     * back to steps 57-59). RECOMP_ROLLBACK_UNBIND=fight (tests): only while fighting, as before. */
+    {
+        static int fight_only = -1;
+        if (fight_only < 0) fight_only = getenv("RECOMP_ROLLBACK_UNBIND") && !strcmp(getenv("RECOMP_ROLLBACK_UNBIND"), "fight");
+        if (!fight_only || MEM32(G_MATCH_PHASE) == 1u) rollback_unbind_textures();
+    }
     /* The fight is decided and every step ran on the real entries, or the match went on offline:
      * no more rollback in this match (write tracking off, no saves on the results screen). */
     if (MEM32(G_MATCH_PHASE) == 1u) N.rb_fought = 1;   /* a rematch starts with the last match's phase */

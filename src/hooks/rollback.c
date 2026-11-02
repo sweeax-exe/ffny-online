@@ -1565,11 +1565,34 @@ static void d3d_call2(void (*fn)(void), uint32_t a, uint32_t b)
     g_esp = sp;
 }
 
+/* How many textures and palettes the device holds now (a save should see none). */
+int rollback_device_bindings(void)
+{
+    uint32_t dev = MEM32(D3D_DEVICE), s;
+    int n = 0;
+    if (!dev) return 0;
+    for (s = 0; s < 4; s++) n += (MEM32(dev + 0xF88u + 4u * s) != 0) + (MEM32(dev + 0xF98u + 4u * s) != 0);
+    return n;
+}
+
 void rollback_unbind_textures(void)
 {
     uint32_t dev = MEM32(D3D_DEVICE), s;
     uint32_t eax = g_eax, ecx = g_ecx, edx = g_edx, ebx = g_ebx, esi = g_esi, edi = g_edi, ebp = g_ebp;
     if (!dev) return;
+    for (s = 0; s < 4; s++) {   /* a bound object whose internal count is 0: one reference short, about to wrap */
+        uint32_t o[2], k;
+        o[0] = MEM32(dev + 0xF88u + 4u * s);
+        o[1] = MEM32(dev + 0xF98u + 4u * s);
+        for (k = 0; k < 2; k++)
+            if (o[k] && !((MEM32(o[k]) >> 19) & 0xFu)) {
+                static unsigned told;
+                if (told++ < 8)
+                    fprintf(stderr, "[ROLLBACK] the device holds %s %08X on stage %u without its reference (Common %08X, "
+                            "%ld saves in): its count wraps at this release\n", k ? "palette" : "texture", o[k], s,
+                            MEM32(o[k]), (long)s_saves);
+            }
+    }
     for (s = 0; s < 4; s++) {
         if (MEM32(dev + 0xF88u + 4u * s)) d3d_call2(sub_00215F60, s, 0);
         if (MEM32(dev + 0xF98u + 4u * s)) d3d_call2(sub_00216140, s, 0);
@@ -2388,5 +2411,6 @@ int rollback_save(int slot) { (void)slot; return -1; }
 int rollback_load(int slot) { (void)slot; return -1; }
 void rollback_reset(void) {}
 void rollback_unbind_textures(void) {}
+int rollback_device_bindings(void) { return 0; }
 void rollback_stats(unsigned *a, unsigned *b, unsigned *c) { if (a) *a = 0; if (b) *b = 0; if (c) *c = 0; }
 #endif

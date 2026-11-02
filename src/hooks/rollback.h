@@ -93,6 +93,7 @@ void rollback_reset(void);
 /* At each update of a rollback match, on the game thread: the D3D device lets go of its textures
  * and palettes, so that no save or load holds a device reference the other does not. */
 void rollback_unbind_textures(void);
+int rollback_device_bindings(void);    /* textures and palettes the device holds now (tests: a save should see none) */
 /* For the log and tests: KB a save copies, pages known to change, pages left alone. */
 void rollback_stats(unsigned *save_kb, unsigned *changing, unsigned *skipped);
 
