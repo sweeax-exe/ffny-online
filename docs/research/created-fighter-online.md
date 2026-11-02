@@ -253,7 +253,7 @@ updated before the build goes out. Gallery pages `name-created`, `grid-created-l
   runtime-built looks are outside what a rollback restores). A match whose START names a record now
   plays in lockstep on every PC (`match_has_created`, decided from the START, so the input delay and
   the decision agree); the log says "rollback off for this match: a created fighter plays".
-  Rollback for created fighters is future work.
+  Since build 45 they roll back too (rollback-plan-2026-11.md, fifth round): the pose pass runs in re-runs, EAGL's dynamic vertex buffers stay live, and P_RTT byte 14 keeps a room with an older build in lockstep.
 
 **Tests** (first on build 35 base c470302, then rebased onto e1866fe; `tools/defjam-mcp/dj.py scenario online` with
 `--created --cp-records`; two copies, local relay, knockout at step 600; the save area of each
