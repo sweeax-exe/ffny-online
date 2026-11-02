@@ -271,6 +271,7 @@ static ULONG64 s_game_cycles;
  * start because the audio arena is set up with the sound engine); a match uses it only when every
  * player has it on (netplay.c, peer_rb). RECOMP_ROLLBACK=on or off overrides it for tests; off, nothing
  * of it runs: no audio arena, no write tracking, no saves. */
+static int s_off_for_server;    /* the setting was on at start, but the server's last answer turned it off */
 int rollback_enabled(void)
 {
     static int on = -1;
@@ -285,6 +286,7 @@ int rollback_enabled(void)
         if (!v && on && recomp_settings_get("online", "rollback_follows_server", 1) &&
             !recomp_settings_get("online", "rollback_server", 0)) {
             on = 0;
+            s_off_for_server = 1;
             fprintf(stderr, "[ROLLBACK] the rollback setting is on, but the server did not allow rollback the last time "
                     "this PC was online: off for this session (no audio arena)\n");
         }
@@ -302,6 +304,15 @@ void rollback_server_allows(int allowed)
         fprintf(stderr, "[ROLLBACK] the server %s rollback: the rollback setting %s from the next start\n",
                 allowed ? "allows" : "no longer allows", allowed ? "applies" : "is not used");
     }
+}
+
+/* The online menu's notice (build 46): this session started without rollback only because the server
+ * did not allow it the last time, and now the setting is still on and the server's answer is yes again
+ * (rollback_server_allows kept it); the audio arena is set up at start only, so a restart uses it. */
+int rollback_restart_hint(void)
+{
+    if (getenv("RECOMP_ROLLBACK") || rollback_enabled() || !s_off_for_server) return 0;
+    return recomp_settings_get("online", "rollback", 0) != 0 && recomp_settings_get("online", "rollback_server", 0) != 0;
 }
 
 /* The rollback setting is on (tests: RECOMP_ROLLBACK=on), but this session runs without rollback
@@ -2381,6 +2392,7 @@ void rollback_mixer_unlock_b(void) { if (MEM32(g_esp) == MIX_UNLOCKS) mixer_end(
 int rollback_enabled(void) { return 0; }
 void rollback_server_allows(int allowed) { (void)allowed; }
 int rollback_setting_idle(void) { return 0; }
+int rollback_restart_hint(void) { return 0; }
 void rollback_heap_range(uint32_t *lo, uint32_t *hi) { if (lo) *lo = 0x80003000u; if (hi) *hi = 0x82A0D000u; }
 int rollback_soak_diff_on(void) { return 0; }
 void rollback_soak_phase(int phase) { (void)phase; }

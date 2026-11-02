@@ -43,6 +43,7 @@
 #include "pc_ui.h"
 #include "patches/widescreen.h"
 #include "recomp_settings.h"
+#include "rollback.h"
 #include "updater.h"
 
 namespace {
@@ -3814,7 +3815,9 @@ void gallery_step()
                                          // build 46: back from a match while another player is on its results
                                          "room-results", "room-results-ffa",
                                          // build 46: each player's rollback in the room
-                                         "room-rollback", "room-rollback-restart", "room-rollback-all" };
+                                         "room-rollback", "room-rollback-restart", "room-rollback-all",
+                                         // build 46: the server allows rollback again (the notice)
+                                         "hub-rollback-restart" };
     const int count = (int)(sizeof(pages) / sizeof(pages[0]));
     static unsigned long long start;
     static int ms;
@@ -3935,6 +3938,7 @@ void gallery_step()
     else if (p == "hub") { S.page = HUB; S.hub_sel = 0; S.quick_mode = 0; }
     else if (p == "hub-signin") { S.page = HUB; S.hub_sel = 3; G.account = ACCOUNT_OUT; }
     else if (p == "hub-voice") { S.page = HUB; S.hub_sel = HUB_VOICE; }
+    else if (p == "hub-rollback-restart") { S.page = HUB; S.hub_sel = 0; S.quick_mode = 0; }   // build 46: the restart notice
     else if (p == "hub-team" || p == "hub-special") {     // QUICK MATCH with Team, or Inferno, chosen
         S.page = HUB;
         S.hub_sel = 0;
@@ -4485,6 +4489,17 @@ bool draw(ImVec2 display)
             hint(dl, f, hx, 424, "b", "BACK");
         }
         if ((pad.a && S.hub_sel == HUB_LEAVE) || pad.b) keep = false;
+    }
+    {   // build 46: the server allows rollback again, but this session started without it (once per session)
+        static bool told;
+        int caps = lobby_caps();
+        if (!told && !gallery_on() && net_state() == NETPLAY_LOBBY && caps > 0 && (caps & NETPLAY_CAP_ROLLBACK) &&
+            rollback_restart_hint()) {
+            told = true;
+            say("Rollback is allowed again: restart the game to use it.", 9000);
+        }
+        if (gallery_on() && G.page && !strcmp(G.page, "hub-rollback-restart") && !S.note_until)
+            say("Rollback is allowed again: restart the game to use it.", 9000);
     }
     draw_status(dl, f);
     return keep;
