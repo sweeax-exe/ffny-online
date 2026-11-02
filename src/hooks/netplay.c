@@ -1102,6 +1102,8 @@ static void spec_remote_hash(int from, const NetCheck *in)
 
 static unsigned g_steps_rx[MAXP], g_steps_last[MAXP];
 static uint32_t g_steps_match[MAXP];       /* the match of each player's latest STEPS: 0 or older while it still loads */
+static ULONGLONG g_steps_at[MAXP];          /* when each player's latest STEPS arrived (GetTickCount64) */
+#define SILENT_OWN_MS 4000                 /* nobody heard this long: this PC's own connection (give-up notice) */
 static void store_steps(int from, const uint8_t *p, int len)
 {
     uint32_t match, last;
@@ -1110,6 +1112,7 @@ static void store_steps(int from, const uint8_t *p, int len)
     match = get32(p); last = get32(p + 4); count = p[8];
     g_steps_rx[from]++;
     g_steps_match[from] = match;
+    g_steps_at[from] = GetTickCount64();
     g_steps_last[from] = last;
     if (len < 9 + count * ENTRY) return;
     EnterCriticalSection(&g_cs);
@@ -4675,6 +4678,25 @@ static void soak_pad(uint32_t actor)
     uint32_t slot, base, k, i;
     if (actor < ACTORS || (actor - ACTORS) % STRIDE) return;
     slot = (actor - ACTORS) / STRIDE;
+                {   /* this PC heard nobody: its own connection dropped, not that player's */
+                    ULONGLONG rx = N.last_rx, at;
+                    uint32_t silent[MAXP], relay = rx < now ? (uint32_t)(now - rx) : 0, quiet;
+                    int i;
+                    for (i = 0; i < MAXP; i++) {
+                        at = g_steps_at[i] ? g_steps_at[i] : waited_since;   /* read once: the network thread writes it */
+                        silent[i] = at < now ? (uint32_t)(now - at) : 0;
+                    }
+                    if (netcheck_silent_cause(N.players, N.pos, late, silent, relay, SILENT_OWN_MS) == NETCHECK_OWN_LINK) {
+                        quiet = netcheck_least_silence(N.players, N.pos, silent, relay);
+                        fprintf(stderr, "[NETPLAY] this PC's connection is unstable: no data from the other players for "
+                                "%.1f s (the relay's last packet %.1f s ago); no player is named\n", quiet / 1000.0,
+                                relay / 1000.0);
+                        set_status("Your connection is unstable; continuing offline.");
+                        toast(10000, "Your connection is unstable: no data from the other players for %u s. "
+                              "The fight goes on offline. START quits.", (quiet + 500) / 1000);
+                        break;
+                    }
+                }
     if (slot >= MAXP) return;
     base = PAD_TABLE + slot * 0x20u;
     k = N.step % SOAK_PAD_RING;
