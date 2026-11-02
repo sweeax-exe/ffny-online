@@ -63,7 +63,7 @@ const Stage k_stages[] = {
     {"Prepare the setup files", {"Preparing verified release source", nullptr}},
     {"Verify your dump", {"Verifying and preparing your dump", "Verified installed dump", "Verified extraction"}},
     {"Check the build tools", {"Checking ", "Installing Microsoft Build Tools", "Preparing the build container",
-                               "Building with this computer", "Building with the compiler that came"}},
+                               "Building with"}},
     {"Analyse the game's code", {"Analysis ", nullptr}},
     {"Translate it to C", {"Lift ", nullptr}},
     {"Compile the game", {"Build ", "Building in the build container", nullptr}},
