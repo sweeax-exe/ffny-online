@@ -500,16 +500,25 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
 
 def rematch_tail(matches, p2):
     """The fights of an online rematch series: the first match, then Rematch from the results menu
-    (the harness's online-rematch routes) for each further one."""
+    for each further one. The menu (battle/rematch) comes after the reward screen's save
+    (MemCard.Save(battle/rewardun.swf)) with No chosen; left moves to Rematch (the menu reads left and right, not up and down). Player 1 chooses
+    at 5 s, player 2 at 9 s, so player 1's choice is held and starts by itself once player 2's arrives
+    (netplay_rematch_tick). The presses are anchored on the screen they are for and held 0.05 s: a
+    0.3 s A on an unpaced copy (RECOMP_FLIP_HZ=0) went through two or three screens and chose No, and
+    the old route's downs never moved the menu (2026-11-02)."""
     h = harness()
     tail = h.FIGHT_TAIL.replace("right:", "left:") if p2 else h.FIGHT_TAIL
     parts = [tail]
     for k in range(2, matches + 1):
         nth = "#%d" % (2 * k - 3) if k > 2 else ""
-        downs = "down@14;down@15;a@16" if p2 else "down@6;down@7;a@8"
-        parts.append(h.raw_stages(["game.getmatchsummary(%s=a@4+3x2" % nth,
-                                   "game.updatematchrewardspoints(%s=a@3;%s" % ("#%d" % (k - 1) if k > 2 else "", downs)]))
+        prev = "#%d" % (k - 1) if k > 2 else ""
+        choose = "left:3:3.3,a:9:9.05" if p2 else "left:3:3.3,a:5:5.05"
+        parts.append("@game.getmatchsummary(%s,a:4:4.05,a:7:7.05" % nth)
+        parts.append("@game.updatematchrewardspoints(%s,a:3:3.05" % prev)
+        parts.append("@memcard.save( battle/rewardun%s,%s" % (prev, choose))
         parts.append(tail.replace("@game.startgame(", "@game.startgame(#%d" % k))
+    if matches > 1:     # the last match's summary too (the run is done once every copy accepted it)
+        parts.append("@game.getmatchsummary(#%d,a:4:4.05,a:7:7.05,a:10:10.05" % (2 * matches - 1))
     return ",".join(parts)
 
 
