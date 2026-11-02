@@ -706,7 +706,12 @@ static void intro_update(void)
     uint32_t st;
     if (!intro_window()) { g_intro_state = 0xFFFFFFFFu; return; }
     st = MEM32(G_LOGIC_STATE);
-    if (st != g_intro_state) { g_intro_state = st; g_intro_updates = 0; }
+    if (st != g_intro_state) {
+        fprintf(stderr, "[NETPLAY] pre-fight state %d after %u updates of state %d\n", (int)st, g_intro_updates,
+                (int)g_intro_state);
+        g_intro_state = st;
+        g_intro_updates = 0;
+    }
     else g_intro_updates++;
 }
 
@@ -3928,6 +3933,17 @@ void netplay_on_step(void)
         }
     }
     N.hash_at[k] = fighter_hash(N.hash_parts[k], N.hash_fields[k], N.hash_split[k]);   /* the state as this step starts */
+    {   /* the x87 control word the step starts with (its precision bits round every result): a
+         * change is logged, at most 12 a match, to compare the PCs of a desynced match */
+        static uint16_t last_cw;
+        static uint32_t cw_match, cw_told;
+        if (cw_match != N.match) { cw_match = N.match; cw_told = 0; last_cw = 0; }
+        if (g_fp_control_word != last_cw && !N.resim) {
+            if (cw_told++ < 12)
+                fprintf(stderr, "[NETPLAY] x87 control word at step %u: %04X (was %04X)\n", s, g_fp_control_word, last_cw);
+            last_cw = g_fp_control_word;
+        }
+    }
     N.hash_tag[k] = s + 1;
     {   /* RECOMP_NETPLAY_STEPLOG=1 (tests): the checksum's fields of every fighter at every step, to find
          * the step and the field where the PCs of a desynced match part (the checksum goes out every 60) */
