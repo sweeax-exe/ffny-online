@@ -708,15 +708,15 @@ void draft_header(ImDrawList *dl, const Frame &f, const NetRoom &r, const NetDra
     char line[64];
     netdraft_banner(&d, r.you, line, sizeof(line));
     bool mine = netdraft_my_turn(&d, r.you);
-    text(dl, f, g_stencil, 24, 320, 76, mine ? GOLD : CREAM, line, CENTER, 1.4f);
+    text(dl, f, g_stencil, 22, 320, 74, mine ? GOLD : CREAM, line, CENTER, 1.4f);
     if (netdraft_active(&d)) {
         int left = draft_secs(d);
         int total = d.step == NETDRAFT_BAN ? 20 : netdraft_fighter_step(d.step) ? 25 : 15;
         char secs[8];
         snprintf(secs, sizeof(secs), "%d", left);
         text(dl, f, g_title, 34, 600, 22, left <= 5 ? RED : CREAM, secs, RIGHT, 1.6f);
-        rect(dl, f, 50, 106, 540, 5, IM_COL32(255, 255, 255, 30), 2.5f);
-        rect(dl, f, 50, 106, 540 * std::min(1.0f, left / (float)total), 5, mine ? GOLD : ORANGE, 2.5f);
+        rect(dl, f, 50, 111, 540, 4, IM_COL32(255, 255, 255, 30), 2.0f);
+        rect(dl, f, 50, 111, 540 * std::min(1.0f, left / (float)total), 4, mine ? GOLD : ORANGE, 2.0f);
     }
 }
 
@@ -740,7 +740,7 @@ void draw_draft_fighters(ImDrawList *dl, const Frame &f, const Pad &pad, const N
     int row = R.draft_sel / cols;
     if (row < R.draft_top) R.draft_top = row;
     if (row >= R.draft_top + rows) R.draft_top = row - rows + 1;
-    float gx = 166, gy = 120, cw = 47, ch = 64;
+    float gx = 166, gy = 124, cw = 47, ch = 61;
     glass(dl, f, gx - 6, gy - 6, cols * (cw + 4) + 8, rows * (ch + 5) + 20);
     for (int rr = 0; rr < rows; rr++)
         for (int c = 0; c < cols; c++) {
@@ -797,15 +797,15 @@ void draw_draft_venues(ImDrawList *dl, const Frame &f, const Pad &pad, const Net
     if (pad.right) R.venue_sel = (R.venue_sel + 1) % n;
     if (pad.up && R.venue_sel >= per) R.venue_sel -= per;
     if (pad.down && R.venue_sel + per < n) R.venue_sel += per;
-    float w = n <= 5 ? 112 : 118, gap = 8, h = rowsn > 1 ? 136 : 200;
+    float w = n <= 5 ? 112 : 118, gap = 8, h = (w - 10) * 0.75f + 40;   // the photos are 4:3
     for (int i = 0; i < n; i++) {
         int v = d.options[i], row = i / per, col = i % per, inrow = std::min(per, n - row * per);
-        float x0 = 320 - (inrow * w + (inrow - 1) * gap) / 2, x = x0 + col * (w + gap), y = 120 + row * (h + 8);
+        float x0 = 320 - (inrow * w + (inrow - 1) * gap) / 2, x = x0 + col * (w + gap), y = 124 + row * (h + 8);
         if (mouse_pick(f, x, y, w, h)) R.venue_sel = i;
         int st = netdraft_venue_state(&d, v);
         bool sel = i == R.venue_sel, out = st == NETDRAFT_VENUE_STRUCK || st == NETDRAFT_VENUE_BANNED;
         glass(dl, f, x, y, w, h, 8, st == NETDRAFT_VENUE_CHOSEN ? IM_COL32(56, 40, 10, 255) : IM_COL32(10, 10, 13, 255), 0.62f);
-        float iw = w - 10, ih = std::min(iw, h - 40);
+        float iw = w - 10, ih = h - 40;
         ImU32 tint = out ? IM_COL32(80, 80, 80, 255) : sel ? IM_COL32_WHITE : IM_COL32(170, 170, 170, 255);
         if (!image(dl, f, venue_tex(v), x + 5, y + 5, iw, ih, tint))
             text(dl, f, g_title, 13, x + w / 2, y + ih / 2 - 6, CREAM, online_venue_name(v), CENTER, 1.0f, iw);
@@ -821,7 +821,7 @@ void draw_draft_venues(ImDrawList *dl, const Frame &f, const Pad &pad, const Net
         if (mouse_click(f, x, y, w, h)) const_cast<Pad &>(pad).a = true;
     }
     {   // both ban strips, small, under the cards
-        float y = 120 + rowsn * (h + 8) + 4;
+        float y = 124 + rowsn * (h + 8) + 6;
         if (y < 380) {
             for (int s = 0; s < 2; s++) {
                 int bans[3], made = netdraft_bans_of(&d, s, bans);
@@ -882,12 +882,12 @@ void draw_draft(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r
         draw_draft_reveal(dl, f, r, d);
         return;
     }
-    text(dl, f, g_title, 11, 320, 92 + 20, GREY, netdraft_hint(&d, r.you), CENTER, 0.7f, 420);
+    text(dl, f, g_title, 10, 320, 97, GREY, netdraft_hint(&d, r.you), CENTER, 0.6f, 460);
     if (netdraft_fighter_step(d.step)) {
         const auto &list = roster();
         int hover = list.empty() ? NETDRAFT_NONE : list[(size_t)std::min(R.draft_sel, (int)list.size() - 1)].id;
-        draft_side(dl, f, r, d, r.you, 14, 120, true, hover);
-        draft_side(dl, f, r, d, 1 - r.you, 640 - 14 - 140, 120, false, NETDRAFT_NONE);
+        draft_side(dl, f, r, d, r.you, 14, 122, true, hover);
+        draft_side(dl, f, r, d, 1 - r.you, 640 - 14 - 140, 122, false, NETDRAFT_NONE);
         draw_draft_fighters(dl, f, pad, r, d);
     } else {
         draw_draft_venues(dl, f, pad, r, d);
