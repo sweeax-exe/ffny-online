@@ -151,7 +151,10 @@
     a.href = base + '/tournaments/' + (id > 0 ? id : '');
     var top = el('div', 'tourney-top');
     var status = el('span', 'status s-' + String(t.status).replace(/[^a-z_]/g, ''), t.status_label);
-    top.appendChild(status);
+    var tags = el('span', 'tourney-tags');
+    tags.appendChild(status);
+    if (t.startgg) tags.appendChild(el('span', 'tourney-sgg', 'start.gg'));
+    top.appendChild(tags);
     top.appendChild(el('span', 'tourney-region', t.region_label));
     a.appendChild(top);
     a.appendChild(el('h3', null, t.name));
@@ -159,6 +162,16 @@
     a.appendChild(when);
     a.appendChild(el('p', 'tourney-meta', t.format_label + ' · Bo' + t.set_length));
     var slots = el('div', 'tourney-slots');
+    if (t.startgg_signup) { // sign-up and bracket on start.gg: our count would read 0
+      var cap = el('span');
+      cap.appendChild(document.createTextNode('Up to '));
+      cap.appendChild(el('b', null, String(t.max_players)));
+      cap.appendChild(document.createTextNode(' players · sign-up on start.gg'));
+      slots.appendChild(cap);
+      a.appendChild(slots);
+      a.appendChild(el('p', 'tourney-by', 'by ' + t.creator));
+      return a;
+    }
     var bar = el('progress');
     bar.max = Math.max(1, t.max_players);
     bar.value = Math.min(t.accepted, t.max_players);
