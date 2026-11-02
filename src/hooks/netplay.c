@@ -1840,6 +1840,7 @@ static void on_packet(const uint8_t *b, int len)
                         N.relay_caps & CAPS_KOTH ? " (King of the Hill)" : "",
                         N.relay_caps & CAPS_ROLLBACK ? " (rollback allowed)" : "",
                         N.relay_caps & CAPS_CREATED ? " (created fighters allowed)" : "");
+            rollback_server_allows((N.relay_caps & CAPS_ROLLBACK) != 0);    /* for the next start's audio arena */
         }
         break;
     case T_HILL:

@@ -20,6 +20,7 @@
 #define _CRT_SECURE_NO_WARNINGS
 #include "rollback.h"
 #include "recomp_settings.h"
+#include "pc_settings.h"
 
 #ifdef _WIN32
 #include "host.h"
@@ -200,8 +201,31 @@ int rollback_enabled(void)
     if (on < 0) {
         const char *v = getenv("RECOMP_ROLLBACK");
         on = v ? !strcmp(v, "on") : recomp_settings_get("online", "rollback", 0) != 0;
+        /* The beta setting alone started the audio arena in every game, lockstep matches included, while the
+         * servers' switch was off: 5.5 to 10 MB more of the 64 MB contiguous window (B2 of
+         * rollback-plan-2026-11.md, step 2). Now it also needs the server's yes from the last time this PC
+         * was online ([online] rollback_server, kept by rollback_server_allows); [online]
+         * rollback_follows_server = 0 goes back to the setting alone. RECOMP_ROLLBACK decides for tests. */
+        if (!v && on && recomp_settings_get("online", "rollback_follows_server", 1) &&
+            !recomp_settings_get("online", "rollback_server", 0)) {
+            on = 0;
+            fprintf(stderr, "[ROLLBACK] the rollback setting is on, but the server did not allow rollback the last time "
+                    "this PC was online: off for this session (no audio arena)\n");
+        }
     }
     return on;
+}
+
+/* netplay.c, at each relay's CAPS answer: whether it allows rollback, for the next start (rollback_enabled). */
+void rollback_server_allows(int allowed)
+{
+    allowed = allowed ? 1 : 0;
+    if (recomp_settings_get("online", "rollback_server", 0) == allowed) return;
+    if (recomp_settings_set("online", "rollback_server", allowed) > 0) {
+        pc_settings_save();
+        fprintf(stderr, "[ROLLBACK] the server %s rollback: the rollback setting %s from the next start\n",
+                allowed ? "allows" : "no longer allows", allowed ? "applies" : "is not used");
+    }
 }
 
 /* The game's heap block: the largest block of the contiguous window (the game takes it at start, before
@@ -2075,6 +2099,7 @@ void rollback_mixer_unlock_b(void) { if (MEM32(g_esp) == MIX_UNLOCKS) mixer_end(
 
 #else
 int rollback_enabled(void) { return 0; }
+void rollback_server_allows(int allowed) { (void)allowed; }
 void rollback_heap_range(uint32_t *lo, uint32_t *hi) { if (lo) *lo = 0x80003000u; if (hi) *hi = 0x82A0D000u; }
 int rollback_soak_diff_on(void) { return 0; }
 void rollback_soak_before(void) {}
