@@ -1839,8 +1839,7 @@ static void on_packet(const uint8_t *b, int len)
                 fprintf(stderr, "[NETPLAY] the relay supports %08X%s%s%s\n", (unsigned)N.relay_caps,
                         N.relay_caps & CAPS_KOTH ? " (King of the Hill)" : "",
                         N.relay_caps & CAPS_ROLLBACK ? " (rollback allowed)" : "",
-                        N.relay_caps & CAPS_CREATED ? " (created fighters allowed)" : "");
-        }
+                        N.relay_caps & CAPS_CREATED ? " (created fighters allowed)" : "");        }
         break;
     case T_HILL:
         if (N.lobby) on_hill(b + 6, len - 6);
@@ -4051,12 +4050,42 @@ void netplay_on_step(void)
     }
 }
 
+/* Tests (the offline soak): each step's pad words as the first pass read them, put back when the step
+ * runs again, as an online match puts back the entries. Without it a re-run read whatever the test bot
+ * decided anew (its memory is not rewound), so the soak counted the bot's second thoughts as steps that
+ * "came out otherwise" (2026-11-02: 6% of steps; two re-runs of the same steps agreed on all). */
+#define SOAK_PAD_RING 64
+static uint32_t s_soak_pad[SOAK_PAD_RING][MAXP][8], s_soak_pad_tag[SOAK_PAD_RING][MAXP];
+static int s_soak_wrong;    /* RECOMP_ROLLBACK_SOAK_WRONG: this re-run gets other buttons (a wrong prediction) */
+
+static void soak_pad(uint32_t actor)
+{
+    uint32_t slot, base, k, i;
+    if (actor < ACTORS || (actor - ACTORS) % STRIDE) return;
+    slot = (actor - ACTORS) / STRIDE;
+    if (slot >= MAXP) return;
+    base = PAD_TABLE + slot * 0x20u;
+    k = N.step % SOAK_PAD_RING;
+    if (!N.resim) {
+        for (i = 0; i < 8; i++) s_soak_pad[k][slot][i] = MEM32(base + i * 4u);
+        s_soak_pad_tag[k][slot] = N.step + 1;
+    } else if (s_soak_pad_tag[k][slot] == N.step + 1) {
+        for (i = 0; i < 8; i++) MEM32(base + i * 4u) = s_soak_pad[k][slot][i];
+        /* a wrong prediction: the buttons of 23 steps earlier (another press, another stick) */
+        if (s_soak_wrong && s_soak_pad_tag[(N.step + SOAK_PAD_RING - 23) % SOAK_PAD_RING][slot] == N.step + 1 - 23)
+            for (i = 0; i < 7; i++) MEM32(base + i * 4u) = s_soak_pad[(N.step + SOAK_PAD_RING - 23) % SOAK_PAD_RING][slot][i];
+    }
+}
+
 void netplay_on_pad_read(uint32_t actor)
 {
     uint32_t slot, base, s;
     int i;
     uint8_t entry[ENTRY];
-    if (!N.lockstep) return;
+    if (!N.lockstep) {
+        if (soak_depth() && N.rb_on) soak_pad(actor);
+        return;
+    }
     if (actor < ACTORS || (actor - ACTORS) % STRIDE) return;
     slot = (actor - ACTORS) / STRIDE;
     if ((int)slot >= N.players) return;
@@ -4373,10 +4402,42 @@ void netplay_on_update(void)
         if (t > 40 && N.step > (uint32_t)d + 2 && N.updates % 5 == 0) {
             unsigned long long before[16];
             int k;
+            static int twice = -1;      /* RECOMP_ROLLBACK_SOAK_TWICE=1: a second re-run, compared with the first */
+            static int wrong = -1;      /* RECOMP_ROLLBACK_SOAK_WRONG=1: between them, one on wrong buttons */
+            if (twice < 0) {
+                wrong = getenv("RECOMP_ROLLBACK_SOAK_WRONG") != NULL;
+                twice = wrong || getenv("RECOMP_ROLLBACK_SOAK_TWICE") != NULL;
+            }
             for (k = 0; k < d; k++) before[k] = defjam_test_step_hash(t - d + k);
-            if (rollback_soak_diff_on()) rollback_soak_before();
+            if (rollback_soak_diff_on() && !twice) rollback_soak_before();
             rollback_to(N.step + 1 - (uint32_t)d);
-            if (rollback_soak_diff_on()) rollback_soak_after(d, t);
+            if (rollback_soak_diff_on() && !twice) rollback_soak_after(d, t);
+            if (twice) {
+                /* Both re-runs draw nothing, so what the first pass's renders wrote is no difference here:
+                 * a step or a word that differs between them is state the load did not put back, or a
+                 * read of something host-timed (rollback-plan-2026-11.md step 3). */
+                static unsigned twice_same, twice_differ;
+                unsigned long long first[16];
+                for (k = 0; k < d; k++) first[k] = defjam_test_step_hash(t - d + k);
+                if (rollback_soak_diff_on()) rollback_soak_before();
+                if (wrong) {    /* what a wrong prediction leaves behind that the load does not take back */
+                    s_soak_wrong = 1;
+                    rollback_to(N.step + 1 - (uint32_t)d);
+                    s_soak_wrong = 0;
+                }
+                rollback_to(N.step + 1 - (uint32_t)d);
+                if (rollback_soak_diff_on()) rollback_soak_after(d, t);
+                for (k = 0; k < d; k++) {
+                    unsigned long long again = defjam_test_step_hash(t - d + k);
+                    if (!first[k] || !again) continue;
+                    if (first[k] == again) twice_same++;
+                    else if (twice_differ++ < 20)
+                        fprintf(stderr, "[ROLLBACK] soak #%u: step %lld came out otherwise in the second re-run (back %d)\n",
+                                soaks + 1, t - d + k, d);
+                }
+                if ((soaks + 1) % 100 == 0)
+                    fprintf(stderr, "[ROLLBACK] soak, two re-runs: %u steps the same, %u otherwise\n", twice_same, twice_differ);
+            }
             soaks++;
             for (k = 0; k < d; k++) {       /* k = 0: the state the load put back */
                 unsigned long long after = defjam_test_step_hash(t - d + k);
