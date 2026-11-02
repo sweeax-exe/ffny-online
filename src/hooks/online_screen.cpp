@@ -461,17 +461,25 @@ void plain_backdrop(ImDrawList *dl, const Frame &f, ImVec2 display, bool full)
     door_shutter(dl, f);
 }
 
+// Our glass door on the right (door_panel, door_text): level with the list panels' top (y 74) and as far
+// from the right edge as they are from the left (x 36), so the two panels sit symmetrically.
+const float DOOR_X = 346, DOOR_Y = 74, DOOR_W = 258, DOOR_H = 358;
+extern bool g_game_door;
+
 // The door's text, laid out as the game lays out STORY or OPTIONS: an icon, the title, an orange
 // subtitle and a few lines in capitals.
 void door_text(ImDrawList *dl, const Frame &f, const Tex *icon, const char *title, const char *sub, const char *desc)
 {
-    if (icon) image_fit(dl, f, *icon, 400, 140, 110, 100, IM_COL32(255, 255, 255, 235));
-    if (title) text(dl, f, g_title, 32, 463, 236, CREAM, title, CENTER, 1.8f);
-    if (sub) text(dl, f, g_hand, 17, 463, 274, ORANGE, sub, CENTER, 1.2f);
+    // In the game's own door the text sits where the game puts it; on our glass door (door_panel)
+    // it is centred on the panel and starts higher.
+    float cx = g_game_door ? 463 : DOOR_X + DOOR_W / 2, dy = g_game_door ? 0 : -28, wrap = g_game_door ? 182 : DOOR_W - 52;
+    if (icon) image_fit(dl, f, *icon, cx - 63, 140 + dy, 110, 100, IM_COL32(255, 255, 255, 235));
+    if (title) text(dl, f, g_title, 32, cx, 236 + dy, CREAM, title, CENTER, 1.8f);
+    if (sub) text(dl, f, g_hand, 17, cx, 274 + dy, ORANGE, sub, CENTER, 1.2f);
     if (desc) {
         std::string up(desc);
         for (char &c : up) c = (char)toupper((unsigned char)c);
-        text(dl, f, g_body, 17, 372, 304, WHITE, up.c_str(), LEFT, 1.2f, 182);
+        text(dl, f, g_body, 17, g_game_door ? 372 : DOOR_X + 26, 304 + dy, WHITE, up.c_str(), LEFT, 1.2f, wrap);
     }
 }
 
@@ -797,7 +805,7 @@ void backdrop(ImDrawList *dl, const Frame &f, ImVec2 display, bool full, LookId 
 // Where the game's door was: a glass panel for the door's text (unless the game's door shows).
 void door_panel(ImDrawList *dl, const Frame &f)
 {
-    if (!g_game_door) glass(dl, f, 346, 84, 234, 360, 14, IM_COL32(10, 10, 13, 255), 0.58f);
+    if (!g_game_door) glass(dl, f, DOOR_X, DOOR_Y, DOOR_W, DOOR_H, 14, IM_COL32(10, 10, 13, 255), 0.58f);
 }
 
 // ---- input --------------------------------------------------------------------------------------
