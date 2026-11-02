@@ -236,3 +236,68 @@ def test_the_engine_answers_status_add_and_remove_as_json(tmp_path, monkeypatch)
     monkeypatch.setenv('DEFJAM_STEAM_ROOT', str(tmp_path / 'nowhere'))
     assert engine.main(['--steam', 'add'] + common) == 2
     assert 'Sign in to Steam' in json.loads(result.read_text())['message']
+
+
+# ---------------------------------------------------------------- Linux (the AppImage, design §6, §7)
+
+linux_only = pytest.mark.skipif(steam.IS_WINDOWS, reason='Linux Steam folders and processes')
+
+
+@linux_only
+def test_linux_finds_steam_through_its_link_or_the_usual_folder(tmp_path, monkeypatch):
+    monkeypatch.setenv('HOME', str(tmp_path))
+    monkeypatch.delenv('DEFJAM_STEAM_ROOT', raising=False)
+    monkeypatch.delenv('XDG_DATA_HOME', raising=False)
+    monkeypatch.setattr(steam.sys, 'platform', 'linux')
+    assert steam.steam_root() is None
+    real = tmp_path / '.local/share/Steam'
+    real.mkdir(parents=True)
+    (real / 'steam.sh').write_text('#!/bin/sh\n')
+    assert steam.steam_root() == real.resolve()
+    (tmp_path / '.steam').mkdir()
+    (tmp_path / '.steam/steam').symlink_to(real)
+    assert steam.steam_root() == real.resolve()
+
+
+@linux_only
+def test_linux_counts_only_the_steam_client_in_that_folder(tmp_path):
+    root = tmp_path / 'Steam'
+    client = root / 'ubuntu12_32/steam'
+    client.parent.mkdir(parents=True)
+    client.write_text('')
+    proc = tmp_path / 'proc'
+    for pid, exe, argv in ((101, client, [str(client)]), (102, Path('/usr/bin/python3'), ['python3', str(client)]),
+                           (103, tmp_path / 'other/ubuntu12_32/steam', ['steam']), (104, Path('/bin/sh'), ['sh'])):
+        (proc / str(pid)).mkdir(parents=True)
+        (proc / str(pid) / 'exe').symlink_to(exe)
+        (proc / str(pid) / 'cmdline').write_bytes(b'\0'.join(a.encode() for a in argv) + b'\0')
+    (proc / 'self').mkdir()
+    assert sorted(steam.steam_processes_linux(root, proc)) == [101, 102]
+
+
+@linux_only
+def test_game_mode_never_closes_steam(tmp_path, monkeypatch):
+    root = steam_folder(tmp_path)
+    vdf = root / 'userdata' / str(ACCOUNT) / 'config/shortcuts.vdf'
+    monkeypatch.setenv('XDG_CURRENT_DESKTOP', 'gamescope')
+    fake = FakeSteam(running=True)
+    with pytest.raises(steam.SteamError, match='Desktop Mode'):
+        steam.add(root, Path('/home/deck/Applications/DefJamRecompiled.AppImage'), '/home/deck/Games/App',
+                  art(tmp_path), tmp_path / 's.json', close=True, running=fake.running, closer=fake.close,
+                  starter=fake.start)
+    assert fake.calls == [] and not vdf.exists()
+    fake = FakeSteam(running=False)                     # Steam not running: nothing to close
+    steam.add(root, Path('/home/deck/Applications/DefJamRecompiled.AppImage'), '/home/deck/Games/App',
+              art(tmp_path / 'again'), tmp_path / 's.json', running=fake.running, closer=fake.close, starter=fake.start)
+    assert [steam.field(steam.fields(b), 'LaunchOptions') for b in steam.read_shortcuts(vdf)[0]] == [
+        '--play --install "/home/deck/Games/App"']
+
+
+@linux_only
+def test_steam_is_started_from_the_stand_in_folder_without_the_appimage_variables(tmp_path, monkeypatch):
+    monkeypatch.setenv('DEFJAM_STEAM_ROOT', str(tmp_path))
+    monkeypatch.setenv('APPIMAGE', '/home/deck/Applications/DefJamRecompiled.AppImage')
+    monkeypatch.setenv('APPDIR', '/tmp/.mount_DefJam123')
+    assert steam.steam_program(tmp_path) == str(tmp_path / 'steam.sh')
+    env = steam.steam_environment()
+    assert 'APPIMAGE' not in env and 'APPDIR' not in env and env.get('HOME') == steam.os.environ.get('HOME')

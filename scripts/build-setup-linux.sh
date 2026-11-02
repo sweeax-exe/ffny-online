@@ -1,8 +1,10 @@
 #!/bin/bash
 # Build the game-free Linux setup (x86-64, Steam Deck included):
 # DefJamSetup-<version>-linux-x64.tar.gz, a folder holding DefJamSetup.sh, the
-# unpacked payload, a short "READ ME FIRST" and the third-party licenses.
-# Never analyzes or builds a dump. Needs Python 3.11+ with pip; pass
+# unpacked payload, a short "READ ME FIRST" and the third-party licenses; and the
+# app, DefJamRecompiled-<version>-x86_64.AppImage, which carries the same payload.
+# Never analyzes or builds a dump. Needs Python 3.11+ with pip, podman or docker (the
+# app is built in a pinned Ubuntu 22.04 container), mksquashfs and readelf; pass
 # --development for a local prototype from a dirty checkout (release workflows must not).
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -37,7 +39,14 @@ cp "$OUT/image/$NAME"/payload/licenses/* "$OUT/image/$NAME/Licenses/"
 cp LICENSE "$OUT/image/$NAME/Licenses/Def-Jam-Recompiled-MIT.txt"
 tar -C "$OUT/image" --owner=0 --group=0 --numeric-owner --sort=name -czf "$OUT/$NAME.tar.gz" "$NAME"
 
-# 3. Inventory, checksum and provenance of exactly what a release would attach.
+# 3. The app (src/app): built in the pinned container against that payload's Dear ImGui source,
+#    then packed with the payload, file for file as the archive carries it, into the AppImage.
+./scripts/build-app-linux.sh "$OUT/image/$NAME/payload" "$OUT/app"
+"$PYTHON" scripts/package-appimage.py --program "$OUT/app/defjam_app" --payload "$OUT/image/$NAME/payload" \
+    --out "$OUT/DefJamRecompiled.AppImage"
+
+# 4. Inventory, checksum and provenance of exactly what a release would attach: the setup archive
+#    and the app.
 "$PYTHON" scripts/check-setup-assets.py --payload "$OUT/setup-payload.zip" --installer "$OUT/$NAME.tar.gz" \
-    --output-dir "$OUT/setup-assets" "${DEVELOPMENT[@]+"${DEVELOPMENT[@]}"}"
+    --app "$OUT/DefJamRecompiled.AppImage" --output-dir "$OUT/setup-assets" "${DEVELOPMENT[@]+"${DEVELOPMENT[@]}"}"
 echo "Built $OUT/setup-assets"

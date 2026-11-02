@@ -270,9 +270,10 @@ bool shift_held()
 #endif
 }
 
-// Tell the install where this app is, so its play wrapper (setup/macos/Launcher, or on Windows
-// DefJamLauncher.exe), which shortcuts and older habits still open, starts the app instead of the
-// game. Only an installed app is worth naming: the macOS bundle, or the Windows program.
+// Tell the install where this app is, so its play wrapper (setup/macos/Launcher, on Windows
+// DefJamLauncher.exe, on Linux launcher.sh), which shortcuts and older habits still open, starts the
+// app instead of the game. Only an installed app is worth naming: the macOS bundle, the Windows
+// program, or the Linux AppImage file.
 void note_location()
 {
     fs::path here = app::bundle_path();
@@ -302,6 +303,16 @@ fs::path g_payload;
 std::string g_payload_version;
 std::vector<std::string> g_arguments, g_relaunch;
 bool g_updated = false;
+
+// The version in a setup payload's manifest, or "" without one.
+std::string read_payload_version(const fs::path &payload)
+{
+    if (payload.empty()) return "";
+    std::ifstream manifest(payload / "manifest.json", std::ios::binary);
+    std::stringstream text;
+    text << manifest.rdbuf();
+    return json_strings(text.str())["version"];
+}
 
 // "0.13.1" as numbers, or empty when it is not a release version.
 std::vector<int> release_version(const std::string &text)
@@ -343,6 +354,27 @@ FirstRun &first_run()
 
 fs::path payload() { return g_payload; }
 fs::path program() { return program_path(); }
+
+fs::path launch_target()
+{
+#if defined(__linux__)
+    if (!appimage().empty()) return appimage();
+#endif
+    return program();
+}
+
+#if !defined(__linux__)        // Linux: app_install_linux.cpp
+fs::path state_dir()
+{
+    fs::path base = os::user_base();
+    if (base.empty()) return base;
+#if defined(__APPLE__)
+    return base / "Library/Application Support/DefJamRecompiled";
+#else
+    return base / "DefJamRecompiled";
+#endif
+}
+#endif
 std::vector<std::string> &arguments() { return g_arguments; }
 bool just_updated() { return g_updated; }
 std::string payload_version() { return g_payload_version; }
@@ -497,9 +529,13 @@ int main(int argc, char **argv)
     }
 
     open_session_log();
-#if defined(_WIN32)
-    // The released Windows program installs itself, or hands over to the installed copy
-    // (app_install.cpp). A development build, or one given its setup files, runs as it is.
+    // Known before the app places itself: the Linux AppImage records it with its home, and compares
+    // it with the installed copy's.
+    g_payload_version = read_payload_version(g_payload);
+#if defined(_WIN32) || defined(__linux__)
+    // The released Windows program and Linux AppImage install themselves, or hand over to the
+    // installed copy (app_install.cpp, app_install_linux.cpp). A development build, or one given its
+    // setup files, runs as it is.
     if (!payload && !getenv("DEFJAM_SETUP_PAYLOAD")) {
         std::string error;
         switch (app::place_app(&error)) {
@@ -517,12 +553,13 @@ int main(int argc, char **argv)
         }
     }
 #endif
-    if (!g_payload.empty()) {
-        std::ifstream manifest(g_payload / "manifest.json", std::ios::binary);
-        std::stringstream text;
-        text << manifest.rdbuf();
-        g_payload_version = json_strings(text.str())["version"];
-    }
+#if defined(__linux__)
+    // The AppImage runtime's own variables name this run's mount: read once (app::appimage), then
+    // kept from the engine, the game and Steam, which must never remember the mount.
+    app::appimage();
+    for (const char *name : {"APPDIR", "APPIMAGE", "ARGV0", "OWD"}) app::os::unset_env(name);
+#endif
+    g_payload_version = read_payload_version(g_payload);     // the Windows app may have just unpacked it
     app::update_cleanup();
     // Acquire the lifetime lock before reading activation state or the receipt.
     if (!app::lock_install()) fail("The game or an update is already running.");

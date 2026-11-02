@@ -24,6 +24,23 @@ fail() {
     exit 1
 }
 
+# The app (src/app, the AppImage) writes where it is to app-location.txt whenever it opens this
+# install. Shortcuts that still point here then open the app, which holds the lock and plays the
+# game itself: --no-launcher becomes the app's --play, --launcher stays, other options are dropped.
+# Without that file, or with the app gone, this plays the game as before.
+APP=$(head -n 1 "$ROOT/app-location.txt" 2> /dev/null || true)
+if [ -n "$APP" ] && [ -f "$APP" ] && [ -x "$APP" ]; then
+    FORWARD=""
+    for arg in "$@"; do
+        case "$arg" in
+            --no-launcher) FORWARD="--play" ;;
+            --launcher) FORWARD="--launcher" ;;
+        esac
+    done
+    # shellcheck disable=SC2086
+    exec "$APP" --install "$ROOT" $FORWARD
+fi
+
 [ -x "$EXECUTABLE" ] || fail "No completed installation was found. Run Def Jam Setup to install or repair it."
 
 # Held for the life of the game: an update or repair cannot replace a running game.

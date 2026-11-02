@@ -50,6 +50,12 @@ fs::path program()
 
 fs::path user_base()
 {
+#if defined(__linux__)
+    // A test hook, as on Windows: a stand-in home for the app's own files (its location record, the
+    // usual install and AppImage folders), so a test never touches the player's. HOME itself cannot
+    // be moved: podman keeps the build container under it.
+    if (const char *base = getenv("DEFJAM_APP_USER_BASE"); base && *base) return fs::path(base);
+#endif
     const char *home = getenv("HOME");
     return home ? fs::path(home) : fs::path();
 }

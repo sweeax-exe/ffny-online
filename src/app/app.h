@@ -56,9 +56,23 @@ struct FirstRun
 };
 FirstRun &first_run();
 
-// The running program, resolved, and the macOS bundle it is in (empty when it is not in one).
+// The running program, resolved, and the macOS bundle it is in (empty when it is not in one). On
+// Windows the folder holding the installed program and its payload; on Linux the AppImage file.
 std::filesystem::path program();
 std::filesystem::path bundle_path();
+
+// What Steam and the play wrapper start: the program; on Linux the AppImage file it runs from
+// (the program itself is inside a mount that changes on every start).
+std::filesystem::path launch_target();
+
+// The app's own per-user folder (its location record, Steam record and answers): on Windows
+// %LOCALAPPDATA%\DefJamRecompiled; on Linux $XDG_DATA_HOME/DefJamRecompiled (~/.local/share).
+std::filesystem::path state_dir();
+
+// Linux: the AppImage file this program was started from, or empty (app_install_linux.cpp).
+std::filesystem::path appimage();
+// Linux: the installed AppImage was replaced by the app's own update; record its new version.
+void note_updated_home(const std::filesystem::path &file, const std::string &version);
 
 // The app's command line after the program name, and whether it was started by its own update.
 std::vector<std::string> &arguments();
@@ -96,7 +110,7 @@ void screen_open_maintenance();
 bool screen_busy();
 void screen_request_cancel();
 
-// ---- Windows: the app installs itself (app_install.cpp) --------------------------------------------
+// ---- Windows and Linux: the app installs itself (app_install.cpp, app_install_linux.cpp) --------------------------------------------
 
 // Where this program stands, decided before anything else when it was started without --payload.
 enum class Placement
@@ -115,7 +129,7 @@ bool ensure_payload(std::string *error);
 bool install_screen_draw(float width, float height, UiResult *result);
 bool install_busy();
 
-// ---- Windows: Add to Steam (app_steam.cpp) ----------------------------------------------------------
+// ---- Windows and Linux: Add to Steam (app_steam.cpp) ----------------------------------------------------------
 
 // Maintenance's Steam section: Add to Steam / Remove from Steam, asking before Steam is closed.
 void steam_section();
