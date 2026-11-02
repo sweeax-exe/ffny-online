@@ -448,6 +448,25 @@ the first), and the soak now replays each step's pad words in re-runs.
 * **Story crash** (goloom F9 64c4c2; also 875ad7, build 28): a NULL string view parsed by the C runtime; not the arena.
   `sub_000BD440` now returns 0 for an empty view (0bbf8d1, re-lift).
 
+### Seventh round (on `remaster` cebaceb, build 45 reports)
+* **Texture/palette count wrap with created fighters** (the owner's run-20261102-211740, F9 4ffb15, fee4d0): the probe of
+  7ee9b63 fired only in matches with a created fighter: "a save with 4 device binding(s) ... running steps again". Since
+  build 45 the created model's pose pass runs in re-runs and binds its textures and palettes, and no unbind ran between
+  re-run updates. Fix 7cd9c19: unbind before every save and every load. Two-copy created-vs-created runs at 110 ms
+  (`20261102-222901-online`, `-232122-online`): no "a save with" or "without its reference" line.
+* **Crashes right after a rollback past the decision** (3b0da3, 291b96; 3ee301 was the sound-engine class of the sixth
+  round): 7a11f13 stops predicting once the match is seen decided, so no step after the decision is predicted or run
+  again. Loads after or across the decision are logged; the across case still happens when the deciding step itself ran
+  on a prediction (`-230552-online`, `-232122-online`: one each, no crash). Not reproduced as a crash here; the
+  mechanism is inferred from the three live logs.
+* **`sub_0005F440` after a created fighter's match** (03ccd0, ce20af, fee4d0): not the count wrap, a summary thumb control
+  missing for the created slot (its pad unlinked before `Battle.StartUserIDThumbCtrl`), set by `Battle.SetThumbCtrlID`.
+  Reproduced on both copies at step 2582 (`-230552-online`, created vs created, 110 ms); guarded in 2d2cde3 (re-lift),
+  then `-232122-online` (3 matches, rematches) and lockstep venue 26 (`-233330-online`, 3 matches) ok.
+* **`sub_000BE3D0` in the reward pass** (59f513, 82d179, e108c2, 07bc78/51d3d3): the reward pass ran before any step saw
+  phase 3, with the created pads still linked. 14068e0 unlinks on entry to `sub_00064ED0` (re-lift). Not reproduced in
+  three forced-knockout matches at venue 26 (the step unlink came first each time), so the fix is not proven on a crash.
+
 ### Next (after the third round)
 1. More two-copy long runs (the desyncs at steps 10 200 and 37 440 came once in two runs each; three later runs were clean),
    always with `RECOMP_NETPLAY_FINALLOG=1` so a desync can be traced to its first step.
