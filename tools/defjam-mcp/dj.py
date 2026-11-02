@@ -58,7 +58,7 @@ def cmd_scenario(a):
                              cp_pick=a.cp_pick.split(",") if a.cp_pick else None,
                              cp_names=a.cp_names.split(",") if a.cp_names else None, more_shots=a.more_shots,
                              rematch=a.rematch, venues=a.venues, spectators=a.spectators, copy_env=copy_env(a.copy_env),
-                             fixtures=a.fixtures.split(",") if a.fixtures else None, **common)
+                             fixtures=a.fixtures.split(",") if a.fixtures else None, ranked=a.ranked, **common)
     elif a.kind == "offline":
         r = scenarios.offline(type=a.type, venue=a.venue, f0=a.f0, f1=a.f1, cpu=not a.human, bot=a.bot,
                               fast_ko=a.fast_ko, turbo=a.turbo, timeout=a.timeout or 420,
@@ -178,6 +178,8 @@ def main(argv=None):
     sc.add_argument("--more-shots", action="store_true", help="online: also each copy's versus and results screens of match 1")
     sc.add_argument("--venues", help="online: the venue feIDs every vote offers in turn (relay -test-venues), e.g. 26")
     sc.add_argument("--rematch", action="store_true", help="online: matches after the first are Rematch from the results menu")
+    sc.add_argument("--ranked", help="online: a ranked set (classic, open or classic,open) against a local account service "
+                                     "with test accounts (accounts -ranked -test-accounts)")
     sc.add_argument("--spectators", type=int, default=0, help="online: this many more copies watch the room (spectator mode)")
     sc.add_argument("--type", type=int, default=0)
     sc.add_argument("--venue", type=int, default=1)

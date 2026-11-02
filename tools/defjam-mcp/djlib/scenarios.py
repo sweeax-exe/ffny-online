@@ -311,7 +311,7 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
            bot=None, timeout=None, relay_port=27900, base_core=2, keep_going=False, extra_env=None,
            lock_timeout=None, log=None, require_hits=False, stall=300, keep_roots=False, quick=None,
            created=False, cp_records=None, rematch=False, venues=None, cp_pick=None, cp_names=None,
-           more_shots=False, spectators=0, copy_env=None, fixtures=None):
+           more_shots=False, spectators=0, copy_env=None, fixtures=None, ranked=None):
     """copy_env: {copy index: {NAME: VALUE}}, extra variables for one copy only; fixtures: per copy a save
     fixture folder ('' none), so the copies' save areas can differ as two players' PCs do.
     created: the relay plays created fighters (relay -created); cp_records: per copy the profile dumps or
@@ -323,7 +323,10 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
     a Rematch from the results menu instead of a new room match. venues: "26" or "1,6": every vote
     offers these in turn (relay -test-venues). spectators: that many more copies watch the players' room
     (RECOMP_NETPLAY=spectate, docs/research/spectator-mode.md); the players ready only once they are in it,
-    and every match is checked on them as on the players (checksums, winners, summary)."""
+    and every match is checked on them as on the players (checksums, winners, summary). ranked: "classic" or
+    "open" (or "classic,open"): a ranked set instead of a quick match, against a local account service
+    (accounts -ranked -test-accounts) the relay asks (-accounts-internal); the copies sign in with its test
+    sessions, queue (RECOMP_NETPLAY=ranked, RECOMP_TEST_RANKED_MODES), accept and play the set's games."""
     t0 = time.time()
     mode = mode.lower()
     if mode not in MODES:
@@ -342,6 +345,12 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
     logs = {}
     try:
         relay_extra = (["-created"] if created else []) + (["-test-venues", str(venues)] if venues else [])
+        tokens = {}
+        if ranked:
+            acc_port = relay_port + 100
+            tokens = s.accounts(acc_port, ["Copy %d" % i for i in range(players)])
+            relay_extra += ["-accounts-internal", "http://127.0.0.1:%d" % (acc_port + 1)]
+            result["params"]["ranked"] = ranked
         s.relay(relay_port, rollback=(rollback == "on"), extra=relay_extra)
         before = {}
         koth = mode == "koth"
@@ -362,6 +371,10 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
                 "RECOMP_PAD_SCRIPT": harness().build_pad_script(["getscreeninfo(intmain/mainmenu=lt@0.5"],
                                                                 online_tail(matches, per, p2)),
             })
+            if ranked:
+                env.update({"RECOMP_NETPLAY": "ranked", "RECOMP_RANKED": "1", "RECOMP_TEST_RANKED_MODES": ranked,
+                            "RECOMP_ACCOUNT_SERVER": "127.0.0.1:%d" % (relay_port + 100),
+                            "RECOMP_ACCOUNT_TEST_TOKEN": tokens["Copy %d" % i]})
             if players > 2:
                 # ready only once every copy is in the room: the relay starts a vote (or calls the hill's
                 # first pair) as soon as two are there and ready, and a later copy then opened a room of

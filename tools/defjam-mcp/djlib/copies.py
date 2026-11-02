@@ -211,6 +211,40 @@ class Session:
         time.sleep(0.5)
         return port
 
+    def accounts(self, port, names):
+        """A local account service for ranked tests (accounts -ranked -test-accounts): its public API on
+        port, its internal listener (the relay's) on port + 1, a fresh accounts file in this session's
+        folder. Returns {name: session token}."""
+        exe = machine.ensure_accounts()
+        for p in (port, port + 1):
+            if not machine.free_port(p):
+                raise OSError("account service port %d is taken" % p)
+        data = os.path.join(self.dir, "accounts.json")
+        args = [exe, "-listen", "127.0.0.1:%d" % port, "-internal-listen", "127.0.0.1:%d" % (port + 1),
+                "-data", data, "-public-url", "http://127.0.0.1:%d" % port, "-ranked",
+                "-test-accounts", ",".join(names)]
+        tag = "accounts%d" % len(self.relays)
+        p = subprocess.Popen(args, stdout=open(os.path.join(self.dir, tag + ".out"), "wb"),
+                             stderr=open(os.path.join(self.dir, tag + ".err"), "wb"),
+                             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        self.relays.append(p)
+        if self.job:
+            self.job.add(p)
+        tokens, path = {}, data + ".test-sessions"
+        for _ in range(100):
+            if os.path.isfile(path):
+                for line in open(path, encoding="utf-8"):
+                    if "\t" in line:
+                        n, t = line.rstrip("\n").split("\t", 1)
+                        tokens[n] = t
+                if len(tokens) == len(names):
+                    break
+            time.sleep(0.1)
+        if len(tokens) != len(names):
+            raise RuntimeError("the local account service made no test sessions (see %s.err)" % tag)
+        time.sleep(0.5)
+        return tokens
+
     def make_root(self, i, fixture=None, partitions=False):
         r = roots.create("%s%d" % (self.name[:12], i), fixture=fixture, partitions=partitions)
         self.roots.append(r)
