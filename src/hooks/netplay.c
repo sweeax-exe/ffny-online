@@ -108,6 +108,7 @@ int netplay_rtt(void) { return -1; }
 void netplay_build_fingerprint(uint8_t o[8]) { memset(o, 0, 8); }
 int netplay_room_ping(int s) { (void)s; return -1; }
 int netplay_room_results_wait(unsigned *s) { if (s) *s = 0; return 0; }
+int netplay_room_rollback(int s) { (void)s; return -1; }
 int netplay_lobby_caps(void) { return 0; }
 void netplay_sync_point(void) {}
 void netplay_on_main_menu(void) {}
@@ -228,7 +229,9 @@ void netplay_crowd_update(void) { sub_00081170(); }
 #define HASH_EVERY    60
 #define P_REMATCH     8             /* u32 START seed, u32 match number: Rematch chosen; 0xFFFFFFFF: back to the room */
 #define REMATCH_NO    0xFFFFFFFFu
-#define P_PINGINFO    9             /* in a room, every PINGINFO_MS: u16 this PC's ping to the relay (builds from 30) */
+#define P_PINGINFO    9             /* in a room, every PINGINFO_MS: u16 this PC's ping to the relay (builds from 30);
+                                     * since build 46 u8 rollback (bit 0: rolls back in the next match, bit 1: the
+                                     * setting is on but this session runs without it) */
 #define PINGINFO_MS   2000
 #define HASH_PARTS    NETCHECK_PARTS    /* the checksum in parts: fighters 1-4, the AI generators, the rest */
 #define STALL_LIMIT_MS 10000        /* mid-fight: a player has gone */
@@ -350,6 +353,7 @@ static struct {
     int room_count;
     unsigned rooms_version;
     int slot_rtt[ROOMSLOTS];        /* each room member's reported ping (P_PINGINFO), -1 none */
+    int slot_rb[ROOMSLOTS];         /* ... and its rollback byte (build 46), -1 none */
     ULONGLONG last_pinginfo;
     uint8_t pend[300];              /* the request waiting for an answer */
     int pend_len, pend_tries;
@@ -486,6 +490,7 @@ static void toast(unsigned ms, const char *format, ...)
 }
 
 static const char *player_name(int pos);
+static int room_rollback_flags(void);
 static void put32(uint8_t *p, uint32_t v);
 static void rematch_declined(void);
 static void send_data(const uint8_t *payload, int len);
@@ -1715,7 +1720,7 @@ static void on_room(const uint8_t *b, int len)
     v.received = GetTickCount64();
     EnterCriticalSection(&g_cs);
     if (!N.roomv.in_room || memcmp(N.roomv.code, v.code, 6)) {      /* another room: its pings come anew */
-        for (i = 0; i < ROOMSLOTS; i++) N.slot_rtt[i] = -1;
+        for (i = 0; i < ROOMSLOTS; i++) N.slot_rtt[i] = N.slot_rb[i] = -1;
         N.last_pinginfo = 0;
     }
     memcpy(v.error, N.roomv.error, sizeof(v.error));
@@ -2252,6 +2257,7 @@ static void on_packet(const uint8_t *b, int len)
             if (N.slot_rtt[b[6]] < 0)
                 fprintf(stderr, "[NETPLAY] room: the player in slot %d reports a ping of %d ms\n", b[6], b[8] | b[9] << 8);
             N.slot_rtt[b[6]] = b[8] | b[9] << 8;
+            N.slot_rb[b[6]] = len >= 11 ? b[10] : -1;     /* builds before 46 send no rollback byte */
             break;
         }
         if (len >= 7) {
@@ -2587,12 +2593,13 @@ static DWORD WINAPI net_thread(LPVOID unused)
         /* Hub: in a room, this PC's ping for the others' player cards and the high-ping warning */
         if (N.lobby && N.have_token && N.roomv.in_room && !SPECTATOR_HERE() && !N.match_live && N.rtt_ms >= 0 &&
             now - N.last_pinginfo >= PINGINFO_MS) {
-            uint8_t p[3];
+            uint8_t p[4];
             int rtt = N.rtt_ms > 0xFFFF ? 0xFFFF : N.rtt_ms;
             p[0] = P_PINGINFO;
             p[1] = (uint8_t)rtt;
             p[2] = (uint8_t)(rtt >> 8);
-            send_data(p, 3);
+            p[3] = (uint8_t)room_rollback_flags();    /* builds before 46 read the first three bytes only */
+            send_data(p, 4);
             N.last_pinginfo = now;
         }
         /* Hub: our ping for this START, until the match is under way. */
@@ -2721,7 +2728,7 @@ static int start(const char *server, const char *name, int creating, const char 
     N.local_seq = 0;
     N.players = N.fighters = 2;
     N.pos = 0;
-    for (i = 0; i < ROOMSLOTS; i++) { N.pos_of_slot[i] = i < 2 ? i : -1; N.slot_rtt[i] = -1; }
+    for (i = 0; i < ROOMSLOTS; i++) { N.pos_of_slot[i] = i < 2 ? i : -1; N.slot_rtt[i] = N.slot_rb[i] = -1; }
     N.last_pinginfo = 0;
     N.relay_caps = -1;
     /* created fighters: read the player's own again (a new one may have been made meanwhile) */
@@ -2854,6 +2861,24 @@ int netplay_room_ping(int slot)
     if (!N.lobby || !N.roomv.in_room || slot < 0 || slot >= ROOMSLOTS) return -1;
     if (slot == N.roomv.you) return N.rtt_ms;
     return N.slot_rtt[slot];
+}
+
+/* This PC's rollback byte for P_PINGINFO: bit 0 when it rolls back in the next match as far as it
+ * decides (the setting on for this session and the relay allowing it, as START sets peer_rb), bit 1 when
+ * the setting is on but this session runs without it (a restart would use it). */
+static int room_rollback_flags(void)
+{
+    int allowed = N.relay_caps > 0 && (N.relay_caps & CAPS_ROLLBACK);
+    if (!allowed) return 0;
+    return rollback_wanted() ? 1 : rollback_setting_idle() ? 2 : 0;
+}
+
+/* A room member's rollback byte (relay slot): -1 not known (not reported yet, or a build before 46). */
+int netplay_room_rollback(int slot)
+{
+    if (!N.lobby || !N.roomv.in_room || slot < 0 || slot >= ROOMSLOTS) return -1;
+    if (slot == N.roomv.you) return room_rollback_flags();
+    return N.slot_rb[slot];
 }
 
 /* The relay keeps a room playing until every member sent OVER (since build 46, 60 s after the first

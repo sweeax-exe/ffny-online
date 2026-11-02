@@ -319,6 +319,11 @@ Same header and version; a relay without it drops `SPECTATE` silently.
   its sync point (0 before), which a spectator plays with. Byte 14 since build 45: bit 0, the sender's
   game rolls back a match with a created fighter too. A match with a created fighter rolls back only
   when every player has rollback on (byte 7) and this bit; otherwise it plays in lockstep.
+- `P_PINGINFO` (game payload 9, in a room every 2 s, builds from 30: `u16` the sender's ping to the
+  relay) gains byte 3 since build 46: bit 0, the sender's game rolls back in the next match (its
+  setting is on for this session and the relay allows rollback, as `P_RTT` byte 7 will say); bit 1, its
+  setting is on but its session runs without rollback (a restart would use it). The room page shows
+  each player's flag and why a match will play in lockstep. Older builds read the first two bytes.
 
 ## Relay status (choosing a relay)
 

@@ -915,6 +915,8 @@ struct Gallery {
     std::string cp_online[3];       // the sample cards' online names ("" the user ID; NAME saves here)
     bool results_wait = false;      // the room still plays: this PC is back, another is on its results
     unsigned results_slots = 0;     // ... the room slots still there (netplay_room_results_wait)
+    bool rollback = false;          // the sample relay allows rollback (NETPLAY_CAP_ROLLBACK)
+    int room_rb[NETPLAY_ROOM_SLOTS] = {};   // each sample member's rollback byte (netplay_room_rollback)
 } G;
 
 bool gallery_on()
@@ -1028,7 +1030,10 @@ int lobby_queue(int *waited, int *searching, char *why, int size)
     if (size > 0) why[0] = 0;
     return G.queue;
 }
-int lobby_caps() { return gallery_on() ? NETPLAY_CAP_KOTH | NETPLAY_CAP_YIELD : netplay_lobby_caps(); }
+int lobby_caps()
+{
+    return gallery_on() ? NETPLAY_CAP_KOTH | NETPLAY_CAP_YIELD | (G.rollback ? NETPLAY_CAP_ROLLBACK : 0) : netplay_lobby_caps();
+}
 // spectator mode: the relay takes spectators (docs/research/spectator-mode.md)
 bool can_watch() { int c = lobby_caps(); return c > 0 && (c & NETPLAY_CAP_SPECTATE); }
 enum AccountState acc_state() { return gallery_on() ? G.account : account_state(); }
@@ -1090,6 +1095,12 @@ int room_ping(int slot)
 {
     if (gallery_on()) return slot >= 0 && slot < NETPLAY_ROOM_SLOTS ? G.room_pings[slot] : -1;
     return netplay_room_ping(slot);
+}
+// A room member's rollback byte (netplay_room_rollback): -1 unknown, bit 0 rolls back, bit 1 needs a restart.
+int room_rb(int slot)
+{
+    if (gallery_on()) return slot >= 0 && slot < NETPLAY_ROOM_SLOTS ? G.room_rb[slot] : -1;
+    return netplay_room_rollback(slot);
 }
 // The relay still has the room playing while this PC is back from the match (netplay_room_results_wait).
 bool results_wait(unsigned *slots)
@@ -3080,6 +3091,47 @@ void draw_room(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
         text(dl, f, g_title, 11, 55, 63, WHITE, warn, LEFT, 0.8f);
     }
 
+    // Rollback (build 46): each player's PC reports whether it rolls back (P_PINGINFO); a match rolls back
+    // only when every player does, so players see why theirs plays in lockstep. Shown while the relay
+    // allows rollback and at least one player has the setting on; never in a match of the hill.
+    bool rb_room = false, rb_any_on = false;
+    std::string rb_off;
+    int rb_off_count = 0, rb_restart = 0;
+    if (lobby_caps() > 0 && (lobby_caps() & NETPLAY_CAP_ROLLBACK) && r.phase == 0) {
+        for (int i = 0; i < r.player_count; i++) {
+            int v = room_rb(r.players[i].slot);
+            if (v > 0) rb_room = true;
+            if (v >= 0 && (v & 1)) rb_any_on = true;
+        }
+        for (int i = 0; rb_room && i < r.player_count; i++) {
+            int v = room_rb(r.players[i].slot);
+            if (v < 0 || (v & 1)) continue;
+            rb_off += std::string(rb_off_count++ ? ", " : "") + (r.players[i].slot == r.you ? "you" : r.players[i].name);
+            if (v & 2) rb_restart++;
+        }
+    }
+    if (rb_room && rb_any_on && rb_off_count && !ranked) {
+        char line[160];
+        bool you_only = rb_off_count == 1 && rb_off == "you";
+        if (rb_restart == rb_off_count)
+            snprintf(line, sizeof(line), "%s MUST RESTART THE GAME FOR ROLLBACK: THIS MATCH PLAYS IN LOCKSTEP",
+                     upper(rb_off.c_str()).c_str());
+        else
+            snprintf(line, sizeof(line), "%s %s ROLLBACK OFF: THIS MATCH PLAYS IN LOCKSTEP", upper(rb_off.c_str()).c_str(),
+                     you_only || rb_off_count > 1 ? "HAVE" : "HAS");
+        float bx = 48;
+        if (worst > 150) {      // after the high-ping warning
+            char warn[96];
+            snprintf(warn, sizeof(warn), "HIGH PING (ABOUT %d MS): INPUTS WILL FEEL DELAYED", worst);
+            bx += text_width(f, g_title, 11, warn) + 20;
+        }
+        float room_w = 470 - bx - 14;
+        float size = fit_size(f, g_title, 11, line, room_w);
+        float lw = text_width(f, g_title, size, line);
+        rect(dl, f, bx, 61, lw + 14, 18, IM_COL32(20, 70, 150, 220), 5);
+        text(dl, f, g_title, size, bx + 7, 63 + (11 - size) * 0.5f, WHITE, line, LEFT, 0.8f);
+    }
+
     // the players' cards. Team: the two sides apart, with their names under them (room slots 0 and 1
     // against 2 and 3; the room holds four, in slot order). A special match: the two players on the
     // left, its venue on the right.
@@ -3148,6 +3200,15 @@ void draw_room(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
                 rect(dl, f, x + w - lw - 31, y + 4, lw + 27, 15, IM_COL32(0, 0, 0, 160), 4);
                 ping_bars(dl, f, x + w - lw - 28, y + 6, 10, ms);
                 text(dl, f, g_title, 10, x + w - 5, y + 6, ping_colour(ms), line, RIGHT, 1.0f);
+            }
+        }
+        if (rb_room) {      // rollback (build 46): this player's next match, as its PC reports it
+            int v = room_rb(p.slot);
+            if (v >= 0) {
+                const char *tag = (v & 1) ? "ROLLBACK" : "LOCKSTEP";
+                float tw = text_width(f, g_title, 9, tag);
+                rect(dl, f, x + w - tw - 14, y + 22, tw + 10, 14, IM_COL32(0, 0, 0, 160), 4);
+                text(dl, f, g_title, 9, x + w - 9, y + 24, (v & 1) ? GREEN : GREY, tag, RIGHT, 1.0f);
             }
         }
         if (r.phase == 2 && p.slot < 32 && (results_slots & (1u << p.slot))) {   // still on the last match's results
@@ -3751,7 +3812,9 @@ void gallery_step()
                                          "ranked-draft-ban", "ranked-draft-venue", "ranked-draft-blind",
                                          "ranked-draft-pick", "ranked-draft-reveal", "stats-ranked-draft",
                                          // build 46: back from a match while another player is on its results
-                                         "room-results", "room-results-ffa" };
+                                         "room-results", "room-results-ffa",
+                                         // build 46: each player's rollback in the room
+                                         "room-rollback", "room-rollback-restart", "room-rollback-all" };
     const int count = (int)(sizeof(pages) / sizeof(pages[0]));
     static unsigned long long start;
     static int ms;
@@ -3854,6 +3917,8 @@ void gallery_step()
     G.cp_pick = 0;
     G.results_wait = false;
     G.results_slots = 0;
+    G.rollback = false;
+    for (int i = 0; i < NETPLAY_ROOM_SLOTS; i++) G.room_rb[i] = -1;
     std::string p = page;
     // the "-long" pages: Ann's first card plays as the widest 16 characters, Ben's as "Brooklyn Bruiser"
     G.cp_long = p.size() > 5 && p.compare(p.size() - 5, 5, "-long") == 0;
@@ -3954,6 +4019,16 @@ void gallery_step()
         G.room.player_count = 3;
     }
     else if (p == "room-special") { S.page = HUB; G.room = sample_room(10, 2, 2); }
+    else if (p == "room-rollback" || p == "room-rollback-restart" || p == "room-rollback-all") {
+        // build 46: who rolls back. Free for All of three: Ann and Cal have it on, Ben off (or Ben's game
+        // needs a restart for it); -all: everyone on, the match rolls back
+        S.page = HUB;
+        G.room = sample_room(3, 4, 3);
+        G.rollback = true;
+        G.room_rb[0] = G.room_rb[2] = 1;
+        G.room_rb[1] = p == "room-rollback-all" ? 1 : p == "room-rollback-restart" ? 2 : 0;
+        for (int i = 0; i < 3; i++) G.room_pings[i] = 30 + 12 * i;
+    }
     else if (p == "room-results" || p == "room-results-ffa") {
         // build 46: back from the match while the relay still plays it (Ben, and in the FFA also Cal,
         // still on the results): no READY offered, the wait said

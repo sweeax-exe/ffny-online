@@ -304,6 +304,15 @@ void rollback_server_allows(int allowed)
     }
 }
 
+/* The rollback setting is on (tests: RECOMP_ROLLBACK=on), but this session runs without rollback
+ * (started before the server allowed it, or the setting was turned on since): a restart would use it. */
+int rollback_setting_idle(void)
+{
+    const char *v = getenv("RECOMP_ROLLBACK");
+    if (rollback_enabled()) return 0;
+    return v ? !strcmp(v, "on") : recomp_settings_get("online", "rollback", 0) != 0;
+}
+
 /* The game's heap block: the largest block of the contiguous window (the game takes it at start, before
  * the sound engine's start-up). Until it is there the old constants stand. */
 extern uint32_t xbox_ContiguousBlockSize(uint32_t va);
@@ -2371,6 +2380,7 @@ void rollback_mixer_unlock_b(void) { if (MEM32(g_esp) == MIX_UNLOCKS) mixer_end(
 #else
 int rollback_enabled(void) { return 0; }
 void rollback_server_allows(int allowed) { (void)allowed; }
+int rollback_setting_idle(void) { return 0; }
 void rollback_heap_range(uint32_t *lo, uint32_t *hi) { if (lo) *lo = 0x80003000u; if (hi) *hi = 0x82A0D000u; }
 int rollback_soak_diff_on(void) { return 0; }
 void rollback_soak_phase(int phase) { (void)phase; }

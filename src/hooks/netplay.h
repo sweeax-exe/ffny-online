@@ -118,6 +118,7 @@ typedef struct NetRoom {
 /* What the relay supports (its answer to CAPS): -1 not known yet (or no answer: an older relay,
  * then 0), else the bits; bit 0 King of the Hill, bit 2 YIELD (relays since build 36). */
 #define NETPLAY_CAP_KOTH 1
+#define NETPLAY_CAP_ROLLBACK 2     /* the relay lets matches roll back */
 #define NETPLAY_CAP_YIELD 4
 #define NETPLAY_CAP_SPECTATE 16    /* spectator mode: rooms can be watched (netplay_lobby_spectate) */
 int netplay_lobby_caps(void);
@@ -202,6 +203,10 @@ int netplay_room_ping(int slot);
  * room slots of the players still on the results as far as this PC knows (bit per slot; 0 when it does
  * not know who). READY is refused then; the room page says what it waits for. */
 int netplay_room_results_wait(unsigned *slots);
+/* A room member's rollback (relay slot), as its PC reports it every two seconds in a room (build 46 on):
+ * -1 not known; else bit 0 it rolls back in the next match, bit 1 its setting is on but its session runs
+ * without rollback (a restart would use it). A match rolls back only when every player's bit 0 is set. */
+int netplay_room_rollback(int slot);
 
 /* From automatch: the agreed match is about to be set up (every PC reaches this point at the
  * same place in the front end), and the front end is back in the menus (the main menu, or the

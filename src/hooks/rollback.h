@@ -56,6 +56,8 @@ int rollback_soak_diff_on(void);            /* tests: RECOMP_ROLLBACK_SOAK_DIFF=
 void rollback_soak_before(void);            /* the whole .data and heap before a soak goes back */
 void rollback_soak_after(int depth, long long step, int verbose);  /* what the re-run made otherwise */
 void rollback_server_allows(int allowed);   /* netplay.c: the relay's CAPS answer, kept for the next start */
+/* 1 when the rollback setting is on but this session runs without it (a restart would use it). */
+int rollback_setting_idle(void);
 extern uint32_t rollback_crash_va;          /* src/main.c: the guest address of the fault, before the callback */
 void rollback_crash_objects(void);          /* the registers' objects and their pages (crash reports) */
 void rollback_set_resim(int on);            /* netplay.c: steps are being run again */
