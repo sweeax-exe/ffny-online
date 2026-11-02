@@ -287,6 +287,7 @@ per-frame update that the simulation reads (collision or hit volumes from the co
 an x87 control-word change on the game thread by the created-player code (the lifter's
 `g_fp_control_word` is per thread, but a render-frame path that sets it between steps would make
 the step's rounding depend on frame timing). Until this is fixed the server switch stays off.
+**After build 38: one cause found and fixed (each PC picked its own intro clip for a created fighter), a second, frame-timing one still open (section 7).**
 
 **KOTH note** (not about created fighters): `dj.py scenario online --mode koth --players 3
 --matches 4` stops on this base and on e1866fe alone (checked by building e1866fe without this
@@ -325,3 +326,81 @@ clear the spare slots' flag/name after the room ends; clear `holder+1` before ea
 make sure a CPU fill never gets fighter 99; test two copies with 5 matches in a row, a rematch,
 and a mix of created and stock fighters, with the save area compared before and after.
 
+
+## 7. The build-38 desync: each PC picked its own intro clip (found 2026-11-01)
+
+Live on build 38 a created fighter desynced practically every match between two players' PCs
+(F9 reports de5a11, 6e7462: created vs stock and created vs created, first at steps 60..1920,
+positions apart by 1..20 ulps). Two copies on one PC with the same record on both sides stayed in
+sync; with two **different** records (AW5J3555 vs CPTWO) 2 of 7 matches desynced (online-names
+agent, 2026-11-01), and 1 of 2 in the run below.
+
+**Measurement** (two copies, `dj.py scenario online --created --fighters 99,99 --cp-records aw,cptwo
+--fast-ko 2400 --bot 60 --env RECOMP_NETPLAY_STEPLOG=1`, `logs/dj/20261101-223218-online`, the
+per-step dumps `logs/desync-8CADCDF7-p1/p2.bin`): match 1 in sync (40 checks), match 2 desynced at
+step 120. In the dumps the fighter records are equal at step 1; the weapon manager (slot 2, a
+loose object's matrix and velocity) already differs at step 1, fighter 0's joints (`+0xDC..`) by
+up to 0.2 units at step 2, the checksummed positions by ulps later. The copies had loaded
+different intro speech for the created fighters: `speech/streams/intro/537i2.asf` and `537i3` on
+one, `537i4` and `537i1` on the other (match 2: `537i3`/`537i2` against `537i5`/`537i4`); stock
+fighters load their single `%03d.asf` (`025.asf`, `002.asf`) on both. The profile slots' bytes
+outside the record (hashed at the injection, `[CREATED] profile slot N before the record`) were
+identical on both copies (725 bytes not zero, the game's defaults), so hypothesis 1 (stale profile
+data) is not what parted this run.
+
+**Cause** [V]: `sub_00035ED0` (from `sub_0003E170`, the match load) picks, per slot, which of five
+intro clips a created fighter plays (`0x33E9E8 + 4*slot`, `rand % 5`, never the last one again),
+and the victory clip (`0x340370`), with draws from the global generator `0x33DB5C` (seeded from
+the wall clock at boot, drawn at host timing; online the crowd draws from its own copy,
+`crowd-lockstep-reset.md`). `sub_00087AF0` uses the value when a fighter with a fighter.xml id of
+87 or more starts its intro (`sub_00035F40(slot)` into the clip index `+0xD4`) and at the victory
+(`sub_00035F50`); the speech loader `sub_00038440` names `%03di%d.asf` with the same value. Stock
+fighters have one clip. So every PC played its own intro, and the intro skip of 1aa620b (every PC
+skips at the first update the title allows) still left the fighters in different poses.
+
+**Fix** (`intro_variants`, `src/hooks/netplay.c`): in a lockstep match every PC writes the five
+values, made from the match's number, at the start of every game update (`netplay_on_update`), so
+the reads at the intro and at the victory see the same values. No protocol or relay change.
+With it, both copies load the same intro speech (`537i3`/`537i4` on both, `logs/dj/20261102-030603-online`)
+and the log shows `created fighters' clips: this PC picked .. every PC plays ..` once per match.
+
+**Not enough: a second, frame-timing cause (open).** The same two-copy test with the fix still
+desynced 2 of 6 matches (steps 720 and 180, `20261102-030603-online`). Measured since:
+
+| Run (`logs/dj/`) | Setup | Result |
+|---|---|---|
+| `20261102-033528-online` | created vs created, copy 1 unpaced (`--copy-env 1:RECOMP_FLIP_HZ=0 --copy-env 1:RECOMP_PRESENT_VSYNC=0`), KO 1200 | **4 of 4 desynced** (steps 300, 300, 120, 660) |
+| `20261102-034555-online` | stock vs stock, the same unpaced copy 1, KO 1200 | 4 of 4 in sync, 90 checks |
+| `20261102-044435-online` | as the first row, intros played to the end (`RECOMP_NETPLAY_INTROS=play`) | 4 of 4 desynced |
+| `20261102-044036-online` | as the first row, KO 900, per-step dumps | 3 of 4 desynced |
+
+So a created fighter's simulation depends on the PC's frame pacing (two players' PCs always differ:
+refresh rate, vsync, load times), and the intro skip is not what carries it. In the per-step dumps
+(`RECOMP_NETPLAY_STEPLOG=1`) the fighter records are equal at step 1 and then:
+- often at step 2, one created fighter's 20 joint positions (`+0xDC..`, written by `sub_001A7610`
+  from the model, `sub_000445A0` -> `sub_0009EC10`) differ by up to 1.8 units, while its position,
+  rotation and animation clock (`+0x44`, `+0x50`, `+0x9C..`) are equal; they are equal again two
+  steps later. The joints of step 1 come from a pose the model last evaluated before the fight,
+  at the PC's own frame timing;
+- at step 6 (the first stance clip restarts at step 5, clock 1.2 -> 2.4) the same fighter's joints
+  differ by 1..4 ulps with every input in the record equal; from there it spreads into the
+  positions. That is history inside the created fighter's model (a blend source pose or similar)
+  carried over from the pre-fight frames.
+- A created fighter's model (the 0xAD20 `CP-Fighter` object of the pad's holder, vtable
+  0x298B18) has `+0xABB4` bit 0 set, so every model call (`sub_0009E4A0`, `sub_0009EC10`, ...) uses
+  the skeleton at `*(+0x9D0)` (= object + 0x9F0) instead of the one at +0x30. The object itself
+  was byte-equal on both copies at steps 1-2 apart from heap pointers and two frame counters
+  (`+0x9D4`, `+0x9E8`); the buffers behind its pointers sit at different heap addresses on the two
+  copies (asynchronous part loading), so a plain pointer-following diff is mostly noise. Which
+  buffer holds the carried pose [U].
+- Ruled out: the x87 control word (0x023F at every step start on both copies, now logged once a
+  match), the profile slot's bytes outside the record (identical), the intro clip choice (fixed above),
+  the venue weapons (they differ at step 1 in synced stock matches too; a separate, harmless-so-far
+  gap in the weapon hold).
+
+Next step: find where the created model's pose is evaluated outside the fight step (the
+pre-fight frames, `CLogic` state 4) and what it keeps (`sub_0009DC40`/`sub_0009E3A0` are the
+object's own virtual methods; the evaluate/blend code is in `sub_000A9xxx`, called with the
+`+0x9D0` skeleton), then either reset that state at the first step on every PC or keep the
+pre-fight from animating a created fighter. The reproduction is quick and reliable: the first row's
+command, 4 matches, about 10 minutes.

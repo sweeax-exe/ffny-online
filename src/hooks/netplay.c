@@ -746,8 +746,45 @@ static void intro_update(void)
     uint32_t st;
     if (!intro_window()) { g_intro_state = 0xFFFFFFFFu; return; }
     st = MEM32(G_LOGIC_STATE);
-    if (st != g_intro_state) { g_intro_state = st; g_intro_updates = 0; }
+    if (st != g_intro_state) {
+        fprintf(stderr, "[NETPLAY] pre-fight state %d after %u updates of state %d\n", (int)st, g_intro_updates,
+                (int)g_intro_state);
+        g_intro_state = st;
+        g_intro_updates = 0;
+    }
     else g_intro_updates++;
+}
+
+/* Created fighters' intro and victory clips, the same on every PC. A stock fighter has one intro
+ * clip; a created fighter (fighter.xml id 87 and up) plays one of five, and the match load picks
+ * them per slot (sub_00035ED0: 0x33E9E8 + 4*slot, and the victory clip at 0x340370) from the global
+ * generator 0x33DB5C, which is seeded from the wall clock at boot and drawn at host timing. So
+ * every PC picked its own: the intro speech of a two-copy test was 537i2 on one and 537i4 on the
+ * other, the skipped intros left the fighters in different poses, and the positions parted by
+ * ulps within the first seconds (the created-fighter desync of build 38: every real match, 2 in 7
+ * on one PC; stock fighters never). sub_00087AF0 reads the slot's value when the intro starts
+ * (sub_00035F40) and the victory clip at the end (sub_00035F50). In a lockstep match every PC
+ * writes values made from the match's number at the start of every update instead. */
+#define INTRO_VARIANTS  0x0033E9E8u     /* 4 x u32, 0..4 */
+#define WIN_VARIANT     0x00340370u
+static void intro_variants(void)
+{
+    static uint32_t told;
+    uint32_t want[5], i, differ = 0;
+    if (!N.lockstep || N.resim) return;
+    for (i = 0; i < 5; i++) want[i] = mix32(N.match ^ mix32(0x1E7A0000u + i)) % 5u;
+    for (i = 0; i < 4; i++) differ |= MEM32(INTRO_VARIANTS + 4u * i) != want[i];
+    differ |= MEM32(WIN_VARIANT) != want[4];
+    if (!differ) return;
+    if (told != N.match) {
+        told = N.match;
+        fprintf(stderr, "[NETPLAY] created fighters' clips: this PC picked %d %d %d %d / %d, every PC plays %u %u %u %u / %u "
+                "(match %08X, step %u)\n", (int)MEM32(INTRO_VARIANTS), (int)MEM32(INTRO_VARIANTS + 4u),
+                (int)MEM32(INTRO_VARIANTS + 8u), (int)MEM32(INTRO_VARIANTS + 12u), (int)MEM32(WIN_VARIANT),
+                want[0], want[1], want[2], want[3], want[4], N.match, N.step);
+    }
+    for (i = 0; i < 4; i++) MEM32(INTRO_VARIANTS + 4u * i) = want[i];
+    MEM32(WIN_VARIANT) = want[4];
 }
 
 /* What another player's port reads before the fight. */
@@ -4308,6 +4345,17 @@ void netplay_on_step(void)
         }
     }
     N.hash_at[k] = fighter_hash(N.hash_parts[k], N.hash_fields[k], N.hash_split[k]);   /* the state as this step starts */
+    {   /* the x87 control word the step starts with (its precision bits round every result): a
+         * change is logged, at most 12 a match, to compare the PCs of a desynced match */
+        static uint16_t last_cw;
+        static uint32_t cw_match, cw_told;
+        if (cw_match != N.match) { cw_match = N.match; cw_told = 0; last_cw = 0; }
+        if (g_fp_control_word != last_cw && !N.resim) {
+            if (cw_told++ < 12)
+                fprintf(stderr, "[NETPLAY] x87 control word at step %u: %04X (was %04X)\n", s, g_fp_control_word, last_cw);
+            last_cw = g_fp_control_word;
+        }
+    }
     N.hash_tag[k] = s + 1;
     {   /* RECOMP_NETPLAY_STEPLOG=1 (tests): the checksum's fields of every fighter at every step, to find
          * the step and the field where the PCs of a desynced match part (the checksum goes out every 60) */
@@ -4739,6 +4787,7 @@ void netplay_on_update(void)
     int i;
     rollback_check_tables(N.resim ? "a re-run update starts" : "an update starts");
     intro_update();
+    intro_variants();
     koth_check_result(0);       /* also between the fight's steps: an ending can stop them */
     if (N.resim || !N.rb_on) return;
     /* before any save, load or the reference copy: the device holds no texture or palette. Only
