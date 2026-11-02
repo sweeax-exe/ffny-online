@@ -175,7 +175,7 @@ def main(argv=None):
     sc.add_argument("--fixture", help="a folder of save files copied over the copy's saves")
     sc.add_argument("--page-ms", type=int, default=1500)
     sc.add_argument("--goto", help="boot: then this main-menu entry by name (story, battle, rewards, online, slotN)")
-    sc.add_argument("--env", action="append", default=[], help="extra NAME=VALUE (checked against the machine rules)")
+    sc.add_argument("--env", action="append", default=[], help="extra NAME=VALUE (checked against the machine rules); online: NAME@N=VALUE for copy N only")
     sc.add_argument("--lock-timeout", type=float, help="give up waiting for the machine after this many s")
     sc.add_argument("--keep-roots", action="store_true", help="leave the data roots for a look (dj roots clean)")
     sc.set_defaults(fn=cmd_scenario)

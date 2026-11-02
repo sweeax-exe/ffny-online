@@ -378,7 +378,10 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
             if rematch:
                 env["RECOMP_PAD_SCRIPT"] = harness().build_pad_script(["getscreeninfo(intmain/mainmenu=lt@0.5"],
                                                                        rematch_tail(matches, p2))
-            env.update(extra_env or {})
+            for k, v in (extra_env or {}).items():     # NAME@N: only copy N gets it
+                name, _, only = k.partition("@")
+                if not only or (only.isdigit() and int(only) == i):
+                    env[name] = v
             root = s.make_root(i)
             before[i] = _save_files(root)
             s.launch(i, env=env, root=root, core=base_core + 2 * i, watch=WATCH)
