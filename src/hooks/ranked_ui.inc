@@ -668,7 +668,7 @@ void draft_ban_tile(ImDrawList *dl, const Frame &f, float x, float y, float w, f
 void draft_side(ImDrawList *dl, const Frame &f, const NetRoom &r, const NetDraft &d, int slot, float x, float y, bool me,
                 int hover)
 {
-    const float w = 140, h = 270;
+    const float w = 140, h = 256;
     bool turn = netdraft_my_turn(&d, slot);
     glass(dl, f, x, y, w, h, 10, turn ? IM_COL32(56, 14, 20, 255) : IM_COL32(10, 10, 13, 255), turn ? 0.72f : 0.6f);
     if (turn) frame_rect(dl, f, x, y, w, h, with_alpha(me ? GOLD : DRAFT_BLUE, 0.85f), 2.0f);
@@ -676,12 +676,12 @@ void draft_side(ImDrawList *dl, const Frame &f, const NetRoom &r, const NetDraft
          CENTER, 0.8f, w - 8);
     int pick = d.picks[slot], shown = pick != NETDRAFT_NONE ? pick : me ? hover : d.cursors[slot];
     bool hidden = !me && d.step == NETDRAFT_BLIND;
-    float px = x + 10, py = y + 24, pw = w - 20, ph = 150;
+    float px = x + 10, py = y + 24, pw = w - 20, ph = 140;
     rect(dl, f, px, py, pw, ph, IM_COL32(0, 0, 0, 160), 4);
     if (hidden) {
         text(dl, f, g_stencil, 54, px + pw / 2, py + 40, with_alpha(CREAM, 0.5f), "?", CENTER, 1.4f);
         if (d.locked[slot]) {
-            draft_padlock(dl, f, px + pw / 2, py + 118, 22);
+            draft_padlock(dl, f, px + pw / 2, py + 110, 22);
             text(dl, f, g_title, 11, px + pw / 2, py + ph + 4, GOLD, "LOCKED IN", CENTER, 0.8f);
         }
     } else if (shown != NETDRAFT_NONE) {
@@ -696,9 +696,12 @@ void draft_side(ImDrawList *dl, const Frame &f, const NetRoom &r, const NetDraft
     // the bans: three tiles
     int bans[3];
     int made = netdraft_bans_of(&d, slot, bans);
-    text(dl, f, g_title, 10, x + w / 2, y + 198, GREY, "BANS", CENTER, 0.6f);
-    for (int i = 0; i < 3; i++) draft_ban_tile(dl, f, x + 10 + i * 42, y + 212, 38, 50, bans[i], i < made);
+    text(dl, f, g_title, 10, x + w / 2, y + 186, GREY, "BANS", CENTER, 0.6f);
+    for (int i = 0; i < 3; i++) draft_ban_tile(dl, f, x + 10 + i * 42, y + 200, 38, 50, bans[i], i < made);
 }
+
+// The Draft pages' button row: a little lower than the other pages', clear of the grid and the cards.
+const float DRAFT_HINT_Y = 416;
 
 // The banner over the draft: the set, whose turn, the clock.
 void draft_header(ImDrawList *dl, const Frame &f, const NetRoom &r, const NetDraft &d, const NetRankInfo &ri)
@@ -715,8 +718,8 @@ void draft_header(ImDrawList *dl, const Frame &f, const NetRoom &r, const NetDra
         char secs[8];
         snprintf(secs, sizeof(secs), "%d", left);
         text(dl, f, g_title, 34, 600, 22, left <= 5 ? RED : CREAM, secs, RIGHT, 1.6f);
-        rect(dl, f, 50, 111, 540, 4, IM_COL32(255, 255, 255, 30), 2.0f);
-        rect(dl, f, 50, 111, 540 * std::min(1.0f, left / (float)total), 4, mine ? GOLD : ORANGE, 2.0f);
+        rect(dl, f, 50, 113, 540, 4, IM_COL32(255, 255, 255, 30), 2.0f);
+        rect(dl, f, 50, 113, 540 * std::min(1.0f, left / (float)total), 4, mine ? GOLD : ORANGE, 2.0f);
     }
 }
 
@@ -740,7 +743,7 @@ void draw_draft_fighters(ImDrawList *dl, const Frame &f, const Pad &pad, const N
     int row = R.draft_sel / cols;
     if (row < R.draft_top) R.draft_top = row;
     if (row >= R.draft_top + rows) R.draft_top = row - rows + 1;
-    float gx = 166, gy = 124, cw = 47, ch = 61;
+    float cw = 44, ch = 56, gx = 320 - (cols * (cw + 4) - 4) / 2, gy = 130;
     glass(dl, f, gx - 6, gy - 6, cols * (cw + 4) + 8, rows * (ch + 5) + 20);
     for (int rr = 0; rr < rows; rr++)
         for (int c = 0; c < cols; c++) {
@@ -776,9 +779,9 @@ void draw_draft_fighters(ImDrawList *dl, const Frame &f, const Pad &pad, const N
     }
     bool legal = mine && netdraft_fighter_legal(&d, you, cur);
     float hx = 54;
-    if (mine) hx += hint(dl, f, hx, 410, "a", d.step == NETDRAFT_BAN ? "BAN" : "LOCK IN");
-    hx += hint(dl, f, hx, 410, "lb", "PAGE");
-    hint(dl, f, hx, 410, "b", "LEAVE (FORFEIT)");
+    if (mine) hx += hint(dl, f, hx, DRAFT_HINT_Y, "a", d.step == NETDRAFT_BAN ? "BAN" : "LOCK IN");
+    hx += hint(dl, f, hx, DRAFT_HINT_Y, "lb", "PAGE");
+    hint(dl, f, hx, DRAFT_HINT_Y, "b", "LEAVE (FORFEIT)");
     if (mine && pad.a) {
         if (legal) netplay_lobby_draft_act(d.step, netdraft_action(&d), cur);
         else say(netdraft_banned(&d, cur) ? "That fighter is banned." : "You won a game with that fighter: pick another.");
@@ -800,7 +803,7 @@ void draw_draft_venues(ImDrawList *dl, const Frame &f, const Pad &pad, const Net
     float w = n <= 5 ? 112 : 118, gap = 8, h = (w - 10) * 0.75f + 40;   // the photos are 4:3
     for (int i = 0; i < n; i++) {
         int v = d.options[i], row = i / per, col = i % per, inrow = std::min(per, n - row * per);
-        float x0 = 320 - (inrow * w + (inrow - 1) * gap) / 2, x = x0 + col * (w + gap), y = 124 + row * (h + 8);
+        float x0 = 320 - (inrow * w + (inrow - 1) * gap) / 2, x = x0 + col * (w + gap), y = 128 + row * (h + 8);
         if (mouse_pick(f, x, y, w, h)) R.venue_sel = i;
         int st = netdraft_venue_state(&d, v);
         bool sel = i == R.venue_sel, out = st == NETDRAFT_VENUE_STRUCK || st == NETDRAFT_VENUE_BANNED;
@@ -821,7 +824,7 @@ void draw_draft_venues(ImDrawList *dl, const Frame &f, const Pad &pad, const Net
         if (mouse_click(f, x, y, w, h)) const_cast<Pad &>(pad).a = true;
     }
     {   // both ban strips, small, under the cards
-        float y = 124 + rowsn * (h + 8) + 6;
+        float y = 128 + rowsn * (h + 8) + 6;
         if (y < 380) {
             for (int s = 0; s < 2; s++) {
                 int bans[3], made = netdraft_bans_of(&d, s, bans);
@@ -833,8 +836,8 @@ void draw_draft_venues(ImDrawList *dl, const Frame &f, const Pad &pad, const Net
     }
     int cur = d.options[R.venue_sel];
     float hx = 54;
-    if (mine) hx += hint(dl, f, hx, 410, "a", d.step == NETDRAFT_STRIKE ? "STRIKE" : d.step == NETDRAFT_VENUE_BAN ? "BAN" : "PICK");
-    hint(dl, f, hx, 410, "b", "LEAVE (FORFEIT)");
+    if (mine) hx += hint(dl, f, hx, DRAFT_HINT_Y, "a", d.step == NETDRAFT_STRIKE ? "STRIKE" : d.step == NETDRAFT_VENUE_BAN ? "BAN" : "PICK");
+    hint(dl, f, hx, DRAFT_HINT_Y, "b", "LEAVE (FORFEIT)");
     if (mine && pad.a && netdraft_venue_legal(&d, cur)) netplay_lobby_draft_act(d.step, netdraft_action(&d), cur);
 }
 
@@ -882,12 +885,12 @@ void draw_draft(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r
         draw_draft_reveal(dl, f, r, d);
         return;
     }
-    text(dl, f, g_title, 10, 320, 97, GREY, netdraft_hint(&d, r.you), CENTER, 0.6f, 460);
+    text(dl, f, g_title, 10, 320, 99, GREY, netdraft_hint(&d, r.you), CENTER, 0.6f, 460);
     if (netdraft_fighter_step(d.step)) {
         const auto &list = roster();
         int hover = list.empty() ? NETDRAFT_NONE : list[(size_t)std::min(R.draft_sel, (int)list.size() - 1)].id;
-        draft_side(dl, f, r, d, r.you, 14, 122, true, hover);
-        draft_side(dl, f, r, d, 1 - r.you, 640 - 14 - 140, 122, false, NETDRAFT_NONE);
+        draft_side(dl, f, r, d, r.you, 14, 126, true, hover);
+        draft_side(dl, f, r, d, 1 - r.you, 640 - 14 - 140, 126, false, NETDRAFT_NONE);
         draw_draft_fighters(dl, f, pad, r, d);
     } else {
         draw_draft_venues(dl, f, pad, r, d);
