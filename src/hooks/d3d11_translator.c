@@ -966,8 +966,12 @@ static void capture_backbuffer(IDirect3DDevice8 *dev)
              * over it in this frame's Present, and pc_ui.cpp replaces the file with the window's
              * picture then, before the report reads it. The [BATCH] draws stay the game's. */
             extern void pc_ui_report_shot(const char *path);
+            extern int pc_ui_report_ask(const char *path);
             pc_ui_report_shot(path);
-            bug_report_send("picture", NULL, path);
+            /* The overlay then asks the player what is wrong and sends it (pc_ui.cpp); in an online
+             * match, which cannot pause, it does not ask, and the report goes now. */
+            if (!pc_ui_report_ask(path))
+                bug_report_send("picture", NULL, path);
         }
         if (!step_shot && ++next >= nwant)
             _putenv_s("RECOMP_TRANS_SHOT", "");   /* every requested frame taken */

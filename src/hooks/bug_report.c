@@ -5,7 +5,8 @@
  * The answer is a short id the toast shows, so a player can name the report in a ticket.
  *
  * What leaves the PC: the log, cut to its first 512 KB and last 2.5 MB if it is longer, with the
- * Windows user folder blanked; the picture as a PNG; the build number. The privacy page
+ * Windows user folder blanked; the picture as a PNG; the build number; and, from F9, the one line
+ * the player may write in the box that asks what is wrong (pc_ui.cpp). The privacy page
  * (accounts/server.go) says the same.
  */
 #include "bug_report.h"
@@ -254,7 +255,7 @@ static int own_log(char *out, int size)
     return 1;
 }
 
-typedef struct { char kind[16], log[MAX_PATH + 8], picture[MAX_PATH + 8]; } Job;
+typedef struct { char kind[16], log[MAX_PATH + 8], picture[MAX_PATH + 8], note[BUG_REPORT_NOTE_MAX + 1]; } Job;
 
 static void field(Buf *b, const char *boundary, const char *name, const char *file, const char *ctype)
 {
@@ -273,6 +274,34 @@ static void field(Buf *b, const char *boundary, const char *name, const char *fi
         puts_(b, "\r\n");
     }
     puts_(b, "\r\n");
+}
+
+/* RECOMP_TEST_REPORT_BODY=<path>: a test keeps a copy of what would be sent, to read the fields back.
+ * Only with RECOMP_ACCOUNT_SERVER set, like the test's F9 (d3d11_translator.c): a test report goes to
+ * a local service or a closed port, never to the players' one. */
+static void test_save_body(const Buf *body)
+{
+    const char *path = getenv("RECOMP_TEST_REPORT_BODY"), *acc = getenv("RECOMP_ACCOUNT_SERVER");
+    FILE *f;
+    if (!path || !*path || !acc || !*acc) return;
+    f = fopen(path, "wb");
+    if (!f) return;
+    fwrite(body->p, 1, body->n, f);
+    fclose(f);
+    fprintf(stderr, "[REPORT] test: the report's body (%zu bytes) kept in %s\n", body->n, path);
+}
+
+/* The note as it is sent: printable ASCII only (the box takes nothing else), one line, no spaces at
+ * either end, at most BUG_REPORT_NOTE_MAX characters. The service cleans it again (reports.go). */
+static void clean_note(char *out, size_t size, const char *in)
+{
+    size_t n = 0;
+    if (!size) return;
+    while (in && *in == ' ') in++;
+    for (; in && *in && n + 1 < size && n < BUG_REPORT_NOTE_MAX; in++)
+        if ((unsigned char)*in >= 0x20 && (unsigned char)*in <= 0x7E) out[n++] = *in;
+    while (n && out[n - 1] == ' ') n--;
+    out[n] = 0;
 }
 
 static DWORD WINAPI send_thread(LPVOID param)
@@ -310,15 +339,21 @@ static DWORD WINAPI send_thread(LPVOID param)
         put(&body, pic.p, pic.n);
         puts_(&body, "\r\n");
     }
+    if (job->note[0]) {         /* an older service ignores a field it does not know */
+        field(&body, boundary, "note", NULL, NULL);
+        puts_(&body, job->note);
+        puts_(&body, "\r\n");
+    }
     puts_(&body, "--");
     puts_(&body, boundary);
     if (!puts_(&body, "--\r\n")) {
         set_toast("Bug report not sent: out of memory.", 1);
         goto done;
     }
+    test_save_body(&body);
     status = account_send_bug_report(ctype, body.p, (int)body.n, answer, sizeof(answer));
-    fprintf(stderr, "[REPORT] bug report (%s, log %zu bytes, picture %zu bytes) sent: HTTP %d %s\n", job->kind, log.n,
-            pic.n, status, status == 201 ? answer : "");
+    fprintf(stderr, "[REPORT] bug report (%s, log %zu bytes, picture %zu bytes, note %zu characters) sent: HTTP %d %s\n",
+            job->kind, log.n, pic.n, strlen(job->note), status, status == 201 ? answer : "");
     if (status == 201)
         snprintf(text, sizeof(text), "Bug report sent - code %.6s. Thanks!", answer);
     else if (status == 429)
@@ -338,6 +373,11 @@ done:
 
 void bug_report_send(const char *kind, const char *log_path, const char *picture_path)
 {
+    bug_report_send_note(kind, log_path, picture_path, NULL);
+}
+
+void bug_report_send_note(const char *kind, const char *log_path, const char *picture_path, const char *note)
+{
     Job *job;
     HANDLE t;
     if (InterlockedExchange(&s_busy, 1)) return;        /* one at a time */
@@ -346,6 +386,9 @@ void bug_report_send(const char *kind, const char *log_path, const char *picture
     snprintf(job->kind, sizeof(job->kind), "%s", kind);
     if (log_path) snprintf(job->log, sizeof(job->log), "%s", log_path);
     if (picture_path) snprintf(job->picture, sizeof(job->picture), "%s", picture_path);
+    clean_note(job->note, sizeof(job->note), note);
+    if (job->note[0])           /* in the log too, so the note can be read beside the log it came with */
+        fprintf(stderr, "[REPORT] note (%zu characters): %s\n", strlen(job->note), job->note);
     set_toast("Sending the bug report...", 0);
     t = CreateThread(NULL, 0, send_thread, job, 0, NULL);
     if (t) CloseHandle(t);
@@ -426,6 +469,8 @@ void bug_report_crash_seen(const char *log_path)
 
 void bug_report_send(const char *kind, const char *log_path, const char *picture_path)
 { (void)kind; (void)log_path; (void)picture_path; }
+void bug_report_send_note(const char *kind, const char *log_path, const char *picture_path, const char *note)
+{ (void)kind; (void)log_path; (void)picture_path; (void)note; }
 int bug_report_toast(char *out, int size) { (void)out; (void)size; return 0; }
 int bug_report_busy(void) { return 0; }
 int bug_report_f9(void) { return 0; }

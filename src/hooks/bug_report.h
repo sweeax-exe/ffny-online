@@ -12,6 +12,11 @@ extern "C" {
  * 24-bit BMP or NULL. */
 void bug_report_send(const char *kind, const char *log_path, const char *picture_path);
 
+/* The same with the player's note from F9's "What's wrong?" box (pc_ui.cpp), NULL or "" for none.
+ * Sent as the form field "note": printable ASCII, at most BUG_REPORT_NOTE_MAX characters. */
+#define BUG_REPORT_NOTE_MAX 200
+void bug_report_send_note(const char *kind, const char *log_path, const char *picture_path, const char *note);
+
 /* A line for the screen while a report is on its way and for a few seconds after; 0 otherwise. */
 int bug_report_toast(char *out, int size);
 int bug_report_busy(void);

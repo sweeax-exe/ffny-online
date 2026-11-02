@@ -42,6 +42,7 @@
 #include "pc_launcher_home.h"
 
 #include "imgui.h"
+#include "imgui_internal.h"     // SetKeyOwner: F9's box keeps the keys from the screens under it
 #if defined(_WIN32)
 #include "imgui_impl_win32.h"
 #include "imgui_impl_dx11.h"
@@ -3379,6 +3380,7 @@ namespace {
 
 std::atomic<bool> g_open(false);
 std::atomic<bool> g_toggle(false);
+std::atomic<bool> g_note_shown(false);  // F9's "What's wrong?" box is up (pc_ui_report_ask)
 bool g_online = false;              // the overlay shows the online screens (the main menu's ONLINE)
 bool g_just_opened = false;
 bool g_ready = false;               // the context and backends exist (under the lock)
@@ -3470,7 +3472,7 @@ bool controls_released()
 
 void release_input_when_idle()
 {
-    if (g_hold_input && !g_open.load() && controls_released()) {
+    if (g_hold_input && !g_open.load() && !g_note_shown.load() && controls_released()) {
         g_hold_input = false;
         xbox_HostInputSetUiActive(0);
     }
@@ -3654,11 +3656,305 @@ extern "C" void pc_ui_report_shot(const char *path)
     snprintf(g_report_path, sizeof(g_report_path), "%s", path);
     g_report_pending = true;
 }
+
+// ---- F9's "What's wrong?" box ----------------------------------------------------------------------------------------
+//
+// Reports came with a picture and a log and no hint of what the player saw. After F9's picture is taken
+// a small box asks for one optional line: typed, or picked letter by letter with the pad as on the
+// online-name page. Enter or A sends it, Esc or B sends without text, and a minute with nothing pressed
+// sends without text. The box is never in the picture: it opens the frame after report_shot (or after
+// the frame F9's picture was the game's own). While it is up the game gets no input (offline the fight
+// goes on without the player) and the screens under it (the settings, the online pages) get none either.
+//
+// Not in an online match (lockstep): it cannot pause, so a box that held the controls would leave the
+// fighter standing while the player types, and one that did not would turn the typing into moves.
+// There the report goes at once, as before; a match that starts while the box is up sends it without text.
+
+struct NoteBox {
+    bool pending = false;           // asked for: opens the frame after the picture is taken
+    bool open = false;
+    bool swallow = false;           // closed over a screen: the keys that closed it stay away from it until let go
+    bool pad_used = false;          // up/down picked a letter: show where
+    char path[1024] = "";
+    char text[BUG_REPORT_NOTE_MAX + 1] = "";
+    int pos = 0;                    // the cursor: before text[pos]
+    float scroll = 0;               // the field's text, moved left to keep the cursor in sight
+    UiTick opened = 0, last = 0;    // last: the last key, button or click
+    ImVec4 send, skip;              // the buttons, as last drawn (x0, y0, x1, y1), for the mouse
+    size_t test_at = 0;             // RECOMP_TEST_REPORT_NOTE: how much is typed
+    int test_key = 0;               // and the key it holds down for a frame
+};
+static NoteBox g_note;
+static const UiTick NOTE_TIMEOUT_MS = 60000;
+// What up and down step through, as on the online-name page (online_screen.cpp NAME_CHARS), with the
+// small letters first: a note is a sentence.
+static const char NOTE_CHARS[] = " abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.,!?'-:/()&";
+
+extern "C" int pc_ui_report_ask(const char *path)
+{
+    if (!path || !*path) return 0;
+    if (netplay_active()) {
+        fprintf(stderr, "[REPORT] online match: no \"What's wrong?\" box, the report goes now\n");
+        return 0;
+    }
+    ui_lock();
+    bool asked = g_window && !g_note.open && !g_note.pending;
+    if (asked) {
+        snprintf(g_note.path, sizeof(g_note.path), "%s", path);
+        g_note.pending = true;
+    }
+    ui_unlock();
+    return asked ? 1 : 0;
+}
+
+static void note_open()
+{
+    NoteBox &n = g_note;
+    n.pending = false;
+    n.open = true;
+    n.swallow = false;
+    n.pad_used = false;
+    n.text[0] = 0;
+    n.pos = 0;
+    n.scroll = 0;
+    n.opened = n.last = ui_ticks();
+    n.send = n.skip = ImVec4(0, 0, 0, 0);
+    n.test_at = 0;
+    n.test_key = 0;
+    g_note_shown = true;
+    g_hold_input = false;
+    xbox_HostInputSetUiActive(1);       // the game gets no input while the box is up
+    fprintf(stderr, "[REPORT] \"What's wrong?\" box open: Enter or A sends, Esc or B sends without text, %u s\n",
+            (unsigned)(NOTE_TIMEOUT_MS / 1000));
+    fflush(stderr);
+}
+
+static void note_finish(bool with_text, const char *how)
+{
+    NoteBox &n = g_note;
+    if (!with_text) n.text[0] = 0;
+    fprintf(stderr, "[REPORT] \"What's wrong?\" box closed (%s): %s\n", how,
+            n.text[0] ? "sent with the note" : "sent without text");
+    fflush(stderr);
+    bug_report_send_note("picture", NULL, n.path, n.text);
+    n.open = false;
+    g_note_shown = false;
+    if (g_open.load()) {
+        n.swallow = true;               // the screen under it: not the Enter or A that sent it
+    } else if (netplay_active()) {
+        g_hold_input = false;           // a match started: the fight's controls at once
+        xbox_HostInputSetUiActive(0);
+    } else {
+        g_hold_input = true;            // released in release_input_when_idle, once everything is let go
+    }
+}
+
+// RECOMP_TEST_REPORT_NOTE=<text>: a test types the text into the box, a character a frame through
+// ImGui's own queue, then presses Enter. "<esc>" presses Esc instead, "<wait>" lets it run out. Only
+// with RECOMP_ACCOUNT_SERVER set, like the test's F9. Called before NewFrame, so the frame reads it.
+static void note_test_feed(ImGuiIO &io)
+{
+    static const char *text = (getenv("RECOMP_ACCOUNT_SERVER") && *getenv("RECOMP_ACCOUNT_SERVER"))
+                                  ? getenv("RECOMP_TEST_REPORT_NOTE") : nullptr;
+    NoteBox &n = g_note;
+    if (!text || !*text || !n.open || strcmp(text, "<wait>") == 0) return;
+    if (n.test_key) {                   // let go of the key pressed last frame
+        io.AddKeyEvent((ImGuiKey)n.test_key, false);
+        n.test_key = 0;
+        return;
+    }
+    UiTick since = ui_ticks() - n.opened;
+    if (since < 1500) return;           // up and empty a moment first, for the pictures
+    bool esc = strcmp(text, "<esc>") == 0;
+    size_t len = esc ? 0 : strlen(text);
+    if (n.test_at < len) {
+        io.AddInputCharacter((unsigned)(unsigned char)text[n.test_at++]);
+        if (n.test_at == len) n.opened = ui_ticks() - 1500;    // typed: the text stays up a moment
+        return;
+    }
+    if (since < 4000) return;
+    n.test_key = esc ? ImGuiKey_Escape : ImGuiKey_Enter;
+    io.AddKeyEvent((ImGuiKey)n.test_key, true);
+}
+
+// Before any screen reads this frame's input: the box takes every key, button and character. While it is
+// up, and after it closed over a screen until everything is let go, nothing under it sees them.
+static void note_input(ImGuiIO &io)
+{
+    NoteBox &n = g_note;
+    const ImGuiID owner = ImHashStr("ffny-report-note");
+    for (int k = ImGuiKey_NamedKey_BEGIN; k < ImGuiKey_NamedKey_END; k++)
+        ImGui::SetKeyOwner((ImGuiKey)k, owner, ImGuiInputFlags_LockThisFrame);
+    if (!n.open) {
+        io.InputQueueCharacters.resize(0);
+        if (controls_released()) n.swallow = false;
+        return;
+    }
+    auto hit = [&](std::initializer_list<ImGuiKey> keys, bool repeat) {
+        for (ImGuiKey k : keys)
+            if (ImGui::IsKeyPressed(k, repeat ? ImGuiInputFlags_Repeat : ImGuiInputFlags_None, owner)) return true;
+        return false;
+    };
+    auto inside = [&](const ImVec4 &r) {
+        return r.z > r.x && io.MousePos.x >= r.x && io.MousePos.x < r.z && io.MousePos.y >= r.y && io.MousePos.y < r.w;
+    };
+    UiTick now = ui_ticks();
+    if (now - n.opened < 400) {         // a button the fight already held is not an answer
+        io.InputQueueCharacters.resize(0);
+        return;
+    }
+    int len = (int)strlen(n.text);
+    bool any = io.InputQueueCharacters.Size > 0;
+    for (int i = 0; i < io.InputQueueCharacters.Size; i++) {    // typing: printable ASCII, at the cursor
+        ImWchar c = io.InputQueueCharacters[i];
+        if (c < 0x20 || c > 0x7E || len >= BUG_REPORT_NOTE_MAX) continue;
+        memmove(n.text + n.pos + 1, n.text + n.pos, (size_t)(len - n.pos + 1));
+        n.text[n.pos++] = (char)c;
+        len++;
+    }
+    io.InputQueueCharacters.resize(0);
+    bool left = hit({ ImGuiKey_LeftArrow, ImGuiKey_GamepadDpadLeft, ImGuiKey_GamepadLStickLeft }, true);
+    bool right = hit({ ImGuiKey_RightArrow, ImGuiKey_GamepadDpadRight, ImGuiKey_GamepadLStickRight }, true);
+    bool up = hit({ ImGuiKey_UpArrow, ImGuiKey_GamepadDpadUp, ImGuiKey_GamepadLStickUp }, true);
+    bool down = hit({ ImGuiKey_DownArrow, ImGuiKey_GamepadDpadDown, ImGuiKey_GamepadLStickDown }, true);
+    bool back = hit({ ImGuiKey_Backspace, ImGuiKey_GamepadFaceLeft }, true);       // X: the character before
+    bool del = hit({ ImGuiKey_Delete }, true);
+    bool space = hit({ ImGuiKey_GamepadFaceUp }, true);                          // Y: a space
+    bool home = hit({ ImGuiKey_Home }, false), end = hit({ ImGuiKey_End }, false);
+    bool send = hit({ ImGuiKey_Enter, ImGuiKey_KeypadEnter, ImGuiKey_GamepadFaceDown, ImGuiKey_GamepadStart }, false);
+    bool skip = hit({ ImGuiKey_Escape, ImGuiKey_GamepadFaceRight }, false);
+    if (ImGui::IsMouseClicked(ImGuiMouseButton_Left, ImGuiInputFlags_None, owner)) {
+        any = true;
+        if (inside(n.send)) send = true;
+        else if (inside(n.skip)) skip = true;
+    }
+    any = any || left || right || up || down || back || del || space || home || end || send || skip;
+    if (left && n.pos > 0) n.pos--;
+    if (right && n.pos < len) n.pos++;
+    if (home) n.pos = 0;
+    if (end) n.pos = len;
+    if (back && n.pos > 0) {
+        memmove(n.text + n.pos - 1, n.text + n.pos, (size_t)(len - n.pos + 1));
+        n.pos--;
+        len--;
+    }
+    if (del && n.pos < len) {
+        memmove(n.text + n.pos, n.text + n.pos + 1, (size_t)(len - n.pos));
+        len--;
+    }
+    if (space && len < BUG_REPORT_NOTE_MAX) {
+        memmove(n.text + n.pos + 1, n.text + n.pos, (size_t)(len - n.pos + 1));
+        n.text[n.pos++] = ' ';
+        len++;
+    }
+    if ((up || down) && (n.pos < len || len < BUG_REPORT_NOTE_MAX)) {   // the letter at the cursor, a new one at the end
+        const int count = (int)sizeof(NOTE_CHARS) - 1;
+        if (n.pos == len) { n.text[len] = ' '; n.text[len + 1] = 0; len++; }
+        const char *at = strchr(NOTE_CHARS, n.text[n.pos]);
+        int i = at ? (int)(at - NOTE_CHARS) : 0;
+        n.text[n.pos] = NOTE_CHARS[(i + (up ? 1 : count - 1)) % count];
+        n.pad_used = true;
+    }
+    if (any) n.last = now;
+    if (send) note_finish(true, "Send");
+    else if (skip) note_finish(false, "Send without text");
+    else if (netplay_active()) note_finish(false, "an online match started");
+    else if (now - n.last >= NOTE_TIMEOUT_MS) note_finish(false, "no answer in 60 s");
+}
+
+// The box: small, in the middle, over everything else this frame draws.
+static void note_draw(ImVec2 display)
+{
+    NoteBox &n = g_note;
+    if (!n.open) return;
+    ImDrawList *dl = ImGui::GetForegroundDrawList();
+    ImFont *body = ImGui::GetFont(), *bold = g_font_bold ? g_font_bold : body;
+    const float s = std::max(15.0f, display.y * 0.021f), pad = s;
+    const float w = std::min(display.x - 2 * s, s * 36), title = s * 1.3f, line = s * 1.35f;
+    const float h = pad + title + s * 0.5f + line + s * 0.6f + line * 1.6f + s * 0.4f + line + s * 0.7f + line * 1.7f + s * 0.6f +
+                    line + pad * 0.6f;
+    const float x0 = (display.x - w) * 0.5f, y0 = std::max(s, (display.y - h) * 0.5f);
+    const ImU32 gold = ImGui::GetColorU32(k_gold), red = ImGui::GetColorU32(k_red), red_hi = ImGui::GetColorU32(k_red_hi);
+    const ImU32 white = IM_COL32(240, 240, 240, 255), grey = IM_COL32(165, 165, 172, 255), dim = IM_COL32(110, 110, 118, 255);
+    const bool ps = pc_ui_button_icons() == PC_UI_ICONS_PLAYSTATION;
+    const char *a = ps ? "Cross" : "A", *b = ps ? "Circle" : "B", *x = ps ? "Square" : "X", *y = ps ? "Triangle" : "Y";
+    UiTick now = ui_ticks();
+    char buf[200];
+
+    dl->AddRectFilled(ImVec2(x0, y0), ImVec2(x0 + w, y0 + h), IM_COL32(14, 14, 17, 245), s * 0.45f);
+    dl->AddRect(ImVec2(x0, y0), ImVec2(x0 + w, y0 + h), IM_COL32(255, 255, 255, 30), s * 0.45f, 0, 1.0f);
+    dl->AddRectFilled(ImVec2(x0, y0), ImVec2(x0 + w, y0 + s * 0.22f), red, s * 0.45f, ImDrawFlags_RoundCornersTop);
+    float cy = y0 + pad;
+    const char *head = "What's wrong?";
+    dl->AddText(bold, title, ImVec2(x0 + pad, cy), gold, head);
+    float hw = bold->CalcTextSizeA(title, FLT_MAX, 0, head).x;
+    dl->AddText(body, s, ImVec2(x0 + pad + hw + s * 0.5f, cy + (title - s) * 0.7f), grey, "(optional)");
+    cy += title + s * 0.5f;
+    dl->AddText(body, s * 0.9f, ImVec2(x0 + pad, cy), grey, "The picture is taken. One line on what went wrong helps us find it.");
+    cy += line + s * 0.6f;
+
+    // the field: one line that moves left as it fills, the cursor always in sight
+    const float fx0 = x0 + pad, fx1 = x0 + w - pad, fh = line * 1.6f, fy0 = cy, inner = s * 0.6f;
+    dl->AddRectFilled(ImVec2(fx0, fy0), ImVec2(fx1, fy0 + fh), IM_COL32(6, 6, 8, 255), s * 0.25f);
+    dl->AddRect(ImVec2(fx0, fy0), ImVec2(fx1, fy0 + fh), red_hi, s * 0.25f, 0, 1.5f);
+    const float ty = fy0 + (fh - s) * 0.5f, room = fx1 - fx0 - 2 * inner;
+    float caret = body->CalcTextSizeA(s, FLT_MAX, 0, n.text, n.text + n.pos).x;
+    float cw = n.text[n.pos] ? body->CalcTextSizeA(s, FLT_MAX, 0, n.text + n.pos, n.text + n.pos + 1).x : s * 0.5f;
+    if (caret + cw - n.scroll > room) n.scroll = caret + cw - room;
+    if (caret - n.scroll < 0) n.scroll = caret;
+    dl->PushClipRect(ImVec2(fx0 + 2, fy0 + 2), ImVec2(fx1 - 2, fy0 + fh - 2), true);
+    const float tx = fx0 + inner - n.scroll;
+    if (n.text[0]) {
+        if (n.pad_used && n.text[n.pos])        // the letter up and down change
+            dl->AddRectFilled(ImVec2(tx + caret - 1, ty - 2), ImVec2(tx + caret + cw + 1, ty + s + 2), IM_COL32(120, 30, 40, 255), 2);
+        dl->AddText(body, s, ImVec2(tx, ty), white, n.text);
+    } else {
+        dl->AddText(body, s, ImVec2(fx0 + inner, ty), dim, "e.g. the floor turned black in the Hunts Point fight");
+    }
+    if ((now / 530) % 2 == 0)
+        dl->AddRectFilled(ImVec2(tx + caret, ty - 1), ImVec2(tx + caret + 2, ty + s + 1), gold);
+    dl->PopClipRect();
+    cy += fh + s * 0.4f;
+    UiTick left = n.last + NOTE_TIMEOUT_MS > now ? n.last + NOTE_TIMEOUT_MS - now : 0;
+    snprintf(buf, sizeof(buf), "Sends by itself in %u s", (unsigned)((left + 999) / 1000));
+    dl->AddText(body, s * 0.85f, ImVec2(fx0, cy), dim, buf);
+    snprintf(buf, sizeof(buf), "%d / %d", (int)strlen(n.text), BUG_REPORT_NOTE_MAX);
+    float bw = body->CalcTextSizeA(s * 0.85f, FLT_MAX, 0, buf).x;
+    dl->AddText(body, s * 0.85f, ImVec2(fx1 - bw, cy), dim, buf);
+    cy += line + s * 0.7f;
+
+    // the buttons: Send (red) and Send without text
+    auto io_mouse_in = [](float ax, float ay, float bx, float by) {
+        ImVec2 m = ImGui::GetIO().MousePos;
+        return m.x >= ax && m.x < bx && m.y >= ay && m.y < by;
+    };
+    auto button = [&](float bx0, float bx1, const char *label, const char *keys, bool main, ImVec4 &rect) {
+        const float by1 = cy + line * 1.7f;
+        bool over = io_mouse_in(bx0, cy, bx1, by1);
+        ImU32 fill = main ? (over ? red_hi : red) : (over ? IM_COL32(52, 52, 60, 255) : IM_COL32(34, 34, 40, 255));
+        dl->AddRectFilled(ImVec2(bx0, cy), ImVec2(bx1, by1), fill, s * 0.3f);
+        ImVec2 ls = bold->CalcTextSizeA(s, FLT_MAX, 0, label), ks = body->CalcTextSizeA(s * 0.78f, FLT_MAX, 0, keys);
+        float mid = (bx0 + bx1) * 0.5f, top = cy + (by1 - cy - ls.y - ks.y) * 0.5f;
+        dl->AddText(bold, s, ImVec2(mid - ls.x * 0.5f, top), white, label);
+        dl->AddText(body, s * 0.78f, ImVec2(mid - ks.x * 0.5f, top + ls.y), main ? IM_COL32(255, 220, 220, 230) : grey, keys);
+        rect = ImVec4(bx0, cy, bx1, by1);
+    };
+    const float gap = s * 0.6f, half = (fx1 - fx0 - gap) * 0.5f;
+    snprintf(buf, sizeof(buf), "Enter or %s", a);
+    button(fx0, fx0 + half, "Send", buf, true, n.send);
+    char keys2[64];
+    snprintf(keys2, sizeof(keys2), "Esc or %s", b);
+    button(fx0 + half + gap, fx1, "Send without text", keys2, false, n.skip);
+    cy += line * 1.7f + s * 0.6f;
+    snprintf(buf, sizeof(buf), "Pad: up/down pick a letter, left/right move, %s deletes, %s adds a space.", x, y);
+    dl->AddText(body, s * 0.8f, ImVec2(fx0, cy), dim, buf);
+}
 #else
 extern "C" void pc_ui_report_shot(const char *path) { (void)path; }
+extern "C" int pc_ui_report_ask(const char *path) { (void)path; return 0; }
 #endif
 
-extern "C" int pc_ui_overlay_open(void) { return g_open.load() ? 1 : 0; }
+extern "C" int pc_ui_overlay_open(void) { return g_open.load() || g_note_shown.load() ? 1 : 0; }
 
 extern "C" void pc_ui_apply_settings(void)
 {
@@ -3674,7 +3970,11 @@ extern "C" void pc_ui_apply_settings(void)
 #if defined(_WIN32)
 extern "C" int pc_ui_window_message(HWND window, UINT msg, WPARAM wp, LPARAM lp)
 {
-    if ((msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN) && !(lp & (1 << 30)) && recorder_mark_vk() &&
+    // F9's "What's wrong?" box takes the typing; another F9 and the overlay key wait until it is closed.
+    bool note = g_note_shown.load();
+    if (note && (msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN) && ((int)wp == VK_F9 || (int)wp == g_overlay_vk))
+        return 1;
+    if (!note && (msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN) && !(lp & (1 << 30)) && recorder_mark_vk() &&
         (int)wp == recorder_mark_vk() && (int)wp != g_overlay_vk) {
         ui_lock();
         bool capturing = ui_capturing();
@@ -3693,7 +3993,7 @@ extern "C" int pc_ui_window_message(HWND window, UINT msg, WPARAM wp, LPARAM lp)
             return 1;
         }
     }
-    if (!g_open.load()) return 0;
+    if (!g_open.load() && !note) return 0;
     ui_lock();
     int handled = 0;
     if (g_ready) {
@@ -3746,7 +4046,7 @@ extern "C" void pc_ui_overlay(void *device, void *context, void *window_rtv, uns
     bool toggled = g_toggle.exchange(false);
     pad_mark_poll();
     if (!ui_capturing() && !g_chords.empty() && pad_toggle_pressed()) toggled = true;
-    if (toggled) set_open(!g_open.load());
+    if (toggled && !g_note.open) set_open(!g_open.load());
     release_input_when_idle();
     if (online_screen::take_open_request()) {      // ONLINE chosen in the game's main menu
         set_open(true);
@@ -3766,9 +4066,12 @@ extern "C" void pc_ui_overlay(void *device, void *context, void *window_rtv, uns
     // would cover the screen being reported. With nothing else drawn, the game's frame stays the picture.
     bool report = g_report_pending.exchange(false);
     if (report) toast = false;
+    // F9's box opens once its picture is taken: never in this frame, whose picture report_shot may read.
+    if (g_note.pending && !report) note_open();
+    if (g_note.open) toast = false;     // F9's "taking a picture" would sit over the box
     char talk[160];
     bool talking = voice_overlay(talk, sizeof(talk)) != 0;               // voice chat: who talks
-    if (!g_open.load() && !decor && !versus && !toast && !talking) { ui_unlock(); return; }
+    if (!g_open.load() && !decor && !versus && !toast && !talking && !g_note.open) { ui_unlock(); return; }
 
     ID3D11Device *dev = (ID3D11Device *)device;
     ID3D11DeviceContext *ctx = (ID3D11DeviceContext *)context;
@@ -3789,13 +4092,15 @@ extern "C" void pc_ui_overlay(void *device, void *context, void *window_rtv, uns
     }
     ui_apply_scale(g_window);
     online_screen::prepare(dev);
-    if (!decor && !versus) ui_feed_gamepad();
+    if ((!decor && !versus) || g_note.open || g_note.swallow) ui_feed_gamepad();
+    if (g_note.open) note_test_feed(ImGui::GetIO());
     ImGui_ImplDX11_NewFrame();
     ImGui_ImplWin32_NewFrame();
     ImGui::NewFrame();
 
     ImGuiIO &io = ImGui::GetIO();
     bool close_request = false;
+    if (g_note.open || g_note.swallow) note_input(io);      // first: the screens under it read no input
     if (versus) {
         online_screen::draw_versus(ImGui::GetForegroundDrawList(), io.DisplaySize);
     } else if (decor) {
@@ -3833,6 +4138,7 @@ extern "C" void pc_ui_overlay(void *device, void *context, void *window_rtv, uns
                           IM_COL32(0, 0, 0, 170), size * 0.3f);
         fg->AddText(font, size, at, IM_COL32(120, 220, 120, 255), talk);
     }
+    note_draw(io.DisplaySize);      // over the screens; the toast is off while it is up
     if (toast) {    // last, so no screen drawn this frame covers it
         ImDrawList *fg = ImGui::GetForegroundDrawList();
         ImFont *font = g_font_bold ? g_font_bold : ImGui::GetFont();
