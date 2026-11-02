@@ -245,4 +245,23 @@ void steam_section_reset()
 
 bool steam_busy() { return g_steam.process.id != 0; }
 
+bool steam_remove_now(std::string *message)
+{
+    std::error_code ec;
+    if (!fs::exists(folder() / "steam.json", ec)) return true;      // this app never added it
+    fs::path answer = folder() / "steam-uninstall.json";
+    std::vector<std::string> args = {"--steam", "remove", "--app-program", program().string(), "--steam-record",
+                                     (folder() / "steam.json").string(), "--steam-result", answer.string(),
+                                     "--close-steam"};
+    if (!install().root.empty()) args.insert(args.end(), {"--install-dir", install().root.string()});
+    os::Process process;
+    if (!spawn_engine(args, &process, message)) return false;
+    int code = os::wait(process);
+    auto values = json_values(os::read_shared(answer));
+    fs::remove(answer, ec);
+    *message = values.count("message") ? values["message"] : "";
+    fprintf(stderr, "[APP] uninstall: steam remove exit %d; %s\n", code, message->c_str());
+    return code == 0;
+}
+
 } // namespace app
