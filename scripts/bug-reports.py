@@ -3,8 +3,9 @@
 F9 in the game, or "Send crash report" in the launcher after a crash, sends the run's log and
 (F9) a picture to POST /api/report (netplay/relay/accounts/reports.go). The service keeps each
 report as a folder <reports>/<YYYYMMDD-HHMMSS>-<id>/ with info.txt, log.txt and picture.png.
+info.txt has a "note:" line when the player wrote what is wrong in F9's box.
 
-    python scripts/bug-reports.py list [--last 20]     # newest last: time, id, kind, build, player
+    python scripts/bug-reports.py list [--last 20]     # newest last: time, id, kind, build, player, note
     python scripts/bug-reports.py get ID [ID ...]      # copies them to logs/bug-reports/<folder>/
     python scripts/bug-reports.py new                  # fetches every report not fetched yet
 
@@ -70,6 +71,8 @@ def main():
             pic = " +picture" if "picture.png" in info["files"] else ""
             print("%s  %-7s build %-4s %s%s" % (folder, info.get("kind", "?"), info.get("build", "?"),
                                                 info.get("player", "?"), pic))
+            if info.get("note"):
+                print("    note: %s" % info["note"])
         print("%d report(s)" % len(reports))
         return
     if a.cmd == "get":
@@ -80,6 +83,8 @@ def main():
         dest = fetch(a.host, folder)
         if dest:
             print(dest, "|", info.get("kind"), "build", info.get("build"), "|", info.get("player"))
+            if info.get("note"):
+                print("    note:", info["note"])
     if not want:
         print("nothing to fetch")
 
