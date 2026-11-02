@@ -832,7 +832,7 @@ std::string upper(const char *s)
 
 // ---- the screens --------------------------------------------------------------------------------
 
-enum Page { HUB, ROOMS, SETTINGS, FIGHTERS, CODE, STATS, PLAYERS, RANKED, VOICE, SERVERS, NAME };
+enum Page { HUB, ROOMS, SETTINGS, FIGHTERS, CODE, STATS, PLAYERS, RANKED, VOICE, SERVERS, NAME, RANKED_MODES, RANKED_RESULTS };
 
 struct State {
     Page page = HUB;
@@ -913,6 +913,25 @@ bool gallery_on()
     }
     return ms > 0;
 }
+
+// Ranked play's pages (ranked_ui.inc, included below the gallery's samples).
+bool ranked_room(const NetRoom &r, NetRankInfo *ri);
+void ranked_banner(ImDrawList *dl, const Frame &f, const NetRoom &r, const NetRankInfo &ri, float y);
+const char *ranked_picker_line(const NetRoom &r, const NetRankInfo &ri, char *buf, int size);
+void ranked_card(ImDrawList *dl, const Frame &f, const NetRankInfo &ri, int slot, float x, float y, float w);
+void ranked_versus(ImDrawList *dl, const Frame &f, const NetVersus &v, float alpha);
+bool ranked_created_ok(const NetRoom &r);
+void draw_ranked_stats(ImDrawList *dl, const Frame &f, int mode);
+int &ranked_stats_tab();
+int ranked_relay();
+bool ranked_test_switch();
+void open_ranked_modes();
+void ranked_search(int fighter);
+void ranked_tick(const NetRoom &r);
+bool ranked_gallery(const std::string &page);
+void draw_ranked_modes(ImDrawList *dl, const Frame &f, const Pad &pad);
+void draw_ranked(ImDrawList *dl, const Frame &f, const Pad &pad);
+void draw_ranked_results(ImDrawList *dl, const Frame &f, const Pad &pad);
 
 enum NetplayState net_state() { return gallery_on() ? G.state : netplay_state(); }
 bool net_in_lobby() { return gallery_on() ? G.in_lobby : netplay_in_lobby() != 0; }
@@ -1375,13 +1394,12 @@ void open_servers()
 
 const int HUB_ITEMS = 8, HUB_LEAVE = 7, HUB_RANKED = 1, HUB_VOICE = 6;
 
-// RANKED MATCH waits until ranked play is switched on on the server (docs/ranked-design.md);
-// RECOMP_RANKED=1 shows it for tests.
+// RANKED MATCH shows once a relay's STATUS says its ranked queue is on (the account service's switch,
+// docs/ranked-design.md); RECOMP_RANKED=1 shows it for tests (a local relay is not probed).
 bool ranked_shown()
 {
-    static int on = -1;
-    if (on < 0) on = getenv("RECOMP_RANKED") != nullptr;
-    return on != 0 || (gallery_on() && G.ranked);
+    if (gallery_on()) return G.ranked;
+    return ranked_test_switch() || ranked_relay() >= 0;
 }
 
 // The server chip at the bottom right, beside the status line: the relay the hub is on, its ping
@@ -1596,8 +1614,8 @@ void draw_hub(ImDrawList *dl, const Frame &f, const Pad &pad)
                                         "BACK TO THE MENU" };
     static const char *const descs[] = {
         "You are put into an open room of this mode, or one is opened for the next players.",
-        "Pick your fighter, then the server finds an opponent with a similar rating. Wins and losses move your "
-        "rating. Sign in with Discord in the launcher to play ranked.",
+        "Classic (stock fighters) or Open (your created fighter too), best of three sets against a player of a "
+        "similar rating, each mode with its own rank. Sign in with Discord in the launcher to play ranked.",
         "Every listed room with its mode and players. Pick one and join it.",
         "Pick the mode, the players and the venues to vote on. Others join from the list or by its code.",
         "Your wins, losses and last fights, and the leaderboard. Sign in with Discord in the launcher to keep them.",
@@ -1621,14 +1639,13 @@ void draw_hub(ImDrawList *dl, const Frame &f, const Pad &pad)
 
     page_title(dl, f, "ONLINE");
     if (online_count(dl, f, true) || pad.x) open_servers();
-    // Ranked needs the account service's internal listener, which only the Europe relay has: on
-    // US East and US West the entry says so and switches over.
+    // Ranked runs on the relays whose STATUS offers it (every relay reaches the central matchmaker
+    // once its tunnel is up): on one that does not, the entry says so and switches over.
+    int ranked_at = ranked_relay();
     bool ranked_elsewhere = false;
     {
-        NetServerInfo s[NETSERVER_COUNT];
-        servers(s);
         int cur = connected_server();
-        ranked_elsewhere = cur >= 0 && cur != NETSERVER_EU && !(s[cur].state == NETSERVER_UP && s[cur].version && (s[cur].flags & NETSERVER_RANKED));
+        ranked_elsewhere = cur >= 0 && ranked_at >= 0 && ranked_at != cur;
     }
     // Online fights need a Discord sign-in: matches against signed-out players did not count, about
     // half of them after the build-23 rules (2026-10-24). Y signs in from here (the browser opens).
@@ -1674,10 +1691,14 @@ void draw_hub(ImDrawList *dl, const Frame &f, const Pad &pad)
     }
     // the door: what the chosen item does
     door_panel(dl, f);
-    if (S.hub_sel == HUB_RANKED && ranked_elsewhere)
-        door_text(dl, f, &tex("ui/online_icon.png"), items[S.hub_sel], "ON THE EUROPE SERVER",
-                  pad_text("Ranked runs on the Europe server: your rating and the leaderboard live there. Press {a} to "
-                           "switch to Europe, then choose Ranked Match again.").c_str());
+    if (S.hub_sel == HUB_RANKED && ranked_elsewhere) {
+        NetServerInfo s[NETSERVER_COUNT];
+        servers(s);
+        std::string at = upper(s[ranked_at].name), name = s[ranked_at].name;
+        door_text(dl, f, &tex("ui/online_icon.png"), items[S.hub_sel], ("ON THE " + at + " SERVER").c_str(),
+                  pad_text(("Ranked is not offered on this server right now. Press {a} to switch to " + name +
+                            ", then choose Ranked Match again.").c_str()).c_str());
+    }
     else
         door_text(dl, f, &tex("ui/online_icon.png"), items[S.hub_sel], subs[S.hub_sel], descs[S.hub_sel]);
     if (S.hub_sel == 0 && mode_count) {
@@ -1733,18 +1754,14 @@ void draw_hub(ImDrawList *dl, const Frame &f, const Pad &pad)
             break;
         case 1:
             if (ranked_elsewhere) {
-                netservers_use(NETSERVER_EU);
-                switch_server("Switching to the Europe server for ranked...");
+                NetServerInfo s[NETSERVER_COUNT];
+                servers(s);
+                netservers_use(ranked_at);
+                switch_server((std::string("Switching to the ") + s[ranked_at].name + " server for ranked...").c_str());
                 break;
             }
             if (acc_state() != ACCOUNT_IN) { say("Sign in with Discord in the launcher to play ranked."); break; }
-            S.ranked_pick = true;
-            S.page = FIGHTERS;
-            {
-                int fighter = saved_fighter();
-                const auto &list = roster();
-                for (size_t i = 0; i < list.size(); i++) if (list[i].id == fighter) S.fighter_sel = (int)i;
-            }
+            open_ranked_modes();
             break;
         case 2: S.page = ROOMS; netplay_lobby_list(0xFF); S.last_list = GetTickCount64(); break;
         case 3:
@@ -1845,6 +1862,21 @@ void draw_stats(ImDrawList *dl, const Frame &f, const Pad &pad)
     enum AccountState acc = acc_state();
     StatsView v;
     bool have = (acc == ACCOUNT_IN || acc == ACCOUNT_CHECKING) && read_stats(v);
+    // Y: the casual record, then one tab per ranked mode (ranked phase 2a), once ranked is offered
+    int &tab = ranked_stats_tab();
+    if (pad.y && ranked_shown()) tab = (tab + 1) % (1 + NETRANK_MODES);
+    if (!ranked_shown()) tab = 0;
+    if (ranked_shown()) {
+        static const char *const tabs[] = { "CASUAL", "OPEN", "CLASSIC", "DRAFT" };
+        float tx = 360;
+        for (int i = 0; i < 4; i++) {
+            float w = text_width(f, g_title, 12, tabs[i]) + 16;
+            rect(dl, f, tx, 54, w, 18, i == tab ? IM_COL32(120, 12, 26, 230) : IM_COL32(0, 0, 0, 150), 5);
+            text(dl, f, g_title, 12, tx + w / 2, 56, i == tab ? WHITE : GREY, tabs[i], CENTER, 0.8f);
+            tx += w + 4;
+        }
+    }
+    if (tab > 0 && have) { draw_ranked_stats(dl, f, tab - 1); return; }
     if (acc != ACCOUNT_IN && acc != ACCOUNT_CHECKING) {
         text(dl, f, g_title, 24, 320, 180, CREAM, "SIGN IN TO KEEP YOUR STATS", CENTER, 1.6f);
         text(dl, f, g_hand, 15, 320, 222, ORANGE, "IN THE LAUNCHER: ONLINE, SIGN IN WITH DISCORD", CENTER, 1.0f);
@@ -2401,7 +2433,7 @@ const std::vector<OnlineFighter> &grid_fighters()
     g_grid_cp.assign(list.size(), -1);
     NetRoom r;
     lobby_room(&r);
-    if (cp_available() && !S.ranked_pick && !(r.in_room && NETPLAY_IS_KOTH(r.settings.mode))) {
+    if (cp_available() && ranked_created_ok(r) && !(r.in_room && NETPLAY_IS_KOTH(r.settings.mode))) {
         const std::vector<CpCard> cards = cp_cards();
         styles.assign(cards.size(), std::string());
         for (size_t i = 0; i < cards.size(); i++)
@@ -2524,52 +2556,6 @@ void draw_fighters(ImDrawList *dl, const Frame &f, const Pad &pad, bool *chosen,
     if (pad.b) S.page = HUB;
 }
 
-// ---- ranked: the search ----
-
-void draw_ranked(ImDrawList *dl, const Frame &f, const Pad &pad)
-{
-    int waited = 0, searching = 0;
-    char why[96];
-    int st = lobby_queue(&waited, &searching, why, sizeof(why));
-    int fighter = saved_fighter();
-    page_title(dl, f, "RANKED MATCH");
-    online_count(dl, f);
-    glass(dl, f, 36, 74, 180, 308);
-    if (!portrait(dl, f, fighter, 46, 84, 160, 240))
-        text(dl, f, g_title, 26, 126, 180, with_alpha(CREAM, 0.6f), online_fighter_name(fighter), CENTER, 1.4f, 150);
-    text(dl, f, g_hand, 22, 126, 330, ORANGE, online_fighter_name(fighter), CENTER, 1.2f);
-    glass(dl, f, 226, 86, 378, 206);
-
-    float hx = 54;
-    if (st == NETQUEUE_REFUSED || st == NETQUEUE_NONE) {
-        text(dl, f, g_hand, 24, 240, 110, RED, "NOT SEARCHING", LEFT, 1.0f);
-        text(dl, f, g_title, 14, 240, 150, WHITE, st == NETQUEUE_REFUSED ? why : "The search ended.", LEFT, 0.8f, 360);
-        hx += hint(dl, f, hx, 392, "a", "TRY AGAIN");
-        hint(dl, f, hx, 392, "b", "BACK");
-        if (pad.a) netplay_lobby_ranked(fighter);
-        if (pad.b) S.page = HUB;
-        return;
-    }
-    // a pulsing line while the server looks
-    float t = (float)(GetTickCount64() % 1600) / 1600.0f;
-    const char *head = st == NETQUEUE_FOUND ? "OPPONENT FOUND!" : st == NETQUEUE_SEARCHING ? "SEARCHING" : "CHECKING YOUR ACCOUNT";
-    text(dl, f, g_hand, 26, 240, 104, st == NETQUEUE_FOUND ? GREEN : ORANGE, head, LEFT, 1.0f);
-    if (st == NETQUEUE_SEARCHING) {
-        rect(dl, f, 240, 148, 340, 4, IM_COL32(255, 255, 255, 30), 2);
-        rect(dl, f, 240 + 300 * (t < 0.5f ? t * 2 : 2 - t * 2), 148, 40, 4, ORANGE);
-        char line[64];
-        snprintf(line, sizeof(line), "%d:%02d", waited / 60, waited % 60);
-        text(dl, f, g_title, 34, 240, 170, CREAM, line, LEFT, 1.6f);
-        snprintf(line, sizeof(line), "%d PLAYER%s SEARCHING", searching, searching == 1 ? "" : "S");
-        text(dl, f, g_title, 14, 240, 222, GREY, line, LEFT, 1.0f);
-        text(dl, f, g_title, 12, 240, 250, WHITE,
-             "The server looks for an opponent with a rating close to yours; the longer the search, the wider it looks.",
-             LEFT, 0.8f, 340);
-    }
-    hint(dl, f, hx, 392, "b", "STOP SEARCHING");
-    if (pad.b) { netplay_lobby_leave(); S.page = HUB; say("You left the ranked queue."); }
-}
-
 // ---- the room ----
 
 void draw_vote(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
@@ -2584,7 +2570,17 @@ void draw_vote(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
     int left = r.ms_left - (int)(GetTickCount64() - r.received);
     if (left < 0) left = 0;
 
-    page_title(dl, f, "VOTE FOR THE VENUE");
+    NetRankInfo ri;
+    bool ranked = ranked_room(r, &ri);
+    bool picks = !ranked || ri.game <= 1 || ri.picker < 0 || ri.picker == r.you;   // a ranked set: the loser picks
+    page_title(dl, f, ranked && ri.game <= 1 ? "GAME 1: THE VENUE" : ranked && picks ? "PICK THE VENUE" :
+                      ranked ? "THE LOSER PICKS" : "VOTE FOR THE VENUE");
+    if (ranked) {
+        char why[96];
+        ranked_banner(dl, f, r, ri, 76);
+        text(dl, f, g_hand, 13, 320, 52, ORANGE, ranked_picker_line(r, ri, why, sizeof(why)), CENTER, 0.8f);
+        if (!picks) const_cast<Pad &>(pad).a = false;
+    }
     char secs[16];
     snprintf(secs, sizeof(secs), "%d", (left + 999) / 1000);
     text(dl, f, g_title, 34, 590, 22, left < 5000 ? RED : CREAM, secs, RIGHT, 1.6f);
@@ -2613,8 +2609,8 @@ void draw_vote(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
     }
     {   // a way out while voting too: the others go back to the room's lobby (relay leaveRoom)
         float hx = 54;
-        hx += hint(dl, f, hx, 396, "a", "VOTE");
-        hint(dl, f, hx, 396, "b", "LEAVE ROOM");
+        if (picks) hx += hint(dl, f, hx, 396, "a", ranked && ri.game <= 1 ? "START NOW" : ranked ? "PICK" : "VOTE");
+        hint(dl, f, hx, 396, "b", ranked ? "LEAVE (FORFEIT)" : "LEAVE ROOM");
     }
     if (pad.b) { netplay_lobby_leave(); S.page = HUB; say("You left the room."); return; }
     if (pad.a) netplay_lobby_vote(S.vote_sel);
@@ -3022,8 +3018,11 @@ void draw_room(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
     }
     if (watcher) host = false;
 
+    NetRankInfo ri;
+    bool ranked = ranked_room(r, &ri);
     page_title(dl, f, r.settings.name);
     image_fit(dl, f, tex(mode_logo(r.settings.mode)), 360, 22, 220, 30);
+    if (ranked) ranked_banner(dl, f, r, ri, 56);
     char code[32];
     snprintf(code, sizeof(code), "CODE  %s", r.code);
     text(dl, f, g_title, 14, 590, 58, ORANGE, code, RIGHT);
@@ -3109,7 +3108,8 @@ void draw_room(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
             if (cp_slot(p.slot, cn, sizeof(cn), &st) && st[0])
                 text(dl, f, g_title, 9, x + w / 2, y + 236, with_alpha(ORANGE, 0.8f), st, CENTER, 0.5f, w - 10);
         }
-        if (p.slot == r.host) text(dl, f, g_title, 10, x + 6, y + 6, ORANGE, "HOST", LEFT, 1.0f);
+        if (ranked) ranked_card(dl, f, ri, p.slot, x, y + 160, w);
+        else if (p.slot == r.host) text(dl, f, g_title, 10, x + 6, y + 6, ORANGE, "HOST", LEFT, 1.0f);
         {   // the player's ping to the server, when it is known (builds from 30 report it)
             int ms = room_ping(p.slot);
             if (ms >= 0) {
@@ -3199,13 +3199,19 @@ void draw_room(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
                  4 - r.player_count == 1 ? "" : "s");
         text(dl, f, g_hand, 15, 320, my, ORANGE, line, CENTER, 0.8f);
     } else if (r.player_count < 2) text(dl, f, g_hand, 15, 320, my, ORANGE, "Waiting for another player...", CENTER, 0.8f);
+    else if (ranked) {
+        char why[96];
+        text(dl, f, g_hand, 15, 320, my, ORANGE, ready ? ranked_picker_line(r, ri, why, sizeof(why)) :
+             "Ready up for the next game (a new fighter if you like).", CENTER, 0.8f);
+    }
     else if (!ready) text(dl, f, g_hand, 15, 320, my, ORANGE, venue ? "Ready up: when both are, the fight starts."
                                                               : "Ready up: when everyone is, the venue vote starts.", CENTER, 0.8f);
     hx += hint(dl, f, hx, hy, "a", ready ? "NOT READY" : "READY");
     if (!ready) hx += hint(dl, f, hx, hy, "x", "CHOOSE FIGHTER");
+    if (ranked) host = false;       // a ranked room's settings are the set's
     if (host && !ready) hx += hint(dl, f, hx, hy, "y", "ROOM SETTINGS");
     hx += hint(dl, f, hx, hy, "rb", "VOICE");
-    hint(dl, f, hx, hy, "b", "LEAVE ROOM");
+    hint(dl, f, hx, hy, "b", ranked ? "LEAVE (FORFEIT)" : "LEAVE ROOM");
 
     if (pad.a) netplay_lobby_ready(ready ? 0 : 1, fighter);
     if (pad.x && !ready) {
@@ -3579,6 +3585,7 @@ void versus_page(ImDrawList *dl, ImVec2 display, const NetVersus &v)
     text(dl, f, g_hand, 13, 590, 426, ORANGE, sub, RIGHT, 0.8f);
     shift_fade(dl, f, k, 0, 0, ease_out((t - 0.2f) / 0.4f));
 
+    ranked_versus(dl, f, v, std::max(0.0f, std::min(1.0f, ease_out((t - 0.2f) / 0.4f))));   // a ranked set: ranks, score
     shift_fade(dl, f, all, 0, 0, v.alpha);     // the fade as the fight starts
 }
 
@@ -3650,6 +3657,8 @@ NetRoom sample_room(int mode, int max, int count)
     return r;
 }
 
+#include "ranked_ui.inc"
+
 // Which page the gallery shows now, and the sample it shows with it.
 void gallery_step()
 {
@@ -3679,7 +3688,10 @@ void gallery_step()
                                          "grid-created-pick",
                                          // build 39: online names of 16 characters, and their entry
                                          "name-created", "name-created-wide", "grid-created-long", "room-created-long",
-                                         "versus-created-long" };
+                                         "versus-created-long",
+                                         // ranked phase 2a: the mode chooser, the search, ACCEPT, the set, results
+                                         "ranked-modes", "ranked-search", "ranked-accept", "ranked-room", "ranked-vote",
+                                         "ranked-versus", "ranked-results", "ranked-results-placement", "stats-ranked" };
     const int count = (int)(sizeof(pages) / sizeof(pages[0]));
     static unsigned long long start;
     static int ms;
@@ -3785,6 +3797,12 @@ void gallery_step()
     G.cp_long = p.size() > 5 && p.compare(p.size() - 5, 5, "-long") == 0;
     for (auto &o : G.cp_online) o.clear();
     if (G.cp_long) { G.cp_online[0] = "WWWWWWWWWWWWWWWW"; G.cp_online[1] = "Brooklyn Bruiser"; }
+    {   // the ranked pages add their ranks to the sample statistics
+        static const std::string base_stats = G.stats;
+        G.stats = base_stats;
+        ranked_stats_tab() = 0;
+        if (ranked_gallery(p)) return;
+    }
     if (p == "connecting") { G.state = NETPLAY_CONNECTING; G.in_lobby = false; }
     else if (p == "offline") { G.state = NETPLAY_FAILED; G.in_lobby = false; }
     else if (p == "hub") { S.page = HUB; S.hub_sel = 0; S.quick_mode = 0; }
@@ -3817,7 +3835,6 @@ void gallery_step()
         // the venue row of a special match, which cannot be changed
         S.settings_sel = p == "create-special" ? 2 : 0;
     }
-    else if (p == "ranked") S.page = RANKED;
     else if (p == "voice") { S.page = VOICE; S.voice_sel = 1; }
     else if (p == "stats" || p == "stats-1v1") { S.page = STATS; S.stats_page = 0; }
     else if (p == "players") S.page = PLAYERS;
@@ -3988,7 +4005,8 @@ LookId page_look(const NetRoom &room, enum NetplayState st)
     case SERVERS: if (!room.in_room) return LOOK_LIST; break;
     case PLAYERS: if (!room.in_room) return LOOK_PLAYERS; break;
     case STATS: if (!room.in_room) return LOOK_STATS; break;
-    case RANKED: if (!room.in_room) return LOOK_SEARCH; break;
+    case RANKED: case RANKED_MODES: if (!room.in_room) return LOOK_SEARCH; break;
+    case RANKED_RESULTS: return LOOK_SEARCH;
     case VOICE: if (!(room.in_room && room.phase != 0)) return LOOK_VOICE; break;
     default: break;
     }
@@ -4137,10 +4155,13 @@ bool draw(ImVec2 display)
             say("Looking for a room...");
         } else if (moved == 1) {
             say("Joining...");
+        } else if (moved == 3) {
+            say("On the set's server: joining the set...");
         } else if (moved < 0) {
             say("The other server did not answer in time. Try again.", 6000);
         }
         if (st == NETPLAY_LOBBY) S.fallback_tried = false;
+        ranked_tick(room);
     }
     // The picker works without a connection: a server that does not answer is left from here.
     if (S.page == SERVERS && !room.in_room && st != NETPLAY_CONNECTED) {
@@ -4232,7 +4253,7 @@ bool draw(ImVec2 display)
         if (chosen) {
             recomp_settings_set("online", "fighter", fighter);
             if (S.ranked_pick && !room.in_room) {
-                netplay_lobby_ranked(fighter);
+                ranked_search(fighter);
                 S.page = RANKED;
             } else {
                 if (room.in_room) {
@@ -4277,10 +4298,15 @@ bool draw(ImVec2 display)
         draw_stats(dl, f, pad);
         float hx = 54;
         hx += hint(dl, f, hx, 420, "x", "REFRESH");
+        if (ranked_shown()) hx += hint(dl, f, hx, 420, "y", ranked_stats_tab() + 1 < 1 + NETRANK_MODES ? "NEXT TAB" : "CASUAL");
         hint(dl, f, hx, 420, "b", "BACK");
         if (pad.b) S.page = HUB;
     } else if (S.page == RANKED && !room.in_room) {
         draw_ranked(dl, f, pad);
+    } else if (S.page == RANKED_MODES && !room.in_room) {
+        draw_ranked_modes(dl, f, pad);
+    } else if (S.page == RANKED_RESULTS) {
+        draw_ranked_results(dl, f, pad);
     } else if (S.page == VOICE && !(room.in_room && room.phase != 0)) {
         draw_voice(dl, f, pad, room);
         float hx = 54;

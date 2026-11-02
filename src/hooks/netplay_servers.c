@@ -462,7 +462,7 @@ static struct {
 } R;
 
 static struct {         /* a join or quick match waiting for the hub to reach its relay */
-    int kind;           /* 0 none, 1 join, 2 quick */
+    int kind;           /* 0 none, 1 join, 2 quick, 3 ranked (a MOVE's reservation in code) */
     int server, mode, max;
     char code[7];
     ULONGLONG since;
@@ -727,6 +727,9 @@ int netservers_tick(int *mode)
     } else if (kind == 2) {
         fprintf(stderr, "[SERVERS] move: quick match (mode %d) on %s\n", A.mode, P.s[A.server].name);
         netplay_lobby_quick(A.mode, A.max);
+    } else if (kind == 3) {
+        fprintf(stderr, "[SERVERS] move: ranked set %s on %s\n", A.code, P.s[A.server].name);
+        netplay_lobby_ranked_again(A.code);
     }
     if (mode) *mode = A.mode;
     return kind;
@@ -746,7 +749,8 @@ static void move_to(int kind, int server, const char *code, int mode, int max, c
     A.since = GetTickCount64();
     LeaveCriticalSection(&g_cs);
     if (netservers_connected() != server) {
-        fprintf(stderr, "[SERVERS] move: moving the hub to %s for a %s\n", P.s[server].name, kind == 1 ? "join" : "quick match");
+        fprintf(stderr, "[SERVERS] move: moving the hub to %s for a %s\n", P.s[server].name,
+                kind == 1 ? "join" : kind == 3 ? "ranked set" : "quick match");
         netservers_use(server);
         netservers_reconnect(name);
     }
@@ -763,6 +767,28 @@ void netservers_quick_on(int server, int mode, int max, const char *name)
 {
     if (server < 0 || server >= NETSERVER_COUNT) { netplay_lobby_quick(mode, max); return; }
     move_to(2, server, NULL, mode, max, name);
+}
+
+int netservers_ranked_move(const char *name)
+{
+    NetQueueExt q;
+    int to;
+    if (netplay_lobby_queue(NULL, NULL, NULL, 0) != NETQUEUE_MOVE || !netplay_lobby_queue_ext(&q) || !q.code[0]) return 0;
+    to = netservers_index_of(q.addr);
+    if (to < 0 && netservers_connected() == -2) {
+        /* a custom address (tests): one relay plays both sides, so a move never comes; refuse */
+        fprintf(stderr, "[SERVERS] move: ranked set %s on %s, not one of the three relays\n", q.code, q.addr);
+        netplay_lobby_ranked_moved(0);
+        return -1;
+    }
+    if (to < 0) {
+        fprintf(stderr, "[SERVERS] move: ranked set %s on an unknown relay %s\n", q.code, q.addr);
+        netplay_lobby_ranked_moved(0);
+        return -1;
+    }
+    netplay_lobby_ranked_moved(1);
+    move_to(3, to, q.code, 0, 0, name);
+    return 1;
 }
 
 #define MOVE_FRESH      6000    /* a quick match moves only on a room list this fresh */
@@ -831,6 +857,7 @@ int netservers_rooms(NetServerRoom *out, int max, unsigned *version) { (void)out
 void netservers_join_on(int server, const char *code, int mode, const char *name) { (void)server; (void)code; (void)mode; (void)name; }
 void netservers_quick_on(int server, int mode, int max, const char *name) { (void)server; (void)mode; (void)max; (void)name; }
 int netservers_tick(int *mode) { (void)mode; return 0; }
+int netservers_ranked_move(const char *name) { (void)name; return 0; }
 int netservers_moving(void) { return 0; }
 int netservers_quick_move(int mode, int search_s, int alone_s, const char *code, int *waiting, int *ping,
                           unsigned *scope)
