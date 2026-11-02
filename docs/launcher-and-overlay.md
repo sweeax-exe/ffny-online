@@ -38,6 +38,19 @@ brightness curve are marked *(restart)* and take effect the next time the game s
 lists the changes that are waiting for a restart. Keys: `[ui] overlay_key` and `overlay_pad` in
 `settings.ini`, or the General page.
 
+### F9: a picture report
+
+**F9** (Windows) takes a picture of the window as it is, overlay included, and sends it with this session's
+log to the developers (`src/hooks/bug_report.c`, `netplay/relay/accounts/reports.go`; one a minute). Once the
+picture is taken a small box asks **What's wrong? (optional)**: one line of up to 200 characters, typed, or
+picked letter by letter with the pad (up and down change the letter, left and right move, X deletes, Y adds a
+space). **Enter** or **A** sends it, **Esc** or **B** sends the report without text, and so does a minute with
+nothing pressed. The box is never in the picture. While it is up the game and the screens under it get no
+input; the game keeps running. In an online match there is no box and the report goes at once: the fight runs
+in lockstep and cannot pause, so a box would leave the fighter standing while the player types (or turn the
+typing into moves). A match that starts while the box is up sends the report without text. The service keeps
+the line in the report's `info.txt` as `note: ...`; the bot's post shows it as *What's wrong*.
+
 ## The pages
 
 | Page | What it has |
@@ -132,6 +145,8 @@ nobody at it (a locked screen, a remote run):
 | `RECOMP_OVERLAY_SHOT_DIR=<folder>`, `RECOMP_OVERLAY_SHOT_MS` | Windows: the finished picture with the overlay, every `RECOMP_OVERLAY_SHOT_MS` (2000 by default) while the overlay draws, as `<ms>.bmp` |
 | `RECOMP_TEST_ONLINE_GALLERY=<ms>` | Windows, with `RECOMP_TEST_OPEN_ONLINE=1`: the online screens show every page in turn, `<ms>` each, with sample players, rooms, a hill and statistics, take no input and connect to nothing; the overlay captures are then named `<ms>-<page>.bmp`. For comparing a design change page by page from one copy. `RECOMP_TEST_ONLINE_GALLERY_ONLY=<prefix>` shows only the pages whose names start with it (`versus`: the versus screen for One on One, 3-Way, Free for All and King of the Hill, the entrance replaying on each page) |
 | `RECOMP_TEST_PICTURE_REPORT_SECS=<secs>` | Presses F9 (a picture report) once at that point on the pad script's clock (`RECOMP_SCRIPT_ANCHOR`). Only with `RECOMP_ACCOUNT_SERVER` set, so the report goes to a local service or a closed port. On Windows the picture is the window's, the overlay included (`[REPORT] picture report: the window's picture with the overlay ...`); the game's own frame is what the next frame's `[BATCH]` draws belong to |
+| `RECOMP_TEST_REPORT_NOTE=<text>` | With `RECOMP_ACCOUNT_SERVER` set: once F9's *What's wrong?* box has been up 1.5 s, types `<text>` into it, a character a frame through the overlay's own input queue, then presses Enter 2.5 s later. `<esc>` presses Esc instead, `<wait>` lets the minute run out. The log says `[REPORT] "What's wrong?" box open ...`, `... box closed (Send): sent with the note` and `[REPORT] note (<n> characters): <text>` |
+| `RECOMP_TEST_REPORT_BODY=<file>` | With `RECOMP_ACCOUNT_SERVER` set: keeps a copy of the report's multipart body (`kind`, `build`, `log`, `picture`, `note`) before it is sent, to read the fields back when the send goes to a closed port |
 | `RECOMP_MODS_PAGE=1` | The Textures page becomes upstream's Mods page (installed packs, load order, the signed project catalogue through the mod helper). Upstream's mod support is beta and not wired into FFNY Online's launcher and updater yet, so it is off by default |
 | `RECOMP_TEST_UPDATE_PROGRESS=<step>[,popup]` | Windows: a made-up update in progress at step 1 (the download) to 8 (finishing up), with no network and no setup, for pictures of the GAME card; `,popup` opens the "Update available" window first, which then shows the same progress |
 | `RECOMP_INPUT_VIRTUAL_PADS`, `RECOMP_INPUT_VIRTUAL_CHORD_MS` | An SDL virtual gamepad, which also opens and closes the overlay with its stick clicks and B ([input guide](10-input.md)) |
