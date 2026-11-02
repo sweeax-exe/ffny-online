@@ -234,7 +234,8 @@ D2D1_SIZE_F measure(const std::wstring& text, const Style& s, float width = 4000
 
 float text(const std::wstring& s, const Style& st_, float x, float y, float w, D2D1_COLOR_F c, Align a = LEFT, bool oneLine = false) {
     auto l = layout(s, st_, w, a, oneLine);
-    cv.rt->DrawTextLayout({x, y}, l, paint(c), D2D1_DRAW_TEXT_OPTIONS_CLIP);
+    // Not clipped to the layout box: a uniform line height can put tall capitals above its top.
+    cv.rt->DrawTextLayout({x, y}, l, paint(c));
     DWRITE_TEXT_METRICS m{}; l->GetMetrics(&m); l->Release();
     return m.height;
 }
@@ -844,7 +845,9 @@ void drawDone() {
     Style label{BODY, 15, DWRITE_FONT_WEIGHT_BOLD, 0.22f};
     float y = 130;
     y += text(st.update ? L"\u2713 UPDATED" : L"\u2713 INSTALLED", label, 0, y, W, GREEN, CENTER) + 18;
-    Style huge{ANTON, 84, DWRITE_FONT_WEIGHT_NORMAL, 0, 1.0f};
+    // Anton's capitals rise above 0.8 of the size, where a 1.0 line puts the baseline: 1.15 keeps their tops inside
+    // the line box (and the space above the heading as the mockup has it)
+    Style huge{ANTON, 84, DWRITE_FONT_WEIGHT_NORMAL, 0, 1.15f};
     y += text(L"READY TO FIGHT", huge, 0, y, W, WHITE, CENTER) + 18;
     y += text(L"Sign in with Discord in the launcher to play online.", Style{BODY, 17}, 0, y, W, cream(0.8f), CENTER) + 36;
     float pw = buttonWidth(L"PLAY", 26, 70, 0.12f);
