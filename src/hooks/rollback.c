@@ -426,9 +426,11 @@ static void track_read(void *host, size_t length)
  * are held until the fight's tracking ends, when no save that knew them is left. */
 extern int (*xbox_contig_free_defer)(uint32_t addr);
 extern int xbox_ContiguousFreeNow(uint32_t addr);
-static uint32_t s_held_free[4096];
-static LONG s_held_free_at[4096];       /* s_saves at each held free */
-static unsigned s_nheld, s_held_over;
+/* The list grows (it was 4096 entries; past that the frees ran at once, which a later load could turn
+ * into a block used twice: B2 of rollback-plan-2026-11.md). */
+static uint32_t *s_held_free;
+static LONG *s_held_free_at;            /* s_saves at each held free */
+static unsigned s_nheld, s_held_cap, s_held_over;
 static CRITICAL_SECTION s_held_cs;
 static LONG s_held_cs_ready;
 
@@ -436,7 +438,14 @@ static int hold_contig_free(uint32_t addr)
 {
     int kept = 0;
     EnterCriticalSection(&s_held_cs);
-    if (s_nheld < sizeof(s_held_free) / sizeof(s_held_free[0])) {
+    if (s_nheld == s_held_cap) {
+        unsigned cap = s_held_cap ? s_held_cap * 2 : 4096;
+        uint32_t *a = (uint32_t *)realloc(s_held_free, cap * sizeof(uint32_t));
+        LONG *t = a ? (LONG *)realloc(s_held_free_at, cap * sizeof(LONG)) : NULL;
+        if (a) s_held_free = a;
+        if (t) { s_held_free_at = t; s_held_cap = cap; }
+    }
+    if (s_nheld < s_held_cap) {
         s_held_free_at[s_nheld] = s_saves;
         s_held_free[s_nheld++] = addr;
         kept = 1;
@@ -1605,9 +1614,9 @@ static int arena_free_now(uint32_t a)
  * A held block stays allocated until no save older than its free is left (ROLLBACK_SLOTS saves
  * later); a block freed again meanwhile (the game frees it once more after a load) just moves
  * its time on. */
-#define HELD_ARENA 4096
-static struct { uint32_t addr; LONG at; int game; } s_held_arena[HELD_ARENA];   /* game: freed on the game thread */
-static unsigned s_nheld_arena;
+typedef struct { uint32_t addr; LONG at; int game; } HeldArena;    /* game: freed on the game thread */
+static HeldArena *s_held_arena;         /* grows as needed (was 4096; past that, freed at once) */
+static unsigned s_nheld_arena, s_held_arena_cap;
 
 static int arena_free(uint32_t a)
 {
@@ -1620,7 +1629,12 @@ static int arena_free(uint32_t a)
         if (s_blk[i].user == a && s_blk[i].used) { live = 1; s_blk[i].freed = 1; }
     if (live) {
         for (k = 0; k < s_nheld_arena && s_held_arena[k].addr != a; k++) {}
-        if (k == s_nheld_arena && s_nheld_arena < HELD_ARENA) s_nheld_arena++;
+        if (k == s_nheld_arena && s_nheld_arena == s_held_arena_cap) {
+            unsigned cap = s_held_arena_cap ? s_held_arena_cap * 2 : 4096;
+            HeldArena *h = (HeldArena *)realloc(s_held_arena, cap * sizeof(HeldArena));
+            if (h) { s_held_arena = h; s_held_arena_cap = cap; }
+        }
+        if (k == s_nheld_arena && s_nheld_arena < s_held_arena_cap) s_nheld_arena++;
         if (k < s_nheld_arena) {
             s_held_arena[k].addr = a;
             s_held_arena[k].at = s_saves;
@@ -1666,9 +1680,9 @@ static void release_held_arena(int all)
  * forgotten by a load that goes back before them, given back on the game thread once no save older than
  * the free is left, and all at the fight's end. */
 extern void defjam_xapi_free_now(uint32_t ptr);
-#define HELD_XAPI 4096
-static struct { uint32_t ptr; LONG at; } s_held_xapi[HELD_XAPI];
-static unsigned s_nheld_xapi;
+typedef struct { uint32_t ptr; LONG at; } HeldXapi;
+static HeldXapi *s_held_xapi;           /* grows as needed (was 4096; past that, freed at once) */
+static unsigned s_nheld_xapi, s_held_xapi_cap;
 
 int rollback_hold_xapi_free(uint32_t ptr)
 {
@@ -1676,7 +1690,13 @@ int rollback_hold_xapi_free(uint32_t ptr)
     if (!s_tracking || !ptr || GetCurrentThreadId() != s_game_tid) return 0;
     for (k = 0; k < s_nheld_xapi && s_held_xapi[k].ptr != ptr; k++) {}
     if (k == s_nheld_xapi) {
-        if (s_nheld_xapi == HELD_XAPI) return 0;
+        if (s_nheld_xapi == s_held_xapi_cap) {
+            unsigned cap = s_held_xapi_cap ? s_held_xapi_cap * 2 : 4096;
+            HeldXapi *h = (HeldXapi *)realloc(s_held_xapi, cap * sizeof(HeldXapi));
+            if (!h) return 0;
+            s_held_xapi = h;
+            s_held_xapi_cap = cap;
+        }
         s_nheld_xapi++;
     }
     s_held_xapi[k].ptr = ptr;
