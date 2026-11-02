@@ -1543,6 +1543,25 @@ void sub_00044FC0(void)
     sub_00044FC0_gen();
 }
 
+/* A string view's number (thiscall, ecx = the view {ptr, len}, one argument, ret 4): the text
+ * element updater sub_000A3E80 parses the view a text-key lookup (sub_0006EC50) gave back, and a
+ * failed lookup leaves the view {0, 0}; the C runtime's parser (sub_001E7090 -> sub_001E6EC0) then
+ * read 8 bytes below address 0. Two players' reports, the first fight after Story's rewards save and
+ * Game.Quit (F9 64c4c2, build 44) and a lockstep match (875ad7, build 28). An empty view is the
+ * number 0, as the zeroed out-parameter already says when nothing parses. */
+extern void sub_000BD440_gen(void);
+void sub_000BD440(void)
+{
+    if (!g_ecx || !MEM32(g_ecx)) {
+        static int told;
+        if (told++ < 4) fprintf(stderr, "[TEXT] a number read from an empty text (view %08X): 0\n", g_ecx);
+        g_eax = 0;
+        g_esp += 8;                     /* ret 4 */
+        return;
+    }
+    sub_000BD440_gen();
+}
+
 extern void sub_00068BA0(void);
 extern void xbox_NoteAnchorEvent(const char *text);
 extern void defjam_unlock_all_on_funccall(const char *text);
