@@ -233,8 +233,8 @@ void ranked_search(int fighter)
 void draw_accept(ImDrawList *dl, const Frame &f, const Pad &pad, const NetQueueExt &q)
 {
     int answered = lobby_accepted();
-    rect(dl, f, 0, 0, 640, 480, IM_COL32(0, 0, 0, 150));
-    glass(dl, f, 150, 120, 340, 220, 14, IM_COL32(40, 12, 16, 255), 0.85f);
+    rect(dl, f, -200, -100, 1040, 680, IM_COL32(0, 0, 0, 215));     // the search behind it, dimmed
+    glass(dl, f, 150, 120, 340, 220, 14, IM_COL32(40, 12, 16, 255), 0.97f);
     text(dl, f, g_stencil, 28, 320, 134, CREAM, "OPPONENT FOUND", CENTER, 1.6f);
     std::string mode = std::string("RANKED ") + netranked_mode_title(q.mode >= 0 ? q.mode : R.primary) + "  -  BEST OF THREE";
     text(dl, f, g_hand, 14, 320, 172, ORANGE, mode.c_str(), CENTER, 0.9f);
@@ -640,7 +640,7 @@ bool ranked_gallery(const std::string &p)
         G.room.phase = 2;
         G.versus = sample_versus("versus-1v1");
         snprintf(G.versus.room, sizeof(G.versus.room), "Ranked");
-        G.versus.ms = G.page_ms;
+        G.versus.ms = 3000 + G.page_ms;     // settled: the cards in, the ranks on them
         ranked_sample_rank(RG.rank, 2, 1, 0, 1, NETRANK_SET_RUNNING);
     } else if (p == "ranked-results" || p == "ranked-results-placement") {
         S.page = RANKED_RESULTS;

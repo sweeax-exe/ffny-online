@@ -2604,7 +2604,7 @@ void draw_vote(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
         char votes[24];
         snprintf(votes, sizeof(votes), "%d VOTE%s", r.votes[i], r.votes[i] == 1 ? "" : "S");
         text(dl, f, g_title, 13, x + w / 2, y + 262, mine ? CREAM : GREY, votes, CENTER);
-        if (sel) selector(dl, f, x, y, w, 290);
+        if (sel && picks) selector(dl, f, x, y, w, 290);
         if (mouse_click(f, x, y, w, 290)) const_cast<Pad &>(pad).a = true;
     }
     {   // a way out while voting too: the others go back to the room's lobby (relay leaveRoom)
