@@ -3792,6 +3792,70 @@ static void guest_call(void (*fn)(void), uint32_t ecx, int nargs, const uint32_t
     g_esp = sp;                         /* whatever the callee popped */
 }
 
+/* ---- created fighters' skeletons, posed in the step -----------------------------------------------
+ *
+ * A created fighter's model (the pad's CP-Fighter object, vtable 0x298B18) has +0xABB4 bit 0 set and
+ * poses the skeleton at *(+0x9D0) through its own animation controller at +0x8B0. That controller's
+ * pose pass (sub_00097F90, a virtual method: the animation sample sub_000230A0, the world matrices
+ * sub_00024070, the attachments sub_000252A0) runs only from the render traversal, once per drawn
+ * frame, and the fight step reads the joints (+0xDC.. of the fighter record, sub_001A7610 ->
+ * sub_000445A0 -> sub_0009EC10) from whatever pose it left. So the joints a step saw depended on
+ * how many frames each PC drew and when (measured with one copy unpaced: created fighters desynced
+ * 4 of 4 matches, stock fighters 0 of 4; docs/research/created-fighter-online.md, section 7). In a
+ * lockstep fight every PC now runs that pass for each created fighter at the start of every step,
+ * so the step reads a pose made from the simulation alone. The render's own passes still run (the
+ * model is drawn from them; skipping them hid the fighters), and the measurement says they leave
+ * nothing the next step's pass does not redo. RECOMP_NETPLAY_CP_EVAL=game (tests): as the game. */
+extern void sub_00097F90(void);
+#define CP_MODEL_VTABLE 0x00298B18u
+#define CP_ALT_CONTROL  0x8B0u
+#define CP_ALT_FLAGS    0xABB4u
+static uint32_t g_cp_ctrl[4];
+static int g_cp_ctrls;
+static uint32_t g_cp_ctrl_match;
+
+static int cp_eval_in_step(void)
+{
+    static int on = -1;
+    if (on < 0) {
+        const char *e = getenv("RECOMP_NETPLAY_CP_EVAL");
+        on = !(e && !strcmp(e, "game"));
+    }
+    return on;
+}
+
+static void cp_collect(void)
+{
+    int pad;
+    g_cp_ctrls = 0;
+    for (pad = 0; pad < 4; pad++) {
+        uint32_t obj = created_fighter_model(pad);
+        if (obj && MEM32(obj) == CP_MODEL_VTABLE && (MEM32(obj + CP_ALT_FLAGS) & 1u))
+            g_cp_ctrl[g_cp_ctrls++] = obj + CP_ALT_CONTROL;
+    }
+    g_cp_ctrl_match = N.match;
+    if (g_cp_ctrls)
+        fprintf(stderr, "[NETPLAY] created fighters: %d skeleton(s) posed in the step (match %08X)\n", g_cp_ctrls, N.match);
+}
+
+/* At the start of every step of a lockstep fight: each created fighter's pose pass, once. */
+static void cp_pose_in_step(void)
+{
+    uint32_t eax = g_eax, ecx = g_ecx, edx = g_edx, ebx = g_ebx, esi = g_esi, edi = g_edi, ebp = g_ebp, esp = g_esp;
+    double fp[8];
+    int fp_top = g_fp_top, i;
+    uint16_t fp_cw = g_fp_control_word;
+    if (!N.lockstep || N.resim || !cp_eval_in_step()) return;
+    if (g_cp_ctrl_match != N.match) cp_collect();
+    if (!g_cp_ctrls) return;
+    memcpy(fp, g_fp_stack, sizeof(fp));
+    for (i = 0; i < g_cp_ctrls; i++) guest_call(sub_00097F90, g_cp_ctrl[i], 0, NULL);
+    g_eax = eax; g_ecx = ecx; g_edx = edx; g_ebx = ebx; g_esi = esi; g_edi = edi; g_ebp = ebp; g_esp = esp;
+    memcpy(g_fp_stack, fp, sizeof(fp));
+    g_fp_top = fp_top;
+    g_fp_control_word = fp_cw;
+}
+
 /* The crowd's update (vtable+8 of the crowd manager, called only indirectly by the arena), as
  * recomp_lookup_manual hands it out: in a lockstep fight it draws from the crowd's copy of the
  * global generator. */
@@ -4227,6 +4291,7 @@ void netplay_on_step(void)
     ULONGLONG waited_since, last_send, last_note;
     if (N.lockstep) versus_hold();
     created_fighter_on_step();  /* created fighters: unlinked once their looks are built */
+    cp_pose_in_step();          /* created fighters: posed once a step, on every PC alike */
     fight_input();              /* also after a fight went on offline */
     if (!N.resim) watch_pads();
     koth_check_result(0);

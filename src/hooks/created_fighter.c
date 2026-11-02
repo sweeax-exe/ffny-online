@@ -755,6 +755,14 @@ static void link_pads(int on)
     g_linked = on;
 }
 
+uint32_t created_fighter_model(int pad)
+{
+    uint32_t gs = MEM32(GS_PTR), holders;
+    if (!gs || pad < 0 || pad > 3 || g_slot_of_pad[pad] < 0) return 0;
+    holders = MEM32(gs + GS_HOLDERS);
+    return holders ? MEM32(holders + (uint32_t)pad * 0x1Cu + 8u) : 0;
+}
+
 void created_fighter_begin(void)
 {
     int k;
