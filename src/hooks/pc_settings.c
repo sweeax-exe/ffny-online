@@ -534,6 +534,78 @@ static int has_arg(const char *flag)
 #endif
 
 #if defined(_WIN32)
+/* One FFNY Online at a time in a Windows session (owner, 2026-11-02): a second start -- the
+ * launcher again, the desktop shortcut, the exe itself, another install -- shows the running one
+ * and exits. The first process holds a named mutex for its whole life; the game process the
+ * launcher starts (--launcher-child) runs under its launcher's. Test runs start several copies
+ * (the two-copy online tests): a copy may run beside another only when it is a test run whose
+ * every server address is this machine, so it can never reach the live servers. */
+static HANDLE g_single_instance;
+
+static int local_address(const char *v)
+{
+    return v && (!strncmp(v, "127.", 4) || !_strnicmp(v, "localhost", 9));
+}
+
+static int may_run_beside_another(void)
+{
+    static const char *const vars[] = { "RECOMP_NETPLAY_SERVER_EU", "RECOMP_NETPLAY_SERVER_NA",
+                                        "RECOMP_NETPLAY_SERVER_WEST", "RECOMP_ACCOUNT_SERVER" };
+    const char *settings = getenv("RECOMP_SETTINGS"), *one = getenv("RECOMP_NETPLAY_SERVER");
+    int i, test_run = (settings && !_stricmp(settings, "none")) ||
+                      (getenv("RECOMP_PAD_SCRIPT") && !getenv("RECOMP_PAD_HOST"));
+    if (!test_run) return 0;
+    for (i = 0; i < (int)(sizeof(vars) / sizeof(vars[0])); i++)
+        if (!local_address(getenv(vars[i]))) return 0;
+    return !one || local_address(one);
+}
+
+/* The running copy's window: the game's, else the launcher's. */
+static BOOL CALLBACK find_running(HWND w, LPARAM out)
+{
+    DWORD pid = 0;
+    WCHAR path[MAX_PATH * 2];
+    DWORD n = MAX_PATH * 2;
+    HANDLE proc;
+    GetWindowThreadProcessId(w, &pid);
+    if (pid == GetCurrentProcessId() || !IsWindowVisible(w) || GetWindow(w, GW_OWNER) || !GetWindowTextLengthW(w))
+        return TRUE;
+    proc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    if (!proc) return TRUE;
+    if (QueryFullProcessImageNameW(proc, 0, path, &n)) {
+        const WCHAR *name = wcsrchr(path, L'\\');
+        if (name && !_wcsicmp(name + 1, L"defjam_recomp.exe")) {
+            WCHAR cls[64];
+            *(HWND *)out = w;
+            CloseHandle(proc);
+            /* the launcher's window (the game has its own): keep looking for the game */
+            return GetClassNameW(w, cls, 64) && !wcscmp(cls, L"DefJamRecompLauncher");
+        }
+    }
+    CloseHandle(proc);
+    return TRUE;
+}
+
+static void one_instance_only(void)
+{
+    const char *cmd = GetCommandLineA();
+    HWND running = NULL;
+    if (cmd && strstr(cmd, "--launcher-child")) return;     /* the launcher holds it for us */
+    if (may_run_beside_another()) return;
+    g_single_instance = CreateMutexW(NULL, FALSE, L"Local\\FFNY-Online-running");
+    if (!g_single_instance || GetLastError() != ERROR_ALREADY_EXISTS) return;
+    fprintf(stderr, "[UI] FFNY Online is already running: showing it, this copy exits\n");
+    fflush(stderr);
+    EnumWindows(find_running, (LPARAM)&running);
+    if (running) {
+        if (IsIconic(running)) ShowWindow(running, SW_RESTORE);
+        SetForegroundWindow(running);
+    } else {
+        MessageBoxW(NULL, L"FFNY Online is already running.", L"FFNY Online", MB_OK | MB_ICONINFORMATION);
+    }
+    ExitProcess(0);
+}
+
 static WCHAR *g_start_env;                  /* the environment as the process got it */
 static WCHAR g_start_dir[MAX_PATH * 2];     /* and its working directory */
 
@@ -573,7 +645,7 @@ static void start_game_process(void)
     n = wcslen(line) + 32;
     cmd = (WCHAR *)malloc(n * sizeof(WCHAR));
     if (!cmd) return;
-    swprintf(cmd, n, L"%ls --no-launcher", line);
+    swprintf(cmd, n, L"%ls --no-launcher --launcher-child", line);
     memset(&si, 0, sizeof(si));
     si.cb = sizeof(si);
     pc_input_stop();                /* the controllers go to the game's process */
@@ -594,6 +666,8 @@ static void start_game_process(void)
     /* In the background meanwhile (tray icon, update checks); when the game closes the launcher
      * opens again, offering an update found in the meantime. */
     int update = pc_launcher_watch(pi.hProcess);
+    /* the reopened launcher takes the one-copy lock itself */
+    if (g_single_instance) { CloseHandle(g_single_instance); g_single_instance = NULL; }
     n = wcslen(line) + 32;
     cmd = (WCHAR *)malloc(n * sizeof(WCHAR));
     if (cmd) {
@@ -836,6 +910,9 @@ int pc_settings_init(void)
     else
         fprintf(stderr, "[SETTINGS] no data folder found; saves use the runtime's default location\n");
     check_started_outside_launcher(have_root);
+#if defined(_WIN32)
+    one_instance_only();        /* before the controllers and the launcher */
+#endif
 
     pc_input_start();
     run_launcher_if_wanted();
