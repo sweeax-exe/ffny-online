@@ -66,7 +66,11 @@ ordinary rooms; King of the Hill can take it over later (section 9).
   recover `START`).
 - **During the match:** every `DATA` from a player whose payload is `P_STEPS` (4), `P_HASH` (5) or
   `P_RTT` (6) goes to the watchers too, verbatim, with the player's slot. Nothing else (live pads,
-  voice, room pings, rematch flags) goes to spectators. Between matches spectators get no `DATA`.
+  room pings, rematch flags) goes to spectators.
+- **Voice (owner's decision, 2026-11-02):** a player's voice `DATA` (`P_VOICE`, 7) goes to every
+  spectator of the room in any phase, lobby and match, watching or not, like to the other players
+  (same per-source rate limit). Spectators hear, they do not talk: the game sends no voice while it
+  spectates, and the relay forwards nothing a spectator sends. The host cannot turn spectators away.
 - **Spectators never reach the players:** a spectator's `DATA` is dropped by the relay (not forwarded,
   not recorded, not counted for the silence watch), its `READY`, `SETTINGS` and lobby-phase `VOTE`
   get `ERROR 8`, its `OVER` changes nothing. So a spectator cannot inject inputs, checksums or
@@ -93,7 +97,7 @@ derives the delay from the pings as the players do.
 
 - A spectator learns nothing a player does not: the inputs, the seed and the result are shown on
   every player's screen anyway. Fighting games have no hidden information. It does not get the
-  players' voice, live pads or rematch choices.
+  players' live pads or rematch choices (it hears their voice chat, as everyone in the room does).
 - It cannot change a match (section 3: everything it sends towards the players is dropped), it
   never reports a match to the account service, never takes part in ranked pairing, never counts
   in anti-cheat reports (silence, health), and its game never sends `RESULT`, `OVER` or `P_HASH`.
@@ -146,7 +150,7 @@ derives the delay from the pings as the players do.
 A player sends about 60 `P_STEPS` a second (about 270 bytes each), a `P_HASH` a second and a few
 `P_RTT` before the fight; a spectator of a 1v1 therefore receives about 120 datagrams and 33 KB a
 second (260 kbit/s). Four spectators of every 1v1 on a relay multiply its outgoing fight traffic by
-three. Voice and live pads (the larger share of room traffic outside the fight) are not copied.
+three. Live pads are not copied; voice is (about 8 KB/s per talking player, only while they talk).
 If it becomes a cost: thin the copies (every second `P_STEPS` still overlaps by four steps), or
 let the relay forward only the newest entry per step (it would parse `P_STEPS`, as the recorder
 already does).
@@ -178,7 +182,7 @@ fight, so v2 needs the relay's replay feed and the fast-forward, not a new input
   the hill's phase 2 (the hill's own results and calls need care).
 - A match of four human players: the spectator's own pad sits on the fourth player's port outside
   the fight (the toolkit maps the local pad to a port 0..3); during the fight it has no effect.
-- Ranked rooms; spectators in the room list (`ROOMS` shows players only); voice for spectators.
+- Ranked rooms; spectators in the room list (`ROOMS` shows players only); talking spectators.
 - Leaving mid-fight in one press (START stops watching, then Quit in the pause menu).
 
 ## 10. Decisions for the owner
@@ -191,4 +195,4 @@ fight, so v2 needs the relay's replay feed and the fast-forward, not a new input
 3. **Ranked and King of the Hill:** v1 refuses both.
 4. **Visibility:** players see "WATCHING: names" in the room. Should the room list show a watcher
    count, and should players be able to turn spectators away?
-5. **Voice:** spectators hear nothing in v1.
+5. **Voice:** decided 2026-11-02: spectators hear the room's voice chat and never talk.
