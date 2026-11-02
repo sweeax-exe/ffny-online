@@ -605,6 +605,19 @@ h1, h2, h3 {
 }
 .tourney-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .tourney-region { color: var(--faint); font-size: 13px; font-weight: 600; }
+.tourney-tags { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.tourney-sgg {
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 9px 4px;
+  border-radius: 999px;
+  white-space: nowrap;
+  font: 700 11px/1 var(--body);
+  letter-spacing: 0.08em;
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.24);
+}
 .tourney h3 { font-size: 27px; margin: 8px 0 2px; overflow-wrap: anywhere; }
 .tourney-when { margin: 0; color: var(--gold); font-weight: 700; }
 .tourney-meta { margin: 0; color: var(--muted); font-size: 14.5px; }
