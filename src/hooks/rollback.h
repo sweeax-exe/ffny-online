@@ -19,6 +19,12 @@ extern "C" {
 #endif
 
 #define ROLLBACK_SLOTS 16
+/* How many saves (one per game update, and one per update run again) a load may go back, and so how long
+ * arena and XAPI frees are held: the slots are per fight step, and with several updates to a step (slow
+ * motion, a move that stops the steps) a slot 9 steps back was older than the 18 saves the frees were held
+ * (a load then brought back pointers to blocks already given out again); and loads more than 64 updates
+ * back were refused, leaving a wrong prediction uncorrected. */
+#define ROLLBACK_HOLD_SAVES 240
 
 /* RECOMP_ROLLBACK=on: rollback is used (build 17 ships it off). */
 int rollback_enabled(void);

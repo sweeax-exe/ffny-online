@@ -4718,7 +4718,7 @@ static void rollback_to(uint32_t f)
     double ms;
     unsigned loads_before;
     if (!N.snap[slot].valid || N.snap[slot].step != f || N.updates < N.snap[slot].update ||
-        N.updates - N.snap[slot].update > 4 * ROLLBACK_SLOTS) {
+        N.updates - N.snap[slot].update > ROLLBACK_HOLD_SAVES) {
         if (N.rb_failed++ < 5)
             fprintf(stderr, "[ROLLBACK] no save state for step %u (now %u): this match may go out of sync\n", f, N.step);
         N.final_step = f;
@@ -4732,7 +4732,13 @@ static void rollback_to(uint32_t f)
     g_last_rb_from = N.step;
     rollback_crash_cb = rollback_crash_state;
     loads_before = rollback_dynamic_loads();
-    rollback_load(slot);
+    if (rollback_load(slot)) {      /* not loaded (too old for the held frees): as with no save */
+        if (N.rb_failed++ < 5)
+            fprintf(stderr, "[ROLLBACK] the save for step %u could not be loaded (now %u): this match may go out of sync\n",
+                    f, N.step);
+        N.final_step = f;
+        return;
+    }
     rollback_check_tables("right after a load");
     N.step = f - 1;
     N.updates = N.snap[slot].update;
@@ -4747,7 +4753,7 @@ static void rollback_to(uint32_t f)
     for (j = 0; j < n; j++) {
         /* not the save gone back to: an update without a fight step at the start of the re-run would
          * save it again, one update later (equivalent, but every later load of it then starts there) */
-        if (j && N.step + 1 != f) snap_save();
+        if (j && N.step + 1 != f && !s_soak_wrong) snap_save();     /* tests: the wrong pass keeps none */
         guest_call(sub_000DD930, input, 1, &dt);
         guest_call(sub_00077040, machine, 1, &dt);
         if (g_eax & 0xFFu) {
@@ -4848,10 +4854,14 @@ void netplay_on_update(void)
                 wrong = getenv("RECOMP_ROLLBACK_SOAK_WRONG") != NULL;
                 twice = wrong || getenv("RECOMP_ROLLBACK_SOAK_TWICE") != NULL;
             }
+            /* the step gone back to, the same for every pass: a pass on wrong buttons can end at another
+             * step (a move that stops the fight steps for a while), and the next pass must still go back
+             * to this one to be compared (2026-11-02: the carrier report showed two different saves) */
+            uint32_t f0 = N.step + 1 - (uint32_t)d;
             for (k = 0; k < d; k++) before[k] = defjam_test_step_hash(t - d + k);
             if (rollback_soak_diff_on() && !twice) rollback_soak_before();
             if (wrong && rollback_soak_diff_on()) rollback_soak_phase(1);
-            rollback_to(N.step + 1 - (uint32_t)d);
+            rollback_to(f0);
             rollback_soak_phase(0);
             if (rollback_soak_diff_on() && !twice) rollback_soak_after(d, t, 0);
             if (twice) {
@@ -4864,11 +4874,11 @@ void netplay_on_update(void)
                 if (rollback_soak_diff_on()) rollback_soak_before();
                 if (wrong) {    /* what a wrong prediction leaves behind that the load does not take back */
                     s_soak_wrong = N.step + 1 - (uint32_t)d;
-                    rollback_to(N.step + 1 - (uint32_t)d);
+                    rollback_to(f0);
                     s_soak_wrong = 0;
                 }
                 if (wrong && rollback_soak_diff_on()) rollback_soak_phase(3);
-                rollback_to(N.step + 1 - (uint32_t)d);
+                rollback_to(f0);
                 rollback_soak_phase(0);
                 {
                     int differ_here = 0;
