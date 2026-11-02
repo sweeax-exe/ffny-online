@@ -63,6 +63,19 @@ Modes offered online: One on One, 3-Way, Free for All (more follow once tested o
 fight's first-time help cards (BLAZIN', weapon, KO) are skipped in online matches: they depend on
 each player's save and would pause only one of the games.
 
+## Watching a match (spectator mode)
+
+In **FIND A ROOM**, RB (**WATCH**) on a room, or RB on the code screen, watches that room instead of
+joining it (relays that take spectators; not King of the Hill or ranked rooms). The room shows
+SPECTATING and the players' cards; the players see "WATCHING: <names>". Every match that starts while
+the spectator is there is run on its PC from the players' inputs (no local fighter) and shown with a
+"SPECTATING" notice; afterwards its game goes through the summary by itself and is back in the room
+for the next match. START during the fight stops watching (then Quit in the pause menu); B leaves the
+room. A match already running is watched from the next one. Design and limits:
+`docs/research/spectator-mode.md`. Tests: `RECOMP_NETPLAY=spectate` (watch the first listed room, or
+`RECOMP_NETPLAY_SPECTATE=<code>`), `RECOMP_TEST_READY_SPECTATORS=<n>` on the players (ready only while
+n watch), `dj.py scenario online --spectators 1`.
+
 ## Playing a friend
 
 Create a room that is not listed ("By code only") and tell your friend the code shown in the room;

@@ -995,6 +995,8 @@ int lobby_queue(int *waited, int *searching, char *why, int size)
     return G.queue;
 }
 int lobby_caps() { return gallery_on() ? NETPLAY_CAP_KOTH | NETPLAY_CAP_YIELD : netplay_lobby_caps(); }
+// spectator mode: the relay takes spectators (docs/research/spectator-mode.md)
+bool can_watch() { int c = lobby_caps(); return c > 0 && (c & NETPLAY_CAP_SPECTATE); }
 enum AccountState acc_state() { return gallery_on() ? G.account : account_state(); }
 bool stats_busy() { return gallery_on() ? false : account_stats_busy() != 0; }
 bool stats_text(char *out, int size)
@@ -2035,6 +2037,17 @@ void draw_rooms(ImDrawList *dl, const Frame &f, const Pad &pad)
         image_fit(dl, f, tex(mode_logo(r.mode)), 383, 150, 160, 34);
         door_text(dl, f, nullptr, r.name, mode_name(r.mode), players);
     }
+    if (pad.rb && n && can_watch()) {     // spectator mode: watch the chosen room's matches
+        const NetServerRoom &e = list[S.rooms_sel];
+        const NetRoomInfo &r = e.room;
+        if (NETPLAY_IS_KOTH(r.mode)) say("King of the Hill rooms are watched from inside the hill.");
+        else if (e.server >= 0 && e.server != here) say(std::string("Watching works on this server's rooms for now: ") +
+                                                         "switch to " + sv[e.server].name + " to watch this one.", 6000);
+        else if (!gallery_on()) {
+            netplay_lobby_spectate(r.code);
+            say(r.phase == 2 ? "Watching... a match is on: you watch from the next one." : "Watching...");
+        }
+    }
     if (pad.a && n) {
         const NetServerRoom &e = list[S.rooms_sel];
         const NetRoomInfo &r = e.room;
@@ -2081,6 +2094,7 @@ void draw_code(ImDrawList *dl, const Frame &f, const Pad &pad)
         if (mouse_click(f, x, y, 40, 56)) S.code_pos = i;
     }
     if (pad.a) { netplay_lobby_join(S.code); say(std::string("Joining ") + S.code + "..."); S.page = HUB; }
+    if (pad.rb && can_watch()) { netplay_lobby_spectate(S.code); say(std::string("Watching ") + S.code + "..."); S.page = HUB; }
     if (pad.b) S.page = ROOMS;
 }
 
@@ -2998,9 +3012,15 @@ void draw_room(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
     for (int i = 0; i < r.player_count; i++) if (r.players[i].slot == r.you) me = &r.players[i];
     bool host = r.you == r.host;
     int fighter = saved_fighter();
+    bool watcher = r.you == NETPLAY_SLOT_SPECTATOR;     // spectator mode: this PC only watches
     if (S.room_version != r.version) S.room_version = r.version;
 
-    if (r.phase == 1) { draw_vote(dl, f, pad, r); return; }
+    if (r.phase == 1) {
+        draw_vote(dl, f, watcher ? Pad() : pad, r);
+        if (watcher && pad.b) { netplay_lobby_leave(); S.page = HUB; }
+        return;
+    }
+    if (watcher) host = false;
 
     page_title(dl, f, r.settings.name);
     image_fit(dl, f, tex(mode_logo(r.settings.mode)), 360, 22, 220, 30);
@@ -3105,6 +3125,23 @@ void draw_room(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
             rect(dl, f, x + 14, y + 240, w - 28, 22, with_alpha(RED, 0.9f), 5);
             text(dl, f, g_title, 15, x + w / 2, y + 242, WHITE, "READY", CENTER, 0.8f);
         }
+    }
+    // who watches (spectator mode), on the hints' line at the right
+    if (r.spectator_count > 0) {
+        std::string line = "WATCHING:";
+        for (int i = 0; i < r.spectator_count; i++) line += std::string(i ? ", " : " ") + r.spectators[i];
+        float size = fit_size(f, g_title, 11, line.c_str(), 250);
+        text(dl, f, g_title, size, 590, 396, GREY, line.c_str(), RIGHT, 0.6f);
+    }
+    if (watcher) {      // a spectator: the players' cards, a banner, and only LEAVE
+        rect(dl, f, 48, 61, text_width(f, g_title, 11, "SPECTATING") + 14, 18, IM_COL32(20, 70, 150, 220), 5);
+        text(dl, f, g_title, 11, 55, 63, WHITE, "SPECTATING", LEFT, 0.8f);
+        text(dl, f, g_hand, 15, 320, team ? 374 : 366, ORANGE,
+             r.phase == 2 ? "A match is on: you watch from the next one." : "You watch: the match plays here when it starts.",
+             CENTER, 0.8f);
+        hint(dl, f, 54, 392, "b", "LEAVE ROOM");
+        if (pad.b) { netplay_lobby_leave(); S.page = HUB; say("You stopped watching the room."); }
+        return;
     }
     // hints
     bool ready = me && me->ready;
@@ -3459,6 +3496,10 @@ void versus_page(ImDrawList *dl, ImVec2 display, const NetVersus &v)
         text(dl, f, g_stencil, 30, 320, 20, CREAM, upper(mode_name(v.type)).c_str(), CENTER, 1.6f);
     }
     if (v.room[0]) text(dl, f, g_hand, 15, 44, 26, ORANGE, v.room, LEFT, 0.9f, 150);
+    if (v.you < 0) {    // spectator mode: this PC watches the match
+        rect(dl, f, 44, 46, text_width(f, g_title, 11, "SPECTATING") + 14, 18, IM_COL32(20, 70, 150, 220), 5);
+        text(dl, f, g_title, 11, 51, 48, WHITE, "SPECTATING", LEFT, 0.8f);
+    }
     {
         NetServerInfo sv[NETSERVER_COUNT];
         int cur = connected_server(), ms = gallery_on() ? (cur >= 0 ? G.servers[cur].ping_ms : -1) : netplay_rtt();
@@ -4249,6 +4290,7 @@ bool draw(ImVec2 display)
         draw_code(dl, f, pad);
         float hx = 54;
         hx += hint(dl, f, hx, 392, "a", "JOIN");
+        if (can_watch()) hx += hint(dl, f, hx, 392, "rb", "WATCH");
         hint(dl, f, hx, 392, "b", "BACK");
     } else if (room.in_room) {
         if (S.page == RANKED) S.page = HUB;     // matched: leaving the room comes back to the menu
@@ -4257,6 +4299,7 @@ bool draw(ImVec2 display)
         draw_rooms(dl, f, pad);
         float hx = 54;
         hx += hint(dl, f, hx, 420, "a", "JOIN");
+        if (can_watch()) hx += hint(dl, f, hx, 420, "rb", "WATCH");
         hx += hint(dl, f, hx, 420, "x", "REFRESH");
         hx += hint(dl, f, hx, 420, "y", "JOIN BY CODE");
         hint(dl, f, hx, 420, "b", "BACK");

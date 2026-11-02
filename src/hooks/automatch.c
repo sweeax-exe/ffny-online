@@ -351,6 +351,7 @@ int automatch_hold_funccall(const char *text)
         }
     }
     created_fighter_before_funccall(text);      /* unlinks created fighters before the reward step */
+    netplay_spectator_funccall(text);           /* spectator mode: the summary goes by by itself */
     if (!strcmp(text, "Game.Rematch()")) return netplay_rematch_request();
     if (g_armed || (!netplay_match_locked() && !g_running)) return 0;
     for (i = 0; i < sizeof(setup) / sizeof(setup[0]); i++)

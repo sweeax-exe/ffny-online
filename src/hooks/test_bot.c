@@ -475,6 +475,7 @@ int defjam_test_bot_input(uint32_t actor, int slot, long long step)
     /* Only while the fight runs: the fighters still read their pads under the winner's scene and
      * the results, and an entry cleared there took the menu's presses away (online, 2026-10-25). */
     if (MEM32(G_PHASE) != 1u) return 0;
+    if (netplay_spectating()) return 0;     /* a spectator drives no fighter */
     local = netplay_local_slot();
     if (local >= 0) {
         if (slot != local) return 0;
