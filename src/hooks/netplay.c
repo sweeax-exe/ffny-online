@@ -354,6 +354,8 @@ static struct {
     uint32_t used_tag[MAXP][RING];      /* step + 1 */
     uint8_t used_pred[MAXP][RING];      /* 1: a prediction */
     uint8_t used_mixed[MAXP][RING];     /* 1: the step read two different predictions (netplay_on_pad_read) */
+    uint8_t step_runs[RING];            /* tests (RECOMP_NETPLAY_FINALLOG): times the step started, its pad reads */
+    uint8_t step_reads[RING];
     uint32_t final_step;                /* every step up to this one ran on the real entries */
     uint32_t updates;                   /* game updates since the match's reference copy */
     uint32_t hash_at[RING], hash_tag[RING], hash_sent;
@@ -4345,6 +4347,8 @@ void netplay_on_step(void)
             N.hash_gens[k][j] = g;
         }
     }
+    N.step_runs[k] = (uint8_t)(N.hash_tag[k] == s + 1 ? N.step_runs[k] + 1 : 1);
+    N.step_reads[k] = 0;
     N.hash_at[k] = fighter_hash(N.hash_parts[k], N.hash_fields[k], N.hash_split[k]);   /* the state as this step starts */
     {   /* the x87 control word the step starts with (its precision bits round every result): a
          * change is logged, at most 12 a match, to compare the PCs of a desynced match */
@@ -4552,6 +4556,7 @@ void netplay_on_pad_read(uint32_t actor)
                     break;
                 }
         }
+        if ((int)slot != N.pos) N.step_reads[k]++;
         if ((int)slot != N.pos && !N.watching) {
             /* A step can read its pads more than once: updates that run no fight step (slow motion, moves
              * that stop the steps) read the entries of the step still current. If one of those reads ran
@@ -4866,6 +4871,20 @@ void netplay_on_update(void)
         if (wrong) { f = t; break; }
         if (!all) break;
         N.final_step = t;
+        {   /* RECOMP_NETPLAY_FINALLOG=1 (tests): each step as it becomes final, with the fields its checksum covers
+             * (as its last run started it), to find the first step two PCs part at by diffing their logs */
+            static int finallog = -1;
+            if (finallog < 0) finallog = getenv("RECOMP_NETPLAY_FINALLOG") != NULL;
+            if (finallog && N.hash_tag[k] == t + 1) {
+                char line[300];
+                int n = snprintf(line, sizeof(line), "[FINAL] %08X %u runs %u reads %u pred %u%u |", N.match, t, N.step_runs[k],
+                                 N.step_reads[k], N.used_pred[0][k], N.used_pred[1][k]), sl, fi;
+                for (sl = 0; sl < 2; sl++)
+                    for (fi = 0; fi < NETCHECK_FIELDS; fi++)
+                        n += snprintf(line + n, sizeof(line) - (size_t)n, " %08X", N.hash_fields[k][sl][fi]);
+                fprintf(stderr, "%s\n", line);
+            }
+        }
     }
     LeaveCriticalSection(&g_cs);
     if (f) rollback_to(f);
