@@ -103,21 +103,31 @@ if ($Venues) { $relayArgs += @('-test-venues', $Venues) }
 $env:HARNESS_SUMMARY_PRESSES = $SummaryPresses
 $env:HARNESS_FIGHT_SECS = "$FightSecs"
 # The local relay is built when a Go source is newer than it (an Oct 28 relay once tested Nov 1 rooms).
-$relayExe = Join-Path $repo 'netplay\relay\dist\relay.exe'
-$relaySrc = Get-ChildItem (Join-Path $repo 'netplay\relay') -Recurse -Include *.go, go.mod, go.sum |
+# The relay is in the private server repository, cloned as server\ (a worktree uses the main
+# checkout's), or where FFNY_SERVER_DIR points.
+$relayDir = $null
+$serverRoots = @()
+if ($env:FFNY_SERVER_DIR) { $serverRoots += $env:FFNY_SERVER_DIR }
+$serverRoots += (Join-Path $repo 'server')
+$common = git -C $repo rev-parse --path-format=absolute --git-common-dir 2>$null
+if ($common) { $serverRoots += (Join-Path (Split-Path $common -Parent) 'server') }
+foreach ($r in $serverRoots) { if (Test-Path (Join-Path $r 'relay\go.mod')) { $relayDir = Join-Path $r 'relay'; break } }
+if (-not $relayDir) { throw 'The relay source is missing: clone sweeax-exe/ffny-server as <checkout>\server or set FFNY_SERVER_DIR' }
+$relayExe = Join-Path $relayDir 'dist\relay.exe'
+$relaySrc = Get-ChildItem $relayDir -Recurse -Include *.go, go.mod, go.sum |
             Sort-Object LastWriteTime -Descending | Select-Object -First 1
 if (-not (Test-Path $relayExe) -or $relaySrc.LastWriteTime -gt (Get-Item $relayExe).LastWriteTime) {
-    Push-Location (Join-Path $repo 'netplay\relay'); go build -o dist\relay.exe ./cmd/relay; $built = $LASTEXITCODE; Pop-Location
+    Push-Location $relayDir; go build -o dist\relay.exe ./cmd/relay; $built = $LASTEXITCODE; Pop-Location
     if ($built) { throw 'building the local relay failed' }
 }
-$relay = Start-Process (Join-Path $repo 'netplay\relay\dist\relay.exe') -ArgumentList $relayArgs `
+$relay = Start-Process (Join-Path $relayDir 'dist\relay.exe') -ArgumentList $relayArgs `
          -PassThru -WindowStyle Hidden -RedirectStandardError "$logs\relay.err" -RedirectStandardOutput "$logs\relay.out"
 $relayNa = $null
 if ($NaRelayPort) {
     $naArgs = @('-listen', "127.0.0.1:$NaRelayPort", '-log-interval', '30s')
     if ($NaLagMs) { $naArgs += @('-test-lag', "$($NaLagMs)ms") }
     if ($Venues) { $naArgs += @('-test-venues', $Venues) }
-    $relayNa = Start-Process (Join-Path $repo 'netplay\relay\dist\relay.exe') -ArgumentList $naArgs `
+    $relayNa = Start-Process (Join-Path $relayDir 'dist\relay.exe') -ArgumentList $naArgs `
                -PassThru -WindowStyle Hidden -RedirectStandardError "$logs\relay-na.err" -RedirectStandardOutput "$logs\relay-na.out"
 }
 $relayWest = $null
@@ -125,7 +135,7 @@ if ($NaRelayPort -and $WestRelayPort) {
     $westArgs = @('-listen', "127.0.0.1:$WestRelayPort", '-log-interval', '30s')
     if ($WestLagMs) { $westArgs += @('-test-lag', "$($WestLagMs)ms") }
     if ($Venues) { $westArgs += @('-test-venues', $Venues) }
-    $relayWest = Start-Process (Join-Path $repo 'netplay\relay\dist\relay.exe') -ArgumentList $westArgs `
+    $relayWest = Start-Process (Join-Path $relayDir 'dist\relay.exe') -ArgumentList $westArgs `
                  -PassThru -WindowStyle Hidden -RedirectStandardError "$logs\relay-west.err" -RedirectStandardOutput "$logs\relay-west.out"
 }
 Start-Sleep -Seconds 1
