@@ -818,8 +818,14 @@ int created_fighter_inject(int slot, int pad, const uint8_t rec[CP_REC_LEN])
 #define G_MATCH_PHASE   0x003B8F30u     /* 0 start, 1 fighting, 2 decided, 3 finished */
 void created_fighter_on_step(void)
 {
-    int pad;
-    if (!g_linked || MEM32(G_MATCH_PHASE) < 3u) return;
+    uint32_t gs;
+    int pad, linked = 0;
+    if (MEM32(G_MATCH_PHASE) < 3u || (gs = MEM32(GS_PTR)) == 0) return;
+    /* read from memory, not g_linked: a rollback that goes back from phase 3 puts the links back
+     * (the pad bytes are saved state), and the re-run must unlink them again */
+    for (pad = 0; pad < 4; pad++)
+        if (g_slot_of_pad[pad] >= 0 && MEM8(gs + GS_PAD_PROFILE + (uint32_t)pad) != 0xFF) linked = 1;
+    if (!linked) return;
     link_pads(0);
     fprintf(stderr, "[CREATED] the match is finished: pads unlinked from the records\n");
     for (pad = 0; pad < 4; pad++)

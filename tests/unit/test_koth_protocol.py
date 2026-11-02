@@ -90,5 +90,8 @@ def test_the_results_screen_never_holds_the_next_fight():
     assert 'is waiting for you: choose No to start the next fight.' in NETPLAY_C
     assert 'p[12] = N.start_deferred ? 1 : 0;' in NETPLAY_C
     # build 40: byte 13, the agreed input delay, for spectators (docs/research/spectator-mode.md)
-    assert 'p[13] = (uint8_t)(N.delay_fixed ? N.delay : 0);' in NETPLAY_C and 'send_data(p, 14);' in NETPLAY_C
+    assert 'p[13] = (uint8_t)(N.delay_fixed ? N.delay : 0);' in NETPLAY_C
+    # build 45: byte 14, rollback also with a created fighter (rollback-plan-2026-11.md, fifth round)
+    assert 'p[14] = 1;' in NETPLAY_C and 'send_data(p, 15);' in NETPLAY_C
+    assert 'N.peer_rb_cp[from] = len >= 15 && (p[14] & 1);' in NETPLAY_C
     assert "leave the last fight's results" in NETPLAY_C

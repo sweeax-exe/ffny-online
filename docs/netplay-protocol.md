@@ -283,7 +283,9 @@ Same header and version; a relay without it drops `SPECTATE` silently.
   the player's slot. A watcher's `VOTE` while the room plays re-sends its `WATCH`. A spectator who
   enters during a match watches from the next one.
 - `P_RTT` (game payload 6) gains byte 13 since build 40: the input delay the sender's game agreed at
-  its sync point (0 before), which a spectator plays with.
+  its sync point (0 before), which a spectator plays with. Byte 14 since build 45: bit 0, the sender's
+  game rolls back a match with a created fighter too. A match with a created fighter rolls back only
+  when every player has rollback on (byte 7) and this bit; otherwise it plays in lockstep.
 
 ## Relay status (choosing a relay)
 

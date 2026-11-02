@@ -371,6 +371,7 @@ static struct {
     int rb_fought;                      /* the phase word said "fighting" in this match */
     uint32_t rb_decided_step;           /* the step at which this PC saw the match decided (0: not yet) */
     int peer_rb[MAXP];                  /* each position rolls back (its P_RTT says so) */
+    int peer_rb_cp[MAXP];               /* ... also when a created fighter plays (P_RTT byte 14, build 45) */
     int rb_match;                       /* hub: this match rolls back (every peer_rb set at the sync point) */
     struct {
         int valid;
@@ -460,8 +461,8 @@ static void toast(unsigned ms, const char *format, ...)
 
 static const char *player_name(int pos);
 static void put32(uint8_t *p, uint32_t v);
-static void send_data(const uint8_t *payload, int len);
 static void rematch_declined(void);
+static void send_data(const uint8_t *payload, int len);
 
 /* The results screen's Rematch (Game.Rematch()) starts the next match on this PC alone: with one
  * player choosing Rematch and the other No, one game loaded a fight the other never joined and stood
@@ -494,8 +495,8 @@ int netplay_rematch_request(void)
     EnterCriticalSection(&g_cs);
     after = N.match_count;
     N.rematch_want[N.pos] = after;
-    for (i = 0; i < N.players; i++) {
     InterlockedExchange(&N.rematch_go, 0);
+    for (i = 0; i < N.players; i++) {
         if (i == N.pos) continue;
         if (N.rematch_want[i] == REMATCH_NO) gone = i;
         if (N.rematch_want[i] != after) all = 0;
@@ -510,24 +511,23 @@ int netplay_rematch_request(void)
         return 1;
     }
     if (all) {
-        fprintf(stderr, "[NETPLAY] rematch: every player chose it\n");
         InterlockedExchange(&N.rematch_held, 0);
+        fprintf(stderr, "[NETPLAY] rematch: every player chose it\n");
         return 0;
     }
-    for (i = 0; i < N.players; i++)
     /* Held. Before build 45 the player had to choose Rematch once more after the others accepted,
      * while the last one to choose started at once: a first chooser who then chose No (or never
      * pressed again) left the other in a fight alone, frozen until START_LIMIT_MS gave up on it (F9
      * report 40f4d1, 2026-11-02). Now this PC starts by itself once every player has chosen it
      * (netplay_rematch_tick). */
     InterlockedExchange(&N.rematch_held, (LONG)(after + 1u));
+    for (i = 0; i < N.players; i++)
         if (i != N.pos && N.rematch_want[i] != after) break;
     fprintf(stderr, "[NETPLAY] rematch: waiting for player %d to choose it\n", i + 1);
     toast(8000, "Waiting for %s to choose Rematch...", player_name(i));
     return 1;
 }
 
-/* Spectator mode: the summary of a watched match is gone through by itself (remote_slot_state taps
 /* The results' No: the tip screen that leads back to the room comes up (Game.GetHeroFighterNumber,
  * then Game.GetTips and Game.Quit). Said at once, not when the room is reached a few seconds and a
  * press later: a player who chose Rematch first hears it before it starts, and one whose rematch
@@ -568,6 +568,7 @@ static void netplay_rematch_tick(void)
     defjam_menu_call("Game.Rematch()");
 }
 
+/* Spectator mode: the summary of a watched match is gone through by itself (remote_slot_state taps
  * A on player 1's port until the game is back in the menus). */
 void netplay_spectator_funccall(const char *text)
 {
@@ -581,10 +582,10 @@ static void rematch_declined(void)
 {
     uint8_t p[9];
     if (!N.lobby || !N.start_seed || N.koth_match || N.watching) return;
-    p[0] = P_REMATCH;
     N.rematch_want[N.pos] = REMATCH_NO;
     InterlockedExchange(&N.rematch_held, 0);
     InterlockedExchange(&N.rematch_go, 0);
+    p[0] = P_REMATCH;
     put32(p + 1, N.start_seed);
     put32(p + 5, REMATCH_NO);
     send_data(p, 9);
@@ -895,7 +896,6 @@ static DWORD remote_slot_state(int slot, XBOX_INPUT_STATE *state)
     }
     if (N.state != NETPLAY_CONNECTED || !N.lockstep || slot < 0 || slot >= N.players || slot == N.pos)
         return ERROR_DEVICE_NOT_CONNECTED;
-    EnterCriticalSection(&g_cs);
     if (N.on_results) {
         /* The summary and the results menu are each player's own. With the other players' live pads
          * on their ports, every press went to every PC's menu: one player's way through the summary
@@ -905,6 +905,7 @@ static DWORD remote_slot_state(int slot, XBOX_INPUT_STATE *state)
         state->dwPacketNumber = 1;
         return ERROR_SUCCESS;
     }
+    EnterCriticalSection(&g_cs);
     state->dwPacketNumber = N.remote_packet[slot];
     state->Gamepad = N.remote_pad[slot];
     LeaveCriticalSection(&g_cs);
@@ -1115,9 +1116,9 @@ static void spec_remote_hash(int from, const NetCheck *in)
 }
 
 static unsigned g_steps_rx[MAXP], g_steps_last[MAXP];
-static uint32_t g_steps_match[MAXP];       /* the match of each player's latest STEPS: 0 or older while it still loads */
 static ULONGLONG g_steps_at[MAXP];          /* when each player's latest STEPS arrived (GetTickCount64) */
 #define SILENT_OWN_MS 4000                 /* nobody heard this long: this PC's own connection (give-up notice) */
+static uint32_t g_steps_match[MAXP];       /* the match of each player's latest STEPS: 0 or older while it still loads */
 static void store_steps(int from, const uint8_t *p, int len)
 {
     uint32_t match, last;
@@ -1125,8 +1126,8 @@ static void store_steps(int from, const uint8_t *p, int len)
     if (len < 9 || from < 0 || from >= MAXP) return;
     match = get32(p); last = get32(p + 4); count = p[8];
     g_steps_rx[from]++;
-    g_steps_match[from] = match;
     g_steps_at[from] = GetTickCount64();
+    g_steps_match[from] = match;
     g_steps_last[from] = last;
     if (len < 9 + count * ENTRY) return;
     EnterCriticalSection(&g_cs);
@@ -1260,7 +1261,7 @@ static void make_data_print(void)
 /* Hub: this PC's ping for the current START, so every PC derives the same input delay. */
 static void send_rtt(void)
 {
-    uint8_t p[14];
+    uint8_t p[15];
     int rtt;
     if (N.pos < 0 || N.watching) return;    /* a spectator: nothing of the lockstep goes out */
     rtt = N.peer_rtt[N.pos] < 0 ? 0 : N.peer_rtt[N.pos];
@@ -1272,20 +1273,34 @@ static void send_rtt(void)
     put32(p + 8, g_data_print);         /* builds before 23 send 8 bytes */
     p[12] = N.start_deferred ? 1 : 0;   /* builds before 34 send 12: 1, still on the last fight's results */
     p[13] = (uint8_t)(N.delay_fixed ? N.delay : 0);    /* builds before 40 send 13: the agreed delay, for spectators */
-    send_data(p, 14);
+    p[14] = 1;                          /* builds before 45 send 14: no rollback with a created fighter */
+    send_data(p, 15);
     N.last_rtt_sent = GetTickCount64();
 }
 
 /* The delay every PC derives from the same pings: the slowest path between two players goes
  * through the relay, about half of each one's round trip, plus a step of margin. */
-/* A match with a created fighter (its START names a record) plays in lockstep: a rollback at
- * step 4 of a created-fighter match crashed in sub_0008BE60 (the created fighters' runtime-built
- * looks are not in what a rollback restores; 2026-10-28). Every PC knows it from the START. */
+/* A match with a created fighter (its START names a record). Before build 45 such a match played
+ * in lockstep: a rollback at step 4 of a created-fighter match crashed in sub_0008BE60 (2026-10-28).
+ * Build 45 rolls them back too (the pose pass also runs in re-runs, rollback-plan-2026-11.md, fifth
+ * round); with a player on an older build (no P_RTT byte 14) the match still plays in lockstep, as
+ * that PC decides. Every PC knows it from the START. */
 static int match_has_created(void)
 {
     int k;
     for (k = 0; k < ROOMSLOTS; k++) if (N.cp_start_crc[k]) return 1;
     return 0;
+}
+
+/* a created fighter plays, every player has rollback on, and one of them is on a build before 45 */
+static int every_peer_rb_cp_missing(void)
+{
+    int i, missing = 0;
+    for (i = 0; i < N.players; i++) {
+        if (!N.peer_rb[i]) return 0;
+        if (!N.peer_rb_cp[i]) missing = 1;
+    }
+    return missing;
 }
 
 static int every_player_rolls_back(void)
@@ -1299,8 +1314,9 @@ static int every_player_rolls_back(void)
         if (koth < 0) koth = getenv("RECOMP_ROLLBACK_KOTH") && *getenv("RECOMP_ROLLBACK_KOTH") == '1';
         if (N.koth_match && !koth) return 0;
     }
-    if (match_has_created()) return 0;
     for (i = 0; i < N.players; i++) if (!N.peer_rb[i]) return 0;
+    if (match_has_created())
+        for (i = 0; i < N.players; i++) if (!N.peer_rb_cp[i]) return 0;
     return 1;
 }
 
@@ -1363,6 +1379,7 @@ static void on_data(int from, const uint8_t *p, int len)
             int had = N.peer_rtt[from];
             N.peer_rtt[from] = p[5] | (p[6] << 8);
             N.peer_rb[from] = len >= 8 && p[7] == 1;
+            N.peer_rb_cp[from] = len >= 15 && (p[14] & 1);
             if (len >= 12 && g_data_print && get32(p + 8) && get32(p + 8) != g_data_print) {
                 static uint32_t warned_seed[MAXP];
                 if (warned_seed[from] != N.start_seed) {
@@ -1402,6 +1419,7 @@ static void on_data(int from, const uint8_t *p, int len)
             EnterCriticalSection(&g_cs);
             N.rematch_want[from] = after;
             mine = N.rematch_want[N.pos] == after;
+            for (i = 0; i < N.players; i++) if (N.rematch_want[i] != after) all = 0;
             LeaveCriticalSection(&g_cs);
             fprintf(stderr, "[NETPLAY] rematch: player %d %s\n", from + 1,
                     after == REMATCH_NO ? "went back to the room" : "chose Rematch");
@@ -1426,7 +1444,6 @@ static void on_data(int from, const uint8_t *p, int len)
             EnterCriticalSection(&g_cs);
             spec_remote_hash(from, &in);
             LeaveCriticalSection(&g_cs);
-            for (i = 0; i < N.players; i++) if (N.rematch_want[i] != after) all = 0;
         } else if (netcheck_unpack(p, len, &in)) {
             EnterCriticalSection(&g_cs);
             memmove(&N.remote_hash[1], &N.remote_hash[0], sizeof(N.remote_hash[0]) * 15);
@@ -1988,6 +2005,7 @@ static void on_start_as(const uint8_t *b, int len, int watching)
     }
     EnterCriticalSection(&g_cs);
     memset(N.rematch_want, 0, sizeof(N.rematch_want));
+    InterlockedExchange(&N.on_results, 0);
     N.start_seed = seed;
     N.session = seed;
     N.players = count;
@@ -1997,15 +2015,15 @@ static void on_start_as(const uint8_t *b, int len, int watching)
     N.spec_start_down = 1;          /* a START held from before does not stop the watching */
     N.delay = LOBBY_DELAY;
     N.delay_fixed = 0;
-    for (i = 0; i < MAXP; i++) N.peer_rtt[i] = -1, N.peer_rb[i] = 0, N.peer_results[i] = N.peer_on_results[i] = 0;
+    for (i = 0; i < MAXP; i++) N.peer_rtt[i] = -1, N.peer_rb[i] = N.peer_rb_cp[i] = 0, N.peer_results[i] = N.peer_on_results[i] = 0;
     for (i = 0; i < MAXP; i++) N.peer_delay[i] = 0;
     spec_reset();
     /* This PC rolls back only when its player has the beta on and the relay allows it: the relay's
      * switch turns the beta off for everyone without a new build (2026-10-26, after rollback
      * crashes). Sent in P_RTT, so every PC of the match decides from the same flags. */
     if (pos >= 0) N.peer_rb[pos] = rollback_wanted() && N.relay_caps > 0 && (N.relay_caps & CAPS_ROLLBACK);
+    if (pos >= 0) N.peer_rb_cp[pos] = 1;
     if (pos >= 0 && rollback_wanted() && !N.peer_rb[pos])
-    InterlockedExchange(&N.on_results, 0);
         fprintf(stderr, "[NETPLAY] rollback is switched off on the server: this match plays in lockstep\n");
     N.rb_match = 0;                         /* decided at the sync point */
     if (pos >= 0) {   /* this PC's ping as of now, with the worst of the last few as the jitter margin */
@@ -3188,8 +3206,9 @@ void netplay_sync_point(void)
             fprintf(stderr, "[NETPLAY] rollback on for this match: every player has it on\n");
         } else if (N.koth_match) {
             fprintf(stderr, "[NETPLAY] rollback off for this match: King of the Hill fights play in lockstep\n");
-        } else if (match_has_created()) {
-            fprintf(stderr, "[NETPLAY] rollback off for this match: a created fighter plays; lockstep\n");
+        } else if (match_has_created() && every_peer_rb_cp_missing()) {
+            fprintf(stderr, "[NETPLAY] rollback off for this match: a created fighter plays and a player's build "
+                    "does not roll back with them; lockstep\n");
         } else {
             for (i = 0; i < N.players && i < MAXP; i++) {
                 char who[40];
@@ -3774,8 +3793,13 @@ static void rbm_reset(void)
     memset(&N.rbm, 0, sizeof(N.rbm));
 }
 
+static int g_cp_stale = 1;     /* created fighters' controllers: collect them again at the next step */
+static unsigned g_ndynvb;       /* EAGL draw commands whose dynamic vertex buffer grew in this fight (below) */
+
 static void soak_match_start(void)
 {
+    g_cp_stale = 1;
+    g_ndynvb = 0;
     rbm_reset();
     N.step = 0;
     N.final_step = N.hash_sent = N.updates = 0;
@@ -3788,6 +3812,8 @@ static void soak_match_start(void)
 void netplay_on_match_start(void)
 {
     if (!N.lockstep) { if (soak_depth()) soak_match_start(); return; }
+    g_cp_stale = 1;
+    g_ndynvb = 0;
     rbm_reset();        /* the last match's line, if it never said "off for the rest" (B3, G2) */
     EnterCriticalSection(&g_cs);
     N.match_count++;
@@ -3802,6 +3828,7 @@ void netplay_on_match_start(void)
                  (unsigned)N.match_count);
     }
     N.reported = N.fighting_seen = N.start_reported = 0;
+    InterlockedExchange(&N.on_results, 0);      /* a rematch's fight: the results are behind */
     disarm_crash_report();
     memset(N.latest_local, 0, sizeof(N.latest_local));
     N.desync = 0;
@@ -3828,7 +3855,6 @@ void netplay_on_match_start(void)
         ac_match_begin();
         report_event("start", 0, 0, 0);
         arm_crash_report();
-    InterlockedExchange(&N.on_results, 0);      /* a rematch's fight: the results are behind */
     }
     log_contiguous("at the match start");
 }
@@ -3940,19 +3966,23 @@ static void cp_collect(void)
             g_cp_ctrl[g_cp_ctrls++] = obj + CP_ALT_CONTROL;
     }
     g_cp_ctrl_match = N.match;
+    g_cp_stale = 0;
     if (g_cp_ctrls)
         fprintf(stderr, "[NETPLAY] created fighters: %d skeleton(s) posed in the step (match %08X)\n", g_cp_ctrls, N.match);
 }
 
-/* At the start of every step of a lockstep fight: each created fighter's pose pass, once. */
+/* At the start of every step of a lockstep fight: each created fighter's pose pass, once. Also in
+ * the steps a rollback runs again (and in the offline rollback soak): nothing is drawn there, so
+ * without it a re-run's steps read the pose the load put back, or the one the step before left,
+ * instead of the one the first run read (rollback-plan-2026-11.md, fifth round). */
 static void cp_pose_in_step(void)
 {
     uint32_t eax = g_eax, ecx = g_ecx, edx = g_edx, ebx = g_ebx, esi = g_esi, edi = g_edi, ebp = g_ebp, esp = g_esp;
     double fp[8];
     int fp_top = g_fp_top, i;
     uint16_t fp_cw = g_fp_control_word;
-    if (!N.lockstep || N.resim || !cp_eval_in_step()) return;
-    if (g_cp_ctrl_match != N.match) cp_collect();
+    if (!(N.lockstep || (soak_depth() && N.rb_on)) || !cp_eval_in_step()) return;
+    if (g_cp_stale || g_cp_ctrl_match != N.match) cp_collect();
     if (!g_cp_ctrls) return;
     memcpy(fp, g_fp_stack, sizeof(fp));
     for (i = 0; i < g_cp_ctrls; i++) guest_call(sub_00097F90, g_cp_ctrl[i], 0, NULL);
@@ -4633,6 +4663,19 @@ void netplay_on_step(void)
              * mid-fight ten seconds there froze the winner's scene and then said the fight would not
              * count, after it had (Farouk's F9 report 63684c, 2026-10-23). */
             int decided = N.fighting_seen && MEM32(G_MATCH_PHASE) >= 2u;
+            /* A rematch that started on this PC (every player chose it) while that player went back
+             * to the room instead (its results' No, or it never started the rematch): nothing of
+             * this match will come from it. Waiting START_LIMIT_MS froze the picture for 90 s
+             * (F9 report 40f4d1, 2026-11-02). */
+            int declined = late >= 0 && late < MAXP && N.rematch_want[late] == REMATCH_NO && g_steps_match[late] != N.match;
+            if (declined) {
+                fprintf(stderr, "[NETPLAY] player %d went back to the room instead of the rematch (step %u)\n", late + 1, s);
+                InterlockedExchange(&N.lockstep, 0);
+                set_status("The other player went back to the room; this fight runs offline.");
+                toast(10000, "%s went back to the room instead of the rematch: START, then Quit, goes back too.",
+                      player_name(late));
+                break;
+            }
             if (now - waited_since > (decided ? DECIDED_LIMIT_MS :
                                       need <= (uint32_t)N.delay + 1 ? START_LIMIT_MS : STALL_LIMIT_MS)) {
                 uint32_t u;
@@ -4653,6 +4696,25 @@ void netplay_on_step(void)
                         "step %u)\n", N.match, late >= 0 ? g_steps_rx[late] : 0, late >= 0 ? g_steps_match[late] : 0,
                         late >= 0 ? g_steps_last[late] : 0);
                 InterlockedExchange(&N.lockstep, 0);
+                {   /* this PC heard nobody: its own connection dropped, not that player's */
+                    ULONGLONG rx = N.last_rx, at;
+                    uint32_t silent[MAXP], relay = rx < now ? (uint32_t)(now - rx) : 0, quiet;
+                    int i;
+                    for (i = 0; i < MAXP; i++) {
+                        at = g_steps_at[i] ? g_steps_at[i] : waited_since;   /* read once: the network thread writes it */
+                        silent[i] = at < now ? (uint32_t)(now - at) : 0;
+                    }
+                    if (netcheck_silent_cause(N.players, N.pos, late, silent, relay, SILENT_OWN_MS) == NETCHECK_OWN_LINK) {
+                        quiet = netcheck_least_silence(N.players, N.pos, silent, relay);
+                        fprintf(stderr, "[NETPLAY] this PC's connection is unstable: no data from the other players for "
+                                "%.1f s (the relay's last packet %.1f s ago); no player is named\n", quiet / 1000.0,
+                                relay / 1000.0);
+                        set_status("Your connection is unstable; continuing offline.");
+                        toast(10000, "Your connection is unstable: no data from the other players for %u s. "
+                              "The fight goes on offline. START quits.", (quiet + 500) / 1000);
+                        break;
+                    }
+                }
                 set_status("A player stopped answering during the fight; continuing offline.");
                 if (late >= 0 && N.fighting_seen && need > (uint32_t)N.delay + 60) {
                     report_left(1u << late);
@@ -4660,19 +4722,6 @@ void netplay_on_step(void)
                           player_name(late));
                 } else
                     toast(10000, "%s stopped answering: the fight goes on offline and won't count.", player_name(late));
-            /* A rematch that started on this PC (every player chose it) while that player went back
-             * to the room instead (its results' No, or it never started the rematch): nothing of
-             * this match will come from it. Waiting START_LIMIT_MS froze the picture for 90 s
-             * (F9 report 40f4d1, 2026-11-02). */
-            int declined = late >= 0 && late < MAXP && N.rematch_want[late] == REMATCH_NO && g_steps_match[late] != N.match;
-            if (declined) {
-                fprintf(stderr, "[NETPLAY] player %d went back to the room instead of the rematch (step %u)\n", late + 1, s);
-                InterlockedExchange(&N.lockstep, 0);
-                set_status("The other player went back to the room; this fight runs offline.");
-                toast(10000, "%s went back to the room instead of the rematch: START, then Quit, goes back too.",
-                      player_name(late));
-                break;
-            }
                 break;
             }
         }
@@ -4696,25 +4745,6 @@ static void soak_pad(uint32_t actor)
     uint32_t slot, base, k, i;
     if (actor < ACTORS || (actor - ACTORS) % STRIDE) return;
     slot = (actor - ACTORS) / STRIDE;
-                {   /* this PC heard nobody: its own connection dropped, not that player's */
-                    ULONGLONG rx = N.last_rx, at;
-                    uint32_t silent[MAXP], relay = rx < now ? (uint32_t)(now - rx) : 0, quiet;
-                    int i;
-                    for (i = 0; i < MAXP; i++) {
-                        at = g_steps_at[i] ? g_steps_at[i] : waited_since;   /* read once: the network thread writes it */
-                        silent[i] = at < now ? (uint32_t)(now - at) : 0;
-                    }
-                    if (netcheck_silent_cause(N.players, N.pos, late, silent, relay, SILENT_OWN_MS) == NETCHECK_OWN_LINK) {
-                        quiet = netcheck_least_silence(N.players, N.pos, silent, relay);
-                        fprintf(stderr, "[NETPLAY] this PC's connection is unstable: no data from the other players for "
-                                "%.1f s (the relay's last packet %.1f s ago); no player is named\n", quiet / 1000.0,
-                                relay / 1000.0);
-                        set_status("Your connection is unstable; continuing offline.");
-                        toast(10000, "Your connection is unstable: no data from the other players for %u s. "
-                              "The fight goes on offline. START quits.", (quiet + 500) / 1000);
-                        break;
-                    }
-                }
     if (slot >= MAXP) return;
     base = PAD_TABLE + slot * 0x20u;
     k = N.step % SOAK_PAD_RING;
@@ -4871,9 +4901,109 @@ static void weapon_update(void)
     sub_000BCC50();
 }
 
+/* EAGL's dynamic vertex buffers. A draw command of a render method (the interpreter's cursor,
+ * [0x3A597C]) that copies its vertices each frame (sub_001189B0) keeps a buffer object at +0x10
+ * (0x30 bytes: the current D3D buffer, three D3D buffers in turn, their size), its size in vertices
+ * at +0x14 and the source at +0x18. The object comes from EAGL's allocation callback (sub_00029800,
+ * [0x2E3988]) when the command first draws or needs more room, and goes back through its free
+ * callback (sub_00029840, [0x2E398C]); its D3D buffers live in the XAPI heap and contiguous memory.
+ * Drawing happens only in normal updates, never in the steps a rollback runs again, so all of this
+ * follows the device, not the fight. Left to the saves (rollback-plan-2026-11.md, fifth round): a
+ * load to before a command's first draw gave it "no buffer" again, the next frame made another
+ * object and three more D3D buffers in the heap block the load had freed again, and within a few
+ * loads the heap's free list held junk (allocations at 80F92F00, 00FA1270, 01080001) and a frame
+ * copied its vertices through it (sub_001ED010 from sub_001189B0+0x116; every created-fighter soak
+ * at step 1698, where the beaten fighter's low-health HUD first shows). In a rollback fight the
+ * objects now come from the arena, which no load touches, and after every load each command keeps
+ * the words it had before it (when the load gave it "no buffer" or one of the objects made here). */
+extern void sub_00029800(void);
+extern void sub_00029840(void);
+#define DYNVB_CMDS 256
+#define DYNVB_OBJS 8
+static struct { uint32_t cmd, obj[DYNVB_OBJS], nobj, live[3]; } g_dynvb[DYNVB_CMDS];
+static unsigned g_dynvb_fixed, g_dynvb_full;
+
+static int dynvb_draw_call(uint32_t ret)
+{
+    return N.rb_on && !N.resim && rollback_on_game_thread() && (ret == 0x00118A29u || ret == 0x00118A52u || ret == 0x00118A04u);
+}
+
+static int dynvb_find(uint32_t cmd, int add)
+{
+    unsigned k;
+    for (k = 0; k < g_ndynvb && g_dynvb[k].cmd != cmd; k++) {}
+    if (k < g_ndynvb) return (int)k;
+    if (!add) return -1;
+    if (g_ndynvb == DYNVB_CMDS) {
+        if (!g_dynvb_full++) fprintf(stderr, "[ROLLBACK] more than %d draw commands with dynamic vertex buffers\n", DYNVB_CMDS);
+        return -1;
+    }
+    g_dynvb[g_ndynvb].cmd = cmd;
+    g_dynvb[g_ndynvb].nobj = 0;
+    return (int)g_ndynvb++;
+}
+
+/* cdecl (size, flags) */
+static void eagl_alloc_hook(void)
+{
+    uint32_t ret = MEM32(g_esp), a, cmd;
+    int k;
+    if (!dynvb_draw_call(ret)) { sub_00029800(); return; }
+    cmd = MEM32(0x003A597Cu);
+    k = dynvb_find(cmd, 1);
+    a = k >= 0 ? rollback_live_alloc(MEM32(g_esp + 4u)) : 0;
+    if (!a) { sub_00029800(); return; }
+    g_dynvb[k].obj[g_dynvb[k].nobj++ % DYNVB_OBJS] = a;
+    g_eax = a;
+    g_esp += 4;                 /* ret */
+}
+
+/* cdecl (block). Any caller: the render method's own teardown at the match's end frees these too. */
+static void eagl_free_hook(void)
+{
+    if (rollback_live_free(MEM32(g_esp + 4u))) { g_esp += 4; return; }     /* an arena block (made above) */
+    sub_00029840();
+}
+
+static void dynvb_before_load(void)
+{
+    unsigned k;
+    for (k = 0; k < g_ndynvb; k++) {
+        g_dynvb[k].live[0] = MEM32(g_dynvb[k].cmd + 0x10u);
+        g_dynvb[k].live[1] = MEM32(g_dynvb[k].cmd + 0x14u);
+        g_dynvb[k].live[2] = MEM32(g_dynvb[k].cmd + 0x18u);
+    }
+}
+
+static void dynvb_after_load(void)
+{
+    unsigned k, j, n;
+    for (k = 0; k < g_ndynvb; k++) {
+        uint32_t now = MEM32(g_dynvb[k].cmd + 0x10u), was = g_dynvb[k].live[0];
+        int ours = now == 0 || now == 0xFFFFFFFFu, live = was == 0 || was == 0xFFFFFFFFu;
+        if (now == was) continue;
+        n = g_dynvb[k].nobj < DYNVB_OBJS ? g_dynvb[k].nobj : DYNVB_OBJS;
+        for (j = 0; j < n; j++) {
+            if (g_dynvb[k].obj[j] == now) ours = 1;
+            if (g_dynvb[k].obj[j] == was) live = 1;
+        }
+        /* both sides must be this command's: the load gave it "no buffer" or an object made here, and
+         * before the load it held one (not a block given back since, filled with 0D0D0D0D) */
+        if (!ours || !live) continue;
+        MEM32(g_dynvb[k].cmd + 0x10u) = g_dynvb[k].live[0];
+        MEM32(g_dynvb[k].cmd + 0x14u) = g_dynvb[k].live[1];
+        MEM32(g_dynvb[k].cmd + 0x18u) = g_dynvb[k].live[2];
+        if (g_dynvb_fixed++ < 4)
+            fprintf(stderr, "[ROLLBACK] draw command %08X: kept its vertex buffer object %08X over the loaded %08X\n",
+                    g_dynvb[k].cmd, g_dynvb[k].live[0], now);
+    }
+}
+
 void *netplay_sound_handler(uint32_t va)
 {
     if (va == 0x000BCC50u) return (void *)weapon_update;
+    if (va == 0x00029840u) return (void *)eagl_free_hook;     /* EAGL's free callback ([0x2E398C]) */
+    if (va == 0x00029800u) return (void *)eagl_alloc_hook;    /* EAGL's allocation callback ([0x2E3988]) */
 #define SOUND_CASE(a) if (va == 0x##a##u) return (void *)snd_##a;
     SOUND_HANDLERS(SOUND_CASE)
     return NULL;
@@ -4898,6 +5028,26 @@ static void rollback_crash_state(void)
     fprintf(stderr, "[ROLLBACK] this match: %u rollbacks, deepest %u, first prediction at step %u\n", N.rbm.count,
             N.rbm.deepest, N.rbm.first_pred);
     rollback_crash_objects();   /* the registers' objects: vtable, +0xC, +0x10, their pages, made in a re-run? */
+    {   /* EAGL's render-method interpreter: the draw command (0x3A597C) and its dynamic vertex buffer
+         * (+0x10 the buffer object, +0x14 its size, +0x18 the source), a crash in sub_001189B0's copy */
+        uint32_t cmd = MEM32(0x003A597Cu), par = MEM32(0x003A5978u), heap_lo, heap_hi, k;
+        rollback_heap_range(&heap_lo, &heap_hi);
+        fprintf(stderr, "[ROLLBACK]   draw command %08X (%s), parameters %08X, [3A5984] %08X, [3A5988] %08X\n", cmd,
+                rollback_page_state(cmd), par, MEM32(0x003A5984u), MEM32(0x003A5988u));
+        if (cmd >= heap_lo && cmd < heap_hi) {
+            uint32_t vb = MEM32(cmd + 0x10u);
+            fprintf(stderr, "[ROLLBACK]     +08 %08X +0C %08X +10 %08X (%s) +14 %08X +18 %08X\n", MEM32(cmd + 8u),
+                    MEM32(cmd + 0xCu), vb, rollback_page_state(vb), MEM32(cmd + 0x14u), MEM32(cmd + 0x18u));
+            if ((vb >= heap_lo && vb < heap_hi) || (vb >= 0x00010000u && vb < 0x04000000u))
+                for (k = 0; k < 0x30u; k += 4) {
+                    uint32_t v = MEM32(vb + k);
+                    fprintf(stderr, "[ROLLBACK]       buffer +%02X = %08X (%s)%s", k, v, rollback_page_state(v),
+                            (v >= 0x00010000u && v < 0x04000000u) || (v >= heap_lo && v < heap_hi) ? "" : "\n");
+                    if ((v >= 0x00010000u && v < 0x04000000u) || (v >= heap_lo && v < heap_hi))
+                        fprintf(stderr, ": %08X %08X %08X %08X\n", MEM32(v), MEM32(v + 4u), MEM32(v + 8u), MEM32(v + 0xCu));
+                }
+        }
+    }
     {   /* EAGL's loaded objects (list head 0x3A52A8, next at +0, previous at +4: the insert at 0x10A3DD
          * stores the old head at +0 of the new one): which one is bad, and its page */
         uint32_t o = MEM32(0x003A52A8u), heap_lo, heap_hi;
@@ -4968,6 +5118,7 @@ static void rollback_to(uint32_t f)
     g_last_rb_from = N.step;
     rollback_crash_cb = rollback_crash_state;
     loads_before = rollback_dynamic_loads();
+    dynvb_before_load();
     if (rollback_load(slot)) {      /* not loaded (too old for the held frees): as with no save */
         if (N.rb_failed++ < 5)
             fprintf(stderr, "[ROLLBACK] the save for step %u could not be loaded (now %u): this match may go out of sync\n",
@@ -4975,6 +5126,7 @@ static void rollback_to(uint32_t f)
         N.final_step = f;
         return;
     }
+    dynvb_after_load();         /* EAGL's dynamic vertex buffers follow the device, not the fight */
     rollback_check_tables("right after a load");
     {   /* the steps run again record anew which entries they read (netplay_on_pad_read) */
         uint32_t t;
@@ -5043,6 +5195,7 @@ void netplay_on_update(void)
     uint32_t t, f = 0;
     int i;
     rollback_check_tables(N.resim ? "a re-run update starts" : "an update starts");
+    if (!N.resim) netplay_rematch_tick();
     intro_update();
     intro_variants();
     koth_check_result(0);       /* also between the fight's steps: an ending can stop them */
@@ -5070,7 +5223,6 @@ void netplay_on_update(void)
         memset(N.snap, 0, sizeof(N.snap));
     }
     rollback_discover(MEM32(G_MATCH_PHASE) == 1u ? 16 : 4);
-    if (!N.resim) netplay_rematch_tick();
     /* which steps ran on the real entries; the first that ran on a wrong prediction */
     EnterCriticalSection(&g_cs);
     for (t = N.final_step + 1; t <= N.step; t++) {

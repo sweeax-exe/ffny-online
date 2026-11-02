@@ -37,6 +37,9 @@ void rollback_sound_alloc(void);
 void rollback_sound_free(void);
 /* sub_00029500's first test: 1 when the block was taken from the arena (the audio code asked). */
 int rollback_route_alloc(void);
+/* Live memory (the arena) for state that follows the device, not the fight; 0 when there is none. */
+uint32_t rollback_live_alloc(uint32_t size);
+int rollback_live_free(uint32_t addr);     /* 1 when it was such a block */
 /* A dynamic load (sub_0010AC20) begins; `caller` is its return address. */
 void rollback_note_dynamic_load(uint32_t caller, uint32_t handle);
 unsigned rollback_dynamic_loads(void);      /* how many so far (a clock for slow rollbacks) */
