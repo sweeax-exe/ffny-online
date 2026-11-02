@@ -362,6 +362,24 @@ the first), and the soak now replays each step's pad words in re-runs.
   * With `20261102-073400-online` (venue 9, 12.4 minutes) that is three runs of 10+ minutes of several matches with no crash,
     hang or desync, including Terror Dome, venue 26 and rematches: the plan's step-4 bar, met once each on the current build.
 
+### Fourth round (on `remaster` 6c706b4)
+* **Desync check** (`RECOMP_NETPLAY_FINALLOG=1`, `--fast-ko 0 --bot 60`, 70+10 ms): `20261102-094114-online` (venue 9, two
+  fights, 16 249 final steps) and `20261102-094658-online` (venue 18, two fights, 53 472 final steps): ok, the two copies'
+  final steps identical. Since c4ea3af five long two-copy runs (about 57 minutes of fight) had no desync; the 10 200 / 37 440
+  kind did not come back, so its cause stays unnamed (FINALLOG is ready for the next one).
+* **Step 6, King of the Hill** (3 copies, `--matches 6`, fast KO at step 600):
+  * Lockstep, king always winning (`--ko-winner 0`, `20261102-100531-online`): **ok**, 6 fights.
+  * Rollback (test switch `RECOMP_ROLLBACK_KOTH=1` on every copy lifts the hill's exclusion), `--ko-winner alt`
+    (`20261102-101207-online`): desync in fight 2 at step 780, one copy knocked out fighter 1, the other fighter 2. A test
+    artefact: "alt" picks the winner from each copy's own match count, which differs on the hill between a copy that fought
+    and one that watched.
+  * Rollback, `--ko-winner 1` (`20261102-103402-online`): fights 1-4 and 6 ok (no desync, 155-1102 rollbacks a copy); fight 5
+    started on one copy only: the king (on a streak, "called again straight after the fight") got the START but never left
+    the match-type screen, and its opponent gave up at step 4.
+  * Lockstep, the same `--ko-winner 1` (`20261102-105039-online`): **the same stall at fight 5** (started on one copy only).
+    So the hill's stall is the room flow's (B3 G1), not rollback's; in the fights that did run, rollback on the hill had no
+    crash, hang or desync. G2 (rollback still on at the next START) was not seen: "off for the rest" came before each START.
+
 ### Next (after the third round)
 1. More two-copy long runs (the desyncs at steps 10 200 and 37 440 came once in two runs each; three later runs were clean),
    always with `RECOMP_NETPLAY_FINALLOG=1` so a desync can be traced to its first step.
