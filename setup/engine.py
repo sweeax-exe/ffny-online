@@ -1966,6 +1966,8 @@ def find_games(source, roots=None, seconds=10.0):
     for candidate in candidates:
         if time.monotonic() > deadline + 5:
             break
+        if candidate.is_dir() and (candidate.parent / 'extraction-state.json').is_file():
+            continue        # an installation's own copy (<data>\\extracted): not a dump to install from
         try:
             verdict = identify_game(candidate, source) if candidate.is_file() else \
                 identify_folder(candidate, manifest, source)
@@ -1974,10 +1976,11 @@ def find_games(source, roots=None, seconds=10.0):
         if verdict['kind'] in SAME_TITLE_KINDS or NAME_HINT.search(candidate.name):
             with contextlib.suppress(OSError):
                 verdict['modified'] = candidate.stat().st_mtime
-            verdict['name'] = candidate.name
+            verdict['name'] = candidate.name if candidate.is_file() else 'Game folder: ' + candidate.name
+            verdict['is_folder'] = candidate.is_dir()
             verdict['folder'] = str(candidate.parent)
             games.append(verdict)
-    games.sort(key=lambda g: (not g['ok'], g['kind'] not in SAME_TITLE_KINDS, -g.get('modified', 0)))
+    games.sort(key=lambda g: (not g['ok'], g['kind'] not in SAME_TITLE_KINDS, g['is_folder'], -g.get('modified', 0)))
     return games
 
 

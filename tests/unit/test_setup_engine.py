@@ -850,6 +850,12 @@ def test_find_games_lists_this_game_best_first_and_skips_unrelated_images(tmp_pa
     xdvdfs_image(games / 'mine.iso', {'default.xbe': xbe, 'audio/a': b'1', 'b': b'2'})
     xdvdfs_image(games / 'halo.iso', {'default.xbe': fake_xbe(title_id=1, name='Halo', region=7), 'audio/a': b'1'})
     (games / 'notes.txt').write_text('x')
+    # An earlier installation's own copy (<data>\extracted) is not offered as a dump.
+    copy = tmp_path / 'Games/FFNY Online/data/extracted'
+    (copy / 'audio').mkdir(parents=True)
+    for name, blob in (('default.xbe', xbe), ('audio/a', b'1'), ('b', b'2')):
+        (copy / name).write_bytes(blob)
+    (copy.parent / 'extraction-state.json').write_text('{}')
     found = engine.find_games(source, [(tmp_path / 'Games', 3)])
     assert [g['name'] for g in found] == ['mine.iso', 'Def Jam (Europe).iso']
     assert found[0]['ok'] and found[1]['kind'] == 'pal' and found[0]['folder'] == str(games)
