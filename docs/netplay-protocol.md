@@ -157,7 +157,11 @@ voting (for the countdown).
   A player leaving during the vote returns the room to phase 0 with ready cleared.
 - **phase 2, playing.** `DATA` is forwarded from the sender to **every other member** of the room
   (in a room of two: to the other player, as before). When every remaining member has sent `OVER`,
-  or after 30 minutes, the room returns to phase 0 with ready cleared.
+  or after 30 minutes, the room returns to phase 0 with ready cleared. Since build 46 also **60 s**
+  after the first `OVER` (a player who stays on the results, or whose game hangs there, held the room
+  playing and the others' `READY` was refused); a late `OVER` then changes nothing. Not in King of the
+  Hill rooms (their fights end with `RESULT`) or ranked rooms (leaving one while it plays is no
+  forfeit). Meanwhile the game shows who it waits for and offers no `READY`.
 - The host is the lowest slot present; when the host leaves, the next lowest becomes host. An empty
   room is deleted at once.
 - `QUICK` joins the public room in phase 0 with that mode (any `max`), a free slot and the most
