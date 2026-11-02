@@ -335,7 +335,18 @@ the first), and the soak now replays each step's pad words in re-runs.
   treated as a missing save.
 * After it: the seeded soak has **0** differing steps (`20261102-061819-offline`), and a **14-minute continuous**
   wrong-prediction soak with bots on both slots (`20261102-062408-offline`: 10 200 soaks of three passes, 56 100 steps compared)
-  had **0 differing steps and no crash**.
+  had **0 differing steps and no crash**. The plain soak (first pass against re-run, with the re-run audio left out) also had 0
+  of 19 242 steps otherwise (`20261102-072212-offline`), so leaving the audio update out of re-runs changes nothing the fight
+  reads.
+* **Two-copy long runs** (venue 9, `--fast-ko 0 --bot 60`, 70+10 ms):
+  * `20261102-070621-online` (d9430e0): **desync at step 10 200** of match 1 (fighter 1 position 0x44/0x4C apart by 0.001,
+    fighter 2 0x54); the copy that went on offline then never ended the fight.
+  * c4ea3af: a step can read its pads more than once (updates without a fight step); a prediction read and then the real entry
+    in one step was recorded as "real", so such a step was never run again. The record now keeps the prediction. Whether this
+    was the desync's cause is **not proven**: the case was not logged in the next run.
+  * `20261102-073400-online` (c4ea3af): **ok**, two fights of 13 200 and 31 000 steps (12.4 minutes), 740 checksums equal,
+    1324-2947 rollbacks a match, no crash, no desync. One clean run against two desyncs before (37 440 and 10 200): more runs
+    are needed before calling the desync fixed.
 
 ### Next
 1. B1 / B5 with the wrong-prediction soak: name the block behind the loader list node and the mixer's voice (the
