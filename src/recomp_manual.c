@@ -1562,6 +1562,24 @@ void sub_00064ED0(void)
     sub_00064ED0_gen();
 }
 
+/* A summary thumb control's update (thiscall, one argument, ret 4), from Battle.SetThumbCtrlID(n)
+ * (sub_0004C060: ecx = the summary's per-slot control at +0xC1C). A created fighter's slot has no
+ * control once its pad is unlinked from the record before the summary (Battle.StartUserIDThumbCtrl
+ * makes one per linked user ID), but the summary still asks for it: ecx 0, a read at 0xFFFFFFxx (F9
+ * 03ccd0, ce20af, fee4d0, 2026-11-02, and every two-copy created-vs-created run with 110 ms,
+ * logs/dj/20261102-230552-online, both copies). No control, nothing to set. */
+extern void sub_0005F440_gen(void);
+void sub_0005F440(void)
+{
+    if (!g_ecx) {
+        static int told;
+        if (told++ < 4) fprintf(stderr, "[CREATED] the summary set a thumb control a slot does not have (no user ID linked)\n");
+        g_esp += 8;                     /* ret 4 */
+        return;
+    }
+    sub_0005F440_gen();
+}
+
 extern void sub_000BD440_gen(void);
 void sub_000BD440(void)
 {
