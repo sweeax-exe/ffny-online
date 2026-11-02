@@ -313,4 +313,7 @@ def test_steam_is_started_from_the_stand_in_folder_without_the_appimage_variable
     monkeypatch.setenv('APPDIR', '/tmp/.mount_DefJam123')
     assert steam.steam_program(tmp_path) == str(tmp_path / 'steam.sh')
     env = steam.steam_environment()
+    monkeypatch.setenv('RECOMP_LAUNCHER_SCRIPT', '1:quit')
+    env = steam.steam_environment()
     assert 'APPIMAGE' not in env and 'APPDIR' not in env and env.get('HOME') == steam.os.environ.get('HOME')
+    assert not [k for k in env if k.startswith(('DEFJAM_', 'RECOMP_'))]

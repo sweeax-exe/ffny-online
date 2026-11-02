@@ -331,10 +331,12 @@ def steam_program(root):
 
 def steam_environment():
     """The environment Steam is started in: this one, less what the app's AppImage runtime set for
-    itself, which Steam would otherwise pass on to every game it starts."""
+    itself and the app's own and the game's variables, which Steam would otherwise pass on to every
+    game it starts."""
     env = dict(os.environ)
-    for key in ('APPDIR', 'APPIMAGE', 'ARGV0', 'OWD'):
-        env.pop(key, None)
+    for key in list(env):
+        if key in ('APPDIR', 'APPIMAGE', 'ARGV0', 'OWD') or key.startswith(('DEFJAM_', 'RECOMP_')):
+            env.pop(key)
     return env
 
 
@@ -351,8 +353,18 @@ def close_steam(root, running=steam_processes, timeout=90.0):
 
 
 def start_steam(root):
+    program = steam_program(root)
+    # Linux: started as a user service when systemd runs the session, so Steam does not belong to
+    # the app's process tree. A subreaper above the app (a gamescope, or Steam's own reaper when the
+    # app was started from Steam) would otherwise end Steam when the app ends.
+    systemd_run = None if IS_WINDOWS or os.environ.get('DEFJAM_STEAM_ROOT') else shutil.which('systemd-run')
+    if systemd_run and subprocess.run([systemd_run, '--user', '--quiet', '--collect', '--unit',
+                                       'defjam-steam-%d' % int(time.time()), program],
+                                      stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                      stderr=subprocess.DEVNULL).returncode == 0:
+        return
     flags = 0x00000008 | 0x00000200 if IS_WINDOWS else 0          # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
-    subprocess.Popen([steam_program(root)], cwd=str(root), creationflags=flags, close_fds=True,
+    subprocess.Popen([program], cwd=str(root), creationflags=flags, close_fds=True,
                      env=steam_environment(), start_new_session=not IS_WINDOWS,
                      stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
