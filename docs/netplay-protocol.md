@@ -211,6 +211,19 @@ relay (EU, NA, West).
   a provisional player), the host relay with the lower worse ping (≤ 120 ms, 180 after 60 s, 250 after
   120 s), the primary mode only for 45 s and then any mode both accept; never the same PC or network,
   never the last opponent again unless both waited over a minute; a mode may require rollback.
+- **The set in the room** (relay `ranked_set.go`, since ranked phase 2a): game 1's venue is drawn
+  from the starters (1, 5, 6, 11, 19) and shown as the room's one candidate for 8 s (the versus
+  screen; two `VOTE`s for it start it sooner). After each game both fighters send `RESULT` (0x22,
+  as in King of the Hill: `seed` of the game's `START`, `winner` slot or 0xFF a draw), repeated until
+  `RANKINFO` shows the game counted. Two that agree count for the set's score; two that disagree
+  count for nothing here (the account service, which rates the set from the games' reports, pauses
+  such a set). After a won game the loser picks the next venue from three drawn from the ranked
+  pool (1, 2, 5, 6, 9, 11, 13, 19; never 17, 24, 26): only the loser's `VOTE` counts (the winner's
+  is answered with `ROOM` and ignored), the vote ends when the loser votes or after 15 s (then at
+  random); after a draw both vote. Both `READY` again between games (a fighter change is allowed;
+  Classic and Draft stay stock only). At two wins, or after five games, the set is over: no game
+  starts any more, and leaving the room is no longer a forfeit (no `setover`). `RANKINFO` follows
+  every `ROOM` of the room.
 - The host cannot change a ranked room's settings (`ERROR 8`). Every `START` in a ranked room that
   still holds the two paired accounts is posted to the account service (`POST
   /internal/ranked/pairing`: key `<room>-<SEED in hex>`, the set, the mode, the relay and the START's
@@ -223,7 +236,7 @@ relay (EU, NA, West).
 | 0x2C | `ACCEPT` | client -> server | `token` 8, `answer` u8 (1 accept, 0 decline) |
 | 0x2D | `DRAFT` | server -> client | `step`, `turn`, `secs`, `game`, `venue` u8; `bans`, `struck`, `venue_bans` (u8 count + ids); `picks` 2 × u8 (0xFF none or hidden); `locked` u8 bits (relay `draft.go`; not sent yet) |
 | 0x2E | `DRAFTACT` | client -> server | `token` 8, `step` u8, `action` u8 (1 ban, 2 strike, 3 pick, 4 venue, 5 cursor), `id` u8 (not taken yet) |
-| 0x2F | `RANKINFO` | server -> client | `mode` u8, count u8, then per player `slot`, `division` (0xFF placement), `placements` left u8, `rating` u16, `set_wins` u8 (not sent yet) |
+| 0x2F | `RANKINFO` | server -> client | `mode` u8, count u8, then per player `slot` u8, `division` u8 (0..21 as the account service's divisions; 0xFF placement), `placements` left u8, `rating` u16, `set_wins` u8, `flags` u8 (bit 0 provisional); in a set's room then `game` u8 (the running or next game from 1, the last once over), `picker` u8 (the slot that picks the next venue, 0xFF both), `winner` u8 (0xFF running, the set winner's slot, 0xFE level after five games). After every `ROOM` of a ranked room (since phase 2a) |
 
 ## King of the Hill extension
 
@@ -237,7 +250,7 @@ by older relays.
 | 0x20 | `CAPS` | client -> server | `token` 8, `caps` u32 (bit 0: King of the Hill) |
 | 0x20 | `CAPS` | server -> client | `caps` u32 (what the relay supports: bit 0 King of the Hill, bit 1 rollback allowed, bit 2 `YIELD`, since build 36) |
 | 0x21 | `HILL` | server -> client | `room` 6, `phase` u8 (0 waiting, 1 calling, 2 voting, 3 fighting), `king` u8 (slot, 0xFF none), `streak` u16, `ms_left` u16, `seed` u32, `fights` u16, `last_winner` u8, `last_loser` u8, `last_how` u8 (0 none, 1 won, 2 draw, 3 loser left, 4 void), `count` u8, per player in line order: `slot` u8, `state` u8 (0 waiting, 1 called, 2 ready, 3 fighting, 4 away), `wins` u16 |
-| 0x22 | `RESULT` | client -> server | `token` 8, `seed` u32, `winner` u8 (slot, 0xFF draw); from the two fighters, repeated until `HILL.fights` changes |
+| 0x22 | `RESULT` | client -> server | `token` 8, `seed` u32, `winner` u8 (slot, 0xFF draw); from the two fighters, repeated until `HILL.fights` changes; in a ranked set's room until `RANKINFO` counts the game (see "Ranked queue") |
 | 0x23 | `WATCH` | server -> client | the body of `START`; to every member who is not fighting when the fight starts |
 | 0x26 | `YIELD` | client -> server | `token` 8; "give up my spot": the sender goes to the back of the line (a king gives up the crown, a called player is replaced by the next). `ERROR 8` while the sender votes or fights, or outside a King of the Hill room. Answered with ROOM and HILL. Relays since build 36 (`CAPS` bit 2) |
 
