@@ -193,10 +193,20 @@ def steam_root():
     return None
 
 
-def game_mode():
-    """A Steam Deck's Game Mode (or another gamescope session): Steam is the session itself there."""
-    return not IS_WINDOWS and (os.environ.get('XDG_CURRENT_DESKTOP', '').lower() == 'gamescope'
-                               or os.environ.get('SteamGamepadUI') == '1')
+def game_mode(pids, proc=Path('/proc')):
+    """Whether the running Steam client (`pids`) is a Steam Deck's Game Mode, or another gamescope
+    session's Steam: there Steam is the session itself and cannot be closed. Asked of Steam's own
+    process (its -gamepadui option, or a gamescope desktop in its environment), not of this one,
+    which may run in a nested gamescope on an ordinary desktop."""
+    if IS_WINDOWS:
+        return False
+    for pid in pids:
+        with contextlib.suppress(OSError):
+            argv = (proc / str(pid) / 'cmdline').read_bytes().split(b'\0')
+            environ = (proc / str(pid) / 'environ').read_bytes().split(b'\0')
+            if b'-gamepadui' in argv or b'XDG_CURRENT_DESKTOP=gamescope' in environ:
+                return True
+    return False
 
 
 def parse_text_vdf(text):
@@ -432,9 +442,10 @@ def status(root, program, running=steam_processes):
 def steam_closed(root, close, event, running, closer, starter):
     """Steam closed while the body runs: refused (exit 4) while it runs, unless asked to close it;
     then started again afterwards."""
-    was_running = bool(running(root))
+    pids = running(root)
+    was_running = bool(pids)
     if was_running:
-        if game_mode():
+        if game_mode(pids if isinstance(pids, (list, tuple)) else ()):
             raise SteamError('Steam cannot be closed in Game Mode, and it must be closed while its list of games '
                              'is changed. Switch to Desktop Mode, then try again')
         if not close:

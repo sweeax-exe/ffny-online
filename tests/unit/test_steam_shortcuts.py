@@ -276,10 +276,23 @@ def test_linux_counts_only_the_steam_client_in_that_folder(tmp_path):
 
 
 @linux_only
+def test_game_mode_is_asked_of_steam_itself(tmp_path):
+    proc = tmp_path / 'proc'
+    for pid, argv, env in ((1, [b'steam', b'-steamdeck'], [b'XDG_CURRENT_DESKTOP=KDE']),
+                           (2, [b'steam', b'-steamdeck', b'-gamepadui'], [b'XDG_CURRENT_DESKTOP=KDE']),
+                           (3, [b'steam'], [b'XDG_CURRENT_DESKTOP=gamescope'])):
+        (proc / str(pid)).mkdir(parents=True)
+        (proc / str(pid) / 'cmdline').write_bytes(b'\0'.join(argv) + b'\0')
+        (proc / str(pid) / 'environ').write_bytes(b'\0'.join(env) + b'\0')
+    assert not steam.game_mode([1], proc) and steam.game_mode([2], proc) and steam.game_mode([3], proc)
+    assert not steam.game_mode([4], proc)                    # gone meanwhile
+
+
+@linux_only
 def test_game_mode_never_closes_steam(tmp_path, monkeypatch):
     root = steam_folder(tmp_path)
     vdf = root / 'userdata' / str(ACCOUNT) / 'config/shortcuts.vdf'
-    monkeypatch.setenv('XDG_CURRENT_DESKTOP', 'gamescope')
+    monkeypatch.setattr(steam, 'game_mode', lambda pids, proc=None: bool(pids))
     fake = FakeSteam(running=True)
     with pytest.raises(steam.SteamError, match='Desktop Mode'):
         steam.add(root, Path('/home/deck/Applications/DefJamRecompiled.AppImage'), '/home/deck/Games/App',
