@@ -208,6 +208,24 @@ def nearest_existing(path):
     return path
 
 
+# Build headroom plus extracted files: players needed about 16 GB in practice (2026-10-28 reports;
+# with less the build stopped part-way), so it is asked for up front. HD textures need 15 GB more
+# while they are made. The Windows wizard's folder check uses the same numbers (plan_folder).
+BUILD_SPACE = 16 * 1024**3
+HD_SPACE = 15 * 1024**3
+
+
+def dump_bytes(dump):
+    dump = Path(dump)
+    return sum(p.stat().st_size for p in dump.rglob('*') if p.is_file()) if dump.is_dir() else dump.stat().st_size
+
+
+def space_needed(dump_size, hd, same_drive):
+    """(free space the install drive needs, free space the data drive needs)."""
+    data = dump_size + 1024**3 + (HD_SPACE if hd else 0) + (BUILD_SPACE if same_drive else 0)
+    return BUILD_SPACE, data
+
+
 def locate_dump(dump):
     """A chosen folder without default.xbe at its top is often the folder around the dump: the one the
     disc image was saved in, or one level above the extracted files (players picked those). Use the
@@ -814,7 +832,7 @@ class Engine:
         vswhere = Path(os.environ.get('ProgramFiles(x86)', 'C:/Program Files (x86)')) / 'Microsoft Visual Studio/Installer/vswhere.exe'
         if not vswhere.is_file():
             if not self.args.install_prerequisites or provisioned:
-                raise SetupError('Visual Studio Build Tools missing; use --install-prerequisites or the wizard checkbox', 3)
+                raise SetupError('Visual Studio Build Tools are missing; turn on "Missing Windows parts" in setup (or use --install-prerequisites)', 3)
             self.install_prerequisites()
             return self.toolchain(provisioned=True)
         query = [vswhere, '-products', '*', '-requires', 'Microsoft.VisualStudio.Component.VC.Tools.x86.x64',
@@ -857,8 +875,8 @@ class Engine:
                     # that installation; a fresh install would leave it as it is.
                     self.install_prerequisites(modify=vs)
                     return self.toolchain(provisioned=True)
-                hint = (' (the "C++ CMake tools for Windows" part of Visual Studio). Tick "Install missing Microsoft Build '
-                        'Tools" and select Install again') if executable in ('cmake.exe', 'ninja.exe') else ''
+                hint = (' (the "C++ CMake tools for Windows" part of Visual Studio). Turn on "Missing Windows parts" in '
+                        'setup and install again') if executable in ('cmake.exe', 'ninja.exe') else ''
                 raise SetupError('Missing toolchain component: ' + executable + hint, 3)
         self.run(['cmake', '--version'])
         self.run(['ninja', '--version'])
@@ -1262,23 +1280,20 @@ class Engine:
                 self.event('Setup ' + json.dumps({k: self.manifest[k] for k in ('version', 'source_commit', 'toolkit_commit')}))
                 self.check_install_destination()
                 self.check_existing_install()
-                # Build headroom plus extracted files: players needed about 16 GB in practice (2026-10-28 reports;
-                # with less the build stopped part-way), so ask for that up front.
-                required = 16 * 1024**3
-                if shutil.disk_usage(nearest_existing(self.install)).free < required:
-                    raise SetupError('At least 16 GB free space is required on the install drive (the game is compiled on your PC); free some space and run setup again', 2)
                 if self.dump is None:
                     dump_size = 0       # an update reuses the extracted files already on the data drive
                 elif not self.dump.exists():
                     raise SetupError('Dump does not exist', 2)
                 else:
-                    dump_size = sum(p.stat().st_size for p in self.dump.rglob('*') if p.is_file()) if self.dump.is_dir() else self.dump.stat().st_size
+                    dump_size = dump_bytes(self.dump)
                 if IS_WINDOWS:
                     same_drive = self.install.anchor.casefold() == self.data.anchor.casefold()
                 else:
                     same_drive = os.stat(nearest_existing(self.install)).st_dev == os.stat(nearest_existing(self.data)).st_dev
-                hd_space = 15 * 1024**3 if getattr(self.args, 'hd_textures', False) else 0
-                if shutil.disk_usage(nearest_existing(self.data)).free < dump_size + 1024**3 + hd_space + (required if same_drive else 0):
+                required, data_required = space_needed(dump_size, getattr(self.args, 'hd_textures', False), same_drive)
+                if shutil.disk_usage(nearest_existing(self.install)).free < required:
+                    raise SetupError('At least 16 GB free space is required on the install drive (the game is compiled on your PC); free some space and run setup again', 2)
+                if shutil.disk_usage(nearest_existing(self.data)).free < data_required:
                     raise SetupError('Insufficient free space on the data drive', 2)
                 self.stage('source')
                 self.prepare_source()
@@ -1534,6 +1549,624 @@ def uninstall(install):
     print('Application removed. Dump, saves, settings and logs were preserved.', flush=True)
 
 
+# ---------------------------------------------------------------------------------------------
+# The Windows wizard's questions: which game file is this (--identify), where are the player's
+# copies (--find-games) and can the game go into this folder (--plan-folder). Each answer is one
+# JSON file (--out); nothing is written anywhere else. What is told apart, and how sure it is:
+#   - the USA Xbox game: default.xbe byte for byte as config/dump-manifest.json records it, every
+#     required path present, at least the expected number of files, and (for an image) every file
+#     inside the image's length. That is what the install itself checks (validate_dump), so the
+#     wizard never accepts a copy the install refuses. Other files' contents are not hashed.
+#   - another Xbox game, region or release: read from default.xbe's certificate (title ID, name,
+#     region flags). A copy of this game whose default.xbe differs but whose regions include North
+#     America is only called "not the USA version" (it may be another release, modified or damaged).
+#   - PlayStation (ISO 9660 system identifier "PLAYSTATION", SYSTEM.CNF BOOT2 = PS2), GameCube and
+#     Wii (their disc header magic numbers), Dolphin's compressed formats and ZIP/7z/RAR archives
+#     (their signatures). Anything else is "not the USA Xbox version", without a guess.
+
+XDVDFS_MAGIC = b'MICROSOFT*XBOX*MEDIA'
+# Where a game partition starts in the image layouts players have (the toolkit's xdvdfs.py has the
+# same list): bare XISO, rebuilt, redump with the video partition first, full disc layouts.
+XDVDFS_BASES = (0x00000000, 0x0000FD90, 0x00030600, 0x0FD90000, 0x18300000)
+DISC_SECTOR = 2048
+XBE_REGION_NA, XBE_REGION_JAPAN, XBE_REGION_PAL = 0x1, 0x2, 0x4
+MIN_IMAGE_BYTES = 100 * 1024**2
+
+_SAME_GAME = "FFNY Online needs the USA Xbox version. Everyone online plays the same game data, so other versions can't connect."
+_PICK_USA = 'Pick the USA Xbox version if you have it.'
+GAME_TEXTS = {
+    'ok': ('DEF JAM: FIGHT FOR NY', 'Xbox · USA · complete and undamaged', ''),
+    'pal': ('THIS IS THE EUROPEAN (PAL) VERSION', _SAME_GAME, _PICK_USA),
+    'japan': ('THIS IS THE JAPANESE VERSION', _SAME_GAME, _PICK_USA),
+    'region': ("THIS ISN'T THE USA XBOX VERSION", _SAME_GAME, _PICK_USA),
+    'changed': ("THIS ISN'T THE USA XBOX VERSION",
+                "Its main game file (default.xbe) is not the one from the USA release FFNY Online is built from. "
+                "It may be another release, a modified copy or a damaged one.", _PICK_USA),
+    'other-game': ('THIS IS A DIFFERENT XBOX GAME', 'This disc image holds {title}, not Def Jam: Fight for NY.',
+                   'Choose your copy of Def Jam: Fight for NY (Xbox, USA).'),
+    'incomplete': ('THIS COPY IS INCOMPLETE OR DAMAGED', 'It is the right game, but {problem}.',
+                   'Copy or dump the game again, then choose the new file.'),
+    'cut': ('THIS DISC IMAGE IS INCOMPLETE', "The file is cut short, so setup can't read the game in it.",
+            'Copy or download it again, then choose the new file.'),
+    'ps2': ('THIS IS A PLAYSTATION 2 DISC IMAGE', 'FFNY Online is built from the Xbox version (USA) only.', _PICK_USA),
+    'playstation': ('THIS IS A PLAYSTATION DISC IMAGE', 'FFNY Online is built from the Xbox version (USA) only.', _PICK_USA),
+    'gamecube': ('THIS IS THE GAMECUBE VERSION', 'FFNY Online is built from the Xbox version (USA) only.', _PICK_USA),
+    'gamecube-other': ('THIS IS A GAMECUBE GAME', 'This disc image holds {title}. FFNY Online is built from the '
+                       'Xbox version (USA) of Def Jam: Fight for NY.', _PICK_USA),
+    'wii': ('THIS IS A WII GAME', 'FFNY Online is built from the Xbox version (USA) only.', _PICK_USA),
+    'dolphin': ('THIS IS A GAMECUBE OR WII IMAGE', 'It is in a compressed format of the Dolphin emulator. '
+                'FFNY Online is built from the Xbox version (USA) only.', _PICK_USA),
+    'archive': ('THIS FILE IS STILL PACKED', 'It is a {title} archive, not a disc image.',
+                'Unpack it first (for example with 7-Zip), then choose the .iso inside.'),
+    'no-game-folder': ('NO GAME IN THIS FOLDER', 'This folder has no Xbox game in it: no default.xbe and no .iso file.',
+                       'Choose the .iso file itself, or the folder that holds default.xbe.'),
+    'many-games': ('MORE THAN ONE GAME IN THIS FOLDER', 'This folder holds more than one disc image or game folder.',
+                   'Choose the .iso file itself, or the folder that holds default.xbe.'),
+    'missing': ("SETUP CAN'T OPEN THIS", 'It was moved, renamed or cannot be read.',
+                'Choose the file again from where it is now.'),
+    'unknown': ("THIS ISN'T THE USA XBOX VERSION",
+                "Setup couldn't recognise it as the USA Xbox version of Def Jam: Fight for NY.",
+                'Pick the USA Xbox version: an .iso file, or the folder with the extracted game.'),
+}
+# Kinds that are this game in another version or state: the search lists them so a player sees
+# why the copy they have does not work.
+SAME_TITLE_KINDS = {'ok', 'pal', 'japan', 'region', 'changed', 'incomplete', 'gamecube'}
+
+
+def game_verdict(kind, chosen, path=None, title='', problem='', size=None, **extra):
+    headline, message, advice = GAME_TEXTS[kind]
+    shown_title = '“' + title + '”' if title else 'another game'
+    return dict(ok=kind == 'ok', kind=kind, headline=headline,
+                message=message.format(title=shown_title if kind != 'archive' else title, problem=problem),
+                advice=advice, chosen=str(chosen), path=str(path or chosen), title=title, size=size, **extra)
+
+
+def load_dump_manifest(source):
+    return json.loads((Path(source) / 'config/dump-manifest.json').read_text(encoding='utf-8'))
+
+
+def xbe_identity(xbe):
+    """Title ID, title name and region flags from an XBE's certificate, or None if it is not one."""
+    if len(xbe) < 0x178 or xbe[:4] != b'XBEH':
+        return None
+    base, certificate = struct.unpack_from('<I', xbe, 0x104)[0], struct.unpack_from('<I', xbe, 0x118)[0]
+    offset = certificate - base
+    if offset < 0x178 or offset + 0xA4 > len(xbe):
+        return None
+    title_id = struct.unpack_from('<I', xbe, offset + 8)[0]
+    name = xbe[offset + 0x0C:offset + 0x5C].decode('utf-16-le', errors='replace').split('\0')[0]
+    name = ''.join(c for c in name if c.isprintable() and c != '�').strip()[:40]
+    return {'title_id': title_id, 'title': name, 'region': struct.unpack_from('<I', xbe, offset + 0xA0)[0]}
+
+
+def classify_xbe(xbe, manifest):
+    """'match' for the manifest's default.xbe, else the kind of difference."""
+    expected = manifest['xbe']
+    if len(xbe) == expected['size'] and hashlib.sha256(xbe).hexdigest() == expected['sha256']:
+        return 'match', None
+    identity = xbe_identity(xbe)
+    if identity is None:
+        return 'unknown', None
+    same = identity['title_id'] == int(str(manifest.get('title_id', '0')), 16) or \
+        'fight for ny' in identity['title'].casefold()
+    if not same:
+        return 'other-game', identity
+    region = identity['region'] & 7
+    if region & XBE_REGION_NA:
+        return 'changed', identity
+    return {XBE_REGION_PAL: 'pal', XBE_REGION_JAPAN: 'japan'}.get(region, 'region'), identity
+
+
+def completeness_problem(names, count, manifest, truncated=False):
+    """The install's completeness rule (scripts/verify-dump.py), as a phrase, or '' when complete."""
+    if truncated:
+        return 'the file is cut short: part of the image is missing'
+    present = {n.casefold() for n in names}
+    if any(p.casefold() not in present for p in manifest['required_paths']) or count < manifest['expected_file_count']:
+        return 'some of its files are missing'
+    return ''
+
+
+class DiscImage:
+    def __init__(self, path):
+        self.path = Path(path)
+        self.stream = self.path.open('rb')
+        self.size = os.fstat(self.stream.fileno()).st_size
+
+    def read(self, offset, size):
+        if offset < 0 or offset >= self.size:
+            return b''
+        self.stream.seek(offset)
+        return self.stream.read(size)
+
+    def close(self):
+        self.stream.close()
+
+
+def xdvdfs_base(image):
+    for base in XDVDFS_BASES:
+        if image.read(base + 32 * DISC_SECTOR, len(XDVDFS_MAGIC)) == XDVDFS_MAGIC:
+            return base
+    return None
+
+
+def xdvdfs_tree(image, base):
+    """{top-level-relative path: (sector, size, is_dir)} of an Xbox image, and whether any of it
+    lies past the end of the file. Bounded like the install's extraction: no cycles, at most
+    100000 entries and 16 MB per directory."""
+    descriptor = image.read(base + 32 * DISC_SECTOR, 0x1C)
+    if len(descriptor) < 0x1C:
+        return {}, True
+    root_sector, root_size = struct.unpack_from('<II', descriptor, 0x14)
+    entries, truncated, seen = {}, False, set()
+    pending = [('', root_sector, root_size)]
+    while pending:
+        folder, sector, size = pending.pop()
+        if (sector, size) in seen or size > 16 * 1024 * 1024 or len(entries) > 100000:
+            break
+        seen.add((sector, size))
+        offset = base + sector * DISC_SECTOR
+        if offset + size > image.size:
+            truncated = True
+            continue
+        data = image.read(offset, size)
+        for start in range(0, len(data), DISC_SECTOR):
+            chunk, at = data[start:start + DISC_SECTOR], 0
+            while at + 0x0E <= len(chunk):
+                left, right, entry_sector, entry_size, attributes, length = struct.unpack_from('<HHIIBB', chunk, at)
+                if (left == 0xFFFF and right == 0xFFFF) or length == 0 or at + 0x0E + length > len(chunk):
+                    break
+                try:
+                    name = chunk[at + 0x0E:at + 0x0E + length].decode('ascii')
+                except UnicodeDecodeError:
+                    break
+                path = (folder + '/' + name).lstrip('/')
+                is_dir = bool(attributes & 0x10)
+                entries[path] = (entry_sector, entry_size, is_dir)
+                if is_dir:
+                    pending.append((path, entry_sector, entry_size))
+                elif base + entry_sector * DISC_SECTOR + entry_size > image.size:
+                    truncated = True
+                at += (0x0E + length + 3) & ~3
+    return entries, truncated
+
+
+def iso9660_system_cnf(image):
+    """SYSTEM.CNF's text from an ISO 9660 image's root directory, or None."""
+    descriptor = image.read(16 * DISC_SECTOR, DISC_SECTOR)
+    if len(descriptor) < 190:
+        return None
+    root_sector, root_size = struct.unpack_from('<I', descriptor, 156 + 2)[0], struct.unpack_from('<I', descriptor, 156 + 10)[0]
+    data, at = image.read(root_sector * DISC_SECTOR, min(root_size, 64 * 1024)), 0
+    while at < len(data):
+        length = data[at]
+        if length == 0:
+            at = (at // DISC_SECTOR + 1) * DISC_SECTOR      # records do not cross sectors
+            continue
+        record = data[at:at + length]
+        name = record[33:33 + record[32]].decode('ascii', errors='replace').split(';')[0].upper() if len(record) > 33 else ''
+        if name == 'SYSTEM.CNF':
+            sector, size = struct.unpack_from('<I', record, 2)[0], struct.unpack_from('<I', record, 10)[0]
+            return image.read(sector * DISC_SECTOR, min(size, 4096)).decode('ascii', errors='replace')
+        at += length
+    return None
+
+
+def identify_image(path, manifest, chosen=None):
+    chosen = chosen or path
+    try:
+        image = DiscImage(path)
+    except OSError:
+        return game_verdict('missing', chosen)
+    try:
+        size = image.size
+        base = xdvdfs_base(image)
+        if base is not None:
+            entries, truncated = xdvdfs_tree(image, base)
+            xbe_entry = entries.get('default.xbe') or next(
+                (v for k, v in entries.items() if k.casefold() == 'default.xbe'), None)
+            if xbe_entry is None or xbe_entry[2] or xbe_entry[1] > 64 * 1024 * 1024:
+                return game_verdict('cut' if truncated else 'unknown', chosen, path, size=size)
+            xbe = image.read(base + xbe_entry[0] * DISC_SECTOR, xbe_entry[1])
+            kind, identity = classify_xbe(xbe, manifest)
+            if kind == 'unknown' and len(xbe) < xbe_entry[1]:
+                return game_verdict('cut', chosen, path, size=size)
+            if kind == 'match':
+                files = [k for k, v in entries.items() if not v[2]]
+                problem = completeness_problem({k.split('/')[0] for k in entries}, len(files), manifest, truncated)
+                return game_verdict('incomplete' if problem else 'ok', chosen, path, problem=problem, size=size)
+            if len(xbe) < xbe_entry[1] and identity and kind != 'other-game':
+                return game_verdict('incomplete', chosen, path, problem='the file is cut short: part of the image is missing', size=size)
+            return game_verdict(kind, chosen, path, title=identity['title'] if identity else '', size=size)
+        head = image.read(0, 0x440)
+        for signature, label in ((b'PK\x03\x04', 'ZIP'), (b'7z\xbc\xaf\x27\x1c', '7-Zip'), (b'Rar!\x1a\x07', 'RAR')):
+            if head.startswith(signature):
+                return game_verdict('archive', chosen, path, title=label, size=size)
+        if head[:4] in (b'RVZ\x01', b'WIA\x01') or head[:4] == b'\x01\xc0\x0b\xb1' or head[:4] == b'CISO':
+            return game_verdict('dolphin', chosen, path, size=size)
+        if len(head) >= 0x40 and head[0x1C:0x20] == b'\xc2\x33\x9f\x3d':
+            name = head[0x20:0x60].split(b'\0')[0].decode('ascii', errors='replace').strip()
+            same = 'fight for ny' in name.casefold() or 'def jam' in name.casefold()
+            return game_verdict('gamecube' if same else 'gamecube-other', chosen, path, title=name, size=size)
+        if len(head) >= 0x20 and head[0x18:0x1C] == b'\x5d\x1c\x9e\xa3':
+            return game_verdict('wii', chosen, path, size=size)
+        descriptor = image.read(16 * DISC_SECTOR, 40)
+        if descriptor[1:6] == b'CD001' and descriptor[8:40].strip().startswith(b'PLAYSTATION'):
+            system = iso9660_system_cnf(image) or ''
+            return game_verdict('ps2' if 'BOOT2' in system.upper() else 'playstation' if 'BOOT' in system.upper()
+                                else 'playstation', chosen, path, size=size)
+        return game_verdict('unknown', chosen, path, size=size)
+    finally:
+        image.close()
+
+
+def identify_folder(folder, manifest, source, chosen=None):
+    chosen = chosen or folder
+    xbe_path = folder / 'default.xbe'
+    try:
+        xbe = xbe_path.read_bytes() if xbe_path.stat().st_size <= 64 * 1024 * 1024 else b''
+    except OSError:
+        return game_verdict('missing', chosen, folder)
+    size = dump_bytes(folder)
+    kind, identity = classify_xbe(xbe, manifest)
+    if kind == 'match':
+        problems = load_module('setup_verify_dump', Path(source) / 'scripts/verify-dump.py').verify(str(folder), manifest)
+        problem = 'some of its files are missing' if problems else ''
+        return game_verdict('incomplete' if problem else 'ok', chosen, folder, problem=problem, size=size)
+    return game_verdict(kind, chosen, folder, title=identity['title'] if identity else '', size=size)
+
+
+def identify_game(chosen, source):
+    """What the chosen file or folder is, as the wizard shows it (game_verdict). source holds
+    config/dump-manifest.json and scripts/verify-dump.py: the install's own rule."""
+    manifest = load_dump_manifest(source)
+    chosen = Path(chosen)
+    try:
+        path = chosen.resolve()
+        exists = path.exists()
+    except OSError:
+        exists = False
+    if not exists:
+        return game_verdict('missing', chosen)
+    if path.is_dir():
+        try:
+            located = locate_dump(path)
+        except SetupError as ex:
+            return game_verdict('many-games' if 'more than one' in str(ex) else 'no-game-folder', chosen, path)
+        except OSError:
+            return game_verdict('missing', chosen, path)
+        if located.is_file():
+            return identify_image(located, manifest, chosen)
+        if not (located / 'default.xbe').is_file():
+            if (located / 'SYSTEM.CNF').is_file():
+                return game_verdict('ps2', chosen, located)
+            if (located / 'sys/main.dol').is_file():
+                return game_verdict('gamecube-other', chosen, located)
+            return game_verdict('no-game-folder', chosen, located)
+        return identify_folder(located, manifest, source, chosen)
+    return identify_image(path, manifest, chosen)
+
+
+# Folders a player keeps games in, besides Downloads, Desktop and Documents: these names are
+# looked for at the top of every fixed drive.
+GAME_FOLDER_NAMES = ('Games', 'Game', 'Spiele', 'Jeux', 'Juegos', 'ISO', 'ISOs', 'Roms', 'ROMs', 'Emulation',
+                     'Emulators', 'Xbox', 'xemu', 'Downloads', 'Backups', 'Dumps')
+SKIP_FOLDERS = {'windows', 'program files', 'program files (x86)', 'programdata', '$recycle.bin', 'appdata',
+                'system volume information', 'recovery', 'node_modules', 'msocache', 'perflogs', 'windowsapps',
+                'steamapps', 'onedrivetemp', 'config.msi'}
+NAME_HINT = re.compile(r'def[\s._-]*jam|fight[\s._-]*for[\s._-]*n\.?y|ffny', re.I)
+
+
+def known_folder(guid):
+    """A Windows known folder (Downloads may live anywhere), or None."""
+    if not IS_WINDOWS:
+        return None
+
+    class GUID(ctypes.Structure):
+        _fields_ = [('a', ctypes.c_uint32), ('b', ctypes.c_uint16), ('c', ctypes.c_uint16), ('d', ctypes.c_ubyte * 8)]
+    parts = guid.split('-')
+    value = GUID(int(parts[0], 16), int(parts[1], 16), int(parts[2], 16),
+                 (ctypes.c_ubyte * 8)(*bytes.fromhex(parts[3] + parts[4])))
+    pointer = ctypes.c_wchar_p()
+    shell = ctypes.windll.shell32
+    shell.SHGetKnownFolderPath.argtypes = [ctypes.POINTER(GUID), ctypes.c_uint32, ctypes.c_void_p, ctypes.POINTER(ctypes.c_wchar_p)]
+    if shell.SHGetKnownFolderPath(ctypes.byref(value), 0, None, ctypes.byref(pointer)) != 0:
+        return None
+    try:
+        return Path(pointer.value)
+    finally:
+        ctypes.windll.ole32.CoTaskMemFree(pointer)
+
+
+def fixed_drives():
+    """Fixed drives' roots (Windows), else the home folder."""
+    if not IS_WINDOWS:
+        return [Path.home()]
+    mask = ctypes.windll.kernel32.GetLogicalDrives()
+    drives = []
+    for index in range(26):
+        if mask & (1 << index):
+            root = chr(ord('A') + index) + ':\\'
+            if ctypes.windll.kernel32.GetDriveTypeW(ctypes.c_wchar_p(root)) == 3:     # DRIVE_FIXED
+                drives.append(Path(root))
+    return drives
+
+
+def default_search_roots():
+    """(folder, depth) pairs: the player's own folders deep, each fixed drive's top shallow, and
+    the usual game folders on each drive deep. xemu's last disc is looked at too."""
+    roots = []
+    home = Path.home()
+    for guid, fallback in (('374DE290-123F-4565-9164-39C4925E467B', 'Downloads'),
+                           ('B4BFCC3A-DB2C-424C-B029-7FE99A87C641', 'Desktop'),
+                           ('FDD39AD0-238F-46AF-ADB4-6C85480369C7', 'Documents')):
+        folder = None
+        with contextlib.suppress(OSError, ValueError, AttributeError):
+            folder = known_folder(guid)
+        roots.append((folder or home / fallback, 3))
+    for drive in fixed_drives():
+        roots.append((drive, 1))
+        for name in GAME_FOLDER_NAMES:
+            roots.append((drive / name, 3))
+    appdata = os.environ.get('APPDATA')
+    if appdata:
+        with contextlib.suppress(OSError):
+            text = (Path(appdata) / 'xemu/xemu/xemu.toml').read_text(encoding='utf-8', errors='replace')
+            match = re.search(r'''dvd_path\s*=\s*['"]([^'"]+)['"]''', text)
+            if match:
+                roots.append((Path(match[1]).parent, 1))
+    return roots
+
+
+def search_candidates(roots, deadline, limit=40, max_entries=60000):
+    """Disc images (.iso/.xiso, at least 100 MB) and folders holding default.xbe under roots."""
+    found, seen, visited, scanned = [], set(), set(), 0
+    queue = [(Path(root), depth) for root, depth in roots]
+    while queue and len(found) < limit and scanned < max_entries and time.monotonic() < deadline:
+        folder, depth = queue.pop(0)
+        try:
+            key = os.path.normcase(str(folder.resolve()))
+            if key in visited or not folder.is_dir():
+                continue
+            visited.add(key)
+            entries = list(os.scandir(folder))
+        except OSError:
+            continue
+        scanned += len(entries)
+        if any(e.name.casefold() == 'default.xbe' and e.is_file() for e in entries if not e.is_symlink()):
+            if key not in seen:
+                seen.add(key)
+                found.append(folder)
+            continue
+        for entry in entries:
+            try:
+                if entry.is_symlink():
+                    continue
+                if entry.is_file() and Path(entry.name).suffix.casefold() in ('.iso', '.xiso'):
+                    if entry.stat().st_size >= MIN_IMAGE_BYTES:
+                        path_key = os.path.normcase(entry.path)
+                        if path_key not in seen:
+                            seen.add(path_key)
+                            found.append(Path(entry.path))
+                elif depth > 0 and entry.is_dir() and entry.name.casefold() not in SKIP_FOLDERS \
+                        and not entry.name.startswith(('.', '$')):
+                    queue.append((Path(entry.path), depth - 1))
+            except OSError:
+                continue
+    return found
+
+
+def find_games(source, roots=None, seconds=10.0):
+    """The player's copies of the game (and other versions of it), best first, for the wizard's
+    "Found on this PC" list. Each is identified as identify_game would."""
+    deadline = time.monotonic() + seconds
+    candidates = search_candidates(default_search_roots() if roots is None else roots, deadline)
+    manifest = load_dump_manifest(source)
+    games = []
+    for candidate in candidates:
+        if time.monotonic() > deadline + 5:
+            break
+        if candidate.is_dir() and (candidate.parent / 'extraction-state.json').is_file():
+            continue        # an installation's own copy (<data>\\extracted): not a dump to install from
+        try:
+            verdict = identify_game(candidate, source) if candidate.is_file() else \
+                identify_folder(candidate, manifest, source)
+        except (OSError, ValueError, KeyError, struct.error):
+            continue
+        if verdict['kind'] in SAME_TITLE_KINDS or NAME_HINT.search(candidate.name):
+            with contextlib.suppress(OSError):
+                verdict['modified'] = candidate.stat().st_mtime
+            verdict['name'] = candidate.name if candidate.is_file() else 'Game folder: ' + candidate.name
+            verdict['is_folder'] = candidate.is_dir()
+            verdict['folder'] = str(candidate.parent)
+            games.append(verdict)
+    games.sort(key=lambda g: (not g['ok'], g['kind'] not in SAME_TITLE_KINDS, g['is_folder'], -g.get('modified', 0)))
+    return games
+
+
+def format_bytes(size):
+    gb = size / 1024**3
+    return (f'{gb:.0f} GB' if gb >= 10 else f'{gb:.1f} GB') if gb >= 1 else f'{size / 1024**2:.0f} MB'
+
+
+def inside_path(child, parent):
+    child, parent = os.path.normcase(str(child)).rstrip('\\/'), os.path.normcase(str(parent)).rstrip('\\/')
+    return child == parent or child.startswith(parent + os.sep)
+
+
+def environment_folders(*names):
+    return [Path(os.environ[n]) for n in names if os.environ.get(n)]
+
+
+def folder_location_problem(folder):
+    """(problem, fix) when a folder is somewhere the game should not go, else None."""
+    parts = [p.casefold() for p in folder.parts]
+    if any(inside_path(folder, f) for f in environment_folders('OneDrive', 'OneDriveConsumer', 'OneDriveCommercial')) \
+            or any(p.startswith('onedrive') for p in parts):
+        return 'This folder is in OneDrive, which would upload the 20 GB or more the build writes'
+    if any(inside_path(folder, f) for f in environment_folders('ProgramFiles', 'ProgramFiles(x86)', 'ProgramW6432')):
+        return 'This folder is in Program Files, where changes need admin rights'
+    system = environment_folders('SystemRoot', 'windir', 'ProgramData', 'TEMP', 'TMP')
+    users = environment_folders('USERPROFILE')
+    if any(inside_path(folder, f) for f in system) or folder == Path(folder.anchor) or \
+            any(folder == u or folder == u.parent for u in users):
+        return 'This is a Windows or system folder'
+    return None
+
+
+UNSAFE_PATH_CHARACTERS = set(';%!^&\'`')
+
+
+def path_problem(folder):
+    text = str(folder)
+    if len(str(folder / 'data')) > 140:
+        return "This folder's path is too long for the build (at most about 130 characters)"
+    if any(ord(c) > 126 or c in UNSAFE_PATH_CHARACTERS for c in text) or any(p != p.rstrip(' .') for p in folder.parts[1:]):
+        return 'This path has characters the build tools may not handle (only plain English letters, numbers, spaces, - and _ are safe)'
+    return None
+
+
+def is_ffny_folder(folder):
+    """An installation of this game (made by this wizard), an empty folder, or one only with its two parts."""
+    try:
+        names = {p.name.casefold() for p in folder.iterdir()}
+    except OSError:
+        return True
+    return (folder / 'app/installed.json').is_file() or (folder / 'app/setup-owner.json').is_file() or \
+        names <= {'app', 'data', 'desktop.ini'}
+
+
+def existing_install(folder):
+    """(install, data) of an earlier installation in folder, or None."""
+    receipt = folder / 'app/installed.json'
+    try:
+        data = json.loads(receipt.read_text(encoding='utf-8'))['data']
+        return folder / 'app', Path(data)
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+
+
+def drive_free(path):
+    with contextlib.suppress(OSError):
+        return shutil.disk_usage(nearest_existing(path)).free
+    return 0
+
+
+def suggest_folder(needed):
+    """An earlier installation's folder, or <the fixed NTFS drive with the most free space>:\\Games\\FFNY Online."""
+    places = [Path(os.environ['LOCALAPPDATA']) / 'DefJamRecompiled'] if os.environ.get('LOCALAPPDATA') else []
+    drives = fixed_drives()
+    places += [d / 'Games/FFNY Online' for d in drives] + [d / 'FFNY Online' for d in drives]
+    for place in places:
+        if existing_install(place):
+            return place
+    usable = [d for d in drives if (volume_filesystem(d) or 'NTFS').upper() in ('NTFS', 'REFS')] or drives
+    usable.sort(key=lambda d: (drive_free(d) < needed, -drive_free(d), str(d)))
+    drive = usable[0] if usable else Path.home()
+    games = drive / 'Games'
+    folder = games / 'FFNY Online' if games.is_dir() or not games.exists() else drive / 'FFNY Online'
+    if folder.exists() and not is_ffny_folder(folder):
+        folder = folder.with_name('FFNY Online Setup')
+    return folder
+
+
+def writable(folder):
+    """Whether this user can create folders where the game goes, without admin rights. Leaves nothing behind."""
+    try:
+        probe = Path(tempfile.mkdtemp(prefix='ffny-write-check-', dir=nearest_existing(folder)))
+    except OSError:
+        return False
+    with contextlib.suppress(OSError):
+        probe.rmdir()
+    return True
+
+
+def plan_folder(folder=None, dump=None, hd=False):
+    """Where the wizard installs: the folder (suggested when None), its install and data folders,
+    and each check with a plain reason and fix when it fails. Nothing is created."""
+    dump = Path(dump).resolve() if dump else None
+    dump_size = 0
+    if dump is not None:
+        with contextlib.suppress(OSError):
+            dump_size = dump_bytes(dump)
+    needed = space_needed(dump_size, hd, True)[1]
+    suggested = folder is None
+    folder = suggest_folder(needed) if folder is None else Path(folder)
+    folder = Path(os.path.abspath(folder))
+    adjusted = False
+    if folder.name.casefold() == 'app' and (folder / 'installed.json').is_file():
+        folder = folder.parent              # the app folder of an installation: the installation
+    elif not suggested and folder.is_dir() and not is_ffny_folder(folder):
+        folder, adjusted = folder / 'FFNY Online', True     # a folder with other things in it: a new one inside
+    existing = existing_install(folder)
+    install, data = existing if existing else (folder / 'app', folder / 'data')
+    fallback = suggest_folder(needed)
+    hint = '' if os.path.normcase(str(fallback)) == os.path.normcase(str(folder)) else ', for example ' + str(fallback)
+    checks = []
+
+    def check(key, ok, text, fix=''):
+        checks.append({'id': key, 'ok': bool(ok), 'text': text, 'fix': '' if ok else fix})
+
+    free = drive_free(folder)
+    drive = folder.anchor.rstrip('\\/') or str(folder)
+    if free >= needed:
+        check('space', True, f'Enough free space on this drive ({format_bytes(free)} free, needs about {format_bytes(needed)})')
+    else:
+        without_hd = space_needed(dump_size, False, True)[1]
+        fix = 'Free up space on ' + drive + ', or choose a folder on another drive' + hint + '.'
+        if hd and free >= without_hd:
+            fix = 'Turn off HD textures (you can add them later in the launcher), free up space, or choose another drive.'
+        check('space', False, f'Not enough free space on {drive} ({format_bytes(free)} free, needs about {format_bytes(needed)})', fix)
+    can_write = writable(folder)
+    check('write', can_write, 'Setup can write here, no admin rights needed' if can_write else
+          'Setup cannot write to this folder without admin rights', 'Choose a folder of your own' + hint + '.')
+    location = folder_location_problem(folder)
+    check('place', location is None, location or 'Not in OneDrive, Program Files or a system folder',
+          'Choose a folder outside it' + hint + '.')
+    if dump is not None:
+        dump_inside = inside_path(dump, folder)
+        nested = dump_inside or (dump.is_dir() and inside_path(folder, dump))
+        check('dump', not nested, 'Your game file stays outside this folder' if not nested else
+              'Your game file is inside this folder' if dump_inside else 'This folder is inside your game folder',
+              'Choose a different folder' + hint + ', or move your game file somewhere else (for example Documents).')
+    filesystem = volume_filesystem(folder) if IS_WINDOWS else None
+    if filesystem and filesystem.upper() not in ('NTFS', 'REFS'):
+        check('drive', False, f'{drive} uses {filesystem}, which cannot hold the folder link the game needs',
+              'Choose a folder on an NTFS drive' + hint + '.')
+    problem = path_problem(folder)
+    if problem:
+        check('path', False, problem, 'Choose a folder with a shorter, plain path' + hint + '.')
+    if not existing and folder.is_dir() and not is_ffny_folder(folder):
+        check('empty', False, 'This folder already has other files in it', 'Choose an empty folder' + hint + '.')
+    if existing:
+        check('existing', True, 'FFNY Online is already here: setup updates it and keeps your saves')
+    return {'folder': str(folder), 'install_dir': str(install), 'data_dir': str(data), 'existing': bool(existing),
+            'adjusted': adjusted, 'suggested': suggested, 'ok': all(c['ok'] for c in checks), 'checks': checks,
+            'free': free, 'needed': needed}
+
+
+def wizard_question(args):
+    """--identify, --find-games or --plan-folder: answer into --out, exit 0 (2 for bad arguments)."""
+    if not args.out:
+        raise SetupError('--out is required', 2)
+    source = Path(args.payload) / 'source'
+    if args.source_root:
+        source = Path(args.source_root)
+    if args.identify:
+        try:
+            result = identify_game(args.identify, source)
+        except (OSError, ValueError, struct.error):
+            # Unreadable in a way the checks above did not expect: say only that it is not the game.
+            result = game_verdict('unknown', args.identify)
+    elif args.find_games:
+        roots = [(Path(r), 3) for r in args.search_root] if args.search_root else None
+        result = {'games': find_games(source, roots)}
+    else:
+        result = plan_folder(args.folder, args.dump, args.hd_textures)
+    write_json(args.out, result)
+    return 0
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--payload', required=True)
@@ -1543,8 +2176,16 @@ def main(argv=None):
                         help='Update: build from the game files the installation already extracted (no --dump)')
     parser.add_argument('--allow-running', action='store_true',
                         help='Update from the running game\'s launcher (Windows; the old version keeps its own copy)')
-    parser.add_argument('--install-dir', required=True)
+    parser.add_argument('--install-dir')
     parser.add_argument('--data-dir')
+    # The Windows wizard's questions (wizard_question); each answers into --out and installs nothing.
+    parser.add_argument('--identify', help='Wizard: what this game file or folder is')
+    parser.add_argument('--find-games', action='store_true', help="Wizard: look for the player's copies")
+    parser.add_argument('--search-root', action='append', help='Wizard: look only here (repeatable)')
+    parser.add_argument('--plan-folder', action='store_true', help='Wizard: check (or suggest) an install folder')
+    parser.add_argument('--folder', help='Wizard: the folder --plan-folder checks')
+    parser.add_argument('--source-root', help=argparse.SUPPRESS)
+    parser.add_argument('--out')
     parser.add_argument('--uninstall', action='store_true')
     parser.add_argument('--no-shortcuts', action='store_true', help='Do not create desktop/Start-menu shortcuts')
     parser.add_argument('--no-desktop-shortcut', action='store_true', help='Create only the Start-menu shortcut')
@@ -1562,6 +2203,10 @@ def main(argv=None):
     args = parser.parse_args(argv)
     engine = None
     try:
+        if args.identify or args.find_games or args.plan_folder:
+            return wizard_question(args)
+        if not args.install_dir:
+            raise SetupError('--install-dir is required', 2)
         if args.uninstall:
             verify_payload(Path(args.payload))
             uninstall(args.install_dir)

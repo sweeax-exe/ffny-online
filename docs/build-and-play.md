@@ -11,24 +11,21 @@ setup on the [release page](https://github.com/vyanhursky/DefJamFFNY-recomp/rele
 The commands below use the v0.6.0 filename. For local testing, run the supplied
 preview build.
 
-1. Run the setup executable and select your ISO/XISO or extracted dump folder.
-2. Choose separate sibling folders, such as `D:\Games\DefJam\App` for the
-   installation and `D:\Games\DefJam\Data` for the dump copy, settings and saves.
-   Data must not be inside the install folder. Keep 16 GB build headroom plus
-   space for the copied dump and compiler.
-3. Choose **Create a desktop shortcut** if wanted. Clearing it keeps the
-   Start-menu shortcut. Enable **Install missing Microsoft Build Tools** only
-   to permit Microsoft's installer to request consent/UAC for missing tools.
-   To generate faithful 4x textures, select **Apply HD texture upscale during
-   install (increases install time)** and allow 15 GiB extra working space.
-   See [HD texture usage](hd-textures.md) for sizes, fallback and restart controls.
-4. Select **Install / Repair**. Setup bundles Python and pinned build sources,
-   verifies the dump, then analyzes, lifts and compiles it locally. Git, system
-   Python and a separate extract-xiso installation are not needed for setup.
+1. Run the setup executable. Drag your ISO/XISO onto it, use **Browse...**, or pick the copy it
+   found under **Found on this PC**; an extracted game folder works too. Setup tells you whether
+   it is the USA Xbox version it needs, and if not, what it is (as far as it can tell).
+2. Keep the folder setup suggests (for example `D:\Games\FFNY Online`) or use **Change**. Setup
+   checks free space (16 GB build headroom plus the game copy; 15 GB more with HD textures),
+   that it can write there without admin rights, and that it is not in OneDrive, Program Files or
+   a system folder. The game, saves and settings all go in this one folder.
+3. The switches: **HD textures** (on by default; see [HD texture usage](hd-textures.md)),
+   **Desktop shortcut**, and **Missing Windows parts**, which lets Microsoft's installer ask for
+   consent/UAC to add missing build tools.
+4. Select **Install**. Setup bundles Python and pinned build sources, verifies the dump, then
+   analyzes, lifts and compiles it locally. Git, system Python and a separate extract-xiso
+   installation are not needed for setup.
 5. After completion, select **Play**, use the shortcut, or double-click
-   `D:\Games\DefJam\App\DefJamLauncher.exe`. The wizard displays your exact
-   launcher path; it supplies the correct data location and working directory.
-
+   `<folder>\app\DefJamLauncher.exe`; it supplies the correct data location and working directory.
 **Show details** follows the current session log inside the setup window;
 **Open logs** opens the whole file. Packaged setup logs default to
 `%LOCALAPPDATA%\DefJamSetup\logs`, including failures before installation starts.

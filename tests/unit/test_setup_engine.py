@@ -665,3 +665,251 @@ def test_generated_files_unchanged_since_the_previous_version_keep_their_time(tm
     assert (gen / 'recomp_0001.c').stat().st_mtime_ns == 1_000_000_000
     assert (gen / 'recomp_0002.c').stat().st_mtime_ns != 1_000_000_000
     assert (gen / 'lift-state.json').stat().st_mtime_ns != 1_000_000_000
+
+
+# ---- The Windows wizard's questions: --identify, --find-games, --plan-folder (synthetic images only) ----
+import hashlib
+import struct
+
+
+def fake_xbe(title_id=0x45410049, name='Def Jam: Fight for NY', region=1, pad=b''):
+    """An XBE header with a certificate: what identification reads, nothing of a game."""
+    data = bytearray(0x400)
+    data[:4] = b'XBEH'
+    struct.pack_into('<I', data, 0x104, 0x10000)
+    struct.pack_into('<I', data, 0x118, 0x10000 + 0x200)
+    struct.pack_into('<I', data, 0x200, 0x1D0)
+    struct.pack_into('<I', data, 0x208, title_id)
+    data[0x20C:0x20C + 0x50] = name.encode('utf-16-le')[:0x50].ljust(0x50, b'\0')
+    struct.pack_into('<I', data, 0x2A0, region)
+    return bytes(data) + pad
+
+
+def wizard_source(tmp_path, xbe, required=('default.xbe', 'audio'), count=3):
+    source = tmp_path / 'source'
+    (source / 'config').mkdir(parents=True)
+    (source / 'scripts').mkdir()
+    (source / 'scripts/verify-dump.py').write_bytes((ROOT / 'scripts/verify-dump.py').read_bytes())
+    (source / 'config/dump-manifest.json').write_text(json.dumps({
+        'title_id': '0x45410049', 'xbe': {'filename': 'default.xbe', 'size': len(xbe), 'sha256': hashlib.sha256(xbe).hexdigest()},
+        'required_paths': list(required), 'expected_file_count': count}))
+    return source
+
+
+def xdvdfs_image(path, files, base=0, cut=0):
+    """A tiny Xbox disc image: files is {'name' or 'dir/name': bytes}, one directory level."""
+    S = 2048
+    sectors, data_sector = {}, 40
+
+    def place(blob):
+        nonlocal data_sector
+        start = data_sector
+        sectors[start] = blob
+        data_sector += max(1, (len(blob) + S - 1) // S)
+        return start
+
+    def directory(entries):
+        out = bytearray()
+        for name, (sector, size, is_dir) in entries.items():
+            raw = name.encode('ascii')
+            record = struct.pack('<HHIIBB', 0, 0, sector, size, 0x10 if is_dir else 0x20, len(raw)) + raw
+            out += record + b'\xff' * ((-len(record)) % 4)
+        return bytes(out.ljust(S, b'\xff'))
+
+    top, folders = {}, {}
+    for name, blob in files.items():
+        if '/' in name:
+            folder, leaf = name.split('/', 1)
+            folders.setdefault(folder, {})[leaf] = blob
+        else:
+            top[name] = (place(blob), len(blob), False)
+    for folder, children in folders.items():
+        listing = directory({leaf: (place(blob), len(blob), False) for leaf, blob in children.items()})
+        top[folder] = (place(listing), len(listing), True)
+    root = directory(top)
+    root_sector = 33                                   # the root first, as image tools write it
+    sectors[root_sector] = root
+    image = bytearray(base + data_sector * S)
+    descriptor = engine.XDVDFS_MAGIC + struct.pack('<II', root_sector, len(root))
+    image[base + 32 * S:base + 32 * S + len(descriptor)] = descriptor
+    for sector, blob in sectors.items():
+        image[base + sector * S:base + sector * S + len(blob)] = blob
+    path.write_bytes(bytes(image[:len(image) - cut] if cut else image))
+    return path
+
+
+def test_identify_accepts_only_the_manifest_game_complete(tmp_path):
+    xbe = fake_xbe()
+    source = wizard_source(tmp_path, xbe)
+    good = xdvdfs_image(tmp_path / 'good.iso', {'default.xbe': xbe, 'audio/a.bin': b'1', 'b.bin': b'2'}, base=0xFD90)
+    verdict = engine.identify_game(good, source)
+    assert verdict['ok'] and verdict['kind'] == 'ok' and verdict['message'] == 'Xbox \u00b7 USA \u00b7 complete and undamaged'
+    missing = xdvdfs_image(tmp_path / 'missing.iso', {'default.xbe': xbe, 'b.bin': b'2', 'c.bin': b'3'})
+    assert engine.identify_game(missing, source)['kind'] == 'incomplete'
+    cut = xdvdfs_image(tmp_path / 'cut.iso', {'default.xbe': xbe, 'audio/a.bin': b'1', 'b.bin': b'2' * 5000}, cut=3000)
+    verdict = engine.identify_game(cut, source)
+    assert verdict['kind'] == 'incomplete' and 'cut short' in verdict['message']
+    # Cut inside default.xbe: its certificate still names this game; cut before it, nothing is claimed.
+    big = fake_xbe(pad=bytes(20000))
+    files = {'default.xbe': big, 'audio/a': b'1'}
+    size = xdvdfs_image(tmp_path / 'n.iso', files).stat().st_size
+    assert engine.identify_game(xdvdfs_image(tmp_path / 'c1.iso', files, cut=size - 40 * 2048 - 1500), source)['kind'] == 'incomplete'
+    assert engine.identify_game(xdvdfs_image(tmp_path / 'c2.iso', files, cut=size - 40 * 2048 - 100), source)['kind'] == 'cut'
+
+
+@pytest.mark.parametrize('xbe, kind, headline', [
+    (fake_xbe(region=4, pad=b'pal'), 'pal', 'THIS IS THE EUROPEAN (PAL) VERSION'),
+    (fake_xbe(title_id=0x12345678, name='Def Jam: Fight for NY', region=4), 'pal', 'THIS IS THE EUROPEAN (PAL) VERSION'),
+    (fake_xbe(region=2, pad=b'jp'), 'japan', 'THIS IS THE JAPANESE VERSION'),
+    (fake_xbe(region=0x80000007, pad=b'mod'), 'changed', "THIS ISN'T THE USA XBOX VERSION"),
+    (fake_xbe(title_id=0x4D530004, name='Halo', region=7), 'other-game', 'THIS IS A DIFFERENT XBOX GAME'),
+    (b'not an xbe at all', 'unknown', "THIS ISN'T THE USA XBOX VERSION"),
+])
+def test_identify_names_other_xbox_versions_only_as_far_as_it_can_tell(tmp_path, xbe, kind, headline):
+    source = wizard_source(tmp_path, fake_xbe())
+    verdict = engine.identify_game(xdvdfs_image(tmp_path / 'x.iso', {'default.xbe': xbe, 'audio/a': b'1'}), source)
+    assert (verdict['ok'], verdict['kind'], verdict['headline']) == (False, kind, headline)
+    if kind == 'other-game':
+        assert '\u201cHalo\u201d' in verdict['message']
+
+
+def iso9660(path, system=b'PLAYSTATION', cnf=b'BOOT2 = cdrom0:\\SLUS_000.00;1\r\n'):
+    S = 2048
+    image = bytearray(S * 24)
+    pvd = bytearray(S)
+    pvd[0], pvd[1:6], pvd[8:8 + 32] = 1, b'CD001', system.ljust(32)
+    struct.pack_into('<I', pvd, 156 + 2, 20)
+    struct.pack_into('<I', pvd, 156 + 10, S)
+    image[16 * S:17 * S] = pvd
+    name = b'SYSTEM.CNF;1'
+    record = bytearray(33 + len(name) + 1)
+    record[0], record[32] = len(record), len(name)
+    struct.pack_into('<I', record, 2, 22)
+    struct.pack_into('<I', record, 10, len(cnf))
+    record[33:33 + len(name)] = name
+    image[20 * S:20 * S + len(record)] = record
+    image[22 * S:22 * S + len(cnf)] = cnf
+    path.write_bytes(bytes(image))
+    return path
+
+
+def test_identify_tells_other_consoles_and_archives_by_their_headers(tmp_path):
+    source = wizard_source(tmp_path, fake_xbe())
+    assert engine.identify_game(iso9660(tmp_path / 'ps2.iso'), source)['kind'] == 'ps2'
+    assert engine.identify_game(iso9660(tmp_path / 'ps1.iso', cnf=b'BOOT = cdrom:\\SLUS_000.00;1'), source)['kind'] == 'playstation'
+    assert engine.identify_game(iso9660(tmp_path / 'pc.iso', system=b'WIN32'), source)['kind'] == 'unknown'
+    cube = bytearray(0x440)
+    cube[0:6], cube[0x1C:0x20] = b'GDJE69', b'\xc2\x33\x9f\x3d'
+    cube[0x20:0x20 + 21] = b'Def Jam: Fight for NY'
+    (tmp_path / 'gc.iso').write_bytes(bytes(cube))
+    assert engine.identify_game(tmp_path / 'gc.iso', source)['kind'] == 'gamecube'
+    cube[0x20:0x20 + 21] = b'Some other cube game!'
+    (tmp_path / 'gc2.iso').write_bytes(bytes(cube))
+    assert engine.identify_game(tmp_path / 'gc2.iso', source)['kind'] == 'gamecube-other'
+    wii = bytearray(0x440)
+    wii[0x18:0x1C] = b'\x5d\x1c\x9e\xa3'
+    (tmp_path / 'wii.iso').write_bytes(bytes(wii))
+    assert engine.identify_game(tmp_path / 'wii.iso', source)['kind'] == 'wii'
+    (tmp_path / 'game.rvz').write_bytes(b'RVZ\x01' + bytes(100))
+    assert engine.identify_game(tmp_path / 'game.rvz', source)['kind'] == 'dolphin'
+    with zipfile.ZipFile(tmp_path / 'packed.iso', 'w') as packed:
+        packed.writestr('game.iso', b'x')
+    verdict = engine.identify_game(tmp_path / 'packed.iso', source)
+    assert verdict['kind'] == 'archive' and 'ZIP' in verdict['message']
+    (tmp_path / 'random.iso').write_bytes(os.urandom(70000))
+    assert engine.identify_game(tmp_path / 'random.iso', source)['kind'] == 'unknown'
+    assert engine.identify_game(tmp_path / 'gone.iso', source)['kind'] == 'missing'
+
+
+def test_identify_folders_like_the_install_does(tmp_path):
+    xbe = fake_xbe()
+    source = wizard_source(tmp_path, xbe)
+    game = tmp_path / 'dumps/extracted'
+    (game / 'audio').mkdir(parents=True)
+    (game / 'default.xbe').write_bytes(xbe)
+    (game / 'audio/a.bin').write_bytes(b'1')
+    assert engine.identify_game(game, source)['kind'] == 'incomplete'      # 2 of 3 files
+    (game / 'b.bin').write_bytes(b'2')
+    assert engine.identify_game(game, source)['ok']
+    # The folder around the dump, as players choose it: the one game inside is used.
+    verdict = engine.identify_game(tmp_path / 'dumps', source)
+    assert verdict['ok'] and Path(verdict['path']) == game.resolve()
+    xdvdfs_image(tmp_path / 'dumps/copy.iso', {'default.xbe': xbe, 'audio/a': b'1', 'b': b'2'})
+    assert engine.identify_game(tmp_path / 'dumps', source)['kind'] == 'many-games'
+    (tmp_path / 'empty').mkdir()
+    assert engine.identify_game(tmp_path / 'empty', source)['kind'] == 'no-game-folder'
+
+
+def test_find_games_lists_this_game_best_first_and_skips_unrelated_images(tmp_path, monkeypatch):
+    monkeypatch.setattr(engine, 'MIN_IMAGE_BYTES', 0)
+    xbe = fake_xbe()
+    source = wizard_source(tmp_path, xbe)
+    games = tmp_path / 'Games/deep/er'
+    games.mkdir(parents=True)
+    xdvdfs_image(games / 'Def Jam (Europe).iso', {'default.xbe': fake_xbe(region=4, pad=b'p'), 'audio/a': b'1'})
+    xdvdfs_image(games / 'mine.iso', {'default.xbe': xbe, 'audio/a': b'1', 'b': b'2'})
+    xdvdfs_image(games / 'halo.iso', {'default.xbe': fake_xbe(title_id=1, name='Halo', region=7), 'audio/a': b'1'})
+    (games / 'notes.txt').write_text('x')
+    # An earlier installation's own copy (<data>\extracted) is not offered as a dump.
+    copy = tmp_path / 'Games/FFNY Online/data/extracted'
+    (copy / 'audio').mkdir(parents=True)
+    for name, blob in (('default.xbe', xbe), ('audio/a', b'1'), ('b', b'2')):
+        (copy / name).write_bytes(blob)
+    (copy.parent / 'extraction-state.json').write_text('{}')
+    found = engine.find_games(source, [(tmp_path / 'Games', 3)])
+    assert [g['name'] for g in found] == ['mine.iso', 'Def Jam (Europe).iso']
+    assert found[0]['ok'] and found[1]['kind'] == 'pal' and found[0]['folder'] == str(games)
+    assert engine.find_games(source, [(tmp_path / 'Games', 1)]) == []      # deeper than asked
+
+
+def test_plan_folder_checks_and_fixes_in_plain_words(tmp_path, monkeypatch):
+    monkeypatch.setattr(engine, 'drive_free', lambda path: 500 * 1024**3)
+    monkeypatch.setattr(engine, 'suggest_folder', lambda needed: tmp_path / 'Suggested/FFNY Online')
+    for key in ('OneDrive', 'OneDriveConsumer', 'OneDriveCommercial'):
+        monkeypatch.delenv(key, raising=False)
+    for key in ('TEMP', 'TMP'):                         # pytest's folders live there
+        monkeypatch.setenv(key, str(tmp_path / 'temp'))
+    dump = tmp_path / 'dump.iso'
+    dump.write_bytes(b'x' * 1000)
+    target = tmp_path / 'Games/FFNY Online'
+    plan = engine.plan_folder(target, dump, hd=True)
+    assert plan['ok'] and plan['install_dir'] == str(target / 'app') and plan['data_dir'] == str(target / 'data')
+    assert [c['id'] for c in plan['checks']] == ['space', 'write', 'place', 'dump']
+    assert not target.exists()                                         # nothing is created
+    # The game file inside the folder.
+    inside = engine.plan_folder(tmp_path, dump)
+    assert inside['folder'] == str(tmp_path / 'FFNY Online') and inside['adjusted']   # a busy folder gets its own
+    nested = engine.plan_folder(tmp_path / 'Games', tmp_path / 'Games/FFNY Online/x.iso')
+    assert nested['ok'] is False and any(c['id'] == 'dump' and not c['ok'] and c['fix'] for c in nested['checks'])
+    # Too little space: HD textures are named as the thing to turn off when that is enough.
+    monkeypatch.setattr(engine, 'drive_free', lambda path: 20 * 1024**3)
+    short = engine.plan_folder(target, dump, hd=True)
+    space = next(c for c in short['checks'] if c['id'] == 'space')
+    assert not short['ok'] and not space['ok'] and 'HD textures' in space['fix']
+    # OneDrive.
+    monkeypatch.setattr(engine, 'drive_free', lambda path: 500 * 1024**3)
+    monkeypatch.setenv('OneDrive', str(tmp_path / 'OneDrive'))
+    cloud = engine.plan_folder(tmp_path / 'OneDrive/Games', dump)
+    assert not cloud['ok'] and 'OneDrive' in next(c for c in cloud['checks'] if c['id'] == 'place')['text']
+
+
+def test_plan_folder_keeps_an_earlier_installation_and_its_data(tmp_path, monkeypatch):
+    monkeypatch.setattr(engine, 'drive_free', lambda path: 500 * 1024**3)
+    monkeypatch.setattr(engine, 'suggest_folder', lambda needed: tmp_path / 'other')
+    folder = tmp_path / 'FFNY Online'
+    (folder / 'app').mkdir(parents=True)
+    engine.write_json(folder / 'app/installed.json', {'schema': 1, 'data': str(tmp_path / 'saves')})
+    for chosen in (folder, folder / 'app'):
+        plan = engine.plan_folder(chosen)
+        assert plan['existing'] and plan['folder'] == str(folder) and plan['data_dir'] == str(tmp_path / 'saves')
+        assert plan['checks'][-1]['id'] == 'existing'
+
+
+def test_wizard_questions_answer_into_a_file_and_installs_still_need_their_folders(tmp_path):
+    xbe = fake_xbe()
+    source = wizard_source(tmp_path, xbe)
+    image = xdvdfs_image(tmp_path / 'good.iso', {'default.xbe': xbe, 'audio/a': b'1', 'b': b'2'})
+    out = tmp_path / 'answer.json'
+    assert engine.main(['--payload', str(tmp_path), '--source-root', str(source), '--identify', str(image), '--out', str(out)]) == 0
+    assert json.loads(out.read_text(encoding='utf-8'))['ok'] is True
+    assert engine.main(['--payload', str(tmp_path), '--dump', str(image), '--data-dir', str(tmp_path / 'd')]) == 2
