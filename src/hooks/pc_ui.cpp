@@ -1655,8 +1655,10 @@ static void voice_settings()
 static void discord_status_setting()
 {
     settings_group("online", { "discord_status" });
-    ImGui::SameLine();
-    ImGui::TextDisabled("Shows what you play in your Discord profile, with your fighter and opponents online.");
+    ImGui::PushTextWrapPos(0.0f);
+    ImGui::TextDisabled("Shows \"Playing FFNY Online\" in your Discord profile; online with the mode, the venue, your "
+                        "fighter and the other players' names.");
+    ImGui::PopTextWrapPos();
 }
 
 // Online: the connection settings. The hub itself (quick match, rooms, the venue vote) is in the
