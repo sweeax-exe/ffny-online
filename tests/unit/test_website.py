@@ -60,7 +60,8 @@ def test_no_external_scripts_styles_or_fonts():
     assert not re.search(r'<link[^>]+href="(?:https?:)?//[^"]*"[^>]*rel="(?:stylesheet|preload)"', html)
     assert not re.search(r'<link[^>]+rel="(?:stylesheet|preload)"[^>]+href="(?:https?:)?//', html)
     assert '@import' not in css and not re.search(r'url\(\s*[\'"]?(?:https?:)?//', css)
-    assert set(re.findall(r'https://[a-z0-9.-]+', js)) <= {'https://api.github.com', 'https://github.com'}
+    assert set(re.findall(r'https://[a-z0-9.-]+', js)) <= {'https://api.github.com', 'https://github.com',
+                                                           'https://play.defjam.online'}
     assert 'document.cookie' not in js
 
 
@@ -86,3 +87,17 @@ def test_the_build_refuses_a_picture_the_owner_has_not_approved(monkeypatch, tmp
 
 def test_the_build_output_is_ignored_by_git():
     assert 'website/dist/' in (ROOT / '.gitignore').read_text(encoding='utf-8').splitlines()
+
+
+def test_the_tournaments_section_stays_hidden_until_the_service_answers():
+    html = (ROOT / 'website/index.html').read_text(encoding='utf-8')
+    assert re.search(r'<section[^>]+id="tournaments"[^>]*hidden', html)
+    assert re.search(r'<a[^>]+id="nav-tournaments"[^>]*hidden', html)
+    js = (ROOT / 'website/site.js').read_text(encoding='utf-8')
+    assert "credentials: 'omit'" in js.split('function loadTournaments')[1]
+    assert 'innerHTML' not in js  # text from the service goes in with textContent only
+
+
+def test_the_site_csp_allows_the_tournament_api():
+    snippet = (ROOT / 'netplay/relay/deploy/Caddyfile.site-snippet').read_text(encoding='utf-8')
+    assert 'connect-src https://api.github.com https://play.defjam.online;' in snippet
