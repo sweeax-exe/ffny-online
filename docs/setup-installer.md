@@ -276,9 +276,10 @@ same `ditto` and `xattr` calls on a quarantined archive).
 
 `DefJamSetup-<version>-linux-x64.tar.gz` unpacks to a folder holding `DefJamSetup.sh`,
 "READ ME FIRST" and the third-party licenses. It needs x86-64 Linux with a Vulkan
-GPU and, at run time, SDL3 3.2 or newer, the Vulkan loader and shaderc -- SteamOS 3.8
-has all three -- plus about 12 GiB free and room for the dump copy. It brings its own
-Python (with Tk, for the wizard) and needs no Python, CMake or Git of your own.
+GPU, glibc 2.31 or newer and the Vulkan loader -- SteamOS and every current desktop
+distribution have them -- plus about 13 GiB free and room for the dump copy. It brings its
+own Python (with Tk, for the wizard) and its own build toolchain, and needs no compiler,
+packages, Python, CMake or Git of your own, and no internet connection.
 
 **Start it.** Open `DefJamSetup.sh`; on the Steam Deck, in Desktop Mode, double-click it
 in Dolphin and choose Execute. The wizard has the same controls as the others -- your
@@ -293,15 +294,20 @@ Python after the game is built ([HD textures](hd-textures.md)). **On the Steam D
 install with upscaled textures takes about 15 minutes** (about 10 of them for the upscale;
 see [Validation](#validation-1)); keep the Deck plugged in and awake.
 
-**The compiler.** If this computer has one (clang, cmake, ninja and the SDL3, Vulkan
-and shaderc development packages; one probe build checks them), setup uses it. If not
--- SteamOS has no compiler, but has podman -- setup builds in a container: Arch Linux
-pinned by image digest and by an archive date whose glibc, SDL3, shaderc and Vulkan
-loader are SteamOS 3.8's own, so the game it builds runs on SteamOS's libraries. The
-container is fetched once (about 1 GB, so the first install needs internet), runs
-without network access and sees only the install and data folders. `--toolchain host`
-or `--toolchain container` forces either. After the build, setup checks with `ldd`
-that the game's libraries are all present on this computer and says which are not.
+**The compiler.** Setup builds with the toolchain it carries (since v0.14.0, design §6):
+Zig's clang targeting x86-64 Linux with glibc 2.31 symbols, CMake, Ninja, and SDL3 and
+shaderc built with that compiler and linked into the game statically. Nothing from the
+computer is used for the build, so it is the same on every distribution (the CachyOS
+failure of #83/#90 came from a computer's own toolchain), and the game it builds needs
+only glibc 2.31 or newer and the computer's own Vulkan loader: SDL loads X11 or Wayland,
+PipeWire, PulseAudio or ALSA, D-Bus and udev from the computer when the game starts. Zig
+compiles its C and C++ runtimes once per version, into the version's `zig-cache`. Two
+developer options remain: `--toolchain host` (the computer's clang, cmake, ninja and the
+SDL3, Vulkan and shaderc development packages; one probe build checks them; the game then
+uses the computer's SDL3 and shaderc) and `--toolchain container` (the pinned Arch Linux
+container of v0.6-v0.13, fetched once with podman, about 1 GB). After the build, setup
+checks with `ldd` that the game's libraries are all present on this computer and says
+which are not.
 
 **Afterwards.** Setup writes the launcher, `Def Jam Recompiled`, into the install folder,
 an application-menu entry, a desktop shortcut unless you clear the choice, and asks
@@ -318,19 +324,21 @@ opens its launcher window first and has the F1 overlay, as on the other platform
 ./DefJamSetup.sh --silent --dump ~/Dumps/DefJam.iso \
     --install-dir ~/Games/DefJamRecompiled/App --data-dir ~/Games/DefJamRecompiled/Data \
     [--steam-shortcut | --steam-art] [--no-desktop-shortcut | --no-shortcuts] [--hd-textures] \
-    [--toolchain host|container]
+    [--toolchain bundled|host|container]
 ./DefJamSetup.sh --uninstall --install-dir ~/Games/DefJamRecompiled/App
 ```
 
 Exit codes as on the other platforms: 0 success; 2 invalid input; 3 prerequisites
-missing (no toolchain and no podman, the container could not be fetched, or the
+missing (the bundled toolchain does not run here; with `--toolchain host` or
+`container`, no toolchain or no podman, or the container could not be fetched; or the
 game's libraries are missing); 4 failed stage; 5 another setup or the game is
 running; 6 cancelled. `--hd-textures` generates and enables the HD packs. Uninstalling
 removes the application, the launcher and the menu and desktop entries it made, and keeps
 the dump copy, saves, settings, generated HD packs and logs. A
 Steam shortcut stays in Steam until you remove it there (in the Library, the game's
-**Manage** menu, *Remove non-Steam game from your library*), and the build container stays
-in podman's store (`podman rmi $(podman images -q localhost/defjam-recompiled-build)`).
+**Manage** menu, *Remove non-Steam game from your library*), and a build container
+(`--toolchain container` only) stays in podman's store
+(`podman rmi $(podman images -q localhost/defjam-recompiled-build)`).
 
 ### What the Linux payload carries
 
@@ -338,10 +346,17 @@ The source, python-build-standalone's CPython with the `pyxbe` and `capstone` wh
 and, for the HD upscale, the manylinux `Pillow` and `NumPy` wheels (since v0.7.2),
 the wizard, the engine and the launcher template, each pinned by SHA-256 in
 `setup/dependencies-linux.json` with the build container's image digest, archive
-date and package list. It carries no compiler and no libraries. Build it with
-`scripts/build-setup-linux.sh` (`--development` for a local prototype from a dirty
-checkout); `check-setup-assets.py` verifies that the tarball's payload is the
-inspected one, byte for byte, and nothing else.
+date and package list. Since v0.14.0 it also carries the game's build toolchain
+(`toolchain` in the same file): `tools/zig` (Zig's release, pruned to what an
+x86_64-linux-gnu build reads) with the `tools/bin/zig-cc`, `zig-c++`, `zig-ar` and
+`zig-ranlib` wrappers, CMake and Ninja in `tools/`, and in `deps/` the static SDL3 (the
+toolkit's pin) and shaderc (the macOS payload's pin), the Vulkan headers and a link-only
+stub of the Vulkan loader's entry points. `scripts/build-toolchain-linux.sh` builds `deps/`
+with the payload's own Zig in the pinned Ubuntu 22.04 image, which supplies only headers.
+Build it with `scripts/build-setup-linux.sh` (`--development` for a local prototype from a
+dirty checkout); `check-setup-assets.py` verifies that the tarball's payload is the
+inspected one, byte for byte, and nothing else, and that its compiler builds and runs a C++
+program linked against glibc 2.31 at most.
 
 ### Validation
 

@@ -63,7 +63,7 @@ const Stage k_stages[] = {
     {"Prepare the setup files", {"Preparing verified release source", nullptr}},
     {"Verify your dump", {"Verifying and preparing your dump", "Verified installed dump", "Verified extraction"}},
     {"Check the build tools", {"Checking ", "Installing Microsoft Build Tools", "Preparing the build container",
-                               "Building with this computer"}},
+                               "Building with this computer", "Building with the compiler that came"}},
     {"Analyse the game's code", {"Analysis ", nullptr}},
     {"Translate it to C", {"Lift ", nullptr}},
     {"Compile the game", {"Build ", "Building in the build container", nullptr}},
@@ -634,9 +634,8 @@ void finished_page(float width, float height, UiResult *result)
                                "in Terminal), then try again.");
 #else
         if (g_run.exit_code == 3)
-            ImGui::TextWrapped("This computer has no build tools for the game. Install podman (setup then builds in a "
-                               "container it downloads once, about 1 GB), or clang, cmake, ninja and the SDL3, "
-                               "Vulkan and shaderc development packages, then try again. SteamOS has podman.");
+            ImGui::TextWrapped("The build tools that came with the app did not work on this computer. The setup log "
+                               "says why; please include it in a bug report.");
 #endif
         if (app::install().installed)
             ImGui::TextWrapped("The installed game is unchanged and still playable.");

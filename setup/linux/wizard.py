@@ -122,8 +122,8 @@ def wizard(payload, smoke=False):
                     variable=hd).grid(row=3, column=0, sticky='w')
     ttk.Label(options, text='Adds about 6.2 GB; needs extra working space. No GPU needed.',
               foreground='#555').grid(row=4, column=0, sticky='w', padx=(24, 0))
-    ttk.Label(frame, text='Setup builds the game from your copy on this computer. The first install takes '
-                          'a while; without a compiler it downloads a build container once (about 1 GB).',
+    ttk.Label(frame, text='Setup builds the game from your copy on this computer with the compiler it brings '
+                          'along; nothing else is installed or downloaded. The first install takes a while.',
               wraplength=640, foreground='#555').grid(row=5, column=0, columnspan=4, sticky='w', pady=8)
     progress = ttk.Progressbar(frame, mode='indeterminate')
     progress.grid(row=6, column=0, columnspan=4, sticky='ew', pady=4)
