@@ -107,6 +107,7 @@ int netplay_lobby_address(char *o, int n) { (void)o; (void)n; return 0; }
 int netplay_rtt(void) { return -1; }
 void netplay_build_fingerprint(uint8_t o[8]) { memset(o, 0, 8); }
 int netplay_room_ping(int s) { (void)s; return -1; }
+int netplay_room_results_wait(unsigned *s) { if (s) *s = 0; return 0; }
 int netplay_lobby_caps(void) { return 0; }
 void netplay_sync_point(void) {}
 void netplay_on_main_menu(void) {}
@@ -2853,6 +2854,25 @@ int netplay_room_ping(int slot)
     if (!N.lobby || !N.roomv.in_room || slot < 0 || slot >= ROOMSLOTS) return -1;
     if (slot == N.roomv.you) return N.rtt_ms;
     return N.slot_rtt[slot];
+}
+
+/* The relay keeps a room playing until every member sent OVER (since build 46, 60 s after the first
+ * one at most): this PC is back from the match while a player stays on its results. The players still
+ * there as far as this PC knows: those whose No on the results (P_REMATCH, "went back") has not come. */
+int netplay_room_results_wait(unsigned *slots)
+{
+    int on, i;
+    unsigned m = 0;
+    InitOnceExecuteOnce(&g_once, init_once, NULL, NULL);
+    EnterCriticalSection(&g_cs);
+    on = N.lobby && N.roomv.in_room && N.roomv.phase == 2 && !SPECTATOR_HERE() &&
+         !NETPLAY_IS_KOTH(N.roomv.settings.mode) && !N.match_live && N.over_pending;
+    for (i = 0; on && i < N.players && i < MAXP; i++)
+        if (i != N.pos && N.rematch_want[i] != REMATCH_NO && N.start_slots[i] >= 0 && N.start_slots[i] < 32)
+            m |= 1u << N.start_slots[i];
+    LeaveCriticalSection(&g_cs);
+    if (slots) *slots = m;
+    return on;
 }
 
 int netplay_lobby_caps(void) { return N.lobby ? N.relay_caps : 0; }

@@ -913,6 +913,8 @@ struct Gallery {
     int cp_pick = 0;                // the sample player's picked created fighter (cp_cards index)
     bool cp_long = false;           // the samples use 16-character online names (the "-long" pages)
     std::string cp_online[3];       // the sample cards' online names ("" the user ID; NAME saves here)
+    bool results_wait = false;      // the room still plays: this PC is back, another is on its results
+    unsigned results_slots = 0;     // ... the room slots still there (netplay_room_results_wait)
 } G;
 
 bool gallery_on()
@@ -1088,6 +1090,12 @@ int room_ping(int slot)
 {
     if (gallery_on()) return slot >= 0 && slot < NETPLAY_ROOM_SLOTS ? G.room_pings[slot] : -1;
     return netplay_room_ping(slot);
+}
+// The relay still has the room playing while this PC is back from the match (netplay_room_results_wait).
+bool results_wait(unsigned *slots)
+{
+    if (gallery_on()) { *slots = G.results_slots; return G.results_wait; }
+    return netplay_room_results_wait(slots) != 0;
 }
 
 // Ping colours: good, fair, high.
@@ -3035,6 +3043,9 @@ void draw_room(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
         return;
     }
     if (watcher) host = false;
+    // The relay still plays the room's match while this PC is back: who is still on the results
+    unsigned results_slots = 0;
+    bool results_back = !watcher && r.phase == 2 && results_wait(&results_slots);
 
     NetRankInfo ri;
     bool ranked = ranked_room(r, &ri);
@@ -3139,7 +3150,10 @@ void draw_room(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
                 text(dl, f, g_title, 10, x + w - 5, y + 6, ping_colour(ms), line, RIGHT, 1.0f);
             }
         }
-        if (p.ready) {
+        if (r.phase == 2 && p.slot < 32 && (results_slots & (1u << p.slot))) {   // still on the last match's results
+            rect(dl, f, x + 14, y + 240, w - 28, 22, IM_COL32(60, 60, 66, 230), 5);
+            text(dl, f, g_title, 13, x + w / 2, y + 243, CREAM, "ON RESULTS", CENTER, 0.8f);
+        } else if (p.ready && r.phase != 2) {   // while the relay still plays the match the flags are the last one's
             rect(dl, f, x + 14, y + 240, w - 28, 22, with_alpha(RED, 0.9f), 5);
             text(dl, f, g_title, 15, x + w / 2, y + 242, WHITE, "READY", CENTER, 0.8f);
         }
@@ -3159,6 +3173,29 @@ void draw_room(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
              CENTER, 0.8f);
         hint(dl, f, 54, 392, "b", "LEAVE ROOM");
         if (pad.b) { netplay_lobby_leave(); S.page = HUB; say("You stopped watching the room."); }
+        return;
+    }
+    if (r.phase == 2) {
+        // The relay keeps the room playing until every player is back from the match (60 s after the
+        // first at most, since build 46): READY, the fighter and the settings are refused until then, so
+        // none is offered. Said who it waits for (their No on the results has not come).
+        std::string who;
+        int named = 0, total = 0;
+        for (int i = 0; i < r.player_count; i++)
+            if (r.players[i].slot < 32 && (results_slots & (1u << r.players[i].slot))) total++;
+        for (int i = 0; i < r.player_count; i++) {
+            if (r.players[i].slot >= 32 || !(results_slots & (1u << r.players[i].slot))) continue;
+            named++;
+            if (named > 1) who += named == total ? " and " : ", ";
+            who += r.players[i].name;
+        }
+        std::string line = !results_back ? "A match is on in this room..." :
+                           who.empty() ? "Waiting for the others to leave the results..." :
+                                         "Waiting for " + who + " to leave the results...";
+        float size = fit_size(f, g_hand, 15, line.c_str(), 540);
+        text(dl, f, g_hand, size, 320, team ? 374 : 366, ORANGE, line.c_str(), CENTER, 0.8f);
+        hint(dl, f, 54, 392, "b", "LEAVE ROOM");     // leaving a ranked room while it plays is no forfeit
+        if (pad.b) { netplay_lobby_leave(); S.page = HUB; say("You left the room."); }
         return;
     }
     // hints
@@ -3712,7 +3749,9 @@ void gallery_step()
                                          "ranked-versus", "ranked-results", "ranked-results-placement", "stats-ranked",
                                          // ranked phase 2b: Draft
                                          "ranked-draft-ban", "ranked-draft-venue", "ranked-draft-blind",
-                                         "ranked-draft-pick", "ranked-draft-reveal", "stats-ranked-draft" };
+                                         "ranked-draft-pick", "ranked-draft-reveal", "stats-ranked-draft",
+                                         // build 46: back from a match while another player is on its results
+                                         "room-results", "room-results-ffa" };
     const int count = (int)(sizeof(pages) / sizeof(pages[0]));
     static unsigned long long start;
     static int ms;
@@ -3813,6 +3852,8 @@ void gallery_step()
     }
     G.cp_slots = 0;
     G.cp_pick = 0;
+    G.results_wait = false;
+    G.results_slots = 0;
     std::string p = page;
     // the "-long" pages: Ann's first card plays as the widest 16 characters, Ben's as "Brooklyn Bruiser"
     G.cp_long = p.size() > 5 && p.compare(p.size() - 5, 5, "-long") == 0;
@@ -3913,6 +3954,17 @@ void gallery_step()
         G.room.player_count = 3;
     }
     else if (p == "room-special") { S.page = HUB; G.room = sample_room(10, 2, 2); }
+    else if (p == "room-results" || p == "room-results-ffa") {
+        // build 46: back from the match while the relay still plays it (Ben, and in the FFA also Cal,
+        // still on the results): no READY offered, the wait said
+        bool ffa = p == "room-results-ffa";
+        S.page = HUB;
+        G.room = ffa ? sample_room(3, 4, 3) : sample_room(0, 2, 2);
+        G.room.phase = 2;
+        for (int i = 0; i < G.room.player_count; i++) G.room.players[i].ready = 1;
+        G.results_wait = true;
+        G.results_slots = ffa ? 6u : 2u;
+    }
     else if (p == "vote") {
         S.page = HUB;
         G.room = sample_room(0, 2, 2);

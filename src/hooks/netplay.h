@@ -197,6 +197,11 @@ void netplay_build_fingerprint(uint8_t out[8]);     /* HELLO's build field: room
 /* A room member's ping to the relay in ms, as it reports it (relay slot), -1 not known; this PC's
  * own slot gives netplay_rtt(). Players report it every two seconds in a room (builds from 30). */
 int netplay_room_ping(int slot);
+/* 1 while the relay still has this PC's room playing although this PC is back from the match (it sent
+ * OVER): another player is still on the results, or its game hangs there. `slots` (may be NULL) gets the
+ * room slots of the players still on the results as far as this PC knows (bit per slot; 0 when it does
+ * not know who). READY is refused then; the room page says what it waits for. */
+int netplay_room_results_wait(unsigned *slots);
 
 /* From automatch: the agreed match is about to be set up (every PC reaches this point at the
  * same place in the front end), and the front end is back in the menus (the main menu, or the
