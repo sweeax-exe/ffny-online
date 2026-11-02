@@ -4439,7 +4439,11 @@ void netplay_on_step(void)
  * "came out otherwise" (2026-11-02: 6% of steps; two re-runs of the same steps agreed on all). */
 #define SOAK_PAD_RING 64
 static uint32_t s_soak_pad[SOAK_PAD_RING][MAXP][8], s_soak_pad_tag[SOAK_PAD_RING][MAXP];
-static int s_soak_wrong;    /* RECOMP_ROLLBACK_SOAK_WRONG: this re-run gets other buttons (a wrong prediction) */
+/* RECOMP_ROLLBACK_SOAK_WRONG: this re-run gets other buttons (a wrong prediction) for the steps from
+ * s_soak_wrong on; reads for earlier steps (an update without a fight step at the start of the re-run
+ * reads the last final step) stay right, as online, where only steps not yet final are predicted. Applied
+ * to those too, the soak itself spoiled the save of the step it went back to (2026-11-02). */
+static uint32_t s_soak_wrong;
 
 static void soak_pad(uint32_t actor)
 {
@@ -4455,7 +4459,7 @@ static void soak_pad(uint32_t actor)
     } else if (s_soak_pad_tag[k][slot] == N.step + 1) {
         for (i = 0; i < 8; i++) MEM32(base + i * 4u) = s_soak_pad[k][slot][i];
         /* a wrong prediction: the buttons of 23 steps earlier (another press, another stick) */
-        if (s_soak_wrong && s_soak_pad_tag[(N.step + SOAK_PAD_RING - 23) % SOAK_PAD_RING][slot] == N.step + 1 - 23)
+        if (s_soak_wrong && N.step >= s_soak_wrong && s_soak_pad_tag[(N.step + SOAK_PAD_RING - 23) % SOAK_PAD_RING][slot] == N.step + 1 - 23)
             for (i = 0; i < 7; i++) MEM32(base + i * 4u) = s_soak_pad[(N.step + SOAK_PAD_RING - 23) % SOAK_PAD_RING][slot][i];
     }
 }
@@ -4693,7 +4697,9 @@ static void rollback_to(uint32_t f)
     N.resim = 1;
     rollback_set_resim(1);
     for (j = 0; j < n; j++) {
-        if (j) snap_save();
+        /* not the save gone back to: an update without a fight step at the start of the re-run would
+         * save it again, one update later (equivalent, but every later load of it then starts there) */
+        if (j && N.step + 1 != f) snap_save();
         guest_call(sub_000DD930, input, 1, &dt);
         guest_call(sub_00077040, machine, 1, &dt);
         if (g_eax & 0xFFu) {
@@ -4795,7 +4801,9 @@ void netplay_on_update(void)
             }
             for (k = 0; k < d; k++) before[k] = defjam_test_step_hash(t - d + k);
             if (rollback_soak_diff_on() && !twice) rollback_soak_before();
+            if (wrong && rollback_soak_diff_on()) rollback_soak_phase(1);
             rollback_to(N.step + 1 - (uint32_t)d);
+            rollback_soak_phase(0);
             if (rollback_soak_diff_on() && !twice) rollback_soak_after(d, t, 0);
             if (twice) {
                 /* Both re-runs draw nothing, so what the first pass's renders wrote is no difference here:
@@ -4806,11 +4814,13 @@ void netplay_on_update(void)
                 for (k = 0; k < d; k++) first[k] = defjam_test_step_hash(t - d + k);
                 if (rollback_soak_diff_on()) rollback_soak_before();
                 if (wrong) {    /* what a wrong prediction leaves behind that the load does not take back */
-                    s_soak_wrong = 1;
+                    s_soak_wrong = N.step + 1 - (uint32_t)d;
                     rollback_to(N.step + 1 - (uint32_t)d);
                     s_soak_wrong = 0;
                 }
+                if (wrong && rollback_soak_diff_on()) rollback_soak_phase(3);
                 rollback_to(N.step + 1 - (uint32_t)d);
+                rollback_soak_phase(0);
                 {
                     int differ_here = 0;
                     for (k = 0; k < d; k++) {
@@ -4826,6 +4836,7 @@ void netplay_on_update(void)
                     }
                     /* every saved word that differs, when a step did (the first such soaks) */
                     if (rollback_soak_diff_on()) rollback_soak_after(d, t, differ_here);
+                    if (differ_here && wrong) rollback_soak_carriers(t);
                 }
                 if ((soaks + 1) % 100 == 0)
                     fprintf(stderr, "[ROLLBACK] soak, two re-runs: %u steps the same, %u otherwise\n", twice_same, twice_differ);

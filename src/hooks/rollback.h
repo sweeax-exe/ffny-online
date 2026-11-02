@@ -41,6 +41,8 @@ void rollback_check_tables(const char *where);
 /* Called by the crash report (src/main.c) when set: netplay prints the rollback state. */
 extern void (*rollback_crash_cb)(void);
 void rollback_heap_range(uint32_t *lo, uint32_t *hi);   /* the game's heap block in the contiguous window */
+void rollback_soak_phase(int phase);        /* tests: 1 first correct re-run, 2 wrong, 3 second, 0 off */
+void rollback_soak_carriers(long long step);    /* tests: what the wrong pass left outside the saves */
 int rollback_soak_diff_on(void);            /* tests: RECOMP_ROLLBACK_SOAK_DIFF=1 */
 void rollback_soak_before(void);            /* the whole .data and heap before a soak goes back */
 void rollback_soak_after(int depth, long long step, int verbose);  /* what the re-run made otherwise */
