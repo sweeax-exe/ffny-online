@@ -180,6 +180,82 @@ static int in_arena(uint32_t a)
         if (a >= s_chunk_lo[k] && a < s_chunk_hi[k]) return 1;
     return 0;
 }
+/* Tests (RECOMP_ROLLBACK_ARENA_WATCH=1): while steps run again the arena's pages are read-only, so a
+ * write from the game thread into the sound engine's memory (through a handle the load brought back,
+ * to an object the engine may have given to someone else since) is caught with its call chain. The
+ * other threads' writes just unprotect the page. Printed when the re-run ends. */
+static volatile LONG s_arena_watch_on;
+static struct { uint32_t va, chain[4]; } s_aw_hit[64];
+static volatile LONG s_aw_n;
+static unsigned s_aw_told;
+static uint32_t s_aw_seen[256][2];
+static unsigned s_aw_nseen;
+static void call_chain(uint32_t sp, uint32_t *out, int max);
+
+static int arena_watch_wanted(void)
+{
+    static int on = -1;
+    if (on < 0) on = getenv("RECOMP_ROLLBACK_ARENA_WATCH") != NULL;
+    return on;
+}
+
+static void arena_watch_set(int on)
+{
+    int k;
+    DWORD old;
+    if (!arena_watch_wanted() || !s_nchunk) return;
+    /* the flag is up whenever a page may be read-only (another thread can fault at any moment) */
+    if (on) InterlockedExchange(&s_arena_watch_on, 1);
+    for (k = 0; k < s_nchunk; k++)
+        VirtualProtect(XBOX_PTR(s_chunk_lo[k]), s_chunk_hi[k] - s_chunk_lo[k], on ? PAGE_READONLY : PAGE_READWRITE, &old);
+    if (on) return;
+    InterlockedExchange(&s_arena_watch_on, 0);
+    {   /* what the re-run wrote, each call chain once */
+        LONG n = s_aw_n < 64 ? s_aw_n : 64, i;
+        for (i = 0; i < n; i++) {
+            unsigned j;
+            for (j = 0; j < s_aw_nseen; j++)
+                if (s_aw_seen[j][0] == s_aw_hit[i].chain[0] && s_aw_seen[j][1] == s_aw_hit[i].chain[1]) break;
+            if (j < s_aw_nseen) continue;
+            if (s_aw_nseen < 256) { s_aw_seen[s_aw_nseen][0] = s_aw_hit[i].chain[0]; s_aw_seen[s_aw_nseen++][1] = s_aw_hit[i].chain[1]; }
+            if (s_aw_told++ < 100)
+                fprintf(stderr, "[ROLLBACK-ARENA] the game thread wrote the sound engine's %08X in a re-run, from %08X <- %08X "
+                        "<- %08X <- %08X\n", s_aw_hit[i].va, s_aw_hit[i].chain[0], s_aw_hit[i].chain[1], s_aw_hit[i].chain[2],
+                        s_aw_hit[i].chain[3]);
+        }
+        InterlockedExchange(&s_aw_n, 0);
+    }
+}
+
+static int in_arena(uint32_t a);
+static int arena_watch_fault(uintptr_t host)
+{
+    uint32_t va;
+    DWORD old;
+    if (!s_arena_watch_on) return 0;
+    va = (uint32_t)(host - (uintptr_t)XBOX_PTR(0));
+    if (!in_arena(va)) return 0;
+    VirtualProtect((void *)(host & ~(uintptr_t)(PAGE - 1)), PAGE, PAGE_READWRITE, &old);
+    if (GetCurrentThreadId() == s_game_tid && !t_in_sound) {
+        LONG n = InterlockedIncrement(&s_aw_n) - 1;
+        if (n < 64) {
+            s_aw_hit[n].va = va;
+            call_chain(g_esp, s_aw_hit[n].chain, 4);
+        }
+    }
+    return 1;
+}
+
+/* a file read into the arena while it is watched (the stream buffers): unprotected first */
+static void arena_watch_read(uintptr_t host, size_t length)
+{
+    uintptr_t p;
+    DWORD old;
+    if (!s_arena_watch_on || !length) return;
+    if (!in_arena((uint32_t)(host - (uintptr_t)XBOX_PTR(0)))) return;
+    for (p = host & ~(uintptr_t)(PAGE - 1); p < host + length; p += PAGE) VirtualProtect((void *)p, PAGE, PAGE_READWRITE, &old);
+}
+
 static CRITICAL_SECTION s_arena_cs;
 static int s_arena_state;               /* 0 not yet, 1 on, -1 unavailable */
 static void arena_start(void);
@@ -369,6 +445,8 @@ static void first_write(uint32_t p, int game)
 /* src/main.c's crash report calls it: the rollback state at the crash. */
 void (*rollback_crash_cb)(void);
 
+static int arena_watch_fault(uintptr_t host);
+
 static LONG CALLBACK track_fault(PEXCEPTION_POINTERS e)
 {
     const EXCEPTION_RECORD *r = e->ExceptionRecord;
@@ -377,6 +455,7 @@ static LONG CALLBACK track_fault(PEXCEPTION_POINTERS e)
     if (r->ExceptionCode != EXCEPTION_ACCESS_VIOLATION || r->NumberParameters < 2) return EXCEPTION_CONTINUE_SEARCH;
     if (r->ExceptionInformation[0] != 1) return EXCEPTION_CONTINUE_SEARCH;
     a = (uintptr_t)r->ExceptionInformation[1];
+    if (arena_watch_fault(a)) return EXCEPTION_CONTINUE_EXECUTION;
     if (a < lo || a >= lo + (uintptr_t)HEAP_PAGES * PAGE) return EXCEPTION_CONTINUE_SEARCH;
     p = (uint32_t)((a - lo) / PAGE);
     if (s_mixguard[p] && InterlockedExchange8((volatile char *)&s_mixguard[p], 0)) {
@@ -404,6 +483,7 @@ static void track_read(void *host, size_t length)
     /* the file layer is synchronous for the game: a worker thread reads while the game thread waits
      * for it (sub_001E5420), into the game's buffers; audio streams read into the arena, not here */
     int game = 1;
+    arena_watch_read(a, length);
     if (!s_tracking || end <= lo || a >= lo + (uintptr_t)HEAP_PAGES * PAGE) return;
     {   /* how often the fight reads files into the heap, and on which thread (printed at saves) */
         LONG n = InterlockedIncrement(&s_reads);
@@ -767,7 +847,111 @@ static struct { uint32_t block, size, caller, chain0; LONG saves; } s_rerun[RERU
 static volatile int s_resim;
 uint32_t rollback_crash_va;
 
-void rollback_set_resim(int on) { s_resim = on; }
+/* The game's own sound globals (the k_data gaps 0x33E778..0x33ECA0 and 0x340318..0x340D58: voice handles,
+ * cue state and their counters, used by its audio code on the game thread) are never saved: sound is not
+ * rolled back. But a re-run's audio code still changes them, so a pass on a wrong prediction left them
+ * otherwise than the pass that is kept would have, and the next re-run read that (the wrong-prediction
+ * soak: the second correct re-run of a stretch differed from the first, cue counters at 0x340898 and
+ * then a fighter's input history). They are put back as they were before the re-runs.
+ * RECOMP_ROLLBACK_SOUND_GLOBALS=live leaves them as the re-runs make them (as before, for comparison). */
+static const Range k_sound_globals[] = { { 0x0033E778u, 0x0033ECA0u }, { 0x00340318u, 0x00340D58u } };
+static uint8_t s_sound_globals[(0x0033ECA0u - 0x0033E778u) + (0x00340D58u - 0x00340318u)];
+
+static int sound_globals_kept(void)
+{
+    static int on = -1;
+    if (on < 0) on = !(getenv("RECOMP_ROLLBACK_SOUND_GLOBALS") && !strcmp(getenv("RECOMP_ROLLBACK_SOUND_GLOBALS"), "live"));
+    return on;
+}
+
+/* Tests (the wrong-prediction soak with RECOMP_ROLLBACK_SOAK_DIFF): memory as the load left it before the
+ * first correct re-run (phase 1) against the same before the second (phase 3). The saved memory is the
+ * same by construction, so every word that differs is state outside the saves that the pass on wrong
+ * buttons changed: the carriers. Printed by rollback_soak_carriers when the steps came out otherwise. */
+#define SD_DATA_LO 0x002D5000u
+#define SD_DATA_HI 0x003CA000u
+static int s_lp_phase;
+static int s_lp_slot[4];
+static uint32_t s_lp_hash[4];
+static LONG s_lp_at[4];
+static uint8_t *s_lp_data, *s_lp_heap;
+static struct { uint32_t lo, hi, now, was; } s_lp_span[64];
+static unsigned s_lp_n;
+void rollback_soak_phase(int phase) { s_lp_phase = phase; }
+
+static void load_point(void)
+{
+    uint32_t a, p;
+    if (!s_lp_phase || !s_ready) return;
+    if (!s_lp_data) s_lp_data = (uint8_t *)malloc(SD_DATA_HI - SD_DATA_LO);
+    if (!s_lp_heap) s_lp_heap = (uint8_t *)malloc((size_t)HEAP_PAGES * PAGE);
+    if (!s_lp_data || !s_lp_heap) return;
+    if (s_lp_phase == 1) {
+        memcpy(s_lp_data, XBOX_PTR(SD_DATA_LO), SD_DATA_HI - SD_DATA_LO);
+        memcpy(s_lp_heap, XBOX_PTR(HEAP_LO), (size_t)HEAP_PAGES * PAGE);
+        return;
+    }
+    if (s_lp_phase != 3) return;
+    s_lp_n = 0;
+    for (a = SD_DATA_LO; a < SD_DATA_HI && s_lp_n < 64; a += 4) {
+        uint32_t lo;
+        if (*(uint32_t *)(s_lp_data + a - SD_DATA_LO) == MEM32(a)) continue;
+        lo = a;
+        s_lp_span[s_lp_n].now = MEM32(a);
+        s_lp_span[s_lp_n].was = *(uint32_t *)(s_lp_data + a - SD_DATA_LO);
+        while (a + 4 < SD_DATA_HI && *(uint32_t *)(s_lp_data + a + 4 - SD_DATA_LO) != MEM32(a + 4)) a += 4;
+        s_lp_span[s_lp_n].lo = lo;
+        s_lp_span[s_lp_n++].hi = a + 4;
+    }
+    for (p = 0; p < HEAP_PAGES && s_lp_n < 64; p++) {
+        const uint32_t *was = (const uint32_t *)(s_lp_heap + (size_t)p * PAGE);
+        const uint32_t *now = (const uint32_t *)XBOX_PTR(HEAP_LO + p * PAGE);
+        unsigned w;
+        if (!memcmp(was, now, PAGE)) continue;
+        for (w = 0; w < PAGE / 4 && s_lp_n < 64; w++) {
+            unsigned e;
+            if (was[w] == now[w]) continue;
+            if (s_mixmask[p] && (s_mixmask[p][w >> 3] & (1u << (w & 7)))) continue;
+            for (e = w; e + 1 < PAGE / 4 && was[e + 1] != now[e + 1]; e++) {}
+            s_lp_span[s_lp_n].lo = HEAP_LO + p * PAGE + w * 4;
+            s_lp_span[s_lp_n].hi = HEAP_LO + p * PAGE + e * 4 + 4;
+            s_lp_span[s_lp_n].now = now[w];
+            s_lp_span[s_lp_n++].was = was[w];
+            w = e;
+        }
+    }
+}
+
+static const char *data_kind(uint32_t a);
+void rollback_soak_carriers(long long step)
+{
+    static unsigned told;
+    unsigned i;
+    if (told < 400)
+        fprintf(stderr, "[SOAKDIFF] carriers at step %lld: the loads read save %d (hash %08X, %ld saves in) and %d (hash %08X, %ld)\n",
+                step, s_lp_slot[1], s_lp_hash[1], (long)s_lp_at[1], s_lp_slot[3], s_lp_hash[3], (long)s_lp_at[3]);
+    for (i = 0; i < s_lp_n && told < 400; i++, told++) {
+        uint32_t lo = s_lp_span[i].lo;
+        const char *kind = lo < SD_DATA_HI ? data_kind(lo) : rollback_page_state(lo);
+        fprintf(stderr, "[SOAKDIFF] carrier at step %lld: %08X..%08X (%s) was %08X before the wrong pass, %08X after\n",
+                step, lo, s_lp_span[i].hi, kind, s_lp_span[i].was, s_lp_span[i].now);
+        if (lo >= HEAP_LO && lo < HEAP_HI) alloclog_page(lo, "carrier");
+    }
+}
+
+void rollback_set_resim(int on)
+{
+    unsigned k;
+    size_t at;
+    if (on && !s_resim) load_point();
+    if (sound_globals_kept() && on != s_resim)
+        for (k = 0, at = 0; k < sizeof(k_sound_globals) / sizeof(k_sound_globals[0]); at += k_sound_globals[k].hi - k_sound_globals[k].lo, k++) {
+            if (on) memcpy(s_sound_globals + at, XBOX_PTR(k_sound_globals[k].lo), k_sound_globals[k].hi - k_sound_globals[k].lo);
+            else memcpy(XBOX_PTR(k_sound_globals[k].lo), s_sound_globals + at, k_sound_globals[k].hi - k_sound_globals[k].lo);
+        }
+    s_resim = on;
+    arena_watch_set(on);    /* tests: RECOMP_ROLLBACK_ARENA_WATCH */
+}
 
 static int rerun_block(uint32_t v, unsigned *k_out)
 {
@@ -1205,6 +1389,14 @@ int rollback_load(int slot)
     int k;
     if (!s_ready || slot < 0 || slot >= ROLLBACK_SLOTS || !s_slot[slot].valid) return -1;
     s = &s_slot[slot];
+    if (s_lp_phase) {   /* tests: which save the carrier comparison loads, and whether it is still the same */
+        uint32_t h = 2166136261u;
+        size_t b;
+        for (b = 0; b < s_dbytes; b += 64) h = (h ^ s->data[b]) * 16777619u;
+        s_lp_slot[s_lp_phase] = slot;
+        s_lp_hash[s_lp_phase] = h ^ s->npages;
+        s_lp_at[s_lp_phase] = s->at;
+    }
     forget_frees_since(s->at);
     for (k = 0, at = 0; k < s_ndseg; at += s_dseg[k].hi - s_dseg[k].lo, k++)
         memcpy(XBOX_PTR(s_dseg[k].lo), s->data + at, s_dseg[k].hi - s_dseg[k].lo);
@@ -1267,8 +1459,9 @@ static int sd_new(uint32_t key)
     return 1;
 }
 
-void rollback_soak_after(int depth, long long step)
+void rollback_soak_after(int depth, long long step, int verbose)
 {
+    static unsigned vtold;
     uint32_t a, p;
     unsigned saved_words = 0, other_words = 0, saved_pages = 0, other_pages = 0;
     if (!s_ready || !s_sd_data || !s_sd_heap) return;
@@ -1283,10 +1476,9 @@ void rollback_soak_after(int depth, long long step)
         while (a + 4 < SD_DATA_HI && *(uint32_t *)(s_sd_data + a + 4 - SD_DATA_LO) != MEM32(a + 4)) a += 4;
         kind = data_kind(lo);
         if (kind[0] == 's' && kind[1] == 'a') saved_words += (a + 4 - lo) / 4; else other_words += (a + 4 - lo) / 4;
-        if (sd_new(lo) && s_sd_told < 300) {
-            s_sd_told++;
+        if ((sd_new(lo) && s_sd_told++ < 300) || (verbose && kind[0] == 's' && kind[1] == 'a' && vtold++ < 800)) {
             fprintf(stderr, "[SOAKDIFF] soak %u (back %d, step %lld): .data %08X..%08X differs after the re-run (%s): "
-                    "%08X, was %08X\n", s_sd_soaks, depth, step, lo, a + 4, kind, now, was);
+                    "%08X, was %08X%s\n", s_sd_soaks, depth, step, lo, a + 4, kind, now, was, verbose ? " [steps differ]" : "");
         }
     }
     for (p = 0; p < HEAP_PAGES; p++) {
@@ -1304,11 +1496,11 @@ void rollback_soak_after(int depth, long long step)
             if (!m) continue;
         }
         if (!s_skip[p]) saved_pages++; else other_pages++;
-        if (sd_new(HEAP_LO + p * PAGE) && s_sd_told < 300) {
-            s_sd_told++;
+        if ((sd_new(HEAP_LO + p * PAGE) && s_sd_told++ < 300) || (verbose && !s_skip[p] && vtold++ < 800)) {
             fprintf(stderr, "[SOAKDIFF] soak %u (back %d, step %lld): heap page %08X differs after the re-run (%s): %u words, "
-                    "%08X..%08X, first %08X was %08X\n", s_sd_soaks, depth, step, HEAP_LO + p * PAGE, kind, n,
-                    HEAP_LO + p * PAGE + first, HEAP_LO + p * PAGE + last + 4, now[first / 4], was[first / 4]);
+                    "%08X..%08X, first %08X was %08X%s\n", s_sd_soaks, depth, step, HEAP_LO + p * PAGE, kind, n,
+                    HEAP_LO + p * PAGE + first, HEAP_LO + p * PAGE + last + 4, now[first / 4], was[first / 4],
+                    verbose ? " [steps differ]" : "");
             if (!s_skip[p]) alloclog_page(HEAP_LO + p * PAGE + (first & ~0xFu), "soak diff");
         }
     }
@@ -2122,8 +2314,10 @@ int rollback_enabled(void) { return 0; }
 void rollback_server_allows(int allowed) { (void)allowed; }
 void rollback_heap_range(uint32_t *lo, uint32_t *hi) { if (lo) *lo = 0x80003000u; if (hi) *hi = 0x82A0D000u; }
 int rollback_soak_diff_on(void) { return 0; }
+void rollback_soak_phase(int phase) { (void)phase; }
+void rollback_soak_carriers(long long step) { (void)step; }
 void rollback_soak_before(void) {}
-void rollback_soak_after(int depth, long long step) { (void)depth; (void)step; }
+void rollback_soak_after(int depth, long long step, int verbose) { (void)depth; (void)step; (void)verbose; }
 uint32_t rollback_crash_va;
 void rollback_crash_objects(void) {}
 void rollback_set_resim(int on) { (void)on; }

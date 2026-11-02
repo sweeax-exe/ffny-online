@@ -295,6 +295,33 @@ the first), and the soak now replays each step's pad words in re-runs.
   end, kept blocks 0-650. So short fights do not leak; the growth seen above (62.3 MB reached) came with the 11-minute fight
   (6000-7000 kept blocks, arena 7.4 MB). The arena never gives a piece back.
 
+### Second round (on `remaster` c36c0fb)
+* **Lockstep control** (`20261102-034926-online`, `--rollback off --fast-ko 0 --bot 60 --venues 9`, 70+10 ms): two bot fights
+  at venue 9, 40 200 steps (11 min) and 67 200+ steps (18.7 min, stopped by hand), every checksum equal, no desync. So the
+  step-37 440 desync of the rollback run is rollback's, not the base game's.
+* **Mixer crash (B1)**: `RECOMP_ROLLBACK_ARENA_WATCH=1` (the arena read-only during re-runs) caught the game thread writing
+  the sound engine's objects in re-runs from 27 call chains under three roots: the audio subsystem's per-frame update
+  `sub_0003D960` (every screen update calls it directly; through `sub_0003D560`, `sub_0003C320`, `sub_00036FB0`,
+  `sub_00030AC0`, `sub_0001D030` into `sub_0013A9E0`, `sub_0013AAF0`, `sub_0011E260`), the AEMS stream calls of
+  `sub_0003A340` (from the audio message handlers), and the engine stream call `sub_0011F5F0` that game objects make directly
+  (`20261102-042533-offline`). ec6bf2c leaves the three out on the game thread while steps run again (re-lift needed).
+  The seeded soak that crashed at step 8728 before (`20261102-033004-offline`) ran to its knockout at step 11 536 with it
+  (`20261102-045005-offline`).
+* No crash in five later wrong-prediction soaks (seeded, to their knockouts: 197 s, then 4 x 101 s of fight, about 10 minutes
+  in all, 5000+ rollbacks of three passes each); a single 10-minute fight was not reached (the CPU knocks the bot out). The
+  weapon / loader crash of `20261102-022953-offline` did not come back, but it was seen only once.
+* **What carries a button across a load** (item 2): still open. The game's sound globals were one carrier (9d759ca puts them
+  back after re-runs); with that, the seeded defensive-bot soak still has 16 of 7684 steps that differ between the two correct
+  re-runs, at one place (steps 3483-3485). The new carrier report (memory at the two load points) shows **saved** `.data` words
+  differing there (`0x2DBF38`, `0x33AB34`, the global generator `0x33DB5C`, CLogic `0x3494F0..`, `0x340D78..`), which a
+  load cannot produce unless the save it read changed in between; 9d759ca stops a re-run from saving its own target again, and
+  the report now names the save each load read, but that run (soak 14) was stopped by the build-41 test priority. Next: run it,
+  then either the save changed (who wrote it) or the load is not exact.
+* Also seen: `[ROLLBACK] no save state for step 3843 (now 3850)` five times in one soak: a load is refused when more than
+  `4 * ROLLBACK_SLOTS` updates passed since the save, which updates without fight steps can reach in seven steps. Online that
+  would leave a mispredicted step uncorrected ("may go out of sync"). Not seen in the online runs; worth a look with the
+  desync.
+
 ### Next
 1. B1 / B5 with the wrong-prediction soak: name the block behind the loader list node and the mixer's voice (the
    `ALLOCLOG` lines next to the crash), fix, then the soak must run 10 minutes clean.

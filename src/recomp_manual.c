@@ -168,6 +168,47 @@ void sub_0005AF80(void)
     }
     sub_0005AF80_gen();
 }
+/* The audio subsystem's per-frame update (cdecl (frame), called directly by every screen's update:
+ * sub_00079B60 and five others). It walks the game's cue queue and voices (sub_0003D560 ->
+ * sub_0003C320, sub_00036FB0, sub_00030AC0, sub_0001D030) and calls into the sound engine directly
+ * (sub_0013A9E0, sub_0013AAF0, sub_0011E260), past the silenced command and bus handlers. Rollback's
+ * re-runs ran it too: with handles a load had brought back it wrote into engine objects in the audio
+ * arena that the engine had since freed or handed out again (RECOMP_ROLLBACK_ARENA_WATCH caught
+ * 15 call chains in the first minute of a wrong-prediction soak), and the mixer then crashed in
+ * sub_0011D480 on a junk table pointer. Sound is not rolled back: while steps run again the update is
+ * left out, as the commands are. RECOMP_ROLLBACK_AUDIO_RERUN=1 runs it as before (tests). */
+static int audio_rerun_skip(void)
+{
+    static int keep = -1;
+    if (keep < 0) keep = getenv("RECOMP_ROLLBACK_AUDIO_RERUN") != NULL;
+    return !keep && netplay_rerunning() && rollback_on_game_thread();
+}
+extern void sub_0003D960_gen(void);
+void sub_0003D960(void)
+{
+    if (audio_rerun_skip()) {
+        g_esp += 4;     /* cdecl: the return address; the caller pops its argument */
+        return;
+    }
+    sub_0003D960_gen();
+}
+/* The same for the two other ways in the watch found: the AEMS stream calls of sub_0003A340 (from the
+ * audio code's message handlers, sub_0003A560 / 3B6A0 / 3B810 / 3B900, reached from the screen
+ * update through a bus event, sub_000CF6B0 -> sub_000BD720), and the engine's stream call
+ * sub_0011F5F0 that game objects make directly (sub_000BF8F0, like sub_0011F0D0 below). Both cdecl,
+ * plain ret; 0 for the caller, as the silenced commands give. */
+extern void sub_0003A340_gen(void);
+void sub_0003A340(void)
+{
+    if (audio_rerun_skip()) { g_eax = 0; g_esp += 4; return; }
+    sub_0003A340_gen();
+}
+extern void sub_0011F5F0_gen(void);
+void sub_0011F5F0(void)
+{
+    if (audio_rerun_skip()) { g_eax = 0; g_esp += 4; return; }
+    sub_0011F5F0_gen();
+}
 /* The crowd member's near-camera fade (thiscall, ecx = the member's animation object). Close to
  * the camera the game fades a spectator out but keeps it at alpha 0.2 at least (writes 0x3E4CCCCD,
  * 0.2f, to +0x48), so it stays faintly see-through in front of the fight. [display] crowd_near =
