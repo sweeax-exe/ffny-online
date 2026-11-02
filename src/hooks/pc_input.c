@@ -224,6 +224,9 @@ void pc_input_online_ports(void)
     fprintf(stderr, "[INPUT] online: the hub gets 4 controllers (it had %d from the ports setting), so a room "
             "of three or four finds one in every port\n", g_hub_pads);
     fflush(stderr);
+    /* also for a USB model that has not started yet (a quick match connects at boot): it sizes the
+     * hub from this variable when it starts, after this call, and would take the old count */
+    _putenv_s("RECOMP_USB_PADS", "4");
     hub_need(4);
 }
 
