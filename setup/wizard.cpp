@@ -170,6 +170,7 @@ IDWriteFactory* dw = nullptr;
 IDWriteFontCollection* antonFonts = nullptr;     // Anton from this exe's resources, when DirectWrite can load it
 std::wstring bodyFamily = L"Segoe UI", antonFamily = L"Anton";
 ID2D1HwndRenderTarget* windowTarget = nullptr;
+bool windowDrawn = false;
 
 struct Canvas { ID2D1RenderTarget* rt = nullptr; ID2D1SolidColorBrush* brush = nullptr; float t = 0; } cv;
 
@@ -1052,7 +1053,9 @@ void paintWindow() {
     cv.t = (GetTickCount64() - startTick) / 1000.f;
     windowTarget->BeginDraw();
     drawAll();
-    if (windowTarget->EndDraw() == D2DERR_RECREATE_TARGET) {
+    HRESULT drawn = windowTarget->EndDraw();
+    windowDrawn = SUCCEEDED(drawn);
+    if (drawn == D2DERR_RECREATE_TARGET) {
         cv.brush->Release(); cv.brush = nullptr;
         windowTarget->Release(); windowTarget = nullptr;
     }
@@ -1343,6 +1346,7 @@ void requestStop() {
 }
 
 void act(int id, int arg) {
+    Screen before = st.screen;
     switch (id) {
         case A_BROWSE: { auto p = pick(false); if (!p.empty()) identify(p); break; }
         case L_FOLDER: case A_BROWSE_FOLDER: { auto p = pick(true); if (!p.empty()) identify(p); break; }
@@ -1394,6 +1398,7 @@ void act(int id, int arg) {
         case L_GUIDE: openUrl(DUMP_GUIDE); break;
     }
     (void)arg;
+    if (st.screen != before) focusIndex = -1;
     redraw();
 }
 
@@ -1596,7 +1601,8 @@ LRESULT CALLBACK windowProc(HWND hwnd, UINT message, WPARAM wp, LPARAM lp) {
             if (LOWORD(lp) == NIN_BALLOONUSERCLICK || LOWORD(lp) == WM_LBUTTONUP) { ShowWindow(hwnd, SW_RESTORE); SetForegroundWindow(hwnd); }
             return 0;
         case WM_CLOSE:
-            if (st.screen == S_INSTALLING && worker && !st.stopping) { requestStop(); return 0; }
+            // While installing (or still preparing to), closing asks first: an engine must never run on unseen.
+            if (st.screen == S_INSTALLING && !st.stopping) { requestStop(); return 0; }
             if (st.screen == S_INSTALLING && st.stopping) return 0;     // it closes once the engine has stopped
             DestroyWindow(hwnd);
             return 0;
@@ -1831,6 +1837,10 @@ int wizardMain(HINSTANCE instance, const std::vector<std::wstring>& args) {
         wchar_t title[128]{}; GetWindowTextW(window, title, 128);
         bool valid = wcscmp(title, L"FFNY Online Setup") == 0 && logView && !IsWindowVisible(logView);
         for (auto name : SNAPSHOT_STATES) valid = valid && sampleState(name) && renderOffscreen(L"", 1);
+        // The window's own Direct2D target draws too (off the desktop, never shown).
+        sampleState(L"game");
+        paintWindow();
+        valid = valid && windowTarget && windowDrawn;
         valid = valid && st.hd && st.shortcut && st.prereq;
         DestroyWindow(window);
         return valid ? 0 : 4;
@@ -1877,5 +1887,6 @@ int wizardMain(HINSTANCE instance, const std::vector<std::wstring>& args) {
     // Embers move at 30 frames a second, at 12 while the game builds (the PC is busy then).
     SetTimer(window, 1, st.update ? 80 : 33, nullptr);
     messageLoop();
-    return 0;
+    // A failed install keeps its session folder for diagnosis (wWinMain removes it only after 0).
+    return st.screen == S_FAILED ? (st.exitCode ? (int)st.exitCode : 4) : 0;
 }
