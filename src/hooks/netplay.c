@@ -1839,7 +1839,8 @@ static void on_packet(const uint8_t *b, int len)
                 fprintf(stderr, "[NETPLAY] the relay supports %08X%s%s%s\n", (unsigned)N.relay_caps,
                         N.relay_caps & CAPS_KOTH ? " (King of the Hill)" : "",
                         N.relay_caps & CAPS_ROLLBACK ? " (rollback allowed)" : "",
-                        N.relay_caps & CAPS_CREATED ? " (created fighters allowed)" : "");        }
+                        N.relay_caps & CAPS_CREATED ? " (created fighters allowed)" : "");
+        }
         break;
     case T_HILL:
         if (N.lobby) on_hill(b + 6, len - 6);
