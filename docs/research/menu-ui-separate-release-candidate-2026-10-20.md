@@ -24,7 +24,7 @@ All artwork stays local; only source, tables, hashes and documentation are publi
 ## Location and local playtest
 
 On this Mac the isolated data root is
-`/Users/vlad/Code/defjam-data/playtest-menu-ui-v1-rc1/` (the root retains the first iteration's name).
+`<isolated-menu-test-data>/` (the root retains the first iteration's name).
 The immutable pack folder and same-stem ZIP are under its `mods/` directory.
 `play.sh all` enables the two optional Faithful components, then the menu pack;
 `play.sh menu-only` enables only the menu pack; `play.sh faithful` is the comparison baseline.
@@ -38,31 +38,11 @@ Removing/disabling this one menu entry returns to the prior enabled textures. Th
 binary uses published toolkit `dd63e17`; older runtimes lacking side-slab support are incompatible.
 No runtime, renderer or toolkit source was changed for this candidate. The harness save-copy helper now uses macOS/APFS copy-on-write cloning when available, with an independent full-copy fallback; full-tree byte verification and failed-backup retention remain unchanged.
 
-## Rebuild and input integrity
+## Authoring records
 
-`config/menu-ui-release.json` defines the pack scope and component receipt pins;
-`scripts/build-menu-ui-release.py` builds from private frozen components and approved masters:
-
-```sh
-python scripts/build-menu-ui-release.py \
-  --art-root <private-pilot-v1> \
-  --base-mods <old-local-playtest>/mods \
-  --approved-components <approved-pack-exports> \
-  --out <isolated-data>/mods/menu-ui-hd-wide-v1-rc2 \
-  --receipt <local-build-receipt.json>
-```
-
-Use Python with Pillow and NumPy. Output folders and ZIPs are immutable; use a fresh version for
-another candidate. The builder checks frozen component receipts/output hashes,23retained-center input pins,4x canvas sizes,
-unique source IDs, safe relative paths, original artwork pins and technical derivative parent pins.
-Explicit retained-core component order avoids directory-order precedence. `files.json` hashes every
-payload file except itself. The ZIP hash is pinned in the local build receipt; ZIP timestamps mean
-rebuilding is not promised to reproduce the same archive bytes. The exact local RC2's outputs were
-also independently checked against every component receipt and all 325 payload hashes/sizes.
-
-All 670 approved/conditional art pins remain intact. No new imggen calls were made; the historical
-artwork total remains 162. New runtime registration is engineering, recorded separately from owner
-art approval in `config/menu-ui-runtime-registrations.json`.
+The exact recipe, approval ledger, component pins and detailed build history are
+preserved privately. Reusable assembly/export tools are maintained in
+[Modding Tools](https://github.com/vyanhursky/DefJam-Modding-Tools/blob/main/docs/menu-exporters.md).
 
 ## Actual pre-fight loading screens
 

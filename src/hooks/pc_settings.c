@@ -34,6 +34,7 @@
 #include "pc_input.h"
 #include "pc_ui.h"
 #include "pc_debug.h"
+#include "pc_language.h"
 #include "patches/widescreen.h"
 #include "patches/picture.h"
 
@@ -469,6 +470,10 @@ int pc_settings_init(void)
 #else
     pc_debug_start(g_log_name[0] ? g_log_name : NULL, has_arg("--record"));
 #endif
+    /* [language] pack: rebuild the pack's files from the dump if needed and serve them in place of
+     * the originals. After the launcher, which chooses it, and before the XBE is loaded. */
+    pc_language_start(have_root ? root : NULL, "game");
+
     /* [debug] unlock_all: src/patches/dev_unlock.c reads the variable once the game runs. */
     if (!getenv("RECOMP_UNLOCK_ALL") && recomp_settings_get("debug", "unlock_all", 0))
         _putenv_s("RECOMP_UNLOCK_ALL", "1");

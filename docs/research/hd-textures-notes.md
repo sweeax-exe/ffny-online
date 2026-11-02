@@ -33,7 +33,7 @@ PROGRESS/worklogs. Do not call the prototype an accepted/released milestone.
 - `scripts/hd_assets.py`: bounded BIG/RefPack/SHPX census, DXT and linear/swizzled indexed/BGRA exports, provisional
   archive IDs and decoded correlation IDs; resumable RGB/separate-alpha/padding GPU jobs, category/override batch
   runner with review defaults; bounded raw MAD/font exports. Source/model/executable/recipe/runner/output hashes.
-- `config/hd-recipes.example.json`: three observed pilot assets only. No original/upscaled artwork, models, captures,
+- the historical three-asset recipe (now `examples/texture-recipe.json` in Modding Tools): three observed pilot assets only. No original/upscaled artwork, models, captures,
   lifted code or binaries are tracked. Source changes remain uncommitted while acceptance/reconciliation is pending.
 - Read-only XML follow-up verified V2IP=named fighter atlases (House003A, SeanPaul125A, Blaze113A, D-Mob014A/B),
   V2CP=create-player/customization (createplayer_parts.xml); its shared cp_a atlas is not proven to be a face.
@@ -104,7 +104,7 @@ pass in isolated headless Edge. No general model/category acceptance yet.
 Neural models sharpen lettering/contours and also smooth intentional grit; inspect
 faces, branded lettering, wood/concrete and alpha semantics before choosing.
 
-`scripts/hd_review.py` creates the gallery/sheets; exact selection/provenance is in
+`defjam-tools audition` creates the gallery/sheets; exact selection/provenance is in
 the data-root `requested.json`/`selection.json`; recipes and hashes in per-job build.json.
 No artwork/model/HTML outputs in source. See `hd-representative-review.md` for
 commands, benchmark and test limitations. RealESRNet/GAN40 jobs total86.62/89.71s;
