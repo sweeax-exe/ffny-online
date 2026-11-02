@@ -285,6 +285,7 @@ static struct {
     volatile LONG start_deferred;   /* a START taken while the last fight's results still show */
     AutoMatch deferred_m;
     int koth_results;               /* this game still shows the results of a hill fight it fought (until the menu) */
+    volatile LONG on_results;       /* this game is on its match's summary and results (each player's own) */
     int koth_quit;                  /* Rematch on those results already took this PC back to the hill */
     ULONGLONG deferred_toast;       /* the last "... is waiting for you" notice */
     int peer_results[MAXP];         /* each position said (P_RTT) it was still on the last fight's results */
@@ -533,6 +534,10 @@ int netplay_rematch_request(void)
  * already started stops waiting for this PC (the fight's wait below). */
 void netplay_results_funccall(const char *text)
 {
+    if (!strncmp(text, "Game.GetMatchSummary(", 21) && N.lobby && N.match_live && !N.watching && !N.on_results) {
+        InterlockedExchange(&N.on_results, 1);
+        fprintf(stderr, "[NETPLAY] the match's summary: the other players' controllers stay off this PC's menus\n");
+    }
     if (strncmp(text, "Game.GetHeroFighterNumber(", 26) || !N.lobby || !N.match_live || N.watching ||
         MEM32(G_MATCH_PHASE) < 3u)
         return;
@@ -891,6 +896,15 @@ static DWORD remote_slot_state(int slot, XBOX_INPUT_STATE *state)
     if (N.state != NETPLAY_CONNECTED || !N.lockstep || slot < 0 || slot >= N.players || slot == N.pos)
         return ERROR_DEVICE_NOT_CONNECTED;
     EnterCriticalSection(&g_cs);
+    if (N.on_results) {
+        /* The summary and the results menu are each player's own. With the other players' live pads
+         * on their ports, every press went to every PC's menu: one player's way through the summary
+         * moved the other's Rematch/No cursor or chose for them (two-copy rematch tests, 2026-11-02:
+         * each copy's one cursor press undid the other's, and both went back to the room). */
+        memset(state, 0, sizeof(*state));
+        state->dwPacketNumber = 1;
+        return ERROR_SUCCESS;
+    }
     state->dwPacketNumber = N.remote_packet[slot];
     state->Gamepad = N.remote_pad[slot];
     LeaveCriticalSection(&g_cs);
@@ -1391,7 +1405,9 @@ static void on_data(int from, const uint8_t *p, int len)
             LeaveCriticalSection(&g_cs);
             fprintf(stderr, "[NETPLAY] rematch: player %d %s\n", from + 1,
                     after == REMATCH_NO ? "went back to the room" : "chose Rematch");
-            if (after == REMATCH_NO) {
+            if (after != REMATCH_NO && after < N.match_count) {
+                /* that rematch runs already (the choice that started it on that PC, sent again) */
+            } else if (after == REMATCH_NO) {
                 InterlockedExchange(&N.rematch_go, 0);
                 SetEvent(N.arrived);    /* a fight that waits for its first entries stops waiting (below) */
                 toast(8000, "%s went back to the room: choose No to join them.", player_name(from));
@@ -1989,6 +2005,7 @@ static void on_start_as(const uint8_t *b, int len, int watching)
      * crashes). Sent in P_RTT, so every PC of the match decides from the same flags. */
     if (pos >= 0) N.peer_rb[pos] = rollback_wanted() && N.relay_caps > 0 && (N.relay_caps & CAPS_ROLLBACK);
     if (pos >= 0 && rollback_wanted() && !N.peer_rb[pos])
+    InterlockedExchange(&N.on_results, 0);
         fprintf(stderr, "[NETPLAY] rollback is switched off on the server: this match plays in lockstep\n");
     N.rb_match = 0;                         /* decided at the sync point */
     if (pos >= 0) {   /* this PC's ping as of now, with the worst of the last few as the jitter margin */
@@ -3811,6 +3828,7 @@ void netplay_on_match_start(void)
         ac_match_begin();
         report_event("start", 0, 0, 0);
         arm_crash_report();
+    InterlockedExchange(&N.on_results, 0);      /* a rematch's fight: the results are behind */
     }
     log_contiguous("at the match start");
 }
