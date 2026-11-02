@@ -40,6 +40,8 @@ apt-get update -qq
 # shellcheck disable=SC2086
 apt-get install -y -qq --no-install-recommends $DEFJAM_APP_PACKAGES > /dev/null
 WORK=$(mktemp -d)
+# The steps below write to logs in $WORK; a failing one shows the end of the newest.
+trap 'log=$(ls -t "$WORK"/*.log 2> /dev/null | head -1); [ -n "$log" ] && tail -n 30 "$log" >&2' ERR
 export ZIG_GLOBAL_CACHE_DIR="$WORK/zig-cache" ZIG_LOCAL_CACHE_DIR="$WORK/zig-cache"
 rm -rf "${OUT:?}"/*
 # The image's headers come after Zig's C library headers: they supply X11, Wayland, the sound
