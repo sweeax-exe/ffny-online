@@ -1,8 +1,17 @@
 # Spectator mode (watching online fights)
 
 Status: design for version 1, written before the code (2026-11-01). Relay, game and room UI of v1
-are built on branch `spectator-mode`; section 9 lists what v1 cannot do yet and the owner's
-decisions it needs.
+are built on branch `spectator-mode`; section 9 lists what v1 cannot do yet and section 10 the
+owner's decisions it needs.
+
+First test (2026-11-02, `dj.py scenario online --matches 2 --spectators 1`, logs
+`logs/dj/20261102-032021-online`): two copies played two room matches with a knockout each, a
+third copy watched both from the room. The spectator took the players' delay (2) from their
+`P_RTT`, loaded the first venue 6 s after the players (28.4 s against 22 s) and ran the fight
+behind them from its own entry store; it compared 60 checksums with the players' (30 checkpoints
+x 2 players, steps 60..900+ of both matches), all equal, no desync; the winners agreed; it went
+through both summaries by itself and was back in the room for the second match. Relay unit tests:
+`netplay/relay/spectate_test.go`.
 
 ## 1. Why a spectator needs no game state
 
