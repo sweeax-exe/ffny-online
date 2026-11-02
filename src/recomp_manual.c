@@ -1549,6 +1549,37 @@ void sub_00044FC0(void)
  * read 8 bytes below address 0. Two players' reports, the first fight after Story's rewards save and
  * Game.Quit (F9 64c4c2, build 44) and a lockstep match (875ad7, build 28). An empty view is the
  * number 0, as the zeroed out-parameter already says when nothing parses. */
+/* The post-fight reward pass (sub_00064ED0, from the fight screen's loader worker sub_00079190 ->
+ * sub_0001E1B0 -> sub_00065FD0): it walks each slot's profile (sub_00014C20) and crashed on a created
+ * fighter's (sub_000BE3D0). The pads were unlinked from the created records when a step saw phase 3,
+ * but Enoc's lockstep rematch (F9 59f513, build 45) ended without such a step and crashed here. The
+ * pads are now unlinked on entry, whatever the phase did (created_fighter.c). */
+extern void sub_00064ED0_gen(void);
+void created_fighter_before_rewards(void);
+void sub_00064ED0(void)
+{
+    created_fighter_before_rewards();
+    sub_00064ED0_gen();
+}
+
+/* A summary thumb control's update (thiscall, one argument, ret 4), from Battle.SetThumbCtrlID(n)
+ * (sub_0004C060: ecx = the summary's per-slot control at +0xC1C). A created fighter's slot has no
+ * control once its pad is unlinked from the record before the summary (Battle.StartUserIDThumbCtrl
+ * makes one per linked user ID), but the summary still asks for it: ecx 0, a read at 0xFFFFFFxx (F9
+ * 03ccd0, ce20af, fee4d0, 2026-11-02, and every two-copy created-vs-created run with 110 ms,
+ * logs/dj/20261102-230552-online, both copies). No control, nothing to set. */
+extern void sub_0005F440_gen(void);
+void sub_0005F440(void)
+{
+    if (!g_ecx) {
+        static int told;
+        if (told++ < 4) fprintf(stderr, "[CREATED] the summary set a thumb control a slot does not have (no user ID linked)\n");
+        g_esp += 8;                     /* ret 4 */
+        return;
+    }
+    sub_0005F440_gen();
+}
+
 extern void sub_000BD440_gen(void);
 void sub_000BD440(void)
 {

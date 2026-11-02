@@ -838,6 +838,19 @@ void created_fighter_on_step(void)
         }
 }
 
+/* The post-fight reward pass begins (sub_00064ED0, recomp_manual.c): no pad may lead to a record. */
+void created_fighter_before_rewards(void)
+{
+    uint32_t gs = MEM32(GS_PTR);
+    int pad, linked = 0;
+    if (!gs) return;
+    for (pad = 0; pad < 4; pad++)
+        if (g_slot_of_pad[pad] >= 0 && MEM8(gs + GS_PAD_PROFILE + (uint32_t)pad) != 0xFF) linked = 1;
+    if (!linked) return;
+    link_pads(0);
+    fprintf(stderr, "[CREATED] the reward pass begins: pads unlinked from the records (phase %u)\n", MEM32(G_MATCH_PHASE));
+}
+
 int created_fighter_before_funccall(const char *text)
 {
     int any = 0, pad;

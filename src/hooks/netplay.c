@@ -5017,7 +5017,19 @@ void netplay_on_step(void)
     if (s <= (uint32_t)N.delay) return;
     /* only once every other PC is under way (an entry of its own has arrived): one may still be
      * loading the venue, and a PC that ran ahead would give up on it after STALL_LIMIT_MS */
-    N.predicting = N.rb_on && rollback_ready() && MEM32(G_MATCH_PHASE) == 1u && N.final_step > (uint32_t)N.delay;
+    /* Not once this PC has seen the match decided (rb_decided_step: the phase word or the result
+     * record): the rest of the fight is the knockout's scene, and a step predicted there and run again
+     * re-ran the end of the match (announcer, slow motion, crowd) on restored state under a sound engine
+     * that had already played it. Two players' crashes came in the first normal update after such a
+     * rollback (F9 3b0da3: decided, then back to step 10722 from 10722, a crash at 10723; 3ee301), both
+     * in the sound engine walking from its pool (80886E04) into junk. From the decision on, every
+     * step waits for the real entries, as in lockstep. RECOMP_ROLLBACK_PREDICT_DECIDED=1 (tests): as before. */
+    {
+        static int old = -1;
+        if (old < 0) old = getenv("RECOMP_ROLLBACK_PREDICT_DECIDED") && *getenv("RECOMP_ROLLBACK_PREDICT_DECIDED") == '1';
+        N.predicting = N.rb_on && rollback_ready() && MEM32(G_MATCH_PHASE) == 1u && N.final_step > (uint32_t)N.delay &&
+                       (old || !N.rb_decided_step);
+    }
     if (N.predicting && !N.rbm.first_pred) {   /* B3/G4: whether a match predicts at all, and from when */
         N.rbm.first_pred = s;
         fprintf(stderr, "[ROLLBACK] first prediction in match %u at step %u (final %u, delay %d)\n", N.rbm.num, s,
@@ -5516,6 +5528,14 @@ static void snap_save(void)
 {
     uint32_t step = N.step + 1;
     int slot = (int)(step % ROLLBACK_SLOTS);
+    /* Every save without device bindings, also the saves inside a re-run and the first one after it:
+     * a created fighter's pose pass (cp_pose_in_step, which runs in re-runs since build 45) binds the
+     * model's textures and palettes, netplay_on_update's unbind does not run between re-run updates,
+     * and the saves took the device's references with them. The owner's created-fighter rollback match
+     * (2026-11-02, 109 ms): "a save with 4 device binding(s) ... running steps again", then textures
+     * and palettes bound without their reference (counts wrapping: black and white flicker), and a
+     * crash 6 s after the knockout (F9 03ccd0). */
+    rollback_unbind_textures();
     {   /* a save while the device holds a texture or palette: a load back to it leaves a count short */
         int b = rollback_device_bindings();
         static unsigned told;
@@ -5565,6 +5585,7 @@ static void rollback_to(uint32_t f)
     g_last_rb_from = N.step;
     rollback_crash_cb = rollback_crash_state;
     loads_before = rollback_dynamic_loads();
+    rollback_unbind_textures();     /* a re-run just before (the soak's passes) may have bound some */
     dynvb_before_load();
     if (rollback_load(slot)) {      /* not loaded (too old for the held frees): as with no save */
         if (N.rb_failed++ < 5)
@@ -5583,7 +5604,19 @@ static void rollback_to(uint32_t f)
             for (i = 0; i < MAXP; i++) N.used_tag[i][t % RING] = 0;
         LeaveCriticalSection(&g_cs);
     }
-    if (N.rb_decided_step && f <= N.rb_decided_step) N.rb_decided_step = 0;    /* seen again after the re-run */
+    if (N.rb_decided_step && f > N.rb_decided_step) {
+        static unsigned told;
+        if (told++ < 20)
+            fprintf(stderr, "[ROLLBACK] a load after the decision: decided at step %u, back to %u (now %u, final %u)\n",
+                    N.rb_decided_step, f, N.step, N.final_step);
+    }
+    if (N.rb_decided_step && f <= N.rb_decided_step) {      /* seen again after the re-run */
+        static unsigned told;
+        if (told++ < 20)
+            fprintf(stderr, "[ROLLBACK] a load back across the decision: decided at step %u, back to %u (now %u, final %u)\n",
+                    N.rb_decided_step, f, N.step, N.final_step);
+        N.rb_decided_step = 0;
+    }
     N.step = f - 1;
     N.updates = N.snap[slot].update;
     defjam_test_set_step(N.snap[slot].test_step);
