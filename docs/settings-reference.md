@@ -82,6 +82,14 @@ line turns it on for one run. Every key here is read at start-up.
 | `vignette_strength` | `100` | How dark the vignette is, 0-100 percent of the game's own; 0 is the same as off. Applies at once. Env `RECOMP_VIGNETTE_STRENGTH`. [How both work](research/picture-options.md). |
 | `crowd_near` | `fade` | Spectators close to the camera. `fade` is the game's own: they fade out but stay faintly see-through (alpha 0.2) in front of the fight; `hide` drops them until the camera moves away. Only the picture changes (online checksums are unaffected). Applies at once. Launcher: Basics and Advanced, Display ("Crowd near the camera"). Env `RECOMP_CROWD_NEAR` (`fade`, `hide`). |
 
+## [language]
+
+| Key | Default | Meaning |
+|---|---|---|
+| `pack` | *(empty)* | The language mod that is on: its folder in the mods folder (`<data>/mods`, or `RECOMP_TEXTURE_ROOT`); empty plays the game in its own English. The first start with a pack rebuilds its files from your dump into `<data>/cache/language`. Restart. Set by ticking the mod on the launcher's **Mods** page (one language at a time). Env `RECOMP_LANGUAGE_PACK`. [Language packs](language-packs.md). |
+| `story_subtitles` | `auto` | Story cutscene subtitles: `auto` (what the language mod asks for; without one, as the game does), `all cutscenes` (every cutscene, English included: the game has English subtitles for all of them), `as the game does` (the opening cutscene only). Restart. Shown in the launcher as **Interface → Language and subtitles**. Env `RECOMP_STORY_SUBTITLES`. |
+| `game` | `english` | The game's own language: `english`, or `french`, the translation built into the game (menus, memory-card messages and Story subtitles, which then show in every cutscene; the voices and the menu icon art stay English). Not used while a language mod is on. Restart. Shown in the launcher as **Interface → Language and subtitles**. Env `RECOMP_GAME_LANGUAGE`. [The game's own French](language-packs.md#the-games-own-french). |
+
 ## [textures]
 
 | Key | Default | Meaning |

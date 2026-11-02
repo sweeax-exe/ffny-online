@@ -55,7 +55,7 @@ void rollback_heap_range(uint32_t *lo, uint32_t *hi) { *lo = 0x80003000u; *hi = 
 
 # recorder.c: test_telemetry.c copies its lines into the play-test recorder's events (upstream v0.10).
 HOOK_SOURCES = ('src/hooks/test_observations.c', 'src/hooks/test_telemetry.c', 'src/hooks/test_bot.c',
-                'src/hooks/recorder.c')
+                'src/hooks/recorder.c', 'tests/unit/input_latency_stub.c')
 
 
 def build(tmp_path_factory, name, driver_text):

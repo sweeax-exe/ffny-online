@@ -39,6 +39,12 @@ background-crowd updates. Two runs of the same pinned fight are compared.
   a percentage chance from `rand`. It was called 902 times in the window in one
   run and 903 in the other, then once per step in both. `rand` draws from it by the
   first step: 231 against 221 in one pair.
+  (Correction, 2026-10-27, measured on a Steam Deck: the update runs once per outer
+  loop iteration, which is per render, not once per screen update. An iteration that
+  runs two steps skips it and one that runs none still runs it: 862 or 863 calls over
+  873 updates. Separately, the foreground spectators do reach the fight: the flag
+  set by `sub_001B8760` for a fighter close to a spectator slot changes what the CPU
+  fighter plans.)
 - **Foreground spectators** (3D figures near the camera). `sub_0007D2F0` picks the
   next animation by name with a random variant, drawing from the generator at
   `0x375F68` through `sub_000AA340` and `sub_000AA300`. Draws by the first step:
