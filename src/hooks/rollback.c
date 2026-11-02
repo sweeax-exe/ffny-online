@@ -1389,6 +1389,11 @@ int rollback_load(int slot)
     int k;
     if (!s_ready || slot < 0 || slot >= ROLLBACK_SLOTS || !s_slot[slot].valid) return -1;
     s = &s_slot[slot];
+    if (s_saves - s->at > ROLLBACK_HOLD_SAVES) {   /* frees held since it may have been given back */
+        static unsigned told;
+        if (told++ < 10) fprintf(stderr, "[ROLLBACK] save %d is %ld saves old: not loaded\n", slot, (long)(s_saves - s->at));
+        return -1;
+    }
     if (s_lp_phase) {   /* tests: which save the carrier comparison loads, and whether it is still the same */
         uint32_t h = 2166136261u;
         size_t b;
@@ -1854,7 +1859,7 @@ static void release_held_arena(int all)
                 "freed before a load and kept\n", s_arena_live / 1024, s_nheld_arena, zombies - s_nheld_arena, zbytes / 1024);
     }
     while (k < s_nheld_arena) {
-        if (all || s_saves - s_held_arena[k].at > ROLLBACK_SLOTS + 2) {
+        if (all || s_saves - s_held_arena[k].at > ROLLBACK_HOLD_SAVES) {
             uint32_t a = s_held_arena[k].addr;
             s_held_arena[k] = s_held_arena[--s_nheld_arena];
             arena_event('R', a, 0);
@@ -1902,7 +1907,7 @@ static void release_held_xapi(int all)
     uint32_t eax = g_eax, ecx = g_ecx, edx = g_edx;
     if (GetCurrentThreadId() != s_game_tid) return;
     while (k < s_nheld_xapi) {
-        if (all || s_saves - s_held_xapi[k].at > ROLLBACK_SLOTS + 2) {
+        if (all || s_saves - s_held_xapi[k].at > ROLLBACK_HOLD_SAVES) {
             uint32_t ptr = s_held_xapi[k].ptr;
             s_held_xapi[k] = s_held_xapi[--s_nheld_xapi];
             defjam_xapi_free_now(ptr);

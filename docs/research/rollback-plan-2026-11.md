@@ -322,7 +322,52 @@ the first), and the soak now replays each step's pad words in re-runs.
   would leave a mispredicted step uncorrected ("may go out of sync"). Not seen in the online runs; worth a look with the
   desync.
 
-### Next
+### Third round (on `remaster` 75802ff)
+* **The save-identity check** (`20261102-060154-offline`): at the step-3483 divergence the two loads read different saves (11
+  and 0). Two soak artefacts, both fixed in d9430e0: a pass on wrong buttons can end at another step than the pass it replaces
+  (moves that stop the fight steps for a while), and the soak computed the next pass's target from the step it ended at; and the
+  wrong pass's own saves could overwrite the save the next pass needed ("no save state for step 3481 (now 3501)").
+* **A real hole found on the way** (d9430e0): the save slots are per fight step, but held arena and XAPI frees were given back
+  18 saves after they happened, while loads up to 64 updates back were allowed; with several updates to a step a load could bring
+  back pointers to blocks already handed out again (a candidate for the weapon / loader crash). Frees are now held for
+  `ROLLBACK_HOLD_SAVES` = 240 saves, older saves are not loaded, and `rollback_to` allows 240 updates back (was 64, the
+  "load refusal"). `rollback_to` also used to re-run on the current state when `rollback_load` failed; a failed load is now
+  treated as a missing save.
+* After it: the seeded soak has **0** differing steps (`20261102-061819-offline`), and a **14-minute continuous**
+  wrong-prediction soak with bots on both slots (`20261102-062408-offline`: 10 200 soaks of three passes, 56 100 steps compared)
+  had **0 differing steps and no crash**. The plain soak (first pass against re-run, with the re-run audio left out) also had 0
+  of 19 242 steps otherwise (`20261102-072212-offline`), so leaving the audio update out of re-runs changes nothing the fight
+  reads.
+* **Two-copy long runs** (venue 9, `--fast-ko 0 --bot 60`, 70+10 ms):
+  * `20261102-070621-online` (d9430e0): **desync at step 10 200** of match 1 (fighter 1 position 0x44/0x4C apart by 0.001,
+    fighter 2 0x54); the copy that went on offline then never ended the fight.
+  * c4ea3af: a step can read its pads more than once (updates without a fight step); a prediction read and then the real entry
+    in one step was recorded as "real", so such a step was never run again. The record now keeps the prediction. Whether this
+    was the desync's cause is **not proven**: the case was not logged in the next run.
+  * `20261102-073400-online` (c4ea3af): **ok**, two fights of 13 200 and 31 000 steps (12.4 minutes), 740 checksums equal,
+    1324-2947 rollbacks a match, no crash, no desync. One clean run against two desyncs before (37 440 and 10 200): more runs
+    are needed before calling the desync fixed.
+* `RECOMP_NETPLAY_FINALLOG=1` (a0afab1) logs every rollback step's checksum fields as it becomes final, with how often it ran
+  and read its pads; diffing the two copies' logs finds the first step they part at. Used in the target runs below: no
+  difference in 51 286 + 41 024 final steps.
+* **Target runs** (step 4 bar; `--fast-ko 0 --bot 60`, 70+10 ms, `--keep-going`):
+  * `20261102-082054-online`, Terror Dome (venue 6), 3 matches with `--rematch`: **ok**, 850 checksums equal, 776-1421
+    rollbacks a match, about 14 minutes of fight, contiguous memory 56.5 -> 57.6 MB (59.7 MB reached).
+  * `20261102-084123-online`, venue 26, 3 matches with `--rematch`: matches 1 and 2 clean, then **the third never started**.
+    Match 2 ended with code 0x201, an ending that stops the fight steps at once and skips the phase words 2 and 3; one copy had
+    predicted step 14 668 past the other's last (14 667), so that step never became final and the copy never reported the
+    result nor switched rollback off. f9cb31b keeps the step at which the match is seen decided and ends the match once that
+    step is final.
+  * `20261102-091559-online` (f9cb31b), venue 26, 3 matches with `--rematch`: **ok**, 680 checksums equal, about 11 minutes.
+  * With `20261102-073400-online` (venue 9, 12.4 minutes) that is three runs of 10+ minutes of several matches with no crash,
+    hang or desync, including Terror Dome, venue 26 and rematches: the plan's step-4 bar, met once each on the current build.
+
+### Next (after the third round)
+1. More two-copy long runs (the desyncs at steps 10 200 and 37 440 came once in two runs each; three later runs were clean),
+   always with `RECOMP_NETPLAY_FINALLOG=1` so a desync can be traced to its first step.
+2. Step 6 (King of the Hill), step 7 (performance), then step 8 (beta re-open on a test relay).
+
+### Next (as of the first round)
 1. B1 / B5 with the wrong-prediction soak: name the block behind the loader list node and the mixer's voice (the
    `ALLOCLOG` lines next to the crash), fix, then the soak must run 10 minutes clean.
 2. The input-history difference after a wrong pass (steps 1717-1723 above): which state outside the saves carries a button

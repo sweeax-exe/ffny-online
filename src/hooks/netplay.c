@@ -353,6 +353,9 @@ static struct {
     uint8_t used[MAXP][RING][ENTRY];    /* each other player's entry as its step ran */
     uint32_t used_tag[MAXP][RING];      /* step + 1 */
     uint8_t used_pred[MAXP][RING];      /* 1: a prediction */
+    uint8_t used_mixed[MAXP][RING];     /* 1: the step read two different predictions (netplay_on_pad_read) */
+    uint8_t step_runs[RING];            /* tests (RECOMP_NETPLAY_FINALLOG): times the step started, its pad reads */
+    uint8_t step_reads[RING];
     uint32_t final_step;                /* every step up to this one ran on the real entries */
     uint32_t updates;                   /* game updates since the match's reference copy */
     uint32_t hash_at[RING], hash_tag[RING], hash_sent;
@@ -362,6 +365,7 @@ static struct {
     uint32_t hash_split[RING][3];       /* the shared generator, the time scale word, the match generator */
     int rb_on, rb_ref_due, resim, predicting;
     int rb_fought;                      /* the phase word said "fighting" in this match */
+    uint32_t rb_decided_step;           /* the step at which this PC saw the match decided (0: not yet) */
     int peer_rb[MAXP];                  /* each position rolls back (its P_RTT says so) */
     int rb_match;                       /* hub: this match rolls back (every peer_rb set at the sync point) */
     struct {
@@ -3704,6 +3708,7 @@ void netplay_on_match_start(void)
     if (N.match_live) N.match_seen = 1;
     N.final_step = N.hash_sent = N.updates = 0;
     N.rb_on = N.rb_ref_due = N.resim = N.predicting = N.rb_fought = 0;
+    N.rb_decided_step = 0;
     memset(N.used_tag, 0, sizeof(N.used_tag));
     memset(N.hash_tag, 0, sizeof(N.hash_tag));
     memset(N.snap, 0, sizeof(N.snap));
@@ -4319,7 +4324,19 @@ void netplay_on_step(void)
     /* The room match decided (the game's phase word: 1 fighting, 2 decided, 3 finished; see
      * test_telemetry.c): report its result. Only after this match was seen fighting, as the
      * phase still holds the last match's value for a moment after a START. */
-    if (N.lobby && N.match_live && !N.reported && !N.resim && (!N.rb_on || N.step <= N.final_step)) {
+    /* With rollback: the step at which the match was decided, by any ending. Some endings stop the fight steps
+     * at once and skip the phase words 2 and 3 (venue 26, code 0x201): a PC that had predicted a step past
+     * the others' last one never saw it final, so it never reported the result nor switched rollback off, and
+     * the room's next match never started (two-copy run at venue 26, 2026-11-02). The decision counts once
+     * the step it was seen at is final. */
+    if (N.lobby && N.match_live && N.rb_on && !N.resim && !N.rb_decided_step && N.rb_fought) {
+        uint32_t phase = MEM32(G_MATCH_PHASE), count = MEM32(G_RESULT_COUNT), code = 0;
+        if (count && count <= RESULTS_MAX) code = MEM16(G_RESULTS + (count - 1u) * 0x10u + 0xEu);
+        if ((phase >= 2u && phase <= 3u) || ((code & 1u) && ((code & 4u) || (MEM32(G_MATCH_FLAGS) & 8u))))
+            N.rb_decided_step = N.step;
+    }
+    if (N.lobby && N.match_live && !N.reported && !N.resim &&
+        (!N.rb_on || N.step <= N.final_step || (N.rb_decided_step && N.final_step >= N.rb_decided_step))) {
         /* The game's result record says draws too (a double knockout, a venue taking both out, a
          * time-up tie): read only through the phase word, those were reported as "slot 0 won", and the
          * venue endings that skip phases 2 and 3 not at all (docs/research/team-and-special-match-types.md
@@ -4409,6 +4426,8 @@ void netplay_on_step(void)
             N.hash_gens[k][j] = g;
         }
     }
+    N.step_runs[k] = (uint8_t)(N.hash_tag[k] == s + 1 ? N.step_runs[k] + 1 : 1);
+    N.step_reads[k] = 0;
     N.hash_at[k] = fighter_hash(N.hash_parts[k], N.hash_fields[k], N.hash_split[k]);   /* the state as this step starts */
     {   /* the x87 control word the step starts with (its precision bits round every result): a
          * change is logged, at most 12 a match, to compare the PCs of a desynced match */
@@ -4616,10 +4635,29 @@ void netplay_on_pad_read(uint32_t actor)
                     break;
                 }
         }
+        if ((int)slot != N.pos) N.step_reads[k]++;
         if ((int)slot != N.pos && !N.watching) {
-            memcpy(N.used[slot][k], entry, ENTRY);
-            N.used_tag[slot][k] = s + 1;
-            N.used_pred[slot][k] = (uint8_t)predicted;
+            /* A step can read its pads more than once: updates that run no fight step (slow motion, moves
+             * that stop the steps) read the entries of the step still current. If one of those reads ran
+             * on a prediction and a later one on the entry that had arrived meanwhile, the record said
+             * "real" and the step that had used the prediction was never run again: the PCs parted by a
+             * few thousandths in the fighters' positions (two-copy runs, 2026-11-02, steps 10 200 and
+             * 37 440). So a prediction, once used in a step, stays recorded until a re-run reads it anew
+             * (rollback_to clears the records), and two different predictions in one step count as wrong. */
+            if (N.used_tag[slot][k] == s + 1 && N.used_pred[slot][k]) {
+                if (predicted && memcmp(N.used[slot][k], entry, ENTRY)) N.used_mixed[slot][k] = 1;
+                if (!predicted) {
+                    static unsigned told;
+                    if (told++ < 20)
+                        fprintf(stderr, "[ROLLBACK] step %u read slot %u's prediction, then its entry, in one step: "
+                                "kept as predicted\n", s, slot);
+                }
+            } else {
+                memcpy(N.used[slot][k], entry, ENTRY);
+                N.used_tag[slot][k] = s + 1;
+                N.used_pred[slot][k] = (uint8_t)predicted;
+                N.used_mixed[slot][k] = 0;
+            }
         }
         LeaveCriticalSection(&g_cs);
     }
@@ -4783,7 +4821,7 @@ static void rollback_to(uint32_t f)
     double ms;
     unsigned loads_before;
     if (!N.snap[slot].valid || N.snap[slot].step != f || N.updates < N.snap[slot].update ||
-        N.updates - N.snap[slot].update > 4 * ROLLBACK_SLOTS) {
+        N.updates - N.snap[slot].update > ROLLBACK_HOLD_SAVES) {
         if (N.rb_failed++ < 5)
             fprintf(stderr, "[ROLLBACK] no save state for step %u (now %u): this match may go out of sync\n", f, N.step);
         N.final_step = f;
@@ -4797,8 +4835,23 @@ static void rollback_to(uint32_t f)
     g_last_rb_from = N.step;
     rollback_crash_cb = rollback_crash_state;
     loads_before = rollback_dynamic_loads();
-    rollback_load(slot);
+    if (rollback_load(slot)) {      /* not loaded (too old for the held frees): as with no save */
+        if (N.rb_failed++ < 5)
+            fprintf(stderr, "[ROLLBACK] the save for step %u could not be loaded (now %u): this match may go out of sync\n",
+                    f, N.step);
+        N.final_step = f;
+        return;
+    }
     rollback_check_tables("right after a load");
+    {   /* the steps run again record anew which entries they read (netplay_on_pad_read) */
+        uint32_t t;
+        int i;
+        EnterCriticalSection(&g_cs);
+        for (t = f - 1; t <= N.step + 1 && t + RING > N.step; t++)
+            for (i = 0; i < MAXP; i++) N.used_tag[i][t % RING] = 0;
+        LeaveCriticalSection(&g_cs);
+    }
+    if (N.rb_decided_step && f <= N.rb_decided_step) N.rb_decided_step = 0;    /* seen again after the re-run */
     N.step = f - 1;
     N.updates = N.snap[slot].update;
     defjam_test_set_step(N.snap[slot].test_step);
@@ -4812,7 +4865,7 @@ static void rollback_to(uint32_t f)
     for (j = 0; j < n; j++) {
         /* not the save gone back to: an update without a fight step at the start of the re-run would
          * save it again, one update later (equivalent, but every later load of it then starts there) */
-        if (j && N.step + 1 != f) snap_save();
+        if (j && N.step + 1 != f && !s_soak_wrong) snap_save();     /* tests: the wrong pass keeps none */
         guest_call(sub_000DD930, input, 1, &dt);
         guest_call(sub_00077040, machine, 1, &dt);
         if (g_eax & 0xFFu) {
@@ -4869,7 +4922,8 @@ void netplay_on_update(void)
      * no more rollback in this match (write tracking off, no saves on the results screen). */
     if (MEM32(G_MATCH_PHASE) == 1u) N.rb_fought = 1;   /* a rematch starts with the last match's phase */
     if ((!N.lockstep && !soak_depth()) ||
-        (N.lockstep && N.rb_fought && MEM32(G_MATCH_PHASE) >= 2u && N.final_step >= N.step && !N.predicting)) {
+        (N.lockstep && N.rb_fought && MEM32(G_MATCH_PHASE) >= 2u && N.final_step >= N.step && !N.predicting) ||
+        (N.lockstep && N.rb_decided_step && N.final_step >= N.rb_decided_step)) {
         N.rb_on = 0;
         rollback_reset();
         fprintf(stderr, "[ROLLBACK] off for the rest of this match (step %u, %u rollbacks)\n", N.step, N.rb_count);
@@ -4892,11 +4946,26 @@ void netplay_on_update(void)
             for (i = 0; i < N.players; i++) {
                 if (i == N.pos) continue;
                 if (!(N.in_tag[i][k] == t + 1 && N.in_match[i][k] == N.match)) { all = 0; continue; }
-                if (N.used_tag[i][k] == t + 1 && N.used_pred[i][k] && memcmp(N.used[i][k], N.in[i][k], ENTRY)) wrong = 1;
+                if (N.used_tag[i][k] == t + 1 && N.used_pred[i][k] &&
+                    (N.used_mixed[i][k] || memcmp(N.used[i][k], N.in[i][k], ENTRY))) wrong = 1;
             }
         if (wrong) { f = t; break; }
         if (!all) break;
         N.final_step = t;
+        {   /* RECOMP_NETPLAY_FINALLOG=1 (tests): each step as it becomes final, with the fields its checksum covers
+             * (as its last run started it), to find the first step two PCs part at by diffing their logs */
+            static int finallog = -1;
+            if (finallog < 0) finallog = getenv("RECOMP_NETPLAY_FINALLOG") != NULL;
+            if (finallog && N.hash_tag[k] == t + 1) {
+                char line[300];
+                int n = snprintf(line, sizeof(line), "[FINAL] %08X %u runs %u reads %u pred %u%u |", N.match, t, N.step_runs[k],
+                                 N.step_reads[k], N.used_pred[0][k], N.used_pred[1][k]), sl, fi;
+                for (sl = 0; sl < 2; sl++)
+                    for (fi = 0; fi < NETCHECK_FIELDS; fi++)
+                        n += snprintf(line + n, sizeof(line) - (size_t)n, " %08X", N.hash_fields[k][sl][fi]);
+                fprintf(stderr, "%s\n", line);
+            }
+        }
     }
     LeaveCriticalSection(&g_cs);
     if (f) rollback_to(f);
@@ -4913,10 +4982,14 @@ void netplay_on_update(void)
                 wrong = getenv("RECOMP_ROLLBACK_SOAK_WRONG") != NULL;
                 twice = wrong || getenv("RECOMP_ROLLBACK_SOAK_TWICE") != NULL;
             }
+            /* the step gone back to, the same for every pass: a pass on wrong buttons can end at another
+             * step (a move that stops the fight steps for a while), and the next pass must still go back
+             * to this one to be compared (2026-11-02: the carrier report showed two different saves) */
+            uint32_t f0 = N.step + 1 - (uint32_t)d;
             for (k = 0; k < d; k++) before[k] = defjam_test_step_hash(t - d + k);
             if (rollback_soak_diff_on() && !twice) rollback_soak_before();
             if (wrong && rollback_soak_diff_on()) rollback_soak_phase(1);
-            rollback_to(N.step + 1 - (uint32_t)d);
+            rollback_to(f0);
             rollback_soak_phase(0);
             if (rollback_soak_diff_on() && !twice) rollback_soak_after(d, t, 0);
             if (twice) {
@@ -4929,11 +5002,11 @@ void netplay_on_update(void)
                 if (rollback_soak_diff_on()) rollback_soak_before();
                 if (wrong) {    /* what a wrong prediction leaves behind that the load does not take back */
                     s_soak_wrong = N.step + 1 - (uint32_t)d;
-                    rollback_to(N.step + 1 - (uint32_t)d);
+                    rollback_to(f0);
                     s_soak_wrong = 0;
                 }
                 if (wrong && rollback_soak_diff_on()) rollback_soak_phase(3);
-                rollback_to(N.step + 1 - (uint32_t)d);
+                rollback_to(f0);
                 rollback_soak_phase(0);
                 {
                     int differ_here = 0;
