@@ -1549,6 +1549,19 @@ void sub_00044FC0(void)
  * read 8 bytes below address 0. Two players' reports, the first fight after Story's rewards save and
  * Game.Quit (F9 64c4c2, build 44) and a lockstep match (875ad7, build 28). An empty view is the
  * number 0, as the zeroed out-parameter already says when nothing parses. */
+/* The post-fight reward pass (sub_00064ED0, from the fight screen's loader worker sub_00079190 ->
+ * sub_0001E1B0 -> sub_00065FD0): it walks each slot's profile (sub_00014C20) and crashed on a created
+ * fighter's (sub_000BE3D0). The pads were unlinked from the created records when a step saw phase 3,
+ * but Enoc's lockstep rematch (F9 59f513, build 45) ended without such a step and crashed here. The
+ * pads are now unlinked on entry, whatever the phase did (created_fighter.c). */
+extern void sub_00064ED0_gen(void);
+void created_fighter_before_rewards(void);
+void sub_00064ED0(void)
+{
+    created_fighter_before_rewards();
+    sub_00064ED0_gen();
+}
+
 extern void sub_000BD440_gen(void);
 void sub_000BD440(void)
 {
