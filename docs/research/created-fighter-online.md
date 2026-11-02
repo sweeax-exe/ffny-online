@@ -287,7 +287,7 @@ per-frame update that the simulation reads (collision or hit volumes from the co
 an x87 control-word change on the game thread by the created-player code (the lifter's
 `g_fp_control_word` is per thread, but a render-frame path that sets it between steps would make
 the step's rounding depend on frame timing). Until this is fixed the server switch stays off.
-**After build 38: one cause found and fixed (each PC picked its own intro clip for a created fighter), a second, frame-timing one still open (section 7).**
+**After build 38: both causes found and fixed (each PC picked its own intro clip for a created fighter; the step read a pose the render had made at each PC's frame timing), section 7.**
 
 **KOTH note** (not about created fighters): `dj.py scenario online --mode koth --players 3
 --matches 4` stops on this base and on e1866fe alone (checked by building e1866fe without this
@@ -364,7 +364,7 @@ the reads at the intro and at the victory see the same values. No protocol or re
 With it, both copies load the same intro speech (`537i3`/`537i4` on both, `logs/dj/20261102-030603-online`)
 and the log shows `created fighters' clips: this PC picked .. every PC plays ..` once per match.
 
-**Not enough: a second, frame-timing cause (open).** The same two-copy test with the fix still
+**Not enough: a second, frame-timing cause (fixed below).** The same two-copy test with the fix still
 desynced 2 of 6 matches (steps 720 and 180, `20261102-030603-online`). Measured since:
 
 | Run (`logs/dj/`) | Setup | Result |
@@ -398,9 +398,25 @@ refresh rate, vsync, load times), and the intro skip is not what carries it. In 
   the venue weapons (they differ at step 1 in synced stock matches too; a separate, harmless-so-far
   gap in the weapon hold).
 
-Next step: find where the created model's pose is evaluated outside the fight step (the
-pre-fight frames, `CLogic` state 4) and what it keeps (`sub_0009DC40`/`sub_0009E3A0` are the
-object's own virtual methods; the evaluate/blend code is in `sub_000A9xxx`, called with the
-`+0x9D0` skeleton), then either reset that state at the first step on every PC or keep the
-pre-fight from animating a created fighter. The reproduction is quick and reliable: the first row's
-command, 4 matches, about 10 minutes.
+**Second cause** [V]: the created model's animation controller (object + 0x8B0) poses that
+skeleton in its virtual method `sub_00097F90` (the animation sample `sub_000230A0`, the world matrices
+`sub_00024070`, the attachments `sub_000252A0`), and only the render traversal calls it, once per
+drawn frame. Found with a hardware write watch on a field of the skeleton (`RECOMP_WATCH_WRITE` on
+object + 0xC60, `logs/dj/20261102-061052-online`): of 21403 writes, the 170 made in the fight step
+came from the model update (`sub_0009E4A0` -> `sub_000A9470`, one a step), the rest from
+`sub_00097F90`'s chain under the frame loop. The step's joint read (`sub_001A7610` ->
+`sub_0009EC10`) then took whatever pose the last drawn frame had left: one PC that drew a frame
+between two steps and another that did not read different joints.
+
+**Fix** (`cp_pose_in_step`, `src/hooks/netplay.c`; `created_fighter_model` in
+`created_fighter.c`): in a lockstep fight every PC calls `sub_00097F90` for each created fighter's
+controller at the start of every step (`netplay_on_step`), so the step reads a pose made from the
+simulation alone. The render's own calls still run: skipping them during the fight (tried first)
+kept the copies in sync but hid the fighters on screen. `RECOMP_NETPLAY_CP_EVAL=game` (tests) turns
+it off. No protocol or relay change.
+
+| Run (`logs/dj/`) | Setup | Result |
+|---|---|---|
+| `20261102-061457-online` | first row of the table above, render calls skipped | 4 of 4 in sync, 90 checks; fighters not drawn |
+| `20261102-062044-online` | first row of the table above, the fix as shipped | **4 of 4 in sync**, 90 checks; fighters drawn |
+| `20261102-063909-online` | the same, no fast knockout (`--fast-ko 0 --bot 60`), long fights | **1510 checks, all equal** over 5 matches (stopped by the run's time limit) |

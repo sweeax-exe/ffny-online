@@ -99,6 +99,9 @@ int created_fighter_inject(int slot, int pad, const uint8_t rec[CP_REC_LEN]);
 int created_fighter_before_funccall(const char *text);
 /* Every fight step (netplay_on_step): unlinks the pads once every created fighter's look is built. */
 void created_fighter_on_step(void);
+/* The created fighter's model (the pad's CP-Fighter object, 0xAD20 bytes) of a pad that plays a
+ * record in the current match, else 0. */
+uint32_t created_fighter_model(int pad);
 
 /* Tests (RECOMP_TEST_CP): the fighter id to set up for the slot after injecting, or -1. */
 int created_fighter_test_slot(int slot, int pad);
