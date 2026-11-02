@@ -203,6 +203,7 @@ void netplay_crowd_update(void) { sub_00081170(); }
 #define CAPS_ROLLBACK 2u        /* the relay lets matches roll back (its switch; off: lockstep only) */
 #define CAPS_CREATED  8u        /* created fighters (client: can play them; relay: its switch is on) */
 #define CAPS_SPECTATE 16u       /* spectator mode (docs/research/spectator-mode.md) */
+#define CAPS_STATS_ERR 32u      /* client (build 46): shows ERROR 12, a created fighter's stats refused */
 #define CP_WAIT_MS    10000     /* START: how long to wait for a created fighter's missing record */
 #define CAPS_TRIES    5         /* CAPS every RETRY_MS; no answer after these: an older relay */
 #define WINNER_DRAW   0xFFu
@@ -2360,9 +2361,21 @@ static void on_packet(const uint8_t *b, int len)
                 "Only the room's host can do that, and not while voting or playing.",
                 "Not possible here: not in a room, or already in one.",
                 "A new build is out: close the game and update in the launcher to play online.",
-                "FFNY Online is already online on this PC." };
+                "FFNY Online is already online on this PC.",
+                "Your created fighter has stats the game does not allow; it can't be used online." };
             int code = b[6];
-            const char *text = code >= 1 && code <= 11 ? why[code] : "The server refused the request.";
+            const char *text = code >= 1 && code <= 12 ? why[code] : "The server refused the request.";
+            if (N.lobby && code == 12) {
+                /* build 46 relays: this player's created fighter has stats Story mode never gives (a
+                 * converted or edited save); the relay did not keep it (its empty RECORD already stopped
+                 * the upload). Said, and the session goes on; a pending request is not this one's. */
+                EnterCriticalSection(&g_cs);
+                snprintf(N.roomv.error, sizeof(N.roomv.error), "%s", text);
+                N.roomv.version++;
+                LeaveCriticalSection(&g_cs);
+                fprintf(stderr, "[NETPLAY] refused: %s\n", text);
+                break;
+            }
             if (N.lobby && (code == 1 || code == 2 || code == 3 || code == 8 || code == 9 || code == 10)) {
                 /* refused, but the session goes on */
                 EnterCriticalSection(&g_cs);
@@ -2570,7 +2583,7 @@ static DWORD WINAPI net_thread(LPVOID unused)
                 uint8_t cb[6 + 8 + 4];
                 int n = header(cb, T_CAPS);
                 memcpy(cb + n, N.token, 8); n += 8;
-                put32(cb + n, CAPS_KOTH | CAPS_CREATED | CAPS_SPECTATE); n += 4;
+                put32(cb + n, CAPS_KOTH | CAPS_CREATED | CAPS_SPECTATE | CAPS_STATS_ERR); n += 4;
                 send_raw(cb, n);
             } else {
                 N.relay_caps = 0;

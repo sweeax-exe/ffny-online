@@ -412,7 +412,13 @@ types from 0x27, dropped silently by older relays.
   is unchanged. The relay sends the named records (`RECORD`) to every other member right before
   `START`; a client that lacks one asks with `RECGET` and sets the match up only once it has it
   (after 10 s it leaves the match).
-- The relay checks only the record's shape. Every client checks and clamps the record the same way
+- Since build 46 the relay also checks the stats against what Story mode can give (the game's code
+  and data: base stats at most 50; bonus stats never negative, at most 8 each for the first five, 5 for
+  the sixth, 24 together). A record beyond that is not kept (empty `RECORD` 0xFE) and a game that
+  announced `CAPS` bit 5 (`32`, build 46) gets **`ERROR 12`** ("fighter stats"), which it shows as "Your created fighter has stats the game does
+  not allow; it can't be used online." without ending the session; the relay logs the name and the
+  values. Values within the limits that the record's own styles do not explain are only logged.
+- Otherwise the relay checks only the record's shape. Every client checks and clamps the record the same way
   before the game sees it (`cp_record_sanitize`, `src/hooks/created_fighter.c`): name cut to 16
   printable ASCII characters, voice 1..6, styles 0..4, base stats at most 50, bonus stats 0..38, move keys and
   recipe parts that the game's database has (others become the defaults). The sender plays the
