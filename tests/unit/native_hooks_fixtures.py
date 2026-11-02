@@ -48,6 +48,9 @@ void sub_001B5420(void)
 }
 int netplay_local_slot(void) { const char *v = getenv("STUB_LOCAL_SLOT"); return v ? atoi(v) : -1; }
 int netplay_rerunning(void) { return 0; }
+int netplay_spectating(void) { return 0; }
+/* rollback.c finds the game's heap at run time; the pre-v0.12 block stands in here. */
+void rollback_heap_range(uint32_t *lo, uint32_t *hi) { *lo = 0x80003000u; *hi = 0x82A0D000u; }
 '''
 
 # recorder.c: test_telemetry.c copies its lines into the play-test recorder's events (upstream v0.10).
