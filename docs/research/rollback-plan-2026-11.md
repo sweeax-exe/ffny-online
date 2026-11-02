@@ -288,7 +288,12 @@ the first), and the soak now replays each step's pad words in re-runs.
   copy writes the flag at the relay's CAPS answer ("the server allows rollback: the rollback setting applies from the next
   start").
 * Step 5, first part: the held contiguous, arena and XAPI free lists grow instead of giving frees back at once past 4096 (none
-  overflowed in the runs above; it was a latent use-twice). The 10-match `[MEM]` measurement is still to do.
+  overflowed in the runs above; it was a latent use-twice).
+* `20261102-033916-online` (`--matches 10 --fast-ko 600`, 70+10 ms, build ed3512b): **ok, 10 of 10 matches**, no crash or
+  desync, 1-151 rollbacks a match. Contiguous memory flat: 56.6 MB in use at the first start, 56.8 / 57.8 MB at the last
+  (copy 0's arena grew once more, by 1 MB, before match 9), 58.8 / 59.7 MB reached; the arena 4.0-5.0 MB live at each fight's
+  end, kept blocks 0-650. So short fights do not leak; the growth seen above (62.3 MB reached) came with the 11-minute fight
+  (6000-7000 kept blocks, arena 7.4 MB). The arena never gives a piece back.
 
 ### Next
 1. B1 / B5 with the wrong-prediction soak: name the block behind the loader list node and the mixer's voice (the
@@ -297,5 +302,6 @@ the first), and the soak now replays each step's pad words in re-runs.
    into the next pass.
 3. The two-copy desync at step 37 440 of a 11.6-minute fight: compare with a lockstep run of the same length (`--rollback off
    --fast-ko 0 --bot 60`, venue 9) before blaming rollback.
-4. Step 5: `--matches 10 --fast-ko 600`, `[MEM]` per match; the arena never gives pieces back (7.4 MB after two matches).
+4. Step 5: long fights. Measure `[MEM]` over several 5-10 minute fights (`--fast-ko 0 --bot 60`); candidates are the blocks a
+   load keeps (thousands per long fight) and arena pieces that could be given back between fights.
 5. Then the target runs (step 4 bar), King of the Hill (step 6).
