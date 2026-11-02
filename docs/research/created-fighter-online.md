@@ -420,3 +420,5 @@ it off. No protocol or relay change.
 | `20261102-061457-online` | first row of the table above, render calls skipped | 4 of 4 in sync, 90 checks; fighters not drawn |
 | `20261102-062044-online` | first row of the table above, the fix as shipped | **4 of 4 in sync**, 90 checks; fighters drawn |
 | `20261102-063909-online` | the same, no fast knockout (`--fast-ko 0 --bot 60`), long fights | **1510 checks, all equal** over 5 matches (stopped by the run's time limit) |
+| `20261102-071925-online` | created (AW5J3555) vs stock (22), copy 1 unpaced, KO 1200 | 3 of 3 in sync, 70 checks |
+| `20261102-071649-online` | stock vs stock, copy 1 unpaced, KO 1200 | 3 of 3 in sync, 60 checks |
