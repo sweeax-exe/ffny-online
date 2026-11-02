@@ -62,6 +62,7 @@ These are for unattended runs and are not player settings:
 | `RECOMP_INPUT_VIRTUAL_PADS=n` with `RECOMP_PAD_SCRIPT_VIRTUAL=1` | Attach `n` SDL virtual gamepads and send the scripted presses of that player to the pad's buttons, so a scripted match goes through the real SDL path. `RECOMP_INPUT_VIRTUAL_LATE_MS=t` plugs one more in `t` ms after start (hot-plug); `RECOMP_INPUT_VIRTUAL_CHORD_MS=t` makes virtual pad 1 hold both stick clicks 1.8 s at `t` ms and then press B (opens and closes the overlay). |
 | `RECOMP_RUMBLE_LOG=1` | Log the rumble values the game sends, when they change. |
 | `RECOMP_USB_PADS=n` | Number of controllers on the hub. Set by the game from the settings unless already set. |
+| `RECOMP_INPUT_EDGES=0` | Turn off upstream v0.13.0's retained transitions (a press shorter than a frame is kept until the game has read it). On by default offline. **Online play never uses them** (FFNY build 44): while `xbox_HostInputSetNetplay*` is on, `xbox_HostInputConsumedEdges()` reads 0, the USB report takes the old path (latch and minimum hold) and the game's acknowledgements are ignored, so what a pad delivers online is what it was in build 43. The lockstep entries are the game's own pad-table reads either way, so this is about feel, not sync. |
 
 ## How it fits together
 

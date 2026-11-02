@@ -74,6 +74,14 @@ game/                               junction to the extracted dump, gitignored
 Game data lives outside the repo at `<data>` (`$env:DEFJAM_DATA`): `xiso/`, `extracted/`,
 `analysis/`, `save/`, `tools/{extract-xiso,ghidra}`.
 
+Texture authoring belongs to `vyanhursky/DefJam-Modding-Tools`; published pack
+metadata/release notes belong to `vyanhursky/DefJamFFNY-mods`. Keep exact prompts,
+candidates, approvals, batch ledgers and checkpoint pointers in the private
+workspace, preserving its IDs, paths, schemas and backups. Game source retains
+runtime integration and concise native acceptance evidence. Do not merge a
+production authoring-history branch into a game release. The frozen HD Setup
+snapshot and its runtime aliases remain here until an explicitly tested pin update.
+
 ## 3. Non-negotiable hygiene (the repo will be public)
 - Never track disc images, XBEs, `.viv/.mad/.xsh`, lifted C, logs, or build output. `git add -A --dry-run` before every commit; CI job `hygiene` also checks.
 - Never mention the site the dump came from, anywhere. Refer to "the user's own dump".

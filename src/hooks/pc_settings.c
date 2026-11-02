@@ -36,6 +36,7 @@
 #include "created_fighter.h"
 #include "pc_debug.h"
 #include "discord_presence.h"
+#include "pc_language.h"
 #include "patches/widescreen.h"
 #include "patches/picture.h"
 
@@ -161,7 +162,7 @@ static RecompSetting g_display_settings[] = {
 
 /* The display table followed by the input tables (pc_input.c): one array, one
  * registration, one file. */
-static RecompSetting g_settings[DISPLAY_SETTING_COUNT + 64 + 16 + 16];
+static RecompSetting g_settings[DISPLAY_SETTING_COUNT + 64 + 16 + 16 + 4];
 static size_t g_setting_count;
 
 static char g_path[MAX_PATH * 4];   /* empty: do not load or save */
@@ -788,6 +789,7 @@ int pc_settings_init(void)
         pc_input_settings(g_settings + DISPLAY_SETTING_COUNT, 64);
     g_setting_count += pc_ui_settings(g_settings + g_setting_count, 16);
     g_setting_count += pc_debug_settings(g_settings + g_setting_count, 16);
+    g_setting_count += pc_language_settings(g_settings + g_setting_count, 4);
     recomp_settings_register(g_settings, g_setting_count);
     recomp_settings_set_log(settings_log);
     read = g_path[0] ? recomp_settings_load(g_path) : 0;
@@ -886,6 +888,10 @@ int pc_settings_init(void)
 #else
     pc_debug_start(g_log_name[0] ? g_log_name : NULL, has_arg("--record"));
 #endif
+    /* [language] pack: rebuild the pack's files from the dump if needed and serve them in place of
+     * the originals. After the launcher, which chooses it, and before the XBE is loaded. */
+    pc_language_start(have_root ? root : NULL, "game");
+
     /* [debug] unlock_all: src/patches/dev_unlock.c reads the variable once the game runs. */
     if (!getenv("RECOMP_UNLOCK_ALL") && recomp_settings_get("debug", "unlock_all", 0))
         _putenv_s("RECOMP_UNLOCK_ALL", "1");

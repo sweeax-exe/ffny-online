@@ -49,13 +49,15 @@ void sub_001B5420(void)
 int netplay_local_slot(void) { const char *v = getenv("STUB_LOCAL_SLOT"); return v ? atoi(v) : -1; }
 int netplay_rerunning(void) { return 0; }
 int netplay_spectating(void) { return 0; }
+/* camera_watch.c: the F9 report's fight camera state, called at every fight step. */
+void defjam_camera_watch(long long step) { (void)step; }
 /* rollback.c finds the game's heap at run time; the pre-v0.12 block stands in here. */
 void rollback_heap_range(uint32_t *lo, uint32_t *hi) { *lo = 0x80003000u; *hi = 0x82A0D000u; }
 '''
 
 # recorder.c: test_telemetry.c copies its lines into the play-test recorder's events (upstream v0.10).
 HOOK_SOURCES = ('src/hooks/test_observations.c', 'src/hooks/test_telemetry.c', 'src/hooks/test_bot.c',
-                'src/hooks/recorder.c')
+                'src/hooks/recorder.c', 'tests/unit/input_latency_stub.c')
 
 
 def build(tmp_path_factory, name, driver_text):

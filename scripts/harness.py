@@ -46,6 +46,9 @@ import zlib
 from pathlib import Path
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_profile_spec = importlib.util.spec_from_file_location('regression_profile', os.path.join(REPO, 'scripts/regression_profile.py'))
+regression_profile = importlib.util.module_from_spec(_profile_spec)
+_profile_spec.loader.exec_module(regression_profile)
 # Windows builds with the win-x64 presets; every other host with the posix ones.
 WINDOWS = os.name == "nt"
 EXE_NAME = "defjam_recomp.exe" if WINDOWS else "defjam_recomp"
@@ -1055,6 +1058,9 @@ def run_game(name, stages=(), tail="", shots="", secs=240, preset=RELEASE_PRESET
     # what the person at the PC is doing (HARNESS_VISIBLE=1 shows it).
     if not os.environ.get("HARNESS_VISIBLE"):
         e.setdefault("RECOMP_WINDOW_BACKGROUND", "1")
+    profile = regression_profile.current()
+    if profile:
+        e.update(profile['environment'])
     e["DEFJAM_DATA"] = data_dir()
     if scripted:
         e["RECOMP_SCRIPT_ANCHOR"] = TITLE_ANCHOR
@@ -1074,6 +1080,7 @@ def run_game(name, stages=(), tail="", shots="", secs=240, preset=RELEASE_PRESET
 
     run = Run(name, log + ".err", shots_dir)
     run.identity = {'preset': preset, 'executable': exe, 'build_state': build_state,
+                    'regression_profile': profile,
                     'environment': {k: v for k, v in e.items() if k.startswith('RECOMP_')},
                     'data_root': e['DEFJAM_DATA'], 'started_utc': datetime.now(timezone.utc).isoformat(),
                     'inherits_recomp_environment': inherit_recomp,
@@ -1282,7 +1289,7 @@ DIR_RE = re.compile(r'\[DIR\] .* pattern "([^"*?]+)" -> 0x00000000 (?:dir|file) 
 
 def run_faults(run):
     """Shared failure policy for routes, goldens, standalone runs and soaks."""
-    out = []
+    out = regression_profile.faults(run)
     for key, label in (("crashes", "[CRASH]"), ("watchdogs", "[WATCHDOG]"),
                        ("debug_layer", "[D3D11-DEBUG]"), ("truncated", "truncated batches"),
                        ("icall_failures", "unresolved indirect calls"),
