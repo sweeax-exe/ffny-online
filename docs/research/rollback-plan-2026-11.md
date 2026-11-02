@@ -322,6 +322,21 @@ the first), and the soak now replays each step's pad words in re-runs.
   would leave a mispredicted step uncorrected ("may go out of sync"). Not seen in the online runs; worth a look with the
   desync.
 
+### Third round (on `remaster` 75802ff)
+* **The save-identity check** (`20261102-060154-offline`): at the step-3483 divergence the two loads read different saves (11
+  and 0). Two soak artefacts, both fixed in d9430e0: a pass on wrong buttons can end at another step than the pass it replaces
+  (moves that stop the fight steps for a while), and the soak computed the next pass's target from the step it ended at; and the
+  wrong pass's own saves could overwrite the save the next pass needed ("no save state for step 3481 (now 3501)").
+* **A real hole found on the way** (d9430e0): the save slots are per fight step, but held arena and XAPI frees were given back
+  18 saves after they happened, while loads up to 64 updates back were allowed; with several updates to a step a load could bring
+  back pointers to blocks already handed out again (a candidate for the weapon / loader crash). Frees are now held for
+  `ROLLBACK_HOLD_SAVES` = 240 saves, older saves are not loaded, and `rollback_to` allows 240 updates back (was 64, the
+  "load refusal"). `rollback_to` also used to re-run on the current state when `rollback_load` failed; a failed load is now
+  treated as a missing save.
+* After it: the seeded soak has **0** differing steps (`20261102-061819-offline`), and a **14-minute continuous**
+  wrong-prediction soak with bots on both slots (`20261102-062408-offline`: 10 200 soaks of three passes, 56 100 steps compared)
+  had **0 differing steps and no crash**.
+
 ### Next
 1. B1 / B5 with the wrong-prediction soak: name the block behind the loader list node and the mixer's voice (the
    `ALLOCLOG` lines next to the crash), fix, then the soak must run 10 minutes clean.
