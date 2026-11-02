@@ -178,7 +178,7 @@ def main(argv=None):
     sc.add_argument("--more-shots", action="store_true", help="online: also each copy's versus and results screens of match 1")
     sc.add_argument("--venues", help="online: the venue feIDs every vote offers in turn (relay -test-venues), e.g. 26")
     sc.add_argument("--rematch", action="store_true", help="online: matches after the first are Rematch from the results menu")
-    sc.add_argument("--ranked", help="online: a ranked set (classic, open or classic,open) against a local account service "
+    sc.add_argument("--ranked", help="online: a ranked set (classic, open, classic,open or draft) against a local account service "
                                      "with test accounts (accounts -ranked -test-accounts)")
     sc.add_argument("--spectators", type=int, default=0, help="online: this many more copies watch the room (spectator mode)")
     sc.add_argument("--type", type=int, default=0)

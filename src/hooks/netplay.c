@@ -99,6 +99,8 @@ void netplay_lobby_accept(int y) { (void)y; }
 int netplay_lobby_accepted(void) { return -1; }
 int netplay_lobby_queue_ext(NetQueueExt *o) { (void)o; return 0; }
 int netplay_lobby_rankinfo(NetRankInfo *o) { (void)o; return 0; }
+int netplay_lobby_draft(NetDraft *o) { memset(o, 0, sizeof(*o)); return 0; }
+void netplay_lobby_draft_act(int s, int a, int i) { (void)s; (void)a; (void)i; }
 int netplay_lobby_queue(int *w, int *s, char *t, int n) { (void)w; (void)s; if (t && n > 0) t[0] = 0; return NETQUEUE_NONE; }
 int netplay_in_lobby(void) { return 0; }
 int netplay_lobby_address(char *o, int n) { (void)o; (void)n; return 0; }
@@ -175,6 +177,8 @@ void netplay_crowd_update(void) { sub_00081170(); }
 #define T_QUEUE       0x1F
 #define TICKET_LEN    16        /* RANKED: the account service's one-time ticket */
 #define T_ACCEPT      0x2C      /* ranked phase 2a: answer a found set */
+#define T_DRAFT       0x2D      /* ranked phase 2b: a Draft set's pick and ban */
+#define T_DRAFTACT    0x2E
 #define T_RANKINFO    0x2F      /* ranked phase 2a: the set room's ranks and score */
 /* King of the Hill (docs/research/king-of-the-hill.md section 8) */
 #define T_CAPS        0x20      /* both ways: what this client / the relay supports */
@@ -337,6 +341,8 @@ static struct {
     char rk_code[7];                /* a MOVE's reservation code ("" none) */
     NetRankInfo rank;               /* the last RANKINFO, of the room rank_room */
     char rank_room[7];
+    NetDraft draft;                 /* the last DRAFT, of the room draft_room (netplay_draft_rules.h) */
+    char draft_room[7];
     int set_match, set_game;        /* this START is a ranked set's game (its RESULT goes out); RANKINFO's game then */
     int room_count;
     unsigned rooms_version;
@@ -1554,6 +1560,23 @@ static void on_rankinfo(const uint8_t *b, int len)
     LeaveCriticalSection(&g_cs);
 }
 
+/* DRAFT: a Draft set's pick and ban, on every change and every second. */
+static void on_draft(const uint8_t *b, int len)
+{
+    NetDraft d;
+    if (!netdraft_decode(b, len, &d)) return;
+    EnterCriticalSection(&g_cs);
+    if (!N.roomv.in_room) { LeaveCriticalSection(&g_cs); return; }
+    if (!N.draft.valid || N.draft.step != d.step || N.draft.turn != d.turn || N.draft.game != d.game ||
+        memcmp(N.draft_room, N.roomv.code, 6))
+        fprintf(stderr, "[NETPLAY] draft: game %d step %d turn %d, %d bans, venue %d, picks %d %d\n", d.game, d.step,
+                d.turn, d.ban_count, d.venue, d.picks[0], d.picks[1]);
+    N.draft = d;
+    memcpy(N.draft_room, N.roomv.code, 7);
+    N.roomv.version++;
+    LeaveCriticalSection(&g_cs);
+}
+
 static void on_room(const uint8_t *b, int len)
 {
     Reader r = { b, len, 0, 0 };
@@ -2196,6 +2219,9 @@ static void on_packet(const uint8_t *b, int len)
         break;
     case T_RANKINFO:
         if (N.lobby) on_rankinfo(b + 6, len - 6);
+        break;
+    case T_DRAFT:
+        if (N.lobby) on_draft(b + 6, len - 6);
         break;
     case T_ROOM:
         if (N.lobby) on_room(b + 6, len - 6);
@@ -2971,6 +2997,34 @@ int netplay_lobby_rankinfo(NetRankInfo *out)
     return ok;
 }
 
+int netplay_lobby_draft(NetDraft *out)
+{
+    int ok;
+    InitOnceExecuteOnce(&g_once, init_once, NULL, NULL);
+    EnterCriticalSection(&g_cs);
+    ok = N.draft.valid && N.roomv.in_room && !memcmp(N.draft_room, N.roomv.code, 6);
+    if (ok) *out = N.draft;
+    else memset(out, 0, sizeof(*out));
+    LeaveCriticalSection(&g_cs);
+    return ok;
+}
+
+void netplay_lobby_draft_act(int step, int action, int id)
+{
+    uint8_t b[6 + 8 + 3];
+    int n;
+    EnterCriticalSection(&g_cs);
+    if (!N.lobby || !N.have_token || !N.roomv.in_room) { LeaveCriticalSection(&g_cs); return; }
+    LeaveCriticalSection(&g_cs);
+    if (action != NETDRAFT_ACT_CURSOR)
+        fprintf(stderr, "[NETPLAY] draft: step %d action %d id %d\n", step, action, id);
+    n = header(b, T_DRAFTACT);
+    memcpy(b + n, N.token, 8); n += 8;
+    n += netdraft_encode_act(b + n, step, action, id);
+    send_raw(b, n);     /* the next DRAFT is the answer; a lock goes twice against a loss (a repeat gets DRAFT) */
+    if (action != NETDRAFT_ACT_CURSOR) send_raw(b, n);
+}
+
 int netplay_lobby_queue(int *waited, int *searching, char *text, int size)
 {
     int state;
@@ -3381,6 +3435,36 @@ static int koth_script_run(const char *script, int called, int n, int *fighter)
  * called, RECOMP_NETPLAY_READY_DELAY_MS later; RECOMP_NETPLAY_NAME names the player); =ranked does the same through the ranked queue
  * (the copy must be signed in; RECOMP_ACCOUNT_SERVER for test accounts); =lobby only
  * enters the hub. */
+/* RECOMP_TEST_DRAFT=auto (tests): in a Draft set's pick and ban, make a legal choice on each of this
+ * player's turns, a moment after the turn starts (the pages show it), as a player would. */
+static void test_draft_tick(int you)
+{
+    static int seen_step = -1, seen_turn = -1, seen_game = -1, seen_bans = -1, seen_struck = -1;
+    static ULONGLONG since;
+    static unsigned acts;
+    const char *on = getenv("RECOMP_TEST_DRAFT");
+    const OnlineFighter *all;
+    int ids[160], n, i, action, id;
+    NetDraft d;
+    if (!on || strcmp(on, "auto") || !netplay_lobby_draft(&d) || !netdraft_my_turn(&d, you)) return;
+    if (d.step != seen_step || d.turn != seen_turn || d.game != seen_game || d.ban_count != seen_bans ||
+        d.struck_count != seen_struck) {
+        seen_step = d.step; seen_turn = d.turn; seen_game = d.game; seen_bans = d.ban_count; seen_struck = d.struck_count;
+        since = GetTickCount64();
+        return;
+    }
+    if (GetTickCount64() - since < 1500) return;
+    n = online_fighters(&all);
+    for (i = 0; i < n && i < 160; i++) ids[i] = all[i].id;
+    if (!netdraft_auto(&d, you, ids, i, (unsigned)GetTickCount64() * 2654435761u + (unsigned)you + ++acts, &action, &id))
+        return;
+    fprintf(stderr, "[NETPLAY] tests: draft step %d: %s %d\n", d.step,
+            action == NETDRAFT_ACT_BAN ? "ban" : action == NETDRAFT_ACT_STRIKE ? "strike" :
+            action == NETDRAFT_ACT_VENUE ? "venue" : "pick", id);
+    netplay_lobby_draft_act(d.step, action, id);
+    since = GetTickCount64();       /* a lost one goes again after the same wait */
+}
+
 static DWORD WINAPI autostart_thread(LPVOID unused)
 {
     const char *mode = getenv("RECOMP_NETPLAY"), *server = getenv("RECOMP_NETPLAY_SERVER");
@@ -3574,6 +3658,7 @@ static DWORD WINAPI autostart_thread(LPVOID unused)
                     netplay_lobby_accept(!(acc && !strcmp(acc, "0")));
                 }
                 netservers_ranked_move(who);
+                if (r.in_room) test_draft_tick(r.you);
             }
             /* The staged search (build 38), as the online screens do it: alone in the quick room, this
              * relay first, then the other North American one from 10 s (Automatic, All), every relay from

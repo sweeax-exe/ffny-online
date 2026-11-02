@@ -307,6 +307,12 @@ def _save_files(root):
     return out
 
 
+# Draft sets: the log line of a step (netplay.c on_draft) -> the name of its capture
+DRAFT_SHOTS = {"[NETPLAY] draft: game 1 step 1 turn": "draft-ban", "[NETPLAY] draft: game 1 step 2 turn": "draft-strike",
+               "[NETPLAY] draft: game 1 step 3 turn": "draft-blind", "[NETPLAY] draft: game 1 step 8 turn": "draft-reveal",
+               "[NETPLAY] draft: game 2 step 4 turn": "draft-venue-ban", "[NETPLAY] draft: game 2 step 7 turn": "draft-counterpick"}
+
+
 def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast_ko=600, ko_winner=None,
            bot=None, timeout=None, relay_port=27900, base_core=2, keep_going=False, extra_env=None,
            lock_timeout=None, log=None, require_hits=False, stall=300, keep_roots=False, quick=None,
@@ -326,7 +332,9 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
     and every match is checked on them as on the players (checksums, winners, summary). ranked: "classic" or
     "open" (or "classic,open"): a ranked set instead of a quick match, against a local account service
     (accounts -ranked -test-accounts) the relay asks (-accounts-internal); the copies sign in with its test
-    sessions, queue (RECOMP_NETPLAY=ranked, RECOMP_TEST_RANKED_MODES), accept and play the set's games."""
+    sessions, queue (RECOMP_NETPLAY=ranked, RECOMP_TEST_RANKED_MODES), accept and play the set's games.
+    ranked "draft": a Draft set; the copies make legal choices in its pick and ban (RECOMP_TEST_DRAFT=auto),
+    and each copy's draft pages are captured (game 1's bans, its blind pick, game 2's venue ban and picks)."""
     t0 = time.time()
     mode = mode.lower()
     if mode not in MODES:
@@ -354,6 +362,8 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
         s.relay(relay_port, rollback=(rollback == "on"), extra=relay_extra)
         before = {}
         koth = mode == "koth"
+        draft = bool(ranked) and "draft" in ranked
+        watch = WATCH + list(DRAFT_SHOTS) if draft else WATCH
         for i in range(players):
             # which way the copy's fighter approaches: Team puts room slots 0 and 1 on the left and 2 and
             # 3 on the right; on the hill (the KO winner is slot 0) copy 0 stays king on the left and
@@ -375,6 +385,8 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
                 env.update({"RECOMP_NETPLAY": "ranked", "RECOMP_RANKED": "1", "RECOMP_TEST_RANKED_MODES": ranked,
                             "RECOMP_ACCOUNT_SERVER": "127.0.0.1:%d" % (relay_port + 100),
                             "RECOMP_ACCOUNT_TEST_TOKEN": tokens["Copy %d" % i]})
+                if draft:
+                    env["RECOMP_TEST_DRAFT"] = "auto"
             if players > 2:
                 # ready only once every copy is in the room: the relay starts a vote (or calls the hill's
                 # first pair) as soon as two are there and ready, and a later copy then opened a room of
@@ -405,7 +417,7 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
             fx = fixtures[i] if fixtures and i < len(fixtures) and fixtures[i] else None
             root = s.make_root(i, fixture=os.path.abspath(fx) if fx else None)
             before[i] = _save_files(root)
-            s.launch(i, env=env, root=root, core=base_core + 2 * i, watch=WATCH)
+            s.launch(i, env=env, root=root, core=base_core + 2 * i, watch=watch)
             time.sleep(3)           # the first copy opens the room and is player 1
         for k in range(spectators):
             # a spectator: no fighter, no presses after the main menu (its game goes through the results by
@@ -457,6 +469,15 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
                 time.sleep(5)
                 stop_reason = "desync or gave up"
                 break
+            if draft:       # the draft's pages, a second into each captured step
+                for mark, name in DRAFT_SHOTS.items():
+                    if cs[0].watch.count(mark) and ("draft", name) not in more_done:
+                        more_done[("draft", name)] = time.time() + 1.0
+                    due = more_done.get(("draft", name))
+                    if isinstance(due, float) and time.time() >= due:
+                        more_done[("draft", name)] = True
+                        for k in range(len(cs)):
+                            _png(s, k, "%s-copy%d" % (name, k), shots)
             if shot_due is None and cs[0].watch.count(" starts in "):
                 shot_due = time.time() + 8
             if more_shots and shot_due and not more_done.get("versus") and time.time() >= shot_due - 7:

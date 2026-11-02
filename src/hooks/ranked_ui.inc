@@ -1,11 +1,12 @@
-// Ranked play's pages (ranked phase 2a: Classic and Open sets; Draft is phase 2b). Included into
+// Ranked play's pages (ranked phase 2a: Classic and Open sets; phase 2b: Draft). Included into
 // online_screen.cpp's anonymous namespace after its helpers (text, glass, the gallery's wrappers), so
 // it is not a translation unit of its own (the hooks' CMake glob takes *.c and *.cpp only). The wire
 // and the ladder are netplay_ranked.c; the lobby side is netplay.c (QUEUE, ACCEPT, RANKINFO).
 //
-//   RANKED_MODES    the mode chooser: Classic / Open (Draft "coming soon"), "also search" toggles
+//   RANKED_MODES    the mode chooser: Classic / Open / Draft, the "also search" toggle
 //   RANKED          the search, the ACCEPT popup, the move to the set's relay
 //   the room        the set's banner (mode, game, score, who picks the venue) and the rank on each card
+//   the draft       a Draft set's bans, strikes and picks on the fighter grid and the venue cards
 //   the versus      the ranks and the set's score over the cards
 //   RANKED_RESULTS  after a set: the rating change, the division bar, PROMOTION / DEMOTION SET, placements
 //   MY STATS        Y: a tab per mode beside the casual record
@@ -22,6 +23,8 @@ struct RankedUi {
     bool results_up = false;            // the results page opened for set_room
     unsigned long long results_since = 0, results_fetch = 0;
     int stats_tab = 0;                  // MY STATS: 0 casual, 1 + NETRANK_* a mode
+    // the draft: the grid's cursor and first row, the venue card, the cursor the relay has, the step seen
+    int draft_sel = 0, draft_top = 0, venue_sel = 0, draft_cursor_sent = -1, draft_room_game = -1;
 } R;
 
 // The gallery's samples (gallery_step sets them per page).
@@ -30,6 +33,7 @@ struct RankedSample {
     NetQueueExt queue = {};
     int accepted = -1;
     NetModeRank after[NETRANK_MODES] = {};
+    NetDraft draft = {};
 } RG;
 
 int lobby_rankinfo(NetRankInfo *out)
@@ -131,10 +135,11 @@ void draw_ranked_modes(ImDrawList *dl, const Frame &f, const Pad &pad)
     static const char *const descs[3] = {
         "The game's own roster, nothing else. Best of three: game 1 on a starter venue, then the loser picks.",
         "Any fighter, Story-mode and your created fighter included. Best of three, the loser picks the venue.",
-        "Bans, venue strikes and blind picks before every game. Coming soon." };
+        "Three bans each, venue strikes and a blind pick, then winner picks first. Best of three, stock fighters." };
     int at = 0;
     for (int i = 0; i < 3; i++) if (order[i] == R.primary) at = i;
-    if (pad.left || pad.right)      // Classic and Open only (Draft: phase 2b) R.primary = R.primary == NETRANK_CLASSIC ? NETRANK_OPEN : NETRANK_CLASSIC;
+    if (pad.left) R.primary = order[(at + 2) % 3];
+    if (pad.right) R.primary = order[(at + 1) % 3];
     for (int i = 0; i < 3; i++) if (order[i] == R.primary) at = i;
     if (pad.y) R.also = !R.also;
 
@@ -146,8 +151,8 @@ void draw_ranked_modes(ImDrawList *dl, const Frame &f, const Pad &pad)
     for (int i = 0; i < 3; i++) {
         int m = order[i];
         float x = x0 + i * (w + gap);
-        bool sel = i == at, draft = m == NETRANK_DRAFT;
-        if (!draft && mouse_pick(f, x, y, w, h)) R.primary = m;
+        bool sel = i == at, draft = false;     // Draft is live since phase 2b
+        if (mouse_pick(f, x, y, w, h)) R.primary = m;
         glass(dl, f, x, y, w, h, 10, sel ? IM_COL32(56, 14, 20, 255) : IM_COL32(10, 10, 13, 255), sel ? 0.70f : 0.58f);
         ImU32 head = draft ? with_alpha(GREY, 0.6f) : sel ? CREAM : with_alpha(CREAM, 0.75f);
         text(dl, f, g_stencil, 30, x + w / 2, y + 14, head, netranked_mode_title(m), CENTER, 1.6f);
@@ -190,10 +195,17 @@ void draw_ranked_modes(ImDrawList *dl, const Frame &f, const Pad &pad)
              "Found sooner: after 45 s either mode you both search may match.", CENTER, 0.7f);
     }
     float hx = 54;
-    hx += hint(dl, f, hx, 410, "a", "CHOOSE FIGHTER");
+    hx += hint(dl, f, hx, 410, "a", R.primary == NETRANK_DRAFT ? "SEARCH" : "CHOOSE FIGHTER");
     hx += hint(dl, f, hx, 410, "y", R.also ? "ONLY THIS MODE" : "ALSO SEARCH");
     hint(dl, f, hx, 410, "b", "BACK");
     if (pad.b) { S.page = HUB; return; }
+    if (pad.a && R.primary == NETRANK_DRAFT) {   // the fighters are drafted: straight to the search
+        int fighter = saved_fighter();
+        if (fighter == NETPLAY_CREATED_FIGHTER) fighter = 55;
+        ranked_search(fighter);
+        S.page = RANKED;
+        return;
+    }
     if (pad.a) {
         S.ranked_pick = true;
         S.page = FIGHTERS;
@@ -209,7 +221,7 @@ unsigned ranked_modes_for(int fighter)
 {
     unsigned m = 1u << R.primary;
     if (R.also) m |= 1u << (R.primary == NETRANK_CLASSIC ? NETRANK_OPEN : NETRANK_CLASSIC);
-    if (fighter == NETPLAY_CREATED_FIGHTER) m &= ~(1u << NETRANK_CLASSIC);
+    if (fighter == NETPLAY_CREATED_FIGHTER) m &= ~((1u << NETRANK_CLASSIC) | (1u << NETRANK_DRAFT));
     return m;
 }
 
@@ -319,7 +331,7 @@ void draw_ranked(ImDrawList *dl, const Frame &f, const Pad &pad)
         if (ext) {      // searching per mode (the matchmaker's counts, every relay)
             for (int k = 0; k < NETRANK_MODES; k++) {
                 float x = 360 + k * 78;
-                bool live = k != NETRANK_DRAFT;
+                bool live = true;
                 snprintf(line, sizeof(line), "%d", q.counts[k]);
                 text(dl, f, g_title, 22, x, 160, live ? WHITE : with_alpha(GREY, 0.6f), line, CENTER, 1.2f);
                 text(dl, f, g_title, 10, x, 188, live ? GREY : with_alpha(GREY, 0.6f), netranked_mode_title(k), CENTER, 0.8f);
@@ -363,6 +375,7 @@ void ranked_banner(ImDrawList *dl, const Frame &f, const NetRoom &r, const NetRa
 
 const char *ranked_picker_line(const NetRoom &r, const NetRankInfo &ri, char *buf, int size)
 {
+    if (ri.mode == NETRANK_DRAFT) return ri.game <= 1 ? "Both ready: the draft starts." : "Both ready: the next game's draft starts.";
     if (ri.game <= 1) return "Game 1: a starter venue, drawn for you.";
     if (ri.picker < 0) return "A draw: both vote for the next venue.";
     if (ri.picker == r.you) return "You lost the last game: you pick the next venue.";
@@ -550,10 +563,6 @@ void draw_ranked_stats(ImDrawList *dl, const Frame &f, int mode)
     const NetModeRank &r = ranks[mode];
     glass(dl, f, 34, 78, 572, 328);
     text(dl, f, g_stencil, 30, 52, 88, CREAM, (std::string("RANKED ") + netranked_mode_title(mode)).c_str(), LEFT, 1.6f);
-    if (mode == NETRANK_DRAFT && !r.valid) {
-        text(dl, f, g_title, 18, 320, 200, GREY, "DRAFT IS COMING SOON", CENTER, 1.2f);
-        return;
-    }
     if (!r.valid) {
         text(dl, f, g_title, 18, 320, 190, WHITE, "NOT PLAYED THIS SEASON", CENTER, 1.2f);
         text(dl, f, g_title, 12, 320, 220, GREY, "Five placement sets show your rank.", CENTER, 0.8f);
@@ -591,6 +600,389 @@ void draw_ranked_stats(ImDrawList *dl, const Frame &f, int mode)
     text(dl, f, g_title, 11, 52, 380, GREY, num, LEFT, 0.8f);
 }
 
+// ---- Draft: the pick and ban (ranked phase 2b; the rules are netplay_draft_rules.c) ----
+
+void ranked_sample_rank(NetRankInfo &ri, int game, int w0, int w1, int picker, int winner);
+
+const ImU32 DRAFT_BLUE = IM_COL32(90, 170, 255, 255);
+
+int lobby_draft(NetDraft *out)
+{
+    if (gallery_on()) { *out = RG.draft; return RG.draft.valid; }
+    return netplay_lobby_draft(out);
+}
+
+// Whether the room shows the draft: a Draft set's room with its pick and ban running, or the
+// drafted fighters being revealed (the room's "vote" of the one venue).
+bool draft_shown(const NetRoom &r, NetDraft *d)
+{
+    NetRankInfo ri;
+    if (!ranked_room(r, &ri) || ri.mode != NETRANK_DRAFT || !lobby_draft(d) || r.you < 0 || r.you > 1) return false;
+    if (r.phase == 0) return netdraft_active(d);
+    return r.phase == 1 && d->step == NETDRAFT_PLAYING;
+}
+
+// The seconds left in the turn: the relay's, counted down here between its DRAFTs.
+int draft_secs(const NetDraft &d)
+{
+    static int step = -1, turn = -1, game = -1, secs0 = -1, bans = -1, struck = -1;
+    static unsigned long long since;
+    if (gallery_on()) return d.secs;
+    if (d.step != step || d.turn != turn || d.game != game || d.secs != secs0 || d.ban_count != bans || d.struck_count != struck) {
+        step = d.step; turn = d.turn; game = d.game; secs0 = d.secs; bans = d.ban_count; struck = d.struck_count;
+        since = GetTickCount64();
+    }
+    return std::max(0, d.secs - (int)((GetTickCount64() - since) / 1000));
+}
+
+// A red X over a tile.
+void draft_cross(ImDrawList *dl, const Frame &f, float x, float y, float w, float h, float thick = 3.0f)
+{
+    float m = std::min(w, h) * 0.12f;
+    dl->AddLine(f.p(x + m, y + m), f.p(x + w - m, y + h - m), RED, thick * f.s());
+    dl->AddLine(f.p(x + w - m, y + m), f.p(x + m, y + h - m), RED, thick * f.s());
+}
+
+// A padlock centred at (cx, cy), `w` wide.
+void draft_padlock(ImDrawList *dl, const Frame &f, float cx, float cy, float w, ImU32 col = GOLD)
+{
+    float bw = w, bh = w * 0.75f, bx = cx - bw / 2, by = cy - bh / 2 + w * 0.2f;
+    dl->PathArcTo(f.p(cx, by), w * 0.3f * f.s(), 3.14159f, 2 * 3.14159f, 12);
+    dl->PathStroke(col, 0, w * 0.13f * f.s());
+    rect(dl, f, bx, by, bw, bh, col, 2);
+    dl->AddCircleFilled(f.p(cx, by + bh * 0.45f), w * 0.1f * f.s(), IM_COL32(40, 30, 10, 255));
+}
+
+// One small fighter tile in a ban strip: a ban (red X), a skipped one (dash) or one still to come.
+void draft_ban_tile(ImDrawList *dl, const Frame &f, float x, float y, float w, float h, int id, bool made)
+{
+    rect(dl, f, x, y, w, h, IM_COL32(0, 0, 0, 170), 3);
+    if (!made) { frame_rect(dl, f, x, y, w, h, with_alpha(GREY, 0.5f), 1.0f); return; }
+    if (id == NETDRAFT_NONE) { text(dl, f, g_title, 14, x + w / 2, y + h / 2 - 8, GREY, "-", CENTER, 0.6f); return; }
+    if (!portrait(dl, f, id, x + 1, y + 1, w - 2, h - 2, IM_COL32(120, 120, 120, 255)))
+        text(dl, f, g_body, 8, x + 2, y + h / 2 - 5, GREY, online_fighter_name(id), LEFT, 0, w - 4);
+    draft_cross(dl, f, x, y, w, h, 2.0f);
+}
+
+// A player's side: who, the fighter (their pick, or the cursor they rest on), and their bans.
+void draft_side(ImDrawList *dl, const Frame &f, const NetRoom &r, const NetDraft &d, int slot, float x, float y, bool me,
+                int hover)
+{
+    const float w = 140, h = 270;
+    bool turn = netdraft_my_turn(&d, slot);
+    glass(dl, f, x, y, w, h, 10, turn ? IM_COL32(56, 14, 20, 255) : IM_COL32(10, 10, 13, 255), turn ? 0.72f : 0.6f);
+    if (turn) frame_rect(dl, f, x, y, w, h, with_alpha(me ? GOLD : DRAFT_BLUE, 0.85f), 2.0f);
+    text(dl, f, g_title, 12, x + w / 2, y + 6, me ? GOLD : DRAFT_BLUE, me ? "YOU" : upper(slot_name(r, slot)).c_str(),
+         CENTER, 0.8f, w - 8);
+    int pick = d.picks[slot], shown = pick != NETDRAFT_NONE ? pick : me ? hover : d.cursors[slot];
+    bool hidden = !me && d.step == NETDRAFT_BLIND;
+    float px = x + 10, py = y + 24, pw = w - 20, ph = 150;
+    rect(dl, f, px, py, pw, ph, IM_COL32(0, 0, 0, 160), 4);
+    if (hidden) {
+        text(dl, f, g_stencil, 54, px + pw / 2, py + 40, with_alpha(CREAM, 0.5f), "?", CENTER, 1.4f);
+        if (d.locked[slot]) {
+            draft_padlock(dl, f, px + pw / 2, py + 118, 22);
+            text(dl, f, g_title, 11, px + pw / 2, py + ph + 4, GOLD, "LOCKED IN", CENTER, 0.8f);
+        }
+    } else if (shown != NETDRAFT_NONE) {
+        bool locked = pick != NETDRAFT_NONE;
+        if (!portrait(dl, f, shown, px, py, pw, ph, locked ? IM_COL32_WHITE : IM_COL32(150, 150, 150, 255)))
+            text(dl, f, g_title, 14, px + pw / 2, py + 60, CREAM, online_fighter_name(shown), CENTER, 1.0f, pw - 6);
+        if (locked) frame_rect(dl, f, px, py, pw, ph, me ? GOLD : DRAFT_BLUE, 2.5f);
+        float size = fit_size(f, g_hand, 15, online_fighter_name(shown), w - 10);
+        text(dl, f, g_hand, size, x + w / 2, py + ph + 3, locked ? (me ? GOLD : DRAFT_BLUE) : GREY,
+             online_fighter_name(shown), CENTER, 0.8f);
+    }
+    // the bans: three tiles
+    int bans[3];
+    int made = netdraft_bans_of(&d, slot, bans);
+    text(dl, f, g_title, 10, x + w / 2, y + 198, GREY, "BANS", CENTER, 0.6f);
+    for (int i = 0; i < 3; i++) draft_ban_tile(dl, f, x + 10 + i * 42, y + 212, 38, 50, bans[i], i < made);
+}
+
+// The banner over the draft: the set, whose turn, the clock.
+void draft_header(ImDrawList *dl, const Frame &f, const NetRoom &r, const NetDraft &d, const NetRankInfo &ri)
+{
+    page_title(dl, f, "DRAFT");
+    ranked_banner(dl, f, r, ri, 50);
+    char line[64];
+    netdraft_banner(&d, r.you, line, sizeof(line));
+    bool mine = netdraft_my_turn(&d, r.you);
+    text(dl, f, g_stencil, 24, 320, 76, mine ? GOLD : CREAM, line, CENTER, 1.4f);
+    if (netdraft_active(&d)) {
+        int left = draft_secs(d);
+        int total = d.step == NETDRAFT_BAN ? 20 : netdraft_fighter_step(d.step) ? 25 : 15;
+        char secs[8];
+        snprintf(secs, sizeof(secs), "%d", left);
+        text(dl, f, g_title, 34, 600, 22, left <= 5 ? RED : CREAM, secs, RIGHT, 1.6f);
+        rect(dl, f, 50, 106, 540, 5, IM_COL32(255, 255, 255, 30), 2.5f);
+        rect(dl, f, 50, 106, 540 * std::min(1.0f, left / (float)total), 5, mine ? GOLD : ORANGE, 2.5f);
+    }
+}
+
+// The fighter grid of the bans and picks: available, banned (red X), locked (padlock), the
+// opponent's cursor (blue outline), your pick (gold), theirs (blue).
+void draw_draft_fighters(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r, const NetDraft &d)
+{
+    const auto &list = roster();
+    int n = (int)list.size();
+    const int cols = 6, rows = 4;
+    if (!n) return;
+    int you = r.you, opp = 1 - you;
+    bool mine = netdraft_my_turn(&d, you);
+    if (R.draft_sel >= n) R.draft_sel = 0;
+    if (pad.left) R.draft_sel = (R.draft_sel + n - 1) % n;
+    if (pad.right) R.draft_sel = (R.draft_sel + 1) % n;
+    if (pad.up) R.draft_sel = std::max(0, R.draft_sel - cols);
+    if (pad.down) R.draft_sel = std::min(n - 1, R.draft_sel + cols);
+    if (pad.lb) R.draft_sel = std::max(0, R.draft_sel - cols * rows);
+    if (pad.rb) R.draft_sel = std::min(n - 1, R.draft_sel + cols * rows);
+    int row = R.draft_sel / cols;
+    if (row < R.draft_top) R.draft_top = row;
+    if (row >= R.draft_top + rows) R.draft_top = row - rows + 1;
+    float gx = 166, gy = 120, cw = 47, ch = 64;
+    glass(dl, f, gx - 6, gy - 6, cols * (cw + 4) + 8, rows * (ch + 5) + 20);
+    for (int rr = 0; rr < rows; rr++)
+        for (int c = 0; c < cols; c++) {
+            int i = (R.draft_top + rr) * cols + c;
+            if (i >= n) break;
+            int id = list[i].id;
+            float x = gx + c * (cw + 4), y = gy + rr * (ch + 5);
+            if (mouse_pick(f, x, y, cw, ch)) R.draft_sel = i;
+            int st = netdraft_fighter_state(&d, you, id);
+            bool sel = i == R.draft_sel, dim = st == NETDRAFT_TILE_BANNED || st == NETDRAFT_TILE_LOCKED;
+            rect(dl, f, x, y, cw, ch, IM_COL32(0, 0, 0, 150), 3);
+            ImU32 tint = dim ? IM_COL32(90, 90, 90, 255) : sel ? IM_COL32_WHITE : IM_COL32(170, 170, 170, 255);
+            if (!portrait(dl, f, id, x + 1, y + 1, cw - 2, ch - 2, tint))
+                text(dl, f, g_body, 9, x + 3, y + 26, GREY, list[i].name, LEFT, 0, cw - 4);
+            if (st == NETDRAFT_TILE_BANNED) draft_cross(dl, f, x, y, cw, ch);
+            if (st == NETDRAFT_TILE_LOCKED) draft_padlock(dl, f, x + cw / 2, y + ch / 2, 18);
+            if (st == NETDRAFT_TILE_MINE) frame_rect(dl, f, x, y, cw, ch, GOLD, 3.0f);
+            if (st == NETDRAFT_TILE_THEIRS) frame_rect(dl, f, x, y, cw, ch, DRAFT_BLUE, 3.0f);
+            if (d.cursors[opp] == id && d.picks[opp] != id && d.step != NETDRAFT_BLIND)     // their cursor (never blind)
+                frame_rect(dl, f, x + 2, y + 2, cw - 4, ch - 4, with_alpha(DRAFT_BLUE, 0.9f), 1.5f);
+            if (sel) selector(dl, f, x, y, cw, ch);
+            if (mouse_click(f, x, y, cw, ch)) const_cast<Pad &>(pad).a = true;
+        }
+    char page[32];
+    snprintf(page, sizeof(page), "%d / %d", R.draft_sel + 1, n);
+    text(dl, f, g_title, 11, gx + cols * (cw + 4) - 4, gy + rows * (ch + 5) - 2, GREY, page, RIGHT, 0.8f);
+    int cur = list[R.draft_sel].id;
+    // the cursor goes to the relay for the other to see (and a pick that runs out takes it)
+    if (!gallery_on() && cur != R.draft_cursor_sent && (d.step == NETDRAFT_BAN || d.step == NETDRAFT_BLIND ||
+                                                       d.step == NETDRAFT_WINNER_PICK || d.step == NETDRAFT_LOSER_PICK)) {
+        netplay_lobby_draft_act(d.step, NETDRAFT_ACT_CURSOR, cur);
+        R.draft_cursor_sent = cur;
+    }
+    bool legal = mine && netdraft_fighter_legal(&d, you, cur);
+    float hx = 54;
+    if (mine) hx += hint(dl, f, hx, 410, "a", d.step == NETDRAFT_BAN ? "BAN" : "LOCK IN");
+    hx += hint(dl, f, hx, 410, "lb", "PAGE");
+    hint(dl, f, hx, 410, "b", "LEAVE (FORFEIT)");
+    if (mine && pad.a) {
+        if (legal) netplay_lobby_draft_act(d.step, netdraft_action(&d), cur);
+        else say(netdraft_banned(&d, cur) ? "That fighter is banned." : "You won a game with that fighter: pick another.");
+    }
+}
+
+// The venue cards of the strikes, the venue ban and the venue pick (the vote's cards).
+void draw_draft_venues(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r, const NetDraft &d)
+{
+    int n = d.option_count;
+    if (n <= 0) return;
+    bool mine = netdraft_my_turn(&d, r.you);
+    int per = n <= 5 ? n : (n + 1) / 2, rowsn = (n + per - 1) / per;
+    if (R.venue_sel >= n) R.venue_sel = 0;
+    if (pad.left) R.venue_sel = (R.venue_sel + n - 1) % n;
+    if (pad.right) R.venue_sel = (R.venue_sel + 1) % n;
+    if (pad.up && R.venue_sel >= per) R.venue_sel -= per;
+    if (pad.down && R.venue_sel + per < n) R.venue_sel += per;
+    float w = n <= 5 ? 112 : 118, gap = 8, h = rowsn > 1 ? 136 : 200;
+    for (int i = 0; i < n; i++) {
+        int v = d.options[i], row = i / per, col = i % per, inrow = std::min(per, n - row * per);
+        float x0 = 320 - (inrow * w + (inrow - 1) * gap) / 2, x = x0 + col * (w + gap), y = 120 + row * (h + 8);
+        if (mouse_pick(f, x, y, w, h)) R.venue_sel = i;
+        int st = netdraft_venue_state(&d, v);
+        bool sel = i == R.venue_sel, out = st == NETDRAFT_VENUE_STRUCK || st == NETDRAFT_VENUE_BANNED;
+        glass(dl, f, x, y, w, h, 8, st == NETDRAFT_VENUE_CHOSEN ? IM_COL32(56, 40, 10, 255) : IM_COL32(10, 10, 13, 255), 0.62f);
+        float iw = w - 10, ih = std::min(iw, h - 40);
+        ImU32 tint = out ? IM_COL32(80, 80, 80, 255) : sel ? IM_COL32_WHITE : IM_COL32(170, 170, 170, 255);
+        if (!image(dl, f, venue_tex(v), x + 5, y + 5, iw, ih, tint))
+            text(dl, f, g_title, 13, x + w / 2, y + ih / 2 - 6, CREAM, online_venue_name(v), CENTER, 1.0f, iw);
+        const Tex &banner = venue_name_tex(v);
+        if (banner.srv) image_fit(dl, f, banner, x + 2, y + ih + 8, w - 4, 22, out ? IM_COL32(120, 120, 120, 255) : IM_COL32_WHITE);
+        else text(dl, f, g_hand, 12, x + w / 2, y + ih + 10, ORANGE, online_venue_name(v), CENTER, 0.8f, w - 6);
+        if (out) {
+            draft_cross(dl, f, x + 5, y + 5, iw, ih);
+            text(dl, f, g_title, 12, x + w / 2, y + ih / 2 - 7, WHITE, st == NETDRAFT_VENUE_STRUCK ? "STRUCK" : "BANNED", CENTER, 1.2f);
+        }
+        if (st == NETDRAFT_VENUE_CHOSEN) frame_rect(dl, f, x, y, w, h, GOLD, 3.0f);
+        if (sel && mine) selector(dl, f, x, y, w, h);
+        if (mouse_click(f, x, y, w, h)) const_cast<Pad &>(pad).a = true;
+    }
+    {   // both ban strips, small, under the cards
+        float y = 120 + rowsn * (h + 8) + 4;
+        if (y < 380) {
+            for (int s = 0; s < 2; s++) {
+                int bans[3], made = netdraft_bans_of(&d, s, bans);
+                float x = s == r.you ? 60 : 640 - 60 - 3 * 30;
+                text(dl, f, g_title, 10, x + 45, y, s == r.you ? GOLD : DRAFT_BLUE, s == r.you ? "YOUR BANS" : "THEIR BANS", CENTER, 0.6f);
+                for (int i = 0; i < 3; i++) draft_ban_tile(dl, f, x + i * 30, y + 14, 27, 36, bans[i], i < made);
+            }
+        }
+    }
+    int cur = d.options[R.venue_sel];
+    float hx = 54;
+    if (mine) hx += hint(dl, f, hx, 410, "a", d.step == NETDRAFT_STRIKE ? "STRIKE" : d.step == NETDRAFT_VENUE_BAN ? "BAN" : "PICK");
+    hint(dl, f, hx, 410, "b", "LEAVE (FORFEIT)");
+    if (mine && pad.a && netdraft_venue_legal(&d, cur)) netplay_lobby_draft_act(d.step, netdraft_action(&d), cur);
+}
+
+// Both drafted fighters and the venue, before the game starts.
+void draw_draft_reveal(ImDrawList *dl, const Frame &f, const NetRoom &r, const NetDraft &d)
+{
+    int left = r.ms_left - (int)(GetTickCount64() - r.received);
+    if (gallery_on()) left = 4000;
+    for (int s = 0; s < 2; s++) {
+        bool me = s == r.you;
+        float x = me ? 40 : 640 - 40 - 170, y = 126;
+        glass(dl, f, x, y, 170, 250, 10, IM_COL32(10, 10, 13, 255), 0.6f);
+        text(dl, f, g_title, 12, x + 85, y + 6, me ? GOLD : DRAFT_BLUE, me ? "YOU" : upper(slot_name(r, s)).c_str(), CENTER, 0.8f, 160);
+        int id = d.picks[s];
+        if (id != NETDRAFT_NONE && !portrait(dl, f, id, x + 10, y + 26, 150, 190))
+            text(dl, f, g_title, 15, x + 85, y + 100, CREAM, online_fighter_name(id), CENTER, 1.0f, 150);
+        frame_rect(dl, f, x + 10, y + 26, 150, 190, me ? GOLD : DRAFT_BLUE, 2.5f);
+        if (id != NETDRAFT_NONE) {
+            float size = fit_size(f, g_hand, 18, online_fighter_name(id), 160);
+            text(dl, f, g_hand, size, x + 85, y + 222, me ? GOLD : DRAFT_BLUE, online_fighter_name(id), CENTER, 1.0f);
+        }
+    }
+    text(dl, f, g_stencil, 40, 320, 150, CREAM, "VS", CENTER, 1.8f);
+    if (d.venue) {
+        if (!image(dl, f, venue_tex(d.venue), 250, 210, 140, 105))
+            text(dl, f, g_title, 13, 320, 250, CREAM, online_venue_name(d.venue), CENTER, 1.0f, 140);
+        text(dl, f, g_hand, 15, 320, 322, ORANGE, online_venue_name(d.venue), CENTER, 0.9f, 170);
+    }
+    char line[48];
+    snprintf(line, sizeof(line), "FIGHT IN %d", std::max(0, (left + 999) / 1000));
+    text(dl, f, g_title, 16, 320, 356, WHITE, line, CENTER, 1.0f);
+}
+
+// The Draft page in the room (draw_room): the header, then the step's page.
+void draw_draft(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r, const NetDraft &d)
+{
+    NetRankInfo ri;
+    lobby_rankinfo(&ri);
+    if (R.draft_room_game != d.game * 16 + d.step) {     // a new step: the cursor starts where it was
+        R.draft_room_game = d.game * 16 + d.step;
+        R.draft_cursor_sent = -1;
+    }
+    draft_header(dl, f, r, d, ri);
+    if (d.step == NETDRAFT_PLAYING) {
+        draw_draft_reveal(dl, f, r, d);
+        return;
+    }
+    text(dl, f, g_title, 11, 320, 92 + 20, GREY, netdraft_hint(&d, r.you), CENTER, 0.7f, 420);
+    if (netdraft_fighter_step(d.step)) {
+        const auto &list = roster();
+        int hover = list.empty() ? NETDRAFT_NONE : list[(size_t)std::min(R.draft_sel, (int)list.size() - 1)].id;
+        draft_side(dl, f, r, d, r.you, 14, 120, true, hover);
+        draft_side(dl, f, r, d, 1 - r.you, 640 - 14 - 140, 120, false, NETDRAFT_NONE);
+        draw_draft_fighters(dl, f, pad, r, d);
+    } else {
+        draw_draft_venues(dl, f, pad, r, d);
+    }
+    if (pad.b) { netplay_lobby_leave(); S.page = HUB; say(d.game <= 1 ? "You left the draft (a dodge)." : "You left the set (a forfeit)."); }
+}
+
+// ---- the gallery's Draft pages ----
+
+// A sample draft: Ann (slot 0) against Ben, the roster's fighters by index.
+void ranked_sample_draft(NetDraft &d, int step, int game, int first)
+{
+    const auto &list = roster();
+    auto id = [&](int i) { return list.empty() ? 55 : list[(size_t)i % list.size()].id; };
+    d = NetDraft();
+    d.valid = 1;
+    d.step = step;
+    d.game = game;
+    d.first = first;
+    d.secs = 14;
+    d.afk = NETDRAFT_NONE;
+    d.picks[0] = d.picks[1] = d.cursors[0] = d.cursors[1] = NETDRAFT_NONE;
+    static const int starters[5] = { 1, 5, 6, 11, 19 }, pool[8] = { 1, 2, 5, 6, 9, 11, 13, 19 };
+    if (game <= 1) { d.option_count = 5; for (int i = 0; i < 5; i++) d.options[i] = starters[i]; }
+    else { d.option_count = 8; for (int i = 0; i < 8; i++) d.options[i] = pool[i]; }
+    static const int bans[6] = { 3, 8, 14, 20, 26, 31 };
+    d.ban_count = step == NETDRAFT_BAN ? 2 : 6;
+    for (int i = 0; i < d.ban_count; i++) d.bans[i] = id(bans[i]);
+    if (step != NETDRAFT_BAN) d.bans[4] = NETDRAFT_NONE;    // one ban ran out
+}
+
+// The pages: ranked-draft-ban, ranked-draft-venue (game 1's strikes), ranked-draft-pick (game 3:
+// Ben won game 2 and picked first, Ann counterpicks; her game 1 fighter is locked),
+// ranked-draft-blind, ranked-draft-reveal. Returns false for any other page.
+bool ranked_draft_gallery(const std::string &p)
+{
+    if (p.compare(0, 12, "ranked-draft") != 0) return false;
+    const auto &list = roster();
+    auto id = [&](int i) { return list.empty() ? 55 : list[(size_t)i % list.size()].id; };
+    S.page = HUB;
+    G.room = sample_room(0, 2, 2);
+    snprintf(G.room.settings.name, sizeof(G.room.settings.name), "Ranked");
+    for (int i = 0; i < 2; i++) G.room.players[i].ready = 1;
+    ranked_sample_rank(RG.rank, 1, 0, 0, -1, NETRANK_SET_RUNNING);
+    RG.rank.mode = NETRANK_DRAFT;
+    NetDraft &d = RG.draft;
+    R.draft_top = 0;
+    if (p == "ranked-draft-ban") {
+        // A = Ben (slot 1): Ben, Ann, Ann banned; Ann's second ban; Ben's cursor rests on a fighter
+        ranked_sample_draft(d, NETDRAFT_BAN, 1, 1);
+        d.turn = 0;
+        d.cursors[1] = id(11);
+        R.draft_sel = 9;
+    } else if (p == "ranked-draft-venue") {
+        ranked_sample_draft(d, NETDRAFT_STRIKE, 1, 1);
+        d.turn = 0;                 // Ben struck one; Ann's first strike
+        d.struck_count = 1;
+        d.struck[0] = 5;
+        R.venue_sel = 2;
+    } else if (p == "ranked-draft-blind") {
+        ranked_sample_draft(d, NETDRAFT_BLIND, 1, 1);
+        d.venue = 11;
+        d.locked[1] = 1;            // Ben locked in: only that shows
+        d.cursors[0] = id(12);
+        R.draft_sel = 12;
+    } else if (p == "ranked-draft-pick") {
+        ranked_sample_rank(RG.rank, 3, 1, 1, 0, NETRANK_SET_RUNNING);
+        RG.rank.mode = NETRANK_DRAFT;
+        ranked_sample_draft(d, NETDRAFT_LOSER_PICK, 3, 1);
+        d.turn = 0;
+        d.venue = 9;
+        d.venue_ban_count = 1;
+        d.venue_bans[0] = 13;
+        d.picks[1] = d.cursors[1] = id(5);
+        d.locked[1] = 1;
+        d.lock_count[0] = 1; d.locks[0][0] = id(2);     // Ann won game 1 with this one
+        d.lock_count[1] = 1; d.locks[1][0] = id(7);
+        d.cursors[0] = id(10);
+        d.secs = 19;
+        R.draft_sel = 10;
+    } else if (p == "ranked-draft-reveal") {
+        ranked_sample_draft(d, NETDRAFT_PLAYING, 1, 1);
+        d.venue = 11;
+        d.picks[0] = id(12);
+        d.picks[1] = id(5);
+        G.room.phase = 1;
+        G.room.candidate_count = 1;
+        G.room.candidates[0] = 11;
+        G.room.ms_left = 4000;
+    } else {
+        return false;
+    }
+    return true;
+}
+
 // ---- the gallery's ranked pages ----
 
 void ranked_sample_rank(NetRankInfo &ri, int game, int w0, int w1, int picker, int winner)
@@ -625,6 +1017,7 @@ bool ranked_gallery(const std::string &p)
     snprintf(RG.queue.code, sizeof(RG.queue.code), "MATCH1");
     R.primary = NETRANK_CLASSIC;
     R.also = true;
+    if (ranked_draft_gallery(p)) return true;
     if (p == "ranked-modes") { S.page = RANKED_MODES; }
     else if (p == "ranked" || p == "ranked-search") { S.page = RANKED; G.queue = NETQUEUE_SEARCHING; }
     else if (p == "ranked-accept") { S.page = RANKED; G.queue = NETQUEUE_ACCEPT; }
@@ -660,10 +1053,10 @@ bool ranked_gallery(const std::string &p)
         netranked_parse_line("1524|260|9|3|5|1|0|2|0|PLACEMENT 2/5|1524|Contender III|", &R.before[NETRANK_OPEN]);
         netranked_parse_line("1561|231|10|2|5|1|0|3|0|PLACEMENT 3/5|1561|Contender II|", &RG.after[NETRANK_OPEN]);
         R.have_before = true;
-    } else if (p == "stats-ranked") {
+    } else if (p == "stats-ranked" || p == "stats-ranked-draft") {
         S.page = STATS;
         S.stats_page = 0;
-        R.stats_tab = 1 + NETRANK_CLASSIC;
+        R.stats_tab = 1 + (p == "stats-ranked-draft" ? NETRANK_DRAFT : NETRANK_CLASSIC);
     }
     return true;
 }
