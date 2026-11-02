@@ -1207,7 +1207,11 @@ static int every_player_rolls_back(void)
     /* King of the Hill fights stay in lockstep for now: with rollback, players' games froze or
      * crashed after the first fight of a hill in build 27, and the loser then never left the seat
      * (2026-10-25). Both PCs of a fight know it from START, so the delay agrees too. */
-    if (N.koth_match) return 0;
+    {   /* tests (rollback-plan-2026-11.md step 6): RECOMP_ROLLBACK_KOTH=1 on every copy lifts the hill's exclusion */
+        static int koth = -1;
+        if (koth < 0) koth = getenv("RECOMP_ROLLBACK_KOTH") && *getenv("RECOMP_ROLLBACK_KOTH") == '1';
+        if (N.koth_match && !koth) return 0;
+    }
     if (match_has_created()) return 0;
     for (i = 0; i < N.players; i++) if (!N.peer_rb[i]) return 0;
     return 1;
