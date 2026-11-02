@@ -128,7 +128,7 @@ A room can therefore come back in `ROOM` with other `max` and `pool` than were a
 | 0x18 | `LEAVE` | `token` 8 |
 | 0x1B | `OVER` | `token` 8 (this client's match has ended) |
 | 0x1C | `WHO` | `token` 8 (who is online; not a pending request, the hub asks every few seconds) |
-| 0x1E | `RANKED` | `token` 8, `ticket` 16 (one-time, from the account service), `fighter` u8 (join the ranked queue; see "Ranked queue") |
+| 0x1E | `RANKED` | `token` 8, `ticket` 16 (one-time, from the account service), `fighter` u8; optionally `modes` u8, `flags` u8, `pings` 3 × u16, `code` 6 (join the ranked queue; see "Ranked queue") |
 
 ### Server to client
 
@@ -138,7 +138,7 @@ A room can therefore come back in `ROOM` with other `max` and `pool` than were a
 | 0x19 | `ROOM` | the whole room: `room` 6, `you` u8 (your slot), `host` u8 (host's slot), `phase` u8, `Settings`, `candidates` u8 count + count x u8, `votes` count x u8 (votes per candidate), `ms_left` u16 (voting countdown), `players` u8 count, then per player: `slot` u8, `name` string, `ready` u8, `fighter` u8, `voted` u8 (0xFF = not yet) |
 | 0x1A | `START` | `seed` u32, `mode` u8, `rounds` u8, `venue` u8, `players` u8 count, per player: `slot` u8, `fighter` u8 |
 | 0x1D | `PLAYERS` | `online` u16 (clients connected), `rooms` u16, `count` u8 (at most 40), per player: `name` string, `state` u8 (0 in the hub, 1 in a room, 2 playing). Lobby players of the asker's build, the hub first, then by name; as many as fit one datagram. Relays before FFNY Online build 13 ignore `WHO`. |
-| 0x1F | `QUEUE` | `state` u8 (0 checking the ticket, 1 searching, 2 refused, 3 out of the queue, 4 found: the ranked room's `ROOM` follows), `waited` u16 (seconds searching), `searching` u16 (players in the queue) |
+| 0x1F | `QUEUE` | `state` u8 (0 checking the ticket, 1 searching, 2 refused, 3 out of the queue, 4 found: the ranked room's `ROOM` follows, 5 accept, 6 move), `waited` u16 (seconds searching), `searching` u16 (players in the queue); the long form (see "Ranked queue") follows for long-form games |
 
 `ROOMS` lists public rooms only, newest first, at most 30 (as many as fit in 1200 bytes).
 `ROOM` is sent to every member whenever anything in the room changes, and once a second while
@@ -170,27 +170,60 @@ voting (for the countdown).
 
 ### Ranked queue
 
-Ranked play is One on One between signed-in players of a similar rating (`docs/ranked-design.md`).
+Ranked play is best-of-three sets between signed-in players in three modes, each with its own
+rating and ladder: **Open** (every fighter, created and Story ones too), **Classic** (stock fighters
+only) and **Draft** (pick and ban). It is off in production until the account service's switch is on
+(`docs/ranked-design.md`). One central matchmaker on the account service pairs the queues of every
+relay (EU, NA, West).
 
 - The game asks the account service for a **ticket** (`POST /api/ranked/ticket` with the launcher's
   session; 32 hex digits = 16 bytes, valid for one minute, usable once) and sends `RANKED` with it.
   The launcher's session itself never goes over UDP.
-- The relay answers `QUEUE` 0 and redeems the ticket on the account service's local listener
-  (`POST /internal/ranked/redeem`), which names the account and its rating. An unknown, used or
-  expired ticket, an account already searching from another game, or a relay without an account
-  service (`-accounts-internal` not set) gives `QUEUE` 2. A client in a room gets `ERROR 9`.
-- While searching the client gets `QUEUE` 1 once a second. Every second the relay pairs the queue:
-  the longest-waiting player first, with the closest rating that both players' windows accept. A
-  window is ±100 rating points at first and grows by 50 every 10 s of searching, up to ±1000.
-- A pair gets `QUEUE` 4 and a private room named "Ranked" (One on One, `max` 2, pool 1, 6, 19)
-  with both players ready with their fighters, so the vote starts at once; then `START` as usual.
-  The host cannot change a ranked room's settings (`ERROR 8`).
-- Every `START` in a ranked room that still holds the two paired accounts is posted to the
-  account service (`POST /internal/ranked/pairing`, key `<room>-<SEED in hex>`, the key the games
-  report the match under). Only matches with such a pairing, reported by both paired accounts
-  from their own slots with the same result, change ratings (Glicko-2), at most 5 per pair per day.
+- `RANKED` has two forms. The **25-byte** one (token, ticket, fighter) is the original: Classic only,
+  no `ACCEPT`, never moved to another relay. The **long** one adds 14 bytes: `modes` u8 (bit 0 Open,
+  bit 1 Classic, bit 2 Draft), `flags` u8 (bit 0 rollback on; bits 4-5 the primary mode 0 Open,
+  1 Classic, 2 Draft), `pings` 3 × u16 (ms to the EU, NA and West relays; 0 unknown) and `code` 6 (a
+  reservation code from `QUEUE` 6, else zeros).
+- The relay answers `QUEUE` 0 and redeems the ticket on the account service's internal listener
+  (`POST /internal/ranked/redeem`). The service refuses (`QUEUE` 2) an unknown, used or expired
+  ticket, a banned account, the queue gate (a Discord account younger than 30 days, fewer than 10
+  casual matches, another ranked account on the same PC within 30 days, a dodge lock) and everything
+  while its switch is off; so does the relay for an account already searching from another game or
+  without an account service. A client in a room gets `ERROR 9`.
+- Every second the relay posts its queue to the matchmaker (`POST /internal/ranked/queue`) and
+  applies the answer for each player:
+  - searching: `QUEUE` 1 (the long form adds the searching count per mode);
+  - found (long form only): `QUEUE` 5 with the mode, the seconds left to accept (15) and the
+    opponent's rating; the game answers `ACCEPT` 1 or 0. Declining or letting it run out is a dodge
+    (queue locked 2, 10, then 30 minutes; the third within a day counts as a set loss); the other
+    player keeps searching. A 25-byte game is accepted for at once;
+  - host: the set's private room "Ranked" (One on One, `max` 2, pool 1, 6, 11) opens here; the player
+    gets `QUEUE` 4 and the room, ready with their fighter (a created fighter only in Open);
+  - move (long form only): `QUEUE` 6 with the reservation `code` and the host relay's `addr`; the game
+    registers there and sends the long `RANKED` with a fresh ticket and the code, and is seated in the
+    set's room once its account checks out. A reservation waits 30 s, then the room closes;
+  - refused: `QUEUE` 2.
+- The long `QUEUE` (to long-form games only) adds after `searching`: `counts` 3 × u16 (Open, Classic,
+  Draft), `mode` u8 (0xFF none), `accept` u8 (seconds), `opp` u16 (rating), `code` 6, `addr` (u8
+  length, then text).
+- Pairing (the matchmaker): the longest waiter first, the closest rating both windows accept
+  (±(75 + RD/2), +25 every 5 s, at least ±400 after 60 s and ±600 after 120 s; ±300 from the start for
+  a provisional player), the host relay with the lower worse ping (≤ 120 ms, 180 after 60 s, 250 after
+  120 s), the primary mode only for 45 s and then any mode both accept; never the same PC or network,
+  never the last opponent again unless both waited over a minute; a mode may require rollback.
+- The host cannot change a ranked room's settings (`ERROR 8`). Every `START` in a ranked room that
+  still holds the two paired accounts is posted to the account service (`POST
+  /internal/ranked/pairing`: key `<room>-<SEED in hex>`, the set, the mode, the relay and the START's
+  lineup). Leaving the room between games ends the set (`POST /internal/ranked/setover`; a forfeit).
 - `LEAVE` while searching leaves the queue (`QUEUE` 3); `CREATE`, `JOIN` or `QUICK` leave it
   silently; so does disconnecting. A repeated `RANKED` while queued only changes the fighter.
+
+| Type | Name | Direction | Body |
+|---|---|---|---|
+| 0x2C | `ACCEPT` | client -> server | `token` 8, `answer` u8 (1 accept, 0 decline) |
+| 0x2D | `DRAFT` | server -> client | `step`, `turn`, `secs`, `game`, `venue` u8; `bans`, `struck`, `venue_bans` (u8 count + ids); `picks` 2 × u8 (0xFF none or hidden); `locked` u8 bits (relay `draft.go`; not sent yet) |
+| 0x2E | `DRAFTACT` | client -> server | `token` 8, `step` u8, `action` u8 (1 ban, 2 strike, 3 pick, 4 venue, 5 cursor), `id` u8 (not taken yet) |
+| 0x2F | `RANKINFO` | server -> client | `mode` u8, count u8, then per player `slot`, `division` (0xFF placement), `placements` left u8, `rating` u16, `set_wins` u8 (not sent yet) |
 
 ## King of the Hill extension
 
