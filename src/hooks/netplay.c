@@ -3557,7 +3557,7 @@ int netplay_voice_room(void)
 
 void netplay_send_voice(const uint8_t *payload, int len)
 {
-    if (netplay_voice_room()) send_data(payload, len);
+    if (netplay_voice_room() && !netplay_spectating()) send_data(payload, len);    /* a spectator only listens */
 }
 
 int netplay_room_name(int slot, char *out, int size)
