@@ -224,6 +224,26 @@ relay (EU, NA, West).
   Classic and Draft stay stock only). At two wins, or after five games, the set is over: no game
   starts any more, and leaving the room is no longer a forfeit (no `setover`). `RANKINFO` follows
   every `ROOM` of the room.
+- **A Draft set** (relay `draft.go`, since ranked phase 2b) replaces the venue vote with a pick and
+  ban the relay runs. Seat "A" is the lower-rated player in Draft (a tie: slot 0); `DRAFT` names it.
+  Bans: three each, A B B A A B, 20 s a turn, visible and kept for the whole set (a ban that runs out
+  is skipped and listed as 0xFF). Game 1: A strikes 1 of the five starters, B 2, A 1 (15 s a turn; a
+  strike that runs out is random), then both pick blind within 25 s: the relay never sends the
+  other's blind pick or cursor, only that it is locked. Games 2 and on: the last game's winner bans a
+  venue of the ranked pool, the loser picks one (15 s each, random when they run out), the winner
+  picks a fighter (visible), the loser counterpicks (25 s each); nobody may pick the fighter they won
+  a game of this set with. A pick that runs out takes the player's cursor (`DRAFTACT` 5) when it is
+  legal, else a random legal fighter. Two turns in a row run out without any `DRAFTACT` from that
+  player make them AFK: before game 1 a dodge (`setover` with `dodge`: the set is void and the
+  dodger's queue locks as after a missed `ACCEPT`), after it a forfeit; `RANKINFO` then shows the
+  other as the set's winner. Leaving the room during game 1's draft is a dodge too. Only stock
+  fighters (never 99). The room stays in phase 0 during the draft (`READY` changes nothing); when
+  the picks are complete the room shows the drafted venue as its one candidate for 6 s (`VOTE`s are
+  ignored) and then sends `START` with the drafted fighters and venue. The next game's draft starts
+  once both are back and `READY`; a game whose `RESULT`s disagree is played again with the same
+  picks. `DRAFT` goes to both players on every change and every second; a `DRAFTACT` out of turn, in
+  another step or not legal is answered with `ERROR 8` (a repeat of one already taken with `DRAFT`,
+  a refused cursor move with nothing).
 - The host cannot change a ranked room's settings (`ERROR 8`). Every `START` in a ranked room that
   still holds the two paired accounts is posted to the account service (`POST
   /internal/ranked/pairing`: key `<room>-<SEED in hex>`, the set, the mode, the relay and the START's
@@ -234,8 +254,8 @@ relay (EU, NA, West).
 | Type | Name | Direction | Body |
 |---|---|---|---|
 | 0x2C | `ACCEPT` | client -> server | `token` 8, `answer` u8 (1 accept, 0 decline) |
-| 0x2D | `DRAFT` | server -> client | `step`, `turn`, `secs`, `game`, `venue` u8; `bans`, `struck`, `venue_bans` (u8 count + ids); `picks` 2 × u8 (0xFF none or hidden); `locked` u8 bits (relay `draft.go`; not sent yet) |
-| 0x2E | `DRAFTACT` | client -> server | `token` 8, `step` u8, `action` u8 (1 ban, 2 strike, 3 pick, 4 venue, 5 cursor), `id` u8 (not taken yet) |
+| 0x2D | `DRAFT` | server -> client | `step` (1 bans, 2 strikes, 3 blind picks, 4 venue ban, 5 venue pick, 6 winner's pick, 7 loser's pick, 8 playing or revealing, 9 over), `turn` (a slot), `secs` (left), `game`, `venue` (0 none), `first` (A's slot) u8; `bans` (u8 count + ids by turn, 0xFF a skipped one), `struck`, `venue_bans` (each u8 count + ids); `picks` 2 × u8 (0xFF none or hidden); `locked` u8 bits; `cursors` 2 × u8 (0xFF none or hidden); `options` (count + the venues of this game: the starters in game 1, then the pool); `locks` 2 × (count + the fighters that slot may not pick: won with); `afk` u8 (the AFK slot, 0xFF none). Relay `draft.go` |
+| 0x2E | `DRAFTACT` | client -> server | `token` 8, `step` u8 (as `DRAFT`'s, 1..7), `action` u8 (1 ban, 2 strike, 3 pick, 4 venue, 5 cursor), `id` u8 (a fighter or venue). No answer but the next `DRAFT`; `ERROR 8` when refused |
 | 0x2F | `RANKINFO` | server -> client | `mode` u8, count u8, then per player `slot` u8, `division` u8 (0..21 as the account service's divisions; 0xFF placement), `placements` left u8, `rating` u16, `set_wins` u8, `flags` u8 (bit 0 provisional); in a set's room then `game` u8 (the running or next game from 1, the last once over), `picker` u8 (the slot that picks the next venue, 0xFF both), `winner` u8 (0xFF running, the set winner's slot, 0xFE level after five games). After every `ROOM` of a ranked room (since phase 2a) |
 
 ## King of the Hill extension

@@ -13,6 +13,7 @@
 
 #include <stdint.h>
 #include "netplay_ranked.h"
+#include "netplay_draft_rules.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -180,6 +181,10 @@ int netplay_lobby_accepted(void);
 int netplay_lobby_queue_ext(NetQueueExt *out);
 /* RANKINFO of the ranked room this PC is in (ranks, the set's score); 0 none. */
 int netplay_lobby_rankinfo(NetRankInfo *out);
+/* DRAFT of the Draft set's room this PC is in (ranked phase 2b, netplay_draft_rules.h); 0 none. */
+int netplay_lobby_draft(NetDraft *out);
+/* DRAFTACT: a ban, strike, pick, venue or cursor move (NETDRAFT_ACT_*) in step. */
+void netplay_lobby_draft_act(int step, int action, int id);
 /* The queue state; waited (seconds), searching (players in the queue) and text (why refused)
  * when not NULL. */
 int netplay_lobby_queue(int *waited, int *searching, char *text, int size);

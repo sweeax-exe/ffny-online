@@ -928,6 +928,8 @@ bool ranked_test_switch();
 void open_ranked_modes();
 void ranked_search(int fighter);
 void ranked_tick(const NetRoom &r);
+bool draft_shown(const NetRoom &r, NetDraft *d);
+void draw_draft(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r, const NetDraft &d);
 bool ranked_gallery(const std::string &page);
 void draw_ranked_modes(ImDrawList *dl, const Frame &f, const Pad &pad);
 void draw_ranked(ImDrawList *dl, const Frame &f, const Pad &pad);
@@ -3004,6 +3006,10 @@ void draw_hill(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
 void draw_room(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
 {
     if (NETPLAY_IS_KOTH(r.settings.mode)) { draw_hill(dl, f, pad, r); return; }
+    {   // a Draft set's pick and ban (ranked_ui.inc)
+        NetDraft d;
+        if (draft_shown(r, &d)) { draw_draft(dl, f, pad, r, d); return; }
+    }
     const NetRoomPlayer *me = nullptr;
     for (int i = 0; i < r.player_count; i++) if (r.players[i].slot == r.you) me = &r.players[i];
     bool host = r.you == r.host;
@@ -3691,7 +3697,10 @@ void gallery_step()
                                          "versus-created-long",
                                          // ranked phase 2a: the mode chooser, the search, ACCEPT, the set, results
                                          "ranked-modes", "ranked-search", "ranked-accept", "ranked-room", "ranked-vote",
-                                         "ranked-versus", "ranked-results", "ranked-results-placement", "stats-ranked" };
+                                         "ranked-versus", "ranked-results", "ranked-results-placement", "stats-ranked",
+                                         // ranked phase 2b: Draft
+                                         "ranked-draft-ban", "ranked-draft-venue", "ranked-draft-blind",
+                                         "ranked-draft-pick", "ranked-draft-reveal", "stats-ranked-draft" };
     const int count = (int)(sizeof(pages) / sizeof(pages[0]));
     static unsigned long long start;
     static int ms;
