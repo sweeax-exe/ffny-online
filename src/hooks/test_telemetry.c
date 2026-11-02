@@ -544,6 +544,10 @@ void defjam_test_step(void)
     if (!defjam_test_observations_enabled() || !s_in_match) return;
     snapshot_point();
     s_step++;
+    {
+        extern void defjam_camera_watch(long long step);
+        defjam_camera_watch((long long)s_step);
+    }
     {   /* RECOMP_TEST_FAST_KO=<percent>: every fighter fights with that share of its health, so a
          * test match is decided in seconds. Set on the step the fight begins (phase 1; the intro
          * fills the bars before that), which is the same step on every PC of an online room, so the

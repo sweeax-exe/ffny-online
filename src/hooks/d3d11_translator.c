@@ -829,6 +829,10 @@ static void capture_backbuffer(IDirect3DDevice8 *dev)
             nv2a_pb_dump_next_frame();
         }
         fprintf(stderr, "[REPORT] picture report: %s, and the next frame's draws below\n", path);
+        {
+            extern void defjam_camera_report(void);     /* camera_watch.c: the camera and the fighters */
+            defjam_camera_report();
+        }
     }
     if (!step_shot) {
     if (!path || !*path)
