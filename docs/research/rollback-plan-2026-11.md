@@ -347,8 +347,27 @@ the first), and the soak now replays each step's pad words in re-runs.
   * `20261102-073400-online` (c4ea3af): **ok**, two fights of 13 200 and 31 000 steps (12.4 minutes), 740 checksums equal,
     1324-2947 rollbacks a match, no crash, no desync. One clean run against two desyncs before (37 440 and 10 200): more runs
     are needed before calling the desync fixed.
+* `RECOMP_NETPLAY_FINALLOG=1` (a0afab1) logs every rollback step's checksum fields as it becomes final, with how often it ran
+  and read its pads; diffing the two copies' logs finds the first step they part at. Used in the target runs below: no
+  difference in 51 286 + 41 024 final steps.
+* **Target runs** (step 4 bar; `--fast-ko 0 --bot 60`, 70+10 ms, `--keep-going`):
+  * `20261102-082054-online`, Terror Dome (venue 6), 3 matches with `--rematch`: **ok**, 850 checksums equal, 776-1421
+    rollbacks a match, about 14 minutes of fight, contiguous memory 56.5 -> 57.6 MB (59.7 MB reached).
+  * `20261102-084123-online`, venue 26, 3 matches with `--rematch`: matches 1 and 2 clean, then **the third never started**.
+    Match 2 ended with code 0x201, an ending that stops the fight steps at once and skips the phase words 2 and 3; one copy had
+    predicted step 14 668 past the other's last (14 667), so that step never became final and the copy never reported the
+    result nor switched rollback off. f9cb31b keeps the step at which the match is seen decided and ends the match once that
+    step is final.
+  * `20261102-091559-online` (f9cb31b), venue 26, 3 matches with `--rematch`: **ok**, 680 checksums equal, about 11 minutes.
+  * With `20261102-073400-online` (venue 9, 12.4 minutes) that is three runs of 10+ minutes of several matches with no crash,
+    hang or desync, including Terror Dome, venue 26 and rematches: the plan's step-4 bar, met once each on the current build.
 
-### Next
+### Next (after the third round)
+1. More two-copy long runs (the desyncs at steps 10 200 and 37 440 came once in two runs each; three later runs were clean),
+   always with `RECOMP_NETPLAY_FINALLOG=1` so a desync can be traced to its first step.
+2. Step 6 (King of the Hill), step 7 (performance), then step 8 (beta re-open on a test relay).
+
+### Next (as of the first round)
 1. B1 / B5 with the wrong-prediction soak: name the block behind the loader list node and the mixer's voice (the
    `ALLOCLOG` lines next to the crash), fix, then the soak must run 10 minutes clean.
 2. The input-history difference after a wrong pass (steps 1717-1723 above): which state outside the saves carries a button
