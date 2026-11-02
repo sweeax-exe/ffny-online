@@ -353,6 +353,7 @@ static struct {
     uint8_t used[MAXP][RING][ENTRY];    /* each other player's entry as its step ran */
     uint32_t used_tag[MAXP][RING];      /* step + 1 */
     uint8_t used_pred[MAXP][RING];      /* 1: a prediction */
+    uint8_t used_mixed[MAXP][RING];     /* 1: the step read two different predictions (netplay_on_pad_read) */
     uint32_t final_step;                /* every step up to this one ran on the real entries */
     uint32_t updates;                   /* game updates since the match's reference copy */
     uint32_t hash_at[RING], hash_tag[RING], hash_sent;
@@ -4552,9 +4553,27 @@ void netplay_on_pad_read(uint32_t actor)
                 }
         }
         if ((int)slot != N.pos && !N.watching) {
-            memcpy(N.used[slot][k], entry, ENTRY);
-            N.used_tag[slot][k] = s + 1;
-            N.used_pred[slot][k] = (uint8_t)predicted;
+            /* A step can read its pads more than once: updates that run no fight step (slow motion, moves
+             * that stop the steps) read the entries of the step still current. If one of those reads ran
+             * on a prediction and a later one on the entry that had arrived meanwhile, the record said
+             * "real" and the step that had used the prediction was never run again: the PCs parted by a
+             * few thousandths in the fighters' positions (two-copy runs, 2026-11-02, steps 10 200 and
+             * 37 440). So a prediction, once used in a step, stays recorded until a re-run reads it anew
+             * (rollback_to clears the records), and two different predictions in one step count as wrong. */
+            if (N.used_tag[slot][k] == s + 1 && N.used_pred[slot][k]) {
+                if (predicted && memcmp(N.used[slot][k], entry, ENTRY)) N.used_mixed[slot][k] = 1;
+                if (!predicted) {
+                    static unsigned told;
+                    if (told++ < 20)
+                        fprintf(stderr, "[ROLLBACK] step %u read slot %u's prediction, then its entry, in one step: "
+                                "kept as predicted\n", s, slot);
+                }
+            } else {
+                memcpy(N.used[slot][k], entry, ENTRY);
+                N.used_tag[slot][k] = s + 1;
+                N.used_pred[slot][k] = (uint8_t)predicted;
+                N.used_mixed[slot][k] = 0;
+            }
         }
         LeaveCriticalSection(&g_cs);
     }
@@ -4740,6 +4759,14 @@ static void rollback_to(uint32_t f)
         return;
     }
     rollback_check_tables("right after a load");
+    {   /* the steps run again record anew which entries they read (netplay_on_pad_read) */
+        uint32_t t;
+        int i;
+        EnterCriticalSection(&g_cs);
+        for (t = f - 1; t <= N.step + 1 && t + RING > N.step; t++)
+            for (i = 0; i < MAXP; i++) N.used_tag[i][t % RING] = 0;
+        LeaveCriticalSection(&g_cs);
+    }
     N.step = f - 1;
     N.updates = N.snap[slot].update;
     defjam_test_set_step(N.snap[slot].test_step);
@@ -4833,7 +4860,8 @@ void netplay_on_update(void)
             for (i = 0; i < N.players; i++) {
                 if (i == N.pos) continue;
                 if (!(N.in_tag[i][k] == t + 1 && N.in_match[i][k] == N.match)) { all = 0; continue; }
-                if (N.used_tag[i][k] == t + 1 && N.used_pred[i][k] && memcmp(N.used[i][k], N.in[i][k], ENTRY)) wrong = 1;
+                if (N.used_tag[i][k] == t + 1 && N.used_pred[i][k] &&
+                    (N.used_mixed[i][k] || memcmp(N.used[i][k], N.in[i][k], ENTRY))) wrong = 1;
             }
         if (wrong) { f = t; break; }
         if (!all) break;
