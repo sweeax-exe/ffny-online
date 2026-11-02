@@ -102,6 +102,13 @@ each round trip plus one step, between 2 and 10. A code match uses the host's se
   names each word that differs, here and there. Since build 35 every PC also seeds the shared
   generator (0x39C0E0) at the start of every online step (`RECOMP_NETPLAY_GEN_PIN=off` disables it
   for comparisons), so draws made outside the step on host timing cannot part the PCs.
+- **Languages (build 44, upstream v0.13.0):** the game's own French (`[language] game = french`) and
+  language mods change text, subtitles, fonts and menu art, not the fight. Two PCs with different
+  languages play together; a French and an English copy stayed in step in the two-copy test. The game
+  files' print sent with each START (`make_data_print`) hashes the fight files as the game opens them,
+  a language mod's rebuilt copy included, so a mod that rebuilds one of those files shows the "game
+  files differ" notice; one that only translates text archives does not. A mod's changes to
+  `default.xbe`'s data sections (strings) are not part of the print.
 - **Known limit:** the crowd is animated during loading on the host's own clock, and spectators
   can push fighters, so a long fight can still drift apart. The checksum reports it when it happens.
 
