@@ -431,6 +431,12 @@ std::string receipt_version(const fs::path &root)
     return json_strings(text.str())["version"];
 }
 
+void forget_install()
+{
+    std::error_code ec;
+    fs::remove(install_record(), ec);
+}
+
 void remember_install(const fs::path &root)
 {
     fs::path usual, data, record = install_record();

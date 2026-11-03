@@ -1309,26 +1309,14 @@ static void page_general(UiMode mode)
 #if defined(DEFJAM_APP)
 static bool g_app_maintenance = false;   // the app's own Maintenance screen was asked for
 void pc_app_home_notice();               // src/app/app_update.cpp: a newer app, or a build to update
+void pc_app_open_uninstall();            // src/app/app_setup.cpp: the app's Uninstall screen
 #endif
 static void page_maintenance(UiMode mode)
 {
     const char *names[] = {"Data", "Saves", "Mods", "Installation", "Settings file", "Play logs"};
     pcui::Folder paths[] = {pcui::Folder::Data,    pcui::Folder::Saves,    pcui::Folder::Mods,
                             pcui::Folder::Install, pcui::Folder::Settings, pcui::Folder::Logs};
-    for (int i = 0; i < 6; i++)
-    {
-        ImGui::PushID(i);
-        auto path = pcui::folder_path(paths[i]);
-        ImGui::SeparatorText(names[i]);
-        ImGui::TextWrapped("%s", path.empty() ? "Not available for this run" : path.c_str());
-        if (ImGui::Button("Open"))
-            pcui::open_path(path, i == 4);
-        ImGui::SameLine();
-        if (ImGui::Button("Copy path"))
-            pcui::copy_text(path);
-        ui_target((std::string("Copy ") + names[i]).c_str());
-        ImGui::PopID();
-    }
+    // Update / Repair first: what the page is most often opened for (owner, 2026-11-02).
     ImGui::SeparatorText("Update / Repair");
 #if defined(DEFJAM_APP)
     (void)mode;
@@ -1349,6 +1337,20 @@ static void page_maintenance(UiMode mode)
     ImGui::TextWrapped("Use Update / Repair on the launcher's Home screen to open the wizard and close the "
                        "game. Setup verifies releases and builds your dump locally.");
 #endif
+    for (int i = 0; i < 6; i++)
+    {
+        ImGui::PushID(i);
+        auto path = pcui::folder_path(paths[i]);
+        ImGui::SeparatorText(names[i]);
+        ImGui::TextWrapped("%s", path.empty() ? "Not available for this run" : path.c_str());
+        if (ImGui::Button("Open"))
+            pcui::open_path(path, i == 4);
+        ImGui::SameLine();
+        if (ImGui::Button("Copy path"))
+            pcui::copy_text(path);
+        ui_target((std::string("Copy ") + names[i]).c_str());
+        ImGui::PopID();
+    }
     ImGui::SeparatorText("Files");
     ImGui::TextWrapped("Settings are saved as you change them in: %s", pc_settings_path());
     if (ImGui::Button(k_show_file_label)) open_folder();
@@ -1374,6 +1376,15 @@ static void page_maintenance(UiMode mode)
     ImGui::SeparatorText("About");
     ImGui::Text("Def Jam: Fight for NY - Recompiled, version %s", DEFJAM_VERSION);
     ImGui::TextDisabled("Dear ImGui %s (MIT)  -  SDL3 (zlib)", IMGUI_VERSION);
+#if defined(DEFJAM_APP)
+    // Last on the page (owner, 2026-11-02): the app's own Uninstall screen (src/app/app_setup.cpp).
+    ImGui::SeparatorText("Uninstall");
+    ImGui::TextWrapped("Removes the game from this computer, with its Steam shortcut and this app. You choose "
+                       "whether its data folder goes too; your saves are copied first.");
+    if (ImGui::Button("Uninstall..."))
+        pc_app_open_uninstall();
+    ui_target("Uninstall");
+#endif
 }
 
 static void page_debug(UiMode mode)

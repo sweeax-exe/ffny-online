@@ -34,7 +34,7 @@ static RecompSetting g_display_settings[] = {
       "Use texture packs from the data folder's mods directory." },
     { "textures", "packs", RECOMP_SETTING_STRING, 0, 0, 0, NULL, "RECOMP_TEXTURE_PACKS", RECOMP_SETTING_RESTART,
       "Pack folder names separated by semicolons. Later packs take precedence.", "faithful-hd" },
-    { "textures", "cache_mb", RECOMP_SETTING_INT, PC_TEXTURE_CACHE_MB, 32, 4096, NULL, "RECOMP_PC_TEXTURE_CACHE_MB", RECOMP_SETTING_RESTART,
+    { "textures", "cache_mb", RECOMP_SETTING_INT, PC_TEXTURE_CACHE_MB, 32, 4096, NULL, "RECOMP_TEXTURE_CACHE_MB", RECOMP_SETTING_RESTART,
       "Memory budget for replacement textures in MiB, including their retained upload data." },
     { "textures", "dump", RECOMP_SETTING_BOOL, 0, 0, 0, NULL, NULL, RECOMP_SETTING_RESTART,
       "Capture source textures for making a pack, in hd-work/runtime under the data folder." },

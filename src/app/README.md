@@ -23,6 +23,14 @@ Play starts the game that setup built on this computer, with `--no-launcher`.
   out the overlay and the Debug page's controls for a running game (the recorder's mark, Story
   scenes, EA's developer menu). It registers the same catalogue
   (`src/hooks/pc_settings_catalog.c`) and edits the same `settings.ini` as the game.
+- **Uninstall** (`app_setup.cpp`; last on Advanced > Maintenance, under Update / Repair, which is
+  first). It takes out the Steam shortcut and art this app added (Windows), copies the saves and
+  `settings.ini` to `Def Jam Recompiled saves <date>` in Documents when the data folder goes too
+  (nothing is deleted unless the copy matches), runs setup's own uninstall (`engine.py
+  --uninstall`: the build, its receipt, the launcher and an older setup's shortcuts), then deletes
+  the data folder (only one setup made, with `extraction-state.json`) and the app's records. On
+  Windows a script removes the installed app's folder and its logs once the window has closed;
+  elsewhere the player deletes the app.
 - **Like the play wrapper.** It holds the install's `play.lock` (letting it go while setup works,
   since setup takes it), reads `installed.json`, sets `DEFJAM_DATA`, `DEFJAM_INSTALL_DIR` and the
   working directory, and keeps the session log beside the wrapper's
