@@ -1,11 +1,12 @@
-"""The app runs setup/engine.py itself (src/app/app_setup.cpp): every option it passes must be one
-the engine takes, and every progress message its stage list waits for must be one the engine
-sends, or a renamed message would leave the progress screen stuck on a step."""
+"""The app runs setup/engine.py itself (src/app/app_setup.cpp, app_update.cpp): every option it
+passes must be one the engine takes, and every progress message its stage list waits for must be
+one the engine sends, or a renamed message would leave the progress screen stuck on a step."""
 from pathlib import Path
 import re
 
 ROOT = Path(__file__).resolve().parents[2]
 APP = (ROOT / 'src/app/app_setup.cpp').read_text(encoding='utf-8')
+UPDATE = (ROOT / 'src/app/app_update.cpp').read_text(encoding='utf-8')
 ENGINE = (ROOT / 'setup/engine.py').read_text(encoding='utf-8')
 
 
@@ -14,11 +15,14 @@ def engine_options():
 
 
 def test_every_option_the_app_passes_is_an_engine_option():
-    # The engine's command line: the args vector and what is added to it (not xcode-select's).
-    body = APP[APP.index('std::vector<std::string> args'):APP.index('std::vector<std::string> env_text')]
-    passed = set(re.findall(r'"(--[a-z-]+)"', body))
-    assert {'--payload', '--operation', '--install-dir', '--data-dir', '--dump', '--status-file',
-            '--cancel-file', '--log', '--bundled-only', '--no-shortcuts', '--install-prerequisites'} <= passed
+    # The engine's command line: spawn_engine's own, start()'s, and app_update.cpp's (not xcode-select's).
+    spawn = APP[APP.index('bool spawn_engine('):APP.index('std::vector<std::string> env_text')]
+    operation = APP[APP.index('std::vector<std::string> args = {"--bundled-only"'):APP.index('if (!spawn_engine(args')]
+    update = ''.join(re.findall(r'spawn_engine\(\{(.*?)\}', UPDATE, re.S))
+    passed = set(re.findall(r'"(--[a-z-]+)"', spawn + operation + update))
+    assert {'--payload', '--operation', '--install-dir', '--data-dir', '--dump', '--status-file', '--cancel-file',
+            '--log', '--bundled-only', '--no-shortcuts', '--install-prerequisites', '--check-app-update',
+            '--stage-app', '--stage-dir'} <= passed
     assert passed - engine_options() == set()
 
 
@@ -33,7 +37,7 @@ def test_the_operations_the_app_starts_are_engine_operations():
     choices = re.search(r"'--operation', choices=\[([^\]]*)\]", ENGINE).group(1)
     operations = set(re.findall(r"'([a-z]+)'", choices))
     started = set(re.findall(r'start\("([a-z]+)"', APP))
-    assert started == {'install', 'repair', 'rebuild'}
+    assert started == {'install', 'repair', 'rebuild', 'update'}
     assert started <= operations
 
 

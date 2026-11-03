@@ -256,6 +256,7 @@ if(DEFJAM_BUILD_APP AND DEFJAM_SDL3)
         src/app/app_main.cpp
         src/app/app_os.cpp
         src/app/app_setup.cpp
+        src/app/app_update.cpp
         src/host_posix_keys.c
         src/hooks/pc_settings_catalog.c
         src/hooks/pc_input.c

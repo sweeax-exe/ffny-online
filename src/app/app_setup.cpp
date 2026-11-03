@@ -49,7 +49,8 @@ enum class Screen
     FirstRun,       // nothing installed yet: choose the dump and the folders
     Maintenance,    // Repair or Clean Rebuild of the install
     Running,        // an operation's progress
-    Finished        // how it ended
+    Finished,       // how it ended
+    UpdateReady     // the app was just updated: build the game it now carries
 };
 
 // The steps the engine reports, in order, by the start of its status lines.
@@ -160,17 +161,52 @@ fs::path python_in(const fs::path &payload)
     return {};
 }
 
+} // namespace
+
+bool spawn_engine(const std::vector<std::string> &engine_args, os::Process *process, std::string *error)
+{
+    fs::path payload = app::payload();
+    fs::path python = python_in(payload);
+    if (payload.empty() || python.empty()) {
+        *error = "This copy of the app has no setup files. Start it with --payload <setup payload folder>.";
+        return false;
+    }
+    std::vector<std::string> args = {python.string(), "-B", (payload / "engine/engine.py").string(),
+                                     "--payload", payload.string()};
+    args.insert(args.end(), engine_args.begin(), engine_args.end());
+
+    // As the macOS wizard runs it: a plain environment, so nothing from a package manager or a
+    // development shell changes the build. Elsewhere the engine may need the session's own
+    // (the build container's runtime folder, the display for Steam; on Windows the user's folders).
+    std::vector<std::string> env_text;
+    const std::vector<std::string> *env = nullptr;
+#if defined(__APPLE__)
+    const char *home = getenv("HOME");
+    const char *tmp = getenv("TMPDIR");
+    env_text = {std::string("HOME=") + (home ? home : ""), "PATH=/usr/bin:/bin:/usr/sbin:/sbin",
+                std::string("TMPDIR=") + (tmp ? tmp : "/tmp"), "LANG=en_US.UTF-8"};
+    env = &env_text;
+#endif
+    std::string why;
+    if (!os::start(args, env, process, &why)) {
+        *error = "Setup could not start: " + why;
+        return false;
+    }
+    return true;
+}
+
+namespace
+{
+
 // Start the engine for `operation`. Returns false with g_form_error set when it could not start.
 bool start(const std::string &operation, const std::string &title, const std::string &root,
            const std::string &data, const std::string &dump, bool hd, bool install_tools = false)
 {
-    g_request = {operation, title, root, data, dump, hd};
-    fs::path payload = app::payload();
-    fs::path python = python_in(payload);
-    if (payload.empty() || python.empty()) {
+    if (app::payload().empty()) {
         g_form_error = "This copy of the app has no setup files. Start it with --payload <setup payload folder>.";
         return false;
     }
+    g_request = {operation, title, root, data, dump, hd};
     g_run = Run();
     g_run.operation = operation;
     g_run.title = title;
@@ -186,11 +222,9 @@ bool start(const std::string &operation, const std::string &title, const std::st
     fs::create_directories(app::log_dir(), ec);
     g_run.log = app::log_dir() / ("setup-" + std::string(stamp) + ".log");
 
-    std::vector<std::string> args = {python.string(), "-B", (payload / "engine/engine.py").string(),
-                                     "--payload", payload.string(), "--bundled-only",
-                                     "--operation", operation, "--install-dir", root, "--data-dir", data,
-                                     "--status-file", g_run.status.string(), "--cancel-file", g_run.cancel.string(),
-                                     "--log", g_run.log.string()};
+    std::vector<std::string> args = {"--bundled-only", "--operation", operation, "--install-dir", root,
+                                     "--data-dir", data, "--status-file", g_run.status.string(),
+                                     "--cancel-file", g_run.cancel.string(), "--log", g_run.log.string()};
     if (!dump.empty()) args.insert(args.end(), {"--dump", dump});
     if (hd) args.push_back("--hd-textures");
     // The app the player downloaded is the only copy: setup makes no Applications, Desktop or menu
@@ -204,28 +238,13 @@ bool start(const std::string &operation, const std::string &title, const std::st
 #else
     (void)install_tools;
 #endif
-
-    // As the macOS wizard runs it: a plain environment, so nothing from a package manager or a
-    // development shell changes the build. Elsewhere the engine may need the session's own
-    // (the build container's runtime folder, the display for Steam).
-    std::vector<std::string> env_text;
-    const std::vector<std::string> *env = nullptr;
-#if defined(__APPLE__)
-    const char *home = getenv("HOME");
-    const char *tmp = getenv("TMPDIR");
-    env_text = {std::string("HOME=") + (home ? home : ""), "PATH=/usr/bin:/bin:/usr/sbin:/sbin",
-                std::string("TMPDIR=") + (tmp ? tmp : "/tmp"), "LANG=en_US.UTF-8"};
-    env = &env_text;
-#endif
     fprintf(stderr, "[APP] setup: %s (%s), log %s\n", operation.c_str(), root.c_str(), g_run.log.string().c_str());
     fflush(stderr);
     // Setup takes play.lock itself, to keep the game from starting while it works; finish() takes it
     // back for the app.
     app::unlock_install();
-    std::string error;
-    if (!os::start(args, env, &g_run.process, &error)) {
+    if (!spawn_engine(args, &g_run.process, &g_form_error)) {
         app::lock_install();
-        g_form_error = "Setup could not start: " + error;
         return false;
     }
     g_run.started_ms = SDL_GetTicks();
@@ -279,6 +298,8 @@ void finish(int code)
         fprintf(stderr, "[APP] %s\n", why.c_str());
     fflush(stderr);
     if (code == 0) g_tools_missing = false;                 // setup found or installed them
+    if (code == 0 && g_run.operation == "install")
+        app::remember_install(app::install().root);         // found again at the next start
     g_screen = Screen::Finished;
 }
 
@@ -330,7 +351,9 @@ std::string elapsed(unsigned long long ms)
     return text;
 }
 
-bool begin_page(float width, float height, const char *heading)
+} // namespace
+
+void page_begin(float width, float height, const char *heading)
 {
     float scale = ImGui::GetStyle().FontScaleMain;
     ImGui::SetNextWindowPos(ImVec2(0, 0));
@@ -344,8 +367,10 @@ bool begin_page(float width, float height, const char *heading)
     ImGui::Separator();
     pcui::heading(heading, 24 * scale);
     ImGui::Spacing();
-    return true;
 }
+
+namespace
+{
 
 void path_row(const char *label, const char *id, char *value, bool folder, bool image_too)
 {
@@ -365,9 +390,50 @@ void path_row(const char *label, const char *id, char *value, bool folder, bool 
     ImGui::PopID();
 }
 
+// An installation already in the folder chosen on the first run (an older setup's, say): the app
+// takes it over instead of installing there, which setup would refuse, and offers to update it
+// when it is older than this app.
+struct Found
+{
+    std::string root, version;      // the folder last looked at, and the version installed there
+} g_found;
+
+void probe_root()
+{
+    if (g_found.root == g_root) return;
+    g_found.root = g_root;
+    g_found.version = g_root[0] ? app::receipt_version(g_root) : "";
+}
+
+// Take over the installation in g_root (and remember it for the next start), then update it when
+// it is older than this app, or go to the launcher.
+void adopt_found()
+{
+    g_form_error.clear();
+    app::unlock_install();
+    app::install().root = g_root;
+    if (!app::lock_install()) {
+        g_form_error = "The game in this folder is running. Close it, then try again.";
+        return;
+    }
+    std::string why;
+    bool loaded = app::load_install(&why);
+    app::remember_install(g_root);
+    fprintf(stderr, "[APP] using the installation in %s (v%s) %s\n", g_root, app::install().version.c_str(),
+            why.c_str());
+    if (!loaded) {
+        g_form_error = why;
+        g_screen = Screen::Maintenance;
+    } else if (app::newer(app::payload_version(), app::install().version)) {
+        start_update_build();
+    } else {
+        g_screen = Screen::None;
+    }
+}
+
 void first_run_page(float width, float height, UiResult *result)
 {
-    begin_page(width, height, "SET UP THE GAME");
+    page_begin(width, height, "SET UP THE GAME");
     ImGui::TextWrapped("The game is built here from your own copy of Def Jam: Fight for NY (Xbox): a disc "
                        "image or an extracted folder. Nothing from it leaves this computer. Setup takes about "
                        "ten minutes and needs about 12 GB.");
@@ -375,21 +441,38 @@ void first_run_page(float width, float height, UiResult *result)
     path_row("Your dump (disc image or extracted folder)", "setup.dump", g_dump, true, true);
     path_row("Install folder (the built game)", "setup.install", g_root, true, false);
     path_row("Data folder (your extracted dump, saves and settings)", "setup.data", g_data, true, false);
+    probe_root();
+    bool found = !g_found.version.empty();
+    bool older = found && app::newer(app::payload_version(), g_found.version);
+    if (older)
+        ImGui::TextColored(pcui::gold(), "This folder already has Def Jam Recompiled v%s. Update it to v%s: it keeps "
+                           "its own data folder, saves and settings, so the dump and data folder above are not "
+                           "needed.", g_found.version.c_str(), app::payload_version().c_str());
+    else if (found)
+        ImGui::TextColored(pcui::gold(), "This folder already has Def Jam Recompiled v%s. Use it as it is, with its "
+                           "own data folder, saves and settings.", g_found.version.c_str());
     ImGui::Spacing();
-    ImGui::Checkbox("Generate HD textures (adds several minutes and about 15 GB)", &g_hd);
-    ui_target("setup.hd");
+    if (!found) {
+        ImGui::Checkbox("Generate HD textures (adds several minutes and about 15 GB)", &g_hd);
+        ui_target("setup.hd");
+    }
     tools_row();
     ImGui::Spacing();
     if (!g_form_error.empty()) ImGui::TextColored(ImVec4(1, 0.45f, 0.4f, 1), "%s", g_form_error.c_str());
-    bool ready = g_dump[0] && g_root[0] && g_data[0];
+    bool ready = found ? g_root[0] != 0 : g_dump[0] && g_root[0] && g_data[0];
+    std::string label = !found ? "INSTALL" : older ? "UPDATE TO V" + app::payload_version() : "USE THIS INSTALL";
     ImGui::BeginDisabled(!ready);
-    if (pcui::play_button("INSTALL", ImVec2(ImGui::GetFontSize() * 10, ImGui::GetFrameHeight() * 1.8f), 26))
+    if (pcui::play_button(label.c_str(), ImVec2(ImGui::GetFontSize() * 13, ImGui::GetFrameHeight() * 1.8f), 26))
     {
-        g_form_error.clear();
-        app::install().root = g_root;
-        start("install", "Installing", g_root, g_data, g_dump, g_hd);
+        if (found) {
+            adopt_found();
+        } else {
+            g_form_error.clear();
+            app::install().root = g_root;
+            start("install", "Installing", g_root, g_data, g_dump, g_hd);
+        }
     }
-    ui_target("setup.start");
+    ui_target(!found ? "setup.start" : older ? "setup.update" : "setup.use");
     ImGui::EndDisabled();
     ImGui::SameLine();
     if (ImGui::Button("Quit")) result->leave = true;
@@ -400,7 +483,7 @@ void first_run_page(float width, float height, UiResult *result)
 void maintenance_page(float width, float height, UiResult *result)
 {
     const Install &in = app::install();
-    begin_page(width, height, "MAINTENANCE");
+    page_begin(width, height, "MAINTENANCE");
     ImGui::TextWrapped("Installed: v%s in %s", in.version.c_str(), in.root.string().c_str());
     ImGui::TextWrapped("Data: %s", in.data.string().c_str());
     ImGui::Spacing();
@@ -408,6 +491,19 @@ void maintenance_page(float width, float height, UiResult *result)
     tools_row();
     ImGui::Spacing();
     if (!g_form_error.empty()) ImGui::TextColored(ImVec4(1, 0.45f, 0.4f, 1), "%s", g_form_error.c_str());
+    // An older game: Repair and Clean Rebuild work on the version this app builds, so the update
+    // comes first (setup refuses them across versions).
+    bool older = in.installed && app::newer(app::payload_version(), in.version);
+    if (older) {
+        ImGui::SeparatorText("Update");
+        ImGui::TextWrapped("Your game is v%s; this app builds v%s. Update builds the game again from your dump "
+                           "with the new version, in about three to ten minutes. Your saves, settings and mods "
+                           "are kept, and v%s stays playable until the new build is ready.",
+                           in.version.c_str(), app::payload_version().c_str(), in.version.c_str());
+        if (ImGui::Button(("Update to v" + app::payload_version()).c_str())) start_update_build();
+        ui_target("setup.update");
+    }
+    ImGui::BeginDisabled(older);
     ImGui::SeparatorText("Repair");
     ImGui::TextWrapped("Checks every file of this version and rebuilds only what is missing or changed. Your "
                        "saves and settings are kept.");
@@ -424,6 +520,10 @@ void maintenance_page(float width, float height, UiResult *result)
         start("rebuild", "Rebuilding", in.root.string(), in.data.string(), "", g_hd);
     }
     ui_target("setup.rebuild");
+    ImGui::EndDisabled();
+    if (older)
+        ImGui::TextDisabled("Repair and Clean Rebuild work on v%s, the version this app builds: update first.",
+                            app::payload_version().c_str());
     ImGui::Spacing();
     ImGui::Separator();
     if (in.installed) {
@@ -435,6 +535,29 @@ void maintenance_page(float width, float height, UiResult *result)
     } else if (ImGui::Button("Quit")) {
         result->leave = true;
     }
+    ImGui::End();
+}
+
+void update_ready_page(float width, float height)
+{
+    const Install &in = app::install();
+    page_begin(width, height, "UPDATE YOUR GAME");
+    if (app::just_updated())
+        ImGui::TextWrapped("Def Jam Recompiled is now v%s.", app::payload_version().c_str());
+    ImGui::TextWrapped("Your game is v%s. Update it to v%s now: it is built again from your dump with the new "
+                       "version, in about three to ten minutes. Your saves, settings and mods are kept.",
+                       in.version.c_str(), app::payload_version().c_str());
+    ImGui::TextWrapped("Later opens the launcher, where Play starts v%s and Update / Repair offers the update "
+                       "again.", in.version.c_str());
+    tools_row();
+    ImGui::Spacing();
+    if (!g_form_error.empty()) ImGui::TextColored(ImVec4(1, 0.45f, 0.4f, 1), "%s", g_form_error.c_str());
+    if (pcui::play_button("UPDATE GAME", ImVec2(ImGui::GetFontSize() * 12, ImGui::GetFrameHeight() * 1.8f), 26))
+        start_update_build();
+    ui_target("update.build");
+    ImGui::SameLine();
+    if (ImGui::Button("Later")) g_screen = Screen::None;
+    ui_target("update.later");
     ImGui::End();
 }
 
@@ -453,7 +576,7 @@ void stage_list()
 
 void running_page(float width, float height)
 {
-    begin_page(width, height, g_run.title.c_str());
+    page_begin(width, height, g_run.title.c_str());
     stage_list();
     ImGui::Spacing();
     ImGui::TextWrapped("%s", g_run.cancelling ? "Cancelling the current step..." : g_run.line.c_str());
@@ -487,7 +610,7 @@ void finished_page(float width, float height, UiResult *result)
 {
     bool ok = g_run.exit_code == 0;
     const char *title = ok ? "DONE" : g_run.exit_code == 6 ? "CANCELLED" : "SETUP STOPPED";
-    begin_page(width, height, title);
+    page_begin(width, height, title);
     stage_list();
     ImGui::Spacing();
     if (ok)
@@ -565,18 +688,24 @@ bool screen_draw(float width, float height, UiResult *result)
         if (!in.installed) {
             g_screen = in.problem.empty() ? Screen::FirstRun : Screen::Maintenance;
             g_form_error = in.problem;
+        } else if (app::newer(app::payload_version(), in.version)) {
+            // An older game than this app builds (after the app's own update, or the first time a
+            // newer app opens an older setup's installation): offer the update before the launcher.
+            g_screen = Screen::UpdateReady;
         }
         start_tools_check();
     }
     take_pick();
     poll_tools_check();
     poll();
+    if (update_screen_draw(width, height, result)) return true;
     switch (g_screen) {
     case Screen::None: return false;
     case Screen::FirstRun: first_run_page(width, height, result); break;
     case Screen::Maintenance: maintenance_page(width, height, result); break;
     case Screen::Running: running_page(width, height); break;
     case Screen::Finished: finished_page(width, height, result); break;
+    case Screen::UpdateReady: update_ready_page(width, height); break;
     }
     return true;
 }
@@ -587,10 +716,19 @@ void screen_open_maintenance()
     g_screen = Screen::Maintenance;
 }
 
-bool screen_busy() { return g_run.process.id != 0; }
+void start_update_build()
+{
+    const Install &in = app::install();
+    g_form_error.clear();
+    if (!start("update", "Updating to v" + app::payload_version(), in.root.string(), in.data.string(), "", false))
+        g_screen = Screen::Maintenance;                     // which shows why
+}
+
+bool screen_busy() { return g_run.process.id != 0 || update_busy(); }
 
 void screen_request_cancel()
 {
+    update_request_cancel();
     if (!g_run.process.id || g_run.cancelling) return;
     std::ofstream(g_run.cancel) << "cancel";
     g_run.cancelling = true;

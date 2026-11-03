@@ -150,6 +150,10 @@ std::string run_in_place(const std::vector<std::string> &argv, const fs::path &d
     return strerror(errno);
 }
 
+std::string replace_with(const std::vector<std::string> &argv) { return run_in_place(argv, {}); }
+
+bool writable(const fs::path &dir) { return access(dir.c_str(), W_OK) == 0; }
+
 #else // _WIN32
 
 namespace
@@ -367,6 +371,27 @@ std::string run_in_place(const std::vector<std::string> &argv, const fs::path &d
     fprintf(stderr, "[APP] the game ended (exit %lu)\n", (unsigned long)code);
     fflush(stderr);
     exit((int)code);
+}
+
+std::string replace_with(const std::vector<std::string> &argv)
+{
+    Process next;
+    std::string error;
+    fflush(stdout);
+    fflush(stderr);
+    if (!start(argv, nullptr, &next, &error)) return error;
+    CloseHandle((HANDLE)next.id);
+    exit(0);
+}
+
+bool writable(const fs::path &dir)
+{
+    fs::path probe = dir / (".write-probe-" + std::to_string(GetCurrentProcessId()));
+    HANDLE h = CreateFileW(probe.wstring().c_str(), GENERIC_WRITE, 0, nullptr, CREATE_NEW,
+                           FILE_ATTRIBUTE_TEMPORARY | FILE_FLAG_DELETE_ON_CLOSE, nullptr);
+    if (h == INVALID_HANDLE_VALUE) return false;
+    CloseHandle(h);
+    return true;
 }
 
 #endif

@@ -67,4 +67,5 @@ build\win-x64-app\DefJamRecompiled.exe --payload <unpacked setup payload> [--ins
 - **First-run choices.** `--dump` and `--data` fill them in.
 - **Test hooks.** The launcher's work here too (`RECOMP_LAUNCHER_SCRIPT`, `RECOMP_WINDOW_SHOT`;
   see `src/hooks/pc_launcher_sdl.cpp`), with the setup screens' controls named `setup.*`.
-  `RECOMP_APP_NO_DIALOG=1` reports a failure on stderr only.
+  `RECOMP_APP_NO_DIALOG=1` reports a failure on stderr only. After a self-update the new app gets
+  `RECOMP_LAUNCHER_SCRIPT_AFTER_UPDATE` as its script, or none.

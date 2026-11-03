@@ -74,5 +74,12 @@ std::string read_shared(const std::filesystem::path &path, uint64_t offset = 0, 
 // the reason.
 std::string run_in_place(const std::vector<std::string> &argv, const std::filesystem::path &dir);
 
+// Become `argv` (the app's own updated copy): exec off Windows; on Windows it is started and this
+// process exits at once, so the new copy can remove the old program file. Returns only on failure.
+std::string replace_with(const std::vector<std::string> &argv);
+
+// Whether files can be created in `dir` (a probe file is made and removed).
+bool writable(const std::filesystem::path &dir);
+
 } // namespace os
 } // namespace app

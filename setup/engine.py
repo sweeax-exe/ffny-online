@@ -1367,6 +1367,10 @@ def main(argv=None):
     parser.add_argument('--bundled-only', action='store_true', help='Use this setup payload without fetching another release')
     parser.add_argument('--list-releases', action='store_true')
     parser.add_argument('--releases-file', help='Write the release catalog JSON for a native wizard')
+    parser.add_argument('--check-app-update', metavar='FILE',
+                        help='The app: write the newest release whose app is newer than this payload (tag=, version=, url=)')
+    parser.add_argument('--stage-app', metavar='TAG', help='The app: download and verify that release\'s app into --stage-dir')
+    parser.add_argument('--stage-dir', help='Where --stage-app puts the verified app bundle (must not exist)')
     parser.add_argument('--download-cache')
     parser.add_argument('--handoff-parent', type=int, help=argparse.SUPPRESS)
     parser.add_argument('--data-dir')
@@ -1424,6 +1428,30 @@ def main(argv=None):
                     for row in rows), encoding='utf-8')
             else:
                 print(json.dumps(result))
+            return 0
+        if args.check_app_update:
+            row = releases.newest_app(HOST_PLATFORM, cache, bootstrap['version'], cancelled)
+            lines = ['current=' + bootstrap['version']]
+            if row:
+                lines += ['tag=' + row['tag'], 'version=' + row['version'],
+                          'url=https://github.com/' + releases.REPO + '/releases/tag/' + row['tag'],
+                          'cached=' + ('1' if row.get('cached') else '0')]
+            pending = Path(args.check_app_update + '.pending')
+            pending.write_text(''.join(line + '\n' for line in lines), encoding='utf-8')
+            os.replace(pending, args.check_app_update)
+            return 0
+        if args.stage_app:
+            if not args.stage_dir:
+                raise SetupError('--stage-dir is required with --stage-app', 2)
+            stage = Path(args.stage_dir)
+            if stage.exists() or stage.is_symlink():
+                raise SetupError('The app update folder already exists: ' + str(stage), 2)
+            scratch, bundle = releases.select_app(args.stage_app, HOST_PLATFORM, cache, verify_payload, cancelled, progress)
+            try:
+                shutil.move(str(bundle), str(stage))
+            finally:
+                shutil.rmtree(scratch, ignore_errors=True)
+            progress('The new app is verified and ready')
             return 0
         if not args.install_dir:
             raise SetupError('--install-dir is required', 2)

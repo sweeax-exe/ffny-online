@@ -20,6 +20,9 @@ size_t pc_ui_settings(RecompSetting *out, size_t max)
     ADD("launcher", "skip", RECOMP_SETTING_BOOL, 0, 0, 0, NULL, "RECOMP_NO_LAUNCHER", 0,
         "Skip the launcher and start the game at once. Hold Shift while the game starts, start it with "
         "--launcher, or turn this off in the in-game overlay to see the launcher again.");
+    ADD("launcher", "check_updates", RECOMP_SETTING_BOOL, 1, 0, 0, NULL, NULL, 0,
+        "When the app starts, look on GitHub for a newer Def Jam Recompiled and offer to update. Nothing about "
+        "you, this computer or your game is sent. The game itself never checks.");
     ADD("debug", "unlock_all", RECOMP_SETTING_BOOL, 0, 0, 0, NULL, "RECOMP_UNLOCK_ALL", RECOMP_SETTING_RESTART,
         "Debug: every fighter and venue is available on any profile, through the developers' own unlock "
         "routine in the game. Meant for testing; it changes the profile in memory and asks the game to save "

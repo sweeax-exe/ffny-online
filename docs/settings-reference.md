@@ -22,6 +22,7 @@ and what to do when something misbehaves, see [Controllers, keyboard and mouse](
 | Key | Default | Meaning |
 |---|---|---|
 | `skip` | `false` | Skip the launcher and start the game at once. The launcher shows on every launch unless this is on. Hold **Shift** while the game starts, or start it with `--launcher`, to see it anyway; turn this off in the overlay's Interface page or the launcher's own checkbox. Env `RECOMP_NO_LAUNCHER=1` skips it for one run. |
+| `check_updates` | `true` | The app (`DefJamRecompiled`) checks GitHub for a newer release when it starts, at most every twelve hours, and Home offers the update. Off: no check. The game itself ignores it. Shown in the app's Advanced > Interface > Start-up as "Check for updates when the app starts". |
 
 ## [debug]
 
