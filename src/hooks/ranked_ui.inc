@@ -122,6 +122,18 @@ void division_bar(ImDrawList *dl, const Frame &f, float x, float y, float w, int
 
 // ---- the mode chooser ----
 
+// The fighter list for a ranked search (from the mode chooser, and back from a stopped search: players
+// who stopped a search to take another fighter landed on the online menu, 2026-11-03). Draft has no pick.
+void ranked_pick_fighter()
+{
+    if (R.primary == NETRANK_DRAFT) { S.page = RANKED_MODES; return; }
+    S.ranked_pick = true;
+    S.page = FIGHTERS;
+    int fighter = saved_fighter();
+    if (fighter == NETPLAY_CREATED_FIGHTER && R.primary != NETRANK_OPEN) fighter = 55;
+    S.fighter_sel = grid_pos(grid_fighters(), fighter);
+}
+
 void open_ranked_modes()
 {
     S.page = RANKED_MODES;
@@ -206,13 +218,7 @@ void draw_ranked_modes(ImDrawList *dl, const Frame &f, const Pad &pad)
         S.page = RANKED;
         return;
     }
-    if (pad.a) {
-        S.ranked_pick = true;
-        S.page = FIGHTERS;
-        int fighter = saved_fighter();
-        if (fighter == NETPLAY_CREATED_FIGHTER && R.primary != NETRANK_OPEN) fighter = 55;
-        S.fighter_sel = grid_pos(grid_fighters(), fighter);
-    }
+    if (pad.a) ranked_pick_fighter();
 }
 
 // The modes searched: the primary, and the other one when "also search" is on (a created fighter
@@ -308,7 +314,7 @@ void draw_ranked(ImDrawList *dl, const Frame &f, const Pad &pad)
         hx += hint(dl, f, hx, 392, "a", "TRY AGAIN");
         hint(dl, f, hx, 392, "b", "BACK");
         if (pad.a) ranked_search(fighter);
-        if (pad.b) S.page = HUB;
+        if (pad.b) ranked_pick_fighter();
         return;
     }
     float t = (float)(GetTickCount64() % 1600) / 1600.0f;
@@ -350,7 +356,7 @@ void draw_ranked(ImDrawList *dl, const Frame &f, const Pad &pad)
     }
     hint(dl, f, hx, 392, "b", "STOP SEARCHING");
     if (st == NETQUEUE_ACCEPT && ext) { draw_accept(dl, f, pad, q); return; }
-    if (pad.b) { netplay_lobby_leave(); S.page = HUB; say("You left the ranked queue."); }
+    if (pad.b) { netplay_lobby_leave(); ranked_pick_fighter(); say("You left the ranked queue."); }
 }
 
 // ---- the set in the room ----
