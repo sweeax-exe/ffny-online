@@ -64,7 +64,7 @@ struct Chat {
     unsigned menu_account = 0;
     // REPORT (stage 2c): the line the menu was opened on, and the lines before it (room lines only
     // this PC saw: their text goes with the report)
-    std::string menu_channel, menu_text;
+    std::string menu_channel, menu_text, menu_room_code;    // the room's code for a room line
     long long menu_msg = 0;
     std::vector<std::string> menu_context;
     // CREW (stage 2c): the page or its chat, LEAVE pressed once, the menu on a crew mate, a new crew's name
@@ -733,6 +733,7 @@ void open_player_menu(long long id, const std::string &name)
     C.menu_account = 0;
     C.menu_channel.clear();
     C.menu_text.clear();
+    C.menu_room_code.clear();
     C.menu_msg = 0;
     C.menu_context.clear();
     C.menu_crew = false;
@@ -748,6 +749,12 @@ void menu_report_line(const std::vector<const social::Line *> &lines, size_t i, 
     C.menu_channel = channel;
     C.menu_msg = channel == "room" ? 0 : l.seq;
     C.menu_text = channel == "room" ? l.text : "";
+    C.menu_room_code.clear();
+    if (channel == "room") {        // the account service takes the room's code with a room line
+        NetRoom r;
+        lobby_room(&r);
+        if (r.in_room) C.menu_room_code = r.code;
+    }
     C.menu_context.clear();
     if (channel == "room")
         for (size_t k = i >= 5 ? i - 5 : 0; k < i; k++)
@@ -1563,8 +1570,11 @@ void draw_player_menu(ImDrawList *dl, const Frame &f, const ChatKeys &k)
                 social::block(C.menu_id, C.menu_name, what == 6);
                 fprintf(stderr, "[SOCIAL-UI] %s %s\n", what == 6 ? "block" : "unblock", C.menu_name.c_str());
             } else if (what == 8) {
-                social::report(C.menu_id, C.menu_channel, C.menu_msg, C.menu_text, C.menu_context);
-                fprintf(stderr, "[SOCIAL-UI] report %s (%s)\n", C.menu_name.c_str(), C.menu_channel.c_str());
+                social::report(C.menu_id, C.menu_channel, C.menu_msg, C.menu_text, C.menu_context,
+                               C.menu_channel == "room" ? C.menu_room_code : std::string());
+                fprintf(stderr, "[SOCIAL-UI] report %s (%s%s%s)\n", C.menu_name.c_str(), C.menu_channel.c_str(),
+                        C.menu_channel == "room" && !C.menu_room_code.empty() ? ", room " : "",
+                        C.menu_channel == "room" ? C.menu_room_code.c_str() : "");
             } else if (what == 9) social::crew_invite(C.menu_id, C.menu_name);
             else if (what >= 10 && what <= 12) {
                 const char *role = what == 10 ? "lieutenant" : what == 11 ? "member" : "boss";
@@ -2085,6 +2095,19 @@ void chat_test_step()
                 for (size_t i = lines.size(); i-- > 0;) if (lines[i]->from == id) { menu_report_line(lines, i, lines[i]->channel); break; }
             }
         }
+    } else if (what == "reportroom") {              // the ROOM tab's menu on NAME, then REPORT (their newest room line)
+        long long id = 0;
+        for (auto &l : room_lines()) if (l.name == arg && l.from) id = l.from;
+        C.open = true;
+        C.tab = TAB_ROOM;
+        open_player_menu(id, arg);
+        C.menu_room = true;
+        menu_report_newest(id, arg, true);
+        if (id && C.menu_channel == "room") {
+            social::report(C.menu_id, C.menu_channel, C.menu_msg, C.menu_text, C.menu_context, C.menu_room_code);
+            fprintf(stderr, "[SOCIAL-UI] report %s (room, room %s)\n", arg.c_str(), C.menu_room_code.c_str());
+        }
+        C.menu = false;
     } else if (what == "room") {                    // a room of this copy's own (a presence other than the menu)
         NetRoomSettings rs;
         default_settings(rs);
