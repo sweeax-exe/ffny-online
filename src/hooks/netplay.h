@@ -157,6 +157,20 @@ int netplay_room_chat_send(const char *text);
  * bit 8. The battle comes from the account service (social.h); CREWJOIN enters its room once the relay
  * knows this account (room chat's IDENT). CREW is the battle's state for the crew battle screen. */
 #define NETPLAY_CAP_CREW 256
+/* Rollback everywhere (build 52): a relay answering CAPS bit 9 sends the modes in which rollback is
+ * mandatory, whatever the players' setting says (0: none, the setting decides). A room's mode falls in
+ * one class: a ranked set, a crew battle, a King of the Hill fight, Team, a 3- or 4-way, else 1v1. */
+#define NETPLAY_CAP_RB_MODES 512
+#define NETPLAY_RB_1V1    1u
+#define NETPLAY_RB_TEAM   2u
+#define NETPLAY_RB_FFA    4u
+#define NETPLAY_RB_KOTH   8u
+#define NETPLAY_RB_CREW   16u
+#define NETPLAY_RB_RANKED 32u
+#define NETPLAY_RB_ALL    63u
+/* 1 when the relay makes rollback mandatory for the mode of this PC's room (and allows rollback): the
+ * room shows a ROLLBACK tag instead of each player's choice. */
+int netplay_room_rollback_mandatory(void);
 #define NETPLAY_CREW_MAX 5
 enum NetCrewMemberState { NETCREW_WAITING = 0, NETCREW_FIGHTING, NETCREW_OUT, NETCREW_GONE };
 enum NetCrewState { NETCREW_FORMING = 0, NETCREW_RUNNING, NETCREW_OVER };

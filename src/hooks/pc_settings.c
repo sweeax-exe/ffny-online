@@ -109,6 +109,10 @@ static RecompSetting g_display_settings[] = {
     { "online", "rollback_server", RECOMP_SETTING_BOOL, 0, 0, 0, NULL, NULL, RECOMP_SETTING_RESTART,
       "Kept by the game: whether the online server allowed rollback the last time this PC was connected. The "
       "rollback setting takes effect only when it did (its sound memory is set up at start)." },
+    { "online", "rollback_modes", RECOMP_SETTING_INT, 0, 0, 255, NULL, NULL, RECOMP_SETTING_RESTART,
+      "Kept by the game: the online modes in which the server made rollback mandatory the last time this PC was "
+      "connected (0: none). While it is not 0, rollback's sound memory is set up at start whatever the rollback "
+      "setting says." },
     { "online", "rollback_follows_server", RECOMP_SETTING_BOOL, 1, 0, 0, NULL, NULL, RECOMP_SETTING_RESTART,
       "Use the rollback setting only when the server allowed rollback last time (off: the setting alone decides)." },
     { "online", "input_delay", RECOMP_SETTING_INT, 3, 1, 8, NULL, NULL, 0,

@@ -572,6 +572,53 @@ The report: 17 rollback matches at 172/94 ms, a rematch chain; out of sync in re
   * Not verified: the bursts themselves (never seen locally), the empty-text path of 4ccbb9f, and a real
     (non-forced) desync.
 
+### Eleventh round (on `remaster` a080b38, build 52): rollback everywhere
+The owner's decision: rollback is mandatory in every mode (1v1, Team, FFA, King of the Hill, crew battles, ranked),
+with no player switch, behind a server switch, keeping the automatic per-match fallback and a server-side kill
+switch (global and per mode).
+* **Mechanism** (`docs/netplay-protocol.md`, "Rollback everywhere"): `CAPS` bit 9 both ways; the relay's answer to a
+  client that announces it carries a `u32` mode mask (bits 1v1, Team, FFA, KOTH, crew, ranked) and is sent again
+  before every `START`. The relay reads it from `<updates>/rollback-everywhere` (empty: all modes; else the names it
+  lists); `rollback-allowed` stays the master switch. The game sorts its room into one class (`room_rb_class`: a ranked
+  set, a crew battle, a hill fight, Team, 3/4-way, else 1v1); in a listed class it rolls back whatever the setting
+  says, in an unlisted one it plays lockstep (the per-mode kill switch); with a 0 mask or an older relay the setting
+  decides as before. The hill's old lockstep rule is lifted only when every fighter sends `P_RTT` byte 14 bit 1, so
+  both PCs agree on it and on the delay. The game keeps the mask (`[online] rollback_modes`); the next start then
+  sets up the audio arena whatever the setting says. A session that started before that plays lockstep with a
+  reason and asks for one restart. The room shows a `ROLLBACK` tag instead of each player's choice (players whose
+  game must restart still show), the settings page replaces the toggle by a line while the mask is kept.
+* **Fallback** (one `[NETPLAY] rollback off for this match: <reason>` line per reason, a notice "This match runs
+  without rollback: <reason>" to the players when their PC meant to roll back): a player who cannot (restart, older
+  build, setting off where the server leaves it to the players), a created fighter with a pre-45 build, a path ping
+  over 300 ms (`RB_PATH_MAX_MS`, from the `P_RTT` pings, so both PCs agree), and during a fight a PC that spends 50%
+  or more of two 5 s windows in a row on rollback (`rb_budget_tick`, `RECOMP_ROLLBACK_BUDGET` for tests): it stops
+  predicting and, once every step is final, turns rollback off until the next `START` (rematches included). Only
+  that PC; the others keep rolling back on the agreed delay, so the match stays in sync. Unchanged: the
+  desync-leave rule, the decided-step rule, prepare/reference failures. Note: the old "off for the rest" check
+  (`N.final_step >= N.step` before the final-step loop) never fires mid-fight with prediction stopped (the newest
+  step is made final later in the same update); the slow-PC fallback checks after the loop. The desync clause has
+  the same blind spot, but the desync-leave rule covers it.
+* **Runs** (`dj.py scenario online --rollback mandatory`: relay `-rollback -rollback-modes all`, copies
+  `RECOMP_ROLLBACK=server`, i.e. the arena but no opt-in; `--bot 60`, `RECOMP_NETPLAY_LAG_MS`):
+  | Mode | Run | Lag | Matches | Rollbacks per match and copy | Result |
+  |---|---|---|---|---|---|
+  | 1v1, rematch chain | `-174806`, `-195812`, `-175333` | 70+10 / 70+10 / 110+10 | 4 (no bot) + 5 + 4 | 35-375 (idle rematches 0) / 2-332 / 115-311, deepest 9 | ok, no desync |
+  | Team 4p | `-175855`, `-195015` | 70+10 / 110+10 | 3 + 3 | 201-726 / 414-877 | ok, 130-140 checks a match |
+  | FFA 3p | `-195401`, `-180252` | 70+10 / 110+10 | 3 + 3 | 225-632 / 399-603 | ok |
+  | KOTH 3p | `-180650`, `-190145` | 70+10 / 110+10 | 6 + 14 fights | 0-469 | every fight a KO (relay how=1), no timeout; the king played 13 rollback fights in a row; peak 61.1 MB, every fight ends at 54.8 MB |
+  | Crew battle | `-191725-crewbattle` | 70+10 | 2 fights | 34-323 | ok, class crew |
+  | Ranked classic set | `-191958` | 70+10 | 3 games | 0-343 | ok, class ranked |
+  | Created vs stock, rematches | `-192434` | 110+10 | 3 | 130-412 | ok |
+  The October KOTH-with-rollback freeze did not come back. Two KOTH runs stopped on test artefacts, fixed in the
+  harness: `--ko-winner alt` counts each copy's own matches (the two fighters disagreed on the winner: "desync" at the
+  KO step), and the king's pad script ran out of results presses (`_koth_script`, more fights within the 4095-character
+  script limit). The crowd-weapon desync did not show (no weapon checksum in these runs).
+* **Fallback checks**: one copy started without rollback (`RECOMP_ROLLBACK@1=off`, `-192843`): lockstep, both reasons and
+  notices; forced slow PC (`RECOMP_ROLLBACK_BUDGET@0=1`, `-193344`): fallback at step 766, off at 767, its rematch
+  lockstep on that PC, the other kept rolling back, in sync; ping 330+10 ms (`-193652`): lockstep d10, "the ping is too
+  high (351 ms)"; KOTH left out of the mask (`-193808`): lockstep, no notice. Regressions: `--rollback on` with a relay
+  without the switch (`-194625`) and `--rollback off` (`-194821`) as before.
+
 ### Next (after the third round)
 1. More two-copy long runs (the desyncs at steps 10 200 and 37 440 came once in two runs each; three later runs were clean),
    always with `RECOMP_NETPLAY_FINALLOG=1` so a desync can be traced to its first step.

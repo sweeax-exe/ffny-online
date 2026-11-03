@@ -114,6 +114,7 @@ void netplay_build_fingerprint(uint8_t o[8]) { memset(o, 0, 8); }
 int netplay_room_ping(int s) { (void)s; return -1; }
 int netplay_room_results_wait(unsigned *s) { if (s) *s = 0; return 0; }
 int netplay_room_rollback(int s) { (void)s; return -1; }
+int netplay_room_rollback_mandatory(void) { return 0; }
 int netplay_lobby_caps(void) { return 0; }
 int netplay_online_twice(void) { return 0; }
 int netplay_room_chat(NetChatLine *o, int m, unsigned *s) { (void)o; (void)m; if (s) *s = 0; return 0; }
@@ -237,6 +238,8 @@ void netplay_crowd_update(void) { sub_00081170(); }
 #define CAPS_SPEC_REMATCH 64u   /* client (build 47): a spectator takes the players' P_REMATCH (rematches watched) */
 #define CAPS_CHAT     128u      /* room chat, both ways (T_IDENT, T_CHAT); only a client announcing it gets T_CHAT */
 #define CAPS_CREW     256u      /* crew battles, both ways (T_CREWJOIN, T_CREW); only a client announcing it gets T_CREW */
+#define CAPS_RB_MODES 512u      /* rollback everywhere (build 52), both ways: the answer carries a u32 of the
+                                 * NETPLAY_RB_* modes in which rollback is mandatory (0: the setting decides) */
 #define CP_WAIT_MS    10000     /* START: how long to wait for a created fighter's missing record */
 #define CAPS_TRIES    5         /* CAPS every RETRY_MS; no answer after these: an older relay */
 #define WINNER_DRAW   0xFFu
@@ -284,6 +287,18 @@ void netplay_crowd_update(void) { sub_00081170(); }
 #define RB_AHEAD      8             /* rollback: steps a PC runs on predicted entries before it waits */
 #define RB_LESS       4             /* hub matches where every PC rolls back: the delay is this much shorter */
 #define MULTI_MARGIN  1             /* lockstep matches of three or four players: this much longer (build 46) */
+/* The per-match fallback to lockstep (build 52, rollback everywhere). At the sync point, from the pings
+ * every PC has alike: a path between two players over this many ms (the delay's own reading of the pings)
+ * is beyond what rollback covers. Its delay is DELAY_MAX either way, and DELAY_MAX + RB_AHEAD steps are
+ * 300 ms: past that every update would run RB_AHEAD steps again and still wait for the other's entries. */
+#define RB_PATH_MAX_MS 300
+/* During a fight (rb_budget_tick): when the rollback work of this PC (the saves of normal updates, the
+ * loads and the steps run again) takes this share of the wall time in RB_BUDGET_WINDOWS windows of
+ * RB_BUDGET_WINDOW_MS in a row, this PC cannot keep up: it stops predicting and plays the rest of the
+ * room's match (rematches included) on the real entries. RECOMP_ROLLBACK_BUDGET=<percent> (tests). */
+#define RB_BUDGET_PERCENT  50
+#define RB_BUDGET_WINDOW_MS 5000
+#define RB_BUDGET_WINDOWS   2
 
 static CRITICAL_SECTION g_cs;
 static INIT_ONCE g_once = INIT_ONCE_STATIC_INIT;
@@ -462,6 +477,18 @@ static struct {
     uint32_t rb_decided_step;           /* the step at which this PC saw the match decided (0: not yet) */
     int peer_rb[MAXP];                  /* each position rolls back (its P_RTT says so) */
     int peer_rb_cp[MAXP];               /* ... also when a created fighter plays (P_RTT byte 14, build 45) */
+    int peer_rb_must[MAXP];             /* ... the server makes it mandatory for the match's mode there (byte 14 bit 1, build 52) */
+    /* rollback everywhere (build 52): the relay's CAPS answer carried the mode mask (CAPS_RB_MODES), and
+     * the modes in which rollback is mandatory (0: none, the players' setting decides) */
+    int rb_modes_known;
+    unsigned rb_modes;
+    /* the per-match fallback for a PC that cannot keep up (rb_budget_tick): this PC stops predicting and
+     * rolls back no more until the next START; the window's start, the ms of rollback work in it, and
+     * how many windows in a row went over */
+    int rb_slow_off;
+    ULONGLONG rbb_start;
+    double rbb_ms;
+    unsigned rbb_over, rbb_updates, rbb_depth, rbb_count;
     int rb_match;                       /* hub: this match rolls back (every peer_rb set at the sync point) */
     struct {
         int valid;
@@ -523,6 +550,52 @@ static int rollback_wanted(void) { return rollback_enabled(); }
  * a PC with it on rolled back alone, with the full lockstep delay the other PC needed. Code rooms
  * (RECOMP_NETPLAY=host/join, tests only) exchange no flags: the local setting. */
 static int match_rolls_back(void) { return N.lobby ? N.rb_match : rollback_wanted(); }
+
+/* Rollback everywhere (build 52). The class of this PC's room for the relay's mode mask: a ranked set,
+ * a crew battle (a King of the Hill room by crews), a hill fight, Team, a 3- or 4-way, else 1v1 (One on
+ * One and the special 1v1 match types). Callers hold g_cs or run where the room does not change. */
+static unsigned room_rb_class(void)
+{
+    const OnlineMode *m;
+    int mode = N.roomv.settings.mode;
+    if (!N.roomv.in_room) return 0;
+    if (N.rank.valid && N.rank.has_set && !memcmp(N.rank_room, N.roomv.code, 6) && !NETPLAY_IS_KOTH(mode))
+        return NETPLAY_RB_RANKED;
+    if (NETPLAY_IS_KOTH(mode))
+        return N.crew.battle && !memcmp(N.crew_room, N.roomv.code, 7) ? NETPLAY_RB_CREW : NETPLAY_RB_KOTH;
+    if (mode == ONLINE_MODE_TEAM) return NETPLAY_RB_TEAM;
+    m = online_mode(mode);
+    return m && m->fighters >= 3 ? NETPLAY_RB_FFA : NETPLAY_RB_1V1;
+}
+
+/* The relay sends a mask that is not 0: it, not the player's setting, decides in every mode. */
+static int rb_server_decides(void) { return N.rb_modes_known && N.rb_modes != 0; }
+static int relay_allows_rb(void) { return N.relay_caps > 0 && (N.relay_caps & CAPS_ROLLBACK); }
+
+/* The relay makes rollback mandatory for the mode of this PC's room. */
+static int rb_mandatory_here(void)
+{
+    return relay_allows_rb() && rb_server_decides() && (N.rb_modes & room_rb_class()) != 0;
+}
+
+int netplay_room_rollback_mandatory(void)
+{
+    int on;
+    EnterCriticalSection(&g_cs);
+    on = N.lobby && rb_mandatory_here();
+    LeaveCriticalSection(&g_cs);
+    return on;
+}
+
+/* Whether this PC rolls back the room's next match, as far as it decides (P_RTT byte 7): this session
+ * can (the audio arena), the relay allows it, and the relay makes it mandatory for the room's mode, or,
+ * with no mask from the relay, the player opted in (the setting). In a mode the mask leaves out every
+ * match plays in lockstep: that is the server's per-mode kill switch. */
+static int this_pc_rolls_back(void)
+{
+    if (!rollback_wanted() || !relay_allows_rb()) return 0;
+    return rb_server_decides() ? rb_mandatory_here() : rollback_opted_in();
+}
 int netplay_rerunning(void) { return N.resim; }
 int netplay_local_slot(void) { return N.lockstep && !N.watching ? N.pos : -1; }
 
@@ -1452,7 +1525,10 @@ static void send_rtt(void)
     put32(p + 8, g_data_print);         /* builds before 23 send 8 bytes */
     p[12] = N.start_deferred ? 1 : 0;   /* builds before 34 send 12: 1, still on the last fight's results */
     p[13] = (uint8_t)(N.delay_fixed ? N.delay : 0);    /* builds before 40 send 13: the agreed delay, for spectators */
-    p[14] = 1;                          /* builds before 45 send 14: no rollback with a created fighter */
+    /* builds before 45 send 14: no rollback with a created fighter (bit 0); builds before 52 never set
+     * bit 1: the server makes rollback mandatory for this match's mode on the sender (rollback
+     * everywhere), which lifts the hill's lockstep only when every player of the fight sends it */
+    p[14] = (uint8_t)(1 | (N.peer_rb_must[N.pos] ? 2 : 0));
     send_data(p, 15);
     N.last_rtt_sent = GetTickCount64();
 }
@@ -1482,20 +1558,44 @@ static int every_peer_rb_cp_missing(void)
     return missing;
 }
 
+/* every player of the match says the server makes rollback mandatory for its mode (P_RTT byte 14 bit 1) */
+static int every_player_must(void)
+{
+    int i;
+    if (N.players <= 0) return 0;
+    for (i = 0; i < N.players && i < MAXP; i++) if (!N.peer_rb_must[i]) return 0;
+    return 1;
+}
+
+/* The slowest path between two players, as agreed_delay reads it: half of each one's round trip to the
+ * relay, the two highest, from the P_RTT pings every PC has alike. */
+static int path_ping_ms(void)
+{
+    int a = 0, b = 0, i;
+    for (i = 0; i < N.players && i < MAXP; i++) {
+        int r = N.peer_rtt[i] < 0 ? 0 : N.peer_rtt[i];
+        if (r > a) { b = a; a = r; } else if (r > b) b = r;
+    }
+    return (a + b) / 2;
+}
+
 static int every_player_rolls_back(void)
 {
     int i;
     /* King of the Hill fights stay in lockstep for now: with rollback, players' games froze or
      * crashed after the first fight of a hill in build 27, and the loser then never left the seat
      * (2026-10-25). Both PCs of a fight know it from START, so the delay agrees too. */
-    {   /* tests (rollback-plan-2026-11.md step 6): RECOMP_ROLLBACK_KOTH=1 on every copy lifts the hill's exclusion */
+    {   /* tests (rollback-plan-2026-11.md step 6): RECOMP_ROLLBACK_KOTH=1 on every copy lifts the hill's exclusion.
+         * Build 52: so does the server, when every player of the fight says (P_RTT byte 14 bit 1) that it
+         * makes rollback mandatory for the room's mode there; from the flags alone, so both PCs agree. */
         static int koth = -1;
         if (koth < 0) koth = getenv("RECOMP_ROLLBACK_KOTH") && *getenv("RECOMP_ROLLBACK_KOTH") == '1';
-        if (N.koth_match && !koth) return 0;
+        if (N.koth_match && !koth && !every_player_must()) return 0;
     }
     for (i = 0; i < N.players; i++) if (!N.peer_rb[i]) return 0;
     if (match_has_created())
         for (i = 0; i < N.players; i++) if (!N.peer_rb_cp[i]) return 0;
+    if (path_ping_ms() > RB_PATH_MAX_MS) return 0;
     return 1;
 }
 
@@ -1564,6 +1664,7 @@ static void on_data(int from, const uint8_t *p, int len)
             N.peer_rtt[from] = p[5] | (p[6] << 8);
             N.peer_rb[from] = len >= 8 && p[7] == 1;
             N.peer_rb_cp[from] = len >= 15 && (p[14] & 1);
+            N.peer_rb_must[from] = len >= 15 && (p[14] & 2);   /* build 52: the server makes it mandatory there */
             if (len >= 12 && g_data_print && get32(p + 8) && get32(p + 8) != g_data_print) {
                 static uint32_t warned_seed[MAXP];
                 if (warned_seed[from] != N.start_seed) {
@@ -2310,16 +2411,29 @@ static void on_start_as(const uint8_t *b, int len, int watching)
     N.spec_start_down = 1;          /* a START held from before does not stop the watching */
     N.delay = LOBBY_DELAY;
     N.delay_fixed = 0;
-    for (i = 0; i < MAXP; i++) N.peer_rtt[i] = -1, N.peer_rb[i] = N.peer_rb_cp[i] = 0, N.peer_results[i] = N.peer_on_results[i] = 0;
+    for (i = 0; i < MAXP; i++) N.peer_rtt[i] = -1, N.peer_rb[i] = N.peer_rb_cp[i] = N.peer_rb_must[i] = 0, N.peer_results[i] = N.peer_on_results[i] = 0;
     for (i = 0; i < MAXP; i++) N.peer_delay[i] = 0;
+    N.rb_slow_off = 0;              /* the per-match fallback for a slow PC holds until the next START */
+    N.rbb_over = 0, N.rbb_start = 0;
     spec_reset();
-    /* This PC rolls back only when its player has the beta on and the relay allows it: the relay's
-     * switch turns the beta off for everyone without a new build (2026-10-26, after rollback
-     * crashes). Sent in P_RTT, so every PC of the match decides from the same flags. */
-    if (pos >= 0) N.peer_rb[pos] = rollback_wanted() && N.relay_caps > 0 && (N.relay_caps & CAPS_ROLLBACK);
-    if (pos >= 0) N.peer_rb_cp[pos] = 1;
-    if (pos >= 0 && rollback_wanted() && !N.peer_rb[pos])
-        fprintf(stderr, "[NETPLAY] rollback is switched off on the server: this match plays in lockstep\n");
+    /* This PC rolls back only when the relay allows it: the relay's switch turns rollback off for
+     * everyone without a new build (2026-10-26, after rollback crashes). Since build 52 the relay may
+     * make it mandatory for the room's mode (this_pc_rolls_back); otherwise the player's setting
+     * decides. Sent in P_RTT, so every PC of the match decides from the same flags. */
+    if (pos >= 0) {
+        N.peer_rb[pos] = this_pc_rolls_back();
+        N.peer_rb_cp[pos] = 1;
+        N.peer_rb_must[pos] = rb_mandatory_here();
+        if (!N.peer_rb[pos]) {
+            const char *why = !relay_allows_rb() ? (rollback_wanted() ? "rollback is switched off on the server" : NULL)
+                            : rb_server_decides() && !rb_mandatory_here() ? "the server leaves this mode in lockstep"
+                            : rb_mandatory_here() && !rollback_wanted() ? "this session started without rollback (a restart turns it on)"
+                            : NULL;
+            if (why) fprintf(stderr, "[NETPLAY] this PC plays the match in lockstep: %s\n", why);
+        } else if (N.peer_rb_must[pos]) {
+            fprintf(stderr, "[NETPLAY] the server makes rollback mandatory for this mode (class %02X)\n", room_rb_class());
+        }
+    }
     N.rb_match = 0;                         /* decided at the sync point */
     if (pos >= 0) {   /* this PC's ping as of now, with the worst of the last few as the jitter margin */
         int k, worst = N.rtt_ms > 0 ? N.rtt_ms : 0;
@@ -2417,6 +2531,7 @@ static void on_packet(const uint8_t *b, int len)
                     N.caps_tries = 0;
                     N.caps_sent = 0;
                     N.relay_caps = -1;
+                    N.rb_modes_known = 0, N.rb_modes = 0;
                     chat_reset();       /* room chat: a new session, a new IDENT */
                     N.pc_tries = 0;         /* this PC's fingerprint, for one session per PC (T_PC) */
                     N.pc_sent = 0;
@@ -2492,6 +2607,20 @@ static void on_packet(const uint8_t *b, int len)
                         N.relay_caps & CAPS_SPECTATE ? " (spectators)" : "",
                         N.relay_caps & CAPS_CHAT ? " (room chat)" : "", N.relay_caps & CAPS_CREW ? " (crew battles)" : "");
             rollback_server_allows((N.relay_caps & CAPS_ROLLBACK) != 0);    /* for the next start's audio arena */
+            {   /* rollback everywhere (build 52): the mode mask after the caps word; the relay sends the answer
+                 * again before every START, so a change of its switch counts from the next match */
+                int known = (N.relay_caps & CAPS_RB_MODES) && len >= 14;
+                unsigned modes = known ? get32(b + 10) & NETPLAY_RB_ALL : 0;
+                if (known != N.rb_modes_known || modes != N.rb_modes)
+                    fprintf(stderr, "[NETPLAY] the relay makes rollback mandatory in: %s%s%s%s%s%s%s\n",
+                            !known ? "nothing (an older relay; the setting decides)" : !modes ? "nothing (the setting decides)" : "",
+                            modes & NETPLAY_RB_1V1 ? "1v1 " : "", modes & NETPLAY_RB_TEAM ? "team " : "",
+                            modes & NETPLAY_RB_FFA ? "ffa " : "", modes & NETPLAY_RB_KOTH ? "koth " : "",
+                            modes & NETPLAY_RB_CREW ? "crew " : "", modes & NETPLAY_RB_RANKED ? "ranked" : "");
+                N.rb_modes_known = known;
+                N.rb_modes = modes;
+                if (known) rollback_server_modes((N.relay_caps & CAPS_ROLLBACK) ? modes : 0);
+            }
         }
         break;
     case T_HILL:
@@ -2790,7 +2919,7 @@ static DWORD WINAPI net_thread(LPVOID unused)
                 int n = header(cb, T_CAPS);
                 memcpy(cb + n, N.token, 8); n += 8;
                 put32(cb + n, CAPS_KOTH | CAPS_CREATED | CAPS_SPECTATE | CAPS_STATS_ERR | CAPS_SPEC_REMATCH | CAPS_CHAT |
-                              CAPS_CREW); n += 4;
+                              CAPS_CREW | CAPS_RB_MODES); n += 4;
                 send_raw(cb, n);
             } else {
                 N.relay_caps = 0;
@@ -3030,6 +3159,7 @@ static int start(const char *server, const char *name, int creating, const char 
     for (i = 0; i < ROOMSLOTS; i++) { N.pos_of_slot[i] = i < 2 ? i : -1; N.slot_rtt[i] = N.slot_rb[i] = -1; }
     N.last_pinginfo = 0;
     N.relay_caps = -1;
+    N.rb_modes_known = 0, N.rb_modes = 0;
     chat_reset();
     N.online_twice = 0;
     /* created fighters: read the player's own again (a new one may have been made meanwhile) */
@@ -3171,7 +3301,9 @@ static int room_rollback_flags(void)
 {
     int allowed = N.relay_caps > 0 && (N.relay_caps & CAPS_ROLLBACK);
     if (!allowed) return 0;
-    return rollback_wanted() ? 1 : rollback_setting_idle() ? 2 : 0;
+    if (rb_server_decides())    /* build 52: the server decides by the room's mode */
+        return this_pc_rolls_back() ? 1 : rb_mandatory_here() && !rollback_wanted() ? 2 : 0;
+    return this_pc_rolls_back() ? 1 : rollback_setting_idle() ? 2 : 0;
 }
 
 /* A room member's rollback byte (relay slot): -1 not known (not reported yet, or a build before 46). */
@@ -3624,7 +3756,13 @@ static DWORD WINAPI ranked_thread(LPVOID param)
     primary = N.rk_primary;
     memcpy(code, N.rk_code, sizeof(code));
     LeaveCriticalSection(&g_cs);
-    netranked_encode_ext(b + TICKET_LEN + 1, modes, primary, rollback_enabled(), pings, code);
+    {   /* rollback: this session can; with the server's mode mask (build 52), as it says for ranked sets */
+        int rb;
+        EnterCriticalSection(&g_cs);
+        rb = rollback_enabled() && (rb_server_decides() ? (N.rb_modes & NETPLAY_RB_RANKED) != 0 : rollback_opted_in());
+        LeaveCriticalSection(&g_cs);
+        netranked_encode_ext(b + TICKET_LEN + 1, modes, primary, rb, pings, code);
+    }
     fprintf(stderr, "[NETPLAY] ranked: queueing for %s (modes %u)%s%s, pings %d/%d/%d ms\n", netranked_mode_title(primary),
             modes, code[0] ? ", set " : "", code, pings[0], pings[1], pings[2]);
     EnterCriticalSection(&g_cs);
@@ -4063,6 +4201,62 @@ static void report_left(uint32_t left)
     report_event("left", 0, left, 0);
 }
 
+/* At the sync point of a match that plays in lockstep: why, one log line each, in the order
+ * every_player_rolls_back checks. The players get a short notice when this PC meant to roll back (the
+ * server made it mandatory for the mode, or the player's setting). */
+static void rb_off_reasons(void)
+{
+    char first[120] = "";
+    int i, koth = getenv("RECOMP_ROLLBACK_KOTH") && *getenv("RECOMP_ROLLBACK_KOTH") == '1';
+    int meant = N.pos >= 0 && N.pos < MAXP && (N.peer_rb[N.pos] || N.peer_rb_must[N.pos]);
+    if (N.koth_match && !koth && !every_player_must()) {
+        if (N.pos >= 0 && N.pos < MAXP && N.peer_rb_must[N.pos])
+            snprintf(first, sizeof(first), "the other player's game is an older build");
+        else
+            meant = 0;      /* the hill without the server's rollback: lockstep, as it always was */
+        fprintf(stderr, "[NETPLAY] rollback off for this match: King of the Hill fights play in lockstep%s; lockstep\n",
+                first[0] ? " (a player's build does not take the server's rollback for the hill)" : "");
+    }
+    for (i = 0; i < N.players && i < MAXP; i++) {
+        char who[40], why[80];
+        int slot = N.start_slots[i], rb = slot >= 0 && slot < ROOMSLOTS ? N.slot_rb[slot] : -1;
+        if (N.peer_rb[i]) continue;
+        if (i == N.pos) snprintf(who, sizeof(who), "this PC (player %d)", i + 1);
+        else if (!netplay_room_name(slot, who, (int)sizeof(who)))
+            snprintf(who, sizeof(who), "player %d", i + 1);
+        if (i == N.pos && N.peer_rb_must[i] && !rollback_wanted())
+            snprintf(why, sizeof(why), "started without rollback (a restart turns it on)");
+        else if (i == N.pos && rb_server_decides() && !N.peer_rb_must[i])
+            snprintf(why, sizeof(why), "has it off (the server leaves this mode in lockstep)");
+        else if (i != N.pos && rb > 0 && (rb & 2))
+            snprintf(why, sizeof(why), "must restart the game for rollback");
+        else if (N.peer_rtt[i] < 0)
+            snprintf(why, sizeof(why), "has it off (its ping did not arrive)");
+        else
+            snprintf(why, sizeof(why), "has it off");
+        fprintf(stderr, "[NETPLAY] rollback off for this match: %s %s; lockstep\n", who, why);
+        if (!first[0]) {
+            if (i == N.pos) snprintf(first, sizeof(first), "%s", N.peer_rb_must[i] ? "restart your game once to turn it on" : "it is off here");
+            else snprintf(first, sizeof(first), "%.30s %s", who, rb > 0 && (rb & 2) ? "must restart their game" :
+                          N.peer_rtt[i] < 0 ? "did not answer in time" : "has an older build or rollback off");
+        }
+    }
+    if (match_has_created() && every_peer_rb_cp_missing()) {
+        fprintf(stderr, "[NETPLAY] rollback off for this match: a created fighter plays and a player's build "
+                "does not roll back with them; lockstep\n");
+        if (!first[0]) snprintf(first, sizeof(first), "a created fighter plays and a player's build is older");
+    }
+    if (path_ping_ms() > RB_PATH_MAX_MS) {
+        fprintf(stderr, "[NETPLAY] rollback off for this match: the ping between the players is too high (%d ms, "
+                "over %d); lockstep\n", path_ping_ms(), RB_PATH_MAX_MS);
+        if (!first[0]) snprintf(first, sizeof(first), "the ping is too high (%d ms)", path_ping_ms());
+    }
+    if (meant && first[0]) {
+        fprintf(stderr, "[NETPLAY] notice: this match runs without rollback: %s\n", first);
+        toast(9000, "This match runs without rollback: %s.", first);
+    }
+}
+
 void netplay_sync_point(void)
 {
     if (!N.lockstep) return;
@@ -4100,22 +4294,10 @@ void netplay_sync_point(void)
         fprintf(stderr, "[NETPLAY] input delay %d steps (pings %d/%d/%d/%d ms%s)\n", N.delay,
                 N.peer_rtt[0], N.peer_rtt[1], N.peer_rtt[2], N.peer_rtt[3], known ? "" : ", some missing");
         if (N.rb_match) {
-            fprintf(stderr, "[NETPLAY] rollback on for this match: every player has it on\n");
-        } else if (N.koth_match) {
-            fprintf(stderr, "[NETPLAY] rollback off for this match: King of the Hill fights play in lockstep\n");
-        } else if (match_has_created() && every_peer_rb_cp_missing()) {
-            fprintf(stderr, "[NETPLAY] rollback off for this match: a created fighter plays and a player's build "
-                    "does not roll back with them; lockstep\n");
+            fprintf(stderr, "[NETPLAY] rollback on for this match: every player has it on%s\n",
+                    every_player_must() ? " (the server makes it mandatory)" : "");
         } else {
-            for (i = 0; i < N.players && i < MAXP; i++) {
-                char who[40];
-                if (N.peer_rb[i]) continue;
-                if (i == N.pos) snprintf(who, sizeof(who), "this PC (player %d)", i + 1);
-                else if (!netplay_room_name(N.start_slots[i], who, (int)sizeof(who)))
-                    snprintf(who, sizeof(who), "player %d", i + 1);
-                fprintf(stderr, "[NETPLAY] rollback off for this match: %s has it off%s; lockstep\n", who,
-                        N.peer_rtt[i] < 0 ? " (its ping did not arrive)" : "");
-            }
+            rb_off_reasons();
         }
     }
     EnterCriticalSection(&g_cs);
@@ -5578,7 +5760,7 @@ void netplay_on_step(void)
         static int crowd_on = -1;   /* RECOMP_ONLINE_CROWD=keep: tests compare without the restart */
         if (crowd_on < 0) crowd_on = !(getenv("RECOMP_ONLINE_CROWD") && !strcmp(getenv("RECOMP_ONLINE_CROWD"), "keep"));
         if (crowd_on) crowd_reset(g_ecx);
-        if (!N.resim && match_rolls_back() && rollback_prepare() == 0) {
+        if (!N.resim && match_rolls_back() && !N.rb_slow_off && rollback_prepare() == 0) {
             N.rb_on = N.rb_ref_due = N.rbm.on = 1;
             N.rbm.num = ++N.rb_matches;
             rollback_crash_cb = rollback_crash_state;   /* a crash before the first rollback says its state too */
@@ -5727,8 +5909,10 @@ void netplay_on_step(void)
          * re-run from then on is risk without a use (F9 b379eb, build 47: out of sync at step 1740,
          * still predicting and running steps again, then a crash at step 1772). The steps already
          * predicted are put right, then rollback goes off for the rest (netplay_on_update). */
+        /* Nor once this PC turned out too slow for rollback (rb_budget_tick): the steps already predicted
+         * are put right, then rollback goes off until the next START. */
         N.predicting = N.rb_on && rollback_ready() && MEM32(G_MATCH_PHASE) == 1u && N.final_step > (uint32_t)N.delay &&
-                       (old || !N.rb_decided_step) && !N.desync;
+                       (old || !N.rb_decided_step) && !N.desync && !N.rb_slow_off;
     }
     if (N.predicting && !N.rbm.first_pred) {   /* B3/G4: whether a match predicts at all, and from when */
         N.rbm.first_pred = s;
@@ -6280,10 +6464,9 @@ static void snap_save(void)
     EnterCriticalSection(&g_cs);
     memcpy(N.snap[slot].seeds, N.seeds, sizeof(N.snap[slot].seeds));
     LeaveCriticalSection(&g_cs);
-    if (N.resim) {
-        QueryPerformanceCounter(&t1);
-        N.rbm.ms_save += qpc_ms(t0, t1);
-    }
+    QueryPerformanceCounter(&t1);
+    if (N.resim) N.rbm.ms_save += qpc_ms(t0, t1);
+    else N.rbb_ms += qpc_ms(t0, t1);        /* rb_budget_tick: a re-run's saves count with its rollback */
 }
 
 static void rollback_to(uint32_t f)
@@ -6390,6 +6573,9 @@ static void rollback_to(uint32_t f)
     if (depth > N.rbm.deepest) N.rbm.deepest = depth;
     if (ms > N.rbm.ms_max) N.rbm.ms_max = ms;
     N.rbm.ms_total += ms;
+    N.rbb_ms += ms;         /* rb_budget_tick */
+    N.rbb_depth += depth;
+    N.rbb_count++;
     if (ms > 30.0) {        /* a stutter: say how deep, and whether models were loaded in it */
         static unsigned told;
         N.rbm.slow++;
@@ -6521,6 +6707,57 @@ static void desync_quit_tick(void)
     }
 }
 
+/* The per-match fallback for a PC that cannot keep up with rollback (build 52), once per update while
+ * rollback is on and the fight runs: the time this PC spends on rollback (normal updates' saves, and each
+ * rollback's load, re-run steps and their saves) against the wall time, over windows of
+ * RB_BUDGET_WINDOW_MS. RB_BUDGET_WINDOWS windows in a row at RB_BUDGET_PERCENT or more: this PC stops
+ * predicting, and netplay_on_update turns rollback off once every step ran on the real entries. Only
+ * this PC: the other PCs keep rolling back (rollback is local, the delay stays the agreed one), so the
+ * match stays in sync; this PC waits for the other's entries as in lockstep. Its START's rematches too. */
+static void rb_budget_tick(void)
+{
+    static int percent = -1;
+    ULONGLONG now = GetTickCount64(), span;
+    double share;
+    if (percent < 0) {
+        const char *v = getenv("RECOMP_ROLLBACK_BUDGET");
+        percent = v && *v ? atoi(v) : RB_BUDGET_PERCENT;
+        if (percent < 0) percent = 0;
+    }
+    if (!percent || N.rb_slow_off || !N.lockstep || N.watching || MEM32(G_MATCH_PHASE) != 1u) {
+        N.rbb_start = 0;    /* outside a fight (the lead-in loads, the results) nothing is counted */
+        return;
+    }
+    if (!N.rbb_start) {
+        N.rbb_start = now;
+        N.rbb_ms = 0;
+        N.rbb_updates = N.rbb_depth = N.rbb_count = 0;
+        return;
+    }
+    N.rbb_updates++;
+    span = now - N.rbb_start;
+    if (span < RB_BUDGET_WINDOW_MS) return;
+    share = N.rbb_ms * 100.0 / (double)span;
+    if (share >= percent) {
+        N.rbb_over++;
+        fprintf(stderr, "[ROLLBACK] busy: %.0f%% of %llu ms on rollback (%u rollbacks, %.1f steps deep on average, %u "
+                "updates), %u window(s) in a row, step %u\n", share, (unsigned long long)span, N.rbb_count,
+                N.rbb_count ? (double)N.rbb_depth / N.rbb_count : 0.0, N.rbb_updates, N.rbb_over, N.step);
+    } else {
+        N.rbb_over = 0;
+    }
+    if (N.rbb_over >= RB_BUDGET_WINDOWS) {
+        N.rb_slow_off = 1;
+        fprintf(stderr, "[NETPLAY] rollback fallback: this PC cannot keep up with rollback (%.0f%% of the time on it, "
+                "limit %d%%): it waits for the other players' entries from step %u until the next START\n", share,
+                percent, N.step);
+        toast(9000, "This match runs without rollback from here: this PC can't keep up with it.");
+    }
+    N.rbb_start = now;
+    N.rbb_ms = 0;
+    N.rbb_updates = N.rbb_depth = N.rbb_count = 0;
+}
+
 void netplay_on_update(void)
 {
     uint32_t t, f = 0;
@@ -6563,6 +6800,7 @@ void netplay_on_update(void)
     /* The fight is decided and every step ran on the real entries, or the match went on offline:
      * no more rollback in this match (write tracking off, no saves on the results screen). */
     if (MEM32(G_MATCH_PHASE) == 1u) N.rb_fought = 1;   /* a rematch starts with the last match's phase */
+    rb_budget_tick();
     if ((!N.lockstep && !soak_depth()) ||
         (N.lockstep && N.rb_fought && MEM32(G_MATCH_PHASE) >= 2u && N.final_step >= N.step && !N.predicting) ||
         (N.lockstep && N.rb_decided_step && N.final_step >= N.rb_decided_step) ||
@@ -6617,6 +6855,18 @@ void netplay_on_update(void)
     }
     LeaveCriticalSection(&g_cs);
     if (f) rollback_to(f);
+    /* The fallback for a PC too slow for rollback (rb_budget_tick): prediction stopped, so each step
+     * waited for the real entries, and the loop above has just made every step up to this one final (a
+     * wrong prediction from before put right first). Here, not with the checks above, which run before
+     * that loop and see the newest step not yet final. From now on no saves either. */
+    if (N.lockstep && N.rb_slow_off && !N.predicting && !f && N.final_step >= N.step) {
+        N.rb_on = 0;
+        rollback_reset();
+        fprintf(stderr, "[ROLLBACK] off for the rest of this match (step %u, %u rollbacks): this PC cannot keep up with it\n",
+                N.step, N.rb_count);
+        rbm_summary("fell back to lockstep (this PC was too slow)");
+        return;
+    }
     if (!N.lockstep && soak_depth()) {      /* tests: go back and compare */
         static unsigned soaks, same, differ;
         long long t = defjam_test_current_step();

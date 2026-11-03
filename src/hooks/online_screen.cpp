@@ -924,6 +924,7 @@ struct Gallery {
     bool results_wait = false;      // the room still plays: this PC is back, another is on its results
     unsigned results_slots = 0;     // ... the room slots still there (netplay_room_results_wait)
     bool rollback = false;          // the sample relay allows rollback (NETPLAY_CAP_ROLLBACK)
+    bool rb_must = false;           // build 52: ... and makes it mandatory for the sample room's mode
     int room_rb[NETPLAY_ROOM_SLOTS] = {};   // each sample member's rollback byte (netplay_room_rollback)
     NetCrew crew = {};              // crew battles (stage 3): the crew-battle pages' sample (battle 0: none)
 } G;
@@ -1133,6 +1134,12 @@ int room_ping(int slot)
     return netplay_room_ping(slot);
 }
 // A room member's rollback byte (netplay_room_rollback): -1 unknown, bit 0 rolls back, bit 1 needs a restart.
+// Build 52: the server makes rollback mandatory for the mode of this PC's room (netplay_room_rollback_mandatory).
+bool room_rb_must()
+{
+    return gallery_on() ? G.rb_must : netplay_room_rollback_mandatory() != 0;
+}
+
 int room_rb(int slot)
 {
     if (gallery_on()) return slot >= 0 && slot < NETPLAY_ROOM_SLOTS ? G.room_rb[slot] : -1;
@@ -3188,10 +3195,27 @@ void draw_room(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
     // Rollback (build 46): each player's PC reports whether it rolls back (P_PINGINFO); a match rolls back
     // only when every player does, so players see why theirs plays in lockstep. Shown while the relay
     // allows rollback and at least one player has the setting on; never in a match of the hill.
+    // Build 52: when the server makes rollback mandatory for the room's mode there is no choice to show: a
+    // small ROLLBACK tag under the room's code, and only the players whose game must restart for it.
+    bool rb_must = room_rb_must();
     bool rb_room = false, rb_any_on = false;
     std::string rb_off;
     int rb_off_count = 0, rb_restart = 0;
-    if (lobby_caps() > 0 && (lobby_caps() & NETPLAY_CAP_ROLLBACK) && r.phase == 0) {
+    if (rb_must) {      // on the server's line, left of its name
+        const char *tag = "ROLLBACK";
+        float tw = text_width(f, g_title, 9, tag);
+        float right = 590 - (cur >= 0 ? text_width(f, g_title, 10, (upper(sv[cur].name) + " SERVER").c_str()) + 8 : 0);
+        rect(dl, f, right - tw - 10, 72, tw + 10, 13, IM_COL32(0, 0, 0, 170), 4);
+        text(dl, f, g_title, 9, right - 5, 73, GREEN, tag, RIGHT, 1.0f);
+        if (r.phase == 0)
+            for (int i = 0; i < r.player_count; i++) {
+                int v = room_rb(r.players[i].slot);
+                if (v < 0 || !(v & 2)) continue;
+                rb_off += std::string(rb_off_count++ ? ", " : "") + (r.players[i].slot == r.you ? "you" : r.players[i].name);
+                rb_restart++;
+            }
+        if (rb_off_count) rb_room = rb_any_on = true;   // the restart line below
+    } else if (lobby_caps() > 0 && (lobby_caps() & NETPLAY_CAP_ROLLBACK) && r.phase == 0) {
         for (int i = 0; i < r.player_count; i++) {
             int v = room_rb(r.players[i].slot);
             if (v > 0) rb_room = true;
@@ -3204,7 +3228,7 @@ void draw_room(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
             if (v & 2) rb_restart++;
         }
     }
-    if (rb_room && rb_any_on && rb_off_count && !ranked) {
+    if (rb_room && rb_any_on && rb_off_count && (!ranked || rb_must)) {
         char line[160];
         bool you_only = rb_off_count == 1 && rb_off == "you";
         if (rb_restart == rb_off_count)
@@ -3304,8 +3328,8 @@ void draw_room(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
         }
         if (rb_room) {      // rollback (build 46): this player's next match, as its PC reports it
             int v = room_rb(p.slot);
-            if (v >= 0) {
-                const char *tag = (v & 1) ? "ROLLBACK" : "LOCKSTEP";
+            if (v >= 0 && (!rb_must || (v & 2))) {  // build 52, mandatory: only a game that must restart
+                const char *tag = (v & 1) ? "ROLLBACK" : rb_must ? "RESTART" : "LOCKSTEP";
                 float tw = text_width(f, g_title, 9, tag);
                 rect(dl, f, x + w - tw - 14, y + 22, tw + 10, 14, IM_COL32(0, 0, 0, 160), 4);
                 text(dl, f, g_title, 9, x + w - 9, y + 24, (v & 1) ? GREEN : GREY, tag, RIGHT, 1.0f);
@@ -3931,6 +3955,8 @@ void gallery_step()
                                          "room-results", "room-results-ffa",
                                          // build 46: each player's rollback in the room
                                          "room-rollback", "room-rollback-restart", "room-rollback-all",
+                                         // build 52: rollback everywhere (the server's ROLLBACK tag, a restart)
+                                         "room-rollback-mandatory", "room-rollback-mandatory-restart", "hub-rollback-mandatory",
                                          // build 46: the server allows rollback again (the notice)
                                          "hub-rollback-restart",
                                          // the Social Update: the quick-chat wheel in a room, its lines' page
@@ -4058,7 +4084,7 @@ void gallery_step()
     G.results_wait = false;
     G.results_slots = 0;
     QW.open = QW.gallery = false;
-    G.rollback = false;
+    G.rollback = G.rb_must = false;
     for (int i = 0; i < NETPLAY_ROOM_SLOTS; i++) G.room_rb[i] = -1;
     G.crew = NetCrew();
     std::string p = page;
@@ -4174,6 +4200,17 @@ void gallery_step()
         G.room_rb[1] = p == "room-rollback-all" ? 1 : p == "room-rollback-restart" ? 2 : 0;
         for (int i = 0; i < 3; i++) G.room_pings[i] = 30 + 12 * i;
     }
+    else if (p == "room-rollback-mandatory" || p == "room-rollback-mandatory-restart") {
+        // build 52: the server makes rollback mandatory for the room's mode: the ROLLBACK tag; -restart: Ben's
+        // game started before the server made it so and must restart
+        S.page = HUB;
+        G.room = sample_room(3, 4, 3);
+        G.rollback = G.rb_must = true;
+        G.room_rb[0] = G.room_rb[2] = 1;
+        G.room_rb[1] = p == "room-rollback-mandatory-restart" ? 2 : 1;
+        for (int i = 0; i < 3; i++) G.room_pings[i] = 30 + 12 * i;
+    }
+    else if (p == "hub-rollback-mandatory") { S.page = HUB; S.hub_sel = 0; S.quick_mode = 0; }   // build 52: its notice
     else if (p == "room-quickchat") {          // the wheel over a room, the second line pointed at
         S.page = HUB;
         G.room = sample_room(0, 2, 2);
@@ -4733,13 +4770,17 @@ bool draw_pages(ImVec2 display)
     {   // build 46: the server allows rollback again, but this session started without it (once per session)
         static bool told;
         int caps = lobby_caps();
-        if (!told && !gallery_on() && net_state() == NETPLAY_LOBBY && caps > 0 && (caps & NETPLAY_CAP_ROLLBACK) &&
-            rollback_restart_hint()) {
+        int hint = !told && !gallery_on() && net_state() == NETPLAY_LOBBY && caps > 0 && (caps & NETPLAY_CAP_ROLLBACK)
+                 ? rollback_restart_hint() : 0;
+        if (hint) {
             told = true;
-            say("Rollback is allowed again: restart the game to use it.", 9000);
+            say(hint == 2 ? "All matches use rollback now: restart the game once."
+                          : "Rollback is allowed again: restart the game to use it.", 9000);
         }
         if (gallery_on() && G.page && !strcmp(G.page, "hub-rollback-restart") && !S.note_until)
             say("Rollback is allowed again: restart the game to use it.", 9000);
+        if (gallery_on() && G.page && !strcmp(G.page, "hub-rollback-mandatory") && !S.note_until)
+            say("All matches use rollback now: restart the game once.", 9000);
     }
     draw_status(dl, f);
     return keep;
