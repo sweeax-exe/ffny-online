@@ -119,7 +119,8 @@ def tool(tmp_path_factory):
     driver.write_text(DRIVER, encoding='utf-8')
     exe = folder / 'input.exe'
     sources = [driver, ROOT / 'src/hooks/pc_input.c', ROOT / 'src/hooks/pc_ui_settings.c', TOOLKIT / 'src/input/input_map.c',
-               TOOLKIT / 'src/input/input_host.c', TOOLKIT / 'src/settings/recomp_settings.c']
+               TOOLKIT / 'src/input/input_host.c', TOOLKIT / 'src/input/input_edges.c',
+               TOOLKIT / 'src/platform/host_time.c', TOOLKIT / 'src/settings/recomp_settings.c']
     cmd = [compiler, '/nologo', '/O2', '/TC', '/I' + str(ROOT / 'src/hooks'), '/I' + str(TOOLKIT / 'src/input'),
            '/I' + str(TOOLKIT / 'src/settings'), '/I' + str(TOOLKIT / 'src')] + [str(s) for s in sources] + [
            '/Fe:' + str(exe), '/link', 'xinput.lib', 'winmm.lib', 'user32.lib']
