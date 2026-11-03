@@ -32,6 +32,7 @@
 #include <vector>
 
 #include "imgui.h"
+#include "imgui_internal.h"      // GetKeyData: the quick-chat wheel reads the sticks
 #include "online_screen.h"
 #include "netplay.h"
 #include "netplay_servers.h"
@@ -848,7 +849,8 @@ std::string upper(const char *s)
 
 // ---- the screens --------------------------------------------------------------------------------
 
-enum Page { HUB, ROOMS, SETTINGS, FIGHTERS, CODE, STATS, PLAYERS, RANKED, VOICE, SERVERS, NAME, RANKED_MODES, RANKED_RESULTS };
+enum Page { HUB, ROOMS, SETTINGS, FIGHTERS, CODE, STATS, PLAYERS, RANKED, VOICE, SERVERS, NAME, RANKED_MODES, RANKED_RESULTS,
+            QUICK };
 
 struct State {
     Page page = HUB;
@@ -3420,7 +3422,7 @@ void draw_voice(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r
         for (int i = 0; i < r.player_count && n_others < NETPLAY_ROOM_SLOTS; i++)
             if (r.players[i].slot != r.you) others[n_others++] = i;
     static const char *const pads[] = { "OFF", "BACK", "LEFT STICK CLICK", "RIGHT STICK CLICK", "D-PAD UP", "D-PAD DOWN" };
-    const int fixed = 5, rows = fixed + n_others + 1;           // the settings, the players, BACK
+    const int fixed = 6, rows = fixed + n_others + 1;           // the settings, QUICK CHAT LINES, the players, BACK
     if (S.voice_sel >= rows) S.voice_sel = rows - 1;
     if (pad.up) S.voice_sel = (S.voice_sel + rows - 1) % rows;
     if (pad.down) S.voice_sel = (S.voice_sel + 1) % rows;
@@ -3435,6 +3437,7 @@ void draw_voice(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r
         case 2: recomp_settings_set("online", "voice_mic_volume", std::max(0, std::min(400, mic + step * 10))); break;
         case 3: recomp_settings_set("online", "voice_auto_level", agc ? 0 : 1); break;
         case 4: recomp_settings_set("online", "voice_pad", (vpad + step + 6) % 6); break;
+        case 5: break;      // QUICK CHAT LINES: A opens its page
         default:
             if (S.voice_sel - fixed < n_others) {
                 int slot = r.players[others[S.voice_sel - fixed]].slot;
@@ -3480,6 +3483,9 @@ void draw_voice(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r
         } else if (i == 4) {
             snprintf(label, sizeof(label), "TALK BUTTON ON THE CONTROLLER");
             snprintf(value, sizeof(value), "%s", pads[vpad >= 0 && vpad < 6 ? vpad : 0]);
+        } else if (i == 5) {
+            snprintf(label, sizeof(label), "QUICK CHAT");
+            snprintf(value, sizeof(value), "THE EIGHT LINES");
         } else {
             const NetRoomPlayer &p = r.players[others[i - fixed]];
             int pv = voice_player_volume(p.slot);
@@ -3493,7 +3499,9 @@ void draw_voice(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r
             text(dl, f, g_title, 10, x + 12, y + 3, GREY, label);
             text(dl, f, g_title, 15, x + 12, y + 15, sel ? WHITE : GREY, value);
         }
-        if (sel) { text(dl, f, g_title, 17, x + w - 26, y + row_h / 2 - 9, ORANGE, "<", CENTER); text(dl, f, g_title, 17, x + w - 10, y + row_h / 2 - 9, ORANGE, ">", CENTER); }
+        if (sel && i == 5) text(dl, f, g_title, 13, x + w - 12, y + row_h / 2 - 7, ORANGE, "A", RIGHT);
+        else if (sel) { text(dl, f, g_title, 17, x + w - 26, y + row_h / 2 - 9, ORANGE, "<", CENTER); text(dl, f, g_title, 17, x + w - 10, y + row_h / 2 - 9, ORANGE, ">", CENTER); }
+        if (i == 5 && mouse_click(f, x, y, w, h)) const_cast<Pad &>(pad).a = true;
     }
     // the door: how it works, and the microphone's level
     door_panel(dl, f);
@@ -3510,6 +3518,7 @@ void draw_voice(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r
         text(dl, f, g_title, 10, 52, my, GREY, r.in_room ? "Press the talk key once: your microphone's level shows here."
                                                        : "Your microphone's level shows here in a room.");
     }
+    if (pad.a && S.voice_sel == 5) { S.page = QUICK; return; }
     if ((pad.a && S.voice_sel == rows - 1) || pad.b) S.page = HUB;
 }
 
@@ -3885,7 +3894,9 @@ void gallery_step()
                                          // build 46: each player's rollback in the room
                                          "room-rollback", "room-rollback-restart", "room-rollback-all",
                                          // build 46: the server allows rollback again (the notice)
-                                         "hub-rollback-restart" };
+                                         "hub-rollback-restart",
+                                         // the Social Update: the quick-chat wheel in a room, its lines' page
+                                         "room-quickchat", "quick-lines" };
     const int count = (int)(sizeof(pages) / sizeof(pages[0]));
     static unsigned long long start;
     static int ms;
@@ -3998,6 +4009,7 @@ void gallery_step()
     G.cp_pick = 0;
     G.results_wait = false;
     G.results_slots = 0;
+    QW.open = QW.gallery = false;
     G.rollback = false;
     for (int i = 0; i < NETPLAY_ROOM_SLOTS; i++) G.room_rb[i] = -1;
     std::string p = page;
@@ -4112,6 +4124,15 @@ void gallery_step()
         G.room_rb[1] = p == "room-rollback-all" ? 1 : p == "room-rollback-restart" ? 2 : 0;
         for (int i = 0; i < 3; i++) G.room_pings[i] = 30 + 12 * i;
     }
+    else if (p == "room-quickchat") {          // the wheel over a room, the second line pointed at
+        S.page = HUB;
+        G.room = sample_room(0, 2, 2);
+        QW.open = QW.gallery = true;
+        QW.where = QW_ROOM;
+        QW.sel = 1;
+        QW.sticky = false;
+    }
+    else if (p == "quick-lines") { S.page = QUICK; QW.quick_page_sel = 1; }
     else if (p == "room-results" || p == "room-results-ffa") {
         // build 46: back from the match while the relay still plays it (Ben, and in the FFA also Cal,
         // still on the results): no READY offered, the wait said
@@ -4171,7 +4192,7 @@ void gallery_step()
             h.watch_slots[0] = 1; h.watch_slots[1] = 2;
             h.watch_fighters[0] = r.players[1].fighter; h.watch_fighters[1] = r.players[2].fighter;
         }
-    } else if (p == "room-voice") { S.page = VOICE; S.voice_sel = 5; G.room = sample_room(0, 4, 4); }
+    } else if (p == "room-voice") { S.page = VOICE; S.voice_sel = 6; G.room = sample_room(0, 4, 4); }
     else if (p == "match") { G.state = NETPLAY_CONNECTED; G.room = sample_room(0, 2, 2); G.room.phase = 2; G.versus.count = 0; }
     else if (p.compare(0, 6, "versus") == 0) {
         G.state = NETPLAY_CONNECTED;
@@ -4238,7 +4259,7 @@ LookId page_look(const NetRoom &room, enum NetplayState st)
     case STATS: if (!room.in_room) return LOOK_STATS; break;
     case RANKED: case RANKED_MODES: if (!room.in_room) return LOOK_SEARCH; break;
     case RANKED_RESULTS: return LOOK_SEARCH;
-    case VOICE: if (!(room.in_room && room.phase != 0)) return LOOK_VOICE; break;
+    case VOICE: case QUICK: if (!(room.in_room && room.phase != 0)) return LOOK_VOICE; break;
     default: break;
     }
     if (room.in_room) {
@@ -4325,7 +4346,17 @@ bool fight_chat_wanted()
 
 bool draw_fight_chat(ImDrawList *dl, ImVec2 display) { return fight_chat_draw_impl(dl, display); }
 
-bool fight_chat_typing() { return FC.typing; }
+bool fight_chat_typing() { return FC.typing || (QW.open && QW.where == QW_FIGHT); }
+
+bool test_pad(int *buttons, float *lx, float *ly)
+{
+    *buttons = QT.buttons;
+    *lx = QT.lx;
+    *ly = QT.ly;
+    return QT.buttons || QT.lx != 0 || QT.ly != 0;
+}
+
+bool test_pad_r3() { return quick_button() == ImGuiKey_GamepadR3; }
 
 const char *shot_label()
 {
@@ -4340,6 +4371,8 @@ bool take_open_request()
     S = State();
     S.opened = GetTickCount64();
     C.open = C.kb = C.menu = false;
+    QW.open = false;
+    QW.editing = -1;
     if (!gallery_on()) {
         connect_if_needed();
         social_start();     // the chat's threads: from the first time the online screens open, never at boot
@@ -4356,16 +4389,25 @@ bool draw(ImVec2 display)
     ImDrawList *dl = ImGui::GetForegroundDrawList();
     Frame f = menu_frame(display);
     // a match starting closes the chat: the versus screen comes, then the fight
-    if (net_state() == NETPLAY_CONNECTED && net_in_lobby()) C.open = C.kb = C.menu = false;
+    if (net_state() == NETPLAY_CONNECTED && net_in_lobby()) {
+        C.open = C.kb = C.menu = false;
+        if (QW.where != QW_FIGHT) quick_close("the match starts");
+    }
     chat_begin();
     bool keep = draw_pages(display);
     if (!keep || g_closed_for_match) {
         C.open = C.kb = C.menu = false;
         C.mouse_off = false;
+        if (QW.where != QW_FIGHT) quick_close("the online screens closed");
         social_set_typing(0);
         return keep;
     }
     if (!(net_state() == NETPLAY_CONNECTED && net_in_lobby())) chat_draw(dl, f, display);
+    // the quick-chat wheel over the page or the chat window (gallery: the picture alone)
+    if (QW.open && QW.where != QW_FIGHT) {
+        C.mouse_off = !QW.gallery;
+        quick_wheel(dl, f, display);
+    }
     C.mouse_off = false;
     return keep;
 }
@@ -4379,6 +4421,7 @@ bool draw_pages(ImVec2 display)
     // the first frame takes no choice: the A that opened the screens is still down
     if (GetTickCount64() - S.opened < 250) pad = Pad();
     if (C.open) pad = Pad();       // the chat window has the input
+    if ((QW.open && QW.where != QW_FIGHT && !QW.gallery) || (C.kb && C.kb_kind == KB_QUICK)) pad = Pad();   // the wheel, or the QUICK CHAT page's keyboard
     if (gallery_on()) {
         gallery_step();
         pad = Pad();
@@ -4590,6 +4633,8 @@ bool draw_pages(ImVec2 display)
         float hx = 54;
         hx += hint(dl, f, hx, 420, "b", "BACK");
         (void)hx;
+    } else if (S.page == QUICK && !(room.in_room && room.phase != 0)) {
+        draw_quick_page(dl, f, pad, display);
     } else if (S.page == CODE) {
         draw_code(dl, f, pad);
         float hx = 54;
@@ -4648,6 +4693,8 @@ const char *shot_label() { return nullptr; }
 bool fight_chat_wanted() { return false; }
 bool draw_fight_chat(ImDrawList *, ImVec2) { return false; }
 bool fight_chat_typing() { return false; }
+bool test_pad(int *b, float *x, float *y) { *b = 0; *x = *y = 0; return false; }
+bool test_pad_r3() { return false; }
 }
 
 #endif

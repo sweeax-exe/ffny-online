@@ -21,7 +21,7 @@ const ImU32 GOLD_TEXT = IM_COL32(255, 205, 60, 255), BLUE_NAME = IM_COL32(142, 1
             LIVE = IM_COL32(123, 224, 123, 255), DIM = IM_COL32(242, 230, 200, 115),
             BUBBLE_ME = IM_COL32(142, 16, 36, 255), LINE_SEP = IM_COL32(255, 255, 255, 20);
 
-enum KbKind { KB_CHAT, KB_FRIEND, KB_CREW_INVITE, KB_CREW_NAME, KB_CREW_TAG, KB_FIGHT };
+enum KbKind { KB_CHAT, KB_FRIEND, KB_CREW_INVITE, KB_CREW_NAME, KB_CREW_TAG, KB_FIGHT, KB_QUICK };
 enum FriendAct { ACT_ACCEPT, ACT_DECLINE, ACT_JOIN, ACT_WATCH, ACT_INVITE, ACT_MESSAGE, ACT_REMOVE, ACT_SURE };
 
 struct Chat {
@@ -75,6 +75,85 @@ struct Chat {
 } C;
 
 bool chat_mouse_blocked() { return C.mouse_off; }
+
+// ---- the quick-chat wheel (the Social Update; the owner's approved design "Quick chat wheel") ----
+//
+// Eight ready-made lines on a wheel. The pad's L3 opens it (R3 when L3 is push-to-talk); the stick (either)
+// or the D-pad points, and letting go of the button sends the line pointed at. A short press keeps the
+// wheel open: then A sends and B cancels. On a keyboard the keys 1-8 send the lines while the chat is
+// open (its box empty; with Ctrl also while it holds text).
+//
+// Where: in a room (the room's chat), on a GLOBAL / CREW / MESSAGES tab of the chat window (to that tab),
+// for a spectator over a fight and for a fighter on its match's results (the room's chat, through the
+// fight chat's overlay). Never for a fighter in the fight: its pad is the fight's, the same rule as
+// typing (social_ui's fight chat). The lines go out as ordinary chat lines, so the relay's and the
+// service's limits apply as to typed ones. They are online.quick_chat_1..8 in the settings file, edited
+// on the QUICK CHAT page (VOICE CHAT, QUICK CHAT LINES) with the on-screen keyboard.
+
+enum QuickWhere { QW_ROOM, QW_TAB, QW_FIGHT };
+const int QUICK_LINES = 8;
+const char *const k_quick_defaults[QUICK_LINES] = { "GG", "Run it back?", "One more", "Nice!", "Good luck", "Lag, sorry",
+                                                    "Brb", "Let's go!" };
+
+struct QuickWheel {
+    bool open = false;
+    int where = QW_ROOM;
+    int tab = TAB_ROOM;             // QW_TAB: the chat window's tab it sends to
+    int sel = -1;                   // the line pointed at, -1 none
+    bool sticky = false;            // a short press: it stays open, A sends
+    ImGuiKey button = ImGuiKey_None;
+    unsigned long long opened = 0;
+    int opened_frame = -1;
+    bool gallery = false;           // the gallery's picture: drawn, takes no input
+    int quick_page_sel = 0;         // the QUICK CHAT page's row
+    int editing = -1;               // the line the on-screen keyboard edits
+} QW;
+
+// A line as it is sent: trimmed, at most 200 bytes (the relay's limit), cut at a character's start.
+std::string quick_clip(std::string t)
+{
+    while (!t.empty() && (t.back() == ' ' || t.back() == '\t')) t.pop_back();
+    size_t lead = t.find_first_not_of(" \t");
+    t = lead == std::string::npos ? std::string() : t.substr(lead);
+    if (t.size() > 200) {
+        size_t cut = 200;
+        while (cut > 0 && ((unsigned char)t[cut] & 0xC0) == 0x80) cut--;
+        t.resize(cut);
+    }
+    return t;
+}
+
+std::string quick_line(int i)
+{
+    if (i < 0 || i >= QUICK_LINES) return "";
+    char key[24], buf[RECOMP_SETTING_TEXT_MAX];
+    snprintf(key, sizeof(key), "quick_chat_%d", i + 1);
+    buf[0] = 0;
+    recomp_settings_get_text("online", key, buf, sizeof(buf), k_quick_defaults[i]);
+    std::string t = quick_clip(buf);
+    return t.empty() ? std::string(k_quick_defaults[i]) : t;
+}
+
+// Empty: the default again.
+void quick_line_set(int i, const std::string &text)
+{
+    if (i < 0 || i >= QUICK_LINES) return;
+    char key[24];
+    snprintf(key, sizeof(key), "quick_chat_%d", i + 1);
+    std::string t = quick_clip(text);
+    if (t.empty()) t = k_quick_defaults[i];
+    if (recomp_settings_set_text("online", key, t.c_str()) > 0) pc_settings_save();
+    fprintf(stderr, "[SOCIAL-UI] quick chat line %d set: %s\n", i + 1, t.c_str());
+}
+
+// L3, or R3 when the left stick's click is push-to-talk (online.voice_pad 2).
+ImGuiKey quick_button() { return recomp_settings_get("online", "voice_pad", 0) == 2 ? ImGuiKey_GamepadR3 : ImGuiKey_GamepadL3; }
+const char *quick_button_name()
+{
+    bool r = quick_button() == ImGuiKey_GamepadR3;
+    return ps_icons() ? (r ? "R3" : "L3") : (r ? "RS" : "LS");
+}
+
 
 // ---- avatars (stage 2c): the players' Discord pictures, as the account service copied them ----
 //
@@ -1637,7 +1716,7 @@ std::string &kb_text() { return C.kb_kind == KB_FIGHT ? fight_draft() : C.kb_kin
 int &kb_cursor() { return C.kb_kind == KB_FIGHT ? fight_cursor() : C.kb_kind != KB_CHAT ? C.friend_cursor : C.cursor[C.tab]; }
 int kb_max()
 {
-    return C.kb_kind == KB_FIGHT ? 200 : C.kb_kind == KB_CREW_TAG ? 4 : C.kb_kind == KB_CREW_NAME ? 24 :
+    return C.kb_kind == KB_FIGHT || C.kb_kind == KB_QUICK ? 200 : C.kb_kind == KB_CREW_TAG ? 4 : C.kb_kind == KB_CREW_NAME ? 24 :
            C.kb_kind != KB_CHAT ? 32 : std::max(1, C.v.max_chars);
 }
 
@@ -1656,6 +1735,12 @@ void open_keyboard(int kind)
 void kb_submit()
 {
     if (C.kb_kind == KB_FIGHT) { fight_send(); C.kb = false; return; }
+    if (C.kb_kind == KB_QUICK) {        // a quick-chat line (an empty one: the default again)
+        quick_line_set(QW.editing, C.friend_name);
+        C.kb = false;
+        QW.editing = -1;
+        return;
+    }
     if (C.kb_kind != KB_CHAT) {
         std::string n = C.friend_name;
         while (!n.empty() && n.back() == ' ') n.pop_back();
@@ -1828,6 +1913,7 @@ void draw_keyboard(ImDrawList *dl, const Frame &f, ImVec2 display)
     else if (C.kb_kind == KB_FIGHT) { head = "MESSAGE TO"; who = "the room"; }
     else if (C.kb_kind == KB_CREW_NAME) { head = "NEW CREW - ITS NAME"; who = ""; }
     else if (C.kb_kind == KB_CREW_TAG) { head = "NEW CREW - ITS TAG"; who = C.crew_new_name; }
+    else if (C.kb_kind == KB_QUICK) { head = "QUICK CHAT - LINE"; who = std::to_string(QW.editing + 1); }
     else if (C.tab == TAB_MESSAGES) { head = "MESSAGE TO"; who = convo_name(C.dm_with); }
     else if (C.tab == TAB_CREW) { head = "MESSAGE TO"; who = "your crew"; }
     else { head = "MESSAGE TO"; who = C.region ? k_region_names[C.region] : "everyone"; }
@@ -1845,7 +1931,10 @@ void draw_keyboard(ImDrawList *dl, const Frame &f, ImVec2 display)
     std::string before = s.substr(0, (size_t)cur);
     float cw = text_width(f, g_body, 14, before.c_str()), shift = std::max(0.0f, cw - (fw - 24));
     dl->PushClipRect(f.p(x + in + 4, fy), f.p(x + in + fw - 4, fy + 32), true);
-    if (s.empty() && C.kb_kind != KB_CHAT)
+    if (s.empty() && C.kb_kind == KB_QUICK && QW.editing >= 0 && QW.editing < QUICK_LINES)
+        text(dl, f, g_body, 14, x + in + 9, fy + 7, DIM, (std::string("Empty: the default, ") + k_quick_defaults[QW.editing]).c_str(),
+             LEFT, 0);
+    else if (s.empty() && C.kb_kind != KB_CHAT)
         text(dl, f, g_body, 14, x + in + 9, fy + 7, DIM, C.kb_kind == KB_CREW_NAME ? "3 to 24 letters, digits and spaces" :
              C.kb_kind == KB_CREW_TAG ? "2 to 4 letters or digits" : "Their name, exactly", LEFT, 0);
     text(dl, f, g_body, 14, x + in + 9 - shift, fy + 7, CREAM, s.c_str(), LEFT, 0);
@@ -1904,6 +1993,7 @@ void draw_keyboard(ImDrawList *dl, const Frame &f, ImVec2 display)
             if (key.kind == K_SEND && C.kb_kind == KB_CREW_INVITE) label = "INVITE";
             if (key.kind == K_SEND && C.kb_kind == KB_CREW_NAME) label = "NEXT";
             if (key.kind == K_SEND && C.kb_kind == KB_CREW_TAG) label = "CREATE";
+            if (key.kind == K_SEND && C.kb_kind == KB_QUICK) label = "SAVE";
             if (key.kind == K_SHIFT && C.caps) label = "CAPS";
             float size = wide ? 10 : 13;
             if (key.kind == K_BKSP) {       // a backspace arrow
@@ -1937,7 +2027,8 @@ void draw_keyboard(ImDrawList *dl, const Frame &f, ImVec2 display)
     hx += plate_hint(dl, f, hx, hy, ps_icons() ? "L1" : "LB", "") - 2;
     hx += plate_hint(dl, f, hx, hy, ps_icons() ? "R1" : "RB", "CURSOR");
     hx += plate_hint(dl, f, hx, hy, start_button_name(), C.kb_kind == KB_FRIEND ? "ADD" : C.kb_kind == KB_CREW_INVITE ? "INVITE" :
-                     C.kb_kind == KB_CREW_NAME ? "NEXT" : C.kb_kind == KB_CREW_TAG ? "CREATE" : "SEND");
+                     C.kb_kind == KB_CREW_NAME ? "NEXT" : C.kb_kind == KB_CREW_TAG ? "CREATE" :
+                     C.kb_kind == KB_QUICK ? "SAVE" : "SEND");
     hint(dl, f, hx, hy, "b", "CLOSE");
     if (k.b || k.esc) C.kb = false;
 }
@@ -2116,6 +2207,381 @@ void chat_test_step()
     fprintf(stderr, "[SOCIAL-UI] %s (tab %s, keyboard %d)\n", step.c_str(), k_tab_names[C.tab], (int)C.kb);
 }
 
+// Sends line i where the wheel was opened; true when it went out.
+bool quick_send(int where, int tab, int i)
+{
+    std::string text = quick_line(i);
+    if (text.empty()) return false;
+    const char *to = "room";
+    bool ok = false;
+    if (where != QW_TAB || tab == TAB_ROOM) {
+        ok = room_chat_state() == 1 && netplay_room_chat_send(text.c_str());
+    } else if (tab == TAB_GLOBAL) {
+        std::string region = k_region_ids[C.region];
+        if (region.empty()) region = social::region_of_server(connected_server());
+        social::send_global(region.empty() ? "eu" : region.c_str(), text);
+        to = "global";
+        ok = true;
+    } else if (tab == TAB_MESSAGES && C.dm_with) {
+        social::send_dm(C.dm_with, text);
+        to = "messages";
+        ok = true;
+    } else if (tab == TAB_CREW && C.v.crew) {
+        social::send_crew(text);
+        to = "crew";
+        ok = true;
+    }
+    if (ok) fprintf(stderr, "[SOCIAL-UI] quick chat %d sent to %s: %s\n", i + 1, to, text.c_str());
+    return ok;
+}
+
+void quick_open(int where, int tab)
+{
+    QW.open = true;
+    QW.where = where;
+    QW.tab = tab;
+    QW.sel = -1;
+    QW.sticky = false;
+    QW.button = quick_button();
+    QW.opened = GetTickCount64();
+    QW.opened_frame = ImGui::GetFrameCount();
+    QW.gallery = false;
+    fprintf(stderr, "[SOCIAL-UI] quick chat: wheel opened (%s)\n",
+            where == QW_FIGHT ? "over the fight" : where == QW_ROOM ? "room" : k_tab_names[tab]);
+}
+
+void quick_close(const char *why)
+{
+    if (!QW.open) return;
+    QW.open = false;
+    if (!QW.gallery) fprintf(stderr, "[SOCIAL-UI] quick chat: wheel closed (%s)\n", why);
+    QW.gallery = false;
+}
+
+// The keys 1-8 (top row or keypad): the line's index, -1 none. plain: without Ctrl too.
+int quick_number_key(bool plain)
+{
+    if (gallery_on()) return -1;
+    bool ctrl = ImGui::GetIO().KeyCtrl;
+    if (!plain && !ctrl) return -1;
+    for (int i = 0; i < QUICK_LINES; i++)
+        if (ImGui::IsKeyPressed((ImGuiKey)(ImGuiKey_1 + i), false) || ImGui::IsKeyPressed((ImGuiKey)(ImGuiKey_Keypad1 + i), false))
+            return i;
+    return -1;
+}
+
+// Tests: RECOMP_TEST_QUICK_CHAT="WHERE:SECONDS:LINE[:a];..." presses the wheel's button on this copy's
+// pad as a player would (through the overlay's pad input, test_pad below): WHERE room (seconds after
+// this copy came into a room), fight (after its fight started) or chat (after the chat window was
+// ready). It holds the button, points the left stick at LINE (1-8) and lets go; ":a" taps the button
+// (the wheel stays open), points and presses A.
+struct QuickTest { std::string where; float at = 0; int line = 0; bool tap = false; };
+struct QuickTestRun {
+    std::vector<QuickTest> steps;
+    size_t next = 0;
+    bool parsed = false;
+    int phase = 0;
+    unsigned long long t = 0;
+    int buttons = 0;                // bit 0 the wheel's button, bit 1 A
+    float lx = 0, ly = 0;
+    unsigned long long room_at = 0, fight_at = 0;
+} QT;
+
+void quick_test_tick()
+{
+    if (!QT.parsed) {
+        QT.parsed = true;
+        if (const char *e = getenv("RECOMP_TEST_QUICK_CHAT")) {
+            std::string s = e;
+            size_t a = 0;
+            while (a < s.size()) {
+                size_t b = s.find(';', a);
+                std::string step = s.substr(a, b == std::string::npos ? std::string::npos : b - a);
+                QuickTest q;
+                size_t c1 = step.find(':'), c2 = c1 == std::string::npos ? c1 : step.find(':', c1 + 1);
+                if (c2 != std::string::npos) {
+                    q.where = step.substr(0, c1);
+                    q.at = (float)atof(step.substr(c1 + 1, c2 - c1 - 1).c_str());
+                    q.line = atoi(step.c_str() + c2 + 1);
+                    q.tap = step.find(":a", c2 + 1) != std::string::npos;
+                    if (q.line >= 1 && q.line <= QUICK_LINES) QT.steps.push_back(q);
+                }
+                if (b == std::string::npos) break;
+                a = b + 1;
+            }
+        }
+    }
+    if (QT.steps.empty()) return;
+    unsigned long long now = GetTickCount64();
+    NetRoom r;
+    lobby_room(&r);
+    if (r.in_room && !QT.room_at) QT.room_at = now;
+    if (!r.in_room && !(net_state() == NETPLAY_CONNECTED && net_in_lobby())) QT.room_at = 0;
+    if (netplay_in_fight() && !QT.fight_at) QT.fight_at = now;
+    if (QT.next >= QT.steps.size()) return;
+    const QuickTest &q = QT.steps[QT.next];
+    // the line's direction: 1 up, then clockwise in eighths
+    float ang = (q.line - 1) * 3.14159265f / 4;
+    float dx = sinf(ang), dy = -cosf(ang);
+    switch (QT.phase) {
+    case 0: {
+        unsigned long long base = q.where == "room" ? QT.room_at : q.where == "fight" ? QT.fight_at : C.ready_at;
+        if (q.where == "chat" && !C.open) base = 0;
+        if (!base || (now - base) / 1000.0f < q.at) return;
+        fprintf(stderr, "[SOCIAL-UI] quick chat test: %s %.1f s, line %d%s: the pad's %s\n", q.where.c_str(), q.at, q.line,
+                q.tap ? " (tap, A)" : "", quick_button_name());
+        QT.buttons = 1;
+        QT.phase = 1;
+        QT.t = now;
+        return;
+    }
+    case 1:     // held a moment (a tap: let go at once), then point
+        if (q.tap) {
+            if (now - QT.t < 120) return;
+            QT.buttons = 0;
+        } else if (now - QT.t < 300) {
+            return;
+        }
+        QT.lx = dx;
+        QT.ly = dy;
+        QT.phase = 2;
+        QT.t = now;
+        return;
+    case 2:     // pointed long enough for a capture, then let go (or A)
+        if (now - QT.t < 2200) return;
+        if (q.tap) QT.buttons |= 2;
+        else QT.buttons = 0;
+        QT.phase = 3;
+        QT.t = now;
+        return;
+    default:
+        if (now - QT.t < 150) return;
+        QT.buttons = 0;
+        QT.lx = QT.ly = 0;
+        QT.phase = 0;
+        QT.next++;
+        fprintf(stderr, "[SOCIAL-UI] quick chat test: step done (wheel %s)\n", QW.open ? "still open" : "closed");
+        return;
+    }
+}
+
+// The line the stick (either) or the D-pad points at; -1 none.
+int quick_aim()
+{
+    auto an = [](ImGuiKey k) { return ImGui::GetKeyData(k)->AnalogValue; };
+    float x = an(ImGuiKey_GamepadLStickRight) - an(ImGuiKey_GamepadLStickLeft) + an(ImGuiKey_GamepadRStickRight) -
+              an(ImGuiKey_GamepadRStickLeft);
+    float y = an(ImGuiKey_GamepadLStickDown) - an(ImGuiKey_GamepadLStickUp) + an(ImGuiKey_GamepadRStickDown) -
+              an(ImGuiKey_GamepadRStickUp);
+    if (x * x + y * y < 0.5f * 0.5f) {
+        auto down = [](ImGuiKey a, ImGuiKey b) { return ImGui::IsKeyDown(a) || ImGui::IsKeyDown(b); };
+        x = (float)(down(ImGuiKey_GamepadDpadRight, ImGuiKey_RightArrow) - down(ImGuiKey_GamepadDpadLeft, ImGuiKey_LeftArrow));
+        y = (float)(down(ImGuiKey_GamepadDpadDown, ImGuiKey_DownArrow) - down(ImGuiKey_GamepadDpadUp, ImGuiKey_UpArrow));
+        if (x == 0 && y == 0) return -1;
+    }
+    float deg = atan2f(x, -y) * 180.0f / 3.14159265f;      // 0 up, clockwise
+    if (deg < 0) deg += 360;
+    return ((int)floorf((deg + 22.5f) / 45.0f)) % QUICK_LINES;
+}
+
+// The wheel's places in the menu's 640x480 (the design's 1280x960, halved): clockwise from the top.
+const float QW_CX = 320, QW_CY = 235, QW_OW = 100, QW_OH = 37;
+const float k_qw_pos[QUICK_LINES][2] = { { 320, 105 }, { 433, 145 }, { 480, 235 }, { 433, 325 },
+                                          { 320, 365 }, { 207, 325 }, { 160, 235 }, { 207, 145 } };
+
+// Input and picture; returns true while it is open (then nothing under it takes input).
+bool quick_wheel(ImDrawList *dl, const Frame &f, ImVec2 display)
+{
+    if (!QW.open) return false;
+    bool fresh = QW.opened_frame == ImGui::GetFrameCount();
+    if (!QW.gallery && !fresh) {
+        unsigned long long age = GetTickCount64() - QW.opened;
+        int aim = quick_aim();
+        if (aim >= 0) QW.sel = aim;
+        for (int i = 0; i < QUICK_LINES; i++)
+            if (mouse_pick(f, k_qw_pos[i][0] - QW_OW / 2, k_qw_pos[i][1] - QW_OH / 2, QW_OW, QW_OH)) QW.sel = i;
+        int send = -1;
+        const char *why = nullptr;
+        int num = quick_number_key(true);
+        if (num >= 0) send = num;
+        for (int i = 0; i < QUICK_LINES && send < 0; i++)
+            if (mouse_click(f, k_qw_pos[i][0] - QW_OW / 2, k_qw_pos[i][1] - QW_OH / 2, QW_OW, QW_OH)) send = i;
+        bool cancel = ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false) || ImGui::IsKeyPressed(ImGuiKey_Escape, false);
+        if (send < 0 && !cancel) {
+            if (!QW.sticky) {
+                if (!ImGui::IsKeyDown(QW.button)) {     // let go
+                    if (QW.sel >= 0) send = QW.sel;
+                    else if (age < 350) QW.sticky = true;
+                    else why = "let go without a line";
+                }
+            } else {
+                bool choose = ImGui::IsKeyPressed(ImGuiKey_GamepadFaceDown, false) || ImGui::IsKeyPressed(ImGuiKey_Enter, false) ||
+                              ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, false);
+                if (choose && QW.sel >= 0) send = QW.sel;
+                else if (ImGui::IsKeyPressed(QW.button, false)) why = "the button again";
+            }
+        }
+        if (cancel) why = "cancelled";
+        if (send >= 0) {
+            quick_send(QW.where, QW.tab, send);
+            quick_close("sent");
+            return false;
+        }
+        if (why) {
+            quick_close(why);
+            return false;
+        }
+    }
+
+    // the picture, as the design has it: the screen dimmed, a dashed ring, QUICK CHAT in the middle,
+    // the eight lines around it, the one pointed at red with a line to it
+    dl->AddRectFilled(ImVec2(0, 0), display, IM_COL32(0, 0, 0, 128));
+    ImVec2 c = f.p(QW_CX, QW_CY);
+    {
+        float rr = 105 * f.s();
+        const int dashes = 72;
+        for (int i = 0; i < dashes; i += 2) {
+            float a0 = i * 6.2831853f / dashes, a1 = (i + 1) * 6.2831853f / dashes;
+            dl->AddLine(ImVec2(c.x + cosf(a0) * rr, c.y + sinf(a0) * rr), ImVec2(c.x + cosf(a1) * rr, c.y + sinf(a1) * rr),
+                        IM_COL32(242, 230, 200, 31), 1.0f * f.s());
+        }
+    }
+    dl->AddCircleFilled(c, 37.5f * f.s(), IM_COL32(18, 12, 14, 230), 64);
+    dl->AddCircle(c, 37.5f * f.s(), IM_COL32(255, 255, 255, 26), 64, 1.0f * f.s());
+    text(dl, f, g_title, 12, QW_CX, QW_CY - 15, GOLD_TEXT, "QUICK", CENTER, 0);
+    text(dl, f, g_title, 12, QW_CX, QW_CY + 0.5f, GOLD_TEXT, "CHAT", CENTER, 0);
+    if (QW.sel >= 0) {     // to the edge of the line's box nearest the middle
+        float ox = k_qw_pos[QW.sel][0], oy = k_qw_pos[QW.sel][1], dx = ox - QW_CX, dy = oy - QW_CY;
+        float s = 1e9f;
+        if (fabsf(dx) > 0.01f) s = std::min(s, (QW_OW / 2) / fabsf(dx));
+        if (fabsf(dy) > 0.01f) s = std::min(s, (QW_OH / 2) / fabsf(dy));
+        float t = std::max(0.0f, 1.0f - s);
+        dl->AddLine(c, f.p(QW_CX + dx * t, QW_CY + dy * t), with_alpha(RED, 0.8f), 2.0f * f.s());
+    }
+    for (int i = 0; i < QUICK_LINES; i++) {
+        float x = k_qw_pos[i][0] - QW_OW / 2, y = k_qw_pos[i][1] - QW_OH / 2;
+        bool on = i == QW.sel;
+        // a soft shadow under each, the design's glow on the one pointed at
+        rect(dl, f, x + 1, y + 5, QW_OW, QW_OH, IM_COL32(0, 0, 0, 70), 7);
+        if (on)
+            for (int g = 4; g >= 1; g--)
+                dl->AddRect(f.p(x - g, y - g), f.p(x + QW_OW + g, y + QW_OH + g), IM_COL32(200, 16, 46, 36 * (5 - g)), (7 + g) * f.s(), 0,
+                            1.5f * f.s());
+        rect(dl, f, x, y, QW_OW, QW_OH, on ? RED : IM_COL32(18, 12, 14, 217), 7);
+        if (on) dl->AddRect(f.p(x, y), f.p(x + QW_OW, y + QW_OH), IM_COL32(255, 90, 110, 255), 7 * f.s(), 0, 1.5f * f.s());
+        else dl->AddLine(f.p(x + 6, y + 0.5f), f.p(x + QW_OW - 6, y + 0.5f), IM_COL32(255, 255, 255, 20), 1.0f * f.s());
+        std::string label = quick_line(i);
+        for (auto &ch : label) ch = (char)toupper((unsigned char)ch);
+        float size = 14;
+        while (size > 9 && text_width(f, g_title, size, label.c_str()) > QW_OW - 12) size -= 0.5f;
+        if (text_width(f, g_title, size, label.c_str()) > QW_OW - 12) {     // still too long: cut, with dots
+            while (!label.empty() && text_width(f, g_title, size, (label + "...").c_str()) > QW_OW - 12) {
+                label.pop_back();
+                while (!label.empty() && ((unsigned char)label.back() & 0xC0) == 0x80) label.pop_back();
+            }
+            label += "...";
+        }
+        text(dl, f, g_title, size, x + QW_OW / 2, y + (QW_OH - size * 1.2f) / 2, on ? IM_COL32(255, 245, 230, 255) : CREAM,
+             label.c_str(), CENTER, 0);
+        char num[4];
+        snprintf(num, sizeof(num), "%d", i + 1);   // the keyboard's key for it
+        text(dl, f, g_body, 7, x + 6, y + 3, on ? IM_COL32(255, 245, 230, 150) : IM_COL32(242, 230, 200, 70), num, LEFT, 0);
+    }
+    // the hints: aim, send, cancel; how it works on the right
+    float hx = 48, hy = 438;
+    dl->AddCircleFilled(f.p(hx + 8, hy + 8), 8 * f.s(), IM_COL32(85, 85, 85, 255));
+    text(dl, f, g_body, 11, hx + 8, hy + 2, WHITE, "L", CENTER, 0);
+    text(dl, f, g_title, 13, hx + 20, hy + 1, CREAM, "AIM", LEFT, 1.0f);
+    hx += 20 + text_width(f, g_title, 13, "AIM") + 15;
+    if (QW.sticky) hx += hint(dl, f, hx, hy, "a", "SEND") + 3;
+    else hx += plate_hint(dl, f, hx, hy, quick_button_name(), "RELEASE TO SEND") + 3;
+    hint(dl, f, hx, hy, "b", "CANCEL");
+    std::string how = std::string("Hold ") + quick_button_name() +
+                      ", point the stick, let go - keys 1-8 too - the eight lines can be changed in Voice Chat";
+    text(dl, f, g_body, 9, 592, hy + 3, IM_COL32(242, 230, 200, 128), how.c_str(), RIGHT, 0);
+    return true;
+}
+
+// The online screens (chat_begin): the button opens the wheel in a room (the window shut) or on a
+// tab of the window that takes writing.
+void quick_online_open(const NetRoom &r)
+{
+    if (QW.open || gallery_on() || C.kb || C.menu) return;
+    if (S.page == CODE || S.page == NAME || S.page == QUICK) return;
+    if (!ImGui::IsKeyPressed(quick_button(), false)) return;
+    if (C.open) {
+        if (!C.v.ready && !room_only()) return;
+        if (tab_types(C.tab)) quick_open(QW_TAB, C.tab);
+    } else if (r.in_room && room_chat_state() == 1) {
+        quick_open(QW_ROOM, TAB_ROOM);
+    }
+}
+
+// The QUICK CHAT page: the eight lines (A edits one on the on-screen keyboard), RESET, BACK.
+void draw_quick_page(ImDrawList *dl, const Frame &f, const Pad &pad, ImVec2 display)
+{
+    const int rows = QUICK_LINES + 2;       // the lines, RESET ALL, BACK
+    int &sel = QW.quick_page_sel;
+    bool editing = C.kb && C.kb_kind == KB_QUICK;
+    if (!editing) {
+        if (pad.up) sel = (sel + rows - 1) % rows;
+        if (pad.down) sel = (sel + 1) % rows;
+    }
+    page_title(dl, f, "QUICK CHAT");
+    float row_step = 300.0f / rows, row_h = row_step - 4;
+    for (int i = 0; i < rows; i++) {
+        float x = 50, y = 80 + i * row_step, w = 270, h = row_h;
+        if (!editing && mouse_pick(f, x, y, w, h)) sel = i;
+        bool on = sel == i;
+        glass(dl, f, x, y, w, h, 7, on ? IM_COL32(44, 32, 22, 255) : IM_COL32(10, 10, 13, 255), on ? 0.78f : 0.6f);
+        if (on) selector(dl, f, x, y, w, h);
+        if (!editing && mouse_click(f, x, y, w, h)) const_cast<Pad &>(pad).a = true;
+        if (i >= QUICK_LINES) {
+            text(dl, f, g_title, 13, x + w / 2, y + (row_h - 14) / 2, on ? CREAM : GREY, i == QUICK_LINES ? "RESET ALL EIGHT" : "BACK",
+                 CENTER);
+            continue;
+        }
+        char num[8];
+        snprintf(num, sizeof(num), "%d", i + 1);
+        text(dl, f, g_title, 10, x + 12, y + (row_h - 11) / 2, ORANGE, num, LEFT, 0);
+        std::string line = quick_line(i);
+        dl->PushClipRect(f.p(x + 26, y), f.p(x + w - 10, y + h), true);
+        text(dl, f, g_title, 12, x + 26, y + (row_h - 13) / 2, on ? WHITE : GREY, line.c_str(), LEFT, 0);
+        dl->PopClipRect();
+    }
+    door_panel(dl, f);
+    std::string how = std::string("In a room, on the results, as a spectator and in the chat: hold ") + quick_button_name() +
+                      " (the stick's click), point at a line and let go. On a keyboard, 1 to 8 send them while the chat is "
+                      "open. A changes a line; an empty one is the default again.";
+    door_text(dl, f, &tex("ui/online_icon.png"), "QUICK CHAT", "EIGHT LINES ON A WHEEL", how.c_str());
+    float hx = 50, hy = 438;
+    if (!editing) {
+        hx += hint(dl, f, hx, hy, "a", sel < QUICK_LINES ? "CHANGE" : "CHOOSE");
+        hint(dl, f, hx, hy, "b", "BACK");
+    }
+    if (editing) {
+        draw_keyboard(dl, f, display);
+        if (!C.kb) QW.editing = -1;
+        return;
+    }
+    if (pad.a) {
+        if (sel < QUICK_LINES) {
+            QW.editing = sel;
+            open_keyboard(KB_QUICK);
+            C.friend_name = quick_line(sel);
+            C.friend_cursor = (int)C.friend_name.size();
+            C.caps = false;
+        } else if (sel == QUICK_LINES) {
+            for (int i = 0; i < QUICK_LINES; i++) quick_line_set(i, "");
+            say("The eight lines are the defaults again.");
+        } else {
+            S.page = VOICE;
+        }
+    } else if (pad.b) {
+        S.page = VOICE;
+    }
+}
+
 // ---- the window ----
 
 // Every frame of the online screens, before the page: the copy of the social state, and ENTER or BACK
@@ -2128,8 +2594,10 @@ bool chat_begin()
         C.have = false;
         C.v = social::View();
         if (room_chat_state() < 0) {
-            C.open = C.kb = C.menu = false;
+            C.open = C.menu = false;
+            if (C.kb_kind != KB_QUICK) C.kb = false;    // the QUICK CHAT page's keyboard is not the chat's
             C.ready_at = 0;
+            if (QW.where != QW_FIGHT) quick_close("no room chat here");
             return false;
         }
         C.tab = TAB_ROOM;
@@ -2147,8 +2615,8 @@ bool chat_begin()
         const char *mode = NETPLAY_IS_KOTH(r.settings.mode) ? "King of the Hill" : mode_name(r.settings.mode);
         social::set_mode_name(mode ? mode : "");
     }
-    bool text_page = S.page == CODE || S.page == NAME;
-    if (!C.open && !gallery_on() && !text_page) {
+    bool text_page = S.page == CODE || S.page == NAME || S.page == QUICK;
+    if (!C.open && !QW.open && !gallery_on() && !text_page) {
         bool enter = ImGui::IsKeyPressed(ImGuiKey_Enter, false) || ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, false);
         bool back = !back_is_ptt() && ImGui::IsKeyPressed(ImGuiKey_GamepadBack, false);
         if (enter || back) {
@@ -2160,8 +2628,11 @@ bool chat_begin()
             fprintf(stderr, "[SOCIAL-UI] chat opened (%s)\n", enter ? "Enter" : "Back");
         }
     }
-    C.mouse_off = C.open;
-    return C.open;
+    // the quick-chat wheel: its button in a room or on a tab that takes writing
+    quick_test_tick();
+    quick_online_open(r);
+    C.mouse_off = C.open || QW.open;
+    return C.open || QW.open;
 }
 
 // The small CHAT chip on every online page while the window is shut: what opens it, and what is new.
@@ -2180,6 +2651,17 @@ void chat_chip(ImDrawList *dl, const Frame &f)
     text(dl, f, g_title, 10, px + pw + 5, y + 3, CREAM, "CHAT", LEFT, 0.8f);
     if (n) badge(dl, f, px + pw + 9 + text_width(f, g_title, 10, "CHAT"), y + 3, n);
     if (!C.open && mouse_click(f, x, y, w, 17)) { C.open = true; C.opened_at = GetTickCount64(); }
+    NetRoom r;
+    lobby_room(&r);
+    if (r.in_room && room_chat_state() == 1) {      // the quick-chat wheel's button, beside it
+        const char *qk = quick_button_name();
+        float qw = text_width(f, g_title, 10, "QUICK CHAT") + text_width(f, g_body, 9, qk) + 23, qx = x + w + 5;
+        glass(dl, f, qx, y, qw, 17, 8, IM_COL32(10, 10, 13, 255), 0.62f);
+        float qpw = text_width(f, g_body, 9, qk) + 6;
+        rect(dl, f, qx + 6, y + 3, qpw, 11, IM_COL32(70, 70, 70, 255), 3);
+        text(dl, f, g_body, 9, qx + 6 + qpw / 2, y + 3.5f, WHITE, qk, CENTER, 0);
+        text(dl, f, g_title, 10, qx + 11 + qpw, y + 3, CREAM, "QUICK CHAT", LEFT, 0.8f);
+    }
 }
 
 // After the page: the window over it (when open), the toasts and the chip. Returns false when the
@@ -2189,8 +2671,8 @@ void chat_draw(ImDrawList *dl, const Frame &f, ImVec2 display)
     if (!social_enabled() && room_chat_state() < 0) return;
     C.mouse_off = false;
     if (!C.open) {
-        social_set_typing(0);
-        if (S.page != CODE && S.page != NAME) chat_chip(dl, f);     // those pages type: no chat over them
+        social_set_typing(C.kb && C.kb_kind == KB_QUICK);    // the QUICK CHAT page's keyboard types
+        if (S.page != CODE && S.page != NAME && S.page != QUICK) chat_chip(dl, f);     // those pages type: no chat over them
         draw_toasts(dl, f);
         return;
     }
@@ -2199,7 +2681,7 @@ void chat_draw(ImDrawList *dl, const Frame &f, ImVec2 display)
     if (!tab_shown(C.tab)) C.tab = TAB_GLOBAL;
     bool typing = (tab_types(C.tab) && !C.menu) || C.kb;
     social_set_typing(typing);
-    ChatKeys k = C.kb || C.menu ? ChatKeys() : chat_keys(tab_types(C.tab));
+    ChatKeys k = C.kb || C.menu || QW.open ? ChatKeys() : chat_keys(tab_types(C.tab));
     // the first frame takes no press: the ENTER that opened the window is still down
     if (GetTickCount64() - C.opened_at < 150) k = ChatKeys();
 
@@ -2231,6 +2713,13 @@ void chat_draw(ImDrawList *dl, const Frame &f, ImVec2 display)
             std::string typed = typed_chars();
             std::string &d = C.draft[C.tab];
             int &cur = C.cursor[C.tab];
+            // the keys 1-8: a quick-chat line (the box empty; with Ctrl always), not a digit typed
+            int qn = QW.open ? -1 : quick_number_key(d.empty());
+            if (qn >= 0) {
+                quick_send(QW_TAB, C.tab, qn);
+                typed.clear();
+            }
+            if (QW.open) typed.clear();
             if (!typed.empty()) { insert_text(d, cur, typed, std::max(1, C.v.max_chars)); C.sel[C.tab] = C.tab == TAB_MESSAGES ? C.sel[C.tab] : -1; }
             if (k.bksp) erase_back(d, cur);
             if (k.del && cur < (int)d.size()) d.erase((size_t)cur, (size_t)(utf8_next(d, cur) - cur));
@@ -2300,7 +2789,8 @@ void chat_draw(ImDrawList *dl, const Frame &f, ImVec2 display)
         if (tab_types(C.tab)) hx += plate_hint(dl, f, hx, hy, "ENTER", "TYPE");
         hx += hint(dl, f, hx, hy, "a", "SELECT");
         hx += hint(dl, f, hx, hy, "b", "CLOSE");
-        if (tab_types(C.tab)) hint(dl, f, hx, hy, "y", "KEYBOARD");
+        if (tab_types(C.tab)) hx += hint(dl, f, hx, hy, "y", "KEYBOARD");
+        if (tab_types(C.tab)) plate_hint(dl, f, hx, hy, quick_button_name(), "QUICK CHAT");
         std::string how = std::string("Chat opens with ENTER") + (back_is_ptt() ? "" : std::string(" or ") + back_button_name()) +
                           ", in every online screen";
         if (!tab_types(C.tab)) text(dl, f, g_body, 9, 592, hy + 3, IM_COL32(242, 230, 200, 128), how.c_str(), RIGHT, 0);
@@ -2316,6 +2806,8 @@ void chat_draw(ImDrawList *dl, const Frame &f, ImVec2 display)
 
 const char *chat_shot_label()
 {
+    if (QW.open && QW.where != QW_FIGHT) return "quickchat";
+    if (C.kb && C.kb_kind == KB_QUICK) return "quick-keyboard";
     if (!C.open || (!social_enabled() && room_chat_state() < 0)) return nullptr;
     if (C.kb) return "social-keyboard";
     if (C.menu) return "social-menu";
@@ -2390,18 +2882,33 @@ bool fight_chat_live()
     return room_chat_state() >= 0;
 }
 
+// The quick-chat wheel over the match: a spectator's any time, a fighter's on its results only.
+bool fight_quick_allowed(const NetRoom &r)
+{
+    if (room_chat_state() != 1 || FC.typing) return false;
+    return fight_spectator(r) || (netplay_on_results() && !netplay_in_fight());
+}
+
 bool fight_chat_wanted_impl()
 {
     if (!fight_chat_live()) {
         FC.typing = FC.pad = false;
         FC.fight_at = 0;
         if (C.kb && C.kb_kind == KB_FIGHT) C.kb = false;
+        if (QW.where == QW_FIGHT) quick_close("the match is over");
         return false;
     }
+    quick_test_tick();
     if (FC.typing) return true;
     NetRoom r;
     lobby_room(&r);
+    if (QW.open && QW.where == QW_FIGHT) return true;
+    // a fighter's button in the fight opens nothing: the pad is the fight's (the same rule as typing)
+    // (read before the frame's NewFrame: each press is seen once)
+    if (!fight_spectator(r) && netplay_in_fight() && ImGui::IsKeyPressed(quick_button(), false))
+        fprintf(stderr, "[SOCIAL-UI] quick chat: not in a fighter's own fight (the wheel stays shut)\n");
     if (fight_spectator(r) && room_chat_state() == 1) return true;     // its ENTER opens the bar
+    if (fight_quick_allowed(r)) return true;                            // a fighter on the results: the wheel's button
     static NetChatLine buf[NETPLAY_CHAT_LINES];
     int n = netplay_room_chat(buf, NETPLAY_CHAT_LINES, nullptr);
     unsigned long long now = GetTickCount64();
@@ -2469,7 +2976,13 @@ bool fight_chat_draw_impl(ImDrawList *dl, ImVec2 display)
     fight_chat_test(r);
     if (!spectator || room_chat_state() != 1) FC.typing = false;
     if (!FC.typing && FC.pad) FC.pad = false;
-    if (spectator && !FC.typing && room_chat_state() == 1 && (ImGui::IsKeyPressed(ImGuiKey_Enter, false) || fight_pad_opens())) {
+    // the quick-chat wheel: the online screens are shut, so a wheel of theirs is gone
+    if (QW.open && QW.where != QW_FIGHT) quick_close("the online screens closed");
+    bool quick_ok = fight_quick_allowed(r);
+    if (QW.open && !quick_ok) quick_close(netplay_in_fight() && !spectator ? "the fight started" : "not here");
+    if (!QW.open && quick_ok && ImGui::IsKeyPressed(quick_button(), false)) quick_open(QW_FIGHT, TAB_ROOM);
+    if (spectator && !FC.typing && !QW.open && room_chat_state() == 1 &&
+        (ImGui::IsKeyPressed(ImGuiKey_Enter, false) || fight_pad_opens())) {
         FC.typing = true;
         FC.pad = !ImGui::IsKeyPressed(ImGuiKey_Enter, false);
         FC.opened = GetTickCount64();
@@ -2485,6 +2998,14 @@ bool fight_chat_draw_impl(ImDrawList *dl, ImVec2 display)
         if (!C.kb || C.kb_kind != KB_FIGHT) { FC.typing = FC.pad = false; }
     } else if (FC.typing && GetTickCount64() - FC.opened > 150) {
         std::string typed = typed_chars();
+        int qn = quick_number_key(FC.draft.empty());      // the keys 1-8: a quick-chat line, and the bar closes
+        if (qn >= 0) {
+            quick_send(QW_FIGHT, TAB_ROOM, qn);
+            typed.clear();
+            FC.draft.clear();
+            FC.cursor = 0;
+            FC.typing = false;
+        }
         if (!typed.empty()) insert_text(FC.draft, FC.cursor, typed, 200);
         if (ImGui::IsKeyPressed(ImGuiKey_Backspace, true)) erase_back(FC.draft, FC.cursor);
         if (ImGui::IsKeyPressed(ImGuiKey_Escape, false) || ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false)) {
@@ -2544,18 +3065,26 @@ bool fight_chat_draw_impl(ImDrawList *dl, ImVec2 display)
         text(dl, f, g_body, 7.5f, bx + bw - 8, by + 10, IM_COL32(242, 230, 200, 153), keys, RIGHT, 0);
         text(dl, f, g_body, 8.5f, bx + bw + 10, by + 9, IM_COL32(242, 230, 200, 140),
              "While you type, the keyboard does not control the game", LEFT, 0);
-    } else if (spectator && room_chat_state() == 1) {
-        // ENTER, or the pad's BACK (R3 when BACK is push-to-talk: the hint says so)
-        std::string keys = std::string("ENTER / ") + fight_pad_name();
-        float x = 20, yy = 452;
-        float pw = text_width(f, g_body, 8, keys.c_str()) + 6;
-        const char *what = back_is_ptt() ? "ROOM CHAT  (BACK IS PUSH-TO-TALK)" : "ROOM CHAT";
-        rect(dl, f, x, yy, pw + text_width(f, g_title, 8, what) + 12, 13, IM_COL32(0, 0, 0, 110), 4);
-        rect(dl, f, x + 3, yy + 2, pw, 9, IM_COL32(70, 70, 70, 220), 2);
-        text(dl, f, g_body, 8, x + 3 + pw / 2, yy + 2, WHITE, keys.c_str(), CENTER, 0);
-        text(dl, f, g_title, 8, x + 7 + pw, yy + 2.5f, IM_COL32(242, 230, 200, 200), what, LEFT, 0);
+    } else if (!QW.open && (spectator || quick_ok) && room_chat_state() == 1) {
+        // ENTER, or the pad's BACK (R3 when BACK is push-to-talk: the hint says so); the wheel's button
+        auto chip = [&](float x, const std::string &keys, const char *what) {
+            float yy = 452, pw = text_width(f, g_body, 8, keys.c_str()) + 6, w = pw + text_width(f, g_title, 8, what) + 12;
+            rect(dl, f, x, yy, w, 13, IM_COL32(0, 0, 0, 110), 4);
+            rect(dl, f, x + 3, yy + 2, pw, 9, IM_COL32(70, 70, 70, 220), 2);
+            text(dl, f, g_body, 8, x + 3 + pw / 2, yy + 2, WHITE, keys.c_str(), CENTER, 0);
+            text(dl, f, g_title, 8, x + 7 + pw, yy + 2.5f, IM_COL32(242, 230, 200, 200), what, LEFT, 0);
+            return w;
+        };
+        float x = 20;
+        if (spectator)
+            x += chip(x, std::string("ENTER / ") + fight_pad_name(), back_is_ptt() ? "ROOM CHAT  (BACK IS PUSH-TO-TALK)" : "ROOM CHAT") + 5;
+        if (quick_ok) chip(x, quick_button_name(), "QUICK CHAT");
     }
-    return FC.typing;
+    if (QW.open && QW.where == QW_FIGHT) quick_wheel(dl, f, display);
+    return FC.typing || (QW.open && QW.where == QW_FIGHT);
 }
 
-const char *fight_chat_shot_label() { return FC.typing ? "fightchat-typing" : "fightchat"; }
+const char *fight_chat_shot_label()
+{
+    return QW.open && QW.where == QW_FIGHT ? "fightchat-quickchat" : FC.typing ? "fightchat-typing" : "fightchat";
+}

@@ -113,6 +113,17 @@ static RecompSetting g_display_settings[] = {
       "Use the rollback setting only when the server allowed rollback last time (off: the setting alone decides)." },
     { "online", "input_delay", RECOMP_SETTING_INT, 3, 1, 8, NULL, NULL, 0,
       "Steps (1/60 s each) between a press and its effect in an online fight. More hides more ping; the host's value is used." },
+    /* the quick-chat wheel's eight lines (social_ui.inc), clockwise from the top; keys 1-8 send them too.
+     * Up to 200 bytes each (the relay's limit for a chat line); empty: the default again. */
+    { "online", "quick_chat_1", RECOMP_SETTING_STRING, 0, 0, 0, NULL, NULL, 0,
+      "Quick chat, line 1 (the wheel's top; key 1). Changed in the online menu: Voice Chat, Quick Chat.", "GG" },
+    { "online", "quick_chat_2", RECOMP_SETTING_STRING, 0, 0, 0, NULL, NULL, 0, "Quick chat, line 2 (key 2).", "Run it back?" },
+    { "online", "quick_chat_3", RECOMP_SETTING_STRING, 0, 0, 0, NULL, NULL, 0, "Quick chat, line 3 (key 3).", "One more" },
+    { "online", "quick_chat_4", RECOMP_SETTING_STRING, 0, 0, 0, NULL, NULL, 0, "Quick chat, line 4 (key 4).", "Nice!" },
+    { "online", "quick_chat_5", RECOMP_SETTING_STRING, 0, 0, 0, NULL, NULL, 0, "Quick chat, line 5 (key 5).", "Good luck" },
+    { "online", "quick_chat_6", RECOMP_SETTING_STRING, 0, 0, 0, NULL, NULL, 0, "Quick chat, line 6 (key 6).", "Lag, sorry" },
+    { "online", "quick_chat_7", RECOMP_SETTING_STRING, 0, 0, 0, NULL, NULL, 0, "Quick chat, line 7 (key 7).", "Brb" },
+    { "online", "quick_chat_8", RECOMP_SETTING_STRING, 0, 0, 0, NULL, NULL, 0, "Quick chat, line 8 (key 8).", "Let's go!" },
     { "display", "fullscreen", RECOMP_SETTING_BOOL, 0, 0, 0, NULL, NULL, 0,
       "Borderless full screen. Alt+Enter or F11 switches while playing." },
     { "display", "window_width", RECOMP_SETTING_INT, 1920, 320, 16384, NULL, NULL, 0,
