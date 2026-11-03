@@ -24,6 +24,7 @@
 
 #ifdef _WIN32
 #include "host.h"
+#include <intrin.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -277,6 +278,7 @@ static CRITICAL_SECTION s_arena_cs;
 static int s_arena_state;               /* 0 not yet, 1 on, -1 unavailable */
 static void arena_start(void);
 static volatile LONG s_mix_on;          /* a mixer tick is being watched (see mixer_begin) */
+static void mixer_stats(void);
 /* The game thread, to tell a tick it ran during (it does when the mixer blocks) from one it did not. */
 static HANDLE s_game_thread;
 static ULONG64 s_game_cycles;
@@ -1167,6 +1169,7 @@ void rollback_reset(void)
 {
     track_stop();
     InterlockedExchange(&s_mix_on, 0);
+    mixer_stats();
     s_ready = 0;
     s_nchange = s_cursor = 0;
     memset(s_known, 0, sizeof(s_known));
@@ -2396,6 +2399,7 @@ void rollback_sound_free(void)
  * saved pages between the tick's lock and unlock is the mixer's: those pages are left alone from
  * then on. */
 #define MIX_TICK_PAGES_MAX 8            /* more pages with new words in one tick: not the mixer's alone (mixer_end) */
+#define MIX_TICK_WORDS_MAX 128          /* or more new words: F9 70d296 kept 8 pages, 2128 words (1024 on one page) */
 #define MIX_LOCKED   0x001242E6u      /* return addresses in sub_001242D0 */
 #define MIX_UNLOCKS  0x0012435Au
 static uint8_t *s_mix;
@@ -2414,6 +2418,51 @@ static ULONG64 game_cycles(void)
     return c;
 }
 
+/* Did the mixer keep its CPU for the whole tick? Every guest thread shares that one CPU, so while the
+ * mixer has it nobody else's guest code runs; when it blocks inside the tick (the file layer's slot lock
+ * in sub_001E8080, the engine lock), whoever runs then writes too. The game thread's cycle count catches
+ * only the game thread, and only where thread cycles are counted exactly; a file worker filling a heap
+ * buffer, or any other guest thread, passed as the mixer. Player logs (F9 8e97cd, 70d296, 0b7e16, build
+ * 47-51) show such ticks: whole heap pages "written by the mixer" (1024 words on one page), the words kept
+ * live through every later load, and then a particle emitter on those pages half restored, its billboard
+ * writer (sub_00115CB0) running through the contiguous window to 84000000 over the file layer's slots at
+ * [0x3C8F30], where the mixer read them first (sub_001E55D0). So a tick counts only when the mixer's own
+ * cycles cover the tick's time on the clock (the two are the same counter, the TSC); a tick it spent
+ * off its CPU, or one the counters cannot vouch for, is left out like a tick the game thread ran in. */
+static ULONG64 s_mix_tsc, s_mix_own;
+static int s_mix_offcpu = -1;           /* RECOMP_ROLLBACK_MIX_OFFCPU=off: the old rule (A/B tests) */
+static DWORD s_mix_yield = (DWORD)-1;   /* RECOMP_ROLLBACK_TEST_MIX_YIELD=<ms>: the mixer sleeps in its tick (tests) */
+static struct { unsigned watched, clean, words, game, seq, cpu, off, pages; ULONG64 own, clock; } s_mixst;
+
+static ULONG64 mixer_own_cycles(void)
+{
+    ULONG64 c = 0;
+    QueryThreadCycleTime(GetCurrentThread(), &c);
+    return c;
+}
+
+/* 1 when the mixer ran for (nearly) the whole of the tick: interrupts on its CPU are not charged to it,
+ * so up to an eighth of the tick plus 40000 cycles (10-20 us) may be missing. */
+static int mixer_kept_cpu(ULONG64 clock, ULONG64 own)
+{
+    ULONG64 slack = clock / 8 + 40000u;
+    s_mixst.own += own;
+    s_mixst.clock += clock;
+    return own + slack >= clock && own <= clock + slack;
+}
+
+/* The fight's mixer ticks, once at its end (rollback_reset). */
+static void mixer_stats(void)
+{
+    if (!s_mixst.watched) return;
+    fprintf(stderr, "[ROLLBACK] mixer ticks this fight: %u watched, %u clean (%u words kept live through loads); left out: "
+            "game thread ran %u, saved or loaded %u, other CPU %u, the mixer off its CPU %u, too many pages or words %u; "
+            "the mixer had its CPU for %.1f%% of the watched time\n", s_mixst.watched, s_mixst.clean, s_mixst.words,
+            s_mixst.game, s_mixst.seq, s_mixst.cpu, s_mixst.off, s_mixst.pages,
+            s_mixst.clock ? 100.0 * (double)s_mixst.own / (double)s_mixst.clock : 0.0);
+    memset(&s_mixst, 0, sizeof(s_mixst));
+}
+
 static void mixer_begin(void)
 {
     unsigned i, n = s_nchange;
@@ -2430,6 +2479,8 @@ static void mixer_begin(void)
      * already had, and taken after it, its cycles would not tell */
     s_game_cycles = game_cycles();
     s_mix_seq = s_game_seq;
+    s_mix_own = mixer_own_cycles();
+    s_mix_tsc = __rdtsc();
     for (i = 0; i < n; i++)
         memcpy(s_mix + (size_t)i * PAGE, XBOX_PTR(HEAP_LO + s_change[i] * PAGE), PAGE);
     s_mix_n = n;
@@ -2445,6 +2496,12 @@ static void mixer_begin(void)
         }
     }
     InterlockedExchange(&s_mix_on, 1);
+    if (s_mix_yield == (DWORD)-1) {
+        const char *y = getenv("RECOMP_ROLLBACK_TEST_MIX_YIELD");
+        s_mix_yield = y ? (DWORD)atoi(y) : 0;
+        if (s_mix_yield) fprintf(stderr, "[ROLLBACK] tests: the mixer sleeps %lu ms in each tick\n", (unsigned long)s_mix_yield);
+    }
+    if (s_mix_yield) Sleep(s_mix_yield);
 }
 
 /* The first write to a guarded page in a tick: which thread, which block and field. Each (thread kind,
@@ -2485,7 +2542,14 @@ static void writer_seen(uint32_t addr, DWORD tid)
 static void mixer_end(void)
 {
     unsigned i;
+    ULONG64 clock = __rdtsc() - s_mix_tsc, own = mixer_own_cycles() - s_mix_own;
     if (!InterlockedExchange(&s_mix_on, 0)) return;
+    s_mixst.watched++;
+    if (s_mix_offcpu < 0) {
+        const char *v = getenv("RECOMP_ROLLBACK_MIX_OFFCPU");
+        s_mix_offcpu = !(v && !strcmp(v, "off"));
+        if (!s_mix_offcpu) fprintf(stderr, "[ROLLBACK] tests: a mixer tick counts without its own cycles (the rule before build 52)\n");
+    }
     if (s_writers_on == 1) {
         DWORD old;
         for (i = 0; i < s_mix_n; i++) {
@@ -2494,8 +2558,12 @@ static void mixer_end(void)
                 VirtualProtect(page_host(q), PAGE, PAGE_READWRITE, &old);
         }
     }
-    if (game_cycles() != s_game_cycles) return;     /* the game thread ran too: no telling who wrote */
-    if (s_game_seq != s_mix_seq) return;            /* it saved or loaded meanwhile, whatever its cycles say */
+    if (game_cycles() != s_game_cycles) { s_mixst.game++; return; }    /* the game thread ran too: no telling who wrote */
+    if (s_game_seq != s_mix_seq) { s_mixst.seq++; return; }            /* it saved or loaded meanwhile, whatever its cycles say */
+    if (!mixer_kept_cpu(clock, own)) {          /* another thread ran (above); with the test switch only counted */
+        s_mixst.off++;
+        if (s_mix_offcpu) return;
+    }
     /* The cycle count tells only while every guest thread shares one CPU (xbox_PinToGuestCore): a game
      * thread running beside the mixer on another CPU is counted at the clock's interrupts, so a short tick
      * can see its count stand still while it writes (rollback-sound-crashes.md, "one CPU per copy"). */
@@ -2506,6 +2574,7 @@ static void mixer_end(void)
             if (InterlockedIncrement(&told) <= 4)
                 fprintf(stderr, "[ROLLBACK] the mixer ran on CPU %ld and the game thread last on CPU %ld: guest threads "
                         "are not on one CPU here, so the mixer's pages are not told apart (tick left out)\n", mcpu, gcpu);
+            s_mixst.cpu++;
             return;
         }
     }
@@ -2528,14 +2597,16 @@ static void mixer_end(void)
                 if (was[w] != now[w] && !(s_mixmask[p] && (s_mixmask[p][w >> 3] & (1u << (w & 7))))) here++;
             if (here) { pages++; words += here; }
         }
-        if (pages > MIX_TICK_PAGES_MAX) {
+        if (pages > MIX_TICK_PAGES_MAX || words > MIX_TICK_WORDS_MAX) {
             static LONG told;
             if (InterlockedIncrement(&told) <= 8)
                 fprintf(stderr, "[ROLLBACK] a mixer tick changed %u pages (%u words) of the game's heap: more than the mixer "
                         "writes, left out\n", pages, words);
+            s_mixst.pages++;
             return;
         }
     }
+    s_mixst.clean++;
     for (i = 0; i < s_mix_n; i++) {
         uint32_t p = s_change[i];
         if (!memcmp(s_mix + (size_t)i * PAGE, XBOX_PTR(HEAP_LO + p * PAGE), PAGE)) continue;
@@ -2553,6 +2624,7 @@ static void mixer_end(void)
                 if (w * 4 < lo) lo = w * 4;
                 hi = w * 4 + 4;
             }
+            s_mixst.words += added;
             if (added && s_mix_found++ < 64) {
                 fprintf(stderr, "[ROLLBACK] the mixer writes %08X (bytes %08X..%08X, %u words): they stay as they are through loads\n",
                         HEAP_LO + p * PAGE, HEAP_LO + p * PAGE + lo, HEAP_LO + p * PAGE + hi, added);
