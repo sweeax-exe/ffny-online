@@ -27,6 +27,14 @@ To look at it locally, serve the folder:
 python -m http.server 8000 --directory website/dist
 ```
 
+## Feature pictures (website/media/)
+
+The Social, Crews, Ranked and Coming-next sections use JPEGs stored in `website/media/` (game
+screenshots resized to 1600 px, plus four pictures labelled "Design preview"). `build.py` copies
+them straight into `dist/media/`. They are **not** in the owner-approved list of
+`scripts/check-source-tree.py`, so the tree check fails once they are tracked until the owner has
+approved them (and their fingerprints are added there).
+
 ## The download button
 
 Without JavaScript the button opens the

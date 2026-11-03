@@ -657,6 +657,36 @@ h1, h2, h3 {
 .s-running { color: #fff; border-color: rgba(255, 90, 70, 0.8); background: linear-gradient(180deg, #f0283c, #b30f22); }
 .s-finished { color: var(--faint); border-color: rgba(255, 255, 255, 0.14); background: rgba(0, 0, 0, 0.25); }
 
+
+/* ---- feature sections (social, crews, ranked, coming next) ---- */
+.split {
+  display: grid;
+  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
+  gap: clamp(20px, 4vw, 48px);
+  margin-bottom: 32px;
+  align-items: start;
+}
+.lead-sm { margin: 0 0 28px; color: var(--muted); font-size: 18px; max-width: 46em; }
+.split .lead-sm { margin: 0; }
+.ticks { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; color: var(--muted); font-size: 16px; }
+.ticks li { position: relative; padding-left: 22px; }
+.ticks li::before { content: ""; position: absolute; left: 0; top: 0.55em; width: 9px; height: 9px; border-radius: 2px; background: var(--red); transform: rotate(45deg); }
+.ticks strong { color: var(--text, #fff); font-weight: 600; }
+.gallery.wide { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.gallery.wide .shot a { position: relative; aspect-ratio: 1600 / 834; }
+.teasers { margin-bottom: 28px; }
+.teasers .card-num { color: var(--orange); letter-spacing: 0.14em; text-transform: uppercase; }
+.badge {
+  position: absolute; z-index: 2; top: 10px; left: 10px;
+  padding: 5px 9px 4px;
+  font: 700 11px/1 var(--body);
+  letter-spacing: 0.12em; text-transform: uppercase;
+  color: #1a0d05; background: var(--orange); border-radius: 4px;
+}
+.gallery.wide .shot a:has(.badge) { aspect-ratio: 1600 / 960; }
+@media (max-width: 860px) { .split { grid-template-columns: 1fr; } }
+@media (max-width: 640px) { .gallery.wide { grid-template-columns: 1fr; } }
+
 /* ---- responsive ---- */
 @media (max-width: 1020px) {
   .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }

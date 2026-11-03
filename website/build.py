@@ -100,10 +100,15 @@ def build(out):
         target = out / dest
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(ROOT / src, target)
+    # Pictures stored under website/media/ (social, crews, ranked, design previews). They are not
+    # in the owner-approved list of scripts/check-source-tree.py: see website/README.md.
+    for pic in sorted((HERE / 'media').glob('*.jpg')):
+        shutil.copyfile(pic, out / 'media' / pic.name)
     versions = {name: sha256(HERE / name)[:10] for name in ('style.css', 'site.js')}
     # The server lets browsers keep pictures for a week: a picture replaced under the same name
     # stayed old for visitors (2026-10-25), so every asset reference carries its content hash too.
     asset_versions = {dest: sha256(ROOT / src)[:10] for dest, src in ASSETS.items()}
+    asset_versions.update({f'media/{p.name}': sha256(p)[:10] for p in (HERE / 'media').glob('*.jpg')})
     for name in PAGE:
         text = (HERE / name).read_text(encoding='utf-8')
         if name == 'index.html':
