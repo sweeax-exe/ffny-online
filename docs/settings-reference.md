@@ -214,3 +214,8 @@ a = K, Mouse1
 To play the keyboard as part of player 1's pad (menus with the keyboard while a pad is connected), set
 `keyboard_player = merge` in `[input]`. To use pads only and give the game no keyboard controller,
 set it to `off`.
+
+
+## Startup-skip application time
+
+`debug.skip_intro` uses the same default < INI < environment boolean precedence as other registered settings, including explicit `false`/`0`. It is sampled after the launcher on the first screen selection, and that one-time decision is consumed even when the option is off or the initial screen is unexpected. Overlay edits therefore save the next-launch choice; they cannot begin skipping later front-end or Story screens in the current process. [Startup implementation and acceptance](research/startup-skip-flow.md) records this scope and the independent fast-start default used by automated tests.

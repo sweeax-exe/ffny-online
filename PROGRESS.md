@@ -429,6 +429,8 @@ Upstream PR submissions still need the owner's separate approval.
 
 - 2026-11-02 21:00 — Cleanup stage2: retired four overlapping roadmaps/backlog files; migrated verified test/tooling gaps to Issues172–176. Pruned stale status/owner questions while preserving every landed decision row, duplicate-ID lookup behavior and standalone export; rewrote current evidence policy, repaired agent/playbook guidance and regenerated adapters.
 
+- 2026-11-02 21:05 — Cleanup stage3: consolidated30research/widescreen reports and the stale launcher handoff into retained technical references. Preserved static/measured distinctions, negative controls, failed aggregates, platform limits and all68baseline run citations. Corrected current cinema/backend architecture against pinned source; retained qualified v0.13 memory/input evidence and8scene JSON controls. No runtime or toolkit changes.
+
 ## 7. Hand-off
 
 ### Public documentation cleanup — PR171

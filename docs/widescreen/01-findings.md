@@ -4,10 +4,11 @@ Evidence levels: **[M]** measured in a run of the game, **[V]** verified in the 
 **[R]** from a research report and not re-checked, **[A]** assumption. Guest addresses are image VAs.
 Captures stay local (`logs/ws/` in the worktree; never committed, they are the game's artwork).
 
-## 1. The game shipped 4:3 only
+## 1. Original image and community evidence
 
-- No version of Fight for NY (PS2, GameCube, Xbox) or Vendetta had a 16:9 option; the PS2 databases list
-  "16:9: no" for every region **[R]** ([community report](../research/widescreen-defjam-community.md)).
+- The supported USA Xbox image uses the4:3path described below. The dated community
+  search found database reports and PS2patches, not a measured all-platform retail
+  survey; see the confidence-labeled community annex.
 - The Xbox build reads the dashboard video flags (`XGetVideoFlags`, `sub_001F53FD`) only from `sub_000DB040`,
   which stores an aspect field in a stack object that `sub_00011E40` never reads; the device's
   `D3DPRESENTFLAG_WIDESCREEN` setter `sub_0010D310` has no callers **[V]**. The toolkit's "widescreen + HDTV" answer
@@ -16,8 +17,9 @@ Captures stay local (`logs/ws/` in the worktree; never committed, they are the g
   name at `0x29A9D8`) is read only by `main`/`mainBE`, two movies of a shared EA Sports UI framework that copy it to
   `_global.WIDESCREEN` and nothing else uses **[V]** ([front-end report](../research/widescreen-frontend-2d.md) §1).
   Setting it to `"1"` (`RECOMP_WS_UI=1`) changed nothing visible in the user-ID screens, the menus or the Story intro **[M]**.
-- Community PS2 patches widen the projection by a 0.75 horizontal factor and add a "renderfix" for edge clipping;
-  none fix the HUD or the movies **[R]**. No Xbox, GameCube or xemu widescreen patch exists **[R]**.
+- Community patch reports are preserved in the [dated prior-art annex](../research/widescreen-prior-art.md#def-jam-community-patch-annex-2026-10-10).
+  Negative search results do not prove no patch exists, and file metadata alone
+  does not establish native option availability or correct HUD/movie behavior.
 
 ## 2. All 3D goes through one aspect function
 
@@ -81,6 +83,13 @@ Measured facts about content:
 | [cameras](../research/widescreen-game-cameras.md) §TL;DR 2, §1.7 | "The engine applies the FOV as a vertical FOV" | It is **horizontal**: `sub_00103E10` passes aspect 1.0 to `sub_001F384B` and scales `m11` by the aspect itself. The camera's distance formula fits the fighters' spread into the **horizontal** 4:3 field, so its half-width tables in §1.6 and §3.2 should be re-derived; the conclusion (aspect-independent, keep the zoom logic) stands. |
 | cameras §4.3 | "No engine-drawn letterbox; mode 1 never selected" | Mode 1 is selected by `sub_000712D0`; the Story intro logs mode 1 and the 640x360 letterbox matches it exactly. Its "pillarbox story cinema to 4:3" recommendation is replaced by the authored-16:9 policy. |
 | [front end](../research/widescreen-frontend-2d.md) §6, §7 | "mode 1 is width/height, mode 2 is 16:9 letterbox" | Swapped: mode 1 is the 16:9 letterbox, mode 2 is width/height (checked on the original lifted body's branch order). |
-| [front end](../research/widescreen-frontend-2d.md) §4 | "The native 2D quad core is the best single hook" | Its three setters are never called in menus or fights (probe, 2026-10-11). The HUD and menus reach the GPU as ordinary vertex-program batches; placement moved to the renderer ([02 §0](02-design.md#0-revision-2026-10-11-during-the-beta1-build)). |
+| [front end](../research/widescreen-frontend-2d.md) §4 | "The native 2D quad core is the best single hook" | Its three setters are never called in menus or fights (probe, 2026-10-11). The HUD and menus reach the GPU as ordinary vertex-program batches; placement moved to the renderer ([02 §0](02-design.md#architecture)). |
 | [renderer](../research/widescreen-renderer.md) §0.3 | `gWidescreenMode` "around VA 0x29AC58"; the game's widescreen path "could make A nearly free" | The name is at `0x29A9D8`, its value at `0x29A9D4`, used in `sub_0006B760`. The path does nothing (finding 1). |
 | renderer §0.3 | toolkit `XC_VIDEO` bits may differ from the XDK's | Irrelevant: the game discards the answer (finding 1). |
+
+
+## Community evidence and its limits (research, 2026-10-10)
+
+PS2 regional database entries report no native 16:9 option ([USA](https://psxdatacenter.com/psx2/games2/SLUS-21004.html), [PAL](https://psxdatacenter.com/psx2/games2/SLES-52507.html), [Japan](https://psxdatacenter.com/psx2/games2/SLPM-65907.html)); these are database fields, not a first-hand test. No native 16:9 evidence was found for GameCube/Xbox, but absence is weaker than the game's verified Xbox code above. The [ConsoleMods Xbox row](https://consolemods.org/wiki/Xbox:Games_with_Alternate_Display_Modes) was only readable as a search summary: its claimed 16:9=no/480 p=yes/720 p=no/1080 i=no column interpretation remains unverified.
+
+The [PCSX2 patch files](https://github.com/PCSX2/pcsx2_patches) were read directly: FFNY patches contain projection/menu and renderfix edits, with no HUD-repositioning or FMV-resize lines. Reading their horizontal factor as Hor+ and their renderfix as cull/clip repair is inference from instructions/comments, not measured behavior. No game-specific Xbox/xemu/Dolphin patch was found in that bounded search; this is not proof none exists. The detailed dated links and confidence labels are retained in [prior art](../research/widescreen-prior-art.md#def-jam-community-patch-annex-2026-10-10).

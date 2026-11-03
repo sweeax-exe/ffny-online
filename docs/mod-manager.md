@@ -83,3 +83,10 @@ updates require fresh verified metadata; installed packs and ordinary offline
 Play remain available. Republish through the reviewed main workflow and approve
 the catalogue-release environment before expiry, even when package versions have
 not changed. Revisions increase and existing package records stay immutable.
+
+
+## Installed groups and priority display
+
+Generated Recomp HD components are grouped only when their bounded builder-ownership marker, recipe ID, folder and mip policy agree. Custom lookalike names remain ordinary local mods. A partly enabled group stays partly enabled until its checkbox is clicked; grouping never silently changes component order. Contiguous components move together in Load Order. If a custom mod is interleaved, individual component priorities remain visible so grouping preserves every texture winner. Missing saved selections appear in a separate warning and retain their positions; a legacy `faithful-hd` selection is distinct from installed channels/opacity components.
+
+Authors are displayed from verified catalogue metadata, without a hardcoded client override. The native order window uses generic next-launch guidance; the owner removed its mod-specific recommendation. Managed updates preserve enablement and relative order. `[textures] packs` remains texture precedence authority; manager receipts and UI projections do not override it.

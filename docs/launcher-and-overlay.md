@@ -99,7 +99,7 @@ See [unlocking everything](research/unlock-everything.md).
 
 Interface contains **Skip startup movies and legal screen**, preserving `[debug] skip_intro` and its
 default off. It starts at Press Start after resource loading; Story scenes and idle attract playback
-remain. `RECOMP_SKIP_INTRO` overrides it for a run. See [startup skipping](research/startup-skip-setting.md).
+remain. `RECOMP_SKIP_INTRO` overrides it for a run. See [startup skipping](research/startup-skip-flow.md#recordertoolkit-integration-and-historical-v0101-acceptance).
 
 ## In-game overlay
 

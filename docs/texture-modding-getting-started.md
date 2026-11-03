@@ -297,7 +297,7 @@ wide views. Keep text and menu controls separate from background scenery.
 
 See the tools' [widescreen scenery guide](https://github.com/vyanhursky/DefJam-Modding-Tools/blob/main/docs/widescreen-backgrounds.md)
 and [menu art workflow](https://github.com/vyanhursky/DefJam-Modding-Tools/blob/main/docs/menu-art-workflow.md).
-The [wide-menu implementation notes](research/menu-ui-playtest-pack-2026-10-19.md#widescreen-backgrounds-d160ui-toolkit-defjammenu-wide)
+The [wide-menu implementation notes](hd-textures.md#wide-layer-authoring-contract)
 explain the slab/anchor format; those are dated engineering notes, so check the
 current export scripts and loader before building a new wide pack.
 

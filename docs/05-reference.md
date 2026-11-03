@@ -105,3 +105,12 @@ A healthy run: `[D3D] 2.0s` lines at 120 presents (60 while loading), no `[CRASH
 
 The golden frames (`tests/golden/`) store measurements of a capture, not pixels, which is why they can
 live in a repository that will be public. They were taken without the gamma ramp (`RECOMP_GAMMA=0`).
+
+
+## GPU vertex-program path: original constraints
+
+The historical M4e design (2026-09-29) addressed CPU execution of the title's NV2A vertex programs, one vertex at a time, after decode-once/vertex reuse still left Debug fights near 38–42 fps. That is a dated baseline, not current performance. The working GPU path forwards attributes and indexed batches through the translator/D3D8 pixel pipeline while retaining CPU fallback for diagnostics and rejected programs.
+
+The important geometry constraint is clip-space reconstruction. The game's Direct3D epilogue leaves output position in screen pixels with reciprocal clip `w`; reconstruct `w=1/oPos.w`, `ndc.xy=(oPos.xy/ScreenSize)*(2,-2)+(-1,1)`, `z=oPos.z/zmax`, then output `float4(ndc*w,z*w,w)`. The old CPU screen-space path used `rhw=1`, causing affine texture/colour interpolation and screen-space near clipping; real clip `w` enables perspective interpolation and hardware clipping. Keep the D3D8 output layout/pixel pipeline consistent (saturated oD0, scaled linear-texture coordinates, further texture stages/fog as supported).
+
+Decoder semantics must stay shared with the verified CPU interpreter: NV2A fields are in microcode dwords 1..3; R12 maps to oPos, O[3] to oD0 and O[9] to oT0; there are 192 constants and relative `a0` addressing. The older separate HLSL decoder used a different field layout and its FVF input layouts did not describe this title's raw attributes. Constants must reflect per-draw writes, especially bone matrices, with dirty ranges updated by `SET_TRANSFORM_CONSTANT`. Programs that write constants (`o_mask` with `orb` clear) require a safe fallback; point-sprite/oPts support was not observed by that design. `RECOMP_VSH_GPU=0`, batch dumps and `RECOMP_VSH_TRACE` retain the CPU diagnostic path. See [rebase acceptance](research/toolkit-rebase-acceptance.md) for measured parity and limits, rather than treating this original design as fresh certification.

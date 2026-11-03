@@ -45,3 +45,8 @@ python scripts/scenario_suite.py run fight-result --fixture logs/fixtures/NAME -
   (`harness.py montage`), and add the stage to `ROUTES` once it is right.
 - Scripts written for one investigation belong in the session's scratch directory. Anything used twice
   belongs in `scripts/`, with a docstring and, if it has logic worth breaking, a test in `tests/unit`.
+
+
+## Front-end movie routes
+
+For creator/loading/Crib Options/tips/late-Story background consumers, use the [route-boundary inventory](../09-testing-harness.md#front-end-background-route-boundaries-inventory-2026-10-20). It distinguishes observed parent routes from uncalibrated child movies. CINEMA scene selection does not load front-end APT/SWF movies, and a command found in APT strings is not evidence of an arbitrary-screen loader.

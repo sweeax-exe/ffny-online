@@ -1,12 +1,15 @@
 # Controller transition preservation — 2026-10-30
 
-This is the implementation follow-up to the [measured tracing investigation](input-latency-tracing-2026-10-30.md) and [15-project source survey](recomp-controller-input-practices-2026-10-30.md). It is local work based on released v0.12.3, not a published release. Windows is the measured platform.
+> Historical evidence: Controller-transition work shipped in v0.13.0; timings below belong to the original Windows experiments.
+> Current support/qualifications live in the versioned release notes and GitHub Issues.
+
+This is the implementation follow-up to the [measured tracing investigation](input-latency-2026-10-30.md#observational-tracing-follow-up-2026-10-30) and [15-project source survey](recomp-controller-input-practices-2026-10-30.md). The original Windows experiments used the v0.12.3baseline; the correction later shipped in v0.13.0.
 
 ## Problem and correction
 
 The released input path detected both fast presses at the host, then its 120 ms minimum hold merged them into one continuous press. Simply setting that hold to zero makes short taps vulnerable between slower downstream updates. The correction retains separate button transitions until a real consumer receives them.
 
-D-new: add an application-opted-in, per-controller FIFO in the toolkit, with explicit USB-success and guest-consumption acknowledgements. The game enables it by default. Generic toolkit behavior remains opt-in, preserving compatibility with titles that have no guest acknowledgement adapter. The game defaults to a 1 ms input-worker deadline; explicit 1/2 ms options permit controlled comparisons. The worker uses a private high-resolution waitable timer on Windows and skips missed deadlines instead of spinning to catch up. SDL worker acquisition uses UpdateGamepads and PeepEvents, whose documented threading policy permits worker use; PollEvent is main-thread-only.
+Implemented correction: add an application-opted-in, per-controller FIFO in the toolkit, with explicit USB-success and guest-consumption acknowledgements. The game enables it by default. Generic toolkit behavior remains opt-in, preserving compatibility with titles that have no guest acknowledgement adapter. The game defaults to a 1 ms input-worker deadline; explicit 1/2 ms options permit controlled comparisons. The worker uses a private high-resolution waitable timer on Windows and skips missed deadlines instead of spinning to catch up. SDL worker acquisition uses UpdateGamepads and PeepEvents, whose documented threading policy permits worker use; PollEvent is main-thread-only.
 
 Repeated transitions of the same button stay separate. Independent button changes may coalesce into a chord. USB transfer attempts and failed TDs cannot retire an event. A guest packet must advance and match a successfully delivered snapshot. During fights, a second adapter boundary waits for the mapped human fighter to read the raw gameplay-button state; this covers frames where controller servicing occurs but simulation does not step. Native fighter filtering and action eligibility remain in place. Start/Back and frontend input use successful XDK-copy acknowledgement, so pause/menu input does not require a fighter step.
 
@@ -43,7 +46,7 @@ The final-build boundary run confirms **`sub_00079280`** as the active Battle pr
 
 These are separate distributions, so their medians need not add exactly. The XDK query and game-cache writer each run about every 16.7 ms in this capture; USB construction is about every 8.06 ms, host acquisition about every 1.008 ms. The observed pipeline explains the previously unsplit interval and identifies guest/controller servicing plus game-update phase as the remaining software delay. It does not establish a mandatory fixed delay, identify physical controller latency, or prove an attack's visible onset. Evidence: `logs/input-audit/edges-final-boundaries*`.
 
-## Evidence and handoff
+## Dated validation evidence
 
 ### Focused and new-path validation
 
@@ -59,7 +62,7 @@ The final unchanged runtime build also passed all seven selected game gates: M2 
 
 The first batch's unit row had three fixture-setup errors alongside 672 passing tests: the standalone input-settings fixture did not link the newly required `input_edges.c` and `host_time.c`. Its build list was corrected without changing runtime behavior. The isolated full unit rerun is recorded separately, so the original batch's honest `7 of 8` result is retained rather than overwritten.
 
-The corrected full unit rerun passes **678 tests**, with 28 skips and one slow-test deselection, in 84.37 seconds (`logs/regress-20261030-173213.txt`). The pytest failure cache is empty. Together with the seven passing runtime gates, all eight selected verification areas are resolved. The final build identity verifies; source-only staging in a temporary index passes publication-policy checks, both worktrees pass whitespace checks, and the real indexes remain unstaged. No changes have been published.
+The corrected full unit rerun passes **678 tests**, with 28 skips and one slow-test deselection, in 84.37 seconds (`logs/regress-20261030-173213.txt`). The pytest failure cache is empty. Together with the seven passing runtime gates, all eight selected verification areas are resolved. The final build identity verifies; source-only staging in a temporary index passes publication-policy checks, both worktrees pass whitespace checks, and the real indexes remain unstaged. That checkpoint predated publication; the work later shipped in v0.13.0.
 
 ### Sustained comparison
 
@@ -80,4 +83,16 @@ Evidence: `logs/input-audit/edges-controlled-poll{1,2}.csv`, their metadata and 
 
 Focused native tests cover ordered rapid taps, independent chords, delivery/packet guards, packet wrap, analog threshold boundaries, magnitude freshness, queue overflow/expiry/reset, repeated ring use, and the game adapter's wait for the mapped human fighter. SDL fixtures cover two controller slots, neutral trigger setup, snapshot reads, UI/focus cancellation and the forced stale-poll race. The virtual test fixture now initializes trigger axes to SDL's actual neutral value; earlier baseline constant half-trigger modifiers are not present.
 
-Source lanes: `C:\Users\Vlad\code\defjam-input-latency` (`investigate/input-latency`) and `C:\Users\Vlad\code\xboxrecomp-input-latency` (`diag/input-latency`). Builds, CSVs, logs, generated code and game data stay ignored/local. The parent gitlink is unchanged because the toolkit implementation has not been published. Publish source only when authorized, publish the toolkit commit before updating the parent gitlink, and validate other platforms before release.
+The local implementation/publishing handoff is superseded by the v0.13.0 release.
+Generated code, traces, builds and game data remain local; no physical display-latency claim follows.
+
+
+## Historical trace integrity and validation
+
+Before the transition correction, the first try-lock tracing queue exposed record loss and was replaced by a bounded 8,192-cell MPSC sequence queue. Four-producer and concurrent-shutdown fixtures checked copied payloads, accounting and drain. Runtime producers performed no file I/O; a separate thread batched CSV output on a shared QPC clock with frequency/origin retained. Later safeguards added budget clamping, ongoing 64-bit counters, checked headers and initial metadata before producers start; immediate termination could not leave a reused path's old successful metadata.
+
+The default observational checkpoint had 263,603 attempted/accepted/written events. Zero hold had 259,382 attempted/accepted and 259,379 written at its concurrent checkpoint; both reported zero full/budget/payload/I/O losses. Harness termination left `closed:0`; 1,242 default and 1,505 zero-hold uncheckpointed tail rows were excluded, with all test windows ending over ten seconds before the retained checkpoint. Maximum observed enqueue durations were 46.7 / 338.8 µs, including scheduling; these are not average costs. The intentionally lossy `queue-prototype-*` captures must not substitute for final evidence.
+
+The instrumented observational build passed seven selected areas: 654 units (28 skips, one deselected), three unchanged goldens, fight median/minimum 120/110 presents per two seconds, combat 27/27, and replay 80 records / 1,800 steps. After diagnostic safeguards, 15 focused buffer/analyzer tests and a rebuilt quick **5/5** passed: 658 units (28 skips, one deselected), the same goldens and fight 120/110 (`logs/regress-20261030-154413.txt`). These precede and do not replace this report's final transition-build results.
+
+Retained observational evidence under `logs/input-audit/`: `trace-{default,zero}.csv`, metadata and `.analysis.json`; `trace-fight-{default,zero,control}.json`, `trace-fights-summary.json`, `trace-fights.log`, `regress-tracing.log`, `analysis-and-buffer-tests.log`, `build-trace-mpsc.log`, `build-trace-hardened.log`, `trace-hardened-tests.log`, and `regress-trace-final-quick.log`. Analysis uses `python scripts/input-latency.py logs/input-audit/trace-default.csv --button x --slot 0 --guest-bit 0x40`. The original CPU-only checkpoint hypothesis and trigger fixture were corrected as described above; physical USB/Bluetooth, switch actuation and scanout remain outside these measurements.
