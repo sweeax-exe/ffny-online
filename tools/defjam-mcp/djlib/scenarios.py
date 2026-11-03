@@ -190,11 +190,15 @@ def boot(timeout=240, turbo=False, extra_env=None, lock_timeout=None, log=None, 
 # ---- social (the chat window, Social Update stage 2a) ----------------------------------------------
 
 SOCIAL_NET = [
-    # copy 0: asks copy 1 to be friends, writes to it, then a line in global chat
+    # copy 0: asks copy 1 to be friends, writes to it, then a line in global chat; stage 2c: once copy 1
+    # is in its crew (made and invited through the window, SOCIAL_UI) makes it a Lieutenant and reports
+    # its global line
     "wait:4;friend:Copy 1;dm:Copy 1:hey Copy 1, run it back?;wait:6;global:eu:anyone on Europe for a quick one?;"
-    "wait:42;log",
-    # copy 1: accepts once the request has been on screen a moment, answers, then a global line
-    "wait:9;accept;wait:3;dm:Copy 0:yo, best of 3?;wait:3;global:eu:gg all, rematch later;wait:40;log",
+    "wait:42;log;wait:56;crewrole:Copy 1:lieutenant;wait:3;report:Copy 1;wait:3;log;wait:24;log",
+    # copy 1: accepts once the request has been on screen a moment, answers, then a global line; stage
+    # 2c: joins copy 0's crew, lets everyone message it, blocks copy 0 and lifts the block again
+    "wait:9;accept;wait:3;dm:Copy 0:yo, best of 3?;wait:3;global:eu:gg all, rematch later;wait:40;log;"
+    "crewjoin;wait:8;dms:everyone;wait:3;log;wait:10;block:Copy 0;wait:5;log;unblock:Copy 0;wait:3;log",
 ]
 # The window's pages for the captures, then the real input paths: copy 1 opens a room (its friends see
 # it), types on the keyboard (ENTER opens, text, ENTER sends, ESC closes); copy 0 uses the pad (BACK
@@ -203,10 +207,13 @@ SOCIAL_NET = [
 SOCIAL_UI = [
     "3:chat=friends;19:dm=Copy 1;25:chat=global;30:keyboard=yeah lets run it bac;35:close;40:chat=friends;44:chat=crew;"
     "46:chat=global;47:type=;48:close;50:pad=back;51:pad=y;52:pad=a;53:pad=left;54:pad=a;55:pad=start;57:pad=b;58:chat=friends;"
-    "59:pad=a;64:chat=room;66:type=hello room from copy 0;67:send;76:mute=Copy 1;92:close",
+    "59:pad=a;64:chat=room;66:type=hello room from copy 0;67:send;76:mute=Copy 1;92:close;"
+    "94:chat=crew;95:crewcreate=Bronx Kings:BXK;100:crewinvite=Copy 1;113:chat=crew;117:menu=Copy 1;119:close;"
+    "120:chat=global;121:menu=Copy 1;123:close;124:chat=messages;128:close",
     "5:chat=friends;16:dm=Copy 0;22:chat=global;27:friend=Tavo;32:close;33:room=create;36:chat=room;40:chat=global;41:close;"
     "44:key=enter;45:text=typed on a keyboard;46:key=enter;47:key=escape;62:chat=room;65:type=hey copy 0, gl;66:send;"
-    "82:type=copy 0 should not see this;83:send;90:close",
+    "82:type=copy 0 should not see this;83:send;90:close;104:chat=crew;110:chat=messages;114:close;116:chat=friends;"
+    "126:chat=friends;130:close",
 ]
 
 
@@ -227,6 +234,20 @@ def social(timeout=300, relay_port=27900, off=False, lock_timeout=None, log=None
         n = 1 if off else 2
         names = ["Copy %d" % i for i in range(n)]
         flags = ["-social-switch", os.path.join(s.dir, "social-enabled")] if off else ["-social"]
+        # avatars (stage 2c): a fake picture source, never Discord; Copy 0 (account 1) has a picture,
+        # Copy 1 none (its initials show)
+        avatars = os.path.join(s.dir, "avatar-source")
+        os.makedirs(avatars, exist_ok=True)
+        try:
+            from PIL import Image, ImageDraw
+            im = Image.new("RGB", (128, 128), (40, 90, 200))
+            d = ImageDraw.Draw(im)
+            d.ellipse((24, 14, 104, 94), fill=(250, 205, 60))
+            d.rectangle((14, 96, 114, 128), fill=(200, 16, 46))
+            im.save(os.path.join(avatars, "1.png"))
+        except ImportError:
+            pass
+        flags += ["-avatar-source", avatars]
         tokens = s.accounts(acc_port, names, extra=flags)
         # the relay asks the account service who writes in a room (room chat's IDENT, stage 2b)
         s.relay(relay_port, extra=["-accounts-internal", "http://127.0.0.1:%d" % (acc_port + 1)])
@@ -269,7 +290,8 @@ def social(timeout=300, relay_port=27900, off=False, lock_timeout=None, log=None
                 if menu and s.elapsed() > menu + 30:
                     stop = "done"
                     break
-            elif (all(c.watch.count("[SOCIAL-TEST] state:") for c in cs) and cs[0].watch.count("[SOCIAL-UI] close") >= 3
+            elif (cs[0].watch.count("[SOCIAL-TEST] state:") >= 3 and cs[1].watch.count("[SOCIAL-TEST] state:") >= 4
+                  and cs[0].watch.count("[SOCIAL-UI] close") >= 6 and cs[1].watch.count("[SOCIAL-UI] close") >= 4
                   and cs[1].watch.count("[SOCIAL-UI] key=escape")):
                 stop = "done"
                 break
@@ -288,6 +310,7 @@ def social(timeout=300, relay_port=27900, off=False, lock_timeout=None, log=None
                       "no_social_captures": not glob.glob(os.path.join(shots[0], "*-social-*.bmp"))}
         else:
             state = {i: next((l for l in reversed(lines[i]) if "[SOCIAL-TEST] state:" in l), "") for i in lines}
+            first = {i: next((l for l in lines[i] if "[SOCIAL-TEST] state:" in l), "") for i in lines}
             checks = {
                 "ready": has(0, "[SOCIAL] ready") and has(1, "[SOCIAL] ready"),
                 "request_arrived": has(1, "friend request from Copy 0"),
@@ -297,8 +320,9 @@ def social(timeout=300, relay_port=27900, off=False, lock_timeout=None, log=None
                 "global_sent": has(0, "sent to global eu") and has(1, "sent to global eu"),
                 "global_seen": all("global 2" in state[i] or "global 3" in state[i] or "global 4" in state[i] for i in state),
                 # both online in the menu at first; copy 1's room reaches copy 0 as a presence change
-                "presence": "Copy 0=" in state[1] and "Copy 0=offline" not in state[1] and
-                            any("[SOCIAL] presence" in l and ": room" in l for l in lines[0]) and "Copy 1=room" in state[0],
+                # (the first state: stage 2c's block ends the friendship before the last one)
+                "presence": "Copy 0=" in first[1] and "Copy 0=offline" not in first[1] and
+                            any("[SOCIAL] presence" in l and ": room" in l for l in lines[0]) and "Copy 1=room" in first[0],
                 "pad_back_opens": has(0, "chat opened (Back)"),
                 "pad_keyboard_send": has(0, "sent to global eu: kj") and has(1, "global eu from Copy 0: kj"),
                 "keyboard_enter_opens": has(1, "chat opened (Enter)"),
@@ -310,6 +334,21 @@ def social(timeout=300, relay_port=27900, off=False, lock_timeout=None, log=None
                 "room_0_to_1": "room chat from Copy 0: hello room from copy 0" in texts[1],
                 "room_1_to_0": "room chat from Copy 1: hey copy 0, gl" in texts[0],
                 "room_mute": has(0, "room chat: muted Copy 1") and has(0, "hidden (muted): Copy 1"),
+                # stage 2c: avatars from the service (never Discord), initials without one
+                "avatar_picture": has(1, "avatar 1: picture") and has(0, "avatar 1: picture"),
+                "avatar_initials": has(0, "avatar 2: none, initials"),
+                # crews through the window: create (two keyboards), invite, join, role
+                "crew_created": has(0, "crew: create Bronx Kings [BXK]") and has(0, "crew: created"),
+                "crew_invited": has(0, "crew: invite Copy 1") and has(0, "crew: invite sent"),
+                "crew_joined": any("[BXK] member" in l or "[BXK] lieutenant" in l for l in lines[1]
+                                   if "[SOCIAL-TEST] state:" in l),
+                "crew_role_seen": "[BXK] lieutenant" in state[1],
+                "crew_role": any("Copy 1=lieutenant" in l for l in lines[0] if "[SOCIAL-TEST] state:" in l),
+                "report_sent": has(0, "reported 2 ("),
+                "dms_everyone": has(1, "messages from: everyone") and any("dms everyone" in l for l in lines[1]),
+                "block_both_ways": has(1, "blocked 1") and any("blocked [Copy 0 ]" in l for l in lines[1]) and
+                                   "Copy 1=" not in state[0].split("friends [", 1)[-1].split("]", 1)[0],
+                "unblock": has(1, "unblocked 1") and "blocked []" in state[1],
             }
             result["state"] = {i: state[i].split("state: ", 1)[-1] for i in state}
         result["checks"] = checks
@@ -364,7 +403,10 @@ def room_chat(timeout=None, relay_port=27900, lock_timeout=None, log=None, keep_
     # copy 1 joins copy 0's room about 3 s after it opened it, the spectator 3 s later, and the match
     # starts as soon as the spectator is in: room lines before that, "fight" lines once START came
     # (the match loads; every copy is in the room)
-    say = {0: "room:5:ready when you are;fight:2:good luck", 1: "fight:3:lets go", 2: "room:1:hi from the stands"}
+    # stage 2c: copy 0's first line comes before anyone else is in: copy 1 and the spectator get it
+    # from the relay's room memory when they come in (flag 8, "(earlier)"), once each
+    say = {0: "room:1:first line before anyone;room:5:ready when you are;fight:2:good luck", 1: "fight:3:lets go",
+           2: "room:1:hi from the stands"}
     import tempfile
     base = tempfile.mkdtemp(prefix="roomchat-shots-")
     for i in range(3):
@@ -373,6 +415,8 @@ def room_chat(timeout=None, relay_port=27900, lock_timeout=None, log=None, keep_
         copy_env[i] = {"RECOMP_TEST_ROOM_CHAT": say[i], "RECOMP_OVERLAY_SHOT_DIR": shots[i],
                        "RECOMP_OVERLAY_SHOT_MS": "700"}
     copy_env[2]["RECOMP_TEST_FIGHT_CHAT"] = "3:nice from the stands"
+    # stage 2c: the spectator opens the bar with the pad's BACK; the on-screen keyboard comes up and sends
+    copy_env[2]["RECOMP_TEST_FIGHT_CHAT_PAD"] = "1"
     # the spectator's overlay draws through the whole match (its ENTER opens the bar): fewer captures,
     # each one reads the picture back and slows that copy (it lags the players already)
     copy_env[2]["RECOMP_OVERLAY_SHOT_MS"] = "1500"
@@ -407,6 +451,12 @@ def room_chat(timeout=None, relay_port=27900, lock_timeout=None, log=None, keep_
         "fighters_got_it_in_fight": all(during_fight(i, "room chat from Spectator 0 (spectator): nice from the stands")
                                         for i in (0, 1)),
         "fighters_never_typed": not any(lines(i, "fight chat: typing") for i in (0, 1)),
+        # stage 2c: the room's earlier lines for who comes later, once each (a return to the room after
+        # the match brings them again: the game drops the repeats)
+        "history_late_joiner": len(lines(1, "room chat (earlier) from Copy 0: first line before anyone")) == 1,
+        "history_spectator": len(lines(2, "room chat (earlier) from Copy 0: first line before anyone")) == 1,
+        "history_not_to_sayer": not lines(0, "(earlier) from Copy 0: first line before anyone"),
+        "spectator_pad_keyboard": bool(lines(2, "bar opened (spectator, pad: on-screen keyboard)")),
     }
     picked = []
     try:

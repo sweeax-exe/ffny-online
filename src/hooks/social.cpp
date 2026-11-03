@@ -725,8 +725,11 @@ std::string presence_json()
 //
 // "step;step;...", run in order once the lists are loaded: wait:S, friend:NAME (a request by name),
 // accept (the first request that comes, waiting up to 60 s), dm:NAME:TEXT (to a friend, waiting up to
-// 60 s for the friendship), global:REGION:TEXT, remove:NAME, log (the state, one line). Each step
-// writes a [SOCIAL-TEST] line.
+// 60 s for the friendship), global:REGION:TEXT, remove:NAME, log (the state, one line). Stage 2c:
+// block:NAME / unblock:NAME, report:NAME (their newest global line, else a DM), dms:everyone|friends|off,
+// avatar:on|off (show my picture), crew:NAME:TAG (create), crewinvite:NAME, crewjoin (the first invite,
+// waiting up to 60 s), crewrole:NAME:ROLE, crewkick:NAME, crewleave. Each step writes a [SOCIAL-TEST]
+// line.
 
 struct TestRun {
     std::vector<std::string> steps;
@@ -737,6 +740,18 @@ struct TestRun {
 long long friend_id(const std::string &name)    // callers hold g_mu
 {
     for (auto &f : g_v.friends) if (f.name == name) return f.id;
+    return 0;
+}
+
+long long anyone_id(const std::string &name)    // callers hold g_mu: a friend, crew mate, sender or the like
+{
+    if (long long id = friend_id(name)) return id;
+    for (auto &m : g_v.crew_roster) if (m.name == name) return m.id;
+    for (auto &c : g_v.convos) if (c.with.name == name) return c.with.id;
+    for (auto &l : g_v.global) if (l.name == name && l.from) return l.from;
+    for (auto &l : g_v.crew_chat) if (l.name == name && l.from) return l.from;
+    for (auto *list : { &g_v.blocked, &g_v.in, &g_v.out, &g_v.muted })
+        for (auto &r : *list) if (r.name == name) return r.id;
     return 0;
 }
 
@@ -769,13 +784,60 @@ void test_tick()
     } else if (what == "global") {
         std::string region = arg.substr(0, arg.find(':'));
         send_global(region.c_str(), arg.find(':') != std::string::npos ? arg.substr(arg.find(':') + 1) : "");
+    } else if (what == "block" || what == "unblock") {
+        long long id;
+        { std::lock_guard<std::mutex> lk(g_mu); id = anyone_id(arg); }
+        block(id, arg, what == "block");
+    } else if (what == "report") {
+        long long id = 0, msg = 0;
+        std::string channel;
+        std::vector<std::string> ctx;
+        {
+            std::lock_guard<std::mutex> lk(g_mu);
+            id = anyone_id(arg);
+            for (auto &l : g_v.global) if (l.from == id && id) { msg = l.seq; channel = l.channel; }
+            if (!msg)
+                for (auto &t : g_v.threads)
+                    if (t.with == id) for (auto &d : t.msgs) if (d.from == id) { msg = d.id; channel = "dm:" + std::to_string(id); }
+        }
+        if (id && msg) report(id, channel, msg, "", ctx);
+        else { done = timed_out; g_dirty_convos = true; if (id) open_thread(id); }
+    } else if (what == "dms") {
+        set_dms(arg);
+    } else if (what == "avatar") {
+        set_show_avatar(arg != "off" && arg != "0");
+    } else if (what == "crew") {
+        std::string region = region_of_server(netservers_connected());
+        crew_create(arg.substr(0, arg.find(':')), arg.find(':') == std::string::npos ? "" : arg.substr(arg.find(':') + 1), region);
+    } else if (what == "crewinvite") {
+        crew_invite(0, arg);
+    } else if (what == "crewjoin") {
+        long long crew = 0;
+        { std::lock_guard<std::mutex> lk(g_mu); if (!g_v.crew_invites.empty()) crew = g_v.crew_invites[0].crew; }
+        if (crew) crew_join(crew);
+        else { done = timed_out; g_dirty_crew = true; }
+    } else if (what == "crewrole" || what == "crewkick") {
+        std::string name = arg.substr(0, arg.find(':'));
+        long long id;
+        { std::lock_guard<std::mutex> lk(g_mu); id = anyone_id(name); }
+        if (!id) { done = timed_out; g_dirty_crew = true; }
+        else if (what == "crewkick") crew_kick(id);
+        else crew_role(id, arg.find(':') == std::string::npos ? "member" : arg.substr(arg.find(':') + 1));
+    } else if (what == "crewleave") {
+        crew_leave();
     } else if (what == "log") {
         std::lock_guard<std::mutex> lk(g_mu);
         std::string fl;
         for (auto &f : g_v.friends) fl += f.name + "=" + f.state + (f.room.empty() ? "" : "@" + f.room) + " ";
-        fprintf(stderr, "[SOCIAL-TEST] state: me %lld, friends [%s], in %d, out %d, convos %d, unread %d, global %d, crew %lld\n",
+        std::string roster, bl;
+        for (auto &m : g_v.crew_roster) roster += m.name + "=" + m.role + " ";
+        for (auto &b : g_v.blocked) bl += b.name + " ";
+        fprintf(stderr, "[SOCIAL-TEST] state: me %lld, friends [%s], in %d, out %d, convos %d, unread %d, global %d, crew %lld"
+                        " [%s] %s, roster [%s], invites %d, blocked [%s], dms %s, picture %s\n",
                 g_v.me, fl.c_str(), (int)g_v.in.size(), (int)g_v.out.size(), (int)g_v.convos.size(), g_v.unread,
-                (int)g_v.global.size(), g_v.crew);
+                (int)g_v.global.size(), g_v.crew, g_v.crew_tag.c_str(), g_v.crew_role.c_str(), roster.c_str(),
+                (int)g_v.crew_invites.size(), bl.c_str(), g_v.dms.empty() ? "friends" : g_v.dms.c_str(),
+                g_v.show_avatar ? "on" : "off");
     }
     if (!done) return;
     fprintf(stderr, "[SOCIAL-TEST] step %d %s%s\n", (int)g_test.next + 1, step.c_str(), timed_out && what != "wait" ? " (timed out)" : "");

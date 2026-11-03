@@ -1976,7 +1976,9 @@ void draw_toasts(ImDrawList *dl, const Frame &f)
 // that text), friend=NAME (the keyboard of ADD FRIEND with that name), dm=NAME (MESSAGES with that
 // friend), type=TEXT (the tab's text box), send, close, mute=NAME / unmute=NAME (MUTE IN ROOM); pad=BUTTON (a, b, x, y, lb, rb, start, back,
 // up, down, left, right) and key=KEY (enter, escape, backspace, tab) press it for a frame as the pad's
-// or keyboard's own press arrives, text=TEXT types it; room=create opens a room. Each step writes a
+// or keyboard's own press arrives, text=TEXT types it; room=create opens a room. Stage 2c:
+// crewcreate=NAME:TAG (CREATE A CREW through its two keyboards), crewinvite=NAME (INVITE A PLAYER's
+// keyboard), menu=NAME (the player menu on a friend, crew mate or sender). Each step writes a
 // [SOCIAL-UI] line.
 
 ImGuiKey test_key(const std::string &name)
@@ -2053,6 +2055,36 @@ void chat_test_step()
         ImGui::GetIO().AddInputCharactersUTF8(arg.c_str());
     } else if (what == "mute" || what == "unmute") {    // the ROOM tab's MUTE IN ROOM on that player
         room_mute(arg, 0, what == "mute");
+    } else if (what == "crewcreate") {              // the keyboard's name, NEXT, its tag, CREATE
+        C.open = true;
+        C.tab = TAB_CREW;
+        open_keyboard(KB_CREW_NAME);
+        C.friend_name = arg.substr(0, arg.find(':'));
+        kb_submit();
+        C.friend_name = arg.find(':') == std::string::npos ? "" : arg.substr(arg.find(':') + 1);
+        kb_submit();
+    } else if (what == "crewinvite") {
+        C.open = true;
+        C.tab = TAB_CREW;
+        C.crew_view = 0;
+        open_keyboard(KB_CREW_INVITE);
+        C.friend_name = arg;
+        kb_submit();
+    } else if (what == "menu") {
+        long long id = 0;
+        for (auto &fr : C.v.friends) if (fr.name == arg) id = fr.id;
+        for (auto &m : C.v.crew_roster) if (m.name == arg) id = m.id;
+        for (auto &l : C.v.global) if (l.name == arg && l.from) id = l.from;
+        C.open = true;
+        for (auto &m : C.v.crew_roster) if (m.id == id && C.tab == TAB_CREW) { crew_member_menu(m); id = 0; }
+        if (id) {
+            open_player_menu(id, arg);
+            if (C.tab == TAB_GLOBAL) {
+                std::vector<const social::Line *> lines;
+                for (auto &l : C.v.global) lines.push_back(&l);
+                for (size_t i = lines.size(); i-- > 0;) if (lines[i]->from == id) { menu_report_line(lines, i, lines[i]->channel); break; }
+            }
+        }
     } else if (what == "room") {                    // a room of this copy's own (a presence other than the menu)
         NetRoomSettings rs;
         default_settings(rs);
@@ -2262,7 +2294,10 @@ void chat_draw(ImDrawList *dl, const Frame &f, ImVec2 display)
 const char *chat_shot_label()
 {
     if (!C.open || (!social_enabled() && room_chat_state() < 0)) return nullptr;
-    return C.kb ? "social-keyboard" : k_tab_shots[C.tab];
+    if (C.kb) return "social-keyboard";
+    if (C.menu) return "social-menu";
+    if (C.tab == TAB_CREW && C.crew_view == 1) return "social-crewchat";
+    return k_tab_shots[C.tab];
 }
 
 // ---- chat during a fight (stage 2b; the design's "Chat during a fight") ----
