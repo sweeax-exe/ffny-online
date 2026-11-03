@@ -2844,10 +2844,11 @@ void draw_watch(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r
     int a = v.pair[0], b = v.pair[1];
     if (h.watch_seed && h.watch_seed == h.seed) { a = h.watch_slots[0]; b = h.watch_slots[1]; }
     if (b >= 0 && a == h.king) std::swap(a, b);     // the king on the right, the challenger on the left
-    // the "WATCHING" tag, as a broadcast's
+    // the "WAITING" tag, as a broadcast's: the queue sees the result only, not the fight (players took
+    // "WATCHING" for a live view, F9 083315 and a Discord question, 2026-11-03)
     rect(dl, f, 50, 26, 118, 28, with_alpha(RED, 0.95f), 3);
     dl->AddCircleFilled(f.p(64, 40), 5 * f.s(), (GetTickCount64() / 600) % 2 ? WHITE : with_alpha(WHITE, 0.3f));
-    text(dl, f, g_title, 18, 76, 30, WHITE, "WATCHING", LEFT, 1.0f);
+    text(dl, f, g_title, 18, 76, 30, WHITE, "WAITING", LEFT, 1.0f);
     text(dl, f, g_hand, 14, 180, 34, ORANGE, r.settings.name, LEFT, 0.8f);
     text(dl, f, g_title, 14, 590, 30, GOLD, "KING OF THE HILL", RIGHT, 1.1f);
     int sides[2] = { a, b };
