@@ -1474,17 +1474,17 @@ bool online_count(ImDrawList *dl, const Frame &f, bool button = false)
     glass(dl, f, x0, y - 3, x1 - x0, 21, 10, IM_COL32(10, 10, 13, 255), 0.62f);
     bool hot = button && mouse_in(f, x0, y - 3, x1 - x0, 21);
     if (hot) frame_rect(dl, f, x0, y - 3, x1 - x0, 21, with_alpha(ORANGE, 0.8f), 1.2f);
-    float x = x0 + 8 + ((x1 - x0) - content) / 2;
+    float x = x0 + 8 + ((x1 - x0) - content) / 2, dy = 2;    // the glyphs sat 2 units above the chip's middle
     if (button) {
-        hint(dl, f, x, y - 1, "x", "");
+        hint(dl, f, x, y - 1 + dy, "x", "");
         x += glyph;
     }
     if (tagged) {
-        text(dl, f, g_title, 10, x, y + 1, ORANGE, tag, LEFT, 0.8f);
+        text(dl, f, g_title, 10, x, y + 1 + dy, ORANGE, tag, LEFT, 0.8f);
         x += label;
     }
-    if (cur >= 0) { ping_bars(dl, f, x, y + 1, 11, ping); x += bars; }
-    text(dl, f, g_title, size, x, y, cur >= 0 ? CREAM : ORANGE, line, LEFT, 1.0f);
+    if (cur >= 0) { ping_bars(dl, f, x, y + 1 + dy, 11, ping); x += bars; }
+    text(dl, f, g_title, size, x, y + dy, cur >= 0 ? CREAM : ORANGE, line, LEFT, 1.0f);
     return hot && ImGui::IsMouseClicked(0);
 }
 
