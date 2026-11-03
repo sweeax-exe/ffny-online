@@ -11,6 +11,12 @@ or `src/recomp_manual.c`.
 - `skip_intro.c`: `[debug] skip_intro` / `RECOMP_SKIP_INTRO=1` selects Press Start on the
   first screen load, retaining native controller initialization. Off by default; later
   Story and attract movies are unchanged. [The investigation](../../docs/research/startup-skip-flow.md).
+- `subtitles.c`: `[language] story_subtitles` (or a language pack's request) shows Story subtitles in
+  every cutscene, not only the opening one: after guest `0x000DA8A0` loads a cutscene's subtitles, its
+  enable step is applied whatever the scene. Off by default ([language packs](../../docs/language-packs.md)).
+- `game_language.c`: `[language] game = french` starts the game in the French built into the disc (string
+  table `cmfren.loc`): the boot call to guest `0x00044FC0` asks for language 3 instead of 1. English by
+  default, and never while a language mod is on ([the game's own French](../../docs/language-packs.md#the-games-own-french)).
 - `picture.c`: `[display] brightness` (a curve on top of the title's gamma ramp), `vignette` and
   `vignette_strength` (the venue post effect's darkened edges: removed, or blended towards the
   undarkened picture). Defaults leave the picture exactly as before; all three apply as they change.
