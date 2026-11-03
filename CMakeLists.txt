@@ -1,7 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 
-# ============================================================================
-# Def Jam: Fight for NY (Xbox, EA-073) — static recompilation to native PC
+# =====================================================================# Def Jam: Fight for NY (Xbox, EA-073) — static recompilation to native PC
 #
 # Layout:
 #   tools/xboxrecomp/      the recompiler + runtime libraries (git submodule)
@@ -13,8 +12,7 @@ cmake_minimum_required(VERSION 3.20)
 #
 # Nothing from the game disc is in this tree. Put your own dump in ./game
 # (a junction/symlink is fine) and run scripts/verify-dump.py first.
-# ============================================================================
-
+# =====================================================================
 project(defjam_recomp VERSION 0.13.0 LANGUAGES C CXX)
 
 set(CMAKE_C_STANDARD 11)
@@ -273,6 +271,7 @@ if(DEFJAM_BUILD_APP AND DEFJAM_SDL3)
         src/app/app_update.cpp
         src/host_posix_keys.c
         src/patches/cheats_settings.c
+        src/hooks/pc_language_settings.c
         src/hooks/pc_settings_catalog.c
         src/hooks/pc_input.c
         src/hooks/pc_ui_settings.c
