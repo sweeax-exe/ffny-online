@@ -54,7 +54,14 @@
 #define MIN_ARCHETYPE   86      /* fighter.xml: CP B__ .. CP MW_, CP_HERO */
 #define MAX_ARCHETYPE   141
 #define MAX_BASE        50      /* the gym's cost table (0x2DBB70) has ten tiers of five */
-#define MAX_BONUS       38      /* with MAX_BASE: the attribute screen's 100 % (stat 30) */
+/* The bonus stats as the game itself makes them (sub_00014C20 recomputes them from zero: three learned
+ * styles' masks and the milestone counters), the limits the relay refuses beyond since build 46
+ * (server relay/record_stats.go; docs/research/created-fighter-online.md). Before build 47 the clamp was
+ * 38 a stat (the attribute screen's 100 %), so an edited or converted save went out as the player had it
+ * and the relay refused it (ERROR 12). */
+#define MAX_BONUS       8       /* bonus[0..4]: three styles' +2 at most, +2 from the milestones */
+#define MAX_BONUS_CHARM 5       /* bonus[5]: the five milestones' +1 */
+#define MAX_BONUS_TOTAL 24      /* three styles' 3 points each, 2 x 5 and 5 from the milestones */
 #define DEFAULT_MOVE    0x06000033u     /* a fresh fighter's four move keys */
 
 /* ---- CRC-32 (IEEE) ---- */
@@ -252,11 +259,23 @@ int cp_record_sanitize(const uint8_t in[CP_REC_LEN], uint8_t out[CP_REC_LEN])
     for (i = 1; i < 3; i++) if (p[R_STYLE + i] > 4) p[R_STYLE + i] = 0xFF;
     if (p[R_VOICE] < 1 || p[R_VOICE] > 6) wr32(p + R_VOICE, 1);
     else wr32(p + R_VOICE, p[R_VOICE]);
-    for (i = 0; i < 6; i++) {
-        uint32_t base = rd32(p + R_BASE + 4 * i);
-        int32_t bonus = (int32_t)rd32(p + R_BONUS + 4 * i);
-        wr32(p + R_BASE + 4 * i, base > MAX_BASE ? MAX_BASE : base);
-        wr32(p + R_BONUS + 4 * i, (uint32_t)clamp32(bonus, 0, MAX_BONUS));
+    {
+        int32_t bonus[6], total = 0;
+        for (i = 0; i < 6; i++) {
+            uint32_t base = rd32(p + R_BASE + 4 * i);
+            wr32(p + R_BASE + 4 * i, base > MAX_BASE ? MAX_BASE : base);
+            bonus[i] = clamp32((int32_t)rd32(p + R_BONUS + 4 * i), 0, i == 5 ? MAX_BONUS_CHARM : MAX_BONUS);
+            total += bonus[i];
+        }
+        /* above the total: a point off the largest bonus at a time (the first of equal ones), the same
+         * on every PC */
+        while (total > MAX_BONUS_TOTAL) {
+            int top = 0;
+            for (i = 1; i < 6; i++) if (bonus[i] > bonus[top]) top = i;
+            bonus[top]--;
+            total--;
+        }
+        for (i = 0; i < 6; i++) wr32(p + R_BONUS + 4 * i, (uint32_t)bonus[i]);
     }
     for (i = 0; i < 4; i++)
         if (!key_ok(rd32(p + R_MOVES + 4 * i))) wr32(p + R_MOVES + 4 * i, DEFAULT_MOVE);

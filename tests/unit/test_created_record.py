@@ -54,3 +54,14 @@ def test_switch_file_named_in_relay_and_doc():
     doc = (ROOT / "docs/netplay-protocol.md").read_text(encoding="utf-8")
     assert '"created-fighters-allowed"' in main
     assert "`created-fighters-allowed`" in doc
+
+
+def test_stat_limits_agree():
+    """The game's own clamp (cp_record_sanitize) is the relay's stat check (build 46,
+    relay/record_stats.go): a record the game sends is never refused with ERROR 12."""
+    game = (ROOT / "src/hooks/created_fighter.c").read_text(encoding="utf-8")
+    go = (RELAY_SRC / "record_stats.go").read_text(encoding="utf-8")
+    assert _int(game, r"#define MAX_BASE\s+(\d+)") == _int(go, r"MaxBaseStat\s+= (\d+)")
+    assert _int(game, r"#define MAX_BONUS\s+(\d+)") == _int(go, r"MaxBonusStat\s+= (\d+)")
+    assert _int(game, r"#define MAX_BONUS_CHARM\s+(\d+)") == _int(go, r"MaxBonusCharm\s+= (\d+)")
+    assert _int(game, r"#define MAX_BONUS_TOTAL\s+(\d+)") == _int(go, r"MaxBonusTotal\s+= (\d+)")

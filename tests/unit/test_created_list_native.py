@@ -98,6 +98,24 @@ int main(int argc, char **argv)
         printf("sanitize|1|[%s]|%d\n", name, (int)strlen((const char *)ok + 1));
         return 0;
     }
+    if (argc > 13 && !strcmp(argv[1], "stats")) {   /* base[0..5] bonus[0..5] (argv[2..13]), checked */
+        static uint8_t p[0x5950];
+        uint8_t rec[CP_REC_LEN], ok[CP_REC_LEN];
+        int i;
+        memcpy(p + 0xC, "STATS", 5);
+        p[0x143] = 98; p[0x140] = 1; p[0x141] = p[0x142] = 0xFF; p[0x13C] = 3; p[0x4D8A] = 1;
+        memset(p + 0x5564, 0xFF, 0x98);
+        for (i = 0; i < 12; i++) {
+            unsigned v = (unsigned)strtol(argv[2 + i], NULL, 10);
+            memcpy(p + 0xFC + 4 * i, &v, 4);
+        }
+        cp_record_from_profile(p, rec);
+        if (!cp_record_sanitize(rec, ok)) { printf("stats|0\n"); return 0; }
+        printf("stats|1");
+        for (i = 0; i < 12; i++) { int v; memcpy(&v, ok + 1 + 0x20 + 4 * i, 4); printf("|%d", v); }
+        printf("\n");
+        return 0;
+    }
     dump();
     if (argc > 2 && !strcmp(argv[1], "name")) {      /* online name argv[3] for entry argv[2] */
         printf("named|%d\n", cp_local_set_name(atoi(argv[2]), argc > 3 ? argv[3] : ""));
@@ -265,6 +283,33 @@ def test_record_name_up_to_sixteen(exe, tmp_path):
     assert rows['sanitize'] == [['1', '[AW5J3555]', '8']]
     rows = run(exe, tmp_path, {}, 'sanitize', r'AB\x07CD\xC9')               # not printable: '?'
     assert rows['sanitize'] == [['1', '[AB?CD?]', '6']]
+
+
+# ---- stats (build 47): the game's clamp is the relay's limit (server relay/record_stats.go) ----
+
+def stats(exe, tmp_path, base, bonus):
+    rows = run(exe, tmp_path, {}, 'stats', *base, *bonus)
+    row = rows['stats'][0]
+    assert row[0] == '1'
+    v = [int(x) for x in row[1:]]
+    return v[:6], v[6:]
+
+
+def test_stats_within_limits_unchanged(exe, tmp_path):
+    base, bonus = stats(exe, tmp_path, (50, 50, 50, 50, 50, 50), (8, 2, 0, 4, 5, 5))
+    assert base == [50] * 6 and bonus == [8, 2, 0, 4, 5, 5]      # total 24: the most the game makes
+
+
+def test_stats_clamped_to_relay_limits(exe, tmp_path):
+    base, bonus = stats(exe, tmp_path, (99, 0, 51, 50, 7, 60), (38, 9, -3, 8, 1, 6))
+    assert base == [50, 0, 50, 50, 7, 50]
+    # each stat at 8, bonus[5] at 5 (8, 8, 0, 8, 1, 5: total 30), then a point off the largest at a time
+    assert bonus == [6, 6, 0, 6, 1, 5]
+    # still above the total: a point off the largest (the first of equal ones) until 24
+    base, bonus = stats(exe, tmp_path, (0,) * 6, (38, 38, 38, 38, 38, 38))
+    assert bonus == [4, 4, 4, 4, 4, 4]
+    base, bonus = stats(exe, tmp_path, (0,) * 6, (8, 8, 8, 1, 0, 5))
+    assert bonus == [6, 6, 6, 1, 0, 5]
 
 
 def test_name_clean(exe, tmp_path):
