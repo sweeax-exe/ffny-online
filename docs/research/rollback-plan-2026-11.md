@@ -467,6 +467,23 @@ the first), and the soak now replays each step's pad words in re-runs.
   phase 3, with the created pads still linked. 14068e0 unlinks on entry to `sub_00064ED0` (re-lift). Not reproduced in
   three forced-knockout matches at venue 26 (the step unlink came first each time), so the fix is not proven on a crash.
 
+### Eighth round (on `remaster` 0bdb2c4, build 46 reports): created fighters' rollback cost
+* **Measured** (two-copy, created vs created, 110+10 ms, `RECOMP_NETPLAY_CP_DRAW=on` = build 46,
+  `logs/dj/20261103-023354-online`): rollbacks 9.71 / 11.92 ms average, 21-22 ms longest; of that, the created
+  fighters' pose passes in the re-runs 8.6 / 10.6 ms (2.9-3.1 ms per step for the two fighters), loads 0.17 ms, re-run
+  saves 0.26-0.38 ms. The same pass in every normal step cost 6.5-6.8 ms, and every pass left the device holding
+  textures/palettes (1906 / 2029 passes). New per-match line `[ROLLBACK] match N time: ...` gives the split.
+* **Cause** [V for the cost split, I for "nothing the step reads"]: the pass (`sub_00097F90`) ends in the controller's
+  model update `sub_00027B80`, which ends in EAGL's model draw `sub_00114C80(ecx = [ctrl+0x11C])`: for each of the
+  model's 19 parts the material set-up and the part's command list (`sub_00114FE0`, D3D calls among them). Drawing,
+  not posing; the render traversal's own pass draws the model in the frame.
+* **Fix**: the step's pass runs with the model's part count (+4) at 0 for its duration (every matrix the same, no part
+  drawn), in normal steps and re-runs alike (`RECOMP_NETPLAY_CP_DRAW=on` for the old way). After
+  (`20261103-023701-online`): 0.49 / 1.52 ms average, 0.63 / 2.15 ms longest; pass 0.08 ms per step; no pass leaves
+  a binding; checksums equal. Stock control `20261103-025039-online`: 0.41 / 1.12 ms. Offline wrong-prediction soak
+  with a created fighter (`20261103-024017-offline`, 10 min): 6600 soaks, 36 300 steps the same, 0 otherwise, two
+  re-runs equal, no crash. Lockstep created vs created with bots (`20261103-025342-online`): ok, 30 checks.
+
 ### Next (after the third round)
 1. More two-copy long runs (the desyncs at steps 10 200 and 37 440 came once in two runs each; three later runs were clean),
    always with `RECOMP_NETPLAY_FINALLOG=1` so a desync can be traced to its first step.

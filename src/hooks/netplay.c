@@ -422,7 +422,10 @@ static struct {
     double rb_ms_max, rb_ms_total;
     /* the same for this match alone (rb_* above run on for the whole session), the step of its first
      * prediction (0: none yet) and whether its summary line went out */
-    struct { unsigned count, steps, deepest, slow; double ms_max, ms_total; uint32_t first_pred; int on, told; unsigned num; } rbm;
+    struct { unsigned count, steps, deepest, slow; double ms_max, ms_total; uint32_t first_pred; int on, told; unsigned num;
+             /* where a rollback's time goes: the load, the saves and the created fighters' pose passes of the
+              * re-runs; the pose passes of normal steps; passes that left the device holding a texture/palette */
+             double ms_load, ms_save, ms_pose, ms_pose_step; unsigned poses, poses_step, pose_binds; } rbm;
     unsigned rb_matches;                /* rollback matches this session (rbm.num) */
     char toast[160];                /* a notice for the fight (netplay_toast), until toast_until */
     ULONGLONG toast_until;
@@ -4186,6 +4189,19 @@ static void rbm_summary(const char *why)
             "%u slow; first prediction %s%u\n", N.rbm.num, why, N.rbm.count, N.rbm.steps, N.rbm.deepest,
             N.rbm.count ? N.rbm.ms_total / N.rbm.count : 0.0, N.rbm.ms_max, N.rbm.slow,
             N.rbm.first_pred ? "at step " : "never", N.rbm.first_pred);
+    if (N.rbm.count)
+        fprintf(stderr, "[ROLLBACK] match %u time: loads %.2f ms, re-run saves %.2f ms, re-run pose passes %.2f ms (%u, %.3f ms "
+                "each), per rollback; pose passes in normal steps %.3f ms each (%u); passes leaving a binding %u\n",
+                N.rbm.num, N.rbm.ms_load / N.rbm.count, N.rbm.ms_save / N.rbm.count, N.rbm.ms_pose / N.rbm.count,
+                N.rbm.poses, N.rbm.poses ? N.rbm.ms_pose / N.rbm.poses : 0.0,
+                N.rbm.poses_step ? N.rbm.ms_pose_step / N.rbm.poses_step : 0.0, N.rbm.poses_step, N.rbm.pose_binds);
+}
+
+static double qpc_ms(LARGE_INTEGER a, LARGE_INTEGER b)
+{
+    static LARGE_INTEGER freq;
+    if (!freq.QuadPart) QueryPerformanceFrequency(&freq);
+    return (double)(b.QuadPart - a.QuadPart) * 1000.0 / (double)freq.QuadPart;
 }
 
 static void rbm_reset(void)
@@ -4348,12 +4364,24 @@ static uint32_t g_cp_ctrl[4];
 static int g_cp_ctrls;
 static uint32_t g_cp_ctrl_match;
 
+#define CP_CTRL_MODEL   0x11Cu      /* the controller's EAGL model (sub_00027B80 draws it) */
+
 static int cp_eval_in_step(void)
 {
     static int on = -1;
     if (on < 0) {
         const char *e = getenv("RECOMP_NETPLAY_CP_EVAL");
         on = !(e && !strcmp(e, "game"));
+    }
+    return on;
+}
+
+static int cp_draw_in_step(void)
+{
+    static int on = -1;
+    if (on < 0) {
+        const char *e = getenv("RECOMP_NETPLAY_CP_DRAW");
+        on = e && !strcmp(e, "on");
     }
     return on;
 }
@@ -4369,8 +4397,12 @@ static void cp_collect(void)
     }
     g_cp_ctrl_match = N.match;
     g_cp_stale = 0;
-    if (g_cp_ctrls)
-        fprintf(stderr, "[NETPLAY] created fighters: %d skeleton(s) posed in the step (match %08X)\n", g_cp_ctrls, N.match);
+    if (g_cp_ctrls) {
+        uint32_t m = MEM32(g_cp_ctrl[0] + CP_CTRL_MODEL);
+        fprintf(stderr, "[NETPLAY] created fighters: %d skeleton(s) posed in the step (match %08X; model %08X, %u parts, "
+                "drawn in the step: %s)\n", g_cp_ctrls, N.match, m, m >= 0x80000000u && m < 0x84000000u ? MEM32(m + 4u) : 0u,
+                cp_draw_in_step() ? "yes" : "no");
+    }
 }
 
 /* At the start of every step of a lockstep fight: each created fighter's pose pass, once. Also in
@@ -4383,11 +4415,35 @@ static void cp_pose_in_step(void)
     double fp[8];
     int fp_top = g_fp_top, i;
     uint16_t fp_cw = g_fp_control_word;
+    LARGE_INTEGER t0, t1;
+    int bound;
     if (!(N.lockstep || (soak_depth() && N.rb_on)) || !cp_eval_in_step()) return;
     if (g_cp_stale || g_cp_ctrl_match != N.match) cp_collect();
     if (!g_cp_ctrls) return;
+    QueryPerformanceCounter(&t0);
+    bound = rollback_device_bindings();
     memcpy(fp, g_fp_stack, sizeof(fp));
-    for (i = 0; i < g_cp_ctrls; i++) guest_call(sub_00097F90, g_cp_ctrl[i], 0, NULL);
+    for (i = 0; i < g_cp_ctrls; i++) {
+        /* The pass ends in the controller's model update (sub_00027B80, its tail jump), which ends in
+         * EAGL's model draw sub_00114C80(ecx = the model at +0x11C): for each of the model's parts
+         * (count +4, array +0xC, 0x10 each) the material set-up and the part's command list
+         * (sub_00114FE0: the commands' own handlers, D3D calls among them). That is drawing: it binds
+         * the model's textures and palettes (the count wrap of 7cd9c19) and was most of a created
+         * fighter's rollback cost (about 5.8 ms per rollback for each, against 1.2-1.7 ms with stock
+         * fighters, build 46). The step reads the skeleton (sub_000230A0 / sub_00024070 above it), and
+         * the render traversal's own pass draws the model in the frame, so the step's pass runs with
+         * the part count at 0 for its duration: the same pass, every matrix the same, no part drawn.
+         * RECOMP_NETPLAY_CP_DRAW=on (tests): the parts drawn in the step as before. */
+        uint32_t ctrl = g_cp_ctrl[i], model = MEM32(ctrl + CP_CTRL_MODEL), parts = 0;
+        int hide = cp_draw_in_step() == 0 && model >= 0x80000000u && model < 0x84000000u;
+        if (hide) { parts = MEM32(model + 4u); MEM32(model + 4u) = 0; }
+        guest_call(sub_00097F90, ctrl, 0, NULL);
+        if (hide) MEM32(model + 4u) = parts;
+    }
+    QueryPerformanceCounter(&t1);
+    if (N.resim) { N.rbm.ms_pose += qpc_ms(t0, t1); N.rbm.poses++; }
+    else { N.rbm.ms_pose_step += qpc_ms(t0, t1); N.rbm.poses_step++; }
+    if (!bound && rollback_device_bindings()) N.rbm.pose_binds++;
     g_eax = eax; g_ecx = ecx; g_edx = edx; g_ebx = ebx; g_esi = esi; g_edi = edi; g_ebp = ebp; g_esp = esp;
     memcpy(g_fp_stack, fp, sizeof(fp));
     g_fp_top = fp_top;
@@ -5528,6 +5584,8 @@ static void snap_save(void)
 {
     uint32_t step = N.step + 1;
     int slot = (int)(step % ROLLBACK_SLOTS);
+    LARGE_INTEGER t0, t1;
+    QueryPerformanceCounter(&t0);
     /* Every save without device bindings, also the saves inside a re-run and the first one after it:
      * a created fighter's pose pass (cp_pose_in_step, which runs in re-runs since build 45) binds the
      * model's textures and palettes, netplay_on_update's unbind does not run between re-run updates,
@@ -5553,6 +5611,10 @@ static void snap_save(void)
     EnterCriticalSection(&g_cs);
     memcpy(N.snap[slot].seeds, N.seeds, sizeof(N.snap[slot].seeds));
     LeaveCriticalSection(&g_cs);
+    if (N.resim) {
+        QueryPerformanceCounter(&t1);
+        N.rbm.ms_save += qpc_ms(t0, t1);
+    }
 }
 
 static void rollback_to(uint32_t f)
@@ -5595,6 +5657,8 @@ static void rollback_to(uint32_t f)
         return;
     }
     dynvb_after_load();         /* EAGL's dynamic vertex buffers follow the device, not the fight */
+    QueryPerformanceCounter(&t1);
+    N.rbm.ms_load += qpc_ms(t0, t1);
     rollback_check_tables("right after a load");
     {   /* the steps run again record anew which entries they read (netplay_on_pad_read) */
         uint32_t t;
