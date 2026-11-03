@@ -630,7 +630,8 @@ void locker_sample()
 bool locker_gallery(const std::string &p)
 {
     g_rewards_gallery = false;
-    if (p != "locker" && p != "locker-emblem" && p != "stats-rewards" && p.compare(0, 14, "ranked-results") != 0 && p != "stats-ranked")
+    if (p != "locker" && p != "locker-emblem" && p != "stats-rewards" && p.compare(0, 14, "ranked-results") != 0 && p != "stats-ranked" &&
+        p.compare(0, 11, "ranked-room") != 0 && p.compare(0, 13, "ranked-versus") != 0)      // the cards' frames (build 52)
         return false;
     locker_sample();
     G.ranked = true;

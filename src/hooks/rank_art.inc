@@ -188,3 +188,159 @@ void avatar_frame(ImDrawList *dl, const Frame &f, float cx, float cy, float r, i
         }
     }
 }
+
+// ---- a player card's rank (build 52: the versus screen and the ranked room's cards) ----------------------
+//
+// The emblem as a patch over the card's top edge, centred, and under it the rank plate in the tier's colour:
+// the tier's name in the stencil font on a band of the emblem's metal (a Legend: the neon fire), and under it
+// on a dark band the division chevrons and the rating (a Legend: its Top 10 place, "#3 NY", and the rating).
+// A player still placing gets the same plate in steel, PLACEMENT and a dot per placement set (filled for the
+// sets played), and a "?" patch; a player without a rank a plain UNRANKED plate. Sizes are in units of `s`
+// (1 = the room card, 128 wide; the versus card uses 1.4): the patch's art is 50 tall, centred 2 below
+// `top`; the plate is 112 wide, from top + 27 to top + 58 (CARD_RANK_H), so a card's portrait starts lower.
+
+const float CARD_RANK_H = 58.0f;
+
+struct CardRank {
+    int kind = 0;           // 0 no rank, 1 placing, 2 ranked
+    int tier = 0, division = 0, rating = 0, top = 0;
+    int placed = 0, of = 5; // placing: the sets played of the placement sets
+    bool provisional = false;
+};
+
+ImU32 mix_col(ImU32 a, ImU32 b, float t)
+{
+    auto ch = [&](int sh) {
+        float x = (float)((a >> sh) & 0xFF), y = (float)((b >> sh) & 0xFF);
+        return (ImU32)(x + (y - x) * t + 0.5f) << sh;
+    };
+    return ch(IM_COL32_R_SHIFT) | ch(IM_COL32_G_SHIFT) | ch(IM_COL32_B_SHIFT) | (a & IM_COL32_A_MASK);
+}
+
+// A small division chevron centred at cx, cy, `w` wide: lit in the tier's colour, or dark.
+void mini_chevron(ImDrawList *dl, const Frame &f, float cx, float cy, float w, ImU32 col, bool on, float alpha)
+{
+    float h = w * 0.62f, t = w * 0.34f;
+    ImVec2 a = f.p(cx - w / 2, cy + h / 2), b = f.p(cx, cy - h / 2), c = f.p(cx + w / 2, cy + h / 2);
+    ImVec2 c2 = f.p(cx + w / 2, cy + h / 2 + t * 0.55f), b2 = f.p(cx, cy - h / 2 + t), a2 = f.p(cx - w / 2, cy + h / 2 + t * 0.55f);
+    ImVec2 q1[4] = { a, b, b2, a2 }, q2[4] = { b, c, c2, b2 };
+    ImU32 fill = on ? with_alpha(col, alpha) : with_alpha(IM_COL32(52, 48, 56, 255), alpha);
+    dl->AddConvexPolyFilled(q1, 4, fill);
+    dl->AddConvexPolyFilled(q2, 4, fill);
+    if (on) {
+        ImVec2 shine[3] = { f.p(cx - w * 0.42f, cy + h * 0.42f), f.p(cx, cy - h * 0.42f), f.p(cx + w * 0.42f, cy + h * 0.42f) };
+        dl->AddPolyline(shine, 3, with_alpha(IM_COL32(255, 255, 255, 150), alpha), 0, std::max(0.6f, w * 0.06f) * f.s());
+    }
+}
+
+// The plate alone, centred at cx, its top at y.
+void card_plate(ImDrawList *dl, const Frame &f, float cx, float y, float s, const CardRank &r, float alpha = 1.0f)
+{
+    const float W = 112 * s, H1 = 17 * s, H2 = 14 * s, H = H1 + H2, x = cx - W / 2;
+    bool legend = r.kind == 2 && r.tier >= 7;
+    float p = legend ? pulse01(1.6f) : 0.6f;
+    ImU32 col = r.kind == 2 ? tier_col(r.tier) : r.kind == 1 ? IM_COL32(176, 184, 198, 255) : IM_COL32(110, 110, 116, 255);
+    ImU32 edge = legend ? IM_COL32(255, (int)(59 + 120 * p), (int)(84 - 30 * p), 255) : col;
+    if (r.kind == 2 && r.tier >= 5) {       // Kingpin and up glow (the design); the Legend's breathes
+        for (int g = 3; g >= 1; g--) {
+            float e = g * 1.6f * s;
+            dl->AddRectFilled(f.p(x - e, y - e), f.p(x + W + e, y + H + e), with_alpha(edge, alpha * (legend ? 0.05f + 0.07f * p : 0.06f)),
+                              (4 * s + e) * f.s());
+        }
+    }
+    dl->AddRectFilled(f.p(x, y), f.p(x + W, y + H), with_alpha(IM_COL32(12, 10, 13, 245), alpha), 4 * s * f.s());
+    // the metal band: the tier's colour, lit from above (the Legend: fire from gold to neon red)
+    ImU32 top_c = legend ? IM_COL32(255, 196, 70, 255) : mix_col(col, IM_COL32(255, 255, 255, 255), 0.30f);
+    ImU32 bot_c = legend ? IM_COL32(214, 28, 64, 255) : mix_col(col, IM_COL32(0, 0, 0, 255), 0.42f);
+    float in = 1.2f * s;
+    dl->AddRectFilledMultiColor(f.p(x + in, y + in), f.p(x + W - in, y + H1), with_alpha(top_c, alpha), with_alpha(top_c, alpha),
+                                with_alpha(bot_c, alpha), with_alpha(bot_c, alpha));
+    dl->AddLine(f.p(x + 3 * s, y + in + 0.6f * s), f.p(x + W - 3 * s, y + in + 0.6f * s), with_alpha(IM_COL32(255, 255, 255, 140), alpha),
+                std::max(0.6f, 0.8f * s) * f.s());
+    dl->AddLine(f.p(x + in, y + H1), f.p(x + W - in, y + H1), with_alpha(IM_COL32(0, 0, 0, 200), alpha), std::max(0.8f, 1.0f * s) * f.s());
+    std::string name = r.kind == 2 ? upper(netranked_tier_name(r.tier)) : r.kind == 1 ? std::string("PLACEMENT") : std::string("UNRANKED");
+    float ts = fit_size(f, g_stencil, 12.5f * s, name.c_str(), W - 10 * s);
+    text(dl, f, g_stencil, ts, cx, y + (H1 - ts) * 0.5f + 0.4f * s, with_alpha(IM_COL32(20, 14, 12, 255), alpha), name.c_str(), CENTER, 0);
+    // the dark band: chevrons and the rating, the Legend's place, the placement dots
+    float by = y + H1, mid = by + H2 * 0.5f, fs = 10 * s;
+    char rating[24];
+    snprintf(rating, sizeof(rating), r.provisional ? "%d ?" : "%d", r.rating);
+    if (r.kind == 2 && !legend) {
+        int lit = division_lit(r.division);
+        float cw = 10 * s, gap = 2.5f * s, rw = text_width(f, g_title, fs, rating);
+        float total = 3 * cw + 2 * gap + 6 * s + rw, x0 = cx - total / 2;
+        for (int i = 0; i < 3; i++) mini_chevron(dl, f, x0 + cw / 2 + i * (cw + gap), mid - 0.8f * s, cw, col, i < lit, alpha);
+        text(dl, f, g_title, fs, x0 + 3 * cw + 2 * gap + 6 * s, mid - fs * 0.56f, with_alpha(CREAM, alpha), rating, LEFT, 0);
+    } else if (legend) {
+        char place[16];
+        snprintf(place, sizeof(place), "#%d NY", r.top);
+        bool top10 = r.top >= 1 && r.top <= 10;
+        float pw = top10 ? text_width(f, g_title, fs, place) + 7 * s : 0, rw = text_width(f, g_title, fs, rating);
+        float x0 = cx - (pw + rw) / 2;
+        if (top10) text(dl, f, g_title, fs, x0, mid - fs * 0.56f, with_alpha(IM_COL32(255, 197, 61, 255), alpha), place, LEFT, 0);
+        text(dl, f, g_title, fs, x0 + pw, mid - fs * 0.56f, with_alpha(CREAM, alpha), rating, LEFT, 0);
+    } else if (r.kind == 1) {
+        int n = std::max(1, std::min(10, r.of));
+        float step = 9 * s, rad = 2.7f * s, x0 = cx - (n - 1) * step / 2;
+        for (int i = 0; i < n; i++) {
+            ImVec2 c = f.p(x0 + i * step, mid);
+            if (i < r.placed) dl->AddCircleFilled(c, rad * f.s(), with_alpha(IM_COL32(255, 168, 26, 255), alpha), 16);
+            else dl->AddCircle(c, (rad - 0.4f * s) * f.s(), with_alpha(IM_COL32(200, 204, 214, 200), alpha), 16, std::max(0.8f, 1.0f * s) * f.s());
+        }
+    } else {
+        text(dl, f, g_title, 8.5f * s, cx, mid - 8.5f * s * 0.56f, with_alpha(GREY, alpha), "NO RANK YET", CENTER, 0);
+    }
+    dl->AddRect(f.p(x, y), f.p(x + W, y + H), with_alpha(edge, alpha * 0.95f), 4 * s * f.s(), 0, std::max(1.0f, 1.3f * s) * f.s());
+}
+
+// The patch over the card's top edge: the emblem (a "?" while placing, nothing without a rank).
+void card_patch(ImDrawList *dl, const Frame &f, float cx, float top, float s, const CardRank &r, float alpha = 1.0f)
+{
+    if (r.kind == 0) return;
+    float E = 50 * s, ecy = top + 2 * s;
+    // a soft shadow under the patch, so it sits on the card
+    for (int g = 3; g >= 1; g--)
+        dl->AddCircleFilled(f.p(cx, ecy + 2 * s), (E * 0.40f + g * 2.2f * s) * f.s(), with_alpha(IM_COL32(0, 0, 0, 255), alpha * 0.16f), 32);
+    if (r.kind == 1) {
+        float rr = E * 0.40f;
+        dl->AddCircleFilled(f.p(cx, ecy), rr * f.s(), with_alpha(IM_COL32(18, 16, 21, 255), alpha), 32);
+        dl->AddCircle(f.p(cx, ecy), rr * f.s(), with_alpha(IM_COL32(176, 184, 198, 255), alpha), 32, 2.4f * s * f.s());
+        dl->AddCircle(f.p(cx, ecy), (rr - 3.2f * s) * f.s(), with_alpha(IM_COL32(176, 184, 198, 90), alpha), 32, 1.0f * s * f.s());
+        text(dl, f, g_stencil, 22 * s, cx, ecy - 11 * s, with_alpha(CREAM, alpha), "?", CENTER, 0.8f);
+        return;
+    }
+    if (r.tier >= 5) {      // Kingpin and up glow; the Legend breathes
+        float p = r.tier >= 7 ? pulse01(1.6f) : 0.6f;
+        for (int g = 4; g >= 1; g--)
+            dl->AddCircleFilled(f.p(cx, ecy), (E * 0.42f + g * 4 * s) * f.s(), with_alpha(tier_col(r.tier), alpha * (0.04f + 0.03f * p)), 32);
+    }
+    float B = E * 256.0f / 210.0f;
+    const Tex &t = emblem_tex(r.tier, B * f.s() > 70);
+    if (t.srv) image(dl, f, t, cx - B / 2, ecy - B * 113.0f / 256.0f, B, B, with_alpha(IM_COL32_WHITE, alpha));
+    else emblem_fallback(dl, f, cx, ecy, E * 0.44f, r.tier, alpha);
+}
+
+// The whole rank of a card whose top edge is `top`, centred at cx.
+void card_rank(ImDrawList *dl, const Frame &f, float cx, float top, float s, const CardRank &r, float alpha = 1.0f)
+{
+    card_patch(dl, f, cx, top, s, r, alpha);
+    card_plate(dl, f, cx, top + 27 * s, s, r, alpha);
+}
+
+// A card's border in its player's avatar frame colour (the Locker's equipped frame; -1 none), the Legend's
+// glowing softly.
+void card_border(ImDrawList *dl, const Frame &f, float x, float y, float w, float h, float round, int frame, float alpha)
+{
+    if (frame < 0 || frame > 7) return;
+    ImU32 col = tier_col(frame);
+    if (frame == 7) {
+        float p = pulse01(1.6f);
+        col = IM_COL32(255, (int)(77 + 120 * p), (int)(94 - 30 * p), 255);
+        for (int g = 3; g >= 1; g--) {
+            float e = g * 1.8f;
+            dl->AddRect(f.p(x - e, y - e), f.p(x + w + e, y + h + e), with_alpha(col, alpha * (0.10f + 0.12f * p) / g),
+                        (round + e) * f.s(), 0, 2.0f * f.s());
+        }
+    }
+    dl->AddRect(f.p(x, y), f.p(x + w, y + h), with_alpha(col, alpha * (frame >= 5 ? 0.95f : 0.8f)), round * f.s(), 0, 1.8f * f.s());
+}

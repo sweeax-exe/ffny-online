@@ -38,6 +38,7 @@ struct RankedSample {
     int accepted = -1;
     NetModeRank after[NETRANK_MODES] = {};
     NetDraft draft = {};
+    long long look[4] = {};             // the slots' looks (locker_sample's ids; 0 none)
 } RG;
 
 int lobby_rankinfo(NetRankInfo *out)
@@ -456,21 +457,46 @@ const char *ranked_picker_line(const NetRoom &r, const NetRankInfo &ri, char *bu
     return buf;
 }
 
-// The rank on a room card, over the portrait's foot.
-void ranked_card(ImDrawList *dl, const Frame &f, const NetRankInfo &ri, int slot, float x, float y, float w)
+// The look (Locker rewards) of a card's player: its frame colours the card, its ladder place names a Legend's
+// Top 10 place. The gallery's samples by slot.
+const social::Look *rank_card_look(int slot, const char *name)
 {
+    if (gallery_on()) return slot >= 0 && slot < 4 && RG.look[slot] ? look_of(RG.look[slot]) : nullptr;
+    if (!social_enabled() || !name || !name[0]) return nullptr;
+    return look_of(room_account_of(name));
+}
+
+// What a card shows of a RANKINFO player (none: no rank).
+CardRank card_rank_of(const NetRankInfo &ri, int slot, const social::Look *lk)
+{
+    CardRank c;
     const NetRankPlayer *p = netranked_player(&ri, slot);
-    if (!p) return;
-    char label[48];
-    netranked_player_label(p, 5, label, sizeof(label));
-    bool placing = p->division == NETRANK_PLACEMENT || p->placements > 0;
-    if (placing) {
-        rank_plate(dl, f, x + w / 2, y, w - 12, upper(label).c_str(), 0, true);
-        return;
+    if (!p) return c;
+    if (p->division == NETRANK_PLACEMENT || p->placements > 0) {
+        c.kind = 1;
+        c.of = 5;
+        c.placed = std::max(0, std::min(5, 5 - p->placements));
+        return c;
     }
-    int tier = netranked_tier_of(p->division);
-    emblem_small(dl, f, x + 16, y + 8, 22, tier);
-    rank_plate(dl, f, x + w / 2 + 10, y, w - 34, upper(label).c_str(), tier, false);
+    c.kind = 2;
+    c.division = p->division;
+    c.tier = netranked_tier_of(p->division);
+    c.rating = p->rating;
+    c.provisional = p->provisional != 0;
+    if (c.tier >= 7 && lk && ri.mode >= 0 && ri.mode < NETRANK_MODES) {
+        c.top = lk->ranks[ri.mode].top;
+        if (!c.top && lk->emblem_mode == ri.mode && lk->emblem_tier >= 7) c.top = lk->emblem_top;
+    }
+    return c;
+}
+
+// The rank on a ranked room's card (x, y its top left, w by h): the patch over the top edge, the plate under
+// it (the card's portrait starts at y + RANK_ROOM_PORTRAIT), the border in the player's frame colour.
+void ranked_card(ImDrawList *dl, const Frame &f, const NetRankInfo &ri, int slot, const char *name, float x, float y, float w, float h)
+{
+    const social::Look *lk = rank_card_look(slot, name);
+    card_border(dl, f, x, y, w, h, 10, lk && ranked_shown() ? lk->frame : -1);
+    card_rank(dl, f, x + w / 2, y, 1.0f, card_rank_of(ri, slot, lk));
 }
 
 // A created fighter: Open only (the search's primary, or the set's mode in its room).
@@ -485,6 +511,13 @@ int &ranked_stats_tab() { return R.stats_tab; }
 
 // ---- the versus screen ----
 
+// A ranked set's two cards (draw_versus; RANK_VS_* in online_screen.cpp).
+bool ranked_versus_on(const NetVersus &v)
+{
+    NetRankInfo ri;
+    return v.count == 2 && !NETPLAY_IS_KOTH(v.room_mode) && lobby_rankinfo(&ri) && ri.has_set;
+}
+
 void ranked_versus(ImDrawList *dl, const Frame &f, const NetVersus &v, float alpha)
 {
     NetRankInfo ri;
@@ -497,22 +530,12 @@ void ranked_versus(ImDrawList *dl, const Frame &f, const NetVersus &v, float alp
              p0 ? p0->set_wins : 0, p1 ? p1->set_wins : 0);
     text(dl, f, g_title, 14, 320, 58, ORANGE, line, CENTER, 1.0f);
     for (int s = 0; s < 2; s++) {
-        const NetRankPlayer *p = s == 0 ? p0 : p1;
-        if (!p) continue;
-        char label[48], rating[16];
-        netranked_player_label(p, 5, label, sizeof(label));
-        bool placing = p->division == NETRANK_PLACEMENT || p->placements > 0;
-        float x = s == 0 ? 36 : 640 - 36 - 196;
-        // on the portrait's top left ("YOU" sits on its right corner); the 48 emblem beside the plate
-        if (placing) {
-            rank_plate(dl, f, x + 72, 78, 120, upper(label).c_str(), 0, true);
-        } else {
-            int tier = netranked_tier_of(p->division);
-            emblem_small(dl, f, x + 20, 90, 40, tier);
-            rank_plate(dl, f, x + 92, 78, 104, upper(label).c_str(), tier, false);
-            snprintf(rating, sizeof(rating), "%d", p->rating);
-            text(dl, f, g_title, 11, x + 92, 97, CREAM, rating, CENTER, 0.8f);
-        }
+        // the card (draw_versus places it lower and starts its portrait under the plate): the patch centred
+        // on its top edge, the plate under it, the border in the player's frame colour
+        float x = s == 0 ? 36 : 640 - 36 - RANK_VS_W;
+        const social::Look *lk = rank_card_look(s, v.name[s]);
+        card_border(dl, f, x, RANK_VS_Y, RANK_VS_W, RANK_VS_PAD + RANK_VS_PH + 92, 12, lk && ranked_shown() ? lk->frame : -1);
+        card_rank(dl, f, x + RANK_VS_W / 2, RANK_VS_Y, RANK_VS_S, card_rank_of(ri, s, lk));
     }
     for (int i = k; i < dl->VtxBuffer.Size; i++) {      // the page's fade
         ImU32 &c = dl->VtxBuffer[i].col;
@@ -641,15 +664,10 @@ void draw_ranked_results(ImDrawList *dl, const Frame &f, const Pad &pad)
         std::string oname = upper(R.opp_name);
         text(dl, f, g_title, fit_size(f, g_title, 14, oname.c_str(), 140), 32, 173, CREAM, oname.c_str(), LEFT, 0.8f);
     }
-    if (opp) {
-        char olabel[48];
-        netranked_player_label(opp, 5, olabel, sizeof(olabel));
-        bool oplacing = opp->division == NETRANK_PLACEMENT || opp->placements > 0;
-        int otier = netranked_tier_of(oplacing ? 0 : opp->division);
-        if (!oplacing) emblem_small(dl, f, 39, 199, 15, otier);
-        text(dl, f, g_title, 11, oplacing ? 32.0f : 50.0f, 193, oplacing ? GREY : tier_colour(otier), upper(olabel).c_str(), LEFT, 0.7f);
-        snprintf(line, sizeof(line), "RATING %d", opp->rating);
-        text(dl, f, g_title, 10, 32, 214, GREY, line, LEFT, 0.6f);
+    if (opp) {      // the opponent's emblem and the cards' rank plate (build 52)
+        CardRank oc = card_rank_of(ri, opp->slot, rank_card_look(opp->slot, R.opp_name));
+        if (oc.kind == 2) emblem_small(dl, f, 42, 205, 26, oc.tier);
+        card_plate(dl, f, oc.kind == 2 ? 104.0f : 77.0f, 193, 0.8f, oc);
     }
 
     if (!rated) {
@@ -1350,6 +1368,25 @@ void ranked_sample_rank(NetRankInfo &ri, int game, int w0, int w1, int picker, i
     ri.winner = winner;
 }
 
+// The cards' variants (build 52): Ann Kingpin II in her gold frame against Ben placing 2/5 in a Hustler
+// frame; "-legend": Ann a Def Jam Legend, #3 in NY, in the Legend frame, against Ben Kingpin II;
+// "-unranked": Ben without a rank (no RANKINFO entry).
+void ranked_sample_cards(const std::string &p)
+{
+    RG.look[0] = 7;
+    RG.look[1] = 8;
+    auto ends = [&](const char *s) { size_t n = strlen(s); return p.size() >= n && p.compare(p.size() - n, n, s) == 0; };
+    if (ends("-legend")) {
+        RG.rank.p[0] = { 0, 21, 0, 2131, RG.rank.p[0].set_wins, 0 };
+        RG.rank.p[1] = { 1, 16, 0, 1872, RG.rank.p[1].set_wins, 0 };
+        RG.look[0] = 9;
+        RG.look[1] = 7;
+    } else if (ends("-unranked")) {
+        RG.rank.count = 1;
+        RG.look[1] = 0;
+    }
+}
+
 // The pages: ranked-modes, ranked-search, ranked-accept, ranked-room, ranked-vote, ranked-versus,
 // ranked-results, ranked-results-placement, stats-ranked. Returns false for any other page.
 bool ranked_gallery(const std::string &p)
@@ -1377,18 +1414,19 @@ bool ranked_gallery(const std::string &p)
     if (p == "ranked-modes") { S.page = RANKED_MODES; }
     else if (p == "ranked" || p == "ranked-search") { S.page = RANKED; G.queue = NETQUEUE_SEARCHING; }
     else if (p == "ranked-accept") { S.page = RANKED; G.queue = NETQUEUE_ACCEPT; }
-    else if (p == "ranked-room" || p == "ranked-vote") {
+    else if (p.compare(0, 11, "ranked-room") == 0 || p == "ranked-vote") {
         S.page = HUB;
         G.room = sample_room(0, 2, 2);
         snprintf(G.room.settings.name, sizeof(G.room.settings.name), "Ranked");
         ranked_sample_rank(RG.rank, 2, 1, 0, 1, NETRANK_SET_RUNNING);
+        ranked_sample_cards(p);
         if (p == "ranked-vote") {
             G.room.phase = 1;
             G.room.candidate_count = 3;
             G.room.candidates[0] = 2; G.room.candidates[1] = 9; G.room.candidates[2] = 13;
             G.room.ms_left = 12000;
         }
-    } else if (p == "ranked-versus") {
+    } else if (p.compare(0, 13, "ranked-versus") == 0) {
         G.state = NETPLAY_CONNECTED;
         G.room = sample_room(0, 2, 2);
         G.room.phase = 2;
@@ -1396,12 +1434,19 @@ bool ranked_gallery(const std::string &p)
         snprintf(G.versus.room, sizeof(G.versus.room), "Ranked");
         G.versus.ms = 3000 + G.page_ms;     // settled: the cards in, the ranks on them
         ranked_sample_rank(RG.rank, 2, 1, 0, 1, NETRANK_SET_RUNNING);
+        ranked_sample_cards(p);
     } else if (p.compare(0, 14, "ranked-results") == 0) {
         S.page = RANKED_RESULTS;
         bool placing = p == "ranked-results-placement";
         ranked_sample_rank(R.set, 3, 2, 1, 0, 0);
         R.set.mode = placing ? NETRANK_OPEN : NETRANK_CLASSIC;
         R.set_you = 0;
+        RG.look[0] = 7;
+        RG.look[1] = 8;
+        if (p == "ranked-results-legend") {     // the opponent a Legend too, #3 in NY (its plate)
+            R.set.p[1].division = 21; R.set.p[1].placements = 0; R.set.p[1].rating = 2190; R.set.p[1].provisional = 0;
+            RG.look[1] = 9;
+        }
         R.results_since = GetTickCount64();
         for (int m = 0; m < NETRANK_MODES; m++) R.before[m] = RG.after[m] = NetModeRank();
         netranked_parse_line("1872|92|16|0|5|0|28|14|6|Kingpin II|1903|Kingpin I|promotion", &R.before[NETRANK_CLASSIC]);
