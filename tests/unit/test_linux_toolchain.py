@@ -74,9 +74,27 @@ def test_zig_is_pruned_to_linux_glibc_and_wrapped_for_glibc_2_31(tmp_path, monke
         assert wrapper.stat().st_mode & 0o111
         text = wrapper.read_text()
         # Found next to itself wherever setup copied it, never by an absolute path.
-        assert '"$(dirname "$(readlink -f "$0")")/../zig/zig" ' in text and str(tmp_path) not in text
+        assert 'here=$(dirname "$(readlink -f "$0")")' in text and '"$here/../zig/zig" ' in text
+        assert str(tmp_path) not in text
     for name in ('zig-cc', 'zig-c++'):
-        assert '-target x86_64-linux-gnu.2.31 -fno-sanitize=all "$@"' in (tools / 'bin' / name).read_text()
+        assert ('-target x86_64-linux-gnu.2.31 -fno-sanitize=all -include "$here/../include/glibc-symbols.h" "$@"'
+                in (tools / 'bin' / name).read_text())
+    assert (tools / 'include/glibc-symbols.h').read_bytes() == linux_payload.GLIBC_SYMBOLS.read_bytes()
+
+
+def test_the_glibc_symbol_header_matches_the_pinned_zig():
+    """setup/linux/glibc-symbols.h is made for one Zig: a new pin needs scripts/zig-glibc-symbols.py again."""
+    toolchain = json.loads((ROOT / 'setup/dependencies-linux.json').read_text())['toolchain']
+    zig_version = re.search(r'/download/([0-9.]+)/', toolchain['zig']['url'])[1]
+    header = (ROOT / 'setup/linux/glibc-symbols.h').read_text()
+    assert f'for Zig {zig_version} and glibc {toolchain["glibc"]}:' in header
+    bound = dict(re.findall(r'\.symver (\w+), \1@(GLIBC_[0-9.]+)', header))
+    # The ones the game spends its time in, at the versions glibc 2.31 gives them.
+    assert bound['memcpy'] == 'GLIBC_2.14' and bound['exp'] == 'GLIBC_2.29' and bound['floor'] == 'GLIBC_2.2.5'
+    assert {'memset', 'memmove', 'memcmp', 'strlen', 'fmod', 'sin', 'cos', 'sqrt', 'log'} <= set(bound)
+    assert all(tuple(map(int, v[6:].split('.'))) <= (2, 31) for v in bound.values())
+    # Assembly sources are preprocessed with it too: they must see nothing.
+    assert header.count('#if !defined(__ASSEMBLER__)') == 1
 
 
 def bundled_payload(setup):

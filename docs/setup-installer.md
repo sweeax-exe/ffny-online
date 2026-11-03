@@ -301,7 +301,11 @@ computer is used for the build, so it is the same on every distribution (the Cac
 failure of #83/#90 came from a computer's own toolchain), and the game it builds needs
 only glibc 2.31 or newer and the computer's own Vulkan loader: SDL loads X11 or Wayland,
 PipeWire, PulseAudio or ALSA, D-Bus and udev from the computer when the game starts. Zig
-compiles its C and C++ runtimes once per version, into the version's `zig-cache`. Two
+compiles its C and C++ runtimes once per version, into the version's `zig-cache`. Zig's
+runtime also defines `memcpy`, `memset`, `strlen`, `floor`, `fmod`, `sin` and other functions
+glibc has, and a program's own definition wins over the C library's: the game's scene loads
+on the Steam Deck were 17-20% longer than the container build's until the compilers bound
+those calls to glibc (`setup/linux/glibc-symbols.h`, included by `zig-cc` and `zig-c++`). Two
 developer options remain: `--toolchain host` (the computer's clang, cmake, ninja and the
 SDL3, Vulkan and shaderc development packages; one probe build checks them; the game then
 uses the computer's SDL3 and shaderc) and `--toolchain container` (the pinned Arch Linux
@@ -349,14 +353,17 @@ the wizard, the engine and the launcher template, each pinned by SHA-256 in
 date and package list. Since v0.14.0 it also carries the game's build toolchain
 (`toolchain` in the same file): `tools/zig` (Zig's release, pruned to what an
 x86_64-linux-gnu build reads) with the `tools/bin/zig-cc`, `zig-c++`, `zig-ar` and
-`zig-ranlib` wrappers, CMake and Ninja in `tools/`, and in `deps/` the static SDL3 (the
+`zig-ranlib` wrappers and `tools/include/glibc-symbols.h` (made for the pinned Zig by
+`scripts/zig-glibc-symbols.py`: run it again when the pin changes), CMake and Ninja in
+`tools/`, and in `deps/` the static SDL3 (the
 toolkit's pin) and shaderc (the macOS payload's pin), the Vulkan headers and a link-only
 stub of the Vulkan loader's entry points. `scripts/build-toolchain-linux.sh` builds `deps/`
 with the payload's own Zig in the pinned Ubuntu 22.04 image, which supplies only headers.
 Build it with `scripts/build-setup-linux.sh` (`--development` for a local prototype from a
 dirty checkout); `check-setup-assets.py` verifies that the tarball's payload is the
 inspected one, byte for byte, and nothing else, and that its compiler builds and runs a C++
-program linked against glibc 2.31 at most.
+program linked against glibc 2.31 at most, whose `memcpy`, `strlen`, `floor` and `fmod` calls
+go to glibc even with Zig's runtime linked in.
 
 ### Validation
 
