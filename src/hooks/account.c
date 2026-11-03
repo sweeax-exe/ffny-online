@@ -49,10 +49,16 @@ static void set_reason(const char *text)
 /* One HTTPS request to the account service, with a body of blen bytes of type ctype (if any).
  * Returns the HTTP status, 0 when the service could not be reached; the answer goes to buf.
  * limit_ms > 0 caps each of WinHTTP's waits (the crash report); 0 keeps the usual ones. */
-static int request_body_ms(const wchar_t *method, const wchar_t *path, const char *token, const char *ctype,
-                           const void *body, DWORD blen, char *buf, int size, int limit_ms)
+/* The social long-poll's request (account_call with a live slot): another thread may close it to
+ * cancel a request that waits (social_shutdown); the owner then leaves that handle alone. */
+static SRWLOCK g_live_lock = SRWLOCK_INIT;
+
+static int request_full(const wchar_t *method, const wchar_t *path, const char *token, const char *ctype,
+                        const void *body, DWORD blen, char *buf, int size, int limit_ms, int receive_ms,
+                        void *volatile *live)
 {
     HINTERNET session = NULL, connect = NULL, req = NULL;
+    int canceled = 0;
     DWORD status = 0, ssize = sizeof(status);
     int n = 0;
     buf[0] = 0;
@@ -73,11 +79,18 @@ static int request_body_ms(const wchar_t *method, const wchar_t *path, const cha
                           WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
     /* A bug report of a few MB may take a while on a slow line. */
     if (session && limit_ms > 0) WinHttpSetTimeouts(session, limit_ms, limit_ms, limit_ms, limit_ms);
-    else if (session) WinHttpSetTimeouts(session, 5000, 5000, blen > 65536 ? 120000 : 10000, 15000);
+    else if (session) WinHttpSetTimeouts(session, 5000, 5000, blen > 65536 ? 120000 : 10000,
+                                         receive_ms > 0 ? receive_ms : 15000);
     if (session) connect = WinHttpConnect(session, host, port, 0);
     if (connect) req = WinHttpOpenRequest(connect, method, path, NULL, WINHTTP_NO_REFERER,
                                           WINHTTP_DEFAULT_ACCEPT_TYPES, secure);
-    if (req) {
+    if (req && live) {
+        AcquireSRWLockExclusive(&g_live_lock);
+        if (*live == (void *)1) canceled = 1;           /* canceled before it started */
+        else *live = req;
+        ReleaseSRWLockExclusive(&g_live_lock);
+    }
+    if (req && !canceled) {
         wchar_t headers[300] = L"";
         if (token && *token) swprintf(headers, 200, L"Authorization: Bearer %hs\r\n", token);
         if (body) swprintf(headers + wcslen(headers), 300 - wcslen(headers), L"Content-Type: %hs\r\n", ctype);
@@ -95,10 +108,22 @@ static int request_body_ms(const wchar_t *method, const wchar_t *path, const cha
             buf[n] = 0;
         }
     }
-    if (req) WinHttpCloseHandle(req);
+    if (req && live) {
+        AcquireSRWLockExclusive(&g_live_lock);
+        if (*live == req) *live = NULL;
+        else if (!canceled) canceled = 2;               /* account_cancel_call closed it */
+        ReleaseSRWLockExclusive(&g_live_lock);
+    }
+    if (req && canceled != 2) WinHttpCloseHandle(req);
     if (connect) WinHttpCloseHandle(connect);
     if (session) WinHttpCloseHandle(session);
-    return (int)status;
+    return canceled ? 0 : (int)status;
+}
+
+static int request_body_ms(const wchar_t *method, const wchar_t *path, const char *token, const char *ctype,
+                           const void *body, DWORD blen, char *buf, int size, int limit_ms)
+{
+    return request_full(method, path, token, ctype, body, blen, buf, size, limit_ms, 0, NULL);
 }
 
 static int request_body(const wchar_t *method, const wchar_t *path, const char *token, const char *ctype,
@@ -568,6 +593,34 @@ int account_ranked_ticket(char out[33])
     return 1;
 }
 
+int account_call(const char *method, const char *path, const char *json, char *buf, int size, int receive_ms,
+                 void *volatile *live)
+{
+    char token[65];
+    wchar_t wmethod[16], wpath[512];
+    int status;
+    if (size > 0) buf[0] = 0;
+    if (g_state != ACCOUNT_IN && g_state != ACCOUNT_CHECKING) return -1;
+    if (!MultiByteToWideChar(CP_UTF8, 0, path, -1, wpath, 512)) return -1;
+    swprintf(wmethod, 16, L"%hs", method);
+    AcquireSRWLockShared(&g_lock);
+    memcpy(token, g_token, sizeof(token));
+    ReleaseSRWLockShared(&g_lock);
+    status = request_full(wmethod, wpath, token, "application/json", json, json ? (DWORD)strlen(json) : 0, buf, size,
+                          0, receive_ms, live);
+    SecureZeroMemory(token, sizeof(token));
+    if (status == 401) { forget(); set_reason("Your sign-in ran out; sign in again."); set_state(ACCOUNT_OUT); }
+    return status;
+}
+
+void account_cancel_call(void *volatile *live)
+{
+    AcquireSRWLockExclusive(&g_live_lock);
+    if (*live && *live != (void *)1) WinHttpCloseHandle((HINTERNET)*live);
+    *live = (void *)1;      /* closed, or not to start: the owner leaves the handle alone */
+    ReleaseSRWLockExclusive(&g_live_lock);
+}
+
 int account_send_bug_report(const char *ctype, const void *body, int len, char *out, int size)
 {
     char token[65];
@@ -649,6 +702,10 @@ void account_fetch_stats_page(int page) { (void)page; }
 int account_stats_busy(void) { return 0; }
 int account_stats(char *out, int size) { (void)out; (void)size; return 0; }
 int account_ranked_ticket(char out[33]) { out[0] = 0; return 0; }
+int account_call(const char *method, const char *path, const char *json, char *buf, int size, int receive_ms,
+                 void *volatile *live)
+{ (void)method; (void)path; (void)json; (void)receive_ms; (void)live; if (size > 0) buf[0] = 0; return -1; }
+void account_cancel_call(void *volatile *live) { (void)live; }
 int account_send_bug_report(const char *ctype, const void *body, int len, char *out, int size)
 { (void)ctype; (void)body; (void)len; if (size > 0) out[0] = 0; return 0; }
 
