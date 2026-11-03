@@ -2065,7 +2065,10 @@ void draw_stats(ImDrawList *dl, const Frame &f, const Pad &pad)
         const auto &r = v.recent[i];
         if (r.size() < 4) continue;
         bool win = r[0] == "win", draw = r[0] == "draw";
-        std::string line = r[1] + " vs " + (r[2].empty() ? "?" : r[2]);
+        // a created fighter: its own name since build 52 (the relay tells the account service the
+        // name its card shows); older records say "Created Fighter", or "Fighter 99" before b099207
+        std::string mine = r[1] == "Fighter 99" ? std::string("Created Fighter") : r[1];
+        std::string line = mine + " vs " + (r[2].empty() ? "?" : r[2]);
         float y = y0 + 16 + i * pitch;
         text(dl, f, g_title, 13, 46, y, win ? GREEN : draw ? GREY : IM_COL32(235, 90, 80, 255), win ? "W" : draw ? "D" : "L",
              LEFT, 1.1f);
@@ -3991,7 +3994,7 @@ void gallery_step()
         snprintf(buf, sizeof(buf),
                  "name=Ann\nmatches=42\nwins=27\nlosses=14\ndraws=1\nwin_rate=64\nstreak=3\nbest_streak=7\nrank=12\nmin=3\n"
                  "favorite=%d\nfavorite_name=%s\nranked=1520|10\nteam=12|8|4|0\nffa=9|3|5|1\n"
-                 "recent=win|Ann|Ben|0\nrecent=loss|Ann|Cal|0\nrecent=win|Ann|Dee|0\n"
+                 "recent=win|Brooklyn Bruiser|Ben|0\nrecent=loss|Fighter 99|Cal|0\nrecent=win|Ann|Dee|0\n"
                  "board=1|Kaze|88|20|0\nboard=2|Rex|71|33|0\nboard=3|Nia|64|12|0\nboard=4|Jay|58|41|0\n"
                  "board=5|Sol|51|27|0\nboard=6|Oz|47|30|0\nboard=7|Vic|40|22|0\nboard=8|Mo|38|19|0\n"
                  "board=9|Tia|31|25|0\nboard=10|Ann|27|14|0\nboard_page=0\nboard_pages=4\n",
