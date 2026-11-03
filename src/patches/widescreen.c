@@ -33,7 +33,7 @@ float ws_fov_cap(void) { return g_fov_cap; }
 /* The choices of [display] widescreen, as aspects; "auto" is resolved from the
  * screen. The first release supports 16:9 and 16:10; wider ones are offered as
  * experimental (owner, 2026-10-11) and "auto" does not pick them. */
-/* [display] aspect: 4:3, stretch, widescreen (auto), 16:9, 16:10, 21:9, 32:9 (src/hooks/pc_settings.c). */
+/* [display] aspect: 4:3, stretch, widescreen (auto), 16:9, 16:10, 21:9, 32:9 (src/hooks/pc_settings_catalog.c). */
 static const float k_choice_aspect[] = { 0.0f, 0.0f, -1.0f, 16.0f / 9.0f, 16.0f / 10.0f, 21.0f / 9.0f, 32.0f / 9.0f };
 
 static float snap_auto(float a)

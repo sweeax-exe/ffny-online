@@ -353,8 +353,9 @@ def check_picture_options(a):
         os.remove(shot)
     settings = ui_settings_file("picture")
     # The vignette is a checkbox, or in a narrow or large-text launcher an Off/On list (see check_unlock_option).
-    script = ("800:ui:Advanced;1400:ui:display.brightness;2000:ui:display.vignette;2600:uiopt:display.vignette.off;"
-              "3300:shot:%s;3700:ui:Play" % shot)
+    # Hover first: the Display page is taller than the window, so Brightness may need scrolling into view.
+    script = ("800:ui:Advanced;1200:hover:display.brightness;1600:ui:display.brightness;2000:hover:display.vignette;"
+              "2300:ui:display.vignette;2800:uiopt:display.vignette.off;3300:shot:%s;3700:ui:Play" % shot)
     run = harness.run_game("ui-picture", secs=60, preset=a.preset, scripted=False, quiet=True,
                            env={"RECOMP_SETTINGS": settings, "RECOMP_LAUNCHER_SCRIPT": script,
                                 "RECOMP_INPUT_IGNORE_FOCUS": "1"})

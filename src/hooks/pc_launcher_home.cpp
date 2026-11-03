@@ -8,6 +8,11 @@
 #ifndef DEFJAM_VERSION
 #define DEFJAM_VERSION "dev"
 #endif
+#if defined(DEFJAM_APP)
+const char *pc_app_game_version();      // src/app/app_update.cpp: the installed game's version
+float pc_app_beside_play_width();       // src/app/app_setup.cpp: Add to Steam beside Play (0 = none)
+void pc_app_beside_play(float width, float height);
+#endif
 
 UiHomeResult ui_launcher_home(float width, float height, const char *focus)
 {
@@ -27,15 +32,32 @@ UiHomeResult ui_launcher_home(float width, float height, const char *focus)
         float ph = std::min(300 * s, body - 175 * s);
         pcui::poster(paper, ImVec2(left - 10 * s, ph), s);
         ImGui::SetCursorScreenPos(ImVec2(start.x, paper.y + ph + 15 * s));
+#if defined(DEFJAM_APP)
+        ImGui::TextDisabled("FAN RECOMP / v%s", pc_app_game_version());   // the game Play starts
+#else
         ImGui::TextDisabled("FAN RECOMP / v%s", DEFJAM_VERSION);
+#endif
         ImGui::SetCursorScreenPos(ImVec2(start.x, start.y + body - 95 * s));
         ImGui::TextUnformatted("Ready for the next round");
+        float row = left - 10 * s, beside = 0, play_width = row;
+#if defined(DEFJAM_APP)
+        beside = pc_app_beside_play_width();          // Add to Steam, on Windows
+        if (beside > 0)
+            play_width = std::max(row - beside - 8 * s, row * .55f);
+#endif
         ImGui::BeginDisabled(pcui::mod_busy() || pcui::mod_recovery_needed());
-        r.play = pcui::play_button("PLAY", ImVec2(left - 10 * s, 64 * s));
+        r.play = pcui::play_button("PLAY", ImVec2(play_width, 64 * s));
         ui_target("Play");
         ImGui::EndDisabled();
         if (ImGui::IsWindowAppearing())
             ImGui::SetItemDefaultFocus();
+#if defined(DEFJAM_APP)
+        if (beside > 0)
+        {
+            ImGui::SameLine(0, 8 * s);
+            pc_app_beside_play(row - play_width - 8 * s, 64 * s);
+        }
+#endif
         ImGui::EndChild();
         ImGui::SameLine(0, gap);
         ImGui::BeginChild("quick settings", ImVec2(0, body),

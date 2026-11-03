@@ -1,5 +1,6 @@
 #!/bin/bash
-# Build the game-free macOS setup (Apple Silicon): Def Jam Setup.app inside a disk image.
+# Build the game-free macOS setup (Apple Silicon): Def Jam Setup.app inside a disk image, and the app
+# that sets up, launches and updates the game (src/app) with the same payload inside it.
 # Never analyzes or builds a dump. Needs the Xcode Command Line Tools and Python 3.11+;
 # pass --development for a local prototype from a dirty checkout (release workflows must not).
 set -euo pipefail
@@ -58,7 +59,22 @@ IMAGE_MIB=$(( (IMAGE_KIB + 1023) / 1024 + 128 ))
 df -h "$OUT"
 hdiutil create -size "${IMAGE_MIB}m" -volname "Def Jam Recompiled Setup" -srcfolder "$OUT/image" -ov -format UDZO "$OUT/DefJamSetup.dmg" > /dev/null
 
-# 5. Inventory, checksum and provenance of exactly what a release would attach.
+# 5. The app (src/app): built with the payload's own CMake, Ninja, SDL3 and Dear ImGui source and
+# nothing else on this computer, then bundled with that payload, whose SDL3 it uses.
+PAYLOAD="$OUT/app-payload"
+ditto -x -k "$OUT/setup-payload.zip" "$PAYLOAD"
+IMGUI=$(cd "$PAYLOAD/source" && ls -d setup-deps/imgui/imgui-*)
+"$PAYLOAD/tools/bin/cmake" -S "$ROOT" -B "$OUT/app-build" -G Ninja -DCMAKE_MAKE_PROGRAM="$PAYLOAD/tools/bin/ninja" \
+    -DCMAKE_BUILD_TYPE=Release -DDEFJAM_BUILD_GAME=OFF -DCMAKE_PREFIX_PATH="$PAYLOAD/deps" \
+    -DCMAKE_FIND_USE_CMAKE_SYSTEM_PATH=OFF -DVulkan_LIBRARY="$PAYLOAD/deps/lib/libMoltenVK.dylib" \
+    -DVulkan_INCLUDE_DIR="$PAYLOAD/deps/include" -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 \
+    -DFETCHCONTENT_SOURCE_DIR_IMGUI="$PAYLOAD/source/$IMGUI" > "$OUT/app-configure.log"
+"$PAYLOAD/tools/bin/cmake" --build "$OUT/app-build" --target defjam_app
+"$PYTHON" scripts/package-app.py --program "$OUT/app-build/defjam_app" --payload "$PAYLOAD" --out "$OUT/app" \
+    --zip "$OUT/DefJamRecompiled.zip"
+
+# 6. Inventory, checksum and provenance of exactly what a release would attach: the setup image
+# and the app.
 "$PYTHON" scripts/check-setup-assets.py --payload "$OUT/setup-payload.zip" --installer "$OUT/DefJamSetup.dmg" \
-    --output-dir "$OUT/setup-assets" "${DEVELOPMENT[@]+"${DEVELOPMENT[@]}"}"
+    --app "$OUT/DefJamRecompiled.zip" --output-dir "$OUT/setup-assets" "${DEVELOPMENT[@]+"${DEVELOPMENT[@]}"}"
 echo "Built $OUT/setup-assets"

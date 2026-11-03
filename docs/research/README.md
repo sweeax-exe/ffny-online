@@ -27,6 +27,7 @@ cite other development notes, logs and captures that are not published.
 - [Push-buffer space reservation and ring wrap](d3d-pushbuffer-wrap.md)
 - [Vertex programs on the GPU](m4e-gpu-vertex-programs.md)
 - [Picture options: brightness and the venue vignette](picture-options.md): the post-effect variances, the tint draw and how the options change it
+- [Graphics enhancements](graphics-enhancements.md): texture levels, anisotropic filtering, MSAA, area downscaling, colour tint and film scratches; restoration pass and the 60+ fps feasibility; [test plan for Windows and Linux](graphics-enhancements-test-plan.md), [Windows validation and compatibility fix](graphics-enhancements-windows-2026-11-01.md)
 
 ## Front end and movies
 

@@ -238,7 +238,7 @@ def cheats_tool(tmp_path_factory):
     driver.write_text(DRIVER)
     exe = folder / ('cheats.exe' if os.name == 'nt' else 'cheats')
     includes = [folder, ROOT / 'src', ROOT / 'src/patches', ROOT / 'tools/xboxrecomp/src/settings']
-    sources = [driver, ROOT / 'src/patches/cheats.c', ROOT / 'tools/xboxrecomp/src/settings/recomp_settings.c']
+    sources = [driver, ROOT / 'src/patches/cheats.c', ROOT / 'src/patches/cheats_settings.c', ROOT / 'tools/xboxrecomp/src/settings/recomp_settings.c']
     if os.name == 'nt':
         cmd = [compiler, '/nologo', '/O2', '/TC', *['/I' + str(p) for p in includes],
                *map(str, sources), '/Fe:' + str(exe)]

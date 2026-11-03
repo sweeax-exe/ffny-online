@@ -37,6 +37,17 @@
       }
     },
     {
+      "name": "win-x64-app",
+      "displayName": "Windows x64: the app only (src/app), no game code",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "DEFJAM_BUILD_GAME": "OFF",
+        "DEFJAM_BUILD_APP": "ON"
+      }
+    },
+    {
       "name": "win-vs2022",
       "displayName": "Visual Studio 2022 solution (for IDE debugging)",
       "generator": "Visual Studio 17 2022",
@@ -85,6 +96,13 @@
     {
       "name": "win-x64-release",
       "configurePreset": "win-x64-release"
+    },
+    {
+      "name": "win-x64-app",
+      "configurePreset": "win-x64-app",
+      "targets": [
+        "defjam_app"
+      ]
     },
     {
       "name": "win-vs2022",

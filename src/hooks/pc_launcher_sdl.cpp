@@ -5,7 +5,8 @@
 // on macOS a window's events can only be read on the process's first thread, so this runs there:
 // pc_launcher_run hands the work to that thread (host_posix_call_on_main) and waits. The thread's
 // ordinary event loop is not running meanwhile, so this one reads the events itself. The pads come
-// from the host input layer, which pc_settings.c starts before this runs.
+// from the host input layer, which pc_settings.c starts before this runs. The app (src/app) runs the
+// same window, pc_launcher_window, on its own first thread before it starts the game.
 //
 // Two test hooks, both off unless named, because the window cannot be looked at on a machine with
 // nobody at it (a locked screen, a remote run):
@@ -14,7 +15,8 @@
 //   Named controls: "<ms>:ui:<id>" clicks; "<ms>:hover:<id>" hovers, revealing scrolled controls.
 //   "<ms>:uiopt:<id>" clicks it if it is there and says nothing if not: a control that only exists in
 //   one layout, such as the On/Off item of an on/off choice (`<section>.<key>.on`), which a narrow or
-//   large-text window shows in place of a checkbox.
+//   large-text window shows in place of a checkbox. "<ms>:uiwait:<id>" clicks it once it appears,
+//   waiting up to half an hour (the app's setup and update screens, which follow minutes of work).
 //   RECOMP_WINDOW_SHOT       a file to write the first full frame to, as a BMP
 
 #define _CRT_SECURE_NO_WARNINGS
@@ -38,9 +40,14 @@ extern "C" {
 #include "pc_ui.h"
 #include "pc_ui_actions.h"
 #include "pc_ui_internal.h"
+#if defined(DEFJAM_APP)
+#include "app/app.h"       // the app's own screens over the launcher: setup and maintenance
+#endif
 
+#if !defined(DEFJAM_APP)
 extern "C" void host_posix_call_on_main(void (*fn)(void *), void *arg);
 extern "C" int host_posix_have_video(void);
+#endif
 
 namespace {
 
@@ -62,6 +69,7 @@ struct ScriptStep {
     bool done;
     unsigned attempts = 0;
     bool optional = false;
+    unsigned max_attempts = 12;
 };
 
 std::vector<ScriptStep> parse_script(const char *text)
@@ -81,12 +89,13 @@ std::vector<ScriptStep> parse_script(const char *text)
             st.at_ms = ms;
             st.x = x;
             st.y = y;
-            if ((!strcmp(kind, "ui") || !strcmp(kind, "uiopt") || !strcmp(kind, "hover")) &&
+            if ((!strcmp(kind, "ui") || !strcmp(kind, "uiopt") || !strcmp(kind, "uiwait") || !strcmp(kind, "hover")) &&
                 sscanf(item.c_str(), "%llu:%*[^:]:%511[^;]", &ms, file) == 2)
             {
                 st.kind = !strcmp(kind, "hover") ? ScriptStep::HOVER : ScriptStep::TARGET;
                 st.file = file;
                 st.optional = !strcmp(kind, "uiopt");
+                if (!strcmp(kind, "uiwait")) st.max_attempts = 9000;     // 200 ms apart: half an hour
             }
             else if (!strcmp(kind, "resize"))
                 st.kind = ScriptStep::RESIZE;
@@ -119,25 +128,37 @@ void save_frame(SDL_Renderer *renderer, const char *path)
     SDL_DestroySurface(pixels);
 }
 
-void launcher_main(void *arg)
+} // namespace
+
+extern "C" int pc_launcher_window(int *open_setup_out)
 {
-    int *result = (int *)arg;
-    *result = 1;                                        // no window: do not hold the game back
+    int result_value = 1;                               // 1 Play, 0 Quit: the loop below sets *result
+    int *result = &result_value;
+    *open_setup_out = 0;
 
     SDL_Window *window = SDL_CreateWindow("Def Jam: Fight for NY - Launcher", 1100, 720,
                                           SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
     if (!window) {
-        fprintf(stderr, "[UI] launcher: no window (%s); starting the game\n", SDL_GetError());
-        return;
+        fprintf(stderr, "[UI] launcher: no window (%s)\n", SDL_GetError());
+        return -1;
     }
     SDL_Renderer *renderer = SDL_CreateRenderer(window, nullptr);
     if (!renderer) {
-        fprintf(stderr, "[UI] launcher: no renderer (%s); starting the game\n", SDL_GetError());
+        fprintf(stderr, "[UI] launcher: no renderer (%s)\n", SDL_GetError());
         SDL_DestroyWindow(window);
-        return;
+        return -1;
     }
     SDL_SetRenderVSync(renderer, 1);
     SDL_SetWindowMinimumSize(window, 640, 480);
+#if defined(_WIN32)
+    // Windows measures the window in pixels: make it as big on a scaled display as it is elsewhere.
+    float scale = SDL_GetWindowDisplayScale(window);
+    if (scale > 1.0f) {
+        SDL_SetWindowMinimumSize(window, (int)(640 * scale), (int)(480 * scale));
+        SDL_SetWindowSize(window, (int)(1100 * scale), (int)(720 * scale));
+        SDL_SetWindowPosition(window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
+    }
+#endif
 
     ui_lock();
     ui_context_begin(window);
@@ -160,6 +181,12 @@ void launcher_main(void *arg)
         SDL_Event e;
         while (SDL_PollEvent(&e)) {
             if (e.type == SDL_EVENT_QUIT || e.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED) {
+#if defined(DEFJAM_APP)
+                if (app::screen_busy()) {               // closing during setup asks it to stop first
+                    app::screen_request_cancel();
+                    continue;
+                }
+#endif
                 done = true;
                 *result = 0;
             } else if (e.type == SDL_EVENT_WINDOW_FOCUS_GAINED) {
@@ -210,7 +237,7 @@ void launcher_main(void *arg)
                 ui_unlock();
                 if (!found)
                 {
-                    if (++st.attempts < 12)
+                    if (++st.attempts < st.max_attempts)
                     {
                         st.done = false;
                         st.at_ms = now + 200;
@@ -273,7 +300,17 @@ void launcher_main(void *arg)
         ImGui_ImplSDLRenderer3_NewFrame();
         ui_sdl_frame((float)w, (float)h, density);
         ImGui::NewFrame();
-        UiResult res = ui_draw(UI_LAUNCHER, 0, 0, (float)w, (float)h);
+        UiResult res;
+#if defined(DEFJAM_APP)
+        if (!app::screen_draw((float)w, (float)h, &res))
+#endif
+            res = ui_draw(UI_LAUNCHER, 0, 0, (float)w, (float)h);
+#if defined(DEFJAM_APP)
+        if (res.setup) {                                // Update / Repair: the app's own Maintenance
+            app::screen_open_maintenance();
+            res.setup = res.leave = false;
+        }
+#endif
         ImGui::Render();
         SDL_SetRenderScale(renderer, density, density);
         SDL_SetRenderDrawColorFloat(renderer, 0.07f, 0.06f, 0.06f, 1.0f);
@@ -303,6 +340,22 @@ void launcher_main(void *arg)
     SDL_DestroyWindow(window);
     fprintf(stderr, "[UI] launcher closed: %s\n", *result ? "play" : "quit");
     fflush(stderr);
+    *open_setup_out = open_setup;
+    return *result;
+}
+
+#if !defined(DEFJAM_APP)
+namespace {
+
+void launcher_main(void *arg)
+{
+    int open_setup = 0;
+    int *result = (int *)arg;
+    *result = pc_launcher_window(&open_setup);
+    if (*result < 0) {
+        fprintf(stderr, "[UI] launcher: starting the game\n");
+        *result = 1;                                    // no window: do not hold the game back
+    }
     if (open_setup)
         pcui::setup_launch();
 }
@@ -319,3 +372,4 @@ extern "C" int pc_launcher_run(void)
     host_posix_call_on_main(launcher_main, &result);
     return result;
 }
+#endif  // !DEFJAM_APP

@@ -58,10 +58,13 @@ def source_allowed(name, toolkit=False):
 
 # The part of branding/ each platform's setup uses at install time: the Windows game build embeds the
 # .ico, the POSIX game build the window icon, and the Linux setup also installs the 256 px icon, shows
-# the 128 px one in its wizard and places the Steam artwork. The rest (masters, macOS icons, previews)
+# the 128 px one in its wizard and places the Steam artwork, as the Windows app does. The rest (masters, macOS icons, previews)
 # is for the repository, and a payload that carried it would be megabytes larger.
 BRANDING_FOR = {
-    'windows-x64': ('branding/icon/defjam.ico',),
+    # The Windows app adds itself to Steam (setup/steam_shortcuts.py): the five images it places, not the
+    # plain portrait, wide and logo, which the fan set replaces.
+    'windows-x64': ('branding/icon/defjam.ico', 'branding/fan/steam/portrait.png', 'branding/fan/steam/wide.png',
+                    'branding/fan/steam/logo.png', 'branding/steam/hero.png', 'branding/steam/icon.png'),
     'macos-arm64': ('branding/icon/window/window-128-macos.rgba',),
     'linux-x64': ('branding/icon/window/window-128.rgba', 'branding/icon/png/defjam-128.png',
                   'branding/icon/png/defjam-256.png', 'branding/steam/', 'branding/fan/steam/'),
@@ -195,7 +198,8 @@ def stage_linux(args, staging, source, toolkit):
 def stage_windows(args, staging, source, toolkit):
     """Embedded Python, wheels, offline SDL3/ImGui source and the native launcher."""
     (staging / 'engine').mkdir()
-    for name in ('engine.py', 'releases.py', 'transaction.py', 'install-prerequisites.ps1', 'shortcuts.ps1'):
+    for name in ('engine.py', 'releases.py', 'transaction.py', 'steam_shortcuts.py', 'install-prerequisites.ps1',
+                 'shortcuts.ps1'):
         shutil.copyfile(ROOT / 'setup' / name, staging / 'engine' / name)
     shutil.copyfile(args.launcher, staging / 'DefJamLauncher.exe')
     provenance = []

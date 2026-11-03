@@ -72,7 +72,7 @@
 | Launcher mod catalogue | ✅ v0.11.0 stable/latest — Mod Support Beta | D198 owner Steam Deck acceptance. Release5775f3c/nine assets unchanged; catalogue PR3 merged5b4de77, signed publication40115951254 passed. Client verifies revision3 and default-channel1.0.0 with testing off; archive43bbb22c unchanged.13local tests/22subtests plus full Linux CI pass. Docs PR99 records stable promotion. |
 
 | Texture modding getting started | ✅ owner-approved and merged PR148 | D232: human-readable first-pack guide links runtime capture, archive extraction/gallery, original IDs, PNG/atlas/alpha rules, manifest/ZIP, current priority UI, testing/sharing and troubleshooting. README/index/reference links refreshed; synthetic CLI/manifest/ZIP smoke pass,89local links and23focused tests pass; CI green, owner approved, PR148 merged852aa43. Docs only; no game/artwork/workspace changes. |
-| v0.13.0 release (D233-D251) | ⏳ owner-authorized merge/tag in progress | All platform RC runs complete with documented exceptions. Owner approves release Nov1; issue166 tracks memory limit/HD scene allocation. Windows historical memory failures retained, Mac short-pulse injection38/40, Deck memory and known golden mismatch accepted as qualifications; no gate threshold/golden change. PR160 merges tested153/156/158 plus Clang casts; excluded146/141 move to0.14.0. Main source-boundary cleanup integrated. Setup real install/Clean Update not performed; CI setup builds checked. |
+| v0.13.0 release (D233-D253) | ✅ stable/latest published; regression qualifications retained | PRs153/156/158/160 merged; immutable annotated tag at main merge `f961c34540d25fb75091dc432129d5048ab55e5a`, toolkit `d569ca1`. Source release41321077471 passed; all nine assets verified against GitHub digests, checksums and production provenance. [Published release](https://github.com/vyanhursky/DefJamFFNY-recomp/releases/tag/v0.13.0), milestone6 closed empty; v0.14.0 remains open. Final Windows rebuild7/7 targeted checks, units749/27skip/1slow deselected, French/English subtitle captures reviewed. Earlier cross-platform RC runs retain Windows/Deck memory failures, Mac short-pulse injection and Deck golden qualification; late language-HD path qualified separately. Issue166/v0.14.0 tracks memory; setup real install/Clean Update and separate Deck playtest not performed. |
 
 
 ## 1. Decisions log
@@ -397,7 +397,7 @@ D138–D140 were allocated independently on main and the launcher branch. Their 
 | D250 | 2026-10-31 | Owner authorizes two explicit `(const void *)XBOX_PTR(state)` casts in the isolated Mac RC checkout and continued tests of that identified build. Keep the unchanged RC build failure and every runtime failure recorded; no unrelated fix or release action. | Fresh Apple Clang 21 build of5d22e8b/d569ca1 rejects integer-to-pointer arguments in input_late.c45/149. Patched executable43b1a7d was tested; report docs/research/rc-v0.13.0-macos.md. Sleep-affected controls rerun awake with permission; input gate remains failed. |
 | D251 | 2026-11-01 | Owner explicitly authorizes merging the tested v0.13.0 PRs and tagging/publishing the release after reading the platform comments; track the cross-platform memory-limit investigation in issue166/v0.14.0. Keep PR146 and the v0.14.0 train out. | Platform runs are complete but not all-green: Windows historical memory deltas accepted for release, Mac strict scripted-input off38/40 (generated38all delivered), Deck memory+73.2/+67.8MiB and known79vs80 replay golden remain qualified. Setup real install/Clean Update and separate Deck playtest were not performed; release proceeds under explicit owner direction, not a fabricated PASS. Preserve thresholds/goldens; merge current main source-authoring boundary cleanup without restoring private production records, retain only the tested Clang pointer casts. |
 | D252 | 2026-11-01 | Include PR153 latest head81a6188 (language mods can carry HD images) under the owner request to merge the release PRs, preserving previous deterministic delta test and min_recomp0.13.0. | The source PR advanced after the original RC integration. Its change validates optional texture manifests, keeps language selection separate and prepends active language images below other packs. Merge with a merge commit so153 current head closes with release160. Verify new native/installer/launcher tests and targeted Windows game checks; earlier all-platform results predate this added active-language path and retain that qualification. |
-
+| D253 | 2026-11-01 | Publish v0.13.0 stable/latest after verifying the successful tagged workflow and all nine game-free setup assets; close empty milestone6 and stop release monitoring. Keep immutable tag f961c34540d25fb75091dc432129d5048ab55e5a. | PRs153/156/158/160 are MERGED. Final CI41319786012 and Source release41321077471 passed; tagged tree equals validated12dbbaf. All nine actual SHA256 values match GitHub digests, all three installer checksums and production provenance agree with source f961c34/toolkit d569ca1; payload inventories contain no game/generated inputs. Published2026-11-01T15:36:01Z, latest verified. Final rebuilt Windows7/7 includes749 units, French menu and English subtitle captures reviewed; historical failures/late language-HD coverage limits in D251-D252 remain unchanged. Milestone6 closed with0open/4closed, v0.14.0/issue166 open; 146/141 deferred there. Local data/builds/logs and initialized-submodule worktree preserved. |
 
 ## 2. Environment inventory (2026-09-17)
 
@@ -494,41 +494,51 @@ defjam-recomp/
 
 > Recent entries only; older entries remain unchanged in the local `docs/worklog/` archive.
 
-- 2026-10-31 14:49 — D247: owner adds full Lanczos4x to playtest and requests post-playtest retest. Assembled/verified 18,971 local images (6,212,168,677 bytes),13runtime aliases, recipe81ddfce230ca into candidate mods; Lanczos opacity/channels precede Menus1.4.0/Fighters1.0.0. Shortcut now uses editable stored pack selection and Picture shape. Added --lanczos-receipt corpus checks and memory groups lanczos/all; focused132pass/1skip, source611files/0policy failures. Full combined-pack game regression and memory comparison wait for owner playtest completion; previous two-mod results retained. Local receipt data/lanczos-pack-build.json and handoff logs/owner-playtest-handoff.md.
-- 2026-10-31 15:14 — D248: owner approves Windows all-pack playtest; submitted future bugs #161 SC04 A/V lag and #162 map-selector Shops widescreen border, both bug/v0.14.0. Reviewed local latest session report (10504frames/51hitches/no retained pictures; no independent cutscene/map reproduction). CI3322cdf failure is an existing random delta-test boundary coincidence; deterministic matching/nonmatching fixtures and payload/round-trip assertions pass18/8skip locally. Full all-pack regression and memory comparison authorized; Mac/Linux owner-run.
 - 2026-10-31 16:40 — D249: all-pack Windows retest on5771350 finished16/17 in46min,4inapplicable skips; units745pass/28skip/1slow deselected. Only combat memory96.68MiB fails64MiB; same-fixture repeat375.58MiB confirms. Longer fixed-fixture controls growth-30.89/+122.27/-38.30MiB for Menus+Fighters/Lanczos/all; Lanczos-only fails. Extra current-fixture all-pack60s menu passes27/27, final-21.74MiB,8settled samples2437.26–2453.29MiB. French/subtitle visual and trace off/on pass, save restoration passes. CI5771350green. Report docs/research/rc-v0.13.0-hd-memory.md; source-only result update, no runtime/gate/golden changes. Mac/Linux and setup gates pending; test monitor finished.
 - 2026-10-31 17:04 — Mac v0.13.0 RC at5d22e8b/toolkitd569ca1: fresh analyze18446/lift21C/64manual0missing pass; posix-release build fails input_late.c45/149 pointer conversions, targeted rebuild confirms. Units719pass54skip1deselected; all20946pack entries verified (Lanczos18971images/13aliases, Menus1.4.0/Fighters1.0.0). No game runs; French/subtitles/controller/memory blocked;21source/disposable save hashes unchanged. Report docs/research/rc-v0.13.0-macos.md and logs/rc-macos-report.json; owner choice pending on proposed two-cast patch.
 - 2026-10-31 21:00 — D250 Mac v0.13.0 RC observations complete on5d22e8b/d569ca1 plus owner-approved2casts, exe43b1a7d. Full16/21PASS/5FAIL/0SKIP (53min), units719pass54skip1deselected; targeted4/5. Sleep-correlated startup/subtitle failures pass awake reruns; French/English16s24s visuallyPASS. Awake input off39/40FAIL/on40/40PASS: no waiver. Same-fixture awake RSS gates3/3PASS (-136.30/-49.28/-50.94MiB vs64); combined dry1 then all-only confirmationPASS (-298.48MiB), originals retained. Source/disposable21save hashes unchanged/all restoration checksPASS; goldens/limits unchanged. Reports docs/research/rc-v0.13.0-macos.md, logs/regress-20261031-180020.txt, logs/regress-20261031-181550.txt, logs/lanczos-memory-comparison-awake and logs/lanczos-memory-all-confirm. No unrelated fix/push/merge/tag/release/setup acceptance.
 - 2026-10-31 21:36 — Owner confirms Windows memory gate already resolved. Mac build fix committedcfcc5e6, source/build freshness verified; requested input repeat logs/regress-20261031-213153.txt FAIL(off38/40,on40/40), on AC/awake/no sleep. Off first scheduled25.00/25.07s pair absent before SDL injection, all38generated rises delivered to every stage; max gaps92.630/70.486ms, no trace loss/discards, both saves restored. No downstream game input loss shown; injection-window cause unproven, no unrelated code fix. Report docs/research/rc-v0.13.0-macos.md and logs/rc-input-owner-confirm.json. No push/merge/tag/release.
 - 2026-10-31 21:55 — Owner authorized commit/push and comments on PR160. Published cfcc5e6 Mac Clang two-cast build fix/report plus da8bcd7 input confirmation/Windows correction by normal fast-forward push to release/v0.13.0; remote base5d22e8b unchanged before push. Findings posted https://github.com/vyanhursky/DefJamFFNY-recomp/pull/160#issuecomment-6553622809; input test FAIL(off38/40,on40/40), no downstream loss shown, Windows memory resolved per owner, other historical results preserved. Source audit612files/0failures, no game data/generated code/logs/captures/binaries published. No merge/tag/release.
 - 2026-11-01 07:06 — D251: reviewed both platform comments onPR160; owner authorizes release with explicit qualifications. Created memory investigation166/v0.14.0 (Windows historical deltas, Deck73.2/67.8MiB, Mac RSS controls; no allocator/leak claim). Integrated main source-authoring boundary cleanup, preserving frozen generator and data ignore; only merge conflict was.gitignore. Finalized release notes/README/known issues with Mac38/40 injection and Deck golden gap, unperformed local setup gates, and owner approval. CI/source/unit checks before merge/tag; no runtime threshold/golden changes.
+- 2026-11-01 07:37 — D253: PRs153/156/158/160 merged; immutable v0.13.0 at f961c34540d25fb75091dc432129d5048ab55e5a. CI41319786012 and Source release41321077471 PASS. Downloaded/verified9assets: actual GitHub digests, checksums, production source/toolkit pins and game-free inventories agree (logs/release-v0.13.0-assets/{github-release,verified-release-assets}.json). Published stable/latest2026-11-01T15:36:01Z; milestone6 closed0open/4closed, v0.14.0 open. Final Windows7/7 in12min, units749pass/27skip/1slow deselected, final French/English subtitle captures visually reviewed (logs/regress-20261101-072301.txt). Prior Windows/Mac/Deck failures and final language-HD coverage qualification retained; memory166open; no thresholds/goldens changed. Installer SHA256: windows-x64 8020fe8747f38ec90fc5f59fe274afec7b03a75d0b2e22dc3f2be822b3a39be6; macos-arm64 3eb1e1a3e8dd967dc4ff2ca302a3300b2421cb364af01129f473ff9a3c3e04d8; linux-x64 b439b7d70484087f221f1a8f27647da9af785b588bec6c5b8e0ec7cff0c79dd0. Monitoring complete; local worktree/settings/data/logs/builds preserved.
+- 2026-11-01 20:11 — Owner requested closing109 after confirming fix shipped in v0.12.2/mergedPR129. Posted closure evidence https://github.com/vyanhursky/DefJamFFNY-recomp/issues/109#issuecomment-6568850356 and verified CLOSED/COMPLETED (2026-11-02T04:11:17Z). Windows Story VY3 executor15.5→9.6ms, >18ms frames6.2%→0.2%, p95 18.28→16.71ms/p99 19.97→16.92ms; linked release and qualified specific timing as Windows-only, separate startup host-stall issue unchanged. Administrative source record only; no new runtime change or game run.
 
 ## 7. Hand-off
 
-### v0.13.0 owner-authorized release — 2026-11-01
+### v0.13.0 published stable/latest — 2026-11-01 (D253)
 
-- Owner directs merging/tagging v0.13.0 after reviewing PR160 comments. Release
-  content is153/156/158 plus tested Apple Clang pointer casts cfcc5e6. Do not
-  merge146,164 or the v0.14.0 app/graphics feature train into this release.
-- All platform runs finished with qualifications preserved in release notes:
-  Windows16/17 and memory confirmation; Mac16/21 with later targeted4/5,
-  strict awake refresh-off38/40 generated pulses (all38 delivered), on40/40;
-  Linux gameplay/controller routes pass, two-match memory+73.2/+67.8MiB fails,
-  replay/repeat79vs80 golden remains#98. No thresholds or goldens relaxed.
-- New issue166/v0.14.0 tracks growth measurement/allocator lifetime and HD scene
-  effects. POSIX sampler is RSS even though JSON says private_bytes. Keep all
-  old evidence; Windows release acceptance does not imply a Linux fix.
-- Source main PR163 separates private texture-authoring history from game runtime.
-  Integrate its removals, checker/tests and ignores; keep the frozen HD Setup
-  generator/runtime aliases. `.gitignore` also retains this RC's ignored data/.
-- Release notes/README/known issues record owner approval and platform limits.
-  Setup real install/Clean Update and a separate Deck playtest were not performed.
-  Proceed under explicit Nov1 owner release authorization, not invented passes.
-- Latest153 head81a6188 adds language-mod HD images after the original RC runs.
-  Include its current head, verify native/installer/launcher fixtures and targeted
-  Windows checks; do not relabel the earlier platform runs.
-- Finish source/unit checks and CI, merge PR160 with a merge commit (its existing
-  merge history closes153/156/158), tag that exact main merge commit v0.13.0,
-  verify release workflow setup assets/digests/provenance, then publish.
-  Move unshipped146/141 to0.14.0 before closing0.13.0. Preserve local captures,
-  logs, saves and built executables; never put them in source or release assets.
+- Owner requested closure of issue109; closed COMPLETED on Nov1 Pacific.
+  Comment https://github.com/vyanhursky/DefJamFFNY-recomp/issues/109#issuecomment-6568850356
+  links merged PR129/v0.12.2 and Windows timing evidence (executor15.5→9.6ms,
+  >18ms frames6.2%→0.2%, p95 18.28→16.71ms, p99 19.97→16.92ms).
+  Specific Story timing was Windows-only; no new runtime changes/tests.
+- Release complete: PRs153/156/158/160 MERGED; immutable annotated tag `v0.13.0`
+  points to main merge `f961c34540d25fb75091dc432129d5048ab55e5a`. Never move it.
+  https://github.com/vyanhursky/DefJamFFNY-recomp/releases/tag/v0.13.0
+- Final release-branch CI41319786012 and tagged Source release41321077471 passed.
+  Published2026-11-01T15:36:01Z, verified stable/latest, exactly nine assets.
+  Local `logs/release-v0.13.0-assets/github-release.json` and
+  `verified-release-assets.json` retain metadata/digests/provenance checks for
+  all three game-free installers. Source policy534files/0failures before records.
+- Toolkit `d569ca10811cef67ec4e9fa2173088c2f9fd0580` is public; configured fork
+  branch defjam/upstream-v0.16 was fast-forwarded. Milestone6/v0.13.0 closed with
+  zero open items; milestone3/v0.14.0 remains open, including deferred146/141.
+- Final rebuilt Windows executable89e0b82e68ff9c8c98a76af945ce8e1dec4c5fe51f4897e400a095973221fa69
+  passed7/7 targeted checks in12min (`logs/regress-20261101-072301.txt`):
+  units749pass/27skip/1slow deselected; stock goldens, fight, French, English
+  subtitles. Latest French/English subtitle captures visually reviewed.
+- Preserve earlier platform qualifications, never claim all-green: Windows full
+  16/17 with historical memory failures; Mac16/21 then4/5, awake off38/40
+  scheduled pulses generated/all38delivered and on40/40; Deck memory+73.2/+67.8MiB
+  and79vs80golden (#98). No threshold/golden changes. Earlier platform runs
+  predate final PR153 language-HD image support; final fixtures/Windows checks
+  cover that path separately. Setup real install/Clean Update and separate Deck
+  playtest were not performed; owner explicitly authorized this qualified release.
+- Memory investigation https://github.com/vyanhursky/DefJamFFNY-recomp/issues/166
+  is open/v0.14.0; POSIX samples are RSS despite private_bytes JSON naming.
+  Future161SC04 and162Shops-border remain there; do not duplicate or merge164.
+- Release monitoring is finished. Keep this initialized-submodule worktree and
+  ignored local data/builds/logs for the owner's game shortcut; do not archive
+  or remove them. No further release game tests or PRs needed.
+
+Decisions are read by number or keyword: `decision D<n>`, `decisions --grep TEXT`.

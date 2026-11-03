@@ -1,7 +1,8 @@
 """Public GitHub setup discovery and verified, release-specific engine handoff.
 
-Only the approved exe/dmg/tar.gz assets are consumed. No GitHub credentials,
-dump contents, save contents or personal paths are sent to the service.
+Only the approved exe/dmg/tar.gz setup assets, and the app assets (D215), are
+consumed. No GitHub credentials, dump contents, save contents or personal paths
+are sent to the service.
 """
 import contextlib
 import ctypes
@@ -27,6 +28,18 @@ REPO = 'vyanhursky/DefJamFFNY-recomp'
 API = 'https://api.github.com/repos/' + REPO + '/releases'
 EXTENSIONS = {'windows-x64': '.exe', 'macos-arm64': '.dmg', 'linux-x64': '.tar.gz'}
 CONTRACT = {'protocol': 1, 'data_schema': 1}
+# The app that sets up, launches and updates the game (src/app, D214/D215), with its checksum
+# and provenance beside it as for setup. On macOS a ZIP of the bundle, whose Resources hold
+# the setup payload; it updates itself from these (select_app).
+APP_ASSETS = {'windows-x64': 'DefJamRecompiled-{v}-windows-x64.exe',
+              'macos-arm64': 'DefJamRecompiled-{v}-macos-arm64.zip',
+              'linux-x64': 'DefJamRecompiled-{v}-x86_64.AppImage'}
+APP_BUNDLE = 'Def Jam Recompiled.app'
+APP_PROGRAM = 'defjam_app'
+# On Windows the app is one program with the setup payload ZIP inside it as a resource (RCDATA 101,
+# as in the setup executable). Staged for an update, it is a folder: the program and payload/.
+APP_PROGRAM_WINDOWS = 'DefJamRecompiled.exe'
+PAYLOAD_RESOURCE = (10, 101)        # RT_RCDATA, the payload's id
 
 
 def default_cache():
@@ -158,13 +171,20 @@ def catalog(platform, cache, cancelled=lambda: None, allow_cached=False):
             continue
         seen.add(tag)
         stem = 'DefJamSetup-' + tag[1:] + '-' + platform
-        expected = (stem + EXTENSIONS[platform], stem + '.sha256', stem + '.provenance.json')
         assets = release.get('assets', [])
-        selected = [next((a for a in assets if a.get('name') == name), None) for name in expected]
-        available = all(a and a.get('state') == 'uploaded' and sum(x.get('name') == a['name'] for x in assets) == 1 for a in selected)
-        result.append({'tag': tag, 'version': tag[1:], 'available': bool(available),
+
+        def complete(expected):
+            selected = [next((a for a in assets if a.get('name') == name), None) for name in expected]
+            ok = all(a and a.get('state') == 'uploaded' and sum(x.get('name') == a['name'] for x in assets) == 1 for a in selected)
+            return bool(ok), selected if ok else []
+        available, selected = complete((stem + EXTENSIONS[platform], stem + '.sha256', stem + '.provenance.json'))
+        app = APP_ASSETS[platform].format(v=tag[1:])
+        app_stem = app.rsplit('.', 1)[0]
+        app_available, app_selected = complete((app, app_stem + '.sha256', app_stem + '.provenance.json'))
+        result.append({'tag': tag, 'version': tag[1:], 'available': available,
                        'reason': '' if available else 'No complete setup for this platform',
-                       'notes': str(release.get('body') or '')[:20000], 'assets': selected if available else []})
+                       'notes': str(release.get('body') or '')[:20000], 'assets': selected,
+                       'app_available': app_available, 'app_assets': app_selected})
     result.sort(key=lambda row: version(row['version']), reverse=True)
     # Display cache is explicit offline metadata; downloads still verify pinned asset bytes.
     fd, temporary = tempfile.mkstemp(prefix='releases-', suffix='.pending', dir=cache)
@@ -296,6 +316,72 @@ def safe_zip(data, destination):
                     target.chmod(mode & 0o777)
 
 
+def pe_resource(data, type_id, name_id):
+    """The bytes of resource `name_id` of type `type_id` (first language) in a Windows PE image,
+    read from the file's own tables: nothing is loaded or run. ValueError when it is not there or
+    the tables point outside the file."""
+    def u16(at):
+        if at < 0 or at + 2 > len(data):
+            raise ValueError('Not a complete Windows program')
+        return int.from_bytes(data[at:at + 2], 'little')
+
+    def u32(at):
+        if at < 0 or at + 4 > len(data):
+            raise ValueError('Not a complete Windows program')
+        return int.from_bytes(data[at:at + 4], 'little')
+
+    if data[:2] != b'MZ':
+        raise ValueError('Not a Windows program')
+    pe = u32(0x3C)
+    if data[pe:pe + 4] != b'PE\0\0':
+        raise ValueError('Not a Windows program')
+    sections, optional_size = u16(pe + 6), u16(pe + 20)
+    optional = pe + 24
+    magic = u16(optional)
+    if magic not in (0x10B, 0x20B):
+        raise ValueError('Unknown Windows program format')
+    directories = optional + (96 if magic == 0x10B else 112)
+    if u32(directories - 4) < 3:
+        raise ValueError('The program has no resources')
+    rsrc_rva = u32(directories + 16)
+    table = optional + optional_size
+
+    def offset(rva, size=0):
+        for s in range(sections):
+            at = table + 40 * s
+            virtual_size, address, raw_size, raw = u32(at + 8), u32(at + 12), u32(at + 16), u32(at + 20)
+            if address <= rva < address + max(virtual_size, raw_size):
+                result = rva - address + raw
+                if rva + size > address + raw_size or result + size > len(data):
+                    raise ValueError('Resource outside the program file')
+                return result
+        raise ValueError('Resource outside the program file')
+
+    base = offset(rsrc_rva)
+
+    def entry(directory, wanted):
+        named, ids = u16(directory + 12), u16(directory + 14)
+        for k in range(named + ids):
+            at = directory + 16 + 8 * k
+            name, target = u32(at), u32(at + 4)
+            if wanted is None or (not name & 0x80000000 and name == wanted):
+                return target
+        raise ValueError('Resource not found')
+
+    level = entry(base, type_id)
+    if not level & 0x80000000:
+        raise ValueError('Malformed resource table')
+    level = entry(base + (level & 0x7FFFFFFF), name_id)
+    if not level & 0x80000000:
+        raise ValueError('Malformed resource table')
+    leaf = entry(base + (level & 0x7FFFFFFF), None)      # the first language
+    if leaf & 0x80000000:
+        raise ValueError('Malformed resource table')
+    data_rva, size = u32(base + leaf), u32(base + leaf + 4)
+    start = offset(data_rva, size)
+    return bytes(data[start:start + size])
+
+
 def unpack_setup(installer, platform, destination):
     if platform == 'macos-arm64':
         mount = Path(destination).parent / 'mounted'
@@ -408,6 +494,80 @@ def select_payload(tag, platform, cache, verify, previous, operation, cancelled,
             if manifest.get(key) != provenance.get(key):
                 raise ValueError('Selected payload does not match release provenance: ' + key)
         return scratch, payload
+    except BaseException:
+        shutil.rmtree(scratch)
+        raise
+
+
+def newest_app(platform, cache, current, cancelled=lambda: None):
+    """The newest stable release newer than `current` with a complete app for this platform, or None."""
+    for row in catalog(platform, cache, cancelled, allow_cached=True):
+        if row.get('app_available') and version(row['version']) > version(current):
+            return row
+    return None
+
+
+def select_app(tag, platform, cache, verify, cancelled, progress):
+    """Download a release's app and verify it as select_payload verifies setup: the asset's
+    GitHub digest, its checksum file and its provenance, then the setup payload inside it
+    against that provenance. Returns (scratch, bundle); the caller moves the bundle and
+    removes scratch. macOS: the ZIP of the bundle. Windows: the program, whose payload resource is
+    read from its tables (not run) and checked against the provenance's payload_sha256; the
+    bundle is a folder with the program and payload/. Linux's AppImage is not built yet."""
+    if platform not in ('macos-arm64', 'windows-x64'):
+        raise ValueError('This platform\'s app cannot update itself yet; download it from the release page')
+    cache = Path(cache)
+    cache.mkdir(parents=True, exist_ok=True)
+    target = next((r for r in catalog(platform, cache, cancelled, allow_cached=True) if r['tag'] == tag), None)
+    if not target or not target.get('app_available'):
+        raise ValueError('Selected release has no app for this platform')
+    app_asset, checksum_asset, provenance_asset = target['app_assets']
+    if type(provenance_asset.get('size')) is not int or provenance_asset['size'] > 4 * 1024**2:
+        raise ValueError('App provenance too large')
+    provenance = json.loads(download(provenance_asset, cache, cancelled, progress).read_text())
+    if (provenance.get('development') or provenance.get('kind') != 'app' or provenance.get('platform') != platform
+            or provenance.get('version') != target['version'] or not capable(provenance.get('updater'))
+            or not re.fullmatch(r'[0-9a-f]{64}', str(provenance.get('app_sha256')))):
+        raise ValueError('App provenance identity mismatch')
+    if type(checksum_asset.get('size')) is not int or checksum_asset['size'] > 1024:
+        raise ValueError('App checksum file is too large')
+    verify_checksum(download(checksum_asset, cache, cancelled, progress), app_asset['name'], provenance['app_sha256'])
+    archive = download(app_asset, cache, cancelled, progress, provenance['app_sha256'])
+    if sha(archive) != provenance['app_sha256']:
+        raise ValueError('App provenance checksum mismatch')
+    scratch = Path(tempfile.mkdtemp(prefix='app-', dir=cache))
+    try:
+        progress('Verifying the new app')
+        cancelled()
+        if platform == 'windows-x64':
+            if not re.fullmatch(r'[0-9a-f]{64}', str(provenance.get('payload_sha256'))):
+                raise ValueError('App provenance identity mismatch')
+            payload_zip = pe_resource(archive.read_bytes(), *PAYLOAD_RESOURCE)
+            if hashlib.sha256(payload_zip).hexdigest() != provenance['payload_sha256']:
+                raise ValueError('The setup files inside the new app do not match its release provenance')
+            bundle = scratch / 'app'
+            bundle.mkdir()
+            shutil.copyfile(archive, bundle / APP_PROGRAM_WINDOWS)
+            safe_zip(payload_zip, bundle / 'payload')
+            # Which built-in payload payload/ holds (src/app/app_install.cpp reads it at start).
+            (bundle / 'payload.sha256').write_text(provenance['payload_sha256'] + '\n', encoding='utf-8')
+            manifest = verify(bundle / 'payload')
+            for key in ('version', 'platform', 'source_commit', 'toolkit_commit', 'files', 'updater'):
+                if manifest.get(key) != provenance.get(key):
+                    raise ValueError('The new app does not match its release provenance: ' + key)
+            return scratch, bundle
+        safe_zip(archive.read_bytes(), scratch)
+        if sorted(p.name for p in scratch.iterdir()) != [APP_BUNDLE]:
+            raise ValueError('Unexpected app archive contents')
+        bundle = scratch / APP_BUNDLE
+        program = bundle / 'Contents/MacOS' / APP_PROGRAM
+        if not (bundle / 'Contents/Info.plist').is_file() or not program.is_file() or not os.access(program, os.X_OK):
+            raise ValueError('The new app is incomplete')
+        manifest = verify(bundle / 'Contents/Resources/payload')
+        for key in ('version', 'platform', 'source_commit', 'toolkit_commit', 'files', 'updater'):
+            if manifest.get(key) != provenance.get(key):
+                raise ValueError('The new app does not match its release provenance: ' + key)
+        return scratch, bundle
     except BaseException:
         shutil.rmtree(scratch)
         raise

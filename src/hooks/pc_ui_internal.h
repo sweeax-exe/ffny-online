@@ -6,13 +6,19 @@
 #endif
 #include "imgui.h"
 
-#if defined(_WIN32)
+// PCUI_WIN32: the game's window on Windows (Win32 and Direct3D 11). The app (DEFJAM_APP) draws in an
+// SDL window on every platform, as the game does off Windows.
+#if defined(_WIN32) && !defined(DEFJAM_APP) && !defined(PCUI_WIN32)
+#define PCUI_WIN32 1
+#endif
+
+#if defined(PCUI_WIN32)
 // The Win32 backend's message handler (its header only declares it in a comment).
 extern LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
 typedef HWND UiWindow;
 #else
-// Off Windows the window is SDL's and its events are fed in by hand (pc_ui.cpp): ui_sdl_event.
+// Otherwise the window is SDL's and its events are fed in by hand (pc_ui.cpp): ui_sdl_event.
 union SDL_Event;
 typedef void *UiWindow;     // an SDL_Window *, or null
 
@@ -68,7 +74,7 @@ void ui_apply_scale(UiWindow window);
 // Once a frame, before ImGui::NewFrame: every pad's buttons become the menu's gamepad navigation.
 void ui_feed_gamepad();
 
-#if defined(_WIN32)
+#if defined(PCUI_WIN32)
 // A key, mouse button or wheel notch being learned for a binding takes the message. Returns true
 // when it did, and the message should go no further. Window thread; call with the UI lock held.
 bool ui_capture_message(HWND window, UINT msg, WPARAM wp, LPARAM lp);

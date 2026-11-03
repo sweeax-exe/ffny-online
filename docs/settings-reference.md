@@ -22,6 +22,7 @@ and what to do when something misbehaves, see [Controllers, keyboard and mouse](
 | Key | Default | Meaning |
 |---|---|---|
 | `skip` | `false` | Skip the launcher and start the game at once. The launcher shows on every launch unless this is on. Hold **Shift** while the game starts, or start it with `--launcher`, to see it anyway; turn this off in the overlay's Interface page or the launcher's own checkbox. Env `RECOMP_NO_LAUNCHER=1` skips it for one run. |
+| `check_updates` | `true` | The app (`DefJamRecompiled`) checks GitHub for a newer release when it starts, at most every twelve hours, and Home offers the update. Off: no check. The game itself ignores it. Shown in the app's Advanced > Interface > Start-up as "Check for updates when the app starts". |
 
 ## [debug]
 
@@ -84,12 +85,17 @@ settings (see [Launcher and overlay](launcher-and-overlay.md#cheats)). [How they
 | `widescreen_side_fill` | `blur` | What is beside 4:3 pictures (movies, menu backgrounds) in widescreen: `blur` (a soft blurred extension) or `black`. Restart. |
 | `widescreen_fov_cap` | `150` | The widest horizontal field of view widescreen may use, 90-170 degrees. Restart. |
 | `render_scale` | `2` | Internal render height: 1× = 480p, 2× = 960p, 3× = 1440p, 4× = 1920p; width follows Picture shape. For 1080p output, 2× balances sharpness and cost, or 3× renders above the output height for extra sharpness. For 1440p, 3× matches the height. Window size is separate; higher scales cost GPU time. Restart. Env `RECOMP_RENDER_SCALE`. |
-| `filter` | `smooth` | How the picture is scaled to the window: `smooth` or `sharp`. |
+| `filter` | `smooth` | How the picture is scaled to the window: `smooth`, `sharp` or `smooth (high quality)`. The last is `smooth` with area-averaged downscaling: when the render scale makes the picture larger than the window (4× in a 1080p window, 3× or 4× on a Steam Deck), it averages the extra pixels instead of skipping some, so edges and fine detail shimmer less. Same as `smooth` when the picture is not larger than the window. Applies at once. Env `RECOMP_PRESENT_FILTER` (a choice name). [How it works](research/graphics-enhancements.md). |
+| `msaa` | `off` | Multisample anti-aliasing of the 3D picture: `off`, `2x`, `4x` or `8x`. Smooths the jagged edges of fighters and the arena, as the console's own anti-aliasing did; combines with render scale. Lowered to what the graphics card supports (the log says which). Costs GPU time and memory, more at higher render scales. Restart. Env `RECOMP_MSAA` (a choice name). |
+| `texture_mips` | `false` | Use the smaller copies (mip levels) the game ships with each texture, and filter between them as the console does. Without it the port samples only the full-size copy, so distant floors, walls and crowds shimmer, most at render scale 1-2. Applies at once (textures already loaded keep their shape until next used). Env `RECOMP_TEXTURE_MIPS` (`1` on, `0` off). |
+| `anisotropy` | `off` | Anisotropic filtering: `off`, `2x`, `4x`, `8x` or `16x`. Keeps floors and walls seen at a low angle sharp. Applies to textures the game filters smoothly; cut-out sprites are left as they are. Works best with `texture_mips` on. Applies at once. Env `RECOMP_ANISOTROPY` (a choice name). |
 | `vsync` | `true` | Pace frames on the display. Used when the refresh rate is a multiple of 60 Hz; other displays use the game's own 60 fps timer, and on those (75, 100, 144, 165 Hz) motion can judder because each frame stays up for an uneven number of refreshes. The log's `[DISPLAY]` line names the refresh rate and which of the two paces the game. Env `RECOMP_PRESENT_VSYNC`. |
 | `gamma` | `true` | Apply the game's own brightness curve, as the console does. Restart. Env `RECOMP_GAMMA`. |
 | `brightness` | `100` | Picture brightness, 50-200, on top of the game's curve: a power curve that moves the mid-tones and keeps black and white where they are. 100 is the console's picture; higher is brighter. Applies at once. Env `RECOMP_BRIGHTNESS`. |
 | `vignette` | `true` | The darkened screen edges that venues and some scenes draw (part of the game's post effects). `false` removes them. Applies at once. Env `RECOMP_VIGNETTE` (`1` on, `0` off). |
 | `vignette_strength` | `100` | How dark the vignette is, 0-100 percent of the game's own; 0 is the same as off. Applies at once. Env `RECOMP_VIGNETTE_STRENGTH`. [How both work](research/picture-options.md). |
+| `color_tint` | `100` | Strength of the colour tint venues and scenes put over the picture (the warm, sepia grade of most fights), 0-100 percent of the game's own; 0 shows the picture untinted. Applies at once. Env `RECOMP_COLOR_TINT`. |
+| `scratches` | `true` | The film scratches some scenes draw over the picture. `false` removes them. Applies at once. Env `RECOMP_SCRATCHES` (`1` on, `0` off). |
 
 ## [language]
 

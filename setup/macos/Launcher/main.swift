@@ -6,6 +6,11 @@
 // becomes the game. It is built here, never downloaded, so Gatekeeper has nothing to
 // say about it. Also: `--make-alias TARGET ALIAS` writes a Finder alias without
 // needing Finder automation permission (used for the Desktop shortcut).
+//
+// Once the app that sets up, launches and updates the game (src/app) has run, the install names
+// where it is (app-location.txt), and this becomes a forwarder: it opens that app for this install,
+// which holds the lock and starts the game itself. Without it, or when it has been removed, this
+// plays the game as before.
 import AppKit
 import Foundation
 
@@ -70,6 +75,22 @@ func openSessionLog() {
     if err >= 0 { dup2(err, 2); close(err) }
 }
 
+/// Become the app named by the install's app-location.txt, if it is there; return if it is not.
+/// --no-launcher (play at once) is the app's --play, --launcher its --launcher.
+func forwardToApp(root: URL, flags: [String]) {
+    let note = root.appendingPathComponent("app-location.txt")
+    guard let text = try? String(contentsOf: note, encoding: .utf8) else { return }
+    let bundle = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard bundle.hasSuffix(".app") else { return }
+    let program = URL(fileURLWithPath: bundle).appendingPathComponent("Contents/MacOS/defjam_app").path
+    guard FileManager.default.isExecutableFile(atPath: program) else { return }
+    var forwarded = [program, "--install", root.path]
+    if flags.contains("--no-launcher") { forwarded.append("--play") }
+    else if flags.contains("--launcher") { forwarded.append("--launcher") }
+    var argv: [UnsafeMutablePointer<CChar>?] = forwarded.map { strdup($0) } + [nil]
+    execv(program, &argv)
+}
+
 let arguments = CommandLine.arguments
 if arguments.count == 4 && arguments[1] == "--make-alias" {
     exit(makeAlias(target: arguments[2], alias: arguments[3]))
@@ -83,6 +104,7 @@ if arguments.count > 1 && arguments[1] != "--launch" && !gameFlags.contains(argu
 }
 
 let root = installRoot()
+forwardToApp(root: root, flags: arguments.dropFirst().filter { gameFlags.contains($0) })
 // Acquire the lifetime lock before reading activation state or receipt.
 let lock = open(root.appendingPathComponent("play.lock").path, O_RDWR | O_CREAT, 0o644)
 if lock < 0 || flock(lock, LOCK_EX | LOCK_NB) != 0 {
