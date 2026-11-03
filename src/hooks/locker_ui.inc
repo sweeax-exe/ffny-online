@@ -368,7 +368,7 @@ void draw_locker(ImDrawList *dl, const Frame &f, const Pad &pad)
         const char *st = eq ? nullptr : !it.unlocked ? "LOCKED" : it.k_crew ? "ALWAYS ON" : fits ? "UNLOCKED" : "";
         if (eq) {
             rect(dl, f, 316, y + 8, 54, 13, GOLD, 3);
-            text(dl, f, g_title, 8.5f, 343, y + 9, BLACK, "EQUIPPED", CENTER, 0);
+            text(dl, f, g_title, 8.5f, 343, y + 10.3f, BLACK, "EQUIPPED", CENTER, 0);   // centred as the crew roles' pills are
         } else if (st) {
             text(dl, f, g_title, 9, 368, y + 9, with_alpha(CREAM, 0.55f), st, RIGHT, 0);
         }

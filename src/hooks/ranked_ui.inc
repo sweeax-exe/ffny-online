@@ -785,7 +785,7 @@ void draw_ranked_results(ImDrawList *dl, const Frame &f, const Pad &pad)
         if (new_peak) {
             float pw = text_width(f, g_title, 12, line);
             rect(dl, f, 608 - pw - 46, ry - 24, 40, 12, GOLD, 2);
-            text(dl, f, g_title, 7.5f, 608 - pw - 26, ry - 23, BLACK, "NEW PEAK", CENTER, 0);
+            text(dl, f, g_title, 7.5f, 608 - pw - 26, ry - 21.9f, BLACK, "NEW PEAK", CENTER, 0);   // centred in the pill
         }
         if (a.place > 0) snprintf(line, sizeof(line), "#%d", a.place);
         else snprintf(line, sizeof(line), "-");
