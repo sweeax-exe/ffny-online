@@ -122,7 +122,12 @@ derives the delay from the pings as the players do.
   - the step loop takes every player's entry for the step, waiting for it as a player waits for
     the others, but never gives up the match the way a player does: a feed that stops mid-fight
     stops the watching (a notice says START then Quit goes back to the room);
-  - it never rolls back and never predicts: it runs only on entries it has.
+  - it never rolls back and never predicts: it runs only on entries it has;
+  - it plays from a small buffer: at the fight's first step, and after any stop for a late entry, it waits
+    (at most 400 ms) until it holds every player's entry 6 steps ahead, then plays one step a frame, so an
+    entry later by less than that does not stop it. Not after the decision: the players no longer predict
+    there and the feed itself slows down. `RECOMP_SPECTATE_BUFFER=<steps>` (0: none). The match's stops
+    and fills are logged at its end (`watching: N steps played, ...`).
 - **Every entry of the match is kept** (not only the players' 512-step ring): a spectator whose
   venue loads more slowly than the players' starts the fight seconds later and plays it seconds
   behind, from step 1. Kept per player in 4096-step chunks, up to 30 minutes (2 x 32 bytes x 60

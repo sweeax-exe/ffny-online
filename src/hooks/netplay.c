@@ -1050,6 +1050,7 @@ static void log_contiguous(const char *when)
 static void rematch_declined(void);
 
 static void disarm_crash_report(void);
+static void spec_play_summary(void);
 
 static void end_hub_match(const char *why)
 {
@@ -1062,6 +1063,7 @@ static void end_hub_match(const char *why)
     N.match_live = N.match_seen = 0;
     N.over_pending = 1;
     if (N.watching) {
+        spec_play_summary();
         N.watching = 0;         /* a spectator's match counts for nobody: no OVER */
         N.pos = 0;
     } else {
@@ -1091,9 +1093,43 @@ static NetCheck g_spec_rh[MAXP][SPEC_HASHES], g_spec_lh[SPEC_HASHES];
 static unsigned g_hash_matches;     /* checksums compared and equal, this session */
 static void desync_detail(const NetCheck *mine, const NetCheck *theirs);
 
+/* The spectator's playback buffer. The players' entries reach a spectator unevenly (each player's
+ * own path through the relay, a rollback player's entries as it plays), and a spectator that plays
+ * each step the moment its entries are here stops whenever one is late, then goes on. So at the start
+ * of the fight and after every such stop the spectator waits until it holds `spec_buffer_steps()`
+ * steps beyond the one it plays (bounded, SPEC_FILL_MS), and from there plays one step a frame: an
+ * entry later by less than that buffer no longer stops it. RECOMP_SPECTATE_BUFFER=<steps> (0: none,
+ * as before). The counts are logged when the match ends for this PC. */
+#define SPEC_FILL_MS 400
+static struct { unsigned steps, stalls, stalls_after, fills, fills_short; double stall_ms, stall_ms_after, fill_ms; int fill_due; } g_spec_play;
+
+static int spec_buffer_steps(void)
+{
+    static int n = -1;
+    if (n < 0) {
+        const char *e = getenv("RECOMP_SPECTATE_BUFFER");
+        n = e && *e ? atoi(e) : 6;
+        if (n < 0) n = 0;
+        if (n > 30) n = 30;
+    }
+    return n;
+}
+
+static void spec_play_summary(void)
+{
+    if (!g_spec_play.steps) return;
+    fprintf(stderr, "[NETPLAY] watching: %u steps played, %u stop(s) for late entries in the fight (%.0f ms) and %u after "
+            "the decision (%.0f ms), %u buffer fill(s) of %d steps (%.0f ms, %u not full)\n", g_spec_play.steps,
+            g_spec_play.stalls, g_spec_play.stall_ms, g_spec_play.stalls_after, g_spec_play.stall_ms_after,
+            g_spec_play.fills, spec_buffer_steps(), g_spec_play.fill_ms, g_spec_play.fills_short);
+    memset(&g_spec_play, 0, sizeof(g_spec_play));
+}
+
 static void spec_reset(void)
 {
     unsigned i, c;
+    memset(&g_spec_play, 0, sizeof(g_spec_play));
+    g_spec_play.fill_due = 1;           /* the fight's first steps: fill the buffer first */
     for (i = 0; i < MAXP; i++)
         for (c = 0; c < SPEC_CHUNKS; c++)
             if (g_spec[i][c]) memset(g_spec[i][c]->match, 0, sizeof(g_spec[i][c]->match));
@@ -4811,10 +4847,45 @@ static int spec_stop_pressed(void)
 /* Spectator mode, step s (its checksum taken): compare it with the players', then wait for every
  * player's entry of the step. Never a give-up that counts for anyone: a feed that stops only stops
  * the watching, and the game goes on on its own (START, then Quit, goes back to the room). */
+/* After a stop for late entries (and before the fight's first steps): wait until every player's entry
+ * of step s + spec_buffer_steps() is here, at most SPEC_FILL_MS, and not once the match is decided (the
+ * feed ends there). */
+static void spec_fill(uint32_t s)
+{
+    uint32_t want = s + (uint32_t)spec_buffer_steps();
+    ULONGLONG since = GetTickCount64();
+    LARGE_INTEGER t0, t1;
+    int full = 0;
+    if (!g_spec_play.fill_due || want == s) return;
+    g_spec_play.fill_due = 0;
+    if (N.fighting_seen && MEM32(G_MATCH_PHASE) >= 2u) return;
+    QueryPerformanceCounter(&t0);
+    while (N.lockstep && GetTickCount64() - since < SPEC_FILL_MS) {
+        int i;
+        full = 1;
+        EnterCriticalSection(&g_cs);
+        for (i = 0; i < N.players; i++) if (!spec_entry(i, want, NULL)) full = 0;
+        LeaveCriticalSection(&g_cs);
+        if (full) break;
+        WaitForSingleObject(N.arrived, 4);
+        if (spec_stop_pressed()) {
+            fprintf(stderr, "[NETPLAY] watching: stopped with START at step %u\n", s);
+            InterlockedExchange(&N.lockstep, 0);
+            toast(10000, "You stopped watching. START, then Quit, goes back to the room.");
+            break;
+        }
+    }
+    QueryPerformanceCounter(&t1);
+    g_spec_play.fills++;
+    g_spec_play.fill_ms += qpc_ms(t0, t1);
+    if (!full) g_spec_play.fills_short++;
+}
+
 static void spec_step(uint32_t s)
 {
     ULONGLONG since;
-    int waited_long = 0;
+    LARGE_INTEGER t0, t1;
+    int waited_long = 0, waited = 0;
     if (s % HASH_EVERY == 0 && N.hash_tag[s % RING] == s + 1) {
         uint32_t k = s % RING;
         unsigned slot = (s / HASH_EVERY) % SPEC_HASHES;
@@ -4840,6 +4911,7 @@ static void spec_step(uint32_t s)
     }
     if (s <= (uint32_t)N.delay) return;
     since = GetTickCount64();
+    QueryPerformanceCounter(&t0);
     for (;;) {
         int ready = 1, i, late = -1;
         ULONGLONG now;
@@ -4850,8 +4922,24 @@ static void spec_step(uint32_t s)
             if (ready && waited_long)
                 fprintf(stderr, "[NETPLAY] watching: waited %.1f s for player %d's entries at step %u\n",
                         (GetTickCount64() - since) / 1000.0, N.last_late + 1, s);
+            if (ready) {
+                double ms;
+                QueryPerformanceCounter(&t1);
+                ms = qpc_ms(t0, t1);
+                g_spec_play.steps++;
+                if (waited && s > (uint32_t)N.delay + 1 && N.fighting_seen && MEM32(G_MATCH_PHASE) >= 2u) {
+                    g_spec_play.stalls_after++;     /* after the decision the players no longer predict: */
+                    g_spec_play.stall_ms_after += ms;   /* the feed itself slows down, no buffer helps */
+                } else if (waited && s > (uint32_t)N.delay + 1) {   /* a stop: the buffer ran dry */
+                    g_spec_play.stalls++;
+                    g_spec_play.stall_ms += ms;
+                    g_spec_play.fill_due = 1;
+                }
+                spec_fill(s);
+            }
             break;
         }
+        waited = 1;
         N.last_late = late;
         WaitForSingleObject(N.arrived, 4);
         now = GetTickCount64();
