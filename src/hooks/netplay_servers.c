@@ -561,6 +561,103 @@ static void list_round(void)
     closesocket(s);
 }
 
+/* ---- Every relay's players (build 47, PLAYERLIST 0x33: WHO without a session) ------------------ */
+
+#define PLAYERLIST_TYPE  0x33
+#define PLAYERLIST_EVERY 5000   /* ms between two asks of one relay (the relay answers 2 a second per IP) */
+#define PLAYERLIST_FRESH 15000  /* an older answer is not used */
+#define PLAYERS_MAX      40     /* the relay's MaxWho */
+
+static struct {
+    int want[NETSERVER_COUNT];
+    ULONGLONG asked[NETSERVER_COUNT], got[NETSERVER_COUNT];
+    int count[NETSERVER_COUNT], total[NETSERVER_COUNT], online[NETSERVER_COUNT];
+    NetPlayer list[NETSERVER_COUNT][PLAYERS_MAX];
+    int logged[NETSERVER_COUNT];        /* the player count last logged plus one, 0 none yet */
+} PL;
+
+/* One ask of every wanted relay: a PLAYERLIST padded to a full datagram (the relay answers with no
+ * more bytes than it was sent) for this build's players, names and states only. */
+static void players_round(void)
+{
+    struct sockaddr_in addr[NETSERVER_COUNT];
+    int want[NETSERVER_COUNT], i, open = 0;
+    uint32_t nonce[NETSERVER_COUNT];
+    char address[NETSERVER_COUNT][128];
+    uint8_t print[8], req[1200];
+    double until;
+    SOCKET s;
+    u_long nonblocking = 1;
+    netplay_build_fingerprint(print);
+    EnterCriticalSection(&g_cs);
+    for (i = 0; i < NETSERVER_COUNT; i++) {
+        memcpy(address[i], P.s[i].address, sizeof(address[i]));
+        want[i] = PL.want[i];
+        PL.want[i] = 0;
+        if (want[i]) open++;
+    }
+    LeaveCriticalSection(&g_cs);
+    if (!open) return;
+    open = 0;
+    s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    if (s == INVALID_SOCKET) return;
+    ioctlsocket(s, FIONBIO, &nonblocking);
+    for (i = 0; i < NETSERVER_COUNT; i++) {
+        if (!want[i] || resolve(i, address[i], &addr[i])) { want[i] = 0; continue; }
+        nonce[i] = ((uint32_t)GetTickCount() * 2246822519u) ^ ((uint32_t)GetCurrentProcessId() << 5) ^ (uint32_t)(i + 7);
+        memset(req, 0, sizeof(req));
+        req[0] = 'D'; req[1] = 'J'; req[2] = 'N'; req[3] = 'P'; req[4] = 1; req[5] = PLAYERLIST_TYPE;
+        req[6] = (uint8_t)nonce[i]; req[7] = (uint8_t)(nonce[i] >> 8); req[8] = (uint8_t)(nonce[i] >> 16);
+        req[9] = (uint8_t)(nonce[i] >> 24);
+        memcpy(req + 10, print, 8);     /* this build's players, as WHO names them */
+        sendto(s, (const char *)req, (int)sizeof(req), 0, (const struct sockaddr *)&addr[i], sizeof(addr[i]));
+        open++;
+    }
+    until = now_ms() + ROOMLIST_WAIT;
+    while (open > 0 && now_ms() < until) {
+        fd_set rd;
+        struct timeval tv = { 0, 20000 };
+        uint8_t b[1500];
+        int n, who = -1, count, at, k, bad = 0;
+        NetPlayer list[PLAYERS_MAX];
+        FD_ZERO(&rd);
+        FD_SET(s, &rd);
+        n = select(0, &rd, NULL, NULL, &tv) > 0 ? recv(s, (char *)b, sizeof(b), 0) : 0;
+        if (n < 15 || memcmp(b, "DJNP", 4) || b[4] != 1 || b[5] != PLAYERLIST_TYPE) continue;
+        for (i = 0; i < NETSERVER_COUNT; i++) if (want[i] && rd32(b + 6) == nonce[i]) who = i;
+        if (who < 0) continue;
+        count = b[14];
+        if (count > PLAYERS_MAX) continue;
+        for (k = 0, at = 15; k < count && !bad; k++) {
+            int len;
+            if (at + 1 > n) { bad = 1; break; }
+            len = b[at++];
+            if (at + len + 1 > n) { bad = 1; break; }
+            memset(&list[k], 0, sizeof(list[k]));
+            snprintf(list[k].name, sizeof(list[k].name), "%.*s", len > 24 ? 24 : len, (const char *)(b + at));
+            at += len;
+            list[k].state = b[at] <= 2 ? b[at] : 0;
+            at++;
+        }
+        if (bad) continue;
+        want[who] = 0;
+        open--;
+        EnterCriticalSection(&g_cs);
+        memcpy(PL.list[who], list, sizeof(list[0]) * (size_t)count);
+        PL.count[who] = count;
+        PL.online[who] = rd16(b + 10);
+        PL.total[who] = rd16(b + 12);
+        PL.got[who] = GetTickCount64();
+        if (PL.logged[who] != count + 1) {
+            PL.logged[who] = count + 1;
+            fprintf(stderr, "[SERVERS] players: %s lists %d of %d (%d connected)\n", P.s[who].name, count,
+                    PL.total[who], PL.online[who]);
+        }
+        LeaveCriticalSection(&g_cs);
+    }
+    closesocket(s);
+}
+
 static DWORD WINAPI list_thread(LPVOID unused)
 {
     (void)unused;
@@ -573,6 +670,7 @@ static DWORD WINAPI list_thread(LPVOID unused)
     for (;;) {
         WaitForSingleObject(R.wake, INFINITE);
         list_round();
+        players_round();
         InterlockedExchange(&R.busy, 0);
     }
 }
@@ -694,6 +792,82 @@ int netservers_rooms(NetServerRoom *out, int max, unsigned *version)
     if (version) *version = v * 2654435761u + R.version;
     LeaveCriticalSection(&g_cs);
     return n;
+}
+
+/* Asks the relays in `mask` for their players (PLAYERLIST) when their last ask is 5 s old. */
+static void fetch_players(unsigned mask)
+{
+    ULONGLONG now;
+    int i, any = 0;
+    init();
+    if (R.busy) return;
+    now = GetTickCount64();
+    EnterCriticalSection(&g_cs);
+    for (i = 0; i < NETSERVER_COUNT; i++)
+        if ((mask >> i & 1u) && P.s[i].state != NETSERVER_OFFLINE && now - PL.asked[i] >= PLAYERLIST_EVERY) {
+            PL.want[i] = 1;
+            PL.asked[i] = now;
+            any = 1;
+        }
+    if (any && !R.thread) {
+        R.wake = CreateEventW(NULL, FALSE, FALSE, NULL);
+        R.thread = R.wake ? CreateThread(NULL, 0, list_thread, NULL, 0, NULL) : NULL;
+    }
+    if (any && R.thread) {
+        InterlockedExchange(&R.busy, 1);
+        SetEvent(R.wake);
+    }
+    LeaveCriticalSection(&g_cs);
+}
+
+void netservers_fetch_players(void)
+{
+    int cur;
+    if (netservers_choice() != NETCHOICE_ALL) return;
+    cur = netservers_connected();
+    fetch_players(((1u << NETSERVER_COUNT) - 1) & ~(cur >= 0 ? 1u << cur : 0u));    /* the hub's own: WHO */
+}
+
+int netservers_players(NetServerPlayer *out, int max, int *online)
+{
+    NetServerInfo sv[NETSERVER_COUNT];
+    NetPlayer own[PLAYERS_MAX];
+    int order[NETSERVER_COUNT], ping[NETSERVER_COUNT], cur = netservers_connected(), own_online = -1, own_n, n = 0;
+    int heard = 0, total = 0, i, j, k, rtt = netplay_rtt();
+    ULONGLONG now = GetTickCount64();
+    init();
+    netservers_get(sv, NETSERVER_COUNT);
+    own_n = netplay_lobby_players(own, PLAYERS_MAX, &own_online, NULL);
+    for (i = 0; i < NETSERVER_COUNT; i++) {
+        ping[i] = sv[i].state == NETSERVER_UP ? sv[i].ping_ms : -1;
+        if (i == cur && rtt >= 0) ping[i] = rtt;
+        order[i] = i;
+    }
+    /* the hub's relay first, then the others by ping (as the rooms) */
+    for (i = 1; i < NETSERVER_COUNT; i++)
+        for (j = i; j > 0; j--) {
+            int a = order[j - 1], b = order[j];
+            int before = b == cur || (a != cur && ping[b] >= 0 && (ping[a] < 0 || ping[b] < ping[a]));
+            if (!before) break;
+            order[j] = a; order[j - 1] = b;
+        }
+    EnterCriticalSection(&g_cs);
+    for (j = 0; j < NETSERVER_COUNT; j++) {
+        int r = order[j];
+        if (r == cur) {
+            if (own_n < 0) continue;
+            heard = 1;
+            total += own_online > 0 ? own_online : 0;
+            for (k = 0; k < own_n && n < max; k++) { out[n].player = own[k]; out[n].server = r; n++; }
+        } else if (PL.got[r] && now - PL.got[r] < PLAYERLIST_FRESH) {
+            heard = 1;
+            total += PL.online[r];
+            for (k = 0; k < PL.count[r] && n < max; k++) { out[n].player = PL.list[r][k]; out[n].server = r; n++; }
+        }
+    }
+    LeaveCriticalSection(&g_cs);
+    if (online) *online = heard ? total : -1;
+    return heard ? n : -1;
 }
 
 /* Sends the pending join or quick match when the hub is in its relay's lobby. */
@@ -853,6 +1027,8 @@ int netservers_reconnect(const char *name) { (void)name; return 0; }
 int netservers_connected(void) { return -1; }
 int netservers_best(void) { return -1; }
 void netservers_fetch_rooms(void) {}
+void netservers_fetch_players(void) {}
+int netservers_players(NetServerPlayer *out, int max, int *online) { (void)out; (void)max; if (online) *online = -1; return -1; }
 int netservers_rooms(NetServerRoom *out, int max, unsigned *version) { (void)out; (void)max; if (version) *version = 0; return 0; }
 void netservers_join_on(int server, const char *code, int mode, const char *name) { (void)server; (void)code; (void)mode; (void)name; }
 void netservers_quick_on(int server, int mode, int max, const char *name) { (void)server; (void)mode; (void)max; (void)name; }

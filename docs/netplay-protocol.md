@@ -320,6 +320,11 @@ Same header and version; a relay without it drops `SPECTATE` silently.
   player `DATA` whose payload type is `P_STEPS` (4), `P_HASH` (5) or `P_RTT` (6) goes to them too, with
   the player's slot. A watcher's `VOTE` while the room plays re-sends its `WATCH`. A spectator who
   enters during a match watches from the next one.
+- A Rematch the players choose on their results runs on in the same relay match (no new `START`),
+  so the watchers get its entries too. Since build 47 a client that sends `CAPS` bit 6 (`64`, client
+  only, not answered) also gets, as a watcher, the players' `P_REMATCH` (8: `u32` START seed, `u32`
+  match number, `0xFFFFFFFF` back to the room): its game waits on the results and watches the rematch,
+  or goes back to the room with the players. Watchers without the bit never get `P_REMATCH`.
 - `P_RTT` (game payload 6) gains byte 13 since build 40: the input delay the sender's game agreed at
   its sync point (0 before), which a spectator plays with. Byte 14 since build 45: bit 0, the sender's
   game rolls back a match with a created fighter too. A match with a created fighter rolls back only
@@ -375,6 +380,28 @@ that relay.
 - The game asks at most every 3 s per relay, while its room list shows or while it waits alone in a
   quick room once its quick match searches other relays (build 38: any choice but a custom address; the
   `age` lets two such players decide who moves; see `docs/netplay.md`).
+
+## Who is online without a session (all servers)
+
+Since build 47 the PLAYERS ONLINE page lists every relay's players when the player chose **All
+servers**: the hub's own relay answers `WHO`, the others `PLAYERLIST`, which, like `ROOMLIST`, needs no
+token and registers nothing. A relay before build 47 drops it silently (an unknown type), and the
+game then lists none of that relay's players. With one server chosen, the page names the hub's relay's
+players and adds a line with how many are on the others (their `STATUS` counts).
+
+| Type | Name | Direction | Body after the header |
+|---|---|---|---|
+| 0x33 | `PLAYERLIST` | client -> server | `nonce` u32, `build` 8 (the asker's fingerprint, zeros: any), then zero bytes (padding, as for `ROOMLIST`) |
+| 0x33 | `PLAYERLIST` | server -> client | `nonce` u32 (the request's), `online` u16 (everyone connected, as `PLAYERS`), `total` u16 (players that match), `count` u8, then per player: `name` string, `state` u8 (0 in the hub, 1 in a room, 2 playing; as in `PLAYERS`) |
+
+- The players are those `WHO` gives a registered client of that build (lobby clients with a name;
+  in the hub first, then in rooms, then playing; by name), at most 40. Names and states only: never an
+  address.
+- **The answer is never larger than the request**; padding that is not zero is malformed (dropped).
+- Each source IP gets at most 2 answers a second (its own allowance, beside `STATUS` and
+  `ROOMLIST`); the per-IP message limit applies as well. The summary log line counts the answers
+  (`playerlist=N` at its end).
+- The game asks every relay but its hub's at most every 5 s, only while the page shows.
 
 ## Created fighters (Story-mode fighters online)
 

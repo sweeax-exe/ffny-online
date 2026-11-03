@@ -145,10 +145,17 @@ derives the delay from the pings as the players do.
 - **The next match:** the spectator stays in the room; the room's next `START` brings the next
   `WATCH`. A match that `WATCH` sets up while the spectator is still on the results starts once it is
   back in the menus (automatch waits for the main menu, as for every match). A Rematch the players
-  choose on their results has no new `START`; v1 does not show it (the spectator waits in the room
-  for the next room match).
-- **Leaving:** B in the room leaves it (`LEAVE`); during the fight START stops watching, then the
-  pause menu's Quit returns to the room. The players never know.
+  choose on their results has no new `START`; v1 did not show it. Since build 47 the spectator's game
+  stops on the Rematch menu (it comes after the reward screen's save) and waits: the players' choices
+  reach it (`P_REMATCH`, `CAPS` bit 6), and once every player chose Rematch (or the rematch's entries
+  arrive) it calls `Game.Rematch()` as the menu would and watches the rematch like the match; when a
+  player goes back to the room, the room is back in its lobby, START is pressed or three minutes pass,
+  it chooses No and goes back to the room.
+- **Leaving:** B in the room leaves it (`LEAVE`); during the fight START stops watching and, since
+  build 47, takes the spectator straight back to the room: the game runs the pause menu's own Quit
+  (`sub_000CD0D0` on its confirm page; the pause menu itself never opens for a spectator, whose pad sits
+  on a port no fighter uses), which leaves the fight for the match-type screen and the room. A feed
+  that stops does the same. The players never know.
 
 ## 6. Bandwidth
 
@@ -182,13 +189,14 @@ fight, so v2 needs the relay's replay feed and the fast-forward, not a new input
 
 ## 9. What v1 does not do
 
-- Join a match already running (v2, section 8); Rematches the players choose on their results.
+- Join a match already running (v2, section 8). (Rematches the players choose on their results are
+  watched since build 47.)
 - King of the Hill: its watchers keep the phase-1 names screen; switching them to this game side is
   the hill's phase 2 (the hill's own results and calls need care).
 - A match of four human players: the spectator's own pad sits on the fourth player's port outside
   the fight (the toolkit maps the local pad to a port 0..3); during the fight it has no effect.
 - Ranked rooms; spectators in the room list (`ROOMS` shows players only); talking spectators.
-- Leaving mid-fight in one press (START stops watching, then Quit in the pause menu).
+- (Leaving mid-fight in one press: START, since build 47.)
 
 ## 10. Decisions for the owner
 

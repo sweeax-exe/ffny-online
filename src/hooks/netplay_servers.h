@@ -110,6 +110,24 @@ void netservers_fetch_rooms(void);
  * first). Returns the count; *version changes whenever the list may have. */
 int netservers_rooms(NetServerRoom *out, int max, unsigned *version);
 
+/* ---- Every relay's players (build 47, "All servers") ------------------------------------------ */
+
+/* One player of the merged list of who is online: the player and the relay it is on. */
+typedef struct NetServerPlayer {
+    NetPlayer player;
+    int server;         /* NETSERVER_* */
+} NetServerPlayer;
+
+/* With All: asks every relay but the hub's own (that one answers WHO) for its players (PLAYERLIST, no
+ * session) when the last answer is older than 5 s. Cheap to call every frame; does nothing with any
+ * other choice. */
+void netservers_fetch_players(void);
+/* Who is online on every relay that answered: the hub's relay's WHO list first, then the others'
+ * PLAYERLIST lists (answers up to 15 s old) by ping, each in the relay's order (hub, room, fighting;
+ * by name), each tagged with its relay. Returns the count, -1 while no relay has answered yet;
+ * *online: everyone connected to those relays (-1 likewise). */
+int netservers_players(NetServerPlayer *out, int max, int *online);
+
 /* Join room `code` (of match type `mode`) on relay `server`: at once when the hub is in that relay's
  * lobby, else the hub moves there (the old session ends) and joins once it is in. The same for a quick
  * match. A move waits at most 15 s for the new lobby. */
