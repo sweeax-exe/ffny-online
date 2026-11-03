@@ -213,6 +213,7 @@ void netplay_crowd_update(void) { sub_00081170(); }
 #define CHAT_SPECTATOR 1
 #define CHAT_SYSTEM   2
 #define CHAT_YOURS    4
+#define CHAT_HISTORY  8         /* the room's earlier line, sent once on joining or watching (stage 2c) */
 #define CHAT_TRIES    5         /* a line every CHAT_RETRY_MS until its echo comes */
 #define CHAT_RETRY_MS 700
 #define CHAT_QUEUE    4
@@ -3165,12 +3166,14 @@ static void chat_add(int slot, unsigned account, int flags, const char *name, in
     l->account = account;
     l->spectator = (flags & CHAT_SPECTATOR) != 0;
     l->mine = (flags & CHAT_YOURS) != 0;
+    l->history = (flags & CHAT_HISTORY) != 0;
     for (i = o = 0; i < nl && o < (int)sizeof(l->name) - 1; i++)
         if ((unsigned char)name[i] >= 0x20 && name[i] != 0x7F) l->name[o++] = name[i];
     for (i = o = 0; i < tl && o < (int)sizeof(l->text) - 1; i++)
         if ((unsigned char)text[i] >= 0x20 && text[i] != 0x7F) l->text[o++] = text[i];
-    l->at = GetTickCount64();
-    l->unix_at = (long long)time(NULL);
+    /* an earlier line: not new (no fight overlay, no unread), and its time is not known */
+    l->at = l->history ? 0 : GetTickCount64();
+    l->unix_at = l->history ? 0 : (long long)time(NULL);
 }
 
 /* T_IDENT from the relay (network thread). */
@@ -3214,9 +3217,15 @@ static void chat_on_line(const uint8_t *p, int n)
         LeaveCriticalSection(&g_cs);    /* a retry's echo of a line already shown */
         return;
     }
+    if (flags & CHAT_HISTORY) {         /* joining again (after a match): the lines this PC has already */
+        int i, dup = 0;
+        for (i = 0; i < N.chat_n && !dup; i++)
+            dup = N.chat[i].account == account && (int)strlen(N.chat[i].text) == tl && !memcmp(N.chat[i].text, p + 10 + nl, (size_t)tl);
+        if (dup) { LeaveCriticalSection(&g_cs); return; }
+    }
     if (N.roomv.in_room) {
         chat_add(slot, account, flags, (const char *)p + 9, nl, (const char *)p + 10 + nl, tl);
-        fprintf(stderr, "[NETPLAY] room chat%s from %s%s: %s\n", flags & CHAT_SYSTEM ? " (relay)" : "",
+        fprintf(stderr, "[NETPLAY] room chat%s from %s%s: %s\n", flags & CHAT_SYSTEM ? " (relay)" : flags & CHAT_HISTORY ? " (earlier)" : "",
                 flags & CHAT_SYSTEM ? "the relay" : N.chat[N.chat_n - 1].name,
                 flags & CHAT_SPECTATOR ? " (spectator)" : flags & CHAT_YOURS ? " (this PC)" : "", N.chat[N.chat_n - 1].text);
     }

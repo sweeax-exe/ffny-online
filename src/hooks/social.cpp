@@ -19,6 +19,7 @@
 #define WIN32_LEAN_AND_MEAN
 #endif
 #include <windows.h>
+#include <wincodec.h>
 
 #include <algorithm>
 #include <atomic>
@@ -28,6 +29,7 @@
 #include <functional>
 #include <map>
 #include <mutex>
+#include <set>
 
 namespace social {
 namespace {
@@ -198,7 +200,7 @@ std::string g_mode_name;            // guarded by g_mu: the room's mode as the o
 const bool g_test_log = getenv("RECOMP_TEST_SOCIAL") != nullptr;
 void *volatile g_poll_live = nullptr;
 void *volatile g_work_live = nullptr;
-HANDLE g_threads[2];
+HANDLE g_threads[3];
 
 int env_switch()                    // RECOMP_SOCIAL: 1 on, -1 off, 0 the service decides
 {
@@ -355,6 +357,7 @@ bool probe()
     int mc = atoi(key_value(out, "max_chars").c_str());
     g_v.max_chars = mc > 0 ? mc : 200;
     g_v.dms = key_value(out, "dms");
+    g_v.show_avatar = key_value(out, "show_avatar") != "0";
     changed();
     return true;
 }
@@ -468,10 +471,24 @@ void load_crew()
     int status = http("GET", "/api/social/crews/mine", nullptr, out, 0, &g_work_live);
     if (status == 404) {
         bool off = error_of(out, status) == "not available";    // crews=off in the switch file
+        std::vector<CrewInvite> invites;
+        J iv;
+        std::string io;
+        if (!off && http("GET", "/api/social/crews/invites", nullptr, io, 0, &g_work_live) == 200 && parse_json(io, iv))
+            for (auto &x : iv["invites"].a) {
+                CrewInvite c;
+                c.crew = x["crew"].i(); c.tag = x["tag"].str(); c.text = x["name"].str();
+                if (c.crew) invites.push_back(c);
+            }
         std::lock_guard<std::mutex> lk(g_mu);
         g_v.crews = !off;
         g_v.crew = 0;
+        g_v.crew_role.clear();
+        g_v.crew_roster.clear();
         g_v.crew_chat.clear();
+        for (auto &c : invites)     // the list the service keeps, plus the ones the long-poll brought
+            if (std::none_of(g_v.crew_invites.begin(), g_v.crew_invites.end(), [&](const CrewInvite &x) { return x.crew == c.crew; }))
+                g_v.crew_invites.push_back(c);
         changed();
         return;
     }
@@ -486,8 +503,36 @@ void load_crew()
         g_v.crew_motto = j["motto"].str();
         g_v.crew_members = (int)j["member_count"].i();
         g_v.crew_online = (int)j["online"].i();
-        g_v.crew_invites.erase(std::remove_if(g_v.crew_invites.begin(), g_v.crew_invites.end(),
-                                              [](const CrewInvite &c) { return c.crew == g_v.crew; }), g_v.crew_invites.end());
+        g_v.crew_role = j["my_role"].str();
+        g_v.crew_region = j["region"].str();
+        g_v.crew_founded = rfc3339(j["founded"].str());
+        g_v.crew_level = (int)j["level"].i();
+        g_v.crew_xp = (int)j["xp"].i();
+        g_v.crew_level_xp = (int)j["level_xp"].i();
+        g_v.crew_next_xp = (int)j["next_xp"].i();
+        g_v.crew_league = j["league_name"].str();
+        const J &season = j["season"];
+        g_v.crew_wins = (int)season["wins"].i();
+        g_v.crew_losses = (int)season["losses"].i();
+        g_v.crew_streak = (int)season["streak"].i();
+        g_v.crew_rating = (int)season["rating"].i();
+        g_v.crew_turf = (int)j["turf"].a.size();
+        g_v.crew_locked = j["locked"].b;
+        g_v.crew_roster.clear();
+        for (auto &m : j["members"].a) {
+            CrewMember x;
+            x.id = m["id"].i(); x.name = m["name"].str(); x.role = m["role"].str(); x.state = m["state"].str();
+            if (x.state.empty()) x.state = "offline";
+            g_v.crew_roster.push_back(x);
+        }
+        auto refs = [](const J &list) {
+            std::vector<Ref> out;
+            for (auto &x : list.a) { Ref r; r.id = x["id"].i(); r.name = x["name"].str(); out.push_back(r); }
+            return out;
+        };
+        g_v.crew_invited = refs(j["invites"]);
+        g_v.crew_applied = refs(j["applications"]);
+        g_v.crew_invites.clear();      // in a crew: no invites to answer
         changed();
     }
     if (http("GET", "/api/social/crews/chat?limit=60", nullptr, out, 0, &g_work_live) != 200 || !parse_json(out, j)) return;
@@ -535,6 +580,7 @@ void apply_event(const std::vector<std::string> &f)
             fprintf(stderr, "[SOCIAL] global %s from %s: %s\n", channel.c_str(), name.c_str(), text.c_str());
     } else if (kind == "crew") {
         add_line(g_v.crew_chat, make_line(), 200);
+        if (flags.find('s') != std::string::npos) g_dirty_crew = true;     // a joiner, a new role: the page again
     } else if (kind == "dm") {
         long long other = channel.compare(0, 3, "dm:") == 0 ? atoll(channel.c_str() + 3) : from;
         bool incoming = from != me;
@@ -679,8 +725,11 @@ std::string presence_json()
 //
 // "step;step;...", run in order once the lists are loaded: wait:S, friend:NAME (a request by name),
 // accept (the first request that comes, waiting up to 60 s), dm:NAME:TEXT (to a friend, waiting up to
-// 60 s for the friendship), global:REGION:TEXT, remove:NAME, log (the state, one line). Each step
-// writes a [SOCIAL-TEST] line.
+// 60 s for the friendship), global:REGION:TEXT, remove:NAME, log (the state, one line). Stage 2c:
+// block:NAME / unblock:NAME, report:NAME (their newest global line, else a DM), dms:everyone|friends|off,
+// avatar:on|off (show my picture), crew:NAME:TAG (create), crewinvite:NAME, crewjoin (the first invite,
+// waiting up to 60 s), crewrole:NAME:ROLE, crewkick:NAME, crewleave. Each step writes a [SOCIAL-TEST]
+// line.
 
 struct TestRun {
     std::vector<std::string> steps;
@@ -691,6 +740,18 @@ struct TestRun {
 long long friend_id(const std::string &name)    // callers hold g_mu
 {
     for (auto &f : g_v.friends) if (f.name == name) return f.id;
+    return 0;
+}
+
+long long anyone_id(const std::string &name)    // callers hold g_mu: a friend, crew mate, sender or the like
+{
+    if (long long id = friend_id(name)) return id;
+    for (auto &m : g_v.crew_roster) if (m.name == name) return m.id;
+    for (auto &c : g_v.convos) if (c.with.name == name) return c.with.id;
+    for (auto &l : g_v.global) if (l.name == name && l.from) return l.from;
+    for (auto &l : g_v.crew_chat) if (l.name == name && l.from) return l.from;
+    for (auto *list : { &g_v.blocked, &g_v.in, &g_v.out, &g_v.muted })
+        for (auto &r : *list) if (r.name == name) return r.id;
     return 0;
 }
 
@@ -723,13 +784,60 @@ void test_tick()
     } else if (what == "global") {
         std::string region = arg.substr(0, arg.find(':'));
         send_global(region.c_str(), arg.find(':') != std::string::npos ? arg.substr(arg.find(':') + 1) : "");
+    } else if (what == "block" || what == "unblock") {
+        long long id;
+        { std::lock_guard<std::mutex> lk(g_mu); id = anyone_id(arg); }
+        block(id, arg, what == "block");
+    } else if (what == "report") {
+        long long id = 0, msg = 0;
+        std::string channel;
+        std::vector<std::string> ctx;
+        {
+            std::lock_guard<std::mutex> lk(g_mu);
+            id = anyone_id(arg);
+            for (auto &l : g_v.global) if (l.from == id && id) { msg = l.seq; channel = l.channel; }
+            if (!msg)
+                for (auto &t : g_v.threads)
+                    if (t.with == id) for (auto &d : t.msgs) if (d.from == id) { msg = d.id; channel = "dm:" + std::to_string(id); }
+        }
+        if (id && msg) report(id, channel, msg, "", ctx);
+        else { done = timed_out; g_dirty_convos = true; if (id) open_thread(id); }
+    } else if (what == "dms") {
+        set_dms(arg);
+    } else if (what == "avatar") {
+        set_show_avatar(arg != "off" && arg != "0");
+    } else if (what == "crew") {
+        std::string region = region_of_server(netservers_connected());
+        crew_create(arg.substr(0, arg.find(':')), arg.find(':') == std::string::npos ? "" : arg.substr(arg.find(':') + 1), region);
+    } else if (what == "crewinvite") {
+        crew_invite(0, arg);
+    } else if (what == "crewjoin") {
+        long long crew = 0;
+        { std::lock_guard<std::mutex> lk(g_mu); if (!g_v.crew_invites.empty()) crew = g_v.crew_invites[0].crew; }
+        if (crew) crew_join(crew);
+        else { done = timed_out; g_dirty_crew = true; }
+    } else if (what == "crewrole" || what == "crewkick") {
+        std::string name = arg.substr(0, arg.find(':'));
+        long long id;
+        { std::lock_guard<std::mutex> lk(g_mu); id = anyone_id(name); }
+        if (!id) { done = timed_out; g_dirty_crew = true; }
+        else if (what == "crewkick") crew_kick(id);
+        else crew_role(id, arg.find(':') == std::string::npos ? "member" : arg.substr(arg.find(':') + 1));
+    } else if (what == "crewleave") {
+        crew_leave();
     } else if (what == "log") {
         std::lock_guard<std::mutex> lk(g_mu);
         std::string fl;
         for (auto &f : g_v.friends) fl += f.name + "=" + f.state + (f.room.empty() ? "" : "@" + f.room) + " ";
-        fprintf(stderr, "[SOCIAL-TEST] state: me %lld, friends [%s], in %d, out %d, convos %d, unread %d, global %d, crew %lld\n",
+        std::string roster, bl;
+        for (auto &m : g_v.crew_roster) roster += m.name + "=" + m.role + " ";
+        for (auto &b : g_v.blocked) bl += b.name + " ";
+        fprintf(stderr, "[SOCIAL-TEST] state: me %lld, friends [%s], in %d, out %d, convos %d, unread %d, global %d, crew %lld"
+                        " [%s] %s, roster [%s], invites %d, blocked [%s], dms %s, picture %s\n",
                 g_v.me, fl.c_str(), (int)g_v.in.size(), (int)g_v.out.size(), (int)g_v.convos.size(), g_v.unread,
-                (int)g_v.global.size(), g_v.crew);
+                (int)g_v.global.size(), g_v.crew, g_v.crew_tag.c_str(), g_v.crew_role.c_str(), roster.c_str(),
+                (int)g_v.crew_invites.size(), bl.c_str(), g_v.dms.empty() ? "friends" : g_v.dms.c_str(),
+                g_v.show_avatar ? "on" : "off");
     }
     if (!done) return;
     fprintf(stderr, "[SOCIAL-TEST] step %d %s%s\n", (int)g_test.next + 1, step.c_str(), timed_out && what != "wait" ? " (timed out)" : "");
@@ -824,6 +932,94 @@ void queue(std::function<void()> job)
         g_jobs.push_back(std::move(job));
     }
     g_cv.notify_all();
+}
+
+
+// ---- avatars (stage 2c) ---------------------------------------------------------------------------------
+//
+// One thread of their own, so a slow picture never holds a chat line back: GET /api/avatar/N.png from
+// the account service (public, no token; the service fetched it from Discord once, the game never talks
+// to Discord), decoded with WIC to 64x64 RGBA. The overlay turns them into textures and keeps at most
+// 256 (social_ui.inc). A 404 (no picture, or the player hid it) comes back as "none".
+
+const int AVATAR_SIDE = 64;
+std::mutex g_av_mu;
+std::condition_variable g_av_cv;
+std::deque<long long> g_av_queue;
+std::set<long long> g_av_asked;     // queued or done: asked once until avatar_forget
+std::vector<AvatarPixels> g_av_done;
+
+bool decode_png(const unsigned char *data, int len, AvatarPixels &out)
+{
+    IWICImagingFactory *factory = nullptr;
+    IWICStream *stream = nullptr;
+    IWICBitmapDecoder *decoder = nullptr;
+    IWICBitmapFrameDecode *frame = nullptr;
+    IWICBitmapScaler *scaler = nullptr;
+    IWICFormatConverter *conv = nullptr;
+    UINT w = 0, h = 0;
+    bool ok = false;
+    if (SUCCEEDED(CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&factory))) &&
+        SUCCEEDED(factory->CreateStream(&stream)) &&
+        SUCCEEDED(stream->InitializeFromMemory((BYTE *)data, (DWORD)len)) &&
+        SUCCEEDED(factory->CreateDecoderFromStream(stream, nullptr, WICDecodeMetadataCacheOnDemand, &decoder)) &&
+        SUCCEEDED(decoder->GetFrame(0, &frame)) && SUCCEEDED(frame->GetSize(&w, &h)) && w && h && w <= 1024 && h <= 1024 &&
+        SUCCEEDED(factory->CreateBitmapScaler(&scaler)) &&
+        SUCCEEDED(scaler->Initialize(frame, AVATAR_SIDE, AVATAR_SIDE, WICBitmapInterpolationModeFant)) &&
+        SUCCEEDED(factory->CreateFormatConverter(&conv)) &&
+        SUCCEEDED(conv->Initialize(scaler, GUID_WICPixelFormat32bppRGBA, WICBitmapDitherTypeNone, nullptr, 0.0,
+                                   WICBitmapPaletteTypeCustom))) {
+        out.rgba.assign((size_t)AVATAR_SIDE * AVATAR_SIDE * 4, 0);
+        ok = SUCCEEDED(conv->CopyPixels(nullptr, AVATAR_SIDE * 4, (UINT)out.rgba.size(), out.rgba.data()));
+        out.w = out.h = AVATAR_SIDE;
+    }
+    if (conv) conv->Release();
+    if (scaler) scaler->Release();
+    if (frame) frame->Release();
+    if (decoder) decoder->Release();
+    if (stream) stream->Release();
+    if (factory) factory->Release();
+    return ok;
+}
+
+DWORD WINAPI avatar_thread(LPVOID)
+{
+    HRESULT com = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+    static const int SIZE = 512 * 1024;
+    unsigned char *buf = (unsigned char *)malloc(SIZE);
+    int fetched = 0, missing = 0;
+    while (!g_stop && buf) {
+        long long id = 0;
+        {
+            std::unique_lock<std::mutex> lk(g_av_mu);
+            if (g_av_queue.empty()) g_av_cv.wait_for(lk, std::chrono::milliseconds(500));
+            if (g_av_queue.empty()) continue;
+            id = g_av_queue.front();
+            g_av_queue.pop_front();
+        }
+        if (!social_enabled()) {        // signed out or switched off meanwhile: ask again later
+            std::lock_guard<std::mutex> lk(g_av_mu);
+            g_av_asked.erase(id);
+            continue;
+        }
+        char path[64];
+        snprintf(path, sizeof(path), "/api/avatar/%lld.png", id);
+        int len = 0;
+        int status = account_fetch(path, buf, SIZE, &len);
+        AvatarPixels px;
+        px.id = id;
+        px.ok = status == 200 && len > 8 && len < SIZE - 1 && decode_png(buf, len, px);
+        if (px.ok) fetched++; else missing++;
+        if (g_test_log || fetched + missing <= 3)
+            fprintf(stderr, "[SOCIAL] avatar %lld: %s (HTTP %d, %d bytes)\n", id, px.ok ? "picture" : "none, initials", status, len);
+        std::lock_guard<std::mutex> lk(g_av_mu);
+        if (status == 0) g_av_asked.erase(id);  // unreachable: the overlay may ask again
+        g_av_done.push_back(std::move(px));
+        if (g_av_done.size() > 64) g_av_done.erase(g_av_done.begin());
+    }
+    free(buf);
+    if (SUCCEEDED(com)) CoUninitialize();
+    return 0;
 }
 
 }   // namespace
@@ -971,6 +1167,144 @@ void crew_dismiss(long long crew)
 
 void reload() { g_resync = true; g_cv.notify_all(); }
 
+void block(long long id, const std::string &name, bool on)
+{
+    queue([id, name, on]() {
+        std::string body = id ? "{\"account\":" + std::to_string(id) + "}" : "{\"name\":" + json_text(name) + "}";
+        if (post(on ? "/api/social/block" : "/api/social/unblock", body) / 100 == 2) {
+            fprintf(stderr, "[SOCIAL] %s %s\n", on ? "blocked" : "unblocked", id ? std::to_string(id).c_str() : name.c_str());
+            std::lock_guard<std::mutex> lk(g_mu);
+            note(on ? "Blocked. You won't see each other's messages." : "Unblocked.");
+        }
+        load_friends();
+        load_convos();
+        load_global();
+    });
+}
+
+void report(long long id, const std::string &channel, long long msg, const std::string &text,
+            const std::vector<std::string> &context)
+{
+    queue([=]() {
+        std::string body = "{\"account\":" + std::to_string(id) + ",\"channel\":" + json_text(channel) +
+                           ",\"message\":" + std::to_string(msg) + ",\"reason\":\"player report\"";
+        if (!text.empty()) body += ",\"text\":" + json_text(text);
+        if (!context.empty()) {
+            body += ",\"context\":[";
+            for (size_t i = 0; i < context.size(); i++) body += (i ? "," : "") + json_text(context[i]);
+            body += "]";
+        }
+        body += "}";
+        if (post("/api/social/report", body) / 100 == 2) {
+            fprintf(stderr, "[SOCIAL] reported %lld (%s, message %lld, %d lines of context)\n", id, channel.c_str(), msg,
+                    (int)context.size());
+            std::lock_guard<std::mutex> lk(g_mu);
+            note("Reported. The team will look at it.");
+        }
+    });
+}
+
+void set_dms(const std::string &policy)
+{
+    {
+        std::lock_guard<std::mutex> lk(g_mu);
+        g_v.dms = policy == "friends" ? "" : policy;
+        changed();
+    }
+    queue([policy]() {
+        if (post("/api/social/settings", "{\"dms\":" + json_text(policy) + "}") / 100 == 2)
+            fprintf(stderr, "[SOCIAL] messages from: %s\n", policy.c_str());
+        load_friends();     // the service's own word on it (dms=)
+    });
+}
+
+void set_show_avatar(bool on)
+{
+    long long me;
+    {
+        std::lock_guard<std::mutex> lk(g_mu);
+        g_v.show_avatar = on;
+        me = g_v.me;
+        changed();
+    }
+    queue([on, me]() {
+        if (post("/api/me/settings", std::string("{\"show_avatar\":") + (on ? "true" : "false") + "}") / 100 == 2)
+            fprintf(stderr, "[SOCIAL] show my Discord picture: %s\n", on ? "on" : "off");
+        avatar_forget(me);
+    });
+}
+
+static void crew_post(const std::string &path, const std::string &body, const char *done, const std::string &say)
+{
+    queue([path, body, done, say]() {
+        std::string out;
+        if (post(path, body, &out) / 100 == 2) {
+            fprintf(stderr, "[SOCIAL] crew: %s\n", done);
+            if (!say.empty()) { std::lock_guard<std::mutex> lk(g_mu); note(say); }
+        }
+        load_crew();
+    });
+}
+
+void crew_create(const std::string &name, const std::string &tag, const std::string &region)
+{
+    std::string r = region.empty() ? "eu" : region;
+    crew_post("/api/social/crews", "{\"name\":" + json_text(name) + ",\"tag\":" + json_text(tag) + ",\"emblem\":0,\"motto\":\"\","
+              "\"region\":" + json_text(r) + "}", "created", "Your crew " + name + " [" + tag + "] is up.");
+}
+
+void crew_invite(long long id, const std::string &name)
+{
+    long long crew;
+    { std::lock_guard<std::mutex> lk(g_mu); crew = g_v.crew; }
+    if (!crew) return;
+    std::string body = id ? "{\"account\":" + std::to_string(id) + "}" : "{\"name\":" + json_text(name) + "}";
+    crew_post("/api/social/crews/" + std::to_string(crew) + "/invite", body, "invite sent",
+              "Invite sent to " + (name.empty() ? std::string("the player") : name) + ".");
+}
+
+void crew_leave() { crew_post("/api/social/crews/leave", "{}", "left", "You left the crew."); }
+
+static void crew_member_op(const char *op, long long id, const std::string &extra, const std::string &say)
+{
+    long long crew;
+    { std::lock_guard<std::mutex> lk(g_mu); crew = g_v.crew; }
+    if (!crew) return;
+    crew_post("/api/social/crews/" + std::to_string(crew) + "/" + op, "{\"account\":" + std::to_string(id) + extra + "}", op, say);
+}
+
+void crew_kick(long long id) { crew_member_op("kick", id, "", "Removed from the crew."); }
+void crew_role(long long id, const std::string &role) { crew_member_op("role", id, ",\"role\":" + json_text(role), "Role changed."); }
+void crew_accept(long long id) { crew_member_op("accept", id, "", "Welcome to the crew."); }
+
+void avatar_want(long long id)
+{
+    if (id <= 0) return;
+    {
+        std::lock_guard<std::mutex> lk(g_av_mu);
+        if (!g_av_asked.insert(id).second) return;
+        g_av_queue.push_back(id);
+    }
+    g_av_cv.notify_all();
+}
+
+std::vector<AvatarPixels> avatar_take()
+{
+    std::lock_guard<std::mutex> lk(g_av_mu);
+    std::vector<AvatarPixels> out;
+    out.swap(g_av_done);
+    return out;
+}
+
+void avatar_forget(long long id)
+{
+    std::lock_guard<std::mutex> lk(g_av_mu);
+    g_av_asked.erase(id);
+    AvatarPixels px;        // id < 0: the overlay drops its copy of -id and asks again
+    px.id = -id;
+    g_av_done.push_back(px);
+}
+
 void set_mode_name(const std::string &name)
 {
     std::lock_guard<std::mutex> lk(g_mu);
@@ -988,6 +1322,7 @@ extern "C" void social_start(void)
     if (env_switch() < 0 || g_started.exchange(true)) return;
     g_threads[0] = CreateThread(nullptr, 0, work_thread, nullptr, 0, nullptr);
     g_threads[1] = CreateThread(nullptr, 0, poll_thread, nullptr, 0, nullptr);
+    g_threads[2] = CreateThread(nullptr, 0, avatar_thread, nullptr, 0, nullptr);
     atexit(social_shutdown);
     fprintf(stderr, "[SOCIAL] started (RECOMP_SOCIAL %s)\n", env_switch() > 0 ? "on" : "unset: the service decides");
 }
@@ -996,14 +1331,15 @@ extern "C" void social_shutdown(void)
 {
     if (!g_started || g_stop.exchange(true)) return;
     g_cv.notify_all();
+    g_av_cv.notify_all();
     account_cancel_call(&g_poll_live);
     account_cancel_call(&g_work_live);
-    HANDLE live[2];
+    HANDLE live[3];
     int n = 0;
     for (HANDLE h : g_threads) if (h) live[n++] = h;
     DWORD r = n ? WaitForMultipleObjects(n, live, TRUE, 3000) : WAIT_OBJECT_0;
     for (int i = 0; i < n; i++) CloseHandle(live[i]);
-    g_threads[0] = g_threads[1] = nullptr;
+    g_threads[0] = g_threads[1] = g_threads[2] = nullptr;
     fprintf(stderr, "[SOCIAL] stopped%s\n", r == WAIT_TIMEOUT ? " (a request was still running)" : "");
 }
 
@@ -1050,6 +1386,19 @@ void mark_read(long long) {}
 void crew_join(long long) {}
 void crew_dismiss(long long) {}
 void reload() {}
+void block(long long, const std::string &, bool) {}
+void report(long long, const std::string &, long long, const std::string &, const std::vector<std::string> &) {}
+void set_dms(const std::string &) {}
+void set_show_avatar(bool) {}
+void crew_create(const std::string &, const std::string &, const std::string &) {}
+void crew_invite(long long, const std::string &) {}
+void crew_leave() {}
+void crew_kick(long long) {}
+void crew_role(long long, const std::string &) {}
+void crew_accept(long long) {}
+void avatar_want(long long) {}
+std::vector<AvatarPixels> avatar_take() { return {}; }
+void avatar_forget(long long) {}
 void set_mode_name(const std::string &) {}
 }
 #endif

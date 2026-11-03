@@ -21,7 +21,7 @@ const ImU32 GOLD_TEXT = IM_COL32(255, 205, 60, 255), BLUE_NAME = IM_COL32(142, 1
             LIVE = IM_COL32(123, 224, 123, 255), DIM = IM_COL32(242, 230, 200, 115),
             BUBBLE_ME = IM_COL32(142, 16, 36, 255), LINE_SEP = IM_COL32(255, 255, 255, 20);
 
-enum KbKind { KB_CHAT, KB_FRIEND };
+enum KbKind { KB_CHAT, KB_FRIEND, KB_CREW_INVITE, KB_CREW_NAME, KB_CREW_TAG, KB_FIGHT };
 enum FriendAct { ACT_ACCEPT, ACT_DECLINE, ACT_JOIN, ACT_WATCH, ACT_INVITE, ACT_MESSAGE, ACT_REMOVE, ACT_SURE };
 
 struct Chat {
@@ -62,9 +62,112 @@ struct Chat {
     std::vector<unsigned> room_muted_ids;       // by account, when the relay named one
     bool menu_room = false;                     // the player menu opened from the ROOM tab
     unsigned menu_account = 0;
+    // REPORT (stage 2c): the line the menu was opened on, and the lines before it (room lines only
+    // this PC saw: their text goes with the report)
+    std::string menu_channel, menu_text;
+    long long menu_msg = 0;
+    std::vector<std::string> menu_context;
+    // CREW (stage 2c): the page or its chat, LEAVE pressed once, the menu on a crew mate, a new crew's name
+    int crew_view = 0;
+    bool confirm_leave = false;
+    bool menu_crew = false;
+    std::string menu_role, crew_new_name;
 } C;
 
 bool chat_mouse_blocked() { return C.mouse_off; }
+
+// ---- avatars (stage 2c): the players' Discord pictures, as the account service copied them ----
+//
+// social.cpp downloads and decodes them on a thread of its own; here they become textures on the
+// overlay's thread, at most AVATAR_CAP of them (the least recently drawn goes first). A player without
+// a picture (none, hidden, or not loaded yet) gets initials on a circle in a colour of their account.
+
+const size_t AVATAR_CAP = 256;
+struct AvatarTex { Tex tex; bool none = false; unsigned long long used = 0, asked = 0; };
+std::map<long long, AvatarTex> g_avatars;
+int g_avatar_textures = 0;          // tests: how many pictures became textures
+
+void avatar_drop(std::map<long long, AvatarTex>::iterator it)
+{
+    if (it->second.tex.srv) { it->second.tex.srv->Release(); g_avatar_textures--; }
+    g_avatars.erase(it);
+}
+
+// Once a frame: the pictures that arrived become textures.
+void avatars_update()
+{
+    for (auto &px : social::avatar_take()) {
+        if (px.id < 0) {        // forgotten (the player changed their setting): ask again
+            auto it = g_avatars.find(-px.id);
+            if (it != g_avatars.end()) avatar_drop(it);
+            continue;
+        }
+        AvatarTex &a = g_avatars[px.id];
+        a.asked = GetTickCount64();
+        if (a.tex.srv) { a.tex.srv->Release(); a.tex.srv = nullptr; g_avatar_textures--; }
+        a.none = !px.ok || !make_texture(px.rgba, px.w, px.h, a.tex);
+        if (!a.none) g_avatar_textures++;
+    }
+    while (g_avatars.size() > AVATAR_CAP) {
+        auto oldest = g_avatars.begin();
+        for (auto it = g_avatars.begin(); it != g_avatars.end(); ++it) if (it->second.used < oldest->second.used) oldest = it;
+        avatar_drop(oldest);
+    }
+}
+
+// A colour of the account: the same on every PC.
+ImU32 avatar_colour(long long id, const std::string &name)
+{
+    unsigned h = (unsigned)(id * 2654435761u);
+    if (!id) for (unsigned char c : name) h = h * 31 + c;
+    float hue = (h % 360) / 360.0f, r, g, b;
+    ImGui::ColorConvertHSVtoRGB(hue, 0.55f, 0.62f, r, g, b);
+    return IM_COL32((int)(r * 255), (int)(g * 255), (int)(b * 255), 255);
+}
+
+std::string initials(const std::string &name)
+{
+    std::string out;
+    bool start = true;
+    for (size_t i = 0; i < name.size() && out.size() < 2; i++) {
+        unsigned char c = (unsigned char)name[i];
+        if (c == ' ' || c == '_' || c == '.' || c == '-') { start = true; continue; }
+        if (start && c < 0x80 && isalnum(c)) out += (char)toupper(c);
+        start = false;
+    }
+    if (out.empty() && !name.empty() && (unsigned char)name[0] < 0x80) out = (char)toupper((unsigned char)name[0]);
+    return out.empty() ? "?" : out;
+}
+
+// A round picture of radius r (menu units) centred at cx, cy; id 0 (a name only): initials.
+void draw_avatar(ImDrawList *dl, const Frame &f, float cx, float cy, float r, long long id, const std::string &name,
+                 float alpha = 1.0f)
+{
+    unsigned long long now = GetTickCount64();
+    AvatarTex *a = nullptr;
+    if (id > 0 && social_enabled()) {      // the social features off: initials only, nothing is asked
+        a = &g_avatars[id];
+        a->used = now;
+        // none: ask again after ten minutes (a player may turn theirs on)
+        if (!a->tex.srv && (!a->asked || (a->none && now - a->asked > 600000))) {
+            a->asked = now;
+            a->none = false;
+            social::avatar_want(id);
+        }
+    }
+    ImVec2 c = f.p(cx, cy);
+    float rs = r * f.s();
+    if (a && a->tex.srv) {
+        dl->AddImageRounded((ImTextureID)(intptr_t)a->tex.srv, ImVec2(c.x - rs, c.y - rs), ImVec2(c.x + rs, c.y + rs),
+                            ImVec2(0, 0), ImVec2(1, 1), IM_COL32(255, 255, 255, (int)(255 * alpha)), rs);
+    } else {
+        dl->AddCircleFilled(c, rs, with_alpha(avatar_colour(id, name), alpha), 24);
+        std::string ini = initials(name);
+        float size = r * (ini.size() > 1 ? 0.95f : 1.15f);
+        text(dl, f, g_title, size, cx, cy - size * 0.62f, with_alpha(IM_COL32(255, 245, 230, 255), alpha), ini.c_str(), CENTER, 0);
+    }
+    dl->AddCircle(c, rs, with_alpha(IM_COL32(255, 255, 255, 40), alpha), 24, 0.8f * f.s());
+}
 
 // ---- room chat (stage 2b): relay-only, so it works with the service's social switch off ----
 
@@ -85,9 +188,24 @@ bool room_muted(const NetChatLine &l)
     if (l.system || l.mine) return false;
     for (auto &n : C.room_muted) if (n == l.name) return true;
     for (unsigned id : C.room_muted_ids) if (id && id == l.account) return true;
-    if (l.account && !room_only())      // muted in the social features too
+    if (l.account && !room_only()) {    // muted or blocked in the social features too
         for (auto &m : C.v.muted) if (m.id == (long long)l.account) return true;
+        for (auto &b : C.v.blocked) if (b.id == (long long)l.account) return true;
+    }
     return false;
+}
+
+// The account behind a name in the room (its room lines carry it), else a friend's or crew mate's; 0
+// unknown (the picture is then initials).
+long long room_account_of(const std::string &name)
+{
+    static NetChatLine buf[NETPLAY_CHAT_LINES];
+    int n = netplay_room_chat(buf, NETPLAY_CHAT_LINES, nullptr);
+    for (int i = n - 1; i >= 0; i--) if (buf[i].account && !buf[i].system && name == buf[i].name) return buf[i].account;
+    for (auto &fr : C.v.friends) if (fr.name == name) return fr.id;
+    for (auto &m : C.v.crew_roster) if (m.name == name) return m.id;
+    if (name == C.v.my_name) return C.v.me;
+    return 0;
 }
 
 void room_mute(const std::string &name, unsigned account, bool on)
@@ -145,7 +263,7 @@ int room_unread()
     unsigned seq = 0;
     int n = netplay_room_chat(buf, NETPLAY_CHAT_LINES, &seq), u = 0;
     for (int i = 0; i < n; i++)
-        if (buf[i].seq > C.room_seen && !buf[i].mine && !buf[i].system && !room_muted(buf[i])) u++;
+        if (buf[i].seq > C.room_seen && !buf[i].mine && !buf[i].system && !buf[i].history && !room_muted(buf[i])) u++;
     return u;
 }
 
@@ -328,7 +446,7 @@ bool tab_types(int tab)
     const social::View &v = C.v;
     if (tab == TAB_ROOM) return room_chat_state() == 1;
     if (tab == TAB_GLOBAL) return true;
-    if (tab == TAB_CREW) return v.crew != 0;
+    if (tab == TAB_CREW) return v.crew != 0 && C.crew_view == 1;     // the crew's chat, not its page
     if (tab == TAB_MESSAGES) {
         for (auto &t : v.threads) if (t.with == C.dm_with) return t.can_message;
         return C.dm_with != 0;
@@ -538,17 +656,19 @@ int draw_lines(ImDrawList *dl, const Frame &f, const std::vector<const social::L
         std::string body = l.hidden ? "message hidden: you muted " + l.name : l.text;
         ImU32 name_col = mine ? GOLD_TEXT : l.from && friend_of(l.from) ? BLUE_NAME : CREAM;
         float h, top;
-        if (stacked) {      // CREW: the name and time above the message, as ROOM in the design
-            float mh = text_height(f, g_body, 11, body.c_str(), x1 - x0);
+        if (stacked) {      // CREW: the picture, the name and time above the message, as ROOM in the design
+            const float ax = room_only() ? 0.0f : 21.0f;     // the picture's column (none with the social features off)
+            float mh = text_height(f, g_body, 11, body.c_str(), x1 - x0 - ax);
             h = 14 + mh + 8;
             top = y - h;
             if (l.system) {
                 text(dl, f, g_body, 8.5f, (x0 + x1) / 2, top + 4, DIM, l.text.c_str(), CENTER, 0, x1 - x0);
             } else {
-                text(dl, f, g_hand, 14, x0, top - 3, name_col, l.name.c_str(), LEFT, 0.6f);
-                text(dl, f, g_body, 8, x0 + text_width(f, g_hand, 14, l.name.c_str()) + 6, top + 1, DIM,
+                if (ax > 0) draw_avatar(dl, f, x0 + 8, top + 8, 8, l.from, l.name, l.hidden ? 0.5f : 1.0f);
+                text(dl, f, g_hand, 14, x0 + ax, top - 3, name_col, l.name.c_str(), LEFT, 0.6f);
+                text(dl, f, g_body, 8, x0 + ax + text_width(f, g_hand, 14, l.name.c_str()) + 6, top + 1, DIM,
                      clock_text(l.at).c_str(), LEFT, 0);
-                text(dl, f, g_body, 11, x0, top + 14, l.hidden ? DIM : CREAM, body.c_str(), LEFT, 0, x1 - x0);
+                text(dl, f, g_body, 11, x0 + ax, top + 14, l.hidden ? DIM : CREAM, body.c_str(), LEFT, 0, x1 - x0 - ax);
             }
         } else {            // GLOBAL: time, crew tag, name and message in one line
             float x = x0;
@@ -557,7 +677,7 @@ int draw_lines(ImDrawList *dl, const Frame &f, const std::vector<const social::L
             float lead = tw, tagw = 0, namew = 0;
             if (!l.tag.empty()) tagw = text_width(f, g_body, 7.5f, l.tag.c_str()) + 10;
             if (l.system) namew = text_width(f, g_title, 8.5f, "SERVER") + 5;
-            else namew = text_width(f, g_hand, 13, l.name.c_str()) + 6;
+            else namew = text_width(f, g_hand, 13, l.name.c_str()) + 6 + 15;      // with the picture
             lead += tagw + namew;
             float mh = text_height(f, g_body, 11, body.c_str(), x1 - x0 - lead);
             h = std::max(14.0f, mh) + 7;
@@ -571,7 +691,10 @@ int draw_lines(ImDrawList *dl, const Frame &f, const std::vector<const social::L
                 x += tagw;
             }
             if (l.system) text(dl, f, g_title, 8.5f, x, top + 2.5f, GOLD_TEXT, "SERVER", LEFT, 0);
-            else text(dl, f, g_hand, 13, x, top - 1.5f, name_col, l.name.c_str(), LEFT, 0.6f);
+            else {
+                draw_avatar(dl, f, x + 6, top + 7, 6, l.from, l.name, l.hidden ? 0.5f : 1.0f);
+                text(dl, f, g_hand, 13, x + 15, top - 1.5f, name_col, l.name.c_str(), LEFT, 0.6f);
+            }
             x += namew;
             text(dl, f, g_body, 11, x, top, l.system ? IM_COL32(255, 231, 166, 255) : l.hidden ? DIM : CREAM, body.c_str(),
                  LEFT, 0, x1 - x);
@@ -608,6 +731,46 @@ void open_player_menu(long long id, const std::string &name)
     C.popup_frame = ImGui::GetFrameCount();
     C.menu_room = false;
     C.menu_account = 0;
+    C.menu_channel.clear();
+    C.menu_text.clear();
+    C.menu_msg = 0;
+    C.menu_context.clear();
+    C.menu_crew = false;
+    C.menu_role.clear();
+}
+
+// What REPORT sends for the line at index i (oldest first) of a chat: its id where the service has the
+// line, else (room) its text, and up to five lines before it.
+void menu_report_line(const std::vector<const social::Line *> &lines, size_t i, const std::string &channel)
+{
+    if (i >= lines.size()) return;
+    const social::Line &l = *lines[i];
+    C.menu_channel = channel;
+    C.menu_msg = channel == "room" ? 0 : l.seq;
+    C.menu_text = channel == "room" ? l.text : "";
+    C.menu_context.clear();
+    if (channel == "room")
+        for (size_t k = i >= 5 ? i - 5 : 0; k < i; k++)
+            if (!lines[k]->system) C.menu_context.push_back(clock_text(lines[k]->at) + " " + lines[k]->name + ": " + lines[k]->text);
+}
+
+// REPORT on a player whose menu came from a list (the room's names, a conversation): their newest line.
+void menu_report_newest(long long id, const std::string &name, bool room)
+{
+    if (room) {
+        std::vector<social::Line> lines = room_lines();
+        std::vector<const social::Line *> ptrs;
+        for (auto &l : lines) ptrs.push_back(&l);
+        for (size_t i = lines.size(); i-- > 0;)
+            if (!lines[i].system && !lines[i].mine && (id ? lines[i].from == id : lines[i].name == name)) {
+                menu_report_line(ptrs, i, "room");
+                return;
+            }
+        return;
+    }
+    for (auto &t : C.v.threads)
+        if (t.with == id)
+            for (auto &m : t.msgs) if (m.from == id) { C.menu_channel = "dm:" + std::to_string(id); C.menu_msg = m.id; }
 }
 
 void draw_global(ImDrawList *dl, const Frame &f, const ChatKeys &k)
@@ -642,7 +805,10 @@ void draw_global(ImDrawList *dl, const Frame &f, const ChatKeys &k)
     int s = C.sel[TAB_GLOBAL];
     if ((k.a || clicked >= 0) && s >= 0 && s < n) {
         const social::Line &l = *lines[(size_t)(n - 1 - s)];
-        if (!l.system) open_player_menu(l.from, l.name);
+        if (!l.system) {
+            open_player_menu(l.from, l.name);
+            menu_report_line(lines, (size_t)(n - 1 - s), l.channel);
+        }
     }
     std::string where = C.region ? std::string(k_region_names[C.region]) : "";
     for (auto &c : where) c = (char)tolower((unsigned char)c);
@@ -651,47 +817,36 @@ void draw_global(ImDrawList *dl, const Frame &f, const ChatKeys &k)
     input_bar(dl, f, PX, ph, "SEND");
 }
 
-void draw_crew(ImDrawList *dl, const Frame &f, const ChatKeys &k)
+// ---- CREW (stage 2c): the crew's page as the design has it, its chat, and making or joining one ----
+
+void open_keyboard(int kind);       // the on-screen keyboard, below
+
+std::string region_name(const std::string &r)
+{
+    return r == "eu" ? "Europe" : r == "us-east" ? "US East" : r == "us-west" ? "US West" : r;
+}
+
+std::string month_year(long long unix_s)
+{
+    if (unix_s <= 0) return "";
+    time_t t = (time_t)unix_s;
+    struct tm tm;
+    if (gmtime_s(&tm, &t)) return "";
+    static const char *const m[12] = { "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" };
+    return std::string(m[tm.tm_mon]) + " " + std::to_string(1900 + tm.tm_year);
+}
+
+void tag_chip(ImDrawList *dl, const Frame &f, float x, float y, float size, const std::string &tag)
+{
+    float tw = text_width(f, g_title, size, tag.c_str()) + size * 0.9f;
+    dl->AddRect(f.p(x, y), f.p(x + tw, y + size * 1.35f), IM_COL32(255, 205, 60, 220), 3 * f.s(), 0, 1.0f * f.s());
+    text(dl, f, g_title, size, x + tw / 2, y + size * 0.12f, GOLD_TEXT, tag.c_str(), CENTER, 0);
+}
+
+// The crew chat (the CREW CHAT button): the lines and the box, B back to the page.
+void draw_crew_chat(ImDrawList *dl, const Frame &f, const ChatKeys &k)
 {
     const social::View &v = C.v;
-    if (!v.crew) {
-        float y = TABS_B + 14;
-        text(dl, f, g_title, 9, PX + 18, y, DIM, "CREW INVITES", LEFT, 0);
-        y += 16;
-        int n = (int)v.crew_invites.size();
-        if (k.up) C.sel[TAB_CREW] = std::max(0, C.sel[TAB_CREW] - 1);
-        if (k.down) C.sel[TAB_CREW] = std::min(n - 1, C.sel[TAB_CREW] + 1);
-        if (C.sel[TAB_CREW] < 0 && n) C.sel[TAB_CREW] = 0;
-        if (k.left || k.right) C.btn = C.btn ? 0 : 1;
-        for (int i = 0; i < n; i++) {
-            const social::CrewInvite &ci = v.crew_invites[(size_t)i];
-            bool on = i == C.sel[TAB_CREW];
-            rect(dl, f, PX + 13, y, PW - 26, 32, on ? IM_COL32(200, 16, 46, 26) : IM_COL32(255, 205, 60, 18), 6);
-            if (on) dl->AddRect(f.p(PX + 13, y), f.p(PX + PW - 13, y + 32), with_alpha(RED, 0.75f), 6 * f.s(), 0, 1.0f * f.s());
-            std::string line = (ci.tag.empty() ? "" : "[" + ci.tag + "] ") + (ci.text.empty() ? ci.from + " invites you" : ci.text);
-            text(dl, f, g_body, 10, PX + 24, y + 9, CREAM, line.c_str(), LEFT, 0, 330);
-            const char *labels[2] = { "JOIN", "DISMISS" };
-            float bx = PX + PW - 22;
-            for (int b = 1; b >= 0; b--) {
-                float bw = text_width(f, g_title, 8.5f, labels[b]) + 14;
-                bx -= bw;
-                bool hot = on && C.btn == b;
-                rect(dl, f, bx, y + 6, bw, 20, hot || b == 0 ? RED : IM_COL32(255, 255, 255, 20), 5);
-                text(dl, f, g_title, 8.5f, bx + bw / 2, y + 11, CREAM, labels[b], CENTER, 0);
-                bool click = mouse_click(f, bx, y + 6, bw, 20);
-                if ((on && k.a && C.btn == b) || click) {
-                    if (b == 0) social::crew_join(ci.crew);
-                    else social::crew_dismiss(ci.crew);
-                }
-                bx -= 5;
-            }
-            y += 36;
-        }
-        if (!n)
-            text(dl, f, g_body, 11, PX + PW / 2, TABS_B + 120, DIM,
-                 "You are not in a crew yet. When a crew invites you, the invite shows here.", CENTER, 0, 380);
-        return;
-    }
     char head[160];
     snprintf(head, sizeof(head), "%d MEMBERS - %d ONLINE", v.crew_members, v.crew_online);
     float y = TABS_B + 9;
@@ -711,9 +866,244 @@ void draw_crew(ImDrawList *dl, const Frame &f, const ChatKeys &k)
     int s = C.sel[TAB_CREW];
     if ((k.a || clicked >= 0) && s >= 0 && s < n) {
         const social::Line &l = *lines[(size_t)(n - 1 - s)];
-        if (!l.system) open_player_menu(l.from, l.name);
+        if (!l.system) {
+            open_player_menu(l.from, l.name);
+            menu_report_line(lines, (size_t)(n - 1 - s), "crew:" + std::to_string(v.crew));
+        }
     }
     input_bar(dl, f, PX, "Message your crew", "SEND");
+}
+
+// Not in a crew: the invites, and CREATE A CREW.
+void draw_crew_none(ImDrawList *dl, const Frame &f, const ChatKeys &k)
+{
+    const social::View &v = C.v;
+    float y = TABS_B + 14;
+    text(dl, f, g_title, 9, PX + 18, y, DIM, "CREW INVITES", LEFT, 0);
+    y += 16;
+    int n = (int)v.crew_invites.size();
+    int &sel = C.sel[TAB_CREW];
+    if (k.up) sel = std::max(0, sel - 1);
+    if (k.down) sel = std::min(n, sel + 1);       // n: the CREATE A CREW button
+    sel = std::max(0, std::min(sel, n));
+    if (k.left || k.right) C.btn = C.btn ? 0 : 1;
+    for (int i = 0; i < n; i++) {
+        const social::CrewInvite &ci = v.crew_invites[(size_t)i];
+        bool on = i == sel;
+        rect(dl, f, PX + 13, y, PW - 26, 32, on ? IM_COL32(200, 16, 46, 26) : IM_COL32(255, 205, 60, 18), 6);
+        if (on) dl->AddRect(f.p(PX + 13, y), f.p(PX + PW - 13, y + 32), with_alpha(RED, 0.75f), 6 * f.s(), 0, 1.0f * f.s());
+        std::string line = (ci.tag.empty() ? "" : "[" + ci.tag + "] ") + (ci.text.empty() ? ci.from + " invites you" : ci.text);
+        text(dl, f, g_body, 10, PX + 24, y + 9, CREAM, line.c_str(), LEFT, 0, 330);
+        const char *labels[2] = { "JOIN", "DISMISS" };
+        float bx = PX + PW - 22;
+        for (int b = 1; b >= 0; b--) {
+            float bw = text_width(f, g_title, 8.5f, labels[b]) + 14;
+            bx -= bw;
+            bool hot = on && C.btn == b;
+            rect(dl, f, bx, y + 6, bw, 20, hot || b == 0 ? RED : IM_COL32(255, 255, 255, 20), 5);
+            text(dl, f, g_title, 8.5f, bx + bw / 2, y + 11, CREAM, labels[b], CENTER, 0);
+            bool click = mouse_click(f, bx, y + 6, bw, 20);
+            if ((on && k.a && C.btn == b) || click) {
+                if (b == 0) social::crew_join(ci.crew);
+                else social::crew_dismiss(ci.crew);
+            }
+            bx -= 5;
+        }
+        y += 36;
+    }
+    if (!n)
+        text(dl, f, g_body, 11, PX + PW / 2, y + 30, DIM,
+             "You are not in a crew yet. When a crew invites you, the invite shows here.", CENTER, 0, 380);
+    // CREATE A CREW: a name, then a tag of 2 to 4 letters (the on-screen keyboard twice)
+    float by = std::max(y + 70, TABS_B + 150.0f), bw = 220, bx = PX + PW / 2 - bw / 2;
+    bool on = sel == n;
+    rect(dl, f, bx, by, bw, 30, on ? RED : IM_COL32(200, 16, 46, 150), 7);
+    if (on) dl->AddRect(f.p(bx - 1, by - 1), f.p(bx + bw + 1, by + 31), IM_COL32(255, 90, 110, 255), 7 * f.s(), 0, 1.2f * f.s());
+    text(dl, f, g_title, 13, bx + bw / 2, by + 7, IM_COL32(255, 245, 230, 255), "CREATE A CREW", CENTER, 0);
+    text(dl, f, g_body, 9, PX + PW / 2, by + 38, DIM, "Pick a name and a tag. You become its Boss; invite your friends.",
+         CENTER, 0, 380);
+    if ((on && k.a) || mouse_click(f, bx, by, bw, 30)) open_keyboard(KB_CREW_NAME);
+}
+
+void crew_member_menu(const social::CrewMember &m)
+{
+    open_player_menu(m.id, m.name);
+    C.menu_crew = true;
+    C.menu_role = m.role;
+}
+
+void draw_crew(ImDrawList *dl, const Frame &f, const ChatKeys &k)
+{
+    const social::View &v = C.v;
+    if (!v.crew) { C.crew_view = 0; draw_crew_none(dl, f, k); return; }
+    if (C.crew_view == 1) { draw_crew_chat(dl, f, k); return; }
+    bool officer = v.crew_role == "boss" || v.crew_role == "lieutenant";
+
+    // the left: emblem, name, tag, motto, the cards, the level and the rewards
+    float lx = PX + 18, ly = TABS_B + 12, rx = PX + 372;
+    rect(dl, f, rx - 10, TABS_B, 0.5f, PY + PH - TABS_B, LINE_SEP);
+    float eb = 62;
+    rect(dl, f, lx, ly, eb, eb, IM_COL32(0, 0, 0, 90), 9);
+    dl->AddRect(f.p(lx, ly), f.p(lx + eb, ly + eb), IM_COL32(255, 205, 60, 230), 9 * f.s(), 0, 2.0f * f.s());
+    {   // the crown (the default emblem)
+        float cx = lx + eb / 2, cy = ly + eb / 2 + 2, u = 12;
+        ImVec2 pts[7] = { f.p(cx - u, cy + u * 0.5f), f.p(cx - u, cy - u * 0.6f), f.p(cx - u * 0.45f, cy - u * 0.05f),
+                          f.p(cx, cy - u * 0.85f), f.p(cx + u * 0.45f, cy - u * 0.05f), f.p(cx + u, cy - u * 0.6f),
+                          f.p(cx + u, cy + u * 0.5f) };
+        dl->AddTriangleFilled(pts[0], pts[1], pts[2], RED);
+        dl->AddTriangleFilled(pts[2], pts[3], pts[4], RED);
+        dl->AddTriangleFilled(pts[4], pts[5], pts[6], RED);
+        dl->AddRectFilled(f.p(cx - u, cy - u * 0.05f), f.p(cx + u, cy + u * 0.5f), RED);
+        dl->AddRectFilled(f.p(cx - u, cy + u * 0.65f), f.p(cx + u, cy + u * 0.95f), IM_COL32(255, 205, 60, 255), 1.5f * f.s());
+    }
+    float nx = lx + eb + 12;
+    text(dl, f, g_title, 21, nx, ly - 2, CREAM, v.crew_name.c_str(), LEFT, 0);
+    tag_chip(dl, f, nx + text_width(f, g_title, 21, v.crew_name.c_str()) + 8, ly + 3, 11, v.crew_tag);
+    if (!v.crew_motto.empty()) text(dl, f, g_hand, 12, nx, ly + 24, CREAM, ("\"" + v.crew_motto + "\"").c_str(), LEFT, 0.5f);
+    std::string info = std::to_string(v.crew_members) + (v.crew_members == 1 ? " member" : " members");
+    if (!v.crew_region.empty()) info += " - " + region_name(v.crew_region);
+    if (v.crew_founded) info += " - founded " + month_year(v.crew_founded);
+    text(dl, f, g_body, 9.5f, nx, ly + 42, DIM, info.c_str(), LEFT, 0);
+    // the cards
+    float cy = ly + eb + 12, cw = (rx - 10 - lx - 16 - 12) / 3, ch = 66;
+    char battles[32], streak[48], turf[32];
+    snprintf(battles, sizeof(battles), "%d - %d", v.crew_wins, v.crew_losses);
+    if (v.crew_streak > 1) snprintf(streak, sizeof(streak), "won %d in a row", v.crew_streak);
+    else snprintf(streak, sizeof(streak), "%s", v.crew_wins + v.crew_losses ? "" : "no battles yet");
+    snprintf(turf, sizeof(turf), "%d", v.crew_turf);
+    char rating[32];
+    snprintf(rating, sizeof(rating), "rating %d", v.crew_rating);
+    struct Card { const char *head; std::string big, sub; };
+    Card cards[3] = { { "LEAGUE", v.crew_league.empty() ? std::string("STREET") : upper(v.crew_league.c_str()), rating },
+                      { "CREW BATTLES", battles, streak },
+                      { "TURF", v.crew_turf ? std::string(turf) + (v.crew_turf == 1 ? " VENUE" : " VENUES") : "NONE YET",
+                        "crew battles: soon" } };
+    for (int i = 0; i < 3; i++) {
+        float x = lx + i * (cw + 6);
+        rect(dl, f, x, cy, cw, ch, IM_COL32(255, 255, 255, 14), 8);
+        text(dl, f, g_title, 8.5f, x + 9, cy + 7, DIM, cards[i].head, LEFT, 0);
+        text(dl, f, g_title, 15, x + 9, cy + 20, i == 0 ? GOLD_TEXT : CREAM, cards[i].big.c_str(), LEFT, 0, cw - 14);
+        text(dl, f, g_body, 8.5f, x + 9, cy + ch - 15, DIM, cards[i].sub.c_str(), LEFT, 0);
+    }
+    // the level
+    float vy = cy + ch + 12;
+    char lv[32], xp[48];
+    snprintf(lv, sizeof(lv), "CREW LEVEL %d", std::max(1, v.crew_level));
+    snprintf(xp, sizeof(xp), "%d / %d XP", v.crew_xp, v.crew_next_xp);
+    text(dl, f, g_title, 11, lx, vy, CREAM, lv, LEFT, 0);
+    text(dl, f, g_body, 9, lx + text_width(f, g_title, 11, lv) + 8, vy + 2, DIM, xp, LEFT, 0);
+    float bw = rx - 10 - lx - 16;
+    float span = (float)std::max(1, v.crew_next_xp - v.crew_level_xp);
+    float part = std::max(0.0f, std::min(1.0f, (v.crew_xp - v.crew_level_xp) / span));
+    rect(dl, f, lx, vy + 17, bw, 6, IM_COL32(255, 255, 255, 22), 3);
+    if (part > 0) rect(dl, f, lx, vy + 17, bw * part, 6, GOLD_TEXT, 3);
+    // the rewards
+    float wy = vy + 32;
+    text(dl, f, g_title, 9, lx, wy, DIM, "REWARDS", LEFT, 0);
+    static const struct { const char *name; int level; } rewards[] = {
+        { "GOLD TAG", 5 }, { "CROWN EMBLEM", 6 }, { "VERSUS CARD", 8 }, { "ROOM THEME", 10 } };
+    float qw = (bw - 3 * 5) / 4;
+    for (int i = 0; i < 4; i++) {
+        float x = lx + i * (qw + 5);
+        bool got = v.crew_level >= rewards[i].level;
+        rect(dl, f, x, wy + 13, qw, 30, IM_COL32(255, 255, 255, got ? 22 : 12), 6);
+        if (got) dl->AddRect(f.p(x, wy + 13), f.p(x + qw, wy + 43), IM_COL32(255, 205, 60, 160), 6 * f.s(), 0, 1.0f * f.s());
+        text(dl, f, g_title, 8, x + qw / 2, wy + 17, got ? GOLD_TEXT : DIM, rewards[i].name, CENTER, 0);
+        char l[16];
+        snprintf(l, sizeof(l), "LEVEL %d", rewards[i].level);
+        text(dl, f, g_title, 7.5f, x + qw / 2, wy + 29, DIM, l, CENTER, 0);
+    }
+
+    // the right: the members (and applications for officers), then the buttons
+    struct Row { int kind; const social::CrewMember *m; const social::Ref *r; };   // 0 member, 1 application
+    std::vector<Row> rows;
+    for (auto &m : v.crew_roster) rows.push_back({ 0, &m, nullptr });
+    if (officer) for (auto &a : v.crew_applied) rows.push_back({ 1, nullptr, &a });
+    enum { B_CHALLENGE, B_CHAT, B_INVITE, B_LEAVE };
+    std::vector<int> buttons = { B_CHALLENGE, B_CHAT };
+    if (officer) buttons.push_back(B_INVITE);
+    buttons.push_back(B_LEAVE);
+    int total = (int)rows.size() + (int)buttons.size();
+    int &sel = C.sel[TAB_CREW];
+    if (sel < 0 || sel >= total) sel = (int)rows.size() + 1;      // CREW CHAT
+    int before = sel;
+    if (k.up) sel = std::max(0, sel - 1);
+    if (k.down) sel = std::min(total - 1, sel + 1);
+    if (sel != before) C.confirm_leave = false;
+    char mh[48];
+    snprintf(mh, sizeof(mh), "MEMBERS - %d ONLINE", v.crew_online);
+    text(dl, f, g_title, 10, rx, TABS_B + 12, DIM, mh, LEFT, 0);
+    const int shown = 8;
+    int first = std::max(0, std::min((int)rows.size() - shown, (sel < (int)rows.size() ? sel : 0) - shown + 2));
+    float ry = TABS_B + 30, rw = PX + PW - 12 - rx;
+    for (int i = first; i < (int)rows.size() && i < first + shown; i++) {
+        const Row &w = rows[(size_t)i];
+        bool on = i == sel;
+        if (on) dl->AddRect(f.p(rx - 5, ry - 3), f.p(rx + rw, ry + 17), with_alpha(RED, 0.8f), 5 * f.s(), 0, 1.2f * f.s());
+        long long id = w.kind ? w.r->id : w.m->id;
+        const std::string &name = w.kind ? w.r->name : w.m->name;
+        std::string state = w.kind ? "wants in" : w.m->state;
+        bool offline = !w.kind && state == "offline";
+        draw_avatar(dl, f, rx + 8, ry + 7, 7.5f, id, name, offline ? 0.55f : 1.0f);
+        ImU32 dot = offline ? IM_COL32(120, 112, 100, 255) : state == "fighting" || state == "watching" ? ORANGE : LIVE;
+        if (!w.kind) {
+            dl->AddCircleFilled(f.p(rx + 14, ry + 12.5f), 2.9f * f.s(), IM_COL32(18, 12, 14, 255));
+            dl->AddCircleFilled(f.p(rx + 14, ry + 12.5f), 2.1f * f.s(), dot);
+        }
+        text(dl, f, g_hand, 13, rx + 21, ry - 2, with_alpha(id == v.me ? GOLD_TEXT : CREAM, offline ? 0.6f : 1.0f), name.c_str(),
+             LEFT, 0.6f);
+        if (w.kind) {
+            const char *acc = "ACCEPT";
+            float aw = text_width(f, g_title, 8, acc) + 10;
+            rect(dl, f, rx + rw - aw - 3, ry, aw, 14, on ? RED : IM_COL32(200, 16, 46, 150), 4);
+            text(dl, f, g_title, 8, rx + rw - 3 - aw / 2, ry + 2.5f, CREAM, acc, CENTER, 0);
+        } else if (w.m->role == "boss" || w.m->role == "lieutenant") {
+            bool boss = w.m->role == "boss";
+            const char *label = boss ? "BOSS" : "LIEUTENANT";
+            float tw = text_width(f, g_title, 8, label) + 9;
+            rect(dl, f, rx + rw - tw - 3, ry + 0.5f, tw, 13, boss ? GOLD_TEXT : IM_COL32(142, 16, 36, 255), 3);
+            text(dl, f, g_title, 8, rx + rw - 3 - tw / 2, ry + 2.5f, boss ? IM_COL32(26, 18, 8, 255) : CREAM, label, CENTER, 0);
+        } else if (state == "fighting" || state == "watching" || state == "room") {
+            text(dl, f, g_title, 8, rx + rw - 3, ry + 2.5f, state == "room" ? LIVE : ORANGE, upper(state.c_str()).c_str(), RIGHT, 0);
+        }
+        bool click = mouse_click(f, rx - 5, ry - 3, rw + 5, 20);
+        if (click) sel = i;
+        if ((on && k.a) || click) {
+            if (w.kind) social::crew_accept(w.r->id);
+            else if (w.m->id != v.me) crew_member_menu(*w.m);
+        }
+        ry += 21;
+    }
+    if ((int)rows.size() > shown) {
+        char more[32];
+        snprintf(more, sizeof(more), "%d of %d", std::min(first + shown, (int)rows.size()), (int)rows.size());
+        text(dl, f, g_body, 8, rx + rw, TABS_B + 13, DIM, more, RIGHT, 0);
+    }
+    float by = PY + PH - 12 - (float)buttons.size() * 27;
+    for (size_t b = 0; b < buttons.size(); b++) {
+        int idx = (int)rows.size() + (int)b;
+        bool on = sel == idx, soon = buttons[b] == B_CHALLENGE;
+        const char *label = buttons[b] == B_CHALLENGE ? "CHALLENGE A CREW" : buttons[b] == B_CHAT ? "CREW CHAT" :
+                            buttons[b] == B_INVITE ? "INVITE A PLAYER" : C.confirm_leave ? "SURE? LEAVE" : "LEAVE CREW";
+        ImU32 fill = on ? RED : b == 0 ? IM_COL32(200, 16, 46, soon ? 70 : 200) : IM_COL32(255, 255, 255, 22);
+        rect(dl, f, rx - 4, by, rw + 4, 23, fill, 6);
+        if (on) dl->AddRect(f.p(rx - 5, by - 1), f.p(rx + rw + 1, by + 24), IM_COL32(255, 90, 110, 255), 6 * f.s(), 0, 1.2f * f.s());
+        text(dl, f, g_title, 11, rx - 2 + rw / 2, by + 5, soon && !on ? DIM : IM_COL32(255, 245, 230, 255), label, CENTER, 0);
+        bool click = mouse_click(f, rx - 4, by, rw + 4, 23);
+        if (click) sel = idx;
+        if ((on && k.a) || click) {
+            switch (buttons[b]) {
+            case B_CHALLENGE: say("Crew battles come with the next stage of the Social Update."); break;
+            case B_CHAT: C.crew_view = 1; C.sel[TAB_CREW] = -1; C.line_skip = 0; break;
+            case B_INVITE: open_keyboard(KB_CREW_INVITE); break;
+            case B_LEAVE:
+                if (!C.confirm_leave) C.confirm_leave = true;
+                else { social::crew_leave(); C.confirm_leave = false; fprintf(stderr, "[SOCIAL-UI] crew: leave\n"); }
+                break;
+            }
+        }
+        by += 27;
+    }
 }
 
 // ---- ROOM: who is in it, and the room's chat (stage 2b: through the relay, netplay.c) ----
@@ -736,16 +1126,20 @@ void draw_room_tab(ImDrawList *dl, const Frame &f, const ChatKeys &k, const NetR
         bool host = !watcher && r.players[i].slot == r.host, you = !watcher && r.players[i].slot == r.you;
         bool on = i == C.sel[TAB_ROOM];
         if (on) dl->AddRect(f.p(PX + 7, y - 4), f.p(PX + lw - 7, y + 15), with_alpha(RED, 0.8f), 5 * f.s(), 0, 1.2f * f.s());
-        dl->AddCircleFilled(f.p(PX + 15, y + 5.5f), 3 * f.s(), watcher ? IM_COL32(242, 230, 200, 90) : LIVE);
-        text(dl, f, g_hand, 13, PX + 24, y - 2, host ? GOLD_TEXT : watcher ? IM_COL32(242, 230, 200, 205) : BLUE_NAME, name,
+        if (room_only()) dl->AddCircleFilled(f.p(PX + 15, y + 5.5f), 3 * f.s(), watcher ? IM_COL32(242, 230, 200, 90) : LIVE);
+        else draw_avatar(dl, f, PX + 16, y + 5.5f, 6.5f, room_account_of(name), name, watcher ? 0.7f : 1.0f);
+        text(dl, f, g_hand, 13, PX + (room_only() ? 24 : 26), y - 2, host ? GOLD_TEXT : watcher ? IM_COL32(242, 230, 200, 205) : BLUE_NAME, name,
              LEFT, 0.6f);
         const char *what = room_name_muted(name) ? "MUTED" : watcher ? "WATCHING" : host ? "HOST" : you ? "YOU" : "";
         text(dl, f, g_body, 7.5f, PX + lw - 12, y + 2, host && !room_name_muted(name) ? GOLD_TEXT : DIM, what, RIGHT, 0);
         bool click = mouse_click(f, PX + 7, y - 4, lw - 14, 19);
         if (click) C.sel[TAB_ROOM] = i;
         if (on && (k.a || click) && !you && !(watcher && r.you == NETPLAY_SLOT_SPECTATOR && !strcmp(name, hub_name().c_str()))) {
-            open_player_menu(0, name);
+            long long acc = room_only() ? 0 : room_account_of(name);
+            open_player_menu(acc, name);
             C.menu_room = true;
+            C.menu_account = (unsigned)acc;
+            menu_report_newest(acc, name, true);
         }
         y += 17;
     }
@@ -779,6 +1173,7 @@ void draw_room_tab(ImDrawList *dl, const Frame &f, const ChatKeys &k, const NetR
             open_player_menu(room_only() ? 0 : l.from, l.name);
             C.menu_room = true;
             C.menu_account = (unsigned)l.from;
+            menu_report_line(ptrs, ptrs.size() - 1 - (size_t)clicked, "room");
         }
     }
     input_bar(dl, f, PX + lw, state == 1 ? std::string("Message the room") : why, "SEND");
@@ -910,11 +1305,13 @@ void draw_friends(ImDrawList *dl, const Frame &f, const ChatKeys &k, const NetRo
             dl->AddRect(f.p(x0, y), f.p(x1, y + h), with_alpha(RED, 0.75f), 6 * f.s(), 0, 1.0f * f.s());
         }
         float a = offline && !on ? 0.55f : 1.0f, x = x0 + 9;
-        if (w.kind == 3) {
-            ImU32 dot = offline ? IM_COL32(242, 230, 200, 90) : w.fr->state == "fighting" || w.fr->state == "watching" ? ORANGE : LIVE;
-            dl->AddCircleFilled(f.p(x + 3, y + h / 2), 3 * f.s(), with_alpha(dot, a));
-            x += 13;
+        draw_avatar(dl, f, x + 10, y + h / 2, 10, w.ref.id, w.ref.name, a);
+        if (w.kind == 3) {      // the state's dot on the picture's edge
+            ImU32 dot = offline ? IM_COL32(120, 112, 100, 255) : w.fr->state == "fighting" || w.fr->state == "watching" ? ORANGE : LIVE;
+            dl->AddCircleFilled(f.p(x + 17, y + h / 2 + 7), 3.6f * f.s(), IM_COL32(18, 12, 14, 255));
+            dl->AddCircleFilled(f.p(x + 17, y + h / 2 + 7), 2.6f * f.s(), with_alpha(dot, a));
         }
+        x += 26;
         text(dl, f, g_hand, 14, x, y + 7, with_alpha(CREAM, a), w.ref.name.c_str(), LEFT, 0.6f);
         x += text_width(f, g_hand, 14, w.ref.name.c_str()) + 8;
         if (!w.ref.tag.empty()) {
@@ -989,18 +1386,40 @@ void draw_messages(ImDrawList *dl, const Frame &f, const ChatKeys &k, const NetR
             rect(dl, f, PX + 7, y, lw - 14, 32, IM_COL32(200, 16, 46, 26), 6);
             dl->AddRect(f.p(PX + 7, y), f.p(PX + lw - 7, y + 32), with_alpha(RED, 0.75f), 6 * f.s(), 0, 1.0f * f.s());
         }
-        text(dl, f, g_hand, 13, PX + 15, y + 1, CREAM, c.with.name.c_str(), LEFT, 0.6f);
+        draw_avatar(dl, f, PX + 23, y + 16, 9, c.with.id, c.with.name);
+        text(dl, f, g_hand, 13, PX + 37, y + 1, CREAM, c.with.name.c_str(), LEFT, 0.6f);
         if (c.unread) badge(dl, f, PX + lw - 26, y + 4, c.unread);
         std::string snip = (c.last_from == v.me ? "You: " : "") + c.last;
-        dl->PushClipRect(f.p(PX + 14, y), f.p(PX + lw - 12, y + 32), true);
-        text(dl, f, g_body, 9, PX + 15, y + 18, IM_COL32(242, 230, 200, 140), snip.c_str(), LEFT, 0);
+        dl->PushClipRect(f.p(PX + 36, y), f.p(PX + lw - 12, y + 32), true);
+        text(dl, f, g_body, 9, PX + 37, y + 18, IM_COL32(242, 230, 200, 140), snip.c_str(), LEFT, 0);
         dl->PopClipRect();
         if (mouse_click(f, PX + 7, y, lw - 14, 32)) { sel = i; C.dm_with = c.with.id; social::open_thread(c.with.id); }
         y += 35;
     }
-    const char *policy = v.dms == "everyone" ? "Anyone can message you." : v.dms == "off" ? "Your messages are off." :
-                         "Only friends can message you.";
-    text(dl, f, g_body, 8, PX + 12, PY + PH - 34, IM_COL32(242, 230, 200, 128), policy, LEFT, 0, lw - 24);
+    // who may message you (stage 2c): LT/RT or a click change it; the service keeps it
+    {
+        static const char *const ids[3] = { "friends", "everyone", "off" };
+        static const char *const names[3] = { "FRIENDS", "EVERYONE", "NOBODY" };
+        int cur = v.dms == "everyone" ? 1 : v.dms == "off" ? 2 : 0;
+        float py = PY + PH - 44;
+        text(dl, f, g_title, 8, PX + 12, py, DIM, "MESSAGES FROM", LEFT, 0);
+        float cw = text_width(f, g_title, 9, names[cur]) + 26;
+        rect(dl, f, PX + 12, py + 12, cw, 16, IM_COL32(255, 255, 255, 20), 8);
+        text(dl, f, g_title, 9, PX + 18, py + 15, CREAM, "<", LEFT, 0);
+        text(dl, f, g_title, 9, PX + 12 + cw / 2, py + 15, GOLD_TEXT, names[cur], CENTER, 0);
+        text(dl, f, g_title, 9, PX + 6 + cw, py + 15, CREAM, ">", RIGHT, 0);
+        plate_hint(dl, f, PX + 18 + cw, py + 14, ps_icons() ? "L2/R2" : "LT/RT", "");
+        int next = -1;
+        if (k.lt) next = (cur + 2) % 3;
+        if (k.rt || mouse_click(f, PX + 12, py + 12, cw, 16)) next = (cur + 1) % 3;
+        if (next >= 0) {
+            social::set_dms(ids[next]);
+            fprintf(stderr, "[SOCIAL-UI] messages from: %s\n", ids[next]);
+        }
+        const char *policy = cur == 1 ? "Anyone can message you." : cur == 2 ? "Nobody can message you." :
+                             "Only friends can message you.";
+        text(dl, f, g_body, 7.5f, PX + 12, py + 31, IM_COL32(242, 230, 200, 110), policy, LEFT, 0, lw - 24);
+    }
     float rx = PX + lw, rw = PW - lw;
     if (!C.dm_with) {
         text(dl, f, g_body, 11, rx + rw / 2, PY + 150, DIM,
@@ -1013,9 +1432,11 @@ void draw_messages(ImDrawList *dl, const Frame &f, const ChatKeys &k, const NetR
     float hy = TABS_B + 8;
     ImU32 scol = DIM;
     std::string state = fr ? friend_state(*fr, &scol) : "not your friend";
-    dl->AddCircleFilled(f.p(rx + 16, hy + 7), 3 * f.s(), fr && fr->state != "offline" ? LIVE : IM_COL32(242, 230, 200, 90));
-    text(dl, f, g_hand, 16, rx + 25, hy - 2, CREAM, name.c_str(), LEFT, 0.6f);
-    float nx = rx + 31 + text_width(f, g_hand, 16, name.c_str());
+    draw_avatar(dl, f, rx + 20, hy + 7, 8.5f, C.dm_with, name);
+    dl->AddCircleFilled(f.p(rx + 26, hy + 13), 3.2f * f.s(), IM_COL32(18, 12, 14, 255));
+    dl->AddCircleFilled(f.p(rx + 26, hy + 13), 2.3f * f.s(), fr && fr->state != "offline" ? LIVE : IM_COL32(120, 112, 100, 255));
+    text(dl, f, g_hand, 16, rx + 33, hy - 2, CREAM, name.c_str(), LEFT, 0.6f);
+    float nx = rx + 39 + text_width(f, g_hand, 16, name.c_str());
     if (fr && !fr->tag.empty()) {
         float tw = text_width(f, g_body, 7.5f, fr->tag.c_str()) + 6;
         dl->AddRect(f.p(nx, hy + 2), f.p(nx + tw, hy + 13), IM_COL32(255, 205, 60, 150), 3 * f.s(), 0, 0.8f * f.s());
@@ -1023,6 +1444,17 @@ void draw_messages(ImDrawList *dl, const Frame &f, const ChatKeys &k, const NetR
         nx += tw + 6;
     }
     text(dl, f, g_body, 9, nx, hy + 2, scol, state.c_str(), LEFT, 0);
+    // BLOCK - REPORT, as the design has it: X or a click opens the player's menu with both
+    {
+        const char *opts = "BLOCK - REPORT";
+        float ow = text_width(f, g_title, 9, opts);
+        bool hot = mouse_in(f, rx + rw - 12 - ow, hy, ow, 14);
+        text(dl, f, g_title, 9, rx + rw - 12, hy + 2, hot ? CREAM : DIM, opts, RIGHT, 0);
+        if (k.x || mouse_click(f, rx + rw - 12 - ow, hy, ow, 14)) {
+            open_player_menu(C.dm_with, name);
+            menu_report_newest(C.dm_with, name, false);
+        }
+    }
     rect(dl, f, rx, hy + 21, rw, 0.5f, IM_COL32(255, 255, 255, 15));
     // the bubbles, newest at the bottom
     const social::Thread *t = nullptr;
@@ -1069,16 +1501,18 @@ void draw_messages(ImDrawList *dl, const Frame &f, const ChatKeys &k, const NetR
     }
     // with a room and an empty box the button invites (the design's INVITE TO ROOM; chat_draw sends it)
     input_bar(dl, f, rx, "Message " + name, r.in_room && C.draft[TAB_MESSAGES].empty() ? "INVITE TO ROOM" : "SEND");
-    (void)k;
 }
 
 // ---- the player menu: A on a name ----
 
 void draw_player_menu(ImDrawList *dl, const Frame &f, const ChatKeys &k)
 {
-    std::vector<std::pair<std::string, int>> items;     // 0 add friend, 1 message, 2 mute, 3 unmute, 4/5 room mute/unmute
-    bool is_friend = C.menu_id && friend_of(C.menu_id), muted = false, asked = false;
+    // 0 add friend, 1 message, 2 mute, 3 unmute, 4/5 room mute/unmute, 6/7 block/unblock, 8 report,
+    // 9 invite to my crew
+    std::vector<std::pair<std::string, int>> items;
+    bool is_friend = C.menu_id && friend_of(C.menu_id), muted = false, asked = false, blocked = false;
     for (auto &m : C.v.muted) muted |= m.id == C.menu_id;
+    for (auto &b : C.v.blocked) blocked |= C.menu_id && b.id == C.menu_id;
     for (auto &o : C.v.out) asked |= C.menu_id ? o.id == C.menu_id : o.name == C.menu_name;
     if (C.menu_room) {      // the ROOM tab: hide this player's room lines on this PC
         bool rm = room_name_muted(C.menu_name);
@@ -1086,9 +1520,23 @@ void draw_player_menu(ImDrawList *dl, const Frame &f, const ChatKeys &k)
         items.push_back({ rm ? "UNMUTE IN ROOM" : "MUTE IN ROOM", rm ? 5 : 4 });
     }
     if (!room_only()) {
-        if (!is_friend && !asked) items.push_back({ "ADD FRIEND", 0 });
-        if (C.menu_id) items.push_back({ "MESSAGE", 1 });
-        if (C.menu_id && !C.menu_room) items.push_back({ muted ? "UNMUTE" : "MUTE", muted ? 3 : 2 });
+        if (!is_friend && !asked && !blocked) items.push_back({ "ADD FRIEND", 0 });
+        if (C.menu_id && !blocked && C.tab != TAB_MESSAGES) items.push_back({ "MESSAGE", 1 });
+        if (C.menu_id && !C.menu_room && !blocked && C.tab != TAB_MESSAGES) items.push_back({ muted ? "UNMUTE" : "MUTE", muted ? 3 : 2 });
+        bool officer = C.v.crew_role == "boss" || C.v.crew_role == "lieutenant";
+        bool in_mine = false;
+        for (auto &m : C.v.crew_roster) in_mine |= m.id == C.menu_id;
+        if (C.menu_id && officer && !in_mine && !blocked) items.push_back({ "INVITE TO MY CREW", 9 });
+        if (C.menu_crew && C.v.crew_role == "boss") {       // 10 lieutenant, 11 member, 12 boss, 13 remove
+            if (C.menu_role == "member") items.push_back({ "MAKE LIEUTENANT", 10 });
+            if (C.menu_role == "lieutenant") items.push_back({ "MAKE MEMBER", 11 });
+            items.push_back({ "MAKE BOSS", 12 });
+            items.push_back({ "REMOVE FROM CREW", 13 });
+        } else if (C.menu_crew && C.v.crew_role == "lieutenant" && C.menu_role == "member") {
+            items.push_back({ "REMOVE FROM CREW", 13 });
+        }
+        if (C.menu_id) items.push_back({ blocked ? "UNBLOCK" : "BLOCK", blocked ? 7 : 6 });
+        if (C.menu_id && !C.menu_channel.empty() && (C.menu_msg || !C.menu_text.empty())) items.push_back({ "REPORT", 8 });
     }
     if (items.empty()) items.push_back({ "FRIEND REQUEST SENT", -1 });
     float w = 160, h = 34 + items.size() * 22.0f, x = 320 - w / 2, y = 200 - h / 2;
@@ -1111,6 +1559,21 @@ void draw_player_menu(ImDrawList *dl, const Frame &f, const ChatKeys &k)
             else if (what == 1) open_dm(C.menu_id);
             else if (what == 2 || what == 3) social::mute(C.menu_id, what == 2);
             else if (what == 4 || what == 5) room_mute(C.menu_name, C.menu_account, what == 4);
+            else if (what == 6 || what == 7) {
+                social::block(C.menu_id, C.menu_name, what == 6);
+                fprintf(stderr, "[SOCIAL-UI] %s %s\n", what == 6 ? "block" : "unblock", C.menu_name.c_str());
+            } else if (what == 8) {
+                social::report(C.menu_id, C.menu_channel, C.menu_msg, C.menu_text, C.menu_context);
+                fprintf(stderr, "[SOCIAL-UI] report %s (%s)\n", C.menu_name.c_str(), C.menu_channel.c_str());
+            } else if (what == 9) social::crew_invite(C.menu_id, C.menu_name);
+            else if (what >= 10 && what <= 12) {
+                const char *role = what == 10 ? "lieutenant" : what == 11 ? "member" : "boss";
+                social::crew_role(C.menu_id, role);
+                fprintf(stderr, "[SOCIAL-UI] crew: %s -> %s\n", C.menu_name.c_str(), role);
+            } else if (what == 13) {
+                social::crew_kick(C.menu_id);
+                fprintf(stderr, "[SOCIAL-UI] crew: remove %s\n", C.menu_name.c_str());
+            }
             C.menu = false;
         }
     }
@@ -1155,9 +1618,18 @@ const std::vector<std::vector<Key>> &key_rows(bool sym)
     return sym ? symbols : letters;
 }
 
-std::string &kb_text() { return C.kb_kind == KB_FRIEND ? C.friend_name : C.draft[C.tab]; }
-int &kb_cursor() { return C.kb_kind == KB_FRIEND ? C.friend_cursor : C.cursor[C.tab]; }
-int kb_max() { return C.kb_kind == KB_FRIEND ? 32 : std::max(1, C.v.max_chars); }
+// A spectator's room line over a fight (KB_FIGHT): the fight chat's own bar, below.
+std::string &fight_draft();
+int &fight_cursor();
+void fight_send();
+
+std::string &kb_text() { return C.kb_kind == KB_FIGHT ? fight_draft() : C.kb_kind != KB_CHAT ? C.friend_name : C.draft[C.tab]; }
+int &kb_cursor() { return C.kb_kind == KB_FIGHT ? fight_cursor() : C.kb_kind != KB_CHAT ? C.friend_cursor : C.cursor[C.tab]; }
+int kb_max()
+{
+    return C.kb_kind == KB_FIGHT ? 200 : C.kb_kind == KB_CREW_TAG ? 4 : C.kb_kind == KB_CREW_NAME ? 24 :
+           C.kb_kind != KB_CHAT ? 32 : std::max(1, C.v.max_chars);
+}
 
 void open_keyboard(int kind)
 {
@@ -1167,16 +1639,34 @@ void open_keyboard(int kind)
     C.kr = 2;
     C.kc = 7;
     C.symbols = false;
-    if (kind == KB_FRIEND) { C.friend_name.clear(); C.friend_cursor = 0; }
+    if (kind != KB_CHAT && kind != KB_FIGHT) { C.friend_name.clear(); C.friend_cursor = 0; }
+    if (kind == KB_CREW_TAG) C.caps = true;     // tags are capitals
 }
 
 void kb_submit()
 {
-    if (C.kb_kind == KB_FRIEND) {
+    if (C.kb_kind == KB_FIGHT) { fight_send(); C.kb = false; return; }
+    if (C.kb_kind != KB_CHAT) {
         std::string n = C.friend_name;
         while (!n.empty() && n.back() == ' ') n.pop_back();
-        if (!n.empty()) social::friend_request(0, n);
+        while (!n.empty() && n.front() == ' ') n.erase(n.begin());
+        int kind = C.kb_kind;
         C.kb = false;
+        if (n.empty()) return;
+        if (kind == KB_FRIEND) social::friend_request(0, n);
+        else if (kind == KB_CREW_INVITE) {
+            social::crew_invite(0, n);
+            fprintf(stderr, "[SOCIAL-UI] crew: invite %s\n", n.c_str());
+        } else if (kind == KB_CREW_NAME) {      // then the tag
+            C.crew_new_name = n;
+            open_keyboard(KB_CREW_TAG);
+        } else if (kind == KB_CREW_TAG) {
+            for (auto &c : n) c = (char)toupper((unsigned char)c);
+            std::string region = social::region_of_server(connected_server());
+            social::crew_create(C.crew_new_name, n, region);
+            fprintf(stderr, "[SOCIAL-UI] crew: create %s [%s] %s\n", C.crew_new_name.c_str(), n.c_str(), region.c_str());
+            C.caps = false;
+        }
         return;
     }
     chat_send();
@@ -1223,7 +1713,7 @@ std::vector<std::string> suggestions()
             "would", "yeah", "your" };
         for (const char *w : common) if (out.size() < 2) offer(w);
     }
-    if (C.kb_kind == KB_CHAT)
+    if (C.kb_kind == KB_CHAT || C.kb_kind == KB_FIGHT)
         for (const char *p : { "GG", "Rematch?", "One more", "Ready?", "Nice" })
             if (out.size() < 5) out.push_back(p);
     return out;
@@ -1324,6 +1814,10 @@ void draw_keyboard(ImDrawList *dl, const Frame &f, ImVec2 display)
     glass(dl, f, x, y, w, h, 9, IM_COL32(18, 12, 14, 255), 0.85f);
     std::string who, head;
     if (C.kb_kind == KB_FRIEND) { head = "ADD FRIEND"; who = ""; }
+    else if (C.kb_kind == KB_CREW_INVITE) { head = "INVITE TO"; who = C.v.crew_name; }
+    else if (C.kb_kind == KB_FIGHT) { head = "MESSAGE TO"; who = "the room"; }
+    else if (C.kb_kind == KB_CREW_NAME) { head = "NEW CREW - ITS NAME"; who = ""; }
+    else if (C.kb_kind == KB_CREW_TAG) { head = "NEW CREW - ITS TAG"; who = C.crew_new_name; }
     else if (C.tab == TAB_MESSAGES) { head = "MESSAGE TO"; who = convo_name(C.dm_with); }
     else if (C.tab == TAB_CREW) { head = "MESSAGE TO"; who = "your crew"; }
     else { head = "MESSAGE TO"; who = C.region ? k_region_names[C.region] : "everyone"; }
@@ -1341,7 +1835,9 @@ void draw_keyboard(ImDrawList *dl, const Frame &f, ImVec2 display)
     std::string before = s.substr(0, (size_t)cur);
     float cw = text_width(f, g_body, 14, before.c_str()), shift = std::max(0.0f, cw - (fw - 24));
     dl->PushClipRect(f.p(x + in + 4, fy), f.p(x + in + fw - 4, fy + 32), true);
-    if (s.empty() && C.kb_kind == KB_FRIEND) text(dl, f, g_body, 14, x + in + 9, fy + 7, DIM, "Their name, exactly", LEFT, 0);
+    if (s.empty() && C.kb_kind != KB_CHAT)
+        text(dl, f, g_body, 14, x + in + 9, fy + 7, DIM, C.kb_kind == KB_CREW_NAME ? "3 to 24 letters, digits and spaces" :
+             C.kb_kind == KB_CREW_TAG ? "2 to 4 letters or digits" : "Their name, exactly", LEFT, 0);
     text(dl, f, g_body, 14, x + in + 9 - shift, fy + 7, CREAM, s.c_str(), LEFT, 0);
     rect(dl, f, x + in + 9 - shift + cw + 1, fy + 8, 1.5f, 16, GOLD_TEXT);
     dl->PopClipRect();
@@ -1395,6 +1891,9 @@ void draw_keyboard(ImDrawList *dl, const Frame &f, ImVec2 display)
                                 5 * f.s(), 0, 1.5f * f.s());
             std::string label = key.label;      // capitals on the keys, as the design draws them
             if (key.kind == K_SEND && C.kb_kind == KB_FRIEND) label = "ADD";
+            if (key.kind == K_SEND && C.kb_kind == KB_CREW_INVITE) label = "INVITE";
+            if (key.kind == K_SEND && C.kb_kind == KB_CREW_NAME) label = "NEXT";
+            if (key.kind == K_SEND && C.kb_kind == KB_CREW_TAG) label = "CREATE";
             if (key.kind == K_SHIFT && C.caps) label = "CAPS";
             float size = wide ? 10 : 13;
             if (key.kind == K_BKSP) {       // a backspace arrow
@@ -1427,7 +1926,8 @@ void draw_keyboard(ImDrawList *dl, const Frame &f, ImVec2 display)
     hx += plate_hint(dl, f, hx, hy, ps_icons() ? "L2" : "LT", C.caps ? "CAPS OFF" : "CAPS");
     hx += plate_hint(dl, f, hx, hy, ps_icons() ? "L1" : "LB", "") - 2;
     hx += plate_hint(dl, f, hx, hy, ps_icons() ? "R1" : "RB", "CURSOR");
-    hx += plate_hint(dl, f, hx, hy, start_button_name(), C.kb_kind == KB_FRIEND ? "ADD" : "SEND");
+    hx += plate_hint(dl, f, hx, hy, start_button_name(), C.kb_kind == KB_FRIEND ? "ADD" : C.kb_kind == KB_CREW_INVITE ? "INVITE" :
+                     C.kb_kind == KB_CREW_NAME ? "NEXT" : C.kb_kind == KB_CREW_TAG ? "CREATE" : "SEND");
     hint(dl, f, hx, hy, "b", "CLOSE");
     if (k.b || k.esc) C.kb = false;
 }
@@ -1476,7 +1976,9 @@ void draw_toasts(ImDrawList *dl, const Frame &f)
 // that text), friend=NAME (the keyboard of ADD FRIEND with that name), dm=NAME (MESSAGES with that
 // friend), type=TEXT (the tab's text box), send, close, mute=NAME / unmute=NAME (MUTE IN ROOM); pad=BUTTON (a, b, x, y, lb, rb, start, back,
 // up, down, left, right) and key=KEY (enter, escape, backspace, tab) press it for a frame as the pad's
-// or keyboard's own press arrives, text=TEXT types it; room=create opens a room. Each step writes a
+// or keyboard's own press arrives, text=TEXT types it; room=create opens a room. Stage 2c:
+// crewcreate=NAME:TAG (CREATE A CREW through its two keyboards), crewinvite=NAME (INVITE A PLAYER's
+// keyboard), menu=NAME (the player menu on a friend, crew mate or sender). Each step writes a
 // [SOCIAL-UI] line.
 
 ImGuiKey test_key(const std::string &name)
@@ -1553,6 +2055,36 @@ void chat_test_step()
         ImGui::GetIO().AddInputCharactersUTF8(arg.c_str());
     } else if (what == "mute" || what == "unmute") {    // the ROOM tab's MUTE IN ROOM on that player
         room_mute(arg, 0, what == "mute");
+    } else if (what == "crewcreate") {              // the keyboard's name, NEXT, its tag, CREATE
+        C.open = true;
+        C.tab = TAB_CREW;
+        open_keyboard(KB_CREW_NAME);
+        C.friend_name = arg.substr(0, arg.find(':'));
+        kb_submit();
+        C.friend_name = arg.find(':') == std::string::npos ? "" : arg.substr(arg.find(':') + 1);
+        kb_submit();
+    } else if (what == "crewinvite") {
+        C.open = true;
+        C.tab = TAB_CREW;
+        C.crew_view = 0;
+        open_keyboard(KB_CREW_INVITE);
+        C.friend_name = arg;
+        kb_submit();
+    } else if (what == "menu") {
+        long long id = 0;
+        for (auto &fr : C.v.friends) if (fr.name == arg) id = fr.id;
+        for (auto &m : C.v.crew_roster) if (m.name == arg) id = m.id;
+        for (auto &l : C.v.global) if (l.name == arg && l.from) id = l.from;
+        C.open = true;
+        for (auto &m : C.v.crew_roster) if (m.id == id && C.tab == TAB_CREW) { crew_member_menu(m); id = 0; }
+        if (id) {
+            open_player_menu(id, arg);
+            if (C.tab == TAB_GLOBAL) {
+                std::vector<const social::Line *> lines;
+                for (auto &l : C.v.global) lines.push_back(&l);
+                for (size_t i = lines.size(); i-- > 0;) if (lines[i]->from == id) { menu_report_line(lines, i, lines[i]->channel); break; }
+            }
+        }
     } else if (what == "room") {                    // a room of this copy's own (a presence other than the menu)
         NetRoomSettings rs;
         default_settings(rs);
@@ -1583,6 +2115,7 @@ bool chat_begin()
         if (social::snapshot(C.v, C.have ? C.v.version : 0xFFFFFFFFu)) C.have = true;
         if (C.v.ready && !C.ready_at) C.ready_at = GetTickCount64();
         if (!C.v.ready) C.ready_at = 0;
+        avatars_update();
     }
     chat_test_step();
     NetRoom r;
@@ -1729,6 +2262,8 @@ void chat_draw(ImDrawList *dl, const Frame &f, ImVec2 display)
     } else if (C.tab == TAB_MESSAGES) {
         hx += hint(dl, f, hx, hy, "a", "OPEN");
         hx += hint(dl, f, hx, hy, "y", "KEYBOARD");
+        if (C.dm_with) hx += hint(dl, f, hx, hy, "x", "BLOCK / REPORT");
+        hx += plate_hint(dl, f, hx, hy, ps_icons() ? "L2/R2" : "LT/RT", "WHO CAN MESSAGE YOU");
         hint(dl, f, hx, hy, "b", "CLOSE");
     } else if (C.tab == TAB_GLOBAL) {
         hx += plate_hint(dl, f, hx, hy, "ENTER", "TYPE");
@@ -1749,14 +2284,20 @@ void chat_draw(ImDrawList *dl, const Frame &f, ImVec2 display)
     }
     if (C.kb) draw_keyboard(dl, f, display);
     draw_toasts(dl, f);
-    if (!C.kb && !C.menu && (k.b || k.esc)) C.open = false;
+    if (!C.kb && !C.menu && (k.b || k.esc)) {
+        if (C.tab == TAB_CREW && C.crew_view == 1 && C.v.crew) { C.crew_view = 0; C.sel[TAB_CREW] = -1; }
+        else C.open = false;
+    }
     if (!C.open) social_set_typing(0);
 }
 
 const char *chat_shot_label()
 {
     if (!C.open || (!social_enabled() && room_chat_state() < 0)) return nullptr;
-    return C.kb ? "social-keyboard" : k_tab_shots[C.tab];
+    if (C.kb) return "social-keyboard";
+    if (C.menu) return "social-menu";
+    if (C.tab == TAB_CREW && C.crew_view == 1) return "social-crewchat";
+    return k_tab_shots[C.tab];
 }
 
 // ---- chat during a fight (stage 2b; the design's "Chat during a fight") ----
@@ -1777,6 +2318,7 @@ const int FIGHT_LINES = 3;
 
 struct FightChat {
     bool typing = false;
+    bool pad = false;               // opened with the pad: the on-screen keyboard is up
     std::string draft;
     int cursor = 0;
     unsigned long long opened = 0, fight_at = 0;
@@ -1790,6 +2332,33 @@ struct FightChat {
 
 bool fight_spectator(const NetRoom &r) { return r.in_room && r.you == NETPLAY_SLOT_SPECTATOR; }
 
+std::string &fight_draft() { return FC.draft; }
+int &fight_cursor() { return FC.cursor; }
+
+// Sends the bar's line (ENTER, or SEND on the on-screen keyboard) and closes the bar.
+void fight_send()
+{
+    std::string t = FC.draft;
+    while (!t.empty() && t.back() == ' ') t.pop_back();
+    if (t.size() > 200) {
+        size_t cut = 200;
+        while (cut > 0 && ((unsigned char)t[cut] & 0xC0) == 0x80) cut--;
+        t.resize(cut);
+    }
+    if (!t.empty() && netplay_room_chat_send(t.c_str())) fprintf(stderr, "[SOCIAL-UI] fight chat sent: %s\n", t.c_str());
+    FC.draft.clear();
+    FC.cursor = 0;
+    FC.typing = false;
+    FC.pad = false;
+}
+
+// The pad's button for the bar: BACK, or R3 when BACK is push-to-talk.
+bool fight_pad_opens()
+{
+    return back_is_ptt() ? ImGui::IsKeyPressed(ImGuiKey_GamepadR3, false) : ImGui::IsKeyPressed(ImGuiKey_GamepadBack, false);
+}
+const char *fight_pad_name() { return back_is_ptt() ? (ps_icons() ? "R3" : "RS") : back_button_name(); }
+
 // In a room's match, the online screens closed.
 bool fight_chat_live()
 {
@@ -1801,8 +2370,9 @@ bool fight_chat_live()
 bool fight_chat_wanted_impl()
 {
     if (!fight_chat_live()) {
-        FC.typing = false;
+        FC.typing = FC.pad = false;
         FC.fight_at = 0;
+        if (C.kb && C.kb_kind == KB_FIGHT) C.kb = false;
         return false;
     }
     if (FC.typing) return true;
@@ -1826,18 +2396,38 @@ void fight_chat_test(const NetRoom &r)
             if (c) { FC.test_s = (float)atof(e); FC.test_text = c + 1; }
         }
     }
-    if (FC.test_s < 0 || FC.test_step >= 2 || !fight_spectator(r)) return;
+    if (FC.test_s < 0 || FC.test_step == 2 || !fight_spectator(r)) return;
+    static const bool by_pad = getenv("RECOMP_TEST_FIGHT_CHAT_PAD") != nullptr;   // the pad's button and the keyboard
     if (netplay_in_fight() && !FC.fight_at) FC.fight_at = GetTickCount64();
     if (!FC.fight_at) return;
     float t = (GetTickCount64() - FC.fight_at) / 1000.0f;
     if (FC.test_step == 0 && t >= FC.test_s && room_chat_state() == 1) {
+        if (by_pad) {       // press the pad's button as a player would; the bar opens below
+            ImGui::GetIO().AddKeyEvent(back_is_ptt() ? ImGuiKey_GamepadR3 : ImGuiKey_GamepadBack, true);
+            FC.test_step = 3;
+            return;
+        }
         FC.typing = true;
         FC.opened = GetTickCount64();
         FC.draft = FC.test_text;
         FC.cursor = (int)FC.draft.size();
         FC.test_step = 1;
         fprintf(stderr, "[SOCIAL-UI] fight chat: test opened the bar\n");
+    } else if (FC.test_step == 3) {
+        ImGui::GetIO().AddKeyEvent(back_is_ptt() ? ImGuiKey_GamepadR3 : ImGuiKey_GamepadBack, false);
+        if (FC.typing) {
+            FC.draft = FC.test_text;
+            FC.cursor = (int)FC.draft.size();
+            FC.test_step = 1;
+            fprintf(stderr, "[SOCIAL-UI] fight chat: test opened the bar with the pad (keyboard %d)\n", (int)C.kb);
+        }
     } else if (FC.test_step == 1 && t >= FC.test_s + 1.5f) {
+        if (FC.pad) {       // SEND on the on-screen keyboard
+            fight_send();
+            C.kb = false;
+            FC.test_step = 2;
+            return;
+        }
         if (netplay_room_chat_send(FC.draft.c_str())) fprintf(stderr, "[SOCIAL-UI] fight chat sent: %s\n", FC.draft.c_str());
         FC.draft.clear();
         FC.cursor = 0;
@@ -1855,27 +2445,29 @@ bool fight_chat_draw_impl(ImDrawList *dl, ImVec2 display)
     bool spectator = fight_spectator(r);
     fight_chat_test(r);
     if (!spectator || room_chat_state() != 1) FC.typing = false;
-    if (spectator && !FC.typing && room_chat_state() == 1 && ImGui::IsKeyPressed(ImGuiKey_Enter, false)) {
+    if (!FC.typing && FC.pad) FC.pad = false;
+    if (spectator && !FC.typing && room_chat_state() == 1 && (ImGui::IsKeyPressed(ImGuiKey_Enter, false) || fight_pad_opens())) {
         FC.typing = true;
+        FC.pad = !ImGui::IsKeyPressed(ImGuiKey_Enter, false);
         FC.opened = GetTickCount64();
         FC.draft.clear();
         FC.cursor = 0;
-        fprintf(stderr, "[SOCIAL-UI] fight chat: bar opened (spectator)\n");
+        if (FC.pad) {       // the pad has no letters: the on-screen keyboard (B closes it and the bar)
+            open_keyboard(KB_FIGHT);
+            C.caps = false;
+        }
+        fprintf(stderr, "[SOCIAL-UI] fight chat: bar opened (spectator, %s)\n", FC.pad ? "pad: on-screen keyboard" : "keyboard");
     }
-    if (FC.typing && GetTickCount64() - FC.opened > 150) {
+    if (FC.pad && FC.typing) {      // the on-screen keyboard has the input; it sends or closes
+        if (!C.kb || C.kb_kind != KB_FIGHT) { FC.typing = FC.pad = false; }
+    } else if (FC.typing && GetTickCount64() - FC.opened > 150) {
         std::string typed = typed_chars();
         if (!typed.empty()) insert_text(FC.draft, FC.cursor, typed, 200);
         if (ImGui::IsKeyPressed(ImGuiKey_Backspace, true)) erase_back(FC.draft, FC.cursor);
         if (ImGui::IsKeyPressed(ImGuiKey_Escape, false) || ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false)) {
             FC.typing = false;
         } else if (ImGui::IsKeyPressed(ImGuiKey_Enter, false) || ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, false)) {
-            std::string t = FC.draft;
-            while (!t.empty() && t.back() == ' ') t.pop_back();
-            if (!t.empty() && t.size() <= 200 && netplay_room_chat_send(t.c_str()))
-                fprintf(stderr, "[SOCIAL-UI] fight chat sent: %s\n", t.c_str());
-            FC.draft.clear();
-            FC.cursor = 0;
-            FC.typing = false;
+            fight_send();
         }
     }
     social_set_typing(FC.typing);
@@ -1909,7 +2501,10 @@ bool fight_chat_draw_impl(ImDrawList *dl, ImVec2 display)
         text(dl, f, g_body, 12, 27 + nw, y + 2.5f, with_alpha(l.system ? ORANGE : CREAM, a), l.text, LEFT, 0, 250);
         y -= 4;
     }
-    if (FC.typing) {    // the bar, as the design has it
+    if (FC.typing && FC.pad && C.kb && C.kb_kind == KB_FIGHT) {
+        draw_keyboard(dl, f, display);
+        if (!C.kb && FC.typing) { FC.typing = FC.pad = false; }     // B closed it without sending
+    } else if (FC.typing) {    // the bar, as the design has it
         float bx = 20, by = 430, bw = 280, bh = 27;
         rect(dl, f, bx, by, bw, bh, IM_COL32(0, 0, 0, 166), 6);
         dl->AddRect(f.p(bx, by), f.p(bx + bw, by + bh), with_alpha(RED, 0.85f), 6 * f.s(), 0, 1.0f * f.s());
@@ -1927,12 +2522,15 @@ bool fight_chat_draw_impl(ImDrawList *dl, ImVec2 display)
         text(dl, f, g_body, 8.5f, bx + bw + 10, by + 9, IM_COL32(242, 230, 200, 140),
              "While you type, the keyboard does not control the game", LEFT, 0);
     } else if (spectator && room_chat_state() == 1) {
+        // ENTER, or the pad's BACK (R3 when BACK is push-to-talk: the hint says so)
+        std::string keys = std::string("ENTER / ") + fight_pad_name();
         float x = 20, yy = 452;
-        float pw = text_width(f, g_body, 8, "ENTER") + 6;
-        rect(dl, f, x, yy, pw + text_width(f, g_title, 8, "ROOM CHAT") + 12, 13, IM_COL32(0, 0, 0, 110), 4);
+        float pw = text_width(f, g_body, 8, keys.c_str()) + 6;
+        const char *what = back_is_ptt() ? "ROOM CHAT  (BACK IS PUSH-TO-TALK)" : "ROOM CHAT";
+        rect(dl, f, x, yy, pw + text_width(f, g_title, 8, what) + 12, 13, IM_COL32(0, 0, 0, 110), 4);
         rect(dl, f, x + 3, yy + 2, pw, 9, IM_COL32(70, 70, 70, 220), 2);
-        text(dl, f, g_body, 8, x + 3 + pw / 2, yy + 2, WHITE, "ENTER", CENTER, 0);
-        text(dl, f, g_title, 8, x + 7 + pw, yy + 2.5f, IM_COL32(242, 230, 200, 200), "ROOM CHAT", LEFT, 0);
+        text(dl, f, g_body, 8, x + 3 + pw / 2, yy + 2, WHITE, keys.c_str(), CENTER, 0);
+        text(dl, f, g_title, 8, x + 7 + pw, yy + 2.5f, IM_COL32(242, 230, 200, 200), what, LEFT, 0);
     }
     return FC.typing;
 }

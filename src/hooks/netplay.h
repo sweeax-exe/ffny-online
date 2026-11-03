@@ -137,6 +137,7 @@ typedef struct NetChatLine {
     int slot;                       /* the sender's room slot; NETPLAY_SLOT_SPECTATOR; -1 a system line */
     unsigned account;               /* the sender's account as the relay knows it, 0 none */
     int spectator, system, mine;    /* a spectator's; the relay's own (a refusal, to this PC only); this PC's */
+    int history;                    /* said before this PC came in (the relay's last 50 lines of the room); at 0 */
     char name[33];                  /* as the relay knows it (the account's name), never the game's say */
     char text[201];
     unsigned long long at;          /* GetTickCount64 when it arrived */

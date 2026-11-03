@@ -52,6 +52,10 @@ int account_send_bug_report(const char *ctype, const void *body, int len, char *
 int account_call(const char *method, const char *path, const char *json, char *buf, int size, int receive_ms,
                  void *volatile *live);
 void account_cancel_call(void *volatile *live);
+/* A public file of the account service (the social features' avatars, GET /api/avatar/N.png): no
+ * session token is sent. Blocks (off the game's threads only); *len gets the bytes read (a 200 only;
+ * an answer of size - 1 bytes or more is cut). Returns the HTTP status, 0 when unreachable. */
+int account_fetch(const char *path, void *buf, int size, int *len);
 
 #ifdef __cplusplus
 }
