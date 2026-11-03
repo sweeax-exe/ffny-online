@@ -1474,6 +1474,173 @@ bool gold_tag(const View &v, const std::string &tag)
     return !tag.empty() && std::find(v.gold_tags.begin(), v.gold_tags.end(), tag) != v.gold_tags.end();
 }
 
+// ---- looks and the Locker (build 52) -----------------------------------------------------------------------
+
+namespace {
+std::map<long long, unsigned long long> g_look_asked;   // guarded by g_mu: when each look was last asked for
+std::set<long long> g_look_wanted;                      // guarded by g_mu: waiting for the next batch
+bool g_look_queued = false;                             // guarded by g_mu
+
+int mode_index(const std::string &m) { return m == "open" ? 0 : m == "classic" ? 1 : m == "draft" ? 2 : -1; }
+
+Look parse_look(const J &e)
+{
+    Look l;
+    l.id = e["id"].i();
+    for (auto &kv : e["ranks"].o) {
+        int m = mode_index(kv.first);
+        if (m < 0) continue;
+        LookRank &r = l.ranks[m];
+        r.tier = (int)kv.second["tier"].i();
+        r.division = (int)kv.second["division"].i();
+        r.rating = (int)kv.second["rating"].i();
+        r.top = (int)kv.second["top"].i();
+        r.label = kv.second["label"].str();
+    }
+    const J &em = e["emblem"];
+    if (em.kind == J::OBJ) {
+        l.emblem_mode = em["mode"].str() == "crown" ? -2 : mode_index(em["mode"].str());
+        l.emblem_season = (int)em["season"].i();
+        l.emblem_tier = (int)em["tier"].i();
+        l.emblem_division = (int)em["division"].i();
+        l.emblem_top = (int)em["top"].i();
+        if (l.emblem_mode == -1) l.emblem_tier = -1;
+    }
+    l.color = e["color"].kind == J::NUM ? (int)e["color"].i() : -1;
+    l.frame = e["frame"].kind == J::NUM ? (int)e["frame"].i() : -1;
+    l.pulse = e["frame_pulse"].b;
+    l.title = e["title"].str();
+    return l;
+}
+
+void load_looks()
+{
+    std::vector<long long> ids;
+    {
+        std::lock_guard<std::mutex> lk(g_mu);
+        g_look_queued = false;
+        for (long long id : g_look_wanted) { ids.push_back(id); if (ids.size() >= 50) break; }
+        for (long long id : ids) g_look_wanted.erase(id);
+        if (!g_look_wanted.empty()) g_look_queued = true;
+    }
+    if (ids.empty()) return;
+    std::string path = "/api/social/looks?ids=", out;
+    for (size_t i = 0; i < ids.size(); i++) path += (i ? "," : "") + std::to_string(ids[i]);
+    J j;
+    if (http("GET", path, nullptr, out, 0, &g_work_live) != 200 || !parse_json(out, j)) return;
+    std::lock_guard<std::mutex> lk(g_mu);
+    for (auto &e : j["looks"].a) {
+        Look l = parse_look(e);
+        if (l.id > 0) g_v.looks[l.id] = l;
+    }
+    if (g_test_log) fprintf(stderr, "[SOCIAL] looks: %d asked, %d known\n", (int)ids.size(), (int)g_v.looks.size());
+    changed();
+    if (g_look_queued) queue(load_looks);
+}
+
+void load_locker()
+{
+    std::string out;
+    J j;
+    if (http("GET", "/api/social/locker", nullptr, out, 0, &g_work_live) != 200 || !parse_json(out, j)) return;
+    Locker L;
+    L.loaded = true;
+    L.ranked = j["ranked"].b;
+    L.season = (int)j["season"].i();
+    const J &eq = j["equipped"];
+    L.color = eq["color"].str(); L.frame = eq["frame"].str(); L.title = eq["title"].str(); L.emblem = eq["emblem"].str();
+    for (auto &e : j["items"].a) {
+        LockerItem it;
+        it.id = e["id"].str(); it.name = e["name"].str(); it.mode = e["mode"].str(); it.title = e["title"].str();
+        it.role = e["role"].str(); it.how = e["how"].str(); it.label = e["label"].str();
+        it.season = (int)e["season"].i();
+        it.tier = e["tier"].kind == J::NUM ? (int)e["tier"].i() : -1;
+        it.division = (int)e["division"].i();
+        it.unlocked = e["unlocked"].b; it.finish = e["finish"].b; it.current = e["current"].b;
+        for (auto &k : e["kinds"].a) {
+            const std::string &s = k.str();
+            if (s == "color") it.k_color = true;
+            else if (s == "frame") it.k_frame = true;
+            else if (s == "title") it.k_title = true;
+            else if (s == "emblem") it.k_emblem = true;
+            else if (s == "crew") it.k_crew = true;
+        }
+        if (!it.id.empty()) L.items.push_back(it);
+    }
+    for (auto &e : j["finishes"].a) {
+        SeasonFinish f;
+        f.mode = e["mode"].str(); f.peak_rank = e["peak_rank"].str(); f.next_rank = e["next_rank"].str();
+        f.season = (int)e["season"].i(); f.tier = (int)e["tier"].i(); f.division = (int)e["division"].i();
+        f.rating = (int)e["rating"].i(); f.peak = (int)e["peak"].i(); f.place = (int)e["place"].i(); f.of = (int)e["of"].i();
+        f.set_wins = (int)e["set_wins"].i(); f.set_losses = (int)e["set_losses"].i(); f.top = (int)e["top"].i();
+        f.next_rating = (int)e["next_rating"].i();
+        L.finishes.push_back(f);
+    }
+    std::sort(L.finishes.begin(), L.finishes.end(), [](const SeasonFinish &a, const SeasonFinish &b) { return a.season > b.season; });
+    fprintf(stderr, "[SOCIAL] locker: season %d, ranked %d, %d items, %d finishes, equipped color=%s frame=%s title=%s emblem=%s\n",
+            L.season, (int)L.ranked, (int)L.items.size(), (int)L.finishes.size(), L.color.c_str(), L.frame.c_str(),
+            L.title.c_str(), L.emblem.c_str());
+    std::lock_guard<std::mutex> lk(g_mu);
+    g_v.locker = L;
+    changed();
+}
+}   // namespace
+
+void look_want(long long id)
+{
+    if (id <= 0 || g_server.load() != 1) return;
+    unsigned long long now = GetTickCount64();
+    std::lock_guard<std::mutex> lk(g_mu);
+    auto it = g_look_asked.find(id);
+    if (it != g_look_asked.end() && now - it->second < 300000) return;
+    g_look_asked[id] = now;
+    g_look_wanted.insert(id);
+    if (!g_look_queued) {
+        g_look_queued = true;
+        g_jobs.push_back(load_looks);
+        g_cv.notify_all();
+    }
+}
+
+void locker_load() { queue(load_locker); }
+
+void equip(const std::string &slot, const std::string &id)
+{
+    queue([slot, id]() {
+        std::string answer;
+        int status = post("/api/social/locker/equip", "{\"slot\":" + json_text(slot) + ",\"id\":" + json_text(id) + "}", &answer);
+        fprintf(stderr, "[SOCIAL] equip %s=%s: %d\n", slot.c_str(), id.c_str(), status);
+        if (status / 100 != 2) {
+            J j;
+            std::lock_guard<std::mutex> lk(g_mu);
+            note(parse_json(answer, j) && !j["error"].str().empty() ? "Locker: " + j["error"].str() : "Locker: not saved");
+            return;
+        }
+        load_locker();
+        long long me;
+        {
+            std::lock_guard<std::mutex> lk(g_mu);
+            me = g_v.me;
+            g_look_asked.erase(me);
+        }
+        look_want(me);
+    });
+}
+
+void test_set_look(const Look &l)
+{
+    std::lock_guard<std::mutex> lk(g_mu);
+    g_v.looks[l.id] = l;
+    changed();
+}
+
+void test_set_locker(const Locker &l)
+{
+    std::lock_guard<std::mutex> lk(g_mu);
+    g_v.locker = l;
+    changed();
+}
+
 void avatar_want(long long id)
 {
     if (id <= 0) return;
@@ -1581,6 +1748,11 @@ void crew_challenge(long long, const std::string &, int) {}
 void battle_answer(const char *) {}
 void ladder() {}
 bool gold_tag(const View &, const std::string &) { return false; }
+void look_want(long long) {}
+void locker_load() {}
+void equip(const std::string &, const std::string &) {}
+void test_set_look(const Look &) {}
+void test_set_locker(const Locker &) {}
 std::string test_ui_take() { return ""; }
 bool snapshot(View &, unsigned) { return false; }
 std::vector<Toast> take_toasts() { return {}; }

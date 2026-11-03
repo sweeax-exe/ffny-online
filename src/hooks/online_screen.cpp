@@ -850,7 +850,7 @@ std::string upper(const char *s)
 // ---- the screens --------------------------------------------------------------------------------
 
 enum Page { HUB, ROOMS, SETTINGS, FIGHTERS, CODE, STATS, PLAYERS, RANKED, VOICE, SERVERS, NAME, RANKED_MODES, RANKED_RESULTS,
-            QUICK };
+            QUICK, LOCKER };
 
 struct State {
     Page page = HUB;
@@ -947,6 +947,19 @@ void ranked_versus(ImDrawList *dl, const Frame &f, const NetVersus &v, float alp
 bool ranked_created_ok(const NetRoom &r);
 void draw_ranked_stats(ImDrawList *dl, const Frame &f, int mode);
 int &ranked_stats_tab();
+// build 52: the rewards (locker_ui.inc)
+bool rewards_shown();
+void open_locker();
+void open_season_rewards(int mode);
+void draw_season_rewards(ImDrawList *dl, const Frame &f, const Pad &pad);
+void draw_locker(ImDrawList *dl, const Frame &f, const Pad &pad);
+bool locker_gallery(const std::string &p);
+const social::Look *look_of(long long id);      // locker_ui.inc
+int look_tier(const social::Look *l);
+float look_icon(ImDrawList *dl, const Frame &f, float x, float cy, float size, const social::Look *l, float alpha = 1.0f);
+ImU32 look_col(const social::Look *l, ImU32 fallback);
+void look_frame(ImDrawList *dl, const Frame &f, float cx, float cy, float r, const social::Look *l, float alpha = 1.0f);
+long long room_account_of(const std::string &name);     // social_ui.inc
 int ranked_relay();
 bool ranked_test_switch();
 void open_ranked_modes();
@@ -1956,25 +1969,29 @@ void big_number(ImDrawList *dl, const Frame &f, float x, float y, const char *va
 
 void draw_stats(ImDrawList *dl, const Frame &f, const Pad &pad)
 {
-    if (pad.x) account_fetch_stats_page(S.stats_page);
+    int &tab0 = ranked_stats_tab();
+    if (pad.x && tab0 <= NETRANK_MODES) account_fetch_stats_page(S.stats_page);
     page_title(dl, f, "MY STATS");
     enum AccountState acc = acc_state();
     StatsView v;
     bool have = (acc == ACCOUNT_IN || acc == ACCOUNT_CHECKING) && read_stats(v);
     // Y: the casual record, then one tab per ranked mode (ranked phase 2a), once ranked is offered
     int &tab = ranked_stats_tab();
-    if (pad.y && ranked_shown()) tab = (tab + 1) % (1 + NETRANK_MODES);
-    if (!ranked_shown()) tab = 0;
+    // build 52: SEASON REWARDS after the modes, while the social features are on too
+    int tabs_n = 1 + NETRANK_MODES + (ranked_shown() && rewards_shown() ? 1 : 0);
+    if (pad.y && ranked_shown()) tab = (tab + 1) % tabs_n;
+    if (!ranked_shown() || tab >= tabs_n) tab = 0;
     if (ranked_shown()) {
-        static const char *const tabs[] = { "CASUAL", "OPEN", "CLASSIC", "DRAFT" };
-        float tx = 360;
-        for (int i = 0; i < 4; i++) {
+        static const char *const tabs[] = { "CASUAL", "OPEN", "CLASSIC", "DRAFT", "SEASON REWARDS" };
+        float tx = tabs_n > 4 ? 262 : 360;
+        for (int i = 0; i < tabs_n; i++) {
             float w = text_width(f, g_title, 12, tabs[i]) + 16;
             rect(dl, f, tx, 54, w, 18, i == tab ? IM_COL32(120, 12, 26, 230) : IM_COL32(0, 0, 0, 150), 5);
             text(dl, f, g_title, 12, tx + w / 2, 56, i == tab ? WHITE : GREY, tabs[i], CENTER, 0.8f);
             tx += w + 4;
         }
     }
+    if (tab == 1 + NETRANK_MODES) { draw_season_rewards(dl, f, pad); return; }
     if (tab > 0 && have) { draw_ranked_stats(dl, f, tab - 1); return; }
     if (acc != ACCOUNT_IN && acc != ACCOUNT_CHECKING) {
         text(dl, f, g_title, 24, 320, 180, CREAM, "SIGN IN TO KEEP YOUR STATS", CENTER, 1.6f);
@@ -3254,7 +3271,13 @@ void draw_room(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
         bool known = shown >= 0;
         if (!known || !portrait(dl, f, shown, x + 4, y + 4, w - 8, (w - 8) * 1.5f))
             text(dl, f, g_title, 40, x + w / 2, y + 70, GREY, "?", CENTER);
-        text(dl, f, g_hand, 15, x + w / 2, y + 200, p.slot == r.you ? ORANGE : CREAM, p.name, CENTER, 1.0f);
+        {   // build 52: the rewards a player wears (outside a ranked set, whose card shows the set's rank)
+            const social::Look *lk = ranked || !social_enabled() ? nullptr : look_of(room_account_of(p.name));
+            ImU32 nc = look_col(lk, p.slot == r.you ? ORANGE : CREAM);
+            float nw = text_width(f, g_hand, 15, p.name), iw = look_tier(lk) >= 0 ? 17.0f : 0.0f;
+            look_icon(dl, f, x + w / 2 - (nw + iw) / 2, y + 210, 15, lk);
+            text(dl, f, g_hand, 15, x + w / 2 + iw / 2, y + 200, nc, p.name, CENTER, 1.0f);
+        }
         {
             std::string label = known ? fighter_label(shown, p.slot) : "choosing";
             float size = fit_size(f, g_title, 11, label.c_str(), w - 10);     // a 16-character online name
@@ -3857,9 +3880,11 @@ NetRoom sample_room(int mode, int max, int count)
     return r;
 }
 
+#include "rank_art.inc"
 #include "ranked_ui.inc"
 #include "social_ui.inc"
 #include "crew_ui.inc"
+#include "locker_ui.inc"
 
 // Which page the gallery shows now, and the sample it shows with it.
 void gallery_step()
@@ -3896,6 +3921,9 @@ void gallery_step()
                                          // ranked phase 2a: the mode chooser, the search, ACCEPT, the set, results
                                          "ranked-modes", "ranked-search", "ranked-accept", "ranked-room", "ranked-vote",
                                          "ranked-versus", "ranked-results", "ranked-results-placement", "stats-ranked",
+                                         // build 52: the emblems' results, the season rewards, the Locker
+                                         "ranked-results-demoted", "ranked-results-placed", "ranked-results-legend",
+                                         "stats-rewards", "locker", "locker-emblem",
                                          // ranked phase 2b: Draft
                                          "ranked-draft-ban", "ranked-draft-venue", "ranked-draft-blind",
                                          "ranked-draft-pick", "ranked-draft-reveal", "stats-ranked-draft",
@@ -3980,8 +4008,16 @@ void gallery_step()
     static std::vector<int> shown;
     if (shown.empty()) {
         const char *only = getenv("RECOMP_TEST_ONLINE_GALLERY_ONLY");
-        for (int i = 0; i < count; i++)
-            if (!only || !*only || !strncmp(pages[i], only, strlen(only))) shown.push_back(i);
+        for (int i = 0; i < count; i++) {     // several prefixes: comma-separated ("ranked-results,locker")
+            bool take = !only || !*only;
+            for (const char *p = only; p && *p && !take;) {
+                const char *comma = strchr(p, ',');
+                size_t n = comma ? (size_t)(comma - p) : strlen(p);
+                take = n > 0 && !strncmp(pages[i], p, n);
+                p = comma ? comma + 1 : nullptr;
+            }
+            if (take) shown.push_back(i);
+        }
         if (shown.empty()) for (int i = 0; i < count; i++) shown.push_back(i);
     }
     int index = shown[(size_t)((now - start) / (unsigned long long)ms) % shown.size()];
@@ -4034,6 +4070,7 @@ void gallery_step()
         static const std::string base_stats = G.stats;
         G.stats = base_stats;
         ranked_stats_tab() = 0;
+        if (locker_gallery(p)) return;
         if (ranked_gallery(p)) return;
     }
     if (p == "connecting") { G.state = NETPLAY_CONNECTING; G.in_lobby = false; }
@@ -4274,7 +4311,7 @@ LookId page_look(const NetRoom &room, enum NetplayState st)
     case SETTINGS: case CODE: return LOOK_LIST;
     case SERVERS: if (!room.in_room) return LOOK_LIST; break;
     case PLAYERS: if (!room.in_room) return LOOK_PLAYERS; break;
-    case STATS: if (!room.in_room) return LOOK_STATS; break;
+    case STATS: case LOCKER: if (!room.in_room) return LOOK_STATS; break;
     case RANKED: case RANKED_MODES: if (!room.in_room) return LOOK_SEARCH; break;
     case RANKED_RESULTS: return LOOK_SEARCH;
     case VOICE: case QUICK: if (!(room.in_room && room.phase != 0)) return LOOK_VOICE; break;
@@ -4641,11 +4678,19 @@ bool draw_pages(ImVec2 display)
         if (pad.b) S.page = HUB;
     } else if (S.page == STATS && !room.in_room) {
         draw_stats(dl, f, pad);
-        float hx = 54;
-        hx += hint(dl, f, hx, 420, "x", "REFRESH");
-        if (ranked_shown()) hx += hint(dl, f, hx, 420, "y", ranked_stats_tab() + 1 < 1 + NETRANK_MODES ? "NEXT TAB" : "CASUAL");
-        hint(dl, f, hx, 420, "b", "BACK");
-        if (pad.b) S.page = HUB;
+        if (S.page == STATS && ranked_stats_tab() != 1 + NETRANK_MODES) {     // SEASON REWARDS draws its own
+            int tabs_n = 1 + NETRANK_MODES + (ranked_shown() && rewards_shown() ? 1 : 0);
+            float hx = 54;
+            hx += hint(dl, f, hx, 420, "x", "REFRESH");
+            if (ranked_shown()) hx += hint(dl, f, hx, 420, "y", ranked_stats_tab() + 1 < tabs_n ? "NEXT TAB" : "CASUAL");
+            if (rewards_shown()) hx += hint(dl, f, hx, 420, "rb", "LOCKER");
+            hint(dl, f, hx, 420, "b", "BACK");
+            if (pad.rb && rewards_shown()) open_locker();
+        }
+        if (pad.b && S.page == STATS) S.page = HUB;
+    } else if (S.page == LOCKER && !room.in_room) {
+        if (!rewards_shown()) S.page = STATS;
+        else draw_locker(dl, f, pad);
     } else if (S.page == RANKED && !room.in_room) {
         draw_ranked(dl, f, pad);
     } else if (S.page == RANKED_MODES && !room.in_room) {

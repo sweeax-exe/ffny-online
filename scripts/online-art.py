@@ -15,7 +15,8 @@ Battle-mode ID, the front-end ID of the fighter's record in assets/djv2.sod: the
 for Teck 85, Santos 93, O.E 92 and Eric Sermon 91), venues/<feID>.png (venue.xml feID: its photo with
 its sign, 256x256) and venues/<feID>_name.png (the gold name banner), ui/<name>.png, fonts/<file>.ttf,
 and manifest.json. ui/ps_cross.png, ps_circle.png, ps_square.png and ps_triangle.png are not from the
-dump: this script draws them (PlayStation-style glyphs for the "Button icons" setting). Needs Pillow (the installed Python has it for the HD textures).
+dump: this script draws them (PlayStation-style glyphs for the "Button icons" setting). ranks/em<N>-256.png and
+em<N>-64.png are not from the dump either: the port's own rank emblems, rendered by scripts/rank-emblems.py. Needs Pillow (the installed Python has it for the HD textures).
 """
 import argparse
 import json
@@ -27,7 +28,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import hd_assets  # noqa: E402
 
-VERSION = 5       # 5: the PlayStation-style glyphs ui/ps_*.png
+VERSION = 6       # 5: the PlayStation-style glyphs ui/ps_*.png; 6: the rank emblems ranks/*.png
 
 # (output name, screens.viv entry, SHPX image name). See docs/research/frontend-menu-integration.md §6.
 UI_IMAGES = [
@@ -218,6 +219,17 @@ def build(data, out):
             continue
         (tmp / "fonts" / font).write_bytes(maybe_refpack(font_entries[font]))
         manifest["fonts"].append(font)
+
+    try:        # the port's own rank emblems (no game bytes); without a browser the game draws its own
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("rank_emblems", Path(__file__).resolve().parent / "rank-emblems.py")
+        rank_emblems = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(rank_emblems)
+        font = tmp / "fonts" / "TradeCon.ttf"
+        rank_emblems.render(tmp / "ranks", font if font.is_file() else None)
+        manifest["ranks"] = 8
+    except Exception as error:    # noqa: BLE001 - reported, never fatal
+        manifest["missing"].append("ranks (%s)" % error)
 
     manifest["fighters"].sort()
     manifest["venues"].sort()

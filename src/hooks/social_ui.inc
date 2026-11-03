@@ -741,6 +741,9 @@ int draw_lines(ImDrawList *dl, const Frame &f, const std::vector<const social::L
         bool mine = l.mine || (l.from && l.from == C.v.me);
         std::string body = l.hidden ? "message hidden: you muted " + l.name : l.text;
         ImU32 name_col = mine ? GOLD_TEXT : l.from && friend_of(l.from) ? BLUE_NAME : CREAM;
+        const social::Look *lk = l.system || room_only() ? nullptr : look_of(l.from);     // build 52: rewards
+        name_col = look_col(lk, name_col);
+        float iconw = look_tier(lk) >= 0 ? 14.0f : 0.0f;
         float h, top;
         if (stacked) {      // CREW: the picture, the name and time above the message, as ROOM in the design
             const float ax = room_only() ? 0.0f : 21.0f;     // the picture's column (none with the social features off)
@@ -750,9 +753,13 @@ int draw_lines(ImDrawList *dl, const Frame &f, const std::vector<const social::L
             if (l.system) {
                 text(dl, f, g_body, 8.5f, (x0 + x1) / 2, top + 4, DIM, l.text.c_str(), CENTER, 0, x1 - x0);
             } else {
-                if (ax > 0) draw_avatar(dl, f, x0 + 8, top + 8, 8, l.from, l.name, l.hidden ? 0.5f : 1.0f);
-                text(dl, f, g_hand, 14, x0 + ax, top - 3, name_col, l.name.c_str(), LEFT, 0.6f);
-                text(dl, f, g_body, 8, x0 + ax + text_width(f, g_hand, 14, l.name.c_str()) + 6, top + 1, DIM,
+                if (ax > 0) {
+                    draw_avatar(dl, f, x0 + 8, top + 8, 8, l.from, l.name, l.hidden ? 0.5f : 1.0f);
+                    look_frame(dl, f, x0 + 8, top + 8, 8, lk, l.hidden ? 0.5f : 1.0f);
+                }
+                look_icon(dl, f, x0 + ax, top + 6, 12, lk);
+                text(dl, f, g_hand, 14, x0 + ax + iconw, top - 3, name_col, l.name.c_str(), LEFT, 0.6f);
+                text(dl, f, g_body, 8, x0 + ax + iconw + text_width(f, g_hand, 14, l.name.c_str()) + 6, top + 1, DIM,
                      clock_text(l.at).c_str(), LEFT, 0);
                 text(dl, f, g_body, 11, x0 + ax, top + 14, l.hidden ? DIM : CREAM, body.c_str(), LEFT, 0, x1 - x0 - ax);
             }
@@ -763,7 +770,7 @@ int draw_lines(ImDrawList *dl, const Frame &f, const std::vector<const social::L
             float lead = tw, tagw = 0, namew = 0;
             if (!l.tag.empty()) tagw = text_width(f, g_body, 7.5f, l.tag.c_str()) + 10;
             if (l.system) namew = text_width(f, g_title, 8.5f, "SERVER") + 5;
-            else namew = text_width(f, g_hand, 13, l.name.c_str()) + 6 + 15;      // with the picture
+            else namew = text_width(f, g_hand, 13, l.name.c_str()) + 6 + 15 + iconw;      // with the picture (and emblem)
             lead += tagw + namew;
             float mh = text_height(f, g_body, 11, body.c_str(), x1 - x0 - lead);
             h = std::max(14.0f, mh) + 7;
@@ -779,7 +786,9 @@ int draw_lines(ImDrawList *dl, const Frame &f, const std::vector<const social::L
             if (l.system) text(dl, f, g_title, 8.5f, x, top + 2.5f, GOLD_TEXT, "SERVER", LEFT, 0);
             else {
                 draw_avatar(dl, f, x + 6, top + 7, 6, l.from, l.name, l.hidden ? 0.5f : 1.0f);
-                text(dl, f, g_hand, 13, x + 15, top - 1.5f, name_col, l.name.c_str(), LEFT, 0.6f);
+                look_frame(dl, f, x + 6, top + 7, 6, lk, l.hidden ? 0.5f : 1.0f);
+                look_icon(dl, f, x + 14, top + 7, 12, lk);
+                text(dl, f, g_hand, 13, x + 15 + iconw, top - 1.5f, name_col, l.name.c_str(), LEFT, 0.6f);
             }
             x += namew;
             text(dl, f, g_body, 11, x, top, l.system ? IM_COL32(255, 231, 166, 255) : l.hidden ? DIM : CREAM, body.c_str(),
@@ -809,7 +818,7 @@ int draw_lines(ImDrawList *dl, const Frame &f, const std::vector<const social::L
 void open_player_menu(long long id, const std::string &name)
 {
     if (!id && name.empty()) return;
-    if (id && id == C.v.me) return;
+    if (id && id == C.v.me && !rewards_shown()) return;
     C.menu = true;
     C.menu_id = id;
     C.menu_name = name;
@@ -1617,14 +1626,17 @@ void draw_friends(ImDrawList *dl, const Frame &f, const ChatKeys &k, const NetRo
             dl->AddRect(f.p(x0, y), f.p(x1, y + h), with_alpha(RED, 0.75f), 6 * f.s(), 0, 1.0f * f.s());
         }
         float a = offline && !on ? 0.55f : 1.0f, x = x0 + 9;
+        const social::Look *lk = look_of(w.ref.id);        // build 52: the rewards worn
         draw_avatar(dl, f, x + 10, y + h / 2, 10, w.ref.id, w.ref.name, a);
+        look_frame(dl, f, x + 10, y + h / 2, 10, lk, a);
         if (w.kind == 3) {      // the state's dot on the picture's edge
             ImU32 dot = offline ? IM_COL32(120, 112, 100, 255) : w.fr->state == "fighting" || w.fr->state == "watching" ? ORANGE : LIVE;
             dl->AddCircleFilled(f.p(x + 17, y + h / 2 + 7), 3.6f * f.s(), IM_COL32(18, 12, 14, 255));
             dl->AddCircleFilled(f.p(x + 17, y + h / 2 + 7), 2.6f * f.s(), with_alpha(dot, a));
         }
         x += 26;
-        text(dl, f, g_hand, 14, x, y + 7, with_alpha(CREAM, a), w.ref.name.c_str(), LEFT, 0.6f);
+        x += look_icon(dl, f, x, y + h / 2, 13, lk, a);
+        text(dl, f, g_hand, 14, x, y + 7, with_alpha(look_col(lk, CREAM), a), w.ref.name.c_str(), LEFT, 0.6f);
         x += text_width(f, g_hand, 14, w.ref.name.c_str()) + 8;
         if (!w.ref.tag.empty()) {
             float tw = text_width(f, g_body, 7.5f, w.ref.tag.c_str()) + 6;
@@ -1822,6 +1834,8 @@ void draw_player_menu(ImDrawList *dl, const Frame &f, const ChatKeys &k)
     // 0 add friend, 1 message, 2 mute, 3 unmute, 4/5 room mute/unmute, 6/7 block/unblock, 8 report,
     // 9 invite to my crew
     std::vector<std::pair<std::string, int>> items;
+    bool self = C.menu_id && C.menu_id == C.v.me;       // build 52: your own name opens your Locker
+    if (self) items.push_back({ "MY LOCKER", 14 });
     bool is_friend = C.menu_id && friend_of(C.menu_id), muted = false, asked = false, blocked = false;
     for (auto &m : C.v.muted) muted |= m.id == C.menu_id;
     for (auto &b : C.v.blocked) blocked |= C.menu_id && b.id == C.menu_id;
@@ -1831,7 +1845,7 @@ void draw_player_menu(ImDrawList *dl, const Frame &f, const ChatKeys &k)
         for (unsigned id : C.room_muted_ids) rm |= C.menu_account && id == C.menu_account;
         items.push_back({ rm ? "UNMUTE IN ROOM" : "MUTE IN ROOM", rm ? 5 : 4 });
     }
-    if (!room_only()) {
+    if (!room_only() && !self) {
         if (!is_friend && !asked && !blocked) items.push_back({ "ADD FRIEND", 0 });
         if (C.menu_id && !blocked && C.tab != TAB_MESSAGES) items.push_back({ "MESSAGE", 1 });
         if (C.menu_id && !C.menu_room && !blocked && C.tab != TAB_MESSAGES) items.push_back({ muted ? "UNMUTE" : "MUTE", muted ? 3 : 2 });
@@ -1888,6 +1902,9 @@ void draw_player_menu(ImDrawList *dl, const Frame &f, const ChatKeys &k)
             } else if (what == 13) {
                 social::crew_kick(C.menu_id);
                 fprintf(stderr, "[SOCIAL-UI] crew: remove %s\n", C.menu_name.c_str());
+            } else if (what == 14) {
+                C.open = false;
+                open_locker();
             }
             C.menu = false;
         }

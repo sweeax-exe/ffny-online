@@ -82,6 +82,7 @@ typedef struct NetModeRank {
     int set_wins, set_losses, peak;
     char label[48], peak_rank[32];
     int hint;               /* NETRANK_HINT_* */
+    int place, of;          /* the mode's ladder: this account's place (0 off it) and its size (build 52) */
 } NetModeRank;
 enum { NETRANK_HINT_NONE = 0, NETRANK_HINT_PROMOTION = 1, NETRANK_HINT_DEMOTION = 2 };
 /* Returns 1 when the value had at least the ten original fields. */

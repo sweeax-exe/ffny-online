@@ -25,6 +25,10 @@ struct RankedUi {
     int stats_tab = 0;                  // MY STATS: 0 casual, 1 + NETRANK_* a mode
     // the draft: the grid's cursor and first row, the venue card, the cursor the relay has, the step seen
     int draft_sel = 0, draft_top = 0, venue_sel = 0, draft_cursor_sent = -1, draft_room_game = -1;
+    char opp_name[40] = "";             // the set's opponent, for the results (build 52)
+    char before_room[7] = "";           // the room whose "before" ranks were read
+    NetRankPlayer last_opp = {};        // the opponent's entry in the set's last RANKINFO that had both
+    bool have_last_opp = false;
 } R;
 
 // The gallery's samples (gallery_step sets them per page).
@@ -86,6 +90,69 @@ void read_ranks(NetModeRank out[NETRANK_MODES])
     }
 }
 
+// The season (build 52): the stats text's season=<n>|<name>|<preseason 0/1>|<end unix s> line.
+struct SeasonInfo { bool valid = false, pre = false; int n = 0; long long end = 0; std::string name; };
+SeasonInfo read_season()
+{
+    static char buf[16384];
+    SeasonInfo si;
+    if (!stats_text(buf, sizeof(buf))) return si;
+    const char *at = strstr(buf, "\nseason=");
+    if (!at && !strncmp(buf, "season=", 7)) at = buf - 1;
+    if (!at) return si;
+    std::string l(at + 8);
+    size_t nl = l.find('\n');
+    if (nl != std::string::npos) l.resize(nl);
+    std::vector<std::string> fs;
+    size_t start = 0;
+    for (;;) {
+        size_t bar = l.find('|', start);
+        fs.push_back(l.substr(start, bar == std::string::npos ? std::string::npos : bar - start));
+        if (bar == std::string::npos) break;
+        start = bar + 1;
+    }
+    if (fs.size() < 3) return si;
+    si.valid = true;
+    si.n = atoi(fs[0].c_str());
+    si.name = fs[1];
+    si.pre = fs[2] == "1";
+    si.end = fs.size() > 3 ? atoll(fs[3].c_str()) : 0;
+    return si;
+}
+
+// "ENDS IN 5D 12H" (or hours and minutes on the last day); "" without an end.
+std::string season_ends_in(const SeasonInfo &si)
+{
+    if (si.end <= 0) return "";
+    long long left = si.end - (long long)time(nullptr);
+    char b[48];
+    if (left <= 0) snprintf(b, sizeof(b), "ENDING NOW");
+    else if (left >= 86400) snprintf(b, sizeof(b), "ENDS IN %lldD %lldH", left / 86400, left % 86400 / 3600);
+    else snprintf(b, sizeof(b), "ENDS IN %lldH %lldM", left / 3600, left % 3600 / 60);
+    return b;
+}
+
+// The preseason's line: "PRESEASON - TEST WEEK - ENDS IN 5D 12H - RANKS RESET AT THE END".
+std::string preseason_line(const SeasonInfo &si)
+{
+    std::string ends = season_ends_in(si);
+    return std::string("PRESEASON  -  TEST WEEK  -  ") + (ends.empty() ? "" : ends + "  -  ") + "RANKS RESET AT THE END";
+}
+
+// A strip with the preseason's line, centred at cx (nothing outside a preseason).
+void preseason_strip(ImDrawList *dl, const Frame &f, float cx, float y, float max_w, const char *extra = nullptr)
+{
+    SeasonInfo si = read_season();
+    if (!si.valid || !si.pre) return;
+    std::string l = preseason_line(si);
+    float size = fit_size(f, g_title, 11, l.c_str(), max_w - 20);
+    float w = text_width(f, g_title, size, l.c_str()) + 20, h = extra ? 30.0f : 18.0f;
+    rect(dl, f, cx - w / 2, y, w, h, IM_COL32(120, 70, 8, 220), 5);
+    frame_rect(dl, f, cx - w / 2, y, w, h, with_alpha(GOLD, 0.8f), 1.0f);
+    text(dl, f, g_title, size, cx, y + 3, IM_COL32(255, 236, 190, 255), l.c_str(), CENTER, 0.6f);
+    if (extra) text(dl, f, g_body, 8.5f, cx, y + 17, CREAM, extra, CENTER, 0);
+}
+
 std::string division_label(int division)
 {
     char name[48];
@@ -93,14 +160,8 @@ std::string division_label(int division)
     return upper(name);
 }
 
-// A rank's colour by tier (the project's own: no badge art yet, phase 3).
-ImU32 tier_colour(int tier)
-{
-    static const ImU32 c[8] = { IM_COL32(170, 150, 130, 255), IM_COL32(190, 120, 70, 255), IM_COL32(200, 200, 210, 255),
-                                IM_COL32(255, 205, 60, 255), IM_COL32(90, 200, 220, 255), IM_COL32(120, 170, 255, 255),
-                                IM_COL32(220, 120, 255, 255), IM_COL32(255, 90, 60, 255) };
-    return c[tier < 0 ? 0 : tier > 7 ? 7 : tier];
-}
+// A rank's colour by tier: the emblems' (rank_art.inc).
+ImU32 tier_colour(int tier) { return tier_col(tier); }
 
 // A small rank plate: the label in its tier's colour on a dark pill, `w` wide, centred at cx.
 void rank_plate(ImDrawList *dl, const Frame &f, float cx, float y, float w, const char *label, int tier, bool placing)
@@ -159,7 +220,7 @@ void draw_ranked_modes(ImDrawList *dl, const Frame &f, const Pad &pad)
     read_ranks(ranks);
     page_title(dl, f, "RANKED MATCH");
     online_count(dl, f);
-    const float w = 176, gap = 12, x0 = 320 - (3 * w + 2 * gap) / 2, y = 82, h = 262;
+    const float w = 176, gap = 12, x0 = 320 - (3 * w + 2 * gap) / 2, y = 92, h = 252;
     for (int i = 0; i < 3; i++) {
         int m = order[i];
         float x = x0 + i * (w + gap);
@@ -182,14 +243,19 @@ void draw_ranked_modes(ImDrawList *dl, const Frame &f, const Pad &pad)
                 text(dl, f, g_title, 11, x + w / 2, y + 122, GREY, "placement sets", CENTER, 0.8f);
             } else {
                 int tier = netranked_tier_of(r.division);
-                rank_plate(dl, f, x + w / 2, y + 96, w - 30, upper(r.label).c_str(), tier, false);
+                EmblemOpts eo;
+                eo.rating = r.rating;
+                eo.top = r.division >= NETRANK_DIVISIONS - 1 && r.place > 0 && r.place <= 10 ? r.place : 0;
+                eo.alpha = sel ? 1.0f : 0.85f;
+                emblem_big(dl, f, x + w / 2 - 36, y + 76, 72, tier, r.division, eo);
+                text(dl, f, g_title, fit_size(f, g_title, 13, upper(r.label).c_str(), w - 16), x + w / 2, y + 148,
+                     tier_colour(tier), upper(r.label).c_str(), CENTER, 0.9f);
                 char num[16];
                 snprintf(num, sizeof(num), "%d", r.rating);
-                text(dl, f, g_title, 26, x + w / 2, y + 118, CREAM, num, CENTER, 1.4f);
-                division_bar(dl, f, x + 20, y + 152, w - 40, r.rating, r.division, tier_colour(tier));
+                text(dl, f, g_title, 12, x + w / 2, y + 162, CREAM, num, CENTER, 0.8f);
             }
         }
-        text(dl, f, g_body, 11, x + 10, y + 176, draft ? with_alpha(GREY, 0.7f) : with_alpha(WHITE, 0.85f), descs[i], LEFT, 0.6f, w - 20);
+        text(dl, f, g_body, 11, x + 10, y + 184, draft ? with_alpha(GREY, 0.7f) : with_alpha(WHITE, 0.85f), descs[i], LEFT, 0.6f, w - 20);
         if (sel) selector(dl, f, x, y, w, h);
         if (!draft && mouse_click(f, x, y, w, h)) const_cast<Pad &>(pad).a = true;
     }
@@ -206,6 +272,7 @@ void draw_ranked_modes(ImDrawList *dl, const Frame &f, const Pad &pad)
         text(dl, f, g_hand, 11, 320, by + 22, with_alpha(ORANGE, 0.8f),
              "Found sooner: after 45 s either mode you both search may match.", CENTER, 0.7f);
     }
+    preseason_strip(dl, f, 320, 58, 420, "A test week: bugs may happen, and every rank resets when Season 1 starts.");
     float hx = 54;
     hx += hint(dl, f, hx, 410, "a", R.primary == NETRANK_DRAFT ? "SEARCH" : "CHOOSE FIGHTER");
     hx += hint(dl, f, hx, 410, "y", R.also ? "ONLY THIS MODE" : "ALSO SEARCH");
@@ -397,7 +464,13 @@ void ranked_card(ImDrawList *dl, const Frame &f, const NetRankInfo &ri, int slot
     char label[48];
     netranked_player_label(p, 5, label, sizeof(label));
     bool placing = p->division == NETRANK_PLACEMENT || p->placements > 0;
-    rank_plate(dl, f, x + w / 2, y, w - 12, upper(label).c_str(), netranked_tier_of(placing ? 0 : p->division), placing);
+    if (placing) {
+        rank_plate(dl, f, x + w / 2, y, w - 12, upper(label).c_str(), 0, true);
+        return;
+    }
+    int tier = netranked_tier_of(p->division);
+    emblem_small(dl, f, x + 16, y + 8, 22, tier);
+    rank_plate(dl, f, x + w / 2 + 10, y, w - 34, upper(label).c_str(), tier, false);
 }
 
 // A created fighter: Open only (the search's primary, or the set's mode in its room).
@@ -430,11 +503,15 @@ void ranked_versus(ImDrawList *dl, const Frame &f, const NetVersus &v, float alp
         netranked_player_label(p, 5, label, sizeof(label));
         bool placing = p->division == NETRANK_PLACEMENT || p->placements > 0;
         float x = s == 0 ? 36 : 640 - 36 - 196;
-        // on the portrait's top left ("YOU" sits on its right corner)
-        rank_plate(dl, f, x + 72, 78, 120, upper(label).c_str(), netranked_tier_of(placing ? 0 : p->division), placing);
-        if (!placing) {
+        // on the portrait's top left ("YOU" sits on its right corner); the 48 emblem beside the plate
+        if (placing) {
+            rank_plate(dl, f, x + 72, 78, 120, upper(label).c_str(), 0, true);
+        } else {
+            int tier = netranked_tier_of(p->division);
+            emblem_small(dl, f, x + 20, 90, 40, tier);
+            rank_plate(dl, f, x + 92, 78, 104, upper(label).c_str(), tier, false);
             snprintf(rating, sizeof(rating), "%d", p->rating);
-            text(dl, f, g_title, 11, x + 72, 97, CREAM, rating, CENTER, 0.8f);
+            text(dl, f, g_title, 11, x + 92, 97, CREAM, rating, CENTER, 0.8f);
         }
     }
     for (int i = k; i < dl->VtxBuffer.Size; i++) {      // the page's fade
@@ -450,6 +527,18 @@ void open_ranked_results(const NetRoom &r, const NetRankInfo &ri)
     snprintf(R.set_room, sizeof(R.set_room), "%s", r.code);
     R.set = ri;
     R.set_you = r.you;
+    for (int i = 0; i < r.player_count; i++)       // the room's other fighter (ranked_tick kept it during the set)
+        if (r.players[i].slot != r.you && r.players[i].slot != NETPLAY_SLOT_SPECTATOR)
+            snprintf(R.opp_name, sizeof(R.opp_name), "%s", r.players[i].name);
+    R.have_before = false;      // the next set reads its own "before" (ranked_search, or ranked_tick)
+    bool opp_in = false;
+    for (int i = 0; i < R.set.count; i++) opp_in |= R.set.p[i].slot != r.you;
+    if (!opp_in && R.have_last_opp && R.set.count < 4) {   // it left the room first: its last entry, the set's end
+        NetRankPlayer o = R.last_opp;
+        if (R.set.winner == o.slot) o.set_wins = std::max(o.set_wins, 2);
+        R.set.p[R.set.count++] = o;
+    }
+    R.have_last_opp = false;
     R.results_up = true;
     R.results_since = R.results_fetch = GetTickCount64();
     S.page = RANKED_RESULTS;
@@ -459,6 +548,65 @@ void open_ranked_results(const NetRoom &r, const NetRankInfo &ri)
     }
 }
 
+// The highest season-floor tier at or below `tier` (Contender 3, Kingpin 5, Legend 7), -1 none.
+int floor_tier_of(int tier)
+{
+    for (int t = tier; t >= 0; t--) if (t == 3 || t == 5 || t == 7) return t;
+    return -1;
+}
+
+std::string title_case(const std::string &s)
+{
+    std::string out = s;
+    bool start = true;
+    for (char &c : out) {
+        if (isalpha((unsigned char)c)) { c = start ? (char)toupper((unsigned char)c) : (char)tolower((unsigned char)c); start = false; }
+        else start = c == ' ';
+    }
+    // the division numerals stay upper case
+    for (const char *num : { " Iii", " Ii", " I" }) {
+        size_t at = out.rfind(num);
+        if (at != std::string::npos && at + strlen(num) == out.size())
+            for (size_t i = at + 1; i < out.size(); i++) out[i] = (char)toupper((unsigned char)out[i]);
+    }
+    return out;
+}
+
+// The light behind a promotion: rays turning slowly round cx, cy.
+void promo_rays(ImDrawList *dl, const Frame &f, float cx, float cy, float r, ImU32 col, float alpha)
+{
+    float spin = gallery_on() ? 0.0f : (float)(GetTickCount64() % 60000) / 60000.0f * 6.2831853f;
+    ImVec2 c = f.p(cx, cy);
+    const int n = 22;
+    for (int i = 0; i < n; i++) {
+        float a0 = spin + i * 6.2831853f / n, a1 = a0 + 0.07f;
+        ImVec2 p1(c.x + cosf(a0) * r * f.s(), c.y + sinf(a0) * r * f.s()), p2(c.x + cosf(a1) * r * f.s(), c.y + sinf(a1) * r * f.s());
+        dl->AddTriangleFilled(c, p1, p2, with_alpha(col, alpha * (i % 2 ? 0.10f : 0.18f)));
+    }
+    for (int g = 6; g >= 1; g--) dl->AddCircleFilled(c, r * 0.12f * g * f.s(), with_alpha(col, alpha * 0.035f), 40);
+}
+
+// One of the two cards under the bar: a promotion shield, a season floor.
+void results_card(ImDrawList *dl, const Frame &f, float x, float y, float w, int icon, const char *head, const char *line)
+{
+    glass(dl, f, x, y, w, 36, 8, IM_COL32(12, 10, 12, 255), 0.75f);
+    if (icon == 0) {        // three small shields
+        for (int i = 0; i < 3; i++) {
+            float sx = x + 12 + i * 9;
+            ImVec2 p[5] = { f.p(sx, y + 12), f.p(sx + 7, y + 12), f.p(sx + 7, y + 18), f.p(sx + 3.5f, y + 23), f.p(sx, y + 18) };
+            dl->AddConvexPolyFilled(p, 5, GOLD);
+        }
+    } else {                // a padlock
+        rect(dl, f, x + 14, y + 16, 14, 11, GOLD, 2);
+        dl->AddCircle(f.p(x + 21, y + 16), 4.5f * f.s(), GOLD, 16, 2.0f * f.s());
+    }
+    text(dl, f, g_title, 11, x + 44, y + 5, GOLD, head, LEFT, 0.8f);
+    text(dl, f, g_body, 9.5f, x + 44, y + 19, CREAM, line, LEFT, 0, w - 50);
+}
+
+// After a set (the owner's approved design "Rank up"): VICTORY / DEFEAT on the left with the opponent, the
+// emblem in the middle (PROMOTED! with rays and the new chevron's pulse, DEMOTED with the lost one fading,
+// PLACED!, or the placement progress), the rating and the season's numbers on the right.
 void draw_ranked_results(ImDrawList *dl, const Frame &f, const Pad &pad)
 {
     const NetRankInfo &ri = R.set;
@@ -478,71 +626,191 @@ void draw_ranked_results(ImDrawList *dl, const Frame &f, const Pad &pad)
         R.results_fetch = t;
         account_fetch_stats_page(0);
     }
-
-    page_title(dl, f, "SET OVER");
-    glass(dl, f, 36, 74, 568, 300);
-    text(dl, f, g_stencil, 46, 320, 86, won ? GREEN : level ? CREAM : with_alpha(RED, 1.0f),
-         won ? "VICTORY" : level ? "LEVEL" : "DEFEAT", CENTER, 2.0f);
     char line[128];
-    snprintf(line, sizeof(line), "RANKED %s  -  SET %d-%d", netranked_mode_title(mode), me ? me->set_wins : 0, opp ? opp->set_wins : 0);
-    text(dl, f, g_title, 15, 320, 142, ORANGE, line, CENTER, 1.0f);
+    page_title(dl, f, "SET OVER");
+    dl->AddLine(f.p(50, 60), f.p(150, 60), RED, 2.5f * f.s());
+
+    // the left panel: the result, the set, the opponent
+    glass(dl, f, 20, 96, 158, 150, 10, IM_COL32(10, 9, 11, 255), 0.72f);
+    text(dl, f, g_stencil, 30, 32, 104, won ? GREEN : level ? CREAM : with_alpha(RED, 1.0f), won ? "VICTORY" : level ? "LEVEL" : "DEFEAT",
+         LEFT, 1.6f);
+    snprintf(line, sizeof(line), "RANKED %s, SET %d-%d", netranked_mode_title(mode), me ? me->set_wins : 0, opp ? opp->set_wins : 0);
+    text(dl, f, g_title, fit_size(f, g_title, 12, line, 140), 32, 140, ORANGE, line, LEFT, 0.8f);
+    text(dl, f, g_title, 8.5f, 32, 162, GREY, "OPPONENT", LEFT, 0.5f);
+    if (R.opp_name[0]) {
+        std::string oname = upper(R.opp_name);
+        text(dl, f, g_title, fit_size(f, g_title, 14, oname.c_str(), 140), 32, 173, CREAM, oname.c_str(), LEFT, 0.8f);
+    }
+    if (opp) {
+        char olabel[48];
+        netranked_player_label(opp, 5, olabel, sizeof(olabel));
+        bool oplacing = opp->division == NETRANK_PLACEMENT || opp->placements > 0;
+        int otier = netranked_tier_of(oplacing ? 0 : opp->division);
+        if (!oplacing) emblem_small(dl, f, 39, 199, 15, otier);
+        text(dl, f, g_title, 11, oplacing ? 32.0f : 50.0f, 193, oplacing ? GREY : tier_colour(otier), upper(olabel).c_str(), LEFT, 0.7f);
+        snprintf(line, sizeof(line), "RATING %d", opp->rating);
+        text(dl, f, g_title, 10, 32, 214, GREY, line, LEFT, 0.6f);
+    }
+
     if (!rated) {
         float dots = (float)(t % 1200) / 1200.0f;
         text(dl, f, g_hand, 18, 320, 200, CREAM, t - R.results_since < 60000 ? "UPDATING YOUR RATING..." : "YOUR RATING UPDATES SOON",
              CENTER, 1.0f);
-        rect(dl, f, 220 + 160 * dots, 232, 40, 4, ORANGE, 2);
-        text(dl, f, g_title, 11, 320, 248, GREY, "The set counts once both games' results are in.", CENTER, 0.8f);
+        rect(dl, f, 260 + 80 * dots, 232, 40, 4, ORANGE, 2);
+        text(dl, f, g_title, 11, 320, 248, GREY, "The set counts once both games' results are in.", CENTER, 0.8f, 240);
     } else {
         int delta = a.rating - (b.valid ? b.rating : 1500);
         bool placing = a.placements_left > 0;
+        int tier = netranked_tier_of(a.division);
+        bool promoted = b.valid && b.placements_left == 0 && a.division > b.division;
+        bool demoted = b.valid && b.placements_left == 0 && a.division < b.division;
+        bool placed = b.valid && b.placements_left > 0 && !placing;
+        ImU32 tc = tier_colour(tier);
         if (placing) {
+            emblem_fallback(dl, f, 320, 160, 46, 0, 0.25f);
+            text(dl, f, g_stencil, 40, 320, 140, with_alpha(CREAM, 0.9f), "?", CENTER, 1.0f);
             snprintf(line, sizeof(line), "PLACEMENT %d / %d", a.placements_of - a.placements_left, a.placements_of);
-            text(dl, f, g_stencil, 28, 320, 176, CREAM, line, CENTER, 1.6f);
-            float w = 300, x = 320 - w / 2;
+            text(dl, f, g_stencil, 26, 320, 222, CREAM, line, CENTER, 1.6f);
+            float w = 220, x = 320 - w / 2;
             for (int i = 0; i < a.placements_of && a.placements_of <= 10; i++) {
                 float cw = (w - (a.placements_of - 1) * 6) / a.placements_of;
-                rect(dl, f, x + i * (cw + 6), 218, cw, 10, i < a.placements_of - a.placements_left ? ORANGE : IM_COL32(255, 255, 255, 30), 4);
+                rect(dl, f, x + i * (cw + 6), 260, cw, 10, i < a.placements_of - a.placements_left ? ORANGE : IM_COL32(255, 255, 255, 30), 4);
             }
-            text(dl, f, g_title, 12, 320, 238, GREY, "Your rank shows after the placement sets.", CENTER, 0.8f);
+            text(dl, f, g_title, 11, 320, 280, GREY, "Your emblem shows after the placement sets.", CENTER, 0.8f);
         } else {
-            int tier = netranked_tier_of(a.division);
-            bool promoted = b.valid && b.placements_left == 0 && a.division > b.division;
-            bool demoted = b.valid && b.placements_left == 0 && a.division < b.division;
-            bool placed = b.valid && b.placements_left > 0;
-            rank_plate(dl, f, 320, 172, 260, upper(a.label).c_str(), tier, false);
+            if (promoted || placed) promo_rays(dl, f, 320, 160, 150, tc, 1.0f);
             if (promoted || placed || demoted) {
                 const char *what = promoted ? "PROMOTED!" : placed ? "PLACED!" : "DEMOTED";
-                text(dl, f, g_hand, 20, 320, 194, promoted || placed ? GOLD : RED, what, CENTER, 1.0f);
+                ImU32 hc = promoted || placed ? IM_COL32(255, 214, 90, 255) : with_alpha(RED, 1.0f);
+                for (int g = 3; g >= 1; g--)
+                    text(dl, f, g_hand, 44, 320, 46 - g * 0.5f, with_alpha(hc, 0.10f), what, CENTER, (float)g * 2.0f);
+                text(dl, f, g_hand, 44, 320, 44, hc, what, CENTER, 1.6f);
             }
-            snprintf(line, sizeof(line), "%d", a.rating);
-            text(dl, f, g_title, 34, 300, 214, CREAM, line, RIGHT, 1.6f);
-            snprintf(line, sizeof(line), "%+d", delta);
-            text(dl, f, g_title, 26, 312, 220, delta >= 0 ? GREEN : with_alpha(RED, 1.0f), line, LEFT, 1.4f);
-            division_bar(dl, f, 170, 262, 300, a.rating, a.division, tier_colour(tier));
-            if (a.division < NETRANK_DIVISIONS - 1) {
+            EmblemOpts eo;
+            eo.fresh = promoted || placed;
+            eo.lost = demoted;
+            eo.rating = a.rating;
+            eo.top = tier >= 7 && a.place > 0 && a.place <= 10 ? a.place : 0;
+            eo.glow = promoted || placed;
+            emblem_big(dl, f, 320 - 70, 96, 140, tier, a.division, eo);
+            std::string name = division_label(a.division);
+            text(dl, f, g_stencil, 30, 320, 236, CREAM, name.c_str(), CENTER, 1.6f);
+            if ((promoted || demoted) && b.valid) {
+                std::string from = division_label(b.division), to = name;
+                float fw = text_width(f, g_title, 12, from.c_str()), tw = text_width(f, g_title, 12, to.c_str());
+                float total = 16 + fw + 30 + 16 + tw, x = 320 - total / 2;
+                emblem_small(dl, f, x + 6, 280, 13, netranked_tier_of(b.division), 0.9f);
+                text(dl, f, g_title, 12, x + 16, 273, GREY, from.c_str(), LEFT, 0.6f);
+                x += 16 + fw + 4;
+                text(dl, f, g_title, 13, x + 11, 272, demoted ? with_alpha(RED, 1.0f) : ORANGE, "->", CENTER, 0.6f);
+                x += 26;
+                emblem_small(dl, f, x + 6, 280, 13, tier);
+                text(dl, f, g_title, 12, x + 16, 273, tc, to.c_str(), LEFT, 0.6f);
+            }
+            // the tier's bar: its three divisions (Legend: the rating over 2100)
+            float bx = 200, bw = 240, by = 296;
+            int first = tier * 3, cur = a.division;
+            if (tier < 7) {
+                for (int d = 0; d < 3; d++) {
+                    float sx = bx + d * (bw / 3) + (d ? 2 : 0), sw = bw / 3 - (d ? 2 : 0);
+                    rect(dl, f, sx, by, sw, 9, IM_COL32(255, 255, 255, 26), 4);
+                    float fill = first + d < cur ? 1.0f : first + d == cur ? netranked_division_percent(a.rating, cur) / 100.0f : 0.0f;
+                    if (fill > 0) rect(dl, f, sx, by, std::max(6.0f, sw * fill), 9, tc, 4);
+                    char lab[24];
+                    snprintf(lab, sizeof(lab), "%d %s", netranked_division_min(first + d) < 0 ? 0 : netranked_division_min(first + d),
+                             d == 0 ? "III" : d == 1 ? "II" : "I");
+                    if (first + d == 0) snprintf(lab, sizeof(lab), "III");
+                    text(dl, f, g_title, 8, sx, by + 12, first + d == cur ? CREAM : GREY, lab, LEFT, 0.5f);
+                }
+                snprintf(line, sizeof(line), "%d %s", netranked_division_min(first + 3), k_tier_short[tier + 1]);
+                text(dl, f, g_title, 8, bx + bw, by + 12, tier_colour(tier + 1), line, RIGHT, 0.5f);
                 snprintf(line, sizeof(line), "%d TO %s", a.to_next, division_label(a.division + 1).c_str());
-                text(dl, f, g_title, 11, 470, 276, GREY, line, RIGHT, 0.8f);
+                text(dl, f, g_title, 13, bx, by + 25, CREAM, line, LEFT, 0.8f);
+                text(dl, f, g_body, 9, bx + bw, by + 28, GREY, "Points per division: 50", RIGHT, 0);
+            } else {
+                rect(dl, f, bx, by, bw, 9, tc, 4);
+                text(dl, f, g_title, 11, 320, by + 14, CREAM, eo.top ? "TOP 10 OF NEW YORK" : "2100 AND UP: EVERY LEGEND", CENTER, 0.6f);
+            }
+            // the cards: the promotion's shield, the season's floor
+            int fl = floor_tier_of(tier);
+            bool shield = promoted || placed, floor_new = fl >= 0 && (promoted || placed) && (!b.valid || netranked_tier_of(b.division) < fl ||
+                                                                                          b.placements_left > 0);
+            float cy = 348, cw = 168;
+            int cards = (shield ? 1 : 0) + (floor_new ? 1 : 0);
+            float cx = 320 - (cards * cw + (cards - 1) * 8) / 2;
+            if (shield) {
+                results_card(dl, f, cx, cy, cw, 0, "PROMOTION SHIELD", "No demotion for the next 3 sets");
+                cx += cw + 8;
+            }
+            if (floor_new) {
+                snprintf(line, sizeof(line), "You stay %s until the season ends", title_case(k_tier_short[fl]).c_str());
+                results_card(dl, f, cx, cy, cw, 1, "SEASON FLOOR", line);
+            }
+            if (!shield && (a.hint == NETRANK_HINT_PROMOTION || a.hint == NETRANK_HINT_DEMOTION)) {
+                const char *h = a.hint == NETRANK_HINT_PROMOTION ? "NEXT: PROMOTION SET" : "NEXT: DEMOTION SET";
+                float w = text_width(f, g_title, 13, h) + 24;
+                rect(dl, f, 320 - w / 2, 352, w, 22, a.hint == NETRANK_HINT_PROMOTION ? IM_COL32(120, 90, 10, 230) : IM_COL32(120, 12, 26, 230), 6);
+                text(dl, f, g_title, 13, 320, 356, WHITE, h, CENTER, 1.0f);
             }
         }
-        if (a.hint == NETRANK_HINT_PROMOTION || a.hint == NETRANK_HINT_DEMOTION) {
-            const char *h = a.hint == NETRANK_HINT_PROMOTION ? "NEXT: PROMOTION SET" : "NEXT: DEMOTION SET";
-            float w = text_width(f, g_title, 13, h) + 24;
-            rect(dl, f, 320 - w / 2, 300, w, 22, a.hint == NETRANK_HINT_PROMOTION ? IM_COL32(120, 90, 10, 230) : IM_COL32(120, 12, 26, 230), 6);
-            text(dl, f, g_title, 13, 320, 304, WHITE, h, CENTER, 1.0f);
+        // the right panel: the rating and the season's numbers
+        glass(dl, f, 462, 96, 158, 180, 10, IM_COL32(10, 9, 11, 255), 0.72f);
+        text(dl, f, g_title, 9, 474, 104, GREY, "RATING", LEFT, 0.5f);
+        snprintf(line, sizeof(line), "%d", a.rating);
+        text(dl, f, g_title, 36, 474, 114, CREAM, line, LEFT, 1.6f);
+        float rw = text_width(f, g_title, 36, line);
+        snprintf(line, sizeof(line), "%+d", delta);
+        text(dl, f, g_title, 18, 480 + rw, 130, delta >= 0 ? GREEN : with_alpha(RED, 1.0f), line, LEFT, 1.0f);
+        if (b.valid) {
+            snprintf(line, sizeof(line), "%s from %d", delta >= 0 ? "Up" : "Down", b.rating);
+            text(dl, f, g_body, 9.5f, 474, 158, GREY, line, LEFT, 0);
         }
-        snprintf(line, sizeof(line), "SETS %d W  %d L   PEAK %d", a.set_wins, a.set_losses, a.peak);
-        text(dl, f, g_title, 12, 320, 340, GREY, line, CENTER, 0.8f);
+        float ry = 176;
+        auto row = [&](const char *k, const char *v, ImU32 col) {
+            dl->AddLine(f.p(474, ry - 3), f.p(608, ry - 3), IM_COL32(255, 255, 255, 22), 1.0f);
+            text(dl, f, g_body, 9.5f, 474, ry + 1, CREAM, k, LEFT, 0);
+            text(dl, f, g_title, 12, 608, ry - 1, col, v, RIGHT, 0.6f);
+            ry += 24;
+        };
+        snprintf(line, sizeof(line), "%d L", a.set_losses);
+        row("Sets", line, IM_COL32(255, 107, 126, 255));
+        {
+            char w2[16];
+            snprintf(w2, sizeof(w2), "%d W", a.set_wins);
+            text(dl, f, g_title, 12, 608 - text_width(f, g_title, 12, line) - 8, ry - 25, GREEN, w2, RIGHT, 0.6f);
+        }
+        bool new_peak = b.valid && a.peak > b.peak;
+        snprintf(line, sizeof(line), "%d", a.peak);
+        row("Peak", line, CREAM);
+        if (new_peak) {
+            float pw = text_width(f, g_title, 12, line);
+            rect(dl, f, 608 - pw - 46, ry - 24, 40, 12, GOLD, 2);
+            text(dl, f, g_title, 7.5f, 608 - pw - 26, ry - 23, BLACK, "NEW PEAK", CENTER, 0);
+        }
+        if (a.place > 0) snprintf(line, sizeof(line), "#%d", a.place);
+        else snprintf(line, sizeof(line), "-");
+        std::string ladder = title_case(netranked_mode_title(mode)) + " ladder";
+        row(ladder.c_str(), line, CREAM);
+        int fl = placing ? -1 : floor_tier_of(netranked_tier_of(a.division));
+        std::string fl_name = fl >= 0 ? title_case(k_tier_short[fl]) : std::string("-");
+        row("Season floor", fl_name.c_str(), fl >= 0 ? tier_colour(fl) : GREY);
     }
+    preseason_strip(dl, f, 320, 394, 420);
     float hx = 54;
     // A (search again) only once the rating shows, and 3 s after: the A pressed through the game's
     // own results screens must not skip this one
     static unsigned long long rated_at;
     if (!rated) rated_at = 0;
     else if (!rated_at) rated_at = t;
-    bool take_a = gallery_on() || (rated && t - rated_at > 3000);
-    if (take_a) hx += hint(dl, f, hx, 392, "a", "SEARCH AGAIN");
-    hint(dl, f, hx, 392, "b", "BACK");
+    // (a scripted ranked test keeps pressing A through the fight's screens: its results stay up for the capture)
+    static const bool test_set = getenv("RECOMP_TEST_RANKED_MODES") != nullptr;
+    bool take_a = gallery_on() || (rated && t - rated_at > 3000 && !test_set);
+    bool rewards = rewards_shown();
+    if (take_a) hx += hint(dl, f, hx, 420, "a", "SEARCH AGAIN");
+    if (rewards) hx += hint(dl, f, hx, 420, "y", "SEASON REWARDS");
+    hint(dl, f, hx, 420, "b", "BACK");
     if (pad.a && take_a) open_ranked_modes();
+    else if (pad.y && rewards) open_season_rewards(mode);
     else if (pad.b) S.page = HUB;
 }
 
@@ -556,6 +824,25 @@ void ranked_tick(const NetRoom &r)
     else if (mv < 0) say("The set's server could not be reached. Search again.", 6000);
     NetRankInfo ri;
     if (!ranked_room(r, &ri)) return;
+    // a set entered without this PC's search (a scripted test's queue): its ranks before it, from the stats
+    // text read at the hub
+    for (int i = 0; ri.count >= 2 && i < ri.count; i++)  // the opponent's rank, in case it leaves first
+        if (ri.p[i].slot != r.you) { R.last_opp = ri.p[i]; R.have_last_opp = true; }
+    if (ri.winner == NETRANK_SET_RUNNING) {          // the opponent's name, for the results
+        for (int i = 0; i < r.player_count; i++)
+            if (r.players[i].slot != r.you && r.players[i].slot != NETPLAY_SLOT_SPECTATOR)
+                snprintf(R.opp_name, sizeof(R.opp_name), "%s", r.players[i].name);
+    }
+    if (!R.have_before && ri.winner == NETRANK_SET_RUNNING && strcmp(R.before_room, r.code)) {
+        read_ranks(R.before);
+        if (!R.before[ri.mode].valid) {     // not asked yet: ask, read again next frame
+            static unsigned long long asked;
+            if (!stats_busy() && GetTickCount64() - asked > 3000) { asked = GetTickCount64(); account_fetch_stats_page(0); }
+        } else {
+            R.have_before = true;
+            snprintf(R.before_room, sizeof(R.before_room), "%s", r.code);
+        }
+    }
     if (ri.winner != NETRANK_SET_RUNNING && r.phase == 0 && !(R.results_up && !strcmp(R.set_room, r.code)))
         open_ranked_results(r, ri);
 }
@@ -567,43 +854,98 @@ void draw_ranked_stats(ImDrawList *dl, const Frame &f, int mode)
     NetModeRank ranks[NETRANK_MODES];
     read_ranks(ranks);
     const NetModeRank &r = ranks[mode];
-    glass(dl, f, 34, 78, 572, 328);
-    text(dl, f, g_stencil, 30, 52, 88, CREAM, (std::string("RANKED ") + netranked_mode_title(mode)).c_str(), LEFT, 1.6f);
+    // the left panel (as the "Season rewards" design's): the mode, the emblem, the rank
+    glass(dl, f, 24, 80, 196, 326, 10, IM_COL32(10, 9, 11, 255), 0.72f);
+    text(dl, f, g_title, 12, 122, 88, ORANGE, (std::string("RANKED ") + netranked_mode_title(mode)).c_str(), CENTER, 0.8f);
     if (!r.valid) {
-        text(dl, f, g_title, 18, 320, 190, WHITE, "NOT PLAYED THIS SEASON", CENTER, 1.2f);
-        text(dl, f, g_title, 12, 320, 220, GREY, "Five placement sets show your rank.", CENTER, 0.8f);
+        emblem_fallback(dl, f, 122, 170, 46, 0, 0.25f);
+        text(dl, f, g_stencil, 40, 122, 150, with_alpha(CREAM, 0.9f), "?", CENTER, 1.0f);
+        text(dl, f, g_title, 15, 122, 236, WHITE, "NOT PLAYED THIS SEASON", CENTER, 1.0f, 180);
+        text(dl, f, g_title, 11, 122, 276, GREY, "Five placement sets show your rank.", CENTER, 0.8f, 170);
+        glass(dl, f, 232, 80, 384, 326, 10);
+        text(dl, f, g_title, 13, 424, 230, GREY, "Your sets, peak and ladder place show here once you play.", CENTER, 0.8f, 300);
+        preseason_strip(dl, f, 424, 346, 370, "A test week: bugs may happen, and every rank resets when Season 1 starts.");
         return;
     }
     char num[64];
     bool placing = r.placements_left > 0;
     int tier = netranked_tier_of(r.division);
-    rank_plate(dl, f, 180, 140, 260, upper(r.label).c_str(), tier, placing);
-    snprintf(num, sizeof(num), "%d", r.rating);
-    big_number(dl, f, 180, 170, num, r.provisional ? "RATING (PROVISIONAL)" : "RATING", CREAM);
+    bool legend = r.division >= NETRANK_DIVISIONS - 1;
     if (placing) {
+        emblem_fallback(dl, f, 122, 170, 46, 0, 0.25f);
+        text(dl, f, g_stencil, 40, 122, 150, with_alpha(CREAM, 0.9f), "?", CENTER, 1.0f);
+        text(dl, f, g_stencil, 22, 122, 236, CREAM, upper(r.label).c_str(), CENTER, 1.2f, 190);
         snprintf(num, sizeof(num), "%d OF %d PLACEMENT SETS PLAYED", r.placements_of - r.placements_left, r.placements_of);
-        text(dl, f, g_title, 12, 180, 236, GREY, num, CENTER, 0.8f);
+        text(dl, f, g_title, 10, 122, 266, GREY, num, CENTER, 0.6f);
     } else {
-        division_bar(dl, f, 60, 236, 240, r.rating, r.division, tier_colour(tier));
+        EmblemOpts eo;
+        eo.rating = r.rating;
+        eo.top = legend && r.place > 0 && r.place <= 10 ? r.place : 0;
+        emblem_big(dl, f, 122 - 62, 104, 124, tier, r.division, eo);
+        std::string lab = upper(r.label);
+        text(dl, f, g_stencil, fit_size(f, g_stencil, 22, lab.c_str(), 186), 122, 230, CREAM, lab.c_str(), CENTER, 1.2f);
+        text(dl, f, g_body, 9.5f, 122, 256, GREY, r.provisional ? "Your rank this season (provisional)" : "Your rank this season",
+             CENTER, 0);
+    }
+    float ry = 282;
+    auto row = [&](const char *k, const char *v, ImU32 col) {
+        dl->AddLine(f.p(36, ry - 4), f.p(208, ry - 4), IM_COL32(255, 255, 255, 22), 1.0f);
+        text(dl, f, g_body, 9.5f, 36, ry, CREAM, k, LEFT, 0);
+        text(dl, f, g_title, 12, 208, ry - 2, col, v, RIGHT, 0.6f);
+        ry += 22;
+    };
+    snprintf(num, sizeof(num), "%d", r.rating);
+    row(r.provisional ? "Rating (provisional)" : "Rating", num, CREAM);
+    if (r.peak_rank[0]) snprintf(num, sizeof(num), "%d, %s", r.peak, title_case(r.peak_rank).c_str());
+    else snprintf(num, sizeof(num), "%d", r.peak);
+    row("Peak", num, CREAM);
+    if (r.place > 0 && r.of > 0) snprintf(num, sizeof(num), "#%d of %d", r.place, r.of);
+    else snprintf(num, sizeof(num), "-");
+    std::string ladder = title_case(netranked_mode_title(mode)) + " ladder";
+    row(ladder.c_str(), num, CREAM);
+    snprintf(num, sizeof(num), "%d W  %d L", r.set_wins, r.set_losses);
+    row("Sets", num, GREEN);
+    snprintf(num, sizeof(num), "Rating deviation %d", r.deviation);
+    text(dl, f, g_body, 8.5f, 36, 388, GREY, num, LEFT, 0);
+
+    // the right side: the division bar, the next set, the record
+    glass(dl, f, 232, 80, 384, 326, 10);
+    if (!placing) {
+        text(dl, f, g_title, 9, 248, 92, GREY, legend ? "DEF JAM LEGEND" : "TO THE NEXT DIVISION", LEFT, 0.5f);
+        division_bar(dl, f, 248, 108, 352, r.rating, r.division, tier_colour(tier));
         if (r.division < NETRANK_DIVISIONS - 1) {
             snprintf(num, sizeof(num), "%d TO %s", r.to_next, division_label(r.division + 1).c_str());
-            text(dl, f, g_title, 11, 300, 250, GREY, num, RIGHT, 0.8f);
+            text(dl, f, g_title, 13, 248, 122, CREAM, num, LEFT, 0.8f);
+        } else {
+            text(dl, f, g_title, 13, 248, 122, CREAM, r.place > 0 && r.place <= 10 ? "TOP 10 OF NEW YORK" : "2100 AND UP", LEFT, 0.8f);
+        }
+        int fl = floor_tier_of(tier);
+        if (fl >= 0) {
+            snprintf(num, sizeof(num), "Season floor: you stay %s until the season ends", title_case(k_tier_short[fl]).c_str());
+            text(dl, f, g_body, 9.5f, 600, 125, GOLD, num, RIGHT, 0);
         }
     }
     if (r.hint) {
         const char *h = r.hint == NETRANK_HINT_PROMOTION ? "NEXT SET: PROMOTION SET" : "NEXT SET: DEMOTION SET";
-        text(dl, f, g_hand, 15, 180, 272, r.hint == NETRANK_HINT_PROMOTION ? GOLD : RED, h, CENTER, 0.9f);
+        text(dl, f, g_hand, 15, 424, 146, r.hint == NETRANK_HINT_PROMOTION ? GOLD : RED, h, CENTER, 0.9f);
     }
     snprintf(num, sizeof(num), "%d", r.set_wins);
-    big_number(dl, f, 400, 130, num, "SETS WON", GREEN);
+    big_number(dl, f, 300, 186, num, "SETS WON", GREEN);
     snprintf(num, sizeof(num), "%d", r.set_losses);
-    big_number(dl, f, 510, 130, num, "SETS LOST", IM_COL32(235, 90, 80, 255));
+    big_number(dl, f, 424, 186, num, "SETS LOST", IM_COL32(235, 90, 80, 255));
     snprintf(num, sizeof(num), "%d", r.peak);
-    big_number(dl, f, 400, 220, num, "PEAK", CREAM);
-    text(dl, f, g_title, 13, 510, 236, WHITE, r.peak_rank[0] ? upper(r.peak_rank).c_str() : "-", CENTER, 1.0f, 120);
-    text(dl, f, g_hand, 13, 510, 260, ORANGE, "PEAK RANK", CENTER, 1.0f);
-    snprintf(num, sizeof(num), "RATING DEVIATION %d", r.deviation);
-    text(dl, f, g_title, 11, 52, 380, GREY, num, LEFT, 0.8f);
+    big_number(dl, f, 548, 186, num, "PEAK", CREAM);
+    // every tier, the reached ones lit: where this rank sits on the ladder
+    for (int t = 0; t < 8; t++) {
+        float cx = 262 + t * 46;
+        bool reached = !placing && t <= tier;
+        emblem_small(dl, f, cx, 300, t == tier && !placing ? 38 : 30, t, reached ? 1.0f : 0.28f);
+        text(dl, f, g_title, 7.5f, cx, 322, reached ? tier_colour(t) : with_alpha(GREY, 0.6f), k_tier_short[t], CENTER, 0.4f);
+    }
+    SeasonInfo si = read_season();
+    if (si.valid && si.pre) preseason_strip(dl, f, 424, 346, 370, "No tier rewards this week: one set earns the Preseason Tester title.");
+    else if (rewards_shown()) text(dl, f, g_body, 9.5f, 424, 352, GREY,
+                                   "Finish the season at a tier to unlock its rewards: SEASON REWARDS tab.", CENTER, 0, 340);
 }
 
 // ---- Draft: the pick and ban (ranked phase 2b; the rules are netplay_draft_rules.c) ----
@@ -1018,6 +1360,11 @@ bool ranked_gallery(const std::string &p)
     // Ann's ranks: Classic Kingpin II 1872 (a promotion set next), Open placing 2/5
     G.stats += "ranked_classic=1872|92|16|0|5|0|28|14|6|Kingpin II|1903|Kingpin I|promotion\n"
                "ranked_open=1524|260|9|3|5|1|0|2|0|PLACEMENT 2/5|1524|Contender III|\n";
+    if (getenv("RECOMP_TEST_PRESEASON")) {      // build 52: the preseason's line on the ranked pages
+        char line[96];
+        snprintf(line, sizeof(line), "season=1|Preseason|1|%lld\n", (long long)time(nullptr) + 5 * 86400 + 12 * 3600 + 600);
+        G.stats += line;
+    }
     RG.queue.valid = 1;
     RG.queue.counts[NETRANK_OPEN] = 3; RG.queue.counts[NETRANK_CLASSIC] = 7; RG.queue.counts[NETRANK_DRAFT] = 0;
     RG.queue.mode = NETRANK_CLASSIC;
@@ -1049,7 +1396,7 @@ bool ranked_gallery(const std::string &p)
         snprintf(G.versus.room, sizeof(G.versus.room), "Ranked");
         G.versus.ms = 3000 + G.page_ms;     // settled: the cards in, the ranks on them
         ranked_sample_rank(RG.rank, 2, 1, 0, 1, NETRANK_SET_RUNNING);
-    } else if (p == "ranked-results" || p == "ranked-results-placement") {
+    } else if (p.compare(0, 14, "ranked-results") == 0) {
         S.page = RANKED_RESULTS;
         bool placing = p == "ranked-results-placement";
         ranked_sample_rank(R.set, 3, 2, 1, 0, 0);
@@ -1061,6 +1408,25 @@ bool ranked_gallery(const std::string &p)
         netranked_parse_line("1906|88|17|0|5|0|44|15|6|Kingpin I|1906|Kingpin I|", &RG.after[NETRANK_CLASSIC]);
         netranked_parse_line("1524|260|9|3|5|1|0|2|0|PLACEMENT 2/5|1524|Contender III|", &R.before[NETRANK_OPEN]);
         netranked_parse_line("1561|231|10|2|5|1|0|3|0|PLACEMENT 3/5|1561|Contender II|", &RG.after[NETRANK_OPEN]);
+        snprintf(R.opp_name, sizeof(R.opp_name), "Duke Marrone");
+        // build 52: the promotion (Kingpin III to II... the sample: Enforcer I to Kingpin III), a demotion,
+        // the last placement set, a Legend in the Top 10
+        netranked_parse_line("1772|92|14|0|5|0|28|14|6|Enforcer I|1790|Enforcer I||212|2310", &R.before[NETRANK_CLASSIC]);
+        netranked_parse_line("1806|88|15|0|5|0|44|15|6|Kingpin III|1806|Kingpin III||212|2310", &RG.after[NETRANK_CLASSIC]);
+        if (p == "ranked-results-demoted") {
+            R.set.winner = 1;
+            netranked_parse_line("1702|90|13|0|5|0|0|20|9|Enforcer II|1760|Enforcer I||380|2310", &R.before[NETRANK_CLASSIC]);
+            netranked_parse_line("1668|90|12|0|5|0|32|20|10|Enforcer III|1760|Enforcer I|demotion|402|2310",
+                                 &RG.after[NETRANK_CLASSIC]);
+        } else if (p == "ranked-results-placed") {
+            netranked_parse_line("1590|180|10|1|5|1|0|4|0|PLACEMENT 4/5|1590|Contender II|", &R.before[NETRANK_CLASSIC]);
+            netranked_parse_line("1626|150|10|0|5|0|24|5|0|Contender II|1626|Contender II||640|2310", &RG.after[NETRANK_CLASSIC]);
+        } else if (p == "ranked-results-legend") {
+            netranked_parse_line("2096|60|20|0|5|0|4|60|20|Don of the Bronx I|2096|Don of the Bronx I||14|2310",
+                                 &R.before[NETRANK_CLASSIC]);
+            netranked_parse_line("2131|58|21|0|5|0|0|61|20|Def Jam Legend (Top 10 of NY)|2131|Def Jam Legend||3|2310",
+                                 &RG.after[NETRANK_CLASSIC]);
+        }
         R.have_before = true;
     } else if (p == "stats-ranked" || p == "stats-ranked-draft") {
         S.page = STATS;

@@ -32,6 +32,7 @@ long long social_battle_ready(char *region, int size);
 #ifdef __cplusplus
 }
 
+#include <map>
 #include <string>
 #include <vector>
 
@@ -89,6 +90,38 @@ struct LadderRow {
     std::string tag, name, league, league_name;
 };
 
+/* Ranked rewards and the Locker (build 52; GET /api/social/looks, /api/social/locker). A look is how others see
+ * an account: its shown rank per ranked mode (NETRANK_* index; tier -1 none), the emblem it shows (mode -1 none,
+ * -2 the crew's crown; season 0 the current rank), the equipped name colour and avatar frame (a tier, -1 none;
+ * pulse: the Legend frame) and its title. Ranks and season rewards come only while ranked is on. */
+struct LookRank { int tier = -1, division = 0, rating = 0, top = 0; std::string label; };
+struct Look {
+    long long id = 0;
+    LookRank ranks[3];
+    int emblem_mode = -1, emblem_season = 0, emblem_tier = -1, emblem_division = 0, emblem_top = 0;
+    int color = -1, frame = -1;
+    bool pulse = false;
+    std::string title;
+};
+struct LockerItem {
+    std::string id, name, mode, title, role, how, label;
+    int season = 0, tier = -1, division = 0;
+    bool unlocked = false, finish = false, current = false;
+    bool k_color = false, k_frame = false, k_title = false, k_emblem = false, k_crew = false;
+};
+struct SeasonFinish {
+    std::string mode, peak_rank, next_rank;
+    int season = 0, tier = 0, division = 0, rating = 0, peak = 0, place = 0, of = 0, set_wins = 0, set_losses = 0, top = 0,
+        next_rating = 0;
+};
+struct Locker {
+    bool loaded = false, ranked = false;
+    int season = 0;
+    std::string color, frame, title, emblem;    /* the equipped item ids ("" none) */
+    std::vector<LockerItem> items;
+    std::vector<SeasonFinish> finishes;         /* newest season first */
+};
+
 struct Toast { int kind = 0; std::string title, text; long long dm_from = 0; unsigned long long at = 0; };
 enum { TOAST_DM = 1, TOAST_REQUEST, TOAST_FRIEND, TOAST_CREW, TOAST_NOTICE };
 
@@ -124,6 +157,8 @@ struct View {
     int ladder_total = 0;
     bool ladder_loaded = false;
     std::vector<std::string> gold_tags;     /* crews whose tag shows gold (level 5, the first reward) */
+    std::map<long long, Look> looks;            /* build 52: the looks asked for (look_want) */
+    Locker locker;                              /* build 52: this account's rewards (locker_load) */
     std::string note;              /* the last refusal from the service ("slow mode: ...") */
     unsigned long long note_at = 0;
 };
@@ -183,6 +218,16 @@ struct AvatarPixels { long long id = 0; bool ok = false; int w = 0, h = 0; std::
 void avatar_want(long long id);
 std::vector<AvatarPixels> avatar_take();
 void avatar_forget(long long id);
+
+/* Build 52: looks and the Locker. look_want asks for an account's look (batched, again after 5 minutes);
+ * locker_load (re)loads this account's rewards; equip wears an unlocked item in a slot ("color", "frame",
+ * "title", "emblem"; id "" takes it off) and reloads the locker and this account's look. */
+void look_want(long long id);
+void locker_load();
+void equip(const std::string &slot, const std::string &id);
+/* Tests and the gallery: put a look or a locker into the view as if the service had sent it. */
+void test_set_look(const Look &l);
+void test_set_locker(const Locker &l);
 
 /* The presence heartbeat works out the state from the lobby itself; the room's mode name comes from
  * the overlay (the names are read from the player's dump on the overlay's thread). */
