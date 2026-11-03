@@ -34,6 +34,7 @@ cite other development notes, logs and captures that are not published.
 - [Integrated launcher/menu RC](integrated-menu-launcher-rc-2026-10-23.md): combined candidate, hosted delivery and acceptance evidence.
 - [CachyOS setup compile failure, issue #83](issue83-cachyos-notes.md): C++20 UTF-8 paths and native regression checks
 
+- [One app for setup, launcher and updates, 2026-10-26](unified-app-design-2026-10-26.md): launcher out of the game, self-update, safe update reuse, AppImage, Add to Steam everywhere (D214)
 - [Launcher UI proposal, 2026-10-19](launcher-ui-proposal-2026-10-19.md): Home/Advanced organization and source review
 - [Launcher implementation and playtest, 2026-10-19](launcher-ui-implementation-2026-10-19.md): native UI, setup handoff and acceptance evidence
 - [Separate HD widescreen menu RC2](menu-ui-separate-release-candidate-2026-10-20.md): sparse pack, measured size, actual loader registration, native evidence and remaining acceptance.
