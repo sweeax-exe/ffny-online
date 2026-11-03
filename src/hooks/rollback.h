@@ -64,6 +64,7 @@ int rollback_setting_idle(void);
 extern uint32_t rollback_crash_va;          /* src/main.c: the guest address of the fault, before the callback */
 void rollback_crash_objects(void);          /* the registers' objects and their pages (crash reports) */
 void rollback_set_resim(int on);            /* netplay.c: steps are being run again */
+void rollback_keep_sound_globals_once(void); /* tests: the next re-run leaves the sound globals as it made them */
 const char *rollback_page_state(uint32_t addr);
 /* The crash report: the arena blocks the guest registers point into, with their last allocations and frees. */
 void rollback_arena_history(void);

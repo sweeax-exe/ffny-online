@@ -399,12 +399,14 @@ static struct {
     uint8_t used_mixed[MAXP][RING];     /* 1: the step read two different predictions (netplay_on_pad_read) */
     uint8_t step_runs[RING];            /* tests (RECOMP_NETPLAY_FINALLOG): times the step started, its pad reads */
     uint8_t step_reads[RING];
+    uint32_t step_upd[RING];            /* tests (FINALLOG): the update counter as the step started */
     uint32_t final_step;                /* every step up to this one ran on the real entries */
     uint32_t updates;                   /* game updates since the match's reference copy */
     uint32_t hash_at[RING], hash_tag[RING], hash_sent;
     uint32_t hash_parts[RING][HASH_PARTS];
     uint32_t hash_fields[RING][NETCHECK_SLOTS][NETCHECK_FIELDS];    /* the raw words the hash covers */
     uint32_t hash_gens[RING][NETCHECK_GENS], hash_crowd[RING];      /* steps a checksum goes out for */
+    uint32_t hash_weapons[RING];        /* tests (FINALLOG): the weapon table and the manager's slots as the step starts */
     uint32_t hash_split[RING][3];       /* the shared generator, the time scale word, the match generator */
     int rb_on, rb_ref_due, resim, predicting;
     int rb_fought;                      /* the phase word said "fighting" in this match */
@@ -4827,6 +4829,8 @@ static void versus_hold(void)
  * so the copies' files show the first step and the very fields where they parted (the checksum covers
  * six fields a fighter). Each record: u32 step, then the ranges' bytes in this order. */
 static uint32_t weapon_hash(void);      /* the weapon manager, below with its update */
+#define WEAPON_TABLE     0x003BE778u    /* the fight's weapon entries, 16 x 0xA4 (weapon-position-timing.md) */
+#define WEAPON_TABLE_END 0x003BF1B8u
 static unsigned g_weapon_waits;
 #define STEPLOG_RING 256
 static const uint32_t k_steplog_ranges[][2] = {
@@ -5156,7 +5160,18 @@ void netplay_on_step(void)
     }
     N.step_runs[k] = (uint8_t)(N.hash_tag[k] == s + 1 ? N.step_runs[k] + 1 : 1);
     N.step_reads[k] = 0;
+    N.step_upd[k] = N.updates;
     N.hash_at[k] = fighter_hash(N.hash_parts[k], N.hash_fields[k], N.hash_split[k]);   /* the state as this step starts */
+    {   /* the weapons (tests): FINALLOG prints them; RECOMP_NETPLAY_HASH_WEAPONS=1 also puts them in the checksum, so a
+         * weapon that lies elsewhere on one PC is seen when it parts, not when a fighter picks it up (match 97EDC0C9,
+         * 2026-11-03: the floor weapon's position differed long before fighter 2 walked to it, state 0x69) */
+        static int fold = -1;
+        uint32_t w = weapon_hash(), a;
+        for (a = WEAPON_TABLE; a < WEAPON_TABLE_END; a += 4) w = (w ^ MEM32(a)) * 16777619u;
+        N.hash_weapons[k] = w;
+        if (fold < 0) fold = getenv("RECOMP_NETPLAY_HASH_WEAPONS") && *getenv("RECOMP_NETPLAY_HASH_WEAPONS") == '1';
+        if (fold) N.hash_at[k] = (N.hash_at[k] ^ w) * 16777619u;
+    }
     {   /* the x87 control word the step starts with (its precision bits round every result): a
          * change is logged, at most 12 a match, to compare the PCs of a desynced match */
         static uint16_t last_cw;
@@ -5173,6 +5188,7 @@ void netplay_on_step(void)
          * the step and the field where the PCs of a desynced match part (the checksum goes out every 60) */
         static int steplog = -1;
         if (steplog < 0) steplog = getenv("RECOMP_NETPLAY_STEPLOG") != NULL;
+        if (steplog && N.resim) steplog_keep(s);   /* the ring holds each step's latest run, the one that becomes final */
         if (steplog && !N.resim) {
             static const uint32_t fields[] = { 0x30, 0x44, 0x48, 0x4C, 0x54, 0x350 };
             char line[400];
@@ -6079,6 +6095,7 @@ void netplay_on_update(void)
                 for (sl = 0; sl < 2; sl++)
                     for (fi = 0; fi < NETCHECK_FIELDS; fi++)
                         n += snprintf(line + n, sizeof(line) - (size_t)n, " %08X", N.hash_fields[k][sl][fi]);
+                n += snprintf(line + n, sizeof(line) - (size_t)n, " | w %08X u %u", N.hash_weapons[k], N.step_upd[k]);
                 fprintf(stderr, "%s\n", line);
             }
         }
@@ -6117,6 +6134,10 @@ void netplay_on_update(void)
                 for (k = 0; k < d; k++) first[k] = defjam_test_step_hash(t - d + k);
                 if (rollback_soak_diff_on()) rollback_soak_before();
                 if (wrong) {    /* what a wrong prediction leaves behind that the load does not take back */
+                    static int keep_sound = -1;
+                    if (keep_sound < 0)
+                        keep_sound = getenv("RECOMP_ROLLBACK_SOAK_WRONG") && !strcmp(getenv("RECOMP_ROLLBACK_SOAK_WRONG"), "keep-sound");
+                    if (keep_sound) rollback_keep_sound_globals_once();
                     s_soak_wrong = N.step + 1 - (uint32_t)d;
                     rollback_to(f0);
                     s_soak_wrong = 0;

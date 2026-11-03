@@ -981,11 +981,18 @@ void rollback_soak_carriers(long long step)
     }
 }
 
+/* Tests (RECOMP_ROLLBACK_SOAK_WRONG=keep-sound): the soak's pass on wrong buttons keeps what it did to the sound
+ * globals, as online, where the pass on a wrong prediction is the normal one (its sound plays, and the re-runs
+ * after it put the globals back to what it left). The second correct re-run then starts from them. */
+static int s_keep_sound_once;
+void rollback_keep_sound_globals_once(void) { s_keep_sound_once = 1; }
+
 void rollback_set_resim(int on)
 {
     unsigned k;
     size_t at;
     if (on && !s_resim) load_point();
+    if (!on && s_keep_sound_once && s_resim) { s_keep_sound_once = 0; s_resim = 0; arena_watch_set(0); return; }
     if (sound_globals_kept() && on != s_resim)
         for (k = 0, at = 0; k < sizeof(k_sound_globals) / sizeof(k_sound_globals[0]); at += k_sound_globals[k].hi - k_sound_globals[k].lo, k++) {
             if (on) memcpy(s_sound_globals + at, XBOX_PTR(k_sound_globals[k].lo), k_sound_globals[k].hi - k_sound_globals[k].lo);
