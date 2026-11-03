@@ -1165,9 +1165,30 @@ void draw_messages(ImDrawList *dl, const Frame &f, const ChatKeys &k, const NetR
         if (mouse_click(f, PX + 7, y, lw - 14, 32)) { sel = i; C.dm_with = c.with.id; social::open_thread(c.with.id); }
         y += 35;
     }
-    const char *policy = v.dms == "everyone" ? "Anyone can message you." : v.dms == "off" ? "Your messages are off." :
-                         "Only friends can message you.";
-    text(dl, f, g_body, 8, PX + 12, PY + PH - 34, IM_COL32(242, 230, 200, 128), policy, LEFT, 0, lw - 24);
+    // who may message you (stage 2c): LT/RT or a click change it; the service keeps it
+    {
+        static const char *const ids[3] = { "friends", "everyone", "off" };
+        static const char *const names[3] = { "FRIENDS", "EVERYONE", "NOBODY" };
+        int cur = v.dms == "everyone" ? 1 : v.dms == "off" ? 2 : 0;
+        float py = PY + PH - 44;
+        text(dl, f, g_title, 8, PX + 12, py, DIM, "MESSAGES FROM", LEFT, 0);
+        float cw = text_width(f, g_title, 9, names[cur]) + 26;
+        rect(dl, f, PX + 12, py + 12, cw, 16, IM_COL32(255, 255, 255, 20), 8);
+        text(dl, f, g_title, 9, PX + 18, py + 15, CREAM, "<", LEFT, 0);
+        text(dl, f, g_title, 9, PX + 12 + cw / 2, py + 15, GOLD_TEXT, names[cur], CENTER, 0);
+        text(dl, f, g_title, 9, PX + 6 + cw, py + 15, CREAM, ">", RIGHT, 0);
+        plate_hint(dl, f, PX + 18 + cw, py + 14, ps_icons() ? "L2/R2" : "LT/RT", "");
+        int next = -1;
+        if (k.lt) next = (cur + 2) % 3;
+        if (k.rt || mouse_click(f, PX + 12, py + 12, cw, 16)) next = (cur + 1) % 3;
+        if (next >= 0) {
+            social::set_dms(ids[next]);
+            fprintf(stderr, "[SOCIAL-UI] messages from: %s\n", ids[next]);
+        }
+        const char *policy = cur == 1 ? "Anyone can message you." : cur == 2 ? "Nobody can message you." :
+                             "Only friends can message you.";
+        text(dl, f, g_body, 7.5f, PX + 12, py + 31, IM_COL32(242, 230, 200, 110), policy, LEFT, 0, lw - 24);
+    }
     float rx = PX + lw, rw = PW - lw;
     if (!C.dm_with) {
         text(dl, f, g_body, 11, rx + rw / 2, PY + 150, DIM,
@@ -1922,6 +1943,7 @@ void chat_draw(ImDrawList *dl, const Frame &f, ImVec2 display)
         hx += hint(dl, f, hx, hy, "a", "OPEN");
         hx += hint(dl, f, hx, hy, "y", "KEYBOARD");
         if (C.dm_with) hx += hint(dl, f, hx, hy, "x", "BLOCK / REPORT");
+        hx += plate_hint(dl, f, hx, hy, ps_icons() ? "L2/R2" : "LT/RT", "WHO CAN MESSAGE YOU");
         hint(dl, f, hx, hy, "b", "CLOSE");
     } else if (C.tab == TAB_GLOBAL) {
         hx += plate_hint(dl, f, hx, hy, "ENTER", "TYPE");

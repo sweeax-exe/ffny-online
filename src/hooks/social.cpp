@@ -1099,6 +1099,20 @@ void report(long long id, const std::string &channel, long long msg, const std::
     });
 }
 
+void set_dms(const std::string &policy)
+{
+    {
+        std::lock_guard<std::mutex> lk(g_mu);
+        g_v.dms = policy == "friends" ? "" : policy;
+        changed();
+    }
+    queue([policy]() {
+        if (post("/api/social/settings", "{\"dms\":" + json_text(policy) + "}") / 100 == 2)
+            fprintf(stderr, "[SOCIAL] messages from: %s\n", policy.c_str());
+        load_friends();     // the service's own word on it (dms=)
+    });
+}
+
 void set_show_avatar(bool on)
 {
     long long me;
@@ -1226,6 +1240,7 @@ void crew_dismiss(long long) {}
 void reload() {}
 void block(long long, const std::string &, bool) {}
 void report(long long, const std::string &, long long, const std::string &, const std::vector<std::string> &) {}
+void set_dms(const std::string &) {}
 void set_show_avatar(bool) {}
 void avatar_want(long long) {}
 std::vector<AvatarPixels> avatar_take() { return {}; }

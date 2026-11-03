@@ -119,6 +119,7 @@ void reload();                      /* every list again */
 void block(long long id, const std::string &name, bool on);
 void report(long long id, const std::string &channel, long long msg, const std::string &text,
             const std::vector<std::string> &context);
+void set_dms(const std::string &policy);    /* "friends", "everyone", "off" */
 void set_show_avatar(bool on);
 /* Avatars (stage 2c): the account service's 64x64 copy of a player's Discord picture
  * (GET /api/avatar/N.png; the game never contacts Discord). avatar_want queues a download on a thread
