@@ -56,6 +56,7 @@ APPROVED_README_MEDIA = {
     # 2026-11-03, FFNY Online's owner approved these for the website (defjam.online): screenshots of the
     # online screens (social chat, friends, crews, crew battles, ranked, Locker) from the game's own frames
     # with test accounts, and the design previews (Turf War, ranks, tournaments), resized to 1600 px JPEG.
+    'website/media/og-preview.jpg': 'b7e7ddb31d32fc2e22091a22d037fc2057a36b0322151c616f1652037dda3944',   # the link preview (logo + two approved shots)
     'website/media/crew-battle.jpg': '83deacb294d8c5db80f8cc96970f7df6912dfdb91d9cc9bed06f43db61acdfda',
     'website/media/crew-ladder.jpg': '1fddea6be18e9c8938416a19750e2dee4ae648064856c662d6aa58bc7869903d',
     'website/media/crew-over.jpg': 'ebd8c20c2fa8685f17aa128e5a4080e916113049272345776e2bb80ffe0f55af',
