@@ -16,6 +16,8 @@ the exit code is 1 on any failure.
            a local account service with -social; --off: its switch off, one copy, nothing new may show)
     python tools/defjam-mcp/dj.py scenario roomchat [--out logs/social-2b]   (room chat through the relay: two
            copies and a spectator talk in the room; the spectator's line during the fight shows on the fighters)
+    python tools/defjam-mcp/dj.py scenario crewbattle [--out logs/crew-battles]   (crew battles: a local account
+           service and relay, four copies in two crews of two; challenge, accept, the battle, rating and ladder)
     python tools/defjam-mcp/dj.py digest <log> [<log> ...] [--max 60]     (a run log, or logs/bug-reports/*/log.txt)
     python tools/defjam-mcp/dj.py analyze <copy logs...> [--matches N]   (an online result from existing logs)
     python tools/defjam-mcp/dj.py lock status | run -- <command...>      (any other test under the lock)
@@ -72,6 +74,9 @@ def cmd_scenario(a):
     elif a.kind == "roomchat":
         r = scenarios.room_chat(timeout=a.timeout, relay_port=a.relay_port, extra_env=env, out_dir=a.out,
                                 rollback=a.rollback, **common)
+    elif a.kind == "crewbattle":
+        r = scenarios.crew_battle(timeout=a.timeout, relay_port=a.relay_port, extra_env=env, out_dir=a.out,
+                                  fast_ko=a.fast_ko, **common)
     elif a.kind == "social":
         r = scenarios.social(timeout=a.timeout or 300, relay_port=a.relay_port, off=a.off, extra_env=env,
                              out_dir=a.out, **common)
@@ -164,9 +169,10 @@ def main(argv=None):
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     sc = sub.add_parser("scenario")
-    sc.add_argument("kind", choices=["online", "offline", "boot", "gallery", "social", "roomchat"])
+    sc.add_argument("kind", choices=["online", "offline", "boot", "gallery", "social", "roomchat",
+                                              "crewbattle"])
     sc.add_argument("--off", action="store_true", help="social: the service's switch off, no RECOMP_SOCIAL (nothing may show)")
-    sc.add_argument("--out", help="social, roomchat: also write the chosen captures (PNG) to this folder")
+    sc.add_argument("--out", help="social, roomchat, crewbattle: also write the chosen captures (PNG) to this folder")
     sc.add_argument("--matches", type=int, default=3)
     sc.add_argument("--mode", default="1v1", choices=sorted(scenarios.MODES))
     sc.add_argument("--players", type=int, default=2)

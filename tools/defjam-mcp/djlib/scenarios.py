@@ -479,6 +479,176 @@ def room_chat(timeout=None, relay_port=27900, lock_timeout=None, log=None, keep_
     return r
 
 
+# ---- crew battles (social stage 3) ----------------------------------------------------------------
+
+# Copies 0 and 1 are Bronx Kings [BXK] (copy 0 the Boss), copies 2 and 3 Red Hook Riders [RHR] (copy 2 the
+# Boss). Copy 0 challenges RHR to a 2 v 2 (a test-only format, -social-test-battles) once RHR has two
+# members; copy 2 accepts. Every copy then joins the battle (RECOMP_NETPLAY=crew: the room's CREWJOIN once the
+# social features show the battle accepted) and its fights run as on the hill, the knockout winner the lower
+# room slot. Each copy logs its state when the battle is over and loads the ladder.
+CREW_NET = [
+    "wait:3;crew:Bronx Kings:BXK;wait:4;crewinvite:Copy 1;wait:8;challenge:RHR:2;log;battledone;wait:4;log",
+    "crewjoin;log;battledone;wait:4;log",
+    "wait:3;crew:Red Hook Riders:RHR;wait:4;crewinvite:Copy 3;battleaccept;log;battledone;wait:4;log",
+    "crewjoin;log;battledone;wait:4;log",
+]
+# the chat window's crew pages on copy 0 (challenger) and copy 2 (challenged): the crew page with the open
+# battle, CHALLENGE A CREW's format picker, the ladder; closed again before the battle's room opens
+CREW_UI = {
+    0: "8:chat=crew;22:crewpicker=RHR;26:crewladder;30:crewpage;34:close",
+    2: "8:chat=crew;30:crewpage;34:crewladder;38:close",
+}
+
+
+def crew_battle(timeout=None, relay_port=27900, lock_timeout=None, log=None, keep_roots=False, extra_env=None,
+                out_dir=None, fast_ko=600):
+    """Crew battles end to end (social stage 3): a local account service (-social -social-test-battles) and a
+    relay that asks it (-accounts-internal), four copies in two crews of two: crews made and joined
+    (RECOMP_TEST_SOCIAL), the challenge and its acceptance, every copy into the battle's room (CREWJOIN), the
+    fights (knockout at a step, the lower room slot wins) until a crew has nobody left; then the relay's
+    result, the rating, W/L, XP and the ladder must show on the service and in the games. out_dir: the chosen
+    captures (the crew page, the challenge picker, the ladder, the battle screen, the result) as PNG."""
+    t0 = time.time()
+    n = 4
+    timeout = timeout or 1200
+    s = copies.Session("crewbattle", lock_timeout=lock_timeout, log=log, keep_roots=keep_roots).open()
+    result = {"scenario": "crewbattle", "ok": False}
+    shots = {}
+    try:
+        h = harness()
+        acc_port = relay_port + 100
+        names = ["Copy %d" % i for i in range(n)]
+        tokens = s.accounts(acc_port, names, extra=["-social", "-social-test-battles"])
+        s.relay(relay_port, extra=["-accounts-internal", "http://127.0.0.1:%d" % (acc_port + 1)])
+        watch = WATCH + ["[SOCIAL-TEST] step", "[SOCIAL] ready", "[NETPLAY] crew battle", "[SOCIAL] crew battle"]
+        for i in range(n):
+            shots[i] = os.path.join(s.dir, "shots%d" % i)
+            os.makedirs(shots[i], exist_ok=True)
+            p2 = i >= 2     # the challenged crew comes in later: mostly the higher room slots, on the right
+            env = dict(VIRTUAL_PAD_ENV)
+            env.update({
+                "RECOMP_INPUT_VIRTUAL_PADS": "1",
+                "RECOMP_NETPLAY": "crew", "RECOMP_NETPLAY_SERVER": "127.0.0.1:%d" % relay_port,
+                "RECOMP_NETPLAY_SERVER_EU": "127.0.0.1:%d" % relay_port,
+                "RECOMP_NETPLAY_FIGHTER": str([55, 22, 9, 31][i]),
+                "RECOMP_NETPLAY_NAME": names[i],
+                "RECOMP_ROLLBACK": "off",
+                "RECOMP_SCRIPT_ANCHOR": TITLE_ANCHOR,
+                "RECOMP_PAD_SCRIPT": h.build_pad_script(["getscreeninfo(intmain/mainmenu=lt@0.5"], online_tail(2, 2, p2)),
+                "RECOMP_ACCOUNT_SERVER": "127.0.0.1:%d" % acc_port,
+                "RECOMP_ACCOUNT_TEST_TOKEN": tokens[names[i]],
+                "RECOMP_SOCIAL": "on",
+                "RECOMP_TEST_OPEN_ONLINE": "1",     # the online screens (the chat window, the battle screen)
+                "RECOMP_TEST_SOCIAL": CREW_NET[i],
+                "RECOMP_OVERLAY_SHOT_DIR": shots[i], "RECOMP_OVERLAY_SHOT_MS": "1500",
+            })
+            if i in CREW_UI:
+                env["RECOMP_TEST_SOCIAL_UI"] = CREW_UI[i]
+            if fast_ko:
+                env["RECOMP_TEST_KO_STEP"] = "%d,0" % int(fast_ko)
+            env.update(extra_env or {})
+            s.launch(i, env=env, core=2 + 2 * i, watch=watch)
+            time.sleep(3)
+        deadline = time.time() + timeout
+        stop = None
+        while time.time() < deadline:
+            s.poll()
+            cs = list(s.copies.values())
+            if any(c.watch.count("[CRASH]") or c.watch.count("[WATCHDOG]") for c in cs) or any(not c.alive() for c in cs):
+                stop = "a copy crashed or exited"
+                break
+            if any(c.watch.count("[NETPLAY] desync in") or c.watch.count("[NETPLAY] gave up") for c in cs):
+                time.sleep(5)
+                stop = "desync or gave up"
+                break
+            # each copy's last step (the log after battledone) written
+            if all(c.watch.count("[SOCIAL-TEST] step") >= len(CREW_NET[c.index].split(";")) for c in cs):
+                stop = "done"
+                break
+            time.sleep(1)
+        else:
+            stop = "timeout after %d s" % timeout
+        time.sleep(4)       # the result screen a moment longer for the captures
+        s.poll()
+        texts = {i: logparse.read_text(c.log) for i, c in s.copies.items()}
+
+        def lines(i, mark):
+            return [l for l in texts[i].splitlines() if mark in l]
+        last_state = {i: (lines(i, "[SOCIAL-TEST] crew:") or [""])[-1] for i in texts}
+        results = {i: (lines(i, "[SOCIAL] crew battle") and [l for l in lines(i, "result: winner")] or [""])[-1] for i in texts}
+        crew_lines = {i: lines(i, "[NETPLAY] crew battle") for i in texts}
+        ladder = {i: (lines(i, "[SOCIAL] crew ladder:") or [""])[-1] for i in texts}
+        # the service's own view: the ladder through the bot's internal route
+        service = {}
+        try:
+            import urllib.request
+            with urllib.request.urlopen("http://127.0.0.1:%d/internal/social/ladder?n=5" % (acc_port + 1), timeout=5) as r:
+                service = json.loads(r.read().decode())
+        except Exception as e:      # noqa: BLE001
+            service = {"error": str(e)}
+        crews = {c.get("tag"): c for c in service.get("crews") or []}
+        winner_tag = None
+        if crews.get("BXK") and crews.get("RHR"):
+            winner_tag = "BXK" if crews["BXK"].get("wins") else "RHR" if crews["RHR"].get("wins") else None
+        checks = {
+            "crews_made": all("[BXK]" in l or "[RHR]" in l for l in [" ".join(lines(i, "[SOCIAL-TEST] state:")) for i in texts]),
+            "challenged": bool(lines(0, "crew battle: challenged crew")) or bool(lines(0, "crew battle 1: proposed")),
+            "accepted": bool(lines(2, "crew battle 1: accept")) or bool(lines(2, "[SOCIAL] crew battle 1: accepted")),
+            "all_notified": all(lines(i, "[SOCIAL] crew battle (") for i in texts),
+            "relay_caps": all(lines(i, "(crew battles)") for i in texts),
+            "all_joined": all(lines(i, "[NETPLAY] crew battle 1: joining its room") for i in texts),
+            "battle_ran": all(any("state 1" in l for l in crew_lines[i]) for i in texts),
+            "battle_over": all(any("state 2" in l for l in crew_lines[i]) for i in texts),
+            "result_in_games": all("result: winner" in results[i] for i in texts),
+            "rated": all("rating +" in results[i] or "rating -" in results[i] for i in texts) and
+                     not any("not rated" in results[i] for i in texts),
+            "service_ladder": winner_tag is not None and len(crews) == 2 and
+                              crews[winner_tag].get("rating", 0) > 1300 and
+                              crews["RHR" if winner_tag == "BXK" else "BXK"].get("rating", 9999) < 1300 and
+                              crews[winner_tag].get("place") == 1,
+            "xp_and_wl": all(("%d-%d" % (1, 0)) in last_state[i] or ("%d-%d" % (0, 1)) in last_state[i] for i in texts) and
+                         all("xp 150" in last_state[i] or "xp 50" in last_state[i] for i in texts),
+            "ladder_in_games": all(ladder[i] and "2 crews" in ladder[i] for i in texts),
+        }
+        result["checks"] = checks
+        result["service_ladder"] = [{k: c.get(k) for k in ("place", "tag", "rating", "wins", "losses", "league")}
+                                    for c in service.get("crews") or []] or service
+        result["results"] = {i: results[i].split("] ", 1)[-1][:160] for i in results}
+        result["state"] = {i: last_state[i].split("crew: ", 1)[-1][:200] for i in last_state}
+        # the captures: per copy and label the last one, the battle screen's first and last
+        picked = []
+        try:
+            from PIL import Image
+        except ImportError:
+            Image = None
+        want = ("social-crew", "social-crewchallenge", "social-crewladder", "crewbattle", "crewbattle-forming", "crewbattle-over")
+        for i, d in shots.items():
+            files = sorted(glob.glob(os.path.join(d, "*.bmp")))
+            last = {}
+            for p in files:
+                base = os.path.splitext(os.path.basename(p))[0]
+                label = base.split("-", 1)[1] if "-" in base else "plain"
+                if label in want:
+                    last[label] = p
+                    if label == "crewbattle":
+                        last.setdefault("crewbattle-first", p)
+            for label, p in sorted(last.items()):
+                name = "copy%d-%s.png" % (i, label)
+                if Image:
+                    for target in [os.path.join(s.dir, name)] + ([os.path.join(out_dir, name)] if out_dir else []):
+                        os.makedirs(os.path.dirname(target), exist_ok=True)
+                        Image.open(p).convert("RGB").save(target)
+                picked.append(name)
+        result["captures"] = picked
+        result["stop"] = stop
+        result["faults"] = {i: _faults(t) for i, t in texts.items() if _faults(t)}
+        result["logs"] = [_relpath(c.log) for c in s.copies.values()]
+        result["ok"] = stop == "done" and all(checks.values()) and not result["faults"]
+    finally:
+        _finish(s, result, t0)
+    return result
+
+
 # ---- offline --------------------------------------------------------------------------------------
 
 def offline(type=0, venue=1, f0=55, f1=22, cpu=True, bot=None, fast_ko=600, turbo=False, timeout=420,

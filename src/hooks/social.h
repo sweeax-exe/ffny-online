@@ -25,6 +25,9 @@ int social_enabled(void);           /* the chat window and its toasts are offere
  * while it types). Set by the overlay every frame it is so; it runs out after 200 ms. */
 void social_set_typing(int on);
 int social_typing(void);
+/* Crew battles (stage 3): this account's crew battle that can be joined now (accepted or live, this
+ * crew in it), its id, else 0; region gets the relay region it runs on ("eu", "us-east", "us-west"). */
+long long social_battle_ready(char *region, int size);
 
 #ifdef __cplusplus
 }
@@ -69,6 +72,23 @@ struct CrewInvite { long long crew = 0; std::string tag, text, from; };
 
 struct CrewMember { long long id = 0; std::string name, role, state; };   /* role: boss lieutenant member */
 
+/* Crew battles (stage 3): the crew's open battle, else its last one for an hour (GET /api/social/battles/mine) */
+struct BattleCrew { long long id = 0; std::string tag, name; int level = 0, rating = 0; };
+struct Battle {
+    long long id = 0;
+    std::string state, region, unrated, void_why;   /* state: proposed accepted live over void */
+    int format = 0, side = 0, winner = 0;           /* side: this crew, 1 the challenger, 2 the challenged */
+    bool can_answer = false, can_cancel = false, rated = false;
+    BattleCrew crews[2];
+    int score[2] = {}, left[2] = {}, dx[2] = {}, xp[2] = {};
+};
+/* The crew ladder (GET /api/social/ladder) */
+struct LadderRow {
+    long long id = 0;
+    int place = 0, level = 0, rating = 0, wins = 0, losses = 0, streak = 0, division = 0, turf = 0, trend = 0, members = 0;
+    std::string tag, name, league, league_name;
+};
+
 struct Toast { int kind = 0; std::string title, text; long long dm_from = 0; unsigned long long at = 0; };
 enum { TOAST_DM = 1, TOAST_REQUEST, TOAST_FRIEND, TOAST_CREW, TOAST_NOTICE };
 
@@ -98,7 +118,13 @@ struct View {
     std::vector<Ref> crew_invited, crew_applied;    /* officers only */
     std::vector<Line> crew_chat;    /* oldest first */
     std::vector<CrewInvite> crew_invites;
-    std::string note;               /* the last refusal from the service ("slow mode: ...") */
+    Battle battle;                  /* id 0: none */
+    std::vector<LadderRow> ladder;  /* the top crews, once asked for (ladder()) */
+    LadderRow ladder_mine;          /* this crew's place (place 0: none) */
+    int ladder_total = 0;
+    bool ladder_loaded = false;
+    std::vector<std::string> gold_tags;     /* crews whose tag shows gold (level 5, the first reward) */
+    std::string note;              /* the last refusal from the service ("slow mode: ...") */
     unsigned long long note_at = 0;
 };
 
@@ -138,6 +164,12 @@ void crew_leave();
 void crew_kick(long long id);
 void crew_role(long long id, const std::string &role);     /* boss lieutenant member */
 void crew_accept(long long id);                             /* an application */
+/* Crew battles (stage 3): challenge a crew (by id, else by its tag) to format v format; answer this crew's
+ * battle ("accept", "decline", "cancel"); load the ladder. */
+void crew_challenge(long long crew, const std::string &tag, int format);
+void battle_answer(const char *answer);
+void ladder();
+bool gold_tag(const View &v, const std::string &tag);
 
 /* Avatars (stage 2c): the account service's 64x64 copy of a player's Discord picture
  * (GET /api/avatar/N.png; the game never contacts Discord). avatar_want queues a download on a thread

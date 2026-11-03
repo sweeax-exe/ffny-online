@@ -195,6 +195,7 @@ std::atomic<int> g_server{0};       // the service's switch: 0 not asked yet, 1 
 std::atomic<bool> g_ready{false};   // lists loaded, the long-poll runs
 std::atomic<long long> g_seq{0};
 std::atomic<bool> g_dirty_friends{false}, g_dirty_convos{false}, g_dirty_crew{false}, g_resync{false};
+std::atomic<bool> g_dirty_battle{false}, g_want_ladder{false};
 std::atomic<unsigned long long> g_typing_until{0};
 std::string g_mode_name;            // guarded by g_mu: the room's mode as the overlay names it
 const bool g_test_log = getenv("RECOMP_TEST_SOCIAL") != nullptr;
@@ -358,6 +359,8 @@ bool probe()
     g_v.max_chars = mc > 0 ? mc : 200;
     g_v.dms = key_value(out, "dms");
     g_v.show_avatar = key_value(out, "show_avatar") != "0";
+    g_v.gold_tags.clear();      // stage 3: the crews with the gold tag
+    for (auto &t : split(key_value(out, "gold_tags"), ',')) if (!t.empty()) g_v.gold_tags.push_back(t);
     changed();
     return true;
 }
@@ -541,12 +544,89 @@ void load_crew()
     changed();
 }
 
+// ---- crew battles and the ladder (stage 3) -------------------------------------------------------
+
+void load_battle()
+{
+    std::string out;
+    J j;
+    int status = http("GET", "/api/social/battles/mine", nullptr, out, 0, &g_work_live);
+    Battle b;
+    if (status == 200 && parse_json(out, j)) {
+        b.id = j["id"].i();
+        b.state = j["state"].str();
+        b.region = j["region"].str();
+        b.unrated = j["unrated"].str();
+        b.void_why = j["void_why"].str();
+        b.format = (int)j["format"].i();
+        b.side = (int)j["side"].i();
+        b.winner = (int)j["winner"].i();
+        b.can_answer = j["can_answer"].b;
+        b.can_cancel = j["can_cancel"].b;
+        b.rated = j["rated"].b;
+        for (int k = 0; k < 2; k++) {
+            const J &c = j["crews"].kind == J::ARR && j["crews"].a.size() > (size_t)k ? j["crews"].a[(size_t)k] : J();
+            b.crews[k].id = c["id"].i();
+            b.crews[k].tag = c["tag"].str();
+            b.crews[k].name = c["name"].str();
+            b.crews[k].level = (int)c["level"].i();
+            b.crews[k].rating = (int)c["rating"].i();
+            auto at = [&](const char *key) { const J &a = j[key]; return a.kind == J::ARR && a.a.size() > (size_t)k ? (int)a.a[(size_t)k].i() : 0; };
+            b.score[k] = at("score");
+            b.left[k] = at("left");
+            b.dx[k] = at("rating_dx");
+            b.xp[k] = at("xp");
+        }
+    } else if (status != 404) {
+        return;     // unreachable: keep what we know
+    }
+    std::lock_guard<std::mutex> lk(g_mu);
+    if (b.id != g_v.battle.id || b.state != g_v.battle.state)
+        fprintf(stderr, "[SOCIAL] crew battle %lld: %s, %d v %d, %s v %s, side %d%s\n", b.id, b.state.empty() ? "none" : b.state.c_str(),
+                b.format, b.format, b.crews[0].tag.c_str(), b.crews[1].tag.c_str(), b.side,
+                b.state == "over" ? (b.rated ? " (rated)" : " (not rated)") : "");
+    if (b.state == "over" && (g_v.battle.state != "over" || g_v.battle.id != b.id))
+        fprintf(stderr, "[SOCIAL] crew battle %lld result: winner %d, %d-%d, rating %+d/%+d, xp %d/%d%s%s\n", b.id, b.winner,
+                b.score[0], b.score[1], b.dx[0], b.dx[1], b.xp[0], b.xp[1], b.unrated.empty() ? "" : ", not rated: ",
+                b.unrated.c_str());
+    g_v.battle = b;
+    changed();
+}
+
+void load_ladder()
+{
+    std::string out;
+    J j;
+    if (http("GET", "/api/social/ladder?n=20", nullptr, out, 0, &g_work_live) != 200 || !parse_json(out, j)) return;
+    auto row = [](const J &e) {
+        LadderRow r;
+        r.id = e["id"].i(); r.place = (int)e["place"].i(); r.level = (int)e["level"].i(); r.rating = (int)e["rating"].i();
+        r.wins = (int)e["wins"].i(); r.losses = (int)e["losses"].i(); r.streak = (int)e["streak"].i();
+        r.division = (int)e["division"].i(); r.turf = (int)e["turf"].i(); r.trend = (int)e["trend"].i();
+        r.members = (int)e["members"].i();
+        r.tag = e["tag"].str(); r.name = e["name"].str(); r.league = e["league"].str(); r.league_name = e["league_name"].str();
+        return r;
+    };
+    std::lock_guard<std::mutex> lk(g_mu);
+    g_v.ladder.clear();
+    for (auto &e : j["crews"].a) g_v.ladder.push_back(row(e));
+    g_v.ladder_mine = j["mine"].kind == J::OBJ ? row(j["mine"]) : LadderRow();
+    g_v.ladder_total = (int)j["total"].i();
+    g_v.ladder_loaded = true;
+    std::string top;
+    for (auto &r : g_v.ladder) top += " " + std::to_string(r.place) + "." + r.tag + "=" + std::to_string(r.rating) +
+                                      "(" + std::to_string(r.wins) + "-" + std::to_string(r.losses) + ")";
+    fprintf(stderr, "[SOCIAL] crew ladder: %d crews:%s; mine %d\n", g_v.ladder_total, top.c_str(), g_v.ladder_mine.place);
+    changed();
+}
+
 void load_all()
 {
     load_friends();
     load_convos();
     load_global();
     load_crew();
+    load_battle();
     std::vector<long long> open;
     {
         std::lock_guard<std::mutex> lk(g_mu);
@@ -639,6 +719,11 @@ void apply_event(const std::vector<std::string> &f)
     } else if (kind == "crew_update") {
         if (!text.empty()) toast(TOAST_CREW, tag.empty() ? "CREW" : tag, text);
         g_dirty_crew = true;
+    } else if (kind == "crew_battle") {     // stage 3: a challenge, its answer, the room, the result
+        toast(TOAST_CREW, "CREW BATTLE", text);
+        fprintf(stderr, "[SOCIAL] crew battle (%s): %s\n", state.c_str(), text.c_str());
+        g_dirty_battle = true;
+        if (state == "over") { g_dirty_crew = true; g_want_ladder = g_v.ladder_loaded; }
     } else if (kind == "notice") {
         toast(TOAST_NOTICE, "NOTICE", text);
     } else if (kind == "removed") {
@@ -825,6 +910,39 @@ void test_tick()
         else crew_role(id, arg.find(':') == std::string::npos ? "member" : arg.substr(arg.find(':') + 1));
     } else if (what == "crewleave") {
         crew_leave();
+    } else if (what == "challenge") {           // challenge:TAG:FORMAT, again every 5 s until it is open (4 min)
+        std::string tag = arg.substr(0, arg.find(':'));
+        int format = arg.find(':') == std::string::npos ? 3 : atoi(arg.c_str() + arg.find(':') + 1);
+        bool open;
+        { std::lock_guard<std::mutex> lk(g_mu); open = g_v.battle.id && g_v.battle.side == 1 && g_v.battle.state != "over" && g_v.battle.state != "void"; }
+        timed_out = now - g_test.since > 240000;
+        static unsigned long long asked;
+        if (!open && !timed_out) {
+            if (now - asked > 5000) { asked = now; crew_challenge(0, tag, format); }
+            done = false;
+        }
+    } else if (what == "battleaccept") {        // the first challenge that comes (4 min)
+        bool answer, accepted;
+        {
+            std::lock_guard<std::mutex> lk(g_mu);
+            answer = g_v.battle.can_answer;
+            accepted = g_v.battle.side == 2 && (g_v.battle.state == "accepted" || g_v.battle.state == "live");
+        }
+        timed_out = now - g_test.since > 240000;
+        static unsigned long long asked;
+        if (!accepted && !timed_out) {
+            if (answer && now - asked > 3000) { asked = now; battle_answer("accept"); }
+            else if (!answer) g_dirty_battle = true;
+            done = false;
+        }
+    } else if (what == "battledone") {          // wait for the battle's result (10 min), then the ladder
+        bool over;
+        { std::lock_guard<std::mutex> lk(g_mu); over = g_v.battle.state == "over" || g_v.battle.state == "void"; }
+        timed_out = now - g_test.since > 600000;
+        if (!over && !timed_out) done = false;
+        else ladder();
+    } else if (what == "ladder") {
+        ladder();
     } else if (what == "log") {
         std::lock_guard<std::mutex> lk(g_mu);
         std::string fl;
@@ -838,6 +956,13 @@ void test_tick()
                 (int)g_v.global.size(), g_v.crew, g_v.crew_tag.c_str(), g_v.crew_role.c_str(), roster.c_str(),
                 (int)g_v.crew_invites.size(), bl.c_str(), g_v.dms.empty() ? "friends" : g_v.dms.c_str(),
                 g_v.show_avatar ? "on" : "off");
+        const Battle &b = g_v.battle;
+        std::string gold;
+        for (auto &t : g_v.gold_tags) gold += t + " ";
+        fprintf(stderr, "[SOCIAL-TEST] crew: level %d, xp %d, rating %d, %d-%d, league %s, gold [%s]; battle %lld %s side %d "
+                        "winner %d %d-%d dx %+d/%+d rated %d\n",
+                g_v.crew_level, g_v.crew_xp, g_v.crew_rating, g_v.crew_wins, g_v.crew_losses, g_v.crew_league.c_str(),
+                gold.c_str(), b.id, b.state.c_str(), b.side, b.winner, b.score[0], b.score[1], b.dx[0], b.dx[1], (int)b.rated);
     }
     if (!done) return;
     fprintf(stderr, "[SOCIAL-TEST] step %d %s%s\n", (int)g_test.next + 1, step.c_str(), timed_out && what != "wait" ? " (timed out)" : "");
@@ -900,6 +1025,8 @@ DWORD WINAPI work_thread(LPVOID)
             if (g_dirty_friends && now - last_friends > 1500) { g_dirty_friends = false; last_friends = now; load_friends(); }
             if (g_dirty_convos.exchange(false)) load_convos();
             if (g_dirty_crew.exchange(false)) load_crew();
+            if (g_dirty_battle.exchange(false)) load_battle();
+            if (g_want_ladder.exchange(false)) load_ladder();
             if (now - last_global > 60000) {        // the online count beside GLOBAL
                 last_global = now;
                 std::string out;
@@ -1277,6 +1404,55 @@ void crew_kick(long long id) { crew_member_op("kick", id, "", "Removed from the 
 void crew_role(long long id, const std::string &role) { crew_member_op("role", id, ",\"role\":" + json_text(role), "Role changed."); }
 void crew_accept(long long id) { crew_member_op("accept", id, "", "Welcome to the crew."); }
 
+void crew_challenge(long long crew, const std::string &tag, int format)
+{
+    queue([crew, tag, format]() {
+        long long id = crew;
+        if (!id) {      // by tag: GET /api/social/crews?tag=
+            std::string out;
+            J j;
+            std::string t;
+            for (char c : tag) if (isalnum((unsigned char)c)) t += (char)toupper((unsigned char)c);
+            int status = http("GET", "/api/social/crews?tag=" + t, nullptr, out, 0, &g_work_live);
+            if (status == 200 && parse_json(out, j)) id = j["id"].i();
+            if (!id) {
+                std::lock_guard<std::mutex> lk(g_mu);
+                note("No crew with the tag " + t + ".");
+                return;
+            }
+        }
+        if (post("/api/social/crews/" + std::to_string(id) + "/challenge", "{\"format\":" + std::to_string(format) + "}") / 100 == 2) {
+            fprintf(stderr, "[SOCIAL] crew battle: challenged crew %lld (%s) to %d v %d\n", id, tag.c_str(), format, format);
+            std::lock_guard<std::mutex> lk(g_mu);
+            note("Challenge sent. Their Boss or a Lieutenant answers.");
+        }
+        load_battle();
+    });
+}
+
+void battle_answer(const char *answer)
+{
+    std::string a = answer;
+    queue([a]() {
+        long long id;
+        { std::lock_guard<std::mutex> lk(g_mu); id = g_v.battle.id; }
+        if (!id) return;
+        if (post("/api/social/battles/" + std::to_string(id) + "/" + a, "{}") / 100 == 2) {
+            fprintf(stderr, "[SOCIAL] crew battle %lld: %s\n", id, a.c_str());
+            std::lock_guard<std::mutex> lk(g_mu);
+            note(a == "accept" ? "Challenge accepted: JOIN BATTLE." : a == "decline" ? "Challenge declined." : "Battle called off.");
+        }
+        load_battle();
+    });
+}
+
+void ladder() { g_want_ladder = true; g_cv.notify_all(); }
+
+bool gold_tag(const View &v, const std::string &tag)
+{
+    return !tag.empty() && std::find(v.gold_tags.begin(), v.gold_tags.end(), tag) != v.gold_tags.end();
+}
+
 void avatar_want(long long id)
 {
     if (id <= 0) return;
@@ -1352,6 +1528,15 @@ extern "C" int social_enabled(void)
     return e > 0 || g_server.load() > 0;
 }
 
+extern "C" long long social_battle_ready(char *region, int size)
+{
+    std::lock_guard<std::mutex> lk(g_mu);
+    const Battle &b = g_v.battle;
+    if (!b.id || b.side == 0 || (b.state != "accepted" && b.state != "live")) return 0;
+    if (region && size > 0) snprintf(region, (size_t)size, "%s", b.region.c_str());
+    return b.id;
+}
+
 extern "C" void social_set_typing(int on)
 {
     g_typing_until = on ? GetTickCount64() + 200 : 0;
@@ -1369,7 +1554,12 @@ extern "C" void social_shutdown(void) {}
 extern "C" int social_enabled(void) { return 0; }
 extern "C" void social_set_typing(int on) { (void)on; }
 extern "C" int social_typing(void) { return 0; }
+extern "C" long long social_battle_ready(char *region, int size) { (void)region; (void)size; return 0; }
 namespace social {
+void crew_challenge(long long, const std::string &, int) {}
+void battle_answer(const char *) {}
+void ladder() {}
+bool gold_tag(const View &, const std::string &) { return false; }
 bool snapshot(View &, unsigned) { return false; }
 std::vector<Toast> take_toasts() { return {}; }
 std::string region_of_server(int) { return ""; }
