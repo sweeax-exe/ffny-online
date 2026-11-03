@@ -468,6 +468,13 @@ bool update_screen_draw(float width, float height, UiResult *result)
 
 } // namespace app
 
+// The installed game's version, which Home shows under its art (the app's own is in the header).
+const char *pc_app_game_version()
+{
+    const app::Install &in = app::install();
+    return in.installed && !in.version.empty() ? in.version.c_str() : DEFJAM_VERSION;
+}
+
 // One line on Home, above the launcher's own: a newer app to download, or this app's version of the
 // game to build. Drawn inside the launcher's Home (pc_ui.cpp, DEFJAM_APP).
 void pc_app_home_notice()

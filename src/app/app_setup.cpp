@@ -19,11 +19,13 @@
 #include <time.h>
 
 #include <algorithm>
+#include <atomic>
 #include <filesystem>
 #include <fstream>
 #include <mutex>
 #include <sstream>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include <SDL3/SDL.h>
@@ -50,7 +52,8 @@ enum class Screen
     Maintenance,    // Repair or Clean Rebuild of the install
     Running,        // an operation's progress
     Finished,       // how it ended
-    UpdateReady     // the app was just updated: build the game it now carries
+    UpdateReady,    // the game is older than this app: build the version it carries
+    Uninstall       // remove the game, its Steam shortcut, the app and (if chosen) its data
 };
 
 // The steps the engine reports, in order, by the start of its status lines.
@@ -298,6 +301,8 @@ void finish(int code)
         fprintf(stderr, "[APP] %s\n", why.c_str());
     fflush(stderr);
     if (code == 0) g_tools_missing = false;                 // setup found or installed them
+    if (code == 0 && g_run.operation == "install")
+        app::remember_install(app::install().root);         // found again at the next start
     g_screen = Screen::Finished;
 }
 
@@ -388,6 +393,47 @@ void path_row(const char *label, const char *id, char *value, bool folder, bool 
     ImGui::PopID();
 }
 
+// An installation already in the folder chosen on the first run (an older setup's, say): the app
+// takes it over instead of installing there, which setup would refuse, and offers to update it
+// when it is older than this app.
+struct Found
+{
+    std::string root, version;      // the folder last looked at, and the version installed there
+} g_found;
+
+void probe_root()
+{
+    if (g_found.root == g_root) return;
+    g_found.root = g_root;
+    g_found.version = g_root[0] ? app::receipt_version(g_root) : "";
+}
+
+// Take over the installation in g_root (and remember it for the next start), then update it when
+// it is older than this app, or go to the launcher.
+void adopt_found()
+{
+    g_form_error.clear();
+    app::unlock_install();
+    app::install().root = g_root;
+    if (!app::lock_install()) {
+        g_form_error = "The game in this folder is running. Close it, then try again.";
+        return;
+    }
+    std::string why;
+    bool loaded = app::load_install(&why);
+    app::remember_install(g_root);
+    fprintf(stderr, "[APP] using the installation in %s (v%s) %s\n", g_root, app::install().version.c_str(),
+            why.c_str());
+    if (!loaded) {
+        g_form_error = why;
+        g_screen = Screen::Maintenance;
+    } else if (app::newer(app::payload_version(), app::install().version)) {
+        start_update_build();
+    } else {
+        g_screen = Screen::None;
+    }
+}
+
 void first_run_page(float width, float height, UiResult *result)
 {
     page_begin(width, height, "SET UP THE GAME");
@@ -398,21 +444,38 @@ void first_run_page(float width, float height, UiResult *result)
     path_row("Your dump (disc image or extracted folder)", "setup.dump", g_dump, true, true);
     path_row("Install folder (the built game)", "setup.install", g_root, true, false);
     path_row("Data folder (your extracted dump, saves and settings)", "setup.data", g_data, true, false);
+    probe_root();
+    bool found = !g_found.version.empty();
+    bool older = found && app::newer(app::payload_version(), g_found.version);
+    if (older)
+        ImGui::TextColored(pcui::gold(), "This folder already has Def Jam Recompiled v%s. Update it to v%s: it keeps "
+                           "its own data folder, saves and settings, so the dump and data folder above are not "
+                           "needed.", g_found.version.c_str(), app::payload_version().c_str());
+    else if (found)
+        ImGui::TextColored(pcui::gold(), "This folder already has Def Jam Recompiled v%s. Use it as it is, with its "
+                           "own data folder, saves and settings.", g_found.version.c_str());
     ImGui::Spacing();
-    ImGui::Checkbox("Generate HD textures (adds several minutes and about 15 GB)", &g_hd);
-    ui_target("setup.hd");
+    if (!found) {
+        ImGui::Checkbox("Generate HD textures (adds several minutes and about 15 GB)", &g_hd);
+        ui_target("setup.hd");
+    }
     tools_row();
     ImGui::Spacing();
     if (!g_form_error.empty()) ImGui::TextColored(ImVec4(1, 0.45f, 0.4f, 1), "%s", g_form_error.c_str());
-    bool ready = g_dump[0] && g_root[0] && g_data[0];
+    bool ready = found ? g_root[0] != 0 : g_dump[0] && g_root[0] && g_data[0];
+    std::string label = !found ? "INSTALL" : older ? "UPDATE TO V" + app::payload_version() : "USE THIS INSTALL";
     ImGui::BeginDisabled(!ready);
-    if (pcui::play_button("INSTALL", ImVec2(ImGui::GetFontSize() * 10, ImGui::GetFrameHeight() * 1.8f), 26))
+    if (pcui::play_button(label.c_str(), ImVec2(ImGui::GetFontSize() * 13, ImGui::GetFrameHeight() * 1.8f), 26))
     {
-        g_form_error.clear();
-        app::install().root = g_root;
-        start("install", "Installing", g_root, g_data, g_dump, g_hd);
+        if (found) {
+            adopt_found();
+        } else {
+            g_form_error.clear();
+            app::install().root = g_root;
+            start("install", "Installing", g_root, g_data, g_dump, g_hd);
+        }
     }
-    ui_target("setup.start");
+    ui_target(!found ? "setup.start" : older ? "setup.update" : "setup.use");
     ImGui::EndDisabled();
     ImGui::SameLine();
     if (ImGui::Button("Quit")) result->leave = true;
@@ -431,6 +494,19 @@ void maintenance_page(float width, float height, UiResult *result)
     tools_row();
     ImGui::Spacing();
     if (!g_form_error.empty()) ImGui::TextColored(ImVec4(1, 0.45f, 0.4f, 1), "%s", g_form_error.c_str());
+    // An older game: Repair and Clean Rebuild work on the version this app builds, so the update
+    // comes first (setup refuses them across versions).
+    bool older = in.installed && app::newer(app::payload_version(), in.version);
+    if (older) {
+        ImGui::SeparatorText("Update");
+        ImGui::TextWrapped("Your game is v%s; this app builds v%s. Update builds the game again from your dump "
+                           "with the new version, in about three to ten minutes. Your saves, settings and mods "
+                           "are kept, and v%s stays playable until the new build is ready.",
+                           in.version.c_str(), app::payload_version().c_str(), in.version.c_str());
+        if (ImGui::Button(("Update to v" + app::payload_version()).c_str())) start_update_build();
+        ui_target("setup.update");
+    }
+    ImGui::BeginDisabled(older);
     ImGui::SeparatorText("Repair");
     ImGui::TextWrapped("Checks every file of this version and rebuilds only what is missing or changed. Your "
                        "saves and settings are kept.");
@@ -447,6 +523,10 @@ void maintenance_page(float width, float height, UiResult *result)
         start("rebuild", "Rebuilding", in.root.string(), in.data.string(), "", g_hd);
     }
     ui_target("setup.rebuild");
+    ImGui::EndDisabled();
+    if (older)
+        ImGui::TextDisabled("Repair and Clean Rebuild work on v%s, the version this app builds: update first.",
+                            app::payload_version().c_str());
 #if defined(_WIN32)
     if (in.installed) steam_section();
 #endif
@@ -467,18 +547,277 @@ void maintenance_page(float width, float height, UiResult *result)
 void update_ready_page(float width, float height)
 {
     const Install &in = app::install();
-    page_begin(width, height, "UPDATE READY");
-    ImGui::TextWrapped("Def Jam Recompiled is now v%s. Your game is still built from v%s: build v%s now "
-                       "(about three to ten minutes) to play it. Until then Play starts the v%s build.",
-                       app::payload_version().c_str(), in.version.c_str(), app::payload_version().c_str(),
-                       in.version.c_str());
+    page_begin(width, height, "UPDATE YOUR GAME");
+    if (app::just_updated())
+        ImGui::TextWrapped("Def Jam Recompiled is now v%s.", app::payload_version().c_str());
+    ImGui::TextWrapped("Your game is v%s. Update it to v%s now: it is built again from your dump with the new "
+                       "version, in about three to ten minutes. Your saves, settings and mods are kept.",
+                       in.version.c_str(), app::payload_version().c_str());
+    ImGui::TextWrapped("Later opens the launcher, where Play starts v%s and Update / Repair offers the update "
+                       "again.", in.version.c_str());
+    tools_row();
     ImGui::Spacing();
-    if (pcui::play_button("BUILD UPDATE", ImVec2(ImGui::GetFontSize() * 12, ImGui::GetFrameHeight() * 1.8f), 26))
+    if (!g_form_error.empty()) ImGui::TextColored(ImVec4(1, 0.45f, 0.4f, 1), "%s", g_form_error.c_str());
+    if (pcui::play_button("UPDATE GAME", ImVec2(ImGui::GetFontSize() * 12, ImGui::GetFrameHeight() * 1.8f), 26))
         start_update_build();
     ui_target("update.build");
     ImGui::SameLine();
     if (ImGui::Button("Later")) g_screen = Screen::None;
     ui_target("update.later");
+    ImGui::End();
+}
+
+// ---- Uninstall (Advanced > Maintenance, last on the page) ----------------------------------------
+// The work runs on its own thread, one step after another: the Steam shortcut this app added
+// (Windows), a copy of the saves and settings when the data folder goes too, setup's own uninstall
+// (the build, its receipt, the launcher and the shortcuts an older setup made), then the data folder
+// and the app's records. Nothing is deleted when the saves could not be copied exactly. A running
+// program's folder cannot be removed, so on Windows a small script removes the app and its logs
+// once the window has closed.
+struct Removal
+{
+    bool data = false;                      // also delete the data folder
+    std::atomic<int> state{0};              // 0 not started, 1 working, 2 done, 3 stopped
+    std::mutex lock;
+    std::string step, error, notes;         // under lock
+    fs::path backup;                        // where the saves and settings are copied
+} g_removal;
+
+void removal_step(const std::string &text)
+{
+    std::lock_guard<std::mutex> hold(g_removal.lock);
+    g_removal.step = text;
+    fprintf(stderr, "[APP] uninstall: %s\n", text.c_str());
+    fflush(stderr);
+}
+
+void removal_stop(const std::string &text)
+{
+    {
+        std::lock_guard<std::mutex> hold(g_removal.lock);
+        g_removal.error = text;
+    }
+    fprintf(stderr, "[APP] uninstall stopped: %s\n", text.c_str());
+    fflush(stderr);
+    g_removal.state = 3;
+}
+
+// How many files are under `dir`, and how many bytes they hold.
+std::pair<uintmax_t, uintmax_t> tally(const fs::path &dir)
+{
+    uintmax_t files = 0, bytes = 0;
+    std::error_code ec;
+    for (auto it = fs::recursive_directory_iterator(dir, ec); !ec && it != fs::recursive_directory_iterator();
+         it.increment(ec))
+        if (it->is_regular_file(ec)) {
+            files++;
+            bytes += it->file_size(ec);
+        }
+    return {files, bytes};
+}
+
+// "Def Jam Recompiled saves <date time>" in the player's Documents folder.
+fs::path backup_folder()
+{
+    fs::path base;
+    if (const char *documents = SDL_GetUserFolder(SDL_FOLDER_DOCUMENTS)) base = documents;
+    if (base.empty()) base = app::os::user_base();
+    char stamp[32];
+    time_t now = time(nullptr);
+    strftime(stamp, sizeof stamp, "%Y-%m-%d %H.%M", localtime(&now));
+    return base / (std::string("Def Jam Recompiled saves ") + stamp);
+}
+
+// Only a data folder setup made (it keeps extraction-state.json there) is deleted, and never a
+// drive, the home folder or a folder that holds the install.
+bool removable_data(const fs::path &data, const fs::path &root, std::string *why)
+{
+    std::error_code ec;
+    fs::path d = fs::weakly_canonical(data, ec), r = fs::weakly_canonical(root, ec);
+    fs::path home = fs::weakly_canonical(app::os::user_base(), ec);
+    bool holds_install = false;
+    for (fs::path p = r; !p.empty() && p != p.root_path(); p = p.parent_path())
+        if (p == d) holds_install = true;
+    if (d.empty() || d == d.root_path() || d == home || d == home.parent_path() || holds_install)
+        *why = "The data folder is not one setup made on its own, so it is left as it is.";
+    else if (!fs::is_regular_file(d / "extraction-state.json", ec))
+        *why = "The data folder has no extraction-state.json, so it was not made by setup and is left as it is.";
+    return why->empty();
+}
+
+void removal_work(fs::path root, fs::path data, bool with_data, fs::path backup)
+{
+    std::error_code ec;
+    std::string message;
+#if defined(_WIN32)
+    removal_step("Removing it from Steam");
+    if (!app::steam_remove_now(&message))
+        return removal_stop("The Steam shortcut could not be removed" + (message.empty() ? std::string() : ": " + message) +
+                            ". Nothing else was changed.");
+#endif
+    if (with_data) {
+        fs::path save = data / "save";
+        if (fs::is_directory(save, ec)) {
+            removal_step("Copying your saves to " + backup.string());
+            fs::create_directories(backup, ec);
+            fs::copy(save, backup / "save", fs::copy_options::recursive, ec);
+            if (ec)
+                return removal_stop("Your saves could not be copied (" + ec.message() + "). Nothing else was removed.");
+            if (tally(save) != tally(backup / "save"))
+                return removal_stop("The copy of your saves does not match them. Nothing else was removed.");
+        }
+        if (fs::is_regular_file(data / "settings.ini", ec)) {
+            fs::create_directories(backup, ec);
+            fs::copy_file(data / "settings.ini", backup / "settings.ini", fs::copy_options::overwrite_existing, ec);
+        }
+    }
+    removal_step("Uninstalling the game");
+    char stamp[32];
+    time_t now = time(nullptr);
+    strftime(stamp, sizeof stamp, "%Y%m%d-%H%M%S", localtime(&now));
+    std::string error;
+    os::Process process;
+    if (!spawn_engine({"--uninstall", "--install-dir", root.string(), "--log",
+                       (app::log_dir() / ("uninstall-" + std::string(stamp) + ".log")).string()},
+                      &process, &error))
+        return removal_stop(error);
+    if (int code = os::wait(process); code != 0)
+        return removal_stop("Setup's uninstall stopped (exit " + std::to_string(code) + "); its log is in " +
+                            app::log_dir().string() + ".");
+    // What the install folder still holds: the locks and records setup and the app keep there.
+    for (const char *name : {"play.lock", "setup.lock", "setup-owner.json", "app-location.txt"})
+        fs::remove(root / name, ec);
+    fs::remove(root, ec);                                       // only when it is empty now
+    if (with_data) {
+        removal_step("Deleting the data folder");
+        fs::remove_all(data, ec);
+        if (ec) {
+            std::lock_guard<std::mutex> hold(g_removal.lock);
+            g_removal.notes = "Some of the data folder could not be deleted (" + ec.message() + "): " + data.string();
+        }
+    }
+    app::forget_install();
+#if defined(_WIN32)
+    fs::path base = app::os::user_base() / "DefJamRecompiled";
+    for (const char *name : {"location.json", "steam.json", "steam-answer.json"})
+        fs::remove(base / name, ec);
+    fs::remove_all(base / "cache", ec);
+#endif
+    removal_step("Done");
+    g_removal.state = 2;
+}
+
+void start_removal()
+{
+    const Install &in = app::install();
+    g_form_error.clear();
+    std::string why;
+    if (g_removal.data && !removable_data(in.data, in.root, &why)) {
+        g_form_error = why;
+        return;
+    }
+    app::unlock_install();                                      // setup's uninstall takes it
+    // The app works in the installed game's folder (as the game does), which Windows will not
+    // delete while a process is in it; setup's uninstall inherits it too.
+    std::error_code ec;
+    os::change_dir(fs::temp_directory_path(ec));
+    g_removal.state = 1;
+    std::thread(removal_work, in.root, in.data, g_removal.data, g_removal.backup).detach();
+}
+
+// Windows: once the window has closed, remove the app's own folder (only an installed app: the
+// program with payload\ and payload.sha256 beside it) and its logs, then its per-user folder if
+// nothing is left in it.
+void removal_cleanup()
+{
+#if defined(_WIN32)
+    std::error_code ec;
+    fs::path folder = app::program().parent_path();
+    bool installed_app = fs::is_regular_file(folder / "payload.sha256", ec) && fs::is_directory(folder / "payload", ec) &&
+                         folder != folder.root_path();
+    fs::path base = app::os::user_base() / "DefJamRecompiled";
+    fs::path script = fs::temp_directory_path(ec) /
+                      ("DefJamRecompiled-uninstall-" + std::to_string(app::os::process_id()) + ".cmd");
+    {
+        std::ofstream out(script, std::ios::binary | std::ios::trunc);
+        out << "@echo off\r\nping -n 4 127.0.0.1 >nul\r\n";
+        if (installed_app) out << "rmdir /s /q \"" << folder.string() << "\"\r\n";
+        out << "rmdir /s /q \"" << (base / "logs").string() << "\"\r\n";
+        out << "rmdir \"" << base.string() << "\" 2>nul\r\n";
+        out << "del \"%~f0\"\r\n";
+    }
+    const char *shell = getenv("ComSpec");
+    os::Process process;
+    std::string error;
+    if (!os::start({shell && *shell ? shell : "cmd.exe", "/c", script.string()}, nullptr, &process, &error))
+        fprintf(stderr, "[APP] uninstall: the app could not remove itself: %s\n", error.c_str());
+#endif
+}
+
+void uninstall_page(float width, float height, UiResult *result)
+{
+    const Install &in = app::install();
+    page_begin(width, height, "UNINSTALL");
+    int state = g_removal.state;
+    if (state == 0) {
+        ImGui::TextWrapped("This removes Def Jam Recompiled from this computer:");
+        ImGui::BulletText("the game built in %s", in.root.string().c_str());
+#if defined(_WIN32)
+        ImGui::BulletText("its Steam shortcut and artwork, if this app added them (Steam is closed and started "
+                          "again if it is running)");
+        ImGui::BulletText("this app, when you close it afterwards");
+#endif
+        ImGui::Spacing();
+        ImGui::Checkbox("Also delete the data folder", &g_removal.data);
+        ui_target("uninstall.data");
+        ImGui::TextDisabled("%s", in.data.string().c_str());
+        if (g_removal.data)
+            ImGui::TextWrapped("It holds the copy of your dump, your saves, settings, mods and HD textures. Your saves "
+                               "and settings are copied first, to:\n%s", g_removal.backup.string().c_str());
+        else
+            ImGui::TextWrapped("It stays, with your saves, settings and mods, for when you install again.");
+        ImGui::Spacing();
+        if (!g_form_error.empty()) ImGui::TextColored(ImVec4(1, 0.45f, 0.4f, 1), "%s", g_form_error.c_str());
+        if (pcui::play_button("UNINSTALL", ImVec2(ImGui::GetFontSize() * 10, ImGui::GetFrameHeight() * 1.8f), 26))
+            start_removal();
+        ui_target("uninstall.start");
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel")) {
+            g_form_error.clear();
+            g_screen = Screen::None;
+        }
+        ui_target("uninstall.cancel");
+    } else if (state == 1) {
+        std::lock_guard<std::mutex> hold(g_removal.lock);
+        ImGui::TextWrapped("%s...", g_removal.step.c_str());
+        ImGui::TextDisabled("Keep this window open until it finishes.");
+    } else {
+        std::lock_guard<std::mutex> hold(g_removal.lock);
+        if (state == 2)
+            ImGui::TextWrapped("Def Jam Recompiled is uninstalled.");
+        else
+            ImGui::TextColored(ImVec4(1, 0.45f, 0.4f, 1), "%s", g_removal.error.c_str());
+        std::error_code ec;
+        bool copied = fs::is_directory(g_removal.backup, ec);
+        if (copied) ImGui::TextWrapped("Your saves and settings are in %s", g_removal.backup.string().c_str());
+        if (!g_removal.notes.empty()) ImGui::TextWrapped("%s", g_removal.notes.c_str());
+#if defined(_WIN32)
+        if (state == 2) ImGui::TextWrapped("The app removes itself when you close it.");
+#else
+        if (state == 2) ImGui::TextWrapped("To finish, delete the app itself (move it to the Trash).");
+#endif
+        ImGui::Spacing();
+        if (copied) {
+            if (ImGui::Button("Open the saves folder")) pcui::open_path(g_removal.backup.string());
+            ui_target("uninstall.saves");
+            ImGui::SameLine();
+        }
+        if (ImGui::Button("Close")) {
+            if (state == 2) removal_cleanup();
+            result->leave = true;
+        }
+        ui_target("uninstall.close");
+    }
     ImGui::End();
 }
 
@@ -561,6 +900,13 @@ void finished_page(float width, float height, UiResult *result)
         if (ok) {
             ImGui::SameLine();
             if (ImGui::Button("Play")) result->play = true;
+            ui_target("setup.play");
+#if defined(_WIN32)
+            if (float beside = steam_play_width(); beside > 0) {       // the owner's choice: right by Play
+                ImGui::SameLine();
+                steam_play_button(beside, 0);
+            }
+#endif
         }
     } else {
         if (ImGui::Button("Back")) g_screen = app::install().problem.empty() ? Screen::FirstRun : Screen::Maintenance;
@@ -609,7 +955,9 @@ bool screen_draw(float width, float height, UiResult *result)
         if (!in.installed) {
             g_screen = in.problem.empty() ? Screen::FirstRun : Screen::Maintenance;
             g_form_error = in.problem;
-        } else if (app::just_updated() && app::newer(app::payload_version(), in.version)) {
+        } else if (app::newer(app::payload_version(), in.version)) {
+            // An older game than this app builds (after the app's own update, or the first time a
+            // newer app opens an older setup's installation): offer the update before the launcher.
             g_screen = Screen::UpdateReady;
         }
         start_tools_check();
@@ -628,6 +976,7 @@ bool screen_draw(float width, float height, UiResult *result)
     case Screen::Running: running_page(width, height); break;
     case Screen::Finished: finished_page(width, height, result); break;
     case Screen::UpdateReady: update_ready_page(width, height); break;
+    case Screen::Uninstall: uninstall_page(width, height, result); break;
     }
     return true;
 }
@@ -650,9 +999,12 @@ void start_update_build()
 }
 
 #if defined(_WIN32)
-bool screen_busy() { return g_run.process.id != 0 || update_busy() || install_busy() || steam_busy(); }
+bool screen_busy()
+{
+    return g_run.process.id != 0 || update_busy() || install_busy() || steam_busy() || g_removal.state == 1;
+}
 #else
-bool screen_busy() { return g_run.process.id != 0 || update_busy(); }
+bool screen_busy() { return g_run.process.id != 0 || update_busy() || g_removal.state == 1; }
 #endif
 
 void screen_request_cancel()
@@ -665,3 +1017,33 @@ void screen_request_cancel()
 }
 
 } // namespace app
+
+// Home's Play row (pc_launcher_home.cpp, DEFJAM_APP): Add to Steam beside Play, on Windows once the
+// game is installed. The width it needs, or 0.
+float pc_app_beside_play_width()
+{
+#if defined(_WIN32)
+    return app::install().installed ? app::steam_play_width() : 0;
+#else
+    return 0;
+#endif
+}
+
+void pc_app_beside_play(float width, float height)
+{
+#if defined(_WIN32)
+    app::steam_play_button(width, height);
+#else
+    (void)width;
+    (void)height;
+#endif
+}
+
+// Advanced > Maintenance's Uninstall (pc_ui.cpp, DEFJAM_APP): the app's own Uninstall screen.
+void pc_app_open_uninstall()
+{
+    if (app::g_removal.state != 0) return;
+    app::g_form_error.clear();
+    app::g_removal.backup = app::backup_folder();
+    app::g_screen = app::Screen::Uninstall;
+}
