@@ -6056,6 +6056,22 @@ void netplay_on_update(void)
     int i;
     rollback_check_tables(N.resim ? "a re-run update starts" : "an update starts");
     if (!N.resim) spec_tick();
+    /* A rollback match that went out of sync leaves for the room at once. Its desync can come from a
+     * load that put the game's memory back only in part, and the fight then plays on that memory: F9
+     * 0b7e16 (build 47) had one rollback in the whole fight (back to step 2861), the desync at step
+     * 2880, and two crashes at step 3444; b379eb crashed 32 steps after its desync. The match no longer
+     * counts. This PC goes on offline (it stops waiting for the other's steps) and leaves the way
+     * f32d773 leaves when the other PC stops sending; the other PC sees the same checksums and leaves
+     * too, or follows after DESYNC_WAIT_MS. A lockstep match plays on as before (its desyncs so far are
+     * the game's own, on intact memory). */
+    if (!N.resim && N.desync && N.rb_match && N.lockstep && !N.watching && N.lobby && N.match_live && !N.desync_quit) {
+        fprintf(stderr, "[NETPLAY] out of sync since step %u in a rollback match: leaving the fight for the room\n",
+                N.desync_step);
+        InterlockedExchange(&N.lockstep, 0);
+        N.desync_quit = 1;
+        set_status("The games went out of sync; back to the room.");
+        toast(10000, "The games went out of sync, so this match doesn't count. Back to the room.");
+    }
     if (!N.resim) desync_quit_tick();
     if (!N.resim) netplay_rematch_tick();
     intro_update();
