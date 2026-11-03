@@ -304,7 +304,7 @@ def runtime_tool(tmp_path_factory):
     driver.write_text(DRIVER)
     exe = folder / ('language.exe' if os.name == 'nt' else 'language')
     includes = [folder, ROOT / 'src/hooks', ROOT / 'tools/xboxrecomp/src/settings']
-    sources = [driver, ROOT / 'src/hooks/pc_language.c', ROOT / 'src/patches/subtitles.c',
+    sources = [driver, ROOT / 'src/hooks/pc_language.c', ROOT / 'src/hooks/pc_language_settings.c', ROOT / 'src/patches/subtitles.c',
                ROOT / 'src/patches/game_language.c', ROOT / 'tools/xboxrecomp/src/settings/recomp_settings.c']
     if os.name == 'nt':
         cmd = [compiler, '/nologo', '/O2', '/TC', *['/I' + str(p) for p in includes], *map(str, sources),
