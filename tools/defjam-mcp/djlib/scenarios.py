@@ -187,6 +187,159 @@ def boot(timeout=240, turbo=False, extra_env=None, lock_timeout=None, log=None, 
     return result
 
 
+# ---- social (the chat window, Social Update stage 2a) ----------------------------------------------
+
+SOCIAL_NET = [
+    # copy 0: asks copy 1 to be friends, writes to it, then a line in global chat
+    "wait:4;friend:Copy 1;dm:Copy 1:hey Copy 1, run it back?;wait:6;global:eu:anyone on Europe for a quick one?;"
+    "wait:42;log",
+    # copy 1: accepts once the request has been on screen a moment, answers, then a global line
+    "wait:9;accept;wait:3;dm:Copy 0:yo, best of 3?;wait:3;global:eu:gg all, rematch later;wait:40;log",
+]
+# The window's pages for the captures, then the real input paths: copy 1 opens a room (its friends see
+# it), types on the keyboard (ENTER opens, text, ENTER sends, ESC closes); copy 0 uses the pad (BACK
+# opens, Y the on-screen keyboard, A types K, left and A types J, START sends "kj", B closes) and then
+# joins copy 1's room from FRIENDS (A on JOIN ROOM).
+SOCIAL_UI = [
+    "3:chat=friends;19:dm=Copy 1;25:chat=global;30:keyboard=yeah lets run it bac;35:close;40:chat=friends;44:chat=crew;"
+    "46:chat=global;47:type=;48:close;50:pad=back;51:pad=y;52:pad=a;53:pad=left;54:pad=a;55:pad=start;57:pad=b;58:chat=friends;"
+    "59:pad=a;64:chat=room;67:close",
+    "5:chat=friends;16:dm=Copy 0;22:chat=global;27:friend=Tavo;32:close;33:room=create;36:chat=room;40:chat=global;41:close;"
+    "44:key=enter;45:text=typed on a keyboard;46:key=enter;47:key=escape",
+]
+
+
+def social(timeout=300, relay_port=27900, off=False, lock_timeout=None, log=None, keep_roots=False, extra_env=None,
+           out_dir=None):
+    """Two copies at the online hub, signed in to a local account service with the social features
+    on (accounts -social -test-accounts) and a local relay: copy 0 asks copy 1 to be friends, copy 1
+    accepts, both write a private message and a global line (RECOMP_TEST_SOCIAL), and the chat
+    window's tabs, the keyboard and the friends list are captured (RECOMP_TEST_SOCIAL_UI and the
+    overlay's own captures). off: one copy against a service whose switch file is missing and without
+    RECOMP_SOCIAL: nothing new may show. out_dir: the chosen captures as PNG there too."""
+    t0 = time.time()
+    s = copies.Session("social-off" if off else "social", lock_timeout=lock_timeout, log=log, keep_roots=keep_roots).open()
+    result = {"scenario": "social", "ok": False, "params": {"off": off}}
+    try:
+        h = harness()
+        acc_port = relay_port + 100
+        n = 1 if off else 2
+        names = ["Copy %d" % i for i in range(n)]
+        flags = ["-social-switch", os.path.join(s.dir, "social-enabled")] if off else ["-social"]
+        tokens = s.accounts(acc_port, names, extra=flags)
+        s.relay(relay_port)
+        watch = WATCH + ["[SOCIAL-TEST] state:", "[SOCIAL] ready", "[SOCIAL-UI] close", "[SOCIAL-UI] key=escape",
+                         "[SOCIAL] the service has the social"]
+        shots = {}
+        for i in range(n):
+            shots[i] = os.path.join(s.dir, "shots%d" % i)
+            os.makedirs(shots[i], exist_ok=True)
+            env = dict(VIRTUAL_PAD_ENV)
+            env.update({
+                "RECOMP_INPUT_VIRTUAL_PADS": "1",
+                "RECOMP_SCRIPT_ANCHOR": TITLE_ANCHOR,
+                "RECOMP_PAD_SCRIPT": h.build_pad_script(["getscreeninfo(intmain/mainmenu=back@9999"]),
+                "RECOMP_TEST_OPEN_ONLINE": "1",
+                # the local relay stands in for Europe (a copy beside another needs local addresses only)
+                "RECOMP_NETPLAY_SERVER": "127.0.0.1:%d" % relay_port, "RECOMP_NETPLAY_SERVER_EU": "127.0.0.1:%d" % relay_port,
+                "RECOMP_NETPLAY_NAME": names[i],
+                "RECOMP_ACCOUNT_SERVER": "127.0.0.1:%d" % acc_port,
+                "RECOMP_ACCOUNT_TEST_TOKEN": tokens[names[i]],
+                "RECOMP_OVERLAY_SHOT_DIR": shots[i], "RECOMP_OVERLAY_SHOT_MS": "1000",
+                "RECOMP_TEST_SOCIAL_UI": "3:chat=global;6:chat=friends" if off else SOCIAL_UI[i],
+            })
+            if not off:
+                env["RECOMP_SOCIAL"] = "on"
+                env["RECOMP_TEST_SOCIAL"] = SOCIAL_NET[i]
+            env.update(extra_env or {})
+            s.launch(i, env=env, core=2 + 2 * i, watch=watch)
+            time.sleep(3)
+        deadline = time.time() + timeout
+        stop = None
+        while time.time() < deadline:
+            s.poll()
+            cs = list(s.copies.values())
+            if any(c.watch.count("[CRASH]") or c.watch.count("[WATCHDOG]") for c in cs) or any(not c.alive() for c in cs):
+                stop = "a copy crashed or exited"
+                break
+            if off:
+                menu = cs[0].watch.first.get(MAIN_MENU)
+                if menu and s.elapsed() > menu + 30:
+                    stop = "done"
+                    break
+            elif (all(c.watch.count("[SOCIAL-TEST] state:") for c in cs) and cs[0].watch.count("[SOCIAL-UI] close") >= 3
+                  and cs[1].watch.count("[SOCIAL-UI] key=escape")):
+                stop = "done"
+                break
+            time.sleep(1)
+        s.poll()
+        time.sleep(2)
+        texts = {i: logparse.read_text(c.log) for i, c in s.copies.items()}
+        lines = {i: [l for l in t.splitlines() if "[SOCIAL" in l] for i, t in texts.items()}
+
+        def has(i, text):
+            return any(text in l for l in lines[i])
+        checks = {}
+        if off:
+            checks = {"service_said_off": has(0, "the service has the social features off"),
+                      "no_ready": not has(0, "[SOCIAL] ready"), "no_chat_ui": not has(0, "[SOCIAL-UI]"),
+                      "no_social_captures": not glob.glob(os.path.join(shots[0], "*-social-*.bmp"))}
+        else:
+            state = {i: next((l for l in reversed(lines[i]) if "[SOCIAL-TEST] state:" in l), "") for i in lines}
+            checks = {
+                "ready": has(0, "[SOCIAL] ready") and has(1, "[SOCIAL] ready"),
+                "request_arrived": has(1, "friend request from Copy 0"),
+                "friends_both": has(0, "friend added: Copy 1") and has(1, "friend added: Copy 0"),
+                "dm_0_to_1": has(1, "dm from Copy 0") and has(0, "dm sent to"),
+                "dm_1_to_0": has(0, "dm from Copy 1"),
+                "global_sent": has(0, "sent to global eu") and has(1, "sent to global eu"),
+                "global_seen": all("global 2" in state[i] or "global 3" in state[i] or "global 4" in state[i] for i in state),
+                # both online in the menu at first; copy 1's room reaches copy 0 as a presence change
+                "presence": "Copy 0=" in state[1] and "Copy 0=offline" not in state[1] and
+                            any("[SOCIAL] presence" in l and ": room" in l for l in lines[0]) and "Copy 1=room" in state[0],
+                "pad_back_opens": has(0, "chat opened (Back)"),
+                "pad_keyboard_send": has(0, "sent to global eu: kj") and has(1, "global eu from Copy 0: kj"),
+                "keyboard_enter_opens": has(1, "chat opened (Enter)"),
+                "keyboard_typing_send": has(1, "sent to global eu: typed on a keyboard") and
+                                        has(0, "global eu from Copy 1: typed on a keyboard"),
+                "join_from_friends": has(0, "joining Copy 1's room"),
+            }
+            result["state"] = {i: state[i].split("state: ", 1)[-1] for i in state}
+        result["checks"] = checks
+        # the captures: per copy and label the last one (the most filled in) and the first (a request, a
+        # toast), as PNG
+        picked = []
+        try:
+            from PIL import Image
+        except ImportError:
+            Image = None
+        for i, d in shots.items():
+            files = sorted(glob.glob(os.path.join(d, "*.bmp")))
+            last, first = {}, {}
+            for p in files:
+                base = os.path.splitext(os.path.basename(p))[0]
+                label = base.split("-", 1)[1] if "-" in base else "plain"
+                last[label] = p
+                first.setdefault(label + "-first", p)
+            last.update({k: v for k, v in first.items() if k != "plain-first" and v != last[k[:-6]]})
+            for label, p in sorted(last.items()):
+                name = "copy%d-%s.png" % (i, label)
+                if Image:
+                    for target in [os.path.join(s.dir, name)] + ([os.path.join(out_dir, name)] if out_dir else []):
+                        os.makedirs(os.path.dirname(target), exist_ok=True)
+                        Image.open(p).convert("RGB").save(target)
+                picked.append(name)
+        result["captures"] = picked
+        result["stop"] = stop
+        result["social_lines"] = {i: len(v) for i, v in lines.items()}
+        result["faults"] = {i: _faults(t) for i, t in texts.items() if _faults(t)}
+        result["logs"] = [_relpath(c.log) for c in s.copies.values()]
+        result["ok"] = stop == "done" and all(checks.values()) and not result["faults"]
+    finally:
+        _finish(s, result, t0)
+    return result
+
+
 # ---- offline --------------------------------------------------------------------------------------
 
 def offline(type=0, venue=1, f0=55, f1=22, cpu=True, bot=None, fast_ko=600, turbo=False, timeout=420,

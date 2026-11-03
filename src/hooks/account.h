@@ -43,6 +43,15 @@ int account_ranked_ticket(char out[33]);
 /* A bug report (bug_report.c): POST /api/report with this body, naming the account if signed in.
  * Blocks; returns the HTTP status (201: out holds the report's id), 0 if unreachable. */
 int account_send_bug_report(const char *ctype, const void *body, int len, char *out, int size);
+/* The social features (social.cpp): one request to the account service with this session's token.
+ * method "GET"/"POST"/..., path with its query (UTF-8), json the body or NULL; the answer goes to buf.
+ * Blocks (off the game's threads only). receive_ms > 0: how long the answer may take (the long-poll).
+ * live (may be NULL): while the request runs it holds the request's handle, so account_cancel_call
+ * from another thread can end it; set it to NULL before each request. Returns the HTTP status, 0 when
+ * unreachable or canceled, -1 when not signed in. A 401 signs out, as the other requests do. */
+int account_call(const char *method, const char *path, const char *json, char *buf, int size, int receive_ms,
+                 void *volatile *live);
+void account_cancel_call(void *volatile *live);
 
 #ifdef __cplusplus
 }

@@ -22,6 +22,7 @@
 #if defined(_WIN32)
 #include "netplay.h"
 #include "recomp_settings.h"
+#include "social.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -427,6 +428,9 @@ static DWORD WINAPI voice_thread(LPVOID unused)
         }
         recomp_settings_get_text("online", "voice_key", keyname, sizeof(keyname), "T");
         vk = key_code(keyname);
+        /* The chat's text box has the keyboard (social.h): a letter, digit or space bound to
+         * push-to-talk types there and does not talk. Other keys and the pad button still talk. */
+        if (social_typing() && ((vk >= 'A' && vk <= 'Z') || (vk >= '0' && vk <= '9') || vk == VK_SPACE)) vk = 0;
         if (mode == 1 && !s_in && (key_held(vk) || pad_held())) open_mic();   /* the microphone opens at the first press */
         if (mode == 2) open_mic();
         if (!s_in) { InterlockedExchange(&s_sending, 0); continue; }

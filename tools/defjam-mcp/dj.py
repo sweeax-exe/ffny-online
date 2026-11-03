@@ -12,6 +12,8 @@ the exit code is 1 on any failure.
            [--bot] [--fast-ko 600] [--turbo] [--fixture <save folder>]
     python tools/defjam-mcp/dj.py scenario boot [--goto battle|story|rewards|online|slotN]
     python tools/defjam-mcp/dj.py scenario gallery [--page-ms 1500]
+    python tools/defjam-mcp/dj.py scenario social [--off] [--out logs/social-2a]   (the chat window: two copies,
+           a local account service with -social; --off: its switch off, one copy, nothing new may show)
     python tools/defjam-mcp/dj.py digest <log> [<log> ...] [--max 60]     (a run log, or logs/bug-reports/*/log.txt)
     python tools/defjam-mcp/dj.py analyze <copy logs...> [--matches N]   (an online result from existing logs)
     python tools/defjam-mcp/dj.py lock status | run -- <command...>      (any other test under the lock)
@@ -65,6 +67,9 @@ def cmd_scenario(a):
                               extra_env=env, fixture=a.fixture, **common)
     elif a.kind == "boot":
         r = scenarios.boot(turbo=a.turbo, timeout=a.timeout or 240, extra_env=env, goto=a.goto, **common)
+    elif a.kind == "social":
+        r = scenarios.social(timeout=a.timeout or 300, relay_port=a.relay_port, off=a.off, extra_env=env,
+                             out_dir=a.out, **common)
     else:
         r = scenarios.gallery(page_ms=a.page_ms, timeout=a.timeout or 300, extra_env=env, **common)
     print(scenarios.format_result(r))
@@ -154,7 +159,9 @@ def main(argv=None):
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     sc = sub.add_parser("scenario")
-    sc.add_argument("kind", choices=["online", "offline", "boot", "gallery"])
+    sc.add_argument("kind", choices=["online", "offline", "boot", "gallery", "social"])
+    sc.add_argument("--off", action="store_true", help="social: the service's switch off, no RECOMP_SOCIAL (nothing may show)")
+    sc.add_argument("--out", help="social: also write the chosen captures (PNG) to this folder")
     sc.add_argument("--matches", type=int, default=3)
     sc.add_argument("--mode", default="1v1", choices=sorted(scenarios.MODES))
     sc.add_argument("--players", type=int, default=2)

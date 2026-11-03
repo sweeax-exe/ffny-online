@@ -45,6 +45,8 @@
 #include "recomp_settings.h"
 #include "rollback.h"
 #include "updater.h"
+#include "social.h"
+#include <time.h>
 
 namespace {
 
@@ -818,9 +820,11 @@ struct Pad { bool up, down, left, right, a, b, x, y, lb, rb, lb_once, lb_down; }
 
 // Mouse: hovering a box picks it, a click chooses it.
 bool gallery_on();
+bool chat_mouse_blocked();          // the chat window is over the page (social_ui.inc)
 bool mouse_in(const Frame &f, float x, float y, float w, float h)
 {
     if (gallery_on()) return false;     // the gallery takes no input: a resting mouse moved the grid's selection
+    if (chat_mouse_blocked()) return false;
     return ImGui::IsMouseHoveringRect(f.p(x, y), f.p(x + w, y + h), false);
 }
 // Hover picks only when the mouse moved (or clicked) this frame: a pointer resting on a row must not
@@ -1185,7 +1189,11 @@ Pad read_pad()
     p.down = any({ ImGuiKey_GamepadDpadDown, ImGuiKey_GamepadLStickDown, ImGuiKey_DownArrow, key(ImGuiKey_S) }, true);
     p.left = any({ ImGuiKey_GamepadDpadLeft, ImGuiKey_GamepadLStickLeft, ImGuiKey_LeftArrow, key(ImGuiKey_A) }, true);
     p.right = any({ ImGuiKey_GamepadDpadRight, ImGuiKey_GamepadLStickRight, ImGuiKey_RightArrow, key(ImGuiKey_D) }, true);
-    p.a = any({ ImGuiKey_GamepadFaceDown, ImGuiKey_Enter, ImGuiKey_KeypadEnter, key(ImGuiKey_Space), key(ImGuiKey_K) }, false);
+    // With the chat (social_ui.inc) ENTER opens it, as the design has it; the code and name pages keep
+    // ENTER for their own confirm. Without it nothing changes.
+    bool enter_chooses = !letters || !social_enabled();
+    auto enter = [&](ImGuiKey k) { return enter_chooses ? k : ImGuiKey_None; };
+    p.a = any({ ImGuiKey_GamepadFaceDown, enter(ImGuiKey_Enter), enter(ImGuiKey_KeypadEnter), key(ImGuiKey_Space), key(ImGuiKey_K) }, false);
     p.b = any({ ImGuiKey_GamepadFaceRight, ImGuiKey_Escape, letters ? ImGuiKey_Backspace : ImGuiKey_None, key(ImGuiKey_L) }, false);
     p.x = any({ ImGuiKey_GamepadFaceLeft, key(ImGuiKey_J), key(ImGuiKey_F) }, false);
     p.y = any({ ImGuiKey_GamepadFaceUp, key(ImGuiKey_I), key(ImGuiKey_R) }, false);
@@ -3830,6 +3838,7 @@ NetRoom sample_room(int mode, int max, int count)
 }
 
 #include "ranked_ui.inc"
+#include "social_ui.inc"
 
 // Which page the gallery shows now, and the sample it shows with it.
 void gallery_step()
@@ -4303,18 +4312,49 @@ void draw_versus(ImDrawList *dl, ImVec2 display)
     if (g_versus_up) versus_page(dl, display, g_versus);
 }
 
-const char *shot_label() { return gallery_on() ? G.page : g_versus_up ? "versus" : nullptr; }
+const char *shot_label()
+{
+    if (const char *chat = chat_shot_label()) return chat;
+    return gallery_on() ? G.page : g_versus_up ? "versus" : nullptr;
+}
 
 bool take_open_request()
 {
     if (!g_open_req.exchange(0)) return false;
     S = State();
     S.opened = GetTickCount64();
-    if (!gallery_on()) connect_if_needed();
+    C.open = C.kb = C.menu = false;
+    if (!gallery_on()) {
+        connect_if_needed();
+        social_start();     // the chat's threads: from the first time the online screens open, never at boot
+    }
     return true;
 }
 
+bool draw_pages(ImVec2 display);
+
+// The online pages, and over them the chat window (social_ui.inc) while it is open: then the pages
+// run as usual but take no input.
 bool draw(ImVec2 display)
+{
+    ImDrawList *dl = ImGui::GetForegroundDrawList();
+    Frame f = menu_frame(display);
+    // a match starting closes the chat: the versus screen comes, then the fight
+    if (net_state() == NETPLAY_CONNECTED && net_in_lobby()) C.open = C.kb = C.menu = false;
+    chat_begin();
+    bool keep = draw_pages(display);
+    if (!keep || g_closed_for_match) {
+        C.open = C.kb = C.menu = false;
+        C.mouse_off = false;
+        social_set_typing(0);
+        return keep;
+    }
+    if (!(net_state() == NETPLAY_CONNECTED && net_in_lobby())) chat_draw(dl, f, display);
+    C.mouse_off = false;
+    return keep;
+}
+
+bool draw_pages(ImVec2 display)
 {
     ImDrawList *dl = ImGui::GetForegroundDrawList();
     Frame f = menu_frame(display);
@@ -4322,6 +4362,7 @@ bool draw(ImVec2 display)
     Pad pad = read_pad();
     // the first frame takes no choice: the A that opened the screens is still down
     if (GetTickCount64() - S.opened < 250) pad = Pad();
+    if (C.open) pad = Pad();       // the chat window has the input
     if (gallery_on()) {
         gallery_step();
         pad = Pad();
