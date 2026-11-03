@@ -619,6 +619,50 @@ switch (global and per mode).
   high (351 ms)"; KOTH left out of the mask (`-193808`): lockstep, no notice. Regressions: `--rollback on` with a relay
   without the switch (`-194625`) and `--rollback off` (`-194821`) as before.
 
+### Twelfth round (on `remaster` e3d4835; F9 8e97cd, 70d296 from build 51, 0b7e16 from build 47)
+* **The two crashes are one** [V]. All three reports crash twice: first the mixer thread (sub_001242D0, created
+  as guest thread #7, stack top 0x01404FF0) in `sub_001E55D0` (`recomp_0013.c:24730`, `[slot+0x10]+4`), reached by
+  `sub_00126300` -> `sub_001E8340` -> `sub_001E8080` (the music stream's read, tail-calling `sub_001E55D0`), then the
+  main thread writing at 84000000. The object in `ecx` (83A07660) is the file layer's slot table `[0x3C8F30]`, which no
+  save or load touches ("heap pages left alone ... 83A06000 83A07000 83A08000"). Its words are floats in all three
+  reports (43E3D6E8 ...), the request handle `edi` too (43D791A1, C2750F89), and in 8e97cd they equal the first words
+  of the main thread's source `ecx` 816B1D00. EAGL's draw command and loaded objects above are junk too (FEB4B1B0,
+  2ACECDB9, 32E05500, FEFEFBF8: packed vertex colours). The second crash's offsets, mapped with this MSVC on the main
+  checkout's PDB (players compile the same lifted C with the same toolset), are `recomp_0008.c:27764` and `:27788`:
+  `sub_00115CB0` writing a particle billboard vertex (position at `[ebx+0x4C8]`, colour, uv). So the main thread's
+  particle writer ran from the 0x81B... heap up through the contiguous window to 84000000, and the mixer read the
+  overwritten slot table on its next tick: the mixer's crash is the fallout, not the cause.
+* **The particle data was kept live** [V for the pages, I for the link]. In all three dumps the emitter (`ebx`,
+  `[ebx]` = 000DF190) and the particle (`esi`) lie on "saved (page with mixer words)"; in 70d296 `esi` 816ADD78 is
+  itself "a mixer word (kept live)". Before the crash 70d296 attributes 8 whole pages to the mixer in one tick
+  (816BA860..816D0040, 2128 words, 1024 on one page: under the 8-page limit of 44b81c6), 8e97cd a 246-page tick (left out)
+  and then dozens of small ones in the crashing match. The cff81c crash of the tenth round was the same family (the particle scheduler's free list).
+* **Why the mixer was blamed** [I]. A tick is attributed when the game thread's cycle count stood still. When the
+  mixer blocks inside its tick (the file layer's slot lock in `sub_001E8080`, the engine lock), any other guest
+  thread on the shared CPU runs and writes, and only the game thread's own running was checked. Measured: with the
+  mixer sleeping 2 ms in every tick (`RECOMP_ROLLBACK_TEST_MIX_YIELD=2`, old rule, `logs/dj/20261103-210324-online`),
+  2873 of 5893 and 877 of 5915 ticks passed the game-thread check although the mixer was off its CPU. Which thread
+  wrote the particle pages on the players' PCs is not known (no such writer showed locally).
+* **Fix** (506b39f, `rollback.c` only): a tick counts only when the mixer's own cycles (`QueryThreadCycleTime` on
+  itself) cover the tick's TSC time, within an eighth plus 40000 cycles; a tick with more than 128 new words is left
+  out too. Each fight ends with `[ROLLBACK] mixer ticks this fight: N watched, C clean (W words kept live) ...`.
+  `RECOMP_ROLLBACK_MIX_OFFCPU=off` gives the old rule.
+* **Checks**: venue 15, 70+10 ms, no knockout, a rematch (`-204513-online`): ok, 350 + 250 checksums equal, 2165 and 957
+  rollbacks in match 1, 35258 ticks watched, 33886 clean, 61 / 17 left out as off the CPU (0.2 %), the mixer had its
+  CPU for 100.1 % of the time (the two counters agree), **0 words** kept live; no desync, no crash. Venue 8, created
+  fighters, 170+20 ms, three matches with two rematches (`-205857-online`): ok, 40/40/50 checksums equal, 183-478
+  rollbacks a match, 0 words kept live. So locally the mixer writes nothing in the game's heap in a clean tick; the
+  mask only ever held what other threads wrote.
+* Not seen here: the bursts themselves and the particle overrun (no local run has attributed a word since 10-24).
+  Related, not fixed: F9 b1dde3 (build 51, 172 ms) crashed in a re-run in `sub_00109F00` from the crowd update,
+  reading a block allocated in a re-run and freed since (0D0D0D0D); its word +4 (81028DE4) had been attributed to
+  the mixer 2300 log lines earlier, so this fix may cover it [I]. The same player-PC pattern in two build-51 re-run
+  crashes of one player (F9 0d0d85: `sub_001156E0+0x2D0`, the particle scheduler of cff81c, step 573 of a rematch
+  after a desync at step 2820, 3286 heap blocks allocated in re-runs; 99b1d9: `sub_00117410` with ecx BF800000, as
+  in a08559): both logs hit the 64-line cap of "the mixer writes" lines in the first match (99b1d9 also two
+  27-30 page bursts), and the crash registers lie on "page with mixer words", in 99b1d9 `[edi+0x10]` is "a mixer
+  word (kept live)". So 44b81c6 narrowed the leak but did not close it [V]; that this fix closes it is [I].
+
 ### Next (after the third round)
 1. More two-copy long runs (the desyncs at steps 10 200 and 37 440 came once in two runs each; three later runs were clean),
    always with `RECOMP_NETPLAY_FINALLOG=1` so a desync can be traced to its first step.
