@@ -50,6 +50,8 @@ cite other development notes, logs and captures that are not published.
   and [PR25 integration](startup-skip-pr25-integration.md), including the combined toolkit and faster regression policy.
   The [venue audit](startup-skip-venue-audit.md) records the stress-route calibration issue found during the full run.
 - [Movie audio clock](movie-audio-clock.md)
+- [SC04 audio/video synchronization RCA](sc04-av-sync-rca.md): zero-step render frames trigger a scene-specific 1/30-second animation fallback; measured RC cause and diagnostic intervention for issue #161.
+- [SC04 source fix and validation](sc04-fix-validation.md): zero-delta guard, 38-archive scope audit, game/toolkit attribution, native boundary tests and focused Windows regression.
 
 ## Controllers and sound
 

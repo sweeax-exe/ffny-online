@@ -41,6 +41,7 @@
 #include "patches/picture.h"
 #include "patches/cheats.h"
 #include "patches/menu_geometry.h"
+#include "patches/cinema_timing.h"
 
 /* Crowd test controls (src/hooks/crowd_control.c, RECOMP_TEST_CROWD; off unless set). */
 void defjam_crowd_match_start(void);
@@ -181,6 +182,11 @@ void sub_00077040_enter(void) { dev_module_manager_enter(); cheats_game_tick(); 
 void sub_00077C40_enter(void) { dev_module_trace(1); }
 void sub_00077A40_enter(void) { dev_module_trace(3); }
 void sub_00077B20_enter(void) { dev_module_trace(4); }
+
+/* v0.16 direct callers reach this wrapper too; retain the generated renderer.
+ * No guest registers or return/stack words are changed by the wrapper itself. */
+extern void sub_000766B0_gen(void);
+void sub_000766B0(void) { defjam_cinema_render(sub_000766B0_gen); }
 void sub_00077DD0_enter(void) { dev_module_trace(7); }
 /* The per-fighter pad reader: RECOMP_TEST_INPUT replaces what it is about to read. */
 void sub_001BAA00_enter(void) { defjam_test_input(MEM32(g_esp + 4)); }
@@ -980,6 +986,8 @@ static void trace_voice_render(void)
 
 recomp_func_t recomp_lookup_manual(uint32_t xbox_va)
 {
+    if (xbox_va == 0x000766B0u)
+        return sub_000766B0;
     if (xbox_va == 0x001BAA00u && input_latency_on())
         return sub_001BAA00;
     if (xbox_va == 0x0027E075u && (input_latency_on() || input_consumption_on())) return sub_0027E075;

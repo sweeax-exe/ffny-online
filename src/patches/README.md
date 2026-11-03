@@ -1,9 +1,15 @@
-# src/patches — gameplay patches (opt-in)
+# src/patches — game behavior and compatibility patches
 
 Reserved for behavioral changes to the game itself, such as a widescreen view.
-Each goes behind a runtime setting so the unmodified path stays testable. CMake
+Each keeps a runtime setting or diagnostic override so the unmodified path stays testable. CMake
 picks up every `.c` file here. Fixes that make the game run belong in `src/hooks`
 or `src/recomp_manual.c`.
+
+- `cinema_timing.c`: SC04's zero-step animation drift correction (on by default;
+  `RECOMP_SC04_ZERO_DT_FIX=0` restores the retail behavior for diagnosis). The
+  manual cinema-render wrapper preserves positive deltas and all other scene
+  names. [RCA](../../docs/research/sc04-av-sync-rca.md) and
+  [scope/validation](../../docs/research/sc04-fix-validation.md).
 
 - `dev_unlock.c`: `RECOMP_UNLOCK_ALL=1` (every fighter and venue, through the developers'
   own routine at `0x000158F0`) and `RECOMP_DEV_DEBUG=1` (the in-fight debug overlay). Both off
