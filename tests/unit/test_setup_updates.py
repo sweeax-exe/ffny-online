@@ -230,6 +230,7 @@ def test_installed_dump_without_original_is_verified_and_clean_candidate_is_uniq
 
 def test_recovery_before_receipt_requirements_needs_no_original_dump(tmp_path, monkeypatch):
     from test_setup_engine import installer
+    monkeypatch.setattr(engine.releases, "default_cache", lambda: tmp_path / "cache/releases")
     obj=installer(tmp_path);obj.extract()
     receipt=dict(schema=1,version='0.4.1',source=str(obj.source),data=str(obj.data),executable=str(obj.source/'fake'))
     engine.write_json(obj.install/'installed.json',receipt)
