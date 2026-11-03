@@ -44,6 +44,14 @@ void draw_versus(ImDrawList *dl, ImVec2 display);
  * nullptr otherwise. */
 const char *shot_label();
 
+/* Room chat over a room's match (the online screens closed): the last lines for a few seconds, and a
+ * spectator's text bar (ENTER). Fighters never type during their match: their keys stay the fight's.
+ * fight_chat_wanted() once a frame; draw_fight_chat returns true while the bar takes the keyboard
+ * (then the game gets no input on this PC: a spectator's only). */
+bool fight_chat_wanted();
+bool draw_fight_chat(ImDrawList *dl, ImVec2 display);
+bool fight_chat_typing();
+
 }
 #endif
 

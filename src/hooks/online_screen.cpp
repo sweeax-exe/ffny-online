@@ -4314,9 +4314,23 @@ void draw_versus(ImDrawList *dl, ImVec2 display)
     if (g_versus_up) versus_page(dl, display, g_versus);
 }
 
+// Room chat over a match (social_ui.inc): read once a frame, drawn by draw_fight_chat.
+bool g_fight_chat_up = false;
+
+bool fight_chat_wanted()
+{
+    g_fight_chat_up = !g_versus_up && fight_chat_wanted_impl();
+    return g_fight_chat_up;
+}
+
+bool draw_fight_chat(ImDrawList *dl, ImVec2 display) { return fight_chat_draw_impl(dl, display); }
+
+bool fight_chat_typing() { return FC.typing; }
+
 const char *shot_label()
 {
     if (const char *chat = chat_shot_label()) return chat;
+    if (g_fight_chat_up && !gallery_on()) return fight_chat_shot_label();
     return gallery_on() ? G.page : g_versus_up ? "versus" : nullptr;
 }
 
@@ -4631,6 +4645,9 @@ bool closed_for_match() { return false; }
 bool versus_wanted() { return false; }
 void draw_versus(ImDrawList *, ImVec2) {}
 const char *shot_label() { return nullptr; }
+bool fight_chat_wanted() { return false; }
+bool draw_fight_chat(ImDrawList *, ImVec2) { return false; }
+bool fight_chat_typing() { return false; }
 }
 
 #endif

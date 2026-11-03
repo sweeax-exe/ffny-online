@@ -56,9 +56,98 @@ struct Chat {
     bool mouse_off = false;         // the page under the chat takes no mouse
     bool opened_once = false;
     int popup_frame = -1;           // the keyboard or the menu opened in this frame: its press is not theirs
+    // ROOM (stage 2b): the room's chat through the relay (netplay.c), the last line seen, local mutes
+    unsigned room_seen = 0;
+    std::vector<std::string> room_muted;        // by name (the room's list names players by name)
+    std::vector<unsigned> room_muted_ids;       // by account, when the relay named one
+    bool menu_room = false;                     // the player menu opened from the ROOM tab
+    unsigned menu_account = 0;
 } C;
 
 bool chat_mouse_blocked() { return C.mouse_off; }
+
+// ---- room chat (stage 2b): relay-only, so it works with the service's social switch off ----
+
+// -1 no room chat here (no room, or a relay without it), 0 read only, 1 can write.
+int room_chat_state(std::string *why = nullptr)
+{
+    char w[160];
+    int s = netplay_room_chat_can_write(w, sizeof(w));
+    if (why) *why = w;
+    return s;
+}
+
+// Only the ROOM tab: the service's social features are off (or not ready), room chat is on.
+bool room_only() { return !social_enabled(); }
+
+bool room_muted(const NetChatLine &l)
+{
+    if (l.system || l.mine) return false;
+    for (auto &n : C.room_muted) if (n == l.name) return true;
+    for (unsigned id : C.room_muted_ids) if (id && id == l.account) return true;
+    if (l.account && !room_only())      // muted in the social features too
+        for (auto &m : C.v.muted) if (m.id == (long long)l.account) return true;
+    return false;
+}
+
+void room_mute(const std::string &name, unsigned account, bool on)
+{
+    auto &ns = C.room_muted;
+    auto &is = C.room_muted_ids;
+    ns.erase(std::remove(ns.begin(), ns.end(), name), ns.end());
+    if (account) is.erase(std::remove(is.begin(), is.end(), account), is.end());
+    if (on) {
+        ns.push_back(name);
+        if (account) is.push_back(account);
+    }
+    fprintf(stderr, "[SOCIAL-UI] room chat: %s %s\n", on ? "muted" : "unmuted", name.c_str());
+}
+
+bool room_name_muted(const std::string &name)
+{
+    for (auto &n : C.room_muted) if (n == name) return true;
+    return false;
+}
+
+// The room's lines as the chat's lines (oldest first); *last: the newest one's seq.
+std::vector<social::Line> room_lines(unsigned *last = nullptr)
+{
+    static NetChatLine buf[NETPLAY_CHAT_LINES];
+    unsigned seq = 0;
+    int n = netplay_room_chat(buf, NETPLAY_CHAT_LINES, &seq);
+    if (last) *last = seq;
+    std::vector<social::Line> out;
+    for (int i = 0; i < n; i++) {
+        social::Line l;
+        l.seq = buf[i].seq;
+        l.from = buf[i].account;
+        l.at = buf[i].unix_at;
+        l.channel = "room";
+        l.name = buf[i].name;
+        l.text = buf[i].text;
+        l.system = buf[i].system != 0;
+        l.mine = buf[i].mine != 0;
+        l.hidden = room_muted(buf[i]);
+        static unsigned logged;     // each hidden line once in the log (tests)
+        if (l.hidden && buf[i].seq > logged) {
+            logged = buf[i].seq;
+            fprintf(stderr, "[SOCIAL-UI] room chat: line hidden (muted): %s\n", buf[i].name);
+        }
+        out.push_back(l);
+    }
+    return out;
+}
+
+// Lines of others not seen yet on the ROOM tab.
+int room_unread()
+{
+    static NetChatLine buf[NETPLAY_CHAT_LINES];
+    unsigned seq = 0;
+    int n = netplay_room_chat(buf, NETPLAY_CHAT_LINES, &seq), u = 0;
+    for (int i = 0; i < n; i++)
+        if (buf[i].seq > C.room_seen && !buf[i].mine && !buf[i].system && !room_muted(buf[i])) u++;
+    return u;
+}
 
 // ---- text helpers ----
 
@@ -237,6 +326,7 @@ ChatKeys chat_keys(bool typing)
 bool tab_types(int tab)
 {
     const social::View &v = C.v;
+    if (tab == TAB_ROOM) return room_chat_state() == 1;
     if (tab == TAB_GLOBAL) return true;
     if (tab == TAB_CREW) return v.crew != 0;
     if (tab == TAB_MESSAGES) {
@@ -275,6 +365,14 @@ void chat_send()
         social::send_dm(C.dm_with, text);
     } else if (t == TAB_CREW && C.v.crew) {
         social::send_crew(text);
+    } else if (t == TAB_ROOM) {
+        if (text.size() > 200) {        // the relay's cap is 200 bytes: cut at a character's start
+            size_t cut = 200;
+            while (cut > 0 && ((unsigned char)text[cut] & 0xC0) == 0x80) cut--;
+            text.resize(cut);
+        }
+        if (!netplay_room_chat_send(text.c_str())) return;
+        fprintf(stderr, "[SOCIAL-UI] room chat sent: %s\n", text.c_str());
     } else {
         return;
     }
@@ -344,7 +442,11 @@ void badge(ImDrawList *dl, const Frame &f, float x, float y, int n)
     text(dl, f, g_body, 8.5f, x + w / 2, y + 0.5f, IM_COL32(255, 245, 230, 255), b, CENTER, 0);
 }
 
-bool tab_shown(int t) { return t != TAB_CREW || C.v.crews || C.v.crew; }
+bool tab_shown(int t)
+{
+    if (room_only()) return t == TAB_ROOM;     // the service's social features off: room chat only
+    return t != TAB_CREW || C.v.crews || C.v.crew;
+}
 
 void step_tab(int dir)
 {
@@ -366,7 +468,7 @@ void chat_tabs(ImDrawList *dl, const Frame &f)
         bool on = t == C.tab;
         float w = text_width(f, g_title, 13, k_tab_names[t]);
         text(dl, f, g_title, 13, x, y, on ? CREAM : DIM, k_tab_names[t], LEFT, 0);
-        int n = t == TAB_FRIENDS ? C.v.requests : t == TAB_MESSAGES ? C.v.unread : 0;
+        int n = t == TAB_FRIENDS ? C.v.requests : t == TAB_MESSAGES ? C.v.unread : t == TAB_ROOM && !on ? room_unread() : 0;
         float bw = 0;
         if (n > 0) { badge(dl, f, x + w + 4, y + 2.5f, n); bw = 18; }
         if (on) rect(dl, f, x - 2, TABS_B - 2.5f, w + bw + 4, 2, RED);
@@ -432,7 +534,7 @@ int draw_lines(ImDrawList *dl, const Frame &f, const std::vector<const social::L
     bool sel_drawn = sel < 0;
     for (int i = C.line_skip; i < n && y > y0; i++) {
         const social::Line &l = *lines[(size_t)(n - 1 - i)];
-        bool mine = l.from && l.from == C.v.me;
+        bool mine = l.mine || (l.from && l.from == C.v.me);
         std::string body = l.hidden ? "message hidden: you muted " + l.name : l.text;
         ImU32 name_col = mine ? GOLD_TEXT : l.from && friend_of(l.from) ? BLUE_NAME : CREAM;
         float h, top;
@@ -484,7 +586,8 @@ int draw_lines(ImDrawList *dl, const Frame &f, const std::vector<const social::L
     dl->PopClipRect();
     if (!sel_drawn && sel >= 0) C.line_skip++;      // keep the marked line in view
     if (n == 0) text(dl, f, g_body, 10, (x0 + x1) / 2, (y0 + y1) / 2 - 6, DIM,
-                     C.tab == TAB_CREW ? "No crew messages yet. Say hello." : "No messages yet. Be the first.", CENTER, 0);
+                     C.tab == TAB_CREW ? "No crew messages yet. Say hello." :
+                     C.tab == TAB_ROOM ? "Nothing said in this room yet." : "No messages yet. Be the first.", CENTER, 0);
     // the mouse wheel scrolls
     if (mouse_in(f, x0, y0, x1 - x0, y1 - y0)) {
         float wheel = ImGui::GetIO().MouseWheel;
@@ -503,6 +606,8 @@ void open_player_menu(long long id, const std::string &name)
     C.menu_name = name;
     C.menu_sel = 0;
     C.popup_frame = ImGui::GetFrameCount();
+    C.menu_room = false;
+    C.menu_account = 0;
 }
 
 void draw_global(ImDrawList *dl, const Frame &f, const ChatKeys &k)
@@ -611,7 +716,7 @@ void draw_crew(ImDrawList *dl, const Frame &f, const ChatKeys &k)
     input_bar(dl, f, PX, "Message your crew", "SEND");
 }
 
-// ---- ROOM: who is in it; room chat comes with the relay's part (stage 2b) ----
+// ---- ROOM: who is in it, and the room's chat (stage 2b: through the relay, netplay.c) ----
 
 void draw_room_tab(ImDrawList *dl, const Frame &f, const ChatKeys &k, const NetRoom &r)
 {
@@ -634,18 +739,49 @@ void draw_room_tab(ImDrawList *dl, const Frame &f, const ChatKeys &k, const NetR
         dl->AddCircleFilled(f.p(PX + 15, y + 5.5f), 3 * f.s(), watcher ? IM_COL32(242, 230, 200, 90) : LIVE);
         text(dl, f, g_hand, 13, PX + 24, y - 2, host ? GOLD_TEXT : watcher ? IM_COL32(242, 230, 200, 205) : BLUE_NAME, name,
              LEFT, 0.6f);
-        const char *what = watcher ? "WATCHING" : host ? "HOST" : you ? "YOU" : "";
-        text(dl, f, g_body, 7.5f, PX + lw - 12, y + 2, host ? GOLD_TEXT : DIM, what, RIGHT, 0);
-        if (mouse_click(f, PX + 7, y - 4, lw - 14, 19)) C.sel[TAB_ROOM] = i;
-        if (on && (k.a || mouse_click(f, PX + 7, y - 4, lw - 14, 19)) && !you) open_player_menu(0, name);
+        const char *what = room_name_muted(name) ? "MUTED" : watcher ? "WATCHING" : host ? "HOST" : you ? "YOU" : "";
+        text(dl, f, g_body, 7.5f, PX + lw - 12, y + 2, host && !room_name_muted(name) ? GOLD_TEXT : DIM, what, RIGHT, 0);
+        bool click = mouse_click(f, PX + 7, y - 4, lw - 14, 19);
+        if (click) C.sel[TAB_ROOM] = i;
+        if (on && (k.a || click) && !you && !(watcher && r.you == NETPLAY_SLOT_SPECTATOR && !strcmp(name, hub_name().c_str()))) {
+            open_player_menu(0, name);
+            C.menu_room = true;
+        }
         y += 17;
     }
-    text(dl, f, g_body, 8.5f, PX + 12, PY + PH - 34, DIM, "Pick a name: add friend.", LEFT, 0, lw - 24);
-    float cx = PX + lw + (PW - lw) / 2;
-    text(dl, f, g_title, 13, cx, PY + 140, CREAM, "ROOM CHAT IS COMING", CENTER, 0);
-    text(dl, f, g_body, 10, cx, PY + 162, DIM, "Writing to the room arrives with the next update.", CENTER, 0);
-    text(dl, f, g_body, 10, cx, PY + 176, DIM, "Voice chat works in rooms today.", CENTER, 0);
-    text(dl, f, g_body, 10, cx, PY + 200, DIM, "Meanwhile: GLOBAL, FRIENDS and MESSAGES.", CENTER, 0);
+    text(dl, f, g_body, 8.5f, PX + 12, PY + PH - 34, DIM, room_only() ? "Pick a name: mute in this room." :
+         "Pick a name: add friend or mute.", LEFT, 0, lw - 24);
+
+    // the room's chat, newest at the bottom, the name and time above each line as the design has it
+    std::string why;
+    int state = room_chat_state(&why);
+    unsigned last = 0;
+    std::vector<social::Line> lines = room_lines(&last);
+    C.room_seen = last;     // shown: read
+    float x0 = PX + lw + 22, x1 = PX + PW - 22;
+    if (state < 0) {
+        float cx = PX + lw + (PW - lw) / 2;
+        text(dl, f, g_title, 13, cx, PY + 140, CREAM, r.in_room ? "NO ROOM CHAT HERE" : "NOT IN A ROOM", CENTER, 0);
+        text(dl, f, g_body, 10, cx, PY + 162, DIM, r.in_room ? (why.empty() ? "This server has no room chat yet." : why.c_str())
+                                                             : "Join or open a room to talk with its players.", CENTER, 0, PW - lw - 40);
+        text(dl, f, g_body, 10, cx, PY + 186, DIM, "Voice chat works in rooms.", CENTER, 0);
+        return;
+    }
+    std::vector<const social::Line *> ptrs;
+    for (auto &l : lines) ptrs.push_back(&l);
+    int keep = C.sel[TAB_ROOM];
+    C.sel[TAB_ROOM] = -1;           // the marker belongs to the list on the left
+    int clicked = draw_lines(dl, f, ptrs, x0, TABS_B + 6, x1, BAR_Y, true);
+    C.sel[TAB_ROOM] = keep;
+    if (clicked >= 0 && clicked < (int)ptrs.size()) {
+        const social::Line &l = *ptrs[ptrs.size() - 1 - (size_t)clicked];
+        if (!l.system && !l.mine) {
+            open_player_menu(room_only() ? 0 : l.from, l.name);
+            C.menu_room = true;
+            C.menu_account = (unsigned)l.from;
+        }
+    }
+    input_bar(dl, f, PX + lw, state == 1 ? std::string("Message the room") : why, "SEND");
 }
 
 // ---- FRIENDS ----
@@ -940,13 +1076,20 @@ void draw_messages(ImDrawList *dl, const Frame &f, const ChatKeys &k, const NetR
 
 void draw_player_menu(ImDrawList *dl, const Frame &f, const ChatKeys &k)
 {
-    std::vector<std::pair<std::string, int>> items;     // 0 add friend, 1 message, 2 mute, 3 unmute
+    std::vector<std::pair<std::string, int>> items;     // 0 add friend, 1 message, 2 mute, 3 unmute, 4/5 room mute/unmute
     bool is_friend = C.menu_id && friend_of(C.menu_id), muted = false, asked = false;
     for (auto &m : C.v.muted) muted |= m.id == C.menu_id;
     for (auto &o : C.v.out) asked |= C.menu_id ? o.id == C.menu_id : o.name == C.menu_name;
-    if (!is_friend && !asked) items.push_back({ "ADD FRIEND", 0 });
-    if (C.menu_id) items.push_back({ "MESSAGE", 1 });
-    if (C.menu_id) items.push_back({ muted ? "UNMUTE" : "MUTE", muted ? 3 : 2 });
+    if (C.menu_room) {      // the ROOM tab: hide this player's room lines on this PC
+        bool rm = room_name_muted(C.menu_name);
+        for (unsigned id : C.room_muted_ids) rm |= C.menu_account && id == C.menu_account;
+        items.push_back({ rm ? "UNMUTE IN ROOM" : "MUTE IN ROOM", rm ? 5 : 4 });
+    }
+    if (!room_only()) {
+        if (!is_friend && !asked) items.push_back({ "ADD FRIEND", 0 });
+        if (C.menu_id) items.push_back({ "MESSAGE", 1 });
+        if (C.menu_id && !C.menu_room) items.push_back({ muted ? "UNMUTE" : "MUTE", muted ? 3 : 2 });
+    }
     if (items.empty()) items.push_back({ "FRIEND REQUEST SENT", -1 });
     float w = 160, h = 34 + items.size() * 22.0f, x = 320 - w / 2, y = 200 - h / 2;
     rect(dl, f, PX, PY, PW, PH, IM_COL32(0, 0, 0, 120), 8);
@@ -967,6 +1110,7 @@ void draw_player_menu(ImDrawList *dl, const Frame &f, const ChatKeys &k)
             if (what == 0) social::friend_request(C.menu_id, C.menu_name);
             else if (what == 1) open_dm(C.menu_id);
             else if (what == 2 || what == 3) social::mute(C.menu_id, what == 2);
+            else if (what == 4 || what == 5) room_mute(C.menu_name, C.menu_account, what == 4);
             C.menu = false;
         }
     }
@@ -1330,7 +1474,7 @@ void draw_toasts(ImDrawList *dl, const Frame &f)
 // "SECONDS:action;..." from the moment the social lists are loaded: chat=TAB (open the chat on that
 // tab: room, global, friends, messages, crew), keyboard=TEXT (the on-screen keyboard over the tab with
 // that text), friend=NAME (the keyboard of ADD FRIEND with that name), dm=NAME (MESSAGES with that
-// friend), type=TEXT (the tab's text box), send, close; pad=BUTTON (a, b, x, y, lb, rb, start, back,
+// friend), type=TEXT (the tab's text box), send, close, mute=NAME / unmute=NAME (MUTE IN ROOM); pad=BUTTON (a, b, x, y, lb, rb, start, back,
 // up, down, left, right) and key=KEY (enter, escape, backspace, tab) press it for a frame as the pad's
 // or keyboard's own press arrives, text=TEXT types it; room=create opens a room. Each step writes a
 // [SOCIAL-UI] line.
@@ -1407,6 +1551,8 @@ void chat_test_step()
         if (held != ImGuiKey_None) ImGui::GetIO().AddKeyEvent(held, true);
     } else if (what == "text") {
         ImGui::GetIO().AddInputCharactersUTF8(arg.c_str());
+    } else if (what == "mute" || what == "unmute") {    // the ROOM tab's MUTE IN ROOM on that player
+        room_mute(arg, 0, what == "mute");
     } else if (what == "room") {                    // a room of this copy's own (a presence other than the menu)
         NetRoomSettings rs;
         default_settings(rs);
@@ -1422,13 +1568,22 @@ void chat_test_step()
 bool chat_begin()
 {
     if (!social_enabled()) {
-        C.open = C.kb = C.menu = false;
+        // room chat is the relay's: with the service's social features off the window still opens
+        // in a room whose relay carries it, with the ROOM tab alone
         C.have = false;
-        return false;
+        C.v = social::View();
+        if (room_chat_state() < 0) {
+            C.open = C.kb = C.menu = false;
+            C.ready_at = 0;
+            return false;
+        }
+        C.tab = TAB_ROOM;
+        if (!C.ready_at) C.ready_at = GetTickCount64();
+    } else {
+        if (social::snapshot(C.v, C.have ? C.v.version : 0xFFFFFFFFu)) C.have = true;
+        if (C.v.ready && !C.ready_at) C.ready_at = GetTickCount64();
+        if (!C.v.ready) C.ready_at = 0;
     }
-    if (social::snapshot(C.v, C.have ? C.v.version : 0xFFFFFFFFu)) C.have = true;
-    if (C.v.ready && !C.ready_at) C.ready_at = GetTickCount64();
-    if (!C.v.ready) C.ready_at = 0;
     chat_test_step();
     NetRoom r;
     lobby_room(&r);
@@ -1457,7 +1612,7 @@ bool chat_begin()
 void chat_chip(ImDrawList *dl, const Frame &f)
 {
     // top centre: the corners carry the page title, the room's code and the vote's clock
-    int n = C.v.unread + C.v.requests;
+    int n = C.v.unread + C.v.requests + room_unread();
     const char *key = "ENTER";
     float w = text_width(f, g_title, 10, "CHAT") + text_width(f, g_body, 9, key) + 26 + (n ? 16 : 0);
     float x = 320 - w / 2, y = 5;
@@ -1475,7 +1630,7 @@ void chat_chip(ImDrawList *dl, const Frame &f)
 // player closed the online screens from here (never: B closes the window only).
 void chat_draw(ImDrawList *dl, const Frame &f, ImVec2 display)
 {
-    if (!social_enabled()) return;
+    if (!social_enabled() && room_chat_state() < 0) return;
     C.mouse_off = false;
     if (!C.open) {
         social_set_typing(0);
@@ -1508,7 +1663,7 @@ void chat_draw(ImDrawList *dl, const Frame &f, ImVec2 display)
     }
     chat_panel(dl, f, PX, PY, PW, PH);
     C.mouse_off = C.kb || C.menu;       // the keyboard or the player menu is over the tab
-    if (!C.v.ready) {
+    if (!C.v.ready && !room_only()) {
         chat_tabs(dl, f);
         text(dl, f, g_body, 11, PX + PW / 2, PY + 160, DIM, "Connecting to the chat...", CENTER, 0);
     } else {
@@ -1600,6 +1755,186 @@ void chat_draw(ImDrawList *dl, const Frame &f, ImVec2 display)
 
 const char *chat_shot_label()
 {
-    if (!C.open || !social_enabled()) return nullptr;
+    if (!C.open || (!social_enabled() && room_chat_state() < 0)) return nullptr;
     return C.kb ? "social-keyboard" : k_tab_shots[C.tab];
 }
+
+// ---- chat during a fight (stage 2b; the design's "Chat during a fight") ----
+//
+// Over a room's match (the online screens closed): the room's last lines at the bottom left for a
+// few seconds each, the newest brightest. Who may type, and why: only a spectator. A fighter's pad
+// and keyboard feed the lockstep and rollback input every step, so a text box over the fight would
+// have to take that input away from the fight mid-match, and any slip would put key presses into the
+// fight or change what the match's input is. A spectator's PC sends nothing into the match (the relay
+// forwards no spectator DATA), so its keys can go to a text box: ENTER opens the bar, ENTER sends, ESC
+// cancels, and while it is open the game gets no input on that PC (pc_ui.cpp holds it, as for the
+// overlay). Fighters see the lines and write in the room once the match is over. Nothing here is in
+// the match's input or its checksums: the lines arrive on the network thread as T_CHAT and are only
+// read here.
+
+const unsigned long long FIGHT_LINE_MS = 8000;     // a line stays this long
+const int FIGHT_LINES = 3;
+
+struct FightChat {
+    bool typing = false;
+    std::string draft;
+    int cursor = 0;
+    unsigned long long opened = 0, fight_at = 0;
+    // RECOMP_TEST_FIGHT_CHAT="S:TEXT": a spectator opens the bar S seconds into its fight, types TEXT
+    // and sends it 1.5 s later (tests: the real bar and the held input)
+    float test_s = -1;
+    std::string test_text;
+    int test_step = 0;
+    bool parsed = false;
+} FC;
+
+bool fight_spectator(const NetRoom &r) { return r.in_room && r.you == NETPLAY_SLOT_SPECTATOR; }
+
+// In a room's match, the online screens closed.
+bool fight_chat_live()
+{
+    if (gallery_on()) return false;
+    if (!(net_state() == NETPLAY_CONNECTED && net_in_lobby())) return false;
+    return room_chat_state() >= 0;
+}
+
+bool fight_chat_wanted_impl()
+{
+    if (!fight_chat_live()) {
+        FC.typing = false;
+        FC.fight_at = 0;
+        return false;
+    }
+    if (FC.typing) return true;
+    NetRoom r;
+    lobby_room(&r);
+    if (fight_spectator(r) && room_chat_state() == 1) return true;     // its ENTER opens the bar
+    static NetChatLine buf[NETPLAY_CHAT_LINES];
+    int n = netplay_room_chat(buf, NETPLAY_CHAT_LINES, nullptr);
+    unsigned long long now = GetTickCount64();
+    for (int i = n - 1; i >= 0; i--)
+        if (now - buf[i].at < FIGHT_LINE_MS && !room_muted(buf[i])) return true;
+    return false;
+}
+
+void fight_chat_test(const NetRoom &r)
+{
+    if (!FC.parsed) {
+        FC.parsed = true;
+        if (const char *e = getenv("RECOMP_TEST_FIGHT_CHAT")) {
+            const char *c = strchr(e, ':');
+            if (c) { FC.test_s = (float)atof(e); FC.test_text = c + 1; }
+        }
+    }
+    if (FC.test_s < 0 || FC.test_step >= 2 || !fight_spectator(r)) return;
+    if (netplay_in_fight() && !FC.fight_at) FC.fight_at = GetTickCount64();
+    if (!FC.fight_at) return;
+    float t = (GetTickCount64() - FC.fight_at) / 1000.0f;
+    if (FC.test_step == 0 && t >= FC.test_s && room_chat_state() == 1) {
+        FC.typing = true;
+        FC.opened = GetTickCount64();
+        FC.draft = FC.test_text;
+        FC.cursor = (int)FC.draft.size();
+        FC.test_step = 1;
+        fprintf(stderr, "[SOCIAL-UI] fight chat: test opened the bar\n");
+    } else if (FC.test_step == 1 && t >= FC.test_s + 1.5f) {
+        if (netplay_room_chat_send(FC.draft.c_str())) fprintf(stderr, "[SOCIAL-UI] fight chat sent: %s\n", FC.draft.c_str());
+        FC.draft.clear();
+        FC.cursor = 0;
+        FC.typing = false;
+        FC.test_step = 2;
+    }
+}
+
+// Draws the lines (and a spectator's bar); returns true while the bar takes the keyboard.
+bool fight_chat_draw_impl(ImDrawList *dl, ImVec2 display)
+{
+    Frame f = menu_frame(display);
+    NetRoom r;
+    lobby_room(&r);
+    bool spectator = fight_spectator(r);
+    fight_chat_test(r);
+    if (!spectator || room_chat_state() != 1) FC.typing = false;
+    if (spectator && !FC.typing && room_chat_state() == 1 && ImGui::IsKeyPressed(ImGuiKey_Enter, false)) {
+        FC.typing = true;
+        FC.opened = GetTickCount64();
+        FC.draft.clear();
+        FC.cursor = 0;
+        fprintf(stderr, "[SOCIAL-UI] fight chat: bar opened (spectator)\n");
+    }
+    if (FC.typing && GetTickCount64() - FC.opened > 150) {
+        std::string typed = typed_chars();
+        if (!typed.empty()) insert_text(FC.draft, FC.cursor, typed, 200);
+        if (ImGui::IsKeyPressed(ImGuiKey_Backspace, true)) erase_back(FC.draft, FC.cursor);
+        if (ImGui::IsKeyPressed(ImGuiKey_Escape, false) || ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false)) {
+            FC.typing = false;
+        } else if (ImGui::IsKeyPressed(ImGuiKey_Enter, false) || ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, false)) {
+            std::string t = FC.draft;
+            while (!t.empty() && t.back() == ' ') t.pop_back();
+            if (!t.empty() && t.size() <= 200 && netplay_room_chat_send(t.c_str()))
+                fprintf(stderr, "[SOCIAL-UI] fight chat sent: %s\n", t.c_str());
+            FC.draft.clear();
+            FC.cursor = 0;
+            FC.typing = false;
+        }
+    }
+    social_set_typing(FC.typing);
+
+    // the lines: the newest at the bottom, each a few seconds
+    static NetChatLine buf[NETPLAY_CHAT_LINES];
+    int n = netplay_room_chat(buf, NETPLAY_CHAT_LINES, nullptr);
+    unsigned long long now = GetTickCount64();
+    std::vector<const NetChatLine *> show;
+    for (int i = n - 1; i >= 0 && (int)show.size() < (FC.typing ? 5 : FIGHT_LINES); i--) {
+        if (room_muted(buf[i])) continue;
+        if (!FC.typing && now - buf[i].at >= FIGHT_LINE_MS) break;
+        show.push_back(&buf[i]);
+    }
+    float y = FC.typing ? 418 : 440;
+    for (size_t i = 0; i < show.size(); i++) {
+        const NetChatLine &l = *show[i];
+        float age = (float)(now - l.at);
+        float a = i == 0 ? 1.0f : i == 1 ? 0.75f : 0.45f;
+        if (!FC.typing && age > FIGHT_LINE_MS - 1500) a *= std::max(0.0f, (FIGHT_LINE_MS - age) / 1500.0f);
+        if (a <= 0.01f) continue;
+        const char *name = l.system ? "" : l.name;
+        float nw = l.system ? 0 : text_width(f, g_hand, 11, name) + 5;
+        float tw = std::min(250.0f, text_width(f, g_body, 12, l.text));
+        float th = std::max(14.0f, text_height(f, g_body, 12, l.text, 250));
+        float h = th + 7, w = nw + tw + 14;
+        y -= h;
+        rect(dl, f, 20, y, w, h, IM_COL32(0, 0, 0, (int)(107 * a)), 5);
+        ImU32 ncol = l.mine ? GOLD_TEXT : l.slot >= 0 && l.slot < 32 ? BLUE_NAME : IM_COL32(242, 230, 200, 217);
+        if (!l.system) text(dl, f, g_hand, 11, 27, y + 2, with_alpha(ncol, a), name, LEFT, 0);
+        text(dl, f, g_body, 12, 27 + nw, y + 2.5f, with_alpha(l.system ? ORANGE : CREAM, a), l.text, LEFT, 0, 250);
+        y -= 4;
+    }
+    if (FC.typing) {    // the bar, as the design has it
+        float bx = 20, by = 430, bw = 280, bh = 27;
+        rect(dl, f, bx, by, bw, bh, IM_COL32(0, 0, 0, 166), 6);
+        dl->AddRect(f.p(bx, by), f.p(bx + bw, by + bh), with_alpha(RED, 0.85f), 6 * f.s(), 0, 1.0f * f.s());
+        text(dl, f, g_title, 9, bx + 8, by + 8, GOLD_TEXT, "ROOM", LEFT, 0);
+        float lx = bx + 12 + text_width(f, g_title, 9, "ROOM");
+        const char *keys = "ENTER SENDS - ESC CANCELS";
+        float kw = text_width(f, g_body, 7.5f, keys);
+        dl->PushClipRect(f.p(lx, by), f.p(bx + bw - kw - 14, by + bh), true);
+        std::string before = FC.draft.substr(0, (size_t)std::max(0, std::min(FC.cursor, (int)FC.draft.size())));
+        float cw = text_width(f, g_body, 11, before.c_str()), shift = std::max(0.0f, cw - (bw - kw - 40 - (lx - bx)));
+        text(dl, f, g_body, 11, lx - shift, by + 6.5f, CREAM, FC.draft.c_str(), LEFT, 0);
+        if ((GetTickCount64() / 500) % 2 == 0) rect(dl, f, lx - shift + cw + 1, by + 6, 1.5f, 14, GOLD_TEXT);
+        dl->PopClipRect();
+        text(dl, f, g_body, 7.5f, bx + bw - 8, by + 10, IM_COL32(242, 230, 200, 153), keys, RIGHT, 0);
+        text(dl, f, g_body, 8.5f, bx + bw + 10, by + 9, IM_COL32(242, 230, 200, 140),
+             "While you type, the keyboard does not control the game", LEFT, 0);
+    } else if (spectator && room_chat_state() == 1) {
+        float x = 20, yy = 452;
+        float pw = text_width(f, g_body, 8, "ENTER") + 6;
+        rect(dl, f, x, yy, pw + text_width(f, g_title, 8, "ROOM CHAT") + 12, 13, IM_COL32(0, 0, 0, 110), 4);
+        rect(dl, f, x + 3, yy + 2, pw, 9, IM_COL32(70, 70, 70, 220), 2);
+        text(dl, f, g_body, 8, x + 3 + pw / 2, yy + 2, WHITE, "ENTER", CENTER, 0);
+        text(dl, f, g_title, 8, x + 7 + pw, yy + 2.5f, IM_COL32(242, 230, 200, 200), "ROOM CHAT", LEFT, 0);
+    }
+    return FC.typing;
+}
+
+const char *fight_chat_shot_label() { return FC.typing ? "fightchat-typing" : "fightchat"; }
