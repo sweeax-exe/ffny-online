@@ -112,6 +112,13 @@ void crew_join(long long crew);
 void crew_dismiss(long long crew);
 void reload();                      /* every list again */
 
+/* Stage 2c. Block: no friendship, requests, messages or chat lines either way (the service keeps it;
+ * room lines of a blocked account are hidden here). Report: a line with up to 5 lines before it, for
+ * the team (channel "room", "eu"/"us-east"/"us-west", "crew:N" or "dm:N"; msg the line's id where the
+ * service has one, text and context for room lines, which only this PC saw). */
+void block(long long id, const std::string &name, bool on);
+void report(long long id, const std::string &channel, long long msg, const std::string &text,
+            const std::vector<std::string> &context);
 void set_show_avatar(bool on);
 /* Avatars (stage 2c): the account service's 64x64 copy of a player's Discord picture
  * (GET /api/avatar/N.png; the game never contacts Discord). avatar_want queues a download on a thread

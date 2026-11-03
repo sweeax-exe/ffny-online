@@ -62,6 +62,11 @@ struct Chat {
     std::vector<unsigned> room_muted_ids;       // by account, when the relay named one
     bool menu_room = false;                     // the player menu opened from the ROOM tab
     unsigned menu_account = 0;
+    // REPORT (stage 2c): the line the menu was opened on, and the lines before it (room lines only
+    // this PC saw: their text goes with the report)
+    std::string menu_channel, menu_text;
+    long long menu_msg = 0;
+    std::vector<std::string> menu_context;
 } C;
 
 bool chat_mouse_blocked() { return C.mouse_off; }
@@ -178,8 +183,10 @@ bool room_muted(const NetChatLine &l)
     if (l.system || l.mine) return false;
     for (auto &n : C.room_muted) if (n == l.name) return true;
     for (unsigned id : C.room_muted_ids) if (id && id == l.account) return true;
-    if (l.account && !room_only())      // muted in the social features too
+    if (l.account && !room_only()) {    // muted or blocked in the social features too
         for (auto &m : C.v.muted) if (m.id == (long long)l.account) return true;
+        for (auto &b : C.v.blocked) if (b.id == (long long)l.account) return true;
+    }
     return false;
 }
 
@@ -719,6 +726,44 @@ void open_player_menu(long long id, const std::string &name)
     C.popup_frame = ImGui::GetFrameCount();
     C.menu_room = false;
     C.menu_account = 0;
+    C.menu_channel.clear();
+    C.menu_text.clear();
+    C.menu_msg = 0;
+    C.menu_context.clear();
+}
+
+// What REPORT sends for the line at index i (oldest first) of a chat: its id where the service has the
+// line, else (room) its text, and up to five lines before it.
+void menu_report_line(const std::vector<const social::Line *> &lines, size_t i, const std::string &channel)
+{
+    if (i >= lines.size()) return;
+    const social::Line &l = *lines[i];
+    C.menu_channel = channel;
+    C.menu_msg = channel == "room" ? 0 : l.seq;
+    C.menu_text = channel == "room" ? l.text : "";
+    C.menu_context.clear();
+    if (channel == "room")
+        for (size_t k = i >= 5 ? i - 5 : 0; k < i; k++)
+            if (!lines[k]->system) C.menu_context.push_back(clock_text(lines[k]->at) + " " + lines[k]->name + ": " + lines[k]->text);
+}
+
+// REPORT on a player whose menu came from a list (the room's names, a conversation): their newest line.
+void menu_report_newest(long long id, const std::string &name, bool room)
+{
+    if (room) {
+        std::vector<social::Line> lines = room_lines();
+        std::vector<const social::Line *> ptrs;
+        for (auto &l : lines) ptrs.push_back(&l);
+        for (size_t i = lines.size(); i-- > 0;)
+            if (!lines[i].system && !lines[i].mine && (id ? lines[i].from == id : lines[i].name == name)) {
+                menu_report_line(ptrs, i, "room");
+                return;
+            }
+        return;
+    }
+    for (auto &t : C.v.threads)
+        if (t.with == id)
+            for (auto &m : t.msgs) if (m.from == id) { C.menu_channel = "dm:" + std::to_string(id); C.menu_msg = m.id; }
 }
 
 void draw_global(ImDrawList *dl, const Frame &f, const ChatKeys &k)
@@ -753,7 +798,10 @@ void draw_global(ImDrawList *dl, const Frame &f, const ChatKeys &k)
     int s = C.sel[TAB_GLOBAL];
     if ((k.a || clicked >= 0) && s >= 0 && s < n) {
         const social::Line &l = *lines[(size_t)(n - 1 - s)];
-        if (!l.system) open_player_menu(l.from, l.name);
+        if (!l.system) {
+            open_player_menu(l.from, l.name);
+            menu_report_line(lines, (size_t)(n - 1 - s), l.channel);
+        }
     }
     std::string where = C.region ? std::string(k_region_names[C.region]) : "";
     for (auto &c : where) c = (char)tolower((unsigned char)c);
@@ -856,8 +904,11 @@ void draw_room_tab(ImDrawList *dl, const Frame &f, const ChatKeys &k, const NetR
         bool click = mouse_click(f, PX + 7, y - 4, lw - 14, 19);
         if (click) C.sel[TAB_ROOM] = i;
         if (on && (k.a || click) && !you && !(watcher && r.you == NETPLAY_SLOT_SPECTATOR && !strcmp(name, hub_name().c_str()))) {
-            open_player_menu(0, name);
+            long long acc = room_only() ? 0 : room_account_of(name);
+            open_player_menu(acc, name);
             C.menu_room = true;
+            C.menu_account = (unsigned)acc;
+            menu_report_newest(acc, name, true);
         }
         y += 17;
     }
@@ -891,6 +942,7 @@ void draw_room_tab(ImDrawList *dl, const Frame &f, const ChatKeys &k, const NetR
             open_player_menu(room_only() ? 0 : l.from, l.name);
             C.menu_room = true;
             C.menu_account = (unsigned)l.from;
+            menu_report_line(ptrs, ptrs.size() - 1 - (size_t)clicked, "room");
         }
     }
     input_bar(dl, f, PX + lw, state == 1 ? std::string("Message the room") : why, "SEND");
@@ -1140,6 +1192,17 @@ void draw_messages(ImDrawList *dl, const Frame &f, const ChatKeys &k, const NetR
         nx += tw + 6;
     }
     text(dl, f, g_body, 9, nx, hy + 2, scol, state.c_str(), LEFT, 0);
+    // BLOCK - REPORT, as the design has it: X or a click opens the player's menu with both
+    {
+        const char *opts = "BLOCK - REPORT";
+        float ow = text_width(f, g_title, 9, opts);
+        bool hot = mouse_in(f, rx + rw - 12 - ow, hy, ow, 14);
+        text(dl, f, g_title, 9, rx + rw - 12, hy + 2, hot ? CREAM : DIM, opts, RIGHT, 0);
+        if (k.x || mouse_click(f, rx + rw - 12 - ow, hy, ow, 14)) {
+            open_player_menu(C.dm_with, name);
+            menu_report_newest(C.dm_with, name, false);
+        }
+    }
     rect(dl, f, rx, hy + 21, rw, 0.5f, IM_COL32(255, 255, 255, 15));
     // the bubbles, newest at the bottom
     const social::Thread *t = nullptr;
@@ -1186,16 +1249,18 @@ void draw_messages(ImDrawList *dl, const Frame &f, const ChatKeys &k, const NetR
     }
     // with a room and an empty box the button invites (the design's INVITE TO ROOM; chat_draw sends it)
     input_bar(dl, f, rx, "Message " + name, r.in_room && C.draft[TAB_MESSAGES].empty() ? "INVITE TO ROOM" : "SEND");
-    (void)k;
 }
 
 // ---- the player menu: A on a name ----
 
 void draw_player_menu(ImDrawList *dl, const Frame &f, const ChatKeys &k)
 {
-    std::vector<std::pair<std::string, int>> items;     // 0 add friend, 1 message, 2 mute, 3 unmute, 4/5 room mute/unmute
-    bool is_friend = C.menu_id && friend_of(C.menu_id), muted = false, asked = false;
+    // 0 add friend, 1 message, 2 mute, 3 unmute, 4/5 room mute/unmute, 6/7 block/unblock, 8 report,
+    // 9 invite to my crew
+    std::vector<std::pair<std::string, int>> items;
+    bool is_friend = C.menu_id && friend_of(C.menu_id), muted = false, asked = false, blocked = false;
     for (auto &m : C.v.muted) muted |= m.id == C.menu_id;
+    for (auto &b : C.v.blocked) blocked |= C.menu_id && b.id == C.menu_id;
     for (auto &o : C.v.out) asked |= C.menu_id ? o.id == C.menu_id : o.name == C.menu_name;
     if (C.menu_room) {      // the ROOM tab: hide this player's room lines on this PC
         bool rm = room_name_muted(C.menu_name);
@@ -1203,9 +1268,11 @@ void draw_player_menu(ImDrawList *dl, const Frame &f, const ChatKeys &k)
         items.push_back({ rm ? "UNMUTE IN ROOM" : "MUTE IN ROOM", rm ? 5 : 4 });
     }
     if (!room_only()) {
-        if (!is_friend && !asked) items.push_back({ "ADD FRIEND", 0 });
-        if (C.menu_id) items.push_back({ "MESSAGE", 1 });
-        if (C.menu_id && !C.menu_room) items.push_back({ muted ? "UNMUTE" : "MUTE", muted ? 3 : 2 });
+        if (!is_friend && !asked && !blocked) items.push_back({ "ADD FRIEND", 0 });
+        if (C.menu_id && !blocked && C.tab != TAB_MESSAGES) items.push_back({ "MESSAGE", 1 });
+        if (C.menu_id && !C.menu_room && !blocked && C.tab != TAB_MESSAGES) items.push_back({ muted ? "UNMUTE" : "MUTE", muted ? 3 : 2 });
+        if (C.menu_id) items.push_back({ blocked ? "UNBLOCK" : "BLOCK", blocked ? 7 : 6 });
+        if (C.menu_id && !C.menu_channel.empty() && (C.menu_msg || !C.menu_text.empty())) items.push_back({ "REPORT", 8 });
     }
     if (items.empty()) items.push_back({ "FRIEND REQUEST SENT", -1 });
     float w = 160, h = 34 + items.size() * 22.0f, x = 320 - w / 2, y = 200 - h / 2;
@@ -1228,6 +1295,13 @@ void draw_player_menu(ImDrawList *dl, const Frame &f, const ChatKeys &k)
             else if (what == 1) open_dm(C.menu_id);
             else if (what == 2 || what == 3) social::mute(C.menu_id, what == 2);
             else if (what == 4 || what == 5) room_mute(C.menu_name, C.menu_account, what == 4);
+            else if (what == 6 || what == 7) {
+                social::block(C.menu_id, C.menu_name, what == 6);
+                fprintf(stderr, "[SOCIAL-UI] %s %s\n", what == 6 ? "block" : "unblock", C.menu_name.c_str());
+            } else if (what == 8) {
+                social::report(C.menu_id, C.menu_channel, C.menu_msg, C.menu_text, C.menu_context);
+                fprintf(stderr, "[SOCIAL-UI] report %s (%s)\n", C.menu_name.c_str(), C.menu_channel.c_str());
+            }
             C.menu = false;
         }
     }
@@ -1847,6 +1921,7 @@ void chat_draw(ImDrawList *dl, const Frame &f, ImVec2 display)
     } else if (C.tab == TAB_MESSAGES) {
         hx += hint(dl, f, hx, hy, "a", "OPEN");
         hx += hint(dl, f, hx, hy, "y", "KEYBOARD");
+        if (C.dm_with) hx += hint(dl, f, hx, hy, "x", "BLOCK / REPORT");
         hint(dl, f, hx, hy, "b", "CLOSE");
     } else if (C.tab == TAB_GLOBAL) {
         hx += plate_hint(dl, f, hx, hy, "ENTER", "TYPE");
