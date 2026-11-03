@@ -549,6 +549,8 @@ def select_app(tag, platform, cache, verify, cancelled, progress):
             bundle.mkdir()
             shutil.copyfile(archive, bundle / APP_PROGRAM_WINDOWS)
             safe_zip(payload_zip, bundle / 'payload')
+            # Which built-in payload payload/ holds (src/app/app_install.cpp reads it at start).
+            (bundle / 'payload.sha256').write_text(provenance['payload_sha256'] + '\n', encoding='utf-8')
             manifest = verify(bundle / 'payload')
             for key in ('version', 'platform', 'source_commit', 'toolkit_commit', 'files', 'updater'):
                 if manifest.get(key) != provenance.get(key):

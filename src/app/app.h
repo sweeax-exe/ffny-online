@@ -55,8 +55,9 @@ struct FirstRun
 };
 FirstRun &first_run();
 
-// The running program, resolved.
+// The running program, resolved, and the macOS bundle it is in (empty when it is not in one).
 std::filesystem::path program();
+std::filesystem::path bundle_path();
 
 // The app's command line after the program name, and whether it was started by its own update.
 std::vector<std::string> &arguments();
@@ -90,6 +91,25 @@ void screen_open_maintenance();
 // An operation is running: the window may not close (a close asks to cancel instead).
 bool screen_busy();
 void screen_request_cancel();
+
+// ---- Windows: the app installs itself (app_install.cpp) --------------------------------------------
+
+// Where this program stands, decided before anything else when it was started without --payload.
+enum class Placement
+{
+    Development,    // no setup payload built in: a development build, run as it is
+    Installed,      // the copy in the app's home folder
+    HandOver,       // another copy (the download): relaunch() holds the installed copy to start
+    NeedsInstall    // no home yet: the window opens on the install page
+};
+Placement place_app(std::string *error);
+
+// The installed copy: make sure payload\ beside it is the one built into it. False with the reason.
+bool ensure_payload(std::string *error);
+
+// The install page, while it is up; drawn before anything else. And whether it is copying files.
+bool install_screen_draw(float width, float height, UiResult *result);
+bool install_busy();
 
 // ---- the app's own updates (app_update.cpp) ----------------------------------------------------
 

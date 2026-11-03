@@ -301,6 +301,7 @@ def test_select_app_on_windows_reads_the_payload_out_of_the_program(tmp_path, mo
         assert not list(tmp_path.glob('app-*'))
         return
     scratch, bundle = releases.select_app('v0.13.1', WINDOWS, tmp_path, verify, lambda: None, lambda text: None)
-    assert sorted(p.name for p in bundle.iterdir()) == [releases.APP_PROGRAM_WINDOWS, 'payload']
+    assert sorted(p.name for p in bundle.iterdir()) == [releases.APP_PROGRAM_WINDOWS, 'payload', 'payload.sha256']
+    assert (bundle / 'payload.sha256').read_text().strip() == prov['payload_sha256']
     assert (bundle / releases.APP_PROGRAM_WINDOWS).read_bytes() == program
     assert json.loads((bundle / 'payload/manifest.json').read_text()) == manifest

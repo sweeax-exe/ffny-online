@@ -19,7 +19,7 @@ namespace os
 std::filesystem::path program();
 
 // Where per-user application files go: %LOCALAPPDATA% on Windows, the home folder elsewhere
-// (empty when there is none).
+// (empty when there is none). On Windows DEFJAM_APP_USER_BASE replaces it (a test hook).
 std::filesystem::path user_base();
 
 // The environment the app and the game it starts read (UTF-8).

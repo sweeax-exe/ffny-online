@@ -101,9 +101,11 @@ fs::path cache_dir()
 #endif
 }
 
+} // namespace
+
 // The bundle this program is in (…/Def Jam Recompiled.app/Contents/MacOS/defjam_app), or empty.
 // On Windows the folder holding the program and, beside it, the payload it runs setup from.
-fs::path bundle()
+fs::path bundle_path()
 {
 #if defined(_WIN32)
     std::error_code ec;
@@ -117,6 +119,11 @@ fs::path bundle()
         return {};
     return contents.parent_path();
 }
+
+namespace
+{
+
+fs::path bundle() { return bundle_path(); }
 
 #if defined(_WIN32)
 // The program inside a staged Windows app (setup/releases.py: APP_PROGRAM_WINDOWS).
@@ -273,6 +280,7 @@ void swap()
         {home / "payload", home / "payload.old"},
         {g_staged / releases_program(), program},
         {g_staged / "payload", home / "payload"},
+        {g_staged / "payload.sha256", home / "payload.sha256.new"},
     };
     for (const auto &step : steps) {
         fs::rename(step.first, step.second, ec);
@@ -284,6 +292,9 @@ void swap()
         }
         done.push_back(step);
     }
+    // Which built-in payload payload\ now holds (app_install.cpp), so the new copy keeps it.
+    fs::remove(home / "payload.sha256", ec);
+    fs::rename(home / "payload.sha256.new", home / "payload.sha256", ec);
     fs::remove_all(g_staged, ec);
     fs::path here = home;
 #else

@@ -270,6 +270,33 @@ bool shift_held()
 #endif
 }
 
+// Tell the install where this app is, so its play wrapper (setup/macos/Launcher, or on Windows
+// DefJamLauncher.exe), which shortcuts and older habits still open, starts the app instead of the
+// game. Only an installed app is worth naming: the macOS bundle, or the Windows program.
+void note_location()
+{
+    fs::path here = app::bundle_path();
+#if defined(_WIN32)
+    if (!here.empty()) here = app::program();
+#endif
+    const app::Install &in = app::install();
+    std::error_code ec;
+    if (here.empty() || !fs::is_directory(in.root, ec)) return;
+    fs::path note = in.root / "app-location.txt";
+    std::ifstream current(note);
+    std::string recorded;
+    std::getline(current, recorded);
+    current.close();
+    if (recorded == here.string()) return;
+    fs::path pending = in.root / "app-location.txt.pending";
+    {
+        std::ofstream out(pending);
+        out << here.string() << "\n";
+        if (!out) return;
+    }
+    fs::rename(pending, note, ec);
+}
+
 intptr_t g_lock = -1;
 fs::path g_payload;
 std::string g_payload_version;
@@ -421,6 +448,7 @@ bool load_install(std::string *why)
     std::string settings = env && !strcasecmp(env, "none") ? "" : env && *env ? env : (in.data / "settings.ini").string();
     pc_settings_open(settings.c_str());
     in.installed = true;
+    note_location();
     return true;
 }
 
@@ -461,14 +489,33 @@ int main(int argc, char **argv)
         first.data = env && *env ? env : default_data.string();
     }
 
+    open_session_log();
+#if defined(_WIN32)
+    // The released Windows program installs itself, or hands over to the installed copy
+    // (app_install.cpp). A development build, or one given its setup files, runs as it is.
+    if (!payload && !getenv("DEFJAM_SETUP_PAYLOAD")) {
+        std::string error;
+        switch (app::place_app(&error)) {
+        case app::Placement::HandOver: {
+            std::string why = app::os::replace_with(g_relaunch);
+            fail("The installed app could not be started (" + why + ").");
+        }
+        case app::Placement::Installed:
+            if (!app::ensure_payload(&error)) fail(error);
+            g_payload = find_payload(nullptr);
+            break;
+        case app::Placement::NeedsInstall:
+        case app::Placement::Development:
+            break;
+        }
+    }
+#endif
     if (!g_payload.empty()) {
         std::ifstream manifest(g_payload / "manifest.json", std::ios::binary);
         std::stringstream text;
         text << manifest.rdbuf();
         g_payload_version = json_strings(text.str())["version"];
     }
-
-    open_session_log();
     app::update_cleanup();
     // Acquire the lifetime lock before reading activation state or the receipt.
     if (!app::lock_install()) fail("The game or an update is already running.");

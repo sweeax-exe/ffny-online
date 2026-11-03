@@ -220,6 +220,9 @@ fs::path program()
 
 fs::path user_base()
 {
+    // A test hook: a scratch folder in place of %LOCALAPPDATA%, so a test run never touches the
+    // player's own app, location record, logs or cache.
+    if (const char *base = getenv("DEFJAM_APP_USER_BASE"); base && *base) return fs::path(base);
     PWSTR value = nullptr;
     if (FAILED(SHGetKnownFolderPath(FOLDERID_LocalAppData, 0, nullptr, &value))) return {};
     fs::path out(value);

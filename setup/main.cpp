@@ -106,10 +106,32 @@ static fs::path localAppData() {
     return result;
 }
 
+// The app (src/app, D215) writes where it is to <install>\app-location.txt whenever it loads this
+// install. When that names a program that is there, the wrapper starts it for this install and
+// waits for it (the app waits for the game), so shortcuts made by an older setup open the app.
+// Returns false when there is no app to start, and the wrapper plays the game as before.
+static bool forwardToApp(const fs::path& root) {
+    std::ifstream note(root / L"app-location.txt", std::ios::binary);
+    std::string line;
+    if (!note || !std::getline(note, line)) return false;
+    while (!line.empty() && (line.back() == '\r' || line.back() == '\n' || line.back() == ' ')) line.pop_back();
+    if (line.empty()) return false;
+    auto app = fs::path(utf8(line));
+    std::error_code error;
+    if (!app.is_absolute() || _wcsicmp(app.extension().c_str(), L".exe") != 0 || !fs::is_regular_file(app, error))
+        return false;
+    HANDLE process;
+    try { process = spawn(app, {L"--install", root.wstring()}); }
+    catch (...) { return false; }
+    wait(process);
+    return true;
+}
+
 static void launchInstalled() {
     wchar_t self[32768], source[32768], data[32768], exe[32768];
     GetModuleFileNameW(nullptr, self, 32768);
     auto root = fs::path(self).parent_path();
+    if (forwardToApp(root)) return;
     HANDLE lock = CreateFileW((root / L"play.lock").c_str(), GENERIC_READ | GENERIC_WRITE,
                              0, nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (lock == INVALID_HANDLE_VALUE) throw std::runtime_error("The game or an update is already running.");

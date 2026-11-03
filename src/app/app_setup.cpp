@@ -698,6 +698,9 @@ bool screen_draw(float width, float height, UiResult *result)
     take_pick();
     poll_tools_check();
     poll();
+#if defined(_WIN32)
+    if (install_screen_draw(width, height, result)) return true;
+#endif
     if (update_screen_draw(width, height, result)) return true;
     switch (g_screen) {
     case Screen::None: return false;
@@ -724,7 +727,11 @@ void start_update_build()
         g_screen = Screen::Maintenance;                     // which shows why
 }
 
+#if defined(_WIN32)
+bool screen_busy() { return g_run.process.id != 0 || update_busy() || install_busy(); }
+#else
 bool screen_busy() { return g_run.process.id != 0 || update_busy(); }
+#endif
 
 void screen_request_cancel()
 {

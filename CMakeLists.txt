@@ -87,6 +87,10 @@ if(WIN32 AND DEFJAM_BUILD_APP)
     if(NOT XBOX_SDL3_VERSION OR NOT XBOX_SDL3_SHA256)
         message(FATAL_ERROR "Could not read the toolkit's SDL3 pin (cmake/xbox_sdl3.cmake)")
     endif()
+    # The static C runtime, as the setup executable has: the app runs before anything is installed
+    # (no Visual C++ runtime, no Build Tools), so it may need nothing but Windows itself. Every
+    # library of this build (the toolkit's, SDL's, Dear ImGui's) uses the same one.
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
     include(FetchContent)
     foreach(_off SDL_SHARED SDL_TEST_LIBRARY SDL_TESTS SDL_EXAMPLES SDL_INSTALL SDL_AUDIO SDL_GPU SDL_CAMERA)
         set(${_off} OFF CACHE BOOL "" FORCE)
@@ -247,7 +251,16 @@ if(DEFJAM_BUILD_APP AND DEFJAM_SDL3)
         include(windows_resource)
         defjam_windows_resource(DEFJAM_APP_RC NAME DefJamRecompiled VERSION ${PROJECT_VERSION}
                                 DESCRIPTION "Def Jam: Fight for NY - Recompiled")
-        set(DEFJAM_APP_PLATFORM_SOURCES WIN32 src/app/app.manifest "${DEFJAM_APP_RC}")
+        set(DEFJAM_APP_PLATFORM_SOURCES WIN32 src/app/app.manifest "${DEFJAM_APP_RC}" src/app/app_install.cpp)
+        # The released program carries the setup payload ZIP as resource 101, as DefJamSetup.exe
+        # does, with its SHA-256 built in: scripts/build-setup.ps1 passes the payload it just made.
+        set(DEFJAM_APP_PAYLOAD "" CACHE FILEPATH "Windows: the setup payload ZIP to build into the app")
+        if(DEFJAM_APP_PAYLOAD)
+            file(TO_CMAKE_PATH "${DEFJAM_APP_PAYLOAD}" PAYLOAD_PATH)
+            file(SHA256 "${DEFJAM_APP_PAYLOAD}" DEFJAM_APP_PAYLOAD_SHA256)
+            configure_file(setup/payload.rc.in "${CMAKE_CURRENT_BINARY_DIR}/app-payload.rc" @ONLY)
+            list(APPEND DEFJAM_APP_PLATFORM_SOURCES "${CMAKE_CURRENT_BINARY_DIR}/app-payload.rc")
+        endif()
     else()
         find_package(SDL3 REQUIRED CONFIG)
     endif()
@@ -281,8 +294,11 @@ if(DEFJAM_BUILD_APP AND DEFJAM_SDL3)
     if(WIN32)
         # The released program is DefJamRecompiled.exe (src/app/README.md).
         set_target_properties(defjam_app PROPERTIES OUTPUT_NAME DefJamRecompiled)
+        if(DEFJAM_APP_PAYLOAD)
+            target_compile_definitions(defjam_app PRIVATE DEFJAM_APP_PAYLOAD_SHA256="${DEFJAM_APP_PAYLOAD_SHA256}")
+        endif()
         target_compile_options(defjam_app PRIVATE /utf-8)
-        target_link_libraries(defjam_app PRIVATE shell32 ole32 shlwapi)
+        target_link_libraries(defjam_app PRIVATE shell32 ole32 shlwapi bcrypt)
     elseif(APPLE)
         # Shift held at start-up is read from the window server, as the game does.
         target_link_libraries(defjam_app PRIVATE "-framework ApplicationServices")

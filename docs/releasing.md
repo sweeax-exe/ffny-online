@@ -118,8 +118,11 @@ last release plus docs), with the same gate.
 GitHub supplies the source ZIP/tar archives. They do not include submodules;
 the supported command-line setup is a recursive clone at the tag. Only the
 setup tools (`DefJamSetup-<version>-windows-x64.exe`, `-macos-arm64.dmg`,
-`-linux-x64.tar.gz`), each with its `.sha256` and `.provenance.json`, are
-attached after standalone setup inventory/tests pass. `check-setup-assets.py`
+`-linux-x64.tar.gz`) and the app (`DefJamRecompiled-<version>-macos-arm64.zip` and
+`DefJamRecompiled-<version>-windows-x64.exe`, D215), each with its `.sha256` and
+`.provenance.json`, are attached after standalone setup inventory/tests pass. The app
+carries the same payload (in the bundle's Resources on macOS, built into the program on
+Windows) and updates itself from these assets. `check-setup-assets.py`
 refuses development payloads and generated/game inputs. Source-tree binary bans
 remain intact; a precompiled game is never published. See [setup installer](setup-installer.md)
 for behavior and remaining acceptance gates.
