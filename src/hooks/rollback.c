@@ -280,6 +280,16 @@ static volatile LONG s_mix_on;          /* a mixer tick is being watched (see mi
 /* The game thread, to tell a tick it ran during (it does when the mixer blocks) from one it did not. */
 static HANDLE s_game_thread;
 static ULONG64 s_game_cycles;
+/* What the game thread's own rollback work leaves (game_mark: every save and load, so every update of
+ * a fight and every re-run): a count, and the CPU it last ran on. mixer_end does not trust a tick in
+ * which the count moved, or which ran on another CPU than the game thread (see there). */
+static volatile LONG s_game_seq, s_game_cpu = -1;
+static LONG s_mix_seq;
+static void game_mark(void)
+{
+    InterlockedIncrement(&s_game_seq);
+    InterlockedExchange(&s_game_cpu, (LONG)GetCurrentProcessorNumber());
+}
 
 /* Off by default again since build 21: on for everyone in builds 19 and 20, players' games crashed
  * in the sound engine (sub_0012BE20, sub_00126150: engine objects with junk vtables in the audio
@@ -1405,6 +1415,7 @@ int rollback_save(int slot)
                 s_read_save[s_reads_told]);
         s_reads_told++;
     }
+    game_mark();
     InterlockedIncrement(&s_saves);
     release_held_arena(0);
     release_held_xapi(0);
@@ -1463,6 +1474,7 @@ int rollback_load(int slot)
         s_lp_hash[s_lp_phase] = h ^ s->npages;
         s_lp_at[s_lp_phase] = s->at;
     }
+    game_mark();
     forget_frees_since(s->at);
     for (k = 0, at = 0; k < s_ndseg; at += s_dseg[k].hi - s_dseg[k].lo, k++)
         memcpy(XBOX_PTR(s_dseg[k].lo), s->data + at, s_dseg[k].hi - s_dseg[k].lo);
@@ -1472,6 +1484,7 @@ int rollback_load(int slot)
     for (; i < s_nchange; i++)      /* found to change after this save: as it was at the reference */
         if (!s_skip[s_change[i]])
             load_page(s_change[i], s_ref + (size_t)s_change[i] * PAGE);
+    game_mark();
     return 0;
 }
 
@@ -2342,6 +2355,7 @@ void rollback_sound_free(void)
  * write through stale offsets. Every guest thread runs on one host core, so what changes in the
  * saved pages between the tick's lock and unlock is the mixer's: those pages are left alone from
  * then on. */
+#define MIX_TICK_PAGES_MAX 8            /* more pages with new words in one tick: not the mixer's alone (mixer_end) */
 #define MIX_LOCKED   0x001242E6u      /* return addresses in sub_001242D0 */
 #define MIX_UNLOCKS  0x0012435Au
 static uint8_t *s_mix;
@@ -2372,10 +2386,13 @@ static void mixer_begin(void)
         s_mix = m;
         s_mix_cap = cap;
     }
+    /* before the copy: a game thread that ran during it (this thread preempted) wrote pages the copy
+     * already had, and taken after it, its cycles would not tell */
+    s_game_cycles = game_cycles();
+    s_mix_seq = s_game_seq;
     for (i = 0; i < n; i++)
         memcpy(s_mix + (size_t)i * PAGE, XBOX_PTR(HEAP_LO + s_change[i] * PAGE), PAGE);
     s_mix_n = n;
-    s_game_cycles = game_cycles();
     if (s_writers_on < 0) s_writers_on = getenv("RECOMP_ROLLBACK_WRITERS") && s_live ? 1 : 0;
     s_mixer_tid = GetCurrentThreadId();
     if (s_writers_on == 1) {
@@ -2438,6 +2455,47 @@ static void mixer_end(void)
         }
     }
     if (game_cycles() != s_game_cycles) return;     /* the game thread ran too: no telling who wrote */
+    if (s_game_seq != s_mix_seq) return;            /* it saved or loaded meanwhile, whatever its cycles say */
+    /* The cycle count tells only while every guest thread shares one CPU (xbox_PinToGuestCore): a game
+     * thread running beside the mixer on another CPU is counted at the clock's interrupts, so a short tick
+     * can see its count stand still while it writes (rollback-sound-crashes.md, "one CPU per copy"). */
+    {
+        LONG gcpu = s_game_cpu, mcpu = (LONG)GetCurrentProcessorNumber();
+        if (gcpu >= 0 && gcpu != mcpu) {
+            static LONG told;
+            if (InterlockedIncrement(&told) <= 4)
+                fprintf(stderr, "[ROLLBACK] the mixer ran on CPU %ld and the game thread last on CPU %ld: guest threads "
+                        "are not on one CPU here, so the mixer's pages are not told apart (tick left out)\n", mcpu, gcpu);
+            return;
+        }
+    }
+    /* A real tick writes a few words in a few blocks (the routed sound side writes none of the game's heap
+     * in test runs). Dozens of pages and thousands of words at once are a game update or a load the checks
+     * above did not see; kept live through every later load, they left the game's own objects half
+     * restored: F9 cff81c (build 47, 64 pages / 2333 words in one tick, then a crash in a re-run writing
+     * through a particle scheduler's half-restored free list, sub_001156E0) and b379eb (55 pages / 2869
+     * words, 56 lines before a desync, then a junk small-block free list, sub_000E5F40). Such a tick is left
+     * out: the mixer's own words change at every tick and are taken from the next clean one. */
+    {
+        unsigned pages = 0, words = 0;
+        for (i = 0; i < s_mix_n; i++) {
+            uint32_t p = s_change[i];
+            const uint32_t *was = (const uint32_t *)(s_mix + (size_t)i * PAGE);
+            const uint32_t *now = (const uint32_t *)XBOX_PTR(HEAP_LO + p * PAGE);
+            unsigned w, here = 0;
+            if (s_skip[p] || !memcmp(was, now, PAGE)) continue;
+            for (w = 0; w < PAGE / 4; w++)
+                if (was[w] != now[w] && !(s_mixmask[p] && (s_mixmask[p][w >> 3] & (1u << (w & 7))))) here++;
+            if (here) { pages++; words += here; }
+        }
+        if (pages > MIX_TICK_PAGES_MAX) {
+            static LONG told;
+            if (InterlockedIncrement(&told) <= 8)
+                fprintf(stderr, "[ROLLBACK] a mixer tick changed %u pages (%u words) of the game's heap: more than the mixer "
+                        "writes, left out\n", pages, words);
+            return;
+        }
+    }
     for (i = 0; i < s_mix_n; i++) {
         uint32_t p = s_change[i];
         if (!memcmp(s_mix + (size_t)i * PAGE, XBOX_PTR(HEAP_LO + p * PAGE), PAGE)) continue;
