@@ -27,6 +27,9 @@ combat 27/27, versus 26/26, intro, crib, gym, soak 3/3.
   (clock, cpu, event, fighters). This is the open Deck finding from the PR #85 pass (also step
   541). Windows and Mac pass it; the pre-migration `77714da` passes it on the Deck. **Not traced;
   not bisected across the four queued PRs in this run.**
+  (Correction, 2026-10-27: `77714da` does not pass it reliably. Built on the same Deck, all 6 of 6
+  run pairs differed, one at step 541. The earlier pass was two lucky runs, so this is not a
+  regression to bisect for.)
 
 ## Not covered
 
