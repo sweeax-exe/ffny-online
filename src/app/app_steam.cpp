@@ -128,11 +128,11 @@ void steam_section()
     }
     std::string owner = g_steam.user.empty() ? "your" : g_steam.user + "'s";
     if (g_steam.added)
-        ImGui::TextWrapped("In %s Steam library, with its artwork. Steam starts the game directly, with Steam "
+        ImGui::TextWrapped("In %s Steam library, with its artwork. Steam opens the app, following your startup preference, with Steam "
                            "Input and the Steam overlay.", owner.c_str());
     else
         ImGui::TextWrapped("Adds the game to %s Steam library as a non-Steam game, with its library artwork, so "
-                           "Steam starts it directly, with Steam Input and the Steam overlay.", owner.c_str());
+                           "Steam opens the app, with Steam Input and the Steam overlay.", owner.c_str());
     if (g_steam.confirm) {
         ImGui::TextWrapped("Steam is running. It has to be closed while the game is %s, because it rewrites its "
                            "list of games when it exits. It is started again afterwards.",
@@ -144,7 +144,7 @@ void steam_section()
         }
         ui_target("steam.close");
         ImGui::SameLine();
-        if (ImGui::Button("Cancel##steam")) g_steam.confirm = false;
+        if (ImGui::Button("Cancel##steam") || back_pressed()) g_steam.confirm = false;
         ui_target("steam.cancel");
         ImGui::EndDisabled();
     } else {
@@ -227,7 +227,7 @@ void steam_play_button(float width, float height)
             }
             ui_target("steam.close");
             ImGui::SameLine();
-            if (ImGui::Button("Cancel##steam")) {
+            if (ImGui::Button("Cancel##steam") || back_pressed()) {
                 g_steam.confirm = false;
                 ImGui::CloseCurrentPopup();
             }

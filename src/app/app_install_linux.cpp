@@ -233,7 +233,11 @@ Placement place_app(std::string *error)
                 payload_version().c_str());
         std::string why = place_into(home);
         if (why.empty()) record_home(home, payload_version());
-        else fprintf(stderr, "[APP] %s Starting the installed copy as it is.\n", why.c_str());
+        else {
+            g_error = "Could not update the installed app: " + why + " Retry installation below. The existing copy was kept.";
+            snprintf(g_folder, sizeof g_folder, "%s", home.parent_path().string().c_str());
+            g_page = true; return Placement::NeedsInstall;
+        }
     }
     auto &next = relaunch();
     next = {home.string()};
@@ -297,6 +301,7 @@ bool install_screen_draw(float width, float height, UiResult *result)
     ImGui::Spacing();
     if (!g_error.empty()) ImGui::TextColored(ImVec4(1, 0.45f, 0.4f, 1), "%s", g_error.c_str());
     if (g_working) ImGui::TextDisabled("Installing...");
+    page_actions();
     ImGui::BeginDisabled(g_working || !g_folder[0]);
     if (pcui::play_button("INSTALL", ImVec2(ImGui::GetFontSize() * 10, ImGui::GetFrameHeight() * 1.8f), 26))
         start_install();
@@ -307,7 +312,7 @@ bool install_screen_draw(float width, float height, UiResult *result)
     if (ImGui::Button("Quit")) result->leave = true;
     ui_target("Quit");
     ImGui::EndDisabled();
-    ImGui::End();
+    page_end();
     return true;
 }
 

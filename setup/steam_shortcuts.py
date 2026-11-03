@@ -1,7 +1,7 @@
 """Add the app to Steam as a non-Steam game, with its library artwork (design §7; Windows and Linux).
 
 The Linux setup wizard asks the running Steam to add its launcher (engine.py add_to_steam), but that
-request cannot give the shortcut launch options, and the app's shortcut needs --play. So for the app,
+request cannot give the shortcut launch options, and the app's shortcut needs its installation path. So for the app,
 on Windows and Linux alike, this writes the shortcut into Steam's own file, as Steam ROM Manager and
 BoilR do:
 
@@ -475,7 +475,7 @@ def steam_closed(root, close, event, running, closer, starter):
 
 def add(root, program, install, art_folders, record, close=False, event=print,
         running=steam_processes, closer=close_steam, starter=start_steam):
-    """Add the app to the account's Steam library, starting the game (--play), with its artwork."""
+    """Add the app to the account's Steam library, opening the app (respects the launcher startup preference), with its artwork."""
     if root is None:
         raise SteamError('Steam is not installed on this computer')
     program = Path(program)
@@ -489,7 +489,7 @@ def add(root, program, install, art_folders, record, close=False, event=print,
             appid = shortcut_appid('"%s"' % program)
             grid = folder / 'config/grid'
             icon = str(grid / (str(appid) + '_icon.png')) if art_origin(art_folders, ART['_icon']) else str(program)
-            options = '--play' + (' --install "%s"' % install if install else '')
+            options = ('--install "%s"' % install if install else '')
             bodies.append(shortcut_body(appid, program, program.parent, icon, options))
             if vdf.is_file():
                 shutil.copyfile(vdf, vdf.with_name(BACKUP))

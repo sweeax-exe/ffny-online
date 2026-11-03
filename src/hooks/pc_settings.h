@@ -29,6 +29,11 @@ void pc_display_set(const char *key, int value);
  * the current values to it. The launcher and overlay save as the player changes things. */
 const char *pc_settings_path(void);
 void pc_settings_save(void);
+/* Zero on success (including intentionally disabled persistence), nonzero on write failure. */
+int pc_settings_save_checked(void);
+/* Deterministic graphics presets: 0 Original, 1 Modern, -1 Custom. Never touches personal settings. */
+int pc_experience_current(void);
+int pc_experience_apply(int modern);
 
 /* Push the display settings that the renderer owns to it. Call before the
  * Direct3D device is created, and it is called again on every change. */

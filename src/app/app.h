@@ -96,6 +96,10 @@ std::vector<std::string> &relaunch();
 
 // The top of each of the app's pages: the window, the brand line and a heading.
 void page_begin(float width, float height, const char *heading);
+void page_actions(); // end scrolling body; begin stationary action area
+void page_end();
+bool back_pressed();
+void screen_open_hd();
 
 // Clean Update of the installed game to this app's payload version, with the progress screen.
 void start_update_build();

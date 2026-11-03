@@ -100,7 +100,7 @@ def test_the_shortcut_is_added_after_the_others_which_keep_their_bytes(tmp_path)
     assert result['appid'] == appid and steam.field(ours, 'appid') == appid and appid & 0x80000000
     assert ours['AppName'] == 'Def Jam Recompiled' and ours['Exe'] == '"%s"' % PROGRAM
     assert ours['StartDir'] == '"%s"' % PROGRAM.parent
-    assert ours['LaunchOptions'] == '--play --install "%s"' % INSTALL
+    assert ours['LaunchOptions'] == '--install "%s"' % INSTALL
     assert ours['AllowOverlay'] == 1 and ours['tags'] == {}
     grid = root / 'userdata' / str(ACCOUNT) / 'config/grid'
     assert ours['icon'] == str(grid / ('%d_icon.png' % appid))
@@ -303,7 +303,7 @@ def test_game_mode_never_closes_steam(tmp_path, monkeypatch):
     steam.add(root, Path('/home/deck/Applications/DefJamRecompiled.AppImage'), '/home/deck/Games/App',
               art(tmp_path / 'again'), tmp_path / 's.json', running=fake.running, closer=fake.close, starter=fake.start)
     assert [steam.field(steam.fields(b), 'LaunchOptions') for b in steam.read_shortcuts(vdf)[0]] == [
-        '--play --install "/home/deck/Games/App"']
+        '--install "/home/deck/Games/App"']
 
 
 @linux_only

@@ -185,10 +185,52 @@ int pc_display(const char *key, int fallback)
 
 const char *pc_settings_path(void) { return g_path; }
 
-void pc_settings_save(void)
+int pc_settings_save_checked(void)
 {
-    if (g_path[0] && recomp_settings_save(g_path))
-        fprintf(stderr, "[SETTINGS] could not write %s\n", g_path);
+    int error = g_path[0] ? recomp_settings_save(g_path) : 0;
+    if (error) fprintf(stderr, "[SETTINGS] could not write %s\n", g_path);
+    return error ? 1 : 0;
+}
+void pc_settings_save(void) { (void)pc_settings_save_checked(); }
+
+/* Keep this ownership list identical for both directions. HD is a separate optional install;
+ * Original disables replacements without deleting packs. Modern preserves their selection. */
+static const struct { const char *key; int original, modern; } k_experience[] = {
+    {"aspect", 0, 2}, {"render_scale", 1, 2}, {"filter", 0, 2},
+    {"msaa", 1, 0}, {"texture_mips", 1, 1}, {"anisotropy", 0, 2},
+    {"vsync", 1, 1}, {"gamma", 1, 1}, {"brightness", 100, 100},
+    {"vignette", 1, 1}, {"vignette_strength", 100, 100},
+    {"color_tint", 100, 100}, {"scratches", 1, 1},
+    {"widescreen_hud", 0, 0}, {"widescreen_cutscenes", 0, 0},
+    {"widescreen_side_fill", 0, 0}, {"widescreen_fov_cap", 150, 150}
+};
+int pc_experience_current(void)
+{
+    int original = !recomp_settings_get("textures", "enabled", 0), modern = 1;
+    for (size_t i = 0; i < sizeof(k_experience)/sizeof(k_experience[0]); ++i) {
+        int v = recomp_settings_get("display", k_experience[i].key, -1);
+        original &= v == k_experience[i].original;
+        modern &= v == k_experience[i].modern;
+    }
+    return original ? 0 : modern ? 1 : -1;
+}
+int pc_experience_apply(int modern)
+{
+    if (modern != 0 && modern != 1) return -1;
+    /* An environment override must not leave a silently partial preset. */
+    for (size_t i = 0; i < sizeof(k_experience)/sizeof(k_experience[0]); ++i) {
+        RecompSetting *s = recomp_settings_find("display", k_experience[i].key);
+        if (!s || s->source == RECOMP_SETTING_FROM_ENV) return -1;
+    }
+    RecompSetting *textures = recomp_settings_find("textures", "enabled");
+    RecompSetting *packs = recomp_settings_find("textures", "packs");
+    if (!modern && ((textures && textures->source == RECOMP_SETTING_FROM_ENV) ||
+                   (packs && packs->source == RECOMP_SETTING_FROM_ENV))) return -1;
+    for (size_t i = 0; i < sizeof(k_experience)/sizeof(k_experience[0]); ++i)
+        recomp_settings_set("display", k_experience[i].key,
+                            modern ? k_experience[i].modern : k_experience[i].original);
+    if (!modern) recomp_settings_set("textures", "enabled", 0);
+    return pc_settings_save_checked();
 }
 
 void pc_display_set(const char *key, int value)

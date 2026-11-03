@@ -55,7 +55,8 @@ void theme(float scale)
     s.Colors[ImGuiCol_TitleBgCollapsed] = s.Colors[ImGuiCol_TitleBg];
     s.Colors[ImGuiCol_Border] = ImVec4(.318f, .294f, .255f, 1);
     s.Colors[ImGuiCol_Separator] = s.Colors[ImGuiCol_Border];
-    s.Colors[ImGuiCol_FrameBg] = ImVec4(.098f, .09f, .082f, 1);
+    s.FrameBorderSize = 1;
+    s.Colors[ImGuiCol_FrameBg] = ImVec4(.15f, .135f, .115f, 1);
     s.Colors[ImGuiCol_FrameBgHovered] = ImVec4(.24f, .20f, .16f, 1);
     s.Colors[ImGuiCol_FrameBgActive] = ImVec4(.30f, .25f, .19f, 1);
     s.Colors[ImGuiCol_Button] = ImVec4(.188f, .169f, .145f, 1);
