@@ -45,6 +45,28 @@ void redirect_output(const std::filesystem::path &base);
 // This process's id, for unique scratch folder names.
 unsigned long process_id();
 
+// A program the app started and watches (the setup engine): a pid off Windows, a process handle on
+// Windows; 0 when there is none.
+struct Process
+{
+    intptr_t id = 0;
+};
+
+// Start `argv` (argv[0] is the program) without a console window. `env` is the whole environment
+// as NAME=value strings, or null for this process's own. Returns false with the reason.
+bool start(const std::vector<std::string> &argv, const std::vector<std::string> *env, Process *process,
+           std::string *error);
+
+// Whether it has ended: -1 while it runs; otherwise its exit code (4 when it was killed), and the
+// process is forgotten (id 0). `wait` blocks until it ends.
+int finished(Process &process);
+int wait(Process &process);
+
+// A file's bytes from `offset`, at most `max` of them, read so that another process may replace or
+// delete the file meanwhile (the engine replaces its status file with os.replace; on Windows that
+// fails while any reader lacks delete sharing, issue #40). Empty when it cannot be read.
+std::string read_shared(const std::filesystem::path &path, uint64_t offset = 0, size_t max = 65536);
+
 // Start `argv` (argv[0] is the program) in `dir`. Off Windows the program replaces this one
 // (exec): open descriptors, such as play.lock's, stay with it. On Windows the program is started
 // and waited for, and this process then exits with its exit code: the app's handles, play.lock's

@@ -14,12 +14,17 @@
 #include <shlobj.h>
 #else
 #include <fcntl.h>
+#include <spawn.h>
 #include <sys/file.h>
+#include <sys/wait.h>
 #include <unistd.h>
 #if defined(__APPLE__)
 #include <mach-o/dyld.h>
 #endif
+extern char **environ;
 #endif
+
+#include <fstream>
 
 namespace fs = std::filesystem;
 
@@ -82,6 +87,56 @@ void redirect_output(const fs::path &base)
 }
 
 unsigned long process_id() { return (unsigned long)getpid(); }
+
+bool start(const std::vector<std::string> &argv, const std::vector<std::string> *env, Process *process,
+           std::string *error)
+{
+    std::vector<char *> args, envp;
+    for (const std::string &a : argv) args.push_back(const_cast<char *>(a.c_str()));
+    args.push_back(nullptr);
+    if (env) {
+        for (const std::string &e : *env) envp.push_back(const_cast<char *>(e.c_str()));
+        envp.push_back(nullptr);
+    }
+    pid_t pid = 0;
+    int rc = posix_spawn(&pid, args[0], nullptr, nullptr, args.data(), env ? envp.data() : environ);
+    if (rc != 0) {
+        process->id = 0;
+        *error = strerror(rc);
+        return false;
+    }
+    process->id = pid;
+    return true;
+}
+
+static int ended(Process &process, int options)
+{
+    if (!process.id) return -1;
+    int status = 0;
+    pid_t done = waitpid((pid_t)process.id, &status, options);
+    if (done == 0 || (done < 0 && errno == EINTR)) return -1;
+    process.id = 0;
+    return done == (pid_t)-1 ? 4 : WIFEXITED(status) ? WEXITSTATUS(status) : 4;
+}
+
+int finished(Process &process) { return ended(process, WNOHANG); }
+
+int wait(Process &process)
+{
+    int code;
+    while ((code = ended(process, 0)) < 0 && process.id) {}
+    return code;
+}
+
+std::string read_shared(const fs::path &path, uint64_t offset, size_t max)
+{
+    std::ifstream f(path, std::ios::binary);
+    if (!f || !f.seekg((std::streamoff)offset)) return {};
+    std::string out(max, '\0');
+    f.read(out.data(), (std::streamsize)max);
+    out.resize((size_t)f.gcount());
+    return out;
+}
 
 std::string run_in_place(const std::vector<std::string> &argv, const fs::path &dir)
 {
@@ -214,12 +269,85 @@ void redirect_output(const fs::path &base)
 
 unsigned long process_id() { return (unsigned long)GetCurrentProcessId(); }
 
+namespace
+{
+
+std::wstring command_line(const std::vector<std::string> &argv)
+{
+    std::wstring command = quote(fs::path(argv[0]).wstring());
+    for (size_t i = 1; i < argv.size(); i++) command += L" " + quote(wide(argv[i]));
+    return command;
+}
+
+} // namespace
+
+bool start(const std::vector<std::string> &argv, const std::vector<std::string> *env, Process *process,
+           std::string *error)
+{
+    process->id = 0;
+    if (argv.empty()) {
+        *error = "nothing to start";
+        return false;
+    }
+    std::wstring program = fs::path(argv[0]).wstring();
+    std::wstring command = command_line(argv);
+    std::wstring block;                                 // NAME=value\0...\0\0, as CreateProcessW takes it
+    if (env) {
+        for (const std::string &e : *env) block += wide(e) + L'\0';
+        block += L'\0';
+    }
+    STARTUPINFOW si{};
+    si.cb = sizeof si;
+    PROCESS_INFORMATION pi{};
+    DWORD flags = CREATE_NO_WINDOW | (env ? CREATE_UNICODE_ENVIRONMENT : 0);
+    if (!CreateProcessW(program.c_str(), command.data(), nullptr, nullptr, FALSE, flags,
+                        env ? (void *)block.data() : nullptr, nullptr, &si, &pi)) {
+        *error = windows_error(GetLastError());
+        return false;
+    }
+    CloseHandle(pi.hThread);
+    process->id = (intptr_t)pi.hProcess;
+    return true;
+}
+
+static int ended(Process &process, DWORD timeout)
+{
+    if (!process.id) return -1;
+    HANDLE h = (HANDLE)process.id;
+    if (WaitForSingleObject(h, timeout) != WAIT_OBJECT_0) return -1;
+    DWORD code = 4;
+    if (!GetExitCodeProcess(h, &code)) code = 4;
+    CloseHandle(h);
+    process.id = 0;
+    return (int)code;
+}
+
+int finished(Process &process) { return ended(process, 0); }
+int wait(Process &process) { return ended(process, INFINITE); }
+
+std::string read_shared(const fs::path &path, uint64_t offset, size_t max)
+{
+    HANDLE file = CreateFileW(path.wstring().c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                              nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (file == INVALID_HANDLE_VALUE) return {};
+    std::string out;
+    LARGE_INTEGER at;
+    at.QuadPart = (LONGLONG)offset;
+    if (SetFilePointerEx(file, at, nullptr, FILE_BEGIN)) {
+        out.resize(max);
+        DWORD read = 0;
+        if (!ReadFile(file, out.data(), (DWORD)max, &read, nullptr)) read = 0;
+        out.resize(read);
+    }
+    CloseHandle(file);                                  // at once: the engine may replace it next
+    return out;
+}
+
 std::string run_in_place(const std::vector<std::string> &argv, const fs::path &dir)
 {
     if (argv.empty()) return "nothing to start";
     std::wstring program = fs::path(argv[0]).wstring();
-    std::wstring command = quote(program);
-    for (size_t i = 1; i < argv.size(); i++) command += L" " + quote(wide(argv[i]));
+    std::wstring command = command_line(argv);
     std::wstring cwd = dir.wstring();
     STARTUPINFOW si{};
     si.cb = sizeof si;

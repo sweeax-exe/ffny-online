@@ -1301,6 +1301,9 @@ static void page_general(UiMode mode)
     settings_group("debug", {"skip_intro"});
     ImGui::TextWrapped("Start at Press Start. Story cutscenes still play. Applies on the next launch.");
 }
+#if defined(DEFJAM_APP)
+static bool g_app_maintenance = false;   // the app's own Maintenance screen was asked for
+#endif
 static void page_maintenance(UiMode mode)
 {
     const char *names[] = {"Data", "Saves", "Mods", "Installation", "Settings file", "Play logs"};
@@ -1321,6 +1324,14 @@ static void page_maintenance(UiMode mode)
         ImGui::PopID();
     }
     ImGui::SeparatorText("Update / Repair");
+#if defined(DEFJAM_APP)
+    (void)mode;
+    ImGui::TextWrapped("Repair checks this version's files and rebuilds what is missing; Clean Rebuild builds "
+                       "it again from nothing. Your saves and settings are kept.");
+    if (ImGui::Button("Repair or rebuild..."))
+        g_app_maintenance = true;
+    ui_target("Maintenance");
+#else
     if (mode == UI_OVERLAY)
         ImGui::TextWrapped("Close the game and open Update / Repair in the launcher to continue in Setup.");
     else
@@ -1331,6 +1342,7 @@ static void page_maintenance(UiMode mode)
     ImGui::TextWrapped("Setup: %s", pcui::setup_path().empty() ? "not selected" : pcui::setup_path().c_str());
     ImGui::TextWrapped("Use Update / Repair on the launcher's Home screen to open the wizard and close the "
                        "game. Setup verifies releases and builds your dump locally.");
+#endif
     ImGui::SeparatorText("Files");
     ImGui::TextWrapped("Settings are saved as you change them in: %s", pc_settings_path());
     if (ImGui::Button(k_show_file_label)) open_folder();
@@ -1687,6 +1699,12 @@ UiResult ui_draw(UiMode mode, float x, float y, float width, float height)
         result.play = false;
         ImGui::TextWrapped("%s", pcui::mod_status().c_str());
     }
+#if defined(DEFJAM_APP)
+    // The app runs setup itself (src/app/app_setup.cpp): no wizard to find and open.
+    if (g_setup_request || g_app_maintenance)
+        result.setup = true;
+    g_setup_request = g_app_maintenance = false;
+#else
     if (g_setup_request)
     {
         ImGui::OpenPopup("Update / Repair");
@@ -1721,6 +1739,7 @@ UiResult ui_draw(UiMode mode, float x, float y, float width, float height)
         ImGui::PopTextWrapPos();
         ImGui::EndPopup();
     }
+#endif
     ImGui::End();
     return result;
 }

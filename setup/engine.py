@@ -1335,6 +1335,27 @@ def discard_failed_attempt(engine):
         pass
 
 
+def windows_toolchain_present():
+    """Whether Visual Studio's C++ build tools, with its CMake and Ninja, are installed: the quick
+    part of Engine.toolchain, which the app (src/app) asks before setup starts so it can offer to
+    install them (--check-toolchain). Windows only; elsewhere setup reports its own tools."""
+    vswhere = Path(os.environ.get('ProgramFiles(x86)', 'C:/Program Files (x86)')) / 'Microsoft Visual Studio/Installer/vswhere.exe'
+    if not vswhere.is_file():
+        return False
+    try:
+        found = subprocess.run([str(vswhere), '-products', '*', '-requires', 'Microsoft.VisualStudio.Component.VC.Tools.x86.x64',
+                                '-sort', '-latest', '-property', 'installationPath'], capture_output=True, text=True,
+                               timeout=120, creationflags=subprocess.CREATE_NO_WINDOW).stdout.strip().splitlines()
+    except (OSError, subprocess.SubprocessError):
+        return False
+    if not found:
+        return False
+    vs = Path(found[0])
+    return all((vs / part).is_file() for part in (
+        'Common7/Tools/VsDevCmd.bat', 'Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin/cmake.exe',
+        'Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe'))
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--payload', required=True)
@@ -1353,6 +1374,8 @@ def main(argv=None):
     parser.add_argument('--no-shortcuts', action='store_true', help='Do not create desktop/Start-menu shortcuts')
     parser.add_argument('--no-desktop-shortcut', action='store_true', help='Create only the Start-menu shortcut')
     parser.add_argument('--install-prerequisites', action='store_true')
+    parser.add_argument('--check-toolchain', action='store_true',
+                        help='Windows: exit 0 when the C++ Build Tools are installed, 3 when they are not')
     parser.add_argument('--hd-textures', action='store_true', help='Generate and enable Lanczos 4x HD textures locally (extra time/space)')
     parser.add_argument('--toolchain', choices=['auto', 'host', 'container'], default='auto',
                         help='Linux: build with this computer\'s compiler, in the pinned build container, '
@@ -1364,6 +1387,9 @@ def main(argv=None):
     parser.add_argument('--status-file')
     parser.add_argument('--cancel-file')
     args = parser.parse_args(argv)
+    if args.check_toolchain:
+        # Needs nothing from the payload or the network, so it answers in a moment.
+        return 0 if not IS_WINDOWS or windows_toolchain_present() else 3
     engine = None
     selection = None
     try:

@@ -1,11 +1,12 @@
-// Def Jam Recompiled, the app: the launcher's Home and Settings in a program of its own, with no game
-// code in it, and Play starting the game the setup built on this computer (docs/research/
-// unified-app-design-2026-10-26.md, step 2).
+// Def Jam Recompiled, the app: setup, the launcher's Home and Settings, and Play, in a program of its
+// own with no game code in it (docs/research/unified-app-design-2026-10-26.md, steps 2 and 3).
 //
-//   defjam_app [--install DIR] [--play | --launcher]
+//   defjam_app [--install DIR] [--payload DIR] [--dump PATH] [--data DIR] [--play | --launcher]
 //
-// It does what the play wrapper does (setup/macos/Launcher, setup/linux/launcher.sh): finds the
-// install, holds its play.lock, reads the receipt, supplies the data folder and working directory
+// With nothing installed it opens on the first run's setup (app_setup.cpp), which runs the setup
+// engine from the app's setup payload; Maintenance repairs or rebuilds an install the same way.
+// Otherwise it does what the play wrapper does (setup/macos/Launcher, setup/linux/launcher.sh):
+// holds the install's play.lock, reads the receipt, supplies the data folder and working directory
 // and keeps the session's log. In between it shows the launcher's window (pc_launcher_window, the
 // same screen and settings file as the game's own launcher), and Play then becomes the game with
 // --no-launcher: the lock descriptor survives the exec, so the lock lives as long as the game, and
@@ -15,7 +16,8 @@
 // is given, and never when mods need recovery; --play always skips it.
 //
 // The install is --install DIR, else DEFJAM_INSTALL_DIR, else the nearest folder above this program
-// that holds installed.json. System calls are in app_os.cpp (POSIX and Windows).
+// that holds installed.json, else the platform's usual place. --dump and --data fill in the first
+// run's choices. System calls are in app_os.cpp (POSIX and Windows).
 
 #define _CRT_SECURE_NO_WARNINGS
 #include <errno.h>
@@ -52,6 +54,7 @@ extern "C" {
 #include "pc_settings_catalog.h"
 #include "pc_ui.h"
 #include "pc_ui_actions.h"
+#include "app.h"
 #include "app_os.h"
 
 namespace fs = std::filesystem;
@@ -69,7 +72,8 @@ namespace {
 
 fs::path program_path() { return app::os::program(); }
 
-// The top-level string values of a JSON object (the install receipt). Other values are skipped.
+// The top-level values of a JSON object (the install receipt): strings decoded, anything else as
+// its JSON text.
 std::map<std::string, std::string> json_strings(const std::string &text)
 {
     std::map<std::string, std::string> out;
@@ -144,7 +148,11 @@ std::map<std::string, std::string> json_strings(const std::string &text)
             if (!string(value)) break;
             out[key] = value;
         } else {
+            size_t from = i;
             skip();
+            size_t to = i;
+            while (to > from && isspace((unsigned char)text[to - 1])) to--;
+            out[key] = text.substr(from, to - from);
         }
         space();
         if (i < text.size() && text[i] == ',') { i++; continue; }
@@ -153,6 +161,28 @@ std::map<std::string, std::string> json_strings(const std::string &text)
     return out;
 }
 
+// The platform's usual install and data folders, as the setup wizards propose them.
+void default_locations(fs::path *root, fs::path *data)
+{
+    fs::path base = app::os::user_base();
+    if (base.empty()) base = fs::current_path();
+#if defined(_WIN32)
+    base /= "DefJamRecompiled";
+    *root = base / "app";
+    *data = base / "data";
+#elif defined(__APPLE__)
+    base /= "Library/Application Support/DefJamRecompiled";
+    *root = base / "app";
+    *data = base / "data";
+#else
+    base /= "Games/DefJamRecompiled";
+    *root = base / "App";
+    *data = base / "Data";
+#endif
+}
+
+// --install DIR, else DEFJAM_INSTALL_DIR, else the nearest folder above this program that holds
+// installed.json, else the usual place (where the first run proposes to install).
 fs::path find_install(const char *named)
 {
     if (named && *named) return fs::path(named);
@@ -164,33 +194,29 @@ fs::path find_install(const char *named)
         if (dir == dir.parent_path()) break;
         dir = dir.parent_path();
     }
-    return {};
+    fs::path root, data;
+    default_locations(&root, &data);
+    return root;
 }
 
-// Where the wrappers keep the session logs; the game's log goes there too (DEFJAM_LOG_DIR).
-fs::path log_dir()
+// --payload DIR, else DEFJAM_SETUP_PAYLOAD, else the payload packaged with the app: in the bundle's
+// Resources on macOS, or beside the program.
+fs::path find_payload(const char *named)
 {
-    if (const char *named = getenv("DEFJAM_LOG_DIR"); named && *named) return fs::path(named);
-#if defined(_WIN32)
-    fs::path base = app::os::user_base();
-    return base.empty() ? base : base / "DefJamRecompiled" / "logs";
-#else
-    const char *home = getenv("HOME");
-#endif
-#if defined(__APPLE__)
-    return home ? fs::path(home) / "Library/Logs/DefJamRecompiled" : fs::path();
-#elif !defined(_WIN32)
-    const char *state = getenv("XDG_STATE_HOME");
-    if (state && *state) return fs::path(state) / "DefJamRecompiled/logs";
-    return home ? fs::path(home) / ".local/state/DefJamRecompiled/logs" : fs::path();
-#endif
+    std::error_code ec;
+    if (named && *named) return fs::path(named);
+    if (const char *env = getenv("DEFJAM_SETUP_PAYLOAD"); env && *env) return fs::path(env);
+    fs::path dir = program_path().parent_path();
+    for (const fs::path &candidate : {dir / "../Resources/payload", dir / "payload"})
+        if (fs::is_regular_file(candidate / "manifest.json", ec)) return fs::canonical(candidate, ec);
+    return {};
 }
 
 // Keep the ten newest session logs, so a problem report always has the last run, and send this
 // session's output to a new one. A terminal keeps the output instead.
 void open_session_log()
 {
-    fs::path logs = log_dir();
+    fs::path logs = app::log_dir();
     std::error_code ec;
     if (logs.empty() || !fs::create_directories(logs, ec) && ec) return;
     app::os::set_env("DEFJAM_LOG_DIR", logs.string());
@@ -223,7 +249,98 @@ bool shift_held()
 #endif
 }
 
+intptr_t g_lock = -1;
+fs::path g_payload;
+
 } // namespace
+
+namespace app
+{
+
+Install &install()
+{
+    static Install value;
+    return value;
+}
+
+FirstRun &first_run()
+{
+    static FirstRun value;
+    return value;
+}
+
+fs::path payload() { return g_payload; }
+
+// Where the wrappers keep the session logs; the game's log goes there too (DEFJAM_LOG_DIR).
+fs::path log_dir()
+{
+    if (const char *named = getenv("DEFJAM_LOG_DIR"); named && *named) return fs::path(named);
+#if defined(_WIN32)
+    fs::path base = os::user_base();
+    return base.empty() ? base : base / "DefJamRecompiled" / "logs";
+#else
+    const char *home = getenv("HOME");
+#endif
+#if defined(__APPLE__)
+    return home ? fs::path(home) / "Library/Logs/DefJamRecompiled" : fs::path();
+#elif !defined(_WIN32)
+    const char *state = getenv("XDG_STATE_HOME");
+    if (state && *state) return fs::path(state) / "DefJamRecompiled/logs";
+    return home ? fs::path(home) / ".local/state/DefJamRecompiled/logs" : fs::path();
+#endif
+}
+
+bool lock_install()
+{
+    std::error_code ec;
+    if (g_lock >= 0) return true;
+    if (!fs::is_directory(install().root, ec)) return true;     // nothing installed there to guard yet
+    intptr_t handle = os::lock_file(install().root / "play.lock");
+    if (handle < 0) return false;
+    g_lock = handle;
+    return true;
+}
+
+void unlock_install()
+{
+    os::unlock_file(g_lock);                                    // closing the handle lets the lock go
+    g_lock = -1;
+}
+
+bool load_install(std::string *why)
+{
+    Install &in = install();
+    std::error_code ec;
+    in.installed = false;
+    in.problem.clear();
+    std::ifstream file(in.root / "installed.json", std::ios::binary);
+    if (!file) return false;                                    // the first run: nothing to say
+    std::stringstream text;
+    text << file.rdbuf();
+    auto receipt = json_strings(text.str());
+    in.data = receipt["data"];
+    in.source = receipt["source"];
+    in.executable = receipt["executable"];
+    in.version = receipt["version"];
+    if (fs::exists(in.root / ".setup-transaction", ec))
+        *why = "An update was interrupted. Select Repair to recover the installation.";
+    else if (in.source.empty() || in.data.empty() || in.executable.empty() || !os::is_program(in.executable))
+        *why = "The installation is incomplete. Select Repair to fix it.";
+    else if (!os::change_dir(in.source))
+        *why = "The installed game folder is missing. Select Repair to fix it.";
+    in.problem = *why;
+    if (!why->empty()) return false;
+    os::set_env("DEFJAM_DATA", in.data.string());
+    os::set_env("DEFJAM_INSTALL_DIR", in.root.string());
+    // The same settings file as the game, with the same catalogue.
+    const char *env = getenv("RECOMP_SETTINGS");
+    std::string settings = env && !strcasecmp(env, "none") ? "" : env && *env ? env : (in.data / "settings.ini").string();
+    pc_settings_open(settings.c_str());
+    in.installed = true;
+    return true;
+}
+
+} // namespace app
 
 extern "C" int pc_mods_needs_recovery(void);   // pc_mods.cpp
 
@@ -232,10 +349,14 @@ extern "C" void xbox_UsbSetPadCount(int count) { (void)count; }
 
 int main(int argc, char **argv)
 {
-    const char *named = nullptr;
+    const char *named = nullptr, *payload = nullptr;
     bool play_now = false, force_launcher = false;
+    app::FirstRun &first = app::first_run();
     for (int a = 1; a < argc; a++) {
         if (!strcmp(argv[a], "--install") && a + 1 < argc) named = argv[++a];
+        else if (!strcmp(argv[a], "--payload") && a + 1 < argc) payload = argv[++a];
+        else if (!strcmp(argv[a], "--dump") && a + 1 < argc) first.dump = argv[++a];
+        else if (!strcmp(argv[a], "--data") && a + 1 < argc) first.data = argv[++a];
         else if (!strcmp(argv[a], "--play")) play_now = true;
         else if (!strcmp(argv[a], "--launcher")) force_launcher = true;
         else if (!strncmp(argv[a], "-psn", 4)) continue;                   // macOS's own, from Finder
@@ -243,58 +364,50 @@ int main(int argc, char **argv)
         else fail(std::string("Unknown option: ") + argv[a]);
     }
 
-    fs::path root = find_install(named);
-    if (root.empty()) fail("No installation was found. Run Def Jam Setup to install the game.");
-    // Acquire the lifetime lock before reading activation state or the receipt.
-    if (app::os::lock_file(root / "play.lock") < 0) fail("The game or an update is already running.");
-    std::error_code ec;
-    if (fs::exists(root / ".setup-transaction", ec))
-        fail("An update was interrupted. Run setup again to recover the installation.");
-    std::ifstream file(root / "installed.json", std::ios::binary);
-    std::stringstream text;
-    text << file.rdbuf();
-    auto receipt = json_strings(text.str());
-    const std::string source = receipt["source"], data = receipt["data"], executable = receipt["executable"];
-    if (source.empty() || data.empty() || executable.empty() || !app::os::is_program(executable))
-        fail("No completed installation was found. Run Def Jam Setup to install or repair it.");
+    app::Install &in = app::install();
+    in.root = find_install(named);
+    g_payload = find_payload(payload);
+    fs::path default_root, default_data;
+    default_locations(&default_root, &default_data);
+    first.install = in.root.string();
+    if (first.data.empty()) {
+        const char *env = getenv("DEFJAM_DATA");
+        first.data = env && *env ? env : default_data.string();
+    }
 
-    app::os::set_env("DEFJAM_DATA", data);
-    app::os::set_env("DEFJAM_INSTALL_DIR", root.string());
-    if (!app::os::change_dir(source)) fail("The installed game folder is missing. Run Def Jam Setup to repair it.");
     open_session_log();
-    fprintf(stderr, "[APP] Def Jam Recompiled %s: install %s, game %s\n", DEFJAM_VERSION, root.string().c_str(),
-            executable.c_str());
-
-    // The same settings file as the game, with the same catalogue.
-    const char *env = getenv("RECOMP_SETTINGS");
-    std::string settings = env && !strcasecmp(env, "none") ? "" : env && *env ? env : (fs::path(data) / "settings.ini").string();
-    pc_settings_open(settings.c_str());
+    // Acquire the lifetime lock before reading activation state or the receipt.
+    if (!app::lock_install()) fail("The game or an update is already running.");
+    std::string why;
+    if (!app::load_install(&why)) {
+        if (!why.empty()) fprintf(stderr, "[APP] %s\n", why.c_str());
+        pc_settings_open("");                       // the screens' own settings, at their defaults
+    }
+    fprintf(stderr, "[APP] Def Jam Recompiled %s: install %s (%s), setup files %s\n", DEFJAM_VERSION,
+            in.root.string().c_str(), in.installed ? ("v" + in.version).c_str() : "not installed",
+            g_payload.empty() ? "none" : g_payload.string().c_str());
 
     if (!SDL_Init(SDL_INIT_VIDEO)) fail(std::string("No display to show the launcher on: ") + SDL_GetError());
     int skip = pc_mods_needs_recovery() ? 0 : recomp_settings_get("launcher", "skip", 0);
-    if (pc_launcher_wanted(skip, force_launcher && !play_now, play_now, shift_held(), 0)) {
+    // Without a playable install there is only the setup to show.
+    if (!in.installed || pc_launcher_wanted(skip, force_launcher && !play_now, play_now, shift_held(), 0)) {
         pc_input_start();                           // pads drive the menus, as in the game's launcher
         int open_setup = 0;
         int play = pc_launcher_window(&open_setup);
         pc_input_stop();
         if (play < 0) fail("The launcher window could not be opened.");
-        if (open_setup) {
-            pcui::setup_launch();
-            SDL_Quit();
-            return 0;
-        }
-        if (!play) {
+        if (!play || !in.installed) {
             SDL_Quit();
             return 0;
         }
     }
     SDL_Quit();
 
-    fprintf(stderr, "[APP] starting %s --no-launcher\n", executable.c_str());
+    fprintf(stderr, "[APP] starting %s --no-launcher\n", in.executable.string().c_str());
 #if defined(_WIN32)
     // The game keeps its run logs in logs\ under its folder, where the old play wrapper pointed too.
-    app::os::set_env("DEFJAM_LOG_DIR", (fs::path(source) / "logs").string());
+    app::os::set_env("DEFJAM_LOG_DIR", (in.source / "logs").string());
 #endif
-    std::string why = app::os::run_in_place({executable, "--no-launcher"}, source);
-    fail("The game could not be started (" + why + "). Run Def Jam Setup to repair it.");
+    std::string error = app::os::run_in_place({in.executable.string(), "--no-launcher"}, in.source);
+    fail("The game could not be started (" + error + "). Select Repair to fix it.");
 }

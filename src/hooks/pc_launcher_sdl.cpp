@@ -39,6 +39,9 @@ extern "C" {
 #include "pc_ui.h"
 #include "pc_ui_actions.h"
 #include "pc_ui_internal.h"
+#if defined(DEFJAM_APP)
+#include "app/app.h"       // the app's own screens over the launcher: setup and maintenance
+#endif
 
 #if !defined(DEFJAM_APP)
 extern "C" void host_posix_call_on_main(void (*fn)(void *), void *arg);
@@ -175,6 +178,12 @@ extern "C" int pc_launcher_window(int *open_setup_out)
         SDL_Event e;
         while (SDL_PollEvent(&e)) {
             if (e.type == SDL_EVENT_QUIT || e.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED) {
+#if defined(DEFJAM_APP)
+                if (app::screen_busy()) {               // closing during setup asks it to stop first
+                    app::screen_request_cancel();
+                    continue;
+                }
+#endif
                 done = true;
                 *result = 0;
             } else if (e.type == SDL_EVENT_WINDOW_FOCUS_GAINED) {
@@ -288,7 +297,17 @@ extern "C" int pc_launcher_window(int *open_setup_out)
         ImGui_ImplSDLRenderer3_NewFrame();
         ui_sdl_frame((float)w, (float)h, density);
         ImGui::NewFrame();
-        UiResult res = ui_draw(UI_LAUNCHER, 0, 0, (float)w, (float)h);
+        UiResult res;
+#if defined(DEFJAM_APP)
+        if (!app::screen_draw((float)w, (float)h, &res))
+#endif
+            res = ui_draw(UI_LAUNCHER, 0, 0, (float)w, (float)h);
+#if defined(DEFJAM_APP)
+        if (res.setup) {                                // Update / Repair: the app's own Maintenance
+            app::screen_open_maintenance();
+            res.setup = res.leave = false;
+        }
+#endif
         ImGui::Render();
         SDL_SetRenderScale(renderer, density, density);
         SDL_SetRenderDrawColorFloat(renderer, 0.07f, 0.06f, 0.06f, 1.0f);
