@@ -21,7 +21,7 @@ const ImU32 GOLD_TEXT = IM_COL32(255, 205, 60, 255), BLUE_NAME = IM_COL32(142, 1
             LIVE = IM_COL32(123, 224, 123, 255), DIM = IM_COL32(242, 230, 200, 115),
             BUBBLE_ME = IM_COL32(142, 16, 36, 255), LINE_SEP = IM_COL32(255, 255, 255, 20);
 
-enum KbKind { KB_CHAT, KB_FRIEND, KB_CREW_INVITE, KB_CREW_NAME, KB_CREW_TAG, KB_FIGHT, KB_QUICK };
+enum KbKind { KB_CHAT, KB_FRIEND, KB_CREW_INVITE, KB_CREW_NAME, KB_CREW_TAG, KB_FIGHT, KB_QUICK, KB_CREW_CHALLENGE };
 enum FriendAct { ACT_ACCEPT, ACT_DECLINE, ACT_JOIN, ACT_WATCH, ACT_INVITE, ACT_MESSAGE, ACT_REMOVE, ACT_SURE };
 
 struct Chat {
@@ -68,8 +68,15 @@ struct Chat {
     long long menu_msg = 0;
     std::vector<std::string> menu_context;
     // CREW (stage 2c): the page or its chat, LEAVE pressed once, the menu on a crew mate, a new crew's name
-    int crew_view = 0;
+    int crew_view = 0;              // 0 the page, 1 its chat, 2 the crew ladder (stage 3)
     bool confirm_leave = false;
+    // crew battles (stage 3): the format picker for a challenge (by crew id, else tag), its choice; the
+    // ladder's selected row; DECLINE pressed once
+    bool picker = false;
+    long long picker_crew = 0;
+    std::string picker_tag, picker_name;
+    int picker_sel = 0, ladder_sel = 0;
+    bool confirm_decline = false;
     bool menu_crew = false;
     std::string menu_role, crew_new_name;
 } C;
@@ -922,11 +929,15 @@ std::string month_year(long long unix_s)
     return std::string(m[tm.tm_mon]) + " " + std::to_string(1900 + tm.tm_year);
 }
 
+// A crew's tag: gold once the crew reached level 5 (the first crew reward, stage 3), silver before.
 void tag_chip(ImDrawList *dl, const Frame &f, float x, float y, float size, const std::string &tag)
 {
     float tw = text_width(f, g_title, size, tag.c_str()) + size * 0.9f;
-    dl->AddRect(f.p(x, y), f.p(x + tw, y + size * 1.35f), IM_COL32(255, 205, 60, 220), 3 * f.s(), 0, 1.0f * f.s());
-    text(dl, f, g_title, size, x + tw / 2, y + size * 0.12f, GOLD_TEXT, tag.c_str(), CENTER, 0);
+    bool gold = social::gold_tag(C.v, tag);
+    ImU32 col = gold ? GOLD_TEXT : IM_COL32(205, 200, 190, 255);
+    if (gold) dl->AddRectFilled(f.p(x, y), f.p(x + tw, y + size * 1.35f), IM_COL32(255, 205, 60, 40), 3 * f.s());
+    dl->AddRect(f.p(x, y), f.p(x + tw, y + size * 1.35f), with_alpha(col, 0.86f), 3 * f.s(), 0, 1.0f * f.s());
+    text(dl, f, g_title, size, x + tw / 2, y + size * 0.12f, col, tag.c_str(), CENTER, 0);
 }
 
 // The crew chat (the CREW CHAT button): the lines and the box, B back to the page.
@@ -1018,11 +1029,172 @@ void crew_member_menu(const social::CrewMember &m)
     C.menu_role = m.role;
 }
 
+// ---- crew battles (stage 3): JOIN BATTLE, the format picker of a challenge, the crew ladder ----
+
+// JOIN BATTLE: the battle's room on the relay of its region (the hub moves there first when it is on
+// another one; the player then presses JOIN BATTLE again).
+void crew_join_battle()
+{
+    const social::Battle &bt = C.v.battle;
+    if (!bt.id) return;
+    if (!netplay_in_lobby()) { say("Connect to the online hub first."); return; }
+    std::string here = social::region_of_server(connected_server());
+    if (!bt.region.empty() && !here.empty() && here != bt.region) {
+        say("The battle runs on " + region_name(bt.region) + ": switch the server in the hub, then JOIN BATTLE.");
+        return;
+    }
+    if (!(lobby_caps() > 0 && (lobby_caps() & NETPLAY_CAP_CREW))) { say("This server does not run crew battles yet."); return; }
+    netplay_lobby_crew_join((unsigned)bt.id);
+    C.open = false;     // the battle's screen is the page under the chat
+    fprintf(stderr, "[SOCIAL-UI] crew battle %lld: join\n", bt.id);
+    say("Joining the crew battle...");
+}
+
+void open_picker(long long crew, const std::string &tag, const std::string &name)
+{
+    C.picker = true;
+    C.picker_crew = crew;
+    C.picker_tag = tag;
+    C.picker_name = name;
+    C.picker_sel = 0;
+    C.crew_view = 0;
+    C.popup_frame = ImGui::GetFrameCount();
+}
+
+// The challenge's format: 3 V 3 or 5 V 5 (the design's battles are 5 v 5).
+void draw_crew_picker(ImDrawList *dl, const Frame &f, const ChatKeys &k)
+{
+    float x = PX + 120, y = TABS_B + 40, w = PW - 240, h = 190;
+    glass(dl, f, x, y, w, h, 10, IM_COL32(24, 12, 14, 255), 0.9f);
+    text(dl, f, g_title, 10, x + w / 2, y + 14, DIM, "CHALLENGE A CREW", CENTER, 0);
+    std::string who = C.picker_name.empty() ? C.picker_tag : C.picker_name;
+    bool chip = !C.picker_tag.empty() && !C.picker_name.empty();     // by tag alone: the tag is the title
+    text(dl, f, g_title, 20, x + w / 2 - (chip ? 18 : 0), y + 32, CREAM, upper(who.c_str()).c_str(), CENTER, 0, w - 60);
+    if (chip)
+        tag_chip(dl, f, x + w / 2 + text_width(f, g_title, 20, upper(who.c_str()).c_str()) / 2 - 10, y + 37, 10, C.picker_tag);
+    text(dl, f, g_body, 9, x + w / 2, y + 62, DIM, "Winner stays on. Their Boss or a Lieutenant answers.", CENTER, 0, w - 30);
+    static const char *const items[] = { "3 V 3", "5 V 5", "BACK" };
+    if (k.up) C.picker_sel = std::max(0, C.picker_sel - 1);
+    if (k.down) C.picker_sel = std::min(2, C.picker_sel + 1);
+    bool fresh = ImGui::GetFrameCount() == C.popup_frame;
+    for (int i = 0; i < 3; i++) {
+        float bx = x + 40, by = y + 86 + i * 30, bw = w - 80;
+        bool on = C.picker_sel == i;
+        rect(dl, f, bx, by, bw, 24, on ? RED : i < 2 ? IM_COL32(200, 16, 46, 120) : IM_COL32(255, 255, 255, 22), 6);
+        text(dl, f, g_title, 12, bx + bw / 2, by + 5, IM_COL32(255, 245, 230, 255), items[i], CENTER, 0);
+        bool click = mouse_click(f, bx, by, bw, 24);
+        if (click) C.picker_sel = i;
+        if (!fresh && ((on && k.a) || click)) {
+            if (i < 2) {
+                int format = i == 0 ? 3 : 5;
+                social::crew_challenge(C.picker_crew, C.picker_tag, format);
+                fprintf(stderr, "[SOCIAL-UI] crew battle: challenge %s %d v %d\n", C.picker_tag.c_str(), format, format);
+            }
+            C.picker = false;
+            C.sel[TAB_CREW] = -1;
+            return;
+        }
+    }
+    if (!fresh && k.b) C.picker = false;
+}
+
+// The crew ladder (the design's CrewLadder): the leagues on the left, the top crews on the right, this
+// crew's row marked; A on a crew (officers) challenges it.
+void draw_crew_ladder(ImDrawList *dl, const Frame &f, const ChatKeys &k)
+{
+    const social::View &v = C.v;
+    float lx = PX + 14, ly = TABS_B + 10, lw = 132;
+    text(dl, f, g_title, 9, lx, ly, DIM, "LEAGUES", LEFT, 0);
+    static const struct { const char *key, *name, *rule; } leagues[] = {
+        { "kings", "KINGS OF NEW YORK", "TOP 5" }, { "city", "CITY CREW", "1,850+" }, { "borough", "BOROUGH CREW", "1,650+" },
+        { "block", "BLOCK CREW", "1,450+" }, { "street", "STREET CREW", "START" } };
+    std::string my_league = v.ladder_mine.place ? v.ladder_mine.league : "street";
+    for (int i = 0; i < 5; i++) {
+        float y = ly + 14 + i * 30;
+        bool mine = leagues[i].key == my_league, kings = i == 0;
+        rect(dl, f, lx, y, lw, 25, kings ? IM_COL32(120, 84, 14, 150) : mine ? IM_COL32(90, 12, 26, 210) : IM_COL32(255, 255, 255, 14), 6);
+        if (mine) dl->AddRect(f.p(lx, y), f.p(lx + lw, y + 25), IM_COL32(255, 90, 110, 255), 6 * f.s(), 0, 1.2f * f.s());
+        text(dl, f, g_title, 9.5f, lx + 7, y + 6.5f, kings ? GOLD_TEXT : CREAM, leagues[i].name, LEFT, 0, lw - 40);
+        text(dl, f, g_title, 8, lx + lw - 6, y + 8, kings ? GOLD_TEXT : DIM, leagues[i].rule, RIGHT, 0);
+    }
+    text(dl, f, g_body, 8.5f, lx, ly + 172, DIM, "Top crews move up at the end of the season, the bottom ones down. "
+         "Every crew starts in Street Crew.", LEFT, 0, lw);
+    // the table
+    float tx = lx + lw + 14, tw = PX + PW - 12 - tx;
+    std::string head = v.ladder_mine.place ? upper(v.ladder_mine.league_name.c_str()) : "THE LADDER";
+    text(dl, f, g_title, 15, tx, ly - 2, CREAM, head.c_str(), LEFT, 0);
+    char sub[64];
+    snprintf(sub, sizeof(sub), "season 1 - %d crews", v.ladder_total);
+    text(dl, f, g_body, 9, tx + text_width(f, g_title, 15, head.c_str()) + 8, ly + 3, DIM, sub, LEFT, 0);
+    float cols[4] = { tx + 6, tx + 26, tx + tw * 0.56f, tx + tw * 0.76f };
+    text(dl, f, g_title, 8, cols[0], ly + 20, DIM, "#", LEFT, 0);
+    text(dl, f, g_title, 8, cols[1], ly + 20, DIM, "CREW", LEFT, 0);
+    text(dl, f, g_title, 8, cols[2], ly + 20, DIM, "RATING", LEFT, 0);
+    text(dl, f, g_title, 8, cols[3], ly + 20, DIM, "BATTLES", LEFT, 0);
+    text(dl, f, g_title, 8, tx + tw - 6, ly + 20, DIM, "LEVEL", RIGHT, 0);
+    int n = (int)v.ladder.size();
+    if (!v.ladder_loaded) text(dl, f, g_body, 10, tx + tw / 2, ly + 70, DIM, "Loading the ladder...", CENTER, 0);
+    else if (!n) text(dl, f, g_body, 10, tx + tw / 2, ly + 70, DIM, "No crews yet.", CENTER, 0);
+    if (k.up) C.ladder_sel = std::max(0, C.ladder_sel - 1);
+    if (k.down) C.ladder_sel = std::min(std::max(0, n - 1), C.ladder_sel + 1);
+    const int shown = 7;
+    int first = std::max(0, std::min(n - shown, C.ladder_sel - shown + 2));
+    bool officer = v.crew_role == "boss" || v.crew_role == "lieutenant";
+    for (int i = first; i < n && i < first + shown; i++) {
+        const social::LadderRow &row = v.ladder[(size_t)i];
+        float y = ly + 34 + (i - first) * 24;
+        bool mine = row.id == v.crew, on = i == C.ladder_sel;
+        rect(dl, f, tx, y, tw, 21, mine ? IM_COL32(90, 12, 26, 200) : IM_COL32(255, 255, 255, 14), 5);
+        if (mine || on) dl->AddRect(f.p(tx, y), f.p(tx + tw, y + 21), on ? IM_COL32(255, 245, 230, 200) : IM_COL32(255, 90, 110, 255),
+                                    5 * f.s(), 0, 1.2f * f.s());
+        char b[32];
+        snprintf(b, sizeof(b), "%d", row.place);
+        text(dl, f, g_title, 12, cols[0], y + 3, GOLD_TEXT, b, LEFT, 0);
+        std::string nm = upper(row.name.c_str());
+        text(dl, f, g_title, 11, cols[1], y + 4, CREAM, nm.c_str(), LEFT, 0, cols[2] - cols[1] - 40);
+        tag_chip(dl, f, cols[1] + std::min(text_width(f, g_title, 11, nm.c_str()), cols[2] - cols[1] - 40) + 5, y + 5, 8, row.tag);
+        snprintf(b, sizeof(b), "%d", row.rating);
+        text(dl, f, g_title, 11, cols[2], y + 4, CREAM, b, LEFT, 0);
+        if (row.trend) {      // the last rated battle: up or down
+            float ax = cols[2] + text_width(f, g_title, 11, b) + 8, ay = y + 10.5f;
+            ImU32 tc = row.trend > 0 ? LIVE : IM_COL32(255, 92, 118, 255);
+            if (row.trend > 0) dl->AddTriangleFilled(f.p(ax - 4, ay + 3), f.p(ax + 4, ay + 3), f.p(ax, ay - 4), tc);
+            else dl->AddTriangleFilled(f.p(ax - 4, ay - 3), f.p(ax + 4, ay - 3), f.p(ax, ay + 4), tc);
+        }
+        snprintf(b, sizeof(b), "%d-%d", row.wins, row.losses);
+        text(dl, f, g_title, 11, cols[3], y + 4, CREAM, b, LEFT, 0);
+        snprintf(b, sizeof(b), "%d", row.level);
+        text(dl, f, g_title, 11, tx + tw - 6, y + 4, row.level >= 5 ? GOLD_TEXT : CREAM, b, RIGHT, 0);
+        if (mouse_click(f, tx, y, tw, 21)) C.ladder_sel = i;
+    }
+    if (v.ladder_mine.place > first + shown || (v.ladder_mine.place && v.ladder_mine.place <= first)) {
+        char b[96];
+        snprintf(b, sizeof(b), "YOUR CREW: #%d - %d - %d-%d", v.ladder_mine.place, v.ladder_mine.rating, v.ladder_mine.wins, v.ladder_mine.losses);
+        text(dl, f, g_title, 9, tx + tw / 2, ly + 34 + shown * 24 + 2, ORANGE, b, CENTER, 0);
+    }
+    // CHALLENGE <the selected crew> (officers, another crew, no battle open)
+    const social::LadderRow *pick = n ? &v.ladder[(size_t)std::min(C.ladder_sel, n - 1)] : nullptr;
+    bool open = v.battle.id && (v.battle.state == "proposed" || v.battle.state == "accepted" || v.battle.state == "live");
+    float by = PY + PH - 34;
+    if (pick && pick->id != v.crew && officer && !open) {
+        std::string label = "CHALLENGE " + upper(pick->name.c_str());
+        float bw = std::min(tw * 0.6f, text_width(f, g_title, 12, label.c_str()) + 24);
+        rect(dl, f, tx, by, bw, 24, RED, 6);
+        text(dl, f, g_title, 12, tx + bw / 2, by + 5, IM_COL32(255, 245, 230, 255), label.c_str(), CENTER, 0, bw - 8);
+        text(dl, f, g_body, 9, tx + bw + 10, by + 7, DIM, "Battles also count for crew XP and rewards", LEFT, 0, tw - bw - 12);
+        if (k.a || mouse_click(f, tx, by, bw, 24)) open_picker(pick->id, pick->tag, pick->name);
+    } else {
+        text(dl, f, g_body, 9, tx, by + 7, DIM, open ? "Your crew has a battle open." : "Battles also count for crew XP and rewards.", LEFT, 0, tw);
+    }
+}
+
 void draw_crew(ImDrawList *dl, const Frame &f, const ChatKeys &k)
 {
     const social::View &v = C.v;
     if (!v.crew) { C.crew_view = 0; draw_crew_none(dl, f, k); return; }
     if (C.crew_view == 1) { draw_crew_chat(dl, f, k); return; }
+    if (C.crew_view == 2) { draw_crew_ladder(dl, f, k); return; }
+    if (C.picker) { draw_crew_picker(dl, f, k); return; }
     bool officer = v.crew_role == "boss" || v.crew_role == "lieutenant";
 
     // the left: emblem, name, tag, motto, the cards, the level and the rewards
@@ -1030,8 +1202,11 @@ void draw_crew(ImDrawList *dl, const Frame &f, const ChatKeys &k)
     rect(dl, f, rx - 10, TABS_B, 0.5f, PY + PH - TABS_B, LINE_SEP);
     float eb = 62;
     rect(dl, f, lx, ly, eb, eb, IM_COL32(0, 0, 0, 90), 9);
-    dl->AddRect(f.p(lx, ly), f.p(lx + eb, ly + eb), IM_COL32(255, 205, 60, 230), 9 * f.s(), 0, 2.0f * f.s());
-    {   // the crown (the default emblem)
+    if (v.crew_level >= 6) dl->AddRect(f.p(lx, ly), f.p(lx + eb, ly + eb), IM_COL32(255, 205, 60, 230), 9 * f.s(), 0, 2.0f * f.s());
+    if (v.crew_level < 6) {     // before the crown emblem (level 6): the tag's first letter
+        dl->AddRect(f.p(lx, ly), f.p(lx + eb, ly + eb), IM_COL32(205, 200, 190, 200), 9 * f.s(), 0, 2.0f * f.s());
+        text(dl, f, g_stencil, 34, lx + eb / 2, ly + 10, CREAM, v.crew_tag.substr(0, 1).c_str(), CENTER, 1.2f);
+    } else {   // the crown emblem (level 6)
         float cx = lx + eb / 2, cy = ly + eb / 2 + 2, u = 12;
         ImVec2 pts[7] = { f.p(cx - u, cy + u * 0.5f), f.p(cx - u, cy - u * 0.6f), f.p(cx - u * 0.45f, cy - u * 0.05f),
                           f.p(cx, cy - u * 0.85f), f.p(cx + u * 0.45f, cy - u * 0.05f), f.p(cx + u, cy - u * 0.6f),
@@ -1058,12 +1233,15 @@ void draw_crew(ImDrawList *dl, const Frame &f, const ChatKeys &k)
     else snprintf(streak, sizeof(streak), "%s", v.crew_wins + v.crew_losses ? "" : "no battles yet");
     snprintf(turf, sizeof(turf), "%d", v.crew_turf);
     char rating[32];
-    snprintf(rating, sizeof(rating), "rating %d", v.crew_rating);
+    if (v.ladder_mine.place && v.ladder_mine.id == v.crew)
+        snprintf(rating, sizeof(rating), "division %s - %d", v.ladder_mine.division == 2 ? "II" : v.ladder_mine.division == 3 ? "III" :
+                 v.ladder_mine.division == 1 ? "I" : std::to_string(v.ladder_mine.division).c_str(), v.crew_rating);
+    else snprintf(rating, sizeof(rating), "rating %d", v.crew_rating);
     struct Card { const char *head; std::string big, sub; };
     Card cards[3] = { { "LEAGUE", v.crew_league.empty() ? std::string("STREET") : upper(v.crew_league.c_str()), rating },
                       { "CREW BATTLES", battles, streak },
                       { "TURF", v.crew_turf ? std::string(turf) + (v.crew_turf == 1 ? " VENUE" : " VENUES") : "NONE YET",
-                        "crew battles: soon" } };
+                        "Turf War: soon" } };
     for (int i = 0; i < 3; i++) {
         float x = lx + i * (cw + 6);
         rect(dl, f, x, cy, cw, ch, IM_COL32(255, 255, 255, 14), 8);
@@ -1105,8 +1283,17 @@ void draw_crew(ImDrawList *dl, const Frame &f, const ChatKeys &k)
     std::vector<Row> rows;
     for (auto &m : v.crew_roster) rows.push_back({ 0, &m, nullptr });
     if (officer) for (auto &a : v.crew_applied) rows.push_back({ 1, nullptr, &a });
-    enum { B_CHALLENGE, B_CHAT, B_INVITE, B_LEAVE };
-    std::vector<int> buttons = { B_CHALLENGE, B_CHAT };
+    // stage 3: the battle's buttons in place of CHALLENGE A CREW while one is open, and the ladder
+    enum { B_CHALLENGE, B_CHAT, B_INVITE, B_LEAVE, B_ACCEPT, B_DECLINE, B_CANCEL, B_JOIN, B_LADDER };
+    const social::Battle &bt = v.battle;
+    bool open = bt.id && (bt.state == "proposed" || bt.state == "accepted" || bt.state == "live");
+    std::vector<int> buttons;
+    if (!open) buttons.push_back(B_CHALLENGE);
+    else if (bt.state == "proposed" && bt.can_answer) { buttons.push_back(B_ACCEPT); buttons.push_back(B_DECLINE); }
+    else if (bt.state == "proposed") buttons.push_back(B_CANCEL);
+    else buttons.push_back(B_JOIN);
+    buttons.push_back(B_LADDER);
+    buttons.push_back(B_CHAT);
     if (officer) buttons.push_back(B_INVITE);
     buttons.push_back(B_LEAVE);
     int total = (int)rows.size() + (int)buttons.size();
@@ -1119,7 +1306,8 @@ void draw_crew(ImDrawList *dl, const Frame &f, const ChatKeys &k)
     char mh[48];
     snprintf(mh, sizeof(mh), "MEMBERS - %d ONLINE", v.crew_online);
     text(dl, f, g_title, 10, rx, TABS_B + 12, DIM, mh, LEFT, 0);
-    const int shown = 8;
+    // the members' rows fit above the buttons and the battle's line
+    const int shown = std::max(3, std::min(8, (int)((PY + PH - 12 - (float)buttons.size() * 27 - 18 - (TABS_B + 30)) / 21)));
     int first = std::max(0, std::min((int)rows.size() - shown, (sel < (int)rows.size() ? sel : 0) - shown + 2));
     float ry = TABS_B + 30, rw = PX + PW - 12 - rx;
     for (int i = first; i < (int)rows.size() && i < first + shown; i++) {
@@ -1166,20 +1354,58 @@ void draw_crew(ImDrawList *dl, const Frame &f, const ChatKeys &k)
         text(dl, f, g_body, 8, rx + rw, TABS_B + 13, DIM, more, RIGHT, 0);
     }
     float by = PY + PH - 12 - (float)buttons.size() * 27;
+    {   // the battle's line over the buttons
+        std::string line;
+        ImU32 lc = DIM;
+        char b2[160];
+        int me = bt.side == 2 ? 1 : 0;
+        const std::string &them = bt.crews[1 - me].tag;
+        if (bt.id && bt.state == "proposed")
+            snprintf(b2, sizeof(b2), bt.side == 2 ? "%s CHALLENGES YOU: %d V %d" : "CHALLENGE TO %s SENT: %d V %d", them.c_str(), bt.format, bt.format);
+        else if (bt.id && (bt.state == "accepted" || bt.state == "live"))
+            snprintf(b2, sizeof(b2), "CREW BATTLE V %s: %d V %d - %s", them.c_str(), bt.format, bt.format,
+                     bt.state == "live" ? "ROOM OPEN" : "ACCEPTED");
+        else if (bt.id && bt.state == "over")
+            snprintf(b2, sizeof(b2), "%s V %s %d-%d%s", bt.winner == 0 ? "DRAW" : bt.winner == bt.side ? "WON" : "LOST", them.c_str(),
+                     bt.score[me], bt.score[1 - me], bt.rated ? (" - RATING " + std::string(bt.dx[me] >= 0 ? "+" : "") + std::to_string(bt.dx[me])).c_str() : " - NOT RATED");
+        else if (bt.id && bt.state == "void")
+            snprintf(b2, sizeof(b2), "CREW BATTLE V %s: %s", them.c_str(), upper(bt.void_why.c_str()).c_str());
+        else b2[0] = 0;
+        line = b2;
+        if (bt.state == "proposed" || bt.state == "accepted" || bt.state == "live") lc = ORANGE;
+        if (!line.empty()) text(dl, f, g_title, 9, rx - 2 + rw / 2, by - 15, lc, line.c_str(), CENTER, 0, rw + 6);
+    }
     for (size_t b = 0; b < buttons.size(); b++) {
         int idx = (int)rows.size() + (int)b;
-        bool on = sel == idx, soon = buttons[b] == B_CHALLENGE;
+        bool on = sel == idx, soon = buttons[b] == B_CHALLENGE && !officer;
         const char *label = buttons[b] == B_CHALLENGE ? "CHALLENGE A CREW" : buttons[b] == B_CHAT ? "CREW CHAT" :
-                            buttons[b] == B_INVITE ? "INVITE A PLAYER" : C.confirm_leave ? "SURE? LEAVE" : "LEAVE CREW";
-        ImU32 fill = on ? RED : b == 0 ? IM_COL32(200, 16, 46, soon ? 70 : 200) : IM_COL32(255, 255, 255, 22);
+                            buttons[b] == B_INVITE ? "INVITE A PLAYER" : buttons[b] == B_ACCEPT ? "ACCEPT CHALLENGE" :
+                            buttons[b] == B_DECLINE ? (C.confirm_decline ? "SURE? DECLINE" : "DECLINE") :
+                            buttons[b] == B_CANCEL ? (bt.can_cancel ? "CALL OFF CHALLENGE" : "WAITING FOR THEIR ANSWER") :
+                            buttons[b] == B_JOIN ? "JOIN BATTLE" : buttons[b] == B_LADDER ? "CREW LADDER" :
+                            C.confirm_leave ? "SURE? LEAVE" : "LEAVE CREW";
+        bool primary = b == 0 && buttons[b] != B_CANCEL;
+        ImU32 fill = on ? RED : primary ? IM_COL32(200, 16, 46, soon ? 70 : 200) : IM_COL32(255, 255, 255, 22);
         rect(dl, f, rx - 4, by, rw + 4, 23, fill, 6);
         if (on) dl->AddRect(f.p(rx - 5, by - 1), f.p(rx + rw + 1, by + 24), IM_COL32(255, 90, 110, 255), 6 * f.s(), 0, 1.2f * f.s());
         text(dl, f, g_title, 11, rx - 2 + rw / 2, by + 5, soon && !on ? DIM : IM_COL32(255, 245, 230, 255), label, CENTER, 0);
         bool click = mouse_click(f, rx - 4, by, rw + 4, 23);
         if (click) sel = idx;
         if ((on && k.a) || click) {
+            if (buttons[b] != B_DECLINE) C.confirm_decline = false;
             switch (buttons[b]) {
-            case B_CHALLENGE: say("Crew battles come with the next stage of the Social Update."); break;
+            case B_CHALLENGE:
+                if (!officer) say("Only the Boss or a Lieutenant can challenge a crew.");
+                else open_keyboard(KB_CREW_CHALLENGE);
+                break;
+            case B_ACCEPT: social::battle_answer("accept"); fprintf(stderr, "[SOCIAL-UI] crew battle: accept\n"); break;
+            case B_DECLINE:
+                if (!C.confirm_decline) C.confirm_decline = true;
+                else { social::battle_answer("decline"); C.confirm_decline = false; fprintf(stderr, "[SOCIAL-UI] crew battle: decline\n"); }
+                break;
+            case B_CANCEL: if (bt.can_cancel) social::battle_answer("cancel"); break;
+            case B_JOIN: crew_join_battle(); break;
+            case B_LADDER: C.crew_view = 2; C.ladder_sel = 0; social::ladder(); break;
             case B_CHAT: C.crew_view = 1; C.sel[TAB_CREW] = -1; C.line_skip = 0; break;
             case B_INVITE: open_keyboard(KB_CREW_INVITE); break;
             case B_LEAVE:
@@ -1716,7 +1942,7 @@ std::string &kb_text() { return C.kb_kind == KB_FIGHT ? fight_draft() : C.kb_kin
 int &kb_cursor() { return C.kb_kind == KB_FIGHT ? fight_cursor() : C.kb_kind != KB_CHAT ? C.friend_cursor : C.cursor[C.tab]; }
 int kb_max()
 {
-    return C.kb_kind == KB_FIGHT || C.kb_kind == KB_QUICK ? 200 : C.kb_kind == KB_CREW_TAG ? 4 : C.kb_kind == KB_CREW_NAME ? 24 :
+    return C.kb_kind == KB_FIGHT || C.kb_kind == KB_QUICK ? 200 : C.kb_kind == KB_CREW_TAG || C.kb_kind == KB_CREW_CHALLENGE ? 4 : C.kb_kind == KB_CREW_NAME ? 24 :
            C.kb_kind != KB_CHAT ? 32 : std::max(1, C.v.max_chars);
 }
 
@@ -1729,7 +1955,7 @@ void open_keyboard(int kind)
     C.kc = 7;
     C.symbols = false;
     if (kind != KB_CHAT && kind != KB_FIGHT) { C.friend_name.clear(); C.friend_cursor = 0; }
-    if (kind == KB_CREW_TAG) C.caps = true;     // tags are capitals
+    if (kind == KB_CREW_TAG || kind == KB_CREW_CHALLENGE) C.caps = true;     // tags are capitals
 }
 
 void kb_submit()
@@ -1755,6 +1981,10 @@ void kb_submit()
         } else if (kind == KB_CREW_NAME) {      // then the tag
             C.crew_new_name = n;
             open_keyboard(KB_CREW_TAG);
+        } else if (kind == KB_CREW_CHALLENGE) {     // then 3 V 3 or 5 V 5
+            for (auto &c : n) c = (char)toupper((unsigned char)c);
+            open_picker(0, n, "");
+            C.caps = false;
         } else if (kind == KB_CREW_TAG) {
             for (auto &c : n) c = (char)toupper((unsigned char)c);
             std::string region = social::region_of_server(connected_server());
@@ -1914,6 +2144,7 @@ void draw_keyboard(ImDrawList *dl, const Frame &f, ImVec2 display)
     else if (C.kb_kind == KB_CREW_NAME) { head = "NEW CREW - ITS NAME"; who = ""; }
     else if (C.kb_kind == KB_CREW_TAG) { head = "NEW CREW - ITS TAG"; who = C.crew_new_name; }
     else if (C.kb_kind == KB_QUICK) { head = "QUICK CHAT - LINE"; who = std::to_string(QW.editing + 1); }
+    else if (C.kb_kind == KB_CREW_CHALLENGE) { head = "CHALLENGE A CREW - ITS TAG"; who = ""; }
     else if (C.tab == TAB_MESSAGES) { head = "MESSAGE TO"; who = convo_name(C.dm_with); }
     else if (C.tab == TAB_CREW) { head = "MESSAGE TO"; who = "your crew"; }
     else { head = "MESSAGE TO"; who = C.region ? k_region_names[C.region] : "everyone"; }
@@ -1936,7 +2167,8 @@ void draw_keyboard(ImDrawList *dl, const Frame &f, ImVec2 display)
              LEFT, 0);
     else if (s.empty() && C.kb_kind != KB_CHAT)
         text(dl, f, g_body, 14, x + in + 9, fy + 7, DIM, C.kb_kind == KB_CREW_NAME ? "3 to 24 letters, digits and spaces" :
-             C.kb_kind == KB_CREW_TAG ? "2 to 4 letters or digits" : "Their name, exactly", LEFT, 0);
+             C.kb_kind == KB_CREW_TAG ? "2 to 4 letters or digits" : C.kb_kind == KB_CREW_CHALLENGE ? "Their crew's tag, e.g. RHR" :
+             "Their name, exactly", LEFT, 0);
     text(dl, f, g_body, 14, x + in + 9 - shift, fy + 7, CREAM, s.c_str(), LEFT, 0);
     rect(dl, f, x + in + 9 - shift + cw + 1, fy + 8, 1.5f, 16, GOLD_TEXT);
     dl->PopClipRect();
@@ -1994,6 +2226,7 @@ void draw_keyboard(ImDrawList *dl, const Frame &f, ImVec2 display)
             if (key.kind == K_SEND && C.kb_kind == KB_CREW_NAME) label = "NEXT";
             if (key.kind == K_SEND && C.kb_kind == KB_CREW_TAG) label = "CREATE";
             if (key.kind == K_SEND && C.kb_kind == KB_QUICK) label = "SAVE";
+            if (key.kind == K_SEND && C.kb_kind == KB_CREW_CHALLENGE) label = "NEXT";
             if (key.kind == K_SHIFT && C.caps) label = "CAPS";
             float size = wide ? 10 : 13;
             if (key.kind == K_BKSP) {       // a backspace arrow
@@ -2027,7 +2260,7 @@ void draw_keyboard(ImDrawList *dl, const Frame &f, ImVec2 display)
     hx += plate_hint(dl, f, hx, hy, ps_icons() ? "L1" : "LB", "") - 2;
     hx += plate_hint(dl, f, hx, hy, ps_icons() ? "R1" : "RB", "CURSOR");
     hx += plate_hint(dl, f, hx, hy, start_button_name(), C.kb_kind == KB_FRIEND ? "ADD" : C.kb_kind == KB_CREW_INVITE ? "INVITE" :
-                     C.kb_kind == KB_CREW_NAME ? "NEXT" : C.kb_kind == KB_CREW_TAG ? "CREATE" :
+                     C.kb_kind == KB_CREW_NAME || C.kb_kind == KB_CREW_CHALLENGE ? "NEXT" : C.kb_kind == KB_CREW_TAG ? "CREATE" :
                      C.kb_kind == KB_QUICK ? "SAVE" : "SEND");
     hint(dl, f, hx, hy, "b", "CLOSE");
     if (k.b || k.esc) C.kb = false;
@@ -2117,9 +2350,14 @@ void chat_test_step()
             }
         }
     }
-    if (next >= steps.size() || !C.ready_at) return;
-    if ((GetTickCount64() - C.ready_at) / 1000.0f < steps[next].first) return;
-    std::string step = steps[next++].second;
+    // RECOMP_TEST_SOCIAL's ui:ACTION step (social.cpp): one of these at a point of that script (after a crew
+    // battle, whenever it ends), else the timed ones
+    std::string step = social::test_ui_take();
+    if (step.empty()) {
+        if (next >= steps.size() || !C.ready_at) return;
+        if ((GetTickCount64() - C.ready_at) / 1000.0f < steps[next].first) return;
+        step = steps[next++].second;
+    }
     std::string what = step.substr(0, step.find('=')), arg = step.find('=') == std::string::npos ? "" : step.substr(step.find('=') + 1);
     if (what == "chat") {
         C.open = C.opened_once = true;
@@ -2206,6 +2444,23 @@ void chat_test_step()
             fprintf(stderr, "[SOCIAL-UI] report %s (room, room %s)\n", arg.c_str(), C.menu_room_code.c_str());
         }
         C.menu = false;
+    } else if (what == "crewladder") {              // stage 3: CREW LADDER
+        C.open = true;
+        C.kb = C.menu = false;
+        C.tab = TAB_CREW;
+        C.crew_view = 2;
+        social::ladder();
+    } else if (what == "crewpicker") {              // stage 3: CHALLENGE A CREW's format picker on a tag (no challenge sent)
+        C.open = true;
+        C.kb = C.menu = false;
+        C.tab = TAB_CREW;
+        open_picker(0, arg, "");
+        for (auto &row : C.v.ladder) if (row.tag == arg) { C.picker_crew = row.id; C.picker_name = row.name; }
+    } else if (what == "crewpage") {                // stage 3: the crew's page (its battle line and buttons)
+        C.open = true;
+        C.kb = C.menu = C.picker = false;
+        C.tab = TAB_CREW;
+        C.crew_view = 0;
     } else if (what == "room") {                    // a room of this copy's own (a presence other than the menu)
         NetRoomSettings rs;
         default_settings(rs);
@@ -2814,7 +3069,8 @@ void chat_draw(ImDrawList *dl, const Frame &f, ImVec2 display)
     if (C.kb) draw_keyboard(dl, f, display);
     draw_toasts(dl, f);
     if (!C.kb && !C.menu && (k.b || k.esc)) {
-        if (C.tab == TAB_CREW && C.crew_view == 1 && C.v.crew) { C.crew_view = 0; C.sel[TAB_CREW] = -1; }
+        if (C.tab == TAB_CREW && C.picker) { /* the picker takes its own B */ }
+        else if (C.tab == TAB_CREW && (C.crew_view == 1 || C.crew_view == 2) && C.v.crew) { C.crew_view = 0; C.sel[TAB_CREW] = -1; }
         else C.open = false;
     }
     if (!C.open) social_set_typing(0);
@@ -2828,6 +3084,8 @@ const char *chat_shot_label()
     if (C.kb) return "social-keyboard";
     if (C.menu) return "social-menu";
     if (C.tab == TAB_CREW && C.crew_view == 1) return "social-crewchat";
+    if (C.tab == TAB_CREW && C.crew_view == 2) return "social-crewladder";
+    if (C.tab == TAB_CREW && C.picker) return "social-crewchallenge";
     return k_tab_shots[C.tab];
 }
 

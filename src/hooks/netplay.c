@@ -40,6 +40,7 @@
 #include "automatch.h"
 #include "online_data.h"
 #include "account.h"
+#include "social.h"
 #include "rollback.h"
 #include "test_observations.h"
 #include "netplay_servers.h"
@@ -92,6 +93,8 @@ void netplay_lobby_ready(int r, int f) { (void)r; (void)f; }
 void netplay_lobby_vote(int c) { (void)c; }
 void netplay_lobby_leave(void) {}
 void netplay_lobby_yield(void) {}
+void netplay_lobby_crew_join(unsigned b) { (void)b; }
+int netplay_lobby_crew(NetCrew *o) { memset(o, 0, sizeof(*o)); return 0; }
 void netplay_lobby_room(NetRoom *o) { memset(o, 0, sizeof(*o)); }
 void netplay_lobby_ranked(int f) { (void)f; }
 void netplay_lobby_ranked_ex(int f, unsigned m, int p) { (void)f; (void)m; (void)p; }
@@ -206,6 +209,11 @@ void netplay_crowd_update(void) { sub_00081170(); }
  * account's id and name on this session's lines; the game never names itself in a line. */
 #define T_IDENT       0x31      /* -> token 8, ticket 16; <- u8 status (IDENT_*), u16 minutes muted */
 #define T_CHAT        0x32      /* -> token 8, u16 id, u8 n, text; <- u8 slot, u32 account, u8 flags, u16 id, name, text */
+/* Crew battles (social stage 3, relays answering CAPS bit 8): CREWJOIN enters a battle's room once the
+ * relay knows this account (IDENT); CREW is the battle (lineups, states, score) after every ROOM/HILL. */
+#define T_CREWJOIN    0x34      /* -> token 8, u32 battle */
+#define T_CREW        0x35      /* <- u32 battle, u8 format, state, winner, u16 secs, u8 watchers, 2 x side */
+#define CREW_RETRY_MS 2000
 #define IDENT_OK      0
 #define IDENT_REFUSED 1
 #define IDENT_NO_SERVICE 2
@@ -228,6 +236,7 @@ void netplay_crowd_update(void) { sub_00081170(); }
 #define CAPS_STATS_ERR 32u      /* client (build 46): shows ERROR 12, a created fighter's stats refused */
 #define CAPS_SPEC_REMATCH 64u   /* client (build 47): a spectator takes the players' P_REMATCH (rematches watched) */
 #define CAPS_CHAT     128u      /* room chat, both ways (T_IDENT, T_CHAT); only a client announcing it gets T_CHAT */
+#define CAPS_CREW     256u      /* crew battles, both ways (T_CREWJOIN, T_CREW); only a client announcing it gets T_CREW */
 #define CP_WAIT_MS    10000     /* START: how long to wait for a created fighter's missing record */
 #define CAPS_TRIES    5         /* CAPS every RETRY_MS; no answer after these: an older relay */
 #define WINNER_DRAW   0xFFu
@@ -496,6 +505,12 @@ static struct {
     /* a player's fight that went out of sync and whose other players stopped sending: left for the
      * room the way the pause menu's Quit leaves it (desync_quit_tick, between two updates) */
     int desync_quit;
+    /* crew battles (T_CREWJOIN, T_CREW): the battle to enter, and the last CREW of this PC's room */
+    unsigned crew_want;
+    int crew_tries;
+    ULONGLONG crew_sent;
+    NetCrew crew;
+    char crew_room[7];
 } N;
 
 /* This PC is in its room as a spectator (the relay's ROOM says `you` 0xFD). */
@@ -1784,6 +1799,53 @@ static void on_queue(const uint8_t *b, int len)
 }
 
 /* RANKINFO: the ranked room's ranks and its set's score, after every ROOM of the room. */
+/* CREW: the crew battle of this PC's room, after every ROOM and HILL of it. */
+static void on_crew(const uint8_t *b, int len)
+{
+    Reader r = { b, len, 0, 0 };
+    NetCrew c;
+    int s, i, v;
+    memset(&c, 0, sizeof(c));
+    rdbytes(&r, &c.battle, 4);
+    c.battle = get32((const uint8_t *)&c.battle);
+    c.format = rd8(&r);
+    c.state = rd8(&r);
+    c.winner = rd8(&r);
+    c.secs_left = rd8(&r); c.secs_left |= rd8(&r) << 8;
+    c.watchers = rd8(&r);
+    for (s = 0; s < 2 && !r.bad; s++) {
+        NetCrewSide *side = &c.sides[s];
+        rdstr(&r, side->tag, sizeof(side->tag));
+        rdstr(&r, side->name, sizeof(side->name));
+        side->score = rd8(&r);
+        side->count = rd8(&r);
+        if (side->count > NETPLAY_CREW_MAX) { r.bad = 1; break; }
+        for (i = 0; i < side->count && !r.bad; i++) {
+            NetCrewEntry *e = &side->lineup[i];
+            v = rd8(&r); e->slot = v < ROOMSLOTS ? v : -1;
+            e->state = rd8(&r);
+            e->wins = rd8(&r);
+            rdstr(&r, e->name, sizeof(e->name));
+            if (e->state > NETCREW_GONE) r.bad = 1;
+        }
+    }
+    if (r.bad || c.state > NETCREW_OVER || c.winner > 2) return;
+    c.received = GetTickCount64();
+    EnterCriticalSection(&g_cs);
+    if (!N.roomv.in_room) { LeaveCriticalSection(&g_cs); return; }
+    if (memcmp(N.crew_room, N.roomv.code, 7) || N.crew.state != c.state || N.crew.sides[0].score != c.sides[0].score ||
+        N.crew.sides[1].score != c.sides[1].score || N.crew.sides[0].count != c.sides[0].count ||
+        N.crew.sides[1].count != c.sides[1].count)
+        fprintf(stderr, "[NETPLAY] crew battle %u: %s v %s, %d v %d, state %d, score %d-%d, lineups %d/%d, winner %d\n",
+                c.battle, c.sides[0].tag, c.sides[1].tag, c.format, c.format, c.state, c.sides[0].score, c.sides[1].score,
+                c.sides[0].count, c.sides[1].count, c.winner);
+    N.crew = c;
+    memcpy(N.crew_room, N.roomv.code, 7);
+    if (N.crew_want == c.battle) N.crew_want = 0;      /* in: no more CREWJOIN */
+    N.roomv.version++;
+    LeaveCriticalSection(&g_cs);
+}
+
 static void on_rankinfo(const uint8_t *b, int len)
 {
     NetRankInfo ri;
@@ -2423,12 +2485,12 @@ static void on_packet(const uint8_t *b, int len)
             int had = N.relay_caps;
             N.relay_caps = (int)(get32(b + 6) & 0x7FFFFFFFu);
             if (had != N.relay_caps)
-                fprintf(stderr, "[NETPLAY] the relay supports %08X%s%s%s%s%s\n", (unsigned)N.relay_caps,
+                fprintf(stderr, "[NETPLAY] the relay supports %08X%s%s%s%s%s%s\n", (unsigned)N.relay_caps,
                         N.relay_caps & CAPS_KOTH ? " (King of the Hill)" : "",
                         N.relay_caps & CAPS_ROLLBACK ? " (rollback allowed)" : "",
                         N.relay_caps & CAPS_CREATED ? " (created fighters allowed)" : "",
                         N.relay_caps & CAPS_SPECTATE ? " (spectators)" : "",
-                        N.relay_caps & CAPS_CHAT ? " (room chat)" : "");
+                        N.relay_caps & CAPS_CHAT ? " (room chat)" : "", N.relay_caps & CAPS_CREW ? " (crew battles)" : "");
             rollback_server_allows((N.relay_caps & CAPS_ROLLBACK) != 0);    /* for the next start's audio arena */
         }
         break;
@@ -2440,6 +2502,9 @@ static void on_packet(const uint8_t *b, int len)
         break;
     case T_CHAT:        /* room chat: a line of this PC's room (only to a client that announced CAPS_CHAT) */
         if (N.lobby) chat_on_line(b + 6, len - 6);
+        break;
+    case T_CREW:        /* a crew battle's state (only to a client that announced CAPS_CREW) */
+        if (N.lobby) on_crew(b + 6, len - 6);
         break;
     case T_PC:          /* the relay took this PC's fingerprint (build 46 relays) */
         if (N.lobby && len >= 7 && !N.pc_done) {
@@ -2724,7 +2789,8 @@ static DWORD WINAPI net_thread(LPVOID unused)
                 uint8_t cb[6 + 8 + 4];
                 int n = header(cb, T_CAPS);
                 memcpy(cb + n, N.token, 8); n += 8;
-                put32(cb + n, CAPS_KOTH | CAPS_CREATED | CAPS_SPECTATE | CAPS_STATS_ERR | CAPS_SPEC_REMATCH | CAPS_CHAT); n += 4;
+                put32(cb + n, CAPS_KOTH | CAPS_CREATED | CAPS_SPECTATE | CAPS_STATS_ERR | CAPS_SPEC_REMATCH | CAPS_CHAT |
+                              CAPS_CREW); n += 4;
                 send_raw(cb, n);
             } else {
                 N.relay_caps = 0;
@@ -2733,6 +2799,21 @@ static DWORD WINAPI net_thread(LPVOID unused)
             N.caps_sent = now;
         }
         chat_tick(now);     /* room chat: IDENT, and the line being sent (relays answering CAPS_CHAT) */
+        /* crew battles: CREWJOIN once the relay knows this account (IDENT), every CREW_RETRY_MS until in */
+        if (N.lobby && N.have_token && N.state == NETPLAY_LOBBY && N.crew_want && N.relay_caps > 0 &&
+            (N.relay_caps & CAPS_CREW) && (N.chat_ident == IDENT_OK || N.chat_ident == IDENT_MUTED) &&
+            !N.roomv.in_room && now - N.crew_sent >= CREW_RETRY_MS) {
+            uint8_t body[4];
+            N.crew_sent = now;
+            if (N.crew_tries++ < 30) {
+                put32(body, N.crew_want);
+                if (N.crew_tries == 1) fprintf(stderr, "[NETPLAY] crew battle %u: joining its room\n", N.crew_want);
+                request(T_CREWJOIN, body, 4);
+            } else {
+                fprintf(stderr, "[NETPLAY] crew battle %u: the relay did not seat this PC\n", N.crew_want);
+                N.crew_want = 0;
+            }
+        }
         /* One session per PC (build 46): this PC's fingerprint, until the relay answers (a relay before
          * build 46 never does: PC_TRIES); a second live session from this PC gets ERROR 11 */
         if (N.lobby && N.have_token && N.state == NETPLAY_LOBBY && !N.pc_done && now - N.pc_sent >= RETRY_MS) {
@@ -3724,6 +3805,29 @@ void netplay_lobby_yield(void)
     request(T_YIELD, NULL, 0);
 }
 
+void netplay_lobby_crew_join(unsigned battle)
+{
+    InitOnceExecuteOnce(&g_once, init_once, NULL, NULL);
+    EnterCriticalSection(&g_cs);
+    N.crew_want = battle;
+    N.crew_tries = 0;
+    N.crew_sent = 0;
+    N.roomv.error[0] = 0;
+    LeaveCriticalSection(&g_cs);
+}
+
+int netplay_lobby_crew(NetCrew *out)
+{
+    int ok;
+    InitOnceExecuteOnce(&g_once, init_once, NULL, NULL);
+    EnterCriticalSection(&g_cs);
+    ok = N.roomv.in_room && N.crew.battle && !memcmp(N.crew_room, N.roomv.code, 7);
+    if (ok) *out = N.crew;
+    else memset(out, 0, sizeof(*out));
+    LeaveCriticalSection(&g_cs);
+    return ok;
+}
+
 void netplay_lobby_leave(void)
 {
     EnterCriticalSection(&g_cs);
@@ -4184,7 +4288,7 @@ static DWORD WINAPI autostart_thread(LPVOID unused)
         }
         return 0;
     }
-    if (!strcmp(mode, "quick") || !strcmp(mode, "ranked")) {
+    if (!strcmp(mode, "quick") || !strcmp(mode, "ranked") || !strcmp(mode, "crew")) {
         const char *f = getenv("RECOMP_NETPLAY_FIGHTER"), *name = getenv("RECOMP_NETPLAY_NAME");
         const char *delay = getenv("RECOMP_NETPLAY_READY_DELAY_MS");
         /* RECOMP_TEST_READY_PLAYERS=<n> (tests of three or four copies): ready (or, on the hill, answer
@@ -4301,6 +4405,15 @@ static DWORD WINAPI autostart_thread(LPVOID unused)
             }
             if (primary < 0) netplay_lobby_ranked(fighter);
             else netplay_lobby_ranked_ex(fighter, mask, primary);
+        } else if (!strcmp(mode, "crew")) {
+            /* RECOMP_NETPLAY=crew (tests, crew battles): the social features find this crew's battle
+             * (accepted or live, social.cpp); then JOIN BATTLE as the crew page does. Up to 10 minutes. */
+            long long battle = 0;
+            char region[16] = "";
+            social_start();
+            for (i = 0; i < 6000 && !N.stop && !(battle = social_battle_ready(region, sizeof(region))); i++) Sleep(100);
+            fprintf(stderr, "[NETPLAY] tests: crew battle %lld (%s)%s\n", battle, region, battle ? "; joining" : ": none came");
+            if (battle) netplay_lobby_crew_join((unsigned)battle);
         } else {
             netplay_lobby_quick(qmode, qmax);
         }
@@ -4507,7 +4620,7 @@ void netplay_autostart(void)
     HANDLE t;
     if (InterlockedExchange(&once, 1)) return;
     if (!mode || !server || (strcmp(mode, "host") && strcmp(mode, "join") && strcmp(mode, "quick") && strcmp(mode, "ranked") && strcmp(mode, "lobby") &&
-                               strcmp(mode, "spectate"))) return;
+                               strcmp(mode, "spectate") && strcmp(mode, "crew"))) return;
     t = CreateThread(NULL, 0, autostart_thread, NULL, 0, NULL);
     if (t) CloseHandle(t);
 }

@@ -153,6 +153,39 @@ int netplay_room_chat_can_write(char *why, int size);
  * echo comes). Returns 1 when queued. */
 int netplay_room_chat_send(const char *text);
 
+/* Crew battles (the Social Update, stage 3): a King of the Hill room by crews on relays answering CAPS
+ * bit 8. The battle comes from the account service (social.h); CREWJOIN enters its room once the relay
+ * knows this account (room chat's IDENT). CREW is the battle's state for the crew battle screen. */
+#define NETPLAY_CAP_CREW 256
+#define NETPLAY_CREW_MAX 5
+enum NetCrewMemberState { NETCREW_WAITING = 0, NETCREW_FIGHTING, NETCREW_OUT, NETCREW_GONE };
+enum NetCrewState { NETCREW_FORMING = 0, NETCREW_RUNNING, NETCREW_OVER };
+typedef struct NetCrewEntry {
+    int slot;                       /* room slot, -1 gone */
+    int state;                      /* NETCREW_WAITING .. NETCREW_GONE */
+    int wins;
+    char name[25];
+} NetCrewEntry;
+typedef struct NetCrewSide {
+    char tag[8], name[32];
+    int score;                      /* fights won */
+    int count;
+    NetCrewEntry lineup[NETPLAY_CREW_MAX];
+} NetCrewSide;
+typedef struct NetCrew {
+    unsigned battle;
+    int format, state, winner;      /* winner: 1 or 2 (side), 0 none or a draw */
+    int secs_left;                  /* forming: seconds until it starts with what is there, as of `received` */
+    int watchers;                   /* room members on the bench */
+    unsigned long long received;
+    NetCrewSide sides[2];
+} NetCrew;
+/* Enter crew battle `battle`'s room (repeated by the network thread until the relay seats this PC);
+ * 0 stops asking. */
+void netplay_lobby_crew_join(unsigned battle);
+/* The battle of this PC's room; 0 when it is no crew battle room (or no CREW came yet). */
+int netplay_lobby_crew(NetCrew *out);
+
 /* Enter the hub on `server`. The state becomes NETPLAY_LOBBY once the server answers; a room's
  * START makes it NETPLAY_CONNECTED for the match, which starts by itself (automatch.h), and it
  * returns to NETPLAY_LOBBY when the game is back at the main menu. */

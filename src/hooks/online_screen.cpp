@@ -925,6 +925,7 @@ struct Gallery {
     unsigned results_slots = 0;     // ... the room slots still there (netplay_room_results_wait)
     bool rollback = false;          // the sample relay allows rollback (NETPLAY_CAP_ROLLBACK)
     int room_rb[NETPLAY_ROOM_SLOTS] = {};   // each sample member's rollback byte (netplay_room_rollback)
+    NetCrew crew = {};              // crew battles (stage 3): the crew-battle pages' sample (battle 0: none)
 } G;
 
 bool gallery_on()
@@ -2956,9 +2957,17 @@ void draw_up(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r, c
     else if (pad.b) leave_hill("You left the room.");
 }
 
+// Crew battles (crew_ui.inc, included below the gallery's samples): a hill by crews.
+bool crew_room(const NetRoom &r, NetCrew *out);
+void draw_crew_battle(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r, const NetCrew &c);
+
 // The hill screen: the line, the king, who is up, the countdown.
 void draw_hill(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
 {
+    {   // a crew battle room: the crew battle screen instead
+        NetCrew cb;
+        if (crew_room(r, &cb)) { draw_crew_battle(dl, f, pad, r, cb); return; }
+    }
     const NetHill &h = r.hill;
     HillView v = hill_view(r);
     bool host = r.you == r.host;
@@ -3850,6 +3859,7 @@ NetRoom sample_room(int mode, int max, int count)
 
 #include "ranked_ui.inc"
 #include "social_ui.inc"
+#include "crew_ui.inc"
 
 // Which page the gallery shows now, and the sample it shows with it.
 void gallery_step()
@@ -3896,7 +3906,9 @@ void gallery_step()
                                          // build 46: the server allows rollback again (the notice)
                                          "hub-rollback-restart",
                                          // the Social Update: the quick-chat wheel in a room, its lines' page
-                                         "room-quickchat", "quick-lines" };
+                                         "room-quickchat", "quick-lines",
+                                         // social stage 3: crew battles
+                                         "crew-battle", "crew-battle-up", "crew-battle-forming", "crew-battle-over" };
     const int count = (int)(sizeof(pages) / sizeof(pages[0]));
     static unsigned long long start;
     static int ms;
@@ -4012,6 +4024,7 @@ void gallery_step()
     QW.open = QW.gallery = false;
     G.rollback = false;
     for (int i = 0; i < NETPLAY_ROOM_SLOTS; i++) G.room_rb[i] = -1;
+    G.crew = NetCrew();
     std::string p = page;
     // the "-long" pages: Ann's first card plays as the widest 16 characters, Ben's as "Brooklyn Bruiser"
     G.cp_long = p.size() > 5 && p.compare(p.size() - 5, 5, "-long") == 0;
@@ -4192,6 +4205,11 @@ void gallery_step()
             h.watch_slots[0] = 1; h.watch_slots[1] = 2;
             h.watch_fighters[0] = r.players[1].fighter; h.watch_fighters[1] = r.players[2].fighter;
         }
+    } else if (p.compare(0, 11, "crew-battle") == 0) {
+        S.page = HUB;
+        G.room = sample_room(NETPLAY_MODE_KOTH_RANDOM, 10, 10);
+        snprintf(G.room.settings.name, sizeof(G.room.settings.name), "BXK v RHR");
+        crew_sample(p, G.room);
     } else if (p == "room-voice") { S.page = VOICE; S.voice_sel = 6; G.room = sample_room(0, 4, 4); }
     else if (p == "match") { G.state = NETPLAY_CONNECTED; G.room = sample_room(0, 2, 2); G.room.phase = 2; G.versus.count = 0; }
     else if (p.compare(0, 6, "versus") == 0) {
@@ -4362,6 +4380,12 @@ const char *shot_label()
 {
     if (const char *chat = chat_shot_label()) return chat;
     if (g_fight_chat_up && !gallery_on()) return fight_chat_shot_label();
+    if (!gallery_on() && !g_versus_up && net_state() != NETPLAY_CONNECTED) {    // the crew battle screen (stage 3)
+        NetRoom r;
+        NetCrew cb;
+        lobby_room(&r);
+        if (crew_room(r, &cb)) return cb.state == NETCREW_OVER ? "crewbattle-over" : cb.state == NETCREW_FORMING ? "crewbattle-forming" : "crewbattle";
+    }
     return gallery_on() ? G.page : g_versus_up ? "versus" : nullptr;
 }
 
