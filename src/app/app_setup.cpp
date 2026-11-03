@@ -527,7 +527,7 @@ void maintenance_page(float width, float height, UiResult *result)
     if (older)
         ImGui::TextDisabled("Repair and Clean Rebuild work on v%s, the version this app builds: update first.",
                             app::payload_version().c_str());
-#if defined(_WIN32)
+#if defined(_WIN32) || defined(__linux__)
     if (in.installed) steam_section();
 #endif
     ImGui::Spacing();
@@ -885,10 +885,15 @@ void finished_page(float width, float height, UiResult *result)
         if (g_run.exit_code == 3010)
             ImGui::TextWrapped("The Build Tools are installed. Restart Windows, then open Def Jam Recompiled "
                                "again: setup carries on from where it stopped.");
-#else
+#elif defined(__APPLE__)
         if (g_run.exit_code == 3)
             ImGui::TextWrapped("Install Apple's Command Line Tools (Install Tools, or run xcode-select --install "
                                "in Terminal), then try again.");
+#else
+        if (g_run.exit_code == 3)
+            ImGui::TextWrapped("This computer has no build tools for the game. Install podman (setup then builds in a "
+                               "container it downloads once, about 1 GB), or clang, cmake, ninja and the SDL3, "
+                               "Vulkan and shaderc development packages, then try again. SteamOS has podman.");
 #endif
         if (app::install().installed)
             ImGui::TextWrapped("The installed game is unchanged and still playable.");
@@ -901,7 +906,7 @@ void finished_page(float width, float height, UiResult *result)
             ImGui::SameLine();
             if (ImGui::Button("Play")) result->play = true;
             ui_target("setup.play");
-#if defined(_WIN32)
+#if defined(_WIN32) || defined(__linux__)
             if (float beside = steam_play_width(); beside > 0) {       // the owner's choice: right by Play
                 ImGui::SameLine();
                 steam_play_button(beside, 0);
@@ -965,7 +970,7 @@ bool screen_draw(float width, float height, UiResult *result)
     take_pick();
     poll_tools_check();
     poll();
-#if defined(_WIN32)
+#if defined(_WIN32) || defined(__linux__)
     if (install_screen_draw(width, height, result)) return true;
 #endif
     if (update_screen_draw(width, height, result)) return true;
@@ -983,7 +988,7 @@ bool screen_draw(float width, float height, UiResult *result)
 
 void screen_open_maintenance()
 {
-#if defined(_WIN32)
+#if defined(_WIN32) || defined(__linux__)
     steam_section_reset();
 #endif
     g_form_error.clear();
@@ -998,7 +1003,7 @@ void start_update_build()
         g_screen = Screen::Maintenance;                     // which shows why
 }
 
-#if defined(_WIN32)
+#if defined(_WIN32) || defined(__linux__)
 bool screen_busy()
 {
     return g_run.process.id != 0 || update_busy() || install_busy() || steam_busy() || g_removal.state == 1;
@@ -1018,11 +1023,11 @@ void screen_request_cancel()
 
 } // namespace app
 
-// Home's Play row (pc_launcher_home.cpp, DEFJAM_APP): Add to Steam beside Play, on Windows once the
-// game is installed. The width it needs, or 0.
+// Home's Play row (pc_launcher_home.cpp, DEFJAM_APP): Add to Steam beside Play, on Windows and Linux
+// once the game is installed. The width it needs, or 0.
 float pc_app_beside_play_width()
 {
-#if defined(_WIN32)
+#if defined(_WIN32) || defined(__linux__)
     return app::install().installed ? app::steam_play_width() : 0;
 #else
     return 0;
@@ -1031,7 +1036,7 @@ float pc_app_beside_play_width()
 
 void pc_app_beside_play(float width, float height)
 {
-#if defined(_WIN32)
+#if defined(_WIN32) || defined(__linux__)
     app::steam_play_button(width, height);
 #else
     (void)width;

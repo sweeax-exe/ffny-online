@@ -264,6 +264,10 @@ if(DEFJAM_BUILD_APP AND DEFJAM_SDL3)
         endif()
     else()
         find_package(SDL3 REQUIRED CONFIG)
+        if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+            # The AppImage installs itself and adds itself to Steam, as the Windows app does.
+            set(DEFJAM_APP_PLATFORM_SOURCES src/app/app_install_linux.cpp src/app/app_steam.cpp)
+        endif()
     endif()
     include(imgui)
     add_executable(defjam_app ${DEFJAM_APP_PLATFORM_SOURCES}
@@ -303,5 +307,12 @@ if(DEFJAM_BUILD_APP AND DEFJAM_SDL3)
     elseif(APPLE)
         # Shift held at start-up is read from the window server, as the game does.
         target_link_libraries(defjam_app PRIVATE "-framework ApplicationServices")
+    else()
+        # The AppImage's program (scripts/build-app-linux.sh) carries the C++ runtime, so it needs
+        # only the C library of the player's computer.
+        option(DEFJAM_APP_STATIC_RUNTIME "Linux: link the app's C++ runtime statically (the AppImage)" OFF)
+        if(DEFJAM_APP_STATIC_RUNTIME)
+            target_link_options(defjam_app PRIVATE -static-libstdc++ -static-libgcc)
+        endif()
     endif()
 endif()

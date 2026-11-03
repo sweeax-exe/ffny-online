@@ -28,5 +28,41 @@
       "vulkan-icd-loader",
       "openssl"
     ]
+  },
+  "app_build": {
+    "comment": "Where the app in the AppImage is built (scripts/build-app-linux.sh): Ubuntu 22.04, so the program needs glibc 2.35 or newer, with the development headers SDL3 is compiled against. SDL3 is the toolkit's pinned release, linked in statically; it loads X11, Wayland, OpenGL, Vulkan and D-Bus from the player's computer at run time. libvulkan-dev only lets the toolkit's build configure (with a placeholder for shaderc, which Ubuntu 22.04 does not package): the app links neither.",
+    "image": "docker.io/library/ubuntu@sha256:8a2321a92b438238f93b4346fff61bc4259c99fdd4d9b52ee86f153fee0c344f",
+    "image_tag": "22.04",
+    "packages": [
+      "ca-certificates",
+      "curl",
+      "cmake",
+      "ninja-build",
+      "g++",
+      "pkg-config",
+      "file",
+      "libx11-dev",
+      "libxext-dev",
+      "libxrandr-dev",
+      "libxcursor-dev",
+      "libxi-dev",
+      "libxfixes-dev",
+      "libxss-dev",
+      "libxtst-dev",
+      "libxkbcommon-dev",
+      "libwayland-dev",
+      "libdecor-0-dev",
+      "libegl-dev",
+      "libgl-dev",
+      "libgles-dev",
+      "libdbus-1-dev",
+      "libudev-dev",
+      "libvulkan-dev"
+    ]
+  },
+  "appimage_runtime": {
+    "comment": "The AppImage type 2 runtime (MIT, AppImage/type2-runtime): mounts the image with its own static FUSE 3 and squashfuse (gzip and zstd). Our image is gzip, so setup/releases.py can read it without running it.",
+    "url": "https://github.com/AppImage/type2-runtime/releases/download/20251108/runtime-x86_64",
+    "sha256": "2fca8b443c92510f1483a883f60061ad09b46b978b2631c807cd873a47ec260d"
   }
 }

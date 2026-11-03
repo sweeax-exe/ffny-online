@@ -1,13 +1,14 @@
-// Add to Steam (Windows; design §7): Maintenance's Steam section adds the app to the player's Steam
+// Add to Steam (Windows and Linux; design §7): Maintenance's Steam section adds the app to the player's Steam
 // library as a non-Steam game that starts the game directly (--play), with the library artwork, and
 // removes it again.
 //
 // The work is setup/engine.py --steam (setup/steam_shortcuts.py), run from the app's payload like the
 // update check: it answers in a moment, in a JSON file this reads when it exits. Steam rewrites its
 // list of games when it exits, so the list is changed only while Steam is closed. When Steam is
-// running the section asks first, then the engine closes Steam (steam.exe -shutdown), makes the
-// change and starts Steam again (--close-steam). Exit 4 means Steam was running and was not to be
-// closed; 2 means it could not be done, and the message says why.
+// running the section asks first, then the engine closes Steam (steam.exe -shutdown, or on Linux
+// steam -shutdown), makes the change and starts Steam again (--close-steam). Exit 4 means Steam was
+// running and was not to be closed; 2 means it could not be done, and the message says why. On Linux
+// the shortcut runs the AppImage file (launch_target), never the program inside its mount.
 
 #define _CRT_SECURE_NO_WARNINGS
 #include <stdio.h>
@@ -45,7 +46,7 @@ struct Steam
     std::string failed;                 // why the last add or remove failed, for Home's dialog
 } g_steam;
 
-fs::path folder() { return os::user_base() / "DefJamRecompiled"; }
+fs::path folder() { return state_dir(); }
 fs::path answer_file() { return folder() / "steam-answer.json"; }
 
 void ask(const std::string &action, bool close)
@@ -53,7 +54,7 @@ void ask(const std::string &action, bool close)
     std::error_code ec;
     fs::create_directories(folder(), ec);
     fs::remove(answer_file(), ec);
-    std::vector<std::string> args = {"--steam", action, "--app-program", program().string(), "--steam-record",
+    std::vector<std::string> args = {"--steam", action, "--app-program", launch_target().string(), "--steam-record",
                                      (folder() / "steam.json").string(), "--steam-result", answer_file().string()};
     if (!install().root.empty()) args.insert(args.end(), {"--install-dir", install().root.string()});
     if (close) args.push_back("--close-steam");

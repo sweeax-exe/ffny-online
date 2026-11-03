@@ -1,11 +1,14 @@
-"""Add the app to Steam as a non-Steam game, with its library artwork (design §7; Windows).
+"""Add the app to Steam as a non-Steam game, with its library artwork (design §7; Windows and Linux).
 
-Linux asks the running Steam to add the shortcut (engine.py add_to_steam). Windows has no such
-request, so this writes the shortcut into Steam's own file, as Steam ROM Manager and BoilR do:
+The Linux setup wizard asks the running Steam to add its launcher (engine.py add_to_steam), but that
+request cannot give the shortcut launch options, and the app's shortcut needs --play. So for the app,
+on Windows and Linux alike, this writes the shortcut into Steam's own file, as Steam ROM Manager and
+BoilR do:
 
 - Steam rewrites userdata/<account>/config/shortcuts.vdf from memory when it exits, so the file is
   changed only while Steam is closed. With --close-steam, Steam is asked to exit first
-  (steam.exe -shutdown) and started again afterwards.
+  (steam.exe -shutdown; on Linux steam -shutdown) and started again afterwards. In a Steam Deck's
+  Game Mode Steam is the session itself and is never closed: the change waits for Desktop Mode.
 - The file is edited without re-encoding what is already there: every other shortcut keeps its
   bytes exactly; only their numbering changes when one is removed. A copy of the previous file is
   kept beside it (shortcuts.vdf.defjam-backup).
@@ -15,7 +18,7 @@ request, so this writes the shortcut into Steam's own file, as Steam ROM Manager
   this placed, still unchanged, are removed. What was placed is recorded in --steam-record.
 
 DEFJAM_STEAM_ROOT stands in for Steam's folder in tests, so a test never reads or writes the
-player's own Steam, and only a steam.exe in that folder counts as running.
+player's own Steam, and only a steam.exe (Linux: ubuntu12_32/steam) in that folder counts as running.
 """
 import contextlib
 import hashlib
@@ -179,7 +182,31 @@ def steam_root():
     if sys.platform == 'darwin':
         path = Path.home() / 'Library/Application Support/Steam'
         return path if path.is_dir() else None
+    # Linux: ~/.steam/steam is the link every Steam package keeps to its folder; then the usual
+    # places of the native package and of Flathub's.
+    data_home = Path(os.environ.get('XDG_DATA_HOME') or Path.home() / '.local/share')
+    for candidate in (Path.home() / '.steam/steam', data_home / 'Steam', Path.home() / '.local/share/Steam',
+                      Path.home() / '.var/app/com.valvesoftware.Steam/.local/share/Steam'):
+        with contextlib.suppress(OSError):
+            if (candidate / 'steam.sh').is_file() or (candidate / 'ubuntu12_32').is_dir():
+                return candidate.resolve()
     return None
+
+
+def game_mode(pids, proc=Path('/proc')):
+    """Whether the running Steam client (`pids`) is a Steam Deck's Game Mode, or another gamescope
+    session's Steam: there Steam is the session itself and cannot be closed. Asked of Steam's own
+    process (its -gamepadui option, or a gamescope desktop in its environment), not of this one,
+    which may run in a nested gamescope on an ordinary desktop."""
+    if IS_WINDOWS:
+        return False
+    for pid in pids:
+        with contextlib.suppress(OSError):
+            argv = (proc / str(pid) / 'cmdline').read_bytes().split(b'\0')
+            environ = (proc / str(pid) / 'environ').read_bytes().split(b'\0')
+            if b'-gamepadui' in argv or b'XDG_CURRENT_DESKTOP=gamescope' in environ:
+                return True
+    return False
 
 
 def parse_text_vdf(text):
@@ -234,11 +261,32 @@ def steam_user(root):
                      'sign in to the one to add the game to, then try again')
 
 
+def steam_processes_linux(root, proc=Path('/proc')):
+    """Linux: process ids of the Steam client from `root`, whose program (or, for a script standing
+    in for it in a test, its first argument) is root/ubuntu12_32/steam."""
+    target = Path(root) / 'ubuntu12_32/steam'
+    found = []
+    with contextlib.suppress(OSError):
+        for entry in proc.iterdir():
+            if not entry.name.isdigit():
+                continue
+            with contextlib.suppress(OSError):
+                if same_path(os.readlink(entry / 'exe'), target):
+                    found.append(int(entry.name))
+                    continue
+            with contextlib.suppress(OSError):
+                argv = (entry / 'cmdline').read_bytes().split(b'\0')[:2]
+                if any(a and same_path(os.fsdecode(a), target) for a in argv):
+                    found.append(int(entry.name))
+    return found
+
+
 def steam_processes(root):
-    """The running Steam client from `root` (Windows): process ids whose program is root\\steam.exe.
-    Only that copy counts, so a test's stand-in never sees the player's own Steam."""
+    """The running Steam client from `root`: process ids whose program is root\\steam.exe (on Linux
+    root/ubuntu12_32/steam). Only that copy counts, so a test's stand-in never sees the player's own
+    Steam."""
     if not IS_WINDOWS:
-        return []
+        return steam_processes_linux(root) if sys.platform.startswith('linux') else []
     import ctypes
     from ctypes import wintypes
     kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
@@ -272,10 +320,30 @@ def steam_processes(root):
     return found
 
 
+def steam_program(root):
+    """What starts Steam: steam.exe; on Linux the system's steam command (which sets up Steam's own
+    runtime), else the folder's steam.sh, the only one a test's stand-in folder has."""
+    if IS_WINDOWS:
+        return str(Path(root) / 'steam.exe')
+    system = None if os.environ.get('DEFJAM_STEAM_ROOT') else shutil.which('steam')
+    return system or str(Path(root) / 'steam.sh')
+
+
+def steam_environment():
+    """The environment Steam is started in: this one, less what the app's AppImage runtime set for
+    itself and the app's own and the game's variables, which Steam would otherwise pass on to every
+    game it starts."""
+    env = dict(os.environ)
+    for key in list(env):
+        if key in ('APPDIR', 'APPIMAGE', 'ARGV0', 'OWD') or key.startswith(('DEFJAM_', 'RECOMP_')):
+            env.pop(key)
+    return env
+
+
 def close_steam(root, running=steam_processes, timeout=90.0):
     """Ask Steam to exit, as its own menu's Exit does, and wait until it has (it writes its files first)."""
     flags = 0x08000000 if IS_WINDOWS else 0                        # CREATE_NO_WINDOW
-    subprocess.Popen([str(Path(root) / 'steam.exe'), '-shutdown'], cwd=str(root), creationflags=flags,
+    subprocess.Popen([steam_program(root), '-shutdown'], cwd=str(root), creationflags=flags, env=steam_environment(),
                      stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     deadline = time.monotonic() + timeout
     while running(root):
@@ -285,8 +353,19 @@ def close_steam(root, running=steam_processes, timeout=90.0):
 
 
 def start_steam(root):
+    program = steam_program(root)
+    # Linux: started as a user service when systemd runs the session, so Steam does not belong to
+    # the app's process tree. A subreaper above the app (a gamescope, or Steam's own reaper when the
+    # app was started from Steam) would otherwise end Steam when the app ends.
+    systemd_run = None if IS_WINDOWS or os.environ.get('DEFJAM_STEAM_ROOT') else shutil.which('systemd-run')
+    if systemd_run and subprocess.run([systemd_run, '--user', '--quiet', '--collect', '--unit',
+                                       'defjam-steam-%d' % int(time.time()), program],
+                                      stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                      stderr=subprocess.DEVNULL).returncode == 0:
+        return
     flags = 0x00000008 | 0x00000200 if IS_WINDOWS else 0          # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
-    subprocess.Popen([str(Path(root) / 'steam.exe')], cwd=str(root), creationflags=flags, close_fds=True,
+    subprocess.Popen([program], cwd=str(root), creationflags=flags, close_fds=True,
+                     env=steam_environment(), start_new_session=not IS_WINDOWS,
                      stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
@@ -375,8 +454,12 @@ def status(root, program, running=steam_processes):
 def steam_closed(root, close, event, running, closer, starter):
     """Steam closed while the body runs: refused (exit 4) while it runs, unless asked to close it;
     then started again afterwards."""
-    was_running = bool(running(root))
+    pids = running(root)
+    was_running = bool(pids)
     if was_running:
+        if game_mode(pids if isinstance(pids, (list, tuple)) else ()):
+            raise SteamError('Steam cannot be closed in Game Mode, and it must be closed while its list of games '
+                             'is changed. Switch to Desktop Mode, then try again')
         if not close:
             raise SteamError('Steam is running. It must be closed while the game is added, because it '
                              'rewrites its list of games when it exits', 4)
@@ -458,9 +541,9 @@ def command(action, payload, program, install, record, result_file, close=False)
     art_folders = [Path(payload) / 'source/branding/fan/steam', Path(payload) / 'source/branding/steam']
     code = 0
     try:
-        if action != 'status' and not IS_WINDOWS and not os.environ.get('DEFJAM_STEAM_ROOT'):
-            # macOS and Linux need their own way to tell whether Steam is running (design §7).
-            raise SteamError('Add to Steam from the app is for Windows for now')
+        if action != 'status' and sys.platform == 'darwin' and not os.environ.get('DEFJAM_STEAM_ROOT'):
+            # macOS needs its own way to tell whether Steam is running (design §7).
+            raise SteamError('Add to Steam from the app is for Windows and Linux for now')
         if action != 'status' and not (program and record):
             raise SteamError('--app-program and --steam-record are required')
         if action == 'add':

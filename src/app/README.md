@@ -66,7 +66,22 @@ Play starts the game that setup built on this computer, with `--no-launcher`.
   replacing it when the download is a newer release. No Start-menu or desktop shortcut is made
   (owner's choice, 2026-10-27). The installed copy unpacks its payload again when `payload\` is
   missing or from another build (`payload.sha256`).
-- **Add to Steam on Windows** (`app_steam.cpp`, `setup/steam_shortcuts.py`; design §7). Maintenance's
+- **Installs itself on Linux** (`app_install_linux.cpp`; design §3.3, §6). The released app is one
+  AppImage, `DefJamRecompiled-<version>-x86_64.AppImage`: the AppImage runtime and a read-only image
+  holding the program with the setup payload beside it. The runtime mounts it at a new
+  `/tmp/.mount_*` folder on every start, so nothing may remember that path: setup copies what it
+  needs into the install folder, and Steam and the play wrapper are given the AppImage file
+  (`launch_target`). Opened from wherever it was downloaded, it asks which folder to keep itself in
+  (`~/Applications` unless the player chooses another; not a read-only or `noexec` drive), copies
+  itself there as `DefJamRecompiled.AppImage` (no version in the name, so an update keeps the path),
+  records it with its version in `~/.local/share/DefJamRecompiled/location.json` and starts that copy.
+  Opened again, the download hands over to the installed copy, first replacing it when the download
+  is a newer release. No menu entry or desktop shortcut is made (owner's choice, 2026-11-01): Add to
+  Steam is the one shortcut. The runtime's own variables (`APPIMAGE`, `APPDIR`, `ARGV0`, `OWD`) are
+  read once and cleared, so the engine, the game and Steam never see the mount. Its update renames
+  the verified new AppImage over the old file (atomic on one filesystem; the running app keeps its
+  own mount of the old image) and starts it.
+- **Add to Steam on Windows and Linux** (`app_steam.cpp`, `setup/steam_shortcuts.py`; design §7). Maintenance's
   Steam section adds the app to the Steam account that signed in last, as a non-Steam game that runs
   `--play --install <root>`, with the library artwork (the fan portrait, wide capsule and logo, the
   hero and the icon, carried in the Windows payload), and removes it again. The app runs
@@ -76,13 +91,20 @@ Play starts the game that setup built on this computer, with `--no-launcher`.
   when Steam is running the section asks first, and the engine then closes it (`steam.exe
   -shutdown`), makes the change and starts it again. Art the player chose is never replaced, and
   only what was placed is removed (recorded in `%LOCALAPPDATA%\DefJamRecompiled\steam.json`).
-  This is the only shortcut the app makes (owner's choice, 2026-10-27).
+  This is the only shortcut the app makes (owner's choice, 2026-10-27). On Linux the shortcut runs the
+  AppImage file; Steam's folder is found through `~/.steam/steam` (or `~/.local/share/Steam`, or
+  Flathub's), only the `ubuntu12_32/steam` client from that folder counts as running, Steam is closed
+  with `steam -shutdown` and started again detached, and the record is
+  `~/.local/share/DefJamRecompiled/steam.json`. In a Steam Deck's Game Mode Steam is the session itself,
+  so a change that needs Steam closed is refused there with a pointer to Desktop Mode. (The setup
+  wizard's own Linux path, `steamos-add-to-steam`, cannot give the shortcut `--play`.)
 - **The play wrapper forwards.** Whenever it loads an install, an installed app writes where it is
   to `<install>/app-location.txt` (the bundle on macOS, the program on Windows). The play wrapper
   setup keeps in the install folder (and in Applications, for installs an older setup made;
-  `setup/macos/Launcher`), and `DefJamLauncher.exe` on Windows, which the old Start-menu and desktop
-  shortcuts open, then open the app instead of the game (`--install <root>`; on macOS
-  `--no-launcher` as `--play`). Without that file, or with the app gone, the wrapper plays the game
+  `setup/macos/Launcher`), `DefJamLauncher.exe` on Windows, which the old Start-menu and desktop
+  shortcuts open, and `launcher.sh` on Linux, which the old menu entry and Steam shortcut open, then
+  open the app instead of the game (`--install <root>`; on macOS
+  `--no-launcher` as `--play`; on Linux too). Without that file, or with the app gone, the wrapper plays the game
   as before.
 
 On every platform the window is SDL3's, drawn with SDL's renderer (Direct3D 11 on Windows, Metal on
@@ -93,7 +115,8 @@ nothing but Windows (it runs before any Build Tools or Visual C++ runtime are in
 program is `DefJamRecompiled.exe` there, with the shield icon and a manifest that sets the UTF-8
 code page, long paths and per-monitor DPI.
 
-The macOS and Windows apps are packaged and published; Linux (the AppImage) is not built yet.
+The macOS, Windows and Linux apps are packaged and published. On Linux the window is SDL3's too
+(X11 or Wayland, OpenGL or Vulkan), with SDL linked into the program.
 
 ## Packaging
 
@@ -112,10 +135,23 @@ inspected one byte for byte, that it imports only Windows' own libraries (no Vis
 that it holds no lifted-code names, then writes `DefJamRecompiled-<version>-windows-x64.exe`, its
 `.sha256` and its `kind: app` provenance (with `payload_sha256`) beside the setup's.
 
-The release workflow attaches both with the setup assets (D215).
+**Linux.** `scripts/build-setup-linux.sh` builds the payload and the setup archive, then the app with
+`scripts/build-app-linux.sh`, in the Ubuntu 22.04 container pinned in `setup/dependencies-linux.json`
+(`app_build`; podman or docker), so it runs on glibc 2.35 and newer: the toolkit's pinned SDL3,
+built statically with video, the renderer and file dialogs (it loads X11 or Wayland, OpenGL or
+Vulkan and D-Bus from the player's computer), the C++ runtime linked in, and the payload's Dear
+ImGui source. The program needs only the C library. `scripts/package-appimage.py` packs it with the
+payload, file for file as the archive carries it, a desktop file and the icon into a gzip squashfs
+(`mksquashfs`) behind the pinned AppImage type 2 runtime (`appimage_runtime`). gzip, so
+`setup/releases.py` (`read_appimage`) can read the image in Python: the updater and
+`scripts/check-setup-assets.py --app` check the payload inside without mounting or running
+anything, then the checker writes `DefJamRecompiled-<version>-x86_64.AppImage`, its `.sha256` and its
+`kind: app` provenance beside the setup's.
+
+The release workflow attaches all three with the setup assets (D215).
 
 ```
-# macOS, Linux
+# macOS, Linux (a development build: SDL3 from the system, no self-install or self-update)
 cmake -S . -B build/app -G Ninja -DDEFJAM_BUILD_GAME=OFF
 cmake --build build/app --target defjam_app
 build/app/defjam_app --payload <unpacked setup payload> [--install DIR] [--dump PATH] [--data DIR]
@@ -137,7 +173,8 @@ build\win-x64-app\DefJamRecompiled.exe --payload <unpacked setup payload> [--ins
   see `src/hooks/pc_launcher_sdl.cpp`; `uiwait:<id>` waits up to half an hour for a control), with
   the setup screens' controls named `setup.*`, `update.*`, `install.*` and `steam.*`. On Windows
   `DEFJAM_APP_USER_BASE` stands in for `%LOCALAPPDATA%` (the app's home, its location record, logs
-  and cache), and `DEFJAM_STEAM_ROOT` for Steam's folder (only a `steam.exe` running from there
+  and cache), and on Linux for the home folder (`~/Applications`, the usual install folder and
+  `~/.local/share/DefJamRecompiled`; HOME itself is left alone, since podman keeps its images there), and `DEFJAM_STEAM_ROOT` for Steam's folder (only a `steam.exe` running from there
   counts as Steam), so a test never touches the player's own.
   `RECOMP_APP_NO_DIALOG=1` reports a failure on stderr only. After a self-update the new app gets
   `RECOMP_LAUNCHER_SCRIPT_AFTER_UPDATE` as its script, or none.

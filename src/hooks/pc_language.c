@@ -59,6 +59,8 @@ extern BOOL (*g_xbox_game_file_redirect)(const char *relative, xbox_host_char *h
 #define LANG_MAX_ENTRY   (64u << 20)    /* one decompressed entry */
 #define DELTA_HEADER     80
 
+/* The [language] settings are in pc_settings_catalog.c, which the game-free app links too. */
+
 /* ---- SHA-256 ------------------------------------------------------------------------------------ */
 
 typedef struct { uint32_t h[8]; uint64_t len; uint8_t buf[64]; size_t used; } Sha;

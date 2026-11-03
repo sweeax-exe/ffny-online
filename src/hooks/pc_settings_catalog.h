@@ -13,7 +13,7 @@ extern "C" {
 #endif
 
 /* Room for the whole catalogue: the display table plus the input (64), launcher/overlay (16)
- * and debug (16) tables. */
+ * debug (16) and language (4) tables. */
 #define PC_SETTINGS_MAX 128
 
 /* A four-fighter match holds about 2 GiB of replacements. At 512 MiB the cache evicted and

@@ -104,13 +104,16 @@ fs::path cache_dir()
 } // namespace
 
 // The bundle this program is in (…/Def Jam Recompiled.app/Contents/MacOS/defjam_app), or empty.
-// On Windows the folder holding the program and, beside it, the payload it runs setup from.
+// On Windows the folder holding the program and, beside it, the payload it runs setup from. On Linux
+// the AppImage file it was started from (app_install_linux.cpp).
 fs::path bundle_path()
 {
 #if defined(_WIN32)
     std::error_code ec;
     fs::path home = app::program().parent_path();
     return !app::payload().empty() && fs::equivalent(app::payload(), home / "payload", ec) ? home : fs::path();
+#elif defined(__linux__)
+    return app::appimage();
 #endif
     fs::path p = app::program();
     fs::path contents = p.parent_path().parent_path();
@@ -128,6 +131,9 @@ fs::path bundle() { return bundle_path(); }
 #if defined(_WIN32)
 // The program inside a staged Windows app (setup/releases.py: APP_PROGRAM_WINDOWS).
 const char *releases_program() { return "DefJamRecompiled.exe"; }
+#elif defined(__linux__)
+// The AppImage inside a staged Linux app (setup/releases.py: APP_PROGRAM_LINUX).
+const char *releases_program() { return "DefJamRecompiled.AppImage"; }
 #endif
 
 fs::path beside(const fs::path &bundle, const char *suffix)
@@ -297,6 +303,19 @@ void swap()
     fs::rename(home / "payload.sha256.new", home / "payload.sha256", ec);
     fs::remove_all(g_staged, ec);
     fs::path here = home;
+#elif defined(__linux__)
+    // One file: the verified AppImage renamed over this one. Atomic on one filesystem, and this
+    // program keeps running from its own mount of the old image.
+    fs::path here = bundle();
+    std::error_code ec;
+    fs::rename(g_staged / releases_program(), here, ec);
+    if (ec) {
+        g_error = "The new app could not be put in place (" + ec.message() + "). This version is still installed.";
+        g_stage = Stage::Failed;
+        return;
+    }
+    fs::remove_all(g_staged, ec);
+    app::note_updated_home(here, g_version);
 #else
     fs::path here = bundle(), old = beside(here, ".old");
     std::error_code ec;
@@ -320,6 +339,8 @@ void swap()
     auto &next = app::relaunch();
 #if defined(_WIN32)
     next = {app::program().string()};
+#elif defined(__linux__)
+    next = {here.string()};
 #else
     next = {(here / "Contents/MacOS/defjam_app").string()};
 #endif
@@ -376,6 +397,9 @@ void update_cleanup()
         fprintf(stderr, "[APP] update: removed the previous app\n");
     }
     fs::remove_all(here / ".update", ec);
+    return;
+#elif defined(__linux__)
+    fs::remove_all(beside(here, ".update"), ec);    // a download an earlier run left unfinished
     return;
 #endif
     if (fs::exists(beside(here, ".old"), ec)) {

@@ -4,8 +4,10 @@
 With --app, also the app that sets up, launches and updates the game (src/app, D215): on macOS
 the archive scripts/package-app.py makes, checked file by file against the inspected payload; on
 Windows the program DefJamRecompiled.exe, whose built-in payload (resource 101) must be the
-inspected payload byte for byte. Published as DefJamRecompiled-<version>-macos-arm64.zip or
--windows-x64.exe with its checksum and a kind: app provenance that setup/releases.py select_app
+inspected payload byte for byte; on Linux the AppImage scripts/package-appimage.py makes, whose image
+is read in Python (setup/releases.py read_appimage) and checked file by file against the inspected
+payload. Published as DefJamRecompiled-<version>-macos-arm64.zip, -windows-x64.exe or
+-x86_64.AppImage with its checksum and a kind: app provenance that setup/releases.py select_app
 verifies before the app replaces itself."""
 import argparse
 import hashlib
@@ -109,7 +111,7 @@ APP_FILES = {'Contents/Info.plist', 'Contents/MacOS/' + releases.APP_PROGRAM, 'C
              'Contents/_CodeSignature/CodeResources'}
 
 
-APP_PLATFORMS = ('macos-arm64', 'windows-x64')
+APP_PLATFORMS = ('macos-arm64', 'windows-x64', 'linux-x64')
 # What the Windows app may load: Windows' own libraries only (it is linked with the static C runtime
 # and a static SDL3), never a Visual C++ runtime, a game library or anything carried beside it.
 WINDOWS_SYSTEM_DLLS = {
@@ -173,6 +175,34 @@ def inspect_app_windows(program, archive):
         raise ValueError('The app program contains lifted game code')
 
 
+def inspect_app_linux(appimage, archive, binary_checks=sys.platform.startswith('linux')):
+    """The AppImage holds the approved files and links (releases.read_appimage) and, under payload/,
+    exactly the inspected payload's files, byte for byte, keeping their execute bits. Its program
+    holds no lifted game code and loads only the C library (package-appimage.py check_program)."""
+    with zipfile.ZipFile(archive) as payload_zip:
+        expected = {}
+        for member in payload_zip.infolist():
+            if not member.filename.endswith('/'):
+                expected[member.filename] = (hashlib.sha256(payload_zip.read(member)).hexdigest(),
+                                             bool((member.external_attr >> 16) & 0o111))
+    image, entries = releases.read_appimage(Path(appimage).read_bytes())
+    found = {path[len('payload/'):]: (hashlib.sha256(image.read(details)).hexdigest(), bool(mode & 0o111))
+             for path, (kind, mode, details) in entries.items() if kind == 'file' and path.startswith('payload/')}
+    if {k: v[0] for k, v in found.items()} != {k: v[0] for k, v in expected.items()}:
+        raise ValueError('The payload inside the app does not match the inspected payload')
+    if any(found[name][1] != executable for name, (_, executable) in expected.items() if executable):
+        raise ValueError('The payload inside the app lost an execute bit')
+    kind, mode, details = entries['defjam_app']
+    if not mode & 0o100:
+        raise ValueError('The app program is not executable')
+    if binary_checks:
+        appimage_package = load('asset_package_appimage', ROOT / 'scripts/package-appimage.py')
+        with tempfile.TemporaryDirectory() as temporary:
+            program = Path(temporary) / 'defjam_app'
+            program.write_bytes(image.read(details))
+            appimage_package.check_program(program)
+
+
 def app_stem(version, platform):
     return releases.APP_ASSETS[platform].format(v=version).rsplit('.', 1)[0]
 
@@ -185,7 +215,7 @@ def validate_asset_names(version, names, platform='windows-x64', app=False):
     expected = {stem + extension, stem + '.sha256', stem + '.provenance.json'}
     if app:
         if platform not in APP_PLATFORMS:
-            raise ValueError('The app is published for macOS and Windows only so far')
+            raise ValueError('The app is published for macOS, Windows and Linux x86-64 only')
         a = app_stem(version, platform)
         expected |= {releases.APP_ASSETS[platform].format(v=version), a + '.sha256', a + '.provenance.json'}
     if set(names) != expected:
@@ -307,7 +337,8 @@ def main(argv=None):
     parser.add_argument('--installer', type=Path, required=True)
     parser.add_argument('--output-dir', type=Path, required=True)
     parser.add_argument('--app', type=Path, help='The app: macOS, the archive from scripts/package-app.py --zip; '
-                                                 'Windows, DefJamRecompiled.exe built with its payload')
+                                                 'Windows, DefJamRecompiled.exe built with its payload; Linux, '
+                                                 'the AppImage from scripts/package-appimage.py')
     parser.add_argument('--development', action='store_true')
     args = parser.parse_args(argv)
     manifest = inspect_payload(args.payload)
@@ -327,9 +358,11 @@ def main(argv=None):
         {'installer_sha256': sha, 'payload_sha256': engine.digest(args.payload), **manifest}, indent=2) + '\n', encoding='utf-8')
     if args.app:
         if platform not in APP_PLATFORMS:
-            raise ValueError('The app is published for macOS and Windows only so far')
+            raise ValueError('The app is published for macOS, Windows and Linux x86-64 only')
         if platform == 'windows-x64':
             inspect_app_windows(args.app, args.payload)
+        elif platform == 'linux-x64':
+            inspect_app_linux(args.app, args.payload)
         else:
             inspect_app(args.app, args.payload)
         app = args.output_dir / releases.APP_ASSETS[platform].format(v=manifest['version'])
