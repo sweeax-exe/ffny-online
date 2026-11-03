@@ -37,6 +37,7 @@
 #include "pc_debug.h"
 #include "patches/widescreen.h"
 #include "patches/picture.h"
+#include "patches/cheats.h"
 
 static char g_path[MAX_PATH * 4];   /* empty: do not load or save */
 static char g_log_name[MAX_PATH * 2];   /* the log this program opened for itself, if it did */
@@ -314,6 +315,7 @@ void pc_settings_apply_display(void)
     }
     d3d8_present_set_vsync(pc_display("vsync", 1));
     picture_apply_settings();
+    cheats_apply_settings();
 }
 
 static void setting_changed(const RecompSetting *s, void *user)

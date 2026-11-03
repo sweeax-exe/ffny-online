@@ -41,6 +41,8 @@
 #include <string>
 #include <vector>
 #include <map>
+#include <fstream>
+#include <iterator>
 #include "pc_ui_model.h"
 #include "pc_mods.h"
 #include "pc_ui_theme.h"
@@ -62,6 +64,7 @@ extern "C" {
 #include "scene_launcher.h"
 #include "dev_module.h"
 #endif
+#include "patches/cheats.h"
 #include "input_host.h"
 #include "input_map.h"
 }
@@ -258,6 +261,11 @@ static const char *friendly(const char *section, const char *key)
         {"debug", "hang_seconds", "Bundle a hang after (s)"},
         {"debug", "keep_sessions", "Sessions kept whole"},
         {"debug", "record_guest_ram", "Crash bundles hold game memory"},
+        {"cheats", "infinite_health", "Infinite health"},
+        {"cheats", "max_blazin", "Max Blazin'"},
+        {"cheats", "no_regen", "No health regeneration"},
+        {"cheats", "fighter_size", "Fighter size"},
+        {"cheats", "story_hero", "Play Story fights as"},
     };
     for (const Label &l : labels)
         if (!strcmp(l.section, section) && !strcmp(l.key, key)) return l.text;
@@ -1482,10 +1490,180 @@ static void page_debug(UiMode mode)
 #endif
 }
 
+
+// ---- cheats (src/patches/cheats.c; issue #71) ----------------------------------------------------------
+
+static std::vector<pcui::Fighter> g_roster;
+static bool g_roster_read;
+static const char *k_styles[CHEAT_STYLE_COUNT] = {"Kickboxing", "Street fighting", "Martial arts", "Wrestling",
+                                                  "Submissions"};
+static const char *style_name(int style)
+{
+    return style >= 0 && style < CHEAT_STYLE_COUNT ? k_styles[style] : "none";
+}
+static void read_roster()
+{
+    if (g_roster_read)
+        return;
+    g_roster_read = true;
+    std::ifstream in(std::filesystem::u8path("game/fighter.xml"), std::ios::binary);
+    std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    g_roster = pcui::roster(text);
+}
+static bool style_combo(const char *label, int *style, bool hybrid)
+{
+    bool changed = false;
+    ImGui::SetNextItemWidth(ImGui::GetFontSize() * 11);
+    if (ImGui::BeginCombo(label, *style == CHEAT_STYLE_NONE ? "None" : style_name(*style)))
+    {
+        if (hybrid && ImGui::Selectable("None", *style == CHEAT_STYLE_NONE))
+            *style = CHEAT_STYLE_NONE, changed = true;
+        for (int i = 0; i < CHEAT_STYLE_COUNT; i++)
+            if (ImGui::Selectable(k_styles[i], *style == i))
+                *style = i, changed = true;
+        ImGui::EndCombo();
+    }
+    return changed;
+}
+static void hero_picker()
+{
+    RecompSetting *hero = find("cheats", "story_hero");
+    if (!hero)
+        return;
+    read_roster();
+    bool locked = hero->source == RECOMP_SETTING_FROM_ENV;
+    int value = locked ? hero->value : hero->stored;
+    const char *off = "Off (your own fighter)";
+    std::string current = value < 0 ? off : "Fighter " + std::to_string(value);
+    for (const auto &f : g_roster)
+        if (f.id == value)
+            current = f.name;
+    if (locked)
+        ImGui::BeginDisabled();
+    ImGui::SetNextItemWidth(ImGui::GetFontSize() * 14);
+    if (ImGui::BeginCombo(friendly("cheats", "story_hero"), current.c_str()))
+    {
+        int chosen = value;
+        if (ImGui::Selectable(off, value < 0))
+            chosen = -1;
+        for (const auto &f : g_roster)
+        {
+            ImGui::PushID(f.id);
+            if (ImGui::Selectable(f.name.c_str(), f.id == value))
+                chosen = f.id;
+            ImGui::PopID();
+        }
+        ImGui::EndCombo();
+        if (chosen != value && recomp_settings_set("cheats", "story_hero", chosen) > 0)
+            commit();
+    }
+    ui_target("cheats.story_hero");
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled) || ImGui::IsItemFocused())
+        g_help = hero->help;
+    item_tooltip(hero->help);
+    if (locked)
+    {
+        ImGui::EndDisabled();
+        ImGui::TextDisabled("Set for this run by %s", hero->env);
+    }
+    if (g_roster.empty())
+        ImGui::TextDisabled("The fighter list comes from the game's fighter.xml (game/fighter.xml), which was not found.");
+}
+static void page_cheats(UiMode mode)
+{
+    ImGui::SeparatorText("Fights");
+    settings_group("cheats", {"infinite_health", "max_blazin", "no_regen", "fighter_size"});
+    ImGui::TextWrapped("Fight cheats apply as you change them, in every mode, and are never saved into a profile. "
+                       "Max Blazin' fills the meter five seconds into a fight; start Blazin' as usual. Giant and tiny "
+                       "change only the picture: reach and collision stay the same.");
+    ImGui::SeparatorText("Story fights");
+    hero_picker();
+    ImGui::TextWrapped("Story fights are played as that fighter, with their look and moves. Cutscenes, the crib and "
+                       "the shops still show your own fighter. Nothing is saved into your profile.");
+
+    ImGui::SeparatorText("Story profile");
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1, 0.75f, 0.2f, 1));
+    ImGui::TextWrapped("These change the Story profile you are playing. Once the game saves, the change is permanent "
+                       "and cannot be undone. Copy your save folder first (Maintenance, Saves).");
+    ImGui::PopStyleColor();
+    if (mode == UI_LAUNCHER)
+    {
+        ImGui::TextWrapped("Open the in-game overlay while you play Story to use these.");
+        return;
+    }
+#if !defined(DEFJAM_APP)
+    CheatStory story;
+    static int pending, main_style = -1, hybrid1 = CHEAT_STYLE_NONE, hybrid2 = CHEAT_STYLE_NONE;
+    if (!cheats_story_info(&story))
+    {
+        ImGui::TextDisabled("Start Story mode with your profile first.");
+        main_style = -1;
+    }
+    else
+    {
+        ImGui::Text("Cash: $%u    Development points: %u", story.cash, story.devpts);
+        ImGui::Text("Fighting styles: %s%s%s%s%s", style_name(story.style[0]),
+                    story.style[1] == CHEAT_STYLE_NONE ? "" : ", ", story.style[1] == CHEAT_STYLE_NONE ? "" : style_name(story.style[1]),
+                    story.style[2] == CHEAT_STYLE_NONE ? "" : ", ", story.style[2] == CHEAT_STYLE_NONE ? "" : style_name(story.style[2]));
+        if (ImGui::Button("Max cash ($999,999)"))
+            pending = CHEAT_STORY_CASH;
+        ui_target("Max cash");
+        ImGui::SameLine();
+        if (ImGui::Button("Max development points (99,999)"))
+            pending = CHEAT_STORY_DEVPTS;
+        ui_target("Max development points");
+        if (main_style < 0)
+        {
+            main_style = story.style[0] < CHEAT_STYLE_COUNT ? story.style[0] : 0;
+            hybrid1 = story.style[1];
+            hybrid2 = story.style[2];
+        }
+        style_combo("Main style", &main_style, false);
+        style_combo("First hybrid", &hybrid1, true);
+        style_combo("Second hybrid", &hybrid2, true);
+        if (ImGui::Button("Change fighting styles"))
+            pending = CHEAT_STORY_STYLES;
+        ui_target("Change fighting styles");
+        item_tooltip("Your fighter's main style and up to two hybrid styles, as if learned at the gym. Each style "
+                     "can be chosen once; the second hybrid needs a first.");
+        if (pending)
+            ImGui::OpenPopup("Change your Story profile?");
+    }
+    if (ImGui::BeginPopupModal("Change your Story profile?", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+    {
+        ImGui::PushTextWrapPos(ImGui::GetFontSize() * 28);
+        ImGui::TextWrapped("%s is written into the Story profile you are playing. When the game next saves, the "
+                           "change is permanent and cannot be undone. Copy your save folder first if you may want "
+                           "to go back.",
+                           pending == CHEAT_STORY_CASH     ? "$999,999 cash"
+                           : pending == CHEAT_STORY_DEVPTS ? "99,999 development points"
+                                                           : "The new fighting styles");
+        ImGui::PopTextWrapPos();
+        if (ImGui::Button("Apply"))
+        {
+            cheats_story_request(pending, main_style, hybrid1, hybrid2);
+            pending = 0;
+            ImGui::CloseCurrentPopup();
+        }
+        ui_target("Apply");
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel"))
+        {
+            pending = 0;
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
+    if (*cheats_story_status())
+        ImGui::TextWrapped("%s", cheats_story_status());
+#endif
+}
+
 static int g_page = 0;
 static bool g_advanced = false, g_select_page = false, g_return_focus = false, g_setup_request = false;
 static std::string g_home_return = "Advanced";
-static const char *page_names[] = {"Display", "Controls", "Mods", "Interface", "Diagnostics", "Maintenance"};
+static const char *page_names[] = {"Display", "Controls", "Mods", "Interface", "Cheats", "Diagnostics", "Maintenance"};
+static const int k_pages = (int)(sizeof page_names / sizeof page_names[0]);
 static void controls_page()
 {
     if (ImGui::CollapsingHeader("Players, devices and feel", ImGuiTreeNodeFlags_DefaultOpen))
@@ -1580,12 +1758,12 @@ UiResult ui_draw(UiMode mode, float x, float y, float width, float height)
         {
             if (ImGui::IsKeyPressed(ImGuiKey_GamepadR1, false))
             {
-                g_page = (g_page + 1) % 6;
+                g_page = (g_page + 1) % k_pages;
                 g_select_page = true;
             }
             if (ImGui::IsKeyPressed(ImGuiKey_GamepadL1, false))
             {
-                g_page = (g_page + 5) % 6;
+                g_page = (g_page + k_pages - 1) % k_pages;
                 g_select_page = true;
             }
             if (mode == UI_LAUNCHER && (ImGui::IsKeyPressed(ImGuiKey_Escape, false) ||
@@ -1603,7 +1781,7 @@ UiResult ui_draw(UiMode mode, float x, float y, float width, float height)
             ImGui::SetNextItemWidth(-1);
             if (ImGui::BeginCombo("##category", page_names[g_page]))
             {
-                for (int i = 0; i < 6; i++)
+                for (int i = 0; i < k_pages; i++)
                     if (ImGui::Selectable(page_names[i], g_page == i))
                         g_page = i;
                 ImGui::EndCombo();
@@ -1613,7 +1791,7 @@ UiResult ui_draw(UiMode mode, float x, float y, float width, float height)
         else if (ImGui::BeginTabBar("categories", ImGuiTabBarFlags_NoCloseWithMiddleMouseButton))
         {
             int requested = g_page;
-            for (int i = 0; i < 6; i++)
+            for (int i = 0; i < k_pages; i++)
             {
                 bool active =
                     ImGui::BeginTabItem(page_names[i], nullptr,
@@ -1647,9 +1825,12 @@ UiResult ui_draw(UiMode mode, float x, float y, float width, float height)
             page_general(mode);
             break;
         case 4:
-            page_debug(mode);
+            page_cheats(mode);
             break;
         case 5:
+            page_debug(mode);
+            break;
+        case 6:
             page_maintenance(mode);
             break;
         }

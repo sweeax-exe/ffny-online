@@ -58,6 +58,21 @@ line turns it on for one run. Every key here is read at start-up.
 | `keep_sessions` | `20` | Sessions kept whole; older ones keep their bundles and events only. |
 | `record_guest_ram` | `false` | Crash and hang bundles also hold the game's 64 MB of memory. |
 
+## [cheats]
+
+Cheats for issue [#71](https://github.com/vyanhursky/DefJamFFNY-recomp/issues/71), on the **Cheats** page of
+the launcher and the in-game overlay. All are off by default and apply as they change. None of them is ever
+saved into a profile; the Story one-shots that do change the profile are buttons in the overlay, not
+settings (see [Launcher and overlay](launcher-and-overlay.md#cheats)). [How they work](research/cheat-menu.md).
+
+| Key | Default | Meaning |
+|---|---|---|
+| `infinite_health` | `off` | Fighters who lose no health: `off`, `player 1` (the first fighter on a pad or the keyboard), `every player` (every fighter not played by the computer) or `everyone`. Hits still land and react. Env `RECOMP_CHEAT_INFINITE_HEALTH` (the same words). |
+| `max_blazin` | `off` | The momentum meter stays full and Blazin' is always ready for the same choice of fighters; start it as usual. It fills five seconds into a fight. Env `RECOMP_CHEAT_MAX_BLAZIN`. |
+| `no_regen` | `false` | No fighter gets health back by itself during a fight. Env `RECOMP_CHEAT_NO_REGEN`. |
+| `fighter_size` | `normal` | `giant` or `tiny` fighters. Only the picture changes: reach and collision stay the same. Env `RECOMP_CHEAT_FIGHTER_SIZE`. |
+| `story_hero` | `-1` | In Story fights, play as another fighter, with that fighter's look and moves, instead of your created fighter: the fighter's `<ID>` from `fighter.xml` (the launcher lists them by name), `-1` off. Cutscenes, the crib and the shops still show your own fighter. Env `RECOMP_CHEAT_STORY_HERO`. |
+
 ## [display]
 
 | Key | Default | Meaning |

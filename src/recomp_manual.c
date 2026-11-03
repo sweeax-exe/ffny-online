@@ -39,6 +39,7 @@
 #include "hooks/scene_launcher.h"
 #include "hooks/dev_module.h"
 #include "patches/picture.h"
+#include "patches/cheats.h"
 #include "patches/menu_geometry.h"
 
 /* Crowd test controls (src/hooks/crowd_control.c, RECOMP_TEST_CROWD; off unless set). */
@@ -59,6 +60,7 @@ void sub_001A50B0_enter(void)
 {
     if (defjam_test_observations_enabled())
         defjam_test_health_begin(MEM32(g_esp + 4), MEM32(g_esp));
+    cheats_health_change();     /* [cheats] infinite_health, no_regen (src/patches/cheats.c) */
 }
 void sub_001A6870_enter(void)
 {
@@ -87,6 +89,7 @@ void sub_00087700_enter(void)
     defjam_test_step();
     s_ws_hud_live = 1;
     ws_hud_heartbeat();
+    cheats_fight_step();        /* [cheats] fight cheats (src/patches/cheats.c) */
 }
 /* The match's update (thiscall; the match at 0x349760, its state at +0x2D820).
  * Only states 5 and 8 run the simulation step above; any other state (intro,
@@ -104,7 +107,7 @@ void sub_0008BE60_enter(void)
  * through a pause that began in a live fight (issue #95); otherwise no change. */
 void sub_00079B60_enter(void) { if (s_ws_hud_live) ws_hud_heartbeat(); }
 void sub_0007A8F0_enter(void) { if (s_ws_hud_live) ws_hud_heartbeat(); }
-void sub_001A4D90_enter(void) { defjam_test_match_start(); defjam_crowd_match_start(); }
+void sub_001A4D90_enter(void) { defjam_test_match_start(); defjam_crowd_match_start(); cheats_match_start(); }
 /* Widescreen song notification (src/patches/widescreen.c, issue #118): the APT
  * movie loader (archive, name, &apt, &const), and the next step of the load,
  * which its only caller runs straight after it with the .apt data as its second
@@ -173,7 +176,7 @@ void sub_00073FD0_enter(void) { scene_launcher_loader_enter(); }
 void sub_0002DFF0_enter(void) { scene_launcher_mode_enter(); }
 /* The developer run module, rebuilt from the host (src/hooks/dev_module.c): the manager's tick
  * queues it on request; its methods are traced. RECOMP_DEV_MODULE; off unless set. */
-void sub_00077040_enter(void) { dev_module_manager_enter(); }
+void sub_00077040_enter(void) { dev_module_manager_enter(); cheats_game_tick(); }  /* + Story cheats, src/patches/cheats.c */
 void sub_00077C40_enter(void) { dev_module_trace(1); }
 void sub_00077A40_enter(void) { dev_module_trace(3); }
 void sub_00077B20_enter(void) { dev_module_trace(4); }
@@ -843,6 +846,7 @@ static void funccall_hook(void)
     recorder_event_text("fe", "text", text);
     xbox_NoteAnchorEvent(text);
     defjam_unlock_all_on_funccall(text);   /* RECOMP_UNLOCK_ALL, src/patches/dev_unlock.c */
+    cheats_on_funccall(text);              /* Story tracking and Story cheats, src/patches/cheats.c */
     sub_00068BA0();
     /* RECOMP_FE_INJECT: commands of a test's own, after a chosen call (src/hooks/fe_inject.c). */
     fe_inject_after_call(text);

@@ -35,6 +35,7 @@ remains in Interface. Display DPI and the existing text/control size setting sti
 | Controls | Players/devices and live stick/button feedback, rumble test, keyboard player, startup controller count/backend, dead zones, thresholds, rumble and pointer behavior; expand Gamepad button mapping or Keyboard and mouse bindings for Detect/Add/Clear/Default |
 | Mods | Installed local/project packs, enablement and overlap winners; shared Load Order window; verified project catalogue downloads/updates, rollback and removal; Refresh local mods, Open Mods Folder, Memory and manual pack list |
 | Interface | Launcher skip, startup movies, overlay key/pad chord, text/control size |
+| Cheats | Fight cheats (infinite health, max Blazin', no health regeneration, giant/tiny fighters), the Story fighter swap and, in-game, the Story profile one-shots (cash, development points, fighting styles) |
 | Diagnostics | Recorder/capture/retention settings, texture authoring, save-affecting unlock tools and, in-game, Story scenes and EA's developer menu |
 | Maintenance | Data/save/mod/install/settings/play-log paths with Open and Copy path; setup selection, reset settings, version and licenses |
 
@@ -88,6 +89,21 @@ game process. Setup does not inherit the play lock. No installation starts autom
 release and operation in the wizard. New installed wrappers supply installation/data/log context, so
 setup is prefilled. In the overlay, Maintenance directs you to close the game and return to the launcher
 before updating. A missing or moved setup can be selected again.
+
+### Cheats
+
+The **Cheats** page (`[cheats]` in `settings.ini`, all off by default) has two kinds of cheat:
+
+- **Fight cheats** apply as you change them, in every mode, and are never saved: infinite health and max
+  Blazin' (for player 1, every player or everyone), no health regeneration, and giant or tiny fighters.
+  Max Blazin' fills the meter five seconds into a fight; start Blazin' as usual. Infinite health keeps
+  you standing, but a fight with a time limit is still decided on points when the clock runs out.
+- **Play Story fights as** swaps your created fighter for another fighter, with their look and moves, in
+  Story fights only. Cutscenes, the crib and the shops still show your own fighter, and nothing is saved.
+- **Story profile** one-shots, in the overlay while you play Story: **Max cash** ($999,999), **Max
+  development points** (99,999) and **Change fighting styles** (a main style and up to two hybrids). These
+  write into the Story profile, and the game saves it: the change is permanent. Each asks first; copy your
+  save folder (Maintenance, Saves) before using them.
 
 ### Developer options
 

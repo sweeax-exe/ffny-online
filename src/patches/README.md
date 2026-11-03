@@ -21,3 +21,7 @@ or `src/recomp_manual.c`.
   `vignette_strength` (the venue post effect's darkened edges: removed, or blended towards the
   undarkened picture). Defaults leave the picture exactly as before; all three apply as they change.
   [The investigation](../../docs/research/picture-options.md).
+- `cheats.c`: the `[cheats]` settings and the Story one-shots of the launcher's and overlay's Cheats page
+  (issue #71): infinite health, max Blazin', no health regeneration, giant/tiny fighters, the Story fighter
+  swap, and cash, development points and fighting styles for the loaded Story profile. All off by default;
+  the fight cheats never touch a save. [The investigation](../../docs/research/cheat-menu.md).

@@ -315,6 +315,50 @@ inline std::map<std::string,std::string> pack_conflicts(const fs::path &mods,con
     }
     return result;
 }
+// The fighters a Story hero can be swapped for, from the dump's own fighter.xml: its <ID> and the
+// name it shows (<dispname>, else <name>). The "CP ..." entries are the created hero's style
+// templates, not fighters, and are left out. Sorted by name.
+struct Fighter
+{
+    int id = -1;
+    std::string name;
+};
+inline std::vector<Fighter> roster(const std::string &xml)
+{
+    auto field = [](const std::string &block, const char *tag) {
+        std::string open = std::string("<") + tag + ">", close = std::string("</") + tag + ">";
+        auto a = block.find(open);
+        if (a == std::string::npos)
+            return std::string();
+        a += open.size();
+        auto b = block.find(close, a);
+        return b == std::string::npos ? std::string() : trim(block.substr(a, b - a));
+    };
+    std::vector<Fighter> out;
+    for (size_t at = 0; out.size() < 512;)
+    {
+        auto a = xml.find("<fighter>", at);
+        if (a == std::string::npos)
+            break;
+        auto b = xml.find("</fighter>", a);
+        if (b == std::string::npos)
+            break;
+        std::string block = xml.substr(a, b - a);
+        at = b + 10;
+        Fighter f;
+        std::string id = field(block, "ID"), name = field(block, "name"), shown = field(block, "dispname");
+        if (id.empty() || id.size() > 3 || !std::all_of(id.begin(), id.end(), [](unsigned char c) { return std::isdigit(c); }))
+            continue;
+        if (name.compare(0, 3, "CP ") == 0)
+            continue;
+        f.id = std::stoi(id);
+        f.name = shown.empty() ? name : shown;
+        if (!f.name.empty())
+            out.push_back(f);
+    }
+    std::sort(out.begin(), out.end(), [](const Fighter &x, const Fighter &y) { return x.name < y.name; });
+    return out;
+}
 inline bool aspect_next_launch(int before, int after)
 {
     return before != after && (before >= 2 || after >= 2);

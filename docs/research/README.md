@@ -69,6 +69,7 @@ cite other development notes, logs and captures that are not published.
 - [Match-end state](match-end-state.md)
 - [Combat telemetry](combat-telemetry.md)
 - [Unlocking everything for playtests](unlock-everything.md): the unlock routine the retail image still carries, and the switch that calls it
+- [A cheat menu (issue #71)](cheat-menu.md): the built-in codes, other versions' cheat tables, and the fields and hooks for Story cash and points, health, the Blazin' meter, time scale and movesets; §7 records the implementation and its live checks
 - [Why a scripted fight does not replay identically](fight-determinism.md)
 - [Why fight pictures do not repeat](crowd-nondeterminism.md)
 - [Launching a scenario by choice: fixtures, generated routes, the crowd, cutscenes](scenario-launching.md)
