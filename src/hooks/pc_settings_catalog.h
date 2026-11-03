@@ -13,8 +13,8 @@ extern "C" {
 #endif
 
 /* Room for the whole catalogue: the display table plus the input (64), launcher/overlay (16)
- * debug (16) and language (4) tables. */
-#define PC_SETTINGS_MAX 128
+ * debug (16), language (4) and cheats (8) tables. */
+#define PC_SETTINGS_MAX 160
 
 /* A four-fighter match holds about 2 GiB of replacements. At 512 MiB the cache evicted and
  * re-decoded dozens of textures every two seconds in a fight on the Steam Deck. */
