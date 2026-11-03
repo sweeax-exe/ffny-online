@@ -561,9 +561,9 @@ static void list_round(void)
     closesocket(s);
 }
 
-/* ---- Every relay's players (build 47, PLAYERLIST 0x31: WHO without a session) ------------------ */
+/* ---- Every relay's players (build 47, PLAYERLIST 0x33: WHO without a session) ------------------ */
 
-#define PLAYERLIST_TYPE  0x31
+#define PLAYERLIST_TYPE  0x33
 #define PLAYERLIST_EVERY 5000   /* ms between two asks of one relay (the relay answers 2 a second per IP) */
 #define PLAYERLIST_FRESH 15000  /* an older answer is not used */
 #define PLAYERS_MAX      40     /* the relay's MaxWho */

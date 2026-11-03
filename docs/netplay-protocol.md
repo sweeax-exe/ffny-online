@@ -391,8 +391,8 @@ players and adds a line with how many are on the others (their `STATUS` counts).
 
 | Type | Name | Direction | Body after the header |
 |---|---|---|---|
-| 0x31 | `PLAYERLIST` | client -> server | `nonce` u32, `build` 8 (the asker's fingerprint, zeros: any), then zero bytes (padding, as for `ROOMLIST`) |
-| 0x31 | `PLAYERLIST` | server -> client | `nonce` u32 (the request's), `online` u16 (everyone connected, as `PLAYERS`), `total` u16 (players that match), `count` u8, then per player: `name` string, `state` u8 (0 in the hub, 1 in a room, 2 playing; as in `PLAYERS`) |
+| 0x33 | `PLAYERLIST` | client -> server | `nonce` u32, `build` 8 (the asker's fingerprint, zeros: any), then zero bytes (padding, as for `ROOMLIST`) |
+| 0x33 | `PLAYERLIST` | server -> client | `nonce` u32 (the request's), `online` u16 (everyone connected, as `PLAYERS`), `total` u16 (players that match), `count` u8, then per player: `name` string, `state` u8 (0 in the hub, 1 in a room, 2 playing; as in `PLAYERS`) |
 
 - The players are those `WHO` gives a registered client of that build (lobby clients with a name;
   in the hub first, then in rooms, then playing; by name), at most 40. Names and states only: never an

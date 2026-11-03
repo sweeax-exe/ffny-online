@@ -36,7 +36,7 @@ def go_const(text, name):
 
 
 def test_type_matches_the_relay_and_is_new():
-    assert c_define(SERVERS_C, 'PLAYERLIST_TYPE') == go_const(GO, 'TypePlayerList') == 0x31
+    assert c_define(SERVERS_C, 'PLAYERLIST_TYPE') == go_const(GO, 'TypePlayerList') == 0x33
     types = [int(t, 16) for t in re.findall(r'MsgType = (0x[0-9A-Fa-f]+)', GO_ALL)]
     assert len(types) == len(set(types)), sorted(types)
 
@@ -71,4 +71,4 @@ def test_the_page_tags_every_server_and_counts_the_others():
     assert 'all_players(list, 40, &online)' in page and 'short_name' in page
     assert 'more on %s' in page        # one server chosen: the others' STATUS counts
     assert '"players-all"' in SCREEN    # the gallery's All-servers page
-    assert '`PLAYERLIST`' in PROTOCOL_DOC and '0x31' in PROTOCOL_DOC
+    assert '`PLAYERLIST`' in PROTOCOL_DOC and '0x33' in PROTOCOL_DOC
