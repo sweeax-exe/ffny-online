@@ -1467,11 +1467,14 @@ bool online_count(ImDrawList *dl, const Frame &f, bool button = false)
     const char *tag = all_servers() ? "ALL SERVERS" : "SERVER";
     bool tagged = button || all_servers();
     float label = tagged ? text_width(f, g_title, 10, tag) + 8 : 0;
-    float bars = cur >= 0 ? 24 : 0, glyph = button ? 22 : 0, x1 = 606, x0 = x1 - w - bars - glyph - label - 16;
+    float bars = cur >= 0 ? 24 : 0, glyph = button ? 22 : 0, content = w + bars + glyph + label + 16;
+    // On our glass door the chip is as wide as the door above it, its content centred (owner, 2026-11-03);
+    // in the game's own door it keeps hugging its text at the right
+    float x1 = g_game_door ? 606 : DOOR_X + DOOR_W, x0 = g_game_door ? x1 - content : std::min(DOOR_X, x1 - content);
     glass(dl, f, x0, y - 3, x1 - x0, 21, 10, IM_COL32(10, 10, 13, 255), 0.62f);
     bool hot = button && mouse_in(f, x0, y - 3, x1 - x0, 21);
     if (hot) frame_rect(dl, f, x0, y - 3, x1 - x0, 21, with_alpha(ORANGE, 0.8f), 1.2f);
-    float x = x0 + 8;
+    float x = x0 + 8 + ((x1 - x0) - content) / 2;
     if (button) {
         hint(dl, f, x, y - 1, "x", "");
         x += glyph;
