@@ -1,6 +1,6 @@
 # v1.0.0 release candidate: regression and acceptance
 
-This candidate includes all 13 PRs from the renamed v1.0.0 milestone plus design #125. #171 is excluded. The release PR is the result tracker; do not merge individual PRs to main while testing. Main's v0.13.0 release remains the stable download. No full gameplay/platform regression has yet qualified this combined source tree.
+This candidate includes the original 13 PRs from the renamed v1.0.0 milestone plus design #125 and launcher UX PR #179. #171 is excluded. The release PR is the result tracker; do not merge individual PRs to main while testing. Main's v0.13.0 release remains the stable download. No full gameplay/platform regression has yet qualified this combined source tree.
 
 ## Identity and source coverage
 
@@ -24,6 +24,7 @@ Toolkit pin: `d033837332a2c8ca8e59113edac17a474fb3a9c8`, fork branch `defjam/rel
 | [#146](https://github.com/vyanhursky/DefJamFFNY-recomp/pull/146) | fix(test): isolate the pinned fight from the host's timing, --isolate-crowd (#98) | `0f858d37d805e46aab1e5d342bd44bd58fbb593a` | D308, D309 |
 | [#164](https://github.com/vyanhursky/DefJamFFNY-recomp/pull/164) | fix(cinema): prevent SC04 zero-step animation drift (#161) | `36d4e06b36f3861ce4253627499e200b258bb79e` | D310, D311, D312 |
 | [#133](https://github.com/vyanhursky/DefJamFFNY-recomp/pull/133) | feat(site): GitHub Pages project site, published with v0.13.0 | `feb70380aeca14c11ffd91bbd8bbf3a4f813dafa` | D313, D314, D315, D316 |
+| [#179](https://github.com/vyanhursky/DefJamFFNY-recomp/pull/179) | Setup/launcher UX, presets, Mods tabs, updates/recovery, DPI layouts and approved typography A | `6859addd2120b227e81bd7eb25da26b88c9000eb` (merge `87fb38f`) | D318–D323 |
 
 The app stack was refreshed by forward merges; its current Steam/uninstall work is retained by Linux and graphics. Cheats #97 depends on #151. The RC merges both Linux and graphics, then cheats, determinism, SC04 and site work. PROGRESS keeps main's landed records, restores reserved D214/D215, and numbers PR decisions once.
 
@@ -82,10 +83,16 @@ For the established HD widescreen lane, use `--release-profile` and, when testin
 | Steam shortcut, overlay and input; Deck Game Mode | Pending | N/A: Steam integration not implemented | Pending |
 | Owner combined-candidate play-test | Pending | Pending | Pending |
 
-Follow [graphics test plan](research/graphics-enhancements-test-plan.md), [SC04 evidence/limits](research/sc04-fix-validation.md) and [cheat coverage](research/cheat-menu.md). Graphics defaults stay unchanged. Review the old Windows visual references rather than raising thresholds: thin background textures now draw after the DXT fix, while the crib ticker also needs inspection. Uninstall acceptance uses a scratch install and copied saves. #126's Windows analysis path and #170's bundled Zig build need acceptance on this combined candidate. The ordinary Linux source-build lane above uses the host toolchain; the CI AppImage installation is the bundled-toolchain lane. Repeat Deck scene-load measurements before treating #170's one-run 10–25% load-time difference as established.
+Follow [graphics test plan](research/graphics-enhancements-test-plan.md), [SC04 evidence/limits](research/sc04-fix-validation.md) and [cheat coverage](research/cheat-menu.md). Existing installs retain their settings. Fresh setup now recommends Modern (widescreen/2x) with optional generated textures; Original is selectable. Test both preset contracts in [launcher UX acceptance](launcher-ux-candidate.md). Review the old Windows visual references rather than raising thresholds: thin background textures now draw after the DXT fix, while the crib ticker also needs inspection. Uninstall acceptance uses a scratch install and copied saves. #126's Windows analysis path and #170's bundled Zig build need acceptance on this combined candidate. The ordinary Linux source-build lane above uses the host toolchain; the CI AppImage installation is the bundled-toolchain lane. Repeat Deck scene-load measurements before treating #170's one-run 10–25% load-time difference as established.
 
 App/setup assets are game-free and each needs its SHA-256 and provenance. CI builds are development candidates; stable-release provenance and a real GitHub-app self-update remain later release acceptance. #133's Pages activation was not verifiable (API404); enable GitHub Actions as Pages source and review the app/install copy before publishing the website. RC preparation does not deploy it.
 
 ## Return evidence
 
 Send the exact candidate/toolkit SHA, OS/GPU/toolchain, command and selected profile, complete `logs/regress-*.txt` table, save-restoration result, capture-review verdicts and every failing row's triage summary. Confirm failures with `--only NAME`. Keep raw logs, saves, generated guest code, images/audio and game executables local. Existing open issues #98/#141/#161/#162/#166 and prior release qualifications remain open; integrating a PR does not establish that its acceptance gates passed.
+
+## Launcher UX follow-up (#179)
+
+The owner explicitly assigned full launcher regression on Windows, macOS and Steam Deck/Linux to the platform agents. Use PR177's current head, not the preceding d79ca62 or a locally installed older app. Feature-head checks: native macOS app/legacy builds, six shared game/overlay objects, 67 focused tests / 1 platform skip and isolated UI checks; no complete game run or actual install/update/uninstall/mod operation was performed in the UX implementation pass.
+
+In addition to the full suite, complete [the launcher acceptance checklist](launcher-ux-candidate.md): both fresh presets and existing-install preservation; optional Upscaled Original Textures and real downloadable texture/language packs; manual/automatic updates and two-phase restart/rebuild; backup/recovery/Steam behavior; keyboard/controller navigation and rebuilt overlay; Windows 4K at 300%, mixed DPI and large app text; Deck Game Mode. Typography A should retain normal-size title-case Home labels in a heavier UI face, with PLAY visually strongest. Record platform font availability if fallback occurs.
