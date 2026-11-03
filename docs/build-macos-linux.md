@@ -12,7 +12,7 @@ same pipeline off Windows, since v0.5.0.
 |---|---|
 | macOS on Apple Silicon (arm64) | Playable. Built, regression-tested and play-tested on macOS 26 with a DualSense. |
 | macOS on Intel | Not tried. |
-| Linux x86-64 | Builds and runs natively (D95). Built with Clang 20 and run on a Steam Deck; 12 of the 14 regression checks pass on the Deck; combat and versus fail only on a few audio-queue underruns ([#11](https://github.com/vyanhursky/DefJamFFNY-recomp/issues/11)). Play-tested by the owner on the Deck. |
+| Linux x86-64 | Native Vulkan build; Steam Deck is the Linux product acceptance target. See the versioned release notes for exact regression results and qualifications. |
 | Steam Deck | Native, through Vulkan on the Deck's GPU, with PipeWire sound and the Deck's own controls as a pad. SteamOS has no compiler: build in a container (below) and run the game on SteamOS itself. Proton not tried. |
 
 What is different from Windows:
@@ -194,7 +194,7 @@ The redirection keeps a log of the session; the game prints a great deal, and
 
 ## Known limits
 
-- The window follows the display's pixel density (2560x1920 pixels for the default 1280x960 window on a Retina
+- The window follows the display's pixel density (2560x1920 pixels for the default 1920x1080 window on a Retina
   display, as `[HOST] window ...` in the log says), and the overlay is drawn at that resolution. Window width and
   height changed in the overlay resize the window at once.
 - HD textures work through the same `[textures]` settings as on Windows (macOS since

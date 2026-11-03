@@ -6,9 +6,9 @@ for a capture-to-pack walkthrough. This page is the format and processing refere
 v0.6.0 added optional Windows Direct3D 11 texture packs and local
 Lanczos 4x generation; v0.6.1 draws the same packs through Vulkan on macOS
 (Apple Silicon), and v0.7.2 offers them in the Linux setup (the Steam Deck included),
-whose Vulkan renderer is the macOS one. The integrated menu RC adds optional
+whose Vulkan renderer is the macOS one. Compatible menu packs add optional
 wide background extensions when a compatible pack is loaded; vector fonts and HD
-movies remain follow-ups. See `research/hd-textures-notes.md` for evidence and gaps.
+movies remain follow-ups. See [the HD acceptance record](research/hd-v060-release-validation.md) for dated evidence and coverage limits.
 
 A pack is named by the contents of the original texture, not by the renderer, so the
 packs Setup makes on a Mac or on Linux are the same files (18,971 images, 6,212,168,677
@@ -32,10 +32,10 @@ Generation took about four minutes on the development PC; game compilation and
 texture verification add time, and other CPUs may take longer. On a Steam Deck the upscale
 takes about ten minutes, and the whole install with it about 15.
 
-The first time a screen is drawn with the packs, its HD textures are decoded and uploaded
-(the main menu's are 2048x2048), so it can take a moment to respond: about 3 s for the main
-menu on a Steam Deck. On the Deck a one-on-one fight runs at 60 frames a second with the packs
-and a four-fighter Free For All at about 56 (both 60 without them).
+Replacement decoding/upload can add work when a screen first appears. The runtime
+uses background preparation where supported and displays originals until replacements
+are ready. Historical synchronous-load timings are not current performance guarantees;
+measure the exact build, packs, cache, venue and display settings.
 
 In the launcher or F1 overlay (Windows, macOS since v0.6.2, Linux since v0.7.0), open **Mods** to disable HD
 packs, change the pack list or adjust the cache. Restart after changes. Or edit `[textures]` in
@@ -137,6 +137,8 @@ corpora, generated candidates and review state in the private workspace. See the
 ## Movies and original fonts
 
 ```powershell
+$hdPython = "python"
+$hdData = "D:\DefJamData" # your existing data folder
 & $hdPython scripts/hd_assets.py export --root "$hdData\extracted" --output "$hdData\video-scratch\originals" --kind video --limit 3
 & $hdPython scripts/hd_assets.py export --root "$hdData\extracted" --output "$hdData\hd-work\fonts" --kind fonts --limit 24
 ```
@@ -154,21 +156,15 @@ the game's timing, skips, loops and audio while presenting host-decoded frames. 
 UI assets rather than these prerecorded videos. No movie decoder or host playback change is implemented here.
 
 
-## Full Lanczos corpus gallery
+## Corpus and acceptance evidence
 
-Owner selected Lanczos after the SwinIR audition. `scripts/hd_corpus.py build`
-processes the supported static census at4x and retains all source aliases;
-`serve --output <local-corpus-root> --port 8767` provides searchable categories,
-original comparisons and locally saved concern flags/notes. See
-`research/hd-full-lanczos-corpus.md` for full commands, counts and verification.
-The generated gallery and all images/reviews stay in the data root. Runtime
-correlation and remaining release gates precede installation of the whole corpus.
-
-
-Owner accepts the full static Lanczos gallery (D91). For exact storage, proposed
-source-only local generation and remaining runtime assembly steps, see
-[release packaging](research/hd-texture-release-packaging.md). Reusable commands,
-model experiments and saved-review behavior are in [workflow guide](hd-texture-workflow.md).
+General extraction/review galleries and optional processing live in
+[Modding Tools](https://github.com/vyanhursky/DefJam-Modding-Tools).
+The game keeps its frozen Setup generator and runtime aliases for compatibility;
+do not replace that snapshot as part of authoring cleanup. The
+[v0.6 acceptance record](research/hd-v060-release-validation.md) distinguishes
+prototype controls, static gallery review and later packaged-install acceptance.
+Generated images, galleries and authoring history remain private/local.
 
 ## Download independent menu mods through the launcher
 

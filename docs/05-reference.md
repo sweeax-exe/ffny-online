@@ -62,7 +62,7 @@ indirect-only wrapping describe v0.13, not the current pin.
    changes in an isolated toolkit worktree, validate and publish, then commit the published gitlink in
    the parent. The 108 numbered patches that source comments still cite are retired and no longer shipped. The ledger in
    `docs/research/toolkit-rebase-ledger.md` maps all 108 old patches. Each upstream PR needs Vlad's approval.
-4. **Deferred structural work is in `docs/04-improvement-backlog.md`**, not in PROGRESS.md.
+4. **Open structural work belongs in GitHub Issues/milestones**, not another checked-in backlog.
 5. **Captures come from the back buffer** (`RECOMP_TRANS_SHOT`, D12, D15) and carry the gamma ramp;
    `scripts/window-shot.ps1` grabs the game's own window when what is presented is the question. Both are
    the game's artwork: under `logs/` only, never committed.
@@ -72,10 +72,8 @@ indirect-only wrapping describe v0.13, not the current pin.
    payloads. A guard whose run was killed leaves a `state.json` in its stamp, and the next guard refuses to
    start until `harness.py save-recover` settles it (`--restore` or `--accept`). Rebase runs use the preserved disposable save copy. Legacy name-hash compatibility verifies
    exact UTF-16 metadata and prefers canonical folders; it never renames or merges player folders (D52).
-7. **M4d items never formally met** (D45): two pads, private bytes stable over three fights, the rare
-   `sub_001A3310` crash at a fight's start, the loading-bar glitch, a rare boot with no sound.
-8. **Ghidra symbol pass** (`docs/03-workflows.md`) so logs name XAPI, D3D and DirectSound functions. VS 2022
-   Build Tools is still not installed; VS 2019 builds everything.
+7. **Historical bring-up qualifications** remain in the dated research/release evidence and
+   PROGRESS decisions. Revalidate old crash/performance hypotheses before treating them as current bugs.
 
 ## Running it, and checking it
 
@@ -90,7 +88,8 @@ The launcher supplies absent `RECOMP_VBLANK`, `RECOMP_PB_EXEC`, `RECOMP_PB_D3D11
 settings as 1, preserves explicit overrides and restores its additions when the game exits. `RECOMP_VBLANK`
 drives the GPU's interrupt (without it the title stalls early), `RECOMP_PB_D3D11` gates the whole
 translator path (without it nothing is drawn), `RECOMP_USB` presents the controller. The harness sets all
-four as well. A direct executable launch still needs these settings.
+four as well. Current executable startup supplies the normal runtime defaults; preserve explicit diagnostic overrides.
+See the build guide and source rather than applying historical launch recipes blindly.
 
 To drive it unattended, `scripts/harness.py` (its docstring has the stage syntax):
 

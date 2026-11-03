@@ -151,9 +151,10 @@ easier to play and customize on modern computers.
 | Build and release automation | Improve automation and the gameplay test harness so shipping builds have reliable, repeatable validation. |
 | Deeper gameplay decompilation | Long-term stretch goal. |
 
-These stages describe current work, not promised release dates. See the
-[PC features plan](docs/07-m6-plan.md), [roadmap](docs/01-plan-review.md#corrected-roadmap-milestones-with-exit-criteria)
-and [improvement backlog](docs/04-improvement-backlog.md) for detail.
+These are directions, not promised release dates. [GitHub Issues](https://github.com/vyanhursky/DefJamFFNY-recomp/issues),
+[milestones](https://github.com/vyanhursky/DefJamFFNY-recomp/milestones) and
+[open PRs](https://github.com/vyanhursky/DefJamFFNY-recomp/pulls) track concrete work.
+The unified-app and graphics PRs are proposals/in progress, not released capabilities.
 
 ## Compatibility and known limits
 

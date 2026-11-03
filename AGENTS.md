@@ -26,13 +26,13 @@ file, not an import:
 Skills and sub-agent files for each tool (`.claude/`, `.codex/`) are generated from `docs/agent/skills/` and
 `docs/agent/briefs/` by `python scripts/sync-agent-adapters.py`. Edit the sources, then run it.
 
-## 1. The three files that carry state
+## 1. State, policy and task ownership
 
 | File | Role | Rule |
 |---|---|---|
-| `PROGRESS.md` | The single source of truth for status, decisions and history | On `main`, release branches and main-only docs PRs, update it **in the same turn** as the work. **Feature branches do not edit it**: their decisions (`D-new: ...`), results and hand-off go in the PR description, and the release PR writes them here (`docs/releasing.md` §2). Vlad exports it, so it must stand alone. Read it in pieces with `scripts/progress.py` (`brief`, `section N`, `decision D<n>`, `decisions --grep TEXT`, `grep TEXT`). |
-| `docs/01-plan-review.md` | Roadmap M0..M8 with exit criteria | Change only when a milestone definition changes; log that change as a decision. |
-| `docs/02-test-plan.md` | What "done" means per milestone | Same rule. |
+| `PROGRESS.md` | Current maintainer handoff and historical decisions; one standalone export | On `main`, release branches and main-only docs PRs, update it **in the same turn** as the work. **Feature branches do not edit it**: their decisions (`D-new: ...`), results and hand-off go in the PR description, and the release PR writes them here (`docs/releasing.md` §2). Vlad exports it, so it must stand alone. Read it in pieces with `scripts/progress.py` (`brief`, `section N`, `decision D<n>`, `decisions --grep TEXT`, `grep TEXT`). |
+| GitHub Issues and milestones | Open bugs, future tasks and release scope | Link existing issues rather than create a parallel backlog or status tracker. |
+| `docs/02-test-plan.md` | Current evidence and acceptance policy | Process lives in `docs/releasing.md`; actual qualifications live with the versioned release. |
 
 `PROGRESS.md` sections and how to use them:
 - **§0 Status at a glance**: one row per area. Flip ✅/⏳/⬜ the moment it changes.
@@ -42,7 +42,9 @@ Skills and sub-agent files for each tool (`.claude/`, `.codex/`) are generated f
 - **§6 Work log**: `- YYYY-MM-DD HH:MM — what happened`, newest at the bottom. One line per iteration or notable event, with numbers (function counts, kernel calls, stage reached) and the log file name. Keep it to about eight entries; `python scripts/worklog-add.py <entry file>` appends one and moves the older ones, unchanged, to the bottom of `docs/worklog/<YYYY-MM>.md`.
 - **§7 Hand-off**: exact next steps with addresses, env vars and file names. Rewrite it at the end of every session so the next agent can start in five minutes. The block it replaces goes to the top of `docs/worklog/<YYYY-MM>-handoffs.md`; do not stack superseded blocks in §7.
 
-`PROGRESS.md` is read at the start of every session (`progress.py brief`), so it has to stay short. Its lines are long, so count bytes, not lines: §1 alone is most of it. The archive
+`progress.py brief` reads the current sections at session start, so keep those sections short.
+The historical decisions stay in §1 for the standalone export (D115); read them by ID/keyword, not end to end.
+D100 and D101 each have two landed rows; preserve their IDs and use their topic/date for disambiguation. The archive
 under `docs/worklog/` is for searching, not for reading end to end. It is a development record and is
 not part of the published tree; `worklog-add.py` creates the folder when it is missing.
 
@@ -87,7 +89,7 @@ snapshot and its runtime aliases remain here until an explicitly tested pin upda
 - Never mention the site the dump came from, anywhere. Refer to "the user's own dump".
 - Never distribute built game executables (they embed lifted EA code). Ship tools, patches, docs.
 - Release setup exception: only the standalone game-free `DefJamSetup-<version>-windows-x64.exe`, `DefJamSetup-<version>-macos-arm64.dmg` (Vlad approved the macOS one on 2026-10-09, unsigned) and `DefJamSetup-<version>-linux-x64.tar.gz` (approved 2026-10-10, D96), each with its SHA-256 and provenance, may be attached by the tagged release workflow after `check-setup-assets.py` passes. Setup compiles the player's dump locally. No binary is tracked in source; no game executable, generated guest code or game data enters the setup payload. The macOS payload carries only pinned third-party tools and libraries (Python, CMake, Ninja, SDL3, shaderc, MoltenVK) next to the reviewed source. The Linux payload carries only pinned Python (python-build-standalone, with Tk) and seven pinned wheels (pyxbe, capstone, Pillow and NumPy; cryptography, cffi and pycparser for the signed mod catalogue, D189/UI) next to the reviewed source; its build container is fetched on the player's computer, never shipped.
-- D58 (2026-10-04): Vlad explicitly approved the two README visuals in `docs/media/`. Only their exact paths and SHA-256 fingerprints in `scripts/check-source-tree.py` are permitted; no general capture/asset exception. The project license does not cover game artwork. On 2026-10-09 he asked for two screenshots of the port's own interface (the setup wizard and the launcher, no game artwork); they are fingerprinted the same way. On 2026-10-20 he requested replacing the older launcher screenshots throughout the README/docs and showing the new launcher on the front page; the exact Home and Advanced exports (`docs/media/launcher.png`, `docs/media/launcher-advanced.png`) are pinned under D144. This permits these UI-only replacements, not arbitrary captures.
+- D58 and later decisions approved specific media in `docs/media/`; the superseded October4 pair was retired in the approved cleanup. Only current exact paths and SHA-256 fingerprints in `scripts/check-source-tree.py` are permitted; no general capture/asset exception. The project license does not cover game artwork. On 2026-10-09 he asked for two screenshots of the port's own interface (the setup wizard and the launcher, no game artwork); they are fingerprinted the same way. On 2026-10-20 he requested replacing the older launcher screenshots throughout the README/docs and showing the new launcher on the front page; the exact Home and Advanced exports (`docs/media/launcher.png`, `docs/media/launcher-advanced.png`) are pinned under D144. This permits these UI-only replacements, not arbitrary captures.
 - D98 (2026-10-10): Vlad approved committing the application icons and the Steam artwork rendered from the game's own textures, under `branding/` only (the shield, the title wordmark, the title-screen scene and what `scripts/make-branding.py` renders from them). `scripts/check-source-tree.py` pins the set by the SHA-256 of `branding/SHA256SUMS`, which lists every file; changing any of them, or adding one, needs his approval of a new pin. It is not a general asset exception, and the licence still does not cover the artwork.
 - Hashes are fine, bytes are not. `config/dump-manifest.json` is the pattern.
 - Branch cleanup after a merge: GitHub deletes the remote head branch itself (`delete_branch_on_merge` is on). Run `git fetch --prune`, then delete the local branch once its PR is merged, including squash merges, which `git branch --merged` misses, so check the PR state with `gh pr view`. Never delete a branch checked out in a worktree or one that still has unmerged commits.
@@ -104,7 +106,7 @@ snapshot and its runtime aliases remain here until an explicitly tested pin upda
 3. Pick the fix in this order of preference:
    - missing function → `.\scripts\seed-from-log.ps1` then `analyze.ps1` → `recomp.ps1` → `build.ps1`;
    - runtime gap (kernel/D3D/NV2A) → make one logical source commit on our xboxrecomp fork branch, run its focused fixtures plus the game regression, then publish to the fork and update the parent gitlink to that published commit. Keep the submodule clean; the old numbered patches are retired and no longer in the tree. Every upstream PR needs Vlad's separate approval;
-   - lifter bug → hand-write the function as `void sub_XXXXXXXX(void)` in `src/recomp_manual.c`; read `docs/agent/lifter-overrides.md` first (a direct caller never reaches a wrapper; the `_enter` hook and `RECOMP_WATCH_WRITE` are the ways to trace). A hardware poke we do not need gets stubbed in `src/hooks/`.
+   - lifter bug → hand-write the function as `void sub_XXXXXXXX(void)` in `src/recomp_manual.c`; read `docs/agent/lifter-overrides.md` first (since toolkit v0.16 direct callers reach manual wrappers too; `_enter` hooks and `RECOMP_WATCH_WRITE` also support tracing). A hardware poke we do not need gets stubbed in `src/hooks/`.
 4. Rebuild, re-run, then `python scripts/regress.py --quick` (unit tests, the three golden frames, a fight) and the
    `--only` checks for the area you changed (`docs/agent/release.md`). The full `python scripts/regress.py` (about an
    hour) runs **once per platform on the release candidate** (release trains, `docs/releasing.md`), not on each PR;
@@ -117,8 +119,8 @@ snapshot and its runtime aliases remain here until an explicitly tested pin upda
    Push only when Vlad asks. Write the
    message to a file and use `git commit -F <file>`; PowerShell 5.1 cannot pipe a here-string, and its
    `Set-Content -Encoding utf8` adds a BOM to the subject.
-7. Toolkit changes live on `vyanhursky/xboxrecomp`, branch `defjam/m6` (D63; started at the accepted
-   `defjam/rebase-2026-10` tip `aa1a1b9`; worktree `logs/m6-work/toolkit`).
+7. Toolkit changes live on `vyanhursky/xboxrecomp`; `.gitmodules` names the current integration branch
+   and the gitlink pins the reviewed commit. Historical branch/worktree names in decisions are not current instructions.
    Use an isolated toolkit worktree, preserve upstream behavior, and commit one logical topic with source-only
    staging and tests. Publish the reviewed commit before committing its gitlink in the parent; a fresh clone
    builds the exact fork commit from `git submodule update --init --recursive`, with no patch replay.
@@ -130,7 +132,7 @@ Diagnostics env vars are tabled in `docs/03-workflows.md`; full list in `docs/re
 ## 5. Orchestration style
 - The main agent orchestrates. Delegate only read-only, bounded reading (lifted C, the image, logs, docs, web research) to a sub-agent on a smaller, cheaper model, and never the measure-change-rebuild loop; rules, the brief checklist and ready briefs are in `docs/agent/delegation.md`. Treat a sub-agent's report as evidence, not as fact.
 - Do the work that does not depend on Vlad first; put blocking questions in chat **and** in `PROGRESS.md` §5.
-- Milestone exit criteria are in `docs/02-test-plan.md`. Do not declare a milestone done without meeting them.
+- Acceptance policy is in `docs/02-test-plan.md`; actual release gates and explicit exceptions must be recorded without rewriting failures as passes.
 - Game runs are serial: never start two at once (timing floors, audio, input and the save area are shared).
 
 ## 6. Environment gotchas (the two that cost the most; the rest in `docs/agent/environment.md`)

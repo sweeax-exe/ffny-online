@@ -6,7 +6,7 @@ signed catalogue, helper and shared launcher order are implemented in the
 protected publication gates tracked there. Generic overrides, recipe delivery and
 code mods remain proposals. The sections below preserve the original design
 context. It takes the backlog's
-[item 4](../04-improvement-backlog.md) ("design the mod and asset-override system deliberately") and adds a
+[item 4](https://github.com/vyanhursky/DefJamFFNY-recomp/issues) ("design the mod and asset-override system deliberately") and adds a
 curated, remotely updated mod list that players manage from the launcher. Come back to the open questions in
 section 12 before starting.
 

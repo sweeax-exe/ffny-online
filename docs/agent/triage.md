@@ -63,4 +63,4 @@ exists to avoid. Slice, and slice again. You lose nothing by it: the log is neve
 `tests/unit/test_triage.py` pins the digest on synthetic logs shaped like the runtime's output
 (`src/main.c` for `[CRASH]`, the lifter's `[ICALL]` line). When the runtime changes a log line the
 digest relies on, change the test and `scripts/triage.py` together. When a real run teaches the
-digest a new signature, add the signature, a synthetic test of it, and say so in `PROGRESS.md` §6.
+digest a new signature, add the signature, a synthetic test of it, and record it in the feature PR description (PROGRESS §6 on main/release branches or main-only docs PRs).

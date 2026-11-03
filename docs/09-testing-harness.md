@@ -1,7 +1,7 @@
 # Gameplay test harness
 
 How to run the scripted gameplay checks and read what they prove. The roadmap
-behind this is [08-testing-roadmap.md](08-testing-roadmap.md); what is still
+behind this is [08-testing-roadmap.md](https://github.com/vyanhursky/DefJamFFNY-recomp/issues); what is still
 missing is listed at the end.
 
 Everything here needs a local build made from your own dump. Hosted CI has no
@@ -343,3 +343,7 @@ them as baseline `masks`, refusing a mask that would hide a fighter.
 - The live-input session recipes in `tests/scenarios/` are uncalibrated examples;
   the `two-matches` route uses the ordinary pad script instead.
 - Long sessions and many repeated matches are not measured.
+
+## Coverage follow-ups
+
+Future coverage is tracked in GitHub, not a parallel roadmap: [Story fixture identity](https://github.com/vyanhursky/DefJamFFNY-recomp/issues/172), [gameplay/lifecycle assertions](https://github.com/vyanhursky/DefJamFFNY-recomp/issues/173), [audiovisual fidelity](https://github.com/vyanhursky/DefJamFFNY-recomp/issues/174), [report provenance](https://github.com/vyanhursky/DefJamFFNY-recomp/issues/175) and [cross-title compatibility adapters](https://github.com/vyanhursky/DefJamFFNY-recomp/issues/176). These describe missing test evidence, not newly established gameplay bugs.

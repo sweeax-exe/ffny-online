@@ -26,7 +26,9 @@ problem at one venue, fighter or Story point), or hands you a bundle. Human guid
    stacks, priorities and CPU time while the frame was late, so an event once a minute is caught in the
    act; a repeatable one with `scripts/sample-threads.py` during the repeat or `RECOMP_TRACE_PROFILE=1`; a picture fault with
    `RECOMP_PB_BATCH_DUMP=shot`; an audio fault with `RECOMP_APU_LEVEL=1`.
-7. Record the bundle's path and what it showed in `PROGRESS.md` §6.
+7. Record the local bundle path and finding in the PR description on a feature branch;
+   on main/release branches or main-only docs PRs, update the relevant PROGRESS section.
 
-Costs to keep in mind: each kept picture is a synchronous GPU read-back (`capture_ms` in every row; the
-analysis subtracts it). For pacing measurements set `[debug] record_fps = 0`.
+Capture cost depends on backend and asynchronous readback/fallback. See the recorder
+guide's current cost section and `capture_ms`; for pacing measurements use
+`[debug] record_fps = 0` rather than assume every kept picture forces a synchronous readback.

@@ -1,5 +1,8 @@
 # Input latency tracing
 
+> Dated evidence: this records the named build/release, not current pending work.
+> Current support and qualifications are in the release notes and GitHub Issues.
+
 The optional input trace follows controller state through the host, USB emulation and fighter input reader on one monotonic clock. Tracing is disabled by default and does not itself change input handling. The local investigation candidate also contains the separately enabled transition-retention correction described below. The implementation was built and exercised on Windows; macOS/Linux validation remains outstanding.
 
 ## Capture
