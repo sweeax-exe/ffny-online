@@ -159,9 +159,16 @@ static int s_audio_state;               /* 0 before, 1 during, 2 after the audio
  * froze with 62.9 of 64 MiB in use, the title's contiguous allocation retrying for ever (build 20). The
  * sound side was seen to hold up to 5.6 MiB. */
 #define ARENA_FIRST  (3u * 1024u * 1024u)
+#define ARENA_FIRST_SMALL (1u * 1024u * 1024u)    /* with ARENA_BIG blocks in pieces of their own: the small ones (0.6-0.8 MB) */
 #define ARENA_GROW   (1u * 1024u * 1024u)
 #define ARENA_MAX    (12u * 1024u * 1024u)
-#define ARENA_CHUNKS 16
+#define ARENA_CHUNKS 64     /* pieces, among them one per large block (ARENA_BIG); a slot given back is reused */
+/* A block this large asked for outside a fight (a venue's or the front end's sample bank, 0.9-1.3 MB) gets a
+ * piece of its own, given back to contiguous memory when the block is (arena_trim). In the shared pieces such
+ * banks left holes the next venue's slightly larger bank did not fit, so the arena grew at most venue changes
+ * and never shrank: 6.6 MB at the first fight, 11.1 MB after 16 matches, and the 17th match's GPU data found
+ * no contiguous memory (F9 926777, build 46: "[CONTIG] refused", 64380 of 65408 KB in use). */
+#define ARENA_BIG    (256u * 1024u)
 #define ARENA_BLOCKS 65536     /* 8192 ran out in a 4.5-minute fight: the blocks a load keeps are many and small */
 #define ARENA_ALIGN  128u               /* what sub_00029500 gives at most */
 #define SND_ALLOCATOR 0x003ADB58u
@@ -178,6 +185,15 @@ static int in_arena(uint32_t a)
     int k;
     for (k = 0; k < s_nchunk; k++)
         if (a >= s_chunk_lo[k] && a < s_chunk_hi[k]) return 1;
+    return 0;
+}
+
+/* a piece starts here: free blocks are not merged across it, so a piece can become one free block again */
+static int piece_start(uint32_t a)
+{
+    int k;
+    for (k = 0; k < s_nchunk; k++)
+        if (a == s_chunk_lo[k] && s_chunk_hi[k] != s_chunk_lo[k]) return 1;
     return 0;
 }
 /* Tests (RECOMP_ROLLBACK_ARENA_WATCH=1): while steps run again the arena's pages are read-only, so a
@@ -207,7 +223,8 @@ static void arena_watch_set(int on)
     /* the flag is up whenever a page may be read-only (another thread can fault at any moment) */
     if (on) InterlockedExchange(&s_arena_watch_on, 1);
     for (k = 0; k < s_nchunk; k++)
-        VirtualProtect(XBOX_PTR(s_chunk_lo[k]), s_chunk_hi[k] - s_chunk_lo[k], on ? PAGE_READONLY : PAGE_READWRITE, &old);
+        if (s_chunk_hi[k] != s_chunk_lo[k])
+            VirtualProtect(XBOX_PTR(s_chunk_lo[k]), s_chunk_hi[k] - s_chunk_lo[k], on ? PAGE_READONLY : PAGE_READWRITE, &old);
     if (on) return;
     InterlockedExchange(&s_arena_watch_on, 0);
     {   /* what the re-run wrote, each call chain once */
@@ -1642,13 +1659,35 @@ extern uint32_t xbox_ContiguousAlloc(uint32_t size, uint32_t alignment);
 extern void sub_0001DC10(void);
 extern void sub_0001DC20(void);
 
-/* A new piece of contiguous memory for the arena, as a free block in address order (the lock held). */
-extern uint32_t xbox_ContiguousAlloc(uint32_t size, uint32_t alignment);
-static int arena_grow(uint32_t need)
+extern int xbox_ContiguousFreeNow(uint32_t va);
+/* RECOMP_ROLLBACK_ARENA_TRIM=off (tests): large blocks share the pieces and no piece is given back, as before */
+static int arena_trim_on(void)
 {
-    uint32_t size = need > ARENA_GROW ? (need + 0xFFFFu) & ~0xFFFFu : ARENA_GROW, base;
-    int i;
-    if (s_nchunk >= ARENA_CHUNKS || s_nblk >= ARENA_BLOCKS || s_arena_total + size > ARENA_MAX) {
+    static int on = -1;
+    if (on < 0) on = !(getenv("RECOMP_ROLLBACK_ARENA_TRIM") && !strcmp(getenv("RECOMP_ROLLBACK_ARENA_TRIM"), "off"));
+    return on;
+}
+
+/* A new piece of contiguous memory for the arena, as a free block in address order (the lock held); own: exactly
+ * the size asked, for one large block (ARENA_BIG). */
+extern uint32_t xbox_ContiguousAlloc(uint32_t size, uint32_t alignment);
+static uint32_t arena_grow(uint32_t need, int own)
+{
+    uint32_t size = own ? (need + 0xFFFu) & ~0xFFFu : need > ARENA_GROW ? (need + 0xFFFFu) & ~0xFFFFu : ARENA_GROW, base;
+    int i, k;
+    if (s_nchunk && !own) {     /* why it grows: the request against the free blocks it has (fragmentation, B2) */
+        uint32_t nfree = 0, free_kb = 0, largest = 0, nused = 0, zombies = 0;
+        for (i = 0; i < s_nblk; i++) {
+            if (!s_blk[i].used) { nfree++; free_kb += s_blk[i].size; if (s_blk[i].size > largest) largest = s_blk[i].size; }
+            else { nused++; if (s_blk[i].freed) zombies++; }
+        }
+        fprintf(stderr, "[ROLLBACK] the arena has no free block of %u KB (%s): %u KB free in %u blocks, the largest %u KB; "
+                "%u blocks used (%u freed and held or kept)\n", (need + 1023u) / 1024u, s_tracking ? "in a fight" : "outside a fight",
+                free_kb / 1024u, nfree, largest / 1024u, nused, zombies);
+    }
+    for (k = 1; k < s_nchunk && s_chunk_hi[k] != s_chunk_lo[k]; k++) {}     /* a slot given back, or a new one */
+    if (!s_nchunk) k = 0;
+    if (k >= ARENA_CHUNKS || s_nblk >= ARENA_BLOCKS || s_arena_total + size > ARENA_MAX) {
         fprintf(stderr, "[ROLLBACK] the audio arena cannot grow: %d pieces, %d blocks, %u KB of %u\n", s_nchunk,
                 s_nblk, s_arena_total / 1024, ARENA_MAX / 1024);
         return 0;
@@ -1658,8 +1697,9 @@ static int arena_grow(uint32_t need)
         fprintf(stderr, "[ROLLBACK] the audio arena cannot grow: no %u KB of contiguous memory\n", size / 1024);
         return 0;
     }
-    s_chunk_lo[s_nchunk] = base;
-    s_chunk_hi[s_nchunk++] = base + size;
+    s_chunk_lo[k] = base;
+    s_chunk_hi[k] = base + size;
+    if (k == s_nchunk) s_nchunk++;
     s_arena_total += size;
     for (i = 0; i < s_nblk && s_blk[i].addr < base; i++) {}
     memmove(&s_blk[i + 1], &s_blk[i], (size_t)(s_nblk - i) * sizeof(Block));
@@ -1668,9 +1708,38 @@ static int arena_grow(uint32_t need)
     s_blk[i].user = 0;
     s_blk[i].used = 0;
     s_nblk++;
-    fprintf(stderr, "[ROLLBACK] the audio arena grows by %u KB at %08X (%u KB in all)\n", size / 1024, base,
-            s_arena_total / 1024);
-    return 1;
+    if (own) {
+        static unsigned told;
+        if (told++ < 40)
+            fprintf(stderr, "[ROLLBACK] the audio arena takes %u KB at %08X for one block (%u KB in all)\n", size / 1024,
+                    base, s_arena_total / 1024);
+    } else {
+        fprintf(stderr, "[ROLLBACK] the audio arena grows by %u KB at %08X (%u KB in all)\n", size / 1024, base,
+                s_arena_total / 1024);
+    }
+    return base;
+}
+
+/* Gives a piece back to contiguous memory once it is one free block, outside a fight only (in a fight a free is
+ * held until no save can reach it, and the contiguous allocator's frees are held too). The first piece stays.
+ * The lock held; i: the free block. Its slot stays, empty (lo == hi), so in_arena never shifts under a reader. */
+static unsigned s_trims;
+static void arena_trim(int i)
+{
+    int k;
+    uint32_t base = s_blk[i].addr, size = s_blk[i].size;
+    if (s_tracking || s_blk[i].used || !arena_trim_on()) return;
+    for (k = 1; k < s_nchunk; k++)
+        if (s_chunk_lo[k] == base && s_chunk_hi[k] == base + size) break;
+    if (k >= s_nchunk) return;
+    memmove(&s_blk[i], &s_blk[i + 1], (size_t)(s_nblk - i - 1) * sizeof(Block));
+    s_nblk--;
+    s_chunk_hi[k] = s_chunk_lo[k];
+    s_arena_total -= size;
+    xbox_ContiguousFreeNow(base);
+    if (s_trims++ < 40)
+        fprintf(stderr, "[ROLLBACK] the audio arena gives %u KB at %08X back (%u KB in all)\n", size / 1024, base,
+                s_arena_total / 1024);
 }
 
 /* Every arena allocation and free with its thread and call chain, so a crash on an arena block can say
@@ -1794,12 +1863,15 @@ void rollback_arena_history(void)
 static uint32_t arena_alloc(uint32_t want)
 {
     int i, grown = 0;
-    uint32_t a = 0, size = (want + ARENA_ALIGN + 16u + 15u) & ~15u;
+    uint32_t only = 0, a = 0, size = (want + ARENA_ALIGN + 16u + 15u) & ~15u;
     if (s_arena_state != 1 || want > ARENA_MAX / 2) return 0;
     EnterCriticalSection(&s_arena_cs);
+    if (want >= ARENA_BIG && !s_tracking && arena_trim_on() && (only = arena_grow(size, 1)) != 0) grown = 1;
 again:
     for (i = 0; i < s_nblk; i++) {
         if (s_blk[i].used || s_blk[i].size < size) continue;
+        if (only && s_blk[i].addr != only) continue;    /* the piece of its own, all of it */
+        if (only) size = s_blk[i].size;
         if (s_blk[i].size > size && s_nblk < ARENA_BLOCKS) {    /* split: the rest stays free */
             memmove(&s_blk[i + 2], &s_blk[i + 1], (size_t)(s_nblk - i - 1) * sizeof(Block));
             s_blk[i + 1].addr = s_blk[i].addr + size;
@@ -1825,7 +1897,7 @@ again:
         }
         break;
     }
-    if (!a && !grown && arena_grow(size)) { grown = 1; goto again; }
+    if (!a && !grown && arena_grow(size, 0)) { grown = 1; goto again; }
     LeaveCriticalSection(&s_arena_cs);
     return a;
 }
@@ -1847,17 +1919,19 @@ static int arena_free_now(uint32_t a)
          * (sub_0025F509) and the host's voice processor (two-copy rollback tests, 2026-10-24; the
          * players' sound crashes in builds 19 and 20 had the same shape). */
         if (i + 1 < s_nblk && !s_blk[i + 1].used &&
-            s_blk[i].addr + s_blk[i].size == s_blk[i + 1].addr) {   /* merge with the next */
+            s_blk[i].addr + s_blk[i].size == s_blk[i + 1].addr && !piece_start(s_blk[i + 1].addr)) {   /* merge with the next */
             s_blk[i].size += s_blk[i + 1].size;
             memmove(&s_blk[i + 1], &s_blk[i + 2], (size_t)(s_nblk - i - 2) * sizeof(Block));
             s_nblk--;
         }
         if (i > 0 && !s_blk[i - 1].used &&
-            s_blk[i - 1].addr + s_blk[i - 1].size == s_blk[i].addr) {   /* and with the previous */
+            s_blk[i - 1].addr + s_blk[i - 1].size == s_blk[i].addr && !piece_start(s_blk[i].addr)) {   /* and with the previous */
             s_blk[i - 1].size += s_blk[i].size;
             memmove(&s_blk[i], &s_blk[i + 1], (size_t)(s_nblk - i - 1) * sizeof(Block));
             s_nblk--;
+            i--;
         }
+        arena_trim(i);      /* a piece now wholly free goes back to contiguous memory (outside a fight) */
         break;
     }
     LeaveCriticalSection(&s_arena_cs);
@@ -2049,11 +2123,11 @@ static void arena_start(void)
     if (!rollback_enabled()) { s_arena_state = -1; return; }
     InitializeCriticalSection(&s_arena_cs);
     s_nblk = 0;
-    if (!arena_grow(ARENA_FIRST)) { s_arena_state = -1; fprintf(stderr, "[ROLLBACK] no room for the sound engine's arena\n"); return; }
+    if (!arena_grow(arena_trim_on() ? ARENA_FIRST_SMALL : ARENA_FIRST, 0)) { s_arena_state = -1; fprintf(stderr, "[ROLLBACK] no room for the sound engine's arena\n"); return; }
     s_arena = s_chunk_lo[0];
     s_arena_state = 1;
     fprintf(stderr, "[ROLLBACK] the audio code allocates from its own arena at %08X (%u KB to start, up to %u KB; "
-            "pool slot 63 %08X)\n", s_arena, ARENA_FIRST / 1024, ARENA_MAX / 1024, MEM32(0x003C9158u + 63u * 4u));
+            "pool slot 63 %08X)\n", s_arena, (arena_trim_on() ? ARENA_FIRST_SMALL : ARENA_FIRST) / 1024, ARENA_MAX / 1024, MEM32(0x003C9158u + 63u * 4u));
 }
 
 static int audio_code(uint32_t ret)
