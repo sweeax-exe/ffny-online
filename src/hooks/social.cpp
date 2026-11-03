@@ -471,10 +471,24 @@ void load_crew()
     int status = http("GET", "/api/social/crews/mine", nullptr, out, 0, &g_work_live);
     if (status == 404) {
         bool off = error_of(out, status) == "not available";    // crews=off in the switch file
+        std::vector<CrewInvite> invites;
+        J iv;
+        std::string io;
+        if (!off && http("GET", "/api/social/crews/invites", nullptr, io, 0, &g_work_live) == 200 && parse_json(io, iv))
+            for (auto &x : iv["invites"].a) {
+                CrewInvite c;
+                c.crew = x["crew"].i(); c.tag = x["tag"].str(); c.text = x["name"].str();
+                if (c.crew) invites.push_back(c);
+            }
         std::lock_guard<std::mutex> lk(g_mu);
         g_v.crews = !off;
         g_v.crew = 0;
+        g_v.crew_role.clear();
+        g_v.crew_roster.clear();
         g_v.crew_chat.clear();
+        for (auto &c : invites)     // the list the service keeps, plus the ones the long-poll brought
+            if (std::none_of(g_v.crew_invites.begin(), g_v.crew_invites.end(), [&](const CrewInvite &x) { return x.crew == c.crew; }))
+                g_v.crew_invites.push_back(c);
         changed();
         return;
     }
@@ -489,8 +503,36 @@ void load_crew()
         g_v.crew_motto = j["motto"].str();
         g_v.crew_members = (int)j["member_count"].i();
         g_v.crew_online = (int)j["online"].i();
-        g_v.crew_invites.erase(std::remove_if(g_v.crew_invites.begin(), g_v.crew_invites.end(),
-                                              [](const CrewInvite &c) { return c.crew == g_v.crew; }), g_v.crew_invites.end());
+        g_v.crew_role = j["my_role"].str();
+        g_v.crew_region = j["region"].str();
+        g_v.crew_founded = rfc3339(j["founded"].str());
+        g_v.crew_level = (int)j["level"].i();
+        g_v.crew_xp = (int)j["xp"].i();
+        g_v.crew_level_xp = (int)j["level_xp"].i();
+        g_v.crew_next_xp = (int)j["next_xp"].i();
+        g_v.crew_league = j["league_name"].str();
+        const J &season = j["season"];
+        g_v.crew_wins = (int)season["wins"].i();
+        g_v.crew_losses = (int)season["losses"].i();
+        g_v.crew_streak = (int)season["streak"].i();
+        g_v.crew_rating = (int)season["rating"].i();
+        g_v.crew_turf = (int)j["turf"].a.size();
+        g_v.crew_locked = j["locked"].b;
+        g_v.crew_roster.clear();
+        for (auto &m : j["members"].a) {
+            CrewMember x;
+            x.id = m["id"].i(); x.name = m["name"].str(); x.role = m["role"].str(); x.state = m["state"].str();
+            if (x.state.empty()) x.state = "offline";
+            g_v.crew_roster.push_back(x);
+        }
+        auto refs = [](const J &list) {
+            std::vector<Ref> out;
+            for (auto &x : list.a) { Ref r; r.id = x["id"].i(); r.name = x["name"].str(); out.push_back(r); }
+            return out;
+        };
+        g_v.crew_invited = refs(j["invites"]);
+        g_v.crew_applied = refs(j["applications"]);
+        g_v.crew_invites.clear();      // in a crew: no invites to answer
         changed();
     }
     if (http("GET", "/api/social/crews/chat?limit=60", nullptr, out, 0, &g_work_live) != 200 || !parse_json(out, j)) return;
@@ -538,6 +580,7 @@ void apply_event(const std::vector<std::string> &f)
             fprintf(stderr, "[SOCIAL] global %s from %s: %s\n", channel.c_str(), name.c_str(), text.c_str());
     } else if (kind == "crew") {
         add_line(g_v.crew_chat, make_line(), 200);
+        if (flags.find('s') != std::string::npos) g_dirty_crew = true;     // a joiner, a new role: the page again
     } else if (kind == "dm") {
         long long other = channel.compare(0, 3, "dm:") == 0 ? atoll(channel.c_str() + 3) : from;
         bool incoming = from != me;
@@ -1129,6 +1172,49 @@ void set_show_avatar(bool on)
     });
 }
 
+static void crew_post(const std::string &path, const std::string &body, const char *done, const std::string &say)
+{
+    queue([path, body, done, say]() {
+        std::string out;
+        if (post(path, body, &out) / 100 == 2) {
+            fprintf(stderr, "[SOCIAL] crew: %s\n", done);
+            if (!say.empty()) { std::lock_guard<std::mutex> lk(g_mu); note(say); }
+        }
+        load_crew();
+    });
+}
+
+void crew_create(const std::string &name, const std::string &tag, const std::string &region)
+{
+    std::string r = region.empty() ? "eu" : region;
+    crew_post("/api/social/crews", "{\"name\":" + json_text(name) + ",\"tag\":" + json_text(tag) + ",\"emblem\":0,\"motto\":\"\","
+              "\"region\":" + json_text(r) + "}", "created", "Your crew " + name + " [" + tag + "] is up.");
+}
+
+void crew_invite(long long id, const std::string &name)
+{
+    long long crew;
+    { std::lock_guard<std::mutex> lk(g_mu); crew = g_v.crew; }
+    if (!crew) return;
+    std::string body = id ? "{\"account\":" + std::to_string(id) + "}" : "{\"name\":" + json_text(name) + "}";
+    crew_post("/api/social/crews/" + std::to_string(crew) + "/invite", body, "invite sent",
+              "Invite sent to " + (name.empty() ? std::string("the player") : name) + ".");
+}
+
+void crew_leave() { crew_post("/api/social/crews/leave", "{}", "left", "You left the crew."); }
+
+static void crew_member_op(const char *op, long long id, const std::string &extra, const std::string &say)
+{
+    long long crew;
+    { std::lock_guard<std::mutex> lk(g_mu); crew = g_v.crew; }
+    if (!crew) return;
+    crew_post("/api/social/crews/" + std::to_string(crew) + "/" + op, "{\"account\":" + std::to_string(id) + extra + "}", op, say);
+}
+
+void crew_kick(long long id) { crew_member_op("kick", id, "", "Removed from the crew."); }
+void crew_role(long long id, const std::string &role) { crew_member_op("role", id, ",\"role\":" + json_text(role), "Role changed."); }
+void crew_accept(long long id) { crew_member_op("accept", id, "", "Welcome to the crew."); }
+
 void avatar_want(long long id)
 {
     if (id <= 0) return;
@@ -1242,6 +1328,12 @@ void block(long long, const std::string &, bool) {}
 void report(long long, const std::string &, long long, const std::string &, const std::vector<std::string> &) {}
 void set_dms(const std::string &) {}
 void set_show_avatar(bool) {}
+void crew_create(const std::string &, const std::string &, const std::string &) {}
+void crew_invite(long long, const std::string &) {}
+void crew_leave() {}
+void crew_kick(long long) {}
+void crew_role(long long, const std::string &) {}
+void crew_accept(long long) {}
 void avatar_want(long long) {}
 std::vector<AvatarPixels> avatar_take() { return {}; }
 void avatar_forget(long long) {}

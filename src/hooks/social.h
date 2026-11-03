@@ -67,6 +67,8 @@ struct Thread {
 
 struct CrewInvite { long long crew = 0; std::string tag, text, from; };
 
+struct CrewMember { long long id = 0; std::string name, role, state; };   /* role: boss lieutenant member */
+
 struct Toast { int kind = 0; std::string title, text; long long dm_from = 0; unsigned long long at = 0; };
 enum { TOAST_DM = 1, TOAST_REQUEST, TOAST_FRIEND, TOAST_CREW, TOAST_NOTICE };
 
@@ -86,6 +88,14 @@ struct View {
     long long crew = 0;
     std::string crew_tag, crew_name, crew_motto;
     int crew_members = 0, crew_online = 0;
+    /* the crew's page (stage 2c): my role, the roster, the numbers of the design's cards */
+    std::string crew_role, crew_region, crew_league;
+    long long crew_founded = 0;
+    int crew_level = 0, crew_xp = 0, crew_level_xp = 0, crew_next_xp = 0, crew_wins = 0, crew_losses = 0, crew_streak = 0,
+        crew_rating = 0, crew_turf = 0;
+    bool crew_locked = false;
+    std::vector<CrewMember> crew_roster;        /* boss, lieutenants, members; online first */
+    std::vector<Ref> crew_invited, crew_applied;    /* officers only */
     std::vector<Line> crew_chat;    /* oldest first */
     std::vector<CrewInvite> crew_invites;
     std::string note;               /* the last refusal from the service ("slow mode: ...") */
@@ -121,6 +131,14 @@ void report(long long id, const std::string &channel, long long msg, const std::
             const std::vector<std::string> &context);
 void set_dms(const std::string &policy);    /* "friends", "everyone", "off" */
 void set_show_avatar(bool on);
+/* Crews: create, invite (by id, else exact name), leave, and the officers' kick and role. */
+void crew_create(const std::string &name, const std::string &tag, const std::string &region);
+void crew_invite(long long id, const std::string &name);
+void crew_leave();
+void crew_kick(long long id);
+void crew_role(long long id, const std::string &role);     /* boss lieutenant member */
+void crew_accept(long long id);                             /* an application */
+
 /* Avatars (stage 2c): the account service's 64x64 copy of a player's Discord picture
  * (GET /api/avatar/N.png; the game never contacts Discord). avatar_want queues a download on a thread
  * of its own (once per id until forgotten); avatar_take hands over the finished ones, decoded to
