@@ -79,3 +79,9 @@ No push, PR merge, tag or release publication is part of this work. Keep branch/
 D-new: Move skip-intro into App preferences, rename Game preferences to Cheats, and use controller-neutral navigation copy. Mods uses native tabs instead of action buttons. Recommend and apply “Upscaled Original Textures” for the local generated option across setup, maintenance, installed groups and load order; “downloadable texture packs” refers to catalogue content. Legacy setup option labels use the same name. No pack IDs, manifests, generation algorithm or setting values change.
 
 Validation for this revision: macOS app compile/link, native Swift Setup compile, shared game/overlay compilation, and existing launcher-model tests (36 passed). Inspected Home, both Mods tabs, return navigation, App preferences and Cheats in isolated UI runs. The earlier broader acceptance limitations still apply; this revision does not qualify Windows or Deck. Logs: `ux-feedback-build.log`, `ux-feedback-swift.log`, `ux-feedback-overlay.log`, `ux-feedback-tests.log`, `ux-feedback-ui.log` in the task's local work folder.
+
+## Texture budget guidance and typography exploration — 2026-11-03
+
+D-new: Explain Texture memory budget both below its Mods control and in focus/hover help. It limits replacement texture residency, including retained upload data; a small budget can evict and reload textures. Recommend trying a larger budget for texture pop-in, slow texture loading or repeated stutters with packs enabled, balanced against graphics/system memory use and requiring a game restart. Defaults and cache behavior are unchanged.
+
+Home navigation typography is awaiting the owner's choice among three image mockups. No navigation font change is implemented by this copy revision. Validation: native app compile/link and an isolated visual check of the expanded Advanced mods explanation; broad settings/gameplay tests remain deferred as requested.

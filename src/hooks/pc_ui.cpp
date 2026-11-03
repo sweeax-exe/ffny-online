@@ -1066,7 +1066,13 @@ static void page_textures()
         ImGui::EndPopup();
     }
     if (!g_pack_status.empty()) ImGui::TextWrapped("%s",g_pack_status.c_str());
-    if (ImGui::CollapsingHeader("Advanced mods")) settings_group("textures", {"enabled", "cache_mb", "packs"});
+    bool advanced_mods = ImGui::CollapsingHeader("Advanced mods");
+    ui_target("mods.advanced");
+    if (advanced_mods) {
+        settings_group("textures", {"enabled", "cache_mb"});
+        ImGui::TextWrapped("%s", find("textures", "cache_mb")->help);
+        settings_group("textures", {"packs"});
+    }
     } else {
     ImGui::SeparatorText("Browse mods");
     if (!launcher) ImGui::TextWrapped("Return to the launcher to download, update or remove mods. Current packs stay in use during this game.");
