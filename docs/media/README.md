@@ -127,12 +127,9 @@ and `ac3583188a87e46dc7f183969f2b51dd0300cf3d6bd05ca3ecf40513c61f4d2f`.
 | `widescreen-comparison.mp4` | 1280×400, silent 60-fps CFR | 2.65 MB | `2916fc4efd72b6d109d829157c01479c9ef50d84c5bbb94437d3fd87060f7d2c` |
 | `developer-menu.png` | 1830×1336 | 0.24 MB | `86a3a91ae252ff9692003e3b88ee8bbc68af176ab74bb7fa0db4e4fd5add9077` |
 
-## Earlier captures
-
-The [early Windows still](fight-screenshot.png) and
-[six-second 12-fps GIF](fight-gameplay.gif) remain as historical examples,
-approved October 4, 2026 (D58). They are no longer the README hero/preview.
-The historical setup image retains its existing fingerprint.
+The superseded October4 gameplay pair is available in repository history. The
+retained setup/overlay images above stay explicitly labeled historical; they
+illustrate their original builds rather than the current wizard/UI.
 
 Game artwork belongs to its respective rights holders. The project's MIT
 license does not cover it. Approval applies only to these exact exports and

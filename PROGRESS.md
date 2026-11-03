@@ -431,6 +431,8 @@ Upstream PR submissions still need the owner's separate approval.
 
 - 2026-11-02 21:05 — Cleanup stage3: consolidated30research/widescreen reports and the stale launcher handoff into retained technical references. Preserved static/measured distinctions, negative controls, failed aggregates, platform limits and all68baseline run citations. Corrected current cinema/backend architecture against pinned source; retained qualified v0.13 memory/input evidence and8scene JSON controls. No runtime or toolkit changes.
 
+- 2026-11-02 21:06 — Cleanup stage4: removed superseded October4gameplay GIF/still (6.83MiB), exact allowlist entries, redundant smoke .gitkeep and RC2-only hosted acceptance helper. Kept frozen Setup/HD tools, all release notes,8scene JSON controls, generated adapters and reusable native/experimental tooling with explicit scope. Validation pending on final diff.
+
 ## 7. Hand-off
 
 ### Public documentation cleanup — PR171

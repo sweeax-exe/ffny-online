@@ -1,5 +1,9 @@
 # 08 — FMV widening pipeline: blurred sides (shipping) and AI outpainting (to-do)
 
+> Optional offline experiment, not a shipped AI movie-replacement feature.
+> The retained helper/tests reproduce a bounded trial; general authoring belongs in Modding Tools.
+> Runtime blur/black side fill is separate and does not need this tool or a model.
+
 Status (owner, 2026-10-11): **blurred sides are the default and ship with widescreen** (WS-8 `side_fill = blur`).
 AI outpainting "looks surprisingly good" but **the seam between the original picture and the generated sides is
 visible and needs more blending**; it stays a to-do (WS-12). This page is the complete record of the trial so the

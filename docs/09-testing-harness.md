@@ -372,3 +372,18 @@ This was a source/flow/fixture inventory, not a native capture pass. A route rea
 | `story/choosGF2`, `choosGF4`, `choosPart` | Catalogue associates SWFs with `screens/story/storyChs.big` | Likely parent-managed submovies; no standalone flow transition or calibrated route was established. The inspected fixture library had only `mac-profiles` at Crib, not a `storyChs` checkpoint. |
 
 Use observed `[FUNCCALL]` anchors with `--stage`/`--shots` and the complete-save guard or a disposable scenario fixture. `Control.GetScreenInfo` is a metadata/action channel, not a reliable arbitrary-movie loader. `RECOMP_FE_INJECT` dispatches after an observed call; an APT string catalogue does not prove any listed command loads a target SWF. `scenarios.py scene` / `RECOMP_SCENE` selects developer CINEMA content in `assets/cinema/*.viv`, not front-end APT/SWF screens. Evidence: route definitions, `<data>/fixtures/library.json`, `<data>/extracted/screens/feflow.xml`, and local `logs/menu-ui-v1-rc/funccall-catalog.json` (Markdown despite its suffix). Current missing-fixture/test evidence belongs to [issues172–176](https://github.com/vyanhursky/DefJamFFNY-recomp/issues?q=is%3Aissue+172+OR+173+OR+174+OR+175+OR+176).
+
+## Experimental recipe examples
+
+`tests/scenarios/fight-return.experimental.json` and
+`story-session.experimental.json` illustrate `--session-plan` with host-second
+live input. They explicitly declare `validated_live:false`; calibrate them against
+fresh ordered screen events before using them for acceptance. `session_driver.py`
+is dynamically loaded by the suite and remains required. The visual-manifest
+example shows the local approved-baseline schema; its placeholder hash and
+`approved:false` are not a real baseline. Keep generated reports/media local.
+
+Manual native launcher coverage is available in `scripts/test-mod-launcher.py`;
+its synthetic catalogue/key/data stay disposable. The former hosted RC2 helper
+was retired because it hardcoded version1.0.0-rc2. Its dated acceptance result
+remains in the integration evidence; it is not a current live-catalogue smoke.
