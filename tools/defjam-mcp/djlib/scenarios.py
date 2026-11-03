@@ -78,6 +78,33 @@ MODES = {   # name: (match type for the quick match, summaries per match = fight
     "1v1": (0, 2), "team": (1, 4), "ffa": (3, 4), "koth": (64, 2),
 }
 
+PAD_SCRIPT_MAX = 4095   # src/hooks: a longer RECOMP_PAD_SCRIPT is ignored ("[PAD] script: ... ignored")
+
+
+def _koth_script(matches, per, p2):
+    """A hill copy's script: presses for up to `matches` + 4 fights (a king fights more than the count),
+    as many as fit the game's script limit."""
+    best = None
+    for n in range(matches, matches + 5):
+        script = harness().build_pad_script(["getscreeninfo(intmain/mainmenu=lt@0.5"], online_tail(n, per, p2))
+        if len(script) > PAD_SCRIPT_MAX:
+            break
+        best = script
+    if best is None:
+        raise ValueError("the pad script for %d hill fights is over %d characters" % (matches, PAD_SCRIPT_MAX))
+    return best
+
+
+def _rb_env(rollback):
+    """RECOMP_ROLLBACK for a player copy: on, off, or (mandatory) "server": the audio arena without an opt-in."""
+    return {"on": "on", "mandatory": "server"}.get(rollback, "off")
+
+
+def _rb_relay_extra(rollback, modes=None):
+    """The relay's rollback-everywhere switch for tests (-rollback-modes), with --rollback mandatory."""
+    return ["-rollback-modes", modes or "all"] if rollback == "mandatory" else []
+
+
 WATCH = ["[CRASH]", "[WATCHDOG]", "[NETPLAY] desync in", "[NETPLAY] gave up", " starts in ",
          "[FUNCCALL] Game.UpdateMatchRewardsPoints()", "[FUNCCALL] Game.GetMatchSummary(", MAIN_MENU,
          '"event":"match_start"', '"event":"result"', '"event":"match_over"', "[AUTOMATCH] Game.StartGame()",
@@ -544,8 +571,8 @@ CREW_UI = {
 
 
 def crew_battle(timeout=None, relay_port=27900, lock_timeout=None, log=None, keep_roots=False, extra_env=None,
-                out_dir=None, fast_ko=600):
-    """Crew battles end to end (social stage 3): a local account service (-social -social-test-battles) and a
+                out_dir=None, fast_ko=600, rollback="off", rollback_modes=None):
+    """rollback: as online() ("mandatory": the relay's rollback-everywhere switch). Crew battles end to end (social stage 3): a local account service (-social -social-test-battles) and a
     relay that asks it (-accounts-internal), four copies in two crews of two: crews made and joined
     (RECOMP_TEST_SOCIAL), the challenge and its acceptance, every copy into the battle's room (CREWJOIN), the
     fights (knockout at a step, the lower room slot wins) until a crew has nobody left; then the relay's
@@ -562,7 +589,8 @@ def crew_battle(timeout=None, relay_port=27900, lock_timeout=None, log=None, kee
         acc_port = relay_port + 100
         names = ["Copy %d" % i for i in range(n)]
         tokens = s.accounts(acc_port, names, extra=["-social", "-social-test-battles"])
-        s.relay(relay_port, extra=["-accounts-internal", "http://127.0.0.1:%d" % (acc_port + 1)])
+        s.relay(relay_port, rollback=(rollback != "off"),
+                extra=["-accounts-internal", "http://127.0.0.1:%d" % (acc_port + 1)] + _rb_relay_extra(rollback, rollback_modes))
         watch = WATCH + ["[SOCIAL-TEST] step", "[SOCIAL] ready", "[NETPLAY] crew battle", "[SOCIAL] crew battle",
                          "[SOCIAL] crew battle 1: proposed"]
         for i in range(n):
@@ -576,7 +604,7 @@ def crew_battle(timeout=None, relay_port=27900, lock_timeout=None, log=None, kee
                 "RECOMP_NETPLAY_SERVER_EU": "127.0.0.1:%d" % relay_port,
                 "RECOMP_NETPLAY_FIGHTER": str([55, 22, 9, 31][i]),
                 "RECOMP_NETPLAY_NAME": names[i],
-                "RECOMP_ROLLBACK": "off",
+                "RECOMP_ROLLBACK": _rb_env(rollback),
                 "RECOMP_SCRIPT_ANCHOR": TITLE_ANCHOR,
                 "RECOMP_PAD_SCRIPT": h.build_pad_script(["getscreeninfo(intmain/mainmenu=lt@0.5"], online_tail(2, 2, p2)),
                 "RECOMP_ACCOUNT_SERVER": "127.0.0.1:%d" % acc_port,
@@ -823,8 +851,10 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
            bot=None, timeout=None, relay_port=27900, base_core=2, keep_going=False, extra_env=None,
            lock_timeout=None, log=None, require_hits=False, stall=300, keep_roots=False, quick=None,
            created=False, cp_records=None, rematch=False, venues=None, cp_pick=None, cp_names=None,
-           more_shots=False, spectators=0, copy_env=None, fixtures=None, ranked=None):
-    """copy_env: {copy index: {NAME: VALUE}}, extra variables for one copy only; fixtures: per copy a save
+           more_shots=False, spectators=0, copy_env=None, fixtures=None, ranked=None, rollback_modes=None):
+    """rollback: "off", "on" (every copy opts in, the relay allows it) or "mandatory" (build 52, rollback
+    everywhere: the relay -rollback -rollback-modes <rollback_modes or all>, the copies RECOMP_ROLLBACK=server,
+    so only the relay's mode mask makes a match roll back). copy_env: {copy index: {NAME: VALUE}}, extra variables for one copy only; fixtures: per copy a save
     fixture folder ('' none), so the copies' save areas can differ as two players' PCs do.
     created: the relay plays created fighters (relay -created); cp_records: per copy the profile dumps or
     user ID saves (RECOMP_CP_RECORD; several separated by ';', newest first; '' none), for fighter 99;
@@ -865,7 +895,7 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
             tokens = s.accounts(acc_port, ["Copy %d" % i for i in range(players)])
             relay_extra += ["-accounts-internal", "http://127.0.0.1:%d" % (acc_port + 1)]
             result["params"]["ranked"] = ranked
-        s.relay(relay_port, rollback=(rollback == "on"), extra=relay_extra)
+        s.relay(relay_port, rollback=(rollback != "off"), extra=relay_extra + _rb_relay_extra(rollback, rollback_modes))
         before = {}
         koth = mode == "koth"
         draft = bool(ranked) and "draft" in ranked
@@ -882,9 +912,14 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
                 "RECOMP_NETPLAY_QUICK": quick or "%d,%d" % (qtype, players),
                 "RECOMP_NETPLAY_FIGHTER": str(fighters[i % len(fighters)]),
                 "RECOMP_NETPLAY_NAME": "Copy %d" % i,
-                "RECOMP_ROLLBACK": "on" if rollback == "on" else "off",
+                "RECOMP_ROLLBACK": _rb_env(rollback),
                 "RECOMP_SCRIPT_ANCHOR": TITLE_ANCHOR,
-                "RECOMP_PAD_SCRIPT": harness().build_pad_script(["getscreeninfo(intmain/mainmenu=lt@0.5"],
+                # on the hill a copy that keeps winning (or keeps being called) fights more than `matches`
+                # fights before the others reach that count: presses for a few more, or it sat on its last
+                # results and the other fighter gave up waiting (a test artefact, 2026-11-03); the game
+                # ignores a script over 4095 characters, so no more than that
+                "RECOMP_PAD_SCRIPT": _koth_script(matches, per, p2) if koth else
+                                     harness().build_pad_script(["getscreeninfo(intmain/mainmenu=lt@0.5"],
                                                                 online_tail(matches, per, p2)),
             })
             if ranked:

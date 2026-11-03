@@ -66,7 +66,8 @@ def cmd_scenario(a):
                              cp_pick=a.cp_pick.split(",") if a.cp_pick else None,
                              cp_names=a.cp_names.split(",") if a.cp_names else None, more_shots=a.more_shots,
                              rematch=a.rematch, venues=a.venues, spectators=a.spectators, copy_env=copy_env(a.copy_env),
-                             fixtures=a.fixtures.split(",") if a.fixtures else None, ranked=a.ranked, **common)
+                             fixtures=a.fixtures.split(",") if a.fixtures else None, ranked=a.ranked,
+                             rollback_modes=a.rollback_modes, **common)
     elif a.kind == "offline":
         r = scenarios.offline(type=a.type, venue=a.venue, f0=a.f0, f1=a.f1, cpu=not a.human, bot=a.bot,
                               fast_ko=a.fast_ko, turbo=a.turbo, timeout=a.timeout or 420,
@@ -78,7 +79,7 @@ def cmd_scenario(a):
                                 rollback=a.rollback, **common)
     elif a.kind == "crewbattle":
         r = scenarios.crew_battle(timeout=a.timeout, relay_port=a.relay_port, extra_env=env, out_dir=a.out,
-                                  fast_ko=a.fast_ko, **common)
+                                  fast_ko=a.fast_ko, rollback=a.rollback, rollback_modes=a.rollback_modes, **common)
     elif a.kind == "social":
         r = scenarios.social(timeout=a.timeout or 300, relay_port=a.relay_port, off=a.off, extra_env=env,
                              out_dir=a.out, **common)
@@ -179,7 +180,10 @@ def main(argv=None):
     sc.add_argument("--mode", default="1v1", choices=sorted(scenarios.MODES))
     sc.add_argument("--players", type=int, default=2)
     sc.add_argument("--fighters")
-    sc.add_argument("--rollback", default="off", choices=["on", "off"])
+    sc.add_argument("--rollback", default="off", choices=["on", "off", "mandatory"],
+                    help="mandatory: the relay's rollback-everywhere switch (-rollback-modes), the copies without an opt-in")
+    sc.add_argument("--rollback-modes", help="with --rollback mandatory: the relay's mode list (default all), "
+                                             "e.g. '1v1 team ffa koth crew ranked'")
     sc.add_argument("--fast-ko", type=int, default=600, help="knockout at this fight step (0: off)")
     sc.add_argument("--ko-winner", help="slot or alt (default alt; koth 0)")
     sc.add_argument("--bot", nargs="?", const=True, default=None,
