@@ -11,7 +11,15 @@ and reached the Story map with its unlocks (macOS, October 2026). Options files,
 and Windows have not been tried. Saves are the game's own data, so they are not published in this
 repository.
 
-## Steps
+## In the launcher
+
+Open **Saves** in the launcher (under PLAY), press **Import Xbox saves** and pick the folder with the
+profile folders (the console's `E:\UDATA\45410049`) or a `.zip` of it. The launcher lists what it found,
+asks before replacing a profile you already have, backs your saves up first (to `save-backups/` in the
+data folder) and then copies and signs the profiles the same way as the script below. The launcher runs
+before the game, so the game is closed; if it is running, the launcher says so and changes nothing.
+
+## Steps (with the script)
 
 1. **Get the save folder.** You need the profile folders from the console's `E:\UDATA\45410049\`,
    or a `.zip` that contains them (a Pro Action Replay zip is fine). Each profile is a folder with a

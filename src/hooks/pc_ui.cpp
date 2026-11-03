@@ -2599,7 +2599,8 @@ static int initial_page()
     static const char *const names[] = { "display", "textures", "controllers", "pad", "keyboard", "voice", "general" };
     const char *want = getenv("RECOMP_LAUNCHER_PAGE");
     if (want && !strcmp(want, "basics")) return PAGE_COUNT;
-    for (int i = 0; want && i < PAGE_COUNT; i++)
+    // names has fewer entries than PAGE_COUNT: an unknown name ("saves", the Saves dialog) read past it
+    for (int i = 0; want && i < (int)(sizeof(names) / sizeof(names[0])); i++)
         if (!strcmp(want, names[i])) return i;
     return -1;
 }
@@ -2977,6 +2978,8 @@ static void settings_dialog(ImVec2 o, float w, float h, float s, int &tab, int &
     ImGui::EndPopup();
 }
 
+#include "pc_launcher_saves.inc"      // the Saves dialog, drawn with the glass above
+
 #if defined(_WIN32)
 // The borderless window's own minimise and close buttons, top right.
 static bool window_controls(ImVec2 o, float w, float s)
@@ -3090,9 +3093,11 @@ static UiResult draw_launcher(float x, float y, float width, float height)
     if (ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere();
     if (glass_button("##play", "PLAY", at(48, 498), ImVec2(270 * s, 64 * s), s, GLASS_RED, display_font(), 36 * s, !busy))
         result.play = true;
-    if (glass_button("##settings", "Settings", at(48, 578), ImVec2(130 * s, 36 * s), s, GLASS_PLAIN, nullptr, 15 * s))
+    if (glass_button("##settings", "Settings", at(48, 578), ImVec2(84 * s, 36 * s), s, GLASS_PLAIN, nullptr, 15 * s))
         ImGui::OpenPopup("Settings");
-    if (glass_button("##discord", "Discord", at(188, 578), ImVec2(130 * s, 36 * s), s, GLASS_PLAIN, nullptr, 15 * s))
+    if (glass_button("##saves", "Saves", at(141, 578), ImVec2(84 * s, 36 * s), s, GLASS_PLAIN, nullptr, 15 * s))
+        ImGui::OpenPopup("Saves");
+    if (glass_button("##discord", "Discord", at(234, 578), ImVec2(84 * s, 36 * s), s, GLASS_PLAIN, nullptr, 15 * s))
         open_url(k_discord_invite);
     dl->AddText(ImGui::GetFont(), 12.5f * s, at(48, 648), col(k_white, 0.5f), "Fan project, not affiliated with EA.");
 
@@ -3105,10 +3110,13 @@ static UiResult draw_launcher(float x, float y, float width, float height)
 
     {
         static bool opened;
-        if (!opened && start_page >= 0) ImGui::OpenPopup("Settings");
+        const char *want = getenv("RECOMP_LAUNCHER_PAGE");
+        if (!opened && want && !strcmp(want, "saves")) ImGui::OpenPopup("Saves");
+        else if (!opened && start_page >= 0) ImGui::OpenPopup("Settings");
         opened = true;
     }
     settings_dialog(origin, width, height, s, tab, page);
+    saves_dialog(origin, width, height, s);
     update_popup(result);
     crash_popup();
     outside_launcher_notice();

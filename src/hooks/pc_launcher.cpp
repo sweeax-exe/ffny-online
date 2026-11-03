@@ -36,6 +36,7 @@ extern "C" {
 #include "pc_ui_actions.h"
 #include "pc_ui_internal.h"
 #include "updater.h"
+#include "pc_launcher_saves.h"
 
 namespace {
 
@@ -423,8 +424,10 @@ extern "C" int pc_launcher_run(void)
     UnregisterClassW(L"DefJamRecompLauncher", GetModuleHandleW(nullptr));
     fprintf(stderr, "[UI] launcher closed: %s\n", g_result ? "play" : "quit");
     fflush(stderr);
-    if (open_setup)
+    if (open_setup) {
+        saves_backup_before_update();       // the setup may update or repair the install
         pcui::setup_launch();
+    }
     return g_result;
 }
 
