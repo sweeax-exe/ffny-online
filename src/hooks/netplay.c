@@ -4619,7 +4619,7 @@ void netplay_autostart(void)
     HANDLE t;
     if (InterlockedExchange(&once, 1)) return;
     if (!mode || !server || (strcmp(mode, "host") && strcmp(mode, "join") && strcmp(mode, "quick") && strcmp(mode, "ranked") && strcmp(mode, "lobby") &&
-                               strcmp(mode, "spectate"))) return;
+                               strcmp(mode, "spectate") && strcmp(mode, "crew"))) return;
     t = CreateThread(NULL, 0, autostart_thread, NULL, 0, NULL);
     if (t) CloseHandle(t);
 }

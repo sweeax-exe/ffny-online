@@ -109,9 +109,9 @@ void crew_panel(ImDrawList *dl, const Frame &f, const NetRoom &r, const NetCrew 
     int left = 0;
     for (int i = 0; i < side.count; i++) left += side.lineup[i].state == NETCREW_WAITING || side.lineup[i].state == NETCREW_FIGHTING;
     std::string name = upper(side.name);
-    float nw = text_width(f, g_title, 15, name.c_str());
-    nw = std::min(nw, w - 110);
-    text(dl, f, g_title, 15, x + 12, y + 10, accent, name.c_str(), LEFT, 1.0f, w - 110);
+    float ns = fit_size(f, g_title, 15, name.c_str(), w - 110);     // a long name gets smaller, never two lines
+    float nw = text_width(f, g_title, ns, name.c_str());
+    text(dl, f, g_title, ns, x + 12, y + 10 + (15 - ns) * 0.5f, accent, name.c_str(), LEFT, 1.0f);
     float tw = text_width(f, g_title, 9, side.tag) + 9;
     bool gold = social::gold_tag(C.v, side.tag);
     dl->AddRect(f.p(x + 18 + nw, y + 12), f.p(x + 18 + nw + tw, y + 26), gold ? GOLD : accent, 3 * f.s(), 0, 1.2f * f.s());
@@ -241,7 +241,7 @@ void draw_crew_battle(ImDrawList *dl, const Frame &f, const Pad &pad, const NetR
         l1 = "NEXT FIGHT";
         l2 = "The next two are called in a moment.";
     }
-    text(dl, f, g_title, 13, 320, 252, c1, l1.c_str(), CENTER, 1.0f, 134);
+    text(dl, f, g_title, fit_size(f, g_title, 13, l1.c_str(), 134), 320, 252, c1, l1.c_str(), CENTER, 1.0f);
     text(dl, f, g_body, 9.5f, 320, 290, CREAM, l2.c_str(), CENTER, 0, 134);
     if (mine < 0 && r.you != NETPLAY_SLOT_SPECTATOR)
         text(dl, f, g_hand, 12, 320, 344, GREY, "You watch from the bench.", CENTER, 0.6f);

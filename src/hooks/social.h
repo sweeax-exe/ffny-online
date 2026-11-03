@@ -170,6 +170,9 @@ void crew_challenge(long long crew, const std::string &tag, int format);
 void battle_answer(const char *answer);
 void ladder();
 bool gold_tag(const View &v, const std::string &tag);
+/* Tests: RECOMP_TEST_SOCIAL's ui:ACTION step hands ACTION (a RECOMP_TEST_SOCIAL_UI action) to the chat
+ * window, which takes it once; "" none. */
+std::string test_ui_take();
 
 /* Avatars (stage 2c): the account service's 64x64 copy of a player's Discord picture
  * (GET /api/avatar/N.png; the game never contacts Discord). avatar_want queues a download on a thread

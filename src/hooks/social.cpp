@@ -198,6 +198,7 @@ std::atomic<bool> g_dirty_friends{false}, g_dirty_convos{false}, g_dirty_crew{fa
 std::atomic<bool> g_dirty_battle{false}, g_want_ladder{false};
 std::atomic<unsigned long long> g_typing_until{0};
 std::string g_mode_name;            // guarded by g_mu: the room's mode as the overlay names it
+std::string g_test_ui;              // guarded by g_mu: a ui:ACTION test step for the chat window
 const bool g_test_log = getenv("RECOMP_TEST_SOCIAL") != nullptr;
 void *volatile g_poll_live = nullptr;
 void *volatile g_work_live = nullptr;
@@ -921,6 +922,17 @@ void test_tick()
             if (now - asked > 5000) { asked = now; crew_challenge(0, tag, format); }
             done = false;
         }
+    } else if (what == "ui") {                  // ui:ACTION: a chat window test action (social_ui.inc), done once the
+        static bool given;                      // window took it (the online screens are up; 60 s at most)
+        std::lock_guard<std::mutex> lk(g_mu);
+        if (!given) { g_test_ui = arg; given = true; done = false; }
+        else if (!g_test_ui.empty() && !timed_out) done = false;
+        else { given = false; g_test_ui.clear(); }
+    } else if (what == "battlewait") {          // until a challenge to this crew is there (4 min)
+        bool answer;
+        { std::lock_guard<std::mutex> lk(g_mu); answer = g_v.battle.can_answer; }
+        timed_out = now - g_test.since > 240000;
+        if (!answer && !timed_out) { done = false; g_dirty_battle = true; }
     } else if (what == "battleaccept") {        // the first challenge that comes (4 min)
         bool answer, accepted;
         {
@@ -1448,6 +1460,14 @@ void battle_answer(const char *answer)
 
 void ladder() { g_want_ladder = true; g_cv.notify_all(); }
 
+std::string test_ui_take()
+{
+    std::lock_guard<std::mutex> lk(g_mu);
+    std::string s;
+    s.swap(g_test_ui);
+    return s;
+}
+
 bool gold_tag(const View &v, const std::string &tag)
 {
     return !tag.empty() && std::find(v.gold_tags.begin(), v.gold_tags.end(), tag) != v.gold_tags.end();
@@ -1560,6 +1580,7 @@ void crew_challenge(long long, const std::string &, int) {}
 void battle_answer(const char *) {}
 void ladder() {}
 bool gold_tag(const View &, const std::string &) { return false; }
+std::string test_ui_take() { return ""; }
 bool snapshot(View &, unsigned) { return false; }
 std::vector<Toast> take_toasts() { return {}; }
 std::string region_of_server(int) { return ""; }

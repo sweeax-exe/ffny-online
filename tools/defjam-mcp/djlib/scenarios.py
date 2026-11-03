@@ -487,16 +487,18 @@ def room_chat(timeout=None, relay_port=27900, lock_timeout=None, log=None, keep_
 # social features show the battle accepted) and its fights run as on the hill, the knockout winner the lower
 # room slot. Each copy logs its state when the battle is over and loads the ladder.
 CREW_NET = [
-    "wait:3;crew:Bronx Kings:BXK;wait:4;crewinvite:Copy 1;wait:8;challenge:RHR:2;log;battledone;wait:4;log",
+    "wait:3;crew:Bronx Kings:BXK;wait:4;crewinvite:Copy 1;wait:8;challenge:RHR:2;log;battledone;wait:3;"
+    "ui:crewpage;wait:4;ui:crewladder;wait:4;ui:crewpicker=RHR;wait:4;ui:close;log",
     "crewjoin;log;battledone;wait:4;log",
-    "wait:3;crew:Red Hook Riders:RHR;wait:4;crewinvite:Copy 3;battleaccept;log;battledone;wait:4;log",
+    "wait:3;crew:Red Hook Riders:RHR;wait:4;crewinvite:Copy 3;battlewait;ui:crewpage;wait:6;battleaccept;log;battledone;wait:3;"
+    "ui:crewpage;wait:4;ui:crewladder;wait:4;ui:close;log",
     "crewjoin;log;battledone;wait:4;log",
 ]
-# the chat window's crew pages on copy 0 (challenger) and copy 2 (challenged): the crew page with the open
-# battle, CHALLENGE A CREW's format picker, the ladder; closed again before the battle's room opens
+# copy 0's chat window on the crew page while it challenges; copy 2's crew page opens when the challenge is
+# there (ui:crewpage, its first capture: ACCEPT CHALLENGE / DECLINE); after the battle the ui: steps show the
+# crew page, the ladder and CHALLENGE A CREW's format picker
 CREW_UI = {
-    0: "8:chat=crew;22:crewpicker=RHR;26:crewladder;30:crewpage;34:close",
-    2: "8:chat=crew;30:crewpage;34:crewladder;38:close",
+    0: "8:chat=crew;40:close",
 }
 
 
@@ -520,7 +522,8 @@ def crew_battle(timeout=None, relay_port=27900, lock_timeout=None, log=None, kee
         names = ["Copy %d" % i for i in range(n)]
         tokens = s.accounts(acc_port, names, extra=["-social", "-social-test-battles"])
         s.relay(relay_port, extra=["-accounts-internal", "http://127.0.0.1:%d" % (acc_port + 1)])
-        watch = WATCH + ["[SOCIAL-TEST] step", "[SOCIAL] ready", "[NETPLAY] crew battle", "[SOCIAL] crew battle"]
+        watch = WATCH + ["[SOCIAL-TEST] step", "[SOCIAL] ready", "[NETPLAY] crew battle", "[SOCIAL] crew battle",
+                         "[SOCIAL] crew battle 1: proposed"]
         for i in range(n):
             shots[i] = os.path.join(s.dir, "shots%d" % i)
             os.makedirs(shots[i], exist_ok=True)
@@ -630,8 +633,8 @@ def crew_battle(timeout=None, relay_port=27900, lock_timeout=None, log=None, kee
                 label = base.split("-", 1)[1] if "-" in base else "plain"
                 if label in want:
                     last[label] = p
-                    if label == "crewbattle":
-                        last.setdefault("crewbattle-first", p)
+                    if label in ("crewbattle", "social-crew"):
+                        last.setdefault(label + "-first", p)
             for label, p in sorted(last.items()):
                 name = "copy%d-%s.png" % (i, label)
                 if Image:

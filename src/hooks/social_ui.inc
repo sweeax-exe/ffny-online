@@ -982,8 +982,9 @@ void draw_crew_picker(ImDrawList *dl, const Frame &f, const ChatKeys &k)
     glass(dl, f, x, y, w, h, 10, IM_COL32(24, 12, 14, 255), 0.9f);
     text(dl, f, g_title, 10, x + w / 2, y + 14, DIM, "CHALLENGE A CREW", CENTER, 0);
     std::string who = C.picker_name.empty() ? C.picker_tag : C.picker_name;
-    text(dl, f, g_title, 20, x + w / 2 - (C.picker_tag.empty() ? 0 : 18), y + 32, CREAM, upper(who.c_str()).c_str(), CENTER, 0, w - 60);
-    if (!C.picker_tag.empty())
+    bool chip = !C.picker_tag.empty() && !C.picker_name.empty();     // by tag alone: the tag is the title
+    text(dl, f, g_title, 20, x + w / 2 - (chip ? 18 : 0), y + 32, CREAM, upper(who.c_str()).c_str(), CENTER, 0, w - 60);
+    if (chip)
         tag_chip(dl, f, x + w / 2 + text_width(f, g_title, 20, upper(who.c_str()).c_str()) / 2 - 10, y + 37, 10, C.picker_tag);
     text(dl, f, g_body, 9, x + w / 2, y + 62, DIM, "Winner stays on. Their Boss or a Lieutenant answers.", CENTER, 0, w - 30);
     static const char *const items[] = { "3 V 3", "5 V 5", "BACK" };
@@ -2248,9 +2249,14 @@ void chat_test_step()
             }
         }
     }
-    if (next >= steps.size() || !C.ready_at) return;
-    if ((GetTickCount64() - C.ready_at) / 1000.0f < steps[next].first) return;
-    std::string step = steps[next++].second;
+    // RECOMP_TEST_SOCIAL's ui:ACTION step (social.cpp): one of these at a point of that script (after a crew
+    // battle, whenever it ends), else the timed ones
+    std::string step = social::test_ui_take();
+    if (step.empty()) {
+        if (next >= steps.size() || !C.ready_at) return;
+        if ((GetTickCount64() - C.ready_at) / 1000.0f < steps[next].first) return;
+        step = steps[next++].second;
+    }
     std::string what = step.substr(0, step.find('=')), arg = step.find('=') == std::string::npos ? "" : step.substr(step.find('=') + 1);
     if (what == "chat") {
         C.open = C.opened_once = true;
