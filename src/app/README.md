@@ -8,7 +8,7 @@ code: it sets up the game from the player's own dump, shows the launcher's Home 
 Play starts the game that setup built on this computer, with `--no-launcher`.
 
 - **Setup inside the app** (`app_setup.cpp`). With nothing installed it opens on the first run:
-  the dump (an image or an extracted folder), the install and data folders, and HD textures.
+  the dump (an image or an extracted folder), the install and data folders, and optional Upscaled Original Textures generated locally.
   Setup makes no shortcuts: the app the player downloaded is the only copy, and they move it
   wherever they like. Home → Help → Repair game opens recovery:
   Repair and Clean Rebuild. Each runs `setup/engine.py` from the app's setup payload with that payload's Python, as

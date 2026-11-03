@@ -130,10 +130,10 @@ def test_builtin_group_preserves_saved_order_and_missing_legacy_alias(inventory_
     pack(tmp_path,'custom')
     chosen=f'faithful-hd;{opacity};{channels};custom'
     out=run(inventory_tool,tmp_path,chosen)
-    assert 'builtin=Recomp HD textures|2\n' in out
+    assert 'builtin=Upscaled Original Textures|2\n' in out
     assert f'chosen={chosen}\n' in out
     assert 'faithful-hd|1|Not installed' in out
-    assert out.index('priority=custom')<out.index('priority=Recomp HD textures')<out.index('priority=faithful-hd')
+    assert out.index('priority=custom')<out.index('priority=Upscaled Original Textures')<out.index('priority=faithful-hd')
 
 
 def test_priority_move_moves_whole_contiguous_builtin_pair(inventory_tool,tmp_path):
@@ -149,9 +149,9 @@ def test_interleaved_components_keep_distinct_priorities(inventory_tool,tmp_path
     pack(tmp_path,'custom')
     chosen=f'{opacity};custom;{channels}'
     out=run(inventory_tool,tmp_path,chosen)
-    assert 'builtin=Recomp HD textures|2\n' in out
-    assert 'priority=Recomp HD textures (material channels)|1' in out
-    assert 'priority=Recomp HD textures (transparency)|1' in out
+    assert 'builtin=Upscaled Original Textures|2\n' in out
+    assert 'priority=Upscaled Original Textures (material channels)|1' in out
+    assert 'priority=Upscaled Original Textures (transparency)|1' in out
     assert f'chosen={chosen}\n' in out
 
 

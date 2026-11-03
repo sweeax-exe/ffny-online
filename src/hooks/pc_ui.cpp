@@ -764,7 +764,7 @@ static void experience_widget()
         ImGui::BeginChild("preset choices", ImVec2(0, -ImGui::GetFrameHeightWithSpacing() * 2));
         ImGui::RadioButton("Modern - recommended", &proposed, 1);
         ui_target("experience.modern");
-        ImGui::TextWrapped("Widescreen Auto, 2x (960p), high-quality scaling, mipmaps and 4x texture filtering. Keeps the original scene effects. HD textures are optional.");
+        ImGui::TextWrapped("Widescreen Auto, 2x (960p), high-quality scaling, mipmaps and 4x texture filtering. Keeps the original scene effects. Upscaled Original Textures and downloadable texture packs are optional.");
         ImGui::Spacing();
         ImGui::RadioButton("Original", &proposed, 0);
         ui_target("experience.original");
@@ -886,11 +886,16 @@ static void page_textures()
     bool locked = find("textures", "packs")->source == RECOMP_SETTING_FROM_ENV;
     bool language_locked = find("language", "pack")->source == RECOMP_SETTING_FROM_ENV;
     static bool browse = false, browse_requested = false;
-    if (ImGui::Button("Installed")) browse = false;
-    ui_target("mods.installed");
-    ImGui::SameLine();
-    if (ImGui::Button("Browse mods")) browse = true;
-    ui_target("mods.browse");
+    if (ImGui::BeginTabBar("mod views", ImGuiTabBarFlags_NoCloseWithMiddleMouseButton |
+                                      ImGuiTabBarFlags_DrawSelectedOverline)) {
+        bool installed_active = ImGui::BeginTabItem("Installed mods");
+        ui_target("mods.installed");
+        if (installed_active) { browse = false; ImGui::EndTabItem(); }
+        bool browse_active = ImGui::BeginTabItem("Browse mods");
+        ui_target("mods.browse");
+        if (browse_active) { browse = true; ImGui::EndTabItem(); }
+        ImGui::EndTabBar();
+    }
     if (browse && launcher && !browse_requested && !pcui::mod_busy()) {
         browse_requested = pcui::mod_start("refresh");
     }
@@ -898,9 +903,9 @@ static void page_textures()
     if (!browse) {
     ImGui::SeparatorText("Installed mods");
 #if defined(DEFJAM_APP)
-    if (ImGui::Button("Set up HD textures")) pc_app_setup_hd();
+    if (ImGui::Button("Generate upscaled textures")) pc_app_setup_hd();
     ui_target("mods.setup-hd");
-    ImGui::TextWrapped("Optional Recomp HD is generated locally. Downloadable texture and language mods are in Browse mods.");
+    ImGui::TextWrapped("Upscaled Original Textures are higher-resolution versions of the original textures, generated from your game copy. Find downloadable texture packs and language mods in the Browse mods tab.");
 #endif
     if (pcui::mod_recovery_needed()) {
         ImGui::TextWrapped("An interrupted installation needs recovery before Play. If recovery fails, files are preserved in the data folder under mod-manager; see the status below.");
@@ -930,6 +935,7 @@ static void page_textures()
     auto display_name = [&](const pcui::ModGroup &group) {
         const auto &first=g_packs[group.members.front()];
         auto found=managed.find(first.name);
+        if (group.builtin) return group.name;
         if (found!=managed.end()) return found->second.name;
         return first.language && !first.title.empty() ? first.title : group.name;
     };
@@ -965,7 +971,7 @@ static void page_textures()
             if(p.language) ImGui::TextDisabled(found==managed.end() ? "Language mod (local)" : "Language mod (project catalogue)");
             else ImGui::TextDisabled(group.builtin ? "Built-in / generated locally" : found==managed.end() ? "Local mod" : "Project catalogue");
             if(group.builtin && ImGui::TreeNode("Components and details")) {
-                ImGui::TextWrapped("Generated from your own dump. Transparency textures preserve menu edges; material-channel textures preserve surface data. Both belong to Recomp HD.");
+                ImGui::TextWrapped("Generated from your own dump. Transparency textures preserve menu edges; material-channel textures preserve surface data. Both belong to Upscaled Original Textures.");
                 for(auto i:group.members) ImGui::TextWrapped("%s: %s",g_packs[i].name.c_str(),g_packs[i].selected?"Enabled":"Disabled");
                 ImGui::TreePop();
             }
@@ -1005,11 +1011,11 @@ static void page_textures()
             ImGui::BeginDisabled((p.language ? language_locked : locked) || pcui::mod_busy());
             if(ImGui::Checkbox(p.name.c_str(),&selected)) { p.selected=selected; save_packs(); }
             ImGui::EndDisabled();
-            if(p.name=="faithful-hd") ImGui::TextWrapped("Legacy default name. The generated Recomp HD components appear together in the table above when installed.");
+            if(p.name=="faithful-hd") ImGui::TextWrapped("Legacy default name. The generated Upscaled Original Textures components appear together in the table above when installed.");
             ImGui::PopID();
         }
     }
-    if(g_packs.empty()) ImGui::TextWrapped("No local packs found. Setup can generate Recomp HD textures from your own dump.");
+    if(g_packs.empty()) ImGui::TextWrapped("No local packs found. Setup can generate Upscaled Original Textures from your own dump.");
     const float modal_scale = ImGui::GetStyle().FontScaleMain;
     const auto viewport = ImGui::GetMainViewport();
     ImGui::SetNextWindowSize(ImVec2(std::min(760 * modal_scale, viewport->WorkSize.x - 24), std::min(460 * modal_scale, viewport->WorkSize.y - 24)), ImGuiCond_Appearing);
@@ -1695,7 +1701,7 @@ static void page_cheats(UiMode mode)
 static int g_page = 0;
 static bool g_advanced = false, g_select_page = false, g_return_focus = false;
 static std::string g_home_return = "Settings";
-static const char *page_names[] = {"Graphics", "Controls", "Mods", "Language & access", "Game preferences", "App preferences", "Help"};
+static const char *page_names[] = {"Graphics", "Controls", "Mods", "Language & access", "Cheats", "App preferences", "Help"};
 static const int k_pages = (int)(sizeof page_names / sizeof page_names[0]);
 static void controls_page()
 {
@@ -1875,8 +1881,6 @@ UiResult ui_draw(UiMode mode, float x, float y, float width, float height)
             page_general(mode);
             break;
         case 4:
-            settings_group("debug", {"skip_intro"});
-            ImGui::TextWrapped("Skip startup movies; Story cutscenes still play.");
             page_cheats(mode);
             ImGui::SeparatorText("Permanent profile changes");
             if (recomp_settings_get("debug", "unlock_all", 0)) {
@@ -1894,8 +1898,11 @@ UiResult ui_draw(UiMode mode, float x, float y, float width, float height)
             }
             break;
         case 5:
+            settings_group("debug", {"skip_intro"});
+            ImGui::TextWrapped("Skip startup movies and the legal screen; Story cutscenes still play.");
+            ImGui::Spacing();
             settings_group("launcher", {"skip", "check_updates"});
-            ImGui::TextWrapped("To reopen a skipped launcher, hold Shift or both shoulder buttons (LB + RB) at startup, or use --launcher. Steam shortcuts open the launcher unless you choose to skip it.");
+            ImGui::TextWrapped("To reopen a skipped launcher, hold Shift or both shoulder buttons at startup, or use --launcher. Steam shortcuts open the launcher unless you choose to skip it.");
             break;
         case 6:
             page_maintenance(mode);
@@ -1966,7 +1973,7 @@ UiResult ui_draw(UiMode mode, float x, float y, float width, float height)
 #endif
         }
         if (!compact_footer)
-            ImGui::TextDisabled("Confirm: Enter / A   Back: Esc / B   Categories: LB / RB");
+            ImGui::TextDisabled("Navigate with mouse, keyboard, or controller.");
         else
         {
             const char *status = g_save_failed ? "Not saved" : mode == UI_LAUNCHER || restart.empty() ? "Saved" : "Next launch";
@@ -1980,7 +1987,7 @@ UiResult ui_draw(UiMode mode, float x, float y, float width, float height)
             result.leave = true;
         ImGui::SameLine();
         if (!compact_footer)
-            ImGui::TextDisabled("Confirm: Enter / A   Back: Esc / B   Categories: LB / RB");
+            ImGui::TextDisabled("Navigate with mouse, keyboard, or controller.");
         else
         {
             const char *status = g_save_failed ? "Not saved" : mode == UI_LAUNCHER || restart.empty() ? "Saved" : "Next launch";

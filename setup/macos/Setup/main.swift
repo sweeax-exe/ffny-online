@@ -143,7 +143,7 @@ final class Wizard: NSObject, NSApplicationDelegate, NSWindowDelegate {
     let dumpField = NSTextField(string: "")
     let installField = NSTextField(string: "")
     let dataField = NSTextField(string: "")
-    let hdUpscale = NSButton(checkboxWithTitle: "Apply HD texture upscale during install (increases install time)", target: nil, action: nil)
+    let hdUpscale = NSButton(checkboxWithTitle: "Generate Upscaled Original Textures (takes extra time)", target: nil, action: nil)
     let desktopShortcut = NSButton(checkboxWithTitle: "Create a desktop shortcut", target: nil, action: nil)
     let status = NSTextField(wrappingLabelWithString: "Choose your game copy and locations, then start the selected action.")
     let launchInfo = NSTextField(wrappingLabelWithString: "After setup, open Def Jam Recompiled from your install folder, Applications or the Desktop.")

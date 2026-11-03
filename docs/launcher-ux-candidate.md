@@ -6,8 +6,8 @@ This is a feature candidate for owner testing, not a qualified release. No rende
 ## Product decisions (D-new)
 
 - Desktop and controller/TV use have equal priority. Automatic layout respects OS scaling; the window fits the monitor work area. Keep Play, update discovery and setup actions reachable.
-- Modern is recommended on fresh setup; HD remains optional. Built-in Recomp HD is generated locally. Downloadable catalogue content is offered in Mods after setup; setup never silently starts optional downloads.
-- Home offers Settings, Controls, Mods and Help; two quick graphics controls and experience/device summaries. Settings categories are Graphics, Controls, Mods, Language & access, Game preferences, App preferences and Help. Developer diagnostics are collapsed inside Help.
+- Modern is recommended on fresh setup; HD remains optional. **Upscaled Original Textures** are generated locally from the player's game copy; downloadable texture packs are labelled separately. Internal pack IDs and saved selections are unchanged. Downloadable catalogue content is offered in Mods after setup; setup never silently starts optional downloads.
+- Home offers Settings, Controls, Mods and Help; two quick graphics controls and experience/device summaries. Settings categories are Graphics, Controls, Mods, Language & access, Cheats, App preferences and Help. Developer diagnostics are collapsed inside Help.
 - Explicit **Check for updates** bypasses the 12-hour automatic cache. Checking, current, failed and cached states remain visible. The online target takes precedence over an intermediate local build. Update confirmation explains both app replacement and local game rebuild; after the app restarts with `--updated`, the approved game build continues. Cancel keeps the previous game usable.
 - Newly created Steam shortcuts respect the saved launcher preference, rather than forcing `--play`. Existing shortcuts are not silently rewritten. Hold Shift or both shoulder buttons (LB + RB) while starting the app, or use `--launcher`, to override direct play. Physical controller startup detection still needs platform testing.
 - Full game graphics/performance retesting is intentionally deferred. The preset values below are candidate choices for owner approval, not claims of pixel-exact Xbox emulation or guaranteed performance.
@@ -36,17 +36,19 @@ First setup applies the chosen experience only after a successful fresh install 
 
 Three steps: USA Xbox game copy → experience → optional HD and location/space review. Default locations are collapsed behind Change locations. Space is calculated asynchronously per destination volume, using the engine's 12 GiB build allowance plus copy size + 1 GiB and optional 15 GiB HD allowance. The engine remains authoritative for full game hashes/toolchain/path validation. The setup body scrolls independently of its primary actions. Technical progress is available under details. Failures retain choices and offer Try again; cancellation no longer promises checkpoint resume.
 
-Maintenance's HD checkbox now applies to Update as well as Repair/Rebuild. Mods has a direct Set up HD textures route into that explicit operation. Setup still prepares optional downloads through Mods after completing the base install; it does not implement a background multi-mod onboarding queue.
+Maintenance's HD checkbox now applies to Update as well as Repair/Rebuild. Mods has a direct Generate upscaled textures route into that explicit operation. Setup still prepares optional downloads through Mods after completing the base install; it does not implement a background multi-mod onboarding queue.
 
 Uninstall checks source inspection, verifies copied settings contents and save-file contents before deleting data, and reports only actual successful backups. Linux now removes the app-owned Steam entry too. Nothing here is permission to bypass the app's Steam restart consent or data-deletion confirmation.
 
 ## Mods and settings
 
-Installed and Browse are separate views. Browse requests the catalogue on entry and has retry/status feedback. Install and enable activates only a successfully installed, valid pack; texture mods go at highest priority, language mods replace the active language selection. Ordinary Update preserves activation/order. Conflict/load-order tools remain available; no automatic dependency graph installer is added.
+Installed mods and Browse mods are native tab views with a selected colour and gold overline. Browse requests the catalogue on entry and has retry/status feedback. Install and enable activates only a successfully installed, valid pack; texture mods go at highest priority, language mods replace the active language selection. Ordinary Update preserves activation/order. Conflict/load-order tools remain available; no automatic dependency graph installer is added.
 
 Installed-but-off differs from missing or globally disabled. The global texture switch and manual paths/cache limits are in Advanced mods. The app uses its own payload helper/Python, with the installed game's version for catalogue compatibility. Existing override locks remain respected.
 
-Graphics and control workarounds sit in collapsed sections. Category resets describe their scope. Unlock-all is under Game preferences with a permanent-profile warning/confirmation rather than an ordinary Diagnostics toggle. Save failures are surfaced with Retry save; text fields persist on completed editing. Unchecked controls have a visible border. Focus help remains accessible at narrow widths.
+Skip startup movies is in App preferences; Story cutscenes still play. The footer says “Navigate with mouse, keyboard, or controller,” without assuming Xbox button labels.
+
+Graphics and control workarounds sit in collapsed sections. Category resets describe their scope. Unlock-all is under Cheats with a permanent-profile warning/confirmation rather than an ordinary Diagnostics toggle. Save failures are surfaced with Retry save; text fields persist on completed editing. Unchecked controls have a visible border. Focus help remains accessible at narrow widths.
 
 ## Scaling and legacy front ends
 
@@ -71,3 +73,9 @@ Other agents should test the feature head, not inherit PR177's old-head qualific
 9. Full game linking and overlay navigation as well as the standalone app. The six changed shared units compile in the macOS game configuration, but that is not a full game link or platform run.
 
 No push, PR merge, tag or release publication is part of this work. Keep branch/source changes separate from local binary/screenshots and game data.
+
+## Owner feedback revision — 2026-11-03
+
+D-new: Move skip-intro into App preferences, rename Game preferences to Cheats, and use controller-neutral navigation copy. Mods uses native tabs instead of action buttons. Recommend and apply “Upscaled Original Textures” for the local generated option across setup, maintenance, installed groups and load order; “downloadable texture packs” refers to catalogue content. Legacy setup option labels use the same name. No pack IDs, manifests, generation algorithm or setting values change.
+
+Validation for this revision: macOS app compile/link, native Swift Setup compile, shared game/overlay compilation, and existing launcher-model tests (36 passed). Inspected Home, both Mods tabs, return navigation, App preferences and Cheats in isolated UI runs. The earlier broader acceptance limitations still apply; this revision does not qualify Windows or Deck. Logs: `ux-feedback-build.log`, `ux-feedback-swift.log`, `ux-feedback-overlay.log`, `ux-feedback-tests.log`, `ux-feedback-ui.log` in the task's local work folder.

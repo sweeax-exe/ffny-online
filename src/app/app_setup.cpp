@@ -73,7 +73,7 @@ const Stage k_stages[] = {
     {"Prepare game code", {"Analysis ", nullptr}},
     {"Prepare the build", {"Lift ", nullptr}},
     {"Build the game", {"Build ", "Building in the build container", nullptr}},
-    {"HD textures", {"Upscaling HD textures", "HD textures ready", nullptr}},
+    {"Upscaled Original Textures", {"Upscaling HD textures", "HD textures ready", nullptr}},
     {"Finish setup", {"Activating the verified installation", "Setup complete", "Installation is ready"}},
 };
 const int k_stage_count = (int)(sizeof k_stages / sizeof k_stages[0]);
@@ -546,7 +546,7 @@ void first_run_page(float width, float height, UiResult *result)
         ImGui::TextWrapped("A system file picker opens when choosing files. On Steam Deck you may need Desktop Mode for this step.");
     } else if (g_setup_step == 1) {
         ImGui::RadioButton("Modern - recommended", &g_experience, 1); ui_target("setup.modern");
-        ImGui::TextWrapped("Widescreen and sharper 2x graphics, with the game's original visual style. HD textures are optional.");
+        ImGui::TextWrapped("Widescreen and sharper 2x graphics, with the game's original visual style. Upscaled Original Textures and downloadable texture packs are optional.");
         ImGui::Spacing();
         ImGui::RadioButton("Original", &g_experience, 0); ui_target("setup.original");
         ImGui::TextWrapped("Original 4:3 proportions, 480p rendering and original textures, with console-style graphics effects.");
@@ -555,10 +555,10 @@ void first_run_page(float width, float height, UiResult *result)
     } else {
         ImGui::Text("Experience: %s", g_experience ? "Modern" : "Original");
         if (g_experience) {
-            ImGui::Checkbox("Generate Recomp HD textures (optional)", &g_hd); ui_target("setup.hd");
-            ImGui::TextWrapped("Generated locally from your game copy. Adds several minutes and 15 GiB of working space. You can do this later in Mods.");
+            ImGui::Checkbox("Upscaled Original Textures (optional)", &g_hd); ui_target("setup.hd");
+            ImGui::TextWrapped("Generates higher-resolution versions of the original textures from your game copy on this PC. Adds several minutes and 15 GiB of working space. You can do this later in Mods.");
         } else g_hd = false;
-        ImGui::TextWrapped("Additional downloadable texture and language mods are available in Mods after setup. No optional downloads are started automatically.");
+        ImGui::TextWrapped("Downloadable texture packs and language mods are available in Mods after setup. No optional downloads are started automatically.");
         if (ImGui::CollapsingHeader("Change locations")) {
             path_row("Installation location", "setup.install", g_root, true, false);
             path_row("Game data and saves location", "setup.data", g_data, true, false);
@@ -604,7 +604,7 @@ void maintenance_page(float width, float height, UiResult *result)
     ImGui::TextWrapped("Installed: v%s in %s", in.version.c_str(), in.root.string().c_str());
     ImGui::TextWrapped("Data: %s", in.data.string().c_str());
     ImGui::Spacing();
-    ImGui::Checkbox("Also generate HD textures", &g_hd);
+    ImGui::Checkbox("Generate Upscaled Original Textures", &g_hd);
     tools_row();
     ImGui::Spacing();
     if (!g_form_error.empty()) ImGui::TextColored(ImVec4(1, 0.45f, 0.4f, 1), "%s", g_form_error.c_str());
@@ -922,7 +922,7 @@ void uninstall_page(float width, float height, UiResult *result)
         ui_target("uninstall.data");
         ImGui::TextDisabled("%s", in.data.string().c_str());
         if (g_removal.data)
-            ImGui::TextWrapped("It holds the copy of your dump, your saves, settings, mods and HD textures. Your saves "
+            ImGui::TextWrapped("It holds the copy of your dump, your saves, settings, mods and Upscaled Original Textures. Your saves "
                                "and settings are copied first, to:\n%s", g_removal.backup.string().c_str());
         else
             ImGui::TextWrapped("It stays, with your saves, settings and mods, for when you install again.");
@@ -1164,7 +1164,7 @@ void screen_open_hd()
 {
     g_hd = true;
     screen_open_maintenance();
-    g_form_error = "HD generation is selected. Repair game will prepare missing HD textures and keep your saves/settings. Allow 15 GiB extra working space.";
+    g_form_error = "Upscaled Original Textures are selected. Repair game will generate any missing upscaled textures and keep your saves/settings. Allow 15 GiB extra working space.";
 }
 
 void start_update_build()

@@ -564,7 +564,7 @@ static int wizard(HINSTANCE instance, bool smoke = false, bool preparation = fal
     control(L"BUTTON", L"Browse...", WS_TABSTOP, 595, 238, 90, 26, 107);
     prerequisites = control(L"BUTTON", L"Install missing Microsoft Build Tools (requires consent and administrator access)",
         WS_TABSTOP | BS_AUTOCHECKBOX, 24, 278, 675, 25, 108);
-    hdUpscale = control(L"BUTTON", L"Apply HD texture upscale during install (increases install time)",
+    hdUpscale = control(L"BUTTON", L"Generate Upscaled Original Textures (takes extra time)",
         WS_TABSTOP | BS_AUTOCHECKBOX, 24, 309, 675, 25, 115);
     control(L"STATIC", L"Adds about 6.2 GB; requires extra working space. No GPU needed.", 0, 44, 336, 650, 18, 0);
     desktopShortcut = control(L"BUTTON", L"Create a desktop shortcut", WS_TABSTOP | BS_AUTOCHECKBOX, 24, 358, 675, 25, 113);

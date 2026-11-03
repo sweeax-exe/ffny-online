@@ -118,7 +118,7 @@ def wizard(payload, smoke=False):
     ttk.Checkbutton(options, text='Create a desktop shortcut', variable=desktop).grid(row=1, column=0, sticky='w')
     ttk.Checkbutton(options, text='Add to Steam (for Gaming Mode; Steam must be running)',
                     variable=steam).grid(row=2, column=0, sticky='w')
-    ttk.Checkbutton(options, text='Generate Recomp HD textures (optional; takes extra time)',
+    ttk.Checkbutton(options, text='Generate Upscaled Original Textures (optional; takes extra time)',
                     variable=hd).grid(row=3, column=0, sticky='w')
     ttk.Label(options, text='Adds about 6.2 GB; needs extra working space. No GPU needed.',
               foreground='#555').grid(row=4, column=0, sticky='w', padx=(24, 0))
