@@ -306,7 +306,8 @@ def social(timeout=300, relay_port=27900, off=False, lock_timeout=None, log=None
             }
             result["state"] = {i: state[i].split("state: ", 1)[-1] for i in state}
         result["checks"] = checks
-        # the captures: per copy and label the last one (the most filled in), as PNG
+        # the captures: per copy and label the last one (the most filled in) and the first (a request, a
+        # toast), as PNG
         picked = []
         try:
             from PIL import Image
@@ -314,11 +315,13 @@ def social(timeout=300, relay_port=27900, off=False, lock_timeout=None, log=None
             Image = None
         for i, d in shots.items():
             files = sorted(glob.glob(os.path.join(d, "*.bmp")))
-            last = {}
+            last, first = {}, {}
             for p in files:
                 base = os.path.splitext(os.path.basename(p))[0]
                 label = base.split("-", 1)[1] if "-" in base else "plain"
                 last[label] = p
+                first.setdefault(label + "-first", p)
+            last.update({k: v for k, v in first.items() if k != "plain-first" and v != last[k[:-6]]})
             for label, p in sorted(last.items()):
                 name = "copy%d-%s.png" % (i, label)
                 if Image:
