@@ -433,3 +433,10 @@ def test_runtime_refuses_xbe_code_changes(runtime_tool, dump):
     (pack / 'language.ini').write_text('\n'.join(ini) + '\n')
     lines, err = run_runtime(runtime_tool, tmp / 'data', game, RECOMP_LANGUAGE_PACK='xx-test')
     assert 'xbe LOADING' in lines and 'outside .rdata/.data' in err
+
+
+def test_game_start_up_calls_language_start():
+    # The runtime tests above call pc_language_start themselves, so they cannot notice when the
+    # game's own start-up stops calling it (a merge dropped it once and packs silently did nothing).
+    text = (ROOT / 'src/hooks/pc_settings.c').read_text(encoding='utf-8')
+    assert 'pc_language_start(have_root ? root : NULL, "game");' in text
