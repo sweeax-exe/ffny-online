@@ -142,8 +142,11 @@ derives the delay from the pings as the players do.
   back in the menus (automatch waits for the main menu, as for every match). A Rematch the players
   choose on their results has no new `START`; v1 does not show it (the spectator waits in the room
   for the next room match).
-- **Leaving:** B in the room leaves it (`LEAVE`); during the fight START stops watching, then the
-  pause menu's Quit returns to the room. The players never know.
+- **Leaving:** B in the room leaves it (`LEAVE`); during the fight START stops watching and, since
+  build 47, takes the spectator straight back to the room: the game runs the pause menu's own Quit
+  (`sub_000CD0D0` on its confirm page; the pause menu itself never opens for a spectator, whose pad sits
+  on a port no fighter uses), which leaves the fight for the match-type screen and the room. A feed
+  that stops does the same. The players never know.
 
 ## 6. Bandwidth
 
@@ -183,7 +186,7 @@ fight, so v2 needs the relay's replay feed and the fast-forward, not a new input
 - A match of four human players: the spectator's own pad sits on the fourth player's port outside
   the fight (the toolkit maps the local pad to a port 0..3); during the fight it has no effect.
 - Ranked rooms; spectators in the room list (`ROOMS` shows players only); talking spectators.
-- Leaving mid-fight in one press (START stops watching, then Quit in the pause menu).
+- (Leaving mid-fight in one press: START, since build 47.)
 
 ## 10. Decisions for the owner
 

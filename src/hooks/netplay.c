@@ -441,6 +441,8 @@ static struct {
     ULONGLONG playing_since;
     ULONGLONG spec_results;
     int spec_start_down;
+    /* build 47: leaving the fight for the room (spec_quit: START, or the feed stopped) */
+    int spec_quit;
 } N;
 
 /* This PC is in its room as a spectator (the relay's ROOM says `you` 0xFD). */
@@ -3588,6 +3590,7 @@ void netplay_on_main_menu(void)
         return;
     }
     N.spec_results = 0;         /* spectator mode: the results are behind it */
+    N.spec_quit = 0;
     if (N.lobby && N.match_live && N.match_seen && N.watching) {
         end_hub_match("Back in the room; watching the next match when it starts.");
         N.koth_results = N.koth_quit = 0;
@@ -4740,6 +4743,18 @@ static void steplog_keep(uint32_t s)
     }
 }
 
+/* RECOMP_TEST_SPEC_STOP_STEP=<n> (tests): the spectator stops watching at step n of the first match it
+ * watches, as with START (the test copies' pads cannot press it at a given step). */
+static int spec_test_stop(uint32_t s)
+{
+    static int at = -1, done;
+    if (at < 0) at = getenv("RECOMP_TEST_SPEC_STOP_STEP") ? atoi(getenv("RECOMP_TEST_SPEC_STOP_STEP")) : 0;
+    if (at <= 0 || done || s != (uint32_t)at) return 0;
+    done = 1;
+    fprintf(stderr, "[NETPLAY] tests: the spectator presses START at step %u\n", s);
+    return 1;
+}
+
 /* START pressed on this PC's own controller (an edge): a spectator stops watching with it. */
 static int spec_stop_pressed(void)
 {
@@ -4754,7 +4769,7 @@ static int spec_stop_pressed(void)
 
 /* Spectator mode, step s (its checksum taken): compare it with the players', then wait for every
  * player's entry of the step. Never a give-up that counts for anyone: a feed that stops only stops
- * the watching, and the game goes on on its own (START, then Quit, goes back to the room). */
+ * the watching, and this PC leaves the fight for the room (spec_tick), as when START stops it. */
 static void spec_step(uint32_t s)
 {
     ULONGLONG since;
@@ -4776,10 +4791,11 @@ static void spec_step(uint32_t s)
         spec_compare(slot);
         LeaveCriticalSection(&g_cs);
     }
-    if (spec_stop_pressed()) {
-        fprintf(stderr, "[NETPLAY] watching: stopped with START at step %u\n", s);
+    if (spec_stop_pressed() || spec_test_stop(s)) {
+        fprintf(stderr, "[NETPLAY] watching: stopped with START at step %u; leaving the fight for the room\n", s);
         InterlockedExchange(&N.lockstep, 0);
-        toast(10000, "You stopped watching. START, then Quit, goes back to the room.");
+        N.spec_quit = 1;        /* spec_tick, between two updates */
+        toast(8000, "You stopped watching: back to the room.");
         return;
     }
     if (s <= (uint32_t)N.delay) return;
@@ -4801,9 +4817,10 @@ static void spec_step(uint32_t s)
         now = GetTickCount64();
         if (now - since >= 1000) waited_long = 1;
         if (spec_stop_pressed()) {
-            fprintf(stderr, "[NETPLAY] watching: stopped with START at step %u\n", s);
+            fprintf(stderr, "[NETPLAY] watching: stopped with START at step %u; leaving the fight for the room\n", s);
             InterlockedExchange(&N.lockstep, 0);
-            toast(10000, "You stopped watching. START, then Quit, goes back to the room.");
+            N.spec_quit = 1;
+            toast(8000, "You stopped watching: back to the room.");
             break;
         }
         {
@@ -4815,8 +4832,9 @@ static void spec_step(uint32_t s)
                             "the rest runs on this PC\n", s);
                 } else {
                     fprintf(stderr, "[NETPLAY] watching: the feed stopped at step %u (player %d's entries); not "
-                            "watching any more\n", s, late + 1);
-                    toast(10000, "The match's feed stopped. START, then Quit, goes back to the room.");
+                            "watching any more, leaving the fight for the room\n", s, late + 1);
+                    N.spec_quit = 1;
+                    toast(8000, "The match's feed stopped: back to the room.");
                 }
                 break;
             }
@@ -5670,11 +5688,70 @@ static void rollback_to(uint32_t f)
                 N.rb_count, f, n, ms, N.step);
 }
 
+/* Spectator mode (build 47), once per game update between two updates, on the game thread.
+ *
+ * Leaving the fight (spec_quit: START stopped the watching, or the feed stopped) goes the way the
+ * pause menu's QUIT goes: its button handler (sub_000CD0D0, the Battle screen's menu at +0x2C) on the
+ * confirm page with Yes closes the menu, posts the resume message when the sound is paused, sets
+ * the run module's quit (GS +0x338, +0x394) and asks for screen 9, the match-type screen, whose
+ * GetScreenInfo(battle/cmtype) brings this PC back to the room (netplay_on_main_menu). Before, the
+ * notice said "START, then Quit": the pause menu never opened, as a spectator's pad sits on a port no
+ * fighter uses (player report, build 46).
+ */
+#define BATTLE_SCREEN_VTABLE 0x0029D5E4u
+extern void sub_000CD0D0(void);         /* the pause menu's button handler: ecx = menu; mask, sound, resume, close */
+static int spec_quit_fight(void)
+{
+    uint32_t mgr = MEM32(0x002FB148u + 0x17u * 4u), gs = MEM32(0x002FB148u + 0x18u * 4u), screen, menu;
+    uint32_t args[4];
+    if (mgr < 0x10000u || MEM32(mgr + 0x24u) != 0) return 0;      /* a screen loads: later */
+    screen = MEM32(mgr + 0x18u);
+    if (screen < 0x10000u || MEM32(screen) != BATTLE_SCREEN_VTABLE || gs < 0x10000u || MEM32(gs + 0x344u) != 1u ||
+        !MEM32(gs + 0x38Cu) || (menu = MEM32(screen + 0x2Cu)) < 0x10000u)
+        return -1;
+    MEM32(menu + 0x24u) = 4u;           /* the confirm page, Yes chosen */
+    MEM8(menu + 0x20u) = 1u;
+    args[0] = 0x10u;                    /* A */
+    args[1] = 0;                        /* no click */
+    args[2] = MEM8(0x00340348u) ? 1u : 0u;      /* the resume message, only when the sound is paused */
+    args[3] = 0;
+    {   /* this runs at an update's start (an _enter hook): every register goes back as it was */
+        uint32_t eax = g_eax, ecx = g_ecx, edx = g_edx, ebx = g_ebx, esi = g_esi, edi = g_edi, ebp = g_ebp;
+        double fp[8];
+        int fp_top = g_fp_top;
+        uint16_t fp_cw = g_fp_control_word;
+        memcpy(fp, g_fp_stack, sizeof(fp));
+        guest_call(sub_000CD0D0, menu, 4, args);
+        g_eax = eax; g_ecx = ecx; g_edx = edx; g_ebx = ebx; g_esi = esi; g_edi = edi; g_ebp = ebp;
+        memcpy(g_fp_stack, fp, sizeof(fp));
+        g_fp_top = fp_top;
+        g_fp_control_word = fp_cw;
+    }
+    fprintf(stderr, "[NETPLAY] watching: left the fight for the room (the pause menu's Quit; screen %08X, menu %08X)\n",
+            screen, menu);
+    return 1;
+}
+
+static void spec_tick(void)
+{
+    static unsigned tries;
+    if (!N.lobby || !N.watching) { tries = 0; return; }
+    if (N.spec_quit) {
+        int r = spec_quit_fight();
+        if (r > 0 || (r < 0 && ++tries > 600)) {
+            if (r < 0) fprintf(stderr, "[NETPLAY] watching: the fight screen is not up; the game goes on by itself\n");
+            N.spec_quit = 0;
+            tries = 0;
+        }
+    }
+}
+
 void netplay_on_update(void)
 {
     uint32_t t, f = 0;
     int i;
     rollback_check_tables(N.resim ? "a re-run update starts" : "an update starts");
+    if (!N.resim) spec_tick();
     if (!N.resim) netplay_rematch_tick();
     intro_update();
     intro_variants();
