@@ -2186,6 +2186,13 @@ void chat_test_step()
                 for (size_t i = lines.size(); i-- > 0;) if (lines[i]->from == id) { menu_report_line(lines, i, lines[i]->channel); break; }
             }
         }
+    } else if (what == "quickedit") {               // the QUICK CHAT page's keyboard on line N: TEXT, SAVE
+        QW.editing = atoi(arg.c_str()) - 1;
+        open_keyboard(KB_QUICK);
+        C.friend_name = arg.find(':') == std::string::npos ? "" : arg.substr(arg.find(':') + 1);
+        C.friend_cursor = (int)C.friend_name.size();
+        kb_submit();
+        fprintf(stderr, "[SOCIAL-UI] quick chat line %d is now: %s\n", atoi(arg.c_str()), quick_line(atoi(arg.c_str()) - 1).c_str());
     } else if (what == "reportroom") {              // the ROOM tab's menu on NAME, then REPORT (their newest room line)
         long long id = 0;
         for (auto &l : room_lines()) if (l.name == arg && l.from) id = l.from;
@@ -2336,9 +2343,10 @@ void quick_test_tick()
         return;
     }
     case 1:     // held a moment (a tap: let go at once), then point
-        if (q.tap) {
+        if (q.tap) {       // let go, then point only once the wheel has seen the release (a slow copy)
             if (now - QT.t < 120) return;
-            QT.buttons = 0;
+            if (QT.buttons) { QT.buttons = 0; QT.t = now; return; }
+            if (now - QT.t < 800) return;
         } else if (now - QT.t < 300) {
             return;
         }
@@ -2348,7 +2356,11 @@ void quick_test_tick()
         QT.t = now;
         return;
     case 2:     // pointed long enough for a capture, then let go (or A)
-        if (now - QT.t < 2200) return;
+        {   // RECOMP_TEST_QUICK_CHAT_HOLD_MS: longer, for a slow copy's captures (a spectator)
+            static const unsigned long long hold = getenv("RECOMP_TEST_QUICK_CHAT_HOLD_MS") ?
+                                                   (unsigned long long)atoi(getenv("RECOMP_TEST_QUICK_CHAT_HOLD_MS")) : 2200;
+            if (now - QT.t < hold) return;
+        }
         if (q.tap) QT.buttons |= 2;
         else QT.buttons = 0;
         QT.phase = 3;
@@ -2411,7 +2423,7 @@ bool quick_wheel(ImDrawList *dl, const Frame &f, ImVec2 display)
             if (!QW.sticky) {
                 if (!ImGui::IsKeyDown(QW.button)) {     // let go
                     if (QW.sel >= 0) send = QW.sel;
-                    else if (age < 350) QW.sticky = true;
+                    else if (age < 350 || ImGui::GetFrameCount() - QW.opened_frame <= 2) QW.sticky = true;   // a tap
                     else why = "let go without a line";
                 }
             } else {
@@ -2435,7 +2447,11 @@ bool quick_wheel(ImDrawList *dl, const Frame &f, ImVec2 display)
 
     // the picture, as the design has it: the screen dimmed, a dashed ring, QUICK CHAT in the middle,
     // the eight lines around it, the one pointed at red with a line to it
-    dl->AddRectFilled(ImVec2(0, 0), display, IM_COL32(0, 0, 0, 128));
+    if (QW.where != QW_FIGHT) {     // the design's own ground: the haze, the page's title faint under the dim
+        chat_backdrop(dl, display, 1.0f);
+        text(dl, f, g_stencil, 30, 50, 24, with_alpha(CREAM, 0.5f), QW.where == QW_ROOM ? "ROOM" : k_tab_names[QW.tab], LEFT, 0);
+    }
+    dl->AddRectFilled(ImVec2(0, 0), display, IM_COL32(0, 0, 0, QW.where == QW_FIGHT ? 140 : 128));
     ImVec2 c = f.p(QW_CX, QW_CY);
     {
         float rr = 105 * f.s();
@@ -2497,7 +2513,7 @@ bool quick_wheel(ImDrawList *dl, const Frame &f, ImVec2 display)
     else hx += plate_hint(dl, f, hx, hy, quick_button_name(), "RELEASE TO SEND") + 3;
     hint(dl, f, hx, hy, "b", "CANCEL");
     std::string how = std::string("Hold ") + quick_button_name() +
-                      ", point the stick, let go - keys 1-8 too - the eight lines can be changed in Voice Chat";
+                      ", point, let go - change the eight lines in Voice Chat";
     text(dl, f, g_body, 9, 592, hy + 3, IM_COL32(242, 230, 200, 128), how.c_str(), RIGHT, 0);
     return true;
 }
