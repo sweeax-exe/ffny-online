@@ -12,9 +12,8 @@ This unofficial native port recompiles the original Xbox game for your computer,
 with higher rendering resolution, modern controller support, local multiplayer
 and optional HD textures.
 
-The port supports local matches, Story play and customization across the three platforms.
-Coverage does not establish that every campaign path or configuration is fault-free. See
-[GitHub Issues](https://github.com/vyanhursky/DefJamFFNY-recomp/issues) and the
+**The port is now mature and continues to improve.** All game functionality is working and we are continuously optimizing, enhancing, and bugfixing. See
+[known issues](https://github.com/vyanhursky/DefJamFFNY-recomp/issues) and the
 [latest release notes](https://github.com/vyanhursky/DefJamFFNY-recomp/releases/latest)
 for current limitations.
 

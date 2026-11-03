@@ -433,6 +433,8 @@ Upstream PR submissions still need the owner's separate approval.
 
 - 2026-11-02 21:06 — Cleanup stage4: removed superseded October4gameplay GIF/still (6.83MiB), exact allowlist entries, redundant smoke .gitkeep and RC2-only hosted acceptance helper. Kept frozen Setup/HD tools, all release notes,8scene JSON controls, generated adapters and reusable native/experimental tooling with explicit scope. Final local validation:717unit passes plus2environment-blocked cases passing on permitted retry;55skip/1slow deselected.454local links/anchors valid; source495/0; adapters0;68run citations retained.
 
+- 2026-11-02 20:28 — Owner review of PR171: restored the README opening paragraph verbatim, changing only its known-issues link destination to GitHub Issues. Narrowed172 to Story profile validation,173 to structured identity/final-menu assertions and175 to actual compiler/toolchain provenance; all remain open, unmilestoned and explicitly deferred until after v1.0. Closed174/176 as not planned with rationale, not as completed. Existing gameplay checks and targeted v1.0 acceptance are not replaced by these future tasks.
+
 ## 7. Hand-off
 
 ### Public documentation cleanup — PR171 ready for review
@@ -440,9 +442,12 @@ Upstream PR submissions still need the owner's separate approval.
 Branch `codex/docs-repository-cleanup` starts from public main2e6648c. Four stages
 retire Known Issues and overlapping plans, prune stale current sections, consolidate
 30research/widescreen reports plus the launcher handoff, and remove superseded
-media/RC2 tooling. Troubleshooting and durable findings remain in current guides;
-verified test gaps are Issues172–176. Every original decision-table row and all68
-run-log citations are retained. The export/numbered-section contract is unchanged.
+media/RC2 tooling. Troubleshooting and durable findings remain in current guides.
+After owner-approved triage, Issues172/173/175 retain narrowed work for after
+v1.0;174/176 are closed as not planned. The README opening paragraph keeps its
+original wording and changes only the known-issues link destination. Every original
+decision-table row and all68run-log citations are retained. The export/numbered-section
+contract is unchanged.
 
 Final local validation:717unit passes plus2environment-blocked tests passing on
 permitted retry,55skips/1slow deselection;454local links/anchors resolve; source
