@@ -114,6 +114,10 @@ last release plus docs), with the same gate.
    Verify every asset's SHA-256 against GitHub's digest and its provenance, then
    publish the draft. Version tags are immutable; use a new version to correct a
    published release.
+6. Publishing a stable release also deploys the project site (`.github/workflows/pages.yml`,
+   [site/README.md](../site/README.md)). Check that the Pages run succeeded and the site shows
+   the new version. Update the site's copy in the release PR when a release adds a headline
+   feature.
 
 GitHub supplies the source ZIP/tar archives. They do not include submodules;
 the supported command-line setup is a recursive clone at the tag. Only the
