@@ -66,6 +66,99 @@ struct Chat {
 
 bool chat_mouse_blocked() { return C.mouse_off; }
 
+// ---- avatars (stage 2c): the players' Discord pictures, as the account service copied them ----
+//
+// social.cpp downloads and decodes them on a thread of its own; here they become textures on the
+// overlay's thread, at most AVATAR_CAP of them (the least recently drawn goes first). A player without
+// a picture (none, hidden, or not loaded yet) gets initials on a circle in a colour of their account.
+
+const size_t AVATAR_CAP = 256;
+struct AvatarTex { Tex tex; bool none = false; unsigned long long used = 0, asked = 0; };
+std::map<long long, AvatarTex> g_avatars;
+int g_avatar_textures = 0;          // tests: how many pictures became textures
+
+void avatar_drop(std::map<long long, AvatarTex>::iterator it)
+{
+    if (it->second.tex.srv) { it->second.tex.srv->Release(); g_avatar_textures--; }
+    g_avatars.erase(it);
+}
+
+// Once a frame: the pictures that arrived become textures.
+void avatars_update()
+{
+    for (auto &px : social::avatar_take()) {
+        if (px.id < 0) {        // forgotten (the player changed their setting): ask again
+            auto it = g_avatars.find(-px.id);
+            if (it != g_avatars.end()) avatar_drop(it);
+            continue;
+        }
+        AvatarTex &a = g_avatars[px.id];
+        a.asked = GetTickCount64();
+        if (a.tex.srv) { a.tex.srv->Release(); a.tex.srv = nullptr; g_avatar_textures--; }
+        a.none = !px.ok || !make_texture(px.rgba, px.w, px.h, a.tex);
+        if (!a.none) g_avatar_textures++;
+    }
+    while (g_avatars.size() > AVATAR_CAP) {
+        auto oldest = g_avatars.begin();
+        for (auto it = g_avatars.begin(); it != g_avatars.end(); ++it) if (it->second.used < oldest->second.used) oldest = it;
+        avatar_drop(oldest);
+    }
+}
+
+// A colour of the account: the same on every PC.
+ImU32 avatar_colour(long long id, const std::string &name)
+{
+    unsigned h = (unsigned)(id * 2654435761u);
+    if (!id) for (unsigned char c : name) h = h * 31 + c;
+    float hue = (h % 360) / 360.0f, r, g, b;
+    ImGui::ColorConvertHSVtoRGB(hue, 0.55f, 0.62f, r, g, b);
+    return IM_COL32((int)(r * 255), (int)(g * 255), (int)(b * 255), 255);
+}
+
+std::string initials(const std::string &name)
+{
+    std::string out;
+    bool start = true;
+    for (size_t i = 0; i < name.size() && out.size() < 2; i++) {
+        unsigned char c = (unsigned char)name[i];
+        if (c == ' ' || c == '_' || c == '.' || c == '-') { start = true; continue; }
+        if (start && c < 0x80 && isalnum(c)) out += (char)toupper(c);
+        start = false;
+    }
+    if (out.empty() && !name.empty() && (unsigned char)name[0] < 0x80) out = (char)toupper((unsigned char)name[0]);
+    return out.empty() ? "?" : out;
+}
+
+// A round picture of radius r (menu units) centred at cx, cy; id 0 (a name only): initials.
+void draw_avatar(ImDrawList *dl, const Frame &f, float cx, float cy, float r, long long id, const std::string &name,
+                 float alpha = 1.0f)
+{
+    unsigned long long now = GetTickCount64();
+    AvatarTex *a = nullptr;
+    if (id > 0 && social_enabled()) {      // the social features off: initials only, nothing is asked
+        a = &g_avatars[id];
+        a->used = now;
+        // none: ask again after ten minutes (a player may turn theirs on)
+        if (!a->tex.srv && (!a->asked || (a->none && now - a->asked > 600000))) {
+            a->asked = now;
+            a->none = false;
+            social::avatar_want(id);
+        }
+    }
+    ImVec2 c = f.p(cx, cy);
+    float rs = r * f.s();
+    if (a && a->tex.srv) {
+        dl->AddImageRounded((ImTextureID)(intptr_t)a->tex.srv, ImVec2(c.x - rs, c.y - rs), ImVec2(c.x + rs, c.y + rs),
+                            ImVec2(0, 0), ImVec2(1, 1), IM_COL32(255, 255, 255, (int)(255 * alpha)), rs);
+    } else {
+        dl->AddCircleFilled(c, rs, with_alpha(avatar_colour(id, name), alpha), 24);
+        std::string ini = initials(name);
+        float size = r * (ini.size() > 1 ? 0.95f : 1.15f);
+        text(dl, f, g_title, size, cx, cy - size * 0.62f, with_alpha(IM_COL32(255, 245, 230, 255), alpha), ini.c_str(), CENTER, 0);
+    }
+    dl->AddCircle(c, rs, with_alpha(IM_COL32(255, 255, 255, 40), alpha), 24, 0.8f * f.s());
+}
+
 // ---- room chat (stage 2b): relay-only, so it works with the service's social switch off ----
 
 // -1 no room chat here (no room, or a relay without it), 0 read only, 1 can write.
@@ -88,6 +181,19 @@ bool room_muted(const NetChatLine &l)
     if (l.account && !room_only())      // muted in the social features too
         for (auto &m : C.v.muted) if (m.id == (long long)l.account) return true;
     return false;
+}
+
+// The account behind a name in the room (its room lines carry it), else a friend's or crew mate's; 0
+// unknown (the picture is then initials).
+long long room_account_of(const std::string &name)
+{
+    static NetChatLine buf[NETPLAY_CHAT_LINES];
+    int n = netplay_room_chat(buf, NETPLAY_CHAT_LINES, nullptr);
+    for (int i = n - 1; i >= 0; i--) if (buf[i].account && !buf[i].system && name == buf[i].name) return buf[i].account;
+    for (auto &fr : C.v.friends) if (fr.name == name) return fr.id;
+    for (auto &m : C.v.crew_roster) if (m.name == name) return m.id;
+    if (name == C.v.my_name) return C.v.me;
+    return 0;
 }
 
 void room_mute(const std::string &name, unsigned account, bool on)
@@ -538,17 +644,19 @@ int draw_lines(ImDrawList *dl, const Frame &f, const std::vector<const social::L
         std::string body = l.hidden ? "message hidden: you muted " + l.name : l.text;
         ImU32 name_col = mine ? GOLD_TEXT : l.from && friend_of(l.from) ? BLUE_NAME : CREAM;
         float h, top;
-        if (stacked) {      // CREW: the name and time above the message, as ROOM in the design
-            float mh = text_height(f, g_body, 11, body.c_str(), x1 - x0);
+        if (stacked) {      // CREW: the picture, the name and time above the message, as ROOM in the design
+            const float ax = room_only() ? 0.0f : 21.0f;     // the picture's column (none with the social features off)
+            float mh = text_height(f, g_body, 11, body.c_str(), x1 - x0 - ax);
             h = 14 + mh + 8;
             top = y - h;
             if (l.system) {
                 text(dl, f, g_body, 8.5f, (x0 + x1) / 2, top + 4, DIM, l.text.c_str(), CENTER, 0, x1 - x0);
             } else {
-                text(dl, f, g_hand, 14, x0, top - 3, name_col, l.name.c_str(), LEFT, 0.6f);
-                text(dl, f, g_body, 8, x0 + text_width(f, g_hand, 14, l.name.c_str()) + 6, top + 1, DIM,
+                if (ax > 0) draw_avatar(dl, f, x0 + 8, top + 8, 8, l.from, l.name, l.hidden ? 0.5f : 1.0f);
+                text(dl, f, g_hand, 14, x0 + ax, top - 3, name_col, l.name.c_str(), LEFT, 0.6f);
+                text(dl, f, g_body, 8, x0 + ax + text_width(f, g_hand, 14, l.name.c_str()) + 6, top + 1, DIM,
                      clock_text(l.at).c_str(), LEFT, 0);
-                text(dl, f, g_body, 11, x0, top + 14, l.hidden ? DIM : CREAM, body.c_str(), LEFT, 0, x1 - x0);
+                text(dl, f, g_body, 11, x0 + ax, top + 14, l.hidden ? DIM : CREAM, body.c_str(), LEFT, 0, x1 - x0 - ax);
             }
         } else {            // GLOBAL: time, crew tag, name and message in one line
             float x = x0;
@@ -557,7 +665,7 @@ int draw_lines(ImDrawList *dl, const Frame &f, const std::vector<const social::L
             float lead = tw, tagw = 0, namew = 0;
             if (!l.tag.empty()) tagw = text_width(f, g_body, 7.5f, l.tag.c_str()) + 10;
             if (l.system) namew = text_width(f, g_title, 8.5f, "SERVER") + 5;
-            else namew = text_width(f, g_hand, 13, l.name.c_str()) + 6;
+            else namew = text_width(f, g_hand, 13, l.name.c_str()) + 6 + 15;      // with the picture
             lead += tagw + namew;
             float mh = text_height(f, g_body, 11, body.c_str(), x1 - x0 - lead);
             h = std::max(14.0f, mh) + 7;
@@ -571,7 +679,10 @@ int draw_lines(ImDrawList *dl, const Frame &f, const std::vector<const social::L
                 x += tagw;
             }
             if (l.system) text(dl, f, g_title, 8.5f, x, top + 2.5f, GOLD_TEXT, "SERVER", LEFT, 0);
-            else text(dl, f, g_hand, 13, x, top - 1.5f, name_col, l.name.c_str(), LEFT, 0.6f);
+            else {
+                draw_avatar(dl, f, x + 6, top + 7, 6, l.from, l.name, l.hidden ? 0.5f : 1.0f);
+                text(dl, f, g_hand, 13, x + 15, top - 1.5f, name_col, l.name.c_str(), LEFT, 0.6f);
+            }
             x += namew;
             text(dl, f, g_body, 11, x, top, l.system ? IM_COL32(255, 231, 166, 255) : l.hidden ? DIM : CREAM, body.c_str(),
                  LEFT, 0, x1 - x);
@@ -736,8 +847,9 @@ void draw_room_tab(ImDrawList *dl, const Frame &f, const ChatKeys &k, const NetR
         bool host = !watcher && r.players[i].slot == r.host, you = !watcher && r.players[i].slot == r.you;
         bool on = i == C.sel[TAB_ROOM];
         if (on) dl->AddRect(f.p(PX + 7, y - 4), f.p(PX + lw - 7, y + 15), with_alpha(RED, 0.8f), 5 * f.s(), 0, 1.2f * f.s());
-        dl->AddCircleFilled(f.p(PX + 15, y + 5.5f), 3 * f.s(), watcher ? IM_COL32(242, 230, 200, 90) : LIVE);
-        text(dl, f, g_hand, 13, PX + 24, y - 2, host ? GOLD_TEXT : watcher ? IM_COL32(242, 230, 200, 205) : BLUE_NAME, name,
+        if (room_only()) dl->AddCircleFilled(f.p(PX + 15, y + 5.5f), 3 * f.s(), watcher ? IM_COL32(242, 230, 200, 90) : LIVE);
+        else draw_avatar(dl, f, PX + 16, y + 5.5f, 6.5f, room_account_of(name), name, watcher ? 0.7f : 1.0f);
+        text(dl, f, g_hand, 13, PX + (room_only() ? 24 : 26), y - 2, host ? GOLD_TEXT : watcher ? IM_COL32(242, 230, 200, 205) : BLUE_NAME, name,
              LEFT, 0.6f);
         const char *what = room_name_muted(name) ? "MUTED" : watcher ? "WATCHING" : host ? "HOST" : you ? "YOU" : "";
         text(dl, f, g_body, 7.5f, PX + lw - 12, y + 2, host && !room_name_muted(name) ? GOLD_TEXT : DIM, what, RIGHT, 0);
@@ -910,11 +1022,13 @@ void draw_friends(ImDrawList *dl, const Frame &f, const ChatKeys &k, const NetRo
             dl->AddRect(f.p(x0, y), f.p(x1, y + h), with_alpha(RED, 0.75f), 6 * f.s(), 0, 1.0f * f.s());
         }
         float a = offline && !on ? 0.55f : 1.0f, x = x0 + 9;
-        if (w.kind == 3) {
-            ImU32 dot = offline ? IM_COL32(242, 230, 200, 90) : w.fr->state == "fighting" || w.fr->state == "watching" ? ORANGE : LIVE;
-            dl->AddCircleFilled(f.p(x + 3, y + h / 2), 3 * f.s(), with_alpha(dot, a));
-            x += 13;
+        draw_avatar(dl, f, x + 10, y + h / 2, 10, w.ref.id, w.ref.name, a);
+        if (w.kind == 3) {      // the state's dot on the picture's edge
+            ImU32 dot = offline ? IM_COL32(120, 112, 100, 255) : w.fr->state == "fighting" || w.fr->state == "watching" ? ORANGE : LIVE;
+            dl->AddCircleFilled(f.p(x + 17, y + h / 2 + 7), 3.6f * f.s(), IM_COL32(18, 12, 14, 255));
+            dl->AddCircleFilled(f.p(x + 17, y + h / 2 + 7), 2.6f * f.s(), with_alpha(dot, a));
         }
+        x += 26;
         text(dl, f, g_hand, 14, x, y + 7, with_alpha(CREAM, a), w.ref.name.c_str(), LEFT, 0.6f);
         x += text_width(f, g_hand, 14, w.ref.name.c_str()) + 8;
         if (!w.ref.tag.empty()) {
@@ -989,11 +1103,12 @@ void draw_messages(ImDrawList *dl, const Frame &f, const ChatKeys &k, const NetR
             rect(dl, f, PX + 7, y, lw - 14, 32, IM_COL32(200, 16, 46, 26), 6);
             dl->AddRect(f.p(PX + 7, y), f.p(PX + lw - 7, y + 32), with_alpha(RED, 0.75f), 6 * f.s(), 0, 1.0f * f.s());
         }
-        text(dl, f, g_hand, 13, PX + 15, y + 1, CREAM, c.with.name.c_str(), LEFT, 0.6f);
+        draw_avatar(dl, f, PX + 23, y + 16, 9, c.with.id, c.with.name);
+        text(dl, f, g_hand, 13, PX + 37, y + 1, CREAM, c.with.name.c_str(), LEFT, 0.6f);
         if (c.unread) badge(dl, f, PX + lw - 26, y + 4, c.unread);
         std::string snip = (c.last_from == v.me ? "You: " : "") + c.last;
-        dl->PushClipRect(f.p(PX + 14, y), f.p(PX + lw - 12, y + 32), true);
-        text(dl, f, g_body, 9, PX + 15, y + 18, IM_COL32(242, 230, 200, 140), snip.c_str(), LEFT, 0);
+        dl->PushClipRect(f.p(PX + 36, y), f.p(PX + lw - 12, y + 32), true);
+        text(dl, f, g_body, 9, PX + 37, y + 18, IM_COL32(242, 230, 200, 140), snip.c_str(), LEFT, 0);
         dl->PopClipRect();
         if (mouse_click(f, PX + 7, y, lw - 14, 32)) { sel = i; C.dm_with = c.with.id; social::open_thread(c.with.id); }
         y += 35;
@@ -1013,9 +1128,11 @@ void draw_messages(ImDrawList *dl, const Frame &f, const ChatKeys &k, const NetR
     float hy = TABS_B + 8;
     ImU32 scol = DIM;
     std::string state = fr ? friend_state(*fr, &scol) : "not your friend";
-    dl->AddCircleFilled(f.p(rx + 16, hy + 7), 3 * f.s(), fr && fr->state != "offline" ? LIVE : IM_COL32(242, 230, 200, 90));
-    text(dl, f, g_hand, 16, rx + 25, hy - 2, CREAM, name.c_str(), LEFT, 0.6f);
-    float nx = rx + 31 + text_width(f, g_hand, 16, name.c_str());
+    draw_avatar(dl, f, rx + 20, hy + 7, 8.5f, C.dm_with, name);
+    dl->AddCircleFilled(f.p(rx + 26, hy + 13), 3.2f * f.s(), IM_COL32(18, 12, 14, 255));
+    dl->AddCircleFilled(f.p(rx + 26, hy + 13), 2.3f * f.s(), fr && fr->state != "offline" ? LIVE : IM_COL32(120, 112, 100, 255));
+    text(dl, f, g_hand, 16, rx + 33, hy - 2, CREAM, name.c_str(), LEFT, 0.6f);
+    float nx = rx + 39 + text_width(f, g_hand, 16, name.c_str());
     if (fr && !fr->tag.empty()) {
         float tw = text_width(f, g_body, 7.5f, fr->tag.c_str()) + 6;
         dl->AddRect(f.p(nx, hy + 2), f.p(nx + tw, hy + 13), IM_COL32(255, 205, 60, 150), 3 * f.s(), 0, 0.8f * f.s());
@@ -1583,6 +1700,7 @@ bool chat_begin()
         if (social::snapshot(C.v, C.have ? C.v.version : 0xFFFFFFFFu)) C.have = true;
         if (C.v.ready && !C.ready_at) C.ready_at = GetTickCount64();
         if (!C.v.ready) C.ready_at = 0;
+        avatars_update();
     }
     chat_test_step();
     NetRoom r;

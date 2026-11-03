@@ -77,6 +77,7 @@ struct View {
     std::string my_name;
     int unread = 0, requests = 0, friends_online = 0, slow_mode = 0, max_chars = 200, online = 0;
     std::string dms;                /* "" friends only, "everyone", "off" */
+    bool show_avatar = true;        /* this account's Discord picture is shown to others (stage 2c) */
     std::vector<Friend> friends;
     std::vector<Ref> in, out, blocked, muted;
     std::vector<Convo> convos;      /* newest first */
@@ -110,6 +111,16 @@ void mark_read(long long with);
 void crew_join(long long crew);
 void crew_dismiss(long long crew);
 void reload();                      /* every list again */
+
+void set_show_avatar(bool on);
+/* Avatars (stage 2c): the account service's 64x64 copy of a player's Discord picture
+ * (GET /api/avatar/N.png; the game never contacts Discord). avatar_want queues a download on a thread
+ * of its own (once per id until forgotten); avatar_take hands over the finished ones, decoded to
+ * RGBA (ok false: none, the overlay draws initials). */
+struct AvatarPixels { long long id = 0; bool ok = false; int w = 0, h = 0; std::vector<unsigned char> rgba; };
+void avatar_want(long long id);
+std::vector<AvatarPixels> avatar_take();
+void avatar_forget(long long id);
 
 /* The presence heartbeat works out the state from the lobby itself; the room's mode name comes from
  * the overlay (the names are read from the player's dump on the overlay's thread). */

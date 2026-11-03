@@ -52,6 +52,8 @@ static void set_reason(const char *text)
 /* The social long-poll's request (account_call with a live slot): another thread may close it to
  * cancel a request that waits (social_shutdown); the owner then leaves that handle alone. */
 static SRWLOCK g_live_lock = SRWLOCK_INIT;
+/* How many bytes the last request_full of this thread read (account_fetch: binary answers). */
+static __declspec(thread) int g_last_len;
 
 static int request_full(const wchar_t *method, const wchar_t *path, const char *token, const char *ctype,
                         const void *body, DWORD blen, char *buf, int size, int limit_ms, int receive_ms,
@@ -117,6 +119,7 @@ static int request_full(const wchar_t *method, const wchar_t *path, const char *
     if (req && canceled != 2) WinHttpCloseHandle(req);
     if (connect) WinHttpCloseHandle(connect);
     if (session) WinHttpCloseHandle(session);
+    g_last_len = n;
     return canceled ? 0 : (int)status;
 }
 
@@ -610,6 +613,17 @@ int account_call(const char *method, const char *path, const char *json, char *b
                           0, receive_ms, live);
     SecureZeroMemory(token, sizeof(token));
     if (status == 401) { forget(); set_reason("Your sign-in ran out; sign in again."); set_state(ACCOUNT_OUT); }
+    return status;
+}
+
+int account_fetch(const char *path, void *buf, int size, int *len)
+{
+    wchar_t wpath[512];
+    int status;
+    if (len) *len = 0;
+    if (size < 2 || !MultiByteToWideChar(CP_UTF8, 0, path, -1, wpath, 512)) return -1;
+    status = request_full(L"GET", wpath, NULL, NULL, NULL, 0, (char *)buf, size, 0, 0, NULL);
+    if (len) *len = status == 200 ? g_last_len : 0;
     return status;
 }
 

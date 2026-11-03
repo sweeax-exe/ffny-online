@@ -19,6 +19,7 @@
 #define WIN32_LEAN_AND_MEAN
 #endif
 #include <windows.h>
+#include <wincodec.h>
 
 #include <algorithm>
 #include <atomic>
@@ -28,6 +29,7 @@
 #include <functional>
 #include <map>
 #include <mutex>
+#include <set>
 
 namespace social {
 namespace {
@@ -198,7 +200,7 @@ std::string g_mode_name;            // guarded by g_mu: the room's mode as the o
 const bool g_test_log = getenv("RECOMP_TEST_SOCIAL") != nullptr;
 void *volatile g_poll_live = nullptr;
 void *volatile g_work_live = nullptr;
-HANDLE g_threads[2];
+HANDLE g_threads[3];
 
 int env_switch()                    // RECOMP_SOCIAL: 1 on, -1 off, 0 the service decides
 {
@@ -355,6 +357,7 @@ bool probe()
     int mc = atoi(key_value(out, "max_chars").c_str());
     g_v.max_chars = mc > 0 ? mc : 200;
     g_v.dms = key_value(out, "dms");
+    g_v.show_avatar = key_value(out, "show_avatar") != "0";
     changed();
     return true;
 }
@@ -826,6 +829,94 @@ void queue(std::function<void()> job)
     g_cv.notify_all();
 }
 
+
+// ---- avatars (stage 2c) ---------------------------------------------------------------------------------
+//
+// One thread of their own, so a slow picture never holds a chat line back: GET /api/avatar/N.png from
+// the account service (public, no token; the service fetched it from Discord once, the game never talks
+// to Discord), decoded with WIC to 64x64 RGBA. The overlay turns them into textures and keeps at most
+// 256 (social_ui.inc). A 404 (no picture, or the player hid it) comes back as "none".
+
+const int AVATAR_SIDE = 64;
+std::mutex g_av_mu;
+std::condition_variable g_av_cv;
+std::deque<long long> g_av_queue;
+std::set<long long> g_av_asked;     // queued or done: asked once until avatar_forget
+std::vector<AvatarPixels> g_av_done;
+
+bool decode_png(const unsigned char *data, int len, AvatarPixels &out)
+{
+    IWICImagingFactory *factory = nullptr;
+    IWICStream *stream = nullptr;
+    IWICBitmapDecoder *decoder = nullptr;
+    IWICBitmapFrameDecode *frame = nullptr;
+    IWICBitmapScaler *scaler = nullptr;
+    IWICFormatConverter *conv = nullptr;
+    UINT w = 0, h = 0;
+    bool ok = false;
+    if (SUCCEEDED(CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&factory))) &&
+        SUCCEEDED(factory->CreateStream(&stream)) &&
+        SUCCEEDED(stream->InitializeFromMemory((BYTE *)data, (DWORD)len)) &&
+        SUCCEEDED(factory->CreateDecoderFromStream(stream, nullptr, WICDecodeMetadataCacheOnDemand, &decoder)) &&
+        SUCCEEDED(decoder->GetFrame(0, &frame)) && SUCCEEDED(frame->GetSize(&w, &h)) && w && h && w <= 1024 && h <= 1024 &&
+        SUCCEEDED(factory->CreateBitmapScaler(&scaler)) &&
+        SUCCEEDED(scaler->Initialize(frame, AVATAR_SIDE, AVATAR_SIDE, WICBitmapInterpolationModeFant)) &&
+        SUCCEEDED(factory->CreateFormatConverter(&conv)) &&
+        SUCCEEDED(conv->Initialize(scaler, GUID_WICPixelFormat32bppRGBA, WICBitmapDitherTypeNone, nullptr, 0.0,
+                                   WICBitmapPaletteTypeCustom))) {
+        out.rgba.assign((size_t)AVATAR_SIDE * AVATAR_SIDE * 4, 0);
+        ok = SUCCEEDED(conv->CopyPixels(nullptr, AVATAR_SIDE * 4, (UINT)out.rgba.size(), out.rgba.data()));
+        out.w = out.h = AVATAR_SIDE;
+    }
+    if (conv) conv->Release();
+    if (scaler) scaler->Release();
+    if (frame) frame->Release();
+    if (decoder) decoder->Release();
+    if (stream) stream->Release();
+    if (factory) factory->Release();
+    return ok;
+}
+
+DWORD WINAPI avatar_thread(LPVOID)
+{
+    HRESULT com = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+    static const int SIZE = 512 * 1024;
+    unsigned char *buf = (unsigned char *)malloc(SIZE);
+    int fetched = 0, missing = 0;
+    while (!g_stop && buf) {
+        long long id = 0;
+        {
+            std::unique_lock<std::mutex> lk(g_av_mu);
+            if (g_av_queue.empty()) g_av_cv.wait_for(lk, std::chrono::milliseconds(500));
+            if (g_av_queue.empty()) continue;
+            id = g_av_queue.front();
+            g_av_queue.pop_front();
+        }
+        if (!social_enabled()) {        // signed out or switched off meanwhile: ask again later
+            std::lock_guard<std::mutex> lk(g_av_mu);
+            g_av_asked.erase(id);
+            continue;
+        }
+        char path[64];
+        snprintf(path, sizeof(path), "/api/avatar/%lld.png", id);
+        int len = 0;
+        int status = account_fetch(path, buf, SIZE, &len);
+        AvatarPixels px;
+        px.id = id;
+        px.ok = status == 200 && len > 8 && len < SIZE - 1 && decode_png(buf, len, px);
+        if (px.ok) fetched++; else missing++;
+        if (g_test_log || fetched + missing <= 3)
+            fprintf(stderr, "[SOCIAL] avatar %lld: %s (HTTP %d, %d bytes)\n", id, px.ok ? "picture" : "none, initials", status, len);
+        std::lock_guard<std::mutex> lk(g_av_mu);
+        if (status == 0) g_av_asked.erase(id);  // unreachable: the overlay may ask again
+        g_av_done.push_back(std::move(px));
+        if (g_av_done.size() > 64) g_av_done.erase(g_av_done.begin());
+    }
+    free(buf);
+    if (SUCCEEDED(com)) CoUninitialize();
+    return 0;
+}
+
 }   // namespace
 
 // ---- the C++ side for the overlay ------------------------------------------------------------------------
@@ -971,6 +1062,50 @@ void crew_dismiss(long long crew)
 
 void reload() { g_resync = true; g_cv.notify_all(); }
 
+void set_show_avatar(bool on)
+{
+    long long me;
+    {
+        std::lock_guard<std::mutex> lk(g_mu);
+        g_v.show_avatar = on;
+        me = g_v.me;
+        changed();
+    }
+    queue([on, me]() {
+        if (post("/api/me/settings", std::string("{\"show_avatar\":") + (on ? "true" : "false") + "}") / 100 == 2)
+            fprintf(stderr, "[SOCIAL] show my Discord picture: %s\n", on ? "on" : "off");
+        avatar_forget(me);
+    });
+}
+
+void avatar_want(long long id)
+{
+    if (id <= 0) return;
+    {
+        std::lock_guard<std::mutex> lk(g_av_mu);
+        if (!g_av_asked.insert(id).second) return;
+        g_av_queue.push_back(id);
+    }
+    g_av_cv.notify_all();
+}
+
+std::vector<AvatarPixels> avatar_take()
+{
+    std::lock_guard<std::mutex> lk(g_av_mu);
+    std::vector<AvatarPixels> out;
+    out.swap(g_av_done);
+    return out;
+}
+
+void avatar_forget(long long id)
+{
+    std::lock_guard<std::mutex> lk(g_av_mu);
+    g_av_asked.erase(id);
+    AvatarPixels px;        // id < 0: the overlay drops its copy of -id and asks again
+    px.id = -id;
+    g_av_done.push_back(px);
+}
+
 void set_mode_name(const std::string &name)
 {
     std::lock_guard<std::mutex> lk(g_mu);
@@ -988,6 +1123,7 @@ extern "C" void social_start(void)
     if (env_switch() < 0 || g_started.exchange(true)) return;
     g_threads[0] = CreateThread(nullptr, 0, work_thread, nullptr, 0, nullptr);
     g_threads[1] = CreateThread(nullptr, 0, poll_thread, nullptr, 0, nullptr);
+    g_threads[2] = CreateThread(nullptr, 0, avatar_thread, nullptr, 0, nullptr);
     atexit(social_shutdown);
     fprintf(stderr, "[SOCIAL] started (RECOMP_SOCIAL %s)\n", env_switch() > 0 ? "on" : "unset: the service decides");
 }
@@ -996,14 +1132,15 @@ extern "C" void social_shutdown(void)
 {
     if (!g_started || g_stop.exchange(true)) return;
     g_cv.notify_all();
+    g_av_cv.notify_all();
     account_cancel_call(&g_poll_live);
     account_cancel_call(&g_work_live);
-    HANDLE live[2];
+    HANDLE live[3];
     int n = 0;
     for (HANDLE h : g_threads) if (h) live[n++] = h;
     DWORD r = n ? WaitForMultipleObjects(n, live, TRUE, 3000) : WAIT_OBJECT_0;
     for (int i = 0; i < n; i++) CloseHandle(live[i]);
-    g_threads[0] = g_threads[1] = nullptr;
+    g_threads[0] = g_threads[1] = g_threads[2] = nullptr;
     fprintf(stderr, "[SOCIAL] stopped%s\n", r == WAIT_TIMEOUT ? " (a request was still running)" : "");
 }
 
@@ -1050,6 +1187,10 @@ void mark_read(long long) {}
 void crew_join(long long) {}
 void crew_dismiss(long long) {}
 void reload() {}
+void set_show_avatar(bool) {}
+void avatar_want(long long) {}
+std::vector<AvatarPixels> avatar_take() { return {}; }
+void avatar_forget(long long) {}
 void set_mode_name(const std::string &) {}
 }
 #endif

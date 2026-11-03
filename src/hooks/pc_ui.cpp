@@ -65,6 +65,7 @@ extern "C" {
 #include "netplay.h"
 #include "netplay_servers.h"
 #include "account.h"
+#include "social.h"
 #include "bug_report.h"
 #include "voice.h"
 #include "online_screen.h"
@@ -1670,6 +1671,17 @@ static void page_account()
             ImGui::SameLine();
             if (ImGui::Button("Keep it", ImVec2(w * 0.7f, 0))) ImGui::CloseCurrentPopup();
             ImGui::EndPopup();
+        }
+        // The Social Update (stage 2c): the picture beside this player's name in chats, friends and crews
+        // is the account service's small copy of the Discord picture; only while the chat is offered.
+        if (social_enabled()) {
+            static social::View v;
+            static bool have = false;
+            if (social::snapshot(v, have ? v.version : 0xFFFFFFFFu)) have = true;
+            bool show = v.show_avatar;
+            if (v.ready && ImGui::Checkbox("Show my Discord picture", &show)) social::set_show_avatar(show);
+            ImGui::SetItemTooltip("Other players see your Discord picture beside your name in the chat, friends and "
+                                  "crews. Our server keeps a small copy, so their games never contact Discord.");
         }
     } else if (state == ACCOUNT_WAITING) {
         ImGui::TextColored(k_gold, "Finish signing in with Discord in your browser...");
