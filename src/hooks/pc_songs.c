@@ -1,0 +1,530 @@
+/*
+ * Songs: restored and (later) player-supplied music in the jukebox and the playlist.
+ * Research and owner decisions: docs/research/custom-songs.md.
+ *
+ * The game lists songs from the Song table of assets/djv2.sod (title, artist, album and the
+ * folder under music/ in AUDIO/MUSIC0-4.VIV). At start-up this file appends rows for the
+ * enabled extra songs to a copy of that database, keeps it in <data>/cache/songs and serves it
+ * in place of the original through the toolkit's game-file redirect. It chains to whatever
+ * redirect was installed before it (a language pack's), and builds on that pack's copy of
+ * djv2.sod when the pack serves one. The dump itself is never written.
+ *
+ * Slice 1: the one cut song with audio on the disc, music/holler ("Holler If Ya Hear Me",
+ * 2Pac), on by default ([songs] restored).
+ */
+#define _CRT_SECURE_NO_WARNINGS
+#include "host.h"
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/stat.h>
+#if defined(_WIN32)
+#include <direct.h>
+#else
+#include <unistd.h>
+#endif
+
+#include "recomp_settings.h"
+#include "pc_songs.h"
+
+/* The toolkit's game-file redirect (kernel.h, not on this target's include path). */
+#if defined(_WIN32)
+typedef WCHAR xbox_host_char;
+#else
+typedef char xbox_host_char;
+#endif
+extern BOOL (*g_xbox_game_file_redirect)(const char *relative, xbox_host_char *host_path, DWORD size);
+
+#define SONGS_PATH     1024
+#define SOD_MAX        (32u << 20)
+#define SOD_NAME       "assets/djv2.sod"
+
+/* ---- the extra songs ---------------------------------------------------------------------------- */
+
+typedef struct {
+    const char *entity;    /* folder under music/ (at most 15 characters: the playlist's slots are 16 bytes) */
+    const char *title, *artist, *album;
+} SongInfo;
+
+/* Cut from the release: complete audio and map on the disc (music1.viv), no Song row. Identified
+ * by the owner from the audio (docs/research/custom-songs.md section 6). */
+static const SongInfo k_restored[] = {
+    { "holler", "Holler If Ya Hear Me", "2Pac", "Strictly 4 My N.I.G.G.A.Z." },
+};
+
+static SongInfo g_songs[64];
+static int g_song_count;
+
+/* ---- small helpers ------------------------------------------------------------------------------- */
+
+typedef struct { uint8_t *p; size_t n, cap; } Buf;
+
+static int buf_reserve(Buf *b, size_t n)
+{
+    if (n <= b->cap) return 1;
+    size_t cap = b->cap ? b->cap : 4096;
+    while (cap < n) cap *= 2;
+    uint8_t *p = (uint8_t *)realloc(b->p, cap);
+    if (!p) return 0;
+    b->p = p;
+    b->cap = cap;
+    return 1;
+}
+
+static uint32_t rd32(const uint8_t *p) { return (uint32_t)p[0] | (uint32_t)p[1] << 8 | (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24; }
+static void wr32(uint8_t *p, uint32_t v) { p[0] = (uint8_t)v; p[1] = (uint8_t)(v >> 8); p[2] = (uint8_t)(v >> 16); p[3] = (uint8_t)(v >> 24); }
+
+static char g_error[256];
+static int fail(const char *what)
+{
+    if (!g_error[0]) snprintf(g_error, sizeof g_error, "%s", what);
+    return 0;
+}
+
+/* The database's own string hash: djb2 over the bytes and the terminating NUL. */
+uint32_t pc_songs_name_hash(const char *s)
+{
+    uint32_t h = 5381;
+    do { h = h * 33 + (uint8_t)*s; } while (*s++);
+    return h;
+}
+
+/* ---- SODB: append rows to one table ------------------------------------------------------------- */
+/*
+ * Layout (setup-side reader with the same checks: the fighter-mod research, setup/fighter_sod.py):
+ *   0 "SODB", 4 version 2, 8 schema fingerprint, 12 schema, 16 tables, 20 strings (offsets).
+ *   index: [tag] count stride; with stride != 0, count keys, then count values of max(stride,1) words.
+ *   schema: tagged index, key = hash(table) ^ hash(field) (hash(table) alone = the row name),
+ *           value = (word offset in the record, type; 1 = string index).
+ *   tables: tagged index, key = hash(table), value = table header:
+ *           tag, primary group, secondary group, record count; each group is an index of
+ *           (member key -> tagged sub-index of record offsets), keyed sub-indexes sorted by value.
+ *   strings: "STRT", count, (hash, offset) pairs; records hold string indexes.
+ * New strings, records, sub-indexes and the string table are appended; existing records keep
+ * their offsets and bytes, and each group's member map is rewritten in place (same size), so the
+ * game's pointer-based readers see the rebuilt sub-indexes.
+ */
+
+typedef struct {
+    Buf out;
+    uint32_t nstr;
+    uint32_t *str_hash, *str_off;    /* nstr entries, grown as strings are added */
+    uint32_t schema;
+} Sod;
+
+static int sod_range(const Sod *s, uint32_t off, uint32_t len)
+{
+    return off <= s->out.n && len <= s->out.n - off;
+}
+
+static uint32_t sod_word(const Sod *s, uint32_t off) { return sod_range(s, off, 4) ? rd32(s->out.p + off) : 0; }
+
+/* Find key in an index; returns the address of its value words, or 0. */
+static uint32_t sod_lookup(const Sod *s, uint32_t index, int tagged, uint32_t key)
+{
+    uint32_t at = index + (tagged ? 4 : 0);
+    if (!sod_range(s, at, 8)) return 0;
+    uint32_t count = sod_word(s, at), stride = sod_word(s, at + 4);
+    if (!stride || stride > 256 || !sod_range(s, at + 8, count * 4 * (stride + 1))) return 0;
+    for (uint32_t i = 0; i < count; i++)
+        if (sod_word(s, at + 8 + i * 4) == key) return at + 8 + count * 4 + i * stride * 4;
+    return 0;
+}
+
+static uint32_t sod_emit(Sod *s, const void *data, size_t n)
+{
+    while (s->out.n % 4) {
+        if (!buf_reserve(&s->out, s->out.n + 1)) return 0;
+        s->out.p[s->out.n++] = 0;
+    }
+    if (s->out.n + n > SOD_MAX || !buf_reserve(&s->out, s->out.n + n)) return 0;
+    uint32_t at = (uint32_t)s->out.n;
+    memcpy(s->out.p + at, data, n);
+    s->out.n += n;
+    return at;
+}
+
+static int sod_intern(Sod *s, const char *value, uint32_t *index)
+{
+    uint32_t h = pc_songs_name_hash(value);
+    for (uint32_t i = 0; i < s->nstr; i++) {
+        if (s->str_hash[i] != h || !s->str_off[i] || !sod_range(s, s->str_off[i], 1)) continue;
+        if (!strncmp((const char *)s->out.p + s->str_off[i], value, s->out.n - s->str_off[i])) { *index = i; return 1; }
+    }
+    uint32_t at = sod_emit(s, value, strlen(value) + 1);
+    if (!at) return fail("database too large");
+    uint32_t *hh = (uint32_t *)realloc(s->str_hash, (s->nstr + 1) * sizeof *hh);
+    if (hh) s->str_hash = hh;
+    uint32_t *oo = (uint32_t *)realloc(s->str_off, (s->nstr + 1) * sizeof *oo);
+    if (oo) s->str_off = oo;
+    if (!hh || !oo) return fail("out of memory");
+    s->str_hash[s->nstr] = h;
+    s->str_off[s->nstr] = at;
+    *index = s->nstr++;
+    return 1;
+}
+
+/* Field (word offset, type) of a table, or 0 when the schema has no such field. */
+static int sod_field(const Sod *s, uint32_t table_hash, const char *field, uint32_t *word, uint32_t *type)
+{
+    uint32_t key = field ? table_hash ^ pc_songs_name_hash(field) : table_hash;
+    uint32_t v = sod_lookup(s, s->schema, 1, key);
+    if (!v) return 0;
+    *word = sod_word(s, v);
+    *type = sod_word(s, v + 4);
+    return 1;
+}
+
+typedef struct { uint32_t value, offset; } Pair;
+
+static int pair_cmp(const void *a, const void *b)
+{
+    const Pair *x = (const Pair *)a, *y = (const Pair *)b;
+    if (x->value != y->value) return x->value < y->value ? -1 : 1;
+    return x->offset < y->offset ? -1 : x->offset > y->offset;
+}
+
+/*
+ * Append `count` rows to table `name`. Each row starts as a copy of the table's first record
+ * (fields the caller does not name keep the template's values), then gets the named string
+ * fields. fields[i*nfields + f] is the value for field_names[f] (NULL field name = the row
+ * name). Rows whose row name already exists are skipped (the database already has the song).
+ */
+int pc_songs_sod_add_rows(const uint8_t *in, size_t n, const char *name, const char *const *field_names,
+                          int nfields, const char *const *values, int count, uint8_t **out, size_t *out_n,
+                          int *added)
+{
+    Sod s;
+    Pair *pairs = NULL;
+    uint32_t *new_rows = NULL;
+    int nnew = 0, ok = 0;
+    memset(&s, 0, sizeof s);
+    g_error[0] = 0;
+    *out = NULL;
+    *out_n = 0;
+    if (added) *added = 0;
+
+    if (n < 24 || n > SOD_MAX || memcmp(in, "SODB", 4) || rd32(in + 4) != 2) return fail("not a version 2 SODB database");
+    if (!buf_reserve(&s.out, n)) return fail("out of memory");
+    memcpy(s.out.p, in, n);
+    s.out.n = n;
+    s.schema = sod_word(&s, 12);
+    uint32_t tables = sod_word(&s, 16), strings = sod_word(&s, 20);
+    if (!sod_range(&s, s.schema, 4) || memcmp(s.out.p + s.schema, "SKMA", 4) || !sod_range(&s, tables, 4) ||
+        memcmp(s.out.p + tables, "DATA", 4) || !sod_range(&s, strings, 8) || memcmp(s.out.p + strings, "STRT", 4))
+        { fail("database sections not found"); goto done; }
+
+    s.nstr = sod_word(&s, strings + 4);
+    if (s.nstr > 1000000 || !sod_range(&s, strings + 8, s.nstr * 8)) { fail("bad string table"); goto done; }
+    s.str_hash = (uint32_t *)malloc((s.nstr + 1) * sizeof(uint32_t));
+    s.str_off = (uint32_t *)malloc((s.nstr + 1) * sizeof(uint32_t));
+    if (!s.str_hash || !s.str_off) { fail("out of memory"); goto done; }
+    for (uint32_t i = 0; i < s.nstr; i++) {
+        s.str_hash[i] = sod_word(&s, strings + 8 + i * 8);
+        s.str_off[i] = sod_word(&s, strings + 12 + i * 8);
+    }
+
+    uint32_t thash = pc_songs_name_hash(name);
+    uint32_t hv = sod_lookup(&s, tables, 1, thash);
+    if (!hv) { fail("table not in the database"); goto done; }
+    uint32_t header = sod_word(&s, hv);
+    if (!sod_range(&s, header, 16) || sod_word(&s, header) != thash) { fail("bad table header"); goto done; }
+    uint32_t rows = sod_word(&s, header + 12);
+
+    /* The table's record offsets (from the primary group's first member) and their extent. */
+    uint32_t group0 = sod_word(&s, header + 4);
+    if (!sod_range(&s, group0, 8) || !sod_word(&s, group0) || sod_word(&s, group0 + 4) != 1) { fail("bad table index"); goto done; }
+    uint32_t members0 = sod_word(&s, group0);
+    uint32_t first_sub = sod_word(&s, group0 + 8 + members0 * 4);
+    if (!sod_range(&s, first_sub, 12) || sod_word(&s, first_sub + 4) != rows) { fail("bad record index"); goto done; }
+    uint32_t sub_stride = sod_word(&s, first_sub + 8);
+    uint32_t rec_list = first_sub + 12 + (sub_stride ? rows * 4 : 0);
+    if (!rows || !sod_range(&s, rec_list, rows * 4)) { fail("table has no records"); goto done; }
+    uint32_t template_off = sod_word(&s, rec_list);
+
+    /* Record size: the highest field word offset this schema gives the table, plus one. */
+    uint32_t words = 1, w, t;
+    for (int f = 0; f < nfields; f++)
+        if (sod_field(&s, thash, field_names[f], &w, &t) && w + 1 > words) words = w + 1;
+    {
+        /* Any other schema entry of this table may sit further out: take the gap to the next
+         * record when the records are laid out contiguously (they are in the retail file). */
+        uint32_t next = 0;
+        for (uint32_t i = 0; i < rows; i++) {
+            uint32_t o = sod_word(&s, rec_list + i * 4);
+            if (o > template_off && (!next || o < next)) next = o;
+        }
+        if (next && next - template_off >= words * 4 && next - template_off <= 4096) words = (next - template_off) / 4;
+    }
+    if (!sod_range(&s, template_off, words * 4)) { fail("bad template record"); goto done; }
+
+    new_rows = (uint32_t *)calloc((size_t)count + 1, sizeof *new_rows);
+    if (!new_rows) { fail("out of memory"); goto done; }
+    uint32_t name_word = 0, name_type = 0;
+    if (!sod_field(&s, thash, NULL, &name_word, &name_type)) { fail("table has no row name"); goto done; }
+    for (int r = 0; r < count; r++) {
+        const char *row_name = NULL;
+        for (int f = 0; f < nfields; f++) if (!field_names[f]) row_name = values[r * nfields + f];
+        if (!row_name) { fail("row without a name"); goto done; }
+        int exists = 0;
+        uint32_t h = pc_songs_name_hash(row_name);
+        for (uint32_t i = 0; i < rows && !exists; i++) {
+            uint32_t idx = sod_word(&s, sod_word(&s, rec_list + i * 4) + name_word * 4);
+            exists = idx < s.nstr && s.str_hash[idx] == h;
+        }
+        if (exists) continue;
+        uint8_t rec[4096];
+        memcpy(rec, s.out.p + template_off, words * 4);
+        for (int f = 0; f < nfields; f++) {
+            uint32_t idx;
+            /* The row name is a string index too, with its own type code (0x02000000). */
+            if (!sod_field(&s, thash, field_names[f], &w, &t) || (field_names[f] && t != 1) || w >= words)
+                { fail("table has no such text field"); goto done; }
+            if (!sod_intern(&s, values[r * nfields + f], &idx)) goto done;
+            wr32(rec + w * 4, idx);
+        }
+        new_rows[nnew] = sod_emit(&s, rec, words * 4);
+        if (!new_rows[nnew]) { fail("database too large"); goto done; }
+        nnew++;
+    }
+
+    if (nnew) {
+        pairs = (Pair *)malloc(((size_t)rows + nnew) * sizeof *pairs);
+        if (!pairs) { fail("out of memory"); goto done; }
+        for (int g = 0; g < 2; g++) {
+            uint32_t group = sod_word(&s, header + 4 + g * 4);
+            if (!sod_range(&s, group, 8)) { fail("bad table group"); goto done; }
+            uint32_t members = sod_word(&s, group), gstride = sod_word(&s, group + 4);
+            if (!members) continue;
+            if (gstride != 1 || !sod_range(&s, group + 8, members * 8)) { fail("bad table group"); goto done; }
+            for (uint32_t m = 0; m < members; m++) {
+                uint32_t key = sod_word(&s, group + 8 + m * 4);
+                uint32_t sub = sod_word(&s, group + 8 + members * 4 + m * 4);
+                if (!sod_range(&s, sub, 12) || sod_word(&s, sub + 4) != rows) { fail("bad member index"); goto done; }
+                uint32_t tag = sod_word(&s, sub), keyed = sod_word(&s, sub + 8);
+                uint32_t list = sub + 12 + (keyed ? rows * 4 : 0);
+                if (keyed > 1 || !sod_range(&s, list, rows * 4)) { fail("bad member index"); goto done; }
+                uint32_t total = rows + (uint32_t)nnew, mw = 0, mt = 0;
+                for (uint32_t i = 0; i < rows; i++) pairs[i].offset = sod_word(&s, list + i * 4);
+                for (int i = 0; i < nnew; i++) pairs[rows + i].offset = new_rows[i];
+                if (keyed) {
+                    uint32_t v = sod_lookup(&s, s.schema, 1, key);
+                    if (!v) { fail("index key not in schema"); goto done; }
+                    mw = sod_word(&s, v);
+                    mt = sod_word(&s, v + 4);
+                    for (uint32_t i = 0; i < total; i++) {
+                        uint32_t val = sod_word(&s, pairs[i].offset + mw * 4);
+                        if (key == thash || mt == 1) {
+                            if (val >= s.nstr) { fail("bad string reference"); goto done; }
+                            val = s.str_hash[val];
+                        }
+                        pairs[i].value = val;
+                    }
+                    qsort(pairs, total, sizeof *pairs, pair_cmp);
+                }
+                /* tag, count, keyed, [keys], record offsets */
+                Buf blob = {0};
+                if (!buf_reserve(&blob, (3 + (size_t)total * 2) * 4)) { fail("out of memory"); goto done; }
+                wr32(blob.p, tag);
+                wr32(blob.p + 4, total);
+                wr32(blob.p + 8, keyed);
+                blob.n = 12;
+                if (keyed) for (uint32_t i = 0; i < total; i++, blob.n += 4) wr32(blob.p + blob.n, pairs[i].value);
+                for (uint32_t i = 0; i < total; i++, blob.n += 4) wr32(blob.p + blob.n, pairs[i].offset);
+                uint32_t at = sod_emit(&s, blob.p, blob.n);
+                free(blob.p);
+                if (!at) { fail("database too large"); goto done; }
+                wr32(s.out.p + group + 8 + members * 4 + m * 4, at);
+            }
+        }
+        wr32(s.out.p + header + 12, rows + (uint32_t)nnew);
+    }
+
+    if (nnew) {
+        /* The string table, re-emitted with the added strings. */
+        Buf blob = {0};
+        if (!buf_reserve(&blob, 8 + (size_t)s.nstr * 8)) { fail("out of memory"); goto done; }
+        memcpy(blob.p, "STRT", 4);
+        wr32(blob.p + 4, s.nstr);
+        for (uint32_t i = 0; i < s.nstr; i++) {
+            wr32(blob.p + 8 + i * 8, s.str_hash[i]);
+            wr32(blob.p + 12 + i * 8, s.str_off[i]);
+        }
+        uint32_t at = sod_emit(&s, blob.p, 8 + (size_t)s.nstr * 8);
+        free(blob.p);
+        if (!at) { fail("database too large"); goto done; }
+        wr32(s.out.p + 20, at);
+    }
+    ok = 1;
+    if (added) *added = nnew;
+    *out = s.out.p;
+    *out_n = s.out.n;
+    s.out.p = NULL;
+done:
+    free(s.out.p);
+    free(s.str_hash);
+    free(s.str_off);
+    free(pairs);
+    free(new_rows);
+    return ok;
+}
+
+/* ---- serving ---------------------------------------------------------------------------------- */
+
+static BOOL (*g_previous_redirect)(const char *relative, xbox_host_char *host_path, DWORD size);
+static char g_served_host[SONGS_PATH];
+
+static int same_name(const char *a, const char *b)
+{
+    for (; *a && *b; a++, b++) {
+        char x = *a == '\\' ? '/' : (char)((*a >= 'A' && *a <= 'Z') ? *a + 32 : *a);
+        char y = *b == '\\' ? '/' : (char)((*b >= 'A' && *b <= 'Z') ? *b + 32 : *b);
+        if (x != y) return 0;
+    }
+    return *a == *b;
+}
+
+static BOOL songs_redirect(const char *relative, xbox_host_char *host_path, DWORD size)
+{
+    if (g_served_host[0] && same_name(relative, SOD_NAME)) {
+#if defined(_WIN32)
+        return MultiByteToWideChar(CP_UTF8, 0, g_served_host, -1, host_path, (int)size) != 0;
+#else
+        return (size_t)snprintf(host_path, size, "%s", g_served_host) < size;
+#endif
+    }
+    return g_previous_redirect ? g_previous_redirect(relative, host_path, size) : FALSE;
+}
+
+static int read_all(const char *path, uint8_t **data, size_t *n)
+{
+    FILE *f = fopen(path, "rb");
+    *data = NULL;
+    *n = 0;
+    if (!f) return 0;
+    if (fseek(f, 0, SEEK_END) || ftell(f) <= 0 || ftell(f) > (long)SOD_MAX) { fclose(f); return 0; }
+    long len = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    *data = (uint8_t *)malloc((size_t)len);
+    if (*data && fread(*data, 1, (size_t)len, f) == (size_t)len) *n = (size_t)len;
+    fclose(f);
+    if (!*n) { free(*data); *data = NULL; return 0; }
+    return 1;
+}
+
+static void make_dirs(const char *path)
+{
+    char tmp[SONGS_PATH];
+    snprintf(tmp, sizeof tmp, "%s", path);
+    for (char *p = tmp + 1; *p; p++) {
+        if (*p != '/' && *p != '\\') continue;
+        char c = *p;
+        *p = 0;
+#if defined(_WIN32)
+        _mkdir(tmp);
+#else
+        mkdir(tmp, 0755);
+#endif
+        *p = c;
+    }
+}
+
+/* The database the game would otherwise read: a language pack's copy, else the dump's. */
+static int source_database(const char *game_dir, char *out, size_t size)
+{
+    if (g_previous_redirect) {
+        xbox_host_char host[SONGS_PATH];
+        if (g_previous_redirect(SOD_NAME, host, SONGS_PATH)) {
+#if defined(_WIN32)
+            return WideCharToMultiByte(CP_UTF8, 0, host, -1, out, (int)size, NULL, NULL) != 0;
+#else
+            return (size_t)snprintf(out, size, "%s", host) < size;
+#endif
+        }
+    }
+    return (size_t)snprintf(out, size, "%s" HOST_SEP "assets" HOST_SEP "djv2.sod", game_dir) < size;
+}
+
+int pc_songs_count(void) { return g_song_count; }
+const char *pc_songs_entity(int i) { return i >= 0 && i < g_song_count ? g_songs[i].entity : NULL; }
+
+void pc_songs_start(const char *data_root, const char *game_dir)
+{
+    char source[SONGS_PATH], cache[SONGS_PATH];
+    uint8_t *in = NULL, *out = NULL;
+    size_t in_n = 0, out_n = 0;
+    int added = 0;
+
+    g_song_count = 0;
+    if (recomp_settings_get("songs", "restored", 1))
+        for (size_t i = 0; i < sizeof k_restored / sizeof k_restored[0]; i++) g_songs[g_song_count++] = k_restored[i];
+    if (!g_song_count) {
+        fprintf(stderr, "[SONGS] the game's own soundtrack (no extra songs)\n");
+        return;
+    }
+    if (!data_root || !*data_root) {
+        fprintf(stderr, "[SONGS] extra songs need a data folder; playing the game's own soundtrack\n");
+        g_song_count = 0;
+        return;
+    }
+
+    g_previous_redirect = g_xbox_game_file_redirect;
+    g_error[0] = 0;
+    if (!source_database(game_dir, source, sizeof source) || !read_all(source, &in, &in_n)) {
+        fprintf(stderr, "[SONGS] cannot read %s; playing the game's own soundtrack\n", source);
+        g_song_count = 0;
+        return;
+    }
+
+    {
+        static const char *const fields[] = { NULL, "Title", "Artist", "Album", "Entity" };
+        const char *values[64 * 5];
+        for (int i = 0; i < g_song_count; i++) {
+            values[i * 5 + 0] = g_songs[i].title;    /* the row name the retail rows use */
+            values[i * 5 + 1] = g_songs[i].title;
+            values[i * 5 + 2] = g_songs[i].artist;
+            values[i * 5 + 3] = g_songs[i].album;
+            values[i * 5 + 4] = g_songs[i].entity;
+        }
+        if (!pc_songs_sod_add_rows(in, in_n, "Song", fields, 5, values, g_song_count, &out, &out_n, &added)) {
+            fprintf(stderr, "[SONGS] song list not extended (%s); playing the game's own soundtrack\n", g_error);
+            free(in);
+            g_song_count = 0;
+            return;
+        }
+    }
+    free(in);
+
+    snprintf(cache, sizeof cache, "%s" HOST_SEP "cache" HOST_SEP "songs" HOST_SEP "djv2.sod", data_root);
+    {
+        /* Rewrite the copy only when it differs: a running game's earlier copy stays valid. */
+        uint8_t *old = NULL;
+        size_t old_n = 0;
+        int same = read_all(cache, &old, &old_n) && old_n == out_n && !memcmp(old, out, out_n);
+        free(old);
+        if (!same) {
+            char part[SONGS_PATH + 8];
+            snprintf(part, sizeof part, "%s.part", cache);
+            make_dirs(cache);
+            FILE *f = fopen(part, "wb");
+            int ok = f && fwrite(out, 1, out_n, f) == out_n;
+            if (f && fclose(f)) ok = 0;
+            remove(cache);
+            if (!ok || rename(part, cache)) {
+                remove(part);
+                fprintf(stderr, "[SONGS] cannot write %s; playing the game's own soundtrack\n", cache);
+                free(out);
+                g_song_count = 0;
+                return;
+            }
+        }
+    }
+    free(out);
+    snprintf(g_served_host, sizeof g_served_host, "%s", cache);
+    g_xbox_game_file_redirect = songs_redirect;
+    fprintf(stderr, "[SONGS] %d extra song(s), %d added to the song list; database served from %s\n",
+            g_song_count, added, cache);
+    for (int i = 0; i < g_song_count; i++)
+        fprintf(stderr, "[SONGS]   %s: \"%s\" - %s\n", g_songs[i].entity, g_songs[i].title, g_songs[i].artist);
+}

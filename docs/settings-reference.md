@@ -105,6 +105,12 @@ settings (see [Launcher and overlay](launcher-and-overlay.md#cheats)). [How they
 | `story_subtitles` | `auto` | Story cutscene subtitles: `auto` (what the language mod asks for; without one, as the game does), `all cutscenes` (every cutscene, English included: the game has English subtitles for all of them), `as the game does` (the opening cutscene only). Restart. Shown in the launcher as **Interface → Language and subtitles**. Env `RECOMP_STORY_SUBTITLES`. |
 | `game` | `english` | The game's own language: `english`, or `french`, the translation built into the game (menus, memory-card messages and Story subtitles, which then show in every cutscene; the voices and the menu icon art stay English). Not used while a language mod is on. Restart. Shown in the launcher as **Interface → Language and subtitles**. Env `RECOMP_GAME_LANGUAGE`. [The game's own French](language-packs.md#the-games-own-french). |
 
+## [songs]
+
+| Key | Default | Meaning |
+|---|---|---|
+| `restored` | `true` | Restored songs: music cut from the release whose audio is still on the disc ("Holler If Ya Hear Me", 2Pac) is in the Beatbox and the playlist like the other songs. The game reads a copy of its song list with the extra rows from `<data>/cache/songs` (built on a language mod's copy when one is on). Restart. Env `RECOMP_SONGS_RESTORED`. [Research](research/custom-songs.md). |
+
 ## [textures]
 
 | Key | Default | Meaning |
