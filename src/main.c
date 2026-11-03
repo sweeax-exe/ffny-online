@@ -59,6 +59,7 @@
 #include "nv2a/nv2a_pgraph_d3d11.h"
 #include "hooks/save_compat.h"
 #include "hooks/recorder.h"
+#include "hooks/pc_language.h"
 
 /*
  * If xboxrecomp.h is not an umbrella header in your setup, include
@@ -607,6 +608,9 @@ static int host_main(void)
      * behind two writers doing single-character system calls. */
     setvbuf(stdout, NULL, _IOFBF, 1 << 16);
     setvbuf(stderr, NULL, _IOFBF, 1 << 16);
+    { extern void input_latency_start(void); input_latency_start(); }
+    { extern void input_consumption_start(void); input_consumption_start(); }
+    { extern void input_late_start(void); input_late_start(); }
 
     /* Find the game folder, open a log if nothing captures the output, supply
      * the runtime's required switches and load settings.ini -- before anything
@@ -636,6 +640,8 @@ static int host_main(void)
         return 1;
     }
     printf("XBE loaded: %zu bytes\n", xbe_size);
+    /* A language pack's change to the data sections (an embedded texture or string). */
+    pc_language_patch_xbe(xbe_data, xbe_size);
 
     /* Report the audio codec as present, before the layout is built.
      *

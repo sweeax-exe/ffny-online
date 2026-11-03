@@ -49,9 +49,9 @@ pane follows the focused or hovered setting. Existing INI names and saved values
 Mods lists selected packs first, including missing selections, then other local folders. The origin badge
 distinguishes manually installed packs from catalogue-managed downloads. Refresh local mods finds new
 folders without enabling them. Unchecking keeps files. **Load Order...** shows all enabled local and
-project packs together: low priority at the top, high priority at the bottom. Earlier/Later moves a pack;
+project packs together: highest priority at the top. Higher/Lower moves a pack;
 the overlap readout names which final pack wins the same texture ID. Changes apply on the next launch.
-Place HD Widescreen Menus after optional Faithful HD components. The advanced pack-list field and
+Place HD Widescreen Menus above the optional Recomp HD baseline in the priority window. The advanced pack-list field and
 `RECOMP_TEXTURE_PACKS` environment locks remain available; overly long lists are rejected visibly.
 
 The **Project catalogue** uses a separate Python helper for network operations. Refresh verifies the
@@ -67,8 +67,9 @@ installation unless its short final commit has already completed. An OS-held loc
 started without the launcher. An interrupted commit is recovered before Play; if recovery cannot safely
 recognize files, it preserves them and offers Retry recovery. A saved skip-launcher preference is
 bypassed for recovery without changing the preference. Old installations without the helper keep local
-mod controls and Play. The signing catalogue is not publicly deployed yet; no public menu download is
-advertised by this source change. See [mod manager implementation](mod-manager.md).
+mod controls and Play. The signed project catalogue provides compatible reviewed downloads.
+For authoring, see [Texture Modding — Getting Started](texture-modding-getting-started.md);
+for helper behavior, see [mod management](mod-manager.md).
 
 ### Folders, logs and setup
 
