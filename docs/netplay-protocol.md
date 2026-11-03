@@ -376,6 +376,28 @@ that relay.
   quick room once its quick match searches other relays (build 38: any choice but a custom address; the
   `age` lets two such players decide who moves; see `docs/netplay.md`).
 
+## Who is online without a session (all servers)
+
+Since build 47 the PLAYERS ONLINE page lists every relay's players when the player chose **All
+servers**: the hub's own relay answers `WHO`, the others `PLAYERLIST`, which, like `ROOMLIST`, needs no
+token and registers nothing. A relay before build 47 drops it silently (an unknown type), and the
+game then lists none of that relay's players. With one server chosen, the page names the hub's relay's
+players and adds a line with how many are on the others (their `STATUS` counts).
+
+| Type | Name | Direction | Body after the header |
+|---|---|---|---|
+| 0x31 | `PLAYERLIST` | client -> server | `nonce` u32, `build` 8 (the asker's fingerprint, zeros: any), then zero bytes (padding, as for `ROOMLIST`) |
+| 0x31 | `PLAYERLIST` | server -> client | `nonce` u32 (the request's), `online` u16 (everyone connected, as `PLAYERS`), `total` u16 (players that match), `count` u8, then per player: `name` string, `state` u8 (0 in the hub, 1 in a room, 2 playing; as in `PLAYERS`) |
+
+- The players are those `WHO` gives a registered client of that build (lobby clients with a name;
+  in the hub first, then in rooms, then playing; by name), at most 40. Names and states only: never an
+  address.
+- **The answer is never larger than the request**; padding that is not zero is malformed (dropped).
+- Each source IP gets at most 2 answers a second (its own allowance, beside `STATUS` and
+  `ROOMLIST`); the per-IP message limit applies as well. The summary log line counts the answers
+  (`playerlist=N` at its end).
+- The game asks every relay but its hub's at most every 5 s, only while the page shows.
+
 ## Created fighters (Story-mode fighters online)
 
 Since build 37 a player may fight with the fighter they made in Story mode

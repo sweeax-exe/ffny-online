@@ -908,6 +908,7 @@ struct Gallery {
     bool pending = false;           // the sample waits for the relays' first answers
     int room_pings[NETPLAY_ROOM_SLOTS] = {};
     std::vector<NetServerRoom> other_rooms;     // All servers: the sample's rooms on US East and US West
+    std::vector<NetServerPlayer> other_players; // All servers: the sample's players on US East and US West
     NetVersus versus = {};          // the versus pages' sample (count 0: the plain MATCH FOUND)
     int page_ms = 0;                // how long the page has been up
     unsigned cp_slots = 0;          // created fighters: the sample's room slots that have one (0: none offered)
@@ -1021,6 +1022,20 @@ int lobby_players(NetPlayer *out, int max, int *online, int *rooms)
     for (int i = 0; out && i < n; i++) out[i] = G.players[i];
     if (online) *online = G.servers[G.server_cur].online;
     if (rooms) *rooms = G.servers[G.server_cur].rooms;
+    return n;
+}
+// All servers (build 47): who is online on every relay, each tagged with its relay (netservers_players).
+int all_players(NetServerPlayer *out, int max, int *online)
+{
+    if (!gallery_on()) {
+        netservers_fetch_players();     // the other relays' lists, every 5 s
+        return netservers_players(out, max, online);
+    }
+    int n = 0, sum = 0;
+    for (const NetPlayer &p : G.players) if (n < max) { out[n].player = p; out[n].server = G.server_cur; n++; }
+    for (const NetServerPlayer &p : G.other_players) if (n < max) out[n++] = p;
+    for (int i = 0; i < NETSERVER_COUNT; i++) if (G.servers[i].state == NETSERVER_UP) sum += G.servers[i].online;
+    if (online) *online = sum;
     return n;
 }
 int lobby_queue(int *waited, int *searching, char *why, int size)
@@ -1492,11 +1507,23 @@ bool online_count(ImDrawList *dl, const Frame &f, bool button = false)
 
 void draw_players(ImDrawList *dl, const Frame &f, const Pad &pad)
 {
-    static NetPlayer list[40];
-    int online = -1, rooms = 0;
-    int n = lobby_players(list, 40, &online, &rooms);
+    // All servers (build 47): every relay's players, each with its server's tag; otherwise the hub's
+    // relay's, and a line with how many are on the others (their STATUS counts)
+    static NetServerPlayer list[40];
+    static NetPlayer own[40];
+    bool all = all_servers();
+    int online = -1, rooms = 0, n;
+    if (all) n = all_players(list, 40, &online);
+    else {
+        n = lobby_players(own, 40, &online, &rooms);
+        for (int i = 0; i < n; i++) { list[i].player = own[i]; list[i].server = -1; }
+    }
     if (pad.x) netplay_lobby_who();
+    NetServerInfo sv[NETSERVER_COUNT];
+    servers(sv);
+    int here = connected_server();
     page_title(dl, f, "PLAYERS ONLINE");
+    if (all) text(dl, f, g_hand, 14, 54, 58, ORANGE, "All servers: everyone, with their server.", LEFT, 0.8f);
     online_count(dl, f);
     if (n < 0) {
         text(dl, f, g_title, 20, 320, 200, CREAM, "ASKING THE SERVER...", CENTER, 1.4f);
@@ -1505,13 +1532,37 @@ void draw_players(ImDrawList *dl, const Frame &f, const Pad &pad)
     glass(dl, f, 40, 78, 566, 334);
     static const char *const states[] = { "IN THE MENU", "IN A ROOM", "FIGHTING" };
     const ImU32 colours[] = { CREAM, ORANGE, GREEN };
+    // the tags are as wide as the widest server's name, so the names line up
+    float tag_w = 0;
+    if (all)
+        for (int i = 0; i < NETSERVER_COUNT; i++) tag_w = std::max(tag_w, text_width(f, g_title, 9, sv[i].short_name));
     for (int i = 0; i < n; i++) {
-        float x = i < 20 ? 52 : 330, y = 90 + (i % 20) * 15.0f;
-        int st = list[i].state >= 0 && list[i].state <= 2 ? list[i].state : 0;
-        text(dl, f, g_title, 13, x, y, WHITE, list[i].name, LEFT, 1.1f);
+        float x = i < 20 ? 52 : 330, y = 90 + (i % 20) * 15.0f, nx = x;
+        const NetPlayer &p = list[i].player;
+        int st = p.state >= 0 && p.state <= 2 ? p.state : 0;
+        if (all && list[i].server >= 0 && list[i].server < NETSERVER_COUNT) {
+            bool away = list[i].server != here;
+            rect(dl, f, x - 2, y + 1, tag_w + 8, 12, away ? IM_COL32(60, 40, 18, 210) : IM_COL32(0, 0, 0, 150), 3);
+            text(dl, f, g_title, 9, x + 2 + tag_w / 2, y + 2, away ? ORANGE : GREY, sv[list[i].server].short_name,
+                 CENTER, 0.8f);
+            nx = x + tag_w + 12;
+        }
+        text(dl, f, g_title, 13, nx, y, WHITE, p.name, LEFT, 1.1f);
         text(dl, f, g_title, 10, x + 262, y + 2, colours[st], states[st], RIGHT, 1.0f);
     }
-    if (n == 0) text(dl, f, g_title, 14, 320, 200, GREY, "Nobody else with this version right now.", CENTER, 1.0f);
+    if (n == 0)
+        text(dl, f, g_title, 14, 320, 200, GREY, all ? "Nobody with this version on any server right now." :
+             "Nobody else with this version right now.", CENTER, 1.0f);
+    if (!all && here >= 0) {    // the other servers' players, from their STATUS
+        std::string more;
+        for (int i = 0; i < NETSERVER_COUNT; i++) {
+            if (i == here || sv[i].state != NETSERVER_UP || sv[i].online <= 0) continue;
+            char part[64];
+            snprintf(part, sizeof(part), "%s%d more on %s", more.empty() ? "" : ", ", sv[i].online, sv[i].name);
+            more += part;
+        }
+        if (!more.empty()) text(dl, f, g_title, 10, 54, 394, ORANGE, (more + ".").c_str(), LEFT, 1.0f);
+    }
     if (online > n)
         text(dl, f, g_title, 10, 592, 394, GREY, "and others on other versions or not shown", RIGHT, 1.0f);
 }
@@ -3790,6 +3841,8 @@ void gallery_step()
                                          "create-team", "create-special", "create-subway", "room-team", "room-team-3",
                                          "room-special", "vote-team",
                                          "ranked", "voice", "stats", "stats-1v1", "players", "fighters",
+                                         // build 47: every server's players (All servers)
+                                         "players-all",
                                          // build 33: the grid at Eric Sermon, O.E, Santos and Teck
                                          "fighters-91", "fighters-92", "fighters-93", "fighters-85", "room", "vote", "hill",
                                          "up", "watch", "room-voice", "match",
@@ -3876,6 +3929,16 @@ void gallery_step()
             e.ping_ms = i == 2 ? 168 : 112;
             e.age_s = 40 + i * 15;
             G.other_rooms.push_back(e);
+        }
+        // All servers: US East's and US West's players (build 47)
+        static const char *const far_who[] = { "Brooklyn Bruiser", "Kingpin", "Rex", "Dmx Fan", "Queens", "NightOwl",
+                                               "Cali", "Oak", "Tre" };
+        for (int i = 0; i < (int)(sizeof(far_who) / sizeof(far_who[0])); i++) {
+            NetServerPlayer e = {};
+            snprintf(e.player.name, sizeof(e.player.name), "%s", far_who[i]);
+            e.player.state = i % 3;
+            e.server = i < 6 ? NETSERVER_NA : NETSERVER_WEST;
+            G.other_players.push_back(e);
         }
     }
     // RECOMP_TEST_ONLINE_GALLERY_ONLY=<prefix>: only the pages whose names start with it ("versus")
@@ -3972,6 +4035,7 @@ void gallery_step()
     else if (p == "voice") { S.page = VOICE; S.voice_sel = 1; }
     else if (p == "stats" || p == "stats-1v1") { S.page = STATS; S.stats_page = 0; }
     else if (p == "players") S.page = PLAYERS;
+    else if (p == "players-all") { S.page = PLAYERS; G.choice = NETCHOICE_ALL; }
     else if (p == "fighters") { S.page = FIGHTERS; S.fighter_sel = 9; S.fighter_top = 0; }
     else if (p.rfind("fighters-", 0) == 0) {    // the grid scrolled to one fighter (by Battle-mode ID)
         const auto &list = roster();
