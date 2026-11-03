@@ -211,10 +211,11 @@ class Session:
         time.sleep(0.5)
         return port
 
-    def accounts(self, port, names):
+    def accounts(self, port, names, extra=()):
         """A local account service for ranked tests (accounts -ranked -test-accounts): its public API on
         port, its internal listener (the relay's) on port + 1, a fresh accounts file in this session's
-        folder. Returns {name: session token}."""
+        folder; extra: more flags (the social tests: -social, or -social-switch with a missing file).
+        Returns {name: session token}."""
         exe = machine.ensure_accounts()
         for p in (port, port + 1):
             if not machine.free_port(p):
@@ -226,7 +227,7 @@ class Session:
         args = [exe, "-listen", "127.0.0.1:%d" % port, "-internal-listen", "127.0.0.1:%d" % (port + 1),
                 "-data", data, "-public-url", "http://127.0.0.1:%d" % port, "-ranked",
                 "-client-id", "0", "-client-secret-file", secret,
-                "-test-accounts", ",".join(names)]
+                "-test-accounts", ",".join(names)] + list(extra)
         tag = "accounts%d" % len(self.relays)
         p = subprocess.Popen(args, stdout=open(os.path.join(self.dir, tag + ".out"), "wb"),
                              stderr=open(os.path.join(self.dir, tag + ".err"), "wb"),
