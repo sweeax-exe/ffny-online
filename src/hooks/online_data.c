@@ -225,6 +225,8 @@ const char *online_fighter_name(int id)
     int i;
     load();
     for (i = 0; i < g_fighter_count; i++) if (g_fighters[i].id == id) return g_fighters[i].name;
+    /* 99 is a created fighter (NETPLAY_CREATED_FIGHTER): My Stats' last fights said "Fighter 99" (Discord, 2026-11-03) */
+    if (id == 99) return "Created Fighter";
     next = (next + 1) % 4;
     snprintf(unknown[next], sizeof(unknown[0]), "Fighter %d", id);
     return unknown[next];
