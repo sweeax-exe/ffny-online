@@ -58,7 +58,7 @@ side), and `sample` profiled sc00. The whole pass took
 about three hours on the Mac.
 
 The window being 4:3 does not change the work: widescreen sizes the render target, not the window.
-Displays at 120 Hz pace to 60 with vsync, as the [known issues](../known-issues.md) describe.
+Displays at 120 Hz pace to 60 with vsync, as the [GitHub Issues](https://github.com/vyanhursky/DefJamFFNY-recomp/issues) describe.
 
 ## Results by scene
 
@@ -242,7 +242,7 @@ sc00 (the opening: the police, the car crash) has 2.9% late frames, a p99 of 33.
 22 fps, against at most 1.0%, 20-23 ms and (outside two short scenes with one hitch) 30-49 fps for
 every other scene; it draws the most (median
 347 draws, up to 907, 509,000 vertices a frame) and uploads the most textures (43 MB, 77
-evictions). The [known issues](../known-issues.md) mention one audio skip as the car crash hits; in
+evictions). The [GitHub Issues](https://github.com/vyanhursky/DefJamFFNY-recomp/issues) mention one audio skip as the car crash hits; in
 the 4:3, render-scale-2 trial it was there (a 174 ms frame and the device running dry twice at
 +82.5 s), in the stress tour and its repeat it was not. Steady sc00 frames are game-side (`work` p99 27 ms);
 the GPU fence wait stays near 2-3.5 ms. sc00 is the scene to use when measuring any CPU-side

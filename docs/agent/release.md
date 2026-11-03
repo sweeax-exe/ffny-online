@@ -41,7 +41,7 @@ checklist. Version `X.Y.Z` below; the GitHub milestone `vX.Y.Z` lists the queued
 5. **Records.** `PROGRESS.md`: assign the next free `D<n>` to each `D-new` (and renumber any provisional
    numbers older branches used; update the references the branch added), one §6 work-log line per PR with its
    numbers, §0 rows, §7 hand-off. `CMakeLists.txt` version, `docs/releases/vX.Y.Z.md`, README "latest setup"
-   link, `docs/known-issues.md`. Run `pytest -q tests/unit` and `check-source-tree.py`.
+   link, remaining-issue links and release qualifications. Run `pytest -q tests/unit` and `check-source-tree.py`.
 6. **Release PR.** Push the branch; `gh pr create --base main --head release/vX.Y.Z --milestone vX.Y.Z
    --body-file <file>` from `.github/PULL_REQUEST_TEMPLATE/release.md`, filled in.
 7. **Build the candidate** from a clean state: analyze, recomp, build (Release preset). A toolkit pin change

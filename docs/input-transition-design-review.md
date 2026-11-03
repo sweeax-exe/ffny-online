@@ -1,5 +1,8 @@
 # Input-edge implementation review
 
+> Dated evidence: this records the named build/release, not current pending work.
+> Current support and qualifications are in the release notes and GitHub Issues.
+
 Read-only review of the current working tree. The toolkit submodule and guest adapter have uncommitted changes; this records observed behavior, not a clean-commit review. No code edits, builds, or game runs were made.
 
 ## Actionable findings

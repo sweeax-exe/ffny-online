@@ -54,7 +54,7 @@ folder; uninstallation preserves them with the rest of the player's data.
 The packaged v0.6.0 installer was run end to end with this option from a real dump,
 and the installed game loaded the generated packs; see
 [release validation](research/hd-v060-release-validation.md) for what was and was
-not exercised. See also [HD setup integration](research/hd-setup-integration.md).
+not exercised. See also [HD setup integration](research/hd-v060-release-validation.md#prototype-controls-and-artwork-acceptance-2026-10-08).
 
 ## Silent mode
 
@@ -79,9 +79,8 @@ No dump, game data or generated code is uploaded.
 
 ## Update, repair and uninstall
 
-The updater implementation in [PR #18](https://github.com/vyanhursky/DefJamFFNY-recomp/pull/18)
-adds **Fetch GitHub releases**, a release picker and an operation picker to all
-three setup wizards. It is not yet in a published setup release. The bundled
+Since v0.8.0, **Fetch GitHub releases**, a release picker and an operation picker
+are available in all three setup wizards. The bundled
 release remains available offline; fetching chooses the newest stable release
 with a complete setup for this platform. Releases without host assets are shown
 as unavailable. The CLI's `--release latest` follows GitHub's latest stable endpoint
@@ -120,17 +119,17 @@ Repair an existing historical installation using its original setup directly.
 The new updater refuses remote historical repair/update on an existing destination.
 Historical versions cannot be downgrade targets. Future downgrade requires both
 receipts/payloads to declare the same supported updater protocol and data schema;
-no published future pair exists yet. Local synthetic future packages test this
-path without publishing fake releases. Linux acceptance for these new operations
+Do not infer downgrade compatibility from version order alone. Synthetic future
+packages exercise this path without publishing fake releases. Linux acceptance for these new operations
 is limited to Steam Deck/SteamOS. See the [test contract](setup-update-test-plan.md)
-and [current results and pending gates](setup-update-test-results.md).
+and [initial v0.8 updater acceptance evidence](setup-update-test-results.md).
 
 The following updater CLI options are forwarded by all packaged entry points:
 `--operation auto|install|repair|update|downgrade|rebuild`, `--release vX.Y.Z|latest`,
 `--bundled-only`, `--list-releases`, `--releases-file PATH` and `--download-cache PATH`.
 Omit `--dump` for recognized installed data; install/data locations remain required
 unless the data location can be read from the existing receipt. `--release` and
-`--bundled-only` are mutually exclusive. Example for a future published target:
+`--bundled-only` are mutually exclusive. Example for updating to the latest compatible release:
 
 ```powershell
 DefJamSetup.exe --silent --operation update --release latest --install-dir "D:\Games\DefJamApp" --data-dir "D:\Games\DefJamData"
@@ -379,3 +378,10 @@ covers Windows x64, Apple Silicon macOS and Steam Deck/SteamOS, and the
 can be installed fresh but cannot update or repair an existing installation; the picker marks them
 **(update unavailable)** when an installation is selected. Clean updates preserve player data, and
 downgrade is only to future compatible updater-capable releases.
+
+
+## HD activation and payload contract
+
+The HD builder runs after the verified game pipeline and before activation. Generated pack names are recorded in the receipt, so a later selected generation replaces their active names without accumulating old Setup entries; old files remain local. Unrelated/custom packs, comments and effective last values in duplicate or padded INI sections are preserved. Cancellation stops the builder through Setup's normal process-tree mechanism; failed generation never enables unfinished packs.
+
+The original Windows HD payload pinned Pillow 12.3.0 and NumPy 2.5.2 for embedded Python 3.13 / win_amd64/cp313 and verified imports, resizing and NumPy execution inside that interpreter. Its wheel notices remained in the inventoried metadata. These are dated v0.6.0 payload facts, not replacement pins for current dependency manifests. No Torch, neural model, GPU dependency or artwork was bundled. [Historical validation](research/hd-v060-release-validation.md) distinguishes generation/UI fixtures from the actual packaged install and lists the untested real-install scenarios.

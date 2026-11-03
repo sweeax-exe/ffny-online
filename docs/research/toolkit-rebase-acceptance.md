@@ -187,3 +187,8 @@ The ledger keeps the CPU decoded-op cache change explicitly partial (0073).
 Existing rare silent boot/crash, long-session memory and visual backlog items
 remain outside this rebase. Rollback preserves `ours-on-pin` = `dc32f30` and the
 pre-rebase parent/source/build/save/capture snapshot.
+
+
+## Historical M4e acceptance scope
+
+M4e's 2026-09-29 design separated GPU vertex execution from the preceding audio/crowd/R3 work. Its original requested gates were Debug fight presentation at 60 fps with the design-rate clock (1.2 ticks per step), three fights without a new crash, unchanged M2/M3/M4a goldens, bounded visual perspective checks, and retained CPU diagnostics/fallback. That proposal alone did not establish those outcomes. This rebase's measured WARP parity/state fixtures, unchanged goldens and game runs above are the retained migration evidence; its Debug cadence comparison explicitly uses different windows from the older M4e minimum 108. CPU fallback performance, constant-writing programs, unobserved point sprites and arbitrary hardware-contract equivalence were not newly certified by the rebase.

@@ -8,7 +8,7 @@ game or game assets are distributed. Windows 11 x64 is the tested environment.
 
 Download `DefJamSetup-<version>-windows-x64.exe` from a release that includes
 setup on the [release page](https://github.com/vyanhursky/DefJamFFNY-recomp/releases).
-The commands below use the v0.6.0 filename. For local testing, run the supplied
+Replace `<version>` in the commands below with the tag you downloaded. For local testing, run the supplied
 preview build.
 
 1. Run the setup executable and select your ISO/XISO or extracted dump folder.
@@ -37,7 +37,7 @@ saves/settings stay in the data folder.
 For silent mode in PowerShell:
 
 ```powershell
-$setupPath = (Resolve-Path .\DefJamSetup-0.6.0-windows-x64.exe).Path
+$setupPath = (Resolve-Path .\DefJamSetup-<version>-windows-x64.exe).Path
 $setupArguments = '--silent --dump "D:\Dumps\DefJam.iso" --install-dir "D:\Games\DefJam\App" --data-dir "D:\Games\DefJam\Data"'
 $setupResult = Start-Process -FilePath $setupPath -ArgumentList $setupArguments -Wait -PassThru
 $setupResult.ExitCode
@@ -160,8 +160,8 @@ edit it while the game is closed.
 | `[display]` key | Default | Meaning |
 |---|---|---|
 | `fullscreen` | `false` | Start in borderless full screen. The hotkeys update it. |
-| `window_width`, `window_height` | `1280`, `960` | Window size. Resizing the window updates them. |
-| `aspect` | `4:3` | `4:3` keeps the picture shape; `stretch` fills the window. |
+| `window_width`, `window_height` | `1920`, `1080` | Window size. Resizing the window updates them. |
+| `aspect` | `auto` | Auto matches the display; `4:3` preserves the original framing; `stretch` fills without widening the view. See the settings reference for widescreen modes. |
 | `render_scale` | `2` | Internal resolution, 1-4 times 640x480. Try `3` or `4` on a 1440p or 4K display. |
 | `filter` | `smooth` | `smooth` or `sharp` scaling to the window. |
 | `vsync` | `true` | Pace frames on the display for even motion. Used on 60, 120, 180 and 240 Hz displays; others use the game's own 60 fps timer. |

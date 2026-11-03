@@ -23,13 +23,6 @@ and what to do when something misbehaves, see [Controllers, keyboard and mouse](
 |---|---|---|
 | `skip` | `false` | Skip the launcher and start the game at once. The launcher shows on every launch unless this is on. Hold **Shift** while the game starts, or start it with `--launcher`, to see it anyway; turn this off in the overlay's Interface page or the launcher's own checkbox. Env `RECOMP_NO_LAUNCHER=1` skips it for one run. |
 
-## [debug]
-
-| Key | Default | Meaning |
-|---|---|---|
-| `unlock_all` | `false` | Every fighter and venue is available on any profile, through the developers' own unlock routine in the game. For testing: it changes the profile in memory and asks the game to save it, so keep it off for a save you care about. Restart. Shown in the launcher and the overlay's Diagnostics page as "Unlock all fighters and venues". Env `RECOMP_UNLOCK_ALL` (`1` on, `0` off). The test harness turns it on for its runs. [How it works](research/unlock-everything.md). |
-| `skip_intro` | `false` | Skip the startup legal screen and EA/THX/intro movies and start at **Press Start**. A brief resource-loading screen and the title's own animation still run. Story cutscenes and idle attract playback keep working. Choose **Interface → Skip startup movies and legal screen** before Play, or restart after changing it in the overlay. Env `RECOMP_SKIP_INTRO` (`1` on, `0` off) overrides the file. [How it works](research/startup-skip-flow.md). |
-
 ## [ui]
 
 | Key | Default | Meaning |
@@ -39,6 +32,13 @@ and what to do when something misbehaves, see [Controllers, keyboard and mouse](
 | `scale` | `100` | Size of the launcher's and overlay's text and controls in percent, 60-250, on top of your display's scaling (full screen on a large monitor is scaled up automatically). |
 
 ## [debug]
+
+| Key | Default | Meaning |
+|---|---|---|
+| `unlock_all` | `false` | Every fighter and venue is available on any profile, through the developers' own unlock routine in the game. For testing: it changes the profile in memory and asks the game to save it, so keep it off for a save you care about. Restart. Shown in the launcher and the overlay's Diagnostics page as "Unlock all fighters and venues". Env `RECOMP_UNLOCK_ALL` (`1` on, `0` off). The test harness turns it on for its runs. [How it works](research/unlock-everything.md). |
+| `skip_intro` | `false` | Skip the startup legal screen and EA/THX/intro movies and start at **Press Start**. A brief resource-loading screen and the title's own animation still run. Story cutscenes and idle attract playback keep working. Choose **Interface → Skip startup movies and legal screen** before Play, or restart after changing it in the overlay. Env `RECOMP_SKIP_INTRO` (`1` on, `0` off) overrides the file. [How it works](research/startup-skip-flow.md). |
+
+### Recorder keys
 
 The play-test recorder: see [Play-test recorder](playtest-recorder.md). Off by default; `--record` on the command
 line turns it on for one run. Every key here is read at start-up.
@@ -214,3 +214,8 @@ a = K, Mouse1
 To play the keyboard as part of player 1's pad (menus with the keyboard while a pad is connected), set
 `keyboard_player = merge` in `[input]`. To use pads only and give the game no keyboard controller,
 set it to `off`.
+
+
+## Startup-skip application time
+
+`debug.skip_intro` uses the same default < INI < environment boolean precedence as other registered settings, including explicit `false`/`0`. It is sampled after the launcher on the first screen selection, and that one-time decision is consumed even when the option is off or the initial screen is unexpected. Overlay edits therefore save the next-launch choice; they cannot begin skipping later front-end or Story screens in the current process. [Startup implementation and acceptance](research/startup-skip-flow.md) records this scope and the independent fast-start default used by automated tests.

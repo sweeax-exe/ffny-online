@@ -1,5 +1,8 @@
 # Setup updater implementation: initial test results
 
+> Dated evidence: this records the named build/release, not current pending work.
+> Current support and qualifications are in the release notes and GitHub Issues.
+
 Candidate: draft [PR #18](https://github.com/vyanhursky/DefJamFFNY-recomp/pull/18),
 `codex/setup-github-updates`, based on v0.7.2 `ce4d4ab`; development payload made
 from implementation commit `f238afe` (development mode). Earlier evidence used

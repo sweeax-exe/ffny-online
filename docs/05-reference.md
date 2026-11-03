@@ -44,9 +44,10 @@ Tools, all cheap:
 | `RECOMP_SELFTEST=1` | Checks the lifted CRT's four 64-bit divide helpers against answers computed in the host. |
 | `scripts/frame-signature.py` | What a captured frame contains, without storing any of it. |
 
-A re-lift is **27 seconds**; the full seed/analyze/lift/build loop is about ten minutes. A `_gen` wrapper
-only intercepts *indirect* calls, because the declaration rewrites direct call sites to `sub_X_gen` as
-well - see `src/recomp_manual.c`.
+Build/lift times depend on toolkit and host. The canonical
+[lifter override playbook](agent/lifter-overrides.md) explains current wrapper semantics:
+since toolkit v0.16 direct callers reach manual wrappers too. Older notes about
+indirect-only wrapping describe v0.13, not the current pin.
 
 ## Standing items
 1. **Run `scripts/jump-table-audit.py` and `scripts/coverage-audit.py` after every re-lift.** The first
@@ -57,11 +58,11 @@ well - see `src/recomp_manual.c`.
    added there, not worked around elsewhere; the sampler will name the function and the lifted body will
    name the register.
 3. **Toolkit changes are fork commits.** `tools/xboxrecomp` is pinned to a published commit on
-   `vyanhursky/xboxrecomp`, branch `defjam/rebase-2026-10`. Build that checkout directly. Make generic
+   `vyanhursky/xboxrecomp`, the branch configured in `.gitmodules`. Build that checkout directly. Make generic
    changes in an isolated toolkit worktree, validate and publish, then commit the published gitlink in
    the parent. The 108 numbered patches that source comments still cite are retired and no longer shipped. The ledger in
    `docs/research/toolkit-rebase-ledger.md` maps all 108 old patches. Each upstream PR needs Vlad's approval.
-4. **Deferred structural work is in `docs/04-improvement-backlog.md`**, not in PROGRESS.md.
+4. **Open structural work belongs in GitHub Issues/milestones**, not another checked-in backlog.
 5. **Captures come from the back buffer** (`RECOMP_TRANS_SHOT`, D12, D15) and carry the gamma ramp;
    `scripts/window-shot.ps1` grabs the game's own window when what is presented is the question. Both are
    the game's artwork: under `logs/` only, never committed.
@@ -71,10 +72,8 @@ well - see `src/recomp_manual.c`.
    payloads. A guard whose run was killed leaves a `state.json` in its stamp, and the next guard refuses to
    start until `harness.py save-recover` settles it (`--restore` or `--accept`). Rebase runs use the preserved disposable save copy. Legacy name-hash compatibility verifies
    exact UTF-16 metadata and prefers canonical folders; it never renames or merges player folders (D52).
-7. **M4d items never formally met** (D45): two pads, private bytes stable over three fights, the rare
-   `sub_001A3310` crash at a fight's start, the loading-bar glitch, a rare boot with no sound.
-8. **Ghidra symbol pass** (`docs/03-workflows.md`) so logs name XAPI, D3D and DirectSound functions. VS 2022
-   Build Tools is still not installed; VS 2019 builds everything.
+7. **Historical bring-up qualifications** remain in the dated research/release evidence and
+   PROGRESS decisions. Revalidate old crash/performance hypotheses before treating them as current bugs.
 
 ## Running it, and checking it
 
@@ -89,7 +88,8 @@ The launcher supplies absent `RECOMP_VBLANK`, `RECOMP_PB_EXEC`, `RECOMP_PB_D3D11
 settings as 1, preserves explicit overrides and restores its additions when the game exits. `RECOMP_VBLANK`
 drives the GPU's interrupt (without it the title stalls early), `RECOMP_PB_D3D11` gates the whole
 translator path (without it nothing is drawn), `RECOMP_USB` presents the controller. The harness sets all
-four as well. A direct executable launch still needs these settings.
+four as well. Current executable startup supplies the normal runtime defaults; preserve explicit diagnostic overrides.
+See the build guide and source rather than applying historical launch recipes blindly.
 
 To drive it unattended, `scripts/harness.py` (its docstring has the stage syntax):
 
@@ -105,3 +105,12 @@ A healthy run: `[D3D] 2.0s` lines at 120 presents (60 while loading), no `[CRASH
 
 The golden frames (`tests/golden/`) store measurements of a capture, not pixels, which is why they can
 live in a repository that will be public. They were taken without the gamma ramp (`RECOMP_GAMMA=0`).
+
+
+## GPU vertex-program path: original constraints
+
+The historical M4e design (2026-09-29) addressed CPU execution of the title's NV2A vertex programs, one vertex at a time, after decode-once/vertex reuse still left Debug fights near 38–42 fps. That is a dated baseline, not current performance. The working GPU path forwards attributes and indexed batches through the translator/D3D8 pixel pipeline while retaining CPU fallback for diagnostics and rejected programs.
+
+The important geometry constraint is clip-space reconstruction. The game's Direct3D epilogue leaves output position in screen pixels with reciprocal clip `w`; reconstruct `w=1/oPos.w`, `ndc.xy=(oPos.xy/ScreenSize)*(2,-2)+(-1,1)`, `z=oPos.z/zmax`, then output `float4(ndc*w,z*w,w)`. The old CPU screen-space path used `rhw=1`, causing affine texture/colour interpolation and screen-space near clipping; real clip `w` enables perspective interpolation and hardware clipping. Keep the D3D8 output layout/pixel pipeline consistent (saturated oD0, scaled linear-texture coordinates, further texture stages/fog as supported).
+
+Decoder semantics must stay shared with the verified CPU interpreter: NV2A fields are in microcode dwords 1..3; R12 maps to oPos, O[3] to oD0 and O[9] to oT0; there are 192 constants and relative `a0` addressing. The older separate HLSL decoder used a different field layout and its FVF input layouts did not describe this title's raw attributes. Constants must reflect per-draw writes, especially bone matrices, with dirty ranges updated by `SET_TRANSFORM_CONSTANT`. Programs that write constants (`o_mask` with `orb` clear) require a safe fallback; point-sprite/oPts support was not observed by that design. `RECOMP_VSH_GPU=0`, batch dumps and `RECOMP_VSH_TRACE` retain the CPU diagnostic path. See [rebase acceptance](research/toolkit-rebase-acceptance.md) for measured parity and limits, rather than treating this original design as fresh certification.

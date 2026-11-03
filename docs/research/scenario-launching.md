@@ -127,7 +127,7 @@ streams will say where) and it refuses to write a mask that would hide the fight
 ## Cutscenes
 
 What is known (`docs/research/widescreen-game-cameras.md` section 4,
-`docs/widescreen/06-cutscenes-movies-and-ai.md`):
+`docs/widescreen/02-design.md#current-cinema-behavior-and-artwork-boundaries`):
 
 - Story cutscenes are in-engine scenes run by the `CINEMA` subsystem
   (`CINEMA::CCinemaSubsystem::LoadScene`, assert strings from guest `0x29C715`),

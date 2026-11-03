@@ -11,8 +11,8 @@ pasted into Markdown. Refer to game code by address and describe its behavior.
 
 ## Reporting a problem
 
-Check [known issues](docs/known-issues.md) and the open
-[issues](https://github.com/vyanhursky/DefJamFFNY-recomp/issues) first, then open
+Search [GitHub Issues](https://github.com/vyanhursky/DefJamFFNY-recomp/issues) and read
+[troubleshooting](docs/troubleshooting.md) first, then open
 a new issue with the form that fits:
 
 - **Bug report**: something goes wrong in the game.
@@ -23,7 +23,8 @@ A report that can be acted on has the version or commit, how you installed
 (installer or source build), your operating system, CPU, GPU and controller, the
 steps to reproduce, and the relevant log lines. A source build writes
 `logs/run-*.log.err`; the installer writes to `%LOCALAPPDATA%\DefJamSetup\logs`.
-Remove personal paths before posting. Screenshots of the problem are welcome.
+Remove personal paths before posting. Keep captures and raw recorder bundles local;
+share permitted textual diagnostics rather than game pictures/audio.
 
 Report security problems privately: see [SECURITY.md](SECURITY.md).
 
@@ -32,7 +33,7 @@ Report security problems privately: see [SECURITY.md](SECURITY.md).
 1. Build the game from source with the [build guide](docs/build-and-play.md)
    (or [macOS and Linux](docs/build-macos-linux.md)). You need your own dump of
    the supported USA Xbox version.
-2. Install the test dependencies: `python -m pip install pytest pyxbe capstone Pillow numpy`.
+2. Install the test dependencies: `python -m pip install pytest pyxbe capstone Pillow numpy cryptography`.
 3. Read [workflows](docs/03-workflows.md) for the pipeline, diagnostics and
    troubleshooting, and the [runtime reference](docs/05-reference.md) for how
    rendering and the investigation tools work.
@@ -118,16 +119,17 @@ could not run a game test, say so; the maintainer will run it.
 - Describe the symptom, the change and how you tested it.
 - Use commit subjects such as `fix(audio): ...`, `feat(input): ...`, `docs: ...`.
 - Keep existing license notices, and disclose AI assistance where it was used.
-- Update the guides your change affects, and add a line to
-  [known issues](docs/known-issues.md) if you leave a limitation behind.
-- Leave `PROGRESS.md` alone; put decisions and results in the pull request
-  description. A change to the game, setup or launcher is queued for a release
+- Update the guides your change affects. Link remaining limitations to an existing
+  GitHub issue or open one with concrete evidence; preserve release qualifications
+  in the versioned release notes.
+- Feature branches leave `PROGRESS.md` alone and put decisions/results in the PR
+  description. Main-only documentation PRs maintain the relevant progress sections. A change to the game, setup or launcher is queued for a release
   (the maintainer sets its milestone) and merges with the other queued changes
   once the release candidate passes; see [releasing](docs/releasing.md).
 
-The only images in the repository are the README visuals in `docs/media/`,
-approved by the owner: two of gameplay and two of the port's own interface. CI
-checks their exact fingerprints; new media needs the owner's review. Game artwork is not covered by the MIT license.
+Approved media in `docs/media/` and artwork in `branding/` have exact fingerprints
+checked by `scripts/check-source-tree.py`. Changes follow that approved-path policy;
+new media requires owner review. Game artwork is not covered by the MIT license.
 
 Upstream pull requests to `sp00nznet/xboxrecomp` on the project's behalf are
 opened by the maintainer, or with the maintainer's approval for each one.
