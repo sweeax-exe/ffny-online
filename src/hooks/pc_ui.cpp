@@ -2616,8 +2616,14 @@ static void page_basics()
     server_widget();
     settings_group("ui", { "button_icons" });
     discord_status_setting();
-    settings_group("online", { "rollback" });
-    ImGui::TextDisabled("Beta: used only when the other player has it on too. Applies the next time the game starts.");
+    // build 52: while the server makes rollback mandatory (its last answer, kept) there is no choice to offer
+    if (recomp_settings_get("online", "rollback_server", 0) && recomp_settings_get("online", "rollback_modes", 0)) {
+        ImGui::TextUnformatted("Rollback netcode: on in online matches");
+        ImGui::TextDisabled("The server sets it for every match. A match plays without it only when a PC can't keep up.");
+    } else {
+        settings_group("online", { "rollback" });
+        ImGui::TextDisabled("Beta: used only when the other player has it on too. Applies the next time the game starts.");
+    }
     ImGui::SeparatorText("HD textures");
     settings_group("textures", { "enabled" });
     ImGui::TextDisabled("Experimental: they can cause white screens or wrong pictures. Make them under Advanced, Textures.");

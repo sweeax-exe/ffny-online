@@ -299,12 +299,34 @@ static void game_mark(void)
  * player has it on (netplay.c, peer_rb). RECOMP_ROLLBACK=on or off overrides it for tests; off, nothing
  * of it runs: no audio arena, no write tracking, no saves. */
 static int s_off_for_server;    /* the setting was on at start, but the server's last answer turned it off */
+/* Rollback everywhere (build 52): the server's last answer made rollback mandatory in some mode
+ * ([online] rollback_modes, kept by rollback_server_modes) and allowed it: the audio arena is set up
+ * at start whatever the player's setting says, so the mandatory modes can roll back. The setting then
+ * decides only in modes the server leaves to it. RECOMP_ROLLBACK=server (tests): the arena as if the
+ * server had made rollback mandatory, but no opt-in of the player's own. */
+static int server_mandates(void)
+{
+    return recomp_settings_get("online", "rollback_server", 0) != 0 && recomp_settings_get("online", "rollback_modes", 0) != 0;
+}
+
+int rollback_opted_in(void)
+{
+    const char *v = getenv("RECOMP_ROLLBACK");
+    if (v) return !strcmp(v, "on");
+    return recomp_settings_get("online", "rollback", 0) != 0;
+}
+
 int rollback_enabled(void)
 {
     static int on = -1;
     if (on < 0) {
         const char *v = getenv("RECOMP_ROLLBACK");
-        on = v ? !strcmp(v, "on") : recomp_settings_get("online", "rollback", 0) != 0;
+        on = v ? !strcmp(v, "on") || !strcmp(v, "server") : recomp_settings_get("online", "rollback", 0) != 0;
+        if (!v && !on && server_mandates()) {
+            on = 1;
+            fprintf(stderr, "[ROLLBACK] the server made rollback mandatory the last time this PC was online: on for "
+                    "this session (audio arena)\n");
+        }
         /* The beta setting alone started the audio arena in every game, lockstep matches included, while the
          * servers' switch was off: 5.5 to 10 MB more of the 64 MB contiguous window (B2 of
          * rollback-plan-2026-11.md, step 2). Now it also needs the server's yes from the last time this PC
@@ -333,21 +355,39 @@ void rollback_server_allows(int allowed)
     }
 }
 
+/* netplay.c, at each CAPS answer of a relay that sends the mode mask (CAPS bit 9, build 52): the modes in
+ * which the server makes rollback mandatory (0: none), kept for the next start (rollback_enabled). */
+void rollback_server_modes(unsigned modes)
+{
+    int v = (int)(modes & 0xFFu);
+    if (recomp_settings_get("online", "rollback_modes", 0) == v) return;
+    if (recomp_settings_set("online", "rollback_modes", v) > 0) {
+        pc_settings_save();
+        fprintf(stderr, "[ROLLBACK] the server %s (modes %02X): kept for the next start\n",
+                v ? "makes rollback mandatory" : "leaves rollback to the players' setting", (unsigned)v);
+    }
+}
+
 /* The online menu's notice (build 46): this session started without rollback only because the server
  * did not allow it the last time, and now the setting is still on and the server's answer is yes again
- * (rollback_server_allows kept it); the audio arena is set up at start only, so a restart uses it. */
+ * (rollback_server_allows kept it); the audio arena is set up at start only, so a restart uses it.
+ * 2 (build 52): the server now makes rollback mandatory, and this session started without it. */
 int rollback_restart_hint(void)
 {
-    if (getenv("RECOMP_ROLLBACK") || rollback_enabled() || !s_off_for_server) return 0;
+    if (getenv("RECOMP_ROLLBACK") || rollback_enabled()) return 0;
+    if (server_mandates()) return 2;
+    if (!s_off_for_server) return 0;
     return recomp_settings_get("online", "rollback", 0) != 0 && recomp_settings_get("online", "rollback_server", 0) != 0;
 }
 
 /* The rollback setting is on (tests: RECOMP_ROLLBACK=on), but this session runs without rollback
- * (started before the server allowed it, or the setting was turned on since): a restart would use it. */
+ * (started before the server allowed it, or the setting was turned on since): a restart would use it.
+ * Also (build 52) when the server made rollback mandatory since this session started. */
 int rollback_setting_idle(void)
 {
     const char *v = getenv("RECOMP_ROLLBACK");
     if (rollback_enabled()) return 0;
+    if (!v && server_mandates()) return 1;
     return v ? !strcmp(v, "on") : recomp_settings_get("online", "rollback", 0) != 0;
 }
 
@@ -2529,7 +2569,9 @@ void rollback_mixer_unlock_b(void) { if (MEM32(g_esp) == MIX_UNLOCKS) mixer_end(
 
 #else
 int rollback_enabled(void) { return 0; }
+int rollback_opted_in(void) { return 0; }
 void rollback_server_allows(int allowed) { (void)allowed; }
+void rollback_server_modes(unsigned modes) { (void)modes; }
 int rollback_setting_idle(void) { return 0; }
 int rollback_restart_hint(void) { return 0; }
 void rollback_heap_range(uint32_t *lo, uint32_t *hi) { if (lo) *lo = 0x80003000u; if (hi) *hi = 0x82A0D000u; }

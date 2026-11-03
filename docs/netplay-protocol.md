@@ -335,6 +335,36 @@ Same header and version; a relay without it drops `SPECTATE` silently.
   setting is on but its session runs without rollback (a restart would use it). The room page shows
   each player's flag and why a match will play in lockstep. Older builds read the first two bytes.
 
+### Rollback everywhere (build 52)
+
+- `CAPS` bit 9 (`512`): from a client, "I read the rollback mode mask"; in the relay's answer (only to such
+  a client), a `u32` mode mask follows the caps word: the modes in which every match rolls back, whatever
+  the players' own rollback setting says. Bits: 0 1v1 (One on One and the special 1v1 match types), 1 Team,
+  2 3- and 4-way (free for all), 3 King of the Hill fights, 4 crew battles, 5 ranked sets. 0: none, the
+  players' setting decides as before. A mode left out of a non-zero mask plays in lockstep (the server's
+  per-mode kill switch). The mask is 0 while rollback is not allowed at all (`CAPS` bit 1), which stays the
+  master switch.
+- The relay sends that answer again right before every `START` to such a client, so a change of its
+  switch counts from the next match. Older builds never send bit 9 and see nothing new.
+- The relay's switch: the file `rollback-everywhere` in its updates folder, read at every answer. No file:
+  off. An empty file: every mode. Otherwise the names it lists (`1v1 team ffa koth crew ranked`, or `all`),
+  separated by spaces, commas or lines; `#` starts a comment. Tests: `-rollback-modes all`.
+- The game keeps the last mask (`[online] rollback_modes`); while it is not 0 and the server allowed
+  rollback, the next start sets up rollback's audio memory whatever the setting says. A session that
+  started before the server made it mandatory plays in lockstep and asks for one restart.
+- `P_RTT` byte 14 bit 1: the server makes rollback mandatory for this match's mode on the sender. A King of
+  the Hill fight (and a crew battle's) rolls back only when every player of the fight sends it; otherwise the
+  hill stays in lockstep as before. Each player's own flag (byte 7) still decides as always: a match rolls back
+  only when every player's is set.
+- The per-match fallback to lockstep, now logged with one reason line and shown to the players as "This
+  match runs without rollback: ...": a player whose game cannot roll back (a session started without it,
+  an older build, the setting off where the server leaves it to the players); a created fighter with a
+  player on a build before 45; a path ping between two players over 300 ms (from the `P_RTT` pings, the same
+  on every PC); and, during a fight, a PC that spends half its time or more on rollback for two 5-second
+  windows in a row stops predicting and plays the rest of the room's match on the real entries (only that
+  PC; the others still roll back, the agreed delay stays). A rollback match that goes out of sync still
+  leaves for the room at once.
+
 ## Relay status (choosing a relay)
 
 Since build 30 there is more than one relay (Europe `play.defjam.online`, US East

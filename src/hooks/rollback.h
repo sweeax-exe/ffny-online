@@ -56,8 +56,14 @@ int rollback_soak_diff_on(void);            /* tests: RECOMP_ROLLBACK_SOAK_DIFF=
 void rollback_soak_before(void);            /* the whole .data and heap before a soak goes back */
 void rollback_soak_after(int depth, long long step, int verbose);  /* what the re-run made otherwise */
 void rollback_server_allows(int allowed);   /* netplay.c: the relay's CAPS answer, kept for the next start */
+/* netplay.c (build 52): the modes in which the relay's CAPS answer makes rollback mandatory, kept for the
+ * next start (rollback_enabled sets up the audio arena whatever the setting says while they are not 0). */
+void rollback_server_modes(unsigned modes);
+/* The player's own opt-in: the rollback setting (tests: RECOMP_ROLLBACK=on; "server" and "off": no). */
+int rollback_opted_in(void);
 /* 1 when this session started without rollback because the server did not allow it then, and the setting
- * is on and the server allows it now: a restart uses it (the online menu says so, once). */
+ * is on and the server allows it now: a restart uses it (the online menu says so, once). 2 (build 52):
+ * the server makes rollback mandatory now, and this session started without it. */
 int rollback_restart_hint(void);
 /* 1 when the rollback setting is on but this session runs without it (a restart would use it). */
 int rollback_setting_idle(void);
