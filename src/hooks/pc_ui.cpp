@@ -551,6 +551,7 @@ void ui_context_begin(UiWindow window)
     for (const char *font : fonts)
         if (stat(font, &st) == 0 && io.Fonts->AddFontFromFileTTF(font, 17.0f)) break;
 #endif
+    if (io.Fonts->Fonts.empty()) io.Fonts->AddFontDefault();
     pcui::load_display_font();
     ui_apply_scale(window);
     remember_start_values();

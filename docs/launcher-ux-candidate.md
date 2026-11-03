@@ -72,7 +72,7 @@ Other agents should test the feature head, not inherit PR177's old-head qualific
 8. Upgrade/adopt customised installs; verify bindings/language/mod choices remain intact. Verify legacy wrappers forward to the new app.
 9. Full game linking and overlay navigation as well as the standalone app. The six changed shared units compile in the macOS game configuration, but that is not a full game link or platform run.
 
-No push, PR merge, tag or release publication is part of this work. Keep branch/source changes separate from local binary/screenshots and game data.
+The owner authorized a source PR and integration into PR177's release candidate on 2026-11-03. Tagging, release publication and merging PR177 to main are not authorized by that integration request. Keep branch/source changes separate from local binary/screenshots and game data.
 
 ## Owner feedback revision — 2026-11-03
 
@@ -84,4 +84,10 @@ Validation for this revision: macOS app compile/link, native Swift Setup compile
 
 D-new: Explain Texture memory budget both below its Mods control and in focus/hover help. It limits replacement texture residency, including retained upload data; a small budget can evict and reload textures. Recommend trying a larger budget for texture pop-in, slow texture loading or repeated stutters with packs enabled, balanced against graphics/system memory use and requiring a game restart. Defaults and cache behavior are unchanged.
 
-Home navigation typography is awaiting the owner's choice among three image mockups. No navigation font change is implemented by this copy revision. Validation: native app compile/link and an isolated visual check of the expanded Advanced mods explanation; broad settings/gameplay tests remain deferred as requested.
+The owner subsequently selected typography option A: keep title case and the existing navigation text size, with a heavier UI font. Windows prefers Segoe UI Semibold; macOS uses Arial Bold and Linux uses DejaVu Sans Bold. Missing font files fall back to the normal UI font. Only the four Home destination buttons use this face; PLAY retains its stronger display font. Validation: native app compile/link and an isolated visual check of the expanded Advanced mods explanation; broad settings/gameplay tests remain deferred as requested.
+
+## Approved publication and testing handoff — 2026-11-03
+
+D-new: Owner selected font mockup A and requested the complete launcher UX change be committed, pushed as a v1.0.0 milestone PR and included in PR177. Use a focused PR targeting `release/v1.0.0`, preserving feature history in a merge commit. Full platform regression and real setup/gameplay acceptance remain with the owner's testing agents; no previous-head pass certifies the new candidate. No game data, binaries or generated mockup images belong in the source PR.
+
+Final feature validation: 67 focused launcher/setup-contract/Steam/package tests passed, one Windows-only check skipped; native macOS app and all six shared game/overlay translation units compile. Option A was visually inspected and all four Home destinations opened and returned successfully using isolated data. Logs: `ux-pr-focused-tests.log`, `ux-font-a-build.log`, `ux-font-a-overlay.log`, `ux-font-a-ui.log`.

@@ -46,7 +46,7 @@ UiHomeResult ui_launcher_home(float width, float height, const char *focus)
     if (ImGui::BeginTable("destinations", 2, ImGuiTableFlags_SizingStretchSame)) {
         for (int i = 0; i < 4; ++i) {
             ImGui::TableNextColumn();
-            if (ImGui::Button(labels[i], ImVec2(-1, 44 * s))) r.route = routes[i];
+            if (pcui::navigation_button(labels[i], ImVec2(-1, 44 * s))) r.route = routes[i];
             ui_target(targets[i]);
             if (i == 0) ui_target("Advanced"); // old automation alias
             if (focus && !strcmp(focus, targets[i])) ImGui::SetKeyboardFocusHere(-1);
