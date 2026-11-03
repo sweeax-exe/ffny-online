@@ -18,6 +18,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "updater.h"
+#include "pc_launcher_saves.h"
 
 #if !defined(_WIN32)
 
@@ -614,6 +615,7 @@ void updater_install(void)
     InitOnceExecuteOnce(&g_once, init_once, NULL, NULL);
     if (g_state != UPDATER_AVAILABLE && g_state != UPDATER_FAILED) return;
     if (!g_build || getenv("RECOMP_TEST_UPDATE_PROGRESS")) return;
+    saves_backup_before_update();       /* save-backups/: the saves as they were before this build */
     InterlockedExchange64(&g_got, 0);
     set_step(1, 1 + SETUP_STEPS_DEFAULT, "Downloading the update");
     g_started = GetTickCount64();

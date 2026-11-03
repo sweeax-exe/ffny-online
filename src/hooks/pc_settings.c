@@ -34,6 +34,7 @@
 #include "pc_ui.h"
 #include "netplay.h"
 #include "created_fighter.h"
+#include "pc_launcher_saves.h"
 #include "pc_debug.h"
 #include "discord_presence.h"
 #include "pc_language.h"
@@ -916,6 +917,9 @@ int pc_settings_init(void)
 
     pc_input_start();
     run_launcher_if_wanted();
+    /* The game starts here: its save area is in use (the launcher's Saves page will not restore or
+     * import into it meanwhile), and the saves are backed up once a day (save-backups/). */
+    if (have_root) saves_game_starts();
     /* What the picture runs with, for bug reports: input delay and frame pacing questions start here. */
     fprintf(stderr, "[SETTINGS] display: %s %dx%d, render scale %d, vsync %s, anti-aliasing %s, anisotropy %d, "
             "sharpen %d, aspect %d, HD textures %s; voice %d\n",

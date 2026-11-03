@@ -24,6 +24,29 @@ has not started yet.
 - **macOS:** the launcher is a window of its own, drawn through Metal, that goes away before the game's
   window opens. Closing it (the red button, Cmd+Q) quits without starting the game, as **Quit** does.
 
+### Saves
+
+**Saves** (beside Settings, under PLAY) lists the profiles in `<data folder>/save/UserData/45410049/`
+(name, last change, whether it has a created fighter and that fighter's online name) and the Options file,
+and the backups in `<data folder>/save-backups/`:
+
+- **Automatic backups:** before an update is installed (and before the setup opens for Update / Repair), and
+  once a day when the game starts (only when no backup was made that day). Each is a folder named by its time
+  (`yyyymmdd-hhmmss`) holding a copy of `UserData` and a `backup.txt`; the newest 10 are kept, and only
+  folders of that name inside `save-backups` are ever removed. `RECOMP_SAVES_BACKUP=0` turns the daily one off.
+- **Back up now** makes one. **Restore** puts a backup back after backing up the saves as they are, so a
+  restore can itself be undone.
+- **Import Xbox saves** takes a folder (the console's `E:\UDATA\45410049`) or a `.zip` of it and does what
+  `scripts/save-import.py` does ([importing Xbox saves](importing-xbox-saves.md)): copies each profile's
+  three files and signs the profile again with the port's key. It backs the saves up first and never
+  replaces a profile you already have unless you tick *Replace* for it.
+- **Open folder** opens the save area.
+
+Restore and import refuse while the game runs on that save area (the game marks it as in use while it
+runs, and a second copy of the same `defjam_recomp.exe` counts as running). A profile copied from an Xbox
+without importing shows as *Signed by another Xbox*. The page says what it did in one line at its foot
+("Imported 2 profiles: ...", "Backup restored from ...").
+
 ## The overlay
 
 Press **F1** in the game (or the pad's guide button, or hold both stick clicks for half a second) to open it
@@ -140,6 +163,7 @@ nobody at it (a locked screen, a remote run):
 | Variable | What it does |
 |---|---|
 | `RECOMP_WINDOW_SHOT=<file.bmp>` | Writes what the launcher (first frame) or the game window (the overlay, after `RECOMP_WINDOW_SHOT_FRAME` overlay frames, 20 by default) shows, as a 32-bit BMP. macOS and Linux |
+| `RECOMP_LAUNCHER_PAGE=saves`, `RECOMP_TEST_SAVES` | Windows: the launcher opens with the Saves page, and `RECOMP_TEST_SAVES` presses its buttons: `<frame>:<action>[:<argument>]` separated by `;`, with `backup`, `import:<folder or zip>` (as if picked), `replace:<profile name>`, `import-ok`, `restore:<row>`, `restore-ok`, `folder`. With `RECOMP_WINDOW_SHOT` for the picture; `scripts/test-saves-launcher.py` uses them on a made-up data folder |
 | `RECOMP_LAUNCHER_SCRIPT` | The launcher's input: `<ms>:click:<x>:<y>`, `<ms>:move:<x>:<y>`, `<ms>:shot:<file>`, `<ms>:play`, `<ms>:quit`, separated by `;`, times from the window's first frame and positions in window points |
 | `RECOMP_HOST_SCRIPT` | The game window's input: `<ms>:key:<SDL key name>` (`F1`, `Escape`), `<ms>:click:<x>:<y>`, `<ms>:move:<x>:<y>`, `<ms>:text:<chars>`, times from the window's opening |
 | `RECOMP_OVERLAY_SHOT_DIR=<folder>`, `RECOMP_OVERLAY_SHOT_MS` | Windows: the finished picture with the overlay, every `RECOMP_OVERLAY_SHOT_MS` (2000 by default) while the overlay draws, as `<ms>.bmp` |
