@@ -53,6 +53,27 @@ APPROVED_README_MEDIA = {
     # 2026-10-24, chosen by FFNY Online's owner: the Anton display font (SIL Open Font License 1.1, its
     # licence beside it in OFL.txt), from google/fonts, for the launcher's headings and PLAY.
     'ffny-branding/fonts/Anton-Regular.ttf': 'a4ba3a92350ebb031da0cb47630ac49eb265082ca1bc0450442f4a83ab947cab',
+    # 2026-11-03, FFNY Online's owner approved these for the website (defjam.online): screenshots of the
+    # online screens (social chat, friends, crews, crew battles, ranked, Locker) from the game's own frames
+    # with test accounts, and the design previews (Turf War, ranks, tournaments), resized to 1600 px JPEG.
+    'website/media/crew-battle.jpg': '83deacb294d8c5db80f8cc96970f7df6912dfdb91d9cc9bed06f43db61acdfda',
+    'website/media/crew-ladder.jpg': '1fddea6be18e9c8938416a19750e2dee4ae648064856c662d6aa58bc7869903d',
+    'website/media/crew-over.jpg': 'ebd8c20c2fa8685f17aa128e5a4080e916113049272345776e2bb80ffe0f55af',
+    'website/media/crew-page.jpg': '10f623754a73e1c4f32501f79a7982f05493afafe47cdb30b8bf56e5fed318b8',
+    'website/media/preview-emblems.jpg': '89f9baf9ec4ba3dc8a5d1342f716581a071dcdd104d80613bc5c64db59de9b4e',
+    'website/media/preview-tournaments.jpg': '6951c05c878c217c87cd03481ead6da1a576f00faf53eba39e7ea946b0765383',
+    'website/media/preview-turf.jpg': '16fb39a15063f099ec796e21a93d6eb395dfe62a32d8d2fb19f61a8a5f5edd34',
+    'website/media/preview-watchlive.jpg': 'a588e0f0298e8e88fff44e0a55f2176fea987c5325d8e9d970284d5bb33c4c6b',
+    'website/media/ranked-locker.jpg': '864f7994697df01821f5d2eceeee166e028af1923152897d94920b7737da1192',
+    'website/media/ranked-modes.jpg': 'd8669b652d8a9f59edc38c8dfae324378ee343e97b68d5e0b9fc026f67d90336',
+    'website/media/ranked-promoted.jpg': 'bcd937fee9e71134d212a241453ed65287baf08569168df3f2a6d23e2b433e91',
+    'website/media/ranked-versus.jpg': 'e8b11d2b13bf5b7fd4ac116b3c372277fdb2dd852a781f670d72a61d77f6f8e7',
+    'website/media/social-block.jpg': 'b29b564ee9492e4f091ada533c21da479c7f30ecbddb71980043b0cc6a1105bd',
+    'website/media/social-chat.jpg': '97e02cbd13eb6f2fe06cdd669272312a1adfa4cc15c3a5c44a713191692380de',
+    'website/media/social-fightchat.jpg': '59bec5dadfb3512b9963523193417bcd1f2c8ff6e800716cf56aa2573d74a3bc',
+    'website/media/social-friends.jpg': '3b3dd0c537ade01eb9e9d29a40f0e64d5246558274679b44fcd91e7f0db51622',
+    'website/media/social-keyboard.jpg': 'df295423cdec795dc04d5d70c60f64e5b7dcfd6f5fbebc0201b2d78110098d7a',
+    'website/media/social-quickchat.jpg': 'abeed192bef41e7c9fda8963b97dd2e9c3b9640fdf4cc0a0f6976f4f3cbbaffd',
 
     # 2026-10-13: owner requested curated PR22 media from the Mac capture set.
     'docs/media/gameplay-hero.png': 'f0f9f8524913594e7b0d676bbe241c5733f6f4fd4eba2206c4f593638e0814e4',
