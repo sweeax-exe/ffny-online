@@ -18,7 +18,7 @@ describe their original builds; they do not override this baseline or the curren
 | Input, launcher/overlay, HD/mod management, updates, language | ✅ shipped | See current guides and versioned release notes; old draft-PR statuses have been retired. |
 | v0.13 acceptance | ⚠ qualified | Windows16/17; Mac16/21 then4/5; Deck memory/golden discrepancies. Preserve original failures and omissions in docs/releases/v0.13.0.md and its linked evidence. No all-green claim. |
 | Open bugs and future work | ⏳ tracked in GitHub | Issues/milestones/PRs own task status. In particular memory166, Deck98, SC04 161, Shops border162 and old512MiB flashing141 remain separate investigations. |
-| Public documentation cleanup | ⏳ PR171 | Owner approved consolidation and pruning on November2. Preserve durable findings, release qualifications, decision IDs, standalone export and run-log citations. |
+| Public documentation cleanup | ⏳ PR171 review | Owner approved consolidation and pruning on November2. Preserve durable findings, release qualifications, decision IDs, standalone export and run-log citations. |
 
 ## 1. Decisions log
 
@@ -431,19 +431,26 @@ Upstream PR submissions still need the owner's separate approval.
 
 - 2026-11-02 21:05 — Cleanup stage3: consolidated30research/widescreen reports and the stale launcher handoff into retained technical references. Preserved static/measured distinctions, negative controls, failed aggregates, platform limits and all68baseline run citations. Corrected current cinema/backend architecture against pinned source; retained qualified v0.13 memory/input evidence and8scene JSON controls. No runtime or toolkit changes.
 
-- 2026-11-02 21:06 — Cleanup stage4: removed superseded October4gameplay GIF/still (6.83MiB), exact allowlist entries, redundant smoke .gitkeep and RC2-only hosted acceptance helper. Kept frozen Setup/HD tools, all release notes,8scene JSON controls, generated adapters and reusable native/experimental tooling with explicit scope. Validation pending on final diff.
+- 2026-11-02 21:06 — Cleanup stage4: removed superseded October4gameplay GIF/still (6.83MiB), exact allowlist entries, redundant smoke .gitkeep and RC2-only hosted acceptance helper. Kept frozen Setup/HD tools, all release notes,8scene JSON controls, generated adapters and reusable native/experimental tooling with explicit scope. Final local validation:717unit passes plus2environment-blocked cases passing on permitted retry;55skip/1slow deselected.454local links/anchors valid; source495/0; adapters0;68run citations retained.
 
 ## 7. Hand-off
 
-### Public documentation cleanup — PR171
+### Public documentation cleanup — PR171 ready for review
 
-Owner approved the repository audit on November2,2026. Branch
-`codex/docs-repository-cleanup` starts from public main2e6648c. The first commit
-retires Known Issues, preserves recovery steps in docs/troubleshooting.md and
-repairs current guide/reporting drift. Continue through the approved research
-consolidations, obsolete media/supporting-file cleanup and focused validation.
-Record actual checks and final scope in PR171; do not merge or release as part of
-this cleanup. Preserve the toolkit pin, runtime, Setup generator and player data.
+Branch `codex/docs-repository-cleanup` starts from public main2e6648c. Four stages
+retire Known Issues and overlapping plans, prune stale current sections, consolidate
+30research/widescreen reports plus the launcher handoff, and remove superseded
+media/RC2 tooling. Troubleshooting and durable findings remain in current guides;
+verified test gaps are Issues172–176. Every original decision-table row and all68
+run-log citations are retained. The export/numbered-section contract is unchanged.
+
+Final local validation:717unit passes plus2environment-blocked tests passing on
+permitted retry,55skips/1slow deselection;454local links/anchors resolve; source
+policy495ordinary files/0failures; adapters0drift. All8scene-performance JSONs
+are byte-identical. PR171 records the final head and hosted CI; do not infer a
+new game run from these documentation checks. No src/setup/config/build/toolkit
+changes, no full game regression, no merge/tag/release. The optional offline FMV
+helper remains scoped as an experiment rather than moving code across repositories.
 
 Current release remains v0.13.0 at f961c34540d25fb75091dc432129d5048ab55e5a;
 never move the tag. Its notes retain Windows/Mac/Deck failed gates, memory metrics,

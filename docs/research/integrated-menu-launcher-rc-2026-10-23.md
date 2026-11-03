@@ -60,10 +60,9 @@ are in the mod-manager and menu handover guides.
 - Unrestricted units: logs/integrated-rc-units-unrestricted.txt.
 - Toolkit focused fixtures: logs/integrated-rc-texture-fixture.txt and
   logs/integrated-rc-settings-fixture.txt.
-- Reusable native tours: scripts/test-mod-launcher.py (synthetic update/order,
-  large text, recovery and testing-channel install) and
-  scripts/test-hosted-menu-launcher.py (actual trusted catalogue/R2 installation,
-  enablement/order and reopen with an unavailable network proxy).
+- Reusable native tour: `scripts/test-mod-launcher.py` (synthetic update/order,
+  large text, recovery and testing-channel install). The RC2-only hosted tour is
+  historical evidence; its pinned source is linked in the hosted-acceptance section below.
 
 ### Full-run diagnostics retained
 

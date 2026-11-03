@@ -36,7 +36,7 @@ APT vertex program's stage mapping still matters when auditing source placement.
 
 | Element | How drawn | Class | Placement / original scope | Risk |
 |---|---|---|---|---|
-| In-engine cutscenes (CINEMA, `assets/cinema/*.viv`) | 3D, aspect mode 1 (16:9, 640x360 letterbox) | CUT | 16:9: full screen, authored framing (verified). 21:9: 16:9 box. 16:10: thin bars or Vert+ | L (verified at 16:9) |
+| In-engine cutscenes (CINEMA, `assets/cinema/*.viv`) | 3D, aspect mode 1 (16:9, 640x360 letterbox) | CUT | 16:9: full screen, authored framing (verified). 21:9/32:9: full-height Hor+; centered16:9cinema box is not implemented. 16:10: thin bars or Vert+ | L (verified at 16:9) |
 | Cast credits over black during the intro ("BUSTA RHYMES / FAT JOE / DANNY TREJO") | 2D text over black | CEN | Same relative placement inside the 4:3 box | L |
 | Choose Style, create-a-player (Fighter Decision folder, sketch-artist head) | APT + 3D head sub-view | CEN + SUB | Folder centred, head in its frame | M |
 | Crib hub (3D room; "CRIB" top-left, legend top-right, icon bar bottom-left) | 3D full-screen view + APT overlay | HOR+ + CEN (anchors as upgrade) | Room fills the screen; overlay at the 4:3 box corners (v1), screen corners later | L |
@@ -70,17 +70,17 @@ APT vertex program's stage mapping still matters when auditing source placement.
 
 | Element | Treatment |
 |---|---|
-| Launcher, in-game overlay (Dear ImGui, window pixels after present) | Unaffected; gains the new settings (WS-0). |
+| Launcher, in-game overlay (Dear ImGui, window pixels after present) | Shares the current display settings; rendered in host/window coordinates. |
 | Window bars (canvas aspect ≠ window aspect) | Present fit, as today. |
-| Captures for tests | Crop the centre 4:3 for goldens when widescreen is on; a separate opt-in writes the whole canvas (WS-1, WS-10). |
+| Captures for tests | Stock goldens/replay explicitly use4:3. Default wide capture squeezes the canvas to640x480; native/wide captures are separate opt-in acceptance evidence. |
 
 ## 6. Not affected
 
 - Movie previews in menus (`movies.viv`: `blazin_NN`, `styleNN`, 240x176) play inside a panel: they move with the panel.
-- Audio, input, saves. The simulation should not change either, but this is an assumption: wider culling draws more
-  crowd and props, and the crowd update draws random numbers (`docs/research/crowd-nondeterminism.md`). WS-10 runs the
-  `replay` check with widescreen on to find out; a difference is acceptable only if it is confined to the crowd and the
-  fight result stream is unchanged.
+- Audio/input/save behavior must be validated separately. Wider culling can change
+  crowd work and random draws. Stock replay runs4:3; any wide replay comparison
+  is separate measured evidence, not an implemented WS-10acceptance gate. See
+  the current harness guide and crowd-determinism research.
 
 
 ## Retail title and Mode Select layer map (file audit, 2026-10-17)

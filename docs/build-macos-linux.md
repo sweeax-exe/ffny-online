@@ -194,8 +194,7 @@ The redirection keeps a log of the session; the game prints a great deal, and
 
 ## Known limits
 
-- The window follows the display's pixel density (2560x1920 pixels for the default 1920x1080 window on a Retina
-  display, as `[HOST] window ...` in the log says), and the overlay is drawn at that resolution. Window width and
+- The window follows the display's pixel density (for example, a2×backing scale gives3840x2160pixels for a1920x1080logical window; check `[HOST] window ...` for the actual drawable size), and the overlay is drawn at that resolution. Window width and
   height changed in the overlay resize the window at once.
 - HD textures work through the same `[textures]` settings as on Windows (macOS since
   v0.6.1, Linux since v0.7.2; [guide](hd-textures.md)); the packs are made by the macOS

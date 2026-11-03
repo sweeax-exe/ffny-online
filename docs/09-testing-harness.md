@@ -1,11 +1,10 @@
 # Gameplay test harness
 
-How to run the scripted gameplay checks and read what they prove. The roadmap
-behind this is [08-testing-roadmap.md](https://github.com/vyanhursky/DefJamFFNY-recomp/issues); what is still
-missing is listed at the end.
+How to run scripted gameplay checks and read what they prove. Current policy is
+in [the test plan](02-test-plan.md); future coverage belongs in GitHub Issues.
 
 Everything here needs a local build made from your own dump. Hosted CI has no
-game data and runs only the unit tests. Captures, audio and reports are the
+game data; it runs unit/native fixtures, source compilation and game-free Setup checks. Captures, audio and reports are the
 game's artwork and stay under `logs/`, which git ignores.
 
 ## Three levels
@@ -243,9 +242,12 @@ fighter, not the `<ID>`, so check the names on the HUD. The addresses and the ru
 - **Frame pacing.** From the runtime's two-second reports during the fight: the
   median present interval within 1 ms of 16.67, and at most 2 percent of presents
   later than 1.5 times their window's median.
-- **Memory.** The game's private bytes, sampled every five seconds, must not have
-  grown more than 64 MB from the start of play to the end of the run. This catches
-  a fast leak; one fight is too short for a slow one.
+- **Memory.** The existing64MiB growth guard compares the final sample with the
+  maximum of the first three play samples. The final point may fall in a result/menu
+  load. Windows samples private bytes; POSIX samples RSS despite the JSON field
+  name `private_bytes`. A positive delta is not an attributed leak, and these OS
+  metrics are not directly comparable. Preserve threshold failures; see the
+  [v0.13 investigation](research/rc-v0.13.0-hd-memory.md) and issue166.
 
 ## Visual baselines
 
