@@ -2649,7 +2649,9 @@ void draw_fighters(ImDrawList *dl, const Frame &f, const Pad &pad, bool *chosen,
         *chosen = true;
         *fighter = cur.id;
     }
-    if (pad.b) S.page = HUB;
+    // BACK from a ranked search's pick goes back to the mode chooser, not to the online menu (a player
+    // who wanted another fighter for ranked landed on the hub, 2026-11-03)
+    if (pad.b) S.page = S.ranked_pick ? RANKED_MODES : HUB;
 }
 
 // ---- the room ----
