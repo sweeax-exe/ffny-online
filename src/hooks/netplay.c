@@ -5252,8 +5252,12 @@ void netplay_on_step(void)
     {
         static int old = -1;
         if (old < 0) old = getenv("RECOMP_ROLLBACK_PREDICT_DECIDED") && *getenv("RECOMP_ROLLBACK_PREDICT_DECIDED") == '1';
+        /* Nor once the games went out of sync (check_hashes): the match no longer counts, and every
+         * re-run from then on is risk without a use (F9 b379eb, build 47: out of sync at step 1740,
+         * still predicting and running steps again, then a crash at step 1772). The steps already
+         * predicted are put right, then rollback goes off for the rest (netplay_on_update). */
         N.predicting = N.rb_on && rollback_ready() && MEM32(G_MATCH_PHASE) == 1u && N.final_step > (uint32_t)N.delay &&
-                       (old || !N.rb_decided_step);
+                       (old || !N.rb_decided_step) && !N.desync;
     }
     if (N.predicting && !N.rbm.first_pred) {   /* B3/G4: whether a match predicts at all, and from when */
         N.rbm.first_pred = s;
@@ -5724,8 +5728,11 @@ static void rollback_crash_state(void)
     fprintf(stderr, "[ROLLBACK] at the crash: %s, step %u, final %u, update %u, %u rollbacks, the last back to %u from %u, thread %lu%s\n",
             N.resim ? "running steps again" : "a normal update", N.step, N.final_step, N.updates, N.rb_count,
             g_last_rb_target, g_last_rb_from, (unsigned long)GetCurrentThreadId(), N.predicting ? ", predicting" : "");
-    fprintf(stderr, "[ROLLBACK] this match: %u rollbacks, deepest %u, first prediction at step %u\n", N.rbm.count,
-            N.rbm.deepest, N.rbm.first_pred);
+    /* The counts above are the process's (B7); a crash in a lockstep match after rollback matches still showed
+     * the last rollback match's (F9 9aafd3: "694 rollbacks, the last back to 3041" at step 0 of a lockstep match). */
+    fprintf(stderr, "[ROLLBACK] this match: %s, %u rollbacks, deepest %u, first prediction at step %u%s\n",
+            N.rb_match ? "rollback" : "lockstep", N.rbm.count, N.rbm.deepest, N.rbm.first_pred,
+            N.rb_match ? "" : " (the lines above and below are left from an earlier match)");
     rollback_crash_objects();   /* the registers' objects: vtable, +0xC, +0x10, their pages, made in a re-run? */
     {   /* EAGL's render-method interpreter: the draw command (0x3A597C) and its dynamic vertex buffer
          * (+0x10 the buffer object, +0x14 its size, +0x18 the source), a crash in sub_001189B0's copy */
@@ -6071,11 +6078,16 @@ void netplay_on_update(void)
     if (MEM32(G_MATCH_PHASE) == 1u) N.rb_fought = 1;   /* a rematch starts with the last match's phase */
     if ((!N.lockstep && !soak_depth()) ||
         (N.lockstep && N.rb_fought && MEM32(G_MATCH_PHASE) >= 2u && N.final_step >= N.step && !N.predicting) ||
-        (N.lockstep && N.rb_decided_step && N.final_step >= N.rb_decided_step)) {
+        (N.lockstep && N.rb_decided_step && N.final_step >= N.rb_decided_step) ||
+        (N.lockstep && N.desync && !N.predicting && N.final_step >= N.step)) {
         N.rb_on = 0;
         rollback_reset();
-        fprintf(stderr, "[ROLLBACK] off for the rest of this match (step %u, %u rollbacks)\n", N.step, N.rb_count);
-        rbm_summary(N.lockstep ? "decided" : "went on offline");
+        if (N.lockstep && N.desync)
+            fprintf(stderr, "[ROLLBACK] off for the rest of this match (step %u, %u rollbacks): out of sync since step %u\n",
+                    N.step, N.rb_count, N.desync_step);
+        else
+            fprintf(stderr, "[ROLLBACK] off for the rest of this match (step %u, %u rollbacks)\n", N.step, N.rb_count);
+        rbm_summary(!N.lockstep ? "went on offline" : N.desync ? "went out of sync" : "decided");
         return;
     }
     if (N.rb_ref_due) {
