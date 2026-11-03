@@ -942,7 +942,13 @@ bool gallery_on()
 bool ranked_room(const NetRoom &r, NetRankInfo *ri);
 void ranked_banner(ImDrawList *dl, const Frame &f, const NetRoom &r, const NetRankInfo &ri, float y);
 const char *ranked_picker_line(const NetRoom &r, const NetRankInfo &ri, char *buf, int size);
-void ranked_card(ImDrawList *dl, const Frame &f, const NetRankInfo &ri, int slot, float x, float y, float w);
+void ranked_card(ImDrawList *dl, const Frame &f, const NetRankInfo &ri, int slot, const char *name, float x, float y, float w, float h);
+const float RANK_ROOM_PORTRAIT = 60;     // a ranked room card's portrait top: under the rank plate (rank_art.inc's 58)
+// A ranked set's two versus cards (ranked_versus): 196 wide, a little lower than the others, the rank patch
+// and plate at scale 1.4 on the top (58 * 1.4 tall), then the portrait, RANK_VS_PH tall.
+const float RANK_VS_W = 196, RANK_VS_Y = 74, RANK_VS_S = 1.4f, RANK_VS_PAD = 58 * 1.4f, RANK_VS_PH = 162;
+bool ranked_versus_on(const NetVersus &v);
+void card_border(ImDrawList *dl, const Frame &f, float x, float y, float w, float h, float round, int frame, float alpha = 1.0f);      // rank_art.inc
 void ranked_versus(ImDrawList *dl, const Frame &f, const NetVersus &v, float alpha);
 bool ranked_created_ok(const NetRoom &r);
 void draw_ranked_stats(ImDrawList *dl, const Frame &f, int mode);
@@ -3156,7 +3162,7 @@ void draw_room(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
     bool ranked = ranked_room(r, &ri);
     page_title(dl, f, r.settings.name);
     image_fit(dl, f, tex(mode_logo(r.settings.mode)), 360, 22, 220, 30);
-    if (ranked) ranked_banner(dl, f, r, ri, 56);
+    if (ranked) ranked_banner(dl, f, r, ri, 50);     // a little higher: the cards' rank patches under it
     char code[32];
     snprintf(code, sizeof(code), "CODE  %s", r.code);
     text(dl, f, g_title, 14, 590, 58, ORANGE, code, RIGHT);
@@ -3234,6 +3240,7 @@ void draw_room(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
     int venue = fixed_venue(r.settings.mode);
     float w = 128, gap = 10, x0 = 320 - (places * w + (places - 1) * gap) / 2, top = 86;
     if (team) { gap = 6; x0 = 320 - (4 * w + 2 * gap + 30) / 2; top = 80; }
+    if (ranked) top = 96;      // the rank patch over the card's top edge (build 52)
     if (venue) x0 = 52;
     auto card_x = [&](int i) { return x0 + i * (w + gap) + (team && i >= 2 ? 30 - gap : 0); };
     if (team) {
@@ -3269,14 +3276,17 @@ void draw_room(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
         // the server knows a fighter from the first READY; until then this PC shows its own pick
         int shown = p.fighter != 0xFF ? p.fighter : p.slot == r.you ? fighter : -1;
         bool known = shown >= 0;
-        if (!known || !portrait(dl, f, shown, x + 4, y + 4, w - 8, (w - 8) * 1.5f))
-            text(dl, f, g_title, 40, x + w / 2, y + 70, GREY, "?", CENTER);
+        // a ranked card's portrait starts under its rank plate (the head stays: the portrait's foot is cut)
+        float py = ranked ? RANK_ROOM_PORTRAIT : 4;
+        if (!known || !portrait(dl, f, shown, x + 4, y + py, w - 8, (w - 8) * 1.5f + 4 - py))
+            text(dl, f, g_title, 40, x + w / 2, y + 70 + (py - 4) / 2, GREY, "?", CENTER);
         {   // build 52: the rewards a player wears (outside a ranked set, whose card shows the set's rank)
             const social::Look *lk = ranked || !social_enabled() ? nullptr : look_of(room_account_of(p.name));
             ImU32 nc = look_col(lk, p.slot == r.you ? ORANGE : CREAM);
             float nw = text_width(f, g_hand, 15, p.name), iw = look_tier(lk) >= 0 ? 17.0f : 0.0f;
             look_icon(dl, f, x + w / 2 - (nw + iw) / 2, y + 210, 15, lk);
             text(dl, f, g_hand, 15, x + w / 2 + iw / 2, y + 200, nc, p.name, CENTER, 1.0f);
+            if (lk && ranked_shown()) card_border(dl, f, x, y, w, 270, 10, lk->frame);     // the Locker's frame
         }
         {
             std::string label = known ? fighter_label(shown, p.slot) : "choosing";
@@ -3289,7 +3299,7 @@ void draw_room(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
             if (cp_slot(p.slot, cn, sizeof(cn), &st) && st[0])
                 text(dl, f, g_title, 9, x + w / 2, y + 236, with_alpha(ORANGE, 0.8f), st, CENTER, 0.5f, w - 10);
         }
-        if (ranked) ranked_card(dl, f, ri, p.slot, x, y + 160, w);
+        if (ranked) ranked_card(dl, f, ri, p.slot, p.name, x, y, w, 270);
         else if (p.slot == r.host) text(dl, f, g_title, 10, x + 6, y + 6, ORANGE, "HOST", LEFT, 1.0f);
         {   // the player's ping to the server, when it is known (builds from 30 report it)
             int ms = room_ping(p.slot);
@@ -3297,9 +3307,10 @@ void draw_room(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
                 char line[16];
                 snprintf(line, sizeof(line), "%d MS", ms);
                 float lw = text_width(f, g_title, 10, line);
-                rect(dl, f, x + w - lw - 31, y + 4, lw + 27, 15, IM_COL32(0, 0, 0, 160), 4);
-                ping_bars(dl, f, x + w - lw - 28, y + 6, 10, ms);
-                text(dl, f, g_title, 10, x + w - 5, y + 6, ping_colour(ms), line, RIGHT, 1.0f);
+                float py = ranked ? y + 165 : y + 4;      // a ranked card: on the portrait's foot (the patch is on top)
+                rect(dl, f, x + w - lw - 31, py, lw + 27, 15, IM_COL32(0, 0, 0, 160), 4);
+                ping_bars(dl, f, x + w - lw - 28, py + 2, 10, ms);
+                text(dl, f, g_title, 10, x + w - 5, py + 2, ping_colour(ms), line, RIGHT, 1.0f);
             }
         }
         if (rb_room) {      // rollback (build 46): this player's next match, as its PC reports it
@@ -3307,8 +3318,9 @@ void draw_room(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
             if (v >= 0) {
                 const char *tag = (v & 1) ? "ROLLBACK" : "LOCKSTEP";
                 float tw = text_width(f, g_title, 9, tag);
-                rect(dl, f, x + w - tw - 14, y + 22, tw + 10, 14, IM_COL32(0, 0, 0, 160), 4);
-                text(dl, f, g_title, 9, x + w - 9, y + 24, (v & 1) ? GREEN : GREY, tag, RIGHT, 1.0f);
+                float ty = ranked ? y + 148 : y + 22;
+                rect(dl, f, x + w - tw - 14, ty, tw + 10, 14, IM_COL32(0, 0, 0, 160), 4);
+                text(dl, f, g_title, 9, x + w - 9, ty + 2, (v & 1) ? GREEN : GREY, tag, RIGHT, 1.0f);
             }
         }
         if (r.phase == 2 && p.slot < 32 && (results_slots & (1u << p.slot))) {   // still on the last match's results
@@ -3405,7 +3417,7 @@ void draw_room(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
         }
         if (scope) S.quick_scope = scope;
     }
-    float my = team ? 374 : 366;
+    float my = team ? 374 : ranked ? 370 : 366;
     if (alone && scope) {       // where it searches now
         std::string line = "Waiting for another player on " + scope_words(sv, scope) + "...";
         text(dl, f, g_hand, 15, 320, my, ORANGE, line.c_str(), CENTER, 0.8f);
@@ -3613,12 +3625,14 @@ const char *fighter_style(int id)
 
 // One fighter's card: the portrait, the player's name, the fighter and the style; the king of the
 // hill gets the crown and his streak. `ph`: the portrait's height.
-void versus_card(ImDrawList *dl, const Frame &f, const NetVersus &v, int i, float x, float y, float w, float ph, bool big)
+void versus_card(ImDrawList *dl, const Frame &f, const NetVersus &v, int i, float x, float y, float w, float ph, bool big, float pad = 0)
 {
     bool me = i == v.you && !v.cpu[i], king = i == v.king;
-    float h = ph + (big ? 92 : 78);
+    float h = pad + ph + (big ? 92 : 78);
+    const float y0 = y;
     glass(dl, f, x, y, w, h, 12, me ? IM_COL32(56, 14, 20, 255) : IM_COL32(10, 10, 13, 255), me ? 0.70f : 0.62f);
     if (king) frame_rect(dl, f, x + 1, y + 1, w - 2, h - 2, with_alpha(GOLD, 0.55f), 1.5f);
+    y += pad;      // a ranked card: the rank patch and plate above the portrait (ranked_versus)
     rect(dl, f, x + 6, y + 6, w - 12, ph, IM_COL32(0, 0, 0, 120), 6);
     if (!portrait(dl, f, v.fighter[i], x + 6, y + 6, w - 12, ph))
         text(dl, f, g_title, 40, x + w / 2, y + ph / 2 - 20, GREY, "?", CENTER);
@@ -3633,7 +3647,7 @@ void versus_card(ImDrawList *dl, const Frame &f, const NetVersus &v, int i, floa
         text(dl, f, g_title, big ? 13 : 11, x + w / 2, y + (big ? 9 : 10), GOLD, streak, CENTER, 1.0f);
     }
     if (me) {   // "YOU" on the portrait's corner
-        text(dl, f, g_title, 11, x + w - 12, y + (king ? 30 : 12), ORANGE, "YOU", RIGHT, 1.0f);
+        text(dl, f, g_title, 11, x + w - 12, y0 + (king ? 30 : 12), ORANGE, "YOU", RIGHT, 1.0f);
     }
     float ty = y + 6 + ph - (big ? 26 : 22);
     const char *who = v.cpu[i] ? "CPU" : v.name[i][0] ? v.name[i] : "?";
@@ -3652,8 +3666,8 @@ void versus_card(ImDrawList *dl, const Frame &f, const NetVersus &v, int i, floa
         char ms[16];
         snprintf(ms, sizeof(ms), "%d MS", v.ping[i]);
         float pw = text_width(f, g_title, 10, ms);
-        ping_bars(dl, f, x + w - 14 - pw - 22, y + h - 17, 9, v.ping[i]);
-        text(dl, f, g_title, 10, x + w - 12, y + h - 18, ping_colour(v.ping[i]), ms, RIGHT, 0.8f);
+        ping_bars(dl, f, x + w - 14 - pw - 22, y0 + h - 17, 9, v.ping[i]);
+        text(dl, f, g_title, 10, x + w - 12, y0 + h - 18, ping_colour(v.ping[i]), ms, RIGHT, 0.8f);
     }
 }
 
@@ -3748,10 +3762,12 @@ void versus_page(ImDrawList *dl, ImVec2 display, const NetVersus &v)
     int order[4] = { 0, 1, 2, 3 };
     if (n == 2 && v.king == 0) std::swap(order[0], order[1]);     // the king on the right, as on the hill
     if (n == 2) {
-        const float w = 196, ph = 214, y = 70;
+        // a ranked set's cards (build 52): lower, the rank patch and plate over the portrait (ranked_versus)
+        const bool rk = ranked_versus_on(v);
+        const float w = 196, ph = rk ? RANK_VS_PH : 214, y = rk ? RANK_VS_Y : 70, pad = rk ? RANK_VS_PAD : 0;
         for (int s = 0; s < 2; s++) {
             k = dl->VtxBuffer.Size;
-            versus_card(dl, f, v, order[s], s == 0 ? 36 : 640 - 36 - w, y, w, ph, true);
+            versus_card(dl, f, v, order[s], s == 0 ? 36 : 640 - 36 - w, y, w, ph, true, pad);
             float e = ease_out((t - 0.05f - 0.08f * s) / 0.45f);
             shift_fade(dl, f, k, (s == 0 ? -70.0f : 70.0f) * (1 - e), 0, e);
         }
@@ -3924,6 +3940,9 @@ void gallery_step()
                                          // build 52: the emblems' results, the season rewards, the Locker
                                          "ranked-results-demoted", "ranked-results-placed", "ranked-results-legend",
                                          "stats-rewards", "locker", "locker-emblem",
+                                         // build 52: the cards' rank plates (a Legend #3, a player without a rank)
+                                         "ranked-room-legend", "ranked-room-unranked", "ranked-versus-legend",
+                                         "ranked-versus-unranked",
                                          // ranked phase 2b: Draft
                                          "ranked-draft-ban", "ranked-draft-venue", "ranked-draft-blind",
                                          "ranked-draft-pick", "ranked-draft-reveal", "stats-ranked-draft",
