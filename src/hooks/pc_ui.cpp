@@ -211,6 +211,11 @@ static const char *friendly(const char *section, const char *key)
         {"display", "brightness", "Brightness"},
         {"display", "vignette", "Vignette"},
         {"display", "vignette_strength", "Vignette strength (%)"},
+        {"display", "color_tint", "Colour tint (%)"},
+        {"display", "scratches", "Film scratches"},
+        {"display", "texture_mips", "Game texture levels (mipmaps)"},
+        {"display", "anisotropy", "Anisotropic filtering"},
+        {"display", "msaa", "Anti-aliasing (MSAA)"},
         {"display", "widescreen_hud", "Fight HUD position"},
         {"display", "widescreen_cutscenes", "Story cutscenes"},
         {"display", "widescreen_side_fill", "Beside 4:3 pictures"},
@@ -745,7 +750,7 @@ static void page_display()
     }
     settings_group("display", { "filter", "vsync" });
     ImGui::SeparatorText("Quality");
-    settings_group("display", { "render_scale" });
+    settings_group("display", { "render_scale", "msaa", "texture_mips", "anisotropy" });
     ImGui::SeparatorText("Picture");
     settings_group("display", { "brightness", "gamma", "vignette" });
     if (recomp_settings_get("display", "vignette", 1)) {
@@ -753,8 +758,9 @@ static void page_display()
         settings_group("display", { "vignette_strength" });
         ImGui::Unindent();
     }
-    ImGui::TextWrapped("Full screen, window size, filter, vsync, the 4:3 and stretch shapes, brightness and the vignette "
-                       "apply as you change them. The widescreen shapes, render scale and the brightness curve apply the "
+    settings_group("display", { "color_tint", "scratches" });
+    ImGui::TextWrapped("Full screen, window size, filter, vsync, the 4:3 and stretch shapes, texture levels, anisotropic "
+                       "filtering, brightness, the vignette, colour tint and film scratches apply as you change them. The widescreen shapes, render scale, anti-aliasing and the brightness curve apply the "
                        "next time the game starts. F11 or Alt+Enter switches full screen while playing.");
 }
 
@@ -1051,6 +1057,12 @@ void ui_home_fields()
         ImGui::EndChild();
         begin("render_scale");
         setting_widget(find("display", "render_scale"), "Render scale", true);
+        ImGui::EndChild();
+        begin("msaa");
+        setting_widget(find("display", "msaa"), "Anti-aliasing", true);
+        ImGui::EndChild();
+        begin("texture_mips");
+        setting_widget(find("display", "texture_mips"), "Game texture levels", true);
         ImGui::EndChild();
         begin("vsync");
         setting_widget(find("display", "vsync"), "VSync", true);

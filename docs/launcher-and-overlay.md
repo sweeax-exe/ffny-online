@@ -31,7 +31,7 @@ remains in Interface. Display DPI and the existing text/control size setting sti
 
 | Page | Contents |
 |---|---|
-| Display | Fullscreen, window dimensions, picture shape, filter, VSync, render scale; widescreen HUD/cutscene/side-fill/FOV options; brightness, game brightness curve and vignette |
+| Display | Fullscreen, window dimensions, picture shape, filter, VSync, render scale, anti-aliasing (MSAA), game texture levels, anisotropic filtering; widescreen HUD/cutscene/side-fill/FOV options; brightness, game brightness curve, vignette, colour tint and film scratches |
 | Controls | Players/devices and live stick/button feedback, rumble test, keyboard player, startup controller count/backend, dead zones, thresholds, rumble and pointer behavior; expand Gamepad button mapping or Keyboard and mouse bindings for Detect/Add/Clear/Default |
 | Mods | Installed local/project packs, enablement and overlap winners; shared Load Order window; verified project catalogue downloads/updates, rollback and removal; Refresh local mods, Open Mods Folder, Memory and manual pack list |
 | Interface | Launcher skip, startup movies, overlay key/pad chord, text/control size |
@@ -108,10 +108,11 @@ it; Esc/B also closes it when no popup or binding capture is open. The game sees
 while the overlay is open, but **keeps running**; it does not pause. On a Mac keyboard use fn+F1 if F1 is
 the brightness key, or change the shortcut in Interface. The pointer shows while the overlay is open.
 
-Fullscreen, window size, 4:3/stretch, filter, VSync, brightness and vignette apply live. Widescreen,
-render scale, brightness curve and other startup settings apply at the next launch; the footer lists
-pending changes. Settings in the launcher say **on Play** instead. Widescreen transitions into or out of
-a wide canvas are tracked separately from the two live picture shapes.
+Fullscreen, window size, 4:3/stretch, filter, VSync, texture levels, anisotropic filtering, brightness,
+vignette, colour tint and film scratches apply live. Widescreen, render scale, anti-aliasing, the brightness
+curve and other startup settings apply at the next launch; the footer lists pending changes. Settings in
+the launcher say **on Play** instead. Widescreen transitions into or out of a wide canvas are tracked
+separately from the two live picture shapes.
 
 ## Keyboard and gamepad
 

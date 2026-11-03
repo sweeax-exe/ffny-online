@@ -26,6 +26,7 @@
 
 #include "recomp_settings.h"
 #include "d3d8_present.h"
+#include "nv2a_pgraph_d3d11.h"
 #if !defined(_WIN32)
 #include "d3d8_vk.h"
 #endif
@@ -290,7 +291,27 @@ void pc_settings_apply_display(void)
         d3d8_present_set_aspect(1, (unsigned)(ws_aspect() * 10000.0f + 0.5f), 10000);
     else
         d3d8_present_set_aspect(pc_display("aspect", 0) != 1, 4, 3);   /* only "stretch" fills the window */
-    d3d8_present_set_linear_filter(pc_display("filter", 0) == 0);
+    {
+        int filter = pc_display("filter", 0);        /* smooth, sharp, smooth (high quality) */
+        d3d8_present_set_filter_mode(filter == 1 ? 0 : filter == 2 ? 2 : 1);
+    }
+    d3d8_set_texture_anisotropy(1u << pc_display("anisotropy", 0));
+    d3d8_set_msaa(1u << pc_display("msaa", 0));     /* read when the device starts */
+    pgraph_d3d11_set_guest_mips(pc_display("texture_mips", 0));
+    {
+        /* One line whenever the picture options change, so a log says what was on. */
+        static int logged = -1;
+        int filter = pc_display("filter", 0), aniso = pc_display("anisotropy", 0);
+        int msaa = pc_display("msaa", 0), mips = pc_display("texture_mips", 0) != 0;
+        int now = ((filter * 8 + aniso) * 8 + msaa) * 2 + mips;
+        if (now != logged) {
+            logged = now;
+            fprintf(stderr, "[DISPLAY] filter %s, texture levels %s, anisotropy %ux, MSAA %ux asked%s\n",
+                    filter == 1 ? "sharp" : filter == 2 ? "smooth (high quality)" : "smooth",
+                    mips ? "on" : "off", 1u << aniso, 1u << msaa,
+                    msaa ? " (from the next start if changed while running)" : "");
+        }
+    }
     d3d8_present_set_vsync(pc_display("vsync", 1));
     picture_apply_settings();
 }

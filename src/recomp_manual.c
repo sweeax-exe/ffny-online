@@ -1274,6 +1274,23 @@ void sub_000D9AF0_enter(void) { picture_tint_draw_enter(); }
 void sub_00028460_enter(void) { picture_quad_color_enter(); }
 
 /*
+ * The rest of the venue post effects ([display] color_tint, scratches). sub_000D8C40 draws the
+ * current variance each frame (its entry logs it with RECOMP_POSTFX_TRACE=1); sub_000D8AD0 is
+ * the film scratch overlay it calls when the variance's ScratchesEnable is set (thiscall, no
+ * arguments, plain ret), skipped when scratches are off.
+ */
+void sub_000D8C40_enter(void) { picture_postfx_enter(); }
+extern void sub_000D8AD0_gen(void);
+void sub_000D8AD0(void)
+{
+    if (!picture_scratches_on()) {
+        g_esp += 4;     /* thiscall, no arguments: the return address */
+        return;
+    }
+    sub_000D8AD0_gen();
+}
+
+/*
  * Widescreen (src/patches/widescreen.c, docs/widescreen/02-design.md).
  *
  * sub_0001A4E0 is the scene viewport's GetViewParams(this, mode, &fov, &aspect,
