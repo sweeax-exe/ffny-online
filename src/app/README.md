@@ -146,7 +146,11 @@ payload, file for file as the archive carries it, a desktop file and the icon in
 `setup/releases.py` (`read_appimage`) can read the image in Python: the updater and
 `scripts/check-setup-assets.py --app` check the payload inside without mounting or running
 anything, then the checker writes `DefJamRecompiled-<version>-x86_64.AppImage`, its `.sha256` and its
-`kind: app` provenance beside the setup's.
+`kind: app` provenance beside the setup's. The payload carries the game's build toolchain (design
+§6): Zig's clang for glibc 2.31, CMake, Ninja, and SDL3 and shaderc built with that Zig
+(`scripts/build-toolchain-linux.sh`, in the same image, which then supplies headers only). Setup
+builds the game with it and no compiler, package or container of the player's, and the game needs
+only glibc 2.31 and the computer's Vulkan loader ([setup-installer.md](../../docs/setup-installer.md#linux-setup)).
 
 The release workflow attaches all three with the setup assets (D215).
 

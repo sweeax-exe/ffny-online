@@ -56,7 +56,7 @@ def inspect_payload(archive):
                 if not package.source_allowed(relative, toolkit):
                     raise ValueError('Disallowed setup source input: ' + name)
             elif manifest['platform'] == 'linux-x64':
-                if not name.startswith(('python/', 'engine/', 'licenses/')) \
+                if not name.startswith(('python/', 'engine/', 'tools/', 'deps/', 'licenses/')) \
                         and name not in {'launcher/launcher.sh', 'dependencies.json'}:
                     raise ValueError('Unexpected setup component: ' + name)
             elif manifest['platform'] == 'macos-arm64':
@@ -76,6 +76,7 @@ def inspect_payload(archive):
                     check=True, env={'PATH': '/usr/bin:/bin'})
                 subprocess.run([python, '-B', folder / 'source/scripts/build-hd-pack.py', '--help'], check=True,
                                stdout=subprocess.DEVNULL, env={'PATH': '/usr/bin:/bin'})
+                check_linux_toolchain(folder)
         elif manifest['platform'] == 'macos-arm64':
             if sys.platform == 'darwin':
                 import subprocess
@@ -98,6 +99,35 @@ def inspect_payload(archive):
                             folder / 'source/setup/mods.py', '--help'], check=True,
                            stdout=subprocess.DEVNULL)
         return manifest
+
+
+def check_linux_toolchain(folder):
+    """The payload's build tools run, and its compiler builds a C++ program for glibc 2.31 that runs."""
+    import subprocess
+    tools = folder / 'tools'
+    for path in [tools / 'zig/zig', *(tools / 'bin').iterdir()]:
+        path.chmod(0o755)   # safe_unpack keeps no modes; the shipped folder does
+    for name in ('libSDL3.a', 'libshaderc_combined.a'):
+        if not (folder / 'deps/lib' / name).is_file():
+            raise ValueError('The Linux payload has no ' + name)
+    subprocess.run([tools / 'bin/cmake', '--version'], check=True, stdout=subprocess.DEVNULL)
+    subprocess.run([tools / 'bin/ninja', '--version'], check=True, stdout=subprocess.DEVNULL)
+    with tempfile.TemporaryDirectory(prefix='toolchain-probe-') as temporary:
+        check_compiler(tools, Path(temporary))
+    print('Bundled toolchain OK')
+
+
+def check_compiler(tools, probe):
+    import subprocess
+    (probe / 'check.cpp').write_text('#include <string>\nint main() { return std::string("ok").size() != 2; }\n')
+    env = {'PATH': '/usr/bin:/bin', 'ZIG_GLOBAL_CACHE_DIR': str(probe / 'cache'), 'ZIG_LOCAL_CACHE_DIR': str(probe / 'cache')}
+    subprocess.run([tools / 'bin/zig-c++', '-o', probe / 'check', probe / 'check.cpp'], check=True, env=env)
+    subprocess.run([probe / 'check'], check=True)
+    newest = max((tuple(map(int, v.split('.'))) for v in re.findall(
+        r'GLIBC_([0-9.]+)', subprocess.run(['objdump', '-T', probe / 'check'], capture_output=True, text=True,
+                                           check=True).stdout)), default=(0,))
+    if newest > (2, 31):
+        raise ValueError('The bundled compiler links newer glibc symbols than 2.31: ' + '.'.join(map(str, newest)))
 
 
 def platform_of(archive):

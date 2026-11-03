@@ -19,12 +19,12 @@ later on the launcher's Textures page.
 
 What it needs
 -------------
-- A Vulkan-capable GPU, SDL3 3.2 or newer, the Vulkan loader and shaderc.
-  SteamOS 3.8 or newer has all of them.
-- About 12 GB free plus room for a copy of the game files.
-- A compiler, or podman to fetch a build container (about 1 GB, once).
-  SteamOS has podman and no compiler, so on the Deck the container is used and
-  needs an internet connection the first time.
+- x86-64 Linux with glibc 2.31 or newer, a Vulkan-capable GPU and the Vulkan
+  loader. SteamOS and any current desktop distribution have them.
+- About 13 GB free plus room for a copy of the game files.
+- Nothing else: setup brings its own compiler (Zig's clang), CMake, Ninja and
+  the libraries the game links (SDL3 and shaderc), and the game it builds
+  carries them. No internet connection and no packages are needed.
 
 Afterwards
 ----------
@@ -42,11 +42,13 @@ Silent install and removal
 ./DefJamSetup.sh --silent --dump ~/Dumps/DefJam.iso \
     --install-dir ~/Games/DefJamRecompiled/App --data-dir ~/Games/DefJamRecompiled/Data
     [--steam-shortcut] [--no-desktop-shortcut | --no-shortcuts] [--hd-textures]
-    [--toolchain host|container]
+    [--toolchain host|container]   (developers: this computer's own compiler and
+                                    SDL3/shaderc packages, or the pinned podman
+                                    build container, instead of the bundled one)
 ./DefJamSetup.sh --uninstall --install-dir ~/Games/DefJamRecompiled/App
 
 Exit codes: 0 success; 2 invalid input; 3 prerequisites missing; 4 a stage
 failed; 5 another setup or the game is running; 6 cancelled.
-Uninstalling keeps your dump copy, saves, settings, HD textures and logs. The build
-container stays in podman's store; remove it with
-"podman rmi $(podman images -q localhost/defjam-recompiled-build)".
+Uninstalling keeps your dump copy, saves, settings, HD textures and logs. If you
+built with --toolchain container, the container stays in podman's store; remove
+it with "podman rmi $(podman images -q localhost/defjam-recompiled-build)".

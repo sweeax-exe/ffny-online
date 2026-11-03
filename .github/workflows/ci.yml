@@ -138,11 +138,13 @@ jobs:
       # mksquashfs packs the app's AppImage (scripts/package-appimage.py) and its tests' images.
       - run: sudo apt-get install -y squashfs-tools > /dev/null
       - name: Installer recovery, input boundaries, launcher and payload checks
-        run: python -m pytest -q --junitxml=build/setup-unit-results.xml tests/unit/test_setup_updates.py tests/unit/test_setup_engine.py tests/unit/test_setup_status.py tests/unit/test_linux_setup.py tests/unit/test_hd_setup.py tests/unit/test_appimage.py tests/unit/test_steam_shortcuts.py tests/unit/test_app_updates.py
+        run: python -m pytest -q --junitxml=build/setup-unit-results.xml tests/unit/test_setup_updates.py tests/unit/test_setup_engine.py tests/unit/test_setup_status.py tests/unit/test_linux_setup.py tests/unit/test_hd_setup.py tests/unit/test_appimage.py tests/unit/test_steam_shortcuts.py tests/unit/test_app_updates.py tests/unit/test_linux_toolchain.py
+      # Zig, CMake, Ninja and the sources are pinned, and the game's SDL3 and shaderc are built from them
+      # with that Zig (scripts/build-toolchain-linux.sh): keep them between runs.
       - uses: actions/cache@v4
         with:
           path: build/setup-downloads/linux
-          key: linux-setup-${{ hashFiles('setup/dependencies-linux.json') }}
+          key: linux-setup-${{ hashFiles('setup/dependencies-linux.json', 'scripts/build-toolchain-linux.sh') }}-${{ hashFiles('tools/xboxrecomp/cmake/xbox_sdl3.cmake') }}
       - name: Build and inventory the setup archive and the app's AppImage (no dump)
         run: ./scripts/build-setup-linux.sh
       - name: Wizard smoke and invalid input exit safely

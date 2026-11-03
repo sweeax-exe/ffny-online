@@ -37,6 +37,8 @@ apt-get install -y -qq --no-install-recommends $DEFJAM_APP_PACKAGES > /dev/null
 WORK="$OUT/work"
 rm -rf "$WORK"
 mkdir -p "$WORK"
+# The steps below write to logs in $WORK; a failing one shows the end of the newest.
+trap 'log=$(ls -t "$WORK"/*.log 2> /dev/null | head -1); [ -n "$log" ] && tail -n 30 "$log" >&2' ERR
 
 SDL_VERSION=$(sed -n 's/^set(XBOX_SDL3_VERSION "\(.*\)")/\1/p' tools/xboxrecomp/cmake/xbox_sdl3.cmake)
 SDL_SHA256=$(sed -n 's/^set(XBOX_SDL3_SHA256 "\(.*\)")/\1/p' tools/xboxrecomp/cmake/xbox_sdl3.cmake)

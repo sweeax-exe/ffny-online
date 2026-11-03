@@ -36,7 +36,8 @@ HOST_PLATFORM = 'windows-x64' if IS_WINDOWS else 'macos-arm64' if IS_MACOS else 
 PRESET = 'win-x64-release' if IS_WINDOWS else 'posix-release'
 HD_SUPPORTED = IS_WINDOWS or IS_MACOS or IS_LINUX  # Direct3D 11 on Windows; Vulkan on macOS (v0.6.1) and Linux (v0.7.2)
 LAUNCHER_BUNDLE = 'Def Jam Recompiled.app'
-RUNTIME_FOLDERS = ('source/', 'python/') if IS_WINDOWS or IS_LINUX else ('source/', 'python/', 'tools/', 'deps/')
+# Linux and macOS: the payload's build tools (tools/) and the libraries the game links (deps/) too.
+RUNTIME_FOLDERS = ('source/', 'python/') if IS_WINDOWS else ('source/', 'python/', 'tools/', 'deps/')
 # Linux: the launcher script setup writes into the install folder, and the
 # desktop entries and Steam shortcut that point at it.
 LINUX_LAUNCHER = 'Def Jam Recompiled'
@@ -252,7 +253,7 @@ class Engine:
             self.python = self.version_root / 'python/python.exe'
         else:
             # A build must not pick up a package manager's compiler, headers or
-            # libraries: the toolchain is the system's, everything else is bundled.
+            # libraries: the toolchain is the payload's (or, by request, the system's).
             for key in list(self.env):
                 if key.startswith(('DYLD_', 'HOMEBREW_', 'CMAKE_', 'PKG_CONFIG', 'CONDA', 'VIRTUAL_ENV')) or key in {
                         'CC', 'CXX', 'CFLAGS', 'CXXFLAGS', 'LDFLAGS', 'CPPFLAGS', 'CPATH', 'LIBRARY_PATH',
@@ -263,7 +264,8 @@ class Engine:
                 [str(self.version_root / 'python/bin'), str(self.version_root / 'tools/bin'),
                  '/usr/bin', '/bin', '/usr/sbin', '/sbin'])
             self.python = self.version_root / 'python/bin/python3'
-        self.container_image = None     # Linux: the build container, when the host has no toolchain
+        self.container_image = None     # Linux: the build container, when setup is asked to use it
+        self.bundled = False            # Linux: the payload's own Zig toolchain (the default)
         self.log = None
 
     def event(self, message):
@@ -621,11 +623,57 @@ class Engine:
                 ' && pacman -Scc --noconfirm\n'
                 'ENV CC=clang CXX=clang++\n')
 
+    def bundled_toolchain(self):
+        """The payload's Zig, CMake, Ninja and libraries (design §6, D215), or None if it carries none."""
+        tools, deps = self.version_root / 'tools', self.version_root / 'deps'
+        needed = [tools / 'bin' / name for name in ('zig-cc', 'zig-c++', 'zig-ar', 'zig-ranlib', 'cmake', 'ninja')]
+        needed += [tools / 'zig/zig', deps / 'lib/libSDL3.a', deps / 'lib/libshaderc_combined.a',
+                   deps / 'link/libvulkan.so']
+        return (tools, deps) if all(path.is_file() for path in needed) else None
+
+    def bundled_overrides(self):
+        """Everything from the payload, nothing from the computer: Zig's clang for glibc 2.31, static SDL3 and
+        shaderc, the Vulkan headers, and a stub loader to link against. The game names libvulkan.so.1 and has
+        no run path, so the computer's own loader is the one it opens."""
+        tools, deps = self.bundled_toolchain()
+        return [f'-DCMAKE_C_COMPILER={tools}/bin/zig-cc', f'-DCMAKE_CXX_COMPILER={tools}/bin/zig-c++',
+                f'-DCMAKE_AR={tools}/bin/zig-ar', f'-DCMAKE_RANLIB={tools}/bin/zig-ranlib',
+                f'-DCMAKE_MAKE_PROGRAM={tools}/bin/ninja', f'-DCMAKE_PREFIX_PATH={deps}',
+                '-DCMAKE_FIND_USE_CMAKE_SYSTEM_PATH=OFF', '-DCMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH=OFF',
+                f'-DVulkan_LIBRARY={deps}/link/libvulkan.so', f'-DVulkan_INCLUDE_DIR={deps}/include',
+                f'-DSHADERC_LIBRARY={deps}/lib/libshaderc_combined.a', f'-DSHADERC_INCLUDE_DIR={deps}/include',
+                '-DCMAKE_SKIP_RPATH=ON']
+
+    def toolchain_bundled(self):
+        tools, _ = self.bundled_toolchain()
+        # Zig compiles its C and C++ runtimes and the glibc 2.31 symbol stubs once, into this folder.
+        cache = self.version_root / 'zig-cache'
+        self.env['ZIG_GLOBAL_CACHE_DIR'] = self.env['ZIG_LOCAL_CACHE_DIR'] = str(cache)
+        probe = self.version_root / 'toolchain-check'
+        probe.mkdir(parents=True, exist_ok=True)
+        (probe / 'check.cpp').write_text('#include <string>\nint main() { return std::string("ok").size() != 2; }\n',
+                                         encoding='utf-8')
+        try:
+            self.run([tools / 'bin/zig-c++', '-o', probe / 'check', probe / 'check.cpp'])
+            self.run([probe / 'check'])
+        except SetupError as ex:
+            if ex.code == 6:
+                raise
+            raise SetupError('The build tools that came with setup do not work on this computer; see the setup log', 3) from ex
+        self.bundled = True
+        version = self.run([tools / 'zig/zig', 'version'], capture=True).strip()
+        self.event('Building with the compiler that came with setup (Zig ' + version + ')')
+        self.record_toolchain('bundled:zig-' + version)
+
     def toolchain_linux(self):
         choice = getattr(self.args, 'toolchain', 'auto') or 'auto'
         self.event('Checking the build toolchain')
         if platform.machine() not in ('x86_64', 'AMD64'):
             raise SetupError('This setup supports x86-64 Linux only', 3)
+        if choice == 'bundled' or (choice == 'auto' and self.bundled_toolchain()):
+            if not self.bundled_toolchain():
+                raise SetupError('This setup carries no build tools of its own; run it with --toolchain auto', 3)
+            return self.toolchain_bundled()
         problem = None
         if choice in ('auto', 'host'):
             problem = self.host_toolchain_problem()
@@ -681,7 +729,8 @@ class Engine:
                 *map(str, argv)]
 
     def check_host_runtime(self):
-        """The game runs on this computer's own SDL3, Vulkan loader and shaderc: say so now if one is missing."""
+        """The game runs on this computer's C library and Vulkan loader (and, built with the computer's own
+        compiler or in the container, its SDL3 and shaderc): say so now if one is missing."""
         executable = self.source / 'build' / PRESET / 'defjam_recomp'
         result = subprocess.run(['ldd', '-r', str(executable)], capture_output=True, text=True, env=self.env)
         problems = sorted({line.strip() for line in (result.stdout + result.stderr).splitlines()
@@ -691,7 +740,8 @@ class Engine:
                 self.log.write('Runtime check:\n' + result.stdout + result.stderr)
             raise SetupError('The game was built but cannot run on this computer: ' +
                              '; '.join(problems[:4] or ['ldd failed']) +
-                             '. It needs SDL3 3.2 or newer, the Vulkan loader and shaderc.', 3)
+                             ('. It needs the Vulkan loader (libvulkan.so.1).' if self.bundled else
+                              '. It needs SDL3 3.2 or newer, the Vulkan loader and shaderc.'), 3)
 
     def toolchain(self, provisioned=False):
         if IS_LINUX:
@@ -798,7 +848,9 @@ class Engine:
                 # Populate FetchContent from the inventoried, offline dependency source.
                 self.run([self.python, self.source / 'scripts/pipeline-state.py', 'begin-build',
                           '--preset', PRESET], cwd=self.source)
-                if IS_LINUX:
+                if IS_LINUX and self.bundled:
+                    overrides = [self.imgui_override(), *self.bundled_overrides()]
+                elif IS_LINUX:
                     # The system's (or the build container's) SDL3, Vulkan and shaderc; Dear
                     # ImGui from the payload, since the container builds without a network.
                     overrides = [self.imgui_override()]
@@ -1381,9 +1433,10 @@ def main(argv=None):
     parser.add_argument('--check-toolchain', action='store_true',
                         help='Windows: exit 0 when the C++ Build Tools are installed, 3 when they are not')
     parser.add_argument('--hd-textures', action='store_true', help='Generate and enable Lanczos 4x HD textures locally (extra time/space)')
-    parser.add_argument('--toolchain', choices=['auto', 'host', 'container'], default='auto',
-                        help='Linux: build with this computer\'s compiler, in the pinned build container, '
-                             'or whichever works (the default)')
+    parser.add_argument('--toolchain', choices=['auto', 'bundled', 'host', 'container'], default='auto',
+                        help='Linux: build with the compiler and libraries that came with setup (bundled; what '
+                             'auto picks when the payload has them), this computer\'s own (host), or in the pinned '
+                             'build container; auto without bundled tools tries host, then the container')
     parser.add_argument('--steam-shortcut', action='store_true', help='Linux: add the game to Steam')
     parser.add_argument('--steam-art', action='store_true',
                         help="Linux: place the Steam artwork for the installed game's existing shortcut")
