@@ -8,7 +8,7 @@
 
 ## 0. Status at a glance
 
-- v1.0.0 release candidate: ⏳ D254; 14 approved PRs integrated on `release/v1.0.0`, toolkit `d033837`. Local units 810 passed / 73 skipped, six renderer fixtures, source policy and app build pass. CI and all three full platform regressions, setup acceptance and owner play-test remain pending; [candidate instructions](docs/regression-v1.0.0.md).
+- v1.0.0 release candidate: ⏳ D254; 14 approved PRs integrated on `release/v1.0.0`, toolkit `d033837`. Local units 810 passed / 73 skipped, six renderer fixtures, source policy, versioned app and fresh macOS game builds pass. CI and all three full platform regressions, setup acceptance and owner play-test remain pending; [candidate instructions](docs/regression-v1.0.0.md).
 
 | Area | State | Notes |
 |---|---|---|
@@ -565,7 +565,6 @@ defjam-recomp/
 
 > Recent entries only; older entries remain unchanged in the local `docs/worklog/` archive.
 
-- 2026-11-02 21:08 — v1.0.0 integration PR#144: feat(app): Add to Steam with the library artwork on Windows; original a4141c0 retained, integrated 85a5ef3; candidate-level local units810pass/73skip and six renderer fixtures pass, full platform/CI/setup/owner gates pending. Decisions: D281,D282,D283,D284,D285,D286,D287,D288,D289,D290,D291.
 - 2026-11-02 21:08 — v1.0.0 integration PR#168: feat(app): the Linux app as an AppImage that installs, updates and adds itself to Steam (design §6, part A); original b085b0e retained, integrated c6d600d; candidate-level local units810pass/73skip and six renderer fixtures pass, full platform/CI/setup/owner gates pending. Decisions: D292,D293,D294,D295,D296,D297.
 - 2026-11-02 21:08 — v1.0.0 integration PR#170: feat(setup): Linux builds the game with the payload's own Zig toolchain (design §6.3, part B); original 742b4a7 retained, integrated bbfcd12; candidate-level local units810pass/73skip and six renderer fixtures pass, full platform/CI/setup/owner gates pending. Decisions: D298,D299,D300.
 - 2026-11-02 21:08 — v1.0.0 integration PR#151: feat(display): texture levels, anisotropic filtering, MSAA, HQ downscaling, colour tint, film scratches; original 8885a38 retained, integrated bb61dc4; candidate-level local units810pass/73skip and six renderer fixtures pass, full platform/CI/setup/owner gates pending. Decisions: D301,D302,D303,D304,D305.
@@ -573,6 +572,7 @@ defjam-recomp/
 - 2026-11-02 21:08 — v1.0.0 integration PR#146: fix(test): isolate the pinned fight from the host's timing, --isolate-crowd (#98); original 0f858d3 retained, integrated 0f858d3; candidate-level local units810pass/73skip and six renderer fixtures pass, full platform/CI/setup/owner gates pending. Decisions: D308,D309.
 - 2026-11-02 21:08 — v1.0.0 integration PR#164: fix(cinema): prevent SC04 zero-step animation drift (#161); original f24bf55 retained, integrated 36d4e06; candidate-level local units810pass/73skip and six renderer fixtures pass, full platform/CI/setup/owner gates pending. Decisions: D310,D311,D312.
 - 2026-11-02 21:08 — v1.0.0 integration PR#133: feat(site): GitHub Pages project site, published with v0.13.0; original feb7038 retained, integrated feb7038; candidate-level local units810pass/73skip and six renderer fixtures pass, full platform/CI/setup/owner gates pending. Decisions: D313,D314,D315,D316.
+- 2026-11-02 21:20 — v1.0.0 RC PR177 published on release/v1.0.0; all14 selected PRs report MERGEABLE, original/refreshed heads verified ancestors and171excluded. Local810unit passes/73skips, records76/76, renderer6/6, source588/0, adapter0drift. Native macOS version1.0.0 app and fresh game build PASS on b1fc3ca (analyze18446, lift21C/65MiB,68manual0missing); initial Errno28 analysis failed, unchanged retry passed, logs ../rc-analyze.log, ../rc-analyze-retry.log, ../rc-recomp.log, ../rc-game-build.log and ../app-build-v1.log. Candidate CI still queued; all full platform regressions/install/play-test gates pending. No main merge/tag/release/game run.
 
 ## 7. Hand-off
 
@@ -582,7 +582,8 @@ defjam-recomp/
 - `release/v1.0.0` contains original and refreshed PR heads with merge history. Original app chain #127→#128→#130→#132→#144 feeds #168→#170 and graphics #151; cheats #97 now depends on graphics #151's shared app catalogue. Forward merges preserve published history.
 - Toolkit `d033837332a2c8ca8e59113edac17a474fb3a9c8` on public fork branch `defjam/release-1.0.0` = main `d569ca1` plus provenance-preserving cherry-picks of `c76b44d`, `d4f5890`, `ebf6f12`. Six renderer fixtures pass locally; Windows native fixtures belong to CI.
 - Integrated native macOS app builds. Full local unit suite: 810 passed, 73 skipped; six renderer fixtures, source policy and adapter checks pass. Initial language fixture link failure was fixed with `pc_language_settings.c`; cheats use `cheats_settings.c` shared by game/app, with Story actions kept game-only. Recovery test cache locks stay in its temporary directory. Logs: local `../rc-unit-tests-final.log`, `../app-build-final.log`, `../toolkit-fixtures/`.
-- CI, fresh gameplay builds and full Windows/macOS/Deck regression, actual setup install/Clean Update from v0.13.0, Steam/Input/Game Mode and owner play-test remain open until evidence is recorded. Follow `docs/regression-v1.0.0.md`; pin every run to the release PR head. No old-head result certifies this candidate.
+- Fresh macOS source build PASS on b1fc3ca: analysis18,446 functions; lift21C/65MiB,68manual addresses/0missing; posix-release game and version1.0.0 standalone app compile/link. Initial analysis hit Errno28 (no space), unchanged retry passed; both attempts retained in local `../rc-analyze{,-retry}.log`, plus `../rc-recomp.log`, `../rc-game-build.log`, `../app-build-v1.log`. No game run or full gameplay regression started.
+- Candidate CI remains queued on GitHub. Full Windows/macOS/Deck regression, actual setup install/Clean Update from v0.13.0, Steam/Input/Game Mode and owner play-test remain open until evidence is recorded. Follow `docs/regression-v1.0.0.md`; pin every run to the release PR head. No old-head result certifies this candidate.
 - Keep #98/#141/#161/#162/#166 qualifications open. The isolated fight golden may be stale on current code; compare repeat/replay without replacing it. Graphics visual references need review (Windows thin-texture/ticker differences). No threshold, mask, golden or graphics-default changes were made.
 - #133 adds the site; Pages configuration could not be verified (API 404). Enable GitHub Actions as the Pages source and review current app/install copy before publishing the website. No deployment requested during RC preparation.
 - Main and stable v0.13.0 remain unchanged. No tag, release publication, merge of the release PR or closure of milestone/issues until the candidate gates and owner release decision.
