@@ -31,6 +31,8 @@
 #include "recomp/gen/recomp_types.h"
 #include "recorder.h"
 #include "test_observations.h"
+#include "input_latency.h"
+#include "input_consumption.h"
 
 #define ACTORS        0x003B92E0u
 #define STRIDE        0x12E8u
@@ -299,6 +301,7 @@ void defjam_test_rng(uint32_t stack)
 /* sub_00087700: one simulation step of a live fight is about to run. */
 void defjam_test_step(void)
 {
+    input_latency_step();
     int slot;
     if (!defjam_test_observations_enabled() || !s_in_match) return;
     s_step++;
@@ -476,6 +479,8 @@ void defjam_test_input(uint32_t actor)
 {
     int slot, i;
     uint32_t buttons = 0;
+    input_consumption_fighter(actor);
+    defjam_input_latency_actor(actor, 0);
     if (!defjam_test_observations_enabled()) return;
     if (s_input_count < 0) input_load();
     if (!s_input_slots || !s_in_match) return;
@@ -486,6 +491,27 @@ void defjam_test_input(uint32_t actor)
         if (s_input[i].slot == slot && s_step >= s_input[i].first && s_step <= s_input[i].last)
             buttons |= s_input[i].buttons;
     MEM32(PAD_TABLE + (uint32_t)slot * 0x20u) = buttons;      /* the deliberate write; see above */
+}
+
+void defjam_input_latency_actor(uint32_t actor, int after)
+{
+    uint32_t words[12];
+    uint32_t pad;
+    int slot, i;
+    if (!input_latency_on() || actor < ACTORS || actor >= ACTORS + SLOTS * STRIDE ||
+        (actor - ACTORS) % STRIDE) return;
+    slot = (int)((actor - ACTORS) / STRIDE);
+    pad=MEM32(actor+F_SLOT);
+    if (pad>=8) return;
+    pad=MEM32(0x003B9098u+pad*4u);
+    if (pad>=8) return;
+    for (i = 0; i < 8; i++) words[i] = MEM32(PAD_TABLE + pad * 0x20u + (uint32_t)i * 4u);
+    words[8] = MEM32(actor + F_HELD);
+    words[9] = MEM32(actor + F_PRESSED);
+    words[10] = MEM32(actor + F_STATE);
+    words[11] = (MEM32(actor + (F_CONTROL & ~3u)) >> (8u * (F_CONTROL & 3u))) & 1u;
+    words[11] |= pad << 8;
+    input_latency_guest(slot, words, after);
 }
 
 /* sub_001AD220(seed): the four per-fighter AI generators (0x3BFC70, 0x88 apart)

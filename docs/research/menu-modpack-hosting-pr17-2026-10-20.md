@@ -85,7 +85,7 @@ there is no need to bundle that system into the menu artwork release.
 - [HD texture guide](../hd-textures.md): current folder format, ordering, limits and local-generation workflow.
 - [HD texture release packaging](hd-texture-release-packaging.md): measured Faithful HD corpus size, local-build rationale and prior GitHub release asset limit check.
 - [Menu/UI modpack handover](../menu-ui-modpack-handover.md): approved artwork scope, local pack export and integration gates.
-- [Menu wide first-release integration audit](menu-wide-first-release-integration-audit-2026-10-20.md): current wide/loading acceptance gaps and local component composition.
+- [Menu wide first-release integration audit](https://github.com/vyanhursky/DefJam-Modding-Tools/blob/main/docs/menu-text-restoration.md): current wide/loading acceptance gaps and local component composition.
 - [Menu UI playtest pack report](menu-ui-playtest-pack-2026-10-19.md): concrete local component order and macOS test evidence.
 - [PR #17](https://github.com/vyanhursky/DefJamFFNY-recomp/pull/17): prior design discussion and visible proposal.
 
