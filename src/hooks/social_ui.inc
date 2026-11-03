@@ -258,7 +258,7 @@ int room_unread()
     unsigned seq = 0;
     int n = netplay_room_chat(buf, NETPLAY_CHAT_LINES, &seq), u = 0;
     for (int i = 0; i < n; i++)
-        if (buf[i].seq > C.room_seen && !buf[i].mine && !buf[i].system && !room_muted(buf[i])) u++;
+        if (buf[i].seq > C.room_seen && !buf[i].mine && !buf[i].system && !buf[i].history && !room_muted(buf[i])) u++;
     return u;
 }
 
