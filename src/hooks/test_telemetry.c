@@ -20,6 +20,12 @@
  * that exist so a scenario can be repeated:
  *   RECOMP_TEST_RNG_SEED=<n>  replaces the seed argument of the match's random
  *     number generator, which the game otherwise takes from the time-stamp counter;
+ *   RECOMP_TEST_ISOLATE_CROWD=1  removes the other things that make two runs of one pinned
+ *     fight differ on a slow host (docs/research/deck-determinism-98.md): the match logic's two
+ *     time-seeded generators are seeded too, the fighters meet no spectators, and the general-
+ *     purpose generator, which code outside the fight step also draws from, restarts from the
+ *     step number at every step (all below). It changes how the fight plays, so a run with it
+ *     has its own golden stream;
  *   RECOMP_TEST_INPUT=<file>  replaces a fighter's pad input, step by step (below).
  */
 #include "host.h"
@@ -298,6 +304,30 @@ void defjam_test_rng(uint32_t stack)
     end_line();
 }
 
+/* RECOMP_TEST_ISOLATE_CROWD=1 (see the header). The seed the pinned generators start from is the
+ * run's RECOMP_TEST_RNG_SEED, or a constant when there is none. */
+static int isolating(void)
+{
+    static int on = -1;
+    if (on < 0) { const char *e = getenv("RECOMP_TEST_ISOLATE_CROWD"); on = e && *e == '1'; }
+    return on && defjam_test_observations_enabled();
+}
+
+static uint32_t isolation_seed(void)
+{
+    const char *e = getenv("RECOMP_TEST_RNG_SEED");
+    return (e && *e) ? (uint32_t)strtoul(e, NULL, 0) : 0x00D19DEFu;
+}
+
+/* Fighters against spectators. sub_001B8760 walks the spectator slot table (count at 0x3494E0, entries of 0x34
+ * bytes from the pointer at 0x3494E4) once per fighter per step and sets bit 0x12 of the flags byte at
+ * 0x3B8F20 for a fighter that is close enough to one. The slots' positions come from the spectators'
+ * animations, which advance with the host's timing, so the same fight meets them at different steps in
+ * different runs and the flag then changes what the CPU fighter plans (the first field to differ was
+ * always the CPU fighter's brain, then its position). An isolated run therefore shows the loop an empty
+ * table. The count is cleared before every step and the game puts it back with the table. */
+#define SPECTATOR_COUNT 0x003494E0u
+
 /* sub_00087700: one simulation step of a live fight is about to run. */
 void defjam_test_step(void)
 {
@@ -305,6 +335,15 @@ void defjam_test_step(void)
     int slot;
     if (!defjam_test_observations_enabled() || !s_in_match) return;
     s_step++;
+    if (isolating()) {
+        MEM32(SPECTATOR_COUNT) = 0;
+        /* The general-purpose generator (G_RNG_UTIL) is also drawn by effects that run once per presented
+         * frame, and a host presents a different number of frames between two steps in different runs, so
+         * its state at a step differs. In two pinned runs that were otherwise the same it was the one word
+         * that differed (the last sample, step 1,771). Whether the fight draws from it was not shown; this
+         * removes the question. */
+        MEM32(G_RNG_UTIL) = (uint32_t)s_step * 2654435761u + 12345u;
+    }
     if (s_step == 1 || s_step == 300 || s_step == 900) draws_report(s_step == 1 ? "step1" : s_step == 300 ? "step300" : "step900");
 
     if (s_setup_due) {
@@ -583,7 +622,7 @@ long defjam_test_shot_due(void)
 }
 
 /* sub_000AA0D0(this = generator, high, low): the routine every generator of this
- * kind is seeded through. Logged, not changed.
+ * kind is seeded through. Logged; changed only for 0x376FDC in an isolated run (below).
  *
  * Seven seedings were seen before a One on One: one at start-up (0x39C0E0, the
  * general-purpose generator), the four AI generators (0x3BFC70, 0x88 apart;
@@ -596,14 +635,34 @@ long defjam_test_shot_due(void)
  * seeds identical, so the crowd is not chosen from these generators' seeds
  * alone. And it changed the game-state stream, so at least one of them feeds the
  * fight even though their time-seeded values had never made two pinned runs
- * differ in thirty seconds. They are therefore left as the game seeds them.
+ * differ in thirty seconds. They are therefore left as the game seeds them, unless the run
+ * asks to be isolated.
+ *
+ * On the Steam Deck (#98) two pinned runs part within a minute, and part of the reason is
+ * 0x376FDC, which is CLogic+0x2D87C: the match logic's own generator, seeded from the
+ * time-stamp counter at the start of every match. An isolated run seeds it from the
+ * run's seed (sub_000C8820 below does the same for the second one, at 0x3773A4). The
+ * crowd's generator at 0x375F68 stays as it was.
  *
  * Reported as [TEST-SEED], not [TEST-EVENT]: some seedings happen before the
  * match's own events and are not part of the recorded state stream. */
 void defjam_test_generator_seed(uint32_t generator, uint32_t stack)
 {
-    if (!defjam_test_observations_enabled() || !budget()) return;
+    if (!defjam_test_observations_enabled()) return;
+    if (generator == 0x376FDCu && isolating()) {
+        MEM32(stack + 4) = isolation_seed() >> 16;                  /* high, as the game splits the counter */
+        MEM32(stack + 8) = isolation_seed() & 0xFFFFu;              /* low */
+    }
+    if (!budget()) return;
     begin_line("TEST-SEED", "generator");
     put(",\"generator\":%u,\"high\":%u,\"low\":%u", generator, MEM32(stack + 4), MEM32(stack + 8));
     end_line();
+}
+
+/* sub_000C8820(this, counter, word): seeds a generator of the same kind as the one above, and the match
+ * logic calls it for its second one, CLogic+0x2DC44 (0x3773A4), with the time-stamp counter at every match
+ * and round start (sub_0008B730 and sub_000891A0). An isolated run replaces the counter with the seed. */
+void defjam_test_logic_seed(uint32_t self, uint32_t stack)
+{
+    if (self == 0x003773A4u && isolating()) MEM32(stack + 4) = isolation_seed();
 }

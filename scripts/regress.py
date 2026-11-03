@@ -591,6 +591,11 @@ def check_visual(a):
     return code == 0 and bool(checks) and not bad, detail + "  " + os.path.relpath(folder, REPO)
 
 
+def fight_golden(a):
+    """The golden stream a fight check compares with: the plain one, or the one recorded with --isolate-crowd."""
+    return os.path.join(REPO, "tests", "golden", "fight-stream-isolated.json" if a.isolate_crowd else "fight-stream.json")
+
+
 def check_replay(a):
     spec = importlib.util.spec_from_file_location("scenario_suite", os.path.join(HERE, "scenario_suite.py"))
     suite = importlib.util.module_from_spec(spec)
@@ -603,11 +608,12 @@ def check_replay(a):
     folder = os.path.join(REPO, "logs", "scenarios", "regress-replay-" + stamp)
     stream = os.path.join(REPO, "logs", "scenarios", "regress-replay-%s.stream" % stamp)
     code = suite.main(["run", "fight", "--fixture", fixture, "--no-audio", "--observe-combat", "--step-input", "default",
-                       "--rng-seed", "20261006", "--no-unlock", "--preset", a.preset, "--stream-out", stream, "--output", folder])
+                       "--rng-seed", "20261006", "--no-unlock", "--preset", a.preset, "--stream-out", stream, "--output", folder]
+                      + (["--isolate-crowd"] if a.isolate_crowd else []))
     try:
         with open(stream, encoding="utf-8") as f:
             lines = [line for line in f.read().splitlines() if line]
-        with open(os.path.join(REPO, "tests", "golden", "fight-stream.json"), encoding="utf-8") as f:
+        with open(fight_golden(a), encoding="utf-8") as f:
             golden = json.load(f)
     except (OSError, ValueError) as ex:
         return False, "no stream: %s" % ex
@@ -633,7 +639,7 @@ def check_repeat(a):
     second = os.path.join(REPO, "logs", "scenarios", "regress-repeat-b-" + stamp)
     stream = os.path.join(REPO, "logs", "scenarios", "regress-repeat-%s.stream" % stamp)
     common = ["run", "fight", "--fixture", fixture, "--no-audio", "--observe-combat", "--step-input", "default",
-              "--rng-seed", "20261006", "--no-unlock", "--preset", a.preset]
+              "--rng-seed", "20261006", "--no-unlock", "--preset", a.preset] + (["--isolate-crowd"] if a.isolate_crowd else [])
     if suite.main(common + ["--stream-out", stream, "--output", first]) != 0:
         return False, "the recording run failed  " + os.path.relpath(first, REPO)
     code = suite.main(common + ["--stream-expect", stream, "--output", second])
@@ -648,7 +654,7 @@ def check_repeat(a):
         detail = "%d records identical over %d steps" % (metrics.get("records", 0), metrics.get("max_step", 0))
         # The stream was the same on Release and Debug and on two fixtures, so its
         # hash is a reference for how the fight plays, not just for this machine.
-        path = os.path.join(REPO, "tests", "golden", "fight-stream.json")
+        path = fight_golden(a)
         with open(path, encoding="utf-8") as f:
             golden = json.load(f)
         if a.update_golden:
@@ -659,7 +665,7 @@ def check_repeat(a):
             detail += "; golden updated"
         elif metrics.get("sha256") != golden["sha256"]:
             golden_ok = False
-            detail += "; but the fight no longer plays as recorded in tests/golden/fight-stream.json" \
+            detail += "; but the fight no longer plays as recorded in " + os.path.relpath(path, REPO).replace(os.sep, "/") + \
                       " (if the change is meant to alter play, rerun with --update-golden)"
         else:
             detail += ", matching the golden hash"
@@ -775,6 +781,10 @@ def main(argv=None):
     ap.add_argument("--only", help="comma-separated checks: " + ",".join(ORDER))
     ap.add_argument("--soak", type=int, default=3, help="boots in the soak check (default 3)")
     ap.add_argument("--fixture", help="save fixture for the combat check (default: a fresh copy of the saved profiles)")
+    ap.add_argument("--isolate-crowd", action="store_true",
+                    help="replay and repeat with the fight isolated from the host's timing (#98): the match logic's "
+                         "generators seeded and no spectators for the fighters to meet. Compares with "
+                         "tests/golden/fight-stream-isolated.json")
     ap.add_argument("--update-golden", action="store_true",
                     help="repeat check: record the new state-stream hash instead of comparing with it")
     ap.add_argument("--shared-story", action="store_true", help="evaluate crib and gym from one story-tour launch")

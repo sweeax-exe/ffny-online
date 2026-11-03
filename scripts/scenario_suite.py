@@ -326,6 +326,8 @@ def execute(args):
                 env[name] = value
             if args.rng_seed is not None:
                 env['RECOMP_TEST_RNG_SEED'] = str(args.rng_seed)
+            if args.isolate_crowd:
+                env['RECOMP_TEST_ISOLATE_CROWD'] = '1'
             sessions_before = recorder_sessions() if getattr(args, 'record', False) else None
             if sessions_before is not None:
                 # The play-test recorder (docs/playtest-recorder.md): frame rows, events and pictures of the run.
@@ -505,6 +507,10 @@ def main(argv=None):
                      help='fight steps the stream covers (default 1800, thirty seconds)')
     run.add_argument('--rng-seed', type=int,
                      help="replace the seed of the match's random number generator (changes CPU behaviour; for repeatable runs)")
+    run.add_argument('--isolate-crowd', action='store_true',
+                     help='also seed the match logic\'s time-seeded generators and show the fighters no spectators, which '
+                          'is what makes the same pinned fight repeat on a slow host (#98); changes how the fight plays, '
+                          'so the stream has its own golden (tests/golden/fight-stream-isolated.json)')
     run.add_argument('--no-unlock', action='store_true',
                      help='run without RECOMP_UNLOCK_ALL (the harness turns it on); the pinned fight stream was recorded without it')
     run.add_argument('--baselines', help='local approved-baseline manifest')

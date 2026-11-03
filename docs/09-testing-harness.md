@@ -151,6 +151,12 @@ of how the fight plays. The full regression's `replay` check plays the pinned fi
 once and compares with that hash: a change to the translator or the runtime that
 alters the simulation fails it even if the picture still looks right.
 
+On a slow host the same pinned fight can part from itself (the Steam Deck, #98): the spectators' positions
+follow the host's timing, two match-logic generators are seeded from the time-stamp counter, and a
+general-purpose generator is drawn once per presented frame. `--isolate-crowd` (on `scenario_suite.py run` and
+on `regress.py`) removes those, changes how the fight plays and so has its own golden,
+`tests/golden/fight-stream-isolated.json`; `docs/research/deck-determinism-98.md` has the evidence.
+
 ```powershell
 python scripts/regress.py --only replay            # one fight against the golden hash
 python scripts/regress.py --only repeat            # two fights against each other, then the hash

@@ -162,6 +162,7 @@ void sub_001BC690_enter(void) { defjam_test_rng(g_esp); }
 void sub_001AD220_enter(void) { defjam_test_ai_seed(g_esp); }
 /* The seeding routine every generator of this kind goes through (thiscall). */
 void sub_000AA0D0_enter(void) { defjam_test_generator_seed(g_ecx, g_esp); defjam_crowd_seed(g_ecx, g_esp); }
+void sub_000C8820_enter(void) { defjam_test_logic_seed(g_ecx, g_esp); }
 /* Every draw (RECOMP_TEST_DRAWS): the C runtime's rand, the match generator, and the two
  * wrappers the object-form generators are drawn through; then the background crowd's update. */
 void sub_00200820_enter(void) { defjam_test_draw(1, MEM32(g_esp)); }

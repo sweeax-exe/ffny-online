@@ -1,5 +1,7 @@
 """Behavioral negative controls for reports, captures, fixtures and ownership."""
+import argparse
 import importlib.util
+import os
 import json
 import re
 from pathlib import Path
@@ -631,6 +633,29 @@ def test_fight_stream_golden_is_a_hash_and_matches_the_repeat_check():
     # Nothing but identifiers and numbers: no game state is stored, only its hash.
     assert set(golden) == {'schema', 'what', 'route', 'rng_seed', 'step_input', 'max_step', 'records', 'sha256',
                            'recorded', 'note'}
+
+
+def test_isolated_fight_stream_golden_matches_what_the_isolated_checks_run():
+    """--isolate-crowd (#98) is a separate pinned fight with its own hash: same shape, same parameters, same
+    route, selected by regress.py and switched on in the game by the suite."""
+    plain = json.loads((ROOT / 'tests/golden/fight-stream.json').read_text(encoding='utf-8'))
+    iso = json.loads((ROOT / 'tests/golden/fight-stream-isolated.json').read_text(encoding='utf-8'))
+    assert set(iso) == set(plain)
+    assert re.fullmatch(r'[0-9a-f]{64}', iso['sha256']) and iso['records'] > 0 and iso['sha256'] != plain['sha256']
+    assert (iso['route'], iso['rng_seed'], iso['step_input'], iso['max_step']) == \
+        (plain['route'], plain['rng_seed'], plain['step_input'], plain['max_step'])
+    regress = (ROOT / 'scripts/regress.py').read_text(encoding='utf-8')
+    assert regress.count('--isolate-crowd') >= 3 and 'fight-stream-isolated.json' in regress
+    suite = (ROOT / 'scripts/scenario_suite.py').read_text(encoding='utf-8')
+    assert "env['RECOMP_TEST_ISOLATE_CROWD'] = '1'" in suite
+
+
+def test_regress_picks_the_isolated_golden_only_when_asked():
+    spec = importlib.util.spec_from_file_location('regress_for_golden', ROOT / 'scripts/regress.py')
+    regress = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(regress)
+    assert os.path.basename(regress.fight_golden(argparse.Namespace(isolate_crowd=False))) == 'fight-stream.json'
+    assert os.path.basename(regress.fight_golden(argparse.Namespace(isolate_crowd=True))) == 'fight-stream-isolated.json'
 
 
 def played_free_for_all():
