@@ -95,7 +95,7 @@ inline std::vector<ModGroup> mod_groups(const fs::path &mods, const std::vector<
         auto recipe=hd_recipe(mods,packs[i]);
         std::string id=recipe.empty() ? packs[i].name : "recomp-hd-"+recipe;
         auto group=std::find_if(groups.begin(),groups.end(),[&](const ModGroup &g){return g.id==id;});
-        if (group==groups.end()) groups.push_back({id,recipe.empty()?packs[i].name:"Recomp HD textures",{i},!recipe.empty()});
+        if (group==groups.end()) groups.push_back({id,recipe.empty()?packs[i].name:"Upscaled Original Textures",{i},!recipe.empty()});
         else group->members.push_back(i);
     }
     return groups;

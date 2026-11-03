@@ -1,14 +1,16 @@
 # The app
 
+See [the 1.0 UX test candidate](../../docs/launcher-ux-candidate.md) for the current menu, preset and testing contract.
+
 `defjam_app` is one app for setup, launcher and updates, in progress
 ([design](../../docs/research/unified-app-design-2026-10-26.md), steps 2 and 3). It holds no game
 code: it sets up the game from the player's own dump, shows the launcher's Home and Settings, and
 Play starts the game that setup built on this computer, with `--no-launcher`.
 
 - **Setup inside the app** (`app_setup.cpp`). With nothing installed it opens on the first run:
-  the dump (an image or an extracted folder), the install and data folders, and HD textures.
+  the dump (an image or an extracted folder), the install and data folders, and optional Upscaled Original Textures generated locally.
   Setup makes no shortcuts: the app the player downloaded is the only copy, and they move it
-  wherever they like. Home's Update / Repair, and Advanced > Maintenance, open Maintenance:
+  wherever they like. Home → Help → Repair game opens recovery:
   Repair and Clean Rebuild. Each runs `setup/engine.py` from the app's setup payload with that payload's Python, as
   the setup wizards do: the choices on its command line, its progress read from `--status-file`
   every frame and shown as a list of stages, Cancel through `--cancel-file`, and its exit code and
@@ -23,8 +25,7 @@ Play starts the game that setup built on this computer, with `--no-launcher`.
   out the overlay and the Debug page's controls for a running game (the recorder's mark, Story
   scenes, EA's developer menu). It registers the same catalogue
   (`src/hooks/pc_settings_catalog.c`) and edits the same `settings.ini` as the game.
-- **Uninstall** (`app_setup.cpp`; last on Advanced > Maintenance, under Update / Repair, which is
-  first). It takes out the Steam shortcut and art this app added (Windows), copies the saves and
+- **Uninstall** (`app_setup.cpp`; last on Help, below repair and file tools). It takes out the Steam shortcut and art this app added (Windows and Linux), copies the saves and
   `settings.ini` to `Def Jam Recompiled saves <date>` in Documents when the data folder goes too
   (nothing is deleted unless the copy matches), runs setup's own uninstall (`engine.py
   --uninstall`: the build, its receipt, the launcher and an older setup's shortcuts), then deletes
@@ -42,14 +43,14 @@ Play starts the game that setup built on this computer, with `--no-launcher`.
   game's own run logs stay in `logs\` under its folder there (`DEFJAM_LOG_DIR`).
 - **When the window shows.** Same rule as the game's launcher (`pc_launcher_wanted`): skipped when
   "Skip launcher" is on, unless Shift is held or `--launcher` is given; always shown when mods need
-  recovery or nothing is installed. `--play` always skips it.
+  recovery or nothing is installed. `--play` skips it unless Shift, both controller shoulder buttons, or `--launcher` request the launcher.
 - **System calls** are in `app_os.cpp` (POSIX and Windows halves), so the rest of the app is the
   same on every platform.
 
 - **Updates itself** (`app_update.cpp`). At start (unless `[launcher] check_updates` is off) the
   engine looks on GitHub for a newer app (`--check-app-update`); Update downloads and verifies it
   beside this one (`--stage-app`, `setup/releases.py` `select_app`), swaps it in and starts the new
-  app, which always shows its window and offers to build the game it carries (a Clean Update from
+  app, which shows its window and continues the approved local game build (a Clean Update from
   its own payload). On macOS the bundles are swapped. On Windows the app is a folder (the program
   and `payload\`), and a folder with a running program in it cannot be renamed: the program and
   `payload\` are renamed aside to `.old` one by one, each step undone if a later one fails, and the

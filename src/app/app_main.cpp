@@ -259,6 +259,26 @@ void open_session_log()
 }
 
 // Whether Shift is down right now, before any key event has said so (as host_posix_shift_held).
+// A couch/Deck escape route from the saved direct-play preference and old --play shortcuts.
+bool controller_launcher_held()
+{
+    if (!SDL_InitSubSystem(SDL_INIT_GAMEPAD)) return false;
+    int count = 0;
+    SDL_JoystickID *ids = SDL_GetGamepads(&count);
+    bool held = false;
+    for (int i = 0; ids && i < count; ++i) {
+        SDL_Gamepad *pad = SDL_OpenGamepad(ids[i]);
+        if (!pad) continue;
+        SDL_PumpEvents(); SDL_UpdateGamepads();
+        held |= SDL_GetGamepadButton(pad, SDL_GAMEPAD_BUTTON_LEFT_SHOULDER) &&
+                SDL_GetGamepadButton(pad, SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER);
+        SDL_CloseGamepad(pad);
+    }
+    SDL_free(ids);
+    SDL_QuitSubSystem(SDL_INIT_GAMEPAD);
+    return held;
+}
+
 bool shift_held()
 {
 #if defined(__APPLE__)
@@ -584,8 +604,8 @@ int main(int argc, char **argv)
     // Without a playable install there is only the setup to show. Just after its own update the app
     // always shows its window: the update was started from it, and the new app offers to build the
     // game it carries (a player who skips the launcher would otherwise go straight into the old one).
-    bool force = (force_launcher || g_updated) && !play_now;
-    if (!in.installed || pc_launcher_wanted(skip, force, play_now, shift_held(), 0)) {
+    bool force = force_launcher || g_updated || shift_held() || ((skip || play_now) && controller_launcher_held());
+    if (!in.installed || pc_launcher_wanted(skip, force, play_now && !force, shift_held(), 0)) {
         pc_input_start();                           // pads drive the menus, as in the game's launcher
         int open_setup = 0;
         int play = pc_launcher_window(&open_setup);

@@ -130,6 +130,35 @@ void save_frame(SDL_Renderer *renderer, const char *path)
 
 } // namespace
 
+// Fit outer bounds, not just the client area: at 300% the default 720-point
+// client would already consume all 2160 pixels of a 4K TV before title bar/taskbar.
+static void fit_launcher(SDL_Window *window, bool initial)
+{
+    SDL_Rect work{};
+    if (!SDL_GetDisplayUsableBounds(SDL_GetDisplayForWindow(window), &work)) return;
+    int top = 0, left = 0, bottom = 0, right = 0;
+    SDL_GetWindowBordersSize(window, &top, &left, &bottom, &right);
+    float scale = 1;
+#if defined(_WIN32)
+    scale = std::max(1.0f, SDL_GetWindowDisplayScale(window));
+#endif
+    int margin = (int)(8 * scale);
+    int max_w = std::max(1, work.w - left - right - margin * 2);
+    int max_h = std::max(1, work.h - top - bottom - margin * 2);
+    SDL_SetWindowMinimumSize(window, std::min((int)(640 * scale), max_w),
+                            std::min((int)(400 * scale), max_h));
+    int w, h, x, y;
+    SDL_GetWindowSize(window, &w, &h);
+    SDL_GetWindowPosition(window, &x, &y);
+    if (initial) { w = (int)(1100 * scale); h = (int)(720 * scale); }
+    w = std::min(w, max_w); h = std::min(h, max_h);
+    SDL_SetWindowSize(window, w, h);
+    if (initial) { x = work.x + (work.w - w) / 2; y = work.y + (work.h - h) / 2; }
+    x = std::clamp(x, work.x + left + margin, work.x + work.w - w - right - margin);
+    y = std::clamp(y, work.y + top + margin, work.y + work.h - h - bottom - margin);
+    SDL_SetWindowPosition(window, x, y);
+}
+
 extern "C" int pc_launcher_window(int *open_setup_out)
 {
     int result_value = 1;                               // 1 Play, 0 Quit: the loop below sets *result
@@ -149,16 +178,7 @@ extern "C" int pc_launcher_window(int *open_setup_out)
         return -1;
     }
     SDL_SetRenderVSync(renderer, 1);
-    SDL_SetWindowMinimumSize(window, 640, 480);
-#if defined(_WIN32)
-    // Windows measures the window in pixels: make it as big on a scaled display as it is elsewhere.
-    float scale = SDL_GetWindowDisplayScale(window);
-    if (scale > 1.0f) {
-        SDL_SetWindowMinimumSize(window, (int)(640 * scale), (int)(480 * scale));
-        SDL_SetWindowSize(window, (int)(1100 * scale), (int)(720 * scale));
-        SDL_SetWindowPosition(window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
-    }
-#endif
+    fit_launcher(window, true);
 
     ui_lock();
     ui_context_begin(window);
@@ -189,6 +209,8 @@ extern "C" int pc_launcher_window(int *open_setup_out)
 #endif
                 done = true;
                 *result = 0;
+            } else if (e.type == SDL_EVENT_WINDOW_DISPLAY_CHANGED || e.type == SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED) {
+                fit_launcher(window, false);
             } else if (e.type == SDL_EVENT_WINDOW_FOCUS_GAINED) {
                 pc_input_set_focus(1);
             } else if (e.type == SDL_EVENT_WINDOW_FOCUS_LOST) {

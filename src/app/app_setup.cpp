@@ -22,6 +22,9 @@
 #include <atomic>
 #include <filesystem>
 #include <fstream>
+#include <future>
+#include <sys/stat.h>
+#include "pc_settings.h"
 #include <mutex>
 #include <sstream>
 #include <string>
@@ -64,14 +67,14 @@ struct Stage
 };
 const Stage k_stages[] = {
     {"Prepare the setup files", {"Preparing verified release source", nullptr}},
-    {"Verify your dump", {"Verifying and preparing your dump", "Verified installed dump", "Verified extraction"}},
+    {"Check your game files", {"Verifying and preparing your dump", "Verified installed dump", "Verified extraction"}},
     {"Check the build tools", {"Checking ", "Installing Microsoft Build Tools", "Preparing the build container",
                                "Building with"}},
-    {"Analyse the game's code", {"Analysis ", nullptr}},
-    {"Translate it to C", {"Lift ", nullptr}},
-    {"Compile the game", {"Build ", "Building in the build container", nullptr}},
-    {"HD textures", {"Upscaling HD textures", "HD textures ready", nullptr}},
-    {"Activate", {"Activating the verified installation", "Setup complete", "Installation is ready"}},
+    {"Prepare game code", {"Analysis ", nullptr}},
+    {"Prepare the build", {"Lift ", nullptr}},
+    {"Build the game", {"Build ", "Building in the build container", nullptr}},
+    {"Upscaled Original Textures", {"Upscaling HD textures", "HD textures ready", nullptr}},
+    {"Finish setup", {"Activating the verified installation", "Setup complete", "Installation is ready"}},
 };
 const int k_stage_count = (int)(sizeof k_stages / sizeof k_stages[0]);
 
@@ -95,6 +98,8 @@ bool g_started = false;
 Run g_run;
 char g_dump[2048], g_root[2048], g_data[2048];
 bool g_hd = false;
+int g_setup_step = 0, g_experience = 1;
+bool g_apply_experience = false;
 bool g_confirm_cancel = false;
 std::string g_form_error;
 
@@ -301,8 +306,14 @@ void finish(int code)
         fprintf(stderr, "[APP] %s\n", why.c_str());
     fflush(stderr);
     if (code == 0) g_tools_missing = false;                 // setup found or installed them
-    if (code == 0 && g_run.operation == "install")
-        app::remember_install(app::install().root);         // found again at the next start
+    if (code == 0 && g_run.operation == "install" && app::install().installed) {
+        if (g_apply_experience) {
+            int saved = pc_experience_apply(g_experience);
+            if (saved) g_run.line += " Experience could not be saved; choose it in Settings.";
+            g_apply_experience = false;
+        }
+        app::remember_install(app::install().root);
+    }         // found again at the next start
     g_screen = Screen::Finished;
 }
 
@@ -356,6 +367,25 @@ std::string elapsed(unsigned long long ms)
 
 } // namespace
 
+static bool g_page_body = false;
+bool back_pressed()
+{
+    return !ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel) &&
+           !ImGui::GetIO().WantTextInput &&
+           (ImGui::IsKeyPressed(ImGuiKey_Escape, false) || ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false));
+}
+void page_actions()
+{
+    if (!g_page_body) return;
+    ImGui::EndChild();
+    g_page_body = false;
+    ImGui::Separator();
+}
+void page_end()
+{
+    page_actions();
+    ImGui::End();
+}
 void page_begin(float width, float height, const char *heading)
 {
     float scale = ImGui::GetStyle().FontScaleMain;
@@ -370,6 +400,9 @@ void page_begin(float width, float height, const char *heading)
     ImGui::Separator();
     pcui::heading(heading, 24 * scale);
     ImGui::Spacing();
+    float actions = std::min(height * .30f, ImGui::GetFrameHeightWithSpacing() * 2.6f);
+    ImGui::BeginChild("app body", ImVec2(0, -actions), ImGuiChildFlags_None);
+    g_page_body = true;
 }
 
 namespace
@@ -378,19 +411,82 @@ namespace
 void path_row(const char *label, const char *id, char *value, bool folder, bool image_too)
 {
     ImGui::PushID(id);
-    ImGui::TextUnformatted(label);
-    float button = ImGui::CalcTextSize("Folder...").x + ImGui::GetStyle().FramePadding.x * 2;
-    float buttons = (image_too ? 2 : 1) * (button + ImGui::GetStyle().ItemSpacing.x);
-    ImGui::SetNextItemWidth(std::max(120.0f, ImGui::GetContentRegionAvail().x - buttons));
+    ImGui::TextWrapped("%s", label);
+    ImGui::SetNextItemWidth(-1);
     ImGui::InputText("##path", value, sizeof g_dump);
     ui_target(id);
     if (image_too) {
-        ImGui::SameLine();
-        if (ImGui::Button("Image...")) choose(value, false);
+        if (ImGui::Button("Choose disc image")) choose(value, false);
+        if (ImGui::GetContentRegionAvail().x > ImGui::CalcTextSize("Choose extracted folder").x + 220) ImGui::SameLine();
     }
-    ImGui::SameLine();
-    if (ImGui::Button(folder ? "Folder..." : "Choose...")) choose(value, true);
+    if (ImGui::Button(image_too ? "Choose extracted folder" : "Change folder")) choose(value, folder);
     ImGui::PopID();
+}
+
+struct SpaceReview { bool valid = false; std::string text; };
+std::future<SpaceReview> g_space_job;
+SpaceReview g_space;
+std::string g_space_key, g_space_running_key;
+fs::path existing_parent(fs::path p) {
+    std::error_code ec;
+    while (!p.empty() && !fs::exists(p, ec)) p = p.parent_path();
+    return p;
+}
+bool contains_path(const fs::path &a, const fs::path &b) {
+    auto i = a.begin(), j = b.begin();
+    for (; i != a.end() && j != b.end() && *i == *j; ++i, ++j) {}
+    return i == a.end();
+}
+SpaceReview review_space(std::string dump, std::string root, std::string data, bool hd)
+{
+    try {
+        auto source = fs::weakly_canonical(fs::u8path(dump));
+        auto install = fs::weakly_canonical(fs::u8path(root));
+        auto storage = fs::weakly_canonical(fs::u8path(data));
+        if (contains_path(install, storage) || contains_path(storage, install) ||
+            contains_path(source, install) || contains_path(install, source) ||
+            contains_path(source, storage) || contains_path(storage, source))
+            return {false, "Choose separate, non-nested folders for your game copy, installation and game data."};
+        if (!fs::exists(source)) return {false, "The selected game copy was not found."};
+        uintmax_t bytes = 0;
+        if (!fs::is_regular_file(storage / "extraction-state.json")) {
+            if (fs::is_directory(source)) {
+                if (!fs::is_regular_file(source / "default.xbe")) return {false, "Choose the extracted Xbox folder containing default.xbe."};
+                for (const auto &e : fs::recursive_directory_iterator(source)) if (e.is_regular_file()) bytes += e.file_size();
+            } else bytes = fs::file_size(source);
+        }
+        auto a = existing_parent(install), b = existing_parent(storage);
+        auto av = fs::space(a), bv = fs::space(b);
+#if defined(_WIN32)
+        bool same = _wcsicmp(a.root_name().c_str(), b.root_name().c_str()) == 0;
+#else
+        struct stat sa{}, sb{};
+        bool same = stat(a.c_str(), &sa) == 0 && stat(b.c_str(), &sb) == 0 && sa.st_dev == sb.st_dev;
+#endif
+        uintmax_t gib = 1024ull * 1024 * 1024;
+        uintmax_t build = 12 * gib, content = bytes + gib + (hd ? 15 * gib : 0);
+        char message[512];
+        if (same) snprintf(message, sizeof message, "Setup working space: %.1f GiB required; %.1f GiB available on the destination drive. Includes the game-copy space and temporary build files%s.",
+                           double(build + content)/gib, double(av.available)/gib, hd ? " and optional HD generation" : "");
+        else snprintf(message, sizeof message, "Install drive: 12 GiB required, %.1f GiB available. Data drive: %.1f GiB required, %.1f GiB available. Includes temporary working space.",
+                      double(av.available)/gib, double(content)/gib, double(bv.available)/gib);
+        bool fits = same ? av.available >= build + content : av.available >= build && bv.available >= content;
+        return {fits, std::string(fits ? "" : "Not enough free space. ") + message};
+    } catch (const std::exception &e) { return {false, std::string("Could not check locations: ") + e.what()}; }
+}
+void space_review()
+{
+    std::string key = std::string(g_dump) + "\n" + g_root + "\n" + g_data + (g_hd ? "1" : "0");
+    if (g_space_job.valid() && g_space_job.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
+        auto answer = g_space_job.get();
+        if (g_space_running_key == key) { g_space = answer; g_space_key = key; }
+    }
+    if (g_space_key != key && !g_space_job.valid()) {
+        g_space = {}; g_space_running_key = key;
+        g_space_job = std::async(std::launch::async, review_space, std::string(g_dump), std::string(g_root), std::string(g_data), g_hd);
+    }
+    ImGui::TextWrapped("%s", g_space_key == key ? g_space.text.c_str() : "Checking selected locations and free space...");
+    if (!g_space_job.valid() && ImGui::SmallButton("Recheck space")) { g_space_key.clear(); g_space.valid = false; }
 }
 
 // An installation already in the folder chosen on the first run (an older setup's, say): the app
@@ -436,61 +532,79 @@ void adopt_found()
 
 void first_run_page(float width, float height, UiResult *result)
 {
-    page_begin(width, height, "SET UP THE GAME");
-    ImGui::TextWrapped("The game is built here from your own copy of Def Jam: Fight for NY (Xbox): a disc "
-                       "image or an extracted folder. Nothing from it leaves this computer. Setup takes about "
-                       "ten minutes and needs about 12 GB.");
-    ImGui::Spacing();
-    path_row("Your dump (disc image or extracted folder)", "setup.dump", g_dump, true, true);
-    path_row("Install folder (the built game)", "setup.install", g_root, true, false);
-    path_row("Data folder (your extracted dump, saves and settings)", "setup.data", g_data, true, false);
+    page_begin(width, height, "SET UP YOUR GAME");
+    ImGui::Text("Step %d of 3", g_setup_step + 1);
     probe_root();
     bool found = !g_found.version.empty();
     bool older = found && app::newer(app::payload_version(), g_found.version);
-    if (older)
-        ImGui::TextColored(pcui::gold(), "This folder already has Def Jam Recompiled v%s. Update it to v%s: it keeps "
-                           "its own data folder, saves and settings, so the dump and data folder above are not "
-                           "needed.", g_found.version.c_str(), app::payload_version().c_str());
-    else if (found)
-        ImGui::TextColored(pcui::gold(), "This folder already has Def Jam Recompiled v%s. Use it as it is, with its "
-                           "own data folder, saves and settings.", g_found.version.c_str());
-    ImGui::Spacing();
-    if (!found) {
-        ImGui::Checkbox("Generate HD textures (adds several minutes and about 15 GB)", &g_hd);
-        ui_target("setup.hd");
+    if (g_setup_step == 0) {
+        ImGui::TextWrapped("Choose your USA Xbox copy of Def Jam: Fight for NY. Setup builds the PC game locally; your game files stay on this computer.");
+        path_row("Your game copy", "setup.dump", g_dump, true, true);
+        if (ImGui::CollapsingHeader("Use an existing installation"))
+            path_row("Installation folder", "setup.install", g_root, true, false);
+        if (found) ImGui::TextWrapped("Found v%s. Your current settings, saves and mods will be kept.", g_found.version.c_str());
+        ImGui::TextWrapped("A system file picker opens when choosing files. On Steam Deck you may need Desktop Mode for this step.");
+    } else if (g_setup_step == 1) {
+        ImGui::RadioButton("Modern - recommended", &g_experience, 1); ui_target("setup.modern");
+        ImGui::TextWrapped("Widescreen and sharper 2x graphics, with the game's original visual style. Upscaled Original Textures and downloadable texture packs are optional.");
+        ImGui::Spacing();
+        ImGui::RadioButton("Original", &g_experience, 0); ui_target("setup.original");
+        ImGui::TextWrapped("Original 4:3 proportions, 480p rendering and original textures, with console-style graphics effects.");
+        ImGui::Spacing();
+        ImGui::TextWrapped("You can change experience or individual settings later. Both experiences keep the same game speed and content.");
+    } else {
+        ImGui::Text("Experience: %s", g_experience ? "Modern" : "Original");
+        if (g_experience) {
+            ImGui::Checkbox("Upscaled Original Textures (optional)", &g_hd); ui_target("setup.hd");
+            ImGui::TextWrapped("Generates higher-resolution versions of the original textures from your game copy on this PC. Adds several minutes and 15 GiB of working space. You can do this later in Mods.");
+        } else g_hd = false;
+        ImGui::TextWrapped("Downloadable texture packs and language mods are available in Mods after setup. No optional downloads are started automatically.");
+        if (ImGui::CollapsingHeader("Change locations")) {
+            path_row("Installation location", "setup.install", g_root, true, false);
+            path_row("Game data and saves location", "setup.data", g_data, true, false);
+        }
+        ImGui::TextWrapped("Game: %s\nData and saves: %s", g_root, g_data);
+        space_review();
+        tools_row();
+        ImGui::TextWrapped("Setup may take several minutes. It checks your copy before building; details and progress stay visible.");
     }
-    tools_row();
-    ImGui::Spacing();
-    if (!g_form_error.empty()) ImGui::TextColored(ImVec4(1, 0.45f, 0.4f, 1), "%s", g_form_error.c_str());
-    bool ready = found ? g_root[0] != 0 : g_dump[0] && g_root[0] && g_data[0];
-    std::string label = !found ? "INSTALL" : older ? "UPDATE TO V" + app::payload_version() : "USE THIS INSTALL";
+    if (!g_form_error.empty()) ImGui::TextWrapped("%s", g_form_error.c_str());
+    page_actions();
+    if (g_setup_step == 2 && !g_space.valid)
+        ImGui::TextWrapped("%s", g_space_job.valid() ? "Checking space before setup..." : "Check the location / free-space message above before starting.");
+    bool next = g_setup_step < 2;
+    bool ready = found || (g_dump[0] && g_root[0] && g_data[0] && (next || (!g_space_job.valid() && g_space.valid)));
     ImGui::BeginDisabled(!ready);
-    if (pcui::play_button(label.c_str(), ImVec2(ImGui::GetFontSize() * 13, ImGui::GetFrameHeight() * 1.8f), 26))
-    {
-        if (found) {
-            adopt_found();
-        } else {
-            g_form_error.clear();
+    const char *label = found ? (older ? "Update existing game" : "Use existing game") : next ? "Continue" : "Set up game";
+    if (ImGui::Button(label)) {
+        if (found) adopt_found();
+        else if (next) ++g_setup_step;
+        else {
+            g_form_error.clear(); g_apply_experience = true;
             app::install().root = g_root;
-            start("install", "Installing", g_root, g_data, g_dump, g_hd);
+            start("install", "SETTING UP YOUR GAME", g_root, g_data, g_dump, g_hd);
         }
     }
-    ui_target(!found ? "setup.start" : older ? "setup.update" : "setup.use");
+    ui_target(!next && !found ? "setup.start" : found ? "setup.use" : "setup.next");
     ImGui::EndDisabled();
     ImGui::SameLine();
+    if (g_setup_step > 0) {
+        if (ImGui::Button("Back") || back_pressed()) --g_setup_step;
+        ui_target("setup.back"); ImGui::SameLine();
+    }
     if (ImGui::Button("Quit")) result->leave = true;
     ui_target("Quit");
-    ImGui::End();
+    page_end();
 }
 
 void maintenance_page(float width, float height, UiResult *result)
 {
     const Install &in = app::install();
-    page_begin(width, height, "MAINTENANCE");
+    page_begin(width, height, "REPAIR AND RECOVERY");
     ImGui::TextWrapped("Installed: v%s in %s", in.version.c_str(), in.root.string().c_str());
     ImGui::TextWrapped("Data: %s", in.data.string().c_str());
     ImGui::Spacing();
-    ImGui::Checkbox("Also generate HD textures", &g_hd);
+    ImGui::Checkbox("Generate Upscaled Original Textures", &g_hd);
     tools_row();
     ImGui::Spacing();
     if (!g_form_error.empty()) ImGui::TextColored(ImVec4(1, 0.45f, 0.4f, 1), "%s", g_form_error.c_str());
@@ -515,10 +629,10 @@ void maintenance_page(float width, float height, UiResult *result)
         start("repair", "Repairing", in.root.string(), in.data.string(), "", g_hd);
     }
     ui_target("setup.repair");
-    ImGui::SeparatorText("Clean Rebuild");
+    ImGui::SeparatorText("Rebuild game");
     ImGui::TextWrapped("Builds this version again from nothing: analysis, translation and compile. About ten "
                        "minutes. The current build stays playable until the new one is ready.");
-    if (ImGui::Button("Clean Rebuild")) {
+    if (ImGui::Button("Rebuild game")) {
         g_form_error.clear();
         start("rebuild", "Rebuilding", in.root.string(), in.data.string(), "", g_hd);
     }
@@ -531,9 +645,9 @@ void maintenance_page(float width, float height, UiResult *result)
     if (in.installed) steam_section();
 #endif
     ImGui::Spacing();
-    ImGui::Separator();
+    page_actions();
     if (in.installed) {
-        if (ImGui::Button("< Back to launcher")) {
+        if (ImGui::Button("< Back to launcher") || back_pressed()) {
             g_form_error.clear();
             g_screen = Screen::None;
         }
@@ -541,30 +655,31 @@ void maintenance_page(float width, float height, UiResult *result)
     } else if (ImGui::Button("Quit")) {
         result->leave = true;
     }
-    ImGui::End();
+    page_end();
 }
 
 void update_ready_page(float width, float height)
 {
     const Install &in = app::install();
-    page_begin(width, height, "UPDATE YOUR GAME");
+    page_begin(width, height, "FINISH YOUR UPDATE");
     if (app::just_updated())
-        ImGui::TextWrapped("Def Jam Recompiled is now v%s.", app::payload_version().c_str());
+        ImGui::TextWrapped("The app is updated to v%s. The game update is still to come.", app::payload_version().c_str());
     ImGui::TextWrapped("Your game is v%s. Update it to v%s now: it is built again from your dump with the new "
                        "version, in about three to ten minutes. Your saves, settings and mods are kept.",
                        in.version.c_str(), app::payload_version().c_str());
-    ImGui::TextWrapped("Later opens the launcher, where Play starts v%s and Update / Repair offers the update "
+    ImGui::TextWrapped("Later opens the launcher, where Play starts v%s and Check for updates offers the update "
                        "again.", in.version.c_str());
     tools_row();
     ImGui::Spacing();
     if (!g_form_error.empty()) ImGui::TextColored(ImVec4(1, 0.45f, 0.4f, 1), "%s", g_form_error.c_str());
+    page_actions();
     if (pcui::play_button("UPDATE GAME", ImVec2(ImGui::GetFontSize() * 12, ImGui::GetFrameHeight() * 1.8f), 26))
         start_update_build();
     ui_target("update.build");
     ImGui::SameLine();
-    if (ImGui::Button("Later")) g_screen = Screen::None;
+    if (ImGui::Button("Later") || back_pressed()) g_screen = Screen::None;
     ui_target("update.later");
-    ImGui::End();
+    page_end();
 }
 
 // ---- Uninstall (Advanced > Maintenance, last on the page) ----------------------------------------
@@ -580,6 +695,7 @@ struct Removal
     std::atomic<int> state{0};              // 0 not started, 1 working, 2 done, 3 stopped
     std::mutex lock;
     std::string step, error, notes;         // under lock
+    bool saves_copied = false, settings_copied = false;
     fs::path backup;                        // where the saves and settings are copied
 } g_removal;
 
@@ -645,11 +761,35 @@ bool removable_data(const fs::path &data, const fs::path &root, std::string *why
     return why->empty();
 }
 
+bool same_file_contents(const fs::path &a, const fs::path &b)
+{
+    std::ifstream first(a, std::ios::binary), second(b, std::ios::binary);
+    if (!first || !second) return false;
+    char x[65536], y[65536];
+    do {
+        first.read(x, sizeof x); second.read(y, sizeof y);
+        if (first.bad() || second.bad() || first.gcount() != second.gcount() ||
+            memcmp(x, y, (size_t)first.gcount())) return false;
+    } while (first.gcount());
+    return true;
+}
+bool same_save_tree(const fs::path &a, const fs::path &b)
+{
+    try {
+        if (tally(a) != tally(b)) return false;
+        for (auto &entry : fs::recursive_directory_iterator(a)) {
+            if (entry.is_symlink()) return false; // Never promise a backup of an external target.
+            if (entry.is_regular_file() && !same_file_contents(entry.path(), b / fs::relative(entry.path(), a))) return false;
+        }
+        return true;
+    } catch (...) { return false; }
+}
+
 void removal_work(fs::path root, fs::path data, bool with_data, fs::path backup)
 {
     std::error_code ec;
     std::string message;
-#if defined(_WIN32)
+#if defined(_WIN32) || defined(__linux__)
     removal_step("Removing it from Steam");
     if (!app::steam_remove_now(&message))
         return removal_stop("The Steam shortcut could not be removed" + (message.empty() ? std::string() : ": " + message) +
@@ -657,18 +797,28 @@ void removal_work(fs::path root, fs::path data, bool with_data, fs::path backup)
 #endif
     if (with_data) {
         fs::path save = data / "save";
-        if (fs::is_directory(save, ec)) {
+        bool has_saves = fs::is_directory(save, ec);
+        if (ec && ec != std::errc::no_such_file_or_directory) return removal_stop("Could not inspect your saves. Your data was not deleted.");
+        ec.clear();
+        if (has_saves) {
             removal_step("Copying your saves to " + backup.string());
             fs::create_directories(backup, ec);
             fs::copy(save, backup / "save", fs::copy_options::recursive, ec);
             if (ec)
-                return removal_stop("Your saves could not be copied (" + ec.message() + "). Nothing else was removed.");
-            if (tally(save) != tally(backup / "save"))
-                return removal_stop("The copy of your saves does not match them. Nothing else was removed.");
+                return removal_stop("Your saves could not be copied (" + ec.message() + "). Your game and data were not deleted.");
+            if (!same_save_tree(save, backup / "save"))
+                return removal_stop("The copy of your saves does not match them. Your game and data were not deleted.");
+            g_removal.saves_copied = true;
         }
-        if (fs::is_regular_file(data / "settings.ini", ec)) {
+        bool has_settings = fs::is_regular_file(data / "settings.ini", ec);
+        if (ec && ec != std::errc::no_such_file_or_directory) return removal_stop("Could not inspect your settings. Your data was not deleted.");
+        ec.clear();
+        if (has_settings) {
             fs::create_directories(backup, ec);
             fs::copy_file(data / "settings.ini", backup / "settings.ini", fs::copy_options::overwrite_existing, ec);
+            if (ec) return removal_stop("Your settings could not be copied (" + ec.message() + "). Your data was not deleted.");
+            if (!same_file_contents(data / "settings.ini", backup / "settings.ini")) return removal_stop("The settings backup could not be verified. Your data was not deleted.");
+            g_removal.settings_copied = true;
         }
     }
     removal_step("Uninstalling the game");
@@ -772,17 +922,18 @@ void uninstall_page(float width, float height, UiResult *result)
         ui_target("uninstall.data");
         ImGui::TextDisabled("%s", in.data.string().c_str());
         if (g_removal.data)
-            ImGui::TextWrapped("It holds the copy of your dump, your saves, settings, mods and HD textures. Your saves "
+            ImGui::TextWrapped("It holds the copy of your dump, your saves, settings, mods and Upscaled Original Textures. Your saves "
                                "and settings are copied first, to:\n%s", g_removal.backup.string().c_str());
         else
             ImGui::TextWrapped("It stays, with your saves, settings and mods, for when you install again.");
         ImGui::Spacing();
         if (!g_form_error.empty()) ImGui::TextColored(ImVec4(1, 0.45f, 0.4f, 1), "%s", g_form_error.c_str());
+        page_actions();
         if (pcui::play_button("UNINSTALL", ImVec2(ImGui::GetFontSize() * 10, ImGui::GetFrameHeight() * 1.8f), 26))
             start_removal();
         ui_target("uninstall.start");
         ImGui::SameLine();
-        if (ImGui::Button("Cancel")) {
+        if (ImGui::Button("Cancel") || back_pressed()) {
             g_form_error.clear();
             g_screen = Screen::None;
         }
@@ -798,8 +949,9 @@ void uninstall_page(float width, float height, UiResult *result)
         else
             ImGui::TextColored(ImVec4(1, 0.45f, 0.4f, 1), "%s", g_removal.error.c_str());
         std::error_code ec;
-        bool copied = fs::is_directory(g_removal.backup, ec);
-        if (copied) ImGui::TextWrapped("Your saves and settings are in %s", g_removal.backup.string().c_str());
+        bool copied = g_removal.saves_copied || g_removal.settings_copied;
+        if (copied) ImGui::TextWrapped("Backed up%s%s to %s", g_removal.saves_copied ? " saves" : "",
+                                     g_removal.settings_copied ? " settings" : "", g_removal.backup.string().c_str());
         if (!g_removal.notes.empty()) ImGui::TextWrapped("%s", g_removal.notes.c_str());
 #if defined(_WIN32)
         if (state == 2) ImGui::TextWrapped("The app removes itself when you close it.");
@@ -807,6 +959,7 @@ void uninstall_page(float width, float height, UiResult *result)
         if (state == 2) ImGui::TextWrapped("To finish, delete the app itself (move it to the Trash).");
 #endif
         ImGui::Spacing();
+        page_actions();
         if (copied) {
             if (ImGui::Button("Open the saves folder")) pcui::open_path(g_removal.backup.string());
             ui_target("uninstall.saves");
@@ -818,7 +971,7 @@ void uninstall_page(float width, float height, UiResult *result)
         }
         ui_target("uninstall.close");
     }
-    ImGui::End();
+    page_end();
 }
 
 void stage_list()
@@ -839,11 +992,13 @@ void running_page(float width, float height)
     page_begin(width, height, g_run.title.c_str());
     stage_list();
     ImGui::Spacing();
-    ImGui::TextWrapped("%s", g_run.cancelling ? "Cancelling the current step..." : g_run.line.c_str());
+    ImGui::TextWrapped("%s", g_run.cancelling ? "Stopping setup..." : "Preparing your local game. This can take several minutes.");
+    if (ImGui::CollapsingHeader("Show technical details")) ImGui::TextWrapped("%s", g_run.line.c_str());
     ImGui::TextDisabled("%s elapsed", elapsed(SDL_GetTicks() - g_run.started_ms).c_str());
     ImGui::Spacing();
+    page_actions();
     ImGui::BeginDisabled(g_run.cancelling);
-    if (ImGui::Button("Cancel")) g_confirm_cancel = true;
+    if (ImGui::Button("Cancel") || back_pressed()) g_confirm_cancel = true;
     ui_target("setup.cancel");
     ImGui::EndDisabled();
     ImGui::SameLine();
@@ -852,30 +1007,31 @@ void running_page(float width, float height)
         ImGui::OpenPopup("Cancel setup?");
         g_confirm_cancel = false;
     }
+    ImGui::SetNextWindowSizeConstraints(ImVec2(0, 0), ImVec2(width - 24, height - 24));
     if (ImGui::BeginPopupModal("Cancel setup?", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
-        ImGui::TextUnformatted("Stop after the current step? What is done so far can be resumed.");
+        ImGui::TextWrapped("Cancel setup? Your existing game and saves will be kept. Some prepared files may be reused, but the game build may need to start again.");
         if (ImGui::Button("Cancel setup")) {
             screen_request_cancel();
             ImGui::CloseCurrentPopup();
         }
         ui_target("setup.cancel-confirm");
         ImGui::SameLine();
-        if (ImGui::Button("Keep going")) ImGui::CloseCurrentPopup();
+        if (ImGui::Button("Keep installing") || ImGui::IsKeyPressed(ImGuiKey_Escape) || ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight)) ImGui::CloseCurrentPopup();
         ImGui::EndPopup();
     }
-    ImGui::End();
+    page_end();
 }
 
 void finished_page(float width, float height, UiResult *result)
 {
     bool ok = g_run.exit_code == 0;
-    const char *title = ok ? "DONE" : g_run.exit_code == 6 ? "CANCELLED" : "SETUP STOPPED";
+    const char *title = ok ? "READY TO PLAY" : g_run.exit_code == 6 ? "CANCELLED" : "SETUP STOPPED";
     page_begin(width, height, title);
     stage_list();
     ImGui::Spacing();
     if (ok)
-        ImGui::TextWrapped("Ready in %s. Version %s is installed.", elapsed(g_run.ended_ms - g_run.started_ms).c_str(),
-                           app::install().version.c_str());
+        ImGui::TextWrapped("Ready in %s. Version %s is installed. %s", elapsed(g_run.ended_ms - g_run.started_ms).c_str(),
+                           app::install().version.c_str(), g_run.line.c_str());
     else {
         ImGui::TextWrapped("%s", g_run.line.empty() ? "Setup stopped." : g_run.line.c_str());
 #if defined(_WIN32)
@@ -884,7 +1040,7 @@ void finished_page(float width, float height, UiResult *result)
                                "them from Microsoft (a few GB; Windows asks for your permission) and then carries on.");
         if (g_run.exit_code == 3010)
             ImGui::TextWrapped("The Build Tools are installed. Restart Windows, then open Def Jam Recompiled "
-                               "again: setup carries on from where it stopped.");
+                               "again and retry setup. Some prepared files may be reused.");
 #elif defined(__APPLE__)
         if (g_run.exit_code == 3)
             ImGui::TextWrapped("Install Apple's Command Line Tools (Install Tools, or run xcode-select --install "
@@ -898,8 +1054,17 @@ void finished_page(float width, float height, UiResult *result)
             ImGui::TextWrapped("The installed game is unchanged and still playable.");
     }
     ImGui::Spacing();
+    page_actions();
+    if (!ok && g_run.exit_code != 3010) {
+        if (ImGui::Button("Try again")) {
+            Request again = g_request;
+            start(again.operation, again.title, again.root, again.data, again.dump, again.hd);
+        }
+        ui_target("setup.retry");
+        ImGui::SameLine();
+    }
     if (ok || app::install().installed) {
-        if (ImGui::Button("Continue")) g_screen = Screen::None;
+        if (ImGui::Button("Back to launcher")) g_screen = Screen::None;
         ui_target("setup.continue");
         if (ok) {
             ImGui::SameLine();
@@ -913,7 +1078,7 @@ void finished_page(float width, float height, UiResult *result)
 #endif
         }
     } else {
-        if (ImGui::Button("Back")) g_screen = app::install().problem.empty() ? Screen::FirstRun : Screen::Maintenance;
+        if (ImGui::Button("Change setup options") || back_pressed()) g_screen = app::install().problem.empty() ? Screen::FirstRun : Screen::Maintenance;
         ui_target("setup.back");
     }
 #if defined(__APPLE__)
@@ -942,7 +1107,7 @@ void finished_page(float width, float height, UiResult *result)
     ImGui::SameLine();
     if (ImGui::Button("Quit")) result->leave = true;
     ui_target("Quit");
-    ImGui::End();
+    page_end();
 }
 
 } // namespace
@@ -962,7 +1127,8 @@ bool screen_draw(float width, float height, UiResult *result)
         } else if (app::newer(app::payload_version(), in.version)) {
             // An older game than this app builds (after the app's own update, or the first time a
             // newer app opens an older setup's installation): offer the update before the launcher.
-            g_screen = Screen::UpdateReady;
+            if (app::just_updated()) start_update_build(); // consent covered both phases before app restart
+            else g_screen = Screen::UpdateReady;
         }
         start_tools_check();
     }
@@ -994,11 +1160,18 @@ void screen_open_maintenance()
     g_screen = Screen::Maintenance;
 }
 
+void screen_open_hd()
+{
+    g_hd = true;
+    screen_open_maintenance();
+    g_form_error = "Upscaled Original Textures are selected. Repair game will generate any missing upscaled textures and keep your saves/settings. Allow 15 GiB extra working space.";
+}
+
 void start_update_build()
 {
     const Install &in = app::install();
     g_form_error.clear();
-    if (!start("update", "Updating to v" + app::payload_version(), in.root.string(), in.data.string(), "", false))
+    if (!start("update", "Updating to v" + app::payload_version(), in.root.string(), in.data.string(), "", g_hd))
         g_screen = Screen::Maintenance;                     // which shows why
 }
 
@@ -1051,3 +1224,5 @@ void pc_app_open_uninstall()
     app::g_removal.backup = app::backup_folder();
     app::g_screen = app::Screen::Uninstall;
 }
+
+void pc_app_setup_hd() { app::screen_open_hd(); }

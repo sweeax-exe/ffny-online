@@ -75,6 +75,8 @@ enum class Stage
 Check g_check = Check::Idle;
 os::Process g_check_process;
 fs::path g_check_file;
+std::string g_check_status = "Not checked yet";
+long long g_last_checked = 0;
 std::string g_tag, g_version, g_url;    // the newer app, when there is one
 
 Stage g_stage = Stage::None;
@@ -173,17 +175,23 @@ void take_answer(std::map<std::string, std::string> &keys)
     }
 }
 
-void start_check()
+void start_check(bool manual = false)
 {
     g_check = Check::Done;
-    if (!recomp_settings_get("launcher", "check_updates", 1) || app::payload().empty()) return;
+    if (app::payload().empty()) { g_check_status = "This development copy has no update payload. Open the release page."; return; }
+    if (!manual && !recomp_settings_get("launcher", "check_updates", 1)) {
+        g_check_status = "Automatic checks are off"; return;
+    }
+    g_check_status = "Checking for updates...";
     std::error_code ec;
     fs::create_directories(cache_dir(), ec);
     g_check_file = cache_dir() / "app-update.txt";
     auto keys = read_keys(g_check_file);
     long long checked = keys.count("checked") ? atoll(keys["checked"].c_str()) : 0;
-    if (keys["current"] == app::payload_version() && time(nullptr) - checked < k_check_seconds) {
+    if (!manual && keys["current"] == app::payload_version() && time(nullptr) - checked < k_check_seconds) {
         take_answer(keys);
+        g_last_checked = checked;
+        g_check_status = "Showing last successful check";
         return;
     }
     std::string error;
@@ -192,6 +200,7 @@ void start_check()
     if (!spawn_engine({"--check-app-update", result.string(), "--log", (app::log_dir() / "update-check.log").string()},
                       &g_check_process, &error)) {
         fprintf(stderr, "[APP] update check: %s\n", error.c_str());
+        g_check_status = "Could not check for updates. You can still play.";
         return;
     }
     g_check = Check::Running;
@@ -206,17 +215,24 @@ void poll_check()
     fs::path result = g_check_file.string() + ".new";
     std::error_code ec;
     if (code != 0) {
-        fprintf(stderr, "[APP] update check failed (see update-check.log); nothing shown\n");
+        fprintf(stderr, "[APP] update check failed (see update-check.log)\n");
+        g_check_status = "Could not check for updates. You can still play.";
         fs::remove(result, ec);
         return;
     }
     auto keys = read_keys(result);
+    if (keys["current"] != app::payload_version()) {
+        g_check_status = "Could not read the update result. Try checking again.";
+        fs::remove(result, ec); return;
+    }
     {
         std::ofstream out(result, std::ios::app);
         out << "checked=" << (long long)time(nullptr) << "\n";
     }
     fs::rename(result, g_check_file, ec);
     take_answer(keys);
+    g_last_checked = time(nullptr);
+    g_check_status = g_version.empty() ? "Up to date" : "Update available";
 }
 
 void start_download()
@@ -426,7 +442,7 @@ bool update_screen_draw(float width, float height, UiResult *result)
         result->leave = true;                           // main starts the new app when the window closes
         page_begin(width, height, "UPDATED");
         ImGui::TextWrapped("Starting Def Jam Recompiled v%s...", g_version.c_str());
-        ImGui::End();
+        page_end();
         return true;
     }
     switch (g_stage) {
@@ -437,34 +453,38 @@ bool update_screen_draw(float width, float height, UiResult *result)
                            app::payload_version().c_str());
         ImGui::TextWrapped("The new app is downloaded from the project's GitHub release and checked against the "
                            "release's checksums before it replaces this one. Your game, saves and settings stay as "
-                           "they are. Afterwards the app offers to build v%s.", g_version.c_str());
+                           "they are until the new game is ready. After restarting, the app builds game v%s locally. "
+                           "This can take several minutes. You can cancel the build and keep playing the previous version.", g_version.c_str());
         ImGui::Spacing();
-        if (pcui::play_button("DOWNLOAD AND UPDATE", ImVec2(ImGui::GetFontSize() * 15, ImGui::GetFrameHeight() * 1.8f), 24))
+        page_actions();
+        if (pcui::play_button("UPDATE APP AND GAME", ImVec2(ImGui::GetFontSize() * 15, ImGui::GetFrameHeight() * 1.8f), 24))
             start_download();
         ui_target("update.download");
         ImGui::SameLine();
         if (ImGui::Button("What's new")) pcui::open_path(g_url);
         ImGui::SameLine();
-        if (ImGui::Button("Not now")) g_stage = Stage::None;
+        if (ImGui::Button("Later") || back_pressed()) g_stage = Stage::None;
         ui_target("update.not-now");
-        ImGui::End();
+        page_end();
         return true;
     case Stage::Downloading:
         page_begin(width, height, "UPDATING THE APP");
         ImGui::TextWrapped("%s", g_cancelling ? "Cancelling..." : g_line.empty() ? "Starting..." : g_line.c_str());
         ImGui::TextDisabled("%s elapsed", elapsed(SDL_GetTicks() - g_started_ms).c_str());
         ImGui::Spacing();
+        page_actions();
         ImGui::BeginDisabled(g_cancelling);
         if (ImGui::Button("Cancel")) update_request_cancel();
         ui_target("update.cancel");
         ImGui::EndDisabled();
-        ImGui::End();
+        page_end();
         return true;
     case Stage::Failed:
         page_begin(width, height, "UPDATE STOPPED");
         ImGui::TextWrapped("%s", g_error.c_str());
         ImGui::Spacing();
-        if (ImGui::Button("Back")) g_stage = Stage::None;
+        page_actions();
+        if (ImGui::Button("Back") || back_pressed()) g_stage = Stage::None;
         ui_target("update.back");
         if (!g_url.empty()) {
             ImGui::SameLine();
@@ -474,7 +494,7 @@ bool update_screen_draw(float width, float height, UiResult *result)
             ImGui::SameLine();
             if (ImGui::Button("Open log")) pcui::open_path(g_log.string(), true);
         }
-        ImGui::End();
+        page_end();
         return true;
     case Stage::NotBundle:
         page_begin(width, height, "UPDATE THE APP");
@@ -483,8 +503,9 @@ bool update_screen_draw(float width, float height, UiResult *result)
         ImGui::Spacing();
         if (ImGui::Button("Release page")) pcui::open_path(g_url);
         ImGui::SameLine();
-        if (ImGui::Button("Back")) g_stage = Stage::None;
-        ImGui::End();
+        page_actions();
+        if (ImGui::Button("Back") || back_pressed()) g_stage = Stage::None;
+        page_end();
         return true;
     }
     return false;
@@ -504,19 +525,32 @@ const char *pc_app_game_version()
 void pc_app_home_notice()
 {
     using namespace app;
+    ImGui::BeginDisabled(g_check == Check::Running);
+    if (ImGui::Button("Check for updates")) start_check(true);
+    ui_target("updates.check");
+    ImGui::EndDisabled();
+    if (app::payload().empty()) {
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Releases")) pcui::open_path("https://github.com/vyanhursky/DefJamFFNY-recomp/releases");
+    }
+    if (!app::payload().empty() && ImGui::GetContentRegionAvail().x > 700 * ImGui::GetStyle().FontScaleMain) ImGui::SameLine();
+    ImGui::TextWrapped("%s", g_check_status.c_str());
+    if (g_last_checked && g_check != Check::Running) {
+        time_t checked = (time_t)g_last_checked;
+        char date[64]; strftime(date, sizeof date, "%b %d, %H:%M", localtime(&checked));
+        ImGui::SameLine(); ImGui::TextDisabled("(%s)", date);
+    }
     const Install &in = install();
-    if (in.installed && newer(payload_version(), in.version)) {
-        ImGui::TextColored(pcui::gold(), "v%s is ready to build; your game is v%s.", payload_version().c_str(),
-                           in.version.c_str());
-        ImGui::SameLine();
-        if (ImGui::SmallButton("Build update")) start_update_build();
-        ui_target("home.build-update");
-    } else if (!g_version.empty()) {
-        ImGui::TextColored(pcui::gold(), "Def Jam Recompiled v%s is available.", g_version.c_str());
-        ImGui::SameLine();
-        if (ImGui::SmallButton("Update")) g_stage = Stage::Confirm;
+    // Prefer a newer online target to rebuilding an intermediate local payload.
+    if (!g_version.empty()) {
+        if (ImGui::Button(("Update to v" + g_version).c_str())) g_stage = Stage::Confirm;
         ui_target("home.update");
         ImGui::SameLine();
         if (ImGui::SmallButton("What's new")) pcui::open_path(g_url);
+    } else if (in.installed && newer(payload_version(), in.version)) {
+        ImGui::TextWrapped("Play starts v%s. Finish updating to v%s when ready.", in.version.c_str(), payload_version().c_str());
+        if (ImGui::SmallButton("Finish game update")) start_update_build();
+        ui_target("home.build-update");
     }
+    ImGui::Separator();
 }
