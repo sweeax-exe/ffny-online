@@ -523,6 +523,20 @@ static void send_data(const uint8_t *payload, int len);
  * on "FIGHT!" for 90 seconds (five F9 reports, 2026-10-23/24). Online it goes through only once every
  * player has chosen it after the same match; until then the call is held, the others are told, and
  * whoever chose first chooses again once they accept. Returns 1 when the call is to be held. */
+/* A fight whose end ran on this PC alone ("the match is decided and player N went on ahead", a wait
+ * of over DECIDED_LIMIT_MS after the KO) left lockstep off, so the rematch every player chose then
+ * started as a local fight on each PC: netplay_on_match_start skipped it, no steps or checksums went
+ * out, and each PC fought its own copy (build 48 candidate tests cc-v26 and spec-rematch, with both
+ * PCs waiting on each other for over a second at step 990). The rematch is a match of the room, so it
+ * runs in lockstep again, as a spectator's watched rematch already does (spec_tick). */
+static void rematch_rearm(void)
+{
+    if (!N.lobby || !N.match_live || N.watching || N.lockstep) return;
+    if (N.state != NETPLAY_CONNECTED) return;
+    fprintf(stderr, "[NETPLAY] rematch: the last fight ended on this PC alone; the rematch runs in lockstep again\n");
+    InterlockedExchange(&N.lockstep, 1);
+}
+
 int netplay_rematch_request(void)
 {
     uint8_t p[9];
@@ -571,6 +585,7 @@ int netplay_rematch_request(void)
     if (all) {
         InterlockedExchange(&N.rematch_held, 0);
         fprintf(stderr, "[NETPLAY] rematch: every player chose it\n");
+        rematch_rearm();
         return 0;
     }
     /* Held. Before build 45 the player had to choose Rematch once more after the others accepted,
@@ -623,6 +638,7 @@ static void netplay_rematch_tick(void)
     if (sm >= 0x10000u && MEM32(sm + 0x24u) != 0) return;
     InterlockedExchange(&N.rematch_go, 0);
     fprintf(stderr, "[NETPLAY] rematch: every player has chosen it; it starts on this PC too\n");
+    rematch_rearm();
     defjam_menu_call("Game.Rematch()");
 }
 
