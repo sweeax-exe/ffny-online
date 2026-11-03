@@ -1,6 +1,6 @@
 # v1.0.0 release candidate: regression and acceptance
 
-This candidate includes the original 13 PRs from the renamed v1.0.0 milestone plus design #125 and launcher UX PR #179. #171 is excluded. The release PR is the result tracker; do not merge individual PRs to main while testing. Main's v0.13.0 release remains the stable download. No full gameplay/platform regression has yet qualified this combined source tree.
+This candidate includes the original 13 PRs from the renamed v1.0.0 milestone plus design #125 and launcher UX PR #179. Documentation cleanup #171 subsequently landed on main and is forward-merged to keep the candidate compatible. The release PR is the result tracker; do not merge individual PRs to main while testing. Main's v0.13.0 release remains the stable download. No full gameplay/platform regression has yet qualified this combined source tree.
 
 ## Identity and source coverage
 

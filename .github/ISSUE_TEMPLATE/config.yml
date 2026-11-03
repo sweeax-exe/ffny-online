@@ -3,9 +3,9 @@ contact_links:
   - name: Build and play guide
     url: https://github.com/vyanhursky/DefJamFFNY-recomp/blob/main/docs/build-and-play.md
     about: Installation and build steps, and the supported game version.
-  - name: Known issues
-    url: https://github.com/vyanhursky/DefJamFFNY-recomp/blob/main/docs/known-issues.md
-    about: Current limitations and what has not been tested.
+  - name: Search existing issues
+    url: https://github.com/vyanhursky/DefJamFFNY-recomp/issues
+    about: Search bug reports and follow-up investigations before opening a duplicate.
   - name: Toolkit problems
     url: https://github.com/sp00nznet/xboxrecomp/issues
     about: Problems in xboxrecomp that are not specific to this game.

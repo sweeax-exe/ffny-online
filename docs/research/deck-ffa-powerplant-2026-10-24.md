@@ -81,7 +81,11 @@ Pinning the game to one thread per physical core (`taskset -c 0,2,4,6`) did not 
   60, so each frame is shown for one or two refreshes (11 or 22 ms): uneven motion even at a steady 60 fps. In Game Mode
   set the refresh rate to 60 Hz (quick access menu > Performance) to get proper vsync.
 
-## Next candidates (CPU, executor thread; planned in docs/04-improvement-backlog.md)
+## Historical CPU/executor candidates
+
+These October24proposals predate later fixes. PR129/v0.12.2 shipped timer,
+shader/constant/signature and diagnostic-poll improvements; use current source
+and Issues for remaining work rather than treating the list below as open tasks.
 
 `nv2a_pb_exec_method` and `pgraph_d3d11_method` each switch on every method (about 14,000 a frame, half of them
 vertex-program constants); `fetch_attr` runs per vertex and attribute with a bounds check each time; `draw_primitive`

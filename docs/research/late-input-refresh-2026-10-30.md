@@ -1,11 +1,12 @@
 # Optional late controller report experiment — 2026-10-30
 
-Local feature branches `investigate/input-latency` / `diag/input-latency`, based on
-the v0.12.3 game and the toolkit revisions recorded in the transition report.
-Late refresh is an experiment, disabled by default. The owner requested a source
-PR for milestone v0.12.4 on October 31, with physical playtest confirmation pending.
+> Historical evidence: The optional refresh shipped in v0.13.0 and remains off by default; the old v0.12.4 release label was superseded.
+> Current support/qualifications live in the versioned release notes and GitHub Issues.
 
-D-new: refresh the report at the controller manager's existing per-device update,
+The original controlled comparison used the v0.12.3 baseline and toolkit revisions
+in the transition report. Late refresh remains optional and disabled by default.
+
+Implementation: refresh the report at the controller manager's existing per-device update,
 instead of re-running the title's device poller or writing its fighter pad table.
 `RECOMP_INPUT_LATE_REFRESH=1` enables it; `shadow` checks the conversion only;
 `0` and an unset option preserve the normal queued-report path.
@@ -195,35 +196,13 @@ matching shadows, with no API errors or reported trace loss. The save guard and
 fault checks pass. Step input establishes simulation preservation; independent
 SDL pulse tests establish button registration. Neither substitutes for the other.
 
-## Local physical playtest handoff
+## Historical build and physical scope
 
-The local Windows candidate is ready for owner confirmation. The final executable
-SHA-256 is `1c9edf8777e177721c4209c9a3549ab9d3b9e773f9b707db1fae32d8165ddf5a`.
-The A/B/B/A executable was
-`9a02472363065d834f2e9a0b7d879d0f30796cbd103a7e26b0dffe9b097c7e12`;
-only seconds-script stick support changed between these runtime builds. The final
-build identity verifies. Source-only temporary-index checks pass for 594 parent
-files and 21 changed toolkit source files, with clean whitespace and real indexes
-preserved. No owned save guards remain unresolved.
-
-Run from this checkout:
-
-```powershell
-.\scripts\playtest-input.ps1
-```
-
-This selects physical controllers, 1 ms acquisition, transition retention,
-optional late refresh and input tracing. Its prepared `logs/input-playtest-data/save`
-copy was verified byte-identical to the checkout's disposable save source; saves
-and settings stay separate from the usual installation. The launcher parses,
-clears scripted/live input and restores the caller's environment afterward.
-`-LateRefresh 0` provides the same build without the optional refresh for a
-physical A/B comparison. Try rapid taps, combos, movement, triggers and
-pause/resume; traces are kept as `logs/input-playtest-*.csv`.
-
-No physical switch-to-display or visible attack-start delay has been measured.
-These are local Windows software-path results; other platforms still need their
-own validation before a release. The feature remains optional and off by default.
+Final Windows executable SHA256 `1c9edf8777e177721c4209c9a3549ab9d3b9e773f9b707db1fae32d8165ddf5a`;
+A/B/B/A executable `9a02472363065d834f2e9a0b7d879d0f30796cbd103a7e26b0dffe9b097c7e12`.
+Only seconds-script stick support changed between them. No physical switch-to-display
+or visible attack-start delay was measured. The current tracing guide explains
+the retained physical-controller helper; old local-playtest scheduling is retired.
 
 ## PR submission — 2026-10-31
 
@@ -233,12 +212,24 @@ v0.12.3 toolkit pin. The parent records that exact published gitlink. The releas
 toolkit branch must combine it with other queued toolkit topics before candidate
 validation. No upstream PR is part of this submission.
 
-The game PR is intended for milestone v0.12.4 and remains a draft pending owner
-physical-controller playtest. The additional required `two-matches` input-scope
+The game work later shipped in v0.13.0; the old v0.12.4/draft label is historical. The additional required `two-matches` input-scope
 regression is recorded in the PR's validation table. The MSVC CI now explicitly runs the
 new retention/adapter/trace fixtures and the standalone edge/SDL fixtures; the
 USB matrix entry enables SDL so its virtual-stick branch also executes.
 
-Source reviews: [call chain](late-input-source-audit.md),
-[design review](late-input-review.md). Baseline behavior and prior test results:
+Source reviews: [call chain](late-input-refresh-2026-10-30.md#static-review-rationale-and-implemented-guards),
+[design review](late-input-refresh-2026-10-30.md#static-review-rationale-and-implemented-guards). Baseline behavior and prior test results:
 [transition correction](input-transition-fix-2026-10-30.md).
+
+
+## Static review rationale and implemented guards
+
+These are read-only source/disassembly findings, not additional runtime tests. The earlier design review rejected a direct native-host snapshot: `CurrentState` has neither a queued-edge token nor successful USB-delivery proof, and `PeekState` alone does not mark delivery. GET_REPORT deliberately stays snapshot-only. It also rejected re-running `001EBBE0`: that poller opens/closes handles and rewrites current/previous digital history, so reading the same report twice can erase a one-poll rising edge. Re-running `DD930` would likewise advance previous/current/repeat and axis filters twice. The implemented per-device callback replacement instead leaves the authoritative manager transition/conversion path running once and never fabricates packet IDs or PAD_TABLE values.
+
+Static mapping verified the converter's nonidentity order: analog LT, White, RT, Black, A, B, X, Y; digital Start, Back, stick clicks, D-pad up/down/left/right. Eight analog entries carry flag 1 and game-scaled floats; eight digital entries carry 0/2 values with flag zero; four axes occupy `+0x80..+0x8C`. Existing XDK normalization and the later device deadzone/inversion/filter must not be applied twice. This field-shape review was not byte-for-byte proof for every device configuration; the measured shadow/button/axis results above provide the tested scope.
+
+The injected `D7BF0` converter and `0027E075` getter each take two guest arguments and return with `ret 8`. Scratch is separate from their downward-growing frames: 22-byte state at `[ESP-0x80, ESP-0x6a)`, raw record `[ESP-0x120, ESP-0x90)`, injected stack below `ESP-0x180`. The reviewed callees use scalar x87/integer state and no modeled XMM operations; the outer wrapper restores integer registers, flags, direction and x87 state. Dispatch safe points preserve the full modeled register set, including XMM/MMX. The runtime-resolved target behind `0x28525C` was not followed, so static review alone does not certify arbitrary stack bounds or every indirect target.
+
+The revised lock review found no concrete lock-order/lifetime or register-restoration defect: refresh tries dispatch exclusion without changing IRQL, then tries lifecycle without waiting. Lifecycle contention releases dispatch immediately and keeps the original report; successful scopes release lifecycle before dispatch. The nested XDK raise/lower recursively uses the exclusion. This superseded the initial lock-order concern; supplied fixtures were not rerun by the reviewer.
+
+The design review identified a concrete stale-ACK risk: resetting the toolkit queue cleared its packet baseline while a game-side pending record survived, allowing a same-button post-reset delivery to match old pending state. Implemented generation checks now bind pending records to their host queue generation, validate around the XDK copy and atomically at consumption, reject older packets, and carry generations across host Stop/Start. The hypothesized asynchronous old-completion race was not established for the synchronous nested getter; serial/generation guards also protect future yielding changes. These are implemented protections, not outstanding review gates. Static uncertainty about whether a candidate runs in Battle must remain separate from the measured Battle evidence above.

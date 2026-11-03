@@ -13,7 +13,7 @@ through GitHub's
 Describe the problem, the version affected and how to reproduce it. Do not
 include game data.
 
-In scope: the Windows setup installer and its release artifacts, the build and
+In scope: the Windows, macOS and Linux setup installers and their release artifacts, the build and
 test scripts, the release workflow, and the port's own code in `src/`.
 
 Problems in the generic runtime or translator belong to the

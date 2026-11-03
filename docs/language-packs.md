@@ -202,5 +202,5 @@ produce identical files.
 |---|---|---|---|
 | Spanish | `es-zarf`, from "Parche textos en español DJFFNY" v1.1 ([source](https://github.com/MODZARF/Parche-textos-en-espanol-DJFFNY-Compatible-con-Xbox-360)) | ZARF (MOD-ZARF) | CC BY-NC-SA 4.0; a conversion exists and awaits its author's agreement before it is shared |
 
-French text is on the USA disc already (`cmfren.loc`); a French pack would point the USA slot at it.
+French text is on the USA disc already (`cmfren.loc`); use the [built-in French setting](#the-games-own-french), which needs no separate pack.
 A Brazilian Portuguese translation exists for the European PS2 release; porting it needs its author's permission.

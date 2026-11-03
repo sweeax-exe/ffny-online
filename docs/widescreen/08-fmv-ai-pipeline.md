@@ -1,9 +1,13 @@
 # 08 — FMV widening pipeline: blurred sides (shipping) and AI outpainting (to-do)
 
+> Optional offline experiment, not a shipped AI movie-replacement feature.
+> The retained helper/tests reproduce a bounded trial; general authoring belongs in Modding Tools.
+> Runtime blur/black side fill is separate and does not need this tool or a model.
+
 Status (owner, 2026-10-11): **blurred sides are the default and ship with widescreen** (WS-8 `side_fill = blur`).
 AI outpainting "looks surprisingly good" but **the seam between the original picture and the generated sides is
 visible and needs more blending**; it stays a to-do (WS-12). This page is the complete record of the trial so the
-work can resume without redoing it. Results in [06 §5](06-cutscenes-movies-and-ai.md#5-fmv-trial-blur-vs-ai).
+work can resume without redoing it. Results in [06 §5](02-design.md#current-cinema-behavior-and-artwork-boundaries).
 
 Everything here runs on the user's own machine from the user's own dump. Decoded frames and outputs are the game's
 artwork: they live under `logs/` (ignored by git) and are never committed or published (`CLAUDE.md` §3).
@@ -32,7 +36,7 @@ Trial layout on the owner's machine: `<data>/tools/fmv-trial/` with `ffmpeg-dl/`
 | Model | `Wan-AI/Wan2.1-VACE-1.3B-diffusers`, Apache-2.0, Hugging Face (27 files) | 19.0 GB | Text encoder UMT5-XXL 11.4 GB, transformer 7.2 GB, VAE 0.5 GB. Check every file's size against the hub API after download (a CRLF file list once produced 27 empty files). |
 
 Hardware used: RTX 4070 Ti SUPER 16 GB, 32 GB RAM, Windows 11. Licences of alternatives:
-[generative AI report §6](../research/widescreen-genai.md).
+[generative AI report §6](08-fmv-ai-pipeline.md#research-provenance-and-implementation-boundary).
 
 ## 3. The pipeline (`scripts/fmv-widescreen.py`)
 
@@ -120,3 +124,10 @@ What each step does:
 - The engine side is WS-8's `art` mode for movies: the movie hook (WS-7) reports the movie name and its decoded frame
   number, and the host draws that frame's strips instead of the blur. Frames without strips fall back to blur.
 - Model downloads happen only on the user's request, and only Apache-2.0 models are defaults.
+
+
+## Research provenance and implementation boundary
+
+The actual 149-frame trial,9.7 GBpeak/19 minute result, duplicate-head corrupt-input failure, dark-shot pops, off-model edge face and owner's visible-seam verdict are recorded above; they supersede the survey's unmeasured GPU-hour estimates. This is a silent 4.9 s/two-shot experiment, not full-movie acceptance. Its model provenance is [Wan-AI/Wan2.1-VACE-1.3B-diffusers](https://huggingface.co/Wan-AI/Wan2.1-VACE-1.3B-diffusers); [VACE](https://github.com/ali-vilab/VACE) documents video editing/expansion under Apache-2.0. Exact checkpoint/conversion/text-encoder/LoRA licences and hashes still need verification before any future default downloader; a base-model licence does not establish a community conversion's terms.
+
+[ComfyUI's outpaint guide](https://docs.comfy.org/tutorials/basic/outpaint) documents padded-mask inpainting/feathering; [FLUX Fill's model card](https://huggingface.co/black-forest-labs/FLUX.1-Fill-dev) documents possible unfilled-area color shifts and fill-edge lines. These support protected-center compositing and per-shot seam review, not a guarantee of temporal quality. Broad later-model marketing, VRAM guesses, hosted-service pricing and extrapolated whole-game budgets are not retained as engineering requirements. Optional movie side strips, frame-index hook and per-shot blur fallback in§7 remain a proposed delivery integration; no shipped `side_fill=art`movie loader follows from this trial.

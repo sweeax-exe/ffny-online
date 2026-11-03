@@ -34,7 +34,7 @@ A result for an older head counts only if every later commit is records or docs.
 ### Records
 
 - [ ] `PROGRESS.md`: decisions numbered, work log, §0, §7 hand-off
-- [ ] `CMakeLists.txt` version, `docs/releases/vX.Y.Z.md`, README setup link, known issues
+- [ ] `CMakeLists.txt` version, `docs/releases/vX.Y.Z.md`, README setup link, issue links and release qualifications
 - [ ] `python -m pytest -q tests/unit` and `python scripts/check-source-tree.py`
 
 ### Checklist

@@ -145,6 +145,9 @@ Compile-time: `-DRECOMP_ICALL_FEEDBACK` plus `python -m tools.recomp.icall_feedb
 2. Nothing else to declare. `scripts/recomp.ps1` passes the file to the lifter with `--exclude-manual`, which scans it for `void sub_XXXXXXXX(void)` definitions and stops generating those bodies, so yours links for direct callers too.
 3. Re-run `scripts/recomp.ps1`, then rebuild. The lifter reports how many it excluded and how many it wrapped.
 
-To **wrap indirect calls**, add `extern void sub_XXXXXXXX_gen(void);` beside your definition and call it from the middle. The real body is emitted under that name, and direct call sites are also rewritten to call `_gen`, bypassing the wrapper. To observe every caller at entry, define `void sub_XXXXXXXX_enter(void)` instead and re-lift; its hook precedes guest instructions while retaining the generated body. Retired overrides can stay inside `#if 0`, which the scanner skips.
+For wrappers and entry hooks, use the canonical [lifter override playbook](agent/lifter-overrides.md).
+Since toolkit v0.16, direct callers reach a manual wrapper through the lookup too;
+the direct-call bypass described in older bring-up notes applies to v0.13 and earlier.
+Re-lift after adding a wrapper or entry hook. The scanner ignores retired overrides inside `#if 0`.
 
 Find candidates by comparing each indexed jump's table arms against its function's detected bounds: arms past the end mean the body was truncated and the lifter could not prove the jump was local, so it emitted an indirect call that fails at runtime.

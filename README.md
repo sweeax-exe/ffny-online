@@ -13,7 +13,7 @@ with higher rendering resolution, modern controller support, local multiplayer
 and optional HD textures.
 
 **The port is now mature and continues to improve.** All game functionality is working and we are continuously optimizing, enhancing, and bugfixing. See
-[known issues](docs/known-issues.md) and the
+[known issues](https://github.com/vyanhursky/DefJamFFNY-recomp/issues) and the
 [latest release notes](https://github.com/vyanhursky/DefJamFFNY-recomp/releases/latest)
 for current limitations.
 
@@ -131,7 +131,8 @@ Want to make a pack? Start with **[Texture Modding — Getting Started](docs/tex
 find an original texture, edit it, write a manifest, test the result and share it.
 The [format reference](docs/hd-textures.md) and [mod-manager reference](docs/mod-manager.md)
 cover the technical details. Broader data/code overrides remain a
-[design proposal](docs/research/mod-system-design.md).
+[design proposal](docs/research/mod-system-design.md). Language mods have a separate,
+released [delta format](docs/language-packs.md).
 
 New fighters, stages, music replacements and code/gameplay mods are not released
 modding capabilities.
@@ -147,23 +148,24 @@ easier to play and customize on modern computers.
 | Port accuracy | Keep the visuals, tone and gameplay feel faithful to the original Xbox game. |
 | Fully unlocked frame rates | Support frame rates above 60 fps while preserving game speed, timing and gameplay feel. Future work; not supported by the current release. |
 | Widescreen refinement | Beta released in [v0.9.0](https://github.com/vyanhursky/DefJamFFNY-recomp/releases/tag/v0.9.0) on Windows, macOS and Linux/Steam Deck. Improve edge cases and broader aspect/venue coverage; 21:9 and 32:9 remain experimental. |
-| Broader mod support | Enable modified game modes, difficulty changes and restored cut content. The [mod-system design proposal](https://github.com/vyanhursky/DefJamFFNY-recomp/pull/17) is not scheduled; texture packs work today. |
+| Broader mod support | Enable modified game modes, difficulty changes and restored cut content. The [mod-system design](docs/research/mod-system-design.md) is not scheduled; texture packs work today. |
 | Build and release automation | Improve automation and the gameplay test harness so shipping builds have reliable, repeatable validation. |
 | Deeper gameplay decompilation | Long-term stretch goal. |
 
-These stages describe current work, not promised release dates. See the
-[PC features plan](docs/07-m6-plan.md), [roadmap](docs/01-plan-review.md#corrected-roadmap-milestones-with-exit-criteria)
-and [improvement backlog](docs/04-improvement-backlog.md) for detail.
+These are directions, not promised release dates. [GitHub Issues](https://github.com/vyanhursky/DefJamFFNY-recomp/issues),
+[milestones](https://github.com/vyanhursky/DefJamFFNY-recomp/milestones) and
+[open PRs](https://github.com/vyanhursky/DefJamFFNY-recomp/pulls) track concrete work.
+The unified-app and graphics PRs are proposals/in progress, not released capabilities.
 
 ## Compatibility and known limits
 
 The released build targets Windows x64, Apple Silicon macOS and x86-64 Linux.
 Steam Deck has automated regression coverage and maintainer playtesting;
 Proton is untested. Performance varies with hardware, settings and scenes.
-Steam Deck audio distortion and Story tutorial performance remain under
-investigation.
+Release-specific test qualifications are recorded with the release; open reports
+and follow-up work are tracked in GitHub Issues.
 
-Check both [known issues](docs/known-issues.md) and the
+Check both [GitHub Issues](https://github.com/vyanhursky/DefJamFFNY-recomp/issues) and the
 [latest release notes](https://github.com/vyanhursky/DefJamFFNY-recomp/releases/latest).
 Some release-specific fixes and validation limits appear in the notes first.
 
@@ -188,7 +190,8 @@ so they are tracked, and never share game files or dumps there either.
 with your version, operating system, CPU/GPU, controller, reproduction steps and
 relevant log lines. Remove personal paths and keep game files, saves and memory
 dumps out of reports. With the [play-test recorder](docs/playtest-recorder.md) on, F9 (or
-View + left stick click) saves the last seconds of play as a bug bundle to attach. See [Contributing](CONTRIBUTING.md) for reporting guidance,
+View + left stick click) saves a bundle for local analysis. Keep the raw bundle local;
+share only permitted textual diagnostics. See [Contributing](CONTRIBUTING.md) for reporting guidance,
 development setup and the tests a change needs.
 
 Bug fixes, platform testing and documentation improvements are welcome.
@@ -219,8 +222,8 @@ community, including xemu hardware references and attributed toolkit components.
 are related projects that helped shape the documentation.
 
 The project's code is [MIT licensed](LICENSE). Toolkit components retain their
-own licenses; see the [toolkit NOTICE](https://github.com/vyanhursky/xboxrecomp/blob/4bff2573127c5499ad795d58ddd90159240520bd/NOTICE)
-and [license texts](https://github.com/vyanhursky/xboxrecomp/tree/4bff2573127c5499ad795d58ddd90159240520bd/LICENSES).
+own licenses; see the [toolkit NOTICE](https://github.com/vyanhursky/xboxrecomp/blob/d569ca10811cef67ec4e9fa2173088c2f9fd0580/NOTICE)
+and [license texts](https://github.com/vyanhursky/xboxrecomp/tree/d569ca10811cef67ec4e9fa2173088c2f9fd0580/LICENSES).
 The license grants no rights to the game or its artwork.
 
 This is an unofficial fan project, not affiliated with Electronic Arts, AKI or

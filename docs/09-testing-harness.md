@@ -1,11 +1,10 @@
 # Gameplay test harness
 
-How to run the scripted gameplay checks and read what they prove. The roadmap
-behind this is [08-testing-roadmap.md](08-testing-roadmap.md); what is still
-missing is listed at the end.
+How to run scripted gameplay checks and read what they prove. Current policy is
+in [the test plan](02-test-plan.md); future coverage belongs in GitHub Issues.
 
 Everything here needs a local build made from your own dump. Hosted CI has no
-game data and runs only the unit tests. Captures, audio and reports are the
+game data; it runs unit/native fixtures, source compilation and game-free Setup checks. Captures, audio and reports are the
 game's artwork and stay under `logs/`, which git ignores.
 
 ## Three levels
@@ -249,9 +248,12 @@ fighter, not the `<ID>`, so check the names on the HUD. The addresses and the ru
 - **Frame pacing.** From the runtime's two-second reports during the fight: the
   median present interval within 1 ms of 16.67, and at most 2 percent of presents
   later than 1.5 times their window's median.
-- **Memory.** The game's private bytes, sampled every five seconds, must not have
-  grown more than 64 MB from the start of play to the end of the run. This catches
-  a fast leak; one fight is too short for a slow one.
+- **Memory.** The existing64MiB growth guard compares the final sample with the
+  maximum of the first three play samples. The final point may fall in a result/menu
+  load. Windows samples private bytes; POSIX samples RSS despite the JSON field
+  name `private_bytes`. A positive delta is not an attributed leak, and these OS
+  metrics are not directly comparable. Preserve threshold failures; see the
+  [v0.13 investigation](research/rc-v0.13.0-hd-memory.md) and issue166.
 
 ## Visual baselines
 
@@ -349,3 +351,47 @@ them as baseline `masks`, refusing a mask that would hide a fighter.
 - The live-input session recipes in `tests/scenarios/` are uncalibrated examples;
   the `two-matches` route uses the ordinary pad script instead.
 - Long sessions and many repeated matches are not measured.
+
+## Coverage follow-ups
+
+Future coverage is tracked in GitHub, not a parallel roadmap: [Story fixture identity](https://github.com/vyanhursky/DefJamFFNY-recomp/issues/172), [gameplay/lifecycle assertions](https://github.com/vyanhursky/DefJamFFNY-recomp/issues/173), [audiovisual fidelity](https://github.com/vyanhursky/DefJamFFNY-recomp/issues/174), [report provenance](https://github.com/vyanhursky/DefJamFFNY-recomp/issues/175) and [cross-title compatibility adapters](https://github.com/vyanhursky/DefJamFFNY-recomp/issues/176). These describe missing test evidence, not newly established gameplay bugs.
+
+
+## Fast-start precedence and measurement limits
+
+`startup_default()` runs after the caller's environment merge: explicit `0` remains normal, an explicit empty value removes the variable, and only absence receives automation default1. This shared `run_game()` boundary also serves scenario-suite instances that sanitize inherited RECOMP variables; changing only the regression module's environment would miss them. Read the final child environment in run identities before claiming a route used fast startup. Sanitize inherited pad scripts/RECOMP options for the one normal `m3` boot and keep the existing title golden: require ordered actual FUNCCALL/PATH evidence for legal1, bootLoad, Game.StartMainMenu(0), EA/THX/intro opens, then preStart. Movie opens and normal progression are positive sequence evidence, not per-frame decoder telemetry.
+
+The `skipintro` matrix removes the injected default for real default-off and INI-only cases; environment-off overrides INI-on, environment-on overrides INI-off, and the combined unlock case retains its independent unlock setting. Off cases may stop at positive legal1 because m3 supplies the complete presentation once. UI checkbox tests also clear the override so the widget is editable. The startup-fault parser ends at the first main-menu request; a long idle-title run can intentionally open attract `intro.mad` before that, so test attract separately rather than classify its whole log with that parser.
+
+Initial M2/resource-crest and launcher-only captures may end before any front-end selector event; do not require preStart in those deliberately short captures. Skipped soak boots measure accelerated-boot stability; they do not establish repeated full-movie reliability. Preserve original fight durations, replay hashes and strict audio gates. Use disposable INIs: the complete-save-root guard restores saves/caches, not arbitrary settings files beside them. Recorder output is independent of that guard; record-on performance evidence must be labeled separately.
+
+
+## Front-end background route boundaries (inventory, 2026-10-20)
+
+This was a source/flow/fixture inventory, not a native capture pass. A route reaching a parent screen or loading a catalogue entry does not prove a child movie appeared.
+
+| Consumer | Existing route/anchor | Proven boundary and remaining calibration |
+|---|---|---|
+| `story/charDec` | `harness.py run intro --png`; `getscreeninfo(story/chardec)` | Route captures eight seconds after creator entry; fixture/profile identity still matters. |
+| `battle/oldMLoad` | `fight-terrordome` / `ffa-terrordome`; `getscreeninfo(battle/oldmload` | Normal Battle traverses this loading card. Its dynamic wall is `screens/match/0_bg/paper_1v1.big`, with `paper_ffa3`, `paper_ffa4`, `paper_team` variants; it is distinct from `battle/matchLoa.big`. |
+| `battle/matchLoa` | Catalogue lists `Game.StartGame()` | Separate APT from `oldMLoad`; catalogue presence alone does not establish runtime visitation. Observe the loading handoff before adding an anchor. |
+| `battle/tips` | `fight-result` waits for `game.getmatchsummary(` | Flow exits tips to `battle/cmtype`, but this route does not wait for/capture tips. Observe result/rewards/rematch calls before claiming coverage. |
+| `options/cribOptions` | `crib` reaches `story/crib`; flow explicitly links parent/child both ways | Existing route stops at the parent. Calibrate visible Options input from a disposable fixture; transition ordering is not a button map. |
+| `story/choosGF2`, `choosGF4`, `choosPart` | Catalogue associates SWFs with `screens/story/storyChs.big` | Likely parent-managed submovies; no standalone flow transition or calibrated route was established. The inspected fixture library had only `mac-profiles` at Crib, not a `storyChs` checkpoint. |
+
+Use observed `[FUNCCALL]` anchors with `--stage`/`--shots` and the complete-save guard or a disposable scenario fixture. `Control.GetScreenInfo` is a metadata/action channel, not a reliable arbitrary-movie loader. `RECOMP_FE_INJECT` dispatches after an observed call; an APT string catalogue does not prove any listed command loads a target SWF. `scenarios.py scene` / `RECOMP_SCENE` selects developer CINEMA content in `assets/cinema/*.viv`, not front-end APT/SWF screens. Evidence: route definitions, `<data>/fixtures/library.json`, `<data>/extracted/screens/feflow.xml`, and local `logs/menu-ui-v1-rc/funccall-catalog.json` (Markdown despite its suffix). Current missing-fixture/test evidence belongs to [issues172–176](https://github.com/vyanhursky/DefJamFFNY-recomp/issues?q=is%3Aissue+172+OR+173+OR+174+OR+175+OR+176).
+
+## Experimental recipe examples
+
+`tests/scenarios/fight-return.experimental.json` and
+`story-session.experimental.json` illustrate `--session-plan` with host-second
+live input. They explicitly declare `validated_live:false`; calibrate them against
+fresh ordered screen events before using them for acceptance. `session_driver.py`
+is dynamically loaded by the suite and remains required. The visual-manifest
+example shows the local approved-baseline schema; its placeholder hash and
+`approved:false` are not a real baseline. Keep generated reports/media local.
+
+Manual native launcher coverage is available in `scripts/test-mod-launcher.py`;
+its synthetic catalogue/key/data stay disposable. The former hosted RC2 helper
+was retired because it hardcoded version1.0.0-rc2. Its dated acceptance result
+remains in the integration evidence; it is not a current live-catalogue smoke.

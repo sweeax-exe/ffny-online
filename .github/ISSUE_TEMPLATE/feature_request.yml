@@ -5,8 +5,8 @@ body:
   - type: markdown
     attributes:
       value: |
-        The README's roadmap and the [improvement backlog](https://github.com/vyanhursky/DefJamFFNY-recomp/blob/main/docs/04-improvement-backlog.md)
-        list what is already planned.
+        Search [existing requests](https://github.com/vyanhursky/DefJamFFNY-recomp/issues) and
+        [milestones](https://github.com/vyanhursky/DefJamFFNY-recomp/milestones) before opening a duplicate.
   - type: textarea
     id: want
     attributes:

@@ -2,8 +2,7 @@
 
 Since v0.3.0 the game reads gamepads through SDL3 and the keyboard and mouse as a player of
 their own. Everything below is a setting in `settings.ini` (written beside your `save` folder
-on first start), so one file holds the choices; the overlay and launcher planned for v0.4.0 will
-edit the same values. [settings.ini and keybinds](settings-reference.md) lists them all.
+on first start). The launcher and in-game overlay edit the same values. [settings.ini and keybinds](settings-reference.md) lists them all.
 
 ## What works
 
@@ -72,5 +71,5 @@ gamepads) and `src/usb/usb_gamepad.c` (the emulated Controller S that carries th
 game and the rumble report back). The title never learns that the pad is not an Xbox one.
 
 SDL3 is zlib licensed; the toolkit downloads release 3.4.18 at configure time, checks its hash and
-builds it statically with only the gamepad subsystem. `-DDEFJAM_SDL3=OFF` builds without it and reads
-pads through XInput.
+builds it statically. On Windows, `-DDEFJAM_SDL3=OFF` selects the XInput fallback.
+POSIX hosts also use SDL for window/audio integration; this is not a promise of an XInput fallback there.

@@ -273,8 +273,8 @@ There are two distribution routes:
 
 The runtime requires `manifest.ini`; the signed catalogue is separate download
 metadata. You do not need a signing key or a catalogue JSON file for a local pack.
-Current catalogue ZIP validation allows `.ini`, `.png`, `.dds`, `.json` and `.txt`
-files. Use `README.txt` in that ZIP; keep `.psd`, `.kra`, models and other editing
+Texture catalogue ZIPs may include `.ini`, `.png`, `.dds`, `.json`, `.txt` and `.md`;
+language packs additionally use the bounded language/delta formats in the language guide. Use a small README; keep `.psd`, `.kra`, models and other editing
 files outside it. Thunderstore's root `manifest.json` is another package format,
 not a replacement for our manifest or a currently supported automatic import.
 
@@ -297,7 +297,7 @@ wide views. Keep text and menu controls separate from background scenery.
 
 See the tools' [widescreen scenery guide](https://github.com/vyanhursky/DefJam-Modding-Tools/blob/main/docs/widescreen-backgrounds.md)
 and [menu art workflow](https://github.com/vyanhursky/DefJam-Modding-Tools/blob/main/docs/menu-art-workflow.md).
-The [wide-menu implementation notes](research/menu-ui-playtest-pack-2026-10-19.md#widescreen-backgrounds-d160ui-toolkit-defjammenu-wide)
+The [wide-menu implementation notes](hd-textures.md#wide-layer-authoring-contract)
 explain the slab/anchor format; those are dated engineering notes, so check the
 current export scripts and loader before building a new wide pack.
 
@@ -315,7 +315,8 @@ current export scripts and loader before building a new wide pack.
 
 The launcher provides **Open Logs** and the resolved data/mod paths. When asking
 for help, include the game version, pack version, original texture ID, original
-and replacement dimensions, enabled pack order, and a screenshot of the problem.
+and replacement dimensions, enabled pack order, and relevant textual log diagnostics.
+Keep screenshots and raw recorder bundles local for analysis.
 
 For more detail, use the [texture format reference](hd-textures.md),
 [processing/review workflow](hd-texture-workflow.md), [launcher guide](launcher-and-overlay.md),
