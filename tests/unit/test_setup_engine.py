@@ -205,6 +205,54 @@ def test_new_release_only_reuses_lift_after_pipeline_validation(tmp_path):
     assert json.loads((setup.source/'src/recomp/gen/lift-state.json').read_text()) == {'synthetic':'uncertified'}
 
 
+def earlier_build(setup):
+    old = setup.install / 'versions/old/source'
+    for relative in ('src/recomp/gen/lift-state.json', 'tools/xboxrecomp/game_files/defjam-analysis-state.json',
+                     'tools/xboxrecomp/tools/disasm/output/functions.json'):
+        (old / relative).parent.mkdir(parents=True, exist_ok=True)
+        (old / relative).write_text('{"synthetic":"uncertified"}')
+    (old / 'tools/xboxrecomp/game_files/default.xbe').write_bytes(b'earlier copy')
+    engine.write_json(setup.install/'installed.json', {'source': str(old)})
+
+
+@pytest.mark.parametrize('operation', ['update', 'downgrade', 'rebuild'])
+def test_update_reuses_only_analysis_and_clean_operations_reuse_nothing(tmp_path, operation):
+    setup = installer(tmp_path)
+    earlier_build(setup)
+    (setup.data / 'extracted').mkdir()
+    (setup.data / 'extracted/default.xbe').write_bytes(b'synthetic')
+    setup.operation = operation
+    setup.prepare_source()
+    toolkit = setup.source / 'tools/xboxrecomp'
+    assert not (setup.source / 'src/recomp/gen').exists()
+    if operation == 'update':
+        # Copied only as candidates: the pipeline's verifier decides whether analysis is reused.
+        assert (toolkit / 'game_files/defjam-analysis-state.json').is_file()
+        assert (toolkit / 'tools/disasm/output/functions.json').is_file()
+        assert (toolkit / 'game_files/default.xbe').read_bytes() == b'synthetic'
+    else:
+        assert not (toolkit / 'game_files').exists()
+
+
+def test_update_before_extraction_drops_the_earlier_xbe_copy(tmp_path):
+    setup = installer(tmp_path)
+    earlier_build(setup)
+    setup.operation = 'update'
+    setup.prepare_source()
+    toolkit = setup.source / 'tools/xboxrecomp'
+    assert (toolkit / 'game_files/defjam-analysis-state.json').is_file()
+    assert not (toolkit / 'game_files/default.xbe').exists()
+
+
+def test_update_without_an_active_install_reuses_nothing(tmp_path):
+    setup = installer(tmp_path)
+    earlier_build(setup)
+    (setup.install / 'installed.json').unlink()
+    setup.operation = 'update'
+    setup.prepare_source()
+    assert not (setup.source / 'tools/xboxrecomp/game_files').exists()
+
+
 def test_unreadable_earlier_attempt_is_skipped_not_fatal(tmp_path, monkeypatch):
     setup = installer(tmp_path)
     good = setup.install / 'versions/0.4.0-good/source/src/recomp/gen'

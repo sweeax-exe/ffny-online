@@ -6,7 +6,9 @@ complete new directory only after the translator succeeds; its previous output
 is retained under logs/lift-backups. No game bytes enter a tracked file.
 """
 import argparse
+import functools
 import hashlib
+import importlib.metadata
 import json
 import os
 from pathlib import Path
@@ -24,6 +26,21 @@ ANALYSIS_FILES = (
     'tools/disasm/output/summary.json', 'tools/func_id/output/identified_functions.json',
     'tools/abi_analysis/output/abi_functions.json',
 )
+# Bumped whenever the meaning of a stage key changes, so a state recorded under the old key is
+# never taken as current. 2: analysis commands, interpreter and all tool files; lifter options.
+KEY_VERSION = 2
+XBE = 'game_files/default.xbe'
+# The analysis commands, run in the toolkit folder. They are part of the analysis key, so a
+# changed option is never mistaken for reusable output. '@seeds' becomes --seed-functions PATH.
+ANALYSIS_COMMANDS = (
+    ('XBE parser', ['-m', 'tools.xbe_parser', XBE, '--json', 'game_files/default_analysis.json']),
+    ('disassembly', ['-m', 'tools.disasm', XBE, '--force', '--extra-sections',
+                     'D3D,D3DX,DSOUND,XPP,XGRPH,DOLBY', '@seeds']),
+    ('function identification', ['-m', 'tools.func_id', XBE, '-v']),
+    ('ABI analysis', ['-m', 'tools.abi_analysis', XBE, '-v']),
+)
+# Third-party packages whose version can change analysis output (capstone decodes the code).
+ANALYSIS_PACKAGES = ('pyxbe', 'capstone')
 
 
 def digest(path):
@@ -35,15 +52,50 @@ def hashes(root, paths):
     return {p.relative_to(root).as_posix(): digest(p) for p in sorted(paths)}
 
 
-def source_files(root, suffixes):
-    return [p for p in root.rglob('*') if p.is_file() and p.suffix in suffixes
+def source_files(root, suffixes=None):
+    """Files under root with one of suffixes, or every file when suffixes is None."""
+    return [p for p in root.rglob('*') if p.is_file() and (suffixes is None or p.suffix in suffixes)
             and not {'output', '__pycache__', '.git', 'tests'} & set(p.relative_to(root).parts)]
 
 
-def analysis_inputs(repo, toolkit):
-    return {'xbe': digest(toolkit / 'game_files/default.xbe'),
+def package_version(name):
+    try:
+        return importlib.metadata.version(name)
+    except importlib.metadata.PackageNotFoundError:
+        return None
+
+
+@functools.cache
+def interpreter(python=None):
+    """The Python and package versions analysis runs with: this interpreter, or python."""
+    if python is None or Path(python).resolve() == Path(sys.executable).resolve():
+        return {'python': sys.version, 'packages': {d: package_version(d) for d in ANALYSIS_PACKAGES}}
+    try:
+        return json.loads(subprocess.check_output([str(python), __file__, 'interpreter'], text=True))
+    except (OSError, subprocess.CalledProcessError, json.JSONDecodeError) as ex:
+        raise ValueError(f'Cannot read the analysis interpreter {python}: {ex}') from ex
+
+
+def analysis_inputs(repo, toolkit, python=None):
+    # Every tool file, not only .py: the lifter and analysers read data files (tools/recomp/data).
+    return {'key': KEY_VERSION, 'commands': [argv for _, argv in ANALYSIS_COMMANDS],
+            'interpreter': interpreter(python),
+            'xbe': digest(toolkit / XBE),
             'seeds': digest(repo / 'config/seed_functions.json'),
-            'tools': hashes(toolkit, source_files(toolkit / 'tools', {'.py'}))}
+            'tools': hashes(toolkit, source_files(toolkit / 'tools'))}
+
+
+def analyze(repo, toolkit):
+    """Run the analysis commands and certify their output (the XBE is already in game_files)."""
+    path = toolkit / 'game_files/defjam-analysis-state.json'
+    begin_stage(path, analysis_inputs(repo, toolkit))
+    seeds = repo / 'config/seed_functions.json'
+    for what, argv in ANALYSIS_COMMANDS:
+        argv = [a for arg in argv for a in (['--seed-functions', str(seeds)] if arg == '@seeds' else [arg])]
+        if subprocess.run([sys.executable, *argv], cwd=toolkit).returncode:
+            raise ValueError(f'{what} failed')
+    inputs = finish_stage_inputs(path, analysis_inputs(repo, toolkit))
+    write_state(path, {'inputs': inputs, 'outputs': analysis_outputs(toolkit)})
 
 
 def analysis_outputs(toolkit):
@@ -80,16 +132,19 @@ def finish_stage_inputs(path, inputs):
     return inputs
 
 
-def verify_analysis(repo, toolkit):
+def verify_analysis(repo, toolkit, python=None):
     state = read_state(toolkit / 'game_files/defjam-analysis-state.json')
-    if state['inputs'] != analysis_inputs(repo, toolkit) or state['outputs'] != analysis_outputs(toolkit):
+    if (state['inputs'] != analysis_inputs(repo, toolkit, python)
+            or state['outputs'] != analysis_outputs(toolkit)):
         raise ValueError('Analysis is stale; run scripts/analyze.ps1')
     return state
 
 
-def lift_inputs(repo, toolkit):
-    state = verify_analysis(repo, toolkit)
-    return {'analysis': {k: state[k] for k in ('inputs', 'outputs')},
+def lift_inputs(repo, toolkit, options=None, python=None):
+    """options: the lifter's --split and extra arguments, as lift() records them."""
+    state = verify_analysis(repo, toolkit, python)
+    return {'key': KEY_VERSION, 'options': options,
+            'analysis': {k: state[k] for k in ('inputs', 'outputs')},
             'manual': digest(repo / 'src/recomp_manual.c'),
             'runtime_templates': hashes(toolkit, source_files(toolkit / 'templates/runtime', {'.h', '.c'}))}
 
@@ -98,10 +153,11 @@ def generated_outputs(gen):
     return hashes(gen, [p for p in gen.iterdir() if p.suffix in {'.c', '.h'}])
 
 
-def verify_lift(repo, toolkit):
+def verify_lift(repo, toolkit, python=None):
     gen = repo / 'src/recomp/gen'
     state = read_state(gen / 'lift-state.json')
-    if state['inputs'] != lift_inputs(repo, toolkit) or state['outputs'] != generated_outputs(gen):
+    options = state['inputs'].get('options')
+    if state['inputs'] != lift_inputs(repo, toolkit, options, python) or state['outputs'] != generated_outputs(gen):
         raise ValueError('Generated code is stale; run scripts/recomp.ps1')
     return state
 
@@ -114,7 +170,8 @@ def lift(repo, toolkit, split, extra):
         option = token.split('=', 1)[0]
         if option == '-o' or (option.startswith('--') and any(p.startswith(option) for p in owned)):
             raise ValueError(f'Lifter option is controlled by the pipeline: {option}')
-    inputs = lift_inputs(repo, toolkit)
+    options = {'split': split, 'extra': list(extra)}
+    inputs = lift_inputs(repo, toolkit, options)
     gen = repo / 'src/recomp/gen'
     gen.parent.mkdir(parents=True, exist_ok=True)
     staged = Path(tempfile.mkdtemp(prefix='gen-pending-', dir=gen.parent))
@@ -125,7 +182,7 @@ def lift(repo, toolkit, split, extra):
     subprocess.run(cmd, cwd=toolkit, check=True)
     if not (staged / 'recomp_dispatch.c').is_file() or not list(staged.glob('recomp_0*.c')):
         raise ValueError(f'Lifter did not produce a complete set: {staged}')
-    if inputs != lift_inputs(repo, toolkit):
+    if inputs != lift_inputs(repo, toolkit, options):
         raise ValueError('Lifter inputs changed during translation; output was not published')
     if (gen / '.gitkeep').is_file():
         (staged / '.gitkeep').write_bytes((gen / '.gitkeep').read_bytes())
@@ -144,8 +201,8 @@ def lift(repo, toolkit, split, extra):
     print(f'Published {len(list(gen.glob("*.c")))} C files; previous output: {backup}')
 
 
-def build_inputs(repo, toolkit):
-    verify_lift(repo, toolkit)
+def build_inputs(repo, toolkit, python=None):
+    verify_lift(repo, toolkit, python)
     paths = source_files(repo / 'src', {'.c', '.cpp', '.m', '.h', '.inc', '.hlsl'})
     paths += [repo / 'CMakeLists.txt', repo / 'CMakePresets.json']
     runtime = source_files(toolkit / 'src', {'.c', '.cpp', '.h', '.inc', '.hlsl', '.txt', '.in'})
@@ -154,14 +211,14 @@ def build_inputs(repo, toolkit):
             'lift': digest(repo / 'src/recomp/gen/lift-state.json')}
 
 
-def verify_build(repo, preset):
+def verify_build(repo, preset, python=None):
     if preset == 'ci-runtime-only':
         raise ValueError('Runtime-only presets cannot certify a game executable')
     folder = repo / 'build' / preset
     state = read_state(folder / 'build-state.json')
     toolkit = Path(state['toolkit'])
     verify_game_configuration(folder)
-    if state['inputs'] != build_inputs(repo, toolkit) or state['exe'] != digest(folder / EXE_NAME):
+    if state['inputs'] != build_inputs(repo, toolkit, python) or state['exe'] != digest(folder / EXE_NAME):
         raise ValueError(f'Build {preset} is stale; rebuild it (scripts/build.ps1 -Preset {preset}, '
                          f'or scripts/pipeline.py build --preset {preset})')
     return state
@@ -175,7 +232,7 @@ def verify_game_configuration(folder):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])
-    ap.add_argument('action', choices=['begin-analysis', 'record-analysis', 'verify-lift', 'lift',
+    ap.add_argument('action', choices=['analyze', 'verify-analysis', 'interpreter', 'verify-lift', 'lift',
                                     'begin-build', 'record-build', 'verify-build'])
     ap.add_argument('--repo', type=Path, default=REPO)
     ap.add_argument('--toolkit', type=Path)
@@ -187,12 +244,12 @@ def main(argv=None):
     try:
         if args.action in ('begin-build', 'record-build', 'verify-build') and args.preset == 'ci-runtime-only':
             raise ValueError('Runtime-only presets cannot certify a game executable')
-        if args.action == 'begin-analysis':
-            begin_stage(toolkit / 'game_files/defjam-analysis-state.json', analysis_inputs(repo, toolkit))
-        elif args.action == 'record-analysis':
-            path = toolkit / 'game_files/defjam-analysis-state.json'
-            inputs = finish_stage_inputs(path, analysis_inputs(repo, toolkit))
-            write_state(path, {'inputs': inputs, 'outputs': analysis_outputs(toolkit)})
+        if args.action == 'analyze':
+            analyze(repo, toolkit)
+        elif args.action == 'verify-analysis':
+            verify_analysis(repo, toolkit)
+        elif args.action == 'interpreter':
+            print(json.dumps(interpreter()))
         elif args.action == 'verify-lift':
             verify_lift(repo, toolkit)
         elif args.action == 'lift':

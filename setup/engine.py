@@ -361,11 +361,13 @@ class Engine:
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 # copy, not copyfile: the bundled interpreter and tools keep their execute bit.
                 shutil.copy(self.payload / name, destination)
-        if self.operation in ('update', 'downgrade', 'rebuild'):
+        if self.operation in ('downgrade', 'rebuild'):
             return  # Fresh analysis, lift and objects are the clean operation contract.
         previous = self.install / 'installed.json'
         if previous.is_file():
             old = Path(json.loads(previous.read_text(encoding='utf-8'))['source']).resolve()
+        elif self.operation == 'update':
+            return
         else:
             # Reuse only saves time, so an earlier folder that cannot be read is skipped. On
             # Windows a half-deleted failed attempt answers access denied (WinError 5), and
@@ -385,9 +387,13 @@ class Engine:
             return
         # Reuse only local analysis/lift artifacts; the incoming pipeline must
         # validate all inputs/outputs before skipping a stage. Never reuse objects.
-        for relative in ('src/recomp/gen', 'tools/xboxrecomp/game_files',
-                         'tools/xboxrecomp/tools/disasm/output', 'tools/xboxrecomp/tools/func_id/output',
-                         'tools/xboxrecomp/tools/abi_analysis/output'):
+        # Update reuses analysis only: its key covers the XBE, seeds, every toolkit tool
+        # file, the commands and the interpreter, and the lift is redone.
+        artifacts = ('tools/xboxrecomp/game_files', 'tools/xboxrecomp/tools/disasm/output',
+                     'tools/xboxrecomp/tools/func_id/output', 'tools/xboxrecomp/tools/abi_analysis/output')
+        if self.operation != 'update':
+            artifacts = ('src/recomp/gen',) + artifacts
+        for relative in artifacts:
             src, dst = old / relative, self.source / relative
             try:
                 if src.is_dir() and (not dst.exists() or (relative == 'src/recomp/gen' and
@@ -397,6 +403,16 @@ class Engine:
                 # A partial copy is discarded so that stage starts from nothing.
                 shutil.rmtree(dst, ignore_errors=True)
                 self.event('Earlier ' + relative + ' not reused: ' + str(ex))
+        if self.operation == 'update':
+            # The earlier build's XBE copy is keyed, but the player's verified dump is the
+            # input: a differing copy leaves analysis stale, so it runs.
+            # Before extraction there is no dump to compare, so the copy goes and analysis runs.
+            xbe, dump = self.source / 'tools/xboxrecomp/game_files/default.xbe', self.data / 'extracted/default.xbe'
+            if xbe.is_file():
+                if dump.is_file():
+                    shutil.copyfile(dump, xbe)
+                else:
+                    xbe.unlink()
 
     def check_install_destination(self):
         marker = self.install / 'setup-owner.json'
@@ -764,9 +780,9 @@ class Engine:
         state = load_module('setup_pipeline_state', self.source / 'scripts/pipeline-state.py')
         tk = self.source / 'tools/xboxrecomp'
         for label, verify, action in (
-            ('Analysis', lambda: state.verify_analysis(self.source, tk), 'analyze'),
-            ('Lift', lambda: state.verify_lift(self.source, tk), 'recomp'),
-            ('Build', lambda: state.verify_build(self.source, PRESET), 'build')):
+            ('Analysis', lambda: state.verify_analysis(self.source, tk, python=self.python), 'analyze'),
+            ('Lift', lambda: state.verify_lift(self.source, tk, python=self.python), 'recomp'),
+            ('Build', lambda: state.verify_build(self.source, PRESET, python=self.python), 'build')):
             self.cancelled()
             try:
                 verify()
