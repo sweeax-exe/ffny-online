@@ -103,6 +103,18 @@ does not change game files. Real song mods should use the toolkit's file redirec
    order positions, 128 entries in the item index (0x3A07B0), 15-character ids. Past ~3 custom songs this
    needs hand-written replacements for the playlist build/run functions with a larger host-side array.
 
+## 6. Owner decisions (2026-11-03, D-new for the PR)
+
+- **Lift the song limit now**: replace the playlist build/run functions with hand-written ones over a
+  larger host-side list, and widen jukebox ordering, so 100+ custom songs work.
+- **Per-song mode, chosen in a launcher Songs page**: each custom song plays *straight* (linear loop, the
+  default) or in an *experimental interactive* mode with generated variants/branches.
+- **Custom songs' jukebox state lives in a PC-side file**, not in the profile, so saves stay clean and
+  importable.
+- **`holler` is restored as a bonus song, on by default**: "Holler If Ya Hear Me" by 2Pac (album
+  *Strictly 4 My N.I.G.G.A.Z.*, 1993; identified by the owner from the audio). It also shows in the
+  launcher's Songs page like a custom song, using its own authored interactive map.
+
 Unknowns: the 12-song list, the `Song` integer field, how songs unlock, the bank sounds' exact roles, the
 branch rules in licensed maps (which variable picks the 4-way route), and save-file offsets of the
 jukebox bytes.
