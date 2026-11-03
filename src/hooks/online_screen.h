@@ -52,6 +52,11 @@ bool fight_chat_wanted();
 bool draw_fight_chat(ImDrawList *dl, ImVec2 display);
 bool fight_chat_typing();
 
+/* Tests (RECOMP_TEST_QUICK_CHAT): the pad presses the quick-chat test makes, merged into the overlay's
+ * own pad input (bit 0 the wheel's button, L3, or R3 when test_pad_r3; bit 1 A; the left stick -1..1). */
+bool test_pad(int *buttons, float *lx, float *ly);
+bool test_pad_r3();
+
 }
 #endif
 

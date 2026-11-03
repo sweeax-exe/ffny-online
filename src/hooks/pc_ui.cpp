@@ -461,6 +461,19 @@ void ui_feed_gamepad()
         for (int s = 0; s < INPUT_SRC_COUNT; s++)
             if (raw.src[s] > all.src[s]) all.src[s] = raw.src[s];
     }
+    {   // tests: the quick-chat test's presses, as if on a pad (online_screen.h)
+        int b = 0;
+        float lx = 0, ly = 0;
+        if (online_screen::test_pad(&b, &lx, &ly)) {
+            auto put = [&](int src, float v) { if (v > 0 && (int)(v * 32767) > all.src[src]) all.src[src] = (int16_t)(v * 32767); };
+            if (b & 1) put(online_screen::test_pad_r3() ? INPUT_SRC_RIGHT_STICK_CLICK : INPUT_SRC_LEFT_STICK_CLICK, 1.0f);
+            if (b & 2) put(INPUT_SRC_SOUTH, 1.0f);
+            put(INPUT_SRC_LSTICK_RIGHT, lx);
+            put(INPUT_SRC_LSTICK_LEFT, -lx);
+            put(INPUT_SRC_LSTICK_DOWN, ly);
+            put(INPUT_SRC_LSTICK_UP, -ly);
+        }
+    }
     io.BackendFlags |= ImGuiBackendFlags_HasGamepad;
     auto key = [&](ImGuiKey k, int src) { io.AddKeyEvent(k, all.src[src] >= 16384); };
     auto analog = [&](ImGuiKey k, int src) {
@@ -482,6 +495,12 @@ void ui_feed_gamepad()
     analog(ImGuiKey_GamepadL2, INPUT_SRC_LEFT_TRIGGER);  analog(ImGuiKey_GamepadR2, INPUT_SRC_RIGHT_TRIGGER);
     analog(ImGuiKey_GamepadLStickUp, INPUT_SRC_LSTICK_UP);     analog(ImGuiKey_GamepadLStickDown, INPUT_SRC_LSTICK_DOWN);
     analog(ImGuiKey_GamepadLStickLeft, INPUT_SRC_LSTICK_LEFT); analog(ImGuiKey_GamepadLStickRight, INPUT_SRC_LSTICK_RIGHT);
+    // the stick clicks and the right stick: the online screens' quick-chat wheel (L3, or R3 when L3 is
+    // push-to-talk) and a spectator's fight chat (R3 when BACK is push-to-talk); ImGui's own navigation
+    // does not use them
+    key(ImGuiKey_GamepadL3, INPUT_SRC_LEFT_STICK_CLICK); key(ImGuiKey_GamepadR3, INPUT_SRC_RIGHT_STICK_CLICK);
+    analog(ImGuiKey_GamepadRStickUp, INPUT_SRC_RSTICK_UP);     analog(ImGuiKey_GamepadRStickDown, INPUT_SRC_RSTICK_DOWN);
+    analog(ImGuiKey_GamepadRStickLeft, INPUT_SRC_RSTICK_LEFT); analog(ImGuiKey_GamepadRStickRight, INPUT_SRC_RSTICK_RIGHT);
 }
 
 // ---- context, fonts, style -----------------------------------------------------------------------

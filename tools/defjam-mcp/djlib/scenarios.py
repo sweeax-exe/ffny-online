@@ -210,11 +210,16 @@ SOCIAL_UI = [
     "59:pad=a;64:chat=room;66:type=hello room from copy 0;67:send;76:mute=Copy 1;92:close;"
     "94:chat=crew;95:crewcreate=Bronx Kings:BXK;100:crewinvite=Copy 1;113:chat=crew;117:menu=Copy 1;119:close;"
     "120:chat=global;121:menu=Copy 1;123:close;124:chat=messages;128:close",
-    "5:chat=friends;16:dm=Copy 0;22:chat=global;27:friend=Tavo;32:close;33:room=create;36:chat=room;40:chat=global;41:close;"
+    "5:chat=friends;12:quickedit=8:See you next round;16:dm=Copy 0;22:chat=global;27:friend=Tavo;32:close;33:room=create;36:chat=room;40:chat=global;41:close;"
     "44:key=enter;45:text=typed on a keyboard;46:key=enter;47:key=escape;62:chat=room;65:type=hey copy 0, gl;66:send;"
+    "70:reportroom=Copy 0;"
     "82:type=copy 0 should not see this;83:send;90:close;104:chat=crew;110:chat=messages;114:close;116:chat=friends;"
-    "126:chat=friends;130:close",
+    "118:chat=global;124:chat=friends;126:chat=friends;130:close",
 ]
+# The quick-chat wheel (RECOMP_TEST_QUICK_CHAT, the pad's L3 through the overlay's pad input): copy 0 a
+# second after it came into copy 1's room (the window shut), line 2 "Run it back?" (hold, point, let go);
+# copy 1 on GLOBAL (open from 118), line 4 "Nice!" (a tap, point, A).
+SOCIAL_QUICK = ["room:1:2", "chat:119:4:a"]
 
 
 def social(timeout=300, relay_port=27900, off=False, lock_timeout=None, log=None, keep_roots=False, extra_env=None,
@@ -272,6 +277,8 @@ def social(timeout=300, relay_port=27900, off=False, lock_timeout=None, log=None
                 "RECOMP_TEST_SOCIAL_UI": "3:chat=global;6:chat=friends" if off else SOCIAL_UI[i],
             })
             if not off:
+                env["RECOMP_TEST_QUICK_CHAT"] = SOCIAL_QUICK[i]
+            if not off:
                 env["RECOMP_SOCIAL"] = "on"
                 env["RECOMP_TEST_SOCIAL"] = SOCIAL_NET[i]
             env.update(extra_env or {})
@@ -318,7 +325,7 @@ def social(timeout=300, relay_port=27900, off=False, lock_timeout=None, log=None
                 "dm_0_to_1": has(1, "dm from Copy 0") and has(0, "dm sent to"),
                 "dm_1_to_0": has(0, "dm from Copy 1"),
                 "global_sent": has(0, "sent to global eu") and has(1, "sent to global eu"),
-                "global_seen": all("global 2" in state[i] or "global 3" in state[i] or "global 4" in state[i] for i in state),
+                "global_seen": all(any("global %d" % n in state[i] for n in (2, 3, 4, 5)) for i in state),
                 # both online in the menu at first; copy 1's room reaches copy 0 as a presence change
                 # (the first state: stage 2c's block ends the friendship before the last one)
                 "presence": "Copy 0=" in first[1] and "Copy 0=offline" not in first[1] and
@@ -345,6 +352,16 @@ def social(timeout=300, relay_port=27900, off=False, lock_timeout=None, log=None
                 "crew_role_seen": "[BXK] lieutenant" in state[1],
                 "crew_role": any("Copy 1=lieutenant" in l for l in lines[0] if "[SOCIAL-TEST] state:" in l),
                 "report_sent": has(0, "reported 2 ("),
+                # the quick-chat wheel: copy 0's pad in the room reaches copy 1; copy 1's on GLOBAL goes out
+                # a room line's report carries the room's code
+                "report_room_code": any("reported 1 (room, message 0," in l and ", room " in l for l in lines[1]),
+                "quick_room_wheel_opened": has(0, "quick chat: wheel opened (room)"),
+                "quick_room_sent": has(0, "quick chat 2 sent to room: Run it back?"),
+                "quick_room_received": "room chat from Copy 0: Run it back?" in texts[1],
+                "quick_global_sent": has(1, "quick chat 4 sent to global: Nice!") and has(1, "sent to global eu: Nice!"),
+                # a line changed with the keyboard (the QUICK CHAT page's) is kept in the settings
+                "quick_line_edited": has(1, "quick chat line 8 set: See you next round") and
+                                     has(1, "quick chat line 8 is now: See you next round"),
                 "dms_everyone": has(1, "messages from: everyone") and any("dms everyone" in l for l in lines[1]),
                 "block_both_ways": has(1, "blocked 1") and any("blocked [Copy 0 ]" in l for l in lines[1]) and
                                    "Copy 1=" not in state[0].split("friends [", 1)[-1].split("]", 1)[0],
@@ -405,10 +422,15 @@ def room_chat(timeout=None, relay_port=27900, lock_timeout=None, log=None, keep_
     # (the match loads; every copy is in the room)
     # stage 2c: copy 0's first line comes before anyone else is in: copy 1 and the spectator get it
     # from the relay's room memory when they come in (flag 8, "(earlier)"), once each
-    say = {0: "room:1:first line before anyone;room:5:ready when you are;fight:2:good luck", 1: "fight:3:lets go",
+    # (copy 1's "still here" comes into the fight: copy 0's overlay draws while it shows, so copy 0's
+    # quick-chat press there is seen, and refused)
+    say = {0: "room:1:first line before anyone;room:5:ready when you are;fight:2:good luck",
+           1: "fight:3:lets go;fight:24:still here",
            2: "room:1:hi from the stands"}
     import tempfile
-    base = tempfile.mkdtemp(prefix="roomchat-shots-")
+    # under logs/dj (git-ignored), not the system temp folder, which other cleanups empty
+    os.makedirs(os.path.join(machine.REPO, "logs", "dj"), exist_ok=True)
+    base = tempfile.mkdtemp(prefix="roomchat-shots-", dir=os.path.join(machine.REPO, "logs", "dj"))
     for i in range(3):
         shots[i] = os.path.join(base, "shots%d" % i)
         os.makedirs(shots[i], exist_ok=True)
@@ -420,6 +442,12 @@ def room_chat(timeout=None, relay_port=27900, lock_timeout=None, log=None, keep_
     # the spectator's overlay draws through the whole match (its ENTER opens the bar): fewer captures,
     # each one reads the picture back and slows that copy (it lags the players already)
     copy_env[2]["RECOMP_OVERLAY_SHOT_MS"] = "1500"
+    # the quick-chat wheel (the pad's L3): the spectator's during the fight, line 2 "Run it back?" (a tap,
+    # point, A); copy 0, a fighter, presses it in its fight: the wheel must stay shut
+    copy_env[2]["RECOMP_TEST_QUICK_CHAT"] = "fight:5.5:2:a"
+    copy_env[2]["RECOMP_TEST_QUICK_CHAT_HOLD_MS"] = "4000"     # the spectator lags: long enough for a capture
+    # (copy 0 presses while copy 1's line "lets go" shows, so its overlay runs and sees the press)
+    copy_env[0]["RECOMP_TEST_QUICK_CHAT"] = "fight:3:3;fight:6:3"
     r = online(matches=1, spectators=1, timeout=timeout, relay_port=relay_port, lock_timeout=lock_timeout, log=log,
                keep_roots=keep_roots, extra_env=extra_env, copy_env=copy_env, rollback=rollback)
     texts = {}
@@ -457,6 +485,12 @@ def room_chat(timeout=None, relay_port=27900, lock_timeout=None, log=None, keep_
         "history_spectator": len(lines(2, "room chat (earlier) from Copy 0: first line before anyone")) == 1,
         "history_not_to_sayer": not lines(0, "(earlier) from Copy 0: first line before anyone"),
         "spectator_pad_keyboard": bool(lines(2, "bar opened (spectator, pad: on-screen keyboard)")),
+        "quick_spectator_wheel": bool(lines(2, "quick chat: wheel opened (over the fight)")),
+        "quick_spectator_sent": bool(lines(2, "quick chat 2 sent to room: Run it back?")),
+        "quick_fighters_got_it": all(during_fight(i, "room chat from Spectator 0 (spectator): Run it back?") for i in (0, 1)),
+        "quick_fighter_refused": bool(lines(0, "quick chat: not in a fighter's own fight")) and
+                                 not any(lines(i, "quick chat: wheel opened") for i in (0, 1)) and
+                                 not any(lines(i, "quick chat 3 sent") for i in (0, 1)),
     }
     picked = []
     try:
@@ -467,6 +501,13 @@ def room_chat(timeout=None, relay_port=27900, lock_timeout=None, log=None, keep_
         files = sorted(glob.glob(os.path.join(d, "*-fightchat*.bmp")))
         if not files or not Image:
             continue
+        wheel = sorted(glob.glob(os.path.join(d, "*-fightchat-quickchat.bmp")))
+        if wheel:       # the wheel over the fight (the spectator's)
+            name = "copy%d-fightchat-quickchat.png" % i
+            if out_dir:
+                os.makedirs(out_dir, exist_ok=True)
+                Image.open(wheel[len(wheel) // 2]).convert("RGB").save(os.path.join(out_dir, name))
+            picked.append(name)
         # the capture where the spectator's line shows: the first after it arrived is enough; keep two
         for k, p in enumerate([files[0], files[len(files) // 2], files[-1]]):
             name = "copy%d-fightchat-%d.png" % (i, k)

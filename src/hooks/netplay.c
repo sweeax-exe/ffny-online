@@ -68,6 +68,7 @@ void netplay_room(char *c, int size) { if (size > 0) c[0] = 0; }
 void netplay_autostart(void) {}
 int netplay_active(void) { return 0; }
 int netplay_in_fight(void) { return 0; }
+int netplay_on_results(void) { return 0; }
 int netplay_match_locked(void) { return 0; }
 int netplay_voice_room(void) { return 0; }
 void netplay_send_voice(const uint8_t *p, int n) { (void)p; (void)n; }
@@ -4513,6 +4514,7 @@ void netplay_autostart(void)
 
 int netplay_active(void) { return N.lockstep != 0; }
 int netplay_in_fight(void) { return MEM32(G_MATCH_PHASE) == 1u; }
+int netplay_on_results(void) { return N.lobby && N.match_live && !N.watching && N.on_results; }
 int netplay_match_locked(void) { return N.lobby && N.match_live; }
 
 int netplay_voice_room(void)

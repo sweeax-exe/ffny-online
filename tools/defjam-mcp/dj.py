@@ -13,9 +13,11 @@ the exit code is 1 on any failure.
     python tools/defjam-mcp/dj.py scenario boot [--goto battle|story|rewards|online|slotN]
     python tools/defjam-mcp/dj.py scenario gallery [--page-ms 1500]
     python tools/defjam-mcp/dj.py scenario social [--off] [--out logs/social-2a]   (the chat window: two copies,
-           a local account service with -social; --off: its switch off, one copy, nothing new may show)
+           a local account service with -social; --off: its switch off, one copy, nothing new may show;
+           the quick-chat wheel in a room and on GLOBAL, a room report with the room's code)
     python tools/defjam-mcp/dj.py scenario roomchat [--out logs/social-2b]   (room chat through the relay: two
-           copies and a spectator talk in the room; the spectator's line during the fight shows on the fighters)
+           copies and a spectator talk in the room; the spectator's line during the fight shows on the fighters;
+           the spectator's quick-chat wheel in the fight reaches them, a fighter's stays shut)
     python tools/defjam-mcp/dj.py digest <log> [<log> ...] [--max 60]     (a run log, or logs/bug-reports/*/log.txt)
     python tools/defjam-mcp/dj.py analyze <copy logs...> [--matches N]   (an online result from existing logs)
     python tools/defjam-mcp/dj.py lock status | run -- <command...>      (any other test under the lock)

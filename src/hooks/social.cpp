@@ -1183,12 +1183,13 @@ void block(long long id, const std::string &name, bool on)
 }
 
 void report(long long id, const std::string &channel, long long msg, const std::string &text,
-            const std::vector<std::string> &context)
+            const std::vector<std::string> &context, const std::string &room)
 {
     queue([=]() {
         std::string body = "{\"account\":" + std::to_string(id) + ",\"channel\":" + json_text(channel) +
                            ",\"message\":" + std::to_string(msg) + ",\"reason\":\"player report\"";
         if (!text.empty()) body += ",\"text\":" + json_text(text);
+        if (!room.empty()) body += ",\"room\":" + json_text(room);
         if (!context.empty()) {
             body += ",\"context\":[";
             for (size_t i = 0; i < context.size(); i++) body += (i ? "," : "") + json_text(context[i]);
@@ -1196,8 +1197,8 @@ void report(long long id, const std::string &channel, long long msg, const std::
         }
         body += "}";
         if (post("/api/social/report", body) / 100 == 2) {
-            fprintf(stderr, "[SOCIAL] reported %lld (%s, message %lld, %d lines of context)\n", id, channel.c_str(), msg,
-                    (int)context.size());
+            fprintf(stderr, "[SOCIAL] reported %lld (%s, message %lld, %d lines of context%s%s)\n", id, channel.c_str(), msg,
+                    (int)context.size(), room.empty() ? "" : ", room ", room.c_str());
             std::lock_guard<std::mutex> lk(g_mu);
             note("Reported. The team will look at it.");
         }
@@ -1387,7 +1388,8 @@ void crew_join(long long) {}
 void crew_dismiss(long long) {}
 void reload() {}
 void block(long long, const std::string &, bool) {}
-void report(long long, const std::string &, long long, const std::string &, const std::vector<std::string> &) {}
+void report(long long, const std::string &, long long, const std::string &, const std::vector<std::string> &,
+            const std::string &) {}
 void set_dms(const std::string &) {}
 void set_show_avatar(bool) {}
 void crew_create(const std::string &, const std::string &, const std::string &) {}
