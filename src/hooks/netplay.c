@@ -242,6 +242,7 @@ void netplay_crowd_update(void) { sub_00081170(); }
 #define STALL_LIMIT_MS 10000        /* mid-fight: a player has gone */
 #define START_LIMIT_MS 90000        /* the first steps: another PC may still be loading the venue */
 #define DECIDED_LIMIT_MS 1000       /* after the KO: a PC that went on ahead is not a lost player */
+#define DESYNC_WAIT_MS 3000         /* out of sync: the other PC's own fight may have ended (it sends no more) */
 #define LOBBY_DELAY   3             /* hub matches: until the delay is agreed (P_RTT) */
 #define DELAY_MIN     2
 #define DELAY_MAX     10
@@ -450,6 +451,9 @@ static struct {
      * start (spec_rematch); leaving the fight for the room (spec_quit: START, or the feed stopped) */
     ULONGLONG spec_menu;
     int spec_leave, spec_rematch, spec_quit;
+    /* a player's fight that went out of sync and whose other players stopped sending: left for the
+     * room the way the pause menu's Quit leaves it (desync_quit_tick, between two updates) */
+    int desync_quit;
 } N;
 
 /* This PC is in its room as a spectator (the relay's ROOM says `you` 0xFD). */
@@ -5281,6 +5285,28 @@ void netplay_on_step(void)
                       player_name(late));
                 break;
             }
+            /* The games went out of sync earlier in this match (check_hashes): from then on each PC plays its
+             * own fight on the same entries, and the one that saw its own knockout went on to the results and
+             * stopped sending steps. Waiting STALL_LIMIT_MS for steps that never come froze the picture for 10 s
+             * mid-fight, then named that player as one who stopped answering (F9 926777, build 46: out of sync
+             * at step 4980 of a rollback rematch, given up at step 8748 while player 2 had already chosen
+             * Rematch). The match no longer counts, so this PC leaves the fight for the room at once when that
+             * player is past the fight (it chose Rematch or went back to the room), or after DESYNC_WAIT_MS. */
+            if (N.desync && late >= 0 && late < MAXP && !N.watching) {
+                uint32_t want = N.rematch_want[late];
+                int past = want == REMATCH_NO || (want == N.match_count && N.match_count);
+                if (past || now - waited_since > DESYNC_WAIT_MS) {
+                    fprintf(stderr, "[NETPLAY] out of sync since step %u and player %d sends no more steps (%s, step %u): "
+                            "leaving the fight for the room\n", N.desync_step, late + 1,
+                            past ? (want == REMATCH_NO ? "it went back to the room" : "it is on the results") :
+                            "nothing for a while", s);
+                    InterlockedExchange(&N.lockstep, 0);
+                    N.desync_quit = 1;      /* desync_quit_tick, between two updates */
+                    set_status("The games went out of sync; back to the room.");
+                    toast(10000, "The games went out of sync, so this match doesn't count. Back to the room.");
+                    break;
+                }
+            }
             if (now - waited_since > (decided ? DECIDED_LIMIT_MS :
                                       need <= (uint32_t)N.delay + 1 ? START_LIMIT_MS : STALL_LIMIT_MS)) {
                 uint32_t u;
@@ -5321,7 +5347,7 @@ void netplay_on_step(void)
                     }
                 }
                 set_status("A player stopped answering during the fight; continuing offline.");
-                if (late >= 0 && N.fighting_seen && need > (uint32_t)N.delay + 60) {
+                if (late >= 0 && N.fighting_seen && need > (uint32_t)N.delay + 60 && !N.desync) {
                     report_left(1u << late);
                     toast(10000, "%s stopped answering: it counts as their loss if they were signed in. START quits.",
                           player_name(late));
@@ -5885,7 +5911,7 @@ static void rollback_to(uint32_t f)
 #define SPEC_MENU_LIMIT_MS 180000u      /* the players never chose (the relay ends the match after 60 s) */
 #define BATTLE_SCREEN_VTABLE 0x0029D5E4u
 extern void sub_000CD0D0(void);         /* the pause menu's button handler: ecx = menu; mask, sound, resume, close */
-static int spec_quit_fight(void)
+static int spec_quit_fight(const char *who)
 {
     uint32_t mgr = MEM32(0x002FB148u + 0x17u * 4u), gs = MEM32(0x002FB148u + 0x18u * 4u), screen, menu;
     uint32_t args[4];
@@ -5912,8 +5938,8 @@ static int spec_quit_fight(void)
         g_fp_top = fp_top;
         g_fp_control_word = fp_cw;
     }
-    fprintf(stderr, "[NETPLAY] watching: left the fight for the room (the pause menu's Quit; screen %08X, menu %08X)\n",
-            screen, menu);
+    fprintf(stderr, "[NETPLAY] %s: left the fight for the room (the pause menu's Quit; screen %08X, menu %08X)\n",
+            who, screen, menu);
     return 1;
 }
 
@@ -5922,7 +5948,7 @@ static void spec_tick(void)
     static unsigned tries;
     if (!N.lobby || !N.watching) { tries = 0; return; }
     if (N.spec_quit) {
-        int r = spec_quit_fight();
+        int r = spec_quit_fight("watching");
         if (r > 0 || (r < 0 && ++tries > 600)) {
             if (r < 0) fprintf(stderr, "[NETPLAY] watching: the fight screen is not up; the game goes on by itself\n");
             N.spec_quit = 0;
@@ -5968,12 +5994,30 @@ static void spec_tick(void)
     }
 }
 
+/* A player's fight that went out of sync and that the other players left (the wait in netplay_on_step):
+ * the same way back to the room as a spectator's, once the fight screen is up; end_hub_match then says
+ * No to a rematch, so a player who waits on the results is told to choose No and come back too. */
+static void desync_quit_tick(void)
+{
+    static unsigned tries;
+    int r;
+    if (!N.desync_quit) { tries = 0; return; }
+    if (!N.lobby || N.watching || !N.match_live) { N.desync_quit = 0; tries = 0; return; }
+    r = spec_quit_fight("out of sync");
+    if (r > 0 || (r < 0 && ++tries > 600)) {
+        if (r < 0) fprintf(stderr, "[NETPLAY] out of sync: the fight screen is not up; the game goes on by itself\n");
+        N.desync_quit = 0;
+        tries = 0;
+    }
+}
+
 void netplay_on_update(void)
 {
     uint32_t t, f = 0;
     int i;
     rollback_check_tables(N.resim ? "a re-run update starts" : "an update starts");
     if (!N.resim) spec_tick();
+    if (!N.resim) desync_quit_tick();
     if (!N.resim) netplay_rematch_tick();
     intro_update();
     intro_variants();
