@@ -33,7 +33,7 @@ These commands are examples; catalogue publication is tracked separately.
 `--capability wide-v1` is appropriate only for a runtime with the wide-layer loader.
 The launcher derives that capability from the toolkit compiled into the game.
 Released builds with the wide-layer loader advertise it, allowing compatible wide
-menu downloads to be offered. Builds from 0.12.4 also pass `--capability language-v1`:
+menu downloads to be offered. Builds from 0.13.0 also pass `--capability language-v1`:
 translations are [language mods](language-packs.md), a folder with `language.ini` and
 binary deltas (`.djd`), optionally with a `manifest.ini` and PNGs for HD versions of the
 images they translate (checked like a texture pack's; the version then also declares

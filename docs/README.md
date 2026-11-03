@@ -13,7 +13,7 @@
 | [HD textures](hd-textures.md) | Optional texture packs on Windows, macOS and Linux: generation, settings and fallback |
 | [Language packs](language-packs.md) | Playing in another language with a language mod, subtitles in every Story cutscene, use with texture packs, and making a pack |
 | [Importing Xbox saves](importing-xbox-saves.md) | Bring profiles from an original Xbox, an emulator or shared save zips into the port |
-| [Known issues](known-issues.md) | Current limitations and what has not been tested |
+| [GitHub Issues](https://github.com/vyanhursky/DefJamFFNY-recomp/issues) | Current limitations and what has not been tested |
 
 ## Develop and test
 

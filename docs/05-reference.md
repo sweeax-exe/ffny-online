@@ -44,9 +44,10 @@ Tools, all cheap:
 | `RECOMP_SELFTEST=1` | Checks the lifted CRT's four 64-bit divide helpers against answers computed in the host. |
 | `scripts/frame-signature.py` | What a captured frame contains, without storing any of it. |
 
-A re-lift is **27 seconds**; the full seed/analyze/lift/build loop is about ten minutes. A `_gen` wrapper
-only intercepts *indirect* calls, because the declaration rewrites direct call sites to `sub_X_gen` as
-well - see `src/recomp_manual.c`.
+Build/lift times depend on toolkit and host. The canonical
+[lifter override playbook](agent/lifter-overrides.md) explains current wrapper semantics:
+since toolkit v0.16 direct callers reach manual wrappers too. Older notes about
+indirect-only wrapping describe v0.13, not the current pin.
 
 ## Standing items
 1. **Run `scripts/jump-table-audit.py` and `scripts/coverage-audit.py` after every re-lift.** The first
@@ -57,7 +58,7 @@ well - see `src/recomp_manual.c`.
    added there, not worked around elsewhere; the sampler will name the function and the lifted body will
    name the register.
 3. **Toolkit changes are fork commits.** `tools/xboxrecomp` is pinned to a published commit on
-   `vyanhursky/xboxrecomp`, branch `defjam/rebase-2026-10`. Build that checkout directly. Make generic
+   `vyanhursky/xboxrecomp`, the branch configured in `.gitmodules`. Build that checkout directly. Make generic
    changes in an isolated toolkit worktree, validate and publish, then commit the published gitlink in
    the parent. The 108 numbered patches that source comments still cite are retired and no longer shipped. The ledger in
    `docs/research/toolkit-rebase-ledger.md` maps all 108 old patches. Each upstream PR needs Vlad's approval.

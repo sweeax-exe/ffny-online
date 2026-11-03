@@ -217,7 +217,7 @@ The redirection keeps a log of the session; the game prints a great deal, and
   single core, so game threads take turns instead. A thread that has just woken
   can wait a few milliseconds for its turn. `RECOMP_GUEST_CORES=all` turns the
   rule off for diagnosis; the game can then freeze, typically at a movie.
-- See also [known issues](known-issues.md), which apply to every host.
+- See also [GitHub Issues](https://github.com/vyanhursky/DefJamFFNY-recomp/issues), which apply to every host.
 
 ## If something goes wrong
 

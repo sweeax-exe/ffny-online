@@ -2,8 +2,7 @@
 
 Since v0.3.0 the game reads gamepads through SDL3 and the keyboard and mouse as a player of
 their own. Everything below is a setting in `settings.ini` (written beside your `save` folder
-on first start), so one file holds the choices; the overlay and launcher planned for v0.4.0 will
-edit the same values. [settings.ini and keybinds](settings-reference.md) lists them all.
+on first start). The launcher and in-game overlay edit the same values. [settings.ini and keybinds](settings-reference.md) lists them all.
 
 ## What works
 

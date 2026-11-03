@@ -160,8 +160,8 @@ edit it while the game is closed.
 | `[display]` key | Default | Meaning |
 |---|---|---|
 | `fullscreen` | `false` | Start in borderless full screen. The hotkeys update it. |
-| `window_width`, `window_height` | `1280`, `960` | Window size. Resizing the window updates them. |
-| `aspect` | `4:3` | `4:3` keeps the picture shape; `stretch` fills the window. |
+| `window_width`, `window_height` | `1920`, `1080` | Window size. Resizing the window updates them. |
+| `aspect` | `auto` | Auto matches the display; `4:3` preserves the original framing; `stretch` fills without widening the view. See the settings reference for widescreen modes. |
 | `render_scale` | `2` | Internal resolution, 1-4 times 640x480. Try `3` or `4` on a 1440p or 4K display. |
 | `filter` | `smooth` | `smooth` or `sharp` scaling to the window. |
 | `vsync` | `true` | Pace frames on the display for even motion. Used on 60, 120, 180 and 240 Hz displays; others use the game's own 60 fps timer. |
