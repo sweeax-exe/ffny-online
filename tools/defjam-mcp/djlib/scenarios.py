@@ -203,9 +203,10 @@ SOCIAL_NET = [
 SOCIAL_UI = [
     "3:chat=friends;19:dm=Copy 1;25:chat=global;30:keyboard=yeah lets run it bac;35:close;40:chat=friends;44:chat=crew;"
     "46:chat=global;47:type=;48:close;50:pad=back;51:pad=y;52:pad=a;53:pad=left;54:pad=a;55:pad=start;57:pad=b;58:chat=friends;"
-    "59:pad=a;64:chat=room;67:close",
+    "59:pad=a;64:chat=room;66:type=hello room from copy 0;67:send;76:mute=Copy 1;92:close",
     "5:chat=friends;16:dm=Copy 0;22:chat=global;27:friend=Tavo;32:close;33:room=create;36:chat=room;40:chat=global;41:close;"
-    "44:key=enter;45:text=typed on a keyboard;46:key=enter;47:key=escape",
+    "44:key=enter;45:text=typed on a keyboard;46:key=enter;47:key=escape;62:chat=room;65:type=hey copy 0, gl;66:send;"
+    "82:type=copy 0 should not see this;83:send;90:close",
 ]
 
 
@@ -227,7 +228,8 @@ def social(timeout=300, relay_port=27900, off=False, lock_timeout=None, log=None
         names = ["Copy %d" % i for i in range(n)]
         flags = ["-social-switch", os.path.join(s.dir, "social-enabled")] if off else ["-social"]
         tokens = s.accounts(acc_port, names, extra=flags)
-        s.relay(relay_port)
+        # the relay asks the account service who writes in a room (room chat's IDENT, stage 2b)
+        s.relay(relay_port, extra=["-accounts-internal", "http://127.0.0.1:%d" % (acc_port + 1)])
         watch = WATCH + ["[SOCIAL-TEST] state:", "[SOCIAL] ready", "[SOCIAL-UI] close", "[SOCIAL-UI] key=escape",
                          "[SOCIAL] the service has the social"]
         shots = {}
@@ -303,6 +305,11 @@ def social(timeout=300, relay_port=27900, off=False, lock_timeout=None, log=None
                 "keyboard_typing_send": has(1, "sent to global eu: typed on a keyboard") and
                                         has(0, "global eu from Copy 1: typed on a keyboard"),
                 "join_from_friends": has(0, "joining Copy 1's room"),
+                # room chat (stage 2b): through the relay, which knows the accounts (IDENT)
+                "room_ident": all("room chat: the relay knows this account" in texts[i] for i in texts),
+                "room_0_to_1": "room chat from Copy 0: hello room from copy 0" in texts[1],
+                "room_1_to_0": "room chat from Copy 1: hey copy 0, gl" in texts[0],
+                "room_mute": has(0, "room chat: muted Copy 1") and has(0, "hidden (muted): Copy 1"),
             }
             result["state"] = {i: state[i].split("state: ", 1)[-1] for i in state}
         result["checks"] = checks
@@ -338,6 +345,88 @@ def social(timeout=300, relay_port=27900, off=False, lock_timeout=None, log=None
     finally:
         _finish(s, result, t0)
     return result
+
+
+# ---- room chat (social stage 2b) ------------------------------------------------------------------
+
+def room_chat(timeout=None, relay_port=27900, lock_timeout=None, log=None, keep_roots=False, extra_env=None,
+              out_dir=None, rollback="off"):
+    """Room chat through the relay, no account service (the social features off: room chat is the
+    relay's own): a quick match of two copies watched by a third (spectator mode, scenario online with
+    one match and one spectator). In the room each copy writes a line (RECOMP_TEST_ROOM_CHAT); during
+    the fight the spectator opens its chat bar, types and sends a line (RECOMP_TEST_FIGHT_CHAT), which
+    must show on both fighters' overlay while the fight runs. The match's checks are scenario online's
+    (checksums equal, winners, summary); the fighters never open the bar. out_dir: the overlay's
+    captures of the fight with the line (PNG)."""
+    shots = {}
+    copy_env = {}
+    session_dir = {}
+    # copy 1 joins copy 0's room about 3 s after it opened it, the spectator 3 s later, and the match
+    # starts as soon as the spectator is in: room lines before that, "fight" lines once START came
+    # (the match loads; every copy is in the room)
+    say = {0: "room:5:ready when you are;fight:2:good luck", 1: "fight:3:lets go", 2: "room:1:hi from the stands"}
+    import tempfile
+    base = tempfile.mkdtemp(prefix="roomchat-shots-")
+    for i in range(3):
+        shots[i] = os.path.join(base, "shots%d" % i)
+        os.makedirs(shots[i], exist_ok=True)
+        copy_env[i] = {"RECOMP_TEST_ROOM_CHAT": say[i], "RECOMP_OVERLAY_SHOT_DIR": shots[i],
+                       "RECOMP_OVERLAY_SHOT_MS": "700"}
+    copy_env[2]["RECOMP_TEST_FIGHT_CHAT"] = "3:nice from the stands"
+    # the spectator's overlay draws through the whole match (its ENTER opens the bar): fewer captures,
+    # each one reads the picture back and slows that copy (it lags the players already)
+    copy_env[2]["RECOMP_OVERLAY_SHOT_MS"] = "1500"
+    r = online(matches=1, spectators=1, timeout=timeout, relay_port=relay_port, lock_timeout=lock_timeout, log=log,
+               keep_roots=keep_roots, extra_env=extra_env, copy_env=copy_env, rollback=rollback)
+    texts = {}
+    for i, p in enumerate(r.get("logs", [])):
+        path = p if os.path.isabs(p) else os.path.join(machine.REPO, p)
+        texts[i] = logparse.read_text(path) if os.path.isfile(path) else ""
+
+    def lines(i, mark):
+        return [l for l in texts.get(i, "").splitlines() if mark in l]
+
+    def during_fight(i, mark):
+        """mark is logged between the copy's fight start and its result."""
+        t = texts.get(i, "").splitlines()
+        start = next((k for k, l in enumerate(t) if '"event":"match_start"' in l), None)
+        end = next((k for k, l in enumerate(t) if start is not None and k > start and
+                    ('"event":"result"' in l or '"event":"match_over"' in l)), None)
+        hit = next((k for k, l in enumerate(t) if mark in l), None)
+        return start is not None and hit is not None and hit > start and (end is None or hit < end)
+    checks = {
+        "relay_has_chat": all(lines(i, "(room chat)") for i in range(3)),
+        "no_service_ident": all(lines(i, "this relay checks no accounts") for i in range(3)),
+        "room_0_to_1": bool(lines(1, "room chat from Copy 0: ready when you are")),
+        "players_to_spectator": bool(lines(2, "room chat from Copy 0: good luck")) and bool(lines(2, "room chat from Copy 1: lets go")),
+        "player_to_player": bool(lines(0, "room chat from Copy 1: lets go")) and bool(lines(1, "room chat from Copy 0: good luck")),
+        "room_spectator_to_players": all(lines(i, "room chat from Spectator 0 (spectator): hi from the stands") for i in (0, 1)),
+        "echo_to_sender": bool(lines(0, "room chat from Copy 0 (this PC): ready when you are")),
+        "spectator_bar_opened": bool(lines(2, "[UI] fight chat: typing, game input held")),
+        "spectator_sent_in_fight": bool(lines(2, "fight chat sent: nice from the stands")),
+        "fighters_got_it_in_fight": all(during_fight(i, "room chat from Spectator 0 (spectator): nice from the stands")
+                                        for i in (0, 1)),
+        "fighters_never_typed": not any(lines(i, "fight chat: typing") for i in (0, 1)),
+    }
+    picked = []
+    try:
+        from PIL import Image
+    except ImportError:
+        Image = None
+    for i, d in shots.items():
+        files = sorted(glob.glob(os.path.join(d, "*-fightchat*.bmp")))
+        if not files or not Image:
+            continue
+        # the capture where the spectator's line shows: the first after it arrived is enough; keep two
+        for k, p in enumerate([files[0], files[len(files) // 2], files[-1]]):
+            name = "copy%d-fightchat-%d.png" % (i, k)
+            if out_dir:
+                os.makedirs(out_dir, exist_ok=True)
+                Image.open(p).convert("RGB").save(os.path.join(out_dir, name))
+            picked.append(name)
+    r["room_chat"] = {"checks": checks, "captures": picked, "shots_dir": base}
+    r["ok"] = bool(r.get("ok")) and all(checks.values())
+    return r
 
 
 # ---- offline --------------------------------------------------------------------------------------
@@ -587,7 +676,11 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
             })
             if fast_ko:
                 env["RECOMP_TEST_KO_STEP"] = "%d,%s" % (int(fast_ko), winner)
-            env.update(extra_env or {})
+            for k, v in (extra_env or {}).items():     # NAME@N: only copy N gets it
+                name, _, only = k.partition("@")
+                if not only or (only.isdigit() and int(only) == i):
+                    env[name] = v
+            env.update((copy_env or {}).get(i, {}))
             root = s.make_root(i)
             before[i] = _save_files(root)
             s.launch(i, env=env, root=root, core=base_core + 2 * i, watch=WATCH)

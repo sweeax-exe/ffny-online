@@ -126,6 +126,32 @@ int netplay_lobby_caps(void);
  * build 46 relays): another copy of the game is online on this PC. Not a connection problem. */
 int netplay_online_twice(void);
 
+/* Room chat (the Social Update, stage 2b): lines through the relay to everyone in this PC's room, the
+ * spectators included, in the room and during its matches. Only with relays answering CAPS bit 7
+ * (NETPLAY_CAP_CHAT); a relay without it never sends a line. It is relay-only: it works whether the
+ * account service's social features are on or not. Never part of a match's input or checksums. */
+#define NETPLAY_CAP_CHAT 128
+#define NETPLAY_CHAT_LINES 40
+typedef struct NetChatLine {
+    unsigned seq;                   /* 1, 2, ... in the order they arrived (this session) */
+    int slot;                       /* the sender's room slot; NETPLAY_SLOT_SPECTATOR; -1 a system line */
+    unsigned account;               /* the sender's account as the relay knows it, 0 none */
+    int spectator, system, mine;    /* a spectator's; the relay's own (a refusal, to this PC only); this PC's */
+    char name[33];                  /* as the relay knows it (the account's name), never the game's say */
+    char text[201];
+    unsigned long long at;          /* GetTickCount64 when it arrived */
+    long long unix_at;              /* time() then, for the clock */
+} NetChatLine;
+/* This room's lines, oldest first (at most max, the newest kept); *last_seq: the newest line's seq
+ * (0 none). Returns the count; 0 out of a room. */
+int netplay_room_chat(NetChatLine *out, int max, unsigned *last_seq);
+/* 1 this PC can write in its room's chat; 0 it reads only (why says so: not signed in, muted,
+ * checking the account); -1 no room chat here (no room, or a relay without it). why may be NULL. */
+int netplay_room_chat_can_write(char *why, int size);
+/* Queues a line (UTF-8, 1..200 bytes; the network thread sends it and repeats it until the relay's
+ * echo comes). Returns 1 when queued. */
+int netplay_room_chat_send(const char *text);
+
 /* Enter the hub on `server`. The state becomes NETPLAY_LOBBY once the server answers; a room's
  * START makes it NETPLAY_CONNECTED for the match, which starts by itself (automatch.h), and it
  * returns to NETPLAY_LOBBY when the game is back at the main menu. */

@@ -46,7 +46,7 @@ struct Ref { long long id = 0; std::string name, tag; };
 struct Line {                       /* a global or crew chat line */
     long long seq = 0, from = 0, at = 0;
     std::string channel, name, tag, text;
-    bool hidden = false, system = false;
+    bool hidden = false, system = false, mine = false;   /* mine: this PC's own (room chat) */
 };
 
 struct Convo {                      /* one MESSAGES entry */

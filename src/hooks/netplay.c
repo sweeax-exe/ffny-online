@@ -33,6 +33,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include "recomp/gen/recomp_types.h"
 #include "netplay.h"
 #include "updater.h"
@@ -111,6 +112,9 @@ int netplay_room_results_wait(unsigned *s) { if (s) *s = 0; return 0; }
 int netplay_room_rollback(int s) { (void)s; return -1; }
 int netplay_lobby_caps(void) { return 0; }
 int netplay_online_twice(void) { return 0; }
+int netplay_room_chat(NetChatLine *o, int m, unsigned *s) { (void)o; (void)m; if (s) *s = 0; return 0; }
+int netplay_room_chat_can_write(char *w, int n) { if (w && n > 0) w[0] = 0; return -1; }
+int netplay_room_chat_send(const char *t) { (void)t; return 0; }
 void netplay_sync_point(void) {}
 void netplay_on_main_menu(void) {}
 int netplay_match_abandoned(void) { return 0; }
@@ -196,6 +200,22 @@ void netplay_crowd_update(void) { sub_00081170(); }
 #define T_RECGET      0x2A      /* the record of the member in a slot, again */
 #define T_SPECTATE    0x2B      /* watch a room (spectator mode, relays with CAPS bit 4) */
 #define T_PC          0x30      /* one session per PC (build 46): this PC's fingerprint; the relay acks or ERROR 11 */
+/* Room chat (social stage 2b, relays answering CAPS bit 7). IDENT carries the account service's
+ * one-time ticket (the same kind as RANKED's): the relay redeems it and from then on puts the
+ * account's id and name on this session's lines; the game never names itself in a line. */
+#define T_IDENT       0x31      /* -> token 8, ticket 16; <- u8 status (IDENT_*), u16 minutes muted */
+#define T_CHAT        0x32      /* -> token 8, u16 id, u8 n, text; <- u8 slot, u32 account, u8 flags, u16 id, name, text */
+#define IDENT_OK      0
+#define IDENT_REFUSED 1
+#define IDENT_NO_SERVICE 2
+#define IDENT_MUTED   3
+#define IDENT_WAIT    4
+#define CHAT_SPECTATOR 1
+#define CHAT_SYSTEM   2
+#define CHAT_YOURS    4
+#define CHAT_TRIES    5         /* a line every CHAT_RETRY_MS until its echo comes */
+#define CHAT_RETRY_MS 700
+#define CHAT_QUEUE    4
 #define PC_TRIES      5         /* PC every RETRY_MS until the relay answers; none after these: an older relay */
 #define SLOT_SPECTATOR 0xFD     /* ROOM `you` of a spectator */
 #define RECORD_SELF   0xFE
@@ -205,6 +225,7 @@ void netplay_crowd_update(void) { sub_00081170(); }
 #define CAPS_SPECTATE 16u       /* spectator mode (docs/research/spectator-mode.md) */
 #define CAPS_STATS_ERR 32u      /* client (build 46): shows ERROR 12, a created fighter's stats refused */
 #define CAPS_SPEC_REMATCH 64u   /* client (build 47): a spectator takes the players' P_REMATCH (rematches watched) */
+#define CAPS_CHAT     128u      /* room chat, both ways (T_IDENT, T_CHAT); only a client announcing it gets T_CHAT */
 #define CP_WAIT_MS    10000     /* START: how long to wait for a created fighter's missing record */
 #define CAPS_TRIES    5         /* CAPS every RETRY_MS; no answer after these: an older relay */
 #define WINNER_DRAW   0xFFu
@@ -287,6 +308,23 @@ static struct {
     int pc_tries, pc_done;          /* one session per PC (T_PC): sent, and answered or given up */
     int online_twice;               /* the relay refused this session: this PC is already online there (ERROR 11) */
     ULONGLONG pc_sent;
+    /* room chat (T_IDENT, T_CHAT): the room's last lines, the account check and the lines being sent */
+    NetChatLine chat[NETPLAY_CHAT_LINES];
+    int chat_n;
+    unsigned chat_seq;
+    char chat_room[7];              /* the room the lines are from */
+    int chat_ident;                 /* -1 not asked, -2 fetching a ticket, -3 IDENT being sent, else IDENT_* */
+    int chat_mute_min;
+    uint8_t chat_ticket[TICKET_LEN];
+    int chat_ident_tries;
+    ULONGLONG chat_ident_sent;
+    char chat_out[CHAT_QUEUE][201];
+    int chat_out_n;
+    uint16_t chat_id;               /* the id of chat_out[0] */
+    int chat_tries;
+    ULONGLONG chat_sent;
+    unsigned chat_gen;              /* a new session: an IDENT ticket fetched for the last one is dropped */
+    int chat_unsigned;              /* the IDENT went without a ticket (not signed in then): again once signed in */
     /* created fighters (created_fighter.c): every room member's record as the relay sent it, this
      * client's own upload, and the records the last START named */
     uint8_t cp_rec[ROOMSLOTS][CP_REC_LEN];
@@ -483,6 +521,7 @@ static BOOL CALLBACK init_once(PINIT_ONCE o, PVOID p, PVOID *c)
     N.queue_state = NETQUEUE_NONE;
     N.queue_accepted = -1;
     N.relay_caps = -1;
+    N.chat_ident = -1;
     N.koth_winner = -1;
     return TRUE;
 }
@@ -515,6 +554,10 @@ static void toast(unsigned ms, const char *format, ...)
 static const char *player_name(int pos);
 static int room_rollback_flags(void);
 static void put32(uint8_t *p, uint32_t v);
+static void chat_reset(void);
+static void chat_on_ident(int status, int minutes);
+static void chat_on_line(const uint8_t *p, int n);
+static void chat_tick(ULONGLONG now);
 static void rematch_declined(void);
 static void send_data(const uint8_t *payload, int len);
 
@@ -2310,6 +2353,7 @@ static void on_packet(const uint8_t *b, int len)
                     N.caps_tries = 0;
                     N.caps_sent = 0;
                     N.relay_caps = -1;
+                    chat_reset();       /* room chat: a new session, a new IDENT */
                     N.pc_tries = 0;         /* this PC's fingerprint, for one session per PC (T_PC) */
                     N.pc_sent = 0;
                     N.pc_done = 0;
@@ -2377,16 +2421,23 @@ static void on_packet(const uint8_t *b, int len)
             int had = N.relay_caps;
             N.relay_caps = (int)(get32(b + 6) & 0x7FFFFFFFu);
             if (had != N.relay_caps)
-                fprintf(stderr, "[NETPLAY] the relay supports %08X%s%s%s%s\n", (unsigned)N.relay_caps,
+                fprintf(stderr, "[NETPLAY] the relay supports %08X%s%s%s%s%s\n", (unsigned)N.relay_caps,
                         N.relay_caps & CAPS_KOTH ? " (King of the Hill)" : "",
                         N.relay_caps & CAPS_ROLLBACK ? " (rollback allowed)" : "",
                         N.relay_caps & CAPS_CREATED ? " (created fighters allowed)" : "",
-                        N.relay_caps & CAPS_SPECTATE ? " (spectators)" : "");
+                        N.relay_caps & CAPS_SPECTATE ? " (spectators)" : "",
+                        N.relay_caps & CAPS_CHAT ? " (room chat)" : "");
             rollback_server_allows((N.relay_caps & CAPS_ROLLBACK) != 0);    /* for the next start's audio arena */
         }
         break;
     case T_HILL:
         if (N.lobby) on_hill(b + 6, len - 6);
+        break;
+    case T_IDENT:       /* room chat: the relay's answer to IDENT (relays answering CAPS_CHAT) */
+        if (N.lobby && len >= 9) chat_on_ident(b[6], b[7] | b[8] << 8);
+        break;
+    case T_CHAT:        /* room chat: a line of this PC's room (only to a client that announced CAPS_CHAT) */
+        if (N.lobby) chat_on_line(b + 6, len - 6);
         break;
     case T_PC:          /* the relay took this PC's fingerprint (build 46 relays) */
         if (N.lobby && len >= 7 && !N.pc_done) {
@@ -2671,7 +2722,7 @@ static DWORD WINAPI net_thread(LPVOID unused)
                 uint8_t cb[6 + 8 + 4];
                 int n = header(cb, T_CAPS);
                 memcpy(cb + n, N.token, 8); n += 8;
-                put32(cb + n, CAPS_KOTH | CAPS_CREATED | CAPS_SPECTATE | CAPS_STATS_ERR | CAPS_SPEC_REMATCH); n += 4;
+                put32(cb + n, CAPS_KOTH | CAPS_CREATED | CAPS_SPECTATE | CAPS_STATS_ERR | CAPS_SPEC_REMATCH | CAPS_CHAT); n += 4;
                 send_raw(cb, n);
             } else {
                 N.relay_caps = 0;
@@ -2679,6 +2730,7 @@ static DWORD WINAPI net_thread(LPVOID unused)
             }
             N.caps_sent = now;
         }
+        chat_tick(now);     /* room chat: IDENT, and the line being sent (relays answering CAPS_CHAT) */
         /* One session per PC (build 46): this PC's fingerprint, until the relay answers (a relay before
          * build 46 never does: PC_TRIES); a second live session from this PC gets ERROR 11 */
         if (N.lobby && N.have_token && N.state == NETPLAY_LOBBY && !N.pc_done && now - N.pc_sent >= RETRY_MS) {
@@ -2895,6 +2947,7 @@ static int start(const char *server, const char *name, int creating, const char 
     for (i = 0; i < ROOMSLOTS; i++) { N.pos_of_slot[i] = i < 2 ? i : -1; N.slot_rtt[i] = N.slot_rb[i] = -1; }
     N.last_pinginfo = 0;
     N.relay_caps = -1;
+    chat_reset();
     N.online_twice = 0;
     /* created fighters: read the player's own again (a new one may have been made meanwhile) */
     N.cp_mine_state = 0;
@@ -3066,6 +3119,300 @@ int netplay_room_results_wait(unsigned *slots)
 }
 
 int netplay_lobby_caps(void) { return N.lobby ? N.relay_caps : 0; }
+
+/* ---- room chat (the Social Update, stage 2b) ------------------------------------------------------
+ *
+ * Lines through the relay (T_CHAT) to everyone in this PC's room, spectators included; only with a
+ * relay answering CAPS_CHAT. The relay names the sender (its account's name once IDENT was accepted)
+ * and echoes this PC's own line back after its word filter: that echo is what shows, and it ends the
+ * line's retries. Nothing here touches a match: the lines are no DATA, never in the lockstep's input
+ * or its checksums, and they are only read by the overlay. Under g_cs unless said otherwise. */
+
+static void chat_reset(void)
+{
+    N.chat_gen++;
+    N.chat_ident = -1;
+    N.chat_mute_min = 0;
+    N.chat_ident_tries = 0;
+    N.chat_ident_sent = 0;
+    N.chat_out_n = 0;
+    N.chat_tries = 0;
+    N.chat_sent = 0;
+}
+
+/* A new room: its own lines (the last room's are not shown in it). */
+static void chat_room_check(void)
+{
+    if (!N.roomv.in_room || !strcmp(N.chat_room, N.roomv.code)) return;
+    snprintf(N.chat_room, sizeof(N.chat_room), "%s", N.roomv.code);
+    N.chat_n = 0;
+    N.chat_out_n = 0;
+}
+
+static void chat_add(int slot, unsigned account, int flags, const char *name, int nl, const char *text, int tl)
+{
+    NetChatLine *l;
+    int i, o;
+    if (N.chat_n == NETPLAY_CHAT_LINES) {
+        memmove(N.chat, N.chat + 1, sizeof(N.chat[0]) * (NETPLAY_CHAT_LINES - 1));
+        N.chat_n--;
+    }
+    l = &N.chat[N.chat_n++];
+    memset(l, 0, sizeof(*l));
+    l->seq = ++N.chat_seq;
+    l->system = (flags & CHAT_SYSTEM) != 0;
+    l->slot = l->system ? -1 : slot;
+    l->account = account;
+    l->spectator = (flags & CHAT_SPECTATOR) != 0;
+    l->mine = (flags & CHAT_YOURS) != 0;
+    for (i = o = 0; i < nl && o < (int)sizeof(l->name) - 1; i++)
+        if ((unsigned char)name[i] >= 0x20 && name[i] != 0x7F) l->name[o++] = name[i];
+    for (i = o = 0; i < tl && o < (int)sizeof(l->text) - 1; i++)
+        if ((unsigned char)text[i] >= 0x20 && text[i] != 0x7F) l->text[o++] = text[i];
+    l->at = GetTickCount64();
+    l->unix_at = (long long)time(NULL);
+}
+
+/* T_IDENT from the relay (network thread). */
+static void chat_on_ident(int status, int minutes)
+{
+    EnterCriticalSection(&g_cs);
+    if (N.chat_ident != status || N.chat_mute_min != minutes)
+        fprintf(stderr, "[NETPLAY] room chat: %s\n", status == IDENT_OK ? "the relay knows this account" :
+                status == IDENT_NO_SERVICE ? "this relay checks no accounts (lines carry the lobby name)" :
+                status == IDENT_REFUSED ? "account refused: reading only" :
+                status == IDENT_MUTED ? "muted by a moderator: reading only" : "the account service did not answer");
+    N.chat_ident = status;
+    N.chat_mute_min = status == IDENT_MUTED ? minutes : 0;
+    N.chat_ident_sent = GetTickCount64();
+    LeaveCriticalSection(&g_cs);
+}
+
+/* T_CHAT from the relay (network thread): slot, account, flags, id, name, text. */
+static void chat_on_line(const uint8_t *p, int n)
+{
+    int slot, flags, nl, tl;
+    unsigned account, id;
+    if (n < 1 + 4 + 1 + 2 + 1 + 1) return;
+    slot = p[0];
+    account = get32(p + 1);
+    flags = p[5];
+    id = (unsigned)p[6] | (unsigned)p[7] << 8;
+    nl = p[8];
+    if (9 + nl + 1 > n) return;
+    tl = p[9 + nl];
+    if (9 + nl + 1 + tl != n) return;
+    EnterCriticalSection(&g_cs);
+    chat_room_check();
+    if ((flags & CHAT_YOURS) && N.chat_out_n && id == N.chat_id) {   /* our line's echo (or its refusal) */
+        memmove(N.chat_out, N.chat_out + 1, sizeof(N.chat_out[0]) * (CHAT_QUEUE - 1));
+        N.chat_out_n--;
+        N.chat_id++;
+        N.chat_tries = 0;
+        N.chat_sent = 0;
+    } else if ((flags & CHAT_YOURS) && N.chat_n && N.chat[N.chat_n - 1].mine && !(flags & CHAT_SYSTEM)) {
+        LeaveCriticalSection(&g_cs);    /* a retry's echo of a line already shown */
+        return;
+    }
+    if (N.roomv.in_room) {
+        chat_add(slot, account, flags, (const char *)p + 9, nl, (const char *)p + 10 + nl, tl);
+        fprintf(stderr, "[NETPLAY] room chat%s from %s%s: %s\n", flags & CHAT_SYSTEM ? " (relay)" : "",
+                flags & CHAT_SYSTEM ? "the relay" : N.chat[N.chat_n - 1].name,
+                flags & CHAT_SPECTATOR ? " (spectator)" : flags & CHAT_YOURS ? " (this PC)" : "", N.chat[N.chat_n - 1].text);
+    }
+    LeaveCriticalSection(&g_cs);
+}
+
+/* Fetches the account service's ticket (it blocks: its own thread), then IDENT goes out from the
+ * network thread. Not signed in: an empty ticket, which a relay with an account service refuses
+ * (reading only) and a relay without one does not look at. */
+static DWORD WINAPI chat_ident_thread(LPVOID param)
+{
+    char t[33];
+    uint8_t tk[TICKET_LEN];
+    unsigned gen = (unsigned)(UINT_PTR)param;
+    int i;
+    memset(tk, 0, sizeof(tk));
+    /* the saved session is still being checked at the game's start: wait for it (20 s at most) */
+    for (i = 0; i < 80 && (account_state() == ACCOUNT_CHECKING || account_state() == ACCOUNT_WAITING); i++) Sleep(250);
+    if (account_state() == ACCOUNT_IN && account_ranked_ticket(t)) {
+        for (i = 0; i < TICKET_LEN; i++) {
+            unsigned v = 0;
+            sscanf(t + 2 * i, "%2x", &v);
+            tk[i] = (uint8_t)v;
+        }
+    }
+    SecureZeroMemory(t, sizeof(t));
+    EnterCriticalSection(&g_cs);
+    if (N.chat_gen == gen && N.chat_ident == -2) {
+        static const uint8_t none[TICKET_LEN];
+        N.chat_unsigned = !memcmp(tk, none, sizeof(tk));
+        memcpy(N.chat_ticket, tk, sizeof(tk));
+        N.chat_ident = -3;
+        N.chat_ident_tries = 0;
+        N.chat_ident_sent = 0;
+    }
+    LeaveCriticalSection(&g_cs);
+    SecureZeroMemory(tk, sizeof(tk));
+    return 0;
+}
+
+/* RECOMP_TEST_ROOM_CHAT="room:S:TEXT;fight:S:TEXT;...": tests send TEXT S seconds after this PC
+ * entered its room (room) or after a fight began on it (fight), each step once, in order. */
+static void chat_test_tick(ULONGLONG now, ULONGLONG room_at, ULONGLONG fight_at)
+{
+    static char steps[16][3][208];
+    static int count = -1, next;
+    if (count < 0) {
+        const char *e = getenv("RECOMP_TEST_ROOM_CHAT");
+        count = 0;
+        while (e && *e && count < 16) {
+            const char *end = strchr(e, ';'), *a = strchr(e, ':'), *b = a ? strchr(a + 1, ':') : NULL;
+            size_t len = end ? (size_t)(end - e) : strlen(e);
+            if (a && b && (size_t)(b - e) < len) {
+                snprintf(steps[count][0], sizeof(steps[0][0]), "%.*s", (int)(a - e), e);
+                snprintf(steps[count][1], sizeof(steps[0][1]), "%.*s", (int)(b - a - 1), a + 1);
+                snprintf(steps[count][2], sizeof(steps[0][2]), "%.*s", (int)(len - (size_t)(b - e) - 1), b + 1);
+                count++;
+            }
+            e = end ? end + 1 : NULL;
+        }
+    }
+    if (next >= count) return;
+    {
+        ULONGLONG since = !strcmp(steps[next][0], "fight") ? fight_at : room_at;
+        if (!since || now - since < (ULONGLONG)(atof(steps[next][1]) * 1000.0)) return;
+    }
+    fprintf(stderr, "[NETPLAY] room chat test: %s %s s: %s\n", steps[next][0], steps[next][1], steps[next][2]);
+    netplay_room_chat_send(steps[next][2]);
+    next++;
+}
+
+/* The network thread, every pass: IDENT, then the line being sent until its echo comes. */
+static void chat_tick(ULONGLONG now)
+{
+    uint8_t b[6 + 8 + 2 + 1 + 200];
+    int n = 0;
+    static ULONGLONG room_at, fight_at;
+    static char room_code[7];
+    if (!(N.lobby && N.have_token && (N.state == NETPLAY_LOBBY || N.state == NETPLAY_CONNECTED) && N.relay_caps > 0 &&
+          (N.relay_caps & CAPS_CHAT)))
+        return;
+    if (N.roomv.in_room && strcmp(room_code, N.roomv.code)) { snprintf(room_code, sizeof(room_code), "%s", N.roomv.code); room_at = now; }
+    if (!N.roomv.in_room) { room_code[0] = 0; room_at = 0; }
+    if (N.match_live) { if (!fight_at) fight_at = now; }     /* (not netplay_in_fight: guest memory may not be mapped yet) */
+    else fight_at = 0;
+    chat_test_tick(now, room_at, fight_at);
+    EnterCriticalSection(&g_cs);
+    chat_room_check();
+    if (N.chat_ident == IDENT_WAIT && now - N.chat_ident_sent >= 30000) N.chat_ident = -1;    /* ask again */
+    if (N.chat_ident == IDENT_REFUSED && N.chat_unsigned && account_state() == ACCOUNT_IN) {   /* signed in since */
+        N.chat_unsigned = 0;
+        N.chat_ident = -1;
+    }
+    if (N.chat_ident == -1) {
+        HANDLE h;
+        N.chat_ident = -2;
+        h = CreateThread(NULL, 0, chat_ident_thread, (LPVOID)(UINT_PTR)N.chat_gen, 0, NULL);
+        if (h) CloseHandle(h);
+        else N.chat_ident = -1;
+    } else if (N.chat_ident == -3 && now - N.chat_ident_sent >= RETRY_MS) {
+        N.chat_ident_sent = now;
+        if (N.chat_ident_tries++ < CHAT_TRIES) {
+            n = header(b, T_IDENT);
+            memcpy(b + n, N.token, 8); n += 8;
+            memcpy(b + n, N.chat_ticket, TICKET_LEN); n += TICKET_LEN;
+        } else {
+            N.chat_ident = IDENT_WAIT;      /* no answer: again in 30 s */
+        }
+    }
+    LeaveCriticalSection(&g_cs);
+    if (n) send_raw(b, n);
+    n = 0;
+    EnterCriticalSection(&g_cs);
+    if (N.chat_out_n && N.roomv.in_room && now - N.chat_sent >= CHAT_RETRY_MS) {
+        N.chat_sent = now;
+        if (N.chat_tries++ < CHAT_TRIES) {
+            int tl = (int)strlen(N.chat_out[0]);
+            n = header(b, T_CHAT);
+            memcpy(b + n, N.token, 8); n += 8;
+            b[n++] = (uint8_t)N.chat_id;
+            b[n++] = (uint8_t)(N.chat_id >> 8);
+            b[n++] = (uint8_t)tl;
+            memcpy(b + n, N.chat_out[0], (size_t)tl); n += tl;
+        } else {    /* no echo: dropped, and said so */
+            static const char lost[] = "Not sent: the server did not answer.";
+            chat_add(-1, 0, CHAT_SYSTEM | CHAT_YOURS, "", 0, lost, (int)sizeof(lost) - 1);
+            memmove(N.chat_out, N.chat_out + 1, sizeof(N.chat_out[0]) * (CHAT_QUEUE - 1));
+            N.chat_out_n--;
+            N.chat_id++;
+            N.chat_tries = 0;
+            N.chat_sent = 0;
+        }
+    }
+    LeaveCriticalSection(&g_cs);
+    if (n) send_raw(b, n);
+}
+
+int netplay_room_chat(NetChatLine *out, int max, unsigned *last_seq)
+{
+    int i, n = 0, from;
+    if (last_seq) *last_seq = 0;
+    InitOnceExecuteOnce(&g_once, init_once, NULL, NULL);
+    EnterCriticalSection(&g_cs);
+    if (N.lobby && N.roomv.in_room && !strcmp(N.chat_room, N.roomv.code)) {
+        from = N.chat_n > max ? N.chat_n - max : 0;
+        for (i = from; i < N.chat_n; i++) out[n++] = N.chat[i];
+        if (last_seq && N.chat_n) *last_seq = N.chat[N.chat_n - 1].seq;
+    }
+    LeaveCriticalSection(&g_cs);
+    return n;
+}
+
+int netplay_room_chat_can_write(char *why, int size)
+{
+    int r;
+    const char *w = "";
+    char mute[64];
+    InitOnceExecuteOnce(&g_once, init_once, NULL, NULL);
+    EnterCriticalSection(&g_cs);
+    if (!N.lobby || !N.roomv.in_room || N.relay_caps <= 0 || !(N.relay_caps & CAPS_CHAT)) {
+        r = -1;
+        w = N.lobby && N.roomv.in_room && N.relay_caps >= 0 ? "This server has no room chat yet." : "";
+    } else if (N.chat_ident == IDENT_OK || N.chat_ident == IDENT_NO_SERVICE) {
+        r = 1;
+    } else {
+        r = 0;
+        if (N.chat_ident == IDENT_REFUSED) w = "Room chat needs a signed-in account (sign in with Discord in the launcher).";
+        else if (N.chat_ident == IDENT_MUTED) {
+            snprintf(mute, sizeof(mute), "You are muted in chat for %d more minute%s.", N.chat_mute_min, N.chat_mute_min == 1 ? "" : "s");
+            w = mute;
+        } else if (N.chat_ident == IDENT_WAIT) w = "The account service did not answer; trying again.";
+        else w = "Checking your account...";
+    }
+    if (why && size > 0) snprintf(why, (size_t)size, "%s", w);
+    LeaveCriticalSection(&g_cs);
+    return r;
+}
+
+int netplay_room_chat_send(const char *text)
+{
+    size_t len;
+    int ok = 0;
+    if (!text) return 0;
+    len = strlen(text);
+    if (len < 1 || len > 200) return 0;
+    if (netplay_room_chat_can_write(NULL, 0) != 1) return 0;
+    EnterCriticalSection(&g_cs);
+    if (N.chat_out_n < CHAT_QUEUE) {
+        memcpy(N.chat_out[N.chat_out_n], text, len + 1);
+        if (!N.chat_out_n) { N.chat_tries = 0; N.chat_sent = 0; }
+        N.chat_out_n++;
+        ok = 1;
+    }
+    LeaveCriticalSection(&g_cs);
+    return ok;
+}
 int netplay_online_twice(void) { return N.state == NETPLAY_FAILED && N.online_twice; }
 
 void netplay_lobby_list(int mode)

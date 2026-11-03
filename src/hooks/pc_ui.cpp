@@ -4088,6 +4088,24 @@ extern "C" void pc_ui_overlay(void *device, void *context, void *window_rtv, uns
     // input), and the ONLINE entry's art on the main menu.
     bool versus = !g_open.load() && online_screen::versus_wanted();
     bool decor = !g_open.load() && !versus && online_screen::decor_wanted();
+    // Room chat over a room's match (the online screens closed): its lines, and a spectator's text bar.
+    // While the bar is open the game gets no input on this PC, as with the overlay; only a spectator's
+    // PC ever opens it, so a fighter's keys always stay the fight's (online_screen.h).
+    bool fightchat = !g_open.load() && !versus && !decor && online_screen::fight_chat_wanted();
+    static bool fc_held;
+    auto fight_chat_hold = [&](bool typing) {
+        if (typing && !fc_held) {
+            fc_held = true;
+            g_hold_input = false;
+            xbox_HostInputSetUiActive(1);
+            fprintf(stderr, "[UI] fight chat: typing, game input held\n");
+        } else if (!typing && fc_held) {
+            fc_held = false;
+            g_hold_input = true;        // released in release_input_when_idle, once everything is let go
+            fprintf(stderr, "[UI] fight chat: bar closed\n");
+        }
+    };
+    fight_chat_hold(fightchat && online_screen::fight_chat_typing());
     char notice[160];
     // F9's notice shows over everything, the online screens and the settings included (pressed in
     // the online menu, it was hidden there); the netplay notices are for the fight only.
@@ -4103,7 +4121,7 @@ extern "C" void pc_ui_overlay(void *device, void *context, void *window_rtv, uns
     if (g_note.open) toast = false;     // F9's "taking a picture" would sit over the box
     char talk[160];
     bool talking = voice_overlay(talk, sizeof(talk)) != 0;               // voice chat: who talks
-    if (!g_open.load() && !decor && !versus && !toast && !talking && !g_note.open) { ui_unlock(); return; }
+    if (!g_open.load() && !decor && !versus && !toast && !talking && !g_note.open && !fightchat) { ui_unlock(); return; }
 
     ID3D11Device *dev = (ID3D11Device *)device;
     ID3D11DeviceContext *ctx = (ID3D11DeviceContext *)context;
@@ -4160,6 +4178,7 @@ extern "C" void pc_ui_overlay(void *device, void *context, void *window_rtv, uns
         (ImGui::IsKeyPressed(ImGuiKey_Escape, false) || ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false)))
         close_request = true;
     }
+    if (fightchat) fight_chat_hold(online_screen::draw_fight_chat(ImGui::GetForegroundDrawList(), io.DisplaySize));
     if (talking) {  // small, bottom left, over everything
         ImDrawList *fg = ImGui::GetForegroundDrawList();
         ImFont *font = g_font_bold ? g_font_bold : ImGui::GetFont();
