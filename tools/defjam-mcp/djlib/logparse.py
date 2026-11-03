@@ -163,7 +163,10 @@ def parse_matches(lines):
         m = STARTS_RE.match(l)
         if m:
             if cur is None or cur["id"] is not None:
+                prev = cur
                 cur = new(i)            # a rematch: no START of its own
+                if prev is not None:    # nor a "rollback on/off for this match" line: it keeps the last one's mode
+                    cur["mode"] = prev["mode"]
             cur.update(id=m.group(1), delay=int(m.group(4)), load_s=float(m.group(5)), starts_line=i)
             if cur["mode"] is None:
                 cur["mode"] = "rollback" if m.group(2) == "rollback" else "lockstep"
