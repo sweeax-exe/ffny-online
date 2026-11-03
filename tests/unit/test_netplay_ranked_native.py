@@ -76,6 +76,10 @@ int main(void)
            m.deviation);
     netranked_parse_line("1500|350|9|3|5|1|0|2|0|PLACEMENT 2/5|1520|Contender III|", &m);
     printf("lineplace|%d|%d|%d|%s|%d\n", m.valid, m.placements_left, m.placements_of, m.label, m.hint);
+    netranked_parse_line("1600|60|13|0|5|0|50|5|3|Contender III|1600|Contender III||2|2", &m);
+    printf("line15|%d|%d|%d|%d\n", m.valid, m.place, m.of, m.hint);
+    netranked_parse_line("1712|98|13|0|5|0|38|7|3|Enforcer II", &m);
+    printf("line10place|%d|%d\n", m.place, m.of);
     printf("lineshort|%d\n", netranked_parse_line("1500|350|9", &m));
     printf("keys|%d|%d|%d|%d|%d\n", netranked_mode_of_key("ranked_open"), netranked_mode_of_key("ranked_classic"),
            netranked_mode_of_key("ranked_draft"), netranked_mode_of_key("ranked"), netranked_mode_of_key("ranked_x"));
@@ -139,6 +143,9 @@ def test_stats_lines(rows):
     assert by(rows, 'line10') == [['1', '1712', '13', '38', '7', '3', 'Enforcer II', '1712', '', '0']]
     assert by(rows, 'line13') == [['1', '1', '1902', 'Kingpin II ?', '1', 'Kingpin III', '120']]
     assert by(rows, 'lineplace') == [['1', '3', '5', 'PLACEMENT 2/5', '0']]
+    # build 52: the ladder's place and size at the end; older lines leave them 0
+    assert by(rows, 'line15') == [['1', '2', '2', '0']]
+    assert by(rows, 'line10place') == [['0', '0']]
     assert by(rows, 'lineshort') == [['0']]
     assert by(rows, 'keys') == [['0', '1', '2', '-1', '-1']]
 

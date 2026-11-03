@@ -151,6 +151,8 @@ int netranked_parse_line(const char *value, NetModeRank *out)
     field(&s, out->peak_rank, sizeof(out->peak_rank));
     if (field(&s, buf, sizeof(buf)))
         out->hint = !strcmp(buf, "promotion") ? NETRANK_HINT_PROMOTION : !strcmp(buf, "demotion") ? NETRANK_HINT_DEMOTION : 0;
+    if (field(&s, buf, sizeof(buf))) out->place = atoi(buf);     /* build 52: |place|of */
+    if (field(&s, buf, sizeof(buf))) out->of = atoi(buf);
     if (out->division < 0) out->division = 0;
     if (out->division >= NETRANK_DIVISIONS) out->division = NETRANK_DIVISIONS - 1;
     out->valid = 1;
