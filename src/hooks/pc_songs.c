@@ -263,17 +263,38 @@ int pc_songs_sod_add_rows(const uint8_t *in, size_t n, const char *name, const c
     if (!new_rows) { fail("out of memory"); goto done; }
     uint32_t name_word = 0, name_type = 0;
     if (!sod_field(&s, thash, NULL, &name_word, &name_type)) { fail("table has no row name"); goto done; }
+    /*
+     * The game's record handles are (table rank << 24) | the record's rank in the table's name
+     * index, which is sorted by name hash, and profiles save those handles (the jukebox's song
+     * keys). So every added row gets a row name whose hash sorts after all the others: the
+     * retail rows keep their ranks and the added ones take the next ones, in order. The row
+     * name is internal; the jukebox and the banner show the Title field.
+     */
+    uint32_t max_hash = 0;
+    for (uint32_t i = 0; i < rows; i++) {
+        uint32_t idx = sod_word(&s, sod_word(&s, rec_list + i * 4) + name_word * 4);
+        if (idx < s.nstr && s.str_hash[idx] > max_hash) max_hash = s.str_hash[idx];
+    }
     for (int r = 0; r < count; r++) {
-        const char *row_name = NULL;
-        for (int f = 0; f < nfields; f++) if (!field_names[f]) row_name = values[r * nfields + f];
-        if (!row_name) { fail("row without a name"); goto done; }
+        const char *base = NULL;
+        char row_name[160];
+        for (int f = 0; f < nfields; f++) if (!field_names[f]) base = values[r * nfields + f];
+        if (!base || strlen(base) > 120) { fail("row without a usable name"); goto done; }
+        /* The same song added again (a database that already has it) is left alone. */
         int exists = 0;
-        uint32_t h = pc_songs_name_hash(row_name);
         for (uint32_t i = 0; i < rows && !exists; i++) {
             uint32_t idx = sod_word(&s, sod_word(&s, rec_list + i * 4) + name_word * 4);
-            exists = idx < s.nstr && s.str_hash[idx] == h;
+            exists = idx < s.nstr && s.str_off[idx] && sod_range(&s, s.str_off[idx], 1) &&
+                     !strncmp((const char *)s.out.p + s.str_off[idx], base, strlen(base)) &&
+                     (s.out.p[s.str_off[idx] + strlen(base)] == 0 || s.out.p[s.str_off[idx] + strlen(base)] == '~');
         }
         if (exists) continue;
+        snprintf(row_name, sizeof row_name, "%s", base);
+        for (unsigned salt = 1; pc_songs_name_hash(row_name) <= max_hash; salt++) {
+            if (salt > 100000000u) { fail("no row name sorts last"); goto done; }
+            snprintf(row_name, sizeof row_name, "%s~%u", base, salt);
+        }
+        max_hash = pc_songs_name_hash(row_name);
         uint8_t rec[4096];
         memcpy(rec, s.out.p + template_off, words * 4);
         for (int f = 0; f < nfields; f++) {
@@ -281,7 +302,7 @@ int pc_songs_sod_add_rows(const uint8_t *in, size_t n, const char *name, const c
             /* The row name is a string index too, with its own type code (0x02000000). */
             if (!sod_field(&s, thash, field_names[f], &w, &t) || (field_names[f] && t != 1) || w >= words)
                 { fail("table has no such text field"); goto done; }
-            if (!sod_intern(&s, values[r * nfields + f], &idx)) goto done;
+            if (!sod_intern(&s, field_names[f] ? values[r * nfields + f] : row_name, &idx)) goto done;
             wr32(rec + w * 4, idx);
         }
         new_rows[nnew] = sod_emit(&s, rec, words * 4);

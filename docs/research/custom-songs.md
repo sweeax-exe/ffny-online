@@ -50,9 +50,9 @@ Other traces of cut or renamed music:
 
 - **Jukebox** (main menu → Beatbox, `screens/jukebox/beatbox`). It is a shop screen
   (`Shops.ChooseShopList(6)`) with Play, Stop, Shuffle, Promote, Demote, Enable and Disable. Each song has
-  one byte in the profile: two bits of state (0 locked/absent, 2 disabled, 3 enabled) and six bits of
-  order position (64 positions). Locked songs show the rewards lock (`~RWRD_LOCK`); unlocking is
-  presumably a Story purchase through the same shop calls (*inferred*). The profile also holds
+  one byte in the profile: two bits of state (0 never arranged, 1 or 3 on, 2 off; see 5a) and six
+  bits of order position (64 positions). The screen can show a rewards lock (`~RWRD_LOCK`); no
+  code that locks or unlocks songs was found, and every song is on in the profiles tested. The profile also holds
   "ordered/shuffled" (+0x14DC) and "jukebox on" (+0x14DD).
 - **Playlist player** (`sub_0003CFF0` builds it, `sub_0003D060` runs it every frame). It plays its list
   strictly in order and wraps. Shuffle is a one-time reorder when the list is built, not a random pick per
@@ -102,6 +102,53 @@ does not change game files. Real song mods should use the toolkit's file redirec
 4. **Lift the limits**: the 36-entry playlist array (33 songs on the disc leaves 3 slots), 64 jukebox
    order positions, 128 entries in the item index (0x3A07B0), 15-character ids. Past ~3 custom songs this
    needs hand-written replacements for the playlist build/run functions with a larger host-side array.
+
+## 5a. Slice 1: "Holler If Ya Hear Me" restored (what it took)
+
+**Song list.** `src/hooks/pc_songs.c` appends a Song row (title, artist, album, entity
+`holler`; the unnamed integer copied from the template row) to a copy of `djv2.sod` in
+`<data>/cache/songs` and serves it through the game-file redirect, chained to the language
+pack's (and built on the pack's copy of the database when it serves one).
+
+**Record handles are ranks.** A record handle is `(table rank << 24) | rank in the table's
+name index`, and that index is sorted by the hash of the row name. Profiles save handles
+(below), so a row inserted mid-index would shift every later retail song. The writer gives an
+added row a row name whose hash sorts after all others (`Holler If Ya Hear Me~N` when the
+plain title does not): retail songs keep ranks 0-31, Holler is 32. The row name is internal;
+the jukebox and the banner show the Title field. `tests/unit/test_songs.py` checks this on a
+synthetic database and on the user's own.
+
+**The profile's song store.** The jukebox and the playlist read a per-profile item store
+(`ItemMgr`, vtable 0x286204) at profile manager B + 0x30: sorted keys (handles), a count, and
+one state byte per key (bits 0-1: 0 never arranged, 1 or 3 on, 2 off; bits 2-7: jukebox
+order). Its buffers are fixed in B (states B + 0x1420, keys B + 0x1444, 36 of each; an order
+counter at B + 0x14D4). `sub_00013340` builds one key per Song row; loading a profile
+(`sub_00014540`) copies the saved block over keys, states and counter but leaves the count, so
+a song added after the save has no key: the playlist skips it, and the jukebox resolves it to
+`states[-1]` (outside the array) and showed "Make It Hurt" in its place.
+
+The fix wraps `sub_00014540` (`src/patches/song_store.c`): after the load, every built handle
+the save lacks goes into a slot past the saved ones, enabled, at the position the order
+counter gives (then advanced). Taking the order from the counter matters: right after a load
+the game numbers its never-arranged songs from that counter, and an order taken from the
+highest one in use collided with theirs (two songs at one position: one dropped, one doubled).
+The saved block has room for 36 and the retail game reads only its own count, so the extra
+entry a save carries is invisible to it.
+
+**Checked live** (Windows, disposable data root, `RECOMP_SONGS_TRACE`): Beatbox lists, plays
+and shows "Holler If Ya Hear Me / 2Pac / Strictly 4 My N.I.G.G.A.Z." in Now Playing; the
+playlist after the profile load and after leaving the Beatbox has 33 songs, Holler once, no
+doubles; with `RECOMP_TEST_SONGS_ONLY=32` the main menu's song banner announces it at start-up
+with all three lines, and a One on One's playlist is Holler (captured audio r 0.96-1.00
+against the decoded song).
+
+**Found on the way.** `release/v1.0.0` never started language packs: the cheat-menu merge
+(`6bccd71`) dropped `pc_language_start` from `pc_settings.c` (fixed in its own commit, with a
+source check). After leaving the Beatbox the main menu keeps the title "BEATBOX"; it does so
+with songs off too, so it is not from this work.
+
+**Before the profile loads** the game plays a 16-song list it builds without the profile's
+choices; Holler is not in it (a profile's jukebox decides from then on).
 
 ## 6. Owner decisions (2026-11-03, D-new for the PR)
 

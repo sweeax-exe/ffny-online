@@ -40,6 +40,7 @@
 #include "hooks/dev_module.h"
 #include "patches/picture.h"
 #include "patches/cheats.h"
+#include "patches/song_store.h"
 #include "patches/menu_geometry.h"
 #include "patches/cinema_timing.h"
 
@@ -224,6 +225,22 @@ void sub_001EB980(void)
 {
     uint32_t raw=input_late_raw();
     if (raw) { g_eax=raw;g_esp+=4; } else sub_001EB980_gen();
+}
+/* A profile load: songs added to the song list since it was saved get a jukebox place
+ * (src/patches/song_store.c). this = the profile manager. */
+extern void sub_00014540_gen(void);
+void sub_00014540(void)
+{
+    uint32_t manager=g_ecx;
+    song_store_before_load(manager);
+    sub_00014540_gen();
+    song_store_after_load(manager);
+}
+extern void sub_0003CFF0_gen(void);
+void sub_0003CFF0(void)
+{
+    sub_0003CFF0_gen();
+    song_store_playlist_built();
 }
 extern void sub_000D7BF0_gen(void);
 void sub_000D7BF0(void)
