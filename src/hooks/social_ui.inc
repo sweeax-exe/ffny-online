@@ -1618,6 +1618,11 @@ const std::vector<std::vector<Key>> &key_rows(bool sym)
     return sym ? symbols : letters;
 }
 
+// A spectator's room line over a fight (KB_FIGHT): the fight chat's own bar, below.
+std::string &fight_draft();
+int &fight_cursor();
+void fight_send();
+
 std::string &kb_text() { return C.kb_kind == KB_FIGHT ? fight_draft() : C.kb_kind != KB_CHAT ? C.friend_name : C.draft[C.tab]; }
 int &kb_cursor() { return C.kb_kind == KB_FIGHT ? fight_cursor() : C.kb_kind != KB_CHAT ? C.friend_cursor : C.cursor[C.tab]; }
 int kb_max()
@@ -1640,6 +1645,7 @@ void open_keyboard(int kind)
 
 void kb_submit()
 {
+    if (C.kb_kind == KB_FIGHT) { fight_send(); C.kb = false; return; }
     if (C.kb_kind != KB_CHAT) {
         std::string n = C.friend_name;
         while (!n.empty() && n.back() == ' ') n.pop_back();
@@ -1707,7 +1713,7 @@ std::vector<std::string> suggestions()
             "would", "yeah", "your" };
         for (const char *w : common) if (out.size() < 2) offer(w);
     }
-    if (C.kb_kind == KB_CHAT)
+    if (C.kb_kind == KB_CHAT || C.kb_kind == KB_FIGHT)
         for (const char *p : { "GG", "Rematch?", "One more", "Ready?", "Nice" })
             if (out.size() < 5) out.push_back(p);
     return out;
@@ -1809,6 +1815,7 @@ void draw_keyboard(ImDrawList *dl, const Frame &f, ImVec2 display)
     std::string who, head;
     if (C.kb_kind == KB_FRIEND) { head = "ADD FRIEND"; who = ""; }
     else if (C.kb_kind == KB_CREW_INVITE) { head = "INVITE TO"; who = C.v.crew_name; }
+    else if (C.kb_kind == KB_FIGHT) { head = "MESSAGE TO"; who = "the room"; }
     else if (C.kb_kind == KB_CREW_NAME) { head = "NEW CREW - ITS NAME"; who = ""; }
     else if (C.kb_kind == KB_CREW_TAG) { head = "NEW CREW - ITS TAG"; who = C.crew_new_name; }
     else if (C.tab == TAB_MESSAGES) { head = "MESSAGE TO"; who = convo_name(C.dm_with); }
@@ -2276,6 +2283,7 @@ const int FIGHT_LINES = 3;
 
 struct FightChat {
     bool typing = false;
+    bool pad = false;               // opened with the pad: the on-screen keyboard is up
     std::string draft;
     int cursor = 0;
     unsigned long long opened = 0, fight_at = 0;
@@ -2289,6 +2297,33 @@ struct FightChat {
 
 bool fight_spectator(const NetRoom &r) { return r.in_room && r.you == NETPLAY_SLOT_SPECTATOR; }
 
+std::string &fight_draft() { return FC.draft; }
+int &fight_cursor() { return FC.cursor; }
+
+// Sends the bar's line (ENTER, or SEND on the on-screen keyboard) and closes the bar.
+void fight_send()
+{
+    std::string t = FC.draft;
+    while (!t.empty() && t.back() == ' ') t.pop_back();
+    if (t.size() > 200) {
+        size_t cut = 200;
+        while (cut > 0 && ((unsigned char)t[cut] & 0xC0) == 0x80) cut--;
+        t.resize(cut);
+    }
+    if (!t.empty() && netplay_room_chat_send(t.c_str())) fprintf(stderr, "[SOCIAL-UI] fight chat sent: %s\n", t.c_str());
+    FC.draft.clear();
+    FC.cursor = 0;
+    FC.typing = false;
+    FC.pad = false;
+}
+
+// The pad's button for the bar: BACK, or R3 when BACK is push-to-talk.
+bool fight_pad_opens()
+{
+    return back_is_ptt() ? ImGui::IsKeyPressed(ImGuiKey_GamepadR3, false) : ImGui::IsKeyPressed(ImGuiKey_GamepadBack, false);
+}
+const char *fight_pad_name() { return back_is_ptt() ? (ps_icons() ? "R3" : "RS") : back_button_name(); }
+
 // In a room's match, the online screens closed.
 bool fight_chat_live()
 {
@@ -2300,8 +2335,9 @@ bool fight_chat_live()
 bool fight_chat_wanted_impl()
 {
     if (!fight_chat_live()) {
-        FC.typing = false;
+        FC.typing = FC.pad = false;
         FC.fight_at = 0;
+        if (C.kb && C.kb_kind == KB_FIGHT) C.kb = false;
         return false;
     }
     if (FC.typing) return true;
@@ -2325,18 +2361,38 @@ void fight_chat_test(const NetRoom &r)
             if (c) { FC.test_s = (float)atof(e); FC.test_text = c + 1; }
         }
     }
-    if (FC.test_s < 0 || FC.test_step >= 2 || !fight_spectator(r)) return;
+    if (FC.test_s < 0 || FC.test_step == 2 || !fight_spectator(r)) return;
+    static const bool by_pad = getenv("RECOMP_TEST_FIGHT_CHAT_PAD") != nullptr;   // the pad's button and the keyboard
     if (netplay_in_fight() && !FC.fight_at) FC.fight_at = GetTickCount64();
     if (!FC.fight_at) return;
     float t = (GetTickCount64() - FC.fight_at) / 1000.0f;
     if (FC.test_step == 0 && t >= FC.test_s && room_chat_state() == 1) {
+        if (by_pad) {       // press the pad's button as a player would; the bar opens below
+            ImGui::GetIO().AddKeyEvent(back_is_ptt() ? ImGuiKey_GamepadR3 : ImGuiKey_GamepadBack, true);
+            FC.test_step = 3;
+            return;
+        }
         FC.typing = true;
         FC.opened = GetTickCount64();
         FC.draft = FC.test_text;
         FC.cursor = (int)FC.draft.size();
         FC.test_step = 1;
         fprintf(stderr, "[SOCIAL-UI] fight chat: test opened the bar\n");
+    } else if (FC.test_step == 3) {
+        ImGui::GetIO().AddKeyEvent(back_is_ptt() ? ImGuiKey_GamepadR3 : ImGuiKey_GamepadBack, false);
+        if (FC.typing) {
+            FC.draft = FC.test_text;
+            FC.cursor = (int)FC.draft.size();
+            FC.test_step = 1;
+            fprintf(stderr, "[SOCIAL-UI] fight chat: test opened the bar with the pad (keyboard %d)\n", (int)C.kb);
+        }
     } else if (FC.test_step == 1 && t >= FC.test_s + 1.5f) {
+        if (FC.pad) {       // SEND on the on-screen keyboard
+            fight_send();
+            C.kb = false;
+            FC.test_step = 2;
+            return;
+        }
         if (netplay_room_chat_send(FC.draft.c_str())) fprintf(stderr, "[SOCIAL-UI] fight chat sent: %s\n", FC.draft.c_str());
         FC.draft.clear();
         FC.cursor = 0;
@@ -2354,27 +2410,29 @@ bool fight_chat_draw_impl(ImDrawList *dl, ImVec2 display)
     bool spectator = fight_spectator(r);
     fight_chat_test(r);
     if (!spectator || room_chat_state() != 1) FC.typing = false;
-    if (spectator && !FC.typing && room_chat_state() == 1 && ImGui::IsKeyPressed(ImGuiKey_Enter, false)) {
+    if (!FC.typing && FC.pad) FC.pad = false;
+    if (spectator && !FC.typing && room_chat_state() == 1 && (ImGui::IsKeyPressed(ImGuiKey_Enter, false) || fight_pad_opens())) {
         FC.typing = true;
+        FC.pad = !ImGui::IsKeyPressed(ImGuiKey_Enter, false);
         FC.opened = GetTickCount64();
         FC.draft.clear();
         FC.cursor = 0;
-        fprintf(stderr, "[SOCIAL-UI] fight chat: bar opened (spectator)\n");
+        if (FC.pad) {       // the pad has no letters: the on-screen keyboard (B closes it and the bar)
+            open_keyboard(KB_FIGHT);
+            C.caps = false;
+        }
+        fprintf(stderr, "[SOCIAL-UI] fight chat: bar opened (spectator, %s)\n", FC.pad ? "pad: on-screen keyboard" : "keyboard");
     }
-    if (FC.typing && GetTickCount64() - FC.opened > 150) {
+    if (FC.pad && FC.typing) {      // the on-screen keyboard has the input; it sends or closes
+        if (!C.kb || C.kb_kind != KB_FIGHT) { FC.typing = FC.pad = false; }
+    } else if (FC.typing && GetTickCount64() - FC.opened > 150) {
         std::string typed = typed_chars();
         if (!typed.empty()) insert_text(FC.draft, FC.cursor, typed, 200);
         if (ImGui::IsKeyPressed(ImGuiKey_Backspace, true)) erase_back(FC.draft, FC.cursor);
         if (ImGui::IsKeyPressed(ImGuiKey_Escape, false) || ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false)) {
             FC.typing = false;
         } else if (ImGui::IsKeyPressed(ImGuiKey_Enter, false) || ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, false)) {
-            std::string t = FC.draft;
-            while (!t.empty() && t.back() == ' ') t.pop_back();
-            if (!t.empty() && t.size() <= 200 && netplay_room_chat_send(t.c_str()))
-                fprintf(stderr, "[SOCIAL-UI] fight chat sent: %s\n", t.c_str());
-            FC.draft.clear();
-            FC.cursor = 0;
-            FC.typing = false;
+            fight_send();
         }
     }
     social_set_typing(FC.typing);
@@ -2408,7 +2466,10 @@ bool fight_chat_draw_impl(ImDrawList *dl, ImVec2 display)
         text(dl, f, g_body, 12, 27 + nw, y + 2.5f, with_alpha(l.system ? ORANGE : CREAM, a), l.text, LEFT, 0, 250);
         y -= 4;
     }
-    if (FC.typing) {    // the bar, as the design has it
+    if (FC.typing && FC.pad && C.kb && C.kb_kind == KB_FIGHT) {
+        draw_keyboard(dl, f, display);
+        if (!C.kb && FC.typing) { FC.typing = FC.pad = false; }     // B closed it without sending
+    } else if (FC.typing) {    // the bar, as the design has it
         float bx = 20, by = 430, bw = 280, bh = 27;
         rect(dl, f, bx, by, bw, bh, IM_COL32(0, 0, 0, 166), 6);
         dl->AddRect(f.p(bx, by), f.p(bx + bw, by + bh), with_alpha(RED, 0.85f), 6 * f.s(), 0, 1.0f * f.s());
@@ -2426,12 +2487,15 @@ bool fight_chat_draw_impl(ImDrawList *dl, ImVec2 display)
         text(dl, f, g_body, 8.5f, bx + bw + 10, by + 9, IM_COL32(242, 230, 200, 140),
              "While you type, the keyboard does not control the game", LEFT, 0);
     } else if (spectator && room_chat_state() == 1) {
+        // ENTER, or the pad's BACK (R3 when BACK is push-to-talk: the hint says so)
+        std::string keys = std::string("ENTER / ") + fight_pad_name();
         float x = 20, yy = 452;
-        float pw = text_width(f, g_body, 8, "ENTER") + 6;
-        rect(dl, f, x, yy, pw + text_width(f, g_title, 8, "ROOM CHAT") + 12, 13, IM_COL32(0, 0, 0, 110), 4);
+        float pw = text_width(f, g_body, 8, keys.c_str()) + 6;
+        const char *what = back_is_ptt() ? "ROOM CHAT  (BACK IS PUSH-TO-TALK)" : "ROOM CHAT";
+        rect(dl, f, x, yy, pw + text_width(f, g_title, 8, what) + 12, 13, IM_COL32(0, 0, 0, 110), 4);
         rect(dl, f, x + 3, yy + 2, pw, 9, IM_COL32(70, 70, 70, 220), 2);
-        text(dl, f, g_body, 8, x + 3 + pw / 2, yy + 2, WHITE, "ENTER", CENTER, 0);
-        text(dl, f, g_title, 8, x + 7 + pw, yy + 2.5f, IM_COL32(242, 230, 200, 200), "ROOM CHAT", LEFT, 0);
+        text(dl, f, g_body, 8, x + 3 + pw / 2, yy + 2, WHITE, keys.c_str(), CENTER, 0);
+        text(dl, f, g_title, 8, x + 7 + pw, yy + 2.5f, IM_COL32(242, 230, 200, 200), what, LEFT, 0);
     }
     return FC.typing;
 }
