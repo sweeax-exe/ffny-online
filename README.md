@@ -25,6 +25,8 @@ the game on your machine. PS2 and GameCube copies cannot be used.
 [Report a problem](https://github.com/vyanhursky/DefJamFFNY-recomp/issues/new/choose) ·
 [Join the Discord](https://discord.gg/xNvBs23ZBw)
 
+**v1.0.0 release candidate:** the integrated app, graphics, cheats and compatibility changes are on [`release/v1.0.0`](https://github.com/vyanhursky/DefJamFFNY-recomp/tree/release/v1.0.0), awaiting three-platform regression and install/play-test acceptance. See the [candidate test instructions](docs/regression-v1.0.0.md).
+
 **[v0.13.0 — Language, audio and controller input](https://github.com/vyanhursky/DefJamFFNY-recomp/releases/tag/v0.13.0)** adds language mods, the game's French interface, English Story subtitles, audio heap fixes and ordered controller transitions. It is the latest stable release. See the [release notes](docs/releases/v0.13.0.md) for cross-platform regression qualifications and the memory-growth investigation. [v0.12.3](https://github.com/vyanhursky/DefJamFFNY-recomp/releases/tag/v0.12.3) improved fight pacing and C++20 setup compatibility; earlier releases added Mod Support Beta, display options and platform fixes.
 
 ## Gameplay
@@ -49,7 +51,7 @@ performance measurement. [Download the longer 60-fps MP4](docs/media/hd-16x9-gam
 **Improved Game Launcher (v0.10.6)** brings a focused Home screen, with detailed options in
 [Advanced settings](docs/launcher-and-overlay.md). The brickwork and torn-paper
 style uses the game's charcoal, ivory, red and gold palette.
-[Get the latest setup](https://github.com/vyanhursky/DefJamFFNY-recomp/releases/tag/v0.12.3).
+[Get the latest setup](https://github.com/vyanhursky/DefJamFFNY-recomp/releases/latest).
 
 ## Features
 
