@@ -6,19 +6,30 @@
 // keyboard and mouse from the window; while it is open the game is polled at rest. The launcher
 // (pc_launcher.cpp) is the same screen in a window of its own before the game starts.
 //
+// Built with DEFJAM_APP for the app (src/app), which has no running game: the overlay and the
+// Debug page's controls for this run (the recorder, Story scenes, EA's developer menu) are left out.
+//
 // Threads: the window's thread delivers input events, the thread that presents draws. One lock keeps
 // them out of ImGui at the same time. Nothing here touches ImGui while the overlay is closed except
 // to look for its hotkeys.
 
 #define _CRT_SECURE_NO_WARNINGS
+// PCUI_WIN32: the game's window on Windows, Win32 with Direct3D 11. Everything else (the game off
+// Windows, and the app on every platform) is an SDL window; pc_ui_internal.h says the same.
+#if defined(_WIN32) && !defined(DEFJAM_APP)
+#define PCUI_WIN32 1
+#endif
 #if defined(_WIN32)
 #include <windows.h>
 #include <shellapi.h>
-#include <d3d11.h>
 #else
 #include <spawn.h>
-#include <sys/stat.h>
 #include <unistd.h>
+#endif
+#if defined(PCUI_WIN32)
+#include <d3d11.h>
+#else
+#include <sys/stat.h>
 #include <chrono>
 #include <mutex>
 #include <SDL3/SDL.h>
@@ -37,18 +48,20 @@
 #include "pc_launcher_home.h"
 
 #include "imgui.h"
-#if defined(_WIN32)
+#if defined(PCUI_WIN32)
 #include "imgui_impl_win32.h"
 #include "imgui_impl_dx11.h"
-#else
+#elif !defined(DEFJAM_APP)
 #include "imgui_impl_vulkan.h"
 #endif
 
 extern "C" {
 #include "recomp_settings.h"
+#if !defined(DEFJAM_APP)
 #include "recorder.h"
 #include "scene_launcher.h"
 #include "dev_module.h"
+#endif
 #include "input_host.h"
 #include "input_map.h"
 }
@@ -341,7 +354,7 @@ void capture_commit_key(int vk)
 
 bool ui_capturing() { return g_capture.kind != Capture::NONE; }
 
-#if defined(_WIN32)
+#if defined(PCUI_WIN32)
 bool ui_capture_message(HWND, UINT msg, WPARAM wp, LPARAM lp)
 {
     if (g_capture.kind != Capture::KEY) return false;
@@ -462,10 +475,17 @@ static float g_extra_scale = 1.0f;
 static float display_scale(UiWindow window)
 {
     float dpi = g_extra_scale;
-#if defined(_WIN32)
+#if defined(PCUI_WIN32)
     if (window) {
         UINT d = GetDpiForWindow(window);
         if (d) dpi *= d / 96.0f;
+    }
+#elif defined(_WIN32)
+    // The app's SDL window on Windows: SDL measures it in pixels and reports the display's scaling
+    // apart (docs/README-highdpi.md in SDL), so the screen is enlarged by it here.
+    if (window) {
+        float s = SDL_GetWindowDisplayScale((SDL_Window *)window) / SDL_GetWindowPixelDensity((SDL_Window *)window);
+        if (s > 0.0f) dpi *= s;
     }
 #else
     // The window's points are not its pixels on a Retina display, and the screen is drawn in points
@@ -1358,6 +1378,7 @@ static void page_debug(UiMode mode)
     settings_group("debug", { "mark_key", "mark_pad", "record_fps", "record_seconds", "record_audio", "record_game_state",
                               "auto_bundle_hitch_ms", "hang_seconds", "keep_sessions", "record_guest_ram" });
     ImGui::Unindent();
+#if !defined(DEFJAM_APP)
     if (mode == UI_OVERLAY) {
         char status[1024];
         recorder_status(status, sizeof status);
@@ -1417,6 +1438,7 @@ static void page_debug(UiMode mode)
             ImGui::TextDisabled(active ? "The developer module is running." : "The developer module is not running.");
         }
     }
+#endif
 }
 
 static int g_page = 0;
@@ -1703,6 +1725,7 @@ UiResult ui_draw(UiMode mode, float x, float y, float width, float height)
     return result;
 }
 
+#if !defined(DEFJAM_APP)
 // ---- the overlay ----------------------------------------------------------------------------------------------------
 
 #if !defined(_WIN32)
@@ -1929,9 +1952,10 @@ extern "C" void pc_ui_overlay(void *device, void *context, void *window_rtv, uns
     ui_unlock();
 }
 #endif
+#endif  // !DEFJAM_APP
 
-#if !defined(_WIN32)
-// ---- off Windows: SDL events, and the overlay through the Vulkan present --------------------------------------------
+#if !defined(PCUI_WIN32)
+// ---- an SDL window (off Windows, and the app): SDL events, and the overlay through the Vulkan present --------------------------------------------
 
 static ImGuiKey imgui_key(SDL_Scancode sc)
 {
@@ -2030,6 +2054,7 @@ void ui_sdl_frame(float width, float height, float framebuffer_scale)
     g_last_frame_ns = now;
 }
 
+#if !defined(DEFJAM_APP)
 // ---- the overlay, drawn by the toolkit's Vulkan present --------------------------------------------------------------
 
 #include "d3d8_vk.h"
@@ -2185,4 +2210,5 @@ extern "C" void pc_ui_register_overlay(void)
     D3D8VkOverlay overlay = { overlay_active, overlay_draw, nullptr };
     d3d8_vk_set_overlay(&overlay);
 }
+#endif  // !DEFJAM_APP
 #endif

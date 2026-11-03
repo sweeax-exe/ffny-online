@@ -17,11 +17,18 @@ int pc_settings_init(void);
  * Windows only: there the program is started through main, which has it. */
 void pc_settings_set_args(int argc, char **argv);
 
+/* The settings file, shared with the app (defined in pc_settings_catalog.c). */
+
 /* Effective value of a [display] setting. */
 int pc_display(const char *key, int fallback);
 
 /* Store a [display] value and write the file. Safe from any thread. */
 void pc_display_set(const char *key, int value);
+
+/* The settings file's path ("" when settings are not kept: RECOMP_SETTINGS=none), and writing
+ * the current values to it. The launcher and overlay save as the player changes things. */
+const char *pc_settings_path(void);
+void pc_settings_save(void);
 
 /* Push the display settings that the renderer owns to it. Call before the
  * Direct3D device is created, and it is called again on every change. */
@@ -32,11 +39,6 @@ void pc_settings_on_fullscreen(void (*notify)(int fullscreen));
 
 /* The window asks to be told when [display] window_width or window_height changed. */
 void pc_settings_on_window_size(void (*notify)(int width, int height));
-
-/* The settings file's path ("" when settings are not kept: RECOMP_SETTINGS=none), and writing
- * the current values to it. The launcher and overlay save as the player changes things. */
-const char *pc_settings_path(void);
-void pc_settings_save(void);
 
 #ifdef __cplusplus
 }

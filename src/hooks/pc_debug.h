@@ -10,7 +10,7 @@
 extern "C" {
 #endif
 
-/* The [debug] section's table, appended to the settings like the input tables. */
+/* The [debug] section's table, part of the settings catalogue (pc_settings_catalog.c). */
 size_t pc_debug_settings(RecompSetting *out, size_t max);
 
 /* Start recording when [debug] record is on, RECOMP_RECORD=1 or `force` (the

@@ -30,89 +30,17 @@
 #include "d3d8_vk.h"
 #endif
 #include "pc_settings.h"
+#include "pc_settings_catalog.h"
 #include "pc_input.h"
 #include "pc_ui.h"
 #include "pc_debug.h"
-#include "pc_language.h"
 #include "patches/widescreen.h"
 #include "patches/picture.h"
-
-/* Picture shape: the console's 4:3, stretched, or widescreen (docs/widescreen); the widescreen
- * choices are indices 2.. and are read once at start-up (src/patches/widescreen.c). */
-static const char *const k_aspect[] = { "4:3", "stretch", "widescreen (auto)", "16:9", "16:10",
-                                        "21:9 (experimental)", "32:9 (experimental)", NULL };
-static const char *const k_filter[] = { "smooth", "sharp", NULL };
-static const char *const k_ws_hud[] = { "auto", "edges", "centered", NULL };
-static const char *const k_ws_cutscenes[] = { "authored", "fill", NULL };
-static const char *const k_ws_fill[] = { "blur", "black", NULL };
-
-/* A four-fighter match holds about 2 GiB of replacements. At 512 MiB the cache evicted and
- * re-decoded dozens of textures every two seconds in a fight on the Steam Deck. */
-#define TEXTURE_CACHE_MB 2048
-static RecompSetting g_display_settings[] = {
-    { "textures", "enabled", RECOMP_SETTING_BOOL, 0, 0, 0, NULL, NULL, RECOMP_SETTING_RESTART,
-      "Use texture packs from the data folder's mods directory." },
-    { "textures", "packs", RECOMP_SETTING_STRING, 0, 0, 0, NULL, "RECOMP_TEXTURE_PACKS", RECOMP_SETTING_RESTART,
-      "Pack folder names separated by semicolons. Later packs take precedence.", "faithful-hd" },
-    { "textures", "cache_mb", RECOMP_SETTING_INT, TEXTURE_CACHE_MB, 32, 4096, NULL, "RECOMP_TEXTURE_CACHE_MB", RECOMP_SETTING_RESTART,
-      "Memory budget for replacement textures in MiB, including their retained upload data." },
-    { "textures", "dump", RECOMP_SETTING_BOOL, 0, 0, 0, NULL, NULL, RECOMP_SETTING_RESTART,
-      "Capture source textures for making a pack, in hd-work/runtime under the data folder." },
-    { "textures", "dump_limit", RECOMP_SETTING_INT, 2000, 0, 65536, NULL, "RECOMP_TEXTURE_DUMP_LIMIT", RECOMP_SETTING_RESTART,
-      "Maximum new source images captured in one run." },
-    { "display", "fullscreen", RECOMP_SETTING_BOOL, 0, 0, 0, NULL, NULL, 0,
-      "Borderless full screen. Alt+Enter or F11 switches while playing." },
-    { "display", "window_width", RECOMP_SETTING_INT, 1920, 320, 16384, NULL, NULL, 0,
-      "Window size when not full screen. Resizing the window updates these." },
-    { "display", "window_height", RECOMP_SETTING_INT, 1080, 240, 16384, NULL, NULL, 0, NULL },
-    { "display", "aspect", RECOMP_SETTING_ENUM, 2, 0, 0, k_aspect, "RECOMP_ASPECT", 0,
-      "4:3 keeps the console's picture shape with black bars; stretch fills the window; the widescreen shapes "
-      "(beta) widen the 3D view and keep menus, HUD and movies in shape, and start with the game." },
-    { "display", "widescreen_hud", RECOMP_SETTING_ENUM, 0, 0, 0, k_ws_hud, NULL, RECOMP_SETTING_RESTART,
-      "Where the fight HUD goes in widescreen: the screen edges, or a centred 16:9 box (auto: edges up to 16:9)." },
-    { "display", "widescreen_cutscenes", RECOMP_SETTING_ENUM, 0, 0, 0, k_ws_cutscenes, NULL, RECOMP_SETTING_RESTART,
-      "Story cutscenes in widescreen: authored keeps the game's own 16:9 framing, fill always fills the screen." },
-    { "display", "widescreen_side_fill", RECOMP_SETTING_ENUM, 0, 0, 0, k_ws_fill, NULL, RECOMP_SETTING_RESTART,
-      "Beside 4:3 pictures (movies, menu backgrounds) in widescreen: a soft blurred extension, or black." },
-    { "display", "widescreen_fov_cap", RECOMP_SETTING_INT, 150, 90, 170, NULL, NULL, RECOMP_SETTING_RESTART,
-      "Widest horizontal field of view widescreen may use, in degrees (only very wide screens reach it)." },
-    { "display", "render_scale", RECOMP_SETTING_INT, 2, 1, 4, NULL, "RECOMP_RENDER_SCALE",
-      RECOMP_SETTING_RESTART,
-      "Internal render height: 1x = 480p, 2x = 960p, 3x = 1440p, 4x = 1920p. "
-      "1080p output: 2x balances speed and clarity; 3x is sharper. 1440p output: 3x. "
-      "Width follows Picture shape; window size is separate. Higher scales cost GPU time. "
-      "Applies on Play/next launch." },
-    { "display", "filter", RECOMP_SETTING_ENUM, 0, 0, 0, k_filter, NULL, 0,
-      "How the picture is scaled to the window." },
-    { "display", "vsync", RECOMP_SETTING_BOOL, 1, 0, 0, NULL, "RECOMP_PRESENT_VSYNC", 0,
-      "Pace frames on the display for even motion. Used when the refresh rate is a multiple of 60 (60, 120, 180, 240 Hz); other displays use the game's own 60 fps timer." },
-    { "display", "gamma", RECOMP_SETTING_BOOL, 1, 0, 0, NULL, "RECOMP_GAMMA",
-      RECOMP_SETTING_RESTART,
-      "Apply the game's own brightness curve, as the console does." },
-    { "display", "brightness", RECOMP_SETTING_INT, 100, 50, 200, NULL, "RECOMP_BRIGHTNESS", 0,
-      "Brightness of the picture's mid-tones; black and white stay as they are. 100 is the console's picture, "
-      "higher is brighter." },
-    { "display", "vignette", RECOMP_SETTING_BOOL, 1, 0, 0, NULL, "RECOMP_VIGNETTE", 0,
-      "The darkened screen edges that venues and scenes draw. Off removes them." },
-    { "display", "vignette_strength", RECOMP_SETTING_INT, 100, 0, 100, NULL, "RECOMP_VIGNETTE_STRENGTH", 0,
-      "How dark the vignette is, in percent of the game's own (100)." },
-};
-#define DISPLAY_SETTING_COUNT (sizeof(g_display_settings) / sizeof(g_display_settings[0]))
-
-/* The display table followed by the input tables (pc_input.c): one array, one
- * registration, one file. */
-static RecompSetting g_settings[DISPLAY_SETTING_COUNT + 64 + 16 + 16 + 4];
-static size_t g_setting_count;
 
 static char g_path[MAX_PATH * 4];   /* empty: do not load or save */
 static char g_log_name[MAX_PATH * 2];   /* the log this program opened for itself, if it did */
 static void (*g_fullscreen_notify)(int fullscreen);
 static void (*g_window_size_notify)(int width, int height);
-
-static void settings_log(const char *message)
-{
-    fprintf(stderr, "[SETTINGS] %s\n", message);
-}
 
 #if defined(_WIN32)
 
@@ -356,11 +284,6 @@ static void supply_runtime_defaults(void)
         _putenv_s("RECOMP_HEAP_RECLAIM", "1");
 }
 
-int pc_display(const char *key, int fallback)
-{
-    return recomp_settings_get("display", key, fallback);
-}
-
 void pc_settings_apply_display(void)
 {
     if (ws_aspect() > 0.0f)       /* widescreen: the canvas's shape, with bars if the window differs */
@@ -393,22 +316,6 @@ void pc_settings_on_fullscreen(void (*notify)(int fullscreen))
 void pc_settings_on_window_size(void (*notify)(int width, int height))
 {
     g_window_size_notify = notify;
-}
-
-const char *pc_settings_path(void) { return g_path; }
-
-void pc_settings_save(void)
-{
-    if (g_path[0] && recomp_settings_save(g_path))
-        fprintf(stderr, "[SETTINGS] could not write %s\n", g_path);
-}
-
-void pc_display_set(const char *key, int value)
-{
-    if (recomp_settings_set("display", key, value) > 0 && g_path[0]) {
-        if (recomp_settings_save(g_path))
-            fprintf(stderr, "[SETTINGS] could not write %s\n", g_path);
-    }
 }
 
 /* The launcher shows on every launch unless the player turned it off (docs/launcher in
@@ -488,7 +395,7 @@ int pc_settings_init(void)
     char root[MAX_PATH * 2];
     const char *env = getenv("RECOMP_SETTINGS");
     int have_game = find_game_root();
-    int have_root, read;
+    int have_root;
 
     if (have_game)
         open_log_if_needed();
@@ -513,26 +420,7 @@ int pc_settings_init(void)
         strcat(g_path, HOST_SEP "settings.ini");
     }
 
-    memcpy(g_settings, g_display_settings, sizeof(g_display_settings));
-    g_setting_count = DISPLAY_SETTING_COUNT +
-        pc_input_settings(g_settings + DISPLAY_SETTING_COUNT, 64);
-    g_setting_count += pc_ui_settings(g_settings + g_setting_count, 16);
-    g_setting_count += pc_debug_settings(g_settings + g_setting_count, 16);
-    g_setting_count += pc_language_settings(g_settings + g_setting_count, 4);
-    recomp_settings_register(g_settings, g_setting_count);
-    recomp_settings_set_log(settings_log);
-    read = g_path[0] ? recomp_settings_load(g_path) : 0;
-    if (!g_path[0])
-        fprintf(stderr, "[SETTINGS] defaults only (RECOMP_SETTINGS=none)\n");
-    else if (read < 0)
-        fprintf(stderr, "[SETTINGS] could not read %s; using defaults\n", g_path);
-    else {
-        fprintf(stderr, "[SETTINGS] %s (%d value(s) read)\n", g_path, read);
-        /* Write it out on first run, and after an upgrade adds a setting, so
-         * there is always a complete, commented file to edit. */
-        if (read < (int)g_setting_count && recomp_settings_save(g_path))
-            fprintf(stderr, "[SETTINGS] could not write %s\n", g_path);
-    }
+    pc_settings_open(g_path);
     if (have_root)
         fprintf(stderr, "[SETTINGS] data folder %s\n", root);
     else
@@ -559,9 +447,9 @@ int pc_settings_init(void)
             recomp_settings_get_text("textures","packs",packs,sizeof packs,"faithful-hd");
             _putenv_s("RECOMP_TEXTURE_PACKS",recomp_settings_get("textures","enabled",0) ? packs : "");
         }
-        if (!getenv("RECOMP_TEXTURE_CACHE_MB")) {
-            snprintf(value,sizeof value,"%d",recomp_settings_get("textures","cache_mb",TEXTURE_CACHE_MB));
-            _putenv_s("RECOMP_TEXTURE_CACHE_MB",value);
+        if (!getenv("RECOMP_PC_TEXTURE_CACHE_MB")) {
+            snprintf(value,sizeof value,"%d",recomp_settings_get("textures","cache_mb",PC_TEXTURE_CACHE_MB));
+            _putenv_s("RECOMP_PC_TEXTURE_CACHE_MB",value);
         }
         if (!getenv("RECOMP_TEXTURE_DUMP_LIMIT")) {
             snprintf(value,sizeof value,"%d",recomp_settings_get("textures","dump_limit",2000));
@@ -581,10 +469,6 @@ int pc_settings_init(void)
 #else
     pc_debug_start(g_log_name[0] ? g_log_name : NULL, has_arg("--record"));
 #endif
-    /* [language] pack: rebuild the pack's files from the dump if needed and serve them in place of
-     * the originals. After the launcher, which chooses it, and before the XBE is loaded. */
-    pc_language_start(have_root ? root : NULL, "game");
-
     /* [debug] unlock_all: src/patches/dev_unlock.c reads the variable once the game runs. */
     if (!getenv("RECOMP_UNLOCK_ALL") && recomp_settings_get("debug", "unlock_all", 0))
         _putenv_s("RECOMP_UNLOCK_ALL", "1");
