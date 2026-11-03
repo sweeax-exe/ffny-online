@@ -204,6 +204,7 @@ void netplay_crowd_update(void) { sub_00081170(); }
 #define CAPS_CREATED  8u        /* created fighters (client: can play them; relay: its switch is on) */
 #define CAPS_SPECTATE 16u       /* spectator mode (docs/research/spectator-mode.md) */
 #define CAPS_STATS_ERR 32u      /* client (build 46): shows ERROR 12, a created fighter's stats refused */
+#define CAPS_SPEC_REMATCH 64u   /* client (build 47): a spectator takes the players' P_REMATCH (rematches watched) */
 #define CP_WAIT_MS    10000     /* START: how long to wait for a created fighter's missing record */
 #define CAPS_TRIES    5         /* CAPS every RETRY_MS; no answer after these: an older relay */
 #define WINNER_DRAW   0xFFu
@@ -441,8 +442,11 @@ static struct {
     ULONGLONG playing_since;
     ULONGLONG spec_results;
     int spec_start_down;
-    /* build 47: leaving the fight for the room (spec_quit: START, or the feed stopped) */
-    int spec_quit;
+    /* build 47: on the watched match's Rematch menu since spec_menu (it stops there and waits for
+     * the players' choice), going back to the room from it (spec_leave), the players' rematch to
+     * start (spec_rematch); leaving the fight for the room (spec_quit: START, or the feed stopped) */
+    ULONGLONG spec_menu;
+    int spec_leave, spec_rematch, spec_quit;
 } N;
 
 /* This PC is in its room as a spectator (the relay's ROOM says `you` 0xFD). */
@@ -516,6 +520,10 @@ int netplay_rematch_request(void)
     int i, all = 1, gone = -1;
     uint32_t after;
     if (!N.lobby) return 0;
+    if (N.watching && N.spec_rematch) {     /* spectator mode: the players' rematch, which this PC watches */
+        N.spec_rematch = 0;
+        return 0;
+    }
     /* King of the Hill: one fight per START, the winner stays on and the hill calls the next pair.
      * Holding Rematch with a notice kept kings on the results pressing it again and again while the
      * next challenger waited, loaded (13, 14 and 61 s in build 33's reports): Rematch now does what
@@ -610,12 +618,21 @@ static void netplay_rematch_tick(void)
 }
 
 /* Spectator mode: the summary of a watched match is gone through by itself (remote_slot_state taps
- * A on player 1's port until the game is back in the menus). */
+ * A on player 1's port). Since build 47 it stops on the Rematch menu (it comes after the reward
+ * screen's save, with No chosen) and waits for the players: their rematch is watched too, and when
+ * they go back to the room the taps choose No and lead there (spec_tick). */
 void netplay_spectator_funccall(const char *text)
 {
-    if (!N.watching || N.spec_results || !N.match_seen || strncmp(text, "Game.GetMatchSummary(", 21)) return;
-    N.spec_results = GetTickCount64();
-    fprintf(stderr, "[NETPLAY] watching: the match's summary; going through it to the room\n");
+    if (!N.watching || !N.match_seen) return;
+    if (!N.spec_results) {
+        if (strncmp(text, "Game.GetMatchSummary(", 21)) return;
+        N.spec_results = GetTickCount64();
+        fprintf(stderr, "[NETPLAY] watching: the match's summary; going through it to the players' choice\n");
+    } else if (!N.spec_menu && !N.spec_leave && !strncmp(text, "MemCard.Save( battle/rewardun", 29)) {
+        N.spec_menu = GetTickCount64();
+        fprintf(stderr, "[NETPLAY] watching: on the Rematch menu; waiting for the players' choice\n");
+        toast(120000, "Waiting for the players: a rematch, or back to the room. START goes back to the room.");
+    }
 }
 
 /* This PC left the results for the room: whoever waits on the rematch screen hears it. */
@@ -926,7 +943,7 @@ static DWORD remote_slot_state(int slot, XBOX_INPUT_STATE *state)
         if (slot < 0 || slot >= N.players) return ERROR_DEVICE_NOT_CONNECTED;
         memset(state, 0, sizeof(*state));
         state->dwPacketNumber = 1;
-        if (since && slot == 0) {
+        if (since && slot == 0 && (!N.spec_menu || N.spec_leave)) {     /* not on the Rematch menu while it waits */
             ULONGLONG t = GetTickCount64() - since;
             int down = t % 500u < 100u;
             if (down) state->Gamepad.bAnalogButtons[0] = 255;
@@ -1459,7 +1476,15 @@ static void on_data(int from, const uint8_t *p, int len)
         }
         break;
     case P_REMATCH:
-        if (N.lobby && len >= 9 && get32(p + 1) == N.start_seed && N.start_seed && !N.watching) {
+        if (N.lobby && len >= 9 && get32(p + 1) == N.start_seed && N.start_seed && N.watching) {
+            /* spectator mode (relays of build 47 send the watchers the players' choices): spec_tick */
+            uint32_t after = get32(p + 5);
+            EnterCriticalSection(&g_cs);
+            N.rematch_want[from] = after;
+            LeaveCriticalSection(&g_cs);
+            fprintf(stderr, "[NETPLAY] watching: player %d %s\n", from + 1,
+                    after == REMATCH_NO ? "went back to the room" : "chose Rematch");
+        } else if (N.lobby && len >= 9 && get32(p + 1) == N.start_seed && N.start_seed && !SPECTATOR_HERE()) {
             uint32_t after = get32(p + 5);
             int mine, all = 1, i;
             EnterCriticalSection(&g_cs);
@@ -2585,7 +2610,7 @@ static DWORD WINAPI net_thread(LPVOID unused)
                 uint8_t cb[6 + 8 + 4];
                 int n = header(cb, T_CAPS);
                 memcpy(cb + n, N.token, 8); n += 8;
-                put32(cb + n, CAPS_KOTH | CAPS_CREATED | CAPS_SPECTATE | CAPS_STATS_ERR); n += 4;
+                put32(cb + n, CAPS_KOTH | CAPS_CREATED | CAPS_SPECTATE | CAPS_STATS_ERR | CAPS_SPEC_REMATCH); n += 4;
                 send_raw(cb, n);
             } else {
                 N.relay_caps = 0;
@@ -3590,7 +3615,8 @@ void netplay_on_main_menu(void)
         return;
     }
     N.spec_results = 0;         /* spectator mode: the results are behind it */
-    N.spec_quit = 0;
+    N.spec_menu = 0;
+    N.spec_leave = N.spec_rematch = N.spec_quit = 0;
     if (N.lobby && N.match_live && N.match_seen && N.watching) {
         end_hub_match("Back in the room; watching the next match when it starts.");
         N.koth_results = N.koth_quit = 0;
@@ -5697,7 +5723,13 @@ static void rollback_to(uint32_t f)
  * GetScreenInfo(battle/cmtype) brings this PC back to the room (netplay_on_main_menu). Before, the
  * notice said "START, then Quit": the pause menu never opened, as a spectator's pad sits on a port no
  * fighter uses (player report, build 46).
- */
+ *
+ * On the Rematch menu (spec_menu) it waits for the players: every one of them chose Rematch (their
+ * P_REMATCH, which relays of build 47 pass to the watchers; or their rematch's entries already
+ * arrive): the same Game.Rematch() call as the menu's, and the rematch is watched like the match; one
+ * went back to the room, or the room is back in its lobby, or START: No, and the summary's taps lead
+ * back to the room. */
+#define SPEC_MENU_LIMIT_MS 180000u      /* the players never chose (the relay ends the match after 60 s) */
 #define BATTLE_SCREEN_VTABLE 0x0029D5E4u
 extern void sub_000CD0D0(void);         /* the pause menu's button handler: ecx = menu; mask, sound, resume, close */
 static int spec_quit_fight(void)
@@ -5743,6 +5775,43 @@ static void spec_tick(void)
             N.spec_quit = 0;
             tries = 0;
         }
+        return;
+    }
+    if (!N.spec_menu || N.spec_leave) return;
+    {
+        uint32_t after = N.match_count, next = mix32(N.session ^ ((after + 1u) * 0x9E3779B9u)), sm;
+        int i, all = N.players > 0, gone = -1, started = 0;
+        const char *why = NULL;
+        EnterCriticalSection(&g_cs);
+        for (i = 0; i < N.players && i < MAXP; i++) {
+            if (N.rematch_want[i] == REMATCH_NO) gone = i;
+            if (N.rematch_want[i] != after) all = 0;
+            if (g_steps_match[i] == next) started = 1;
+        }
+        LeaveCriticalSection(&g_cs);
+        if (gone >= 0) why = "a player went back to the room";
+        else if (!SPECTATOR_HERE()) why = "the room is gone";
+        else if (N.roomv.phase != 2) why = "the room is back in its lobby";
+        else if (spec_stop_pressed()) why = "START";
+        else if (GetTickCount64() - N.spec_menu > SPEC_MENU_LIMIT_MS) why = "the players never chose";
+        if (why) {
+            fprintf(stderr, "[NETPLAY] watching: no rematch (%s); back to the room\n", why);
+            N.spec_leave = 1;
+            N.toast_until = 0;
+            return;
+        }
+        if (!all && !started) return;
+        sm = MEM32(0x002FB148u + 0x17u * 4u);
+        if (sm >= 0x10000u && MEM32(sm + 0x24u) != 0) return;     /* a screen loads: later */
+        fprintf(stderr, "[NETPLAY] watching: the players chose a rematch (%s); watching it\n",
+                all ? "every player chose it" : "its entries arrive");
+        N.spec_menu = N.spec_results = 0;
+        N.spec_rematch = 1;
+        N.toast_until = 0;
+        N.spec_start_down = 1;
+        InterlockedExchange(&N.lockstep, 1);     /* netplay_on_match_start counts the rematch as the players do */
+        defjam_menu_call("Game.Rematch()");
+        N.spec_rematch = 0;
     }
 }
 

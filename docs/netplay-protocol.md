@@ -320,6 +320,11 @@ Same header and version; a relay without it drops `SPECTATE` silently.
   player `DATA` whose payload type is `P_STEPS` (4), `P_HASH` (5) or `P_RTT` (6) goes to them too, with
   the player's slot. A watcher's `VOTE` while the room plays re-sends its `WATCH`. A spectator who
   enters during a match watches from the next one.
+- A Rematch the players choose on their results runs on in the same relay match (no new `START`),
+  so the watchers get its entries too. Since build 47 a client that sends `CAPS` bit 6 (`64`, client
+  only, not answered) also gets, as a watcher, the players' `P_REMATCH` (8: `u32` START seed, `u32`
+  match number, `0xFFFFFFFF` back to the room): its game waits on the results and watches the rematch,
+  or goes back to the room with the players. Watchers without the bit never get `P_REMATCH`.
 - `P_RTT` (game payload 6) gains byte 13 since build 40: the input delay the sender's game agreed at
   its sync point (0 before), which a spectator plays with. Byte 14 since build 45: bit 0, the sender's
   game rolls back a match with a created fighter too. A match with a created fighter rolls back only

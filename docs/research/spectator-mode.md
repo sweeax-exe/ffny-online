@@ -140,8 +140,12 @@ derives the delay from the pings as the players do.
 - **The next match:** the spectator stays in the room; the room's next `START` brings the next
   `WATCH`. A match that `WATCH` sets up while the spectator is still on the results starts once it is
   back in the menus (automatch waits for the main menu, as for every match). A Rematch the players
-  choose on their results has no new `START`; v1 does not show it (the spectator waits in the room
-  for the next room match).
+  choose on their results has no new `START`; v1 did not show it. Since build 47 the spectator's game
+  stops on the Rematch menu (it comes after the reward screen's save) and waits: the players' choices
+  reach it (`P_REMATCH`, `CAPS` bit 6), and once every player chose Rematch (or the rematch's entries
+  arrive) it calls `Game.Rematch()` as the menu would and watches the rematch like the match; when a
+  player goes back to the room, the room is back in its lobby, START is pressed or three minutes pass,
+  it chooses No and goes back to the room.
 - **Leaving:** B in the room leaves it (`LEAVE`); during the fight START stops watching and, since
   build 47, takes the spectator straight back to the room: the game runs the pause menu's own Quit
   (`sub_000CD0D0` on its confirm page; the pause menu itself never opens for a spectator, whose pad sits
@@ -180,7 +184,8 @@ fight, so v2 needs the relay's replay feed and the fast-forward, not a new input
 
 ## 9. What v1 does not do
 
-- Join a match already running (v2, section 8); Rematches the players choose on their results.
+- Join a match already running (v2, section 8). (Rematches the players choose on their results are
+  watched since build 47.)
 - King of the Hill: its watchers keep the phase-1 names screen; switching them to this game side is
   the hill's phase 2 (the hill's own results and calls need care).
 - A match of four human players: the spectator's own pad sits on the fourth player's port outside
