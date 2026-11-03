@@ -1593,6 +1593,25 @@ void sub_000BD440(void)
     sub_000BD440_gen();
 }
 
+/* Its sibling (thiscall, ecx = the same view, one argument, ret 4): where the number ends in the
+ * view's text, or 0 when nothing parses. The text element updater sub_000A22A0 calls sub_000BD440
+ * and then this one on the same view, twice, and hands the result to sub_00021870, which treats 0
+ * as "no text". With the guard above only, an empty view got past sub_000BD440 and crashed here in
+ * the same parser (sub_001E7090 -> sub_001E6EC0 reading 0xFFFFFFF8): F9 9aafd3 (build 47), the first
+ * update of a lockstep match, right after "[TEXT] a number read from an empty text". */
+extern void sub_000BD400_gen(void);
+void sub_000BD400(void)
+{
+    if (!g_ecx || !MEM32(g_ecx)) {
+        static int told;
+        if (told++ < 4) fprintf(stderr, "[TEXT] the end of a number in an empty text (view %08X): none\n", g_ecx);
+        g_eax = 0;
+        g_esp += 8;                     /* ret 4 */
+        return;
+    }
+    sub_000BD400_gen();
+}
+
 extern void sub_00068BA0(void);
 extern void xbox_NoteAnchorEvent(const char *text);
 extern void defjam_unlock_all_on_funccall(const char *text);
