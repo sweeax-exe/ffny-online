@@ -26,6 +26,9 @@ struct RankedUi {
     // the draft: the grid's cursor and first row, the venue card, the cursor the relay has, the step seen
     int draft_sel = 0, draft_top = 0, venue_sel = 0, draft_cursor_sent = -1, draft_room_game = -1;
     char opp_name[40] = "";             // the set's opponent, for the results (build 52)
+    char before_room[7] = "";           // the room whose "before" ranks were read
+    NetRankPlayer last_opp = {};        // the opponent's entry in the set's last RANKINFO that had both
+    bool have_last_opp = false;
 } R;
 
 // The gallery's samples (gallery_step sets them per page).
@@ -524,9 +527,18 @@ void open_ranked_results(const NetRoom &r, const NetRankInfo &ri)
     snprintf(R.set_room, sizeof(R.set_room), "%s", r.code);
     R.set = ri;
     R.set_you = r.you;
-    R.opp_name[0] = 0;
-    for (int i = 0; i < ri.count; i++)
-        if (ri.p[i].slot != r.you) snprintf(R.opp_name, sizeof(R.opp_name), "%s", slot_name(r, ri.p[i].slot));
+    for (int i = 0; i < r.player_count; i++)       // the room's other fighter (ranked_tick kept it during the set)
+        if (r.players[i].slot != r.you && r.players[i].slot != NETPLAY_SLOT_SPECTATOR)
+            snprintf(R.opp_name, sizeof(R.opp_name), "%s", r.players[i].name);
+    R.have_before = false;      // the next set reads its own "before" (ranked_search, or ranked_tick)
+    bool opp_in = false;
+    for (int i = 0; i < R.set.count; i++) opp_in |= R.set.p[i].slot != r.you;
+    if (!opp_in && R.have_last_opp && R.set.count < 4) {   // it left the room first: its last entry, the set's end
+        NetRankPlayer o = R.last_opp;
+        if (R.set.winner == o.slot) o.set_wins = std::max(o.set_wins, 2);
+        R.set.p[R.set.count++] = o;
+    }
+    R.have_last_opp = false;
     R.results_up = true;
     R.results_since = R.results_fetch = GetTickCount64();
     S.page = RANKED_RESULTS;
@@ -625,9 +637,11 @@ void draw_ranked_results(ImDrawList *dl, const Frame &f, const Pad &pad)
     snprintf(line, sizeof(line), "RANKED %s, SET %d-%d", netranked_mode_title(mode), me ? me->set_wins : 0, opp ? opp->set_wins : 0);
     text(dl, f, g_title, fit_size(f, g_title, 12, line, 140), 32, 140, ORANGE, line, LEFT, 0.8f);
     text(dl, f, g_title, 8.5f, 32, 162, GREY, "OPPONENT", LEFT, 0.5f);
-    if (opp) {
-        std::string oname = R.opp_name[0] ? upper(R.opp_name) : std::string("OPPONENT");
+    if (R.opp_name[0]) {
+        std::string oname = upper(R.opp_name);
         text(dl, f, g_title, fit_size(f, g_title, 14, oname.c_str(), 140), 32, 173, CREAM, oname.c_str(), LEFT, 0.8f);
+    }
+    if (opp) {
         char olabel[48];
         netranked_player_label(opp, 5, olabel, sizeof(olabel));
         bool oplacing = opp->division == NETRANK_PLACEMENT || opp->placements > 0;
@@ -706,10 +720,10 @@ void draw_ranked_results(ImDrawList *dl, const Frame &f, const Pad &pad)
                     snprintf(lab, sizeof(lab), "%d %s", netranked_division_min(first + d) < 0 ? 0 : netranked_division_min(first + d),
                              d == 0 ? "III" : d == 1 ? "II" : "I");
                     if (first + d == 0) snprintf(lab, sizeof(lab), "III");
-                    text(dl, f, g_title, 9, sx, by + 12, first + d == cur ? CREAM : GREY, lab, LEFT, 0.5f);
+                    text(dl, f, g_title, 8, sx, by + 12, first + d == cur ? CREAM : GREY, lab, LEFT, 0.5f);
                 }
                 snprintf(line, sizeof(line), "%d %s", netranked_division_min(first + 3), k_tier_short[tier + 1]);
-                text(dl, f, g_title, 9, bx + bw, by + 12, tier_colour(tier + 1), line, RIGHT, 0.5f);
+                text(dl, f, g_title, 8, bx + bw, by + 12, tier_colour(tier + 1), line, RIGHT, 0.5f);
                 snprintf(line, sizeof(line), "%d TO %s", a.to_next, division_label(a.division + 1).c_str());
                 text(dl, f, g_title, 13, bx, by + 25, CREAM, line, LEFT, 0.8f);
                 text(dl, f, g_body, 9, bx + bw, by + 28, GREY, "Points per division: 50", RIGHT, 0);
@@ -758,8 +772,13 @@ void draw_ranked_results(ImDrawList *dl, const Frame &f, const Pad &pad)
             text(dl, f, g_title, 12, 608, ry - 1, col, v, RIGHT, 0.6f);
             ry += 24;
         };
-        snprintf(line, sizeof(line), "%d W  %d L", a.set_wins, a.set_losses);
-        row("Sets", line, GREEN);
+        snprintf(line, sizeof(line), "%d L", a.set_losses);
+        row("Sets", line, IM_COL32(255, 107, 126, 255));
+        {
+            char w2[16];
+            snprintf(w2, sizeof(w2), "%d W", a.set_wins);
+            text(dl, f, g_title, 12, 608 - text_width(f, g_title, 12, line) - 8, ry - 25, GREEN, w2, RIGHT, 0.6f);
+        }
         bool new_peak = b.valid && a.peak > b.peak;
         snprintf(line, sizeof(line), "%d", a.peak);
         row("Peak", line, CREAM);
@@ -783,7 +802,9 @@ void draw_ranked_results(ImDrawList *dl, const Frame &f, const Pad &pad)
     static unsigned long long rated_at;
     if (!rated) rated_at = 0;
     else if (!rated_at) rated_at = t;
-    bool take_a = gallery_on() || (rated && t - rated_at > 3000);
+    // (a scripted ranked test keeps pressing A through the fight's screens: its results stay up for the capture)
+    static const bool test_set = getenv("RECOMP_TEST_RANKED_MODES") != nullptr;
+    bool take_a = gallery_on() || (rated && t - rated_at > 3000 && !test_set);
     bool rewards = rewards_shown();
     if (take_a) hx += hint(dl, f, hx, 420, "a", "SEARCH AGAIN");
     if (rewards) hx += hint(dl, f, hx, 420, "y", "SEASON REWARDS");
@@ -803,6 +824,25 @@ void ranked_tick(const NetRoom &r)
     else if (mv < 0) say("The set's server could not be reached. Search again.", 6000);
     NetRankInfo ri;
     if (!ranked_room(r, &ri)) return;
+    // a set entered without this PC's search (a scripted test's queue): its ranks before it, from the stats
+    // text read at the hub
+    for (int i = 0; ri.count >= 2 && i < ri.count; i++)  // the opponent's rank, in case it leaves first
+        if (ri.p[i].slot != r.you) { R.last_opp = ri.p[i]; R.have_last_opp = true; }
+    if (ri.winner == NETRANK_SET_RUNNING) {          // the opponent's name, for the results
+        for (int i = 0; i < r.player_count; i++)
+            if (r.players[i].slot != r.you && r.players[i].slot != NETPLAY_SLOT_SPECTATOR)
+                snprintf(R.opp_name, sizeof(R.opp_name), "%s", r.players[i].name);
+    }
+    if (!R.have_before && ri.winner == NETRANK_SET_RUNNING && strcmp(R.before_room, r.code)) {
+        read_ranks(R.before);
+        if (!R.before[ri.mode].valid) {     // not asked yet: ask, read again next frame
+            static unsigned long long asked;
+            if (!stats_busy() && GetTickCount64() - asked > 3000) { asked = GetTickCount64(); account_fetch_stats_page(0); }
+        } else {
+            R.have_before = true;
+            snprintf(R.before_room, sizeof(R.before_room), "%s", r.code);
+        }
+    }
     if (ri.winner != NETRANK_SET_RUNNING && r.phase == 0 && !(R.results_up && !strcmp(R.set_room, r.code)))
         open_ranked_results(r, ri);
 }

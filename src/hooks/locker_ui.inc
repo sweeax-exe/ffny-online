@@ -484,7 +484,7 @@ void draw_season_rewards(ImDrawList *dl, const Frame &f, const Pad &pad)
 
     // the table: a row per tier, Legend first
     glass(dl, f, 206, 112, 410, 294, 10);
-    static const float cx_tier = 216, cx_name = 304, cx_frame = 382, cx_title = 400, cx_role = 532;
+    static const float cx_tier = 216, cx_name = 314, cx_frame = 392, cx_title = 410, cx_role = 538;
     text(dl, f, g_title, 7.5f, cx_tier + 22, 117, GREY, "FINISH IN", LEFT, 0);
     text(dl, f, g_title, 7.5f, cx_name, 117, GREY, "NAME IN CHAT", LEFT, 0);
     text(dl, f, g_title, 7.5f, cx_frame, 117, GREY, "FRAME", CENTER, 0);
@@ -515,7 +515,7 @@ void draw_season_rewards(ImDrawList *dl, const Frame &f, const Pad &pad)
         if (mouse_click(f, 210, y, 402, 32)) LK.rewards_sel = r;
         emblem_small(dl, f, cx_tier + 10, y + 16, 22, t, a);
         std::string tn = netranked_tier_name(t) ? upper(netranked_tier_name(t)) : std::string(k_tier_short[t]);
-        text(dl, f, g_title, fit_size(f, g_title, 11.5f, tn.c_str(), 76), cx_tier + 24, y + 3, with_alpha(col, a), tn.c_str(), LEFT, 0.5f);
+        text(dl, f, g_title, fit_size(f, g_title, 11.5f, tn.c_str(), 70), cx_tier + 24, y + 3, with_alpha(col, a), tn.c_str(), LEFT, 0.5f);
         std::string sub;
         if (mine) sub = equipped_id(L, 2) == id ? "YOUR FINISH - Equipped" : "YOUR FINISH";
         else if (unlocked) sub = "Reached";
@@ -524,8 +524,8 @@ void draw_season_rewards(ImDrawList *dl, const Frame &f, const Pad &pad)
             snprintf(line, sizeof(line), "Locked: %d and up", netranked_division_min(t * 3) < 0 ? 0 : netranked_division_min(t * 3));
             sub = line;
         }
-        text(dl, f, g_body, 7.5f, cx_tier + 24, y + 18, mine ? GOLD : with_alpha(GREY, std::max(a, 0.8f)), sub.c_str(), LEFT, 0);
-        text(dl, f, g_title, fit_size(f, g_title, 11, name.c_str(), 70), cx_name, y + 9, with_alpha(look_name_col(t, CREAM), a),
+        text(dl, f, g_body, fit_size(f, g_body, 7.5f, sub.c_str(), 70), cx_tier + 24, y + 18, mine ? GOLD : with_alpha(GREY, std::max(a, 0.8f)), sub.c_str(), LEFT, 0);
+        text(dl, f, g_title, fit_size(f, g_title, 11, name.c_str(), 64), cx_name, y + 9, with_alpha(look_name_col(t, CREAM), a),
              name.c_str(), LEFT, 0.5f);
         draw_avatar(dl, f, cx_frame, y + 16, 10, v.me, v.my_name, a);
         avatar_frame(dl, f, cx_frame, y + 16, 10, t, t == 7, a);
