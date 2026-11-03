@@ -484,6 +484,39 @@ the first), and the soak now replays each step's pad words in re-runs.
   with a created fighter (`20261103-024017-offline`, 10 min): 6600 soaks, 36 300 steps the same, 0 otherwise, two
   re-runs equal, no crash. Lockstep created vs created with bots (`20261103-025342-online`): ok, 30 checks.
 
+### Ninth round (on `remaster` 265aa48, build 47; F9 926777 from build 46)
+The report: 17 rollback matches at 172/94 ms, a rematch chain; out of sync in rematches 6BA8AA6C (step 1800) and
+690AC92C (step 4980), then "gave up at step 8748" (a 10 s frozen picture); contiguous memory 56.6 -> 61.8 MB and
+"[CONTIG] refused" before the 17th match.
+* **Desync** [V for where it starts, U for the exact input]: reproduced in the first two-copy run (170+20 ms, created vs
+  stock, venue 9, bots, `logs/dj/20261103-051343-online`, step 23280: fighter 2 in state 0x69 walking to a floor weapon
+  that lay at -23.10/30.56 on one copy and -23.25/30.18 on the other). With the weapons in the checksum
+  (`RECOMP_NETPLAY_HASH_WEAPONS=1`, af2fa0f) every run parted on the weapons while all fighter fields were equal
+  (`-053624-online` step 1543, `-060426-online` step 510), each time about 20 steps after a **spectator's weapon** appears
+  (slot spawned at the spectator's place, identical except its heap pointers) when it is tossed. **Lockstep does the
+  same** (`-060736-online`, rollback off: weapons part at step 1357 the same way), so it is not a save/load gap; the
+  re-runs and the update count per step (1 everywhere) are ruled out. A rematch keeps the weapons a match leaves, so
+  it starts apart (match BDAEA2B8 differed at step 1): the "later rematches" pattern. Long lockstep runs looked clean
+  only because the checksum never covered weapons; the fighters part only when one picks such a weapon up. Static
+  read (sub-agent, not proven): the held weapon's matrix is Rot(slot+0x58) * Trans(slot+0x4C) * hand joint
+  (`sub_000445C0`, the member's pose sampled in the crowd update); the toss `sub_000BBF30` copies it; the camera-dependent
+  visibility bit (member A+0x42, `sub_000849C0` in the draw) gates the weapon model's own update `sub_00026D30`
+  (+0x138 bit 0x800). Next: log member+0x50, the joint-0xA output and slot+0x4C/+0x58 at each `sub_000BAF90` call
+  in the held mode on both copies to name the differing input; then reset the weapon pool at a rematch's start.
+* **Contiguous memory** [V]: the growth is the audio arena: sound banks (0.25-1.3 MB, loaded outside the fight)
+  left holes the next venue's bank did not fit. 0deb11b gives such blocks pieces of their own and gives empty pieces
+  back. Six matches over venues 9,5,24,7,16,27: before 57.5 -> 59.9 MB in use, 61.8 reached (`-055920-online`, with
+  `RECOMP_ROLLBACK_ARENA_TRIM=off`); after 55.7-57.0 at the starts, 54.7 at every end, 60.1 reached (`-055450-online`);
+  rollback off 50.0-50.2, 58.0 reached (`-061003-online`).
+* **The freeze after a desync** [V]: f32d773: once out of sync, a fight whose other player is past it (Rematch or No
+  arrived) or silent for 3 s leaves for the room through the pause menu's Quit; seen in `-053624-online` match 2.
+* Also seen once (`-052352-online`, venue 11, step ~1711, with the arena change): `[ICALL] target 0x00000000` from
+  0x0013A4A8 (a venue hazard's sound via `sub_001A94B0` -> `sub_0008F990`), after which that copy's fight ended and it
+  went to the main menu. The same null call is in build 46's F9 291b96 (step 1718), so it predates this round; not
+  analysed.
+* Checks: `regress.py --quick` 5 of 5 (`logs/regress-20261103-062031.txt`); rollback rematch chain, 5 matches,
+  created vs stock, 170+20 ms, KO at 2400 (`-062043-online`): ok, 220 checksums equal, 55.0-55.3 MB in use.
+
 ### Next (after the third round)
 1. More two-copy long runs (the desyncs at steps 10 200 and 37 440 came once in two runs each; three later runs were clean),
    always with `RECOMP_NETPLAY_FINALLOG=1` so a desync can be traced to its first step.
