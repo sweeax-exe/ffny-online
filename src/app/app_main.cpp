@@ -322,6 +322,13 @@ std::vector<int> release_version(const std::string &text)
 namespace app
 {
 
+std::map<std::string, std::string> json_values(const std::string &text) { return json_strings(text); }
+
+} // namespace app
+
+namespace app
+{
+
 Install &install()
 {
     static Install value;
@@ -390,6 +397,12 @@ std::string receipt_version(const fs::path &root)
     std::stringstream text;
     text << file.rdbuf();
     return json_strings(text.str())["version"];
+}
+
+void forget_install()
+{
+    std::error_code ec;
+    fs::remove(install_record(), ec);
 }
 
 void remember_install(const fs::path &root)

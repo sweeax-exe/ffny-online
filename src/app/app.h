@@ -3,6 +3,7 @@
 #pragma once
 
 #include <filesystem>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -35,6 +36,8 @@ std::string receipt_version(const std::filesystem::path &root);
 // Remember an install folder the player chose, so the next start finds it (nothing is kept for the
 // usual place).
 void remember_install(const std::filesystem::path &root);
+// Forget it again (Uninstall).
+void forget_install();
 
 // play.lock, held while the app shows the launcher and, through the exec, while the game runs.
 // Setup takes it itself, so it is let go while an operation runs.
@@ -65,6 +68,9 @@ bool just_updated();
 
 // The setup payload's version: what this app builds ("" without a payload).
 std::string payload_version();
+
+// The top-level values of a JSON object: strings decoded, anything else as its JSON text.
+std::map<std::string, std::string> json_values(const std::string &text);
 
 // Whether release version `a` is newer than `b` ("0.13.1" against "0.13.0"; false if either is not one).
 bool newer(const std::string &a, const std::string &b);
@@ -110,6 +116,23 @@ bool ensure_payload(std::string *error);
 // The install page, while it is up; drawn before anything else. And whether it is copying files.
 bool install_screen_draw(float width, float height, UiResult *result);
 bool install_busy();
+
+// ---- Windows: Add to Steam (app_steam.cpp) ----------------------------------------------------------
+
+// Maintenance's Steam section: Add to Steam / Remove from Steam, asking before Steam is closed.
+void steam_section();
+// Ask Steam's state again the next time the section is drawn (Maintenance was opened).
+void steam_section_reset();
+// The engine is changing Steam's library (the window may not close meanwhile).
+bool steam_busy();
+// Add to Steam beside Play (Home, and the page that ends an install or update): the width it needs,
+// or 0 when there is nothing to show (no Steam, Steam's state not known yet, or already added).
+float steam_play_width();
+// Draw it, asking in a dialog before Steam is closed. Then IN STEAM, once added in this session.
+void steam_play_button(float width, float height);
+// Uninstall: take out the Steam shortcut and art this app added (closing and restarting Steam if it
+// runs), waiting for it. True when there was nothing to remove or it was removed.
+bool steam_remove_now(std::string *message);
 
 // ---- the app's own updates (app_update.cpp) ----------------------------------------------------
 

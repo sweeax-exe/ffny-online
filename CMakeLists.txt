@@ -251,7 +251,8 @@ if(DEFJAM_BUILD_APP AND DEFJAM_SDL3)
         include(windows_resource)
         defjam_windows_resource(DEFJAM_APP_RC NAME DefJamRecompiled VERSION ${PROJECT_VERSION}
                                 DESCRIPTION "Def Jam: Fight for NY - Recompiled")
-        set(DEFJAM_APP_PLATFORM_SOURCES WIN32 src/app/app.manifest "${DEFJAM_APP_RC}" src/app/app_install.cpp)
+        set(DEFJAM_APP_PLATFORM_SOURCES WIN32 src/app/app.manifest "${DEFJAM_APP_RC}" src/app/app_install.cpp
+            src/app/app_steam.cpp)
         # The released program carries the setup payload ZIP as resource 101, as DefJamSetup.exe
         # does, with its SHA-256 built in: scripts/build-setup.ps1 passes the payload it just made.
         set(DEFJAM_APP_PAYLOAD "" CACHE FILEPATH "Windows: the setup payload ZIP to build into the app")

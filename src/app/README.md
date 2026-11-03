@@ -23,6 +23,14 @@ Play starts the game that setup built on this computer, with `--no-launcher`.
   out the overlay and the Debug page's controls for a running game (the recorder's mark, Story
   scenes, EA's developer menu). It registers the same catalogue
   (`src/hooks/pc_settings_catalog.c`) and edits the same `settings.ini` as the game.
+- **Uninstall** (`app_setup.cpp`; last on Advanced > Maintenance, under Update / Repair, which is
+  first). It takes out the Steam shortcut and art this app added (Windows), copies the saves and
+  `settings.ini` to `Def Jam Recompiled saves <date>` in Documents when the data folder goes too
+  (nothing is deleted unless the copy matches), runs setup's own uninstall (`engine.py
+  --uninstall`: the build, its receipt, the launcher and an older setup's shortcuts), then deletes
+  the data folder (only one setup made, with `extraction-state.json`) and the app's records. On
+  Windows a script removes the installed app's folder and its logs once the window has closed;
+  elsewhere the player deletes the app.
 - **Like the play wrapper.** It holds the install's `play.lock` (letting it go while setup works,
   since setup takes it), reads `installed.json`, sets `DEFJAM_DATA`, `DEFJAM_INSTALL_DIR` and the
   working directory, and keeps the session log beside the wrapper's
@@ -58,6 +66,17 @@ Play starts the game that setup built on this computer, with `--no-launcher`.
   replacing it when the download is a newer release. No Start-menu or desktop shortcut is made
   (owner's choice, 2026-10-27). The installed copy unpacks its payload again when `payload\` is
   missing or from another build (`payload.sha256`).
+- **Add to Steam on Windows** (`app_steam.cpp`, `setup/steam_shortcuts.py`; design §7). Maintenance's
+  Steam section adds the app to the Steam account that signed in last, as a non-Steam game that runs
+  `--play --install <root>`, with the library artwork (the fan portrait, wide capsule and logo, the
+  hero and the icon, carried in the Windows payload), and removes it again. The app runs
+  `engine.py --steam status|add|remove`, which writes the shortcut into Steam's own
+  `userdata/<account>/config/shortcuts.vdf`, keeping every other shortcut's bytes, and a backup
+  beside it. Steam rewrites that file when it exits, so it is changed only while Steam is closed:
+  when Steam is running the section asks first, and the engine then closes it (`steam.exe
+  -shutdown`), makes the change and starts it again. Art the player chose is never replaced, and
+  only what was placed is removed (recorded in `%LOCALAPPDATA%\DefJamRecompiled\steam.json`).
+  This is the only shortcut the app makes (owner's choice, 2026-10-27).
 - **The play wrapper forwards.** Whenever it loads an install, an installed app writes where it is
   to `<install>/app-location.txt` (the bundle on macOS, the program on Windows). The play wrapper
   setup keeps in the install folder (and in Applications, for installs an older setup made;
@@ -116,8 +135,9 @@ build\win-x64-app\DefJamRecompiled.exe --payload <unpacked setup payload> [--ins
 - **First-run choices.** `--dump` and `--data` fill them in.
 - **Test hooks.** The launcher's work here too (`RECOMP_LAUNCHER_SCRIPT`, `RECOMP_WINDOW_SHOT`;
   see `src/hooks/pc_launcher_sdl.cpp`; `uiwait:<id>` waits up to half an hour for a control), with
-  the setup screens' controls named `setup.*`, `update.*` and `install.*`. On Windows
+  the setup screens' controls named `setup.*`, `update.*`, `install.*` and `steam.*`. On Windows
   `DEFJAM_APP_USER_BASE` stands in for `%LOCALAPPDATA%` (the app's home, its location record, logs
-  and cache), so a test never touches the player's own.
+  and cache), and `DEFJAM_STEAM_ROOT` for Steam's folder (only a `steam.exe` running from there
+  counts as Steam), so a test never touches the player's own.
   `RECOMP_APP_NO_DIALOG=1` reports a failure on stderr only. After a self-update the new app gets
   `RECOMP_LAUNCHER_SCRIPT_AFTER_UPDATE` as its script, or none.

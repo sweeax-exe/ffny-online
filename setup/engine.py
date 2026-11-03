@@ -1387,6 +1387,13 @@ def main(argv=None):
     parser.add_argument('--steam-shortcut', action='store_true', help='Linux: add the game to Steam')
     parser.add_argument('--steam-art', action='store_true',
                         help="Linux: place the Steam artwork for the installed game's existing shortcut")
+    parser.add_argument('--steam', choices=['status', 'add', 'remove'],
+                        help='The app (Windows): add it to Steam with its artwork, remove it, or report (steam_shortcuts.py)')
+    parser.add_argument('--app-program', help='The app program the Steam shortcut starts')
+    parser.add_argument('--steam-record', help='Where --steam records the shortcut and artwork it placed')
+    parser.add_argument('--steam-result', help='Where --steam writes its answer (JSON)')
+    parser.add_argument('--close-steam', action='store_true',
+                        help='Close Steam for --steam add/remove when it is running, and start it again after')
     parser.add_argument('--log')
     parser.add_argument('--status-file')
     parser.add_argument('--cancel-file')
@@ -1394,6 +1401,11 @@ def main(argv=None):
     if args.check_toolchain:
         # Needs nothing from the payload or the network, so it answers in a moment.
         return 0 if not IS_WINDOWS or windows_toolchain_present() else 3
+    if args.steam:
+        # The shortcut and artwork only: nothing from the network, the dump or the install's lock.
+        steam = load_module('setup_steam_shortcuts', Path(__file__).with_name('steam_shortcuts.py'))
+        return steam.command(args.steam, Path(args.payload), args.app_program, args.install_dir,
+                             args.steam_record, args.steam_result, args.close_steam)
     engine = None
     selection = None
     try:
