@@ -517,6 +517,61 @@ The report: 17 rollback matches at 172/94 ms, a rematch chain; out of sync in re
 * Checks: `regress.py --quick` 5 of 5 (`logs/regress-20261103-062031.txt`); rollback rematch chain, 5 matches,
   created vs stock, 170+20 ms, KO at 2400 (`-062043-online`): ok, 220 checksums equal, 55.0-55.3 MB in use.
 
+### Tenth round (on `remaster` 9f95b2d, build 48 candidate; F9 cff81c, b379eb, 9aafd3 from build 47)
+* **The mixer mask holds the game's own words** [V for the pattern, U for the writer]. `mixer_end` keeps live through
+  every load the heap words that changed during a mixer tick in which the game thread's cycle count did not move.
+  No local rollback run since 10-24 attributes a single word. Player logs with rollback are either 0 or the print cap
+  (64 lines), and the second group holds every unanalysed B5 crash (9fd9bd, 22ecc8, 7b829d) plus 3ee301, 3b0da3,
+  09d35d, b379eb and cff81c. The attributions come as bursts: 64 pages / 2333 words at once (cff81c), 55 / 2869
+  (b379eb), 53 / 1320 (7b829d), spread over the whole heap. A burst like that is a game update or a load, not
+  a mixer tick. All three build-47 reports run guest threads on CPU mask 0x4, so which thread wrote the bursts
+  unseen is not known.
+* **cff81c** (crash in a re-run, `sub_001156E0+0x2D0`, from `sub_000DF5C0`, a particle scheduler's time wheel)
+  [V]: the crash dump marks edi 81605780 (node array) and edx 810E9580 (u16 index array) as "a mixer word (kept
+  live)". The free node taken from `[ecx+0x1C]` was 0, and the write went to `edx + ((0 - edi) >> 3) * 2` =
+  A0B67FA0, the fault VA. The object had been half restored by loads.
+* **b379eb** (`sub_000E5F40`, the small-block allocator, a normal update) [V for the read, I for the link]: the
+  0x240 class's free-list head was a float (BC2740C0). Two pool pages (81126000, 81136000) were in the burst 56
+  lines before the desync at step 1740. The opponent's log of the same match (9aafd3) has no attribution then,
+  so the desync is more likely this PC's half-restored state than the crowd-weapon divergence [I].
+* **Fix** 44b81c6: a tick is left out when the game thread saved or loaded during it, when the mixer ran on
+  another CPU than the game thread last did (logged), or when it changed more than 8 pages. The mixer's own
+  words change at every tick, so the next clean tick still takes them. The cycle count is read before the copy.
+* **After a desync** (b379eb: out of sync at step 1740, still predicting, crashed at step 1772; 0b7e16: **one**
+  rollback in the whole fight, back to step 2861, the desync at step 2880, the first check after it, then two
+  crashes at step 3444, with mixer bursts of 11 pages / 1164 words before that load): the desync and the later
+  crash come from the same half-restored memory, not from re-runs after the desync [I, strong for 0b7e16].
+  a08559 (the same player) shows it twice. Match 28182DF6 went back to step 8753 and was out of sync at step
+  8760. Rematch BC5FC078 went back to step 2041 and was out of sync at step 2100. In both cases the load just
+  before is the only one in the stretch, and the bursts came before it. That rematch then crashed in a re-run
+  at step 4801 (`sub_00117410`, ecx = BF800000, a float -1.0 used as a pointer). The rematches there did roll
+  back (#383-#387). The digest's "lockstep d2" for a rematch only means it had no START line of its own.
+  f32d773 does not cover this case, because it leaves only when the other PC stops sending. 6656f4e stops
+  prediction at a desync. 9949788 makes a rollback match that went out of sync go on offline and leave for the
+  room at once, through the same pause-menu Quit. Lockstep matches still play on.
+* **9aafd3** (step 0 of a lockstep match, `sub_001E6EC0` reading FFFFFFF8) [V]: not rollback. `sub_000A22A0`
+  calls `sub_000BD440` (guarded in 0bbf8d1, and its "[TEXT]" line fired) and then `sub_000BD400` on the same
+  empty view. 4ccbb9f guards that call too. The "[ROLLBACK] at the crash" lines were the last rollback match's
+  counts (B7). The crash line now names the match's mode. Two lockstep matches ran in between, one of them a
+  full fight with 650 checksums equal, and the masks and saves are cleared at each `rollback_reset`. Nothing
+  points to a leak. Its desync at step 120 (74A080F3, both fighters, rollback d5) is not explained; the only
+  burst in that log comes after it.
+* Checks:
+  * `logs/dj/20261103-072354-online` (build before 9949788 and 9fdef35; rollback, 3 matches with two rematches,
+    70+10 ms, KO at 2400): ok. 52-262 rollbacks per match and copy, 130 checksums equal, no mixer attribution, and
+    neither new line fired. The guards cost a clean run nothing.
+  * `-080323-online` and `-082624-online` (rebased build; weapons in the checksum, `RECOMP_NETPLAY_HASH_WEAPONS=1`,
+    to force the crowd-weapon desync): both copies saw the desync at the same step (1440, 1980), left within 1-3
+    steps, switched rollback off and were back in the room. That happened five times in all, with no crash. Each
+    next room match at the same venue was out of sync at step 60, because the weapons are kept (that test switch,
+    ninth round), so the runs looped until the timeout. With `--rematch` the route lost its way (no results
+    menu after a leave): a test artefact.
+  * `regress.py --quick` (`logs/regress-20261103-082623.txt`): m2, m3, m4a and the fight ok. The unit row failed
+    only because the worktree's toolkit folder was empty (`test_hd_setup` reads `recomp_settings.h`); with the
+    toolkit there, `pytest -m "not slow"` gives 1068 passed.
+  * Not verified: the bursts themselves (never seen locally), the empty-text path of 4ccbb9f, and a real
+    (non-forced) desync.
+
 ### Next (after the third round)
 1. More two-copy long runs (the desyncs at steps 10 200 and 37 440 came once in two runs each; three later runs were clean),
    always with `RECOMP_NETPLAY_FINALLOG=1` so a desync can be traced to its first step.
