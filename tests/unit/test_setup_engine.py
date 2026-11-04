@@ -446,6 +446,32 @@ def test_uninstall_preserves_data_and_unrelated_install_files(tmp_path, monkeypa
     assert (setup.data/'save/profile').read_bytes() == b'keep'
 
 
+@pytest.mark.skipif(sys.platform != 'win32', reason='Windows uninstall')
+def test_uninstall_reports_each_removed_build_file_and_shortcut_and_the_kept_data(tmp_path, monkeypatch):
+    setup = installer(tmp_path)
+    old = setup.install/'versions/0.13.0-attempt-old'
+    (old/'build').mkdir(parents=True)
+    (old/'build/game.exe').write_bytes(b'x' * 3_000_000)
+    (setup.source/'big.bin').write_bytes(b'y' * 2_000_000)
+    engine.write_json(setup.install/'installed.json', {'schema':1, 'version':'1.0.0', 'source':str(setup.source), 'data':str(setup.data)})
+    (setup.install/'DefJamLauncher.exe').write_bytes(b'synthetic')
+    (setup.install/'unrelated.txt').write_bytes(b'keep')
+    monkeypatch.setattr(engine.subprocess, 'run', lambda *a, **k: engine.subprocess.CompletedProcess(
+        a, 0, stdout='Removed shortcut C:\\Desktop\\Def Jam Recompiled.lnk\r\n', stderr=''))
+    lines = []
+    engine.uninstall(setup.install, lines.append)
+    text = '\n'.join(lines)
+    assert lines[0].startswith('Uninstalling Def Jam Recompiled 1.0.0 from ')
+    assert 'Removed versions\\0.13.0-attempt-old (3 MB)' in lines
+    assert any(line.startswith('Removed versions\\' + setup.source.parent.name) and 'the active build' in line for line in lines)
+    assert 'Removed DefJamLauncher.exe' in lines and 'Removed installed.json' in lines
+    assert 'Removed installed.ini' not in lines            # only what was there
+    assert 'Removed shortcut C:\\Desktop\\Def Jam Recompiled.lnk' in lines
+    assert 'Kept the data folder ' + str(setup.data) in text
+    assert any(line.startswith('Left in ') and 'unrelated.txt' in line for line in lines)
+    assert lines[-1] == 'Application removed. Dump, saves, settings and logs were preserved.'
+
+
 def synthetic_launcher_template(payload):
     template = payload / 'launcher' / engine.LAUNCHER_BUNDLE
     (template / 'Contents/MacOS').mkdir(parents=True)

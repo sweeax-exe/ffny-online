@@ -1313,7 +1313,36 @@ def apply_steam_art(install):
     return 0
 
 
-def uninstall(install):
+def tree_size(path):
+    """Bytes in a folder, without following links or Windows junctions."""
+    total, stack = 0, [Path(path)]
+    while stack:
+        try:
+            entries = list(os.scandir(stack.pop()))
+        except OSError:
+            continue
+        for entry in entries:
+            try:
+                if entry.is_symlink() or getattr(entry, 'is_junction', lambda: False)():
+                    continue
+                if entry.is_dir(follow_symlinks=False):
+                    stack.append(Path(entry.path))
+                elif entry.is_file(follow_symlinks=False):
+                    total += entry.stat(follow_symlinks=False).st_size
+            except OSError:
+                pass
+    return total
+
+
+def size_text(size):
+    return '%.1f GB' % (size / 1e9) if size >= 1e9 else '%d MB' % round(size / 1e6)
+
+
+def uninstall(install, report=None):
+    """Remove the application from `install`, never the data folder. `report` gets one line for each
+    thing found, removed or kept; main() sends the lines to the screen and to the --log file."""
+    if report is None:
+        report = lambda message: print(message, flush=True)
     root = Path(install).resolve()
     receipt_file = root / 'installed.json'
     if not receipt_file.is_file() or root == Path(root.anchor):
@@ -1322,35 +1351,48 @@ def uninstall(install):
     versions = root / 'versions'
     if receipt.get('schema') != 1 or versions.resolve() != versions or versions not in Path(receipt['source']).parents:
         raise SetupError('Invalid installation ownership receipt', 2)
+    report('Uninstalling Def Jam Recompiled %s from %s' % (receipt.get('version', '(unknown version)'), root))
+
+    def remove_file(path, what):
+        if path.is_file() or path.is_symlink():
+            path.unlink()
+            report('Removed ' + what)
+
     with install_lock(root), install_lock(Path(receipt['data'])), game_lock(root):
         transaction.Activation(root, receipt['data']).recover()
         receipt = json.loads(receipt_file.read_text(encoding='utf-8'))
+        active = Path(receipt['source']).parent.name
         # Python 3.13 rmtree does not traverse Windows junction contents. Data is
         # outside versions by contract; verify the final target before deletion.
         if versions.exists():
+            freed = 0
+            for build in sorted(versions.iterdir()):
+                size = tree_size(build)
+                freed += size
+                report('Removed %s (%s%s)' % (Path('versions', build.name), size_text(size),
+                                             ', the active build' if build.name == active else ''))
             shutil.rmtree(versions)
+            report('Freed %s of game builds' % size_text(freed))
         for name in ('installed.ini', 'installed.json', 'DefJamLauncher.exe'):
-            (root / name).unlink(missing_ok=True)
+            remove_file(root / name, name)
         if IS_LINUX:
-            (root / LINUX_LAUNCHER).unlink(missing_ok=True)
-            (root / (LINUX_LAUNCHER + '.png')).unlink(missing_ok=True)
+            remove_file(root / LINUX_LAUNCHER, LINUX_LAUNCHER)
+            remove_file(root / (LINUX_LAUNCHER + '.png'), LINUX_LAUNCHER + '.png')
             for name in receipt.get('steam_art', []):
                 art = Path(name)
                 if art.parent.name == 'grid' and art.is_file() and not art.is_symlink() and digest(art) == receipt.get('steam_art_hashes', {}).get(name):
-                    art.unlink()   # the artwork this setup placed for its Steam shortcut
+                    remove_file(art, 'Steam artwork ' + str(art))   # the artwork this setup placed for its Steam shortcut
             # Only entries this installation made and recorded, and only if they still name it.
             for name in receipt.get('shortcuts', []):
                 shortcut = Path(name)
                 if shortcut.is_file() and not shortcut.is_symlink() and \
                         (LINUX_MARKER + '=' + str(root)) in shortcut.read_text(encoding='utf-8', errors='replace'):
-                    shortcut.unlink()
-            print('Application removed. Dump, saves, settings and logs were preserved. A Steam shortcut, '
-                  'if you added one, stays in Steam until you remove it there.', flush=True)
-            return
-        if not IS_WINDOWS:
+                    remove_file(shortcut, 'menu entry ' + str(shortcut))
+        elif not IS_WINDOWS:
             bundle = root / LAUNCHER_BUNDLE
             if bundle.is_dir() and not bundle.is_symlink():
                 shutil.rmtree(bundle)
+                report('Removed ' + LAUNCHER_BUNDLE)
             # Only the shortcuts this installation made and recorded, and only if
             # they still are what was made: a bundle that names this install, or an alias file.
             for name in receipt.get('shortcuts', []):
@@ -1359,18 +1401,28 @@ def uninstall(install):
                 if shortcut.is_dir() and not shortcut.is_symlink() and marker.is_file() \
                         and marker.read_text(encoding='utf-8') == str(root):
                     shutil.rmtree(shortcut)
+                    report('Removed shortcut ' + str(shortcut))
                 elif shortcut.is_file() and not shortcut.is_symlink() and digest(shortcut) == receipt.get('shortcut_hashes', {}).get(name):
-                    shortcut.unlink()
-            print('Application removed. Dump, saves, settings and logs were preserved.', flush=True)
-            return
-        env = os.environ.copy()
-        env['DEFJAM_SETUP_REMOVE_SHORTCUTS'] = '1'
-        env['DEFJAM_SETUP_LAUNCHER'] = str(root / 'DefJamLauncher.exe')
-        subprocess.run(['powershell.exe', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
-                        Path(__file__).parent / 'shortcuts.ps1'], env=env, check=True,
-                       creationflags=subprocess.CREATE_NO_WINDOW)
-    print('Application removed. Dump, saves, settings and logs were preserved.', flush=True)
-
+                    remove_file(shortcut, 'shortcut ' + str(shortcut))
+        else:
+            env = os.environ.copy()
+            env['DEFJAM_SETUP_REMOVE_SHORTCUTS'] = '1'
+            env['DEFJAM_SETUP_LAUNCHER'] = str(root / 'DefJamLauncher.exe')
+            result = subprocess.run(['powershell.exe', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
+                                     Path(__file__).parent / 'shortcuts.ps1'], env=env, check=True,
+                                    creationflags=subprocess.CREATE_NO_WINDOW, capture_output=True, text=True)
+            for line in (getattr(result, 'stdout', None) or '').splitlines():
+                if line.strip():
+                    report(line.strip())   # shortcuts.ps1 names each shortcut it removed
+    report('Kept the data folder %s (the extracted game, saves, settings, mods and logs)' % receipt['data'])
+    left = sorted(entry.name for entry in root.iterdir()) if root.is_dir() else []
+    if left:
+        report('Left in %s: %s' % (root, ', '.join(left)))
+    if IS_LINUX:
+        report('Application removed. Dump, saves, settings and logs were preserved. A Steam shortcut, '
+               'if you added one, stays in Steam until you remove it there.')
+    else:
+        report('Application removed. Dump, saves, settings and logs were preserved.')
 
 def discard_failed_attempt(engine):
     """Delete the unique version folder this run created, so a failed or cancelled attempt does not
@@ -1568,7 +1620,13 @@ def main(argv=None):
                 shutil.rmtree(scratch)
         if args.uninstall:
             verify_payload(Path(args.payload))
-            uninstall(args.install_dir)
+
+            def report(message):
+                print(message, flush=True)
+                if args.log:
+                    with Path(args.log).open('a', encoding='utf-8') as stream:
+                        stream.write(message + '\n')
+            uninstall(args.install_dir, report)
             return 0
         if args.steam_art:
             return apply_steam_art(args.install_dir)

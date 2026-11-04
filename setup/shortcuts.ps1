@@ -12,6 +12,7 @@ foreach ($folder in $folders) {
     if ($env:DEFJAM_SETUP_REMOVE_SHORTCUTS) {
         if ((Test-Path -LiteralPath $path) -and $shortcut.TargetPath -eq $env:DEFJAM_SETUP_LAUNCHER) {
             Remove-Item -LiteralPath $path -Force
+            Write-Output "Removed shortcut $path"
         }
         continue
     }
