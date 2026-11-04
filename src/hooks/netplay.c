@@ -323,7 +323,10 @@ void netplay_crowd_update(void) { sub_00081170(); }
  * single windows of 1.5-1.7 and never two in a row (rollback-plan-2026-11.md, thirteenth round), so 2.0 in
  * two windows in a row (the PC plays every step three times for 10 s) is a connection whose entries come
  * late all the time, which the delay, not rollback, has to cover. */
-#define RB_HEAVY_RERUN      2.0
+/* Off (0) since build 59: the fallback keeps the delay rollback chose (2-3 steps), far too little for lockstep
+ * at this ping: the rest of the fight ran at 20-27 fps (owner's ranked game, 2026-11-05). Until a fallback can
+ * raise the delay on every PC, rewinds are the lesser evil. */
+#define RB_HEAVY_RERUN      0.0
 
 static CRITICAL_SECTION g_cs;
 static INIT_ONCE g_once = INIT_ONCE_STATIC_INIT;
