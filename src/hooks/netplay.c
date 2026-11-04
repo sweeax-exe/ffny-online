@@ -7202,6 +7202,16 @@ void netplay_on_update(void)
         }
     }
     LeaveCriticalSection(&g_cs);
+    {   /* RECOMP_ROLLBACK_TEST_BACK=lo,hi (tests): with the step in lo..hi, every update goes back a step and
+         * runs two again on the same inputs, so that a rollback crosses whatever happens in that window */
+        static int lo = -1, hi;
+        if (lo < 0) {
+            const char *v = getenv("RECOMP_ROLLBACK_TEST_BACK");
+            lo = 0;
+            if (v) sscanf(v, "%d,%d", &lo, &hi);
+        }
+        if (!f && lo > 1 && N.step >= (uint32_t)lo && N.step <= (uint32_t)hi) f = N.step - 1u;
+    }
     if (f) rollback_to(f);
     /* The fallback for a PC too slow for rollback (rb_budget_tick): prediction stopped, so each step
      * waited for the real entries, and the loop above has just made every step up to this one final (a

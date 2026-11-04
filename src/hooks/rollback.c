@@ -1175,12 +1175,93 @@ void rollback_note_dynamic_load(uint32_t caller, uint32_t handle)
     }
 }
 
+/* The crash at step 62 of a fight (sub_00109F80, seven reports on builds 56 to 58): EAGL's DynamicLoader
+ * parses an object file IN PLACE, turning each section's sh_offset and sh_link into pointers. Files read by
+ * another thread in a fight (allocated from 0x1AA99) get their block from the audio arena, which no load
+ * touches, while the loader's state in the heap goes back. So a rollback across the parse ran it again over
+ * a section table already fixed up: sh_link was a pointer, 5*link*8 went far off (fault VA = ecx + edx*8 + 0x10,
+ * with edx = 5*eax and eax that pointer, in all seven). The first parse of such a file in a fight keeps a copy
+ * of it, and any later parse starts from that copy: every run, and so both PCs, parses the same bytes. */
+typedef struct { uint32_t lo, hi; void *copy; } LoaderImage;
+static LoaderImage *s_img;
+static unsigned s_nimg, s_imgcap;
+
+/* s_arena_cs held: a block going back takes the copies of what was in it along */
+static void loader_images_drop(uint32_t lo, uint32_t hi)
+{
+    unsigned k = 0;
+    while (k < s_nimg) {
+        if (s_img[k].lo >= lo && s_img[k].lo < hi) {
+            free(s_img[k].copy);
+            s_img[k] = s_img[--s_nimg];
+        } else {
+            k++;
+        }
+    }
+}
+
+static void loader_image_keep(uint32_t base)
+{
+    static unsigned told_kept, told_back;
+    unsigned k;
+    int i;
+    if (!in_arena(base)) return;
+    EnterCriticalSection(&s_arena_cs);
+    for (k = 0; k < s_nimg; k++) {
+        if (s_img[k].lo != base) continue;
+        memcpy((void *)XBOX_PTR(base), s_img[k].copy, s_img[k].hi - s_img[k].lo);
+        if (told_back++ < 20)
+            fprintf(stderr, "[ROLLBACK] an object file in the arena is parsed again: %08X..%08X put back as it was read "
+                    "(%ld saves in)\n", s_img[k].lo, s_img[k].hi, (long)s_saves);
+        LeaveCriticalSection(&s_arena_cs);
+        return;
+    }
+    for (i = 0; i < s_nblk; i++) {
+        uint32_t end = s_blk[i].addr + s_blk[i].size;
+        void *copy;
+        if (!s_blk[i].used || base < s_blk[i].addr || base >= end) continue;
+        if (s_nimg == s_imgcap) {
+            unsigned cap = s_imgcap ? s_imgcap * 2u : 64u;
+            LoaderImage *grown = (LoaderImage *)realloc(s_img, cap * sizeof(LoaderImage));
+            if (!grown) break;
+            s_img = grown;
+            s_imgcap = cap;
+        }
+        copy = malloc(end - base);
+        if (!copy) break;
+        memcpy(copy, (const void *)XBOX_PTR(base), end - base);
+        s_img[s_nimg].lo = base;
+        s_img[s_nimg].hi = end;
+        s_img[s_nimg].copy = copy;
+        s_nimg++;
+        if (told_kept++ < 20)
+            fprintf(stderr, "[ROLLBACK] an object file in the arena is parsed in the fight: %08X..%08X kept (%ld saves in)\n",
+                    base, end, (long)s_saves);
+        break;
+    }
+    LeaveCriticalSection(&s_arena_cs);
+}
+
+void rollback_loader_parse(uint32_t desc)
+{
+    static int off = -1;    /* RECOMP_ROLLBACK_TEST_NO_IMAGE_COPY=1 (tests): as before, to reproduce the crash */
+    if (off < 0) off = getenv("RECOMP_ROLLBACK_TEST_NO_IMAGE_COPY") != NULL;
+    if (off || !s_tracking || !s_arena) return;
+    loader_image_keep(MEM32(desc + 0x10u));
+    loader_image_keep(MEM32(desc + 0x18u));     /* the second part of a file loaded in two (sub_0010B440's path) */
+}
+
 static void release_kept_arena(void);
 static int s_kept_rescan;   /* the fight's end left kept blocks named: one more scan when the next load needs room */
 void rollback_reset(void)
 {
     int fought = s_tracking;
     track_stop();
+    if (s_arena) {          /* no rollback can reach the fight's parses any more */
+        EnterCriticalSection(&s_arena_cs);
+        loader_images_drop(0u, 0xFFFFFFFFu);
+        LeaveCriticalSection(&s_arena_cs);
+    }
     /* The blocks a load kept go back as soon as the fight is over, not only when the next fight's saves
      * start: a rematch chain loads its next venue in between, and its banks found the arena scattered
      * with the last fight's kept blocks (F9 e7d57d, build 54: "1813 blocks used (817 freed and held or
@@ -2024,6 +2105,7 @@ static int arena_free_now(uint32_t a)
     for (i = 0; i < s_nblk; i++) {
         if (s_blk[i].user != a || !s_blk[i].used) continue;
         arena_event('F', a, s_blk[i].size);
+        loader_images_drop(s_blk[i].addr, s_blk[i].addr + s_blk[i].size);
         s_blk[i].used = 0;
         s_arena_live -= s_blk[i].size;
         /* Merged only with a neighbour that touches it: the arena is pieces of contiguous memory with
@@ -2300,6 +2382,20 @@ int rollback_route_alloc(void)
         static int heap = -1;
         if (heap < 0) heap = getenv("RECOMP_ROLLBACK_STREAMS_IN_HEAP") != NULL;
         if (ret == 0x001E3F20u && heap) return 0;
+    }
+    /* RECOMP_ROLLBACK_TEST_LOADER_ARENA=1 (tests): every object file the file jobs read (return 0x1AA99) goes to
+     * the arena. On the players' PCs only the files still being read when the fight's saves start do, so a fast
+     * disk never shows the crash in sub_00109F80 (see rollback_loader_parse). */
+    {
+        static int test_arena = -1;
+        if (test_arena < 0) test_arena = getenv("RECOMP_ROLLBACK_TEST_LOADER_ARENA") != NULL;
+        if (test_arena && req == 0x0001AA99u) {
+            a = arena_alloc(MEM32(g_esp + 8));
+            if (!a) return 0;
+            g_eax = a;
+            g_esp += 4;
+            return 1;
+        }
     }
     if (!audio_code(req) && !t_in_sound && !(s_tracking && GetCurrentThreadId() != s_game_tid)) {
         /* The file layer's buffers (allocated at return 0x1E3F20) for a stream the audio code opens:
@@ -2742,6 +2838,7 @@ void rollback_arena_history(void) {}
 int rollback_sound_command_dead(uint32_t sp) { (void)sp; return 0; }
 int rollback_hold_xapi_free(uint32_t ptr) { (void)ptr; return 0; }
 void rollback_note_dynamic_load(uint32_t caller, uint32_t handle) { (void)caller; (void)handle; }
+void rollback_loader_parse(uint32_t desc) { (void)desc; }
 unsigned rollback_dynamic_loads(void) { return 0; }
 void rollback_check_alloc(uint32_t caller, uint32_t size, uint32_t block) { (void)caller; (void)size; (void)block; }
 void rollback_check_tables(const char *where) { (void)where; }
