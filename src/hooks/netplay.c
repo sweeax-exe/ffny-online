@@ -1149,7 +1149,12 @@ static DWORD remote_slot_state(int slot, XBOX_INPUT_STATE *state)
         /* Spectator mode: the players' live pads are not here (the relay sends a spectator only the
          * lockstep's entries), so their ports read at rest; through the summary and the results,
          * which this game goes through by itself, player 1's port taps A (100 ms every 500 ms). */
+        /* RECOMP_TEST_SPEC_SLOW_MS=<ms> (tests only): the taps begin that much later, so the players
+         * choose their rematch before this PC's reward screen saves (F9 fe1b81's order) */
+        static int slow = -1;
         ULONGLONG since = N.spec_results;
+        if (slow < 0) slow = getenv("RECOMP_TEST_SPEC_SLOW_MS") ? atoi(getenv("RECOMP_TEST_SPEC_SLOW_MS")) : 0;
+        if (since && slow > 0) since = GetTickCount64() - since < (ULONGLONG)slow ? 0 : since + (ULONGLONG)slow;
         if (slot < 0 || slot >= N.players) return ERROR_DEVICE_NOT_CONNECTED;
         memset(state, 0, sizeof(*state));
         state->dwPacketNumber = 1;
@@ -6778,6 +6783,19 @@ static int spec_quit_fight(const char *who)
     return 1;
 }
 
+/* The front end's memory-card save manager (sub_000D2ED0 pumps it every frame): MemCard.Save
+ * (sub_00052B60) queues its entries (count 0x39FCFA, state 0x39FD00 nonzero while they are written),
+ * and the end of the queue (sub_000D1620) zeroes both and calls the menu's
+ * "_level0._root.MCOPComplete" through sub_00144F20. A spectator's rematch started while that save
+ * still ran (the players had chosen before the reward screen's save began): the save finished in the
+ * rematch's intro and its MCOPComplete call reached a menu whose heap (0x3452A8) was gone, a null
+ * allocator and then the crash in sub_00142D20 (F9 fe1b81, build 53). On a player's PC the Rematch
+ * menu only comes after the save, so only the automatic calls wait for it. */
+static int memcard_save_busy(void)
+{
+    return MEM8(0x0039FCFAu) != 0 || MEM32(0x0039FD00u) != 0;
+}
+
 static void spec_tick(void)
 {
     static unsigned tries;
@@ -6792,6 +6810,18 @@ static void spec_tick(void)
         return;
     }
     if (!N.spec_menu || N.spec_leave) return;
+    {   /* the save's end, once per menu (what the rematch below waits for) */
+        static ULONGLONG menu_seen;
+        static int was_busy;
+        int busy = memcard_save_busy();
+        if (menu_seen != N.spec_menu) { menu_seen = N.spec_menu; was_busy = -1; }
+        if (busy != was_busy) {
+            if (was_busy >= 0 || busy)
+                fprintf(stderr, "[NETPLAY] watching: the reward screen's save %s (%llu ms after it began)\n",
+                        busy ? "runs" : "finished", (unsigned long long)(GetTickCount64() - N.spec_menu));
+            was_busy = busy;
+        }
+    }
     {
         uint32_t after = N.match_count, next = mix32(N.session ^ ((after + 1u) * 0x9E3779B9u)), sm;
         int i, all = N.players > 0, gone = -1, started = 0;
@@ -6817,6 +6847,14 @@ static void spec_tick(void)
         if (!all && !started) return;
         sm = MEM32(0x002FB148u + 0x17u * 4u);
         if (sm >= 0x10000u && MEM32(sm + 0x24u) != 0) return;     /* a screen loads: later */
+        if (memcard_save_busy()) {      /* the reward screen's save still runs: later */
+            static uint32_t told;
+            if (told != N.match_count) {
+                told = N.match_count;
+                fprintf(stderr, "[NETPLAY] watching: the rematch waits for the reward screen's save to finish\n");
+            }
+            return;
+        }
         fprintf(stderr, "[NETPLAY] watching: the players chose a rematch (%s); watching it\n",
                 all ? "every player chose it" : "its entries arrive");
         N.spec_menu = N.spec_results = 0;
