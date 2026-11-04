@@ -74,7 +74,7 @@ void graphics_card(ImVec2 a, ImVec2 b, float s)
     if (v.busy && !v.progress.empty()) snprintf(line, sizeof(line), "%s", v.progress.c_str());
     else if (v.restart_needed) snprintf(line, sizeof(line), "Applies at the next start");
     else if (v.installed) snprintf(line, sizeof(line), "Community ReShade + DLSS presets");
-    else snprintf(line, sizeof(line), "Community ReShade + DLSS presets, optional");
+    else snprintf(line, sizeof(line), "Optional community presets");    // ", optional" was cut off
     status_dot(dl, at, s, v.installed ? k_red_hi : v.busy ? k_gold : ImVec4(0.6f, 0.6f, 0.64f, 1));
     float right = b.x - 124 * s;
     dl->PushClipRect(a, ImVec2(right, b.y), true);

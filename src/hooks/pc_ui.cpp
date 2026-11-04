@@ -2486,20 +2486,41 @@ static void news_card(ImVec2 a, ImVec2 b, float s)
     glass(dl, a, b, 14 * s);
     card_title(dl, a, s, "NEWS");
     ImVec2 at(a.x + 20 * s, a.y + 40 * s);
-    float wrap = b.x - a.x - 40 * s;
-    dl->PushClipRect(a, ImVec2(b.x, b.y - 46 * s), true);
+    // The same layout as the Graphics and Music cards: a title, one line under it, the button on the right.
+    // The notes were drawn wrapped under the title and the shortened card cut their second line in half
+    // behind the button (build 57); now they are one line that ends in "..." where it does not fit.
+    float right = b.x - 124 * s;
+    const char *line = "Patch notes, tournaments and players to fight: the FFNY Online community is on Discord.";
     if (notes[0] && build > 0) {
         snprintf(title, sizeof(title), build > local ? "New in build %d" : "What's new in build %d", build);
-        float y = card_line(dl, at, s, k_white, title, true);
-        card_line(dl, ImVec2(at.x, at.y + y + 8 * s), s, ImVec4(0.82f, 0.82f, 0.84f, 1), notes, false, wrap);
+        line = notes;
+        if (!strncmp(line, "Build ", 6)) {                  // "Build 57: ..." repeats the title
+            const char *colon = strchr(line, ':');
+            if (colon && colon - line < 12) line = colon + 1;
+            while (*line == ' ') line++;
+        }
     } else {
-        float y = card_line(dl, at, s, k_white, "News, events and the leaderboard", true);
-        card_line(dl, ImVec2(at.x, at.y + y + 8 * s), s, ImVec4(0.82f, 0.82f, 0.84f, 1),
-                  "Patch notes, tournaments and players to fight: the FFNY Online community is on Discord.", false, wrap);
+        snprintf(title, sizeof(title), "News, events and the leaderboard");
     }
+    char shown[1024];
+    snprintf(shown, sizeof(shown), "%s", line);
+    for (char *p = shown; *p; p++)
+        if (*p == '\n' || *p == '\r') *p = ' ';
+    float size = 13.5f * s, room = right - at.x;
+    if (text_size(ImGui::GetFont(), size, shown).x > room) {
+        size_t n = strlen(shown);
+        while (n > 0) {
+            do n--; while (n > 0 && (shown[n] & 0xC0) == 0x80);     // whole UTF-8 characters only
+            snprintf(shown + n, sizeof(shown) - n, "...");
+            if (text_size(ImGui::GetFont(), size, shown).x <= room) break;
+        }
+    }
+    dl->PushClipRect(a, ImVec2(right, b.y), true);
+    card_line(dl, at, s, k_white, title, true);
+    card_line(dl, ImVec2(at.x, at.y + 26 * s), s, ImVec4(0.82f, 0.82f, 0.84f, 1), shown, false);
     dl->PopClipRect();
-    if (glass_button("##news_discord", "All news on Discord", ImVec2(at.x, b.y - 42 * s), ImVec2(170 * s, 28 * s), s,
-                     GLASS_PLAIN, nullptr, 13 * s))
+    if (glass_button("##news_discord", "News", ImVec2(b.x - 112 * s, a.y + 40 * s), ImVec2(92 * s, 30 * s), s,
+                     GLASS_PLAIN, bold_font(), 14 * s))
         open_url(k_discord_invite);
 }
 
