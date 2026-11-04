@@ -64,6 +64,9 @@ APPROVED_README_MEDIA = {
     'website/media/preview-emblems.jpg': '89f9baf9ec4ba3dc8a5d1342f716581a071dcdd104d80613bc5c64db59de9b4e',
     'website/media/preview-tournaments.jpg': '6951c05c878c217c87cd03481ead6da1a576f00faf53eba39e7ea946b0765383',
     'website/media/preview-turf.jpg': '16fb39a15063f099ec796e21a93d6eb395dfe62a32d8d2fb19f61a8a5f5edd34',
+    # RecompLauncher's official "Get it on" badge from their press kit, unchanged (owner approved 2026-11-04)
+    'website/media/recomplauncher-badge.svg': 'ad29e778c2e8c6c6dbe95fa100914ea2e8d36346c0fa09308ec2a051c5c300a8',
+    'website/media/recomplauncher-mark.svg': '1e3a599841a87693f2389d877be40c9c217b7e9d80b8d50c6aba7d49f6abca70',
     'website/media/preview-watchlive.jpg': 'a588e0f0298e8e88fff44e0a55f2176fea987c5325d8e9d970284d5bb33c4c6b',
     'website/media/ranked-locker.jpg': '864f7994697df01821f5d2eceeee166e028af1923152897d94920b7737da1192',
     'website/media/ranked-modes.jpg': 'd8669b652d8a9f59edc38c8dfae324378ee343e97b68d5e0b9fc026f67d90336',

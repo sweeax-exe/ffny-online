@@ -275,40 +275,33 @@ h1, h2, h3 {
   overflow-wrap: anywhere;
 }
 
-/* the second way in: RecompLauncher (a quieter glass button under the red one) */
-.btn-alt {
+/* the second way in: RecompLauncher's own badge (press kit, unchanged) and a line about it */
+.dl-alt {
   display: flex;
   align-items: center;
-  gap: 14px;
-  margin-top: 12px;
-  padding: 13px 18px;
-  border-radius: 12px;
-  color: #fff;
-  text-decoration: none;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  transition: background 0.2s ease, border-color 0.2s ease, transform 0.15s ease;
+  gap: 16px;
+  margin-top: 14px;
 }
-.btn-alt:hover {
-  color: #fff;
-  background: rgba(255, 255, 255, 0.1);
-  border-color: rgba(255, 140, 120, 0.55);
-  transform: translateY(-1px);
+.badge-rl {
+  flex: none;
+  line-height: 0;
+  border-radius: 9px;
+  transition: transform 0.15s ease, box-shadow 0.25s ease;
 }
-.btn-alt svg { width: 26px; height: 26px; flex: none; color: var(--red); }
-.btn-alt-label {
-  font: 400 clamp(18px, 2.2vw, 21px)/1.1 var(--display);
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
+.badge-rl img { width: 220px; height: auto; }
+.badge-rl:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 26px -10px rgba(52, 242, 232, 0.55);
 }
-.btn-alt-meta {
-  margin-top: 3px;
-  font-size: 13px;
-  color: rgba(255, 255, 255, 0.72);
+.dl-alt-text {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.45;
+  color: rgba(255, 255, 255, 0.78);
 }
 .tag-new {
   display: inline-block;
-  margin-left: 6px;
+  margin-right: 4px;
   padding: 2px 7px 1px;
   border-radius: 99px;
   font: 400 12px/1.4 var(--display);
@@ -586,6 +579,22 @@ h1, h2, h3 {
 .foot a:hover { color: var(--text); }
 .disclaimer { color: var(--muted); }
 .disclaimer strong { color: var(--text); }
+.verified-rl {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  margin-top: 14px;
+  padding: 7px 14px 7px 10px;
+  border-radius: 99px;
+  font-size: 14px;
+  color: rgba(255, 255, 255, 0.85);
+  text-decoration: none;
+  background: rgba(52, 242, 232, 0.06);
+  border: 1px solid rgba(52, 242, 232, 0.28);
+}
+.verified-rl:hover { color: #fff; border-color: rgba(52, 242, 232, 0.6); }
+.verified-rl img { width: 22px; height: 22px; }
+.verified-rl svg { width: 20px; height: 20px; }
 .foot-links { display: flex; flex-wrap: wrap; gap: 6px 20px; margin-top: 16px; }
 
 /* ---- lightbox ---- */
@@ -779,7 +788,7 @@ h1, h2, h3 {
 
 @media (prefers-reduced-motion: reduce) {
   .hero-bg, .hero-logo img, .hero-copy, .scroll-cue::after { animation: none; }
-  .btn-download, .btn-alt, .card, .shot img, .btn, .tourney { transition: none; }
+  .btn-download, .badge-rl, .card, .shot img, .btn, .tourney { transition: none; }
 }
 
 /* Without backdrop-filter, give glass a darker fill so text stays readable. */
