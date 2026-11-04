@@ -194,8 +194,7 @@ static void graphics_dialog(ImVec2 o, float w, float h, float s)
         bool have = gfx::fs::exists(p, ec);
         if (glass_button("##gfx_notices", "Open notices", ImVec2(lx + inner - 150 * s, y - 6 * s), ImVec2(150 * s, 32 * s), s,
                          GLASS_PLAIN, bold_font(), 13.5f * s, have)) {
-            auto u = p.u8string();
-            pcui::open_path(std::string(u.begin(), u.end()));
+            pcui::open_path(pcui::path_utf8(p));
         }
     }
 

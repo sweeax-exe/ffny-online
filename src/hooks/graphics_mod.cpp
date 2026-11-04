@@ -47,8 +47,15 @@ void say(std::string *error, const std::string &text)
 
 std::string utf8(const fs::path &p)
 {
-    auto s = p.u8string();
-    return std::string(s.begin(), s.end());
+#if defined(_WIN32)
+    const std::wstring &w = p.native();
+    int n = w.empty() ? 0 : WideCharToMultiByte(CP_UTF8, 0, w.c_str(), (int)w.size(), nullptr, 0, nullptr, nullptr);
+    std::string out((size_t)(n > 0 ? n : 0), '\0');
+    if (n > 0) WideCharToMultiByte(CP_UTF8, 0, w.c_str(), (int)w.size(), &out[0], n, nullptr, nullptr);
+    return out;
+#else
+    return p.string();
+#endif
 }
 fs::path from_utf8(const std::string &s) { return fs::u8path(s); }
 
