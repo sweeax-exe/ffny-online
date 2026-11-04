@@ -239,8 +239,8 @@ def check_launcher(a):
     if os.path.exists(shot):
         os.remove(shot)
     settings = ui_settings_file("launcher")
-    # Visit direct routes, save skip in Interface, return Home, capture and click Play.
-    script = "800:ui:Mods;1300:ui:Back;1800:ui:Configure;2300:ui:Back;2800:ui:Advanced;3300:ui:Interface;3800:ui:launcher.skip;4300:ui:Back;4700:move:1050:25;5100:shot:%s;5600:ui:Play" % shot
+    # Visit direct routes, save skip in App preferences, return Home, capture and click Play.
+    script = "800:ui:Mods;1300:ui:Back;1800:ui:Configure;2300:ui:Back;2800:ui:Advanced;3300:ui:App preferences;3800:ui:launcher.skip;4300:ui:Back;4700:move:1050:25;5100:shot:%s;5600:ui:Play" % shot
     run = harness.run_game("ui-launcher", secs=120, preset=a.preset, scripted=False, quiet=True, until_file=shot,
                            env={"RECOMP_SETTINGS": settings, "RECOMP_LAUNCHER_SCRIPT": script,
                                 "RECOMP_INPUT_IGNORE_FOCUS": "1"})
@@ -290,9 +290,9 @@ def check_overlay(a):
 
 
 def check_unlock_option(a):
-    """The launcher's "Debug - Unlock all Fighters and Venues" checkbox, and what it does.
+    """The launcher's "Unlock all fighters and venues" button (Cheats), and what it does.
 
-    Part one clicks it in the launcher and expects `unlock_all = true` under [debug] in the settings
+    Part one clicks it and its confirmation in the launcher and expects `unlock_all = true` under [debug] in the settings
     file. Part two starts the game from a file that says so, with no environment variable, and expects
     the unlock routine to run; a file without it must leave the routine alone."""
     if sys.platform == "win32":
@@ -303,11 +303,10 @@ def check_unlock_option(a):
     if os.path.exists(shot):
         os.remove(shot)
     settings = ui_settings_file("unlockopt")
-    # Open Diagnostics, click unlock, capture and click Play. The harness turns the
-    # unlock on for its runs, which would lock the checkbox, so the variable is left unset here.
-    # A narrow or large-text launcher (the Steam Deck's) draws the choice as an Off/On list: the first
-    # click opens it and the optional second picks On. With a checkbox the first click is enough.
-    script = ("800:ui:Advanced;1300:ui:Diagnostics;1900:ui:debug.unlock_all;2500:uiopt:debug.unlock_all.on;"
+    # Open Cheats, click unlock and confirm the permanent-unlock warning, capture and click Play. The
+    # harness turns the unlock on for its runs, which would hide the button, so the variable is left
+    # unset here.
+    script = ("800:ui:Advanced;1300:ui:Cheats;1900:ui:cheats.unlock_all;2500:ui:cheats.unlock_all.confirm;"
               "3300:shot:%s;3700:ui:Play" % shot)
     run = harness.run_game("ui-unlockopt", secs=120, preset=a.preset, scripted=False, quiet=True, until_file=shot,
                            env={"RECOMP_SETTINGS": settings, "RECOMP_LAUNCHER_SCRIPT": script,
@@ -316,7 +315,7 @@ def check_unlock_option(a):
     with open(settings, encoding="utf-8") as f:
         ini = f.read()
     if not re.search(r"^\[debug\][^\[]*^unlock_all\s*=\s*true\s*$", ini, re.M | re.S):
-        faults.append("the click on the Debug checkbox did not reach settings.ini")
+        faults.append("the Cheats page's unlock and its confirmation did not reach settings.ini")
     if "[UI] launcher closed: play" not in run.text:
         faults.append("Play did not close the launcher")
     if faults:
@@ -334,7 +333,7 @@ def check_unlock_option(a):
             faults.append("unlock_all = true in the file, but the unlock routine did not run")
         if not want and (started or ran):
             faults.append("unlock_all is off in the file, but the unlock routine ran")
-    return verdict(faults, "the checkbox saves [debug] unlock_all; from the file alone the unlock runs, and without it does not")
+    return verdict(faults, "the confirmed button saves [debug] unlock_all; from the file alone the unlock runs, and without it does not")
 
 
 def check_picture_options(a):
@@ -352,10 +351,12 @@ def check_picture_options(a):
     if os.path.exists(shot):
         os.remove(shot)
     settings = ui_settings_file("picture")
-    # The vignette is a checkbox, or in a narrow or large-text launcher an Off/On list (see check_unlock_option).
-    # Hover first: the Display page is taller than the window, so Brightness may need scrolling into view.
-    script = ("800:ui:Advanced;1200:hover:display.brightness;1600:ui:display.brightness;2000:hover:display.vignette;"
-              "2300:ui:display.vignette;2800:uiopt:display.vignette.off;3300:shot:%s;3700:ui:Play" % shot)
+    # The vignette is in the collapsed "Original visual effects" section: open it first. It is a checkbox,
+    # or in a narrow or large-text launcher an Off/On list whose optional second click picks Off.
+    # Hover first: the Graphics page is taller than the window, so controls may need scrolling into view.
+    script = ("800:ui:Advanced;1200:hover:display.brightness;1600:ui:display.brightness;2000:ui:graphics.effects;"
+              "2500:hover:display.vignette;2800:ui:display.vignette;3300:uiopt:display.vignette.off;"
+              "3800:shot:%s;4300:ui:Play" % shot)
     run = harness.run_game("ui-picture", secs=60, preset=a.preset, scripted=False, quiet=True,
                            env={"RECOMP_SETTINGS": settings, "RECOMP_LAUNCHER_SCRIPT": script,
                                 "RECOMP_INPUT_IGNORE_FOCUS": "1"})

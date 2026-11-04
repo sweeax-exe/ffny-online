@@ -817,15 +817,21 @@ static void page_display()
     experience_widget();
     ImGui::SeparatorText("Graphics and display");
     settings_group("display", {"fullscreen", "aspect", "render_scale", "brightness"});
-    if (ImGui::CollapsingHeader("Image quality"))
+    bool quality = ImGui::CollapsingHeader("Image quality");
+    ui_target("graphics.quality");                  // scripted tests open the sections by name
+    if (quality)
         settings_group("display", {"filter", "msaa", "texture_mips", "anisotropy", "vsync"});
-    if (ImGui::CollapsingHeader("Original visual effects"))
+    bool effects = ImGui::CollapsingHeader("Original visual effects");
+    ui_target("graphics.effects");
+    if (effects)
         settings_group("display", {"vignette", "vignette_strength", "color_tint", "scratches"});
     if (recomp_settings_get("display", "aspect", 0) >= 2 && ImGui::CollapsingHeader("Widescreen framing")) {
         settings_group("display", {"widescreen_hud", "widescreen_cutscenes", "widescreen_side_fill"});
         ImGui::TextWrapped("Auto chooses 16:9 or 16:10. Wider ratios are experimental. Original framing preserves the game's cutscene composition.");
     }
-    if (ImGui::CollapsingHeader("Advanced graphics")) {
+    bool advanced = ImGui::CollapsingHeader("Advanced graphics");
+    ui_target("graphics.advanced");
+    if (advanced) {
         settings_group("display", {"window_width", "window_height", "widescreen_fov_cap", "gamma"});
         reset_topic("Reset graphics to factory defaults", {"display"});
         ImGui::TextWrapped("Custom window dimensions do not change internal render resolution. The field-of-view limit only affects very wide screens.");
@@ -1894,13 +1900,17 @@ UiResult ui_draw(UiMode mode, float x, float y, float width, float height)
             if (recomp_settings_get("debug", "unlock_all", 0)) {
                 ImGui::TextWrapped("Unlock all is enabled. Turning it off does not undo saved unlocks.");
                 if (ImGui::Button("Turn off unlock all")) { recomp_settings_set("debug", "unlock_all", 0); commit(); }
-            } else if (ImGui::Button("Unlock all fighters and venues...")) ImGui::OpenPopup("Permanent unlocks");
+            } else {
+                if (ImGui::Button("Unlock all fighters and venues...")) ImGui::OpenPopup("Permanent unlocks");
+                ui_target("cheats.unlock_all");
+            }
             ImGui::SetNextWindowSizeConstraints(ImVec2(0, 0), ImVec2(width - 24, height - 24));
             if (ImGui::BeginPopupModal("Permanent unlocks", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
                 ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + std::min(420 * scale, width - 80));
                 ImGui::TextWrapped("This can permanently save unlocks to your Story profile. Turning it off will not restore your previous progress. Back up your saves in Help first.");
                 ImGui::PopTextWrapPos();
                 if (ImGui::Button("Enable permanent unlocks")) { recomp_settings_set("debug", "unlock_all", 1); commit(); ImGui::CloseCurrentPopup(); }
+                ui_target("cheats.unlock_all.confirm");
                 if (ImGui::Button("Cancel") || ImGui::IsKeyPressed(ImGuiKey_Escape) || ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight)) ImGui::CloseCurrentPopup();
                 ImGui::EndPopup();
             }
