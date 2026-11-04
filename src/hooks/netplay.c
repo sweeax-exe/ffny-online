@@ -312,6 +312,17 @@ void netplay_crowd_update(void) { sub_00081170(); }
 #define RB_BUDGET_PERCENT  50
 #define RB_BUDGET_WINDOW_MS 5000
 #define RB_BUDGET_WINDOWS   2
+/* Build 55: the same fallback when a fight rolls back too often, whatever it costs: RB_BUDGET_WINDOWS windows
+ * in a row in which the steps run again per normal update reach this (RECOMP_ROLLBACK_HEAVY=<x> for tests,
+ * 0: off). Every load is a chance to put memory back only in part, and on players' PCs the re-runs were far
+ * above the test runs' level: F9 ba0793 (build 54, 101-117 ms) ran 1.3-1.8 steps again per step over whole
+ * matches (8028 in 6102 steps, 8961 in 5299, 10297 in 5834), e7d57d 1.6 (11501 in 7106), with 4 to 9 steps
+ * deep; the CPU budget never saw it (3 ms a rollback, under 10% of the time). Whole matches that high mean
+ * windows well over 2. The local two-copy runs at 100+10 ms of test lag (the 120 ms limit's edge) reach
+ * single windows of 1.5-1.7 and never two in a row (rollback-plan-2026-11.md, thirteenth round), so 2.0 in
+ * two windows in a row (the PC plays every step three times for 10 s) is a connection whose entries come
+ * late all the time, which the delay, not rollback, has to cover. */
+#define RB_HEAVY_RERUN      2.0
 
 static CRITICAL_SECTION g_cs;
 static INIT_ONCE g_once = INIT_ONCE_STATIC_INIT;
@@ -6994,8 +7005,32 @@ static void rb_budget_tick(void)
     } else {
         N.rbb_over = 0;
     }
+    {   /* build 55: too many rollbacks, whatever they cost (RB_HEAVY_RERUN) */
+        static double heavy = -1;
+        double rerun = N.rbb_updates ? (double)N.rbb_depth / N.rbb_updates : 0.0;
+        if (heavy < 0) {
+            const char *v = getenv("RECOMP_ROLLBACK_HEAVY");
+            heavy = v && *v ? atof(v) : RB_HEAVY_RERUN;
+        }
+        if (heavy > 0 && rerun >= heavy) {
+            N.rbb_heavy++;
+            fprintf(stderr, "[ROLLBACK] heavy: %.2f steps run again per update (%u rollbacks in %u updates, limit %.2f), "
+                    "%u window(s) in a row, step %u\n", rerun, N.rbb_count, N.rbb_updates, heavy, N.rbb_heavy, N.step);
+        } else {
+            N.rbb_heavy = 0;
+        }
+        if (N.rbb_heavy >= RB_BUDGET_WINDOWS && N.rbb_over < RB_BUDGET_WINDOWS) {
+            N.rb_slow_off = 1;
+            N.chain_ask = 1;
+            fprintf(stderr, "[NETPLAY] rollback fallback: too many rollbacks (%.2f steps run again per update, limit "
+                    "%.2f): this PC waits for the other players' entries from step %u; the START's rematches play in "
+                    "lockstep\n", rerun, heavy, N.step);
+            toast(9000, "This match runs without rollback from here: the connection makes it roll back too often.");
+        }
+    }
     if (N.rbb_over >= RB_BUDGET_WINDOWS) {
         N.rb_slow_off = 1;
+        N.chain_ask = 1;
         fprintf(stderr, "[NETPLAY] rollback fallback: this PC cannot keep up with rollback (%.0f%% of the time on it, "
                 "limit %d%%): it waits for the other players' entries from step %u until the next START\n", share,
                 percent, N.step);
