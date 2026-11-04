@@ -780,7 +780,12 @@ void pc_language_start(const char *data_root, const char *game_dir)
     Sha sha;
 
     recomp_settings_get_text("language", "pack", folder, sizeof folder, "");
-    snprintf(folder, sizeof folder, "%s", trim(folder));
+    {
+        /* trim() points into folder, so this may overlap. snprintf onto its own source is undefined,
+         * and glibc empties the text first: the pack was lost on Linux. */
+        const char *name = trim(folder);
+        memmove(folder, name, strlen(name) + 1);
+    }
     if (!folder[0]) {
         fprintf(stderr, "[LANG] the game's own language (no language pack)\n");
         return;
