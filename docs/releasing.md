@@ -114,12 +114,20 @@ last release plus docs), with the same gate.
    Verify every asset's SHA-256 against GitHub's digest and its provenance, then
    publish the draft. Version tags are immutable; use a new version to correct a
    published release.
+6. A beta for player play-testing uses the tag `vMAJOR.MINOR.PATCH-beta.N` with the CMake
+   version it leads up to and `docs/releases/<tag>.md`. The workflow drafts it as a prerelease
+   that is never Latest, and the app and setup never offer prereleases as updates. A beta
+   reports the final version number, so its testers download the next beta or the final release
+   themselves. The final release is tagged `vMAJOR.MINOR.PATCH` later, from `main`.
 
 GitHub supplies the source ZIP/tar archives. They do not include submodules;
 the supported command-line setup is a recursive clone at the tag. Only the
 setup tools (`DefJamSetup-<version>-windows-x64.exe`, `-macos-arm64.dmg`,
-`-linux-x64.tar.gz`), each with its `.sha256` and `.provenance.json`, are
-attached after standalone setup inventory/tests pass. `check-setup-assets.py`
+`-linux-x64.tar.gz`) and the app (`DefJamRecompiled-<version>-macos-arm64.zip`,
+`DefJamRecompiled-<version>-windows-x64.exe` and `DefJamRecompiled-<version>-x86_64.AppImage`,
+D215), each with its `.sha256` and `.provenance.json`, are attached after standalone setup
+inventory/tests pass. The app carries the same payload (in the bundle's Resources on macOS, built
+into the program on Windows, in the AppImage's image on Linux) and updates itself from these assets. `check-setup-assets.py`
 refuses development payloads and generated/game inputs. Source-tree binary bans
 remain intact; a precompiled game is never published. See [setup installer](setup-installer.md)
 for behavior and remaining acceptance gates.

@@ -1,5 +1,10 @@
 #define _CRT_SECURE_NO_WARNINGS
 #include "pc_mods.h"
+#include "pc_settings.h"
+#include "recomp_settings.h"
+#if defined(DEFJAM_APP)
+#include "app/app.h"
+#endif
 #include "pc_ui_model.h"
 #include "pc_ui_actions.h"
 #include <cstdlib>
@@ -27,6 +32,7 @@ namespace pcui {
 static ModView view;
 static std::string status;
 static bool running = false;
+static std::string enable_after_install;
 static bool testing_versions = false;
 static fs::path job_root;
 #if defined(_WIN32)
@@ -95,7 +101,8 @@ void mod_cancel() {
     std::ofstream cancel(job_root / "cancel"); cancel << "cancel\n";
     status = "Cancelling; the previous installation will be kept.";
 }
-bool mod_start(const std::string &command, const std::string &id) {
+bool mod_start(const std::string &requested, const std::string &id) {
+    std::string command = requested == "install-enable" ? "install" : requested;
     if (running) return false;
     if (command != "status" && command != "refresh" && command != "install" && command != "remove" && command != "rollback" && command != "recover") return false;
     if (!id.empty() && !pack_name(id)) return false;
@@ -105,6 +112,9 @@ bool mod_start(const std::string &command, const std::string &id) {
     }
     std::error_code error;
     auto source = fs::current_path();
+#if defined(DEFJAM_APP)
+    if (!app::payload().empty()) source = app::payload() / "source";
+#endif
     if (!fs::is_regular_file(source / "setup/mods.py", error)) source = fs::u8path(DEFJAM_MOD_SOURCE_DIR);
     auto script = source / "setup/mods.py";
     auto python = source.parent_path() /
@@ -133,7 +143,11 @@ bool mod_start(const std::string &command, const std::string &id) {
     if (error) { status = "Could not create mod-manager state directory."; return false; }
     fs::remove(job_root / "cancel",error);
     fs::remove(job_root / "progress.ini",error);
-    std::vector<std::string> args = {interpreter, path_utf8(script), command, "--data-dir", folder_path(Folder::Data), "--runtime", DEFJAM_VERSION,
+    std::string runtime = DEFJAM_VERSION;
+#if defined(DEFJAM_APP)
+    if (app::install().installed) runtime = app::install().version;
+#endif
+    std::vector<std::string> args = {interpreter, path_utf8(script), command, "--data-dir", folder_path(Folder::Data), "--runtime", runtime,
                                    "--cancel-file", path_utf8(job_root / "cancel")};
 #if defined(DEFJAM_MOD_WIDE)
     args.insert(args.end(), {"--capability", "wide-v1"});
@@ -168,6 +182,7 @@ bool mod_start(const std::string &command, const std::string &id) {
     posix_spawn_file_actions_destroy(&files); posix_spawnattr_destroy(&attr);
     if (result) { status = "Could not start mod helper: " + std::to_string(result); return false; }
 #endif
+    enable_after_install = requested == "install-enable" ? id : "";
     running = true; status = "Working on mods..."; return true;
 }
 bool mod_poll() {
@@ -190,6 +205,38 @@ bool mod_poll() {
     running = false; read_view();
     if (ok) status = view.message.empty() ? "Mod inventory refreshed." : view.message;
     else if (progress["progress"]["message"].empty()) status = "Mod helper failed. Local packs are unchanged; see the launcher log.";
+    if (ok && !enable_after_install.empty()) {
+        char selected[RECOMP_SETTING_TEXT_MAX], language[RECOMP_SETTING_TEXT_MAX];
+        recomp_settings_get_text("textures", "packs", selected, sizeof selected, "");
+        recomp_settings_get_text("language", "pack", language, sizeof language, "");
+        auto packs = inventory(fs::u8path(folder_path(Folder::Mods)), selected, language);
+        auto pack = std::find_if(packs.begin(), packs.end(), [&](const Pack &p) { return p.name == enable_after_install && p.problem.empty(); });
+        if (pack != packs.end()) {
+            auto selection = recomp_settings_find(pack->language ? "language" : "textures", pack->language ? "pack" : "packs");
+            auto enabled = recomp_settings_find("textures", "enabled");
+            if ((selection && selection->source == RECOMP_SETTING_FROM_ENV) ||
+                (!pack->language && enabled && enabled->source == RECOMP_SETTING_FROM_ENV)) {
+                status = "Installed. A launch environment override prevents enabling this mod; remove it and enable in Installed.";
+            } else {
+                if (pack->language) recomp_settings_set_text("language", "pack", pack->name.c_str());
+                else {
+                    // A newly installed texture mod goes last (highest priority). Updates preserve order.
+                    Pack chosen = *pack;
+                    packs.erase(pack); chosen.selected = true; packs.push_back(chosen);
+                    auto text = selected_packs(packs);
+                    if (text.size() >= sizeof selected) {
+                        status = "Installed but not enabled: the pack list is full. Manage selections in Installed.";
+                        enable_after_install.clear(); return true;
+                    }
+                    recomp_settings_set_text("textures", "packs", text.c_str());
+                    recomp_settings_set("textures", "enabled", 1);
+                }
+                status = pc_settings_save_checked() ? "Installed, but settings could not be saved. Enable the mod again in Installed."
+                                                    : "Installed and enabled for the next game launch. Review texture conflicts in Installed if needed.";
+            }
+        } else status = "Download finished, but the installed pack could not be enabled. Open Installed to inspect its status.";
+    }
+    enable_after_install.clear();
     return true;
 }
 } // namespace pcui

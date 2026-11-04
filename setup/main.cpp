@@ -1,5 +1,8 @@
 // Game-free Windows bootstrap, native wizard, and stable installation launcher.
 #define WIN32_LEAN_AND_MEAN
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
 #include <windows.h>
 #include <commctrl.h>
 #include <shlobj.h>
@@ -15,6 +18,12 @@
 #include <thread>
 
 namespace fs = std::filesystem;
+struct WizardControl { HWND hwnd; RECT logical; bool action; };
+static std::vector<WizardControl> wizardControls;
+static UINT wizardDpi = 96;
+static int wizardScroll = 0;
+static HFONT wizardFont = nullptr;
+static void layoutWizard();
 static HWND window, dumpEdit, installEdit, dataEdit, statusLabel, startButton, cancelButton, prerequisites, desktopShortcut, hdUpscale, launchInfo;
 static HWND releaseChoice, operationChoice, refreshButton;
 static std::vector<std::wstring> releaseTags{L""};
@@ -106,10 +115,32 @@ static fs::path localAppData() {
     return result;
 }
 
+// The app (src/app, D215) writes where it is to <install>\app-location.txt whenever it loads this
+// install. When that names a program that is there, the wrapper starts it for this install and
+// waits for it (the app waits for the game), so shortcuts made by an older setup open the app.
+// Returns false when there is no app to start, and the wrapper plays the game as before.
+static bool forwardToApp(const fs::path& root) {
+    std::ifstream note(root / L"app-location.txt", std::ios::binary);
+    std::string line;
+    if (!note || !std::getline(note, line)) return false;
+    while (!line.empty() && (line.back() == '\r' || line.back() == '\n' || line.back() == ' ')) line.pop_back();
+    if (line.empty()) return false;
+    auto app = fs::path(utf8(line));
+    std::error_code error;
+    if (!app.is_absolute() || _wcsicmp(app.extension().c_str(), L".exe") != 0 || !fs::is_regular_file(app, error))
+        return false;
+    HANDLE process;
+    try { process = spawn(app, {L"--install", root.wstring()}); }
+    catch (...) { return false; }
+    wait(process);
+    return true;
+}
+
 static void launchInstalled() {
     wchar_t self[32768], source[32768], data[32768], exe[32768];
     GetModuleFileNameW(nullptr, self, 32768);
     auto root = fs::path(self).parent_path();
+    if (forwardToApp(root)) return;
     HANDLE lock = CreateFileW((root / L"play.lock").c_str(), GENERIC_READ | GENERIC_WRITE,
                              0, nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (lock == INVALID_HANDLE_VALUE) throw std::runtime_error("The game or an update is already running.");
@@ -254,7 +285,86 @@ static void setBusy(bool value) {
     SetWindowTextW(cancelButton, value ? L"Cancel" : L"Close");
 }
 
+static int scaled(int value) { return MulDiv(value, (int)wizardDpi, 96); }
+static void layoutWizard() {
+    if (wizardControls.empty()) return;
+    RECT area{}; GetClientRect(window, &area);
+    int body = std::max(1L, area.bottom - scaled(66));
+    int total = scaled(585);
+    wizardScroll = std::clamp(wizardScroll, 0, std::max(0, total - body));
+    SCROLLINFO scroll{sizeof(scroll), SIF_RANGE | SIF_PAGE | SIF_POS};
+    scroll.nMax = total - 1; scroll.nPage = (UINT)body; scroll.nPos = wizardScroll;
+    SetScrollInfo(window, SB_VERT, &scroll, TRUE);
+    for (auto &c : wizardControls) {
+        int x = scaled(c.logical.left), w = scaled(c.logical.right - c.logical.left);
+        int h = scaled(c.logical.bottom - c.logical.top);
+        int y = c.action ? area.bottom - scaled(49) : scaled(c.logical.top) - wizardScroll;
+        // Stretch broad fields and right-anchored browse/close actions with the window.
+        int extra = area.right - scaled(714);
+        if (c.logical.left >= 440) x += extra;
+        else if (c.logical.right >= 430) w += extra;
+        w = std::max(scaled(30), w);
+        SetWindowPos(c.hwnd, nullptr, x, y, w, h, SWP_NOZORDER | SWP_NOACTIVATE);
+        if (c.action) SetWindowRgn(c.hwnd, nullptr, TRUE);
+        else {
+            int visibleTop = std::clamp(-y, 0, h), visibleBottom = std::clamp(body - y, 0, h);
+            HRGN clip = CreateRectRgn(0, visibleTop, w, std::max(visibleTop, visibleBottom));
+            SetWindowRgn(c.hwnd, clip, TRUE); // Windows owns the region after success.
+        }
+    }
+    InvalidateRect(window, nullptr, TRUE);
+}
+static void fontWizard() {
+    HFONT next = CreateFontW(-scaled(16), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+                            DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+                            CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
+    for (auto &c : wizardControls) SendMessageW(c.hwnd, WM_SETFONT, (WPARAM)next, TRUE);
+    if (wizardFont) DeleteObject(wizardFont);
+    wizardFont = next;
+}
+static LRESULT CALLBACK focusWizard(HWND child, UINT message, WPARAM wp, LPARAM lp, UINT_PTR, DWORD_PTR) {
+    if (message == WM_SETFOCUS) {
+        RECT area{}; GetClientRect(window, &area);
+        int body = std::max(1L, area.bottom - scaled(66));
+        for (auto &c : wizardControls) if (c.hwnd == child && !c.action) {
+            int top = scaled(c.logical.top), bottom = scaled(c.logical.bottom);
+            if (top < wizardScroll) wizardScroll = top;
+            else if (bottom > wizardScroll + body) wizardScroll = bottom - body;
+            layoutWizard(); break;
+        }
+    }
+    return DefSubclassProc(child, message, wp, lp);
+}
+
 static LRESULT CALLBACK windowProc(HWND hwnd, UINT message, WPARAM wp, LPARAM lp) {
+    if (message == WM_GETMINMAXINFO) {
+        MONITORINFO monitor{sizeof(monitor)};
+        GetMonitorInfoW(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST), &monitor);
+        auto limits = reinterpret_cast<MINMAXINFO*>(lp);
+        limits->ptMinTrackSize.x = std::min(scaled(700), (int)(monitor.rcWork.right-monitor.rcWork.left));
+        limits->ptMinTrackSize.y = std::min(scaled(400), (int)(monitor.rcWork.bottom-monitor.rcWork.top));
+        return 0;
+    }
+    if (message == WM_SIZE) { layoutWizard(); return 0; }
+    if (message == WM_DPICHANGED) {
+        wizardDpi = HIWORD(wp);
+        auto rect = reinterpret_cast<RECT*>(lp);
+        SetWindowPos(hwnd, nullptr, rect->left, rect->top, rect->right-rect->left, rect->bottom-rect->top, SWP_NOZORDER | SWP_NOACTIVATE);
+        fontWizard(); layoutWizard(); return 0;
+    }
+    if (message == WM_VSCROLL || message == WM_MOUSEWHEEL) {
+        SCROLLINFO info{sizeof(info), SIF_ALL}; GetScrollInfo(hwnd, SB_VERT, &info);
+        if (message == WM_MOUSEWHEEL) wizardScroll -= GET_WHEEL_DELTA_WPARAM(wp) * scaled(48) / WHEEL_DELTA;
+        else switch (LOWORD(wp)) {
+            case SB_LINEUP: wizardScroll -= scaled(24); break;
+            case SB_LINEDOWN: wizardScroll += scaled(24); break;
+            case SB_PAGEUP: wizardScroll -= info.nPage; break;
+            case SB_PAGEDOWN: wizardScroll += info.nPage; break;
+            case SB_THUMBTRACK: wizardScroll = info.nTrackPos; break;
+        }
+        layoutWizard(); return 0;
+    }
+
     if (message == WM_COMMAND) {
         int id = LOWORD(wp);
         if (id == 102) browse(dumpEdit, false);
@@ -417,7 +527,7 @@ static LRESULT CALLBACK windowProc(HWND hwnd, UINT message, WPARAM wp, LPARAM lp
     }
     if (message == WM_CLOSE) {
         if (running) {
-            if (MessageBoxW(window, L"Cancel setup? Completed steps can be resumed.", L"Setup", MB_YESNO) == IDYES) {
+            if (MessageBoxW(window, L"Cancel setup? Your existing game and saves are kept. A cancelled build may need to start again.", L"Setup", MB_YESNO) == IDYES) {
                 std::ofstream marker(cancelPath); marker << "cancel";
                 SetWindowTextW(statusLabel, L"Cancelling the current step...");
             }
@@ -434,11 +544,11 @@ static int wizard(HINSTANCE instance, bool smoke = false, bool preparation = fal
     wc.hCursor = LoadCursor(nullptr, IDC_ARROW); wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
     wc.hIcon = LoadIcon(instance, MAKEINTRESOURCE(1));  // setup/app.rc.in
     wc.lpszClassName = L"DefJamSetupWizard"; RegisterClassW(&wc);
-    window = CreateWindowW(wc.lpszClassName, L"Def Jam Recompiled \u2014 Setup", WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
+    window = CreateWindowW(wc.lpszClassName, L"Def Jam Recompiled \u2014 Setup", WS_OVERLAPPEDWINDOW | WS_VSCROLL,
         CW_USEDEFAULT, CW_USEDEFAULT, 740, 689, nullptr, nullptr, instance, nullptr);
     control(L"STATIC", L"Build and play from your own USA Xbox dump", 0, 24, 20, 660, 24, 0);
-    control(L"STATIC", L"First setup can take an hour and needs internet for missing Microsoft Build Tools.", 0, 24, 49, 670, 25, 0);
-    control(L"STATIC", L"Your ISO/XISO or extracted dump", 0, 24, 87, 580, 20, 0);
+    control(L"STATIC", L"Setup builds your game locally. Missing build tools need an internet connection.", 0, 24, 49, 670, 25, 0);
+    control(L"STATIC", L"Your USA Xbox game copy (disc image or extracted folder)", 0, 24, 87, 580, 20, 0);
     dumpEdit = control(L"EDIT", L"", WS_TABSTOP | ES_AUTOHSCROLL, 24, 110, 465, 26, 101);
     control(L"BUTTON", L"Image...", WS_TABSTOP, 499, 110, 86, 26, 102);
     control(L"BUTTON", L"Folder...", WS_TABSTOP, 595, 110, 90, 26, 103);
@@ -454,7 +564,7 @@ static int wizard(HINSTANCE instance, bool smoke = false, bool preparation = fal
     control(L"BUTTON", L"Browse...", WS_TABSTOP, 595, 238, 90, 26, 107);
     prerequisites = control(L"BUTTON", L"Install missing Microsoft Build Tools (requires consent and administrator access)",
         WS_TABSTOP | BS_AUTOCHECKBOX, 24, 278, 675, 25, 108);
-    hdUpscale = control(L"BUTTON", L"Apply HD texture upscale during install (increases install time)",
+    hdUpscale = control(L"BUTTON", L"Generate Upscaled Original Textures (takes extra time)",
         WS_TABSTOP | BS_AUTOCHECKBOX, 24, 309, 675, 25, 115);
     control(L"STATIC", L"Adds about 6.2 GB; requires extra working space. No GPU needed.", 0, 44, 336, 650, 18, 0);
     desktopShortcut = control(L"BUTTON", L"Create a desktop shortcut", WS_TABSTOP | BS_AUTOCHECKBOX, 24, 358, 675, 25, 113);
@@ -462,7 +572,7 @@ static int wizard(HINSTANCE instance, bool smoke = false, bool preparation = fal
     statusLabel = control(L"STATIC", L"Choose your dump and destinations, then select Install / Repair.", 0, 24, 394, 670, 35, 0);
     launchInfo = control(L"EDIT", L"After setup, use Play or open DefJamLauncher.exe from your install folder.",
                         WS_TABSTOP | ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL, 24, 439, 660, 50, 114);
-    startButton = control(L"BUTTON", L"Install / Repair", WS_TABSTOP | BS_DEFPUSHBUTTON, 24, 501, 140, 30, 109);
+    startButton = control(L"BUTTON", L"Start selected action", WS_TABSTOP | BS_DEFPUSHBUTTON, 24, 501, 140, 30, 109);
     control(L"BUTTON", L"Open logs", WS_TABSTOP, 180, 501, 110, 30, 111);
     control(L"BUTTON", L"Play", WS_TABSTOP, 306, 501, 90, 30, 112);
     EnableWindow(GetDlgItem(window, 112), FALSE);
@@ -473,12 +583,27 @@ static int wizard(HINSTANCE instance, bool smoke = false, bool preparation = fal
         if (rect.top >= 394) SetWindowPos(child, nullptr, rect.left, rect.top + 90, 0, 0, SWP_NOSIZE | SWP_NOZORDER);
     }
     releaseChoice = control(L"COMBOBOX", L"", WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL, 24, 391, 410, 230, 117);
-    refreshButton = control(L"BUTTON", L"Fetch GitHub releases", WS_TABSTOP, 445, 391, 240, 26, 118);
+    refreshButton = control(L"BUTTON", L"Check for updates", WS_TABSTOP, 445, 391, 240, 26, 118);
     operationChoice = control(L"COMBOBOX", L"", WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL, 24, 429, 660, 230, 116);
     SendMessageW(releaseChoice, CB_ADDSTRING, 0, (LPARAM)L"Bundled release (offline)");
     const wchar_t* labels[] = {L"Automatic install / repair / update", L"Install", L"Repair", L"Clean Update", L"Downgrade (future compatible releases)", L"Clean Rebuild (same version)"};
     for (auto label : labels) SendMessageW(operationChoice, CB_ADDSTRING, 0, (LPARAM)label);
     SendMessageW(releaseChoice, CB_SETCURSEL, 0, 0); SendMessageW(operationChoice, CB_SETCURSEL, 0, 0);
+    for (HWND child = GetWindow(window, GW_CHILD); child; child = GetWindow(child, GW_HWNDNEXT)) {
+        RECT rect{}; GetWindowRect(child, &rect); MapWindowPoints(nullptr, window, (POINT*)&rect, 2);
+        int id = GetDlgCtrlID(child);
+        wizardControls.push_back({child, rect, id == 109 || id == 110 || id == 111 || id == 112});
+        SetWindowSubclass(child, focusWizard, 1, 0);
+    }
+    wizardDpi = GetDpiForWindow(window);
+    fontWizard();
+    MONITORINFO monitor{sizeof(monitor)};
+    GetMonitorInfoW(MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST), &monitor);
+    int ww = std::min(scaled(740), (int)(monitor.rcWork.right-monitor.rcWork.left));
+    int wh = std::min(scaled(689), (int)(monitor.rcWork.bottom-monitor.rcWork.top));
+    SetWindowPos(window, nullptr, monitor.rcWork.left + ((monitor.rcWork.right-monitor.rcWork.left)-ww)/2,
+                 monitor.rcWork.top + ((monitor.rcWork.bottom-monitor.rcWork.top)-wh)/2, ww, wh, SWP_NOZORDER);
+    layoutWizard();
     if (smoke) {
         // Hardware-free CI probe: controls exist and the wizard needs no Python,
         // D3D device, compiler or payload extraction merely to open.

@@ -71,6 +71,15 @@ void pc_ui_register_overlay(void);
  * game, 0 to quit. The window is SDL's, so this hands the work to the thread that owns the window
  * (host_posix_call_on_main) and waits. Returns 1 when there is no window to show it in. */
 int pc_launcher_run(void);
+
+#endif
+
+#if !defined(_WIN32) || defined(DEFJAM_APP)
+/* The launcher's window itself, in SDL's window, on the thread that owns SDL's windows (the game's
+ * launcher off Windows, and the app, src/app, on every platform). Runs until the player plays (1)
+ * or quits (0); -1 when there is no window. *open_setup is set when the player asked for setup,
+ * which the caller opens after this returns. */
+int pc_launcher_window(int *open_setup);
 #endif
 
 #ifdef __cplusplus

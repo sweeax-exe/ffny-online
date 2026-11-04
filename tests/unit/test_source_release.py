@@ -78,7 +78,15 @@ def test_release_requires_matching_version_and_notes():
         release.validate_version('v0.1.0', 'project(defjam_recomp VERSION 0.1.0 LANGUAGES C)', False)
 
 
-@pytest.mark.parametrize('tag', ['preview', 'v0.1.0-rc1', '../../notes', 'v0.1'])
+def test_beta_tag_matches_the_cmake_version():
+    release.validate_version('v0.1.0-beta.1', 'project(defjam_recomp VERSION 0.1.0 LANGUAGES C)', True)
+    release.validate_version('v0.1.0-beta.12', 'project(defjam_recomp VERSION 0.1.0 LANGUAGES C)', True)
+    with pytest.raises(ValueError, match='CMake'):
+        release.validate_version('v0.2.0-beta.1', 'project(defjam_recomp VERSION 0.1.0 LANGUAGES C)', True)
+
+
+@pytest.mark.parametrize('tag', ['preview', 'v0.1.0-rc1', '../../notes', 'v0.1', 'v0.1.0-beta', 'v0.1.0-beta.0',
+                                 'v0.1.0-beta.1/../x', 'v0.1.0-alpha.1'])
 def test_release_rejects_invalid_tags(tag):
     with pytest.raises(ValueError, match='vMAJOR'):
         release.validate_version(tag, 'project(defjam_recomp VERSION 0.1.0)', True)

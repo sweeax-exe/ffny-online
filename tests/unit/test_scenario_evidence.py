@@ -1,5 +1,7 @@
 """Behavioral negative controls for reports, captures, fixtures and ownership."""
+import argparse
 import importlib.util
+import os
 import json
 import re
 from pathlib import Path
@@ -168,7 +170,8 @@ def test_fixture_output_inside_source_is_rejected(tmp_path):
 def test_scenario_settings_are_explicit_and_reject_ambiguous_values(tmp_path):
     settings, env = suite.scenario_settings()
     assert settings == {'render_scale': 2, 'gamma': True, 'vsync': True,
-                        'brightness': 100, 'vignette': True, 'vignette_strength': 100}
+                        'brightness': 100, 'vignette': True, 'vignette_strength': 100,
+                        'texture_mips': False, 'anisotropy': 1, 'color_tint': 100, 'scratches': True, 'msaa': 1}
     assert env['RECOMP_RENDER_SCALE'] == '2' and env['RECOMP_GAMMA'] == '1'
     assert env['RECOMP_BRIGHTNESS'] == '100' and env['RECOMP_VIGNETTE'] == '1' and env['RECOMP_VIGNETTE_STRENGTH'] == '100'
     p = tmp_path / 'settings.json'
@@ -178,13 +181,31 @@ def test_scenario_settings_are_explicit_and_reject_ambiguous_values(tmp_path):
     p.write_text(json.dumps({'brightness': 150, 'vignette': False, 'vignette_strength': 40}))
     settings, env = suite.scenario_settings(p)
     assert env['RECOMP_BRIGHTNESS'] == '150' and env['RECOMP_VIGNETTE'] == '0' and env['RECOMP_VIGNETTE_STRENGTH'] == '40'
-    for bad in ({'brightness': 49}, {'brightness': 201}, {'vignette_strength': 101}, {'brightness': '120'}):
+    p.write_text(json.dumps({'texture_mips': True, 'anisotropy': 16, 'color_tint': 0, 'scratches': False}))
+    settings, env = suite.scenario_settings(p)
+    assert env['RECOMP_TEXTURE_MIPS'] == '1' and env['RECOMP_ANISOTROPY'] == '16x'
+    assert env['RECOMP_COLOR_TINT'] == '0' and env['RECOMP_SCRATCHES'] == '0'
+    assert suite.scenario_settings()[1]['RECOMP_ANISOTROPY'] == 'off'
+    assert suite.scenario_settings()[1]['RECOMP_MSAA'] == 'off'
+    p.write_text(json.dumps({'msaa': 4}))
+    assert suite.scenario_settings(p)[1]['RECOMP_MSAA'] == '4x'
+    for bad in ({'anisotropy': 3}, {'anisotropy': True}):
+        p.write_text(json.dumps(bad))
+        with pytest.raises(ValueError, match='anisotropy'):
+            suite.scenario_settings(p)
+    for bad in ({'msaa': 16}, {'msaa': '4x'}):
+        p.write_text(json.dumps(bad))
+        with pytest.raises(ValueError, match='msaa'):
+            suite.scenario_settings(p)
+    for bad in ({'brightness': 49}, {'brightness': 201}, {'vignette_strength': 101}, {'brightness': '120'},
+                {'color_tint': 101}):
         p.write_text(json.dumps(bad))
         with pytest.raises(ValueError, match='integer'):
             suite.scenario_settings(p)
-    p.write_text(json.dumps({'gamma': 'false'}))
-    with pytest.raises(ValueError, match='booleans'):
-        suite.scenario_settings(p)
+    for bad in ({'gamma': 'false'}, {'texture_mips': 1}):
+        p.write_text(json.dumps(bad))
+        with pytest.raises(ValueError, match='booleans'):
+            suite.scenario_settings(p)
     p.write_text(json.dumps({'game_folder': 'unexpected'}))
     with pytest.raises(ValueError, match='unknown'):
         suite.scenario_settings(p)
@@ -423,7 +444,7 @@ def test_missing_build_writes_failed_report_before_copying_fixture(tmp_path, mon
     (src / 'profile').write_bytes(b'synthetic')
     fixture = tmp_path / 'fixture'
     suite.create_fixture(src, fixture, 'synthetic profile')
-    def missing_build(*args): raise ValueError('synthetic missing build certificate')
+    def missing_build(*args, **kwargs): raise ValueError('synthetic missing build certificate')
     monkeypatch.setattr(suite.harness.pipeline_state, 'verify_build', missing_build)
     monkeypatch.setattr(suite, 'source_identity', lambda _: {})
     output = tmp_path / 'report'
@@ -445,7 +466,7 @@ def test_scenario_runner_requires_audio_and_retains_browsable_evidence(tmp_path,
     fixture = tmp_path / 'fixture'
     suite.create_fixture(src, fixture, 'synthetic')
     monkeypatch.setattr(suite, 'source_identity', lambda _: {'head': 'synthetic'})
-    monkeypatch.setattr(suite.harness.pipeline_state, 'verify_build', lambda *a: {})
+    monkeypatch.setattr(suite.harness.pipeline_state, 'verify_build', lambda *a, **k: {})
     received = {}
     monkeypatch.setenv('RECOMP_TEXTURE_PACKS', 'inherited-must-not-enter-scenario')
     def launch(route, **kwargs):
@@ -612,6 +633,29 @@ def test_fight_stream_golden_is_a_hash_and_matches_the_repeat_check():
     # Nothing but identifiers and numbers: no game state is stored, only its hash.
     assert set(golden) == {'schema', 'what', 'route', 'rng_seed', 'step_input', 'max_step', 'records', 'sha256',
                            'recorded', 'note'}
+
+
+def test_isolated_fight_stream_golden_matches_what_the_isolated_checks_run():
+    """--isolate-crowd (#98) is a separate pinned fight with its own hash: same shape, same parameters, same
+    route, selected by regress.py and switched on in the game by the suite."""
+    plain = json.loads((ROOT / 'tests/golden/fight-stream.json').read_text(encoding='utf-8'))
+    iso = json.loads((ROOT / 'tests/golden/fight-stream-isolated.json').read_text(encoding='utf-8'))
+    assert set(iso) == set(plain)
+    assert re.fullmatch(r'[0-9a-f]{64}', iso['sha256']) and iso['records'] > 0 and iso['sha256'] != plain['sha256']
+    assert (iso['route'], iso['rng_seed'], iso['step_input'], iso['max_step']) == \
+        (plain['route'], plain['rng_seed'], plain['step_input'], plain['max_step'])
+    regress = (ROOT / 'scripts/regress.py').read_text(encoding='utf-8')
+    assert regress.count('--isolate-crowd') >= 3 and 'fight-stream-isolated.json' in regress
+    suite = (ROOT / 'scripts/scenario_suite.py').read_text(encoding='utf-8')
+    assert "env['RECOMP_TEST_ISOLATE_CROWD'] = '1'" in suite
+
+
+def test_regress_picks_the_isolated_golden_only_when_asked():
+    spec = importlib.util.spec_from_file_location('regress_for_golden', ROOT / 'scripts/regress.py')
+    regress = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(regress)
+    assert os.path.basename(regress.fight_golden(argparse.Namespace(isolate_crowd=False))) == 'fight-stream.json'
+    assert os.path.basename(regress.fight_golden(argparse.Namespace(isolate_crowd=True))) == 'fight-stream-isolated.json'
 
 
 def played_free_for_all():

@@ -398,7 +398,9 @@ void pc_input_window_message(HWND window, UINT msg, WPARAM wp, LPARAM lp)
     }
 }
 
-#else /* !_WIN32 */
+#endif /* _WIN32 */
+
+#if !defined(_WIN32) || defined(DEFJAM_APP)
 
 void pc_input_host_key(int vk, int down)
 {
@@ -412,4 +414,4 @@ void pc_input_host_wheel(int notches)
         xbox_HostInputWheel(notches);
 }
 
-#endif /* _WIN32 */
+#endif /* !_WIN32 || DEFJAM_APP */

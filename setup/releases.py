@@ -1,7 +1,8 @@
 """Public GitHub setup discovery and verified, release-specific engine handoff.
 
-Only the approved exe/dmg/tar.gz assets are consumed. No GitHub credentials,
-dump contents, save contents or personal paths are sent to the service.
+Only the approved exe/dmg/tar.gz setup assets, and the app assets (D215), are
+consumed. No GitHub credentials, dump contents, save contents or personal paths
+are sent to the service.
 """
 import contextlib
 import ctypes
@@ -13,6 +14,7 @@ from pathlib import Path, PurePosixPath
 import re
 import shutil
 import signal
+import struct
 import subprocess
 import sys
 import tarfile
@@ -22,11 +24,31 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import zipfile
+import zlib
 
 REPO = 'vyanhursky/DefJamFFNY-recomp'
 API = 'https://api.github.com/repos/' + REPO + '/releases'
 EXTENSIONS = {'windows-x64': '.exe', 'macos-arm64': '.dmg', 'linux-x64': '.tar.gz'}
 CONTRACT = {'protocol': 1, 'data_schema': 1}
+# The app that sets up, launches and updates the game (src/app, D214/D215), with its checksum
+# and provenance beside it as for setup. On macOS a ZIP of the bundle, whose Resources hold
+# the setup payload; it updates itself from these (select_app).
+APP_ASSETS = {'windows-x64': 'DefJamRecompiled-{v}-windows-x64.exe',
+              'macos-arm64': 'DefJamRecompiled-{v}-macos-arm64.zip',
+              'linux-x64': 'DefJamRecompiled-{v}-x86_64.AppImage'}
+APP_BUNDLE = 'Def Jam Recompiled.app'
+APP_PROGRAM = 'defjam_app'
+# On Windows the app is one program with the setup payload ZIP inside it as a resource (RCDATA 101,
+# as in the setup executable). Staged for an update, it is a folder: the program and payload/.
+APP_PROGRAM_WINDOWS = 'DefJamRecompiled.exe'
+PAYLOAD_RESOURCE = (10, 101)        # RT_RCDATA, the payload's id
+# On Linux the app is one AppImage (scripts/package-appimage.py): the AppImage runtime followed by a
+# gzip squashfs holding the program, the setup payload and the desktop file and icon the AppImage
+# format expects. Staged for an update it is a folder holding the AppImage under this name. The
+# squashfs is read here in Python (read_squashfs), so nothing downloaded is run to check it.
+APP_PROGRAM_LINUX = 'DefJamRecompiled.AppImage'
+APPIMAGE_FILES = {'defjam_app', 'DefJamRecompiled.desktop', 'DefJamRecompiled.png'}
+APPIMAGE_LINKS = {'AppRun': 'defjam_app', '.DirIcon': 'DefJamRecompiled.png'}
 
 
 def default_cache():
@@ -158,13 +180,20 @@ def catalog(platform, cache, cancelled=lambda: None, allow_cached=False):
             continue
         seen.add(tag)
         stem = 'DefJamSetup-' + tag[1:] + '-' + platform
-        expected = (stem + EXTENSIONS[platform], stem + '.sha256', stem + '.provenance.json')
         assets = release.get('assets', [])
-        selected = [next((a for a in assets if a.get('name') == name), None) for name in expected]
-        available = all(a and a.get('state') == 'uploaded' and sum(x.get('name') == a['name'] for x in assets) == 1 for a in selected)
-        result.append({'tag': tag, 'version': tag[1:], 'available': bool(available),
+
+        def complete(expected):
+            selected = [next((a for a in assets if a.get('name') == name), None) for name in expected]
+            ok = all(a and a.get('state') == 'uploaded' and sum(x.get('name') == a['name'] for x in assets) == 1 for a in selected)
+            return bool(ok), selected if ok else []
+        available, selected = complete((stem + EXTENSIONS[platform], stem + '.sha256', stem + '.provenance.json'))
+        app = APP_ASSETS[platform].format(v=tag[1:])
+        app_stem = app.rsplit('.', 1)[0]
+        app_available, app_selected = complete((app, app_stem + '.sha256', app_stem + '.provenance.json'))
+        result.append({'tag': tag, 'version': tag[1:], 'available': available,
                        'reason': '' if available else 'No complete setup for this platform',
-                       'notes': str(release.get('body') or '')[:20000], 'assets': selected if available else []})
+                       'notes': str(release.get('body') or '')[:20000], 'assets': selected,
+                       'app_available': app_available, 'app_assets': app_selected})
     result.sort(key=lambda row: version(row['version']), reverse=True)
     # Display cache is explicit offline metadata; downloads still verify pinned asset bytes.
     fd, temporary = tempfile.mkstemp(prefix='releases-', suffix='.pending', dir=cache)
@@ -296,6 +325,283 @@ def safe_zip(data, destination):
                     target.chmod(mode & 0o777)
 
 
+def pe_resource(data, type_id, name_id):
+    """The bytes of resource `name_id` of type `type_id` (first language) in a Windows PE image,
+    read from the file's own tables: nothing is loaded or run. ValueError when it is not there or
+    the tables point outside the file."""
+    def u16(at):
+        if at < 0 or at + 2 > len(data):
+            raise ValueError('Not a complete Windows program')
+        return int.from_bytes(data[at:at + 2], 'little')
+
+    def u32(at):
+        if at < 0 or at + 4 > len(data):
+            raise ValueError('Not a complete Windows program')
+        return int.from_bytes(data[at:at + 4], 'little')
+
+    if data[:2] != b'MZ':
+        raise ValueError('Not a Windows program')
+    pe = u32(0x3C)
+    if data[pe:pe + 4] != b'PE\0\0':
+        raise ValueError('Not a Windows program')
+    sections, optional_size = u16(pe + 6), u16(pe + 20)
+    optional = pe + 24
+    magic = u16(optional)
+    if magic not in (0x10B, 0x20B):
+        raise ValueError('Unknown Windows program format')
+    directories = optional + (96 if magic == 0x10B else 112)
+    if u32(directories - 4) < 3:
+        raise ValueError('The program has no resources')
+    rsrc_rva = u32(directories + 16)
+    table = optional + optional_size
+
+    def offset(rva, size=0):
+        for s in range(sections):
+            at = table + 40 * s
+            virtual_size, address, raw_size, raw = u32(at + 8), u32(at + 12), u32(at + 16), u32(at + 20)
+            if address <= rva < address + max(virtual_size, raw_size):
+                result = rva - address + raw
+                if rva + size > address + raw_size or result + size > len(data):
+                    raise ValueError('Resource outside the program file')
+                return result
+        raise ValueError('Resource outside the program file')
+
+    base = offset(rsrc_rva)
+
+    def entry(directory, wanted):
+        named, ids = u16(directory + 12), u16(directory + 14)
+        for k in range(named + ids):
+            at = directory + 16 + 8 * k
+            name, target = u32(at), u32(at + 4)
+            if wanted is None or (not name & 0x80000000 and name == wanted):
+                return target
+        raise ValueError('Resource not found')
+
+    level = entry(base, type_id)
+    if not level & 0x80000000:
+        raise ValueError('Malformed resource table')
+    level = entry(base + (level & 0x7FFFFFFF), name_id)
+    if not level & 0x80000000:
+        raise ValueError('Malformed resource table')
+    leaf = entry(base + (level & 0x7FFFFFFF), None)      # the first language
+    if leaf & 0x80000000:
+        raise ValueError('Malformed resource table')
+    data_rva, size = u32(base + leaf), u32(base + leaf + 4)
+    start = offset(data_rva, size)
+    return bytes(data[start:start + size])
+
+
+def appimage_offset(data):
+    """Where the squashfs starts in a type 2 AppImage: the end of its ELF runtime, as appimagetool
+    and the runtime itself compute it (the section header table or the last section, whichever ends
+    later)."""
+    if len(data) < 64 or data[:4] != b'\x7fELF' or data[4] != 2 or data[5] != 1:
+        raise ValueError('Not a 64-bit Linux program')
+    if data[8:11] != b'AI\x02':
+        raise ValueError('Not a type 2 AppImage')
+    shoff, = struct.unpack_from('<Q', data, 0x28)
+    shentsize, shnum = struct.unpack_from('<HH', data, 0x3A)
+    end = shoff + shentsize * shnum
+    if shentsize < 64 or end > len(data):
+        raise ValueError('Malformed AppImage runtime')
+    for k in range(shnum):
+        kind, = struct.unpack_from('<I', data, shoff + k * shentsize + 4)
+        offset, size = struct.unpack_from('<QQ', data, shoff + k * shentsize + 24)
+        if kind != 8:                                       # SHT_NOBITS takes no room in the file
+            end = max(end, offset + size)
+    if end > len(data):
+        raise ValueError('Malformed AppImage runtime')
+    return end
+
+
+class _SquashTable:
+    """A squashfs metadata table (inodes or directories), decompressed block by block as far as a
+    reference into it needs. `ref_block` is a block's position from the table's start."""
+    LIMIT = 256 * 1024**2
+
+    def __init__(self, fs, start):
+        self.fs, self.start, self.pos = fs, start, start
+        self.buf, self.at = bytearray(), {0: 0}
+
+    def _grow(self):
+        if self.pos + 2 > self.fs.end or len(self.buf) > self.LIMIT:
+            raise ValueError('Malformed squashfs metadata')
+        header, = struct.unpack_from('<H', self.fs.data, self.fs.base + self.pos)
+        size = header & 0x7FFF
+        raw = self.fs.data[self.fs.base + self.pos + 2:self.fs.base + self.pos + 2 + size]
+        if len(raw) != size:
+            raise ValueError('Malformed squashfs metadata')
+        self.buf += raw if header & 0x8000 else self.fs.inflate(raw, 8192)
+        self.pos += 2 + size
+        self.at[self.pos - self.start] = len(self.buf)
+
+    def read(self, ref_block, offset, size):
+        while ref_block not in self.at:
+            if self.pos - self.start > ref_block:
+                raise ValueError('Malformed squashfs reference')
+            self._grow()
+        begin = self.at[ref_block] + offset
+        while len(self.buf) < begin + size:
+            self._grow()
+        return bytes(self.buf[begin:begin + size])
+
+
+class SquashFS:
+    """A read-only view of a squashfs 4.0 image compressed with gzip, enough to list it and read its
+    files: what scripts/package-appimage.py makes (mksquashfs -comp gzip)."""
+
+    def __init__(self, data, base=0):
+        self.data, self.base = data, base
+        if len(data) < base + 96:
+            raise ValueError('No squashfs image')
+        (magic, _, _, self.block_size, _, compressor, _, _, _, major, _, self.root, used, _, _, inode_table,
+         dir_table, self.frag_table, _) = struct.unpack_from('<IIIIIHHHHHHQQQQQQQQ', data, base)
+        if magic != 0x73717368 or major != 4:
+            raise ValueError('Not a squashfs 4.0 image')
+        if compressor != 1:
+            raise ValueError('The app image must be compressed with gzip')
+        if not 4096 <= self.block_size <= 1024**2 or base + used > len(data):
+            raise ValueError('Malformed squashfs image')
+        self.end = used
+        self.inodes = _SquashTable(self, inode_table)
+        self.dirs = _SquashTable(self, dir_table)
+
+    def inflate(self, raw, limit):
+        engine = zlib.decompressobj()
+        out = engine.decompress(raw, limit)
+        if engine.unconsumed_tail:
+            raise ValueError('Malformed squashfs block')
+        return out
+
+    def inode(self, ref):
+        """(kind, mode, details) of an inode reference: kind 'dir', 'file' or 'link'."""
+        block, offset = ref >> 16, ref & 0xFFFF
+        kind, mode = struct.unpack('<HH', self.inodes.read(block, offset, 4))
+        body = offset + 16
+        if kind == 1:
+            index, _, size, block_offset, _ = struct.unpack('<IIHHI', self.inodes.read(block, body, 16))
+            return 'dir', mode, (index, block_offset, size)
+        if kind == 8:
+            _, size, index, _, _, block_offset, _ = struct.unpack('<IIIIHHI', self.inodes.read(block, body, 24))
+            return 'dir', mode, (index, block_offset, size)
+        if kind in (2, 9):
+            if kind == 2:
+                start, fragment, frag_offset, size = struct.unpack('<IIII', self.inodes.read(block, body, 16))
+                head = 16
+            else:
+                start, size, _, _, fragment, frag_offset, _ = struct.unpack('<QQQIIII', self.inodes.read(block, body, 40))
+                head = 40
+            whole = size // self.block_size if fragment != 0xFFFFFFFF else -(-size // self.block_size)
+            if size > 2 * 1024**3:
+                raise ValueError('Squashfs file too large')
+            sizes = struct.unpack('<%dI' % whole, self.inodes.read(block, body + head, 4 * whole))
+            return 'file', mode, (start, size, sizes, fragment, frag_offset)
+        if kind in (3, 10):
+            _, length = struct.unpack('<II', self.inodes.read(block, body, 8))
+            if length > 4096:
+                raise ValueError('Malformed squashfs link')
+            return 'link', mode, self.inodes.read(block, body + 8, length).decode('utf-8')
+        raise ValueError('Unsupported squashfs entry (devices, pipes and sockets are refused)')
+
+    def listing(self, details):
+        """The (name, inode reference) pairs of a directory."""
+        index, block_offset, size = details
+        data = self.dirs.read(index, block_offset, max(size - 3, 0))
+        at, out = 0, []
+        while at + 12 <= len(data):
+            count, start, _ = struct.unpack_from('<III', data, at)
+            at += 12
+            for _ in range(count + 1):
+                offset, _, _, length = struct.unpack_from('<HhHH', data, at)
+                name = data[at + 8:at + 9 + length].decode('utf-8')
+                at += 9 + length
+                if name in ('', '.', '..') or '/' in name:
+                    raise ValueError('Malformed squashfs name')
+                out.append((name, (start << 16) | offset))
+        return out
+
+    def walk(self):
+        """Every entry below the root: (path, kind, mode, details), parents before children."""
+        pending, seen = [('', self.root)], 0
+        while pending:
+            prefix, ref = pending.pop()
+            kind, _, details = self.inode(ref)
+            if kind != 'dir':
+                raise ValueError('Malformed squashfs directory')
+            for name, child in sorted(self.listing(details)):
+                seen += 1
+                if seen > 100000:
+                    raise ValueError('Squashfs image holds too many entries')
+                path = prefix + name
+                kind, mode, info = self.inode(child)
+                yield path, kind, mode, info
+                if kind == 'dir':
+                    pending.append((path + '/', child))
+
+    def read(self, details):
+        start, size, sizes, fragment, frag_offset = details
+        out, pos = bytearray(), self.base + start
+        for word in sizes:
+            length = word & 0xFFFFFF
+            if length == 0:
+                out += bytes(self.block_size)
+                continue
+            raw = self.data[pos:pos + length]
+            out += raw if word & 0x1000000 else self.inflate(raw, self.block_size)
+            pos += length
+        if fragment != 0xFFFFFFFF:
+            where, = struct.unpack_from('<Q', self.data, self.base + self.frag_table + 8 * (fragment // 512))
+            table = _SquashTable(self, where)
+            frag_start, frag_size, _ = struct.unpack('<QII', table.read(0, (fragment % 512) * 16, 16))
+            length = frag_size & 0xFFFFFF
+            raw = self.data[self.base + frag_start:self.base + frag_start + length]
+            block = raw if frag_size & 0x1000000 else self.inflate(raw, self.block_size)
+            out += block[frag_offset:frag_offset + size - len(out)]
+        if len(out) < size:
+            raise ValueError('Malformed squashfs file')
+        return bytes(out[:size])
+
+
+def read_appimage(data):
+    """The app's AppImage, checked for shape: (squashfs, {path: (kind, mode, details)}). Only the
+    approved files and links at the top and plain files and folders under payload/."""
+    image = SquashFS(data, appimage_offset(data))
+    entries = {}
+    for path, kind, mode, details in image.walk():
+        top = path.split('/')[0]
+        if top == 'payload':
+            if kind == 'link':
+                raise ValueError('The app image holds a link in its setup files: ' + path)
+        elif kind == 'link':
+            if APPIMAGE_LINKS.get(path) != details:
+                raise ValueError('Unexpected link in the app image: ' + path)
+        elif path not in APPIMAGE_FILES or kind != 'file':
+            raise ValueError('Unexpected file in the app image: ' + path)
+        entries[path] = (kind, mode, details)
+    if not APPIMAGE_FILES | set(APPIMAGE_LINKS) | {'payload'} <= set(entries):
+        raise ValueError('The app image is incomplete')
+    return image, entries
+
+
+def appimage_payload(data, destination):
+    """Unpack the setup payload inside the app's AppImage into `destination`, keeping execute bits."""
+    image, entries = read_appimage(data)
+    total = 0
+    for path, (kind, mode, details) in entries.items():
+        if not path.startswith('payload/'):
+            continue
+        target = Path(destination).joinpath(*path[len('payload/'):].split('/'))
+        if kind == 'dir':
+            target.mkdir(parents=True, exist_ok=True)
+            continue
+        total += details[1]
+        if total > 2 * 1024**3:
+            raise ValueError('The app image expands beyond its limit')
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(image.read(details))
+        target.chmod(mode & 0o755)
+
+
 def unpack_setup(installer, platform, destination):
     if platform == 'macos-arm64':
         mount = Path(destination).parent / 'mounted'
@@ -408,6 +714,95 @@ def select_payload(tag, platform, cache, verify, previous, operation, cancelled,
             if manifest.get(key) != provenance.get(key):
                 raise ValueError('Selected payload does not match release provenance: ' + key)
         return scratch, payload
+    except BaseException:
+        shutil.rmtree(scratch)
+        raise
+
+
+def newest_app(platform, cache, current, cancelled=lambda: None):
+    """The newest stable release newer than `current` with a complete app for this platform, or None."""
+    for row in catalog(platform, cache, cancelled, allow_cached=True):
+        if row.get('app_available') and version(row['version']) > version(current):
+            return row
+    return None
+
+
+def select_app(tag, platform, cache, verify, cancelled, progress):
+    """Download a release's app and verify it as select_payload verifies setup: the asset's
+    GitHub digest, its checksum file and its provenance, then the setup payload inside it
+    against that provenance. Returns (scratch, bundle); the caller moves the bundle and
+    removes scratch. macOS: the ZIP of the bundle. Windows: the program, whose payload resource is
+    read from its tables (not run) and checked against the provenance's payload_sha256; the
+    bundle is a folder with the program and payload/. Linux: the AppImage, whose squashfs is read
+    here (not mounted or run) and whose payload is unpacked into scratch only to be verified; the
+    bundle is a folder holding just the AppImage (APP_PROGRAM_LINUX)."""
+    if platform not in ('macos-arm64', 'windows-x64', 'linux-x64'):
+        raise ValueError('This platform\'s app cannot update itself yet; download it from the release page')
+    cache = Path(cache)
+    cache.mkdir(parents=True, exist_ok=True)
+    target = next((r for r in catalog(platform, cache, cancelled, allow_cached=True) if r['tag'] == tag), None)
+    if not target or not target.get('app_available'):
+        raise ValueError('Selected release has no app for this platform')
+    app_asset, checksum_asset, provenance_asset = target['app_assets']
+    if type(provenance_asset.get('size')) is not int or provenance_asset['size'] > 4 * 1024**2:
+        raise ValueError('App provenance too large')
+    provenance = json.loads(download(provenance_asset, cache, cancelled, progress).read_text())
+    if (provenance.get('development') or provenance.get('kind') != 'app' or provenance.get('platform') != platform
+            or provenance.get('version') != target['version'] or not capable(provenance.get('updater'))
+            or not re.fullmatch(r'[0-9a-f]{64}', str(provenance.get('app_sha256')))):
+        raise ValueError('App provenance identity mismatch')
+    if type(checksum_asset.get('size')) is not int or checksum_asset['size'] > 1024:
+        raise ValueError('App checksum file is too large')
+    verify_checksum(download(checksum_asset, cache, cancelled, progress), app_asset['name'], provenance['app_sha256'])
+    archive = download(app_asset, cache, cancelled, progress, provenance['app_sha256'])
+    if sha(archive) != provenance['app_sha256']:
+        raise ValueError('App provenance checksum mismatch')
+    scratch = Path(tempfile.mkdtemp(prefix='app-', dir=cache))
+    try:
+        progress('Verifying the new app')
+        cancelled()
+        if platform == 'windows-x64':
+            if not re.fullmatch(r'[0-9a-f]{64}', str(provenance.get('payload_sha256'))):
+                raise ValueError('App provenance identity mismatch')
+            payload_zip = pe_resource(archive.read_bytes(), *PAYLOAD_RESOURCE)
+            if hashlib.sha256(payload_zip).hexdigest() != provenance['payload_sha256']:
+                raise ValueError('The setup files inside the new app do not match its release provenance')
+            bundle = scratch / 'app'
+            bundle.mkdir()
+            shutil.copyfile(archive, bundle / APP_PROGRAM_WINDOWS)
+            safe_zip(payload_zip, bundle / 'payload')
+            # Which built-in payload payload/ holds (src/app/app_install.cpp reads it at start).
+            (bundle / 'payload.sha256').write_text(provenance['payload_sha256'] + '\n', encoding='utf-8')
+            manifest = verify(bundle / 'payload')
+            for key in ('version', 'platform', 'source_commit', 'toolkit_commit', 'files', 'updater'):
+                if manifest.get(key) != provenance.get(key):
+                    raise ValueError('The new app does not match its release provenance: ' + key)
+            return scratch, bundle
+        if platform == 'linux-x64':
+            checked = scratch / 'payload'
+            appimage_payload(archive.read_bytes(), checked)
+            manifest = verify(checked)
+            for key in ('version', 'platform', 'source_commit', 'toolkit_commit', 'files', 'updater'):
+                if manifest.get(key) != provenance.get(key):
+                    raise ValueError('The new app does not match its release provenance: ' + key)
+            shutil.rmtree(checked)
+            bundle = scratch / 'app'
+            bundle.mkdir()
+            shutil.copyfile(archive, bundle / APP_PROGRAM_LINUX)
+            (bundle / APP_PROGRAM_LINUX).chmod(0o755)
+            return scratch, bundle
+        safe_zip(archive.read_bytes(), scratch)
+        if sorted(p.name for p in scratch.iterdir()) != [APP_BUNDLE]:
+            raise ValueError('Unexpected app archive contents')
+        bundle = scratch / APP_BUNDLE
+        program = bundle / 'Contents/MacOS' / APP_PROGRAM
+        if not (bundle / 'Contents/Info.plist').is_file() or not program.is_file() or not os.access(program, os.X_OK):
+            raise ValueError('The new app is incomplete')
+        manifest = verify(bundle / 'Contents/Resources/payload')
+        for key in ('version', 'platform', 'source_commit', 'toolkit_commit', 'files', 'updater'):
+            if manifest.get(key) != provenance.get(key):
+                raise ValueError('The new app does not match its release provenance: ' + key)
+        return scratch, bundle
     except BaseException:
         shutil.rmtree(scratch)
         raise

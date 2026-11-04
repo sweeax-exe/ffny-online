@@ -55,43 +55,6 @@ static int hitch_probe_ms(void)
     return ms > 0 ? ms : 0;
 }
 
-size_t pc_debug_settings(RecompSetting *out, size_t max)
-{
-    size_t n = 0;
-    if (max < 11) return 0;
-    memset(out, 0, sizeof(*out) * 11);
-#define ADD(...) do { RecompSetting s_ = { __VA_ARGS__ }; out[n++] = s_; } while (0)
-    ADD("debug", "record", RECOMP_SETTING_BOOL, 0, 0, 0, NULL, "RECOMP_RECORD", RECOMP_SETTING_RESTART,
-        "Keep a play-test record of every run under logs/sessions: frame times, events, the sound and the last "
-        "seconds of pictures. The mark key writes a bug bundle of those seconds. See docs/playtest-recorder.md.");
-    ADD("debug", "mark_key", RECOMP_SETTING_STRING, 0, 0, 0, NULL, NULL, RECOMP_SETTING_RESTART,
-        "While recording, the key that marks a moment and writes a bug bundle of the seconds around it.", "F9");
-    ADD("debug", "mark_pad", RECOMP_SETTING_STRING, 0, 0, 0, NULL, NULL, RECOMP_SETTING_RESTART,
-        "While recording, pad buttons that mark a moment, for a pad or a Steam Deck. Alternatives are separated "
-        "by commas; a combination joined with + must be held for half a second. Button names as in [gamepad]. "
-        "Empty for none.", "back+left_stick_click");
-    ADD("debug", "record_fps", RECOMP_SETTING_INT, 10, 0, 30, NULL, "RECOMP_RECORD_FPS", RECOMP_SETTING_RESTART,
-        "Pictures a second kept for bundles (0 for none). Each one is read back from the graphics card, which "
-        "costs that frame a little; frames.csv records how much.");
-    ADD("debug", "record_seconds", RECOMP_SETTING_INT, 30, 5, 120, NULL, "RECOMP_RECORD_SECONDS",
-        RECOMP_SETTING_RESTART, "How many seconds before a mark a bundle holds.");
-    ADD("debug", "record_audio", RECOMP_SETTING_BOOL, 1, 0, 0, NULL, NULL, RECOMP_SETTING_RESTART,
-        "Also keep the mixed sound (about 11 MB a minute; older sessions lose it, see keep_sessions).");
-    ADD("debug", "record_game_state", RECOMP_SETTING_BOOL, 1, 0, 0, NULL, NULL, RECOMP_SETTING_RESTART,
-        "Also log the fighters, health and match events (the test harness's read-only probes).");
-    ADD("debug", "auto_bundle_hitch_ms", RECOMP_SETTING_INT, 0, 0, 5000, NULL, "RECOMP_RECORD_AUTO_HITCH_MS",
-        RECOMP_SETTING_RESTART,
-        "A frame at least this long writes a bundle by itself (at most five a run, a minute apart). 0: only marks.");
-    ADD("debug", "hang_seconds", RECOMP_SETTING_INT, 15, 0, 600, NULL, "RECOMP_RECORD_HANG_SECS",
-        RECOMP_SETTING_RESTART, "No frame for this many seconds writes a hang bundle. 0: never.");
-    ADD("debug", "keep_sessions", RECOMP_SETTING_INT, 20, 1, 500, NULL, NULL, RECOMP_SETTING_RESTART,
-        "Sessions kept whole; older ones keep their bundles and events only.");
-    ADD("debug", "record_guest_ram", RECOMP_SETTING_BOOL, 0, 0, 0, NULL, NULL, RECOMP_SETTING_RESTART,
-        "Crash and hang bundles also hold the game's 64 MB of memory, for offline inspection.");
-#undef ADD
-    return n;
-}
-
 /* The file stderr is going to, when the caller redirected it to one. */
 static int stderr_file(char *out, size_t size)
 {

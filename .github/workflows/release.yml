@@ -49,10 +49,13 @@ jobs:
           GH_REPO: ${{ github.repository }}
           RELEASE_TAG: ${{ github.ref_name }}
         run: |
-          gh release create "$RELEASE_TAG" --verify-tag --draft \
+          # A beta tag (vX.Y.Z-beta.N, scripts/check-release.py) becomes a prerelease, never Latest.
+          channel=()
+          case "$RELEASE_TAG" in *-beta.*) channel=(--prerelease --latest=false) ;; esac
+          gh release create "$RELEASE_TAG" --verify-tag --draft "${channel[@]}" \
             --title "Def Jam: Fight for NY — Recompiled $RELEASE_TAG" \
             --notes-file "docs/releases/$RELEASE_TAG.md" setup-assets/*
-      # Only the inventoried game-free setups (Windows, macOS and Linux), their checksums and provenance are attached.
+      # Only the inventoried game-free setups (Windows, macOS and Linux), the Windows and macOS apps, their checksums and provenance are attached.
       # No game executable, lifted source or game-data assets are uploaded.
       # Source archives contain the two fingerprinted owner-approved README visuals.
       # GitHub provides source archives; cloning recursively fetches the pinned toolkit.

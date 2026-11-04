@@ -841,7 +841,7 @@ def run_game(name, stages=(), tail="", shots="", secs=240, preset=RELEASE_PRESET
         raise SystemExit("not built: %s (scripts/build.ps1 -Preset %s, or scripts/pipeline.py build --preset %s)"
                          % (exe, preset, preset))
     try:
-        build_state = pipeline_state.verify_build(Path(REPO), preset)
+        build_state = pipeline_state.verify_build(Path(REPO), preset, python=pipeline_state.RECORDED)
     except (OSError, ValueError, KeyError) as ex:
         raise SystemExit(str(ex)) from ex
     if not os.path.exists(os.path.join(REPO, "game", "default.xbe")):

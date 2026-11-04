@@ -26,6 +26,8 @@ DRIVER=r'''
 #include <iostream>
 #include <thread>
 #include <chrono>
+#include <cstdlib>
+extern "C" int pc_settings_save_checked(void) { std::abort(); }
 std::string data;
 namespace pcui { std::string folder_path(Folder which) { return data; } }
 int main(int argc,char **argv) {
@@ -46,16 +48,30 @@ int main(int argc,char **argv) {
 def bridge(tmp_path_factory):
     folder=tmp_path_factory.mktemp('mod bridge with spaces')
     source=folder/'main.cpp';source.write_text(DRIVER)
+    # This process/lock fixture has no initialized toolkit or settings registry.
+    # Status/recovery must not read or write settings; fail loudly if that changes.
+    (folder/'recomp_settings.h').write_text(r'''#pragma once
+#include <stddef.h>
+#include <stdlib.h>
+#define RECOMP_SETTING_TEXT_MAX 1024
+enum { RECOMP_SETTING_FROM_ENV = 2 };
+struct RecompSetting { int source; };
+static inline const char *recomp_settings_get_text(const char *, const char *, char *, size_t, const char *) { abort(); }
+static inline RecompSetting *recomp_settings_find(const char *, const char *) { abort(); }
+static inline int recomp_settings_set_text(const char *, const char *, const char *) { abort(); }
+static inline int recomp_settings_set(const char *, const char *, int) { abort(); }
+''')
     compiler=shutil.which('cl') or shutil.which('clang++') or shutil.which('g++')
     if not compiler:pytest.skip('C++ compiler required')
     exe=folder/('bridge.exe' if os.name=='nt' else 'bridge')
     if Path(compiler).stem.lower()=='cl':
-        command=[compiler,'/nologo','/std:c++17','/EHsc','/I'+str(ROOT/'src/hooks'),
+        command=[compiler,'/nologo','/std:c++17','/EHsc','/I'+str(folder),'/I'+str(ROOT/'src/hooks'),
                  '/DDEFJAM_MOD_SOURCE_DIR="'+str(ROOT)+'"',str(source),str(ROOT/'src/hooks/pc_mods.cpp'),'/Fe:'+str(exe)]
     else:
-        command=[compiler,'-std=c++17','-pthread','-I'+str(ROOT/'src/hooks'),
+        command=[compiler,'-std=c++17','-pthread','-I'+str(folder),'-I'+str(ROOT/'src/hooks'),
                  '-DDEFJAM_MOD_SOURCE_DIR="'+str(ROOT)+'"',str(source),str(ROOT/'src/hooks/pc_mods.cpp'),'-o',str(exe)]
-    subprocess.run(command,cwd=folder,check=True,capture_output=True)
+    result=subprocess.run(command,cwd=folder,capture_output=True,text=True)
+    assert result.returncode == 0, result.stdout + result.stderr
     return exe
 
 

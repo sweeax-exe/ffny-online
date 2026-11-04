@@ -39,16 +39,8 @@ def analyze(args):
     run('dump check', [SCRIPTS / 'verify-dump.py', data / 'extracted'])
     (tk / 'game_files').mkdir(exist_ok=True)
     shutil.copyfile(data / 'extracted/default.xbe', tk / 'game_files/default.xbe')
-    run('analysis input snapshot', [SCRIPTS / 'pipeline-state.py', 'begin-analysis', '--toolkit', tk])
-    xbe = 'game_files/default.xbe'
-    seeds = REPO / 'config/seed_functions.json'
-    seed_args = ['--seed-functions', seeds] if seeds.exists() else []
-    run('XBE parser', ['-m', 'tools.xbe_parser', xbe, '--json', 'game_files/default_analysis.json'], tk)
-    run('disassembly', ['-m', 'tools.disasm', xbe, '--force', '--extra-sections',
-                        'D3D,D3DX,DSOUND,XPP,XGRPH,DOLBY', *seed_args], tk)
-    run('function identification', ['-m', 'tools.func_id', xbe, '-v'], tk)
-    run('ABI analysis', ['-m', 'tools.abi_analysis', xbe, '-v'], tk)
-    run('analysis state validation', [SCRIPTS / 'pipeline-state.py', 'record-analysis', '--toolkit', tk])
+    # The commands and their stage key live in pipeline-state.py, so analyze.ps1 runs the same ones.
+    run('analysis', [SCRIPTS / 'pipeline-state.py', 'analyze', '--toolkit', tk])
     if getattr(args, 'no_archive', False):
         return  # Setup candidates keep analysis local; preserve player data caches.
     archive = data / 'analysis'

@@ -39,7 +39,9 @@
 #include "hooks/scene_launcher.h"
 #include "hooks/dev_module.h"
 #include "patches/picture.h"
+#include "patches/cheats.h"
 #include "patches/menu_geometry.h"
+#include "patches/cinema_timing.h"
 
 /* Crowd test controls (src/hooks/crowd_control.c, RECOMP_TEST_CROWD; off unless set). */
 void defjam_crowd_match_start(void);
@@ -59,6 +61,7 @@ void sub_001A50B0_enter(void)
 {
     if (defjam_test_observations_enabled())
         defjam_test_health_begin(MEM32(g_esp + 4), MEM32(g_esp));
+    cheats_health_change();     /* [cheats] infinite_health, no_regen (src/patches/cheats.c) */
 }
 void sub_001A6870_enter(void)
 {
@@ -87,6 +90,7 @@ void sub_00087700_enter(void)
     defjam_test_step();
     s_ws_hud_live = 1;
     ws_hud_heartbeat();
+    cheats_fight_step();        /* [cheats] fight cheats (src/patches/cheats.c) */
 }
 /* The match's update (thiscall; the match at 0x349760, its state at +0x2D820).
  * Only states 5 and 8 run the simulation step above; any other state (intro,
@@ -104,7 +108,7 @@ void sub_0008BE60_enter(void)
  * through a pause that began in a live fight (issue #95); otherwise no change. */
 void sub_00079B60_enter(void) { if (s_ws_hud_live) ws_hud_heartbeat(); }
 void sub_0007A8F0_enter(void) { if (s_ws_hud_live) ws_hud_heartbeat(); }
-void sub_001A4D90_enter(void) { defjam_test_match_start(); defjam_crowd_match_start(); }
+void sub_001A4D90_enter(void) { defjam_test_match_start(); defjam_crowd_match_start(); cheats_match_start(); }
 /* Widescreen song notification (src/patches/widescreen.c, issue #118): the APT
  * movie loader (archive, name, &apt, &const), and the next step of the load,
  * which its only caller runs straight after it with the .apt data as its second
@@ -159,6 +163,7 @@ void sub_001BC690_enter(void) { defjam_test_rng(g_esp); }
 void sub_001AD220_enter(void) { defjam_test_ai_seed(g_esp); }
 /* The seeding routine every generator of this kind goes through (thiscall). */
 void sub_000AA0D0_enter(void) { defjam_test_generator_seed(g_ecx, g_esp); defjam_crowd_seed(g_ecx, g_esp); }
+void sub_000C8820_enter(void) { defjam_test_logic_seed(g_ecx, g_esp); }
 /* Every draw (RECOMP_TEST_DRAWS): the C runtime's rand, the match generator, and the two
  * wrappers the object-form generators are drawn through; then the background crowd's update. */
 void sub_00200820_enter(void) { defjam_test_draw(1, MEM32(g_esp)); }
@@ -173,10 +178,15 @@ void sub_00073FD0_enter(void) { scene_launcher_loader_enter(); }
 void sub_0002DFF0_enter(void) { scene_launcher_mode_enter(); }
 /* The developer run module, rebuilt from the host (src/hooks/dev_module.c): the manager's tick
  * queues it on request; its methods are traced. RECOMP_DEV_MODULE; off unless set. */
-void sub_00077040_enter(void) { dev_module_manager_enter(); }
+void sub_00077040_enter(void) { dev_module_manager_enter(); cheats_game_tick(); }  /* + Story cheats, src/patches/cheats.c */
 void sub_00077C40_enter(void) { dev_module_trace(1); }
 void sub_00077A40_enter(void) { dev_module_trace(3); }
 void sub_00077B20_enter(void) { dev_module_trace(4); }
+
+/* v0.16 direct callers reach this wrapper too; retain the generated renderer.
+ * No guest registers or return/stack words are changed by the wrapper itself. */
+extern void sub_000766B0_gen(void);
+void sub_000766B0(void) { defjam_cinema_render(sub_000766B0_gen); }
 void sub_00077DD0_enter(void) { dev_module_trace(7); }
 /* The per-fighter pad reader: RECOMP_TEST_INPUT replaces what it is about to read. */
 void sub_001BAA00_enter(void) { defjam_test_input(MEM32(g_esp + 4)); }
@@ -843,6 +853,7 @@ static void funccall_hook(void)
     recorder_event_text("fe", "text", text);
     xbox_NoteAnchorEvent(text);
     defjam_unlock_all_on_funccall(text);   /* RECOMP_UNLOCK_ALL, src/patches/dev_unlock.c */
+    cheats_on_funccall(text);              /* Story tracking and Story cheats, src/patches/cheats.c */
     sub_00068BA0();
     /* RECOMP_FE_INJECT: commands of a test's own, after a chosen call (src/hooks/fe_inject.c). */
     fe_inject_after_call(text);
@@ -975,6 +986,8 @@ static void trace_voice_render(void)
 
 recomp_func_t recomp_lookup_manual(uint32_t xbox_va)
 {
+    if (xbox_va == 0x000766B0u)
+        return sub_000766B0;
     if (xbox_va == 0x001BAA00u && input_latency_on())
         return sub_001BAA00;
     if (xbox_va == 0x0027E075u && (input_latency_on() || input_consumption_on())) return sub_0027E075;
@@ -1272,6 +1285,23 @@ void sub_002203C6_enter(void)
  */
 void sub_000D9AF0_enter(void) { picture_tint_draw_enter(); }
 void sub_00028460_enter(void) { picture_quad_color_enter(); }
+
+/*
+ * The rest of the venue post effects ([display] color_tint, scratches). sub_000D8C40 draws the
+ * current variance each frame (its entry logs it with RECOMP_POSTFX_TRACE=1); sub_000D8AD0 is
+ * the film scratch overlay it calls when the variance's ScratchesEnable is set (thiscall, no
+ * arguments, plain ret), skipped when scratches are off.
+ */
+void sub_000D8C40_enter(void) { picture_postfx_enter(); }
+extern void sub_000D8AD0_gen(void);
+void sub_000D8AD0(void)
+{
+    if (!picture_scratches_on()) {
+        g_esp += 4;     /* thiscall, no arguments: the return address */
+        return;
+    }
+    sub_000D8AD0_gen();
+}
 
 /*
  * Widescreen (src/patches/widescreen.c, docs/widescreen/02-design.md).

@@ -106,7 +106,7 @@ def wizard(payload, smoke=False):
         for i, (text, kind) in enumerate(kinds):
             ttk.Button(frame, text=text, command=lambda k=kind: browse(variable, k)).grid(row=r, column=2 + i)
 
-    row(0, 'Your game copy', dump, [('Disc image…', 'file'), ('Folder…', 'folder')])
+    row(0, 'Your USA Xbox game copy', dump, [('Disc image…', 'file'), ('Folder…', 'folder')])
     row(1, 'Install location', install, [('Choose…', 'folder')])
     row(2, 'Data location', data, [('Choose…', 'folder')])
     ttk.Label(frame, text='The data location keeps a copy of your game files, your saves and settings; '
@@ -118,19 +118,19 @@ def wizard(payload, smoke=False):
     ttk.Checkbutton(options, text='Create a desktop shortcut', variable=desktop).grid(row=1, column=0, sticky='w')
     ttk.Checkbutton(options, text='Add to Steam (for Gaming Mode; Steam must be running)',
                     variable=steam).grid(row=2, column=0, sticky='w')
-    ttk.Checkbutton(options, text='Apply HD texture upscale during install (increases install time)',
+    ttk.Checkbutton(options, text='Generate Upscaled Original Textures (optional; takes extra time)',
                     variable=hd).grid(row=3, column=0, sticky='w')
     ttk.Label(options, text='Adds about 6.2 GB; needs extra working space. No GPU needed.',
               foreground='#555').grid(row=4, column=0, sticky='w', padx=(24, 0))
-    ttk.Label(frame, text='Setup builds the game from your copy on this computer. The first install takes '
-                          'a while; without a compiler it downloads a build container once (about 1 GB).',
+    ttk.Label(frame, text='Setup builds the game from your copy on this computer with the compiler it brings '
+                          'along; nothing else is installed or downloaded. The first install takes a while.',
               wraplength=640, foreground='#555').grid(row=5, column=0, columnspan=4, sticky='w', pady=8)
     progress = ttk.Progressbar(frame, mode='indeterminate')
     progress.grid(row=6, column=0, columnspan=4, sticky='ew', pady=4)
     ttk.Label(frame, textvariable=status, wraplength=640).grid(row=7, column=0, columnspan=4, sticky='w')
     buttons = ttk.Frame(frame)
     buttons.grid(row=8, column=0, columnspan=4, sticky='e', pady=(12, 0))
-    install_button = ttk.Button(buttons, text='Install / Repair')
+    install_button = ttk.Button(buttons, text='Start selected action')
     cancel_button = ttk.Button(buttons, text='Cancel', state='disabled')
     logs_button = ttk.Button(buttons, text='Open logs', state='disabled')
     play_button = ttk.Button(buttons, text='Play', state='disabled')
@@ -206,7 +206,7 @@ def wizard(payload, smoke=False):
                 status.set('Select a release and operation; unavailable releases will be refused.')
             if not session['closing']: root.after(0, complete)
         threading.Thread(target=background, daemon=True).start()
-    refresh_button = ttk.Button(frame, text='Fetch GitHub releases', command=fetch)
+    refresh_button = ttk.Button(frame, text='Check for updates', command=fetch)
     refresh_button.grid(row=8, column=2, padx=4)
 
     def launcher():
@@ -269,9 +269,9 @@ def wizard(payload, smoke=False):
         refresh_play()
         code = child.returncode
         if code == 0:
-            status.set('Setup complete. Select Play, or start Def Jam Recompiled from the menu, the desktop or Steam.')
+            status.set('Setup complete. Select Play, or use a shortcut you chose during setup.')
         elif code == 6:
-            status.set('Setup cancelled. Run it again to resume completed work.')
+            status.set('Setup cancelled. Retry to reuse prepared files; the build may need to start again.')
         else:
             messagebox.showerror(TITLE, status.get() + '\n\nThe setup log is ' + str(session['log']))
 

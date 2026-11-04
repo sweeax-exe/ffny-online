@@ -136,18 +136,18 @@ final class Wizard: NSObject, NSApplicationDelegate, NSWindowDelegate {
                           styleMask: [.titled, .closable, .miniaturizable], backing: .buffered, defer: false)
     let releaseChoice = NSPopUpButton(frame: .zero, pullsDown: false)
     let operationChoice = NSPopUpButton(frame: .zero, pullsDown: false)
-    let refreshButton = NSButton(title: "Fetch GitHub releases", target: nil, action: nil)
+    let refreshButton = NSButton(title: "Check for updates", target: nil, action: nil)
     let installedLabel = NSTextField(wrappingLabelWithString: "Bundled release is available offline. Select an install folder to repair or update.")
     let operations = ["auto", "install", "repair", "update", "downgrade", "rebuild"]
     var releaseTags: [String?] = [nil]
     let dumpField = NSTextField(string: "")
     let installField = NSTextField(string: "")
     let dataField = NSTextField(string: "")
-    let hdUpscale = NSButton(checkboxWithTitle: "Apply HD texture upscale during install (increases install time)", target: nil, action: nil)
+    let hdUpscale = NSButton(checkboxWithTitle: "Generate Upscaled Original Textures (takes extra time)", target: nil, action: nil)
     let desktopShortcut = NSButton(checkboxWithTitle: "Create a desktop shortcut", target: nil, action: nil)
-    let status = NSTextField(wrappingLabelWithString: "Choose your dump and destinations, then select Install / Repair.")
+    let status = NSTextField(wrappingLabelWithString: "Choose your game copy and locations, then start the selected action.")
     let launchInfo = NSTextField(wrappingLabelWithString: "After setup, open Def Jam Recompiled from your install folder, Applications or the Desktop.")
-    let installButton = NSButton(title: "Install / Repair", target: nil, action: nil)
+    let installButton = NSButton(title: "Start selected action", target: nil, action: nil)
     let logsButton = NSButton(title: "Open logs", target: nil, action: nil)
     let playButton = NSButton(title: "Play", target: nil, action: nil)
     let closeButton = NSButton(title: "Close", target: nil, action: nil)
@@ -192,9 +192,9 @@ final class Wizard: NSObject, NSApplicationDelegate, NSWindowDelegate {
         hdUpscale.state = .off
         launchInfo.isSelectable = true
 
-        let heading = label("Build and play from your own USA Xbox dump")
+        let heading = label("Build and play from your own USA Xbox game copy")
         heading.font = .boldSystemFont(ofSize: 15)
-        let intro = label("Setup builds locally from your own dump. Clean updates preserve your saves, settings and mods. Fetch releases to choose an online version, or use the bundled release offline.")
+        let intro = label("Setup builds locally from your own game copy. Clean updates preserve your saves, settings and mods. Fetch releases to choose an online version, or use the bundled release offline.")
         let tools = NSTextField(labelWithString: "")
         tools.allowsEditingTextAttributes = true
         tools.isSelectable = true
@@ -224,9 +224,9 @@ final class Wizard: NSObject, NSApplicationDelegate, NSWindowDelegate {
         buttons.spacing = 10
         let stack = NSStackView(views: [
             heading, intro, tools, installedLabel, NSStackView(views: [releaseChoice, refreshButton]), operationChoice,
-            label("Your ISO/XISO or extracted dump (optional for an installed game)"), row(dumpField, [imageButton, folderButton]),
+            label("Your disc image or extracted game folder (optional for an installed game)"), row(dumpField, [imageButton, folderButton]),
             label("Install location"), row(installField, [installBrowse]),
-            label("Data location (dump copy, saves and settings; preserved across updates)"), row(dataField, [dataBrowse]),
+            label("Data location (game copy, saves and settings; preserved across updates)"), row(dataField, [dataBrowse]),
             hdUpscale, hdNote, desktopShortcut, status, launchInfo, buttons])
         stack.orientation = .vertical
         stack.alignment = .leading
@@ -307,6 +307,7 @@ final class Wizard: NSObject, NSApplicationDelegate, NSWindowDelegate {
         guard !running else { return }
         readInstalled()
         let canPlay = playButton.isEnabled
+        let installContext = installField.stringValue
         let session = Session()
         self.session = session
         setBusy(true)
@@ -316,7 +317,7 @@ final class Wizard: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 try session.unpack()
                 if fs.fileExists(atPath: session.cancel.path) { throw SetupFailure(message: "Release fetch cancelled.", code: 6) }
                 let result = session.scratch.appendingPathComponent("releases.json")
-                let process = session.engineProcess(["--list-releases", "--releases-file", result.path, "--cancel-file", session.cancel.path])
+                let process = session.engineProcess(["--list-releases", "--releases-file", result.path, "--cancel-file", session.cancel.path, "--install-dir", installContext])
                 try process.run()
                 process.waitUntilExit()
                 guard process.terminationStatus == 0 else { throw SetupFailure(message: "Cannot fetch releases. Use the bundled release or retry. See Open logs.", code: 4) }
@@ -331,13 +332,13 @@ final class Wizard: NSObject, NSApplicationDelegate, NSWindowDelegate {
                     self.releaseTags = [nil]
                     for row in rows {
                         let tag = row["tag"] as? String ?? ""
-                        let available = row["available"] as? Bool ?? false
+                        let available = (row["available"] as? Bool ?? false) && (!canPlay || row["updater"] as? Bool != false)
                         self.releaseChoice.addItem(withTitle: tag + (available ? "" : " — unavailable on this Mac"))
                         self.releaseChoice.lastItem?.isEnabled = available
                         self.releaseTags.append(tag)
                     }
                     self.releaseChoice.autoenablesItems = false
-                    if let index = rows.firstIndex(where: { $0["available"] as? Bool == true }) { self.releaseChoice.selectItem(at: index + 1) }
+                    if let index = rows.firstIndex(where: { $0["available"] as? Bool == true && (!canPlay || $0["updater"] as? Bool != false) }) { self.releaseChoice.selectItem(at: index + 1) }
                     self.status.stringValue = rows.contains(where: { $0["cached"] as? Bool == true }) ? "Cached release list (offline). Only previously verified downloads can be installed." : "Choose a release and operation. Downgrade requires compatible future releases."
                 }
             } catch {
@@ -457,7 +458,7 @@ final class Wizard: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     func confirmCancel() {
         let box = NSAlert()
-        box.messageText = "Cancel setup? Completed steps can be resumed."
+        box.messageText = "Cancel setup? Your existing game and saves are kept. A cancelled build may need to start again."
         box.addButton(withTitle: "Cancel setup")
         box.addButton(withTitle: "Keep going")
         if box.runModal() == .alertFirstButtonReturn {

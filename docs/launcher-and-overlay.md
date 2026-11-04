@@ -31,10 +31,11 @@ remains in Interface. Display DPI and the existing text/control size setting sti
 
 | Page | Contents |
 |---|---|
-| Display | Fullscreen, window dimensions, picture shape, filter, VSync, render scale; widescreen HUD/cutscene/side-fill/FOV options; brightness, game brightness curve and vignette |
+| Display | Fullscreen, window dimensions, picture shape, filter, VSync, render scale, anti-aliasing (MSAA), game texture levels, anisotropic filtering; widescreen HUD/cutscene/side-fill/FOV options; brightness, game brightness curve, vignette, colour tint and film scratches |
 | Controls | Players/devices and live stick/button feedback, rumble test, keyboard player, startup controller count/backend, dead zones, thresholds, rumble and pointer behavior; expand Gamepad button mapping or Keyboard and mouse bindings for Detect/Add/Clear/Default |
 | Mods | Installed local/project packs, enablement and overlap winners; shared Load Order window; verified project catalogue downloads/updates, rollback and removal; Refresh local mods, Open Mods Folder, Memory and manual pack list |
 | Interface | Launcher skip, startup movies, overlay key/pad chord, text/control size |
+| Cheats | Fight cheats (infinite health, max Blazin', no health regeneration, giant/tiny fighters), the Story fighter swap and, in-game, the Story profile one-shots (cash, development points, fighting styles) |
 | Diagnostics | Recorder/capture/retention settings, texture authoring, save-affecting unlock tools and, in-game, Story scenes and EA's developer menu |
 | Maintenance | Data/save/mod/install/settings/play-log paths with Open and Copy path; setup selection, reset settings, version and licenses |
 
@@ -89,6 +90,21 @@ release and operation in the wizard. New installed wrappers supply installation/
 setup is prefilled. In the overlay, Maintenance directs you to close the game and return to the launcher
 before updating. A missing or moved setup can be selected again.
 
+### Cheats
+
+The **Cheats** page (`[cheats]` in `settings.ini`, all off by default) has two kinds of cheat:
+
+- **Fight cheats** apply as you change them, in every mode, and are never saved: infinite health and max
+  Blazin' (for player 1, every player or everyone), no health regeneration, and giant or tiny fighters.
+  Max Blazin' fills the meter five seconds into a fight; start Blazin' as usual. Infinite health keeps
+  you standing, but a fight with a time limit is still decided on points when the clock runs out.
+- **Play Story fights as** swaps your created fighter for another fighter, with their look and moves, in
+  Story fights only. Cutscenes, the crib and the shops still show your own fighter, and nothing is saved.
+- **Story profile** one-shots, in the overlay while you play Story: **Max cash** ($999,999), **Max
+  development points** (99,999) and **Change fighting styles** (a main style and up to two hybrids). These
+  write into the Story profile, and the game saves it: the change is permanent. Each asks first; copy your
+  save folder (Maintenance, Saves) before using them.
+
 ### Developer options
 
 Diagnostics contains **Unlock all fighters and venues** (`[debug] unlock_all`, off by default).
@@ -108,10 +124,11 @@ it; Esc/B also closes it when no popup or binding capture is open. The game sees
 while the overlay is open, but **keeps running**; it does not pause. On a Mac keyboard use fn+F1 if F1 is
 the brightness key, or change the shortcut in Interface. The pointer shows while the overlay is open.
 
-Fullscreen, window size, 4:3/stretch, filter, VSync, brightness and vignette apply live. Widescreen,
-render scale, brightness curve and other startup settings apply at the next launch; the footer lists
-pending changes. Settings in the launcher say **on Play** instead. Widescreen transitions into or out of
-a wide canvas are tracked separately from the two live picture shapes.
+Fullscreen, window size, 4:3/stretch, filter, VSync, texture levels, anisotropic filtering, brightness,
+vignette, colour tint and film scratches apply live. Widescreen, render scale, anti-aliasing, the brightness
+curve and other startup settings apply at the next launch; the footer lists pending changes. Settings in
+the launcher say **on Play** instead. Widescreen transitions into or out of a wide canvas are tracked
+separately from the two live picture shapes.
 
 ## Keyboard and gamepad
 

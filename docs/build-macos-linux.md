@@ -96,9 +96,14 @@ alias djpy='djc /opt/djpy/bin/python'   # instead of the uv alias below
 The `faked-system-time` line lets pacman check the archive's signatures as of
 that date: some packagers' keys have expired since. The container sees your
 home folder at the same path, so the repository and the data folder are the
-same inside and out. Use this `djpy` for the pipeline steps below (and `djc` in
-front of any other build command), and start the game itself on SteamOS, from a
-Desktop Mode terminal:
+same inside and out. Use this `djpy` for all three pipeline steps below,
+analyze, recomp and build (and `djc` in front of any other build command), and
+start the game itself on SteamOS, from a Desktop Mode terminal. The analysis
+records the Python and the `pyxbe`/`capstone` versions it ran with, and recomp
+and build refuse analysis from another interpreter ("Analysis is stale
+(interpreter changed)"): analyzing in a SteamOS venv and building in the
+container does not work. The harness on SteamOS checks the finished build
+against the interpreter the analysis recorded, so it may run on another Python.
 `ldd -r build/posix-release/defjam_recomp` there lists anything the build
 needs that SteamOS lacks.
 
@@ -110,7 +115,9 @@ audio library on its own (`memory_layout_posix`, `kernel_memory_posix`,
 `cmake -S` line, as the game build has.
 
 The scripted regression (`scripts/regress.py`) runs on SteamOS itself, not in the container, from a
-venv that has `pytest`, `numpy`, `pillow`, `pyxbe` and `capstone`. Start it in `gamescope --backend
+venv that has `pytest`, `numpy`, `pillow`, `pyxbe` and `capstone`. A SteamOS update can move the system
+Python on, and a venv made from the old one then loses its packages (`No module named 'capstone'`):
+make the venv again. Start it in `gamescope --backend
 headless`, which needs no screen and runs the whole table in one go (40 minutes):
 
 ```bash

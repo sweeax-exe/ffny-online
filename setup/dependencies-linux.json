@@ -12,6 +12,32 @@
     "cffi-2.0.0-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.whl": "c8d3b5532fc71b7a77c09192b4a5a200ea992702734a2e9279a37f2478236f26",
     "pycparser-2.23-py3-none-any.whl": "e5c6e8d3fbad53479cab09ac03729e0a9faf2bee3db8208a550daf5af81a5934"
   },
+  "toolchain": {
+    "comment": "The game's build toolchain, carried in the payload (design \u00a76, D215): Zig's clang for x86_64-linux-gnu with glibc 2.31 symbols, CMake and Ninja, and the libraries the game links, built with that compiler by scripts/build-toolchain-linux.sh (SDL3 and shaderc statically; a link-only Vulkan loader stub, since the game uses the player's own loader). The game it builds needs only glibc 2.31 or newer and the Vulkan loader.",
+    "glibc": "2.31",
+    "zig": {
+      "url": "https://ziglang.org/download/0.17.0/zig-x86_64-linux-0.17.0.tar.xz",
+      "sha256": "1cbe9df9f27e6b78d14ccbca43b6703a404ef79ef1c463de901d7f088d4e2026"
+    },
+    "cmake": {
+      "url": "https://github.com/Kitware/CMake/releases/download/v4.4.4/cmake-4.4.4-linux-x86_64.tar.gz",
+      "sha256": "e5bb807f7728cb60cd8b27ebc97a2edb469b68655f21e844a600c3575b76f5bb"
+    },
+    "ninja": {
+      "url": "https://github.com/ninja-build/ninja/releases/download/v1.13.2/ninja-linux.zip",
+      "sha256": "5749cbc4e668273514150a80e387a957f933c6ed3f5f11e03fb30955e2bbead6"
+    },
+    "shaderc": {
+      "url": "https://github.com/google/shaderc",
+      "tag": "v2026.4",
+      "commit": "b64fd42c4a2a9d501c47aca5d3571f7673a5e9cc"
+    },
+    "vulkan_headers": {
+      "url": "https://github.com/KhronosGroup/Vulkan-Headers",
+      "tag": "v1.4.321",
+      "commit": "2cd90f9d20df57eac214c148f3aed885372ddcfe"
+    }
+  },
   "container": {
     "comment": "The build toolchain for hosts without one (SteamOS). Arch Linux as of the archive date below, which carries the same glibc, SDL3, shaderc and Vulkan loader as SteamOS 3.8, so the game it builds runs on the host's own libraries.",
     "image": "docker.io/library/archlinux@sha256:af82cf8d6d8e461701c28e339bb39de2f22376f06382c205fe22f86175889f4d",
@@ -28,5 +54,49 @@
       "vulkan-icd-loader",
       "openssl"
     ]
+  },
+  "app_build": {
+    "comment": "Where the Linux binaries are built, with the development headers they are compiled against: Ubuntu 22.04, run with podman or docker. scripts/build-app-linux.sh builds the app in the AppImage with the image's g++, so it needs glibc 2.35 or newer; SDL3 is the toolkit's pinned release, linked in statically, and loads X11, Wayland, OpenGL, Vulkan and D-Bus from the player's computer at run time. libvulkan-dev only lets the toolkit's build configure (with a placeholder for shaderc, which Ubuntu 22.04 does not package): the app links neither. scripts/build-toolchain-linux.sh builds the libraries the game links with the payload's Zig instead (toolchain above); only the image's headers are used then: X11, Wayland, the sound servers, D-Bus, udev, libusb and IBus, all of which SDL loads at run time.",
+    "image": "docker.io/library/ubuntu@sha256:8a2321a92b438238f93b4346fff61bc4259c99fdd4d9b52ee86f153fee0c344f",
+    "image_tag": "22.04",
+    "packages": [
+      "ca-certificates",
+      "curl",
+      "cmake",
+      "ninja-build",
+      "g++",
+      "pkg-config",
+      "file",
+      "libx11-dev",
+      "libxext-dev",
+      "libxrandr-dev",
+      "libxcursor-dev",
+      "libxi-dev",
+      "libxfixes-dev",
+      "libxss-dev",
+      "libxtst-dev",
+      "libxkbcommon-dev",
+      "libwayland-dev",
+      "libdecor-0-dev",
+      "libegl-dev",
+      "libgl-dev",
+      "libgles-dev",
+      "libdbus-1-dev",
+      "libudev-dev",
+      "libvulkan-dev",
+      "python3",
+      "libpulse-dev",
+      "libasound2-dev",
+      "libpipewire-0.3-dev",
+      "libdrm-dev",
+      "libgbm-dev",
+      "libusb-1.0-0-dev",
+      "libibus-1.0-dev"
+    ]
+  },
+  "appimage_runtime": {
+    "comment": "The AppImage type 2 runtime (MIT, AppImage/type2-runtime): mounts the image with its own static FUSE 3 and squashfuse (gzip and zstd). Our image is gzip, so setup/releases.py can read it without running it.",
+    "url": "https://github.com/AppImage/type2-runtime/releases/download/20251108/runtime-x86_64",
+    "sha256": "2fca8b443c92510f1483a883f60061ad09b46b978b2631c807cd873a47ec260d"
   }
 }

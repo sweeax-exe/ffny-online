@@ -7,9 +7,11 @@
 namespace pcui
 {
 static ImFont *display_font = nullptr;
+static ImFont *navigation_font = nullptr;
 void load_display_font()
 {
     display_font = nullptr;
+    navigation_font = nullptr;
 #if defined(_WIN32)
     const char *root = getenv("WINDIR");
     std::string candidate = std::string(root ? root : "C:/Windows") + "/Fonts/impact.ttf";
@@ -29,6 +31,26 @@ void load_display_font()
             display_font = ImGui::GetIO().Fonts->AddFontFromFileTTF(fonts[i], 22);
             if (display_font)
                 break;
+        }
+    }
+    // Owner-selected option A: normal-size, title-case navigation with a heavier UI face.
+    // Prefer semibold where available; use the platform's ordinary bold face, never Impact.
+#if defined(_WIN32)
+    std::string semibold = std::string(root ? root : "C:/Windows") + "/Fonts/seguisb.ttf";
+    std::string bold = std::string(root ? root : "C:/Windows") + "/Fonts/segoeuib.ttf";
+    const char *navigation_fonts[] = {semibold.c_str(), bold.c_str(), nullptr};
+#elif defined(__APPLE__)
+    const char *navigation_fonts[] = {"/System/Library/Fonts/Supplemental/Arial Bold.ttf", nullptr};
+#else
+    const char *navigation_fonts[] = {"/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+                                      "/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf",
+                                      "/usr/share/fonts/TTF/DejaVuSans-Bold.ttf", nullptr};
+#endif
+    for (int i = 0; navigation_fonts[i]; ++i) {
+        std::error_code ec;
+        if (std::filesystem::is_regular_file(navigation_fonts[i], ec)) {
+            navigation_font = ImGui::GetIO().Fonts->AddFontFromFileTTF(navigation_fonts[i], 17.0f);
+            if (navigation_font) break;
         }
     }
 }
@@ -55,7 +77,8 @@ void theme(float scale)
     s.Colors[ImGuiCol_TitleBgCollapsed] = s.Colors[ImGuiCol_TitleBg];
     s.Colors[ImGuiCol_Border] = ImVec4(.318f, .294f, .255f, 1);
     s.Colors[ImGuiCol_Separator] = s.Colors[ImGuiCol_Border];
-    s.Colors[ImGuiCol_FrameBg] = ImVec4(.098f, .09f, .082f, 1);
+    s.FrameBorderSize = 1;
+    s.Colors[ImGuiCol_FrameBg] = ImVec4(.15f, .135f, .115f, 1);
     s.Colors[ImGuiCol_FrameBgHovered] = ImVec4(.24f, .20f, .16f, 1);
     s.Colors[ImGuiCol_FrameBgActive] = ImVec4(.30f, .25f, .19f, 1);
     s.Colors[ImGuiCol_Button] = ImVec4(.188f, .169f, .145f, 1);
@@ -134,6 +157,14 @@ void poster(ImVec2 a, ImVec2 size, float s)
     ImGui::TextUnformatted("THE STREETS ARE WAITING.");
     ImGui::PopFont();
     ImGui::PopStyleColor();
+}
+bool navigation_button(const char *text, ImVec2 size)
+{
+    // Preserve the current logical text size and native button focus/input behavior.
+    ImGui::PushFont(navigation_font, ImGui::GetFontSize() / ImGui::GetStyle().FontScaleMain);
+    bool hit = ImGui::Button(text, size);
+    ImGui::PopFont();
+    return hit;
 }
 bool play_button(const char *text, ImVec2 size, float font_size)
 {

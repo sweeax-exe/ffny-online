@@ -148,6 +148,10 @@ def test_each_platforms_payload_carries_only_the_branding_it_uses():
 
     # What each build and setup reads at install time is there...
     assert 'branding/icon/defjam.ico' in wanted('windows-x64')
+    # The Windows app's Add to Steam places the fan set and the plain hero and icon, nothing else.
+    assert [n for n in wanted('windows-x64') if '/steam/' in n] == [
+        'branding/fan/steam/logo.png', 'branding/fan/steam/portrait.png', 'branding/fan/steam/wide.png',
+        'branding/steam/hero.png', 'branding/steam/icon.png']
     assert 'branding/icon/window/window-128-macos.rgba' in wanted('macos-arm64')
     linux = wanted('linux-x64')
     for name in ('branding/icon/window/window-128.rgba', 'branding/icon/png/defjam-128.png',
@@ -160,4 +164,6 @@ def test_each_platforms_payload_carries_only_the_branding_it_uses():
         assert package.payload_wants('setup/engine.py', platform)
     # The macOS payload was 7.6 MB heavier with all of branding/ and hdiutil ran out of room.
     assert sum((ROOT / n).stat().st_size for n in wanted('macos-arm64')) < 200_000
-    assert sum((ROOT / n).stat().st_size for n in wanted('windows-x64')) < 300_000
+    # The Steam artwork is about 2.7 MB of the Windows payload's 59 MB; the rest of branding/ stays out.
+    assert sum((ROOT / n).stat().st_size for n in wanted('windows-x64') if '/steam/' not in n) < 300_000
+    assert sum((ROOT / n).stat().st_size for n in wanted('windows-x64')) < 3_000_000

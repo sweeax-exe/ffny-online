@@ -36,7 +36,8 @@ HOST_PLATFORM = 'windows-x64' if IS_WINDOWS else 'macos-arm64' if IS_MACOS else 
 PRESET = 'win-x64-release' if IS_WINDOWS else 'posix-release'
 HD_SUPPORTED = IS_WINDOWS or IS_MACOS or IS_LINUX  # Direct3D 11 on Windows; Vulkan on macOS (v0.6.1) and Linux (v0.7.2)
 LAUNCHER_BUNDLE = 'Def Jam Recompiled.app'
-RUNTIME_FOLDERS = ('source/', 'python/') if IS_WINDOWS or IS_LINUX else ('source/', 'python/', 'tools/', 'deps/')
+# Linux and macOS: the payload's build tools (tools/) and the libraries the game links (deps/) too.
+RUNTIME_FOLDERS = ('source/', 'python/') if IS_WINDOWS else ('source/', 'python/', 'tools/', 'deps/')
 # Linux: the launcher script setup writes into the install folder, and the
 # desktop entries and Steam shortcut that point at it.
 LINUX_LAUNCHER = 'Def Jam Recompiled'
@@ -252,7 +253,7 @@ class Engine:
             self.python = self.version_root / 'python/python.exe'
         else:
             # A build must not pick up a package manager's compiler, headers or
-            # libraries: the toolchain is the system's, everything else is bundled.
+            # libraries: the toolchain is the payload's (or, by request, the system's).
             for key in list(self.env):
                 if key.startswith(('DYLD_', 'HOMEBREW_', 'CMAKE_', 'PKG_CONFIG', 'CONDA', 'VIRTUAL_ENV')) or key in {
                         'CC', 'CXX', 'CFLAGS', 'CXXFLAGS', 'LDFLAGS', 'CPPFLAGS', 'CPATH', 'LIBRARY_PATH',
@@ -263,7 +264,8 @@ class Engine:
                 [str(self.version_root / 'python/bin'), str(self.version_root / 'tools/bin'),
                  '/usr/bin', '/bin', '/usr/sbin', '/sbin'])
             self.python = self.version_root / 'python/bin/python3'
-        self.container_image = None     # Linux: the build container, when the host has no toolchain
+        self.container_image = None     # Linux: the build container, when setup is asked to use it
+        self.bundled = False            # Linux: the payload's own Zig toolchain (the default)
         self.log = None
 
     def event(self, message):
@@ -361,11 +363,13 @@ class Engine:
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 # copy, not copyfile: the bundled interpreter and tools keep their execute bit.
                 shutil.copy(self.payload / name, destination)
-        if self.operation in ('update', 'downgrade', 'rebuild'):
+        if self.operation in ('downgrade', 'rebuild'):
             return  # Fresh analysis, lift and objects are the clean operation contract.
         previous = self.install / 'installed.json'
         if previous.is_file():
             old = Path(json.loads(previous.read_text(encoding='utf-8'))['source']).resolve()
+        elif self.operation == 'update':
+            return
         else:
             # Reuse only saves time, so an earlier folder that cannot be read is skipped. On
             # Windows a half-deleted failed attempt answers access denied (WinError 5), and
@@ -385,9 +389,13 @@ class Engine:
             return
         # Reuse only local analysis/lift artifacts; the incoming pipeline must
         # validate all inputs/outputs before skipping a stage. Never reuse objects.
-        for relative in ('src/recomp/gen', 'tools/xboxrecomp/game_files',
-                         'tools/xboxrecomp/tools/disasm/output', 'tools/xboxrecomp/tools/func_id/output',
-                         'tools/xboxrecomp/tools/abi_analysis/output'):
+        # Update reuses analysis only: its key covers the XBE, seeds, every toolkit tool
+        # file, the commands and the interpreter, and the lift is redone.
+        artifacts = ('tools/xboxrecomp/game_files', 'tools/xboxrecomp/tools/disasm/output',
+                     'tools/xboxrecomp/tools/func_id/output', 'tools/xboxrecomp/tools/abi_analysis/output')
+        if self.operation != 'update':
+            artifacts = ('src/recomp/gen',) + artifacts
+        for relative in artifacts:
             src, dst = old / relative, self.source / relative
             try:
                 if src.is_dir() and (not dst.exists() or (relative == 'src/recomp/gen' and
@@ -397,6 +405,16 @@ class Engine:
                 # A partial copy is discarded so that stage starts from nothing.
                 shutil.rmtree(dst, ignore_errors=True)
                 self.event('Earlier ' + relative + ' not reused: ' + str(ex))
+        if self.operation == 'update':
+            # The earlier build's XBE copy is keyed, but the player's verified dump is the
+            # input: a differing copy leaves analysis stale, so it runs.
+            # Before extraction there is no dump to compare, so the copy goes and analysis runs.
+            xbe, dump = self.source / 'tools/xboxrecomp/game_files/default.xbe', self.data / 'extracted/default.xbe'
+            if xbe.is_file():
+                if dump.is_file():
+                    shutil.copyfile(dump, xbe)
+                else:
+                    xbe.unlink()
 
     def check_install_destination(self):
         marker = self.install / 'setup-owner.json'
@@ -605,11 +623,57 @@ class Engine:
                 ' && pacman -Scc --noconfirm\n'
                 'ENV CC=clang CXX=clang++\n')
 
+    def bundled_toolchain(self):
+        """The payload's Zig, CMake, Ninja and libraries (design §6, D215), or None if it carries none."""
+        tools, deps = self.version_root / 'tools', self.version_root / 'deps'
+        needed = [tools / 'bin' / name for name in ('zig-cc', 'zig-c++', 'zig-ar', 'zig-ranlib', 'cmake', 'ninja')]
+        needed += [tools / 'zig/zig', deps / 'lib/libSDL3.a', deps / 'lib/libshaderc_combined.a',
+                   deps / 'link/libvulkan.so']
+        return (tools, deps) if all(path.is_file() for path in needed) else None
+
+    def bundled_overrides(self):
+        """Everything from the payload, nothing from the computer: Zig's clang for glibc 2.31, static SDL3 and
+        shaderc, the Vulkan headers, and a stub loader to link against. The game names libvulkan.so.1 and has
+        no run path, so the computer's own loader is the one it opens."""
+        tools, deps = self.bundled_toolchain()
+        return [f'-DCMAKE_C_COMPILER={tools}/bin/zig-cc', f'-DCMAKE_CXX_COMPILER={tools}/bin/zig-c++',
+                f'-DCMAKE_AR={tools}/bin/zig-ar', f'-DCMAKE_RANLIB={tools}/bin/zig-ranlib',
+                f'-DCMAKE_MAKE_PROGRAM={tools}/bin/ninja', f'-DCMAKE_PREFIX_PATH={deps}',
+                '-DCMAKE_FIND_USE_CMAKE_SYSTEM_PATH=OFF', '-DCMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH=OFF',
+                f'-DVulkan_LIBRARY={deps}/link/libvulkan.so', f'-DVulkan_INCLUDE_DIR={deps}/include',
+                f'-DSHADERC_LIBRARY={deps}/lib/libshaderc_combined.a', f'-DSHADERC_INCLUDE_DIR={deps}/include',
+                '-DCMAKE_SKIP_RPATH=ON']
+
+    def toolchain_bundled(self):
+        tools, _ = self.bundled_toolchain()
+        # Zig compiles its C and C++ runtimes and the glibc 2.31 symbol stubs once, into this folder.
+        cache = self.version_root / 'zig-cache'
+        self.env['ZIG_GLOBAL_CACHE_DIR'] = self.env['ZIG_LOCAL_CACHE_DIR'] = str(cache)
+        probe = self.version_root / 'toolchain-check'
+        probe.mkdir(parents=True, exist_ok=True)
+        (probe / 'check.cpp').write_text('#include <string>\nint main() { return std::string("ok").size() != 2; }\n',
+                                         encoding='utf-8')
+        try:
+            self.run([tools / 'bin/zig-c++', '-o', probe / 'check', probe / 'check.cpp'])
+            self.run([probe / 'check'])
+        except SetupError as ex:
+            if ex.code == 6:
+                raise
+            raise SetupError('The build tools that came with setup do not work on this computer; see the setup log', 3) from ex
+        self.bundled = True
+        version = self.run([tools / 'zig/zig', 'version'], capture=True).strip()
+        self.event('Building with the compiler that came with setup (Zig ' + version + ')')
+        self.record_toolchain('bundled:zig-' + version)
+
     def toolchain_linux(self):
         choice = getattr(self.args, 'toolchain', 'auto') or 'auto'
         self.event('Checking the build toolchain')
         if platform.machine() not in ('x86_64', 'AMD64'):
             raise SetupError('This setup supports x86-64 Linux only', 3)
+        if choice == 'bundled' or (choice == 'auto' and self.bundled_toolchain()):
+            if not self.bundled_toolchain():
+                raise SetupError('This setup carries no build tools of its own; run it with --toolchain auto', 3)
+            return self.toolchain_bundled()
         problem = None
         if choice in ('auto', 'host'):
             problem = self.host_toolchain_problem()
@@ -665,7 +729,8 @@ class Engine:
                 *map(str, argv)]
 
     def check_host_runtime(self):
-        """The game runs on this computer's own SDL3, Vulkan loader and shaderc: say so now if one is missing."""
+        """The game runs on this computer's C library and Vulkan loader (and, built with the computer's own
+        compiler or in the container, its SDL3 and shaderc): say so now if one is missing."""
         executable = self.source / 'build' / PRESET / 'defjam_recomp'
         result = subprocess.run(['ldd', '-r', str(executable)], capture_output=True, text=True, env=self.env)
         problems = sorted({line.strip() for line in (result.stdout + result.stderr).splitlines()
@@ -675,7 +740,8 @@ class Engine:
                 self.log.write('Runtime check:\n' + result.stdout + result.stderr)
             raise SetupError('The game was built but cannot run on this computer: ' +
                              '; '.join(problems[:4] or ['ldd failed']) +
-                             '. It needs SDL3 3.2 or newer, the Vulkan loader and shaderc.', 3)
+                             ('. It needs the Vulkan loader (libvulkan.so.1).' if self.bundled else
+                              '. It needs SDL3 3.2 or newer, the Vulkan loader and shaderc.'), 3)
 
     def toolchain(self, provisioned=False):
         if IS_LINUX:
@@ -764,9 +830,9 @@ class Engine:
         state = load_module('setup_pipeline_state', self.source / 'scripts/pipeline-state.py')
         tk = self.source / 'tools/xboxrecomp'
         for label, verify, action in (
-            ('Analysis', lambda: state.verify_analysis(self.source, tk), 'analyze'),
-            ('Lift', lambda: state.verify_lift(self.source, tk), 'recomp'),
-            ('Build', lambda: state.verify_build(self.source, PRESET), 'build')):
+            ('Analysis', lambda: state.verify_analysis(self.source, tk, python=self.python), 'analyze'),
+            ('Lift', lambda: state.verify_lift(self.source, tk, python=self.python), 'recomp'),
+            ('Build', lambda: state.verify_build(self.source, PRESET, python=self.python), 'build')):
             self.cancelled()
             try:
                 verify()
@@ -782,7 +848,9 @@ class Engine:
                 # Populate FetchContent from the inventoried, offline dependency source.
                 self.run([self.python, self.source / 'scripts/pipeline-state.py', 'begin-build',
                           '--preset', PRESET], cwd=self.source)
-                if IS_LINUX:
+                if IS_LINUX and self.bundled:
+                    overrides = [self.imgui_override(), *self.bundled_overrides()]
+                elif IS_LINUX:
                     # The system's (or the build container's) SDL3, Vulkan and shaderc; Dear
                     # ImGui from the payload, since the container builds without a network.
                     overrides = [self.imgui_override()]
@@ -1245,7 +1313,36 @@ def apply_steam_art(install):
     return 0
 
 
-def uninstall(install):
+def tree_size(path):
+    """Bytes in a folder, without following links or Windows junctions."""
+    total, stack = 0, [Path(path)]
+    while stack:
+        try:
+            entries = list(os.scandir(stack.pop()))
+        except OSError:
+            continue
+        for entry in entries:
+            try:
+                if entry.is_symlink() or getattr(entry, 'is_junction', lambda: False)():
+                    continue
+                if entry.is_dir(follow_symlinks=False):
+                    stack.append(Path(entry.path))
+                elif entry.is_file(follow_symlinks=False):
+                    total += entry.stat(follow_symlinks=False).st_size
+            except OSError:
+                pass
+    return total
+
+
+def size_text(size):
+    return '%.1f GB' % (size / 1e9) if size >= 1e9 else '%d MB' % round(size / 1e6)
+
+
+def uninstall(install, report=None):
+    """Remove the application from `install`, never the data folder. `report` gets one line for each
+    thing found, removed or kept; main() sends the lines to the screen and to the --log file."""
+    if report is None:
+        report = lambda message: print(message, flush=True)
     root = Path(install).resolve()
     receipt_file = root / 'installed.json'
     if not receipt_file.is_file() or root == Path(root.anchor):
@@ -1254,35 +1351,48 @@ def uninstall(install):
     versions = root / 'versions'
     if receipt.get('schema') != 1 or versions.resolve() != versions or versions not in Path(receipt['source']).parents:
         raise SetupError('Invalid installation ownership receipt', 2)
+    report('Uninstalling Def Jam Recompiled %s from %s' % (receipt.get('version', '(unknown version)'), root))
+
+    def remove_file(path, what):
+        if path.is_file() or path.is_symlink():
+            path.unlink()
+            report('Removed ' + what)
+
     with install_lock(root), install_lock(Path(receipt['data'])), game_lock(root):
         transaction.Activation(root, receipt['data']).recover()
         receipt = json.loads(receipt_file.read_text(encoding='utf-8'))
+        active = Path(receipt['source']).parent.name
         # Python 3.13 rmtree does not traverse Windows junction contents. Data is
         # outside versions by contract; verify the final target before deletion.
         if versions.exists():
+            freed = 0
+            for build in sorted(versions.iterdir()):
+                size = tree_size(build)
+                freed += size
+                report('Removed %s (%s%s)' % (Path('versions', build.name), size_text(size),
+                                             ', the active build' if build.name == active else ''))
             shutil.rmtree(versions)
+            report('Freed %s of game builds' % size_text(freed))
         for name in ('installed.ini', 'installed.json', 'DefJamLauncher.exe'):
-            (root / name).unlink(missing_ok=True)
+            remove_file(root / name, name)
         if IS_LINUX:
-            (root / LINUX_LAUNCHER).unlink(missing_ok=True)
-            (root / (LINUX_LAUNCHER + '.png')).unlink(missing_ok=True)
+            remove_file(root / LINUX_LAUNCHER, LINUX_LAUNCHER)
+            remove_file(root / (LINUX_LAUNCHER + '.png'), LINUX_LAUNCHER + '.png')
             for name in receipt.get('steam_art', []):
                 art = Path(name)
                 if art.parent.name == 'grid' and art.is_file() and not art.is_symlink() and digest(art) == receipt.get('steam_art_hashes', {}).get(name):
-                    art.unlink()   # the artwork this setup placed for its Steam shortcut
+                    remove_file(art, 'Steam artwork ' + str(art))   # the artwork this setup placed for its Steam shortcut
             # Only entries this installation made and recorded, and only if they still name it.
             for name in receipt.get('shortcuts', []):
                 shortcut = Path(name)
                 if shortcut.is_file() and not shortcut.is_symlink() and \
                         (LINUX_MARKER + '=' + str(root)) in shortcut.read_text(encoding='utf-8', errors='replace'):
-                    shortcut.unlink()
-            print('Application removed. Dump, saves, settings and logs were preserved. A Steam shortcut, '
-                  'if you added one, stays in Steam until you remove it there.', flush=True)
-            return
-        if not IS_WINDOWS:
+                    remove_file(shortcut, 'menu entry ' + str(shortcut))
+        elif not IS_WINDOWS:
             bundle = root / LAUNCHER_BUNDLE
             if bundle.is_dir() and not bundle.is_symlink():
                 shutil.rmtree(bundle)
+                report('Removed ' + LAUNCHER_BUNDLE)
             # Only the shortcuts this installation made and recorded, and only if
             # they still are what was made: a bundle that names this install, or an alias file.
             for name in receipt.get('shortcuts', []):
@@ -1291,18 +1401,28 @@ def uninstall(install):
                 if shortcut.is_dir() and not shortcut.is_symlink() and marker.is_file() \
                         and marker.read_text(encoding='utf-8') == str(root):
                     shutil.rmtree(shortcut)
+                    report('Removed shortcut ' + str(shortcut))
                 elif shortcut.is_file() and not shortcut.is_symlink() and digest(shortcut) == receipt.get('shortcut_hashes', {}).get(name):
-                    shortcut.unlink()
-            print('Application removed. Dump, saves, settings and logs were preserved.', flush=True)
-            return
-        env = os.environ.copy()
-        env['DEFJAM_SETUP_REMOVE_SHORTCUTS'] = '1'
-        env['DEFJAM_SETUP_LAUNCHER'] = str(root / 'DefJamLauncher.exe')
-        subprocess.run(['powershell.exe', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
-                        Path(__file__).parent / 'shortcuts.ps1'], env=env, check=True,
-                       creationflags=subprocess.CREATE_NO_WINDOW)
-    print('Application removed. Dump, saves, settings and logs were preserved.', flush=True)
-
+                    remove_file(shortcut, 'shortcut ' + str(shortcut))
+        else:
+            env = os.environ.copy()
+            env['DEFJAM_SETUP_REMOVE_SHORTCUTS'] = '1'
+            env['DEFJAM_SETUP_LAUNCHER'] = str(root / 'DefJamLauncher.exe')
+            result = subprocess.run(['powershell.exe', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
+                                     Path(__file__).parent / 'shortcuts.ps1'], env=env, check=True,
+                                    creationflags=subprocess.CREATE_NO_WINDOW, capture_output=True, text=True)
+            for line in (getattr(result, 'stdout', None) or '').splitlines():
+                if line.strip():
+                    report(line.strip())   # shortcuts.ps1 names each shortcut it removed
+    report('Kept the data folder %s (the extracted game, saves, settings, mods and logs)' % receipt['data'])
+    left = sorted(entry.name for entry in root.iterdir()) if root.is_dir() else []
+    if left:
+        report('Left in %s: %s' % (root, ', '.join(left)))
+    if IS_LINUX:
+        report('Application removed. Dump, saves, settings and logs were preserved. A Steam shortcut, '
+               'if you added one, stays in Steam until you remove it there.')
+    else:
+        report('Application removed. Dump, saves, settings and logs were preserved.')
 
 def discard_failed_attempt(engine):
     """Delete the unique version folder this run created, so a failed or cancelled attempt does not
@@ -1319,6 +1439,27 @@ def discard_failed_attempt(engine):
         pass
 
 
+def windows_toolchain_present():
+    """Whether Visual Studio's C++ build tools, with its CMake and Ninja, are installed: the quick
+    part of Engine.toolchain, which the app (src/app) asks before setup starts so it can offer to
+    install them (--check-toolchain). Windows only; elsewhere setup reports its own tools."""
+    vswhere = Path(os.environ.get('ProgramFiles(x86)', 'C:/Program Files (x86)')) / 'Microsoft Visual Studio/Installer/vswhere.exe'
+    if not vswhere.is_file():
+        return False
+    try:
+        found = subprocess.run([str(vswhere), '-products', '*', '-requires', 'Microsoft.VisualStudio.Component.VC.Tools.x86.x64',
+                                '-sort', '-latest', '-property', 'installationPath'], capture_output=True, text=True,
+                               timeout=120, creationflags=subprocess.CREATE_NO_WINDOW).stdout.strip().splitlines()
+    except (OSError, subprocess.SubprocessError):
+        return False
+    if not found:
+        return False
+    vs = Path(found[0])
+    return all((vs / part).is_file() for part in (
+        'Common7/Tools/VsDevCmd.bat', 'Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin/cmake.exe',
+        'Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe'))
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--payload', required=True)
@@ -1330,6 +1471,10 @@ def main(argv=None):
     parser.add_argument('--bundled-only', action='store_true', help='Use this setup payload without fetching another release')
     parser.add_argument('--list-releases', action='store_true')
     parser.add_argument('--releases-file', help='Write the release catalog JSON for a native wizard')
+    parser.add_argument('--check-app-update', metavar='FILE',
+                        help='The app: write the newest release whose app is newer than this payload (tag=, version=, url=)')
+    parser.add_argument('--stage-app', metavar='TAG', help='The app: download and verify that release\'s app into --stage-dir')
+    parser.add_argument('--stage-dir', help='Where --stage-app puts the verified app bundle (must not exist)')
     parser.add_argument('--download-cache')
     parser.add_argument('--handoff-parent', type=int, help=argparse.SUPPRESS)
     parser.add_argument('--data-dir')
@@ -1337,17 +1482,35 @@ def main(argv=None):
     parser.add_argument('--no-shortcuts', action='store_true', help='Do not create desktop/Start-menu shortcuts')
     parser.add_argument('--no-desktop-shortcut', action='store_true', help='Create only the Start-menu shortcut')
     parser.add_argument('--install-prerequisites', action='store_true')
+    parser.add_argument('--check-toolchain', action='store_true',
+                        help='Windows: exit 0 when the C++ Build Tools are installed, 3 when they are not')
     parser.add_argument('--hd-textures', action='store_true', help='Generate and enable Lanczos 4x HD textures locally (extra time/space)')
-    parser.add_argument('--toolchain', choices=['auto', 'host', 'container'], default='auto',
-                        help='Linux: build with this computer\'s compiler, in the pinned build container, '
-                             'or whichever works (the default)')
+    parser.add_argument('--toolchain', choices=['auto', 'bundled', 'host', 'container'], default='auto',
+                        help='Linux: build with the compiler and libraries that came with setup (bundled; what '
+                             'auto picks when the payload has them), this computer\'s own (host), or in the pinned '
+                             'build container; auto without bundled tools tries host, then the container')
     parser.add_argument('--steam-shortcut', action='store_true', help='Linux: add the game to Steam')
     parser.add_argument('--steam-art', action='store_true',
                         help="Linux: place the Steam artwork for the installed game's existing shortcut")
+    parser.add_argument('--steam', choices=['status', 'add', 'remove'],
+                        help='The app (Windows, Linux): add it to Steam with its artwork, remove it, or report (steam_shortcuts.py)')
+    parser.add_argument('--app-program', help='The app program the Steam shortcut starts')
+    parser.add_argument('--steam-record', help='Where --steam records the shortcut and artwork it placed')
+    parser.add_argument('--steam-result', help='Where --steam writes its answer (JSON)')
+    parser.add_argument('--close-steam', action='store_true',
+                        help='Close Steam for --steam add/remove when it is running, and start it again after')
     parser.add_argument('--log')
     parser.add_argument('--status-file')
     parser.add_argument('--cancel-file')
     args = parser.parse_args(argv)
+    if args.check_toolchain:
+        # Needs nothing from the payload or the network, so it answers in a moment.
+        return 0 if not IS_WINDOWS or windows_toolchain_present() else 3
+    if args.steam:
+        # The shortcut and artwork only: nothing from the network, the dump or the install's lock.
+        steam = load_module('setup_steam_shortcuts', Path(__file__).with_name('steam_shortcuts.py'))
+        return steam.command(args.steam, Path(args.payload), args.app_program, args.install_dir,
+                             args.steam_record, args.steam_result, args.close_steam)
     engine = None
     selection = None
     try:
@@ -1382,6 +1545,30 @@ def main(argv=None):
                     for row in rows), encoding='utf-8')
             else:
                 print(json.dumps(result))
+            return 0
+        if args.check_app_update:
+            row = releases.newest_app(HOST_PLATFORM, cache, bootstrap['version'], cancelled)
+            lines = ['current=' + bootstrap['version']]
+            if row:
+                lines += ['tag=' + row['tag'], 'version=' + row['version'],
+                          'url=https://github.com/' + releases.REPO + '/releases/tag/' + row['tag'],
+                          'cached=' + ('1' if row.get('cached') else '0')]
+            pending = Path(args.check_app_update + '.pending')
+            pending.write_text(''.join(line + '\n' for line in lines), encoding='utf-8')
+            os.replace(pending, args.check_app_update)
+            return 0
+        if args.stage_app:
+            if not args.stage_dir:
+                raise SetupError('--stage-dir is required with --stage-app', 2)
+            stage = Path(args.stage_dir)
+            if stage.exists() or stage.is_symlink():
+                raise SetupError('The app update folder already exists: ' + str(stage), 2)
+            scratch, bundle = releases.select_app(args.stage_app, HOST_PLATFORM, cache, verify_payload, cancelled, progress)
+            try:
+                shutil.move(str(bundle), str(stage))
+            finally:
+                shutil.rmtree(scratch, ignore_errors=True)
+            progress('The new app is verified and ready')
             return 0
         if not args.install_dir:
             raise SetupError('--install-dir is required', 2)
@@ -1433,7 +1620,13 @@ def main(argv=None):
                 shutil.rmtree(scratch)
         if args.uninstall:
             verify_payload(Path(args.payload))
-            uninstall(args.install_dir)
+
+            def report(message):
+                print(message, flush=True)
+                if args.log:
+                    with Path(args.log).open('a', encoding='utf-8') as stream:
+                        stream.write(message + '\n')
+            uninstall(args.install_dir, report)
             return 0
         if args.steam_art:
             return apply_steam_art(args.install_dir)

@@ -8,92 +8,55 @@
 #ifndef DEFJAM_VERSION
 #define DEFJAM_VERSION "dev"
 #endif
+#if defined(DEFJAM_APP)
+const char *pc_app_game_version();
+float pc_app_beside_play_width();
+void pc_app_beside_play(float width, float height);
+#endif
 
 UiHomeResult ui_launcher_home(float width, float height, const char *focus)
 {
     UiHomeResult r;
-    float s = ImGui::GetStyle().FontScaleMain, gap = 20 * s;
-    bool split = width >= 850 * s;
-    float tools = 65 * s, body = std::max(height - tools - 20 * s, 410 * s);
-    if (split)
-    {
-        float left = width * .35f;
-        ImGui::BeginChild("hero", ImVec2(left, body), ImGuiChildFlags_None,
+    float s = ImGui::GetStyle().FontScaleMain;
+    bool poster = width >= 950 * s && height >= 390 * s;
+    if (poster) {
+        float left = width * .30f;
+        ImGui::BeginChild("hero", ImVec2(left, 0), ImGuiChildFlags_None,
                           ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoBackground);
         auto start = ImGui::GetCursorScreenPos();
-        pcui::brickwork(start, ImVec2(left, body), s);
-        ImGui::TextColored(pcui::gold(), "NEW YORK / 2004 / RECOMPILED");
-        ImVec2 paper(start.x, start.y + 45 * s);
-        float ph = std::min(300 * s, body - 175 * s);
-        pcui::poster(paper, ImVec2(left - 10 * s, ph), s);
-        ImGui::SetCursorScreenPos(ImVec2(start.x, paper.y + ph + 15 * s));
-        ImGui::TextDisabled("FAN RECOMP / v%s", DEFJAM_VERSION);
-        ImGui::SetCursorScreenPos(ImVec2(start.x, start.y + body - 95 * s));
-        ImGui::TextUnformatted("Ready for the next round");
-        ImGui::BeginDisabled(pcui::mod_busy() || pcui::mod_recovery_needed());
-        r.play = pcui::play_button("PLAY", ImVec2(left - 10 * s, 64 * s));
-        ui_target("Play");
-        ImGui::EndDisabled();
-        if (ImGui::IsWindowAppearing())
-            ImGui::SetItemDefaultFocus();
+        pcui::brickwork(start, ImVec2(left, height), s);
+        ImGui::TextWrapped("NEW YORK / 2004 / RECOMPILED");
+        pcui::poster(ImVec2(start.x, start.y + 45 * s), ImVec2(left - 10 * s, 290 * s), s);
         ImGui::EndChild();
-        ImGui::SameLine(0, gap);
-        ImGui::BeginChild("quick settings", ImVec2(0, body),
-                          ImGuiChildFlags_Borders | ImGuiChildFlags_AlwaysUseWindowPadding);
+        ImGui::SameLine(0, 20 * s);
     }
-    else
-    {
-        pcui::heading("FIGHT FOR NY", 32 * s);
-        ImGui::Spacing();
-        ImGui::BeginChild("quick settings", ImVec2(0, 0),
-                          ImGuiChildFlags_Borders | ImGuiChildFlags_AutoResizeY |
-                              ImGuiChildFlags_AlwaysUseWindowPadding);
-    }
-    pcui::heading("BEFORE YOU PLAY", 25 * s);
-    ImGui::Spacing();
-    ui_home_fields();
-    ImGui::Separator();
-    ui_home_devices();
-    if (ImGui::Button("Configure controls"))
-        r.route = 2;
-    ui_target("Configure");
-    if (focus && !strcmp(focus, "Configure"))
-        ImGui::SetKeyboardFocusHere(-1);
-    ImGui::EndChild();
-    ImGui::Spacing();
-    const char *labels[] = {"Advanced", "Mods", "Open Logs", "Open Folder", "Update / Repair"};
-    int columns = std::max(1, std::min(5, (int)(width / (145 * s))));
-    if (ImGui::BeginTable("utilities", columns, ImGuiTableFlags_SizingStretchSame))
-    {
-        for (int i = 0; i < 5; i++)
-        {
+    ImGui::BeginChild("home tasks", ImVec2(0, 0), ImGuiChildFlags_None, ImGuiWindowFlags_NoBackground);
+    pcui::heading("READY TO PLAY", 26 * s);
+#if defined(DEFJAM_APP)
+    ImGui::TextDisabled("Game v%s", pc_app_game_version());
+#else
+    ImGui::TextDisabled("Game v%s", DEFJAM_VERSION);
+#endif
+    if (pcui::mod_recovery_needed())
+        ImGui::TextWrapped("Play is unavailable until an interrupted mod installation is recovered. Open Mods to fix it.");
+    else if (pcui::mod_busy()) ImGui::TextWrapped("Finishing a mod operation. Play will be available when it finishes.");
+    const char *labels[] = {"Settings", "Controls", "Mods", "Help"};
+    const char *targets[] = {"Settings", "Configure", "Mods", "Help"};
+    int routes[] = {1, 2, 3, 4};
+    if (ImGui::BeginTable("destinations", 2, ImGuiTableFlags_SizingStretchSame)) {
+        for (int i = 0; i < 4; ++i) {
             ImGui::TableNextColumn();
-            bool hit = ImGui::Button(labels[i], ImVec2(-1, 44 * s));
-            ui_target(labels[i]);
-            if (focus && !strcmp(focus, labels[i]))
-                ImGui::SetKeyboardFocusHere(-1);
-            if (i == 0 && hit)
-                r.route = 1;
-            if (i == 1 && hit)
-                r.route = 3;
-            if (i == 2 && hit)
-                pcui::open_path(pcui::folder_path(pcui::Folder::Logs));
-            if (i == 3 && hit)
-                ImGui::OpenPopup("folders");
-            if (i == 3 && ImGui::BeginPopup("folders"))
-            {
-                const char *names[] = {"Data", "Saves", "Mods", "Installation", "Settings file"};
-                pcui::Folder kinds[] = {pcui::Folder::Data, pcui::Folder::Saves, pcui::Folder::Mods,
-                                        pcui::Folder::Install, pcui::Folder::Settings};
-                for (int j = 0; j < 5; j++)
-                    if (ImGui::MenuItem(names[j]))
-                        pcui::open_path(pcui::folder_path(kinds[j]), j == 4);
-                ImGui::EndPopup();
-            }
-            if (i == 4 && hit)
-                r.route = 4;
+            if (pcui::navigation_button(labels[i], ImVec2(-1, 44 * s))) r.route = routes[i];
+            ui_target(targets[i]);
+            if (i == 0) ui_target("Advanced"); // old automation alias
+            if (focus && !strcmp(focus, targets[i])) ImGui::SetKeyboardFocusHere(-1);
         }
         ImGui::EndTable();
     }
+    ImGui::Separator();
+    ui_home_fields();
+    ImGui::Separator();
+    ui_home_devices();
+    ImGui::EndChild();
     return r;
 }

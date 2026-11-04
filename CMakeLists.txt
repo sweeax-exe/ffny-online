@@ -1,7 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 
-# ============================================================================
-# Def Jam: Fight for NY (Xbox, EA-073) — static recompilation to native PC
+# =====================================================================# Def Jam: Fight for NY (Xbox, EA-073) — static recompilation to native PC
 #
 # Layout:
 #   tools/xboxrecomp/      the recompiler + runtime libraries (git submodule)
@@ -13,9 +12,8 @@ cmake_minimum_required(VERSION 3.20)
 #
 # Nothing from the game disc is in this tree. Put your own dump in ./game
 # (a junction/symlink is fine) and run scripts/verify-dump.py first.
-# ============================================================================
-
-project(defjam_recomp VERSION 0.13.0 LANGUAGES C CXX)
+# =====================================================================
+project(defjam_recomp VERSION 1.0.0 LANGUAGES C CXX)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -54,20 +52,70 @@ endif()
 option(DEFJAM_SDL3 "Read gamepads through SDL3" ON)
 set(XBOXRECOMP_SDL3 ${DEFJAM_SDL3} CACHE BOOL "Read gamepads through SDL3 (fetched and built statically)" FORCE)
 
+# Whether lifted code is there to build the game from (see DEFJAM_BUILD_GAME below).
+option(DEFJAM_BUILD_GAME "Build the game executable (requires src/recomp/gen from scripts/recomp.ps1)" ON)
+if(DEFJAM_BUILD_GAME AND NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/recomp/gen/recomp_dispatch.c")
+    message(WARNING "src/recomp/gen is empty — run scripts/recomp.ps1. Building runtime libraries only.")
+    set(DEFJAM_BUILD_GAME OFF)
+endif()
+
+# The app (src/app, at the end of this file). On Windows it is built on its own, without the game
+# (preset win-x64-app, or scripts/build-setup.ps1): it draws its window with SDL's renderer, and the
+# toolkit's SDL3 is built for pads only (no video, rendering or dialogs). So the same pinned SDL3
+# release is made available here first, with those parts on; the toolkit's include then finds it
+# already there. Other Windows builds (the game, ci-runtime-only) keep the toolkit's SDL3 as it is.
+if(DEFJAM_SDL3)
+    if(WIN32)
+        option(DEFJAM_BUILD_APP "Build the game-free app (src/app)" OFF)
+    else()
+        option(DEFJAM_BUILD_APP "Build the game-free app (src/app)" ON)
+    endif()
+endif()
+if(WIN32 AND DEFJAM_BUILD_APP)
+    if(DEFJAM_BUILD_GAME)
+        message(FATAL_ERROR "On Windows the app is built without the game (-DDEFJAM_BUILD_GAME=OFF, preset win-x64-app)")
+    endif()
+    file(STRINGS "${XBOXRECOMP_DIR}/cmake/xbox_sdl3.cmake" _sdl3_pins REGEX "^set\\(XBOX_SDL3_(VERSION|SHA256) ")
+    foreach(_pin IN LISTS _sdl3_pins)
+        string(REGEX REPLACE "^set\\((XBOX_SDL3_[A-Z0-9]+) \"([^\"]+)\"\\).*" "\\1;\\2" _pin "${_pin}")
+        list(GET _pin 0 _name)
+        list(GET _pin 1 _value)
+        set(${_name} "${_value}")
+    endforeach()
+    if(NOT XBOX_SDL3_VERSION OR NOT XBOX_SDL3_SHA256)
+        message(FATAL_ERROR "Could not read the toolkit's SDL3 pin (cmake/xbox_sdl3.cmake)")
+    endif()
+    # The static C runtime, as the setup executable has: the app runs before anything is installed
+    # (no Visual C++ runtime, no Build Tools), so it may need nothing but Windows itself. Every
+    # library of this build (the toolkit's, SDL's, Dear ImGui's) uses the same one.
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+    include(FetchContent)
+    foreach(_off SDL_SHARED SDL_TEST_LIBRARY SDL_TESTS SDL_EXAMPLES SDL_INSTALL SDL_AUDIO SDL_GPU SDL_CAMERA)
+        set(${_off} OFF CACHE BOOL "" FORCE)
+    endforeach()
+    foreach(_on SDL_STATIC SDL_VIDEO SDL_RENDER SDL_DIALOG SDL_HAPTIC)
+        set(${_on} ON CACHE BOOL "" FORCE)
+    endforeach()
+    FetchContent_Declare(sdl3
+        URL https://github.com/libsdl-org/SDL/releases/download/release-${XBOX_SDL3_VERSION}/SDL3-${XBOX_SDL3_VERSION}.tar.gz
+        URL_HASH SHA256=${XBOX_SDL3_SHA256})
+    FetchContent_MakeAvailable(sdl3)
+endif()
+
 # Builds all runtime libraries and provides the 'xboxrecomp' umbrella target.
 add_subdirectory(${XBOXRECOMP_DIR} ${CMAKE_BINARY_DIR}/xboxrecomp)
+
+# Whether the toolkit's texture loader takes wide slabs, which the Mods page reports (pc_mods.cpp).
+file(READ "${XBOXRECOMP_DIR}/src/nv2a/texture_pack.c" _mod_texture_loader)
+string(FIND "${_mod_texture_loader}" "texture_pack_wide_slabs" _mod_has_wide)
+if(NOT _mod_has_wide EQUAL -1)
+    set(DEFJAM_MOD_WIDE ON)
+endif()
 
 # ── Game executable (only when lifted code is present) ──────────────────
 file(GLOB RECOMP_GEN_SOURCES CONFIGURE_DEPENDS "src/recomp/gen/*.c")
 file(GLOB HOOK_SOURCES       CONFIGURE_DEPENDS "src/hooks/*.c" "src/hooks/*.cpp")
 file(GLOB PATCH_SOURCES      CONFIGURE_DEPENDS "src/patches/*.c")
-
-option(DEFJAM_BUILD_GAME "Build the game executable (requires src/recomp/gen from scripts/recomp.ps1)" ON)
-
-if(DEFJAM_BUILD_GAME AND NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/recomp/gen/recomp_dispatch.c")
-    message(WARNING "src/recomp/gen is empty — run scripts/recomp.ps1. Building runtime libraries only.")
-    set(DEFJAM_BUILD_GAME OFF)
-endif()
 
 if(DEFJAM_BUILD_GAME)
     # Dear ImGui (MIT): the launcher and the in-game overlay. Fetched at a pinned hash.
@@ -89,7 +137,7 @@ if(DEFJAM_BUILD_GAME)
         # (Vulkan, in the game's window) are the same screen as on Windows,
         # in pc_ui.cpp; pc_launcher.cpp is the Direct3D 11 one.
         list(FILTER HOOK_SOURCES EXCLUDE REGEX "/(watchpoint\\.c|pc_launcher\\.cpp)$")
-        set(HOST_SOURCES src/host_posix.c)
+        set(HOST_SOURCES src/host_posix.c src/host_posix_keys.c)
         if(APPLE)
             enable_language(OBJC)
             list(APPEND HOST_SOURCES src/host_macos.m)
@@ -144,9 +192,7 @@ if(DEFJAM_BUILD_GAME)
     endif()
     target_compile_definitions(${PROJECT_NAME} PRIVATE DEFJAM_VERSION=\"${PROJECT_VERSION}\")
     target_compile_definitions(${PROJECT_NAME} PRIVATE DEFJAM_MOD_SOURCE_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}\")
-    file(READ "${XBOXRECOMP_DIR}/src/nv2a/texture_pack.c" _mod_texture_loader)
-    string(FIND "${_mod_texture_loader}" "texture_pack_wide_slabs" _mod_has_wide)
-    if(NOT _mod_has_wide EQUAL -1)
+    if(DEFJAM_MOD_WIDE)
         target_compile_definitions(${PROJECT_NAME} PRIVATE DEFJAM_MOD_WIDE=1)
     endif()
     target_include_directories(${PROJECT_NAME} PRIVATE
@@ -188,5 +234,85 @@ if(DEFJAM_BUILD_GAME)
     endif()
     if(DEFJAM_VERBOSE_KERNEL)
         target_compile_definitions(${PROJECT_NAME} PRIVATE VERBOSE_KERNEL_LOG=1)
+    endif()
+endif()
+
+# ── The app: the launcher's Home and Settings, and Play starting the built game ────────────────
+# No game code: the settings catalogue, the launcher screen (pc_ui.cpp with DEFJAM_APP, which leaves
+# out the overlay) and the toolkit's settings and input libraries. It builds without lifted code.
+# With SDL3 (docs/research/unified-app-design-2026-10-26.md, step 2); DEFJAM_BUILD_APP is set above.
+if(DEFJAM_BUILD_APP AND DEFJAM_SDL3)
+    list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
+    if(WIN32)
+        # The SDL3 made available near the top of this file, with video. A WIN32 program (no
+        # console); SDL_main.h supplies WinMain and hands main its arguments in UTF-8.
+        include(windows_resource)
+        defjam_windows_resource(DEFJAM_APP_RC NAME DefJamRecompiled VERSION ${PROJECT_VERSION}
+                                DESCRIPTION "Def Jam: Fight for NY - Recompiled")
+        set(DEFJAM_APP_PLATFORM_SOURCES WIN32 src/app/app.manifest "${DEFJAM_APP_RC}" src/app/app_install.cpp
+            src/app/app_steam.cpp)
+        # The released program carries the setup payload ZIP as resource 101, as DefJamSetup.exe
+        # does, with its SHA-256 built in: scripts/build-setup.ps1 passes the payload it just made.
+        set(DEFJAM_APP_PAYLOAD "" CACHE FILEPATH "Windows: the setup payload ZIP to build into the app")
+        if(DEFJAM_APP_PAYLOAD)
+            file(TO_CMAKE_PATH "${DEFJAM_APP_PAYLOAD}" PAYLOAD_PATH)
+            file(SHA256 "${DEFJAM_APP_PAYLOAD}" DEFJAM_APP_PAYLOAD_SHA256)
+            configure_file(setup/payload.rc.in "${CMAKE_CURRENT_BINARY_DIR}/app-payload.rc" @ONLY)
+            list(APPEND DEFJAM_APP_PLATFORM_SOURCES "${CMAKE_CURRENT_BINARY_DIR}/app-payload.rc")
+        endif()
+    else()
+        find_package(SDL3 REQUIRED CONFIG)
+        if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+            # The AppImage installs itself and adds itself to Steam, as the Windows app does.
+            set(DEFJAM_APP_PLATFORM_SOURCES src/app/app_install_linux.cpp src/app/app_steam.cpp)
+        endif()
+    endif()
+    include(imgui)
+    add_executable(defjam_app ${DEFJAM_APP_PLATFORM_SOURCES}
+        src/app/app_main.cpp
+        src/app/app_os.cpp
+        src/app/app_setup.cpp
+        src/app/app_update.cpp
+        src/host_posix_keys.c
+        src/patches/cheats_settings.c
+        src/hooks/pc_language_settings.c
+        src/hooks/pc_settings_catalog.c
+        src/hooks/pc_input.c
+        src/hooks/pc_ui_settings.c
+        src/hooks/pc_ui.cpp
+        src/hooks/pc_ui_theme.cpp
+        src/hooks/pc_ui_actions.cpp
+        src/hooks/pc_launcher_home.cpp
+        src/hooks/pc_launcher_sdl.cpp
+        src/hooks/pc_mods.cpp)
+    target_compile_features(defjam_app PRIVATE cxx_std_17)
+    target_compile_definitions(defjam_app PRIVATE DEFJAM_APP=1 DEFJAM_VERSION=\"${PROJECT_VERSION}\"
+                               DEFJAM_MOD_SOURCE_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}\")
+    if(DEFJAM_MOD_WIDE)
+        target_compile_definitions(defjam_app PRIVATE DEFJAM_MOD_WIDE=1)
+    endif()
+    target_include_directories(defjam_app PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/hooks
+        ${XBOXRECOMP_DIR}/include)
+    target_link_libraries(defjam_app PRIVATE recomp_settings xbox_input defjam_imgui_sdl SDL3::SDL3)
+    if(WIN32)
+        # The released program is DefJamRecompiled.exe (src/app/README.md).
+        set_target_properties(defjam_app PROPERTIES OUTPUT_NAME DefJamRecompiled)
+        if(DEFJAM_APP_PAYLOAD)
+            target_compile_definitions(defjam_app PRIVATE DEFJAM_APP_PAYLOAD_SHA256="${DEFJAM_APP_PAYLOAD_SHA256}")
+        endif()
+        target_compile_options(defjam_app PRIVATE /utf-8)
+        target_link_libraries(defjam_app PRIVATE shell32 ole32 shlwapi bcrypt)
+    elseif(APPLE)
+        # Shift held at start-up is read from the window server, as the game does.
+        target_link_libraries(defjam_app PRIVATE "-framework ApplicationServices")
+    else()
+        # The AppImage's program (scripts/build-app-linux.sh) carries the C++ runtime, so it needs
+        # only the C library of the player's computer.
+        option(DEFJAM_APP_STATIC_RUNTIME "Linux: link the app's C++ runtime statically (the AppImage)" OFF)
+        if(DEFJAM_APP_STATIC_RUNTIME)
+            target_link_options(defjam_app PRIVATE -static-libstdc++ -static-libgcc)
+        endif()
     endif()
 endif()

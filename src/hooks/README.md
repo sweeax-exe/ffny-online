@@ -7,7 +7,8 @@ editing it. CMake picks up every `.c` and `.cpp` file in this directory.
 |---|---|
 | `d3d11_translator.c`, `nv2a_regs.c` | The Direct3D 11 device and window for the push-buffer translator; the graphics registers that cannot be plain memory |
 | `ac97_bm.c` | The audio bus-master registers the game waits on at start-up |
-| `pc_settings.c`, `pc_settings.h` | Player-facing settings, `settings.ini` and start-up paths |
+| `pc_settings.c`, `pc_settings.h` | The game's start-up paths, and applying the settings to it |
+| `pc_settings_catalog.c`, `pc_settings_catalog.h` | Every player-facing setting and `settings.ini`, shared with the app (`src/app`) |
 | `pc_input.c`, `pc_input.h` | Gamepad, keyboard and mouse input and their settings |
 | `pc_ui.cpp`, `pc_launcher.cpp`, `pc_ui_settings.c`, `pc_ui*.h` | The settings screen, shared by the launcher and the in-game overlay |
 | `pc_language.c`, `pc_language.h` | Language mods and `[language] game` (the game's own French): rebuild the active mod's files from the dump into the data folder's cache and serve them in place of the originals; its change to the XBE's data sections; its own HD images (a `manifest.ini` beside `language.ini`) added beneath the texture packs ([docs](../../docs/language-packs.md)). `pc_ui_model.h` lists them on the Mods page |

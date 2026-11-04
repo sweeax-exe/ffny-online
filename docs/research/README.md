@@ -124,3 +124,15 @@ Exact prompts, candidates, approval ledgers and checkpoint/backups stay in the
 private authoring workspace. [Mod catalogue](https://github.com/vyanhursky/DefJamFFNY-mods)
 metadata/release notes own published pack versions. The game keeps runtime/Setup
 compatibility and concise native acceptance; it does not recreate authoring history.
+
+## v1.0.0 candidate additions
+
+- [Cheat menu: research for issue #71](cheat-menu.md)
+- [Side findings from the #98 investigation (Steam Deck, 2026-10-27)](deck-determinism-98-side-findings.md)
+- [Why a pinned fight does not repeat on the Steam Deck (#98)](deck-determinism-98.md)
+- [Graphics enhancements: test plan for Windows and Linux / Steam Deck](graphics-enhancements-test-plan.md)
+- [Graphics enhancements: Windows validation, 2026-11-01](graphics-enhancements-windows-2026-11-01.md)
+- [Graphics enhancements: texture levels, anisotropic filtering, MSAA, downscaling, post effects](graphics-enhancements.md)
+- [SC04 audio/video synchronization: root cause](sc04-av-sync-rca.md)
+- [SC04 zero-time guard: scope, implementation and validation](sc04-fix-validation.md)
+- [One app for setup, launcher and updates (design, 2026-10-26)](unified-app-design-2026-10-26.md)

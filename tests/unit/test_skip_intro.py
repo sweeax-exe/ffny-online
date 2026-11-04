@@ -29,6 +29,8 @@ static int unlock_calls;
 void defjam_skip_intro_enter(void);
 void defjam_unlock_all_on_funccall(const char *text);
 recomp_func_t recomp_lookup(uint32_t va) { (void)va; return 0; }
+void cheats_start_game(uint32_t gamedata) { (void)gamedata; }  /* src/patches/cheats.c */
+void cheats_start_game_done(uint32_t gamedata) { (void)gamedata; }
 void sub_000158F0(void) { unlock_calls++; g_esp += 4; }
 void sub_00055640(void)
 {
