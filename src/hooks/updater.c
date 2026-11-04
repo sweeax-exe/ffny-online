@@ -40,6 +40,7 @@ int updater_download(unsigned long long *got, unsigned long long *total) { if (g
 #include <winhttp.h>
 #include <bcrypt.h>
 #include <shellapi.h>
+#include "updater_guard.h"
 #pragma comment(lib, "winhttp.lib")
 #pragma comment(lib, "bcrypt.lib")
 
@@ -442,49 +443,66 @@ static int to_file(const void *data, DWORD size, void *user)
     return 1;
 }
 
+static DWORD install_run(void);
+
 static DWORD WINAPI install_thread(LPVOID unused)
 {
-    char install[MAX_PATH * 2], data[MAX_PATH * 2], dir[MAX_PATH], path[MAX_PATH * 2], hex[65];
-    wchar_t wpath[MAX_PATH * 2], url[160];
+    HANDLE m;
+    DWORD r;
+    (void)unused;
+    if (!update_lock(&m)) {
+        say(UPDATER_FAILED, "Another FFNY launcher (the one in the tray?) is already downloading this update; "
+                            "it goes on there. Open that one, or try again once it is done.");
+        return 0;
+    }
+    r = install_run();
+    update_unlock(m);
+    return r;
+}
+
+static DWORD install_run(void)
+{
+    char install[MAX_PATH * 2], data[MAX_PATH * 2], line[MAX_PATH * 2], hex[65];
+    wchar_t wpath[MAX_PATH * 2], wdir[MAX_PATH * 2], url[160], wsetup[96];
     unsigned char digest[32], want[32];
     Download d;
     int i, ok;
-    (void)unused;
     if (!find_install(install, sizeof(install), data, sizeof(data))) {
         say(UPDATER_FAILED, "This copy was not installed by setup; update it from its source instead.");
         return 0;
     }
-    GetTempPathA(sizeof(dir), dir);
-    strncat(dir, "DefJamUpdate", sizeof(dir) - strlen(dir) - 1);
-    CreateDirectoryA(dir, NULL);
+    MultiByteToWideChar(CP_UTF8, 0, g_setup, -1, wsetup, 96);
+    if (!update_path(wdir, MAX_PATH * 2, NULL) || !update_path(wpath, MAX_PATH * 2, wsetup)) {
+        say(UPDATER_FAILED, "Could not prepare the download folder (the temp folder's path is too long).");
+        return 0;
+    }
+    CreateDirectoryW(wdir, NULL);
     {
         /* the setups of earlier updates (about 56 MB each) stayed here for good */
-        WIN32_FIND_DATAA found;
+        WIN32_FIND_DATAW found;
         HANDLE h;
-        snprintf(path, sizeof(path), "%s\\DefJamSetup-*.exe", dir);
-        if ((h = FindFirstFileA(path, &found)) != INVALID_HANDLE_VALUE) {
+        wchar_t pattern[MAX_PATH * 2], old[MAX_PATH * 2];
+        if (update_path(pattern, MAX_PATH * 2, L"DefJamSetup-*.exe") &&
+            (h = FindFirstFileW(pattern, &found)) != INVALID_HANDLE_VALUE) {
             do {
-                if (_stricmp(found.cFileName, g_setup)) {
-                    snprintf(path, sizeof(path), "%s\\%s", dir, found.cFileName);
-                    DeleteFileA(path);
-                }
-            } while (FindNextFileA(h, &found));
+                if (_wcsicmp(found.cFileName, wsetup) && update_path(old, MAX_PATH * 2, found.cFileName))
+                    DeleteFileW(old);
+            } while (FindNextFileW(h, &found));
             FindClose(h);
         }
     }
-    snprintf(path, sizeof(path), "%s\\%s", dir, g_setup);
-    MultiByteToWideChar(CP_UTF8, 0, path, -1, wpath, MAX_PATH * 2);
-    {
-        wchar_t name[96];
-        MultiByteToWideChar(CP_UTF8, 0, g_setup, -1, name, 96);
-        _snwprintf(url, sizeof(url) / sizeof(url[0]), L"/%s", name);
-    }
+    _snwprintf(url, sizeof(url) / sizeof(url[0]), L"/%s", wsetup);
     memset(&d, 0, sizeof(d));
     d.total = g_size;
     d.file = CreateFileW(wpath, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
     if (d.file == INVALID_HANDLE_VALUE || BCryptCreateHash(BCRYPT_SHA256_ALG_HANDLE, &d.hash, NULL, 0, NULL, 0, 0)) {
+        DWORD err = d.file == INVALID_HANDLE_VALUE ? GetLastError() : 0;
         if (d.file != INVALID_HANDLE_VALUE) CloseHandle(d.file);
-        say(UPDATER_FAILED, "Could not prepare the download folder.");
+        if (err == ERROR_SHARING_VIOLATION || err == ERROR_LOCK_VIOLATION)
+            say(UPDATER_FAILED, "The update's setup is in use by another program (another launcher, or the setup "
+                                "itself still running); try again in a minute.");
+        else
+            say(UPDATER_FAILED, "Could not prepare the download folder (error %lu).", (unsigned long)err);
         return 0;
     }
     InterlockedExchange(&g_permille, 0);
@@ -506,21 +524,21 @@ static DWORD WINAPI install_thread(LPVOID unused)
      * has its own executable) and this launcher shows the setup's status and progress files. */
     {
         wchar_t cmd[MAX_PATH * 8], winstall[MAX_PATH * 2], wdata[MAX_PATH * 2], wstatus[MAX_PATH * 2], wlog[MAX_PATH * 2];
-        char status[MAX_PATH * 2], text[256], line[MAX_PATH * 2];
+        wchar_t wprogress[MAX_PATH * 2], wstage[MAX_PATH * 2];
+        char text[256];
         STARTUPINFOW si;
         PROCESS_INFORMATION pi;
         DWORD code = 1;
-        snprintf(status, sizeof(status), "%s\\status.txt", dir);
-        DeleteFileA(status);
-        snprintf(line, sizeof(line), "%s.progress", status);
-        DeleteFileA(line);
-        snprintf(line, sizeof(line), "%s.stage", status);
-        DeleteFileA(line);
+        update_path(wstatus, MAX_PATH * 2, L"status.txt");
+        update_path(wprogress, MAX_PATH * 2, L"status.txt.progress");
+        update_path(wstage, MAX_PATH * 2, L"status.txt.stage");
+        update_path(wlog, MAX_PATH * 2, L"update-log.txt");
+        DeleteFileW(wstatus);
+        DeleteFileW(wprogress);
+        DeleteFileW(wstage);
+        WideCharToMultiByte(CP_UTF8, 0, wlog, -1, line, (int)sizeof(line), NULL, NULL);    /* for the message */
         MultiByteToWideChar(CP_UTF8, 0, install, -1, winstall, MAX_PATH * 2);
         MultiByteToWideChar(CP_UTF8, 0, data, -1, wdata, MAX_PATH * 2);
-        MultiByteToWideChar(CP_UTF8, 0, status, -1, wstatus, MAX_PATH * 2);
-        snprintf(line, sizeof(line), "%s\\update-log.txt", dir);
-        MultiByteToWideChar(CP_UTF8, 0, line, -1, wlog, MAX_PATH * 2);
         _snwprintf(cmd, sizeof(cmd) / sizeof(cmd[0]),
                    L"\"%s\" --silent --reuse-extracted --allow-running --install-prerequisites --no-shortcuts"
                    L" --install-dir \"%s\" --data-dir \"%s\" --status-file \"%s\" --log \"%s\"",
@@ -537,7 +555,7 @@ static DWORD WINAPI install_thread(LPVOID unused)
         set_step(0, 0, "");             /* until the setup names its first step */
         say(UPDATER_INSTALLING, "Installing version %s...", g_version);
         while (WaitForSingleObject(pi.hProcess, 500) == WAIT_TIMEOUT) {
-            FILE *f = fopen(status, "r");
+            FILE *f = _wfopen(wstatus, L"r");
             if (f) {
                 if (fgets(text, sizeof(text), f)) {
                     size_t n = strlen(text);
@@ -548,15 +566,13 @@ static DWORD WINAPI install_thread(LPVOID unused)
                 }
                 fclose(f);
             }
-            snprintf(line, sizeof(line), "%s.progress", status);
-            if ((f = fopen(line, "r")) != NULL) {
+            if ((f = _wfopen(wprogress, L"r")) != NULL) {
                 int permille;
                 if (fscanf(f, "%d", &permille) == 1 && permille >= 0 && permille <= 1000)
                     InterlockedExchange(&g_permille, permille);
                 fclose(f);
             }
-            snprintf(line, sizeof(line), "%s.stage", status);
-            if ((f = fopen(line, "r")) != NULL) {
+            if ((f = _wfopen(wstage, L"r")) != NULL) {
                 if (fgets(text, sizeof(text), f)) read_stage_line(text);
                 fclose(f);
             }
@@ -571,8 +587,7 @@ static DWORD WINAPI install_thread(LPVOID unused)
             char why[200] = "";
             FILE *f;
             size_t n;
-            snprintf(line, sizeof(line), "%s\\update-log.txt", dir);
-            if ((f = fopen(line, "r")) != NULL) {
+            if ((f = _wfopen(wlog, L"r")) != NULL) {
                 while (fgets(text, sizeof(text), f))
                     if (!strncmp(text, "Setup stopped: ", 15)) snprintf(why, sizeof(why), "%s", text + 15);
                 fclose(f);
