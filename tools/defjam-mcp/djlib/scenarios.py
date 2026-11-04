@@ -335,6 +335,16 @@ def social(timeout=300, relay_port=27900, off=False, lock_timeout=None, log=None
             pass
         flags += ["-avatar-source", avatars]
         tokens = s.accounts(acc_port, names + (STRESS_NAMES if stress and not off else []), extra=flags)
+        # DJ_RENAME="Copy 0=New Name[,Copy 1=...]": the FFNY name (POST /api/me/name) before the copies start;
+        # the room and the chats then show the new name (the checks below still look for "Copy N")
+        for pair in filter(None, os.environ.get("DJ_RENAME", "").split(",")):
+            who, new = pair.split("=", 1)
+            import urllib.request
+            req = urllib.request.Request("http://127.0.0.1:%d/api/me/name" % acc_port, method="POST",
+                                         data=json.dumps({"name": new}).encode(),
+                                         headers={"Authorization": "Bearer " + tokens[who], "Content-Type": "application/json"})
+            with urllib.request.urlopen(req, timeout=5) as r:
+                result.setdefault("renamed", {})[who] = json.loads(r.read())["account"]["name"]
         stress_sent, stress_rounds = [], [60, 120]
         if stress and not off:
             stress_sent.append(_stress_social(acc_port, tokens, names, 0))

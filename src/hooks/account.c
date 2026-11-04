@@ -616,6 +616,13 @@ int account_call(const char *method, const char *path, const char *json, char *b
     return status;
 }
 
+/* The launcher's rename (POST /api/me/name) answered with the account: keep its new FFNY name. */
+void account_take_renamed(const char *json)
+{
+    take_account(json);
+    save();
+}
+
 int account_fetch(const char *path, void *buf, int size, int *len)
 {
     wchar_t wpath[512];
@@ -703,6 +710,7 @@ int account_report_crash(const char *json, unsigned timeout_ms)
 void account_init(void) {}
 void account_refresh(void) {}
 void account_sign_in(void) {}
+void account_take_renamed(const char *json) { (void)json; }
 void account_cancel(void) {}
 void account_sign_out(void) {}
 void account_delete(void) {}

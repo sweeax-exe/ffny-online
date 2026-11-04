@@ -56,6 +56,9 @@ void account_cancel_call(void *volatile *live);
  * session token is sent. Blocks (off the game's threads only); *len gets the bytes read (a 200 only;
  * an answer of size - 1 bytes or more is cut). Returns the HTTP status, 0 when unreachable. */
 int account_fetch(const char *path, void *buf, int size, int *len);
+/* The launcher's Change name dialog: the service's answer to POST /api/me/name ({"account": ...})
+ * becomes the shown and saved name. */
+void account_take_renamed(const char *json);
 
 #ifdef __cplusplus
 }

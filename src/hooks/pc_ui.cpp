@@ -2321,6 +2321,8 @@ static AccountNumbers account_numbers()
     return n;
 }
 
+static void name_dialog_open();     // pc_launcher_name.inc
+
 static void account_card(ImVec2 a, ImVec2 b, float s)
 {
     static bool fetched;
@@ -2347,6 +2349,9 @@ static void account_card(ImVec2 a, ImVec2 b, float s)
         if (glass_button("##signout", "Sign out", ImVec2(b.x - 96 * s, a.y + 10 * s), ImVec2(78 * s, 24 * s), s,
                          GLASS_PLAIN, nullptr, 12.5f * s))
             account_sign_out();
+        if (glass_button("##rename", "Change name", ImVec2(b.x - 96 * s - 112 * s, a.y + 10 * s), ImVec2(104 * s, 24 * s), s,
+                         GLASS_PLAIN, nullptr, 12.5f * s))
+            name_dialog_open();
     } else if (state == ACCOUNT_WAITING) {
         card_line(dl, at, s, k_gold, "Finish signing in with Discord in your browser...", false, wrap);
         if (glass_button("##cancel", "Cancel", ImVec2(at.x, b.y - 38 * s), ImVec2(100 * s, 28 * s), s))
@@ -3017,6 +3022,7 @@ static void settings_dialog(ImVec2 o, float w, float h, float s, int &tab, int &
 
 #include "pc_launcher_saves.inc"      // the Saves dialog, drawn with the glass above
 #include "pc_launcher_music.inc"      // the Music card and dialog (custom music), the same glass
+#include "pc_launcher_name.inc"       // the Account card's Change name dialog (the FFNY name)
 
 #if defined(_WIN32)
 // The borderless window's own minimise and close buttons, top right.
@@ -3157,6 +3163,7 @@ static UiResult draw_launcher(float x, float y, float width, float height)
     settings_dialog(origin, width, height, s, tab, page);
     saves_dialog(origin, width, height, s);
     music_dialog(origin, width, height, s);
+    name_dialog(origin, width, height, s);
     update_popup(result);
     crash_popup();
     outside_launcher_notice();
