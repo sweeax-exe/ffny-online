@@ -229,6 +229,13 @@ relay (EU, NA, West).
   Classic and Draft stay stock only). At two wins, or after five games, the set is over: no game
   starts any more, and leaving the room is no longer a forfeit (no `setover`). `RANKINFO` follows
   every `ROOM` of the room.
+- Build 54: one game per `START`. The game's results screen offers no rematch in a set: Rematch goes back
+  to the room as No does (as on the hill), the Rematch menu leaves by itself after 4 s, and a `P_REMATCH`
+  from the other game prompts nothing; the account service counts only the first match of a `START` in the
+  set. A player who leaves from the results of a game both `RESULT`s already counted (the room is still
+  playing until both send `OVER`) leaves between games: a forfeit (`setover`), and `RANKINFO`'s `winner`
+  names the one who stayed, whose game then shows the results. The results page takes VICTORY / DEFEAT
+  from the account's own record once the set is rated, and shows the score from this player's seat.
 - **A Draft set** (relay `draft.go`, since ranked phase 2b) replaces the venue vote with a pick and
   ban the relay runs. Seat "A" is the lower-rated player in Draft (a tie: slot 0); `DRAFT` names it.
   Bans: three each, A B B A A B, 20 s a turn, visible and kept for the whole set (a ban that runs out

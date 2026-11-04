@@ -246,6 +246,7 @@ void netplay_crowd_update(void) { sub_00081170(); }
 #define CP_WAIT_MS    10000     /* START: how long to wait for a created fighter's missing record */
 #define CAPS_TRIES    5         /* CAPS every RETRY_MS; no answer after these: an older relay */
 #define WINNER_DRAW   0xFFu
+#define SET_MENU_MS   4000u     /* a ranked set's game: the results' Rematch menu goes back to the room by itself */
 #define RESULT_TRIES  75        /* RESULT every RETRY_MS until a HILL shows the fight over (30 s) */
 
 /* DATA payloads between the game copies (opaque to the relay) */
@@ -388,7 +389,10 @@ static struct {
     AutoMatch deferred_m;
     int koth_results;               /* this game still shows the results of a hill fight it fought (until the menu) */
     volatile LONG on_results;       /* this game is on its match's summary and results (each player's own) */
-    int koth_quit;                  /* Rematch on those results already took this PC back to the hill */
+    int koth_quit;                  /* Rematch on those results already took this PC back to the hill (or the set's room) */
+    ULONGLONG set_menu;             /* a ranked set's game: on the results' Rematch menu since (0: not there) */
+    int test_leave_due;             /* tests (RECOMP_TEST_RANKED_LEAVE): leave the room at the next update */
+    int decided_alone;              /* this match was decided in lockstep, then the other PC went on ahead */
     ULONGLONG deferred_toast;       /* the last "... is waiting for you" notice */
     int peer_results[MAXP];         /* each position said (P_RTT) it was still on the last fight's results */
     int peer_on_results[MAXP];      /* ... and says so in its latest P_RTT */
@@ -699,13 +703,22 @@ int netplay_rematch_request(void)
      * No does there, on this game thread inside the front end's call, as the results screen's own
      * No path runs it (MemCard.QuerySave(battle/rewardun.swf), then Game.Quit()). Also after a
      * deferred next fight was called off (match_live is 0 then, koth_results still 1). */
-    if (N.koth_results || (N.match_live && N.koth_match) || N.watching) {
+    /* Build 54: a ranked set's game too. Its set plays one game per START (the relay counts the START's
+     * RESULT, the loser picks the next venue in the room), so a rematch from the results screen played
+     * games the relay never counted while the account service did (launch night: a set shown 2-0 on
+     * the relay was 2-1 the other way on the service, and "Rematch?" asked mid-set). Rematch goes back
+     * to the room as No does; netplay_rematch_tick chooses it by itself after SET_MENU_MS. */
+    if (N.koth_results || (N.match_live && (N.koth_match || N.set_match)) || N.watching) {
         unsigned saved;
+        const char *who = N.set_match && !N.koth_match ? "ranked set" : "King of the Hill";
         if (N.koth_quit) return 1;      /* already on the way back */
         N.koth_quit = 1;
-        fprintf(stderr, "[NETPLAY] King of the Hill: Rematch on the results goes back to the hill (as No)\n");
+        N.set_menu = 0;
+        fprintf(stderr, "[NETPLAY] %s: Rematch on the results goes back to the %s (as No)\n", who,
+                N.set_match && !N.koth_match ? "room for the set's next game" : "hill");
+        if (N.set_match && !N.koth_match) rematch_declined();      /* the other PC hears it at once */
         saved = defjam_fe_call("MemCard.QuerySave( battle/rewardun.swf )");
-        fprintf(stderr, "[NETPLAY] King of the Hill: MemCard.QuerySave -> %08X; Game.Quit()\n", saved);
+        fprintf(stderr, "[NETPLAY] %s: MemCard.QuerySave -> %08X; Game.Quit()\n", who, saved);
         defjam_fe_call("Game.Quit()");
         return 1;
     }
@@ -757,11 +770,19 @@ void netplay_results_funccall(const char *text)
         InterlockedExchange(&N.on_results, 1);
         fprintf(stderr, "[NETPLAY] the match's summary: the other players' controllers stay off this PC's menus\n");
     }
+    if (N.set_match && !N.koth_match && N.lobby && N.match_live && !N.watching && !N.set_menu && !N.koth_quit &&
+        !strncmp(text, "MemCard.Save( battle/rewardun", 29)) {
+        /* a ranked set's game: the Rematch menu comes next; either choice, or none, goes back to the room */
+        N.set_menu = GetTickCount64();
+        fprintf(stderr, "[NETPLAY] ranked set: on the results' Rematch menu; back to the room for the next game\n");
+        toast(SET_MENU_MS, "Ranked set: the next game starts from the room.");
+    }
     if (strncmp(text, "Game.GetHeroFighterNumber(", 26) || !N.lobby || !N.match_live || N.watching ||
         MEM32(G_MATCH_PHASE) < 3u)
         return;
     InterlockedExchange(&N.rematch_held, 0);
     InterlockedExchange(&N.rematch_go, 0);
+    N.set_menu = 0;             /* a ranked set's game: No chosen, on the way to the room */
     if (N.rematch_want[N.pos] != REMATCH_NO) {
         fprintf(stderr, "[NETPLAY] rematch: this PC chose No on the results\n");
         rematch_declined();
@@ -774,6 +795,24 @@ void netplay_results_funccall(const char *text)
 static void netplay_rematch_tick(void)
 {
     uint32_t sm;
+    if (N.test_leave_due) {
+        N.test_leave_due = 0;
+        fprintf(stderr, "[NETPLAY] tests: leaving the ranked set's room on the results (RECOMP_TEST_RANKED_LEAVE)\n");
+        netplay_lobby_leave();
+    }
+    if (N.set_menu) {   /* a ranked set's game: off the Rematch menu by itself, as Rematch (= No there) would */
+        if (!N.lobby || !N.match_live || N.watching || N.koth_quit) {
+            N.set_menu = 0;
+        } else if (GetTickCount64() - N.set_menu >= SET_MENU_MS) {
+            sm = MEM32(0x002FB148u + 0x17u * 4u);
+            if (sm >= 0x10000u && MEM32(sm + 0x24u) != 0) return;     /* a screen loads: later */
+            fprintf(stderr, "[NETPLAY] ranked set: no choice on the Rematch menu in %u s; back to the room\n",
+                    (unsigned)(SET_MENU_MS / 1000u));
+            N.set_menu = 0;
+            defjam_menu_call("Game.Rematch()");     /* netplay_rematch_request: the No path */
+        }
+        return;
+    }
     if (!N.rematch_go) return;
     if (!N.lobby || !N.match_live || N.watching) {
         InterlockedExchange(&N.rematch_go, 0);
@@ -1764,7 +1803,11 @@ static void on_data(int from, const uint8_t *p, int len)
             LeaveCriticalSection(&g_cs);
             fprintf(stderr, "[NETPLAY] rematch: player %d %s\n", from + 1,
                     after == REMATCH_NO ? "went back to the room" : "chose Rematch");
-            if (after != REMATCH_NO && after < N.match_count) {
+            if (N.set_match && !N.koth_match) {
+                /* a ranked set's game: no rematch between its games (netplay_rematch_request), so no
+                 * "wants a rematch" prompt; the next game starts from the room */
+                if (after == REMATCH_NO) SetEvent(N.arrived);
+            } else if (after != REMATCH_NO && after < N.match_count) {
                 /* that rematch runs already (the choice that started it on that PC, sent again) */
             } else if (after == REMATCH_NO) {
                 InterlockedExchange(&N.rematch_go, 0);
@@ -2011,6 +2054,11 @@ static void on_rankinfo(const uint8_t *b, int len)
     if (N.set_match && N.koth_winner >= 0 && (ri.game != N.set_game || ri.winner != NETRANK_SET_RUNNING)) {
         fprintf(stderr, "[NETPLAY] ranked set: the result is in\n");
         N.koth_winner = -1;
+        {   /* tests: RECOMP_TEST_RANKED_LEAVE=<n> leaves the room on the results of the set's n-th game
+             * (launch night's open sets: a player gone from the results before both sent OVER) */
+            const char *e = getenv("RECOMP_TEST_RANKED_LEAVE");
+            if (e && atoi(e) > 0 && atoi(e) == N.set_game) N.test_leave_due = 1;
+        }
     }
     N.roomv.version++;
     LeaveCriticalSection(&g_cs);
@@ -4200,7 +4248,12 @@ void netplay_on_result(uint32_t winners, uint32_t losers, uint32_t code)
     (void)losers;
     InitOnceExecuteOnce(&g_once, init_once, NULL, NULL);
     EnterCriticalSection(&g_cs);
-    if (!N.lobby || !N.match_live || N.reported || !N.report_key[0] || N.desync || !N.lockstep || N.watching) {
+    /* Build 54: also when the match was decided in lockstep and the other PC then went on ahead (the rest
+     * ran here alone): its decision is the room's. Only one of the two games reported such a game, and
+     * the account service paused ranked sets for it ("1 of 2 players reported a result"; a ranked test
+     * run with the test knockout, logs/dj/20261104-040658-online). */
+    if (!N.lobby || !N.match_live || N.reported || !N.report_key[0] || N.desync || (!N.lockstep && !N.decided_alone) ||
+        N.watching) {
         LeaveCriticalSection(&g_cs);
         return;
     }
@@ -4391,10 +4444,21 @@ void netplay_on_main_menu(void)
         koth_check_result(1);   /* King of the Hill: the fight's RESULT, a draw if none was recorded */
         end_hub_match("Match over; back in the room.");
     }
+    if (N.rb_on) {
+        /* Back in the menus with rollback still on: the per-update check that turns it off (every step
+         * final after the decision) never passed, e.g. the other PC went to its results or the room
+         * before this one had its last entries. Write tracking and the held frees stayed on through
+         * the menus, and the next venue loaded "in a fight" (ranked launch night: No after game 1,
+         * Game.Quit(), and the set's next game never came). Off here, on the game thread. */
+        fprintf(stderr, "[ROLLBACK] off: back in the menus with rollback still on (step %u, final %u)\n", N.step, N.final_step);
+        N.rb_on = N.predicting = N.resim = 0;
+        rollback_reset();
+    }
     if (N.koth_results)         /* also after the next fight was called off meanwhile */
         fprintf(stderr, "[NETPLAY] back from the last fight's results: on the hill\n");
     N.koth_results = 0;
     N.koth_quit = 0;
+    N.set_menu = 0;
 }
 
 /* At the sync point, before the match is set up: the room's START came, but a player has left
@@ -5046,6 +5110,7 @@ void netplay_on_match_start(void)
                  (unsigned)N.match_count);
     }
     N.reported = N.fighting_seen = N.start_reported = 0;
+    N.decided_alone = 0;
     InterlockedExchange(&N.on_results, 0);      /* a rematch's fight: the results are behind */
     disarm_crash_report();
     memset(N.latest_local, 0, sizeof(N.latest_local));
@@ -6064,6 +6129,9 @@ void netplay_on_step(void)
                 if (decided) {
                     fprintf(stderr, "[NETPLAY] the match is decided and player %d went on ahead (step %u): the rest "
                             "runs on this PC alone\n", late, s);
+                    /* its result is still the room's (netplay_on_result), once the step it was decided at is
+                     * final: not a decision seen on predicted entries */
+                    N.decided_alone = !N.rb_on || (N.rb_decided_step && N.final_step >= N.rb_decided_step);
                     InterlockedExchange(&N.lockstep, 0);
                     set_status("The match is over; the rest runs on this PC.");
                     break;

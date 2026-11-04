@@ -643,6 +643,14 @@ void draw_ranked_results(ImDrawList *dl, const Frame &f, const Pad &pad)
     const NetModeRank &a = now[mode], &b = R.before[mode];
     int sets_before = b.valid ? b.set_wins + b.set_losses : 0, sets_now = a.valid ? a.set_wins + a.set_losses : 0;
     bool rated = a.valid && sets_now > sets_before;
+    // Build 54: once the account service rated the set, this player's own record says how it went (a set
+    // won or lost more than before), so VICTORY / DEFEAT always agree with the rating change shown below.
+    // Launch night showed DEFEAT 1-2 beside +75 and PROMOTED: the service had counted the games' rematches,
+    // the relay only each START's first game (both now count one game per START).
+    if (rated && b.valid && !level) {
+        if (a.set_wins > b.set_wins && a.set_losses == b.set_losses) won = true;
+        else if (a.set_losses > b.set_losses && a.set_wins == b.set_wins) won = false;
+    }
     unsigned long long t = GetTickCount64();
     // the account service rates the set once both games' reports are in: ask again every 3 s, a minute
     if (!gallery_on() && !rated && t - R.results_since < 60000 && t - R.results_fetch > 3000 && !stats_busy()) {
@@ -657,7 +665,13 @@ void draw_ranked_results(ImDrawList *dl, const Frame &f, const Pad &pad)
     glass(dl, f, 20, 96, 158, 150, 10, IM_COL32(10, 9, 11, 255), 0.72f);
     text(dl, f, g_stencil, 30, 32, 104, won ? GREEN : level ? CREAM : with_alpha(RED, 1.0f), won ? "VICTORY" : level ? "LEVEL" : "DEFEAT",
          LEFT, 1.6f);
-    snprintf(line, sizeof(line), "RANKED %s, SET %d-%d", netranked_mode_title(mode), me ? me->set_wins : 0, opp ? opp->set_wins : 0);
+    {   // the score from this player's seat; one that contradicts the result (the relay's count against
+        // the account service's) is left out rather than shown the wrong way round
+        int mine = me ? me->set_wins : 0, theirs = opp ? opp->set_wins : 0;
+        bool fits = level ? mine == theirs : won ? mine > theirs : mine < theirs;
+        if (fits) snprintf(line, sizeof(line), "RANKED %s, SET %d-%d", netranked_mode_title(mode), mine, theirs);
+        else snprintf(line, sizeof(line), "RANKED %s SET", netranked_mode_title(mode));
+    }
     text(dl, f, g_title, fit_size(f, g_title, 12, line, 140), 32, 140, ORANGE, line, LEFT, 0.8f);
     text(dl, f, g_title, 8.5f, 32, 162, GREY, "OPPONENT", LEFT, 0.5f);
     if (R.opp_name[0]) {
