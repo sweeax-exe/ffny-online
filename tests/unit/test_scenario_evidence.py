@@ -444,7 +444,7 @@ def test_missing_build_writes_failed_report_before_copying_fixture(tmp_path, mon
     (src / 'profile').write_bytes(b'synthetic')
     fixture = tmp_path / 'fixture'
     suite.create_fixture(src, fixture, 'synthetic profile')
-    def missing_build(*args): raise ValueError('synthetic missing build certificate')
+    def missing_build(*args, **kwargs): raise ValueError('synthetic missing build certificate')
     monkeypatch.setattr(suite.harness.pipeline_state, 'verify_build', missing_build)
     monkeypatch.setattr(suite, 'source_identity', lambda _: {})
     output = tmp_path / 'report'
@@ -466,7 +466,7 @@ def test_scenario_runner_requires_audio_and_retains_browsable_evidence(tmp_path,
     fixture = tmp_path / 'fixture'
     suite.create_fixture(src, fixture, 'synthetic')
     monkeypatch.setattr(suite, 'source_identity', lambda _: {'head': 'synthetic'})
-    monkeypatch.setattr(suite.harness.pipeline_state, 'verify_build', lambda *a: {})
+    monkeypatch.setattr(suite.harness.pipeline_state, 'verify_build', lambda *a, **k: {})
     received = {}
     monkeypatch.setenv('RECOMP_TEXTURE_PACKS', 'inherited-must-not-enter-scenario')
     def launch(route, **kwargs):

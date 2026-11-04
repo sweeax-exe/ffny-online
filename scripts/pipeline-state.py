@@ -132,11 +132,24 @@ def finish_stage_inputs(path, inputs):
     return inputs
 
 
+# python=RECORDED: take the interpreter the analysis recorded, checking every other input. For a
+# consumer of a finished build (the harness), which may run on another Python than the pipeline did:
+# a Steam Deck analyzes and builds in the container and runs the game on SteamOS. The pipeline's own
+# stages and the setup engine keep checking the interpreter itself.
+RECORDED = 'recorded'
+
+
 def verify_analysis(repo, toolkit, python=None):
     state = read_state(toolkit / 'game_files/defjam-analysis-state.json')
-    if (state['inputs'] != analysis_inputs(repo, toolkit, python)
-            or state['outputs'] != analysis_outputs(toolkit)):
-        raise ValueError('Analysis is stale; run scripts/analyze.ps1')
+    inputs = analysis_inputs(repo, toolkit, None if python == RECORDED else python)
+    if python == RECORDED:
+        inputs['interpreter'] = state['inputs'].get('interpreter')
+    changed = sorted(k for k in set(inputs) | set(state['inputs']) if inputs.get(k) != state['inputs'].get(k))
+    if state['outputs'] != analysis_outputs(toolkit):
+        changed.append('outputs')
+    if changed:
+        raise ValueError('Analysis is stale (%s changed); run scripts/analyze.ps1, or scripts/pipeline.py '
+                         'analyze with the Python the build uses' % ', '.join(changed))
     return state
 
 

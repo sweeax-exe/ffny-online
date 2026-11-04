@@ -451,7 +451,7 @@ def test_launch_failure_restores_full_save_root(tmp_path, monkeypatch, original)
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(b'original')
     monkeypatch.setattr(harness, 'kill_stray', lambda: None)
-    monkeypatch.setattr(harness.pipeline_state, 'verify_build', lambda *a: None)
+    monkeypatch.setattr(harness.pipeline_state, 'verify_build', lambda *a, **k: None)
     repo = tmp_path / 'repo'
     monkeypatch.setattr(harness, 'REPO', str(repo))
     for name in ('build/%s/%s' % (harness.RELEASE_PRESET, harness.EXE_NAME), 'game/default.xbe'):
@@ -640,6 +640,20 @@ def test_analysis_key_covers_commands_interpreter_tool_data_and_version(tmp_path
         monkeypatch.setattr(pipeline, 'KEY_VERSION', pipeline.KEY_VERSION + 1)
     with pytest.raises(ValueError, match='Analysis is stale'):
         pipeline.verify_analysis(repo, toolkit)
+
+
+def test_a_finished_build_can_be_checked_from_another_python(tmp_path, monkeypatch):
+    # A Steam Deck analyzes and builds in the container and runs the harness on SteamOS's Python:
+    # RECORDED accepts the interpreter the analysis recorded and still checks everything else.
+    repo, toolkit = pipeline_fixture(tmp_path)
+    real = pipeline.interpreter()
+    monkeypatch.setattr(pipeline, 'interpreter', lambda python=None: {**real, 'python': '3.99 (another host)'})
+    with pytest.raises(ValueError, match=r'Analysis is stale \(interpreter changed\)'):
+        pipeline.verify_analysis(repo, toolkit)
+    pipeline.verify_analysis(repo, toolkit, python=pipeline.RECORDED)
+    monkeypatch.setattr(pipeline, 'KEY_VERSION', pipeline.KEY_VERSION + 1)
+    with pytest.raises(ValueError, match=r'Analysis is stale \(key changed\)'):
+        pipeline.verify_analysis(repo, toolkit, python=pipeline.RECORDED)
 
 
 def test_interpreter_action_reports_what_the_engine_compares(tmp_path):

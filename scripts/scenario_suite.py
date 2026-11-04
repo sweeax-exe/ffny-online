@@ -302,7 +302,8 @@ def execute(args):
         report['identity']['rng_seed_override'] = args.rng_seed
         # Fail before copying a potentially large save/cache tree when no
         # certified game build exists in this isolated worktree.
-        harness.pipeline_state.verify_build(Path(harness.REPO), args.preset)
+        harness.pipeline_state.verify_build(Path(harness.REPO), args.preset,
+                                                  python=harness.pipeline_state.RECORDED)
         with tempfile.TemporaryDirectory(prefix='runtime-', dir=folder) as disposable:
             shutil.copytree(Path(args.fixture) / 'save', Path(disposable) / 'save')
             env = {'DEFJAM_DATA': disposable, 'RECOMP_SETTINGS': 'none',
