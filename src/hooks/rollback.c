@@ -707,6 +707,7 @@ void rollback_sound_context(int on) { t_in_sound = on; }
 int rollback_on_game_thread(void) { return s_game_tid && GetCurrentThreadId() == s_game_tid; }
 
 /* For crash reports: how the save states treat the page of a guest address. */
+static int mixmask_keep(void);
 const char *rollback_page_state(uint32_t addr)
 {
     uint32_t p;
@@ -715,7 +716,7 @@ const char *rollback_page_state(uint32_t addr)
     if (s_skip[p]) return s_audio_page[p] ? "left alone (audio)" : "left alone";
     if (s_mixmask[p]) {
         uint32_t w = ((addr - HEAP_LO) % PAGE) / 4u;
-        if (s_mixmask[p][w >> 3] & (1u << (w & 7))) return "a mixer word (kept live)";
+        if (s_mixmask[p][w >> 3] & (1u << (w & 7))) return mixmask_keep() ? "a mixer word (kept live)" : "a mixer word (restored by loads)";
         if (s_known[p]) return "saved (page with mixer words)";
     }
     if (s_known[p]) return "saved";
@@ -1502,13 +1503,29 @@ int rollback_save(int slot)
 
 static void forget_frees_since(LONG at);
 
-/* A heap page back as it was, but for the words the mixer writes (s_mixmask). */
+/* Whether the words a mixer tick was seen to change stay live through loads (s_mixmask). Off since build 55:
+ * in every local run since 506b39f a clean tick changed no word of the game's heap (the sound side lives in
+ * the arena), so what the mask held on players' PCs was other writers' words, the game's own objects left
+ * half restored by every later load. All three build-54 rollback crashes sit on them: F9 e7d57d crashed in
+ * sub_00117410 with edi = 8172D208, the first of the 7 words "the mixer writes 8172D000 (bytes 8172D208..)"
+ * kept live in that fight (ecx = BF800000, the float -1.0 of a08559 and 99b1d9); 2df2cd's draw command and
+ * loaded object, ba0793's particle pages lay on "page with mixer words" before the billboard writer
+ * (sub_00115CB0) ran to 84000000. The ticks are still found and logged; a load now puts those words back
+ * with the rest. RECOMP_ROLLBACK_MIXMASK=keep: the rule before build 55. */
+static int mixmask_keep(void)
+{
+    static int keep = -1;
+    if (keep < 0) keep = getenv("RECOMP_ROLLBACK_MIXMASK") && !strcmp(getenv("RECOMP_ROLLBACK_MIXMASK"), "keep");
+    return keep;
+}
+
+/* A heap page back as it was (with RECOMP_ROLLBACK_MIXMASK=keep: but for the words the mixer writes). */
 static void load_page(uint32_t p, const uint8_t *saved)
 {
     uint32_t *now = (uint32_t *)XBOX_PTR(HEAP_LO + p * PAGE), live[PAGE / 4];
     const uint8_t *m = s_mixmask[p];
     unsigned w;
-    if (!m) { memcpy(now, saved, PAGE); return; }
+    if (!m || !mixmask_keep()) { memcpy(now, saved, PAGE); return; }
     memcpy(live, now, PAGE);
     memcpy(now, saved, PAGE);
     for (w = 0; w < PAGE / 4; w++)
@@ -2490,12 +2507,13 @@ static int mixer_kept_cpu(ULONG64 clock, ULONG64 own)
 static void mixer_stats(void)
 {
     if (!s_mixst.watched) return;
-    fprintf(stderr, "[ROLLBACK] mixer ticks this fight: %u watched, %u clean (%u words kept live through loads); left out: "
+    fprintf(stderr, "[ROLLBACK] mixer ticks this fight: %u watched, %u clean (%u words %s); left out: "
             "game thread ran %u, saved or loaded %u, other CPU %u, the mixer off its CPU %u, too many pages or words %u; "
             "the mixer had its CPU for %.1f%% of the watched time\n", s_mixst.watched, s_mixst.clean, s_mixst.words,
-            s_mixst.game, s_mixst.seq, s_mixst.cpu, s_mixst.off, s_mixst.pages,
+            mixmask_keep() ? "kept live through loads" : "seen, restored by loads", s_mixst.game, s_mixst.seq, s_mixst.cpu, s_mixst.off, s_mixst.pages,
             s_mixst.clock ? 100.0 * (double)s_mixst.own / (double)s_mixst.clock : 0.0);
     memset(&s_mixst, 0, sizeof(s_mixst));
+    s_mix_found = 0;
 }
 
 static void mixer_begin(void)
@@ -2660,9 +2678,10 @@ static void mixer_end(void)
                 hi = w * 4 + 4;
             }
             s_mixst.words += added;
-            if (added && s_mix_found++ < 64) {
-                fprintf(stderr, "[ROLLBACK] the mixer writes %08X (bytes %08X..%08X, %u words): they stay as they are through loads\n",
-                        HEAP_LO + p * PAGE, HEAP_LO + p * PAGE + lo, HEAP_LO + p * PAGE + hi, added);
+            if (added && s_mix_found++ < 32) {     /* per fight (mixer_stats): a chain's later fights showed none */
+                fprintf(stderr, "[ROLLBACK] the mixer writes %08X (bytes %08X..%08X, %u words): %s\n",
+                        HEAP_LO + p * PAGE, HEAP_LO + p * PAGE + lo, HEAP_LO + p * PAGE + hi, added,
+                        mixmask_keep() ? "they stay as they are through loads" : "seen, a load restores them");
                 alloclog_page(HEAP_LO + p * PAGE + (lo & ~0xFu), "the mixer");
             }
         }
