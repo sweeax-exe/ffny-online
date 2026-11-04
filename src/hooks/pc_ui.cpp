@@ -3017,6 +3017,7 @@ static void settings_dialog(ImVec2 o, float w, float h, float s, int &tab, int &
 
 #include "pc_launcher_saves.inc"      // the Saves dialog, drawn with the glass above
 #include "pc_launcher_music.inc"      // the Music card and dialog (custom music), the same glass
+#include "pc_launcher_graphics.inc"   // the Graphics card and dialog (Enhanced graphics), the same glass
 
 #if defined(_WIN32)
 // The borderless window's own minimise and close buttons, top right.
@@ -3144,8 +3145,9 @@ static UiResult draw_launcher(float x, float y, float width, float height)
     float grow = upd == UPDATER_DOWNLOADING || upd == UPDATER_INSTALLING ? 24 : 0;
     account_card(at(740, 64), at(1060, 168), s);
     game_card(at(740, 184), at(1060, 288 + grow), s, result);
-    news_card(at(740, 304 + grow), at(1060, 520), s);
-    music_card(at(740, 536), at(1060, 632), s);
+    news_card(at(740, 304 + grow), at(1060, 424), s);
+    graphics_card(at(740, 440), at(1060, 536), s);
+    music_card(at(740, 552), at(1060, 648), s);
 
     {
         static bool opened;
@@ -3157,6 +3159,7 @@ static UiResult draw_launcher(float x, float y, float width, float height)
     settings_dialog(origin, width, height, s, tab, page);
     saves_dialog(origin, width, height, s);
     music_dialog(origin, width, height, s);
+    graphics_dialog(origin, width, height, s);
     update_popup(result);
     crash_popup();
     outside_launcher_notice();
