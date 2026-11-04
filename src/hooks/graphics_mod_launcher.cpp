@@ -114,8 +114,8 @@ void run_install(std::string preset, bool reinstall)
         return;
     }
     save_setting(true, preset);
-    finish(reinstall ? "Enhanced graphics installed again for this version. It applies at the next start."
-                     : "Enhanced graphics is installed. It applies the next time you start FFNY Online.", 1);
+    finish(reinstall ? "Enhanced graphics installed again for this version. Close and reopen the launcher to apply it."
+                     : "Enhanced graphics is installed. Close and reopen the launcher to apply it.", 1);
 }
 
 bool start_work()
@@ -169,7 +169,7 @@ void start_switch(const std::string &preset)
         std::string error;
         if (!fetch(m, error)) { finish(error, 2); return; }
         if (!switch_preset(m, data_folder(), preset, downloading(), &error)) { finish(error, 2); return; }
-        finish(std::string(preset == "quality" ? "Quality" : "Performance") + " preset set. It applies at the next start.", 1);
+        finish(std::string(preset == "quality" ? "Quality" : "Performance") + " preset set. Close and reopen the launcher to apply it.", 1);
     }).detach();
 }
 
