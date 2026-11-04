@@ -248,6 +248,7 @@ void netplay_crowd_update(void) { sub_00081170(); }
 #define CAPS_TRIES    5         /* CAPS every RETRY_MS; no answer after these: an older relay */
 #define WINNER_DRAW   0xFFu
 #define SET_MENU_MS   4000u     /* a ranked set's game: the results' Rematch menu goes back to the room by itself */
+#define SET_LEAVE_MS  15000u    /* ... and when it has not reached the menus this long after that, it is forced */
 #define RESULT_TRIES  75        /* RESULT every RETRY_MS until a HILL shows the fight over (30 s) */
 
 /* DATA payloads between the game copies (opaque to the relay) */
@@ -403,6 +404,7 @@ static struct {
     volatile LONG on_results;       /* this game is on its match's summary and results (each player's own) */
     int koth_quit;                  /* Rematch on those results already took this PC back to the hill (or the set's room) */
     ULONGLONG set_menu;             /* a ranked set's game: on the results' Rematch menu since (0: not there) */
+    ULONGLONG set_leave;            /* a ranked set's game: left those results for the room at (0: not on the way) */
     int test_leave_due;             /* tests (RECOMP_TEST_RANKED_LEAVE): leave the room at the next update */
     int decided_alone;              /* this match was decided in lockstep, then the other PC went on ahead */
     ULONGLONG deferred_toast;       /* the last "... is waiting for you" notice */
@@ -688,6 +690,22 @@ static void chat_tick(ULONGLONG now);
 static void rematch_declined(void);
 static void send_data(const uint8_t *payload, int len);
 
+/* Off before the results are left, not once back in the menus (build 54): with rollback still on (the
+ * per-update check never passed, the other PC's last entries never came) the frees stay held and the
+ * sound engine's memory stays in its arena through the load Game.Quit() starts, and that load froze
+ * the game for good: launch night's No after a set's game, and set W34VFS's automatic leave, F9 dead on
+ * both PCs. RECOMP_TEST_ROLLBACK_STAYS_ON=2 skips this (the freeze, for tests). */
+static void rollback_off_leaving(const char *why)
+{
+    const char *e;
+    if (!N.rb_on || N.resim) return;
+    e = getenv("RECOMP_TEST_ROLLBACK_STAYS_ON");
+    if (e && atoi(e) == 2) return;
+    fprintf(stderr, "[ROLLBACK] off: %s with rollback still on (step %u, final %u)\n", why, N.step, N.final_step);
+    N.rb_on = N.predicting = 0;
+    rollback_reset();
+}
+
 /* The results screen's Rematch (Game.Rematch()) starts the next match on this PC alone: with one
  * player choosing Rematch and the other No, one game loaded a fight the other never joined and stood
  * on "FIGHT!" for 90 seconds (five F9 reports, 2026-10-23/24). Online it goes through only once every
@@ -769,7 +787,11 @@ int netplay_rematch_request(void)
         N.set_menu = 0;
         fprintf(stderr, "[NETPLAY] %s: Rematch on the results goes back to the %s (as No)\n", who,
                 N.set_match && !N.koth_match ? "room for the set's next game" : "hill");
-        if (N.set_match && !N.koth_match) rematch_declined();      /* the other PC hears it at once */
+        if (N.set_match && !N.koth_match) {
+            rematch_declined();     /* the other PC hears it at once */
+            N.set_leave = GetTickCount64();
+        }
+        rollback_off_leaving("Rematch on the results leaves them");
         saved = defjam_fe_call("MemCard.QuerySave( battle/rewardun.swf )");
         fprintf(stderr, "[NETPLAY] %s: MemCard.QuerySave -> %08X; Game.Quit()\n", who, saved);
         defjam_fe_call("Game.Quit()");
@@ -821,6 +843,7 @@ int netplay_rematch_request(void)
  * already started stops waiting for this PC (the fight's wait below). */
 void netplay_results_funccall(const char *text)
 {
+    if (!strcmp(text, "Game.Quit()")) rollback_off_leaving("Game.Quit()");
     if (!strncmp(text, "Game.GetMatchSummary(", 21) && N.lobby && N.match_live && !N.watching && !N.on_results) {
         InterlockedExchange(&N.on_results, 1);
         fprintf(stderr, "[NETPLAY] the match's summary: the other players' controllers stay off this PC's menus\n");
@@ -838,6 +861,7 @@ void netplay_results_funccall(const char *text)
     InterlockedExchange(&N.rematch_held, 0);
     InterlockedExchange(&N.rematch_go, 0);
     N.set_menu = 0;             /* a ranked set's game: No chosen, on the way to the room */
+    if (N.set_match && !N.koth_match && !N.set_leave) N.set_leave = GetTickCount64();
     if (N.rematch_want[N.pos] != REMATCH_NO) {
         fprintf(stderr, "[NETPLAY] rematch: this PC chose No on the results\n");
         rematch_declined();
@@ -854,6 +878,24 @@ static void netplay_rematch_tick(void)
         N.test_leave_due = 0;
         fprintf(stderr, "[NETPLAY] tests: leaving the ranked set's room on the results (RECOMP_TEST_RANKED_LEAVE)\n");
         netplay_lobby_leave();
+    }
+    if (N.set_leave) {  /* a ranked set's game on its way to the room: it must not be able to stay there */
+        if (!N.lobby || !N.match_live || N.watching) {
+            N.set_leave = 0;
+        } else if (GetTickCount64() - N.set_leave >= SET_LEAVE_MS) {
+            sm = MEM32(0x002FB148u + 0x17u * 4u);
+            N.set_leave = GetTickCount64();     /* again after as long, while it is not there */
+            if (sm >= 0x10000u && MEM32(sm + 0x24u) != 0) {
+                fprintf(stderr, "[NETPLAY] ranked set: not back in the menus after %u s; a screen loads (state %u), waiting\n",
+                        (unsigned)(SET_LEAVE_MS / 1000u), MEM32(sm + 0x24u));
+            } else {
+                fprintf(stderr, "[NETPLAY] ranked set: not back in the menus after %u s (phase %u, on_results %ld, rollback %d): "
+                        "Game.Quit() forced\n", (unsigned)(SET_LEAVE_MS / 1000u), MEM32(G_MATCH_PHASE), (long)N.on_results, N.rb_on);
+                rollback_off_leaving("the forced way back");
+                defjam_menu_call("Game.Quit()");
+            }
+            return;
+        }
     }
     if (N.set_menu) {   /* a ranked set's game: off the Rematch menu by itself, as Rematch (= No there) would */
         if (!N.lobby || !N.match_live || N.watching || N.koth_quit) {
@@ -4557,6 +4599,7 @@ void netplay_on_main_menu(void)
     N.koth_results = 0;
     N.koth_quit = 0;
     N.set_menu = 0;
+    N.set_leave = 0;
 }
 
 /* At the sync point, before the match is set up: the room's START came, but a player has left
@@ -7044,7 +7087,7 @@ static void rb_budget_tick(void)
 void netplay_on_update(void)
 {
     uint32_t t, f = 0;
-    int i;
+    int i, rb_stays;
     rollback_check_tables(N.resim ? "a re-run update starts" : "an update starts");
     if (!N.resim) spec_tick();
     /* A rollback match that went out of sync leaves for the room at once. Its desync can come from a
@@ -7084,10 +7127,16 @@ void netplay_on_update(void)
      * no more rollback in this match (write tracking off, no saves on the results screen). */
     if (MEM32(G_MATCH_PHASE) == 1u) N.rb_fought = 1;   /* a rematch starts with the last match's phase */
     rb_budget_tick();
-    if ((!N.lockstep && !soak_depth()) ||
+    {   /* tests: RECOMP_TEST_ROLLBACK_STAYS_ON: the check below never passes after the decision, as on
+         * a PC whose last entries never came (launch night, "still in a fight" after Game.Quit()) */
+        static int stays = -1;
+        if (stays < 0) stays = getenv("RECOMP_TEST_ROLLBACK_STAYS_ON") != NULL;
+        rb_stays = stays && N.lockstep && !N.desync && N.rb_fought && MEM32(G_MATCH_PHASE) >= 2u;
+    }
+    if (!rb_stays && ((!N.lockstep && !soak_depth()) ||
         (N.lockstep && N.rb_fought && MEM32(G_MATCH_PHASE) >= 2u && N.final_step >= N.step && !N.predicting) ||
         (N.lockstep && N.rb_decided_step && N.final_step >= N.rb_decided_step) ||
-        (N.lockstep && N.desync && !N.predicting && N.final_step >= N.step)) {
+        (N.lockstep && N.desync && !N.predicting && N.final_step >= N.step))) {
         N.rb_on = 0;
         rollback_reset();
         if (N.lockstep && N.desync)
