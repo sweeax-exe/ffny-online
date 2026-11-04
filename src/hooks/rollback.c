@@ -174,7 +174,9 @@ static int s_audio_state;               /* 0 before, 1 during, 2 after the audio
 #define ARENA_ALIGN  128u               /* what sub_00029500 gives at most */
 #define SND_ALLOCATOR 0x003ADB58u
 /* addr/size: the piece of the arena; user: the block handed out (aligned, 16-byte header before it) */
-typedef struct { uint32_t addr, size, user; int used, freed; } Block;   /* freed: given back, held */
+/* freed: given back, held; fight: handed out while a fight's saves ran (the fight's-end line counts what of
+ * that is still live, to tell a leak of blocks a load took back from the engine's own growth) */
+typedef struct { uint32_t addr, size, user; int used, freed, fight; } Block;
 static Block s_blk[ARENA_BLOCKS];
 static int s_nblk;
 static uint32_t s_arena, s_arena_live, s_arena_peak, s_arena_total;
@@ -1165,9 +1167,21 @@ void rollback_note_dynamic_load(uint32_t caller, uint32_t handle)
     }
 }
 
+static void release_kept_arena(void);
+static int s_kept_rescan;   /* the fight's end left kept blocks named: one more scan when the next load needs room */
 void rollback_reset(void)
 {
+    int fought = s_tracking;
     track_stop();
+    /* The blocks a load kept go back as soon as the fight is over, not only when the next fight's saves
+     * start: a rematch chain loads its next venue in between, and its banks found the arena scattered
+     * with the last fight's kept blocks (F9 e7d57d, build 54: "1813 blocks used (817 freed and held or
+     * kept)" as the next venue loaded, the arena grown twice). Those still named here (the results
+     * screen holds the fight's objects) get one more try when a load finds no room (arena_alloc). */
+    if (fought && s_arena) {
+        release_kept_arena();
+        s_kept_rescan = 1;
+    }
     InterlockedExchange(&s_mix_on, 0);
     mixer_stats();
     s_ready = 0;
@@ -1295,10 +1309,15 @@ static void release_kept_arena(void)
          * toolkit's v0.12 layout ("Heap: 48 MB at 0x00F80000-0x04000000"; it ended at 0x01600000 before) */
         mark_range(0x00010000u, 0x04000000u);
         /* the heap and the whole contiguous window above it (the arena, DirectSound's voice memory, the GPU
-         * data), less the kept blocks themselves: one that only a kept block names is no less dead */
-        for (k = 0; k < n; k++) {
-            if (s_kept[k].lo > at) mark_range(at, s_kept[k].lo);
-            at = s_kept[k].hi;
+         * data), less the kept blocks themselves (one that only a kept block names is no less dead) and less
+         * the arena's free blocks: their bytes are what the last owner left, and old handles in them kept
+         * blocks "named" for ever (F9 e7d57d, build 54: 241, then 295 of them carried from match to match
+         * through a rematch chain, scattered between the live ones, until the next venue's 116 and 201 KB
+         * blocks found no room among 516 free blocks of at most 21 KB) */
+        for (i = 0; i < s_nblk; i++) {
+            if (s_blk[i].used && !s_blk[i].freed) continue;
+            if (s_blk[i].addr > at) mark_range(at, s_blk[i].addr);
+            if (s_blk[i].addr + s_blk[i].size > at) at = s_blk[i].addr + s_blk[i].size;
         }
         mark_range(at, 0x84000000u);
     }
@@ -1945,6 +1964,7 @@ again:
         }
         s_blk[i].used = 1;
         s_blk[i].freed = 0;
+        s_blk[i].fight = s_tracking ? 1 : 0;
         a = (s_blk[i].addr + 16u + ARENA_ALIGN - 1u) & ~(ARENA_ALIGN - 1u);
         s_blk[i].user = a;
         arena_event('A', a, want);
@@ -1959,6 +1979,11 @@ again:
             s_arena_peak = s_arena_live;
         }
         break;
+    }
+    if (!a && !grown && !s_tracking && s_kept_rescan) {     /* the last fight's kept blocks first (rollback_reset) */
+        s_kept_rescan = 0;
+        release_kept_arena();
+        goto again;
     }
     if (!a && !grown && arena_grow(size, 0)) { grown = 1; goto again; }
     LeaveCriticalSection(&s_arena_cs);
@@ -2049,11 +2074,21 @@ static void release_held_arena(int all)
     EnterCriticalSection(&s_arena_cs);
     if (all) {      /* the fight is over: what the arena holds, and how much of it the engine gave back */
         int i;
-        unsigned zombies = 0, zbytes = 0;
-        for (i = 0; i < s_nblk; i++)
+        unsigned zombies = 0, zbytes = 0, nfree = 0, fbytes = 0, largest = 0, nfight = 0, fightb = 0, nused = 0;
+        int pieces = 0;
+        for (i = 0; i < s_nchunk; i++) pieces += s_chunk_hi[i] != s_chunk_lo[i];
+        for (i = 0; i < s_nblk; i++) {
             if (s_blk[i].used && s_blk[i].freed) { zombies++; zbytes += s_blk[i].size; }
+            if (s_blk[i].used) nused++;
+            if (s_blk[i].used && !s_blk[i].freed && s_blk[i].fight) { nfight++; fightb += s_blk[i].size; }
+            if (!s_blk[i].used) { nfree++; fbytes += s_blk[i].size; if (s_blk[i].size > largest) largest = s_blk[i].size; }
+        }
         fprintf(stderr, "[ROLLBACK] the audio arena at the fight's end: %u KB live, %u held frees, %u blocks (%u KB) "
                 "freed before a load and kept\n", s_arena_live / 1024, s_nheld_arena, zombies - s_nheld_arena, zbytes / 1024);
+        /* the numbers a long rematch chain must keep flat */
+        fprintf(stderr, "[ROLLBACK] arena: %u KB in %d pieces, %u blocks used (%u allocated in this fight still live, "
+                "%u KB), %u KB free in %u blocks, the largest %u KB\n", s_arena_total / 1024, pieces, nused, nfight,
+                fightb / 1024, fbytes / 1024, nfree, largest / 1024);
     }
     while (k < s_nheld_arena) {
         if (all || s_saves - s_held_arena[k].at > ROLLBACK_HOLD_SAVES) {
