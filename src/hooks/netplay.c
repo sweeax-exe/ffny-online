@@ -104,6 +104,7 @@ void netplay_lobby_accept(int y) { (void)y; }
 int netplay_lobby_accepted(void) { return -1; }
 int netplay_lobby_queue_ext(NetQueueExt *o) { (void)o; return 0; }
 int netplay_lobby_rankinfo(NetRankInfo *o) { (void)o; return 0; }
+int netplay_lobby_rank_opponent(const char *r, char *o, int n) { (void)r; if (n > 0) o[0] = 0; return 0; }
 int netplay_lobby_draft(NetDraft *o) { memset(o, 0, sizeof(*o)); return 0; }
 void netplay_lobby_draft_act(int s, int a, int i) { (void)s; (void)a; (void)i; }
 int netplay_lobby_queue(int *w, int *s, char *t, int n) { (void)w; (void)s; if (t && n > 0) t[0] = 0; return NETQUEUE_NONE; }
@@ -435,6 +436,7 @@ static struct {
     unsigned rk_modes;
     char rk_code[7];                /* a MOVE's reservation code ("" none) */
     NetRankInfo rank;               /* the last RANKINFO, of the room rank_room */
+    char rank_opp_name[25], rank_opp_room[7];   /* the set's opponent while it was in that room */
     char rank_room[7];
     NetDraft draft;                 /* the last DRAFT, of the room draft_room (netplay_draft_rules.h) */
     char draft_room[7];
@@ -2065,6 +2067,17 @@ static void on_rankinfo(const uint8_t *b, int len)
                 ri.count > 1 ? ri.p[1].set_wins : 0, ri.picker, ri.winner);
     N.rank = ri;
     memcpy(N.rank_room, N.roomv.code, 7);
+    {   /* the set's opponent's name while it is in the room: the results show it when it left first */
+        int i, s;
+        for (s = 0; s < ri.count; s++) {
+            if (ri.p[s].slot == N.roomv.you) continue;
+            for (i = 0; i < N.roomv.player_count; i++)
+                if (N.roomv.players[i].slot == ri.p[s].slot && N.roomv.players[i].name[0]) {
+                    snprintf(N.rank_opp_name, sizeof(N.rank_opp_name), "%s", N.roomv.players[i].name);
+                    memcpy(N.rank_opp_room, N.roomv.code, 7);
+                }
+        }
+    }
     /* this PC's RESULT got through: the game counted (or the set ended) */
     if (N.set_match && N.koth_winner >= 0 && (ri.game != N.set_game || ri.winner != NETRANK_SET_RUNNING)) {
         fprintf(stderr, "[NETPLAY] ranked set: the result is in\n");
@@ -3983,6 +3996,17 @@ int netplay_lobby_queue_ext(NetQueueExt *out)
     EnterCriticalSection(&g_cs);
     *out = N.queue_ext;
     ok = out->valid;
+    LeaveCriticalSection(&g_cs);
+    return ok;
+}
+
+int netplay_lobby_rank_opponent(const char *room, char *out, int size)
+{
+    int ok;
+    InitOnceExecuteOnce(&g_once, init_once, NULL, NULL);
+    EnterCriticalSection(&g_cs);
+    ok = room && N.rank_opp_name[0] && !strncmp(N.rank_opp_room, room, 6);
+    if (size > 0) snprintf(out, (size_t)size, "%s", ok ? N.rank_opp_name : "");
     LeaveCriticalSection(&g_cs);
     return ok;
 }

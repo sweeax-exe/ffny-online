@@ -553,6 +553,18 @@ void open_ranked_results(const NetRoom &r, const NetRankInfo &ri)
     for (int i = 0; i < r.player_count; i++)       // the room's other fighter (ranked_tick kept it during the set)
         if (r.players[i].slot != r.you && r.players[i].slot != NETPLAY_SLOT_SPECTATOR)
             snprintf(R.opp_name, sizeof(R.opp_name), "%s", r.players[i].name);
+    {   // it left first (a forfeit between games): its name as the set's RANKINFOs saw it in this room.
+        // ranked_tick only runs while these screens are drawn, and a set started from the queue goes
+        // straight into its game, so R.opp_name could be empty or a former set's opponent.
+        char kept[40];
+        if (!gallery_on() && netplay_lobby_rank_opponent(r.code, kept, sizeof(kept))) {
+            bool here = false;
+            for (int i = 0; i < r.player_count; i++)
+                here |= r.players[i].slot != r.you && r.players[i].slot != NETPLAY_SLOT_SPECTATOR;
+            if (!here) snprintf(R.opp_name, sizeof(R.opp_name), "%s", kept);
+        }
+        fprintf(stderr, "[ONLINE] ranked results: opponent \"%s\"\n", R.opp_name);
+    }
     R.have_before = false;      // the next set reads its own "before" (ranked_search, or ranked_tick)
     bool opp_in = false;
     for (int i = 0; i < R.set.count; i++) opp_in |= R.set.p[i].slot != r.you;
