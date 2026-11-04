@@ -2,8 +2,8 @@
  * The hang watch (build 58). A frozen game could not be reported: F9 takes its picture at the next
  * present, and a freeze has none (ranked set W34VFS: both players on the results picture, F9 dead,
  * the window closed by hand, nothing on the server). This host thread looks once a second whether the
- * game still moves: a present, or many file reads (a screen or venue that loads reads all the time and
- * presents nothing; the music stream goes on reading through a freeze, a few times a second at most).
+ * game still moves: a guest frame, or megabytes read (a screen or venue that loads reads all the time and
+ * has no frames; the relay's packets and the music stream go on reading through a freeze, but little).
  * After HANG_SECS without either it writes a [HANG] block to the log: the host
  * stack of every thread, the game thread's guest stack, the netplay and rollback state, and leaves a
  * "<log>.hang" mark that the next start offers as a report (bug_report_last_crash). If the game moves
@@ -30,26 +30,25 @@
 #include <io.h>
 
 #include "recomp/gen/recomp_types.h"     /* g_esp, MEM32, XBOX_PTR */
+#include "nv2a/nv2a_pgraph_d3d11.h"         /* the guest's frames: the window itself is presented without them */
 
 void netplay_hang_dump(void);   /* netplay.c: no locks taken */
 void rollback_hang_dump(void);  /* rollback.c: no locks taken */
 
 #define HANG_SECS        20u    /* no present and no load's reads */
-#define HANG_LOAD_READS 200u    /* file reads in HANG_SECS that say a load is working */
-#define HANG_LOAD_SECS   45u    /* the same while the screen manager says a screen loads */
+#define HANG_LOAD_BYTES (4u * 1024u * 1024u)    /* bytes read in HANG_SECS that say a load is working (relay and music: far less) */
+#define HANG_LOAD_SECS   30u    /* the same while the screen manager says a screen loads */
 #define HANG_MAX_BLOCKS   3     /* in one run */
-#define MAX_THREADS      48
-#define MAX_FRAMES       14
+#define MAX_THREADS     160
+#define MAX_FRAMES       20
 #define GUEST_WORDS     256u
 
-static volatile LONG s_presents, s_updates;
+static volatile LONG s_updates;
 static volatile DWORD s_game_tid;
 static const volatile uint32_t *s_game_esp;     /* the game thread's own g_esp (thread-local) */
 static double s_test_at = -1.0, s_test_for = -1.0;
 static ULONGLONG s_started;
 static char s_mark[MAX_PATH + 16];
-
-void hang_watch_note_present(void) { InterlockedIncrement(&s_presents); }
 
 void hang_watch_note_update(void)
 {
@@ -140,7 +139,16 @@ static void dump_threads(void)
         if (shots[i].tid == s_game_tid) { ThreadShot g = shots[i]; shots[i] = shots[0]; shots[0] = g; break; }
     for (i = 0; i < n; i++) shoot_thread(&shots[i]);
     for (i = 0; i < n; i++) {
+        HMODULE self_m = GetModuleHandleA(NULL);
+        int ours = 0;
         if (!shots[i].captured) continue;
+        /* the game's own threads: the graphics driver's and the system's say nothing and fill the log */
+        for (f = 0; f < shots[i].frames; f++) {
+            HMODULE m = NULL;
+            ours |= GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                                       (LPCSTR)(uintptr_t)shots[i].pc[f], &m) && m == self_m;
+        }
+        if (!ours) continue;
         fprintf(stderr, "  thread %lu%s:", shots[i].tid, shots[i].tid == s_game_tid ? " (game)" : "");
         for (f = 0; f < shots[i].frames; f++) print_pc(shots[i].pc[f]);
         fprintf(stderr, "\n");
@@ -207,19 +215,22 @@ static DWORD WINAPI hang_thread(LPVOID unused)
     for (;;) {
         IO_COUNTERS io;
         ULONGLONG now;
-        LONG p = s_presents, u = s_updates;
+        LONG p, u;
+        PgraphD3D11Stats st;
         int moved;
         Sleep(1000);
         now = GetTickCount64();
         /* the PC slept, or this thread had no time: that is not the game's hang */
         if (now - tick > 5000u) last = now;
         tick = now;
-        p = s_presents; u = s_updates;
+        pgraph_d3d11_get_stats(&st);
+        p = (LONG)st.frames;
+        u = s_updates;
         memset(&io, 0, sizeof(io));
         GetProcessIoCounters(GetCurrentProcess(), &io);
         /* the reads of the last HANG_SECS seconds */
-        reads = io.ReadOperationCount;
-        moved = p != presents || (at >= HANG_SECS && reads - read_at[at % HANG_SECS] >= HANG_LOAD_READS);
+        reads = io.ReadTransferCount;
+        moved = p != presents || (at >= HANG_SECS && reads - read_at[at % HANG_SECS] >= HANG_LOAD_BYTES);
         read_at[at % HANG_SECS] = reads;
         at++;
         if (p != presents) armed = 1;       /* from the first picture on: never during the start-up */
@@ -274,7 +285,6 @@ void hang_watch_start(void)
 #else
 
 void hang_watch_start(void) {}
-void hang_watch_note_present(void) {}
 void hang_watch_note_update(void) {}
 
 #endif
