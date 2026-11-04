@@ -663,6 +663,44 @@ switch (global and per mode).
   27-30 page bursts), and the crash registers lie on "page with mixer words", in 99b1d9 `[edi+0x10]` is "a mixer
   word (kept live)". So 44b81c6 narrowed the leak but did not close it [V]; that this fix closes it is [I].
 
+### Thirteenth round (on `remaster` 8401feb, build 54 reports 2df2cd, e7d57d, ba0793): build 55
+* **Reading the reports.** "[ROLLBACK] off for the rest of this match (step N, M rollbacks)" without a reason is the
+  normal end of every rollback fight, and M is the session's running total: no fallback fired in any of the three
+  (no "busy", "fallback" or "out of sync" line). Per match Miguel's PCs ran 0.4-1.1 rollbacks and 1.3-1.8 re-run
+  steps per step (ba0793: 8028 in 6102, 8961 in 5299, 10297 in 5834; e7d57d 11501 in 7106), not 2-3 rollbacks.
+* **The crashes sit on mixer-kept words** [V for the addresses, I for the cause]. e7d57d: `sub_00117410+0x127A`
+  in a re-run, edi = 8172D208, the first of the 7 words "the mixer writes 8172D000 (bytes 8172D208..)" kept live
+  that fight, ecx = BF800000 (as a08559, 99b1d9). 2df2cd (54 ms, first match, 1150 rollbacks): the mixer thread in
+  `sub_0011E530`, then `sub_00115CB0` writing to 84000000; EAGL's draw command and loaded object on "saved (page with
+  mixer words)" are full of the billboard colour 65DCDCC2 (the "NOT A HEAP ADDRESS" line is that fill, i.e. the
+  overrun's fallout). ba0793: the mixer in `sub_001EE3C0` on the file layer's slots `[0x3C8F30]`, then the same
+  `sub_00115CB0` overrun; 67 attribution lines. Fix e6d7a0e: loads restore those words (`RECOMP_ROLLBACK_MIXMASK=keep`
+  for the old rule); every local run since 506b39f attributes 0 words, so a clean run is unchanged.
+* **Arena: kept blocks and a leak.** (1) bba6d15: kept blocks were scanned only at the next fight's start, after
+  the next venue had loaded around them (e7d57d: 817 kept as the next venue loaded, "160 KB free in 516 blocks, the
+  largest 21 KB"); now also at the fight's end and once more before the arena grows outside a fight, and the scan
+  skips the arena's free blocks (stale handles there kept blocks "named" for ever). (2) 544ce75: a block the game
+  thread's audio code got after a save leaked at every load (the restored state never had it, the re-run asked
+  again); `forget_frees_since` now hands those to the same scan (`freed = 2`).
+  | Run (8 matches, rematch chain, no KO, 100+10 ms, bot 60) | fight blocks still live per fight end | arena |
+  |---|---|---|
+  | `logs/dj/20261104-095902-online` (bba6d15 + e6d7a0e) | copy 0: 187, 547, 550, 735, 766, ... 3281 (606 KB); copy 1: 1234, 1625, 2996, ... 7253 (1340 KB) | copy 1 grew to 6984 KB in 13 pieces, 876 KB free in 1164 blocks |
+  | `logs/dj/20261104-104755-online` (+ 544ce75) | 89, 78, 94, 117, 118, 120, 117, 129 / 89, 71, 94, 101, 115, 117, 115, 127 (13-22 KB) | 4952 KB, one 1 MB growth at fight 4-5, then flat at 5976 KB in 12 pieces; kept blocks still named plateau at 290 |
+  Both runs: 8 of 8 matches, no crash, no desync, 160-750 checks equal a match, 600-2900 rollbacks a match and copy.
+* **Rematch rule** (88ebadd): a PC that fell back sends a flag with its rematch choice (P_REMATCH byte 9); once all
+  choices are in, every PC turns rollback off for the rest of the START's chain if any flag is set and every
+  choice carried the byte (older builds: the old local rule). The delay stays the START's.
+* **Heavy rollback** (eaf6712): two 5 s windows in a row at 2.0 or more re-run steps per normal update take the
+  slow-PC fallback and set the flag. The local 100+10 chains logged single windows of 1.54-1.72, never two in a
+  row. Forced with `RECOMP_ROLLBACK_HEAVY@0=0.05` (`-113913-online`): copy 0 fell back at step 606 of match 1,
+  both copies played both rematches in lockstep (delay 5), in sync.
+* **Other checks** (all fixes, `--rollback mandatory`, 70+10 ms, bot 60, 2 matches each): Team 4p `-115224-online`,
+  FFA 3p `-114842-online`, KOTH 3p `-115025-online`: ok, 40-214 rollbacks a match and copy, no crash, no desync. An
+  8-match KO-at-600 chain at 100+10 (`-095016-online`) ok. `regress.py --quick`: 5 of 5 (`logs/regress-20261104-120018.txt`).
+* **Not verified**: the mixer-word crash itself (never reproduced locally; that restoring the words prevents it is
+  [I]); a real (not forced) heavy fallback; a mixed 54/55 room (the 9-byte path); chains on players' PCs, where the
+  zombie-scan hitch at a fight's end (15-50 ms locally, 141 ms in e7d57d) also lands on the results screen.
+
 ### Next (after the third round)
 1. More two-copy long runs (the desyncs at steps 10 200 and 37 440 came once in two runs each; three later runs were clean),
    always with `RECOMP_NETPLAY_FINALLOG=1` so a desync can be traced to its first step.
