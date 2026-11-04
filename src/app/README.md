@@ -83,7 +83,7 @@ Play starts the game that setup built on this computer, with `--no-launcher`.
   own mount of the old image) and starts it.
 - **Add to Steam on Windows and Linux** (`app_steam.cpp`, `setup/steam_shortcuts.py`; design §7). Maintenance's
   Steam section adds the app to the Steam account that signed in last, as a non-Steam game that runs
-  `--play --install <root>`, with the library artwork (the fan portrait, wide capsule and logo, the
+  `--install <root>`, with the library artwork (the fan portrait, wide capsule and logo, the
   hero and the icon, carried in the Windows payload), and removes it again. The app runs
   `engine.py --steam status|add|remove`, which writes the shortcut into Steam's own
   `userdata/<account>/config/shortcuts.vdf`, keeping every other shortcut's bytes, and a backup
@@ -97,7 +97,12 @@ Play starts the game that setup built on this computer, with `--no-launcher`.
   with `steam -shutdown` and started again detached, and the record is
   `~/.local/share/DefJamRecompiled/steam.json`. In a Steam Deck's Game Mode Steam is the session itself,
   so a change that needs Steam closed is refused there with a pointer to Desktop Mode. (The setup
-  wizard's own Linux path, `steamos-add-to-steam`, cannot give the shortcut `--play`.)
+  wizard's own Linux path, `steamos-add-to-steam`, cannot give the shortcut `--install`.) The shortcut
+  opens the app like any other, so the launcher shows unless "Skip launcher" is on (owner's choice,
+  2026-11-03). Add to Steam first gave it `--play`, which always skipped the launcher: the engine's
+  status reports such a shortcut as `outdated`, and Add takes `--play` out of it, changing nothing
+  else. The app makes that one-time fix by itself when Steam is closed; while Steam runs, Home shows
+  UPDATE STEAM by Play and Maintenance an Update the shortcut button, which close Steam as Add does.
 - **The play wrapper forwards.** Whenever it loads an install, an installed app writes where it is
   to `<install>/app-location.txt` (the bundle on macOS, the program on Windows). The play wrapper
   setup keeps in the install folder (and in Applications, for installs an older setup made;
