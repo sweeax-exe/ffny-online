@@ -23,7 +23,7 @@ Toolkit pin: `d033837332a2c8ca8e59113edac17a474fb3a9c8`, fork branch `defjam/rel
 | [#97](https://github.com/vyanhursky/DefJamFFNY-recomp/pull/97) | feat: cheat menu for issue #71 | `08d33ff0906b8183be728a6091fa925eb705fcb0` | D306, D307 |
 | [#146](https://github.com/vyanhursky/DefJamFFNY-recomp/pull/146) | fix(test): isolate the pinned fight from the host's timing, --isolate-crowd (#98) | `0f858d37d805e46aab1e5d342bd44bd58fbb593a` | D308, D309 |
 | [#164](https://github.com/vyanhursky/DefJamFFNY-recomp/pull/164) | fix(cinema): prevent SC04 zero-step animation drift (#161) | `36d4e06b36f3861ce4253627499e200b258bb79e` | D310, D311, D312 |
-| [#133](https://github.com/vyanhursky/DefJamFFNY-recomp/pull/133) | feat(site): GitHub Pages project site, published with v0.13.0 | `feb70380aeca14c11ffd91bbd8bbf3a4f813dafa` | D313, D314, D315, D316 |
+| [#133](https://github.com/vyanhursky/DefJamFFNY-recomp/pull/133) | feat(site): GitHub Pages project site, published with v0.13.0 | Removed: merge `38a7be9` reverted by `e2cd464` (owner, 2026-11-04) | D313, D314, D315, D316 |
 | [#179](https://github.com/vyanhursky/DefJamFFNY-recomp/pull/179) | Setup/launcher UX, presets, Mods tabs, updates/recovery, DPI layouts and approved typography A | `6859addd2120b227e81bd7eb25da26b88c9000eb` (merge `87fb38f`) | D318–D323 |
 
 The app stack was refreshed by forward merges; its current Steam/uninstall work is retained by Linux and graphics. Cheats #97 depends on #151. The RC merges both Linux and graphics, then cheats, determinism, SC04 and site work. PROGRESS keeps main's landed records, restores reserved D214/D215, and numbers PR decisions once.
@@ -85,7 +85,7 @@ For the established HD widescreen lane, use `--release-profile` and, when testin
 
 Follow [graphics test plan](research/graphics-enhancements-test-plan.md), [SC04 evidence/limits](research/sc04-fix-validation.md) and [cheat coverage](research/cheat-menu.md). Existing installs retain their settings. Fresh setup now recommends Modern (widescreen/2x) with optional generated textures; Original is selectable. Test both preset contracts in [launcher UX acceptance](launcher-ux-candidate.md). Review the old Windows visual references rather than raising thresholds: thin background textures now draw after the DXT fix, while the crib ticker also needs inspection. Uninstall acceptance uses a scratch install and copied saves. #126's Windows analysis path and #170's bundled Zig build need acceptance on this combined candidate. The ordinary Linux source-build lane above uses the host toolchain; the CI AppImage installation is the bundled-toolchain lane. Repeat Deck scene-load measurements before treating #170's one-run 10–25% load-time difference as established.
 
-App/setup assets are game-free and each needs its SHA-256 and provenance. CI builds are development candidates; stable-release provenance and a real GitHub-app self-update remain later release acceptance. #133's Pages activation was not verifiable (API404); enable GitHub Actions as Pages source and review the app/install copy before publishing the website. RC preparation does not deploy it.
+App/setup assets are game-free and each needs its SHA-256 and provenance. CI builds are development candidates; stable-release provenance and a real GitHub-app self-update remain later release acceptance. The owner took #133 (project site) out of v1.0.0 on 2026-11-04; it stays open for a later release, which still needs Pages activation (API404) and a review of the app/install copy.
 
 ## Return evidence
 
