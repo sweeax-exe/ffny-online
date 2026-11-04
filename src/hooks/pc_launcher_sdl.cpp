@@ -20,6 +20,7 @@
 //   RECOMP_WINDOW_SHOT       a file to write the first full frame to, as a BMP
 
 #define _CRT_SECURE_NO_WARNINGS
+#include <algorithm>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
