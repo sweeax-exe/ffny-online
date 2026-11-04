@@ -942,6 +942,7 @@ bool gallery_on()
 
 // Ranked play's pages (ranked_ui.inc, included below the gallery's samples).
 bool ranked_room(const NetRoom &r, NetRankInfo *ri);
+const char *ranked_leave_hint(const NetRankInfo &ri);
 void ranked_banner(ImDrawList *dl, const Frame &f, const NetRoom &r, const NetRankInfo &ri, float y);
 const char *ranked_picker_line(const NetRoom &r, const NetRankInfo &ri, char *buf, int size);
 void ranked_card(ImDrawList *dl, const Frame &f, const NetRankInfo &ri, int slot, const char *name, float x, float y, float w, float h);
@@ -2746,7 +2747,7 @@ void draw_vote(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
     {   // a way out while voting too: the others go back to the room's lobby (relay leaveRoom)
         float hx = 54;
         if (picks) hx += hint(dl, f, hx, 396, "a", ranked && ri.game <= 1 ? "START NOW" : ranked ? "PICK" : "VOTE");
-        hint(dl, f, hx, 396, "b", ranked ? "LEAVE (FORFEIT)" : "LEAVE ROOM");
+        hint(dl, f, hx, 396, "b", ranked ? ranked_leave_hint(ri) : "LEAVE ROOM");
     }
     if (pad.b) { netplay_lobby_leave(); S.page = HUB; say("You left the room."); return; }
     if (pad.a) netplay_lobby_vote(S.vote_sel);
@@ -3468,7 +3469,7 @@ void draw_room(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
     if (ranked) host = false;       // a ranked room's settings are the set's
     if (host && !ready) hx += hint(dl, f, hx, hy, "y", "ROOM SETTINGS");
     hx += hint(dl, f, hx, hy, "rb", "VOICE");
-    hint(dl, f, hx, hy, "b", ranked ? "LEAVE (FORFEIT)" : "LEAVE ROOM");
+    hint(dl, f, hx, hy, "b", ranked ? ranked_leave_hint(ri) : "LEAVE ROOM");
 
     if (pad.a) netplay_lobby_ready(ready ? 0 : 1, fighter);
     if (pad.x && !ready) {

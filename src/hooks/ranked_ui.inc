@@ -434,6 +434,23 @@ bool ranked_room(const NetRoom &r, NetRankInfo *ri)
     return r.in_room && !NETPLAY_IS_KOTH(r.settings.mode) && lobby_rankinfo(ri) && ri->has_set;
 }
 
+// The set is decided: the relay's word, or a player with its two wins of the best of three.
+int ranked_score_winner(const NetRankInfo &ri)
+{
+    for (int i = 0; i < ri.count; i++) if (ri.p[i].set_wins >= 2) return ri.p[i].slot;
+    return -1;
+}
+
+bool ranked_set_decided(const NetRankInfo &ri)
+{
+    return ri.winner != NETRANK_SET_RUNNING || ranked_score_winner(ri) >= 0;
+}
+
+const char *ranked_leave_hint(const NetRankInfo &ri)
+{
+    return ranked_set_decided(ri) ? "LEAVE ROOM" : "LEAVE (FORFEIT)";
+}
+
 // The banner over the room or the vote: the mode, the game, the score, who picks the venue.
 void ranked_banner(ImDrawList *dl, const Frame &f, const NetRoom &r, const NetRankInfo &ri, float y)
 {
@@ -887,8 +904,35 @@ void ranked_tick(const NetRoom &r)
             snprintf(R.before_room, sizeof(R.before_room), "%s", r.code);
         }
     }
-    if (ri.winner != NETRANK_SET_RUNNING && r.phase == 0 && !(R.results_up && !strcmp(R.set_room, r.code)))
-        open_ranked_results(r, ri);
+    // Build 58: a decided set never stays in its room. Set PS6XAR (2-0 on the relay, "set over", the room
+    // closed, the set rated) left one player here on "GAME 2 - SET 2-0", "Waiting for another player..."
+    // and "LEAVE (FORFEIT)". The score alone decides too, after 3 s for the relay's own word; and a room
+    // that is still here after its results were shown (their leave did not get through) is left again.
+    if (ri.winner == NETRANK_SET_RUNNING && ranked_score_winner(ri) >= 0) {
+        static char since_room[7];
+        static unsigned long long since;
+        if (strcmp(since_room, r.code)) {
+            snprintf(since_room, sizeof(since_room), "%s", r.code);
+            since = GetTickCount64();
+        }
+        if (GetTickCount64() - since >= 3000) {
+            ri.winner = ranked_score_winner(ri);
+            fprintf(stderr, "[ONLINE] ranked set: two wins on the score, no winner from the relay in 3 s: slot %d won it\n", ri.winner);
+        }
+    }
+    if (ri.winner != NETRANK_SET_RUNNING && r.phase == 0) {
+        if (!(R.results_up && !strcmp(R.set_room, r.code))) {
+            open_ranked_results(r, ri);
+        } else if (S.page != RANKED_RESULTS) {
+            static unsigned long long left;
+            if (GetTickCount64() - left >= 2000) {
+                left = GetTickCount64();
+                fprintf(stderr, "[ONLINE] ranked set: its room %s is still here after the results: leaving\n", r.code);
+                netplay_lobby_leave();
+            }
+            S.page = HUB;
+        }
+    }
 }
 
 // ---- MY STATS: a tab per mode ----
