@@ -508,6 +508,13 @@ static struct {
     ULONGLONG rbb_start;
     double rbb_ms;
     unsigned rbb_over, rbb_updates, rbb_depth, rbb_count;
+    unsigned rbb_heavy;                 /* windows in a row with RB_HEAVY_RERUN steps or more run again per update */
+    /* Build 55: a fallback in a fight (too slow, or too many rollbacks) keeps the rest of the START's rematch
+     * chain in lockstep on every PC. chain_ask: this PC fell back, its rematch choices say so (P_REMATCH byte
+     * 9); rematch_flags: each player's byte 9 with bit 7 set when its choice carried one (an older build
+     * sends 9 bytes); chain_lock: the chain plays lockstep (decided alike from the choices every PC has) */
+    int chain_ask, chain_lock;
+    uint8_t rematch_flags[MAXP];
     int rb_match;                       /* hub: this match rolls back (every peer_rb set at the sync point) */
     struct {
         int valid;
@@ -681,6 +688,39 @@ static void send_data(const uint8_t *payload, int len);
  * out, and each PC fought its own copy (build 48 candidate tests cc-v26 and spec-rematch, with both
  * PCs waiting on each other for over a second at step 990). The rematch is a match of the room, so it
  * runs in lockstep again, as a spectator's watched rematch already does (spec_tick). */
+/* At a rematch's start, once every player's choice is in (build 55): a PC that fell back to lockstep in a
+ * fight of this START (rb_budget_tick: too slow, or too many rollbacks) said so with its choice, and the
+ * rematch, like every later one of the START, plays lockstep on every PC. Each PC decides from the same
+ * choices (all of them arrived, or the rematch would not start), so they agree; the delay stays the
+ * START's (the spectators' too), as in the in-fight fallback. A player whose choice carried no flags (an
+ * older build) keeps the old rule: only the PC that fell back stops rolling back. Before, the next
+ * rematch rolled back again on the same PCs and the same ping (F9 ba0793 and e7d57d, build 54: five and
+ * eight rematches in a row at 101-117 ms, thousands of rollbacks each). */
+static void chain_decide(void)
+{
+    int i, ask = N.chain_ask, older = 0, who = -1;
+    if (N.chain_lock || !N.rb_match) return;
+    EnterCriticalSection(&g_cs);
+    for (i = 0; i < N.players && i < MAXP; i++) {
+        if (i == N.pos) continue;
+        if (!(N.rematch_flags[i] & 0x80u)) older = 1;
+        if (N.rematch_flags[i] & 1u) { ask = 1; if (who < 0) who = i; }
+    }
+    LeaveCriticalSection(&g_cs);
+    if (!ask) return;
+    if (older) {
+        fprintf(stderr, "[NETPLAY] rematch: a fallback asked for lockstep, but a player's build is older: only the PC "
+                "that fell back stays in lockstep\n");
+        return;
+    }
+    N.chain_lock = 1;
+    N.rb_match = 0;
+    fprintf(stderr, "[NETPLAY] rematch: %s fell back to lockstep in this START: this rematch and the next ones play "
+            "in lockstep (delay %d)\n", who < 0 ? "this PC" : "a player", N.delay);
+    toast(9000, "Rematches from here run without rollback: %s.",
+          who < 0 ? "this PC fell back to lockstep" : "a player's PC fell back to lockstep");
+}
+
 static void rematch_rearm(void)
 {
     if (!N.lobby || !N.match_live || N.watching || N.lockstep) return;
@@ -691,7 +731,7 @@ static void rematch_rearm(void)
 
 int netplay_rematch_request(void)
 {
-    uint8_t p[9];
+    uint8_t p[10];
     int i, all = 1, gone = -1;
     uint32_t after;
     if (!N.lobby) return 0;
@@ -738,7 +778,8 @@ int netplay_rematch_request(void)
     p[0] = P_REMATCH;
     put32(p + 1, N.start_seed);
     put32(p + 5, after);
-    send_data(p, 9);
+    p[9] = N.chain_ask ? 1u : 0u;   /* build 55: this PC fell back in a fight of this START (chain_decide) */
+    send_data(p, 10);
     if (gone >= 0) {
         toast(8000, "%s went back to the room: choose No to join them.", player_name(gone));
         return 1;
@@ -746,6 +787,7 @@ int netplay_rematch_request(void)
     if (all) {
         InterlockedExchange(&N.rematch_held, 0);
         fprintf(stderr, "[NETPLAY] rematch: every player chose it\n");
+        chain_decide();
         rematch_rearm();
         return 0;
     }
@@ -825,6 +867,7 @@ static void netplay_rematch_tick(void)
     if (sm >= 0x10000u && MEM32(sm + 0x24u) != 0) return;
     InterlockedExchange(&N.rematch_go, 0);
     fprintf(stderr, "[NETPLAY] rematch: every player has chosen it; it starts on this PC too\n");
+    chain_decide();
     rematch_rearm();
     defjam_menu_call("Game.Rematch()");
 }
@@ -850,7 +893,7 @@ void netplay_spectator_funccall(const char *text)
 /* This PC left the results for the room: whoever waits on the rematch screen hears it. */
 static void rematch_declined(void)
 {
-    uint8_t p[9];
+    uint8_t p[10];
     if (!N.lobby || !N.start_seed || N.koth_match || N.watching) return;
     N.rematch_want[N.pos] = REMATCH_NO;
     InterlockedExchange(&N.rematch_held, 0);
@@ -858,7 +901,8 @@ static void rematch_declined(void)
     p[0] = P_REMATCH;
     put32(p + 1, N.start_seed);
     put32(p + 5, REMATCH_NO);
-    send_data(p, 9);
+    p[9] = 0;
+    send_data(p, 10);
 }
 
 int netplay_toast(char *out, int size)
@@ -1805,6 +1849,7 @@ static void on_data(int from, const uint8_t *p, int len)
             int mine, all = 1, i;
             EnterCriticalSection(&g_cs);
             N.rematch_want[from] = after;
+            N.rematch_flags[from] = len >= 10 ? (uint8_t)(0x80u | (p[9] & 1u)) : 0;
             mine = N.rematch_want[N.pos] == after;
             for (i = 0; i < N.players; i++) if (N.rematch_want[i] != after) all = 0;
             LeaveCriticalSection(&g_cs);
@@ -2539,7 +2584,9 @@ static void on_start_as(const uint8_t *b, int len, int watching)
     for (i = 0; i < MAXP; i++) N.peer_delay[i] = 0, N.peer_rb_max[i] = 0;
     if (pos >= 0 && pos < MAXP) N.peer_rb_max[pos] = own_rb_limit();   /* the relay's answer came before START */
     N.rb_slow_off = 0;              /* the per-match fallback for a slow PC holds until the next START */
-    N.rbb_over = 0, N.rbb_start = 0;
+    N.rbb_over = 0, N.rbb_start = 0, N.rbb_heavy = 0;
+    N.chain_ask = N.chain_lock = 0;
+    memset(N.rematch_flags, 0, sizeof(N.rematch_flags));
     spec_reset();
     /* This PC rolls back only when the relay allows it: the relay's switch turns rollback off for
      * everyone without a new build (2026-10-26, after rollback crashes). Since build 52 the relay may
