@@ -278,7 +278,7 @@ bool steam_remove_now(std::string *message)
     std::error_code ec;
     if (!fs::exists(folder() / "steam.json", ec)) return true;      // this app never added it
     fs::path answer = folder() / "steam-uninstall.json";
-    std::vector<std::string> args = {"--steam", "remove", "--app-program", program().string(), "--steam-record",
+    std::vector<std::string> args = {"--steam", "remove", "--app-program", launch_target().string(), "--steam-record",
                                      (folder() / "steam.json").string(), "--steam-result", answer.string(),
                                      "--close-steam"};
     if (!install().root.empty()) args.insert(args.end(), {"--install-dir", install().root.string()});

@@ -352,3 +352,28 @@ def test_steam_is_started_from_the_stand_in_folder_without_the_appimage_variable
     env = steam.steam_environment()
     assert 'APPIMAGE' not in env and 'APPDIR' not in env and env.get('HOME') == steam.os.environ.get('HOME')
     assert not [k for k in env if k.startswith(('DEFJAM_', 'RECOMP_'))]
+
+
+def test_uninstall_removes_the_shortcut_the_app_added():
+    # A shortcut runs the AppImage file (launch_target). program() is inside its temporary mount on
+    # Linux, so Uninstall matched nothing: it deleted the artwork and left the shortcut in the library.
+    text = (ROOT / 'src/app/app_steam.cpp').read_text(encoding='utf-8')
+    assert text.count('"--app-program", launch_target().string()') == 2
+    assert '"--app-program", program()' not in text
+
+
+def test_removing_with_the_shortcuts_own_path_takes_it_and_its_artwork(tmp_path):
+    grid = tmp_path / 'art'
+    grid.mkdir()
+    (grid / 'wide.png').write_bytes(b'wide')
+    root = tmp_path / 'steam'
+    config = root / 'userdata/12345/config'
+    config.mkdir(parents=True)
+    (config / 'shortcuts.vdf').write_bytes(b'\x00shortcuts\x00\x08\x08')
+    record = tmp_path / 'steam.json'
+    appimage = tmp_path / 'DefJamRecompiled.AppImage'
+    steam.add(root, appimage, '', [grid], record, running=lambda _: [])
+    steam.remove(root, appimage, [grid], record, running=lambda _: [])
+    bodies, _ = steam.read_shortcuts(config / 'shortcuts.vdf')
+    assert bodies == []
+    assert not list((config / 'grid').glob('*.png'))
