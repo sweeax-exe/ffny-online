@@ -174,9 +174,9 @@ static int s_audio_state;               /* 0 before, 1 during, 2 after the audio
 #define ARENA_ALIGN  128u               /* what sub_00029500 gives at most */
 #define SND_ALLOCATOR 0x003ADB58u
 /* addr/size: the piece of the arena; user: the block handed out (aligned, 16-byte header before it) */
-/* freed: given back, held; fight: handed out while a fight's saves ran (the fight's-end line counts what of
- * that is still live, to tell a leak of blocks a load took back from the engine's own growth) */
-typedef struct { uint32_t addr, size, user; int used, freed, fight; } Block;
+/* freed: 1 given back, held; 2 taken back by a load (forget_frees_since); fight: handed out while a fight's
+ * saves ran; game, at: handed to the game thread outside a sound command, at that save count */
+typedef struct { uint32_t addr, size, user; int used, freed, fight, game; LONG at; } Block;
 static Block s_blk[ARENA_BLOCKS];
 static int s_nblk;
 static uint32_t s_arena, s_arena_live, s_arena_peak, s_arena_total;
@@ -1889,7 +1889,7 @@ int rollback_sound_command_dead(uint32_t sp)
             int mid = (lo + hi) / 2;
             if (v < s_blk[mid].addr) hi = mid - 1;
             else if (v >= s_blk[mid].addr + s_blk[mid].size) lo = mid + 1;
-            else { dead = s_blk[mid].used && s_blk[mid].freed; break; }
+            else { dead = s_blk[mid].used && s_blk[mid].freed == 1; break; }   /* not one a load took back */
         }
     }
     LeaveCriticalSection(&s_arena_cs);
@@ -1982,6 +1982,8 @@ again:
         s_blk[i].used = 1;
         s_blk[i].freed = 0;
         s_blk[i].fight = s_tracking ? 1 : 0;
+        s_blk[i].game = s_tracking && GetCurrentThreadId() == s_game_tid && !t_in_sound;
+        s_blk[i].at = s_saves;
         a = (s_blk[i].addr + 16u + ARENA_ALIGN - 1u) & ~(ARENA_ALIGN - 1u);
         s_blk[i].user = a;
         arena_event('A', a, want);
@@ -2176,7 +2178,8 @@ static void release_held_xapi(int all)
 static void forget_frees_since(LONG at)
 {
     static unsigned told;
-    unsigned i = 0, contig = 0, arena = 0;
+    unsigned i = 0, contig = 0, arena = 0, taken = 0;
+    static unsigned taken_told;
     if (s_held_cs_ready) {
         EnterCriticalSection(&s_held_cs);
         while (i < s_nheld) {
@@ -2216,6 +2219,21 @@ static void forget_frees_since(LONG at)
                 i++;
             }
         }
+        /* The game thread's blocks handed out after that save (outside sound commands, where the engine,
+         * which no load touches, keeps what it makes): the state the load brings back never had them, and
+         * the re-run asks for new ones. Left as they were, every rollback leaked them; in long two-copy
+         * fights at 100+10 ms the fight's live blocks went 187 -> 547 -> 550 -> 735 over four fights and the
+         * arena's free room broke into 141-219 blocks of at most 43-62 KB (build 55 tests). They are not
+         * given back here: a page no load restores, or the engine, may still name one. Marked, they go
+         * with the kept blocks to the conservative scan at the fight's end (release_kept_arena). */
+        {
+            int b;
+            for (b = 0; b < s_nblk; b++)
+                if (s_blk[b].used && !s_blk[b].freed && s_blk[b].game && s_blk[b].at >= at && s_blk[b].size < ARENA_BIG) {
+                    s_blk[b].freed = 2;
+                    taken++;
+                }
+        }
         LeaveCriticalSection(&s_arena_cs);
     }
     {
@@ -2230,6 +2248,9 @@ static void forget_frees_since(LONG at)
     if ((contig || arena) && told++ < 20)
         fprintf(stderr, "[ROLLBACK] a load went back before %u contiguous and %u audio frees: they stay allocated\n",
                 contig, arena);
+    if (taken && taken_told++ < 20)
+        fprintf(stderr, "[ROLLBACK] a load went back before %u audio blocks the game thread was given: kept for the "
+                "fight's-end scan\n", taken);
 }
 
 static void arena_start(void)
