@@ -9,18 +9,14 @@
 
 Bring **Def Jam: Fight for NY** to Windows, macOS and Linux, including the Steam Deck.
 This unofficial native port recompiles the original Xbox game for your computer,
-with higher rendering resolution, modern controller support, local multiplayer
-and optional HD textures.
+with higher rendering resolution, modern controller support, extensive mod support, and other PC-specific enhancements.
 
-**The port is now mature and continues to improve.** All game functionality is working and we are continuously optimizing, enhancing, and bugfixing. See
-[known issues](https://github.com/vyanhursky/DefJamFFNY-recomp/issues) and the
-[latest release notes](https://github.com/vyanhursky/DefJamFFNY-recomp/releases/latest)
-for current limitations.
+**This is the definitive port of the game.** All game functionality is working and we are continuously optimizing, enhancing, and bugfixing based on player feedback. The project's roadmap now focuses on expanding game moddability, gameplay, and presentation.
 
 You need **your own supported USA Xbox dump**. Setup checks your dump and builds
 the game on your machine. PS2 and GameCube copies cannot be used.
 
-**[Get the latest setup](https://github.com/vyanhursky/DefJamFFNY-recomp/releases/latest)** ·
+**[Get the latest installer for your platform](https://github.com/vyanhursky/DefJamFFNY-recomp/releases/latest)** ·
 [Install guide](docs/setup-installer.md) · [Documentation](docs/README.md) ·
 [Report a problem](https://github.com/vyanhursky/DefJamFFNY-recomp/issues/new/choose) ·
 [Join the Discord](https://discord.gg/xNvBs23ZBw)
@@ -56,14 +52,13 @@ style uses the game's charcoal, ivory, red and gold palette.
 - **Native across three platforms.** Windows x64 uses Direct3D 11; Apple Silicon
   Macs and x86-64 Linux use Vulkan. Steam Deck runs the Linux version natively.
 - **60-fps gameplay.** The port targets 60 frames per second, with performance
-  depending on your hardware, chosen settings and the scene.
+  depending on your hardware, chosen settings and the scene. Steam Deck hits steady 60FPS in all game modes at 2x render resolution and all HD texture mods enabled.
 - **Sharper rendering.** Choose 1×–4× internal resolution, a resizable window
   or borderless full screen.
-- **Widescreen (beta), available now.** Since v0.9.0, Windows, macOS and
-  Linux/Steam Deck support wider 16:9 and 16:10 views. The 3D view widens while
-  the HUD and menus keep their shape; original 4:3 remains available.
-- **Optional HD textures.** Setup can generate faithful 4× texture packs locally
-  from your dump on Windows, macOS and Linux. Original textures remain available.
+- **Widescreen.** Windows, macOS and
+  Linux/Steam Deck support traditional 16:9 and 16:10 ratios, as well as ultrawide up to 32:9. Download HD Widescreen Menus Mod from the game launcher to transform every menu and background to support widescreen ratios. 
+- **Create HD textures locally.** Setup can generate faithful 4× texture packs
+  from your dump on Windows, macOS and Linux using a local upscaling model. Further restored textures can be downloaded via mod support.
 - **Controllers and keyboard play.** Xbox, DualSense, Switch Pro and other
   supported gamepads, with remapping, hot-plug and rumble. Keyboard and mouse
   buttons can supply gameplay bindings; the launcher and settings support a pointer.
@@ -71,18 +66,11 @@ style uses the game's charcoal, ivory, red and gold palette.
   Network multiplayer is not supported.
 - **Settings before and during play.** The launcher has a focused Home screen,
   Advanced settings and direct Mods/files/logs/setup actions. Open the in-game overlay
-  with F1 or a configured controller shortcut. Changes are saved locally;
-  settings that require a restart are marked. The overlay does not pause the game.
-- **Optional faster startup.** Skip the legal screen and startup movies to reach
-  Press Start after initial loading. Enable it under Interface;
-  Story and attract-mode movies still play.
+  with F1 or a configured controller shortcut. 
 - **EA's developer menu, restored.** The game's own debug menu, cut off in the retail
   build, opens from the overlay (Diagnostics tab): set up any match with any fighters, venue and
   match type, play any Story scene, or look at a venue in the stage viewer. See
   [The developer menu](docs/developer-menu.md).
-- **Local saves.** Profiles, settings and generated texture packs live in your
-  data folder, which setup preserves through updates and repairs. Profiles from an original
-  Xbox can be brought over; see [Importing Xbox saves](docs/importing-xbox-saves.md).
 
 ## Get started
 
