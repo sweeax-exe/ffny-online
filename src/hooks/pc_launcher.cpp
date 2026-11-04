@@ -37,6 +37,7 @@ extern "C" {
 #include "pc_ui_internal.h"
 #include "updater.h"
 #include "pc_launcher_saves.h"
+#include "pc_launcher_music.h"
 
 namespace {
 
@@ -273,6 +274,23 @@ LRESULT CALLBACK launcher_proc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
         g_done = true;
         g_result = 0;
         return 0;
+    case WM_DROPFILES: {
+        // Songs dropped on the launcher: the Music dialog adds them (pc_launcher_music.inc).
+        HDROP drop = (HDROP)wp;
+        UINT count = DragQueryFileW(drop, 0xFFFFFFFF, nullptr, 0);
+        std::vector<std::string> paths;
+        for (UINT i = 0; i < count && i < 5000; i++) {
+            UINT len = DragQueryFileW(drop, i, nullptr, 0);
+            std::wstring name(len + 1, L'\0');
+            if (DragQueryFileW(drop, i, name.data(), len + 1)) {
+                name.resize(len);
+                paths.push_back(musiclib::utf8(musiclib::fs::path(name)));
+            }
+        }
+        DragFinish(drop);
+        pcmusic::dropped(paths);
+        return 0;
+    }
     case WM_DESTROY:
         return 0;
     }
@@ -325,6 +343,7 @@ extern "C" int pc_launcher_run(void)
     HWND window = CreateWindowExW(background ? WS_EX_NOACTIVATE : 0, L"DefJamRecompLauncher", L"FFNY Online",
                                   style, x, y, w, h, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
     if (!window) return 1;                       // no window: do not hold the game back
+    DragAcceptFiles(window, TRUE);              // songs dropped on it go to the Music dialog
     {
         // Windows 11 rounds the corners of a borderless window when asked (33: DWMWA_WINDOW_CORNER_PREFERENCE,
         // 2: round); older versions ignore it.
