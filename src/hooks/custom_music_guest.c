@@ -54,6 +54,11 @@ static int asked(void)
     return v < 0 ? 0 : v > 100 ? 100 : v;
 }
 
+/* The save's options load behind the Press Start screen: until the main menu, the MUSIC volume the
+ * game asks for is its default, not the player's slider, and the intro and title keep their own sound. */
+static int g_options_ready;
+void custom_music_options_ready(void) { g_options_ready = 1; }
+
 void custom_music_on_update(int rerun, int in_fight)
 {
     int want, v, i, zeroed = 0;
@@ -66,8 +71,12 @@ void custom_music_on_update(int rerun, int in_fight)
             fprintf(stderr, "[MUSIC] game music volume %d\n", v);
         g_last_asked = v;
     }
-    custom_music_set_game_volume(v);
+    if (in_fight)
+        g_options_ready = 1;
+    custom_music_set_game_volume(g_options_ready ? v : 0);
     custom_music_set_in_fight(in_fight);
+    if (!g_options_ready)
+        return;
     want = custom_music_active() && custom_music_want_mute();
     if (want) {
         for (i = 0; i < PLAYERS; i++) {

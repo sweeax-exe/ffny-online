@@ -31,6 +31,7 @@ extern "C" {
 void custom_music_game_starts(const char *data_root);
 
 /* Game-thread events (src/recomp_manual.c). `rerun` is 1 inside a rollback re-run step. */
+void custom_music_options_ready(void);    /* the main menu: the save's options are loaded */
 void custom_music_on_update(int rerun, int in_fight);
 void custom_music_stream_open(int rerun);
 void custom_music_stream_stop(int rerun);

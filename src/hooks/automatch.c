@@ -20,6 +20,7 @@
 #include "netplay.h"
 #include "online_screen.h"
 #include "created_fighter.h"
+#include "custom_music.h"
 #include "discord_presence.h"
 
 extern void xbox_NoteAnchorEvent(const char *text);
@@ -320,6 +321,8 @@ void test_control_note_funccall(const char *text);     /* src/hooks/test_control
  * players have not chosen yet). */
 int automatch_hold_funccall(const char *text)
 {
+    if (strstr(text, "intMain/mainMenu.swf"))
+        custom_music_options_ready();
     /* The front end's own calls that set up a match, while the room's match is agreed, set up or
      * fought: the menu under the match (the battle match-type screen a summary returns to) still takes
      * presses, and an A pressed there during the load went on to the controller screen, which cleared
