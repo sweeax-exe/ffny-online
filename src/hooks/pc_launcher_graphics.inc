@@ -1,6 +1,6 @@
 // The launcher's Graphics card and dialog: "Enhanced graphics (community)", the ReShade / DLSS pack with
 // presets by Marleymarletto (included by pc_ui.cpp after the Music dialog; the same glass). The card says
-// whether it is on and which preset; the dialog turns it on (download, about 200 MB, with progress),
+// whether it is on and which preset; the dialog turns it on (download, about 150 MB, with progress),
 // picks Performance (default) or Quality, and turns it off in one click, always. Only offered on an
 // NVIDIA RTX adapter; elsewhere the switch is disabled with the reason. The work is graphics_mod*.cpp.
 //
@@ -132,7 +132,7 @@ static void graphics_dialog(ImVec2 o, float w, float h, float s)
                     "Enhanced graphics (community)");
         std::string sub = gpu ? (on ? "On  \xC2\xB7  " + std::string(preset == "quality" ? "Quality" : "Performance") +
                                           (v.version.empty() ? "" : "  \xC2\xB7  pack " + v.version)
-                                    : "Off  \xC2\xB7  turning it on downloads about 200 MB once")
+                                    : "Off  \xC2\xB7  turning it on downloads about 150 MB once")
                               : gpu_why;
         dl->AddText(ImGui::GetFont(), 13 * s, ImVec2(ra.x + 18 * s, ra.y + 36 * s), col(gpu ? ImVec4(0.80f, 0.80f, 0.82f, 1) : k_gold),
                     sub.c_str());
