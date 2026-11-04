@@ -114,6 +114,11 @@ last release plus docs), with the same gate.
    Verify every asset's SHA-256 against GitHub's digest and its provenance, then
    publish the draft. Version tags are immutable; use a new version to correct a
    published release.
+6. A beta for player play-testing uses the tag `vMAJOR.MINOR.PATCH-beta.N` with the CMake
+   version it leads up to and `docs/releases/<tag>.md`. The workflow drafts it as a prerelease
+   that is never Latest, and the app and setup never offer prereleases as updates. A beta
+   reports the final version number, so its testers download the next beta or the final release
+   themselves. The final release is tagged `vMAJOR.MINOR.PATCH` later, from `main`.
 
 GitHub supplies the source ZIP/tar archives. They do not include submodules;
 the supported command-line setup is a recursive clone at the tag. Only the

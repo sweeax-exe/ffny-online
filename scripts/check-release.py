@@ -8,10 +8,13 @@ import importlib.util
 
 
 def validate_version(tag, cmake, notes_present):
-    if not re.fullmatch(r'v\d+\.\d+\.\d+', tag):
-        raise ValueError('Use a stable vMAJOR.MINOR.PATCH source release tag')
+    # A beta (vMAJOR.MINOR.PATCH-beta.N) is published as a GitHub prerelease, which the
+    # app's updater and setup never offer (setup/releases.py takes stable tags only).
+    tag_match = re.fullmatch(r'v(\d+\.\d+\.\d+)(?:-beta\.[1-9]\d*)?', tag)
+    if not tag_match:
+        raise ValueError('Use a stable vMAJOR.MINOR.PATCH or a vMAJOR.MINOR.PATCH-beta.N source release tag')
     match = re.search(r'project\(defjam_recomp\s+VERSION\s+(\d+\.\d+\.\d+)', cmake)
-    if not match or tag != 'v' + match.group(1):
+    if not match or tag_match.group(1) != match.group(1):
         raise ValueError('Tag must match the CMake project version')
     if not notes_present:
         raise ValueError('Missing docs/releases/<tag>.md')
