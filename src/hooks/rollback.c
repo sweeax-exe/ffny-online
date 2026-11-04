@@ -704,6 +704,13 @@ static int track_start(void)
 }
 
 void rollback_sound_context(int on) { t_in_sound = on; }
+/* The hang watch's block (hang_watch.c). No locks: the game thread may hold them. */
+void rollback_hang_dump(void)
+{
+    fprintf(stderr, "  rollback: tracking %ld, audio arena state %d, %d pieces, %d blocks, %u KB of %u, %u KB live\n",
+            (long)s_tracking, s_arena_state, s_nchunk, s_nblk, s_arena_total / 1024u, (unsigned)(ARENA_MAX / 1024u), s_arena_live / 1024u);
+}
+
 int rollback_on_game_thread(void) { return s_game_tid && GetCurrentThreadId() == s_game_tid; }
 
 /* For crash reports: how the save states treat the page of a guest address. */

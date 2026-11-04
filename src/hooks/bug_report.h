@@ -27,6 +27,7 @@ int bug_report_f9(void);
 /* After a crash: the previous run's log, when it ended in a crash report and the launcher has not
  * offered it yet (1, path in out). bug_report_crash_seen marks it offered, sent or not. */
 int bug_report_last_crash(char *out, int size);
+int bug_report_last_was_hang(void);     /* that run froze (the hang watch's mark) rather than crashed */
 void bug_report_crash_seen(const char *log_path);
 
 #ifdef __cplusplus

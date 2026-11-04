@@ -59,6 +59,7 @@
 #include "nv2a/nv2a_pgraph_d3d11.h"
 #include "hooks/save_compat.h"
 #include "hooks/rollback.h"
+#include "hooks/hang_watch.h"
 #include "hooks/recorder.h"
 #include "hooks/pc_language.h"
 
@@ -1013,6 +1014,7 @@ static int host_main(void)
      * silently inert, and the one diagnostic that tells a hang from slowness
      * does nothing while appearing to be set. */
     xbox_WatchdogStart();
+    hang_watch_start();     /* the players' one: logs a freeze, kills nothing */
 
     /* Step 7: Call the recompiled entry point */
     printf("\nStarting game...\n");

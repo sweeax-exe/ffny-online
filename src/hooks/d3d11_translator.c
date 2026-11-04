@@ -779,6 +779,11 @@ static void capture_backbuffer(IDirect3DDevice8 *dev)
     double now_secs = 0.0;
     long step_shot = 0;
 
+    {
+        extern void hang_watch_note_present(void);
+        hang_watch_note_present();
+    }
+
     /* A capture asked for at a fight step (RECOMP_TEST_SHOT, test_telemetry.c):
      * with step-timed input and pinned seeds the game's state at a step is the
      * same every run, so this frame can be compared with a baseline. It takes

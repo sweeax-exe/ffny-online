@@ -2728,8 +2728,11 @@ static void crash_popup()
     }
     if (!begin_glass_modal("The game crashed", ImGui::GetFontSize() * 30)) return;
     ImGui::PushTextWrapPos(ImGui::GetFontSize() * 28);
-    ImGui::TextUnformatted("The game crashed last time. Send its log to the developers? It shows where the crash "
-                           "happened, so it can be fixed.");
+    ImGui::TextUnformatted(bug_report_last_was_hang()
+                               ? "The game froze last time. Send its log to the developers? It shows where it "
+                                 "got stuck, so it can be fixed."
+                               : "The game crashed last time. Send its log to the developers? It shows where the crash "
+                                 "happened, so it can be fixed.");
     ImGui::TextDisabled("Only that session's log is sent, with your Windows user folder blanked. See Privacy.");
     char status[160];
     bool busy = bug_report_busy();

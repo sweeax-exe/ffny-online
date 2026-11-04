@@ -34,6 +34,7 @@
 #include "hooks/pc_settings.h"
 #include "recomp_settings.h"
 #include "hooks/netplay.h"
+#include "hooks/hang_watch.h"
 #include "hooks/automatch.h"
 #include "hooks/options_audio.h"
 #include "hooks/custom_music.h"
@@ -418,6 +419,7 @@ void sub_001BAA00_enter(void) { defjam_test_input(MEM32(g_esp + 4)); netplay_on_
  * own, which a load must leave alone (sub_00012CC0, the registry store, follows it). */
 void sub_0002C530_enter(void)
 {
+    hang_watch_note_update();
     netplay_on_update();
     /* Custom music (custom_music.h): silences or restores the game's own music at this clean point. */
     custom_music_on_update(netplay_rerunning(), netplay_in_fight());

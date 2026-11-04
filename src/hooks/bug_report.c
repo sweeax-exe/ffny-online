@@ -418,6 +418,9 @@ int bug_report_f9(void)
 
 /* The run before this one, if it ended in a crash report (main.c) not offered yet. Logs are
  * named by their start time (pc_settings.c), so the newest other one is the previous run. */
+static int g_last_was_hang;
+int bug_report_last_was_hang(void) { return g_last_was_hang; }
+
 int bug_report_last_crash(char *out, int size)
 {
     WIN32_FIND_DATAA fd;
@@ -438,6 +441,13 @@ int bug_report_last_crash(char *out, int size)
     if (!best[0]) return 0;
     snprintf(path, sizeof(path), "logs\\%s.seen", best);
     if (GetFileAttributesA(path) != INVALID_FILE_ATTRIBUTES) return 0;
+    /* Build 58: a run the hang watch left marked (hang_watch.c): it froze, and was closed by hand */
+    snprintf(path, sizeof(path), "logs\\%s.hang", best);
+    if (GetFileAttributesA(path) != INVALID_FILE_ATTRIBUTES) {
+        g_last_was_hang = 1;
+        snprintf(out, size, "logs\\%s", best);
+        return 1;
+    }
     snprintf(path, sizeof(path), "logs\\%s", best);
     h = CreateFileA(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, NULL);
     if (h == INVALID_HANDLE_VALUE) return 0;
@@ -475,6 +485,7 @@ int bug_report_toast(char *out, int size) { (void)out; (void)size; return 0; }
 int bug_report_busy(void) { return 0; }
 int bug_report_f9(void) { return 0; }
 int bug_report_last_crash(char *out, int size) { (void)out; (void)size; return 0; }
+int bug_report_last_was_hang(void) { return 0; }
 void bug_report_crash_seen(const char *log_path) { (void)log_path; }
 
 #endif

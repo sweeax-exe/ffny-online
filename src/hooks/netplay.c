@@ -868,6 +868,19 @@ void netplay_results_funccall(const char *text)
     }
 }
 
+/* The hang watch's block (hang_watch.c): what this PC thinks it is doing. No locks: the game thread may hold them. */
+void netplay_hang_dump(void)
+{
+    ULONGLONG now = GetTickCount64();
+    fprintf(stderr, "  netplay: lobby %d state %d match_live %d lockstep %ld match_seen %d watching %d phase %u step %u final %u\n",
+            N.lobby, (int)N.state, N.match_live, (long)N.lockstep, N.match_seen, N.watching, MEM32(G_MATCH_PHASE), N.step, N.final_step);
+    fprintf(stderr, "  netplay: set_match %d koth %d on_results %ld koth_quit %d set_menu %llu ms ago, set_leave %llu ms ago, rematch mine %08X\n",
+            N.set_match, N.koth_match, (long)N.on_results, N.koth_quit, N.set_menu ? now - N.set_menu : 0ULL,
+            N.set_leave ? now - N.set_leave : 0ULL, N.rematch_want[N.pos]);
+    fprintf(stderr, "  netplay: rollback on %d predicting %d resim %d fought %d, last late player %d\n",
+            N.rb_on, N.predicting, N.resim, N.rb_fought, N.last_late);
+}
+
 /* Once per game update, on the game thread, between two updates: a held Rematch that every player
  * has now chosen runs here, as the menu's own call would (the same hooks, so created fighters are
  * linked again). Not while a screen loads. */
