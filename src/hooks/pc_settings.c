@@ -471,9 +471,9 @@ int pc_settings_init(void)
             recomp_settings_get_text("textures","packs",packs,sizeof packs,"faithful-hd");
             _putenv_s("RECOMP_TEXTURE_PACKS",recomp_settings_get("textures","enabled",0) ? packs : "");
         }
-        if (!getenv("RECOMP_PC_TEXTURE_CACHE_MB")) {
+        if (!getenv("RECOMP_TEXTURE_CACHE_MB")) {
             snprintf(value,sizeof value,"%d",recomp_settings_get("textures","cache_mb",PC_TEXTURE_CACHE_MB));
-            _putenv_s("RECOMP_PC_TEXTURE_CACHE_MB",value);
+            _putenv_s("RECOMP_TEXTURE_CACHE_MB",value);
         }
         if (!getenv("RECOMP_TEXTURE_DUMP_LIMIT")) {
             snprintf(value,sizeof value,"%d",recomp_settings_get("textures","dump_limit",2000));
