@@ -18,6 +18,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "updater.h"
+#include "update_sig.h"
 #include "pc_launcher_saves.h"
 
 #if !defined(_WIN32)
@@ -50,11 +51,6 @@ int updater_download(unsigned long long *got, unsigned long long *total) { if (g
  * The manifest is signed (below), so the host only needs to be reachable, not trusted. */
 static const wchar_t *const k_update_hosts[] = { L"play.defjam.online", L"49.12.78.32", L"142.132.178.17" };
 #define UPDATE_PORT 27778
-/* updatesign's public key: X and Y of the P-256 point, big-endian. */
-static const char k_public_key[] =
-    "6f8ce805a386c294c1a24de83d07ce6a0c296ebf836d00434e9a5f0256c6dd7a"
-    "6d60d26ef38562ee1e29b99dddca155d89f2a6a28a32c4559c78ea00d28e5c05";
-
 #define MANIFEST_MAX (64 * 1024)
 #define SETUP_MAX    (512u * 1024 * 1024)
 
@@ -235,40 +231,15 @@ static int to_memory(const void *data, DWORD size, void *user)
 
 /* ---- trust ------------------------------------------------------------------------------ */
 
-static int unhex(const char *text, unsigned char *out, size_t bytes)
-{
-    size_t i;
-    for (i = 0; i < bytes; i++) {
-        unsigned v;
-        if (sscanf(text + 2 * i, "%2x", &v) != 1) return 0;
-        out[i] = (unsigned char)v;
-    }
-    return 1;
-}
+#define unhex(text, out, bytes) update_unhex((text), (out), (unsigned long)(bytes))
+#define signature_ok(manifest, size, sig) update_signature_ok((manifest), (unsigned long)(size), (sig), NULL)
 
-static int sha256(const void *data, ULONG size, unsigned char out[32])
+/* The update service's hosts and port, for other downloads from it (graphics_mod.cpp). */
+const wchar_t *updater_host(int i)
 {
-    return BCryptHash(BCRYPT_SHA256_ALG_HANDLE, NULL, 0, (PUCHAR)data, size, out, 32) == 0;
+    return i >= 0 && i < (int)(sizeof(k_update_hosts) / sizeof(k_update_hosts[0])) ? k_update_hosts[i] : NULL;
 }
-
-static int signature_ok(const char *manifest, DWORD size, const char *sig_hex)
-{
-    struct { BCRYPT_ECCKEY_BLOB head; unsigned char xy[64]; } blob;
-    unsigned char sig[64], digest[32];
-    BCRYPT_ALG_HANDLE alg = NULL;
-    BCRYPT_KEY_HANDLE key = NULL;
-    int ok = 0;
-    if (strlen(sig_hex) < 128 || !unhex(sig_hex, sig, 64) || !unhex(k_public_key, blob.xy, 64)) return 0;
-    if (!sha256(manifest, size, digest)) return 0;
-    blob.head.dwMagic = BCRYPT_ECDSA_PUBLIC_P256_MAGIC;
-    blob.head.cbKey = 32;
-    if (BCryptOpenAlgorithmProvider(&alg, BCRYPT_ECDSA_P256_ALGORITHM, NULL, 0) == 0 &&
-        BCryptImportKeyPair(alg, NULL, BCRYPT_ECCPUBLIC_BLOB, &key, (PUCHAR)&blob, sizeof(blob), 0) == 0)
-        ok = BCryptVerifySignature(key, NULL, digest, 32, sig, 64, 0) == 0;
-    if (key) BCryptDestroyKey(key);
-    if (alg) BCryptCloseAlgorithmProvider(alg, 0);
-    return ok;
-}
+int updater_port(void) { return UPDATE_PORT; }
 
 /* ---- the manifest ----------------------------------------------------------------------- */
 
