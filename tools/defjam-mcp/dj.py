@@ -67,7 +67,7 @@ def cmd_scenario(a):
                              cp_names=a.cp_names.split(",") if a.cp_names else None, more_shots=a.more_shots,
                              rematch=a.rematch, venues=a.venues, spectators=a.spectators, copy_env=copy_env(a.copy_env),
                              fixtures=a.fixtures.split(",") if a.fixtures else None, ranked=a.ranked,
-                             rollback_modes=a.rollback_modes, **common)
+                             rollback_modes=a.rollback_modes, rollback_max_ping=a.rollback_max_ping, **common)
     elif a.kind == "offline":
         r = scenarios.offline(type=a.type, venue=a.venue, f0=a.f0, f1=a.f1, cpu=not a.human, bot=a.bot,
                               fast_ko=a.fast_ko, turbo=a.turbo, timeout=a.timeout or 420,
@@ -186,6 +186,8 @@ def main(argv=None):
                     help="mandatory: the relay's rollback-everywhere switch (-rollback-modes), the copies without an opt-in")
     sc.add_argument("--rollback-modes", help="with --rollback mandatory: the relay's mode list (default all), "
                                              "e.g. '1v1 team ffa koth crew ranked'")
+    sc.add_argument("--rollback-max-ping", type=int, help="online: the relay's rollback ping limit in ms (-rollback-max-ping; "
+                                                          "default none, the game's own 120)")
     sc.add_argument("--fast-ko", type=int, default=600, help="knockout at this fight step (0: off)")
     sc.add_argument("--ko-winner", help="slot or alt (default alt; koth 0)")
     sc.add_argument("--bot", nargs="?", const=True, default=None,

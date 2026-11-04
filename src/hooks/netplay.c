@@ -240,6 +240,9 @@ void netplay_crowd_update(void) { sub_00081170(); }
 #define CAPS_CREW     256u      /* crew battles, both ways (T_CREWJOIN, T_CREW); only a client announcing it gets T_CREW */
 #define CAPS_RB_MODES 512u      /* rollback everywhere (build 52), both ways: the answer carries a u32 of the
                                  * NETPLAY_RB_* modes in which rollback is mandatory (0: the setting decides) */
+#define CAPS_RB_PING  1024u     /* the rollback ping limit (build 54), both ways, with CAPS_RB_MODES: the answer
+                                 * carries a u32 after the mode mask, the path ping in ms over which a match
+                                 * plays in lockstep (0: the relay sets none, RB_PATH_DEFAULT_MS) */
 #define CP_WAIT_MS    10000     /* START: how long to wait for a created fighter's missing record */
 #define CAPS_TRIES    5         /* CAPS every RETRY_MS; no answer after these: an older relay */
 #define WINNER_DRAW   0xFFu
@@ -290,8 +293,16 @@ void netplay_crowd_update(void) { sub_00081170(); }
 /* The per-match fallback to lockstep (build 52, rollback everywhere). At the sync point, from the pings
  * every PC has alike: a path between two players over this many ms (the delay's own reading of the pings)
  * is beyond what rollback covers. Its delay is DELAY_MAX either way, and DELAY_MAX + RB_AHEAD steps are
- * 300 ms: past that every update would run RB_AHEAD steps again and still wait for the other's entries. */
+ * 300 ms: past that every update would run RB_AHEAD steps again and still wait for the other's entries.
+ * Build 54: the relay sets the limit (CAPS_RB_PING, its rollback-max-ping switch), at most this; without
+ * one (an older relay, or no switch) RB_PATH_DEFAULT_MS. On the ranked launch night (build 53) matches
+ * at 100-200 ms rolled back with this 300 and desynced or crashed; the two-copy rollback runs were
+ * clean up to 110+10 ms of test lag (rollback-plan-2026-11.md, eleventh round), so 120 is the default.
+ * Every PC sends its limit in P_RTT (bytes 15-16) and the match uses the lowest (rb_path_limit), so
+ * the PCs decide alike even when their relay answers differ; with a player on an older build (no bytes
+ * 15-16) it stays RB_PATH_MAX_MS, as that PC decides by itself. */
 #define RB_PATH_MAX_MS 300
+#define RB_PATH_DEFAULT_MS 120
 /* During a fight (rb_budget_tick): when the rollback work of this PC (the saves of normal updates, the
  * loads and the steps run again) takes this share of the wall time in RB_BUDGET_WINDOWS windows of
  * RB_BUDGET_WINDOW_MS in a row, this PC cannot keep up: it stops predicting and plays the rest of the
@@ -482,6 +493,8 @@ static struct {
      * the modes in which rollback is mandatory (0: none, the players' setting decides) */
     int rb_modes_known;
     unsigned rb_modes;
+    int rb_max_ping;                    /* the relay's rollback ping limit (CAPS_RB_PING; 0: none set) */
+    int peer_rb_max[MAXP];              /* each position's ping limit for this match (P_RTT bytes 15-16, build 54; 0: older) */
     /* the per-match fallback for a PC that cannot keep up (rb_budget_tick): this PC stops predicting and
      * rolls back no more until the next START; the window's start, the ms of rollback work in it, and
      * how many windows in a row went over */
@@ -1513,7 +1526,7 @@ static void make_data_print(void)
 /* Hub: this PC's ping for the current START, so every PC derives the same input delay. */
 static void send_rtt(void)
 {
-    uint8_t p[15];
+    uint8_t p[17];
     int rtt;
     if (N.pos < 0 || N.watching) return;    /* a spectator: nothing of the lockstep goes out */
     rtt = N.peer_rtt[N.pos] < 0 ? 0 : N.peer_rtt[N.pos];
@@ -1529,7 +1542,11 @@ static void send_rtt(void)
      * bit 1: the server makes rollback mandatory for this match's mode on the sender (rollback
      * everywhere), which lifts the hill's lockstep only when every player of the fight sends it */
     p[14] = (uint8_t)(1 | (N.peer_rb_must[N.pos] ? 2 : 0));
-    send_data(p, 15);
+    /* builds before 54 send 15: the rollback ping limit this PC uses for the match (its relay's, or
+     * RB_PATH_DEFAULT_MS); every PC takes the lowest of the players' (rb_path_limit) */
+    p[15] = (uint8_t)N.peer_rb_max[N.pos];
+    p[16] = (uint8_t)(N.peer_rb_max[N.pos] >> 8);
+    send_data(p, 17);
     N.last_rtt_sent = GetTickCount64();
 }
 
@@ -1579,6 +1596,36 @@ static int path_ping_ms(void)
     return (a + b) / 2;
 }
 
+/* The relay's CAPS answer b (len bytes, the header's 6 first): its rollback ping limit after the mode
+ * mask, when it answers CAPS_RB_PING (build 54); 0: none set or an older relay. */
+static int known_rb_ping(const uint8_t *b, int len)
+{
+    uint32_t v;
+    if (N.relay_caps <= 0 || !(N.relay_caps & CAPS_RB_MODES) || !(N.relay_caps & CAPS_RB_PING) || len < 18) return 0;
+    v = get32(b + 14);
+    return v > RB_PATH_MAX_MS ? RB_PATH_MAX_MS : (int)v;
+}
+
+/* This PC's rollback ping limit for the next match: the relay's (CAPS_RB_PING), else the default. */
+static int own_rb_limit(void)
+{
+    return N.rb_max_ping > 0 ? (N.rb_max_ping < RB_PATH_MAX_MS ? N.rb_max_ping : RB_PATH_MAX_MS) : RB_PATH_DEFAULT_MS;
+}
+
+/* The match's rollback ping limit: the lowest of the players' (P_RTT bytes 15-16), which every PC has
+ * alike. A player on a build before 54 sends none and decides with RB_PATH_MAX_MS by itself: then
+ * every PC uses that, so they still agree. *older (may be NULL): such a player plays. */
+static int rb_path_limit(int *older)
+{
+    int i, lim = RB_PATH_MAX_MS, old = 0;
+    for (i = 0; i < N.players && i < MAXP; i++) {
+        if (N.peer_rb_max[i] <= 0) { old = 1; continue; }
+        if (N.peer_rb_max[i] < lim) lim = N.peer_rb_max[i];
+    }
+    if (older) *older = old;
+    return old ? RB_PATH_MAX_MS : lim;
+}
+
 static int every_player_rolls_back(void)
 {
     int i;
@@ -1595,7 +1642,7 @@ static int every_player_rolls_back(void)
     for (i = 0; i < N.players; i++) if (!N.peer_rb[i]) return 0;
     if (match_has_created())
         for (i = 0; i < N.players; i++) if (!N.peer_rb_cp[i]) return 0;
-    if (path_ping_ms() > RB_PATH_MAX_MS) return 0;
+    if (path_ping_ms() > rb_path_limit(NULL)) return 0;
     return 1;
 }
 
@@ -1665,6 +1712,7 @@ static void on_data(int from, const uint8_t *p, int len)
             N.peer_rb[from] = len >= 8 && p[7] == 1;
             N.peer_rb_cp[from] = len >= 15 && (p[14] & 1);
             N.peer_rb_must[from] = len >= 15 && (p[14] & 2);   /* build 52: the server makes it mandatory there */
+            N.peer_rb_max[from] = len >= 17 ? (p[15] | (p[16] << 8)) : 0;   /* build 54: its rollback ping limit */
             if (len >= 12 && g_data_print && get32(p + 8) && get32(p + 8) != g_data_print) {
                 static uint32_t warned_seed[MAXP];
                 if (warned_seed[from] != N.start_seed) {
@@ -2412,7 +2460,8 @@ static void on_start_as(const uint8_t *b, int len, int watching)
     N.delay = LOBBY_DELAY;
     N.delay_fixed = 0;
     for (i = 0; i < MAXP; i++) N.peer_rtt[i] = -1, N.peer_rb[i] = N.peer_rb_cp[i] = N.peer_rb_must[i] = 0, N.peer_results[i] = N.peer_on_results[i] = 0;
-    for (i = 0; i < MAXP; i++) N.peer_delay[i] = 0;
+    for (i = 0; i < MAXP; i++) N.peer_delay[i] = 0, N.peer_rb_max[i] = 0;
+    if (pos >= 0 && pos < MAXP) N.peer_rb_max[pos] = own_rb_limit();   /* the relay's answer came before START */
     N.rb_slow_off = 0;              /* the per-match fallback for a slow PC holds until the next START */
     N.rbb_over = 0, N.rbb_start = 0;
     spec_reset();
@@ -2531,7 +2580,7 @@ static void on_packet(const uint8_t *b, int len)
                     N.caps_tries = 0;
                     N.caps_sent = 0;
                     N.relay_caps = -1;
-                    N.rb_modes_known = 0, N.rb_modes = 0;
+                    N.rb_modes_known = 0, N.rb_modes = 0, N.rb_max_ping = 0;
                     chat_reset();       /* room chat: a new session, a new IDENT */
                     N.pc_tries = 0;         /* this PC's fingerprint, for one session per PC (T_PC) */
                     N.pc_sent = 0;
@@ -2620,6 +2669,13 @@ static void on_packet(const uint8_t *b, int len)
                 N.rb_modes_known = known;
                 N.rb_modes = modes;
                 if (known) rollback_server_modes((N.relay_caps & CAPS_ROLLBACK) ? modes : 0);
+            }
+            {   /* the rollback ping limit (build 54): a u32 after the mask; 0 or an older relay: the default */
+                int ms = known_rb_ping(b, len);
+                if (ms != N.rb_max_ping)
+                    fprintf(stderr, "[NETPLAY] the relay's rollback ping limit: %s%d ms\n",
+                            ms > 0 ? "" : "none set, the default ", ms > 0 ? ms : RB_PATH_DEFAULT_MS);
+                N.rb_max_ping = ms;
             }
         }
         break;
@@ -2919,7 +2975,7 @@ static DWORD WINAPI net_thread(LPVOID unused)
                 int n = header(cb, T_CAPS);
                 memcpy(cb + n, N.token, 8); n += 8;
                 put32(cb + n, CAPS_KOTH | CAPS_CREATED | CAPS_SPECTATE | CAPS_STATS_ERR | CAPS_SPEC_REMATCH | CAPS_CHAT |
-                              CAPS_CREW | CAPS_RB_MODES); n += 4;
+                              CAPS_CREW | CAPS_RB_MODES | CAPS_RB_PING); n += 4;
                 send_raw(cb, n);
             } else {
                 N.relay_caps = 0;
@@ -3159,7 +3215,7 @@ static int start(const char *server, const char *name, int creating, const char 
     for (i = 0; i < ROOMSLOTS; i++) { N.pos_of_slot[i] = i < 2 ? i : -1; N.slot_rtt[i] = N.slot_rb[i] = -1; }
     N.last_pinginfo = 0;
     N.relay_caps = -1;
-    N.rb_modes_known = 0, N.rb_modes = 0;
+    N.rb_modes_known = 0, N.rb_modes = 0, N.rb_max_ping = 0;
     chat_reset();
     N.online_twice = 0;
     /* created fighters: read the player's own again (a new one may have been made meanwhile) */
@@ -4246,10 +4302,14 @@ static void rb_off_reasons(void)
                 "does not roll back with them; lockstep\n");
         if (!first[0]) snprintf(first, sizeof(first), "a created fighter plays and a player's build is older");
     }
-    if (path_ping_ms() > RB_PATH_MAX_MS) {
-        fprintf(stderr, "[NETPLAY] rollback off for this match: the ping between the players is too high (%d ms, "
-                "over %d); lockstep\n", path_ping_ms(), RB_PATH_MAX_MS);
-        if (!first[0]) snprintf(first, sizeof(first), "the ping is too high (%d ms)", path_ping_ms());
+    {
+        int older, lim = rb_path_limit(&older);
+        if (path_ping_ms() > lim) {
+            fprintf(stderr, "[NETPLAY] rollback off for this match: the ping between the players is too high (%d ms, "
+                    "over %d%s); lockstep\n", path_ping_ms(), lim,
+                    older ? ", a player's build is older" : N.rb_max_ping > 0 ? ", the relay's limit" : ", the default limit");
+            if (!first[0]) snprintf(first, sizeof(first), "the ping is too high (%d ms)", path_ping_ms());
+        }
     }
     if (meant && first[0]) {
         fprintf(stderr, "[NETPLAY] notice: this match runs without rollback: %s\n", first);
@@ -4294,8 +4354,8 @@ void netplay_sync_point(void)
         fprintf(stderr, "[NETPLAY] input delay %d steps (pings %d/%d/%d/%d ms%s)\n", N.delay,
                 N.peer_rtt[0], N.peer_rtt[1], N.peer_rtt[2], N.peer_rtt[3], known ? "" : ", some missing");
         if (N.rb_match) {
-            fprintf(stderr, "[NETPLAY] rollback on for this match: every player has it on%s\n",
-                    every_player_must() ? " (the server makes it mandatory)" : "");
+            fprintf(stderr, "[NETPLAY] rollback on for this match: every player has it on%s (path ping %d ms, limit %d)\n",
+                    every_player_must() ? " (the server makes it mandatory)" : "", path_ping_ms(), rb_path_limit(NULL));
         } else {
             rb_off_reasons();
         }

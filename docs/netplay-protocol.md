@@ -365,6 +365,20 @@ Same header and version; a relay without it drops `SPECTATE` silently.
   PC; the others still roll back, the agreed delay stays). A rollback match that goes out of sync still
   leaves for the room at once.
 
+### Rollback ping limit (build 54)
+
+- `CAPS` bit 10 (`1024`), with bit 9: from a client, "I read the rollback ping limit"; in the relay's answer
+  (only to such a client), a `u32` follows the mode mask: the path ping in ms between two players over which
+  a match plays in lockstep. 0: the relay sets none, the game's default (120 ms) holds; an older relay sends
+  nothing, the same. At most 300 ms (past that the delay is the longest and rollback cannot cover it). Sent
+  again before every `START` with the mask.
+- The relay's switch: the file `rollback-max-ping` in its updates folder, one whole number of ms (`#` starts a
+  comment), read at every answer. No file or 0: none set. Tests: `-rollback-max-ping 120`.
+- `P_RTT` bytes 15-16 (`u16`, builds from 54; older builds send 15 bytes): the limit the sender uses for this
+  match (its relay's, or the default), fixed at `START`. Every PC takes the lowest of the players' limits, so
+  they decide alike; when a player sends no limit (an older build, which uses 300 ms by itself) the match uses
+  300 ms. Over the limit the players see "This match runs without rollback: the ping is too high (N ms)".
+
 ## Relay status (choosing a relay)
 
 Since build 30 there is more than one relay (Europe `play.defjam.online`, US East

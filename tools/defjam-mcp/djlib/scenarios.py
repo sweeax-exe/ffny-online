@@ -916,7 +916,8 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
            bot=None, timeout=None, relay_port=27900, base_core=2, keep_going=False, extra_env=None,
            lock_timeout=None, log=None, require_hits=False, stall=300, keep_roots=False, quick=None,
            created=False, cp_records=None, rematch=False, venues=None, cp_pick=None, cp_names=None,
-           more_shots=False, spectators=0, copy_env=None, fixtures=None, ranked=None, rollback_modes=None):
+           more_shots=False, spectators=0, copy_env=None, fixtures=None, ranked=None, rollback_modes=None,
+           rollback_max_ping=None):
     """rollback: "off", "on" (every copy opts in, the relay allows it) or "mandatory" (build 52, rollback
     everywhere: the relay -rollback -rollback-modes <rollback_modes or all>, the copies RECOMP_ROLLBACK=server,
     so only the relay's mode mask makes a match roll back). copy_env: {copy index: {NAME: VALUE}}, extra variables for one copy only; fixtures: per copy a save
@@ -954,6 +955,9 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
     logs = {}
     try:
         relay_extra = (["-created"] if created else []) + (["-test-venues", str(venues)] if venues else [])
+        if rollback_max_ping:   # build 54: the relay's rollback ping limit (else the game's default)
+            relay_extra += ["-rollback-max-ping", str(int(rollback_max_ping))]
+            result["params"]["rollback_max_ping"] = int(rollback_max_ping)
         tokens = {}
         if ranked:
             acc_port = relay_port + 100
