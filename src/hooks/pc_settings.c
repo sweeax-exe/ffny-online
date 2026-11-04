@@ -31,8 +31,6 @@
 #endif
 #include "pc_settings.h"
 #include "pc_input.h"
-#include "graphics_mod.h"
-#include "custom_music.h"
 #include "pc_ui.h"
 #include "netplay.h"
 #include "created_fighter.h"
@@ -51,7 +49,6 @@ static const char *const k_filter[] = { "smooth", "sharp", NULL };
 static const char *const k_aa[] = { "off", "on", NULL };
 static const char *const k_anisotropy[] = { "off", "2x", "4x", "8x", "16x", NULL };
 static const char *const k_voice[] = { "off", "push_to_talk", "open", NULL };
-static const char *const k_graphics_preset[] = { "performance", "quality", NULL };
 static const char *const k_music_mode[] = { "auto", "mine", "mix", "original", NULL };
 static const char *const k_voice_pad[] = { "off", "back", "left_stick", "right_stick", "dpad_up", "dpad_down", NULL };
 static const char *const k_ws_hud[] = { "auto", "edges", "centered", NULL };
@@ -183,12 +180,6 @@ static RecompSetting g_display_settings[] = {
       "when there are songs). Only your PC hears it; online matches are unaffected." },
     { "music", "shuffle", RECOMP_SETTING_BOOL, 1, 0, 0, NULL, "RECOMP_MUSIC_SHUFFLE", 0,
       "Play your songs in a random order; off plays them by name." },
-    { "graphics", "enabled", RECOMP_SETTING_BOOL, 0, 0, 0, NULL, NULL, RECOMP_SETTING_RESTART,
-      "Enhanced graphics (community): the ReShade / DLSS pack with presets by Marleymarletto, installed by the "
-      "launcher next to the game (Launcher > Graphics). Heavy on the GPU: for NVIDIA RTX cards." },
-    { "graphics", "preset", RECOMP_SETTING_ENUM, 0, 0, 0, k_graphics_preset, NULL, RECOMP_SETTING_RESTART,
-      "The Enhanced graphics preset: performance (50% resolution, lighter, RTX 30/40) or quality (RTX 5070-class, "
-      "1080p)." },
 };
 #define DISPLAY_SETTING_COUNT (sizeof(g_display_settings) / sizeof(g_display_settings[0]))
 
@@ -951,7 +942,6 @@ int pc_settings_init(void)
     /* The game starts here: its save area is in use (the launcher's Saves page will not restore or
      * import into it meanwhile), and the saves are backed up once a day (save-backups/). */
     if (have_root) saves_game_starts();
-    graphics_mod_log_header();        /* [GRAPHICS]: the community pack on or off, for crash and F9 reports */
     custom_music_game_starts(have_root ? root : NULL);    /* the player's own songs, when there are any */
     /* What the picture runs with, for bug reports: input delay and frame pacing questions start here. */
     fprintf(stderr, "[SETTINGS] display: %s %dx%d, render scale %d, vsync %s, anti-aliasing %s, anisotropy %d, "
