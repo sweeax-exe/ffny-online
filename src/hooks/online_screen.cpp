@@ -27,6 +27,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <exception>
 #include <map>
 #include <string>
 #include <vector>
@@ -2662,6 +2663,7 @@ void draw_fighters(ImDrawList *dl, const Frame &f, const Pad &pad, bool *chosen,
                 } else {    // a long online name: two lines, split at the blank nearest the middle
                     std::string s = list[i].name;
                     size_t cut = s.size() / 2, best = std::string::npos;
+                    while (cut > 0 && ((unsigned char)s[cut] & 0xC0) == 0x80) cut--;     // at a character's start
                     for (size_t k = 1; k + 1 < s.size(); k++)
                         if (s[k] == ' ' && (best == std::string::npos || (k > cut ? k - cut : cut - k) < (best > cut ? best - cut : cut - best)))
                             best = k;
@@ -4458,7 +4460,33 @@ bool fight_chat_wanted()
     return g_fight_chat_up;
 }
 
-bool draw_fight_chat(ImDrawList *dl, ImVec2 display) { return fight_chat_draw_impl(dl, display); }
+// A C++ exception from the overlay's drawing is logged and the chat shut for that frame instead of ending
+// the game: an uncaught one calls abort() (build 52, 2026-11-04: a lock taken twice in social.cpp).
+void ui_caught(const char *where, const char *what)
+{
+    static int logged = 0;
+    if (logged < 20) {
+        logged++;
+        fprintf(stderr, "[SOCIAL] caught: %s (%s)\n", what ? what : "unknown exception", where);
+        fflush(stderr);
+    }
+    C.open = C.kb = C.menu = false;
+    C.mouse_off = false;
+    QW.open = false;
+    FC.typing = false;
+}
+
+bool draw_fight_chat(ImDrawList *dl, ImVec2 display)
+{
+    try {
+        return fight_chat_draw_impl(dl, display);
+    } catch (const std::exception &e) {
+        ui_caught("fight chat", e.what());
+    } catch (...) {
+        ui_caught("fight chat", nullptr);
+    }
+    return false;
+}
 
 bool fight_chat_typing() { return FC.typing || (QW.open && QW.where == QW_FIGHT); }
 
@@ -4503,8 +4531,22 @@ bool take_open_request()
 bool draw_pages(ImVec2 display);
 
 // The online pages, and over them the chat window (social_ui.inc) while it is open: then the pages
-// run as usual but take no input.
+// run as usual but take no input. An exception shuts the chat window and keeps the screens.
+bool draw_unguarded(ImVec2 display);
+
 bool draw(ImVec2 display)
+{
+    try {
+        return draw_unguarded(display);
+    } catch (const std::exception &e) {
+        ui_caught("online screens", e.what());
+    } catch (...) {
+        ui_caught("online screens", nullptr);
+    }
+    return true;
+}
+
+bool draw_unguarded(ImVec2 display)
 {
     ImDrawList *dl = ImGui::GetForegroundDrawList();
     Frame f = menu_frame(display);

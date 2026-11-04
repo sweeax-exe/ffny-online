@@ -247,10 +247,64 @@ SOCIAL_UI = [
 # second after it came into copy 1's room (the window shut), line 2 "Run it back?" (hold, point, let go);
 # copy 1 on GLOBAL (open from 118), line 4 "Nice!" (a tap, point, A).
 SOCIAL_QUICK = ["room:1:2", "chat:119:4:a"]
+# --stress: more accounts (no game) whose names and lines are what the live chat has: flag emoji
+# (regional-indicator pairs, 4-byte UTF-8), Arabic, combining marks, a ZWJ family, a very long word, format
+# characters, near-empty text. They become friends of both copies (copy 0 also keeps two requests open),
+# write to both copies (both let everyone message them) and to global chat, before the copies start and
+# again while they run (the long-poll's events). Build 52's chat closed the game (2026-11-04).
+STRESS_NAMES = ["faroukleboucher69\U0001F1EB\U0001F1F7\U0001F1E9\U0001F1FF", "محمد الفارس",
+                "Z̴̡̛͓a̷͚͐l̶̰̓g̸̱̈́o̵̘͠",
+                "Averyveryveryveryveryveryverylongnamewithoutanyspaces",
+                "\U0001F468‍\U0001F469‍\U0001F467‍\U0001F466 família"]
+STRESS_TEXTS = ["\U0001F1EB\U0001F1F7\U0001F1E9\U0001F1FF\U0001F1EB\U0001F1F7 allez \U0001F525\U0001F525\U0001F525",
+                "مرحبا بالجميع، من يريد القتال؟",
+                "Z̴̡̛͓a̷͚͐l̶̰̓g̸̱̈́o̵̘͠ t̸e̵x̷t̶",
+                "A" * 260, "\U0001F600" * 70, "100% %s %n %d {x} \\ \" \t tab", "a​‎‮ reversed ‬ end",
+                "é́́́ \U0001F44D\U0001F3FD \U0001F3F3️‍\U0001F308", " ", "x"]
+
+
+def _stress_social(port, tokens, copy_names, rnd):
+    """One round of the --stress accounts' lines (rnd 0: also the friendships and the settings)."""
+    import urllib.request
+
+    def call(name, method, path, body=None):
+        req = urllib.request.Request("http://127.0.0.1:%d%s" % (port, path), method=method,
+                                     data=None if body is None else json.dumps(body).encode("utf-8"),
+                                     headers={"Authorization": "Bearer " + tokens[name], "Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(req, timeout=10) as r:
+                return r.status, json.loads(r.read() or b"null")
+        except Exception as e:      # a rejected line (empty, too fast) is part of the test
+            return getattr(e, "code", 0), None
+
+    ids = {}
+    if rnd == 0:
+        for c in copy_names:
+            call(c, "POST", "/api/social/settings", {"dms": "everyone"})
+        for k, w in enumerate(STRESS_NAMES):
+            for c in copy_names:
+                if c == copy_names[-1] and k >= 3:
+                    continue        # copy 1 accepts its first request in the script: none of these may be first
+                st, out = call(w, "POST", "/api/social/friends/request", {"name": c})
+                if out and out.get("account"):
+                    ids[c] = out["account"]
+                if k < 3:
+                    call(c, "POST", "/api/social/friends/accept", {"name": w})
+        _stress_social.ids = ids
+    ids = getattr(_stress_social, "ids", {})
+    sent = 0
+    for k, w in enumerate(STRESS_NAMES):
+        t = STRESS_TEXTS[(k + rnd * 3) % len(STRESS_TEXTS)]
+        st, _ = call(w, "POST", "/api/social/global", {"region": "eu", "text": t + ("" if rnd == 0 else " r%d" % rnd)})
+        sent += st // 100 == 2
+        for c, cid in ids.items():
+            st, _ = call(w, "POST", "/api/social/messages/%d" % cid, {"text": STRESS_TEXTS[(k + rnd) % len(STRESS_TEXTS)] + " %d" % rnd})
+            sent += st // 100 == 2
+    return sent
 
 
 def social(timeout=300, relay_port=27900, off=False, lock_timeout=None, log=None, keep_roots=False, extra_env=None,
-           out_dir=None):
+           out_dir=None, stress=False):
     """Two copies at the online hub, signed in to a local account service with the social features
     on (accounts -social -test-accounts) and a local relay: copy 0 asks copy 1 to be friends, copy 1
     accepts, both write a private message and a global line (RECOMP_TEST_SOCIAL), and the chat
@@ -259,7 +313,7 @@ def social(timeout=300, relay_port=27900, off=False, lock_timeout=None, log=None
     RECOMP_SOCIAL: nothing new may show. out_dir: the chosen captures as PNG there too."""
     t0 = time.time()
     s = copies.Session("social-off" if off else "social", lock_timeout=lock_timeout, log=log, keep_roots=keep_roots).open()
-    result = {"scenario": "social", "ok": False, "params": {"off": off}}
+    result = {"scenario": "social", "ok": False, "params": {"off": off, "stress": stress}}
     try:
         h = harness()
         acc_port = relay_port + 100
@@ -280,7 +334,10 @@ def social(timeout=300, relay_port=27900, off=False, lock_timeout=None, log=None
         except ImportError:
             pass
         flags += ["-avatar-source", avatars]
-        tokens = s.accounts(acc_port, names, extra=flags)
+        tokens = s.accounts(acc_port, names + (STRESS_NAMES if stress and not off else []), extra=flags)
+        stress_sent, stress_rounds = [], [60, 120]
+        if stress and not off:
+            stress_sent.append(_stress_social(acc_port, tokens, names, 0))
         # the relay asks the account service who writes in a room (room chat's IDENT, stage 2b)
         s.relay(relay_port, extra=["-accounts-internal", "http://127.0.0.1:%d" % (acc_port + 1)])
         watch = WATCH + ["[SOCIAL-TEST] state:", "[SOCIAL] ready", "[SOCIAL-UI] close", "[SOCIAL-UI] key=escape",
@@ -315,6 +372,9 @@ def social(timeout=300, relay_port=27900, off=False, lock_timeout=None, log=None
         stop = None
         while time.time() < deadline:
             s.poll()
+            if stress and not off and stress_rounds and s.elapsed() > stress_rounds[0]:
+                stress_rounds.pop(0)
+                stress_sent.append(_stress_social(acc_port, tokens, names, len(stress_sent)))
             cs = list(s.copies.values())
             if any(c.watch.count("[CRASH]") or c.watch.count("[WATCHDOG]") for c in cs) or any(not c.alive() for c in cs):
                 stop = "a copy crashed or exited"
@@ -395,6 +455,11 @@ def social(timeout=300, relay_port=27900, off=False, lock_timeout=None, log=None
                 "unblock": has(1, "unblocked 1") and "blocked []" in state[1],
             }
             result["state"] = {i: state[i].split("state: ", 1)[-1] for i in state}
+        if stress and not off:
+            result["stress_sent"] = stress_sent
+            checks["stress_lines_sent"] = len(stress_sent) >= 2 and all(n > 0 for n in stress_sent)
+            checks["no_caught_exception"] = not any("[SOCIAL] caught:" in t for t in texts.values())
+            checks["stress_names_shown"] = all(any("faroukleboucher69" in l for l in lines[i]) for i in lines)
         result["checks"] = checks
         # the captures: per copy and label the last one (the most filled in) and the first (a request, a
         # toast), as PNG

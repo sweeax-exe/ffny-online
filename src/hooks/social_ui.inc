@@ -2019,7 +2019,7 @@ void kb_submit()
 std::vector<std::string> suggestions()
 {
     const std::string &s = kb_text();
-    int cur = std::min(kb_cursor(), (int)s.size());
+    int cur = std::max(0, std::min(kb_cursor(), (int)s.size()));
     int a = cur;
     while (a > 0 && s[(size_t)a - 1] != ' ') a--;
     std::string part = s.substr((size_t)a, (size_t)(cur - a));
@@ -2065,7 +2065,7 @@ void apply_suggestion(const std::string &word, bool completion)
 {
     std::string &s = kb_text();
     int &cur = kb_cursor();
-    cur = std::min(cur, (int)s.size());
+    cur = std::max(0, std::min(cur, (int)s.size()));
     if (completion) {
         int a = cur;
         while (a > 0 && s[(size_t)a - 1] != ' ') a--;
@@ -3010,7 +3010,7 @@ void chat_draw(ImDrawList *dl, const Frame &f, ImVec2 display)
             if (QW.open) typed.clear();
             if (!typed.empty()) { insert_text(d, cur, typed, std::max(1, C.v.max_chars)); C.sel[C.tab] = C.tab == TAB_MESSAGES ? C.sel[C.tab] : -1; }
             if (k.bksp) erase_back(d, cur);
-            if (k.del && cur < (int)d.size()) d.erase((size_t)cur, (size_t)(utf8_next(d, cur) - cur));
+            if (k.del && cur >= 0 && cur < (int)d.size()) d.erase((size_t)cur, (size_t)(utf8_next(d, cur) - cur));
             if (k.home) cur = 0;
             if (k.end_) cur = (int)d.size();
             if (!d.empty() && (C.sel[C.tab] < 0 || C.tab == TAB_MESSAGES)) {    // the arrows move the cursor in the text

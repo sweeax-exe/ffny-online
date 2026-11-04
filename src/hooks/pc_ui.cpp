@@ -4188,10 +4188,19 @@ extern "C" void pc_ui_overlay(void *device, void *context, void *window_rtv, uns
     ImGuiIO &io = ImGui::GetIO();
     bool close_request = false;
     if (g_note.open || g_note.swallow) note_input(io);      // first: the screens under it read no input
-    if (versus) {
-        online_screen::draw_versus(ImGui::GetForegroundDrawList(), io.DisplaySize);
-    } else if (decor) {
-        online_screen::draw_decor(ImGui::GetForegroundDrawList(), io.DisplaySize);
+    if (versus || decor) {
+        // the versus card and the room's decor draw names with looks: an exception skips that frame's
+        // picture instead of ending the game (online_screen::draw and the fight chat guard themselves)
+        try {
+            if (versus) online_screen::draw_versus(ImGui::GetForegroundDrawList(), io.DisplaySize);
+            else online_screen::draw_decor(ImGui::GetForegroundDrawList(), io.DisplaySize);
+        } catch (const std::exception &e) {
+            static int logged;
+            if (logged++ < 20) fprintf(stderr, "[SOCIAL] caught: %s (%s)\n", e.what(), versus ? "versus" : "decor");
+        } catch (...) {
+            static int logged_other;
+            if (logged_other++ < 20) fprintf(stderr, "[SOCIAL] caught: unknown exception (%s)\n", versus ? "versus" : "decor");
+        }
     } else if (g_online) {
         if (!online_screen::draw(io.DisplaySize)) close_request = true;
     } else if (g_open.load()) {

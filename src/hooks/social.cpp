@@ -24,6 +24,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <exception>
 #include <condition_variable>
 #include <deque>
 #include <functional>
@@ -752,8 +753,14 @@ DWORD WINAPI poll_thread(LPVOID)
             misses = 0;
             long long seq = atoll(key_value(out, "seq").c_str());
             bool resync = key_value(out, "resync") == "1";
-            for (auto &line : split(out, '\n'))
-                if (!line.compare(0, 3, "ev\t")) apply_event(split(line, '\t'));
+            for (auto &line : split(out, '\n')) {
+                if (line.compare(0, 3, "ev\t")) continue;
+                try {
+                    apply_event(split(line, '\t'));
+                } catch (const std::exception &e) {     // one odd line is skipped, the rest still arrive
+                    fprintf(stderr, "[SOCIAL] caught: %s (an event)\n", e.what());
+                }
+            }
             if (seq > 0) g_seq = seq;
             if (resync) {
                 fprintf(stderr, "[SOCIAL] resync: the lists again\n");
@@ -988,7 +995,9 @@ DWORD WINAPI work_thread(LPVOID)
 {
     unsigned long long next_probe = 0, last_presence = 0, last_friends = 0, last_global = 0;
     std::string presence_sent;
-    if (const char *t = getenv("RECOMP_TEST_SOCIAL")) {
+    static bool steps_read = false;     // once: guarded_thread may start this again after an exception
+    if (const char *t = steps_read ? nullptr : getenv("RECOMP_TEST_SOCIAL")) {
+        steps_read = true;
         for (auto &s : split(t, ';')) if (!s.empty()) g_test.steps.push_back(s);
     }
     while (!g_stop) {
@@ -1030,7 +1039,11 @@ DWORD WINAPI work_thread(LPVOID)
                     job = std::move(g_jobs.front());
                     g_jobs.pop_front();
                 }
-                job();
+                try {
+                    job();
+                } catch (const std::exception &e) {     // one bad answer loses that action only
+                    fprintf(stderr, "[SOCIAL] caught: %s (a queued action)\n", e.what());
+                }
                 if (g_stop) break;
             }
             if (g_resync.exchange(false)) { probe(); load_all(); last_friends = now; }
@@ -1527,15 +1540,24 @@ void load_looks()
     std::string path = "/api/social/looks?ids=", out;
     for (size_t i = 0; i < ids.size(); i++) path += (i ? "," : "") + std::to_string(ids[i]);
     J j;
-    if (http("GET", path, nullptr, out, 0, &g_work_live) != 200 || !parse_json(out, j)) return;
-    std::lock_guard<std::mutex> lk(g_mu);
-    for (auto &e : j["looks"].a) {
-        Look l = parse_look(e);
-        if (l.id > 0) g_v.looks[l.id] = l;
+    bool ok = http("GET", path, nullptr, out, 0, &g_work_live) == 200 && parse_json(out, j);
+    bool again = false;
+    {
+        std::lock_guard<std::mutex> lk(g_mu);
+        if (ok) {
+            for (auto &e : j["looks"].a) {
+                Look l = parse_look(e);
+                if (l.id > 0) g_v.looks[l.id] = l;
+            }
+            if (g_test_log) fprintf(stderr, "[SOCIAL] looks: %d asked, %d known\n", (int)ids.size(), (int)g_v.looks.size());
+            changed();
+        }
+        // more were wanted meanwhile (look_want during the request, or over 50): one more batch. queue()
+        // takes g_mu itself, so it is called after this scope; calling it here locked g_mu twice on this
+        // thread, which std::mutex answers with an exception, and the game closed (build 52, 2026-11-04).
+        again = g_look_queued;
     }
-    if (g_test_log) fprintf(stderr, "[SOCIAL] looks: %d asked, %d known\n", (int)ids.size(), (int)g_v.looks.size());
-    changed();
-    if (g_look_queued) queue(load_looks);
+    if (again) queue(load_looks);
 }
 
 void load_locker()
@@ -1681,12 +1703,31 @@ void set_mode_name(const std::string &name)
 
 using namespace social;
 
+// A C++ exception escaping a thread of the chat (a bad answer, a lock taken twice) is logged and the thread
+// started again a second later, instead of std::terminate closing the game (build 52, 2026-11-04).
+template <DWORD (WINAPI *Body)(LPVOID)>
+DWORD WINAPI guarded_thread(LPVOID arg)
+{
+    for (int restarts = 0; !g_stop; restarts++) {
+        try {
+            return Body(arg);
+        } catch (const std::exception &e) {
+            if (restarts < 20) fprintf(stderr, "[SOCIAL] caught: %s (a chat thread; it starts again)\n", e.what());
+        } catch (...) {
+            if (restarts < 20) fprintf(stderr, "[SOCIAL] caught: unknown exception (a chat thread; it starts again)\n");
+        }
+        fflush(stderr);
+        for (int i = 0; i < 10 && !g_stop; i++) Sleep(100);
+    }
+    return 0;
+}
+
 extern "C" void social_start(void)
 {
     if (env_switch() < 0 || g_started.exchange(true)) return;
-    g_threads[0] = CreateThread(nullptr, 0, work_thread, nullptr, 0, nullptr);
-    g_threads[1] = CreateThread(nullptr, 0, poll_thread, nullptr, 0, nullptr);
-    g_threads[2] = CreateThread(nullptr, 0, avatar_thread, nullptr, 0, nullptr);
+    g_threads[0] = CreateThread(nullptr, 0, guarded_thread<work_thread>, nullptr, 0, nullptr);
+    g_threads[1] = CreateThread(nullptr, 0, guarded_thread<poll_thread>, nullptr, 0, nullptr);
+    g_threads[2] = CreateThread(nullptr, 0, guarded_thread<avatar_thread>, nullptr, 0, nullptr);
     atexit(social_shutdown);
     fprintf(stderr, "[SOCIAL] started (RECOMP_SOCIAL %s)\n", env_switch() > 0 ? "on" : "unset: the service decides");
 }
