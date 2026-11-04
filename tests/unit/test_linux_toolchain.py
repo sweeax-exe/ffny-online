@@ -2,6 +2,7 @@
 when setup picks it and what the game's build is told. Synthetic files only: no compiler runs."""
 import importlib.util
 import io
+import os
 import json
 from pathlib import Path
 import re
@@ -67,11 +68,12 @@ def test_zig_is_pruned_to_linux_glibc_and_wrapped_for_glibc_2_31(tmp_path, monke
                     'lib/libc/glibc/abilists', 'lib/libc/include/generic-glibc/stdio.h',
                     'lib/libc/include/any-linux-any/linux/types.h', 'lib/libc/include/x86-linux-any/asm/x.h',
                     'lib/libc/include/x86-linux-gnu/bits/wordsize.h'}
-    assert (tools / 'zig/zig').stat().st_mode & 0o111
+    # Windows files have no execute bit; the payload is built on Linux.
+    assert os.name == 'nt' or (tools / 'zig/zig').stat().st_mode & 0o111
     assert provenance['glibc'] == '2.31' and provenance['url'] == pin['url']
     for name in ('zig-cc', 'zig-c++', 'zig-ar', 'zig-ranlib'):
         wrapper = tools / 'bin' / name
-        assert wrapper.stat().st_mode & 0o111
+        assert os.name == 'nt' or wrapper.stat().st_mode & 0o111
         text = wrapper.read_text()
         # Found next to itself wherever setup copied it, never by an absolute path.
         assert 'here=$(dirname "$(readlink -f "$0")")' in text and '"$here/../zig/zig" ' in text
