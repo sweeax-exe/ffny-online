@@ -362,7 +362,7 @@ void draw_accept(ImDrawList *dl, const Frame &f, const Pad &pad, const NetQueueE
 void draw_ranked(ImDrawList *dl, const Frame &f, const Pad &pad)
 {
     int waited = 0, searching = 0;
-    char why[96];
+    char why[160];
     int st = lobby_queue(&waited, &searching, why, sizeof(why));
     NetQueueExt q;
     bool ext = lobby_queue_ext(&q) != 0;

@@ -427,7 +427,7 @@ static struct {
     NetPlayer who[40];              /* the last PLAYERS */
     int who_count, who_online, who_rooms;
     int queue_state, queue_waited, queue_searching;     /* the ranked queue (NETQUEUE_*) */
-    char queue_text[96];
+    char queue_text[160];
     NetQueueExt queue_ext;          /* the long QUEUE's part (counts, the found set, a move) */
     int queue_accepted;             /* the answer to the found set shown: 1, 0, -1 none */
     char queue_match[7];            /* the found set it answers */
@@ -1986,6 +1986,16 @@ static void on_queue(const uint8_t *b, int len)
         if (state != NETQUEUE_ACCEPT && state != NETQUEUE_SEARCHING) N.queue_accepted = -1;
         if (state == NETQUEUE_SEARCHING) N.queue_match[0] = 0;
         snprintf(N.queue_text, sizeof(N.queue_text), "%s", say[wire]);
+        if (state == NETQUEUE_REFUSED && ext.valid && ext.why[0]) {
+            /* build 54: the server's own reason (a dodge lock, the Discord account's age, one account
+             * per PC, a ban, ranked off...) instead of the sign-in line for every refusal */
+            char why[sizeof(ext.why)];
+            snprintf(why, sizeof(why), "%s", ext.why);
+            why[0] = (char)toupper((unsigned char)why[0]);
+            snprintf(N.queue_text, sizeof(N.queue_text), "Ranked play refused: %s.", why);
+        }
+        if (state == NETQUEUE_REFUSED)
+            fprintf(stderr, "[NETPLAY] ranked queue: refused (%s)\n", ext.valid && ext.why[0] ? ext.why : "no reason given");
     }
     LeaveCriticalSection(&g_cs);
 }
@@ -3866,6 +3876,7 @@ static DWORD WINAPI ranked_thread(LPVOID param)
         rb = rollback_enabled() && (rb_server_decides() ? (N.rb_modes & NETPLAY_RB_RANKED) != 0 : rollback_opted_in());
         LeaveCriticalSection(&g_cs);
         netranked_encode_ext(b + TICKET_LEN + 1, modes, primary, rb, pings, code);
+        b[TICKET_LEN + 1 + 1] |= NETRANK_FLAG_WHY;     /* build 54: a refusal says why (QUEUE 2's reason) */
     }
     fprintf(stderr, "[NETPLAY] ranked: queueing for %s (modes %u)%s%s, pings %d/%d/%d ms\n", netranked_mode_title(primary),
             modes, code[0] ? ", set " : "", code, pings[0], pings[1], pings[2]);

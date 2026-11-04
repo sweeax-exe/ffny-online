@@ -20,6 +20,7 @@ enum { NETRANK_OPEN = 0, NETRANK_CLASSIC = 1, NETRANK_DRAFT = 2, NETRANK_MODES =
 
 #define NETRANK_EXT_LEN     14      /* what the long RANKED adds to the 25-byte one */
 #define NETRANK_CODE_LEN    6
+#define NETRANK_FLAG_WHY    2       /* RANKED flags bit 1 (build 54): this game reads QUEUE 2's reason */
 #define NETRANK_PLACEMENT   0xFF    /* RANKINFO division: still placing */
 #define NETRANK_DIVISIONS   22      /* Street Rookie III .. Def Jam Legend */
 #define NETRANK_SET_RUNNING 0xFF    /* RANKINFO winner */
@@ -46,6 +47,7 @@ typedef struct NetQueueExt {
     int opp_rating;             /* QUEUE 5: the opponent's rating */
     char code[NETRANK_CODE_LEN + 1];    /* QUEUE 6: the reservation code */
     char addr[65];              /* QUEUE 6: the host relay "host:port" */
+    char why[97];               /* QUEUE 2 (build 54, to a game that sets NETRANK_FLAG_WHY): why it was refused */
 } NetQueueExt;
 /* Returns 1 and fills out from b (len bytes), 0 when it is short or malformed (out->valid 0). */
 int netranked_decode_queue_ext(const uint8_t *b, int len, NetQueueExt *out);

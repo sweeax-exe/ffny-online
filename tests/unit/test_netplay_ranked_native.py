@@ -52,6 +52,14 @@ int main(void)
         printf("qshort|%d\n", netranked_decode_queue_ext(mv, 10, &q));
         printf("qbadlen|%d\n", netranked_decode_queue_ext(mv, (int)sizeof(mv) - 1, &q));
     }
+    {   /* QUEUE 2 with the reason (build 54): after the empty address, a length byte and the text */
+        unsigned char why[] = { 0, 0, 0, 0, 0, 0, 0xFF, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                                6, 'b', 'a', 'n', 'n', 'e', 'd' };
+        int ok = netranked_decode_queue_ext(why, (int)sizeof(why), &q), cut;
+        printf("qwhy|%d|%s|", ok, q.why);
+        cut = netranked_decode_queue_ext(why, (int)sizeof(why) - 1, &q);
+        printf("%d\n", cut);
+    }
     {   /* RANKINFO: relay draft_test's example, with and without the set */
         unsigned char b[] = { 1, 2, 0, 15, 0, 0x14, 0x07, 1, 0, 1, 0xFF, 3, 0xDC, 0x05, 0, 1, 2, 1, 0xFF };
         netranked_decode_rankinfo(b, (int)sizeof(b), &ri);
@@ -128,6 +136,8 @@ def test_queue_long_form(rows):
     assert by(rows, 'qmove') == [['1', '1', 'XMOVE1', 'na.example:27777']]
     assert by(rows, 'qshort') == [['0']]
     assert by(rows, 'qbadlen') == [['0']]
+    # build 54: a refusal's reason after the address (relay Queue.Why); cut short, the QUEUE is bad
+    assert by(rows, 'qwhy') == [['1', 'banned', '0']]
 
 
 def test_rankinfo(rows):

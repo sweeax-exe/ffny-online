@@ -195,6 +195,13 @@ relay (EU, NA, West).
   casual matches, another ranked account on the same PC within 30 days, a dodge lock) and everything
   while its switch is off; so does the relay for an account already searching from another game or
   without an account service. A client in a room gets `ERROR 9`.
+- Build 54: a game that sets `flags` bit 1 in the long `RANKED` reads the refusal's reason. Its `QUEUE` 2 is
+  the long form with, after `addr`, `why` (a length byte and at most 96 bytes of text): the service's own
+  (its 403 `{"error": why}` from the redeem: "the Discord account must be at least 30 days old", the dodge
+  lock with its minutes left, one ranked account per PC, a ban, ranked off), or the relay's (ranked off on
+  this server, already searching from another game, the set declined, a reservation that never came, the
+  sign-in not checked). The game shows "Ranked play refused: <why>." instead of the sign-in line. Without
+  the flag nothing changes on the wire.
 - Every second the relay posts its queue to the matchmaker (`POST /internal/ranked/queue`) and
   applies the answer for each player:
   - searching: `QUEUE` 1 (the long form adds the searching count per mode);

@@ -59,13 +59,25 @@ int netranked_decode_queue_ext(const uint8_t *b, int len, NetQueueExt *out)
     if (!out->code[0]) memset(out->code, 0, sizeof(out->code));
     at += NETRANK_CODE_LEN;
     alen = b[at++];
-    if (alen > 64 || at + alen != len) {
+    if (alen > 64 || at + alen > len) {
         memset(out, 0, sizeof(*out));
         out->mode = -1;
         return 0;
     }
     memcpy(out->addr, b + at, (size_t)alen);
     out->addr[alen] = 0;
+    at += alen;
+    if (at < len) {     /* build 54: a refusal's reason, a length byte and the text (printable ASCII kept) */
+        int wlen = b[at++], k, o = 0;
+        if (wlen > 96 || at + wlen != len) {
+            memset(out, 0, sizeof(*out));
+            out->mode = -1;
+            return 0;
+        }
+        for (k = 0; k < wlen; k++)
+            if (b[at + k] >= 0x20 && b[at + k] < 0x7F) out->why[o++] = (char)b[at + k];
+        out->why[o] = 0;
+    }
     out->valid = 1;
     return 1;
 }
