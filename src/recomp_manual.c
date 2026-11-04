@@ -36,6 +36,7 @@
 #include "hooks/netplay.h"
 #include "hooks/automatch.h"
 #include "hooks/options_audio.h"
+#include "hooks/custom_music.h"
 #include "hooks/rollback.h"
 #include "hooks/recorder.h"
 #include "hooks/input_latency.h"
@@ -415,7 +416,12 @@ void sub_001BAA00_enter(void) { defjam_test_input(MEM32(g_esp + 4)); netplay_on_
  * update, so its entry is the clean point between two updates: save, load and re-run there.
  * The audio subsystem's start-up brackets the memory the sound engine and its mixer thread
  * own, which a load must leave alone (sub_00012CC0, the registry store, follows it). */
-void sub_0002C530_enter(void) { netplay_on_update(); }
+void sub_0002C530_enter(void)
+{
+    netplay_on_update();
+    /* Custom music (custom_music.h): silences or restores the game's own music at this clean point. */
+    custom_music_on_update(netplay_rerunning(), netplay_in_fight());
+}
 void sub_0003C6E0_enter(void) { rollback_audio_init_begin(); }
 void sub_00012CC0_enter(void) { rollback_audio_init_end(); }
 /* EAGL's DynamicLoader::Resolve: a model, weapon or render object is linked in (rollback.c logs it in fights). */
@@ -432,9 +438,9 @@ static void music_trace(const char *what)
         fprintf(stderr, "[MUSIC] %s (%sfrom %08X)\n", what, r ? "RE-RUN STEP, " : "", MEM32(g_esp));
     }
 }
-void sub_0003BE50_enter(void) { music_trace("the director rebuilds the stream (sub_0003BE50)"); }
-void sub_0001D5B0_enter(void) { music_trace("AEMS stream open (sub_0001D5B0)"); }
-void sub_0001D7C0_enter(void) { music_trace("AEMS stream stop (sub_0001D7C0)"); }
+void sub_0003BE50_enter(void) { music_trace("the director rebuilds the stream (sub_0003BE50)"); custom_music_track_change(netplay_rerunning()); }
+void sub_0001D5B0_enter(void) { music_trace("AEMS stream open (sub_0001D5B0)"); custom_music_stream_open(netplay_rerunning()); }
+void sub_0001D7C0_enter(void) { music_trace("AEMS stream stop (sub_0001D7C0)"); custom_music_stream_stop(netplay_rerunning()); }
 void sub_001E8600_enter(void) { music_trace("a stream ring flushed (sub_001E8600)"); }
 
 

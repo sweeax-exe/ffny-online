@@ -49,6 +49,7 @@ static const char *const k_filter[] = { "smooth", "sharp", NULL };
 static const char *const k_aa[] = { "off", "on", NULL };
 static const char *const k_anisotropy[] = { "off", "2x", "4x", "8x", "16x", NULL };
 static const char *const k_voice[] = { "off", "push_to_talk", "open", NULL };
+static const char *const k_music_mode[] = { "auto", "mine", "mix", "original", NULL };
 static const char *const k_voice_pad[] = { "off", "back", "left_stick", "right_stick", "dpad_up", "dpad_down", NULL };
 static const char *const k_ws_hud[] = { "auto", "edges", "centered", NULL };
 static const char *const k_ws_cutscenes[] = { "authored", "fill", NULL };
@@ -173,6 +174,12 @@ static RecompSetting g_display_settings[] = {
     { "display", "crowd_near", RECOMP_SETTING_ENUM, 0, 0, 0, k_crowd_near, "RECOMP_CROWD_NEAR", 0,
       "Spectators close to the camera: fade (the game's own, they stay faintly see-through) or hide (not drawn "
       "until the camera moves away). Only the picture changes; online matches are unaffected." },
+    { "music", "mode", RECOMP_SETTING_ENUM, 0, 0, 0, k_music_mode, "RECOMP_MUSIC_MODE", 0,
+      "Your own songs (the music folder in the data folder, or add them in the launcher's Music): mine (only "
+      "yours), mix (yours between the game's own tracks), original (the game's soundtrack only) or auto (mix "
+      "when there are songs). Only your PC hears it; online matches are unaffected." },
+    { "music", "shuffle", RECOMP_SETTING_BOOL, 1, 0, 0, NULL, "RECOMP_MUSIC_SHUFFLE", 0,
+      "Play your songs in a random order; off plays them by name." },
 };
 #define DISPLAY_SETTING_COUNT (sizeof(g_display_settings) / sizeof(g_display_settings[0]))
 
@@ -935,6 +942,7 @@ int pc_settings_init(void)
     /* The game starts here: its save area is in use (the launcher's Saves page will not restore or
      * import into it meanwhile), and the saves are backed up once a day (save-backups/). */
     if (have_root) saves_game_starts();
+    custom_music_game_starts(have_root ? root : NULL);    /* the player's own songs, when there are any */
     /* What the picture runs with, for bug reports: input delay and frame pacing questions start here. */
     fprintf(stderr, "[SETTINGS] display: %s %dx%d, render scale %d, vsync %s, anti-aliasing %s, anisotropy %d, "
             "sharpen %d, aspect %d, HD textures %s; voice %d\n",
