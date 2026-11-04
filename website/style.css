@@ -275,6 +275,49 @@ h1, h2, h3 {
   overflow-wrap: anywhere;
 }
 
+/* the second way in: RecompLauncher (a quieter glass button under the red one) */
+.btn-alt {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 12px;
+  padding: 13px 18px;
+  border-radius: 12px;
+  color: #fff;
+  text-decoration: none;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  transition: background 0.2s ease, border-color 0.2s ease, transform 0.15s ease;
+}
+.btn-alt:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 140, 120, 0.55);
+  transform: translateY(-1px);
+}
+.btn-alt svg { width: 26px; height: 26px; flex: none; color: var(--red); }
+.btn-alt-label {
+  font: 400 clamp(18px, 2.2vw, 21px)/1.1 var(--display);
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+.btn-alt-meta {
+  margin-top: 3px;
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.72);
+}
+.tag-new {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 2px 7px 1px;
+  border-radius: 99px;
+  font: 400 12px/1.4 var(--display);
+  letter-spacing: 0.06em;
+  vertical-align: 2px;
+  background: var(--red);
+  color: #fff;
+}
+
 .dl-more {
   list-style: none;
   margin: 14px 2px 0;
@@ -736,7 +779,7 @@ h1, h2, h3 {
 
 @media (prefers-reduced-motion: reduce) {
   .hero-bg, .hero-logo img, .hero-copy, .scroll-cue::after { animation: none; }
-  .btn-download, .card, .shot img, .btn, .tourney { transition: none; }
+  .btn-download, .btn-alt, .card, .shot img, .btn, .tourney { transition: none; }
 }
 
 /* Without backdrop-filter, give glass a darker fill so text stays readable. */
