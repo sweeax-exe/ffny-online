@@ -128,6 +128,22 @@ def check_compiler(tools, probe):
                                            check=True).stdout)), default=(0,))
     if newest > (2, 31):
         raise ValueError('The bundled compiler links newer glibc symbols than 2.31: ' + '.'.join(map(str, newest)))
+    # With Zig's runtime pulled in (a 128-bit division by a variable does), these must still be called in
+    # glibc, not in Zig's generic copies (setup/linux/glibc-symbols.h): every call goes through the PLT.
+    (probe / 'bind.c').write_text(
+        '#include <math.h>\n#include <stdlib.h>\n#include <string.h>\n'
+        'int main(int c, char **v) { char b[64]; volatile unsigned __int128 n = (unsigned)c + 1000, d = c + 6;\n'
+        '  size_t k = strlen(v[0]) % 32; memcpy(b, v[0], k); memset(b + k, 0, k);\n'
+        '  return (int)(n / d) + (int)floor(atof(v[0])) + (int)fmod(c, 3.0) + b[9]; }\n')
+    subprocess.run([tools / 'bin/zig-cc', '-O2', '-o', probe / 'bind', probe / 'bind.c', '-lm'], check=True, env=env)
+    code = subprocess.run(['objdump', '-d', '--no-show-raw-insn', probe / 'bind'], capture_output=True, text=True,
+                          check=True).stdout
+    if not re.search(r'call +[0-9a-f]+ <__udivti3>', code):
+        raise ValueError("The glibc binding probe did not pull in Zig's runtime (__udivti3)")
+    for name in ('memcpy', 'memset', 'strlen', 'floor', 'fmod'):
+        calls = re.findall(rf'(?:call|jmp) +[0-9a-f]+ <{name}(@plt)?>', code)
+        if not calls or not all(calls):
+            raise ValueError(f'The bundled compiler does not take {name} from glibc (setup/linux/glibc-symbols.h)')
 
 
 def platform_of(archive):

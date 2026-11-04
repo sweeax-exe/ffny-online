@@ -100,7 +100,7 @@ def test_the_shortcut_is_added_after_the_others_which_keep_their_bytes(tmp_path)
     assert result['appid'] == appid and steam.field(ours, 'appid') == appid and appid & 0x80000000
     assert ours['AppName'] == 'Def Jam Recompiled' and ours['Exe'] == '"%s"' % PROGRAM
     assert ours['StartDir'] == '"%s"' % PROGRAM.parent
-    assert ours['LaunchOptions'] == '--install "%s"' % INSTALL
+    assert ours['LaunchOptions'] == '--install "%s"' % INSTALL          # the launcher unless Skip launcher
     assert ours['AllowOverlay'] == 1 and ours['tags'] == {}
     grid = root / 'userdata' / str(ACCOUNT) / 'config/grid'
     assert ours['icon'] == str(grid / ('%d_icon.png' % appid))
@@ -128,6 +128,41 @@ def test_adding_again_keeps_one_shortcut_and_the_players_own_art(tmp_path):
     assert len(entries(root)) == 1
     assert hero.read_bytes() == b'my own hero' and any('your own artwork' in m for m in messages)
     assert str(hero) not in json.loads(record.read_text())['art']
+
+
+def test_adding_again_takes_the_old_play_out_of_the_shortcut_and_nothing_else(tmp_path):
+    other = other_shortcut(0x9000_0001, 'Other game', r'C:\Games\other.exe')
+    appid = steam.shortcut_appid('"%s"' % PROGRAM)
+    old = steam.shortcut_body(appid, PROGRAM, PROGRAM.parent, 'icon.png', '--play --install "%s"' % INSTALL)
+    old = old.replace(b'\x00tags\x00\x08', b'\x00tags\x00\x010\x00Fighting\x00\x08')  # the player's own tag
+    root = steam_folder(tmp_path, other, old)
+    record = tmp_path / 'steam.json'
+    assert steam.outdated(steam.fields(old))
+    messages = []
+    steam.add(root, PROGRAM, INSTALL, art(tmp_path), record, event=messages.append, running=lambda r: [])
+    bodies = entries(root)
+    assert len(bodies) == 2 and bodies[0] == other
+    assert bodies[1] == old.replace(b'--play --install', b'--install')       # only the option changed
+    assert not steam.outdated(steam.fields(bodies[1])) and any('Updated' in m for m in messages)
+    backup = root / 'userdata' / str(ACCOUNT) / 'config' / steam.BACKUP
+    assert entries_of(backup)[1] == old
+    messages.clear()
+    steam.add(root, PROGRAM, INSTALL, art(tmp_path / 'again'), record, event=messages.append, running=lambda r: [])
+    assert entries(root)[1] == bodies[1] and any('already' in m for m in messages)
+
+
+def test_status_reports_a_shortcut_that_still_skips_the_launcher(tmp_path, monkeypatch):
+    appid = steam.shortcut_appid('"%s"' % PROGRAM)
+    root = steam_folder(tmp_path, steam.shortcut_body(appid, PROGRAM, PROGRAM.parent, '', '--play --install "x"'))
+    answer = steam.status(root, PROGRAM, running=lambda r: [])
+    assert answer['added'] and answer['outdated']
+    steam.add(root, PROGRAM, INSTALL, art(tmp_path), tmp_path / 'steam.json', running=lambda r: [])
+    answer = steam.status(root, PROGRAM, running=lambda r: [])
+    assert answer['added'] and not answer['outdated']
+
+
+def entries_of(vdf):
+    return steam.split_shortcuts(Path(vdf).read_bytes())[0]
 
 
 def test_a_shortcut_steam_made_without_an_appid_is_recognised(tmp_path):

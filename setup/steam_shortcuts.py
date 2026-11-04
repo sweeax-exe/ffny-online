@@ -1,7 +1,7 @@
 """Add the app to Steam as a non-Steam game, with its library artwork (design §7; Windows and Linux).
 
 The Linux setup wizard asks the running Steam to add its launcher (engine.py add_to_steam), but that
-request cannot give the shortcut launch options, and the app's shortcut needs its installation path. So for the app,
+request cannot give the shortcut launch options, and the app's shortcut needs --install. So for the app,
 on Windows and Linux alike, this writes the shortcut into Steam's own file, as Steam ROM Manager and
 BoilR do:
 
@@ -16,6 +16,10 @@ BoilR do:
   named by it at once; an existing shortcut to the same program is kept, with its own appid.
 - The artwork rules are the Linux setup's: art the player chose is never replaced, and only files
   this placed, still unchanged, are removed. What was placed is recorded in --steam-record.
+- The shortcut opens the app as any other shortcut does: the launcher shows unless "Skip launcher"
+  is on. An earlier Add to Steam gave it --play, which always skipped the launcher; status reports
+  such a shortcut as outdated, and Add takes --play out of it (the one-time fix; the owner's choice,
+  2026-11-03).
 
 DEFJAM_STEAM_ROOT stands in for Steam's folder in tests, so a test never reads or writes the
 player's own Steam, and only a steam.exe (Linux: ubuntu12_32/steam) in that folder counts as running.
@@ -161,6 +165,33 @@ def entry_appid(values):
 def runs(values, program):
     exe = field(values, 'exe', '')
     return isinstance(exe, str) and bool(exe.strip()) and same_path(exe.strip().strip('"'), program)
+
+
+def outdated(values):
+    """Whether a shortcut to the app still has the --play an earlier Add to Steam gave it."""
+    options = field(values, 'LaunchOptions', '')
+    return isinstance(options, str) and '--play' in options.split()
+
+
+def without_play(body):
+    """The shortcut's map with --play taken out of its launch options; every other byte as it was."""
+    pos = 0
+    while pos < len(body) and body[pos] != 8:
+        kind = body[pos]
+        end = body.index(b'\0', pos + 1)
+        key = body[pos + 1:end].decode('utf-8', 'replace')
+        if kind == 0:
+            _, stop = _node(body, end + 1)
+        elif kind == 1:
+            stop = body.index(b'\0', end + 1) + 1
+            if key.lower() == 'launchoptions':
+                options = body[end + 1:stop - 1].decode('utf-8', 'replace')
+                kept = ' '.join(t for t in options.split(' ') if t and t != '--play')
+                return body[:end + 1] + kept.encode('utf-8') + b'\0' + body[stop:]
+        else:
+            stop = end + 1 + {2: 4, 3: 4, 7: 8}[kind]
+        pos = stop
+    return body
 
 
 # ---------------------------------------------------------------- Steam and its accounts
@@ -435,7 +466,7 @@ def read_shortcuts(vdf):
 
 def status(root, program, running=steam_processes):
     """What the app's Steam section shows."""
-    result = {'steam': '', 'user': '', 'running': False, 'added': False}
+    result = {'steam': '', 'user': '', 'running': False, 'added': False, 'outdated': False}
     if root is None:
         result['message'] = 'Steam is not installed on this computer'
         return result
@@ -444,7 +475,9 @@ def status(root, program, running=steam_processes):
     try:
         folder, result['user'] = steam_user(root)
         bodies, _ = read_shortcuts(folder / 'config/shortcuts.vdf')
-        result['added'] = bool(program) and any(runs(fields(b), program) for b in bodies)
+        ours = [fields(b) for b in bodies if program and runs(fields(b), program)]
+        result['added'] = bool(ours)
+        result['outdated'] = any(outdated(v) for v in ours)
     except SteamError as ex:
         result['message'] = str(ex)
     return result
@@ -475,7 +508,8 @@ def steam_closed(root, close, event, running, closer, starter):
 
 def add(root, program, install, art_folders, record, close=False, event=print,
         running=steam_processes, closer=close_steam, starter=start_steam):
-    """Add the app to the account's Steam library, opening the app (respects the launcher startup preference), with its artwork."""
+    """Add the app to the account's Steam library, with its artwork. A shortcut to it that is
+    already there is kept, less the --play an earlier Add gave it."""
     if root is None:
         raise SteamError('Steam is not installed on this computer')
     program = Path(program)
@@ -489,12 +523,17 @@ def add(root, program, install, art_folders, record, close=False, event=print,
             appid = shortcut_appid('"%s"' % program)
             grid = folder / 'config/grid'
             icon = str(grid / (str(appid) + '_icon.png')) if art_origin(art_folders, ART['_icon']) else str(program)
-            options = ('--install "%s"' % install if install else '')
+            options = '--install "%s"' % install if install else ''
             bodies.append(shortcut_body(appid, program, program.parent, icon, options))
             if vdf.is_file():
                 shutil.copyfile(vdf, vdf.with_name(BACKUP))
             write_atomically(vdf, join_shortcuts(bodies, tail))
             event('Added Def Jam Recompiled to ' + user + "'s Steam library")
+        elif any(outdated(fields(b)) for b in bodies if runs(fields(b), program)):
+            bodies = [without_play(b) if runs(fields(b), program) else b for b in bodies]
+            shutil.copyfile(vdf, vdf.with_name(BACKUP))
+            write_atomically(vdf, join_shortcuts(bodies, tail))
+            event('Updated the Steam shortcut: it opens the launcher, unless Skip launcher is on')
         else:
             event('Def Jam Recompiled is already in ' + user + "'s Steam library")
         old = read_record(record)

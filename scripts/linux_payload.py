@@ -120,7 +120,11 @@ ZIG_HEADERS = ('generic-glibc', 'x86-linux-gnu', 'x86-linux-any', 'any-linux-any
 # What CMake is given as the compiler, archiver and indexer. -fno-sanitize=all: zig cc turns the
 # undefined-behaviour sanitizer on in unoptimized builds, and the lifted code relies on behaviour it
 # would trap (the game is compiled with -fno-strict-aliasing -fwrapv -ffp-contract=off).
-WRAPPERS = {'zig-cc': 'cc {target} -fno-sanitize=all', 'zig-c++': 'c++ {target} -fno-sanitize=all',
+# The compilers include setup/linux/glibc-symbols.h in everything they compile: the functions Zig's
+# own runtime also defines (memcpy, floor, ...) then come from glibc, not from Zig's generic copies.
+GLIBC_SYMBOLS = ROOT / 'setup/linux/glibc-symbols.h'
+WRAPPERS = {'zig-cc': 'cc {target} -fno-sanitize=all -include "$here/../include/glibc-symbols.h"',
+            'zig-c++': 'c++ {target} -fno-sanitize=all -include "$here/../include/glibc-symbols.h"',
             'zig-ar': 'ar', 'zig-ranlib': 'ranlib'}
 
 
@@ -158,12 +162,14 @@ def stage_zig(tools, cache, pin, glibc):
             shutil.rmtree(folder)
     flatten_links(zig)
     (tools / 'bin').mkdir(parents=True, exist_ok=True)
+    (tools / 'include').mkdir(exist_ok=True)
+    shutil.copyfile(GLIBC_SYMBOLS, tools / 'include/glibc-symbols.h')
     target = f'-target x86_64-linux-gnu.{glibc}'
     for name, arguments in WRAPPERS.items():
         wrapper = tools / 'bin' / name
         wrapper.write_text('#!/bin/sh\n# The game\'s build toolchain (setup/dependencies-linux.json, toolchain).\n'
-                           'exec "$(dirname "$(readlink -f "$0")")/../zig/zig" ' + arguments.format(target=target)
-                           + ' "$@"\n', encoding='utf-8')
+                           'here=$(dirname "$(readlink -f "$0")")\n'
+                           'exec "$here/../zig/zig" ' + arguments.format(target=target) + ' "$@"\n', encoding='utf-8')
         wrapper.chmod(0o755)
     return {'url': pin['url'], 'sha256': pin['sha256'], 'pruned': list(ZIG_PRUNE), 'glibc': glibc}
 
@@ -205,7 +211,8 @@ def stage_toolchain(staging, cache):
     provenance.append(git_checkout(toolchain['vulkan_headers'], sources / 'vulkan-headers'))
     # The libraries follow from these pins, the image and the script alone, so one build serves every payload.
     key = hashlib.sha256(json.dumps([toolchain, version, sha, pins()['app_build'],
-                                     (ROOT / 'scripts/build-toolchain-linux.sh').read_text(encoding='utf-8')],
+                                     (ROOT / 'scripts/build-toolchain-linux.sh').read_text(encoding='utf-8'),
+                                     GLIBC_SYMBOLS.read_text(encoding='utf-8')],
                                     sort_keys=True).encode()).hexdigest()[:16]
     built = cache / ('toolchain-deps-' + key)
     if not (built / 'lib/libshaderc_combined.a').is_file():
