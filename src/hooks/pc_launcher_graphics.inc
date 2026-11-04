@@ -203,7 +203,7 @@ static void graphics_dialog(ImVec2 o, float w, float h, float s)
         float foot = 64 * s;
         std::string text = v.busy ? std::string() : v.message;
         ImVec4 c = v.tone == 1 ? k_green : v.tone == 2 ? k_gold : ImVec4(1, 1, 1, 0.75f);
-        if (text.empty() && v.restart_needed) { text = "Applies the next time you start FFNY Online."; c = k_gold; }
+        if (text.empty() && v.restart_needed) { text = "Close and reopen the launcher to apply it."; c = k_gold; }
         if (!text.empty()) {
             float wrap = size.x - 60 * s - 170 * s;
             dl->PushClipRect(a, ImVec2(b.x - 170 * s, b.y), true);
