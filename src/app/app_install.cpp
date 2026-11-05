@@ -218,8 +218,16 @@ std::string place_into(const fs::path &folder, bool program_too)
     if (program_too) steps.push_back({program.string() + ".new", program});
     steps.push_back({folder / "payload.new", payload});
     for (const auto &step : steps) {
-        fs::rename(step.first, step.second, ec);
+        // Antivirus scanners open freshly unpacked files for a moment, and Windows refuses to rename
+        // a folder while any file in it is open ("Access is denied"): retry for a few seconds.
+        for (int attempt = 0; attempt < 40; ++attempt) {
+            fs::rename(step.first, step.second, ec);
+            if (!ec) break;
+            Sleep(250);
+        }
         if (ec) {
+            fprintf(stderr, "[APP] could not rename %s to %s: %s\n", step.first.string().c_str(),
+                    step.second.string().c_str(), ec.message().c_str());
             std::error_code back;
             for (auto it = done.rbegin(); it != done.rend(); ++it) fs::rename(it->second, it->first, back);
             fs::remove_all(folder / "payload.new", back);
