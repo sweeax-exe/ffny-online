@@ -41,12 +41,12 @@ v0.13.0 until 1.0 ships, so its buttons offer the old setup. To see the app down
 | S1 | Replace the hero gameplay clip | **owner**: clips | waiting on clips |
 | S2 | New features heading | **owner**: pick | waiting on pick |
 | S3 | Feature cards: order and wording | | done, see question below |
-| S4 | New captures: Menu/Launcher, Mod launcher, other old-UI pictures | **owner**: approval | open |
+| S4 | New captures: Menu/Launcher, Mod launcher, other old-UI pictures | **owner**: approval | captured, awaiting approval |
 | S5 | Install guide for the app | | open |
 | S6 | Owner confirmations | **owner**: answers | open |
 | S7 | Vlad's review of the remaining page sections | **owner**: notes | waiting on notes |
 | S8 | README pass for 1.0 | **owner**: review | open |
-| S10 | Four new before/after sliders | **owner**: answers, approval | open |
+| S10 | Four new before/after sliders | **owner**: answers, approval | 3 of 4 captured, awaiting approval; slider code not started |
 | S11 | Three new Roadmap entries | | open |
 | S9 | Go-live | **owner**: Pages setting | open, last |
 
@@ -154,6 +154,21 @@ Not started; Vlad wants to review its wording. Known issues:
   "proposals/in progress", and "texture packs work today" leaves out language mods. Add the S11 entries.
 
 ### S10. Four new before/after sliders
+
+**Progress (2026-11-05, Vlad's Mac):** the fight, Main Menu and Map Select pairs and all the S4 UI screens are captured from the
+candidate build `6396ac3`. They exist only on that Mac, under the ignored `logs/site-captures/` in Vlad's
+`feat/project-site` worktree, and nothing is pinned until he approves. The cutscene pair was not requested yet.
+Do not recapture these unless Vlad asks. How they were made:
+
+- **Before:** `RECOMP_ASPECT=4:3`, `RECOMP_RENDER_SCALE=1`, no packs, `RECOMP_TEXTURE_MIPS=1`.
+- **After:** `RECOMP_ASPECT=16:9`, `RECOMP_RENDER_SCALE=2`, `RECOMP_MSAA=4x`, `RECOMP_ANISOTROPY=16x`,
+  `RECOMP_TEXTURE_MIPS=1`, `RECOMP_TRANS_SHOT_NATIVE=1`, `RECOMP_TEXTURE_CACHE_MB=4096`, with Upscaled Original
+  Textures, HD Widescreen Menus 1.4.0 and HD Fighters 1.0.0. The colour tint and film scratches stay at their defaults.
+- **Fight:** harness Battle route, seed `RECOMP_TEST_RNG_SEED=20261105`, step-timed input, frame by
+  `RECOMP_TEST_SHOT_STEPS` (step 900). `RECOMP_FE_INJECT` picks them after the venue choice:
+  `game.choosevenue#1=>Controller.ControllerSetup(0,0,2,0);Controller.ControllerSetup(1,-1,7,1);Game.ChooseVenue(2)`.
+- **Map Select:** the Battle venue map (`battle/chsVenue`). **Main Menu:** idle, 14 s after the menu music starts.
+- **App screens:** `defjam_app` with `RECOMP_LAUNCHER_SCRIPT` and a throwaway `HOME`. Overlay: `RECOMP_WINDOW_SHOT`.
 
 Add four sliders to the Screens section. In each one:
 
