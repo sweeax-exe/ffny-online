@@ -4,6 +4,8 @@
  */
 #define _CRT_SECURE_NO_WARNINGS
 #include "widescreen.h"
+#include "story_map.h"
+#include "cheats.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -89,6 +91,7 @@ float ws_init(int window_w, int window_h, int fullscreen)
     if (a <= WS_DESIGN_ASPECT)
         a = 0.0f;
     g_aspect = a;
+    ws_story_map_init();
     g_k = a > 0.0f ? WS_DESIGN_ASPECT / a : 1.0f;
     g_hud = recomp_settings_get("display", "widescreen_hud", 0);
     if (g_hud == WS_HUD_AUTO)
@@ -141,6 +144,7 @@ float ws_init(int window_w, int window_h, int fullscreen)
 #define WS_CHYRON_Y 385
 
 static int g_apt_feloader;               /* the loader is resolving feloader */
+static int g_apt_story_map;
 
 static int guest_name_is(uint32_t s, const char *want)
 {
@@ -161,6 +165,7 @@ static int guest_name_is(uint32_t s, const char *want)
 void ws_apt_load_begin(uint32_t name)
 {
     g_apt_feloader = g_k < 1.0f && name && guest_name_is(name, "feloader");
+    g_apt_story_map = g_k < 1.0f && cheats_in_story() && name && guest_name_is(name, "map");
 }
 
 void ws_apt_load_done(uint32_t apt)
@@ -168,6 +173,13 @@ void ws_apt_load_done(uint32_t apt)
     static const char magic[] = "Apt Data";
     uint32_t h = 0x811C9DC5u, i;
     int y;
+    if (g_apt_story_map) {
+        int tagged;
+        g_apt_story_map = 0;
+        tagged = ws_story_map_tag_text(apt ? (uint8_t *)XBOX_PTR(apt) : NULL, 0xB24);
+        fprintf(stderr, "[WS] Story map heading: %s (map.apt %08X)\n",
+                tagged < 0 ? "unknown layout; unchanged" : tagged ? "extended clip tagged" : "already tagged", apt);
+    }
     if (!g_apt_feloader)
         return;
     g_apt_feloader = 0;

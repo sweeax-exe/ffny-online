@@ -375,6 +375,18 @@ ROUTES = {
         "shots": "@getscreeninfo(story/gym,13,23",
         "story": True,
     },
+    "story-map-shops": {
+        "help": "Story map -> Shop District -> clothing and gym pins (widescreen border check, #162)",
+        "stages": [
+            "getscreeninfo(intmain/mainmenu=a@6",
+            "getscreeninfo(options/userid=down@4;down@6;a@9",
+            "getscreeninfo(story/crib=down@4;a@6;a@10;a@16;down@24",
+        ],
+        "until": "crib.entermap(", "after": 18, "secs": 300,
+        "shots": "@getscreeninfo(story/crib,13,19,26",
+        "env": {"RECOMP_TRANS_SHOT_NATIVE": "1"},
+        "story": True,
+    },
     "unlock": {
         "help": "Unlock Rewards -> Unlock Fighters, moving the selector around the grid (nothing is bought)",
         "stages": [
