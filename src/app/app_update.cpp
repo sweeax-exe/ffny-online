@@ -305,8 +305,15 @@ void swap()
         {g_staged / "payload.sha256", home / "payload.sha256.new"},
     };
     for (const auto &step : steps) {
-        fs::rename(step.first, step.second, ec);
+        // An antivirus scan of the freshly staged files can refuse a rename for a moment: retry.
+        for (int attempt = 0; attempt < 40; ++attempt) {
+            fs::rename(step.first, step.second, ec);
+            if (!ec) break;
+            Sleep(250);
+        }
         if (ec) {
+            fprintf(stderr, "[APP] could not rename %s to %s: %s\n", step.first.string().c_str(),
+                    step.second.string().c_str(), ec.message().c_str());
             undo();
             g_error = "The new app could not be put in place (" + ec.message() + "). This version is still installed.";
             g_stage = Stage::Failed;
@@ -547,8 +554,11 @@ void pc_app_home_notice()
         ui_target("home.update");
         ImGui::SameLine();
         if (ImGui::SmallButton("What's new")) pcui::open_path(g_url);
-    } else if (in.installed && newer(payload_version(), in.version)) {
-        ImGui::TextWrapped("Play starts v%s. Finish updating to v%s when ready.", in.version.c_str(), payload_version().c_str());
+    } else if (in.installed && game_behind(in)) {
+        bool other = other_build(in);
+        ImGui::TextWrapped("Play starts %s. Finish updating to %s when ready.",
+                           build_label(in.version, other ? in.source_commit : "").c_str(),
+                           build_label(payload_version(), other ? payload_commit() : "").c_str());
         if (ImGui::SmallButton("Finish game update")) start_update_build();
         ui_target("home.build-update");
     }

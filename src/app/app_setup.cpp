@@ -523,11 +523,22 @@ void adopt_found()
     if (!loaded) {
         g_form_error = why;
         g_screen = Screen::Maintenance;
-    } else if (app::newer(app::payload_version(), app::install().version)) {
+    } else if (app::game_behind(app::install())) {
         start_update_build();
     } else {
         g_screen = Screen::None;
     }
+}
+
+// The installed game and what this app builds: a build is named only when the versions match.
+std::string installed_label()
+{
+    const Install &in = app::install();
+    return app::build_label(in.version, app::other_build(in) ? in.source_commit : "");
+}
+std::string target_label()
+{
+    return app::build_label(app::payload_version(), app::other_build(app::install()) ? app::payload_commit() : "");
 }
 
 void first_run_page(float width, float height, UiResult *result)
@@ -610,14 +621,14 @@ void maintenance_page(float width, float height, UiResult *result)
     if (!g_form_error.empty()) ImGui::TextColored(ImVec4(1, 0.45f, 0.4f, 1), "%s", g_form_error.c_str());
     // An older game: Repair and Clean Rebuild work on the version this app builds, so the update
     // comes first (setup refuses them across versions).
-    bool older = in.installed && app::newer(app::payload_version(), in.version);
+    bool older = in.installed && app::game_behind(in);
     if (older) {
         ImGui::SeparatorText("Update");
-        ImGui::TextWrapped("Your game is v%s; this app builds v%s. Update builds the game again from your dump "
+        ImGui::TextWrapped("Your game is %s; this app builds %s. Update builds the game again from your dump "
                            "with the new version, in about three to ten minutes. Your saves, settings and mods "
-                           "are kept, and v%s stays playable until the new build is ready.",
-                           in.version.c_str(), app::payload_version().c_str(), in.version.c_str());
-        if (ImGui::Button(("Update to v" + app::payload_version()).c_str())) start_update_build();
+                           "are kept, and %s stays playable until the new build is ready.",
+                           installed_label().c_str(), target_label().c_str(), installed_label().c_str());
+        if (ImGui::Button(("Update to " + target_label()).c_str())) start_update_build();
         ui_target("setup.update");
     }
     ImGui::BeginDisabled(older);
@@ -663,12 +674,12 @@ void update_ready_page(float width, float height)
     const Install &in = app::install();
     page_begin(width, height, "FINISH YOUR UPDATE");
     if (app::just_updated())
-        ImGui::TextWrapped("The app is updated to v%s. The game update is still to come.", app::payload_version().c_str());
-    ImGui::TextWrapped("Your game is v%s. Update it to v%s now: it is built again from your dump with the new "
+        ImGui::TextWrapped("The app is updated to %s. The game update is still to come.", target_label().c_str());
+    ImGui::TextWrapped("Your game is %s. Update it to %s now: it is built again from your dump with the new "
                        "version, in about three to ten minutes. Your saves, settings and mods are kept.",
-                       in.version.c_str(), app::payload_version().c_str());
-    ImGui::TextWrapped("Later opens the launcher, where Play starts v%s and Check for updates offers the update "
-                       "again.", in.version.c_str());
+                       installed_label().c_str(), target_label().c_str());
+    ImGui::TextWrapped("Later opens the launcher, where Play starts %s and Check for updates offers the update "
+                       "again.", installed_label().c_str());
     tools_row();
     ImGui::Spacing();
     if (!g_form_error.empty()) ImGui::TextColored(ImVec4(1, 0.45f, 0.4f, 1), "%s", g_form_error.c_str());
@@ -1124,8 +1135,8 @@ bool screen_draw(float width, float height, UiResult *result)
         if (!in.installed) {
             g_screen = in.problem.empty() ? Screen::FirstRun : Screen::Maintenance;
             g_form_error = in.problem;
-        } else if (app::newer(app::payload_version(), in.version)) {
-            // An older game than this app builds (after the app's own update, or the first time a
+        } else if (app::game_behind(in)) {
+            // An older game than this app builds, or another build of the same version (after the app's own update, or the first time a
             // newer app opens an older setup's installation): offer the update before the launcher.
             if (app::just_updated()) start_update_build(); // consent covered both phases before app restart
             else g_screen = Screen::UpdateReady;
@@ -1171,7 +1182,12 @@ void start_update_build()
 {
     const Install &in = app::install();
     g_form_error.clear();
-    if (!start("update", "Updating to v" + app::payload_version(), in.root.string(), in.data.string(), "", g_hd))
+    // Setup's Clean Update needs a newer version; another build of the same one is a Clean Rebuild
+    // from this app's payload (setup/releases.py policy).
+    std::string title = "Updating to " + target_label();
+    bool started = app::other_build(in) ? start("rebuild", title, in.root.string(), in.data.string(), "", g_hd)
+                                        : start("update", title, in.root.string(), in.data.string(), "", g_hd);
+    if (!started)
         g_screen = Screen::Maintenance;                     // which shows why
 }
 

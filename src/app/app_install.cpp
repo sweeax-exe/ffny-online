@@ -218,8 +218,16 @@ std::string place_into(const fs::path &folder, bool program_too)
     if (program_too) steps.push_back({program.string() + ".new", program});
     steps.push_back({folder / "payload.new", payload});
     for (const auto &step : steps) {
-        fs::rename(step.first, step.second, ec);
+        // Antivirus scanners open freshly unpacked files for a moment, and Windows refuses to rename
+        // a folder while any file in it is open ("Access is denied"): retry for a few seconds.
+        for (int attempt = 0; attempt < 40; ++attempt) {
+            fs::rename(step.first, step.second, ec);
+            if (!ec) break;
+            Sleep(250);
+        }
         if (ec) {
+            fprintf(stderr, "[APP] could not rename %s to %s: %s\n", step.first.string().c_str(),
+                    step.second.string().c_str(), ec.message().c_str());
             std::error_code back;
             for (auto it = done.rbegin(); it != done.rend(); ++it) fs::rename(it->second, it->first, back);
             fs::remove_all(folder / "payload.new", back);
@@ -318,15 +326,23 @@ Placement place_app(std::string *error)
         return Placement::NeedsInstall;
     }
     // A newer release opened from wherever it was downloaded updates the installed copy first.
-    std::ifstream manifest(h / "payload/manifest.json", std::ios::binary);
     std::stringstream text;
-    text << manifest.rdbuf();
+    {
+        // Closed before the payload folder is renamed: Windows refuses to rename a folder while a
+        // file in it is open ("Access is denied").
+        std::ifstream manifest(h / "payload/manifest.json", std::ios::binary);
+        text << manifest.rdbuf();
+    }
     std::string s = text.str(), theirs;
     size_t at = s.find("\"version\"");
     if (at != std::string::npos && (at = s.find('"', s.find(':', at) + 1)) != std::string::npos)
         theirs = s.substr(at + 1, s.find('"', at + 1) - at - 1);
-    if (newer(DEFJAM_VERSION, theirs)) {
-        fprintf(stderr, "[APP] updating the installed app in %s from v%s to v%s\n", h.string().c_str(), theirs.c_str(), DEFJAM_VERSION);
+    // Another build of the same version (the next beta, or the release after its betas) replaces it
+    // too: payload.sha256 records which payload the installed copy carries.
+    bool other = theirs == DEFJAM_VERSION && read_first_line(h / "payload.sha256") != k_payload_sha256;
+    if (newer(DEFJAM_VERSION, theirs) || other) {
+        fprintf(stderr, "[APP] updating the installed app in %s from v%s to v%s%s\n", h.string().c_str(), theirs.c_str(),
+                DEFJAM_VERSION, other ? " (another build of the same version)" : "");
         std::string why = place_into(h, true);
         if (!why.empty()) {
             g_error = "Could not update the installed app: " + why + " Retry installation below. The existing copy was kept.";

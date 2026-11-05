@@ -20,6 +20,7 @@ struct Install
 {
     std::filesystem::path root, data, source, executable;
     std::string version;
+    std::string source_commit;  // the commit it was built from ("" in an older setup's receipt)
     bool installed = false;     // a completed, playable installation
     std::string problem;        // why an installation that is there cannot be played (Repair fixes it)
 };
@@ -82,6 +83,16 @@ bool just_updated();
 
 // The setup payload's version: what this app builds ("" without a payload).
 std::string payload_version();
+// The commit the setup payload builds ("" without a payload). Betas share a version, so this tells
+// one build of 1.0.0 from another.
+std::string payload_commit();
+// The installed game is the version this app builds but from another commit: a beta moving to the
+// next beta or to the release. Clean Rebuild builds it from this app's payload.
+bool other_build(const Install &in);
+// The installed game is behind this app: an older version, or another build of the same version.
+bool game_behind(const Install &in);
+// "v1.0.0", or "v1.0.0 (build cd2a298)" when `commit` is given.
+std::string build_label(const std::string &version, const std::string &commit = "");
 
 // The top-level values of a JSON object: strings decoded, anything else as its JSON text.
 std::map<std::string, std::string> json_values(const std::string &text);

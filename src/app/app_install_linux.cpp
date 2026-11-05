@@ -89,7 +89,8 @@ const char *k_file = "DefJamRecompiled.AppImage";
 fs::path default_folder() { return os::user_base() / "Applications"; }
 fs::path location_file() { return state_dir() / "location.json"; }
 
-// {"app": "<home file>", "version": "<its version>"}: written here only.
+// {"app": "<home file>", "version": "<its version>", "commit": "<its payload's commit>"}: written here
+// only. A record without "commit" (1.0.0-beta.1 and older) counts as another build.
 std::map<std::string, std::string> recorded()
 {
     std::ifstream in(location_file(), std::ios::binary);
@@ -98,7 +99,7 @@ std::map<std::string, std::string> recorded()
     return json_values(text.str());
 }
 
-bool record_home(const fs::path &file, const std::string &version)
+bool record_home(const fs::path &file, const std::string &version, const std::string &commit = payload_commit())
 {
     std::error_code ec;
     fs::create_directories(location_file().parent_path(), ec);
@@ -110,7 +111,8 @@ bool record_home(const fs::path &file, const std::string &version)
     fs::path pending = location_file().string() + ".pending";
     {
         std::ofstream out(pending, std::ios::binary);
-        out << "{\"app\": \"" << escaped << "\", \"version\": \"" << version << "\"}\n";
+        out << "{\"app\": \"" << escaped << "\", \"version\": \"" << version << "\", \"commit\": \"" << commit
+            << "\"}\n";
         if (!out) return false;
     }
     fs::rename(pending, location_file(), ec);
@@ -217,7 +219,8 @@ Placement place_app(std::string *error)
     fs::path home = home_file();
     std::error_code ec;
     if (fs::equivalent(me, home, ec)) {
-        if (recorded()["version"] != payload_version() || recorded()["app"] != home.string())
+        if (recorded()["version"] != payload_version() || recorded()["commit"] != payload_commit() ||
+            recorded()["app"] != home.string())
             record_home(home, payload_version());
         return Placement::Installed;
     }
@@ -226,11 +229,14 @@ Placement place_app(std::string *error)
         g_page = true;
         return Placement::NeedsInstall;
     }
-    // A newer release opened from wherever it was downloaded updates the installed copy first.
-    std::string theirs = recorded()["version"];
-    if (newer(payload_version(), theirs)) {
-        fprintf(stderr, "[APP] updating the installed app %s from v%s to v%s\n", home.string().c_str(), theirs.c_str(),
-                payload_version().c_str());
+    // A newer release opened from wherever it was downloaded updates the installed copy first, and so
+    // does another build of the same version (the next beta, or the release after its betas).
+    std::string theirs = recorded()["version"], their_commit = recorded()["commit"];
+    bool other = !payload_commit().empty() && theirs == payload_version() && their_commit != payload_commit();
+    if (newer(payload_version(), theirs) || other) {
+        fprintf(stderr, "[APP] updating the installed app %s from %s to %s\n", home.string().c_str(),
+                build_label(theirs, other ? their_commit : "").c_str(),
+                build_label(payload_version(), other ? payload_commit() : "").c_str());
         std::string why = place_into(home);
         if (why.empty()) record_home(home, payload_version());
         else {
@@ -254,7 +260,8 @@ bool ensure_payload(std::string *error)
 }
 
 // The installed app has been replaced by its own update (app_update.cpp): record the new version.
-void note_updated_home(const fs::path &file, const std::string &version) { record_home(file, version); }
+// The new copy records its own commit when it first runs.
+void note_updated_home(const fs::path &file, const std::string &version) { record_home(file, version, ""); }
 
 bool install_screen_draw(float width, float height, UiResult *result)
 {
