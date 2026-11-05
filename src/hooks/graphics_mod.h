@@ -1,6 +1,13 @@
 // "Enhanced graphics (community)": the launcher installs, switches and removes the community ReShade /
 // DLSS pack (presets by Marleymarletto) in the game's bin folder, next to defjam_recomp.exe. The game is
-// never changed; the pack loads through its dxgi.dll proxy at the next start of the program.
+// never changed; the pack loads through its dxgi.dll proxy, in the game's process only.
+//
+// The launcher and the game are the same exe and dxgi.dll beside it loads at process start, so the proxy is
+// kept as dxgi.ffny-mod. Play (start_game_process, pc_settings.c) renames it to dxgi.dll, starts the game's
+// process and renames it back as soon as that process has it loaded, or has ended. An older install's
+// dxgi.dll is renamed at the next start. Start guard: a marker is written before the start with the mod and
+// cleared when the game has run for a minute (or closed normally); a marker found later means the mod did
+// not get through, and the next Play is without it, that one time.
 //
 // The pack comes from the update server: graphics.json (made by scripts/make-graphics-pack.py, signed
 // like latest.json, update_sig.h) names a shared base archive and one small archive per preset with their
@@ -55,6 +62,21 @@ void finish_pending(const fs::path &data);
 struct Record { bool present = false; std::string version, preset; fs::path bin; std::vector<std::string> files, dirs; };
 Record read_record(const fs::path &data);
 
+// ---- the proxy's two names and the start guard ----
+// Parks a dxgi.dll the record owns (an older install, or a start that stopped half-way). A dxgi.dll beside the
+// parked proxy is not ours and stays. False when it could not be renamed now.
+bool tidy_proxy(const fs::path &data);
+// Before the game's process starts: true when the proxy is in place as dxgi.dll and the marker written. False:
+// start without the mod (off, not installed, a foreign dxgi.dll, or the guard says so this one time).
+bool begin_play(const fs::path &data, const fs::path &bin, bool enabled);
+void start_failed(const fs::path &data);    // the process could not be started
+// After it started: parks the proxy as soon as `child` (a process handle) has loaded it or ended, then clears
+// the marker at guard_ms of running, or at a normal close before that. Returns when that is settled.
+void watch_play(void *child, const fs::path &data, unsigned long guard_ms);
+bool guard_note_launcher_start(const fs::path &data);   // a marker left behind becomes "next Play without the mod"
+bool guard_tripped(const fs::path &data);
+void clear_guard(const fs::path &data);
+
 // ---- the launcher's view (background work) ----
 struct View
 {
@@ -66,13 +88,14 @@ struct View
     std::string message;            // what happened last
     int tone = 0;                   // 0 plain, 1 done, 2 a problem
     std::string credits, notices;   // from the last manifest (credits has a default)
-    bool restart_needed = false;    // the files changed since this program started
+    bool skip_once = false;         // the next Play is without the mod (the start guard)
 };
 View view();
 void start_enable(const std::string &preset);
 void start_switch(const std::string &preset);
 void turn_off();                     // synchronous: removes the files now
-void launcher_starts();             // pending deletes; re-install into a new version's bin when enabled
+void try_again();                    // the next Play is with the mod again
+void launcher_starts();             // pending deletes, the proxy's name, the guard; re-install into a new version's bin when enabled
 bool gpu_supported(std::string *adapter, std::string *why);
 fs::path bin_folder();               // where defjam_recomp.exe is
 fs::path data_folder();              // <data>/graphics lives below it
@@ -82,6 +105,15 @@ extern "C" {
 
 /* One line for the log's header (crash and F9 reports): whether the pack is installed and loaded. */
 void graphics_mod_log_header(void);
+
+#if defined(_WIN32)
+/* The game's process, pc_settings.c. Whether a start without the launcher has to go through its own process too. */
+int graphics_mod_wanted(void);
+int graphics_mod_before_start(void);        /* 1: started with the mod; then one of the next two */
+void graphics_mod_start_failed(void);
+void graphics_mod_started(void *process, unsigned long pid);    /* the notice and the watch, in the background */
+void graphics_mod_settled(void);            /* waits for the watch; the proxy is parked when this returns */
+#endif
 
 #ifdef __cplusplus
 }

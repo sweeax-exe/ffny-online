@@ -664,7 +664,7 @@ void pc_settings_capture_start(void)
  * "Skip the launcher" made it work (2026-10-21). Waiting keeps DefJamLauncher's play.lock held
  * for the game's whole life, as before. Returns only when the process could not be started (the
  * game then starts here, as it used to). */
-static void start_game_process(void)
+static void start_game_process(int reopen_launcher)
 {
     static WCHAR exe[32768];
     const WCHAR *line = GetCommandLineW();
@@ -682,8 +682,10 @@ static void start_game_process(void)
     si.cb = sizeof(si);
     pc_input_stop();                /* the controllers go to the game's process */
     netplay_stop();                 /* and so does any online session (one player, one session) */
+    int with_mod = graphics_mod_before_start();     /* the community pack's proxy, for this process only */
     if (!CreateProcessW(exe, cmd, NULL, NULL, FALSE, g_start_env ? CREATE_UNICODE_ENVIRONMENT : 0,
                         g_start_env, g_start_dir[0] ? g_start_dir : NULL, &si, &pi)) {
+        if (with_mod) graphics_mod_start_failed();
         fprintf(stderr, "[UI] could not start the game in its own process (error %lu); starting it here\n",
                 (unsigned long)GetLastError());
         fflush(stderr);
@@ -695,9 +697,17 @@ static void start_game_process(void)
             (unsigned long)pi.dwProcessId);
     fflush(stderr);
     CloseHandle(pi.hThread);
+    if (with_mod) graphics_mod_started(pi.hProcess, pi.dwProcessId);
+    if (!reopen_launcher) {         /* started with the launcher skipped: only here for the proxy */
+        WaitForSingleObject(pi.hProcess, INFINITE);
+        graphics_mod_settled();
+        GetExitCodeProcess(pi.hProcess, &code);
+        ExitProcess(code);
+    }
     /* In the background meanwhile (tray icon, update checks); when the game closes the launcher
      * opens again, offering an update found in the meantime. */
     int update = pc_launcher_watch(pi.hProcess);
+    graphics_mod_settled();         /* the proxy is parked before the launcher opens again */
     /* the reopened launcher takes the one-copy lock itself */
     if (g_single_instance) { CloseHandle(g_single_instance); g_single_instance = NULL; }
     n = wcslen(line) + 32;
@@ -738,8 +748,14 @@ static void run_launcher_if_wanted(void)
     int no = cmd && strstr(cmd, "--no-launcher") != NULL;
     int shift = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
 
-    if (!pc_launcher_wanted(pc_mods_needs_recovery() ? 0 : recomp_settings_get("launcher", "skip", 0), force && !no, no, shift, test_run))
+    if (!pc_launcher_wanted(pc_mods_needs_recovery() ? 0 : recomp_settings_get("launcher", "skip", 0), force && !no, no, shift, test_run)) {
+        /* The launcher skipped, by setting or by the switch: the proxy only reaches a process started for it. */
+        if (!strstr(cmd ? cmd : "", "--launcher-child") && !test_run && graphics_mod_wanted()) {
+            start_game_process(0);
+            pc_input_restart();     /* it could not be started: the game starts here */
+        }
         return;
+    }
     discord_presence_launcher();
     if (!pc_launcher_run()) {
         fprintf(stderr, "[UI] the launcher was closed; not starting the game\n");
@@ -749,7 +765,7 @@ static void run_launcher_if_wanted(void)
     }
     if (!getenv("RECOMP_LAUNCHER_SAME_PROCESS")) {
         discord_presence_end();     /* the game's process shows its own */
-        start_game_process();
+        start_game_process(1);
     }
     pc_input_restart();
 #else

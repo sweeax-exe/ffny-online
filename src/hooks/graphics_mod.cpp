@@ -25,6 +25,8 @@ extern "C" {
 #include <windows.h>
 #include <winhttp.h>
 #include <bcrypt.h>
+#include <psapi.h>
+#pragma comment(lib, "psapi.lib")
 #pragma comment(lib, "winhttp.lib")
 #pragma comment(lib, "bcrypt.lib")
 extern "C" const wchar_t *updater_host(int i);
@@ -37,6 +39,20 @@ namespace
 {
 constexpr size_t kManifestMax = 1 << 20;
 constexpr uint64_t kArchiveMax = 2ull << 30;
+
+const char *const kProxy = "dxgi.dll", *const kParked = "dxgi.ffny-mod";
+
+bool same_name(const std::string &a, const char *b)
+{
+    size_t n = strlen(b);
+    if (a.size() != n) return false;
+    for (size_t i = 0; i < n; i++)
+        if (tolower((unsigned char)a[i]) != tolower((unsigned char)b[i])) return false;
+    return true;
+}
+
+// The name a pack file has in bin: the proxy is kept where nothing loads it (see graphics_mod.h).
+std::string on_disk_name(const std::string &rel) { return same_name(rel, kProxy) ? kParked : rel; }
 
 void say(std::string *error, const std::string &text)
 {
@@ -382,7 +398,7 @@ bool extract(const fs::path &zip, const fs::path &bin, const std::vector<std::st
     if (seen.size() != wanted.size()) { say(error, "the archive lacks files the manifest lists"); return false; }
     std::vector<char> buf(1 << 20);
     for (auto &e : entries) {
-        fs::path target = bin / from_utf8(e.name), part = target;
+        fs::path target = bin / from_utf8(on_disk_name(e.name)), part = target;
         part += ".ffny-part";
         fs::create_directories(target.parent_path(), ec);
         {
@@ -411,6 +427,15 @@ bool extract(const fs::path &zip, const fs::path &bin, const std::vector<std::st
 
 fs::path record_path(const fs::path &data) { return data / "graphics" / "installed.txt"; }
 fs::path pending_path(const fs::path &data) { return data / "graphics" / "pending-delete.txt"; }
+fs::path marker_path(const fs::path &data) { return data / "graphics" / "play-started.txt"; }
+fs::path skip_path(const fs::path &data) { return data / "graphics" / "skip-next-play.txt"; }
+
+void touch(const fs::path &file)
+{
+    std::error_code ec;
+    fs::create_directories(file.parent_path(), ec);
+    std::ofstream(file, std::ios::binary | std::ios::trunc) << "FFNY Online: Enhanced graphics start guard\n";
+}
 
 void write_record(const fs::path &data, const Record &r)
 {
@@ -464,7 +489,156 @@ Record read_record(const fs::path &data)
     return r;
 }
 
+bool tidy_proxy(const fs::path &data)
+{
+    std::error_code ec;
+    Record r = read_record(data);
+    if (!r.present || r.bin.empty()) return true;
+    auto old = std::find_if(r.files.begin(), r.files.end(), [](const std::string &f) { return same_name(f, kProxy); });
+    bool old_form = old != r.files.end();
+    if (!old_form && std::find(r.files.begin(), r.files.end(), kParked) == r.files.end()) return true;
+    fs::path live = r.bin / kProxy, parked = r.bin / kParked;
+    bool have_live = fs::exists(live, ec), have_parked = fs::exists(parked, ec);
+    if (have_live && (old_form || !have_parked)) {
+        // Ours by the record: an install from before the proxy was parked, or a start that stopped before it
+        // was renamed back. Windows renames a loaded DLL (this very process may hold it): the mapping stays
+        // and the next start is clean.
+        if (have_parked) fs::remove(parked, ec);
+        fs::rename(live, parked, ec);
+        if (ec) {
+            fprintf(stderr, "[GRAPHICS] cannot rename the proxy yet (%s); trying again later\n", ec.message().c_str());
+            fflush(stderr);
+            return false;
+        }
+        fprintf(stderr, "[GRAPHICS] proxy parked as %s\n", kParked);
+    }
+    if (old_form) {
+        *old = kParked;
+        write_record(data, r);
+    }
+    return true;
+}
+
+bool begin_play(const fs::path &data, const fs::path &bin, bool enabled)
+{
+    std::error_code ec;
+    bool tidy = tidy_proxy(data);
+    if (!enabled) return false;
+    Record r = read_record(data);
+    if (!r.present || r.files.empty() || !fs::equivalent(r.bin, bin, ec)) return false;
+    if (guard_tripped(data)) {
+        clear_guard(data);
+        fprintf(stderr, "[GRAPHICS] this start is without the community mod: the last one did not get through\n");
+        fflush(stderr);
+        return false;
+    }
+    fs::path live = r.bin / kProxy, parked = r.bin / kParked;
+    if (fs::exists(live, ec)) {
+        if (tidy) {         // tidy_proxy left it: both names exist, so this one is not ours
+            fprintf(stderr, "[GRAPHICS] a dxgi.dll the launcher did not install is in the game folder; not starting the mod\n");
+            fflush(stderr);
+            return false;
+        }
+        touch(marker_path(data));       // ours, and it could not be renamed: it loads as it is
+        return true;
+    }
+    if (!fs::exists(parked, ec)) {
+        fprintf(stderr, "[GRAPHICS] the proxy is missing; starting without the community mod\n");
+        fflush(stderr);
+        return false;
+    }
+    touch(marker_path(data));
+    fs::rename(parked, live, ec);
+    if (ec) {
+        fs::remove(marker_path(data), ec);
+        fprintf(stderr, "[GRAPHICS] cannot put the proxy in place; starting without the community mod\n");
+        fflush(stderr);
+        return false;
+    }
+    fprintf(stderr, "[GRAPHICS] proxy in place for the game's start\n");
+    fflush(stderr);
+    return true;
+}
+
+void start_failed(const fs::path &data)
+{
+    std::error_code ec;
+    tidy_proxy(data);
+    fs::remove(marker_path(data), ec);
+}
+
+bool guard_note_launcher_start(const fs::path &data)
+{
+    std::error_code ec;
+    if (fs::exists(marker_path(data), ec)) {
+        touch(skip_path(data));
+        fs::remove(marker_path(data), ec);
+        fprintf(stderr, "[GRAPHICS] the last start with the community mod did not get through; the next one is without it\n");
+        fflush(stderr);
+    }
+    return guard_tripped(data);
+}
+
+bool guard_tripped(const fs::path &data)
+{
+    std::error_code ec;
+    return fs::exists(skip_path(data), ec) || fs::exists(marker_path(data), ec);
+}
+
+void clear_guard(const fs::path &data)
+{
+    std::error_code ec;
+    fs::remove(skip_path(data), ec);
+    fs::remove(marker_path(data), ec);
+}
+
 #if defined(_WIN32)
+static bool loaded_from(HANDLE process, const fs::path &bin)
+{
+    HMODULE mods[1024];
+    DWORD got = 0;
+    if (!K32EnumProcessModulesEx(process, mods, sizeof(mods), &got, LIST_MODULES_ALL)) return false;    // still starting
+    std::error_code ec;
+    for (DWORD i = 0; i < got / sizeof(HMODULE) && i < 1024; i++) {
+        wchar_t path[MAX_PATH * 2];
+        if (!K32GetModuleFileNameExW(process, mods[i], path, MAX_PATH * 2)) continue;
+        fs::path p(path);
+        if (_wcsicmp(p.filename().c_str(), L"dxgi.dll") == 0 && fs::equivalent(p.parent_path(), bin, ec)) return true;
+    }
+    return false;
+}
+
+void watch_play(void *child, const fs::path &data, unsigned long guard_ms)
+{
+    HANDLE h = (HANDLE)child;
+    Record r = read_record(data);
+    ULONGLONG start = GetTickCount64();
+    bool exited = false, loaded = false;
+    while (!exited && !loaded && GetTickCount64() - start < 30000) {
+        exited = WaitForSingleObject(h, 25) == WAIT_OBJECT_0;
+        if (!exited) loaded = loaded_from(h, r.bin);
+    }
+    // A moment more than "loaded": the proxy's own start-up may still look at its file.
+    if (loaded) exited = WaitForSingleObject(h, 2000) == WAIT_OBJECT_0;
+    bool back = false;
+    for (int i = 0; i < 50 && !back; i++) {
+        back = tidy_proxy(data);
+        if (!back) Sleep(100);
+    }
+    fprintf(stderr, "[GRAPHICS] the game %s the proxy after %llu ms; %s\n", loaded ? "loaded" : "did not load",
+            (unsigned long long)(GetTickCount64() - start), back ? "parked again" : "still in place, parked at the next start");
+    if (!exited) {
+        ULONGLONG spent = GetTickCount64() - start;
+        exited = spent < guard_ms && WaitForSingleObject(h, (DWORD)(guard_ms - spent)) == WAIT_OBJECT_0;
+    }
+    DWORD code = 1;
+    if (exited) GetExitCodeProcess(h, &code);
+    std::error_code ec;
+    if (!exited || code == 0) fs::remove(marker_path(data), ec);    // running, or closed normally: it made it
+    else fprintf(stderr, "[GRAPHICS] the game ended early with the mod (code 0x%lx)\n", (unsigned long)code);
+    fflush(stderr);
+}
+
 bool fetch_manifest(Manifest &m, std::string *error)
 {
     std::string text, sig;
@@ -609,7 +783,7 @@ bool install(const Manifest &m, const fs::path &bin, const fs::path &data, const
         std::string ext = from_utf8(f).extension().string();
         if (_stricmp(ext.c_str(), ".ini") == 0 || _stricmp(ext.c_str(), ".cfg") == 0 || _stricmp(ext.c_str(), ".cache") == 0)
             continue;
-        if (fs::exists(bin / from_utf8(f), ec)) {
+        if (fs::exists(bin / from_utf8(f), ec)) {       // the proxy's own name counts: a dxgi.dll here is foreign
             say(error, "The game folder already has " + f + ", which this launcher did not install. Remove it "
                        "(another ReShade or mod?) and try again; nothing was changed.");
             return false;
@@ -627,6 +801,7 @@ bool install(const Manifest &m, const fs::path &bin, const fs::path &data, const
     r.preset = preset;
     r.bin = bin;
     r.files = all;
+    for (auto &f : r.files) f = on_disk_name(f);
     std::set<std::string> dirs;
     for (auto &f : all)
         for (size_t s = f.find('/'); s != std::string::npos; s = f.find('/', s + 1))
@@ -652,7 +827,7 @@ bool switch_preset(const Manifest &m, const fs::path &data, const std::string &p
     fs::path pre = ensure_archive(preset_archive(m, preset), data / "graphics" / "cache", progress, error);
     if (pre.empty()) return false;
     for (auto &f : preset_files(m, preset))
-        if (std::find(r.files.begin(), r.files.end(), f) == r.files.end()) {
+        if (std::find(r.files.begin(), r.files.end(), on_disk_name(f)) == r.files.end()) {
             say(error, "The installed pack does not match this preset; turn it off and on again.");
             return false;
         }
@@ -666,6 +841,7 @@ bool switch_preset(const Manifest &m, const fs::path &data, const std::string &p
 bool remove(const fs::path &data, std::string *error)
 {
     std::error_code ec;
+    tidy_proxy(data);           // a proxy left under its live name is taken out as well
     Record r = read_record(data);
     if (!r.present) return true;
     bool ok = true;

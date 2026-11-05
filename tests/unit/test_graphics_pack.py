@@ -1,7 +1,8 @@
 """Enhanced graphics (community): scripts/make-graphics-pack.py, and the launcher's download and install
 (src/hooks/graphics_mod.cpp) compiled on its own against a local HTTP server with tiny made-up packs and
 a TEST signing key made here. Install, preset switch, re-install into a new version's bin, removal of
-exactly the owned files, a bad checksum, a bad signature and an interrupted download. No real pack."""
+exactly the owned files, a bad checksum, a bad signature and an interrupted download. The proxy's two names
+and the start guard, with a tiny DLL made here that does nothing. No real pack."""
 from pathlib import Path
 import hashlib
 import http.server
@@ -72,6 +73,7 @@ def test_script_refuses_other_differences(tmp_path):
 DRIVER = r'''
 #include <cstdio>
 #include <string>
+#include <windows.h>
 #include "graphics_mod.h"
 extern "C" const wchar_t *updater_host(int) { return nullptr; }
 extern "C" int updater_port(void) { return 27778; }
@@ -81,6 +83,38 @@ int main(int argc, char **argv)
     std::string cmd = argc > 1 ? argv[1] : "", error;
     fs::path data = fs::u8path(argc > 2 ? argv[2] : ".");
     finish_pending(data);
+    if (cmd == "tidy") { printf("%s\n", tidy_proxy(data) ? "OK" : "FAIL"); return 0; }
+    if (cmd == "launcher-start") { printf("%s\n", guard_note_launcher_start(data) ? "SKIP" : "CLEAN"); return 0; }
+    if (cmd == "begin") { printf("%s\n", begin_play(data, fs::u8path(argv[3]), argv[4][0] == '1') ? "MOD" : "PLAIN"); return 0; }
+    if (cmd == "tidy-loaded") {         // as the launcher of an older install: the proxy is loaded in this process
+        HMODULE dll = LoadLibraryW((fs::u8path(argv[3]) / "dxgi.dll").c_str());
+        if (!dll) { printf("NOLOAD\n"); return 0; }
+        printf("%s\n", tidy_proxy(data) ? "OK" : "FAIL");
+        return 0;
+    }
+    if (cmd == "child") {               // as the game: the proxy loads at the start, then it runs or fails
+        HMODULE dll = LoadLibraryW(L"dxgi.dll");
+        wchar_t path[1024] = L"";
+        if (dll) GetModuleFileNameW(dll, path, 1024);
+        FILE *f = fopen(argv[3], "w");
+        fprintf(f, "%ls\n", path);
+        fclose(f);
+        Sleep(atoi(argv[4]));
+        return atoi(argv[5]);
+    }
+    if (cmd == "play") {                // as the launcher: Play, with the child above (argv: data bin report ms code guard)
+        if (!begin_play(data, fs::u8path(argv[3]), true)) { printf("PLAIN\n"); return 0; }
+        wchar_t exe[1024];
+        GetModuleFileNameW(nullptr, exe, 1024);
+        std::wstring line = L"gfx child x " + fs::u8path(argv[4]).wstring() + L" " + fs::u8path(argv[5]).wstring() + L" " + fs::u8path(argv[6]).wstring();
+        STARTUPINFOW si = {};
+        si.cb = sizeof(si);
+        PROCESS_INFORMATION pi;
+        if (!CreateProcessW(exe, line.data(), nullptr, nullptr, FALSE, 0, nullptr, nullptr, &si, &pi)) { start_failed(data); printf("NOSTART\n"); return 0; }
+        watch_play(pi.hProcess, data, (unsigned long)atoi(argv[7]));
+        printf("%s\n", WaitForSingleObject(pi.hProcess, 0) == WAIT_OBJECT_0 ? "SETTLED-EXITED" : "SETTLED-RUNNING");
+        return 0;
+    }
     if (cmd == "remove") { bool ok = remove(data, &error); printf("%s %s\n", ok ? "OK" : "FAIL", error.c_str()); return 0; }
     Manifest m;
     if (!fetch_manifest(m, &error)) { printf("FAIL %s\n", error.c_str()); return 0; }
@@ -141,6 +175,10 @@ def tool(tmp_path_factory):
            str(ROOT / 'src/hooks/graphics_mod.cpp'), str(ROOT / 'src/hooks/update_sig.c'), '/Fe:' + str(exe)]
     r = subprocess.run(cmd, cwd=folder, capture_output=True, text=True)
     assert r.returncode == 0, r.stdout[-3000:] + r.stderr[-3000:]
+    # a real DLL that does nothing: what loading it, renaming it held and the child start need
+    (folder / 'dummy.cpp').write_text('int ffny_dummy_proxy = 1;\n', encoding='utf-8')
+    r = subprocess.run(['cl', '/nologo', '/LD', 'dummy.cpp', '/link', '/OUT:dummy.dll'], cwd=folder, capture_output=True, text=True)
+    assert r.returncode == 0, r.stdout[-3000:] + r.stderr[-3000:]
     return exe
 
 
@@ -187,7 +225,7 @@ def test_install_switch_update_remove(tool, server, tmp_path):
     env = server['env']
     assert run(tool, env, 'install', data, v1, 'performance').startswith('OK')
     assert (v1 / 'ReShade.ini').read_bytes() == b'performance ReShade.ini'
-    assert (v1 / 'dxgi.dll').exists() and (v1 / 'reshade-shaders/Shaders/a.fx').exists()
+    assert (v1 / 'dxgi.ffny-mod').exists() and not (v1 / 'dxgi.dll').exists() and (v1 / 'reshade-shaders/Shaders/a.fx').exists()
     # the preset switch fetches only the small archive and swaps the 4 files
     Handler.log.clear()
     assert run(tool, env, 'switch', data, 'quality').startswith('OK')
@@ -253,4 +291,109 @@ def test_interrupted_download_resumes(tool, server, tmp_path):
     assert run(tool, server['env'], 'install', tmp_path / 'data', bin_dir, 'performance').startswith('OK')
     ranges = [r for path, r in Handler.log if path.endswith(name)]
     assert ranges[0] is None and ranges[-1] == 'bytes=3000-'
-    assert (bin_dir / 'dxgi.dll').read_bytes() == b'MZ fake proxy' * 50
+    assert (bin_dir / 'dxgi.ffny-mod').read_bytes() == b'MZ fake proxy' * 50
+
+
+# ---- the proxy's two names and the start guard ----
+
+def old_install(tool, tmp_path, proxy=None):
+    """An install as builds up to 59 left it: dxgi.dll in bin, under that name in the record."""
+    data, bin_dir = tmp_path / 'data', tmp_path / 'bin'
+    bin_dir.mkdir()
+    (data / 'graphics').mkdir(parents=True)
+    (bin_dir / 'dxgi.dll').write_bytes(proxy or b'MZ fake')
+    (bin_dir / 'ReShade.ini').write_text('x')
+    (data / 'graphics/installed.txt').write_text(f'version t0\npreset performance\nbin {bin_dir}\nfile dxgi.dll\nfile ReShade.ini\n')
+    return data, bin_dir
+
+
+def record_files(data):
+    return [ln[5:] for ln in (data / 'graphics/installed.txt').read_text().splitlines() if ln.startswith('file ')]
+
+
+def test_foreign_dxgi_beside_a_new_install_stays_and_blocks_the_mod(tool, server, tmp_path):
+    data, bin_dir = tmp_path / 'data', tmp_path / 'bin'
+    bin_dir.mkdir()
+    assert run(tool, server['env'], 'install', data, bin_dir, 'performance').startswith('OK')
+    (bin_dir / 'dxgi.dll').write_bytes(b'someone else')
+    assert run(tool, server['env'], 'begin', data, bin_dir, '1') == 'PLAIN'
+    assert run(tool, server['env'], 'remove', data).startswith('OK')
+    assert files(bin_dir) == ['dxgi.dll'] and (bin_dir / 'dxgi.dll').read_bytes() == b'someone else'
+
+
+def test_old_install_is_migrated(tool, tmp_path):
+    data, bin_dir = old_install(tool, tmp_path)
+    assert run(tool, os.environ, 'tidy', data) == 'OK'
+    assert not (bin_dir / 'dxgi.dll').exists() and (bin_dir / 'dxgi.ffny-mod').read_bytes() == b'MZ fake'
+    assert 'dxgi.ffny-mod' in record_files(data) and 'dxgi.dll' not in record_files(data)
+    assert run(tool, os.environ, 'tidy', data) == 'OK'
+    assert run(tool, os.environ, 'remove', data).startswith('OK')
+    assert files(bin_dir) == []
+
+
+def test_migration_with_the_proxy_loaded_in_this_process(tool, tmp_path):
+    data, bin_dir = old_install(tool, tmp_path, (tool.parent / 'dummy.dll').read_bytes())
+    assert run(tool, os.environ, 'tidy-loaded', data, bin_dir) == 'OK'
+    assert not (bin_dir / 'dxgi.dll').exists() and (bin_dir / 'dxgi.ffny-mod').exists()
+    assert 'dxgi.ffny-mod' in record_files(data)
+
+
+def test_a_stopped_start_is_put_right(tool, tmp_path):
+    data, bin_dir = old_install(tool, tmp_path)
+    assert run(tool, os.environ, 'begin', data, bin_dir, '1') == 'MOD'
+    assert (bin_dir / 'dxgi.dll').exists() and not (bin_dir / 'dxgi.ffny-mod').exists()
+    assert (data / 'graphics/play-started.txt').exists()
+    # the power went: the next start renames it back, and the guard speaks
+    assert run(tool, os.environ, 'tidy', data) == 'OK'
+    assert not (bin_dir / 'dxgi.dll').exists()
+    assert run(tool, os.environ, 'launcher-start', data) == 'SKIP'
+
+
+def test_off_starts_plain_and_touches_nothing(tool, tmp_path):
+    data, bin_dir = old_install(tool, tmp_path)
+    assert run(tool, os.environ, 'tidy', data) == 'OK'
+    assert run(tool, os.environ, 'begin', data, bin_dir, '0') == 'PLAIN'
+    assert (bin_dir / 'dxgi.ffny-mod').exists() and not (bin_dir / 'dxgi.dll').exists()
+    assert not (data / 'graphics/play-started.txt').exists()
+
+
+def play_install(tool, tmp_path):
+    data, bin_dir = old_install(tool, tmp_path, (tool.parent / 'dummy.dll').read_bytes())
+    exe = bin_dir / 'gfx.exe'
+    shutil.copy(tool, exe)
+    assert run(exe, os.environ, 'tidy', data) == 'OK'
+    return data, bin_dir, exe
+
+
+def test_play_child_loads_it_and_it_goes_back(tool, tmp_path):
+    data, bin_dir, exe = play_install(tool, tmp_path)
+    report = tmp_path / 'child.txt'
+    # the child runs on past the guard (4 s): settled while it runs, marker cleared, proxy parked meanwhile
+    assert run(exe, os.environ, 'play', data, bin_dir, report, 6000, 0, 4000) == 'SETTLED-RUNNING'
+    assert report.read_text().strip().lower().endswith('dxgi.dll')
+    assert not (bin_dir / 'dxgi.dll').exists() and (bin_dir / 'dxgi.ffny-mod').exists()
+    assert not (data / 'graphics/play-started.txt').exists()
+    assert run(exe, os.environ, 'launcher-start', data) == 'CLEAN'
+
+
+def test_guard_after_a_crash_skips_once(tool, tmp_path):
+    data, bin_dir, exe = play_install(tool, tmp_path)
+    report = tmp_path / 'child.txt'
+    assert run(exe, os.environ, 'play', data, bin_dir, report, 100, 3, 60000) == 'SETTLED-EXITED'
+    assert not (bin_dir / 'dxgi.dll').exists() and (bin_dir / 'dxgi.ffny-mod').exists()
+    assert (data / 'graphics/play-started.txt').exists()
+    # the launcher opens: the next Play is without it, also if this launcher closes first
+    assert run(exe, os.environ, 'launcher-start', data) == 'SKIP'
+    assert run(exe, os.environ, 'launcher-start', data) == 'SKIP'
+    assert run(exe, os.environ, 'begin', data, bin_dir, '1') == 'PLAIN'
+    assert not (bin_dir / 'dxgi.dll').exists()
+    # that one time: the Play after it has the mod again
+    assert run(exe, os.environ, 'launcher-start', data) == 'CLEAN'
+    assert run(exe, os.environ, 'begin', data, bin_dir, '1') == 'MOD'
+    assert (bin_dir / 'dxgi.dll').exists()
+
+
+def test_a_normal_quick_close_is_not_a_failure(tool, tmp_path):
+    data, bin_dir, exe = play_install(tool, tmp_path)
+    assert run(exe, os.environ, 'play', data, bin_dir, tmp_path / 'c.txt', 100, 0, 60000) == 'SETTLED-EXITED'
+    assert run(exe, os.environ, 'launcher-start', data) == 'CLEAN'

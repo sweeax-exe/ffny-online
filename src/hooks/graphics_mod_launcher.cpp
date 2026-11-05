@@ -29,23 +29,9 @@ namespace
 {
 std::mutex g_mutex;
 View g_view;
-int g_loaded = -1;          // whether this program started with the pack's dxgi.dll loaded
 
 const char *kCredits = "Presets by Marleymarletto \xC2\xB7 ReShade by crosire \xC2\xB7 DLSS by NVIDIA \xC2\xB7 "
                        "DLSS 5 Manager / shader authors (see notices)";
-
-bool loaded_from_bin()
-{
-#if defined(_WIN32)
-    HMODULE dxgi = GetModuleHandleW(L"dxgi.dll");
-    wchar_t path[MAX_PATH * 2];
-    if (!dxgi || !GetModuleFileNameW(dxgi, path, MAX_PATH * 2)) return false;
-    std::error_code ec;
-    return fs::equivalent(fs::path(path).parent_path(), bin_folder(), ec);
-#else
-    return false;
-#endif
-}
 
 void refresh_locked()
 {
@@ -53,8 +39,7 @@ void refresh_locked()
     g_view.installed = r.present && !r.files.empty();
     g_view.preset = r.preset;
     g_view.version = r.version;
-    if (g_loaded < 0) g_loaded = loaded_from_bin() ? 1 : 0;
-    g_view.restart_needed = g_view.installed != (g_loaded == 1);
+    g_view.skip_once = g_view.installed && guard_tripped(data_folder());
     if (g_view.credits.empty()) g_view.credits = kCredits;
 }
 
@@ -114,8 +99,8 @@ void run_install(std::string preset, bool reinstall)
         return;
     }
     save_setting(true, preset);
-    finish(reinstall ? "Enhanced graphics installed again for this version. Close and reopen the launcher to apply it."
-                     : "Enhanced graphics is installed. Close and reopen the launcher to apply it.", 1);
+    finish(reinstall ? "Enhanced graphics installed again for this version. It applies when you press Play."
+                     : "Enhanced graphics is installed. It applies when you press Play.", 1);
 }
 
 bool start_work()
@@ -154,6 +139,7 @@ View view()
 void start_enable(const std::string &preset)
 {
     if (!start_work()) return;
+    clear_guard(data_folder());
     save_setting(true, preset);
     std::thread(run_install, preset, false).detach();
 }
@@ -169,7 +155,7 @@ void start_switch(const std::string &preset)
         std::string error;
         if (!fetch(m, error)) { finish(error, 2); return; }
         if (!switch_preset(m, data_folder(), preset, downloading(), &error)) { finish(error, 2); return; }
-        finish(std::string(preset == "quality" ? "Quality" : "Performance") + " preset set. Close and reopen the launcher to apply it.", 1);
+        finish(std::string(preset == "quality" ? "Quality" : "Performance") + " preset set. It applies when you press Play.", 1);
     }).detach();
 }
 
@@ -183,15 +169,32 @@ void turn_off()
         g_view.busy = false;
     }
     bool ok = remove(data_folder(), &error);
+    clear_guard(data_folder());
     finish(ok ? "Enhanced graphics is off; its files are removed." : error, ok ? 1 : 2);
+}
+
+void try_again()
+{
+    clear_guard(data_folder());
+    std::lock_guard<std::mutex> lock(g_mutex);
+    g_view.message = "The next Play starts with Enhanced graphics again.";
+    g_view.tone = 1;
+    refresh_locked();
 }
 
 void launcher_starts()
 {
     fs::path data = data_folder();
     finish_pending(data);
+    tidy_proxy(data);           // before anything looks at the files: an older install's dxgi.dll gets its new name
+    bool skip = guard_note_launcher_start(data);
     {
         std::lock_guard<std::mutex> lock(g_mutex);
+        if (skip && recomp_settings_get("graphics", "enabled", 0)) {
+            g_view.message = "Enhanced graphics was turned off for this start because the game did not start with it "
+                             "last time. Try again from Graphics.";
+            g_view.tone = 2;
+        }
         refresh_locked();
     }
     bool on = recomp_settings_get("graphics", "enabled", 0) != 0;
@@ -251,12 +254,129 @@ bool gpu_supported(std::string *adapter, std::string *why)
 }
 } // namespace gfx
 
+#if defined(_WIN32)
+namespace
+{
+const wchar_t *const kNotice = L"Loading Enhanced graphics, the window may not respond for a moment.";
+std::thread g_watch;
+
+struct FoundWindow { DWORD pid; HWND window; };
+
+BOOL CALLBACK find_game_window(HWND w, LPARAM out)
+{
+    FoundWindow *f = (FoundWindow *)out;
+    DWORD pid = 0;
+    GetWindowThreadProcessId(w, &pid);
+    if (pid != f->pid || !IsWindowVisible(w)) return TRUE;
+    f->window = w;
+    return FALSE;
+}
+
+LRESULT CALLBACK notice_proc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
+{
+    if (msg == WM_PAINT) {
+        PAINTSTRUCT ps;
+        HDC dc = BeginPaint(h, &ps);
+        RECT rc;
+        GetClientRect(h, &rc);
+        HBRUSH back = CreateSolidBrush(RGB(20, 20, 24));
+        FillRect(dc, &rc, back);
+        DeleteObject(back);
+        HFONT font = CreateFontW(-MulDiv(15, GetDeviceCaps(dc, LOGPIXELSY), 96), 0, 0, 0, FW_SEMIBOLD, 0, 0, 0, DEFAULT_CHARSET,
+                                 OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
+        HGDIOBJ was = SelectObject(dc, font);
+        SetBkMode(dc, TRANSPARENT);
+        SetTextColor(dc, RGB(240, 240, 240));
+        DrawTextW(dc, kNotice, -1, &rc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+        SelectObject(dc, was);
+        DeleteObject(font);
+        EndPaint(h, &ps);
+        return 0;
+    }
+    return DefWindowProcW(h, msg, wp, lp);
+}
+
+// A small bar in the middle of the screen, without the focus, until the game's window answers (two seconds
+// more) or it has ended; at most half a minute. A plain window: the launcher's Direct3D is closed by now.
+void show_notice(HANDLE process, DWORD pid)
+{
+    WNDCLASSEXW wc = {};
+    wc.cbSize = sizeof(wc);
+    wc.lpfnWndProc = notice_proc;
+    wc.hInstance = GetModuleHandleW(nullptr);
+    wc.hCursor = LoadCursorW(nullptr, MAKEINTRESOURCEW(32512));
+    wc.lpszClassName = L"DefJamRecompGraphicsNotice";
+    RegisterClassExW(&wc);
+    HDC screen = GetDC(nullptr);
+    int dpi = screen ? GetDeviceCaps(screen, LOGPIXELSX) : 96;
+    if (screen) ReleaseDC(nullptr, screen);
+    int w = MulDiv(640, dpi, 96), h = MulDiv(64, dpi, 96);
+    HWND window = CreateWindowExW(WS_EX_TOPMOST | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW, wc.lpszClassName, L"FFNY Online", WS_POPUP,
+                                  (GetSystemMetrics(SM_CXSCREEN) - w) / 2, (GetSystemMetrics(SM_CYSCREEN) - h) / 2, w, h,
+                                  nullptr, nullptr, wc.hInstance, nullptr);
+    if (!window) return;
+    fprintf(stderr, "[GRAPHICS] notice shown while the game starts\n");
+    fflush(stderr);
+    ShowWindow(window, SW_SHOWNOACTIVATE);
+    UpdateWindow(window);
+    ULONGLONG start = GetTickCount64(), answered = 0;
+    while (GetTickCount64() - start < 30000) {
+        if (MsgWaitForMultipleObjects(1, &process, FALSE, 100, QS_ALLINPUT) == WAIT_OBJECT_0) break;
+        MSG msg;
+        while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) DispatchMessageW(&msg);
+        FoundWindow f = {pid, nullptr};
+        EnumWindows(find_game_window, (LPARAM)&f);
+        if (f.window && !IsHungAppWindow(f.window)) {
+            if (!answered) answered = GetTickCount64();
+            if (GetTickCount64() - answered > 2000) break;
+        } else {
+            answered = 0;
+        }
+    }
+    DestroyWindow(window);
+    UnregisterClassW(wc.lpszClassName, wc.hInstance);
+}
+} // namespace
+
+extern "C" int graphics_mod_wanted(void)
+{
+    using namespace gfx;
+    if (!recomp_settings_get("graphics", "enabled", 0)) return 0;
+    Record r = read_record(data_folder());
+    return r.present && !r.files.empty();
+}
+
+extern "C" int graphics_mod_before_start(void)
+{
+    using namespace gfx;
+    finish_pending(data_folder());
+    return begin_play(data_folder(), bin_folder(), recomp_settings_get("graphics", "enabled", 0) != 0) ? 1 : 0;
+}
+
+extern "C" void graphics_mod_start_failed(void) { gfx::start_failed(gfx::data_folder()); }
+
+extern "C" void graphics_mod_started(void *process, unsigned long pid)
+{
+    gfx::fs::path data = gfx::data_folder();
+    const char *ms = getenv("RECOMP_GRAPHICS_GUARD_MS");     // tests
+    unsigned long guard = ms && atoi(ms) > 0 ? (unsigned long)atoi(ms) : 60000;
+    g_watch = std::thread(gfx::watch_play, process, data, guard);
+    std::thread(show_notice, (HANDLE)process, (DWORD)pid).detach();
+}
+
+extern "C" void graphics_mod_settled(void)
+{
+    if (g_watch.joinable()) g_watch.join();
+}
+#endif
+
 extern "C" void graphics_mod_log_header(void)
 {
     using namespace gfx;
     Record r = read_record(data_folder());
     std::error_code ec;
-    bool proxy = fs::exists(bin_folder() / "dxgi.dll", ec);
+    bool foreign = fs::exists(bin_folder() / "dxgi.dll", ec);
+    bool proxy = foreign || fs::exists(bin_folder() / "dxgi.ffny-mod", ec);
     bool loaded = false, reshade = false;
 #if defined(_WIN32)
     HMODULE dxgi = GetModuleHandleW(L"dxgi.dll");
@@ -265,11 +385,12 @@ extern "C" void graphics_mod_log_header(void)
     reshade = dxgi && (GetProcAddress(dxgi, "ReShadeRegisterAddon") || GetModuleHandleW(L"ReShade64.dll"));
 #endif
     if (r.present && !r.files.empty())
-        fprintf(stderr, "[GRAPHICS] community mod on (%s), pack %s; dxgi proxy %s, %s, ReShade %s\n", r.preset.c_str(),
-                r.version.c_str(), proxy ? "present" : "missing", loaded ? "loaded" : "not loaded", reshade ? "yes" : "no");
+        fprintf(stderr, "[GRAPHICS] community mod on (%s), pack %s; dxgi proxy %s, %s in this process (it loads in the "
+                "game's only), ReShade %s\n", r.preset.c_str(), r.version.c_str(), proxy ? "present" : "missing",
+                loaded ? "loaded" : "not loaded", reshade ? "yes" : "no");
     else
         fprintf(stderr, "[GRAPHICS] community mod off%s\n",
-                proxy ? (loaded ? "; a dxgi.dll not installed by the launcher is loaded from the game folder"
+                foreign ? (loaded ? "; a dxgi.dll not installed by the launcher is loaded from the game folder"
                                 : "; a dxgi.dll not installed by the launcher is in the game folder") : "");
     fflush(stderr);
 }

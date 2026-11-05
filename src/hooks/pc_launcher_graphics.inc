@@ -72,14 +72,14 @@ void graphics_card(ImVec2 a, ImVec2 b, float s)
     else if (v.busy) snprintf(head, sizeof(head), "Enhanced graphics");
     else snprintf(head, sizeof(head), "Original graphics");
     if (v.busy && !v.progress.empty()) snprintf(line, sizeof(line), "%s", v.progress.c_str());
-    else if (v.restart_needed) snprintf(line, sizeof(line), "Close and reopen the launcher to apply");
+    else if (v.skip_once) snprintf(line, sizeof(line), "Off for this start: see Graphics");
     else if (v.installed) snprintf(line, sizeof(line), "Community ReShade + DLSS presets");
     else snprintf(line, sizeof(line), "Optional community presets");    // ", optional" was cut off
     status_dot(dl, at, s, v.installed ? k_red_hi : v.busy ? k_gold : ImVec4(0.6f, 0.6f, 0.64f, 1));
     float right = b.x - 124 * s;
     dl->PushClipRect(a, ImVec2(right, b.y), true);
     card_line(dl, ImVec2(at.x + 18 * s, at.y), s, k_white, head, true);
-    card_line(dl, ImVec2(at.x, at.y + 26 * s), s, v.restart_needed ? k_gold : ImVec4(0.80f, 0.80f, 0.82f, 1), line, false);
+    card_line(dl, ImVec2(at.x, at.y + 26 * s), s, v.skip_once ? k_gold : ImVec4(0.80f, 0.80f, 0.82f, 1), line, false);
     dl->PopClipRect();
     if (glass_button("##graphics_card", "Graphics", ImVec2(b.x - 112 * s, a.y + 40 * s), ImVec2(92 * s, 30 * s), s,
                      GLASS_PLAIN, bold_font(), 14 * s))
@@ -95,6 +95,12 @@ static void graphics_dialog(ImVec2 o, float w, float h, float s)
         const char *want = getenv("RECOMP_LAUNCHER_PAGE");
         if (!asked && want && !strcmp(want, "graphics") && !ImGui::IsPopupOpen("Graphics")) ImGui::OpenPopup("Graphics");
         asked = true;
+        // The start guard's message has to be seen, and it is longer than the card.
+        static bool told;
+        if (!told && gfx::view().skip_once && !gfx::view().message.empty() && !ImGui::IsPopupOpen("Graphics")) {
+            told = true;
+            ImGui::OpenPopup("Graphics");
+        }
     }
     ImVec2 size(std::min(w - 40 * s, 760 * s), std::min(h - 40 * s, 600 * s));
     ImGui::SetNextWindowPos(ImVec2(o.x + (w - size.x) / 2, o.y + (h - size.y) / 2));
@@ -137,6 +143,9 @@ static void graphics_dialog(ImVec2 o, float w, float h, float s)
         dl->AddText(ImGui::GetFont(), 13 * s, ImVec2(ra.x + 18 * s, ra.y + 36 * s), col(gpu ? ImVec4(0.80f, 0.80f, 0.82f, 1) : k_gold),
                     sub.c_str());
         ImVec2 ba(rb.x - 150 * s, ra.y + 14 * s);
+        if (v.skip_once && glass_button("##gfx_retry", "Try again", ImVec2(ba.x - 146 * s, ba.y), ImVec2(136 * s, 36 * s), s,
+                                        GLASS_RED, bold_font(), 14.5f * s))
+            gfx::try_again();
         if (on || v.installed) {
             // Turn off works always: also without an RTX card, while a download runs, or with the game
             // having started without the pack.
@@ -198,12 +207,11 @@ static void graphics_dialog(ImVec2 o, float w, float h, float s)
         }
     }
 
-    // The foot: what happened, or that it applies at the next start.
+    // The foot: what happened.
     {
         float foot = 64 * s;
         std::string text = v.busy ? std::string() : v.message;
         ImVec4 c = v.tone == 1 ? k_green : v.tone == 2 ? k_gold : ImVec4(1, 1, 1, 0.75f);
-        if (text.empty() && v.restart_needed) { text = "Close and reopen the launcher to apply it."; c = k_gold; }
         if (!text.empty()) {
             float wrap = size.x - 60 * s - 170 * s;
             dl->PushClipRect(a, ImVec2(b.x - 170 * s, b.y), true);
