@@ -69,6 +69,7 @@ h3 {
   letter-spacing: .03em;
 }
 p { margin: 0 0 1em; }
+code { font: 500 .92em ui-monospace, "SF Mono", Menlo, Consolas, monospace; color: var(--muted); }
 
 .skip {
   position: absolute; left: 12px; top: -48px; z-index: 200;
@@ -111,6 +112,11 @@ p { margin: 0 0 1em; }
 @media (max-width: 900px) {
   .nav__links { display: none; }
   .nav__ext { margin-left: auto; }
+}
+@media (max-width: 480px) {
+  .nav__inner { gap: 10px; }
+  .nav__brand { font-size: 16px; letter-spacing: .03em; }
+  .nav .icon-link { display: none; }
 }
 
 /* Buttons */
@@ -231,9 +237,10 @@ figcaption, .fine { color: var(--dim); font-size: 14px; margin-top: 10px; }
 
 .cards {
   list-style: none; margin: 0; padding: 0;
-  display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 2px;
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 2px;
   background: var(--line); border: 2px solid var(--line);
 }
+@media (max-width: 760px) { .cards { grid-template-columns: 1fr; } }
 .card { position: relative; background: var(--night); padding: 26px 24px 22px; }
 .card:hover { background: var(--concrete); }
 .card__num {
@@ -351,6 +358,15 @@ figcaption, .fine { color: var(--dim); font-size: 14px; margin-top: 10px; }
 .platform .btn--block .btn__sub { align-self: center; }
 .more { font: 600 15px/1 var(--label); text-transform: uppercase; letter-spacing: .08em; }
 .more::after { content: " →"; }
+
+/* A picture of the interface from before the app, waiting for an approved capture. */
+.needs-capture { position: relative; }
+.needs-capture::after {
+  content: "Old UI: new capture needed";
+  position: absolute; top: 10px; left: 10px; z-index: 2; padding: 5px 9px;
+  background: var(--brick); color: var(--ink); pointer-events: none;
+  font: 700 12px/1 var(--label); text-transform: uppercase; letter-spacing: .1em;
+}
 
 /* Mods */
 

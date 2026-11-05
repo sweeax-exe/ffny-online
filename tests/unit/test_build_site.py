@@ -34,6 +34,13 @@ def test_page_refers_only_to_published_media():
     assert referenced <= set(site.MEDIA), referenced - set(site.MEDIA)
 
 
+def test_page_links_to_docs_that_exist():
+    text = (ROOT / 'site/index.html').read_text(encoding='utf-8')
+    linked = set(re.findall(r'DefJamFFNY-recomp/blob/main/([^"#]+)', text))
+    assert linked, 'expected the page to link to the docs'
+    assert not [path for path in linked if not (ROOT / path).exists()]
+
+
 def test_every_source_is_approved_media():
     approved = site.approved_media(ROOT)
     assert all(source in approved for source in site.MEDIA.values())

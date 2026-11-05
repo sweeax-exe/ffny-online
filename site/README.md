@@ -35,26 +35,31 @@ When the API is unavailable, the page reads `releases.json`, which the deploy wr
 ## Publishing
 
 `.github/workflows/pages.yml` builds and deploys the site when a stable (not pre-release)
-release is published, and on demand from the Actions tab (**Pages → Run workflow**). Before the
-first deploy, enable Pages once: **Settings → Pages → Build and deployment → Source: GitHub
-Actions**.
+release is published, and on demand from the Actions tab (**Pages → Run workflow**). Betas never
+deploy it. The site goes live with stable v1.0.0, so `pages.yml` must be on the commit that release
+is tagged from. Before that first deploy, enable Pages once: **Settings → Pages → Build and
+deployment → Source: GitHub Actions**.
 
-The release line, download buttons and news follow the latest release by themselves. Feature
+The release line, download buttons and news follow the latest stable release by themselves. Feature
 copy, the FAQ and the roadmap are written by hand: update them when a release changes what the
 port does.
 
 ## Proposed captures
 
 Pending the owner's approval. None of these exist yet; each would be captured from a tagged
-release, reviewed, then pinned as described under **Images**.
+release, reviewed, then pinned as described under **Images**. Pictures of the old interface carry
+the `needs-capture` class, which draws a visible label on them; remove it when one is replaced.
 
 | Priority | Shot | Where it goes | Why |
 |---|---|---|---|
-| 1 | Mods page with the catalogue and a pack installed (UI only) | Mods section, replacing the Advanced screenshot | Shows the feature the section describes. |
+| 1 | The app's Home screen (UI only) | Screens gallery, replacing the old launcher Home | The page describes the app; `launcher.png` is the v0.10.6 launcher. |
+| 1 | The app's first run, Modern/Original step (UI only) | Screens gallery or Install section | Shows the simplified setup. |
+| 1 | Mods page, Browse tab with the catalogue (UI only) | Mods section, replacing the Advanced screenshot | Shows the feature the section describes. |
+| 1 | Current Advanced settings (UI only) | Screens gallery | `launcher-advanced.png` is the v0.10.6 layout. |
+| 1 | Current F1 overlay over a fight | Screens gallery | `overlay.png` is from v0.9.0. |
 | 1 | A second venue in daylight or a bright club, 16:9, HD | Screens gallery | Every current gameplay shot is the dark Basement. |
 | 1 | Steam Deck in Gaming Mode, 16:10 | Screens gallery, Linux install card | Platform claim with no picture today. |
-| 2 | Four-fighter free-for-all | Features card 06 or gallery | Local multiplayer; caption only what the capture proves. |
+| 2 | Four-fighter free-for-all | Features card 08 or gallery | Local multiplayer; caption only what the capture proves. |
 | 2 | Created fighter in the Sketch Artist or crib | Screens gallery | Story mode beyond versus fights, and the v0.12.1 fixes. |
-| 2 | Current setup wizard on macOS or the Deck, neutral paths | Install section | The only setup capture is the historical Windows one. |
 | 3 | A short loop of a grapple or Blazin' move, 16:9 | Hero reel | Replaces the face-off clip with a signature moment. |
 | 3 | Windows capture of the same fight frame | Screens fine print | All captures are Mac today. |
