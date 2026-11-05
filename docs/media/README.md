@@ -74,6 +74,21 @@ illustrates the installation workflow, not the current wizard or its
 new update controls. A fresh setup capture is still needed; see the
 [setup guide](../setup-installer.md) for current behavior.
 
+## Project site
+
+The `compare-*` pairs and `app-*` screens are for the [project site](../../site/README.md), approved by the
+owner on November 5, 2026. Captured on an Apple M1 Pro from the v1.0.0 candidate build `6396ac3`, whose
+interface matches v1.0.0 beta 2 apart from test hooks.
+
+- **`compare-*-before.png`:** 640×480, 4:3, render scale 1, original textures.
+- **`compare-*-after.jpg`:** 1708×960, 16:9, render scale 2, Upscaled Original Textures, HD Widescreen Menus
+  1.4.0, HD Fighters 1.0.0, MSAA 4×, anisotropic filtering 16×, default colour tint and film scratches.
+- **`compare-fight-*`:** Nyne vs Trejo at The Limit, one seeded fight at simulation step 900. The crowd differs
+  because the wider view frames it differently.
+- **`compare-cutscene-*`:** Story scene `sc05`, 8 seconds after its file opens. The frames are timed, not stepped.
+- **`compare-menu-*`:** the main menu, idle. **`compare-map-*`:** the Battle venue map.
+- **`app-*`:** the app in a test home folder with the Modern experience. `app-overlay.png` is the F1 overlay over a fight.
+
 ## Capture provenance
 
 The owner requested review, selection and inclusion of this supplied capture

@@ -6,7 +6,7 @@
 
 `site/` holds only text (HTML, CSS, JS). The pictures the page shows are copied in here from
 the files the owner already approved for publication: the README media pinned in
-`scripts/check-source-tree.py` (D58, D144) and the branding set pinned by `branding/SHA256SUMS`
+`scripts/check-source-tree.py` (D58, D144 and later approvals) and the branding set pinned by `branding/SHA256SUMS`
 (D98). Each copy is checked against its pinned SHA-256 first, so the site cannot publish a file
 the tree check would not admit. The game artwork stays the property of its rights holders.
 
@@ -32,11 +32,20 @@ MEDIA = {
     'icon-256.png': 'branding/icon/png/defjam-256.png',
     'gameplay-hero.png': 'docs/media/gameplay-hero.png',
     'hd-16x9-gameplay.mp4': 'docs/media/hd-16x9-gameplay.mp4',
-    'textures-comparison.png': 'docs/media/textures-comparison.png',
-    'widescreen-comparison.png': 'docs/media/widescreen-comparison.png',
-    'launcher.png': 'docs/media/launcher.png',
-    'launcher-advanced.png': 'docs/media/launcher-advanced.png',
-    'overlay.png': 'docs/media/overlay.png',
+    'compare-cutscene-before.png': 'docs/media/compare-cutscene-before.png',
+    'compare-cutscene-after.jpg': 'docs/media/compare-cutscene-after.jpg',
+    'compare-fight-before.png': 'docs/media/compare-fight-before.png',
+    'compare-fight-after.jpg': 'docs/media/compare-fight-after.jpg',
+    'compare-menu-before.png': 'docs/media/compare-menu-before.png',
+    'compare-menu-after.jpg': 'docs/media/compare-menu-after.jpg',
+    'compare-map-before.png': 'docs/media/compare-map-before.png',
+    'compare-map-after.jpg': 'docs/media/compare-map-after.jpg',
+    'app-home.png': 'docs/media/app-home.png',
+    'app-first-run.png': 'docs/media/app-first-run.png',
+    'app-settings.png': 'docs/media/app-settings.png',
+    'app-mods-installed.png': 'docs/media/app-mods-installed.png',
+    'app-mods-browse.png': 'docs/media/app-mods-browse.png',
+    'app-overlay.png': 'docs/media/app-overlay.png',
     'developer-menu.png': 'docs/media/developer-menu.png',
 }
 

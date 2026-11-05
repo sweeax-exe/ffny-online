@@ -41,12 +41,12 @@ v0.13.0 until 1.0 ships, so its buttons offer the old setup. To see the app down
 | S1 | Replace the hero gameplay clip | **owner**: clips | waiting on clips |
 | S2 | New features heading | **owner**: pick | waiting on pick |
 | S3 | Feature cards: order and wording | | done, see question below |
-| S4 | New captures: Menu/Launcher, Mod launcher, other old-UI pictures | **owner**: approval | captured, awaiting approval |
+| S4 | New captures: Menu/Launcher, Mod launcher, other old-UI pictures | | done |
 | S5 | Install guide for the app | | open |
 | S6 | Owner confirmations | **owner**: answers | open |
 | S7 | Vlad's review of the remaining page sections | **owner**: notes | waiting on notes |
 | S8 | README pass for 1.0 | **owner**: review | open |
-| S10 | Four new before/after sliders | **owner**: answers, approval | 3 of 4 captured, awaiting approval; slider code not started |
+| S10 | Four new before/after sliders | | done |
 | S11 | Three new Roadmap entries | | open |
 | S9 | Go-live | **owner**: Pages setting | open, last |
 
@@ -95,16 +95,8 @@ by default or asks first.
 
 ### S4. New captures
 
-Vlad has asked for these two first:
-
-- [ ] **Menu/Launcher:** the app's current Home screen. It replaces `media/launcher.png` in the Screens gallery.
-- [ ] **Mod launcher:** the app's current Mods page, showing the catalogue. It replaces the Advanced picture
-  in the Mods section.
-
-Pictures with the `needs-capture` class show a red "Old UI" label on the page: Home, Advanced (twice)
-and the F1 overlay. The rest of the shot list is in [site/README.md](site/README.md#proposed-captures).
-Vlad approves each capture. Pin it, swap it in and remove the class. The labels must all be gone before
-go-live, either replaced or by Vlad's choice to ship the old picture.
+Done: `docs/media/app-*.png`, approved by Vlad on 2026-11-05 and pinned. The remaining optional shots are in
+[site/README.md](site/README.md#proposed-captures).
 
 ### S5. Install guide for the app
 
@@ -155,20 +147,8 @@ Not started; Vlad wants to review its wording. Known issues:
 
 ### S10. Four new before/after sliders
 
-**Progress (2026-11-05, Vlad's Mac):** the fight, Main Menu and Map Select pairs and all the S4 UI screens are captured from the
-candidate build `6396ac3`. They exist only on that Mac, under the ignored `logs/site-captures/` in Vlad's
-`feat/project-site` worktree, and nothing is pinned until he approves. The cutscene pair was not requested yet.
-Do not recapture these unless Vlad asks. How they were made:
-
-- **Before:** `RECOMP_ASPECT=4:3`, `RECOMP_RENDER_SCALE=1`, no packs, `RECOMP_TEXTURE_MIPS=1`.
-- **After:** `RECOMP_ASPECT=16:9`, `RECOMP_RENDER_SCALE=2`, `RECOMP_MSAA=4x`, `RECOMP_ANISOTROPY=16x`,
-  `RECOMP_TEXTURE_MIPS=1`, `RECOMP_TRANS_SHOT_NATIVE=1`, `RECOMP_TEXTURE_CACHE_MB=4096`, with Upscaled Original
-  Textures, HD Widescreen Menus 1.4.0 and HD Fighters 1.0.0. The colour tint and film scratches stay at their defaults.
-- **Fight:** harness Battle route, seed `RECOMP_TEST_RNG_SEED=20261105`, step-timed input, frame by
-  `RECOMP_TEST_SHOT_STEPS` (step 900). `RECOMP_FE_INJECT` picks them after the venue choice:
-  `game.choosevenue#1=>Controller.ControllerSetup(0,0,2,0);Controller.ControllerSetup(1,-1,7,1);Game.ChooseVenue(2)`.
-- **Map Select:** the Battle venue map (`battle/chsVenue`). **Main Menu:** idle, 14 s after the menu music starts.
-- **App screens:** `defjam_app` with `RECOMP_LAUNCHER_SCRIPT` and a throwaway `HOME`. Overlay: `RECOMP_WINDOW_SHOT`.
+**Done (2026-11-05):** all four pairs are approved, pinned as `docs/media/compare-*` and on the page, with
+`docs/media/README.md` recording how they were made. The two old sliders are removed, by Vlad's choice.
 
 Add four sliders to the Screens section. In each one:
 
@@ -177,36 +157,12 @@ Add four sliders to the Screens section. In each one:
 
 Scenarios:
 
-- [ ] One v One fight in The Limit, Nyne vs Trejo
-- [ ] A cutscene
-- [ ] The main menu
-- [ ] Map Select
+- [x] One v One fight in The Limit, Nyne vs Trejo
+- [x] A cutscene: Vlad chose Candidate A, sc05
+- [x] The main menu
+- [x] Map Select
 
-**Questions for Vlad, before capturing:**
-
-- Do the two existing sliders (original vs upscaled textures, 4:3 vs 16:9) stay, making six, or do these replace them?
-- "All graphics settings": MSAA, anisotropic filtering, game texture levels and high-quality downscaling
-  sharpen the picture, but the colour tint and film scratches change its look. Should those two be left off?
-  (Suggested: yes.)
-- Which cutscene?
-- Is "Map Select" the Story map or the Battle stage select?
-- Which platform should these be captured on? The page's fine print says captures are from the Mac, so
-  update it if that changes.
-
-**How:**
-
-- Each pair must show the same moment. `docs/09-testing-harness.md` has seeded scenarios and `--step-shots`
-  for fight steps, and `docs/scene-selector.md` covers playing a chosen cutscene. Match menus by the same
-  screen, and say so in the caption if something on screen moves between shots.
-- Game runs are serial: never start two at once, including across agents. Use disposable saves, and keep raw
-  captures under the ignored `logs/`. Record the build used.
-- Vlad approves each exported image, then pin it as in the rules above and add it to `MEDIA`. Keep each
-  file about 1 MB or less, since six sliders load on one page.
-- The slider code assumes one image holding two labelled panels side by side
-  (`.compare__img` and `--bar` in `site/styles.css`). New pairs will probably be two separate files, so the
-  slider needs to support that. The 4:3 side sits pillarboxed inside the 16:9 frame, as the existing
-  widescreen slider does.
-- Give each slider tags, alt text, an `aria-label` and a caption. Check the layout at phone width.
+Vlad's answers: the old sliders go; Map Select is the Battle venue map; the colour tint and film scratches stay at their defaults.
 
 ### S11. Three new Roadmap entries
 

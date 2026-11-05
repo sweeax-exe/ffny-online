@@ -157,63 +157,97 @@
       <div class="section__head">
         <p class="kicker">Screens</p>
         <h2 id="screens-title">Drag the line. See the difference.</h2>
-        <p class="section__lede">Same seeded fight, same moment. One setting changes.</p>
+        <p class="section__lede">Original on the left. Everything turned up on the right.</p>
       </div>
 
       <div class="compare-grid">
         <figure class="compare" data-compare>
-          <div class="compare__stage compare__stage--43">
-            <img class="compare__img compare__img--left" src="media/textures-comparison.png"
-                 alt="Original textures, 4:3" width="1932" height="764" loading="lazy">
-            <div class="compare__after">
-              <img class="compare__img compare__img--right" src="media/textures-comparison.png"
-                   alt="Upscaled original textures, 4:3" width="1932" height="764" loading="lazy">
+          <div class="compare__stage">
+            <img class="compare__after-img" src="media/compare-fight-after.jpg"
+                 alt="Nyne vs Trejo at The Limit: 16:9 at 2× with HD mods" width="1708" height="960" loading="lazy">
+            <div class="compare__before">
+              <img src="media/compare-fight-before.png" alt="Nyne vs Trejo at The Limit: original 4:3 at 480p" width="640" height="480" loading="lazy">
             </div>
             <span class="compare__tag compare__tag--l">Original</span>
-            <span class="compare__tag compare__tag--r">Upscaled</span>
+            <span class="compare__tag compare__tag--r">Recompiled</span>
             <div class="compare__handle" aria-hidden="true"></div>
             <input class="compare__range" type="range" min="0" max="100" value="50"
-                   aria-label="Reveal: original textures to upscaled original textures">
+                   aria-label="Nyne vs Trejo at The Limit: reveal the original or the recompiled picture">
           </div>
-          <figcaption>Clothing and floor detail. These are upscales of the original art, generated from your own copy, not replacement artwork. Crowd members can differ between captures.</figcaption>
+          <figcaption>Nyne vs Trejo at The Limit: the same seeded fight, at the same moment. The crowd differs because the wider view frames it differently.</figcaption>
         </figure>
-
         <figure class="compare" data-compare>
-          <div class="compare__stage compare__stage--169">
-            <img class="compare__img compare__img--left" src="media/widescreen-comparison.png"
-                 alt="Original 4:3 framing, pillarboxed" width="1932" height="584" loading="lazy">
-            <div class="compare__after">
-              <img class="compare__img compare__img--right" src="media/widescreen-comparison.png"
-                   alt="16:9 widescreen framing" width="1932" height="584" loading="lazy">
+          <div class="compare__stage">
+            <img class="compare__after-img" src="media/compare-cutscene-after.jpg"
+                 alt="Story cutscene: 16:9 at 2× with HD mods" width="1708" height="960" loading="lazy">
+            <div class="compare__before">
+              <img src="media/compare-cutscene-before.png" alt="Story cutscene: original 4:3 at 480p" width="640" height="480" loading="lazy">
             </div>
-            <span class="compare__tag compare__tag--l">4:3</span>
-            <span class="compare__tag compare__tag--r">16:9</span>
+            <span class="compare__tag compare__tag--l">Original</span>
+            <span class="compare__tag compare__tag--r">Recompiled</span>
             <div class="compare__handle" aria-hidden="true"></div>
             <input class="compare__range" type="range" min="0" max="100" value="50"
-                   aria-label="Reveal: 4:3 to 16:9 widescreen">
+                   aria-label="Story cutscene: reveal the original or the recompiled picture">
           </div>
-          <figcaption>Widescreen shows more of the arena while keeping the vertical framing, and moves the health bars toward the edges.</figcaption>
+          <figcaption>A Story cutscene. The original letterboxes it inside 4:3; here it fills the screen.</figcaption>
+        </figure>
+        <figure class="compare" data-compare>
+          <div class="compare__stage">
+            <img class="compare__after-img" src="media/compare-menu-after.jpg"
+                 alt="Main menu: 16:9 at 2× with HD mods" width="1708" height="960" loading="lazy">
+            <div class="compare__before">
+              <img src="media/compare-menu-before.png" alt="Main menu: original 4:3 at 480p" width="640" height="480" loading="lazy">
+            </div>
+            <span class="compare__tag compare__tag--l">Original</span>
+            <span class="compare__tag compare__tag--r">Recompiled</span>
+            <div class="compare__handle" aria-hidden="true"></div>
+            <input class="compare__range" type="range" min="0" max="100" value="50"
+                   aria-label="Main menu: reveal the original or the recompiled picture">
+          </div>
+          <figcaption>The main menu.</figcaption>
+        </figure>
+        <figure class="compare" data-compare>
+          <div class="compare__stage">
+            <img class="compare__after-img" src="media/compare-map-after.jpg"
+                 alt="Venue map: 16:9 at 2× with HD mods" width="1708" height="960" loading="lazy">
+            <div class="compare__before">
+              <img src="media/compare-map-before.png" alt="Venue map: original 4:3 at 480p" width="640" height="480" loading="lazy">
+            </div>
+            <span class="compare__tag compare__tag--l">Original</span>
+            <span class="compare__tag compare__tag--r">Recompiled</span>
+            <div class="compare__handle" aria-hidden="true"></div>
+            <input class="compare__range" type="range" min="0" max="100" value="50"
+                   aria-label="Venue map: reveal the original or the recompiled picture">
+          </div>
+          <figcaption>Choosing a venue.</figcaption>
         </figure>
       </div>
+      <p class="fine">Left: original 4:3 at 480p with original textures. Right: 16:9 at 2× with Upscaled Original Textures, HD Widescreen Menus, HD Fighters, MSAA 4× and anisotropic filtering 16×.</p>
 
       <div class="gallery">
-        <!-- "needs-capture" marks a picture of the interface before the app. Remove the class when an
-             approved capture replaces it (site/README.md, "Proposed captures"). -->
-        <button class="shot needs-capture" type="button" data-full="media/launcher.png">
-          <img src="media/launcher.png" alt="Launcher Home screen with Play and the common display choices" width="1440" height="960" loading="lazy">
+        <button class="shot" type="button" data-full="media/app-home.png">
+          <img src="media/app-home.png" alt="The app's Home screen with Play, Settings, Controls, Mods and Help" loading="lazy">
           <span class="shot__cap">Home: Play, settings, controls, mods and help</span>
         </button>
-        <button class="shot needs-capture" type="button" data-full="media/overlay.png">
-          <img src="media/overlay.png" alt="F1 settings overlay over a live fight" width="1800" height="1130" loading="lazy">
-          <span class="shot__cap">F1 overlay: change settings mid-fight</span>
+        <button class="shot" type="button" data-full="media/app-first-run.png">
+          <img src="media/app-first-run.png" alt="First run, choosing the Modern or Original experience" loading="lazy">
+          <span class="shot__cap">First run: Modern or Original</span>
+        </button>
+        <button class="shot" type="button" data-full="media/app-settings.png">
+          <img src="media/app-settings.png" alt="Graphics settings" loading="lazy">
+          <span class="shot__cap">Settings: every option, explained</span>
+        </button>
+        <button class="shot" type="button" data-full="media/app-mods-installed.png">
+          <img src="media/app-mods-installed.png" alt="The Mods page, Installed tab" loading="lazy">
+          <span class="shot__cap">Mods: what you have, and in what order</span>
+        </button>
+        <button class="shot" type="button" data-full="media/app-overlay.png">
+          <img src="media/app-overlay.png" alt="The F1 settings overlay over a fight" loading="lazy">
+          <span class="shot__cap">F1 overlay: change settings in the game</span>
         </button>
         <button class="shot" type="button" data-full="media/developer-menu.png">
-          <img src="media/developer-menu.png" alt="The restored EA developer menu" width="1830" height="1336" loading="lazy">
+          <img src="media/developer-menu.png" alt="The restored EA developer menu" loading="lazy">
           <span class="shot__cap">The restored developer menu</span>
-        </button>
-        <button class="shot needs-capture" type="button" data-full="media/launcher-advanced.png">
-          <img src="media/launcher-advanced.png" alt="Advanced settings" width="1440" height="960" loading="lazy">
-          <span class="shot__cap">Advanced: every option, explained</span>
         </button>
       </div>
       <p class="fine">Captures from the native Mac port (Vulkan via MoltenVK). They don't show Steam Deck Gaming Mode or Windows rendering.</p>
@@ -306,9 +340,8 @@
             <a href="https://github.com/vyanhursky/DefJamFFNY-recomp/blob/main/docs/mod-manager.md">Mod manager</a>
           </p>
         </div>
-        <figure class="split__media needs-capture">
-          <!-- Swap for an approved Mods-page capture when one exists, and remove "needs-capture". -->
-          <img src="media/launcher-advanced.png" alt="Advanced settings, which include the Mods category" width="1440" height="960" loading="lazy">
+        <figure class="split__media">
+          <img src="media/app-mods-browse.png" alt="The Mods page, Browse tab, listing the catalogue" width="2200" height="1800" loading="lazy">
         </figure>
       </div>
     </section>

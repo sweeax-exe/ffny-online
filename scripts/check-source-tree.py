@@ -38,6 +38,22 @@ APPROVED_README_MEDIA = {
     'docs/media/widescreen-comparison.mp4': '2916fc4efd72b6d109d829157c01479c9ef50d84c5bbb94437d3fd87060f7d2c',
     # D130 (2026-10-17): the owner's own screenshot of EA's developer menu (text only) for docs/developer-menu.md.
     'docs/media/developer-menu.png': '86a3a91ae252ff9692003e3b88ee8bbc68af176ab74bb7fa0db4e4fd5add9077',
+    # 2026-11-05: the owner approved the project site's before/after pairs and the app's screens, captured on
+    # macOS from the v1.0.0 candidate (docs/media/README.md).
+    'docs/media/compare-cutscene-before.png': 'c6656bca90c5d48476fb1ec4c95f543782f4bbec4c8f83a685b485827f9dc91c',
+    'docs/media/compare-cutscene-after.jpg': 'cb7953b35665e8811ba4826e7fa37576f00de46fb0166ec456453dd7c6c37898',
+    'docs/media/compare-fight-before.png': 'def518e6e2e8edeed541f8f97555aae63fe91879aa2ce9757042f489ec1a058c',
+    'docs/media/compare-fight-after.jpg': 'a039bb965d18ec5bb2cbb34a882121b5855d2cfaeab8106085c70a7539eaf186',
+    'docs/media/compare-menu-before.png': 'c77e8071aaab91906b8b63ff815624d63c25f3a6427df2a7e9ffe19cdb66336e',
+    'docs/media/compare-menu-after.jpg': '83ddf5179df2a8725a81952376c535e8dadcbc3926f2969e33cc02a07bc5d974',
+    'docs/media/compare-map-before.png': '3d07e21f4ee3851a270ad74290b9e80430c7d7f92df4a2bf93cd01753c51f624',
+    'docs/media/compare-map-after.jpg': '0971a0995a332f4b75b1d32b69f2f5b731c90b9bbc69f62278ef4815f15540f8',
+    'docs/media/app-home.png': '018ca077d45b2cdaee111c4c2a576eafb4bd5f6e9d658845ce6a34bdf83e2cbe',
+    'docs/media/app-first-run.png': '72a941c2f8f36650da1ae192754f1c6d425fae87ddffbcf799b6b93fc1f9fb44',
+    'docs/media/app-settings.png': '1ae66b9be20c700f98455166d8fd69ef62c1a98b286d6001d4170397453f0340',
+    'docs/media/app-mods-installed.png': 'fd3b3b0d753c5dc397b7818b37c6e8915e9ea8be21ff683289508683bbcdd678',
+    'docs/media/app-mods-browse.png': '62ce3debd8fa090920cb5b55a6906b7b6268dff4acc71483190513f3ca796ab0',
+    'docs/media/app-overlay.png': 'e0ceab22af71f319309d9ea17013f2383f61e2602304af888fc1bf0093f5b401',
 }
 # D98 (2026-10-10): the owner approved committing the application icons and the Steam artwork
 # rendered from the game's own textures (the shield, the title wordmark, the title-screen scene).

@@ -54,10 +54,10 @@ def test_refuses_unapproved_or_changed_media(tmp_path, monkeypatch):
 
     monkeypatch.delitem(site.MEDIA, 'extra.png')
     approved = dict(site.approved_media(ROOT))
-    approved['docs/media/overlay.png'] = '0' * 64
+    approved['docs/media/developer-menu.png'] = '0' * 64
     monkeypatch.setattr(site, 'approved_media', lambda repo: approved)
     assert site.build(ROOT, tmp_path / 'site') == [
-        'docs/media/overlay.png: does not match its approved fingerprint']
+        'docs/media/developer-menu.png: does not match its approved fingerprint']
 
 
 def test_site_folder_is_text_only():

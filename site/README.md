@@ -21,6 +21,8 @@ checks that the page only refers to names in that table.
 A new picture needs the owner's approval and a fingerprint, like any README media: add it to
 `docs/media/` and the allowlist in `scripts/check-source-tree.py`, then add a line to `MEDIA`.
 
+A slider is a pair: a 16:9 after picture and a 4:3 before picture, of the same moment.
+
 ## Preview
 
 ```sh
@@ -47,16 +49,10 @@ port does.
 ## Proposed captures
 
 Pending the owner's approval. None of these exist yet; each would be captured from a tagged
-release, reviewed, then pinned as described under **Images**. Pictures of the old interface carry
-the `needs-capture` class, which draws a visible label on them; remove it when one is replaced.
+release, reviewed, then pinned as described under **Images**.
 
 | Priority | Shot | Where it goes | Why |
 |---|---|---|---|
-| 1 | The app's Home screen (UI only) | Screens gallery, replacing the old launcher Home | The page describes the app; `launcher.png` is the v0.10.6 launcher. |
-| 1 | The app's first run, Modern/Original step (UI only) | Screens gallery or Install section | Shows the simplified setup. |
-| 1 | Mods page, Browse tab with the catalogue (UI only) | Mods section, replacing the Advanced screenshot | Shows the feature the section describes. |
-| 1 | Current Advanced settings (UI only) | Screens gallery | `launcher-advanced.png` is the v0.10.6 layout. |
-| 1 | Current F1 overlay over a fight | Screens gallery | `overlay.png` is from v0.9.0. |
 | 1 | A second venue in daylight or a bright club, 16:9, HD | Screens gallery | Every current gameplay shot is the dark Basement. |
 | 1 | Steam Deck in Gaming Mode, 16:10 | Screens gallery, Linux install card | Platform claim with no picture today. |
 | 2 | Four-fighter free-for-all | Features card 08 or gallery | Local multiplayer; caption only what the capture proves. |
