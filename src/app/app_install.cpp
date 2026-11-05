@@ -326,9 +326,13 @@ Placement place_app(std::string *error)
         return Placement::NeedsInstall;
     }
     // A newer release opened from wherever it was downloaded updates the installed copy first.
-    std::ifstream manifest(h / "payload/manifest.json", std::ios::binary);
     std::stringstream text;
-    text << manifest.rdbuf();
+    {
+        // Closed before the payload folder is renamed: Windows refuses to rename a folder while a
+        // file in it is open ("Access is denied").
+        std::ifstream manifest(h / "payload/manifest.json", std::ios::binary);
+        text << manifest.rdbuf();
+    }
     std::string s = text.str(), theirs;
     size_t at = s.find("\"version\"");
     if (at != std::string::npos && (at = s.find('"', s.find(':', at) + 1)) != std::string::npos)
