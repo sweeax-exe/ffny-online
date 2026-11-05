@@ -1,0 +1,451 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Def Jam: Fight for NY — Fan Recomp</title>
+  <meta name="description" content="An unofficial native port of Def Jam: Fight for NY for Windows, macOS, Linux and Steam Deck, built on your machine from your own USA Xbox copy.">
+  <meta name="theme-color" content="#0c0b0a">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Def Jam: Fight for NY — Fan Recomp">
+  <meta property="og:description" content="The 2004 Xbox classic, recompiled to run natively on Windows, macOS, Linux and Steam Deck. Bring your own copy.">
+  <meta property="og:image" content="media/social-preview.jpg">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="icon" type="image/png" sizes="64x64" href="media/icon-64.png">
+  <link rel="apple-touch-icon" href="media/icon-256.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Anton&family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+
+  <header class="nav" id="top">
+    <div class="nav__inner">
+      <a class="nav__brand" href="#top" aria-label="Def Jam: Fight for NY Fan Recomp, back to top">
+        <img src="media/icon-64.png" alt="" width="32" height="32">
+        <span>FFNY <b>Recomp</b></span>
+      </a>
+      <nav class="nav__links" aria-label="Sections">
+        <a href="#features">Features</a>
+        <a href="#screens">Screens</a>
+        <a href="#install">Install</a>
+        <a href="#mods">Mods</a>
+        <a href="#news">News</a>
+        <a href="#faq">FAQ</a>
+        <a href="#docs">Docs</a>
+      </nav>
+      <div class="nav__ext">
+        <a class="icon-link" href="https://discord.gg/xNvBs23ZBw" aria-label="Discord">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.3 4.4A19.6 19.6 0 0 0 15.4 3l-.6 1.3a18.2 18.2 0 0 0-5.6 0L8.6 3a19.6 19.6 0 0 0-4.9 1.4C.6 9 -.3 13.6.1 18.1a19.8 19.8 0 0 0 6 3l1.3-2.1a12.8 12.8 0 0 1-2-1l.5-.4a14.1 14.1 0 0 0 12.2 0l.5.4c-.6.4-1.3.7-2 1l1.3 2.1a19.7 19.7 0 0 0 6-3c.5-5.2-.8-9.7-3.6-13.7ZM8.3 15.4c-1.2 0-2.2-1.1-2.2-2.4s1-2.4 2.2-2.4 2.2 1.1 2.2 2.4-1 2.4-2.2 2.4Zm7.4 0c-1.2 0-2.2-1.1-2.2-2.4s1-2.4 2.2-2.4 2.2 1.1 2.2 2.4-1 2.4-2.2 2.4Z"/></svg>
+        </a>
+        <a class="icon-link" href="https://github.com/vyanhursky/DefJamFFNY-recomp" aria-label="GitHub">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.6 22.4c.6.1.8-.3.8-.6v-2c-3.2.7-3.9-1.5-3.9-1.5-.5-1.3-1.3-1.7-1.3-1.7-1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.7-1.6-2.6-.3-5.3-1.3-5.3-5.7 0-1.3.5-2.3 1.2-3.1-.1-.3-.5-1.5.1-3.1 0 0 1-.3 3.2 1.2a11 11 0 0 1 5.8 0c2.2-1.5 3.2-1.2 3.2-1.2.6 1.6.2 2.8.1 3.1.8.8 1.2 1.9 1.2 3.1 0 4.4-2.7 5.4-5.3 5.7.4.4.8 1.1.8 2.2v3.2c0 .3.2.7.8.6A11.5 11.5 0 0 0 12 .5Z"/></svg>
+        </a>
+        <a class="btn btn--sm" href="#install">Download</a>
+      </div>
+    </div>
+  </header>
+
+  <main id="main">
+    <section class="hero" aria-labelledby="hero-title">
+      <div class="hero__bg" aria-hidden="true"></div>
+      <div class="hero__inner">
+        <img class="hero__logo" src="media/logo-fan.png" width="1280" height="353"
+             alt="Def Jam: Fight for NY — Fan Recomp">
+        <h1 id="hero-title" class="hero__title">Back on the block. <span>Native on your machine.</span></h1>
+        <p class="hero__lede">
+          An unofficial native port of the 2004 Xbox classic for Windows, macOS, Linux and
+          Steam Deck. Higher resolution, widescreen, modern controllers, local multiplayer
+          and optional HD textures, built on your computer from your own copy.
+        </p>
+        <div class="hero__actions">
+          <a class="btn btn--primary" id="download-primary"
+             href="https://github.com/vyanhursky/DefJamFFNY-recomp/releases/latest">
+            <span class="btn__label">Get the latest setup</span>
+            <span class="btn__sub" id="download-sub">Windows · macOS · Linux</span>
+          </a>
+          <a class="btn btn--ghost" href="#install">All platforms</a>
+        </div>
+        <p class="release-line" id="release-line" aria-live="polite">
+          <a href="https://github.com/vyanhursky/DefJamFFNY-recomp/releases/latest">Latest release notes</a>
+        </p>
+        <p class="hero__note">
+          <strong>Bring your own game.</strong> You need your own supported
+          <strong>USA Xbox</strong> disc image or extracted dump. PS2 and GameCube copies can't be used.
+          No game files are downloaded or distributed. <a href="#faq-dump">Why?</a>
+        </p>
+      </div>
+    </section>
+
+    <section class="reel" aria-label="Gameplay clip">
+      <figure class="reel__frame">
+        <video autoplay muted loop playsinline preload="metadata" poster="media/gameplay-hero.png"
+               aria-label="Blaze and Doc trade strikes in the Basement venue, 16:9 with faithful HD textures">
+          <source src="media/hd-16x9-gameplay.mp4" type="video/mp4">
+        </video>
+        <figcaption>Native macOS, render scale 2, 16:9 with faithful HD textures. Silent capture.</figcaption>
+      </figure>
+    </section>
+
+    <section class="section" id="features" aria-labelledby="features-title">
+      <div class="section__head">
+        <p class="kicker">What you get</p>
+        <h2 id="features-title">The same fight. A sharper corner.</h2>
+      </div>
+      <ul class="cards">
+        <li class="card">
+          <span class="card__num">01</span>
+          <h3>Native on three platforms</h3>
+          <p>Windows x64 on Direct3D 11. Apple Silicon Macs and x86-64 Linux on Vulkan.
+             Steam Deck runs the Linux build natively.</p>
+        </li>
+        <li class="card">
+          <span class="card__num">02</span>
+          <h3>60 fps, up to 4× resolution</h3>
+          <p>Targets 60 frames per second, with 1×–4× internal resolution, a resizable
+             window or borderless full screen.</p>
+        </li>
+        <li class="card">
+          <span class="card__num">03</span>
+          <h3>Widescreen <small>beta</small></h3>
+          <p>16:9 and 16:10 widen the 3D view while the HUD and menus keep their shape.
+             Original 4:3 is always one setting away.</p>
+        </li>
+        <li class="card">
+          <span class="card__num">04</span>
+          <h3>Faithful HD textures</h3>
+          <p>Setup can generate 4× texture packs locally from your own dump. No GPU or
+             AI model needed, and the originals stay available.</p>
+        </li>
+        <li class="card">
+          <span class="card__num">05</span>
+          <h3>Controllers &amp; keyboard</h3>
+          <p>Xbox, DualSense, Switch Pro and more, with remapping, hot-plug and rumble.
+             Keyboard and mouse can carry gameplay bindings too.</p>
+        </li>
+        <li class="card">
+          <span class="card__num">06</span>
+          <h3>Four players, one couch</h3>
+          <p>Local multiplayer for up to four, mixing gamepads and a keyboard player.
+             Online play is not supported.</p>
+        </li>
+        <li class="card">
+          <span class="card__num">07</span>
+          <h3>EA's developer menu, restored</h3>
+          <p>The game's own debug menu, cut from the retail build: any fighters, any venue,
+             any Story scene, plus a stage viewer.</p>
+        </li>
+        <li class="card">
+          <span class="card__num">08</span>
+          <h3>Mods, in the launcher</h3>
+          <p>Discover, download, enable and order texture mods from a curated catalogue.
+             Mod Support is in beta since v0.11.0.</p>
+        </li>
+      </ul>
+    </section>
+
+    <section class="section section--dark" id="screens" aria-labelledby="screens-title">
+      <div class="section__head">
+        <p class="kicker">Screens</p>
+        <h2 id="screens-title">Drag the line. See the difference.</h2>
+        <p class="section__lede">Same seeded fight, same frame. Only one setting changes.</p>
+      </div>
+
+      <div class="compare-grid">
+        <figure class="compare" data-compare>
+          <div class="compare__stage compare__stage--43">
+            <img class="compare__img compare__img--left" src="media/textures-comparison.png"
+                 alt="Original textures, 4:3" width="1932" height="764" loading="lazy">
+            <div class="compare__after">
+              <img class="compare__img compare__img--right" src="media/textures-comparison.png"
+                   alt="Faithful HD textures, 4:3" width="1932" height="764" loading="lazy">
+            </div>
+            <span class="compare__tag compare__tag--l">Original</span>
+            <span class="compare__tag compare__tag--r">Faithful HD</span>
+            <div class="compare__handle" aria-hidden="true"></div>
+            <input class="compare__range" type="range" min="0" max="100" value="50"
+                   aria-label="Reveal: original textures to faithful HD">
+          </div>
+          <figcaption>Clothing, floor and crowd detail. HD is a faithful upscale of the original art, not replacement artwork.</figcaption>
+        </figure>
+
+        <figure class="compare" data-compare>
+          <div class="compare__stage compare__stage--169">
+            <img class="compare__img compare__img--left" src="media/widescreen-comparison.png"
+                 alt="Original 4:3 framing, pillarboxed" width="1932" height="584" loading="lazy">
+            <div class="compare__after">
+              <img class="compare__img compare__img--right" src="media/widescreen-comparison.png"
+                   alt="16:9 widescreen framing" width="1932" height="584" loading="lazy">
+            </div>
+            <span class="compare__tag compare__tag--l">4:3</span>
+            <span class="compare__tag compare__tag--r">16:9</span>
+            <div class="compare__handle" aria-hidden="true"></div>
+            <input class="compare__range" type="range" min="0" max="100" value="50"
+                   aria-label="Reveal: 4:3 to 16:9 widescreen">
+          </div>
+          <figcaption>Widescreen shows more of the arena while keeping the vertical framing, and moves the health bars toward the edges.</figcaption>
+        </figure>
+      </div>
+
+      <div class="gallery">
+        <!-- New captures (pending owner approval, see site/README.md "Proposed captures") slot in here. -->
+        <button class="shot" type="button" data-full="media/launcher.png">
+          <img src="media/launcher.png" alt="Launcher Home screen with display choices beside Play" width="1440" height="960" loading="lazy">
+          <span class="shot__cap">Launcher: common display choices beside Play</span>
+        </button>
+        <button class="shot" type="button" data-full="media/overlay.png">
+          <img src="media/overlay.png" alt="F1 settings overlay over a live fight" width="1800" height="1130" loading="lazy">
+          <span class="shot__cap">F1 overlay: change settings mid-fight</span>
+        </button>
+        <button class="shot" type="button" data-full="media/developer-menu.png">
+          <img src="media/developer-menu.png" alt="The restored EA developer menu" width="1830" height="1336" loading="lazy">
+          <span class="shot__cap">The restored developer menu</span>
+        </button>
+        <button class="shot" type="button" data-full="media/launcher-advanced.png">
+          <img src="media/launcher-advanced.png" alt="Launcher Advanced display settings" width="1440" height="960" loading="lazy">
+          <span class="shot__cap">Advanced: display, controls, mods and more</span>
+        </button>
+      </div>
+      <p class="fine">Captures from the native Mac port (Vulkan via MoltenVK). They don't show Steam Deck Gaming Mode or Windows rendering.</p>
+    </section>
+
+    <section class="section" id="install" aria-labelledby="install-title">
+      <div class="section__head">
+        <p class="kicker">Install</p>
+        <h2 id="install-title">Four steps to the first round.</h2>
+      </div>
+      <ol class="steps">
+        <li><h3>Have your dump</h3><p>Your own USA Xbox disc image (ISO/XISO) or extracted folder, matching the <a href="https://github.com/vyanhursky/DefJamFFNY-recomp/blob/main/config/dump-manifest.json">supported dump manifest</a>.</p></li>
+        <li><h3>Download setup</h3><p>Pick your platform below. Setup is game-free: it carries tools and source, never the game.</p></li>
+        <li><h3>Let it build</h3><p>Choose your dump, install folder and data folder, tick HD textures if you want them. Setup verifies, recompiles and builds the game locally.</p></li>
+        <li><h3>Play</h3><p>Open the launcher, choose display and input settings, hit <strong>Play</strong>.</p></li>
+      </ol>
+
+      <div class="platforms">
+        <article class="platform" data-platform="windows">
+          <h3>Windows</h3>
+          <p class="platform__arch">x64 · Direct3D 11</p>
+          <a class="btn btn--block" data-asset="windows-x64.exe"
+             href="https://github.com/vyanhursky/DefJamFFNY-recomp/releases/latest">Download .exe</a>
+          <ul>
+            <li>Setup is unsigned, so SmartScreen may ask before it runs.</li>
+            <li>Can install missing Microsoft Build Tools for you (asks for consent).</li>
+          </ul>
+          <a class="more" href="https://github.com/vyanhursky/DefJamFFNY-recomp/blob/main/docs/setup-installer.md">Windows guide</a>
+        </article>
+        <article class="platform" data-platform="mac">
+          <h3>macOS</h3>
+          <p class="platform__arch">Apple Silicon · Vulkan</p>
+          <a class="btn btn--block" data-asset="macos-arm64.dmg"
+             href="https://github.com/vyanhursky/DefJamFFNY-recomp/releases/latest">Download .dmg</a>
+          <ul>
+            <li>Apple Silicon (M-series) only. Intel Macs aren't supported.</li>
+            <li>Unsigned: macOS asks for confirmation on first open.</li>
+          </ul>
+          <a class="more" href="https://github.com/vyanhursky/DefJamFFNY-recomp/blob/main/docs/setup-installer.md#macos-setup-apple-silicon">macOS guide</a>
+        </article>
+        <article class="platform" data-platform="linux">
+          <h3>Linux &amp; Steam Deck</h3>
+          <p class="platform__arch">x86-64 · Vulkan</p>
+          <a class="btn btn--block" data-asset="linux-x64.tar.gz"
+             href="https://github.com/vyanhursky/DefJamFFNY-recomp/releases/latest">Download .tar.gz</a>
+          <ul>
+            <li>No compiler on SteamOS? Setup builds in a container (about 1&nbsp;GB, fetched once).</li>
+            <li>Add to Steam places the shortcut with library artwork.</li>
+          </ul>
+          <a class="more" href="https://github.com/vyanhursky/DefJamFFNY-recomp/blob/main/docs/setup-installer.md#linux-setup">Linux guide</a>
+        </article>
+      </div>
+      <p class="fine">
+        HD texture generation adds about 6.2&nbsp;GB plus install time. Each release ships a SHA-256 and
+        provenance file next to its setup. Prefer building by hand? See
+        <a href="https://github.com/vyanhursky/DefJamFFNY-recomp/blob/main/docs/build-and-play.md">Build and play</a> (Windows) or
+        <a href="https://github.com/vyanhursky/DefJamFFNY-recomp/blob/main/docs/build-macos-linux.md">Build on macOS and Linux</a>.
+      </p>
+    </section>
+
+    <section class="section section--dark" id="mods" aria-labelledby="mods-title">
+      <div class="split">
+        <div>
+          <p class="kicker">Mods <span class="pill">Beta</span></p>
+          <h2 id="mods-title">Make it yours.</h2>
+          <p>
+            The launcher's <strong>Mods</strong> page lists your installed packs and a curated,
+            signed project catalogue. Download and enable packs, then set one shared load order;
+            later packs win. Installing a mod never switches it on by itself, and an update can
+            be rolled back to the previous version.
+          </p>
+          <ul class="ticks">
+            <li><b>Faithful HD</b>: texture packs generated locally by setup.</li>
+            <li><b>HD Widescreen Menus</b>: in the default catalogue after a refresh.</li>
+            <li><b>Your own packs</b>: drop-in texture replacement, with a documented format.</li>
+          </ul>
+          <p class="fine">
+            Today's mods replace textures. New fighters, stages, music and gameplay or code mods
+            aren't supported yet.
+          </p>
+          <p class="links">
+            <a href="https://github.com/vyanhursky/DefJamFFNY-recomp/blob/main/docs/mod-manager.md">Mod manager</a>
+            <a href="https://github.com/vyanhursky/DefJamFFNY-recomp/blob/main/docs/hd-textures.md">Texture pack guide</a>
+          </p>
+        </div>
+        <figure class="split__media">
+          <!-- Swap for an approved Mods-page capture when one exists. -->
+          <img src="media/launcher-advanced.png" alt="Launcher Advanced page, which includes the Mods category" width="1440" height="960" loading="lazy">
+        </figure>
+      </div>
+    </section>
+
+    <section class="section" id="news" aria-labelledby="news-title">
+      <div class="section__head">
+        <p class="kicker">News</p>
+        <h2 id="news-title">Fresh off the release page.</h2>
+      </div>
+      <div class="news" id="news-list">
+        <p class="news__empty">
+          Release notes live on
+          <a href="https://github.com/vyanhursky/DefJamFFNY-recomp/releases">GitHub Releases</a>.
+        </p>
+      </div>
+      <p class="links"><a href="https://github.com/vyanhursky/DefJamFFNY-recomp/releases">All releases</a></p>
+    </section>
+
+    <section class="section section--dark" id="faq" aria-labelledby="faq-title">
+      <div class="section__head">
+        <p class="kicker">FAQ</p>
+        <h2 id="faq-title">Straight answers.</h2>
+      </div>
+      <div class="faq">
+        <details id="faq-dump">
+          <summary>Do I need the original game?</summary>
+          <p>Yes. You need your own <strong>USA Xbox</strong> copy, as a disc image (ISO/XISO) or an
+             extracted folder, matching the
+             <a href="https://github.com/vyanhursky/DefJamFFNY-recomp/blob/main/config/dump-manifest.json">supported dump manifest</a>.
+             Setup checks it before doing anything. PS2 and GameCube versions are different games
+             underneath and can't be used.</p>
+        </details>
+        <details>
+          <summary>Why does setup build the game instead of downloading it?</summary>
+          <p>The project never distributes game files or a compiled game. Setup carries the port's
+             source and tools, translates the game code from <em>your</em> copy and compiles it on
+             your machine. Your original dump is left untouched.</p>
+        </details>
+        <details>
+          <summary>How does the port work?</summary>
+          <p>The <a href="https://github.com/sp00nznet/xboxrecomp">xboxrecomp</a> toolchain translates
+             the Xbox executable into C, compiled ahead of time. The game's code runs on an Xbox
+             compatibility runtime, with graphics, audio and input supplied by your computer. It's a
+             static recompilation, not an emulator.</p>
+        </details>
+        <details>
+          <summary>Will it run on my computer?</summary>
+          <p>Supported: Windows x64, Macs with Apple Silicon, x86-64 Linux and the Steam Deck.
+             Performance depends on your hardware, settings and the scene. Intel Macs aren't
+             supported, and Windows builds under Proton are untested.</p>
+        </details>
+        <details>
+          <summary>Why does Windows or macOS warn me about setup?</summary>
+          <p>The setup apps aren't code-signed yet, so Windows SmartScreen or macOS Gatekeeper may ask
+             you to confirm. Each release publishes a SHA-256 checksum and provenance file so you can
+             check the download.</p>
+        </details>
+        <details>
+          <summary>Can I play online?</summary>
+          <p>No. Up to four players can play locally with gamepads and a keyboard. Network play isn't
+             supported.</p>
+        </details>
+        <details>
+          <summary>How do updates work? Will I lose my saves?</summary>
+          <p>Run the new setup or use <strong>Update / Repair</strong> in the launcher. Profiles,
+             settings and generated texture packs live in your data folder, which updates and repairs
+             keep.</p>
+        </details>
+        <details>
+          <summary>Is it finished?</summary>
+          <p>All game functionality works, and the port keeps getting faster and more polished.
+             Current limitations are listed in
+             <a href="https://github.com/vyanhursky/DefJamFFNY-recomp/blob/main/docs/known-issues.md">known issues</a>
+             and each release's notes.</p>
+        </details>
+        <details>
+          <summary>Something's broken. Where do I report it?</summary>
+          <p>Open a <a href="https://github.com/vyanhursky/DefJamFFNY-recomp/issues/new/choose">GitHub issue</a>
+             with your version, OS, CPU/GPU and controller. With the play-test recorder on, F9 (or View +
+             left stick click) saves the last seconds of play as a bug bundle you can attach. Keep game
+             files and dumps out of reports.</p>
+        </details>
+      </div>
+    </section>
+
+    <section class="section" id="docs" aria-labelledby="docs-title">
+      <div class="section__head">
+        <p class="kicker">Where it's heading</p>
+        <h2 id="docs-title">Roadmap &amp; docs.</h2>
+      </div>
+      <div class="roadmap">
+        <div class="road"><h3>Engine optimizations</h3><p>Better performance on low-spec machines, staying current with xboxrecomp and contributing upstream.</p></div>
+        <div class="road"><h3>Port accuracy</h3><p>Keep the visuals, tone and feel of the original Xbox game.</p></div>
+        <div class="road"><h3>Unlocked frame rates</h3><p>Above 60 fps without changing game speed or timing. Future work.</p></div>
+        <div class="road"><h3>Widescreen refinement</h3><p>Edge cases and more venues. 21:9 and 32:9 are experimental.</p></div>
+        <div class="road"><h3>Broader mods</h3><p>Modified game modes, difficulty changes and restored cut content.</p></div>
+        <div class="road"><h3>Deeper decompilation</h3><p>A long-term stretch goal.</p></div>
+      </div>
+      <p class="fine">Directions, not promised dates.</p>
+
+      <ul class="doc-grid">
+        <li><a href="https://github.com/vyanhursky/DefJamFFNY-recomp/blob/main/docs/setup-installer.md"><b>Install guide</b><span>Requirements, prompts, updates, repairs</span></a></li>
+        <li><a href="https://github.com/vyanhursky/DefJamFFNY-recomp/blob/main/docs/launcher-and-overlay.md"><b>Launcher &amp; overlay</b><span>Every screen and setting</span></a></li>
+        <li><a href="https://github.com/vyanhursky/DefJamFFNY-recomp/blob/main/docs/10-input.md"><b>Controls</b><span>Gamepads, keyboard, mouse, remapping</span></a></li>
+        <li><a href="https://github.com/vyanhursky/DefJamFFNY-recomp/blob/main/docs/settings-reference.md"><b>Settings reference</b><span>Everything in settings.ini</span></a></li>
+        <li><a href="https://github.com/vyanhursky/DefJamFFNY-recomp/blob/main/docs/hd-textures.md"><b>HD textures</b><span>Generate, install and enable packs</span></a></li>
+        <li><a href="https://github.com/vyanhursky/DefJamFFNY-recomp/blob/main/docs/developer-menu.md"><b>Developer menu</b><span>EA's restored debug menu</span></a></li>
+        <li><a href="https://github.com/vyanhursky/DefJamFFNY-recomp/blob/main/docs/known-issues.md"><b>Known issues</b><span>Current limits and investigations</span></a></li>
+        <li><a href="https://github.com/vyanhursky/DefJamFFNY-recomp/blob/main/CONTRIBUTING.md"><b>Contributing</b><span>Reports, development setup, tests</span></a></li>
+      </ul>
+    </section>
+
+    <section class="cta" aria-labelledby="cta-title">
+      <div class="cta__inner">
+        <h2 id="cta-title">Join the crew.</h2>
+        <p>Development happens in the open. Follow along, get setup help, share ideas and talk mods on
+           Discord. File bugs on GitHub so they get tracked.</p>
+        <div class="hero__actions">
+          <a class="btn btn--primary" href="https://discord.gg/xNvBs23ZBw"><span class="btn__label">Join the Discord</span></a>
+          <a class="btn btn--ghost" href="https://github.com/vyanhursky/DefJamFFNY-recomp/issues/new/choose">Report a problem</a>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="footer__inner">
+      <p>
+        Maintained by <a href="https://github.com/vyanhursky">vyanhursky</a>, with development assistance
+        from Claude Code and Codex. Built on <a href="https://github.com/sp00nznet/xboxrecomp">sp00nz's xboxrecomp</a>
+        and work from the Xbox emulation community.
+      </p>
+      <p>
+        The project's code is <a href="https://github.com/vyanhursky/DefJamFFNY-recomp/blob/main/LICENSE">MIT licensed</a>.
+        The license grants no rights to the game or its artwork. This is an unofficial fan project, not
+        affiliated with Electronic Arts, AKI or Def Jam. Def Jam: Fight for NY and its assets belong to
+        their respective owners.
+      </p>
+      <p class="footer__links">
+        <a href="https://github.com/vyanhursky/DefJamFFNY-recomp">Source</a>
+        <a href="https://github.com/vyanhursky/DefJamFFNY-recomp/releases">Releases</a>
+        <a href="https://github.com/vyanhursky/DefJamFFNY-recomp/issues">Issues</a>
+        <a href="https://discord.gg/xNvBs23ZBw">Discord</a>
+        <a href="https://github.com/vyanhursky/DefJamFFNY-recomp/blob/main/SECURITY.md">Security</a>
+      </p>
+    </div>
+  </footer>
+
+  <dialog class="lightbox" id="lightbox" aria-label="Full-size screenshot">
+    <form method="dialog"><button class="lightbox__close" aria-label="Close">×</button></form>
+    <img alt="">
+  </dialog>
+</body>
+</html>

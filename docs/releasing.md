@@ -119,6 +119,10 @@ last release plus docs), with the same gate.
    that is never Latest, and the app and setup never offer prereleases as updates. A beta
    reports the final version number, so its testers download the next beta or the final release
    themselves. The final release is tagged `vMAJOR.MINOR.PATCH` later, from `main`.
+7. Publishing a stable release also deploys the project site (`.github/workflows/pages.yml`,
+   [site/README.md](../site/README.md)). Check that the Pages run succeeded and the site shows
+   the new version. Update the site's copy in the release PR when a release adds a headline
+   feature.
 
 GitHub supplies the source ZIP/tar archives. They do not include submodules;
 the supported command-line setup is a recursive clone at the tag. Only the
