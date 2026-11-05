@@ -41,11 +41,13 @@ v0.13.0 until 1.0 ships, so its buttons offer the old setup. To see the app down
 | S1 | Replace the hero gameplay clip | **owner**: clips | waiting on clips |
 | S2 | New features heading | **owner**: pick | waiting on pick |
 | S3 | Feature cards: order and wording | | done, see question below |
-| S4 | New captures to replace the old-UI pictures | **owner**: approval | open |
+| S4 | New captures: Menu/Launcher, Mod launcher, other old-UI pictures | **owner**: approval | open |
 | S5 | Install guide for the app | | open |
 | S6 | Owner confirmations | **owner**: answers | open |
 | S7 | Vlad's review of the remaining page sections | **owner**: notes | waiting on notes |
 | S8 | README pass for 1.0 | **owner**: review | open |
+| S10 | Four new before/after sliders | **owner**: answers, approval | open |
+| S11 | Three new Roadmap entries | | open |
 | S9 | Go-live | **owner**: Pages setting | open, last |
 
 ## Items
@@ -93,10 +95,16 @@ by default or asks first.
 
 ### S4. New captures
 
+Vlad has asked for these two first:
+
+- [ ] **Menu/Launcher:** the app's current Home screen. It replaces `media/launcher.png` in the Screens gallery.
+- [ ] **Mod launcher:** the app's current Mods page, showing the catalogue. It replaces the Advanced picture
+  in the Mods section.
+
 Pictures with the `needs-capture` class show a red "Old UI" label on the page: Home, Advanced (twice)
-and the F1 overlay. The shot list is in [site/README.md](site/README.md#proposed-captures). Vlad approves
-each capture. Pin it, swap it in and remove the class. The labels must all be gone before go-live, either
-replaced or by Vlad's choice to ship the old picture.
+and the F1 overlay. The rest of the shot list is in [site/README.md](site/README.md#proposed-captures).
+Vlad approves each capture. Pin it, swap it in and remove the class. The labels must all be gone before
+go-live, either replaced or by Vlad's choice to ship the old picture.
 
 ### S5. Install guide for the app
 
@@ -143,7 +151,59 @@ Not started; Vlad wants to review its wording. Known issues:
 - Features: match the page's list and order. "Settings before and during play" describes the old launcher.
 - HD textures: "a local upscaling model" is misleading. Setup uses Lanczos 4x on the CPU, with no AI model.
 - Roadmap: "21:9 and 32:9 remain experimental" contradicts Features, the unified app is called
-  "proposals/in progress", and "texture packs work today" leaves out language mods.
+  "proposals/in progress", and "texture packs work today" leaves out language mods. Add the S11 entries.
+
+### S10. Four new before/after sliders
+
+Add four sliders to the Screens section. In each one:
+
+- **Before:** original resolution, 4:3.
+- **After:** widescreen, 2× resolution, all HD modpacks and graphics settings.
+
+Scenarios:
+
+- [ ] One v One fight in The Limit, Nyne vs Trejo
+- [ ] A cutscene
+- [ ] The main menu
+- [ ] Map Select
+
+**Questions for Vlad, before capturing:**
+
+- Do the two existing sliders (original vs upscaled textures, 4:3 vs 16:9) stay, making six, or do these replace them?
+- "All graphics settings": MSAA, anisotropic filtering, game texture levels and high-quality downscaling
+  sharpen the picture, but the colour tint and film scratches change its look. Should those two be left off?
+  (Suggested: yes.)
+- Which cutscene?
+- Is "Map Select" the Story map or the Battle stage select?
+- Which platform should these be captured on? The page's fine print says captures are from the Mac, so
+  update it if that changes.
+
+**How:**
+
+- Each pair must show the same moment. `docs/09-testing-harness.md` has seeded scenarios and `--step-shots`
+  for fight steps, and `docs/scene-selector.md` covers playing a chosen cutscene. Match menus by the same
+  screen, and say so in the caption if something on screen moves between shots.
+- Game runs are serial: never start two at once, including across agents. Use disposable saves, and keep raw
+  captures under the ignored `logs/`. Record the build used.
+- Vlad approves each exported image, then pin it as in the rules above and add it to `MEDIA`. Keep each
+  file about 1 MB or less, since six sliders load on one page.
+- The slider code assumes one image holding two labelled panels side by side
+  (`.compare__img` and `--bar` in `site/styles.css`). New pairs will probably be two separate files, so the
+  slider needs to support that. The 4:3 side sits pillarboxed inside the 16:9 frame, as the existing
+  widescreen slider does.
+- Give each slider tags, alt text, an `aria-label` and a caption. Check the layout at phone width.
+
+### S11. Three new Roadmap entries
+
+Add to the Roadmap in `site/index.html` (`.roadmap`), with Vlad's wording:
+
+- [ ] **Extensible Custom Fighter Mod support**
+- [ ] **Custom and Restored Songs**
+- [ ] **Additional HD Upscaling mods**, covering Story Fighter customization, and Stages and Level textures
+
+The "Broader mods" entry already mentions custom fighters and music, so trim it to avoid repeating them, and
+keep the Mods section's fine print and the "Mod support" feature card consistent. That makes nine entries,
+which fills the grid. The README's roadmap table gets the same entries in S8.
 
 ### S9. Go-live
 
