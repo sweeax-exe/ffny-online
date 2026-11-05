@@ -9,7 +9,8 @@
  * (mcfr.loc) and the Story subtitles are French, and the game shows subtitles in
  * every Story cutscene by itself; the voices and the menu icon art stay English.
  * Only the boot call is changed (return address 0x00012134); the wrapper is in
- * src/recomp_manual.c. Off by default, and never while a language mod is on.
+ * src/recomp_manual.c. Off by default; an active language mod selects its own
+ * base slot (English by default, or French with [language] base=french).
  */
 #include <stdint.h>
 #include <stdio.h>
