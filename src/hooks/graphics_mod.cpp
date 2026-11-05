@@ -604,6 +604,11 @@ bool install(const Manifest &m, const fs::path &bin, const fs::path &data, const
     std::vector<std::string> all = m.base_files;
     for (auto &f : preset_files(m, preset)) if (std::find(all.begin(), all.end(), f) == all.end()) all.push_back(f);
     for (auto &f : all) {
+        // ReShade and its add-ons write their own settings back when the program closes, so after Turn off these
+        // came back and every Turn on was refused (2026-11-05). Settings are ours to replace; programs are not.
+        std::string ext = from_utf8(f).extension().string();
+        if (_stricmp(ext.c_str(), ".ini") == 0 || _stricmp(ext.c_str(), ".cfg") == 0 || _stricmp(ext.c_str(), ".cache") == 0)
+            continue;
         if (fs::exists(bin / from_utf8(f), ec)) {
             say(error, "The game folder already has " + f + ", which this launcher did not install. Remove it "
                        "(another ReShade or mod?) and try again; nothing was changed.");
