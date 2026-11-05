@@ -547,8 +547,11 @@ void pc_app_home_notice()
         ui_target("home.update");
         ImGui::SameLine();
         if (ImGui::SmallButton("What's new")) pcui::open_path(g_url);
-    } else if (in.installed && newer(payload_version(), in.version)) {
-        ImGui::TextWrapped("Play starts v%s. Finish updating to v%s when ready.", in.version.c_str(), payload_version().c_str());
+    } else if (in.installed && game_behind(in)) {
+        bool other = other_build(in);
+        ImGui::TextWrapped("Play starts %s. Finish updating to %s when ready.",
+                           build_label(in.version, other ? in.source_commit : "").c_str(),
+                           build_label(payload_version(), other ? payload_commit() : "").c_str());
         if (ImGui::SmallButton("Finish game update")) start_update_build();
         ui_target("home.build-update");
     }

@@ -325,8 +325,12 @@ Placement place_app(std::string *error)
     size_t at = s.find("\"version\"");
     if (at != std::string::npos && (at = s.find('"', s.find(':', at) + 1)) != std::string::npos)
         theirs = s.substr(at + 1, s.find('"', at + 1) - at - 1);
-    if (newer(DEFJAM_VERSION, theirs)) {
-        fprintf(stderr, "[APP] updating the installed app in %s from v%s to v%s\n", h.string().c_str(), theirs.c_str(), DEFJAM_VERSION);
+    // Another build of the same version (the next beta, or the release after its betas) replaces it
+    // too: payload.sha256 records which payload the installed copy carries.
+    bool other = theirs == DEFJAM_VERSION && read_first_line(h / "payload.sha256") != k_payload_sha256;
+    if (newer(DEFJAM_VERSION, theirs) || other) {
+        fprintf(stderr, "[APP] updating the installed app in %s from v%s to v%s%s\n", h.string().c_str(), theirs.c_str(),
+                DEFJAM_VERSION, other ? " (another build of the same version)" : "");
         std::string why = place_into(h, true);
         if (!why.empty()) {
             g_error = "Could not update the installed app: " + why + " Retry installation below. The existing copy was kept.";

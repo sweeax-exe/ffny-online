@@ -320,19 +320,20 @@ void note_location()
 
 intptr_t g_lock = -1;
 fs::path g_payload;
-std::string g_payload_version;
+std::string g_payload_version, g_payload_commit;
 std::vector<std::string> g_arguments, g_relaunch;
 bool g_updated = false;
 
-// The version in a setup payload's manifest, or "" without one.
-std::string read_payload_version(const fs::path &payload)
+// A value in a setup payload's manifest ("version", "source_commit"), or "" without one.
+std::string read_payload_field(const fs::path &payload, const char *key)
 {
     if (payload.empty()) return "";
     std::ifstream manifest(payload / "manifest.json", std::ios::binary);
     std::stringstream text;
     text << manifest.rdbuf();
-    return json_strings(text.str())["version"];
+    return json_strings(text.str())[key];
 }
+std::string read_payload_version(const fs::path &payload) { return read_payload_field(payload, "version"); }
 
 // "0.13.1" as numbers, or empty when it is not a release version.
 std::vector<int> release_version(const std::string &text)
@@ -398,6 +399,18 @@ fs::path state_dir()
 std::vector<std::string> &arguments() { return g_arguments; }
 bool just_updated() { return g_updated; }
 std::string payload_version() { return g_payload_version; }
+std::string payload_commit() { return g_payload_commit; }
+bool other_build(const Install &in)
+{
+    return !g_payload_commit.empty() && in.version == g_payload_version && in.source_commit != g_payload_commit;
+}
+bool game_behind(const Install &in) { return newer(g_payload_version, in.version) || other_build(in); }
+std::string build_label(const std::string &version, const std::string &commit)
+{
+    std::string label = "v" + version;
+    if (!commit.empty()) label += " (build " + commit.substr(0, 7) + ")";
+    return label;
+}
 std::vector<std::string> &relaunch() { return g_relaunch; }
 
 bool newer(const std::string &a, const std::string &b)
@@ -498,6 +511,7 @@ bool load_install(std::string *why)
     in.source = receipt["source"];
     in.executable = receipt["executable"];
     in.version = receipt["version"];
+    in.source_commit = receipt["source_commit"];
     if (fs::exists(in.root / ".setup-transaction", ec))
         *why = "An update was interrupted. Select Repair to recover the installation.";
     else if (in.source.empty() || in.data.empty() || in.executable.empty() || !os::is_program(in.executable))
@@ -558,6 +572,7 @@ int main(int argc, char **argv)
     // Known before the app places itself: the Linux AppImage records it with its home, and compares
     // it with the installed copy's.
     g_payload_version = read_payload_version(g_payload);
+    g_payload_commit = read_payload_field(g_payload, "source_commit");
 #if defined(_WIN32) || defined(__linux__)
     // The released Windows program and Linux AppImage install themselves, or hand over to the
     // installed copy (app_install.cpp, app_install_linux.cpp). A development build, or one given its
@@ -586,6 +601,7 @@ int main(int argc, char **argv)
     for (const char *name : {"APPDIR", "APPIMAGE", "ARGV0", "OWD"}) app::os::unset_env(name);
 #endif
     g_payload_version = read_payload_version(g_payload);     // the Windows app may have just unpacked it
+    g_payload_commit = read_payload_field(g_payload, "source_commit");
     app::update_cleanup();
     // Acquire the lifetime lock before reading activation state or the receipt.
     if (!app::lock_install()) fail("The game or an update is already running.");
