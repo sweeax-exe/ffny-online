@@ -132,7 +132,7 @@ int main(int argc, char **argv)
 {
     /* driver in.sod out.sod [entity title artist album]... */
     static const char *const fields[] = { 0, "Title", "Artist", "Album", "Entity" };
-    const char *values[5 * 16];
+    const char *values[5 * 64];
     int n = 0, added = 0;
     FILE *f = fopen(argv[1], "rb");
     if (!f) return 2;
@@ -140,7 +140,7 @@ int main(int argc, char **argv)
     unsigned char *in = malloc(len);
     if (fread(in, 1, len, f) != (size_t)len) return 2;
     fclose(f);
-    for (int a = 3; a + 3 < argc && n < 16; a += 4, n++) {
+    for (int a = 3; a + 3 < argc && n < 64; a += 4, n++) {
         values[n * 5 + 0] = argv[a + 1];
         values[n * 5 + 1] = argv[a + 1];
         values[n * 5 + 2] = argv[a + 2];
@@ -209,12 +209,12 @@ def check_added(before, after, entities):
     old, new = Db(before), Db(after)
     old_keys, old_recs = old.name_index('Song')
     new_keys, new_recs = new.name_index('Song')
-    # Retail records keep their bytes and their ranks; added rows take the last ranks, in order.
+    # Retail records keep their bytes and their ranks; added rows take the ranks after them.
     assert new_recs[:len(old_recs)] == old_recs
     for rec in old_recs:
         assert after[rec:rec + 24] == before[rec:rec + 24]
     added = new_recs[len(old_recs):]
-    assert [new.strings[new.row(r)[3]] for r in added] == entities
+    assert sorted(new.strings[new.row(r)[3]] for r in added) == sorted(entities)
     # Other tables are untouched.
     for th, header in old.headers.items():
         if th != name_hash('Song'):
@@ -248,12 +248,23 @@ def test_second_run_is_a_no_op(writer, tmp_path):
     assert count == 0 and twice == once
 
 
-def test_several_songs_keep_their_order(writer, tmp_path):
+def test_several_songs_rank_after_retail(writer, tmp_path):
     before = build_database(songs(5))
     extra = [['a1', 'Alpha', 'X', 'Y'], ['zz', 'Zulu', 'X', 'Y'], ['m1', 'Mike', 'X', 'Y']]
     after, count = add(writer, tmp_path, before, *extra)
     assert count == 3
     check_added(before, after, ['a1', 'zz', 'm1'])
+
+
+def test_a_full_store_of_added_songs(writer, tmp_path):
+    # 32 retail-like rows + 32 added: every added row still ranks after every retail row.
+    names = [f'Retail {i:02d}' for i in range(32)]
+    before = build_database([dict(name=x, Album='A', Artist='B', Entity=f'r{i}', Unknown=0, Title=x)
+                             for i, x in enumerate(names)])
+    extra = [[f'c{i:02d}', f'Custom {i}', 'X', 'Y'] for i in range(32)]
+    after, count = add(writer, tmp_path, before, *extra)
+    assert count == 32
+    check_added(before, after, [e[0] for e in extra])
 
 
 def test_users_own_database(writer, tmp_path):

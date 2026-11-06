@@ -53,7 +53,7 @@ static const SongInfo k_restored[] = {
     { "holler", "Holler If Ya Hear Me", "2Pac", "Strictly 4 My N.I.G.G.A.Z." },
 };
 
-static SongInfo g_songs[64];
+static SongInfo g_songs[PC_SONGS_MAX_ROWS];
 static int g_song_count;
 
 /* ---- small helpers ------------------------------------------------------------------------------- */
@@ -267,7 +267,7 @@ int pc_songs_sod_add_rows(const uint8_t *in, size_t n, const char *name, const c
      * The game's record handles are (table rank << 24) | the record's rank in the table's name
      * index, which is sorted by name hash, and profiles save those handles (the jukebox's song
      * keys). So every added row gets a row name whose hash sorts after all the others: the
-     * retail rows keep their ranks and the added ones take the next ones, in order. The row
+     * retail rows keep their ranks and the added ones take the ranks after them. The row
      * name is internal; the jukebox and the banner show the Title field.
      */
     uint32_t max_hash = 0;
@@ -294,7 +294,7 @@ int pc_songs_sod_add_rows(const uint8_t *in, size_t n, const char *name, const c
             if (salt > 100000000u) { fail("no row name sorts last"); goto done; }
             snprintf(row_name, sizeof row_name, "%s~%u", base, salt);
         }
-        max_hash = pc_songs_name_hash(row_name);
+        /* Only the retail ranks must hold: added rows sort after them, in any order among themselves. */
         uint8_t rec[4096];
         memcpy(rec, s.out.p + template_off, words * 4);
         for (int f = 0; f < nfields; f++) {
@@ -470,6 +470,58 @@ static int source_database(const char *game_dir, char *out, size_t size)
 int pc_songs_count(void) { return g_song_count; }
 const char *pc_songs_entity(int i) { return i >= 0 && i < g_song_count ? g_songs[i].entity : NULL; }
 
+/* ---- which song each record handle names ------------------------------------------------------ */
+
+static char g_rank_entity[PC_SONGS_MAX_ROWS][16];
+static char g_rank_id[PC_SONGS_MAX_ROWS][24];
+static char g_data_root[SONGS_PATH];
+static int g_rank_count, g_retail_rows;
+
+/* The Song table's records in name-index order (= the low bits of their handles), as entities.
+ * Returns the row count, or -1. */
+static int read_rank_table(const uint8_t *p, size_t n, char (*out)[16], int max)
+{
+    Sod s;
+    int rows = -1;
+    memset(&s, 0, sizeof s);
+    if (n < 24 || memcmp(p, "SODB", 4)) return -1;
+    s.out.p = (uint8_t *)p;
+    s.out.n = n;
+    s.schema = sod_word(&s, 12);
+    uint32_t tables = sod_word(&s, 16), strings = sod_word(&s, 20);
+    uint32_t nstr = sod_word(&s, strings + 4);
+    uint32_t thash = pc_songs_name_hash("Song");
+    uint32_t hv = sod_lookup(&s, tables, 1, thash);
+    uint32_t w, t;
+    if (!hv || !sod_field(&s, thash, "Entity", &w, &t) || !sod_range(&s, strings + 8, nstr * 8)) return -1;
+    uint32_t header = sod_word(&s, hv), group0 = sod_word(&s, header + 4), count = sod_word(&s, header + 12);
+    uint32_t members = sod_word(&s, group0), sub = sod_word(&s, group0 + 8 + members * 4);
+    if (!members || sod_word(&s, sub + 4) != count || sod_word(&s, sub + 8) != 1) return -1;
+    uint32_t list = sub + 12 + count * 4;
+    if (!sod_range(&s, list, count * 4)) return -1;
+    rows = (int)count;
+    for (uint32_t i = 0; i < count && (int)i < max; i++) {
+        uint32_t idx = sod_word(&s, sod_word(&s, list + i * 4) + w * 4);
+        uint32_t at = idx < nstr ? sod_word(&s, strings + 12 + idx * 8) : 0;
+        out[i][0] = 0;
+        if (at && sod_range(&s, at, 1)) snprintf(out[i], sizeof out[i], "%s", (const char *)p + at);
+    }
+    return rows;
+}
+
+const char *pc_songs_data_root(void) { return g_data_root; }
+int pc_songs_retail_rows(void) { return g_retail_rows; }
+int pc_songs_rows(void) { return g_rank_count; }
+const char *pc_songs_id_for_rank(uint32_t rank)
+{
+    return rank < (uint32_t)g_rank_count ? g_rank_id[rank] : NULL;
+}
+
+const char *pc_songs_entity_for_rank(uint32_t rank)
+{
+    return rank < (uint32_t)g_rank_count ? g_rank_entity[rank] : NULL;
+}
+
 void pc_songs_start(const char *data_root, const char *game_dir)
 {
     char source[SONGS_PATH], cache[SONGS_PATH];
@@ -480,6 +532,19 @@ void pc_songs_start(const char *data_root, const char *game_dir)
     g_song_count = 0;
     if (recomp_settings_get("songs", "restored", 1))
         for (size_t i = 0; i < sizeof k_restored / sizeof k_restored[0]; i++) g_songs[g_song_count++] = k_restored[i];
+    {
+        /* Test aid: RECOMP_TEST_SONG_CLONES=N adds N songs that play the disc's own music
+         * folders under other titles, to exercise a full song store and playlist. */
+        static const char *const folders[] = { "dirty", "walkwithme", "manup", "og", "venu", "comp", "move", "pump" };
+        static char titles[PC_SONGS_MAX_ROWS][24];
+        const char *clones = getenv("RECOMP_TEST_SONG_CLONES");
+        int n = clones ? atoi(clones) : 0;
+        for (int i = 0; i < n && g_song_count < PC_SONGS_MAX_ROWS; i++) {
+            snprintf(titles[i], sizeof titles[i], "Test Song %d", i + 1);
+            SongInfo s = { folders[i % 8], titles[i], "Test Artist", "Test Album" };
+            g_songs[g_song_count++] = s;
+        }
+    }
     if (!g_song_count) {
         fprintf(stderr, "[SONGS] the game's own soundtrack (no extra songs)\n");
         return;
@@ -490,6 +555,7 @@ void pc_songs_start(const char *data_root, const char *game_dir)
         return;
     }
 
+    snprintf(g_data_root, sizeof g_data_root, "%s", data_root);
     g_previous_redirect = g_xbox_game_file_redirect;
     g_error[0] = 0;
     if (!source_database(game_dir, source, sizeof source) || !read_all(source, &in, &in_n)) {
@@ -498,9 +564,27 @@ void pc_songs_start(const char *data_root, const char *game_dir)
         return;
     }
 
+    /* The game holds PC_SONGS_MAX_ROWS songs (pc_songs.h): the extras beyond that are left out. */
+    {
+        char (*retail)[16] = (char (*)[16])calloc(PC_SONGS_MAX_ROWS, 16);
+        g_retail_rows = retail ? read_rank_table(in, in_n, retail, PC_SONGS_MAX_ROWS) : -1;
+        free(retail);
+        if (g_retail_rows <= 0 || g_retail_rows >= PC_SONGS_MAX_ROWS) {
+            fprintf(stderr, "[SONGS] unexpected song list in %s; playing the game's own soundtrack\n", source);
+            free(in);
+            g_song_count = 0;
+            return;
+        }
+        if (g_retail_rows + g_song_count > PC_SONGS_MAX_ROWS) {
+            fprintf(stderr, "[SONGS] %d extra songs, room for %d: the rest are left out this time\n",
+                    g_song_count, PC_SONGS_MAX_ROWS - g_retail_rows);
+            g_song_count = PC_SONGS_MAX_ROWS - g_retail_rows;
+        }
+    }
+
     {
         static const char *const fields[] = { NULL, "Title", "Artist", "Album", "Entity" };
-        const char *values[64 * 5];
+        const char *values[PC_SONGS_MAX_ROWS * 5];
         for (int i = 0; i < g_song_count; i++) {
             values[i * 5 + 0] = g_songs[i].title;    /* the row name the retail rows use */
             values[i * 5 + 1] = g_songs[i].title;
@@ -540,6 +624,16 @@ void pc_songs_start(const char *data_root, const char *game_dir)
                 return;
             }
         }
+    }
+    g_rank_count = read_rank_table(out, out_n, g_rank_entity, PC_SONGS_MAX_ROWS);
+    if (g_rank_count < 0) g_rank_count = 0;
+    /* A stable id per row for the PC-side jukebox file: the folder, and "#k" for the k-th
+     * row after the first that plays the same folder. */
+    for (int i = 0; i < g_rank_count; i++) {
+        int k = 0;
+        for (int j = 0; j < i; j++) k += !strcmp(g_rank_entity[i], g_rank_entity[j]);
+        if (k) snprintf(g_rank_id[i], sizeof g_rank_id[i], "%s#%d", g_rank_entity[i], k);
+        else snprintf(g_rank_id[i], sizeof g_rank_id[i], "%s", g_rank_entity[i]);
     }
     free(out);
     snprintf(g_served_host, sizeof g_served_host, "%s", cache);

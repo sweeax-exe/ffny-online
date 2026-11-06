@@ -226,8 +226,17 @@ void sub_001EB980(void)
     uint32_t raw=input_late_raw();
     if (raw) { g_eax=raw;g_esp+=4; } else sub_001EB980_gen();
 }
-/* A profile load: songs added to the song list since it was saved get a jukebox place
- * (src/patches/song_store.c). this = the profile manager. */
+/* Songs (src/patches/song_store.c). The song store is built with buffers that hold every song
+ * (this = the store); a profile load fills it from the save and the PC-side file (this = the
+ * profile manager); the playlist builders hand back at most what the playlist holds; the
+ * built playlist can be traced. */
+extern void sub_00013340_gen(void);
+void sub_00013340(void)
+{
+    song_store_before_build(g_ecx);
+    sub_00013340_gen();
+    song_store_after_build();
+}
 extern void sub_00014540_gen(void);
 void sub_00014540(void)
 {
@@ -236,10 +245,14 @@ void sub_00014540(void)
     sub_00014540_gen();
     song_store_after_load(manager);
 }
+extern void sub_00020C40_gen(void);
+void sub_00020C40(void) { song_store_build_playlist(sub_00020C40_gen, 0); }
+extern void sub_00020D70_gen(void);
+void sub_00020D70(void) { song_store_build_playlist(sub_00020D70_gen, 1); }
 extern void sub_0003CFF0_gen(void);
 void sub_0003CFF0(void)
 {
-    sub_0003CFF0_gen();
+    song_store_set_playlist(sub_0003CFF0_gen);
     song_store_playlist_built();
 }
 extern void sub_000D7BF0_gen(void);
@@ -871,6 +884,7 @@ static void funccall_hook(void)
     xbox_NoteAnchorEvent(text);
     defjam_unlock_all_on_funccall(text);   /* RECOMP_UNLOCK_ALL, src/patches/dev_unlock.c */
     cheats_on_funccall(text);              /* Story tracking and Story cheats, src/patches/cheats.c */
+    song_store_on_funccall(text);          /* songs: the save's copy before MemCard.*, src/patches/song_store.c */
     sub_00068BA0();
     /* RECOMP_FE_INJECT: commands of a test's own, after a chosen call (src/hooks/fe_inject.c). */
     fe_inject_after_call(text);

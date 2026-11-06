@@ -10,6 +10,11 @@
 extern "C" {
 #endif
 
+/* Songs the game can hold. The jukebox screen keeps them in arrays of 36 (its list builder,
+ * sub_0004FD80, and its object's enabled list), the playlist holds 36 names and the shuffled
+ * playlist builder 36 entries: more rows overflow them (docs/research/custom-songs.md). */
+#define PC_SONGS_MAX_ROWS 36
+
 /* Register the [songs] settings. Returns how many were added. */
 struct RecompSetting;
 size_t pc_songs_settings(struct RecompSetting *out, size_t max);
@@ -22,6 +27,15 @@ void pc_songs_start(const char *data_root, const char *game_dir);
 /* The extra songs in effect after pc_songs_start: count, and each one's folder under music/. */
 int pc_songs_count(void);
 const char *pc_songs_entity(int i);
+
+/* After pc_songs_start: Song rows in the retail database, rows in the served one, and the
+ * entity (folder under music/) of the row a record handle names (handle & 0xFFFFFF = rank). */
+int pc_songs_retail_rows(void);
+const char *pc_songs_data_root(void);
+int pc_songs_rows(void);
+const char *pc_songs_entity_for_rank(uint32_t rank);
+/* A stable id for the row (the entity, "#k" for the k-th later row with the same one). */
+const char *pc_songs_id_for_rank(uint32_t rank);
 
 /* The database's string hash (djb2 over the bytes and the terminating NUL). */
 uint32_t pc_songs_name_hash(const char *s);

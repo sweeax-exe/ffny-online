@@ -150,6 +150,48 @@ with songs off too, so it is not from this work.
 **Before the profile loads** the game plays a 16-song list it builds without the profile's
 choices; Holler is not in it (a profile's jukebox decides from then on).
 
+## 5b. Slice 2: how many songs the game can hold (2026-11-05)
+
+The song count is bounded in more places than the playlist:
+
+| Where | Bound | What overflows |
+|---|---|---|
+| Song store buffers in the profile manager (B + 0x1420 / + 0x1444) | 36 | the order counter and the manager fields after them |
+| Playlist slots (`0x33E798`, `sub_0003CFF0`) | 36 names | the count at `0x33E9DC` |
+| `sub_0003DA40`'s list (the front end's playlist) | 35 names + end marker | its return address |
+| Shuffled playlist builder `sub_00020D70` | a 36-entry local array (esp + 0x54 .. 0xE4) | its own locals (seen: a corrupt `free` under `Audio.PlayMusic` with 49 songs on) |
+| Jukebox list builder `sub_0004FD80` | local arrays of 36 (unarranged, esp + 0xF8), 36 (by order, + 0x188), 32 (never arranged, + 0x218) | its frame |
+| The jukebox object (0xE4 bytes, `ChooseShopList(6)`) | 37 enabled-song indices at + 0x4C, then the flag at + 0xE0 | the flag and the heap block after it |
+| Jukebox order | 6 bits | positions past 63 |
+
+So the game holds **36 Song rows**: the 32 retail songs, "Holler If Ya Hear Me" and three more.
+Past 36 the jukebox screen itself (its list builder, its object and the handlers that index
+it: Play, Shuffle, Promote, Demote, Enable, Disable) would have to be reimplemented, and even
+then the order field stops at 64.
+
+What slice 2 does within that bound (`src/patches/song_store.c`):
+
+- The store gets buffers of its own; the fixed buffers in B become the save's copy only, written
+  in the **retail shape** (the 32 retail songs, orders renumbered 0.., the other slots empty)
+  after the build, after a load, before every `MemCard.*` command and whenever the playlist is
+  rebuilt. A save stays one the original game reads as its own.
+- The added songs' jukebox places live in **`<data>/song-state/<profile>.txt`** (the profile name
+  is at B + 0x2B8): one line per song, by folder (`folder#k` for a later row playing the same
+  folder), plus a checksum of the save's song block. A load uses the file for every song when
+  the save is the one it was written with, else the save for the retail songs and the file for
+  the added ones.
+- The playlist builders hand back at most 32 songs (the fights put one or two of their own in
+  front) and `SetMusicPlaylist` takes at most 36, as windows that move on at every rebuild when
+  more songs are on. (With 36 rows the shuffled builder's 36-entry array is just large enough;
+  more rows would need it replaced too.)
+- `RECOMP_TEST_SONG_CLONES=N` adds N rows that play the disc's own folders ("Test Song N"),
+  to fill the store in tests.
+
+Checked: 36 rows (retail, Holler, three clones) through boot, the Beatbox (every row), back to
+the menu, and a reload with the state file; no crash, playlists 32/36, saves restored
+identically. With 64 rows (before the cap) a boot crashed in `free` under `Audio.PlayMusic`:
+the shuffled builder's array, which is how the table above was found.
+
 ## 6. Owner decisions (2026-11-03, D-new for the PR)
 
 - **Lift the song limit now**: replace the playlist build/run functions with hand-written ones over a
