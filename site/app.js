@@ -1,4 +1,4 @@
-// Def Jam: Fight for NY Fan Recomp site: latest release, OS-aware download, news, sliders, lightbox.
+// Def Jam: Fight for NY Fan Recomp site: latest release, OS-aware download, news, sliders.
 // The page works without this script; it only fills in live details.
 (function () {
   'use strict';
@@ -188,25 +188,9 @@
     });
   }
 
-  function initLightbox() {
-    var box = document.getElementById('lightbox');
-    if (!box || typeof box.showModal !== 'function') return;
-    var img = box.querySelector('img');
-    document.querySelectorAll('[data-full]').forEach(function (btn) {
-      btn.addEventListener('click', function () {
-        var thumb = btn.querySelector('img');
-        img.src = btn.getAttribute('data-full');
-        img.alt = thumb ? thumb.alt : '';
-        box.showModal();
-      });
-    });
-    box.addEventListener('click', function (e) { if (e.target === box) box.close(); });
-  }
-
   var os = detectOS();
   applyDownloads(os, null);
   initSliders();
-  initLightbox();
 
   loadReleases().then(function (releases) {
     if (!releases.length) return;

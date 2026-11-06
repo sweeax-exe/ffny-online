@@ -34,8 +34,8 @@
         <a href="#install">Install</a>
         <a href="#mods">Mods</a>
         <a href="#news">News</a>
-        <a href="#faq">FAQ</a>
         <a href="#docs">Docs</a>
+        <a href="#faq">FAQ</a>
       </nav>
       <div class="nav__ext">
         <a class="icon-link" href="https://discord.gg/xNvBs23ZBw" aria-label="Discord">
@@ -53,13 +53,12 @@
     <section class="hero" aria-labelledby="hero-title">
       <div class="hero__bg" aria-hidden="true"></div>
       <div class="hero__inner">
-        <img class="hero__logo" src="media/logo-fan.png" width="1280" height="353"
+        <img class="hero__logo" src="media/logo-fan.png" width="1280" height="365"
              alt="Def Jam: Fight for NY — Fan Recomp">
         <h1 id="hero-title" class="hero__title">Back on the block. <span>Native on your machine.</span></h1>
         <p class="hero__lede">
-          An unofficial native port of the 2004 Xbox classic for Windows, macOS, Linux and
-          Steam Deck. One app sets up, plays, updates and mods the game, built on your
-          computer from your own copy.
+          An unofficial native port of the 2004 Xbox classic for Windows, macOS, Linux and Steam Deck.
+          This project is the definitive way to play this game.
         </p>
         <div class="hero__actions">
           <a class="btn btn--primary" id="download-primary"
@@ -80,20 +79,19 @@
       </div>
     </section>
 
-    <section class="reel" aria-label="Gameplay clip">
+    <section class="reel" aria-label="Gameplay trailer">
       <figure class="reel__frame">
-        <video autoplay muted loop playsinline preload="metadata" poster="media/gameplay-hero.png"
-               aria-label="Blaze and Doc trade strikes in the Basement venue, 16:9 with upscaled original textures">
-          <source src="media/hd-16x9-gameplay.mp4" type="video/mp4">
+        <video autoplay muted loop playsinline preload="metadata" poster="media/site-trailer-poster.jpg" width="1280" height="720"
+               aria-label="Silent trailer: fights across several venues, with the fighter and venue menus and a Story cutscene">
+          <source src="media/site-trailer.mp4" type="video/mp4">
         </video>
-        <figcaption>Native macOS, render scale 2, 16:9 with upscaled original textures. Silent capture.</figcaption>
       </figure>
     </section>
 
     <section class="section" id="features" aria-labelledby="features-title">
       <div class="section__head">
         <p class="kicker">What you get</p>
-        <h2 id="features-title">The same fight. A sharper corner.</h2>
+        <h2 id="features-title">Everything you remember. Nothing holding it back.</h2>
       </div>
       <ul class="cards">
         <li class="card">
@@ -174,12 +172,11 @@
             <input class="compare__range" type="range" min="0" max="100" value="50"
                    aria-label="Nyne vs Trejo at The Limit: reveal the original or the recompiled picture">
           </div>
-          <figcaption>Nyne vs Trejo at The Limit: the same seeded fight, at the same moment. The crowd differs because the wider view frames it differently.</figcaption>
         </figure>
-        <figure class="compare" data-compare>
+        <figure class="compare compare--same-frame" data-compare>
           <div class="compare__stage">
             <img class="compare__after-img" src="media/compare-cutscene-after.jpg"
-                 alt="Story cutscene: 16:9 at 2× with HD mods" width="1708" height="960" loading="lazy">
+                 alt="Story cutscene: the same 4:3 frame at 2× with HD mods" width="1280" height="960" loading="lazy">
             <div class="compare__before">
               <img src="media/compare-cutscene-before.png" alt="Story cutscene: original 4:3 at 480p" width="640" height="480" loading="lazy">
             </div>
@@ -189,7 +186,6 @@
             <input class="compare__range" type="range" min="0" max="100" value="50"
                    aria-label="Story cutscene: reveal the original or the recompiled picture">
           </div>
-          <figcaption>A Story cutscene. The original letterboxes it inside 4:3; here it fills the screen.</figcaption>
         </figure>
         <figure class="compare" data-compare>
           <div class="compare__stage">
@@ -204,7 +200,6 @@
             <input class="compare__range" type="range" min="0" max="100" value="50"
                    aria-label="Main menu: reveal the original or the recompiled picture">
           </div>
-          <figcaption>The main menu.</figcaption>
         </figure>
         <figure class="compare" data-compare>
           <div class="compare__stage">
@@ -219,38 +214,8 @@
             <input class="compare__range" type="range" min="0" max="100" value="50"
                    aria-label="Venue map: reveal the original or the recompiled picture">
           </div>
-          <figcaption>Choosing a venue.</figcaption>
         </figure>
       </div>
-      <p class="fine">Left: original 4:3 at 480p with original textures. Right: 16:9 at 2× with Upscaled Original Textures, HD Widescreen Menus, HD Fighters, MSAA 4× and anisotropic filtering 16×.</p>
-
-      <div class="gallery">
-        <button class="shot" type="button" data-full="media/app-home.png">
-          <img src="media/app-home.png" alt="The app's Home screen with Play, Settings, Controls, Mods and Help" loading="lazy">
-          <span class="shot__cap">Home: Play, settings, controls, mods and help</span>
-        </button>
-        <button class="shot" type="button" data-full="media/app-first-run.png">
-          <img src="media/app-first-run.png" alt="First run, choosing the Modern or Original experience" loading="lazy">
-          <span class="shot__cap">First run: Modern or Original</span>
-        </button>
-        <button class="shot" type="button" data-full="media/app-settings.png">
-          <img src="media/app-settings.png" alt="Graphics settings" loading="lazy">
-          <span class="shot__cap">Settings: every option, explained</span>
-        </button>
-        <button class="shot" type="button" data-full="media/app-mods-installed.png">
-          <img src="media/app-mods-installed.png" alt="The Mods page, Installed tab" loading="lazy">
-          <span class="shot__cap">Mods: what you have, and in what order</span>
-        </button>
-        <button class="shot" type="button" data-full="media/app-overlay.png">
-          <img src="media/app-overlay.png" alt="The F1 settings overlay over a fight" loading="lazy">
-          <span class="shot__cap">F1 overlay: change settings in the game</span>
-        </button>
-        <button class="shot" type="button" data-full="media/developer-menu.png">
-          <img src="media/developer-menu.png" alt="The restored EA developer menu" loading="lazy">
-          <span class="shot__cap">The restored developer menu</span>
-        </button>
-      </div>
-      <p class="fine">Captures from the native Mac port (Vulkan via MoltenVK). They don't show Steam Deck Gaming Mode or Windows rendering.</p>
     </section>
 
     <section class="section" id="install" aria-labelledby="install-title">
@@ -276,7 +241,7 @@
             <li>Offers to install Microsoft's C++ Build Tools if they're missing (a few GB).</li>
             <li>Unsigned, so SmartScreen may ask before it runs.</li>
           </ul>
-          <a class="more" href="https://github.com/vyanhursky/DefJamFFNY-recomp/blob/main/docs/setup-installer.md">Windows guide</a>
+          <a class="more" href="https://github.com/vyanhursky/DefJamFFNY-recomp/blob/main/docs/install-guide.md#windows">Windows guide</a>
         </article>
         <article class="platform" data-platform="mac">
           <h3>macOS</h3>
@@ -288,7 +253,7 @@
             <li>Needs Apple's Xcode Command Line Tools to build the game.</li>
             <li>Unsigned: the first time, choose <strong>Open Anyway</strong> in Privacy &amp; Security.</li>
           </ul>
-          <a class="more" href="https://github.com/vyanhursky/DefJamFFNY-recomp/blob/main/docs/setup-installer.md#macos-setup-apple-silicon">macOS guide</a>
+          <a class="more" href="https://github.com/vyanhursky/DefJamFFNY-recomp/blob/main/docs/install-guide.md#macos">macOS guide</a>
         </article>
         <article class="platform" data-platform="linux">
           <h3>Linux &amp; Steam Deck</h3>
@@ -300,7 +265,7 @@
             <li>Mark the file as executable, then open it. It installs and updates itself.</li>
             <li>On Steam Deck, start in Desktop Mode for first run's file picker, then play from Gaming Mode.</li>
           </ul>
-          <a class="more" href="https://github.com/vyanhursky/DefJamFFNY-recomp/blob/main/docs/setup-installer.md#linux-setup">Linux guide</a>
+          <a class="more" href="https://github.com/vyanhursky/DefJamFFNY-recomp/blob/main/docs/install-guide.md#linux-and-steam-deck">Linux guide</a>
         </article>
       </div>
       <p class="fine">
@@ -360,7 +325,42 @@
       <p class="links"><a href="https://github.com/vyanhursky/DefJamFFNY-recomp/releases">All releases</a></p>
     </section>
 
-    <section class="section section--dark" id="faq" aria-labelledby="faq-title">
+    <section class="section section--dark" id="docs" aria-labelledby="docs-title">
+      <div class="section__head">
+        <p class="kicker">Where it's heading</p>
+        <h2 id="docs-title">Roadmap &amp; docs.</h2>
+      </div>
+      <div class="roadmap">
+        <div class="road"><h3>Engine optimizations</h3><p>Better performance on low-spec machines, staying current with xboxrecomp and contributing upstream.</p></div>
+        <div class="road"><h3>Port accuracy</h3><p>Keep the visuals, tone and feel of the original Xbox game.</p></div>
+        <div class="road"><h3>Unlocked frame rates</h3><p>Above 60 fps without changing game speed or timing. Future work.</p></div>
+        <div class="road"><h3>Widescreen refinement</h3><p>Edge cases and broader aspect and venue coverage.</p></div>
+        <div class="road"><h3>Extensible Custom Fighter Mod support</h3><p>Add your own fighters to the game.</p></div>
+        <div class="road"><h3>Custom and Restored Songs</h3><p>New music, and tracks restored to the game.</p></div>
+        <div class="road"><h3>Additional HD Upscaling mods</h3><p>Story Fighter customization, plus Stages and Level textures.</p></div>
+        <div class="road"><h3>Def Jam: The Takeover expansion</h3><p>Bring the mechanics and story mode from Def Jam: The Takeover into this game.</p></div>
+        <div class="road"><h3>Broader mods</h3><p>Custom stages and game modes, difficulty changes and restored cut content.</p></div>
+        <div class="road"><h3>Deeper decompilation</h3><p>A long-term stretch goal.</p></div>
+      </div>
+      <p class="fine">Directions, not promised dates.</p>
+
+      <ul class="doc-grid">
+        <li><a href="https://github.com/vyanhursky/DefJamFFNY-recomp/blob/main/docs/install-guide.md"><b>Install guide</b><span>First run, updates, repair, step by step</span></a></li>
+        <li><a href="https://github.com/vyanhursky/DefJamFFNY-recomp/blob/main/docs/launcher-and-overlay.md"><b>App &amp; overlay</b><span>Every screen and setting</span></a></li>
+        <li><a href="https://github.com/vyanhursky/DefJamFFNY-recomp/blob/main/docs/10-input.md"><b>Controls</b><span>Gamepads, keyboard, mouse, remapping</span></a></li>
+        <li><a href="https://github.com/vyanhursky/DefJamFFNY-recomp/blob/main/docs/settings-reference.md"><b>Settings reference</b><span>Everything in settings.ini</span></a></li>
+        <li><a href="https://github.com/vyanhursky/DefJamFFNY-recomp/blob/main/docs/hd-textures.md"><b>HD textures</b><span>Generate, install and enable packs</span></a></li>
+        <li><a href="https://github.com/vyanhursky/DefJamFFNY-recomp/blob/main/docs/texture-modding-getting-started.md"><b>Texture modding</b><span>Find, edit and share your first pack</span></a></li>
+        <li><a href="https://github.com/vyanhursky/DefJamFFNY-recomp/blob/main/docs/language-packs.md"><b>Language packs</b><span>Play in another language, or make a pack</span></a></li>
+        <li><a href="https://github.com/vyanhursky/DefJamFFNY-recomp/blob/main/docs/importing-xbox-saves.md"><b>Importing Xbox saves</b><span>Bring your profiles into the port</span></a></li>
+        <li><a href="https://github.com/vyanhursky/DefJamFFNY-recomp/blob/main/docs/developer-menu.md"><b>Developer menu</b><span>EA's restored debug menu</span></a></li>
+        <li><a href="https://github.com/vyanhursky/DefJamFFNY-recomp/blob/main/docs/troubleshooting.md"><b>Troubleshooting</b><span>Setup, startup and pack recovery</span></a></li>
+        <li><a href="https://github.com/vyanhursky/DefJamFFNY-recomp/issues"><b>Open issues</b><span>Bugs and planned work</span></a></li>
+        <li><a href="https://github.com/vyanhursky/DefJamFFNY-recomp/blob/main/CONTRIBUTING.md"><b>Contributing</b><span>Reports, development setup, tests</span></a></li>
+      </ul>
+    </section>
+
+    <section class="section" id="faq" aria-labelledby="faq-title">
       <div class="section__head">
         <p class="kicker">FAQ</p>
         <h2 id="faq-title">Straight answers.</h2>
@@ -433,41 +433,10 @@
           <summary>Something's broken. Where do I report it?</summary>
           <p>Start with <a href="https://github.com/vyanhursky/DefJamFFNY-recomp/blob/main/docs/troubleshooting.md">troubleshooting</a>, then open a
              <a href="https://github.com/vyanhursky/DefJamFFNY-recomp/issues/new/choose">GitHub issue</a>
-             with your version, OS, CPU/GPU and controller. Press F9 in the game to save a bug bundle.
-             Keep game files and dumps out of reports.</p>
+             with your version, OS, CPU/GPU, controller and the relevant log lines. Please don't attach
+             F9 bug bundles, game files or dumps.</p>
         </details>
       </div>
-    </section>
-
-    <section class="section" id="docs" aria-labelledby="docs-title">
-      <div class="section__head">
-        <p class="kicker">Where it's heading</p>
-        <h2 id="docs-title">Roadmap &amp; docs.</h2>
-      </div>
-      <div class="roadmap">
-        <div class="road"><h3>Engine optimizations</h3><p>Better performance on low-spec machines, staying current with xboxrecomp and contributing upstream.</p></div>
-        <div class="road"><h3>Port accuracy</h3><p>Keep the visuals, tone and feel of the original Xbox game.</p></div>
-        <div class="road"><h3>Unlocked frame rates</h3><p>Above 60 fps without changing game speed or timing. Future work.</p></div>
-        <div class="road"><h3>Widescreen refinement</h3><p>Edge cases and broader aspect and venue coverage.</p></div>
-        <div class="road"><h3>Broader mods</h3><p>Custom fighters, music, stages and game modes, plus difficulty changes and restored cut content.</p></div>
-        <div class="road"><h3>Deeper decompilation</h3><p>A long-term stretch goal.</p></div>
-      </div>
-      <p class="fine">Directions, not promised dates.</p>
-
-      <ul class="doc-grid">
-        <li><a href="https://github.com/vyanhursky/DefJamFFNY-recomp/blob/main/docs/setup-installer.md"><b>Install guide</b><span>Requirements, prompts, updates, repairs</span></a></li>
-        <li><a href="https://github.com/vyanhursky/DefJamFFNY-recomp/blob/main/docs/launcher-and-overlay.md"><b>App &amp; overlay</b><span>Every screen and setting</span></a></li>
-        <li><a href="https://github.com/vyanhursky/DefJamFFNY-recomp/blob/main/docs/10-input.md"><b>Controls</b><span>Gamepads, keyboard, mouse, remapping</span></a></li>
-        <li><a href="https://github.com/vyanhursky/DefJamFFNY-recomp/blob/main/docs/settings-reference.md"><b>Settings reference</b><span>Everything in settings.ini</span></a></li>
-        <li><a href="https://github.com/vyanhursky/DefJamFFNY-recomp/blob/main/docs/hd-textures.md"><b>HD textures</b><span>Generate, install and enable packs</span></a></li>
-        <li><a href="https://github.com/vyanhursky/DefJamFFNY-recomp/blob/main/docs/texture-modding-getting-started.md"><b>Texture modding</b><span>Find, edit and share your first pack</span></a></li>
-        <li><a href="https://github.com/vyanhursky/DefJamFFNY-recomp/blob/main/docs/language-packs.md"><b>Language packs</b><span>Play in another language, or make a pack</span></a></li>
-        <li><a href="https://github.com/vyanhursky/DefJamFFNY-recomp/blob/main/docs/importing-xbox-saves.md"><b>Importing Xbox saves</b><span>Bring your profiles into the port</span></a></li>
-        <li><a href="https://github.com/vyanhursky/DefJamFFNY-recomp/blob/main/docs/developer-menu.md"><b>Developer menu</b><span>EA's restored debug menu</span></a></li>
-        <li><a href="https://github.com/vyanhursky/DefJamFFNY-recomp/blob/main/docs/troubleshooting.md"><b>Troubleshooting</b><span>Setup, startup and pack recovery</span></a></li>
-        <li><a href="https://github.com/vyanhursky/DefJamFFNY-recomp/issues"><b>Open issues</b><span>Bugs and planned work</span></a></li>
-        <li><a href="https://github.com/vyanhursky/DefJamFFNY-recomp/blob/main/CONTRIBUTING.md"><b>Contributing</b><span>Reports, development setup, tests</span></a></li>
-      </ul>
     </section>
 
     <section class="cta" aria-labelledby="cta-title">
@@ -505,10 +474,5 @@
       </p>
     </div>
   </footer>
-
-  <dialog class="lightbox" id="lightbox" aria-label="Full-size screenshot">
-    <form method="dialog"><button class="lightbox__close" aria-label="Close">×</button></form>
-    <img alt="">
-  </dialog>
 </body>
 </html>

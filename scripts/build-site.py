@@ -30,8 +30,8 @@ MEDIA = {
     'social-preview.jpg': 'branding/fan/github/social-preview-1280x640.jpg',
     'icon-64.png': 'branding/icon/png/defjam-64.png',
     'icon-256.png': 'branding/icon/png/defjam-256.png',
-    'gameplay-hero.png': 'docs/media/gameplay-hero.png',
-    'hd-16x9-gameplay.mp4': 'docs/media/hd-16x9-gameplay.mp4',
+    'site-trailer.mp4': 'docs/media/site-trailer.mp4',
+    'site-trailer-poster.jpg': 'docs/media/site-trailer-poster.jpg',
     'compare-cutscene-before.png': 'docs/media/compare-cutscene-before.png',
     'compare-cutscene-after.jpg': 'docs/media/compare-cutscene-after.jpg',
     'compare-fight-before.png': 'docs/media/compare-fight-before.png',
@@ -40,13 +40,7 @@ MEDIA = {
     'compare-menu-after.jpg': 'docs/media/compare-menu-after.jpg',
     'compare-map-before.png': 'docs/media/compare-map-before.png',
     'compare-map-after.jpg': 'docs/media/compare-map-after.jpg',
-    'app-home.png': 'docs/media/app-home.png',
-    'app-first-run.png': 'docs/media/app-first-run.png',
-    'app-settings.png': 'docs/media/app-settings.png',
-    'app-mods-installed.png': 'docs/media/app-mods-installed.png',
     'app-mods-browse.png': 'docs/media/app-mods-browse.png',
-    'app-overlay.png': 'docs/media/app-overlay.png',
-    'developer-menu.png': 'docs/media/developer-menu.png',
 }
 
 

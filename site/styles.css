@@ -62,6 +62,7 @@ h2 {
   font: 400 clamp(36px, 6vw, 64px)/1 var(--display);
   text-transform: uppercase;
   letter-spacing: .01em;
+  text-wrap: balance;
 }
 h3 {
   font: 700 21px/1.15 var(--label);
@@ -159,14 +160,14 @@ code { font: 500 .92em ui-monospace, "SF Mono", Menlo, Consolas, monospace; colo
   background:
     linear-gradient(90deg, var(--asphalt) 0%, rgba(12, 11, 10, .9) 30%, rgba(12, 11, 10, .25) 70%, rgba(12, 11, 10, .55) 100%),
     linear-gradient(0deg, var(--asphalt) 0%, rgba(12, 11, 10, 0) 35%),
-    url("media/hero.png") 70% 40% / cover no-repeat;
+    url("media/hero.png") 4% 40% / cover no-repeat;
 }
 @media (max-width: 700px) {
   .hero { padding-top: 40px; }
   .hero__bg {
     background:
       linear-gradient(0deg, var(--asphalt) 0%, rgba(12, 11, 10, .78) 45%, rgba(12, 11, 10, .55) 100%),
-      url("media/hero.png") 62% 30% / cover no-repeat;
+      url("media/hero.png") 31% 30% / cover no-repeat;
   }
 }
 .hero__inner { position: relative; max-width: var(--max); width: 100%; margin: 0 auto; }
@@ -268,6 +269,8 @@ figcaption, .fine { color: var(--dim); font-size: 14px; margin-top: 10px; }
   touch-action: pan-y;
 }
 .compare__after-img { position: absolute; inset: 0; width: 100%; height: 100%; }
+/* A pair framed alike: both sides sit 4:3 in the stage, so the slider lines up exactly. */
+.compare--same-frame .compare__after-img { object-fit: contain; }
 .compare__before {
   position: absolute; inset: 0; display: flex; justify-content: center;
   background: #000; clip-path: inset(0 calc(100% - var(--pos)) 0 0);
@@ -295,35 +298,6 @@ figcaption, .fine { color: var(--dim); font-size: 14px; margin-top: 10px; }
 }
 .compare__tag--l { left: 12px; }
 .compare__tag--r { right: 12px; color: var(--sodium); }
-
-/* Gallery */
-
-.gallery { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 48px; }
-@media (max-width: 600px) { .gallery { grid-template-columns: 1fr; } }
-.shot {
-  position: relative; display: block; padding: 0; margin: 0; overflow: hidden;
-  border: 1px solid var(--line); background: #000; cursor: zoom-in;
-  font: inherit; color: inherit; text-align: left;
-}
-.shot img { width: 100%; aspect-ratio: 3 / 2; object-fit: cover; object-position: top; transition: transform .4s, opacity .2s; opacity: .9; }
-.shot:hover img { transform: scale(1.03); opacity: 1; }
-.shot__cap {
-  position: absolute; left: 0; right: 0; bottom: 0; padding: 26px 14px 10px;
-  background: linear-gradient(0deg, rgba(0, 0, 0, .9), transparent);
-  font: 600 14px/1.25 var(--label); text-transform: uppercase; letter-spacing: .06em;
-}
-
-.lightbox {
-  max-width: min(1400px, 96vw); max-height: 94vh; padding: 0;
-  border: 1px solid var(--line); background: #000;
-}
-.lightbox::backdrop { background: rgba(0, 0, 0, .88); }
-.lightbox img { max-height: 90vh; width: auto; }
-.lightbox__close {
-  position: absolute; top: 8px; right: 8px; width: 40px; height: 40px;
-  border: 0; border-radius: 99px; background: rgba(12, 11, 10, .85); color: var(--ink);
-  font-size: 26px; line-height: 1; cursor: pointer;
-}
 
 /* Install */
 

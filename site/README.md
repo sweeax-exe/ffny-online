@@ -5,9 +5,9 @@ step of its own. It is served at `https://vyanhursky.github.io/DefJamFFNY-recomp
 
 | File | Holds |
 |---|---|
-| `index.html` | All the copy and structure: hero, features, screens, install, mods, news, FAQ, roadmap and docs, community, footer. |
+| `index.html` | All the copy and structure: hero, features, screens, install, mods, news, roadmap and docs, FAQ, community, footer. |
 | `styles.css` | The look. Colours and fonts are variables at the top. |
-| `app.js` | Live details: the latest release line, the download button for the visitor's OS, the news list, the before/after sliders and the screenshot lightbox. The page still works without it. |
+| `app.js` | Live details: the latest release line, the download button for the visitor's OS, the news list and the before/after sliders. The page still works without it. |
 
 ## Images
 
@@ -53,9 +53,9 @@ release, reviewed, then pinned as described under **Images**.
 
 | Priority | Shot | Where it goes | Why |
 |---|---|---|---|
-| 1 | A second venue in daylight or a bright club, 16:9, HD | Screens gallery | Every current gameplay shot is the dark Basement. |
-| 1 | Steam Deck in Gaming Mode, 16:10 | Screens gallery, Linux install card | Platform claim with no picture today. |
-| 2 | Four-fighter free-for-all | Features card 08 or gallery | Local multiplayer; caption only what the capture proves. |
-| 2 | Created fighter in the Sketch Artist or crib | Screens gallery | Story mode beyond versus fights, and the v0.12.1 fixes. |
+| 1 | A second venue in daylight or a bright club, 16:9, HD | Screens | Every current gameplay shot is the dark Basement. |
+| 1 | Steam Deck in Gaming Mode, 16:10 | Screens, Linux install card | Platform claim with no picture today. |
+| 2 | Four-fighter free-for-all | Features card 08 or Screens | Local multiplayer; caption only what the capture proves. |
+| 2 | Created fighter in the Sketch Artist or crib | Screens | Story mode beyond versus fights, and the v0.12.1 fixes. |
 | 3 | A short loop of a grapple or Blazin' move, 16:9 | Hero reel | Replaces the face-off clip with a signature moment. |
 | 3 | Windows capture of the same fight frame | Screens fine print | All captures are Mac today. |
