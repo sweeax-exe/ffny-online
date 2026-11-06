@@ -276,6 +276,12 @@ same `ditto` and `xattr` calls on a quarantined archive).
 
 ## Linux setup
 
+Since 1.0.0 Linux releases attach only the app, `DefJamRecompiled-<version>-x86_64.AppImage`,
+which carries this same payload. The setup archive below was attached to releases up to v0.13.0;
+`scripts/build-setup-linux.sh` still builds it (CI runs its wizard smoke test), but it is not published.
+A v0.13.0 Linux setup lists 1.0.0 and later as having no setup for the platform, so those players
+download the AppImage and open it once; it finds their installation and offers to update the game.
+
 `DefJamSetup-<version>-linux-x64.tar.gz` unpacks to a folder holding `DefJamSetup.sh`,
 "READ ME FIRST" and the third-party licenses. It needs x86-64 Linux with a Vulkan
 GPU, glibc 2.31 or newer and the Vulkan loader -- SteamOS and every current desktop

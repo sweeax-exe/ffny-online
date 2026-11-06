@@ -3,6 +3,7 @@
 # DefJamSetup-<version>-linux-x64.tar.gz, a folder holding DefJamSetup.sh, the
 # unpacked payload, a short "READ ME FIRST" and the third-party licenses; and the
 # app, DefJamRecompiled-<version>-x86_64.AppImage, which carries the same payload.
+# Since 1.0.0 only the AppImage is a release asset (build/setup-linux/setup-assets).
 # Never analyzes or builds a dump. Needs Python 3.11+ with pip, podman or docker (the
 # app is built in a pinned Ubuntu 22.04 container), mksquashfs and readelf; pass
 # --development for a local prototype from a dirty checkout (release workflows must not).
@@ -45,8 +46,9 @@ tar -C "$OUT/image" --owner=0 --group=0 --numeric-owner --sort=name -czf "$OUT/$
 "$PYTHON" scripts/package-appimage.py --program "$OUT/app/defjam_app" --payload "$OUT/image/$NAME/payload" \
     --out "$OUT/DefJamRecompiled.AppImage"
 
-# 4. Inventory, checksum and provenance of exactly what a release would attach: the setup archive
-#    and the app.
+# 4. Inventory, checksum and provenance of exactly what a release would attach: the app only. The
+#    setup archive is checked against the payload but is not a release asset since 1.0.0; it stays
+#    in $OUT for the wizard smoke test and command-line use.
 "$PYTHON" scripts/check-setup-assets.py --payload "$OUT/setup-payload.zip" --installer "$OUT/$NAME.tar.gz" \
     --app "$OUT/DefJamRecompiled.AppImage" --output-dir "$OUT/setup-assets" "${DEVELOPMENT[@]+"${DEVELOPMENT[@]}"}"
 echo "Built $OUT/setup-assets"
