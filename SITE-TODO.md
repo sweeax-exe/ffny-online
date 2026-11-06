@@ -38,43 +38,31 @@ v0.13.0 until 1.0 ships, so its buttons offer the old setup. To see the app down
 
 | ID | Item | Needs | Status |
 |---|---|---|---|
-| S1 | Replace the hero gameplay clip | **owner**: clips | waiting on clips |
-| S2 | New features heading | **owner**: pick | waiting on pick |
+| S1 | Replace the hero gameplay clip | | done, see question below |
+| S2 | New features tagline | | done |
 | S3 | Feature cards: order and wording | | done, see question below |
 | S4 | New captures: Menu/Launcher, Mod launcher, other old-UI pictures | | done |
-| S5 | Install guide for the app | | open |
-| S6 | Owner confirmations | **owner**: answers | open |
-| S7 | Vlad's review of the remaining page sections | **owner**: notes | waiting on notes |
-| S8 | README pass for 1.0 | **owner**: review | open |
+| S5 | Install guide for the app | | done, real-system checks below |
+| S6 | Owner confirmations | | answered; docs follow in S8 |
+| S7 | Vlad's review of the remaining page sections | | done |
+| S8 | README pass for 1.0 | | README done; other docs open |
 | S10 | Four new before/after sliders | | done |
-| S11 | Three new Roadmap entries | | open |
+| S11 | New Roadmap entries | | done |
 | S9 | Go-live | **owner**: Pages setting | open, last |
 
 ## Items
 
 ### S1. Replace the hero gameplay clip
 
-Vlad will supply clips and ask for them to be combined. The clip is the one playing under the hero:
-`docs/media/hd-16x9-gameplay.mp4`, shown as `media/hd-16x9-gameplay.mp4`, with
-`docs/media/gameplay-hero.png` as its poster.
+Done (2026-11-05): Vlad supplied the trailer. `docs/media/site-trailer.mp4` is its silent 720p web copy (16.8 MB, 38.6 s), with
+`docs/media/site-trailer-poster.jpg` as its poster, and it replaces the old clip on the page.
 
-- Combine the clips as Vlad directs. Keep the working files outside the repo or under the ignored `logs/`.
-- Keep it silent, looping and small enough for a web page (the current one is 5.6 MB).
-- Vlad approves the final file, then pin it as in the rules above.
-- Update the `<video>` label and caption in `site/index.html` to say what it now shows.
-- **Question for Vlad:** should the README's GIF (`docs/media/gameplay-preview-compact.gif`) change too?
+- README: the trailer plays from a GitHub attachment Vlad uploaded (9.1 MB copy).
+  under-10 MB copy uploaded, then its URL replacing the poster link in the Gameplay section.
 
-### S2. New features heading
+### S2. New features tagline
 
-"The same fight. A sharper corner." is to be replaced. Suggestions, for Vlad to pick from or redirect:
-
-1. Same streets. Sharper fight. (recommended)
-2. Old-school fight. New-school hardware.
-3. The fight you remember. Built for now.
-4. Same block. Better everything.
-5. Your corner. Your rules.
-
-Then change `#features-title` in `site/index.html`.
+Done: Vlad chose "Everything you remember. Nothing holding it back."
 
 ### S3. Feature cards
 
@@ -85,7 +73,7 @@ by default or asks first.
 **Question for Vlad:** these cards are no longer in the list. Should any come back, or be mentioned elsewhere?
 
 - **Four players, one couch.** Local multiplayer now appears only in an FAQ answer.
-- **EA's developer menu.** Now only a gallery picture and a docs link.
+- **EA's developer menu.** Now only a docs link.
 - **Upscaled textures.** Still in the sliders and the Mods section.
 - **Picture options** (Modern or Original, MSAA, anisotropic filtering, tint, film scratches). Now nowhere
   except "Modern or Original" in the install steps.
@@ -100,50 +88,50 @@ Done: `docs/media/app-*.png`, approved by Vlad on 2026-11-05 and pinned. The rem
 
 ### S5. Install guide for the app
 
-`docs/setup-installer.md` still describes the old setup wizards, and the page's platform guide links and
-Install guide card point to it.
+Done: `docs/install-guide.md` and its pinned `docs/media/install-*.png` screenshots.
 
-- Rewrite it, or add an app guide, covering first run, the Modern and Original choice, updates, Repair,
-  Uninstall and Add to Steam, per platform. `src/app/README.md`, `docs/launcher-ux-candidate.md` and
-  `docs/releases/v1.0.0-beta.1.md` are the sources.
-- Check these page claims against the app itself while there. They came from the old setup guide or
-  general knowledge:
-  - macOS: the "Open Anyway" step and the Xcode Command Line Tools requirement;
-  - Linux: "Mark the file as executable";
-  - the 12 GiB and 15 GiB space figures.
-- Point the page's links at the result.
+The Modern table in the guide assumes PR #193 (MSAA 2×, anisotropic filtering 16×), so that PR must land with this one.
+
+Still to check on real systems, since they came from the old setup guide or general knowledge:
+
+- Windows: the SmartScreen wording and the install screen.
+- macOS: the "Open Anyway" steps for the app's `.zip`.
+- Linux and Steam Deck: marking the AppImage executable in Dolphin, and the install screen.
+
+No Windows or Linux screenshots exist yet, and neither does one of the finished screen.
 
 ### S6. Owner confirmations
 
-Record each answer here, then apply it to the page and the README.
+Vlad's answers (2026-11-05), now the policy for the page and the docs:
 
-- [ ] Remove "beta" from Mods and Widescreen? The page has removed both, following the README. v0.11.0's
-  notes called mod support a beta.
-- [ ] Is "Steam Deck hits a steady 60 fps at 2×" safe to say publicly? The README adds "in all game modes"
-  and "with all HD texture mods". Vlad's note did not mention "at 2×"; the page keeps it from the README.
-- [ ] One name for the generated textures. The app says "Upscaled Original Textures" and the page follows
-  it. The docs also say "Faithful HD" and "Recomp HD".
-- [ ] F9 bug bundles: the beta notes say to attach them, the README says to keep them local and share only
-  text diagnostics. The page only says F9 saves one.
-- [ ] Custom fighters, music, stages and game modes are now "coming up on the roadmap" on the page. The
-  README and `docs/mod-manager.md` still call broader mods an unscheduled proposal. Item S8 follows this answer.
+- Mod support is not a beta.
+- The page may say Steam Deck hits a steady 60 fps.
+- The generated textures are called **Upscaled Original Textures**.
+- Players should not attach F9 bug bundles to reports.
+- Custom fighters, music, stages and game modes are coming; working branches exist.
+
+**Follow-ups:**
+
+- `docs/releases/v1.0.0.md` must not tell players to attach F9 bundles. The published beta 1 and beta 2 notes do, so Vlad
+  decides whether to edit those on GitHub.
+- Item S8 applies the naming, the mods wording and the F9 rule to the README and the guides.
 
 ### S7. Review of the remaining page sections
 
 Vlad has reviewed the features so far. Still to come: the hero, Screens, Install, Mods, News, FAQ,
 Roadmap and docs, community and footer. Add his notes here as they arrive.
 
+Done from Vlad's notes (2026-11-05): launcher and settings pictures removed from Screens, slider captions removed,
+FAQ moved below Roadmap and docs, and the cutscene recaptured at 4:3 on both sides so the slider lines up (pair approved by Vlad). The developer menu picture is removed too.
+
 ### S8. README pass for 1.0
 
-Not started; Vlad wants to review its wording. Known issues:
+The README is done and approved by Vlad. Still open, in the other docs:
 
-- Top: the "v1.0.0 release candidate" paragraph and "Setup checks your dump".
-- Launcher section: "Improved Game Launcher (v0.10.6)", the old screenshot and "Get the latest setup".
-- Get started: the steps and table describe the wizard and `DefJamSetup` files. Use the app and the AppImage.
-- Features: match the page's list and order. "Settings before and during play" describes the old launcher.
-- HD textures: "a local upscaling model" is misleading. Setup uses Lanczos 4x on the CPU, with no AI model.
-- Roadmap: "21:9 and 32:9 remain experimental" contradicts Features, the unified app is called
-  "proposals/in progress", and "texture packs work today" leaves out language mods. Add the S11 entries.
+- Naming: use **Upscaled Original Textures**. "Faithful HD" or "Recomp HD" also appear in `docs/hd-textures.md`, `docs/hd-texture-workflow.md`,
+  `docs/language-packs.md`, `docs/launcher-and-overlay.md`, `docs/mod-manager.md`, `docs/menu-ui-modpack-handover.md`,
+  `docs/texture-modding-getting-started.md` and `docs/widescreen/09-macos-validation.md`.
+- Mods: `docs/mod-manager.md` calls broader mods future work. Vlad says they're coming.
 
 ### S10. Four new before/after sliders
 
@@ -164,17 +152,11 @@ Scenarios:
 
 Vlad's answers: the old sliders go; Map Select is the Battle venue map; the colour tint and film scratches stay at their defaults.
 
-### S11. Three new Roadmap entries
+### S11. New Roadmap entries
 
-Add to the Roadmap in `site/index.html` (`.roadmap`), with Vlad's wording:
-
-- [ ] **Extensible Custom Fighter Mod support**
-- [ ] **Custom and Restored Songs**
-- [ ] **Additional HD Upscaling mods**, covering Story Fighter customization, and Stages and Level textures
-
-The "Broader mods" entry already mentions custom fighters and music, so trim it to avoid repeating them, and
-keep the Mods section's fine print and the "Mod support" feature card consistent. That makes nine entries,
-which fills the grid. The README's roadmap table gets the same entries in S8.
+Done on the page: Extensible Custom Fighter Mod support, Custom and Restored Songs, Additional HD Upscaling mods (Story
+Fighter customization, Stages and Level textures) and the Def Jam: The Takeover expansion (its mechanics and story
+mode in this game). The README's roadmap table gets the same entries in S8.
 
 ### S9. Go-live
 
