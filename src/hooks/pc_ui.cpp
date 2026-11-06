@@ -43,6 +43,7 @@
 #include <vector>
 #include <map>
 #include <fstream>
+#include <filesystem>
 #include <iterator>
 #include "pc_ui_model.h"
 #include "pc_mods.h"
@@ -265,7 +266,7 @@ static const char *friendly(const char *section, const char *key)
         {"debug", "hang_seconds", "Bundle a hang after (s)"},
         {"debug", "keep_sessions", "Sessions kept whole"},
         {"debug", "record_guest_ram", "Crash bundles hold game memory"},
-        {"songs", "restored", "Restored song (Holler If Ya Hear Me)"},
+        {"songs", "restored", "Restored song: Holler If Ya Hear Me - 2Pac"},
         {"songs", "custom", "Your own songs"},
         {"songs", "folders", "More song folders"},
         {"cheats", "infinite_health", "Infinite health"},
@@ -1666,6 +1667,185 @@ static void songs_save()
                          : "Could not save the song choices.";
 }
 
+// The Beatbox of a profile, from the state file the game writes when the profile loads
+// (<data>/song-state/<profile>.txt): every song with its state byte (bits 0-1: 0 never arranged,
+// 1 or 3 on, 2 off; bits 2-7 its place) and name. Saving adds a "launcher" line; the next load of
+// that profile follows the file over the save (src/patches/song_store.c).
+struct BeatboxSong
+{
+    std::string id, label;
+    int state;
+};
+static std::vector<std::string> g_bb_profiles;
+static int g_bb_profile = 0;
+static std::vector<BeatboxSong> g_bb_songs;
+static std::string g_bb_retail, g_bb_status;
+static bool g_bb_loaded = false;
+static const int k_bb_on_limit = 35;
+
+static std::string bb_dir() { return pcui::folder_path(pcui::Folder::Data) + "/song-state"; }
+
+static void bb_list_profiles()
+{
+    g_bb_profiles.clear();
+    std::error_code ec;
+    for (auto &e : std::filesystem::directory_iterator(std::filesystem::u8path(bb_dir()), ec))
+    {
+        std::string name = e.path().filename().u8string();
+        if (name.size() > 4 && name.compare(name.size() - 4, 4, ".txt") == 0 && name != "library.txt")
+            g_bb_profiles.push_back(name.substr(0, name.size() - 4));
+    }
+    std::sort(g_bb_profiles.begin(), g_bb_profiles.end());
+    if (g_bb_profile >= (int)g_bb_profiles.size())
+        g_bb_profile = 0;
+}
+
+static void bb_load()
+{
+    g_bb_songs.clear();
+    g_bb_retail.clear();
+    g_bb_loaded = true;
+    if (g_bb_profiles.empty())
+        return;
+    std::ifstream f(std::filesystem::u8path(bb_dir() + "/" + g_bb_profiles[g_bb_profile] + ".txt"));
+    std::string line;
+    while (std::getline(f, line))
+    {
+        if (line.empty() || line[0] == '#' || line.compare(0, 8, "launcher") == 0)
+            continue;
+        if (line.compare(0, 7, "retail ") == 0)
+        {
+            g_bb_retail = line;
+            continue;
+        }
+        char id[32] = "";
+        unsigned state = 0;
+        int used = 0;
+        if (sscanf(line.c_str(), "%31s %x %n", id, &state, &used) < 2)
+            continue;
+        BeatboxSong s{id, used > 0 && used < (int)line.size() ? line.substr(used) : std::string(id), (int)state};
+        if (s.label.empty() || s.label == " - ")
+            s.label = id;
+        g_bb_songs.push_back(s);
+    }
+    // In Beatbox order: arranged songs by place, then the rest.
+    std::stable_sort(g_bb_songs.begin(), g_bb_songs.end(), [](const BeatboxSong &a, const BeatboxSong &b) {
+        int pa = (a.state & 3) ? a.state >> 2 : 999, pb = (b.state & 3) ? b.state >> 2 : 999;
+        return pa < pb;
+    });
+}
+
+static bool bb_on(const BeatboxSong &s) { return (s.state & 3) != 0 && (s.state & 3) != 2; }
+
+static void bb_save()
+{
+    std::string path = bb_dir() + "/" + g_bb_profiles[g_bb_profile] + ".txt";
+    std::ofstream f(std::filesystem::u8path(path), std::ios::trunc);
+    f << "# The Beatbox of profile " << g_bb_profiles[g_bb_profile]
+      << ", changed on the launcher's Songs page: the next load of the profile follows it.\n";
+    if (!g_bb_retail.empty())
+        f << g_bb_retail << "\n";
+    f << "launcher 1\n";
+    for (size_t k = 0; k < g_bb_songs.size(); k++)
+    {
+        int state = (int)(std::min<size_t>(k, 62) << 2) | (bb_on(g_bb_songs[k]) ? 3 : 2);
+        g_bb_songs[k].state = state;
+        char hex[8];
+        snprintf(hex, sizeof hex, "%02X", state);
+        f << g_bb_songs[k].id << " " << hex << " " << g_bb_songs[k].label << "\n";
+    }
+    g_bb_status = f.good() ? "Saved. The game uses it the next time this profile loads." : "Could not save the Beatbox.";
+}
+
+static void page_beatbox()
+{
+    float scale = ImGui::GetStyle().FontScaleMain;
+    ImGui::SeparatorText("Beatbox");
+    if (!g_bb_loaded)
+    {
+        bb_list_profiles();
+        bb_load();
+    }
+    if (g_bb_profiles.empty())
+    {
+        ImGui::TextWrapped("Load a profile in the game once (start Story or Battle with it) and its Beatbox appears here.");
+        return;
+    }
+    ImGui::SetNextItemWidth(240 * scale);
+    if (ImGui::BeginCombo("Profile", g_bb_profiles[g_bb_profile].c_str()))
+    {
+        for (int i = 0; i < (int)g_bb_profiles.size(); i++)
+            if (ImGui::Selectable(g_bb_profiles[i].c_str(), i == g_bb_profile))
+            {
+                g_bb_profile = i;
+                bb_load();
+            }
+        ImGui::EndCombo();
+    }
+    ui_target("songs.beatbox.profile");
+    int on = 0;
+    for (auto &s : g_bb_songs)
+        on += bb_on(s);
+    ImGui::SameLine();
+    ImGui::PushStyleColor(ImGuiCol_Text, on >= k_bb_on_limit ? ImVec4(1, 0.75f, 0.2f, 1) : ImGui::GetStyleColorVec4(ImGuiCol_Text));
+    ImGui::Text("%d of %d songs on", on, k_bb_on_limit);
+    ImGui::PopStyleColor();
+    ImGui::TextDisabled("The songs this profile's Beatbox plays, in its order. Changes apply the next time the profile loads.");
+    bool changed = false;
+    int move_from = -1, move_to = -1;
+    if (ImGui::BeginTable("beatbox", 3, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_SizingStretchProp))
+    {
+        ImGui::TableSetupColumn("On", ImGuiTableColumnFlags_WidthFixed, 50 * scale);
+        ImGui::TableSetupColumn("Song");
+        ImGui::TableSetupColumn("Order", ImGuiTableColumnFlags_WidthFixed, 110 * scale);
+        ImGui::TableHeadersRow();
+        for (size_t i = 0; i < g_bb_songs.size(); i++)
+        {
+            BeatboxSong &s = g_bb_songs[i];
+            ImGui::PushID((int)i + 10000);
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            bool v = bb_on(s);
+            bool can = v || on < k_bb_on_limit;
+            if (!can)
+                ImGui::BeginDisabled();
+            if (ImGui::Checkbox("##on", &v))
+            {
+                s.state = (s.state & 0xFC) | (v ? 3 : 2);
+                changed = true;
+            }
+            if (!can)
+                ImGui::EndDisabled();
+            ui_target(("songs.beatbox.on." + s.id).c_str());
+            ImGui::TableNextColumn();
+            ImGui::TextUnformatted(s.label.c_str());
+            ImGui::TableNextColumn();
+            if (ImGui::ArrowButton("##up", ImGuiDir_Up) && i > 0)
+            {
+                move_from = (int)i;
+                move_to = (int)i - 1;
+            }
+            ImGui::SameLine();
+            if (ImGui::ArrowButton("##down", ImGuiDir_Down) && i + 1 < g_bb_songs.size())
+            {
+                move_from = (int)i;
+                move_to = (int)i + 1;
+            }
+            ImGui::PopID();
+        }
+        ImGui::EndTable();
+    }
+    if (move_from >= 0)
+    {
+        std::swap(g_bb_songs[move_from], g_bb_songs[move_to]);
+        changed = true;
+    }
+    if (changed)
+        bb_save();
+    if (!g_bb_status.empty())
+        ImGui::TextDisabled("%s", g_bb_status.c_str());
+}
+
 static void page_songs(UiMode mode)
 {
     float scale = ImGui::GetStyle().FontScaleMain;
@@ -1675,16 +1855,21 @@ static void page_songs(UiMode mode)
                        "banner, and in fights. Put MP3, FLAC, Ogg or WAV files in the songs folder (subfolders are "
                        "fine), or add folders below. The first start after adding a song converts it, a few seconds a "
                        "song.");
+    char folder[SONG_LIBRARY_PATH];
+    song_library_folder(pcui::folder_path(pcui::Folder::Data).c_str(), folder, sizeof folder);
     if (ImGui::Button("Open songs folder"))
-    {
-        char folder[SONG_LIBRARY_PATH];
-        song_library_folder(pcui::folder_path(pcui::Folder::Data).c_str(), folder, sizeof folder);
         pcui::open_path(folder);
-    }
     ui_target("songs.open_folder");
     ImGui::SameLine();
+    if (ImGui::Button("Copy its path"))
+        pcui::copy_text(folder);
+    ui_target("songs.copy_folder");
+    ImGui::SameLine();
     if (ImGui::Button("Look for songs again") || !g_songs_scanned)
+    {
         songs_scan();
+        g_bb_loaded = false;
+    }
     ui_target("songs.rescan");
     settings_group("songs", {"folders"});
 
@@ -1692,21 +1877,24 @@ static void page_songs(UiMode mode)
     for (auto &row : g_song_rows)
         on += row.entry.on;
     ImGui::SeparatorText("Your songs");
-    ImGui::TextWrapped("The game holds 27 of your songs next to its own 33; at most 35 songs can be ticked on at "
-                       "once in the Beatbox. Interactive (experimental) builds a song on a licensed song's "
-                       "arrangement: in fights it switches between the song and filtered versions of it as the "
-                       "fight goes.");
-    if (g_song_rows.empty())
     {
-        ImGui::TextDisabled("No music files found yet.");
-        return;
+        // The two limits, where they cannot be missed.
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1, 0.75f, 0.2f, 1));
+        ImGui::BulletText("Up to 27 of your own songs in the game (next to its own 33).");
+        ImGui::BulletText("Up to 35 songs switched on in the Beatbox at once.");
+        ImGui::PopStyleColor();
     }
+    ImGui::TextWrapped("Interactive (experimental) builds a song on a licensed song's arrangement: in fights it "
+                       "switches between the song and filtered versions of it as the fight goes.");
+    if (g_song_rows.empty())
+        ImGui::TextDisabled("No music files found yet.");
+    if (!g_song_rows.empty())
     ImGui::Text("%d file(s) found, %d chosen for the game%s", (int)g_song_rows.size(), on,
                 on > SONG_LIBRARY_ROOM ? " (the first 27 are used)" : "");
     if (mode != UI_LAUNCHER)
         ImGui::TextDisabled("Changes apply the next time the game starts.");
     bool changed = false;
-    if (ImGui::BeginTable("songs", 4, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_Resizable |
+    if (!g_song_rows.empty() && ImGui::BeginTable("songs", 4, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_Resizable |
                                           ImGuiTableFlags_SizingStretchProp))
     {
         ImGui::TableSetupColumn("In game", ImGuiTableColumnFlags_WidthFixed, 70 * scale);
@@ -1757,6 +1945,7 @@ static void page_songs(UiMode mode)
         songs_save();
     if (!g_songs_status.empty())
         ImGui::TextDisabled("%s", g_songs_status.c_str());
+    page_beatbox();
 }
 
 static void page_cheats(UiMode mode)
@@ -1929,6 +2118,9 @@ UiResult ui_draw(UiMode mode, float x, float y, float width, float height)
         }
         if (home.route == 4) {
             g_advanced = true; g_page = 7; g_select_page = true; g_home_return = "Help";
+        }
+        if (home.route == 5) {
+            g_advanced = true; ImGui::SetScrollY(0); g_page = 3; g_select_page = true; g_home_return = "Songs";
         }
     }
     else

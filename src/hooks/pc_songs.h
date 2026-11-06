@@ -38,6 +38,8 @@ int pc_songs_rows(void);
 const char *pc_songs_entity_for_rank(uint32_t rank);
 /* A stable id for the row (the entity, "#k" for the k-th later row with the same one). */
 const char *pc_songs_id_for_rank(uint32_t rank);
+/* "Title - Artist" of the row. */
+const char *pc_songs_label_for_rank(uint32_t rank);
 
 /* The database's string hash (djb2 over the bytes and the terminating NUL). */
 uint32_t pc_songs_name_hash(const char *s);

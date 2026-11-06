@@ -512,6 +512,7 @@ const char *pc_songs_entity(int i) { return i >= 0 && i < g_song_count ? g_songs
 
 static char g_rank_entity[PC_SONGS_MAX_ROWS][16];
 static char g_rank_id[PC_SONGS_MAX_ROWS][24];
+static char g_rank_label[PC_SONGS_MAX_ROWS][128];
 static char g_data_root[SONGS_PATH];
 static int g_rank_count, g_retail_rows;
 
@@ -538,11 +539,23 @@ static int read_rank_table(const uint8_t *p, size_t n, char (*out)[16], int max)
     uint32_t list = sub + 12 + count * 4;
     if (!sod_range(&s, list, count * 4)) return -1;
     rows = (int)count;
+    uint32_t wt = 0, wa = 0, tt;
+    int have_title = sod_field(&s, thash, "Title", &wt, &tt), have_artist = sod_field(&s, thash, "Artist", &wa, &tt);
     for (uint32_t i = 0; i < count && (int)i < max; i++) {
-        uint32_t idx = sod_word(&s, sod_word(&s, list + i * 4) + w * 4);
+        uint32_t rec = sod_word(&s, list + i * 4);
+        uint32_t idx = sod_word(&s, rec + w * 4);
         uint32_t at = idx < nstr ? sod_word(&s, strings + 12 + idx * 8) : 0;
         out[i][0] = 0;
         if (at && sod_range(&s, at, 1)) snprintf(out[i], sizeof out[i], "%s", (const char *)p + at);
+        if (out == g_rank_entity) {
+            /* "Title - Artist" for the launcher's Beatbox list (the state file carries it). */
+            const char *title = "", *artist = "";
+            uint32_t ti = have_title ? sod_word(&s, rec + wt * 4) : 0xFFFFFFFFu, ai = have_artist ? sod_word(&s, rec + wa * 4) : 0xFFFFFFFFu;
+            uint32_t ta = ti < nstr ? sod_word(&s, strings + 12 + ti * 8) : 0, aa = ai < nstr ? sod_word(&s, strings + 12 + ai * 8) : 0;
+            if (ta && sod_range(&s, ta, 1)) title = (const char *)p + ta;
+            if (aa && sod_range(&s, aa, 1)) artist = (const char *)p + aa;
+            snprintf(g_rank_label[i], sizeof g_rank_label[i], "%.60s - %.60s", title, artist);
+        }
     }
     return rows;
 }
@@ -550,6 +563,11 @@ static int read_rank_table(const uint8_t *p, size_t n, char (*out)[16], int max)
 const char *pc_songs_data_root(void) { return g_data_root; }
 int pc_songs_retail_rows(void) { return g_retail_rows; }
 int pc_songs_rows(void) { return g_rank_count; }
+const char *pc_songs_label_for_rank(uint32_t rank)
+{
+    return rank < (uint32_t)g_rank_count ? g_rank_label[rank] : NULL;
+}
+
 const char *pc_songs_id_for_rank(uint32_t rank)
 {
     return rank < (uint32_t)g_rank_count ? g_rank_id[rank] : NULL;

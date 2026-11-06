@@ -62,7 +62,7 @@ static uint32_t s_fixed_keys, s_fixed_states, s_fixed_counter;   /* the save's c
 static uint32_t s_manager;                                       /* B: the profile manager */
 static int s_loaded;                                             /* a profile was loaded */
 static char s_profile[40];
-static char s_written[8192];                                     /* the state file as last written */
+static char s_written[16384];                                     /* the state file as last written */
 static uint32_t s_rotate;
 
 static int on_count(uint32_t store);
@@ -132,6 +132,8 @@ static void state_path(char *out, size_t size)
 typedef struct { char entity[24]; int state; } Saved;
 
 /* entity -> state byte, in file order; *retail gets the checksum line. Returns the count. */
+static int s_launcher_edit;     /* the file carries the launcher's choices: follow them over the save */
+
 static int read_state_file(Saved *out, int max, uint32_t *retail, int *have_retail)
 {
     char path[1024], line[128];
@@ -145,6 +147,7 @@ static int read_state_file(Saved *out, int max, uint32_t *retail, int *have_reta
         unsigned v;
         if (line[0] == '#') continue;
         if (sscanf(line, "retail %x", &v) == 1) { *retail = v; *have_retail = 1; continue; }
+        if (!strncmp(line, "launcher", 8)) { s_launcher_edit = 1; continue; }
         if (n < max && sscanf(line, "%63s %x", name, &v) == 2 && strlen(name) < sizeof out[n].entity) {
             snprintf(out[n].entity, sizeof out[n].entity, "%s", name);
             out[n++].state = (int)(v & 0xFF);
@@ -185,16 +188,20 @@ static void make_dirs(const char *path)
 
 static void write_state_file(void)
 {
-    char text[sizeof s_written], path[1024], part[1040];
+    static char text[sizeof s_written];
+    char path[1024], part[1040];
     size_t n = 0;
     uint32_t count = MEM32(s_store + 8);
     n += (size_t)snprintf(text + n, sizeof text - n,
-                          "# Jukebox places of the songs the game's own save does not hold (profile %s).\n"
-                          "# Written by the game; see docs/research/custom-songs.md. One song per line: folder, state.\n"
+                          "# The Beatbox of profile %s: every song, its state (bits 0-1: 0 never arranged, 1 or 3 on,\n"
+                          "# 2 off; bits 2-7: its place) and name. Written by the game; the launcher's Songs page may\n"
+                          "# change states and places and add a \"launcher\" line, which the next load follows over the\n"
+                          "# save. docs/research/custom-songs.md.\n"
                           "retail %08X\n", s_profile, fixed_checksum());
-    for (uint32_t i = 0; i < count && n < sizeof text - 64; i++) {
-        const char *e = pc_songs_id_for_rank(MEM32(s_keys + i * 4) & 0xFFFFFFu);
-        if (e && *e) n += (size_t)snprintf(text + n, sizeof text - n, "%s %02X\n", e, MEM8(s_states + i));
+    for (uint32_t i = 0; i < count && n < sizeof text - 200; i++) {
+        uint32_t rank = MEM32(s_keys + i * 4) & 0xFFFFFFu;
+        const char *e = pc_songs_id_for_rank(rank), *label = pc_songs_label_for_rank(rank);
+        if (e && *e) n += (size_t)snprintf(text + n, sizeof text - n, "%s %02X %s\n", e, MEM8(s_states + i), label ? label : "");
     }
     if (!strcmp(text, s_written)) return;
     state_path(path, sizeof path);
@@ -283,11 +290,13 @@ void song_store_after_load(uint32_t manager)
     s_loaded = 1;
     profile_name(manager, s_profile, sizeof s_profile);
     s_written[0] = 0;
+    s_launcher_edit = 0;
     nsaved = read_state_file(saved, CAP, &file_retail, &have_retail);
     /* The file describes this save when the save's song block is the one it was written with;
      * otherwise (a new profile, or one the original game changed) the save decides for the
      * retail songs and the file only for the added ones. */
-    int file_whole = have_retail && file_retail == fixed_checksum();
+    int file_whole = (have_retail && file_retail == fixed_checksum()) || (s_launcher_edit && nsaved);
+    if (s_launcher_edit) fprintf(stderr, "[SONGS] profile %s: the launcher's Beatbox choices\n", s_profile);
 
     /* Wanted position of every song: (state, sort key). Sort keys: file songs in file order
      * (their own order) when the file is whole; else retail by their saved order, then the
