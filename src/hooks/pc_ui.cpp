@@ -1691,7 +1691,7 @@ static void bb_list_profiles()
     std::error_code ec;
     for (auto &e : std::filesystem::directory_iterator(std::filesystem::u8path(bb_dir()), ec))
     {
-        std::string name = e.path().filename().u8string();
+        std::string name = pcui::path_utf8(e.path().filename());
         if (name.size() > 4 && name.compare(name.size() - 4, 4, ".txt") == 0 && name != "library.txt")
             g_bb_profiles.push_back(name.substr(0, name.size() - 4));
     }
