@@ -1,6 +1,6 @@
 // Linux: the AppImage installs itself (docs/research/unified-app-design-2026-10-26.md §3.3, §6).
 //
-// The released app is one file, DefJamRecompiled-<version>-x86_64.AppImage (scripts/package-appimage.py):
+// The released app is one file, DefJamRecompiled-<version>-linux-x86_64.AppImage (scripts/package-appimage.py):
 // the AppImage runtime and a read-only image holding this program and, beside it, the setup payload.
 // The runtime mounts the image at a new /tmp/.mount_* folder on every start and says which file it
 // came from in APPIMAGE (and where it is mounted in APPDIR). Nothing may remember the mount: setup

@@ -7,7 +7,7 @@ Windows the program DefJamRecompiled.exe, whose built-in payload (resource 101) 
 inspected payload byte for byte; on Linux the AppImage scripts/package-appimage.py makes, whose image
 is read in Python (setup/releases.py read_appimage) and checked file by file against the inspected
 payload. Published as DefJamRecompiled-<version>-macos-arm64.zip, -windows-x64.exe or
--x86_64.AppImage with its checksum and a kind: app provenance that setup/releases.py select_app
+-linux-x86_64.AppImage (-x86_64.AppImage up to 1.0.0) with its checksum and a kind: app provenance that setup/releases.py select_app
 verifies before the app replaces itself.
 
 A Linux release attaches only the app (APP_ONLY_PLATFORMS): with --app the setup archive is still

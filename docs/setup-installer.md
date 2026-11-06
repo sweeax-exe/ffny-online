@@ -276,7 +276,7 @@ same `ditto` and `xattr` calls on a quarantined archive).
 
 ## Linux setup
 
-Since 1.0.0 Linux releases attach only the app, `DefJamRecompiled-<version>-x86_64.AppImage`,
+Since 1.0.0 Linux releases attach only the app, `DefJamRecompiled-<version>-linux-x86_64.AppImage`,
 which carries this same payload. The setup archive below was attached to releases up to v0.13.0;
 `scripts/build-setup-linux.sh` still builds it (CI runs its wizard smoke test), but it is not published.
 A v0.13.0 Linux setup lists 1.0.0 and later as having no setup for the platform, so those players

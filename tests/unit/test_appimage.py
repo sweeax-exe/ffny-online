@@ -246,8 +246,8 @@ def test_asset_check_compares_the_appimage_payload_with_the_inspected_one(tmp_pa
 
 def test_linux_app_asset_names():
     # Since 1.0.0 a Linux release attaches only the AppImage, its checksum and its provenance.
-    names = ['DefJamRecompiled-0.14.0-x86_64.AppImage', 'DefJamRecompiled-0.14.0-x86_64.sha256',
-             'DefJamRecompiled-0.14.0-x86_64.provenance.json']
+    names = ['DefJamRecompiled-0.14.0-linux-x86_64.AppImage', 'DefJamRecompiled-0.14.0-linux-x86_64.sha256',
+             'DefJamRecompiled-0.14.0-linux-x86_64.provenance.json']
     setup = ['DefJamSetup-0.14.0-linux-x64.tar.gz', 'DefJamSetup-0.14.0-linux-x64.sha256',
              'DefJamSetup-0.14.0-linux-x64.provenance.json']
     assets.validate_asset_names('0.14.0', names, PLATFORM, app=True)

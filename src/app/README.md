@@ -68,7 +68,7 @@ Play starts the game that setup built on this computer, with `--no-launcher`.
   (owner's choice, 2026-10-27). The installed copy unpacks its payload again when `payload\` is
   missing or from another build (`payload.sha256`).
 - **Installs itself on Linux** (`app_install_linux.cpp`; design §3.3, §6). The released app is one
-  AppImage, `DefJamRecompiled-<version>-x86_64.AppImage`: the AppImage runtime and a read-only image
+  AppImage, `DefJamRecompiled-<version>-linux-x86_64.AppImage`: the AppImage runtime and a read-only image
   holding the program with the setup payload beside it. The runtime mounts it at a new
   `/tmp/.mount_*` folder on every start, so nothing may remember that path: setup copies what it
   needs into the install folder, and Steam and the play wrapper are given the AppImage file
@@ -151,7 +151,7 @@ payload, file for file as the archive carries it, a desktop file and the icon in
 (`mksquashfs`) behind the pinned AppImage type 2 runtime (`appimage_runtime`). gzip, so
 `setup/releases.py` (`read_appimage`) can read the image in Python: the updater and
 `scripts/check-setup-assets.py --app` check the payload inside without mounting or running
-anything, then the checker writes `DefJamRecompiled-<version>-x86_64.AppImage`, its `.sha256` and its
+anything, then the checker writes `DefJamRecompiled-<version>-linux-x86_64.AppImage`, its `.sha256` and its
 `kind: app` provenance beside the setup's. The payload carries the game's build toolchain (design
 §6): Zig's clang for glibc 2.31, CMake, Ninja, and SDL3 and shaderc built with that Zig
 (`scripts/build-toolchain-linux.sh`, in the same image, which then supplies headers only). Setup

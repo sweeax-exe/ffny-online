@@ -128,7 +128,7 @@ GitHub supplies the source ZIP/tar archives. They do not include submodules;
 the supported command-line setup is a recursive clone at the tag. Only the
 setup tools (`DefJamSetup-<version>-windows-x64.exe`, `-macos-arm64.dmg`; Linux has no
 setup asset since 1.0.0, only the AppImage) and the app (`DefJamRecompiled-<version>-macos-arm64.zip`,
-`DefJamRecompiled-<version>-windows-x64.exe` and `DefJamRecompiled-<version>-x86_64.AppImage`,
+`DefJamRecompiled-<version>-windows-x64.exe` and `DefJamRecompiled-<version>-linux-x86_64.AppImage`,
 D215), each with its `.sha256` and `.provenance.json`, are attached after standalone setup
 inventory/tests pass. The app carries the same payload (in the bundle's Resources on macOS, built
 into the program on Windows, in the AppImage's image on Linux) and updates itself from these assets. `check-setup-assets.py`

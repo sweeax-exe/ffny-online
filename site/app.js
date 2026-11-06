@@ -10,7 +10,7 @@
   var PLATFORMS = {
     windows: { label: 'Download for Windows', sub: 'x64', asset: 'windows-x64.exe' },
     mac: { label: 'Download for macOS', sub: 'Apple Silicon', asset: 'macos-arm64.zip' },
-    linux: { label: 'Download for Linux', sub: 'x86-64 & Steam Deck', asset: 'x86_64.AppImage' }
+    linux: { label: 'Download for Linux', sub: 'x86-64 & Steam Deck', asset: 'linux-x86_64.AppImage' }
   };
 
   // Each button downloads the app (DefJamRecompiled-<v>-<platform>, D215), which sets up, launches and
@@ -19,8 +19,11 @@
   var SETUP_FOR = {
     'windows-x64.exe': 'windows-x64.exe',
     'macos-arm64.zip': 'macos-arm64.dmg',
-    'x86_64.AppImage': 'linux-x64.tar.gz'
+    'linux-x86_64.AppImage': 'linux-x64.tar.gz'
   };
+
+  // The Linux app was DefJamRecompiled-<v>-x86_64.AppImage up to 1.0.0, without "linux-".
+  var LEGACY_APP = { 'linux-x86_64.AppImage': 'x86_64.AppImage' };
 
   // Best guess at the visitor's desktop OS; null on phones, tablets and anything unknown.
   function detectOS() {
@@ -100,7 +103,9 @@
 
   // The asset a button for `suffix` should download: the app when the release has it, else the setup.
   function pickAsset(release, suffix) {
-    return findAsset(release, 'DefJamRecompiled', suffix) || findAsset(release, 'DefJamSetup', SETUP_FOR[suffix]);
+    return findAsset(release, 'DefJamRecompiled', suffix) ||
+      (LEGACY_APP[suffix] && findAsset(release, 'DefJamRecompiled', LEGACY_APP[suffix])) ||
+      findAsset(release, 'DefJamSetup', SETUP_FOR[suffix]);
   }
 
   function extension(asset) {

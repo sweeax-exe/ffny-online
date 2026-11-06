@@ -2,7 +2,7 @@
 # Build the game-free Linux setup (x86-64, Steam Deck included):
 # DefJamSetup-<version>-linux-x64.tar.gz, a folder holding DefJamSetup.sh, the
 # unpacked payload, a short "READ ME FIRST" and the third-party licenses; and the
-# app, DefJamRecompiled-<version>-x86_64.AppImage, which carries the same payload.
+# app, DefJamRecompiled-<version>-linux-x86_64.AppImage, which carries the same payload.
 # Since 1.0.0 only the AppImage is a release asset (build/setup-linux/setup-assets).
 # Never analyzes or builds a dump. Needs Python 3.11+ with pip, podman or docker (the
 # app is built in a pinned Ubuntu 22.04 container), mksquashfs and readelf; pass
