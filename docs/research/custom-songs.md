@@ -192,6 +192,23 @@ the menu, and a reload with the state file; no crash, playlists 32/36, saves res
 identically. With 64 rows (before the cap) a boot crashed in `free` under `Audio.PlayMusic`:
 the shuffled builder's array, which is how the table above was found.
 
+### Story fights name their songs (2026-11-05)
+
+A Story fight (VY2 fixture, crib -> Map -> Club 357 -> Ice-T, `RECOMP_TEST_SONGS_ONLY=32` so
+only Holler was on in the jukebox) built its playlist as **`og nuffrespect holler`**: "O.G.
+Original Gangster" (Ice-T's own song) and "Nuff Respect" first, then the jukebox list. The
+match setup (`sub_0001F2D0` / `sub_0001F7E0`) reads a primary and a second song from the match
+as **Song record handles** (properties `0x92BF3967`, `0x60D0AE77`, resolved with
+`sub_000BE760` and the Entity field) and falls back to `dirty` without one. Where the Story
+keeps those handles is not found yet (no data table or front-end command names a song; the
+fighter records do not hold them as plain fields). Battle fights carry neither: their playlist
+is the jukebox list. The hard-coded 12-song list (`sub_0001E9C0`, `sub_0001FCF0`) has no caller
+and no pointer to it in the image: dead code.
+
+So the disc songs cannot be taken out of the game's song list for a session without changing
+Story fight music; their handles must also keep their ranks (as the writer already ensures).
+Owner, 2026-11-05: in that case, hold more songs at once instead (the jukebox rewrite).
+
 ## 6. Owner decisions (2026-11-03, D-new for the PR)
 
 - **Lift the song limit now**: replace the playlist build/run functions with hand-written ones over a
