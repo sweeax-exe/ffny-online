@@ -55,7 +55,8 @@ jobs:
           gh release create "$RELEASE_TAG" --verify-tag --draft "${channel[@]}" \
             --title "Def Jam: Fight for NY — Recompiled $RELEASE_TAG" \
             --notes-file "docs/releases/$RELEASE_TAG.md" setup-assets/*
-      # Only the inventoried game-free setups (Windows, macOS and Linux), the Windows and macOS apps, their checksums and provenance are attached.
+      # Only the inventoried game-free setups (Windows and macOS), the apps (Windows, macOS and the Linux AppImage), their checksums and provenance are attached.
+      # Linux attaches the AppImage only (scripts/check-setup-assets.py APP_ONLY_PLATFORMS); its setup archive is not a release asset since 1.0.0.
       # No game executable, lifted source or game-data assets are uploaded.
       # Source archives contain the two fingerprinted owner-approved README visuals.
       # GitHub provides source archives; cloning recursively fetches the pinned toolkit.

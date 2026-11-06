@@ -98,7 +98,7 @@ the game on your computer. See [the app and overlay guide](docs/launcher-and-ove
 |---|---|---|
 | Windows x64 | `DefJamRecompiled-<version>-windows-x64.exe` | [Windows](docs/install-guide.md#windows) |
 | macOS, Apple Silicon | `DefJamRecompiled-<version>-macos-arm64.zip` | [macOS](docs/install-guide.md#macos) |
-| Linux x86-64 / Steam Deck | `DefJamRecompiled-<version>-x86_64.AppImage` | [Linux and Steam Deck](docs/install-guide.md#linux-and-steam-deck) |
+| Linux x86-64 / Steam Deck | `DefJamRecompiled-<version>-linux-x86_64.AppImage` | [Linux and Steam Deck](docs/install-guide.md#linux-and-steam-deck) |
 
 Also available on [RecompLauncher](https://recomplauncher.com/game/defjamffny-recomp) and
 [Quiver](https://quiverlauncher.com/apps/def-jam-fight-for-ny-def-jam-fight-for-ny-fan-recomp).

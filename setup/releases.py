@@ -35,7 +35,9 @@ CONTRACT = {'protocol': 1, 'data_schema': 1}
 # the setup payload; it updates itself from these (select_app).
 APP_ASSETS = {'windows-x64': 'DefJamRecompiled-{v}-windows-x64.exe',
               'macos-arm64': 'DefJamRecompiled-{v}-macos-arm64.zip',
-              'linux-x64': 'DefJamRecompiled-{v}-x86_64.AppImage'}
+              'linux-x64': 'DefJamRecompiled-{v}-linux-x86_64.AppImage'}
+# The Linux app was published as DefJamRecompiled-<v>-x86_64.AppImage up to 1.0.0; still read for those releases.
+LEGACY_APP_ASSETS = {'linux-x64': 'DefJamRecompiled-{v}-x86_64.AppImage'}
 APP_BUNDLE = 'Def Jam Recompiled.app'
 APP_PROGRAM = 'defjam_app'
 # On Windows the app is one program with the setup payload ZIP inside it as a resource (RCDATA 101,
@@ -187,9 +189,14 @@ def catalog(platform, cache, cancelled=lambda: None, allow_cached=False):
             ok = all(a and a.get('state') == 'uploaded' and sum(x.get('name') == a['name'] for x in assets) == 1 for a in selected)
             return bool(ok), selected if ok else []
         available, selected = complete((stem + EXTENSIONS[platform], stem + '.sha256', stem + '.provenance.json'))
-        app = APP_ASSETS[platform].format(v=tag[1:])
-        app_stem = app.rsplit('.', 1)[0]
-        app_available, app_selected = complete((app, app_stem + '.sha256', app_stem + '.provenance.json'))
+        for name in (APP_ASSETS[platform], LEGACY_APP_ASSETS.get(platform)):
+            if not name:
+                continue
+            app = name.format(v=tag[1:])
+            app_stem = app.rsplit('.', 1)[0]
+            app_available, app_selected = complete((app, app_stem + '.sha256', app_stem + '.provenance.json'))
+            if app_available:
+                break
         result.append({'tag': tag, 'version': tag[1:], 'available': available,
                        'reason': '' if available else 'No complete setup for this platform',
                        'notes': str(release.get('body') or '')[:20000], 'assets': selected,

@@ -18,7 +18,7 @@ bytes) as on Windows, and a pack made on one can be used on the others.
 
 Run the Windows setup (`DefJamSetup-<version>-windows-x64.exe`), the macOS setup
 (`DefJamSetup-<version>-macos-arm64.dmg`, v0.6.1 or newer) or the Linux setup
-(`DefJamSetup-<version>-linux-x64.tar.gz`, v0.7.2 or newer) with your supported USA Xbox
+(`DefJamSetup-<version>-linux-x64.tar.gz`, v0.7.2 to v0.13.0; since 1.0.0 the Linux app) with your supported USA Xbox
 dump and select **Apply HD texture upscale during install (increases install time)**.
 The option starts unchecked. Setup generates the textures on your CPU after
 building the game, then enables the generated packs for the first launch.

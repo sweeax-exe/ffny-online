@@ -7,8 +7,11 @@ Windows the program DefJamRecompiled.exe, whose built-in payload (resource 101) 
 inspected payload byte for byte; on Linux the AppImage scripts/package-appimage.py makes, whose image
 is read in Python (setup/releases.py read_appimage) and checked file by file against the inspected
 payload. Published as DefJamRecompiled-<version>-macos-arm64.zip, -windows-x64.exe or
--x86_64.AppImage with its checksum and a kind: app provenance that setup/releases.py select_app
-verifies before the app replaces itself."""
+-linux-x86_64.AppImage (-x86_64.AppImage up to 1.0.0) with its checksum and a kind: app provenance that setup/releases.py select_app
+verifies before the app replaces itself.
+
+A Linux release attaches only the app (APP_ONLY_PLATFORMS): with --app the setup archive is still
+inspected against the payload but is not written to --output-dir."""
 import argparse
 import hashlib
 import importlib.util
@@ -158,6 +161,9 @@ APP_FILES = {'Contents/Info.plist', 'Contents/MacOS/' + releases.APP_PROGRAM, 'C
 
 
 APP_PLATFORMS = ('macos-arm64', 'windows-x64', 'linux-x64')
+# Platforms whose release attaches only the app. Since 1.0.0 Linux ships just the AppImage: its setup
+# archive is still built and inspected (the AppImage carries the same payload), but not attached.
+APP_ONLY_PLATFORMS = ('linux-x64',)
 # What the Windows app may load: Windows' own libraries only (it is linked with the static C runtime
 # and a static SDL3), never a Visual C++ runtime, a game library or anything carried beside it.
 WINDOWS_SYSTEM_DLLS = {
@@ -262,6 +268,8 @@ def validate_asset_names(version, names, platform='windows-x64', app=False):
     if app:
         if platform not in APP_PLATFORMS:
             raise ValueError('The app is published for macOS, Windows and Linux x86-64 only')
+        if platform in APP_ONLY_PLATFORMS:
+            expected = set()
         a = app_stem(version, platform)
         expected |= {releases.APP_ASSETS[platform].format(v=version), a + '.sha256', a + '.provenance.json'}
     if set(names) != expected:
@@ -396,12 +404,13 @@ def main(argv=None):
     args.output_dir.mkdir(parents=True, exist_ok=True)
     stem = f'DefJamSetup-{manifest["version"]}-{platform}'
     import shutil
-    exe = args.output_dir / (stem + INSTALLER_EXTENSION[platform])
-    shutil.copyfile(args.installer, exe)
-    sha = engine.digest(exe)
-    (args.output_dir / (stem + '.sha256')).write_text(sha + '  ' + exe.name + '\n', encoding='utf-8')
-    (args.output_dir / (stem + '.provenance.json')).write_text(json.dumps(
-        {'installer_sha256': sha, 'payload_sha256': engine.digest(args.payload), **manifest}, indent=2) + '\n', encoding='utf-8')
+    if not (args.app and platform in APP_ONLY_PLATFORMS):
+        exe = args.output_dir / (stem + INSTALLER_EXTENSION[platform])
+        shutil.copyfile(args.installer, exe)
+        sha = engine.digest(exe)
+        (args.output_dir / (stem + '.sha256')).write_text(sha + '  ' + exe.name + '\n', encoding='utf-8')
+        (args.output_dir / (stem + '.provenance.json')).write_text(json.dumps(
+            {'installer_sha256': sha, 'payload_sha256': engine.digest(args.payload), **manifest}, indent=2) + '\n', encoding='utf-8')
     if args.app:
         if platform not in APP_PLATFORMS:
             raise ValueError('The app is published for macOS, Windows and Linux x86-64 only')
