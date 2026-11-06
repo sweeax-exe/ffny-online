@@ -298,6 +298,15 @@ ROUTES = {
         "until": "game.startgame(", "after": 150, "secs": 520,
         "shots": "@game.startgame(,60,140",
     },
+    "battle-map-edges": {
+        "help": "Free For All venue map through the eastern pins to Chop Shop and back (widescreen clip check)",
+        "stages": FFA_SETUP + [
+            "getscreeninfo(battle/chsvenue=right@7;right@13;down@19;down@25;right@31;left@37;up@43",
+        ],
+        "until": "getscreeninfo(battle/chsvenue", "after": 49, "secs": 300,
+        "shots": "@getscreeninfo(battle/chsvenue,5,11,17,23,29,35,41,47",
+        "env": {"RECOMP_TRANS_SHOT_NATIVE": "1"},
+    },
     "two-matches": {
         "help": "One on One to its result, back through the menus, then a Free For All to its result, in one launch",
         "stages": ONE_ON_ONE_SETUP + ["controllersetup(1,=a@4+4x6"],

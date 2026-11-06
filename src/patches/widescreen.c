@@ -145,6 +145,7 @@ float ws_init(int window_w, int window_h, int fullscreen)
 
 static int g_apt_feloader;               /* the loader is resolving feloader */
 static int g_apt_story_map;
+static int g_apt_venue_map;
 
 static int guest_name_is(uint32_t s, const char *want)
 {
@@ -166,6 +167,7 @@ void ws_apt_load_begin(uint32_t name)
 {
     g_apt_feloader = g_k < 1.0f && name && guest_name_is(name, "feloader");
     g_apt_story_map = g_k < 1.0f && cheats_in_story() && name && guest_name_is(name, "map");
+    g_apt_venue_map = g_k < 1.0f && name && guest_name_is(name, "chsvenue");
 }
 
 void ws_apt_load_done(uint32_t apt)
@@ -173,6 +175,14 @@ void ws_apt_load_done(uint32_t apt)
     static const char magic[] = "Apt Data";
     uint32_t h = 0x811C9DC5u, i;
     int y;
+    if (g_apt_venue_map) {
+        int tagged;
+        g_apt_venue_map = 0;
+        tagged = ws_map_tag_pins(apt ? (uint8_t *)XBOX_PTR(apt) : NULL, 0x10457);
+        fprintf(stderr, "[WS] map pins: %s (chsVenue.apt %08X, %d children)\n",
+                tagged < 0 ? "unknown layout; unchanged" : tagged ? "extended clip tagged" : "already tagged",
+                apt, tagged < 0 ? 0 : tagged);
+    }
     if (g_apt_story_map) {
         int tagged;
         g_apt_story_map = 0;

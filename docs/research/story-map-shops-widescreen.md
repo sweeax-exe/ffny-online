@@ -1,4 +1,4 @@
-# Story map Shops border and heading (#162) — 2026-11-05
+# Shared map border, heading and venue pins (#162 / PR #190) — 2026-11-05
 
 [Issue #162](https://github.com/vyanhursky/DefJamFFNY-recomp/issues/162)
 comes from two consumers of the same map artwork. Story uses
@@ -114,3 +114,38 @@ another side slab, invalid inputs and callback shutdown. Local native logs,
 captures, source/toolkit commits and exact qualification limits are recorded
 in the feature PR handoff. Captures, saves and private diagnostic artifacts
 remain local.
+
+## Battle venue pin clipping
+
+Normal Battle uses the same `chsVenue` movie. With an eastern venue selected,
+the map pan carries neighbouring pins past the centred 4:3 boundary. Their
+paper and icon stop at that boundary while the map artwork continues into the
+widescreen margin. This is the same foreground scissor limitation as the Story
+heading, independently of the mode-specific background correction.
+
+The correction tags the four static visual children of the shared pin widget
+(sprite 132): `blackPaper`, `greyPin`, `paper` and `pin`. Their local placement
+matrices carry the existing 16384 y tag; the renderer removes it and extends
+the full-width horizontal clip. Dynamic venue artwork attached inside these
+containers follows the tag. The parent `pin<FEID>` coordinates are untouched:
+ActionScript's `findPins` and `moveToVenue` still see authored navigation and
+pan positions. Tagging those parent coordinates would change map behaviour.
+
+The APT load hook applies this to `chsVenue` in both Story and Battle, only in
+widescreen. It validates all four placement headers, names, matrices and y
+values before writing any; unknown layouts remain unchanged. Repeated loads
+are idempotent. Narrower guest masks, vertical clipping, ordinary menu batches
+and 4:3 retain their existing behaviour. No additional toolkit change, pack
+update or re-lift is required.
+
+`harness.py run battle-map-edges --png` uses Free For All and traverses
+Foundation → Scrapyard → TerrorDome → Heights → Limit → Chop Shop, then returns
+west and north. Native captures after each pan cover neighbouring pins at the
+left edge. Set `RECOMP_ASPECT=16:9` or `16:10` and the released Menus pack
+explicitly; the route otherwise uses stock 4:3. It uses the same saved Battle
+profile/venue availability as the existing `ffa` route and restores the entire
+isolated save root byte-identically.
+
+The exact-route comparison against the original PR build (`a473281`) also
+records a pre-existing thin black background strip near the right edge of
+the Chop Shop pan with released Menus 1.4.0.

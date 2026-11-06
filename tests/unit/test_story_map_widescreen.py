@@ -1,4 +1,4 @@
-"""The mode policy for the shared map: Story preserves its inset, Battle keeps its cleanup."""
+"""Shared map replay policy and opt-in foreground tags against synthetic metadata."""
 from pathlib import Path
 import os
 import shutil
@@ -86,6 +86,55 @@ int main(void)
         memcpy(saved,apt,sizeof apt);
         assert(ws_story_map_tag_text(apt,sizeof apt)==0);
         assert(!memcmp(apt,saved,sizeof apt));
+    }
+    /* All copies of the pin widget share these four visual children. Keep
+     * parent navigation coordinates and every other movie byte untouched. */
+    {
+        unsigned char apt[0x10457]={0}, saved[sizeof apt], expected[sizeof apt];
+        const size_t at[]={0x75DC,0x761C,0x765C,0x769C};
+        const size_t name_at[]={0xF600,0xF60C,0xF614,0xF61C};
+        const char *names[]={"blackPaper","greyPin","paper","pin"};
+        float y;
+        size_t j;
+        memcpy(apt,"Apt Data",8);
+        for(i=0;i<4;i++) {
+            uint32_t header[]={3,0x26,1+2*(uint32_t)i,(uint32_t)(i==1?130:131)};
+            float matrix[]={1,0,0,1,i%2?0.0f:-30.0f,i%2?0.0f:-13.0f};
+            memcpy(apt+at[i],header,sizeof header);
+            memcpy(apt+at[i]+16,matrix,sizeof matrix);
+            memcpy(apt+name_at[i],names[i],strlen(names[i])+1);
+        }
+        memcpy(saved,apt,sizeof apt);
+        memcpy(expected,apt,sizeof apt);
+        for(i=0;i<4;i++) {
+            y=(i%2?0.0f:-13.0f)+WS_STORY_MAP_TEXT_TAG;
+            memcpy(expected+at[i]+36,&y,4);
+        }
+        assert(ws_map_tag_pins(NULL,sizeof apt)==-1);
+        assert(ws_map_tag_pins(apt,0xF61F)==-1);
+        assert(!memcmp(apt,saved,sizeof apt));
+        /* An unknown last child must not leave earlier children half tagged. */
+        for(j=0;j<4;j++) {
+            const size_t bad[]={0,0x769C+4,0x769C+16,0xF61C};
+            apt[bad[j]]^=1;
+            memcpy(saved,apt,sizeof apt);
+            assert(ws_map_tag_pins(apt,sizeof apt)==-1);
+            assert(!memcmp(apt,saved,sizeof apt));
+            apt[bad[j]]^=1;
+        }
+        y=99;memcpy(apt+at[3]+36,&y,4);
+        memcpy(saved,apt,sizeof apt);
+        assert(ws_map_tag_pins(apt,sizeof apt)==-1);
+        assert(!memcmp(apt,saved,sizeof apt));
+        y=0;memcpy(apt+at[3]+36,&y,4);
+        assert(ws_map_tag_pins(apt,sizeof apt)==4);
+        assert(!memcmp(apt,expected,sizeof apt));
+        assert(ws_map_tag_pins(apt,sizeof apt)==0);
+        assert(!memcmp(apt,expected,sizeof apt));
+        /* A validated partial tag can be completed, with no doubled offset. */
+        y=-13;memcpy(apt+at[0]+36,&y,4);
+        assert(ws_map_tag_pins(apt,sizeof apt)==1);
+        assert(!memcmp(apt,expected,sizeof apt));
     }
     return 0;
 }
