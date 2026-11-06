@@ -319,12 +319,38 @@ static void from_name(const char *path, SongTags *t)
     }
 }
 
+/* The first 4 MB of the file, and its last 128 bytes after them when the file is longer (tags
+ * sit at the start: ID3v2, FLAC metadata, Ogg comments; ID3v1 at the end), so a long list of
+ * songs reads quickly. */
+static int read_head_tail(const char *path, uint8_t **data, size_t *n)
+{
+    FILE *f = open_utf8(path, "rb");
+    *data = NULL;
+    *n = 0;
+    if (!f) return 0;
+    if (fseek(f, 0, SEEK_END)) { fclose(f); return 0; }
+    long len = ftell(f);
+    size_t head = len > (4L << 20) ? (4u << 20) : (size_t)(len > 0 ? len : 0);
+    size_t tail = (size_t)len > head ? 128 : 0;
+    *data = (uint8_t *)malloc(head + tail + 1);
+    if (!*data || fseek(f, 0, SEEK_SET) || fread(*data, 1, head, f) != head ||
+        (tail && (fseek(f, len - 128, SEEK_SET) || fread(*data + head, 1, tail, f) != tail))) {
+        fclose(f);
+        free(*data);
+        *data = NULL;
+        return 0;
+    }
+    fclose(f);
+    *n = head + tail;
+    return head > 0;
+}
+
 int song_read_tags(const char *path, SongTags *out)
 {
     uint8_t *d;
     size_t n;
     memset(out, 0, sizeof *out);
-    if (!read_all(path, &d, &n, MAX_FILE)) return 0;
+    if (!read_head_tail(path, &d, &n)) return 0;
     if (ext_is(path, "mp3")) read_id3(d, n, out);
     else if (ext_is(path, "flac")) {
         drflac *f = drflac_open_memory_with_metadata(d, n, flac_meta, out, NULL);

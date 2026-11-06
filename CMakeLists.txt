@@ -277,6 +277,9 @@ if(DEFJAM_BUILD_APP AND DEFJAM_SDL3)
         src/patches/cheats_settings.c
         src/hooks/pc_language_settings.c
         src/hooks/pc_songs_settings.c
+        src/hooks/song_library.c
+        src/hooks/song_convert.c
+        src/hooks/song_decoders.c
         src/hooks/pc_settings_catalog.c
         src/hooks/pc_input.c
         src/hooks/pc_ui_settings.c

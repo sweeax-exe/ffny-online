@@ -17,6 +17,15 @@ your own files, and they never leave your computer.
 The title, artist and album come from the file's tags; without tags, from the file name
 (`Artist - Title.mp3`) and its folder (the album).
 
+## The Songs page
+
+The launcher's **Songs** tab (Advanced) lists every music file it finds, with its title and
+artist. **In game** chooses which songs the game takes (the first 27 ticked; the rest show "no
+room"), **Plays** chooses how each one plays, **Open songs folder** opens `<data>/songs`, and
+**More song folders** adds folders. The choices are kept in `<data>/song-state/library.txt` and
+apply the next time the game starts. The restored song and your own songs can each be turned off
+there too.
+
 ## How many
 
 The game holds **60 songs**: its own 32, "Holler If Ya Hear Me" (a song cut from the release,
@@ -29,9 +38,16 @@ plays first), so they cannot make room.
 
 ## How they play
 
-A song is fitted into the frame of one of the game's own (its interactive map): it plays
-start to finish in the menus, and in fights its middle loops until the fight is over, like the
-game's songs. The short clips the game plays on loading screens and as a fight starts are still
-that template song's own.
+**Straight** (the default): the song is fitted into the frame of one of the game's own score
+tracks: it plays start to finish in the menus, and in fights its middle loops until the fight is
+over, like the game's songs.
+
+**Interactive (experimental)**: the song is fitted into a licensed song's frame, whose fight
+sections switch at every few seconds between four arrangements depending on the fight; your song
+gets four versions (as it is, muffled, heavy on the bass, bright) that the game switches between
+without losing its place. Which version plays when is the game's choice; try it and see.
+
+The short clips the game plays on loading screens and as a fight starts are still the template
+song's own (an instrumental for Straight, "Holler If Ya Hear Me" for Interactive).
 
 Settings: [`[songs]`](settings-reference.md). How it works: [research notes](research/custom-songs.md).

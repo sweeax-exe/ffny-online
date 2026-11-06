@@ -73,6 +73,8 @@ extern "C" {
 #include "pc_settings.h"
 #include "pc_ui.h"
 #include "pc_ui_internal.h"
+#include "song_convert.h"
+#include "song_library.h"
 
 #ifndef DEFJAM_VERSION
 #define DEFJAM_VERSION "dev"
@@ -263,6 +265,9 @@ static const char *friendly(const char *section, const char *key)
         {"debug", "hang_seconds", "Bundle a hang after (s)"},
         {"debug", "keep_sessions", "Sessions kept whole"},
         {"debug", "record_guest_ram", "Crash bundles hold game memory"},
+        {"songs", "restored", "Restored song (Holler If Ya Hear Me)"},
+        {"songs", "custom", "Your own songs"},
+        {"songs", "folders", "More song folders"},
         {"cheats", "infinite_health", "Infinite health"},
         {"cheats", "max_blazin", "Max Blazin'"},
         {"cheats", "no_regen", "No health regeneration"},
@@ -1622,6 +1627,138 @@ static void hero_picker()
     if (g_roster.empty())
         ImGui::TextDisabled("The fighter list comes from the game's fighter.xml (game/fighter.xml), which was not found.");
 }
+// ---- Songs: restored songs and the player's own (docs/custom-songs.md) -----------------------------
+
+struct SongRow
+{
+    SongEntry entry;
+    SongTags tags;
+};
+static std::vector<SongRow> g_song_rows;
+static bool g_songs_scanned = false;
+static std::string g_songs_status;
+
+static void songs_scan()
+{
+    std::string data = pcui::folder_path(pcui::Folder::Data);
+    std::vector<SongEntry> found(SONG_LIBRARY_MAX);
+    int n = song_library_scan(data.c_str(), found.data(), (int)found.size());
+    g_song_rows.clear();
+    for (int i = 0; i < n; i++)
+    {
+        SongRow row;
+        row.entry = found[i];
+        if (!song_read_tags(found[i].path, &row.tags))
+            snprintf(row.tags.title, sizeof row.tags.title, "(cannot read)");
+        g_song_rows.push_back(row);
+    }
+    g_songs_scanned = true;
+}
+
+static void songs_save()
+{
+    std::string data = pcui::folder_path(pcui::Folder::Data);
+    std::vector<SongEntry> entries;
+    for (auto &row : g_song_rows)
+        entries.push_back(row.entry);
+    g_songs_status = song_library_save(data.c_str(), entries.data(), (int)entries.size())
+                         ? "Saved. The game uses it the next time it starts."
+                         : "Could not save the song choices.";
+}
+
+static void page_songs(UiMode mode)
+{
+    float scale = ImGui::GetStyle().FontScaleMain;
+    ImGui::SeparatorText("Songs");
+    settings_group("songs", {"restored", "custom"});
+    ImGui::TextWrapped("Your own music plays like the game's soundtrack: in the Beatbox, in the menus with the song "
+                       "banner, and in fights. Put MP3, FLAC, Ogg or WAV files in the songs folder (subfolders are "
+                       "fine), or add folders below. The first start after adding a song converts it, a few seconds a "
+                       "song.");
+    if (ImGui::Button("Open songs folder"))
+    {
+        char folder[SONG_LIBRARY_PATH];
+        song_library_folder(pcui::folder_path(pcui::Folder::Data).c_str(), folder, sizeof folder);
+        pcui::open_path(folder);
+    }
+    ui_target("songs.open_folder");
+    ImGui::SameLine();
+    if (ImGui::Button("Look for songs again") || !g_songs_scanned)
+        songs_scan();
+    ui_target("songs.rescan");
+    settings_group("songs", {"folders"});
+
+    int on = 0;
+    for (auto &row : g_song_rows)
+        on += row.entry.on;
+    ImGui::SeparatorText("Your songs");
+    ImGui::TextWrapped("The game holds 27 of your songs next to its own 33; at most 35 songs can be ticked on at "
+                       "once in the Beatbox. Interactive (experimental) builds a song on a licensed song's "
+                       "arrangement: in fights it switches between the song and filtered versions of it as the "
+                       "fight goes.");
+    if (g_song_rows.empty())
+    {
+        ImGui::TextDisabled("No music files found yet.");
+        return;
+    }
+    ImGui::Text("%d file(s) found, %d chosen for the game%s", (int)g_song_rows.size(), on,
+                on > SONG_LIBRARY_ROOM ? " (the first 27 are used)" : "");
+    if (mode != UI_LAUNCHER)
+        ImGui::TextDisabled("Changes apply the next time the game starts.");
+    bool changed = false;
+    if (ImGui::BeginTable("songs", 4, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_Resizable |
+                                          ImGuiTableFlags_SizingStretchProp))
+    {
+        ImGui::TableSetupColumn("In game", ImGuiTableColumnFlags_WidthFixed, 70 * scale);
+        ImGui::TableSetupColumn("Song");
+        ImGui::TableSetupColumn("Artist");
+        ImGui::TableSetupColumn("Plays", ImGuiTableColumnFlags_WidthFixed, 190 * scale);
+        ImGui::TableHeadersRow();
+        int used = 0;
+        for (size_t i = 0; i < g_song_rows.size(); i++)
+        {
+            SongRow &row = g_song_rows[i];
+            ImGui::PushID((int)i);
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            bool in_game = row.entry.on != 0;
+            if (ImGui::Checkbox("##on", &in_game))
+            {
+                row.entry.on = in_game;
+                changed = true;
+            }
+            ui_target(("songs.on." + std::string(row.entry.id)).c_str());
+            if (row.entry.on)
+                used++;
+            ImGui::TableNextColumn();
+            if (row.entry.on && used > SONG_LIBRARY_ROOM)
+                ImGui::TextDisabled("%s (no room)", row.tags.title);
+            else
+                ImGui::TextUnformatted(row.tags.title);
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("%s\nAlbum: %s", row.entry.path, row.tags.album);
+            ImGui::TableNextColumn();
+            ImGui::TextUnformatted(row.tags.artist);
+            ImGui::TableNextColumn();
+            ImGui::SetNextItemWidth(-1);
+            int interactive = row.entry.interactive;
+            const char *modes[] = {"Straight", "Interactive (experimental)"};
+            if (ImGui::Combo("##mode", &interactive, modes, 2))
+            {
+                row.entry.interactive = interactive;
+                changed = true;
+            }
+            ui_target(("songs.mode." + std::string(row.entry.id)).c_str());
+            ImGui::PopID();
+        }
+        ImGui::EndTable();
+    }
+    if (changed)
+        songs_save();
+    if (!g_songs_status.empty())
+        ImGui::TextDisabled("%s", g_songs_status.c_str());
+}
+
 static void page_cheats(UiMode mode)
 {
     ImGui::SeparatorText("Fights");
@@ -1715,7 +1852,7 @@ static void page_cheats(UiMode mode)
 static int g_page = 0;
 static bool g_advanced = false, g_select_page = false, g_return_focus = false;
 static std::string g_home_return = "Settings";
-static const char *page_names[] = {"Graphics", "Controls", "Mods", "Language & access", "Cheats", "App preferences", "Help"};
+static const char *page_names[] = {"Graphics", "Controls", "Mods", "Songs", "Language & access", "Cheats", "App preferences", "Help"};
 static const int k_pages = (int)(sizeof page_names / sizeof page_names[0]);
 static void controls_page()
 {
@@ -1791,7 +1928,7 @@ UiResult ui_draw(UiMode mode, float x, float y, float width, float height)
             g_home_return = home.route == 2 ? "Configure" : home.route == 3 ? "Mods" : "Settings";
         }
         if (home.route == 4) {
-            g_advanced = true; g_page = 6; g_select_page = true; g_home_return = "Help";
+            g_advanced = true; g_page = 7; g_select_page = true; g_home_return = "Help";
         }
     }
     else
@@ -1892,9 +2029,12 @@ UiResult ui_draw(UiMode mode, float x, float y, float width, float height)
             page_textures();
             break;
         case 3:
-            page_general(mode);
+            page_songs(mode);
             break;
         case 4:
+            page_general(mode);
+            break;
+        case 5:
             page_cheats(mode);
             ImGui::SeparatorText("Permanent profile changes");
             if (recomp_settings_get("debug", "unlock_all", 0)) {
@@ -1915,14 +2055,14 @@ UiResult ui_draw(UiMode mode, float x, float y, float width, float height)
                 ImGui::EndPopup();
             }
             break;
-        case 5:
+        case 6:
             settings_group("debug", {"skip_intro"});
             ImGui::TextWrapped("Skip startup movies and the legal screen; Story cutscenes still play.");
             ImGui::Spacing();
             settings_group("launcher", {"skip", "check_updates"});
             ImGui::TextWrapped("To reopen a skipped launcher, hold Shift or both shoulder buttons at startup, or use --launcher. Steam shortcuts open the launcher unless you choose to skip it.");
             break;
-        case 6:
+        case 7:
             page_maintenance(mode);
             if (ImGui::CollapsingHeader("Developer diagnostics")) page_debug(mode);
             break;
