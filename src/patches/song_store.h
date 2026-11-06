@@ -25,6 +25,14 @@ void song_store_set_playlist(void (*set)(void));
 /* After sub_0003CFF0 (the music playlist is built): a trace with RECOMP_SONGS_TRACE. */
 void song_store_playlist_built(void);
 
+/* In place of sub_0004FD80 (the Beatbox list) and sub_00050E00 (EnableSong); original is the
+ * generated body, used when no song was added. */
+void song_jukebox_build(void (*original)(void));
+void song_jukebox_enable(void (*original)(void));
+void song_jukebox_play(void (*original)(void));
+/* Whether songs were added (the store is ours). */
+int song_store_active(void);
+
 /* RECOMP_TEST_SONGS_ONLY (a test aid). */
 void song_store_test_only(void);
 

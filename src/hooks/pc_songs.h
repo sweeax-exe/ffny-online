@@ -10,10 +10,12 @@
 extern "C" {
 #endif
 
-/* Songs the game can hold. The jukebox screen keeps them in arrays of 36 (its list builder,
- * sub_0004FD80, and its object's enabled list), the playlist holds 36 names and the shuffled
- * playlist builder 36 entries: more rows overflow them (docs/research/custom-songs.md). */
-#define PC_SONGS_MAX_ROWS 36
+/* Songs the game can hold. The Beatbox list is built by song_store.c (the game's own keeps 36 on
+ * its stack), the store's buffers hold 64, the jukebox numbers songs in six bits (62 usable
+ * positions); at most 35 are on at once, 36 while a song that was off plays (the playlist,
+ * the jukebox's map of it and its play list hold 36).
+ * docs/research/custom-songs.md. */
+#define PC_SONGS_MAX_ROWS 60
 
 /* Register the [songs] settings. Returns how many were added. */
 struct RecompSetting;

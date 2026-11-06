@@ -248,7 +248,15 @@ void sub_00014540(void)
 extern void sub_00020C40_gen(void);
 void sub_00020C40(void) { song_store_build_playlist(sub_00020C40_gen, 0); }
 extern void sub_00020D70_gen(void);
-void sub_00020D70(void) { song_store_build_playlist(sub_00020D70_gen, 1); }
+/* With songs added, the shuffled list is the ordered one shuffled on the host: the game's own
+ * shuffle keeps 36 songs in a stack array. */
+void sub_00020D70(void) { song_store_build_playlist(song_store_active() ? sub_00020C40_gen : sub_00020D70_gen, 1); }
+extern void sub_0004FD80_gen(void);
+void sub_0004FD80(void) { song_jukebox_build(sub_0004FD80_gen); }
+extern void sub_00050E00_gen(void);
+void sub_00050E00(void) { song_jukebox_enable(sub_00050E00_gen); }
+extern void sub_0004EEC0_gen(void);
+void sub_0004EEC0(void) { song_jukebox_play(sub_0004EEC0_gen); }
 extern void sub_0003CFF0_gen(void);
 void sub_0003CFF0(void)
 {

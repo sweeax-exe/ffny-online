@@ -42,7 +42,12 @@
 #include "hooks/pc_songs.h"
 #include "song_store.h"
 
-#define CAP            PC_SONGS_MAX_ROWS
+#define CAP            64u              /* store buffers: PC_SONGS_MAX_ROWS rows fit */
+/* Songs on at once. The playlist, the jukebox's map of it and PlaySong's list (sub_0004EEC0:
+ * the songs on, after the one asked for, which it turns on) hold 36: ticking stops at 35, and
+ * playing a song that is off is the one way to the 36th. */
+#define ON_LIMIT       35u
+#define PLAY_LIMIT     36u
 #define FIXED_CAP      36u
 #define PLAYLIST_CAP   32u
 #define ALLOC_TAG      0x0028997Cu      /* a tag string the playlist builder itself uses */
@@ -59,6 +64,8 @@ static int s_loaded;                                             /* a profile wa
 static char s_profile[40];
 static char s_written[8192];                                     /* the state file as last written */
 static uint32_t s_rotate;
+
+static int on_count(uint32_t store);
 
 static int trace(void)
 {
@@ -300,21 +307,31 @@ void song_store_after_load(uint32_t manager)
         uint32_t rank;
         if (retail_rank(key) && !file_whole) {
             state[i] = in_fixed ? fixed_state : 0;
-            rank = (state[i] & 3) ? (uint32_t)(state[i] >> 2) : 0x10000u + i;
+            rank = (state[i] & 3) ? (uint32_t)(state[i] >> 2) : 0x800u + i;     /* never arranged: after the arranged, before new songs */
         } else if (from_file >= 0) {
             state[i] = (uint8_t)saved[from_file].state;
             rank = (state[i] & 3) ? (file_whole ? (uint32_t)(state[i] >> 2) : 0x100u + (uint32_t)from_file)
-                                  : 0x10000u + i;
+                                  : 0x800u + i;
         } else {
-            state[i] = 3;                                   /* new: on, after everything else */
+            state[i] = 3;                                   /* new: on, after every song the profile knows (off past ON_LIMIT) */
             rank = 0x1000u + i;
         }
-        if (state[i] & 3) { want[nwant].index = i; want[nwant++].rank = rank; }
+        /* A song the game never arranged it would arrange itself right after the load (on, after
+         * the others, from its order counter): do it here, so it counts toward ON_LIMIT. */
+        if (!(state[i] & 3)) state[i] = 1;
+        want[nwant].index = i;
+        want[nwant++].rank = rank;
     }
     qsort(want, nwant, sizeof *want, order_cmp);
-    for (uint32_t i = 0; i < count; i++) MEM8(s_states + i) = (state[i] & 3) ? 0 : state[i];
-    for (uint32_t o = 0; o < nwant; o++)
-        MEM8(s_states + want[o].index) = (uint8_t)(((o < 63 ? o : 63) << 2) | (state[want[o].index] & 3));
+    {
+        /* At most ON_LIMIT on: the ones after that keep their places, turned off. */
+        uint32_t on = 0;
+        for (uint32_t o = 0; o < nwant; o++) {
+            uint8_t s = state[want[o].index] & 3;
+            if (s != 2) { if (on >= ON_LIMIT) s = 2; else on++; }
+            MEM8(s_states + want[o].index) = (uint8_t)(((o < 62 ? o : 62) << 2) | s);
+        }
+    }
     MEM32(s_counter) = nwant;
 
     song_store_test_only();
@@ -325,7 +342,7 @@ void song_store_after_load(uint32_t manager)
         fprintf(stderr, "\n");
     }
     sync_fixed();
-    fprintf(stderr, "[SONGS] profile %s: %u song(s) in its jukebox, %u on\n", s_profile, count, nwant);
+    fprintf(stderr, "[SONGS] profile %s: %u song(s) in its jukebox, %u on\n", s_profile, count, (unsigned)on_count(s_store));
 }
 
 /*
@@ -366,6 +383,12 @@ void song_store_build_playlist(void (*builder)(void), int shuffled)
     if (n > CAP) n = CAP;
     for (uint32_t i = 0; i < n; i++) names[i] = MEM32(list + i * 4);
     g_esp = esp0 + 12;                       /* as the builder's own ret 8 leaves it */
+    if (shuffled)                            /* the game's shuffle, on the host (sub_00020D70 keeps 36) */
+        for (uint32_t i = n; i > 1; i--) {
+            uint32_t j = (uint32_t)rand() % i, x = names[i - 1];
+            names[i - 1] = names[j];
+            names[j] = x;
+        }
     take = n < PLAYLIST_CAP ? n : PLAYLIST_CAP;
     start = (!shuffled && n > take) ? s_rotate % n : 0;
     if (!shuffled && n > take) s_rotate = (s_rotate + take) % n;
@@ -424,4 +447,144 @@ void song_store_playlist_built(void)
         for (uint32_t i = 0; i < n && i < CAP; i++) fprintf(stderr, " %X=%02X", MEM32(s_keys + i * 4), MEM8(s_states + i));
         fprintf(stderr, "\n");
     }
+}
+
+int song_store_active(void) { return s_active; }
+
+/* ---- the jukebox screen ------------------------------------------------------------------------- */
+
+static int on_count(uint32_t store)
+{
+    uint32_t n = MEM32(store + 8), states = MEM32(store + 0xC);
+    int on = 0;
+    for (uint32_t i = 0; i < n; i++) { uint8_t s = MEM8(states + i) & 3; on += s != 0 && s != 2; }
+    return on;
+}
+
+static int find_key(uint32_t store, uint32_t h)
+{
+    uint32_t n = MEM32(store + 8), keys = MEM32(store + 4);
+    for (uint32_t i = 0; i < n; i++) if (MEM32(keys + i * 4) == h) return (int)i;
+    return -1;
+}
+
+/*
+ * In place of sub_0004FD80 (this = the jukebox object J of ChooseShopList(6); ret 4): the list of
+ * songs the Beatbox shows, at 0x3A07B0 (128 handles), built the way the game builds it but with
+ * arrays sized for every song (the game's are 36, 36 and 32 entries on its stack):
+ *   arranged songs by jukebox order; then the unplaced ones (order bits all set), each given its
+ *   list position as order and turned on; then the never-arranged (state 0); -1 after them.
+ *   J+4 the list's length, J+0x3C arranged + unplaced, J+0x4C[J+0x38++] the list index of each
+ *   song that is on (the jukebox's map of the playlist: 37 slots, the flag at J+0xE0 after them),
+ *   J+0x18 = 0. With music playing, the song now playing is selected: PlaySong(index, 1) after
+ *   J+0xE0 = 1. Song state is read from the store directly (every Song row is in it).
+ */
+extern void sub_0004EEC0(void);
+void song_jukebox_build(void (*original)(void))
+{
+    uint32_t j = g_ecx, store = MEM32(j + 0x34);
+    uint32_t n, keys, states, O[CAP], U[CAP], T[CAP], no = 0, nu = 0, nt = 0, c = 0;
+    uint8_t taken[CAP];
+    if (!s_active || store != s_store) { original(); return; }
+    n = MEM32(store + 8); keys = MEM32(store + 4); states = MEM32(store + 0xC);
+    if (n > CAP) n = CAP;
+    MEM8(j + 0xE0) = 0;
+    MEM32(j + 4) = 0;
+    MEM32(j + 0x18) = 0;
+    memset(taken, 0, sizeof taken);
+    for (uint32_t i = 0; i < n; i++) {
+        uint8_t s = MEM8(states + i);
+        if (!(s & 3)) T[nt++] = MEM32(keys + i * 4);
+        else if ((s & 0xFC) == 0xFC) U[nu++] = MEM32(keys + i * 4);
+    }
+    for (uint32_t p = 0; p < 63 && no < n - nu - nt; p++)
+        for (uint32_t i = 0; i < n; i++) {
+            uint8_t s = MEM8(states + i);
+            if ((s & 3) && (s & 0xFC) != 0xFC && (uint32_t)(s >> 2) == p && !taken[i]) {
+                O[no++] = MEM32(keys + i * 4);
+                taken[i] = 1;
+                break;
+            }
+        }
+    /* Two songs at one position (the game's own search would never finish): the rest after. */
+    for (uint32_t i = 0; i < n && no < n - nu - nt; i++) {
+        uint8_t s = MEM8(states + i);
+        if ((s & 3) && (s & 0xFC) != 0xFC && !taken[i]) O[no++] = MEM32(keys + i * 4);
+    }
+    for (uint32_t i = 0; i < no; i++) MEM32(0x3A07B0 + c++ * 4) = O[i];
+    for (uint32_t i = 0; i < nu; i++) {
+        int k = find_key(store, U[i]);
+        MEM32(0x3A07B0 + c * 4) = U[i];
+        if (k >= 0) MEM8(states + k) = (uint8_t)((c << 2) | 3);
+        c++;
+    }
+    for (uint32_t i = 0; i < nt; i++) MEM32(0x3A07B0 + c++ * 4) = T[i];
+    MEM32(j + 4) = c;
+    MEM32(j + 0x3C) = no + nu;
+    for (uint32_t i = c; i < 0x80; i++) MEM32(0x3A07B0 + i * 4) = 0xFFFFFFFFu;
+    for (uint32_t i = 0; i < no + nu; i++) {
+        int k = find_key(store, MEM32(0x3A07B0 + i * 4));
+        uint8_t s = k >= 0 ? MEM8(states + k) & 3 : 0;
+        if (s == 2 || s == 0) continue;
+        if (MEM32(j + 0x38) >= 37) break;            /* its map has 37 slots, then the flag */
+        MEM32(j + 0x4C + MEM32(j + 0x38) * 4) = i;
+        MEM32(j + 0x38) = MEM32(j + 0x38) + 1;
+    }
+    if (MEM8(MEM32(j + 0x44))) {
+        char now[17];
+        uint32_t e;
+        for (int k = 0; k < 16; k++) now[k] = (char)MEM8(0x33E798 + MEM32(0x33EC94) * 16 + k);
+        now[16] = 0;
+        for (e = 0; e < no + nu; e++) {
+            uint32_t h = MEM32(0x3A07B0 + e * 4);
+            int k = find_key(store, h);
+            uint8_t s = k >= 0 ? MEM8(states + k) & 3 : 0;
+            const char *entity = pc_songs_entity_for_rank(h & 0xFFFFFFu);
+            if (s == 2 || s == 0 || !entity) continue;
+            if (!strcmp(entity, now)) break;
+        }
+        uint32_t args[2] = { e, 1 };
+        MEM8(j + 0xE0) = 1;
+        guest_call(sub_0004EEC0, j, 2, args);
+    }
+    g_eax = 0;
+    g_esp += 8;                                      /* ret 4 */
+    if (trace())
+        fprintf(stderr, "[SONGS] jukebox list: %u songs (%u in order, %u placed now, %u never arranged), %u on\n",
+                c, no, nu, nt, MEM32(j + 0x38));
+}
+
+/* In place of sub_00050E00 (Shops.EnableSong(i): this = J, the list index on the stack; ret 4;
+ * returns the reply string 0x294A28). With ON_LIMIT songs on, a further one stays off. */
+void song_jukebox_enable(void (*original)(void))
+{
+    uint32_t j = g_ecx, store = MEM32(j + 0x34), idx = MEM32(g_esp + 4);
+    if (s_active && store == s_store && idx < 0x80) {
+        int k = find_key(store, MEM32(0x3A07B0 + idx * 4));
+        uint8_t s = k >= 0 ? MEM8(MEM32(store + 0xC) + k) & 3 : 0;
+        if ((s == 0 || s == 2) && on_count(store) >= (int)ON_LIMIT) {
+            fprintf(stderr, "[SONGS] jukebox: %u songs on already; song %u stays off\n", ON_LIMIT, idx);
+            g_eax = 0x294A28u;
+            g_esp += 8;
+            return;
+        }
+    }
+    original();
+}
+
+/* In place of sub_0004EEC0 (PlaySong: this = J, the list index and a flag on the stack; ret 8).
+ * Playing a song that is off turns it on: with PLAY_LIMIT on already, it is not played. */
+void song_jukebox_play(void (*original)(void))
+{
+    uint32_t j = g_ecx, store = MEM32(j + 0x34), idx = MEM32(g_esp + 4);
+    if (s_active && store == s_store && idx < 0x80) {
+        int k = find_key(store, MEM32(0x3A07B0 + idx * 4));
+        uint8_t s = k >= 0 ? MEM8(MEM32(store + 0xC) + k) & 3 : 0;
+        if ((s == 0 || s == 2) && on_count(store) >= (int)PLAY_LIMIT) {
+            fprintf(stderr, "[SONGS] jukebox: %u songs on; song %u (off) not played\n", PLAY_LIMIT, idx);
+            g_esp += 12;
+            return;
+        }
+    }
+    original();
 }

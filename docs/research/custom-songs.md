@@ -164,10 +164,7 @@ The song count is bounded in more places than the playlist:
 | The jukebox object (0xE4 bytes, `ChooseShopList(6)`) | 37 enabled-song indices at + 0x4C, then the flag at + 0xE0 | the flag and the heap block after it |
 | Jukebox order | 6 bits | positions past 63 |
 
-So the game holds **36 Song rows**: the 32 retail songs, "Holler If Ya Hear Me" and three more.
-Past 36 the jukebox screen itself (its list builder, its object and the handlers that index
-it: Play, Shuffle, Promote, Demote, Enable, Disable) would have to be reimplemented, and even
-then the order field stops at 64.
+So the stock game holds **36 Song rows**. The section below takes that to 60.
 
 What slice 2 does within that bound (`src/patches/song_store.c`):
 
@@ -191,6 +188,34 @@ Checked: 36 rows (retail, Holler, three clones) through boot, the Beatbox (every
 the menu, and a reload with the state file; no crash, playlists 32/36, saves restored
 identically. With 64 rows (before the cap) a boot crashed in `free` under `Audio.PlayMusic`:
 the shuffled builder's array, which is how the table above was found.
+
+### 60 songs: the Beatbox list rebuilt (2026-11-05)
+
+The bounds above are of two kinds: arrays of **every** song (the store, the Beatbox list
+builder's stack arrays) and arrays of the songs **on** (the playlist, the jukebox object's map
+of it at J + 0x4C, PlaySong's list at esp + 0x60 in `sub_0004EEC0`, the shuffled builder's
+array). The first kind is taken over here; the second stays the game's, so the number of songs
+on is limited instead:
+
+- `sub_0004FD80` (the Beatbox list) is replaced by `song_jukebox_build` (song_store.c), the same
+  algorithm with arrays sized for 64: arranged songs by order, then unplaced ones (given their
+  list position and turned on), then never-arranged ones; the counts at J + 4 / + 0x3C, the map
+  at J + 0x4C (37 slots), and `PlaySong(index, 1)` for the song now playing.
+- `sub_00020D70` (shuffled playlist) runs the ordered builder and shuffles on the host.
+- At most **35 songs on** (ticking stops there: `sub_00050E00` wrapper) and **36 while a song
+  that was off plays** (PlaySong turns it on and lists it with the others: `sub_0004EEC0`
+  wrapper refuses a further one).
+- After a load: songs the profile knows keep their order and come first (the never-arranged
+  ones are arranged as the game would, on, after the others), new songs after them; past 35
+  on, the later ones are off. A new song never turns a disc song off.
+- `PC_SONGS_MAX_ROWS` is **60** (the order field has 62 usable positions; 63 marks "unplaced").
+
+Checked with 60 rows (`RECOMP_TEST_SONG_CLONES=27`): the Beatbox lists all 60 and scrolls;
+ticking a 36th song is refused; playing an unticked song plays it (36 on, playlist 36); playing
+a further unticked one is refused; leaving the Beatbox; a One on One; no crash, saves restored
+identically. Before the PlaySong limit, playing an unticked song with 36 on crashed in the
+front end's script interpreter (`sub_001588F0`, calls to 0 and garbage), which is how its
+36-entry list was found.
 
 ### Story fights name their songs (2026-11-05)
 
