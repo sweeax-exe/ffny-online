@@ -103,6 +103,26 @@ def test_catalog_finds_the_app_beside_setup_and_each_independently(tmp_path, mon
     assert not rows['0.12.9']['available'] and rows['0.12.9']['app_available']
 
 
+def test_linux_catalog_reads_the_new_and_the_legacy_appimage_name(tmp_path, monkeypatch):
+    # The Linux app is DefJamRecompiled-<v>-linux-x86_64.AppImage from 1.0.1; up to 1.0.0 it had no "linux-".
+    def linux(v, name):
+        tag, stem = 'v' + v, name.rsplit('.', 1)[0]
+        names = (name, stem + '.sha256', stem + '.provenance.json')
+        return dict(tag_name=tag, body='notes', assets=[asset(tag, n, b'x', i) for i, n in enumerate(names)]), {}
+    serve(monkeypatch, [linux('1.0.1', 'DefJamRecompiled-1.0.1-linux-x86_64.AppImage'),
+                        linux('1.0.0', 'DefJamRecompiled-1.0.0-x86_64.AppImage'),
+                        linux('0.9.0', 'DefJamRecompiled-0.9.0-linux-x64.AppImage')])
+    rows = {r['version']: r for r in releases.catalog('linux-x64', tmp_path)}
+    assert rows['1.0.1']['app_available'] and not rows['1.0.1']['available']
+    assert [a['name'] for a in rows['1.0.1']['app_assets']] == [
+        'DefJamRecompiled-1.0.1-linux-x86_64.AppImage', 'DefJamRecompiled-1.0.1-linux-x86_64.sha256',
+        'DefJamRecompiled-1.0.1-linux-x86_64.provenance.json']
+    assert rows['1.0.0']['app_available']
+    assert rows['1.0.0']['app_assets'][0]['name'] == 'DefJamRecompiled-1.0.0-x86_64.AppImage'
+    assert not rows['0.9.0']['app_available'] and rows['0.9.0']['app_assets'] == []
+    assert releases.newest_app('linux-x64', tmp_path, '1.0.0')['tag'] == 'v1.0.1'
+
+
 def test_newest_app_is_the_newest_newer_release_with_an_app(tmp_path, monkeypatch):
     serve(monkeypatch, [release('0.13.2', app=False), release('0.13.1'), release('0.12.0')])
     assert releases.newest_app(PLATFORM, tmp_path, '0.13.0')['tag'] == 'v0.13.1'

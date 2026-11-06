@@ -16,7 +16,7 @@ It is appended to the AppImage type 2 runtime pinned in setup/dependencies-linux
 (appimage_runtime, checked by SHA-256). The program finds the payload beside itself. gzip, not
 zstd, so setup/releases.py (read_appimage) can read the image in Python, with nothing run.
 scripts/check-setup-assets.py --app then checks the result file by file against the inspected
-payload before writing the release asset DefJamRecompiled-<version>-x86_64.AppImage.
+payload before writing the release asset DefJamRecompiled-<version>-linux-x86_64.AppImage.
 """
 import argparse
 import importlib.util

@@ -37,7 +37,7 @@ Get the file for your platform from the
 |---|---|
 | Windows x64 | `DefJamRecompiled-<version>-windows-x64.exe` |
 | macOS, Apple Silicon | `DefJamRecompiled-<version>-macos-arm64.zip` |
-| Linux x86-64 and Steam Deck | `DefJamRecompiled-<version>-x86_64.AppImage` |
+| Linux x86-64 and Steam Deck | `DefJamRecompiled-<version>-linux-x86_64.AppImage` |
 
 Each file has a `.sha256` checksum and a `.provenance.json` record beside it, so you can check the download.
 
