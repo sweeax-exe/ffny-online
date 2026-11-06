@@ -71,7 +71,7 @@ For the established HD widescreen lane, use `--release-profile` and, when testin
 
 ## Stable release result (2026-11-06)
 
-The stable v1.0.0 is `main` after beta 2 (#186, #191, #193, #194) plus #190, toolkit `351e28a` (fork `defjam/release-1.0.0`), release PR #197. The owner qualified it on Windows only (D340); macOS and Steam Deck were not rerun on this head. The table below keeps the candidate gates; their Windows column for the beta-1 candidate is in `PROGRESS.md` §6 (2026-11-04).
+The stable v1.0.0 is `main` after beta 2 (#186, #191, #193, #194) plus #190 and #198, toolkit `6c0bd55` (fork `defjam/release-1.0.0`), release PR #197. The Windows results below are on `4b73e78` (toolkit `351e28a`), before #198 landed; #198 was not regression-tested here (owner: no further full regression). The owner qualified it on Windows only (D340); macOS and Steam Deck were not rerun on this head. The table below keeps the candidate gates; their Windows column for the beta-1 candidate is in `PROGRESS.md` §6 (2026-11-04).
 
 | Gate on head `4b73e78` | Windows result | Log |
 |---|---|---|

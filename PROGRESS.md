@@ -8,7 +8,7 @@
 
 ## 0. Status at a glance
 
-- v1.0.0: ✅ stable, release PR #197 = main after beta 2 + #190 (Shops border #162, venue pins), toolkit `351e28a`. Qualified on Windows only (D340): stock full regression 17/17, 16:9 HD lane 16/17 (combat memory-growth check fails, post-fight transition sample, #166), Clean Update from v0.13.0 and a fresh install pass. macOS/Deck not rerun on this head. Notes: docs/releases/v1.0.0.md; results: docs/regression-v1.0.0.md.
+- v1.0.0: ✅ stable, release PR #197 = main after beta 2 + #190 (Shops border #162, venue pins) + #198 (combo call-out #196), toolkit `6c0bd55`. Windows results below are on `4b73e78` (before #198, toolkit `351e28a`); no full regression after #198 (owner). Qualified on Windows only (D340): stock full regression 17/17, 16:9 HD lane 16/17 (combat memory-growth check fails, post-fight transition sample, #166), Clean Update from v0.13.0 and a fresh install pass. macOS/Deck not rerun on this head. Notes: docs/releases/v1.0.0.md; results: docs/regression-v1.0.0.md.
 
 Current baseline: **v1.0.0**, published November 6, 2026 (v0.13.0 before it).
 describe their original builds; they do not override this baseline or the current source.
@@ -16,7 +16,7 @@ describe their original builds; they do not override this baseline or the curren
 | Area | State | Notes |
 |---|---|---|
 | Windows, Apple Silicon macOS, Linux/Steam Deck | ✅ released | Game-free Setup builds the supported dump locally; runtime/backend details are in the platform guides. |
-| Toolkit | ✅ published pin | `351e28a60d448bde31f67fb8610ffe8bcf48deda` on fork `defjam/release-1.0.0`; fast-forward the `.gitmodules` branch (`defjam/upstream-v0.16`) to it after the release. |
+| Toolkit | ✅ published pin | `6c0bd55a42a68fe1c60e11481b0e883357853120` on fork `defjam/release-1.0.0` (= `351e28a` merged with #198's `1986e35`); fast-forward the `.gitmodules` branch (`defjam/upstream-v0.16`) to it after the release. |
 | Input, launcher/overlay, HD/mod management, updates, language | ✅ shipped | See current guides and versioned release notes; old draft-PR statuses have been retired. |
 | v0.13 acceptance | ⚠ qualified | Windows16/17; Mac16/21 then4/5; Deck memory/golden discrepancies. Preserve original failures and omissions in docs/releases/v0.13.0.md and its linked evidence. No all-green claim. |
 | Open bugs and future work | ⏳ tracked in GitHub | Issues/milestones/PRs own task status. #141, #161 and #162 are fixed in v1.0.0; memory #166 (incl. the HD-lane combat memory check) and Deck replay #98 remain, on v1.1.0 or unscheduled. |
@@ -524,9 +524,9 @@ Upstream PR submissions still need the owner's separate approval.
 
 ### Stable v1.0.0 published; v1.1.0 next — 2026-11-06
 
-- v1.0.0 = release PR #197 (main after beta 2 + #190), toolkit `351e28a` on fork `defjam/release-1.0.0`. Annotated tag at the merge commit; the release is Latest. Notes `docs/releases/v1.0.0.md`, results `docs/regression-v1.0.0.md` (Stable release result).
+- v1.0.0 = release PR #197 (main after beta 2 + #190 + #198), toolkit `6c0bd55` on fork `defjam/release-1.0.0`. #198 landed on main during the gate and was not in the Windows regression; the owner asked for no further full regression this cycle. Annotated tag at the merge commit; the release is Latest. Notes `docs/releases/v1.0.0.md`, results `docs/regression-v1.0.0.md` (Stable release result).
 - Gate (D340, owner): Windows only. Stock full regression 17/17; 16:9 HD lane 16/17. The failing row is combat `performance.memory_growth` (105.2 / 99.2 MB vs 64 MB): private bytes are flat during play, the final sample lands in the post-fight scene change. Owner chose to publish with it recorded; investigate under #166 (the check's end anchor, or the transition spike), never by raising the limit.
-- After the release: fast-forward fork `defjam/upstream-v0.16` to `351e28a` (or point `.gitmodules` at `defjam/release-1.0.0`), close milestone v1.0.0, check the Pages run (`pages.yml` deploys on a stable release) shows v1.0.0 with app downloads, delete worktrees `code/defjam-release-1.0.0` and `code/defjam-pr190` (unlink `game` with `cmd /c rmdir game` first) and the scratch installs in `C:\dj13\r1000`.
-- v1.1.0 queue: #192 (setup stage timings, with the ccache work on local branch `feat/ccache-187`), #166, #196 (16:9 combo call-out). #185 (French-base packs) has no milestone.
+- After the release: fast-forward fork `defjam/upstream-v0.16` to `6c0bd55` (or point `.gitmodules` at `defjam/release-1.0.0`), close milestone v1.0.0, check the Pages run (`pages.yml` deploys on a stable release) shows v1.0.0 with app downloads, delete worktrees `code/defjam-release-1.0.0` and `code/defjam-pr190` (unlink `game` with `cmd /c rmdir game` first) and the scratch installs in `C:\dj13\r1000`.
+- v1.1.0 queue: #192 (setup stage timings, with the ccache work on local branch `feat/ccache-187`), #166. #185 (French-base packs) has no milestone.
 - Still unchecked on real systems (from the site hand-off): Windows SmartScreen wording, macOS Open Anyway for the `.zip`, marking the AppImage executable in Dolphin. D331 naming ("Faithful HD"/"Recomp HD") still to align in `docs/hd-textures.md`, `docs/hd-texture-workflow.md`, `docs/language-packs.md`, `docs/launcher-and-overlay.md`, `docs/mod-manager.md`, `docs/menu-ui-modpack-handover.md`, `docs/texture-modding-getting-started.md` and `docs/widescreen/09-macos-validation.md`.
 
