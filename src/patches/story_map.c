@@ -8,6 +8,9 @@
 #include "story_map.h"
 #include "texture_pack.h"
 
+/* Toolkit executor (nv2a_pb_exec.c); its header is D3D11-only. */
+void nv2a_ws_set_extend_tag(float y_offset);
+
 static int replay_map_source(const char *id, int offset, void *user)
 {
     (void)user;
@@ -19,7 +22,6 @@ static int replay_map_source(const char *id, int offset, void *user)
 
 void ws_story_map_init(void)
 {
-    extern void nv2a_ws_set_extend_tag(float y_offset);
     texture_pack_set_wide_replay_filter(replay_map_source, NULL);
     nv2a_ws_set_extend_tag((float)WS_STORY_MAP_TEXT_TAG);
 }
