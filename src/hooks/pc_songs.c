@@ -544,6 +544,24 @@ void pc_songs_start(const char *data_root, const char *game_dir)
             SongInfo s = { folders[i % 8], titles[i], "Test Artist", "Test Album" };
             g_songs[g_song_count++] = s;
         }
+        /* Test aid: RECOMP_TEST_SONG_ADD="folder|title|artist|album" adds one row for a folder
+         * the test put under music/ itself. */
+        static char add[256];
+        const char *a = getenv("RECOMP_TEST_SONG_ADD");
+        if (a && *a && g_song_count < PC_SONGS_MAX_ROWS) {
+            char *f[4] = { add, NULL, NULL, NULL };
+            snprintf(add, sizeof add, "%s", a);
+            for (int k = 1; k < 4; k++) {
+                char *bar = strchr(f[k - 1], '|');
+                if (!bar) break;
+                *bar = 0;
+                f[k] = bar + 1;
+            }
+            if (f[3] && strlen(f[0]) < 16) {
+                SongInfo s = { f[0], f[1], f[2], f[3] };
+                g_songs[g_song_count++] = s;
+            }
+        }
     }
     if (!g_song_count) {
         fprintf(stderr, "[SONGS] the game's own soundtrack (no extra songs)\n");

@@ -355,6 +355,9 @@ void song_store_test_only(void)
     const char *only = getenv("RECOMP_TEST_SONGS_ONLY");
     if (!only || !*only || !s_active) return;
     uint32_t want = (uint32_t)strtoul(only, NULL, 0), count = MEM32(s_store + 8);
+    if (only[0] < '0' || only[0] > '9')               /* a folder name instead of a rank */
+        for (uint32_t r = 0; r < (uint32_t)pc_songs_rows(); r++)
+            if (pc_songs_entity_for_rank(r) && !strcmp(pc_songs_entity_for_rank(r), only)) want = r;
     for (uint32_t i = 0; i < count; i++) {
         uint8_t s = MEM8(s_states + i);
         if ((MEM32(s_keys + i * 4) & 0xFFFFFFu) == want) MEM8(s_states + i) = (uint8_t)((s & 0xFC) | 3);
