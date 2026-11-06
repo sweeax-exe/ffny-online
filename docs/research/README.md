@@ -41,6 +41,7 @@ confidence labels and disproved hypotheses remain distinct from measured facts.
 - [v0.12.1: Sketch Artist eye-color preview refresh](v0121-eye-preview-cache.md)
 - [v0.12.1: widescreen menu song notification (#118)](v0121-menu-song-banner.md)
 - [v0.12.1: widescreen fight HUD while paused (#95)](v0121-pause-hud-widescreen.md)
+- [Widescreen combo call-out (#196)](widescreen-combo-callout.md)
 - [v0.12.1 Story portrait and Power Plant investigation](v0121-portrait-viewport-read.md)
 - [v0.12.1: right-side health and Blazin meters](v0121-right-meters-fix.md)
 - [v0.12.1: Story shop LOADING flash on item changes (#119)](v0121-shop-loading-flash.md)
