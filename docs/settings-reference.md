@@ -110,6 +110,8 @@ settings (see [Launcher and overlay](launcher-and-overlay.md#cheats)). [How they
 | Key | Default | Meaning |
 |---|---|---|
 | `restored` | `true` | Restored songs: music cut from the release whose audio is still on the disc ("Holler If Ya Hear Me", 2Pac) is in the Beatbox and the playlist like the other songs. The game reads a copy of its song list with the extra rows from `<data>/cache/songs` (built on a language mod's copy when one is on). Restart. Env `RECOMP_SONGS_RESTORED`. [Research](research/custom-songs.md). |
+| `custom` | `true` | Your own songs: MP3, FLAC, Ogg Vorbis and WAV files in `<data>/songs` (and its subfolders) and in `folders` are converted once into `<data>/cache/songs` and play in the Beatbox, the menus and fights like the game's songs, with their tags (or file name) in the song banner. The game holds 60 songs (27 of your own next to its 33); 35 can be on at once. Restart. Env `RECOMP_SONGS_CUSTOM`. [Custom songs](custom-songs.md). |
+| `folders` | *(empty)* | More folders of your own songs, separated by semicolons; `<data>/songs` is always read. Restart. Env `RECOMP_SONGS_FOLDERS`. |
 
 ## [textures]
 

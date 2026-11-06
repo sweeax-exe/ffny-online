@@ -1,0 +1,694 @@
+/*
+ * Custom songs: a music file of the player's becomes a song folder the game plays
+ * (docs/research/custom-songs.md, "custom songs").
+ *
+ * A disc song is music/<id>/{tune.mpf, main.mus, loading0.mus, overlay0.mus}: an EA PathFinder
+ * map (v4, little-endian), the song cut into segments, each its own EA SCHl stream (EA-XA ADPCM,
+ * split channels, 2408-sample blocks), and two banks of short clips (loading screens, fight
+ * start). A custom song is built on the plainest disc song, minitrack2 (read from the player's
+ * own dump at start-up; no game data is in this source): its map is kept node for node and only
+ * its sample table (each segment's place in main.mus and length) is rewritten; its 48-segment
+ * full play (intro, body, outro, ending) is filled with the player's song cut into 48 pieces in
+ * order, so the song plays through once in the menus and its body loops in fights; the template's
+ * other segments get pieces too. The clip banks are the template's own for now.
+ */
+#define _CRT_SECURE_NO_WARNINGS
+#include "host.h"
+#include <ctype.h>
+#include <math.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include "song_convert.h"
+
+#if !defined(_WIN32)
+#include <strings.h>
+#define _stricmp strcasecmp
+#endif
+
+#include "../../thirdparty/audio-decoders/dr_mp3.h"
+#include "../../thirdparty/audio-decoders/dr_flac.h"
+#include "../../thirdparty/audio-decoders/dr_wav.h"
+/* stb_vorbis has no header: the declarations used here. */
+typedef struct stb_vorbis stb_vorbis;
+typedef struct { char *vendor; int comment_list_length; char **comment_list; } stb_vorbis_comment;
+extern int stb_vorbis_decode_memory(const unsigned char *mem, int len, int *channels, int *sample_rate, short **output);
+extern stb_vorbis *stb_vorbis_open_memory(const unsigned char *data, int len, int *error, const void *alloc);
+extern stb_vorbis_comment stb_vorbis_get_comment(stb_vorbis *f);
+extern void stb_vorbis_close(stb_vorbis *f);
+
+#define RATE          44100u
+#define BLOCK         2408u           /* samples per SCDl block, as the game's own streams */
+#define MAX_FILE      (512u << 20)
+#define MAX_SECONDS   (20u * 60u)
+#define MIN_SECONDS   5u
+
+static int fail(char *err, size_t errn, const char *msg)
+{
+    if (err && errn) snprintf(err, errn, "%s", msg);
+    return 0;
+}
+
+/* ---- files, with UTF-8 paths ---------------------------------------------------------------- */
+
+static FILE *open_utf8(const char *path, const char *mode)
+{
+#if defined(_WIN32)
+    WCHAR wpath[1024], wmode[8];
+    if (!MultiByteToWideChar(CP_UTF8, 0, path, -1, wpath, 1024)) return NULL;
+    if (!MultiByteToWideChar(CP_UTF8, 0, mode, -1, wmode, 8)) return NULL;
+    return _wfopen(wpath, wmode);
+#else
+    return fopen(path, mode);
+#endif
+}
+
+static int read_all(const char *path, uint8_t **data, size_t *n, size_t max)
+{
+    FILE *f = open_utf8(path, "rb");
+    *data = NULL;
+    *n = 0;
+    if (!f) return 0;
+    if (fseek(f, 0, SEEK_END)) { fclose(f); return 0; }
+    long len = ftell(f);
+    if (len <= 0 || (size_t)len > max || fseek(f, 0, SEEK_SET)) { fclose(f); return 0; }
+    *data = (uint8_t *)malloc((size_t)len);
+    if (*data && fread(*data, 1, (size_t)len, f) == (size_t)len) *n = (size_t)len;
+    fclose(f);
+    if (!*n) { free(*data); *data = NULL; return 0; }
+    return 1;
+}
+
+static int write_all(const char *path, const void *data, size_t n)
+{
+    char part[1100];
+    snprintf(part, sizeof part, "%s.part", path);
+    FILE *f = open_utf8(part, "wb");
+    int ok = f && fwrite(data, 1, n, f) == n;
+    if (f && fclose(f)) ok = 0;
+    if (!ok) { remove(part); return 0; }
+#if defined(_WIN32)
+    WCHAR wfrom[1100], wto[1100];
+    MultiByteToWideChar(CP_UTF8, 0, part, -1, wfrom, 1100);
+    MultiByteToWideChar(CP_UTF8, 0, path, -1, wto, 1100);
+    if (!MoveFileExW(wfrom, wto, MOVEFILE_REPLACE_EXISTING)) { DeleteFileW(wfrom); return 0; }
+#else
+    if (rename(part, path)) { remove(part); return 0; }
+#endif
+    return 1;
+}
+
+static uint32_t rd16le(const uint8_t *p) { return (uint32_t)p[0] | (uint32_t)p[1] << 8; }
+static uint32_t rd32le(const uint8_t *p) { return rd16le(p) | rd16le(p + 2) << 16; }
+static uint32_t rd32be(const uint8_t *p) { return (uint32_t)p[0] << 24 | (uint32_t)p[1] << 16 | (uint32_t)p[2] << 8 | p[3]; }
+static void wr32le(uint8_t *p, uint32_t v) { p[0] = (uint8_t)v; p[1] = (uint8_t)(v >> 8); p[2] = (uint8_t)(v >> 16); p[3] = (uint8_t)(v >> 24); }
+
+/* ---- text the game can draw ------------------------------------------------------------------- */
+
+/* One code point -> ASCII: accented Latin letters lose the accent, typographic punctuation becomes
+ * its plain form, anything else '?'. */
+static char ascii_of(uint32_t c)
+{
+    static const char *const latin1 =
+        "AAAAAAACEEEEIIIIDNOOOOOxOUUUUYPsaaaaaaaceeeeiiiidnooooo/ouuuuypy";   /* U+00C0 .. U+00FF */
+    if (c >= 0x20 && c < 0x7F) return (char)c;
+    if (c >= 0xC0 && c <= 0xFF) return latin1[c - 0xC0];
+    if (c == 0x2018 || c == 0x2019 || c == 0x00B4 || c == 0x2032) return '\'';
+    if (c == 0x201C || c == 0x201D) return '"';
+    if (c == 0x2013 || c == 0x2014) return '-';
+    if (c == 0x2026) return '.';
+    if (c == 0xA0 || c == 0x09) return ' ';
+    return '?';
+}
+
+static void put_cp(char *out, size_t size, size_t *n, uint32_t c)
+{
+    if (c < 0x20 && c != 0x09) return;
+    if (*n + 1 < size) out[(*n)++] = ascii_of(c);
+}
+
+static void finish(char *out, size_t n)
+{
+    out[n] = 0;
+    while (n && out[n - 1] == ' ') out[--n] = 0;
+    size_t s = 0;
+    while (out[s] == ' ') s++;
+    if (s) memmove(out, out + s, strlen(out + s) + 1);
+}
+
+static void text_utf8(const uint8_t *p, size_t len, char *out, size_t size)
+{
+    size_t n = 0;
+    for (size_t i = 0; i < len && p[i];) {
+        uint32_t c = p[i];
+        int extra = c >= 0xF0 ? 3 : c >= 0xE0 ? 2 : c >= 0xC0 ? 1 : 0;
+        if (extra) {
+            c &= 0x3F >> extra;
+            for (int k = 1; k <= extra && i + k < len; k++) c = c << 6 | (p[i + k] & 0x3F);
+        }
+        i += (size_t)extra + 1;
+        put_cp(out, size, &n, c);
+    }
+    finish(out, n);
+}
+
+static void text_latin1(const uint8_t *p, size_t len, char *out, size_t size)
+{
+    size_t n = 0;
+    for (size_t i = 0; i < len && p[i]; i++) put_cp(out, size, &n, p[i]);
+    finish(out, n);
+}
+
+static void text_utf16(const uint8_t *p, size_t len, int big, char *out, size_t size)
+{
+    size_t n = 0, i = 0;
+    if (len >= 2 && ((p[0] == 0xFF && p[1] == 0xFE) || (p[0] == 0xFE && p[1] == 0xFF))) { big = p[0] == 0xFE; i = 2; }
+    for (; i + 1 < len; i += 2) {
+        uint32_t c = big ? (uint32_t)p[i] << 8 | p[i + 1] : (uint32_t)p[i + 1] << 8 | p[i];
+        if (!c) break;
+        if (c >= 0xD800 && c < 0xDC00 && i + 3 < len) { i += 2; c = '?'; }
+        put_cp(out, size, &n, c);
+    }
+    finish(out, n);
+}
+
+/* ---- tags ------------------------------------------------------------------------------------- */
+
+static void id3_text(const uint8_t *p, size_t len, char *out, size_t size)
+{
+    if (!len) return;
+    switch (p[0]) {
+    case 0: text_latin1(p + 1, len - 1, out, size); break;
+    case 1: text_utf16(p + 1, len - 1, 0, out, size); break;
+    case 2: text_utf16(p + 1, len - 1, 1, out, size); break;
+    default: text_utf8(p + 1, len - 1, out, size); break;
+    }
+}
+
+static void read_id3(const uint8_t *d, size_t n, SongTags *t)
+{
+    if (n >= 10 && !memcmp(d, "ID3", 3) && d[3] >= 2 && d[3] <= 4) {
+        int v = d[3];
+        size_t size = ((size_t)(d[6] & 0x7F) << 21) | ((size_t)(d[7] & 0x7F) << 14) | ((size_t)(d[8] & 0x7F) << 7) | (d[9] & 0x7F);
+        size_t p = 10, end = 10 + size < n ? 10 + size : n;
+        if (v >= 3 && (d[5] & 0x40) && p + 4 <= end)                  /* extended header */
+            p += v == 4 ? (((size_t)(d[p] & 0x7F) << 21) | ((size_t)(d[p + 1] & 0x7F) << 14) | ((size_t)(d[p + 2] & 0x7F) << 7) | (d[p + 3] & 0x7F))
+                        : 4 + rd32be(d + p);
+        while (p + (v == 2 ? 6 : 10) <= end) {
+            char id[5] = {0};
+            size_t fs, hdr = v == 2 ? 6 : 10;
+            if (v == 2) { memcpy(id, d + p, 3); fs = (size_t)d[p + 3] << 16 | (size_t)d[p + 4] << 8 | d[p + 5]; }
+            else {
+                memcpy(id, d + p, 4);
+                fs = v == 4 ? (((size_t)(d[p + 4] & 0x7F) << 21) | ((size_t)(d[p + 5] & 0x7F) << 14) | ((size_t)(d[p + 6] & 0x7F) << 7) | (d[p + 7] & 0x7F))
+                            : rd32be(d + p + 4);
+            }
+            if (!id[0] || fs == 0 || p + hdr + fs > end) break;
+            const uint8_t *body = d + p + hdr;
+            if ((!strcmp(id, "TIT2") || !strcmp(id, "TT2")) && !t->title[0]) id3_text(body, fs, t->title, sizeof t->title);
+            if ((!strcmp(id, "TPE1") || !strcmp(id, "TP1")) && !t->artist[0]) id3_text(body, fs, t->artist, sizeof t->artist);
+            if ((!strcmp(id, "TALB") || !strcmp(id, "TAL")) && !t->album[0]) id3_text(body, fs, t->album, sizeof t->album);
+            p += hdr + fs;
+        }
+    }
+    if (n >= 128 && !memcmp(d + n - 128, "TAG", 3)) {
+        const uint8_t *v1 = d + n - 128;
+        if (!t->title[0]) text_latin1(v1 + 3, 30, t->title, sizeof t->title);
+        if (!t->artist[0]) text_latin1(v1 + 33, 30, t->artist, sizeof t->artist);
+        if (!t->album[0]) text_latin1(v1 + 63, 30, t->album, sizeof t->album);
+    }
+}
+
+static void vorbis_comment(const char *c, size_t len, SongTags *t)
+{
+    struct { const char *key; char *out; } k[] = { { "TITLE=", t->title }, { "ARTIST=", t->artist }, { "ALBUM=", t->album } };
+    for (int i = 0; i < 3; i++) {
+        size_t kl = strlen(k[i].key);
+        if (len > kl && !k[i].out[0]) {
+            int match = 1;
+            for (size_t j = 0; j < kl; j++) if (toupper((unsigned char)c[j]) != k[i].key[j]) match = 0;
+            if (match) text_utf8((const uint8_t *)c + kl, len - kl, k[i].out, 48);
+        }
+    }
+}
+
+static void flac_meta(void *user, drflac_metadata *m)
+{
+    if (m->type != DRFLAC_METADATA_BLOCK_TYPE_VORBIS_COMMENT) return;
+    drflac_vorbis_comment_iterator it;
+    drflac_uint32 len;
+    const char *c;
+    drflac_init_vorbis_comment_iterator(&it, m->data.vorbis_comment.commentCount, m->data.vorbis_comment.pComments);
+    while ((c = drflac_next_vorbis_comment(&it, &len)) != NULL) vorbis_comment(c, len, (SongTags *)user);
+}
+
+static void read_wav_info(const uint8_t *d, size_t n, SongTags *t)
+{
+    if (n < 12 || memcmp(d, "RIFF", 4) || memcmp(d + 8, "WAVE", 4)) return;
+    for (size_t p = 12; p + 8 <= n;) {
+        uint32_t sz = rd32le(d + p + 4);
+        if (!memcmp(d + p, "LIST", 4) && p + 12 <= n && !memcmp(d + p + 8, "INFO", 4)) {
+            size_t end = p + 8 + sz < n ? p + 8 + sz : n;
+            for (size_t q = p + 12; q + 8 <= end;) {
+                uint32_t s2 = rd32le(d + q + 4);
+                if (q + 8 + s2 > end) break;
+                if (!memcmp(d + q, "INAM", 4) && !t->title[0]) text_utf8(d + q + 8, s2, t->title, sizeof t->title);
+                if (!memcmp(d + q, "IART", 4) && !t->artist[0]) text_utf8(d + q + 8, s2, t->artist, sizeof t->artist);
+                if (!memcmp(d + q, "IPRD", 4) && !t->album[0]) text_utf8(d + q + 8, s2, t->album, sizeof t->album);
+                q += 8 + s2 + (s2 & 1);
+            }
+        }
+        p += 8 + (size_t)sz + (sz & 1);
+    }
+}
+
+static const char *extension(const char *path)
+{
+    const char *dot = strrchr(path, '.'), *sep1 = strrchr(path, '/'), *sep2 = strrchr(path, '\\');
+    const char *sep = sep1 > sep2 ? sep1 : sep2;
+    return dot && (!sep || dot > sep) ? dot + 1 : "";
+}
+
+static int ext_is(const char *path, const char *ext)
+{
+    const char *e = extension(path);
+    for (; *e && *ext; e++, ext++) if (tolower((unsigned char)*e) != *ext) return 0;
+    return !*e && !*ext;
+}
+
+int song_is_music_file(const char *path)
+{
+    return ext_is(path, "mp3") || ext_is(path, "flac") || ext_is(path, "ogg") || ext_is(path, "wav");
+}
+
+/* "Artist - Title" from the file name, the album from the folder. */
+static void from_name(const char *path, SongTags *t)
+{
+    const char *sep1 = strrchr(path, '/'), *sep2 = strrchr(path, '\\');
+    const char *base = sep1 > sep2 ? sep1 : sep2;
+    char stem[256], folder[256] = "";
+    base = base ? base + 1 : path;
+    snprintf(stem, sizeof stem, "%s", base);
+    char *dot = strrchr(stem, '.');
+    if (dot) *dot = 0;
+    if (base > path) {
+        size_t len = (size_t)(base - path - 1);
+        const char *start = path + len;
+        while (start > path && start[-1] != '/' && start[-1] != '\\') start--;
+        snprintf(folder, sizeof folder, "%.*s", (int)(path + len - start), start);
+    }
+    char *dash = strstr(stem, " - ");
+    if (!dash) {
+        /* "My_Song" or "My-Song-Name": words, not punctuation */
+        int spaces = strchr(stem, ' ') != NULL;
+        for (char *p = stem; *p; p++)
+            if (*p == '_' || (!spaces && *p == '-')) *p = ' ';
+    }
+    if (dash && !t->artist[0]) {
+        *dash = 0;
+        text_utf8((const uint8_t *)stem, strlen(stem), t->artist, sizeof t->artist);
+        if (!t->title[0]) text_utf8((const uint8_t *)dash + 3, strlen(dash + 3), t->title, sizeof t->title);
+    }
+    if (!t->title[0]) text_utf8((const uint8_t *)stem, strlen(stem), t->title, sizeof t->title);
+    if (!t->artist[0]) snprintf(t->artist, sizeof t->artist, "Unknown Artist");
+    if (!t->album[0]) {
+        if (folder[0] && strcmp(folder, "songs")) text_utf8((const uint8_t *)folder, strlen(folder), t->album, sizeof t->album);
+        else snprintf(t->album, sizeof t->album, "Custom Songs");
+    }
+}
+
+int song_read_tags(const char *path, SongTags *out)
+{
+    uint8_t *d;
+    size_t n;
+    memset(out, 0, sizeof *out);
+    if (!read_all(path, &d, &n, MAX_FILE)) return 0;
+    if (ext_is(path, "mp3")) read_id3(d, n, out);
+    else if (ext_is(path, "flac")) {
+        drflac *f = drflac_open_memory_with_metadata(d, n, flac_meta, out, NULL);
+        if (f) drflac_close(f);
+    } else if (ext_is(path, "ogg")) {
+        int e;
+        stb_vorbis *v = stb_vorbis_open_memory(d, (int)n, &e, NULL);
+        if (v) {
+            stb_vorbis_comment c = stb_vorbis_get_comment(v);
+            for (int i = 0; i < c.comment_list_length; i++) vorbis_comment(c.comment_list[i], strlen(c.comment_list[i]), out);
+            stb_vorbis_close(v);
+        }
+    } else if (ext_is(path, "wav")) read_wav_info(d, n, out);
+    free(d);
+    from_name(path, out);
+    return 1;
+}
+
+/* ---- decoding --------------------------------------------------------------------------------- */
+
+/* Decoded, stereo, 44.1 kHz: frames * 2 int16. */
+static int16_t *decode_file(const char *path, size_t *frames, char *err, size_t errn)
+{
+    uint8_t *d;
+    size_t n;
+    int16_t *pcm = NULL;
+    unsigned ch = 0, rate = 0;
+    uint64_t count = 0;
+    *frames = 0;
+    if (!read_all(path, &d, &n, MAX_FILE)) { fail(err, errn, "cannot read the file"); return NULL; }
+    if (ext_is(path, "mp3")) {
+        drmp3_config cfg;
+        drmp3_uint64 c = 0;
+        pcm = drmp3_open_memory_and_read_pcm_frames_s16(d, n, &cfg, &c, NULL);
+        ch = cfg.channels; rate = cfg.sampleRate; count = c;
+    } else if (ext_is(path, "flac")) {
+        drflac_uint64 c = 0;
+        pcm = drflac_open_memory_and_read_pcm_frames_s16(d, n, &ch, &rate, &c, NULL);
+        count = c;
+    } else if (ext_is(path, "wav")) {
+        drwav_uint64 c = 0;
+        pcm = drwav_open_memory_and_read_pcm_frames_s16(d, n, &ch, &rate, &c, NULL);
+        count = c;
+    } else if (ext_is(path, "ogg")) {
+        int c2 = 0, r2 = 0;
+        short *out = NULL;
+        int got = stb_vorbis_decode_memory(d, (int)n, &c2, &r2, &out);
+        if (got > 0) { pcm = out; ch = (unsigned)c2; rate = (unsigned)r2; count = (uint64_t)got; }
+        else free(out);
+    }
+    free(d);
+    if (!pcm || !ch || !rate || !count) { free(pcm); fail(err, errn, "not a music file this game can read"); return NULL; }
+    if (count / rate > MAX_SECONDS) count = (uint64_t)MAX_SECONDS * rate;
+    if (count < (uint64_t)MIN_SECONDS * rate) { free(pcm); fail(err, errn, "shorter than 5 seconds"); return NULL; }
+    /* Stereo at 44.1 kHz (linear interpolation; most files are 44.1 kHz already). */
+    size_t out_frames = (size_t)(count * RATE / rate);
+    int16_t *st = (int16_t *)malloc(out_frames * 2 * sizeof *st);
+    if (!st) { free(pcm); fail(err, errn, "out of memory"); return NULL; }
+    for (size_t i = 0; i < out_frames; i++) {
+        double pos = (double)i * rate / RATE;
+        size_t a = (size_t)pos;
+        double f = pos - (double)a;
+        size_t b = a + 1 < count ? a + 1 : a;
+        for (int c = 0; c < 2; c++) {
+            unsigned src = ch == 1 ? 0 : (unsigned)c;
+            double v = pcm[a * ch + src] * (1.0 - f) + pcm[b * ch + src] * f;
+            st[i * 2 + c] = (int16_t)(v < -32768 ? -32768 : v > 32767 ? 32767 : v);
+        }
+    }
+    free(pcm);
+    *frames = out_frames;
+    return st;
+}
+
+/* ---- EA-XA ------------------------------------------------------------------------------------ */
+
+static const int32_t k_c1[4] = { 0, 240, 460, 392 }, k_c2[4] = { 0, 0, -208, -220 };
+
+void song_eaxa_frame(const int16_t *x, int n, int32_t *h1, int32_t *h2, uint8_t out[15])
+{
+    int64_t best = -1;
+    int bf = 0, bs = 0;
+    uint8_t bn[28] = {0};
+    int32_t bh1 = *h1, bh2 = *h2;
+    for (int f = 0; f < 4; f++)
+        for (int sh = 0; sh <= 12; sh++) {
+            int32_t a = *h1, b = *h2;
+            int64_t err = 0, q = (int64_t)1 << (20 - sh);
+            uint8_t nib[28];
+            int i;
+            for (i = 0; i < 28; i++) {
+                int32_t s = i < n ? x[i] : 0;
+                int64_t pred = (int64_t)k_c1[f] * a + (int64_t)k_c2[f] * b;
+                int64_t nn = (int64_t)floor(((double)s * 256.0 - (double)pred) / (double)q + 0.5);
+                if (nn < -8) nn = -8;
+                if (nn > 7) nn = 7;
+                int64_t v = (nn * q + pred) >> 8;
+                if (v < -32768) v = -32768;
+                if (v > 32767) v = 32767;
+                err += (v - s) * (v - s);
+                if (best >= 0 && err >= best) break;
+                nib[i] = (uint8_t)(nn & 15);
+                b = a;
+                a = (int32_t)v;
+            }
+            if (i == 28 && (best < 0 || err < best)) {
+                best = err; bf = f; bs = sh; memcpy(bn, nib, 28); bh1 = a; bh2 = b;
+            }
+        }
+    out[0] = (uint8_t)(bf << 4 | bs);
+    for (int i = 0; i < 14; i++) out[1 + i] = (uint8_t)(bn[2 * i] << 4 | bn[2 * i + 1]);
+    *h1 = bh1;
+    *h2 = bh2;
+}
+
+typedef struct { uint8_t *p; size_t n, cap; } Buf;
+
+static int buf_add(Buf *b, const void *data, size_t n)
+{
+    if (b->n + n > b->cap) {
+        size_t cap = b->cap ? b->cap : 1 << 20;
+        while (cap < b->n + n) cap *= 2;
+        uint8_t *p = (uint8_t *)realloc(b->p, cap);
+        if (!p) return 0;
+        b->p = p;
+        b->cap = cap;
+    }
+    if (data) memcpy(b->p + b->n, data, n);
+    else memset(b->p + b->n, 0, n);
+    b->n += n;
+    return 1;
+}
+
+/* One SCHl stream of frames stereo samples at pcm: the template's header with the sample count
+ * and rate set, SCCl, SCDl blocks (split channels, each with its two history words), SCEl. */
+static int write_stream(Buf *out, const SongTemplate *t, const int16_t *pcm, size_t frames)
+{
+    uint8_t hdr[128];
+    memcpy(hdr, t->header, t->header_n);
+    for (size_t i = 12; i < t->header_n;) {
+        uint8_t tag = hdr[i++];
+        if (tag == 0xFF) break;
+        if (tag == 0xFC || tag == 0xFD || tag == 0xFE) continue;
+        uint8_t len = hdr[i++];
+        uint32_t v = tag == 0x85 ? (uint32_t)frames : tag == 0x84 ? RATE : 0;
+        if ((tag == 0x85 || tag == 0x84) && len >= 1 && len <= 4)
+            for (int k = 0; k < len; k++) hdr[i + k] = (uint8_t)(v >> (8 * (len - 1 - k)));
+        i += len;
+    }
+    uint32_t blocks = (uint32_t)((frames + BLOCK - 1) / BLOCK);
+    uint8_t cc[12] = { 'S', 'C', 'C', 'l' };
+    wr32le(cc + 4, 12);
+    wr32le(cc + 8, blocks);
+    if (!buf_add(out, hdr, t->header_n) || !buf_add(out, cc, 12)) return 0;
+    int32_t h1[2] = {0, 0}, h2[2] = {0, 0};
+    int16_t chan[BLOCK];
+    uint8_t frame[15];
+    for (size_t s = 0; s < frames; s += BLOCK) {
+        uint32_t n = (uint32_t)(frames - s < BLOCK ? frames - s : BLOCK);
+        uint32_t fr = (n + 27) / 28, chsize = 4 + fr * 15;
+        uint8_t head[20] = { 'S', 'C', 'D', 'l' };
+        wr32le(head + 4, 20 + 2 * chsize);
+        wr32le(head + 8, n);
+        wr32le(head + 12, 0);
+        wr32le(head + 16, chsize);
+        if (!buf_add(out, head, 20)) return 0;
+        for (int c = 0; c < 2; c++) {
+            uint8_t hist[4] = { (uint8_t)h1[c], (uint8_t)(h1[c] >> 8), (uint8_t)h2[c], (uint8_t)(h2[c] >> 8) };
+            for (uint32_t i = 0; i < n; i++) chan[i] = pcm[(s + i) * 2 + c];
+            if (!buf_add(out, hist, 4)) return 0;
+            for (uint32_t f = 0; f < fr; f++) {
+                int left = (int)(n - f * 28);
+                song_eaxa_frame(chan + f * 28, left < 28 ? left : 28, &h1[c], &h2[c], frame);
+                if (!buf_add(out, frame, 15)) return 0;
+            }
+        }
+    }
+    uint8_t end[8] = { 'S', 'C', 'E', 'l', 8, 0, 0, 0 };
+    return buf_add(out, end, 8);
+}
+
+/* ---- the template's map ------------------------------------------------------------------------ */
+
+typedef struct {
+    uint32_t nodes, samples_table, track0;       /* track 0: samples 0 .. track0-1 */
+    uint32_t full[256], nfull;                   /* 1-based sample numbers of the longest play */
+} MapInfo;
+
+static int map_info(const uint8_t *d, size_t n, MapInfo *m)
+{
+    memset(m, 0, sizeof *m);
+    if (n < 0x40 || memcmp(d, "xDFP", 4) || d[4] != 4) return 0;
+    uint32_t tracks = d[0x0D], events = d[0x0F], routers = d[0x10];
+    m->nodes = rd16le(d + 0x12);
+    if (!m->nodes || !events || !tracks || 0x20 + m->nodes * 2 > n) return 0;
+#define CHECK(o, len) do { if ((size_t)(o) + (len) > n) return 0; } while (0)
+    uint32_t so = 0x20, eo = rd16le(d + so + (m->nodes - 1) * 2) * 4;
+    CHECK(eo, 8);
+    uint32_t sub = (rd32be(d + eo + 4) >> 20) & 0xF;
+    so = eo + 0x10 + sub * 4;
+    CHECK(so, events * 2);
+    eo = rd16le(d + so + (events - 1) * 2) * 4;
+    CHECK(eo, 0x10);
+    sub = (rd32be(d + eo + 0x0C) >> 8) & 0x3F;
+    so = eo + 0x10 + sub * 0x10 + routers * 4;
+    CHECK(so, 4);
+    uint32_t tracks_table = rd32le(d + so) * 4;
+    CHECK(tracks_table, (tracks + 1) * 4);
+    m->samples_table = tracks_table + (tracks + 1) * 4;
+    uint32_t t1 = rd32le(d + tracks_table + 4) * 4;
+    if (t1 < m->samples_table) return 0;
+    m->track0 = (t1 - m->samples_table) / 8;
+    CHECK(m->samples_table, m->track0 * 8);
+    /* The longest walk from a section's start node (sample 0), first route at each node. */
+    for (uint32_t start = 0; start < m->nodes; start++) {
+        uint32_t o = rd16le(d + 0x20 + start * 2) * 4;
+        CHECK(o, 0x14);
+        if (rd16le(d + o) != 0) continue;
+        uint32_t walk[256], nw = 0, node = start;
+        uint8_t seen[2048] = {0};
+        while (node < m->nodes && node < 2048 && !seen[node] && nw < 256) {
+            seen[node] = 1;
+            uint32_t oo = rd16le(d + 0x20 + node * 2) * 4;
+            CHECK(oo, 0x14);
+            uint32_t seg = rd16le(d + oo);
+            if (seg && seg != 0xFFFF && seg != 0xFFFD && seg <= m->track0) walk[nw++] = seg;
+            if (!((rd32be(d + oo + 4) >> 20) & 0xF)) break;
+            node = rd16le(d + oo + 0x12);
+        }
+        if (nw > m->nfull) { memcpy(m->full, walk, nw * sizeof walk[0]); m->nfull = nw; }
+    }
+#undef CHECK
+    return m->nfull > 0;
+}
+
+/* ---- the template from the dump ----------------------------------------------------------------- */
+
+static int big_find(const char *viv, const char *name, uint8_t **data, size_t *n, size_t limit)
+{
+    FILE *f = open_utf8(viv, "rb");
+    uint8_t h[16];
+    int ok = 0;
+    *data = NULL;
+    *n = 0;
+    if (!f) return 0;
+    if (fread(h, 1, 16, f) == 16 && (!memcmp(h, "BIGF", 4) || !memcmp(h, "BIG4", 4))) {
+        uint32_t count = rd32be(h + 8), hlen = rd32be(h + 12);
+        if (hlen > 16 && hlen < (16u << 20)) {
+            uint8_t *dir = (uint8_t *)malloc(hlen);
+            if (dir && fread(dir, 1, hlen - 16, f) == hlen - 16) {
+                size_t p = 0;
+                for (uint32_t i = 0; i < count && p + 9 <= hlen - 16; i++) {
+                    uint32_t off = rd32be(dir + p), len = rd32be(dir + p + 4);
+                    const char *nm = (const char *)dir + p + 8;
+                    size_t nl = strnlen(nm, hlen - 16 - p - 8);
+                    if (!_stricmp(nm, name) && len && len <= limit) {
+                        *data = (uint8_t *)malloc(len);
+                        if (*data && !fseek(f, (long)off, SEEK_SET) && fread(*data, 1, len, f) == len) { *n = len; ok = 1; }
+                        else { free(*data); *data = NULL; }
+                        break;
+                    }
+                    p += 8 + nl + 1;
+                }
+            }
+            free(dir);
+        }
+    }
+    fclose(f);
+    return ok;
+}
+
+static uint32_t fnv(uint32_t h, const uint8_t *p, size_t n)
+{
+    for (size_t i = 0; i < n; i++) h = (h ^ p[i]) * 16777619u;
+    return h;
+}
+
+void song_template_free(SongTemplate *t)
+{
+    free(t->mpf); free(t->loading); free(t->overlay);
+    memset(t, 0, sizeof *t);
+}
+
+int song_template_load(const char *game_dir, SongTemplate *t, char *err, size_t errn)
+{
+    static const char *const names[] = { "music\\minitrack2\\tune.mpf", "music\\minitrack2\\loading0.mus",
+                                         "music\\minitrack2\\overlay0.mus", "music\\minitrack2\\main.mus" };
+    uint8_t *got[4] = {0};
+    size_t len[4] = {0};
+    memset(t, 0, sizeof *t);
+    for (int v = 0; v < 5; v++) {
+        char viv[1024];
+        snprintf(viv, sizeof viv, "%s" HOST_SEP "audio" HOST_SEP "music%d.viv", game_dir, v);
+        for (int k = 0; k < 4; k++)
+            if (!got[k]) big_find(viv, names[k], &got[k], &len[k], k == 3 ? (64u << 20) : (4u << 20));
+    }
+    if (!got[0] || !got[1] || !got[2] || !got[3] || len[3] < 64 || memcmp(got[3], "SCHl", 4) ||
+        rd32le(got[3] + 4) > sizeof t->header || rd32le(got[3] + 4) < 16) {
+        for (int k = 0; k < 4; k++) free(got[k]);
+        return fail(err, errn, "the template song (minitrack2) is not in the dump");
+    }
+    t->mpf = got[0]; t->mpf_n = len[0];
+    t->loading = got[1]; t->loading_n = len[1];
+    t->overlay = got[2]; t->overlay_n = len[2];
+    t->header_n = rd32le(got[3] + 4);
+    memcpy(t->header, got[3], t->header_n);
+    free(got[3]);
+    MapInfo m;
+    if (!map_info(t->mpf, t->mpf_n, &m)) { song_template_free(t); return fail(err, errn, "the template's map is not one this version reads"); }
+    t->hash = fnv(fnv(fnv(fnv(2166136261u, t->mpf, t->mpf_n), t->loading, t->loading_n), t->overlay, t->overlay_n), t->header, t->header_n);
+    return 1;
+}
+
+/* ---- a song ------------------------------------------------------------------------------------ */
+
+int song_convert(const char *path, const char *out_dir, const SongTemplate *t, char *err, size_t errn)
+{
+    size_t frames;
+    MapInfo m;
+    char file[1100];
+    int ok = 0;
+    if (!map_info(t->mpf, t->mpf_n, &m)) return fail(err, errn, "the template's map is not one this version reads");
+    int16_t *pcm = decode_file(path, &frames, err, errn);
+    if (!pcm) return 0;
+    uint8_t *mpf = (uint8_t *)malloc(t->mpf_n);
+    Buf mus = {0};
+    if (!mpf) { free(pcm); return fail(err, errn, "out of memory"); }
+    memcpy(mpf, t->mpf, t->mpf_n);
+
+    /* The song cut into m.nfull pieces (on 28-sample frame edges) along the full play; the
+     * other track-0 samples take pieces in turn. */
+    size_t edges[257];
+    for (uint32_t k = 0; k <= m.nfull; k++) {
+        size_t e = (size_t)((double)frames * k / m.nfull);
+        edges[k] = k == m.nfull ? frames : e - e % 28;
+    }
+    int piece_of[256];
+    for (uint32_t i = 0; i < m.track0 && i < 256; i++) piece_of[i] = -1;
+    for (uint32_t k = 0; k < m.nfull; k++) piece_of[m.full[k] - 1] = (int)k;
+    for (uint32_t i = 0, next = 0; i < m.track0 && i < 256; i++)
+        if (piece_of[i] < 0) piece_of[i] = (int)(next++ % m.nfull);
+
+    for (uint32_t i = 0; i < m.track0 && i < 256; i++) {
+        size_t a = edges[piece_of[i]], b = edges[piece_of[i] + 1];
+        size_t at = mus.n;
+        if (!write_stream(&mus, t, pcm + a * 2, b - a) || !buf_add(&mus, NULL, (0x80 - mus.n % 0x80) % 0x80)) {
+            fail(err, errn, "out of memory");
+            goto done;
+        }
+        wr32le(mpf + m.samples_table + i * 8, (uint32_t)(at / 0x80));
+        wr32le(mpf + m.samples_table + i * 8 + 4, (uint32_t)((b - a) * 1000 / RATE));
+    }
+    snprintf(file, sizeof file, "%s" HOST_SEP "main.mus", out_dir);
+    if (!write_all(file, mus.p, mus.n)) { fail(err, errn, "cannot write the converted song"); goto done; }
+    snprintf(file, sizeof file, "%s" HOST_SEP "loading0.mus", out_dir);
+    if (!write_all(file, t->loading, t->loading_n)) { fail(err, errn, "cannot write the converted song"); goto done; }
+    snprintf(file, sizeof file, "%s" HOST_SEP "overlay0.mus", out_dir);
+    if (!write_all(file, t->overlay, t->overlay_n)) { fail(err, errn, "cannot write the converted song"); goto done; }
+    snprintf(file, sizeof file, "%s" HOST_SEP "tune.mpf", out_dir);          /* last: it marks a whole song */
+    if (!write_all(file, mpf, t->mpf_n)) { fail(err, errn, "cannot write the converted song"); goto done; }
+    ok = 1;
+done:
+    free(pcm);
+    free(mpf);
+    free(mus.p);
+    return ok;
+}
