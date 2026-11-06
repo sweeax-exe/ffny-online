@@ -4,8 +4,9 @@
 
 | Guide | Purpose |
 |---|---|
+| [Install guide](install-guide.md) | Def Jam Recompiled, step by step: download, first run, Add to Steam, updates, repair and uninstall |
 | [Build and play](build-and-play.md) | Windows: the installer, or a manual source build from your own dump; launch and saves |
-| [Setup installers](setup-installer.md) | Windows, macOS and Linux/Steam Deck: folders, shortcuts, silent mode, repair and removal |
+| [Setup installers](setup-installer.md) | The older `DefJamSetup` tools on Windows, macOS and Linux/Steam Deck: folders, shortcuts, silent mode, repair and removal |
 | [Build on macOS and Linux](build-macos-linux.md) | The same pipeline off Windows, and what works there |
 | [Launcher and overlay](launcher-and-overlay.md) | The start-up window and the in-game settings screen (F1) |
 | [Controllers, keyboard and mouse](10-input.md) | Gamepads, the keyboard player, default keys, remapping and rumble |
