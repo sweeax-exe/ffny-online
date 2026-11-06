@@ -181,13 +181,14 @@ def writer(tmp_path_factory):
     exe = folder / ('songs.exe' if os.name == 'nt' else 'songs')
     includes = [folder, ROOT / 'src/hooks', ROOT / 'tools/xboxrecomp/src/settings']
     sources = [driver, stub, ROOT / 'src/hooks/pc_songs.c', ROOT / 'src/hooks/pc_songs_settings.c',
+               ROOT / 'src/hooks/song_library.c', ROOT / 'src/hooks/song_convert.c', ROOT / 'src/hooks/song_decoders.c',
                ROOT / 'tools/xboxrecomp/src/settings/recomp_settings.c']
     if os.name == 'nt':
         cmd = [compiler, '/nologo', '/O2', '/TC', *['/I' + str(p) for p in includes], *map(str, sources),
                '/Fe:' + str(exe)]
     else:
         cmd = [compiler, '-O2', '-Wall', *['-I' + str(p) for p in includes], *map(str, sources), '-o', str(exe),
-               '-pthread']
+               '-pthread', '-lm']
     result = subprocess.run(cmd, cwd=folder, capture_output=True, text=True)
     assert result.returncode == 0, result.stdout + result.stderr
     return exe
