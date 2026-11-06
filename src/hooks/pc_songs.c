@@ -28,6 +28,7 @@
 #include "recomp_settings.h"
 #include "pc_songs.h"
 #include "song_convert.h"
+#include "song_library.h"
 
 #if !defined(_WIN32)
 #include <ctype.h>
@@ -560,48 +561,7 @@ const char *pc_songs_entity_for_rank(uint32_t rank)
 }
 
 
-/* ---- custom songs: finding and converting the player's files ------------------------------------ */
-
-typedef struct { char path[SONGS_PATH]; } Found;
-
-static int found_cmp(const void *a, const void *b) { return strcmp(((const Found *)a)->path, ((const Found *)b)->path); }
-
-/* Every music file under dir (UTF-8), depth-first, at most max. */
-static void scan_dir(const char *dir, Found *out, int *n, int max, int depth)
-{
-    if (depth > 8 || *n >= max) return;
-#if defined(_WIN32)
-    WCHAR pattern[SONGS_PATH];
-    char pat8[SONGS_PATH + 4];
-    WIN32_FIND_DATAW fd;
-    snprintf(pat8, sizeof pat8, "%s\\*", dir);
-    if (!MultiByteToWideChar(CP_UTF8, 0, pat8, -1, pattern, SONGS_PATH)) return;
-    HANDLE h = FindFirstFileW(pattern, &fd);
-    if (h == INVALID_HANDLE_VALUE) return;
-    do {
-        char name[SONGS_PATH], full[SONGS_PATH];
-        if (!WideCharToMultiByte(CP_UTF8, 0, fd.cFileName, -1, name, sizeof name, NULL, NULL)) continue;
-        if (name[0] == '.') continue;
-        if ((size_t)snprintf(full, sizeof full, "%s\\%s", dir, name) >= sizeof full) continue;
-        if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) scan_dir(full, out, n, max, depth + 1);
-        else if (song_is_music_file(full) && *n < max) snprintf(out[(*n)++].path, SONGS_PATH, "%s", full);
-    } while (*n < max && FindNextFileW(h, &fd));
-    FindClose(h);
-#else
-    DIR *d = opendir(dir);
-    struct dirent *e;
-    if (!d) return;
-    while (*n < max && (e = readdir(d)) != NULL) {
-        char full[SONGS_PATH];
-        struct stat st;
-        if (e->d_name[0] == '.') continue;
-        if ((size_t)snprintf(full, sizeof full, "%s/%s", dir, e->d_name) >= sizeof full || stat(full, &st)) continue;
-        if (S_ISDIR(st.st_mode)) scan_dir(full, out, n, max, depth + 1);
-        else if (song_is_music_file(full)) snprintf(out[(*n)++].path, SONGS_PATH, "%s", full);
-    }
-    closedir(d);
-#endif
-}
+/* ---- custom songs: converting the player's files (song_library.c finds them) ----------------- */
 
 static int file_meta(const char *path, long long *size, long long *mtime)
 {
@@ -618,62 +578,20 @@ static int file_meta(const char *path, long long *size, long long *mtime)
     return 1;
 }
 
-/* A stable id for a file: "u" and eight hex digits of its path (lower case), within the 15
- * characters the playlist keeps for a song's folder name. */
-static void song_id(const char *path, char *out, size_t size)
-{
-    uint32_t h = 2166136261u;
-    for (const char *p = path; *p; p++) {
-        char c = *p == '\\' ? '/' : (char)tolower((unsigned char)*p);
-        h = (h ^ (uint8_t)c) * 16777619u;
-    }
-    snprintf(out, size, "u%08x", h);
-}
-
-/* <data>/song-state/library.txt: one line per song the launcher's Songs page knows,
- * "<id> <on|off> <straight|interactive>". A song that is not listed is on. */
-static int library_off(const char *data_root, const char *id)
-{
-    char path[SONGS_PATH], line[256];
-    int off = 0;
-    snprintf(path, sizeof path, "%s" HOST_SEP "song-state" HOST_SEP "library.txt", data_root);
-    FILE *f = fopen(path, "r");
-    if (!f) return 0;
-    while (fgets(line, sizeof line, f)) {
-        char lid[32], state[16];
-        if (sscanf(line, "%31s %15s", lid, state) == 2 && !strcmp(lid, id)) off = !strcmp(state, "off");
-    }
-    fclose(f);
-    return off;
-}
 
 static void add_custom_songs(const char *data_root, const char *game_dir, int room)
 {
-    char roots[8][SONGS_PATH], folders[RECOMP_SETTING_TEXT_MAX], err[200];
-    int nroots = 0, nfound = 0, converted = 0, failed = 0;
-    SongTemplate t;
+    char err[200];
+    int nfound, converted = 0, failed = 0, off = 0;
+    SongTemplate tmpl[2];
+    int have[2] = { 0, 0 };
     g_ncustom = 0;
+    memset(tmpl, 0, sizeof tmpl);
     if (room <= 0) return;
-    snprintf(roots[nroots++], SONGS_PATH, "%s" HOST_SEP "songs", data_root);
-    recomp_settings_get_text("songs", "folders", folders, sizeof folders, "");
-    for (char *p = folders; *p && nroots < 8;) {
-        char *semi = strchr(p, ';');
-        if (semi) *semi = 0;
-        while (*p == ' ') p++;
-        if (*p) snprintf(roots[nroots++], SONGS_PATH, "%s", p);
-        if (!semi) break;
-        p = semi + 1;
-    }
-    Found *found = (Found *)calloc(1024, sizeof *found);
+    SongEntry *found = (SongEntry *)calloc(SONG_LIBRARY_MAX, sizeof *found);
     if (!found) return;
-    for (int r = 0; r < nroots; r++) scan_dir(roots[r], found, &nfound, 1024, 0);
+    nfound = song_library_scan(data_root, found, SONG_LIBRARY_MAX);
     if (!nfound) {
-        free(found);
-        return;
-    }
-    qsort(found, (size_t)nfound, sizeof *found, found_cmp);
-    if (!song_template_load(game_dir, &t, err, sizeof err)) {
-        fprintf(stderr, "[SONGS] %d music file(s) found but not used: %s\n", nfound, err);
         free(found);
         return;
     }
@@ -681,12 +599,20 @@ static void add_custom_songs(const char *data_root, const char *game_dir, int ro
         Custom *c = &g_custom[g_ncustom];
         char stamp_path[SONGS_PATH + 32], stamp[SONGS_PATH + 128], old[SONGS_PATH + 128] = "";
         long long size = 0, mtime = 0;
-        song_id(found[i].path, c->id, sizeof c->id);
-        if (library_off(data_root, c->id)) continue;
+        if (!found[i].on) { off++; continue; }
+        int mode = found[i].interactive ? 1 : 0;
+        if (!have[mode]) {
+            have[mode] = song_template_load(game_dir, mode, &tmpl[mode], err, sizeof err) ? 1 : -1;
+            if (have[mode] < 0) fprintf(stderr, "[SONGS] %s songs not used: %s\n", mode ? "interactive" : "straight", err);
+        }
+        if (have[mode] < 0) { failed++; continue; }
+        SongTemplate *tp = &tmpl[mode];
+        snprintf(c->id, sizeof c->id, "%s", found[i].id);
         if (!file_meta(found[i].path, &size, &mtime) || !song_read_tags(found[i].path, &c->tags)) continue;
         snprintf(c->dir, sizeof c->dir, "%s" HOST_SEP "cache" HOST_SEP "songs" HOST_SEP "%s", data_root, c->id);
         snprintf(stamp_path, sizeof stamp_path, "%s" HOST_SEP "stamp.txt", c->dir);
-        snprintf(stamp, sizeof stamp, "v%d t%08x s%lld m%lld %s\n", SONG_CONVERT_VERSION, t.hash, size, mtime, found[i].path);
+        snprintf(stamp, sizeof stamp, "v%d t%08x s%lld m%lld %s %s\n", SONG_CONVERT_VERSION, tp->hash, size, mtime,
+                 found[i].interactive ? "interactive" : "straight", found[i].path);
         FILE *f = fopen(stamp_path, "r");
         if (f) {
             if (!fgets(old, sizeof old, f)) old[0] = 0;
@@ -695,8 +621,8 @@ static void add_custom_songs(const char *data_root, const char *game_dir, int ro
         if (strcmp(old, stamp)) {
             make_dirs(stamp_path);
             remove(stamp_path);
-            fprintf(stderr, "[SONGS] converting %s ...\n", found[i].path);
-            if (!song_convert(found[i].path, c->dir, &t, err, sizeof err)) {
+            fprintf(stderr, "[SONGS] converting %s (%s) ...\n", found[i].path, found[i].interactive ? "interactive" : "straight");
+            if (!song_convert(found[i].path, c->dir, tp, mode, err, sizeof err)) {
                 fprintf(stderr, "[SONGS] %s not used: %s\n", found[i].path, err);
                 failed++;
                 continue;
@@ -709,10 +635,11 @@ static void add_custom_songs(const char *data_root, const char *game_dir, int ro
         g_songs[g_song_count++] = s;
         g_ncustom++;
     }
-    fprintf(stderr, "[SONGS] custom songs: %d file(s) found, %d in the game (%d converted now%s%s)\n",
-            nfound, g_ncustom, converted, failed ? ", some not usable" : "",
-            nfound > g_ncustom + failed ? "; the rest are off or past the room the game has" : "");
-    song_template_free(&t);
+    fprintf(stderr, "[SONGS] custom songs: %d file(s) found, %d in the game (%d converted now), %d turned off%s%s\n",
+            nfound, g_ncustom, converted, off, failed ? ", some not usable" : "",
+            nfound > g_ncustom + failed + off ? "; the rest past the room the game has" : "");
+    song_template_free(&tmpl[0]);
+    song_template_free(&tmpl[1]);
     free(found);
 }
 

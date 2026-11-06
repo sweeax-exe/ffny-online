@@ -560,6 +560,183 @@ static int map_info(const uint8_t *d, size_t n, MapInfo *m)
     return m->nfull > 0;
 }
 
+/* ---- interactive: lanes ----------------------------------------------------------------------- */
+/*
+ * The licensed songs' maps (holler's is the template) branch four ways at every segment of their
+ * fight sections: the route is picked by a value of the game's (0-0x7F, four ranges) and lands on
+ * the same place of the song in one of four lanes (the song; a loop; two other mixes), so the
+ * music changes its arrangement with the fight without losing its place. A custom song in this
+ * mode fills lane 0 with the song and lanes 1-3 with the same pieces filtered three ways.
+ *
+ * Mapping: every section's lane-0 chain (first route at each node), longest first; a sample gets
+ * the place it first has in a chain (the fight sections enter the same body cycle at different
+ * points, so later chains agree), and each chain spreads the whole song over its samples. The
+ * other routes of a branching node inherit their first route's place, as lanes 1-3.
+ */
+typedef struct {
+    int chain[256], slot[256], lane[256];          /* per track-0 sample (0-based) */
+    int nchains, count[64];                        /* samples given to each chain */
+} LaneMap;
+
+static int lane_map(const uint8_t *d, size_t n, const MapInfo *m, LaneMap *lm)
+{
+    enum { MAXN = 2048 };
+    static uint32_t seg[MAXN], routes[MAXN][8];
+    static int nroutes[MAXN], walk[MAXN];
+    int starts[64], lens[64], nstarts = 0;
+    uint32_t N = m->nodes < MAXN ? m->nodes : MAXN;
+    memset(lm, 0, sizeof *lm);
+    for (int s = 0; s < 256; s++) lm->chain[s] = -1;
+    for (uint32_t i = 0; i < N; i++) {
+        uint32_t o = rd16le(d + 0x20 + i * 2) * 4;
+        if ((size_t)o + 0x14 > n) return 0;
+        seg[i] = rd16le(d + o);
+        nroutes[i] = (int)((rd32be(d + o + 4) >> 20) & 0xF);
+        if (nroutes[i] > 8) nroutes[i] = 8;
+        if ((size_t)o + 0x10 + 4 * (size_t)nroutes[i] > n) return 0;
+        for (int k = 0; k < nroutes[i]; k++) routes[i][k] = rd16le(d + o + 0x10 + 4 * k + 2);
+    }
+    /* chains, longest first */
+    for (uint32_t s = 0; s < N && nstarts < 64; s++) {
+        if (seg[s] != 0) continue;
+        static uint8_t seen[MAXN];
+        int len = 0;
+        memset(seen, 0, N);
+        for (uint32_t x = s; x < N && !seen[x];) {
+            seen[x] = 1;
+            if (seg[x] && seg[x] <= m->track0) len++;
+            if (!nroutes[x]) break;
+            x = routes[x][0];
+        }
+        if (len) { starts[nstarts] = (int)s; lens[nstarts++] = len; }
+    }
+    for (int i = 1; i < nstarts; i++)
+        for (int j = i; j > 0 && lens[j - 1] < lens[j]; j--) {
+            int a = starts[j]; starts[j] = starts[j - 1]; starts[j - 1] = a;
+            a = lens[j]; lens[j] = lens[j - 1]; lens[j - 1] = a;
+        }
+    for (int c = 0; c < nstarts; c++) {
+        static uint8_t seen[MAXN];
+        int nw = 0;
+        memset(seen, 0, N);
+        for (uint32_t x = (uint32_t)starts[c]; x < N && !seen[x];) {
+            seen[x] = 1;
+            walk[nw++] = (int)x;
+            if (!nroutes[x]) break;
+            x = routes[x][0];
+        }
+        for (int k = 0; k < nw; k++) {
+            uint32_t s = seg[walk[k]];
+            if (!s || s > m->track0 || s > 256 || lm->chain[s - 1] >= 0) continue;
+            lm->chain[s - 1] = lm->nchains;
+            lm->slot[s - 1] = lm->count[lm->nchains]++;
+            lm->lane[s - 1] = 0;
+        }
+        if (lm->count[lm->nchains]) lm->nchains++;
+    }
+    /* lanes: the other routes of a branching node take their first route's place */
+    for (int changed = 1; changed;) {
+        changed = 0;
+        for (uint32_t p = 0; p < N; p++) {
+            if (nroutes[p] < 2 || routes[p][0] >= N) continue;
+            uint32_t s0 = seg[routes[p][0]];
+            if (!s0 || s0 > m->track0 || s0 > 256 || lm->chain[s0 - 1] < 0) continue;
+            for (int k = 1; k < nroutes[p] && k < 4; k++) {
+                uint32_t t = routes[p][k];
+                if (t >= N) continue;
+                uint32_t s = seg[t];
+                if (!s || s > m->track0 || s > 256 || lm->chain[s - 1] >= 0) continue;
+                lm->chain[s - 1] = lm->chain[s0 - 1];
+                lm->slot[s - 1] = lm->slot[s0 - 1];
+                lm->lane[s - 1] = k;
+                changed = 1;
+            }
+        }
+    }
+    /* anything left: the longest chain's pieces in turn, as lane 0 */
+    if (!lm->nchains) return 0;
+    for (uint32_t s = 0, next = 0; s < m->track0 && s < 256; s++)
+        if (lm->chain[s] < 0) { lm->chain[s] = 0; lm->slot[s] = (int)(next++ % (uint32_t)lm->count[0]); lm->lane[s] = 0; }
+    return 1;
+}
+
+/* Lanes 1-3: the song filtered three ways (RBJ biquads), the same length and place. */
+typedef struct { double b0, b1, b2, a1, a2, z1[2], z2[2]; } Biquad;
+
+static void biquad_set(Biquad *q, int type, double freq, double gain_db)
+{
+    double w = 2 * 3.14159265358979 * freq / RATE, cw = cos(w), sw = sin(w), A = pow(10, gain_db / 40), Q = 0.707;
+    double alpha = sw / (2 * Q), b0, b1, b2, a0, a1, a2;
+    if (type == 0) {                                          /* low-pass */
+        b0 = (1 - cw) / 2; b1 = 1 - cw; b2 = (1 - cw) / 2; a0 = 1 + alpha; a1 = -2 * cw; a2 = 1 - alpha;
+    } else {                                                  /* shelves: 1 low, 2 high */
+        double s = type == 1 ? 1 : -1, sq = 2 * sqrt(A) * alpha;
+        b0 = A * ((A + 1) - s * (A - 1) * cw + sq);
+        b1 = s * 2 * A * ((A - 1) - s * (A + 1) * cw);
+        b2 = A * ((A + 1) - s * (A - 1) * cw - sq);
+        a0 = (A + 1) + s * (A - 1) * cw + sq;
+        a1 = -s * 2 * ((A - 1) + s * (A + 1) * cw);
+        a2 = (A + 1) + s * (A - 1) * cw - sq;
+    }
+    memset(q, 0, sizeof *q);
+    q->b0 = b0 / a0; q->b1 = b1 / a0; q->b2 = b2 / a0; q->a1 = a1 / a0; q->a2 = a2 / a0;
+}
+
+static double biquad_run(Biquad *q, int c, double x)
+{
+    double y = q->b0 * x + q->z1[c];
+    q->z1[c] = q->b1 * x - q->a1 * y + q->z2[c];
+    q->z2[c] = q->b2 * x - q->a2 * y;
+    return y;
+}
+
+static int16_t *lane_pcm(const int16_t *pcm, size_t frames, int lane)
+{
+    int16_t *out = (int16_t *)malloc(frames * 2 * sizeof *out);
+    Biquad a, b;
+    double gain = 1.0;
+    if (!out) return NULL;
+    if (lane == 1) { biquad_set(&a, 0, 1200, 0); biquad_set(&b, 0, 1200, 0); gain = 1.1; }   /* muffled */
+    else if (lane == 2) { biquad_set(&a, 1, 150, 6); biquad_set(&b, 0, 9000, 0); gain = 0.9; } /* heavy */
+    else { biquad_set(&a, 2, 3500, 4); biquad_set(&b, 1, 90, 2); gain = 0.95; }              /* bright */
+    for (size_t i = 0; i < frames; i++)
+        for (int c = 0; c < 2; c++) {
+            double v = biquad_run(&b, c, biquad_run(&a, c, pcm[i * 2 + c])) * gain;
+            double m = fabs(v) / 32768.0;                               /* unity gain, a soft knee above 0.8 */
+            if (m > 0.8) m = 0.8 + 0.2 * tanh((m - 0.8) / 0.2);
+            v = (v < 0 ? -m : m) * 32767.0;
+            out[i * 2 + c] = (int16_t)v;
+        }
+    return out;
+}
+
+static int convert_interactive(const int16_t *pcm, size_t frames, const SongTemplate *t, const MapInfo *m,
+                               uint8_t *mpf, Buf *mus, char *err, size_t errn)
+{
+    LaneMap lm;
+    if (!lane_map(t->mpf, t->mpf_n, m, &lm)) return fail(err, errn, "the interactive template's map is not one this version reads");
+    for (int lane = 0; lane < 4; lane++) {
+        int16_t *src = lane ? lane_pcm(pcm, frames, lane) : (int16_t *)pcm;
+        if (!src) return fail(err, errn, "out of memory");
+        for (uint32_t i = 0; i < m->track0 && i < 256; i++) {
+            if (lm.lane[i] != lane) continue;
+            int c = lm.chain[i], cnt = lm.count[c];
+            size_t a = (size_t)((double)frames * lm.slot[i] / cnt), b = (size_t)((double)frames * (lm.slot[i] + 1) / cnt);
+            a -= a % 28;
+            if (lm.slot[i] + 1 < cnt) b -= b % 28;
+            size_t at = mus->n;
+            if (!write_stream(mus, t, src + a * 2, b - a) || !buf_add(mus, NULL, (0x80 - mus->n % 0x80) % 0x80)) {
+                if (lane) free(src);
+                return fail(err, errn, "out of memory");
+            }
+            wr32le(mpf + m->samples_table + i * 8, (uint32_t)(at / 0x80));
+            wr32le(mpf + m->samples_table + i * 8 + 4, (uint32_t)((b - a) * 1000 / RATE));
+        }
+        if (lane) free(src);
+    }
+    return 1;
+}
+
 /* ---- the template from the dump ----------------------------------------------------------------- */
 
 static int big_find(const char *viv, const char *name, uint8_t **data, size_t *n, size_t limit)
@@ -608,10 +785,15 @@ void song_template_free(SongTemplate *t)
     memset(t, 0, sizeof *t);
 }
 
-int song_template_load(const char *game_dir, SongTemplate *t, char *err, size_t errn)
+int song_template_load(const char *game_dir, int interactive, SongTemplate *t, char *err, size_t errn)
 {
-    static const char *const names[] = { "music\\minitrack2\\tune.mpf", "music\\minitrack2\\loading0.mus",
-                                         "music\\minitrack2\\overlay0.mus", "music\\minitrack2\\main.mus" };
+    /* straight: minitrack2 (a plain loop); interactive: holler (four lanes in its fight sections) */
+    const char *song = interactive ? "holler" : "minitrack2";
+    char names[4][64];
+    snprintf(names[0], sizeof names[0], "music\\%s\\tune.mpf", song);
+    snprintf(names[1], sizeof names[1], "music\\%s\\loading0.mus", song);
+    snprintf(names[2], sizeof names[2], "music\\%s\\overlay0.mus", song);
+    snprintf(names[3], sizeof names[3], "music\\%s\\main.mus", song);
     uint8_t *got[4] = {0};
     size_t len[4] = {0};
     memset(t, 0, sizeof *t);
@@ -624,7 +806,8 @@ int song_template_load(const char *game_dir, SongTemplate *t, char *err, size_t 
     if (!got[0] || !got[1] || !got[2] || !got[3] || len[3] < 64 || memcmp(got[3], "SCHl", 4) ||
         rd32le(got[3] + 4) > sizeof t->header || rd32le(got[3] + 4) < 16) {
         for (int k = 0; k < 4; k++) free(got[k]);
-        return fail(err, errn, "the template song (minitrack2) is not in the dump");
+        return fail(err, errn, interactive ? "the interactive template song (holler) is not in the dump"
+                                           : "the template song (minitrack2) is not in the dump");
     }
     t->mpf = got[0]; t->mpf_n = len[0];
     t->loading = got[1]; t->loading_n = len[1];
@@ -634,13 +817,14 @@ int song_template_load(const char *game_dir, SongTemplate *t, char *err, size_t 
     free(got[3]);
     MapInfo m;
     if (!map_info(t->mpf, t->mpf_n, &m)) { song_template_free(t); return fail(err, errn, "the template's map is not one this version reads"); }
+    t->interactive = interactive;
     t->hash = fnv(fnv(fnv(fnv(2166136261u, t->mpf, t->mpf_n), t->loading, t->loading_n), t->overlay, t->overlay_n), t->header, t->header_n);
     return 1;
 }
 
 /* ---- a song ------------------------------------------------------------------------------------ */
 
-int song_convert(const char *path, const char *out_dir, const SongTemplate *t, char *err, size_t errn)
+int song_convert(const char *path, const char *out_dir, const SongTemplate *t, int interactive, char *err, size_t errn)
 {
     size_t frames;
     MapInfo m;
@@ -653,6 +837,11 @@ int song_convert(const char *path, const char *out_dir, const SongTemplate *t, c
     Buf mus = {0};
     if (!mpf) { free(pcm); return fail(err, errn, "out of memory"); }
     memcpy(mpf, t->mpf, t->mpf_n);
+    if (interactive != t->interactive) { fail(err, errn, "the template does not match the song's mode"); goto done; }
+    if (interactive) {
+        if (!convert_interactive(pcm, frames, t, &m, mpf, &mus, err, errn)) goto done;
+        goto write;
+    }
 
     /* The song cut into m.nfull pieces (on 28-sample frame edges) along the full play; the
      * other track-0 samples take pieces in turn. */
@@ -677,6 +866,7 @@ int song_convert(const char *path, const char *out_dir, const SongTemplate *t, c
         wr32le(mpf + m.samples_table + i * 8, (uint32_t)(at / 0x80));
         wr32le(mpf + m.samples_table + i * 8 + 4, (uint32_t)((b - a) * 1000 / RATE));
     }
+write:
     snprintf(file, sizeof file, "%s" HOST_SEP "main.mus", out_dir);
     if (!write_all(file, mus.p, mus.n)) { fail(err, errn, "cannot write the converted song"); goto done; }
     snprintf(file, sizeof file, "%s" HOST_SEP "loading0.mus", out_dir);

@@ -32,15 +32,19 @@ typedef struct {
     uint8_t header[128];
     size_t header_n;
     uint32_t hash;                  /* of all of the above: part of each song's cache stamp */
+    int interactive;                /* built on holler's map (lanes) rather than minitrack2's */
 } SongTemplate;
 
-int song_template_load(const char *game_dir, SongTemplate *t, char *err, size_t errn);
+int song_template_load(const char *game_dir, int interactive, SongTemplate *t, char *err, size_t errn);
 void song_template_free(SongTemplate *t);
 
-/* Convert path (UTF-8) into out_dir/{main.mus,tune.mpf,loading0.mus,overlay0.mus}: decoded,
+/* interactive (experimental): built on holler's map, whose fight sections switch every segment
+ * between four lanes by a value of the game's; lane 0 is the song, lanes 1-3 the same pieces
+ * filtered (muffled, heavy, bright). t must be the template loaded for that mode.
+ * Convert path (UTF-8) into out_dir/{main.mus,tune.mpf,loading0.mus,overlay0.mus}: decoded,
  * made 44.1 kHz stereo, cut along the template's full play and encoded as the game's streams.
  * Returns 1, or 0 with a reason in err. */
-int song_convert(const char *path, const char *out_dir, const SongTemplate *t, char *err, size_t errn);
+int song_convert(const char *path, const char *out_dir, const SongTemplate *t, int interactive, char *err, size_t errn);
 
 /* The EA-XA encoder (exposed for the unit test): 28 samples -> one 15-byte frame, with the
  * decoder's history carried in *h1, *h2. */
