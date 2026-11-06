@@ -10,6 +10,7 @@ docstring has the syntax. The front end logs each call into the game as a `[FUNC
 python scripts/harness.py routes                    # boot, fight, crib, gym, intro
 python scripts/harness.py run intro --png           # Story from a new ID: the cutscenes, to the creator
 python scripts/harness.py run gym --stage "getscreeninfo(story/gym=down@4;down@6;a@9;x@16"
+python scripts/harness.py run story-map-shops --png --env RECOMP_ASPECT=16:9
 python scripts/harness.py soak --boots 20           # stops at a boot that stops presenting and dumps its state
 python scripts/regress.py [--quick] [--only fight,intro]
 python scripts/scenario_suite.py run fight-result --fixture logs/fixtures/NAME --require-combat

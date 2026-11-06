@@ -140,11 +140,14 @@ int main(int argc, char **argv)
         for (i = 0; i < 6 * 6 * 6; i++)
             MEM8(0x2EBF6F + i - 43) = (uint8_t)(i + 50);   /* any table: the id must come from it */
         printf("outside %d\n", cheats_story_info(&s));
+        assert(!cheats_in_story());
         cheats_story_request(CHEAT_STORY_CASH, 0, 0, 0);
         cheats_game_tick();
         printf("status %s\n", cheats_story_status());
         cheats_on_funccall("Game.StartStoryMode( 0,0 )");
+        assert(cheats_in_story());
         cheats_on_funccall("Control.GetScreenInfo(battle/chsVenue.swf)");   /* the Story map */
+        assert(cheats_in_story());
         printf("inside %d cash %u devpts %u styles %d %d %d\n", cheats_story_info(&s), s.cash, s.devpts,
                s.style[0], s.style[1], s.style[2]);
         cheats_story_request(CHEAT_STORY_CASH, 0, 0, 0);
@@ -186,6 +189,11 @@ int main(int argc, char **argv)
             MEM8(gd + 0x1E8) = 1;
             MEM32(gd + 0x168) = 98;
             cheats_on_funccall("Control.GetScreenInfo(intMain/mainMenu.swf)");
+            assert(!cheats_in_story());
+            cheats_on_funccall("Game.StartStoryMode( 0,0 )");
+            assert(cheats_in_story());
+            cheats_on_funccall("Game.StartMainMenu( 0 )");
+            assert(!cheats_in_story());
             printf("left %d\n", cheats_story_info(&s));
             cheats_start_game(gd);
             printf("battle created %u core %d\n", MEM8(gd + 0x1E8), (int)MEM32(gd + 0x168));

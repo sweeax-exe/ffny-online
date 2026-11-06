@@ -35,6 +35,9 @@ typedef struct CheatStory {
     int style[3];               /* main, hybrid 1, hybrid 2; CHEAT_STYLE_NONE for an empty hybrid */
 } CheatStory;
 int cheats_story_info(CheatStory *out);
+/* Front-end Story context, independent of cheats being enabled or a profile being valid.
+ * Shared battle/ screens do not identify the mode themselves. */
+int cheats_in_story(void);
 
 /* One-shot Story changes. They are queued and applied on the game's thread, at the next update
  * of the module manager (every frame) or the next front-end call; cheats_story_status() then says what happened. */
