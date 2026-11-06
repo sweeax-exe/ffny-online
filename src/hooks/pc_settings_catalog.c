@@ -200,7 +200,7 @@ void pc_settings_save(void) { (void)pc_settings_save_checked(); }
  * Original disables replacements without deleting packs. Modern preserves their selection. */
 static const struct { const char *key; int original, modern; } k_experience[] = {
     {"aspect", 0, 2}, {"render_scale", 1, 2}, {"filter", 0, 2},
-    {"msaa", 1, 0}, {"texture_mips", 1, 1}, {"anisotropy", 0, 2},
+    {"msaa", 1, 1}, {"texture_mips", 1, 1}, {"anisotropy", 0, 4},
     {"vsync", 1, 1}, {"gamma", 1, 1}, {"brightness", 100, 100},
     {"vignette", 1, 1}, {"vignette_strength", 100, 100},
     {"color_tint", 100, 100}, {"scratches", 1, 1},
