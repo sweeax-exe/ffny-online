@@ -44,8 +44,9 @@ APPROVED_README_MEDIA = {
 # The whole set is pinned by the SHA-256 of branding/SHA256SUMS, which lists every other file in
 # branding/ and is written by scripts/make-branding.py. Changing any file therefore needs the
 # owner to approve a new pin here.
+# 2026-11-05: owner approved the HD city/title refresh and retained the original Impact subtitle.
 BRANDING_SUMS = 'branding/SHA256SUMS'
-BRANDING_SUMS_SHA256 = 'c8d6048985f1bda2f167f008ec0c278713b6da43eb1f7c46e9560af8f21a1af7'
+BRANDING_SUMS_SHA256 = '0e46ab19f5ec6afcc30574797b95ecd66d0962d19522e95743eaf47d188ddfcb'
 
 
 def approved_branding(repo):
