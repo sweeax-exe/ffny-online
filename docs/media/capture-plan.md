@@ -1,6 +1,6 @@
 # Media upkeep
 
-The [gallery](README.md) records the exact builds, platforms, dates and hashes of
+The [media index](README.md) records the exact builds, platforms, dates and hashes of
 the retained exports. Existing captures are not proof of the latest release or
 of a different platform's output. Capture requests belong in GitHub Issues;
 this page is the procedure, not a parallel task/status list.
@@ -15,10 +15,9 @@ this page is the procedure, not a parallel task/status list.
    scale, brightness and pack settings. State any phase/crowd differences.
    Export frame rate is not a measurement of game frame pacing.
 4. Publish only owner-reviewed concrete exports under the exact source-tree
-   allowlist. Update gallery provenance, hash pin, captions and inbound links
+   allowlist. Update the media index provenance, hash pin, captions and inbound links
    together; remove superseded files/pins when their historical example no longer helps.
-5. Run source hygiene and link checks. Keep current README media focused; a gallery
-   example need not become an additional front-page image.
+5. Run source hygiene and link checks. Keep current README media focused.
 
 For a published export retain filename, dimensions/cadence, SHA256, date, build,
 platform, render settings, pack identities, owner approval and demonstrated scope.

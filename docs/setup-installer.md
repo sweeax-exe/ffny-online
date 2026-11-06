@@ -1,5 +1,8 @@
 # Setup installers
 
+Most players want the app: see the [install guide](install-guide.md). This page covers the older
+`DefJamSetup` tools, which are still attached to each release.
+
 Setup contains tools and source and compiles your own USA Xbox dump locally. It
 exists for Windows x64, macOS on Apple Silicon (see
 [macOS setup](#macos-setup-apple-silicon)) and x86-64 Linux including the Steam Deck
