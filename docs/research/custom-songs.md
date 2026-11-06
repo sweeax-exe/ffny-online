@@ -217,6 +217,43 @@ identically. Before the PlaySong limit, playing an unticked song with 36 on cras
 front end's script interpreter (`sub_001588F0`, calls to 0 and garbage), which is how its
 36-entry list was found.
 
+## 5c. Slices 3 and 4: the player's own songs (2026-11-06)
+
+**Serving.** The game opens a song's files as loose files first (`D:\music\<id>\tune.mpf`, then
+the archives), and that relative path reaches the game-file redirect. Converted songs are
+served from `<data>/cache/songs/<id>/` that way: no archive is rebuilt.
+
+**Straight** (`song_convert.c`): minitrack2's map, kept node for node. Its longest first-route
+walk from a section start is the full play, 48 samples (intro 49-52, body 13-44, outro 53-60,
+ending 45-48); the fights loop the body. The player's song is cut into 48 pieces along that walk
+(other samples reuse pieces); each piece is an SCHl stream (the template's header with sample
+count and rate patched, 2408-sample SCDl blocks, split channels, each with its two history words,
+EA-XA frames, SCEl) aligned to 0x80 in main.mus, and the map's sample table gets its offset/0x80
+and length in ms. Rate 44.1 kHz (holler shows the game plays it). A prototype of three minutes
+put under `music/testsong1` played straight through in order (capture r 0.95-1.00, position
+moving 5 s per 5 s); a converted MP3 the same (r 0.98-1.00).
+
+**Interactive** (experimental): holler's map. Its fight sections branch four ways at every
+segment: routes `00/1d`, `1d/4f`, `4f/78`, `78/7f` on a value of the game's land on the same
+place in four lanes (the song; a 4-segment loop; two other mixes). The fight sections are
+rotations of one body cycle (13-60, entered at 13, 29 or 45). Mapping: every section's lane-0
+chain, longest first; a sample takes the place it first has (so rotations agree), each chain
+spreads the whole song over its samples, and the other routes of a branching node inherit their
+first route's place as lanes 1-3 (210 of holler's 216 samples placed; the rest reuse pieces).
+Lane 0 is the song, lanes 1-3 the same song filtered (low-pass 1.2 kHz; +6 dB below 150 Hz;
++4 dB above 3.5 kHz) with a soft limit. Which game value picks the lane is not known. Checked:
+the menu plays it in order (r 0.93) and a fight keeps its place (matched position advancing with
+time, r 0.25-0.5 under the crowd).
+
+**Clip banks** (loading0/overlay0: `BNKl` v5, PT headers, EA-XA split mono channels at the
+offsets in tags 0x88/0x89): kept from the template for now. Their rate is not in the header, and
+correlating a clip against its song at 22.05-48 kHz found no clear match (r <= 0.29), so they
+are not resampled from the player's song yet.
+
+**Tags**: ID3v2.2-2.4 text frames, ID3v1, FLAC and Ogg Vorbis comments, WAV `LIST/INFO`, else
+"Artist - Title" from the file name and the folder as album; text reduced to ASCII (accents
+dropped) for the game's menu font. Read from a file's first 4 MB and last 128 bytes.
+
 ### Story fights name their songs (2026-11-05)
 
 A Story fight (VY2 fixture, crib -> Map -> Club 357 -> Ice-T, `RECOMP_TEST_SONGS_ONLY=32` so
@@ -245,6 +282,12 @@ Owner, 2026-11-05: in that case, hold more songs at once instead (the jukebox re
 - **`holler` is restored as a bonus song, on by default**: "Holler If Ya Hear Me" by 2Pac (album
   *Strictly 4 My N.I.G.G.A.Z.*, 1993; identified by the owner from the audio). It also shows in the
   launcher's Songs page like a custom song, using its own authored interactive map.
+
+2026-11-05:
+
+- **Decoders**: vendor dr_mp3, dr_flac, dr_wav and stb_vorbis (thirdparty/audio-decoders).
+- **More songs at once rather than a chosen 36 per launch**: Story fights name disc songs, so
+  none can be taken out; the Beatbox list is rebuilt for 60 songs, 35 on at once.
 
 Unknowns: the 12-song list, the `Song` integer field, how songs unlock, the bank sounds' exact roles, the
 branch rules in licensed maps (which variable picks the 4-way route), and save-file offsets of the
