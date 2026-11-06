@@ -30,6 +30,7 @@ confidence labels and disproved hypotheses remain distinct from measured facts.
 
 ## Rendering and front-end repairs
 
+- [Story map Shops widescreen border and heading: shared map replays and foreground clipping (#162)](story-map-shops-widescreen.md)
 - [D3D8 push-buffer: space reservation and ring wrap](d3d-pushbuffer-wrap.md)
 - [M2 — render path: NV2A pushbuffer executor vs D3D8 intercept, and why the main thread parks](m2-render-path.md)
 - [M2 — vblank ISR hang: why the D3D ISR declines, and what's actually stuck](m2-vblank-isr.md)

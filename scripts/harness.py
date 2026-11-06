@@ -298,6 +298,15 @@ ROUTES = {
         "until": "game.startgame(", "after": 150, "secs": 520,
         "shots": "@game.startgame(,60,140",
     },
+    "battle-map-edges": {
+        "help": "Free For All venue map through the eastern pins to Chop Shop and back (widescreen clip check)",
+        "stages": FFA_SETUP + [
+            "getscreeninfo(battle/chsvenue=right@7;right@13;down@19;down@25;right@31;left@37;up@43",
+        ],
+        "until": "getscreeninfo(battle/chsvenue", "after": 49, "secs": 300,
+        "shots": "@getscreeninfo(battle/chsvenue,5,11,17,23,29,35,41,47",
+        "env": {"RECOMP_TRANS_SHOT_NATIVE": "1"},
+    },
     "two-matches": {
         "help": "One on One to its result, back through the menus, then a Free For All to its result, in one launch",
         "stages": ONE_ON_ONE_SETUP + ["controllersetup(1,=a@4+4x6"],
@@ -373,6 +382,18 @@ ROUTES = {
         ],
         "until": "getscreeninfo(story/gym", "after": 26, "secs": 300,
         "shots": "@getscreeninfo(story/gym,13,23",
+        "story": True,
+    },
+    "story-map-shops": {
+        "help": "Story map -> Shop District -> clothing and gym pins (widescreen border check, #162)",
+        "stages": [
+            "getscreeninfo(intmain/mainmenu=a@6",
+            "getscreeninfo(options/userid=down@4;down@6;a@9",
+            "getscreeninfo(story/crib=down@4;a@6;a@10;a@16;down@24",
+        ],
+        "until": "crib.entermap(", "after": 18, "secs": 300,
+        "shots": "@getscreeninfo(story/crib,13,19,26",
+        "env": {"RECOMP_TRANS_SHOT_NATIVE": "1"},
         "story": True,
     },
     "unlock": {

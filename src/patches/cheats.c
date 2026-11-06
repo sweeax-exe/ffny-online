@@ -98,6 +98,8 @@ static const char *const k_sizes[] = { "normal", "giant", "tiny", NULL };
 static volatile int s_health, s_blazin, s_no_regen, s_size, s_hero = -1;
 static int s_log = -1, s_probe = -1, s_verbose;
 static volatile int s_in_story;
+
+int cheats_in_story(void) { return s_in_story != 0; }
 static long long s_steps, s_fighting;     /* simulation steps since the match started; of them, fighting */
 
 static volatile int s_request, s_req_main, s_req_h1, s_req_h2;
