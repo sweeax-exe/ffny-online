@@ -766,7 +766,7 @@ static void experience_widget()
         ImGui::BeginChild("preset choices", ImVec2(0, -ImGui::GetFrameHeightWithSpacing() * 2));
         ImGui::RadioButton("Modern - recommended", &proposed, 1);
         ui_target("experience.modern");
-        ImGui::TextWrapped("Widescreen Auto, 2x (960p), high-quality scaling, mipmaps and 4x texture filtering. Keeps the original scene effects. Upscaled Original Textures and downloadable texture packs are optional.");
+        ImGui::TextWrapped("Widescreen Auto, 2x (960p), high-quality scaling, mipmaps, 2x anti-aliasing and 16x texture filtering. Keeps the original scene effects. Upscaled Original Textures and downloadable texture packs are optional.");
         ImGui::Spacing();
         ImGui::RadioButton("Original", &proposed, 0);
         ui_target("experience.original");

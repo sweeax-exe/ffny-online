@@ -21,9 +21,9 @@ This is a feature candidate for owner testing, not a qualified release. No rende
 | Aspect | 4:3 | Widescreen Auto (16:9 / 16:10) |
 | Render resolution | 1x / 480p | 2x / 960p |
 | Output filter | Smooth | High-quality smooth |
-| MSAA | 2x | Off |
+| MSAA | 2x | 2x |
 | Mipmaps | On | On |
-| Anisotropy | Off | 4x |
+| Anisotropy | Off | 16x |
 | VSync / game brightness curve | On | On |
 | Brightness, vignette strength, colour tint | 100% | 100% |
 | Vignette / scratches | On | On |
