@@ -192,6 +192,8 @@ code { font: 500 .92em ui-monospace, "SF Mono", Menlo, Consolas, monospace; colo
 .release-line a { color: var(--muted); }
 .release-line a:hover { color: var(--ink); }
 .release-line .tag { color: var(--ink); }
+.also-on { margin-top: 6px; color: var(--muted); font-size: 15px; }
+.also-on--install { margin-top: 18px; }
 .hero__note {
   max-width: 60ch; margin-top: 26px; padding: 12px 16px;
   border-left: 3px solid var(--brick);
