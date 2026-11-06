@@ -4,6 +4,7 @@ nothing here reads or writes a real Steam."""
 import importlib.util
 import json
 from pathlib import Path
+import shutil
 import struct
 
 import pytest
@@ -271,6 +272,64 @@ def test_the_engine_answers_status_add_and_remove_as_json(tmp_path, monkeypatch)
     monkeypatch.setenv('DEFJAM_STEAM_ROOT', str(tmp_path / 'nowhere'))
     assert engine.main(['--steam', 'add'] + common) == 2
     assert 'Sign in to Steam' in json.loads(result.read_text())['message']
+
+
+@pytest.mark.parametrize('platform', ['windows-x64', 'linux-x64'])
+def test_add_to_steam_refreshes_owned_art_from_the_shipped_branding(tmp_path, monkeypatch, platform):
+    """Exercise the app's engine command with the actual platform payload and PNGs."""
+    Image = pytest.importorskip('PIL.Image')
+    package = load('steam_branding_package', ROOT / 'scripts/package-setup.py')
+    payload = tmp_path / 'payload'
+    for source in (ROOT / 'branding').rglob('*'):
+        name = source.relative_to(ROOT).as_posix()
+        if source.is_file() and package.payload_wants(name, platform):
+            target = payload / 'source' / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(source, target)
+
+    other = other_shortcut(0x9000_0001, 'Other game', r'C:\Games\other.exe')
+    root = steam_folder(tmp_path, other)
+    record = tmp_path / 'steam.json'
+    # An earlier install owns this old artwork; adding again must refresh it.
+    steam.add(root, PROGRAM, INSTALL, art(tmp_path / 'old'), record, running=lambda r: [])
+    original_entries = entries(root)
+    monkeypatch.setenv('DEFJAM_STEAM_ROOT', str(root))
+    result = tmp_path / 'result.json'
+    common = ['--payload', str(payload), '--app-program', str(PROGRAM), '--install-dir', INSTALL,
+              '--steam-record', str(record), '--steam-result', str(result)]
+    assert engine.main(['--steam', 'add'] + common) == 0
+    assert json.loads(result.read_text())['added'] is True
+    assert entries(root) == original_entries  # no duplicate and no shortcut option/tag changes
+    appid = steam.shortcut_appid('"%s"' % PROGRAM)
+    grid = root / 'userdata' / str(ACCOUNT) / 'config/grid'
+    expected = {
+        'p': ('fan/steam/portrait.png', (600, 900)),
+        '': ('fan/steam/wide.png', (920, 430)),
+        '_logo': ('fan/steam/logo.png', None),
+        '_hero': ('steam/hero.png', (1920, 620)),
+        '_icon': ('steam/icon.png', (256, 256)),
+    }
+    assert len(list(grid.glob('*.png'))) == 5
+    for suffix, (source, size) in expected.items():
+        placed = grid / f'{appid}{suffix}.png'
+        assert placed.read_bytes() == (ROOT / 'branding' / source).read_bytes()
+        with Image.open(placed) as image:
+            image.load()
+            assert image.format == 'PNG'
+            if size:
+                assert image.size == size
+            else:
+                assert image.width == 1280 and image.mode == 'RGBA'
+    saved = json.loads(record.read_text())
+    assert all(steam.digest(Path(path)) == digest for path, digest in saved['art_hashes'].items())
+
+    hero = grid / f'{appid}_hero.png'
+    hero.write_bytes(b'player-chosen artwork')
+    assert engine.main(['--steam', 'add'] + common) == 0
+    assert hero.read_bytes() == b'player-chosen artwork' and entries(root) == original_entries
+    assert engine.main(['--steam', 'remove'] + common) == 0
+    assert entries(root) == [other]
+    assert list(grid.iterdir()) == [hero]  # retain custom art; remove everything this app owned
 
 
 # ---------------------------------------------------------------- Linux (the AppImage, design §6, §7)

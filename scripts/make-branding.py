@@ -3,11 +3,14 @@
 
     python scripts/make-branding.py render [--out branding]
     python scripts/make-branding.py masters --corpus <decoded-texture-corpus> [--out branding]
+    python scripts/make-branding.py hd-masters --pack <menu-ui-hd-wide.zip> [--out branding]
     python scripts/make-branding.py fan-tag [--font impact.ttf] [--out branding]
 
 `render` needs only Pillow and NumPy and rebuilds everything under `branding/` from
-`branding/masters/` (the shield, the title wordmark, the title-screen scene and its skyline,
-and `cover.jpg`, the official cover scan, when present). `masters` rebuilds those four masters from the decoded
+`branding/masters/` (the shield, the title wordmark, the title-screen scene and its skyline;
+the legacy 640px scene also uses `cover.jpg`, the official cover scan, when present).
+`hd-masters` replaces the scene, skyline and wordmark from a published HD widescreen menu pack;
+the existing shield and subtitle masters are retained. `masters` rebuilds the original masters from the decoded
 textures of a dump: the corpus is the one `scripts/hd_corpus.py` writes (`corpus.json` plus
 `originals/`), and the source of every master is recorded in `branding/README.md`.
 
@@ -21,6 +24,7 @@ committing exactly these files (D98). `scripts/check-source-tree.py` pins them b
 of `branding/SHA256SUMS`, which this script writes last.
 """
 import argparse
+import configparser
 import hashlib
 import json
 import struct
@@ -28,6 +32,7 @@ import sys
 import zlib
 from io import BytesIO
 from pathlib import Path
+from zipfile import ZipFile
 
 import numpy as np
 from PIL import Image, ImageDraw, ImageFilter, ImageFont, ImageOps
@@ -105,6 +110,12 @@ def master_wordmark(src):
     logo = rgbi.convert('RGBA')
     logo.putalpha(alpha)
     logo = logo.crop(alpha_bbox(logo))
+    return ink_wordmark(logo)
+
+
+def ink_wordmark(logo):
+    """Keep the silver artwork intact and put dark ink behind its transparent letter openings."""
+    logo = logo.crop(alpha_bbox(logo))
     pad = 8
     canvas = Image.new('RGBA', (logo.width + 2 * pad, logo.height + 2 * pad), (0, 0, 0, 0))
     canvas.paste(logo, (pad, pad))
@@ -116,11 +127,71 @@ def master_wordmark(src):
     above = np.maximum.accumulate(sol, axis=0)
     below = np.maximum.accumulate(sol[::-1], axis=0)[::-1]
     plate = above & below & ~sol  # the plate behind FIGHT FOR NY: letters open at its edge
-    plate[:, :pad + 330] = False
+    plate[:, :pad + round(logo.width * 0.17)] = False
     holes_img = Image.fromarray(((holes | plate) * 255).astype(np.uint8)).filter(ImageFilter.MaxFilter(3))
     fill = Image.new('RGBA', canvas.size, INK + (255,))
     fill.putalpha(holes_img)
     return Image.alpha_composite(fill, canvas)
+
+
+def hd_masters(pack, out):
+    """Assemble the published HD pack's prestart tiles at the authored idle positions.
+
+    Three pixels per logical pixel gives a 5120x1440 32:9 master. Side slabs
+    contribute only outside the original 640px stage. No mirrored or invented tiles.
+    """
+    ids = {
+        'sky': ('627117d2e69e0a56279f40cadd4397ffcb32192b8c110d40e2c54052e26ae168',
+                '919550631f96c060cf70102059d3d185ac79b83e0d3f9d37949d731cc11c5bfd'),
+        'city': ('fdc3666e5aec15824bd2cb3fb8598f2f7047980c696c494035d019e7036680ba',
+                 '99aa2410ae53d3edc92c89fbecf01d1adf5eab12b2d613338de66f0f03a92a33'),
+        'tower': ('427424b7b670739f1a493dff7e53725299f72c718c7680aca3314b76247ca5ad',
+                  '682f298f59c1680b2bc7118a4768d685fa41dd16eb684b67cbfbf9077036c4e4'),
+    }
+    with ZipFile(pack) as archive:
+        manifests = [n for n in archive.namelist() if n.endswith('/manifest.ini') or n == 'manifest.ini']
+        if len(manifests) != 1:
+            raise ValueError('HD pack must contain exactly one manifest.ini')
+        manifest = manifests[0]
+        prefix = manifest[:-len('manifest.ini')]
+        cfg = configparser.ConfigParser()
+        cfg.read_string(archive.read(manifest).decode('utf-8-sig'))
+
+        def texture(path):
+            return Image.open(BytesIO(archive.read(prefix + path))).convert('RGBA')
+
+        def layer(first, second):
+            result = Image.new('RGBA', (5120, 1536))
+            for item in cfg['wide'][first].split(';'):
+                offset, path = item.split(':', 1)
+                x = 1600 + int(offset) * 3
+                slab = texture(path).resize((1536, 1536), Image.LANCZOS)
+                # Runtime side slabs overlap their anchor; retain only offstage scenery.
+                left, right = max(0, x), min(5120, x + 1536)
+                if int(offset) < 0:
+                    right = min(right, 1600)
+                else:
+                    left = max(left, 3520)
+                if right > left:
+                    result.paste(slab.crop((left - x, 0, right - x, 1536)), (left, 0))
+            for key, x, width in ((first, 1600, 1536), (second, 3136, 384)):
+                image = texture(cfg['textures'][key])
+                image = image.resize((width, 1536), Image.LANCZOS)
+                result.paste(image, (x, 0))
+            return result
+
+        sky = layer(*ids['sky'])
+        scene = Image.new('RGBA', (5120, 1440), (0, 0, 0, 255))
+        scene.alpha_composite(sky.crop((0, 402, 5120, 1350)))
+        scene.alpha_composite(layer(*ids['city']).crop((0, 0, 5120, 930)), (0, 306))
+        scene.alpha_composite(layer(*ids['tower']).crop((0, 0, 5120, 1338)), (0, 48))
+        masters = out / 'masters'
+        masters.mkdir(parents=True, exist_ok=True)
+        scene.convert('RGB').save(masters / 'scene.png', optimize=True)
+        sky.crop((0, 402, 5120, 1350)).convert('RGB').save(masters / 'skyline.png', optimize=True)
+        logo_id = 'c194328377ad8dd75b4c3fadfd8886b5bc2af468a92e362519651a7942adea39'
+        ink_wordmark(texture(cfg['textures'][logo_id])).save(masters / 'wordmark.png', optimize=True)
+        print(f'HD masters from {cfg["pack"]["name"]}; archive SHA-256 {hashlib.sha256(pack.read_bytes()).hexdigest()}')
 
 
 def master_scene(corpus):
@@ -179,8 +250,11 @@ def master_fan_tag(font_path, text='FAN RECOMP', cap=152, tracking=24, seed=5):
     return tag.crop(tag.getchannel('A').getbbox())
 
 
-def with_fan_tag(wordmark, tag, gap=-10):
+def with_fan_tag(wordmark, tag, gap=None):
     """The wordmark with the tag under it, right-aligned to the plate."""
+    width = round(wordmark.width * 0.66)
+    tag = tag.resize((width, round(width * tag.height / tag.width)), Image.LANCZOS)
+    gap = round(wordmark.width * 0.008) if gap is None else gap
     canvas = Image.new('RGBA', (wordmark.width, wordmark.height + gap + tag.height), (0, 0, 0, 0))
     canvas.alpha_composite(wordmark, (0, 0))
     canvas.alpha_composite(tag, (wordmark.width - tag.width - 24, wordmark.height + gap))
@@ -294,6 +368,13 @@ def scene_layer(scene, scale, size, x0, y0=0, rows=None):
 
 def hero(scene, skyline, size=(3840, 1240)):
     w, h = size
+    if scene.width > 640:
+        base = ImageOps.fit(scene, size, Image.LANCZOS)
+        rgb = np.asarray(base, np.float32)
+        yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
+        # Steam draws a separate logo in the lower left.
+        shade = (1 - smooth(xx / w, 0.05, 0.60)) * smooth(yy / h, 0.30, 0.95)
+        return Image.fromarray(np.clip(rgb * (1 - 0.34 * shade[..., None]), 0, 255).astype(np.uint8))
     s = 3.0
     x0 = 1500
     layer, (bw, bh) = scene_layer(scene, s, size, x0)
@@ -320,6 +401,8 @@ def hero(scene, skyline, size=(3840, 1240)):
 
 def wide(scene, wordmark, size, wordmark_width=0.62, y_center=0.66, crop_top=24):
     w, h = size
+    if scene.width > 640:
+        return hd_capsule(scene, wordmark, size, wordmark_width=0.76, y_center=0.61)
     s = w / 640
     big = scene.resize((w, round(480 * s)), Image.LANCZOS).filter(ImageFilter.UnsharpMask(radius=s * 0.8, percent=60, threshold=2))
     rgb = np.asarray(big.crop((0, round(crop_top * s), w, round(crop_top * s) + h)), np.float32)
@@ -338,8 +421,27 @@ def wide(scene, wordmark, size, wordmark_width=0.62, y_center=0.66, crop_top=24)
     return base.convert('RGB')
 
 
+def hd_capsule(scene, wordmark, size, wordmark_width=0.76, y_center=0.61):
+    """Crop the panoramic master without distortion; preserve its existing colour and detail."""
+    w, h = size
+    base = ImageOps.fit(scene, size, Image.LANCZOS).convert('RGBA')
+    mark = wordmark.resize((round(w * wordmark_width), round(w * wordmark_width * wordmark.height / wordmark.width)), Image.LANCZOS)
+    x, y = (w - mark.width) // 2, round(h * y_center - mark.height / 2)
+    shadow = Image.new('RGBA', size)
+    ink = Image.new('RGBA', mark.size, (0, 0, 0, 255))
+    ink.putalpha(mark.getchannel('A'))
+    shadow.alpha_composite(ink, (x, y + max(2, round(h * 0.005))))
+    base.alpha_composite(shadow.filter(ImageFilter.GaussianBlur(max(2, h * 0.012))))
+    base.alpha_composite(mark, (x, y))
+    return base.convert('RGB')
+
+
 def portrait(scene, wordmark, shield, size=(1200, 1800)):
     w, h = size
+    if scene.width > 640:
+        # A tall crop keeps the water tower and street, with the title above it.
+        source = scene.crop((1340, 0, 2300, 1440))
+        return hd_capsule(source, wordmark, size, wordmark_width=0.88, y_center=0.22)
     s = 3.75
     big = scene.resize((round(640 * s), round(480 * s)), Image.LANCZOS).filter(ImageFilter.UnsharpMask(radius=3, percent=60, threshold=2))
     rgb = np.asarray(big.crop((0, 0, w, h)), np.float32)
@@ -406,7 +508,7 @@ def render(out):
     big_wide = wide(scene, wordmark, (1840, 860))
     big_wide.resize((920, 430), Image.LANCZOS).save(out / 'steam/wide.png', optimize=True)
     cover = masters / 'cover.jpg'  # the official cover scan, optional; without it the portrait is built from the scene
-    if cover.exists():
+    if cover.exists() and scene.width <= 640:
         base = portrait_from_cover(Image.open(cover).convert('RGB'), wordmark)
     else:
         base = portrait(scene, wordmark, shield).resize((600, 900), Image.LANCZOS)
@@ -420,7 +522,7 @@ def render(out):
             (out / sub).mkdir(parents=True, exist_ok=True)
         steam_logo(fan).save(out / 'fan/steam/logo.png', optimize=True)
         wide(scene, fan, (1840, 860)).resize((920, 430), Image.LANCZOS).save(out / 'fan/steam/wide.png', optimize=True)
-        if cover.exists():
+        if cover.exists() and scene.width <= 640:
             fan_base = portrait_from_cover(Image.open(cover).convert('RGB'), fan)
         else:
             fan_base = portrait(scene, fan, shield).resize((600, 900), Image.LANCZOS)
@@ -439,12 +541,17 @@ def write_sums(out):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument('command', choices=('render', 'masters', 'fan-tag'))
+    parser.add_argument('command', choices=('render', 'masters', 'hd-masters', 'fan-tag'))
     parser.add_argument('--out', type=Path, default=Path(__file__).resolve().parents[1] / 'branding')
     parser.add_argument('--corpus', type=Path)
+    parser.add_argument('--pack', type=Path, help='hd-masters: published menu-ui-hd-wide ZIP')
     parser.add_argument('--font', type=Path, default=Path(r'C:\Windows\Fonts\impact.ttf'),
                         help='fan-tag: a heavy condensed font for the FAN RECOMP tag (default: Impact on Windows)')
     args = parser.parse_args()
+    if args.command == 'hd-masters':
+        if not args.pack:
+            parser.error('hd-masters needs --pack')
+        hd_masters(args.pack, args.out)
     if args.command == 'masters':
         if not args.corpus:
             parser.error('masters needs --corpus')
