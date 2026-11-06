@@ -69,6 +69,19 @@ The default full suite retains the plain replay golden. The extra isolated check
 
 For the established HD widescreen lane, use `--release-profile` and, when testing full local Lanczos textures, `--lanczos-receipt PATH`. This explicitly verifies Menus1.4.0/Fighters1.0.0, records identities, uses 16:9/2048MiB, and preserves stock frame-golden runs. The setup, generated-pack and receipt commands remain in [the v0.13.0 reproduction guide](regression-v0.13.0.md); use `--runtime 1.0.0` for this candidate. Record your chosen lane; stock and HD results describe different configurations. Retain the original 64MiB memory-growth gate and all failures; POSIX RSS and Windows private bytes are distinct metrics (#166).
 
+## Stable release result (2026-11-06)
+
+The stable v1.0.0 is `main` after beta 2 (#186, #191, #193, #194) plus #190, toolkit `351e28a` (fork `defjam/release-1.0.0`), release PR #197. The owner qualified it on Windows only (D340); macOS and Steam Deck were not rerun on this head. The table below keeps the candidate gates; their Windows column for the beta-1 candidate is in `PROGRESS.md` §6 (2026-11-04).
+
+| Gate on head `4b73e78` | Windows result | Log |
+|---|---|---|
+| Full regression, stock lane | 17/17 pass, 4 skipped (launcher, overlay, unlockopt, picture) | `logs/regress-20261106-110329.txt` |
+| Full regression, `--release-profile` (16:9, Menus 1.4.0, Fighters 1.0.0) | 16/17: **combat FAIL** `performance.memory_growth` 105.2 MB > 64 MB; rerun `--only combat` 99.2 MB, FAIL. Private bytes flat ~2,390 MB during play; the last sample is in the post-fight scene change (+~110 MB, same as the pre-fight change at ~80 s in every run incl. the beta-1 candidate's 23.2 MB pass). Not changed; #166. | `logs/regress-20261106-115208.txt`, `logs/regress-20261106-115740.txt` |
+| #190 routes `story-map-shops`, `battle-map-edges` at 16:9 with Menus 1.4.0 | pass (captures reviewed) | `logs/run-20261106-095036.log.err`, `-095213` |
+| Setup: v0.13.0 install, then Clean Update with CI run 42260186582's setup | pass: 400 s + 390 s, data folder 119 files identical | `C:\dj13\r1000\up\` (local) |
+| Setup: fresh install with the same setup | pass: 426 s, exit 0 (installed games not started) | `C:\dj13\r1000\new\` (local) |
+| macOS, Steam Deck full regression | not run on this head (D340) | |
+
 ## Acceptance beyond the full suite
 
 | Gate | Windows | macOS | Steam Deck / Linux |
