@@ -141,6 +141,10 @@ endif()
 file(GLOB RECOMP_GEN_SOURCES CONFIGURE_DEPENDS "src/recomp/gen/*.c")
 file(GLOB HOOK_SOURCES       CONFIGURE_DEPENDS "src/hooks/*.c" "src/hooks/*.cpp")
 file(GLOB PATCH_SOURCES      CONFIGURE_DEPENDS "src/patches/*.c")
+# The source folder's own path, on the one file that reads it. Set on a whole target it is part of every
+# file's compile line, so a compiler cache misses them all whenever the folder changes (each update's does).
+set_property(SOURCE src/hooks/pc_mods.cpp APPEND PROPERTY COMPILE_DEFINITIONS
+             DEFJAM_MOD_SOURCE_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}\")
 
 if(DEFJAM_BUILD_GAME)
     # Dear ImGui (MIT): the launcher and the in-game overlay. Fetched at a pinned hash.
@@ -216,7 +220,6 @@ if(DEFJAM_BUILD_GAME)
         set_target_properties(${PROJECT_NAME} PROPERTIES ENABLE_EXPORTS ON)
     endif()
     target_compile_definitions(${PROJECT_NAME} PRIVATE DEFJAM_VERSION=\"${PROJECT_VERSION}\")
-    target_compile_definitions(${PROJECT_NAME} PRIVATE DEFJAM_MOD_SOURCE_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}\")
     if(DEFJAM_MOD_WIDE)
         target_compile_definitions(${PROJECT_NAME} PRIVATE DEFJAM_MOD_WIDE=1)
     endif()
@@ -311,8 +314,7 @@ if(DEFJAM_BUILD_APP AND DEFJAM_SDL3)
         src/hooks/pc_launcher_sdl.cpp
         src/hooks/pc_mods.cpp)
     target_compile_features(defjam_app PRIVATE cxx_std_17)
-    target_compile_definitions(defjam_app PRIVATE DEFJAM_APP=1 DEFJAM_VERSION=\"${PROJECT_VERSION}\"
-                               DEFJAM_MOD_SOURCE_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}\")
+    target_compile_definitions(defjam_app PRIVATE DEFJAM_APP=1 DEFJAM_VERSION=\"${PROJECT_VERSION}\")
     if(DEFJAM_MOD_WIDE)
         target_compile_definitions(defjam_app PRIVATE DEFJAM_MOD_WIDE=1)
     endif()
