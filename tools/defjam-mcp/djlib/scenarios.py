@@ -1038,8 +1038,11 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
            lock_timeout=None, log=None, require_hits=False, stall=300, keep_roots=False, quick=None,
            created=False, cp_records=None, rematch=False, venues=None, cp_pick=None, cp_names=None,
            more_shots=False, spectators=0, copy_env=None, fixtures=None, ranked=None, rollback_modes=None,
-           rollback_max_ping=None):
-    """rollback: "off", "on" (every copy opts in, the relay allows it) or "mandatory" (build 52, rollback
+           rollback_max_ping=None, leave=None):
+    """leave: "N@STEP": copy N leaves the room at fight step STEP of the first match (RECOMP_TEST_LEAVE_STEP) and
+    plays on offline; the run is done once the other copies are, it is left out of the match checks, and
+    each other copy must go on in lockstep with its port at rest (P_GONE) when two or more stay.
+    rollback: "off", "on" (every copy opts in, the relay allows it) or "mandatory" (build 52, rollback
     everywhere: the relay -rollback -rollback-modes <rollback_modes or all>, the copies RECOMP_ROLLBACK=server,
     so only the relay's mode mask makes a match roll back). copy_env: {copy index: {NAME: VALUE}}, extra variables for one copy only; fixtures: per copy a save
     fixture folder ('' none), so the copies' save areas can differ as two players' PCs do.
@@ -1064,6 +1067,10 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
         raise ValueError("mode: " + ", ".join(MODES))
     qtype, per = MODES[mode]
     players = max(2, min(4 if mode != "koth" else 10, int(players)))
+    leaver = None
+    if leave:
+        who, _, step = str(leave).partition("@")
+        leaver = (int(who), int(step or 300))
     fighters = list(fighters or [55, 22, 9, 31])
     timeout = timeout or (180 + 240 * matches * (1 if fast_ko or bot else 3))
     winner = ko_winner or ("0" if mode == "koth" else "alt")
@@ -1145,6 +1152,8 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
                 if not only or (only.isdigit() and int(only) == i):
                     env[name] = v
             env.update((copy_env or {}).get(i, {}))
+            if leaver and i == leaver[0]:
+                env["RECOMP_TEST_LEAVE_STEP"] = str(leaver[1])
             fx = fixtures[i] if fixtures and i < len(fixtures) and fixtures[i] else None
             root = s.make_root(i, fixture=os.path.abspath(fx) if fx else None)
             before[i] = _save_files(root)
@@ -1185,7 +1194,7 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
                 # as the challenger, so the matches are done when the king's and the challengers' are
                 done = rewards[0] >= matches and sum(rewards[1:]) >= matches
             else:
-                done = all(n >= matches for n in rewards)
+                done = all(n >= matches for c, n in zip(cs, rewards) if not (leaver and c.index == leaver[0]))
             if done:
                 time.sleep(3)
                 stop_reason = "done"
@@ -1273,6 +1282,9 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
     finally:
         _finish(s, result, t0)
     analyses = {i: logparse.analyze_copy(logparse.read_text(p)) for i, p in logs.items()}
+    if leaver:
+        result["leave"] = leave_check(logs, leaver, players, problems)
+        analyses.pop(leaver[0], None)
     rows, ok = online_rows(analyses, matches, require_hits, problems)
     if stop_reason != "done":
         problems.insert(0, "stopped: " + stop_reason)
@@ -1280,6 +1292,35 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
     result.update({"ok": ok and not problems, "stop": stop_reason, "matches": rows, "problems": problems,
                    "logs": [_relpath(p) for p in logs.values()], "shots": shots})
     return result
+
+
+def leave_check(logs, leaver, players, problems):
+    """A run with a leaver: what each copy that stayed did after the leave (netplay.c P_GONE)."""
+    import re
+    out = {"copy": leaver[0], "step": leaver[1], "copies": {}}
+    rest = set()
+    for i, p in sorted(logs.items()):
+        text = logparse.read_text(p)
+        if i == leaver[0]:
+            out["left"] = "RECOMP_TEST_LEAVE_STEP" in text
+            continue
+        offline = text.count("it finishes offline") + text.count("[NETPLAY] gave up")
+        m = re.search(r"\[NETPLAY\] player (\d+)'s port rests from step (\d+)", text)
+        out["copies"][i] = {"offline": offline, "gone": text.count("[NETPLAY] player %d is gone" % (leaver[0] + 1)),
+                            "rests_from": int(m.group(2)) if m else None,
+                            "desync": text.count("[NETPLAY] desync in")}
+        if m:
+            rest.add(int(m.group(2)))
+        if players - 1 >= 2:
+            if offline:
+                problems.append("copy %d went offline after the leave" % i)
+            if not m:
+                problems.append("copy %d never agreed the leaver's rest step" % i)
+    if len(rest) > 1:
+        problems.append("the copies agreed different rest steps: %s" % sorted(rest))
+    if not out.get("left"):
+        problems.append("copy %d never left" % leaver[0])
+    return out
 
 
 def rematch_tail(matches, p2):
