@@ -45,8 +45,8 @@ strip. That takes in the meter's three pieces and leaves the pause panel (starts
 height) centred. With 3-4 fighters, the bottom strip also takes each of the bottom meter's pieces by where it starts
 and its height: a piece 60 or more tall starting at y 320..340 (frame), 12 or less starting at y 330..340 and ending by
 350 (fill bar), 18 or less starting at 308 or lower down and ending at y 326..332 (text). The pause panel's lowest
-piece (y 330..346, 16 tall) lies between them and matches none. Applied to the owner's trace and to two scripted four-minute fights, it moves only the meter's
-pieces. The left-tag fixture pins these extents at 16:9 and 21:9 and fails without either rule.
+piece (y 330..346, 16 tall) lies between them and matches none. Applied to both owner traces and to two scripted
+four-minute fights, the rules move only the meter's pieces. The left-tag fixture pins these extents at 16:9 and 21:9 and fails without either rule.
 
 ## Not covered
 
