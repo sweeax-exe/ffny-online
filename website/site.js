@@ -1,4 +1,5 @@
-/* defjam.online: the download button, the screenshot lightbox, the gameplay clip and the embers.
+/* defjam.online: the download button, the screenshot lightbox, the gameplay clip, the embers and the
+   ranked ladder (ranked.html).
    Everything here is optional: without JS the button still points at the latest GitHub release. */
 (function () {
   'use strict';
@@ -205,6 +206,154 @@
       .catch(function () { /* tournaments off or the service away: the section stays hidden */ });
   }
 
+  // ---- the ranked ladder (ranked.html), from the account service ----
+  function seasonEnd(iso) {
+    try {
+      return new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' });
+    } catch (e) {
+      return iso;
+    }
+  }
+
+  function loadSeason(base) {
+    var line = document.getElementById('season');
+    if (!line) return;
+    fetch(base + '/api/ranked/seasons', { credentials: 'omit', referrerPolicy: 'no-referrer' })
+      .then(function (r) { if (!r.ok) throw new Error('seasons ' + r.status); return r.json(); })
+      .then(function (data) {
+        var now = data && data.now;
+        if (!now || !now.name) return;
+        line.textContent = '';
+        line.appendChild(el('strong', null, now.name));
+        var end = now.end && new Date(now.end);
+        if (end && !isNaN(end.getTime()) && end.getFullYear() > 2000) {
+          line.appendChild(document.createTextNode((end > new Date() ? ' ends ' : ' ended ') + seasonEnd(now.end) + '.'));
+        }
+        line.hidden = false;
+      })
+      .catch(function () { /* the season line stays hidden */ });
+  }
+
+  function formerNames(entry) {
+    var f = entry.formerly;
+    if (typeof f === 'string') f = f ? [f] : [];
+    if (!Array.isArray(f)) return [];
+    return f.filter(function (n) { return typeof n === 'string' && n; });
+  }
+
+  function ladderRow(entry, provisional) {
+    var tr = document.createElement('tr');
+    tr.appendChild(el('td', 'c-place', provisional ? '' : String(entry.place || '')));
+    var name = el('td', 'c-name', entry.name || '?');
+    var former = formerNames(entry);
+    if (former.length) name.appendChild(el('small', 'formerly', 'formerly ' + former.join(', ')));
+    tr.appendChild(name);
+    tr.appendChild(el('td', 'c-rank', (entry.rank || '') + (provisional ? ' ?' : '')));
+    tr.appendChild(el('td', 'c-num', entry.rating != null ? String(entry.rating) : ''));
+    tr.appendChild(el('td', 'c-num', (entry.set_wins || 0) + '-' + (entry.set_losses || 0)));
+    return tr;
+  }
+
+  function setupLadder() {
+    var panel = document.getElementById('ladder-panel');
+    if (!panel || !window.fetch) return;
+    var base = tournamentsBase();
+    var tabs = Array.prototype.slice.call(document.querySelectorAll('.ladder-tabs [role="tab"]'));
+    var msg = document.getElementById('ladder-msg');
+    var table = document.getElementById('ladder-table');
+    var rows = document.getElementById('ladder-rows');
+    var moreWrap = document.getElementById('ladder-more-wrap');
+    var more = document.getElementById('ladder-more');
+    var settling = document.getElementById('settling');
+    var settlingRows = document.getElementById('settling-rows');
+    var state = { mode: 'open', shown: 0, total: 0, settled: 0, request: 0 };
+
+    function message(text, retry, append) {
+      msg.textContent = text;
+      if (retry) {
+        var b = el('button', null, 'Try again');
+        b.type = 'button';
+        b.addEventListener('click', function () { load(append); });
+        msg.appendChild(b);
+      }
+      msg.hidden = false;
+    }
+
+    function load(append) {
+      var id = ++state.request;
+      var offset = append ? state.shown : 0;
+      if (!append) {
+        rows.textContent = '';
+        settlingRows.textContent = '';
+        table.hidden = true;
+        settling.hidden = true;
+        moreWrap.hidden = true;
+        state.shown = 0;
+        state.settled = 0;
+        message('Loading the ladder…');
+      } else {
+        more.disabled = true;
+      }
+      var url = base + '/api/ranked/leaderboard?mode=' + encodeURIComponent(state.mode) + '&provisional=1' +
+        (offset ? '&offset=' + offset : '');
+      fetch(url, { credentials: 'omit', referrerPolicy: 'no-referrer' })
+        .then(function (r) { if (!r.ok) throw new Error('leaderboard ' + r.status); return r.json(); })
+        .then(function (data) {
+          if (id !== state.request) return;
+          var entries = (data && data.entries) || [];
+          entries.forEach(function (e) { rows.appendChild(ladderRow(e, false)); });
+          state.shown += entries.length;
+          state.total = (data && data.total) || state.shown;
+          table.hidden = state.shown === 0;
+          // "provisional" is only in the answer once the server sends it; without the key the section stays hidden.
+          if (!append && data && Array.isArray(data.provisional)) {
+            data.provisional.forEach(function (e) { settlingRows.appendChild(ladderRow(e, true)); });
+            state.settled = data.provisional.length;
+            settling.hidden = state.settled === 0;
+          }
+          if (state.shown === 0 && state.settled === 0) message('No ranked players yet this season.');
+          else msg.hidden = true;
+          moreWrap.hidden = !(state.total > state.shown && entries.length > 0);
+          more.disabled = false;
+        })
+        .catch(function () {
+          if (id !== state.request) return;
+          more.disabled = false;
+          if (append) message('Could not load more players.', true, true);
+          else message('The ladder could not be loaded right now.', true, false);
+        });
+    }
+
+    function select(tab, focus) {
+      tabs.forEach(function (t) {
+        var on = t === tab;
+        t.setAttribute('aria-selected', on ? 'true' : 'false');
+        t.tabIndex = on ? 0 : -1;
+      });
+      if (focus) tab.focus();
+      panel.setAttribute('aria-labelledby', tab.id);
+      state.mode = tab.getAttribute('data-mode');
+      try { window.history.replaceState(null, '', '#' + state.mode); } catch (e) { /* old browser */ }
+      load(false);
+    }
+
+    tabs.forEach(function (tab, i) {
+      tab.addEventListener('click', function () { if (tab.getAttribute('aria-selected') !== 'true') select(tab, false); });
+      tab.addEventListener('keydown', function (e) {
+        var step = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0;
+        if (!step) return;
+        e.preventDefault();
+        select(tabs[(i + step + tabs.length) % tabs.length], true);
+      });
+    });
+    more.addEventListener('click', function () { load(true); });
+
+    loadSeason(base);
+    var wanted = (window.location.hash || '').slice(1);
+    var first = tabs.filter(function (t) { return t.getAttribute('data-mode') === wanted; })[0] || tabs[0];
+    select(first, false);
+  }
+
   // ---- screenshots open in a lightbox ----
   function setupLightbox() {
     var box = document.getElementById('lightbox');
@@ -314,6 +463,7 @@
   }
 
   function start() {
+    if (document.getElementById('ladder-panel')) { setupLadder(); return; }
     loadRelease();
     loadTournaments();
     setupLightbox();

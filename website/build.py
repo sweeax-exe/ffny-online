@@ -23,7 +23,7 @@ ROOT = HERE.parent
 
 # Page files, written with a short content hash on their CSS/JS references so a new upload is
 # never mixed with an old cached copy.
-PAGE = ['index.html', 'style.css', 'site.js']
+PAGE = ['index.html', 'ranked.html', 'style.css', 'site.js']
 
 # dist path -> repository path. Every image must be in check-source-tree.py's approved list.
 ASSETS = {
@@ -81,11 +81,13 @@ def check_assets(approved):
 def local_refs(out):
     """Every local file the built page, stylesheet and script refer to."""
     refs = set()
-    html = (out / 'index.html').read_text(encoding='utf-8')
-    refs.update(LOCAL_REF.findall(html))
+    for page in ('index.html', 'ranked.html'):
+        html = (out / page).read_text(encoding='utf-8')
+        refs.update(LOCAL_REF.findall(html))
+        refs.update(CSS_URL.findall(html))
     refs.update(CSS_URL.findall((out / 'style.css').read_text(encoding='utf-8')))
-    refs.update(CSS_URL.findall(html))
-    return {r.lstrip('./') for r in refs if r and not r.startswith(('//', 'mailto'))}
+    # "./" (ranked.html's link back to the start page) strips to nothing: the directory itself.
+    return {r.lstrip('./') for r in refs if r.lstrip('./') and not r.startswith(('//', 'mailto'))}
 
 
 def build(out):
@@ -111,7 +113,7 @@ def build(out):
     asset_versions.update({f'media/{p.name}': sha256(p)[:10] for p in (HERE / 'media').glob('*.jpg')})
     for name in PAGE:
         text = (HERE / name).read_text(encoding='utf-8')
-        if name == 'index.html':
+        if name.endswith('.html'):
             for ref, version in versions.items():
                 text = text.replace(f'"{ref}"', f'"{ref}?v={version}"')
         for ref, version in asset_versions.items():

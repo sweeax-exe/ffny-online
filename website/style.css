@@ -739,6 +739,71 @@ h1, h2, h3 {
 @media (max-width: 860px) { .split { grid-template-columns: 1fr; } }
 @media (max-width: 640px) { .gallery.wide { grid-template-columns: 1fr; } }
 
+/* ---- ranked ladder page (ranked.html) ---- */
+.ranked-page .section { padding-top: clamp(110px, 12vw, 150px); min-height: 70vh; }
+.ranked-page .section h2 { margin-bottom: 10px; }
+.top nav a[aria-current="page"] { color: var(--text); background: rgba(255, 255, 255, 0.08); }
+.season { margin: 0 0 26px; color: var(--muted); font-size: 17px; }
+.season strong { color: var(--gold); font-weight: 700; }
+.ladder-tabs { display: flex; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; }
+.ladder-tabs button {
+  padding: 11px 20px 10px;
+  font: 400 19px/1 var(--display);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 10px;
+  cursor: pointer;
+}
+.ladder-tabs button:hover { color: var(--text); background: rgba(255, 255, 255, 0.1); }
+.ladder-tabs button[aria-selected="true"] {
+  color: #fff;
+  background: linear-gradient(180deg, var(--red), var(--red-deep));
+  border-color: rgba(255, 90, 70, 0.7);
+}
+.ladder { padding: 8px 20px 18px; }
+.ladder-msg { margin: 14px 0 4px; color: var(--muted); }
+.ladder-msg button { margin-left: 8px; font: inherit; color: var(--gold); background: none; border: 0; padding: 0; text-decoration: underline; cursor: pointer; }
+.ladder-table { width: 100%; border-collapse: collapse; font-size: 15.5px; }
+.ladder-table th {
+  padding: 12px 8px 10px;
+  text-align: left;
+  color: var(--faint);
+  font-size: 12.5px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  border-bottom: 1px solid var(--edge);
+}
+.ladder-table td { padding: 11px 8px; border-bottom: 1px solid rgba(255, 255, 255, 0.05); vertical-align: top; }
+.ladder-table tr:last-child td { border-bottom: 0; }
+.ladder-table .c-place { width: 3.2em; color: var(--muted); font: 400 18px/1.2 var(--display); }
+.ladder-table th.c-place { font: 700 12.5px/1 var(--body); }
+.ladder-table tbody tr:nth-child(-n+3) .c-place { color: var(--gold); }
+.ladder-table .c-num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.ladder-table .c-name { font-weight: 600; overflow-wrap: anywhere; }
+.ladder-table .c-rank { color: var(--muted); }
+.ladder-table .formerly { display: block; color: var(--faint); font-size: 12.5px; font-weight: 400; }
+.ladder-more { display: flex; justify-content: center; margin-top: 16px; }
+.ladder-more .btn { font-size: 18px; padding: 12px 22px; cursor: pointer; }
+.settling { margin-top: 26px; padding-top: 18px; border-top: 1px solid var(--edge); }
+.settling h3 { font-size: 24px; margin: 0 0 4px; }
+.settling .fine { margin: 0 0 6px; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+@media (max-width: 640px) {
+  .ladder { padding: 4px 10px 14px; }
+  .ladder-tabs button { flex: 1; padding-inline: 10px; }
+  .ladder-table { font-size: 14.5px; }
+  .ladder-table th, .ladder-table td { padding-inline: 5px; }
+  .ladder-table .c-place { width: 2.2em; }
+}
+@media (max-width: 420px) {
+  .ladder-table { font-size: 13.5px; }
+  .ladder-table th { font-size: 11px; letter-spacing: 0.04em; }
+}
+
 /* ---- responsive ---- */
 @media (max-width: 1020px) {
   .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }

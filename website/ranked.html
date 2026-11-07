@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ranked ladder: FFNY Online</title>
+<meta name="description" content="The FFNY Online ranked ladder: Open, Classic and Draft, the current season and every ranked player.">
+<meta name="theme-color" content="#0b0808">
+<meta name="color-scheme" content="dark">
+<meta name="referrer" content="no-referrer">
+<link rel="canonical" href="https://defjam.online/ranked.html">
+<link rel="icon" href="favicon.ico" sizes="any">
+<link rel="icon" type="image/png" sizes="256x256" href="img/icon-256.png">
+<link rel="apple-touch-icon" href="img/icon-256.png">
+<link rel="preload" href="fonts/Anton-Regular.ttf" as="font" type="font/ttf" crossorigin>
+<link rel="stylesheet" href="style.css">
+<script src="site.js" defer></script>
+</head>
+<body>
+<a class="skip" href="#ladder">Skip to the ladder</a>
+
+<header class="top">
+  <a class="brand" href="./" aria-label="FFNY Online, start page">
+    <img src="img/icon-256.png" alt="" width="36" height="36">
+    <span>FFNY Online</span>
+  </a>
+  <nav aria-label="Sections">
+    <a href="./#tournaments">Tournaments</a>
+    <a href="./#features">Features</a>
+    <a href="./#social">Social</a>
+    <a href="./#crews">Crews</a>
+    <a href="ranked.html" aria-current="page">Ranked</a>
+    <a href="./#next">Coming next</a>
+    <a href="./#screens">Screens</a>
+    <a href="./#how">Get started</a>
+    <a class="pill" href="https://discord.gg/zCZKVDnKaP" rel="noopener">Discord</a>
+  </nav>
+</header>
+
+<main class="ranked-page">
+  <section class="section" id="ladder" aria-labelledby="ladder-title">
+    <div class="wrap">
+      <p class="kicker">Ranked</p>
+      <h2 id="ladder-title">The ladder</h2>
+      <p class="season" id="season" hidden></p>
+
+      <div class="ladder-tabs" role="tablist" aria-label="Ranked mode">
+        <button type="button" role="tab" id="tab-open" data-mode="open" aria-selected="true" aria-controls="ladder-panel">Open</button>
+        <button type="button" role="tab" id="tab-classic" data-mode="classic" aria-selected="false" aria-controls="ladder-panel" tabindex="-1">Classic</button>
+        <button type="button" role="tab" id="tab-draft" data-mode="draft" aria-selected="false" aria-controls="ladder-panel" tabindex="-1">Draft</button>
+      </div>
+
+      <div class="glass ladder" id="ladder-panel" role="tabpanel" aria-labelledby="tab-open" aria-live="polite">
+        <p class="ladder-msg" id="ladder-msg">Loading the ladder…</p>
+        <noscript><p class="ladder-msg">The ladder needs JavaScript. It is also shown in the game under Ranked Match.</p></noscript>
+        <table class="ladder-table" id="ladder-table" hidden>
+          <thead>
+            <tr><th scope="col" class="c-place">#</th><th scope="col">Name</th><th scope="col">Rank</th><th scope="col" class="c-num">Rating</th><th scope="col" class="c-num">Sets W-L</th></tr>
+          </thead>
+          <tbody id="ladder-rows"></tbody>
+        </table>
+        <div class="ladder-more" id="ladder-more-wrap" hidden>
+          <button type="button" class="btn btn-ghost" id="ladder-more">More</button>
+        </div>
+
+        <div class="settling" id="settling" hidden>
+          <h3>Still settling (?)</h3>
+          <p class="fine">A rank becomes final after a few more sets.</p>
+          <table class="ladder-table">
+            <thead>
+              <tr><th scope="col" class="c-place"><span class="sr">Place</span></th><th scope="col">Name</th><th scope="col">Rank</th><th scope="col" class="c-num">Rating</th><th scope="col" class="c-num">Sets W-L</th></tr>
+            </thead>
+            <tbody id="settling-rows"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="foot">
+  <div class="wrap foot-inner">
+    <img src="img/logo-512.png" alt="" width="96" height="90" loading="lazy" decoding="async">
+    <div>
+      <p class="disclaimer"><strong>FFNY Online is an unofficial fan project.</strong> It is not
+        affiliated with, endorsed or sponsored by Electronic Arts, AKI or Def Jam. Def Jam: Fight
+        for NY and its assets belong to their respective owners. You need your own legally obtained
+        copy of the game; no game data is distributed.</p>
+      <p>This site sets no cookies and uses no trackers.</p>
+      <nav class="foot-links" aria-label="Links">
+        <a href="./">Start page</a>
+        <a href="https://play.defjam.online/privacy" rel="noopener">Privacy</a>
+        <a href="https://discord.gg/zCZKVDnKaP" rel="noopener">Discord</a>
+        <a href="https://github.com/sweeax-exe/ffny-online" rel="noopener">GitHub</a>
+      </nav>
+    </div>
+  </div>
+</footer>
+</body>
+</html>
