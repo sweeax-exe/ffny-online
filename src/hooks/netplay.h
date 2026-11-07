@@ -217,6 +217,9 @@ void netplay_lobby_quick(int mode, int max);
  * NetRoom.you is then NETPLAY_SLOT_SPECTATOR and every match that starts in it is run here from the
  * players' inputs, with no local player. Only when netplay_lobby_caps() has NETPLAY_CAP_SPECTATE. */
 void netplay_lobby_spectate(const char *code);
+/* Tests: the fights of their START a spectator that came late did not watch (the test knockout's "alt"
+ * counts the fights as the players count them). */
+int netplay_fights_skipped(void);
 int netplay_spectating(void);   /* 1 while this PC watches a room or one of its matches */
 /* The account report key of this PC's last room match ("ROOM12-1A2B3C4D-1"; "" before the first), for
  * REPORT PLAYER. Returns its length. */

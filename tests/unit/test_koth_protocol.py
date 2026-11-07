@@ -105,3 +105,15 @@ def test_the_results_screen_never_holds_the_next_fight():
     assert 'N.peer_rb_max[from] = len >= 17 ? (p[15] | (p[16] << 8)) : 0;' in NETPLAY_C
     assert 'N.peer_rb_cp[from] = len >= 15 && (p[14] & 1);' in NETPLAY_C
     assert "leave the last fight's results" in NETPLAY_C
+
+
+def test_late_spectator_type_and_caps_match_the_relay():
+    # a spectator that comes while the match runs (docs/research/spectator-mode.md section 5): WATCHLATE
+    # and the client's CAPS bit 11, from the relay's protocol_spectate.go
+    spec = (RELAY_SRC / 'protocol_spectate.go').read_text(encoding='utf-8')
+    m = re.search(r'^\s*TypeWatchLate\s+MsgType\s+=\s+(0x[0-9A-Fa-f]+)', spec, re.M)
+    assert m and c_define(NETPLAY_C, 'T_WATCHLATE') == int(m.group(1), 0)
+    m = re.search(r'^\s*CapSpectateLate\s+uint32\s+=\s+1\s*<<\s*(\d+)', spec, re.M)
+    assert m and c_define(NETPLAY_C, 'CAPS_SPEC_LATE') == 1 << int(m.group(1))
+    m = re.search(r'^\s*CapSpectateRematch\s+uint32\s+=\s+1\s*<<\s*(\d+)', spec, re.M)
+    assert m and c_define(NETPLAY_C, 'CAPS_SPEC_REMATCH') == 1 << int(m.group(1))

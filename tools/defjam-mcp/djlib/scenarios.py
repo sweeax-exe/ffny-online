@@ -1038,7 +1038,7 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
            lock_timeout=None, log=None, require_hits=False, stall=300, keep_roots=False, quick=None,
            created=False, cp_records=None, rematch=False, venues=None, cp_pick=None, cp_names=None,
            more_shots=False, spectators=0, copy_env=None, fixtures=None, ranked=None, rollback_modes=None,
-           rollback_max_ping=None, leave=None):
+           rollback_max_ping=None, leave=None, spectate_after=0, spectate_delay=0):
     """leave: "N@STEP": copy N leaves the room at fight step STEP of the first match (RECOMP_TEST_LEAVE_STEP) and
     plays on offline; the run is done once the other copies are, it is left out of the match checks, and
     each other copy must go on in lockstep with its port at rest (P_GONE) when two or more stay.
@@ -1055,7 +1055,12 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
     a Rematch from the results menu instead of a new room match. venues: "26" or "1,6": every vote
     offers these in turn (relay -test-venues). spectators: that many more copies watch the players' room
     (RECOMP_NETPLAY=spectate, docs/research/spectator-mode.md); the players ready only once they are in it,
-    and every match is checked on them as on the players (checksums, winners, summary). ranked: "classic" or
+    and every match is checked on them as on the players (checksums, winners, summary). spectate_after: N,
+    the spectators start only once copy 0 has finished match N (its rewards), so they come while the
+    players' match runs (with rematch: on the results or in the next fight) and the players do not wait
+    for them; each must then watch at least one later fight, checked against the players' fight with the
+    same id (late_spectators in the result); spectate_delay: that many seconds later still (into the
+    next fight). ranked: "classic" or
     "open" (or "classic,open"): a ranked set instead of a quick match, against a local account service
     (accounts -ranked -test-accounts) the relay asks (-accounts-internal); the copies sign in with its test
     sessions, queue (RECOMP_NETPLAY=ranked, RECOMP_TEST_RANKED_MODES), accept and play the set's games.
@@ -1077,7 +1082,8 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
     s = copies.Session("online", lock_timeout=lock_timeout, log=log, keep_roots=keep_roots).open()
     result = {"scenario": "online", "ok": False,
               "params": {"matches": matches, "mode": mode, "players": players, "fighters": fighters[:players],
-                         "rollback": rollback, "fast_ko": fast_ko, "bot": bot, "spectators": spectators}}
+                         "rollback": rollback, "fast_ko": fast_ko, "bot": bot, "spectators": spectators,
+                         "spectate_after": spectate_after, "spectate_delay": spectate_delay}}
     shots, problems = [], []
     stop_reason = None
     logs = {}
@@ -1130,7 +1136,7 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
                 # first pair) as soon as two are there and ready, and a later copy then opened a room of
                 # its own (src/hooks/netplay.c autostart_thread)
                 env["RECOMP_TEST_READY_PLAYERS"] = str(players)
-            if spectators:      # the spectators watch from the first match on
+            if spectators and not spectate_after:   # the spectators watch from the first match on
                 env["RECOMP_TEST_READY_SPECTATORS"] = str(spectators)
             if fast_ko:
                 env["RECOMP_TEST_KO_STEP"] = "%d,%s" % (int(fast_ko), winner)
@@ -1159,7 +1165,7 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
             before[i] = _save_files(root)
             s.launch(i, env=env, root=root, core=base_core + 2 * i, watch=watch)
             time.sleep(3)           # the first copy opens the room and is player 1
-        for k in range(spectators):
+        def launch_spectator(k):
             # a spectator: no fighter, no presses after the main menu (its game goes through the results by
             # itself); the same test knockout as the players, since that is applied on every PC
             i = players + k
@@ -1182,6 +1188,11 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
             root = s.make_root(i)
             before[i] = _save_files(root)
             s.launch(i, env=env, root=root, core=base_core + 2 * i, watch=WATCH)
+        late = set(range(players, players + spectators)) if spectate_after else set()
+        spectate_due = None
+        if not spectate_after:
+            for k in range(spectators):
+                launch_spectator(k)
         deadline = time.time() + timeout
         shot_due = None
         more_done = {}
@@ -1189,7 +1200,19 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
             s.poll()
             cs = list(s.copies.values())
             rewards = [c.watch.count("[FUNCCALL] Game.UpdateMatchRewardsPoints()") for c in cs]
-            if koth and len(cs) > 2:
+            if spectate_after and len(cs) == players and rewards[0] >= spectate_after and not spectate_due:
+                spectate_due = time.time() + float(spectate_delay or 0)
+            if spectate_due and len(cs) == players and time.time() >= spectate_due:
+                log("copy 0 finished match %d: the spectators start" % spectate_after) if log else None
+                for k in range(spectators):
+                    launch_spectator(k)
+                continue
+            if spectate_after and len(cs) == players:
+                done = False
+            elif spectate_after:    # the players' matches, and a watched fight on every late spectator
+                done = all(n >= matches for c, n in zip(cs, rewards) if c.index not in late) and \
+                    all(n >= 1 for c, n in zip(cs, rewards) if c.index in late)
+            elif koth and len(cs) > 2:
                 # the hill: copy 0 (the knockout winner's slot) fights every match, the others take turns
                 # as the challenger, so the matches are done when the king's and the challengers' are
                 done = rewards[0] >= matches and sum(rewards[1:]) >= matches
@@ -1282,6 +1305,8 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
     finally:
         _finish(s, result, t0)
     analyses = {i: logparse.analyze_copy(logparse.read_text(p)) for i, p in logs.items()}
+    if spectate_after:
+        result["late_spectators"] = late_spectator_check(analyses, players, spectators, problems)
     if leaver:
         result["leave"] = leave_check(logs, leaver, players, problems)
         analyses.pop(leaver[0], None)
@@ -1292,6 +1317,40 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
     result.update({"ok": ok and not problems, "stop": stop_reason, "matches": rows, "problems": problems,
                    "logs": [_relpath(p) for p in logs.values()], "shots": shots})
     return result
+
+
+def late_spectator_check(analyses, players, spectators, problems):
+    """Spectators that came while the players' match ran (spectate_after): each watched fight against the
+    players' fight with the same id (checksums compared and equal, the same winners, no desync); the
+    spectators are taken out of the per-match rows."""
+    out = {}
+    ref = analyses.get(0, {}).get("started", [])
+    for i in range(players, players + spectators):
+        a = analyses.pop(i, None)
+        if a is None:
+            problems.append("late spectator copy %d: no log" % i)
+            continue
+        rows = []
+        for m in a["started"]:
+            p = next((x for x in ref if x.get("id") == m.get("id")), None)
+            row = {"id": m.get("id"), "players_match": ref.index(p) + 1 if p else None, "checks": m.get("checks", 0),
+                   "winners": m.get("winners"), "desync": (m.get("desync") or {}).get("step")}
+            rows.append(row)
+            tag = "late spectator copy %d, fight %s: " % (i, m.get("id"))
+            if p is None:
+                problems.append(tag + "no player fight has its id")
+            elif p.get("winners") != m.get("winners"):
+                problems.append(tag + "winners %s, the players' %s" % (m.get("winners"), p.get("winners")))
+            if m.get("desync"):
+                problems.append(tag + "desync at step %d (%s)" % (m["desync"]["step"], (m.get("desync_detail") or "")[:110]))
+            if not m.get("checks"):
+                problems.append(tag + "no checksum compared")
+            for g in m.get("gave_up", []):
+                problems.append(tag + g[:120])
+        if not rows:
+            problems.append("late spectator copy %d watched no fight" % i)
+        out[str(i)] = rows
+    return out
 
 
 def leave_check(logs, leaver, players, problems):

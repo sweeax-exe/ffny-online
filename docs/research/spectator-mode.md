@@ -151,6 +151,18 @@ derives the delay from the pings as the players do.
   arrive) it calls `Game.Rematch()` as the menu would and watches the rematch like the match; when a
   player goes back to the room, the room is back in its lobby, START is pressed or three minutes pass,
   it chooses No and goes back to the room.
+- **Coming while the match runs (CAPS bit 11, `WATCHLATE` 0x36):** a player report (2026-11-07) found
+  that a spectator who entered while the players fought, or sat on their results, saw nothing until they
+  went back to the room: their rematches bring no `START`. A game that announces bit 11 now gets, on
+  `SPECTATE` into a playing room, `WATCHLATE` (the running match's `START` body) and each player's latest
+  `P_RTT` (the agreed input delay), and is a watcher at once. It holds that match and keeps the players'
+  entries and choices; it sets the fight up as a room match once the players' next fight of the `START`
+  starts (all its first entries are here, or every player chose Rematch), numbered as theirs
+  (`N.match_count`, so the match id agrees) and with its seedings counted on from the fights before
+  (`seed_base`: the players' rematches seed every generator once, as a set-up from the menus does; the
+  checksums tell if a venue does otherwise). A fight already under way is skipped for the next. The room
+  back in its lobby ends the wait; its next `START` brings a `WATCH`. A `VOTE` while waiting re-sends the
+  `WATCHLATE`. Older games still wait for the next `START`.
 - **Leaving:** B in the room leaves it (`LEAVE`); during the fight START stops watching and, since
   build 47, takes the spectator straight back to the room: the game runs the pause menu's own Quit
   (`sub_000CD0D0` on its confirm page; the pause menu itself never opens for a spectator, whose pad sits
@@ -175,6 +187,7 @@ already does).
 | 0x2B | `SPECTATE` | client -> server | `token` 8, `room` 6 |
 | 0x19 | `ROOM` | server -> client | `you` 0xFD for a spectator; to bit-4 clients a trailer: `count` u8, per spectator `name` string |
 | 0x23 | `WATCH` | server -> client | the `START` body (also in ordinary rooms now, to their spectators) |
+| 0x36 | `WATCHLATE` | server -> client | the `START` body of the match already running, to a client with `CAPS` bit 11 entering it |
 | 0x04 | `DATA` | server -> spectator | a player's `P_STEPS`, `P_HASH`, `P_RTT` only, during the match |
 | (payload) | `P_RTT` | game -> game | byte 13: the agreed input delay, 0 before the sync point |
 
@@ -189,8 +202,8 @@ fight, so v2 needs the relay's replay feed and the fast-forward, not a new input
 
 ## 9. What v1 does not do
 
-- Join a match already running (v2, section 8). (Rematches the players choose on their results are
-  watched since build 47.)
+- Join a fight already running (v2, section 8). (Rematches the players choose on their results are
+  watched since build 47; a spectator that comes during a match watches its next fight since bit 11.)
 - King of the Hill: its watchers keep the phase-1 names screen; switching them to this game side is
   the hill's phase 2 (the hill's own results and calls need care).
 - A match of four human players: the spectator's own pad sits on the fourth player's port outside
