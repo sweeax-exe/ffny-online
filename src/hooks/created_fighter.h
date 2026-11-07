@@ -43,7 +43,7 @@ void cp_record_stats(const uint8_t rec[CP_REC_LEN], int out[6]);
 /* Every Story save of the save area with a created fighter, sanitized, newest first (or, for
  * tests, RECOMP_CP_RECORD: profile dumps or user ID saves separated by ';', in that order). Read
  * once, then again after created_fighter_reload(). */
-#define CP_LOCAL_MAX    32      /* was 8: a player with 10 created fighters lost the 2 oldest (SaltySkyzo, 2026-11-07) */
+#define CP_LOCAL_MAX    64      /* was 8: a player with 10 created fighters lost the 2 oldest; 55 are planned (SaltySkyzo, 2026-11-07) */
 typedef struct CpLocal {
     uint8_t rec[CP_REC_LEN];        /* the checked record, carrying the online name when one is set */
     char name[CP_NAME_MAX + 1];     /* the name it plays under online: the online name, else the user ID */
