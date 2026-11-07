@@ -82,5 +82,5 @@ def test_the_notice_says_the_shortest_silence(output):
 
 def test_the_give_up_uses_it():
     assert 'netcheck_silent_cause(N.players, N.pos, late, silent, relay, SILENT_OWN_MS) == NETCHECK_OWN_LINK' in NETPLAY_C
-    assert 'Your connection is unstable: no data from the other players for %u s.' in NETPLAY_C
+    assert 'Your connection is unstable (no data for %u s).' in NETPLAY_C
     assert 'g_steps_at[from] = GetTickCount64();' in NETPLAY_C
