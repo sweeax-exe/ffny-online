@@ -44,6 +44,8 @@ typedef struct {
     SongPlan plan;
     uint32_t orig[512];             /* the converted map's sample table: offset, length per sample */
     int cursor, match;              /* next piece; the match it last played in (0: none) */
+    int playing;                    /* the piece handed out last (-1: none since the map was set up) */
+    double started, length;         /* when, and its length (ms) */
 } CursorSong;
 
 static CursorSong *s_songs;
@@ -52,6 +54,15 @@ static int s_match, s_reload = 1, s_cur = -1;
 static uint32_t s_table;            /* the guest table as this file last left it ... */
 static uint32_t s_left[512];        /* ... and its contents */
 static int s_left_n;
+
+static double now_ms(void)
+{
+    static LARGE_INTEGER f;
+    LARGE_INTEGER c;
+    if (!f.QuadPart) QueryPerformanceFrequency(&f);
+    QueryPerformanceCounter(&c);
+    return (double)c.QuadPart * 1000.0 / (double)f.QuadPart;
+}
 
 static int trace(void)
 {
@@ -169,6 +180,7 @@ void song_cursor_play_node(uint32_t track)
             int resume = s->match && s->match == s_match && s->cursor;
             if (!resume) s->cursor = 0;
             s->match = s_match;
+            s->playing = -1;
             if (trace())
                 fprintf(stderr, "[SONGS] %s: map set up, %s at piece %d of %d\n", s->id,
                         resume ? "goes on" : "starts", s->cursor, s->plan.pieces);
@@ -185,14 +197,26 @@ void song_cursor_play_node(uint32_t track)
     int sample = SMEM16(node);
     if (sample <= 0 || sample > s->plan.track0) return;                 /* section starts, control */
 
-    int lane = s->plan.lane[sample - 1], k = s->cursor;
+    /* A node played again before the piece handed out last got half way through (a fight's
+     * start fired its event a dozen times in half a second in a play-test, and every call took a
+     * piece: the song jumped 30 s) gets that piece again: the song does not skip what it has not
+     * played. */
+    double t_now = now_ms();
+    int again = s->playing >= 0 && t_now - s->started < s->length / 2;
+    int lane = s->plan.lane[sample - 1], k = again ? s->playing : s->cursor;
     if (lane >= s->plan.lanes) lane = 0;
     uint32_t off = s->plan.off[lane][k], ms = s->plan.ms[lane][k];
     MEM32(table + (uint32_t)(sample - 1) * 8) = off;
     MEM32(table + (uint32_t)(sample - 1) * 8 + 4) = ms;
     s_left[(sample - 1) * 2] = off;
     s_left[(sample - 1) * 2 + 1] = ms;
-    s->cursor = (k + 1) % s->plan.pieces;
+    s->started = t_now;                                     /* a piece played again starts over */
+    if (!again) {
+        s->playing = k;
+        s->length = ms;
+        s->cursor = (k + 1) % s->plan.pieces;
+    }
     if (trace())
-        fprintf(stderr, "[SONGS] %s: node %d sample %d lane %d -> piece %d (%u ms)\n", s->id, idx, sample, lane, k, ms);
+        fprintf(stderr, "[SONGS] %s: node %d sample %d lane %d -> piece %d (%u ms)%s\n", s->id, idx, sample, lane, k, ms,
+                again ? " again" : "");
 }

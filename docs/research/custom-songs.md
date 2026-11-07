@@ -280,6 +280,15 @@ again and started at piece 0, and the fight played pieces 0-121 in order while t
 sample 13, then 63-66, 213-216, 144-151 and 64 on its own, switching between lanes 0 and 1. The
 straight song: pieces 0-5 in order on samples 49, 13, 14, 61, 62, 14.
 
+**A node played again within half a piece gets the same piece.** The owner's play-test
+(DMX, interactive, One on One) heard the song cut about 15 s two seconds into the fight: the log
+shows the fight's map set up, pieces 0 and 1, then node 6 (sample 13) played 13 times in half a
+second (`playtest-songs-20261107-095832.log.err`, frames 2486-2515), each call taking the next
+piece: the song went from piece 1 to piece 14. A call that comes before the piece handed out last
+has played half its length now gets that piece again (from its start), so a burst or a jump right
+after a piece began repeats at most half a piece instead of skipping. Checked in a One on One: a
+section jump 0.3 s into piece 27 replayed piece 27 in the new lane.
+
 **The read buffer is sized from the sample table.** `sub_001317C0(flags, 3000)` (from
 `sub_0001CBE0`, at boot and at a match's start) walks the active map's sample table and keeps the
 largest `(next.offset - this.offset) * 0x80 / this.ms`; the music stream's ring is 3000 ms times
