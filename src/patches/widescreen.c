@@ -136,7 +136,10 @@ float ws_init(int window_w, int window_h, int fullscreen)
  * tag band, from where it is moved back and anchored left. The literal is the
  * operand of a PushShort in the movie's first-frame action, patched in memory
  * after the loader resolves feloader.apt and before any of it runs. A hash of
- * the instruction window guards against any other build of the movie. */
+ * the instruction window guards against any other build of the movie. Over a
+ * 4:3 menu background that gets the side fill (no [wide] art), the renderer
+ * keeps the tagged clip in the 4:3 box instead, as the fill covers the sides
+ * (docs/research/widescreen-song-banner-side-fill.md). */
 #define WS_FELOADER_Y_AT 0xCD1Fu        /* the PushShort operand in feloader.apt */
 #define WS_FELOADER_WINDOW_AT 0xCD10u   /* chyron._x = 0; chyron._y = 385 */
 #define WS_FELOADER_WINDOW_LEN 18u
