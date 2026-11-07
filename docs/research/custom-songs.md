@@ -289,6 +289,18 @@ has played half its length now gets that piece again (from its start), so a burs
 after a piece began repeats at most half a piece instead of skipping. Checked in a One on One: a
 section jump 0.3 s into piece 27 replayed piece 27 in the new lane.
 
+**Next song / from the start (shortcuts, 2026-11-07).** The playlist machine `sub_0003D060` runs
+menus (audio mode `0x340374` 1) and fights (2). In state 2 (`0x340398`) it adds the frame time to
+the timer `0x33E790` and, once that passes the song's length `0x33EC40`, moves the index
+`0x33EC94` on (unless the hold byte `0x33EC90` is set), wraps it at the count `0x33E9DC` and loads
+that song with its banner. A shortcut (`[songs] skip_pad`, `restart_pad`, `skip_key`,
+`restart_key`; `src/hooks/pc_ui.cpp` reads them) asks `song_cursor_request`; once a frame on the
+game's thread (`sub_00077040_enter`), while a song is playing (state 1, no song description
+loading: `0x3407B4` not 1 or 2), it sets the timer past the length and state 2, with the index a
+step back first for "from the start". A custom song loaded so starts at its first piece. Pads
+cannot keep a button from the game in this runtime (only the overlay blanks them all), so the
+D-pad press of the default chords reaches the game too; R3 does nothing in the game.
+
 **The read buffer is sized from the sample table.** `sub_001317C0(flags, 3000)` (from
 `sub_0001CBE0`, at boot and at a match's start) walks the active map's sample table and keeps the
 largest `(next.offset - this.offset) * 0x80 / this.ms`; the music stream's ring is 3000 ms times

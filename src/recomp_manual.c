@@ -181,7 +181,7 @@ void sub_00073FD0_enter(void) { scene_launcher_loader_enter(); }
 void sub_0002DFF0_enter(void) { scene_launcher_mode_enter(); }
 /* The developer run module, rebuilt from the host (src/hooks/dev_module.c): the manager's tick
  * queues it on request; its methods are traced. RECOMP_DEV_MODULE; off unless set. */
-void sub_00077040_enter(void) { dev_module_manager_enter(); cheats_game_tick(); }  /* + Story cheats, src/patches/cheats.c */
+void sub_00077040_enter(void) { dev_module_manager_enter(); cheats_game_tick(); song_cursor_game_tick(); }  /* + Story cheats, src/patches/cheats.c; song shortcuts, src/patches/song_cursor.c */
 void sub_00077C40_enter(void) { dev_module_trace(1); }
 void sub_00077A40_enter(void) { dev_module_trace(3); }
 void sub_00077B20_enter(void) { dev_module_trace(4); }

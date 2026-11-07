@@ -51,6 +51,9 @@ typedef struct {
 static CursorSong *s_songs;
 static int s_count, s_off = -1, s_trace = -1;
 static int s_match, s_reload = 1, s_cur = -1;
+static int s_fresh;                 /* the next custom song set up starts at its beginning (a shortcut) */
+static volatile int s_request;      /* SONG_REQUEST_*, from the shortcuts; done on the game's thread */
+static int s_request_wait;          /* frames it has waited for the song to be playing */
 static uint32_t s_table;            /* the guest table as this file last left it ... */
 static uint32_t s_left[512];        /* ... and its contents */
 static int s_left_n;
@@ -177,10 +180,11 @@ void song_cursor_play_node(uint32_t track)
         remember(table, s_cur >= 0 ? s_songs[s_cur].plan.track0 * 2 : 64);
         if (s_cur >= 0) {
             CursorSong *s = &s_songs[s_cur];
-            int resume = s->match && s->match == s_match && s->cursor;
+            int resume = !s_fresh && s->match && s->match == s_match && s->cursor;
             if (!resume) s->cursor = 0;
             s->match = s_match;
             s->playing = -1;
+            s_fresh = 0;
             if (trace())
                 fprintf(stderr, "[SONGS] %s: map set up, %s at piece %d of %d\n", s->id,
                         resume ? "goes on" : "starts", s->cursor, s->plan.pieces);
@@ -219,4 +223,83 @@ void song_cursor_play_node(uint32_t track)
     if (trace())
         fprintf(stderr, "[SONGS] %s: node %d sample %d lane %d -> piece %d (%u ms)%s\n", s->id, idx, sample, lane, k, ms,
                 again ? " again" : "");
+}
+
+/* ---- the shortcuts: next song, the song from its start ---------------------------------------- */
+/*
+ * The music playlist's per-frame machine (sub_0003D060, menus and fights alike; research notes):
+ * MEM32(0x340398) its state (1 playing, 2 ending), MEMF(0x33E790) the song's timer and
+ * MEMF(0x33EC40) its length (s), MEM32(0x33EC94) the playlist index and MEM32(0x33E9DC) the count,
+ * MEM8(0x33EC90) "hold" (the index is not moved on), MEM8(0x33E794) the playlist on, MEM32(0x340374)
+ * the audio mode (1 menus, 2 fight), MEM32(0x3407B4) a song description loading (1, 2). In state 2,
+ * once the timer passes the length, it moves the index on and loads that song, with its banner. So a
+ * shortcut sets state 2 with the timer past the length, the index a step back first for "from the
+ * start", and the game's own next frame does the rest, as when a song ends.
+ */
+void song_cursor_request(int what, const char *from)
+{
+    s_request = what;
+    fprintf(stderr, "[SONGS] shortcut (%s): %s\n", from ? from : "?", what == SONG_REQUEST_SKIP ? "next song" : "song from its start");
+}
+
+/* Test aid: RECOMP_TEST_SONG_SHORTCUT="next@40,start@70" asks for the shortcuts that many seconds
+ * after the first frame (scripted runs have no host pads, so the chords cannot be pressed there). */
+static void test_schedule(void)
+{
+    static int parsed, n, done;
+    static double at[8], t0;
+    static int what_at[8];
+    if (!parsed) {
+        const char *e = getenv("RECOMP_TEST_SONG_SHORTCUT");
+        parsed = 1;
+        t0 = now_ms();
+        while (e && *e && n < 8) {
+            double secs = 0;
+            int skip = !strncmp(e, "next@", 5), start = !strncmp(e, "start@", 6);
+            if ((skip || start) && sscanf(e + (skip ? 5 : 6), "%lf", &secs) == 1) {
+                at[n] = secs * 1000.0;
+                what_at[n++] = skip ? SONG_REQUEST_SKIP : SONG_REQUEST_RESTART;
+            }
+            e = strchr(e, ',');
+            if (e) e++;
+        }
+    }
+    if (done < n && now_ms() - t0 >= at[done]) {
+        song_cursor_request(what_at[done], "test");
+        done++;
+    }
+}
+
+void song_cursor_game_tick(void)
+{
+    test_schedule();
+    int what = s_request;
+    if (!what) return;
+    uint32_t mode = MEM32(0x340374), count = MEM32(0x33E9DC), state = MEM32(0x340398), loading = MEM32(0x3407B4);
+    if (!MEM8(0x33E794) || !count || count > 64 || (mode != 1 && mode != 2)) {
+        s_request = 0;
+        s_request_wait = 0;
+        fprintf(stderr, "[SONGS] shortcut: no music playlist playing (mode %u, %u songs)\n", mode, count);
+        return;
+    }
+    if (state != 1 || loading == 1 || loading == 2) {          /* a song is ending or loading: wait */
+        if (++s_request_wait > 180) {
+            s_request = 0;
+            s_request_wait = 0;
+            fprintf(stderr, "[SONGS] shortcut: the music stayed busy, dropped\n");
+        }
+        return;
+    }
+    s_request = 0;
+    s_request_wait = 0;
+    uint32_t idx = MEM32(0x33EC94) % count;
+    int hold = MEM8(0x33EC90) != 0;
+    if (what == SONG_REQUEST_SKIP && hold) idx = (idx + 1) % count;            /* the machine will not */
+    if (what == SONG_REQUEST_RESTART && !hold) idx = (idx + count - 1) % count; /* it moves on by one */
+    MEM32(0x33EC94) = idx;
+    MEMF(0x33E790) = MEMF(0x33EC40) + 1.0f;
+    MEM32(0x340398) = 2;
+    s_fresh = 1;
+    fprintf(stderr, "[SONGS] shortcut: %s (playlist %u songs, %s)\n", what == SONG_REQUEST_SKIP ? "next song" : "from the start",
+            count, mode == 2 ? "fight" : "menus");
 }

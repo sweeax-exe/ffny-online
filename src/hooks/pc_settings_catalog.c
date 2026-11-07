@@ -147,7 +147,7 @@ size_t pc_settings_catalog(RecompSetting *out, size_t max)
     n += pc_ui_settings(out + n, 16);
     n += pc_debug_settings(out + n, 16);
     n += pc_language_settings(out + n, 4);
-    n += pc_songs_settings(out + n, 4);
+    n += pc_songs_settings(out + n, 8);
     n += cheats_settings(out + n, 8);
     return n;
 }

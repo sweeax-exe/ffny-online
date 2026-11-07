@@ -65,6 +65,7 @@ extern "C" {
 #include "recorder.h"
 #include "scene_launcher.h"
 #include "dev_module.h"
+#include "patches/song_cursor.h"
 #endif
 #include "patches/cheats.h"
 #include "input_host.h"
@@ -269,6 +270,10 @@ static const char *friendly(const char *section, const char *key)
         {"songs", "restored", "Restored song: Holler If Ya Hear Me - 2Pac"},
         {"songs", "custom", "Your own songs"},
         {"songs", "folders", "More song folders"},
+        {"songs", "skip_pad", "Next song (pad)"},
+        {"songs", "restart_pad", "Song from the start (pad)"},
+        {"songs", "skip_key", "Next song (key)"},
+        {"songs", "restart_key", "Song from the start (key)"},
         {"cheats", "infinite_health", "Infinite health"},
         {"cheats", "max_blazin", "Max Blazin'"},
         {"cheats", "no_regen", "No health regeneration"},
@@ -1872,6 +1877,10 @@ static void page_songs(UiMode mode)
     }
     ui_target("songs.rescan");
     settings_group("songs", {"folders"});
+    ImGui::SeparatorText("Shortcuts");
+    ImGui::TextWrapped("Skip to the next song, or play the current one from its start, in the menus and in fights. "
+                       "On a pad, hold the right stick in and press the D-pad (the game sees the D-pad press too).");
+    settings_group("songs", {"skip_pad", "restart_pad", "skip_key", "restart_key"});
 
     int on = 0;
     for (auto &row : g_song_rows)
@@ -2418,6 +2427,8 @@ int g_overlay_vk = VK_F1;
 struct Chord { int src[3]; int n; UiTick since; bool fired; };
 std::vector<Chord> g_chords;        // read and written on the drawing thread, and by apply_settings under the lock
 std::vector<Chord> g_mark_chords;   // [debug] mark_pad: the recorder's mark, from a pad
+std::vector<Chord> g_song_chords[2]; // [songs] skip_pad, restart_pad (src/patches/song_cursor.c)
+int g_song_vk[2] = {VK_F8, VK_F7};  // [songs] skip_key, restart_key (0: none)
 
 void parse_chord_list(const std::string &text, std::vector<Chord> &chords)
 {
@@ -2446,6 +2457,8 @@ void parse_chords()
 {
     parse_chord_list(get_text("ui", "overlay_pad"), g_chords);
     parse_chord_list(get_text("debug", "mark_pad"), g_mark_chords);
+    parse_chord_list(get_text("songs", "skip_pad"), g_song_chords[0]);
+    parse_chord_list(get_text("songs", "restart_pad"), g_song_chords[1]);
 }
 
 // A chord of `chords` was just completed, on any pad: one button at once, two or three held half a second.
@@ -2481,6 +2494,40 @@ void pad_mark_poll()
         recorder_mark("pad");
 }
 
+// [songs] skip_pad / restart_pad: a chord acts at once, when its last button goes down, on any pad;
+// not while the left stick is in as well (L3+R3 is the overlay's chord, unless the chord names it).
+void song_pad_poll()
+{
+    InputRaw all;
+    memset(&all, 0, sizeof(all));
+    for (int slot = 0; slot < 4; slot++) {
+        InputRaw raw;
+        if (!xbox_HostInputRawPad(slot, &raw)) continue;
+        for (int s = 0; s < INPUT_SRC_COUNT; s++)
+            if (raw.src[s] > all.src[s]) all.src[s] = raw.src[s];
+    }
+    for (int what = 0; what < 2; what++)
+        for (Chord &c : g_song_chords[what]) {
+            bool held = true, names_l3 = false;
+            for (int i = 0; i < c.n; i++) {
+                held = held && all.src[c.src[i]] >= 16384;
+                names_l3 = names_l3 || c.src[i] == INPUT_SRC_LEFT_STICK_CLICK;
+            }
+            if (!names_l3 && all.src[INPUT_SRC_LEFT_STICK_CLICK] >= 16384) held = false;
+            if (held && !c.fired) song_cursor_request(what == 0 ? SONG_REQUEST_SKIP : SONG_REQUEST_RESTART, "pad");
+            c.fired = held;
+        }
+}
+
+// [songs] skip_key / restart_key: which request a key-down is, if any.
+int song_key_request(int vk)
+{
+    if (vk <= 0 || vk == g_overlay_vk) return 0;
+    if (vk == g_song_vk[0]) return SONG_REQUEST_SKIP;
+    if (vk == g_song_vk[1]) return SONG_REQUEST_RESTART;
+    return 0;
+}
+
 void set_open(bool open)
 {
     if (g_open.load() == open) return;
@@ -2509,6 +2556,9 @@ extern "C" void pc_ui_apply_settings(void)
     std::string key = get_text("ui", "overlay_key");
     int vk = xbox_InputMap_KeyFromName(key.c_str());
     g_overlay_vk = vk > 0 ? vk : VK_F1;
+    std::string song_keys[2] = {get_text("songs", "skip_key"), get_text("songs", "restart_key")};
+    for (int i = 0; i < 2; i++)
+        g_song_vk[i] = song_keys[i].empty() ? 0 : xbox_InputMap_KeyFromName(song_keys[i].c_str());
     parse_chords();
     if (g_ready) ui_apply_scale(g_window);
     ui_unlock();
@@ -2517,6 +2567,18 @@ extern "C" void pc_ui_apply_settings(void)
 #if defined(_WIN32)
 extern "C" int pc_ui_window_message(HWND window, UINT msg, WPARAM wp, LPARAM lp)
 {
+    if ((msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN) && !(lp & (1 << 30)) && !g_open.load()) {
+        int request = song_key_request((int)wp);
+        if (request) {
+            ui_lock();
+            bool capturing = ui_capturing();
+            ui_unlock();
+            if (!capturing) {
+                song_cursor_request(request, "key");
+                return 1;
+            }
+        }
+    }
     if ((msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN) && !(lp & (1 << 30)) && recorder_mark_vk() &&
         (int)wp == recorder_mark_vk() && (int)wp != g_overlay_vk) {
         ui_lock();
@@ -2557,6 +2619,7 @@ extern "C" void pc_ui_overlay(void *device, void *context, void *window_rtv, uns
     ui_lock();
     bool toggled = g_toggle.exchange(false);
     pad_mark_poll();
+    if (!ui_capturing() && !g_open.load()) song_pad_poll();
     if (!ui_capturing() && !g_chords.empty() && pad_toggle_pressed()) toggled = true;
     if (toggled) set_open(!g_open.load());
     if (!g_open.load()) { ui_unlock(); return; }
@@ -2744,6 +2807,7 @@ int overlay_active(void *)
     ui_lock();
     bool toggled = g_toggle.exchange(false);
     pad_mark_poll();
+    if (!ui_capturing() && !g_open.load()) song_pad_poll();
     if (!ui_capturing() && !g_chords.empty() && pad_toggle_pressed()) toggled = true;
     if (toggled) set_open(!g_open.load());
     bool open = g_open.load();
@@ -2833,6 +2897,18 @@ void overlay_draw(const D3D8VkOverlayFrame *f, void *)
 extern "C" int pc_ui_sdl_event(const void *event, float window_width, float window_height)
 {
     const SDL_Event *e = (const SDL_Event *)event;
+    if (e->type == SDL_EVENT_KEY_DOWN && !e->key.repeat && !g_open.load()) {
+        int request = song_key_request(host_posix_vk_from_scancode(e->key.scancode));
+        if (request) {
+            ui_lock();
+            bool capturing = ui_capturing();
+            ui_unlock();
+            if (!capturing) {
+                song_cursor_request(request, "key");
+                return 1;
+            }
+        }
+    }
     if (e->type == SDL_EVENT_KEY_DOWN && !e->key.repeat && recorder_mark_vk() &&
         host_posix_vk_from_scancode(e->key.scancode) == recorder_mark_vk() &&
         host_posix_vk_from_scancode(e->key.scancode) != g_overlay_vk) {

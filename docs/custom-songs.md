@@ -52,4 +52,19 @@ losing its place. Which version plays when is the game's choice; try it and see.
 The short clips the game plays on loading screens and as a fight starts are still the template
 song's own (an instrumental for Straight, "Holler If Ya Hear Me" for Interactive).
 
+## Next song, song from the start
+
+Any song, the game's or yours, in the menus and in fights:
+
+| | Pad | Keyboard |
+|---|---|---|
+| Next song | hold the right stick in (R3), press D-pad right | F8 |
+| The song from its start | hold the right stick in (R3), press D-pad left | F7 |
+
+The game does not use the stick clicks, so holding R3 changes nothing else; the D-pad press does
+reach the game as well (in a menu it moves the cursor one step). The shortcuts act as the game
+does when a song ends, so the song banner shows the new song. In a Story fight, "next song" moves
+on from the opponent's own song to your Beatbox list. Change or turn them off on the launcher's
+Songs page (Shortcuts) or in [`[songs]`](settings-reference.md).
+
 Settings: [`[songs]`](settings-reference.md). How it works: [research notes](research/custom-songs.md).
