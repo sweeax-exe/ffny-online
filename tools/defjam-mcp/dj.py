@@ -10,7 +10,7 @@ the exit code is 1 on any failure.
            [--spectators 1]
     python tools/defjam-mcp/dj.py scenario offline [--type 0] [--venue 1] [--f0 55] [--f1 22] [--human]
            [--bot] [--fast-ko 600] [--turbo] [--fixture <save folder>]
-    python tools/defjam-mcp/dj.py scenario boot [--goto battle|story|rewards|online|slotN]
+    python tools/defjam-mcp/dj.py scenario boot [--goto battle|story|rewards|online|slotN|exit]
     python tools/defjam-mcp/dj.py scenario gallery [--page-ms 1500]
     python tools/defjam-mcp/dj.py scenario social [--off] [--out logs/social-2a]   (the chat window: two copies,
            a local account service with -social; --off: its switch off, one copy, nothing new may show;
@@ -217,7 +217,7 @@ def main(argv=None):
     sc.add_argument("--turbo", action="store_true", help="no flip pacing or vsync wait (measured: no gain, the fight runs on the guest timer)")
     sc.add_argument("--fixture", help="a folder of save files copied over the copy's saves")
     sc.add_argument("--page-ms", type=int, default=1500)
-    sc.add_argument("--goto", help="boot: then this main-menu entry by name (story, battle, rewards, online, slotN)")
+    sc.add_argument("--goto", help="boot: then this main-menu entry by name (story, battle, rewards, online, slotN), or exit: the EXIT prompt, NO three ways, then YES (the game must quit with code 0)")
     sc.add_argument("--env", action="append", default=[], help="extra NAME=VALUE (checked against the machine rules); online: NAME@N=VALUE for copy N only")
     sc.add_argument("--copy-env", action="append", default=[],
                     help="online: COPY:NAME=VALUE, an extra variable for one copy only (checked as --env)")

@@ -3488,6 +3488,10 @@ std::atomic<bool> g_open(false);
 std::atomic<bool> g_toggle(false);
 std::atomic<bool> g_note_shown(false);  // F9's "What's wrong?" box is up (pc_ui_report_ask)
 bool g_online = false;              // the overlay shows the online screens (the main menu's ONLINE)
+bool g_exit = false;                // the overlay shows the main menu's QUIT FFNY ONLINE? prompt
+std::atomic<bool> g_exit_req{false};    // ESC or a click on the EXIT chip (window thread)
+std::atomic<int> g_menu_eats_back{0};   // the title reads no BACK (VIEW) on the main menu (game thread)
+bool g_exit_view_down = true;       // the pad's VIEW was held last frame (true: a held one never opens it)
 bool g_just_opened = false;
 bool g_ready = false;               // the context and backends exist (under the lock)
 #if defined(_WIN32)
@@ -3599,7 +3603,7 @@ void set_open(bool open)
     if (g_open.load() == open) return;
     g_open = open;
     g_just_opened = open;
-    if (!open) g_online = false;
+    if (!open) g_online = g_exit = false;
     if (open) { g_hold_input = false; xbox_HostInputSetUiActive(1); }
     else g_hold_input = true;           // released in release_input_when_idle
 #if !defined(_WIN32)
@@ -4060,6 +4064,10 @@ extern "C" void pc_ui_report_shot(const char *path) { (void)path; }
 extern "C" int pc_ui_report_ask(const char *path) { (void)path; return 0; }
 #endif
 
+// The main menu's own BACK handler sends it to the title screen, as B does; on the main menu VIEW opens
+// EXIT instead, so the title's pad reads (sub_0027E075, src/recomp_manual.c) lose the BACK bit there.
+extern "C" int pc_ui_menu_eats_back(void) { return g_menu_eats_back.load(std::memory_order_relaxed); }
+
 extern "C" int pc_ui_overlay_open(void) { return g_open.load() || g_note_shown.load() ? 1 : 0; }
 
 extern "C" void pc_ui_apply_settings(void)
@@ -4096,6 +4104,19 @@ extern "C" int pc_ui_window_message(HWND window, UINT msg, WPARAM wp, LPARAM lp)
         ui_unlock();
         if (!capturing) {
             g_toggle = true;
+            return 1;
+        }
+    }
+    // EXIT on the main menu (online_screen.h): ESC or a click on its chip opens the prompt. The key or
+    // click is kept from the game: the menu must not see it.
+    if (!note && !g_open.load() &&
+        ((msg == WM_KEYDOWN && (int)wp == VK_ESCAPE && !(lp & (1 << 30))) || msg == WM_LBUTTONDOWN)) {
+        ui_lock();
+        bool want = !ui_capturing() && online_screen::exit_wanted() &&
+                    (msg == WM_KEYDOWN || online_screen::exit_chip_at((float)(short)LOWORD(lp), (float)(short)HIWORD(lp)));
+        ui_unlock();
+        if (want) {
+            g_exit_req = true;
             return 1;
         }
     }
@@ -4157,6 +4178,24 @@ extern "C" void pc_ui_overlay(void *device, void *context, void *window_rtv, uns
     if (online_screen::take_open_request()) {      // ONLINE chosen in the game's main menu
         set_open(true);
         g_online = true;
+    }
+    {   // EXIT on the main menu: the pad's VIEW (a new press), ESC or the chip (pc_ui_window_message)
+        bool view = false;
+        for (int slot = 0; slot < 4; slot++) {
+            InputRaw raw;
+            if (xbox_HostInputRawPad(slot, &raw) && raw.src[INPUT_SRC_BACK] >= 16384) view = true;
+        }
+        bool ptt = recomp_settings_get("online", "voice_pad", 0) == 1;     // VIEW is push-to-talk
+        bool view_press = view && !g_exit_view_down && !ptt;
+        g_exit_view_down = view;
+        g_menu_eats_back = online_screen::exit_wanted() && !ptt ? 1 : 0;
+        bool req = g_exit_req.exchange(false);
+        if (!g_open.load() && !g_note.open && !toggled && online_screen::exit_wanted() &&
+            (req || view_press || online_screen::take_exit_test_request())) {
+            set_open(true);
+            g_exit = true;
+            online_screen::exit_prompt_begin();
+        }
     }
     // Closed, the overlay still draws the versus screen while a room's match loads (it takes no
     // input), and the ONLINE entry's art on the main menu.
@@ -4240,6 +4279,14 @@ extern "C" void pc_ui_overlay(void *device, void *context, void *window_rtv, uns
         }
     } else if (g_online) {
         if (!online_screen::draw(io.DisplaySize)) close_request = true;
+    } else if (g_exit) {
+        int answer = g_note.open ? 0 : online_screen::draw_exit_prompt(io.DisplaySize);
+        if (answer == 2 && g_window) {
+            // the window's own close: the log line, the pads stopped, exit code 0 (d3d11_translator.c)
+            PostMessageW(g_window, WM_CLOSE, 0, 0);
+        } else if (answer) {
+            close_request = true;
+        }
     } else if (g_open.load()) {
     // Dim the game and put the settings in a panel in the middle.
     if (g_just_opened) {
