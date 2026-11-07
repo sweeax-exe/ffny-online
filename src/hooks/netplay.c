@@ -1138,7 +1138,12 @@ static void send_data(const uint8_t *payload, int len)
 {
     uint8_t b[1200];
     int n = header(b, T_DATA);
+    static int mute = -1;
     if (!N.have_token || len <= 0 || len > 1150) return;
+    /* tests: RECOMP_TEST_CP_DROP=3 is =2, and from the first START on none of this PC's data goes out
+     * (as the relay forwarded none of it in F9 f899b3) */
+    if (mute < 0) mute = getenv("RECOMP_TEST_CP_DROP") && atoi(getenv("RECOMP_TEST_CP_DROP")) >= 3;
+    if (mute && N.start_seed && payload[0] != P_VOICE) return;
     memcpy(b + n, N.token, 8); n += 8;
     memcpy(b + n, payload, (size_t)len); n += len;
     send_raw(b, n);
@@ -2723,6 +2728,15 @@ static void on_record(const uint8_t *b, int len)
         N.cp_acked = crc;
         if (!crc && N.cp_mine_state > 0) N.cp_tries = 99;     /* refused: do not repeat */
     } else if (slot < ROOMSLOTS) {
+        /* tests: RECOMP_TEST_CP_DROP=1 drops the other members' records until the first START (it
+         * fetches them with RECGET), =2 drops every one (the START's wait for them gives up) */
+        static int drop = -1;
+        if (drop < 0) drop = getenv("RECOMP_TEST_CP_DROP") ? atoi(getenv("RECOMP_TEST_CP_DROP")) : 0;
+        if (n && (drop >= 2 || (drop == 1 && !N.start_seed))) {
+            LeaveCriticalSection(&g_cs);
+            fprintf(stderr, "[NETPLAY] tests: slot %d's record dropped (RECOMP_TEST_CP_DROP)\n", slot);
+            return;
+        }
         if (n) memcpy(N.cp_rec[slot], b + 3, CP_REC_LEN);
         if (N.cp_have[slot] != (n != 0) || (n && memcmp(N.cp_rec[slot], b + 3, CP_REC_LEN))) N.roomv.version++;
         N.cp_have[slot] = n != 0;
@@ -3488,16 +3502,24 @@ static DWORD WINAPI net_thread(LPVOID unused)
             if (n) send_raw(fb, n);
         }
         if (N.cp_waiting) {
-            int complete, late;
+            int complete, late, left;
             AutoMatch wm;
             EnterCriticalSection(&g_cs);
-            complete = cp_records_complete(now - N.cp_get_sent >= RETRY_MS);
+            /* the room said a player of this START left meanwhile (on_room: lockstep off): nothing
+             * is set up, and the wait ends now, not after CP_WAIT_MS of asking for a record */
+            left = !N.lockstep;
+            complete = !left && cp_records_complete(now - N.cp_get_sent >= RETRY_MS);
             if (now - N.cp_get_sent >= RETRY_MS) N.cp_get_sent = now;
             late = now - N.cp_wait_since >= CP_WAIT_MS;
             wm = N.cp_wait_m;
-            if (complete || late) InterlockedExchange(&N.cp_waiting, 0);
+            if (complete || late || left) InterlockedExchange(&N.cp_waiting, 0);
             LeaveCriticalSection(&g_cs);
-            if (complete) {
+            if (left) {
+                fprintf(stderr, "[NETPLAY] a player left while this PC waited for a created fighter's record: "
+                        "the match is not set up\n");
+                end_hub_match("The other player left before the fight started.");
+                toast(6000, "The other player left before the fight started.");
+            } else if (complete) {
                 fprintf(stderr, "[NETPLAY] the created fighters' records are here\n");
                 automatch_request(&wm);
             } else if (late) {
@@ -6531,11 +6553,15 @@ void netplay_on_step(void)
             int declined = late >= 0 && late < MAXP && N.rematch_want[late] == REMATCH_NO && g_steps_match[late] != N.match &&
                            !(N.gone_mask >> late & 1);     /* gone mid-fight: its port rests (P_GONE) */
             if (declined) {
-                fprintf(stderr, "[NETPLAY] player %d went back to the room instead of the rematch (step %u)\n", late + 1, s);
+                /* the START's first match: that PC never set it up (it left at its START, e.g. a created
+                 * fighter's record that never came, end_hub_match) */
+                int first = N.match_count == 1;
+                fprintf(stderr, "[NETPLAY] player %d went back to the room instead of the %s (step %u)\n", late + 1,
+                        first ? "match" : "rematch", s);
                 InterlockedExchange(&N.lockstep, 0);
                 set_status("The other player went back to the room; this fight runs offline.");
-                toast(10000, "%s went back to the room instead of the rematch: START, then Quit, goes back too.",
-                      player_name(late));
+                toast(10000, "%s went back to the room instead of the %s: START, then Quit, goes back too.",
+                      player_name(late), first ? "fight" : "rematch");
                 break;
             }
             /* The games went out of sync earlier in this match (check_hashes): from then on each PC plays its
@@ -6560,8 +6586,16 @@ void netplay_on_step(void)
                     break;
                 }
             }
+            /* At the fight's start a player this PC has heard nothing from since the START is not in
+             * this match: a PC in it sends its P_RTT every 100 ms from the START until its fight is under
+             * way, however long it loads, and no entry of this match came from it either. Waiting
+             * START_LIMIT_MS for it froze the picture for 90 s (F9 0ee740, build 61: the other PC gave
+             * up at its START, waiting for a created fighter's record, and none of its packets came);
+             * STALL_LIMIT_MS is enough. */
+            int unheard = N.lobby && !N.watching && late >= 0 && late < MAXP && N.peer_rtt[late] < 0 &&
+                          g_steps_match[late] != N.match && N.match_count == 1;
             if (now - waited_since > (decided ? DECIDED_LIMIT_MS :
-                                      need <= (uint32_t)N.delay + 1 ? START_LIMIT_MS : STALL_LIMIT_MS)) {
+                                      need <= (uint32_t)N.delay + 1 && !unheard ? START_LIMIT_MS : STALL_LIMIT_MS)) {
                 uint32_t u;
                 if (decided) {
                     fprintf(stderr, "[NETPLAY] the match is decided and player %d went on ahead (step %u): the rest "
@@ -6628,6 +6662,13 @@ void netplay_on_step(void)
                               "a drop on your side can count as your loss. START quits.", (quiet + 500) / 1000);
                         break;
                     }
+                }
+                if (unheard) {
+                    fprintf(stderr, "[NETPLAY] player %d sent nothing since the START: it is not in this match\n", late + 1);
+                    set_status("A player never joined the match; it runs offline.");
+                    toast(10000, "%s never joined the fight: it goes on offline and won't count. START quits.",
+                          player_name(late));
+                    break;
                 }
                 set_status("A player stopped answering during the fight; continuing offline.");
                 if (late >= 0 && N.fighting_seen && need > (uint32_t)N.delay + 60 && !N.desync) {
