@@ -75,6 +75,18 @@ std::string utf8(const fs::path &p)
 }
 fs::path from_utf8(const std::string &s) { return fs::u8path(s); }
 
+// An update's downloads stop when the game starts (update() sets it for its thread).
+thread_local const std::function<bool()> *t_go_on = nullptr;
+bool stopped() { return t_go_on && *t_go_on && !(*t_go_on)(); }
+const char *const kStopped = "The game started; the graphics pack update waits for the next launcher start.";
+
+// ReShade and its add-ons write their own settings back when the program closes: ours to replace.
+bool settings_file(const std::string &f)
+{
+    std::string ext = from_utf8(f).extension().string();
+    return _stricmp(ext.c_str(), ".ini") == 0 || _stricmp(ext.c_str(), ".cfg") == 0 || _stricmp(ext.c_str(), ".cache") == 0;
+}
+
 // ---- a small JSON reader, enough for graphics.json ----
 struct Json
 {
@@ -447,6 +459,8 @@ void write_record(const fs::path &data, const Record &r)
         std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
         out << "# FFNY Online: the Enhanced graphics files in the game folder (removed exactly by Turn off)\n";
         out << "version " << r.version << "\npreset " << r.preset << "\nbin " << utf8(r.bin) << "\n";
+        if (!r.base_sha.empty()) out << "base-sha256 " << r.base_sha << "\n";
+        if (!r.preset_sha.empty()) out << "preset-sha256 " << r.preset_sha << "\n";
         for (auto &d : r.dirs) out << "dir " << d << "\n";
         for (auto &f : r.files) out << "file " << f << "\n";
     }
@@ -483,6 +497,8 @@ Record read_record(const fs::path &data)
         if (k == "version") r.version = v;
         else if (k == "preset") r.preset = v;
         else if (k == "bin") r.bin = from_utf8(v);
+        else if (k == "base-sha256") r.base_sha = v;
+        else if (k == "preset-sha256") r.preset_sha = v;
         else if (k == "dir" && safe_rel(v)) r.dirs.push_back(v);
         else if (k == "file" && safe_rel(v)) r.files.push_back(v);
     }
@@ -704,6 +720,7 @@ fs::path ensure_archive(const Archive &a, const fs::path &cache, const Progress 
     fs::remove(final_path, ec);
     auto list = servers();
     for (int attempt = 0; attempt < 6; attempt++) {
+        if (stopped()) { say(error, kStopped); return fs::path(); }     // the .part stays: resumed next time
         uint64_t have = fs::exists(part, ec) ? fs::file_size(part, ec) : 0;
         if (ec) have = 0;
         if (have > a.size) { fs::remove(part, ec); have = 0; }
@@ -719,7 +736,7 @@ fs::path ensure_archive(const Archive &a, const fs::path &cache, const Progress 
                     if (!out) return false;
                     if (!partial) got = 0;
                 }
-                if (got + n > a.size) return false;
+                if (got + n > a.size || stopped()) return false;
                 if (fwrite(d, 1, n, out.get()) != n) return false;
                 got += n;
                 if (progress) progress(got, a.size);
@@ -780,9 +797,7 @@ bool install(const Manifest &m, const fs::path &bin, const fs::path &data, const
     for (auto &f : all) {
         // ReShade and its add-ons write their own settings back when the program closes, so after Turn off these
         // came back and every Turn on was refused (2026-11-05). Settings are ours to replace; programs are not.
-        std::string ext = from_utf8(f).extension().string();
-        if (_stricmp(ext.c_str(), ".ini") == 0 || _stricmp(ext.c_str(), ".cfg") == 0 || _stricmp(ext.c_str(), ".cache") == 0)
-            continue;
+        if (settings_file(f)) continue;
         if (fs::exists(bin / from_utf8(f), ec)) {       // the proxy's own name counts: a dxgi.dll here is foreign
             say(error, "The game folder already has " + f + ", which this launcher did not install. Remove it "
                        "(another ReShade or mod?) and try again; nothing was changed.");
@@ -800,6 +815,8 @@ bool install(const Manifest &m, const fs::path &bin, const fs::path &data, const
     r.version = m.version;
     r.preset = preset;
     r.bin = bin;
+    r.base_sha = m.base.sha256;
+    r.preset_sha = preset_archive(m, preset).sha256;
     r.files = all;
     for (auto &f : r.files) f = on_disk_name(f);
     std::set<std::string> dirs;
@@ -833,8 +850,246 @@ bool switch_preset(const Manifest &m, const fs::path &data, const std::string &p
         }
     if (!extract(pre, r.bin, preset_files(m, preset), error)) return false;
     r.preset = preset;
+    // from this manifest: when it is newer than the installed base the update brings that next
+    r.preset_sha = preset_archive(m, preset).sha256;
     write_record(data, r);
     fprintf(stderr, "[GRAPHICS] preset now %s\n", preset.c_str());
+    return true;
+}
+
+// ---- the update: changed archives only, unpacked beside bin, then switched over whole ----
+namespace
+{
+const char *const kStage = "ffny-graphics-new", *const kBackup = "ffny-graphics-old";
+
+fs::path journal_path(const fs::path &data) { return data / "graphics" / "update-journal.txt"; }
+
+// What the switch does, written before it starts: 'a' a new file, 's' a file replaced, 'd' a file the new
+// pack no longer has (both of these go to the backup first), 'm' a folder it made.
+struct Journal { std::string version; fs::path bin; std::vector<std::pair<char, std::string>> items; };
+
+bool write_journal(const fs::path &data, const Journal &j)
+{
+    std::error_code ec;
+    fs::path tmp = journal_path(data);
+    tmp += ".new";
+    {
+        std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
+        out << "version " << j.version << "\nbin " << utf8(j.bin) << "\n";
+        for (auto &i : j.items) out << i.first << " " << i.second << "\n";
+        if (!out) return false;
+    }
+    fs::rename(tmp, journal_path(data), ec);
+    return !ec;
+}
+
+bool read_journal(const fs::path &data, Journal &j)
+{
+    std::ifstream in(journal_path(data), std::ios::binary);
+    if (!in) return false;
+    std::string line;
+    while (std::getline(in, line)) {
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        if (!line.compare(0, 8, "version ")) j.version = line.substr(8);
+        else if (!line.compare(0, 4, "bin ")) j.bin = from_utf8(line.substr(4));
+        else if (line.size() > 2 && line[1] == ' ' && strchr("asdm", line[0]) && safe_rel(line.substr(2)))
+            j.items.push_back({line[0], line.substr(2)});
+    }
+    return !j.bin.empty();
+}
+
+// Removes a folder of ours; a file the program holds is parked and deleted at a later start.
+void clear_folder(const fs::path &data, const fs::path &dir)
+{
+    std::error_code ec;
+    if (!fs::exists(dir, ec)) return;
+    fs::remove_all(dir, ec);
+    if (!ec) return;
+    std::vector<fs::path> left;
+    for (auto it = fs::recursive_directory_iterator(dir, ec); !ec && it != fs::recursive_directory_iterator(); it.increment(ec))
+        if (it->is_regular_file(ec) && it->path().extension() != ".ffny-delete") left.push_back(it->path());
+    for (auto &p : left) delete_or_park(data, p);
+    fs::remove_all(dir, ec);
+}
+
+// Puts the old pack back: the new files out, the backup in. False leaves the journal for the next start.
+bool roll_back(const fs::path &data, const Journal &j)
+{
+    std::error_code ec;
+    fs::path backup = j.bin / kBackup;
+    bool ok = true;
+    for (auto i = j.items.rbegin(); i != j.items.rend(); ++i) {
+        fs::path t = j.bin / from_utf8(i->second), b = backup / from_utf8(i->second);
+        if (i->first == 'a') {
+            if (!delete_or_park(data, t)) ok = false;
+        } else if (i->first == 's' || i->first == 'd') {
+            if (!fs::exists(b, ec)) continue;           // not moved yet: the old one is still in place
+            fs::rename(b, t, ec);
+            if (ec && delete_or_park(data, t)) fs::rename(b, t, ec);
+            if (ec) ok = false;
+        }
+    }
+    std::vector<std::string> dirs;
+    for (auto &i : j.items) if (i.first == 'm') dirs.push_back(i.second);
+    std::sort(dirs.begin(), dirs.end(), [](const std::string &a, const std::string &b) { return a.size() > b.size(); });
+    for (auto &d : dirs) {
+        fs::path p = j.bin / from_utf8(d);
+        if (fs::is_directory(p, ec) && fs::is_empty(p, ec)) fs::remove(p, ec);
+    }
+    if (!ok) {
+        fprintf(stderr, "[GRAPHICS] could not put the old pack fully back yet; trying again at the next start\n");
+        fflush(stderr);
+        return false;
+    }
+    clear_folder(data, j.bin / kStage);
+    clear_folder(data, backup);
+    fs::remove(journal_path(data), ec);
+    fprintf(stderr, "[GRAPHICS] update undone: the pack is as it was\n");
+    fflush(stderr);
+    return true;
+}
+} // namespace
+
+std::mutex &bin_lock()
+{
+    static std::mutex m;
+    return m;
+}
+
+void recover_update(const fs::path &data)
+{
+    Journal j;
+    if (!read_journal(data, j)) return;
+    std::lock_guard<std::mutex> lock(bin_lock());
+    Record r = read_record(data);
+    if (r.present && r.version == j.version) {       // the record was written: the new pack is complete
+        std::error_code ec;
+        clear_folder(data, j.bin / kStage);
+        clear_folder(data, j.bin / kBackup);
+        fs::remove(journal_path(data), ec);
+        return;
+    }
+    roll_back(data, j);
+}
+
+bool update(const Manifest &m, const fs::path &data, const Progress &progress, const std::function<bool()> &go_on,
+            std::string *error, bool *updated)
+{
+    std::error_code ec;
+    if (updated) *updated = false;
+    recover_update(data);
+    Record r = read_record(data);
+    if (!r.present || r.files.empty() || r.version == m.version || r.bin.empty() || !fs::is_directory(r.bin, ec)) return true;
+    std::string preset = r.preset == "quality" ? "quality" : "performance";
+    const Archive &pa = preset_archive(m, preset);
+    struct Part { const Archive *a; const std::vector<std::string> *files; };
+    std::vector<Part> changed;
+    if (r.base_sha != m.base.sha256) changed.push_back({&m.base, &m.base_files});
+    if (r.preset_sha != pa.sha256) changed.push_back({&pa, &preset_files(m, preset)});
+
+    std::vector<std::string> next, staged;          // on-disk names: the whole new pack, and what comes new
+    for (auto *list : {&m.base_files, &preset_files(m, preset)})
+        for (auto &f : *list)
+            if (std::find(next.begin(), next.end(), on_disk_name(f)) == next.end()) next.push_back(on_disk_name(f));
+    for (auto &p : changed)
+        for (auto &f : *p.files) staged.push_back(on_disk_name(f));
+    std::set<std::string> old(r.files.begin(), r.files.end()), next_set(next.begin(), next.end());
+    for (auto &f : next)
+        if (!old.count(f) && !settings_file(f) && (fs::exists(r.bin / from_utf8(f), ec) ||
+                                                    (f == kParked && fs::exists(r.bin / kProxy, ec)))) {
+            say(error, "The game folder already has " + f + ", which this launcher did not install; the installed "
+                       "pack is unchanged.");
+            return false;
+        }
+
+    // the downloads, checked against the signed manifest; the old pack is untouched meanwhile
+    struct Scope { Scope(const std::function<bool()> *g) { t_go_on = g; } ~Scope() { t_go_on = nullptr; } } scope(&go_on);
+    std::vector<fs::path> zips;
+    for (auto &p : changed) {
+        fs::path z = ensure_archive(*p.a, data / "graphics" / "cache", progress, error);
+        if (z.empty()) {
+            if (!stopped()) return false;
+            say(error, kStopped);           // waits: the old pack is in place, the .part is resumed next time
+            return true;
+        }
+        zips.push_back(z);
+    }
+    if (stopped()) { say(error, kStopped); return true; }
+    fs::path stage = r.bin / kStage, backup = r.bin / kBackup;
+    clear_folder(data, stage);
+    clear_folder(data, backup);
+    for (size_t i = 0; i < zips.size(); i++)
+        if (!extract(zips[i], stage, *changed[i].files, error)) {
+            clear_folder(data, stage);
+            return false;
+        }
+
+    // the switch: nothing else changes bin meanwhile, and Play waits for it (a few renames)
+    std::lock_guard<std::mutex> lock(bin_lock());
+    Record now = read_record(data);
+    if (!now.present || now.files.empty()) { clear_folder(data, stage); return true; }      // turned off meanwhile
+    if (stopped()) { clear_folder(data, stage); say(error, kStopped); return true; }
+    if (now.version != r.version || now.preset != r.preset || !fs::equivalent(now.bin, r.bin, ec)) {
+        clear_folder(data, stage);
+        say(error, "The graphics pack changed meanwhile; the update runs again at the next start.");
+        return false;
+    }
+    Journal j;
+    j.version = m.version;
+    j.bin = r.bin;
+    std::set<std::string> made;
+    for (auto &f : staged) {
+        j.items.push_back({fs::exists(r.bin / from_utf8(f), ec) ? 's' : 'a', f});
+        for (size_t s = f.find('/'); s != std::string::npos; s = f.find('/', s + 1))
+            if (!fs::exists(r.bin / from_utf8(f.substr(0, s)), ec)) made.insert(f.substr(0, s));
+    }
+    for (auto &f : r.files)
+        if (!next_set.count(f)) j.items.push_back({'d', f});
+    for (auto &d : made) j.items.push_back({'m', d});
+    if (!write_journal(data, j)) {
+        clear_folder(data, stage);
+        say(error, "Cannot write in the launcher's data folder; the installed pack is unchanged.");
+        return false;
+    }
+    std::string failed;
+    for (auto &i : j.items) {
+        if (i.first == 'm') continue;
+        fs::path t = r.bin / from_utf8(i.second), b = backup / from_utf8(i.second);
+        if ((i.first == 's' || i.first == 'd') && fs::exists(t, ec)) {
+            fs::create_directories(b.parent_path(), ec);
+            fs::rename(t, b, ec);
+            if (ec) { failed = i.second; break; }
+        }
+        if (i.first == 's' || i.first == 'a') {
+            fs::create_directories(t.parent_path(), ec);
+            fs::rename(stage / from_utf8(i.second), t, ec);
+            if (ec) { failed = i.second; break; }
+        }
+    }
+    Record nr = r;
+    if (failed.empty()) {
+        nr.version = m.version;
+        nr.files = next;
+        nr.base_sha = m.base.sha256;
+        nr.preset_sha = pa.sha256;
+        std::set<std::string> dirs(r.dirs.begin(), r.dirs.end());
+        dirs.insert(made.begin(), made.end());
+        nr.dirs.assign(dirs.begin(), dirs.end());
+        write_record(data, nr);                     // the commit
+        if (read_record(data).version != m.version) failed = "installed.txt";
+    }
+    if (!failed.empty()) {
+        roll_back(data, j);
+        say(error, "Cannot replace " + failed + " (in use?); the installed pack is unchanged.");
+        return false;
+    }
+    fs::remove(journal_path(data), ec);
+    clear_folder(data, stage);
+    clear_folder(data, backup);
+    fprintf(stderr, "[GRAPHICS] updated %s -> %s (%s): %zu archive(s) downloaded, %zu files replaced or added\n",
+            r.version.c_str(), m.version.c_str(), preset.c_str(), changed.size(), staged.size());
+    fflush(stderr);
+    if (updated) *updated = true;
     return true;
 }
 

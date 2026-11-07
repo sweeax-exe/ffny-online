@@ -4,11 +4,13 @@
 #include "graphics_mod.h"
 
 #include <cstdio>
+#include <atomic>
 #include <cstring>
 #include <mutex>
 #include <thread>
 
 #include "pc_ui_actions.h"
+#include "pc_launcher_saves.h"
 extern "C" {
 #include "recomp_settings.h"
 #include "pc_settings.h"
@@ -60,14 +62,17 @@ void finish(const std::string &message, int tone)
     refresh_locked();
 }
 
-Progress downloading()
+Progress downloading(const char *what = "Downloading the graphics pack")
 {
-    return [](uint64_t got, uint64_t total) {
+    return [what](uint64_t got, uint64_t total) {
         char t[160];
-        snprintf(t, sizeof(t), "Downloading the graphics pack: %.0f of %.0f MB", got / 1048576.0, total / 1048576.0);
+        snprintf(t, sizeof(t), "%s: %.0f of %.0f MB", what, got / 1048576.0, total / 1048576.0);
         set_progress(t, total ? (double)got / total : -1);
     };
 }
+
+std::atomic<bool> g_checking{false};    // one update check at a time
+std::atomic<bool> g_playing{false};     // Play was pressed in this process: bin is the game's from now on
 
 bool fetch(Manifest &m, std::string &error)
 {
@@ -111,7 +116,48 @@ bool start_work()
     g_view.message.clear();
     return true;
 }
+
+bool may_change_bin() { return !g_playing && !pcsaves::game_running(); }
+
+void notice(const std::string &text, int tone)
+{
+    std::lock_guard<std::mutex> lock(g_mutex);
+    g_view.notice = text;
+    g_view.notice_tone = tone;
+}
+
+// Quiet unless there is something to do: a server that cannot be reached, or the same version, says nothing.
+void run_update_check()
+{
+    Manifest m;
+    std::string error;
+    Record r = read_record(data_folder());
+    if (r.present && !r.files.empty() && fetch_manifest(m, &error) && m.version != r.version && may_change_bin() &&
+        start_work()) {
+        fprintf(stderr, "[GRAPHICS] pack %s published, %s installed: updating\n", m.version.c_str(), r.version.c_str());
+        set_progress("Updating the graphics pack...", -1);
+        bool updated = false;
+        bool ok = update(m, data_folder(), downloading("Updating the graphics pack"), may_change_bin, &error, &updated);
+        if (updated) {
+            std::string text = "Graphics pack updated to " + m.version + ".";
+            notice(text, 1);
+            finish(text, 1);
+        } else if (!ok) {
+            notice("Graphics pack update failed: see Graphics", 2);      // the card is short; the dialog says why
+            finish("Graphics pack update failed: " + error, 2);
+        } else {
+            finish("", 0);          // waits for the next start (the game started), or turned off meanwhile
+        }
+    }
+    g_checking = false;
+}
 } // namespace
+
+void check_update()
+{
+    if (!recomp_settings_get("graphics", "enabled", 0) || g_playing || g_checking.exchange(true)) return;
+    std::thread(run_update_check).detach();
+}
 
 fs::path bin_folder()
 {
@@ -168,7 +214,11 @@ void turn_off()
         // even while a download runs: its install will see the setting and the record is ours to remove
         g_view.busy = false;
     }
-    bool ok = remove(data_folder(), &error);
+    bool ok;
+    {
+        std::lock_guard<std::mutex> lock(bin_lock());      // not in the middle of an update's switch
+        ok = remove(data_folder(), &error);
+    }
     clear_guard(data_folder());
     finish(ok ? "Enhanced graphics is off; its files are removed." : error, ok ? 1 : 2);
 }
@@ -185,8 +235,9 @@ void try_again()
 void launcher_starts()
 {
     fs::path data = data_folder();
+    recover_update(data);       // an update the power cut: finished or undone, before anything else looks
     finish_pending(data);
-    tidy_proxy(data);           // before anything looks at the files: an older install's dxgi.dll gets its new name
+    tidy_proxy(data);          // before anything looks at the files: an older install's dxgi.dll gets its new name
     bool skip = guard_note_launcher_start(data);
     {
         std::lock_guard<std::mutex> lock(g_mutex);
@@ -211,7 +262,10 @@ void launcher_starts()
     bool here = r.present && fs::equivalent(r.bin, bin_folder(), ec);
     bool complete = here;
     for (size_t i = 0; complete && i < r.files.size(); i++) complete = fs::exists(r.bin / fs::u8path(r.files[i]), ec);
-    if (complete) return;
+    if (complete) {
+        check_update();
+        return;
+    }
     fprintf(stderr, "[GRAPHICS] enabled but %s; installing it here\n",
             r.present && !here ? "installed for another version" : "not complete in this game folder");
     if (start_work()) std::thread(run_install, r.preset.empty() ? preset : r.preset, true).detach();
@@ -349,6 +403,8 @@ extern "C" int graphics_mod_wanted(void)
 extern "C" int graphics_mod_before_start(void)
 {
     using namespace gfx;
+    std::lock_guard<std::mutex> lock(bin_lock());      // an update's switch finishes first; none starts after this
+    g_playing = true;
     finish_pending(data_folder());
     return begin_play(data_folder(), bin_folder(), recomp_settings_get("graphics", "enabled", 0) != 0) ? 1 : 0;
 }

@@ -73,13 +73,16 @@ void graphics_card(ImVec2 a, ImVec2 b, float s)
     else snprintf(head, sizeof(head), "Original graphics");
     if (v.busy && !v.progress.empty()) snprintf(line, sizeof(line), "%s", v.progress.c_str());
     else if (v.skip_once) snprintf(line, sizeof(line), "Off for this start: see Graphics");
+    else if (!v.notice.empty()) snprintf(line, sizeof(line), "%s", v.notice.c_str());     // the update's outcome
     else if (v.installed) snprintf(line, sizeof(line), "Community ReShade + DLSS presets");
     else snprintf(line, sizeof(line), "Optional community presets");    // ", optional" was cut off
     status_dot(dl, at, s, v.installed ? k_red_hi : v.busy ? k_gold : ImVec4(0.6f, 0.6f, 0.64f, 1));
     float right = b.x - 124 * s;
     dl->PushClipRect(a, ImVec2(right, b.y), true);
     card_line(dl, ImVec2(at.x + 18 * s, at.y), s, k_white, head, true);
-    card_line(dl, ImVec2(at.x, at.y + 26 * s), s, v.skip_once ? k_gold : ImVec4(0.80f, 0.80f, 0.82f, 1), line, false);
+    bool noted = !(v.busy && !v.progress.empty()) && !v.skip_once && !v.notice.empty();
+    ImVec4 tone = v.skip_once || (noted && v.notice_tone == 2) ? k_gold : noted ? k_green : ImVec4(0.80f, 0.80f, 0.82f, 1);
+    card_line(dl, ImVec2(at.x, at.y + 26 * s), s, tone, line, false);
     dl->PopClipRect();
     if (glass_button("##graphics_card", "Graphics", ImVec2(b.x - 112 * s, a.y + 40 * s), ImVec2(92 * s, 30 * s), s,
                      GLASS_PLAIN, bold_font(), 14 * s))
@@ -113,6 +116,7 @@ static void graphics_dialog(ImVec2 o, float w, float h, float s)
     ImGui::PopStyleVar(2);
     ImGui::PopStyleColor();
     if (!open) return;
+    if (ImGui::IsWindowAppearing()) gfx::check_update();    // a pack published since the start comes now
     gfx_test_steps();
     auto v = gfx::view();
     std::string adapter, why;

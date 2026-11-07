@@ -31,11 +31,17 @@ def make_zip(path, files):
             z.writestr(name, data)
 
 
-def sources(tmp, extra_diff=False):
+TEXTURE = os.urandom(5000)
+
+
+def sources(tmp, extra_diff=False, preset_tag=b'', base_add=None, base_drop=()):
     shared = {'dxgi.dll': b'MZ fake proxy' * 50, 'reshade-shaders/Shaders/a.fx': b'shader a',
-              'reshade-shaders/Textures/t.png': os.urandom(5000), 'THIRD-PARTY-NOTICES.txt': b'notices'}
-    q = dict(shared, **{n: b'quality ' + n.encode() for n in PRESETS})
-    p = dict(shared, **{n: b'performance ' + n.encode() for n in PRESETS})
+              'reshade-shaders/Textures/t.png': TEXTURE, 'THIRD-PARTY-NOTICES.txt': b'notices'}
+    shared.update(base_add or {})
+    for name in base_drop:
+        del shared[name]
+    q = dict(shared, **{n: b'quality ' + preset_tag + n.encode() for n in PRESETS})
+    p = dict(shared, **{n: b'performance ' + preset_tag + n.encode() for n in PRESETS})
     if extra_diff:
         p['dxgi.dll'] = b'other'
     make_zip(tmp / 'q.zip', q)
@@ -116,11 +122,18 @@ int main(int argc, char **argv)
         return 0;
     }
     if (cmd == "remove") { bool ok = remove(data, &error); printf("%s %s\n", ok ? "OK" : "FAIL", error.c_str()); return 0; }
+    if (cmd == "recover") { recover_update(data); printf("OK\n"); return 0; }
     Manifest m;
     if (!fetch_manifest(m, &error)) { printf("FAIL %s\n", error.c_str()); return 0; }
     bool ok = false;
     if (cmd == "install") ok = install(m, fs::u8path(argv[3]), data, argv[4], nullptr, &error);
     else if (cmd == "switch") ok = switch_preset(m, data, argv[3], nullptr, &error);
+    else if (cmd == "update" || cmd == "update-game-running") {
+        bool running = cmd != "update", updated = false;
+        ok = update(m, data, nullptr, [running] { return !running; }, &error, &updated);
+        printf("%s %s %s\n", ok ? "OK" : "FAIL", updated ? "UPDATED" : "SAME", error.c_str());
+        return 0;
+    }
     printf("%s %s\n", ok ? "OK" : "FAIL", error.c_str());
     return 0;
 }
@@ -292,6 +305,127 @@ def test_interrupted_download_resumes(tool, server, tmp_path):
     ranges = [r for path, r in Handler.log if path.endswith(name)]
     assert ranges[0] is None and ranges[-1] == 'bytes=3000-'
     assert (bin_dir / 'dxgi.ffny-mod').read_bytes() == b'MZ fake proxy' * 50
+
+
+# ---- updates: a newer graphics.json, changed archives only, switched over whole ----
+
+def publish(server, version, **kw):
+    """A new pack version on the test server, signed with the same TEST key."""
+    src = server['tmp'] / f'src-{version}'
+    src.mkdir()
+    sources(src, **kw)
+    pack.main([str(src / 'q.zip'), str(src / 'p.zip'), '--out', str(server['out']), '--version', version,
+               '--sign-test-key', str(server['pem'])])
+    return json.loads((server['out'] / 'graphics.json').read_text(encoding='utf-8'))
+
+
+def snapshot(bin_dir):
+    return {f: (bin_dir / f).read_bytes() for f in files(bin_dir)}
+
+
+def installed(tool, server, tmp_path):
+    data, bin_dir = tmp_path / 'data', tmp_path / 'bin'
+    bin_dir.mkdir()
+    (bin_dir / 'defjam_recomp.exe').write_bytes(b'game')
+    assert run(tool, server['env'], 'install', data, bin_dir, 'performance').startswith('OK')
+    return data, bin_dir
+
+
+def record_version(data):
+    return next(ln[8:] for ln in (data / 'graphics/installed.txt').read_text().splitlines() if ln.startswith('version '))
+
+
+def test_update_fetches_only_the_changed_archive(tool, server, tmp_path):
+    data, bin_dir = installed(tool, server, tmp_path)
+    assert run(tool, server['env'], 'update', data) == 'OK SAME'           # same version: nothing
+    m = publish(server, 't2', preset_tag=b'v2 ')
+    shutil.rmtree(data / 'graphics/cache')          # the hash compare decides, not a cached copy
+    Handler.log.clear()
+    assert run(tool, server['env'], 'update', data) == 'OK UPDATED'
+    got = [path for path, _ in Handler.log]
+    assert any(m['archives']['performance']['path'] in p for p in got)
+    assert not any('base' in p or 'quality' in p for p in got)
+    assert (bin_dir / 'ReShade.ini').read_bytes() == b'performance v2 ReShade.ini'
+    assert (bin_dir / 'dxgi.ffny-mod').read_bytes() == b'MZ fake proxy' * 50
+    assert record_version(data) == 't2'
+    assert not (bin_dir / 'ffny-graphics-new').exists() and not (bin_dir / 'ffny-graphics-old').exists()
+    assert not (data / 'graphics/update-journal.txt').exists()
+    assert run(tool, server['env'], 'update', data) == 'OK SAME'
+
+
+def test_update_of_the_base_adds_and_drops_files(tool, server, tmp_path):
+    data, bin_dir = installed(tool, server, tmp_path)
+    publish(server, 't2', base_add={'reshade-shaders/New/b.fx': b'shader b'}, base_drop=['reshade-shaders/Textures/t.png'])
+    assert run(tool, server['env'], 'update', data) == 'OK UPDATED'
+    assert (bin_dir / 'reshade-shaders/New/b.fx').read_bytes() == b'shader b'
+    assert not (bin_dir / 'reshade-shaders/Textures/t.png').exists()
+    assert (bin_dir / 'ReShade.ini').read_bytes() == b'performance ReShade.ini'
+    # Turn off still removes exactly the pack, the new folder too
+    assert run(tool, server['env'], 'remove', data).startswith('OK')
+    assert files(bin_dir) == ['defjam_recomp.exe'] and not (bin_dir / 'reshade-shaders').exists()
+
+
+def test_old_record_without_hashes_updates_everything(tool, server, tmp_path):
+    data, bin_dir = installed(tool, server, tmp_path)
+    rec = data / 'graphics/installed.txt'
+    rec.write_text(''.join(ln + '\n' for ln in rec.read_text().splitlines() if 'sha256' not in ln))
+    (bin_dir / 'reshade-shaders/Shaders/a.fx').write_bytes(b'stale')
+    publish(server, 't2', preset_tag=b'v2 ')
+    assert run(tool, server['env'], 'update', data) == 'OK UPDATED'
+    # the base counts as changed: unpacked again (from the checked cache, so not downloaded again)
+    assert (bin_dir / 'reshade-shaders/Shaders/a.fx').read_bytes() == b'shader a'
+    assert (bin_dir / 'ReShade.ini').read_bytes() == b'performance v2 ReShade.ini'
+
+
+def test_update_with_a_bad_download_keeps_the_old_pack(tool, server, tmp_path):
+    data, bin_dir = installed(tool, server, tmp_path)
+    before = snapshot(bin_dir)
+    m = publish(server, 't2', base_add={'reshade-shaders/New/b.fx': b'shader b'})
+    base = server['out'] / m['archives']['base']['path']
+    raw = bytearray(base.read_bytes())
+    raw[100] ^= 0xFF
+    base.write_bytes(bytes(raw))
+    out = run(tool, server['env'], 'update', data)
+    assert out.startswith('FAIL SAME') and 'checksum' in out
+    assert snapshot(bin_dir) == before and record_version(data) == 't1'
+
+
+def test_no_update_while_the_game_runs(tool, server, tmp_path):
+    data, bin_dir = installed(tool, server, tmp_path)
+    before = snapshot(bin_dir)
+    publish(server, 't2', preset_tag=b'v2 ')
+    out = run(tool, server['env'], 'update-game-running', data)
+    assert out.startswith('OK SAME') and 'game started' in out
+    assert snapshot(bin_dir) == before and record_version(data) == 't1'
+
+
+def test_a_file_that_cannot_be_replaced_rolls_the_switch_back(tool, server, tmp_path):
+    data, bin_dir = installed(tool, server, tmp_path)
+    before = snapshot(bin_dir)
+    m = publish(server, 't2', preset_tag=b'v2 ')
+    last = m['installs']['performance'][-1]          # the earlier preset files are already switched by then
+    with open(bin_dir / last, 'rb'):                 # held without delete sharing: it cannot be renamed
+        out = run(tool, server['env'], 'update', data)
+    assert out.startswith('FAIL SAME') and 'Cannot replace' in out
+    assert snapshot(bin_dir) == before and record_version(data) == 't1'
+    assert not (data / 'graphics/update-journal.txt').exists()
+    assert run(tool, server['env'], 'update', data) == 'OK UPDATED'     # the next try goes through
+
+
+def test_a_switch_cut_short_is_undone_at_the_next_start(tool, server, tmp_path):
+    data, bin_dir = installed(tool, server, tmp_path)
+    before = snapshot(bin_dir)
+    # as the power cut left it: one file in the backup, the new one in its place, the record still the old one
+    (bin_dir / 'ffny-graphics-old').mkdir()
+    (bin_dir / 'ReShade.ini').rename(bin_dir / 'ffny-graphics-old/ReShade.ini')
+    (bin_dir / 'ReShade.ini').write_bytes(b'new')
+    (bin_dir / 'ffny-graphics-new').mkdir()
+    (bin_dir / 'ffny-graphics-new/x.ini').write_bytes(b'staged')
+    (bin_dir / 'brand-new.fx').write_bytes(b'added')
+    (data / 'graphics/update-journal.txt').write_text(f'version t2\nbin {bin_dir}\ns ReShade.ini\na brand-new.fx\n')
+    assert run(tool, server['env'], 'recover', data) == 'OK'
+    assert snapshot(bin_dir) == before and record_version(data) == 't1'
+    assert not (data / 'graphics/update-journal.txt').exists()
 
 
 # ---- the proxy's two names and the start guard ----

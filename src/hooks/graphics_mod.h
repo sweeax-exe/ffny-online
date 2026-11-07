@@ -14,7 +14,9 @@
 // sizes and SHA-256. Downloads go to <data>/graphics/cache (resumed, retried, checked), the files that
 // were installed are recorded in <data>/graphics/installed.txt, and removal deletes exactly those (a file
 // the running program holds, such as the loaded dxgi.dll, is renamed and deleted at the next start). A
-// file already in bin that is not ours is never overwritten: the install stops and says so.
+// file already in bin that is not ours is never overwritten: the install stops and says so. An installed
+// pack follows the published one: at the launcher's start and when Graphics opens, a graphics.json with
+// another version brings the changed archives only and switches over whole (update(), below).
 //
 // Settings: [graphics] enabled, preset (performance by default, quality). RECOMP_GRAPHICS_SERVER=
 // host:port (plain HTTP, /graphics/...) points at another server; with it on this PC (127.0.0.1 or
@@ -26,6 +28,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <functional>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -59,7 +62,26 @@ bool remove(const fs::path &data, std::string *error);
 // Deletes what an earlier removal had to leave (a file the program held).
 void finish_pending(const fs::path &data);
 
-struct Record { bool present = false; std::string version, preset; fs::path bin; std::vector<std::string> files, dirs; };
+// Brings an installed pack to the manifest's version when it differs. Only the archives whose SHA-256 differs
+// from the installed one (recorded at install) are downloaded, checked like an install's and unpacked beside
+// bin first; then, under bin_lock() and only while go_on() says yes, the old files go aside and the new ones in,
+// with a journal, and the new record is the commit. Any failure puts the old pack back: never half a pack.
+// True with *updated false: nothing to do, or the game started (go_on said no) and it waits for the next time.
+bool update(const Manifest &m, const fs::path &data, const Progress &progress, const std::function<bool()> &go_on,
+            std::string *error, bool *updated);
+// An update that stopped half-way (the power went): finished when its record was written, else undone.
+void recover_update(const fs::path &data);
+// Held while the pack's files in bin change (an update's switch, Turn off) and while Play puts the proxy in place.
+std::mutex &bin_lock();
+
+struct Record
+{
+    bool present = false;
+    std::string version, preset;
+    fs::path bin;
+    std::vector<std::string> files, dirs;
+    std::string base_sha, preset_sha;   // the installed archives (empty: from before updates; all count as changed)
+};
 Record read_record(const fs::path &data);
 
 // ---- the proxy's two names and the start guard ----
@@ -89,6 +111,8 @@ struct View
     int tone = 0;                   // 0 plain, 1 done, 2 a problem
     std::string credits, notices;   // from the last manifest (credits has a default)
     bool skip_once = false;         // the next Play is without the mod (the start guard)
+    std::string notice;             // the last update's outcome, for the card ("Graphics pack updated to ...")
+    int notice_tone = 0;
 };
 View view();
 void start_enable(const std::string &preset);
@@ -96,6 +120,8 @@ void start_switch(const std::string &preset);
 void turn_off();                     // synchronous: removes the files now
 void try_again();                    // the next Play is with the mod again
 void launcher_starts();             // pending deletes, the proxy's name, the guard; re-install into a new version's bin when enabled
+                                    // or else check_update()
+void check_update();                 // in the background: a newer published pack replaces the installed one (not while the game runs)
 bool gpu_supported(std::string *adapter, std::string *why);
 fs::path bin_folder();               // where defjam_recomp.exe is
 fs::path data_folder();              // <data>/graphics lives below it
