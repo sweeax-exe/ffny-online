@@ -24,6 +24,17 @@ fighters, a pause during one):
 | Limb health label and bar | 128x128, 256x8 | y 105.5..136, already anchored | |
 | Pause panel, highest pieces | 16x32, 128x100 | y0 161.5 and below | |
 
+A second owner run (Free For All with four fighters, submissions on fighters 3 and 4, a pause) gave the bottom strip.
+Fighters 3 and 4's meter is mirrored about their HUD at the bottom:
+
+| Piece | Texture | P3 | P4 |
+|---|---|---|---|
+| Text ("TAP ANY BUTTON"), above the HUD | 128x128 | x 48.5..183.5, y 314..330 | x 465.5..590.5, y 314..330 |
+| Meter frame | 256x64 | x 41..297, y 331..395 | x 343..599, y 331..395 |
+| Fill bar (moves) | 128x8 | y 335..345 | y 335..345 |
+| Limb health label and bar | 128x128, 256x8 | y 346..368, already anchored | |
+| Pause panel, lowest pieces | 128x100 | x 146.5..267.5, y 330..346; x 190.5..223.5, y 300..316 | |
+
 A scripted four-minute fight also drew the match summary's rows straight after the fight, while the HUD still
 counts as live: rows starting at y 124..146 that are 23-26 tall (128x32, 256x32).
 
@@ -31,11 +42,13 @@ counts as live: rows starting at y 124..146 that are 23-26 tall (128x32, 256x32)
 
 A one-sided batch that starts at y 118..150, ends by y 190 and is 18 tall or less, or 60 or more, goes with the top
 strip. That takes in the meter's three pieces and leaves the pause panel (starts lower) and the summary rows (their
-height) centred. Applied to the owner's trace and to two scripted four-minute fights, it moves only the meter's
-pieces. The left-tag fixture pins these extents at 16:9 and 21:9 and fails without the rule.
+height) centred. With 3-4 fighters, the bottom strip also takes each of the bottom meter's pieces by where it starts
+and its height: a piece 60 or more tall starting at y 320..340 (frame), 12 or less starting at y 330..340 and ending by
+350 (fill bar), 18 or less starting at 308 or lower down and ending at y 326..332 (text). The pause panel's lowest
+piece (y 330..346, 16 tall) lies between them and matches none. Applied to the owner's trace and to two scripted four-minute fights, it moves only the meter's
+pieces. The left-tag fixture pins these extents at 16:9 and 21:9 and fails without either rule.
 
 ## Not covered
 
-- Fighters 3 and 4 (the bottom strip) were not traced in a submission; their meter may still stay centred.
 - 4:3 is unchanged (nothing is placed).
 - Windows D3D11 only in the trace; the classifier is shared by every backend.
