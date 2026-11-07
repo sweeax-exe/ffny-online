@@ -235,18 +235,18 @@ def test_picking_writes_the_setting(exe, save_area):
     assert rows['set'] == [['0']] and 'setting' not in rows
 
 
-def test_at_most_eight_newest_kept(exe, tmp_path):
+def test_at_most_thirty_two_newest_kept(exe, tmp_path):
     users = tmp_path / 'data/save/UserData/45410049'
     now = time.time()
-    for i in range(11):
+    for i in range(35):
         d = users / ('%012X' % (i + 1))
         d.mkdir(parents=True)
         f = d / ('F%02d' % i)
         f.write_bytes(save_file('F%02d' % i))
-        os.utime(f, (now - 1000 + 60 * i, now - 1000 + 60 * i))     # F10 newest
+        os.utime(f, (now - 1000 + 60 * i, now - 1000 + 60 * i))     # F34 newest
     rows = run(exe, tmp_path, {'DEFJAM_DATA': str(tmp_path / 'data')})
-    assert rows['count'] == [['8', '8']]
-    assert names(rows) == ['F%02d' % i for i in range(10, 2, -1)]
+    assert rows['count'] == [['32', '32']]
+    assert names(rows) == ['F%02d' % i for i in range(34, 2, -1)]
 
 
 def test_no_fighter(exe, tmp_path):
