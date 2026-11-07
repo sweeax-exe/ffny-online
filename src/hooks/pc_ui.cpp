@@ -1561,6 +1561,37 @@ static void page_pad_buttons()
     ImGui::TextWrapped("Which physical button acts as each Xbox control. Choose from the list, or press Detect and then the "
                        "button on your pad. Names are positional: south is the bottom face button (Xbox A, PlayStation cross), "
                        "east the right one, west the left, north the top.");
+    {   // One-click layouts (Farouk, 2026-11-07): the PS2 version blocks, grabs and hits hard with R1/L1, the Xbox one
+        // with the triggers, so "PS2" swaps the shoulder buttons and the triggers. The other buttons stay as they are.
+        static const char *const keys[4] = { "black", "white", "left_trigger", "right_trigger" };
+        static const char *const xbox[4] = { "left_shoulder", "right_shoulder", "left_trigger", "right_trigger" };
+        static const char *const ps2[4] = { "left_trigger", "right_trigger", "left_shoulder", "right_shoulder" };
+        bool is_xbox = true, is_ps2 = true;
+        for (int i = 0; i < 4; i++) {
+            RecompSetting *s = find("gamepad", keys[i]);
+            int cur = s ? xbox_InputMap_SourceFromName(s->stored_text) : -1;
+            if (cur != xbox_InputMap_SourceFromName(xbox[i])) is_xbox = false;
+            if (cur != xbox_InputMap_SourceFromName(ps2[i])) is_ps2 = false;
+        }
+        const char *now = is_xbox ? "Xbox (original)" : is_ps2 ? "PS2 (R1/L1 block and grab)" : "Custom";
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextUnformatted("Button layout");
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(260);
+        if (ImGui::BeginCombo("##layout", now)) {
+            if (ImGui::Selectable("Xbox (original)", is_xbox) && !is_xbox) {
+                for (int i = 0; i < 4; i++) recomp_settings_set_text("gamepad", keys[i], xbox[i]);
+                commit();
+            }
+            if (ImGui::Selectable("PS2 (R1/L1 block and grab)", is_ps2) && !is_ps2) {
+                for (int i = 0; i < 4; i++) recomp_settings_set_text("gamepad", keys[i], ps2[i]);
+                commit();
+            }
+            ImGui::EndCombo();
+        }
+        ImGui::SameLine();
+        ImGui::TextDisabled("PS2 swaps the shoulder buttons and the triggers.");
+    }
     if (ImGui::Button("Reset all to default")) {
         for (int i = 0; i < INPUT_PAD_CONTROL_COUNT; i++) recomp_settings_reset_to_default("gamepad", xbox_InputMap_ControlName(i));
         commit();
