@@ -773,9 +773,11 @@ static int watched_loaded(void)
     return 0;
 }
 
+void rollback_check_emitters(const char *where);
 void rollback_check_tables(const char *where)
 {
     uint32_t at, v;
+    rollback_check_emitters(where);
     if (!check_on() || !s_wobj) return;
     if (!s_tracking || !watched_loaded()) { s_wobj = 0; return; }
     if (MEM32(s_wobj + 0x420u) != s_wchain || MEM32(s_wobj + 0x10u) != s_wcount) {
@@ -1049,10 +1051,21 @@ void rollback_soak_carriers(long long step)
 static int s_keep_sound_once;
 void rollback_keep_sound_globals_once(void) { s_keep_sound_once = 1; }
 
+static const char *emit_where(uint32_t a);
 void rollback_set_resim(int on)
 {
     unsigned k;
     size_t at;
+    {   /* tests (RECOMP_ROLLBACK_CHECK_EMITTERS=1): the pitch effect's record across a re-run (sub_000388B0) */
+        static int chk = -1;
+        static uint32_t r0;
+        static unsigned told;
+        if (chk < 0) chk = getenv("RECOMP_ROLLBACK_CHECK_EMITTERS") != NULL;
+        if (chk && on && !s_resim) r0 = MEM32(0x003407DCu);
+        if (chk && !on && s_resim && MEM32(0x003407DCu) != r0 && told++ < 100)
+            fprintf(stderr, "[EMITTERS] a re-run changed the pitch record %08X -> %08X (%ld saves); the record put back is %s\n",
+                    r0, MEM32(0x003407DCu), (long)s_saves, r0 ? emit_where(r0) : "-");
+    }
     if (on && !s_resim) load_point();
     if (!on && s_keep_sound_once && s_resim) { s_keep_sound_once = 0; s_resim = 0; arena_watch_set(0); return; }
     if (sound_globals_kept() && on != s_resim)
@@ -2817,7 +2830,74 @@ void rollback_mixer_lock_b(void) { uint32_t ret = MEM32(g_esp); sub_00121C80(); 
 void rollback_mixer_unlock_a(void) { if (MEM32(g_esp) == MIX_UNLOCKS) mixer_end(); sub_0011FCD0(); }
 void rollback_mixer_unlock_b(void) { if (MEM32(g_esp) == MIX_UNLOCKS) mixer_end(); sub_00121C90(); }
 
+/* Tests (RECOMP_ROLLBACK_CHECK_EMITTERS=1): the particle emitters' lists (registry 0x21: groups from [mgr],
+ * next at +4, each group's emitters from +0xC, next at +4), walked at every check point, so the moment one of
+ * them holds a pointer that is no block of the heap or the arena is caught with where it was seen. */
+static const char *emit_where(uint32_t a)
+{
+    int b;
+    if (a >= HEAP_LO && a < HEAP_HI) return rollback_page_state(a);
+    if (!in_arena(a)) return "nowhere";
+    for (b = 0; b < s_nblk; b++)
+        if (a >= s_blk[b].user && a < s_blk[b].addr + s_blk[b].size)
+            return !s_blk[b].used ? "arena, free" : s_blk[b].freed == 1 ? "arena, held free" : s_blk[b].freed ? "arena, taken back" : "arena, live";
+    return "arena";
+}
+
+void rollback_check_emitters(const char *where)
+{
+    static int on = -1, dead;
+    static uint32_t sig;
+    static unsigned told;
+    uint32_t mgr, g, it, h = 0, prev = 0;
+    unsigned k, j, n = 0;
+    if (on < 0) on = getenv("RECOMP_ROLLBACK_CHECK_EMITTERS") != NULL;
+    if (!on || dead) return;
+    {   /* the slow-motion / train pitch effect's record (sub_000388B0), kept live with the sound globals */
+        static uint32_t last;
+        static const char *last_state;
+        static unsigned etold;
+        uint32_t r = MEM32(0x003407DCu);
+        const char *st = r ? emit_where(r) : "-";
+        if ((r != last || st != last_state) && etold++ < 200)
+            fprintf(stderr, "[EMITTERS] %s (%ld saves, %s): effect record %08X -> %08X (%s)\n", where, (long)s_saves,
+                    s_resim ? "re-run" : "normal", last, r, st);
+        last = r;
+        last_state = st;
+    }
+    mgr = MEM32(0x002FB148u + 0x21u * 4u);
+    if (!mgr || mgr >= 0x84000000u) return;
+    for (k = 0, g = MEM32(mgr); g && k < 512; k++, prev = g, g = MEM32(g + 4u)) {
+        if (!((g >= HEAP_LO && g < HEAP_HI) || in_arena(g))) {
+            fprintf(stderr, "[EMITTERS] %s (%ld saves, %s): group %u at %08X after %08X (%s) is no block; list head %08X\n",
+                    where, (long)s_saves, s_resim ? "re-run" : "normal", k, g, prev, prev ? emit_where(prev) : "-", MEM32(mgr));
+            dead = 1;
+            return;
+        }
+        h = h * 31u + g;
+        n++;
+        for (j = 0, it = MEM32(g + 0xCu); it && j < 4096; j++, it = MEM32(it + 4u))
+            if (!((it >= HEAP_LO && it < HEAP_HI) || in_arena(it))) {
+                fprintf(stderr, "[EMITTERS] %s (%ld saves, %s): group %08X (%s) emitter %u is %08X, no block\n",
+                        where, (long)s_saves, s_resim ? "re-run" : "normal", g, emit_where(g), j, it);
+                dead = 1;
+                return;
+            }
+    }
+    if (h != sig) {
+        char line[1200];
+        int len = 0;
+        sig = h;
+        if (told++ >= 80) return;
+        for (k = 0, g = MEM32(mgr); g && k < 24 && len < 1000; k++, g = MEM32(g + 4u))
+            len += snprintf(line + len, sizeof(line) - (size_t)len, " %08X(%s,obj %08X)", g, emit_where(g), MEM32(g + 8u));
+        fprintf(stderr, "[EMITTERS] %s (%ld saves, %s): %u groups:%s\n", where, (long)s_saves, s_resim ? "re-run" : "normal",
+                n, line);
+    }
+}
+
 #else
+void rollback_check_emitters(const char *where) { (void)where; }
 int rollback_enabled(void) { return 0; }
 int rollback_opted_in(void) { return 0; }
 void rollback_server_allows(int allowed) { (void)allowed; }

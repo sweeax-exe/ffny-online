@@ -212,6 +212,22 @@ void sub_0003A340(void)
     if (audio_rerun_skip()) { g_eax = 0; g_esp += 4; return; }
     sub_0003A340_gen();
 }
+/* sub_000388B0 (cdecl (value), plain ret): the audio subsystem's pitch/slow-motion effect. Its record (an
+ * arena block) is [0x3407DC] and its last value [0x340344], both in the sound globals a re-run puts back
+ * when it ends (rollback_set_resim). The subway's train (venue 11, sub_001A94B0 -> sub_0008F990) calls it
+ * every update. A re-run that started before the train's start ran the waiting steps' 1.5 with the record
+ * of "now" and freed it; the re-run's end put the pointer back, the held free was given back
+ * ROLLBACK_HOLD_SAVES later, and the normal updates went on writing into the block and calling the engine
+ * on it (F9 6c6e15: recomp_icall_not_code from 0x13A4A8; the null call from 0x13A4A8 in venue-11 runs).
+ * Left out in re-runs, as the audio update is. docs/research/arena11-rollback-crash.md. */
+extern void sub_000388B0_gen(void);
+void sub_000388B0(void)
+{
+    static int rerun = -1;      /* tests: RECOMP_ROLLBACK_TEST_PITCH_RERUN=1 runs it in re-runs, as before */
+    if (rerun < 0) rerun = getenv("RECOMP_ROLLBACK_TEST_PITCH_RERUN") != NULL;
+    if (!rerun && audio_rerun_skip()) { g_esp += 4; return; }     /* cdecl: the caller pops the value */
+    sub_000388B0_gen();
+}
 extern void sub_0011F5F0_gen(void);
 void sub_0011F5F0(void)
 {
