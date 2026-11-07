@@ -841,6 +841,180 @@ bool read_folder(const fs::path &folder, Groups &groups, std::string *error)
     return true;
 }
 
+// ---- PS2 profiles (hK's converter, ported) ----
+
+namespace
+{
+constexpr size_t kPs2Header = 28;           // "20CM", three sizes, the PS2's own 12-byte check
+constexpr size_t kPs2Payload = kPs2Header + 64;
+constexpr size_t kPortraitStart = 384;      // payload offsets: the portrait, PS2 and Xbox
+constexpr size_t kPs2PortraitEnd = 19852;
+constexpr size_t kXboxPortraitEnd = 19844;
+constexpr size_t kMaxPs2File = 16u << 20;
+const char kIdentity[] = "DJFFNY::User 17 -";
+const char kCardMagic[] = "Sony PS2 Memory Card Format";
+const char kMaxMagic[] = "Ps2PowerSave";
+
+bool starts_with(const Bytes &b, const char *text)
+{
+    size_t n = strlen(text);
+    return b.size() >= n && !memcmp(b.data(), text, n);
+}
+
+void put32(Bytes &b, uint32_t v)
+{
+    for (int i = 0; i < 4; i++) b.push_back((uint8_t)(v >> (8 * i)));
+}
+
+// hK's header_is: a 20CM file of `size` bytes whose identity block starts at `header`.
+bool header_is(const Bytes &b, size_t size, size_t header)
+{
+    return b.size() == size && !memcmp(b.data(), "20CM", 4) && rd32(&b[4]) == size && rd32(&b[8]) == 64 &&
+           rd32(&b[12]) == size - header - 64 && !memcmp(&b[header], kIdentity, sizeof(kIdentity) - 1);
+}
+
+std::string cstr(const uint8_t *p, size_t n)
+{
+    size_t len = 0;
+    while (len < n && p[len]) len++;
+    std::string s((const char *)p, len);
+    for (auto &c : s)
+        if ((unsigned char)c < 0x20 || (unsigned char)c > 0x7E) c = '?';
+    return s;
+}
+} // namespace
+
+bool is_ps2_profile(const Bytes &blob)
+{
+    return header_is(blob, kPs2ProfileSize, kPs2Header);
+}
+
+bool read_psu(const Bytes &d, std::vector<std::pair<std::string, Bytes>> &files, std::string *error)
+{
+    auto fail = [&](const char *why) { if (error) *error = why; return false; };
+    // Each entry is a 512-byte header: mode (0x20 a folder, 0x10 a file), its size (a folder: how
+    // many entries), its name at +64. A file's bytes follow its header, padded to 1 KiB.
+    struct E { uint32_t mode, size; std::string name; };
+    auto entry = [&](size_t at, E &e) {
+        if (at + 512 > d.size()) return false;
+        e.mode = rd16(&d[at]);
+        e.size = rd32(&d[at + 4]);
+        e.name = cstr(&d[at + 64], 32);
+        return true;
+    };
+    E dir, e;
+    if (!entry(0, dir) || (dir.mode & 0x30) != 0x20 || dir.size < 3 || dir.size > 34)
+        return fail("it is not a .psu save export");
+    if (!entry(512, e) || (e.mode & 0x30) != 0x20 || e.name != "." || !entry(1024, e) || (e.mode & 0x30) != 0x20 || e.name != "..")
+        return fail("the .psu file is damaged (its folder entries)");
+    size_t at = 1536;
+    for (uint32_t i = 0; i + 2 < dir.size; i++) {
+        if (!entry(at, e)) return fail("the .psu file is cut short");
+        at += 512;
+        if ((e.mode & 0x30) != 0x10 || e.size > d.size() - at) return fail("the .psu file is damaged (a file entry)");
+        files.push_back({e.name, Bytes(d.begin() + at, d.begin() + at + e.size)});
+        at += ((size_t)e.size + 1023) / 1024 * 1024;
+    }
+    if (at != d.size()) return fail("the .psu file has the wrong size for what it lists");
+    return true;
+}
+
+bool read_ps2(const Bytes &file, std::vector<Ps2Profile> &out, std::string *error)
+{
+    auto fail = [&](const std::string &why) { if (error) *error = why; return false; };
+    if (starts_with(file, kCardMagic))
+        return fail("a whole PS2 memory card (.ps2) cannot be imported yet. Export the Def Jam save from the card "
+                    "as a .psu file (for example with mymcplus, or uLaunchELF on a PS2) and import that file");
+    if (starts_with(file, kMaxMagic))
+        return fail("MAX Drive saves (.max) cannot be imported yet. Turn it into a .psu file (for example with "
+                    "mymcplus) and import that file");
+    std::vector<std::pair<std::string, Bytes>> files;
+    if (file.size() == kPs2ProfileSize && is_ps2_profile(file)) {
+        files.push_back({"", file});
+    } else {
+        std::string why;
+        if (!read_psu(file, files, &why)) return fail(why);
+    }
+    for (auto &[name, blob] : files) {
+        if (!is_ps2_profile(blob)) continue;
+        Ps2Profile p;
+        p.file = name;
+        if (!name.compare(0, 12, "BASLUS-21004")) p.region = "NTSC-U";
+        else if (!name.compare(0, 12, "BESLES-52507")) p.region = "PAL";
+        p.name = cstr(&blob[kPs2Payload], 20);
+        p.data = blob;
+        out.push_back(std::move(p));
+    }
+    return true;
+}
+
+std::string ps2_name_fault(const std::string &name)
+{
+    if (name.empty() || name.size() > 20) return "the fighter's name must be 1 to 20 characters";
+    auto alnum = [](char c) { return isalnum((unsigned char)c) != 0 && (unsigned char)c < 0x80; };
+    for (size_t i = 0; i < name.size(); i++) {
+        char c = name[i];
+        bool ok = alnum(c) || (i > 0 && (c == '_' || c == '-' || (c == ' ' && i + 1 < name.size())));
+        if (!ok) return "the fighter's name has characters a profile here cannot use";
+    }
+    std::string up;
+    for (char c : name) up.push_back((char)toupper((unsigned char)c));
+    if (up == "CON" || up == "PRN" || up == "AUX" || up == "NUL" ||
+        (up.size() == 4 && (!up.compare(0, 3, "COM") || !up.compare(0, 3, "LPT")) && isdigit((unsigned char)up[3])))
+        return "Windows keeps the fighter's name for itself";
+    return "";
+}
+
+Bytes ps2_to_xbox(const Bytes &ps2)
+{
+    if (!is_ps2_profile(ps2)) return {};
+    const uint8_t *payload = &ps2[kPs2Payload];
+    Bytes out;
+    out.reserve(kProfileFileSize);
+    out.insert(out.end(), {'2', '0', 'C', 'M'});
+    put32(out, (uint32_t)kProfileFileSize);
+    put32(out, 0x40);
+    put32(out, (uint32_t)(kProfileFileSize - kIdentityEnd));
+    out.resize(kHeader);                                // the three signatures, made below
+    // The identity block as hK's Xbox reference has it (the Xbox import keeps another console's
+    // identity as it is, so the game does not tie a profile to it).
+    const char identity[] = "DJFFNY::User 17 -2030886228";
+    out.insert(out.end(), identity, identity + sizeof(identity) - 1);
+    out.resize(kIdentityEnd);
+    out.insert(out.end(), payload, payload + kPortraitStart);
+    // hK's neutral preview: two bytes, 4863 grey BGRA texels (the reference's last at 19834), then six
+    // bytes from his reference, the first the created-fighter flag (profile +0x4D8A = 1).
+    out.push_back(0);
+    out.push_back(0);
+    for (int i = 0; i < 4863; i++) out.insert(out.end(), {48, 48, 48, 255});
+    out.insert(out.end(), {0x01, 0x89, 0x00, 0x81, 0xA0, 0x08});
+    out.insert(out.end(), payload + kPs2PortraitEnd, ps2.data() + ps2.size());
+    if (out.size() != kProfileFileSize || out.size() != kIdentityEnd + kXboxPortraitEnd + (kPs2ProfileSize - kPs2Payload - kPs2PortraitEnd))
+        return {};
+    out = resign(out, kPortKey);
+    return header_fault(out).empty() && header_is(out, kProfileFileSize, kHeader) ? out : Bytes();
+}
+
+Bytes neutral_save_image()
+{
+    // hK's icon: XPR0, a 4 KiB file with a 2 KiB header, a 64x64 DXT1 texture of one grey.
+    Bytes out;
+    for (uint32_t v : {0x30525058u, 4096u, 2048u, 0x40001u, 0u, 0u, 0x06610C29u, 0u, 0xFFFFFFFFu}) put32(out, v);
+    out.resize(2048, 0xAD);
+    for (int i = 0; i < 256; i++) out.insert(out.end(), {0x86, 0x31, 0, 0, 0, 0, 0, 0});
+    return out;
+}
+
+Bytes save_meta(const std::string &name)
+{
+    Bytes out = {0xFF, 0xFE};
+    for (char c : "Name=" + name + "\r\n") {
+        out.push_back((uint8_t)c);
+        out.push_back(0);
+    }
+    return out;
+}
+
 // ---- bringing in Xbox profiles ----
 
 ImportScan scan_import(const fs::path &source, const fs::path &save_dir)
@@ -850,10 +1024,56 @@ ImportScan scan_import(const fs::path &source, const fs::path &save_dir)
     std::error_code ec;
     std::string why;
     auto type = fs::status(source, ec).type();
-    bool read = false;
-    if (type == fs::file_type::regular) read = read_zip(source, groups, &why);
-    else if (type == fs::file_type::directory) read = read_folder(source, groups, &why);
-    else why = "it is not there";
+    bool read = false, ps2 = false;
+    std::map<std::string, std::string> origin;          // group -> "PS2, PAL"
+    std::string ext = lower(pcui::path_utf8(source.extension()));
+    if (type == fs::file_type::regular) {
+        // A PS2 save (a .psu export, a bare profile file, or a card or MAX file to explain) by its
+        // first bytes or its name; anything else is read as a zip.
+        Bytes head;
+        {
+            std::ifstream f(source, std::ios::binary);
+            head.resize(32);
+            f.read((char *)head.data(), (std::streamsize)head.size());
+            head.resize((size_t)std::max<std::streamsize>(f.gcount(), 0));
+        }
+        uintmax_t size = fs::file_size(source, ec);
+        ps2 = ext == ".psu" || ext == ".ps2" || ext == ".max" || starts_with(head, kCardMagic) ||
+              starts_with(head, kMaxMagic) || (!ec && size == kPs2ProfileSize && starts_with(head, "20CM")) ||
+              (head.size() >= 8 && (rd16(&head[0]) & 0x8030) == 0x8020 && rd32(&head[4]) >= 3 && rd32(&head[4]) <= 34);
+        if (ps2) {
+            Bytes file;
+            std::vector<Ps2Profile> found;
+            if (!read_file(source, file, kMaxPs2File)) why = "it could not be read (or it is larger than 16 MB)";
+            else read = read_ps2(file, found, &why);
+            if (read && found.empty()) {
+                scan.error = "No Def Jam Story profile in " + pcui::path_utf8(source.filename()) +
+                             ". Export the Story profile save (not the Options save) as a .psu file and pick that.";
+                return scan;
+            }
+            for (auto &p : found) {
+                std::string label = p.file.empty() ? pcui::path_utf8(source.filename()) : p.file;
+                std::string fault = ps2_name_fault(p.name);
+                Bytes xbox = fault.empty() ? ps2_to_xbox(p.data) : Bytes();
+                if (fault.empty() && xbox.empty()) fault = "it could not be converted";
+                if (!fault.empty()) {
+                    scan.skipped.push_back(label + (p.name.empty() ? "" : " (" + p.name + ")") + ": " + fault);
+                    continue;
+                }
+                auto &g = groups[label];
+                g["SaveMeta.xbx"] = save_meta(p.name);
+                g[p.name] = std::move(xbox);
+                g["saveimage.xbx"] = neutral_save_image();
+                origin[label] = "PS2" + (p.region.empty() ? std::string() : ", " + p.region);
+            }
+        } else {
+            read = read_zip(source, groups, &why);
+        }
+    } else if (type == fs::file_type::directory) {
+        read = read_folder(source, groups, &why);
+    } else {
+        why = "it is not there";
+    }
     if (!read) {
         scan.error = "Could not read " + pcui::path_utf8(source.filename()) + ": " + why + ".";
         return scan;
@@ -902,6 +1122,7 @@ ImportScan scan_import(const fs::path &source, const fs::path &save_dir)
             scan.skipped.push_back(folder + " (" + name + "): a second copy of the same profile, left out");
             continue;
         }
+        if (origin.count(folder)) c.origin = origin.at(folder);
         c.exists = fs::exists(title / c.folder, ec);
         c.needs_signing = !signatures_ok(data, kPortKey);
         c.meta = *meta;
@@ -958,8 +1179,9 @@ ImportResult apply_import(const ImportScan &scan, const std::set<std::string> &r
             fprintf(stderr, "[SAVES] import of %s failed\n", c->name.c_str());
             continue;
         }
-        fprintf(stderr, "[SAVES] imported %s from %s into %s%s%s\n", c->name.c_str(), c->source.c_str(),
-                c->folder.c_str(), c->needs_signing ? " (signed again with the port's key)" : "",
+        std::string converted = c->origin.empty() ? "" : " (converted from " + c->origin + ")";
+        fprintf(stderr, "[SAVES] imported %s from %s into %s%s%s%s\n", c->name.c_str(), c->source.c_str(),
+                c->folder.c_str(), c->needs_signing ? " (signed again with the port's key)" : "", converted.c_str(),
                 existed ? ", replacing the one there" : "");
         done.push_back(c->name);
         r.imported++;

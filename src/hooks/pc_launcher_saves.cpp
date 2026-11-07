@@ -126,7 +126,7 @@ static void picked(const std::string &path)
 }
 
 #if defined(_WIN32)
-void pick_start(bool zip, void *window)
+void pick_start(Pick what, void *window)
 {
     std::string result;
     HRESULT com = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
@@ -135,10 +135,15 @@ void pick_start(bool zip, void *window)
         FILEOPENDIALOGOPTIONS options = 0;
         dialog->GetOptions(&options);
         options |= FOS_FORCEFILESYSTEM | FOS_PATHMUSTEXIST | FOS_NOCHANGEDIR;
-        if (zip) {
+        if (what == Pick::ZIP) {
             static const COMDLG_FILTERSPEC filter[] = {{L"Zip files (*.zip)", L"*.zip"}, {L"All files", L"*.*"}};
             dialog->SetFileTypes(2, filter);
             dialog->SetTitle(L"Choose a .zip of Xbox saves");
+            options |= FOS_FILEMUSTEXIST;
+        } else if (what == Pick::PS2) {
+            static const COMDLG_FILTERSPEC filter[] = {{L"PS2 saves (*.psu)", L"*.psu"}, {L"All files", L"*.*"}};
+            dialog->SetFileTypes(2, filter);
+            dialog->SetTitle(L"Choose a PS2 Def Jam save exported as .psu");
             options |= FOS_FILEMUSTEXIST;
         } else {
             dialog->SetTitle(L"Choose the folder with your Xbox saves (UDATA\\45410049)");
@@ -172,11 +177,14 @@ static void dialog_done(void *, const char *const *files, int)
     picked(files && files[0] ? files[0] : "");
 }
 
-void pick_start(bool zip, void *window)
+void pick_start(Pick what, void *window)
 {
-    static const SDL_DialogFileFilter filter[] = {{"Zip files", "zip"}};
-    if (zip)
-        SDL_ShowOpenFileDialog(dialog_done, nullptr, (SDL_Window *)window, filter, 1, nullptr, false);
+    static const SDL_DialogFileFilter zip[] = {{"Zip files", "zip"}};
+    static const SDL_DialogFileFilter ps2[] = {{"PS2 saves (.psu)", "psu"}, {"All files", "*"}};
+    if (what == Pick::ZIP)
+        SDL_ShowOpenFileDialog(dialog_done, nullptr, (SDL_Window *)window, zip, 1, nullptr, false);
+    else if (what == Pick::PS2)
+        SDL_ShowOpenFileDialog(dialog_done, nullptr, (SDL_Window *)window, ps2, 2, nullptr, false);
     else
         SDL_ShowOpenFolderDialog(dialog_done, nullptr, (SDL_Window *)window, nullptr, false);
 }

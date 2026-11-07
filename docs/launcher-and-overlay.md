@@ -36,7 +36,8 @@ and the backups in `<data folder>/save-backups/`:
   folders of that name inside `save-backups` are ever removed. `RECOMP_SAVES_BACKUP=0` turns the daily one off.
 - **Back up now** makes one. **Restore** puts a backup back after backing up the saves as they are, so a
   restore can itself be undone.
-- **Import Xbox saves** takes a folder (the console's `E:\UDATA\45410049`) or a `.zip` of it and does what
+- **Import saves** takes a PS2 Story profile exported as `.psu` (converted first, see
+  [PS2 profiles](importing-xbox-saves.md#ps2-profiles)), or a folder (the console's `E:\UDATA\45410049`) or a `.zip` of it and does what
   `scripts/save-import.py` does ([importing Xbox saves](importing-xbox-saves.md)): copies each profile's
   three files and signs the profile again with the port's key. It backs the saves up first and never
   replaces a profile you already have unless you tick *Replace* for it.

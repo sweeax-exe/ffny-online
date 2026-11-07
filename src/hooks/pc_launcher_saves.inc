@@ -1,6 +1,6 @@
 // The launcher's Saves page (included by pc_ui.cpp after the settings dialog, so it draws with the
 // same glass, fonts and buttons). A glass dialog like Settings: the profiles and the Options file
-// on the left with Import Xbox saves, the backups on the right with Back up now and Restore, and
+// on the left with Import saves (Xbox folders or zips, PS2 .psu exports), the backups on the right with Back up now and Restore, and
 // one plain line at the foot that says what happened. The work is save_manager.cpp; where the files
 // are and whether the game runs, pc_launcher_saves.cpp.
 //
@@ -111,7 +111,7 @@ void saves_start_import(const std::string &path)
         return;
     }
     fprintf(stderr, "[SAVES] import: %zu profile(s) found in %s\n", g_sp.scan.found.size(), path.c_str());
-    ImGui::OpenPopup("Import Xbox saves##confirm");
+    ImGui::OpenPopup("Import saves##confirm");
 }
 
 void saves_do_import()
@@ -223,7 +223,7 @@ void saves_profiles(float w, float h, float s)
                 line += "  \xC2\xB7  no created fighter";
             }
             if (!e.signed_ok) {
-                line = "Signed by another Xbox: it shows as damaged. Import it with Import Xbox saves.";
+                line = "Signed by another Xbox: it shows as damaged. Import it with Import saves.";
                 c = k_gold;
             }
         }
@@ -236,7 +236,7 @@ void saves_profiles(float w, float h, float s)
     if (!shown) {
         ImGui::PushTextWrapPos(rw);
         ImGui::TextColored(ImVec4(1, 1, 1, 0.65f), "No profiles yet. Make one in the game under Select User ID, or "
-                                                   "bring your Xbox profiles in with Import Xbox saves.");
+                                                   "bring your Xbox or PS2 profiles in with Import saves.");
         ImGui::PopTextWrapPos();
     }
     if (other) ImGui::TextColored(ImVec4(1, 1, 1, 0.5f), "%d other folder%s in the save area", other, other == 1 ? "" : "s");
@@ -271,17 +271,23 @@ void saves_backups(float w, float h, float s)
 
 void saves_import_confirm(float s)
 {
-    if (!begin_glass_modal("Import Xbox saves##confirm", ImGui::GetFontSize() * 32)) return;
+    if (!begin_glass_modal("Import saves##confirm", ImGui::GetFontSize() * 32)) return;
     float wrap = ImGui::GetFontSize() * 30;
     ImGui::PushTextWrapPos(wrap);
     ImGui::TextDisabled("From %s", pcui::path_utf8(saves::fs::u8path(g_sp.source).filename()).c_str());
     ImGui::Spacing();
     int writes = 0;
+    bool converted = false;
     for (auto &c : g_sp.scan.found) {
         ImGui::PushFont(bold_font(), 0.0f);
         ImGui::TextUnformatted(c.name.c_str());
         ImGui::PopFont();
         ImGui::SameLine();
+        if (!c.origin.empty()) {
+            converted = true;
+            ImGui::TextDisabled("(%s)", c.origin.c_str());
+            ImGui::SameLine();
+        }
         if (!c.exists) {
             ImGui::TextColored(k_green, "new");
             writes++;
@@ -304,6 +310,9 @@ void saves_import_confirm(float s)
         if (g_sp.scan.skipped.size() > 4) ImGui::TextDisabled("  and %zu more", g_sp.scan.skipped.size() - 4);
     }
     ImGui::Spacing();
+    if (converted)
+        ImGui::TextWrapped("A PS2 profile is converted to the Xbox layout (PS2 converter by hK). Its fighter and "
+                           "progress come over; its picture on Select User ID starts out as a plain dark square.");
     ImGui::TextWrapped("Your saves are backed up first. Each profile is signed again for this PC, so the game "
                        "loads it; it will not load on an Xbox afterwards.");
     ImGui::PopTextWrapPos();
@@ -410,7 +419,7 @@ static void saves_dialog(ImVec2 o, float w, float h, float s)
     saves_backups(right_w, list_h, s);
 
     float by = a.y + list_top + list_h + 12 * s;
-    if (glass_button("##saves_import", "Import Xbox saves", ImVec2(lx, by), ImVec2(190 * s, button_h), s, GLASS_PLAIN,
+    if (glass_button("##saves_import", "Import saves", ImVec2(lx, by), ImVec2(190 * s, button_h), s, GLASS_PLAIN,
                      bold_font(), 14.5f * s))
         ImGui::OpenPopup("##import_from");
     if (glass_button("##saves_backup", "Back up now", ImVec2(rx, by), ImVec2(150 * s, button_h), s, GLASS_PLAIN, bold_font(),
@@ -422,13 +431,15 @@ static void saves_dialog(ImVec2 o, float w, float h, float s)
 #if defined(_WIN32)
         window = ImGui::GetMainViewport()->PlatformHandleRaw;
 #endif
-        bool zip = false, pick = false;
-        if (ImGui::MenuItem("From a folder (E:\\UDATA\\45410049)...")) pick = true;
-        if (ImGui::MenuItem("From a .zip file...")) pick = zip = true;
+        bool pick = false;
+        pcsaves::Pick what = pcsaves::Pick::FOLDER;
+        if (ImGui::MenuItem("Xbox: from a folder (E:\\UDATA\\45410049)...")) pick = true;
+        if (ImGui::MenuItem("Xbox: from a .zip file...")) { pick = true; what = pcsaves::Pick::ZIP; }
+        if (ImGui::MenuItem("PS2: from a .psu save export...")) { pick = true; what = pcsaves::Pick::PS2; }
         ImGui::EndPopup();
         if (pick && !saves_refuse_while_running("saves can be imported")) {
             g_sp.picking = true;
-            pcsaves::pick_start(zip, window);
+            pcsaves::pick_start(what, window);
         }
     }
     {

@@ -1,5 +1,6 @@
 // The launcher's Saves page underneath: listing the profiles, backups of the save area, and
-// bringing in Xbox profiles (scripts/save-import.py, ported). No UI, no game state and no
+// bringing in Xbox profiles (scripts/save-import.py, ported) and PS2 ones (converted, hK's
+// converter ported). No UI, no game state and no
 // platform calls beyond std::filesystem, so native unit tests build it on its own
 // (tests/unit/test_save_manager.py). The page itself is pc_launcher_saves.inc; the glue that
 // knows the data folder and whether the game runs is pc_launcher_saves.cpp.
@@ -81,11 +82,39 @@ bool read_folder(const fs::path &folder, Groups &groups, std::string *error);
 bool inflate_raw(const uint8_t *src, size_t size, Bytes &out, size_t limit);
 uint32_t crc32(const uint8_t *data, size_t size);
 
+// ---- bringing in PS2 profiles (hK's PS2 -> Xbox converter, ported; docs/importing-xbox-saves.md) ----
+// A PS2 Story profile is 22888 bytes: "20CM", its three sizes, 12 bytes of the PS2's own check, the
+// 64-byte identity block at 28 and the profile from 92 (the fighter's name first). The Xbox file
+// keeps the profile around a portrait of another size: the PS2 portrait (payload 384..19852) becomes
+// a neutral Xbox preview (384..19844) that the game draws again when it next saves the profile.
+constexpr size_t kPs2ProfileSize = 22888;
+struct Ps2Profile
+{
+    std::string file;           // its name in the export ("BESLES-52507...")
+    std::string region;         // "PAL", "NTSC-U" or "" unknown
+    std::string name;           // the fighter's name at +92 ("" none)
+    Bytes data;                 // the 22888 PS2 bytes
+};
+bool is_ps2_profile(const Bytes &blob);
+// The files of a .psu export (uLaunchELF, PCSX2, mymc): false with *error when it is not one.
+bool read_psu(const Bytes &file, std::vector<std::pair<std::string, Bytes>> &files, std::string *error);
+// The PS2 profiles in a picked file: a .psu export or a bare profile file. False with *error (for the
+// player) when the file is not a PS2 save we read, a whole memory card (.ps2) or a MAX Drive save.
+// True with nothing in `out` when it is a PS2 save without a Story profile.
+bool read_ps2(const Bytes &file, std::vector<Ps2Profile> &out, std::string *error);
+// "" when the fighter's name can be a profile here (1..20 letters, digits, space, _ and -, not a
+// name Windows keeps for itself); else why not.
+std::string ps2_name_fault(const std::string &name);
+Bytes ps2_to_xbox(const Bytes &ps2);    // the 0x5990-byte Xbox profile, signed with kPortKey ({} if not a PS2 profile)
+Bytes neutral_save_image();             // a plain grey 64x64 saveimage.xbx (XPR0, DXT1)
+Bytes save_meta(const std::string &name);   // SaveMeta.xbx: UTF-16LE "Name=<name>\r\n" with a BOM
+
 struct Candidate
 {
     std::string source;         // the folder it came from
     std::string name;           // the profile name
     std::string folder;         // where it goes (folder_name(name))
+    std::string origin;         // "" an Xbox profile; "PS2, PAL" and the like for a converted one
     bool exists = false;        // that folder is in the save area already
     bool needs_signing = false;
     Bytes meta, data, image;
