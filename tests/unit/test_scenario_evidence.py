@@ -547,6 +547,75 @@ def test_memory_checks_measure_growth_during_play():
     loading = ev.memory_checks(samples([50, 100, 200, 300, 320, 318, 319, 321, 320, 322], first=0), start_seconds=15)
     assert loading[0]['status'] == 'pass'
     assert ev.memory_checks(samples([300, 320]), start_seconds=30)[0]['status'] == 'fail'
+    assert steady[0]['metrics']['method'] == 'endpoint' and len(steady) == 1
+
+
+def _cycle_run(fight_mb, between_mb, matches, fight_samples=8, gap_samples=4, tail_mb=None):
+    """Memory samples every 5 s and a timeline for `matches` fights. `fight_mb(k, i)` is sample i of
+    match k (k from 1), `between_mb(k, i)` a sample of the scene change after it."""
+    samples, timeline, t = [], [], 0.0
+    def add(value):
+        nonlocal t
+        samples.append({'seconds': t, 'private_bytes': int(value * 1048576), 'working_set': 0})
+        t += 5.0
+    for k in range(1, matches + 1):
+        timeline.append({'observed_seconds': t, 'call': 'Game.StartGame()'})
+        for i in range(4):       # streaming in, before the settled window
+            add(fight_mb(k, 0) - 40)
+        for i in range(fight_samples):
+            add(fight_mb(k, i))
+        timeline.append({'observed_seconds': t, 'call': 'Game.GetMatchSummary()'})
+        for i in range(gap_samples):
+            add(between_mb(k, i))
+    if tail_mb is not None:
+        add(tail_mb)
+    return samples, timeline
+
+
+def test_memory_checks_compare_settled_fights_and_report_transitions_apart():
+    # Issue #166: flat play, but the run ends in a scene change that holds +60 MiB
+    # (decode buffers and allocator arenas). Growth is settled-to-settled, the end is reported.
+    samples, timeline = _cycle_run(lambda k, i: 1400, lambda k, i: 1460, matches=2)
+    checks = {c['name']: c for c in ev.memory_checks(samples, start_seconds=20, timeline=timeline)}
+    growth, transition = checks['performance.memory_growth'], checks['performance.memory_transition']
+    assert growth['status'] == 'pass' and growth['metrics']['method'] == 'settled'
+    assert growth['metrics']['growth_mb'] == 0.0 and growth['metrics']['cycle_growth_mb'] == [0.0, 0.0]
+    assert transition['status'] == 'pass' and transition['metrics']['end_over_baseline_mb'] == 60.0
+    # The old endpoint reading of the same samples.
+    assert ev.memory_checks(samples, start_seconds=20)[0]['metrics']['growth_mb'] == 60.0
+
+
+def test_memory_checks_still_fail_growth_that_continues_across_cycles():
+    # A leak of about 6 MiB a minute through five matches (the Deck positive control was
+    # 100 KiB/s): every settled window is higher than the last.
+    rate = 0.5  # MiB per 5 s sample
+    clock = {'n': 0}
+    def leaking(k, i):
+        clock['n'] += 1
+        return 1400 + rate * clock['n']
+    samples, timeline = _cycle_run(leaking, lambda k, i: 1400 + rate * clock['n'], matches=5,
+                                   fight_samples=40, gap_samples=12)
+    growth = ev.memory_checks(samples, start_seconds=20, timeline=timeline)[0]
+    assert growth['status'] == 'fail' and growth['metrics']['method'] == 'settled'
+    cycles = growth['metrics']['cycle_growth_mb']
+    assert len(cycles) == 5 and cycles == sorted(cycles) and cycles[-1] > 64
+
+
+def test_memory_checks_bound_the_transition_peak():
+    # Settled fights agree, but a scene change spikes past the separate transition limit.
+    samples, timeline = _cycle_run(lambda k, i: 1400, lambda k, i: 1800 if k == 1 and i == 1 else 1400, matches=2)
+    checks = {c['name']: c for c in ev.memory_checks(samples, start_seconds=20, timeline=timeline)}
+    assert checks['performance.memory_growth']['status'] == 'pass'
+    assert checks['performance.memory_transition']['status'] == 'fail'
+    assert checks['performance.memory_transition']['metrics']['peak_over_baseline_mb'] == 400.0
+
+
+def test_memory_checks_fall_back_to_the_endpoint_when_the_last_fight_is_too_short():
+    samples, timeline = _cycle_run(lambda k, i: 1400, lambda k, i: 1480, matches=2)
+    # Cut the second fight's settled window to two samples.
+    timeline[-1]['observed_seconds'] = timeline[-2]['observed_seconds'] + 30
+    growth = ev.memory_checks(samples, start_seconds=20, timeline=timeline)
+    assert growth[0]['metrics']['method'] == 'endpoint' and growth[0]['status'] == 'fail' and len(growth) == 1
 
 
 def test_default_fixture_copies_only_profiles_and_leaves_the_source_alone(tmp_path, monkeypatch):
@@ -744,3 +813,15 @@ def test_two_matches_route_judges_each_match_on_its_own():
     route = harness.ROUTES['two-matches']
     assert route['until'] == 'game.getmatchsummary(#3' and '@game.startgame(#2' in route['tail']
     assert suite.SESSION_ROUTES['two-matches'] == ((1, 2), (2, 4))
+
+
+def test_fight_cycles_route_fits_the_native_pad_script():
+    # The runtime ignores a script over 4095 characters and watches at most 32 distinct
+    # anchors (#166 found both limits); five matches is the most that fits.
+    route = harness.ROUTES['fight-cycles']
+    script = harness.build_pad_script(suite.bootstrap_stages('fight-cycles'), route['tail'])
+    anchors = {e.split(',')[0] for e in script.split(',') if e.startswith('@')}
+    assert len(script) <= 4095 and len(anchors) <= 32
+    assert route['until'] == 'game.getmatchsummary(#9' and '@game.startgame(#5' in route['tail']
+    assert suite.SESSION_ROUTES['fight-cycles'] == tuple((k, 2) for k in range(1, 6))
+    assert 'fight-cycles' in regress.CHECKS and 'fight-cycles' not in regress.DEFAULT
