@@ -88,6 +88,7 @@ void netplay_lobby_join(const char *c) { (void)c; }
 void netplay_lobby_quick(int m, int x) { (void)m; (void)x; }
 void netplay_lobby_spectate(const char *c) { (void)c; }
 int netplay_spectating(void) { return 0; }
+int netplay_last_match_key(char *out, int size) { if (size > 0) out[0] = 0; return 0; }
 void netplay_lobby_settings(const NetRoomSettings *s) { (void)s; }
 void netplay_lobby_ready(int r, int f) { (void)r; (void)f; }
 void netplay_lobby_vote(int c) { (void)c; }
@@ -3949,6 +3950,17 @@ void netplay_lobby_spectate(const char *code)
     int i;
     for (i = 0; i < 6; i++) b[i] = (uint8_t)toupper((unsigned char)(code && code[i] ? code[i] : 0));
     request(T_SPECTATE, b, 6);
+}
+
+int netplay_last_match_key(char *out, int size)
+{
+    int n;
+    if (size <= 0) return 0;
+    InitOnceExecuteOnce(&g_once, init_once, NULL, NULL);
+    EnterCriticalSection(&g_cs);
+    n = snprintf(out, (size_t)size, "%s", N.watching ? "" : N.report_key);
+    LeaveCriticalSection(&g_cs);
+    return n < size ? n : size - 1;
 }
 
 int netplay_spectating(void)

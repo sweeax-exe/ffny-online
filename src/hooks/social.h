@@ -161,6 +161,10 @@ struct View {
     Locker locker;                              /* build 52: this account's rewards (locker_load) */
     std::string note;              /* the last refusal from the service ("slow mode: ...") */
     unsigned long long note_at = 0;
+    /* REPORT PLAYER: the service's answer to the last report_player ("Report sent...", or why not) */
+    std::string report_answer;
+    bool report_ok = false;
+    unsigned report_seq = 0;        /* counts the answers */
 };
 
 /* A copy of the state when it changed since `have` (true), else nothing (false). */
@@ -191,6 +195,11 @@ void reload();                      /* every list again */
 void block(long long id, const std::string &name, bool on);
 void report(long long id, const std::string &channel, long long msg, const std::string &text,
             const std::vector<std::string> &context, const std::string &room = "");
+/* REPORT PLAYER: a player this one shared a room or a match with (reason "cheating", "quitting", "abuse" or
+ * "other"; note at most 200 characters; room the room's code, match the last match's report key, either may
+ * be empty). The service decides whether it takes it; its answer comes back as View::report_answer. */
+void report_player(long long id, const std::string &reason, const std::string &note, const std::string &room,
+                   const std::string &match);
 void set_dms(const std::string &policy);    /* "friends", "everyone", "off" */
 void set_show_avatar(bool on);
 /* Crews: create, invite (by id, else exact name), leave, and the officers' kick and role. */
