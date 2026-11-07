@@ -7202,15 +7202,20 @@ void netplay_on_update(void)
         }
     }
     LeaveCriticalSection(&g_cs);
-    {   /* RECOMP_ROLLBACK_TEST_BACK=lo,hi (tests): with the step in lo..hi, every update goes back a step and
-         * runs two again on the same inputs, so that a rollback crosses whatever happens in that window */
-        static int lo = -1, hi;
+    {   /* RECOMP_ROLLBACK_TEST_BACK=lo,hi[,depth[,every]] (tests): with the step in lo..hi, every update (or every
+         * every-th) goes back depth steps (default 1) and runs them again on the same inputs, so that a rollback
+         * crosses whatever happens in that window. 1500,7200,6,7: the subway train's start crossed now and then,
+         * with no later load reaching back over it (docs/research/arena11-rollback-crash.md). */
+        static int lo = -1, hi, depth = 1, every = 1;
         if (lo < 0) {
             const char *v = getenv("RECOMP_ROLLBACK_TEST_BACK");
             lo = 0;
-            if (v) sscanf(v, "%d,%d", &lo, &hi);
+            if (v) sscanf(v, "%d,%d,%d,%d", &lo, &hi, &depth, &every);
+            if (depth < 1 || depth > 8) depth = 1;
+            if (every < 1) every = 1;
         }
-        if (!f && lo > 1 && N.step >= (uint32_t)lo && N.step <= (uint32_t)hi) f = N.step - 1u;
+        if (!f && lo > depth && N.step >= (uint32_t)lo && N.step <= (uint32_t)hi && N.step % (uint32_t)every == 0)
+            f = N.step - (uint32_t)depth;
     }
     if (f) rollback_to(f);
     /* The fallback for a PC too slow for rollback (rb_budget_tick): prediction stopped, so each step
