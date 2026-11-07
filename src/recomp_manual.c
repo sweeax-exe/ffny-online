@@ -46,6 +46,7 @@
 #include "hooks/fe_inject.h"
 #include "hooks/scene_launcher.h"
 #include "hooks/dev_module.h"
+#include "hooks/combo_log.h"
 #include "patches/picture.h"
 #include "patches/menu_geometry.h"
 
@@ -96,6 +97,7 @@ void sub_00087700_enter(void)
     defjam_crowd_step();
     defjam_test_step();
     netplay_on_step();
+    if (combo_log_on()) combo_log_step();
     s_ws_hud_live = 1;
     ws_hud_heartbeat();
 }
@@ -122,6 +124,13 @@ void sub_001A4D90_enter(void)
     defjam_crowd_match_start();
     netplay_on_match_start();
     crowd_guard_match_start();
+    if (combo_log_on()) combo_log_match_start();
+}
+/* Combo log (RECOMP_COMBO_LOG=1, src/hooks/combo_log.c): one hit, cdecl (attacker, defender,
+ * hit flags) at g_esp+4/+8/+12, before the body copies the move to the defender's +0xFB8. */
+void sub_001C6CD0_enter(void)
+{
+    if (combo_log_on()) combo_log_hit(MEM32(g_esp + 4), MEM32(g_esp + 8), MEM32(g_esp + 12));
 }
 /* Widescreen song notification (src/patches/widescreen.c, issue #118): the APT
  * movie loader (archive, name, &apt, &const), and the next step of the load,
