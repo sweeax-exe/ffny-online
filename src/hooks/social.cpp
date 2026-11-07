@@ -1357,6 +1357,32 @@ void report(long long id, const std::string &channel, long long msg, const std::
     });
 }
 
+void report_player(long long id, const std::string &reason, const std::string &note_text, const std::string &room,
+                   const std::string &match)
+{
+    queue([=]() {
+        std::string body = "{\"account\":" + std::to_string(id) + ",\"reason\":" + json_text(reason) +
+                           ",\"note\":" + json_text(note_text);
+        if (!room.empty()) body += ",\"room\":" + json_text(room);
+        if (!match.empty()) body += ",\"match\":" + json_text(match);
+        body += "}";
+        std::string out;
+        int status = post("/api/social/report-player", body, &out);
+        std::string answer = error_of(out, status);
+        if (status / 100 == 2) {
+            J j;
+            answer = parse_json(out, j) && j["status"].kind == J::STR ? j["status"].s : "Report sent.";
+        }
+        fprintf(stderr, "[SOCIAL] report player %lld (%s, room %s, match %s): HTTP %d %s\n", id, reason.c_str(),
+                room.c_str(), match.c_str(), status, answer.c_str());
+        std::lock_guard<std::mutex> lk(g_mu);
+        g_v.report_answer = answer;
+        g_v.report_ok = status / 100 == 2;
+        g_v.report_seq++;
+        changed();
+    });
+}
+
 void set_dms(const std::string &policy)
 {
     {
@@ -1812,6 +1838,7 @@ void crew_join(long long) {}
 void crew_dismiss(long long) {}
 void reload() {}
 void block(long long, const std::string &, bool) {}
+void report_player(long long, const std::string &, const std::string &, const std::string &, const std::string &) {}
 void report(long long, const std::string &, long long, const std::string &, const std::vector<std::string> &,
             const std::string &) {}
 void set_dms(const std::string &) {}

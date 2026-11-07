@@ -21,7 +21,7 @@ const ImU32 GOLD_TEXT = IM_COL32(255, 205, 60, 255), BLUE_NAME = IM_COL32(142, 1
             LIVE = IM_COL32(123, 224, 123, 255), DIM = IM_COL32(242, 230, 200, 115),
             BUBBLE_ME = IM_COL32(142, 16, 36, 255), LINE_SEP = IM_COL32(255, 255, 255, 20);
 
-enum KbKind { KB_CHAT, KB_FRIEND, KB_CREW_INVITE, KB_CREW_NAME, KB_CREW_TAG, KB_FIGHT, KB_QUICK, KB_CREW_CHALLENGE };
+enum KbKind { KB_CHAT, KB_FRIEND, KB_CREW_INVITE, KB_CREW_NAME, KB_CREW_TAG, KB_FIGHT, KB_QUICK, KB_CREW_CHALLENGE, KB_REPORT };
 enum FriendAct { ACT_ACCEPT, ACT_DECLINE, ACT_JOIN, ACT_WATCH, ACT_INVITE, ACT_MESSAGE, ACT_REMOVE, ACT_SURE };
 
 struct Chat {
@@ -79,6 +79,13 @@ struct Chat {
     bool confirm_decline = false;
     bool menu_crew = false;
     std::string menu_role, crew_new_name;
+    // REPORT PLAYER: the form over the player menu (rp: open; it keeps C.menu set, so the menu's rules
+    // hold): the player, where they played together, the reason, the note, then the service's answer
+    bool rp = false, rp_sent = false;
+    long long rp_id = 0;
+    std::string rp_name, rp_room, rp_match, rp_note;
+    int rp_reason = -1, rp_sel = 0;
+    unsigned rp_seq = 0;
 } C;
 
 bool chat_mouse_blocked() { return C.mouse_off; }
@@ -1827,10 +1834,145 @@ void draw_messages(ImDrawList *dl, const Frame &f, const ChatKeys &k, const NetR
     input_bar(dl, f, rx, "Message " + name, r.in_room && C.draft[TAB_MESSAGES].empty() ? "INVITE TO ROOM" : "SEND");
 }
 
+// ---- REPORT PLAYER: a small form over the player menu ----
+//
+// A player this PC shared a room or a match with: the room's code while in one, and the last room
+// match's report key, go with it; the account service decides whether it takes the report and says so
+// (its answer is shown here). Signed-in players only (the social features), never on yourself.
+
+const char *const k_rp_reasons[4] = { "cheating", "quitting", "abuse", "other" };
+const char *const k_rp_labels[4] = { "CHEATING", "QUITTING OR STALLING", "ABUSE", "OTHER" };
+const int RP_NOTE_MAX = 200;
+
+// Where this PC played with others lately: the room's code (in one) and the last match's key.
+void report_context(std::string &room, std::string &match)
+{
+    NetRoom r;
+    lobby_room(&r);
+    room = r.in_room ? r.code : "";
+    char key[48];
+    netplay_last_match_key(key, sizeof(key));
+    match = key;
+}
+
+bool report_offered(long long id)
+{
+    if (!id || id == C.v.me || !C.v.me || room_only()) return false;
+    std::string room, match;
+    report_context(room, match);
+    return !room.empty() || !match.empty();
+}
+
+void open_report_form(long long id, const std::string &name)
+{
+    C.menu = true;
+    C.rp = true;
+    C.rp_sent = false;
+    C.rp_id = id;
+    C.rp_name = name;
+    C.rp_note.clear();
+    C.rp_reason = -1;
+    C.rp_sel = 0;
+    C.popup_frame = ImGui::GetFrameCount();
+    report_context(C.rp_room, C.rp_match);
+}
+
+void send_report_form()
+{
+    if (C.rp_reason < 0 || C.rp_sent) return;
+    C.rp_sent = true;
+    C.rp_seq = C.v.report_seq;
+    social::report_player(C.rp_id, k_rp_reasons[C.rp_reason], C.rp_note, C.rp_room, C.rp_match);
+    fprintf(stderr, "[SOCIAL-UI] report player %s (%s, room %s, match %s)\n", C.rp_name.c_str(), k_rp_reasons[C.rp_reason],
+            C.rp_room.c_str(), C.rp_match.c_str());
+}
+
+void close_report_form() { C.rp = C.rp_sent = false; C.menu = false; }
+
+// rows: 0..3 the reasons, 4 the note, 5 SEND / CANCEL (rp_sel 5 SEND, 6 CANCEL)
+void draw_report_form(ImDrawList *dl, const Frame &f, const ChatKeys &k)
+{
+    float w = 300, h = 252, x = 320 - w / 2, y = 196 - h / 2;
+    rect(dl, f, PX, PY, PW, PH, IM_COL32(0, 0, 0, 140), 8);
+    glass(dl, f, x, y, w, h, 10, IM_COL32(24, 12, 14, 255), 0.94f);
+    text(dl, f, g_title, 10, x + w / 2, y + 10, DIM, "REPORT PLAYER", CENTER, 0);
+    text(dl, f, g_hand, 17, x + w / 2, y + 24, CREAM, C.rp_name.c_str(), CENTER, 0.6f, w - 30);
+    bool fresh = ImGui::GetFrameCount() == C.popup_frame;
+    if (C.rp_sent) {        // the service's answer, or the wait for it
+        bool answered = C.v.report_seq != C.rp_seq;
+        const char *say = answered ? C.v.report_answer.c_str() : "Sending...";
+        text(dl, f, g_hand, 15, x + w / 2, y + 96, answered && !C.v.report_ok ? ORANGE : CREAM, say, CENTER, 0.8f, w - 40);
+        if (answered) {
+            float bx = x + w / 2 - 50, by = y + h - 44;
+            rect(dl, f, bx, by, 100, 26, RED, 6);
+            text(dl, f, g_title, 12, bx + 50, by + 6, IM_COL32(255, 245, 230, 255), "OK", CENTER, 0);
+            if (!fresh && (k.a || k.enter || k.b || k.esc || mouse_click(f, bx, by, 100, 26))) close_report_form();
+        } else if (!fresh && (k.b || k.esc)) {
+            close_report_form();    // the answer still comes, as the view's note
+        }
+        return;
+    }
+    if (!fresh) {       // the reasons two by two, the note, then SEND / CANCEL side by side
+        int s = C.rp_sel;
+        if (k.down) s = s < 2 ? s + 2 : s < 4 ? 4 : s == 4 ? 5 : s;
+        if (k.up) s = s >= 5 ? 4 : s == 4 ? 2 : s >= 2 ? s - 2 : s;
+        if (k.left && (s == 1 || s == 3 || s == 6)) s--;
+        if (k.right && (s == 0 || s == 2 || s == 5)) s++;
+        C.rp_sel = s;
+    }
+    bool choose = !fresh && (k.a || k.enter);
+    text(dl, f, g_title, 8.5f, x + 20, y + 48, DIM, "REASON", LEFT, 0);
+    for (int i = 0; i < 4; i++) {
+        float bx = x + 20 + (i % 2) * 133, by = y + 62 + (i / 2) * 28, bw = 127;
+        bool on = C.rp_sel == i, picked = C.rp_reason == i;
+        rect(dl, f, bx, by, bw, 23, picked ? IM_COL32(200, 16, 46, 200) : IM_COL32(255, 255, 255, 20), 6);
+        if (on) dl->AddRect(f.p(bx, by), f.p(bx + bw, by + 23), IM_COL32(255, 245, 230, 230), 6 * f.s(), 0, 1.4f * f.s());
+        text(dl, f, g_title, 9, bx + bw / 2, by + 6, IM_COL32(255, 245, 230, 255), k_rp_labels[i], CENTER, 0, bw - 8);
+        bool click = mouse_click(f, bx, by, bw, 23);
+        if (click) C.rp_sel = i;
+        if ((on && choose) || click) { C.rp_reason = i; choose = false; }
+    }
+    text(dl, f, g_title, 8.5f, x + 20, y + 124, DIM, "NOTE (OPTIONAL)", LEFT, 0);
+    {
+        float bx = x + 20, by = y + 138, bw = w - 40;
+        bool on = C.rp_sel == 4;
+        rect(dl, f, bx, by, bw, 34, IM_COL32(0, 0, 0, 110), 6);
+        if (on) dl->AddRect(f.p(bx, by), f.p(bx + bw, by + 34), IM_COL32(255, 245, 230, 230), 6 * f.s(), 0, 1.4f * f.s());
+        text(dl, f, g_body, 9.5f, bx + 8, by + 6, C.rp_note.empty() ? DIM : CREAM,
+             C.rp_note.empty() ? "What happened? A to write (200 characters)" : C.rp_note.c_str(), LEFT, 0, bw - 16);
+        bool click = mouse_click(f, bx, by, bw, 34);
+        if (click) C.rp_sel = 4;
+        if ((on && choose) || click) {
+            open_keyboard(KB_REPORT);
+            C.friend_name = C.rp_note;
+            C.friend_cursor = (int)C.rp_note.size();
+            choose = false;
+        }
+    }
+    for (int i = 0; i < 2; i++) {
+        float bw = 110, bx = x + w / 2 - bw - 6 + i * (bw + 12), by = y + h - 44;
+        bool on = C.rp_sel == 5 + i, can = i == 1 || C.rp_reason >= 0;
+        rect(dl, f, bx, by, bw, 26, on ? RED : i == 0 && can ? IM_COL32(200, 16, 46, 120) : IM_COL32(255, 255, 255, 22), 6);
+        text(dl, f, g_title, 12, bx + bw / 2, by + 6, can ? IM_COL32(255, 245, 230, 255) : DIM, i == 0 ? "SEND" : "CANCEL", CENTER, 0);
+        bool click = mouse_click(f, bx, by, bw, 26);
+        if (click) C.rp_sel = 5 + i;
+        if ((on && choose) || click) {
+            if (i == 1) { close_report_form(); return; }
+            if (can) send_report_form();
+        }
+    }
+    if (C.rp_reason < 0 && C.rp_sel == 5)
+        text(dl, f, g_body, 8.5f, x + w / 2, y + h - 14, ORANGE, "Pick a reason first.", CENTER, 0);
+    else
+        text(dl, f, g_body, 8.5f, x + w / 2, y + h - 14, DIM, "The team reads every report. People decide, not the game.", CENTER, 0, w - 20);
+    if (!fresh && (k.b || k.esc)) close_report_form();
+}
+
 // ---- the player menu: A on a name ----
 
 void draw_player_menu(ImDrawList *dl, const Frame &f, const ChatKeys &k)
 {
+    if (C.rp) { draw_report_form(dl, f, k); return; }
     // 0 add friend, 1 message, 2 mute, 3 unmute, 4/5 room mute/unmute, 6/7 block/unblock, 8 report,
     // 9 invite to my crew
     std::vector<std::pair<std::string, int>> items;
@@ -1864,6 +2006,7 @@ void draw_player_menu(ImDrawList *dl, const Frame &f, const ChatKeys &k)
         if (C.menu_id) items.push_back({ blocked ? "UNBLOCK" : "BLOCK", blocked ? 7 : 6 });
         if (C.menu_id && !C.menu_channel.empty() && (C.menu_msg || !C.menu_text.empty())) items.push_back({ "REPORT", 8 });
     }
+    if (!self && report_offered(C.menu_id)) items.push_back({ "REPORT PLAYER", 15 });
     if (items.empty()) items.push_back({ "FRIEND REQUEST SENT", -1 });
     float w = 160, h = 34 + items.size() * 22.0f, x = 320 - w / 2, y = 200 - h / 2;
     rect(dl, f, PX, PY, PW, PH, IM_COL32(0, 0, 0, 120), 8);
@@ -1905,6 +2048,9 @@ void draw_player_menu(ImDrawList *dl, const Frame &f, const ChatKeys &k)
             } else if (what == 14) {
                 C.open = false;
                 open_locker();
+            } else if (what == 15) {
+                open_report_form(C.menu_id, C.menu_name);
+                return;     // the form keeps the menu open
             }
             C.menu = false;
         }
@@ -1960,7 +2106,7 @@ int &kb_cursor() { return C.kb_kind == KB_FIGHT ? fight_cursor() : C.kb_kind != 
 int kb_max()
 {
     return C.kb_kind == KB_FIGHT || C.kb_kind == KB_QUICK ? 200 : C.kb_kind == KB_CREW_TAG || C.kb_kind == KB_CREW_CHALLENGE ? 4 : C.kb_kind == KB_CREW_NAME ? 24 :
-           C.kb_kind != KB_CHAT ? 32 : std::max(1, C.v.max_chars);
+           C.kb_kind == KB_REPORT ? RP_NOTE_MAX : C.kb_kind != KB_CHAT ? 32 : std::max(1, C.v.max_chars);
 }
 
 void open_keyboard(int kind)
@@ -1978,6 +2124,12 @@ void open_keyboard(int kind)
 void kb_submit()
 {
     if (C.kb_kind == KB_FIGHT) { fight_send(); C.kb = false; return; }
+    if (C.kb_kind == KB_REPORT) {       // REPORT PLAYER's note: back to the form
+        C.rp_note = C.friend_name;
+        C.kb = false;
+        C.rp_sel = 5;
+        return;
+    }
     if (C.kb_kind == KB_QUICK) {        // a quick-chat line (an empty one: the default again)
         quick_line_set(QW.editing, C.friend_name);
         C.kb = false;
@@ -2403,7 +2555,7 @@ void chat_test_step()
     } else if (what == "send") {
         if (C.kb) kb_submit(); else chat_send();
     } else if (what == "close") {
-        C.open = C.kb = C.menu = false;
+        C.open = C.kb = C.menu = C.rp = false;
     } else if (what == "pad" || what == "key") {    // as the pad's or the keyboard's own press arrives
         held = test_key(arg);
         if (held != ImGuiKey_None) ImGui::GetIO().AddKeyEvent(held, true);
@@ -2461,6 +2613,29 @@ void chat_test_step()
             fprintf(stderr, "[SOCIAL-UI] report %s (room, room %s)\n", arg.c_str(), C.menu_room_code.c_str());
         }
         C.menu = false;
+    } else if (what == "reportplayer") {            // REPORT PLAYER on NAME:REASON[:NOTE] (REASON 0..3), then SEND
+        std::vector<std::string> parts;
+        for (size_t a = 0;;) {
+            size_t b = arg.find(':', a);
+            parts.push_back(arg.substr(a, b == std::string::npos ? std::string::npos : b - a));
+            if (b == std::string::npos || parts.size() == 2) {
+                if (b != std::string::npos) parts.push_back(arg.substr(b + 1));     // the note may hold ':'
+                break;
+            }
+            a = b + 1;
+        }
+        long long id = parts.empty() ? 0 : room_account_of(parts[0]);
+        for (auto &fr : C.v.friends) if (!parts.empty() && fr.name == parts[0]) id = fr.id;
+        C.open = true;
+        C.tab = TAB_ROOM;
+        if (id && report_offered(id)) {
+            open_report_form(id, parts[0]);
+            C.rp_reason = parts.size() > 1 ? std::max(0, std::min(3, atoi(parts[1].c_str()))) : 0;
+            if (parts.size() > 2) C.rp_note = parts[2].substr(0, RP_NOTE_MAX);
+            send_report_form();
+        } else {
+            fprintf(stderr, "[SOCIAL-UI] report player %s: not offered (no account, no room or match)\n", arg.c_str());
+        }
     } else if (what == "crewladder") {              // stage 3: CREW LADDER
         C.open = true;
         C.kb = C.menu = false;
@@ -3040,7 +3215,7 @@ void chat_draw(ImDrawList *dl, const Frame &f, ImVec2 display)
         default: draw_crew(dl, f, k); break;
         }
         C.mouse_off = false;
-        if (C.menu) draw_player_menu(dl, f, C.popup_frame == ImGui::GetFrameCount() ? ChatKeys() : chat_keys(false));
+        if (C.menu) draw_player_menu(dl, f, C.popup_frame == ImGui::GetFrameCount() || C.kb ? ChatKeys() : chat_keys(false));
         // the keyboard: Y, or A on the text box
         if (!C.kb && !C.menu) {
             if (k.y && C.tab == TAB_FRIENDS) open_keyboard(KB_FRIEND);
@@ -3099,6 +3274,7 @@ const char *chat_shot_label()
     if (C.kb && C.kb_kind == KB_QUICK) return "quick-keyboard";
     if (!C.open || (!social_enabled() && room_chat_state() < 0)) return nullptr;
     if (C.kb) return "social-keyboard";
+    if (C.menu && C.rp) return "social-report";
     if (C.menu) return "social-menu";
     if (C.tab == TAB_CREW && C.crew_view == 1) return "social-crewchat";
     if (C.tab == TAB_CREW && C.crew_view == 2) return "social-crewladder";

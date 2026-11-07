@@ -218,6 +218,9 @@ void netplay_lobby_quick(int mode, int max);
  * players' inputs, with no local player. Only when netplay_lobby_caps() has NETPLAY_CAP_SPECTATE. */
 void netplay_lobby_spectate(const char *code);
 int netplay_spectating(void);   /* 1 while this PC watches a room or one of its matches */
+/* The account report key of this PC's last room match ("ROOM12-1A2B3C4D-1"; "" before the first), for
+ * REPORT PLAYER. Returns its length. */
+int netplay_last_match_key(char *out, int size);
 void netplay_lobby_settings(const NetRoomSettings *settings);   /* host only */
 void netplay_lobby_ready(int ready, int fighter);
 void netplay_lobby_vote(int choice);
