@@ -141,6 +141,7 @@ int netplay_toast(char *t, int n) { (void)t; (void)n; return 0; }
 int netplay_versus(NetVersus *o) { (void)o; return 0; }
 int netplay_match_info(NetVersus *o) { (void)o; return 0; }
 int netplay_rematch_request(void) { return 0; }
+int netplay_fights_skipped(void) { return 0; }
 void netplay_spectator_funccall(const char *t) { (void)t; }
 void netplay_results_funccall(const char *t) { (void)t; }
 int netplay_debug_json(char *o, int n) { return snprintf(o, (size_t)n, "{}"); }
@@ -200,6 +201,7 @@ void netplay_crowd_update(void) { sub_00081170(); }
 #define T_HILL        0x21      /* the room's line, king and countdowns */
 #define T_RESULT      0x22      /* a fighter's outcome: START seed, the winner's room slot (0xFF a draw) */
 #define T_WATCH       0x23      /* START's body, for a fight this PC only watches */
+#define T_WATCHLATE   0x36      /* the same, for a match that already ran when this PC came (CAPS bit 11) */
 #define T_YIELD       0x26      /* give up my spot in the line (relays since build 36, CAPS bit 2) */
 #define T_NOTICE      0x27      /* relay -> game: a countdown before a relay restart (build 37 on) */
 #define T_FIGHTER     0x28      /* created fighters (build 38): this client's record, u16 length + record */
@@ -238,6 +240,7 @@ void netplay_crowd_update(void) { sub_00081170(); }
 #define CAPS_SPECTATE 16u       /* spectator mode (docs/research/spectator-mode.md) */
 #define CAPS_STATS_ERR 32u      /* client (build 46): shows ERROR 12, a created fighter's stats refused */
 #define CAPS_SPEC_REMATCH 64u   /* client (build 47): a spectator takes the players' P_REMATCH (rematches watched) */
+#define CAPS_SPEC_LATE 2048u    /* client: a spectator that comes while the match runs watches its next fight (T_WATCHLATE) */
 #define CAPS_CHAT     128u      /* room chat, both ways (T_IDENT, T_CHAT); only a client announcing it gets T_CHAT */
 #define CAPS_CREW     256u      /* crew battles, both ways (T_CREWJOIN, T_CREW); only a client announcing it gets T_CREW */
 #define CAPS_RB_MODES 512u      /* rollback everywhere (build 52), both ways: the answer carries a u32 of the
@@ -589,6 +592,12 @@ static struct {
      * start (spec_rematch); leaving the fight for the room (spec_quit: START, or the feed stopped) */
     ULONGLONG spec_menu;
     int spec_leave, spec_rematch, spec_quit;
+    /* a WATCHLATE: the match ran already when this PC came; its START is held (spec_late_m) until the
+     * players' next fight of it starts (spec_late_tick). seed_base: that fight's number less one, added to
+     * every seeding's count (netplay_on_seed), as the players' fights before it counted theirs */
+    int spec_late;
+    AutoMatch spec_late_m;
+    uint32_t seed_base;
     /* a player's fight that went out of sync and whose other players stopped sending: left for the
      * room the way the pause menu's Quit leaves it (desync_quit_tick, between two updates) */
     int desync_quit;
@@ -2824,8 +2833,9 @@ static void on_start_as(const uint8_t *b, int len, int watching)
     Reader r = { b, len, 0, 0 };
     AutoMatch m;
     uint32_t seed;
-    int count, i, j, slots[MAXP], fighters[MAXP], pos = -1, deferred;
+    int count, i, j, slots[MAXP], fighters[MAXP], pos = -1, deferred, late = watching == 2;
     if (len < 4) return;
+    if (late) watching = 1;     /* T_WATCHLATE: watched like a WATCH, from the players' next fight */
     seed = get32(b);
     r.i = 4;
     memset(&m, 0, sizeof(m));
@@ -2910,6 +2920,8 @@ static void on_start_as(const uint8_t *b, int len, int watching)
     N.chain_ask = N.chain_lock = 0;
     memset(N.rematch_flags, 0, sizeof(N.rematch_flags));
     spec_reset();
+    N.spec_late = 0;
+    N.seed_base = 0;
     /* This PC rolls back only when the relay allows it: the relay's switch turns rollback off for
      * everyone without a new build (2026-10-26, after rollback crashes). Since build 52 the relay may
      * make it mandatory for the room's mode (this_pc_rolls_back); otherwise the player's setting
@@ -2967,12 +2979,26 @@ static void on_start_as(const uint8_t *b, int len, int watching)
         for (i = 0; i < count; i++) if (slots[i] == N.roomv.hill.king) N.vs_king = i;
     LeaveCriticalSection(&g_cs);
     reset_remote_pads();
-    if (watching)
+    if (late)
+        fprintf(stderr, "[NETPLAY] WATCHLATE: seed %08X, type %d, rules %d, venue %d, %d players; the match runs already: "
+                "this PC watches from the players' next fight\n", seed, m.type, m.rules, m.venue, count);
+    else if (watching)
         fprintf(stderr, "[NETPLAY] START: seed %08X, type %d, rules %d, venue %d, %d players, this PC watches (spectator)\n",
                 seed, m.type, m.rules, m.venue, count);
     else
         fprintf(stderr, "[NETPLAY] START: seed %08X, type %d, rules %d, venue %d, %d players, this PC is player %d%s\n",
                 seed, m.type, m.rules, m.venue, count, pos + 1, N.koth_match ? " (a King of the Hill fight)" : "");
+    if (late) {
+        /* The players fight, or sit on their results, and choose Rematch there: no new START comes
+         * until they are back in the room (a player report, 2026-11-07: watching only worked from the
+         * next room match). This PC keeps their entries and their choices from now on and sets the
+         * match up once their next fight starts (spec_late_tick). */
+        InterlockedExchange(&N.lockstep, 0);
+        N.spec_late_m = m;
+        N.spec_late = 1;
+        set_status("Watching: the players' match runs; you watch from their next fight.");
+        return;
+    }
     if (deferred) {
         /* The king's next fight while its game still shows the last one's results: the new
          * opponent's controller would drive this PC's results menu as player 2 (it chose Rematch
@@ -3004,6 +3030,96 @@ static void on_start_as(const uint8_t *b, int len, int watching)
 }
 
 static void on_start(const uint8_t *b, int len) { on_start_as(b, len, 0); }
+
+/* Spectator mode, a WATCHLATE held: whether player pos's entry for step s of that match is here. */
+static int spec_has(int pos, uint32_t s, uint32_t match)
+{
+    uint32_t c = s / SPEC_CHUNK;
+    SpecChunk *k;
+    return pos >= 0 && pos < MAXP && c < SPEC_CHUNKS && (k = g_spec[pos][c]) != NULL && k->match[s % SPEC_CHUNK] == match;
+}
+
+static volatile LONG g_fights_skipped;     /* netplay_fights_skipped */
+int netplay_fights_skipped(void) { return (int)g_fights_skipped; }
+
+/* The number of the fight of this START a match id belongs to (netplay_on_match_start), 0: none. */
+#define SPEC_LATE_FIGHTS 500u
+static uint32_t spec_fight_of(uint32_t match)
+{
+    uint32_t k;
+    if (!match) return 0;
+    for (k = 1; k <= SPEC_LATE_FIGHTS; k++)
+        if (mix32(N.session ^ (k * 0x9E3779B9u)) == match) return k;
+    return 0;
+}
+
+/* Network thread: a WATCHLATE's match starts here with the players' next fight. That is the fight whose
+ * first entries are all here (it began after this PC came), or the rematch every player chose on the
+ * results; a fight already under way is not (its first entries are gone): the one after it. The fight
+ * is set up as a room match is, numbered as the players number it (N.match_count, so N.match is
+ * theirs), and its seedings count on from the fights before it (seed_base: the players seed every
+ * generator once in each rematch, as this PC's set-up does). The room back in its lobby: nothing; its
+ * next START brings a WATCH. */
+static void spec_late_tick(void)
+{
+    static uint32_t told;
+    uint32_t target = 0, cur = 0, after, f;
+    int i, all, first = 1, n = N.players < MAXP ? N.players : MAXP;
+    const char *how = NULL;
+    if (!N.spec_late) { told = 0; return; }
+    if (!N.lobby || !N.watching || !SPECTATOR_HERE() || N.roomv.phase != 2) {
+        InterlockedExchangeAdd(&g_fights_skipped, (LONG)told);
+        N.spec_late = 0;
+        N.match_live = 0;
+        N.watching = 0;
+        N.pos = 0;
+        fprintf(stderr, "[NETPLAY] watching: the players' match ended before its next fight; watching from the room's "
+                "next match\n");
+        set_status("Watching the room. The next match starts by itself.");
+        return;
+    }
+    EnterCriticalSection(&g_cs);
+    after = N.rematch_want[0];
+    all = n > 0 && after && after != REMATCH_NO;
+    for (i = 0; i < n; i++) {
+        if (N.rematch_want[i] != after) all = 0;
+        if ((f = spec_fight_of(g_steps_match[i])) > cur) cur = f;
+    }
+    if (cur)
+        for (i = 0; i < n; i++)
+            if (!spec_has(i, 1, mix32(N.session ^ (cur * 0x9E3779B9u)))) first = 0;
+    LeaveCriticalSection(&g_cs);
+    if (cur && first) { target = cur; how = "its first entries are here"; }
+    else if (all && after + 1u > cur) { target = after + 1u; how = "every player chose Rematch"; }
+    if (!target) {
+        if (cur && told != cur) {
+            told = cur;
+            fprintf(stderr, "[NETPLAY] watching: the players are in fight %u of their match; watching from the next\n", cur);
+        }
+        return;
+    }
+    N.spec_late = 0;
+    InterlockedExchangeAdd(&g_fights_skipped, (LONG)(target - 1u));
+    EnterCriticalSection(&g_cs);
+    N.match_count = target - 1u;    /* netplay_on_match_start counts this fight as the players count it */
+    N.seed_base = target - 1u;
+    LeaveCriticalSection(&g_cs);
+    N.start_tick = GetTickCount64();
+    fprintf(stderr, "[NETPLAY] watching: the players' fight %u of the match starts (%s); watching it from its first step\n",
+            target, how);
+    become_connected();
+    EnterCriticalSection(&g_cs);
+    if (!cp_records_complete(1)) {
+        N.cp_wait_m = N.spec_late_m;
+        N.cp_wait_since = N.cp_get_sent = GetTickCount64();
+        InterlockedExchange(&N.cp_waiting, 1);
+        LeaveCriticalSection(&g_cs);
+        fprintf(stderr, "[NETPLAY] waiting for a created fighter's record\n");
+        return;
+    }
+    LeaveCriticalSection(&g_cs);
+    automatch_request(&N.spec_late_m);
+}
 
 static void on_packet(const uint8_t *b, int len)
 {
@@ -3147,6 +3263,9 @@ static void on_packet(const uint8_t *b, int len)
         break;
     case T_WATCH:
         if (N.lobby) on_watch(b + 6, len - 6);
+        break;
+    case T_WATCHLATE:   /* spectator mode: a match that runs already; this PC watches its next fight */
+        if (N.lobby && !NETPLAY_IS_KOTH(N.roomv.settings.mode) && SPECTATOR_HERE()) on_start_as(b + 6, len - 6, 2);
         break;
     case T_NOTICE:      /* u16 seconds left, u8 length, text: the relay restarts soon (maintenance) */
         if (len >= 9 && b[8] == len - 9) {
@@ -3420,7 +3539,7 @@ static DWORD WINAPI net_thread(LPVOID unused)
                 int n = header(cb, T_CAPS);
                 memcpy(cb + n, N.token, 8); n += 8;
                 put32(cb + n, CAPS_KOTH | CAPS_CREATED | CAPS_SPECTATE | CAPS_STATS_ERR | CAPS_SPEC_REMATCH | CAPS_CHAT |
-                              CAPS_CREW | CAPS_RB_MODES | CAPS_RB_PING); n += 4;
+                              CAPS_CREW | CAPS_RB_MODES | CAPS_RB_PING | CAPS_SPEC_LATE); n += 4;
                 send_raw(cb, n);
             } else {
                 N.relay_caps = 0;
@@ -3534,6 +3653,7 @@ static DWORD WINAPI net_thread(LPVOID unused)
         /* Hub: our ping for this START, until the match is under way. */
         if (N.lobby && N.match_live && !N.match_seen && now - N.last_rtt_sent >= 100)
             send_rtt();
+        if (N.lobby) spec_late_tick();
         /* The room is playing but this PC never got its START: a VOTE makes the server send it again.
          * In a King of the Hill room only a fighter has a START to get (the HILL says who fights). */
         if (N.lobby && N.roomv.in_room && N.roomv.phase == 2 && !N.start_this_play && !N.over_pending &&
@@ -7635,7 +7755,7 @@ void netplay_on_seed(uint32_t esp, int words, uint32_t which)
         if (N.seeds[i].which == which || !N.seeds[i].which) { slot = i; break; }
     if (slot < 0) slot = (int)(which % 32);
     N.seeds[slot].which = which;
-    count = N.seeds[slot].count++;
+    count = N.seeds[slot].count++ + N.seed_base;
     LeaveCriticalSection(&g_cs);
     for (i = 0; i < words; i++) {
         uint32_t v = mix32(N.session ^ mix32(which * 0x9E3779B9u + count * 0x85EBCA6Bu + (uint32_t)i));

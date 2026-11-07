@@ -2225,7 +2225,7 @@ void draw_rooms(ImDrawList *dl, const Frame &f, const Pad &pad)
                                                          "switch to " + sv[e.server].name + " to watch this one.", 6000);
         else if (!gallery_on()) {
             netplay_lobby_spectate(r.code);
-            say(r.phase == 2 ? "Watching... a match is on: you watch from the next one." : "Watching...");
+            say(r.phase == 2 ? "Watching... a match is on: you watch from its next fight." : "Watching...");
         }
     }
     if (pad.a && n) {

@@ -465,6 +465,7 @@ static void snapshot_point(void)
  * out (state 0x18 or the defeat flag) is left alone, so a step run again after a rollback does
  * exactly what its first run did. Tests only. */
 extern void sub_001B5420(void);     /* (record, state): the state set and restarted */
+extern int netplay_fights_skipped(void);    /* netplay.c: a late spectator counts the fights as the players */
 #define F_HEALTH_RATIO 0x35Cu
 #define F_DEFEAT      0x932u
 #define F_KO_ANIM     0x943u
@@ -516,7 +517,7 @@ static void ko_step(void)
     /* Team (the mode mask 0x3B907E is 2): the side of the winner stands, the other side (slots 0 and 1
      * against 2 and 3) is knocked out, and "alt" alternates the sides (slot 0's, then slot 2's) */
     team = MEM8(0x003B907Eu) == 2u;
-    winner = winner_arg >= 0 ? winner_arg : (int)((s_match - 1) % 2) * (team ? 2 : 1);
+    winner = winner_arg >= 0 ? winner_arg : (int)((s_match - 1 + netplay_fights_skipped()) % 2) * (team ? 2 : 1);
     if (winner < 0 || winner >= SLOTS || !active(winner)) return;
     for (slot = 0; slot < SLOTS; slot++) {
         uint32_t r = record(slot);
