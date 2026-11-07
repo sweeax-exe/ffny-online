@@ -29,7 +29,9 @@
 #include <chrono>
 #include <exception>
 #include <map>
+#include <mutex>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "imgui.h"
@@ -851,7 +853,7 @@ std::string upper(const char *s)
 // ---- the screens --------------------------------------------------------------------------------
 
 enum Page { HUB, ROOMS, SETTINGS, FIGHTERS, CODE, STATS, PLAYERS, RANKED, VOICE, SERVERS, NAME, RANKED_MODES, RANKED_RESULTS,
-            QUICK, LOCKER };
+            QUICK, LOCKER, RANKED_BOARD };
 
 struct State {
     Page page = HUB;
@@ -980,6 +982,13 @@ bool ranked_gallery(const std::string &page);
 void draw_ranked_modes(ImDrawList *dl, const Frame &f, const Pad &pad);
 void draw_ranked(ImDrawList *dl, const Frame &f, const Pad &pad);
 void draw_ranked_results(ImDrawList *dl, const Frame &f, const Pad &pad);
+// build 62: the RANKED board and the searching counts (ranked_board.inc)
+void searching_poll();
+int searching_count(int mode);          // NETRANK_*, or -1 every player once; -1 without a count
+float searching_chip(ImDrawList *dl, const Frame &f, float x1, float y, int n, float alpha = 1.0f);
+bool ranked_board_gallery(const std::string &p);
+void ranked_board_test_step();
+void open_ranked_board(int mode, Page back);
 
 enum NetplayState net_state() { return gallery_on() ? G.state : netplay_state(); }
 bool net_in_lobby() { return gallery_on() ? G.in_lobby : netplay_in_lobby() != 0; }
@@ -1813,6 +1822,11 @@ void draw_hub(ImDrawList *dl, const Frame &f, const Pad &pad)
         if (sel) selector(dl, f, x, y, w, h);
         text(dl, f, g_title, 23, x + 16, y + 3, sel ? CREAM : with_alpha(GREY, 0.85f), items[i], LEFT, 1.6f);
         text(dl, f, g_hand, 12, x + 18, y + 29, sel ? ORANGE : with_alpha(ORANGE, 0.45f), subs[i], LEFT, 1.0f);
+        // build 62: who searches ranked right now (every mode, each player once), at the item's right
+        if (i == HUB_RANKED) {
+            searching_poll();
+            searching_chip(dl, f, x + w - 8, y + 6, searching_count(-1), sel ? 1.0f : 0.75f);
+        }
         if (mouse_click(f, x, y, w, h)) const_cast<Pad &>(pad).a = true;
     }
     // the door: what the chosen item does
@@ -3928,6 +3942,7 @@ NetRoom sample_room(int mode, int max, int count)
 
 #include "rank_art.inc"
 #include "ranked_ui.inc"
+#include "ranked_board.inc"
 #include "social_ui.inc"
 #include "crew_ui.inc"
 #include "locker_ui.inc"
@@ -3967,6 +3982,8 @@ void gallery_step()
                                          // ranked phase 2a: the mode chooser, the search, ACCEPT, the set, results
                                          "ranked-modes", "ranked-search", "ranked-accept", "ranked-room", "ranked-vote",
                                          "ranked-versus", "ranked-results", "ranked-results-placement", "stats-ranked",
+                                         // build 62: the RANKED board, the searching counts on RANKED MATCH
+                                         "ranked-board", "ranked-board-settling", "ranked-board-draft", "ranked-hub",
                                          // build 52: the emblems' results, the season rewards, the Locker
                                          "ranked-results-demoted", "ranked-results-placed", "ranked-results-legend",
                                          "stats-rewards", "locker", "locker-emblem",
@@ -4373,7 +4390,7 @@ LookId page_look(const NetRoom &room, enum NetplayState st)
     case SETTINGS: case CODE: return LOOK_LIST;
     case SERVERS: if (!room.in_room) return LOOK_LIST; break;
     case PLAYERS: if (!room.in_room) return LOOK_PLAYERS; break;
-    case STATS: case LOCKER: if (!room.in_room) return LOOK_STATS; break;
+    case STATS: case LOCKER: case RANKED_BOARD: if (!room.in_room) return LOOK_STATS; break;
     case RANKED: case RANKED_MODES: if (!room.in_room) return LOOK_SEARCH; break;
     case RANKED_RESULTS: return LOOK_SEARCH;
     case VOICE: case QUICK: if (!(room.in_room && room.phase != 0)) return LOOK_VOICE; break;
@@ -4719,6 +4736,7 @@ bool draw_pages(ImVec2 display)
         gallery_step();
         pad = Pad();
     }
+    ranked_board_test_step();
 
     NetRoom room;
     lobby_room(&room);
@@ -4752,7 +4770,8 @@ bool draw_pages(ImVec2 display)
         g_closed_for_match = !gallery_on() && (GetTickCount64() - S.start_seen >= 1800 || (have && v.loaded));
         return !g_closed_for_match;
     }
-    backdrop(dl, f, display, S.page == FIGHTERS || S.page == NAME || S.page == STATS || S.page == PLAYERS || room.in_room ||
+    backdrop(dl, f, display, S.page == FIGHTERS || S.page == NAME || S.page == STATS || S.page == RANKED_BOARD || S.page == PLAYERS ||
+             room.in_room ||
              st == NETPLAY_CONNECTED ||
              !g_menu_up.load(), page_look(room, st));
     S.start_seen = 0;
@@ -4927,6 +4946,8 @@ bool draw_pages(ImVec2 display)
         draw_ranked(dl, f, pad);
     } else if (S.page == RANKED_MODES && !room.in_room) {
         draw_ranked_modes(dl, f, pad);
+    } else if (S.page == RANKED_BOARD && !room.in_room) {
+        draw_ranked_board(dl, f, pad);
     } else if (S.page == RANKED_RESULTS) {
         draw_ranked_results(dl, f, pad);
     } else if (S.page == VOICE && !(room.in_room && room.phase != 0)) {

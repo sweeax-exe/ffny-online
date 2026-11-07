@@ -216,6 +216,8 @@ void draw_ranked_modes(ImDrawList *dl, const Frame &f, const Pad &pad)
     if (pad.right) R.primary = order[(at + 1) % 3];
     for (int i = 0; i < 3; i++) if (order[i] == R.primary) at = i;
     if (pad.y) R.also = !R.also;
+    if (pad.x) { open_ranked_board(R.primary, RANKED_MODES); return; }     // build 62: the mode's ladder
+    searching_poll();
 
     NetModeRank ranks[NETRANK_MODES];
     read_ranks(ranks);
@@ -257,6 +259,14 @@ void draw_ranked_modes(ImDrawList *dl, const Frame &f, const Pad &pad)
             }
         }
         text(dl, f, g_body, 11, x + 10, y + 184, draft ? with_alpha(GREY, 0.7f) : with_alpha(WHITE, 0.85f), descs[i], LEFT, 0.6f, w - 20);
+        {   // build 62: who searches this mode right now, centred at the card's foot
+            int n = searching_count(m);
+            std::string l = n >= 0 ? std::to_string(n) + " SEARCHING" : "";
+            if (!l.empty()) {
+                float cw = text_width(f, g_title, 10, l.c_str()) + 22;
+                searching_chip(dl, f, x + w / 2 + cw / 2, y + h - 22, n, sel ? 1.0f : 0.8f);
+            }
+        }
         if (sel) selector(dl, f, x, y, w, h);
         if (!draft && mouse_click(f, x, y, w, h)) const_cast<Pad &>(pad).a = true;
     }
@@ -277,6 +287,7 @@ void draw_ranked_modes(ImDrawList *dl, const Frame &f, const Pad &pad)
     float hx = 54;
     hx += hint(dl, f, hx, 410, "a", R.primary == NETRANK_DRAFT ? "SEARCH" : "CHOOSE FIGHTER");
     hx += hint(dl, f, hx, 410, "y", R.also ? "ONLY THIS MODE" : "ALSO SEARCH");
+    hx += hint(dl, f, hx, 410, "x", "RANKED BOARD");
     hint(dl, f, hx, 410, "b", "BACK");
     if (pad.b) { S.page = HUB; return; }
     if (pad.a && R.primary == NETRANK_DRAFT) {   // the fighters are drafted: straight to the search
@@ -409,6 +420,14 @@ void draw_ranked(ImDrawList *dl, const Frame &f, const Pad &pad)
                 snprintf(line, sizeof(line), "%d", q.counts[k]);
                 text(dl, f, g_title, 22, x, 160, live ? WHITE : with_alpha(GREY, 0.6f), line, CENTER, 1.2f);
                 text(dl, f, g_title, 10, x, 188, live ? GREY : with_alpha(GREY, 0.6f), netranked_mode_title(k), CENTER, 0.8f);
+            }
+            text(dl, f, g_title, 10, 438, 202, GREY, "SEARCHING ON EVERY SERVER", CENTER, 0.6f);
+        } else if (searching_poll(), searching_count(-1) >= 0) {     // build 62: the service's counts per mode
+            for (int k = 0; k < NETRANK_MODES; k++) {
+                float x = 360 + k * 78;
+                snprintf(line, sizeof(line), "%d", std::max(0, searching_count(k)));
+                text(dl, f, g_title, 22, x, 160, WHITE, line, CENTER, 1.2f);
+                text(dl, f, g_title, 10, x, 188, GREY, netranked_mode_title(k), CENTER, 0.8f);
             }
             text(dl, f, g_title, 10, 438, 202, GREY, "SEARCHING ON EVERY SERVER", CENTER, 0.6f);
         } else {
@@ -1480,6 +1499,7 @@ bool ranked_gallery(const std::string &p)
     snprintf(RG.queue.code, sizeof(RG.queue.code), "MATCH1");
     R.primary = NETRANK_CLASSIC;
     R.also = true;
+    if (ranked_board_gallery(p)) return true;      // build 62 (it also sets the searching counts' sample)
     if (ranked_draft_gallery(p)) return true;
     if (p == "ranked-modes") { S.page = RANKED_MODES; }
     else if (p == "ranked" || p == "ranked-search") { S.page = RANKED; G.queue = NETQUEUE_SEARCHING; }
