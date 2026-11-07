@@ -328,6 +328,37 @@ class Session:
             return None, "no copy %s" % i
         return window_png(c.proc.pid, path, scale)
 
+    def post(self, i, msg, wp=0, lp=0):
+        """Post a window message (a key, a click) to the copy's game window, as the system would. Returns
+        False when it has no window."""
+        c = self.copies.get(int(i))
+        hwnd = c and game_window(c.proc.pid)
+        if not hwnd:
+            return False
+        return bool(ctypes.windll.user32.PostMessageW(ctypes.c_void_p(hwnd), msg, ctypes.c_size_t(wp),
+                                                        ctypes.c_ssize_t(lp)))
+
+
+def game_window(pid):
+    """The HWND of the process's game window (its largest window), or None."""
+    user32 = ctypes.windll.user32
+    found = []
+
+    class RECT(ctypes.Structure):
+        _fields_ = [("l", ctypes.c_long), ("t", ctypes.c_long), ("r", ctypes.c_long), ("b", ctypes.c_long)]
+
+    @ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
+    def each(hwnd, _):
+        p = ctypes.c_ulong()
+        user32.GetWindowThreadProcessId(ctypes.c_void_p(hwnd), ctypes.byref(p))
+        if p.value == pid:
+            r = RECT()
+            user32.GetClientRect(ctypes.c_void_p(hwnd), ctypes.byref(r))
+            found.append((r.r * r.b, hwnd))
+        return True
+    user32.EnumWindows(each, 0)
+    return max(found)[1] if found else None
+
 
 def window_png(pid, path=None, scale=0.5):
     try:

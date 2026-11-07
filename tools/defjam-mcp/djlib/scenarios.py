@@ -171,8 +171,112 @@ def _faults(text):
 
 # ---- boot -----------------------------------------------------------------------------------------
 
+EXIT_OPEN, EXIT_NO, EXIT_YES = "[UI] exit prompt opened", "[UI] exit prompt: no", "[UI] exit prompt: yes"
+EXIT_CHIP, WINDOW_CLOSED, PRESTART = "[UI] exit chip at ", "[TRANS] window closed by the user", "intMain/preStart"
+EXIT_WATCH = [EXIT_OPEN, EXIT_NO, EXIT_YES, EXIT_CHIP, WINDOW_CLOSED, PRESTART]
+
+
+def _wait_count(s, c, text, n, secs):
+    deadline = time.time() + secs
+    while time.time() < deadline:
+        s.poll()
+        if c.watch.count(text) >= n:
+            return True
+        if not c.alive():
+            return False
+        time.sleep(0.25)
+    return False
+
+
+def exit_check(s, c, shots):
+    """The main menu's EXIT (online_screen.cpp): VIEW opens the prompt and B says NO, ESC opens and
+    closes it, a click on the chip opens it and B closes it; the menu stays where it was through all of
+    it (no title screen, the same cursor). Then VIEW, YES: the process ends with code 0 through the
+    window's own close, with no crash and no dump."""
+    WM_KEYDOWN, WM_KEYUP, WM_LBUTTONDOWN, WM_LBUTTONUP, VK_ESCAPE = 0x100, 0x101, 0x201, 0x202, 0x1B
+    steps = []
+
+    def step(name, ok):
+        steps.append(name + (" ok" if ok else " FAILED"))
+        return ok
+
+    def key(vk):
+        s.post(0, WM_KEYDOWN, vk, 1)
+        time.sleep(0.12)
+        s.post(0, WM_KEYUP, vk, 1 | (1 << 30) | (1 << 31))
+
+    r = nav.to_menu(s.control, 0, timeout=60)
+    if not r.get("ok"):
+        return {"ok": False, "error": r.get("error"), "steps": steps}
+    time.sleep(3.0)                 # the menu takes presses once its music runs; the chip is drawn
+    before = s.control(0, "state")
+    s.poll()
+    focus0, prestart0 = nav.focus_of(before), c.watch.count(PRESTART)
+    ok = step("chip drawn", c.watch.count(EXIT_CHIP) > 0)
+    # 1. VIEW opens, B closes
+    s.control(0, "press 0 back 150")
+    ok &= step("view opens", _wait_count(s, c, EXIT_OPEN, 1, 6))
+    time.sleep(0.8)
+    _png(s, 0, "exit-prompt", shots)
+    s.control(0, "press 0 b 150")
+    ok &= step("b says no", _wait_count(s, c, EXIT_NO, 1, 6))
+    time.sleep(2.0)
+    # 2. ESC opens, ESC closes
+    key(VK_ESCAPE)
+    ok &= step("esc opens", _wait_count(s, c, EXIT_OPEN, 2, 6))
+    time.sleep(0.8)
+    key(VK_ESCAPE)
+    ok &= step("esc says no", _wait_count(s, c, EXIT_NO, 2, 6))
+    time.sleep(2.0)
+    # 3. a click on the chip opens, B closes
+    chip = None
+    for line in logparse.read_text(c.log).splitlines():
+        if line.startswith(EXIT_CHIP):
+            a, b = line[len(EXIT_CHIP):].split("-")
+            (x0, y0), (x1, y1) = (map(int, a.split(",")), map(int, b.split(",")))
+            chip = ((x0 + x1) // 2, (y0 + y1) // 2)
+    if chip:
+        lp = (chip[1] << 16) | chip[0]
+        s.post(0, WM_LBUTTONDOWN, 1, lp)
+        time.sleep(0.12)
+        s.post(0, WM_LBUTTONUP, 0, lp)
+        ok &= step("click opens", _wait_count(s, c, EXIT_OPEN, 3, 6))
+        time.sleep(0.8)
+        s.control(0, "press 0 b 150")
+        ok &= step("b says no", _wait_count(s, c, EXIT_NO, 3, 6))
+    else:
+        ok &= step("click opens (no chip line)", False)
+    time.sleep(2.5)
+    after = s.control(0, "state")
+    _png(s, 0, "exit-no", shots)
+    same = "mainmenu" in after.get("screen", "").lower() and c.watch.count(PRESTART) == prestart0 and         nav.focus_of(after) == focus0
+    ok &= step("menu unchanged", same)
+    # 4. VIEW, left to YES, A: the game ends
+    s.control(0, "press 0 back 150")
+    ok &= step("view opens", _wait_count(s, c, EXIT_OPEN, 4, 6))
+    time.sleep(0.8)
+    s.control(0, "press 0 dpad_left 150")
+    time.sleep(0.6)
+    s.control(0, "press 0 a 150")
+    ok &= step("yes", _wait_count(s, c, EXIT_YES, 1, 6))
+    deadline = time.time() + 20
+    while c.alive() and time.time() < deadline:
+        time.sleep(0.25)
+    s.poll()
+    code = None if c.alive() else c.proc.returncode
+    # a crash writes process.dmp into its bug bundle (src/hooks/recorder.c, logs/sessions/<start>/)
+    dumps = [_relpath(p) for p in glob.glob(os.path.join(machine.REPO, "logs", "sessions", "*", "*.dmp"))
+             if os.path.getmtime(p) >= s.t0]
+    crashed = c.watch.count("[CRASH]") > 0
+    ok &= step("exit code 0", code == 0)
+    ok &= step("window close path", c.watch.count(WINDOW_CLOSED) > 0)
+    ok &= step("no crash, no dump", not dumps and not crashed)
+    return {"ok": bool(ok), "exit_code": code, "dumps": dumps, "steps": steps}
+
+
 def boot(timeout=240, turbo=False, extra_env=None, lock_timeout=None, log=None, keep_roots=False, goto=None):
-    """To the main menu; with goto (story, battle, rewards, online, slotN) on to that entry by name."""
+    """To the main menu; with goto (story, battle, rewards, online, slotN) on to that entry by name, or
+    with goto 'exit' through the menu's EXIT prompt (exit_check) until the game quits."""
     t0 = time.time()
     s = copies.Session("boot", lock_timeout=lock_timeout, log=log, keep_roots=keep_roots).open()
     result = {"scenario": "boot", "ok": False}
@@ -186,8 +290,12 @@ def boot(timeout=240, turbo=False, extra_env=None, lock_timeout=None, log=None, 
         if goto:
             env.update(VIRTUAL_PAD_ENV)
             env["RECOMP_INPUT_VIRTUAL_PADS"] = "1"
+        if goto == "exit":
+            # the title presses go into the report, not onto the virtual pad: there they would undo the
+            # control channel's presses, and the overlay reads VIEW from the pad itself
+            env.pop("RECOMP_PAD_SCRIPT_VIRTUAL", None)
         env.update(extra_env or {})
-        c = s.launch(0, env=env, watch=WATCH)
+        c = s.launch(0, env=env, watch=WATCH + (EXIT_WATCH if goto == "exit" else []))
         deadline = time.time() + timeout
         while time.time() < deadline and c.alive():
             s.poll()
@@ -198,7 +306,10 @@ def boot(timeout=240, turbo=False, extra_env=None, lock_timeout=None, log=None, 
         if c.watch.count(MAIN_MENU):
             time.sleep(3)
             _png(s, 0, "menu", shots)
-            if goto:
+            if goto == "exit":
+                nav_result = exit_check(s, c, shots)
+                result["goto"] = nav_result
+            elif goto:
                 nav_result = nav.goto(s.control, goto, 0, timeout=90)
                 time.sleep(2)
                 _png(s, 0, "goto-" + goto, shots)

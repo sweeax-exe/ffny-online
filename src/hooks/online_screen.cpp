@@ -4421,10 +4421,140 @@ bool decor_wanted()
     return g_menu_up.load() != 0 && g_menu_ticks.load() >= 45 && now_ms() - g_last_tick_ms.load() < 300;
 }
 
+// ---- EXIT on the main menu ----------------------------------------------------------------------
+//
+// Handheld and TV players quit from the game instead of Alt+F4. The menu's 3x3 grid has no free cell
+// (ONLINE took the last one), so EXIT is a glass chip in the menu's bottom right corner: the pad's
+// VIEW (Back) button, ESC or a click on it opens "QUIT FFNY ONLINE?" with YES and NO. The menu reads
+// VIEW as BACK, like B (to the title screen), so on the main menu the title's pad reads lose that bit
+// (pc_ui_menu_eats_back, sub_0027E075 in src/recomp_manual.c); ESC and the click never reach the game
+// (pc_ui_window_message), and ESC is no game control by default. While the prompt is open the overlay holds every game input, as for
+// the online screens, and gives it back only once everything is let go, so the B that answers NO never
+// reaches the menu. YES closes the window (the same path as the window's own close: exit code 0, and
+// the launcher, which waits for this process, opens again). Never in a fight, a room or a session.
+
+ImVec4 g_exit_chip;                 // the chip's rectangle in window pixels, as last drawn
+long long g_exit_chip_ms = 0;       // when it was last drawn
+struct ExitPrompt { int sel = 1; long long opened = 0; } X;     // sel 0 YES, 1 NO
+
+bool exit_wanted()
+{
+    if (!decor_wanted() || gallery_on()) return false;
+    if (netplay_in_fight() || netplay_active() || netplay_match_locked()) return false;
+    NetRoom r;
+    lobby_room(&r);
+    return !r.in_room;
+}
+
+bool exit_chip_at(float x, float y)
+{
+    if (now_ms() - g_exit_chip_ms > 300) return false;
+    return x >= g_exit_chip.x && x < g_exit_chip.z && y >= g_exit_chip.y && y < g_exit_chip.w;
+}
+
+bool take_exit_test_request()
+{
+    static int once;
+    if (once || !exit_wanted() || !getenv("RECOMP_TEST_OPEN_EXIT")) return false;
+    once = 1;
+    return true;
+}
+
+// The pad's VIEW button: two small overlapping frames, as on the pad itself.
+void view_glyph(ImDrawList *dl, const Frame &f, float x, float y)
+{
+    dl->AddCircleFilled(f.p(x + 8, y + 8), 8.5f * f.s(), IM_COL32(70, 70, 70, 255));
+    float t = std::max(1.0f, 1.1f * f.s());
+    dl->AddRect(f.p(x + 3.5f, y + 4.5f), f.p(x + 10, y + 9.5f), WHITE, 1.0f * f.s(), 0, t);
+    dl->AddRectFilled(f.p(x + 6, y + 7), f.p(x + 12.5f, y + 12), WHITE, 1.0f * f.s());
+}
+
+void draw_exit_chip(ImDrawList *dl, const Frame &f)
+{
+    const float h = 22, y = 446, right = 606;
+    float word = text_width(f, g_title, 13, "EXIT"), esc = text_width(f, g_body, 10, "ESC");
+    float w = 10 + 16 + 6 + word + 10 + esc + 10 + 10, x = right - w;
+    glass(dl, f, x, y, w, h, 10, IM_COL32(10, 10, 13, 255), 0.62f);
+    view_glyph(dl, f, x + 10, y + 3);
+    text(dl, f, g_title, 13, x + 32, y + 4, WHITE, "EXIT", LEFT, 1.0f);
+    float ex = x + 32 + word + 10;
+    rect(dl, f, ex - 3, y + 5, esc + 6, 12, IM_COL32(70, 70, 70, 255), 3);
+    text(dl, f, g_body, 10, ex, y + 6, WHITE, "ESC", LEFT, 0);
+    ImVec2 a = f.p(x, y), b = f.p(x + w, y + h);
+    g_exit_chip = ImVec4(a.x, a.y, b.x, b.y);
+    g_exit_chip_ms = now_ms();
+    static bool logged;     // once, for the tests' click (tools/defjam-mcp scenario boot --goto exit)
+    if (!logged) {
+        logged = true;
+        fprintf(stderr, "[UI] exit chip at %d,%d-%d,%d\n", (int)a.x, (int)a.y, (int)b.x, (int)b.y);
+    }
+}
+
+void exit_prompt_begin()
+{
+    X = ExitPrompt();
+    X.opened = now_ms();
+    fprintf(stderr, "[UI] exit prompt opened\n");
+    fflush(stderr);
+}
+
+int draw_exit_prompt(ImVec2 display)
+{
+    // the menu went away under it (it should not: nothing on the main menu moves on by itself)
+    if (!exit_wanted()) {
+        fprintf(stderr, "[UI] exit prompt: closed, the main menu is gone\n");
+        return 1;
+    }
+    ImDrawList *dl = ImGui::GetForegroundDrawList();
+    Frame f = menu_frame(display);
+    dl->AddRectFilled(ImVec2(0, 0), display, IM_COL32(0, 0, 0, 150));
+    const float px = 170, py = 160, pw = 300, ph = 160;
+    glass(dl, f, px, py, pw, ph, 14, IM_COL32(10, 10, 13, 255), 0.86f);
+    text(dl, f, g_title, 24, 320, py + 18, CREAM, "QUIT FFNY ONLINE?", CENTER, 1.6f);
+    text(dl, f, g_hand, 15, 320, py + 50, ORANGE, "the launcher opens again", CENTER, 1.0f);
+    const float by = py + 80, bh = 32, bw = 120;
+    const float bx[2] = { 320 - 10 - bw, 320 + 10 };
+    const char *label[2] = { "YES", "NO" };
+    int choose = -1;
+    for (int i = 0; i < 2; i++) {
+        if (mouse_pick(f, bx[i], by, bw, bh)) X.sel = i;
+        if (mouse_click(f, bx[i], by, bw, bh)) choose = i;
+        bool sel = X.sel == i;
+        glass(dl, f, bx[i], by, bw, bh, 7, sel ? RED : IM_COL32(10, 10, 13, 255), sel ? 0.92f : 0.6f);
+        text(dl, f, g_title, 18, bx[i] + bw / 2, by + 6, sel ? WHITE : GREY, label[i], CENTER, 1.2f);
+    }
+    float hx = px + 78;
+    hx += hint(dl, f, hx, py + ph - 26, "a", "SELECT");
+    hint(dl, f, hx, py + ph - 26, "b", "BACK");
+
+    auto pressed = [](std::initializer_list<ImGuiKey> keys) {
+        for (ImGuiKey k : keys) if (ImGui::IsKeyPressed(k, false)) return true;
+        return false;
+    };
+    if (pressed({ ImGuiKey_GamepadDpadLeft, ImGuiKey_GamepadLStickLeft, ImGuiKey_LeftArrow, ImGuiKey_A }))
+        X.sel = 0;
+    if (pressed({ ImGuiKey_GamepadDpadRight, ImGuiKey_GamepadLStickRight, ImGuiKey_RightArrow, ImGuiKey_D }))
+        X.sel = 1;
+    if (pressed({ ImGuiKey_Tab })) X.sel ^= 1;
+    if (pressed({ ImGuiKey_GamepadFaceDown, ImGuiKey_Enter, ImGuiKey_KeypadEnter, ImGuiKey_Space, ImGuiKey_K }))
+        choose = X.sel;
+    if (pressed({ ImGuiKey_Y })) choose = 0;
+    // VIEW again closes it too, but not the press that opened it (the pad reaches the overlay's
+    // input only once the prompt is open, so that press reads as new in its first frames)
+    bool view = now_ms() - X.opened > 400 && pressed({ ImGuiKey_GamepadBack });
+    if (pressed({ ImGuiKey_GamepadFaceRight, ImGuiKey_Escape, ImGuiKey_Backspace, ImGuiKey_N, ImGuiKey_L }) || view)
+        choose = 1;
+    if (choose < 0) return 0;
+    fprintf(stderr, "[UI] exit prompt: %s\n", choose == 0 ? "yes, quitting" : "no");
+    fflush(stderr);
+    return choose == 0 ? 2 : 1;
+}
+
 void draw_decor(ImDrawList *dl, ImVec2 display)
 {
     if (!decor_wanted()) return;
     Frame f = menu_frame(display);
+    if (exit_wanted()) draw_exit_chip(dl, f);
     bool focused = g_focus.load() == ONLINE_SLOT;
     // The poster itself is painted into the menu's wall textures (scripts/apt-patch.py v3), so it
     // slides and lights with its neighbours; only the door's text is drawn here.
@@ -4859,6 +4989,11 @@ namespace online_screen {
 void prepare(void *) {}
 bool decor_wanted() { return false; }
 void draw_decor(ImDrawList *, ImVec2) {}
+bool exit_wanted() { return false; }
+bool exit_chip_at(float, float) { return false; }
+bool take_exit_test_request() { return false; }
+void exit_prompt_begin() {}
+int draw_exit_prompt(ImVec2) { return 1; }
 bool take_open_request() { return g_open_req.exchange(0) != 0 && false; }
 bool draw(ImVec2) { return false; }
 bool closed_for_match() { return false; }

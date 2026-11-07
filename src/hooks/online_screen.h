@@ -26,6 +26,16 @@ void prepare(void *d3d11_device);
 bool decor_wanted();
 void draw_decor(ImDrawList *dl, ImVec2 display);
 
+/* EXIT on the main menu: a glass chip drawn with the decor (the grid has no free cell). The overlay
+ * opens the prompt on the pad's VIEW, ESC or a click on the chip, only while exit_wanted() (the main
+ * menu, no fight, no session, no room). exit_chip_at takes window pixels. RECOMP_TEST_OPEN_EXIT=1
+ * (tests) opens it once at the first main menu. draw_exit_prompt: 0 still open, 1 NO, 2 YES. */
+bool exit_wanted();
+bool exit_chip_at(float x, float y);
+bool take_exit_test_request();
+void exit_prompt_begin();
+int draw_exit_prompt(ImVec2 display);
+
 /* The player chose ONLINE (once per choice). */
 bool take_open_request();
 

@@ -90,6 +90,22 @@ The d-pad or left stick moves, **A** (the bottom face button) activates, **B** g
 buttons switch pages, and the triggers change a slider faster. This works with any pad the game reads, with
 the first pad to press a button, and independently of the game's own button mapping.
 
+## EXIT on the main menu
+
+The game's main menu is a 3x3 grid whose last free cell is ONLINE, so EXIT is not a menu entry: it is a small
+glass chip in the menu's bottom right corner (the pad's VIEW glyph, EXIT, ESC). The pad's VIEW (Back) button,
+ESC or a click on the chip opens "QUIT FFNY ONLINE?" with YES and NO (NO selected). Left/right or the mouse
+choose, A/Enter/Space take the choice, B/ESC/VIEW say NO, Y and N answer directly. While it is open the game
+gets no input, and after NO it gets its controls back only once everything is let go, so the B that answered
+never reaches the menu (B there would go to the title screen). The menu reads VIEW as BACK too (to the title
+screen), so on the main menu the title's pad reads lose the BACK bit (`pc_ui_menu_eats_back`, the
+`sub_0027E075` wrapper in `src/recomp_manual.c`); ESC and the click are kept from the game in the window
+procedure, and ESC is no game control by default. YES closes the window the same way its close button does: exit code
+0, and the launcher, which waits for the game's process, opens again. The chip shows only on the main menu,
+never in a fight, an online session or a room. With VIEW as push-to-talk (`online.voice_pad = back`) only
+ESC and the chip open it. Windows only for now, like the online screens. `dj.py scenario boot --goto exit`
+tests it end to end.
+
 ## The online screens' look
 
 The online screens (`src/hooks/online_screen.cpp`, opened from ONLINE in the game's main menu) wear the
@@ -168,6 +184,7 @@ nobody at it (a locked screen, a remote run):
 | `RECOMP_HOST_SCRIPT` | The game window's input: `<ms>:key:<SDL key name>` (`F1`, `Escape`), `<ms>:click:<x>:<y>`, `<ms>:move:<x>:<y>`, `<ms>:text:<chars>`, times from the window's opening |
 | `RECOMP_OVERLAY_SHOT_DIR=<folder>`, `RECOMP_OVERLAY_SHOT_MS` | Windows: the finished picture with the overlay, every `RECOMP_OVERLAY_SHOT_MS` (2000 by default) while the overlay draws, as `<ms>.bmp` |
 | `RECOMP_TEST_ONLINE_GALLERY=<ms>` | Windows, with `RECOMP_TEST_OPEN_ONLINE=1`: the online screens show every page in turn, `<ms>` each, with sample players, rooms, a hill and statistics, take no input and connect to nothing; the overlay captures are then named `<ms>-<page>.bmp`. For comparing a design change page by page from one copy. `RECOMP_TEST_ONLINE_GALLERY_ONLY=<prefix>` shows only the pages whose names start with it (`versus`: the versus screen for One on One, 3-Way, Free for All and King of the Hill, the entrance replaying on each page) |
+| `RECOMP_TEST_OPEN_EXIT=1` | Windows: the main menu's QUIT FFNY ONLINE? prompt opens once at the first main menu, as if VIEW had been pressed |
 | `RECOMP_SOCIAL=on\|off` | Windows: the chat window of the online screens (friends, private messages, global and crew chat; `src/hooks/social.h`). Unset, it shows only once the account service says the social features are on; `on` shows it for a test against a local account service that has them on; `off` keeps it hidden. Signed-in players only |
 | `RECOMP_TEST_SOCIAL=<steps>` | With `RECOMP_SOCIAL=on`: the social thread runs these once its lists are loaded, `;` between them: `wait:<s>`, `friend:<name>`, `accept`, `dm:<friend>:<text>`, `global:<region>:<text>`, `remove:<friend>`, `log`; each writes a `[SOCIAL-TEST]` line (`dj.py scenario social`) |
 | `RECOMP_TEST_SOCIAL_UI=<steps>` | The chat window's own steps, `<s>:<action>` from the moment the lists are loaded: `chat=<tab>`, `keyboard=<text>`, `friend=<name>`, `dm=<friend>`, `type=<text>`, `send`, `close`; the overlay captures are then named after the tab (`social-global`, `social-keyboard`, ...) |

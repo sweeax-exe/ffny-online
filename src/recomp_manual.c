@@ -926,15 +926,27 @@ void sub_001BAA00(void)
     defjam_input_latency_actor(actor, 1);
 }
 extern void sub_0027E075_gen(void);
+/* The main menu's EXIT (src/hooks/online_screen.cpp): there the pad's BACK (VIEW) opens the quit
+ * prompt, so the title must not read it (its menu would go to the title screen, as on B). */
+extern int pc_ui_menu_eats_back(void);
+static void strip_menu_back(uint32_t state)
+{
+    if (!g_eax && state && pc_ui_menu_eats_back())
+        MEM16(state + 4) &= (uint16_t)~0x0020u;     /* XINPUT_GAMEPAD_BACK in wButtons, after the packet DWORD */
+}
 void sub_0027E075(void)
 {
+    uint32_t handle = MEM32(g_esp + 4), state = MEM32(g_esp + 8);
     if (input_latency_on() || input_consumption_on()) {
-        uint32_t handle = MEM32(g_esp + 4), state = MEM32(g_esp + 8);
         input_latency_xdk_begin(handle);
         sub_0027E075_gen();
+        strip_menu_back(state);
         input_consumption_xdk_end(handle, state, g_eax);
         input_late_capture(handle, state, g_eax);
-    } else sub_0027E075_gen();
+    } else {
+        sub_0027E075_gen();
+        strip_menu_back(state);
+    }
 }
 /* Optional fresh report at the controller manager's existing update, before
  * DD930/DCE00 advance history. Lifecycle functions serialize with this read. */
