@@ -42,6 +42,7 @@
 #include "patches/cheats.h"
 #include "patches/song_store.h"
 #include "patches/song_cursor.h"
+#include "patches/options_volume.h"
 #include "patches/menu_geometry.h"
 #include "patches/cinema_timing.h"
 
@@ -245,6 +246,7 @@ void sub_00014540(void)
     song_store_before_load(manager);
     sub_00014540_gen();
     song_store_after_load(manager);
+    options_volume_after_load(manager);    /* src/patches/options_volume.c: saved volumes to the mixer */
 }
 extern void sub_00020C40_gen(void);
 void sub_00020C40(void) { song_store_build_playlist(sub_00020C40_gen, 0); }
