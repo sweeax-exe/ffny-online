@@ -384,6 +384,27 @@
     });
   }
 
+  // ---- the trailer: a YouTube player (privacy-enhanced mode) made only on click ----
+  function setupTrailer() {
+    var play = document.getElementById('trailer-play');
+    var box = document.getElementById('trailer-media');
+    if (!play || !box) return;
+    play.addEventListener('click', function (e) {
+      var id = play.getAttribute('data-video');
+      if (!/^[A-Za-z0-9_-]{11}$/.test(id || '')) return;
+      e.preventDefault();
+      var f = document.createElement('iframe');
+      f.src = 'https://www.youtube-nocookie.com/embed/' + id + '?autoplay=1&rel=0';
+      f.title = 'FFNY Online trailer';
+      f.allow = 'autoplay; encrypted-media; picture-in-picture; fullscreen';
+      f.allowFullscreen = true;
+      // The page sends no referrer; YouTube's player refuses to start without one (error 153).
+      f.referrerPolicy = 'strict-origin-when-cross-origin';
+      box.textContent = '';
+      box.appendChild(f);
+    });
+  }
+
   // ---- embers rising through the hero; off for reduced motion, paused off screen ----
   function setupEmbers() {
     var canvas = document.querySelector('.embers');
@@ -468,6 +489,7 @@
     loadTournaments();
     setupLightbox();
     setupClip();
+    setupTrailer();
     setupEmbers();
   }
 

@@ -85,7 +85,24 @@
         </div>
       </div>
     </div>
-    <a class="scroll-cue" href="#features" aria-label="Scroll to the features"></a>
+    <a class="scroll-cue" href="#trailer" aria-label="Scroll to the trailer"></a>
+  </section>
+
+  <!-- The trailer loads from YouTube (privacy-enhanced mode) only when it is clicked; until then the
+       page makes no request to YouTube. Without JavaScript the link opens it on YouTube. -->
+  <section class="section trailer" id="trailer" aria-labelledby="trailer-title">
+    <div class="wrap">
+      <p class="kicker">Trailer</p>
+      <h2 id="trailer-title">See FFNY Online in action.</h2>
+      <div class="trailer-media glass" id="trailer-media">
+        <img src="media/online-fight.png" alt="An online fight in FFNY Online" width="640" height="480" loading="lazy" decoding="async">
+        <a class="clip-play" id="trailer-play" href="https://www.youtube.com/watch?v=5EHQ68okIJw"
+           data-video="5EHQ68okIJw" target="_blank" rel="noopener">
+          <span class="clip-icon" aria-hidden="true"></span>
+          <span>Play the trailer <small>(loads from YouTube)</small></span>
+        </a>
+      </div>
+    </div>
   </section>
 
   <!-- Filled by site.js from the account service (GET https://play.defjam.online/api/tournaments);
