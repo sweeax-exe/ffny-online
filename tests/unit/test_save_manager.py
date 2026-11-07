@@ -383,3 +383,116 @@ def test_stored_and_large_deflate_members(tool, tmp_path):
     assert 'imported=1' in text
     got = (save / 'UserData/45410049' / save_import.folder_name('Repeat') / 'Repeat').read_bytes()
     assert got == save_import.resign(blob, bytes(16))
+
+
+# ---- PS2 profiles (hK's converter, ported) ----
+
+PS2_SIZE = 22888
+PS2_IDENTITY = b'DJFFNY::User 17 -'
+
+
+def ps2_profile(name, seed='ps2'):
+    """A synthetic PS2 Story profile: the 20CM header with the PS2 sizes, random check bytes, the
+    identity block at 28, the fighter's name at 92 and random bytes for the rest."""
+    body = bytearray(hashlib.shake_256((seed + name).encode()).digest(PS2_SIZE))
+    body[0:4] = b'20CM'
+    body[4:16] = struct.pack('<III', PS2_SIZE, 64, PS2_SIZE - 28 - 64)
+    body[28:92] = (PS2_IDENTITY + b'1234567890').ljust(64, b'\0')
+    body[92:112] = name.encode('ascii').ljust(20, b'\0')
+    return bytes(body)
+
+
+def psu(dirname, files):
+    """A .psu export: a folder entry, '.' and '..', then each file's 512-byte entry and its bytes
+    padded to 1 KiB."""
+    def entry(mode, size, name):
+        e = bytearray(512)
+        struct.pack_into('<HHI', e, 0, mode, 0, size)
+        e[64:64 + len(name)] = name
+        return bytes(e)
+    out = entry(0x8427, len(files) + 2, dirname) + entry(0x8427, 0, b'.') + entry(0x8427, 0, b'..')
+    for name, data in files:
+        out += entry(0x8497, len(data), name) + data + bytes(-len(data) % 1024)
+    return out
+
+
+def expected_xbox(ps2):
+    """The Xbox layout written out independently from the description in save_manager.h."""
+    payload = ps2[92:]
+    preview = bytes(2) + bytes((48, 48, 48, 255)) * 4863 + bytes.fromhex('01890081a008')
+    identity = (PS2_IDENTITY + b'2030886228').ljust(64, b'\0')
+    blob = (b'20CM' + struct.pack('<III', 0x5990, 64, 0x5990 - 140) + bytes(60) + identity + payload[:384]
+            + preview + payload[19852:])
+    assert len(blob) == 0x5990
+    return save_import.resign(blob, bytes(16))
+
+
+def test_ps2_psu_import(tool, tmp_path):
+    blob = ps2_profile('SWEEAX')
+    src = tmp_path / 'Def Jam.psu'
+    src.write_bytes(psu(b'BESLES-52507DEFJAM', [(b'icon.sys', b'I' * 964), (b'defjams.ico', b'C' * 3000),
+                                                   (b'BESLES-52507DEFJAM', blob)]))
+    save = tmp_path / 'save'
+    text = run(tool, 'import', src, save, tmp_path / 'b', noon())
+    folder = save_import.folder_name('SWEEAX')
+    assert 'found SWEEAX %s exists=0 sign=0' % folder in text
+    assert 'result ok=1 imported=1' in text and 'message Imported 1 profile: SWEEAX.' in text
+    out = save / 'UserData/45410049' / folder
+    got = (out / 'SWEEAX').read_bytes()
+    assert got == expected_xbox(blob)
+    assert all(save_import.signatures_ok(got, save_import.PORT_KEY))
+    assert got[0x38:0x4C] == hmac.new(bytes(16), got[:0x38], hashlib.sha1).digest()
+    assert got[0x80 + 0x4D8A] == 1                       # the created-fighter flag
+    assert got[0x8C:0x8C + 6] == b'SWEEAX'               # the fighter's name opens the profile
+    assert (out / 'SaveMeta.xbx').read_bytes() == meta('SWEEAX')
+    image = (out / 'saveimage.xbx').read_bytes()
+    assert len(image) == 4096 and image[:4] == b'XPR0'
+    assert run(tool, 'list', save).splitlines() == ['0|SWEEAX|%s|1|1|1' % folder]
+
+
+def test_ps2_bare_profile_and_replace(tool, tmp_path):
+    save, backups = tmp_path / 'save', tmp_path / 'b'
+    mine = profile('AMP mine', key=bytes(16))
+    put_profile(save / 'UserData' / '45410049', 'AMP', mine)
+    blob = ps2_profile('AMP')
+    src = tmp_path / 'BASLUS-21004DEFJAM'          # the profile file itself, as a card tool saves it
+    src.write_bytes(blob)
+    text = run(tool, 'import', src, save, backups, noon(-1))
+    assert 'exists=1' in text and 'kept=1' in text
+    assert (save / 'UserData/45410049' / save_import.folder_name('AMP') / 'AMP').read_bytes() == mine
+    text = run(tool, 'import', src, save, backups, noon(), 'AMP')
+    assert 'imported=1 replaced=1' in text
+    assert (save / 'UserData/45410049' / save_import.folder_name('AMP') / 'AMP').read_bytes() == expected_xbox(blob)
+
+
+@pytest.mark.parametrize('file,data,words', [
+    ('Mcd001.ps2', b'Sony PS2 Memory Card Format 1.2.0.0' + bytes(5000), ['memory card (.ps2)', '.psu']),
+    ('save.max', b'Ps2PowerSave' + bytes(500), ['MAX Drive', '.psu']),
+    ('cut.psu', None, ['damaged']),
+    ('notone.psu', b'\0' * 2048, ['not a .psu save export']),
+])
+def test_ps2_files_that_are_refused(tool, tmp_path, file, data, words):
+    if data is None:
+        whole = psu(b'BESLES-52507DEFJAM', [(b'BESLES-52507DEFJAM', ps2_profile('CUT'))])
+        data = whole[:len(whole) - 1024]
+    (tmp_path / file).write_bytes(data)
+    out = subprocess.run([str(tool), 'import', str(tmp_path / file), str(tmp_path / 'save'), str(tmp_path / 'b'),
+                          str(noon())], capture_output=True, text=True)
+    assert out.returncode == 1 and out.stdout.startswith('error Could not read ' + file)
+    for w in words:
+        assert w in out.stdout
+    assert not (tmp_path / 'save').exists()
+
+
+def test_ps2_options_save_and_bad_names(tool, tmp_path):
+    options = tmp_path / 'options.psu'
+    options.write_bytes(psu(b'BESLES-52507OPTIONS', [(b'icon.sys', b'I' * 964), (b'BESLES-52507OPTIONS', b'\0' * 300)]))
+    out = subprocess.run([str(tool), 'import', str(options), str(tmp_path / 'save'), str(tmp_path / 'b'), str(noon())],
+                         capture_output=True, text=True)
+    assert out.returncode == 1 and 'No Def Jam Story profile in options.psu' in out.stdout
+    for name, why in (('CON', 'Windows keeps'), (' lead', 'cannot use'), ('a/b', 'cannot use'), ('', '1 to 20')):
+        src = tmp_path / 'bad.psu'
+        src.write_bytes(psu(b'BASLUS-21004X', [(b'BASLUS-21004X', ps2_profile(name))]))
+        text = run(tool, 'import', src, tmp_path / 'save', tmp_path / 'b', noon(), check=False)
+        assert 'skipped BASLUS-21004X' in text and why in text, (name, text)
+        assert not (tmp_path / 'save' / 'UserData').exists()

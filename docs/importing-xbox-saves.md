@@ -13,11 +13,31 @@ repository.
 
 ## In the launcher
 
-Open **Saves** in the launcher (under PLAY), press **Import Xbox saves** and pick the folder with the
+Open **Saves** in the launcher (under PLAY), press **Import saves** and pick the folder with the
 profile folders (the console's `E:\UDATA\45410049`) or a `.zip` of it. The launcher lists what it found,
 asks before replacing a profile you already have, backs your saves up first (to `save-backups/` in the
 data folder) and then copies and signs the profiles the same way as the script below. The launcher runs
 before the game, so the game is closed; if it is running, the launcher says so and changes nothing.
+
+## PS2 profiles
+
+The launcher also brings in a Story profile from the PS2 game (PAL `SLES-52507` or NTSC-U
+`SLUS-21004`). Open **Saves**, press **Import saves**, choose **PS2: from a .psu save export** and
+pick the `.psu` file of the Def Jam Story profile. A `.psu` is the one-save export that uLaunchELF
+writes on a PS2 and that memory card tools such as mymcplus write from a PCSX2 card. The bare
+profile file from such an export works as well. The rest is the same as for Xbox profiles: the
+list, *Replace* for a name you already have, the backup first, the signing.
+
+Not supported yet: a whole PCSX2 memory card (`.ps2`) and MAX Drive saves (`.max`). The launcher
+says so; export the Def Jam save from the card as a `.psu` and import that. The Options save is not
+imported, as with Xbox saves.
+
+The conversion is a C++ port of the PS2 to Xbox converter by **hK** (used with his permission). The
+PS2 profile has the same `20CM` shape with a 28-byte header (no HMAC fields) and is 22888 bytes;
+everything but the portrait is laid out as on the Xbox. The import keeps the fighter and the
+progress byte for byte, replaces the PS2 portrait (it has another size and format) with a plain grey
+preview (a dark square on Select User ID), gives the profile the identity block and the created-fighter flag of hK's Xbox reference,
+adds a plain grey `saveimage.xbx` and signs the result with the port's key.
 
 ## Steps (with the script)
 

@@ -15,8 +15,10 @@ saves::fs::path backup_dir();       // <data>/save-backups
 int64_t now();
 // Another process runs the game on this save area (or a copy of this install runs at all).
 bool game_running();
-// The folder or .zip picker. Done when pick_poll returns true; `path` is "" when cancelled.
-void pick_start(bool zip, void *window);
+// The folder, .zip or PS2 save (.psu) picker. Done when pick_poll returns true; `path` is "" when
+// cancelled.
+enum class Pick { FOLDER, ZIP, PS2 };
+void pick_start(Pick what, void *window);
 bool pick_poll(std::string &path);
 } // namespace pcsaves
 
