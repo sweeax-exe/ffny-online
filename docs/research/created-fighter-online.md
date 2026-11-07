@@ -201,7 +201,18 @@ before is held, so a `START` that still names the old CRC plays the old record o
 Tests: `RECOMP_CP_RECORD=<dump or save>[;<dump or save>...]` replaces the list (in that order),
 `RECOMP_CP_PICK=<index>` the pick, `RECOMP_TEST_CP_REPICK=<index>` picks another once the relay
 keeps the first (the test autostart, as the fighter select does); `dj.py scenario online
---cp-records "a;b;c,d" --cp-pick 2,`.
+--cp-records "a;b;c,d" --cp-pick 2,`. `RECOMP_TEST_CP_DROP=1` drops the other members' records until
+the first `START` (the `START` then waits and fetches them with `RECGET`), `=2` drops every one (the
+wait gives up after 10 s and the PC leaves the match), `=3` also sends none of this PC's data from the
+first `START` on (the other PC hears nothing from it), e.g. `--copy-env 0:RECOMP_TEST_CP_DROP=2`.
+
+**A PC that leaves at its START** (F9 reports f899b3/0ee740, build 61, a Window Match of two created
+fighters): one PC waited for the other's record, the room said that player had left, and it never set
+the match up, while the other PC loaded and stood at the fight's first steps waiting for entries that
+never came (`START_LIMIT_MS`, 90 s, with no picture). Since then the waiting PC ends the hub match as
+soon as the room says a player left (not after the 10 s of asking), and a PC at the first steps gives up
+after `STALL_LIMIT_MS` on a player it has heard nothing from since the `START` (no `P_RTT`, which a PC
+in the match sends every 100 ms from the `START` on, and no entries).
 
 **Injection** (`created_fighter_inject`, from the automatch sequence for each slot whose START
 fighter is 99): the record into the highest profile slot without a loaded user ID, the pad linked
