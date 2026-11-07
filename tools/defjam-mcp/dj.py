@@ -67,7 +67,8 @@ def cmd_scenario(a):
                              cp_names=a.cp_names.split(",") if a.cp_names else None, more_shots=a.more_shots,
                              rematch=a.rematch, venues=a.venues, spectators=a.spectators, copy_env=copy_env(a.copy_env),
                              fixtures=a.fixtures.split(",") if a.fixtures else None, ranked=a.ranked,
-                             rollback_modes=a.rollback_modes, rollback_max_ping=a.rollback_max_ping, **common)
+                             rollback_modes=a.rollback_modes, rollback_max_ping=a.rollback_max_ping, leave=a.leave,
+                             **common)
     elif a.kind == "offline":
         r = scenarios.offline(type=a.type, venue=a.venue, f0=a.f0, f1=a.f1, cpu=not a.human, bot=a.bot,
                               fast_ko=a.fast_ko, turbo=a.turbo, timeout=a.timeout or 420,
@@ -208,6 +209,8 @@ def main(argv=None):
     sc.add_argument("--rematch", action="store_true", help="online: matches after the first are Rematch from the results menu")
     sc.add_argument("--ranked", help="online: a ranked set (classic, open, classic,open or draft) against a local account service "
                                      "with test accounts (accounts -ranked -test-accounts)")
+    sc.add_argument("--leave", help="online: N@STEP, copy N leaves the room at fight step STEP of the first match "
+                    "(RECOMP_TEST_LEAVE_STEP) and is left out of the checks")
     sc.add_argument("--spectators", type=int, default=0, help="online: this many more copies watch the room (spectator mode)")
     sc.add_argument("--type", type=int, default=0)
     sc.add_argument("--venue", type=int, default=1)

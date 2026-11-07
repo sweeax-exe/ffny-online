@@ -280,6 +280,14 @@ void netplay_crowd_update(void) { sub_00081170(); }
                                      * since build 46 u8 rollback (bit 0: rolls back in the next match, bit 1: the
                                      * setting is on but this session runs without it) */
 #define PINGINFO_MS   2000
+/* A player gone mid-fight while two or more stay (Free for All, Team, 3-Way; build 62): u32 START seed,
+ * u32 match, u8 the gone player's position, u32 the sender's last step of its entries (every step
+ * before is there too), u8 count, count x 32 bytes: its entries up to that step. Every PC that stays
+ * sends it; the gone player's port is at rest from the step after the highest of them, on every PC. */
+#define P_GONE        10
+#define GONE_WINDOW   32            /* entries a P_GONE carries (more than two delays) */
+#define GONE_RESEND_MS 100
+#define GONE_REPEAT_MS 3000         /* P_GONE goes on this long after the step is agreed (for a PC that lost one) */
 #define HASH_PARTS    NETCHECK_PARTS    /* the checksum in parts: fighters 1-4, the AI generators, the rest */
 #define STALL_LIMIT_MS 10000        /* mid-fight: a player has gone */
 #define START_LIMIT_MS 90000        /* the first steps: another PC may still be loading the venue */
@@ -488,6 +496,15 @@ static struct {
     uint32_t rematch_want[MAXP];    /* the match number each player chose Rematch after, REMATCH_NO: went back */
     volatile LONG rematch_held;     /* this PC chose Rematch and waits for the others (its call was held) */
     volatile LONG rematch_go;       /* ... and they all have now: the game thread starts the rematch */
+    /* players gone mid-fight while two or more stay (P_GONE): the others go on in lockstep, the gone
+     * player's port at rest from an agreed step on; cleared at every START */
+    uint32_t gone_mask;             /* positions gone */
+    uint32_t gone_from[MAXP];       /* the first step its port rests on every PC (0: not agreed yet) */
+    uint32_t gone_have[MAXP];       /* this PC's last step of its entries when it went (P_GONE) */
+    uint32_t gone_peer[MAXP][MAXP]; /* ... and each other player's, from their P_GONE */
+    uint32_t gone_heard[MAXP];      /* the positions whose P_GONE about it arrived */
+    uint32_t gone_fill_match[MAXP], gone_fill_next[MAXP];   /* its rest entries are in the ring up to here */
+    ULONGLONG gone_sent, gone_until;    /* the last P_GONE; sent until (0: a step not agreed yet) */
     /* rollback (rollback.h): a fighting step runs on a prediction of each entry that has not
      * arrived (that player's last one); when the real one differs, the game goes back to the
      * save state taken before that step and runs the steps again. */
@@ -1544,6 +1561,221 @@ static unsigned g_steps_rx[MAXP], g_steps_last[MAXP];
 static ULONGLONG g_steps_at[MAXP];          /* when each player's latest STEPS arrived (GetTickCount64) */
 #define SILENT_OWN_MS 4000                 /* nobody heard this long: this PC's own connection (give-up notice) */
 static uint32_t g_steps_match[MAXP];       /* the match of each player's latest STEPS: 0 or older while it still loads */
+
+/* ---- a player gone mid-fight while two or more stay -------------------------------------------
+ *
+ * One player of a four-player Free for All left mid-fight: each PC that stayed dropped out of the
+ * lockstep and finished the fight offline, so every player saw the other two stand still and quit
+ * within seconds (EU relay log, 2026-11-07). With two or more players left, the lockstep goes on
+ * among them and the gone player's port reads at rest from a step every PC agrees on: each sends a
+ * P_GONE with the last step of that player's entries it has (with every one before it) and those
+ * entries; the port rests from the step after the highest. A PC runs no step past its own number
+ * meanwhile, and none ran one past it before (it had no entry for it), so no PC used a real entry
+ * where another uses the rest one; the entries the others still lack come in the P_GONE. With one
+ * player left (One on One, King of the Hill) the match finishes offline, as before. */
+static void report_left(uint32_t left);
+
+static int gone_old_way(void)       /* RECOMP_NETPLAY_LEAVER=offline (tests): the old way, for comparison */
+{
+    static int v = -1;
+    if (v < 0) v = getenv("RECOMP_NETPLAY_LEAVER") && !strcmp(getenv("RECOMP_NETPLAY_LEAVER"), "offline");
+    return v;
+}
+
+/* Under g_cs: whether the players of `mask` can be gone while the others go on in lockstep. */
+static int gone_can_go_on(uint32_t mask)
+{
+    int i, stay = 0;
+    if (!N.lobby || N.watching || N.koth_match || N.players < 3 || N.pos < 0 || N.pos >= N.players ||
+        (mask >> N.pos & 1) || gone_old_way())
+        return 0;
+    for (i = 0; i < N.players && i < MAXP; i++)
+        if (!((N.gone_mask | mask) >> i & 1)) stay++;
+    return stay >= 2;
+}
+
+/* Under g_cs: player i's entry for step t of this match is here and may be used. A gone player's
+ * entries count only up to the step this PC said it has, until the step its port rests from is agreed
+ * (then the ring holds the rest entries from that step on, gone_fill). */
+static int entry_known(int i, uint32_t t)
+{
+    uint32_t k = t % RING;
+    if (N.in_tag[i][k] != t + 1 || N.in_match[i][k] != N.match) return 0;
+    if ((N.gone_mask >> i & 1) && !N.gone_from[i] && t > N.gone_have[i]) return 0;
+    return 1;
+}
+
+/* Under g_cs: the last step of player i's entries this PC has, with every step before it. */
+static uint32_t gone_own_have(int i)
+{
+    uint32_t t, end;
+    if (!N.match_seen) return 0;    /* the match is not loaded here yet: none used */
+    t = N.rb_on && N.final_step + 1 < N.step ? N.final_step + 1 : N.step;
+    if (t < 1) t = 1;
+    for (end = t + RING / 2; t < end && (t <= (uint32_t)N.delay ||
+         (N.in_tag[i][t % RING] == t + 1 && N.in_match[i][t % RING] == N.match)); t++) {}
+    return t - 1;
+}
+
+/* Under g_cs: the agreed rest entries of the gone players into the ring, up to step upto. */
+static void gone_fill(uint32_t upto)
+{
+    int i;
+    uint32_t t;
+    if (!N.match_seen) return;
+    for (i = 0; i < N.players && i < MAXP; i++) {
+        if (!(N.gone_mask >> i & 1) || !N.gone_from[i]) continue;
+        if (N.gone_fill_match[i] != N.match) {
+            N.gone_fill_match[i] = N.match;
+            N.gone_fill_next[i] = N.gone_from[i];
+        }
+        for (t = N.gone_fill_next[i]; t <= upto && t < N.gone_fill_next[i] + RING / 2; t++) {
+            uint32_t k = t % RING;
+            memset(N.in[i][k], 0, ENTRY);
+            N.in_tag[i][k] = t + 1;
+            N.in_match[i][k] = N.match;
+        }
+        N.gone_fill_next[i] = t;
+    }
+}
+
+/* Under g_cs: the players of mask are gone; returns the ones that were not before. */
+static uint32_t gone_mark(uint32_t mask, const char *how)
+{
+    uint32_t fresh = 0;
+    int i, stay = 0;
+    for (i = 0; i < N.players && i < MAXP; i++)
+        if ((mask >> i & 1) && !(N.gone_mask >> i & 1) && i != N.pos) fresh |= 1u << i;
+    if (!fresh) return 0;
+    N.gone_mask |= fresh;
+    for (i = 0; i < N.players && i < MAXP; i++) if (!(N.gone_mask >> i & 1)) stay++;
+    for (i = 0; i < N.players && i < MAXP; i++) {
+        if (!(fresh >> i & 1)) continue;
+        N.gone_from[i] = N.gone_heard[i] = 0;
+        N.gone_have[i] = gone_own_have(i);
+        N.rematch_want[i] = REMATCH_NO;     /* it is not there for a rematch: the results go back to the room */
+        fprintf(stderr, "[NETPLAY] player %d is gone (%s) at step %u: the %d players left go on in lockstep, its port "
+                "at rest from an agreed step (entries here up to step %u)\n", i + 1, how, N.step, stay, N.gone_have[i]);
+    }
+    N.gone_sent = N.gone_until = 0;         /* P_GONE at once */
+    return fresh;
+}
+
+/* Under g_cs: agree each gone player's rest step once every player still here has said its own. */
+static void gone_decide(void)
+{
+    int i, r;
+    for (i = 0; i < N.players && i < MAXP; i++) {
+        uint32_t need = 0, last;
+        if (!(N.gone_mask >> i & 1) || N.gone_from[i]) continue;
+        for (r = 0; r < N.players && r < MAXP; r++)
+            if (r != N.pos && !(N.gone_mask >> r & 1)) need |= 1u << r;
+        if ((N.gone_heard[i] & need) != need) continue;
+        /* every P_GONE heard counts, also one of a player gone since: another PC may have heard it too */
+        last = N.gone_have[i];
+        for (r = 0; r < N.players && r < MAXP; r++)
+            if ((N.gone_heard[i] >> r & 1) && N.gone_peer[i][r] > last) last = N.gone_peer[i][r];
+        N.gone_from[i] = last + 1;
+        N.gone_until = GetTickCount64() + GONE_REPEAT_MS;
+        fprintf(stderr, "[NETPLAY] player %d's port rests from step %u on every PC (entries up to step %u here, %u at the "
+                "most; this PC at step %u)\n", i + 1, N.gone_from[i], N.gone_have[i], last, N.step);
+        gone_fill(N.step + RING / 4);       /* also over an entry of it that came out of order, past the step */
+    }
+}
+
+/* This PC's P_GONE for every gone player: at once, then every GONE_RESEND_MS until GONE_REPEAT_MS after
+ * the last rest step was agreed. */
+static void gone_send(void)
+{
+    uint8_t p[15 + GONE_WINDOW * ENTRY];
+    ULONGLONG now = GetTickCount64();
+    int i, open = 0;
+    if (!N.gone_mask || N.watching || !N.lockstep || !N.lobby || !N.match_live) return;
+    for (i = 0; i < N.players && i < MAXP; i++) if ((N.gone_mask >> i & 1) && !N.gone_from[i]) open = 1;
+    if ((!open && N.gone_until && now > N.gone_until) || (N.gone_sent && now - N.gone_sent < GONE_RESEND_MS)) return;
+    N.gone_sent = now;
+    for (i = 0; i < N.players && i < MAXP; i++) {
+        uint32_t have, first, t;
+        int count = 0;
+        if (!(N.gone_mask >> i & 1)) continue;
+        EnterCriticalSection(&g_cs);
+        have = N.gone_have[i];
+        first = have > GONE_WINDOW ? have - GONE_WINDOW + 1 : 1;
+        p[0] = P_GONE;
+        put32(p + 1, N.start_seed);
+        put32(p + 5, N.match);
+        p[9] = (uint8_t)i;
+        put32(p + 10, have);
+        for (t = first; have && t <= have; t++, count++) {
+            uint32_t k = t % RING;
+            if (N.in_tag[i][k] == t + 1 && N.in_match[i][k] == N.match) memcpy(p + 15 + count * ENTRY, N.in[i][k], ENTRY);
+            else memset(p + 15 + count * ENTRY, 0, ENTRY);  /* the steps of the input delay: at rest anyway */
+        }
+        p[14] = (uint8_t)count;
+        LeaveCriticalSection(&g_cs);
+        send_data(p, 15 + count * ENTRY);
+    }
+}
+
+/* Outside g_cs, after gone_mark: tell the others, say it, and report the leaver (report_left, once). */
+static void gone_announce(uint32_t fresh, int report)
+{
+    int i;
+    gone_send();
+    for (i = 0; i < MAXP; i++)
+        if (fresh >> i & 1)
+            toast(10000, "%s left the fight: the rest fight on. It counts as their loss if they were signed in.",
+                  player_name(i));
+    if (report && N.fighting_seen && MEM32(G_MATCH_PHASE) < 2u) report_left(fresh);
+    SetEvent(N.arrived);
+}
+
+/* P_GONE from player `from` (the network thread). */
+static void on_gone(int from, const uint8_t *p, int len)
+{
+    uint32_t match, have, first, t;
+    int who, count, i, me = 0;
+    uint32_t fresh = 0;
+    if (len < 15 || !N.lobby || !N.match_live || !N.start_seed || get32(p + 1) != N.start_seed) return;
+    match = get32(p + 5); who = p[9]; have = get32(p + 10); count = p[14];
+    if (len < 15 + count * ENTRY || who >= N.players || who >= MAXP || from >= N.players) return;
+    EnterCriticalSection(&g_cs);
+    if (who == N.pos) {
+        me = N.lockstep && !N.watching;
+    } else if (!N.watching) {
+        if (!(N.gone_mask >> who & 1)) {
+            if (!N.lockstep || !gone_can_go_on(1u << who)) { LeaveCriticalSection(&g_cs); return; }
+            fresh = gone_mark(1u << who, "another player lost it");
+        }
+        if (!(N.gone_heard[who] >> from & 1))
+            fprintf(stderr, "[NETPLAY] player %d has player %d's entries up to step %u (P_GONE)\n", from + 1, who + 1, have);
+        first = have - (uint32_t)count + 1;
+        for (i = 0, t = first; i < count; i++, t++) {
+            uint32_t k = t % RING;
+            if (t == 0 || t > have || (N.gone_from[who] && t >= N.gone_from[who])) continue;
+            if (N.in_tag[who][k] == t + 1 && (N.in_match[who][k] == match || N.in_match[who][k] == N.match)) continue;
+            memcpy(N.in[who][k], p + 15 + i * ENTRY, ENTRY);
+            N.in_tag[who][k] = t + 1;
+            N.in_match[who][k] = match;
+        }
+        N.gone_peer[who][from] = have;
+        N.gone_heard[who] |= 1u << from;
+        gone_decide();
+    }
+    LeaveCriticalSection(&g_cs);
+    if (me) {
+        fprintf(stderr, "[NETPLAY] player %d says this PC is gone (its entries up to step %u; here step %u): the fight "
+                "goes on offline here\n", from + 1, have, N.step);
+        InterlockedExchange(&N.lockstep, 0);
+        fight_input();
+        set_status("The other players lost your connection; the fight goes on offline.");
+        toast(10000, "The other players lost your connection: the fight goes on offline here and can count as your "
+              "loss. START quits.");
+    }
+    if (fresh) gone_announce(fresh, 1);
+    SetEvent(N.arrived);
+}
+
 static void store_steps(int from, const uint8_t *p, int len)
 {
     uint32_t match, last;
@@ -1556,6 +1788,10 @@ static void store_steps(int from, const uint8_t *p, int len)
     g_steps_last[from] = last;
     if (len < 9 + count * ENTRY) return;
     EnterCriticalSection(&g_cs);
+    if (N.gone_mask >> from & 1) {      /* gone: its entries come in the P_GONE of the PCs that stay */
+        LeaveCriticalSection(&g_cs);
+        return;
+    }
     for (i = 0; i < count; i++) {
         uint32_t s = last - (uint32_t)(count - 1 - i);
         uint32_t k = s % RING;
@@ -1864,6 +2100,9 @@ static void on_data(int from, const uint8_t *p, int len)
         break;
     case P_STEPS:
         store_steps(from, p + 1, len - 1);
+        break;
+    case P_GONE:
+        on_gone(from, p, len);
         break;
     case P_RTT:
         if (N.lobby && N.match_live && len >= 7 && get32(p + 1) == N.start_seed) {
@@ -2302,15 +2541,24 @@ static void on_room(const uint8_t *b, int len)
     }
     LeaveCriticalSection(&g_cs);
     if (gone && N.lockstep) {
-        uint32_t left = 0;
-        int k, j;
+        uint32_t left = 0, fresh = 0;
+        int k, j, go_on;
         EnterCriticalSection(&g_cs);
         for (k = 0; k < N.players; k++) {
             int found = 0;
             for (j = 0; j < count; j++) if (v.players[j].slot == N.start_slots[k]) found = 1;
             if (!found) left |= 1u << k;
         }
+        /* two or more players stay: they go on in lockstep, the gone one's port at rest (P_GONE) */
+        go_on = gone_can_go_on(left);
+        if (go_on) fresh = gone_mark(left, "it left the room");
         LeaveCriticalSection(&g_cs);
+        if (go_on) {
+            if (fresh) gone_announce(fresh, 1);
+            return;
+        }
+        fprintf(stderr, "[NETPLAY] a player left the match (positions 0x%X, step %u): it finishes offline\n",
+                (unsigned)left, N.step);
         InterlockedExchange(&N.lockstep, 0);
         fight_input();              /* their ports stay plugged in, at rest, until the match ends */
         SetEvent(N.arrived);
@@ -2640,6 +2888,10 @@ static void on_start_as(const uint8_t *b, int len, int watching)
     }
     EnterCriticalSection(&g_cs);
     memset(N.rematch_want, 0, sizeof(N.rematch_want));
+    N.gone_mask = 0;                /* every player of this START is here */
+    memset(N.gone_from, 0, sizeof(N.gone_from));
+    memset(N.gone_heard, 0, sizeof(N.gone_heard));
+    memset(N.gone_fill_match, 0, sizeof(N.gone_fill_match));
     InterlockedExchange(&N.on_results, 0);
     N.start_seed = seed;
     N.session = seed;
@@ -6179,8 +6431,22 @@ void netplay_on_step(void)
     memcpy(N.in[N.pos][k], N.latest_local, ENTRY);
     N.in_tag[N.pos][k] = target + 1;
     N.in_match[N.pos][k] = N.match;
+    gone_fill(target);                  /* a gone player's rest entries, once its step is agreed */
     LeaveCriticalSection(&g_cs);
     send_steps(target);
+    gone_send();
+    {   /* tests: RECOMP_TEST_LEAVE_STEP=<n> leaves the room at fight step n of the START's first match (a
+         * player who quits mid-fight through the room), then plays that fight on offline */
+        static int leave_at = -1;
+        if (leave_at < 0) leave_at = getenv("RECOMP_TEST_LEAVE_STEP") ? atoi(getenv("RECOMP_TEST_LEAVE_STEP")) : 0;
+        if (leave_at > 0 && s == (uint32_t)leave_at && N.lobby && N.match_live && N.match_count == 1) {
+            fprintf(stderr, "[NETPLAY] tests: leaving the room mid-fight at step %u (RECOMP_TEST_LEAVE_STEP)\n", s);
+            netplay_lobby_leave();
+            InterlockedExchange(&N.lockstep, 0);
+            fight_input();
+            return;
+        }
+    }
 
     if (!N.rb_on) send_hashes(s);      /* with rollback, once the steps before are final (netplay_on_update) */
 
@@ -6224,7 +6490,7 @@ void netplay_on_step(void)
         EnterCriticalSection(&g_cs);
         for (; t <= need; t++)
             for (i = 0; i < N.players; i++)
-                if (i != N.pos && !(N.in_tag[i][t % RING] == t + 1 && N.in_match[i][t % RING] == N.match)) { ready = 0; late = i; }
+                if (i != N.pos && !entry_known(i, t)) { ready = 0; late = i; }
         LeaveCriticalSection(&g_cs);
         if (ready || !N.lockstep) {
             ULONGLONG waited = GetTickCount64() - waited_since;
@@ -6252,6 +6518,7 @@ void netplay_on_step(void)
              * said once the fight moves (above). */
             if (late >= 0 && g_steps_match[late] != N.match && now - waited_since >= 1500) last_note = now;
             if (now - last_send >= 50) { send_steps(target); last_send = now; }   /* the others may be waiting for ours */
+            gone_send();
             /* The fight decided (KO, time): what follows is the winner's scene and the results, the same
              * on every PC however they part, and a PC that skips ahead stops sending steps. Waiting the
              * mid-fight ten seconds there froze the winner's scene and then said the fight would not
@@ -6261,7 +6528,8 @@ void netplay_on_step(void)
              * to the room instead (its results' No, or it never started the rematch): nothing of
              * this match will come from it. Waiting START_LIMIT_MS froze the picture for 90 s
              * (F9 report 40f4d1, 2026-11-02). */
-            int declined = late >= 0 && late < MAXP && N.rematch_want[late] == REMATCH_NO && g_steps_match[late] != N.match;
+            int declined = late >= 0 && late < MAXP && N.rematch_want[late] == REMATCH_NO && g_steps_match[late] != N.match &&
+                           !(N.gone_mask >> late & 1);     /* gone mid-fight: its port rests (P_GONE) */
             if (declined) {
                 fprintf(stderr, "[NETPLAY] player %d went back to the room instead of the rematch (step %u)\n", late + 1, s);
                 InterlockedExchange(&N.lockstep, 0);
@@ -6304,6 +6572,32 @@ void netplay_on_step(void)
                     InterlockedExchange(&N.lockstep, 0);
                     set_status("The match is over; the rest runs on this PC.");
                     break;
+                }
+                /* Three or more players and the one who stopped answering is not this PC's own link: it is
+                 * gone for the others, who go on in lockstep with its port at rest (P_GONE; the relay says a
+                 * crashed game is gone only after its 15 s). A player already gone whose rest step is still
+                 * not agreed, or the last one left: offline, as below. */
+                if (late >= 0 && late < MAXP && !(N.gone_mask >> late & 1)) {
+                    ULONGLONG rx = N.last_rx, at;
+                    uint32_t silent[MAXP], relay = rx < now ? (uint32_t)(now - rx) : 0, fresh = 0;
+                    int q, go_on = 0;
+                    for (q = 0; q < MAXP; q++) {
+                        at = g_steps_at[q] ? g_steps_at[q] : waited_since;
+                        silent[q] = at < now ? (uint32_t)(now - at) : 0;
+                    }
+                    if (netcheck_silent_cause(N.players, N.pos, late, silent, relay, SILENT_OWN_MS) != NETCHECK_OWN_LINK) {
+                        EnterCriticalSection(&g_cs);
+                        go_on = N.lockstep && gone_can_go_on(1u << late);
+                        if (go_on) fresh = gone_mark(1u << late, "it stopped answering");
+                        LeaveCriticalSection(&g_cs);
+                    }
+                    if (go_on) {
+                        fprintf(stderr, "[NETPLAY] player %d sent no entries for %.1f s (step %u, waiting for %u)\n",
+                                late + 1, (now - waited_since) / 1000.0, s, need);
+                        if (fresh) gone_announce(fresh, need > (uint32_t)N.delay + 60);
+                        waited_since = now;
+                        continue;
+                    }
                 }
                 fprintf(stderr, "[NETPLAY] gave up at step %u waiting for the entries up to %u (final %u, phase %u, "
                         "predicting %d, rollback %d); player %d has:", s, need, N.final_step, MEM32(G_MATCH_PHASE),
@@ -6407,7 +6701,7 @@ void netplay_on_pad_read(uint32_t actor)
         EnterCriticalSection(&g_cs);
         if (N.watching)
             spec_entry((int)slot, s, entry);    /* spectator mode: the whole match is kept */
-        else if (N.in_tag[slot][k] == s + 1 && N.in_match[slot][k] == N.match)
+        else if (entry_known((int)slot, s))
             memcpy(entry, N.in[slot][k], ENTRY);
         else if (N.predicting || N.resim) {     /* not here yet: that player's last entry */
             uint32_t t;
@@ -7191,7 +7485,7 @@ void netplay_on_update(void)
         if (t > (uint32_t)N.delay)
             for (i = 0; i < N.players; i++) {
                 if (i == N.pos) continue;
-                if (!(N.in_tag[i][k] == t + 1 && N.in_match[i][k] == N.match)) { all = 0; continue; }
+                if (!entry_known(i, t)) { all = 0; continue; }
                 if (N.used_tag[i][k] == t + 1 && N.used_pred[i][k] &&
                     (N.used_mixed[i][k] || memcmp(N.used[i][k], N.in[i][k], ENTRY))) wrong = 1;
             }
