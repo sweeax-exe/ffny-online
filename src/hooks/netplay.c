@@ -6317,8 +6317,9 @@ void netplay_on_step(void)
                                 "%.1f s (the relay's last packet %.1f s ago); no player is named\n", quiet / 1000.0,
                                 relay / 1000.0);
                         set_status("Your connection is unstable; continuing offline.");
-                        toast(10000, "Your connection is unstable: no data from the other players for %u s. "
-                              "The fight goes on offline. START quits.", (quiet + 500) / 1000);
+                        /* fits toast[160]: say that a drop on this side can still count (allcapskuma, 2026-11-05) */
+                        toast(10000, "Your connection is unstable (no data for %u s). The fight goes on offline; "
+                              "a drop on your side can count as your loss. START quits.", (quiet + 500) / 1000);
                         break;
                     }
                 }
