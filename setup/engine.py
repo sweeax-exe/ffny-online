@@ -410,10 +410,18 @@ class Engine:
             self.log.flush()
         # Redirect to disk, not a pipe: compiler bursts cannot deadlock the UI.
         with tempfile.TemporaryFile() as output:
-            with subprocess.Popen(list(map(str, argv)), cwd=cwd, env=child_env,
-                                  stdout=output, stderr=subprocess.STDOUT,
-                                  **({'creationflags': subprocess.CREATE_NO_WINDOW} if IS_WINDOWS
-                                     else {'start_new_session': True})) as child:
+            try:
+                child = subprocess.Popen(list(map(str, argv)), cwd=cwd, env=child_env,
+                                         stdout=output, stderr=subprocess.STDOUT,
+                                         **({'creationflags': subprocess.CREATE_NO_WINDOW} if IS_WINDOWS
+                                            else {'start_new_session': True}))
+            except OSError as ex:
+                if getattr(ex, 'winerror', None) == 740:
+                    # A player's PC asked for elevation to start vswhere.exe (a compatibility setting).
+                    raise SetupError('Windows asks for administrator rights to start ' + Path(str(argv[0])).name +
+                                     '. Right-click the setup, choose "Run as administrator" and try again.') from ex
+                raise
+            with child:
                 position = 0
                 progress_text = ''
                 try:
@@ -462,6 +470,13 @@ class Engine:
                     self.log.write(output.read().decode('utf-8', errors='replace'))
                     self.log.flush()
                 if child.returncode:
+                    if self.log and not log_output:
+                        # Output kept out of the log (it can hold the environment) is still the only
+                        # place the reason is: a failed step ends before anything secret is printed.
+                        output.seek(0)
+                        tail = output.read().decode('utf-8', errors='replace').splitlines()[-30:]
+                        self.log.write('Output of the failed step (last lines):\n' + '\n'.join(tail) + '\n')
+                        self.log.flush()
                     raise SetupError(f'Stage failed with exit {child.returncode}; see setup log')
             output.seek(0)
             return output.read().decode('utf-8', errors='replace') if capture else ''
@@ -853,12 +868,21 @@ class Engine:
         # Expand one quoted environment value after parsing a constant command;
         # omit CALL, whose second expansion would reinterpret percent characters.
         self.env['DEFJAM_SETUP_ENV_SCRIPT'] = '"' + str(batch) + '"'
+        # A stray double quote in PATH (a player's had 'C:\Program Files\dotnet"') turns the ')' of
+        # '(x86)' into the end of a block in Microsoft's vcvars.bat: "\Microsoft was unexpected".
+        self.env['PATH'] = self.env.get('PATH', '').replace('"', '')
         lines = self.run(['cmd.exe', '/d', '/c', '%DEFJAM_SETUP_ENV_SCRIPT%'], capture=True,
                          log_output=False)  # SET includes inherited environment secrets.
         for line in lines.splitlines():
             key, equal, value = line.partition('=')
             if equal and key and not key.startswith('='):
                 self.env[key] = value
+        includes = [d for d in self.env.get('INCLUDE', '').split(';') if d]
+        if not any((Path(d) / 'stdio.h').is_file() for d in includes):
+            # A player's Windows SDK lost its Universal CRT part: every C file failed on stdio.h.
+            raise SetupError('The Windows SDK is incomplete: the C runtime headers (stdio.h) are missing. Open '
+                             'Visual Studio Installer, choose Modify, tick "Windows Universal CRT SDK" and a '
+                             '"Windows 11 SDK" under Individual components (or use Repair), then run setup again.', 3)
         additions = [self.payload / 'python', vs / 'Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin',
                      vs / 'Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja']
         self.env['PATH'] = os.pathsep.join(map(str, additions)) + os.pathsep + self.env.get('PATH', '')
