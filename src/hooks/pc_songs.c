@@ -29,6 +29,7 @@
 #include "pc_songs.h"
 #include "song_convert.h"
 #include "song_library.h"
+#include "../patches/song_cursor.h"
 
 #if !defined(_WIN32)
 #include <ctype.h>
@@ -604,6 +605,7 @@ static void add_custom_songs(const char *data_root, const char *game_dir, int ro
     SongTemplate tmpl[2];
     int have[2] = { 0, 0 };
     g_ncustom = 0;
+    song_cursor_clear();
     memset(tmpl, 0, sizeof tmpl);
     if (room <= 0) return;
     SongEntry *found = (SongEntry *)calloc(SONG_LIBRARY_MAX, sizeof *found);
@@ -651,6 +653,7 @@ static void add_custom_songs(const char *data_root, const char *game_dir, int ro
         }
         SongInfo s = { c->id, c->tags.title, c->tags.artist, c->tags.album };
         g_songs[g_song_count++] = s;
+        song_cursor_register(c->id, c->dir, mode);
         g_ncustom++;
     }
     fprintf(stderr, "[SONGS] custom songs: %d file(s) found, %d in the game (%d converted now), %d turned off%s%s\n",

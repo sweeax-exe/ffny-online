@@ -38,14 +38,16 @@ plays first), so they cannot make room.
 
 ## How they play
 
-**Straight** (the default): the song is fitted into the frame of one of the game's own score
-tracks: it plays start to finish in the menus, and in fights its middle loops until the fight is
-over, like the game's songs.
+Both modes play your song from start to end, in the menus and in fights. In a fight the game
+jumps between parts of its music as the fight goes (the start, Blazin, knock-downs); with your
+songs it keeps the place instead, so the song carries on where it was. A song that ends during a
+fight starts again from the top.
 
-**Interactive (experimental)**: the song is fitted into a licensed song's frame, whose fight
-sections switch at every few seconds between four arrangements depending on the fight; your song
-gets four versions (as it is, muffled, heavy on the bass, bright) that the game switches between
-without losing its place. Which version plays when is the game's choice; try it and see.
+**Straight** (the default): your song as it is, no filter.
+
+**Interactive (experimental)**: the same, but the game switches your song between versions as
+the fight goes (as it is, muffled, heavy on the bass, bright), every few seconds at most, without
+losing its place. Which version plays when is the game's choice; try it and see.
 
 The short clips the game plays on loading screens and as a fight starts are still the template
 song's own (an instrumental for Straight, "Holler If Ya Hear Me" for Interactive).

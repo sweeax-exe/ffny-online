@@ -245,6 +245,55 @@ Lane 0 is the song, lanes 1-3 the same song filtered (low-pass 1.2 kHz; +6 dB be
 the menu plays it in order (r 0.93) and a fight keeps its place (matched position advancing with
 time, r 0.25-0.5 under the crowd).
 
+### Fights play the song in order (2026-11-06)
+
+Play-test (owner): a Straight song in a fight played 3-15 s, faded, and went on from somewhere
+else; Interactive played well for a while, then the same. Cause: the fights do not walk the
+menu's play. They jump between sections on events (the fight starting, Blazin, knock-downs) and
+loop parts of the body, and every sample outside the menu's play held a piece taken in turn (or,
+interactive, its own chain's spread of the whole song), so a jump landed on an unrelated piece.
+
+The engine, from the lifted code (`recomp_0009.c`): `MEM32(0x3AD928)` is the active map
+context (+0x34 the map, +0x38 its node offset table, +0x50 the sample table, +0x58 + 4t the
+track states). `sub_001350E0(track)` plays the node at `s16 track+0x36`: it reads the node's
+sample number and that sample's table entry (offset/0x80 into ebp, length into track+0x40/+0x44)
+and starts the stream. Every advance (`sub_00135860`, after the router `sub_00134E70` picks a
+route by `lo <= value <= hi`) and every event jump (`sub_00133E60`, via `sub_001355E0`) ends in
+it, once per segment. `sub_00131080` sets up a context.
+
+So the order is now kept at play time (`src/patches/song_cursor.c`), for custom songs only:
+`sub_001350E0_enter` rewrites the table entry of the sample about to play with the next piece of
+the song, in the lane the game chose. The converter writes the song as K equal pieces (the menu
+play's length; the last padded with silence) once per lane in order, and `pieces.txt` lists them
+and each sample's lane (`SONG_CONVERT_VERSION` 7). A cursor per song goes on through jumps and
+through a map set up again in the same match (around Blazin), starts over when the song's map is
+set up outside that match, and wraps at the song's end. In the menus the walk plays the pieces in
+turn and ends with the song. `RECOMP_SONGS_SEGMENTS=1` turns the remap off for comparison.
+Straight is now "the song, no filter" and Interactive "the song, with the game switching
+filters"; both play end to end. Holler's map has 4-way routes at 334 nodes, but routes 2 and 3
+(`1d/4f`, `4f/78`) mostly land on the same samples, so in practice the game picks between three
+versions.
+
+Checked (Free For All at the Terrordome, four minutes, `RECOMP_TEST_SONGS_ONLY` with the
+interactive test song): the menu played pieces 0-26 on samples 85-111; the fight's map was set up
+again and started at piece 0, and the fight played pieces 0-121 in order while the engine looped
+sample 13, then 63-66, 213-216, 144-151 and 64 on its own, switching between lanes 0 and 1. The
+straight song: pieces 0-5 in order on samples 49, 13, 14, 61, 62, 14.
+
+**The read buffer is sized from the sample table.** `sub_001317C0(flags, 3000)` (from
+`sub_0001CBE0`, at boot and at a match's start) walks the active map's sample table and keeps the
+largest `(next.offset - this.offset) * 0x80 / this.ms`; the music stream's ring is 3000 ms times
+that. The game's own tables step through main.mus in order (about 47 bytes/ms, a ring of about
+142 KB; their fight segments are all one size, holler's 103040 bytes). A first cut of this layout
+named the pieces out of file order: the formula came to 29 MB, and the reads overran into a sound
+bank (`0x813C6670`) and a stream object (crashes in `sub_00139F00` and `sub_0011EEF0`, found by
+matching the overwritten words to main.mus). The first converter's tables were out of order too
+(5-6 MB rings) and got away with it. Now sample i names piece i in file order, and samples past
+the pieces get a second of silence each after them (a straight table whose last 16 entries named
+one piece played nothing at all: the map loaded and main.mus was never opened), so every entry
+steps forward and the formula sees the stream's own rate (unit test). When a song's map is set up
+again over a table the remap changed, the hook puts the converted entries back first.
+
 **Clip banks** (loading0/overlay0: `BNKl` v5, PT headers, EA-XA split mono channels at the
 offsets in tags 0x88/0x89): kept from the template for now. Their rate is not in the header, and
 correlating a clip against its song at 22.05-48 kHz found no clear match (r <= 0.29), so they

@@ -45,6 +45,18 @@ int main(int argc, char **argv)
         if (!song_convert(argv[3], argv[4], &t, inter, err, sizeof err)) { printf("FAIL %s\n", err); return 1; }
         puts("OK"); return 0;
     }
+    if (!strcmp(argv[1], "plan")) {               /* plan tune.mpf pieces.txt: the play-time order */
+        static uint8_t d[1 << 20]; static char txt[1 << 16]; static SongPlan p;
+        FILE *f = fopen(argv[2], "rb"); size_t n = fread(d, 1, sizeof d, f); fclose(f);
+        f = fopen(argv[3], "rb"); size_t tn = fread(txt, 1, sizeof txt - 1, f); fclose(f); txt[tn] = 0;
+        if (!song_plan(d, n, txt, &p)) { puts("FAIL"); return 1; }
+        printf("pieces %d lanes %d\n", p.pieces, p.lanes);
+        for (int i = 0; i < p.track0; i++)        /* each sample: its lane, its entry, its length */
+            printf("sample %d %u %u\n", p.lane[i], *(uint32_t *)(d + p.table + i * 8), *(uint32_t *)(d + p.table + i * 8 + 4));
+        for (int l = 0; l < p.lanes; l++)
+            for (int k = 0; k < p.pieces; k++) printf("piece %d %u %u\n", l, p.off[l][k], p.ms[l][k]);
+        return 0;
+    }
     return 2;
 }
 '''
@@ -166,3 +178,28 @@ def test_whole_conversion(tool, tmp_path, interactive):
     starts = [m.start() for m in re.finditer(b'SCHl', mus)]
     assert starts and all(s % 0x80 == 0 for s in starts)
     assert b'\x84\x03\x00\xac\x44' in mus[:0x40]
+    # the play-time order (song_plan, used by src/patches/song_cursor.c): every lane holds the whole
+    # song in order, its pieces adding up to the song and each as long as lane 0's; every sample of
+    # the map names one of the pieces of its lane
+    lines = run(tool, 'plan', out / 'tune.mpf', out / 'pieces.txt').splitlines()
+    pieces, lanes = int(lines[0].split()[1]), int(lines[0].split()[3])
+    assert pieces >= 8 and lanes == (4 if interactive else 1)
+    samples = [list(map(int, line.split()[1:])) for line in lines if line.startswith('sample ')]
+    assert samples
+    if interactive:
+        assert len({s[0] for s in samples}) >= 2
+    # the game sizes its read buffer from consecutive entries: 3000 ms * max((next - this) * 128 / ms);
+    # it must come out at the stream's own rate (about 47-48 bytes per ms at 44.1 kHz), never far above
+    rate = max((b[1] - a[1]) * 128 / a[2] for a, b in zip(samples, samples[1:]))
+    assert all(b[1] > a[1] for a, b in zip(samples, samples[1:]))
+    assert 40 < rate < 50, rate
+    table = {}
+    for line in lines:
+        if line.startswith('piece '):
+            _, lane, off, ms = line.split()
+            table.setdefault(int(lane), []).append((int(off), int(ms)))
+    for lane, rows in table.items():
+        assert len(rows) == pieces
+        assert [o for o, _ in rows] == sorted(o for o, _ in rows)
+        assert abs(sum(ms for _, ms in rows) - secs * 1000) <= pieces + 2
+        assert [ms for _, ms in rows] == [ms for _, ms in table[0]]

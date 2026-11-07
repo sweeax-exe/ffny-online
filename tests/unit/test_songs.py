@@ -175,7 +175,9 @@ def writer(tmp_path_factory):
     stub = folder / 'stub.c'
     stub.write_text('#include "host.h"\n'
                     '#if defined(_WIN32)\ntypedef WCHAR xbox_host_char;\n#else\ntypedef char xbox_host_char;\n#endif\n'
-                    'BOOL (*g_xbox_game_file_redirect)(const char *, xbox_host_char *, DWORD);\n')
+                    'BOOL (*g_xbox_game_file_redirect)(const char *, xbox_host_char *, DWORD);\n'
+                    'void song_cursor_register(const char *id, const char *dir, int interactive) {}\n'
+                    'void song_cursor_clear(void) {}\n')
     driver = folder / 'driver.c'
     driver.write_text(DRIVER)
     exe = folder / ('songs.exe' if os.name == 'nt' else 'songs')

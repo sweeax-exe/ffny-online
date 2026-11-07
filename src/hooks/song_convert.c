@@ -44,6 +44,8 @@ extern void stb_vorbis_close(stb_vorbis *f);
 #define MAX_FILE      (512u << 20)
 #define MAX_SECONDS   (20u * 60u)
 #define MIN_SECONDS   5u
+/* Streams start on 0x80 (the sample table counts in 0x80s). */
+#define STREAM_ALIGN  0x80u
 
 static int fail(char *err, size_t errn, const char *msg)
 {
@@ -736,30 +738,121 @@ static int16_t *lane_pcm(const int16_t *pcm, size_t frames, int lane)
     return out;
 }
 
-static int convert_interactive(const int16_t *pcm, size_t frames, const SongTemplate *t, const MapInfo *m,
-                               uint8_t *mpf, Buf *mus, char *err, size_t errn)
+/*
+ * The song cut into the menu play's K pieces (m->nfull, on 28-sample frame edges), written once
+ * per lane in the song's order: lane 0 the song, lanes 1-3 (interactive) filtered. Every track-0
+ * sample of the map then names one of them: straight, the menu play's samples hold pieces 0..K-1
+ * in turn and the others take pieces in turn; interactive, a sample's lane and place come from
+ * lane_map (its chain's place, scaled to K). out_dir/pieces.txt lists the pieces for the play-time
+ * remap (song_plan).
+ */
+static int convert_pieces(const int16_t *pcm, size_t frames, const SongTemplate *t, const MapInfo *m, int interactive,
+                          uint8_t *mpf, Buf *mus, const char *out_dir, char *err, size_t errn)
 {
-    LaneMap lm;
-    if (!lane_map(t->mpf, t->mpf_n, m, &lm)) return fail(err, errn, "the interactive template's map is not one this version reads");
-    for (int lane = 0; lane < 4; lane++) {
-        int16_t *src = lane ? lane_pcm(pcm, frames, lane) : (int16_t *)pcm;
-        if (!src) return fail(err, errn, "out of memory");
-        for (uint32_t i = 0; i < m->track0 && i < 256; i++) {
-            if (lm.lane[i] != lane) continue;
-            int c = lm.chain[i], cnt = lm.count[c];
-            size_t a = (size_t)((double)frames * lm.slot[i] / cnt), b = (size_t)((double)frames * (lm.slot[i] + 1) / cnt);
-            a -= a % 28;
-            if (lm.slot[i] + 1 < cnt) b -= b % 28;
+    static uint32_t off[4][256], ms[4][256];
+    static LaneMap lm;
+    size_t edges[257];
+    uint32_t K = m->nfull < 256 ? m->nfull : 256, lanes = interactive ? 4 : 1;
+    if (interactive && !lane_map(t->mpf, t->mpf_n, m, &lm)) return fail(err, errn, "the interactive template's map is not one this version reads");
+    /* Every piece the same length, as the game's own songs' segments are (the last one padded
+     * with silence): P frames, a whole number of 28-sample frames. */
+    size_t P = (frames + K - 1) / K;
+    P += (28 - P % 28) % 28;
+    for (uint32_t k = 0; k <= K; k++) edges[k] = (size_t)k * P;
+    int16_t *tail = (int16_t *)calloc(P * 2, sizeof *tail);
+    if (!tail) return fail(err, errn, "out of memory");
+    for (uint32_t lane = 0; lane < lanes; lane++) {
+        int16_t *src = lane ? lane_pcm(pcm, frames, (int)lane) : (int16_t *)pcm;
+        if (!src) { free(tail); return fail(err, errn, "out of memory"); }
+        for (uint32_t k = 0; k < K; k++) {
             size_t at = mus->n;
-            if (!write_stream(mus, t, src + a * 2, b - a) || !buf_add(mus, NULL, (0x80 - mus->n % 0x80) % 0x80)) {
+            const int16_t *piece = src + edges[k] * 2;
+            if (edges[k] + P > frames) {                          /* the last piece: padded */
+                size_t have = edges[k] < frames ? frames - edges[k] : 0;
+                memset(tail, 0, P * 2 * sizeof *tail);
+                if (have) memcpy(tail, src + edges[k] * 2, have * 2 * sizeof *tail);
+                piece = tail;
+            }
+            if (!write_stream(mus, t, piece, P) ||
+                !buf_add(mus, NULL, (STREAM_ALIGN - mus->n % STREAM_ALIGN) % STREAM_ALIGN)) {
                 if (lane) free(src);
+                free(tail);
                 return fail(err, errn, "out of memory");
             }
-            wr32le(mpf + m->samples_table + i * 8, (uint32_t)(at / 0x80));
-            wr32le(mpf + m->samples_table + i * 8 + 4, (uint32_t)((b - a) * 1000 / RATE));
+            off[lane][k] = (uint32_t)(at / 0x80);
+            ms[lane][k] = (uint32_t)(P * 1000 / RATE);
         }
         if (lane) free(src);
     }
+    free(tail);
+    /*
+     * The sample table: sample i names piece i in file order (the last piece for the samples past
+     * the pieces), so consecutive entries step through main.mus exactly as the game's own songs'
+     * do. The game sizes its music read buffer once from this table: 3000 ms times the largest
+     * (next entry's offset - this one's) / this one's length (sub_001317C0); an entry order that
+     * jumps around the file made that tens of megabytes and the reads overran the game's memory.
+     * Which piece plays when is the play-time remap's (song_cursor.c), and a sample's lane (which
+     * filter the game's route chose) is listed in pieces.txt.
+     */
+    uint32_t total = K * lanes, lane_of[256];
+    const size_t F = RATE - RATE % 28;                            /* a second of silence */
+    int16_t *quiet = NULL;
+    for (uint32_t i = 0; i < m->track0 && i < 256; i++) {
+        lane_of[i] = interactive ? (uint32_t)lm.lane[i] & 3 : 0;
+        if (i < total) {
+            wr32le(mpf + m->samples_table + i * 8, off[i / K][i % K]);
+            wr32le(mpf + m->samples_table + i * 8 + 4, ms[i / K][i % K]);
+            continue;
+        }
+        /* Samples past the pieces (minitrack2 has 64 for 48 pieces) each get a stream of their
+         * own after them, so every entry steps forward: the game played nothing at all for a
+         * table whose last entries named one piece. The remap gives them pieces when they play. */
+        size_t at = mus->n;
+        if (!quiet && !(quiet = (int16_t *)calloc(F * 2, sizeof *quiet))) return fail(err, errn, "out of memory");
+        if (!write_stream(mus, t, quiet, F) || !buf_add(mus, NULL, (STREAM_ALIGN - mus->n % STREAM_ALIGN) % STREAM_ALIGN)) {
+            free(quiet);
+            return fail(err, errn, "out of memory");
+        }
+        wr32le(mpf + m->samples_table + i * 8, (uint32_t)(at / 0x80));
+        wr32le(mpf + m->samples_table + i * 8 + 4, (uint32_t)(F * 1000 / RATE));
+    }
+    free(quiet);
+    char file[1100];
+    snprintf(file, sizeof file, "%s" HOST_SEP "pieces.txt", out_dir);
+    FILE *f = open_utf8(file, "w");
+    if (!f) return fail(err, errn, "cannot write the converted song");
+    fprintf(f, "pieces %u lanes %u\n", K, lanes);
+    for (uint32_t lane = 0; lane < lanes; lane++)
+        for (uint32_t k = 0; k < K; k++) fprintf(f, "%u %u %u %u\n", lane, k, off[lane][k], ms[lane][k]);
+    for (uint32_t i = 0; i < m->track0 && i < 256; i++) fprintf(f, "lane %u %u\n", i, lane_of[i]);
+    int ok = !ferror(f);
+    if (fclose(f) || !ok) return fail(err, errn, "cannot write the converted song");
+    return 1;
+}
+
+/* The play-time order of a converted song (song_convert.h). */
+int song_plan(const uint8_t *mpf, size_t n, const char *pieces_txt, SongPlan *p)
+{
+    MapInfo m;
+    unsigned K = 0, lanes = 0;
+    int used = 0;
+    memset(p, 0, sizeof *p);
+    if (!map_info(mpf, n, &m) || sscanf(pieces_txt, "pieces %u lanes %u%n", &K, &lanes, &used) != 2) return 0;
+    if (!K || K > 256 || !lanes || lanes > 4) return 0;
+    p->table = m.samples_table;
+    p->track0 = (int)(m.track0 < 256 ? m.track0 : 256);
+    p->pieces = (int)K;
+    p->lanes = (int)lanes;
+    const char *s = pieces_txt + used;
+    unsigned lane, k, o, d;
+    int got = 0;
+    for (int adv = 0; sscanf(s, " %u %u %u %u%n", &lane, &k, &o, &d, &adv) == 4; s += adv) {
+        if (lane < lanes && k < K) { p->off[lane][k] = o; p->ms[lane][k] = d; got++; }
+    }
+    if (got != (int)(K * lanes) || p->table + (size_t)p->track0 * 8 > n) return 0;
+    unsigned i2, l2;
+    for (int adv = 0; sscanf(s, " lane %u %u%n", &i2, &l2, &adv) == 2; s += adv)
+        if ((int)i2 < p->track0 && l2 < lanes) p->lane[i2] = (uint8_t)l2;
     return 1;
 }
 
@@ -864,35 +957,7 @@ int song_convert(const char *path, const char *out_dir, const SongTemplate *t, i
     if (!mpf) { free(pcm); return fail(err, errn, "out of memory"); }
     memcpy(mpf, t->mpf, t->mpf_n);
     if (interactive != t->interactive) { fail(err, errn, "the template does not match the song's mode"); goto done; }
-    if (interactive) {
-        if (!convert_interactive(pcm, frames, t, &m, mpf, &mus, err, errn)) goto done;
-        goto write;
-    }
-
-    /* The song cut into m.nfull pieces (on 28-sample frame edges) along the full play; the
-     * other track-0 samples take pieces in turn. */
-    size_t edges[257];
-    for (uint32_t k = 0; k <= m.nfull; k++) {
-        size_t e = (size_t)((double)frames * k / m.nfull);
-        edges[k] = k == m.nfull ? frames : e - e % 28;
-    }
-    int piece_of[256];
-    for (uint32_t i = 0; i < m.track0 && i < 256; i++) piece_of[i] = -1;
-    for (uint32_t k = 0; k < m.nfull; k++) piece_of[m.full[k] - 1] = (int)k;
-    for (uint32_t i = 0, next = 0; i < m.track0 && i < 256; i++)
-        if (piece_of[i] < 0) piece_of[i] = (int)(next++ % m.nfull);
-
-    for (uint32_t i = 0; i < m.track0 && i < 256; i++) {
-        size_t a = edges[piece_of[i]], b = edges[piece_of[i] + 1];
-        size_t at = mus.n;
-        if (!write_stream(&mus, t, pcm + a * 2, b - a) || !buf_add(&mus, NULL, (0x80 - mus.n % 0x80) % 0x80)) {
-            fail(err, errn, "out of memory");
-            goto done;
-        }
-        wr32le(mpf + m.samples_table + i * 8, (uint32_t)(at / 0x80));
-        wr32le(mpf + m.samples_table + i * 8 + 4, (uint32_t)((b - a) * 1000 / RATE));
-    }
-write:
+    if (!convert_pieces(pcm, frames, t, &m, interactive, mpf, &mus, out_dir, err, errn)) goto done;
     snprintf(file, sizeof file, "%s" HOST_SEP "main.mus", out_dir);
     if (!write_all(file, mus.p, mus.n)) { fail(err, errn, "cannot write the converted song"); goto done; }
     snprintf(file, sizeof file, "%s" HOST_SEP "loading0.mus", out_dir);

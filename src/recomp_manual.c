@@ -41,6 +41,7 @@
 #include "patches/picture.h"
 #include "patches/cheats.h"
 #include "patches/song_store.h"
+#include "patches/song_cursor.h"
 #include "patches/menu_geometry.h"
 #include "patches/cinema_timing.h"
 
@@ -109,7 +110,7 @@ void sub_0008BE60_enter(void)
  * through a pause that began in a live fight (issue #95); otherwise no change. */
 void sub_00079B60_enter(void) { if (s_ws_hud_live) ws_hud_heartbeat(); }
 void sub_0007A8F0_enter(void) { if (s_ws_hud_live) ws_hud_heartbeat(); }
-void sub_001A4D90_enter(void) { defjam_test_match_start(); defjam_crowd_match_start(); cheats_match_start(); }
+void sub_001A4D90_enter(void) { defjam_test_match_start(); defjam_crowd_match_start(); cheats_match_start(); song_cursor_match_start(); }
 /* Widescreen song notification (src/patches/widescreen.c, issue #118): the APT
  * movie loader (archive, name, &apt, &const), and the next step of the load,
  * which its only caller runs straight after it with the .apt data as its second
@@ -247,6 +248,11 @@ void sub_00014540(void)
 }
 extern void sub_00020C40_gen(void);
 void sub_00020C40(void) { song_store_build_playlist(sub_00020C40_gen, 0); }
+/* Custom songs in order (src/patches/song_cursor.c): a music map context is set up
+ * (sub_00131080), and a track plays the node it is on (sub_001350E0, cdecl (track), once per
+ * segment and after every jump). */
+void sub_00131080_enter(void) { song_cursor_map_load(); }
+void sub_001350E0_enter(void) { song_cursor_play_node(MEM32(g_esp + 4)); }
 extern void sub_00020D70_gen(void);
 /* With songs added, the shuffled list is the ordered one shuffled on the host: the game's own
  * shuffle keeps 36 songs in a stack array. */

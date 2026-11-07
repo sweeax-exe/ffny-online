@@ -10,7 +10,7 @@ extern "C" {
 #endif
 
 /* Bump when the files song_convert writes change: every cached song is rebuilt. */
-#define SONG_CONVERT_VERSION 1
+#define SONG_CONVERT_VERSION 7
 
 /* Title, artist and album, as text the game's menus can draw (ASCII; accents dropped). */
 typedef struct {
@@ -45,6 +45,23 @@ void song_template_free(SongTemplate *t);
  * made 44.1 kHz stereo, cut along the template's full play and encoded as the game's streams.
  * Returns 1, or 0 with a reason in err. */
 int song_convert(const char *path, const char *out_dir, const SongTemplate *t, int interactive, char *err, size_t errn);
+
+/* The play-time order of a converted song: its pieces in the song's order, per lane, from its
+ * tune.mpf and the pieces.txt written next to it. The game plays a map's samples in whatever order
+ * its sections, events and routes take; the play-time remap (src/patches/song_cursor.c) hands each
+ * segment the next piece of the song instead, in the lane (filter) the game chose, so the song
+ * plays through from start to end.
+ * table: the sample table's offset in the map (u32 offset / 0x80, u32 length in ms per sample);
+ * lane: per track-0 sample (0-based), 0 = the song as is, 1-3 the filtered lanes (interactive);
+ * off/ms[lane][k]: piece k of that lane, as a sample table entry. Returns 1, or 0. */
+typedef struct {
+    uint32_t table;
+    int track0, pieces, lanes;
+    uint8_t lane[256];
+    uint32_t off[4][256], ms[4][256];
+} SongPlan;
+
+int song_plan(const uint8_t *mpf, size_t n, const char *pieces_txt, SongPlan *p);
 
 /* The EA-XA encoder (exposed for the unit test): 28 samples -> one 15-byte frame, with the
  * decoder's history carried in *h1, *h2. */
