@@ -77,7 +77,7 @@ def cmd_scenario(a):
                              fixtures=a.fixtures.split(",") if a.fixtures else None, ranked=a.ranked,
                              rollback_modes=a.rollback_modes, rollback_max_ping=a.rollback_max_ping, leave=a.leave,
                              spectate_after=a.spectate_after, spectate_delay=a.spectate_delay,
-                             maintenance=a.maintenance, **common)
+                             maintenance=a.maintenance, cpu_level=a.cpu_level, **common)
     elif a.kind == "offline":
         r = scenarios.offline(type=a.type, venue=a.venue, f0=a.f0, f1=a.f1, cpu=not a.human, bot=a.bot,
                               fast_ko=a.fast_ko, turbo=a.turbo, timeout=a.timeout or 420,
@@ -205,7 +205,9 @@ def main(argv=None):
     sc.add_argument("--rollback-max-ping", type=int, help="online: the relay's rollback ping limit in ms (-rollback-max-ping; "
                                                           "default none, the game's own 120)")
     sc.add_argument("--fast-ko", type=int, default=600, help="knockout at this fight step (0: off)")
-    sc.add_argument("--ko-winner", help="slot or alt (default alt; koth 0)")
+    sc.add_argument("--ko-winner", help="slot, alt or humans (only the human fighters; default alt; koth 0)")
+    sc.add_argument("--cpu-level", choices=["easy", "normal", "hard"],
+                    help="online (3-Way, FFA): the host sets its room's CPU level (RECOMP_TEST_CPU_LEVEL)")
     sc.add_argument("--bot", nargs="?", const=True, default=None,
                     help="the state-reading bot fights (aggression 0..100, or p1=..,p2=.. behaviours)")
     sc.add_argument("--timeout", type=int)

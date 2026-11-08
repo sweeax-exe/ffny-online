@@ -1098,11 +1098,21 @@ int lobby_queue(int *waited, int *searching, char *why, int size)
 int lobby_caps()
 {
     return gallery_on() ? NETPLAY_CAP_KOTH | NETPLAY_CAP_YIELD | NETPLAY_CAP_FFAROT | NETPLAY_CAP_RANDOM_VENUE |
-                              (G.rollback ? NETPLAY_CAP_ROLLBACK : 0)
+                              NETPLAY_CAP_CPULEVEL | (G.rollback ? NETPLAY_CAP_ROLLBACK : 0)
                         : netplay_lobby_caps();
 }
 // The relay takes RANDOM in the venue vote (build 67): the vote shows a fourth card.
 bool random_venue_offered() { int c = lobby_caps(); return c > 0 && (c & NETPLAY_CAP_RANDOM_VENUE); }
+// build 67: a room of this mode has a CPU level to set (its free places go to CPU fighters, the relay takes it)
+bool cpu_level_offered(int mode)
+{
+    int c = lobby_caps();
+    return NETPLAY_CPU_FILL(mode) && c > 0 && (c & NETPLAY_CAP_CPULEVEL);
+}
+const char *cpu_level_text(int level)
+{
+    return level == NETPLAY_CPU_EASY ? "Easy" : level == NETPLAY_CPU_NORMAL ? "Normal" : "Hard";
+}
 // spectator mode: the relay takes spectators (docs/research/spectator-mode.md)
 bool can_watch() { int c = lobby_caps(); return c > 0 && (c & NETPLAY_CAP_SPECTATE); }
 enum AccountState acc_state() { return gallery_on() ? G.account : account_state(); }
@@ -2527,14 +2537,16 @@ void venue_showcase(ImDrawList *dl, const Frame &f, const NetRoomSettings &s, fl
 void draw_settings(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &room)
 {
     // the rows; a King of the Hill room has one more, how each fight's venue is chosen
-    enum Row { R_MODE, R_VENUE_CHOICE, R_PLAYERS, R_POOL, R_LISTED, R_OPEN };
-    static const char *const labels[] = { "MODE", "VENUE OF EACH FIGHT", "PLAYERS", "VENUES", "LISTED", "" };
+    enum Row { R_MODE, R_VENUE_CHOICE, R_PLAYERS, R_POOL, R_LISTED, R_OPEN, R_CPU };
+    static const char *const labels[] = { "MODE", "VENUE OF EACH FIGHT", "PLAYERS", "VENUES", "LISTED", "", "CPU LEVEL" };
     NetRoomSettings &s = S.settings;
     bool was_koth = NETPLAY_IS_KOTH(s.mode), was_rot = NETPLAY_IS_FFAROT(s.mode);
     // the host cannot turn a room into the other kind (the relay refuses it)
     std::vector<int> cycle = S.settings_edit ? mode_cycle(was_koth, !was_koth, was_rot) : mode_cycle();
     std::vector<int> rows_of = { R_MODE, R_PLAYERS, R_POOL, R_LISTED, R_OPEN };
     if (was_koth) rows_of.insert(rows_of.begin() + 1, R_VENUE_CHOICE);
+    // build 67: how strong the CPU fighters are that fill a 3-Way's or Free for All's free places
+    if (cpu_level_offered(s.mode)) rows_of.insert(rows_of.begin() + 2, R_CPU);
     const int rows = (int)rows_of.size();
     if (S.settings_sel >= rows) S.settings_sel = rows - 1;
     if (pad.up) S.settings_sel = (S.settings_sel + rows - 1) % rows;
@@ -2568,8 +2580,16 @@ void draw_settings(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom
         case R_PLAYERS: s.max = std::max(least_of(s.mode), std::min(most_of(s.mode), s.max + step)); break;
         case R_POOL: if (!fixed_venue(s.mode)) apply_preset(s, (preset_of(s) < 0 ? 0 : preset_of(s)) + step); break;
         case R_LISTED: s.is_public = !s.is_public; break;
+        case R_CPU: {    // left easier, right harder
+            static const int order[] = { NETPLAY_CPU_EASY, NETPLAY_CPU_NORMAL, NETPLAY_CPU_HARD };
+            int at = 2;
+            for (int k = 0; k < 3; k++) if (order[k] == s.cpu_level) at = k;
+            s.cpu_level = order[std::max(0, std::min(2, at + step))];
+            break;
+        }
         }
     }
+    if (!NETPLAY_CPU_FILL(s.mode)) s.cpu_level = NETPLAY_CPU_HARD;     // no CPU fighters: the default
     m = online_mode(s.mode);
     if (s.max > most_of(s.mode)) s.max = most_of(s.mode);
     if (s.max < least_of(s.mode)) s.max = least_of(s.mode);
@@ -2578,7 +2598,7 @@ void draw_settings(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom
         was_koth = NETPLAY_IS_KOTH(s.mode);
     }
     bool koth = NETPLAY_IS_KOTH(s.mode), rot = NETPLAY_IS_FFAROT(s.mode);
-    float row_step = koth ? 46 : 54, row_h = koth ? 40 : 44;
+    float row_step = rows >= 6 ? 46 : 54, row_h = rows >= 6 ? 40 : 44;
 
     page_title(dl, f, S.settings_edit ? "ROOM SETTINGS" : "CREATE A ROOM");
     text(dl, f, g_hand, 15, 54, 66, ORANGE, s.name, LEFT, 0.8f);
@@ -2609,6 +2629,7 @@ void draw_settings(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom
             if (int v = fixed_venue(s.mode)) { value = online_venue_name(v); break; }
             { int p = preset_of(s); value = p >= 0 ? presets()[p].name : "Custom"; snprintf(buf, sizeof(buf), " (%d)", s.pool_count); value += buf; } break;
         case R_LISTED: value = s.is_public ? "In the room list" : "By code only"; break;
+        case R_CPU: value = cpu_level_text(s.cpu_level); break;
         }
         text(dl, f, g_title, 17, x + 12, y + 19, sel ? WHITE : GREY, value.c_str());
         // a fixed row (a special match's venue and players) has nothing to step through
@@ -3452,7 +3473,17 @@ void draw_room(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
         }
         if (a >= 0 && b >= 0) worst = (a + b) / 2;
     }
-    if (cur >= 0) text(dl, f, g_title, 10, 590, 73, GREY, (upper(sv[cur].name) + " SERVER").c_str(), RIGHT, 0.6f);
+    {
+        float sx = 590;
+        if (cur >= 0) {
+            std::string sn = upper(sv[cur].name) + " SERVER";
+            text(dl, f, g_title, 10, 590, 73, GREY, sn.c_str(), RIGHT, 0.6f);
+            sx -= text_width(f, g_title, 10, sn.c_str()) + 12;
+        }
+        // build 67: the CPU fighters' level, in a room whose free places go to CPU fighters
+        if (cpu_level_offered(r.settings.mode) && !NETPLAY_IS_HILL(r.settings.mode))
+            text(dl, f, g_title, 10, sx, 73, ORANGE, ("CPU " + upper(cpu_level_text(r.settings.cpu_level))).c_str(), RIGHT, 0.6f);
+    }
     if (worst > 150) {
         char warn[96];
         snprintf(warn, sizeof(warn), "HIGH PING (ABOUT %d MS): INPUTS WILL FEEL DELAYED", worst);
@@ -4254,6 +4285,8 @@ void gallery_step()
                                          // build 33: the grid at Eric Sermon, O.E, Santos and Teck
                                          "fighters-91", "fighters-92", "fighters-93", "fighters-85", "room", "vote", "hill",
                                          "up", "watch", "room-voice", "match",
+                                         // build 67: the CPU level (CREATE A ROOM's row, the room's line)
+                                         "create-cpu", "room-cpu",
                                          // build 66: FFA rotation (its room, called, watching, its door)
                                          "rot", "rot-up", "rot-watch", "rot-fight", "create-rot", "hub-rot", "versus-rot",
                                          // build 30: the server choice
@@ -4478,6 +4511,13 @@ void gallery_step()
         }
         // the venue row of a special match, which cannot be changed
         S.settings_sel = p == "create-special" ? 2 : 0;
+        if (p == "create-cpu") {    // Free for All, three players and a CPU fighter at Easy; the cursor on its row
+            S.settings.mode = 3;
+            S.settings.max = 3;
+            S.settings.cpu_level = NETPLAY_CPU_EASY;
+            apply_preset(S.settings, 0);
+            S.settings_sel = 2;
+        }
     }
     else if (p == "voice") { S.page = VOICE; S.voice_sel = 1; }
     else if (p == "stats" || p == "stats-1v1") { S.page = STATS; S.stats_page = 0; }
@@ -4494,6 +4534,7 @@ void gallery_step()
         for (size_t i = 0; i < list.size(); i++) if (list[i].id == id) S.fighter_sel = (int)i;
     }
     else if (p == "room") { S.page = HUB; G.room = sample_room(2, 4, 3); }
+    else if (p == "room-cpu") { S.page = HUB; G.room = sample_room(3, 4, 2); G.room.settings.cpu_level = NETPLAY_CPU_EASY; }
     else if (p == "name-created" || p == "name-created-wide") {     // the first card's online name: half typed, or too wide
         G.cp_slots = 1;
         G.room = sample_room(0, 2, 2);

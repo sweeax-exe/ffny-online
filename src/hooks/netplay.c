@@ -262,6 +262,8 @@ void netplay_crowd_update(void) { sub_00081170(); }
 #define CAPS_TSET     4096u     /* tournament sets, both ways (T_TJOIN, T_TSET, T_TPICK); only with an account service */
 #define CAPS_FFAROT   8192u     /* FFA rotation rooms (build 66), both ways: RESULT carries the finishing order there */
 #define CAPS_RANDOM_VENUE 16384u /* RANDOM in the venue vote (build 67), both ways: VOTE 0xFE, ROOM voted 0xFE */
+#define CAPS_CPULEVEL 32768u    /* the room's CPU level (build 67), both ways: a byte after CREATE's / SETTINGS'
+                                 * Settings, after ROOM's spectators, after START's created fighters */
 #define CAPS_RB_MODES 512u      /* rollback everywhere (build 52), both ways: the answer carries a u32 of the
                                  * NETPLAY_RB_* modes in which rollback is mandatory (0: the setting decides) */
 #define CAPS_RB_PING  1024u     /* the rollback ping limit (build 54), both ways, with CAPS_RB_MODES: the answer
@@ -514,6 +516,7 @@ static struct {
     ULONGLONG start_tick;           /* when this PC took the room's START: load times are measured from it */
     int load_done, load_hinted;     /* this START's match is loaded; the long-load notice was shown */
     uint32_t start_seed;
+    int start_cpu;                  /* START's CPU level (NETPLAY_CPU_*, build 67): the CPU fighters' difficulty */
     int start_slots[MAXP];
     /* the room match for its result report (account.c): set at START, sent once */
     AutoMatch report_m;
@@ -2321,6 +2324,13 @@ static void rdsettings(Reader *r, NetRoomSettings *s)
     rdbytes(r, s->pool, s->pool_count);
 }
 
+static int relay_has(unsigned cap) { return N.relay_caps > 0 && ((unsigned)N.relay_caps & cap) != 0; }
+
+static const char *cpu_level_name(int level)
+{
+    return level == NETPLAY_CPU_EASY ? "Easy" : level == NETPLAY_CPU_NORMAL ? "Normal" : "Hard";
+}
+
 /* The most players a room of `mode` takes: King of the Hill rooms ten, FFA rotation eight, the others four. */
 static int room_max(int mode)
 {
@@ -2341,6 +2351,9 @@ static int put_settings(uint8_t *b, const NetRoomSettings *s)
     if (pool > 32) pool = 32;
     b[n++] = (uint8_t)pool;
     memcpy(b + n, s->pool, (size_t)pool); n += pool;
+    /* build 67: the CPU level, only to a relay that takes it (an older one refuses a longer request) */
+    if (relay_has(CAPS_CPULEVEL))
+        b[n++] = (uint8_t)(NETPLAY_CPU_FILL(s->mode) && s->cpu_level > 0 && s->cpu_level <= NETPLAY_CPU_EASY ? s->cpu_level : 0);
     return n;
 }
 
@@ -2655,6 +2668,10 @@ static void on_room(const uint8_t *b, int len)
         }
         v.spectator_count = sc < NETPLAY_MAX_SPECTATORS ? sc : NETPLAY_MAX_SPECTATORS;
         if (r.bad) return;
+    }
+    if (r.i < r.n) {    /* build 67: the CPU level (relays answering CAPS_CPULEVEL) */
+        v.settings.cpu_level = rd8(&r);
+        if (r.bad || v.settings.cpu_level > NETPLAY_CPU_EASY) return;
     }
     v.in_room = 1;
     v.received = GetTickCount64();
@@ -3022,7 +3039,7 @@ static void on_start_as(const uint8_t *b, int len, int watching)
     Reader r = { b, len, 0, 0 };
     AutoMatch m;
     uint32_t seed;
-    int count, i, j, slots[MAXP], fighters[MAXP], pos = -1, deferred, late = watching == 2;
+    int count, i, j, slots[MAXP], fighters[MAXP], pos = -1, deferred, late = watching == 2, cpu = NETPLAY_CPU_HARD;
     if (len < 4) return;
     if (late) watching = 1;     /* T_WATCHLATE: watched like a WATCH, from the players' next fight */
     seed = get32(b);
@@ -3047,6 +3064,10 @@ static void on_start_as(const uint8_t *b, int len, int watching)
                 if (s < ROOMSLOTS) named[s] = crc;
             }
             if (r.bad) return;
+        }
+        if (r.i < r.n) {    /* build 67: the CPU fighters' level, after the created fighters (absent: Hard) */
+            cpu = rd8(&r);
+            if (r.bad || cpu > NETPLAY_CPU_EASY) return;
         }
         if (!(N.start_seed && seed == N.start_seed)) {
             EnterCriticalSection(&g_cs);
@@ -3096,6 +3117,7 @@ static void on_start_as(const uint8_t *b, int len, int watching)
     N.session = seed;
     N.players = count;
     N.fighters = m.count;
+    N.start_cpu = m.count > count ? cpu : NETPLAY_CPU_HARD;
     N.pos = pos;
     N.watching = watching;
     N.spec_start_down = 1;          /* a START held from before does not stop the watching */
@@ -3187,6 +3209,8 @@ static void on_start_as(const uint8_t *b, int len, int watching)
         fprintf(stderr, "[NETPLAY] START: seed %08X, type %d, rules %d, venue %d, %d players, this PC is player %d%s\n",
                 seed, m.type, m.rules, m.venue, count, pos + 1,
                 N.rot_match ? " (an FFA rotation fight)" : N.koth_match ? " (a King of the Hill fight)" : "");
+    if (m.count > count)
+        fprintf(stderr, "[NETPLAY] START: %d CPU fighters at level %s\n", m.count - count, cpu_level_name(N.start_cpu));
     if (late) {
         /* The players fight, or sit on their results, and choose Rematch there: no new START comes
          * until they are back in the room (a player report, 2026-11-07: watching only worked from the
@@ -3755,7 +3779,8 @@ static DWORD WINAPI net_thread(LPVOID unused)
                 int n = header(cb, T_CAPS);
                 memcpy(cb + n, N.token, 8); n += 8;
                 put32(cb + n, CAPS_KOTH | CAPS_CREATED | CAPS_SPECTATE | CAPS_STATS_ERR | CAPS_SPEC_REMATCH | CAPS_CHAT |
-                              CAPS_CREW | CAPS_RB_MODES | CAPS_RB_PING | CAPS_SPEC_LATE | CAPS_TSET | CAPS_FFAROT | CAPS_RANDOM_VENUE); n += 4;
+                              CAPS_CREW | CAPS_RB_MODES | CAPS_RB_PING | CAPS_SPEC_LATE | CAPS_CPULEVEL |
+                              CAPS_TSET | CAPS_FFAROT | CAPS_RANDOM_VENUE); n += 4;
                 send_raw(cb, n);
             } else {
                 N.relay_caps = 0;
@@ -4574,7 +4599,7 @@ int netplay_lobby_rooms(NetRoomInfo *out, int max, unsigned *version)
 
 void netplay_lobby_create(const NetRoomSettings *settings)
 {
-    uint8_t b[64];
+    uint8_t b[80];
     request(T_CREATE, b, put_settings(b, settings));
 }
 
@@ -4836,7 +4861,7 @@ int netplay_lobby_queue(int *waited, int *searching, char *text, int size)
 
 void netplay_lobby_settings(const NetRoomSettings *settings)
 {
-    uint8_t b[64];
+    uint8_t b[80];
     request(T_SETTINGS, b, put_settings(b, settings));
 }
 
@@ -5773,6 +5798,24 @@ static DWORD WINAPI autostart_thread(LPVOID unused)
                     }
                 }
             }
+            {   /* RECOMP_TEST_CPU_LEVEL=easy|normal|hard (tests, build 67): the host sets its room's CPU level */
+                const char *tc = getenv("RECOMP_TEST_CPU_LEVEL");
+                int want_level = !tc || !*tc ? -1 : !strcmp(tc, "easy") ? NETPLAY_CPU_EASY
+                               : !strcmp(tc, "normal") ? NETPLAY_CPU_NORMAL : NETPLAY_CPU_HARD;
+                if (want_level >= 0 && r.in_room && r.phase == 0 && r.you == r.host && !N.match_live &&
+                    NETPLAY_CPU_FILL(r.settings.mode) && relay_has(CAPS_CPULEVEL) && r.settings.cpu_level != want_level) {
+                    static ULONGLONG asked;
+                    if (GetTickCount64() - asked > 1000) {
+                        NetRoomSettings want = r.settings;
+                        asked = GetTickCount64();
+                        want.cpu_level = want_level;
+                        fprintf(stderr, "[NETPLAY] tests: the room's CPU level is %s\n", cpu_level_name(want_level));
+                        netplay_lobby_settings(&want);
+                    }
+                    Sleep(100);
+                    continue;
+                }
+            }
             if (!strcmp(mode, "tset") && r.in_room && !N.match_live) {
                 /* tests, tournament sets: the loser's stage pick (RECOMP_TEST_TSET_PICK="7,8": the first of these
                  * the relay offers, else its first choice) two seconds after the pick opened; nothing after
@@ -6032,9 +6075,156 @@ static void soak_match_start(void)
     fprintf(stderr, "[ROLLBACK] soak: going back %d steps every few updates\n", soak_depth());
 }
 
+/* ---- the room's CPU level, and a fight left to CPU fighters (build 67) ----------------------------
+ *
+ * The CPU level. The game gives each fighter slot a difficulty (0 Easy, 1 Normal, 2 Hard: the four
+ * words at 0x3B90A8, copied from the match setup by sub_000871F0 just before it calls sub_001A4D90).
+ * The CPU fighters' brains read their own slot's word when the fight loads them (sub_000D6EE0 picks
+ * the "easy", "normal" or "hard" tendency list of each CPU fighter's AI file, sub_000C9110 loads it);
+ * the momentum scale reads only slot 0's word, a human's. Online every PC sets the game's difficulty
+ * to Hard (automatch.c), so a CPU fighter always played Hard; with a room level other than Hard its
+ * slots get that level here, from sub_001A4D90's entry, after the copy and before the brains load.
+ * The level comes from START, so every PC of the match (and every spectator) writes the same words.
+ *
+ * Only CPU fighters left. In a 3-Way or Free for All whose human fighters are all out (knocked out,
+ * or gone mid-fight), the rest of the fight was CPU fighters beating each other while the players
+ * watched. The fight ends then: the CPU fighter with the most health (the lowest slot of equals)
+ * wins, and every other fighter still up is knocked out the way the test knockout does it
+ * (test_telemetry.c: zero health and the knockout state through the game's own routine), each once it
+ * stands free (state 1, so no hold or throw has it), with the winner as its primary opponent (the game
+ * names the last one put out's primary opponent as the match's winner). The game's win check then
+ * records the result and runs its own ending. Two CPU fighters can stay locked in a hold, a ground
+ * move or a wall loop: CPU_END_WAIT steps after the humans were all out, the rest are knocked out
+ * whatever they do (as the test knockout does after its grace). That moment is counted in fight steps:
+ * each run of a step notes in a ring whether the humans were all out at it, and a step looks at the
+ * note of the step CPU_END_WAIT before it. That step is final on every PC by then (more than RB_AHEAD
+ * back), and its note is from its last run, the one a rollback left, so every PC reads the same. It runs at the start of a fight step, before the step's checksum, and keeps no
+ * state: it reads only the fighters' records, the step number and the agreed rest step of a gone
+ * player, so a step run again after a rollback does what its first run did, on every PC alike. A gone
+ * player counts as out only CPU_END_GONE_STEPS after its port rests: no PC runs a step that late,
+ * not even on predicted entries, before every PC has agreed that rest step. */
+#define G_SLOT_DIFFICULTY  0x003B90A8u  /* the game's difficulty of each fighter slot, 4 words */
+#define F_STATE_WORD       0x30u        /* a fighter's state: 1 standing or walking, 0x18 knocked out */
+#define F_HEALTH_NOW       0x350u
+#define F_HEALTH_TOP       0x354u
+#define F_HEALTH_SHARE     0x35Cu
+#define F_KO_FALL          0x943u
+#define STATE_FREE         1u
+#define STATE_KNOCKED_OUT  0x18u
+#define CPU_END_GONE_STEPS (RB_AHEAD + 1)
+#define CPU_END_WAIT       300          /* steps (5 s) after the humans were out: the rest go down anyway */
+static uint32_t g_cpu_end_tag[RING], g_cpu_end_match[RING];     /* per step: s + 1 when the humans were out */
+extern void sub_001B5420(void);     /* (record, state): the state set and restarted */
+
+static void cpu_level_apply(void)
+{
+    int i;
+    uint32_t level;
+    if (!N.lobby || !N.match_live || N.fighters <= N.players || N.start_cpu == NETPLAY_CPU_HARD) return;
+    level = (uint32_t)(2 - N.start_cpu);    /* the game's index: 2 Hard, 1 Normal, 0 Easy */
+    for (i = N.players; i < N.fighters && i < MAXP; i++) MEM32(G_SLOT_DIFFICULTY + 4u * (uint32_t)i) = level;
+    fprintf(stderr, "[NETPLAY] CPU level %s: the slots' difficulty words are now %u %u %u %u\n",
+            cpu_level_name(N.start_cpu), MEM32(G_SLOT_DIFFICULTY), MEM32(G_SLOT_DIFFICULTY + 4u),
+            MEM32(G_SLOT_DIFFICULTY + 8u), MEM32(G_SLOT_DIFFICULTY + 12u));
+}
+
+static int fighter_out(uint32_t rec)
+{
+    /* the knockout state, or the defeat word's knockout bit or its "ended" bit (0x200: put out by any
+     * ending, team-and-special-match-types.md 3.4; a knocked-out fighter of a Free for All leaves the
+     * knockout state with only that bit) */
+    return MEM32(rec + F_STATE_WORD) == STATE_KNOCKED_OUT || (MEM16(rec + 0x932u) & 0x201u);
+}
+
+/* The game's state routine on a fighter, from a step hook (as test_telemetry.c's call_set_state). */
+static void fighter_set_state(uint32_t rec, uint32_t state)
+{
+    uint32_t eax_ = g_eax, ecx_ = g_ecx, edx_ = g_edx, ebx_ = g_ebx, esi_ = g_esi, edi_ = g_edi,
+             ebp_ = g_ebp, sp = g_esp;
+    double fp[8];
+    int fp_top = g_fp_top;
+    uint16_t fp_cw = g_fp_control_word;
+    memcpy(fp, g_fp_stack, sizeof(fp));
+    g_esp = (sp - 0x80u) & ~3u;         /* below the hook's frame */
+    PUSH32(g_esp, state);
+    PUSH32(g_esp, rec);
+    PUSH32(g_esp, 0u);                  /* a return address the lifted ret only pops */
+    sub_001B5420();
+    g_eax = eax_; g_ecx = ecx_; g_edx = edx_; g_ebx = ebx_; g_esi = esi_; g_edi = edi_; g_ebp = ebp_;
+    g_esp = sp;
+    memcpy(g_fp_stack, fp, sizeof(fp));
+    g_fp_top = fp_top;
+    g_fp_control_word = fp_cw;
+}
+
+/* RECOMP_CPU_END=off (tests): CPU fighters fight on after the last human is out, as before build 67;
+ * RECOMP_CPU_END=late (tests): no free stance counts, so only the CPU_END_WAIT fallback ends the fight. */
+static int cpu_end_mode(void)
+{
+    static int v = -1;
+    if (v < 0) {
+        const char *e = getenv("RECOMP_CPU_END");
+        v = e && !strcmp(e, "off") ? 0 : e && !strcmp(e, "late") ? 2 : 1;
+    }
+    return v;
+}
+static int cpu_end_on(void) { return cpu_end_mode() != 0; }
+
+/* At the start of fight step s (offline: the fight went on on this PC alone, the others count as gone). */
+static void cpus_only_end(uint32_t s, int offline)
+{
+    static int offline_out;         /* offline (this PC alone, nothing to agree): calls since the humans were out */
+    int i, winner = -1, out = 1, late;
+    float best = -1.0f;
+    if (!N.lobby || !N.match_live || N.fighters <= N.players || N.fighters > MAXP || !cpu_end_on() ||
+        MEM32(G_MATCH_PHASE) != 1u || (offline && (N.watching || N.pos < 0)))
+        return;
+    for (i = 0; i < N.players && out; i++) {
+        uint32_t rec = ACTORS + (uint32_t)i * STRIDE;
+        int gone = offline ? i != N.pos
+                 : (N.gone_mask >> i & 1) && N.gone_from[i] && s >= N.gone_from[i] + CPU_END_GONE_STEPS;
+        if (!gone && !fighter_out(rec)) out = 0;    /* a human still fights */
+    }
+    if (offline) {
+        offline_out = out ? offline_out + 1 : 0;
+        late = offline_out > CPU_END_WAIT;
+    } else {
+        uint32_t k = s % RING, w = s - CPU_END_WAIT;
+        g_cpu_end_tag[k] = out ? s + 1u : 0u;       /* this run's note; a later run of the step replaces it */
+        g_cpu_end_match[k] = N.match;
+        late = s > CPU_END_WAIT && g_cpu_end_tag[w % RING] == w + 1u && g_cpu_end_match[w % RING] == N.match;
+    }
+    if (!out) return;
+    for (i = N.players; i < N.fighters; i++) {
+        uint32_t rec = ACTORS + (uint32_t)i * STRIDE;
+        float h = MEMF(rec + F_HEALTH_NOW), top = MEMF(rec + F_HEALTH_TOP), share;
+        if (fighter_out(rec)) continue;
+        share = top > 0.0f && h == h ? h / top : 0.0f;
+        if (share > best) { best = share; winner = i; }
+    }
+    if (winner < 0) return;                         /* every CPU fighter is out too: the game decides */
+    for (i = 0; i < N.fighters; i++) {
+        uint32_t rec = ACTORS + (uint32_t)i * STRIDE;
+        int held = MEM32(rec + F_STATE_WORD) != STATE_FREE || cpu_end_mode() == 2;
+        if (i == winner || fighter_out(rec) || (held && !late)) continue;
+        MEMF(rec + F_HEALTH_NOW) = 0.0f;
+        MEMF(rec + F_HEALTH_SHARE) = 0.0f;
+        MEM8(rec + F_KO_FALL) = 1;      /* the plain knockout fall */
+        /* the game's decision names the last fighter put out's primary opponent (+0) as the winner, and
+         * its record of each knockout that fighter as the one who won it: the winner, for every one */
+        MEM32(rec) = ACTORS + (uint32_t)winner * STRIDE;
+        fighter_set_state(rec, STATE_KNOCKED_OUT);
+        if (!N.resim)
+            fprintf(stderr, "[NETPLAY] only CPU fighters are left: fighter %d knocked out at step %u; fighter %d "
+                    "(the most health, %.0f%%) wins%s\n", i + 1, s, winner + 1, (double)(best * 100.0f),
+                    held ? " (not waiting any longer for a free stance: the humans were out 300 steps ago)" : "");
+    }
+}
+
 void netplay_on_match_start(void)
 {
     if (!N.lockstep) { if (soak_depth()) soak_match_start(); return; }
+    cpu_level_apply();          /* the room's CPU level, before the brains load */
     g_cp_stale = 1;
     g_ndynvb = 0;
     rbm_reset();        /* the last match's line, if it never said "off for the rest" (B3, G2) */
@@ -6789,6 +6979,7 @@ void netplay_on_step(void)
     if (!N.resim) watch_pads();
     koth_check_result(0);
     if (!N.lockstep) {
+        cpus_only_end(0, 1);    /* a room match that went on on this PC alone */
         if (soak_depth()) {     /* tests: the soak counts steps and prepares the save states itself */
             s = ++N.step;
             if (s == 1 && !N.resim && rollback_prepare() == 0) {
@@ -6872,6 +7063,7 @@ void netplay_on_step(void)
             g_weapon_waits = 0;
         }
     }
+    cpus_only_end(s, 0);        /* only CPU fighters left: the fight ends (before the checksum) */
     /* before anything in the step draws, and before the checksum: the same state on every PC */
     if (shared_gen_pin()) shared_gen_reseed(s);
     {

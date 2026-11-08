@@ -457,7 +457,9 @@ static void snapshot_point(void)
  * soon as both are standing free (state 1, so no grapple or throw holds the loser); after
  * KO_GRACE steps it does not wait for that any more. The winner is slot 0 unless named, and
  * "alt" alternates it per match (slot 0 wins the first, 1 the second, ...). In a Team match the
- * winner's partner stands too, and "alt" alternates the sides (slot 0, then slot 2).
+ * winner's partner stands too, and "alt" alternates the sides (slot 0, then slot 2). "humans" knocks
+ * out the human fighters only and leaves the CPU fighters standing (build 67: the fight then ends by
+ * netplay.c's rule for a fight of CPU fighters only).
  *
  * Lockstep and rollback: it runs at the start of a step (sub_00087700), before the step's
  * checksum, and depends only on the step number, the match ordinal and the fighters' records,
@@ -498,7 +500,7 @@ static void ko_step(void)
 {
     static int parsed;
     static LONG64 at;
-    static int winner_arg;              /* >= 0 a slot, -1 alternate */
+    static int winner_arg;              /* >= 0 a slot, -1 alternate, -2 the CPU fighters stand */
     int slot, winner, losers = 0, ready = 1, team;
     if (!parsed) {
         const char *v = getenv("RECOMP_TEST_KO_STEP");
@@ -507,13 +509,29 @@ static void ko_step(void)
         winner_arg = 0;
         if (v && strchr(v, ',')) {
             const char *w = strchr(v, ',') + 1;
-            winner_arg = !strncmp(w, "alt", 3) ? -1 : atoi(w);
+            winner_arg = !strncmp(w, "alt", 3) ? -1 : !strncmp(w, "humans", 6) ? -2 : atoi(w);
         }
         if (at > 0)
             fprintf(stderr, "[TEST-KO] knockout from fight step %lld, winner %s%d\n", (long long)at,
-                    winner_arg < 0 ? "alternating from slot " : "slot ", winner_arg < 0 ? 0 : winner_arg);
+                    winner_arg == -2 ? "the CPU fighters, from slot " : winner_arg < 0 ? "alternating from slot " : "slot ",
+                    winner_arg < 0 ? 0 : winner_arg);
     }
     if (at <= 0 || s_step < at || MEM32(G_PHASE) != 1u) return;
+    if (winner_arg == -2) {     /* the human fighters out, each once it stands free; the CPU fighters stand */
+        for (slot = 0; slot < SLOTS; slot++) {
+            uint32_t r = record(slot);
+            if (!active(slot) || is_cpu(slot)) continue;
+            if (MEM32(r + F_STATE) == STATE_KO || (MEM16(r + F_DEFEAT) & 0x201u)) continue;     /* 0x200: out */
+            if (!ko_free(MEM32(r + F_STATE)) && s_step < at + KO_GRACE) continue;
+            MEMF(r + F_HEALTH) = 0.0f;
+            MEMF(r + F_HEALTH_RATIO) = 0.0f;
+            MEM8(r + F_KO_ANIM) = 1;
+            call_set_state(r, STATE_KO);
+            fprintf(stderr, "[TEST-KO] match %ld step %lld: slot %d (human) knocked out\n", (long)s_match,
+                    (long long)s_step, slot);
+        }
+        return;
+    }
     /* Team (the mode mask 0x3B907E is 2): the side of the winner stands, the other side (slots 0 and 1
      * against 2 and 3) is knocked out, and "alt" alternates the sides (slot 0's, then slot 2's) */
     team = MEM8(0x003B907Eu) == 2u;
