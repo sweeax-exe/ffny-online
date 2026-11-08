@@ -63,6 +63,27 @@ Modes offered online: One on One, 3-Way, Free for All (more follow once tested o
 fight's first-time help cards (BLAZIN', weapon, KO) are skipped in online matches: they depend on
 each player's save and would pause only one of the games.
 
+## Turf War
+
+Crews fight over New York's venues. While Turf War runs, the hub shows **TURF WAR** under MY STATS
+(the entry is hidden while it is off). It has two tabs (LB/RB, or click them):
+
+- **MAP**: the 18 venues by borough. Each row shows the crew that holds it (its tag) or **OPEN**, a blue
+  ring while it is protected, an orange **VS** while it is challenged, and BOSS on the boss venue.
+  The panel on the right shows the selected venue: who holds it and for how long, how often it was
+  defended, how long its protection lasts, and an open challenge with its crew and how long is left to
+  play the battle.
+- **SEASON**: the month's season with its days left, the crews' standings (points and venues held) and the
+  top crews of past seasons. The header also shows your crew, its place, venues and points.
+
+A crew's **Boss or a Lieutenant** can act from the map (members see it read-only):
+**CHALLENGE** a venue another crew holds, **CLAIM** an open venue (pick the crew to fight for it from the
+list), and on your crew's challenges **SET UP BATTLE** (3 v 3) or **CANCEL CHALLENGE**. A challenge or a
+cancel asks for a second press. When something is not possible the panel says why, in the server's words.
+The battle itself is an ordinary crew battle: the other crew accepts it, then both join it from the crew
+page; its screen says which venue it is for and, at the end, what it did to the map. Sign in with Discord
+to see your crew and act; the map is visible to everyone.
+
 ## Watching a match (spectator mode)
 
 In **FIND A ROOM**, RB (**WATCH**) on a room, or RB on the code screen, watches that room instead of
@@ -123,6 +144,11 @@ on the hill, answers a call) only while its room holds `n` players. The relay st
 soon as two are in and every one of them is ready, so without it the first two copies started their
 match before the third joined, and that one opened a room of its own (`dj.py scenario online --players
 3` and `scripts/netplay-hub-test.ps1 -Players 3` set it).
+
+Turf War without a server: `RECOMP_TEST_TURF=<file>` answers the map and season requests from that text
+file (`tests/fixtures/turf-sample.txt` is a sample), so TURF WAR shows in the hub; its actions are
+logged, not sent. The gallery's `turf` pages (`dj.py scenario gallery --env
+RECOMP_TEST_ONLINE_GALLERY_ONLY=turf,hub-turf`) show the same sample, or that file when it is set.
 
 The server choice: `RECOMP_NETPLAY_SERVER=auto|eu|na|west|all` with `RECOMP_NETPLAY_SERVER_EU`,
 `RECOMP_NETPLAY_SERVER_NA` and `RECOMP_NETPLAY_SERVER_WEST` naming local relays (one started with
