@@ -73,6 +73,23 @@ int main(int argc, char **argv) {
             std::cout << q.name << "|" << q.folder << "|" << q.profile << "|" << q.when << "\n";
         return 0;
     }
+    if (cmd == "aside") {
+        std::string message;
+        bool ok = put_aside(fs::u8path(argv[2]), argv[3], &message);
+        std::cout << ok << " " << message << "\n";
+        return ok ? 0 : 1;
+    }
+    if (cmd == "back") {
+        std::string message;
+        bool ok = bring_back(fs::u8path(argv[2]), argv[3], &message);
+        std::cout << ok << " " << message << "\n";
+        return ok ? 0 : 1;
+    }
+    if (cmd == "asides") {
+        for (auto &e : list_aside(fs::u8path(argv[2])))
+            std::cout << e.name << "|" << e.folder << "|" << e.stash << "|" << e.created << "\n";
+        return 0;
+    }
     if (cmd == "list") {
         for (auto &e : list_saves(fs::u8path(argv[2])))
             std::cout << e.kind << "|" << e.name << "|" << e.folder << "|" << e.signed_ok << "|" << e.created << "|"
@@ -632,3 +649,97 @@ def test_ps2_options_save_and_bad_names(tool, tmp_path):
         text = run(tool, 'import', src, tmp_path / 'save', tmp_path / 'b', noon(), check=False)
         assert 'skipped BASLUS-21004X' in text and why in text, (name, text)
         assert not (tmp_path / 'save' / 'UserData').exists()
+
+
+# ---- profiles put aside ----
+
+def test_put_aside_and_bring_back_move_the_folder_whole(tool, tmp_path):
+    save = tmp_path / 'save'
+    title = save / 'UserData' / '45410049'
+    vy2 = put_profile(title, 'VY2', profile('VY2', key=bytes(16), created=True))
+    put_profile(title, 'KID', profile('KID', key=bytes(16)))
+    (vy2 / 'extra.bin').write_bytes(b'kept as it is')
+    before = tree(vy2)
+    out = run(tool, 'aside', save, vy2.name)
+    assert out.startswith('1 VY2 is put aside')
+    assert not vy2.exists()
+    stash = save / 'aside' / vy2.name
+    assert tree(stash) == before                                    # whole and unchanged
+    assert [p.name for p in (save / 'aside').iterdir()] == [vy2.name]   # no copy left behind
+    assert [l.split('|')[1] for l in run(tool, 'list', save).splitlines()] == ['KID']
+    assert run(tool, 'asides', save).splitlines() == ['VY2|%s|%s|1' % (vy2.name, vy2.name)]
+    out = run(tool, 'back', save, vy2.name)
+    assert out.startswith('1 VY2 is back in the game (2 of 16 user IDs)')
+    assert tree(vy2) == before
+    assert list((save / 'aside').iterdir()) == []
+    assert run(tool, 'asides', save) == ''
+
+
+def test_bring_back_refused_at_sixteen_and_never_overwrites(tool, tmp_path):
+    save = tmp_path / 'save'
+    title = save / 'UserData' / '45410049'
+    old = put_profile(title, 'OLD', profile('OLD', key=bytes(16)))
+    run(tool, 'aside', save, old.name)
+    for i in range(16):
+        put_profile(title, 'P%02d' % i, profile('P%02d' % i, key=bytes(16)))
+    out = run(tool, 'back', save, old.name, check=False)
+    assert out.startswith('0 Nothing was changed: the game already has 16 user IDs') and 'Put one aside first' in out
+    assert (save / 'aside' / old.name / 'OLD').is_file() and not old.exists()
+    # a new profile of the same name in the game: Bring back refuses, a second Put aside gets its own folder
+    shutil.rmtree(title / save_import.folder_name('P00'))
+    shutil.rmtree(title / save_import.folder_name('P01'))
+    newer = put_profile(title, 'OLD', profile('OLD again', key=bytes(16)))
+    mine = (newer / 'OLD').read_bytes()
+    out = run(tool, 'back', save, old.name, check=False)
+    assert out.startswith('0 Nothing was changed: the game has a profile named OLD already')
+    assert (newer / 'OLD').read_bytes() == mine
+    run(tool, 'aside', save, newer.name)
+    assert sorted(p.name for p in (save / 'aside').iterdir()) == [old.name, old.name + '~2']
+    assert (save / 'aside' / (old.name + '~2') / 'OLD').read_bytes() == mine
+    assert (save / 'aside' / old.name / 'OLD').read_bytes() == profile('OLD', key=bytes(16))
+    out = run(tool, 'back', save, old.name + '~2')
+    assert out.startswith('1 OLD is back') and (newer / 'OLD').read_bytes() == mine
+
+
+def test_only_profiles_go_aside(tool, tmp_path):
+    save = tmp_path / 'save'
+    title = save / 'UserData' / '45410049'
+    options = title / save_import.folder_name('Options')
+    options.mkdir(parents=True)
+    (options / 'SaveMeta.xbx').write_bytes(meta('Options'))
+    (options / 'Options').write_bytes(b'\0' * 5404)
+    assert run(tool, 'aside', save, options.name, check=False).startswith('0 Only profiles')
+    assert run(tool, 'aside', save, 'NOTTHERE', check=False).startswith('0 That profile is not in the game')
+    assert run(tool, 'back', save, 'NOTTHERE', check=False).startswith('0 That profile is not put aside')
+    assert options.is_dir() and not (save / 'aside').exists()
+
+
+def test_put_aside_refused_when_the_stash_is_a_file(tool, tmp_path):
+    save = tmp_path / 'save'
+    vy2 = put_profile(save / 'UserData' / '45410049', 'VY2', profile('VY2', key=bytes(16)))
+    (save / 'aside').write_bytes(b'not a folder')
+    out = run(tool, 'aside', save, vy2.name, check=False)
+    assert out.startswith('0 Nothing was changed') and (vy2 / 'VY2').is_file()
+
+
+def test_unfinished_moves_and_other_folders_are_not_listed(tool, tmp_path):
+    save = tmp_path / 'save'
+    put_profile(save / 'aside', 'VY2', profile('VY2', key=bytes(16)))
+    leftover = put_profile(save / 'aside', 'KID', profile('KID', key=bytes(16)))
+    leftover.rename(save / 'aside' / ('.moving-' + leftover.name))
+    (save / 'aside' / 'notes').mkdir()
+    assert [l.split('|')[0] for l in run(tool, 'asides', save).splitlines()] == ['VY2']
+
+
+def test_backups_carry_the_profiles_put_aside(tool, tmp_path):
+    save, backups = tmp_path / 'save', tmp_path / 'save-backups'
+    title = save / 'UserData' / '45410049'
+    put_profile(title, 'KID', profile('KID', key=bytes(16)))
+    vy2 = put_profile(title, 'VY2', profile('VY2', key=bytes(16)))
+    run(tool, 'aside', save, vy2.name)
+    name = run(tool, 'backup', save, backups, 'manual', noon()).split()[1]
+    assert tree(backups / name / 'aside') == tree(save / 'aside')
+    assert 'profiles=1' in (backups / name / 'backup.txt').read_text()
+    # a restore puts back UserData only: the profile put aside stays where it is
+    run(tool, 'restore', save, backups, name, noon(1))
+    assert (save / 'aside' / vy2.name / 'VY2').is_file() and not vy2.exists()

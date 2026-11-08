@@ -6,7 +6,8 @@
 Builds a throw-away data folder (<out>/run-<time>/data) with made-up profiles (never a player's
 save, never game data), then starts build/win-x64-release/defjam_recomp.exe several times with
 the launcher's test switches: RECOMP_LAUNCHER_PAGE=saves opens the page, RECOMP_TEST_SAVES presses
-its buttons (Back up now, Import Xbox saves from a made-up zip, Replace, Restore) and
+its buttons (Back up now, Import Xbox saves from a made-up zip, Replace, Restore, Put aside and Bring
+back, also with 16 profiles in the game) and
 RECOMP_WINDOW_SHOT writes the window's own picture (never the desktop) as a BMP, kept as PNG.
 Then it starts the game itself on that data folder (--no-launcher, a test copy beside nothing
 else), checks the daily backup and that a launcher refuses to restore while the game runs, and
@@ -199,6 +200,25 @@ def main():
     back = title / save_import.folder_name('GONE') / 'GONE'
     step('bring back a deleted profile', png and back.is_file() and back.read_bytes() == (gone / 'GONE').read_bytes() and
          'Imported 1 profile' in text, png)
+
+    # Put aside: VY2 (a created fighter) leaves the game folder whole, into save/aside, and comes back
+    vy2_before = tree(vy2)
+    code, text, png = launcher(run, data, settings, '07c-put-aside', steps='10:aside:VY2', frame=30)
+    stash = data / 'save' / 'aside' / vy2.name
+    step('put aside', png and not vy2.exists() and tree(stash) == vy2_before and 'VY2 is put aside' in text and
+         sorted(p.name for p in (data / 'save' / 'aside').iterdir()) == [vy2.name], png)
+    # 16 profiles in the game: Bring back refuses and changes nothing
+    extra = [put(title, 'FILL%02d' % i, profile('FILL%02d' % i, key=bytes(16)))
+             for i in range(16 - sum(1 for d in title.iterdir() if d.is_dir() and d.name != options.name))]
+    code, text, png = launcher(run, data, settings, '07d-bring-back-refused', steps='10:back:VY2', frame=30)
+    step('bring back refused at 16', png and 'the game already has 16 user IDs' in text and tree(stash) == vy2_before and
+         not vy2.exists(), png)
+    for folder in extra:
+        for f in folder.iterdir():
+            f.unlink()
+        folder.rmdir()
+    code, text, png = launcher(run, data, settings, '07e-brought-back', steps='10:back:VY2', frame=30)
+    step('bring back', png and tree(vy2) == vy2_before and not stash.exists() and 'VY2 is back in the game' in text, png)
 
     # The game itself on this data folder: the daily backup, then a launcher that must refuse.
     game_env = env_for(data, 'none', {'RECOMP_AUDIO_MUTE': '1'})

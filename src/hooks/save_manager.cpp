@@ -348,6 +348,44 @@ bool parse_save_meta(const Bytes &raw, std::string &name)
 
 // ---- the save area ----
 
+namespace
+{
+// One folder of the save area (or of the stash) as an Entry.
+Entry read_entry(const fs::path &dir)
+{
+    Entry e;
+    e.folder = pcui::path_utf8(dir.filename());
+    Bytes meta, blob;
+    fs::path meta_path = find_file(dir, "SaveMeta.xbx"), main;
+    if (!meta_path.empty() && read_file(meta_path, meta, 64 * 1024)) parse_save_meta(meta, e.name);
+    if (!e.name.empty()) main = find_file(dir, e.name);
+    std::error_code e2;
+    if (!main.empty()) e.changed = unix_time(fs::last_write_time(main, e2));
+    if (e.name == "Options" && !main.empty()) {
+        e.kind = Entry::OPTIONS;
+    } else if (!main.empty() && read_file(main, blob, kMaxMember) && header_fault(blob).empty()) {
+        e.kind = Entry::PROFILE;
+        e.signed_ok = signatures_ok(blob, kPortKey);
+        e.created = blob.size() > kProfileStart + kCreatedFlag && blob[kProfileStart + kCreatedFlag] == 1;
+    } else {
+        e.kind = Entry::OTHER;
+        if (!e.changed)
+            for (fs::directory_iterator f(dir, e2), fend; !e2 && f != fend; f.increment(e2))
+                if (f->symlink_status(e2).type() == fs::file_type::regular)
+                    e.changed = std::max(e.changed, unix_time(fs::last_write_time(f->path(), e2)));
+    }
+    return e;
+}
+
+void sort_entries(std::vector<Entry> &out)
+{
+    std::sort(out.begin(), out.end(), [](const Entry &a, const Entry &b) {
+        if (a.kind != b.kind) return a.kind < b.kind;
+        return lower(a.name.empty() ? a.folder : a.name) < lower(b.name.empty() ? b.folder : b.name);
+    });
+}
+} // namespace
+
 std::vector<Entry> list_saves(const fs::path &save_dir)
 {
     std::vector<Entry> out;
@@ -355,33 +393,9 @@ std::vector<Entry> list_saves(const fs::path &save_dir)
     std::error_code ec;
     for (fs::directory_iterator it(title, ec), end; !ec && it != end; it.increment(ec)) {
         if (it->symlink_status(ec).type() != fs::file_type::directory) continue;
-        Entry e;
-        e.folder = pcui::path_utf8(it->path().filename());
-        Bytes meta, blob;
-        fs::path meta_path = find_file(it->path(), "SaveMeta.xbx"), main;
-        if (!meta_path.empty() && read_file(meta_path, meta, 64 * 1024)) parse_save_meta(meta, e.name);
-        if (!e.name.empty()) main = find_file(it->path(), e.name);
-        std::error_code e2;
-        if (!main.empty()) e.changed = unix_time(fs::last_write_time(main, e2));
-        if (e.name == "Options" && !main.empty()) {
-            e.kind = Entry::OPTIONS;
-        } else if (!main.empty() && read_file(main, blob, kMaxMember) && header_fault(blob).empty()) {
-            e.kind = Entry::PROFILE;
-            e.signed_ok = signatures_ok(blob, kPortKey);
-            e.created = blob.size() > kProfileStart + kCreatedFlag && blob[kProfileStart + kCreatedFlag] == 1;
-        } else {
-            e.kind = Entry::OTHER;
-            if (!e.changed)
-                for (fs::directory_iterator f(it->path(), e2), fend; !e2 && f != fend; f.increment(e2))
-                    if (f->symlink_status(e2).type() == fs::file_type::regular)
-                        e.changed = std::max(e.changed, unix_time(fs::last_write_time(f->path(), e2)));
-        }
-        out.push_back(e);
+        out.push_back(read_entry(it->path()));
     }
-    std::sort(out.begin(), out.end(), [](const Entry &a, const Entry &b) {
-        if (a.kind != b.kind) return a.kind < b.kind;
-        return lower(a.name.empty() ? a.folder : a.name) < lower(b.name.empty() ? b.folder : b.name);
-    });
+    sort_entries(out);
     return out;
 }
 
@@ -480,7 +494,8 @@ bool make_backup(const fs::path &save_dir, const fs::path &backups, const std::s
     fs::path dst = backups / name;
     int files = 0;
     std::string why;
-    if (!copy_tree(src, dst / "UserData", &files, &why)) {
+    if (!copy_tree(src, dst / "UserData", &files, &why) ||
+        (real_dir(aside_dir(save_dir)) && !copy_tree(aside_dir(save_dir), dst / "aside", &files, &why))) {
         remove_tree(dst);
         if (error) *error = "The backup failed: " + why + ".";
         return false;
@@ -668,6 +683,182 @@ bool quarantine(const fs::path &folder, const fs::path &backups, int64_t now, st
         if (remove_tree(list[i].path))
             fprintf(stderr, "[SAVES] old quarantine copy %s removed (the newest %d are kept)\n", list[i].name.c_str(), keep);
     }
+    return true;
+}
+
+// ---- profiles put aside ----
+
+fs::path aside_dir(const fs::path &save_dir) { return save_dir / "aside"; }
+
+std::string aside_folder(const std::string &stash)
+{
+    if (stash.empty() || stash[0] == '.' || bad_file_name(stash)) return "";
+    size_t tilde = stash.find('~');
+    if (tilde == std::string::npos) return stash;
+    if (tilde == 0 || tilde + 1 >= stash.size() || stash.size() - tilde > 3) return "";
+    for (size_t i = tilde + 1; i < stash.size(); i++)
+        if (!isdigit((unsigned char)stash[i])) return "";
+    return stash.substr(0, tilde);
+}
+
+std::vector<Entry> list_aside(const fs::path &save_dir)
+{
+    std::vector<Entry> out;
+    std::error_code ec;
+    fs::path root = aside_dir(save_dir);
+    if (!real_dir(root)) return out;
+    for (fs::directory_iterator it(root, ec), end; !ec && it != end; it.increment(ec)) {
+        std::string stash = pcui::path_utf8(it->path().filename());
+        if (it->symlink_status(ec).type() != fs::file_type::directory || aside_folder(stash).empty()) continue;
+        Entry e = read_entry(it->path());
+        if (e.kind != Entry::PROFILE) continue;
+        e.stash = stash;
+        e.folder = aside_folder(stash);
+        out.push_back(e);
+    }
+    sort_entries(out);
+    return out;
+}
+
+namespace
+{
+// Every file under `dir` by its path inside it, with its bytes. False when one cannot be read, or
+// for anything but plain files and folders (a profile folder holds plain files only).
+bool tree_bytes(const fs::path &dir, std::map<std::string, Bytes> &out, int depth = 0)
+{
+    std::error_code ec;
+    for (fs::directory_iterator it(dir, ec), end; !ec && it != end; it.increment(ec)) {
+        auto type = it->symlink_status(ec).type();
+        if (ec) return false;
+        std::string leaf = pcui::path_utf8(it->path().filename());
+        if (type == fs::file_type::directory) {
+            std::map<std::string, Bytes> inner;
+            if (depth >= 8 || !tree_bytes(it->path(), inner, depth + 1)) return false;
+            for (auto &kv : inner) out[leaf + "/" + kv.first] = std::move(kv.second);
+        } else if (type == fs::file_type::regular) {
+            if (!read_file(it->path(), out[leaf], kMaxCopy)) return false;
+        } else {
+            return false;
+        }
+    }
+    return !ec;
+}
+
+bool same_tree(const fs::path &a, const fs::path &b)
+{
+    std::map<std::string, Bytes> ta, tb;
+    return tree_bytes(a, ta) && tree_bytes(b, tb) && !ta.empty() && ta == tb;
+}
+
+// Moves the folder `from` to `to` (which must not exist), both on the save area's volume: a checked
+// copy in `staging_parent` first, then one rename, then the moved folder checked against the copy.
+// The copy goes only once the move is verified; when that check fails it stays, and *why says where.
+bool move_checked(const fs::path &from, const fs::path &to, const fs::path &staging_parent, std::string *why)
+{
+    std::error_code ec;
+    if (fs::exists(fs::symlink_status(to, ec))) { *why = "a folder of that name is there already"; return false; }
+    if (!real_dir(from)) { *why = "it is not a plain folder"; return false; }
+    std::string leaf = pcui::path_utf8(from.filename());
+    fs::path copy = staging_parent / fs::u8path(".moving-" + leaf);
+    for (int n = 2; fs::exists(fs::symlink_status(copy, ec)) && n < 100; n++)
+        copy = staging_parent / fs::u8path(".moving-" + leaf + "-" + std::to_string(n));
+    if (fs::exists(fs::symlink_status(copy, ec))) {
+        *why = "too many unfinished moves in " + pcui::path_utf8(staging_parent);
+        return false;
+    }
+    std::string err;
+    if (!copy_tree(from, copy, nullptr, &err) || !same_tree(from, copy)) {
+        remove_tree(copy);              // only ever the copy just made
+        *why = err.empty() ? "its files could not be copied whole" : err;
+        return false;
+    }
+    fs::rename(from, to, ec);
+    if (ec) {
+        remove_tree(copy);
+        *why = "it is in use or could not be moved (" + ec.message() + "). Close anything that has it open and try again";
+        return false;
+    }
+    if (!same_tree(to, copy)) {
+        fprintf(stderr, "[SAVES] moved %s to %s, but it does not match the copy: the copy stays in %s\n",
+                pcui::path_utf8(from).c_str(), pcui::path_utf8(to).c_str(), pcui::path_utf8(copy).c_str());
+        *why = "it was moved but does not read back the same; a copy is kept in " + pcui::path_utf8(copy);
+        return false;
+    }
+    remove_tree(copy);
+    return true;
+}
+} // namespace
+
+bool put_aside(const fs::path &save_dir, const std::string &folder, std::string *message)
+{
+    auto say = [&](const std::string &text) { if (message) *message = text; };
+    Entry found;
+    for (auto &e : list_saves(save_dir))
+        if (e.folder == folder) found = e;
+    if (found.folder.empty()) { say("That profile is not in the game any more."); return false; }
+    if (found.kind != Entry::PROFILE) { say("Only profiles can be put aside."); return false; }
+    if (aside_folder(folder) != folder) {
+        say("Nothing was changed: the folder " + folder + " has a name that cannot be put aside.");
+        return false;
+    }
+    fs::path root = aside_dir(save_dir);
+    std::error_code ec;
+    if (fs::exists(fs::symlink_status(root, ec)) && !real_dir(root)) {
+        say("Nothing was changed: " + pcui::path_utf8(root) + " is not a plain folder.");
+        return false;
+    }
+    fs::create_directories(root, ec);
+    if (!real_dir(root)) { say("Nothing was changed: could not make " + pcui::path_utf8(root) + "."); return false; }
+    std::string stash = folder;
+    for (int n = 2; fs::exists(fs::symlink_status(root / fs::u8path(stash), ec)) && n < 100; n++)
+        stash = folder + "~" + std::to_string(n);
+    if (fs::exists(fs::symlink_status(root / fs::u8path(stash), ec))) {
+        say("Nothing was changed: too many profiles of this name are put aside already.");
+        return false;
+    }
+    std::string why;
+    if (!move_checked(save_dir / "UserData" / kTitleId / fs::u8path(folder), root / fs::u8path(stash), root, &why)) {
+        say("Nothing was changed: " + found.name + " could not be put aside, " + why + ".");
+        return false;
+    }
+    fprintf(stderr, "[SAVES] profile %s (%s) put aside as aside/%s\n", found.name.c_str(), folder.c_str(), stash.c_str());
+    say(found.name + " is put aside. The game no longer lists it; Bring back puts it in again, as it is now.");
+    return true;
+}
+
+bool bring_back(const fs::path &save_dir, const std::string &stash, std::string *message)
+{
+    auto say = [&](const std::string &text) { if (message) *message = text; };
+    Entry found;
+    for (auto &e : list_aside(save_dir))
+        if (e.stash == stash) found = e;
+    if (found.stash.empty()) { say("That profile is not put aside any more."); return false; }
+    int in_game = count_profiles(save_dir);
+    if (in_game >= kMaxUserIds) {
+        say("Nothing was changed: the game already has " + std::to_string(in_game) + " user IDs and loads at most " +
+            std::to_string(kMaxUserIds) + ". Put one aside first, then bring " + found.name + " back.");
+        return false;
+    }
+    fs::path title = save_dir / "UserData" / kTitleId, target = title / fs::u8path(found.folder);
+    std::error_code ec;
+    if (fs::exists(fs::symlink_status(target, ec))) {
+        std::string other;
+        for (auto &e : list_saves(save_dir))
+            if (e.folder == found.folder) other = e.name;
+        say("Nothing was changed: the game has a profile named " + (other.empty() ? found.name : other) +
+            " already. Put that one aside first, then bring this one back.");
+        return false;
+    }
+    fs::create_directories(title, ec);
+    std::string why;
+    if (!move_checked(aside_dir(save_dir) / fs::u8path(stash), target, aside_dir(save_dir), &why)) {
+        say("Nothing was changed: " + found.name + " could not be brought back, " + why + ".");
+        return false;
+    }
+    fprintf(stderr, "[SAVES] profile %s brought back from aside/%s to %s\n", found.name.c_str(), stash.c_str(),
+            found.folder.c_str());
+    say(found.name + " is back in the game (" + std::to_string(in_game + 1) + " of " + std::to_string(kMaxUserIds) +
+        " user IDs).");
     return true;
 }
 
