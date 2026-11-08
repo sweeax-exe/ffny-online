@@ -84,6 +84,33 @@ The battle itself is an ordinary crew battle: the other crew accepts it, then bo
 page; its screen says which venue it is for and, at the end, what it did to the map. Sign in with Discord
 to see your crew and act; the map is visible to everyone.
 
+## Tournament matches
+
+When you play in a tournament on FFNY Online, its host makes your match (you and your opponent) on the
+tournament page. Signed in with Discord on a server that runs tournaments, the hub shows **TOURNAMENT
+MATCH** under RANKED MATCH. Choose it and you are put into your match's room, on the tournament's server;
+when no match of yours is ready, the hub says why (no match yet, another server, already played). If you
+lose the connection, choose it again: you get your place back and the set goes on.
+
+The server runs the set by the tournament's rules; the game only shows them and sends your choices:
+
+- The room shows the round, **best of N**, the score, and every game played: the stage, who won, both
+  fighters (a draw is replayed on the same stage). Room settings and the venue vote are not there.
+- **Coin toss**: before game 1 the server tosses a coin. The page says who picks first; that player
+  readies with their fighter first, and the other sees it before choosing.
+- Game 1 is on the tournament's start stage. After each game, with **loser picks** on, the loser picks
+  the next stage from the list the server offers (stick or mouse, A), before the countdown runs out (then
+  the server picks one at random). With **Dave's rule** the list leaves out the stages where the loser
+  already won in this set. The other player sees "waiting for ... to pick a stage".
+- With **winner keeps the fighter**, the winner of a game plays the same fighter in the next one: the card
+  says LOCKED, and CHOOSE FIGHTER is not offered. Stock-only tournaments do not take created fighters.
+- Before each game its stage shows for a few seconds; A starts it sooner.
+- Leaving the room (B twice) or a lost connection during a game loses that game. A player who is out of
+  the room for the tournament's DQ time forfeits the set; the page counts it down. When the set is over
+  the page shows the winner, and the result goes to the host to confirm.
+
+Older builds cannot enter a tournament room: the server asks them to update.
+
 ## Watching a match (spectator mode)
 
 In **FIND A ROOM**, RB (**WATCH**) on a room, or RB on the code screen, watches that room instead of

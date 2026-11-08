@@ -994,6 +994,7 @@ void turf_poll();
 bool turf_shown();
 void open_turf(Page back);
 bool turf_gallery(const std::string &p);
+bool tset_gallery(const std::string &p);      // tset_ui.inc
 
 enum NetplayState net_state() { return gallery_on() ? G.state : netplay_state(); }
 bool net_in_lobby() { return gallery_on() ? G.in_lobby : netplay_in_lobby() != 0; }
@@ -1493,9 +1494,13 @@ void open_servers()
 
 // ---- hub ----
 
-const int HUB_ITEMS = 9, HUB_LEAVE = 7, HUB_RANKED = 1, HUB_VOICE = 6, HUB_TURF = 8;
+const int HUB_ITEMS = 10, HUB_LEAVE = 7, HUB_RANKED = 1, HUB_VOICE = 6, HUB_TURF = 8, HUB_TSET = 9;
 // The hub's order: TURF WAR (stage 4) after MY STATS; it shows while the account service answers the map.
-const int HUB_ORDER[HUB_ITEMS] = { 0, 1, 2, 3, 4, HUB_TURF, 5, 6, 7 };
+// TOURNAMENT MATCH after RANKED MATCH; it shows while signed in on a relay that offers tournament sets.
+const int HUB_ORDER[HUB_ITEMS] = { 0, 1, HUB_TSET, 2, 3, 4, HUB_TURF, 5, 6, 7 };
+bool tset_shown();      // tset_ui.inc
+void tset_join();
+void tset_poll();
 
 // RANKED MATCH shows once a relay's STATUS says its ranked queue is on (the account service's switch,
 // server/docs/ranked-design.md); RECOMP_RANKED=1 shows it for tests (a local relay is not probed).
@@ -1750,10 +1755,10 @@ void draw_servers(ImDrawList *dl, const Frame &f, const Pad &pad)
 void draw_hub(ImDrawList *dl, const Frame &f, const Pad &pad)
 {
     static const char *const items[] = { "QUICK MATCH", "RANKED MATCH", "FIND A ROOM", "CREATE A ROOM", "MY STATS",
-                                         "PLAYERS ONLINE", "VOICE CHAT", "LEAVE", "TURF WAR" };
+                                         "PLAYERS ONLINE", "VOICE CHAT", "LEAVE", "TURF WAR", "TOURNAMENT MATCH" };
     static const char *const subs[] = { "STRAIGHT INTO A FIGHT", "ONE ON ONE FOR YOUR RATING", "OPEN ROOMS", "YOUR RULES",
                                         "RECORD AND LEADERBOARD", "WHO IS AROUND", "TALK IN ROOMS AND FIGHTS",
-                                        "BACK TO THE MENU", "CREWS FIGHT FOR NEW YORK" };
+                                        "BACK TO THE MENU", "CREWS FIGHT FOR NEW YORK", "YOUR SET IN A TOURNAMENT" };
     static const char *const descs[] = {
         "You are put into an open room of this mode, or one is opened for the next players.",
         "Classic (stock fighters) or Open (your created fighter too), best of three sets against a player of a "
@@ -1767,16 +1772,19 @@ void draw_hub(ImDrawList *dl, const Frame &f, const Pad &pad)
         "Back to the main menu. You stay reachable until you go offline in the settings.",
         "Crews hold the city's venues: who holds what, the open challenges and the season's standings. A Boss or a "
         "Lieutenant challenges; a crew battle decides.",
+        "Your tournament set, once the host has made your match: you are put into its room. The server runs the "
+        "set by the tournament's rules: the coin toss, the stage picks, Dave's rule and the winner's fighter.",
     };
     std::vector<int> quick_modes = mode_cycle();     // King of the Hill last, when the relay has it
     int mode_count = (int)quick_modes.size();
     if (S.quick_mode >= mode_count) S.quick_mode = 0;
     turf_poll();
+    tset_poll();
     int shown[HUB_ITEMS], count = 0, at = 0;
-    bool turf = turf_shown();
+    bool turf = turf_shown(), tour = tset_shown();
     for (int k = 0; k < HUB_ITEMS; k++) {
         int i = HUB_ORDER[k];
-        if ((i != HUB_RANKED || ranked_shown()) && (i != HUB_TURF || turf)) shown[count++] = i;
+        if ((i != HUB_RANKED || ranked_shown()) && (i != HUB_TURF || turf) && (i != HUB_TSET || tour)) shown[count++] = i;
     }
     for (int k = 0; k < count; k++) if (shown[k] == S.hub_sel) at = k;
     if (pad.up) at = (at + count - 1) % count;
@@ -1822,22 +1830,23 @@ void draw_hub(ImDrawList *dl, const Frame &f, const Pad &pad)
         }
     }
     {   // the items on one glass panel
-        float bottom = count > 8 ? 80 + (count - 1) * 37 + 35 : count > 7 ? 84 + (count - 1) * 41 + 39 : count > 6 ? 84 + (count - 1) * 45 + 42
-                                                                                                    : 88 + (count - 1) * 53 + 46;
+        float bottom = count > 9 ? 78 + (count - 1) * 33 + 31 : count > 8 ? 80 + (count - 1) * 37 + 35
+                     : count > 7 ? 84 + (count - 1) * 41 + 39 : count > 6 ? 84 + (count - 1) * 45 + 42 : 88 + (count - 1) * 53 + 46;
         glass(dl, f, 36, 74, 290, bottom - 74 + 10);
     }
     for (int k = 0; k < count; k++) {
         int i = shown[k];
         // eight items (ranked shown) sit closer, so the panel still ends above the hints
         // nine (ranked and turf shown): closer still, a little smaller
-        bool nine = count > 8;
-        float x = 50, y = nine ? 80 + k * 37 : count > 7 ? 84 + k * 41 : count > 6 ? 84 + k * 45 : 88 + k * 53, w = 262;
-        float h = nine ? 35 : count > 7 ? 39 : count > 6 ? 42 : 46;
+        // ten (tournament match too): closer still
+        bool nine = count > 8, ten = count > 9;
+        float x = 50, y = ten ? 78 + k * 33 : nine ? 80 + k * 37 : count > 7 ? 84 + k * 41 : count > 6 ? 84 + k * 45 : 88 + k * 53, w = 262;
+        float h = ten ? 31 : nine ? 35 : count > 7 ? 39 : count > 6 ? 42 : 46;
         if (mouse_pick(f, x, y, w, h)) S.hub_sel = i;
         bool sel = S.hub_sel == i;
         if (sel) selector(dl, f, x, y, w, h);
-        text(dl, f, g_title, nine ? 21 : 23, x + 16, y + (nine ? 1 : 3), sel ? CREAM : with_alpha(GREY, 0.85f), items[i], LEFT, 1.6f);
-        text(dl, f, g_hand, nine ? 11 : 12, x + 18, y + (nine ? 24 : 29), sel ? ORANGE : with_alpha(ORANGE, 0.45f), subs[i], LEFT, 1.0f);
+        text(dl, f, g_title, ten ? 19 : nine ? 21 : 23, x + 16, y + (nine ? 1 : 3), sel ? CREAM : with_alpha(GREY, 0.85f), items[i], LEFT, 1.6f);
+        text(dl, f, g_hand, ten ? 10 : nine ? 11 : 12, x + 18, y + (ten ? 21 : nine ? 24 : 29), sel ? ORANGE : with_alpha(ORANGE, 0.45f), subs[i], LEFT, 1.0f);
         // build 62: who searches ranked right now (every mode, each player once), at the item's right
         if (i == HUB_RANKED) {
             searching_poll();
@@ -1874,7 +1883,7 @@ void draw_hub(ImDrawList *dl, const Frame &f, const Pad &pad)
     }
 
     if (pad.a) {
-        bool needs_account = S.hub_sel == 0 || S.hub_sel == 2 || S.hub_sel == 3;
+        bool needs_account = S.hub_sel == 0 || S.hub_sel == 2 || S.hub_sel == 3 || S.hub_sel == HUB_TSET;
         if ((needs_account || S.hub_sel == 1) && outdated) {
             char line[120];
             snprintf(line, sizeof(line), "Build %d is out: close the game and update in the launcher to play online.", newer);
@@ -1931,6 +1940,7 @@ void draw_hub(ImDrawList *dl, const Frame &f, const Pad &pad)
         case 5: S.page = PLAYERS; netplay_lobby_who(); break;
         case HUB_VOICE: S.page = VOICE; S.voice_sel = 0; break;
         case HUB_TURF: open_turf(HUB); break;
+        case HUB_TSET: tset_join(); break;
         case HUB_LEAVE: break;      // handled by the caller (closes)
         }
     }
@@ -3178,9 +3188,19 @@ void draw_hill(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
     if (pad.b) { netplay_lobby_leave(); S.page = HUB; say("You left the room."); }
 }
 
+bool tset_room(const NetRoom &r, NetTSet *out);       // tset_ui.inc
+void draw_tset(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r, const NetTSet &t);
+void draw_tset_intro(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r, const NetTSet &t);
+void tset_banner(ImDrawList *dl, const Frame &f, const NetRoom &r, const NetTSet &t, float y);
+
 void draw_room(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
 {
     if (NETPLAY_IS_KOTH(r.settings.mode)) { draw_hill(dl, f, pad, r); return; }
+    // a tournament match's room: the set page (no room settings, no venue vote: the relay runs the set)
+    NetTSet tset;
+    bool tour = tset_room(r, &tset);
+    if (tour && r.phase == 0) { draw_tset(dl, f, pad, r, tset); return; }
+    if (tour && r.phase == 1) { draw_tset_intro(dl, f, pad, r, tset); return; }
     {   // a Draft set's pick and ban (ranked_ui.inc)
         NetDraft d;
         if (draft_shown(r, &d)) { draw_draft(dl, f, pad, r, d); return; }
@@ -3207,6 +3227,7 @@ void draw_room(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
     page_title(dl, f, r.settings.name);
     image_fit(dl, f, tex(mode_logo(r.settings.mode)), 360, 22, 220, 30);
     if (ranked) ranked_banner(dl, f, r, ri, 50);     // a little higher: the cards' rank patches under it
+    else if (tour) tset_banner(dl, f, r, tset, 50);
     char code[32];
     snprintf(code, sizeof(code), "CODE  %s", r.code);
     text(dl, f, g_title, 14, 590, 58, ORANGE, code, RIGHT);
@@ -3497,7 +3518,7 @@ void draw_room(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
                                                               : "Ready up: when everyone is, the venue vote starts.", CENTER, 0.8f);
     hx += hint(dl, f, hx, hy, "a", ready ? "NOT READY" : "READY");
     if (!ready) hx += hint(dl, f, hx, hy, "x", "CHOOSE FIGHTER");
-    if (ranked) host = false;       // a ranked room's settings are the set's
+    if (ranked || tour) host = false;       // a ranked or tournament room's settings are the set's
     if (host && !ready) hx += hint(dl, f, hx, hy, "y", "ROOM SETTINGS");
     hx += hint(dl, f, hx, hy, "rb", "VOICE");
     hint(dl, f, hx, hy, "b", ranked ? ranked_leave_hint(ri) : "LEAVE ROOM");
@@ -3976,6 +3997,7 @@ NetRoom sample_room(int mode, int max, int count)
 #include "crew_ui.inc"
 #include "locker_ui.inc"
 #include "turf_ui.inc"
+#include "tset_ui.inc"
 
 // Which page the gallery shows now, and the sample it shows with it.
 void gallery_step()
@@ -4036,7 +4058,10 @@ void gallery_step()
                                          // social stage 3: crew battles
                                          "crew-battle", "crew-battle-up", "crew-battle-forming", "crew-battle-over",
                                          // social stage 4: Turf War
-                                         "hub-turf", "turf", "turf-open", "turf-claim", "turf-member", "turf-why", "turf-season" };
+                                         "hub-turf", "turf", "turf-open", "turf-claim", "turf-member", "turf-why", "turf-season",
+                                         // tournament sets (tset_ui.inc)
+                                         "hub-tset", "tset-coin", "tset-select", "tset-why", "tset-pick", "tset-pick-wait",
+                                         "tset-intro", "tset-waiting", "tset-over" };
     const int count = (int)(sizeof(pages) / sizeof(pages[0]));
     static unsigned long long start;
     static int ms;
@@ -4170,6 +4195,7 @@ void gallery_step()
         static const std::string base_stats = G.stats;
         G.stats = base_stats;
         ranked_stats_tab() = 0;
+        if (tset_gallery(p)) return;
         if (turf_gallery(p)) return;
         if (locker_gallery(p)) return;
         if (ranked_gallery(p)) return;
@@ -4690,6 +4716,11 @@ const char *shot_label()
         NetCrew cb;
         lobby_room(&r);
         if (crew_room(r, &cb)) return cb.state == NETCREW_OVER ? "crewbattle-over" : cb.state == NETCREW_FORMING ? "crewbattle-forming" : "crewbattle";
+        NetTSet ts;     // a tournament set's room: the set page by its state
+        if (tset_room(r, &ts)) {
+            static const char *const st[] = { "tset-waiting", "tset-select", "tset-pick", "tset-playing", "tset-over", "tset" };
+            return r.phase == 1 ? "tset-intro" : st[ts.state < 6 ? ts.state : 5];
+        }
         if (S.page == TURF && !r.in_room) return TW.picker ? "turf-claim" : TW.tab == 1 ? "turf-season" : "turf";    // stage 4
     }
     return gallery_on() ? G.page : g_versus_up ? "versus" : nullptr;

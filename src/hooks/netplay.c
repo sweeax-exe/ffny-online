@@ -96,6 +96,11 @@ void netplay_lobby_leave(void) {}
 void netplay_lobby_yield(void) {}
 void netplay_lobby_crew_join(unsigned b) { (void)b; }
 int netplay_lobby_crew(NetCrew *o) { memset(o, 0, sizeof(*o)); return 0; }
+void netplay_lobby_tset_join(unsigned m) { (void)m; }
+int netplay_lobby_tset(NetTSet *o) { memset(o, 0, sizeof(*o)); return 0; }
+void netplay_lobby_tset_pick(int v) { (void)v; }
+unsigned netplay_lobby_tset_refusal(char *w, int n) { if (w && n > 0) w[0] = 0; return 0; }
+int netplay_lobby_tset_joining(void) { return 0; }
 void netplay_lobby_room(NetRoom *o) { memset(o, 0, sizeof(*o)); }
 void netplay_lobby_ranked(int f) { (void)f; }
 void netplay_lobby_ranked_ex(int f, unsigned m, int p) { (void)f; (void)m; (void)p; }
@@ -219,6 +224,16 @@ void netplay_crowd_update(void) { sub_00081170(); }
 #define T_CREWJOIN    0x34      /* -> token 8, u32 battle */
 #define T_CREW        0x35      /* <- u32 battle, u8 format, state, winner, u16 secs, u8 watchers, 2 x side */
 #define CREW_RETRY_MS 2000
+/* Tournament sets (relays answering CAPS bit 12, with an account service): TJOIN enters this account's
+ * tournament match room once the relay knows the account (IDENT); TSET is the set after every ROOM of
+ * the room (or alone, state 5, a refusal); TPICK is the loser's stage. The relay decides every step. */
+#define T_TJOIN       0x37      /* -> token 8, u32 match (0: my ready match) */
+#define T_TSET        0x38      /* <- u32 match, u8 best_of, flags, state, game, wins[2], first, order, picker, u16 secs,
+                                 *    u8 venue, locks[2], winner, n, choices[n], g, g x {venue, winner, f0, f1, how},
+                                 *    str8 round, str8 why */
+#define T_TPICK       0x39      /* -> token 8, u8 venue */
+#define TSET_RETRY_MS 2000      /* TJOIN again while no answer came (the relay asks the account service) */
+#define TSET_TRIES    15
 #define IDENT_OK      0
 #define IDENT_REFUSED 1
 #define IDENT_NO_SERVICE 2
@@ -243,6 +258,7 @@ void netplay_crowd_update(void) { sub_00081170(); }
 #define CAPS_SPEC_LATE 2048u    /* client: a spectator that comes while the match runs watches its next fight (T_WATCHLATE) */
 #define CAPS_CHAT     128u      /* room chat, both ways (T_IDENT, T_CHAT); only a client announcing it gets T_CHAT */
 #define CAPS_CREW     256u      /* crew battles, both ways (T_CREWJOIN, T_CREW); only a client announcing it gets T_CREW */
+#define CAPS_TSET     4096u     /* tournament sets, both ways (T_TJOIN, T_TSET, T_TPICK); only with an account service */
 #define CAPS_RB_MODES 512u      /* rollback everywhere (build 52), both ways: the answer carries a u32 of the
                                  * NETPLAY_RB_* modes in which rollback is mandatory (0: the setting decides) */
 #define CAPS_RB_PING  1024u     /* the rollback ping limit (build 54), both ways, with CAPS_RB_MODES: the answer
@@ -609,6 +625,15 @@ static struct {
     ULONGLONG crew_sent;
     NetCrew crew;
     char crew_room[7];
+    /* tournament sets (T_TJOIN, T_TSET, T_TPICK): the match to enter (tset_wanting), the last TSET of this
+     * PC's room, and the last refusal's sentence */
+    unsigned tset_want;
+    int tset_wanting, tset_tries;
+    ULONGLONG tset_sent;
+    NetTSet tset;
+    char tset_room[7];
+    char tset_why[65];
+    unsigned tset_why_seq;
     /* the room this PC just left (LEAVE): a ROOM of it that was already on its way (the answer to the
      * match end's OVER, another member's change) must not bring it back (on_room, LEFT_ROOM_MS) */
     char left_room[7];
@@ -889,7 +914,8 @@ void netplay_results_funccall(const char *text)
         /* a ranked set's game: the Rematch menu comes next; either choice, or none, goes back to the room */
         N.set_menu = GetTickCount64();
         fprintf(stderr, "[NETPLAY] ranked set: on the results' Rematch menu; back to the room for the next game\n");
-        toast(SET_MENU_MS, "Ranked set: the next game starts from the room.");
+        toast(SET_MENU_MS, "%s set: the next game starts from the room.",
+              N.tset.match && !memcmp(N.tset_room, N.roomv.code, 6) ? "Tournament" : "Ranked");
     }
     if (strncmp(text, "Game.GetHeroFighterNumber(", 26) || !N.lobby || !N.match_live || N.watching ||
         MEM32(G_MATCH_PHASE) < 3u)
@@ -2432,6 +2458,81 @@ static void on_crew(const uint8_t *b, int len)
     LeaveCriticalSection(&g_cs);
 }
 
+/* TSET: the tournament set of this PC's room, after every ROOM of it; state 5 alone: a TJOIN refused. */
+static void on_tset(const uint8_t *b, int len)
+{
+    Reader r = { b, len, 0, 0 };
+    NetTSet t;
+    int i, n;
+    memset(&t, 0, sizeof(t));
+    rdbytes(&r, &t.match, 4);
+    t.match = get32((const uint8_t *)&t.match);
+    t.best_of = rd8(&r);
+    t.flags = rd8(&r);
+    t.state = rd8(&r);
+    t.game = rd8(&r);
+    t.wins[0] = rd8(&r);
+    t.wins[1] = rd8(&r);
+    t.first = rd8(&r);
+    t.order = rd8(&r);
+    t.picker = rd8(&r);
+    t.secs = rd8(&r); t.secs |= rd8(&r) << 8;
+    t.venue = rd8(&r);
+    t.locks[0] = rd8(&r);
+    t.locks[1] = rd8(&r);
+    t.winner = rd8(&r);
+    n = rd8(&r);
+    if (n > NETPLAY_TSET_CHOICES) r.bad = 1;
+    for (i = 0; i < n && !r.bad; i++) t.choices[t.choice_count++] = rd8(&r);
+    n = rd8(&r);
+    if (n > NETPLAY_TSET_GAMES) r.bad = 1;
+    for (i = 0; i < n && !r.bad; i++) {
+        NetTSetGame *g = &t.games[t.game_count++];
+        g->venue = rd8(&r);
+        g->winner = rd8(&r);
+        g->fighters[0] = rd8(&r);
+        g->fighters[1] = rd8(&r);
+        g->how = rd8(&r);
+    }
+    rdstr(&r, t.round, sizeof(t.round));
+    rdstr(&r, t.why, sizeof(t.why));
+    if (r.bad || t.state > NETTSET_REFUSED) return;
+    t.received = GetTickCount64();
+    EnterCriticalSection(&g_cs);
+    if (t.state == NETTSET_REFUSED) {
+        /* the relay (or the account service) refused the TJOIN: said once, no more TJOIN */
+        snprintf(N.tset_why, sizeof(N.tset_why), "%s", t.why[0] ? t.why : "No tournament match is ready for you.");
+        N.tset_why_seq++;
+        N.tset_wanting = 0;
+        LeaveCriticalSection(&g_cs);
+        fprintf(stderr, "[NETPLAY] tournament match %u: refused (%s)\n", t.match, t.why[0] ? t.why : "no reason given");
+        return;
+    }
+    if (!N.roomv.in_room) { LeaveCriticalSection(&g_cs); return; }
+    if (memcmp(N.tset_room, N.roomv.code, 7) || N.tset.state != t.state || N.tset.game != t.game ||
+        N.tset.wins[0] != t.wins[0] || N.tset.wins[1] != t.wins[1] || N.tset.picker != t.picker ||
+        N.tset.venue != t.venue || N.tset.order != t.order || strcmp(N.tset.why, t.why)) {
+        char list[4 * NETPLAY_TSET_CHOICES + 1] = "";
+        int at = 0;
+        for (i = 0; i < t.choice_count && at < (int)sizeof(list) - 5; i++)
+            at += snprintf(list + at, sizeof(list) - (size_t)at, "%s%d", i ? "," : "", t.choices[i]);
+        fprintf(stderr, "[NETPLAY] tournament set %u: %s, best of %d, state %d, game %d, score %d-%d, first %d, order %d, "
+                "picker %d, venue %d, locks %d/%d, winner %d, choices [%s], games %d, why \"%s\"\n",
+                t.match, t.round, t.best_of, t.state, t.game, t.wins[0], t.wins[1], t.first, t.order, t.picker, t.venue,
+                t.locks[0], t.locks[1], t.winner, list, t.game_count, t.why);
+    }
+    /* this PC's RESULT got through: the game counted (or the set ended) */
+    if (N.set_match && N.koth_winner >= 0 && (t.game != N.set_game || t.state == NETTSET_OVER)) {
+        fprintf(stderr, "[NETPLAY] tournament set: the result is in\n");
+        N.koth_winner = -1;
+    }
+    N.tset = t;
+    memcpy(N.tset_room, N.roomv.code, 7);
+    if (N.tset_wanting && (!N.tset_want || N.tset_want == t.match)) N.tset_wanting = 0;     /* in: no more TJOIN */
+    N.roomv.version++;
+    LeaveCriticalSection(&g_cs);
+}
+
 static void on_rankinfo(const uint8_t *b, int len)
 {
     NetRankInfo ri;
@@ -3024,6 +3125,11 @@ static void on_start_as(const uint8_t *b, int len, int watching)
     /* a ranked set's game: its RESULT goes to the relay too (the set's score, the loser's venue pick) */
     N.set_match = !watching && !N.koth_match && N.rank.valid && N.rank.has_set && !memcmp(N.rank_room, N.roomv.code, 6);
     N.set_game = N.rank.game;
+    /* a tournament set's game: its RESULT goes to the relay too (the score, the loser's stage pick) */
+    if (!watching && !N.koth_match && N.tset.match && !memcmp(N.tset_room, N.roomv.code, 6) && N.tset.state != NETTSET_OVER) {
+        N.set_match = 1;
+        N.set_game = N.tset.game;
+    }
     N.koth_fights = N.roomv.hill.fights;
     N.koth_winner = -1;
     N.koth_fought = N.koth_done = 0;
@@ -3273,6 +3379,7 @@ static void on_packet(const uint8_t *b, int len)
                         N.relay_caps & CAPS_CREATED ? " (created fighters allowed)" : "",
                         N.relay_caps & CAPS_SPECTATE ? " (spectators)" : "",
                         N.relay_caps & CAPS_CHAT ? " (room chat)" : "", N.relay_caps & CAPS_CREW ? " (crew battles)" : "");
+            if (N.relay_caps & CAPS_TSET) fprintf(stderr, "[NETPLAY] the relay offers tournament sets\n");
             rollback_server_allows((N.relay_caps & CAPS_ROLLBACK) != 0);    /* for the next start's audio arena */
             {   /* rollback everywhere (build 52): the mode mask after the caps word; the relay sends the answer
                  * again before every START, so a change of its switch counts from the next match */
@@ -3308,6 +3415,9 @@ static void on_packet(const uint8_t *b, int len)
         break;
     case T_CREW:        /* a crew battle's state (only to a client that announced CAPS_CREW) */
         if (N.lobby) on_crew(b + 6, len - 6);
+        break;
+    case T_TSET:        /* a tournament set's state, or a TJOIN refused (only to a client that announced CAPS_TSET) */
+        if (N.lobby) on_tset(b + 6, len - 6);
         break;
     case T_PC:          /* the relay took this PC's fingerprint (build 46 relays) */
         if (N.lobby && len >= 7 && !N.pc_done) {
@@ -3377,6 +3487,7 @@ static void on_packet(const uint8_t *b, int len)
                 "Your created fighter has stats the game does not allow; it can't be used online." };
             int code = b[6];
             const char *text = code >= 1 && code <= 12 ? why[code] : "The server refused the request.";
+            if (code == 8 && N.pend_len && N.pend[5] == T_TPICK) text = "That stage can't be picked now.";
             if (N.lobby && code == 12) {
                 /* build 46 relays: this player's created fighter has stats Story mode never gives (a
                  * converted or edited save); the relay did not keep it (its empty RECORD already stopped
@@ -3604,7 +3715,7 @@ static DWORD WINAPI net_thread(LPVOID unused)
                 int n = header(cb, T_CAPS);
                 memcpy(cb + n, N.token, 8); n += 8;
                 put32(cb + n, CAPS_KOTH | CAPS_CREATED | CAPS_SPECTATE | CAPS_STATS_ERR | CAPS_SPEC_REMATCH | CAPS_CHAT |
-                              CAPS_CREW | CAPS_RB_MODES | CAPS_RB_PING | CAPS_SPEC_LATE); n += 4;
+                              CAPS_CREW | CAPS_RB_MODES | CAPS_RB_PING | CAPS_SPEC_LATE | CAPS_TSET); n += 4;
                 send_raw(cb, n);
             } else {
                 N.relay_caps = 0;
@@ -3626,6 +3737,38 @@ static DWORD WINAPI net_thread(LPVOID unused)
             } else {
                 fprintf(stderr, "[NETPLAY] crew battle %u: the relay did not seat this PC\n", N.crew_want);
                 N.crew_want = 0;
+            }
+        }
+        /* tournament sets: TJOIN once the relay knows this account (IDENT), every TSET_RETRY_MS until a TSET
+         * of the room or a refusal comes (the relay asks the account service first: no immediate answer) */
+        if (N.lobby && N.have_token && N.state == NETPLAY_LOBBY && N.tset_wanting && N.relay_caps >= 0 &&
+            !N.roomv.in_room && now - N.tset_sent >= TSET_RETRY_MS) {
+            N.tset_sent = now;
+            if (!(N.relay_caps & CAPS_TSET)) {
+                EnterCriticalSection(&g_cs);
+                snprintf(N.tset_why, sizeof(N.tset_why), "This server has no tournament matches.");
+                N.tset_why_seq++;
+                N.tset_wanting = 0;
+                LeaveCriticalSection(&g_cs);
+                fprintf(stderr, "[NETPLAY] tournament match %u: this relay has no tournament sets\n", N.tset_want);
+            } else if (N.tset_tries++ >= TSET_TRIES) {
+                EnterCriticalSection(&g_cs);
+                snprintf(N.tset_why, sizeof(N.tset_why), "%s", N.chat_ident == IDENT_OK || N.chat_ident == IDENT_MUTED ?
+                         "The server did not answer. Try again." : "The server could not check your sign-in. Try again.");
+                N.tset_why_seq++;
+                N.tset_wanting = 0;
+                LeaveCriticalSection(&g_cs);
+                fprintf(stderr, "[NETPLAY] tournament match %u: the relay did not seat this PC (ident %d)\n", N.tset_want,
+                        N.chat_ident);
+            } else if (N.chat_ident == IDENT_OK || N.chat_ident == IDENT_MUTED) {
+                uint8_t tb[6 + 8 + 4];
+                int n = header(tb, T_TJOIN);
+                memcpy(tb + n, N.token, 8); n += 8;
+                put32(tb + n, N.tset_want); n += 4;
+                N.left_room[0] = 0;     /* into a room again (maybe the one just left): its ROOM counts */
+                if (N.tset_tries <= 1 || N.tset_tries % 5 == 0)
+                    fprintf(stderr, "[NETPLAY] tournament match %u: joining its room\n", N.tset_want);
+                send_raw(tb, n);
             }
         }
         /* One session per PC (build 46): this PC's fingerprint, until the relay answers (a relay before
@@ -3879,6 +4022,7 @@ static int start(const char *server, const char *name, int creating, const char 
     N.start_deferred = 0;
     N.koth_results = 0;
     memset(&N.rank, 0, sizeof(N.rank));
+    memset(&N.tset, 0, sizeof(N.tset));
     reset_remote_pads();
     EnterCriticalSection(&g_cs);
     memset(N.in_tag, 0, sizeof(N.in_tag));
@@ -4691,6 +4835,51 @@ int netplay_lobby_crew(NetCrew *out)
     return ok;
 }
 
+void netplay_lobby_tset_join(unsigned match)
+{
+    InitOnceExecuteOnce(&g_once, init_once, NULL, NULL);
+    EnterCriticalSection(&g_cs);
+    N.tset_want = match;
+    N.tset_wanting = 1;
+    N.tset_tries = 0;
+    N.tset_sent = 0;
+    N.roomv.error[0] = 0;
+    LeaveCriticalSection(&g_cs);
+    fprintf(stderr, "[NETPLAY] tournament match %u: asked to join\n", match);
+}
+
+int netplay_lobby_tset(NetTSet *out)
+{
+    int ok;
+    InitOnceExecuteOnce(&g_once, init_once, NULL, NULL);
+    EnterCriticalSection(&g_cs);
+    ok = N.roomv.in_room && N.tset.match && !memcmp(N.tset_room, N.roomv.code, 7);
+    if (ok) *out = N.tset;
+    else memset(out, 0, sizeof(*out));
+    LeaveCriticalSection(&g_cs);
+    return ok;
+}
+
+void netplay_lobby_tset_pick(int venue)
+{
+    uint8_t v = (uint8_t)venue;
+    fprintf(stderr, "[NETPLAY] tournament set: picking venue %d\n", venue);
+    request(T_TPICK, &v, 1);
+}
+
+unsigned netplay_lobby_tset_refusal(char *why, int size)
+{
+    unsigned seq;
+    InitOnceExecuteOnce(&g_once, init_once, NULL, NULL);
+    EnterCriticalSection(&g_cs);
+    if (why && size > 0) snprintf(why, (size_t)size, "%s", N.tset_why);
+    seq = N.tset_why_seq;
+    LeaveCriticalSection(&g_cs);
+    return seq;
+}
+
+int netplay_lobby_tset_joining(void) { return N.tset_wanting != 0; }
+
 void netplay_lobby_leave(void)
 {
     EnterCriticalSection(&g_cs);
@@ -4699,6 +4888,8 @@ void netplay_lobby_leave(void)
         N.left_at = GetTickCount64();
     }
     N.crew_want = 0;                /* a crew battle not entered yet: no more CREWJOIN */
+    N.tset_wanting = 0;             /* a tournament match not entered yet: no more TJOIN */
+    memset(&N.tset, 0, sizeof(N.tset));
     memset(&N.roomv, 0, sizeof(N.roomv));
     N.roomv.version = (unsigned)GetTickCount64();
     N.room[0] = 0;
@@ -5221,7 +5412,7 @@ static DWORD WINAPI autostart_thread(LPVOID unused)
         }
         return 0;
     }
-    if (!strcmp(mode, "quick") || !strcmp(mode, "ranked") || !strcmp(mode, "crew")) {
+    if (!strcmp(mode, "quick") || !strcmp(mode, "ranked") || !strcmp(mode, "crew") || !strcmp(mode, "tset")) {
         const char *f = getenv("RECOMP_NETPLAY_FIGHTER"), *name = getenv("RECOMP_NETPLAY_NAME");
         const char *delay = getenv("RECOMP_NETPLAY_READY_DELAY_MS");
         /* RECOMP_TEST_READY_PLAYERS=<n> (tests of three or four copies): ready (or, on the hill, answer
@@ -5347,6 +5538,26 @@ static DWORD WINAPI autostart_thread(LPVOID unused)
             for (i = 0; i < 6000 && !N.stop && !(battle = social_battle_ready(region, sizeof(region))); i++) Sleep(100);
             fprintf(stderr, "[NETPLAY] tests: crew battle %lld (%s)%s\n", battle, region, battle ? "; joining" : ": none came");
             if (battle) netplay_lobby_crew_join((unsigned)battle);
+        } else if (!strcmp(mode, "tset")) {
+            /* RECOMP_NETPLAY=tset (tests, tournament sets): TOURNAMENT MATCH as the hub's entry does it (TJOIN
+             * RECOMP_TEST_TSET_MATCH, default 0: this account's ready match); again after a refusal, every 5 s
+             * for up to 2 minutes (the host may make the match after the copies are up) */
+            const char *tm = getenv("RECOMP_TEST_TSET_MATCH");
+            unsigned want = tm && *tm ? (unsigned)atoi(tm) : 0, seen = netplay_lobby_tset_refusal(NULL, 0);
+            NetRoom tr;
+            for (i = 0; i < 24 && !N.stop; i++) {
+                int k;
+                netplay_lobby_tset_join(want);
+                for (k = 0; k < 50 && netplay_lobby_tset_joining(); k++) Sleep(100);
+                netplay_lobby_room(&tr);
+                if (tr.in_room) break;
+                if (netplay_lobby_tset_refusal(NULL, 0) != seen) {
+                    char why[80];
+                    seen = netplay_lobby_tset_refusal(why, sizeof(why));
+                    fprintf(stderr, "[NETPLAY] tests: tournament match refused (%s); again in 5 s\n", why);
+                }
+                Sleep(5000);
+            }
         } else {
             netplay_lobby_quick(qmode, qmax);
         }
@@ -5499,6 +5710,46 @@ static DWORD WINAPI autostart_thread(LPVOID unused)
                     }
                 }
             }
+            if (!strcmp(mode, "tset") && r.in_room && !N.match_live) {
+                /* tests, tournament sets: the loser's stage pick (RECOMP_TEST_TSET_PICK="7,8": the first of these
+                 * the relay offers, else its first choice) two seconds after the pick opened; nothing after
+                 * the set is over (the relay refuses READY then) */
+                static unsigned pick_key, over_told;
+                static ULONGLONG pick_at;
+                NetTSet ts;
+                if (netplay_lobby_tset(&ts)) {
+                    unsigned key = ts.match * 64u + (unsigned)ts.game;
+                    if (ts.state == NETTSET_OVER) {
+                        if (over_told != ts.match) {
+                            fprintf(stderr, "[NETPLAY] tests: tournament set %u over, winner slot %d, %d-%d\n", ts.match,
+                                    ts.winner, ts.wins[0], ts.wins[1]);
+                            over_told = ts.match;
+                        }
+                        Sleep(100);
+                        continue;
+                    }
+                    if (ts.state == NETTSET_PICK && ts.picker == r.you && ts.choice_count && r.phase == 0) {
+                        if (pick_key != key) { pick_key = key; pick_at = GetTickCount64(); }
+                        if (pick_at && GetTickCount64() - pick_at >= 2000) {
+                            const char *tp = getenv("RECOMP_TEST_TSET_PICK");
+                            int v = ts.choices[0], k;
+                            for (const char *c = tp; c && *c; ) {
+                                int want = atoi(c), hit = 0;
+                                for (k = 0; k < ts.choice_count; k++) if (ts.choices[k] == want) hit = 1;
+                                if (hit) { v = want; break; }
+                                while (*c && *c != ',') c++;
+                                if (*c == ',') c++;
+                            }
+                            fprintf(stderr, "[NETPLAY] tests: tournament set game %d: picking venue %d of %d choices\n",
+                                    ts.game, v, ts.choice_count);
+                            netplay_lobby_tset_pick(v);
+                            pick_at = 0;
+                        }
+                        Sleep(100);
+                        continue;
+                    }
+                }
+            }
             if (r.in_room && r.phase == 0 && !N.match_live) {
                 /* Ready again whenever this player shows as not ready: after a
                    match, or after a scripted press toggled it in the overlay. */
@@ -5553,7 +5804,7 @@ void netplay_autostart(void)
     HANDLE t;
     if (InterlockedExchange(&once, 1)) return;
     if (!mode || !server || (strcmp(mode, "host") && strcmp(mode, "join") && strcmp(mode, "quick") && strcmp(mode, "ranked") && strcmp(mode, "lobby") &&
-                               strcmp(mode, "spectate") && strcmp(mode, "crew"))) return;
+                               strcmp(mode, "spectate") && strcmp(mode, "crew") && strcmp(mode, "tset"))) return;
     t = CreateThread(NULL, 0, autostart_thread, NULL, 0, NULL);
     if (t) CloseHandle(t);
 }

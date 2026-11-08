@@ -10,6 +10,7 @@ dict whose 'ok' is False on any failure; dj.py exits non-zero then. format_resul
 one line per match, so a result stays under ~40 lines.
 """
 import glob
+import html.parser
 import importlib.util
 import json
 import os
@@ -902,6 +903,283 @@ def crew_battle(timeout=None, relay_port=27900, lock_timeout=None, log=None, kee
         result["faults"] = {i: _faults(t) for i, t in texts.items() if _faults(t)}
         result["logs"] = [_relpath(c.log) for c in s.copies.values()]
         result["ok"] = stop == "done" and all(checks.values()) and not result["faults"]
+    finally:
+        _finish(s, result, t0)
+    return result
+
+
+# ---- tournament set ---------------------------------------------------------------------------------
+
+class _FormReader(html.parser.HTMLParser):
+    """The forms of a page as a browser sees them: action, and each field's name and value (checked
+    boxes, selected options, text), plus every select's options (value, text)."""
+
+    def __init__(self):
+        super().__init__()
+        self.forms, self._form, self._select, self._option, self._text = [], None, None, None, None
+
+    def handle_starttag(self, tag, attrs):
+        a = dict(attrs)
+        if tag == "form":
+            self._form = {"action": a.get("action") or "", "fields": [], "options": {}}
+            self.forms.append(self._form)
+        if self._form is None:
+            return
+        if tag == "input" and a.get("name"):
+            kind = (a.get("type") or "text").lower()
+            if kind in ("checkbox", "radio") and "checked" not in a:
+                return
+            if kind in ("submit", "button", "image", "file"):
+                return
+            self._form["fields"].append((a["name"], a.get("value") or ("on" if kind == "checkbox" else "")))
+        elif tag == "select" and a.get("name"):
+            self._select = {"name": a["name"], "chosen": None, "first": None}
+            self._form["options"][a["name"]] = []
+        elif tag == "option" and self._select is not None:
+            self._option = [a.get("value") or "", "", "selected" in a]
+        elif tag == "textarea" and a.get("name"):
+            self._text = [a["name"], ""]
+
+    def handle_data(self, data):
+        if self._option is not None:
+            self._option[1] += data
+        if self._text is not None:
+            self._text[1] += data
+
+    def handle_endtag(self, tag):
+        if tag == "option" and self._option is not None and self._select is not None:
+            v, t, sel = self._option
+            self._form["options"][self._select["name"]].append((v, t.strip()))
+            if self._select["first"] is None:
+                self._select["first"] = v
+            if sel:
+                self._select["chosen"] = v
+            self._option = None
+        elif tag == "select" and self._select is not None and self._form is not None:
+            v = self._select["chosen"] if self._select["chosen"] is not None else self._select["first"]
+            if v is not None:
+                self._form["fields"].append((self._select["name"], v))
+            self._select = None
+        elif tag == "textarea" and self._text is not None and self._form is not None:
+            self._form["fields"].append(tuple(self._text))
+            self._text = None
+        elif tag == "form":
+            self._form = None
+
+
+def _web(base, method, path, cookie, form=None):
+    """(status, location, text) of a request to the account service's pages as a signed-in browser
+    (the game's session token as the session cookie; no redirects followed)."""
+    import urllib.error
+    import urllib.parse
+    import urllib.request
+
+    class NoRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, *a, **k):
+            return None
+    data = urllib.parse.urlencode(form, doseq=True).encode() if form is not None else None
+    req = urllib.request.Request(base + path, method=method, data=data)
+    req.add_header("Cookie", "ffny_session=" + cookie)
+    if data is not None:
+        req.add_header("Content-Type", "application/x-www-form-urlencoded")
+        req.add_header("Origin", "null")
+    opener = urllib.request.build_opener(NoRedirect)
+    try:
+        with opener.open(req, timeout=10) as r:
+            return r.status, r.headers.get("Location") or "", r.read().decode("utf-8", "replace")
+    except urllib.error.HTTPError as e:
+        return e.code, e.headers.get("Location") or "", e.read().decode("utf-8", "replace")
+
+
+def _web_form(base, cookie, page, action_end, set_fields=None):
+    """Posts the form on `page` whose action ends with action_end, as a browser would (its own fields,
+    its CSRF token among them), with set_fields replacing values. Returns (status, location, text, form)."""
+    st, _, text = _web(base, "GET", page, cookie)
+    rd = _FormReader()
+    rd.feed(text)
+    form = next((f for f in rd.forms if f["action"].endswith(action_end)), None)
+    if not form:
+        return st, "", "no form %s on %s (%d)" % (action_end, page, st), None
+    fields = [(k, v) for k, v in form["fields"] if k not in (set_fields or {})]
+    for k, v in (set_fields or {}).items():
+        for one in (v if isinstance(v, list) else [v]):
+            fields.append((k, one))
+    st, loc, text = _web(base, "POST", form["action"], cookie, fields)
+    return st, loc, text, form
+
+
+TSET_PLAYERS = ["Copy 0", "Copy 1"]
+
+
+def tset(timeout=None, relay_port=27900, lock_timeout=None, log=None, keep_roots=False, extra_env=None, out_dir=None,
+         fast_ko=600, rollback="off", rollback_modes=None, picks="7;8"):
+    """A tournament set end to end: a local account service (tournaments on) and a relay that asks it; the
+    host (test account "Host", the service's admin) makes a tournament with the TYF preset through its pages,
+    both players sign up and the host makes their match (best of 3). Both copies enter it from the game
+    (RECOMP_NETPLAY=tset: TJOIN 0), play with knockouts at a step that alternate the winner (slot 0, 1, 0),
+    and the game-2 and game-3 losers pick their stage (RECOMP_TEST_TSET_PICK, `picks` per copy). Checked:
+    both seated with TSET, a TPICK taken, Dave's rule (game 3's choices lack the stage its picker won), the
+    set over 2-1 in both games, and the result reported on the service."""
+    t0 = time.time()
+    timeout = timeout or 900
+    s = copies.Session("tset", lock_timeout=lock_timeout, log=log, keep_roots=keep_roots).open()
+    result = {"scenario": "tset", "ok": False}
+    shots = {}
+    try:
+        h = harness()
+        acc_port = relay_port + 100
+        base = "http://127.0.0.1:%d" % acc_port
+        names = ["Host"] + TSET_PLAYERS
+        tokens = s.accounts(acc_port, names, extra=["-tournaments", "-social"])
+        s.relay(relay_port, rollback=(rollback != "off"),
+                extra=["-accounts-internal", "http://127.0.0.1:%d" % (acc_port + 1)] + _rb_relay_extra(rollback, rollback_modes))
+        steps = {}
+        # the host's tournament: the TYF preset's form, a name and a start in two hours
+        import datetime
+        start = (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M")
+        st, loc, text, form = _web_form(base, tokens["Host"], "/tournaments/new?preset=tyf", "/tournaments/new",
+                                        {"name": "Local Test Cup", "start": start, "region": "eu"})
+        steps["create"] = "%d %s" % (st, loc or text[:200])
+        tid = loc.rsplit("/", 1)[-1] if st == 303 and loc.startswith("/tournaments/") else ""
+        if not tid.isdigit():
+            raise RuntimeError("the tournament was not made: " + steps["create"])
+        page = "/tournaments/" + tid
+        for n in TSET_PLAYERS:
+            st, loc, text, _ = _web_form(base, tokens[n], page, "/signup")
+            steps["signup " + n] = "%d %s" % (st, loc or text[:160])
+        # the host accepts both sign-ups (the preset's sign-up asks the host), then makes the match
+        st, _, text = _web(base, "GET", page, tokens["Host"])
+        rd = _FormReader()
+        rd.feed(text)
+        for act in sorted({f["action"] for f in rd.forms if "/entrants/" in f["action"]}):
+            st, loc, text, _ = _web_form(base, tokens["Host"], page, act, {"status": "accepted"})
+            steps["accept " + act.rsplit("/", 1)[-1]] = "%d %s" % (st, loc or text[:120])
+        # the host's match form: the two players by name, round, kind set
+        st, _, text = _web(base, "GET", page, tokens["Host"])
+        rd = _FormReader()
+        rd.feed(text)
+        mf = next((f for f in rd.forms if f["action"].endswith("/matches")), None)
+        ids = {}
+        for opt in (mf or {}).get("options", {}).get("p1", []):
+            ids[opt[1]] = opt[0]
+        p1 = next((v for k, v in ids.items() if TSET_PLAYERS[0] in k), None)
+        p2 = next((v for k, v in ids.items() if TSET_PLAYERS[1] in k), None)
+        st, loc, text, _ = _web_form(base, tokens["Host"], page, "/matches",
+                                     {"p1": p1 or "", "p2": p2 or "", "round": "Winners round 1", "kind": "set"})
+        steps["match"] = "%d %s" % (st, loc or text[:160])
+        result["setup"] = steps
+        if "error=" in loc or st != 303:
+            raise RuntimeError("the match was not made: " + steps["match"])
+
+        watch = WATCH + ["[NETPLAY] tournament", "over, winner slot"]
+        pick_list = (picks or "7;8").split(";")
+        for i in range(2):
+            shots[i] = os.path.join(s.dir, "shots%d" % i)
+            os.makedirs(shots[i], exist_ok=True)
+            env = dict(VIRTUAL_PAD_ENV)
+            env.update({
+                "RECOMP_INPUT_VIRTUAL_PADS": "1",
+                "RECOMP_NETPLAY": "tset", "RECOMP_NETPLAY_SERVER": "127.0.0.1:%d" % relay_port,
+                "RECOMP_NETPLAY_SERVER_EU": "127.0.0.1:%d" % relay_port,
+                "RECOMP_NETPLAY_FIGHTER": str([55, 22][i]),
+                "RECOMP_NETPLAY_NAME": TSET_PLAYERS[i],
+                "RECOMP_ROLLBACK": _rb_env(rollback),
+                "RECOMP_SCRIPT_ANCHOR": TITLE_ANCHOR,
+                "RECOMP_PAD_SCRIPT": h.build_pad_script(["getscreeninfo(intmain/mainmenu=lt@0.5"], online_tail(3, 2, i == 1)),
+                "RECOMP_ACCOUNT_SERVER": "127.0.0.1:%d" % acc_port,
+                "RECOMP_ACCOUNT_TEST_TOKEN": tokens[TSET_PLAYERS[i]],
+                "RECOMP_TEST_OPEN_ONLINE": "1",     # the online screens: the set page in the captures
+                "RECOMP_TEST_TSET_PICK": pick_list[i % len(pick_list)] + "," + pick_list[(i + 1) % len(pick_list)],
+                "RECOMP_OVERLAY_SHOT_DIR": shots[i], "RECOMP_OVERLAY_SHOT_MS": "1500",
+            })
+            if fast_ko:
+                env["RECOMP_TEST_KO_STEP"] = "%d,alt" % int(fast_ko)
+            env.update(extra_env or {})
+            s.launch(i, env=env, core=2 + 2 * i, watch=watch)
+            time.sleep(3)
+        deadline = time.time() + timeout
+        stop = None
+        while time.time() < deadline:
+            s.poll()
+            cs = list(s.copies.values())
+            if any(c.watch.count("[CRASH]") or c.watch.count("[WATCHDOG]") for c in cs) or any(not c.alive() for c in cs):
+                stop = "a copy crashed or exited"
+                break
+            if any(c.watch.count("[NETPLAY] desync in") or c.watch.count("[NETPLAY] gave up") for c in cs):
+                time.sleep(5)
+                stop = "desync or gave up"
+                break
+            if all(c.watch.count("over, winner slot") for c in cs):
+                stop = "done"
+                break
+            time.sleep(1)
+        else:
+            stop = "timeout after %d s" % timeout
+        time.sleep(5)       # the set page a moment longer for the captures, the report on its way
+        s.poll()
+        texts = {i: logparse.read_text(c.log) for i, c in s.copies.items()}
+
+        def lines(i, mark):
+            return [l for l in texts[i].splitlines() if mark in l]
+        tsets = {i: lines(i, "[NETPLAY] tournament set ") for i in texts}
+        picks_made = {i: lines(i, "[NETPLAY] tournament set: picking venue") for i in texts}     # the page's A or the tests' pick
+        over = {i: (lines(i, "[NETPLAY] tests: tournament set") and [l for l in lines(i, "[NETPLAY] tests: tournament set") if " over" in l] or [""])[-1]
+                for i in texts}
+        # Dave's rule: the game-3 pick offered no stage its picker had won (game 1's stage, 10, the start)
+        dave = False
+        for i in texts:
+            for l in tsets[i]:
+                if "game 3" in l and "state 2" in l and "choices [" in l:
+                    ch = l.split("choices [", 1)[1].split("]", 1)[0].split(",")
+                    dave = dave or (len(ch) > 1 and "10" not in ch)
+        service = {}
+        st, _, text = _web(base, "GET", "/api/tournaments/" + tid, tokens["Host"])
+        try:
+            service = json.loads(text)
+        except ValueError:
+            service = {"error": "%d %s" % (st, text[:200])}
+        matches = service.get("matches") or []
+        m0 = matches[0] if matches else {}
+        checks = {
+            "relay_caps": all(lines(i, "the relay offers tournament sets") for i in texts),
+            "joined": all(lines(i, "joining its room") for i in texts),
+            "tset_shown": all(tsets[i] for i in texts),
+            "picked": sum(len(picks_made[i]) for i in texts) >= 2,      # games 2 and 3
+            "daves_rule": dave,
+            "set_over": all(" over, winner slot " in over[i] for i in texts),
+            "reported": m0.get("state") in ("reported", "confirmed"),
+        }
+        result["checks"] = checks
+        result["service_match"] = {k: m0.get(k) for k in ("id", "round", "state", "winner", "score", "best_of")} if m0 else service
+        result["tset_last"] = {i: (tsets[i] or [""])[-1].split("] ", 1)[-1][:260] for i in texts}
+        result["picks"] = {i: [l.split("] ", 1)[-1][:100] for l in picks_made[i]] for i in texts}
+        picked = []
+        try:
+            from PIL import Image
+        except ImportError:
+            Image = None
+        for i, d in shots.items():
+            files = sorted(glob.glob(os.path.join(d, "*.bmp")))
+            keep = {}
+            for p in files:
+                base_name = os.path.splitext(os.path.basename(p))[0]
+                label = base_name.split("-", 1)[1] if "-" in base_name else "plain"
+                keep.setdefault(label, []).append(p)
+            for label, ps in sorted(keep.items()):
+                for k, p in enumerate([ps[0], ps[-1]] if len(ps) > 1 else ps):
+                    name = "copy%d-%s-%d.png" % (i, label, k)
+                    if Image:
+                        for target in [os.path.join(s.dir, name)] + ([os.path.join(out_dir, name)] if out_dir else []):
+                            os.makedirs(os.path.dirname(target), exist_ok=True)
+                            Image.open(p).convert("RGB").save(target)
+                    picked.append(name)
+        result["captures"] = picked[:40]
+        result["stop"] = stop
+        result["faults"] = {i: _faults(t) for i, t in texts.items() if _faults(t)}
+        result["logs"] = [_relpath(c.log) for c in s.copies.values()]
+        result["ok"] = stop == "done" and all(checks.values()) and not result["faults"]
+    except Exception as e:      # noqa: BLE001
+        result["error"] = str(e)[:400]
     finally:
         _finish(s, result, t0)
     return result
