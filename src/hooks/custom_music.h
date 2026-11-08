@@ -17,7 +17,10 @@
  *  - The game's music events say when music plays: a stream opened (sub_0001D5B0) starts or resumes our
  *    song, a stream stopped (sub_0001D7C0) pauses it, the director's track change (sub_0003BE50) is
  *    where "mix" hands back from the game's track to the next song of ours.
- * Settings: [music] mode (auto, mine, mix, original) and shuffle; RECOMP_MUSIC_DIR points at another
+ *  - A new fight starts the next song ([music] new_song_per_match, on by default): the match phase the game
+ *    keeps ([0x3B8F30], only read) says when a fight is over and the next begins (musiclib::FightWatch);
+ *    the song that played through the last fight gives way. Host only, like the rest.
+ * Settings: [music] mode (auto, mine, mix, original), shuffle and new_song_per_match; RECOMP_MUSIC_DIR points at another
  * folder (tests), RECOMP_MUSIC_GAIN (percent, default 50) sets how loud the songs are against the game. */
 #ifndef DEFJAM_CUSTOM_MUSIC_H
 #define DEFJAM_CUSTOM_MUSIC_H
@@ -45,6 +48,7 @@ void custom_music_set_game_volume(int volume);
 void custom_music_set_in_fight(int in_fight);
 void custom_music_note(int playing);        /* the game's stream opened (1) or stopped (0) */
 void custom_music_note_track_change(void);
+void custom_music_note_phase(int phase);   /* the match phase [0x3B8F30], once per game update */
 
 #ifdef __cplusplus
 }

@@ -280,4 +280,24 @@ Mode effective_mode(int mode, size_t songs)
     return MODE_MIX;
 }
 
+FightWatch::Event FightWatch::feed(int phase)
+{
+    if (phase < 0 || phase > 3) phase = 0;
+    int was = last;
+    last = phase;
+    if (phase == 1) {
+        away = 0;
+        if (++fighting >= kMinFight) fought = true;
+        if (ended) { ended = false; return BEGAN; }
+        return NONE;
+    }
+    fighting = 0;
+    if (fought) {
+        if (++away >= kSettle) { fought = false; ended = true; away = 0; return ENDED; }
+        return NONE;
+    }
+    if (ended && phase == 0 && was >= 2) { ended = false; return BEGAN; }
+    return NONE;
+}
+
 } // namespace musiclib

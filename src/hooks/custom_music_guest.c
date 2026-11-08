@@ -19,6 +19,7 @@
 #include "guest_call.h"
 
 #define MUSIC_ASKED     0x0033EA18u     /* int: the music volume the game last asked for (slider and ducking) */
+#define MATCH_PHASE     0x003B8F30u     /* int: 0 start, 1 fighting, 2 decided, 3 finished */
 #define PLAYERS         2
 static const uint32_t k_handle_at[PLAYERS] = { 0x00331D08u, 0x002DBC40u };   /* main, overlay */
 
@@ -71,6 +72,7 @@ void custom_music_on_update(int rerun, int in_fight)
             fprintf(stderr, "[MUSIC] game music volume %d\n", v);
         g_last_asked = v;
     }
+    custom_music_note_phase((int)MEM32(MATCH_PHASE));    /* read only: a new fight, a new song */
     if (in_fight)
         g_options_ready = 1;
     custom_music_set_game_volume(g_options_ready ? v : 0);

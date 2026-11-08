@@ -44,8 +44,12 @@ std::atomic<bool> g_have_song{false};       // a song of ours is loaded and play
 std::atomic<bool> g_in_fight{false};
 std::atomic<int> g_game_volume{85};
 std::atomic<unsigned> g_track_changes{0};
+std::atomic<unsigned> g_fights_ended{0};    // fights over so far (musiclib::FightWatch)
+std::atomic<unsigned> g_fights_begun{0};    // fights begun after one was over
+musiclib::FightWatch g_fight_watch;         // the game thread's only
 musiclib::Mode g_mode = musiclib::MODE_ORIGINAL;
 bool g_shuffle = true;
+bool g_per_match = true;                    // [music] new_song_per_match: each fight after the first starts the next song
 float g_gain = 0.5f;
 std::vector<Song> g_songs;
 std::vector<size_t> g_order;
@@ -113,6 +117,7 @@ struct Player
     int slot = 0;
     MusicDecoder *song = nullptr;
     size_t song_index = 0;
+    unsigned song_ends_seen = 0;        // g_fights_ended when this song started
     bool draining = false;              // the song ended; waiting for the queue to play out
     unsigned long long frames = 0;
     unsigned songs_played = 0;
@@ -171,6 +176,7 @@ struct Player
         }
         song = d;
         song_index = index;
+        song_ends_seen = g_fights_ended.load();
         songs_played++;
         g_have_song = true;
         draining = false;
@@ -205,6 +211,7 @@ struct Player
             return;
         }
         unsigned seen_changes = g_track_changes.load();
+        unsigned seen_begun = g_fights_begun.load();
         float applied = -1;
         auto last_report = std::chrono::steady_clock::now();
         while (g_active) {
@@ -215,6 +222,22 @@ struct Player
                 if (g_mode == musiclib::MODE_MIX && !g_custom_turn) {
                     g_custom_turn = true;
                     log("the game changes track: one of your songs next");
+                }
+            }
+            unsigned begun = g_fights_begun.load();
+            if (begun != seen_begun) {
+                seen_begun = begun;
+                // A new fight (rematch, next match, the next fight of a rotation): the song that played
+                // through the last one gives way to the next in the order. A song that began after that
+                // fight was over (on its results) carries on. Paused or not, the new one waits for the game.
+                if (g_per_match && (song || draining) && song_ends_seen < g_fights_ended.load()) {
+                    log("a new fight: the next song (fight %u)", begun);
+                    if (voice) { voice->DestroyVoice(); voice = nullptr; voice_rate = 0; started = false; }
+                    applied = -1;
+                    close_song();
+                    draining = false;
+                    start_song();
+                    if (!g_active) break;
                 }
             }
             bool want = g_game_playing && g_custom_turn;
@@ -272,6 +295,7 @@ extern "C" void custom_music_game_starts(const char *data_root)
 {
     int mode = recomp_settings_get("music", "mode", 0);
     g_shuffle = recomp_settings_get("music", "shuffle", 1) != 0;
+    g_per_match = recomp_settings_get("music", "new_song_per_match", 1) != 0;
     if (const char *gain = getenv("RECOMP_MUSIC_GAIN")) g_gain = std::max(0, std::min(200, atoi(gain))) / 100.0f;
     musiclib::fs::path folder;
     if (const char *dir = getenv("RECOMP_MUSIC_DIR")) folder = musiclib::from_utf8(dir);
@@ -294,9 +318,10 @@ extern "C" void custom_music_game_starts(const char *data_root)
         g_songs.push_back(s);
     }
     g_mode = musiclib::effective_mode(mode, g_songs.size());
-    log("%zu song(s) in %s (%zu known bad, %zu over the limit), mode %s, shuffle %s", g_songs.size(),
-        musiclib::utf8(folder).c_str(), bad, more,
-        g_mode == musiclib::MODE_MINE ? "mine" : g_mode == musiclib::MODE_MIX ? "mix" : "original", g_shuffle ? "on" : "off");
+    log("%zu song(s) in %s (%zu known bad, %zu over the limit), mode %s, shuffle %s, new song per match %s",
+        g_songs.size(), musiclib::utf8(folder).c_str(), bad, more,
+        g_mode == musiclib::MODE_MINE ? "mine" : g_mode == musiclib::MODE_MIX ? "mix" : "original", g_shuffle ? "on" : "off",
+        g_per_match ? "on" : "off");
     if (g_mode == musiclib::MODE_ORIGINAL) return;
     reorder((size_t)-1);
     g_custom_turn = true;
@@ -320,3 +345,19 @@ extern "C" void custom_music_note(int playing)
 }
 
 extern "C" void custom_music_note_track_change(void) { g_track_changes++; }
+
+extern "C" void custom_music_note_phase(int phase)
+{
+    switch (g_fight_watch.feed(phase)) {
+    case musiclib::FightWatch::ENDED:
+        g_fights_ended++;
+        if (g_active) log("fight over (%u so far, phase %d)", g_fights_ended.load(), phase);
+        break;
+    case musiclib::FightWatch::BEGAN:
+        g_fights_begun++;
+        if (g_active) log("the next fight begins (phase %d)", phase);
+        break;
+    default:
+        break;
+    }
+}
