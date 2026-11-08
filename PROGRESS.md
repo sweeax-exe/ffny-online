@@ -535,7 +535,6 @@ Upstream PR submissions still need the owner's separate approval.
 
 > Recent entries only; older entries remain unchanged in the local `docs/worklog/` archive.
 
-- 2026-11-04 13:30 — Owner: #133 (project site) out of v1.0.0 (`e2cd464` reverts merge `38a7be9`: site/, build-site.py, pages.yml and its test), the rest published as v1.0.0-beta.1 for player play-testing (D326). Beta tags `vX.Y.Z-beta.N` pass `check-release.py` against the CMake version and the release workflow drafts them as a prerelease, never Latest; `tests/unit/test_source_release.py` 59 passed, source policy 545/0. Notes `docs/releases/v1.0.0-beta.1.md`. CI on `0a64f79` passed after a rerun of two macOS jobs that never got a runner. Learn Moves row bars filed as #181.
 - 2026-11-04 18:30 — v1.0.0-beta.2 from beta.1 play-test findings (D327). #182: `[textures] cache_mb` exported as `RECOMP_PC_TEXTURE_CACHE_MB` since #125, so the loader kept 512 MiB (owner's sessions: up to 236 evicted / 2-3 GB re-uploaded per 2 s window, black widescreen sides); fixed build reads 4096, 0 evicted to the main menu against 270 at 512 (`logs/run-20261104-154948.log.err`, `-155034`). #183 (owner's Linux agent): language pack name lost on glibc (overlapping `snprintf`), Linux Uninstall kept the Steam shortcut. #184: same-version builds replace the app and offer Update game (Clean Rebuild); Windows scratch test of the CI app over the beta.1 asset found `place_app` holding `payload\manifest.json` open (Access is denied on the payload rename), fixed in `cb5114d`, then replaced in 2 s. Unit `-m "not slow"` 682 passed on #182; CI green on all three.
 - 2026-11-05 22:26 — PR #186 project site and README prepared for go-live: 17 published media files, seven decisions (D328-D334), the older gallery exports removed, unit tests 798 passed with one failure that needs the toolkit submodule, source tree check 0 failures.
 - 2026-11-06 09:29 — Site, README and install guide now say "Also available on RecompLauncher and Quiver", with links to both listings (D335). PR #193 merged at the owner's request (D336). Both listing pages returned 200 and name this game. Docs-only change; Pages needs a manual deploy after the merge, since `pages.yml` runs on a stable release or by hand.
@@ -543,6 +542,7 @@ Upstream PR submissions still need the owner's separate approval.
 - 2026-11-06 15:30 — Hotfix v1.0.1 (PR #199, D341-D342): owner asked to drop the Linux setup archive and name the platform in the AppImage. Removed `DefJamSetup-1.0.0-linux-x64.{tar.gz,sha256,provenance.json}` from the published v1.0.0 release (backup `defjam/release-evidence-1.0.0/linux-setup-asset`, SHA-256 `82f1543f…` matched GitHub's digest) and added a Linux/AppImage note to its notes. #199: `check-setup-assets.py` stops attaching the Linux setup (`APP_ONLY_PLATFORMS`); the Linux app becomes `DefJamRecompiled-<v>-linux-x86_64.AppImage`, with the old name still read for releases up to 1.0.0 (`LEGACY_APP_ASSETS`) and by the site. Windows: unit tests 706 passed / 206 skipped, source policy 572 files 0 failures, site picker checked in Node. No regression rerun (packaging and site only). A 1.0.0 AppImage cannot see the new name: its players download 1.0.1 by hand once.
 - 2026-11-07 17:50 — v1.1.0 release candidate (D343-D361): `release/v1.1.0` = main after v1.0.1 + #192, #195, #201, #185, #203, #204, #205 (all merged cleanly except the research index and the toolkit gitlink, #205). Toolkit `defjam/release-1.1.0` `4801dc1` = `6c0bd55` + `3d7758a`, `8ae88ff`, `ae79f3d`; `nv2a_ws_left_tag` 82 draws pass. Clean analyze, re-lift and Release build; gate results in the release PR.
 - 2026-11-07 20:30 — v1.1.0 Windows gate: CI 35/35, full regress 17/17 stock (`logs/regress-20261107-183752.txt`) and 17/17 `--release-profile` (`-193219`), unit 889, source tree 0 failures. CI setup assets (checksums match): v1.0.1 install, then Clean Update to 1.1.0 exit 0 in 838 s, data folder 120 files 0 differences; fresh install 359 s; the updated game stays up 40 s with `[D3D]` present lines at 60 fps. Settings-kept not verified (no `settings.ini` before the first run). The gate script's install timings are inflated by an orphan `mspdbsrv.exe` that kept `Start-Process -Wait` from returning. Open: macOS and Linux/Deck regressions, play-test, D348 review.
+- 2026-11-07 21:16 — PR #206 macOS clean RC build: analyze 18,446 functions, re-lift 21 C files; first game build failed on #203's undefined VK_F7/VK_F8 (app-only CI omits this code). Added POSIX UI definitions and native compile test (1/1); rebuilt posix-release successfully on macOS 26.5.2 arm64 / AppleClang 21.0.0. Unit before fix 870 passed/73 skipped; combined toolkit widescreen fixture 1/1, 82 draws. Logs: `logs/rc110-analyze.txt`, `rc110-recomp.txt`, `rc110-build.txt` (preserved failure), `rc110-build-fixed.txt`, `rc110-unit.txt`, `rc110-ws-fixture-build.txt`. Full regression/functional qualification running next; no Mac approval yet.
 
 ## 7. Hand-off
 
@@ -556,9 +556,16 @@ Upstream PR submissions still need the owner's separate approval.
   `ae79f3d` (#205); the `nv2a_ws_left_tag` fixture's draw count was resolved to 82 (43 + 5 + 20 + 14). The older pins of
   #185, #192 and #195 are ancestors of `6c0bd55`. After publishing, fast-forward the `.gitmodules` branch
   (`defjam/upstream-v0.16`) to it.
-- Gate (release PR): CI with the three setup builds; full `regress.py` on Windows (this machine), macOS and the Deck
-  or Linux (owner, in parallel, on the release PR's head); a setup install from the PR's CI artifacts and a Clean Update
-  from v1.0.1 on Windows; the owner's play-test.
+- Windows stock and HD full regressions pass on `98ad031` (17/17 each); install and Clean Update pass.
+- macOS qualification in progress in worktree `c58d`: Python `/tmp/defjam-rc110-venv/bin/python`,
+  `DEFJAM_DATA=$PWD/logs/rc110-data` (cloned saves), preset `posix-release`. Clean analyze found 18,446 functions;
+  re-lift 21 C files. First full game build failed on undefined `VK_F7`/`VK_F8` in the new song hotkeys.
+  Game UI compatibility definitions and a native compile test fix it; rebuilt successfully.
+  Evidence: `logs/rc110-{analyze,recomp,build,build-fixed,unit,ws-fixture-build}.txt`.
+  Next: full stock and HD regressions, train functional checks including `two-matches,fight-cycles`, native Songs
+  UI/playback, French-base pack, optional ccache, and CI setup install. Game runs stay serial.
+- Owner requested fixes/results pushed to PR #206, then merge with a merge commit and tag `v1.1.0` only after all
+  gates and Windows/Linux approvals. Check new PR comments/reviews and head before pushing or publishing.
 - Open for the owner: D348 (the 256 MiB transition limit, #201) needs review. #195's cache is off until setup passes
   the option. `SONG_CONVERT_VERSION` 7: custom songs converted by a pre-release build are converted again once.
 - Still open from earlier hand-offs: the Linux pick-a-release list only knows setup assets (v1.1.0 material, not in
