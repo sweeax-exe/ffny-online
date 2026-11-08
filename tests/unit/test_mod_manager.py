@@ -407,6 +407,19 @@ def test_language_mod_needs_its_capability_and_installs_beside_textures(manager,
     assert not (manager.data/'settings.ini').exists()  # installing never turns it on
 
 
+@pytest.mark.parametrize('base', ['english', 'french', '', 'spanish', 'French'])
+def test_language_package_base_is_validated(tmp_path, base):
+    ini = ('[language]\nschema=1\nname=Test\nlanguage=xx\nbase=' + base + '\n'
+           '[files]\nassets/misc.viv|cmfren.loc = patches/001.djd\n')
+    source, row = language_package(tmp_path, ini=ini)
+    if base in ('english', 'french'):
+        result = mods.unpack_archive(source, row['versions'][0]['archive'], tmp_path/'unpacked')
+        assert result['capabilities'] == ['language-v1']
+    else:
+        with pytest.raises(ValueError, match='base must be english or french'):
+            mods.unpack_archive(source, row['versions'][0]['archive'], tmp_path/'unpacked')
+
+
 def test_language_mod_with_its_own_images_installs(manager, tmp_path):
     manager, key = manager
     manifest = f'[pack]\nschema=1\nname=HD\n[textures]\n{ID}=textures/test.png\n'

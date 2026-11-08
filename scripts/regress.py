@@ -27,6 +27,9 @@ Checks, in order:
            land damaging hits (the second pad through the USB model)
   two-matches  (--only) a One on One and a Free For All played to their results in
            one launch, each judged on its own events (about 12 minutes)
+  fight-cycles  (--only) five One on Ones in one launch, then the battle menu held
+           for 90 seconds: memory compared between settled fight samples (#166,
+           about 15 minutes)
   ffa-result  (--only) a four-fighter match played to its result: every fighter but
            the winner put out once
   replay   one step-timed, seed-pinned fight: the first thirty seconds of game state
@@ -78,11 +81,11 @@ evidence = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(evidence)
 REPO = harness.REPO
 
-ORDER = ["unit", "m2", "m3", "m4a", "launcher", "overlay", "unlockopt", "picture", "skipintro", "fight", "ffa", "fight-terrordome", "ffa-terrordome", "combat", "versus", "ffa-result", "two-matches", "replay", "repeat", "visual",
+ORDER = ["unit", "m2", "m3", "m4a", "launcher", "overlay", "unlockopt", "picture", "skipintro", "fight", "ffa", "fight-terrordome", "ffa-terrordome", "combat", "versus", "ffa-result", "two-matches", "fight-cycles", "replay", "repeat", "visual",
          "intro", "crib", "gym", "soak", "french", "subtitles-en", "input-trace"]
 # Opt-in (--only): the One on One at the Terrordome, which the Free For All covers, and
 # the repeatability check, which is two more fights.
-DEFAULT = [n for n in ORDER if n not in ("fight-terrordome", "ffa-result", "two-matches", "repeat", "visual", "skipintro")]
+DEFAULT = [n for n in ORDER if n not in ("fight-terrordome", "ffa-result", "two-matches", "fight-cycles", "repeat", "visual", "skipintro")]
 QUICK = ["unit", "m2", "m3", "m4a", "fight"]
 
 # A 2 s line of a 60 Hz title holds 120 presents. Loading screens run at 30, so the
@@ -561,6 +564,13 @@ def check_two_matches(a):
                           ("combat.result.match1", "combat.result.match2", "combat.eliminations.match2"))
 
 
+def check_fight_cycles(a):
+    # Five One on Ones in one launch; the memory check compares settled fight samples (#166).
+    return scenario_check(a, "fight-cycles", "fight-cycles",
+                          ("combat.result.match1", "combat.result.match5",
+                           "performance.memory_growth", "performance.memory_transition"))
+
+
 def check_ffa_result(a):
     return scenario_check(a, "ffa-result", "ffa-result", ("combat.eliminations", "combat.result"))
 
@@ -765,7 +775,7 @@ CHECKS = {"unit": check_unit, "m2": check_m2, "m3": check_m3, "m4a": check_m4a, 
           "overlay": check_overlay, "unlockopt": check_unlock_option, "picture": check_picture_options, "skipintro": check_skip_intro, "fight": check_fight, "ffa": check_ffa,
           "fight-terrordome": lambda a: check_fight(a, 'fight-terrordome'),
           "ffa-terrordome": lambda a: check_fight(a, 'ffa-terrordome'),
-          "combat": check_combat, "versus": check_versus, "ffa-result": check_ffa_result, "two-matches": check_two_matches, "replay": check_replay, "visual": check_visual, "repeat": check_repeat, "intro": check_intro, "crib": check_crib, "gym": check_gym, "soak": check_soak}
+          "combat": check_combat, "versus": check_versus, "ffa-result": check_ffa_result, "two-matches": check_two_matches, "fight-cycles": check_fight_cycles, "replay": check_replay, "visual": check_visual, "repeat": check_repeat, "intro": check_intro, "crib": check_crib, "gym": check_gym, "soak": check_soak}
 
 
 def status_word(ok):

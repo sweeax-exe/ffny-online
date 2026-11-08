@@ -40,6 +40,9 @@
 #include "hooks/dev_module.h"
 #include "patches/picture.h"
 #include "patches/cheats.h"
+#include "patches/song_store.h"
+#include "patches/song_cursor.h"
+#include "patches/options_volume.h"
 #include "patches/menu_geometry.h"
 #include "patches/cinema_timing.h"
 
@@ -108,7 +111,7 @@ void sub_0008BE60_enter(void)
  * through a pause that began in a live fight (issue #95); otherwise no change. */
 void sub_00079B60_enter(void) { if (s_ws_hud_live) ws_hud_heartbeat(); }
 void sub_0007A8F0_enter(void) { if (s_ws_hud_live) ws_hud_heartbeat(); }
-void sub_001A4D90_enter(void) { defjam_test_match_start(); defjam_crowd_match_start(); cheats_match_start(); }
+void sub_001A4D90_enter(void) { defjam_test_match_start(); defjam_crowd_match_start(); cheats_match_start(); song_cursor_match_start(); }
 /* Widescreen song notification (src/patches/widescreen.c, issue #118): the APT
  * movie loader (archive, name, &apt, &const), and the next step of the load,
  * which its only caller runs straight after it with the .apt data as its second
@@ -178,7 +181,7 @@ void sub_00073FD0_enter(void) { scene_launcher_loader_enter(); }
 void sub_0002DFF0_enter(void) { scene_launcher_mode_enter(); }
 /* The developer run module, rebuilt from the host (src/hooks/dev_module.c): the manager's tick
  * queues it on request; its methods are traced. RECOMP_DEV_MODULE; off unless set. */
-void sub_00077040_enter(void) { dev_module_manager_enter(); cheats_game_tick(); }  /* + Story cheats, src/patches/cheats.c */
+void sub_00077040_enter(void) { dev_module_manager_enter(); cheats_game_tick(); song_cursor_game_tick(); }  /* + Story cheats, src/patches/cheats.c; song shortcuts, src/patches/song_cursor.c */
 void sub_00077C40_enter(void) { dev_module_trace(1); }
 void sub_00077A40_enter(void) { dev_module_trace(3); }
 void sub_00077B20_enter(void) { dev_module_trace(4); }
@@ -224,6 +227,49 @@ void sub_001EB980(void)
 {
     uint32_t raw=input_late_raw();
     if (raw) { g_eax=raw;g_esp+=4; } else sub_001EB980_gen();
+}
+/* Songs (src/patches/song_store.c). The song store is built with buffers that hold every song
+ * (this = the store); a profile load fills it from the save and the PC-side file (this = the
+ * profile manager); the playlist builders hand back at most what the playlist holds; the
+ * built playlist can be traced. */
+extern void sub_00013340_gen(void);
+void sub_00013340(void)
+{
+    song_store_before_build(g_ecx);
+    sub_00013340_gen();
+    song_store_after_build();
+}
+extern void sub_00014540_gen(void);
+void sub_00014540(void)
+{
+    uint32_t manager=g_ecx;
+    song_store_before_load(manager);
+    sub_00014540_gen();
+    song_store_after_load(manager);
+    options_volume_after_load(manager);    /* src/patches/options_volume.c: saved volumes to the mixer */
+}
+extern void sub_00020C40_gen(void);
+void sub_00020C40(void) { song_store_build_playlist(sub_00020C40_gen, 0); }
+/* Custom songs in order (src/patches/song_cursor.c): a music map context is set up
+ * (sub_00131080), and a track plays the node it is on (sub_001350E0, cdecl (track), once per
+ * segment and after every jump). */
+void sub_00131080_enter(void) { song_cursor_map_load(); }
+void sub_001350E0_enter(void) { song_cursor_play_node(MEM32(g_esp + 4)); }
+extern void sub_00020D70_gen(void);
+/* With songs added, the shuffled list is the ordered one shuffled on the host: the game's own
+ * shuffle keeps 36 songs in a stack array. */
+void sub_00020D70(void) { song_store_build_playlist(song_store_active() ? sub_00020C40_gen : sub_00020D70_gen, 1); }
+extern void sub_0004FD80_gen(void);
+void sub_0004FD80(void) { song_jukebox_build(sub_0004FD80_gen); }
+extern void sub_00050E00_gen(void);
+void sub_00050E00(void) { song_jukebox_enable(sub_00050E00_gen); }
+extern void sub_0004EEC0_gen(void);
+void sub_0004EEC0(void) { song_jukebox_play(sub_0004EEC0_gen); }
+extern void sub_0003CFF0_gen(void);
+void sub_0003CFF0(void)
+{
+    song_store_set_playlist(sub_0003CFF0_gen);
+    song_store_playlist_built();
 }
 extern void sub_000D7BF0_gen(void);
 void sub_000D7BF0(void)
@@ -854,6 +900,7 @@ static void funccall_hook(void)
     xbox_NoteAnchorEvent(text);
     defjam_unlock_all_on_funccall(text);   /* RECOMP_UNLOCK_ALL, src/patches/dev_unlock.c */
     cheats_on_funccall(text);              /* Story tracking and Story cheats, src/patches/cheats.c */
+    song_store_on_funccall(text);          /* songs: the save's copy before MemCard.*, src/patches/song_store.c */
     sub_00068BA0();
     /* RECOMP_FE_INJECT: commands of a test's own, after a chosen call (src/hooks/fe_inject.c). */
     fe_inject_after_call(text);

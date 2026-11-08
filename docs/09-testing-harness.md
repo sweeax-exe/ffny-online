@@ -42,8 +42,8 @@ and unlock state; the early command makes Terrordome selection independent of th
 The full regression is the quick one plus a four-fighter Free For All, the same
 at the Terrordome for four minutes, the **combat check**, a **two-pad match**, the
 **replay check**, the Story intro, crib, gym and a boot soak. `--only a,b` picks
-checks; `fight-terrordome`, `ffa-result`, `two-matches`, `repeat` and `visual` are
-selectable that way only.
+checks; `fight-terrordome`, `ffa-result`, `two-matches`, `fight-cycles`, `repeat` and `visual`
+are selectable that way only.
 
 The harness explicitly sets `RECOMP_ASPECT=4:3` for the reviewed goldens and replays; new player
 defaults can use Widescreen (Auto) without changing those baselines. An explicit per-run
@@ -107,7 +107,8 @@ machine and GPU driver, the fixture's hashes, the settings, the input schedule a
 which gates were selected. A gate that could not be evaluated is an error.
 
 Routes: `fight`, `fight-result`, `ffa`, `ffa-result`, `versus` (two pads),
-`two-matches` (a One on One and a Free For All in one launch), `fight-terrordome`,
+`two-matches` (a One on One and a Free For All in one launch), `fight-cycles` (five One on
+Ones in one launch, then a held menu), `fight-terrordome`,
 `ffa-terrordome`, `story-tour` (crib and gym in one launch), `intro`, `crib`, `gym`,
 `boot`, `unlock`.
 
@@ -248,12 +249,28 @@ fighter, not the `<ID>`, so check the names on the HUD. The addresses and the ru
 - **Frame pacing.** From the runtime's two-second reports during the fight: the
   median present interval within 1 ms of 16.67, and at most 2 percent of presents
   later than 1.5 times their window's median.
-- **Memory.** The existing64MiB growth guard compares the final sample with the
-  maximum of the first three play samples. The final point may fall in a result/menu
-  load. Windows samples private bytes; POSIX samples RSS despite the JSON field
-  name `private_bytes`. A positive delta is not an attributed leak, and these OS
-  metrics are not directly comparable. Preserve threshold failures; see the
-  [v0.13 investigation](research/rc-v0.13.0-hd-memory.md) and issue166.
+- **Memory.** Samples every 5 seconds. Windows samples private bytes; POSIX samples
+  RSS despite the JSON field name `private_bytes`. These OS metrics are not directly
+  comparable, and a positive delta is not an attributed leak.
+  - **Baseline:** the highest of the first three samples from 20 seconds after
+    `Game.StartGame`.
+  - **`performance.memory_growth`** (limit 64 MiB): compares the baseline with the
+    highest of the last three samples in the last match's settled fight window, which
+    runs from 20 seconds after its `StartGame` to its first `GetMatchSummary`. Its
+    metrics give the same figure for every match (`cycle_growth_mb`).
+  - **`performance.memory_transition`** (limit 256 MiB): reports scene changes
+    separately. It bounds the highest sample of play against the baseline, and also
+    reports where the run ended. A sample taken in a result or menu load holds decode
+    buffers in flight and, on Linux, free memory in the decode workers' glibc arenas
+    (issue #166), so it is not mixed into the growth figure.
+  - **Endpoint fallback:** without a timeline, or when the first or last fight window
+    has fewer than three samples, growth falls back to the old last-sample reading
+    (`method: endpoint`) and no transition row is written.
+  - **Repeated cycles:** `--only fight-cycles` plays five One on Ones in one launch.
+    This is the most the native pad script holds (4095 characters, 32 distinct
+    anchors).
+  - Preserve earlier threshold failures as they were recorded; see the
+    [v0.13 investigation](research/rc-v0.13.0-hd-memory.md) and issue #166.
 
 ## Visual baselines
 

@@ -412,6 +412,7 @@ typedef struct {
 typedef struct {
     char folder[64], name[96], language[16];
     int all_subtitles;
+    int base_french;        /* The validated pack replaces the French language slot. */
     PackFile files[LANG_MAX_FILES];
     int count;
     Buf ini;
@@ -503,6 +504,13 @@ static int pack_load(const char *dir, const char *folder, Pack *p, int read_delt
             else if (!strcmp(key, "name")) snprintf(p->name, sizeof p->name, "%s", value);
             else if (!strcmp(key, "language")) snprintf(p->language, sizeof p->language, "%s", value);
             else if (!strcmp(key, "story_subtitles")) p->all_subtitles = !strcmp(value, "all");
+            else if (!strcmp(key, "base")) {
+                if (strcmp(value, "english") && strcmp(value, "french")) {
+                    free(text);
+                    return fail("%s: [language] base must be english or french", folder);
+                }
+                p->base_french = !strcmp(value, "french");
+            }
         } else if (!strcmp(section, "[files]")) {
             size_t vlen = strlen(value);
             if (p->count >= LANG_MAX_FILES) { free(text); return fail("%s: too many files", folder); }
@@ -962,6 +970,12 @@ int pc_language_all_subtitles(void)
 int pc_language_french(void)
 {
     static int logged;
+    /* A pack declaring base=french replaces the French strings and art, so the game must start in French. */
+    if (g_active && g_pack.base_french) {
+        if (!logged++)
+            fprintf(stderr, "[LANG] the language mod '%s' is built on the game's own French\n", g_pack.name);
+        return 1;
+    }
     if (recomp_settings_get("language", "game", 0) != 1) return 0;
     if (g_active) {
         if (!logged++)

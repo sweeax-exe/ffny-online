@@ -276,6 +276,22 @@ class Engine:
         if self.args.status_file:
             write_status(self.args.status_file, message)
 
+    def timed(self, label, step):
+        """Run one setup stage and write how long it took to the setup log (#187). Not to the status
+        file: the app shows that line to the player."""
+        started = time.monotonic()
+        try:
+            return step()
+        finally:
+            self.log_time(label, time.monotonic() - started)
+
+    def log_time(self, label, seconds):
+        line = '[TIME] {}: {:.1f} s'.format(label, seconds)
+        print(line, flush=True)
+        if self.log:
+            self.log.write(line + '\n')
+            self.log.flush()
+
     def cancelled(self):
         parent = getattr(self.args, 'handoff_parent', None)
         if parent and not IS_WINDOWS:
@@ -866,17 +882,17 @@ class Engine:
                                  f'-DCMAKE_PREFIX_PATH={prefix}', f'-DVulkan_LIBRARY={prefix}/lib/libMoltenVK.dylib',
                                  f'-DVulkan_INCLUDE_DIR={prefix}/include', '-DCMAKE_FIND_USE_CMAKE_SYSTEM_PATH=OFF',
                                  '-DCMAKE_OSX_ARCHITECTURES=arm64']
-                self.run(self.in_container(['cmake', '--preset', PRESET, '-DDEFJAM_BUILD_GAME=ON', *overrides],
-                                           self.source), cwd=self.source)
-                self.run(self.in_container(['cmake', '--build', '--preset', PRESET, '--target', 'defjam_recomp'],
-                                           self.source), cwd=self.source)
+                self.timed('Configure', lambda: self.run(self.in_container(
+                    ['cmake', '--preset', PRESET, '-DDEFJAM_BUILD_GAME=ON', *overrides], self.source), cwd=self.source))
+                self.timed('Compile and link', lambda: self.run(self.in_container(
+                    ['cmake', '--build', '--preset', PRESET, '--target', 'defjam_recomp'], self.source), cwd=self.source))
                 self.run([self.python, self.source / 'scripts/pipeline-state.py', 'record-build',
                           '--preset', PRESET], cwd=self.source)
                 verify()
                 if IS_LINUX:
                     self.check_host_runtime()
                 continue
-            self.run(argv, cwd=self.source)
+            self.timed(label, lambda: self.run(argv, cwd=self.source))
             verify()
 
     def build_hd_textures(self):
@@ -1123,13 +1139,15 @@ class Engine:
                 hd_space = 15 * 1024**3 if getattr(self.args, 'hd_textures', False) else 0
                 if shutil.disk_usage(nearest_existing(self.data)).free < dump_size + 1024**3 + hd_space + (required if same_drive else 0):
                     raise SetupError('Insufficient free space on the data drive', 2)
-                self.prepare_source()
-                self.extract()
-                self.toolchain()
+                started = time.monotonic()
+                self.timed('Prepare source', self.prepare_source)
+                self.timed('Verify and extract dump', self.extract)
+                self.timed('Check toolchain', self.toolchain)
                 self.link_game()
                 self.pipeline()
-                self.build_hd_textures()
-                self.activate()
+                self.timed('HD textures', self.build_hd_textures)
+                self.timed('Activate', self.activate)
+                self.log_time('Setup total', time.monotonic() - started)
 
 
 TEXTURE_PACK_LIST_MAX = 1023

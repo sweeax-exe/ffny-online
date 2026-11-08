@@ -42,6 +42,8 @@ confidence labels and disproved hypotheses remain distinct from measured facts.
 - [v0.12.1: widescreen menu song notification (#118)](v0121-menu-song-banner.md)
 - [v0.12.1: widescreen fight HUD while paused (#95)](v0121-pause-hud-widescreen.md)
 - [Widescreen combo call-out (#196)](widescreen-combo-callout.md)
+- [Widescreen song banner over side-filled menus](widescreen-song-banner-side-fill.md)
+- [Widescreen struggle meter (submissions)](widescreen-struggle-meter.md)
 - [v0.12.1 Story portrait and Power Plant investigation](v0121-portrait-viewport-read.md)
 - [v0.12.1: right-side health and Blazin meters](v0121-right-meters-fix.md)
 - [v0.12.1: Story shop LOADING flash on item changes (#119)](v0121-shop-loading-flash.md)
@@ -130,6 +132,7 @@ compatibility and concise native acceptance; it does not recreate authoring hist
 ## v1.0.0 candidate additions
 
 - [Cheat menu: research for issue #71](cheat-menu.md)
+- [Custom and cut songs: how the game's music works](custom-songs.md)
 - [Side findings from the #98 investigation (Steam Deck, 2026-10-27)](deck-determinism-98-side-findings.md)
 - [Why a pinned fight does not repeat on the Steam Deck (#98)](deck-determinism-98.md)
 - [Graphics enhancements: test plan for Windows and Linux / Steam Deck](graphics-enhancements-test-plan.md)

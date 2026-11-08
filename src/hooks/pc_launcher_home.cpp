@@ -40,11 +40,11 @@ UiHomeResult ui_launcher_home(float width, float height, const char *focus)
     if (pcui::mod_recovery_needed())
         ImGui::TextWrapped("Play is unavailable until an interrupted mod installation is recovered. Open Mods to fix it.");
     else if (pcui::mod_busy()) ImGui::TextWrapped("Finishing a mod operation. Play will be available when it finishes.");
-    const char *labels[] = {"Settings", "Controls", "Mods", "Help"};
-    const char *targets[] = {"Settings", "Configure", "Mods", "Help"};
-    int routes[] = {1, 2, 3, 4};
+    const char *labels[] = {"Settings", "Controls", "Mods", "Songs", "Help"};
+    const char *targets[] = {"Settings", "Configure", "Mods", "Songs", "Help"};
+    int routes[] = {1, 2, 3, 5, 4};
     if (ImGui::BeginTable("destinations", 2, ImGuiTableFlags_SizingStretchSame)) {
-        for (int i = 0; i < 4; ++i) {
+        for (int i = 0; i < 5; ++i) {
             ImGui::TableNextColumn();
             if (pcui::navigation_button(labels[i], ImVec2(-1, 44 * s))) r.route = routes[i];
             ui_target(targets[i]);

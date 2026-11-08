@@ -219,6 +219,8 @@ def validate_language(folder):
     check(parser.get('language', 'schema', fallback='') == '1', 'Unsupported language.ini schema')
     check(parser.get('language', 'name', fallback='').strip() and parser.get('language', 'language', fallback='').strip(),
           'language.ini needs name and language')
+    check(parser.get('language', 'base', fallback='english') in ('english', 'french'),
+          'language.ini base must be english or french')
     check(parser.has_section('files') and 0 < len(parser['files']) <= 256, 'Missing language file entries')
     targets = set()
     for target, delta in parser['files'].items():

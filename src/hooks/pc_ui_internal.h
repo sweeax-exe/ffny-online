@@ -48,6 +48,12 @@ typedef void *UiWindow;     // an SDL_Window *, or null
 #ifndef VK_F1
 #define VK_F1       0x70
 #endif
+#ifndef VK_F7
+#define VK_F7       0x76
+#endif
+#ifndef VK_F8
+#define VK_F8       0x77
+#endif
 #ifndef VK_F11
 #define VK_F11      0x7A
 #endif
