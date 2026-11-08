@@ -1279,7 +1279,7 @@ def turf(timeout=None, relay_port=27900, off=False, lock_timeout=None, log=None,
                 "RECOMP_NETPLAY_NAME": names[i],
                 "RECOMP_ROLLBACK": _rb_env(rollback),
                 "RECOMP_SCRIPT_ANCHOR": TITLE_ANCHOR,
-                "RECOMP_PAD_SCRIPT": h.build_pad_script(["getscreeninfo(intmain/mainmenu=lt@0.5"], online_tail(2, 2, i >= 2, last_presses=2)),
+                "RECOMP_PAD_SCRIPT": h.build_pad_script(["getscreeninfo(intmain/mainmenu=lt@0.5"], crew_tail(3, i >= 2)),
                 "RECOMP_ACCOUNT_SERVER": "127.0.0.1:%d" % acc_port,
                 "RECOMP_ACCOUNT_TEST_TOKEN": tokens[names[i]],
                 "RECOMP_SOCIAL": "on",
@@ -1521,6 +1521,30 @@ def online_tail(matches, per, p2, last_presses=12):
         parts.append(h.raw_stages(["game.getmatchsummary(0%s=a@4+3x%d" % (nth, presses)]))
         if m < matches:
             parts.append(fight.replace("@game.startgame(", "@game.startgame(#%d" % (m + 1)))
+    return ",".join(parts)
+
+
+def crew_tail(fights, p2):
+    """Pad presses for a crew battle's fights (turf): crew battles run King of the Hill style, so a copy fights
+    0, 1 or 2 times and online_tail's count of matches is off. After the Nth fight an A every 3 s on each of
+    its screens, anchored on the screen (the summary, the rewards, the save, the tips): an entry is over once
+    any later anchor is reached (usb_gamepad.c), so the next screen ends the presses of the one before, and the
+    Nth Game.Quit (the tips' A back to the online screens, after every fight, the King's too) those of the
+    tips. A copy out of the battle never reaches the next StartGame, so nothing presses after its Quit.
+    The first Quit closing everything left the King on its second summary (20261108-085153-turf). online_tail's 12 timed A's
+    after the summary ran on past the Quit into the hub's QUICK MATCH and a quick room
+    (logs/dj/20261108-070806-turf: room_stays_left, pages_show_holder)."""
+    h = harness()
+    fight = h.FIGHT_TAIL.replace("right:", "left:") if p2 else h.FIGHT_TAIL
+    parts = []
+    for k in range(1, fights + 1):
+        nth = "#%d" % k if k > 1 else ""
+        parts.append(fight.replace("@game.startgame(", "@game.startgame(%s" % nth))
+        parts.append("@game.getmatchsummary(0%s,a:4:60:3:0.3" % nth)
+        parts.append("@game.updatematchrewardspoints(%s,a:3:60:3:0.3" % nth)
+        parts.append("@memcard.save( battle/rewardun%s,a:3:60:3:0.3" % nth)
+        parts.append("@game.gettips(%s,a:3:60:3:0.3" % nth)
+        parts.append("@game.quit(%s" % nth)
     return ",".join(parts)
 
 
