@@ -38,6 +38,7 @@
   </a>
   <nav aria-label="Sections">
     <a href="#tournaments" id="nav-tournaments" hidden>Tournaments</a>
+    <a href="turf.html" id="nav-turf" hidden>Turf War</a>
     <a href="#features">Features</a>
     <a href="#social">Social</a>
     <a href="#crews">Crews</a>
@@ -119,6 +120,21 @@
       <div class="tourney-cards" id="tournament-cards"></div>
       <p class="fine" id="tournaments-empty" hidden>No tournaments are scheduled right now. Hosts with the Creator role
         on the Discord can set one up.</p>
+    </div>
+  </section>
+
+  <!-- Revealed by site.js when the account service answers GET /api/turf with 200 (Turf War on). -->
+  <section class="section turf-teaser" id="turf" aria-labelledby="turf-teaser-title" hidden>
+    <div class="wrap">
+      <div class="tourneys-head">
+        <div>
+          <p class="kicker">Crews</p>
+          <h2 id="turf-teaser-title">Turf War: crews fight for NYC</h2>
+        </div>
+        <a class="btn btn-ghost" href="turf.html">Open the map</a>
+      </div>
+      <p class="turf-teaser-text">Every venue in New York can belong to a crew. Take an open venue, challenge a
+        holder, defend what you own, and earn points all season. <span id="turf-teaser-stat"></span></p>
     </div>
   </section>
 
