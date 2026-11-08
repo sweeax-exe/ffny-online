@@ -63,6 +63,10 @@ int cp_local_set_pick(int index);
 /* The picked record (CP_REC_LEN bytes). 1 if there is one. */
 int cp_local_record(uint8_t rec[CP_REC_LEN]);
 void created_fighter_reload(void);
+/* The record of the player's own list whose CRC is `crc` (CP_REC_LEN bytes into rec; *index its
+ * entry, -1 none): 1 if there is one. The CRC covers version and payload (cp_record_sealed is
+ * checked), so an equal CRC is the same record. Searches only a list already read: never reads files. */
+int cp_local_find(uint32_t crc, uint8_t rec[CP_REC_LEN], int *index);
 /* The remembered pick (setting online.created; "" none): read and written through
  * the settings file (pc_settings.c). */
 void cp_pick_setting_get(char *out, int size);
