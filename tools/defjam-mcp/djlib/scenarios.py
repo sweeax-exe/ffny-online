@@ -1000,7 +1000,7 @@ def turf(timeout=None, relay_port=27900, off=False, lock_timeout=None, log=None,
                 "RECOMP_NETPLAY_NAME": names[i],
                 "RECOMP_ROLLBACK": _rb_env(rollback),
                 "RECOMP_SCRIPT_ANCHOR": TITLE_ANCHOR,
-                "RECOMP_PAD_SCRIPT": h.build_pad_script(["getscreeninfo(intmain/mainmenu=lt@0.5"], online_tail(2, 2, i >= 2)),
+                "RECOMP_PAD_SCRIPT": h.build_pad_script(["getscreeninfo(intmain/mainmenu=lt@0.5"], online_tail(2, 2, i >= 2, last_presses=5)),
                 "RECOMP_ACCOUNT_SERVER": "127.0.0.1:%d" % acc_port,
                 "RECOMP_ACCOUNT_TEST_TOKEN": tokens[names[i]],
                 "RECOMP_SOCIAL": "on",
@@ -1226,7 +1226,7 @@ def offline(type=0, venue=1, f0=55, f1=22, cpu=True, bot=None, fast_ko=600, turb
 
 # ---- online ---------------------------------------------------------------------------------------
 
-def online_tail(matches, per, p2):
+def online_tail(matches, per, p2, last_presses=12):
     """Pad presses for N room matches: fight presses from each StartGame, A through each summary
     (anchored on the Nth GetMatchSummary(0): the summary asks once per fighter, `per` calls a match in
     One on One and King of the Hill, three or four in 3-Way, Free for All and Team, and only the one
@@ -1237,7 +1237,9 @@ def online_tail(matches, per, p2):
     parts = [fight]
     for m in range(1, matches + 1):
         nth = "#%d" % m if m > 1 else ""
-        parts.append(h.raw_stages(["game.getmatchsummary(0%s=a@4+3x12" % nth]))
+        # The last match's presses can be fewer (turf: 12 ran on past the results into the hub's QUICK MATCH).
+        presses = last_presses if m == matches else 12
+        parts.append(h.raw_stages(["game.getmatchsummary(0%s=a@4+3x%d" % (nth, presses)]))
         if m < matches:
             parts.append(fight.replace("@game.startgame(", "@game.startgame(#%d" % (m + 1)))
     return ",".join(parts)
