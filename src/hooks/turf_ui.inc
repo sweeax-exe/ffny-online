@@ -470,6 +470,7 @@ void turf_actions(const TurfMap &m, const TurfVenue &v, bool signed_in, std::vec
         return;
     }
     why = !v.why.empty() ? v.why : v.can == 0 ? "Not open to a challenge right now." : "";
+    if (!why.empty()) why[0] = (char)toupper((unsigned char)why[0]);     // the service's reasons start lower-case
 }
 
 void turf_do(const TurfMap &m, const TurfVenue &v, const std::string &act)
@@ -835,6 +836,85 @@ void draw_turf(ImDrawList *dl, const Frame &f, const Pad &pad)
     hx += hint(dl, f, hx, 420, "x", "REFRESH");
     hint(dl, f, hx, 420, "b", "BACK");
     if (pad.b) { S.page = TW.back; TW.armed.clear(); }
+}
+
+// ---- tests: RECOMP_TEST_SOCIAL's ui: steps (social_ui.inc chat_test_step) ----
+//
+// turfhub: the hub's TURF WAR entry picked when the hub shows it (a pad=a step then opens it the player's way),
+// else a line saying it is hidden; turf: the page; turfsel=ID: the map's venue of that feID; turfpick=TAG:
+// CLAIM's crew; turflog=ID: that venue as the map has it and what this player may do there. False: not a
+// turf step.
+bool turf_test_action(const std::string &what, const std::string &arg)
+{
+    if (what == "turfhub") {
+        int status;
+        {
+            std::lock_guard<std::mutex> lock(TW.mu);
+            status = TW.map_status;
+        }
+        bool shown = turf_shown();
+        if (shown && S.page == HUB) S.hub_sel = HUB_TURF;
+        fprintf(stderr, "[SOCIAL-UI] turf: hub entry %s (map HTTP %d, page %d)\n", shown ? "shown" : "hidden", status, (int)S.page);
+        return true;
+    }
+    if (what == "turf") {
+        open_turf(S.page == TURF ? TW.back : S.page);
+        return true;
+    }
+    TurfMap m;
+    {
+        std::lock_guard<std::mutex> lock(TW.mu);
+        m = TW.map;
+    }
+    int id = atoi(arg.c_str());
+    if (what == "turfsel") {
+        auto rows = turf_rows(m);
+        bool found = false;
+        for (int i = 0; i < (int)rows.size(); i++)
+            if (rows[i].venue >= 0 && m.venues[rows[i].venue].id == id) { TW.sel = i; TW.tab = 0; found = true; }
+        TW.picker = false;
+        TW.armed.clear();
+        fprintf(stderr, "[SOCIAL-UI] turf: venue %d %s\n", id, found ? "selected" : "not on the map");
+        return true;
+    }
+    if (what == "turfpick") {
+        TurfSeason s;
+        {
+            std::lock_guard<std::mutex> lock(TW.mu);
+            s = TW.season;
+        }
+        auto crews = turf_picker_crews(m, s);
+        int at = -1;
+        std::string all;
+        for (int i = 0; i < (int)crews.size(); i++) {
+            all += crews[i].tag + " ";
+            if (crews[i].tag == arg) at = i;
+        }
+        if (at >= 0) TW.picker_sel = at;
+        fprintf(stderr, "[SOCIAL-UI] turf: picker %s, crews [%s], %s %s\n", TW.picker ? "up" : "not up", all.c_str(), arg.c_str(),
+                at >= 0 ? "picked" : "not there");
+        return true;
+    }
+    if (what == "turflog") {
+        const TurfVenue *v = nullptr;
+        for (auto &e : m.venues) if (e.id == id) v = &e;
+        if (!v) {
+            fprintf(stderr, "[SOCIAL-UI] turf venue %d: not on the map (map %s)\n", id, m.valid ? "loaded" : "not loaded");
+            return true;
+        }
+        std::vector<TurfAction> acts;
+        std::string why, labels;
+        bool signed_in = acc_state() == ACCOUNT_IN || turf_test_file();
+        turf_actions(m, *v, signed_in, acts, why);
+        for (auto &a : acts) labels += a.label + "/";
+        long long now = turf_now(m);
+        fprintf(stderr, "[SOCIAL-UI] turf venue %d (%s): owner %lld [%s], protected %s, challenge %lld [%s], claim battle %lld, "
+                        "my crew %lld officer %d, can %d, actions [%s], why: %s\n",
+                v->id, v->name.c_str(), v->owner, v->otag.c_str(), v->protect > now ? "yes" : "no", v->chal, v->ctag.c_str(),
+                v->claim_battle, m.my_crew, (int)m.officer, v->can, labels.c_str(), why.c_str());
+        return true;
+    }
+    return false;
 }
 
 // ---- the gallery ----

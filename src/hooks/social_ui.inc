@@ -2487,8 +2487,10 @@ void draw_toasts(ImDrawList *dl, const Frame &f)
 // up, down, left, right) and key=KEY (enter, escape, backspace, tab) press it for a frame as the pad's
 // or keyboard's own press arrives, text=TEXT types it; room=create opens a room. Stage 2c:
 // crewcreate=NAME:TAG (CREATE A CREW through its two keyboards), crewinvite=NAME (INVITE A PLAYER's
-// keyboard), menu=NAME (the player menu on a friend, crew mate or sender). Each step writes a
-// [SOCIAL-UI] line.
+// keyboard), menu=NAME (the player menu on a friend, crew mate or sender). Stage 4 (turf_ui.inc):
+// turfhub (the hub's TURF WAR picked, or why not; then pad=a opens it), turf (the page), turfsel=ID (a
+// venue by feID), turfpick=TAG (CLAIM's crew), turflog=ID (the venue and what this crew may do there);
+// leaveroom. Each step writes a [SOCIAL-UI] line.
 
 ImGuiKey test_key(const std::string &name)
 {
@@ -2502,6 +2504,8 @@ ImGuiKey test_key(const std::string &name)
     for (auto &k : keys) if (name == k.name) return k.key;
     return ImGuiKey_None;
 }
+
+bool turf_test_action(const std::string &what, const std::string &arg);    // turf_ui.inc
 
 void chat_test_step()
 {
@@ -2663,6 +2667,16 @@ void chat_test_step()
         NetRoomSettings rs;
         default_settings(rs);
         netplay_lobby_create(&rs);
+    } else if (what == "leaveroom") {               // out of the room (a crew battle's, after it): the hub
+        C.open = C.kb = C.menu = false;
+        NetRoom r;
+        lobby_room(&r);
+        if (r.in_room) netplay_lobby_leave();
+        S.page = HUB;
+        g_open_req = 1;     // leaving the crew battle's screen closes the online screens: open them on the hub
+        fprintf(stderr, "[SOCIAL-UI] leaveroom: %s\n", r.in_room ? "left the room" : "not in a room");
+    } else if (turf_test_action(what, arg)) {       // stage 4: turfhub, turf, turfsel=ID, turfpick=TAG, turflog=ID
+        C.open = C.kb = C.menu = false;
     }
     fprintf(stderr, "[SOCIAL-UI] %s (tab %s, keyboard %d)\n", step.c_str(), k_tab_names[C.tab], (int)C.kb);
 }

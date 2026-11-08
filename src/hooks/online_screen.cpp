@@ -4678,6 +4678,7 @@ const char *shot_label()
         NetCrew cb;
         lobby_room(&r);
         if (crew_room(r, &cb)) return cb.state == NETCREW_OVER ? "crewbattle-over" : cb.state == NETCREW_FORMING ? "crewbattle-forming" : "crewbattle";
+        if (S.page == TURF && !r.in_room) return TW.picker ? "turf-claim" : TW.tab == 1 ? "turf-season" : "turf";    // stage 4
     }
     return gallery_on() ? G.page : g_versus_up ? "versus" : nullptr;
 }

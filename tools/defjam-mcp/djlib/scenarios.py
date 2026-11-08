@@ -907,6 +907,231 @@ def crew_battle(timeout=None, relay_port=27900, lock_timeout=None, log=None, kee
     return result
 
 
+# ---- turf -----------------------------------------------------------------------------------------
+
+TURF_VENUE = 6      # The Terror Dome (the Bronx): open at the start, a plain venue of the relay's pool
+# after the battle: out of its room (the copies' LEAVE reached the relay up to ~25 s late on 2026-11-08, the
+# room's next ROOM bringing it back meanwhile), then the TURF page with the new holder
+_TURF_AFTER = "wait:5;ui:leaveroom;wait:25;ui:leaveroom;wait:4;ui:turf;wait:3;ui:turfsel=%d;wait:4;ui:turflog=%d;wait:3;log" % (TURF_VENUE, TURF_VENUE)
+TURF_NET = [
+    # the BXK Boss: both crews full (the ladder), then the hub's TURF WAR with A, the venue, CLAIM, RHR, A
+    "wait:3;crew:Bronx Kings:BXK;wait:4;crewinvite:Copy 1;ladderwait:RHR:2;ladderwait:BXK:2;ui:close;ui:turfhub;wait:1;"
+    "ui:pad=a;wait:4;ui:turfsel=%d;wait:3;ui:turflog=%d;ui:pad=a;wait:3;ui:turfpick=RHR;wait:2;ui:pad=a;wait:4;"
+    "ui:turflog=%d;log;battledone;" % (TURF_VENUE, TURF_VENUE, TURF_VENUE) + _TURF_AFTER,
+    "crewjoin;log;battledone;" + _TURF_AFTER,
+    # the RHR Boss accepts the claim battle; afterwards its map must say why it may not challenge (protection)
+    "wait:3;crew:Red Hook Riders:RHR;wait:4;crewinvite:Copy 3;battlewait;battleaccept;log;battledone;" + _TURF_AFTER,
+    # an RHR member (copy 1 the BXK one): the page read-only; the losing crew's Boss: protection
+    "crewjoin;log;battledone;" + _TURF_AFTER,
+]
+TURF_OFF_NET = "wait:10;ui:close;ui:turfhub;wait:3;log"
+
+
+def _http(method, url, token=None, body=None):
+    """(status, text) of a request to the local account service."""
+    import urllib.error
+    import urllib.request
+    req = urllib.request.Request(url, method=method, data=body.encode() if body is not None else None)
+    if token:
+        req.add_header("Authorization", "Bearer " + token)
+    if body is not None:
+        req.add_header("Content-Type", "application/json")
+    try:
+        with urllib.request.urlopen(req, timeout=5) as r:
+            return r.status, r.read().decode("utf-8", "replace")
+    except urllib.error.HTTPError as e:
+        return e.code, e.read().decode("utf-8", "replace")
+    except Exception as e:      # noqa: BLE001
+        return 0, str(e)
+
+
+def _turf_venue(text, venue):
+    """The fields of the map text's venue=<venue>|... line (docs/turf-war.md section 4), [] none."""
+    for line in (text or "").splitlines():
+        if line.startswith("venue=%d|" % venue):
+            return line.split("=", 1)[1].split("|")
+    return []
+
+
+def turf(timeout=None, relay_port=27900, off=False, lock_timeout=None, log=None, keep_roots=False, extra_env=None,
+         out_dir=None, fast_ko=600, rollback="off", rollback_modes=None):
+    """Turf War end to end (social stage 4): a local account service with Turf War on (-turf-switch with
+    fresh_hours=0, -social -social-test-battles: crews of two play 2 v 2) and a relay that asks it; four copies
+    in two crews of two (BXK: copies 0 and 1, RHR: 2 and 3, the first of each the Boss). Copy 0 opens TURF WAR
+    from the hub with A, picks The Terror Dome (open), CLAIM, RHR, A (the page's POST); copy 2 accepts the crew
+    battle, every copy joins it and fights it at that venue (knockout at a step); the relay reports it and the
+    winner holds the venue: the map text (GET /api/turf?format=text), the turf events and each copy's TURF
+    page after it. Then: RHR's Boss may not challenge again (why_not on its page and a 409 on the POST), RHR's
+    member sees the page read-only. off: Turf War off, one copy: the hub hides TURF WAR, /api/turf is 404.
+    out_dir: the chosen captures (the TURF page before and after, the crew picker, the battle) as PNG."""
+    t0 = time.time()
+    n = 1 if off else 4
+    timeout = timeout or (300 if off else 1200)
+    s = copies.Session("turf", lock_timeout=lock_timeout, log=log, keep_roots=keep_roots).open()
+    result = {"scenario": "turf" + (" off" if off else ""), "ok": False}
+    shots = {}
+    steps = [TURF_OFF_NET] if off else TURF_NET
+    try:
+        h = harness()
+        acc_port = relay_port + 100
+        names = ["Copy %d" % i for i in range(n)]
+        flags = ["-social", "-social-test-battles"]
+        if not off:
+            switch = os.path.join(s.dir, "turf-enabled")
+            with open(switch, "w") as f:
+                f.write("fresh_hours=0\n")      # crews made a minute ago: their battle still counts
+            flags += ["-turf-switch", switch]
+        tokens = s.accounts(acc_port, names, extra=flags)
+        s.relay(relay_port, rollback=(rollback != "off"),
+                extra=["-accounts-internal", "http://127.0.0.1:%d" % (acc_port + 1)] + _rb_relay_extra(rollback, rollback_modes))
+        watch = WATCH + ["[SOCIAL-TEST] step", "[SOCIAL-UI] turf", "[ONLINE] turf", "[NETPLAY] crew battle"]
+        for i in range(n):
+            shots[i] = os.path.join(s.dir, "shots%d" % i)
+            os.makedirs(shots[i], exist_ok=True)
+            env = dict(VIRTUAL_PAD_ENV)
+            env.update({
+                "RECOMP_INPUT_VIRTUAL_PADS": "1",
+                "RECOMP_NETPLAY": "crew", "RECOMP_NETPLAY_SERVER": "127.0.0.1:%d" % relay_port,
+                "RECOMP_NETPLAY_SERVER_EU": "127.0.0.1:%d" % relay_port,
+                "RECOMP_NETPLAY_FIGHTER": str([55, 22, 9, 31][i]),
+                "RECOMP_NETPLAY_NAME": names[i],
+                "RECOMP_ROLLBACK": _rb_env(rollback),
+                "RECOMP_SCRIPT_ANCHOR": TITLE_ANCHOR,
+                "RECOMP_PAD_SCRIPT": h.build_pad_script(["getscreeninfo(intmain/mainmenu=lt@0.5"], online_tail(2, 2, i >= 2)),
+                "RECOMP_ACCOUNT_SERVER": "127.0.0.1:%d" % acc_port,
+                "RECOMP_ACCOUNT_TEST_TOKEN": tokens[names[i]],
+                "RECOMP_SOCIAL": "on",
+                "RECOMP_TEST_OPEN_ONLINE": "1",
+                "RECOMP_TEST_SOCIAL": steps[i],
+                "RECOMP_OVERLAY_SHOT_DIR": shots[i], "RECOMP_OVERLAY_SHOT_MS": "1500",
+            })
+            if fast_ko:
+                env["RECOMP_TEST_KO_STEP"] = "%d,0" % int(fast_ko)
+            env.update(extra_env or {})
+            s.launch(i, env=env, core=2 + 2 * i, watch=watch)
+            time.sleep(3)
+        deadline = time.time() + timeout
+        stop = None
+        while time.time() < deadline:
+            s.poll()
+            cs = list(s.copies.values())
+            if any(c.watch.count("[CRASH]") or c.watch.count("[WATCHDOG]") for c in cs) or any(not c.alive() for c in cs):
+                stop = "a copy crashed or exited"
+                break
+            if any(c.watch.count("[NETPLAY] desync in") or c.watch.count("[NETPLAY] gave up") for c in cs):
+                time.sleep(5)
+                stop = "desync or gave up"
+                break
+            if all(c.watch.count("[SOCIAL-TEST] step") >= len(steps[c.index].split(";")) for c in cs):
+                stop = "done"
+                break
+            time.sleep(1)
+        else:
+            stop = "timeout after %d s" % timeout
+        time.sleep(3)
+        s.poll()
+        texts = {i: logparse.read_text(c.log) for i, c in s.copies.items()}
+
+        def lines(i, mark):
+            return [l for l in texts[i].splitlines() if mark in l]
+
+        def venue_log(i):       # the copy's last turflog line for the venue
+            return (lines(i, "[SOCIAL-UI] turf venue %d " % TURF_VENUE) or [""])[-1]
+        api = "http://127.0.0.1:%d" % acc_port
+        if off:
+            status, body = _http("GET", api + "/api/turf?format=text")
+            checks = {
+                "service_404": status == 404,
+                "game_off": bool(lines(0, "[ONLINE] turf map: off (HTTP 404)")),
+                "hub_hidden": bool(lines(0, "[SOCIAL-UI] turf: hub entry hidden")) and not lines(0, "hub entry shown"),
+            }
+            result["api"] = "HTTP %d" % status
+        else:
+            status, public = _http("GET", api + "/api/turf?format=text")
+            pub = _turf_venue(public, TURF_VENUE)
+            winner = pub[5] if len(pub) > 5 else ""
+            lb, lm = (0, 1) if winner == "RHR" else (2, 3)     # the losing crew's Boss and member
+            _, rhr_map = _http("GET", api + "/api/turf?format=text", tokens[names[lb]])
+            rhr = _turf_venue(rhr_map, TURF_VENUE)
+            post_status, post_body = _http("POST", api + "/api/turf/challenge", tokens[names[lb]], json.dumps({"venue": TURF_VENUE}))
+            _, ev = _http("GET", "http://127.0.0.1:%d/internal/turf/events?after=0&n=50" % (acc_port + 1))
+            try:
+                events = json.loads(ev).get("events") or []
+            except ValueError:
+                events = []
+            kinds = [e.get("kind") for e in events]
+            before = lines(0, "[SOCIAL-UI] turf venue %d " % TURF_VENUE)[:1]
+            results = {i: (lines(i, "result: winner") or [""])[-1] for i in texts}
+            checks = {
+                "hub_entry": bool(lines(0, "[SOCIAL-UI] turf: hub entry shown")),
+                "page_map": bool(lines(0, "[ONLINE] turf map: season")) and bool(before) and "owner 0 []" in before[0]
+                            and "officer 1" in before[0] and "CLAIM: PICK A CREW" in before[0],
+                "picker_rhr": bool(lines(0, "[SOCIAL-UI] turf: picker up, crews [RHR")),
+                "claim_posted": any('/api/turf/challenge {"venue":%d,"crew":' % TURF_VENUE in l and "-> HTTP 200" in l
+                                    for l in lines(0, "[ONLINE] turf: POST")),
+                "all_joined": all(lines(i, "joining its room") for i in texts),
+                "battle_over": all(any("state 2" in l for l in lines(i, "[NETPLAY] crew battle")) for i in texts),
+                "result_in_games": all("result: winner" in results[i] for i in texts),
+                "map_holder": status == 200 and winner in ("BXK", "RHR") and len(pub) > 8 and pub[8] != "0",
+                "claimed_event": "claimed" in kinds,
+                # every copy still on the online screens after the battle (some go on into the game's own menus
+                # with the pad script, where the ui: steps time out) shows the holder; both Bosses always do
+                "pages_show_holder": bool(winner) and all(("[%s]" % winner) in venue_log(i) for i in range(4) if venue_log(i))
+                                     and all(venue_log(i) for i in (0, 2)),
+                "protection_why": len(rhr) > 19 and rhr[18] == "0" and ("protected" in rhr[19] or "again from" in rhr[19]) and "can 0" in venue_log(lb)
+                                  and "actions []" in venue_log(lb) and rhr[19].lower() in venue_log(lb).lower(),
+                "protection_post": post_status == 409,
+                "member_readonly": any(venue_log(i) for i in (1, 3)) and
+                                   all("officer 0" in venue_log(i) and "actions []" in venue_log(i) for i in (1, 3) if venue_log(i))
+                                   and ("Boss or a Lieutenant" in venue_log(lm) or not venue_log(lm)),
+            }
+            result["map"] = "|".join(pub[:11])
+            result["loser_boss"] = "copy %d" % lb
+            result["loser_why"] = rhr[19] if len(rhr) > 19 else None
+            result["loser_post"] = "HTTP %d %s" % (post_status, post_body.strip()[:140])
+            result["events"] = [e.get("text", "")[:140] for e in events]
+            result["results"] = {i: results[i].split("] ", 1)[-1][:200] for i in results}
+            result["venue_logs"] = {i: venue_log(i).split("] ", 1)[-1][:260] for i in range(4)}
+        result["checks"] = checks
+        picked = []
+        try:
+            from PIL import Image
+        except ImportError:
+            Image = None
+        want = ("turf", "turf-claim", "crewbattle", "crewbattle-over", "plain")
+        for i, d in shots.items():
+            last = {}
+            for p in sorted(glob.glob(os.path.join(d, "*.bmp"))):
+                base = os.path.splitext(os.path.basename(p))[0]
+                label = base.split("-", 1)[1] if "-" in base else "plain"
+                if label in want and (label != "plain" or off):
+                    last[label] = p
+                    if label == "turf":
+                        last.setdefault("turf-first", p)
+            for label, p in sorted(last.items()):
+                name = "copy%d-%s.png" % (i, label)
+                if Image:
+                    for target in [os.path.join(s.dir, name)] + ([os.path.join(out_dir, name)] if out_dir else []):
+                        os.makedirs(os.path.dirname(target), exist_ok=True)
+                        Image.open(p).convert("RGB").save(target)
+                picked.append(name)
+        if not off:     # the TURF page captured after the battle (the new holder), on the Boss and on a member
+            def after(i):
+                names = [os.path.basename(p) for p in sorted(glob.glob(os.path.join(shots[i], "*.bmp")))]
+                fight = [k for k, b in enumerate(names) if "crewbattle" in b or "fightchat" in b or "versus" in b]
+                return any(b.endswith("-turf.bmp") and k > (fight[-1] if fight else -1) for k, b in enumerate(names))
+            result["turf_page_after"] = {i: after(i) for i in range(4)}
+            checks["turf_page_after"] = any(result["turf_page_after"].values())
+        result["captures"] = picked
+        result["stop"] = stop
+        result["faults"] = {i: _faults(t) for i, t in texts.items() if _faults(t)}
+        result["logs"] = [_relpath(c.log) for c in s.copies.values()]
+        result["ok"] = stop == "done" and all(checks.values()) and not result["faults"]
+    finally:
+        _finish(s, result, t0)
+    return result
+
+
 # ---- offline --------------------------------------------------------------------------------------
 
 def offline(type=0, venue=1, f0=55, f1=22, cpu=True, bot=None, fast_ko=600, turbo=False, timeout=420,

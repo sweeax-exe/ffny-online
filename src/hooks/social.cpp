@@ -825,8 +825,8 @@ std::string presence_json()
 // 60 s for the friendship), global:REGION:TEXT, remove:NAME, log (the state, one line). Stage 2c:
 // block:NAME / unblock:NAME, report:NAME (their newest global line, else a DM), dms:everyone|friends|off,
 // avatar:on|off (show my picture), crew:NAME:TAG (create), crewinvite:NAME, crewjoin (the first invite,
-// waiting up to 60 s), crewrole:NAME:ROLE, crewkick:NAME, crewleave. Each step writes a [SOCIAL-TEST]
-// line.
+// waiting up to 60 s), crewrole:NAME:ROLE, crewkick:NAME, crewleave; ladderwait:TAG:N (until the ladder
+// shows crew TAG with N members, 4 min). Each step writes a [SOCIAL-TEST] line.
 
 struct TestRun {
     std::vector<std::string> steps;
@@ -964,6 +964,17 @@ void test_tick()
         timed_out = now - g_test.since > 600000;
         if (!over && !timed_out) done = false;
         else ladder();
+    } else if (what == "ladderwait") {          // ladderwait:TAG:N, until the crew ladder shows crew TAG with N members (4 min)
+        std::string tag = arg.substr(0, arg.find(':'));
+        int want = arg.find(':') == std::string::npos ? 1 : atoi(arg.c_str() + arg.find(':') + 1);
+        bool there = false;
+        { std::lock_guard<std::mutex> lk(g_mu); for (auto &r : g_v.ladder) if (r.tag == tag && r.members >= want) there = true; }
+        timed_out = now - g_test.since > 240000;
+        static unsigned long long asked;
+        if (!there && !timed_out) {
+            if (now - asked > 3000) { asked = now; ladder(); }
+            done = false;
+        }
     } else if (what == "ladder") {
         ladder();
     } else if (what == "log") {
