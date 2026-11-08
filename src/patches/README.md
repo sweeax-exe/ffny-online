@@ -22,7 +22,8 @@ or `src/recomp_manual.c`.
   enable step is applied whatever the scene. Off by default ([language packs](../../docs/language-packs.md)).
 - `game_language.c`: `[language] game = french` starts the game in the French built into the disc (string
   table `cmfren.loc`): the boot call to guest `0x00044FC0` asks for language 3 instead of 1. English by
-  default, and never while a language mod is on ([the game's own French](../../docs/language-packs.md#the-games-own-french)).
+  default; an active language mod selects its base slot instead (English by default, or French with
+  `base=french`). See [language packs](../../docs/language-packs.md#mods-built-on-the-french-slot).
 - `picture.c`: `[display] brightness` (a curve on top of the title's gamma ramp), `vignette` and
   `vignette_strength` (the venue post effect's darkened edges: removed, or blended towards the
   undarkened picture). Defaults leave the picture exactly as before; all three apply as they change.
