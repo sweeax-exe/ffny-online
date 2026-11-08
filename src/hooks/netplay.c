@@ -404,6 +404,7 @@ static struct {
     int cp_tries;
     uint32_t cp_start_crc[ROOMSLOTS];   /* by room slot: the record START named, 0 none */
     volatile LONG cp_waiting;       /* START waits for records (cp_wait_m) */
+    volatile LONG cp_refused;       /* the relay refused a RECGET of that wait (ERROR 9: not in a room) */
     ULONGLONG cp_wait_since, cp_get_sent;
     AutoMatch cp_wait_m;
     int koth_match;                 /* this START is a King of the Hill fight */
@@ -2767,6 +2768,22 @@ static int cp_records_complete(int ask)
             memcpy(N.cp_rec[slot], N.cp_prev, CP_REC_LEN);
             N.cp_have[slot] = 1;
         }
+        if (!(N.cp_have[slot] && cp_record_crc(N.cp_rec[slot]) == N.cp_start_crc[slot])) {
+            /* the relay's copy is not here, but this PC's own created fighters hold the same record
+             * (the players share the save files): played from that, no RECGET needed. The CRC covers
+             * the whole record and cp_local_find checks it, so every PC writes the same bytes. */
+            uint8_t local[CP_REC_LEN];
+            int index = -1;
+            if (cp_local_find(N.cp_start_crc[slot], local, &index)) {
+                char name[CP_NAME_MAX + 1];
+                memcpy(N.cp_rec[slot], local, CP_REC_LEN);
+                N.cp_have[slot] = 1;
+                N.roomv.version++;
+                cp_record_name(local, name, sizeof(name));
+                fprintf(stderr, "[NETPLAY] slot %d plays record %08X: not here from the relay; this PC's own created "
+                        "fighter %d (%s) is the same record, played from that\n", slot, N.cp_start_crc[slot], index, name);
+            }
+        }
         if (N.cp_have[slot] && cp_record_crc(N.cp_rec[slot]) == N.cp_start_crc[slot]) continue;
         complete = 0;
         if (ask)
@@ -3034,6 +3051,7 @@ static void on_start_as(const uint8_t *b, int len, int watching)
          * thread asks again), so every PC writes the same one */
         N.cp_wait_m = m;
         N.cp_wait_since = N.cp_get_sent = GetTickCount64();
+        InterlockedExchange(&N.cp_refused, 0);
         InterlockedExchange(&N.cp_waiting, 1);
         LeaveCriticalSection(&g_cs);
         fprintf(stderr, "[NETPLAY] waiting for a created fighter's record\n");
@@ -3126,6 +3144,7 @@ static void spec_late_tick(void)
     if (!cp_records_complete(1)) {
         N.cp_wait_m = N.spec_late_m;
         N.cp_wait_since = N.cp_get_sent = GetTickCount64();
+        InterlockedExchange(&N.cp_refused, 0);
         InterlockedExchange(&N.cp_waiting, 1);
         LeaveCriticalSection(&g_cs);
         fprintf(stderr, "[NETPLAY] waiting for a created fighter's record\n");
@@ -3343,6 +3362,14 @@ static void on_packet(const uint8_t *b, int len)
                 N.roomv.version++;
                 LeaveCriticalSection(&g_cs);
                 fprintf(stderr, "[NETPLAY] refused: %s\n", text);
+                break;
+            }
+            if (N.lobby && code == 9 && N.cp_waiting && !N.pend_len) {
+                /* no request is pending, so this answers a RECGET of the START's wait for a created
+                 * fighter's record: the relay has this PC in no room (a live case, build 61). The wait
+                 * ends at once (the network thread), not after CP_WAIT_MS of asking again */
+                if (!InterlockedExchange(&N.cp_refused, 1))
+                    fprintf(stderr, "[NETPLAY] refused: %s (a created fighter's record, RECGET)\n", text);
                 break;
             }
             if (N.lobby && (code == 1 || code == 2 || code == 3 || code == 8 || code == 9 || code == 10)) {
@@ -3621,19 +3648,26 @@ static DWORD WINAPI net_thread(LPVOID unused)
             if (n) send_raw(fb, n);
         }
         if (N.cp_waiting) {
-            int complete, late, left;
+            int complete, late, left, refused;
             AutoMatch wm;
             EnterCriticalSection(&g_cs);
-            /* the room said a player of this START left meanwhile (on_room: lockstep off): nothing
-             * is set up, and the wait ends now, not after CP_WAIT_MS of asking for a record */
-            left = !N.lockstep;
+            /* the room said a player of this START left meanwhile (on_room: lockstep off), or the
+             * relay refused a RECGET (ERROR 9: this PC is not in a room there): nothing is set up,
+             * and the wait ends now, not after CP_WAIT_MS of asking for a record */
+            refused = N.cp_refused != 0;
+            left = !N.lockstep || refused;
             complete = !left && cp_records_complete(now - N.cp_get_sent >= RETRY_MS);
             if (now - N.cp_get_sent >= RETRY_MS) N.cp_get_sent = now;
             late = now - N.cp_wait_since >= CP_WAIT_MS;
             wm = N.cp_wait_m;
             if (complete || late || left) InterlockedExchange(&N.cp_waiting, 0);
             LeaveCriticalSection(&g_cs);
-            if (left) {
+            if (refused) {
+                fprintf(stderr, "[NETPLAY] the relay refused the created fighter's record (ERROR 9: not in a room "
+                        "there) while this PC waited for it: the match is not set up\n");
+                end_hub_match("the relay refused a created fighter's record (not in a room)");
+                toast(6000, "The match could not start: the server lost the room.");
+            } else if (left) {
                 fprintf(stderr, "[NETPLAY] a player left while this PC waited for a created fighter's record: "
                         "the match is not set up\n");
                 end_hub_match("The other player left before the fight started.");
@@ -3813,6 +3847,7 @@ static int start(const char *server, const char *name, int creating, const char 
     memset(N.cp_have, 0, sizeof(N.cp_have));
     memset(N.cp_start_crc, 0, sizeof(N.cp_start_crc));
     N.cp_waiting = 0;
+    N.cp_refused = 0;
     created_fighter_reload();
     N.koth_match = 0;
     N.set_match = 0;

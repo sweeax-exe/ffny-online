@@ -691,6 +691,21 @@ int cp_local_record(uint8_t rec[CP_REC_LEN])
     return i >= 0;
 }
 
+int cp_local_find(uint32_t crc, uint8_t rec[CP_REC_LEN], int *index)
+{
+    int i, found = -1;
+    if (!crc) return 0;
+    InitOnceExecuteOnce(&g_local_once, local_init, NULL, NULL);
+    EnterCriticalSection(&g_local_cs);
+    /* never reads the files here (the caller may hold the session's lock): the list read before */
+    for (i = 0; g_local_state && i < g_local_count && found < 0; i++)
+        if (cp_record_crc(g_local[i].rec) == crc && cp_record_sealed(g_local[i].rec)) found = i;
+    if (found >= 0) memcpy(rec, g_local[found].rec, CP_REC_LEN);
+    LeaveCriticalSection(&g_local_cs);
+    if (index) *index = found;
+    return found >= 0;
+}
+
 void created_fighter_reload(void)
 {
     InitOnceExecuteOnce(&g_local_once, local_init, NULL, NULL);
