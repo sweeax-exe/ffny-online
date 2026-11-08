@@ -31,6 +31,9 @@ extern "C" {
 void saves_game_starts(void);
 /* Before an update is installed or the setup is opened for one (the launcher). */
 void saves_backup_before_update(void);
+/* The game is about to delete a folder (XAPI's tree delete, src/recomp_manual.c): when it is a
+ * profile folder under UDATA/45410049, a copy goes to <data>/save-backups/quarantine first. */
+void saves_game_deletes(const char *guest_path);
 
 #ifdef __cplusplus
 }

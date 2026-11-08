@@ -1,13 +1,14 @@
 // The launcher's Saves page (included by pc_ui.cpp after the settings dialog, so it draws with the
 // same glass, fonts and buttons). A glass dialog like Settings: the profiles and the Options file
 // on the left with Import saves (Xbox folders or zips, PS2 .psu exports), the backups on the right with Back up now and Restore, and
+// the profiles the game deleted (save-backups/quarantine, Bring back = import that copy), and
 // one plain line at the foot that says what happened. The work is save_manager.cpp; where the files
 // are and whether the game runs, pc_launcher_saves.cpp.
 //
 // Tests and pictures: RECOMP_LAUNCHER_PAGE=saves opens it at start; RECOMP_TEST_SAVES runs steps
 // "<frame>:<action>[:<argument>]" separated by ';' once the dialog is open: backup, import:<path>
 // (as if that folder or zip was picked), replace:<profile name> (ticks Replace), import-ok,
-// restore:<row>, restore-ok, folder (Open folder).
+// restore:<row>, restore-ok, folder (Open folder), bring:<row> (Bring back a profile the game deleted).
 
 #include "pc_launcher_saves.h"
 #include "created_fighter.h"     // cp_names_setting_get: the created fighters' online names
@@ -19,6 +20,8 @@ struct SavesPage
     bool loaded = false;
     std::vector<saves::Entry> entries;
     std::vector<saves::Backup> backups;
+    std::vector<saves::Quarantined> deleted;        // profiles the game deleted (save-backups/quarantine)
+    std::string bring_back;                         // a quarantine copy to import, at the dialog's level
     std::map<std::string, std::string> online;      // "<folder>/<file>" -> online name of its created fighter
     std::string message;
     int tone = 0;                                   // 0 plain, 1 done, 2 refused or failed
@@ -63,6 +66,7 @@ void saves_refresh()
 {
     g_sp.entries = saves::list_saves(pcsaves::save_dir());
     g_sp.backups = saves::list_backups(pcsaves::backup_dir());
+    g_sp.deleted = saves::list_quarantine(pcsaves::backup_dir());
     g_sp.online.clear();
     char text[1024] = "";
     cp_names_setting_get(text, (int)sizeof(text));
@@ -182,6 +186,8 @@ void saves_test_steps()
         else if (s.action == "restore") saves_ask_restore(atoi(s.arg.c_str()));
         else if (s.action == "restore-ok") g_sp.want_restore_ok = true;
         else if (s.action == "folder") saves_open_folder();
+        else if (s.action == "bring" && atoi(s.arg.c_str()) >= 0 && atoi(s.arg.c_str()) < (int)g_sp.deleted.size())
+            g_sp.bring_back = pcui::path_utf8(g_sp.deleted[atoi(s.arg.c_str())].path);
     }
 }
 
@@ -266,6 +272,22 @@ void saves_backups(float w, float h, float s)
     }
     if (g_sp.backups.empty())
         ImGui::TextColored(ImVec4(1, 1, 1, 0.65f), "No backups yet.");
+    // Profiles the game itself deleted: Bring back imports the copy (asks before replacing one)
+    for (int i = 0; i < (int)g_sp.deleted.size(); i++) {
+        auto &q = g_sp.deleted[i];
+        ImVec2 a = ImGui::GetCursorScreenPos(), z(a.x + rw, a.y + row_h);
+        std::string head = saves::describe_time(q.when);
+        if (!head.empty()) head[0] = (char)toupper((unsigned char)head[0]);
+        std::string line = "Deleted by the game  \xC2\xB7  " + (q.profile.empty() ? q.folder : q.profile);
+        saves_row(dl, a, ImVec2(z.x, z.y), s, head.c_str(), line.c_str(), ImVec4(0.80f, 0.80f, 0.82f, 1));
+        ImGui::PushID(1000 + i);
+        if (glass_button("##bring", "Bring back", ImVec2(z.x - 110 * s, a.y + 16 * s), ImVec2(96 * s, 28 * s), s,
+                         GLASS_PLAIN, bold_font(), 13.5f * s))
+            g_sp.bring_back = pcui::path_utf8(q.path);
+        ImGui::PopID();
+        ImGui::SetCursorScreenPos(a);
+        ImGui::Dummy(ImVec2(rw, row_h + gap));
+    }
     ImGui::EndChild();
 }
 
@@ -448,6 +470,11 @@ static void saves_dialog(ImVec2 o, float w, float h, float s)
             g_sp.picking = false;
             if (!path.empty()) saves_start_import(path);
         }
+    }
+    if (!g_sp.bring_back.empty()) {
+        std::string path = g_sp.bring_back;
+        g_sp.bring_back.clear();
+        if (!saves_refuse_while_running("saves can be imported")) saves_start_import(path);
     }
     if (g_sp.open_restore) {
         g_sp.open_restore = false;

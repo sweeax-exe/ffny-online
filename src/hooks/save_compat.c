@@ -21,6 +21,8 @@ void defjam_save_compat_init(const char *user_data_dir)
         strcpy(s_save_dir, user_data_dir);
 }
 
+const char *defjam_save_user_data_dir(void) { return s_save_dir; }
+
 static int path_exists(const char *path)
 {
 #ifdef _WIN32

@@ -73,6 +73,8 @@ def backups(data):
     out = []
     folder = data / 'save-backups'
     for d in sorted(folder.iterdir(), reverse=True) if folder.is_dir() else []:
+        if d.name == 'quarantine':
+            continue
         info = dict(l.split('=', 1) for l in (d / 'backup.txt').read_text().split('\n') if '=' in l)
         out.append((d.name, info.get('reason')))
     return out
@@ -130,6 +132,12 @@ def main():
     vy2 = put(title, 'VY2', profile('VY2', key=bytes(16), created=True))
     put(title, 'KID', profile('KID', key=bytes(16)))
     put(title, 'XBOX1', profile('XBOX1', key=bytes(range(16))))         # copied from an Xbox, never signed again
+    # a profile the game deleted earlier, kept in quarantine (src/hooks/pc_launcher_saves.cpp)
+    gone = data / 'save-backups' / 'quarantine' / ('20261101-120000-' + save_import.folder_name('GONE'))
+    gone.mkdir(parents=True)
+    (gone / 'SaveMeta.xbx').write_bytes(meta('GONE'))
+    (gone / 'GONE').write_bytes(profile('GONE', key=bytes(16)))
+    (gone / 'saveimage.xbx').write_bytes(b'\0' * 4096)
     options = title / save_import.folder_name('Options')
     options.mkdir()
     (options / 'SaveMeta.xbx').write_bytes(meta('Options'))
@@ -187,6 +195,11 @@ def main():
           'Backup restored from' in text)
     step('restore', png and ok, png, restored_from)
 
+    code, text, png = launcher(run, data, settings, '07b-bring-back', steps='10:bring:0;20:import-ok', frame=40)
+    back = title / save_import.folder_name('GONE') / 'GONE'
+    step('bring back a deleted profile', png and back.is_file() and back.read_bytes() == (gone / 'GONE').read_bytes() and
+         'Imported 1 profile' in text, png)
+
     # The game itself on this data folder: the daily backup, then a launcher that must refuse.
     game_env = env_for(data, 'none', {'RECOMP_AUDIO_MUTE': '1'})
     game_log = run / '08-game.log'
@@ -215,6 +228,8 @@ def main():
     # no backup from today any more (their times moved two days back): the game makes one
     yesterday = int(time.time()) - 2 * 86400
     for d in (data / 'save-backups').iterdir():
+        if d.name == 'quarantine':
+            continue
         lines = [l for l in (d / 'backup.txt').read_text().split('\n') if l and not l.startswith('when=')]
         (d / 'backup.txt').write_text('when=%d\n' % yesterday + '\n'.join(lines) + '\n')
     game_log = run / '10-game-daily.log'

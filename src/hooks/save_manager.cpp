@@ -411,13 +411,15 @@ std::vector<Backup> list_backups(const fs::path &backups)
         b.path = it->path();
         std::ifstream info(it->path() / "backup.txt");
         std::string line;
+        bool counted = false;
         while (std::getline(info, line)) {
             if (!line.empty() && line.back() == '\r') line.pop_back();
             if (!line.compare(0, 5, "when=")) b.when = atoll(line.c_str() + 5);
             else if (!line.compare(0, 7, "reason=")) b.reason = line.substr(7);
-            else if (!line.compare(0, 9, "profiles=")) b.profiles = atoi(line.c_str() + 9);
+            else if (!line.compare(0, 9, "profiles=")) b.profiles = atoi(line.c_str() + 9), counted = true;
         }
         if (!b.when) b.when = time_of_name(name);
+        if (!counted) b.profiles = count_profiles(it->path());
         out.push_back(b);
     }
     std::sort(out.begin(), out.end(), [](const Backup &a, const Backup &b) { return newer(a.name, b.name); });
@@ -428,9 +430,17 @@ int rotate(const fs::path &backups, int keep, const std::string &protect)
 {
     auto list = list_backups(backups);
     int kept = 0, removed = 0;
+    std::string good;                       // the newest backup with a profile in it stays, whatever its age
+    for (auto &b : list)
+        if (b.profiles > 0) { good = b.name; break; }
     for (auto &b : list) {
         if (b.name == protect) continue;
         if (kept < keep) { kept++; continue; }
+        if (b.name == good) {
+            fprintf(stderr, "[SAVES] backup %s kept past the newest %d: it is the newest one with a profile (%d)\n",
+                    b.name.c_str(), keep, b.profiles);
+            continue;
+        }
         // only ever a backup folder directly inside save-backups (list_backups found it there)
         if (!is_backup_name(pcui::path_utf8(b.path.filename()))) continue;
         if (remove_tree(b.path)) {
@@ -449,6 +459,20 @@ bool make_backup(const fs::path &save_dir, const fs::path &backups, const std::s
         if (error) *error = "There are no saves to back up yet.";
         return false;
     }
+    int profiles = count_profiles(save_dir);
+    if (!profiles && (reason == "start" || reason == "update")) {
+        // TitleMeta.xbx and TitleImage.xbx are always there: an empty save area would still copy, and
+        // a run of such backups used to push the last good one out
+        auto list = list_backups(backups);
+        if (!list.empty() && list[0].profiles > 0) {
+            fprintf(stderr, "[SAVES] %s backup skipped: the saves hold no profile and the newest backup %s has %d\n",
+                    reason.c_str(), list[0].name.c_str(), list[0].profiles);
+            if (error)
+                *error = "skipped: the saves hold no profile and the newest backup (" + list[0].name + ") has " +
+                         plural(list[0].profiles, "profile", "profiles");
+            return false;
+        }
+    }
     std::error_code ec;
     fs::create_directories(backups, ec);
     std::string name = stamp(now);
@@ -456,9 +480,6 @@ bool make_backup(const fs::path &save_dir, const fs::path &backups, const std::s
     fs::path dst = backups / name;
     int files = 0;
     std::string why;
-    int profiles = 0;
-    for (auto &e : list_saves(save_dir))
-        if (e.kind == Entry::PROFILE) profiles++;
     if (!copy_tree(src, dst / "UserData", &files, &why)) {
         remove_tree(dst);
         if (error) *error = "The backup failed: " + why + ".";
@@ -474,6 +495,14 @@ bool make_backup(const fs::path &save_dir, const fs::path &backups, const std::s
     return true;
 }
 
+int count_profiles(const fs::path &save_dir)
+{
+    int profiles = 0;
+    for (auto &e : list_saves(save_dir))
+        if (e.kind == Entry::PROFILE) profiles++;
+    return profiles;
+}
+
 bool daily_due(const fs::path &backups, int64_t now)
 {
     std::tm today = local(now);
@@ -481,6 +510,42 @@ bool daily_due(const fs::path &backups, int64_t now)
         std::tm t = local(b.when);
         if (t.tm_year == today.tm_year && t.tm_yday == today.tm_yday) return false;
     }
+    return true;
+}
+
+// Moves a UserData.replaced an earlier restore left behind into save-backups as a backup of its own.
+static bool keep_leftover(const fs::path &old, const fs::path &backups, int64_t now, std::string *made,
+                          std::string *error)
+{
+    std::error_code ec;
+    fs::create_directories(backups, ec);
+    std::string name = stamp(now);
+    for (int n = 2; fs::exists(backups / name, ec) && n < 100; n++) name = stamp(now) + "-" + std::to_string(n);
+    fs::path dst = backups / name;
+    fs::create_directories(dst, ec);
+    if (ec) { if (error) *error = "could not make " + pcui::path_utf8(dst); return false; }
+    int files = count_files(old);
+    fs::rename(old, dst / "UserData", ec);
+    if (ec) {
+        // another volume or a held file: copy, and remove the original only once every file is there
+        std::string why;
+        int copied = 0;
+        if (!copy_tree(old, dst / "UserData", &copied, &why) || count_files(dst / "UserData") != files) {
+            remove_tree(dst);
+            if (error) *error = why.empty() ? "not every file could be copied" : why;
+            return false;
+        }
+        remove_tree(old);
+    }
+    int profiles = count_profiles(dst);
+    {
+        std::ofstream info(dst / "backup.txt", std::ios::trunc);
+        info << "when=" << now << "\nreason=leftover\nprofiles=" << profiles << "\nfrom=" << pcui::path_utf8(old)
+             << " (left by a restore that did not finish)\n";
+    }
+    fprintf(stderr, "[SAVES] %s from an unfinished restore kept as backup %s: %d files, %d profiles\n",
+            pcui::path_utf8(old).c_str(), name.c_str(), files, profiles);
+    if (made) *made = name;
     return true;
 }
 
@@ -495,21 +560,25 @@ bool restore(const fs::path &save_dir, const fs::path &backups, const std::strin
     fs::path src = chosen.path / "UserData";
     if (!real_dir(src)) { say("That backup has no saves in it."); return false; }
     fs::path live = save_dir / "UserData";
+    fs::path incoming = save_dir / "UserData.restoring", old = save_dir / "UserData.replaced";
+    std::string made, why, leftover;
+    std::error_code ec;
+    if (fs::exists(fs::symlink_status(old, ec)) && !keep_leftover(old, backups, now, &leftover, &why)) {
+        say("Nothing was changed: an earlier restore left " + pcui::path_utf8(old.filename()) +
+            " behind and it could not be moved into the backups (" + why + ").");
+        return false;
+    }
     bool had = real_dir(live) && count_files(live);
-    std::string made, why;
     if (had && !make_backup(save_dir, backups, "restore", now, &made, &why, name)) {
         say("Nothing was changed: your saves could not be backed up first. " + why);
         return false;
     }
-    fs::path incoming = save_dir / "UserData.restoring", old = save_dir / "UserData.replaced";
-    remove_tree(incoming);
-    remove_tree(old);
+    remove_tree(incoming);              // only ever a copy of a backup that is still there
     if (!copy_tree(src, incoming, nullptr, &why)) {
         remove_tree(incoming);
         say("Nothing was changed: the backup could not be copied (" + why + ").");
         return false;
     }
-    std::error_code ec;
     if (fs::exists(live, ec)) {
         fs::rename(live, old, ec);
         if (ec) {
@@ -534,6 +603,74 @@ bool restore(const fs::path &save_dir, const fs::path &backups, const std::strin
     return true;
 }
 
+// ---- profiles the game deletes ----
+
+bool is_quarantine_name(const std::string &name)
+{
+    if (name.size() < 17 || name.size() > 15 + 1 + 48 || !is_backup_name(name.substr(0, 15)) || name[15] != '-')
+        return false;
+    for (size_t i = 16; i < name.size(); i++)
+        if (!isalnum((unsigned char)name[i]) && name[i] != '_' && name[i] != '-') return false;
+    return true;
+}
+
+std::vector<Quarantined> list_quarantine(const fs::path &backups)
+{
+    std::vector<Quarantined> out;
+    std::error_code ec;
+    for (fs::directory_iterator it(backups / "quarantine", ec), end; !ec && it != end; it.increment(ec)) {
+        std::string name = pcui::path_utf8(it->path().filename());
+        if (it->symlink_status(ec).type() != fs::file_type::directory || !is_quarantine_name(name)) continue;
+        Quarantined q;
+        q.name = name;
+        q.path = it->path();
+        q.folder = name.substr(16);
+        q.when = time_of_name(name);
+        Bytes meta;
+        fs::path meta_path = find_file(it->path(), "SaveMeta.xbx");
+        if (!meta_path.empty() && read_file(meta_path, meta, 64 * 1024)) parse_save_meta(meta, q.profile);
+        out.push_back(q);
+    }
+    std::sort(out.begin(), out.end(), [](const Quarantined &a, const Quarantined &b) {
+        std::string sa = a.name.substr(0, 15), sb = b.name.substr(0, 15);
+        return sa != sb ? sa > sb : a.name > b.name;
+    });
+    return out;
+}
+
+bool quarantine(const fs::path &folder, const fs::path &backups, int64_t now, std::string *made, std::string *error,
+                int keep)
+{
+    if (!real_dir(folder) || !count_files(folder)) {
+        if (error) *error = "there is nothing in " + pcui::path_utf8(folder.filename());
+        return false;
+    }
+    std::string base = pcui::path_utf8(folder.filename());
+    for (char &ch : base)
+        if (!isalnum((unsigned char)ch) && ch != '_') ch = '_';
+    if (base.size() > 40) base.resize(40);
+    fs::path q = backups / "quarantine";
+    std::error_code ec;
+    fs::create_directories(q, ec);
+    std::string name = stamp(now) + "-" + base;
+    for (int n = 2; fs::exists(q / name, ec) && n < 100; n++) name = stamp(now) + "-" + base + "-" + std::to_string(n);
+    std::string why;
+    if (!copy_tree(folder, q / name, nullptr, &why)) {
+        remove_tree(q / name);
+        if (error) *error = why;
+        return false;
+    }
+    if (made) *made = name;
+    auto list = list_quarantine(backups);
+    for (size_t i = (size_t)std::max(keep, 1); i < list.size(); i++) {
+        // only ever a folder of the quarantine name shape directly inside save-backups/quarantine
+        if (!is_quarantine_name(pcui::path_utf8(list[i].path.filename())) || list[i].path.parent_path() != q) continue;
+        if (remove_tree(list[i].path))
+            fprintf(stderr, "[SAVES] old quarantine copy %s removed (the newest %d are kept)\n", list[i].name.c_str(), keep);
+    }
+    return true;
+}
+
 std::string describe_time(int64_t when)
 {
     if (!when) return "an unknown time";
@@ -554,6 +691,7 @@ std::string describe_reason(const std::string &reason)
     if (reason == "manual") return "Made by you";
     if (reason == "restore") return "Before a restore";
     if (reason == "import") return "Before an import";
+    if (reason == "leftover") return "Left by an unfinished restore";
     return "Backup";
 }
 

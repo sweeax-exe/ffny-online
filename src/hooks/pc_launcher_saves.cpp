@@ -3,6 +3,9 @@
 #include "pc_launcher_saves.h"
 #include "pc_ui_actions.h"
 #include "pc_ui_model.h"
+extern "C" {
+#include "save_compat.h"
+}
 
 #include <cctype>
 #include <cstdio>
@@ -20,6 +23,13 @@
 #include <fcntl.h>
 #include <sys/file.h>
 #include <unistd.h>
+#endif
+
+// The runtime's guest path translation (xboxrecomp kernel.h), the same rules every guest file call uses.
+#if defined(_WIN32)
+extern "C" BOOL xbox_translate_path(const char *xbox_path, WCHAR *host_path_buf, DWORD buf_size);
+#else
+extern "C" int xbox_translate_path(const char *xbox_path, char *host_path_buf, uint32_t buf_size);
 #endif
 
 namespace pcsaves
@@ -228,5 +238,42 @@ extern "C" void saves_backup_before_update(void)
         fprintf(stderr, "[SAVES] backup before the update: %s\n", pcui::path_utf8(backups / made).c_str());
     else
         fprintf(stderr, "[SAVES] backup before the update: %s\n", why.c_str());
+    fflush(stderr);
+}
+
+// XAPI's tree delete is about to run (sub_001FBCCA_enter, src/recomp_manual.c): XDeleteSaveGame removing
+// a profile, or its other caller. When the folder is one directly under UDATA/45410049, a copy goes to
+// save-backups/quarantine first; the delete itself goes ahead (the game recreates the profile right
+// after for its requests 6 and 19). Runs on the game's storage thread; a profile is about 30 KB.
+extern "C" void saves_game_deletes(const char *guest_path)
+{
+    if (!guest_path) return;
+    char path[300];
+    size_t n = 0;
+    while (n + 1 < sizeof(path) && guest_path[n]) { path[n] = guest_path[n]; n++; }
+    path[n] = 0;
+    while (n && (path[n - 1] == '\\' || path[n - 1] == '/')) path[--n] = 0;
+    const char *udata = defjam_save_user_data_dir();
+    if (!n || !udata || !*udata) return;
+    namespace fs = saves::fs;
+    fs::path host;
+#if defined(_WIN32)
+    wchar_t buf[MAX_PATH * 2];
+    if (!xbox_translate_path(path, buf, MAX_PATH)) return;
+    host = fs::path(buf);
+#else
+    char buf[4096];
+    if (!xbox_translate_path(path, buf, sizeof(buf))) return;
+    host = fs::path(buf);
+#endif
+    std::error_code ec;
+    fs::path title = fs::u8path(udata) / saves::kTitleId;
+    if (!fs::is_directory(host, ec) || !fs::equivalent(host.parent_path(), title, ec) || ec) return;
+    std::string folder = pcui::path_utf8(host.filename()), made, why;
+    if (saves::quarantine(host, pcsaves::backup_dir(), pcsaves::now(), &made, &why))
+        fprintf(stderr, "[SAVES] the game deleted profile %s (copy in save-backups/quarantine/%s)\n", folder.c_str(),
+                made.c_str());
+    else
+        fprintf(stderr, "[SAVES] the game deleted profile %s (no copy: %s)\n", folder.c_str(), why.c_str());
     fflush(stderr);
 }

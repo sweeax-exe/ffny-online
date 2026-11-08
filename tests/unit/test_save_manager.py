@@ -61,6 +61,18 @@ int main(int argc, char **argv) {
         std::cout << ok << " " << message << "\n";
         return ok ? 0 : 1;
     }
+    if (cmd == "quarantine") {
+        std::string made, error;
+        bool ok = quarantine(fs::u8path(argv[2]), fs::u8path(argv[3]), atoll(argv[4]), &made, &error,
+                             argc > 5 ? atoi(argv[5]) : kKeepQuarantine);
+        std::cout << (ok ? "made " + made : "error " + error) << "\n";
+        return ok ? 0 : 1;
+    }
+    if (cmd == "quarantined") {
+        for (auto &q : list_quarantine(fs::u8path(argv[2])))
+            std::cout << q.name << "|" << q.folder << "|" << q.profile << "|" << q.when << "\n";
+        return 0;
+    }
     if (cmd == "list") {
         for (auto &e : list_saves(fs::u8path(argv[2])))
             std::cout << e.kind << "|" << e.name << "|" << e.folder << "|" << e.signed_ok << "|" << e.created << "|"
@@ -213,6 +225,58 @@ def test_backup_rotation_spares_the_protected_one(tool, tmp_path):
     assert oldest in names and len(names) == 11
 
 
+def empty_save_area(save):
+    """What the game leaves when every profile is gone: the title's own two files."""
+    title = save / 'UserData' / '45410049'
+    shutil.rmtree(save / 'UserData', ignore_errors=True)
+    title.mkdir(parents=True)
+    (title / 'TitleMeta.xbx').write_bytes(b'TITLE')
+    (title / 'TitleImage.xbx').write_bytes(b'IMAGE')
+
+
+def test_rotation_keeps_the_newest_backup_with_a_profile(tool, tmp_path):
+    save, backups = tmp_path / 'save', tmp_path / 'save-backups'
+    put_profile(save / 'UserData' / '45410049', 'VY2', profile('VY2', key=bytes(16)))
+    good = run(tool, 'backup', save, backups, 'manual', noon(-30)).split()[1]
+    empty_save_area(save)
+    made = [run(tool, 'backup', save, backups, 'manual', noon(-20 + i)).split()[1] for i in range(12)]
+    rows = [l.split() for l in run(tool, 'backups', backups).splitlines()]
+    names = [r[0] for r in rows]
+    assert names == list(reversed(made[2:])) + [good]
+    assert rows[-1][3] == '1' and all(r[3] == '0' for r in rows[:-1])
+    # a newer backup with a profile takes over; the old good one then goes like any other
+    put_profile(save / 'UserData' / '45410049', 'VY3', profile('VY3', key=bytes(16)))
+    newer = run(tool, 'backup', save, backups, 'manual', noon()).split()[1]
+    names = [l.split()[0] for l in run(tool, 'backups', backups).splitlines()]
+    assert newer in names and good not in names and len(names) == 10
+
+
+def test_no_empty_daily_or_update_backup_over_a_good_one(tool, tmp_path):
+    save, backups = tmp_path / 'save', tmp_path / 'save-backups'
+    empty_save_area(save)
+    # with nothing better there, an empty save area is still backed up
+    first = run(tool, 'backup', save, backups, 'start', noon(-3)).split()[1]
+    put_profile(save / 'UserData' / '45410049', 'VY2', profile('VY2', key=bytes(16)))
+    good = run(tool, 'backup', save, backups, 'start', noon(-2)).split()[1]
+    empty_save_area(save)
+    for reason in ('start', 'update'):
+        out = subprocess.run([str(tool), 'backup', str(save), str(backups), reason, str(noon())],
+                             capture_output=True, text=True)
+        assert out.returncode == 1 and 'skipped' in out.stdout and good in out.stdout, out.stdout
+        assert 'backup skipped' in out.stderr
+    assert [l.split()[0] for l in run(tool, 'backups', backups).splitlines()] == [good, first]
+    # one asked for is always made
+    assert run(tool, 'backup', save, backups, 'manual', noon()).startswith('made')
+
+
+def test_backup_without_a_count_is_counted(tool, tmp_path):
+    save, backups = tmp_path / 'save', tmp_path / 'save-backups'
+    put_profile(save / 'UserData' / '45410049', 'VY2', profile('VY2', key=bytes(16)))
+    name = run(tool, 'backup', save, backups, 'manual', noon()).split()[1]
+    (backups / name / 'backup.txt').write_text('when=%d\nreason=manual\n' % noon())
+    assert run(tool, 'backups', backups).split()[3] == '1'
+
+
 def test_backups_in_one_second_get_their_own_folders(tool, tmp_path):
     save, backups = tmp_path / 'save', tmp_path / 'save-backups'
     put_profile(save / 'UserData' / '45410049', 'VY2', profile('VY2', key=bytes(16)))
@@ -256,6 +320,33 @@ def test_restore_backs_up_the_current_state_first(tool, tmp_path):
     assert not (save / 'UserData.restoring').exists() and not (save / 'UserData.replaced').exists()
 
 
+def test_restore_keeps_a_leftover_from_an_unfinished_restore(tool, tmp_path):
+    save, backups = tmp_path / 'save', tmp_path / 'save-backups'
+    title = save / 'UserData' / '45410049'
+    put_profile(title, 'VY2', profile('VY2', key=bytes(16)))
+    wanted = tree(save / 'UserData')
+    name = run(tool, 'backup', save, backups, 'manual', noon(-1)).split()[1]
+    # an earlier restore stopped between its two renames: the real saves sit in UserData.replaced
+    left = save / 'UserData.replaced' / '45410049'
+    put_profile(left, 'REAL', profile('REAL', key=bytes(16)))
+    put_profile(left, 'REAL2', profile('REAL2', key=bytes(16)))
+    real = tree(save / 'UserData.replaced')
+    (save / 'UserData.restoring').mkdir()
+    (save / 'UserData.restoring' / 'half').write_bytes(b'x')
+    text = run(tool, 'restore', save, backups, name, noon())
+    assert text.startswith('1 Backup restored from')
+    assert tree(save / 'UserData') == wanted
+    assert not (save / 'UserData.replaced').exists() and not (save / 'UserData.restoring').exists()
+    rows = [l.split() for l in run(tool, 'backups', backups).splitlines()]
+    kept = [r for r in rows if r[1] == 'leftover']
+    assert len(kept) == 1 and kept[0][3] == '2'
+    assert tree(backups / kept[0][0] / 'UserData') == real
+    info = (backups / kept[0][0] / 'backup.txt').read_text()
+    assert 'reason=leftover' in info and 'from=' in info and 'UserData.replaced' in info
+    # and the saves from just before the restore were backed up as always
+    assert [r[1] for r in rows].count('restore') == 1
+
+
 def test_restore_keeps_the_backup_it_restores_when_ten_exist(tool, tmp_path):
     save, backups = tmp_path / 'save', tmp_path / 'save-backups'
     put_profile(save / 'UserData' / '45410049', 'VY2', profile('VY2', key=bytes(16)))
@@ -266,6 +357,51 @@ def test_restore_keeps_the_backup_it_restores_when_ten_exist(tool, tmp_path):
     assert names[0] in left and len(left) == 11
     assert run(tool, 'backup', save, backups, 'manual', noon(1)).startswith('made')
     assert len(run(tool, 'backups', backups).splitlines()) == 10
+
+
+# ---- profiles the game deletes ----
+
+def test_quarantine_copies_the_profile_folder(tool, tmp_path):
+    save, backups = tmp_path / 'save', tmp_path / 'save-backups'
+    folder = put_profile(save / 'UserData' / '45410049', 'VY2', profile('VY2', key=bytes(16)))
+    before = tree(folder)
+    made = run(tool, 'quarantine', folder, backups, noon()).split()[1]
+    assert made == time.strftime('%Y%m%d-%H%M%S', time.localtime(noon())) + '-' + folder.name
+    assert tree(backups / 'quarantine' / made) == before
+    assert tree(folder) == before                       # the copy only; the game deletes it itself
+    rows = run(tool, 'quarantined', backups).splitlines()
+    assert rows == ['%s|%s|VY2|%d' % (made, folder.name, noon())]
+    # the same folder twice in one second gets its own copy
+    again = run(tool, 'quarantine', folder, backups, noon()).split()[1]
+    assert again == made + '-2'
+    # Bring back on the Saves page: the importer reads the copy like any folder of Xbox saves
+    other = tmp_path / 'other-save'
+    text = run(tool, 'import', backups / 'quarantine' / made, other, tmp_path / 'other-backups', noon())
+    assert 'found VY2 %s exists=0' % folder.name in text and 'imported=1' in text
+    assert (other / 'UserData' / '45410049' / folder.name / 'VY2').read_bytes() == (folder / 'VY2').read_bytes()
+
+
+def test_quarantine_keeps_the_newest_thirty(tool, tmp_path):
+    save, backups = tmp_path / 'save', tmp_path / 'save-backups'
+    folder = put_profile(save / 'UserData' / '45410049', 'VY2', profile('VY2', key=bytes(16)))
+    q = backups / 'quarantine'
+    q.mkdir(parents=True)
+    (q / 'mine').mkdir()                                # not a quarantine copy: never touched
+    (q / 'notes.txt').write_text('mine')
+    (q / '20200101-120000').mkdir()                      # a backup name, not a quarantine name
+    made = [run(tool, 'quarantine', folder, backups, noon(-40 + i)).split()[1] for i in range(33)]
+    names = [r.split('|')[0] for r in run(tool, 'quarantined', backups).splitlines()]
+    assert names == list(reversed(made[3:])) and len(names) == 30
+    assert (q / 'mine').is_dir() and (q / 'notes.txt').read_text() == 'mine' and (q / '20200101-120000').is_dir()
+    # the backups list never shows the quarantine folder
+    assert run(tool, 'backups', backups).strip() == ''
+
+
+def test_quarantine_of_nothing(tool, tmp_path):
+    out = subprocess.run([str(tool), 'quarantine', str(tmp_path / 'gone'), str(tmp_path / 'b'), str(noon())],
+                         capture_output=True, text=True)
+    assert out.returncode == 1 and out.stdout.startswith('error')
+    assert not (tmp_path / 'b' / 'quarantine').exists() or not any((tmp_path / 'b' / 'quarantine').iterdir())
 
 
 # ---- listing ----
