@@ -1805,8 +1805,10 @@ void draw_hub(ImDrawList *dl, const Frame &f, const Pad &pad)
     if (pad.up) at = (at + count - 1) % count;
     if (pad.down) at = (at + 1) % count;
     S.hub_sel = shown[at];
+    // build 66: no wraparound at the ends (one tap left from One on One went to King of the Hill, the last
+    // entry, and stayed there for every later Quick Match)
     if (S.hub_sel == 0 && (pad.left || pad.right) && mode_count)
-        S.quick_mode = (S.quick_mode + (pad.right ? 1 : mode_count - 1)) % mode_count;
+        S.quick_mode = std::max(0, std::min(mode_count - 1, S.quick_mode + (pad.right ? 1 : -1)));
 
     page_title(dl, f, "ONLINE");
     if (online_count(dl, f, true) || pad.x) open_servers();
@@ -1887,14 +1889,20 @@ void draw_hub(ImDrawList *dl, const Frame &f, const Pad &pad)
         float dx = door_dx();
         if (!logo.srv) text(dl, f, g_title, 16, 463 + dx, 404, CREAM, mode_name(type), CENTER);
         else image_fit(dl, f, logo, 383 + dx, 396, 160, 30);
-        text(dl, f, g_title, 22, 370 + dx, 398, ORANGE, "<", CENTER, 1.2f);
-        text(dl, f, g_title, 22, 556 + dx, 398, ORANGE, ">", CENTER, 1.2f);
-        // Team and the special matches: what the mode is (a special match: where), over the logo
+        // the arrows fade at the ends: the cycle does not wrap (build 66)
+        text(dl, f, g_title, 22, 370 + dx, 398, S.quick_mode > 0 ? ORANGE : with_alpha(GREY, 0.35f), "<", CENTER, 1.2f);
+        text(dl, f, g_title, 22, 556 + dx, 398, S.quick_mode < mode_count - 1 ? ORANGE : with_alpha(GREY, 0.35f), ">", CENTER, 1.2f);
+        // Any mode but the first (One on One): what it is, over the logo, so it is plain before A (a
+        // special match: where; build 66: King of the Hill and any later mode too)
         if (int v = fixed_venue(type)) {
             std::string at = "ONE ON ONE AT " + upper(online_venue_name(v));
             text(dl, f, g_hand, 12, 463 + door_dx(), 378, ORANGE, at.c_str(), CENTER, 0.8f, 200);
         } else if (is_team(type))
             text(dl, f, g_hand, 12, 463 + door_dx(), 378, ORANGE, "TWO ON TWO, FOUR PLAYERS", CENTER, 0.8f, 200);
+        else if (NETPLAY_IS_KOTH(type))
+            text(dl, f, g_hand, 12, 463 + door_dx(), 378, ORANGE, "KING OF THE HILL: UP TO 8 PLAYERS", CENTER, 0.8f, 200);
+        else if (S.quick_mode > 0 && mode_name(type))
+            text(dl, f, g_hand, 12, 463 + door_dx(), 378, ORANGE, upper(mode_name(type)).c_str(), CENTER, 0.8f, 200);
     }
 
     if (pad.a) {
@@ -4044,7 +4052,7 @@ NetRoom sample_room(int mode, int max, int count)
 void gallery_step()
 {
     static const char *const pages[] = { "connecting", "offline", "hub", "hub-signin", "hub-voice", "hub-team",
-                                         "hub-special", "rooms", "rooms-special", "code",
+                                         "hub-special", "hub-koth", "rooms", "rooms-special", "code",
                                          "create", "create-3", "create-6", "create-1", "create-koth",
                                          "create-koth-3", "create-koth-6", "create-koth-1",
                                          // Team (2 vs 2) and the special matches
@@ -4250,11 +4258,11 @@ void gallery_step()
     else if (p == "hub-signin") { S.page = HUB; S.hub_sel = 3; G.account = ACCOUNT_OUT; }
     else if (p == "hub-voice") { S.page = HUB; S.hub_sel = HUB_VOICE; }
     else if (p == "hub-rollback-restart") { S.page = HUB; S.hub_sel = 0; S.quick_mode = 0; }   // build 46: the restart notice
-    else if (p == "hub-team" || p == "hub-special") {     // QUICK MATCH with Team, or Inferno, chosen
+    else if (p == "hub-team" || p == "hub-special" || p == "hub-koth") {     // QUICK MATCH with Team, Inferno or King of the Hill
         S.page = HUB;
         S.hub_sel = 0;
         std::vector<int> cycle = mode_cycle();
-        S.quick_mode = cycle_index(cycle, p == "hub-team" ? 1 : 7);
+        S.quick_mode = cycle_index(cycle, p == "hub-team" ? 1 : p == "hub-koth" ? NETPLAY_MODE_KOTH_RANDOM : 7);
     }
     else if (p == "rooms" || p == "rooms-special") { S.page = ROOMS; S.rooms_sel = p == "rooms" ? 1 : 5; }
     else if (p == "code") { S.page = CODE; snprintf(S.code, sizeof(S.code), "GTE4AQ"); S.code_pos = 3; }
