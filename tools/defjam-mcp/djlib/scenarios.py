@@ -1889,7 +1889,7 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
         analyses.pop(leaver[0], None)
     rows, ok = online_rows(analyses, matches, require_hits, problems)
     if mode == "ffarot":
-        result["rotation"] = rotation_check(logs, rot_relay_log, matches, players, problems)
+        result["rotation"] = rotation_check(logs, rot_relay_log, matches, players, problems, leaver)
     if maintenance:
         told = [i for i, p in logs.items() if "the relay restarts in" in logparse.read_text(p)]
         result["maintenance_told"] = told
@@ -1905,14 +1905,16 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
     return result
 
 
-def rotation_check(logs, relay_log, matches, players, problems):
+def rotation_check(logs, relay_log, matches, players, problems, leaver=None):
     """FFA rotation (mode ffarot): every copy fought its fights as FFA rotation fights, sent its RESULT
     with the finishing order and saw it in (the relay's HILL moved on); the relay started each fight with
     up to four copies (3-Way or 4-Way), ended it with a winner, rotated the line and called the next ones.
     With five or more copies the ones waiting must come in: every copy fights within the first two fights,
-    and the winner of each fight is in the next one."""
+    and the winner of each fight is in the next one. With a leaver (--leave COPY@STEP, in the first
+    fight) its copy is not counted and the fights after the first have one fighter fewer."""
     out = {"copies": {}, "relay": {}}
     fighting = min(players, 4)
+    left = leaver[0] if leaver else None
     for i, p in logs.items():
         text = logparse.read_text(p)
         c = {"rot_starts": text.count("(an FFA rotation fight)"),
@@ -1920,6 +1922,8 @@ def rotation_check(logs, relay_log, matches, players, problems):
              "result_in": text.count("[NETPLAY] hill: the result is in"),
              "auto_ready": text.count("[NETPLAY] hill: called again straight after the fight")}
         out["copies"][str(i)] = c
+        if i == left:
+            continue
         want = matches if players <= 4 else 1
         if c["rot_starts"] < want:
             problems.append("copy %d: %d FFA rotation STARTs, want %d" % (i, c["rot_starts"], want))
@@ -1936,8 +1940,10 @@ def rotation_check(logs, relay_log, matches, players, problems):
     if len(fights) < matches:
         problems.append("relay: %d FFA rotation fights started, want %d" % (len(fights), matches))
     for k, (mode, slots) in enumerate(fights[:matches]):
-        if mode != want_mode or len(slots.split()) != fighting:
-            problems.append("relay: fight %d mode %s slots [%s], want mode %s with %d" % (k + 1, mode, slots, want_mode, fighting))
+        n = fighting if k == 0 or left is None else min(players - 1, 4)
+        wm = want_mode if n == fighting else ("3" if n == 4 else "2" if n == 3 else "0")
+        if mode != wm or len(slots.split()) != n:
+            problems.append("relay: fight %d mode %s slots [%s], want mode %s with %d" % (k + 1, mode, slots, wm, n))
     if len(overs) < matches:
         problems.append("relay: %d fights over, want %d" % (len(overs), matches))
     for k, o in enumerate(overs[:matches]):
