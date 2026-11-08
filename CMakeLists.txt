@@ -13,7 +13,7 @@ cmake_minimum_required(VERSION 3.20)
 # Nothing from the game disc is in this tree. Put your own dump in ./game
 # (a junction/symlink is fine) and run scripts/verify-dump.py first.
 # =====================================================================
-project(defjam_recomp VERSION 1.0.1 LANGUAGES C CXX)
+project(defjam_recomp VERSION 1.1.0 LANGUAGES C CXX)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
