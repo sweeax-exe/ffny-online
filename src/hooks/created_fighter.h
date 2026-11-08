@@ -109,6 +109,8 @@ uint32_t created_fighter_model(int pad);
 
 /* Tests (RECOMP_TEST_CP): the fighter id to set up for the slot after injecting, or -1. */
 int created_fighter_test_slot(int slot, int pad);
+/* RECOMP_TEST_CP_LOAD_USERS only: 1 while the room's match must wait for the test's user ID load */
+int created_fighter_test_hold(void);
 
 #ifdef __cplusplus
 }

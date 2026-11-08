@@ -221,6 +221,26 @@ to it, the pad's holder marked unbuilt, ControllerSetup with 99. The pads are un
 (the reward save of section 4.3) and linked again on `Game.Rematch()`. A CPU fill never plays 99
 (it draws from the roster, which has no 99).
 
+**Borrowed slots** (build 62 hotfix). The Select User ID screens (Story's `options/userID`,
+Battle's `options/battleID`, both via `MemCard.ChooseMCDevice`) load up to 16 user IDs into the 16
+slots; a player with 16 or more saves who visited one of them had no empty slot, and every online
+created fighter played Doc (`[CREATED] no spare profile slot`, F9 ce0bd3 and 06d379: 19 and 20 saves, Story's
+current profile 10 and 2). Then the inject borrows a slot: the highest that is not the current profile
+(`MEM32(GS+4)+0x5AC7C`, -1 none), not one a pad leads to (`GS+0x1ABD[pad]`) and not taken in the
+sequence. Its 0x5950 bytes are kept on the host, the slot gets the game's own defaults for that index
+(taken once at boot, before any user ID loads) plus the record, so its bytes equal those of an empty
+slot on another PC (rest hash B82A5D2C / C47C0495 for slots 15 / 14 in both cases), and the original
+bytes go back at `Game.UpdateMatchRewardsPoints` (after `Game.GetMatchSummary`, which still names the
+fighter), any `MemCard.*` call, `Game.Quit`, `Game.StartBattleMode`, `Game.StartMainMenu`, the main
+menu, `battle/cmtype`, a Story screen or the next sequence; `Game.Rematch()` borrows it again.
+`MemCard.Save` (`sub_00052B60`) writes the current profile outside battle mode and each pad's linked
+profile in battle mode (`sub_0001E810` reads `GS+0x1ABD[pad]`); a borrowed slot is neither, its pad
+link is removed at phase 3, and its bytes are back before the reward step's save. Test:
+`RECOMP_TEST_CP_LOAD_USERS=1` loads the save's user IDs at the first main menu (the room's match
+waits for it); `RECOMP_TEST_CP_NO_BORROW=1` gives the old behaviour. With 20 user ID saves per copy:
+before, Doc on both pads; after, the created fighters in 2/2 matches and a 2-match rematch, checksums
+equal, and all 60 user ID files byte-identical after the run (only `Options` written).
+
 **UI** (`online_screen.cpp`): the fighter grid shows the player's created fighters first, one
 silhouette card each, newest first (the fighter's name on an orange band, a small YOURS tag; the
 large card names the fighter, its styles from the archetype's fighter.xml letters: B
