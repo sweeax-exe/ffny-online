@@ -12,6 +12,7 @@
 // new one is activated, so a failed or cancelled Repair leaves the game as it was.
 
 #define _CRT_SECURE_NO_WARNINGS
+#include "app_setup_handoff.h"
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -109,6 +110,7 @@ struct Request
     std::string operation, title, root, data, dump;
     bool hd = false;
 } g_request;
+bool g_resume_setup = false, g_handoff_started = false, g_resume_tools = false;
 
 // Windows: whether Microsoft's C++ Build Tools are missing (asked of the engine when the app starts),
 // and whether setup should install them first.
@@ -213,6 +215,18 @@ bool start(const std::string &operation, const std::string &title, const std::st
     if (app::payload().empty()) {
         g_form_error = "This copy of the app has no setup files. Start it with --payload <setup payload folder>.";
         return false;
+    }
+    // Old Windows wrappers wait for this app and keep their own .exe mapped. Resume the
+    // exact request in a direct app instance only after both this instance and its wrapper exit.
+    std::vector<std::string> next = {app::program().string(), "--install", root,
+        "--payload", app::payload().string(), "--launcher", "--resume-setup",
+        operation, title, root, data, dump, hd ? "1" : "0",
+        (install_tools || (g_tools_missing && g_install_tools)) ? "1" : "0"};
+    auto handoff = os::setup_handoff(root, next, &g_form_error);
+    if (handoff == os::SetupHandoff::Failed) return false;
+    if (handoff == os::SetupHandoff::Started) {
+        g_handoff_started = true;
+        return true;
     }
     g_request = {operation, title, root, data, dump, hd};
     g_run = Run();
@@ -1125,6 +1139,7 @@ void finished_page(float width, float height, UiResult *result)
 
 bool screen_draw(float width, float height, UiResult *result)
 {
+    if (g_handoff_started) { result->leave = true; return true; }
     if (!g_started) {
         g_started = true;
         const FirstRun &f = app::first_run();
@@ -1132,7 +1147,12 @@ bool screen_draw(float width, float height, UiResult *result)
         snprintf(g_root, sizeof g_root, "%s", f.install.c_str());
         snprintf(g_data, sizeof g_data, "%s", f.data.c_str());
         const Install &in = app::install();
-        if (!in.installed) {
+        if (g_resume_setup) {
+            g_resume_setup = false;
+            auto request = g_request;
+            if (!start(request.operation, request.title, request.root, request.data, request.dump,
+                       request.hd, g_resume_tools)) g_screen = Screen::Maintenance;
+        } else if (!in.installed) {
             g_screen = in.problem.empty() ? Screen::FirstRun : Screen::Maintenance;
             g_form_error = in.problem;
         } else if (app::game_behind(in)) {
@@ -1160,6 +1180,17 @@ bool screen_draw(float width, float height, UiResult *result)
     case Screen::Uninstall: uninstall_page(width, height, result); break;
     }
     return true;
+}
+
+void resume_setup(const std::string &operation, const std::string &title, const std::string &root,
+                  const std::string &data, const std::string &dump, bool hd, bool install_tools)
+{
+    // The same operations the screens can start; this is a one-shot request, never an update argument.
+    if (operation != "install" && operation != "repair" && operation != "rebuild" && operation != "update")
+        return;
+    g_request = {operation, title, root, data, dump, hd};
+    g_resume_tools = install_tools;
+    g_resume_setup = true;
 }
 
 void screen_open_maintenance()

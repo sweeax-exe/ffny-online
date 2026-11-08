@@ -142,6 +142,12 @@ class Activation:
                 path = Path(entry['path'])
                 checkpoint('recover:' + path.name)
                 pending = path.with_name(path.name + '.restore')
+                # A failed promotion may not have changed this target at all. In particular,
+                # Windows refuses replacing a running .exe; trying to restore that same .exe
+                # only repeats the refusal and strands an otherwise consistent installation.
+                if inventory(path) == entry['before']:
+                    remove(pending)
+                    continue
                 remove(pending)
                 if entry['before'] is not None:
                     copy(self.folder / str(i), pending)
