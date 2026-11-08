@@ -20,6 +20,9 @@ the exit code is 1 on any failure.
            the spectator's quick-chat wheel in the fight reaches them, a fighter's stays shut)
     python tools/defjam-mcp/dj.py scenario crewbattle [--out logs/crew-battles]   (crew battles: a local account
            service and relay, four copies in two crews of two; challenge, accept, the battle, rating and ladder)
+    python tools/defjam-mcp/dj.py scenario turf [--off] [--out logs/turf-e2e]   (Turf War: a local account service
+           with turf on and a relay, four copies in two crews of two; the hub's TURF WAR, CLAIM on an open venue,
+           the crew battle there, the new holder on the map; protection, a member's read-only page; --off: hidden)
     python tools/defjam-mcp/dj.py digest <log> [<log> ...] [--max 60]     (a run log, or logs/bug-reports/*/log.txt)
     python tools/defjam-mcp/dj.py analyze <copy logs...> [--matches N]   (an online result from existing logs)
     python tools/defjam-mcp/dj.py lock status | run -- <command...>      (any other test under the lock)
@@ -81,6 +84,9 @@ def cmd_scenario(a):
     elif a.kind == "crewbattle":
         r = scenarios.crew_battle(timeout=a.timeout, relay_port=a.relay_port, extra_env=env, out_dir=a.out,
                                   fast_ko=a.fast_ko, rollback=a.rollback, rollback_modes=a.rollback_modes, **common)
+    elif a.kind == "turf":
+        r = scenarios.turf(timeout=a.timeout, relay_port=a.relay_port, off=a.off, extra_env=env, out_dir=a.out,
+                           fast_ko=a.fast_ko, rollback=a.rollback, rollback_modes=a.rollback_modes, **common)
     elif a.kind == "social":
         r = scenarios.social(timeout=a.timeout or 300, relay_port=a.relay_port, off=a.off, extra_env=env,
                              out_dir=a.out, stress=a.stress, **common)
@@ -174,7 +180,7 @@ def main(argv=None):
 
     sc = sub.add_parser("scenario")
     sc.add_argument("kind", choices=["online", "offline", "boot", "gallery", "social", "roomchat",
-                                              "crewbattle"])
+                                              "crewbattle", "turf"])
     sc.add_argument("--off", action="store_true", help="social: the service's switch off, no RECOMP_SOCIAL (nothing may show)")
     sc.add_argument("--stress", action="store_true", help="social: more accounts with emoji, Arabic, combining-mark "
                     "and very long names and lines in every tab")

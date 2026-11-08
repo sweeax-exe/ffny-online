@@ -346,3 +346,20 @@ def test_compact_json_is_one_line_per_match():
     text = scenarios.compact_json(r)
     assert len(text.splitlines()) == 15
     assert json.loads(text) == r
+
+
+def test_turf_map_venue_line_and_steps():
+    # the account service's map text (docs: venue= fields, 1-based in the docs, 0-based here)
+    text = ("season=1\nmy_crew=3|1\n"
+            "venue=6|The Terror Dome|bronx|0|3|BXK|Bronx Kings|1|1762500000|1762586400|0|0|0|||0|0|0|0|"
+            "The Terror Dome is protected until Nov 9 12:00 UTC\n"
+            "venue=16|7th Heaven|queens|0|0||||0|0|0|0|0|||0|0|0|1|\n")
+    v = scenarios._turf_venue(text, 6)
+    assert v[5] == "BXK" and v[8] != "0" and v[18] == "0" and "protected" in v[19]
+    assert scenarios._turf_venue(text, 16)[18] == "1" and scenarios._turf_venue(text, 1) == []
+    # four copies; the Boss claims through the page (the hub's entry, A, the venue, CLAIM, the crew, A)
+    assert len(scenarios.TURF_NET) == 4
+    boss = scenarios.TURF_NET[0].split(";")
+    assert boss.index("ui:turfhub") < boss.index("ui:pad=a") < boss.index("ui:turfpick=RHR") < boss.index("battledone")
+    assert "ui:turfsel=%d" % scenarios.TURF_VENUE in boss and "battleaccept" in scenarios.TURF_NET[2]
+    assert all("ui:turflog=%d" % scenarios.TURF_VENUE in scenarios.TURF_NET[i] for i in range(4))
