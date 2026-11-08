@@ -28,6 +28,8 @@
 #include "recomp/gen/recomp_types.h"
 #include "created_fighter.h"
 
+int automatch_queue_fe(const char *command);     /* automatch.c: a front-end call at the next call */
+
 #define GS_PTR          (0x2FB148u + 4u * 0x18u)    /* game-flow singleton, component 0x18 */
 #define GS_PROFILES     4u                          /* MEM32(GS+4) + 0x177C: 16 profiles */
 #define PROFILE_BASE    0x177Cu
@@ -779,6 +781,115 @@ static int g_linked;                                  /* the pads point at their
 static unsigned g_ours;                               /* profile slots this file wrote */
 static unsigned g_used_now;                           /* slots taken in the current sequence */
 
+/* ---- borrowed slots ----
+ * The game loads up to 16 user IDs into the 16 profile slots (MemCard.BootupLoad), so a player with
+ * 16 or more saves has no empty slot (F9 logs of build 62: "no spare profile slot", Doc played). Then
+ * a slot holding a user ID is borrowed for the match: its 0x5950 bytes are kept here, the record goes
+ * in, and the original bytes go back before anything could save it.
+ *
+ * What the game saves (MemCard.Save, sub_00052B60): outside battle mode the current profile
+ * (MEM32(GS+4)+0x5AC7C, -1 none); in battle mode the profile of each pad, GS+0x1ABD[pad]
+ * (sub_0001E810). So a borrowed slot is never the current profile and never a slot a pad is linked
+ * to by the game; our own pad link is removed once the match is finished and before the reward pass
+ * (below), so the reward step's save never names it. The original bytes are back before
+ * Game.UpdateMatchRewardsPoints, any MemCard.* call (Save, QuerySave, the user ID screens), Game.Quit,
+ * Game.StartBattleMode, Game.StartMainMenu, the main menu, the battle match-type screen, any Story
+ * screen and the next match's sequence, whichever comes first: after the summary's
+ * Game.GetMatchSummary (which still names the created fighter) and before anything can save. The
+ * save queue keeps only the slot's name pointer, so even a write that came later would write the
+ * user ID's own bytes, not the record. Game.Rematch() puts the record back in (borrow_again).
+ *
+ * While borrowed, the slot's bytes outside the record are the game's defaults for that slot, kept
+ * here before the user IDs were loaded (an empty slot holds them: 725 bytes not zero), so a borrowing
+ * PC holds the same bytes as one with an empty slot of that index. The fight does not read them
+ * (section 2 of the research); without the defaults (not seen at boot) the user ID's own stay. */
+#define CURRENT_PROFILE 0x5AC7Cu                    /* MEM32(GS+4)+: current profile index, -1 none */
+static unsigned g_borrowed;                           /* slots holding a record over a user ID */
+static uint8_t *g_backup[PROFILE_COUNT];              /* their original bytes */
+static uint8_t g_borrow_rec[PROFILE_COUNT][CP_REC_LEN];   /* the record each holds (for a rematch) */
+static unsigned g_borrow_seq;                         /* slots borrowed in the current sequence */
+static uint8_t *g_defaults;                           /* the 16 slots as the game set them up, before any load */
+static int g_defaults_done;
+
+/* at every front-end call until taken: once the profile table is set up and no slot holds a user ID */
+static void defaults_try(void)
+{
+    int i;
+    if (g_defaults_done) return;
+    for (i = 0; i < PROFILE_COUNT; i++) {
+        uint32_t p = created_fighter_profile(i);
+        if (!p) return;
+        if (MEM8(p + 0xC)) { g_defaults_done = 1; return; }    /* a user ID is in: too late */
+        if (MEM32(p + 0x5910) != p + 0x5564) return;              /* not set up yet */
+    }
+    g_defaults_done = 1;
+    g_defaults = (uint8_t *)malloc((size_t)PROFILE_COUNT * PROFILE_SIZE);
+    if (!g_defaults) return;
+    for (i = 0; i < PROFILE_COUNT; i++)
+        memcpy(g_defaults + (size_t)i * PROFILE_SIZE, (const void *)XBOX_PTR(created_fighter_profile(i)), PROFILE_SIZE);
+    fprintf(stderr, "[CREATED] the profile slots' defaults kept (no user ID loaded yet)\n");
+}
+
+static void borrow_fill(int index)
+{
+    uint32_t p = created_fighter_profile(index), o;
+    if (!p) return;
+    if (g_defaults)
+        for (o = 0; o < PROFILE_SIZE; o++)
+            if (o < 0x5910 || o >= 0x5924) MEM8(p + o) = g_defaults[(size_t)index * PROFILE_SIZE + o];
+    record_to_profile(g_borrow_rec[index], p);
+}
+
+/* the slot a record may borrow: the highest that holds a user ID, is not the current profile, no pad
+ * leads to (except this sequence's own links) and is not taken in this sequence; -1 none */
+static int borrow_pick(void)
+{
+    uint32_t gs = MEM32(GS_PTR), base;
+    int32_t current;
+    int index, pad;
+    if (!gs || (base = MEM32(gs + GS_PROFILES)) == 0) return -1;
+    current = (int32_t)MEM32(base + CURRENT_PROFILE);
+    for (index = PROFILE_COUNT - 1; index >= 0; index--) {
+        int linked = 0;
+        if (index == current || (g_used_now & (1u << index)) || (g_borrowed & (1u << index))) continue;
+        for (pad = 0; pad < 4; pad++)
+            if ((int8_t)MEM8(gs + GS_PAD_PROFILE + (uint32_t)pad) == index && g_slot_of_pad[pad] != index) linked = 1;
+        if (!linked && created_fighter_profile(index)) return index;
+    }
+    return -1;
+}
+
+static void borrow_restore(const char *why)
+{
+    int index;
+    for (index = 0; index < PROFILE_COUNT; index++) {
+        uint32_t p;
+        if (!(g_borrowed & (1u << index))) continue;
+        p = created_fighter_profile(index);
+        if (p && g_backup[index]) memcpy((void *)XBOX_PTR(p), g_backup[index], PROFILE_SIZE);
+        g_borrowed &= ~(1u << index);
+        fprintf(stderr, "[CREATED] slot %d restored to its user ID (%s)\n", index, why);
+    }
+}
+
+/* Game.Rematch(): the record goes back into each slot it borrowed (the original stays kept) */
+static void borrow_again(void)
+{
+    int pad;
+    for (pad = 0; pad < 4; pad++) {
+        int index = g_slot_of_pad[pad];
+        if (index < 0 || !(g_borrow_seq & (1u << index)) || (g_borrowed & (1u << index)) || !g_backup[index]) continue;
+        {
+            uint32_t p = created_fighter_profile(index);
+            if (!p) continue;
+            memcpy(g_backup[index], (const void *)XBOX_PTR(p), PROFILE_SIZE);
+            g_borrowed |= 1u << index;
+            borrow_fill(index);
+            fprintf(stderr, "[CREATED] rematch: slot %d borrowed again for pad %d\n", index, pad);
+        }
+    }
+}
+
 static void link_pads(int on)
 {
     uint32_t gs = MEM32(GS_PTR);
@@ -800,35 +911,66 @@ uint32_t created_fighter_model(int pad)
 void created_fighter_begin(void)
 {
     int k;
+    borrow_restore("a new match sequence");
     for (k = 0; k < 4; k++) g_slot_of_pad[k] = -1;
     g_used_now = 0;
+    g_borrow_seq = 0;
     g_linked = 0;
 }
 
 int created_fighter_inject(int slot, int pad, const uint8_t rec[CP_REC_LEN])
 {
     uint32_t gs = MEM32(GS_PTR), dst = 0, holder;
-    int index;
+    int index, borrowed = 0;
     char name[CP_NAME_MAX + 1];
     if (!gs || pad < 0 || pad > 3 || !rec) return -1;
     /* a spare profile slot: the highest without a user ID loaded in it (or one written here) */
     for (index = PROFILE_COUNT - 1; index >= 0; index--) {
         uint32_t p = created_fighter_profile(index);
-        if (!p || (g_used_now & (1u << index))) continue;
+        if (!p || (g_used_now & (1u << index)) || (g_borrowed & (1u << index))) continue;
         if (!MEM8(p + 0xC) || (g_ours & (1u << index))) { dst = p; break; }
+    }
+    if (!dst && !getenv("RECOMP_TEST_CP_NO_BORROW")) {
+        /* none: every slot holds a user ID (16 or more saves), so one is borrowed for the match */
+        index = borrow_pick();
+        if (index >= 0 && (g_backup[index] || (g_backup[index] = (uint8_t *)malloc(PROFILE_SIZE)) != NULL)) {
+            char user[CP_NAME_BYTES + 1];
+            int k;
+            dst = created_fighter_profile(index);
+            memcpy(g_backup[index], (const void *)XBOX_PTR(dst), PROFILE_SIZE);
+            memcpy(user, g_backup[index] + 0xC, CP_NAME_BYTES);
+            user[CP_NAME_BYTES] = 0;
+            for (k = 0; user[k]; k++)
+                if ((unsigned char)user[k] < 0x20 || (unsigned char)user[k] > 0x7E) user[k] = '?';
+            borrowed = 1;
+            fprintf(stderr, "[CREATED] slot %d borrowed from user ID %s for pad %d (restored after the match)\n",
+                    index, user, pad);
+        } else dst = 0;
     }
     if (!dst) {
         fprintf(stderr, "[CREATED] no spare profile slot for pad %d\n", pad);
         return -1;
     }
-    test_dirt(dst);
-    {
+    if (borrowed) {
         unsigned nz;
-        uint32_t h = rest_hash(dst, &nz);
-        fprintf(stderr, "[CREATED] profile slot %d before the record: rest %08X, %u bytes not zero\n", index, h, nz);
+        uint32_t h;
+        memcpy(g_borrow_rec[index], rec, CP_REC_LEN);
+        g_borrowed |= 1u << index;
+        g_borrow_seq |= 1u << index;
+        borrow_fill(index);
+        h = rest_hash(dst, &nz);
+        fprintf(stderr, "[CREATED] profile slot %d (borrowed) with the record: rest %08X, %u bytes not zero%s\n", index, h, nz,
+                g_defaults ? "" : " (the slot's defaults were not seen at boot: the user ID's own bytes stay)");
+    } else {
+        test_dirt(dst);
+        {
+            unsigned nz;
+            uint32_t h = rest_hash(dst, &nz);
+            fprintf(stderr, "[CREATED] profile slot %d before the record: rest %08X, %u bytes not zero\n", index, h, nz);
+        }
+        record_to_profile(rec, dst);
+        g_ours |= 1u << index;
     }
-    record_to_profile(rec, dst);
-    g_ours |= 1u << index;
     g_used_now |= 1u << index;
     g_slot_of_pad[pad] = index;
     MEM8(gs + GS_PAD_PROFILE + (uint32_t)pad) = (uint8_t)index;
@@ -885,13 +1027,55 @@ void created_fighter_before_rewards(void)
     fprintf(stderr, "[CREATED] the reward pass begins: pads unlinked from the records (phase %u)\n", MEM32(G_MATCH_PHASE));
 }
 
+/* RECOMP_TEST_CP_LOAD_USERS: the room's match waits until the load has filled the 16 slots and its
+ * memory-card operation has had a few seconds to end on the menu (its completion call into a menu
+ * that is gone crashes, as the spectator's did); 30 s at most. Without the variable: never. */
+static ULONGLONG g_test_load_since, g_test_full_since;
+int created_fighter_test_hold(void)
+{
+    int i, full = 1;
+    ULONGLONG now;
+    if (!g_test_load_since) return 0;
+    now = GetTickCount64();
+    for (i = 0; i < PROFILE_COUNT; i++) {
+        uint32_t p = created_fighter_profile(i);
+        if (!p || !MEM8(p + 0xC)) full = 0;
+    }
+    if (full && !g_test_full_since) g_test_full_since = now;
+    if ((g_test_full_since && now - g_test_full_since > 4000) || now - g_test_load_since > 30000) {
+        fprintf(stderr, "[CP-TEST] user ID load %s; the match may start\n", full ? "done, 16 slots hold user IDs" : "timed out");
+        g_test_load_since = 0;
+        return 0;
+    }
+    return 1;
+}
+
 int created_fighter_before_funccall(const char *text)
 {
     int any = 0, pad;
+    defaults_try();
+    {   /* RECOMP_TEST_CP_LOAD_USERS=1 (tests): at the first main menu the save's user IDs are loaded into
+         * the profile slots, as the Select User ID screen does (up to 16), so a test save with more
+         * than 16 has no empty slot left, as on a player's PC after Story or a Battle user ID */
+        static int loaded;
+        if (!loaded && strstr(text, "intMain/mainMenu.swf") && getenv("RECOMP_TEST_CP_LOAD_USERS")) {
+            loaded = 1;
+            automatch_queue_fe("MemCard.ChooseMCDevice(SELECT)");
+            g_test_load_since = GetTickCount64();
+            fprintf(stderr, "[CP-TEST] the save's user IDs are loaded into the profile slots\n");
+        }
+    }
+    /* a borrowed slot goes back to its user ID before anything that could save or leave the match */
+    if (g_borrowed && (!strncmp(text, "Game.UpdateMatchRewardsPoints", 29) || !strncmp(text, "MemCard.", 8) ||
+                       !strncmp(text, "Game.Quit", 9) || !strncmp(text, "Game.StartBattleMode", 20) ||
+                       !strncmp(text, "Game.StartMainMenu", 18) || strstr(text, "mainMenu") ||
+                       strstr(text, "battle/cmtype") || strstr(text, "story/")))
+        borrow_restore(text);
     for (pad = 0; pad < 4; pad++) if (g_slot_of_pad[pad] >= 0) any = 1;
     if (!any) return 0;
     if (!strcmp(text, "Game.Rematch()")) {
         if (!g_linked) {
+            borrow_again();
             link_pads(1);
             fprintf(stderr, "[CREATED] rematch: the pads play their records again\n");
         }

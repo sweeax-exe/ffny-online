@@ -431,7 +431,7 @@ void automatch_on_funccall(const char *text)
             run_probe();
         }
     }
-    if (g_armed && g_on_menu && settled(text)) {
+    if (g_armed && g_on_menu && settled(text) && !created_fighter_test_hold()) {
         g_on_menu = 0;
         run_sequence();
     }

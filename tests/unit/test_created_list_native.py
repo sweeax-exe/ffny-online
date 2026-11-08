@@ -38,6 +38,7 @@ void cp_pick_setting_get(char *out, int size)
     snprintf(out, (size_t)size, "%s", v ? v : "");
 }
 void cp_pick_setting_set(const char *key) { printf("setting|%s\n", key); }
+int automatch_queue_fe(const char *command) { (void)command; return 0; }   /* tests' user ID load */
 
 /* the setting online.created_names: STUB_NAMES, and what a set writes */
 static char g_names[CP_NAMES_TEXT_MAX];
