@@ -910,9 +910,12 @@ def crew_battle(timeout=None, relay_port=27900, lock_timeout=None, log=None, kee
 # ---- turf -----------------------------------------------------------------------------------------
 
 TURF_VENUE = 6      # The Terror Dome (the Bronx): open at the start, a plain venue of the relay's pool
-# after the battle: out of its room (the copies' LEAVE reached the relay up to ~25 s late on 2026-11-08, the
-# room's next ROOM bringing it back meanwhile), then the TURF page with the new holder
-_TURF_AFTER = "wait:5;ui:leaveroom;wait:25;ui:leaveroom;wait:4;ui:turf;wait:3;ui:turfsel=%d;wait:4;ui:turflog=%d;wait:3;log" % (TURF_VENUE, TURF_VENUE)
+# after the battle: out of its room, then the TURF page with the new holder. The second leaveroom must find no
+# room ("room_stays_left"): on 2026-11-08 the ROOM answering the last fight's OVER reached the fighters after their
+# LEAVE and brought the room (and the battle screen) back. The fighters' LEAVE reaches the relay some 20-25 s after
+# the knockout because their game is on the fight's results and Rematch until then (the steps wait for the
+# online screens), not because the LEAVE is late.
+_TURF_AFTER = "wait:5;ui:leaveroom;wait:6;ui:leaveroom;wait:4;ui:turf;wait:3;ui:turfsel=%d;wait:4;ui:turflog=%d;wait:3;log" % (TURF_VENUE, TURF_VENUE)
 TURF_NET = [
     # the BXK Boss: both crews full (the ladder), then the hub's TURF WAR with A, the venue, CLAIM, RHR, A
     "wait:3;crew:Bronx Kings:BXK;wait:4;crewinvite:Copy 1;ladderwait:RHR:2;ladderwait:BXK:2;ui:close;ui:turfhub;wait:1;"
@@ -1081,6 +1084,9 @@ def turf(timeout=None, relay_port=27900, off=False, lock_timeout=None, log=None,
                 "protection_why": len(rhr) > 19 and rhr[18] == "0" and ("protected" in rhr[19] or "again from" in rhr[19]) and "can 0" in venue_log(lb)
                                   and "actions []" in venue_log(lb) and rhr[19].lower() in venue_log(lb).lower(),
                 "protection_post": post_status == 409,
+                # left once, out for good: every copy's later leaveroom finds no room (no stale ROOM brought it back)
+                "room_stays_left": all(len(lines(i, "[SOCIAL-UI] leaveroom: ")) >= 2 and
+                                       lines(i, "[SOCIAL-UI] leaveroom: ")[-1].endswith("not in a room") for i in texts),
                 "member_readonly": any(venue_log(i) for i in (1, 3)) and
                                    all("officer 0" in venue_log(i) and "actions []" in venue_log(i) for i in (1, 3) if venue_log(i))
                                    and ("Boss or a Lieutenant" in venue_log(lm) or not venue_log(lm)),

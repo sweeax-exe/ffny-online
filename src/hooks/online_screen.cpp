@@ -3638,7 +3638,19 @@ void draw_status(ImDrawList *dl, const Frame &f)
     const char *note = nullptr;
     if (r.error[0]) note = r.error;
     else if (now < S.note_until) note = S.note.c_str();
-    if (note) text(dl, f, g_hand, 14, 54, 428, r.error[0] ? RED : ORANGE, note, LEFT, 0.8f, 270);
+    if (!note) return;
+    if (S.page == TURF) {
+        // TURF WAR's hints take the row at 420 and its notes are long ("Challenge sent to RHR: once they
+        // accept, ..."): at 428 on the left they ran into the hints and, on two lines, the status line. There
+        // they go to the right of the bottom, under the venue panel, growing upward from the foot.
+        const float w = 270, size = 13;
+        float h = font_or_default(g_hand)->CalcTextSizeA(size * f.s(), FLT_MAX, w * f.sx, note).y / f.sy;
+        float y = 470 - h;
+        if (y < 414) y = 414;
+        text(dl, f, g_hand, size, 606, y, r.error[0] ? RED : ORANGE, note, RIGHT, 0.8f, w);
+        return;
+    }
+    text(dl, f, g_hand, 14, 54, 428, r.error[0] ? RED : ORANGE, note, LEFT, 0.8f, 270);
 }
 
 // ---- the versus screen: who fights whom, where, while the match loads ----------------------------
