@@ -820,7 +820,7 @@ void door_panel(ImDrawList *dl, const Frame &f)
 
 // ---- input --------------------------------------------------------------------------------------
 
-struct Pad { bool up, down, left, right, a, b, x, y, lb, rb, lb_once, lb_down; };
+struct Pad { bool up, down, left, right, a, b, x, y, lb, rb, lb_once, lb_down, r3; };
 
 // Mouse: hovering a box picks it, a click chooses it.
 bool gallery_on();
@@ -995,6 +995,8 @@ void turf_poll();
 bool turf_shown();
 void open_turf(Page back);
 bool turf_gallery(const std::string &p);
+bool turf_board_up();                                       // the map page (the city) is up
+void turf_board_note(ImDrawList *dl, const char *note, bool error);   // a note on it
 bool tset_gallery(const std::string &p);      // tset_ui.inc
 bool tset_created_ok(const NetRoom &r);       // tset_ui.inc
 
@@ -1259,6 +1261,7 @@ Pad read_pad()
     p.rb = any({ ImGuiKey_GamepadR1, ImGuiKey_PageDown, ImGuiKey_E }, true);
     p.lb_once = any({ ImGuiKey_GamepadL1, ImGuiKey_PageUp, ImGuiKey_Q }, false);
     p.lb_down = ImGui::IsKeyDown(ImGuiKey_GamepadL1) || ImGui::IsKeyDown(ImGuiKey_PageUp) || ImGui::IsKeyDown(ImGuiKey_Q);
+    p.r3 = any({ ImGuiKey_GamepadR3, key(ImGuiKey_V) }, false);      // TURF WAR: watch the turf battle under way
     return p;
 }
 
@@ -3689,7 +3692,7 @@ void draw_status(ImDrawList *dl, const Frame &f)
 {
     char status[256];
     status_text(status, sizeof(status));
-    text(dl, f, g_body, 11, 54, 452, GREY, status, LEFT, 0.6f, 270);
+    if (!(S.page == TURF && turf_board_up())) text(dl, f, g_body, 11, 54, 452, GREY, status, LEFT, 0.6f, 270);     // the map has its own bottom
     NetRoom r;
     lobby_room(&r);
     unsigned long long now = GetTickCount64();
@@ -3697,6 +3700,7 @@ void draw_status(ImDrawList *dl, const Frame &f)
     if (r.error[0]) note = r.error;
     else if (now < S.note_until) note = S.note.c_str();
     if (!note) return;
+    if (S.page == TURF && turf_board_up()) { turf_board_note(dl, note, r.error[0] != 0); return; }
     if (S.page == TURF) {
         // TURF WAR's hints take the row at 420 and its notes are long ("Challenge sent to RHR: once they
         // accept, ..."): at 428 on the left they ran into the hints and, on two lines, the status line. There
@@ -4095,7 +4099,7 @@ void gallery_step()
                                          // social stage 3: crew battles
                                          "crew-battle", "crew-battle-up", "crew-battle-forming", "crew-battle-over",
                                          // social stage 4: Turf War
-                                         "hub-turf", "turf", "turf-open", "turf-claim", "turf-member", "turf-why", "turf-season",
+                                         "hub-turf", "turf", "turf-zoom", "turf-detail", "turf-open", "turf-claim", "turf-member", "turf-why", "turf-season",
                                          // tournament sets (tset_ui.inc)
                                          "hub-tset", "tset-coin", "tset-select", "tset-why", "tset-pick", "tset-pick-wait",
                                          "tset-intro", "tset-waiting", "tset-over", "tset-grid",
@@ -5067,7 +5071,7 @@ bool draw_pages(ImVec2 display)
     } else if (S.page == RANKED_BOARD && !room.in_room) {
         draw_ranked_board(dl, f, pad);
     } else if (S.page == TURF && !room.in_room) {
-        draw_turf(dl, f, pad);
+        draw_turf(dl, f, pad, display);
     } else if (S.page == RANKED_RESULTS) {
         draw_ranked_results(dl, f, pad);
     } else if (S.page == VOICE && !(room.in_room && room.phase != 0)) {
