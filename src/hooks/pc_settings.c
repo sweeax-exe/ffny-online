@@ -183,6 +183,9 @@ static RecompSetting g_display_settings[] = {
       "when there are songs). Only your PC hears it; online matches are unaffected." },
     { "music", "shuffle", RECOMP_SETTING_BOOL, 1, 0, 0, NULL, "RECOMP_MUSIC_SHUFFLE", 0,
       "Play your songs in a random order; off plays them by name." },
+    { "music", "new_song_per_match", RECOMP_SETTING_BOOL, 1, 0, 0, NULL, "RECOMP_MUSIC_NEW_SONG_PER_MATCH", 0,
+      "Each new fight (a rematch, the next match, the next fight of a rotation) starts the next of your songs; "
+      "off keeps the song playing on from where it was." },
     { "graphics", "enabled", RECOMP_SETTING_BOOL, 0, 0, 0, NULL, NULL, RECOMP_SETTING_RESTART,
       "Enhanced graphics (community): the ReShade / DLSS pack with presets by Marleymarletto, installed by the "
       "launcher next to the game (Launcher > Graphics). Heavy on the GPU: for NVIDIA RTX cards." },

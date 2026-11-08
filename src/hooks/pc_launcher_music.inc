@@ -1,13 +1,13 @@
 // The launcher's Music card and dialog (included by pc_ui.cpp after the Saves dialog, so it draws with
 // the same glass, fonts and buttons). The card on the start page says how many songs there are and
 // what plays; its button opens the dialog: what plays (My music only / Mix with the original / Original
-// only) and Shuffle at the top, the songs with a Remove each, ADD SONGS and Open music folder, and one
+// only), Shuffle and New song every match at the top, the songs with a Remove each, ADD SONGS and Open music folder, and one
 // line at the foot for the background work and what happened. Files dropped on the window are added.
 // The work is pc_launcher_music.cpp; the files, music_library.cpp; the game's side, custom_music.cpp.
 //
 // Tests and pictures: RECOMP_LAUNCHER_PAGE=music opens it at start; RECOMP_TEST_MUSIC runs steps
 // "<frame>:<action>[:<argument>]" separated by ';': add:<path> (as if picked or dropped), mode:<auto|
-// mine|mix|original>, shuffle:<0|1>, remove:<row>, refresh.
+// mine|mix|original>, shuffle:<0|1>, permatch:<0|1>, remove:<row>, refresh.
 
 #include "pc_launcher_music.h"
 
@@ -95,6 +95,8 @@ void music_test_steps()
             for (int i = 0; i < 4; i++) if (s.arg == k_music_modes[i]) music_set_mode(i);
         } else if (s.action == "shuffle") {
             if (recomp_settings_set("music", "shuffle", atoi(s.arg.c_str()) ? 1 : 0) > 0) commit();
+        } else if (s.action == "permatch") {
+            if (recomp_settings_set("music", "new_song_per_match", atoi(s.arg.c_str()) ? 1 : 0) > 0) commit();
         } else if (s.action == "remove") {
             auto v = pcmusic::view();
             int row = atoi(s.arg.c_str());
@@ -271,12 +273,12 @@ static void music_dialog(ImVec2 o, float w, float h, float s)
 
     push_glass_style();
     float lx = a.x + 30 * s, inner = size.x - 60 * s, top = a.y + 92 * s;
-    // What plays: three choices side by side, and Shuffle.
+    // What plays: three choices side by side, Shuffle, and under it New song every match.
     dl->AddText(display_font(), 17 * s, ImVec2(lx, top), col(ImVec4(0.86f, 0.84f, 0.80f, 1)), "WHAT PLAYS");
     {
         static const char *const labels[3] = {"My music only", "Mix with the original", "Original only"};
         static const int modes[3] = {musiclib::MODE_MINE, musiclib::MODE_MIX, musiclib::MODE_ORIGINAL};
-        float bw = (inner - 150 * s - 3 * 10 * s) / 3, by = top + 28 * s;
+        float tw = 190 * s, bw = (inner - tw - 3 * 10 * s) / 3, by = top + 28 * s;
         for (int i = 0; i < 3; i++) {
             bool on = mode == modes[i];
             char id[24];
@@ -286,9 +288,16 @@ static void music_dialog(ImVec2 o, float w, float h, float s)
                 music_set_mode(modes[i]);
         }
         bool shuffle = recomp_settings_get("music", "shuffle", 1) != 0;
-        if (glass_button("##music_shuffle", shuffle ? "Shuffle: on" : "Shuffle: off", ImVec2(lx + inner - 150 * s, by),
-                         ImVec2(150 * s, 36 * s), s, shuffle ? GLASS_RED : GLASS_PLAIN, bold_font(), 14 * s)) {
+        if (glass_button("##music_shuffle", shuffle ? "Shuffle: on" : "Shuffle: off", ImVec2(lx + inner - tw, by),
+                         ImVec2(tw, 36 * s), s, shuffle ? GLASS_RED : GLASS_PLAIN, bold_font(), 14 * s)) {
             recomp_settings_set("music", "shuffle", shuffle ? 0 : 1);
+            commit();
+        }
+        bool per_match = recomp_settings_get("music", "new_song_per_match", 1) != 0;
+        if (glass_button("##music_per_match", per_match ? "New song every match: on" : "New song every match: off",
+                         ImVec2(lx + inner - tw, by + 40 * s), ImVec2(tw, 28 * s), s, per_match ? GLASS_RED : GLASS_PLAIN,
+                         bold_font(), 12.5f * s)) {
+            recomp_settings_set("music", "new_song_per_match", per_match ? 0 : 1);
             commit();
         }
         const char *hint = setting == musiclib::MODE_AUTO
