@@ -48,6 +48,7 @@
 #include "hooks/scene_launcher.h"
 #include "hooks/dev_module.h"
 #include "hooks/combo_log.h"
+#include "hooks/memcard_fast.h"
 #include "patches/picture.h"
 #include "patches/menu_geometry.h"
 
@@ -976,6 +977,14 @@ void sub_0027E075(void)
 }
 /* Optional fresh report at the controller manager's existing update, before
  * DD930/DCE00 advance history. Lifecycle functions serialize with this read. */
+/* The memory-card driver's tick (thunk to sub_0019A170), called once a frame by MemCard.Update
+ * (sub_000D0C20). It takes at most one response from the driver's worker thread, so a save list
+ * reads one step per frame; src/hooks/memcard_fast.c runs it again within the frame while the
+ * driver only reads. thiscall, one argument (dt), ret 4. */
+extern void sub_00197370_gen(void);
+void sub_00197370(void) { memcard_fast_tick(sub_00197370_gen); }
+extern void sub_000D1270(void);
+static void memcard_worker_sleep(void) { memcard_fast_sleep(sub_000D1270); }
 extern void sub_000DC970_gen(void);
 void sub_000DC970(void)
 {
@@ -1963,6 +1972,8 @@ recomp_func_t recomp_lookup_manual(uint32_t xbox_va)
 
     if (xbox_va == 0x000D1270u && getenv("RECOMP_TRACE_SLEEP"))
         return trace_sleep_caller;
+    if (xbox_va == 0x000D1270u && memcard_fast_on())   /* the memory-card worker's idle sleep */
+        return memcard_worker_sleep;
     if (xbox_va == 0x00068BA0u)
         return funccall_hook;
     if (xbox_va == 0x000D6670u)
