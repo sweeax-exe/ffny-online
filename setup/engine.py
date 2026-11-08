@@ -53,6 +53,16 @@ class SetupError(Exception):
         self.code = code
 
 
+# CMakePresets.json version 2 and cmake_minimum_required in CMakeLists.txt.
+CMAKE_MINIMUM = (3, 20)
+
+
+def cmake_version(text):
+    """(major, minor) from `cmake --version` output ("cmake version 3.18.20081302-MSVC_2"), or None."""
+    match = re.search(r'cmake version (\d+)\.(\d+)', text or '')
+    return (int(match.group(1)), int(match.group(2))) if match else None
+
+
 def digest(path):
     with Path(path).open('rb') as stream:
         return hashlib.file_digest(stream, 'sha256').hexdigest()
@@ -902,7 +912,20 @@ class Engine:
                 hint = (' (the "C++ CMake tools for Windows" part of Visual Studio). Turn on "Missing Windows parts" in '
                         'setup and install again') if executable in ('cmake.exe', 'ninja.exe') else ''
                 raise SetupError('Missing toolchain component: ' + executable + hint, 3)
-        self.run(['cmake', '--version'])
+        version = cmake_version(self.run(['cmake', '--version'], capture=True))
+        if version and version < CMAKE_MINIMUM:
+            # A player's Visual Studio 2019 brought CMake 3.18, which does not know --preset and took the
+            # preset's name for the source folder ('The source directory ".../win-x64-release" does not
+            # exist', "Stage failed with exit 1"). Newer Build Tools sort first in vswhere once installed.
+            have = '.'.join(map(str, version))
+            if self.args.install_prerequisites and not provisioned:
+                self.event(f'Visual Studio CMake {have} is too old (needs {CMAKE_MINIMUM[0]}.{CMAKE_MINIMUM[1]}+)')
+                self.install_prerequisites()
+                return self.toolchain(provisioned=True)
+            raise SetupError(f'Your Visual Studio ({vs.name}) brings CMake {have}; setup needs CMake '
+                             f'{CMAKE_MINIMUM[0]}.{CMAKE_MINIMUM[1]} or newer. Turn on "Missing Windows parts" in '
+                             'setup to add Build Tools for Visual Studio 2022, or install them yourself (with '
+                             '"Desktop development with C++"), then run setup again.', 3)
         self.run(['ninja', '--version'])
 
     def install_prerequisites(self, modify=None):

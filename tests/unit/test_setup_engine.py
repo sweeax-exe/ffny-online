@@ -4,6 +4,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 import zipfile
@@ -913,3 +914,19 @@ def test_wizard_questions_answer_into_a_file_and_installs_still_need_their_folde
     assert engine.main(['--payload', str(tmp_path), '--source-root', str(source), '--identify', str(image), '--out', str(out)]) == 0
     assert json.loads(out.read_text(encoding='utf-8'))['ok'] is True
     assert engine.main(['--payload', str(tmp_path), '--dump', str(image), '--data-dir', str(tmp_path / 'd')]) == 2
+
+
+def test_cmake_version_reads_visual_studio_cmake_and_flags_old_ones():
+    # A player's Visual Studio 2019 brought CMake 3.18, which takes "--preset NAME" for a source folder.
+    old = engine.cmake_version('cmake version 3.18.20081302-MSVC_2\n\nCMake suite maintained and supported by Kitware')
+    assert old == (3, 18) and old < engine.CMAKE_MINIMUM
+    assert engine.cmake_version('cmake version 4.3.1-msvc1') >= engine.CMAKE_MINIMUM
+    assert engine.cmake_version('cmake version 3.20.21032501-MSVC_2') == engine.CMAKE_MINIMUM
+    assert engine.cmake_version('') is None and engine.cmake_version(None) is None
+
+
+def test_cmake_minimum_matches_the_project():
+    root = Path(__file__).resolve().parents[2]
+    lists = (root / 'CMakeLists.txt').read_text(encoding='utf-8')
+    match = re.search(r'cmake_minimum_required\(VERSION (\d+)\.(\d+)', lists)
+    assert (int(match.group(1)), int(match.group(2))) == engine.CMAKE_MINIMUM
