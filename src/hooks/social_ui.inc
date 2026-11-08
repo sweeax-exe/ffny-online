@@ -1388,6 +1388,12 @@ void draw_crew(ImDrawList *dl, const Frame &f, const ChatKeys &k)
             snprintf(b2, sizeof(b2), "CREW BATTLE V %s: %s", them.c_str(), upper(bt.void_why.c_str()).c_str());
         else b2[0] = 0;
         line = b2;
+        // Turf War: the venue the battle is for, then what it did to the map (or why not)
+        if (bt.id && bt.turf_venue && !line.empty()) {
+            if (bt.state == "over" && !bt.turf_result.empty()) line += " - TURF: " + upper(bt.turf_result.c_str());
+            else if (bt.state == "over" && !bt.turf_why.empty()) line += " - TURF UNCHANGED: " + upper(bt.turf_why.c_str());
+            else if (!bt.turf_name.empty()) line += " - FOR " + upper(bt.turf_name.c_str());
+        }
         if (bt.state == "proposed" || bt.state == "accepted" || bt.state == "live") lc = ORANGE;
         if (!line.empty()) text(dl, f, g_title, 9, rx - 2 + rw / 2, by - 15, lc, line.c_str(), CENTER, 0, rw + 6);
     }

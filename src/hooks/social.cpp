@@ -566,6 +566,10 @@ void load_battle()
         b.can_answer = j["can_answer"].b;
         b.can_cancel = j["can_cancel"].b;
         b.rated = j["rated"].b;
+        b.turf_venue = (int)j["turf_venue"].i();
+        b.turf_name = j["turf_name"].str();
+        b.turf_result = j["turf_result"].str();
+        b.turf_why = j["turf_why"].str();
         for (int k = 0; k < 2; k++) {
             const J &c = j["crews"].kind == J::ARR && j["crews"].a.size() > (size_t)k ? j["crews"].a[(size_t)k] : J();
             b.crews[k].id = c["id"].i();

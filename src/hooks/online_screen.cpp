@@ -853,7 +853,7 @@ std::string upper(const char *s)
 // ---- the screens --------------------------------------------------------------------------------
 
 enum Page { HUB, ROOMS, SETTINGS, FIGHTERS, CODE, STATS, PLAYERS, RANKED, VOICE, SERVERS, NAME, RANKED_MODES, RANKED_RESULTS,
-            QUICK, LOCKER, RANKED_BOARD };
+            QUICK, LOCKER, RANKED_BOARD, TURF };
 
 struct State {
     Page page = HUB;
@@ -989,6 +989,11 @@ float searching_chip(ImDrawList *dl, const Frame &f, float x1, float y, int n, f
 bool ranked_board_gallery(const std::string &p);
 void ranked_board_test_step();
 void open_ranked_board(int mode, Page back);
+// the Social Update stage 4: TURF WAR (turf_ui.inc)
+void turf_poll();
+bool turf_shown();
+void open_turf(Page back);
+bool turf_gallery(const std::string &p);
 
 enum NetplayState net_state() { return gallery_on() ? G.state : netplay_state(); }
 bool net_in_lobby() { return gallery_on() ? G.in_lobby : netplay_in_lobby() != 0; }
@@ -1488,7 +1493,9 @@ void open_servers()
 
 // ---- hub ----
 
-const int HUB_ITEMS = 8, HUB_LEAVE = 7, HUB_RANKED = 1, HUB_VOICE = 6;
+const int HUB_ITEMS = 9, HUB_LEAVE = 7, HUB_RANKED = 1, HUB_VOICE = 6, HUB_TURF = 8;
+// The hub's order: TURF WAR (stage 4) after MY STATS; it shows while the account service answers the map.
+const int HUB_ORDER[HUB_ITEMS] = { 0, 1, 2, 3, 4, HUB_TURF, 5, 6, 7 };
 
 // RANKED MATCH shows once a relay's STATUS says its ranked queue is on (the account service's switch,
 // server/docs/ranked-design.md); RECOMP_RANKED=1 shows it for tests (a local relay is not probed).
@@ -1743,10 +1750,10 @@ void draw_servers(ImDrawList *dl, const Frame &f, const Pad &pad)
 void draw_hub(ImDrawList *dl, const Frame &f, const Pad &pad)
 {
     static const char *const items[] = { "QUICK MATCH", "RANKED MATCH", "FIND A ROOM", "CREATE A ROOM", "MY STATS",
-                                         "PLAYERS ONLINE", "VOICE CHAT", "LEAVE" };
+                                         "PLAYERS ONLINE", "VOICE CHAT", "LEAVE", "TURF WAR" };
     static const char *const subs[] = { "STRAIGHT INTO A FIGHT", "ONE ON ONE FOR YOUR RATING", "OPEN ROOMS", "YOUR RULES",
                                         "RECORD AND LEADERBOARD", "WHO IS AROUND", "TALK IN ROOMS AND FIGHTS",
-                                        "BACK TO THE MENU" };
+                                        "BACK TO THE MENU", "CREWS FIGHT FOR NEW YORK" };
     static const char *const descs[] = {
         "You are put into an open room of this mode, or one is opened for the next players.",
         "Classic (stock fighters) or Open (your created fighter too), best of three sets against a player of a "
@@ -1758,13 +1765,19 @@ void draw_hub(ImDrawList *dl, const Frame &f, const Pad &pad)
         "Talk with the players in your room, in the room and in the fight. Push-to-talk, open microphone or off, "
         "your microphone's and the others' volume.",
         "Back to the main menu. You stay reachable until you go offline in the settings.",
+        "Crews hold the city's venues: who holds what, the open challenges and the season's standings. A Boss or a "
+        "Lieutenant challenges; a crew battle decides.",
     };
     std::vector<int> quick_modes = mode_cycle();     // King of the Hill last, when the relay has it
     int mode_count = (int)quick_modes.size();
     if (S.quick_mode >= mode_count) S.quick_mode = 0;
+    turf_poll();
     int shown[HUB_ITEMS], count = 0, at = 0;
-    for (int i = 0; i < HUB_ITEMS; i++)
-        if (i != HUB_RANKED || ranked_shown()) shown[count++] = i;
+    bool turf = turf_shown();
+    for (int k = 0; k < HUB_ITEMS; k++) {
+        int i = HUB_ORDER[k];
+        if ((i != HUB_RANKED || ranked_shown()) && (i != HUB_TURF || turf)) shown[count++] = i;
+    }
     for (int k = 0; k < count; k++) if (shown[k] == S.hub_sel) at = k;
     if (pad.up) at = (at + count - 1) % count;
     if (pad.down) at = (at + 1) % count;
@@ -1809,19 +1822,22 @@ void draw_hub(ImDrawList *dl, const Frame &f, const Pad &pad)
         }
     }
     {   // the items on one glass panel
-        float bottom = count > 7 ? 84 + (count - 1) * 41 + 39 : count > 6 ? 84 + (count - 1) * 45 + 42 : 88 + (count - 1) * 53 + 46;
+        float bottom = count > 8 ? 80 + (count - 1) * 37 + 35 : count > 7 ? 84 + (count - 1) * 41 + 39 : count > 6 ? 84 + (count - 1) * 45 + 42
+                                                                                                    : 88 + (count - 1) * 53 + 46;
         glass(dl, f, 36, 74, 290, bottom - 74 + 10);
     }
     for (int k = 0; k < count; k++) {
         int i = shown[k];
         // eight items (ranked shown) sit closer, so the panel still ends above the hints
-        float x = 50, y = count > 7 ? 84 + k * 41 : count > 6 ? 84 + k * 45 : 88 + k * 53, w = 262;
-        float h = count > 7 ? 39 : count > 6 ? 42 : 46;
+        // nine (ranked and turf shown): closer still, a little smaller
+        bool nine = count > 8;
+        float x = 50, y = nine ? 80 + k * 37 : count > 7 ? 84 + k * 41 : count > 6 ? 84 + k * 45 : 88 + k * 53, w = 262;
+        float h = nine ? 35 : count > 7 ? 39 : count > 6 ? 42 : 46;
         if (mouse_pick(f, x, y, w, h)) S.hub_sel = i;
         bool sel = S.hub_sel == i;
         if (sel) selector(dl, f, x, y, w, h);
-        text(dl, f, g_title, 23, x + 16, y + 3, sel ? CREAM : with_alpha(GREY, 0.85f), items[i], LEFT, 1.6f);
-        text(dl, f, g_hand, 12, x + 18, y + 29, sel ? ORANGE : with_alpha(ORANGE, 0.45f), subs[i], LEFT, 1.0f);
+        text(dl, f, g_title, nine ? 21 : 23, x + 16, y + (nine ? 1 : 3), sel ? CREAM : with_alpha(GREY, 0.85f), items[i], LEFT, 1.6f);
+        text(dl, f, g_hand, nine ? 11 : 12, x + 18, y + (nine ? 24 : 29), sel ? ORANGE : with_alpha(ORANGE, 0.45f), subs[i], LEFT, 1.0f);
         // build 62: who searches ranked right now (every mode, each player once), at the item's right
         if (i == HUB_RANKED) {
             searching_poll();
@@ -1914,6 +1930,7 @@ void draw_hub(ImDrawList *dl, const Frame &f, const Pad &pad)
         case 4: S.page = STATS; S.stats_page = 0; account_fetch_stats_page(0); break;
         case 5: S.page = PLAYERS; netplay_lobby_who(); break;
         case HUB_VOICE: S.page = VOICE; S.voice_sel = 0; break;
+        case HUB_TURF: open_turf(HUB); break;
         case HUB_LEAVE: break;      // handled by the caller (closes)
         }
     }
@@ -3946,6 +3963,7 @@ NetRoom sample_room(int mode, int max, int count)
 #include "social_ui.inc"
 #include "crew_ui.inc"
 #include "locker_ui.inc"
+#include "turf_ui.inc"
 
 // Which page the gallery shows now, and the sample it shows with it.
 void gallery_step()
@@ -4004,7 +4022,9 @@ void gallery_step()
                                          // the Social Update: the quick-chat wheel in a room, its lines' page
                                          "room-quickchat", "quick-lines",
                                          // social stage 3: crew battles
-                                         "crew-battle", "crew-battle-up", "crew-battle-forming", "crew-battle-over" };
+                                         "crew-battle", "crew-battle-up", "crew-battle-forming", "crew-battle-over",
+                                         // social stage 4: Turf War
+                                         "hub-turf", "turf", "turf-open", "turf-claim", "turf-member", "turf-why", "turf-season" };
     const int count = (int)(sizeof(pages) / sizeof(pages[0]));
     static unsigned long long start;
     static int ms;
@@ -4138,6 +4158,7 @@ void gallery_step()
         static const std::string base_stats = G.stats;
         G.stats = base_stats;
         ranked_stats_tab() = 0;
+        if (turf_gallery(p)) return;
         if (locker_gallery(p)) return;
         if (ranked_gallery(p)) return;
     }
@@ -4390,7 +4411,7 @@ LookId page_look(const NetRoom &room, enum NetplayState st)
     case SETTINGS: case CODE: return LOOK_LIST;
     case SERVERS: if (!room.in_room) return LOOK_LIST; break;
     case PLAYERS: if (!room.in_room) return LOOK_PLAYERS; break;
-    case STATS: case LOCKER: case RANKED_BOARD: if (!room.in_room) return LOOK_STATS; break;
+    case STATS: case LOCKER: case RANKED_BOARD: case TURF: if (!room.in_room) return LOOK_STATS; break;
     case RANKED: case RANKED_MODES: if (!room.in_room) return LOOK_SEARCH; break;
     case RANKED_RESULTS: return LOOK_SEARCH;
     case VOICE: case QUICK: if (!(room.in_room && room.phase != 0)) return LOOK_VOICE; break;
@@ -4770,7 +4791,7 @@ bool draw_pages(ImVec2 display)
         g_closed_for_match = !gallery_on() && (GetTickCount64() - S.start_seen >= 1800 || (have && v.loaded));
         return !g_closed_for_match;
     }
-    backdrop(dl, f, display, S.page == FIGHTERS || S.page == NAME || S.page == STATS || S.page == RANKED_BOARD || S.page == PLAYERS ||
+    backdrop(dl, f, display, S.page == FIGHTERS || S.page == NAME || S.page == STATS || S.page == RANKED_BOARD || S.page == TURF || S.page == PLAYERS ||
              room.in_room ||
              st == NETPLAY_CONNECTED ||
              !g_menu_up.load(), page_look(room, st));
@@ -4948,6 +4969,8 @@ bool draw_pages(ImVec2 display)
         draw_ranked_modes(dl, f, pad);
     } else if (S.page == RANKED_BOARD && !room.in_room) {
         draw_ranked_board(dl, f, pad);
+    } else if (S.page == TURF && !room.in_room) {
+        draw_turf(dl, f, pad);
     } else if (S.page == RANKED_RESULTS) {
         draw_ranked_results(dl, f, pad);
     } else if (S.page == VOICE && !(room.in_room && room.phase != 0)) {

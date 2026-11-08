@@ -177,7 +177,10 @@ void draw_crew_battle(ImDrawList *dl, const Frame &f, const Pad &pad, const NetR
                                         with_alpha(s ? CREW_BLUE : CREW_RED, s ? 0 : 0.10f));
     text(dl, f, g_stencil, 34, 320, 12, CREAM, "CREW BATTLE", CENTER, 1.6f);
     char sub[96];
-    snprintf(sub, sizeof(sub), "%d VS %d  -  WINNER STAYS ON", c.format, c.format);
+    const social::Battle &tb = C.v.battle;
+    bool turf = tb.id && (unsigned)tb.id == c.battle && tb.turf_venue && !tb.turf_name.empty();     // Turf War (stage 4)
+    if (turf) snprintf(sub, sizeof(sub), "%d VS %d  -  TURF BATTLE FOR %s", c.format, c.format, upper(tb.turf_name.c_str()).c_str());
+    else snprintf(sub, sizeof(sub), "%d VS %d  -  WINNER STAYS ON", c.format, c.format);
     text(dl, f, g_title, 13, 320, 52, ORANGE, sub, CENTER, 1.0f);
 
     crew_panel(dl, f, r, c, 0, 26, 74, 214, 300, over);
@@ -243,7 +246,10 @@ void draw_crew_battle(ImDrawList *dl, const Frame &f, const Pad &pad, const NetR
     }
     text(dl, f, g_title, fit_size(f, g_title, 13, l1.c_str(), 134), 320, 252, c1, l1.c_str(), CENTER, 1.0f);
     text(dl, f, g_body, 9.5f, 320, 290, CREAM, l2.c_str(), CENTER, 0, 134);
-    if (mine < 0 && r.you != NETPLAY_SLOT_SPECTATOR)
+    if (over && turf && (!tb.turf_result.empty() || !tb.turf_why.empty())) {     // what the battle did to the map
+        std::string t = !tb.turf_result.empty() ? "TURF: " + upper(tb.turf_result.c_str()) : "THE MAP DID NOT CHANGE: " + tb.turf_why;
+        text(dl, f, g_hand, 13, 320, 344, !tb.turf_result.empty() ? GOLD : GREY, t.c_str(), CENTER, 0.6f, 360);
+    } else if (mine < 0 && r.you != NETPLAY_SLOT_SPECTATOR)
         text(dl, f, g_hand, 12, 320, 344, GREY, "You watch from the bench.", CENTER, 0.6f);
     else if (mine >= 0 && !over && c.sides[mine].lineup[my_place].state == NETCREW_WAITING && v.next == r.you)
         text(dl, f, g_hand, 14, 320, 344, ORANGE, "YOU'RE UP NEXT", CENTER, 0.8f);
