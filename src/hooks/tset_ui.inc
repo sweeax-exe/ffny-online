@@ -30,12 +30,67 @@ struct TSetUi {
 
 const ImU32 TSET_GOLD = IM_COL32(255, 205, 60, 255), TSET_BLUE = IM_COL32(118, 170, 255, 255);
 
-// TOURNAMENT MATCH shows on the hub while signed in on a relay that offers tournament sets.
+// This account's open tournament match, from the account service (GET /api/me/tournament, build 66):
+// "match=<id>" and "state=ready|live|none" lines. Asked in the background while the hub is up.
+struct TSetMine {
+    std::mutex mu;
+    std::atomic<int> busy{0};
+    unsigned long long at = 0;      // last asked
+    int status = 0;                 // its HTTP status (0 not asked yet or unreachable)
+    long long match = 0;            // the open match (0 none)
+} TM;
+
+void tset_fetch_mine()
+{
+    if (gallery_on() || TM.busy.exchange(1)) return;
+    TM.at = GetTickCount64();
+    std::thread([]() {
+        char buf[256] = {};
+        int status = account_call("GET", "/api/me/tournament", nullptr, buf, (int)sizeof(buf), 0, nullptr);
+        long long match = 0;
+        if (status == 200) {
+            const char *m = strstr(buf, "match=");
+            if (m) match = atoll(m + 6);
+        }
+        int before;
+        {
+            std::lock_guard<std::mutex> lock(TM.mu);
+            before = TM.status;
+            if (status > 0) { TM.status = status; TM.match = status == 200 ? match : 0; }   // unreachable: keep the last answer
+        }
+        if (status != before || match)
+            fprintf(stderr, "[ONLINE] tournament match: %lld (HTTP %d)\n", match, status);
+        TM.busy = 0;
+    }).detach();
+}
+
+// TOURNAMENT MATCH shows on the hub while signed in on a relay that offers tournament sets, and only
+// when this player has a match ready or running (build 66: before, everyone saw it and 68 presses on
+// 2026-11-08 got "You have no tournament match ready."). The hub asks every 30 seconds (every five
+// minutes while the service does not answer). An account service older than build 66 (404) cannot say,
+// so the entry shows as before.
 bool tset_shown()
 {
     if (gallery_on()) return TS.gallery_entry;
     int caps = lobby_caps();
-    return acc_state() == ACCOUNT_IN && caps > 0 && (caps & NETPLAY_CAP_TSET);
+    if (acc_state() != ACCOUNT_IN) {      // signed out: the next account asks afresh
+        std::lock_guard<std::mutex> lock(TM.mu);
+        TM.status = 0;
+        TM.match = 0;
+        TM.at = 0;
+        return false;
+    }
+    if (!(caps > 0 && (caps & NETPLAY_CAP_TSET))) return false;
+    int status;
+    long long match;
+    {
+        std::lock_guard<std::mutex> lock(TM.mu);
+        status = TM.status;
+        match = TM.match;
+    }
+    unsigned long long now = GetTickCount64(), every = status == 0 || status == 200 || status == 404 ? 30000ull : 300000ull;
+    if (!TM.at || now - TM.at > every) tset_fetch_mine();
+    return status == 404 || (status == 200 && match > 0);
 }
 
 // The hub's entry: TJOIN 0 ("my match that is ready"); the relay's refusal is said when it comes.
