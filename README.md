@@ -63,7 +63,10 @@ the game on your computer. See [the app and overlay guide](docs/launcher-and-ove
   first additional languages: ZARF's Spanish mod in the catalogue, and the disc's own French
   as a setting.
 - **Mod support.** Texture and language mods are here, with a curated catalogue in the app.
-  Custom fighters, music, stages and game modes are coming up on the roadmap.
+  Custom fighters, stages and game modes are coming up on the roadmap.
+- **Your own music.** Add MP3, FLAC, Ogg or WAV songs and play them in the Beatbox, menus and
+  fights. The cut song "Holler If Ya Hear Me" is restored too. Manage your music on the
+  Songs page; see [Custom songs](docs/custom-songs.md).
 - **Controllers and keyboard.** Xbox, DualSense, Switch Pro and other supported gamepads,
   with remapping, hot-plug and rumble. Keyboard and mouse buttons can supply gameplay bindings;
   the app and settings support a pointer.
@@ -138,7 +141,9 @@ The [format reference](docs/hd-textures.md) and [mod-manager reference](docs/mod
 cover the technical details. Language mods have their own
 [delta format](docs/language-packs.md).
 
-**Coming up:** custom fighters, songs, stages and game modes. See the roadmap below.
+Your own music is supported separately on the Songs page: [add and manage songs](docs/custom-songs.md).
+
+**Coming up:** custom fighters, stages and game modes. See the roadmap below.
 
 ## Where the project is heading
 
@@ -152,7 +157,6 @@ easier to play and customize on modern computers.
 | Fully unlocked frame rates | Support frame rates above 60 fps while preserving game speed, timing and gameplay feel. Future work; not supported by the current release. |
 | Widescreen refinement | Improve edge cases and broader aspect and venue coverage. |
 | Extensible Custom Fighter Mod support | Add your own fighters to the game. |
-| Custom and Restored Songs | New music, and tracks restored to the game. |
 | Additional HD Upscaling mods | Story Fighter customization, plus Stages and Level textures. |
 | Def Jam: The Takeover expansion | Bring the mechanics and story mode from Def Jam: The Takeover into this game. |
 | Broader mod support | Custom stages and game modes, difficulty changes and restored cut content. |
