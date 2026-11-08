@@ -34,8 +34,17 @@ and the backups in `<data folder>/save-backups/`:
   once a day when the game starts (only when no backup was made that day). Each is a folder named by its time
   (`yyyymmdd-hhmmss`) holding a copy of `UserData` and a `backup.txt`; the newest 10 are kept, and only
   folders of that name inside `save-backups` are ever removed. `RECOMP_SAVES_BACKUP=0` turns the daily one off.
+  The newest backup that holds a profile is never rotated out, and a daily or update backup with no profile
+  in it is skipped (the log says why) while the newest backup has one.
+- **Deleted by the game:** before the game deletes a profile folder itself (XDeleteSaveGame: deleting a User ID, and
+  the storage requests that delete a profile and then create it again), its files are copied to
+  `save-backups/quarantine/<yyyymmdd-hhmmss>-<folder>/` and the log says
+  `[SAVES] the game deleted profile <folder> (copy in save-backups/quarantine/...)`. The newest 30 are kept.
+  They are listed under the backups; **Bring back** imports one (the same as importing that folder, so it
+  asks before replacing a profile of the same name).
 - **Back up now** makes one. **Restore** puts a backup back after backing up the saves as they are, so a
-  restore can itself be undone.
+  restore can itself be undone. A `save/UserData.replaced` left by a restore that did not finish is first
+  moved into the backups as one of its own (*Left by an unfinished restore*), never deleted.
 - **Import saves** takes a PS2 Story profile exported as `.psu` (converted first, see
   [PS2 profiles](importing-xbox-saves.md#ps2-profiles)), or a folder (the console's `E:\UDATA\45410049`) or a `.zip` of it and does what
   `scripts/save-import.py` does ([importing Xbox saves](importing-xbox-saves.md)): copies each profile's
@@ -180,7 +189,7 @@ nobody at it (a locked screen, a remote run):
 | Variable | What it does |
 |---|---|
 | `RECOMP_WINDOW_SHOT=<file.bmp>` | Writes what the launcher (first frame) or the game window (the overlay, after `RECOMP_WINDOW_SHOT_FRAME` overlay frames, 20 by default) shows, as a 32-bit BMP. macOS and Linux |
-| `RECOMP_LAUNCHER_PAGE=saves`, `RECOMP_TEST_SAVES` | Windows: the launcher opens with the Saves page, and `RECOMP_TEST_SAVES` presses its buttons: `<frame>:<action>[:<argument>]` separated by `;`, with `backup`, `import:<folder or zip>` (as if picked), `replace:<profile name>`, `import-ok`, `restore:<row>`, `restore-ok`, `folder`. With `RECOMP_WINDOW_SHOT` for the picture; `scripts/test-saves-launcher.py` uses them on a made-up data folder |
+| `RECOMP_LAUNCHER_PAGE=saves`, `RECOMP_TEST_SAVES` | Windows: the launcher opens with the Saves page, and `RECOMP_TEST_SAVES` presses its buttons: `<frame>:<action>[:<argument>]` separated by `;`, with `backup`, `import:<folder or zip>` (as if picked), `replace:<profile name>`, `import-ok`, `restore:<row>`, `restore-ok`, `folder`, `bring:<row>` (Bring back a quarantine copy). With `RECOMP_WINDOW_SHOT` for the picture; `scripts/test-saves-launcher.py` uses them on a made-up data folder |
 | `RECOMP_LAUNCHER_SCRIPT` | The launcher's input: `<ms>:click:<x>:<y>`, `<ms>:move:<x>:<y>`, `<ms>:shot:<file>`, `<ms>:play`, `<ms>:quit`, separated by `;`, times from the window's first frame and positions in window points |
 | `RECOMP_HOST_SCRIPT` | The game window's input: `<ms>:key:<SDL key name>` (`F1`, `Escape`), `<ms>:click:<x>:<y>`, `<ms>:move:<x>:<y>`, `<ms>:text:<chars>`, times from the window's opening |
 | `RECOMP_OVERLAY_SHOT_DIR=<folder>`, `RECOMP_OVERLAY_SHOT_MS` | Windows: the finished picture with the overlay, every `RECOMP_OVERLAY_SHOT_MS` (2000 by default) while the overlay draws, as `<ms>.bmp` |

@@ -374,8 +374,11 @@ def test_quarantine_copies_the_profile_folder(tool, tmp_path):
     # the same folder twice in one second gets its own copy
     again = run(tool, 'quarantine', folder, backups, noon()).split()[1]
     assert again == made + '-2'
-    # a restorable layout: the importer reads the copy like any folder of Xbox saves
-    assert (backups / 'quarantine' / made / 'SaveMeta.xbx').is_file()
+    # Bring back on the Saves page: the importer reads the copy like any folder of Xbox saves
+    other = tmp_path / 'other-save'
+    text = run(tool, 'import', backups / 'quarantine' / made, other, tmp_path / 'other-backups', noon())
+    assert 'found VY2 %s exists=0' % folder.name in text and 'imported=1' in text
+    assert (other / 'UserData' / '45410049' / folder.name / 'VY2').read_bytes() == (folder / 'VY2').read_bytes()
 
 
 def test_quarantine_keeps_the_newest_thirty(tool, tmp_path):
