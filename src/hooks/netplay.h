@@ -39,14 +39,22 @@ enum NetplayState {
 #define NETPLAY_MODE_KOTH        0x40
 #define NETPLAY_MODE_KOTH_RANDOM 0x41
 #define NETPLAY_IS_KOTH(mode)    ((mode) == NETPLAY_MODE_KOTH || (mode) == NETPLAY_MODE_KOTH_RANDOM)
+/* FFA rotation (build 66): a room of up to eight with a line, as on the hill, where up to four fight a
+ * Free for All (3-Way with three, One on One with two), the winner stays on and the next in the line
+ * are called; the venue is drawn at random. Only on relays answering CAPS with NETPLAY_CAP_FFAROT. */
+#define NETPLAY_MODE_FFAROT      0x42
+#define NETPLAY_FFAROT_SLOTS     8
+#define NETPLAY_IS_FFAROT(mode)  ((mode) == NETPLAY_MODE_FFAROT)
+/* A room with a line (HILL): King of the Hill or FFA rotation. */
+#define NETPLAY_IS_HILL(mode)    (NETPLAY_IS_KOTH(mode) || NETPLAY_IS_FFAROT(mode))
 
 /* ---- the online hub: rooms, quick match, venue voting (docs/netplay-protocol.md) ---- */
 
 typedef struct NetRoomSettings {
     char name[25];
     int is_public;          /* listed; join by code only when 0 */
-    int mode;               /* front-end match type, 0 One on One; or NETPLAY_MODE_KOTH* */
-    int max;                /* players 2..4; King of the Hill 2..10 */
+    int mode;               /* front-end match type, 0 One on One; or NETPLAY_MODE_KOTH*, NETPLAY_MODE_FFAROT */
+    int max;                /* players 2..4; King of the Hill 2..10; FFA rotation 2..8 */
     int rounds;             /* 0 the game's default */
     int pool_count;         /* venues to vote on (venue.xml feID) */
     unsigned char pool[32];
@@ -69,7 +77,8 @@ typedef struct NetRoomPlayer {
     int ready, fighter, voted;      /* voted: candidate index, -1 not yet */
 } NetRoomPlayer;
 
-/* King of the Hill: the line (HILL), in line order; line[0] is the king when there is one. */
+/* King of the Hill and FFA rotation: the line (HILL), in line order; line[0] is the king (FFA rotation:
+ * the last winner, who stays on) when there is one. */
 enum NetHillPhase { NETHILL_WAITING = 0, NETHILL_CALLING, NETHILL_VOTING, NETHILL_FIGHTING };
 enum NetLineState { NETLINE_WAITING = 0, NETLINE_CALLED, NETLINE_READY, NETLINE_FIGHTING, NETLINE_AWAY };
 enum NetHillHow { NETHOW_NONE = 0, NETHOW_WON, NETHOW_DRAW, NETHOW_LEFT, NETHOW_VOID };
@@ -93,7 +102,7 @@ typedef struct NetHill {
     NetHillEntry line[NETPLAY_ROOM_SLOTS];
     /* the WATCH of the fight this PC watches (phase 1: the names only, no simulation) */
     uint32_t watch_seed;            /* 0: none */
-    int watch_venue, watch_slots[2], watch_fighters[2];
+    int watch_venue, watch_count, watch_slots[NETPLAY_MAX_PLAYERS], watch_fighters[NETPLAY_MAX_PLAYERS];
 } NetHill;
 
 typedef struct NetRoom {
@@ -108,7 +117,7 @@ typedef struct NetRoom {
     unsigned long long received;    /* GetTickCount64 when this state arrived */
     int player_count;
     NetRoomPlayer players[NETPLAY_ROOM_SLOTS];
-    NetHill hill;                   /* King of the Hill rooms only */
+    NetHill hill;                   /* King of the Hill and FFA rotation rooms only */
     int spectator_count;            /* spectator mode: who watches (relays with NETPLAY_CAP_SPECTATE) */
     char spectators[NETPLAY_MAX_SPECTATORS][25];
     char error[96];                 /* the last refusal, "" if none */
@@ -121,6 +130,7 @@ typedef struct NetRoom {
 #define NETPLAY_CAP_ROLLBACK 2     /* the relay lets matches roll back */
 #define NETPLAY_CAP_YIELD 4
 #define NETPLAY_CAP_SPECTATE 16    /* spectator mode: rooms can be watched (netplay_lobby_spectate) */
+#define NETPLAY_CAP_FFAROT 8192    /* FFA rotation rooms (NETPLAY_MODE_FFAROT, build 66) */
 int netplay_lobby_caps(void);
 /* 1 when the relay refused the hub session because this PC already has a live session there (ERROR 11,
  * build 46 relays): another copy of the game is online on this PC. Not a connection problem. */

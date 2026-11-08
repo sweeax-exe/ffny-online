@@ -890,7 +890,7 @@ int netservers_tick(int *mode)
     LeaveCriticalSection(&g_cs);
     if (!kind || netplay_state() != NETPLAY_LOBBY || !netplay_in_lobby() || cur != A.server) return 0;
     netplay_lobby_room(&r);
-    if (r.in_room || (NETPLAY_IS_KOTH(A.mode) && netplay_lobby_caps() < 0)) return 0;
+    if (r.in_room || (NETPLAY_IS_HILL(A.mode) && netplay_lobby_caps() < 0)) return 0;
     EnterCriticalSection(&g_cs);
     kind = A.kind;
     A.kind = 0;
@@ -978,7 +978,7 @@ int netservers_quick_move(int mode, int search_s, int alone_s, const char *code,
     if (waiting) *waiting = 0;
     if (ping) *ping = -1;
     if (scope_out) *scope_out = 0;
-    if (c == NETCHOICE_CUSTOM || cur < 0 || NETPLAY_IS_KOTH(mode)) return -1;
+    if (c == NETCHOICE_CUSTOM || cur < 0 || NETPLAY_IS_HILL(mode)) return -1;
     netservers_get(sv, NETSERVER_COUNT);
     for (o = 0; o < NETSERVER_COUNT; o++) if (sv[o].state == NETSERVER_UP) up |= 1u << o;
     scope = netservers_scope(c, cur, search_s, up);

@@ -71,6 +71,7 @@ static const char *mode_name(int type, int room_mode)
 {
     const OnlineMode *m;
     if (NETPLAY_IS_KOTH(room_mode)) return "King of the Hill";
+    if (NETPLAY_IS_FFAROT(room_mode)) return "FFA Rotation";
     if (type == ONLINE_MODE_TEAM) return "Team 2v2";
     m = online_mode(type);
     return m ? m->name : "Online";

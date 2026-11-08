@@ -810,8 +810,8 @@ std::string presence_json()
         int max = r.settings.max > 0 ? r.settings.max : 2;
         char seats[16];
         snprintf(seats, sizeof(seats), "%d/%d", r.player_count, max);
-        // a King of the Hill room takes players at any time; the others while nobody plays
-        bool joinable = r.player_count < max && (r.phase == 0 || NETPLAY_IS_KOTH(r.settings.mode));
+        // a King of the Hill or FFA rotation room takes players at any time; the others while nobody plays
+        bool joinable = r.player_count < max && (r.phase == 0 || NETPLAY_IS_HILL(r.settings.mode));
         j += ",\"room\":" + json_text(r.code) + ",\"mode\":" + json_text(mode) + ",\"seats\":\"" + seats + "\"";
         if (joinable) j += ",\"joinable\":true";
     }
