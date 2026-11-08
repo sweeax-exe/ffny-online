@@ -71,7 +71,8 @@ def cmd_scenario(a):
                              rematch=a.rematch, venues=a.venues, spectators=a.spectators, copy_env=copy_env(a.copy_env),
                              fixtures=a.fixtures.split(",") if a.fixtures else None, ranked=a.ranked,
                              rollback_modes=a.rollback_modes, rollback_max_ping=a.rollback_max_ping, leave=a.leave,
-                             spectate_after=a.spectate_after, spectate_delay=a.spectate_delay, **common)
+                             spectate_after=a.spectate_after, spectate_delay=a.spectate_delay,
+                             maintenance=a.maintenance, **common)
     elif a.kind == "offline":
         r = scenarios.offline(type=a.type, venue=a.venue, f0=a.f0, f1=a.f1, cpu=not a.human, bot=a.bot,
                               fast_ko=a.fast_ko, turbo=a.turbo, timeout=a.timeout or 420,
@@ -225,6 +226,8 @@ def main(argv=None):
                     "(they come while the match runs, e.g. on its results before a --rematch), and must watch a later fight")
     sc.add_argument("--spectate-delay", type=float, default=0, help="online: with --spectate-after, that many seconds later "
                     "(e.g. into the next fight)")
+    sc.add_argument("--maintenance", type=int, default=0, help="online: the relay's restart countdown (SECS) holds the "
+                    "fights from the start until the file goes SECS + 5 s later; copy 0's online screens are captured")
     sc.add_argument("--type", type=int, default=0)
     sc.add_argument("--venue", type=int, default=1)
     sc.add_argument("--f0", type=int, default=55)
