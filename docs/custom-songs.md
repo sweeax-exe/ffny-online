@@ -15,7 +15,9 @@ your own files, and they never leave your computer.
 3. Open **Beatbox** from the main menu: your songs are in the list, on, after the game's own.
 
 The title, artist and album come from the file's tags; without tags, from the file name
-(`Artist - Title.mp3`) and its folder (the album).
+(`Artist - Title.mp3`) and its folder (the album). Names shown in the game use plain ASCII.
+Common Latin accents are removed, punctuation is simplified, and other unsupported characters
+appear as `?` to fit the game's font.
 
 ## The Songs page
 
