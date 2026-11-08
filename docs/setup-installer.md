@@ -99,6 +99,17 @@ Clean Update, Downgrade and Clean Rebuild use fresh analysis, lifted code and
 compiler objects in a separate attempt directory. Repair may reuse verified
 analysis/lift work. Every successful attempt gets a distinct build directory.
 The stable launcher and receipts switch through a recoverable activation journal.
+
+On Windows, starting setup from an older installed shortcut briefly restarts the app
+directly, then resumes the same operation after the old shortcut wrapper exits. This
+lets setup replace `DefJamLauncher.exe`. Standalone setup reports a running wrapper
+before recovery or compilation; close the app and its background `DefJamLauncher.exe`,
+then start `DefJamRecompiled.exe` directly or run standalone setup again. A wrapper
+opened during a build also stops activation with this message. macOS and Linux
+forwarders already replace themselves with the app (`exec`), so they need no restart.
+On all platforms, recovery leaves files that already match their backup unchanged.
+If activation and recovery both fail, the error includes both failures and setup
+keeps the recovery journal and backups for the next retry.
 Close the game first; setup, data and launcher lifetime locks prevent overlapping
 operations. If interrupted activation blocks the launcher, rerun setup to recover.
 Previous successful builds are retained, so repeated updates consume disk space (about 0.9 GB each on Linux);

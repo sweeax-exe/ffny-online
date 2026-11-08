@@ -117,6 +117,9 @@ the older [setup installers](docs/setup-installer.md) remain available on earlie
 [Build and play](docs/build-and-play.md) for Windows or
 [Build on macOS and Linux](docs/build-macos-linux.md).
 
+[v1.1.1](docs/releases/v1.1.1.md) fixes Windows updates blocked by an older launcher
+and improves interrupted-update recovery on all platforms.
+
 ## Customize your game
 
 Use the app or F1 overlay to change display settings, controls and mods.
