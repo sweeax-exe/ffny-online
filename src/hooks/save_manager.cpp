@@ -513,6 +513,42 @@ bool daily_due(const fs::path &backups, int64_t now)
     return true;
 }
 
+// Moves a UserData.replaced an earlier restore left behind into save-backups as a backup of its own.
+static bool keep_leftover(const fs::path &old, const fs::path &backups, int64_t now, std::string *made,
+                          std::string *error)
+{
+    std::error_code ec;
+    fs::create_directories(backups, ec);
+    std::string name = stamp(now);
+    for (int n = 2; fs::exists(backups / name, ec) && n < 100; n++) name = stamp(now) + "-" + std::to_string(n);
+    fs::path dst = backups / name;
+    fs::create_directories(dst, ec);
+    if (ec) { if (error) *error = "could not make " + pcui::path_utf8(dst); return false; }
+    int files = count_files(old);
+    fs::rename(old, dst / "UserData", ec);
+    if (ec) {
+        // another volume or a held file: copy, and remove the original only once every file is there
+        std::string why;
+        int copied = 0;
+        if (!copy_tree(old, dst / "UserData", &copied, &why) || count_files(dst / "UserData") != files) {
+            remove_tree(dst);
+            if (error) *error = why.empty() ? "not every file could be copied" : why;
+            return false;
+        }
+        remove_tree(old);
+    }
+    int profiles = count_profiles(dst);
+    {
+        std::ofstream info(dst / "backup.txt", std::ios::trunc);
+        info << "when=" << now << "\nreason=leftover\nprofiles=" << profiles << "\nfrom=" << pcui::path_utf8(old)
+             << " (left by a restore that did not finish)\n";
+    }
+    fprintf(stderr, "[SAVES] %s from an unfinished restore kept as backup %s: %d files, %d profiles\n",
+            pcui::path_utf8(old).c_str(), name.c_str(), files, profiles);
+    if (made) *made = name;
+    return true;
+}
+
 bool restore(const fs::path &save_dir, const fs::path &backups, const std::string &name, int64_t now,
              std::string *message)
 {
@@ -524,21 +560,25 @@ bool restore(const fs::path &save_dir, const fs::path &backups, const std::strin
     fs::path src = chosen.path / "UserData";
     if (!real_dir(src)) { say("That backup has no saves in it."); return false; }
     fs::path live = save_dir / "UserData";
+    fs::path incoming = save_dir / "UserData.restoring", old = save_dir / "UserData.replaced";
+    std::string made, why, leftover;
+    std::error_code ec;
+    if (fs::exists(fs::symlink_status(old, ec)) && !keep_leftover(old, backups, now, &leftover, &why)) {
+        say("Nothing was changed: an earlier restore left " + pcui::path_utf8(old.filename()) +
+            " behind and it could not be moved into the backups (" + why + ").");
+        return false;
+    }
     bool had = real_dir(live) && count_files(live);
-    std::string made, why;
     if (had && !make_backup(save_dir, backups, "restore", now, &made, &why, name)) {
         say("Nothing was changed: your saves could not be backed up first. " + why);
         return false;
     }
-    fs::path incoming = save_dir / "UserData.restoring", old = save_dir / "UserData.replaced";
-    remove_tree(incoming);
-    remove_tree(old);
+    remove_tree(incoming);              // only ever a copy of a backup that is still there
     if (!copy_tree(src, incoming, nullptr, &why)) {
         remove_tree(incoming);
         say("Nothing was changed: the backup could not be copied (" + why + ").");
         return false;
     }
-    std::error_code ec;
     if (fs::exists(live, ec)) {
         fs::rename(live, old, ec);
         if (ec) {
@@ -651,6 +691,7 @@ std::string describe_reason(const std::string &reason)
     if (reason == "manual") return "Made by you";
     if (reason == "restore") return "Before a restore";
     if (reason == "import") return "Before an import";
+    if (reason == "leftover") return "Left by an unfinished restore";
     return "Backup";
 }
 

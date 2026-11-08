@@ -76,7 +76,9 @@ int rotate(const fs::path &backups, int keep, const std::string &protect = "");
 int count_profiles(const fs::path &save_dir);
 // No backup was made on now's local calendar day.
 bool daily_due(const fs::path &backups, int64_t now);
-// Backs up the current saves (reason "restore"), then puts the backup's UserData in place.
+// Backs up the current saves (reason "restore"), then puts the backup's UserData in place. A
+// UserData.replaced left by a restore that did not finish (it can hold the real saves) is first moved
+// into save-backups as its own backup (reason "leftover"), never deleted.
 bool restore(const fs::path &save_dir, const fs::path &backups, const std::string &name, int64_t now,
              std::string *message);
 // ---- profiles the game deletes ----

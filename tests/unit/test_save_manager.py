@@ -320,6 +320,33 @@ def test_restore_backs_up_the_current_state_first(tool, tmp_path):
     assert not (save / 'UserData.restoring').exists() and not (save / 'UserData.replaced').exists()
 
 
+def test_restore_keeps_a_leftover_from_an_unfinished_restore(tool, tmp_path):
+    save, backups = tmp_path / 'save', tmp_path / 'save-backups'
+    title = save / 'UserData' / '45410049'
+    put_profile(title, 'VY2', profile('VY2', key=bytes(16)))
+    wanted = tree(save / 'UserData')
+    name = run(tool, 'backup', save, backups, 'manual', noon(-1)).split()[1]
+    # an earlier restore stopped between its two renames: the real saves sit in UserData.replaced
+    left = save / 'UserData.replaced' / '45410049'
+    put_profile(left, 'REAL', profile('REAL', key=bytes(16)))
+    put_profile(left, 'REAL2', profile('REAL2', key=bytes(16)))
+    real = tree(save / 'UserData.replaced')
+    (save / 'UserData.restoring').mkdir()
+    (save / 'UserData.restoring' / 'half').write_bytes(b'x')
+    text = run(tool, 'restore', save, backups, name, noon())
+    assert text.startswith('1 Backup restored from')
+    assert tree(save / 'UserData') == wanted
+    assert not (save / 'UserData.replaced').exists() and not (save / 'UserData.restoring').exists()
+    rows = [l.split() for l in run(tool, 'backups', backups).splitlines()]
+    kept = [r for r in rows if r[1] == 'leftover']
+    assert len(kept) == 1 and kept[0][3] == '2'
+    assert tree(backups / kept[0][0] / 'UserData') == real
+    info = (backups / kept[0][0] / 'backup.txt').read_text()
+    assert 'reason=leftover' in info and 'from=' in info and 'UserData.replaced' in info
+    # and the saves from just before the restore were backed up as always
+    assert [r[1] for r in rows].count('restore') == 1
+
+
 def test_restore_keeps_the_backup_it_restores_when_ten_exist(tool, tmp_path):
     save, backups = tmp_path / 'save', tmp_path / 'save-backups'
     put_profile(save / 'UserData' / '45410049', 'VY2', profile('VY2', key=bytes(16)))
