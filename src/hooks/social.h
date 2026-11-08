@@ -82,6 +82,10 @@ struct Battle {
     bool can_answer = false, can_cancel = false, rated = false;
     BattleCrew crews[2];
     int score[2] = {}, left[2] = {}, dx[2] = {}, xp[2] = {};
+    /* Turf War (stage 4): the venue a turf battle is fought for (0 none), and after the end what it did to
+     * the map (turf_result) or why it did not (turf_why), as the service words them */
+    int turf_venue = 0;
+    std::string turf_name, turf_result, turf_why;
 };
 /* The crew ladder (GET /api/social/ladder) */
 struct LadderRow {
