@@ -995,6 +995,7 @@ bool turf_shown();
 void open_turf(Page back);
 bool turf_gallery(const std::string &p);
 bool tset_gallery(const std::string &p);      // tset_ui.inc
+bool tset_created_ok(const NetRoom &r);       // tset_ui.inc
 
 enum NetplayState net_state() { return gallery_on() ? G.state : netplay_state(); }
 bool net_in_lobby() { return gallery_on() ? G.in_lobby : netplay_in_lobby() != 0; }
@@ -2597,7 +2598,8 @@ void draw_settings(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom
 // ---- fighter choice: the game's portrait grid ----
 
 // The grid's fighters: the roster, with this player's created fighters first (one card each,
-// newest first) when the relay plays them here (not in ranked play, not in King of the Hill rooms).
+// newest first) when the relay plays them here (not in ranked play, not in King of the Hill rooms, not in a
+// tournament set of stock fighters only).
 // g_grid_cp: per grid entry, the created fighter's cp_cards index, -1 for a roster fighter.
 std::vector<int> g_grid_cp;
 const std::vector<OnlineFighter> &grid_fighters()
@@ -2608,7 +2610,7 @@ const std::vector<OnlineFighter> &grid_fighters()
     g_grid_cp.assign(list.size(), -1);
     NetRoom r;
     lobby_room(&r);
-    if (cp_available() && ranked_created_ok(r) && !(r.in_room && NETPLAY_IS_KOTH(r.settings.mode))) {
+    if (cp_available() && ranked_created_ok(r) && tset_created_ok(r) && !(r.in_room && NETPLAY_IS_KOTH(r.settings.mode))) {
         const std::vector<CpCard> cards = cp_cards();
         styles.assign(cards.size(), std::string());
         for (size_t i = 0; i < cards.size(); i++)
@@ -4061,7 +4063,7 @@ void gallery_step()
                                          "hub-turf", "turf", "turf-open", "turf-claim", "turf-member", "turf-why", "turf-season",
                                          // tournament sets (tset_ui.inc)
                                          "hub-tset", "tset-coin", "tset-select", "tset-why", "tset-pick", "tset-pick-wait",
-                                         "tset-intro", "tset-waiting", "tset-over" };
+                                         "tset-intro", "tset-waiting", "tset-over", "tset-grid" };
     const int count = (int)(sizeof(pages) / sizeof(pages[0]));
     static unsigned long long start;
     static int ms;
