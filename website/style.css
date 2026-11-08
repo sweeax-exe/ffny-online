@@ -875,3 +875,27 @@ h1, h2, h3 {
 }
 .trailer-media img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .trailer-media iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+
+/* ---- Turf War (turf.html, start page teaser) ---- */
+.turf-teaser { padding-bottom: 0; }
+.turf-teaser-text { margin: 4px 0 0; max-width: 62ch; color: var(--muted); }
+.turf-state { padding: 18px 22px; margin-bottom: 20px; }
+.turf-h { font-size: 26px; margin: 34px 0 12px; }
+.turf-borough:first-child .turf-h { margin-top: 10px; }
+.turf-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; }
+.turf-venue { padding: 16px 18px; display: flex; flex-direction: column; gap: 8px; }
+.turf-venue-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.turf-venue h4 { margin: 0; font: 400 22px/1.15 var(--display); letter-spacing: 0.03em; overflow-wrap: anywhere; }
+.turf-holder { margin: 0; font-weight: 600; overflow-wrap: anywhere; }
+.turf-crew b { color: var(--gold); }
+.turf-open { color: #3ccf7a; font: 400 18px/1 var(--display); letter-spacing: 0.08em; }
+.turf-venue.is-boss { border-color: rgba(244, 183, 64, 0.6); }
+.turf-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.turf-badge {
+  display: inline-block; padding: 3px 9px; font-size: 12.5px; font-weight: 700; color: var(--muted);
+  border: 1px solid rgba(255, 255, 255, 0.22); border-radius: 99px; background: rgba(255, 255, 255, 0.05);
+}
+.turf-badge.boss { color: var(--gold); border-color: rgba(244, 183, 64, 0.6); background: rgba(244, 183, 64, 0.12); letter-spacing: 0.08em; text-transform: uppercase; }
+.turf-badge.prot { color: #6db7ff; border-color: rgba(109, 183, 255, 0.5); background: rgba(109, 183, 255, 0.1); }
+.turf-badge.chal { color: #ff8a6b; border-color: rgba(255, 90, 70, 0.55); background: rgba(255, 90, 70, 0.12); }
+.turf-updated { margin-top: 22px; }

@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Turf War: FFNY Online</title>
+<meta name="description" content="The FFNY Online Turf War map: which crew holds which New York venue, open challenges and the season standings.">
+<meta name="theme-color" content="#0b0808">
+<meta name="color-scheme" content="dark">
+<meta name="referrer" content="no-referrer">
+<link rel="canonical" href="https://defjam.online/turf.html">
+<link rel="icon" href="favicon.ico" sizes="any">
+<link rel="icon" type="image/png" sizes="256x256" href="img/icon-256.png">
+<link rel="apple-touch-icon" href="img/icon-256.png">
+<link rel="preload" href="fonts/Anton-Regular.ttf" as="font" type="font/ttf" crossorigin>
+<link rel="stylesheet" href="style.css">
+<script src="site.js" defer></script>
+</head>
+<body>
+<a class="skip" href="#turf-map">Skip to the map</a>
+
+<header class="top">
+  <a class="brand" href="./" aria-label="FFNY Online, start page">
+    <img src="img/icon-256.png" alt="" width="36" height="36">
+    <span>FFNY Online</span>
+  </a>
+  <nav aria-label="Sections">
+    <a href="./#tournaments">Tournaments</a>
+    <a href="turf.html" aria-current="page">Turf War</a>
+    <a href="./#features">Features</a>
+    <a href="./#social">Social</a>
+    <a href="./#crews">Crews</a>
+    <a href="ranked.html">Ranked</a>
+    <a href="./#next">Coming next</a>
+    <a href="./#screens">Screens</a>
+    <a href="./#how">Get started</a>
+    <a class="pill" href="https://discord.gg/zCZKVDnKaP" rel="noopener">Discord</a>
+  </nav>
+</header>
+
+<main class="ranked-page turf-page">
+  <section class="section" id="turf-map" aria-labelledby="turf-title">
+    <div class="wrap">
+      <p class="kicker">Crews</p>
+      <h2 id="turf-title">Turf War</h2>
+      <p class="season" id="turf-season" hidden></p>
+
+      <div class="glass turf-state" id="turf-msg" role="status" aria-live="polite">
+        <p class="ladder-msg">Loading the map…</p>
+      </div>
+      <noscript><p class="ladder-msg">The map needs JavaScript. It is also shown in the game under Crews.</p></noscript>
+
+      <div id="turf-body" hidden>
+        <div id="turf-boroughs"></div>
+
+        <h3 class="turf-h">Season standings</h3>
+        <div class="glass ladder">
+          <p class="ladder-msg" id="turf-standings-empty" hidden>No crew holds turf yet this season.</p>
+          <table class="ladder-table" id="turf-standings" hidden>
+            <thead>
+              <tr><th scope="col" class="c-place">#</th><th scope="col">Crew</th><th scope="col" class="c-num">Points</th><th scope="col" class="c-num">Venues</th><th scope="col" class="c-num">Rating</th></tr>
+            </thead>
+            <tbody id="turf-standings-rows"></tbody>
+          </table>
+        </div>
+
+        <div id="turf-history-wrap" hidden>
+          <h3 class="turf-h">Past winners</h3>
+          <div class="glass ladder">
+            <table class="ladder-table">
+              <thead>
+                <tr><th scope="col">Season</th><th scope="col">Winner</th><th scope="col" class="c-num">Points</th><th scope="col" class="c-num">Venues</th></tr>
+              </thead>
+              <tbody id="turf-history-rows"></tbody>
+            </table>
+          </div>
+        </div>
+        <p class="fine turf-updated" id="turf-updated"></p>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="foot">
+  <div class="wrap foot-inner">
+    <img src="img/logo-512.png" alt="" width="96" height="90" loading="lazy" decoding="async">
+    <div>
+      <p class="disclaimer"><strong>FFNY Online is an unofficial fan project.</strong> It is not
+        affiliated with, endorsed or sponsored by Electronic Arts, AKI or Def Jam. Def Jam: Fight
+        for NY and its assets belong to their respective owners. You need your own legally obtained
+        copy of the game; no game data is distributed.</p>
+      <p>This site sets no cookies and uses no trackers.</p>
+      <nav class="foot-links" aria-label="Links">
+        <a href="./">Start page</a>
+        <a href="https://play.defjam.online/privacy" rel="noopener">Privacy</a>
+        <a href="https://discord.gg/zCZKVDnKaP" rel="noopener">Discord</a>
+        <a href="https://github.com/sweeax-exe/ffny-online" rel="noopener">GitHub</a>
+      </nav>
+    </div>
+  </div>
+</footer>
+</body>
+</html>

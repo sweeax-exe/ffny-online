@@ -106,3 +106,18 @@ def test_the_site_csp_allows_the_tournament_api():
         pytest.skip(SKIP)
     snippet = (RELAY / 'deploy/Caddyfile.site-snippet').read_text(encoding='utf-8')
     assert 'connect-src https://api.github.com https://play.defjam.online;' in snippet
+
+
+def test_the_turf_war_section_and_nav_stay_hidden_until_the_service_answers():
+    html = (ROOT / 'website/index.html').read_text(encoding='utf-8')
+    assert re.search(r'<section[^>]+id="turf"[^>]*hidden', html)
+    assert re.search(r'<a[^>]+id="nav-turf"[^>]*hidden', html)
+    js = (ROOT / 'website/site.js').read_text(encoding='utf-8')
+    assert "/api/turf'" in js and "/api/turf/season'" in js
+    assert "credentials: 'omit'" in js.split('function turfGet')[1]
+
+
+def test_the_turf_page_is_built_and_linked(dist):
+    page = (dist / 'turf.html').read_text(encoding='utf-8')
+    assert re.search(r'href="style\.css\?v=[0-9a-f]{10}"', page)
+    assert 'id="turf-body"' in page and 'turf.html' in (dist / 'index.html').read_text(encoding='utf-8')

@@ -23,7 +23,7 @@ ROOT = HERE.parent
 
 # Page files, written with a short content hash on their CSS/JS references so a new upload is
 # never mixed with an old cached copy.
-PAGE = ['index.html', 'ranked.html', 'style.css', 'site.js']
+PAGE = ['index.html', 'ranked.html', 'turf.html', 'style.css', 'site.js']
 
 # dist path -> repository path. Every image must be in check-source-tree.py's approved list.
 ASSETS = {
@@ -81,7 +81,7 @@ def check_assets(approved):
 def local_refs(out):
     """Every local file the built page, stylesheet and script refer to."""
     refs = set()
-    for page in ('index.html', 'ranked.html'):
+    for page in ('index.html', 'ranked.html', 'turf.html'):
         html = (out / page).read_text(encoding='utf-8')
         refs.update(LOCAL_REF.findall(html))
         refs.update(CSS_URL.findall(html))

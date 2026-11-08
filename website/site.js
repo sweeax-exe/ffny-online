@@ -1,5 +1,5 @@
 /* defjam.online: the download button, the screenshot lightbox, the gameplay clip, the embers and the
-   ranked ladder (ranked.html).
+   ranked ladder (ranked.html) and the Turf War map (turf.html).
    Everything here is optional: without JS the button still points at the latest GitHub release. */
 (function () {
   'use strict';
@@ -204,6 +204,173 @@
         if (nav) nav.hidden = false;
       })
       .catch(function () { /* tournaments off or the service away: the section stays hidden */ });
+  }
+
+  // ---- Turf War (turf.html and the start page teaser), from the account service ----
+  // GET /api/turf and GET /api/turf/season answer 404 while Turf War is off.
+  var BOROUGHS = [['bronx', 'The Bronx'], ['manhattan', 'Manhattan'], ['queens', 'Queens'],
+                  ['brooklyn', 'Brooklyn'], ['staten_island', 'Staten Island'], ['', 'Elsewhere in the city']];
+
+  function turfGet(base, path) {
+    return fetch(base + path, { credentials: 'omit', referrerPolicy: 'no-referrer' }).then(function (r) {
+      if (r.status === 404) { var e = new Error('off'); e.off = true; throw e; }
+      if (!r.ok) throw new Error('turf ' + r.status);
+      return r.json();
+    });
+  }
+
+  function crewLabel(c) {
+    var s = el('span', 'turf-crew');
+    s.appendChild(el('b', null, '[' + (c.tag || '?') + ']'));
+    s.appendChild(document.createTextNode(' ' + (c.name || '')));
+    return s;
+  }
+
+  function realDate(iso) {
+    var d = iso && new Date(iso);
+    return d && !isNaN(d.getTime()) && d.getFullYear() > 2000 ? d : null;
+  }
+
+  function venueCard(v, now) {
+    var card = el('div', 'glass turf-venue' + (v.boss ? ' is-boss' : '') + (v.owner ? ' is-held' : ' is-open'));
+    var top = el('div', 'turf-venue-top');
+    top.appendChild(el('h4', null, v.name || '?'));
+    if (v.boss) top.appendChild(el('span', 'turf-badge boss', 'Boss'));
+    card.appendChild(top);
+    var holder = el('p', 'turf-holder');
+    if (v.owner) holder.appendChild(crewLabel(v.owner));
+    else holder.appendChild(el('span', 'turf-open', 'OPEN'));
+    card.appendChild(holder);
+    var tags = el('div', 'turf-tags');
+    var prot = realDate(v.protected_until);
+    if (v.owner && prot && prot > now) tags.appendChild(el('span', 'turf-badge prot', 'Protected until ' + localWhen(v.protected_until)));
+    if (v.owner && v.defended > 0) tags.appendChild(el('span', 'turf-badge', 'Defended ' + v.defended + 'x'));
+    var ch = v.challenge;
+    if (ch && ch.challenger) {
+      var c = el('span', 'turf-badge chal');
+      c.appendChild(document.createTextNode('Challenged by [' + (ch.challenger.tag || '?') + '] ' + (ch.challenger.name || '')));
+      if (realDate(ch.deadline)) c.appendChild(document.createTextNode(', answer by ' + localWhen(ch.deadline)));
+      tags.appendChild(c);
+    } else if (!v.owner && v.claim_battle) {
+      tags.appendChild(el('span', 'turf-badge chal', 'Claim battle under way'));
+    }
+    if (tags.childNodes.length) card.appendChild(tags);
+    return card;
+  }
+
+  function renderTurfMap(map) {
+    var wrap = document.getElementById('turf-boroughs');
+    wrap.textContent = '';
+    var now = new Date();
+    var venues = (map && map.venues) || [];
+    BOROUGHS.forEach(function (b) {
+      var list = venues.filter(function (v) { return (v.borough || '') === b[0]; });
+      if (!list.length) return;
+      var group = el('section', 'turf-borough');
+      group.appendChild(el('h3', 'turf-h', b[1]));
+      var grid = el('div', 'turf-grid');
+      list.forEach(function (v) { grid.appendChild(venueCard(v, now)); });
+      group.appendChild(grid);
+      wrap.appendChild(group);
+    });
+    var line = document.getElementById('turf-season');
+    line.textContent = '';
+    line.appendChild(el('strong', null, 'Season ' + (map.season || '') + (map.month ? ' (' + map.month + ')' : '')));
+    if (realDate(map.ends)) line.appendChild(document.createTextNode(' ends ' + seasonEnd(map.ends) + '.'));
+    var r = map.rules;
+    if (r && r.response_hours) {
+      line.appendChild(document.createTextNode(' A holder has ' + r.response_hours + ' hours to answer a challenge.'));
+    }
+    line.hidden = false;
+  }
+
+  function renderTurfSeason(s) {
+    var rows = document.getElementById('turf-standings-rows');
+    rows.textContent = '';
+    var st = (s && s.standings) || [];
+    document.getElementById('turf-standings').hidden = st.length === 0;
+    document.getElementById('turf-standings-empty').hidden = st.length > 0;
+    st.forEach(function (e) {
+      var tr = document.createElement('tr');
+      tr.appendChild(el('td', 'c-place', String(e.place || '')));
+      var name = el('td', 'c-name');
+      name.appendChild(crewLabel(e));
+      tr.appendChild(name);
+      tr.appendChild(el('td', 'c-num', String(e.points || 0)));
+      tr.appendChild(el('td', 'c-num', String(e.venues || 0)));
+      tr.appendChild(el('td', 'c-num', e.rating != null ? String(e.rating) : ''));
+      rows.appendChild(tr);
+    });
+    var hist = (s && s.history) || [];
+    var hrows = document.getElementById('turf-history-rows');
+    hrows.textContent = '';
+    hist.forEach(function (h) {
+      var top = h.top && h.top[0];
+      if (!top) return;
+      var tr = document.createElement('tr');
+      tr.appendChild(el('td', null, 'Season ' + h.season + (h.month ? ' (' + h.month + ')' : '')));
+      var name = el('td', 'c-name');
+      name.appendChild(crewLabel(top));
+      tr.appendChild(name);
+      tr.appendChild(el('td', 'c-num', String(top.points || 0)));
+      tr.appendChild(el('td', 'c-num', String(top.venues || 0)));
+      hrows.appendChild(tr);
+    });
+    document.getElementById('turf-history-wrap').hidden = hrows.childNodes.length === 0;
+  }
+
+  function setupTurf() {
+    var msg = document.getElementById('turf-msg');
+    var body = document.getElementById('turf-body');
+    if (!msg || !window.fetch) return;
+    var base = tournamentsBase();
+    var shown = false;
+    function say(text, retry) {
+      msg.textContent = '';
+      var p = el('p', 'ladder-msg', text);
+      if (retry) {
+        var b = el('button', null, 'Try again');
+        b.type = 'button';
+        b.addEventListener('click', load);
+        p.appendChild(b);
+      }
+      msg.appendChild(p);
+      msg.hidden = false;
+    }
+    function load() {
+      Promise.all([turfGet(base, '/api/turf'), turfGet(base, '/api/turf/season')]).then(function (res) {
+        renderTurfMap(res[0]);
+        renderTurfSeason(res[1]);
+        msg.hidden = true;
+        body.hidden = false;
+        shown = true;
+        document.getElementById('turf-updated').textContent = 'Updated ' + new Date().toLocaleTimeString() + '. The map refreshes every minute.';
+      }).catch(function (e) {
+        if (e && e.off) {
+          body.hidden = true;
+          document.getElementById('turf-season').hidden = true;
+          say('Turf War starts soon. Crews will fight for the venues of New York here; the map goes live with the first season.');
+        } else if (!shown) {
+          say('The map could not be loaded.', true);
+        } /* else keep showing the last map */
+      });
+    }
+    load();
+    setInterval(function () { if (!document.hidden) load(); }, 60000);
+  }
+
+  function loadTurfTeaser() {
+    var section = document.getElementById('turf');
+    if (!section || !window.fetch) return;
+    turfGet(tournamentsBase(), '/api/turf').then(function (map) {
+      var venues = (map && map.venues) || [];
+      var held = venues.filter(function (v) { return v.owner; }).length;
+      var stat = document.getElementById('turf-teaser-stat');
+      if (stat && venues.length) stat.textContent = held + ' of ' + venues.length + ' venues are held right now.';
+      section.hidden = false;
+      var nav = document.getElementById('nav-turf');
+      if (nav) nav.hidden = false;
+    }).catch(function () { /* Turf War off or the service away: the section stays hidden */ });
   }
 
   // ---- the ranked ladder (ranked.html), from the account service ----
@@ -485,8 +652,10 @@
 
   function start() {
     if (document.getElementById('ladder-panel')) { setupLadder(); return; }
+    if (document.getElementById('turf-body')) { setupTurf(); return; }
     loadRelease();
     loadTournaments();
+    loadTurfTeaser();
     setupLightbox();
     setupClip();
     setupTrailer();
