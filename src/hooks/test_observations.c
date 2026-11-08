@@ -80,9 +80,13 @@ void defjam_test_health_notify(uint32_t actor, uint32_t code)
     if (code != 0x3d || actor != pending_actor || !pending_actor) return;
     pending_actor = 0;
     after = health(actor);
-    if (!isfinite(after) || after < 0 || after == pending_health || InterlockedIncrement(&changes) > 10000) return;
+    if (!isfinite(after) || after < 0 || after == pending_health) return;
+    /* The damage event first, under its own line budget: regeneration is a
+     * small rise every update, and it used up the cap below during the third
+     * match of one launch, after which no hit was reported (issue #166). */
+    defjam_test_damage(slot(actor), pending_health, after);
+    if (InterlockedIncrement(&changes) > 10000) return;
     fprintf(stderr, "[TEST-OBSERVATION] {\"kind\":\"health_change\",\"update\":%lld,\"host_ms\":%llu,\"slot\":%d,\"before\":%.9g,\"after\":%.9g,\"caller\":%u}\n",
             (long long)updates, (unsigned long long)GetTickCount64(), slot(actor),
             (double)pending_health, (double)after, pending_caller);
-    defjam_test_damage(slot(actor), pending_health, after);
 }

@@ -270,6 +270,29 @@ SECOND_MATCH_FFA = raw_stages([
     "getscreeninfo(battle/chsvenue#2=a@8+4x4",
 ])
 
+# Repeated One on Ones for the memory check (issue #166). The runtime's pad script
+# takes at most 32 anchors and 4095 characters, which caps this at five matches.
+FIGHT_CYCLES = 5
+
+
+def fight_cycles_tail(matches):
+    """Pad-script tail for `matches` One on Ones at the default venue in one launch: each
+    match's scripted fighter, then through the summary back to the same match type and
+    fighters. Ends by holding the battle menu. Each match asks for the summary twice."""
+    def fighter(k):
+        return FIGHT_TAIL if k == 1 else FIGHT_TAIL.replace("@game.startgame(", "@game.startgame(#%d" % k)
+    parts = [fighter(1)]
+    for k in range(2, matches + 1):
+        parts += ["@game.getmatchsummary(#%d,a:4:80:3:0.3" % (2 * (k - 1) - 1),
+                  "@getscreeninfo(options/battleid#%d,start:6:30:4:0.3" % k,
+                  "@controllerbind(0#%d,a:5:40:4:0.3" % k,
+                  "@controllersetup(0#%d,right:4:4.3,a:6:90:4:0.3" % k,
+                  fighter(k)]
+    parts.append("@game.getmatchsummary(#%d,a:4:60:3:0.3" % (2 * matches - 1))
+    parts.append("@getscreeninfo(battle/cmtype#%d,back:9999:10000" % (matches + 1))
+    return ",".join(parts)
+
+
 ROUTES = {
     "boot": {
         "help": "start-up to the main menu, nothing pressed there",
@@ -313,6 +336,14 @@ ROUTES = {
         "tail": ",".join([FIGHT_TAIL, SECOND_MATCH_FFA, FIGHT_TAIL.replace("@game.startgame(", "@game.startgame(#2")]),
         "until": "game.getmatchsummary(#3", "after": 6, "secs": 1800,
         "shots": "@game.startgame(,60",
+    },
+    "fight-cycles": {
+        "help": "Five One on Ones at the default venue in one launch, then the battle menu held for 90 seconds "
+                "(repeated scene cycles for the memory check, issue #166)",
+        "stages": ONE_ON_ONE_SETUP + ["controllersetup(1,=a@4+4x6"],
+        "tail": fight_cycles_tail(FIGHT_CYCLES),
+        "until": "game.getmatchsummary(#%d" % (2 * FIGHT_CYCLES - 1), "after": 90, "secs": 600 * FIGHT_CYCLES,
+        "shots": "",
     },
     "versus": {
         "help": "One on One between two pads: both press START, each picks a fighter, default venue",

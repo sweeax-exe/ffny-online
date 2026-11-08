@@ -36,7 +36,7 @@ RESULT_ROUTES = ('fight-result', 'ffa-result')
 # Routes in which every fighter is driven by a pad.
 TWO_PAD_ROUTES = ('versus',)
 # Routes that play several matches in one launch: (match ordinal, fighters) for each.
-SESSION_ROUTES = {'two-matches': ((1, 2), (2, 4))}
+SESSION_ROUTES = {'two-matches': ((1, 2), (2, 4)), 'fight-cycles': tuple((k, 2) for k in range(1, 6))}
 evidence = load('test_evidence')
 session_driver = load('session_driver')
 
@@ -426,7 +426,7 @@ def execute(args):
                               if 'game.startgame(' in e['call'].lower()), None)
                 report['memory'] = run.memory
                 report['assertions'] += evidence.pacing_checks(run.text, end_anchor='game.getmatchsummary(')
-                report['assertions'] += evidence.memory_checks(run.memory, (start or 0) + 20)
+                report['assertions'] += evidence.memory_checks(run.memory, (start or 0) + 20, run.timeline)
             if args.stream_out:
                 lines = evidence.state_stream(run.text, args.stream_steps)
                 Path(args.stream_out).write_text('\n'.join(lines) + '\n', encoding='utf-8')
