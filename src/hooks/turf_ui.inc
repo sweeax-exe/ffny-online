@@ -3,7 +3,8 @@
 //
 //   MAP      the 18 venues by borough: who holds each (or OPEN), since when, protected until, an open
 //            challenge and its deadline; crew officers CHALLENGE (an owned venue), CLAIM (an open one, against
-//            a crew picked from the crews this PC knows), SET UP BATTLE and CANCEL on their crew's challenges.
+//            a crew picked from the crews this PC knows, in a format the service allows: 2 V 2 / 3 V 3 / 5 V 5),
+//            SET UP BATTLE and CANCEL on their crew's challenges (3 V 3).
 //   SEASON   the season's standings (points, venues held) and the past seasons' top crews.
 //
 // The game only shows what the account service answers and sends the requests; the service decides every
@@ -39,6 +40,8 @@ struct TurfEv {
 struct TurfMap {
     bool valid = false, officer = false;
     int season = 0, members = 0, online = 0;
+    int answer_min = 0;                 // rules= field 8: a turf battle's time to be accepted (0: not said)
+    std::vector<int> claim_formats;     // rules= field 9: a claim's formats (an older service: 3 and 5)
     std::string month, season_name;
     long long ends = 0, now = 0, my_crew = 0, started = 0;
     std::vector<TurfVenue> venues;
@@ -47,7 +50,7 @@ struct TurfMap {
     std::vector<TurfEv> events;         // newest first
     unsigned long long got = 0;     // GetTickCount64 at the answer (now moves on from there)
 };
-struct TurfCrew { int place = 0, emblem = 0, points = 0, venues = 0, rating = 0; long long id = 0; std::string tag, name; };
+struct TurfCrew { int place = 0, emblem = 0, points = 0, venues = 0, rating = 0, members = 0; long long id = 0; std::string tag, name; };
 struct TurfPast { int season = 0, place = 0, points = 0, venues = 0; long long id = 0, ended = 0; std::string month, tag, name; };
 struct TurfSeason {
     bool valid = false;
@@ -76,6 +79,7 @@ struct TurfState {
     bool cam_snap = true;           // the next frame takes the camera's goal at once
     bool picker = false;            // CLAIM: the crew picker is up
     int picker_sel = 0, picker_frame = -1;     // the frame it opened on takes no input (its A opened it)
+    int picker_fmt = 0;             // the claim's format picked with left/right (0: the default for the crew)
     std::string armed;              // the action pressed once ("challenge:6"), sent on the second press
     unsigned long long armed_at = 0;
     Page back = HUB;
@@ -118,7 +122,8 @@ std::vector<std::pair<std::string, std::string>> turf_lines(const char *text)
 
 long long turf_ll(const std::string &s) { return atoll(s.c_str()); }
 
-// The map's text form: season=, month=, ends=, now=, my_crew=id|officer[|members|online], rules=, then a venue=
+// The map's text form: season=, month=, ends=, now=, my_crew=id|officer[|members|online], rules= (field 8 the turf
+// battle's answer minutes, field 9 the claim formats "2,3,5", from build 67's service on), then a venue=
 // line per venue (fields only ever appended; can_challenge and why_not only with a session), then the map
 // page's lines: started=, season_name=, tint=crew|colour, live= (a turf battle under way) and event= (the
 // street wire, newest first). False without venues.
@@ -136,6 +141,19 @@ bool parse_turf_map(const char *text, TurfMap &m)
             m.my_crew = turf_ll(f[0]);
             m.officer = f.size() > 1 && f[1] == "1";
             if (f.size() > 3) { m.members = atoi(f[2].c_str()); m.online = atoi(f[3].c_str()); }
+        } else if (k == "rules") {
+            auto f = split_bar(v);
+            if (f.size() > 7) m.answer_min = atoi(f[7].c_str());
+            if (f.size() > 8) {
+                m.claim_formats.clear();
+                for (size_t a = 0; a < f[8].size();) {
+                    size_t c = f[8].find(',', a);
+                    if (c == std::string::npos) c = f[8].size();
+                    int n = atoi(f[8].substr(a, c - a).c_str());
+                    if (n >= 2 && n <= 5) m.claim_formats.push_back(n);
+                    a = c + 1;
+                }
+            }
         } else if (k == "started") m.started = turf_ll(v);
         else if (k == "season_name") m.season_name = v;
         else if (k == "tint") {
@@ -188,6 +206,7 @@ bool parse_turf_map(const char *text, TurfMap &m)
             m.venues.push_back(t);
         }
     }
+    if (m.claim_formats.empty()) m.claim_formats = { 3, 5 };
     m.valid = !m.venues.empty();
     return m.valid;
 }
@@ -521,6 +540,7 @@ void turf_do(const TurfMap &m, const TurfVenue &v, const std::string &act)
     } else if (act == "claim") {
         TW.picker = true;
         TW.picker_sel = 0;
+        TW.picker_fmt = 0;
         TW.picker_frame = ImGui::GetFrameCount();
         if (!C.v.ladder_loaded) social::ladder();
     }
@@ -533,17 +553,39 @@ void turf_do(const TurfMap &m, const TurfVenue &v, const std::string &act)
 std::vector<TurfCrew> turf_picker_crews(const TurfMap &m, const TurfSeason &s)
 {
     std::vector<TurfCrew> out;
-    auto add = [&](long long id, const std::string &tag, const std::string &name, int rating) {
+    auto add = [&](long long id, const std::string &tag, const std::string &name, int rating, int members) {
         if (!id || id == m.my_crew || tag.empty()) return;
-        for (auto &c : out) if (c.id == id) return;
+        for (auto &c : out)
+            if (c.id == id) { if (members) c.members = members; return; }
         TurfCrew c;
-        c.id = id; c.tag = tag; c.name = name; c.rating = rating;
+        c.id = id; c.tag = tag; c.name = name; c.rating = rating; c.members = members;
         out.push_back(c);
     };
-    for (auto &c : s.crews) add(c.id, c.tag, c.name, c.rating);
-    for (auto &v : m.venues) { add(v.owner, v.otag, v.oname, 0); add(v.chal_crew, v.ctag, v.cname, 0); }
-    for (auto &r : C.v.ladder) add(r.id, r.tag, r.name, r.rating);
+    for (auto &c : s.crews) add(c.id, c.tag, c.name, c.rating, 0);
+    for (auto &v : m.venues) { add(v.owner, v.otag, v.oname, 0, 0); add(v.chal_crew, v.ctag, v.cname, 0, 0); }
+    for (auto &r : C.v.ladder) add(r.id, r.tag, r.name, r.rating, r.members);
     return out;
+}
+
+// A claim's default format against crew c: the largest the service allows that both crews can field (a member
+// count not known counts as enough), else the smallest allowed.
+int turf_claim_default(const TurfMap &m, const TurfCrew &c)
+{
+    int best = 0;
+    for (int n : m.claim_formats)
+        if ((!m.members || m.members >= n) && (!c.members || c.members >= n)) best = std::max(best, n);
+    if (best) return best;
+    best = 99;
+    for (int n : m.claim_formats) best = std::min(best, n);
+    return best == 99 ? 3 : best;
+}
+
+// The claim's format now: the one picked with left/right while the service still allows it, else the default.
+int turf_claim_format(const TurfMap &m, const TurfCrew *c)
+{
+    for (int n : m.claim_formats)
+        if (n == TW.picker_fmt) return n;
+    return c ? turf_claim_default(m, *c) : (m.claim_formats.empty() ? 3 : m.claim_formats.back());
 }
 
 void draw_turf_picker(ImDrawList *dl, const Frame &f, const Pad &pad_in, const TurfMap &m, const TurfSeason &s, const TurfVenue &v)
@@ -557,15 +599,32 @@ void draw_turf_picker(ImDrawList *dl, const Frame &f, const Pad &pad_in, const T
     text(dl, f, g_title, 10, x + w / 2, y + 12, GREY, "CLAIM AN OPEN VENUE", CENTER, 0);
     text(dl, f, g_title, fit_size(f, g_title, 20, upper(v.name.c_str()).c_str(), w - 30), x + w / 2, y + 26, CREAM,
          upper(v.name.c_str()).c_str(), CENTER, 1.2f);
-    text(dl, f, g_body, 9.5f, x + w / 2, y + 54, GREY, "Pick the crew to fight for it: a 3 v 3 crew battle here. Their Boss or a "
-         "Lieutenant accepts it.", CENTER, 0, w - 40);
-    const int visible = 7;
+    std::string blurb = "Pick the crew and the format for a crew battle here. Their Boss or a Lieutenant " +
+        (m.answer_min > 0 ? "has " + std::to_string(m.answer_min) + " min to accept it." : std::string("accepts it."));
+    text(dl, f, g_body, 9.5f, x + w / 2, y + 50, GREY, blurb.c_str(), CENTER, 0, w - 40);
+    const int visible = 6;
     int n = (int)crews.size();
     if (pad.down && n) TW.picker_sel = std::min(n - 1, TW.picker_sel + 1);
     if (pad.up && n) TW.picker_sel = std::max(0, TW.picker_sel - 1);
     TW.picker_sel = std::max(0, std::min(TW.picker_sel, n - 1));
     int first = std::max(0, std::min(TW.picker_sel - visible / 2, n - visible));
-    float ry = y + 86;
+    // the format: left/right (or a click) steps through what the service allows
+    const TurfCrew *cur = n ? &crews[TW.picker_sel] : nullptr;
+    int fmt = turf_claim_format(m, cur);
+    int nf = (int)m.claim_formats.size(), fi = 0;
+    for (int i = 0; i < nf; i++) if (m.claim_formats[i] == fmt) fi = i;
+    bool fclick = nf > 1 && mouse_click(f, x + 70, y + 80, w - 140, 20);
+    if (nf > 1 && (pad.right || fclick)) { fi = (fi + 1) % nf; TW.picker_fmt = fmt = m.claim_formats[fi]; }
+    if (nf > 1 && pad.left) { fi = (fi + nf - 1) % nf; TW.picker_fmt = fmt = m.claim_formats[fi]; }
+    {
+        char fl[32];
+        snprintf(fl, sizeof(fl), nf > 1 ? "<  %d V %d  >" : "%d V %d", fmt, fmt);
+        rect(dl, f, x + 70, y + 80, w - 140, 20, IM_COL32(255, 255, 255, 16), 6);
+        text(dl, f, g_title, 12, x + w / 2, y + 83, GOLD, fl, CENTER, 0.8f);
+        if (cur && cur->members && cur->members < fmt)
+            text(dl, f, g_body, 8.5f, x + w - 66, y + 85, ORANGE, (std::to_string(cur->members) + " in crew").c_str(), LEFT, 0);
+    }
+    float ry = y + 108;
     if (!n) text(dl, f, g_title, 13, x + w / 2, ry + 50, GREY, "No other crews found yet.", CENTER, 0.8f);
     for (int i = first; i < n && i < first + visible; i++) {
         const TurfCrew &c = crews[i];
@@ -585,9 +644,12 @@ void draw_turf_picker(ImDrawList *dl, const Frame &f, const Pad &pad_in, const T
     if (pad.a && n) {
         const TurfCrew &c = crews[TW.picker_sel];
         char body[128];
-        snprintf(body, sizeof(body), "{\"venue\":%d,\"crew\":%lld,\"format\":3}", v.id, c.id);
-        turf_post("/api/turf/challenge", body, "Challenge sent to " + c.tag + ": once they accept, join it from the crew page.");
-        fprintf(stderr, "[ONLINE] turf: claim venue %d against crew %lld (%s)\n", v.id, c.id, c.tag.c_str());
+        snprintf(body, sizeof(body), "{\"venue\":%d,\"crew\":%lld,\"format\":%d}", v.id, c.id, fmt);
+        std::string sent = "Challenge sent to " + c.tag + " (" + std::to_string(fmt) + " v " + std::to_string(fmt) + "): " +
+            (m.answer_min > 0 ? "THEY HAVE " + std::to_string(m.answer_min) + " MIN TO ACCEPT. " : std::string("once they accept, ")) +
+            (m.answer_min > 0 ? "Then join it from the crew page." : "join it from the crew page.");
+        turf_post("/api/turf/challenge", body, sent);
+        fprintf(stderr, "[ONLINE] turf: claim venue %d against crew %lld (%s), %d v %d\n", v.id, c.id, c.tag.c_str(), fmt, fmt);
         TW.picker = false;
     }
     if (pad.b) TW.picker = false;
@@ -870,8 +932,8 @@ bool turf_test_action(const std::string &what, const std::string &arg)
             if (crews[i].tag == arg) at = i;
         }
         if (at >= 0) TW.picker_sel = at;
-        fprintf(stderr, "[SOCIAL-UI] turf: picker %s, crews [%s], %s %s\n", TW.picker ? "up" : "not up", all.c_str(), arg.c_str(),
-                at >= 0 ? "picked" : "not there");
+        fprintf(stderr, "[SOCIAL-UI] turf: picker %s, crews [%s], %s %s, format %d\n", TW.picker ? "up" : "not up", all.c_str(), arg.c_str(),
+                at >= 0 ? "picked" : "not there", at >= 0 ? turf_claim_format(m, &crews[at]) : 0);
         return true;
     }
     if (what == "turflog") {
@@ -908,7 +970,7 @@ const char *const TURF_SAMPLE =
     "ends=1764547200\n"
     "now=1762600000\n"
     "my_crew=11|1|9|6\n"
-    "rules=72|24|2|0|24|3|24\n"
+    "rules=72|24|2|0|24|3|24|60|2,3,5\n"
     "venue=6|The Terror Dome|bronx|0|3|BXK|Bronx Kings|1|1762300000|0|2|46|11|HHT|Harlem Heat|1762609670|0|0|0|Your crew already challenged it\n"
     "venue=14|Hunt's Point Scrapyard|bronx|0|3|BXK|Bronx Kings|1|1762400000|0|1|0|0|||0|0|0|1|\n"
     "venue=17|Gun Hill Garage|bronx|0|3|BXK|Bronx Kings|1|1761990000|0|5|0|0|||0|0|0|1|\n"
@@ -980,6 +1042,7 @@ bool turf_gallery(const std::string &p)
     TW.tab = p == "turf-season" ? 1 : 0;
     TW.picker = p == "turf-claim";
     TW.picker_sel = 1;
+    TW.picker_fmt = 0;
     TW.armed.clear();
     TW.season_top = 0;
     TW.region = p == "turf-zoom" ? 2 : 0;
