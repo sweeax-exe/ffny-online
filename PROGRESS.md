@@ -466,6 +466,7 @@ D138–D140 were allocated independently on main and the launcher branch. Their 
 | D359 | 2026-11-07 | PR #203: Next song / song from the start: hold R3 and press D-pad right / left, or F8 / F7 (`[songs] skip_pad`, `restart_pad`, `skip_key`, `restart_key`); the D-pad press is not hidden from the game. | R3 is unused by the game; hiding a pad button needs a runtime change the owner declined. Owner, 2026-11-07. |
 | D360 | 2026-11-07 | PR #204: Over a 4:3 menu picture that gets the side fill, a left-tagged element (the song banner) stays in the 4:3 box, once 8 frames agree; at the left edge otherwise. | The fill is painted over the sides at present and covered it; screen changes have 1-5 frames without their `[wide]` art. Owner report 2026-11-07. |
 | D361 | 2026-11-07 | PR #205: The fight HUD's top strip also takes a one-sided batch that starts at y 118..150, ends by y 190 and is 18 tall or less or 60 or more; with 3-4 fighters the bottom strip takes the bottom struggle meter's text, frame and fill bar, matched by start and height. | Measured in the owner's traces of submissions on all four fighters; the pause panel and the match summary stay centred. Owner play-test passed 2026-11-07. |
+| D362 | 2026-11-07 | Prepare Mac Story visual baseline candidates from stable v1.0.1 on the RC's exact disposable fixture; human image review remains pending. Preserve strict 3/.02 comparisons outside the variable song banner/movie; add a separately calibrated movie ROI guard (25/.5) that rejects a black-preview control. | No approved Mac manifest existed. Stable repeat differed only in the banner and movie; RC matches outside the banner, including an identical movie frame. This calibrates against stable controls and keeps the original frame/replay goldens unchanged. |
 
 ### Historical evidence retention
 
@@ -522,8 +523,9 @@ defjam-recomp/
 
 ## 5. Open questions for Vlad
 
+- v1.1.0 Mac visual baseline review: no pre-existing approved Story manifest. Stable 1.0.1 ran twice and RC once on one exact fixture; proposed four comparisons pass, including a movie guard that rejects a black-preview control. Baselines remain unapproved pending owner review of `logs/rc110-visual-comparison-review.png` (generator explicitly requires human review).
+- v1.1.0 Linux qualification on PR #206 (comment 6717596415): stock/HD each 20/21, known replay 79 vs 80 (#98), isolated repeat passes; two `test_cinema_timing` fixtures SIGSEGV with Zig-as-cc, also on main. Asked owner whether to hold for fixes or explicitly accept these recorded qualifications; no exception assumed.
 - v1.1.0: owner approved D348's 256 MiB scene-change limit on 2026-11-07. The combined candidate play-test is still pending (owner's reply); merge/tag also wait for Windows and Linux approvals on PR #206.
-- v1.1.0 Mac fresh-install acceptance: local drive has about 9.1 GiB free, below Setup's 12 GiB build headroom plus 2.82 GiB dump and 1 GiB data requirement. Asked owner to free roughly 7 GiB or supply another volume; game qualification continues.
 - None for v1.0.0: the owner set the stable gate (D340) and chose to publish with the HD-lane memory check recorded as a failure.
 
 No owner-only question blocks the approved documentation cleanup. Resolved setup,
@@ -536,7 +538,6 @@ Upstream PR submissions still need the owner's separate approval.
 
 > Recent entries only; older entries remain unchanged in the local `docs/worklog/` archive.
 
-- 2026-11-05 22:26 — PR #186 project site and README prepared for go-live: 17 published media files, seven decisions (D328-D334), the older gallery exports removed, unit tests 798 passed with one failure that needs the toolkit submodule, source tree check 0 failures.
 - 2026-11-06 09:29 — Site, README and install guide now say "Also available on RecompLauncher and Quiver", with links to both listings (D335). PR #193 merged at the owner's request (D336). Both listing pages returned 200 and name this game. Docs-only change; Pages needs a manual deploy after the merge, since `pages.yml` runs on a stable release or by hand.
 - 2026-11-06 12:40 — Stable v1.0.0 release train (PR #197, D337-D340): `release/v1.0.0` = main `ad6b695` + #190 (toolkit `351e28a`, fork `defjam/release-1.0.0` fast-forwarded from `d033837`). #190 on Windows: `story-map-shops` and `battle-map-edges` at 16:9 with Menus 1.4.0 pass; its unit test failed under MSVC (C4210, block-scope `extern`), fixed in `5bf591d`, quick 5/5. Candidate (fresh analyze, 18,446 functions 0 failed): stock full regress 17/17 (`logs/regress-20261106-110329.txt`); `--release-profile` 16/17, combat `performance.memory_growth` 105.2 MB then 99.2 MB on rerun vs 64 MB (`logs/regress-20261106-115208.txt`, `-115740`; #190's own build 107.1 MB). Private bytes stay ~2,390 MB during play; the final sample falls in the post-fight scene change (+~110 MB, same as the pre-fight step at ~80 s; the beta-1 candidate passed at 23.2 MB because its last sample came earlier). Owner: publish with the failure recorded, #166. CI run 42260186582 assets (checksums match): v0.13.0 install 400 s -> Clean Update 390 s, data folder 119 files identical; fresh install 426 s (installs not started). Owner: Windows-only gate (D340); #192 and #166 moved to v1.1.0; #141/#161 closed as fixed.
 - 2026-11-06 15:30 — Hotfix v1.0.1 (PR #199, D341-D342): owner asked to drop the Linux setup archive and name the platform in the AppImage. Removed `DefJamSetup-1.0.0-linux-x64.{tar.gz,sha256,provenance.json}` from the published v1.0.0 release (backup `defjam/release-evidence-1.0.0/linux-setup-asset`, SHA-256 `82f1543f…` matched GitHub's digest) and added a Linux/AppImage note to its notes. #199: `check-setup-assets.py` stops attaching the Linux setup (`APP_ONLY_PLATFORMS`); the Linux app becomes `DefJamRecompiled-<v>-linux-x86_64.AppImage`, with the old name still read for releases up to 1.0.0 (`LEGACY_APP_ASSETS`) and by the site. Windows: unit tests 706 passed / 206 skipped, source policy 572 files 0 failures, site picker checked in Node. No regression rerun (packaging and site only). A 1.0.0 AppImage cannot see the new name: its players download 1.0.1 by hand once.
@@ -544,33 +545,44 @@ Upstream PR submissions still need the owner's separate approval.
 - 2026-11-07 20:30 — v1.1.0 Windows gate: CI 35/35, full regress 17/17 stock (`logs/regress-20261107-183752.txt`) and 17/17 `--release-profile` (`-193219`), unit 889, source tree 0 failures. CI setup assets (checksums match): v1.0.1 install, then Clean Update to 1.1.0 exit 0 in 838 s, data folder 120 files 0 differences; fresh install 359 s; the updated game stays up 40 s with `[D3D]` present lines at 60 fps. Settings-kept not verified (no `settings.ini` before the first run). The gate script's install timings are inflated by an orphan `mspdbsrv.exe` that kept `Start-Process -Wait` from returning. Open: macOS and Linux/Deck regressions, play-test, D348 review.
 - 2026-11-07 21:16 — PR #206 macOS clean RC build: analyze 18,446 functions, re-lift 21 C files; first game build failed on #203's undefined VK_F7/VK_F8 (app-only CI omits this code). Added POSIX UI definitions and native compile test (1/1); rebuilt posix-release successfully on macOS 26.5.2 arm64 / AppleClang 21.0.0. Unit before fix 870 passed/73 skipped; combined toolkit widescreen fixture 1/1, 82 draws. Logs: `logs/rc110-analyze.txt`, `rc110-recomp.txt`, `rc110-build.txt` (preserved failure), `rc110-build-fixed.txt`, `rc110-unit.txt`, `rc110-ws-fixture-build.txt`. Full regression/functional qualification running next; no Mac approval yet.
 - 2026-11-07 21:45 — PR #206 release copy corrected: README/site now list custom/restored songs as available and link `docs/custom-songs.md`, rather than carrying the completed feature as future work. Site checks 6/6, build publishes the same 17 approved media, source policy 601 files/0 failures (`logs/rc110-site-unit.txt`, `rc110-site-build.txt`). Owner approved D348's 256 MiB transition limit; combined-RC play-test pending. Mac stock qualification still running: first 12 checks passed including combat 28/28; settled RSS growth -61.5 MiB, transition peak +12.0 MiB (`logs/scenarios/regress-combat-20261107-213757/report.json`, `logs/rc110-stock-console.txt`). CI 35/35 on dec1ef6. CI Mac assets verified against checksums and artifact digest; payload source 52cedef is the GitHub test merge containing dec1ef6.
+- 2026-11-07 23:02 — PR #206 Mac qualification: stock full 21/21 in 48 min (`logs/regress-20261107-220503.txt`); native song order/UI/SDL shortcuts/60–35 Beatbox/cache and accepted volumes 80/82/82 pass; French-base private review pack 5/5. CI-payload fresh setup 204 s, v1.0.1 install 206 s → Clean Update 97 s, 137 data files/0 differences incl. settings/profiles; both built games boot 40 s, median 120 presents/2 s, guards restore (`logs/rc110-setup/results.json`). Initial ad-hoc Quit/dropdown/Cancel/injection recipe failures remain in raw receipts, final targeted checks pass. D362 prepares stable v1.0.1 visual candidates (human review pending). HD two/five-fight checks running; full HD/cache/final units remain. Linux reports 20/21 stock and HD (known replay #98) plus two Zig cinema-fixture crashes also on main; owner exception requested, not assumed.
 
 ## 7. Hand-off
 
-### v1.1.0 release candidate — 2026-11-07
+### v1.1.0 RC #206: Mac qualification continues — 2026-11-07
 
-- `release/v1.1.0` = main after v1.0.1 (`2a61312`) + #192 (setup stage timings), #195 (optional compiler cache, off),
-  #201 (settled-fight memory gate), #185 (French-base language packs), #203 (custom and restored songs, saved volumes,
-  song shortcuts), #204 (song banner over 4:3 menus), #205 (submission meter in widescreen), merged in that order with
-  merge commits. #202 (Linux mmap threshold) is not in it (owner).
-- Toolkit `4801dc1` on fork `defjam/release-1.1.0`: `6c0bd55` + cherry-picks of `3d7758a` (#204), `8ae88ff` and
-  `ae79f3d` (#205); the `nv2a_ws_left_tag` fixture's draw count was resolved to 82 (43 + 5 + 20 + 14). The older pins of
-  #185, #192 and #195 are ancestors of `6c0bd55`. After publishing, fast-forward the `.gitmodules` branch
-  (`defjam/upstream-v0.16`) to it.
-- Windows stock and HD full regressions pass on `98ad031` (17/17 each); install and Clean Update pass.
-- macOS qualification in progress in worktree `c58d`: Python `/tmp/defjam-rc110-venv/bin/python`,
-  `DEFJAM_DATA=$PWD/logs/rc110-data` (cloned saves), preset `posix-release`. Clean analyze found 18,446 functions;
-  re-lift 21 C files. First full game build failed on undefined `VK_F7`/`VK_F8` in the new song hotkeys.
-  Game UI compatibility definitions and a native compile test fix it; rebuilt successfully.
-  Evidence: `logs/rc110-{analyze,recomp,build,build-fixed,unit,ws-fixture-build}.txt`.
-  Next: full stock and HD regressions, train functional checks including `two-matches,fight-cycles`, native Songs
-  UI/playback, French-base pack, optional ccache, and CI setup install. Game runs stay serial.
-- Owner requested fixes/results pushed to PR #206, then merge with a merge commit and tag `v1.1.0` only after all
-  gates and Windows/Linux approvals. Check new PR comments/reviews and head before pushing or publishing.
-- D348 (the 256 MiB transition limit, #201) approved by the owner 2026-11-07; candidate play-test pending. #195's cache is off until setup passes
-  the option. `SONG_CONVERT_VERSION` 7: custom songs converted by a pre-release build are converted again once.
-- Still open from earlier hand-offs: the Linux pick-a-release list only knows setup assets (v1.1.0 material, not in
-  this train); D331 naming alignment in the HD/mod docs; the real-system checks (SmartScreen wording, macOS Open
-  Anyway, marking the AppImage executable in Dolphin).
+- Train: #192, #195, #201, #185, #203, #204, #205; #202 excluded by owner. Toolkit `4801dc1` on
+  `defjam/release-1.1.0`; fast-forward `.gitmodules` integration branch `defjam/upstream-v0.16` after publication.
+- Code fix `dec1ef6`: POSIX UI F7/F8 names were missing, so the RC game did not compile on Mac/Linux despite CI.
+  Header definitions + native compile regression check; complete Mac build now succeeds. `fec3b54` aligns README/site
+  song copy and records the owner's approval of D348 (256 MiB scene-change limit). Later work here is records/docs.
+- Mac worktree `c58d`, Python `/tmp/defjam-rc110-venv/bin/python`, `DEFJAM_DATA=$PWD/logs/rc110-data`, `posix-release`:
+  clean analysis 18,446 functions, lift 21 C files; stock full regression **21/21 in 48 min**, report
+  `logs/regress-20261107-220503.txt`, captures `logs/rc110-stock-shots`. Replay 80/1,800 = golden; combat 28/28,
+  versus 27/27, soak 3/3; stock settled RSS growth −61.5 MiB, transition peak +12.0 MiB.
+- Mac train functional: native Songs checkbox/mode, restored song, actual SDL F8/F7, Beatbox 60 rows/35 on,
+  full Straight/Interactive piece order (48/128 pieces; 95/241 advances), conversion cache reuse; UI Accept Changes
+  saves 80/82/82 and a new boot applies .80/.82/.82. Private unchanged French-base review pack: 5/5 (launcher,
+  Portuguese menu, fight + restored-song SOD layer, intro, sc05). Receipts `logs/rc110-{song-results,
+  song-trace-audit,songs-ui-retry-final,volume-ui-accepted-results,language-results}.json`.
+  Earlier ad-hoc checker/route failures are retained: intentional Quit misclassified, dropdown misclick,
+  injected setters without Save and B/Cancel. They are not rewritten as successful aggregates.
+- Native CI-payload Mac setup: fresh install 204 s; v1.0.1 install 206 s → Clean Update 97 s; 137 data files
+  **0 differences**, including marker settings and real copied profiles. Both built games present at median 120/2 s
+  for 40 s with identical save restoration. `logs/rc110-setup/results.json`. Owner freed space; no disk threshold bypass.
+- ACTIVE: `regress.py --release-profile --only two-matches,fight-cycles` (exec session 56365), console
+  `logs/rc110-memory-hd-console.txt`. Menus 1.4.0 + Fighters 1.0.0 verified, 16:9. Game runs remain serial.
+  Then full `regress.py --release-profile`; optional ccache cold/warm builds + cached quick; final full unit/hygiene.
+- Story visual: D362 candidates from two healthy v1.0.1 runs and one RC run with exact fixture path in
+  `logs/rc110-visual-fixture.json`. Manifest `logs/rc110-data/test-baselines/story-tour-v1/manifest.json` remains
+  **unapproved**, owner asked with gallery `logs/rc110-visual-comparison-review.png`. After explicit approval,
+  mark only those reviewed images approved, then run stock `--only visual --fixture <that exact fixture>` in a free
+  game slot. Retain calibration/control metrics. Do not update original-image or replay goldens.
+- PR #206: Windows earlier stock/HD 17/17 and setup gate pass. Linux comment 6717596415: stock/HD each 20/21
+  (known replay 79 vs 80, #98); isolated repeat matches its golden; two Zig-built cinema fixtures also SIGSEGV on main.
+  Owner asked hold vs documented exception; no exception assumed. Read-only fixture audit found no definite cause.
+- Owner's combined RC play-test and final Windows/Linux approvals remain pending. User authorizes fixes/results
+  pushed to #206, then a merge commit and annotated `v1.1.0` only when gates/approvals are satisfied. Keep release
+  notes/PR table and this hand-off current; no built game or private pack/capture enters Git.
 
-Decisions are read by number or keyword: `decision D<n>`, `decisions --grep TEXT`.
+Detailed local checkpoint: `logs/rc110-MAC-RESULTS.md`. Remaining historical follow-ups are in GitHub Issues/PRs.

@@ -78,10 +78,10 @@ rejected by the authoring tool, installer and runtime. Disabling a pack, or refu
 deltas do not match the dump, restores the normal Game language setting. A pack's `language=pt-BR`
 identifies the translation; it does not choose the slot or translate any text itself.
 
-French-base support needs a runtime that implements this key. Older builds, including 0.13.0, ignore
-it and start in English while applying the pack's deltas. A catalogue version using `base=french` must
-set `min_recomp` to the first released runtime that supports it; the general 0.13.0 minimum below is
-not sufficient for these packs. Source patches and custom game executables do not belong in the mod ZIP.
+French-base support requires Recomp 1.1.0 or newer. Older releases ignore this key and start in English
+while applying the pack's deltas. A catalogue version using `base=french` must set `min_recomp` to
+`1.1.0` or newer; the general 0.13.0 minimum below is not sufficient for these packs. Source patches
+and custom game executables do not belong in the mod ZIP.
 
 ## With texture packs (HD, widescreen menus)
 
