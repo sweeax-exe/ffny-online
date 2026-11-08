@@ -370,3 +370,31 @@ def test_online_name_escaped_in_setting(exe, save_area):
     env['STUB_NAMES'] = rows['names'][0][0]
     rows = run(exe, save_area, env)
     assert rows['entry'][0][1] == 'a;b=c%d' and rows['entry'][3][1] == 'Ace'
+
+
+def test_profiles_put_aside_are_listed_under_their_game_folder(exe, save_area):
+    """<save>/aside (the launcher's Put aside, save_manager.h): the game never reads it, the list does,
+    keyed by the game folder each profile came from ("<folder>~2" is a second one of that folder), so
+    its online name and the pick stay with it. A key already listed from the game's folder wins; an
+    unfinished move (.moving-*) is not read."""
+    aside = save_area / 'data/save/aside'
+    now = time.time()
+    for stash, name, age in (('5E5E5E5E5E5E', 'BENCHED', 10), ('6F6F6F6F6F6F~2', 'SECONDOF', 400),
+                             ('4D4D4D4D4D4D~2', 'LATEST', 5), ('.moving-7A7A7A7A7A7A', 'HALFWAY', 1)):
+        d = aside / stash
+        d.mkdir(parents=True)
+        f = d / name
+        f.write_bytes(save_file(name))
+        os.utime(f, (now - age, now - age))
+    env = {'DEFJAM_DATA': str(save_area / 'data'), 'STUB_NAMES': '5E5E5E5E5E5E/BENCHED=Bench Boss'}
+    rows = run(exe, save_area, env)
+    assert names(rows) == ['Bench Boss', 'LATEST', 'CPTWO', 'NIGHTOWL', 'AW5J3555', 'SECONDOF']
+    keys = [e[2] for e in rows['entry']]
+    assert keys[0] == '5E5E5E5E5E5E/BENCHED' and keys[-1] == '6F6F6F6F6F6F/SECONDOF'
+    assert keys.count('4D4D4D4D4D4D/LATEST') == 1 and 'HALFWAY' not in ''.join(keys)
+    assert rows['entry'][0][5] == 'BENCHED' and rows['entry'][0][6] == 'Bench Boss'
+    assert rows['pick'] == [['0']] and rows['record'] == [['Bench Boss', '1']]
+    env['STUB_PICK_KEY'] = '6F6F6F6F6F6F/SECONDOF'
+    rows = run(exe, save_area, env)
+    assert rows['pick'] == [['5']] and rows['record'] == [['SECONDOF', '1']]
+

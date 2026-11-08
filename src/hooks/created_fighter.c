@@ -544,30 +544,30 @@ static void read_test_records(const char *list)
     }
 }
 
-static void read_local(void)
+/* The created fighters of one folder of user ID folders: `root`\<folder>\<file>, each keyed
+ * "<folder>/<file>". With `stash` the folders are profiles put aside (save_manager.h: <save>\aside,
+ * the game never reads them) and the key names the game folder each came from, so its online name
+ * and the pick stay with it: "<folder>~2" is the second of one folder put aside. Such a record is the
+ * file's own bytes, played like an opponent's: into a spare or borrowed profile slot for the match
+ * only (created_fighter_inject), never written to the save area or into the game's user ID list. */
+static void read_folder_of_user_ids(const char *root, int stash)
 {
     static uint8_t profile[PROFILE_SIZE];
     uint8_t rec[CP_REC_LEN];
-    const char *test = getenv("RECOMP_CP_RECORD"), *data = getenv("DEFJAM_DATA");
-    char root[MAX_PATH], pattern[MAX_PATH];
+    char pattern[MAX_PATH];
     WIN32_FIND_DATAA dir;
     HANDLE h;
-    int i;
-    g_local_count = 0;
-    if (test && *test) { read_test_records(test); goto done; }
-    if (data && *data) snprintf(root, sizeof(root), "%s\\save\\UserData\\45410049", data);
-    else {
-        const char *la = getenv("LOCALAPPDATA");
-        snprintf(root, sizeof(root), "%s\\xboxrecomp\\UserData\\45410049", la ? la : ".");
-    }
     snprintf(pattern, sizeof(pattern), "%s\\*", root);
     h = FindFirstFileA(pattern, &dir);
-    if (h == INVALID_HANDLE_VALUE) goto done;
+    if (h == INVALID_HANDLE_VALUE) return;
     do {
-        char inner[MAX_PATH];
+        char inner[MAX_PATH], folder[MAX_PATH], *tilde;
         WIN32_FIND_DATAA file;
         HANDLE g;
         if (!(dir.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) || dir.cFileName[0] == '.') continue;
+        if (stash && (dir.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)) continue;
+        snprintf(folder, sizeof(folder), "%s", dir.cFileName);
+        if (stash && (tilde = strchr(folder, '~')) != NULL) *tilde = 0;
         snprintf(inner, sizeof(inner), "%s\\%s\\*", root, dir.cFileName);
         g = FindFirstFileA(inner, &file);
         if (g == INVALID_HANDLE_VALUE) continue;
@@ -575,17 +575,43 @@ static void read_local(void)
             char path[MAX_PATH], key[sizeof(g_local[0].key)];
             FILETIME when = { 0, 0 };
             uint8_t ok[CP_REC_LEN];
+            int i, dup = 0;
             if (file.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY || file.nFileSizeLow != SAVE_FILE_SIZE) continue;
             snprintf(path, sizeof(path), "%s\\%s\\%s", root, dir.cFileName, file.cFileName);
             if (!profile_from_file(path, profile, &when) || profile[0x4D8A] != 1) continue;
             cp_record_from_profile(profile, rec);
             if (!cp_record_sanitize(rec, ok)) continue;
-            snprintf(key, sizeof(key), "%s/%s", dir.cFileName, file.cFileName);
+            snprintf(key, sizeof(key), "%s/%s", folder, file.cFileName);
+            for (i = 0; i < g_local_count; i++)
+                if (!strcmp(g_local[i].key, key)) dup = 1;
+            if (dup) {          /* one key, one fighter: the game's own save wins, then the first found */
+                fprintf(stderr, "[CREATED] %s put aside has the key of a fighter listed already: not listed\n", path);
+                continue;
+            }
             local_add(ok, key, ft64(when), 1);
         } while (FindNextFileA(g, &file));
         FindClose(g);
     } while (FindNextFileA(h, &dir));
     FindClose(h);
+}
+
+static void read_local(void)
+{
+    const char *test = getenv("RECOMP_CP_RECORD"), *data = getenv("DEFJAM_DATA");
+    char root[MAX_PATH], aside[MAX_PATH];
+    int i;
+    g_local_count = 0;
+    if (test && *test) { read_test_records(test); goto done; }
+    if (data && *data) {
+        snprintf(root, sizeof(root), "%s\\save\\UserData\\45410049", data);
+        snprintf(aside, sizeof(aside), "%s\\save\\aside", data);
+    } else {
+        const char *la = getenv("LOCALAPPDATA");
+        snprintf(root, sizeof(root), "%s\\xboxrecomp\\UserData\\45410049", la ? la : ".");
+        snprintf(aside, sizeof(aside), "%s\\xboxrecomp\\aside", la ? la : ".");
+    }
+    read_folder_of_user_ids(root, 0);
+    read_folder_of_user_ids(aside, 1);
 done:
     for (i = 0; i < g_local_count; i++)
         fprintf(stderr, "[CREATED] the player's fighter %d: %s%s%s (%s), saved %s, record %08X\n", i, g_local[i].name,

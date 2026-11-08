@@ -8,8 +8,8 @@
 // Layout: <data>/save/UserData/45410049/<profile folder>/ holds SaveMeta.xbx (UTF-16 "Name=..."),
 // the profile file named like the profile (0x5990 bytes, "20CM" header with three HMAC-SHA1
 // fields, docs/importing-xbox-saves.md) and saveimage.xbx; the Options file is a folder of the
-// same shape named "Options". Backups are <data>/save-backups/<yyyymmdd-hhmmss>/UserData plus a
-// backup.txt; only folders with that name shape are ever removed, and only inside save-backups.
+// same shape named "Options". Backups are <data>/save-backups/<yyyymmdd-hhmmss>/UserData (and aside, the
+// profiles put aside, when there are any) plus a backup.txt; only folders with that name shape are ever removed, and only inside save-backups.
 // A profile folder the game itself deletes (XDeleteSaveGame) is copied first to
 // <data>/save-backups/quarantine/<yyyymmdd-hhmmss>-<folder>/ (the folder's own files); the newest 30
 // are kept, and only folders of that name shape inside quarantine are ever removed.
@@ -50,8 +50,28 @@ struct Entry
     int64_t changed = 0;        // the main file's last change, Unix seconds (0 unknown)
     bool signed_ok = false;     // a profile: its signatures verify with the port's key
     bool created = false;       // a profile with a created fighter (profile +0x4D8A == 1)
+    std::string stash;          // a profile put aside: its folder under <save>/aside ("" one in the game)
 };
 std::vector<Entry> list_saves(const fs::path &save_dir);
+
+// ---- profiles put aside ----
+// The game loads at most 16 user IDs (MemCard.BootupLoad, 16 profile slots). A profile put aside is
+// moved, whole and unchanged, from UserData/45410049/<folder> to <save>/aside/<folder> (or
+// <folder>~2.. when that name is taken), which the game never reads; Bring back moves it home again.
+// A move is a rename on the same volume, so the game's folder never holds part of a profile; a copy
+// is made first in <save>/aside/.moving-<name>, checked byte for byte against the source and again
+// against the moved folder, and removed only then. Nothing is ever overwritten. Backups copy
+// <save>/aside beside UserData; a restore leaves it as it is.
+constexpr int kMaxUserIds = 16;
+fs::path aside_dir(const fs::path &save_dir);
+std::vector<Entry> list_aside(const fs::path &save_dir);          // PROFILE entries with `stash` set
+// The game folder `folder` (a profile, not Options) goes aside. False with *message (for the player).
+bool put_aside(const fs::path &save_dir, const std::string &folder, std::string *message);
+// The stash `stash` goes back to UserData/45410049/<its folder>. Refused while the game folder holds
+// kMaxUserIds profiles or a folder of that name.
+bool bring_back(const fs::path &save_dir, const std::string &stash, std::string *message);
+// The game folder a stash name stands for ("" when it is not a stash name).
+std::string aside_folder(const std::string &stash);
 
 // ---- backups ----
 struct Backup

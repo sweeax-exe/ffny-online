@@ -66,4 +66,19 @@ enum Mode { MODE_AUTO, MODE_MINE, MODE_MIX, MODE_ORIGINAL };
 // What `mode` means with `songs` playable songs: AUTO is MIX when there are songs, ORIGINAL when not.
 Mode effective_mode(int mode, size_t songs);
 
+// When a fight ends and the next begins, from the game's match phase read once per game update
+// ([0x3B8F30]: 0 start, 1 fighting, 2 decided, 3 finished; anything else counts as no fight). A fight
+// counts once it ran kMinFight updates; it is over once the phase stayed off "fighting" for kSettle
+// updates, so a phase that flickers for a few updates (a rollback correcting a predicted KO) is no end.
+// The next fight begins when the phase goes back to 0 or 1 after that end. One fight is one match: the
+// game has no rounds inside a fight (a KOTH or FFA rotation is a new fight each time).
+struct FightWatch
+{
+    enum Event { NONE, ENDED, BEGAN };
+    static constexpr int kMinFight = 60, kSettle = 30;
+    int last = -1, fighting = 0, away = 0;
+    bool fought = false, ended = false;
+    Event feed(int phase);
+};
+
 } // namespace musiclib

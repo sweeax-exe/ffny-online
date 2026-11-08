@@ -874,6 +874,7 @@ struct State {
     char name[CP_NAME_MAX + 1] = "";
     int name_pos = 0, name_cp = -1;
     int fighters_cp = -1;           // FIGHTERS: the selected card's cp_cards index, -1 a roster fighter
+    bool random_pick = false;       // FIGHTERS: the last pick was the RANDOM card (the hub says so)
     uint32_t watch_hidden = 0;      // King of the Hill: the fight whose watching screen B closed
     unsigned long long give_up_at = 0, lb_since = 0;    // King of the Hill: LB gave up the spot; LB held since
     bool lb_long_done = false;      // the long LB press has acted
@@ -1096,10 +1097,12 @@ int lobby_queue(int *waited, int *searching, char *why, int size)
 }
 int lobby_caps()
 {
-    return gallery_on() ? NETPLAY_CAP_KOTH | NETPLAY_CAP_YIELD | NETPLAY_CAP_FFAROT | NETPLAY_CAP_CPULEVEL |
-                              (G.rollback ? NETPLAY_CAP_ROLLBACK : 0)
+    return gallery_on() ? NETPLAY_CAP_KOTH | NETPLAY_CAP_YIELD | NETPLAY_CAP_FFAROT | NETPLAY_CAP_RANDOM_VENUE |
+                              NETPLAY_CAP_CPULEVEL | (G.rollback ? NETPLAY_CAP_ROLLBACK : 0)
                         : netplay_lobby_caps();
 }
+// The relay takes RANDOM in the venue vote (build 67): the vote shows a fourth card.
+bool random_venue_offered() { int c = lobby_caps(); return c > 0 && (c & NETPLAY_CAP_RANDOM_VENUE); }
 // build 67: a room of this mode has a CPU level to set (its free places go to CPU fighters, the relay takes it)
 bool cpu_level_offered(int mode)
 {
@@ -2673,6 +2676,10 @@ void draw_settings(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom
 // newest first) when the relay plays them here (not in ranked play, not in King of the Hill rooms, not in a
 // tournament set of stock fighters only).
 // g_grid_cp: per grid entry, the created fighter's cp_cards index, -1 for a roster fighter.
+// The last card is RANDOM (FIGHTER_RANDOM, build 67): a fighter of the others at random, so it follows
+// the same rules (created fighters only where the grid offers them). The pick is made here and sent
+// like any other (READY with the fighter), so both copies of a match get the same fighter.
+const int FIGHTER_RANDOM = -2;
 std::vector<int> g_grid_cp;
 const std::vector<OnlineFighter> &grid_fighters()
 {
@@ -2696,7 +2703,22 @@ const std::vector<OnlineFighter> &grid_fighters()
             g_grid_cp.insert(g_grid_cp.begin(), (int)i);
         }
     }
+    if (list.size() > 1) {
+        OnlineFighter rnd{};
+        rnd.id = FIGHTER_RANDOM;
+        snprintf(rnd.name, sizeof(rnd.name), "Random");
+        rnd.style = "A FIGHTER AT RANDOM";
+        list.push_back(rnd);
+        g_grid_cp.push_back(-1);
+    }
     return list;
+}
+
+// The RANDOM card's question mark, centred in the box.
+void random_card(ImDrawList *dl, const Frame &f, float x, float y, float w, float h, bool lit, float size)
+{
+    rect(dl, f, x + 1, y + 1, w - 2, h - 2, lit ? IM_COL32(56, 14, 20, 255) : IM_COL32(24, 10, 12, 255), 3);
+    text(dl, f, g_title, size, x + w / 2, y + h / 2 - size * 0.62f, lit ? ORANGE : with_alpha(ORANGE, 0.6f), "?", CENTER, 1.4f);
 }
 
 // Where `fighter` sits in the grid list (a created fighter: the picked card); 0 if not there.
@@ -2735,7 +2757,8 @@ void draw_fighters(ImDrawList *dl, const Frame &f, const Pad &pad, bool *chosen,
     int cur_cp = S.fighter_sel < (int)g_grid_cp.size() ? g_grid_cp[S.fighter_sel] : -1;
     // the chosen fighter, large, with name and style
     glass(dl, f, 36, 74, 180, 308);
-    if (!portrait(dl, f, cur.id, 46, 84, 160, 240))
+    if (cur.id == FIGHTER_RANDOM) random_card(dl, f, 46, 84, 160, 240, true, 110);
+    else if (!portrait(dl, f, cur.id, 46, 84, 160, 240))
         text(dl, f, g_title, 26, 126, 180, with_alpha(CREAM, 0.6f), cur.name, CENTER, 1.4f, 150);
     S.fighters_cp = cur_cp;
     if (cur_cp >= 0) {      // a created fighter: which Story save it comes from, and its user ID under an online name
@@ -2768,7 +2791,10 @@ void draw_fighters(ImDrawList *dl, const Frame &f, const Pad &pad, bool *chosen,
             if (mouse_pick(f, x, y, cw, ch)) S.fighter_sel = i;
             bool sel = i == S.fighter_sel;
             rect(dl, f, x, y, cw, ch, IM_COL32(0, 0, 0, 150), 3);
-            if (!portrait(dl, f, list[i].id, x + 1, y + 1, cw - 2, ch - 2, sel ? IM_COL32_WHITE : IM_COL32(150, 150, 150, 255)))
+            if (list[i].id == FIGHTER_RANDOM) {
+                random_card(dl, f, x, y, cw, ch, sel, 34);
+                text(dl, f, g_title, 9, x + cw / 2, y + ch - 14, sel ? WHITE : GREY, "RANDOM", CENTER, 0.6f);
+            } else if (!portrait(dl, f, list[i].id, x + 1, y + 1, cw - 2, ch - 2, sel ? IM_COL32_WHITE : IM_COL32(150, 150, 150, 255)))
                 text(dl, f, g_body, 9, x + 3, y + 30, GREY, list[i].name, LEFT, 0, cw - 4);
             if (list[i].id == NETPLAY_CREATED_FIGHTER) {     // the fighter's name on an orange band
                 float tw = text_width(f, g_title, 9, list[i].name);
@@ -2799,9 +2825,14 @@ void draw_fighters(ImDrawList *dl, const Frame &f, const Pad &pad, bool *chosen,
     snprintf(page, sizeof(page), "%d / %d", S.fighter_sel + 1, n);
     text(dl, f, g_title, 12, gx + cols * (cw + 4) - 4, gy + rows * (ch + 6), GREY, page, RIGHT, 0.8f);
     if (pad.a) {
-        if (cur_cp >= 0) cp_choose(cur_cp);     // which created fighter: remembered, and sent to the relay
+        int pick = S.fighter_sel;
+        S.random_pick = cur.id == FIGHTER_RANDOM;
+        if (S.random_pick) pick = online_random_below(n - 1);  // RANDOM is the last card: one of the others
+        int pick_cp = pick < (int)g_grid_cp.size() ? g_grid_cp[pick] : -1;
+        if (pick_cp >= 0) cp_choose(pick_cp);   // which created fighter: remembered, and sent to the relay
         *chosen = true;
-        *fighter = cur.id;
+        *fighter = list[pick].id;
+        if (S.random_pick) S.fighter_sel = pick;    // back here later: on the fighter it drew
     }
     // BACK from a ranked search's pick goes back to the mode chooser, not to the online menu (a player
     // who wanted another fighter for ranked landed on the hub, 2026-11-03)
@@ -2816,9 +2847,13 @@ void draw_vote(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
     for (int i = 0; i < r.player_count; i++) if (r.players[i].slot == r.you) me = &r.players[i];
     int n = r.candidate_count;
     if (n <= 0) return;
-    if (S.vote_sel >= n) S.vote_sel = 0;
-    if (pad.left) S.vote_sel = (S.vote_sel + n - 1) % n;
-    if (pad.right) S.vote_sel = (S.vote_sel + 1) % n;
+    // RANDOM (build 67): a fourth card where the relay takes it and there is more than one venue; when it
+    // wins, the relay draws the venue from the room's pool and START names it (both copies load the same)
+    bool rnd = random_venue_offered() && n > 1;
+    int cards = n + (rnd ? 1 : 0);
+    if (S.vote_sel >= cards) S.vote_sel = 0;
+    if (pad.left) S.vote_sel = (S.vote_sel + cards - 1) % cards;
+    if (pad.right) S.vote_sel = (S.vote_sel + 1) % cards;
     int left = r.ms_left - (int)(GetTickCount64() - r.received);
     if (left < 0) left = 0;
 
@@ -2839,23 +2874,33 @@ void draw_vote(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
     text(dl, f, g_title, held ? 24 : 34, 590, held ? 30 : 22, held ? ORANGE : left < 5000 ? RED : CREAM, secs, RIGHT, 1.6f);
     rect(dl, f, 50, 70, 540, 5, IM_COL32(255, 255, 255, 30), 2.5f);
     rect(dl, f, 50, 70, 540 * (left / 15000.0f), 5, ORANGE, 2.5f);
-    float w = 170, gap = 15, x0 = 320 - (n * w + (n - 1) * gap) / 2;
-    for (int i = 0; i < n; i++) {
+    int random_votes = 0;
+    for (int i = 0; i < r.player_count; i++) random_votes += r.players[i].voted == NETPLAY_VOTE_RANDOM;
+    float w = cards > 3 ? 135 : 170, gap = cards > 3 ? 12 : 15, x0 = 320 - (cards * w + (cards - 1) * gap) / 2;
+    for (int i = 0; i < cards; i++) {
         float x = x0 + i * (w + gap), y = 100;
+        bool is_rnd = i == n;
+        int nv = is_rnd ? random_votes : r.votes[i];
         if (mouse_pick(f, x, y, w, 290)) S.vote_sel = i;
-        bool sel = i == S.vote_sel, mine = me && me->voted == i;
+        bool sel = i == S.vote_sel, mine = me && me->voted == (is_rnd ? NETPLAY_VOTE_RANDOM : i);
         glass(dl, f, x, y, w, 290, 10, mine ? IM_COL32(56, 14, 20, 255) : IM_COL32(10, 10, 13, 255), mine ? 0.68f : 0.62f);
-        const Tex &photo = venue_tex(r.candidates[i]);
-        if (!image(dl, f, photo, x + 5, y + 5, w - 10, w - 10, sel || mine ? IM_COL32_WHITE : IM_COL32(170, 170, 170, 255)))
-            text(dl, f, g_title, 15, x + w / 2, y + 70, CREAM, online_venue_name(r.candidates[i]), CENTER, 1.2f, w - 10);
-        const Tex &banner = venue_name_tex(r.candidates[i]);
-        if (banner.srv) image_fit(dl, f, banner, x + 2, y + w + 2, w - 4, 26);
-        else text(dl, f, g_hand, 13, x + w / 2, y + w + 6, ORANGE, online_venue_name(r.candidates[i]), CENTER, 0.8f);
+        if (is_rnd) {
+            random_card(dl, f, x + 5, y + 5, w - 10, w - 10, sel || mine, 80);
+            text(dl, f, g_title, 17, x + w / 2, y + w + 6, ORANGE, "RANDOM", CENTER, 1.2f);
+        } else {
+            const Tex &photo = venue_tex(r.candidates[i]);
+            if (!image(dl, f, photo, x + 5, y + 5, w - 10, w - 10, sel || mine ? IM_COL32_WHITE : IM_COL32(170, 170, 170, 255)))
+                text(dl, f, g_title, 15, x + w / 2, y + 70, CREAM, online_venue_name(r.candidates[i]), CENTER, 1.2f, w - 10);
+            const Tex &banner = venue_name_tex(r.candidates[i]);
+            if (banner.srv) image_fit(dl, f, banner, x + 2, y + w + 2, w - 4, 26);
+            else text(dl, f, g_hand, 13, x + w / 2, y + w + 6, ORANGE, online_venue_name(r.candidates[i]), CENTER, 0.8f, w - 6);
+        }
         // the votes, as stars
-        for (int k = 0; k < r.votes[i]; k++)
-            text(dl, f, g_title, 26, x + w / 2 + (k - (r.votes[i] - 1) / 2.0f) * 26, y + w + 34, ORANGE, "*", CENTER, 1.2f);
+        for (int k = 0; k < nv; k++)
+            text(dl, f, g_title, 26, x + w / 2 + (k - (nv - 1) / 2.0f) * 26, y + w + 34, ORANGE, "*", CENTER, 1.2f);
+        if (is_rnd) text(dl, f, g_body, 11, x + w / 2, y + 236, GREY, "ANY VENUE OF THE ROOM", CENTER, 0.8f, w - 8);
         char votes[24];
-        snprintf(votes, sizeof(votes), "%d VOTE%s", r.votes[i], r.votes[i] == 1 ? "" : "S");
+        snprintf(votes, sizeof(votes), "%d VOTE%s", nv, nv == 1 ? "" : "S");
         text(dl, f, g_title, 13, x + w / 2, y + 262, mine ? CREAM : GREY, votes, CENTER);
         if (sel && picks) selector(dl, f, x, y, w, 290);
         if (mouse_click(f, x, y, w, 290)) const_cast<Pad &>(pad).a = true;
@@ -2866,7 +2911,7 @@ void draw_vote(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
         hint(dl, f, hx, 396, "b", ranked ? ranked_leave_hint(ri) : "LEAVE ROOM");
     }
     if (pad.b) { netplay_lobby_leave(); S.page = HUB; say("You left the room."); return; }
-    if (pad.a) netplay_lobby_vote(S.vote_sel);
+    if (pad.a) netplay_lobby_vote(rnd && S.vote_sel == n ? NETPLAY_VOTE_RANDOM : S.vote_sel);
 }
 
 // ---- King of the Hill: the hill screen, "YOU'RE UP", and watching ----
@@ -4232,6 +4277,8 @@ void gallery_step()
                                          // Team (2 vs 2) and the special matches
                                          "create-team", "create-special", "create-subway", "room-team", "room-team-3",
                                          "room-special", "vote-team",
+                                         // build 67: RANDOM in the grid and in the vote
+                                         "fighters-random", "vote-random",
                                          "ranked", "voice", "stats", "stats-1v1", "players", "fighters",
                                          // build 47: every server's players (All servers)
                                          "players-all",
@@ -4477,6 +4524,7 @@ void gallery_step()
     else if (p == "players") S.page = PLAYERS;
     else if (p == "players-all") { S.page = PLAYERS; G.choice = NETCHOICE_ALL; }
     else if (p == "fighters") { S.page = FIGHTERS; S.fighter_sel = 9; S.fighter_top = 0; }
+    else if (p == "fighters-random") { S.page = FIGHTERS; S.fighter_sel = (int)grid_fighters().size() - 1; S.fighter_top = 0; }
     else if (p.rfind("fighters-", 0) == 0) {    // the grid scrolled to one fighter (by Battle-mode ID)
         const auto &list = roster();
         int id = atoi(p.c_str() + 9);
@@ -4595,6 +4643,17 @@ void gallery_step()
         G.room.players[0].voted = 0;
         G.room.ms_left = 9000;
         S.vote_sel = 0;
+    } else if (p == "vote-random") {     // this player voted RANDOM, one other a venue
+        S.page = HUB;
+        G.room = sample_room(0, 2, 2);
+        G.room.phase = 1;
+        G.room.candidate_count = 3;
+        G.room.candidates[0] = 4; G.room.candidates[1] = 13; G.room.candidates[2] = 21;
+        G.room.votes[1] = 1;
+        G.room.players[0].voted = NETPLAY_VOTE_RANDOM;
+        G.room.players[1].voted = 1;
+        G.room.ms_left = 7000;
+        S.vote_sel = 3;
     } else if (p == "vote-team") {
         S.page = HUB;
         G.room = sample_room(1, 4, 4);
@@ -5249,7 +5308,7 @@ bool draw_pages(ImVec2 display)
                         if (room.players[i].slot == room.you) ready = room.players[i].ready;
                     netplay_lobby_ready(ready, fighter);
                 }
-                say(fighter_label(fighter) +
+                say((S.random_pick ? std::string("RANDOM: ") : std::string()) + fighter_label(fighter) +
                     (room.in_room && NETPLAY_IS_HILL(room.settings.mode) ? " it is, from your next fight." : " it is."));
                 S.page = HUB;
             }

@@ -125,7 +125,7 @@ A room can therefore come back in `ROOM` with other `max` and `pool` than were a
 | 0x14 | `QUICK` | `token` 8, `mode` u8, `max` u8 |
 | 0x15 | `SETTINGS` | `token` 8, `Settings` (the host only; refused while voting or playing) |
 | 0x16 | `READY` | `token` 8, `ready` u8, `fighter` u8 (`fighter.xml` ID the player wants) |
-| 0x17 | `VOTE` | `token` 8, `choice` u8 (0..2: index into the candidates) |
+| 0x17 | `VOTE` | `token` 8, `choice` u8 (0..2: index into the candidates; 0xFE: RANDOM, only from a client the relay answered `CAPS` bit 14: when RANDOM has the most votes, ties at random as for any candidate, the relay draws the venue from the room's pool) |
 | 0x18 | `LEAVE` | `token` 8 |
 | 0x1B | `OVER` | `token` 8 (this client's match has ended) |
 | 0x1C | `WHO` | `token` 8 (who is online; not a pending request, the hub asks every few seconds) |
@@ -136,7 +136,7 @@ A room can therefore come back in `ROOM` with other `max` and `pool` than were a
 | Type | Name | Body after the header |
 |---|---|---|
 | 0x11 | `ROOMS` | `count` u8, then per room: `room` 6, `name` string, `mode` u8, `players` u8, `max` u8, `phase` u8 |
-| 0x19 | `ROOM` | the whole room: `room` 6, `you` u8 (your slot), `host` u8 (host's slot), `phase` u8, `Settings`, `candidates` u8 count + count x u8, `votes` count x u8 (votes per candidate), `ms_left` u16 (voting countdown), `players` u8 count, then per player: `slot` u8, `name` string, `ready` u8, `fighter` u8, `voted` u8 (0xFF = not yet) |
+| 0x19 | `ROOM` | the whole room: `room` 6, `you` u8 (your slot), `host` u8 (host's slot), `phase` u8, `Settings`, `candidates` u8 count + count x u8, `votes` count x u8 (votes per candidate), `ms_left` u16 (voting countdown), `players` u8 count, then per player: `slot` u8, `name` string, `ready` u8, `fighter` u8, `voted` u8 (0xFF = not yet; 0xFE = RANDOM, sent only to clients with `CAPS` bit 14, others see 0xFF) |
 | 0x1A | `START` | `seed` u32, `mode` u8, `rounds` u8, `venue` u8, `players` u8 count, per player: `slot` u8, `fighter` u8 |
 | 0x1D | `PLAYERS` | `online` u16 (clients connected), `rooms` u16, `count` u8 (at most 40), per player: `name` string, `state` u8 (0 in the hub, 1 in a room, 2 playing). Lobby players of the asker's build, the hub first, then by name; as many as fit one datagram. Relays before FFNY Online build 13 ignore `WHO`. |
 | 0x1F | `QUEUE` | `state` u8 (0 checking the ticket, 1 searching, 2 refused, 3 out of the queue, 4 found: the ranked room's `ROOM` follows, 5 accept, 6 move), `waited` u16 (seconds searching), `searching` u16 (players in the queue); the long form (see "Ranked queue") follows for long-form games |
@@ -286,7 +286,7 @@ by older relays.
 
 | Type | Name | Direction | Body after the header |
 |---|---|---|---|
-| 0x20 | `CAPS` | client -> server | `token` 8, `caps` u32 (bit 0: King of the Hill; bit 13: FFA rotation; bit 15: CPU level) |
+| 0x20 | `CAPS` | client -> server | `token` 8, `caps` u32 (bit 0: King of the Hill; bit 13: FFA rotation; bit 14: RANDOM in the venue vote, build 67; bit 15: CPU level, build 67) |
 | 0x20 | `CAPS` | server -> client | `caps` u32 (what the relay supports: bit 0 King of the Hill, bit 1 rollback allowed, bit 2 `YIELD`, since build 36) |
 | 0x21 | `HILL` | server -> client | `room` 6, `phase` u8 (0 waiting, 1 calling, 2 voting, 3 fighting), `king` u8 (slot, 0xFF none), `streak` u16, `ms_left` u16, `seed` u32, `fights` u16, `last_winner` u8, `last_loser` u8, `last_how` u8 (0 none, 1 won, 2 draw, 3 loser left, 4 void), `count` u8, per player in line order: `slot` u8, `state` u8 (0 waiting, 1 called, 2 ready, 3 fighting, 4 away), `wins` u16 |
 | 0x22 | `RESULT` | client -> server | `token` 8, `seed` u32, `winner` u8 (slot, 0xFF draw); from the two fighters, repeated until `HILL.fights` changes; in a ranked set's room until `RANKINFO` counts the game (see "Ranked queue") |

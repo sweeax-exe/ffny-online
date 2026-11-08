@@ -68,6 +68,25 @@ int main(int argc, char **argv)
         printf("ADDED %d SKIPPED %d\n", r.added, r.skipped);
         return 0;
     }
+    if (cmd == "fights") {        // the match phase per update, "phase*count,..."; prints E/B at each update they fire
+        FightWatch w;
+        std::string spec = argv[2];
+        size_t at = 0, update = 0;
+        while (at < spec.size()) {
+            size_t end = spec.find(',', at);
+            if (end == std::string::npos) end = spec.size();
+            std::string item = spec.substr(at, end - at);
+            size_t star = item.find('*');
+            int phase = atoi(item.substr(0, star).c_str()), count = star == std::string::npos ? 1 : atoi(item.c_str() + star + 1);
+            for (int i = 0; i < count; i++, update++) {
+                auto e = w.feed(phase);
+                if (e != FightWatch::NONE) printf("%c%zu ", e == FightWatch::ENDED ? 'E' : 'B', update);
+            }
+            at = end + 1;
+        }
+        printf("\n");
+        return 0;
+    }
     if (cmd == "remove") {
         auto songs = scan(from_utf8(argv[2]));
         for (auto &s : songs) if (s.rel == argv[3]) { std::string why; printf("%s\n", remove(from_utf8(argv[2]), s, &why) ? "REMOVED" : why.c_str()); }
@@ -284,3 +303,19 @@ def test_add_copies_and_remove_takes_out(tool, tmp_path):
     assert run(tool, 'remove', music, 'song (2).wav').strip() == 'REMOVED'
     assert not (music / 'song (2).wav').exists() and (music / 'song.wav').exists()
     assert (music / '.cache' / 'removed' / 'song (2).wav').is_file()
+
+
+def test_fight_watch_new_fight_after_a_fight_is_over(tool):
+    def events(spec):
+        return [(e[0], int(e[1:])) for e in run(tool, 'fights', spec).split()]
+    # menus, the first fight (no event at its start), KO, results, the rematch's start, the rematch
+    assert events('0*100,1*600,2*50,3*200,0*20,1*300') == [('E', 729), ('B', 950)]
+    # straight from finished into fighting again (a rotation): ends, then begins at the first fighting update
+    assert events('1*600,3*40,1*10') == [('E', 629), ('B', 640)]
+    # a KO undone by a rollback a few updates later is no end; a fight that never really ran is none either
+    assert events('1*600,2*5,1*600') == []
+    assert events('1*20,3*100,1*100') == []
+    # a fight left from its pause menu (phase back to 0): over after the settle time, the next starts at fighting
+    assert events('1*600,0*100,1*10') == [('E', 629), ('B', 700)]
+    # junk before the game sets the phase counts as no fight
+    assert events('77*50,0*50') == []

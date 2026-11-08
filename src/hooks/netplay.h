@@ -83,7 +83,7 @@ typedef struct NetPlayer {
 typedef struct NetRoomPlayer {
     int slot;
     char name[25];
-    int ready, fighter, voted;      /* voted: candidate index, -1 not yet */
+    int ready, fighter, voted;      /* voted: candidate index, NETPLAY_VOTE_RANDOM, -1 not yet */
 } NetRoomPlayer;
 
 /* King of the Hill and FFA rotation: the line (HILL), in line order; line[0] is the king (FFA rotation:
@@ -140,6 +140,10 @@ typedef struct NetRoom {
 #define NETPLAY_CAP_YIELD 4
 #define NETPLAY_CAP_SPECTATE 16    /* spectator mode: rooms can be watched (netplay_lobby_spectate) */
 #define NETPLAY_CAP_FFAROT 8192    /* FFA rotation rooms (NETPLAY_MODE_FFAROT, build 66) */
+#define NETPLAY_CAP_RANDOM_VENUE 16384  /* RANDOM in the venue vote (build 67): netplay_lobby_vote(NETPLAY_VOTE_RANDOM) */
+/* NetRoomPlayer.voted and netplay_lobby_vote(): RANDOM, the relay draws the venue from the room's pool when
+ * it wins. Only with relays answering NETPLAY_CAP_RANDOM_VENUE. */
+#define NETPLAY_VOTE_RANDOM 0xFE
 #define NETPLAY_CAP_CPULEVEL 32768 /* the room's CPU level (NetRoomSettings.cpu_level, build 67) */
 int netplay_lobby_caps(void);
 /* 1 when the relay refused the hub session because this PC already has a live session there (ERROR 11,

@@ -60,6 +60,10 @@ def copy_env(items):
 def cmd_scenario(a):
     common = {"lock_timeout": a.lock_timeout, "log": say, "keep_roots": a.keep_roots}
     env = dict(e.split("=", 1) for e in a.env)
+    if getattr(a, "pick_random", False):    # build 67: every copy picks RANDOM (the hub's RANDOM card)
+        env.setdefault("RECOMP_NETPLAY_FIGHTER", "random")
+    if getattr(a, "vote_random", False):    # build 67: every copy votes RANDOM where the relay offers it
+        env.setdefault("RECOMP_NETPLAY_TEST_VOTE", "random")
     if a.kind == "online":
         r = scenarios.online(matches=a.matches, mode=a.mode, players=a.players,
                              fighters=ints(a.fighters) if a.fighters else None, rollback=a.rollback,
@@ -218,6 +222,8 @@ def main(argv=None):
     sc.add_argument("--cp-names", help="online: per copy the online names of its --cp-records (RECOMP_CP_NAMES), comma-separated "
                                        "per copy, ';' between a copy's records in the same order, '' the user ID")
     sc.add_argument("--more-shots", action="store_true", help="online: also each copy's versus and results screens of match 1")
+    sc.add_argument("--pick-random", action="store_true", help="online: every copy picks a RANDOM fighter (RECOMP_NETPLAY_FIGHTER=random)")
+    sc.add_argument("--vote-random", action="store_true", help="online: every copy votes RANDOM for the venue (RECOMP_NETPLAY_TEST_VOTE=random)")
     sc.add_argument("--venues", help="online: the venue feIDs every vote offers in turn (relay -test-venues), e.g. 26")
     sc.add_argument("--rematch", action="store_true", help="online: matches after the first are Rematch from the results menu")
     sc.add_argument("--ranked", help="online: a ranked set (classic, open, classic,open or draft) against a local account service "

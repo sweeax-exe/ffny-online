@@ -8,7 +8,11 @@
 // Tests and pictures: RECOMP_LAUNCHER_PAGE=saves opens it at start; RECOMP_TEST_SAVES runs steps
 // "<frame>:<action>[:<argument>]" separated by ';' once the dialog is open: backup, import:<path>
 // (as if that folder or zip was picked), replace:<profile name> (ticks Replace), import-ok,
-// restore:<row>, restore-ok, folder (Open folder), bring:<row> (Bring back a profile the game deleted).
+// restore:<row>, restore-ok, folder (Open folder), bring:<row> (Bring back a profile the game deleted),
+// aside:<profile name> (Put aside), back:<profile name> (Bring back a profile put aside).
+//
+// Put aside (save_manager.h): the game loads at most 16 user IDs, so a profile can be moved out of the
+// folder it reads, whole, and brought back later; the count of profiles in the game is in the heading.
 
 #include "pc_launcher_saves.h"
 #include "created_fighter.h"     // cp_names_setting_get: the created fighters' online names
@@ -19,6 +23,7 @@ struct SavesPage
 {
     bool loaded = false;
     std::vector<saves::Entry> entries;
+    std::vector<saves::Entry> aside;                // profiles put aside (<save>/aside)
     std::vector<saves::Backup> backups;
     std::vector<saves::Quarantined> deleted;        // profiles the game deleted (save-backups/quarantine)
     std::string bring_back;                         // a quarantine copy to import, at the dialog's level
@@ -65,6 +70,7 @@ std::string saves_unescape(const std::string &s)
 void saves_refresh()
 {
     g_sp.entries = saves::list_saves(pcsaves::save_dir());
+    g_sp.aside = saves::list_aside(pcsaves::save_dir());
     g_sp.backups = saves::list_backups(pcsaves::backup_dir());
     g_sp.deleted = saves::list_quarantine(pcsaves::backup_dir());
     g_sp.online.clear();
@@ -149,6 +155,31 @@ void saves_do_restore()
     saves_refresh();
 }
 
+void saves_put_aside(const std::string &folder)
+{
+    if (saves_refuse_while_running("a profile can be put aside")) return;
+    std::string message;
+    bool ok = saves::put_aside(pcsaves::save_dir(), folder, &message);
+    saves_say(message, ok ? 1 : 2);
+    saves_refresh();
+}
+
+void saves_bring_back_aside(const std::string &stash)
+{
+    if (saves_refuse_while_running("a profile can be brought back")) return;
+    std::string message;
+    bool ok = saves::bring_back(pcsaves::save_dir(), stash, &message);
+    saves_say(message, ok ? 1 : 2);
+    saves_refresh();
+}
+
+int saves_in_game()
+{
+    int n = 0;
+    for (auto &e : g_sp.entries) n += e.kind == saves::Entry::PROFILE;
+    return n;
+}
+
 void saves_open_folder()
 {
     std::error_code ec;
@@ -188,19 +219,49 @@ void saves_test_steps()
         else if (s.action == "folder") saves_open_folder();
         else if (s.action == "bring" && atoi(s.arg.c_str()) >= 0 && atoi(s.arg.c_str()) < (int)g_sp.deleted.size())
             g_sp.bring_back = pcui::path_utf8(g_sp.deleted[atoi(s.arg.c_str())].path);
+        else if (s.action == "aside") {
+            std::string folder;
+            for (auto &e : g_sp.entries)
+                if (e.kind == saves::Entry::PROFILE && e.name == s.arg) folder = e.folder;
+            if (!folder.empty()) saves_put_aside(folder);
+        } else if (s.action == "back") {
+            std::string stash;
+            for (auto &e : g_sp.aside)
+                if (e.name == s.arg && stash.empty()) stash = e.stash;
+            if (!stash.empty()) saves_bring_back_aside(stash);
+        }
     }
 }
 
-// A row of a list: a quiet translucent band, its headline and a detail line.
-void saves_row(ImDrawList *dl, ImVec2 a, ImVec2 b, float s, const char *head, const char *detail, const ImVec4 &detail_c)
+// A row of a list: a quiet translucent band, its headline and a detail line (clear of a button
+// `room` wide at its right end).
+void saves_row(ImDrawList *dl, ImVec2 a, ImVec2 b, float s, const char *head, const char *detail, const ImVec4 &detail_c,
+               float room = 0)
 {
     dl->AddRectFilled(a, b, col(k_white, 0.05f), 10 * s);
     dl->AddRect(a, b, col(k_white, 0.06f), 10 * s);
-    float right = b.x - a.x - 32 * s;
-    dl->PushClipRect(a, b, true);
+    float right = b.x - a.x - 32 * s - room;
+    dl->PushClipRect(a, ImVec2(b.x - room, b.y), true);
     dl->AddText(bold_font(), 16 * s, ImVec2(a.x + 16 * s, a.y + 10 * s), col(k_white), head);
     dl->AddText(ImGui::GetFont(), 13 * s, ImVec2(a.x + 16 * s, a.y + 33 * s), col(detail_c), detail, nullptr, right);
     dl->PopClipRect();
+}
+
+std::string saves_profile_line(const saves::Entry &e, ImVec4 &c)
+{
+    std::string line = "Changed " + saves::describe_time(e.changed);
+    if (e.created) {
+        auto found = g_sp.online.find(e.folder + "/" + e.name);
+        line += "  \xC2\xB7  created fighter";
+        if (found != g_sp.online.end() && !found->second.empty()) line += " \"" + found->second + "\" online";
+    } else {
+        line += "  \xC2\xB7  no created fighter";
+    }
+    if (!e.signed_ok) {
+        line = "Signed by another Xbox: it shows as damaged. Import it with Import saves.";
+        c = k_gold;
+    }
+    return line;
 }
 
 void saves_profiles(float w, float h, float s)
@@ -210,6 +271,7 @@ void saves_profiles(float w, float h, float s)
     ImVec4 detail(0.80f, 0.80f, 0.82f, 1);
     float row_h = 60 * s, gap = 8 * s, rw = ImGui::GetContentRegionAvail().x;
     int shown = 0;
+    std::string aside_folder, back_stash;       // pressed this frame (acted on after the lists)
     for (auto &e : g_sp.entries) {
         if (e.kind == saves::Entry::OTHER) continue;
         ImVec2 a = ImGui::GetCursorScreenPos(), b(a.x + rw, a.y + row_h);
@@ -220,20 +282,18 @@ void saves_profiles(float w, float h, float s)
             line = "Game settings  \xC2\xB7  changed " + saves::describe_time(e.changed);
         } else {
             head = e.name;
-            line = "Changed " + saves::describe_time(e.changed);
-            if (e.created) {
-                auto found = g_sp.online.find(e.folder + "/" + e.name);
-                line += "  \xC2\xB7  created fighter";
-                if (found != g_sp.online.end() && !found->second.empty()) line += " \"" + found->second + "\" online";
-            } else {
-                line += "  \xC2\xB7  no created fighter";
-            }
-            if (!e.signed_ok) {
-                line = "Signed by another Xbox: it shows as damaged. Import it with Import saves.";
-                c = k_gold;
-            }
+            line = saves_profile_line(e, c);
         }
-        saves_row(dl, a, b, s, head.c_str(), line.c_str(), c);
+        bool profile = e.kind == saves::Entry::PROFILE;
+        saves_row(dl, a, b, s, head.c_str(), line.c_str(), c, profile ? 104 * s : 0);
+        if (profile) {
+            ImGui::PushID(e.folder.c_str());
+            if (glass_button("##aside", "Put aside", ImVec2(b.x - 104 * s, a.y + 16 * s), ImVec2(90 * s, 28 * s), s,
+                             GLASS_PLAIN, bold_font(), 13.5f * s))
+                aside_folder = e.folder;
+            ImGui::PopID();
+            ImGui::SetCursorScreenPos(a);
+        }
         ImGui::Dummy(ImVec2(rw, row_h + gap));
         shown++;
     }
@@ -246,7 +306,34 @@ void saves_profiles(float w, float h, float s)
         ImGui::PopTextWrapPos();
     }
     if (other) ImGui::TextColored(ImVec4(1, 1, 1, 0.5f), "%d other folder%s in the save area", other, other == 1 ? "" : "s");
+    // Profiles put aside: out of the folder the game reads (it loads at most 16 user IDs)
+    if (!g_sp.aside.empty()) {
+        ImGui::Dummy(ImVec2(rw, 6 * s));
+        ImVec2 at = ImGui::GetCursorScreenPos();
+        dl->AddText(display_font(), 15 * s, at, col(ImVec4(0.86f, 0.84f, 0.80f, 1)), "PUT ASIDE");
+        dl->AddText(ImGui::GetFont(), 12.5f * s, ImVec2(at.x + 92 * s, at.y + 2 * s), col(k_white, 0.5f),
+                    "Not in the game. Bring one back to play it.");
+        ImGui::Dummy(ImVec2(rw, 26 * s));
+        bool full = saves_in_game() >= saves::kMaxUserIds;
+        for (auto &e : g_sp.aside) {
+            ImVec2 a = ImGui::GetCursorScreenPos(), b(a.x + rw, a.y + row_h);
+            ImVec4 c = detail;
+            std::string line = saves_profile_line(e, c);
+            saves_row(dl, a, b, s, e.name.c_str(), line.c_str(), c, 118 * s);
+            ImGui::PushID(e.stash.c_str());
+            if (glass_button("##back", "Bring back", ImVec2(b.x - 118 * s, a.y + 16 * s), ImVec2(104 * s, 28 * s), s,
+                             GLASS_PLAIN, bold_font(), 13.5f * s))
+                back_stash = e.stash;
+            if (full && ImGui::IsItemHovered())
+                ImGui::SetTooltip("The game has 16 user IDs, its most. Put one aside first.");
+            ImGui::PopID();
+            ImGui::SetCursorScreenPos(a);
+            ImGui::Dummy(ImVec2(rw, row_h + gap));
+        }
+    }
     ImGui::EndChild();
+    if (!aside_folder.empty()) saves_put_aside(aside_folder);
+    else if (!back_stash.empty()) saves_bring_back_aside(back_stash);
 }
 
 void saves_backups(float w, float h, float s)
@@ -426,6 +513,14 @@ static void saves_dialog(ImVec2 o, float w, float h, float s)
     float list_top = top + 30 * s, list_h = size.y - list_top - foot - button_h - 16 * s;
     float lx = a.x + 30 * s, rx = lx + left_w + between;
     dl->AddText(display_font(), 17 * s, ImVec2(lx, a.y + top), col(ImVec4(0.86f, 0.84f, 0.80f, 1)), "PROFILES");
+    {
+        int in_game = saves_in_game();
+        char count[64];
+        snprintf(count, sizeof(count), "%d of %d user IDs in the game", in_game, saves::kMaxUserIds);
+        float cw = text_size(ImGui::GetFont(), 12.5f * s, count).x;
+        dl->AddText(ImGui::GetFont(), 12.5f * s, ImVec2(lx + left_w - cw, a.y + top + 4 * s),
+                    col(in_game >= saves::kMaxUserIds ? k_gold : ImVec4(1, 1, 1, 0.5f)), count);
+    }
     dl->AddText(display_font(), 17 * s, ImVec2(rx, a.y + top), col(ImVec4(0.86f, 0.84f, 0.80f, 1)), "BACKUPS");
     {
         const char *hint = "Before every update and once a day you play. The newest 10 are kept.";
