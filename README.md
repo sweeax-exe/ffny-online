@@ -112,8 +112,8 @@ disk space, updates and repairs, with a screenshot of each setup step.
 Upscaled Original Textures need additional disk space and install time.
 
 Already installed with the older setup? Choose **Use an existing installation** in the app, and
-your saves, settings and mods are kept. The older [setup installers](docs/setup-installer.md) are
-still attached to each release. Prefer a manual source build? Use
+your saves, settings and mods are kept. Releases from v1.1.0 publish only the app packages;
+the older [setup installers](docs/setup-installer.md) remain available on earlier releases. Prefer a manual source build? Use
 [Build and play](docs/build-and-play.md) for Windows or
 [Build on macOS and Linux](docs/build-macos-linux.md).
 

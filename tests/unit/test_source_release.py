@@ -1,5 +1,7 @@
 """Source publication boundaries and version mistakes must stop a release."""
 import importlib.util
+import os
+import re
 import shutil
 import subprocess
 import sys
@@ -156,3 +158,38 @@ def test_production_ledgers_cannot_hide_under_other_config_names(record):
 
 def test_public_runtime_alias_config_is_not_an_authoring_ledger():
     assert source.text_problem(b'{"schema": 1, "aliases": []}', 'config/hd-runtime-aliases.json') is None
+
+
+@pytest.mark.skipif(sys.platform == 'win32' or not shutil.which('bash'), reason='Release workflow runs in Bash on Ubuntu')
+@pytest.mark.parametrize('tag,missing', [('v1.1.0', False), ('v1.1.0-beta.2', False), ('v1.1.0', True)])
+def test_release_uploads_only_app_assets_and_stops_if_one_is_missing(tmp_path, tag, missing):
+    workflow = (ROOT / '.github/workflows/release.yml').read_text()
+    block = re.search(r'^        run: \|\n((?:          .*\n|\n)+)', workflow, re.M).group(1)
+    script = '\n'.join(line[10:] for line in block.splitlines())
+    folder = tmp_path / 'setup-assets'
+    folder.mkdir()
+    expected = []
+    for suffix in ('windows-x64.exe', 'macos-arm64.zip', 'linux-x86_64.AppImage'):
+        name = 'DefJamRecompiled-1.1.0-' + suffix
+        stem = name.rsplit('.', 1)[0]
+        for asset in (name, stem + '.sha256', stem + '.provenance.json'):
+            (folder / asset).write_text('synthetic asset')
+            expected.append('setup-assets/' + asset)
+    # An old local build must never add its setup file to the public release.
+    (folder / 'DefJamSetup-1.1.0-windows-x64.exe').write_text('legacy setup')
+    if missing:
+        (tmp_path / expected[-1]).unlink()
+    # Capture the exact arguments handed to gh; this test never contacts GitHub.
+    stub = 'gh() { printf "%s\\n" "$@" > published-args; }\n'
+    result = subprocess.run(['bash', '-e'], input=stub + script, cwd=tmp_path,
+                            env={**os.environ, 'RELEASE_TAG': tag}, capture_output=True, text=True)
+    if missing:
+        assert result.returncode != 0
+        assert 'Missing app release asset' in result.stdout
+        assert not (tmp_path / 'published-args').exists()
+    else:
+        assert result.returncode == 0, result.stderr
+        args = (tmp_path / 'published-args').read_text().splitlines()
+        assert args[-9:] == expected
+        assert not any('DefJamSetup' in arg for arg in args)
+        assert ('--prerelease' in args) == ('-beta.' in tag)
