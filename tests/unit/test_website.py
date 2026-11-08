@@ -60,8 +60,10 @@ def test_no_external_scripts_styles_or_fonts():
     assert not re.search(r'<link[^>]+href="(?:https?:)?//[^"]*"[^>]*rel="(?:stylesheet|preload)"', html)
     assert not re.search(r'<link[^>]+rel="(?:stylesheet|preload)"[^>]+href="(?:https?:)?//', html)
     assert '@import' not in css and not re.search(r'url\(\s*[\'"]?(?:https?:)?//', css)
+    # The trailer's player (privacy-enhanced mode) is made only when the visitor clicks it.
     assert set(re.findall(r'https://[a-z0-9.-]+', js)) <= {'https://api.github.com', 'https://github.com',
-                                                           'https://play.defjam.online'}
+                                                           'https://play.defjam.online',
+                                                           'https://www.youtube-nocookie.com'}
     assert 'document.cookie' not in js
 
 
