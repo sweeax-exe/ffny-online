@@ -43,6 +43,7 @@
 #include <vector>
 #include <map>
 #include <fstream>
+#include <filesystem>
 #include <iterator>
 #include "pc_ui_model.h"
 #include "pc_mods.h"
@@ -64,6 +65,7 @@ extern "C" {
 #include "recorder.h"
 #include "scene_launcher.h"
 #include "dev_module.h"
+#include "patches/song_cursor.h"
 #endif
 #include "patches/cheats.h"
 #include "input_host.h"
@@ -73,6 +75,8 @@ extern "C" {
 #include "pc_settings.h"
 #include "pc_ui.h"
 #include "pc_ui_internal.h"
+#include "song_convert.h"
+#include "song_library.h"
 
 #ifndef DEFJAM_VERSION
 #define DEFJAM_VERSION "dev"
@@ -263,6 +267,13 @@ static const char *friendly(const char *section, const char *key)
         {"debug", "hang_seconds", "Bundle a hang after (s)"},
         {"debug", "keep_sessions", "Sessions kept whole"},
         {"debug", "record_guest_ram", "Crash bundles hold game memory"},
+        {"songs", "restored", "Restored song: Holler If Ya Hear Me - 2Pac"},
+        {"songs", "custom", "Your own songs"},
+        {"songs", "folders", "More song folders"},
+        {"songs", "skip_pad", "Next song (pad)"},
+        {"songs", "restart_pad", "Song from the start (pad)"},
+        {"songs", "skip_key", "Next song (key)"},
+        {"songs", "restart_key", "Song from the start (key)"},
         {"cheats", "infinite_health", "Infinite health"},
         {"cheats", "max_blazin", "Max Blazin'"},
         {"cheats", "no_regen", "No health regeneration"},
@@ -1622,6 +1633,330 @@ static void hero_picker()
     if (g_roster.empty())
         ImGui::TextDisabled("The fighter list comes from the game's fighter.xml (game/fighter.xml), which was not found.");
 }
+// ---- Songs: restored songs and the player's own (docs/custom-songs.md) -----------------------------
+
+struct SongRow
+{
+    SongEntry entry;
+    SongTags tags;
+};
+static std::vector<SongRow> g_song_rows;
+static bool g_songs_scanned = false;
+static std::string g_songs_status;
+
+static void songs_scan()
+{
+    std::string data = pcui::folder_path(pcui::Folder::Data);
+    std::vector<SongEntry> found(SONG_LIBRARY_MAX);
+    int n = song_library_scan(data.c_str(), found.data(), (int)found.size());
+    g_song_rows.clear();
+    for (int i = 0; i < n; i++)
+    {
+        SongRow row;
+        row.entry = found[i];
+        if (!song_read_tags(found[i].path, &row.tags))
+            snprintf(row.tags.title, sizeof row.tags.title, "(cannot read)");
+        g_song_rows.push_back(row);
+    }
+    g_songs_scanned = true;
+}
+
+static void songs_save()
+{
+    std::string data = pcui::folder_path(pcui::Folder::Data);
+    std::vector<SongEntry> entries;
+    for (auto &row : g_song_rows)
+        entries.push_back(row.entry);
+    g_songs_status = song_library_save(data.c_str(), entries.data(), (int)entries.size())
+                         ? "Saved. The game uses it the next time it starts."
+                         : "Could not save the song choices.";
+}
+
+// The Beatbox of a profile, from the state file the game writes when the profile loads
+// (<data>/song-state/<profile>.txt): every song with its state byte (bits 0-1: 0 never arranged,
+// 1 or 3 on, 2 off; bits 2-7 its place) and name. Saving adds a "launcher" line; the next load of
+// that profile follows the file over the save (src/patches/song_store.c).
+struct BeatboxSong
+{
+    std::string id, label;
+    int state;
+};
+static std::vector<std::string> g_bb_profiles;
+static int g_bb_profile = 0;
+static std::vector<BeatboxSong> g_bb_songs;
+static std::string g_bb_retail, g_bb_status;
+static bool g_bb_loaded = false;
+static const int k_bb_on_limit = 35;
+
+static std::string bb_dir() { return pcui::folder_path(pcui::Folder::Data) + "/song-state"; }
+
+static void bb_list_profiles()
+{
+    g_bb_profiles.clear();
+    std::error_code ec;
+    for (auto &e : std::filesystem::directory_iterator(std::filesystem::u8path(bb_dir()), ec))
+    {
+        std::string name = pcui::path_utf8(e.path().filename());
+        if (name.size() > 4 && name.compare(name.size() - 4, 4, ".txt") == 0 && name != "library.txt")
+            g_bb_profiles.push_back(name.substr(0, name.size() - 4));
+    }
+    std::sort(g_bb_profiles.begin(), g_bb_profiles.end());
+    if (g_bb_profile >= (int)g_bb_profiles.size())
+        g_bb_profile = 0;
+}
+
+static void bb_load()
+{
+    g_bb_songs.clear();
+    g_bb_retail.clear();
+    g_bb_loaded = true;
+    if (g_bb_profiles.empty())
+        return;
+    std::ifstream f(std::filesystem::u8path(bb_dir() + "/" + g_bb_profiles[g_bb_profile] + ".txt"));
+    std::string line;
+    while (std::getline(f, line))
+    {
+        if (line.empty() || line[0] == '#' || line.compare(0, 8, "launcher") == 0)
+            continue;
+        if (line.compare(0, 7, "retail ") == 0)
+        {
+            g_bb_retail = line;
+            continue;
+        }
+        char id[32] = "";
+        unsigned state = 0;
+        int used = 0;
+        if (sscanf(line.c_str(), "%31s %x %n", id, &state, &used) < 2)
+            continue;
+        BeatboxSong s{id, used > 0 && used < (int)line.size() ? line.substr(used) : std::string(id), (int)state};
+        if (s.label.empty() || s.label == " - ")
+            s.label = id;
+        g_bb_songs.push_back(s);
+    }
+    // In Beatbox order: arranged songs by place, then the rest.
+    std::stable_sort(g_bb_songs.begin(), g_bb_songs.end(), [](const BeatboxSong &a, const BeatboxSong &b) {
+        int pa = (a.state & 3) ? a.state >> 2 : 999, pb = (b.state & 3) ? b.state >> 2 : 999;
+        return pa < pb;
+    });
+}
+
+static bool bb_on(const BeatboxSong &s) { return (s.state & 3) != 0 && (s.state & 3) != 2; }
+
+static void bb_save()
+{
+    std::string path = bb_dir() + "/" + g_bb_profiles[g_bb_profile] + ".txt";
+    std::ofstream f(std::filesystem::u8path(path), std::ios::trunc);
+    f << "# The Beatbox of profile " << g_bb_profiles[g_bb_profile]
+      << ", changed on the launcher's Songs page: the next load of the profile follows it.\n";
+    if (!g_bb_retail.empty())
+        f << g_bb_retail << "\n";
+    f << "launcher 1\n";
+    for (size_t k = 0; k < g_bb_songs.size(); k++)
+    {
+        int state = (int)(std::min<size_t>(k, 62) << 2) | (bb_on(g_bb_songs[k]) ? 3 : 2);
+        g_bb_songs[k].state = state;
+        char hex[8];
+        snprintf(hex, sizeof hex, "%02X", state);
+        f << g_bb_songs[k].id << " " << hex << " " << g_bb_songs[k].label << "\n";
+    }
+    g_bb_status = f.good() ? "Saved. The game uses it the next time this profile loads." : "Could not save the Beatbox.";
+}
+
+static void page_beatbox()
+{
+    float scale = ImGui::GetStyle().FontScaleMain;
+    ImGui::SeparatorText("Beatbox");
+    if (!g_bb_loaded)
+    {
+        bb_list_profiles();
+        bb_load();
+    }
+    if (g_bb_profiles.empty())
+    {
+        ImGui::TextWrapped("Load a profile in the game once (start Story or Battle with it) and its Beatbox appears here.");
+        return;
+    }
+    ImGui::SetNextItemWidth(240 * scale);
+    if (ImGui::BeginCombo("Profile", g_bb_profiles[g_bb_profile].c_str()))
+    {
+        for (int i = 0; i < (int)g_bb_profiles.size(); i++)
+            if (ImGui::Selectable(g_bb_profiles[i].c_str(), i == g_bb_profile))
+            {
+                g_bb_profile = i;
+                bb_load();
+            }
+        ImGui::EndCombo();
+    }
+    ui_target("songs.beatbox.profile");
+    int on = 0;
+    for (auto &s : g_bb_songs)
+        on += bb_on(s);
+    ImGui::SameLine();
+    ImGui::PushStyleColor(ImGuiCol_Text, on >= k_bb_on_limit ? ImVec4(1, 0.75f, 0.2f, 1) : ImGui::GetStyleColorVec4(ImGuiCol_Text));
+    ImGui::Text("%d of %d songs on", on, k_bb_on_limit);
+    ImGui::PopStyleColor();
+    ImGui::TextDisabled("The songs this profile's Beatbox plays, in its order. Changes apply the next time the profile loads.");
+    bool changed = false;
+    int move_from = -1, move_to = -1;
+    if (ImGui::BeginTable("beatbox", 3, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_SizingStretchProp))
+    {
+        ImGui::TableSetupColumn("On", ImGuiTableColumnFlags_WidthFixed, 50 * scale);
+        ImGui::TableSetupColumn("Song");
+        ImGui::TableSetupColumn("Order", ImGuiTableColumnFlags_WidthFixed, 110 * scale);
+        ImGui::TableHeadersRow();
+        for (size_t i = 0; i < g_bb_songs.size(); i++)
+        {
+            BeatboxSong &s = g_bb_songs[i];
+            ImGui::PushID((int)i + 10000);
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            bool v = bb_on(s);
+            bool can = v || on < k_bb_on_limit;
+            if (!can)
+                ImGui::BeginDisabled();
+            if (ImGui::Checkbox("##on", &v))
+            {
+                s.state = (s.state & 0xFC) | (v ? 3 : 2);
+                changed = true;
+            }
+            if (!can)
+                ImGui::EndDisabled();
+            ui_target(("songs.beatbox.on." + s.id).c_str());
+            ImGui::TableNextColumn();
+            ImGui::TextUnformatted(s.label.c_str());
+            ImGui::TableNextColumn();
+            if (ImGui::ArrowButton("##up", ImGuiDir_Up) && i > 0)
+            {
+                move_from = (int)i;
+                move_to = (int)i - 1;
+            }
+            ImGui::SameLine();
+            if (ImGui::ArrowButton("##down", ImGuiDir_Down) && i + 1 < g_bb_songs.size())
+            {
+                move_from = (int)i;
+                move_to = (int)i + 1;
+            }
+            ImGui::PopID();
+        }
+        ImGui::EndTable();
+    }
+    if (move_from >= 0)
+    {
+        std::swap(g_bb_songs[move_from], g_bb_songs[move_to]);
+        changed = true;
+    }
+    if (changed)
+        bb_save();
+    if (!g_bb_status.empty())
+        ImGui::TextDisabled("%s", g_bb_status.c_str());
+}
+
+static void page_songs(UiMode mode)
+{
+    float scale = ImGui::GetStyle().FontScaleMain;
+    ImGui::SeparatorText("Songs");
+    settings_group("songs", {"restored", "custom"});
+    ImGui::TextWrapped("Your own music plays like the game's soundtrack: in the Beatbox, in the menus with the song "
+                       "banner, and in fights. Put MP3, FLAC, Ogg or WAV files in the songs folder (subfolders are "
+                       "fine), or add folders below. The first start after adding a song converts it, a few seconds a "
+                       "song.");
+    char folder[SONG_LIBRARY_PATH];
+    song_library_folder(pcui::folder_path(pcui::Folder::Data).c_str(), folder, sizeof folder);
+    if (ImGui::Button("Open songs folder"))
+        pcui::open_path(folder);
+    ui_target("songs.open_folder");
+    ImGui::SameLine();
+    if (ImGui::Button("Copy its path"))
+        pcui::copy_text(folder);
+    ui_target("songs.copy_folder");
+    ImGui::SameLine();
+    if (ImGui::Button("Look for songs again") || !g_songs_scanned)
+    {
+        songs_scan();
+        g_bb_loaded = false;
+    }
+    ui_target("songs.rescan");
+    settings_group("songs", {"folders"});
+    ImGui::SeparatorText("Shortcuts");
+    ImGui::TextWrapped("Skip to the next song, or play the current one from its start, in the menus and in fights. "
+                       "On a pad, hold the right stick in and press the D-pad (the game sees the D-pad press too).");
+    settings_group("songs", {"skip_pad", "restart_pad", "skip_key", "restart_key"});
+
+    int on = 0;
+    for (auto &row : g_song_rows)
+        on += row.entry.on;
+    ImGui::SeparatorText("Your songs");
+    {
+        // The two limits, where they cannot be missed.
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1, 0.75f, 0.2f, 1));
+        ImGui::BulletText("Up to 27 of your own songs in the game (next to its own 33).");
+        ImGui::BulletText("Up to 35 songs switched on in the Beatbox at once.");
+        ImGui::PopStyleColor();
+    }
+    ImGui::TextWrapped("Interactive (experimental) builds a song on a licensed song's arrangement: in fights it "
+                       "switches between the song and filtered versions of it as the fight goes.");
+    if (g_song_rows.empty())
+        ImGui::TextDisabled("No music files found yet.");
+    if (!g_song_rows.empty())
+    ImGui::Text("%d file(s) found, %d chosen for the game%s", (int)g_song_rows.size(), on,
+                on > SONG_LIBRARY_ROOM ? " (the first 27 are used)" : "");
+    if (mode != UI_LAUNCHER)
+        ImGui::TextDisabled("Changes apply the next time the game starts.");
+    bool changed = false;
+    if (!g_song_rows.empty() && ImGui::BeginTable("songs", 4, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_Resizable |
+                                          ImGuiTableFlags_SizingStretchProp))
+    {
+        ImGui::TableSetupColumn("In game", ImGuiTableColumnFlags_WidthFixed, 70 * scale);
+        ImGui::TableSetupColumn("Song");
+        ImGui::TableSetupColumn("Artist");
+        ImGui::TableSetupColumn("Plays", ImGuiTableColumnFlags_WidthFixed, 190 * scale);
+        ImGui::TableHeadersRow();
+        int used = 0;
+        for (size_t i = 0; i < g_song_rows.size(); i++)
+        {
+            SongRow &row = g_song_rows[i];
+            ImGui::PushID((int)i);
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            bool in_game = row.entry.on != 0;
+            if (ImGui::Checkbox("##on", &in_game))
+            {
+                row.entry.on = in_game;
+                changed = true;
+            }
+            ui_target(("songs.on." + std::string(row.entry.id)).c_str());
+            if (row.entry.on)
+                used++;
+            ImGui::TableNextColumn();
+            if (row.entry.on && used > SONG_LIBRARY_ROOM)
+                ImGui::TextDisabled("%s (no room)", row.tags.title);
+            else
+                ImGui::TextUnformatted(row.tags.title);
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("%s\nAlbum: %s", row.entry.path, row.tags.album);
+            ImGui::TableNextColumn();
+            ImGui::TextUnformatted(row.tags.artist);
+            ImGui::TableNextColumn();
+            ImGui::SetNextItemWidth(-1);
+            int interactive = row.entry.interactive;
+            const char *modes[] = {"Straight", "Interactive (experimental)"};
+            if (ImGui::Combo("##mode", &interactive, modes, 2))
+            {
+                row.entry.interactive = interactive;
+                changed = true;
+            }
+            ui_target(("songs.mode." + std::string(row.entry.id)).c_str());
+            ImGui::PopID();
+        }
+        ImGui::EndTable();
+    }
+    if (changed)
+        songs_save();
+    if (!g_songs_status.empty())
+        ImGui::TextDisabled("%s", g_songs_status.c_str());
+    page_beatbox();
+}
+
 static void page_cheats(UiMode mode)
 {
     ImGui::SeparatorText("Fights");
@@ -1715,7 +2050,7 @@ static void page_cheats(UiMode mode)
 static int g_page = 0;
 static bool g_advanced = false, g_select_page = false, g_return_focus = false;
 static std::string g_home_return = "Settings";
-static const char *page_names[] = {"Graphics", "Controls", "Mods", "Language & access", "Cheats", "App preferences", "Help"};
+static const char *page_names[] = {"Graphics", "Controls", "Mods", "Songs", "Language & access", "Cheats", "App preferences", "Help"};
 static const int k_pages = (int)(sizeof page_names / sizeof page_names[0]);
 static void controls_page()
 {
@@ -1791,7 +2126,10 @@ UiResult ui_draw(UiMode mode, float x, float y, float width, float height)
             g_home_return = home.route == 2 ? "Configure" : home.route == 3 ? "Mods" : "Settings";
         }
         if (home.route == 4) {
-            g_advanced = true; g_page = 6; g_select_page = true; g_home_return = "Help";
+            g_advanced = true; g_page = 7; g_select_page = true; g_home_return = "Help";
+        }
+        if (home.route == 5) {
+            g_advanced = true; ImGui::SetScrollY(0); g_page = 3; g_select_page = true; g_home_return = "Songs";
         }
     }
     else
@@ -1892,9 +2230,12 @@ UiResult ui_draw(UiMode mode, float x, float y, float width, float height)
             page_textures();
             break;
         case 3:
-            page_general(mode);
+            page_songs(mode);
             break;
         case 4:
+            page_general(mode);
+            break;
+        case 5:
             page_cheats(mode);
             ImGui::SeparatorText("Permanent profile changes");
             if (recomp_settings_get("debug", "unlock_all", 0)) {
@@ -1915,14 +2256,14 @@ UiResult ui_draw(UiMode mode, float x, float y, float width, float height)
                 ImGui::EndPopup();
             }
             break;
-        case 5:
+        case 6:
             settings_group("debug", {"skip_intro"});
             ImGui::TextWrapped("Skip startup movies and the legal screen; Story cutscenes still play.");
             ImGui::Spacing();
             settings_group("launcher", {"skip", "check_updates"});
             ImGui::TextWrapped("To reopen a skipped launcher, hold Shift or both shoulder buttons at startup, or use --launcher. Steam shortcuts open the launcher unless you choose to skip it.");
             break;
-        case 6:
+        case 7:
             page_maintenance(mode);
             if (ImGui::CollapsingHeader("Developer diagnostics")) page_debug(mode);
             break;
@@ -2086,6 +2427,8 @@ int g_overlay_vk = VK_F1;
 struct Chord { int src[3]; int n; UiTick since; bool fired; };
 std::vector<Chord> g_chords;        // read and written on the drawing thread, and by apply_settings under the lock
 std::vector<Chord> g_mark_chords;   // [debug] mark_pad: the recorder's mark, from a pad
+std::vector<Chord> g_song_chords[2]; // [songs] skip_pad, restart_pad (src/patches/song_cursor.c)
+int g_song_vk[2] = {VK_F8, VK_F7};  // [songs] skip_key, restart_key (0: none)
 
 void parse_chord_list(const std::string &text, std::vector<Chord> &chords)
 {
@@ -2114,6 +2457,8 @@ void parse_chords()
 {
     parse_chord_list(get_text("ui", "overlay_pad"), g_chords);
     parse_chord_list(get_text("debug", "mark_pad"), g_mark_chords);
+    parse_chord_list(get_text("songs", "skip_pad"), g_song_chords[0]);
+    parse_chord_list(get_text("songs", "restart_pad"), g_song_chords[1]);
 }
 
 // A chord of `chords` was just completed, on any pad: one button at once, two or three held half a second.
@@ -2149,6 +2494,40 @@ void pad_mark_poll()
         recorder_mark("pad");
 }
 
+// [songs] skip_pad / restart_pad: a chord acts at once, when its last button goes down, on any pad;
+// not while the left stick is in as well (L3+R3 is the overlay's chord, unless the chord names it).
+void song_pad_poll()
+{
+    InputRaw all;
+    memset(&all, 0, sizeof(all));
+    for (int slot = 0; slot < 4; slot++) {
+        InputRaw raw;
+        if (!xbox_HostInputRawPad(slot, &raw)) continue;
+        for (int s = 0; s < INPUT_SRC_COUNT; s++)
+            if (raw.src[s] > all.src[s]) all.src[s] = raw.src[s];
+    }
+    for (int what = 0; what < 2; what++)
+        for (Chord &c : g_song_chords[what]) {
+            bool held = true, names_l3 = false;
+            for (int i = 0; i < c.n; i++) {
+                held = held && all.src[c.src[i]] >= 16384;
+                names_l3 = names_l3 || c.src[i] == INPUT_SRC_LEFT_STICK_CLICK;
+            }
+            if (!names_l3 && all.src[INPUT_SRC_LEFT_STICK_CLICK] >= 16384) held = false;
+            if (held && !c.fired) song_cursor_request(what == 0 ? SONG_REQUEST_SKIP : SONG_REQUEST_RESTART, "pad");
+            c.fired = held;
+        }
+}
+
+// [songs] skip_key / restart_key: which request a key-down is, if any.
+int song_key_request(int vk)
+{
+    if (vk <= 0 || vk == g_overlay_vk) return 0;
+    if (vk == g_song_vk[0]) return SONG_REQUEST_SKIP;
+    if (vk == g_song_vk[1]) return SONG_REQUEST_RESTART;
+    return 0;
+}
+
 void set_open(bool open)
 {
     if (g_open.load() == open) return;
@@ -2177,6 +2556,9 @@ extern "C" void pc_ui_apply_settings(void)
     std::string key = get_text("ui", "overlay_key");
     int vk = xbox_InputMap_KeyFromName(key.c_str());
     g_overlay_vk = vk > 0 ? vk : VK_F1;
+    std::string song_keys[2] = {get_text("songs", "skip_key"), get_text("songs", "restart_key")};
+    for (int i = 0; i < 2; i++)
+        g_song_vk[i] = song_keys[i].empty() ? 0 : xbox_InputMap_KeyFromName(song_keys[i].c_str());
     parse_chords();
     if (g_ready) ui_apply_scale(g_window);
     ui_unlock();
@@ -2185,6 +2567,18 @@ extern "C" void pc_ui_apply_settings(void)
 #if defined(_WIN32)
 extern "C" int pc_ui_window_message(HWND window, UINT msg, WPARAM wp, LPARAM lp)
 {
+    if ((msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN) && !(lp & (1 << 30)) && !g_open.load()) {
+        int request = song_key_request((int)wp);
+        if (request) {
+            ui_lock();
+            bool capturing = ui_capturing();
+            ui_unlock();
+            if (!capturing) {
+                song_cursor_request(request, "key");
+                return 1;
+            }
+        }
+    }
     if ((msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN) && !(lp & (1 << 30)) && recorder_mark_vk() &&
         (int)wp == recorder_mark_vk() && (int)wp != g_overlay_vk) {
         ui_lock();
@@ -2225,6 +2619,7 @@ extern "C" void pc_ui_overlay(void *device, void *context, void *window_rtv, uns
     ui_lock();
     bool toggled = g_toggle.exchange(false);
     pad_mark_poll();
+    if (!ui_capturing() && !g_open.load()) song_pad_poll();
     if (!ui_capturing() && !g_chords.empty() && pad_toggle_pressed()) toggled = true;
     if (toggled) set_open(!g_open.load());
     if (!g_open.load()) { ui_unlock(); return; }
@@ -2412,6 +2807,7 @@ int overlay_active(void *)
     ui_lock();
     bool toggled = g_toggle.exchange(false);
     pad_mark_poll();
+    if (!ui_capturing() && !g_open.load()) song_pad_poll();
     if (!ui_capturing() && !g_chords.empty() && pad_toggle_pressed()) toggled = true;
     if (toggled) set_open(!g_open.load());
     bool open = g_open.load();
@@ -2501,6 +2897,18 @@ void overlay_draw(const D3D8VkOverlayFrame *f, void *)
 extern "C" int pc_ui_sdl_event(const void *event, float window_width, float window_height)
 {
     const SDL_Event *e = (const SDL_Event *)event;
+    if (e->type == SDL_EVENT_KEY_DOWN && !e->key.repeat && !g_open.load()) {
+        int request = song_key_request(host_posix_vk_from_scancode(e->key.scancode));
+        if (request) {
+            ui_lock();
+            bool capturing = ui_capturing();
+            ui_unlock();
+            if (!capturing) {
+                song_cursor_request(request, "key");
+                return 1;
+            }
+        }
+    }
     if (e->type == SDL_EVENT_KEY_DOWN && !e->key.repeat && recorder_mark_vk() &&
         host_posix_vk_from_scancode(e->key.scancode) == recorder_mark_vk() &&
         host_posix_vk_from_scancode(e->key.scancode) != g_overlay_vk) {

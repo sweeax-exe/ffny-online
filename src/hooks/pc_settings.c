@@ -36,6 +36,7 @@
 #include "pc_ui.h"
 #include "pc_debug.h"
 #include "pc_language.h"
+#include "pc_songs.h"
 #include "patches/widescreen.h"
 #include "patches/picture.h"
 #include "patches/cheats.h"
@@ -496,6 +497,8 @@ int pc_settings_init(void)
     /* [language] pack: rebuild the pack's files from the dump if needed and serve them in place of
      * the originals. After the launcher, which chooses it, and before the XBE is loaded. */
     pc_language_start(have_root ? root : NULL, "game");
+    /* [songs]: extra songs in the song list, on top of a language pack's copy of the database. */
+    pc_songs_start(have_root ? root : NULL, "game");
 
     /* [debug] unlock_all: src/patches/dev_unlock.c reads the variable once the game runs. */
     if (!getenv("RECOMP_UNLOCK_ALL") && recomp_settings_get("debug", "unlock_all", 0))

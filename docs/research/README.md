@@ -130,6 +130,7 @@ compatibility and concise native acceptance; it does not recreate authoring hist
 ## v1.0.0 candidate additions
 
 - [Cheat menu: research for issue #71](cheat-menu.md)
+- [Custom and cut songs: how the game's music works](custom-songs.md)
 - [Side findings from the #98 investigation (Steam Deck, 2026-10-27)](deck-determinism-98-side-findings.md)
 - [Why a pinned fight does not repeat on the Steam Deck (#98)](deck-determinism-98.md)
 - [Graphics enhancements: test plan for Windows and Linux / Steam Deck](graphics-enhancements-test-plan.md)

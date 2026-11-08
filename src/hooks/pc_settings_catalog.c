@@ -19,6 +19,7 @@
 #include "pc_ui.h"
 #include "pc_debug.h"
 #include "pc_language.h"
+#include "pc_songs.h"
 #include "patches/cheats.h"
 
 /* Picture shape: the console's 4:3, stretched, or widescreen (docs/widescreen); the widescreen
@@ -146,6 +147,7 @@ size_t pc_settings_catalog(RecompSetting *out, size_t max)
     n += pc_ui_settings(out + n, 16);
     n += pc_debug_settings(out + n, 16);
     n += pc_language_settings(out + n, 4);
+    n += pc_songs_settings(out + n, 8);
     n += cheats_settings(out + n, 8);
     return n;
 }

@@ -12,6 +12,7 @@
 | [Controllers, keyboard and mouse](10-input.md) | Gamepads, the keyboard player, default keys, remapping and rumble |
 | [settings.ini and keybinds](settings-reference.md) | Every setting, the default keys and key names, with examples |
 | [HD textures](hd-textures.md) | Optional texture packs on Windows, macOS and Linux: generation, settings and fallback |
+| [Custom songs](custom-songs.md) | Your own music files (MP3, FLAC, Ogg, WAV) in the Beatbox, the menus and fights; how many the game holds |
 | [Language packs](language-packs.md) | Playing in another language with a language mod, subtitles in every Story cutscene, use with texture packs, and making a pack |
 | [Importing Xbox saves](importing-xbox-saves.md) | Bring profiles from an original Xbox, an emulator or shared save zips into the port |
 | [Troubleshooting](troubleshooting.md) | Setup/startup recovery, saved thumbnails, pack/presentation checks and permitted report diagnostics |
