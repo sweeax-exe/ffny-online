@@ -61,6 +61,18 @@ int main(int argc, char **argv) {
         std::cout << ok << " " << message << "\n";
         return ok ? 0 : 1;
     }
+    if (cmd == "quarantine") {
+        std::string made, error;
+        bool ok = quarantine(fs::u8path(argv[2]), fs::u8path(argv[3]), atoll(argv[4]), &made, &error,
+                             argc > 5 ? atoi(argv[5]) : kKeepQuarantine);
+        std::cout << (ok ? "made " + made : "error " + error) << "\n";
+        return ok ? 0 : 1;
+    }
+    if (cmd == "quarantined") {
+        for (auto &q : list_quarantine(fs::u8path(argv[2])))
+            std::cout << q.name << "|" << q.folder << "|" << q.profile << "|" << q.when << "\n";
+        return 0;
+    }
     if (cmd == "list") {
         for (auto &e : list_saves(fs::u8path(argv[2])))
             std::cout << e.kind << "|" << e.name << "|" << e.folder << "|" << e.signed_ok << "|" << e.created << "|"
@@ -266,6 +278,48 @@ def test_restore_keeps_the_backup_it_restores_when_ten_exist(tool, tmp_path):
     assert names[0] in left and len(left) == 11
     assert run(tool, 'backup', save, backups, 'manual', noon(1)).startswith('made')
     assert len(run(tool, 'backups', backups).splitlines()) == 10
+
+
+# ---- profiles the game deletes ----
+
+def test_quarantine_copies_the_profile_folder(tool, tmp_path):
+    save, backups = tmp_path / 'save', tmp_path / 'save-backups'
+    folder = put_profile(save / 'UserData' / '45410049', 'VY2', profile('VY2', key=bytes(16)))
+    before = tree(folder)
+    made = run(tool, 'quarantine', folder, backups, noon()).split()[1]
+    assert made == time.strftime('%Y%m%d-%H%M%S', time.localtime(noon())) + '-' + folder.name
+    assert tree(backups / 'quarantine' / made) == before
+    assert tree(folder) == before                       # the copy only; the game deletes it itself
+    rows = run(tool, 'quarantined', backups).splitlines()
+    assert rows == ['%s|%s|VY2|%d' % (made, folder.name, noon())]
+    # the same folder twice in one second gets its own copy
+    again = run(tool, 'quarantine', folder, backups, noon()).split()[1]
+    assert again == made + '-2'
+    # a restorable layout: the importer reads the copy like any folder of Xbox saves
+    assert (backups / 'quarantine' / made / 'SaveMeta.xbx').is_file()
+
+
+def test_quarantine_keeps_the_newest_thirty(tool, tmp_path):
+    save, backups = tmp_path / 'save', tmp_path / 'save-backups'
+    folder = put_profile(save / 'UserData' / '45410049', 'VY2', profile('VY2', key=bytes(16)))
+    q = backups / 'quarantine'
+    q.mkdir(parents=True)
+    (q / 'mine').mkdir()                                # not a quarantine copy: never touched
+    (q / 'notes.txt').write_text('mine')
+    (q / '20200101-120000').mkdir()                      # a backup name, not a quarantine name
+    made = [run(tool, 'quarantine', folder, backups, noon(-40 + i)).split()[1] for i in range(33)]
+    names = [r.split('|')[0] for r in run(tool, 'quarantined', backups).splitlines()]
+    assert names == list(reversed(made[3:])) and len(names) == 30
+    assert (q / 'mine').is_dir() and (q / 'notes.txt').read_text() == 'mine' and (q / '20200101-120000').is_dir()
+    # the backups list never shows the quarantine folder
+    assert run(tool, 'backups', backups).strip() == ''
+
+
+def test_quarantine_of_nothing(tool, tmp_path):
+    out = subprocess.run([str(tool), 'quarantine', str(tmp_path / 'gone'), str(tmp_path / 'b'), str(noon())],
+                         capture_output=True, text=True)
+    assert out.returncode == 1 and out.stdout.startswith('error')
+    assert not (tmp_path / 'b' / 'quarantine').exists() or not any((tmp_path / 'b' / 'quarantine').iterdir())
 
 
 # ---- listing ----

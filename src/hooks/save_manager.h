@@ -10,6 +10,9 @@
 // fields, docs/importing-xbox-saves.md) and saveimage.xbx; the Options file is a folder of the
 // same shape named "Options". Backups are <data>/save-backups/<yyyymmdd-hhmmss>/UserData plus a
 // backup.txt; only folders with that name shape are ever removed, and only inside save-backups.
+// A profile folder the game itself deletes (XDeleteSaveGame) is copied first to
+// <data>/save-backups/quarantine/<yyyymmdd-hhmmss>-<folder>/ (the folder's own files); the newest 30
+// are kept, and only folders of that name shape inside quarantine are ever removed.
 #pragma once
 #include <cstdint>
 #include <filesystem>
@@ -72,6 +75,22 @@ bool daily_due(const fs::path &backups, int64_t now);
 // Backs up the current saves (reason "restore"), then puts the backup's UserData in place.
 bool restore(const fs::path &save_dir, const fs::path &backups, const std::string &name, int64_t now,
              std::string *message);
+// ---- profiles the game deletes ----
+constexpr int kKeepQuarantine = 30;
+struct Quarantined
+{
+    std::string name;           // the folder's name in quarantine, yyyymmdd-hhmmss-<folder>[-n]
+    fs::path path;
+    std::string folder;         // the profile folder it was (from the name)
+    std::string profile;        // the profile's name from its SaveMeta.xbx ("" none)
+    int64_t when = 0;           // when the game deleted it, Unix seconds
+};
+bool is_quarantine_name(const std::string &name);
+std::vector<Quarantined> list_quarantine(const fs::path &backups);  // newest first
+// Copies one profile folder (its files) to <backups>/quarantine/<stamp>-<folder>, then keeps the newest
+// `keep` there. False with *error when the folder is missing or empty, or the copy fails.
+bool quarantine(const fs::path &folder, const fs::path &backups, int64_t now, std::string *made, std::string *error,
+                int keep = kKeepQuarantine);
 std::string describe_time(int64_t when);                            // "3 Nov 2026, 14:05"
 std::string describe_reason(const std::string &reason);
 

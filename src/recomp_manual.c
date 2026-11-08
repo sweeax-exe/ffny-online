@@ -30,6 +30,7 @@
  * override would read zeroes for every register. */
 #include "recomp/gen/recomp_types.h"
 #include "hooks/save_compat.h"
+#include "hooks/pc_launcher_saves.h"
 #include "hooks/test_observations.h"
 #include "hooks/pc_settings.h"
 #include "recomp_settings.h"
@@ -1121,6 +1122,13 @@ void sub_001F8360(void)
     }
     g_esp += 16; /* stdcall: return address and three arguments */
 }
+
+/* XAPI's tree delete (cdecl: ANSI path, flags). XDeleteSaveGame (sub_001F89FD)
+ * calls it with the NT path of U:\<folder>\ once the SaveMeta name matched;
+ * the one other caller is sub_001FC736. A profile folder under
+ * UDATA\45410049 is copied to <data>/save-backups/quarantine first
+ * (src/hooks/pc_launcher_saves.cpp); the delete itself goes ahead. */
+void sub_001FBCCA_enter(void) { saves_game_deletes((const char *)XBOX_PTR(MEM32(g_esp + 4))); }
 
 /* â”€â”€ Manual overrides for this title â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
  *

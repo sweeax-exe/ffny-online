@@ -534,6 +534,74 @@ bool restore(const fs::path &save_dir, const fs::path &backups, const std::strin
     return true;
 }
 
+// ---- profiles the game deletes ----
+
+bool is_quarantine_name(const std::string &name)
+{
+    if (name.size() < 17 || name.size() > 15 + 1 + 48 || !is_backup_name(name.substr(0, 15)) || name[15] != '-')
+        return false;
+    for (size_t i = 16; i < name.size(); i++)
+        if (!isalnum((unsigned char)name[i]) && name[i] != '_' && name[i] != '-') return false;
+    return true;
+}
+
+std::vector<Quarantined> list_quarantine(const fs::path &backups)
+{
+    std::vector<Quarantined> out;
+    std::error_code ec;
+    for (fs::directory_iterator it(backups / "quarantine", ec), end; !ec && it != end; it.increment(ec)) {
+        std::string name = pcui::path_utf8(it->path().filename());
+        if (it->symlink_status(ec).type() != fs::file_type::directory || !is_quarantine_name(name)) continue;
+        Quarantined q;
+        q.name = name;
+        q.path = it->path();
+        q.folder = name.substr(16);
+        q.when = time_of_name(name);
+        Bytes meta;
+        fs::path meta_path = find_file(it->path(), "SaveMeta.xbx");
+        if (!meta_path.empty() && read_file(meta_path, meta, 64 * 1024)) parse_save_meta(meta, q.profile);
+        out.push_back(q);
+    }
+    std::sort(out.begin(), out.end(), [](const Quarantined &a, const Quarantined &b) {
+        std::string sa = a.name.substr(0, 15), sb = b.name.substr(0, 15);
+        return sa != sb ? sa > sb : a.name > b.name;
+    });
+    return out;
+}
+
+bool quarantine(const fs::path &folder, const fs::path &backups, int64_t now, std::string *made, std::string *error,
+                int keep)
+{
+    if (!real_dir(folder) || !count_files(folder)) {
+        if (error) *error = "there is nothing in " + pcui::path_utf8(folder.filename());
+        return false;
+    }
+    std::string base = pcui::path_utf8(folder.filename());
+    for (char &ch : base)
+        if (!isalnum((unsigned char)ch) && ch != '_') ch = '_';
+    if (base.size() > 40) base.resize(40);
+    fs::path q = backups / "quarantine";
+    std::error_code ec;
+    fs::create_directories(q, ec);
+    std::string name = stamp(now) + "-" + base;
+    for (int n = 2; fs::exists(q / name, ec) && n < 100; n++) name = stamp(now) + "-" + base + "-" + std::to_string(n);
+    std::string why;
+    if (!copy_tree(folder, q / name, nullptr, &why)) {
+        remove_tree(q / name);
+        if (error) *error = why;
+        return false;
+    }
+    if (made) *made = name;
+    auto list = list_quarantine(backups);
+    for (size_t i = (size_t)std::max(keep, 1); i < list.size(); i++) {
+        // only ever a folder of the quarantine name shape directly inside save-backups/quarantine
+        if (!is_quarantine_name(pcui::path_utf8(list[i].path.filename())) || list[i].path.parent_path() != q) continue;
+        if (remove_tree(list[i].path))
+            fprintf(stderr, "[SAVES] old quarantine copy %s removed (the newest %d are kept)\n", list[i].name.c_str(), keep);
+    }
+    return true;
+}
+
 std::string describe_time(int64_t when)
 {
     if (!when) return "an unknown time";

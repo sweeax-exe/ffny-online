@@ -7,5 +7,7 @@
 /* Pass the runtime-resolved UDATA host directory, encoded as UTF-8. */
 void defjam_save_compat_init(const char *user_data_dir);
 int defjam_save_directory_name(const uint16_t *name, char out[13]);
+/* The UDATA host directory given to init (UTF-8), "" when unknown. */
+const char *defjam_save_user_data_dir(void);
 
 #endif
