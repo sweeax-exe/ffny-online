@@ -48,7 +48,7 @@ jobs:
       - uses: ilammy/msvc-dev-cmd@v1
         with: { arch: x64 }
       - name: Installer recovery and input boundaries
-          run: python -m pytest -q --junitxml=build/setup-unit-results.xml tests/unit/test_setup_updates.py tests/unit/test_setup_engine.py tests/unit/test_setup_status.py tests/unit/test_linux_setup.py tests/unit/test_hd_assets.py tests/unit/test_hd_corpus.py tests/unit/test_hd_setup.py tests/unit/test_app_package.py tests/unit/test_app_updates.py tests/unit/test_app_setup_contract.py tests/unit/test_steam_shortcuts.py tests/unit/test_setup_handoff.py
+        run: python -m pytest -q --junitxml=build/setup-unit-results.xml tests/unit/test_setup_updates.py tests/unit/test_setup_engine.py tests/unit/test_setup_status.py tests/unit/test_linux_setup.py tests/unit/test_hd_assets.py tests/unit/test_hd_corpus.py tests/unit/test_hd_setup.py tests/unit/test_app_package.py tests/unit/test_app_updates.py tests/unit/test_app_setup_contract.py tests/unit/test_steam_shortcuts.py tests/unit/test_setup_handoff.py
       - name: Build and inventory standalone setup and app (no dump)
         shell: pwsh
         run: ./scripts/build-setup.ps1
