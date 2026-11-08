@@ -61,6 +61,20 @@ def test_modes_room_size_and_caps_match_the_relay():
     assert c_define(NETPLAY_C, 'WINNER_DRAW') == go_const('WinnerDraw')
 
 
+def test_ffa_rotation_matches_the_relay():
+    # build 66: FFA rotation rooms (mode 0x42, up to eight, CAPS bit 13; RESULT may carry the order)
+    if 'ModeFFARot' not in GO:
+        pytest.skip('the relay source checked out has no FFA rotation yet (server branch feat/ffa-rotation)')
+    assert c_define(NETPLAY_H, 'NETPLAY_MODE_FFAROT') == go_const('ModeFFARot')
+    assert c_define(NETPLAY_H, 'NETPLAY_FFAROT_SLOTS') == go_const('MaxFFARotSlots')
+    assert re.search(r'^\s*CapFFARot uint32 = 1 << 13$', GO, re.M)
+    assert c_define(NETPLAY_C, 'CAPS_FFAROT') == 1 << 13 == c_define(NETPLAY_H, 'NETPLAY_CAP_FFAROT')
+    assert 'CAPS_TSET | CAPS_FFAROT); n += 4;' in NETPLAY_C      # announced in CAPS
+    assert 'N.rot_match = NETPLAY_IS_FFAROT(N.roomv.settings.mode);' in NETPLAY_C
+    assert 'rb[n++] = (uint8_t)N.koth_order_n;' in NETPLAY_C      # RESULT's finishing order
+    assert '(N.koth_match && !N.rot_match)' in NETPLAY_C          # a leaver: the others fight on
+
+
 def test_hill_phases_line_states_and_results_match_the_relay():
     phases = c_enum(NETPLAY_H, 'NetHillPhase')
     assert [phases[k] for k in ('NETHILL_WAITING', 'NETHILL_CALLING', 'NETHILL_VOTING', 'NETHILL_FIGHTING')] == \
@@ -90,7 +104,7 @@ def test_the_results_screen_never_holds_the_next_fight():
     assert re.search(r'N\.start_deferred && N\.koth_match &&\s*\(h\.fights != N\.koth_fights \|\| '
                      r'\(h\.phase == NETHILL_FIGHTING && h\.seed != N\.start_seed\)\)', NETPLAY_C)
     assert 'end_hub_match("The next fight was called off: back on the hill.")' in NETPLAY_C
-    assert 'deferred = N.lobby && N.koth_results && NETPLAY_IS_KOTH(N.roomv.settings.mode);' in NETPLAY_C
+    assert 'deferred = N.lobby && N.koth_results && NETPLAY_IS_HILL(N.roomv.settings.mode);' in NETPLAY_C
     assert 'defjam_fe_call("MemCard.QuerySave( battle/rewardun.swf )")' in NETPLAY_C
     assert 'defjam_fe_call("Game.Quit()")' in NETPLAY_C
     assert 'is waiting for you: choose No to start the next fight.' in NETPLAY_C

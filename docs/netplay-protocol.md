@@ -97,7 +97,7 @@ to the lobby with the same token.
 |---|---|---|
 | `name` | string | 1..24 bytes, shown in the list |
 | `public` | u8 | 1: listed; 0: join by code only. Quick match joins only rooms QUICK made ("Quick: <player>"), never a player's own room |
-| `mode` | u8 | front-end match type: 0 One on One, 1 Team (2 vs 2), 2 3-Way, 3 Free for All, 6..11 the special matches; 0x40/0x41 King of the Hill |
+| `mode` | u8 | front-end match type: 0 One on One, 1 Team (2 vs 2), 2 3-Way, 3 Free for All, 6..11 the special matches; 0x40/0x41 King of the Hill; 0x42 FFA rotation |
 | `max` | u8 | players 2..4 (a Team room: 4; a special match: 2) |
 | `rounds` | u8 | 0 = the game's default; otherwise the rules index the game takes |
 | `pool` | u8 count (1..32) + count x u8 | the venues to vote on (`venue.xml` feID) |
@@ -286,7 +286,7 @@ by older relays.
 
 | Type | Name | Direction | Body after the header |
 |---|---|---|---|
-| 0x20 | `CAPS` | client -> server | `token` 8, `caps` u32 (bit 0: King of the Hill) |
+| 0x20 | `CAPS` | client -> server | `token` 8, `caps` u32 (bit 0: King of the Hill; bit 13: FFA rotation) |
 | 0x20 | `CAPS` | server -> client | `caps` u32 (what the relay supports: bit 0 King of the Hill, bit 1 rollback allowed, bit 2 `YIELD`, since build 36) |
 | 0x21 | `HILL` | server -> client | `room` 6, `phase` u8 (0 waiting, 1 calling, 2 voting, 3 fighting), `king` u8 (slot, 0xFF none), `streak` u16, `ms_left` u16, `seed` u32, `fights` u16, `last_winner` u8, `last_loser` u8, `last_how` u8 (0 none, 1 won, 2 draw, 3 loser left, 4 void), `count` u8, per player in line order: `slot` u8, `state` u8 (0 waiting, 1 called, 2 ready, 3 fighting, 4 away), `wins` u16 |
 | 0x22 | `RESULT` | client -> server | `token` 8, `seed` u32, `winner` u8 (slot, 0xFF draw); from the two fighters, repeated until `HILL.fights` changes; in a ranked set's room until `RANKINFO` counts the game (see "Ranked queue") |
@@ -307,6 +307,21 @@ by older relays.
   nothing; `VOTE` during the fight re-sends the sender's `START` or `WATCH`.
 - Any member who is not voting or fighting may change its fighter with `READY` (its ready flag as
   it is); the change counts from its next fight. Leaving is `LEAVE` at any time.
+
+### FFA rotation (build 66)
+
+- `Settings.mode` **0x42** is an FFA rotation room: a room with a line as above, `max` 2..8, where up
+  to four fight a Free for All (`START.mode` 3 with four, 2 with three, 0 with two); the venue is
+  drawn at random. Only a client that sent `CAPS` bit 13 (`8192`) sees, creates, quick-matches or
+  joins one (otherwise `ERROR 8`); the relay answers the bit only to such a client. `QUICK` with
+  mode 0x42 joins the fullest public one of the build, or opens one.
+- `HILL` as above: the first four in the line who are not away are called (state 1/2), then fight
+  (state 3); `king` is the last fight's winner, who stays at the front; `last_loser` is 0xFF.
+- `RESULT` from each fighter may carry the finishing order after `winner`: `count` u8 (1..4), then
+  `count` room slots, best first. The fighters' orders place the losers at the back of the line;
+  without one they keep their line order.
+- A fighter who leaves during the fight is out of it and the others play on (the leaver's port at
+  rest, as in other rooms of three or four); the last one left wins.
 
 ## Spectator extension (watching a room's matches)
 

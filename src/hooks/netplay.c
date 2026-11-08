@@ -260,6 +260,7 @@ void netplay_crowd_update(void) { sub_00081170(); }
 #define CAPS_CHAT     128u      /* room chat, both ways (T_IDENT, T_CHAT); only a client announcing it gets T_CHAT */
 #define CAPS_CREW     256u      /* crew battles, both ways (T_CREWJOIN, T_CREW); only a client announcing it gets T_CREW */
 #define CAPS_TSET     4096u     /* tournament sets, both ways (T_TJOIN, T_TSET, T_TPICK); only with an account service */
+#define CAPS_FFAROT   8192u     /* FFA rotation rooms (build 66), both ways: RESULT carries the finishing order there */
 #define CAPS_RB_MODES 512u      /* rollback everywhere (build 52), both ways: the answer carries a u32 of the
                                  * NETPLAY_RB_* modes in which rollback is mandatory (0: the setting decides) */
 #define CAPS_RB_PING  1024u     /* the rollback ping limit (build 54), both ways, with CAPS_RB_MODES: the answer
@@ -425,7 +426,12 @@ static struct {
     volatile LONG cp_refused;       /* the relay refused a RECGET of that wait (ERROR 9: not in a room) */
     ULONGLONG cp_wait_since, cp_get_sent;
     AutoMatch cp_wait_m;
-    int koth_match;                 /* this START is a King of the Hill fight */
+    int koth_match;                 /* this START is a King of the Hill fight (or an FFA rotation one) */
+    int rot_match;                  /* this START is an FFA rotation fight: up to four, the winner stays */
+    int rot_out[MAXP];              /* FFA rotation: when each position was put out (1, 2, ...), 0 still in */
+    int rot_outs;
+    uint8_t koth_order[MAXP];       /* FFA rotation: the RESULT's finishing order (room slots, best first) */
+    int koth_order_n;
     int koth_fights;                /* HILL `fights` when it started: a change means it is over */
     int koth_winner;                /* the RESULT to repeat: the winner's slot, WINNER_DRAW; -1 none */
     int koth_tries;
@@ -661,8 +667,9 @@ static unsigned room_rb_class(void)
     const OnlineMode *m;
     int mode = N.roomv.settings.mode;
     if (!N.roomv.in_room) return 0;
-    if (N.rank.valid && N.rank.has_set && !memcmp(N.rank_room, N.roomv.code, 6) && !NETPLAY_IS_KOTH(mode))
+    if (N.rank.valid && N.rank.has_set && !memcmp(N.rank_room, N.roomv.code, 6) && !NETPLAY_IS_HILL(mode))
         return NETPLAY_RB_RANKED;
+    if (NETPLAY_IS_FFAROT(mode)) return NETPLAY_RB_KOTH;    /* one fight per START, as on the hill */
     if (NETPLAY_IS_KOTH(mode))
         return N.crew.battle && !memcmp(N.crew_room, N.roomv.code, 7) ? NETPLAY_RB_CREW : NETPLAY_RB_KOTH;
     if (mode == ONLINE_MODE_TEAM) return NETPLAY_RB_TEAM;
@@ -1656,7 +1663,7 @@ static int gone_old_way(void)       /* RECOMP_NETPLAY_LEAVER=offline (tests): th
 static int gone_can_go_on(uint32_t mask)
 {
     int i, stay = 0;
-    if (!N.lobby || N.watching || N.koth_match || N.players < 3 || N.pos < 0 || N.pos >= N.players ||
+    if (!N.lobby || N.watching || (N.koth_match && !N.rot_match) || N.players < 3 || N.pos < 0 || N.pos >= N.players ||
         (mask >> N.pos & 1) || gone_old_way())
         return 0;
     for (i = 0; i < N.players && i < MAXP; i++)
@@ -2313,10 +2320,10 @@ static void rdsettings(Reader *r, NetRoomSettings *s)
     rdbytes(r, s->pool, s->pool_count);
 }
 
-/* The most players a room of `mode` takes: King of the Hill rooms ten, the others four. */
+/* The most players a room of `mode` takes: King of the Hill rooms ten, FFA rotation eight, the others four. */
 static int room_max(int mode)
 {
-    return NETPLAY_IS_KOTH(mode) ? ROOMSLOTS : MAXP;
+    return NETPLAY_IS_KOTH(mode) ? ROOMSLOTS : NETPLAY_IS_FFAROT(mode) ? NETPLAY_FFAROT_SLOTS : MAXP;
 }
 
 static int put_settings(uint8_t *b, const NetRoomSettings *s)
@@ -2627,7 +2634,7 @@ static void on_room(const uint8_t *b, int len)
     v.ms_left = rd8(&r);
     v.ms_left |= rd8(&r) << 8;
     count = rd8(&r);
-    if (count > ROOMSLOTS || (count > MAXP && !NETPLAY_IS_KOTH(v.settings.mode))) return;
+    if (count > ROOMSLOTS || (count > MAXP && !NETPLAY_IS_HILL(v.settings.mode))) return;
     v.player_count = count;
     for (i = 0; i < count; i++) {
         v.players[i].slot = rd8(&r);
@@ -2674,7 +2681,7 @@ static void on_room(const uint8_t *b, int len)
     memcpy(v.error, N.roomv.error, sizeof(v.error));
     v.version = N.roomv.version + 1;
     /* the line comes in its own message (HILL, after every ROOM of such a room): keep the last */
-    if (NETPLAY_IS_KOTH(v.settings.mode) && N.roomv.in_room && !memcmp(N.roomv.code, v.code, 6))
+    if (NETPLAY_IS_HILL(v.settings.mode) && N.roomv.in_room && !memcmp(N.roomv.code, v.code, 6))
         v.hill = N.roomv.hill;
     N.roomv = v;
     N.slot = v.you;
@@ -2782,6 +2789,7 @@ static void on_hill(const uint8_t *b, int len)
     /* the watched fight stays known while it runs */
     h.watch_seed = N.roomv.hill.watch_seed;
     h.watch_venue = N.roomv.hill.watch_venue;
+    h.watch_count = N.roomv.hill.watch_count;
     memcpy(h.watch_slots, N.roomv.hill.watch_slots, sizeof(h.watch_slots));
     memcpy(h.watch_fighters, N.roomv.hill.watch_fighters, sizeof(h.watch_fighters));
     if (h.phase != NETHILL_FIGHTING) h.watch_seed = 0;
@@ -2819,7 +2827,7 @@ static void on_hill(const uint8_t *b, int len)
         fprintf(stderr, "[NETPLAY] hill: the deferred fight is over on the relay (fights %d, how %d, phase %d); not started\n",
                 h.fights, h.last_how, h.phase);
         end_hub_match("The next fight was called off: back on the hill.");
-        if (h.last_how == NETHOW_LEFT)
+        if (h.last_how == NETHOW_LEFT && N.players == 2)
             toast(8000, "The next fight was called off (%s left): back on the hill.", player_name(1 - N.pos));
         else
             toast(8000, "The next fight was called off: back on the hill.");
@@ -2836,31 +2844,34 @@ static void on_start_as(const uint8_t *b, int len, int watching);
 static void on_watch(const uint8_t *b, int len)
 {
     Reader r = { b, len, 0, 0 };
-    if (!NETPLAY_IS_KOTH(N.roomv.settings.mode)) {     /* spectator mode: the match this PC watches */
+    if (!NETPLAY_IS_HILL(N.roomv.settings.mode)) {     /* spectator mode: the match this PC watches */
         if (SPECTATOR_HERE()) on_start_as(b, len, 1);
         return;
     }
     uint32_t seed;
-    int count, venue, i, slots[2], fighters[2];
+    int count, venue, i, slots[MAXP], fighters[MAXP];
     if (len < 8) return;
     seed = get32(b);
     r.i = 4;
-    rd8(&r);                    /* mode: 0, One on One */
+    rd8(&r);                    /* mode: 0, One on One (FFA rotation: 2 or 3 with three or four) */
     rd8(&r);                    /* rules */
     venue = rd8(&r);
     count = rd8(&r);
-    if (count != 2) return;
-    for (i = 0; i < 2; i++) { slots[i] = rd8(&r); fighters[i] = rd8(&r); }
+    if (count < 2 || count > MAXP || (count != 2 && !NETPLAY_IS_FFAROT(N.roomv.settings.mode))) return;
+    memset(slots, 0xFF, sizeof(slots));
+    memset(fighters, 0xFF, sizeof(fighters));
+    for (i = 0; i < count; i++) { slots[i] = rd8(&r); fighters[i] = rd8(&r); }
     if (r.bad) return;
     EnterCriticalSection(&g_cs);
     if (N.roomv.in_room && N.roomv.hill.watch_seed != seed) {
         N.roomv.hill.watch_seed = seed;
         N.roomv.hill.watch_venue = venue;
+        N.roomv.hill.watch_count = count;
         memcpy(N.roomv.hill.watch_slots, slots, sizeof(slots));
         memcpy(N.roomv.hill.watch_fighters, fighters, sizeof(fighters));
         N.roomv.version++;
-        fprintf(stderr, "[NETPLAY] WATCH: seed %08X, venue %d, slots %d and %d (watching, not running the fight)\n",
-                seed, venue, slots[0], slots[1]);
+        fprintf(stderr, "[NETPLAY] WATCH: seed %08X, venue %d, %d fighters, slots %d and %d (watching, not running the fight)\n",
+                seed, venue, count, slots[0], slots[1]);
     }
     LeaveCriticalSection(&g_cs);
 }
@@ -3045,7 +3056,7 @@ static void on_start_as(const uint8_t *b, int len, int watching)
     if (N.start_seed && seed == N.start_seed) { N.start_this_play = 1; return; }     /* a repeat */
     /* King of the Hill: the last fight of this PC is still on its results screen (also when a
      * START deferred there was called off since: its match is over, the results still show) */
-    deferred = N.lobby && N.koth_results && NETPLAY_IS_KOTH(N.roomv.settings.mode);
+    deferred = N.lobby && N.koth_results && NETPLAY_IS_HILL(N.roomv.settings.mode);
     /* positions follow the room slots in order */
     for (i = 1; i < count; i++)
         for (j = i; j > 0 && slots[j - 1] > slots[j]; j--) {
@@ -3142,7 +3153,11 @@ static void on_start_as(const uint8_t *b, int len, int watching)
     N.reported = N.fighting_seen = 0;
     disarm_crash_report();
     /* King of the Hill: one fight, then RESULT and back to the hill */
-    N.koth_match = NETPLAY_IS_KOTH(N.roomv.settings.mode);
+    N.koth_match = NETPLAY_IS_HILL(N.roomv.settings.mode);
+    /* FFA rotation: the same, with up to four; a player who leaves is out and the others fight on */
+    N.rot_match = NETPLAY_IS_FFAROT(N.roomv.settings.mode);
+    memset(N.rot_out, 0, sizeof(N.rot_out));
+    N.rot_outs = N.koth_order_n = 0;
     /* a ranked set's game: its RESULT goes to the relay too (the set's score, the loser's venue pick) */
     N.set_match = !watching && !N.koth_match && N.rank.valid && N.rank.has_set && !memcmp(N.rank_room, N.roomv.code, 6);
     N.set_game = N.rank.game;
@@ -3169,7 +3184,8 @@ static void on_start_as(const uint8_t *b, int len, int watching)
                 seed, m.type, m.rules, m.venue, count);
     else
         fprintf(stderr, "[NETPLAY] START: seed %08X, type %d, rules %d, venue %d, %d players, this PC is player %d%s\n",
-                seed, m.type, m.rules, m.venue, count, pos + 1, N.koth_match ? " (a King of the Hill fight)" : "");
+                seed, m.type, m.rules, m.venue, count, pos + 1,
+                N.rot_match ? " (an FFA rotation fight)" : N.koth_match ? " (a King of the Hill fight)" : "");
     if (late) {
         /* The players fight, or sit on their results, and choose Rematch there: no new START comes
          * until they are back in the room (a player report, 2026-11-07: watching only worked from the
@@ -3385,7 +3401,7 @@ static void on_packet(const uint8_t *b, int len)
             int from = N.lobby ? (b[6] < ROOMSLOTS ? N.pos_of_slot[b[6]] : -1) : (b[6] ? 1 : 0);
             /* King of the Hill: a fight this PC does not play in (it watches, or waits) is not its
              * lockstep; phase 1 does not run the watched fight */
-            if (N.lobby && !N.match_live && NETPLAY_IS_KOTH(N.roomv.settings.mode)) break;
+            if (N.lobby && !N.match_live && NETPLAY_IS_HILL(N.roomv.settings.mode)) break;
             on_data(from, b + 7, len - 7);
         }
         break;
@@ -3453,7 +3469,7 @@ static void on_packet(const uint8_t *b, int len)
         if (N.lobby) on_watch(b + 6, len - 6);
         break;
     case T_WATCHLATE:   /* spectator mode: a match that runs already; this PC watches its next fight */
-        if (N.lobby && !NETPLAY_IS_KOTH(N.roomv.settings.mode) && SPECTATOR_HERE()) on_start_as(b + 6, len - 6, 2);
+        if (N.lobby && !NETPLAY_IS_HILL(N.roomv.settings.mode) && SPECTATOR_HERE()) on_start_as(b + 6, len - 6, 2);
         break;
     case T_NOTICE:      /* u16 seconds left, u8 length, text: the relay restarts soon (maintenance) */
         if (len >= 9 && b[8] == len - 9) {
@@ -3603,7 +3619,7 @@ static void send_live_pad(ULONGLONG now)
 static int koth_fighting_here(void)
 {
     int i, on = 0;
-    if (!NETPLAY_IS_KOTH(N.roomv.settings.mode)) return 1;
+    if (!NETPLAY_IS_HILL(N.roomv.settings.mode)) return 1;
     EnterCriticalSection(&g_cs);
     if (N.roomv.hill.valid && N.roomv.hill.phase == NETHILL_FIGHTING)
         for (i = 0; i < N.roomv.hill.count; i++)
@@ -3738,7 +3754,7 @@ static DWORD WINAPI net_thread(LPVOID unused)
                 int n = header(cb, T_CAPS);
                 memcpy(cb + n, N.token, 8); n += 8;
                 put32(cb + n, CAPS_KOTH | CAPS_CREATED | CAPS_SPECTATE | CAPS_STATS_ERR | CAPS_SPEC_REMATCH | CAPS_CHAT |
-                              CAPS_CREW | CAPS_RB_MODES | CAPS_RB_PING | CAPS_SPEC_LATE | CAPS_TSET); n += 4;
+                              CAPS_CREW | CAPS_RB_MODES | CAPS_RB_PING | CAPS_SPEC_LATE | CAPS_TSET | CAPS_FFAROT); n += 4;
                 send_raw(cb, n);
             } else {
                 N.relay_caps = 0;
@@ -3873,11 +3889,16 @@ static DWORD WINAPI net_thread(LPVOID unused)
         /* King of the Hill: this PC's RESULT, repeated until a HILL shows the fight over */
         if (N.lobby && N.have_token && N.koth_winner >= 0 && now - N.koth_sent >= RETRY_MS) {
             if (N.koth_tries++ < RESULT_TRIES) {
-                uint8_t rb[6 + 8 + 5];
-                int n = header(rb, T_RESULT);
+                uint8_t rb[6 + 8 + 5 + 1 + MAXP];
+                int n = header(rb, T_RESULT), k;
                 memcpy(rb + n, N.token, 8); n += 8;
                 put32(rb + n, N.start_seed); n += 4;
                 rb[n++] = (uint8_t)N.koth_winner;
+                /* FFA rotation (relays answering CAPS_FFAROT): the finishing order, best first */
+                if (N.rot_match && N.koth_order_n > 0 && N.koth_order_n <= MAXP && N.relay_caps > 0 && (N.relay_caps & CAPS_FFAROT)) {
+                    rb[n++] = (uint8_t)N.koth_order_n;
+                    for (k = 0; k < N.koth_order_n; k++) rb[n++] = N.koth_order[k];
+                }
                 send_raw(rb, n);
             } else {
                 N.koth_winner = -1;
@@ -4193,7 +4214,7 @@ int netplay_room_results_wait(unsigned *slots)
     InitOnceExecuteOnce(&g_once, init_once, NULL, NULL);
     EnterCriticalSection(&g_cs);
     on = N.lobby && N.roomv.in_room && N.roomv.phase == 2 && !SPECTATOR_HERE() &&
-         !NETPLAY_IS_KOTH(N.roomv.settings.mode) && !N.match_live && N.over_pending;
+         !NETPLAY_IS_HILL(N.roomv.settings.mode) && !N.match_live && N.over_pending;
     for (i = 0; on && i < N.players && i < MAXP; i++)
         if (i != N.pos && N.rematch_want[i] != REMATCH_NO && N.start_slots[i] >= 0 && N.start_slots[i] < 32)
             m |= 1u << N.start_slots[i];
@@ -5424,7 +5445,7 @@ static DWORD WINAPI autostart_thread(LPVOID unused)
                 n = netplay_lobby_rooms(list, 32, NULL);
                 if (want && *want) code = want;
                 for (k = 0; k < n && !code; k++)
-                    if (!NETPLAY_IS_KOTH(list[k].mode) && list[k].players > 0) code = list[k].code;
+                    if (!NETPLAY_IS_HILL(list[k].mode) && list[k].players > 0) code = list[k].code;
                 if (code) {
                     fprintf(stderr, "[NETPLAY] tests: watching room %.6s\n", code);
                     netplay_lobby_spectate(code);
@@ -5476,7 +5497,7 @@ static DWORD WINAPI autostart_thread(LPVOID unused)
         unsigned scope_seen = 0;
         if (q && *q) sscanf(q, "%d,%d", &qmode, &qmax);
         /* the relay lets only a client that announced King of the Hill into such a room */
-        for (i = 0; i < 50 && NETPLAY_IS_KOTH(qmode) && N.relay_caps < 0; i++) Sleep(100);
+        for (i = 0; i < 50 && NETPLAY_IS_HILL(qmode) && N.relay_caps < 0; i++) Sleep(100);
         /* a created fighter (fighter 99): only once the relay keeps this player's record */
         for (i = 0; i < 100 && fighter == NETPLAY_CREATED_FIGHTER && !netplay_created_available(); i++) Sleep(100);
         if (fighter == NETPLAY_CREATED_FIGHTER)
@@ -5526,7 +5547,7 @@ static DWORD WINAPI autostart_thread(LPVOID unused)
                 }
                 for (k = 0; k < n; k++) {
                     const NetRoomInfo *x = &list[k].room;
-                    if (x->phase != 0 || x->players >= x->max || NETPLAY_IS_KOTH(x->mode)) continue;
+                    if (x->phase != 0 || x->players >= x->max || NETPLAY_IS_HILL(x->mode)) continue;
                     fprintf(stderr, "[NETPLAY] tests: joining the listed room %s on %s\n", x->code,
                             netservers_short(list[k].server));
                     if (list[k].server == netservers_connected()) netplay_lobby_join(x->code);
@@ -5611,7 +5632,7 @@ static DWORD WINAPI autostart_thread(LPVOID unused)
              * 30 s; a player waiting there for this mode is met (at most three moves). The search time
              * runs from the first wait alone and is kept across moves. */
             if (!listed && !strcmp(mode, "quick") && r.in_room && r.phase == 0 && r.player_count < 2 &&
-                !NETPLAY_IS_KOTH(r.settings.mode) && !netservers_moving() && moves < 3) {
+                !NETPLAY_IS_HILL(r.settings.mode) && !netservers_moving() && moves < 3) {
                 int waiting = 0, ping = -1, to, search_s, alone_s;
                 unsigned scope = 0;
                 ULONGLONG now = GetTickCount64();
@@ -5653,7 +5674,7 @@ static DWORD WINAPI autostart_thread(LPVOID unused)
                 continue;
             }
             if (r.in_room && ready_spectators > 0 && r.spectator_count < ready_spectators && !N.match_live &&
-                !NETPLAY_IS_KOTH(r.settings.mode)) {
+                !NETPLAY_IS_HILL(r.settings.mode)) {
                 if (!told_spec) {
                     fprintf(stderr, "[NETPLAY] tests: %d of %d spectators in the room; not ready until all are\n",
                             r.spectator_count, ready_spectators);
@@ -5670,8 +5691,8 @@ static DWORD WINAPI autostart_thread(LPVOID unused)
                 fprintf(stderr, "[NETPLAY] tests: the room holds %d players; readying\n", r.player_count);
                 told_wait = 0;
             }
-            if (r.in_room && NETPLAY_IS_KOTH(r.settings.mode)) {
-                /* King of the Hill: ready when called (back from the last fight), after
+            if (r.in_room && NETPLAY_IS_HILL(r.settings.mode)) {
+                /* King of the Hill (and FFA rotation): ready when called (back from the last fight), after
                  * RECOMP_NETPLAY_READY_DELAY_MS (tests: the "YOU'RE UP" screen shows meanwhile);
                  * vote when fighting */
                 int me, state = -1;
@@ -6444,6 +6465,16 @@ static void koth_check_result(int final)
     phase = MEM32(G_MATCH_PHASE);
     if (phase == 1u) N.koth_fought = 1;
     if (!N.koth_fought) return;
+    if (N.rot_match) {
+        /* FFA rotation: who is put out when (the game marks a fighter it puts out as ended, +0x932 bit
+         * 0x200, as report_missed_result reads it), for the finishing order the relay rotates the line by */
+        int k;
+        for (k = 0; k < N.players && k < MAXP; k++)
+            if (!N.rot_out[k] && (MEM16(ACTORS + (uint32_t)k * STRIDE + F_DEFEAT_WORD) & 0x200u)) {
+                N.rot_out[k] = ++N.rot_outs;
+                fprintf(stderr, "[NETPLAY] FFA rotation: player %d is out (%d of %d)\n", k + 1, N.rot_outs, N.players);
+            }
+    }
     count = MEM32(G_RESULT_COUNT);
     if (count && count <= RESULTS_MAX) code = MEM16(G_RESULTS + (count - 1u) * 0x10u + 0xEu);
     if ((code & 1u) && (code & 4u)) {
@@ -6463,6 +6494,18 @@ static void koth_check_result(int final)
         return;
     }
     EnterCriticalSection(&g_cs);
+    if (N.rot_match) {
+        /* the finishing order, best first: the winner, those never put out (by position), then the
+         * ones put out, the last one first */
+        int k, o, n = 0;
+        if (winner != (int)WINNER_DRAW) N.koth_order[n++] = (uint8_t)winner;
+        for (k = 0; k < N.players && k < MAXP && n < MAXP; k++)
+            if (!N.rot_out[k] && N.start_slots[k] != winner) N.koth_order[n++] = (uint8_t)N.start_slots[k];
+        for (o = N.rot_outs; o >= 1; o--)
+            for (k = 0; k < N.players && k < MAXP && n < MAXP; k++)
+                if (N.rot_out[k] == o && N.start_slots[k] != winner) N.koth_order[n++] = (uint8_t)N.start_slots[k];
+        N.koth_order_n = n;
+    }
     N.koth_done = 1;
     if (N.koth_match)
         N.koth_results = 1;     /* the winner's scene, the summary and the results follow, until the menu */
@@ -6471,7 +6514,7 @@ static void koth_check_result(int final)
     N.koth_winner = winner;
     LeaveCriticalSection(&g_cs);
     fprintf(stderr, "[NETPLAY] %s: the fight is decided (%s; code %04X, phase %u), winner %s %d; sending RESULT\n",
-            N.koth_match ? "King of the Hill" : "ranked set", how, (unsigned)code, (unsigned)phase, winner == (int)WINNER_DRAW ? "none, slot" : "room slot", winner);
+            N.rot_match ? "FFA rotation" : N.koth_match ? "King of the Hill" : "ranked set", how, (unsigned)code, (unsigned)phase, winner == (int)WINNER_DRAW ? "none, slot" : "room slot", winner);
 }
 /* A player's own controller dropped mid-fight and the game showed "Controller Disconnected"
  * (port 2) that START could not close (players' report, 2026-10-26). Our input layer never

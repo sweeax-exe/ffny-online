@@ -13,6 +13,7 @@ import glob
 import html.parser
 import importlib.util
 import json
+import re
 import os
 import threading
 import time
@@ -78,6 +79,8 @@ TURBO_ENV = {"RECOMP_FLIP_HZ": "0", "RECOMP_PRESENT_VSYNC": "0"}
 
 MODES = {   # name: (match type for the quick match, summaries per match = fighters in it)
     "1v1": (0, 2), "team": (1, 4), "ffa": (3, 4), "koth": (64, 2),
+    # FFA rotation (build 66): a room with a line, up to four fight a Free for All, the winner stays on
+    "ffarot": (0x42, 4),
 }
 
 PAD_SCRIPT_MAX = 4095   # src/hooks: a longer RECOMP_PAD_SCRIPT is ignored ("[PAD] script: ... ignored")
@@ -1611,15 +1614,22 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
     if mode not in MODES:
         raise ValueError("mode: " + ", ".join(MODES))
     qtype, per = MODES[mode]
-    players = max(2, min(4 if mode != "koth" else 10, int(players)))
+    # FFA rotation: three to eight copies; with five or more four fight and the others wait their turn
+    players = max(2, min(10 if mode == "koth" else 8 if mode == "ffarot" else 4, int(players)))
+    if mode == "ffarot":
+        players = max(3, players)
+    # a copy that sits out a fight counts its matches apart from the others: the test knockout's
+    # alternating winner would differ between the fighters, so slot 0 (the first fighter) wins
+    rot_wait = mode == "ffarot" and players > 4
     leaver = None
     if leave:
         who, _, step = str(leave).partition("@")
         leaver = (int(who), int(step or 300))
     fighters = list(fighters or [55, 22, 9, 31])
     timeout = timeout or (180 + 240 * matches * (1 if fast_ko or bot else 3))
-    winner = ko_winner or ("0" if mode == "koth" else "alt")
+    winner = ko_winner or ("0" if mode == "koth" or rot_wait else "alt")
     s = copies.Session("online", lock_timeout=lock_timeout, log=log, keep_roots=keep_roots).open()
+    rot_relay_log = None
     result = {"scenario": "online", "ok": False,
               "params": {"matches": matches, "mode": mode, "players": players, "fighters": fighters[:players],
                          "rollback": rollback, "fast_ko": fast_ko, "bot": bot, "spectators": spectators,
@@ -1657,6 +1667,7 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
             maint_timer.start()
             timeout += int(maintenance) + 5
         s.relay(relay_port, rollback=(rollback != "off"), extra=relay_extra + _rb_relay_extra(rollback, rollback_modes))
+        rot_relay_log = os.path.join(s.dir, "relay%d.err" % (len(s.relays) - 1))
         before = {}
         koth = mode == "koth"
         draft = bool(ranked) and "draft" in ranked
@@ -1679,7 +1690,7 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
                 # fights before the others reach that count: presses for a few more, or it sat on its last
                 # results and the other fighter gave up waiting (a test artefact, 2026-11-03); the game
                 # ignores a script over 4095 characters, so no more than that
-                "RECOMP_PAD_SCRIPT": _koth_script(matches, per, p2) if koth else
+                "RECOMP_PAD_SCRIPT": _koth_script(matches, per, p2) if koth or rot_wait else
                                      harness().build_pad_script(["getscreeninfo(intmain/mainmenu=lt@0.5"],
                                                                 online_tail(matches, per, p2)),
             })
@@ -1778,6 +1789,10 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
                 # the hill: copy 0 (the knockout winner's slot) fights every match, the others take turns
                 # as the challenger, so the matches are done when the king's and the challengers' are
                 done = rewards[0] >= matches and sum(rewards[1:]) >= matches
+            elif rot_wait:
+                # FFA rotation with copies waiting: four fight each match, so the matches are done once
+                # the copies' summaries add up to four a match and every copy has fought
+                done = sum(rewards) >= 4 * matches and min(rewards) >= 1
             else:
                 done = all(n >= matches for c, n in zip(cs, rewards) if not (leaver and c.index == leaver[0]))
             if done:
@@ -1873,6 +1888,8 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
         result["leave"] = leave_check(logs, leaver, players, problems)
         analyses.pop(leaver[0], None)
     rows, ok = online_rows(analyses, matches, require_hits, problems)
+    if mode == "ffarot":
+        result["rotation"] = rotation_check(logs, rot_relay_log, matches, players, problems)
     if maintenance:
         told = [i for i, p in logs.items() if "the relay restarts in" in logparse.read_text(p)]
         result["maintenance_told"] = told
@@ -1886,6 +1903,54 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
     result.update({"ok": ok and not problems, "stop": stop_reason, "matches": rows, "problems": problems,
                    "logs": [_relpath(p) for p in logs.values()], "shots": shots})
     return result
+
+
+def rotation_check(logs, relay_log, matches, players, problems):
+    """FFA rotation (mode ffarot): every copy fought its fights as FFA rotation fights, sent its RESULT
+    with the finishing order and saw it in (the relay's HILL moved on); the relay started each fight with
+    up to four copies (3-Way or 4-Way), ended it with a winner, rotated the line and called the next ones.
+    With five or more copies the ones waiting must come in: every copy fights within the first two fights,
+    and the winner of each fight is in the next one."""
+    out = {"copies": {}, "relay": {}}
+    fighting = min(players, 4)
+    for i, p in logs.items():
+        text = logparse.read_text(p)
+        c = {"rot_starts": text.count("(an FFA rotation fight)"),
+             "decided": text.count("[NETPLAY] FFA rotation: the fight is decided"),
+             "result_in": text.count("[NETPLAY] hill: the result is in"),
+             "auto_ready": text.count("[NETPLAY] hill: called again straight after the fight")}
+        out["copies"][str(i)] = c
+        want = matches if players <= 4 else 1
+        if c["rot_starts"] < want:
+            problems.append("copy %d: %d FFA rotation STARTs, want %d" % (i, c["rot_starts"], want))
+        if c["decided"] < want:
+            problems.append("copy %d: %d FFA rotation fights decided, want %d" % (i, c["decided"], want))
+    rtext = logparse.read_text(relay_log) if relay_log and os.path.isfile(relay_log) else ""
+    fights = re.findall(r"koth: fight venue=\d+ mode=(\d+) slots=\[([\d ]+)\]", rtext)
+    overs = re.findall(r"koth: fight over how=(\d+) winner=(\d+) loser=(\d+) streak=(\d+)", rtext)
+    calls = re.findall(r"koth: calling ((?:c=\S+(?: and )?)+)", rtext)
+    want_mode = "3" if fighting == 4 else "2"
+    out["relay"] = {"fights": ["mode %s slots %s" % f for f in fights],
+                    "over": ["how %s winner %s streak %s" % (o[0], o[1], o[3]) for o in overs],
+                    "calls": len(calls)}
+    if len(fights) < matches:
+        problems.append("relay: %d FFA rotation fights started, want %d" % (len(fights), matches))
+    for k, (mode, slots) in enumerate(fights[:matches]):
+        if mode != want_mode or len(slots.split()) != fighting:
+            problems.append("relay: fight %d mode %s slots [%s], want mode %s with %d" % (k + 1, mode, slots, want_mode, fighting))
+    if len(overs) < matches:
+        problems.append("relay: %d fights over, want %d" % (len(overs), matches))
+    for k, o in enumerate(overs[:matches]):
+        if o[0] != "1":
+            problems.append("relay: fight %d ended how=%s (want 1, won)" % (k + 1, o[0]))
+        elif k + 1 < len(fights) and o[1] not in fights[k + 1][1].split():
+            problems.append("relay: fight %d's winner (slot %s) is not in fight %d" % (k + 1, o[1], k + 2))
+    if players > 4 and len(fights) >= 2:
+        seen = set(fights[0][1].split()) | set(fights[1][1].split())
+        out["relay"]["fought_in_two"] = sorted(seen, key=int)
+        if len(seen) < players:
+            problems.append("relay: only slots %s fought in the first two fights of %d copies" % (sorted(seen), players))
+    return out
 
 
 def late_spectator_check(analyses, players, spectators, problems):
@@ -1987,7 +2052,8 @@ def online_rows(analyses, matches, require_hits=False, problems=None):
     # watch), so a copy's k-th match is not the room's k-th; the matches go by their START seed, in
     # the order the copies saw them, each checked on the copies that fought it.
     by_seed = None
-    if len(analyses) > 2 and any(m.get("koth") for a in analyses.values() for m in a["started"]):
+    if len(analyses) > 2 and any(m.get("koth") or (m.get("rot") and len(analyses) > 4)
+                                 for a in analyses.values() for m in a["started"]):
         by_seed = []
         for i in sorted(analyses):
             for m in analyses[i]["started"]:

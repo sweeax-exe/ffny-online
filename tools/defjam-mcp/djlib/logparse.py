@@ -147,7 +147,8 @@ def parse_matches(lines):
         m = {"line": i, "start": start, "id": None, "mode": None, "delay": None, "load_s": None,
              "input_delay": None, "pings": None, "rollback_off_why": None, "checks": 0, "desync": None,
              "desync_detail": None, "desync_fields": None, "gave_up": [], "waited": [], "result": None, "over": None,
-             "rollbacks": None, "unplugged": [], "refused": [], "koth": bool(start and "King of the Hill" in start.get("note", ""))}
+             "rollbacks": None, "unplugged": [], "refused": [], "koth": bool(start and "King of the Hill" in start.get("note", "")),
+             "rot": bool(start and "FFA rotation" in start.get("note", ""))}
         matches.append(m)
         return m
 

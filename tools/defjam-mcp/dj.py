@@ -5,7 +5,8 @@ Every game launch waits for the machine lock (D:\\DefJam\\test-lock.txt and test
 other defjam_recomp.exe running), runs on disposable data roots and prints one compact JSON result;
 the exit code is 1 on any failure.
 
-    python tools/defjam-mcp/dj.py scenario online --matches 3 [--mode 1v1|ffa|team|koth] [--players 2]
+    python tools/defjam-mcp/dj.py scenario online --matches 3 [--mode 1v1|ffa|team|koth|ffarot] [--players 2]
+           (ffarot: an FFA rotation room, 3 or 4 copies; checks the relay's calls, fights and line rotation)
            [--fighters 55,22] [--rollback on|off] [--fast-ko 600|0] [--bot [60|p1=aggressive,p2=counter]]
            [--spectators 1]
     python tools/defjam-mcp/dj.py scenario offline [--type 0] [--venue 1] [--f0 55] [--f1 22] [--human]

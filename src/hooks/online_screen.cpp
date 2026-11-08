@@ -193,7 +193,7 @@ const char *mode_logo(int type)
     switch (type) {
     case 0: return "modes/oneOnOne.png";
     case 1: return "modes/team.png";
-    case 2: case 3: return "modes/ffa.png";
+    case 2: case 3: case NETPLAY_MODE_FFAROT: return "modes/ffa.png";
     case 6: return "modes/demolition.png";
     case 7: return "modes/inferno.png";
     case 8: return "modes/subway.png";
@@ -1096,7 +1096,8 @@ int lobby_queue(int *waited, int *searching, char *why, int size)
 }
 int lobby_caps()
 {
-    return gallery_on() ? NETPLAY_CAP_KOTH | NETPLAY_CAP_YIELD | (G.rollback ? NETPLAY_CAP_ROLLBACK : 0) : netplay_lobby_caps();
+    return gallery_on() ? NETPLAY_CAP_KOTH | NETPLAY_CAP_YIELD | NETPLAY_CAP_FFAROT | (G.rollback ? NETPLAY_CAP_ROLLBACK : 0)
+                        : netplay_lobby_caps();
 }
 // spectator mode: the relay takes spectators (docs/research/spectator-mode.md)
 bool can_watch() { int c = lobby_caps(); return c > 0 && (c & NETPLAY_CAP_SPECTATE); }
@@ -1277,6 +1278,7 @@ void say(const std::string &s, unsigned ms = 3500) { S.note = s; S.note_until = 
 const char *mode_name(int type)
 {
     if (NETPLAY_IS_KOTH(type)) return "King of the Hill";
+    if (NETPLAY_IS_FFAROT(type)) return "FFA Rotation";
     const OnlineMode *m = online_mode(type);
     return m ? m->name : "Match";
 }
@@ -1291,6 +1293,7 @@ int fixed_venue(int type)
 }
 bool many_fighters(int type)
 {
+    if (NETPLAY_IS_FFAROT(type)) return true;   // up to four fight: never the one-on-one venues
     const OnlineMode *m = online_mode(type);
     return m && m->fighters > 2;
 }
@@ -1307,6 +1310,8 @@ const char *mode_blurb(int type)
     case 9: return "One on one in Crow's office, high over the street. Mind the windows.";
     case 10: return "One on one in Crow's cage at Club Murder.";
     case 11: return "One on one at The Dragon House. Ring out rules are always in effect.";
+    case NETPLAY_MODE_FFAROT: return "Up to eight players. Four fight a Free for All; the winner stays on and the "
+                                     "next three in the line come in.";
     }
     return nullptr;
 }
@@ -1318,17 +1323,26 @@ bool koth_offered()
     return caps > 0 && (caps & NETPLAY_CAP_KOTH);
 }
 
+// The relay answered CAPS with FFA rotation rooms (build 66 on).
+bool rot_offered()
+{
+    int caps = lobby_caps();
+    return caps > 0 && (caps & NETPLAY_CAP_FFAROT);
+}
+
 // The modes CREATE A ROOM and QUICK MATCH cycle through: the game's online modes, then King of the
-// Hill when the relay has it. `only_koth` / `no_koth`: a room's host cannot switch between the two
-// kinds (the relay refuses it).
-std::vector<int> mode_cycle(bool only_koth = false, bool no_koth = false)
+// Hill and FFA rotation when the relay has them. `only_koth` / `no_koth`: a room's host cannot switch
+// between the kinds (the relay refuses it); `only_rot`: an FFA rotation room keeps its mode.
+std::vector<int> mode_cycle(bool only_koth = false, bool no_koth = false, bool only_rot = false)
 {
     std::vector<int> out;
+    if (only_rot) return { NETPLAY_MODE_FFAROT };
     const OnlineMode *modes;
     int n = online_modes(&modes);
     if (!only_koth)
         for (int i = 0; i < n; i++) out.push_back(modes[i].type);
     if (!no_koth && (koth_offered() || only_koth)) out.push_back(NETPLAY_MODE_KOTH_RANDOM);
+    if (!no_koth && !only_koth && rot_offered()) out.push_back(NETPLAY_MODE_FFAROT);
     return out;
 }
 
@@ -1901,6 +1915,8 @@ void draw_hub(ImDrawList *dl, const Frame &f, const Pad &pad)
             text(dl, f, g_hand, 12, 463 + door_dx(), 378, ORANGE, "TWO ON TWO, FOUR PLAYERS", CENTER, 0.8f, 200);
         else if (NETPLAY_IS_KOTH(type))
             text(dl, f, g_hand, 12, 463 + door_dx(), 378, ORANGE, "KING OF THE HILL: UP TO 8 PLAYERS", CENTER, 0.8f, 200);
+        else if (NETPLAY_IS_FFAROT(type))
+            text(dl, f, g_hand, 12, 463 + door_dx(), 378, ORANGE, "UP TO 8 PLAYERS, 4 FIGHT, WINNER STAYS", CENTER, 0.8f, 200);
         else if (S.quick_mode > 0 && mode_name(type))
             text(dl, f, g_hand, 12, 463 + door_dx(), 378, ORANGE, upper(mode_name(type)).c_str(), CENTER, 0.8f, 200);
     }
@@ -1919,8 +1935,8 @@ void draw_hub(ImDrawList *dl, const Frame &f, const Pad &pad)
             if (mode_count) {
                 int type = quick_modes[S.quick_mode];
                 const OnlineMode *qm = online_mode(type);
-                // King of the Hill: the fullest open hill, or a new one with room for eight
-                int qmax = NETPLAY_IS_KOTH(type) ? 8 : qm ? std::min(4, qm->fighters) : 2;
+                // King of the Hill (FFA rotation): the fullest open room of it, or a new one for eight
+                int qmax = NETPLAY_IS_HILL(type) ? 8 : qm ? std::min(4, qm->fighters) : 2;
                 S.last_quick = type;
                 S.last_quick_max = qmax;
                 S.auto_moves = 0;
@@ -1936,7 +1952,7 @@ void draw_hub(ImDrawList *dl, const Frame &f, const Pad &pad)
                     say(std::string("Searching on ") + sv[home].name + " first...");
                 } else {
                     netplay_lobby_quick(type, qmax);
-                    S.quick_wanted = !NETPLAY_IS_KOTH(type);
+                    S.quick_wanted = !NETPLAY_IS_HILL(type);
                     say("Looking for a room...");
                 }
             }
@@ -2217,8 +2233,8 @@ void draw_rooms(ImDrawList *dl, const Frame &f, const Pad &pad)
         float x = 50, y = 86 + (i - top) * 52, w = 262, h = 44;
         if (mouse_pick(f, x, y, w, h)) S.rooms_sel = i;
         bool sel = i == S.rooms_sel;
-        // a King of the Hill room takes players in any phase: they join the back of the line
-        bool open = (r.phase == 0 || NETPLAY_IS_KOTH(r.mode)) && r.players < r.max;
+        // a King of the Hill or FFA rotation room takes players in any phase: they join the back of the line
+        bool open = (r.phase == 0 || NETPLAY_IS_HILL(r.mode)) && r.players < r.max;
         if (sel) selector(dl, f, x, y, w, h);
         text(dl, f, g_title, 19, x + 12, y + 3, sel ? CREAM : with_alpha(GREY, 0.9f), r.name, LEFT, 1.2f);
         char line[96];
@@ -2242,7 +2258,7 @@ void draw_rooms(ImDrawList *dl, const Frame &f, const Pad &pad)
     if (n) {   // the door: the chosen room
         const NetServerRoom &e = list[S.rooms_sel];
         const NetRoomInfo &r = e.room;
-        bool open = (r.phase == 0 || NETPLAY_IS_KOTH(r.mode)) && r.players < r.max;
+        bool open = (r.phase == 0 || NETPLAY_IS_HILL(r.mode)) && r.players < r.max;
         char players[160], where[80] = "";
         if (int v = fixed_venue(r.mode)) {      // "At Red Hook Tire Co. " (no second full stop)
             const char *vn = online_venue_name(v);
@@ -2250,8 +2266,9 @@ void draw_rooms(ImDrawList *dl, const Frame &f, const Pad &pad)
             snprintf(where, sizeof(where), "At %s%s ", vn, len && vn[len - 1] == '.' ? "" : ".");
         }
         else if (is_team(r.mode)) snprintf(where, sizeof(where), "Two on two. ");
+        else if (NETPLAY_IS_FFAROT(r.mode)) snprintf(where, sizeof(where), "Four fight a Free for All. ");
         snprintf(players, sizeof(players), "%s%d of %d players. %s", where, r.players, r.max,
-                 pad_text(NETPLAY_IS_KOTH(r.mode) ? (open ? "Winner stays on. Press {a} to join the line." : "Full.") :
+                 pad_text(NETPLAY_IS_HILL(r.mode) ? (open ? "Winner stays on. Press {a} to join the line." : "Full.") :
                           r.phase == 1 ? "Voting on the venue right now." : r.phase == 2 ? "A match is on." :
                           open ? "Open: press {a} to join." : "Full.").c_str());
         {   // this PC's ping to the server the room is on; on the other server, that joining moves there
@@ -2271,6 +2288,7 @@ void draw_rooms(ImDrawList *dl, const Frame &f, const Pad &pad)
         const NetServerRoom &e = list[S.rooms_sel];
         const NetRoomInfo &r = e.room;
         if (NETPLAY_IS_KOTH(r.mode)) say("King of the Hill rooms are watched from inside the hill.");
+        else if (NETPLAY_IS_FFAROT(r.mode)) say("FFA rotation rooms are watched from inside the room: join the line.");
         else if (e.server >= 0 && e.server != here) say(std::string("Watching works on this server's rooms for now: ") +
                                                          "switch to " + sv[e.server].name + " to watch this one.", 6000);
         else if (!gallery_on()) {
@@ -2281,7 +2299,7 @@ void draw_rooms(ImDrawList *dl, const Frame &f, const Pad &pad)
     if (pad.a && n) {
         const NetServerRoom &e = list[S.rooms_sel];
         const NetRoomInfo &r = e.room;
-        if (!((r.phase == 0 || NETPLAY_IS_KOTH(r.mode)) && r.players < r.max)) say("That room is not open right now.");
+        if (!((r.phase == 0 || NETPLAY_IS_HILL(r.mode)) && r.players < r.max)) say("That room is not open right now.");
         else if (e.server < 0 || e.server == here) { netplay_lobby_join(r.code); say("Joining..."); }
         else if (!gallery_on()) {
             netservers_join_on(e.server, r.code, r.mode, hub_name().c_str());
@@ -2508,9 +2526,9 @@ void draw_settings(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom
     enum Row { R_MODE, R_VENUE_CHOICE, R_PLAYERS, R_POOL, R_LISTED, R_OPEN };
     static const char *const labels[] = { "MODE", "VENUE OF EACH FIGHT", "PLAYERS", "VENUES", "LISTED", "" };
     NetRoomSettings &s = S.settings;
-    bool was_koth = NETPLAY_IS_KOTH(s.mode);
+    bool was_koth = NETPLAY_IS_KOTH(s.mode), was_rot = NETPLAY_IS_FFAROT(s.mode);
     // the host cannot turn a room into the other kind (the relay refuses it)
-    std::vector<int> cycle = S.settings_edit ? mode_cycle(was_koth, !was_koth) : mode_cycle();
+    std::vector<int> cycle = S.settings_edit ? mode_cycle(was_koth, !was_koth, was_rot) : mode_cycle();
     std::vector<int> rows_of = { R_MODE, R_PLAYERS, R_POOL, R_LISTED, R_OPEN };
     if (was_koth) rows_of.insert(rows_of.begin() + 1, R_VENUE_CHOICE);
     const int rows = (int)rows_of.size();
@@ -2520,10 +2538,12 @@ void draw_settings(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom
     int step = pad.right ? 1 : pad.left ? -1 : 0;
     const OnlineMode *m = online_mode(s.mode);
     // King of the Hill: 3..10 in the line (two fight, the others wait their turn)
+    // FFA rotation: 3..8 (up to four fight, the others wait their turn)
     // Team: four, no CPU partners (the relay starts a Team room with four only)
-    auto least_of = [](int mode) { return NETPLAY_IS_KOTH(mode) ? 3 : is_team(mode) ? 4 : 2; };
+    auto least_of = [](int mode) { return NETPLAY_IS_HILL(mode) ? 3 : is_team(mode) ? 4 : 2; };
     auto most_of = [](int mode) {
         if (NETPLAY_IS_KOTH(mode)) return NETPLAY_ROOM_SLOTS;
+        if (NETPLAY_IS_FFAROT(mode)) return NETPLAY_FFAROT_SLOTS;
         const OnlineMode *om = online_mode(mode);
         return om ? std::min(4, om->fighters) : 2;
     };
@@ -2534,6 +2554,7 @@ void draw_settings(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom
                 int old_mode = s.mode, old_preset = preset_of(s);
                 s.mode = cycle[(cycle_index(cycle, s.mode) + step + (int)cycle.size()) % (int)cycle.size()];
                 if (NETPLAY_IS_KOTH(s.mode) && !was_koth) s.max = 6;     // a fresh hill: room for a line
+                if (NETPLAY_IS_FFAROT(s.mode) && !was_rot) s.max = NETPLAY_FFAROT_SLOTS;
                 fit_pool(s, old_mode, old_preset);
             }
             break;
@@ -2552,7 +2573,7 @@ void draw_settings(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom
         S.settings_sel = 0;
         was_koth = NETPLAY_IS_KOTH(s.mode);
     }
-    bool koth = NETPLAY_IS_KOTH(s.mode);
+    bool koth = NETPLAY_IS_KOTH(s.mode), rot = NETPLAY_IS_FFAROT(s.mode);
     float row_step = koth ? 46 : 54, row_h = koth ? 40 : 44;
 
     page_title(dl, f, S.settings_edit ? "ROOM SETTINGS" : "CREATE A ROOM");
@@ -2577,7 +2598,7 @@ void draw_settings(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom
         case R_MODE: value = mode_name(s.mode); break;
         case R_VENUE_CHOICE: value = s.mode == NETPLAY_MODE_KOTH ? "The two fighters vote" : "At random"; break;
         case R_PLAYERS:
-            if (koth) { snprintf(buf, sizeof(buf), "Up to %d in the line", s.max); value = buf; break; }
+            if (koth || rot) { snprintf(buf, sizeof(buf), "Up to %d in the line", s.max); value = buf; break; }
             snprintf(buf, sizeof(buf), is_team(s.mode) ? "%d players, 2 vs 2" : "%d players", s.max); value = buf;
             if (m && s.max < m->fighters) { snprintf(buf, sizeof(buf), " + %d CPU", m->fighters - s.max); value += buf; } break;
         case R_POOL:
@@ -2598,6 +2619,13 @@ void draw_settings(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom
         text(dl, f, g_hand, 13, 463 + dx, 120, ORANGE, "WINNER STAYS ON", CENTER, 1.0f);
         text(dl, f, g_body, 12, 362 + dx, 138, WHITE,
              pad_text("TWO FIGHT ONE ON ONE, THE OTHERS WAIT IN LINE. THE LOSER GOES TO THE BACK. "
+                      "WHEN YOU'RE CALLED, PRESS {A} WITHIN 20 SECONDS.").c_str(), LEFT, 1.0f, 202);
+        venues_y = 196;
+    } else if (rot) {
+        text(dl, f, g_title, 24, 463 + dx, 92, CREAM, "FFA ROTATION", CENTER, 1.6f);
+        text(dl, f, g_hand, 13, 463 + dx, 120, ORANGE, "UP TO 8 PLAYERS, 4 FIGHT, WINNER STAYS", CENTER, 1.0f);
+        text(dl, f, g_body, 12, 362 + dx, 138, WHITE,
+             pad_text("FOUR FIGHT A FREE FOR ALL, THE OTHERS WAIT IN LINE. THE WINNER STAYS ON, THE NEXT THREE COME IN. "
                       "WHEN YOU'RE CALLED, PRESS {A} WITHIN 20 SECONDS.").c_str(), LEFT, 1.0f, 202);
         venues_y = 196;
     } else {
@@ -2632,7 +2660,7 @@ const std::vector<OnlineFighter> &grid_fighters()
     g_grid_cp.assign(list.size(), -1);
     NetRoom r;
     lobby_room(&r);
-    if (cp_available() && ranked_created_ok(r) && tset_created_ok(r) && !(r.in_room && NETPLAY_IS_KOTH(r.settings.mode))) {
+    if (cp_available() && ranked_created_ok(r) && tset_created_ok(r) && !(r.in_room && NETPLAY_IS_HILL(r.settings.mode))) {
         const std::vector<CpCard> cards = cp_cards();
         styles.assign(cards.size(), std::string());
         for (size_t i = 0; i < cards.size(); i++)
@@ -2843,7 +2871,9 @@ void crown(ImDrawList *dl, const Frame &f, float cx, float cy, float w, ImU32 co
 struct HillView {
     const NetHill *h = nullptr;
     int my_state = -1, my_index = -1;   // this PC in the line (NETLINE_*), -1 not in it yet
-    int pair[2] = { -1, -1 };           // the called or fighting pair's slots, in line order
+    int pair[4] = { -1, -1, -1, -1 };   // the called or fighting slots, in line order (two; FFA rotation up to four)
+    int npair = 0;
+    bool rot = false;                   // an FFA rotation room
     int next = -1;                      // "you're up next": the first waiting after the pair
     int ms_left = 0;
 };
@@ -2868,20 +2898,39 @@ int slot_fighter(const NetRoom &r, int slot)
     return slot == r.you ? saved_fighter() : -1;
 }
 
+bool hill_called(const HillView &v, int slot)
+{
+    for (int i = 0; i < v.npair; i++) if (v.pair[i] == slot) return slot >= 0;
+    return false;
+}
+
+// "ANN, BEN AND CAL": the called (or fighting) players' names, but `skip`.
+std::string called_names(const NetRoom &r, const HillView &v, int skip = -2)
+{
+    std::vector<std::string> names;
+    for (int i = 0; i < v.npair; i++) if (v.pair[i] != skip) names.push_back(upper(slot_name(r, v.pair[i])));
+    std::string out;
+    for (size_t i = 0; i < names.size(); i++)
+        out += (i == 0 ? "" : i + 1 == names.size() ? " AND " : ", ") + names[i];
+    return out.empty() ? "?" : out;
+}
+
 HillView hill_view(const NetRoom &r)
 {
     HillView v;
     v.h = &r.hill;
-    int n = 0;
+    v.rot = NETPLAY_IS_FFAROT(r.settings.mode);
+    int n = 0, most = v.rot ? 4 : 2;
     for (int i = 0; i < r.hill.count; i++) {
         const NetHillEntry &e = r.hill.line[i];
         if (e.slot == r.you) { v.my_state = e.state; v.my_index = i; }
-        if (e.state >= NETLINE_CALLED && e.state <= NETLINE_FIGHTING && n < 2) v.pair[n++] = e.slot;
+        if (e.state >= NETLINE_CALLED && e.state <= NETLINE_FIGHTING && n < most) v.pair[n++] = e.slot;
     }
-    if (n == 2)
+    v.npair = n;
+    if (n >= 2)
         for (int i = 0; i < r.hill.count; i++) {
             const NetHillEntry &e = r.hill.line[i];
-            if (e.state == NETLINE_WAITING && e.slot != v.pair[0] && e.slot != v.pair[1]) { v.next = e.slot; break; }
+            if (e.state == NETLINE_WAITING && !hill_called(v, e.slot)) { v.next = e.slot; break; }
         }
     v.ms_left = r.hill.ms_left - (int)(GetTickCount64() - r.hill.received);
     if (v.ms_left < 0) v.ms_left = 0;
@@ -2894,6 +2943,15 @@ std::string last_result(const NetRoom &r)
     const NetHill &h = r.hill;
     std::string w = h.last_winner >= 0 ? upper(slot_name(r, h.last_winner)) : "?",
                 l = h.last_loser >= 0 ? upper(slot_name(r, h.last_loser)) : "?";
+    if (NETPLAY_IS_FFAROT(r.settings.mode)) {   // a Free for All: the winner, or everyone to the back
+        switch (h.last_how) {
+        case NETHOW_WON: return w + " WINS THE FFA";
+        case NETHOW_LEFT: return w + " WINS: THE OTHERS LEFT";
+        case NETHOW_DRAW: return "DRAW: EVERYONE TO THE BACK";
+        case NETHOW_VOID: return "NO RESULT: EVERYONE TO THE BACK";
+        }
+        return "";
+    }
     switch (h.last_how) {
     case NETHOW_WON: return w + " BEATS " + l;
     case NETHOW_LEFT: return w + " WINS: " + l + " LEFT";
@@ -2921,7 +2979,7 @@ void leave_hill(const char *why)
     say(why);
 }
 
-float give_up(ImDrawList *dl, const Frame &f, const Pad &pad, float x, float y, bool *left)
+float give_up(ImDrawList *dl, const Frame &f, const Pad &pad, float x, float y, bool *left, bool rot = false)
 {
     *left = false;
     if (!yield_offered()) return 0;
@@ -2930,15 +2988,16 @@ float give_up(ImDrawList *dl, const Frame &f, const Pad &pad, float x, float y, 
     if (!pad.lb_down) { S.lb_since = 0; S.lb_long_done = false; }
     else if (!S.lb_since) S.lb_since = now;
     bool held = pad.lb_down && S.lb_since && now - S.lb_since >= 1200 && !S.lb_long_done;
-    float w = hint(dl, f, x, y, "lb", armed ? "AGAIN: LEAVE THE HILL" : "GIVE UP MY SPOT");
+    float w = hint(dl, f, x, y, "lb", armed ? (rot ? "AGAIN: LEAVE THE ROOM" : "AGAIN: LEAVE THE HILL") : "GIVE UP MY SPOT");
     if ((pad.lb_once && armed) || held) {
         S.lb_long_done = true;
         *left = true;
-        leave_hill("You left the hill.");
+        leave_hill(rot ? "You left the room." : "You left the hill.");
     } else if (pad.lb_once) {
         netplay_lobby_yield();
         S.give_up_at = now;
-        say(pad_text("You gave up your spot: back of the line. {LB} again (or hold {LB}) leaves the hill."), 5000);
+        say(pad_text(rot ? "You gave up your spot: back of the line. {LB} again (or hold {LB}) leaves the room."
+                         : "You gave up your spot: back of the line. {LB} again (or hold {LB}) leaves the hill."), 5000);
     }
     return w;
 }
@@ -2953,8 +3012,10 @@ void choose_fighter(int fighter)
 
 // The watching screen: the fight this PC does not play in. Phase 1 shows who fights, the king's
 // crown and streak, and the line; the fight itself runs on the fighters' PCs only.
+void draw_watch_rot(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r, const HillView &v);
 void draw_watch(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r, const HillView &v)
 {
+    if (v.rot) { draw_watch_rot(dl, f, pad, r, v); return; }
     const NetHill &h = r.hill;
     int a = v.pair[0], b = v.pair[1];
     if (h.watch_seed && h.watch_seed == h.seed) { a = h.watch_slots[0]; b = h.watch_slots[1]; }
@@ -3016,6 +3077,68 @@ void draw_watch(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r
     else if (pad.b) S.watch_hidden = h.seed ? h.seed : 1;
 }
 
+// FFA rotation's watching screen: the up to four who fight, side by side, the last winner crowned.
+void draw_watch_rot(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r, const HillView &v)
+{
+    const NetHill &h = r.hill;
+    int slots[4] = { -1, -1, -1, -1 }, fighters[4] = { -1, -1, -1, -1 }, n = 0;
+    bool from_watch = h.watch_seed && h.watch_seed == h.seed && h.watch_count >= 2;
+    if (from_watch)
+        for (int i = 0; i < h.watch_count && i < 4; i++) { slots[n] = h.watch_slots[i]; fighters[n] = h.watch_fighters[i]; n++; }
+    else
+        for (int i = 0; i < v.npair && i < 4; i++) { slots[n] = v.pair[i]; fighters[n] = slot_fighter(r, v.pair[i]); n++; }
+    rect(dl, f, 50, 26, 118, 28, with_alpha(RED, 0.95f), 3);
+    dl->AddCircleFilled(f.p(64, 40), 5 * f.s(), (GetTickCount64() / 600) % 2 ? WHITE : with_alpha(WHITE, 0.3f));
+    text(dl, f, g_title, 18, 76, 30, WHITE, "WAITING", LEFT, 1.0f);
+    text(dl, f, g_hand, 14, 180, 34, ORANGE, r.settings.name, LEFT, 0.8f);
+    text(dl, f, g_title, 14, 590, 30, GOLD, "FFA ROTATION", RIGHT, 1.1f);
+    const float w = 126, gap = 12, ph = 176;
+    float x0 = 320 - (n * w + (n - 1) * gap) / 2;
+    for (int k = 0; k < n; k++) {
+        int slot = slots[k], fighter = fighters[k] >= 0 && fighters[k] != 0xFF ? fighters[k] : slot_fighter(r, slot);
+        float x = x0 + k * (w + gap), y = 84;
+        glass(dl, f, x, y, w, ph + 60);
+        if (fighter < 0 || !portrait(dl, f, fighter, x + 5, y + 5, w - 10, ph - 10))
+            text(dl, f, g_title, 34, x + w / 2, y + 70, GREY, "?", CENTER);
+        if (slot >= 0 && slot == h.king) {
+            crown(dl, f, x + w / 2, y - 15, 34);
+            char streak[32];
+            snprintf(streak, sizeof(streak), "x%d", h.streak);
+            text(dl, f, g_title, 13, x + w - 8, y + 10, GOLD, streak, RIGHT, 1.2f);
+        }
+        text(dl, f, g_hand, 17, x + w / 2, y + ph + 2, slot == r.you ? ORANGE : CREAM, slot >= 0 ? slot_name(r, slot) : "?", CENTER, 1.2f, w - 6);
+        text(dl, f, g_title, 11, x + w / 2, y + ph + 32, GREY, fighter >= 0 ? online_fighter_name(fighter) : "", CENTER, 0.8f, w - 6);
+    }
+    text(dl, f, g_stencil, 30, 320, 326, CREAM, n > 2 ? "FREE FOR ALL" : "ONE ON ONE", CENTER, 1.6f);
+    if (from_watch && h.watch_venue)
+        text(dl, f, g_hand, 14, 320, 360, ORANGE, upper(online_venue_name(h.watch_venue)).c_str(), CENTER, 0.8f, 300);
+    std::string line = "NEXT:";
+    int shown = 0;
+    for (int i = 0; i < h.count && shown < 4; i++) {
+        const NetHillEntry &e = h.line[i];
+        bool fights = false;
+        for (int k = 0; k < n; k++) fights = fights || slots[k] == e.slot;
+        if (e.state != NETLINE_WAITING || fights) continue;
+        char one[48];
+        snprintf(one, sizeof(one), "%s  %d. %s", shown ? "," : "", shown + 1, upper(slot_name(r, e.slot)).c_str());
+        line += one;
+        shown++;
+    }
+    if (!shown) line = "NOBODY ELSE IN THE LINE";
+    glass(dl, f, 40, 382, 560, 28, 8);
+    text(dl, f, g_title, 14, 52, 388, WHITE, line.c_str(), LEFT, 1.0f);
+    if (v.next == r.you) text(dl, f, g_hand, 18, 588, 386, ORANGE, "YOU'RE UP NEXT", RIGHT, 1.2f);
+    float hx = 54;
+    bool left = false;
+    hx += hint(dl, f, hx, 414, "x", "CHOOSE FIGHTER");
+    hx += give_up(dl, f, pad, hx, 414, &left, true);
+    hx += hint(dl, f, hx, 414, "b", "BACK TO THE ROOM");
+    (void)hx;
+    if (left) return;
+    if (pad.x) choose_fighter(slot_fighter(r, r.you));
+    else if (pad.b) S.watch_hidden = h.seed ? h.seed : 1;
+}
+
 // "YOU'RE UP": this PC is called; one press readies it with its fighter.
 void draw_up(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r, const HillView &v)
 {
@@ -3035,14 +3158,16 @@ void draw_up(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r, c
         snprintf(s, sizeof(s), "   (KING x%d)", r.hill.streak);
         vs += s;
     }
-    text(dl, f, g_title, 22, 242, 146, WHITE, vs.c_str(), LEFT, 1.4f);
-    if (r.you == r.hill.king) text(dl, f, g_hand, 16, 242, 176, GOLD, "DEFEND THE HILL", LEFT, 1.0f);
+    if (v.rot) vs = "VS " + called_names(r, v, r.you);    // a Free for All: everyone else called
+    if (v.rot) text(dl, f, g_title, 17, 242, 146, WHITE, vs.c_str(), LEFT, 1.2f, 352);
+    else text(dl, f, g_title, 22, 242, 146, WHITE, vs.c_str(), LEFT, 1.4f);
+    if (r.you == r.hill.king) text(dl, f, g_hand, 16, 242, v.rot ? 190 : 176, GOLD, v.rot ? "YOU WON THE LAST ONE: STAY ON TOP" : "DEFEND THE HILL", LEFT, 1.0f);
     char secs[16];
     snprintf(secs, sizeof(secs), "%d", (v.ms_left + 999) / 1000);
     text(dl, f, g_title, 64, 594, 206, v.ms_left < 6000 ? RED : CREAM, secs, RIGHT, 2.0f);
     rect(dl, f, 242, 290, 352, 6, IM_COL32(255, 255, 255, 30), 3);
     rect(dl, f, 242, 290, 352 * std::min(1.0f, v.ms_left / 20000.0f), 6, v.ms_left < 6000 ? RED : ORANGE, 3);
-    std::string say_line = pad_text(ready ? "Waiting for your opponent to press {a}..."
+    std::string say_line = pad_text(ready ? (v.rot ? "Waiting for the others to press {a}..." : "Waiting for your opponent to press {a}...")
                                           : "Press {a} now: not ready in time sends you to the back of the line.");
     text(dl, f, g_hand, 16, 242, 304, ORANGE, say_line.c_str(), LEFT, 0.8f, 360);
     float hx = 242;
@@ -3050,7 +3175,7 @@ void draw_up(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r, c
     hx += hint(dl, f, hx, 352, "x", "CHOOSE FIGHTER");
     hx = 242;
     bool left = false;
-    hx += give_up(dl, f, pad, hx, 396, &left);
+    hx += give_up(dl, f, pad, hx, 396, &left, v.rot);
     hx += hint(dl, f, hx, 396, "b", "LEAVE ROOM");
     (void)hx;
     if (left) return;
@@ -3088,7 +3213,7 @@ void draw_hill(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
     if (h.phase != NETHILL_FIGHTING) S.watch_hidden = 0;
 
     page_title(dl, f, r.settings.name);
-    text(dl, f, g_title, 16, 590, 26, GOLD, "KING OF THE HILL", RIGHT, 1.2f);
+    text(dl, f, g_title, 16, 590, 26, GOLD, v.rot ? "FFA ROTATION" : "KING OF THE HILL", RIGHT, 1.2f);
     char code[32];
     snprintf(code, sizeof(code), "CODE  %s", r.code);
     text(dl, f, g_title, 14, 590, 58, ORANGE, code, RIGHT);
@@ -3105,7 +3230,7 @@ void draw_hill(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
         const NetHillEntry &e = h.line[i];
         float x = 46, y = 104 + i * 28, w = 278, rh = 26;
         bool me = e.slot == r.you, king = e.slot == h.king && i == 0;
-        bool up = e.slot == v.pair[0] || e.slot == v.pair[1];
+        bool up = hill_called(v, e.slot);
         if (up) rect(dl, f, x, y, w, rh, e.state == NETLINE_FIGHTING ? IM_COL32(110, 14, 26, 170) : IM_COL32(120, 80, 14, 150), 5);
         else if (me) rect(dl, f, x, y, w, rh, IM_COL32(255, 168, 26, 40), 5);
         ImU32 col = e.state == NETLINE_AWAY ? with_alpha(GREY, 0.7f) : me ? ORANGE : CREAM;
@@ -3147,8 +3272,8 @@ void draw_hill(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
         text(dl, f, g_title, 15, 463, 280, GOLD, streak, CENTER, 1.2f);
     } else {
         crown(dl, f, 463, 140, 64, with_alpha(GREY, 0.5f));
-        text(dl, f, g_title, 20, 463, 190, CREAM, "NO KING YET", CENTER, 1.4f);
-        text(dl, f, g_hand, 14, 463, 218, ORANGE, "WIN A FIGHT TO TAKE THE HILL", CENTER, 1.0f);
+        text(dl, f, g_title, 20, 463, 190, CREAM, v.rot ? "NO WINNER YET" : "NO KING YET", CENTER, 1.4f);
+        text(dl, f, g_hand, 14, 463, 218, ORANGE, v.rot ? "WIN THE FFA TO STAY ON" : "WIN A FIGHT TO TAKE THE HILL", CENTER, 1.0f);
     }
     // what happens now
     std::string now_line, sub;
@@ -3156,7 +3281,7 @@ void draw_hill(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
     switch (h.valid ? h.phase : NETHILL_WAITING) {
     case NETHILL_WAITING:
         now_line = "WAITING FOR PLAYERS";
-        sub = "Two players who are not away start the hill.";
+        sub = v.rot ? "Two players who are not away start the rotation; up to four fight." : "Two players who are not away start the hill.";
         break;
     case NETHILL_CALLING:
         now_line = "UP: " + upper(slot_name(r, v.pair[0])) + " VS " + upper(slot_name(r, v.pair[1]));
@@ -3171,6 +3296,15 @@ void draw_hill(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
         now_line = "FIGHT ON: " + upper(slot_name(r, v.pair[0])) + " VS " + upper(slot_name(r, v.pair[1]));
         sub = fighting_me ? "" : "You watch from here; the result comes when it is over.";
         break;
+    }
+    if (v.rot && h.valid) {     // a Free for All: everyone called or fighting, by name
+        if (h.phase == NETHILL_CALLING) {
+            now_line = "UP: " + called_names(r, v);
+            snprintf(buf, sizeof(buf), "Everyone called presses %s within %d s or goes to the back.", pad_text("{a}").c_str(),
+                     (v.ms_left + 999) / 1000);
+            sub = buf;
+        } else if (h.phase == NETHILL_VOTING) now_line = called_names(r, v) + " PICK THE VENUE";
+        else if (h.phase == NETHILL_FIGHTING) now_line = "FFA ON: " + called_names(r, v);
     }
     text(dl, f, g_title, 15, 463, 308, WHITE, now_line.c_str(), CENTER, 1.2f, 250);
     if (!sub.empty()) text(dl, f, g_title, 11, 463, 330, GREY, sub.c_str(), CENTER, 0.8f, 250);
@@ -3190,7 +3324,7 @@ void draw_hill(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
     bool left = false;
     if (v.my_state == NETLINE_AWAY) hx += hint(dl, f, hx, hy, "a", "I'M BACK");
     hx += hint(dl, f, hx, hy, "x", "CHOOSE FIGHTER");
-    if (h.valid && v.my_index >= 0) hx += give_up(dl, f, pad, hx, hy, &left);
+    if (h.valid && v.my_index >= 0) hx += give_up(dl, f, pad, hx, hy, &left, v.rot);
     hint(dl, f, hx, hy, "b", "LEAVE ROOM");
     if (left) return;
     bool fight_on = h.valid && h.phase == NETHILL_FIGHTING && !fighting_me;
@@ -3220,7 +3354,7 @@ void tset_banner(ImDrawList *dl, const Frame &f, const NetRoom &r, const NetTSet
 
 void draw_room(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
 {
-    if (NETPLAY_IS_KOTH(r.settings.mode)) { draw_hill(dl, f, pad, r); return; }
+    if (NETPLAY_IS_HILL(r.settings.mode)) { draw_hill(dl, f, pad, r); return; }
     // a tournament match's room: the set page (no room settings, no venue vote: the relay runs the set)
     NetTSet tset;
     bool tour = tset_room(r, &tset);
@@ -3499,7 +3633,7 @@ void draw_room(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
         if (gallery_on()) {
             unsigned up = 0;
             for (int i = 0; i < NETSERVER_COUNT; i++) if (sv[i].state == NETSERVER_UP) up |= 1u << i;
-            scope = NETPLAY_IS_KOTH(S.last_quick) ? 0 : netservers_scope(G.choice, cur, search_s, up);
+            scope = NETPLAY_IS_HILL(S.last_quick) ? 0 : netservers_scope(G.choice, cur, search_s, up);
         } else if (!netservers_moving()) {
             int waiting = 0, ping = -1;
             int to = netservers_quick_move(S.last_quick, search_s, alone_s, r.code, &waiting, &ping, &scope);
@@ -3686,7 +3820,7 @@ void draw_maintenance(ImDrawList *dl, const Frame &f, const NetRoom &room)
     if (left > 0) snprintf(head, sizeof(head), "%s IN %d:%02d", upper(what).c_str(), left / 60, left % 60);
     else snprintf(head, sizeof(head), "%s NOW", upper(what).c_str());
     const char *tail = !room.in_room ? "No new matches until then." :
-                       room.phase == 1 && !NETPLAY_IS_KOTH(room.settings.mode) ? "The match is held until then." :
+                       room.phase == 1 && !NETPLAY_IS_HILL(room.settings.mode) ? "The match is held until then." :
                        "Matches start after it.";
     const float x = 50, y = 4, w = 230, h = 17;
     rect(dl, f, x, y, w, h, IM_COL32(150, 14, 30, 225), 4);
@@ -3868,14 +4002,15 @@ void versus_page(ImDrawList *dl, ImVec2 display, const NetVersus &v)
     float t = v.ms / 1000.0f;
     int all = dl->VtxBuffer.Size;
     backdrop(dl, f, display, true, LOOK_MATCH);
-    bool koth = NETPLAY_IS_KOTH(v.room_mode) || v.king >= 0;
+    bool rot = NETPLAY_IS_FFAROT(v.room_mode);
+    bool koth = !rot && (NETPLAY_IS_KOTH(v.room_mode) || v.king >= 0);
     int n = v.count < 2 ? 2 : v.count > 4 ? 4 : v.count;
 
     // the header: the mode's logo (King of the Hill: the crown and its name), the room, the server
     int k = dl->VtxBuffer.Size;
-    if (koth) {
+    if (koth || rot) {
         crown(dl, f, 320, 24, 30);
-        text(dl, f, g_title, 22, 320, 38, GOLD, "KING OF THE HILL", CENTER, 1.4f);
+        text(dl, f, g_title, 22, 320, 38, GOLD, rot ? "FFA ROTATION" : "KING OF THE HILL", CENTER, 1.4f);
     } else if (v.type != 2 && tex(mode_logo(v.type)).srv) {    // (3-Way shares Free for All's logo: in words)
         image_fit(dl, f, tex(mode_logo(v.type)), 200, 12, 240, 46);
     } else {
@@ -3977,8 +4112,8 @@ NetVersus sample_versus(const std::string &page)
     static const char *const names[] = { "Ann", "Ben", "Cal", "Dee" };
     const auto &list = roster();
     NetVersus v = {};
-    v.count = page == "versus-3way" ? 3 : page == "versus-ffa" || page == "versus-team" ? 4 : 2;
-    v.type = page == "versus-3way" ? 2 : page == "versus-ffa" ? 3 : page == "versus-team" ? 1 : 0;
+    v.count = page == "versus-3way" ? 3 : page == "versus-ffa" || page == "versus-team" || page == "versus-rot" ? 4 : 2;
+    v.type = page == "versus-3way" ? 2 : page == "versus-ffa" || page == "versus-rot" ? 3 : page == "versus-team" ? 1 : 0;
     // The Foundation and Red Hook Tire Co. (no subtitle: the photo alone, the name in words in a row),
     // The Subway and The Terror Dome (their subtitle banners)
     v.venue = page == "versus-koth" ? 6 : page == "versus-ffa" ? 11 : page == "versus-3way" ? 24 : 1;
@@ -3990,6 +4125,13 @@ NetVersus sample_versus(const std::string &page)
         v.cpu[i] = page == "versus-ffa" && i == 3;
         if (!v.cpu[i]) snprintf(v.name[i], sizeof(v.name[i]), "%s", names[i]);
         v.ping[i] = v.cpu[i] ? -1 : 38 + 41 * i;
+    }
+    if (page == "versus-rot") {     // FFA rotation: Cal won the last one and stays on
+        v.room_mode = NETPLAY_MODE_FFAROT;
+        v.venue = 11;
+        v.king = 2;
+        v.streak = 2;
+        snprintf(v.room, sizeof(v.room), "Late night FFA");
     }
     if (page == "versus-koth") {
         v.room_mode = NETPLAY_MODE_KOTH_RANDOM;
@@ -4064,6 +4206,8 @@ void gallery_step()
                                          // build 33: the grid at Eric Sermon, O.E, Santos and Teck
                                          "fighters-91", "fighters-92", "fighters-93", "fighters-85", "room", "vote", "hill",
                                          "up", "watch", "room-voice", "match",
+                                         // build 66: FFA rotation (its room, called, watching, its door)
+                                         "rot", "rot-up", "rot-watch", "rot-fight", "create-rot", "hub-rot", "versus-rot",
                                          // build 30: the server choice
                                          "connecting-auto", "hub-server", "servers", "servers-offline", "hub-ranked-na",
                                          "room-ping", "offline-server",
@@ -4258,11 +4402,12 @@ void gallery_step()
     else if (p == "hub-signin") { S.page = HUB; S.hub_sel = 3; G.account = ACCOUNT_OUT; }
     else if (p == "hub-voice") { S.page = HUB; S.hub_sel = HUB_VOICE; }
     else if (p == "hub-rollback-restart") { S.page = HUB; S.hub_sel = 0; S.quick_mode = 0; }   // build 46: the restart notice
-    else if (p == "hub-team" || p == "hub-special" || p == "hub-koth") {     // QUICK MATCH with Team, Inferno or King of the Hill
+    else if (p == "hub-team" || p == "hub-special" || p == "hub-koth" || p == "hub-rot") {     // QUICK MATCH with Team, Inferno, King of the Hill or FFA rotation
         S.page = HUB;
         S.hub_sel = 0;
         std::vector<int> cycle = mode_cycle();
-        S.quick_mode = cycle_index(cycle, p == "hub-team" ? 1 : p == "hub-koth" ? NETPLAY_MODE_KOTH_RANDOM : 7);
+        S.quick_mode = cycle_index(cycle, p == "hub-team" ? 1 : p == "hub-koth" ? NETPLAY_MODE_KOTH_RANDOM
+                                          : p == "hub-rot" ? NETPLAY_MODE_FFAROT : 7);
     }
     else if (p == "rooms" || p == "rooms-special") { S.page = ROOMS; S.rooms_sel = p == "rooms" ? 1 : 5; }
     else if (p == "code") { S.page = CODE; snprintf(S.code, sizeof(S.code), "GTE4AQ"); S.code_pos = 3; }
@@ -4271,6 +4416,7 @@ void gallery_step()
         default_settings(S.settings);
         snprintf(S.settings.name, sizeof(S.settings.name), "Ann's room");
         if (p.find("koth") != std::string::npos) { S.settings.mode = NETPLAY_MODE_KOTH_RANDOM; S.settings.max = 8; }
+        if (p == "create-rot") { S.settings.mode = NETPLAY_MODE_FFAROT; S.settings.max = NETPLAY_FFAROT_SLOTS; apply_preset(S.settings, 0); }
         char last = p.back();
         if (last == '3') apply_preset(S.settings, 1);
         else if (last == '6') apply_preset(S.settings, 2);
@@ -4445,6 +4591,40 @@ void gallery_step()
             h.watch_slots[0] = 1; h.watch_slots[1] = 2;
             h.watch_fighters[0] = r.players[1].fighter; h.watch_fighters[1] = r.players[2].fighter;
         }
+    } else if (p == "rot" || p == "rot-up" || p == "rot-watch" || p == "rot-fight") {
+        // FFA rotation: eight in the room; Cal won the last FFA and stays on, Ben, Dee and Ann (this PC)
+        // are called with him; the others wait
+        S.page = HUB;
+        NetRoom &r = G.room = sample_room(NETPLAY_MODE_FFAROT, NETPLAY_FFAROT_SLOTS, 8);
+        snprintf(r.settings.name, sizeof(r.settings.name), "Late night FFA");
+        NetHill &h = r.hill;
+        h.valid = 1;
+        h.king = 2;
+        h.streak = 2;
+        h.ms_left = 14000;
+        h.received = r.received;
+        h.fights = 5;
+        h.last_winner = 2; h.last_loser = -1; h.last_how = NETHOW_WON;
+        h.count = 8;
+        const int order[8] = { 2, 1, 3, 0, 4, 5, 6, 7 };
+        for (int i = 0; i < 8; i++) { h.line[i].slot = order[i]; h.line[i].state = i < 4 ? NETLINE_CALLED : NETLINE_WAITING; h.line[i].wins = i == 0 ? 3 : i == 2 ? 1 : i == 5 ? 1 : 0; }
+        h.line[7].state = NETLINE_AWAY;
+        h.phase = NETHILL_CALLING;
+        if (p == "rot") { h.line[0].state = h.line[1].state = NETLINE_READY; std::swap(h.line[3], h.line[4]); h.line[3].state = NETLINE_CALLED; h.line[4].state = NETLINE_WAITING; }
+        else if (p == "rot-up") { h.line[0].state = h.line[2].state = NETLINE_READY; }
+        else {
+            // rot-watch: Ann waits while four fight; rot-fight: the room page during it (B on the watch screen)
+            std::swap(h.line[3], h.line[4]);
+            h.phase = NETHILL_FIGHTING;
+            for (int i = 0; i < 4; i++) h.line[i].state = NETLINE_FIGHTING;
+            h.line[4].state = NETLINE_WAITING;
+            h.seed = h.watch_seed = 4321;
+            h.watch_venue = 11;
+            h.watch_count = 4;
+            const int fs[4] = { 1, 2, 3, 4 };
+            for (int i = 0; i < 4; i++) { h.watch_slots[i] = fs[i]; h.watch_fighters[i] = r.players[fs[i]].fighter; }
+            if (p == "rot-fight") S.watch_hidden = h.seed;
+        }
     } else if (p.compare(0, 11, "crew-battle") == 0) {
         S.page = HUB;
         G.room = sample_room(NETPLAY_MODE_KOTH_RANDOM, 10, 10);
@@ -4521,7 +4701,7 @@ LookId page_look(const NetRoom &room, enum NetplayState st)
     default: break;
     }
     if (room.in_room) {
-        if (!NETPLAY_IS_KOTH(room.settings.mode)) return room.phase == 1 ? LOOK_VOTE : LOOK_ROOM;
+        if (!NETPLAY_IS_HILL(room.settings.mode)) return room.phase == 1 ? LOOK_VOTE : LOOK_ROOM;
         HillView v = hill_view(room);
         const NetHill &h = room.hill;
         bool fighting_me = v.my_state == NETLINE_FIGHTING;
@@ -4913,7 +5093,7 @@ bool draw_pages(ImVec2 display)
         if (S.connect_pending) connect_if_needed();
         int moved_mode = 0, moved = netservers_tick(&moved_mode);   // a join or quick match on the other relay
         if (moved == 2) {
-            S.quick_wanted = !NETPLAY_IS_KOTH(moved_mode);
+            S.quick_wanted = !NETPLAY_IS_HILL(moved_mode);
             say("Looking for a room...");
         } else if (moved == 1) {
             say("Joining...");
@@ -5028,7 +5208,7 @@ bool draw_pages(ImVec2 display)
                     netplay_lobby_ready(ready, fighter);
                 }
                 say(fighter_label(fighter) +
-                    (room.in_room && NETPLAY_IS_KOTH(room.settings.mode) ? " it is, from your next fight." : " it is."));
+                    (room.in_room && NETPLAY_IS_HILL(room.settings.mode) ? " it is, from your next fight." : " it is."));
                 S.page = HUB;
             }
             S.ranked_pick = false;
