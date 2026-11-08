@@ -200,6 +200,57 @@ void netplay_lobby_crew_join(unsigned battle);
 /* The battle of this PC's room; 0 when it is no crew battle room (or no CREW came yet). */
 int netplay_lobby_crew(NetCrew *out);
 
+/* Tournament sets (relays answering CAPS bit 12, only with an account service): a tournament match's
+ * room runs a set by the tournament's rules. The relay decides every step (the coin toss, the start
+ * stage, the loser's stage pick, Dave's rule, the winner's fighter lock, the score); the game shows
+ * TSET and sends the choices: TJOIN enters the player's match (0: "my match that is ready") once the
+ * relay knows this account (room chat's IDENT), TPICK is the loser's stage. docs/netplay.md. */
+#define NETPLAY_CAP_TSET 4096
+#define NETPLAY_TSET_CHOICES 32
+#define NETPLAY_TSET_GAMES 16
+enum NetTSetState { NETTSET_WAITING = 0, NETTSET_SELECT, NETTSET_PICK, NETTSET_PLAYING, NETTSET_OVER, NETTSET_REFUSED };
+#define NETTSET_LOSER_PICKS 1u
+#define NETTSET_DAVES       2u
+#define NETTSET_WINNER_LOCK 4u
+#define NETTSET_COIN_TOSS   8u
+#define NETTSET_STOCK_ONLY  16u
+#define NETTSET_NONE  0xFF          /* first, order, picker, a lock: none; winner: still running */
+#define NETTSET_LEVEL 0xFE          /* winner: the set ended level (the host decides) */
+enum NetTSetHow { NETTSET_WIN = 1, NETTSET_DRAW = 2, NETTSET_LEFT = 3, NETTSET_FORFEIT = 4 };
+typedef struct NetTSetGame {
+    int venue, winner;              /* winner: a slot, NETTSET_NONE a draw */
+    int fighters[2];
+    int how;                        /* NETTSET_WIN .. NETTSET_FORFEIT */
+} NetTSetGame;
+typedef struct NetTSet {
+    unsigned match;
+    int best_of, flags, state, game;    /* game: the one being set up or played (1-based); over: the last */
+    int wins[2];                    /* by room slot (slot 0 is side 1) */
+    int first, order, picker;       /* coin toss; whose READY counts first this game; the stage picker */
+    int secs;                       /* as of `received`: pick time left, or until a missing side is DQ'd */
+    int venue;                      /* this game's venue (0 until known) */
+    int locks[2];                   /* by slot: the fighter that slot must play, NETTSET_NONE free */
+    int winner;
+    int choice_count;
+    int choices[NETPLAY_TSET_CHOICES];
+    int game_count;
+    NetTSetGame games[NETPLAY_TSET_GAMES];
+    char round[65], why[65];
+    unsigned long long received;
+} NetTSet;
+/* Enter tournament match `match`'s room (0: this account's ready match); repeated by the network
+ * thread until the relay seats this PC or refuses (netplay_lobby_tset_refusal). */
+void netplay_lobby_tset_join(unsigned match);
+/* The set of this PC's room; 0 when it is no tournament room (or no TSET came yet). */
+int netplay_lobby_tset(NetTSet *out);
+/* The stage pick (only the picker, only one of `choices`; the relay refuses anything else). */
+void netplay_lobby_tset_pick(int venue);
+/* The last TJOIN refusal's sentence (the relay's or the account service's); returns a number that
+ * changes with each refusal (0: none yet). */
+unsigned netplay_lobby_tset_refusal(char *why, int size);
+/* 1 while a TJOIN waits for the relay's answer. */
+int netplay_lobby_tset_joining(void);
+
 /* Enter the hub on `server`. The state becomes NETPLAY_LOBBY once the server answers; a room's
  * START makes it NETPLAY_CONNECTED for the match, which starts by itself (automatch.h), and it
  * returns to NETPLAY_LOBBY when the game is back at the main menu. */

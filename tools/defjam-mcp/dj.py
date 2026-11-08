@@ -87,6 +87,9 @@ def cmd_scenario(a):
     elif a.kind == "turf":
         r = scenarios.turf(timeout=a.timeout, relay_port=a.relay_port, off=a.off, extra_env=env, out_dir=a.out,
                            fast_ko=a.fast_ko, rollback=a.rollback, rollback_modes=a.rollback_modes, **common)
+    elif a.kind == "tset":
+        r = scenarios.tset(timeout=a.timeout, relay_port=a.relay_port, extra_env=env, out_dir=a.out, fast_ko=a.fast_ko,
+                           rollback=a.rollback, rollback_modes=a.rollback_modes, **common)
     elif a.kind == "social":
         r = scenarios.social(timeout=a.timeout or 300, relay_port=a.relay_port, off=a.off, extra_env=env,
                              out_dir=a.out, stress=a.stress, **common)
@@ -180,7 +183,7 @@ def main(argv=None):
 
     sc = sub.add_parser("scenario")
     sc.add_argument("kind", choices=["online", "offline", "boot", "gallery", "social", "roomchat",
-                                              "crewbattle", "turf"])
+                                              "crewbattle", "turf", "tset"])
     sc.add_argument("--off", action="store_true", help="social: the service's switch off, no RECOMP_SOCIAL (nothing may show)")
     sc.add_argument("--stress", action="store_true", help="social: more accounts with emoji, Arabic, combining-mark "
                     "and very long names and lines in every tab")
