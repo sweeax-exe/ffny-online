@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include "online_data.h"
 #if defined(_WIN32)
 #include <windows.h>
@@ -209,6 +210,27 @@ static void load(void)
 int online_fighters(const OnlineFighter **out) { load(); *out = g_fighters; return g_fighter_count; }
 int online_venues(const OnlineVenue **out) { load(); *out = g_venues; return g_venue_count; }
 int online_modes(const OnlineMode **out) { *out = k_modes; return (int)(sizeof(k_modes) / sizeof(k_modes[0])); }
+
+int online_random_below(int n)
+{
+    static unsigned long long state;
+    unsigned long long z;
+    if (n <= 1) return 0;
+    if (!state) state = ((unsigned long long)time(NULL) << 20) ^ (unsigned long long)clock() ^
+                        (unsigned long long)(size_t)&state ^ 0x9E3779B97F4A7C15ull;
+    z = (state += 0x9E3779B97F4A7C15ull);       /* splitmix64 */
+    z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ull;
+    z = (z ^ (z >> 27)) * 0x94D049BB133111EBull;
+    z ^= z >> 31;
+    return (int)(z % (unsigned long long)n);
+}
+
+int online_random_fighter(void)
+{
+    const OnlineFighter *all;
+    int n = online_fighters(&all);
+    return n > 0 ? all[online_random_below(n)].id : 55;
+}
 
 int online_fighter_id(int id)
 {

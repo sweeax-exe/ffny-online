@@ -261,6 +261,7 @@ void netplay_crowd_update(void) { sub_00081170(); }
 #define CAPS_CREW     256u      /* crew battles, both ways (T_CREWJOIN, T_CREW); only a client announcing it gets T_CREW */
 #define CAPS_TSET     4096u     /* tournament sets, both ways (T_TJOIN, T_TSET, T_TPICK); only with an account service */
 #define CAPS_FFAROT   8192u     /* FFA rotation rooms (build 66), both ways: RESULT carries the finishing order there */
+#define CAPS_RANDOM_VENUE 16384u /* RANDOM in the venue vote (build 67), both ways: VOTE 0xFE, ROOM voted 0xFE */
 #define CAPS_RB_MODES 512u      /* rollback everywhere (build 52), both ways: the answer carries a u32 of the
                                  * NETPLAY_RB_* modes in which rollback is mandatory (0: the setting decides) */
 #define CAPS_RB_PING  1024u     /* the rollback ping limit (build 54), both ways, with CAPS_RB_MODES: the answer
@@ -3754,7 +3755,7 @@ static DWORD WINAPI net_thread(LPVOID unused)
                 int n = header(cb, T_CAPS);
                 memcpy(cb + n, N.token, 8); n += 8;
                 put32(cb + n, CAPS_KOTH | CAPS_CREATED | CAPS_SPECTATE | CAPS_STATS_ERR | CAPS_SPEC_REMATCH | CAPS_CHAT |
-                              CAPS_CREW | CAPS_RB_MODES | CAPS_RB_PING | CAPS_SPEC_LATE | CAPS_TSET | CAPS_FFAROT); n += 4;
+                              CAPS_CREW | CAPS_RB_MODES | CAPS_RB_PING | CAPS_SPEC_LATE | CAPS_TSET | CAPS_FFAROT | CAPS_RANDOM_VENUE); n += 4;
                 send_raw(cb, n);
             } else {
                 N.relay_caps = 0;
@@ -4847,6 +4848,8 @@ void netplay_lobby_ready(int ready, int fighter)
 
 void netplay_lobby_vote(int choice)
 {
+    if (choice == NETPLAY_VOTE_RANDOM)
+        fprintf(stderr, "[NETPLAY] voting RANDOM (the relay draws the venue if it wins)\n");
     uint8_t b = (uint8_t)choice;
     request(T_VOTE, &b, 1);
 }
@@ -5403,6 +5406,15 @@ static void test_draft_tick(int you)
     since = GetTickCount64();       /* a lost one goes again after the same wait */
 }
 
+/* The tests' vote: the first candidate, or RANDOM (RECOMP_NETPLAY_TEST_VOTE=random) where the relay
+ * offers it and the vote has more than one venue. */
+static int test_vote(const NetRoom *r, int want_random)
+{
+    if (want_random && N.relay_caps > 0 && (N.relay_caps & CAPS_RANDOM_VENUE) && r->candidate_count > 1)
+        return NETPLAY_VOTE_RANDOM;
+    return 0;
+}
+
 static DWORD WINAPI autostart_thread(LPVOID unused)
 {
     const char *mode = getenv("RECOMP_NETPLAY"), *server = getenv("RECOMP_NETPLAY_SERVER");
@@ -5465,6 +5477,9 @@ static DWORD WINAPI autostart_thread(LPVOID unused)
          * their match before the third joined, and the third opened a room of its own. */
         const char *rp = getenv("RECOMP_TEST_READY_PLAYERS");
         int fighter = f && *f ? atoi(f) : 55, readied = 0, ready_delay = delay ? atoi(delay) : 0;
+        /* RECOMP_NETPLAY_TEST_VOTE=random (tests, build 67): vote RANDOM where the relay offers it */
+        const char *tv = getenv("RECOMP_NETPLAY_TEST_VOTE");
+        int vote_random = tv && !_stricmp(tv, "random");
         int ready_players = rp && *rp ? atoi(rp) : 0, told_wait = 0;
         /* RECOMP_TEST_READY_SPECTATORS=<n> (spectator tests): ready only while n spectators watch the room */
         const char *rs = getenv("RECOMP_TEST_READY_SPECTATORS");
@@ -5496,6 +5511,10 @@ static DWORD WINAPI autostart_thread(LPVOID unused)
         ULONGLONG alone_since = 0, search_since = 0;
         unsigned scope_seen = 0;
         if (q && *q) sscanf(q, "%d,%d", &qmode, &qmax);
+        if (f && !_stricmp(f, "random")) {     /* RECOMP_NETPLAY_FIGHTER=random: the hub's RANDOM pick */
+            fighter = online_random_fighter();
+            fprintf(stderr, "[NETPLAY] tests: RANDOM fighter: %d (%s)\n", fighter, online_fighter_name(fighter));
+        }
         /* the relay lets only a client that announced King of the Hill into such a room */
         for (i = 0; i < 50 && NETPLAY_IS_HILL(qmode) && N.relay_caps < 0; i++) Sleep(100);
         /* a created fighter (fighter 99): only once the relay keeps this player's record */
@@ -5723,7 +5742,7 @@ static DWORD WINAPI autostart_thread(LPVOID unused)
                 }
                 if (r.phase == 1 && state == NETLINE_FIGHTING && voted_in != r.version) {
                     for (me = 0; me < r.player_count; me++)
-                        if (r.players[me].slot == r.you && r.players[me].voted < 0) { netplay_lobby_vote(0); break; }
+                        if (r.players[me].slot == r.you && r.players[me].voted < 0) { netplay_lobby_vote(test_vote(&r, vote_random)); break; }
                     voted_in = r.version;
                 }
                 Sleep(100);
@@ -5810,7 +5829,7 @@ static DWORD WINAPI autostart_thread(LPVOID unused)
             if (r.in_room && r.phase == 1 && voted_in != r.version) {
                 int me;
                 for (me = 0; me < r.player_count; me++)
-                    if (r.players[me].slot == r.you && r.players[me].voted < 0) { netplay_lobby_vote(0); break; }
+                    if (r.players[me].slot == r.you && r.players[me].voted < 0) { netplay_lobby_vote(test_vote(&r, vote_random)); break; }
                 voted_in = r.version;
             }
             if (r.phase == 2) readied = 0;

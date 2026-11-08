@@ -45,6 +45,13 @@ int online_fighter_id(int id);
 const char *online_venue_name(int fe_id);
 const OnlineMode *online_mode(int type);    /* NULL if not offered */
 
+/* RANDOM picks in the online hub (build 67): 0..n-1 (0 for n <= 1) from a host generator of its own,
+ * seeded from the clock once, never the guest's rand() (the lockstep's state is not touched; the
+ * pick is made on this PC and sent like any other). */
+int online_random_below(int n);
+/* A fighter of online_fighters() at random (55 when the list is empty): the tests' RANDOM pick. */
+int online_random_fighter(void);
+
 #ifdef __cplusplus
 }
 #endif
