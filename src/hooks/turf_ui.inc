@@ -23,12 +23,28 @@ struct TurfVenue {
     long long owner = 0, since = 0, protect = 0, chal = 0, chal_crew = 0, deadline = 0, chal_battle = 0, claim_battle = 0;
     std::string name, borough, otag, oname, ctag, cname, why;
 };
+// A turf battle under way (live=): the crews (the challenger first), its room on a relay. The score, the fight
+// it is on and who watches only when the line carries them (-1 / 0: not said).
+struct TurfLive {
+    int venue = 0, format = 0, score[2] = { -1, -1 }, fight = 0, fights = 0, watching = -1;
+    long long battle = 0, crew[2] = {}, started = 0;
+    std::string tag[2], name[2], relay, room;
+};
+// A change of the map (event=), for the street wire.
+struct TurfEv {
+    long long seq = 0, at = 0, crew = 0, other = 0;
+    int venue = 0;
+    std::string kind, vname, ctag, cname, otag, oname, text;
+};
 struct TurfMap {
     bool valid = false, officer = false;
-    int season = 0;
-    std::string month;
-    long long ends = 0, now = 0, my_crew = 0;
+    int season = 0, members = 0, online = 0;
+    std::string month, season_name;
+    long long ends = 0, now = 0, my_crew = 0, started = 0;
     std::vector<TurfVenue> venues;
+    std::map<long long, int> tints;     // crew -> colour (tint=)
+    std::vector<TurfLive> live;
+    std::vector<TurfEv> events;         // newest first
     unsigned long long got = 0;     // GetTickCount64 at the answer (now moves on from there)
 };
 struct TurfCrew { int place = 0, emblem = 0, points = 0, venues = 0, rating = 0; long long id = 0; std::string tag, name; };
@@ -52,7 +68,12 @@ struct TurfState {
     std::atomic<int> map_busy{0}, season_busy{0}, post_busy{0};
     unsigned long long map_at = 0, season_at = 0;
     // the page
-    int tab = 0, sel = 0, top = 0, season_top = 0;
+    int tab = 0, season_top = 0;
+    int sel_id = 6;                 // the map: the selected venue's feID
+    int region = 0;                 // 0 all five boroughs, 1..5 the Bronx, Manhattan, Queens, Brooklyn, Staten Island
+    bool details = false;           // the selected venue's details and actions over the right column
+    float cam[5] = { 800, 480, 1, 800, 480 };      // the camera: centre x, y, zoom, where the centre sits x, y
+    bool cam_snap = true;           // the next frame takes the camera's goal at once
     bool picker = false;            // CLAIM: the crew picker is up
     int picker_sel = 0, picker_frame = -1;     // the frame it opened on takes no input (its A opened it)
     std::string armed;              // the action pressed once ("challenge:6"), sent on the second press
@@ -97,8 +118,10 @@ std::vector<std::pair<std::string, std::string>> turf_lines(const char *text)
 
 long long turf_ll(const std::string &s) { return atoll(s.c_str()); }
 
-// The map's text form: season=, month=, ends=, now=, my_crew=id|officer, rules=, then a venue= line per
-// venue (fields only ever appended; can_challenge and why_not only with a session). False without venues.
+// The map's text form: season=, month=, ends=, now=, my_crew=id|officer[|members|online], rules=, then a venue=
+// line per venue (fields only ever appended; can_challenge and why_not only with a session), then the map
+// page's lines: started=, season_name=, tint=crew|colour, live= (a turf battle under way) and event= (the
+// street wire, newest first). False without venues.
 bool parse_turf_map(const char *text, TurfMap &m)
 {
     m = TurfMap();
@@ -112,6 +135,32 @@ bool parse_turf_map(const char *text, TurfMap &m)
             auto f = split_bar(v);
             m.my_crew = turf_ll(f[0]);
             m.officer = f.size() > 1 && f[1] == "1";
+            if (f.size() > 3) { m.members = atoi(f[2].c_str()); m.online = atoi(f[3].c_str()); }
+        } else if (k == "started") m.started = turf_ll(v);
+        else if (k == "season_name") m.season_name = v;
+        else if (k == "tint") {
+            auto f = split_bar(v);
+            if (f.size() >= 2) m.tints[turf_ll(f[0])] = atoi(f[1].c_str());
+        } else if (k == "live") {
+            auto f = split_bar(v);
+            if (f.size() < 12) continue;
+            TurfLive l;
+            l.venue = atoi(f[0].c_str()); l.battle = turf_ll(f[1]);
+            l.crew[0] = turf_ll(f[2]); l.tag[0] = f[3]; l.name[0] = f[4];
+            l.crew[1] = turf_ll(f[5]); l.tag[1] = f[6]; l.name[1] = f[7];
+            l.format = atoi(f[8].c_str()); l.started = turf_ll(f[9]); l.relay = f[10]; l.room = f[11];
+            if (f.size() > 13 && !f[12].empty()) { l.score[0] = atoi(f[12].c_str()); l.score[1] = atoi(f[13].c_str()); }
+            if (f.size() > 15) { l.fight = atoi(f[14].c_str()); l.fights = atoi(f[15].c_str()); }
+            if (f.size() > 16 && !f[16].empty()) l.watching = atoi(f[16].c_str());
+            m.live.push_back(l);
+        } else if (k == "event") {
+            auto f = split_bar(v);
+            if (f.size() < 11) continue;
+            TurfEv e;
+            e.seq = turf_ll(f[0]); e.kind = f[1]; e.at = turf_ll(f[2]); e.venue = atoi(f[3].c_str()); e.vname = f[4];
+            e.crew = turf_ll(f[5]); e.ctag = f[6]; e.cname = f[7]; e.other = turf_ll(f[8]); e.otag = f[9]; e.oname = f[10];
+            if (f.size() > 11) e.text = f[11];
+            m.events.push_back(e);
         } else if (k == "venue") {
             auto f = split_bar(v);
             if (f.size() < 18) continue;
@@ -275,6 +324,9 @@ void open_turf(Page back)
     TW.back = back;
     TW.tab = 0;
     TW.picker = false;
+    TW.details = false;
+    TW.region = 0;
+    TW.cam_snap = true;
     TW.armed.clear();
     turf_fetch_map();
     turf_fetch_season();
@@ -383,24 +435,6 @@ float turf_tag(ImDrawList *dl, const Frame &f, float x, float y, float size, con
 }
 
 const ImU32 TURF_BLUE = IM_COL32(118, 170, 255, 255);
-
-// The venues in the page's order: each borough once (in the map's order of first appearance), its venues under it.
-struct TurfRow { int venue; std::string borough; };     // venue -1: the borough's heading
-std::vector<TurfRow> turf_rows(const TurfMap &m)
-{
-    std::vector<std::string> order;
-    for (auto &v : m.venues)
-        if (std::find(order.begin(), order.end(), v.borough) == order.end()) order.push_back(v.borough);
-    // the venues not placed in a borough last
-    auto none = std::find(order.begin(), order.end(), std::string());
-    if (none != order.end()) { order.erase(none); order.push_back(""); }
-    std::vector<TurfRow> rows;
-    for (auto &b : order) {
-        rows.push_back({ -1, b });
-        for (int i = 0; i < (int)m.venues.size(); i++) if (m.venues[i].borough == b) rows.push_back({ i, b });
-    }
-    return rows;
-}
 
 // The header over both tabs: the season and its days left, this player's crew and its standing.
 void turf_header(ImDrawList *dl, const Frame &f, const TurfMap &m, const TurfSeason &s, bool signed_in)
@@ -642,71 +676,6 @@ void turf_detail(ImDrawList *dl, const Frame &f, const Pad &pad, const TurfMap &
     }
 }
 
-void draw_turf_map(ImDrawList *dl, const Frame &f, const Pad &pad, const TurfMap &m, const TurfSeason &s, bool signed_in)
-{
-    std::vector<TurfRow> rows = turf_rows(m);
-    int n = (int)rows.size();
-    // the selection skips the boroughs' headings
-    if (!TW.picker) {
-        if (pad.down) { int i = TW.sel + 1; while (i < n && rows[i].venue < 0) i++; if (i < n) TW.sel = i; }
-        if (pad.up) { int i = TW.sel - 1; while (i >= 0 && rows[i].venue < 0) i--; if (i >= 0) TW.sel = i; }
-    }
-    if (TW.sel >= n) TW.sel = n - 1;
-    if (TW.sel >= 0 && TW.sel < n && rows[TW.sel].venue < 0) { int i = TW.sel; while (i < n && rows[i].venue < 0) i++; TW.sel = i < n ? i : 0; }
-    if (TW.sel < 0) TW.sel = 0;
-    const int visible = 12;
-    const float x = 34, y0 = 130, pitch = 23, w = 300;
-    if (TW.sel < TW.top + 1) TW.top = std::max(0, TW.sel - 1);     // keep the heading above the first venue in view
-    if (TW.sel >= TW.top + visible) TW.top = TW.sel - visible + 1;
-    TW.top = std::max(0, std::min(TW.top, std::max(0, n - visible)));
-    glass(dl, f, x, 124, w, 286);
-    long long now = turf_now(m);
-    for (int i = TW.top; i < n && i < TW.top + visible; i++) {
-        float y = y0 + (i - TW.top) * pitch;
-        const TurfRow &r = rows[i];
-        if (r.venue < 0) {
-            text(dl, f, g_hand, 15, x + 12, y + 1, ORANGE, turf_borough(r.borough).c_str(), LEFT, 0.9f);
-            dl->AddLine(f.p(x + 16 + text_width(f, g_hand, 15, turf_borough(r.borough).c_str()), y + 12), f.p(x + w - 10, y + 12),
-                        IM_COL32(255, 168, 26, 60), 1.0f);
-            continue;
-        }
-        const TurfVenue &v = m.venues[r.venue];
-        bool sel = i == TW.sel, ours = v.owner && v.owner == m.my_crew;
-        if (!TW.picker && mouse_pick(f, x + 8, y - 1, w - 16, pitch - 2)) TW.sel = i;
-        if (ours) rect(dl, f, x + 8, y - 1, w - 16, pitch - 2, IM_COL32(255, 205, 60, 40), 4);
-        else if (sel) rect(dl, f, x + 8, y - 1, w - 16, pitch - 2, IM_COL32(255, 255, 255, 18), 4);
-        if (sel) frame_rect(dl, f, x + 8, y - 1, w - 16, pitch - 2, with_alpha(RED, 0.9f), 1.5f);
-        std::string vn = upper(v.name.c_str());
-        text(dl, f, g_title, fit_size(f, g_title, 14, vn.c_str(), 166), x + 18, y + 2, sel ? WHITE : CREAM, vn.c_str(), LEFT, 1.0f);
-        float rx = x + w - 16;
-        if (v.owner) rx -= turf_tag(dl, f, rx, y + 3, 11, v.otag, ours ? GOLD : CREAM, RIGHT);
-        else { text(dl, f, g_title, 11, rx, y + 4, GREY, "OPEN", RIGHT, 0); rx -= text_width(f, g_title, 11, "OPEN"); }
-        // the marks before the holder: a challenge (orange VS), protection (a blue ring), the boss venue (gold BOSS)
-        rx -= 8;
-        if (v.chal || v.claim_battle) {
-            text(dl, f, g_title, 10, rx, y + 5, ORANGE, "VS", RIGHT, 0.6f);
-            rx -= text_width(f, g_title, 10, "VS") + 6;
-        }
-        if (v.protect > now) {
-            dl->AddCircle(f.p(rx - 5, y + 11), 4.5f * f.s(), TURF_BLUE, 16, 1.6f * f.s());
-            rx -= 14;
-        }
-        if (v.boss) text(dl, f, g_title, 9, rx, y + 6, GOLD, "BOSS", RIGHT, 0.6f);
-        if (!TW.picker && mouse_click(f, x + 8, y - 1, w - 16, pitch - 2)) TW.sel = i;
-    }
-    if (n > visible) {
-        float bh = 270.0f * visible / n, by = y0 + 270.0f * TW.top / n;
-        rect(dl, f, x + w - 5, y0, 3, 270, IM_COL32(255, 255, 255, 25), 1.5f);
-        rect(dl, f, x + w - 5, by, 3, bh, with_alpha(ORANGE, 0.8f), 1.5f);
-    }
-    if (TW.sel >= 0 && TW.sel < n && rows[TW.sel].venue >= 0) {
-        const TurfVenue &v = m.venues[rows[TW.sel].venue];
-        Pad dp = TW.picker ? Pad() : pad;
-        turf_detail(dl, f, dp, m, v, signed_in);
-        if (TW.picker) draw_turf_picker(dl, f, pad, m, s, v);
-    }
-}
-
 void draw_turf_season(ImDrawList *dl, const Frame &f, const Pad &pad, const TurfMap &m, const TurfSeason &s)
 {
     // the standings
@@ -770,7 +739,16 @@ void draw_turf_season(ImDrawList *dl, const Frame &f, const Pad &pad, const Turf
     }
 }
 
-void draw_turf(ImDrawList *dl, const Frame &f, const Pad &pad)
+#include "turf_map.inc"
+
+// The map's page is the city (turf_map.inc); the season's standings and past winners keep the menu's page.
+bool turf_board_up()
+{
+    std::lock_guard<std::mutex> lock(TW.mu);
+    return S.page == TURF && TW.tab == 0 && TW.map.valid;
+}
+
+void draw_turf(ImDrawList *dl, const Frame &f, const Pad &pad, ImVec2 display)
 {
     TurfMap m;
     TurfSeason s;
@@ -787,20 +765,27 @@ void draw_turf(ImDrawList *dl, const Frame &f, const Pad &pad)
     }
     if (!note.empty()) say(note, note_ok ? 4500 : 7000);
     bool signed_in = acc_state() == ACCOUNT_IN || turf_test_file() || gallery_on();
+    unsigned long long now = GetTickCount64();
+    if (!gallery_on()) {
+        if (TW.map_busy == 0 && now - TW.map_at > 30000) turf_fetch_map();
+        if (TW.tab == 1 && TW.season_busy == 0 && now - TW.season_at > 60000) turf_fetch_season();
+    }
+    if (TW.tab == 0 && m.valid) {
+        draw_turf_board(dl, display, f, pad, m, s, signed_in);
+        return;
+    }
     page_title(dl, f, "TURF WAR");
-    // the tabs: MAP, SEASON (LB / RB, or a click; left / right too on the season's page)
+    // the tabs: MAP, SEASON (LB / RB, left / right or a click; Y and B go back to the map too)
     static const char *const tabs[] = { "MAP", "SEASON" };
     int want = TW.tab;
-    if (!TW.picker) {
-        if (pad.rb || pad.lb) want = 1 - TW.tab;
-        if (TW.tab == 1 && (pad.left || pad.right)) want = 0;
-        if (TW.tab == 0 && (pad.right)) want = 1;
+    if (!TW.picker && m.valid) {
+        if (pad.rb || pad.lb || pad.left || pad.right || pad.y) want = 1 - TW.tab;
     }
     {
         float tx = 262;
         for (int i = 0; i < 2; i++) {
             float tw = text_width(f, g_title, 13, tabs[i]) + 20;
-            if (!TW.picker && mouse_click(f, tx, 52, tw, 20)) want = i;
+            if (!TW.picker && m.valid && mouse_click(f, tx, 52, tw, 20)) want = i;
             rect(dl, f, tx, 52, tw, 20, i == TW.tab ? IM_COL32(120, 12, 26, 230) : IM_COL32(0, 0, 0, 150), 5);
             text(dl, f, g_title, 13, tx + tw / 2, 54, i == TW.tab ? WHITE : GREY, tabs[i], CENTER, 0.8f);
             tx += tw + 4;
@@ -812,12 +797,7 @@ void draw_turf(ImDrawList *dl, const Frame &f, const Pad &pad)
         if (want == 1) turf_fetch_season();
         return;
     }
-    unsigned long long now = GetTickCount64();
-    if (!gallery_on()) {
-        if (TW.map_busy == 0 && now - TW.map_at > 30000) turf_fetch_map();
-        if (TW.tab == 1 && TW.season_busy == 0 && now - TW.season_at > 60000) turf_fetch_season();
-        if (pad.x && !TW.picker) { turf_fetch_map(); turf_fetch_season(); say("Refreshing the map..."); }
-    }
+    if (!gallery_on() && pad.x) { turf_fetch_map(); turf_fetch_season(); say("Refreshing..."); }
     if (!m.valid) {
         glass(dl, f, 34, 76, 572, 334);
         bool off = status == 404, failed = status != 0 && status != 200 && TW.map_busy == 0;
@@ -826,22 +806,22 @@ void draw_turf(ImDrawList *dl, const Frame &f, const Pad &pad)
         if (failed && !off) text(dl, f, g_hand, 14, 320, 246, ORANGE, pad_text("PRESS {X} TO TRY AGAIN").c_str(), CENTER, 1.0f);
     } else {
         turf_header(dl, f, m, s, signed_in);
-        if (TW.tab == 0) draw_turf_map(dl, f, pad, m, s, signed_in);
-        else draw_turf_season(dl, f, pad, m, s);
+        draw_turf_season(dl, f, pad, m, s);
     }
-    if (TW.picker) return;      // the picker draws its own hints
     float hx = 54;
-    if (TW.tab == 0 && m.valid) hx += hint(dl, f, hx, 420, "rb", "SEASON");
-    else hx += hint(dl, f, hx, 420, "lb", "MAP");
     hx += hint(dl, f, hx, 420, "x", "REFRESH");
-    hint(dl, f, hx, 420, "b", "BACK");
-    if (pad.b) { S.page = TW.back; TW.armed.clear(); }
+    hint(dl, f, hx, 420, "b", m.valid ? "MAP" : "BACK");
+    if (pad.b) {
+        TW.armed.clear();
+        if (m.valid && TW.tab == 1) TW.tab = 0;
+        else S.page = TW.back;
+    }
 }
 
 // ---- tests: RECOMP_TEST_SOCIAL's ui: steps (social_ui.inc chat_test_step) ----
 //
 // turfhub: the hub's TURF WAR entry picked when the hub shows it (a pad=a step then opens it the player's way),
-// else a line saying it is hidden; turf: the page; turfsel=ID: the map's venue of that feID; turfpick=TAG:
+// else a line saying it is hidden; turf: the page; turfsel=ID: the map's venue of that feID (its details open); turfpick=TAG:
 // CLAIM's crew; turflog=ID: that venue as the map has it and what this player may do there. False: not a
 // turf step.
 bool turf_test_action(const std::string &what, const std::string &arg)
@@ -868,10 +848,9 @@ bool turf_test_action(const std::string &what, const std::string &arg)
     }
     int id = atoi(arg.c_str());
     if (what == "turfsel") {
-        auto rows = turf_rows(m);
         bool found = false;
-        for (int i = 0; i < (int)rows.size(); i++)
-            if (rows[i].venue >= 0 && m.venues[rows[i].venue].id == id) { TW.sel = i; TW.tab = 0; found = true; }
+        for (auto &v : m.venues)
+            if (v.id == id) { TW.sel_id = id; TW.tab = 0; TW.details = true; found = true; }
         TW.picker = false;
         TW.armed.clear();
         fprintf(stderr, "[SOCIAL-UI] turf: venue %d %s\n", id, found ? "selected" : "not on the map");
@@ -919,37 +898,62 @@ bool turf_test_action(const std::string &what, const std::string &arg)
 
 // ---- the gallery ----
 
-// The sample map and season (as tests/fixtures/turf-sample.txt): the player's crew BXK (Boss), three crews,
-// a challenge on the player's venue, one by the player's crew, protection, open venues.
+// The sample map and season (as tests/fixtures/turf-sample.txt): the player's crew HHT (Boss) and four more,
+// every mark the map has: a challenge by the player's crew (the dashed line), a turf battle under way with its
+// score and watchers (LIVE), a hot streak, a newly taken venue, a contested borough, a front line, the boss
+// venue, open turf, the street wire's events, the standings and past winners.
 const char *const TURF_SAMPLE =
-    "season=2\nmonth=2026-11\nends=1764547200\nnow=1762600000\nmy_crew=3|1\nrules=72|24|2|0|24|3|24\n"
-    "venue=6|The Terror Dome|bronx|0|3|BXK|Bronx Kings|1|1762300000|0|2|41|7|RHR|Red Hook Riders|1762790000|0|0|0|Your crew holds it\n"
-    "venue=14|Hunt's Point Scrapyard|bronx|0|3|BXK|Bronx Kings|1|1762500000|1762650000|0|0|0|||0|0|0|0|Your crew holds it\n"
-    "venue=17|Gun Hill Garage|bronx|0|0||||0|0|0|0|0|||0|0|0|1|\n"
-    "venue=18|The Heights|manhattan|0|9|QNS|Queens Finest|2|1762400000|0|1|0|0|||0|0|0|1|\n"
-    "venue=11|125th Street Station|manhattan|0|7|RHR|Red Hook Riders|4|1762200000|0|0|44|3|BXK|Bronx Kings|1762810000|0|0|0|"
-    "Your crew already challenged it\n"
-    "venue=4|Club 357|manhattan|0|7|RHR|Red Hook Riders|4|1762560000|1762646400|0|0|0|||0|0|0|0|Protected for 12 more hours\n"
-    "venue=8|The Dragon House|manhattan|0|0||||0|0|0|0|0|||0|0|52|0|A battle for it is under way\n"
+    "season=2\n"
+    "month=2025-11\n"
+    "ends=1764547200\n"
+    "now=1762600000\n"
+    "my_crew=11|1|9|6\n"
+    "rules=72|24|2|0|24|3|24\n"
+    "venue=6|The Terror Dome|bronx|0|3|BXK|Bronx Kings|1|1762300000|0|2|46|11|HHT|Harlem Heat|1762609670|0|0|0|Your crew already challenged it\n"
+    "venue=14|Hunt's Point Scrapyard|bronx|0|3|BXK|Bronx Kings|1|1762400000|0|1|0|0|||0|0|0|1|\n"
+    "venue=17|Gun Hill Garage|bronx|0|3|BXK|Bronx Kings|1|1761990000|0|5|0|0|||0|0|0|1|\n"
+    "venue=18|The Heights|manhattan|0|11|HHT|Harlem Heat|6|1762100000|0|3|0|0|||0|0|0|0|Your crew holds it\n"
+    "venue=11|125th Street Station|manhattan|0|11|HHT|Harlem Heat|6|1762450000|0|1|0|0|||0|0|0|0|Your crew holds it\n"
+    "venue=4|Club 357|manhattan|0|9|QNF|Queens Finest|2|1762200000|1762646400|2|0|0|||0|0|0|0|Protected for 12 more hours\n"
+    "venue=8|The Dragon House|manhattan|0|9|QNF|Queens Finest|2|1762150000|0|0|44|7|RHR|Red Hook Riders|1762790000|52|0|0|A battle for it is under way\n"
     "venue=26|Crow's Office|manhattan|1|0||||0|0|0|0|0|||0|0|0|0|Hold 3 other venues to challenge for the boss venue\n"
-    "venue=16|7th Heaven|queens|0|9|QNS|Queens Finest|2|1761990000|0|3|0|0|||0|0|0|1|\n"
-    "venue=1|The Foundation|queens|0|9|QNS|Queens Finest|2|1762100000|0|0|0|0|||0|0|0|1|\n"
-    "venue=24|Red Hook Tire Co.|brooklyn|0|7|RHR|Red Hook Riders|4|1762000000|0|1|0|0|||0|0|0|1|\n"
-    "venue=19|The Pit|staten_island|0|0||||0|0|0|0|0|||0|0|0|1|\n"
-    "venue=2|The Limit||0|0||||0|0|0|0|0|||0|0|0|1|\n"
-    "venue=7|Syn Energy Power Plant||0|0||||0|0|0|0|0|||0|0|0|1|\n"
-    "venue=10|Club Murder||0|12|LES|Lower East Side|3|1762450000|0|0|0|0|||0|0|0|1|\n"
-    "venue=12|Babylon||0|0||||0|0|0|0|0|||0|0|0|1|\n"
-    "venue=13|Chopshop||0|0||||0|0|0|0|0|||0|0|0|1|\n"
-    "venue=21|Gauntlet||0|0||||0|0|0|0|0|||0|0|0|1|\n"
-    "total=4\n"
-    "crew=1|7|RHR|Red Hook Riders|4|412|4|1388\ncrew=2|3|BXK|Bronx Kings|1|366|2|1342\n"
-    "crew=3|9|QNS|Queens Finest|2|301|3|1296\ncrew=4|12|LES|Lower East Side|3|98|1|1210\n"
-    "past=1|2026-10|1761955200|1|7|RHR|Red Hook Riders|980|6\npast=1|2026-10|1761955200|2|3|BXK|Bronx Kings|744|4\n"
-    "past=1|2026-10|1761955200|3|9|QNS|Queens Finest|512|3\n";
+    "venue=16|7th Heaven|queens|0|9|QNF|Queens Finest|2|1761990000|0|4|0|0|||0|0|0|1|\n"
+    "venue=1|The Foundation|queens|0|0||||0|0|0|0|0|||0|0|0|1|\n"
+    "venue=24|Red Hook Tire Co.|brooklyn|0|7|RHR|Red Hook Riders|4|1762000000|0|3|0|0|||0|0|0|1|\n"
+    "venue=19|The Pit|staten_island|0|12|SSM|Shoreside Mob|3|1762300000|0|2|0|0|||0|0|0|1|\n"
+    "venue=2|The Limit|bronx|0|0||||0|0|0|0|0|||0|0|0|1|\n"
+    "venue=7|Syn Energy Power Plant|queens|0|9|QNF|Queens Finest|2|1762300000|0|1|0|0|||0|0|0|1|\n"
+    "venue=10|Club Murder|brooklyn|0|7|RHR|Red Hook Riders|4|1762599880|1762686280|0|0|0|||0|0|0|0|Protected for 23 more hours\n"
+    "venue=12|Babylon|brooklyn|0|7|RHR|Red Hook Riders|4|1762250000|0|1|0|0|||0|0|0|1|\n"
+    "venue=13|Chopshop|brooklyn|0|0||||0|0|0|0|0|||0|0|0|1|\n"
+    "venue=21|Gauntlet|queens|0|7|RHR|Red Hook Riders|4|1762350000|0|0|0|0|||0|0|0|1|\n"
+    "started=1761955200\n"
+    "season_name=Cold Steel\n"
+    "tint=3|0\n"
+    "tint=7|2\n"
+    "tint=9|1\n"
+    "tint=11|3\n"
+    "tint=12|4\n"
+    "live=8|52|7|RHR|Red Hook Riders|9|QNF|Queens Finest|5|1762598000|eu|K7QX|1|2|4|9|38\n"
+    "event=49|taken|1762599880|10|Club Murder|7|RHR|Red Hook Riders|9|QNF|Queens Finest|Red Hook Riders [RHR] take Club Murder from Queens Finest.\n"
+    "event=48|defended|1762599160|17|Gun Hill Garage|3|BXK|Bronx Kings|12|SSM|Shoreside Mob|Bronx Kings [BXK] hold Gun Hill Garage.\n"
+    "event=47|challenged|1762596400|6|The Terror Dome|11|HHT|Harlem Heat|3|BXK|Bronx Kings|Harlem Heat [HHT] challenge Bronx Kings for The Terror Dome.\n"
+    "event=46|challenged|1762590000|8|The Dragon House|7|RHR|Red Hook Riders|9|QNF|Queens Finest|Red Hook Riders [RHR] challenge Queens Finest for The Dragon House.\n"
+    "event=45|freed|1762589200|1|The Foundation|0|||0|||The Foundation is open again.\n"
+    "event=44|claimed|1762300000|19|The Pit|12|SSM|Shoreside Mob|7|RHR|Red Hook Riders|Shoreside Mob [SSM] claim The Pit, beating Red Hook Riders.\n"
+    "total=5\n"
+    "crew=1|3|BXK|Bronx Kings|1|412|3|1388\n"
+    "crew=2|9|QNF|Queens Finest|2|366|4|1342\n"
+    "crew=3|7|RHR|Red Hook Riders|4|301|4|1296\n"
+    "crew=4|11|HHT|Harlem Heat|6|240|2|1250\n"
+    "crew=5|12|SSM|Shoreside Mob|3|98|1|1210\n"
+    "past=1|2025-10|1761955200|1|7|RHR|Red Hook Riders|980|6\n"
+    "past=1|2025-10|1761955200|2|3|BXK|Bronx Kings|744|4\n"
+    "past=1|2025-10|1761955200|3|9|QNF|Queens Finest|512|3\n";
 
-// The gallery's pages: hub-turf (TURF WAR on the hub), turf (the map at the player's challenged venue),
-// turf-open (an open venue: CLAIM), turf-claim (the crew picker), turf-member (a member: read-only),
+// The gallery's pages: hub-turf (TURF WAR on the hub), turf (the map, all five boroughs, the player's challenged
+// venue picked), turf-zoom (flown to Manhattan, the live battle picked), turf-detail (the picked venue's details
+// and actions), turf-open (an open venue: CLAIM), turf-claim (the crew picker), turf-member (a member: read-only),
 // turf-why (why not, from the service), turf-season (the standings and past winners).
 // RECOMP_TEST_TURF=<file> takes that file's text instead of the sample.
 bool turf_gallery(const std::string &p)
@@ -977,14 +981,10 @@ bool turf_gallery(const std::string &p)
     TW.picker = p == "turf-claim";
     TW.picker_sel = 1;
     TW.armed.clear();
-    TW.top = 0;
     TW.season_top = 0;
-    // the row of a venue by its feID (the rows have the boroughs' headings between them)
-    auto row_of = [&](int id) {
-        auto rows = turf_rows(m);
-        for (int i = 0; i < (int)rows.size(); i++) if (rows[i].venue >= 0 && m.venues[rows[i].venue].id == id) return i;
-        return 1;
-    };
-    TW.sel = row_of(p == "turf-open" || p == "turf-claim" ? 17 : p == "turf-why" ? 26 : p == "turf-member" ? 11 : 6);
+    TW.region = p == "turf-zoom" ? 2 : 0;
+    TW.cam_snap = true;
+    TW.details = p == "turf-detail" || p == "turf-open" || p == "turf-claim" || p == "turf-member" || p == "turf-why";
+    TW.sel_id = p == "turf-open" || p == "turf-claim" ? 13 : p == "turf-why" ? 26 : p == "turf-member" ? 18 : p == "turf-zoom" ? 8 : 6;
     return true;
 }

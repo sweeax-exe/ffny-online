@@ -176,6 +176,11 @@ Turf War without a server: `RECOMP_TEST_TURF=<file>` answers the map and season 
 file (`tests/fixtures/turf-sample.txt` is a sample), so TURF WAR shows in the hub; its actions are
 logged, not sent. The gallery's `turf` pages (`dj.py scenario gallery --env
 RECOMP_TEST_ONLINE_GALLERY_ONLY=turf,hub-turf`) show the same sample, or that file when it is set.
+The map page is the Turf Map v2 design (`src/hooks/turf_map.inc`): the city in a 1600x960 design space fitted to
+the window, LB / RB fly to a borough, the stick or d-pad moves between pins, A acts on the picked venue (opening
+its details), X shows or hides the details, Y the season's standings, R3 (or V) watches a turf battle under way
+when the map's `live=` line names its room. Pages `turf`, `turf-zoom`, `turf-detail`, `turf-open`, `turf-claim`,
+`turf-member`, `turf-why`, `turf-season`.
 
 The server choice: `RECOMP_NETPLAY_SERVER=auto|eu|na|west|all` with `RECOMP_NETPLAY_SERVER_EU`,
 `RECOMP_NETPLAY_SERVER_NA` and `RECOMP_NETPLAY_SERVER_WEST` naming local relays (one started with
