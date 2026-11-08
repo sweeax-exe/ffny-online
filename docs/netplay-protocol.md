@@ -286,7 +286,7 @@ by older relays.
 
 | Type | Name | Direction | Body after the header |
 |---|---|---|---|
-| 0x20 | `CAPS` | client -> server | `token` 8, `caps` u32 (bit 0: King of the Hill; bit 13: FFA rotation) |
+| 0x20 | `CAPS` | client -> server | `token` 8, `caps` u32 (bit 0: King of the Hill; bit 13: FFA rotation; bit 15: CPU level) |
 | 0x20 | `CAPS` | server -> client | `caps` u32 (what the relay supports: bit 0 King of the Hill, bit 1 rollback allowed, bit 2 `YIELD`, since build 36) |
 | 0x21 | `HILL` | server -> client | `room` 6, `phase` u8 (0 waiting, 1 calling, 2 voting, 3 fighting), `king` u8 (slot, 0xFF none), `streak` u16, `ms_left` u16, `seed` u32, `fights` u16, `last_winner` u8, `last_loser` u8, `last_how` u8 (0 none, 1 won, 2 draw, 3 loser left, 4 void), `count` u8, per player in line order: `slot` u8, `state` u8 (0 waiting, 1 called, 2 ready, 3 fighting, 4 away), `wins` u16 |
 | 0x22 | `RESULT` | client -> server | `token` 8, `seed` u32, `winner` u8 (slot, 0xFF draw); from the two fighters, repeated until `HILL.fights` changes; in a ranked set's room until `RANKINFO` counts the game (see "Ranked queue") |
@@ -322,6 +322,28 @@ by older relays.
   without one they keep their line order.
 - A fighter who leaves during the fight is out of it and the others play on (the leaver's port at
   rest, as in other rooms of three or four); the last one left wins.
+
+### CPU level (build 67)
+
+- A 3-Way's or Free for All's free places are played by CPU fighters (random fighters drawn from the
+  `START` seed, the same on every PC). Their level is a room setting: **0 Hard** (the default, what
+  online CPU fighters always played: every PC sets the game's difficulty to Hard), **1 Normal**,
+  **2 Easy**, the game's own CPU difficulty as its Battle mode has it.
+- Only between a relay and a client that both sent `CAPS` bit 15 (`32768`; the relay answers it only
+  to such a client): `CREATE` and `SETTINGS` carry the level as one byte after the Settings block;
+  `ROOM` carries it after the spectators trailer (sent, possibly with 0 spectators, to such a client);
+  `START`, `WATCH` and `WATCHLATE` carry it after the created-fighter trailer (whose count may then be
+  0) when it is not Hard. A Hard `START` is unchanged. A mode without CPU fighters keeps Hard.
+- A room at another level than Hard is left out of `LIST` for, and refuses `JOIN`, `QUICK`, a v1 join
+  and `SPECTATE` (`ERROR 8`) from, a client without the bit; its host cannot set such a level while a
+  client without the bit is in the room (`ERROR 8`).
+- Each PC gives the CPU fighters' slots that level when the fight loads them (the game's per-slot
+  difficulty words, which its AI reads to pick its "easy", "normal" or "hard" tendencies); the human
+  fighters keep Hard, so nothing of theirs changes.
+- When every human fighter of such a fight is out (knocked out, or gone mid-fight with its port at
+  rest), the fight ends: the CPU fighter with the most health (the lowest slot of equals) wins and
+  the others still up are knocked out, each once it stands free. Every PC decides this from the
+  fight's state at the start of a step, so it agrees in lockstep and with rollback.
 
 ## Spectator extension (watching a room's matches)
 

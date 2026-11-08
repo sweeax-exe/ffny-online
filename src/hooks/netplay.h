@@ -58,7 +58,16 @@ typedef struct NetRoomSettings {
     int rounds;             /* 0 the game's default */
     int pool_count;         /* venues to vote on (venue.xml feID) */
     unsigned char pool[32];
+    int cpu_level;          /* build 67: the CPU fighters' level, NETPLAY_CPU_* (relays with NETPLAY_CAP_CPULEVEL) */
 } NetRoomSettings;
+
+/* The CPU level of a 3-Way's or Free for All's CPU fighters (build 67): the game's own CPU difficulty
+ * (its Battle mode's Easy / Normal / Hard), counted from the default down. Online CPU fighters always
+ * played the game's Hard, which stays the default. Every PC of a match takes it from START. */
+#define NETPLAY_CPU_HARD   0
+#define NETPLAY_CPU_NORMAL 1
+#define NETPLAY_CPU_EASY   2
+#define NETPLAY_CPU_FILL(mode) ((mode) == 2 || (mode) == 3)    /* 3-Way, Free for All: free places go to CPUs */
 
 typedef struct NetRoomInfo {
     char code[7], name[25];
@@ -131,6 +140,7 @@ typedef struct NetRoom {
 #define NETPLAY_CAP_YIELD 4
 #define NETPLAY_CAP_SPECTATE 16    /* spectator mode: rooms can be watched (netplay_lobby_spectate) */
 #define NETPLAY_CAP_FFAROT 8192    /* FFA rotation rooms (NETPLAY_MODE_FFAROT, build 66) */
+#define NETPLAY_CAP_CPULEVEL 32768 /* the room's CPU level (NetRoomSettings.cpu_level, build 67) */
 int netplay_lobby_caps(void);
 /* 1 when the relay refused the hub session because this PC already has a live session there (ERROR 11,
  * build 46 relays): another copy of the game is online on this PC. Not a connection problem. */

@@ -75,6 +75,23 @@ def test_ffa_rotation_matches_the_relay():
     assert '(N.koth_match && !N.rot_match)' in NETPLAY_C          # a leaver: the others fight on
 
 
+def test_cpu_level_matches_the_relay():
+    # build 67: the room's CPU level (CAPS bit 15; 0 Hard, 1 Normal, 2 Easy; 3-Way and Free for All only)
+    path = RELAY_SRC / 'protocol_cpu.go'
+    if not path.exists():
+        pytest.skip('the relay source checked out has no CPU level yet (server branch feat/cpu-level)')
+    go = path.read_text(encoding='utf-8')
+    def const(name):
+        m = re.search(r'^\s*%s\s+(?:\w+\s+)?=\s+(\d+)(?:\s*<<\s*(\d+))?' % name, go, re.M)
+        assert m, name
+        return int(m.group(1)) << int(m.group(2) or 0)
+    assert c_define(NETPLAY_C, 'CAPS_CPULEVEL') == const('CapCPULevel') == c_define(NETPLAY_H, 'NETPLAY_CAP_CPULEVEL')
+    assert [c_define(NETPLAY_H, 'NETPLAY_CPU_' + k) for k in ('HARD', 'NORMAL', 'EASY')] ==         [const('CPU' + k) for k in ('Hard', 'Normal', 'Easy')]
+    assert 'func cpuFill(mode uint8) bool { return mode == 2 || mode == 3 }' in go
+    assert '#define NETPLAY_CPU_FILL(mode) ((mode) == 2 || (mode) == 3)' in NETPLAY_H
+    assert 'CAPS_SPEC_LATE | CAPS_CPULEVEL |' in NETPLAY_C       # announced in CAPS
+
+
 def test_hill_phases_line_states_and_results_match_the_relay():
     phases = c_enum(NETPLAY_H, 'NetHillPhase')
     assert [phases[k] for k in ('NETHILL_WAITING', 'NETHILL_CALLING', 'NETHILL_VOTING', 'NETHILL_FIGHTING')] == \
