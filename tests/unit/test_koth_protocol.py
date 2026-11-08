@@ -69,7 +69,7 @@ def test_ffa_rotation_matches_the_relay():
     assert c_define(NETPLAY_H, 'NETPLAY_FFAROT_SLOTS') == go_const('MaxFFARotSlots')
     assert re.search(r'^\s*CapFFARot uint32 = 1 << 13$', GO, re.M)
     assert c_define(NETPLAY_C, 'CAPS_FFAROT') == 1 << 13 == c_define(NETPLAY_H, 'NETPLAY_CAP_FFAROT')
-    assert 'CAPS_TSET | CAPS_FFAROT); n += 4;' in NETPLAY_C      # announced in CAPS
+    assert 'CAPS_TSET | CAPS_FFAROT' in NETPLAY_C                # announced in CAPS
     assert 'N.rot_match = NETPLAY_IS_FFAROT(N.roomv.settings.mode);' in NETPLAY_C
     assert 'rb[n++] = (uint8_t)N.koth_order_n;' in NETPLAY_C      # RESULT's finishing order
     assert '(N.koth_match && !N.rot_match)' in NETPLAY_C          # a leaver: the others fight on
@@ -131,3 +131,19 @@ def test_late_spectator_type_and_caps_match_the_relay():
     assert m and c_define(NETPLAY_C, 'CAPS_SPEC_LATE') == 1 << int(m.group(1))
     m = re.search(r'^\s*CapSpectateRematch\s+uint32\s+=\s+1\s*<<\s*(\d+)', spec, re.M)
     assert m and c_define(NETPLAY_C, 'CAPS_SPEC_REMATCH') == 1 << int(m.group(1))
+
+
+def test_random_venue_matches_the_relay():
+    # build 67: RANDOM in the venue vote (CAPS bit 14, VOTE choice and ROOM voted 0xFE)
+    rnd = RELAY_SRC / 'random_venue.go'
+    if not rnd.exists():
+        pytest.skip('the relay source checked out has no RANDOM vote yet (server branch feat/random-pick)')
+    go = rnd.read_text(encoding='utf-8')
+    m = re.search(r'^\s*CapRandomVenue\s+uint32\s+=\s+1\s*<<\s*(\d+)', go, re.M)
+    assert m and c_define(NETPLAY_C, 'CAPS_RANDOM_VENUE') == 1 << int(m.group(1)) == c_define(NETPLAY_H, 'NETPLAY_CAP_RANDOM_VENUE')
+    m = re.search(r'^\s*VoteRandom\s+uint8\s+=\s+(0x[0-9A-Fa-f]+)', go, re.M)
+    assert m and c_define(NETPLAY_H, 'NETPLAY_VOTE_RANDOM') == int(m.group(1), 0)
+    assert 'CAPS_FFAROT | CAPS_RANDOM_VENUE); n += 4;' in NETPLAY_C      # announced in CAPS
+    # every other CAPS bit the client knows is a different one
+    bits = [c_define(NETPLAY_C, n) for n in re.findall(r'^#define\s+(CAPS_[A-Z_]+)\s+\d+u', NETPLAY_C, re.M)]
+    assert len(bits) == len(set(bits))
