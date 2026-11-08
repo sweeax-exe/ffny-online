@@ -3,6 +3,7 @@ import argparse
 import importlib.util
 import json
 from pathlib import Path
+import re
 import subprocess
 import sys
 import zipfile
@@ -122,6 +123,28 @@ def test_process_arguments_are_literal_and_failed_stage_is_not_success(tmp_path)
     script.write_text('import sys\nprint(sys.argv[1])\nsys.exit(7)\n')
     with pytest.raises(engine.SetupError, match='exit 7'):
         setup.run([sys.executable, script, '$(not a shell); & literal'])
+
+
+def test_stage_timings_go_to_the_log_and_not_to_the_status_line(tmp_path):
+    # #187: the setup log says how long each stage took, a failed one too; the app's status line
+    # (the status file) keeps showing the stage, not a [TIME] line.
+    setup = installer(tmp_path)
+    status = tmp_path / 'status.txt'
+    setup.args.status_file = str(status)
+    log_path = tmp_path / 'setup.log'
+    with log_path.open('a', encoding='utf-8') as log:
+        setup.log = log
+        setup.event('Analysis in progress (this may take several minutes)')
+        assert setup.timed('Analysis', lambda: 'result') == 'result'
+        with pytest.raises(engine.SetupError, match='exit 3'):
+            setup.timed('Lift', lambda: setup.run([sys.executable, '-c', 'raise SystemExit(3)']))
+        setup.log_time('Setup total', 12.34)
+    setup.log = None
+    text = log_path.read_text(encoding='utf-8')
+    assert re.search(r'^\[TIME\] Analysis: \d+\.\d s$', text, re.M)
+    assert re.search(r'^\[TIME\] Lift: \d+\.\d s$', text, re.M)
+    assert '[TIME] Setup total: 12.3 s' in text
+    assert status.read_text(encoding='utf-8').strip() == 'Analysis in progress (this may take several minutes)'
 
 
 def test_cancellation_prevents_a_new_stage(tmp_path):
