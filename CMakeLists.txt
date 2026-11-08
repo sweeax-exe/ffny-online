@@ -35,6 +35,31 @@ if(MSVC)
     string(REPLACE "/RTC1" "" CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG}")
 endif()
 
+# Compiler cache (#187). Setup builds every update in a fresh folder, so without a cache it compiles
+# everything again; ccache hands back what a file compiled to while its source, headers and flags are the
+# same. Empty: no cache, the build is as before. Set before the toolkit and SDL3 are added so their
+# targets use it too.
+set(DEFJAM_COMPILER_CACHE "" CACHE FILEPATH "ccache program to run the compiler through (empty: none)")
+set(DEFJAM_MSVC_DEBUG_INFO "/Zi")
+if(DEFJAM_COMPILER_CACHE)
+    set(CMAKE_C_COMPILER_LAUNCHER "${DEFJAM_COMPILER_CACHE}")
+    set(CMAKE_CXX_COMPILER_LAUNCHER "${DEFJAM_COMPILER_CACHE}")
+    # SDL3 always builds with a precompiled header, which ccache refuses with MSVC ("could not use
+    # precompiled header"), so most of its files would compile every time. Without it they are cached.
+    set(CMAKE_DISABLE_PRECOMPILE_HEADERS ON)
+    if(MSVC)
+        # ccache cannot cache /Zi (every object writes into one shared compiler PDB). /Z7 keeps the debug
+        # information in each object; the linker still gathers it into the same defjam_recomp.pdb.
+        # (CMAKE_MSVC_DEBUG_INFORMATION_FORMAT needs CMake 3.25; Visual Studio 2019 ships 3.20.)
+        set(DEFJAM_MSVC_DEBUG_INFO "/Z7")
+        foreach(lang C CXX)
+            foreach(config DEBUG RELWITHDEBINFO)
+                string(REPLACE "/Zi" "/Z7" CMAKE_${lang}_FLAGS_${config} "${CMAKE_${lang}_FLAGS_${config}}")
+            endforeach()
+        endforeach()
+    endif()
+endif()
+
 # Check that every lifted call preserves ebx/esi/edi and does not leave esp
 # low, and name the callee that breaks it (recomp_types.h, RECOMP_ABI_CHECK).
 # Directory-wide because the reporter lives in the runtime library. Slower;
@@ -116,6 +141,10 @@ endif()
 file(GLOB RECOMP_GEN_SOURCES CONFIGURE_DEPENDS "src/recomp/gen/*.c")
 file(GLOB HOOK_SOURCES       CONFIGURE_DEPENDS "src/hooks/*.c" "src/hooks/*.cpp")
 file(GLOB PATCH_SOURCES      CONFIGURE_DEPENDS "src/patches/*.c")
+# The source folder's own path, on the one file that reads it. Set on a whole target it is part of every
+# file's compile line, so a compiler cache misses them all whenever the folder changes (each update's does).
+set_property(SOURCE src/hooks/pc_mods.cpp APPEND PROPERTY COMPILE_DEFINITIONS
+             DEFJAM_MOD_SOURCE_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}\")
 
 if(DEFJAM_BUILD_GAME)
     # Dear ImGui (MIT): the launcher and the in-game overlay. Fetched at a pinned hash.
@@ -191,7 +220,6 @@ if(DEFJAM_BUILD_GAME)
         set_target_properties(${PROJECT_NAME} PROPERTIES ENABLE_EXPORTS ON)
     endif()
     target_compile_definitions(${PROJECT_NAME} PRIVATE DEFJAM_VERSION=\"${PROJECT_VERSION}\")
-    target_compile_definitions(${PROJECT_NAME} PRIVATE DEFJAM_MOD_SOURCE_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}\")
     if(DEFJAM_MOD_WIDE)
         target_compile_definitions(${PROJECT_NAME} PRIVATE DEFJAM_MOD_WIDE=1)
     endif()
@@ -213,7 +241,7 @@ if(DEFJAM_BUILD_GAME)
         target_link_options(${PROJECT_NAME} PRIVATE /LARGEADDRESSAWARE)
         # Generated chunks are huge; also keep debug info even in Release so the
         # VEH handler can name guest functions from the PDB.
-        target_compile_options(${PROJECT_NAME} PRIVATE /bigobj /Zi)
+        target_compile_options(${PROJECT_NAME} PRIVATE /bigobj ${DEFJAM_MSVC_DEBUG_INFO})
         # Linker map lets scripts/sample-threads.py and tools/symbolize.py name guest functions from a host RIP.
         # /DYNAMICBASE:NO loads the image at the map's preferred address, so a RIP in a crash report is the
         # map address with no rebasing, and is the same across runs. /OPT:NOICF stops the linker folding
@@ -286,8 +314,7 @@ if(DEFJAM_BUILD_APP AND DEFJAM_SDL3)
         src/hooks/pc_launcher_sdl.cpp
         src/hooks/pc_mods.cpp)
     target_compile_features(defjam_app PRIVATE cxx_std_17)
-    target_compile_definitions(defjam_app PRIVATE DEFJAM_APP=1 DEFJAM_VERSION=\"${PROJECT_VERSION}\"
-                               DEFJAM_MOD_SOURCE_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}\")
+    target_compile_definitions(defjam_app PRIVATE DEFJAM_APP=1 DEFJAM_VERSION=\"${PROJECT_VERSION}\")
     if(DEFJAM_MOD_WIDE)
         target_compile_definitions(defjam_app PRIVATE DEFJAM_MOD_WIDE=1)
     endif()
