@@ -253,6 +253,7 @@ void netplay_crowd_update(void) { sub_00081170(); }
 #define WINNER_DRAW   0xFFu
 #define SET_MENU_MS   4000u     /* a ranked set's game: the results' Rematch menu goes back to the room by itself */
 #define SET_LEAVE_MS  15000u    /* ... and when it has not reached the menus this long after that, it is forced */
+#define LEFT_ROOM_MS  3000u     /* after LEAVE: a ROOM of the room left is a stale one this long (on_room) */
 #define RESULT_TRIES  75        /* RESULT every RETRY_MS until a HILL shows the fight over (30 s) */
 
 /* DATA payloads between the game copies (opaque to the relay) */
@@ -608,6 +609,10 @@ static struct {
     ULONGLONG crew_sent;
     NetCrew crew;
     char crew_room[7];
+    /* the room this PC just left (LEAVE): a ROOM of it that was already on its way (the answer to the
+     * match end's OVER, another member's change) must not bring it back (on_room, LEFT_ROOM_MS) */
+    char left_room[7];
+    ULONGLONG left_at;
 } N;
 
 /* This PC is in its room as a spectator (the relay's ROOM says `you` 0xFD). */
@@ -1166,6 +1171,9 @@ static void request(uint8_t type, const uint8_t *body, int len)
     uint8_t b[sizeof(N.pend)];
     int n;
     if (!N.lobby || !N.have_token || len < 0 || len > (int)sizeof(b) - 14) return;
+    if (type == T_CREATE || type == T_JOIN || type == T_SPECTATE || type == T_QUICK || type == T_CREWJOIN ||
+        type == T_RANKED)
+        N.left_room[0] = 0;     /* into a room again (maybe the one just left): its ROOM counts */
     n = header(b, type);
     memcpy(b + n, N.token, 8); n += 8;
     if (len) memcpy(b + n, body, (size_t)len);
@@ -2521,6 +2529,22 @@ static void on_room(const uint8_t *b, int len)
     v.in_room = 1;
     v.received = GetTickCount64();
     EnterCriticalSection(&g_cs);
+    if (N.left_room[0] && !memcmp(N.left_room, v.code, 6)) {
+        if (v.received - N.left_at < LEFT_ROOM_MS) {
+            /* a ROOM of the room this PC has just left, sent before the relay had its LEAVE (the
+             * answer to the match end's OVER): it would bring the room and its screen back, with the
+             * relay no longer counting this PC in it. Ignored, and LEAVE once more (the relay ignores
+             * a LEAVE from a PC in no room), in case both were lost. */
+            uint8_t lb[6 + 8];
+            int ln = header(lb, T_LEAVE);
+            LeaveCriticalSection(&g_cs);
+            memcpy(lb + ln, N.token, 8);
+            send_raw(lb, ln + 8);
+            fprintf(stderr, "[NETPLAY] a ROOM of %s, the room this PC just left: ignored\n", v.code);
+            return;
+        }
+        N.left_room[0] = 0;     /* later: the relay still has this PC there (both LEAVEs lost) */
+    }
     if (!N.roomv.in_room || memcmp(N.roomv.code, v.code, 6)) {      /* another room: its pings come anew */
         for (i = 0; i < ROOMSLOTS; i++) N.slot_rtt[i] = N.slot_rb[i] = -1;
         N.last_pinginfo = 0;
@@ -4670,6 +4694,11 @@ int netplay_lobby_crew(NetCrew *out)
 void netplay_lobby_leave(void)
 {
     EnterCriticalSection(&g_cs);
+    if (N.roomv.in_room) {
+        memcpy(N.left_room, N.roomv.code, 7);
+        N.left_at = GetTickCount64();
+    }
+    N.crew_want = 0;                /* a crew battle not entered yet: no more CREWJOIN */
     memset(&N.roomv, 0, sizeof(N.roomv));
     N.roomv.version = (unsigned)GetTickCount64();
     N.room[0] = 0;
