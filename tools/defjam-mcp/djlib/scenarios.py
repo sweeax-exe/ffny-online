@@ -1577,8 +1577,10 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
            lock_timeout=None, log=None, require_hits=False, stall=300, keep_roots=False, quick=None,
            created=False, cp_records=None, rematch=False, venues=None, cp_pick=None, cp_names=None,
            more_shots=False, spectators=0, copy_env=None, fixtures=None, ranked=None, rollback_modes=None,
-           rollback_max_ping=None, leave=None, spectate_after=0, spectate_delay=0, maintenance=0):
-    """maintenance: SECS, the relay's restart countdown from the start (<updates-dir>/maintenance "SECS Server
+           rollback_max_ping=None, leave=None, spectate_after=0, spectate_delay=0, maintenance=0, cpu_level=None):
+    """cpu_level: "easy", "normal" or "hard" (build 67): the room's host sets its CPU level (RECOMP_TEST_CPU_LEVEL);
+    the result's `cpu` says, per copy, the level its STARTs named and how often a fight ended with only CPU
+    fighters left. maintenance: SECS, the relay's restart countdown from the start (<updates-dir>/maintenance "SECS Server
     update"): the relay holds every new fight; the file goes SECS + 5 s later (the restart that never comes),
     and the matches then run. Every copy must log the countdown, and copy 0 opens its online screens
     (RECOMP_TEST_OPEN_ONLINE) and captures them every 3 s into <session>/maint (the banner, the vote's HELD).
@@ -1709,6 +1711,8 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
                 env["RECOMP_TEST_READY_SPECTATORS"] = str(spectators)
             if fast_ko:
                 env["RECOMP_TEST_KO_STEP"] = "%d,%s" % (int(fast_ko), winner)
+            if cpu_level:
+                env["RECOMP_TEST_CPU_LEVEL"] = cpu_level
             env.update(_bot_env(bot))
             if cp_records and i < len(cp_records) and cp_records[i]:
                 recs = [os.path.abspath(r) for r in cp_records[i].split(";") if r]
@@ -1888,6 +1892,9 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
         result["leave"] = leave_check(logs, leaver, players, problems)
         analyses.pop(leaver[0], None)
     rows, ok = online_rows(analyses, matches, require_hits, problems)
+    if cpu_level or winner == "humans":
+        result["cpu"] = cpu_check(logs, cpu_level, winner == "humans", leaver, problems, players)
+        ok = ok and not any(p.startswith("cpu:") for p in problems)
     if mode == "ffarot":
         result["rotation"] = rotation_check(logs, rot_relay_log, matches, players, problems, leaver)
     if maintenance:
@@ -1903,6 +1910,34 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
     result.update({"ok": ok and not problems, "stop": stop_reason, "matches": rows, "problems": problems,
                    "logs": [_relpath(p) for p in logs.values()], "shots": shots})
     return result
+
+
+def cpu_check(logs, level, humans_out, leaver, problems, players=2):
+    """Build 67: per copy the CPU level its STARTs named, the slots' difficulty words it set, and the fights
+    that ended with only CPU fighters left (with the --ko-winner humans knockout: every fight must)."""
+    out = {}
+    want = (level or "hard").capitalize()
+    for i, path in logs.items():
+        if leaver and i == leaver[0]:
+            continue
+        text = logparse.read_text(path)
+        levels = re.findall(r"START: \d+ CPU fighters at level (\w+)", text)
+        words = re.findall(r"CPU level \w+: the slots' difficulty words are now ([\d ]+)", text)
+        ends = re.findall(r"only CPU fighters are left: fighter (\d+) knocked out at step (\d+); fighter (\d+)", text)
+        results = [int(w, 16) for w in re.findall(r"match result: winners 0x([0-9A-Fa-f]+)", text)]
+        humans = len(re.findall(r"\[TEST-KO\] match \d+ step \d+: slot \d+ \(human\) knocked out", text))
+        out[str(i)] = {"levels": sorted(set(levels)), "difficulty_words": sorted(set(w.strip() for w in words)),
+                       "cpu_end_knockouts": len(ends), "winners": sorted(set(int(e[2]) for e in ends)),
+                       "humans_knocked_out": humans, "reported_winners": results}
+        if level and (not levels or set(levels) != {want}):
+            problems.append("cpu: copy %d's STARTs named levels %s, not %s" % (i, sorted(set(levels)), want))
+        if level and level != "hard" and not words:
+            problems.append("cpu: copy %d never set the CPU slots' difficulty" % i)
+        if humans_out and not ends:
+            problems.append("cpu: copy %d never ended a fight of CPU fighters only" % i)
+        if humans_out and any(w & ((1 << players) - 1) or not w for w in results):
+            problems.append("cpu: copy %d reported a fight won by a human or nobody: %s" % (i, results))
+    return out
 
 
 def rotation_check(logs, relay_log, matches, players, problems, leaver=None):
