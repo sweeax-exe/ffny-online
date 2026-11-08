@@ -2454,8 +2454,11 @@ void draw_toasts(ImDrawList *dl, const Frame &f)
     unsigned long long now = GetTickCount64();
     C.toasts.erase(std::remove_if(C.toasts.begin(), C.toasts.end(), [&](const social::Toast &t) { return now - t.at > 6000; }),
                    C.toasts.end());
-    while (C.toasts.size() > 3) C.toasts.erase(C.toasts.begin());
-    float y = 50;
+    // TURF WAR's header (the season and its days left, 76..118) sits where the column starts on the other
+    // pages: there the toasts go above it, beside the tabs, one at a time (the newest; the chat keeps them all)
+    const bool turf = S.page == TURF;
+    while (C.toasts.size() > (turf ? 1u : 3u)) C.toasts.erase(C.toasts.begin());
+    float y = turf ? 4.0f : 50.0f;
     for (auto &t : C.toasts) {
         float age = (now - t.at) / 1000.0f, a = age < 0.25f ? age / 0.25f : age > 5.4f ? (6 - age) / 0.6f : 1;
         float w = 190, x = 606 - w + (1 - std::min(1.0f, age / 0.25f)) * 30;
