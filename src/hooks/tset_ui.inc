@@ -12,7 +12,8 @@
 // hub-tset (TOURNAMENT MATCH on the hub), tset-coin (game 1, the other player selects first), tset-select
 // (game 2, this player's fighter locked), tset-why (a draw replayed), tset-pick (this player picks, Dave's
 // rule), tset-pick-wait (the other player picks), tset-intro (the venue before START), tset-waiting (the
-// other side is missing: the DQ clock), tset-over (the set's result).
+// other side is missing: the DQ clock), tset-over (the set's result), tset-grid (CHOOSE FIGHTER in a set of
+// stock fighters only: the created fighters left out).
 
 struct TSetUi {
     bool gallery_entry = false;     // the gallery: TOURNAMENT MATCH on the sample hub
@@ -68,6 +69,14 @@ bool tset_room(const NetRoom &r, NetTSet *out)
     if (!r.in_room) return false;
     if (netplay_lobby_tset(out)) { TS.asked = false; return true; }
     return false;
+}
+
+// Created fighters in this room: not in a set of stock fighters only (TSET's flags). The grid leaves them
+// out there (grid_fighters): READY with one was refused and the relay swapped it (build 63).
+bool tset_created_ok(const NetRoom &r)
+{
+    NetTSet t;
+    return !(tset_room(r, &t) && (t.flags & NETTSET_STOCK_ONLY));
 }
 
 // TSET's secs, counted down here from its arrival (the relay sends it only with a ROOM).
@@ -302,6 +311,9 @@ void draw_tset(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r,
     const NetRoomPlayer *opp = tset_player(r, other);
     int lock = !watcher && r.you < 2 ? t.locks[r.you] : NETTSET_NONE;
     int fighter = lock != NETTSET_NONE ? lock : saved_fighter();
+    // stock fighters only: a created fighter chosen before plays as the default fighter here (the grid
+    // offers no created fighter in this set, so READY is never refused for it)
+    if (fighter == NETPLAY_CREATED_FIGHTER && (t.flags & NETTSET_STOCK_ONLY)) fighter = 55;
     bool ready = me && me->ready;
     bool picking = t.state == NETTSET_PICK && t.picker == r.you && !watcher;
     page_title(dl, f, picking ? "PICK THE STAGE" : upper(r.settings.name).c_str());
@@ -541,6 +553,9 @@ bool tset_gallery(const std::string &p)
         t.secs = 512;
         G.room.player_count = 1;
         snprintf(t.why, sizeof(t.why), "Ben left during game 1 and lost it.");
+    } else if (p == "tset-grid") {          // CHOOSE FIGHTER in a stock-only set: no created fighter offered
+        G.cp_slots = 1;
+        S.page = FIGHTERS; S.fighter_sel = 0; S.fighter_top = 0;
     } else if (p == "tset-over") {
         game(10, 0, NETTSET_WIN);
         game(4, 1, NETTSET_WIN);

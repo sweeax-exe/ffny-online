@@ -926,6 +926,7 @@ struct Gallery {
     std::string cp_online[3];       // the sample cards' online names ("" the user ID; NAME saves here)
     bool results_wait = false;      // the room still plays: this PC is back, another is on its results
     unsigned results_slots = 0;     // ... the room slots still there (netplay_room_results_wait)
+    int maint_secs = -1;            // the relay's restart countdown (netplay_maintenance): seconds, -1 none
     bool rollback = false;          // the sample relay allows rollback (NETPLAY_CAP_ROLLBACK)
     bool rb_must = false;           // build 52: ... and makes it mandatory for the sample room's mode
     int room_rb[NETPLAY_ROOM_SLOTS] = {};   // each sample member's rollback byte (netplay_room_rollback)
@@ -995,6 +996,7 @@ bool turf_shown();
 void open_turf(Page back);
 bool turf_gallery(const std::string &p);
 bool tset_gallery(const std::string &p);      // tset_ui.inc
+bool tset_created_ok(const NetRoom &r);       // tset_ui.inc
 
 enum NetplayState net_state() { return gallery_on() ? G.state : netplay_state(); }
 bool net_in_lobby() { return gallery_on() ? G.in_lobby : netplay_in_lobby() != 0; }
@@ -1173,6 +1175,16 @@ bool results_wait(unsigned *slots)
 {
     if (gallery_on()) { *slots = G.results_slots; return G.results_wait; }
     return netplay_room_results_wait(slots) != 0;
+}
+// The relay's restart countdown (netplay_maintenance): the seconds left, -1 when none runs. The relay
+// holds new fights until the restart, so a vote stays at 0 and a ready room does not start.
+int maintenance_left(char *text, int size)
+{
+    if (gallery_on()) {
+        if (G.maint_secs >= 0) snprintf(text, (size_t)size, "Server update");
+        return G.maint_secs < 0 ? -1 : std::max(0, G.maint_secs - G.page_ms / 1000);
+    }
+    return netplay_maintenance(text, size);
 }
 
 // Ping colours: good, fair, high.
@@ -2597,7 +2609,8 @@ void draw_settings(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom
 // ---- fighter choice: the game's portrait grid ----
 
 // The grid's fighters: the roster, with this player's created fighters first (one card each,
-// newest first) when the relay plays them here (not in ranked play, not in King of the Hill rooms).
+// newest first) when the relay plays them here (not in ranked play, not in King of the Hill rooms, not in a
+// tournament set of stock fighters only).
 // g_grid_cp: per grid entry, the created fighter's cp_cards index, -1 for a roster fighter.
 std::vector<int> g_grid_cp;
 const std::vector<OnlineFighter> &grid_fighters()
@@ -2608,7 +2621,7 @@ const std::vector<OnlineFighter> &grid_fighters()
     g_grid_cp.assign(list.size(), -1);
     NetRoom r;
     lobby_room(&r);
-    if (cp_available() && ranked_created_ok(r) && !(r.in_room && NETPLAY_IS_KOTH(r.settings.mode))) {
+    if (cp_available() && ranked_created_ok(r) && tset_created_ok(r) && !(r.in_room && NETPLAY_IS_KOTH(r.settings.mode))) {
         const std::vector<CpCard> cards = cp_cards();
         styles.assign(cards.size(), std::string());
         for (size_t i = 0; i < cards.size(); i++)
@@ -2759,9 +2772,10 @@ void draw_vote(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
         text(dl, f, g_hand, 13, 320, 52, ORANGE, ranked_picker_line(r, ri, why, sizeof(why)), CENTER, 0.8f);
         if (!picks) const_cast<Pad &>(pad).a = false;
     }
-    char secs[16];
-    snprintf(secs, sizeof(secs), "%d", (left + 999) / 1000);
-    text(dl, f, g_title, 34, 590, 22, left < 5000 ? RED : CREAM, secs, RIGHT, 1.6f);
+    char secs[16], maint[96];
+    bool held = left < 1000 && maintenance_left(maint, sizeof(maint)) >= 0;     // the relay starts no fight now
+    snprintf(secs, sizeof(secs), held ? "HELD" : "%d", (left + 999) / 1000);
+    text(dl, f, g_title, held ? 24 : 34, 590, held ? 30 : 22, held ? ORANGE : left < 5000 ? RED : CREAM, secs, RIGHT, 1.6f);
     rect(dl, f, 50, 70, 540, 5, IM_COL32(255, 255, 255, 30), 2.5f);
     rect(dl, f, 50, 70, 540 * (left / 15000.0f), 5, ORANGE, 2.5f);
     float w = 170, gap = 15, x0 = 320 - (n * w + (n - 1) * gap) / 2;
@@ -3648,6 +3662,29 @@ void draw_voice(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r
     if ((pad.a && S.voice_sel == rows - 1) || pad.b) S.page = HUB;
 }
 
+// The relay's restart countdown (maintenance): a banner at the top left of every online page while it
+// runs. The relay holds new fights until the restart, so without it a vote sat at 0 and a ready room
+// "never started" (a player's report, build 63). It ends left of the CHAT chip (top centre, chat_chip);
+// the right of the row is the vote's clock and the update chip.
+void draw_maintenance(ImDrawList *dl, const Frame &f, const NetRoom &room)
+{
+    char what[96];
+    int left = maintenance_left(what, sizeof(what));
+    if (left < 0) return;
+    char head[128];
+    if (left > 0) snprintf(head, sizeof(head), "%s IN %d:%02d", upper(what).c_str(), left / 60, left % 60);
+    else snprintf(head, sizeof(head), "%s NOW", upper(what).c_str());
+    const char *tail = !room.in_room ? "No new matches until then." :
+                       room.phase == 1 && !NETPLAY_IS_KOTH(room.settings.mode) ? "The match is held until then." :
+                       "Matches start after it.";
+    const float x = 50, y = 4, w = 230, h = 17;
+    rect(dl, f, x, y, w, h, IM_COL32(150, 14, 30, 225), 4);
+    float hs = fit_size(f, g_title, 11, head, 120), hw = text_width(f, g_title, hs, head);
+    text(dl, f, g_title, hs, x + 6, y + 2.5f + (11 - hs) * 0.5f, WHITE, head, LEFT, 1.0f);
+    float tx = x + 6 + hw + 6, size = fit_size(f, g_hand, 11, tail, x + w - 5 - tx);
+    text(dl, f, g_hand, size, tx, y + 3 + (11 - size) * 0.5f, CREAM, tail, LEFT, 0.8f);
+}
+
 void draw_status(ImDrawList *dl, const Frame &f)
 {
     char status[256];
@@ -4061,7 +4098,9 @@ void gallery_step()
                                          "hub-turf", "turf", "turf-open", "turf-claim", "turf-member", "turf-why", "turf-season",
                                          // tournament sets (tset_ui.inc)
                                          "hub-tset", "tset-coin", "tset-select", "tset-why", "tset-pick", "tset-pick-wait",
-                                         "tset-intro", "tset-waiting", "tset-over" };
+                                         "tset-intro", "tset-waiting", "tset-over", "tset-grid",
+                                         // build 64: the relay's restart countdown (it holds new fights)
+                                         "maint-hub", "maint-room", "maint-vote" };
     const int count = (int)(sizeof(pages) / sizeof(pages[0]));
     static unsigned long long start;
     static int ms;
@@ -4182,6 +4221,7 @@ void gallery_step()
     G.cp_pick = 0;
     G.results_wait = false;
     G.results_slots = 0;
+    G.maint_secs = -1;
     QW.open = QW.gallery = false;
     G.rollback = G.rb_must = false;
     for (int i = 0; i < NETPLAY_ROOM_SLOTS; i++) G.room_rb[i] = -1;
@@ -4331,6 +4371,19 @@ void gallery_step()
         for (int i = 0; i < G.room.player_count; i++) G.room.players[i].ready = 1;
         G.results_wait = true;
         G.results_slots = ffa ? 6u : 2u;
+    }
+    else if (p == "maint-hub") { S.page = HUB; S.hub_sel = 0; S.quick_mode = 0; G.maint_secs = 272; }
+    else if (p == "maint-room") { S.page = HUB; G.room = sample_room(2, 4, 3); G.maint_secs = 272; }
+    else if (p == "maint-vote") {       // the vote's time is up: the relay holds the match
+        S.page = HUB;
+        G.room = sample_room(0, 2, 2);
+        G.room.phase = 1;
+        G.room.candidate_count = 3;
+        G.room.candidates[0] = 1; G.room.candidates[1] = 6; G.room.candidates[2] = 11;
+        G.room.votes[0] = 1; G.room.votes[2] = 1;
+        G.room.ms_left = 0;
+        S.vote_sel = 0;
+        G.maint_secs = 45;
     }
     else if (p == "vote") {
         S.page = HUB;
@@ -5065,6 +5118,7 @@ bool draw_pages(ImVec2 display)
         if (gallery_on() && G.page && !strcmp(G.page, "hub-rollback-mandatory") && !S.note_until)
             say("All matches use rollback now: restart the game once.", 9000);
     }
+    draw_maintenance(dl, f, room);
     draw_status(dl, f);
     return keep;
 }

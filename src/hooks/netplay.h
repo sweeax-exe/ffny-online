@@ -340,6 +340,9 @@ int netplay_room_ping(int slot);
  * room slots of the players still on the results as far as this PC knows (bit per slot; 0 when it does
  * not know who). READY is refused then; the room page says what it waits for. */
 int netplay_room_results_wait(unsigned *slots);
+/* The relay's maintenance countdown (a restart is planned; the relay holds new fights until then): the
+ * seconds left (0: due now), its text in `text` ("Server update"); -1 when no countdown runs. */
+int netplay_maintenance(char *text, int size);
 /* A room member's rollback (relay slot), as its PC reports it every two seconds in a room (build 46 on):
  * -1 not known; else bit 0 it rolls back in the next match, bit 1 its setting is on but its session runs
  * without rollback (a restart would use it). A match rolls back only when every player's bit 0 is set. */

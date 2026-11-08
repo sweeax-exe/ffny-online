@@ -120,6 +120,7 @@ int netplay_rtt(void) { return -1; }
 void netplay_build_fingerprint(uint8_t o[8]) { memset(o, 0, 8); }
 int netplay_room_ping(int s) { (void)s; return -1; }
 int netplay_room_results_wait(unsigned *s) { if (s) *s = 0; return 0; }
+int netplay_maintenance(char *t, int n) { if (t && n > 0) t[0] = 0; return -1; }
 int netplay_room_rollback(int s) { (void)s; return -1; }
 int netplay_room_rollback_mandatory(void) { return 0; }
 int netplay_lobby_caps(void) { return 0; }
@@ -592,6 +593,7 @@ static struct {
     ULONGLONG toast_until;
     char notice[96];                /* the relay's maintenance NOTICE text, counted down to notice_at */
     ULONGLONG notice_at, notice_shown;
+    ULONGLONG maint_until, maint_heard;    /* the same countdown for the online screens' banner (netplay_maintenance) */
     /* the versus screen (netplay_versus): shown since vs_start (0: not shown), the fight under way
      * since vs_end (0: not yet); the king's position and streak as of the START */
     ULONGLONG vs_start, vs_end;
@@ -1031,6 +1033,25 @@ static void rematch_declined(void)
     put32(p + 5, REMATCH_NO);
     p[9] = 0;
     send_data(p, 10);
+}
+
+/* The relay's restart countdown for the online screens (T_NOTICE): while the relay holds new fights
+ * it sends the countdown every 30 s (every 10 s in the last minute, and on at 0 until it restarts).
+ * The banner stays while the notices keep coming; a switch taken back (no more notices) ends it. */
+int netplay_maintenance(char *text, int size)
+{
+    int left = -1;
+    ULONGLONG now;
+    InitOnceExecuteOnce(&g_once, init_once, NULL, NULL);
+    EnterCriticalSection(&g_cs);
+    now = GetTickCount64();
+    if (N.maint_heard && now - N.maint_heard < 75000 && !(now > N.maint_until + 15000 && now - N.maint_heard > 15000)) {
+        left = now < N.maint_until ? (int)((N.maint_until - now + 999) / 1000) : 0;
+        if (text && size > 0) snprintf(text, (size_t)size, "%s", N.notice[0] ? N.notice : "Server update");
+    }
+    LeaveCriticalSection(&g_cs);
+    if (left < 0 && text && size > 0) text[0] = 0;
+    return left;
 }
 
 int netplay_toast(char *out, int size)
@@ -3442,6 +3463,8 @@ static void on_packet(const uint8_t *b, int len)
             N.notice[tl] = 0;
             N.notice_at = GetTickCount64() + (ULONGLONG)secs * 1000u;
             N.notice_shown = 0;
+            N.maint_heard = GetTickCount64();
+            N.maint_until = N.notice_at;
             LeaveCriticalSection(&g_cs);
             fprintf(stderr, "[NETPLAY] the relay restarts in %u s: %s\n", secs, N.notice);
         }

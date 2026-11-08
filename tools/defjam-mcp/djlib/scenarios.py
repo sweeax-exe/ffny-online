@@ -14,6 +14,7 @@ import html.parser
 import importlib.util
 import json
 import os
+import threading
 import time
 
 from . import copies, logparse, machine, nav
@@ -1278,7 +1279,7 @@ def turf(timeout=None, relay_port=27900, off=False, lock_timeout=None, log=None,
                 "RECOMP_NETPLAY_NAME": names[i],
                 "RECOMP_ROLLBACK": _rb_env(rollback),
                 "RECOMP_SCRIPT_ANCHOR": TITLE_ANCHOR,
-                "RECOMP_PAD_SCRIPT": h.build_pad_script(["getscreeninfo(intmain/mainmenu=lt@0.5"], online_tail(2, 2, i >= 2, last_presses=2)),
+                "RECOMP_PAD_SCRIPT": h.build_pad_script(["getscreeninfo(intmain/mainmenu=lt@0.5"], crew_tail(3, i >= 2)),
                 "RECOMP_ACCOUNT_SERVER": "127.0.0.1:%d" % acc_port,
                 "RECOMP_ACCOUNT_TEST_TOKEN": tokens[names[i]],
                 "RECOMP_SOCIAL": "on",
@@ -1523,6 +1524,30 @@ def online_tail(matches, per, p2, last_presses=12):
     return ",".join(parts)
 
 
+def crew_tail(fights, p2):
+    """Pad presses for a crew battle's fights (turf): crew battles run King of the Hill style, so a copy fights
+    0, 1 or 2 times and online_tail's count of matches is off. After the Nth fight an A every 3 s on each of
+    its screens, anchored on the screen (the summary, the rewards, the save, the tips): an entry is over once
+    any later anchor is reached (usb_gamepad.c), so the next screen ends the presses of the one before, and the
+    Nth Game.Quit (the tips' A back to the online screens, after every fight, the King's too) those of the
+    tips. A copy out of the battle never reaches the next StartGame, so nothing presses after its Quit.
+    The first Quit closing everything left the King on its second summary (20261108-085153-turf). online_tail's 12 timed A's
+    after the summary ran on past the Quit into the hub's QUICK MATCH and a quick room
+    (logs/dj/20261108-070806-turf: room_stays_left, pages_show_holder)."""
+    h = harness()
+    fight = h.FIGHT_TAIL.replace("right:", "left:") if p2 else h.FIGHT_TAIL
+    parts = []
+    for k in range(1, fights + 1):
+        nth = "#%d" % k if k > 1 else ""
+        parts.append(fight.replace("@game.startgame(", "@game.startgame(%s" % nth))
+        parts.append("@game.getmatchsummary(0%s,a:4:60:3:0.3" % nth)
+        parts.append("@game.updatematchrewardspoints(%s,a:3:60:3:0.3" % nth)
+        parts.append("@memcard.save( battle/rewardun%s,a:3:60:3:0.3" % nth)
+        parts.append("@game.gettips(%s,a:3:60:3:0.3" % nth)
+        parts.append("@game.quit(%s" % nth)
+    return ",".join(parts)
+
+
 def _save_files(root):
     """{relative path: SHA-256} of a data root's save area, without the cache partitions' images."""
     import hashlib
@@ -1549,8 +1574,12 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
            lock_timeout=None, log=None, require_hits=False, stall=300, keep_roots=False, quick=None,
            created=False, cp_records=None, rematch=False, venues=None, cp_pick=None, cp_names=None,
            more_shots=False, spectators=0, copy_env=None, fixtures=None, ranked=None, rollback_modes=None,
-           rollback_max_ping=None, leave=None, spectate_after=0, spectate_delay=0):
-    """leave: "N@STEP": copy N leaves the room at fight step STEP of the first match (RECOMP_TEST_LEAVE_STEP) and
+           rollback_max_ping=None, leave=None, spectate_after=0, spectate_delay=0, maintenance=0):
+    """maintenance: SECS, the relay's restart countdown from the start (<updates-dir>/maintenance "SECS Server
+    update"): the relay holds every new fight; the file goes SECS + 5 s later (the restart that never comes),
+    and the matches then run. Every copy must log the countdown, and copy 0 opens its online screens
+    (RECOMP_TEST_OPEN_ONLINE) and captures them every 3 s into <session>/maint (the banner, the vote's HELD).
+    leave: "N@STEP": copy N leaves the room at fight step STEP of the first match (RECOMP_TEST_LEAVE_STEP) and
     plays on offline; the run is done once the other copies are, it is left out of the match checks, and
     each other copy must go on in lockstep with its port at rest (P_GONE) when two or more stay.
     rollback: "off", "on" (every copy opts in, the relay allows it) or "mandatory" (build 52, rollback
@@ -1609,6 +1638,24 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
             tokens = s.accounts(acc_port, ["Copy %d" % i for i in range(players)])
             relay_extra += ["-accounts-internal", "http://127.0.0.1:%d" % (acc_port + 1)]
             result["params"]["ranked"] = ranked
+        maint_timer = None
+        if maintenance:     # build 64: the relay's restart countdown holds every new fight until the file goes
+            updates = os.path.join(s.dir, "updates")
+            os.makedirs(updates, exist_ok=True)
+            maint_file = os.path.join(updates, "maintenance")
+            with open(maint_file, "w") as f:
+                f.write("%d Server update" % int(maintenance))
+            relay_extra += ["-updates-dir", updates]
+            result["params"]["maintenance"] = int(maintenance)
+            def end_maintenance():
+                try:
+                    os.remove(maint_file)
+                except OSError:
+                    pass
+            maint_timer = threading.Timer(int(maintenance) + 5, end_maintenance)
+            maint_timer.daemon = True
+            maint_timer.start()
+            timeout += int(maintenance) + 5
         s.relay(relay_port, rollback=(rollback != "off"), extra=relay_extra + _rb_relay_extra(rollback, rollback_modes))
         before = {}
         koth = mode == "koth"
@@ -1669,6 +1716,10 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
                 if not only or (only.isdigit() and int(only) == i):
                     env[name] = v
             env.update((copy_env or {}).get(i, {}))
+            if maintenance and i == 0:
+                env.update({"RECOMP_OVERLAY_SHOT_DIR": os.path.join(s.dir, "maint"), "RECOMP_OVERLAY_SHOT_MS": "3000",
+                            "RECOMP_TEST_OPEN_ONLINE": "1"})     # the online screens up: the room, the vote, the banner
+                os.makedirs(os.path.join(s.dir, "maint"), exist_ok=True)
             if leaver and i == leaver[0]:
                 env["RECOMP_TEST_LEAVE_STEP"] = str(leaver[1])
             fx = fixtures[i] if fixtures and i < len(fixtures) and fixtures[i] else None
@@ -1822,6 +1873,13 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
         result["leave"] = leave_check(logs, leaver, players, problems)
         analyses.pop(leaver[0], None)
     rows, ok = online_rows(analyses, matches, require_hits, problems)
+    if maintenance:
+        told = [i for i, p in logs.items() if "the relay restarts in" in logparse.read_text(p)]
+        result["maintenance_told"] = told
+        if len(told) < len(logs):
+            problems.append("copies %s never logged the restart countdown" % sorted(set(logs) - set(told)))
+        shots_dir = os.path.join(s.dir, "maint")
+        result["maint_shots"] = _relpath(shots_dir) if os.path.isdir(shots_dir) else None
     if stop_reason != "done":
         problems.insert(0, "stopped: " + stop_reason)
         ok = False
