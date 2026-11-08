@@ -1047,6 +1047,13 @@ def tset(timeout=None, relay_port=27900, lock_timeout=None, log=None, keep_roots
         for n in TSET_PLAYERS:
             st, loc, text, _ = _web_form(base, tokens[n], page, "/signup")
             steps["signup " + n] = "%d %s" % (st, loc or text[:160])
+        # the host accepts both sign-ups (the preset's sign-up asks the host), then makes the match
+        st, _, text = _web(base, "GET", page, tokens["Host"])
+        rd = _FormReader()
+        rd.feed(text)
+        for act in sorted({f["action"] for f in rd.forms if "/entrants/" in f["action"]}):
+            st, loc, text, _ = _web_form(base, tokens["Host"], page, act, {"status": "accepted"})
+            steps["accept " + act.rsplit("/", 1)[-1]] = "%d %s" % (st, loc or text[:120])
         # the host's match form: the two players by name, round, kind set
         st, _, text = _web(base, "GET", page, tokens["Host"])
         rd = _FormReader()
@@ -1064,7 +1071,7 @@ def tset(timeout=None, relay_port=27900, lock_timeout=None, log=None, keep_roots
         if "error=" in loc or st != 303:
             raise RuntimeError("the match was not made: " + steps["match"])
 
-        watch = WATCH + ["[NETPLAY] tournament", "[NETPLAY] tests: tournament"]
+        watch = WATCH + ["[NETPLAY] tournament", "over, winner slot"]
         pick_list = (picks or "7;8").split(";")
         for i in range(2):
             shots[i] = os.path.join(s.dir, "shots%d" % i)
@@ -1102,7 +1109,7 @@ def tset(timeout=None, relay_port=27900, lock_timeout=None, log=None, keep_roots
                 time.sleep(5)
                 stop = "desync or gave up"
                 break
-            if all(c.watch.count("[NETPLAY] tests: tournament set") for c in cs):
+            if all(c.watch.count("over, winner slot") for c in cs):
                 stop = "done"
                 break
             time.sleep(1)
@@ -1115,7 +1122,7 @@ def tset(timeout=None, relay_port=27900, lock_timeout=None, log=None, keep_roots
         def lines(i, mark):
             return [l for l in texts[i].splitlines() if mark in l]
         tsets = {i: lines(i, "[NETPLAY] tournament set ") for i in texts}
-        picks_made = {i: lines(i, "[NETPLAY] tests: tournament set game") for i in texts}
+        picks_made = {i: lines(i, "[NETPLAY] tournament set: picking venue") for i in texts}     # the page's A or the tests' pick
         over = {i: (lines(i, "[NETPLAY] tests: tournament set") and [l for l in lines(i, "[NETPLAY] tests: tournament set") if " over" in l] or [""])[-1]
                 for i in texts}
         # Dave's rule: the game-3 pick offered no stage its picker had won (game 1's stage, 10, the start)
@@ -1137,7 +1144,7 @@ def tset(timeout=None, relay_port=27900, lock_timeout=None, log=None, keep_roots
             "relay_caps": all(lines(i, "the relay offers tournament sets") for i in texts),
             "joined": all(lines(i, "joining its room") for i in texts),
             "tset_shown": all(tsets[i] for i in texts),
-            "picked": any(picks_made[i] for i in texts) and any(lines(i, "picking venue") for i in texts),
+            "picked": sum(len(picks_made[i]) for i in texts) >= 2,      # games 2 and 3
             "daves_rule": dave,
             "set_over": all(" over, winner slot " in over[i] for i in texts),
             "reported": m0.get("state") in ("reported", "confirmed"),

@@ -914,7 +914,8 @@ void netplay_results_funccall(const char *text)
         /* a ranked set's game: the Rematch menu comes next; either choice, or none, goes back to the room */
         N.set_menu = GetTickCount64();
         fprintf(stderr, "[NETPLAY] ranked set: on the results' Rematch menu; back to the room for the next game\n");
-        toast(SET_MENU_MS, "Ranked set: the next game starts from the room.");
+        toast(SET_MENU_MS, "%s set: the next game starts from the room.",
+              N.tset.match && !memcmp(N.tset_room, N.roomv.code, 6) ? "Tournament" : "Ranked");
     }
     if (strncmp(text, "Game.GetHeroFighterNumber(", 26) || !N.lobby || !N.match_live || N.watching ||
         MEM32(G_MATCH_PHASE) < 3u)
