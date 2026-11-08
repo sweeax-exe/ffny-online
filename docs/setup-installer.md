@@ -1,7 +1,10 @@
 # Setup installers
 
 Most players want the app: see the [install guide](install-guide.md). This page covers the older
-`DefJamSetup` tools, which are still attached to each release.
+`DefJamSetup` tools. Windows and macOS setup assets are available on releases before v1.1.0;
+Linux setup assets were published through v0.13.0. From v1.1.0, all platforms publish only the app
+packages. The legacy setup tools are still built and tested in CI, but are not attached to releases.
+Use the app's **Use an existing installation** option to keep an older installation's data.
 
 Setup contains tools and source and compiles your own USA Xbox dump locally. It
 exists for Windows x64, macOS on Apple Silicon (see

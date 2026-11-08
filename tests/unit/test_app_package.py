@@ -19,18 +19,20 @@ spec.loader.exec_module(assets)
 BUNDLE = assets.releases.APP_BUNDLE
 
 
-def test_names_are_the_setup_triple_plus_the_app_triple():
-    setup = ['DefJamSetup-0.13.0-macos-arm64' + ext for ext in ('.dmg', '.sha256', '.provenance.json')]
-    app = ['DefJamRecompiled-0.13.0-macos-arm64' + ext for ext in ('.zip', '.sha256', '.provenance.json')]
-    assets.validate_asset_names('0.13.0', setup + app, 'macos-arm64', app=True)
-    assets.validate_asset_names('0.13.0', setup, 'macos-arm64')
-    for names in (setup, setup + app[:2], setup + app + ['defjam_recomp']):
+@pytest.mark.parametrize('platform', assets.APP_PLATFORMS)
+def test_releases_require_only_the_app_checksum_and_provenance(platform):
+    version = '1.1.0'
+    setup_stem = f'DefJamSetup-{version}-{platform}'
+    setup = [setup_stem + ext for ext in (assets.INSTALLER_EXTENSION[platform], '.sha256', '.provenance.json')]
+    app_stem = assets.app_stem(version, platform)
+    app = [assets.releases.APP_ASSETS[platform].format(v=version), app_stem + '.sha256', app_stem + '.provenance.json']
+    assets.validate_asset_names(version, app, platform, app=True)
+    assets.validate_asset_names(version, setup, platform)  # local standalone packaging remains available
+    for names in ([], setup, app[:2], setup + app, app + ['defjam_recomp']):
         with pytest.raises(ValueError):
-            assets.validate_asset_names('0.13.0', names, 'macos-arm64', app=True)
+            assets.validate_asset_names(version, names, platform, app=True)
     with pytest.raises(ValueError):
-        assets.validate_asset_names('0.13.0', setup + app, 'macos-arm64')     # an app nobody asked for
-    with pytest.raises(ValueError):
-        assets.validate_asset_names('0.13.0', [], 'linux-x64', app=True)      # no Linux app yet
+        assets.validate_asset_names(version, setup + app, platform)
 
 
 PAYLOAD = {'manifest.json': b'{}', 'source/a.c': b'/* synthetic */', 'python/bin/python3': b'synthetic'}
@@ -108,12 +110,40 @@ def test_the_program_must_carry_no_lifted_code(tmp_path, source, ok):
 
 # ---- Windows: the program with the payload built in (resource 101) ---------------------------------
 
-def test_windows_names_are_the_setup_triple_plus_the_app_triple():
-    setup = ['DefJamSetup-0.13.0-windows-x64' + ext for ext in ('.exe', '.sha256', '.provenance.json')]
-    app = ['DefJamRecompiled-0.13.0-windows-x64' + ext for ext in ('.exe', '.sha256', '.provenance.json')]
-    assets.validate_asset_names('0.13.0', setup + app, 'windows-x64', app=True)
-    with pytest.raises(ValueError):
-        assets.validate_asset_names('0.13.0', setup + app[:2], 'windows-x64', app=True)
+@pytest.mark.parametrize('platform,setup_check,app_check', [
+    ('windows-x64', 'verify_embedded_payload', 'inspect_app_windows'),
+    ('macos-arm64', 'verify_embedded_payload_macos', 'inspect_app'),
+    ('linux-x64', 'verify_embedded_payload_linux', 'inspect_app_linux'),
+])
+def test_packaging_inspects_both_payloads_but_emits_only_app_assets(tmp_path, monkeypatch,
+                                                                 platform, setup_check, app_check):
+    import hashlib
+    import json
+
+    payload = tmp_path / 'payload.zip'
+    payload.write_bytes(b'synthetic payload')
+    installer = tmp_path / ('setup' + assets.INSTALLER_EXTENSION[platform])
+    installer.write_bytes(b'synthetic legacy setup')
+    app = tmp_path / 'app'
+    app.write_bytes(b'synthetic game-free app')
+    output = tmp_path / 'assets'
+    monkeypatch.setattr(assets, 'inspect_payload', lambda p: {'version': '1.1.0', 'platform': platform})
+    inspected = []
+    monkeypatch.setattr(assets, setup_check, lambda p, archive: inspected.append(('setup', p, archive)))
+    monkeypatch.setattr(assets, app_check, lambda p, archive: inspected.append(('app', p, archive)))
+
+    assert assets.main(['--payload', str(payload), '--installer', str(installer), '--app', str(app),
+                        '--output-dir', str(output)]) == 0
+    assert inspected == [('setup', installer, payload), ('app', app, payload)]
+    name = assets.releases.APP_ASSETS[platform].format(v='1.1.0')
+    stem = assets.app_stem('1.1.0', platform)
+    assert sorted(p.name for p in output.iterdir()) == sorted([name, stem + '.sha256', stem + '.provenance.json'])
+    assert (output / name).read_bytes() == app.read_bytes()
+    digest = hashlib.sha256(app.read_bytes()).hexdigest()
+    assert (output / (stem + '.sha256')).read_text().split() == [digest, name]
+    provenance = json.loads((output / (stem + '.provenance.json')).read_text())
+    assert provenance['kind'] == 'app' and provenance['app_sha256'] == digest
+    assert provenance['payload_sha256'] == hashlib.sha256(payload.read_bytes()).hexdigest()
 
 
 def windows_program(tmp_path, payload, extra=b''):

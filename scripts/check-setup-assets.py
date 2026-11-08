@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Validate the narrow game-free setup release exception, never game binaries.
 
-With --app, also the app that sets up, launches and updates the game (src/app, D215): on macOS
+With --app, publish only the app that sets up, launches and updates the game (src/app, D215): on macOS
 the archive scripts/package-app.py makes, checked file by file against the inspected payload; on
 Windows the program DefJamRecompiled.exe, whose built-in payload (resource 101) must be the
 inspected payload byte for byte; on Linux the AppImage scripts/package-appimage.py makes, whose image
@@ -10,8 +10,8 @@ payload. Published as DefJamRecompiled-<version>-macos-arm64.zip, -windows-x64.e
 -linux-x86_64.AppImage (-x86_64.AppImage up to 1.0.0) with its checksum and a kind: app provenance that setup/releases.py select_app
 verifies before the app replaces itself.
 
-A Linux release attaches only the app (APP_ONLY_PLATFORMS): with --app the setup archive is still
-inspected against the payload but is not written to --output-dir."""
+With --app the legacy setup is still inspected against the payload on every platform, but is not
+written to --output-dir. Without --app, a standalone setup can still be packaged for local use."""
 import argparse
 import hashlib
 import importlib.util
@@ -161,9 +161,6 @@ APP_FILES = {'Contents/Info.plist', 'Contents/MacOS/' + releases.APP_PROGRAM, 'C
 
 
 APP_PLATFORMS = ('macos-arm64', 'windows-x64', 'linux-x64')
-# Platforms whose release attaches only the app. Since 1.0.0 Linux ships just the AppImage: its setup
-# archive is still built and inspected (the AppImage carries the same payload), but not attached.
-APP_ONLY_PLATFORMS = ('linux-x64',)
 # What the Windows app may load: Windows' own libraries only (it is linked with the static C runtime
 # and a static SDL3), never a Visual C++ runtime, a game library or anything carried beside it.
 WINDOWS_SYSTEM_DLLS = {
@@ -268,12 +265,11 @@ def validate_asset_names(version, names, platform='windows-x64', app=False):
     if app:
         if platform not in APP_PLATFORMS:
             raise ValueError('The app is published for macOS, Windows and Linux x86-64 only')
-        if platform in APP_ONLY_PLATFORMS:
-            expected = set()
+        expected = set()
         a = app_stem(version, platform)
         expected |= {releases.APP_ASSETS[platform].format(v=version), a + '.sha256', a + '.provenance.json'}
     if set(names) != expected:
-        raise ValueError('Release assets must be exactly the approved setup installer and app, their checksums and provenance')
+        raise ValueError('Assets must be exactly the requested app or standalone setup, its checksum and provenance')
 
 
 def inspect_app(app_zip, archive, binary_checks=sys.platform == 'darwin'):
@@ -404,7 +400,7 @@ def main(argv=None):
     args.output_dir.mkdir(parents=True, exist_ok=True)
     stem = f'DefJamSetup-{manifest["version"]}-{platform}'
     import shutil
-    if not (args.app and platform in APP_ONLY_PLATFORMS):
+    if not args.app:
         exe = args.output_dir / (stem + INSTALLER_EXTENSION[platform])
         shutil.copyfile(args.installer, exe)
         sha = engine.digest(exe)
@@ -430,7 +426,8 @@ def main(argv=None):
             indent=2) + '\n', encoding='utf-8')
         print('Verified game-free app assets:', a)
     validate_asset_names(manifest['version'], [p.name for p in args.output_dir.iterdir()], platform, app=bool(args.app))
-    print('Verified game-free setup assets:', stem)
+    if not args.app:
+        print('Verified game-free standalone setup assets:', stem)
     return 0
 
 

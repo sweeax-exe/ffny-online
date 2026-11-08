@@ -181,6 +181,6 @@ Please don't attach F9 bug bundles, game files or dumps.
 
 - Also available on [RecompLauncher](https://recomplauncher.com/game/defjamffny-recomp) and
   [Quiver](https://quiverlauncher.com/apps/def-jam-fight-for-ny-def-jam-fight-for-ny-fan-recomp).
-- [Setup installers](setup-installer.md): the older `DefJamSetup` tools, still attached to each release, including
-  silent installs.
+- [Setup installers](setup-installer.md): the older `DefJamSetup` tools, including silent installs,
+  available on releases before v1.1.0. Current releases publish only the app packages above.
 - Build by hand: [Windows](build-and-play.md) or [macOS and Linux](build-macos-linux.md).
