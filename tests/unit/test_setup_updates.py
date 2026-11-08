@@ -255,6 +255,72 @@ def test_failure_during_recovery_can_be_retried_without_losing_backup(tmp_path, 
     assert target.read_text()=='old'
 
 
+@pytest.mark.parametrize('name', ['DefJamLauncher.exe', 'Def Jam Recompiled', 'installed.json'])
+def test_recovery_skips_unchanged_targets_but_restores_changed_receipts(tmp_path, monkeypatch, name):
+    root = tmp_path / 'app'; data = tmp_path / 'data'; root.mkdir(); data.mkdir()
+    launcher = root / name
+    receipt = root / 'installed.ini'
+    launcher.write_bytes(b'old launcher')
+    receipt.write_bytes(b'old receipt')
+    tx = transaction.Activation(root, data)
+    tx.begin([launcher, receipt])
+    receipt.write_bytes(b'new receipt')
+    replace = transaction.os.replace
+    def deny_unchanged(src, dst):
+        assert Path(dst) != launcher, 'recovery tried replacing an unchanged target'
+        return replace(src, dst)
+    monkeypatch.setattr(transaction.os, 'replace', deny_unchanged)
+    tx.recover(); tx.recover()
+    assert launcher.read_bytes() == b'old launcher'
+    assert receipt.read_bytes() == b'old receipt'
+    assert not tx.folder.exists()
+
+
+def test_recovery_skips_unchanged_macos_bundle(tmp_path, monkeypatch):
+    root = tmp_path / 'app'; data = tmp_path / 'data'; root.mkdir(); data.mkdir()
+    bundle = root / 'Def Jam Recompiled.app'
+    (bundle / 'Contents/MacOS').mkdir(parents=True)
+    (bundle / 'Contents/MacOS/DefJamLauncher').write_bytes(b'synthetic launcher')
+    tx = transaction.Activation(root, data); tx.begin([bundle])
+    monkeypatch.setattr(transaction, 'copy', lambda *a: pytest.fail('unchanged bundle copied'))
+    tx.recover(); tx.recover()
+    assert not tx.folder.exists()
+
+
+def test_activation_reports_original_and_recovery_failures(tmp_path, monkeypatch):
+    from test_setup_engine import installer
+    obj = installer(tmp_path)
+    monkeypatch.setattr(engine, 'IS_WINDOWS', True)
+    monkeypatch.setattr(engine, 'check_launcher_closed', lambda root: None)
+    monkeypatch.setattr(engine.transaction.Activation, 'begin', lambda *a: None)
+    def blocked(*a):
+        raise PermissionError('launcher promotion blocked')
+    def recovery(*a):
+        raise PermissionError('backup restore blocked')
+    monkeypatch.setattr(engine.shutil, 'copyfile', blocked)
+    monkeypatch.setattr(engine.transaction.Activation, 'recover', recovery)
+    with pytest.raises(engine.SetupError, match='launcher promotion blocked.*recovery also failed.*backup restore blocked') as error:
+        engine.Engine.activate(obj)
+    assert isinstance(error.value.__cause__, PermissionError)
+
+
+def test_launcher_preflight_precedes_pending_recovery(tmp_path, monkeypatch):
+    from test_setup_engine import installer
+    obj = installer(tmp_path)
+    target = obj.install / 'installed.json'
+    target.write_text('old')
+    tx = engine.transaction.Activation(obj.install, obj.data); tx.begin([target])
+    target.write_text('pending')
+    monkeypatch.setattr(engine.releases, 'default_cache', lambda: tmp_path / 'cache/releases')
+    def busy(root):
+        raise engine.SetupError('Close DefJamLauncher.exe', 5)
+    monkeypatch.setattr(engine, 'check_launcher_closed', busy)
+    code = engine.main(['--payload', str(obj.payload), '--install-dir', str(obj.install),
+                        '--data-dir', str(obj.data), '--operation', 'repair', '--bundled-only'])
+    assert code == 5
+    assert target.read_text() == 'pending' and tx.folder.exists()
+
+
 @pytest.fixture
 def handoff_children(monkeypatch):
     """Record run_selected's engine children and stop any that a failing test leaves running."""

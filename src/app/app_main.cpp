@@ -23,6 +23,7 @@
 // carries. System calls are in app_os.cpp (POSIX and Windows).
 
 #define _CRT_SECURE_NO_WARNINGS
+#include "app_setup_handoff.h"
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -540,10 +541,21 @@ extern "C" void xbox_UsbSetPadCount(int count) { (void)count; }
 
 int main(int argc, char **argv)
 {
+    if (argc >= 5 && !strcmp(argv[1], "--setup-handoff")) {
+        std::string error;
+        if (!app::os::wait_setup_handoff(argv[2], argv[3], argv[4], &error)) fail(error);
+        // Internal handles are one-shot: never forward them to an app update or placement.
+        for (int i = 1; i + 4 < argc; ++i) argv[i] = argv[i + 4];
+        argc -= 4;
+        argv[argc] = nullptr;
+    }
     const char *named = nullptr, *payload = nullptr;
     bool play_now = false, force_launcher = false;
     app::FirstRun &first = app::first_run();
-    for (int a = 1; a < argc; a++) g_arguments.push_back(argv[a]);
+    for (int a = 1; a < argc; a++) {
+        if (!strcmp(argv[a], "--resume-setup") && a + 7 < argc) a += 7;
+        else g_arguments.push_back(argv[a]);
+    }
     for (int a = 1; a < argc; a++) {
         if (!strcmp(argv[a], "--updated")) g_updated = true;             // started by its own update
         else if (!strcmp(argv[a], "--install") && a + 1 < argc) named = argv[++a];
@@ -552,6 +564,12 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[a], "--data") && a + 1 < argc) first.data = argv[++a];
         else if (!strcmp(argv[a], "--play")) play_now = true;
         else if (!strcmp(argv[a], "--launcher")) force_launcher = true;
+        else if (!strcmp(argv[a], "--resume-setup") && a + 7 < argc) {
+            app::resume_setup(argv[a+1], argv[a+2], argv[a+3], argv[a+4], argv[a+5],
+                              !strcmp(argv[a+6], "1"), !strcmp(argv[a+7], "1"));
+            a += 7;
+            force_launcher = true;
+        }
         else if (!strncmp(argv[a], "-psn", 4)) continue;                   // macOS's own, from Finder
         else if (!strncmp(argv[a], "-NS", 3)) a++;                           // an AppKit default and its value
         else fail(std::string("Unknown option: ") + argv[a]);

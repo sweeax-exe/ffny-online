@@ -115,6 +115,10 @@ void screen_open_hd();
 // Clean Update of the installed game to this app's payload version, with the progress screen.
 void start_update_build();
 
+// Resume the setup request after releasing an older Windows shortcut wrapper.
+void resume_setup(const std::string &operation, const std::string &title, const std::string &root,
+                  const std::string &data, const std::string &dump, bool hd, bool install_tools);
+
 
 // Draw this frame's screen when the app has one up (first-run setup, maintenance, an operation's
 // progress); returns false to let the launcher draw. Inside the launcher's frame.

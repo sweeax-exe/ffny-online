@@ -230,6 +230,24 @@ releases = load_module('setup_releases', Path(__file__).with_name('releases.py')
 transaction = load_module('setup_transaction', Path(__file__).with_name('transaction.py'))
 
 
+def check_launcher_closed(root):
+    """Fail before recovery/build, and again before promotion, if this install's Windows
+    shortcut wrapper is still mapped. The app hands off its own wrapper before calling us."""
+    launcher = Path(root) / 'DefJamLauncher.exe'
+    if not IS_WINDOWS or not launcher.is_file():
+        return
+    env = dict(os.environ, DEFJAM_SETUP_LAUNCHER=str(launcher))
+    result = subprocess.run(['powershell.exe', '-NoProfile', '-Command',
+        "Get-Process | Where-Object { $_.ProcessName -eq 'DefJamLauncher' -and "
+        "$_.Path -eq $env:DEFJAM_SETUP_LAUNCHER } | "
+        "ForEach-Object { $_.Id }"], env=env, capture_output=True, text=True, check=True,
+        creationflags=subprocess.CREATE_NO_WINDOW, timeout=15)
+    if result.stdout.strip():
+        raise SetupError('Close the Def Jam app and its background DefJamLauncher.exe '
+                         '(process ' + result.stdout.strip().replace('\n', ', ') + '). '
+                         'Then start DefJamRecompiled.exe directly or run the standalone setup to retry.', 5)
+
+
 class Engine:
     def __init__(self, args):
         self.args = args
@@ -1036,6 +1054,7 @@ class Engine:
             self.event('Steam did not take the shortcut; add ' + str(launcher) + ' with "Add a Non-Steam Game"')
 
     def activate(self):
+        check_launcher_closed(self.install)
         self.event('Activating the verified installation')
         previous = self.install / 'installed.json'
         old = json.loads(previous.read_text()) if previous.exists() else {}
@@ -1088,8 +1107,13 @@ class Engine:
                     transaction.flush_file(path)
                 transaction.sync_directory(path.parent)
             journal.commit()
-        except BaseException:
-            journal.recover()
+        except BaseException as original:
+            self.event('Activation failed: ' + str(original))
+            try:
+                journal.recover()
+            except (OSError, ValueError) as recovery:
+                raise SetupError('Activation failed: ' + str(original) + '; recovery also failed: ' +
+                                 str(recovery) + '. Backups were kept; close Def Jam and rerun setup.', 4) from original
             raise
         finally:
             self.args.no_shortcuts = no_shortcuts
@@ -1120,6 +1144,7 @@ class Engine:
             with log_path.open('a', encoding='utf-8') as log:
                 self.log = log
                 self.event('Setup ' + json.dumps({k: self.manifest[k] for k in ('version', 'source_commit', 'toolkit_commit')}))
+                check_launcher_closed(self.install)
                 transaction.Activation(self.install, self.data).recover()
                 self.check_install_destination()
                 self.check_existing_install()
@@ -1620,6 +1645,7 @@ def main(argv=None):
                     raise SetupError('Recovery must use the previous data folder', 2)
             validate_locations(root, data_root, None)
             with install_lock(root), install_lock(data_root), game_lock(root):
+                check_launcher_closed(root)
                 transaction.Activation(root, data_root).recover()
             args.data_dir = str(data_root)
         receipt_path = root / 'installed.json'
