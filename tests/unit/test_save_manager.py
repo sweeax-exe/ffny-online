@@ -225,6 +225,58 @@ def test_backup_rotation_spares_the_protected_one(tool, tmp_path):
     assert oldest in names and len(names) == 11
 
 
+def empty_save_area(save):
+    """What the game leaves when every profile is gone: the title's own two files."""
+    title = save / 'UserData' / '45410049'
+    shutil.rmtree(save / 'UserData', ignore_errors=True)
+    title.mkdir(parents=True)
+    (title / 'TitleMeta.xbx').write_bytes(b'TITLE')
+    (title / 'TitleImage.xbx').write_bytes(b'IMAGE')
+
+
+def test_rotation_keeps_the_newest_backup_with_a_profile(tool, tmp_path):
+    save, backups = tmp_path / 'save', tmp_path / 'save-backups'
+    put_profile(save / 'UserData' / '45410049', 'VY2', profile('VY2', key=bytes(16)))
+    good = run(tool, 'backup', save, backups, 'manual', noon(-30)).split()[1]
+    empty_save_area(save)
+    made = [run(tool, 'backup', save, backups, 'manual', noon(-20 + i)).split()[1] for i in range(12)]
+    rows = [l.split() for l in run(tool, 'backups', backups).splitlines()]
+    names = [r[0] for r in rows]
+    assert names == list(reversed(made[2:])) + [good]
+    assert rows[-1][3] == '1' and all(r[3] == '0' for r in rows[:-1])
+    # a newer backup with a profile takes over; the old good one then goes like any other
+    put_profile(save / 'UserData' / '45410049', 'VY3', profile('VY3', key=bytes(16)))
+    newer = run(tool, 'backup', save, backups, 'manual', noon()).split()[1]
+    names = [l.split()[0] for l in run(tool, 'backups', backups).splitlines()]
+    assert newer in names and good not in names and len(names) == 10
+
+
+def test_no_empty_daily_or_update_backup_over_a_good_one(tool, tmp_path):
+    save, backups = tmp_path / 'save', tmp_path / 'save-backups'
+    empty_save_area(save)
+    # with nothing better there, an empty save area is still backed up
+    first = run(tool, 'backup', save, backups, 'start', noon(-3)).split()[1]
+    put_profile(save / 'UserData' / '45410049', 'VY2', profile('VY2', key=bytes(16)))
+    good = run(tool, 'backup', save, backups, 'start', noon(-2)).split()[1]
+    empty_save_area(save)
+    for reason in ('start', 'update'):
+        out = subprocess.run([str(tool), 'backup', str(save), str(backups), reason, str(noon())],
+                             capture_output=True, text=True)
+        assert out.returncode == 1 and 'skipped' in out.stdout and good in out.stdout, out.stdout
+        assert 'backup skipped' in out.stderr
+    assert [l.split()[0] for l in run(tool, 'backups', backups).splitlines()] == [good, first]
+    # one asked for is always made
+    assert run(tool, 'backup', save, backups, 'manual', noon()).startswith('made')
+
+
+def test_backup_without_a_count_is_counted(tool, tmp_path):
+    save, backups = tmp_path / 'save', tmp_path / 'save-backups'
+    put_profile(save / 'UserData' / '45410049', 'VY2', profile('VY2', key=bytes(16)))
+    name = run(tool, 'backup', save, backups, 'manual', noon()).split()[1]
+    (backups / name / 'backup.txt').write_text('when=%d\nreason=manual\n' % noon())
+    assert run(tool, 'backups', backups).split()[3] == '1'
+
+
 def test_backups_in_one_second_get_their_own_folders(tool, tmp_path):
     save, backups = tmp_path / 'save', tmp_path / 'save-backups'
     put_profile(save / 'UserData' / '45410049', 'VY2', profile('VY2', key=bytes(16)))

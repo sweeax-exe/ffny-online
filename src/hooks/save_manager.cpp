@@ -411,13 +411,15 @@ std::vector<Backup> list_backups(const fs::path &backups)
         b.path = it->path();
         std::ifstream info(it->path() / "backup.txt");
         std::string line;
+        bool counted = false;
         while (std::getline(info, line)) {
             if (!line.empty() && line.back() == '\r') line.pop_back();
             if (!line.compare(0, 5, "when=")) b.when = atoll(line.c_str() + 5);
             else if (!line.compare(0, 7, "reason=")) b.reason = line.substr(7);
-            else if (!line.compare(0, 9, "profiles=")) b.profiles = atoi(line.c_str() + 9);
+            else if (!line.compare(0, 9, "profiles=")) b.profiles = atoi(line.c_str() + 9), counted = true;
         }
         if (!b.when) b.when = time_of_name(name);
+        if (!counted) b.profiles = count_profiles(it->path());
         out.push_back(b);
     }
     std::sort(out.begin(), out.end(), [](const Backup &a, const Backup &b) { return newer(a.name, b.name); });
@@ -428,9 +430,17 @@ int rotate(const fs::path &backups, int keep, const std::string &protect)
 {
     auto list = list_backups(backups);
     int kept = 0, removed = 0;
+    std::string good;                       // the newest backup with a profile in it stays, whatever its age
+    for (auto &b : list)
+        if (b.profiles > 0) { good = b.name; break; }
     for (auto &b : list) {
         if (b.name == protect) continue;
         if (kept < keep) { kept++; continue; }
+        if (b.name == good) {
+            fprintf(stderr, "[SAVES] backup %s kept past the newest %d: it is the newest one with a profile (%d)\n",
+                    b.name.c_str(), keep, b.profiles);
+            continue;
+        }
         // only ever a backup folder directly inside save-backups (list_backups found it there)
         if (!is_backup_name(pcui::path_utf8(b.path.filename()))) continue;
         if (remove_tree(b.path)) {
@@ -449,6 +459,20 @@ bool make_backup(const fs::path &save_dir, const fs::path &backups, const std::s
         if (error) *error = "There are no saves to back up yet.";
         return false;
     }
+    int profiles = count_profiles(save_dir);
+    if (!profiles && (reason == "start" || reason == "update")) {
+        // TitleMeta.xbx and TitleImage.xbx are always there: an empty save area would still copy, and
+        // a run of such backups used to push the last good one out
+        auto list = list_backups(backups);
+        if (!list.empty() && list[0].profiles > 0) {
+            fprintf(stderr, "[SAVES] %s backup skipped: the saves hold no profile and the newest backup %s has %d\n",
+                    reason.c_str(), list[0].name.c_str(), list[0].profiles);
+            if (error)
+                *error = "skipped: the saves hold no profile and the newest backup (" + list[0].name + ") has " +
+                         plural(list[0].profiles, "profile", "profiles");
+            return false;
+        }
+    }
     std::error_code ec;
     fs::create_directories(backups, ec);
     std::string name = stamp(now);
@@ -456,9 +480,6 @@ bool make_backup(const fs::path &save_dir, const fs::path &backups, const std::s
     fs::path dst = backups / name;
     int files = 0;
     std::string why;
-    int profiles = 0;
-    for (auto &e : list_saves(save_dir))
-        if (e.kind == Entry::PROFILE) profiles++;
     if (!copy_tree(src, dst / "UserData", &files, &why)) {
         remove_tree(dst);
         if (error) *error = "The backup failed: " + why + ".";
@@ -472,6 +493,14 @@ bool make_backup(const fs::path &save_dir, const fs::path &backups, const std::s
     if (made) *made = name;
     rotate(backups, keep, protect);
     return true;
+}
+
+int count_profiles(const fs::path &save_dir)
+{
+    int profiles = 0;
+    for (auto &e : list_saves(save_dir))
+        if (e.kind == Entry::PROFILE) profiles++;
+    return profiles;
 }
 
 bool daily_due(const fs::path &backups, int64_t now)

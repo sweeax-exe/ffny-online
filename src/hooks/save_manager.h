@@ -65,11 +65,15 @@ struct Backup
 bool is_backup_name(const std::string &name);
 std::vector<Backup> list_backups(const fs::path &backups);          // newest first
 // Copies save_dir/UserData into a new backup. False with *error when there is nothing to copy or
-// a copy fails (a half-made backup is removed). Then keeps the newest `keep`, never `protect`.
+// a copy fails (a half-made backup is removed), and for a daily ("start") or "update" backup with no
+// profile in it while the newest backup has some. Then keeps the newest `keep`, never `protect`.
 bool make_backup(const fs::path &save_dir, const fs::path &backups, const std::string &reason, int64_t now,
                  std::string *made, std::string *error, const std::string &protect = "", int keep = kKeepBackups);
-// Removes the oldest backups past `keep` (never `protect`); returns how many went.
+// Removes the oldest backups past `keep` (never `protect`, and never the newest backup that holds a
+// profile); returns how many went.
 int rotate(const fs::path &backups, int keep, const std::string &protect = "");
+// Profiles in save_dir/UserData/45410049: folders holding a profile file (Entry::PROFILE).
+int count_profiles(const fs::path &save_dir);
 // No backup was made on now's local calendar day.
 bool daily_due(const fs::path &backups, int64_t now);
 // Backs up the current saves (reason "restore"), then puts the backup's UserData in place.
