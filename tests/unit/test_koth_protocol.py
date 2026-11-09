@@ -124,7 +124,7 @@ def test_the_results_screen_never_holds_the_next_fight():
     assert 'deferred = N.lobby && N.koth_results && NETPLAY_IS_HILL(N.roomv.settings.mode);' in NETPLAY_C
     assert 'defjam_fe_call("MemCard.QuerySave( battle/rewardun.swf )")' in NETPLAY_C
     assert 'defjam_fe_call("Game.Quit()")' in NETPLAY_C
-    assert 'is waiting for you: choose No to start the next fight.' in NETPLAY_C
+    assert 'waiting for you: choose No to start the next fight (it starts by itself in %d s).' in NETPLAY_C
     assert 'p[12] = N.start_deferred ? 1 : 0;' in NETPLAY_C
     # build 40: byte 13, the agreed input delay, for spectators (docs/research/spectator-mode.md)
     assert 'p[13] = (uint8_t)(N.delay_fixed ? N.delay : 0);' in NETPLAY_C
@@ -136,6 +136,20 @@ def test_the_results_screen_never_holds_the_next_fight():
     assert 'N.peer_rb_max[from] = len >= 17 ? (p[15] | (p[16] << 8)) : 0;' in NETPLAY_C
     assert 'N.peer_rb_cp[from] = len >= 15 && (p[14] & 1);' in NETPLAY_C
     assert "leave the last fight's results" in NETPLAY_C
+
+
+def test_an_idle_player_on_the_results_holds_the_next_fight_briefly():
+    # build 68 (F9 b6b79d: 75.5 s in an FFA rotation room): with the next fight agreed, the results leave by
+    # themselves HILL_RESULTS_MS after the decision (HILL_SUMMARY_MS before the rewards' save), on the game
+    # thread, never while a screen loads
+    assert re.search(r'#define HILL_RESULTS_MS 15000u', NETPLAY_C)
+    assert re.search(r'#define HILL_SUMMARY_MS 20000u', NETPLAY_C)
+    tick = NETPLAY_C.split('static void hill_results_tick(void)', 1)[1].split('\n}\n', 1)[0]
+    assert '!N.start_deferred || !N.koth_results' in tick
+    assert 'now - N.hill_decided_at < HILL_CAP_MS()' in tick
+    assert 'MEM32(sm + 0x24u) != 0) return;' in tick
+    assert 'defjam_menu_call("Game.Rematch()")' in tick and 'defjam_menu_call("Game.Quit()")' in tick
+    assert '    hill_results_tick();' in NETPLAY_C
 
 
 def test_late_spectator_type_and_caps_match_the_relay():

@@ -77,7 +77,7 @@ def cmd_scenario(a):
                              fixtures=a.fixtures.split(",") if a.fixtures else None, ranked=a.ranked,
                              rollback_modes=a.rollback_modes, rollback_max_ping=a.rollback_max_ping, leave=a.leave,
                              spectate_after=a.spectate_after, spectate_delay=a.spectate_delay,
-                             maintenance=a.maintenance, cpu_level=a.cpu_level, **common)
+                             maintenance=a.maintenance, cpu_level=a.cpu_level, linger=a.linger, **common)
     elif a.kind == "offline":
         r = scenarios.offline(type=a.type, venue=a.venue, f0=a.f0, f1=a.f1, cpu=not a.human, bot=a.bot,
                               fast_ko=a.fast_ko, turbo=a.turbo, timeout=a.timeout or 420,
@@ -237,6 +237,8 @@ def main(argv=None):
                     "(e.g. into the next fight)")
     sc.add_argument("--maintenance", type=int, default=0, help="online: the relay's restart countdown (SECS) holds the "
                     "fights from the start until the file goes SECS + 5 s later; copy 0's online screens are captured")
+    sc.add_argument("--linger", type=int, help="online, koth/ffarot: copy N presses nothing after the main menu and sits on "
+                    "each fight's results (the game must take it off them; result hill_gaps)")
     sc.add_argument("--type", type=int, default=0)
     sc.add_argument("--venue", type=int, default=1)
     sc.add_argument("--f0", type=int, default=55)
