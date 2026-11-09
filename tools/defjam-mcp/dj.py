@@ -59,6 +59,8 @@ def copy_env(items):
 
 def cmd_scenario(a):
     common = {"lock_timeout": a.lock_timeout, "log": say, "keep_roots": a.keep_roots}
+    if getattr(a, "override", None):    # FFNY Studio: rebuilt archives on top of <data>/override in each root
+        os.environ["DJ_OVERRIDE"] = os.path.abspath(a.override)
     env = dict(e.split("=", 1) for e in a.env)
     if getattr(a, "pick_random", False):    # build 67: every copy picks RANDOM (the hub's RANDOM card)
         env.setdefault("RECOMP_NETPLAY_FIGHTER", "random")
@@ -84,7 +86,7 @@ def cmd_scenario(a):
     elif a.kind == "offline":
         r = scenarios.offline(type=a.type, venue=a.venue, f0=a.f0, f1=a.f1, cpu=not a.human, bot=a.bot,
                               fast_ko=a.fast_ko, turbo=a.turbo, timeout=a.timeout or 420,
-                              extra_env=env, fixture=a.fixture, **common)
+                              extra_env=env, fixture=a.fixture, shots_every=a.shots_every, **common)
     elif a.kind == "boot":
         r = scenarios.boot(turbo=a.turbo, timeout=a.timeout or 240, extra_env=env, goto=a.goto, **common)
     elif a.kind == "roomchat":
@@ -257,6 +259,7 @@ def main(argv=None):
     sc.add_argument("--turbo", action="store_true", help="no flip pacing or vsync wait (measured: no gain, the fight runs on the guest timer)")
     sc.add_argument("--fixture", help="a folder of save files copied over the copy's saves")
     sc.add_argument("--page-ms", type=int, default=1500)
+    sc.add_argument("--shots-every", type=float, default=0, help="offline: also a capture every N s through the fight")
     sc.add_argument("--goto", help="boot: then this main-menu entry by name (story, battle, rewards, online, slotN), or exit: the EXIT prompt, NO three ways, then YES (the game must quit with code 0)")
     sc.add_argument("--env", action="append", default=[], help="extra NAME=VALUE (checked against the machine rules); online: NAME@N=VALUE for copy N only")
     sc.add_argument("--copy-env", action="append", default=[],
@@ -264,6 +267,8 @@ def main(argv=None):
     sc.add_argument("--fixtures", help="online: per copy a save fixture folder, comma-separated ('' none)")
     sc.add_argument("--lock-timeout", type=float, help="give up waiting for the machine after this many s")
     sc.add_argument("--keep-roots", action="store_true", help="leave the data roots for a look (dj roots clean)")
+    sc.add_argument("--override", help="a folder of rebuilt game files (FFNY Studio, e.g. assets/v2ip.viv) laid over "
+                    "<data>/override in each disposable root (DJ_OVERRIDE); <data> itself is not touched")
     sc.set_defaults(fn=cmd_scenario)
 
     dg = sub.add_parser("digest")

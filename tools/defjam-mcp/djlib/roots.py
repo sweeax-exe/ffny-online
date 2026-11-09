@@ -80,8 +80,11 @@ def create(name, fixture=None, partitions=False, data=None):
     with open(os.path.join(root, MARKER), "w", encoding="utf-8") as f:
         json.dump({"owner": machine.agent_id(), "pid": os.getpid(), "data": data,
                    "created": datetime.datetime.now().isoformat(timespec="seconds")}, f)
+    extra = os.environ.get("DJ_OVERRIDE", "")
     for n in LINKED:
-        if os.path.isdir(os.path.join(data, n)):
+        if n == "override" and extra:
+            _merged_override(os.path.join(root, n), os.path.join(data, n), extra)
+        elif os.path.isdir(os.path.join(data, n)):
             make_junction(os.path.join(root, n), os.path.join(data, n))
     save = os.path.join(root, "save")
     if os.path.isdir(os.path.join(data, "save")):
@@ -94,6 +97,22 @@ def create(name, fixture=None, partitions=False, data=None):
             raise FileNotFoundError("save fixture not found: " + fixture)
         shutil.copytree(src, save, dirs_exist_ok=True)
     return root
+
+
+def _merged_override(link, base, extra):
+    """The root's override folder when DJ_OVERRIDE names a test override (FFNY Studio's rebuilt archives,
+    e.g. ``assets/v2ip.viv``): a real folder of junctions, each top-level entry from the test override,
+    else from <data>/override, so neither is written to and <data> keeps its own override."""
+    if not os.path.isdir(extra):
+        raise FileNotFoundError("DJ_OVERRIDE is not a folder: " + extra)
+    os.makedirs(link)
+    names = set(os.listdir(base)) if os.path.isdir(base) else set()
+    for n in sorted(names | set(os.listdir(extra))):
+        src = os.path.join(extra, n) if os.path.exists(os.path.join(extra, n)) else os.path.join(base, n)
+        if os.path.isdir(src):
+            make_junction(os.path.join(link, n), src)
+        else:
+            shutil.copy2(src, os.path.join(link, n))
 
 
 def _links_under(root):

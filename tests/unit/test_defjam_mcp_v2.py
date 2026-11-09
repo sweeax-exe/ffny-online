@@ -143,6 +143,23 @@ def test_root_create_and_destroy_keeps_the_dump(fake_data, tmp_path):
     assert (fake_data / "save" / "UserData" / "Options").read_bytes() == b"opts"
 
 
+def test_a_test_override_is_laid_over_the_data_override(fake_data, tmp_path, monkeypatch):
+    (fake_data / "override" / "screens").mkdir(parents=True)
+    (fake_data / "override" / "screens" / "a.big").write_bytes(b"port")
+    studio = tmp_path / "studio-override"
+    (studio / "assets").mkdir(parents=True)
+    (studio / "assets" / "v2ip.viv").write_bytes(b"BIGF new body")
+    monkeypatch.setenv("DJ_OVERRIDE", str(studio))
+    root = roots.create("ov")
+    over = os.path.join(root, "override")
+    assert not roots.is_link(over)                                                   # a real folder
+    assert open(os.path.join(over, "assets", "v2ip.viv"), "rb").read() == b"BIGF new body"
+    assert open(os.path.join(over, "screens", "a.big"), "rb").read() == b"port"
+    roots.destroy(root)
+    assert (studio / "assets" / "v2ip.viv").read_bytes() == b"BIGF new body"         # links only removed
+    assert (fake_data / "override" / "screens" / "a.big").read_bytes() == b"port"
+
+
 def test_destroy_refuses_unmanaged_folders(fake_data, tmp_path):
     with pytest.raises(PermissionError):
         roots.destroy(str(fake_data))
