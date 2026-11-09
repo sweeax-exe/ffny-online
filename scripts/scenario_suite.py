@@ -36,7 +36,7 @@ RESULT_ROUTES = ('fight-result', 'ffa-result')
 # Routes in which every fighter is driven by a pad.
 TWO_PAD_ROUTES = ('versus',)
 # Routes that play several matches in one launch: (match ordinal, fighters) for each.
-SESSION_ROUTES = {'two-matches': ((1, 2), (2, 4))}
+SESSION_ROUTES = {'two-matches': ((1, 2), (2, 4)), 'fight-cycles': tuple((k, 2) for k in range(1, 6))}
 evidence = load('test_evidence')
 session_driver = load('session_driver')
 
@@ -152,21 +152,31 @@ def bootstrap_stages(route):
 
 def scenario_settings(path=None):
     settings = {'render_scale': 2, 'gamma': True, 'vsync': True,
-                'brightness': 100, 'vignette': True, 'vignette_strength': 100}
+                'brightness': 100, 'vignette': True, 'vignette_strength': 100,
+                'texture_mips': False, 'anisotropy': 1, 'color_tint': 100, 'scratches': True, 'msaa': 1}
     if path:
         supplied = json.loads(Path(path).read_text(encoding='utf-8'))
         if set(supplied) - set(settings):
             raise ValueError('unknown scenario display setting')
         settings.update(supplied)
-    for key, low, high in (('render_scale', 1, 4), ('brightness', 50, 200), ('vignette_strength', 0, 100)):
+    for key, low, high in (('render_scale', 1, 4), ('brightness', 50, 200), ('vignette_strength', 0, 100),
+                           ('color_tint', 0, 100)):
         if type(settings[key]) is not int or not low <= settings[key] <= high:
             raise ValueError('%s must be an integer from %d to %d' % (key, low, high))
-    if any(type(settings[k]) is not bool for k in ('gamma', 'vsync', 'vignette')):
-        raise ValueError('gamma/vsync/vignette must be booleans')
+    if any(type(settings[k]) is not bool for k in ('gamma', 'vsync', 'vignette', 'texture_mips', 'scratches')):
+        raise ValueError('gamma/vsync/vignette/texture_mips/scratches must be booleans')
+    if type(settings['anisotropy']) is not int or settings['anisotropy'] not in (1, 2, 4, 8, 16):
+        raise ValueError('anisotropy must be 1, 2, 4, 8 or 16')
+    if type(settings['msaa']) is not int or settings['msaa'] not in (1, 2, 4, 8):
+        raise ValueError('msaa must be 1, 2, 4 or 8')
     env = {'RECOMP_RENDER_SCALE': str(settings['render_scale']),
            'RECOMP_GAMMA': str(int(settings['gamma'])), 'RECOMP_PRESENT_VSYNC': str(int(settings['vsync'])),
            'RECOMP_BRIGHTNESS': str(settings['brightness']), 'RECOMP_VIGNETTE': str(int(settings['vignette'])),
-           'RECOMP_VIGNETTE_STRENGTH': str(settings['vignette_strength'])}
+           'RECOMP_VIGNETTE_STRENGTH': str(settings['vignette_strength']),
+           'RECOMP_TEXTURE_MIPS': str(int(settings['texture_mips'])),
+           'RECOMP_ANISOTROPY': 'off' if settings['anisotropy'] == 1 else '%dx' % settings['anisotropy'],
+           'RECOMP_COLOR_TINT': str(settings['color_tint']), 'RECOMP_SCRATCHES': str(int(settings['scratches'])),
+           'RECOMP_MSAA': 'off' if settings['msaa'] == 1 else '%dx' % settings['msaa']}
     return settings, env
 
 
@@ -292,7 +302,8 @@ def execute(args):
         report['identity']['rng_seed_override'] = args.rng_seed
         # Fail before copying a potentially large save/cache tree when no
         # certified game build exists in this isolated worktree.
-        harness.pipeline_state.verify_build(Path(harness.REPO), args.preset)
+        harness.pipeline_state.verify_build(Path(harness.REPO), args.preset,
+                                                  python=harness.pipeline_state.RECORDED)
         with tempfile.TemporaryDirectory(prefix='runtime-', dir=folder) as disposable:
             shutil.copytree(Path(args.fixture) / 'save', Path(disposable) / 'save')
             env = {'DEFJAM_DATA': disposable, 'RECOMP_SETTINGS': 'none',
@@ -316,6 +327,8 @@ def execute(args):
                 env[name] = value
             if args.rng_seed is not None:
                 env['RECOMP_TEST_RNG_SEED'] = str(args.rng_seed)
+            if args.isolate_crowd:
+                env['RECOMP_TEST_ISOLATE_CROWD'] = '1'
             sessions_before = recorder_sessions() if getattr(args, 'record', False) else None
             if sessions_before is not None:
                 # The play-test recorder (docs/playtest-recorder.md): frame rows, events and pictures of the run.
@@ -413,7 +426,7 @@ def execute(args):
                               if 'game.startgame(' in e['call'].lower()), None)
                 report['memory'] = run.memory
                 report['assertions'] += evidence.pacing_checks(run.text, end_anchor='game.getmatchsummary(')
-                report['assertions'] += evidence.memory_checks(run.memory, (start or 0) + 20)
+                report['assertions'] += evidence.memory_checks(run.memory, (start or 0) + 20, run.timeline)
             if args.stream_out:
                 lines = evidence.state_stream(run.text, args.stream_steps)
                 Path(args.stream_out).write_text('\n'.join(lines) + '\n', encoding='utf-8')
@@ -473,7 +486,7 @@ def main(argv=None):
     run.add_argument('--fixture', required=True)
     run.add_argument('--output')
     run.add_argument('--preset', default=harness.RELEASE_PRESET)
-    run.add_argument('--settings', help='optional JSON render_scale/gamma/vsync/brightness/vignette/vignette_strength; inherited RECOMP diagnostics are suppressed')
+    run.add_argument('--settings', help='optional JSON render_scale/gamma/vsync/brightness/vignette/vignette_strength/texture_mips/anisotropy/color_tint/scratches/msaa; inherited RECOMP diagnostics are suppressed')
     run.add_argument('--texture-packs', help='explicit semicolon-separated HD pack folders for this scenario')
     run.add_argument('--texture-root', help='local mods folder read by the scenario; saves still use a disposable root')
     audio_group = run.add_mutually_exclusive_group()
@@ -495,6 +508,10 @@ def main(argv=None):
                      help='fight steps the stream covers (default 1800, thirty seconds)')
     run.add_argument('--rng-seed', type=int,
                      help="replace the seed of the match's random number generator (changes CPU behaviour; for repeatable runs)")
+    run.add_argument('--isolate-crowd', action='store_true',
+                     help='also seed the match logic\'s time-seeded generators and show the fighters no spectators, which '
+                          'is what makes the same pinned fight repeat on a slow host (#98); changes how the fight plays, '
+                          'so the stream has its own golden (tests/golden/fight-stream-isolated.json)')
     run.add_argument('--no-unlock', action='store_true',
                      help='run without RECOMP_UNLOCK_ALL (the harness turns it on); the pinned fight stream was recorded without it')
     run.add_argument('--baselines', help='local approved-baseline manifest')

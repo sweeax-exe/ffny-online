@@ -29,7 +29,7 @@ symptom: several case values commonly share one arm.
 it checks every table the lifter found. A table in code the lifter never
 reached at all -- because an earlier truncation cut the body before it -- is
 invisible here and to the generated C both. Catching those needs real function
-extents to compare against, which is item 1 of docs/04-improvement-backlog.md.
+extents to compare against; see docs/05-reference.md and the source-coverage tools.
 So a clean result means "every table that was lifted is complete", not "no code
 was lost".
 """

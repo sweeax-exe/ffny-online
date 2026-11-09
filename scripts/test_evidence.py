@@ -506,24 +506,69 @@ def pacing_checks(log, anchor='game.startgame(', end_anchor=None, target_ms=1000
                       fraction=round(late / presents, 5), worst_interval_ms=worst, p95_window_max_ms=p95_window_max)]
 
 
-def memory_checks(samples, start_seconds, max_growth_mb=64.0, min_samples=6):
-    """Growth of the game's private bytes from the start of play to the end of the run.
+def fight_windows(timeline, settle_seconds=20.0):
+    """(start, end) host seconds of each match's settled play: from `settle_seconds` after
+    `Game.StartGame` to the first `Game.GetMatchSummary` after it (end None while a match is
+    still running when the run stops)."""
+    calls = [(e['observed_seconds'], e['call'].lower()) for e in timeline or []]
+    windows = []
+    for at, call in calls:
+        if 'game.startgame(' in call:
+            end = next((t for t, c in calls if t > at and 'game.getmatchsummary(' in c), None)
+            windows.append((at + settle_seconds, end))
+    return windows
+
+
+def memory_checks(samples, start_seconds, timeline=None, max_growth_mb=64.0, max_transition_mb=256.0,
+                  min_samples=6, settle_seconds=20.0):
+    """Growth of the game's private bytes (POSIX: RSS) during play, and how far scene changes reach.
 
     A fight streams assets for its first seconds, so the baseline is the highest
-    of the first three samples after `start_seconds`. Growth is the last sample
-    minus that. The limit is a guard against a leak that grows every second, not
-    a tuned budget; one fight is too short to show a slow one.
+    of the first three samples after `start_seconds`. Growth is measured in
+    comparable settled scenes (issue #166): the highest of the last three samples
+    inside the last match's settled fight window, minus the baseline. A sample
+    taken in a scene change measures what the loaders and the allocator hold at
+    that moment (decode buffers in flight, glibc arenas of the decode workers,
+    the replacement cache filling to its budget), so the end of the run and the
+    peak are reported, and bounded, separately as `performance.memory_transition`.
+
+    Without a timeline, or when the first or last fight window holds fewer than
+    three samples, growth falls back to the last sample (`method: endpoint`).
+    The limit is a guard against a leak that grows every second, not a tuned
+    budget; one fight is too short to show a slow one, which is what the
+    repeated-cycle route `fight-cycles` is for.
     """
     play = [s for s in samples if s['seconds'] >= start_seconds]
     if len(play) < min_samples:
         return [assertion('performance.memory_evidence', False, 'too few memory samples during play', samples=len(play))]
+    mb = lambda value: round(value / 1048576.0, 1)
     baseline = max(s['private_bytes'] for s in play[:3])
-    growth = (play[-1]['private_bytes'] - baseline) / 1048576.0
-    peak = max(s['private_bytes'] for s in play) / 1048576.0
-    return [assertion('performance.memory_growth', growth <= max_growth_mb,
-                      'private bytes at the end of play against the start of play',
-                      growth_mb=round(growth, 1), limit_mb=max_growth_mb, baseline_mb=round(baseline / 1048576.0, 1),
-                      peak_mb=round(peak, 1), samples=len(play), seconds=play[-1]['seconds'] - play[0]['seconds'])]
+    peak = max(s['private_bytes'] for s in play)
+    windows = [[s['private_bytes'] for s in play if s['seconds'] >= lo and (hi is None or s['seconds'] < hi)]
+               for lo, hi in fight_windows(timeline, settle_seconds)]
+    settled = len(windows) > 0 and len(windows[0]) >= 3 and len(windows[-1]) >= 3
+    if settled:
+        final = max(windows[-1][-3:])
+        cycles = [mb(max(w[-3:]) - baseline) for w in windows if len(w) >= 3]
+        growth_metrics = dict(method='settled', matches=len(windows), cycle_growth_mb=cycles)
+        detail = 'private bytes late in the last match against early in the first, settled fight samples only'
+    else:
+        final = play[-1]['private_bytes']
+        growth_metrics = dict(method='endpoint')
+        detail = 'private bytes at the end of play against the start of play'
+    growth = (final - baseline) / 1048576.0
+    checks = [assertion('performance.memory_growth', growth <= max_growth_mb, detail,
+                        growth_mb=round(growth, 1), limit_mb=max_growth_mb, baseline_mb=mb(baseline),
+                        final_mb=mb(final), peak_mb=mb(peak), samples=len(play),
+                        seconds=play[-1]['seconds'] - play[0]['seconds'], **growth_metrics)]
+    if settled:
+        reach = (peak - baseline) / 1048576.0
+        checks.append(assertion('performance.memory_transition', reach <= max_transition_mb,
+                                'highest sample of play (scene changes included) against the baseline',
+                                peak_over_baseline_mb=round(reach, 1), limit_mb=max_transition_mb,
+                                end_over_baseline_mb=mb(play[-1]['private_bytes'] - baseline),
+                                end_over_last_fight_mb=mb(play[-1]['private_bytes'] - final)))
+    return checks
 
 
 def environment_identity():

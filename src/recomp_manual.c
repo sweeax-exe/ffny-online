@@ -50,7 +50,10 @@
 #include "hooks/combo_log.h"
 #include "hooks/memcard_fast.h"
 #include "patches/picture.h"
+#include "patches/cheats.h"
+#include "patches/online_guard.h"   /* cheats refused while online */
 #include "patches/menu_geometry.h"
+#include "patches/cinema_timing.h"
 
 /* Crowd test controls (src/hooks/crowd_control.c, RECOMP_TEST_CROWD; off unless set). */
 void defjam_crowd_match_start(void);
@@ -70,6 +73,8 @@ void sub_001A50B0_enter(void)
 {
     if (defjam_test_observations_enabled())
         defjam_test_health_begin(MEM32(g_esp + 4), MEM32(g_esp));
+    if (!ffny_online_locked())
+        cheats_health_change(); /* [cheats] infinite_health, no_regen (src/patches/cheats.c); never online */
 }
 void sub_001A6870_enter(void)
 {
@@ -102,6 +107,8 @@ void sub_00087700_enter(void)
     if (combo_log_on()) combo_log_step();
     s_ws_hud_live = 1;
     ws_hud_heartbeat();
+    if (!ffny_online_locked())
+        cheats_fight_step();    /* [cheats] fight cheats (src/patches/cheats.c); never online */
 }
 /* The match's update (thiscall; the match at 0x349760, its state at +0x2D820).
  * Only states 5 and 8 run the simulation step above; any other state (intro,
@@ -126,6 +133,7 @@ void sub_001A4D90_enter(void)
     defjam_crowd_match_start();
     netplay_on_match_start();
     crowd_guard_match_start();
+    cheats_match_start();       /* [cheats] (src/patches/cheats.c): a step count and logs only */
     if (combo_log_on()) combo_log_match_start();
 }
 /* Combo log (RECOMP_COMBO_LOG=1, src/hooks/combo_log.c): one hit, cdecl (attacker, defender,
@@ -327,6 +335,7 @@ void sub_000AA0D0_enter(void)
     defjam_crowd_seed(g_ecx, g_esp);
     netplay_on_seed(g_esp, 2, g_ecx);
 }
+void sub_000C8820_enter(void) { defjam_test_logic_seed(g_ecx, g_esp); }
 /* Every draw (RECOMP_TEST_DRAWS): the C runtime's rand, the match generator, and the two
  * wrappers the object-form generators are drawn through; then the background crowd's update. */
 void sub_00200820_enter(void) { defjam_test_draw(1, MEM32(g_esp)); }
@@ -938,10 +947,21 @@ void sub_0002DFF0_enter(void) { scene_launcher_mode_enter(); }
 /* The developer run module, rebuilt from the host (src/hooks/dev_module.c): the manager's tick
  * queues it on request; its methods are traced. RECOMP_DEV_MODULE; off unless set. */
 static void screen_swap_guard(void);    /* below: a swap with no screen loaded */
-void sub_00077040_enter(void) { screen_swap_guard(); dev_module_manager_enter(); }
+void sub_00077040_enter(void)
+{
+    screen_swap_guard();
+    dev_module_manager_enter();
+    if (!ffny_online_locked())
+        cheats_game_tick();     /* Story cheats, src/patches/cheats.c; never online */
+}
 void sub_00077C40_enter(void) { dev_module_trace(1); }
 void sub_00077A40_enter(void) { dev_module_trace(3); }
 void sub_00077B20_enter(void) { dev_module_trace(4); }
+
+/* v0.16 direct callers reach this wrapper too; retain the generated renderer.
+ * No guest registers or return/stack words are changed by the wrapper itself. */
+extern void sub_000766B0_gen(void);
+void sub_000766B0(void) { defjam_cinema_render(sub_000766B0_gen); }
 void sub_00077DD0_enter(void) { dev_module_trace(7); }
 /* Observe both sides of the calibrated fighter pad-consumption routine.
  * v0.16's manual dispatch sends direct calls through this wrapper too. */
@@ -1276,8 +1296,10 @@ void sub_0025FB7C(void)
  * the delay it stored at +0x1A90), so the same shift goes into that stored
  * delay and the title keeps it instead of correcting it away. Only while the
  * loop runs at the clock's rate (its period within 2%), so a slow host still
- * catches up as before. RECOMP_FRAME_CLOCK_LOCK=0 (or RECOMP_TEST_FRAME_CLOCK_LOCK=0)
- * turns the steering off; RECOMP_FRAME_CLOCK_TRACE=1 (or RECOMP_TEST_...) logs the
+ * catches up as before. [display] frame_clock_lock = false, RECOMP_FRAME_CLOCK_LOCK=0 (or
+ * RECOMP_TEST_FRAME_CLOCK_LOCK=0) turns the steering off (FFNY Online: a switch since the upstream
+ * v1.1.1 merge, so an online problem can be tested without it; it moves only when the host
+ * presents, not what a simulation step computes); RECOMP_FRAME_CLOCK_TRACE=1 (or RECOMP_TEST_...) logs the
  * steps per frame every 10 s either way. */
 #define FRAME_CLOCK_OBJ    0x003A0178u   /* the clock: period +0x1A80, last arm +0x1A88, stored delay +0x1A90 */
 #define FRAME_CLOCK_CB     0x000D7EA0u   /* its callback */
@@ -1295,7 +1317,11 @@ static int fc_env(const char *name, const char *test_name)
 static int fc_lock_on(void)
 {
     static int on = -1;
-    if (on < 0) on = fc_env("RECOMP_FRAME_CLOCK_LOCK", "RECOMP_TEST_FRAME_CLOCK_LOCK") != 0;
+    if (on < 0) {
+        int env = fc_env("RECOMP_FRAME_CLOCK_LOCK", "RECOMP_TEST_FRAME_CLOCK_LOCK");
+        on = env >= 0 ? env : recomp_settings_get("display", "frame_clock_lock", 1) != 0;
+        fprintf(stderr, "[FRAME-CLOCK] steering %s (issue #140; [display] frame_clock_lock)\n", on ? "on" : "off");
+    }
     return on;
 }
 static int fc_trace_on(void)
@@ -1711,6 +1737,8 @@ static void funccall_hook(void)
     }
     defjam_unlock_all_on_funccall(text);   /* RECOMP_UNLOCK_ALL, src/patches/dev_unlock.c */
     options_audio_before_funccall(text);   /* the saved volumes, once loaded (options_audio.c) */
+    if (!ffny_online_locked())
+        cheats_on_funccall(text);          /* Story tracking and Story cheats, src/patches/cheats.c; never online */
     sub_00068BA0();
     options_audio_after_funccall(text);
     /* RECOMP_FE_INJECT: commands of a test's own, after a chosen call (src/hooks/fe_inject.c). */
@@ -1948,6 +1976,8 @@ static void fe_custom_ctrl_guard(void)
 
 recomp_func_t recomp_lookup_manual(uint32_t xbox_va)
 {
+    if (xbox_va == 0x000766B0u)
+        return sub_000766B0;
     if (xbox_va == 0x000689B0u)         /* the front end's custom-control draw: freed controls */
         return fe_custom_ctrl_guard;
     if (xbox_va == 0x001BAA00u && input_latency_on())
@@ -2331,6 +2361,23 @@ void sub_001FBE1E(void)
  */
 void sub_000D9AF0_enter(void) { picture_tint_draw_enter(); }
 void sub_00028460_enter(void) { picture_quad_color_enter(); }
+
+/*
+ * The rest of the venue post effects ([display] color_tint, scratches). sub_000D8C40 draws the
+ * current variance each frame (its entry logs it with RECOMP_POSTFX_TRACE=1); sub_000D8AD0 is
+ * the film scratch overlay it calls when the variance's ScratchesEnable is set (thiscall, no
+ * arguments, plain ret), skipped when scratches are off.
+ */
+void sub_000D8C40_enter(void) { picture_postfx_enter(); }
+extern void sub_000D8AD0_gen(void);
+void sub_000D8AD0(void)
+{
+    if (!picture_scratches_on()) {
+        g_esp += 4;     /* thiscall, no arguments: the return address */
+        return;
+    }
+    sub_000D8AD0_gen();
+}
 
 /*
  * Widescreen (src/patches/widescreen.c, docs/widescreen/02-design.md).

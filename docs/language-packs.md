@@ -60,9 +60,28 @@ starts the game in French: menus, create-a-fighter, results and the Story subtit
 shows in every cutscene by itself. The voices are English, and so is the menu icon art, which the disc has
 in English only. No download is needed.
 
-A language mod takes the place of this setting: a pack translates the English string table, so while one is
-on the game starts in English for the pack to replace, and the log says `[LANG] game language french not
-used: ...`. A French language mod could still carry art or text the built-in translation lacks.
+A language mod takes the place of this setting. By default it translates the English slot, so while one
+is on the game starts in English and the log says `[LANG] game language french not used: ...` if French
+was selected. A pack can instead declare that it replaces the French slot, as described below.
+
+### Mods built on the French slot
+
+A translation whose text and artwork follow the game's French layout can set `base=french` in the
+`[language]` section of `language.ini`. It translates `cmfren.loc`, `mcfr.loc` and the French-selected art
+instead of their English counterparts. While that pack is successfully in use, the game starts in
+French for it to replace, regardless of the player's Game language setting. Players only need to enable
+the mod; they do not need to select French manually. The log says `[LANG] the language mod '...' is
+built on the game's own French`.
+
+Omitting `base`, or setting `base=english`, keeps the existing English-slot behavior. Other values are
+rejected by the authoring tool, installer and runtime. Disabling a pack, or refusing it because its
+deltas do not match the dump, restores the normal Game language setting. A pack's `language=pt-BR`
+identifies the translation; it does not choose the slot or translate any text itself.
+
+French-base support requires Recomp 1.1.0 or newer. Older releases ignore this key and start in English
+while applying the pack's deltas. A catalogue version using `base=french` must set `min_recomp` to
+`1.1.0` or newer; the general 0.13.0 minimum below is not sufficient for these packs. Source patches
+and custom game executables do not belong in the mod ZIP.
 
 ## With texture packs (HD, widescreen menus)
 
@@ -118,8 +137,8 @@ Where things are, on the USA disc:
 
 | What | Where |
 |---|---|
-| Menu, HUD and Story text, including subtitles | `assets/misc.viv`, entry `cmusen.loc` (UTF-16 string table; `@` and `#` are the game's line-break markup). The game loads this table for its USA language; put your translation here and no code change is needed |
-| Memory-unit messages | `assets/misc.viv`, entry `mcusen.loc` |
+| Menu, HUD and Story text, including subtitles | `assets/misc.viv`, entry `cmusen.loc` (UTF-16 string table; `@` and `#` are the game's line-break markup). The default English base loads this table; a `base=french` pack translates `cmfren.loc` instead |
+| Memory-unit messages | `assets/misc.viv`, entry `mcusen.loc` (`mcfr.loc` for a French-base pack) |
 | Subtitle font (add the accented letters your language needs) | `fonts/befonts.viv`, entry `Subtitl.xfn` |
 | Fight HUD art | `assets/misc.viv`, entry `hud.xsh` |
 | Menu art with words in it | `screens/screens.viv`, one archive per screen, its `.xsh` entry |
@@ -179,6 +198,9 @@ default.xbe = patches/005-default.xbe.djd
 ```
 
 - Comments are whole lines starting with `;` or `#`; text after a value is part of it.
+- `[language] base` is optional: `english` (the default) or `french`, in lowercase. Translate the
+  resources selected by that slot. Changing a manifest target from a French entry to an English one
+  does not convert a delta: their source hashes differ, so the resources and deltas must be rebuilt.
 - A target is a path in the dump (forward slashes, matched without regard to case), then `|` and an entry
   name for each archive level, as the game names them itself. ASCII letters, digits, `_`, `-`, `.` and `/`;
   no `..`. Delta paths are relative to the pack and end in `.djd`.
@@ -202,5 +224,5 @@ produce identical files.
 |---|---|---|---|
 | Spanish | `es-zarf`, from "Parche textos en español DJFFNY" v1.1 ([source](https://github.com/MODZARF/Parche-textos-en-espanol-DJFFNY-Compatible-con-Xbox-360)) | ZARF (MOD-ZARF) | CC BY-NC-SA 4.0; a conversion exists and awaits its author's agreement before it is shared |
 
-French text is on the USA disc already (`cmfren.loc`); a French pack would point the USA slot at it.
+French text is on the USA disc already (`cmfren.loc`); use the [built-in French setting](#the-games-own-french), which needs no separate pack.
 A Brazilian Portuguese translation exists for the European PS2 release; porting it needs its author's permission.

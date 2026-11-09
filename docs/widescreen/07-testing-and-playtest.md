@@ -1,19 +1,19 @@
 # 07 — Testing, beta release and play-test
 
-## 1. Automated checks (agents run these)
+## 1. Automated evidence
 
-| Check | When | How | Pass |
-|---|---|---|---|
-| Off is unchanged | every commit | `python scripts/regress.py --quick` (harness forces widescreen off) | green, goldens identical |
-| Full regression | before merge | `python scripts/regress.py` | green (14 checks) |
-| Maths | every commit touching placement or canvas | unit tests (WS-10) | green |
-| Settings | WS-0 and later | settings and reference unit tests | green |
-| Widescreen smoke | every game-side widescreen commit | `harness.py run fight --widescreen 16:9`, `run intro --widescreen 16:9`, `run ffa --widescreen 21:9` | no crash, `[WS]` lines, presents within 5% of the 4:3 run, save restored |
-| Wide frame signatures | WS-10 onward | `regress.py --only widescreen` vs `<data>/test-baselines/widescreen/` | match (review and re-baseline intentionally) |
-| Determinism | once per milestone | `replay` with widescreen on vs off | same fight stream; crowd-only differences documented |
-| Side fill never on fights | WS-8 | request counter in the `fight` route's match | 0 |
-| Debug layer | WS-1a | `win-x64-debug` fight at 16:9 | no D3D11 debug messages |
-| Vulkan | WS-1b | Linux build on the Deck: quick regress + 16:10 fight | green |
+Use the [current acceptance policy](../02-test-plan.md), [harness reference](../09-testing-harness.md)
+and release cadence. Quick/affected-area checks belong on a runtime PR; a full
+run belongs on each platform's combined release candidate. Historical14-check
+counts are not the present check inventory.
+
+Compare stock4:3goldens with widescreen off. For a local wide smoke, pass the
+supported numeric override through harness `--env`, for example
+`python scripts/harness.py run fight --env RECOMP_WS_ASPECT=1.7777778 --png`.
+Choose actual routes from `harness.py routes`; the old planned `--widescreen`
+CLI and `regress.py --only widescreen` were not implemented. Report source,
+settings, canvas, save restoration, faults and actual captured dimensions.
+Frame-rate and view correctness remain separate claims.
 
 ## 2. Aspect test matrix
 
@@ -24,7 +24,7 @@ Run the smoke set at each, plus a window resize and Alt+Enter at each:
 | 4:3 window (1280x960) | off | baseline unchanged |
 | 1920x1080 | 16:9 | main target |
 | 1280x800 (Deck) | 16:10 | handheld; thin cutscene bars |
-| 2560x1080 / 3440x1440 | 21:9 | ultrawide; HUD in 16:9 box; cutscene box |
+| 2560x1080 / 3440x1440 | 21:9 | ultrawide; HUD in16:9safe box; cinema full-height Hor+ |
 | 5120x1440 | 32:9 | experimental; FOV near 97° in the widest venue |
 | 1280x1024 | 5:4 | narrower than 4:3: widescreen inactive, bars |
 | 16:9 canvas in a 16:10 window | 16:9 | present fit with bars |
@@ -32,32 +32,12 @@ Run the smoke set at each, plus a window resize and Alt+Enter at each:
 A machine without those monitors can use window sizes (`window_width`/`window_height`); full-screen checks need the real
 displays or the Deck.
 
-## 3. Preview before the beta (2026-10-11)
+## 3. Historical release context
 
-The owner asked for an early look while the beta is built. The branch build with the experiment switched on is a
-playable **preview**: run the game with `RECOMP_WS_ASPECT=1.7778` (16:9) or `1.6` (16:10). The 3D (fights, free-for-all,
-Story hub, cutscenes) is the real Hor+ result, and the window presents at that aspect without touching
-`settings.ini`. Everything 2D (menus, HUD, movies, loading posters) is **stretched**, because the 2D work packages are
-not in yet; ignore that and judge the 3D: fight framing in 1v1 and free-for-all, venue edges, special cameras,
-cutscenes. On Windows, from the worktree root:
-
-```powershell
-$env:RECOMP_WS_ASPECT = "1.7778"; .\build\win-x64-release\defjam_recomp.exe
-```
-
-## 4. Release plan (updated 2026-10-13)
-
-Vlad requested the widescreen release after Windows, Linux and Mac validation,
-then chose **v0.9.0** because v0.8.0 already shipped the setup updater.
-Use the stable source-release workflow in `docs/releasing.md`; the widescreen
-feature remains labelled **beta** and **off by default**. This version change
-does not make unswept venues or experimental ultrawide shapes fully validated.
-
-Release notes describe the tested routes, platform differences and retained
-known issues. The Mac evidence is in [09-macos-validation.md](09-macos-validation.md).
-The original beta sequence and eventual automatic-default proposal remain
-research plans; changing the default requires a later decision and the venue
-sweep. Continue the hand play-test below at 16:9 and 16:10, and record any gaps.
+The original October11anamorphic preview had stretched2D and is not the current
+renderer. v0.9.0 shipped the implemented wider canvas/classifier; its platform
+results remain in release notes and the Mac validation record. Later fresh-setting
+Auto defaults do not retroactively validate unswept experimental aspects.
 
 ## 5. Play-test script (owner, by hand)
 
@@ -118,3 +98,10 @@ and the timer centred. Notes: a single 2 s window per run dips to about 59 prese
 appears at 4:3 too); the harness uses a 1280x960 window unless a settings file asks for full screen, so use
 the settings-file run for the real output size. Not covered: pause and popups, shops, the Story hub, and the
 by-hand checklist in section 5, which still needs a person on the Deck.
+
+
+## Acceptance distinctions retained from the original packages
+
+The original packages' remaining visual checks are acceptance criteria, not completed coverage: compare wide HUD bar width/height against 4:3 within 2%; check all four corners, pause/popups/tutorials, full-width tints/dimmers and hidden slide-ins; confirm 2Dpanels align with 3Dcharacter/head/gym previews; check cutscene→creator/menu transitions for framing flashes; confirm point glows remain round and movies retain audio sync. Resize/Alt+Enter must fit the fixed canvas, without implying live aspect switching. Capture-free fight pacing targets no more than 5%loss against a matched 4:3 baseline; debug-layer diagnostics and no ambient fill over active 3Dneed their own evidence. Existing routes do not prove every venue, finisher, language, late-Story screen or ultrawide camera.
+
+Coverage work is tracked in [issues172–176](https://github.com/vyanhursky/DefJamFFNY-recomp/issues?q=is%3Aissue+172+OR+173+OR+174+OR+175+OR+176), rather than a second package backlog. Renderer/gameplay defects already tracked in 98/141/161/162/166 remain distinct from missing test evidence. Use the current [release cadence](../releasing.md) and supported harness `--env RECOMP_WS_ASPECT=...`/wide-capture options; the old `harness --widescreen` and `regress --only widescreen` examples were proposed interfaces, not demonstrated commands.

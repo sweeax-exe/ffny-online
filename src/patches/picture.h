@@ -12,12 +12,15 @@ extern "C" {
  * brightness (the title's ramp is off). Hands the composed ramp to the presentation pass. */
 void picture_title_ramp(const uint8_t *ramp);
 
-/* Read [display] brightness, vignette and vignette_strength; call at start-up and on a change. */
+/* Read [display] brightness, vignette, vignette_strength, color_tint and scratches; call at
+ * start-up and on a change. */
 void picture_apply_settings(void);
 
 /* Guest hooks (src/recomp_manual.c). */
 void picture_tint_draw_enter(void);
 void picture_quad_color_enter(void);
+void picture_postfx_enter(void);
+int picture_scratches_on(void);
 
 #ifdef __cplusplus
 }

@@ -301,6 +301,29 @@ def online_tail(matches):
         parts.append(FIGHT_TAIL.replace("@game.startgame(", f"@game.startgame(#{k}"))
     return ",".join(parts)
 
+# Repeated One on Ones for the memory check (issue #166). The runtime's pad script
+# takes at most 32 anchors and 4095 characters, which caps this at five matches.
+FIGHT_CYCLES = 5
+
+
+def fight_cycles_tail(matches):
+    """Pad-script tail for `matches` One on Ones at the default venue in one launch: each
+    match's scripted fighter, then through the summary back to the same match type and
+    fighters. Ends by holding the battle menu. Each match asks for the summary twice."""
+    def fighter(k):
+        return FIGHT_TAIL if k == 1 else FIGHT_TAIL.replace("@game.startgame(", "@game.startgame(#%d" % k)
+    parts = [fighter(1)]
+    for k in range(2, matches + 1):
+        parts += ["@game.getmatchsummary(#%d,a:4:80:3:0.3" % (2 * (k - 1) - 1),
+                  "@getscreeninfo(options/battleid#%d,start:6:30:4:0.3" % k,
+                  "@controllerbind(0#%d,a:5:40:4:0.3" % k,
+                  "@controllersetup(0#%d,right:4:4.3,a:6:90:4:0.3" % k,
+                  fighter(k)]
+    parts.append("@game.getmatchsummary(#%d,a:4:60:3:0.3" % (2 * matches - 1))
+    parts.append("@getscreeninfo(battle/cmtype#%d,back:9999:10000" % (matches + 1))
+    return ",".join(parts)
+
+
 ROUTES = {
     "boot": {
         "help": "start-up to the main menu, nothing pressed there",
@@ -429,12 +452,29 @@ ROUTES = {
         "until": "game.startgame(", "after": 150, "secs": 520,
         "shots": "@game.startgame(,60,140",
     },
+    "battle-map-edges": {
+        "help": "Free For All venue map through the eastern pins to Chop Shop and back (widescreen clip check)",
+        "stages": FFA_SETUP + [
+            "getscreeninfo(battle/chsvenue=right@7;right@13;down@19;down@25;right@31;left@37;up@43",
+        ],
+        "until": "getscreeninfo(battle/chsvenue", "after": 49, "secs": 300,
+        "shots": "@getscreeninfo(battle/chsvenue,5,11,17,23,29,35,41,47",
+        "env": {"RECOMP_TRANS_SHOT_NATIVE": "1"},
+    },
     "two-matches": {
         "help": "One on One to its result, back through the menus, then a Free For All to its result, in one launch",
         "stages": ONE_ON_ONE_SETUP + ["controllersetup(1,=a@4+4x6"],
         "tail": ",".join([FIGHT_TAIL, SECOND_MATCH_FFA, FIGHT_TAIL.replace("@game.startgame(", "@game.startgame(#2")]),
         "until": "game.getmatchsummary(#3", "after": 6, "secs": 1800,
         "shots": "@game.startgame(,60",
+    },
+    "fight-cycles": {
+        "help": "Five One on Ones at the default venue in one launch, then the battle menu held for 90 seconds "
+                "(repeated scene cycles for the memory check, issue #166)",
+        "stages": ONE_ON_ONE_SETUP + ["controllersetup(1,=a@4+4x6"],
+        "tail": fight_cycles_tail(FIGHT_CYCLES),
+        "until": "game.getmatchsummary(#%d" % (2 * FIGHT_CYCLES - 1), "after": 90, "secs": 600 * FIGHT_CYCLES,
+        "shots": "",
     },
     "versus": {
         "help": "One on One between two pads: both press START, each picks a fighter, default venue",
@@ -504,6 +544,18 @@ ROUTES = {
         ],
         "until": "getscreeninfo(story/gym", "after": 26, "secs": 300,
         "shots": "@getscreeninfo(story/gym,13,23",
+        "story": True,
+    },
+    "story-map-shops": {
+        "help": "Story map -> Shop District -> clothing and gym pins (widescreen border check, #162)",
+        "stages": [
+            "getscreeninfo(intmain/mainmenu=a@6",
+            "getscreeninfo(options/userid=down@4;down@6;a@9",
+            "getscreeninfo(story/crib=down@4;a@6;a@10;a@16;down@24",
+        ],
+        "until": "crib.entermap(", "after": 18, "secs": 300,
+        "shots": "@getscreeninfo(story/crib,13,19,26",
+        "env": {"RECOMP_TRANS_SHOT_NATIVE": "1"},
         "story": True,
     },
     "unlock": {
@@ -1024,7 +1076,7 @@ def run_game(name, stages=(), tail="", shots="", secs=240, preset=RELEASE_PRESET
         raise SystemExit("not built: %s (scripts/build.ps1 -Preset %s, or scripts/pipeline.py build --preset %s)"
                          % (exe, preset, preset))
     try:
-        build_state = pipeline_state.verify_build(Path(REPO), preset)
+        build_state = pipeline_state.verify_build(Path(REPO), preset, python=pipeline_state.RECORDED)
     except (OSError, ValueError, KeyError) as ex:
         raise SystemExit(str(ex)) from ex
     if not os.path.exists(os.path.join(REPO, "game", "default.xbe")):

@@ -14,28 +14,14 @@ $xbe = Join-Path $DataDir "extracted\default.xbe"
 python (Join-Path $PSScriptRoot "verify-dump.py") (Join-Path $DataDir "extracted"); if ($LASTEXITCODE) { throw "dump check failed" }
 New-Item -ItemType Directory -Force (Join-Path $tk "game_files") | Out-Null
 Copy-Item $xbe (Join-Path $tk "game_files\default.xbe") -Force
-python (Join-Path $PSScriptRoot "pipeline-state.py") begin-analysis --toolkit $tk
-if ($LASTEXITCODE) { throw "analysis input snapshot failed" }
-Push-Location $tk
-try {
-    python -m tools.xbe_parser game_files/default.xbe --json game_files/default_analysis.json
-    if ($LASTEXITCODE) { throw "XBE parser failed" }
-    $seedArgs = @()
-    if (Test-Path (Join-Path $repo "config\seed_functions.json")) { $seedArgs = @("--seed-functions", (Join-Path $repo "config\seed_functions.json")) }
-    python -m tools.disasm     game_files/default.xbe --force --extra-sections D3D,D3DX,DSOUND,XPP,XGRPH,DOLBY @seedArgs
-    if ($LASTEXITCODE) { throw "disassembly failed" }
-    python -m tools.func_id    game_files/default.xbe -v
-    if ($LASTEXITCODE) { throw "function identification failed" }
-    python -m tools.abi_analysis game_files/default.xbe -v
-    if ($LASTEXITCODE) { throw "ABI analysis failed" }
-    if ($Ghidra) {
-        $env:XBE = "game_files/default.xbe"
-        $env:GHIDRA_INSTALL_DIR = (Get-ChildItem (Join-Path $DataDir "tools\ghidra") -Directory | Select-Object -First 1).FullName
-        Write-Host "Ghidra naming: see tools/ghidra_naming/README (run_ghidra.sh is bash; use Git Bash or WSL)"
-    }
-} finally { Pop-Location }
-python (Join-Path $PSScriptRoot "pipeline-state.py") record-analysis --toolkit $tk
-if ($LASTEXITCODE) { throw "analysis state validation failed" }
+# The commands and their stage key live in pipeline-state.py, so pipeline.py runs the same ones.
+python (Join-Path $PSScriptRoot "pipeline-state.py") analyze --toolkit $tk
+if ($LASTEXITCODE) { throw "analysis failed" }
+if ($Ghidra) {
+    $env:XBE = "game_files/default.xbe"
+    $env:GHIDRA_INSTALL_DIR = (Get-ChildItem (Join-Path $DataDir "tools\ghidra") -Directory | Select-Object -First 1).FullName
+    Write-Host "Ghidra naming: see tools/ghidra_naming/README (run_ghidra.sh is bash; use Git Bash or WSL)"
+}
 $an = Join-Path $DataDir "analysis"
 New-Item -ItemType Directory -Force $an | Out-Null
 foreach ($d in "tools\disasm\output","tools\func_id\output","tools\abi_analysis\output","tools\recomp\output") {

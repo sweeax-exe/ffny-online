@@ -16,4 +16,4 @@ Never read a run log whole: it is hundreds of megabytes. Full guidance: `docs/ag
    `triage.py <log> --around LINE --context 30`, `--lines A:B`, `--grep REGEX --max 40` (`--last`), `--head N`, `--tail N`.
 4. Hangs are always `partial`: find the live thread (`scripts/native-stacks.py` on every host,
    `scripts/sample-threads.py` on Windows), then `scripts/guest-stack.py` (Windows). The watchdog's own stack is a scan.
-5. Record the finding in `PROGRESS.md` §6 with the log name.
+5. Record the finding/log name in the feature PR description; on main/release branches and main-only docs PRs use PROGRESS §6.

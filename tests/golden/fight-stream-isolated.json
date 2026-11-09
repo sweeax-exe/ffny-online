@@ -1,0 +1,12 @@
+{
+ "schema": 1,
+ "what": "SHA-256 of the game-state stream (scripts/test_evidence.state_stream) of the first 1800 fight steps of the `fight` route, run with --isolate-crowd",
+ "route": "fight",
+ "rng_seed": 20261006,
+ "step_input": "scenario_suite.step_input default",
+ "max_step": 1800,
+ "records": 79,
+ "sha256": "6f8b8f327f23872356582944bea6ceadbb7ef99a53a0ac1992a7ce2d39971a28",
+ "recorded": "2026-10-27, posix-release",
+ "note": "Same fight as fight-stream.json but with RECOMP_TEST_ISOLATE_CROWD=1 (docs/research/deck-determinism-98.md): the match logic's generators are seeded and the fighters meet no spectators, which changes how the fight plays. Record it with `python scripts/regress.py --only repeat --isolate-crowd --update-golden`; it counts as proven only when a second platform records the same hash."
+}

@@ -84,4 +84,28 @@ No normal controller settings were changed and no fix has been shipped from this
 
 The source and toolkit remain the exact released versions (pipeline-state verify-build and source diffs checked after the runs). The investigation report is the only untracked non-ignored change on this branch. Test scripts, generated code, executable, copied data and logs remain private. No changes were pushed or released. The worktree is retained for a potential diagnostic/fix follow-up; do not interpret its test-only zero-hold run as a recommendation to change the owner's settings.
 
-The paragraph above records the state at the end of the baseline investigation. The owner's subsequent request authorized new tracing; see the [tracing follow-up](input-latency-tracing-2026-10-30.md) for the current local changes, precise loss boundary, software timing and validation, and the [15-project survey](recomp-controller-input-practices-2026-10-30.md) for input design research.
+The paragraph above records the state at the end of the baseline investigation. The owner's subsequent request authorized new tracing; see the [tracing follow-up](input-latency-2026-10-30.md#observational-tracing-follow-up-2026-10-30) for the current local changes, precise loss boundary, software timing and validation, and the [15-project survey](recomp-controller-input-practices-2026-10-30.md) for input design research.
+
+
+## Observational tracing follow-up (2026-10-30)
+
+The follow-up instrumented the same v0.12.3 base without changing normal holding/polling behavior. Serial seed-314159 tests used SDL virtual input through host mapping, sampling, USB/OHCI and guest code, with `RECOMP_TEST_INPUT` unset: ten pairs of 20 ms X taps 70 ms apart, then ten pairs 170 ms apart, one second between pair starts. Every phase had 20 deliberate presses.
+
+| X rising edges | Default 120 ms, rapid / wider | Diagnostic 0 ms, rapid / wider |
+|---|---:|---:|
+| Script, SDL, mapped host, host read, raw USB sample and latch (each) | 20 / 20 | 20 / 20 |
+| Report after minimum hold and successful USB completion (each) | 10 / 20 | 20 / 20 |
+| Later pad-table/held observations | 10 / 20 | 20 / 20 |
+
+This places merging **after latching, in `min_hold` report construction**. The first press is reported immediately and its down level is extended; 120 ms is not a first-response delay. Zero hold preserved these pulses but does not guarantee arbitrarily short pulses survive guest cadence. The original virtual fixture also used trigger-axis zero as neutral, producing constant half-triggers near `0x78` / guest modifiers `0x3000`. This did not invalidate the isolated X edge boundary, but it prevents unmodified combat-animation claims. The transition implementation later fixed trigger neutral.
+
+The historical trace labeled its endpoint “fighter pad read.” Subsequent boundary work corrected `sub_001AD380` to CPU/AI-only: its human-pad observation was a later checkpoint, not the human cache writer. Keep these timing values as the earlier observed checkpoint distributions; the final transition report supplies the actual Battle writer and fighter-read measurements.
+
+| Observed path, median / p95 ms | Default rapid (10 retained) | Default wider (20) | Zero rapid (20) | Zero wider (20) |
+|---|---:|---:|---:|---:|
+| Mapped host → later input checkpoint | 28.57 / 38.36 | 25.79 / 28.18 | 25.59 / 28.80 | 26.66 / 29.29 |
+| USB completion → that checkpoint | 21.72 / 30.77 | 20.83 / 22.80 | 21.91 / 24.98 | 20.23 / 21.99 |
+
+Mapped-host → USB medians were 6.53, 4.59, 2.66 and 6.02 ms respectively. Default rapid script-setter → mapped-host median was 1.96 ms; SDL event receipt → publication was about 0.004 ms within one worker iteration, excluding earlier acquisition. Measured host poll medians were 2.32–2.50 ms, USB sampler 4.52–4.62 ms, report construction about 8.02 ms and later pad reads about 16.67 ms; the slowest host-poll interval in those windows was 4.96 ms. These are software cadences, not physical device report rates. Stage medians are separate distributions and must not be summed. Twenty presses per phase cannot establish population tail latency; ambiguous or >250 ms matches were excluded and the default rapid phase explicitly had ten merged/unmatched source presses. The next Present roughly 14 ms later does not identify visible attack onset.
+
+Tracing-on default/zero/control-off fights all passed 3/3 pacing checks: respectively 29/28/28 full-rate windows, 16.67 ms medians, and late presents 5/3,483 (0.144%), 5/3,360 (0.149%) and 6/3,359 (0.179%). Each reached combat without crash/watchdog/unresolved call and restored saves byte-identically. One run per condition detects a gross regression; it cannot prove zero tracing overhead or a statistical speed difference.

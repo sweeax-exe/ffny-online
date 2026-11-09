@@ -1,5 +1,8 @@
 # Input latency tracing
 
+> Dated evidence: this records the named build/release, not current pending work.
+> Current support and qualifications are in the release notes and GitHub Issues.
+
 The optional input trace follows controller state through the host, USB emulation and fighter input reader on one monotonic clock. Tracing is disabled by default and does not itself change input handling. The local investigation candidate also contains the separately enabled transition-retention correction described below. The implementation was built and exercised on Windows; macOS/Linux validation remains outstanding.
 
 ## Capture
@@ -76,7 +79,7 @@ Scripted phases are separated by gaps over three seconds. Without scripted marke
 
 The writer checkpoints metadata roughly once a second and drains when C exit handlers run. Harness termination and Windows window-close paths that use `ExitProcess` can leave `closed:0`; the analyzer excludes the uncheckpointed tail and distinguishes earlier windows with no reported loss from a complete capture. A missing sidecar, malformed row or nonzero loss/error counter prevents a clean attribution. Exit status is 0 for checkpointed windows without reported loss, 2 otherwise; inspect `trace_complete` separately. Whole-trace completion is required for claims about the whole session.
 
-See the [measured investigation](research/input-latency-tracing-2026-10-30.md), [transition correction](research/input-transition-fix-2026-10-30.md) and [15-project source survey](research/recomp-controller-input-practices-2026-10-30.md).
+See the [measured investigation](research/input-latency-2026-10-30.md#observational-tracing-follow-up-2026-10-30), [transition correction](research/input-transition-fix-2026-10-30.md) and [15-project source survey](research/recomp-controller-input-practices-2026-10-30.md).
 
 ## Optional late report refresh
 

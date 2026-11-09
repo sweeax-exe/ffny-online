@@ -7,7 +7,7 @@
 # SDL renderer (the launcher's own window) and Vulkan (the overlay drawn in the game's window), with
 # the SDL events fed in by src/hooks/pc_ui.cpp. The Win32 backend's own XInput polling is switched
 # off: the host input layer feeds the menu from every pad (SDL or XInput) instead. Elsewhere SDL3
-# and Vulkan must have been found (find_package) before this is included.
+# must have been found (find_package) before this is included, and Vulkan too for defjam_imgui.
 include_guard(GLOBAL)
 include(FetchContent)
 
@@ -28,7 +28,22 @@ set(DEFJAM_IMGUI_CORE
     ${imgui_SOURCE_DIR}/imgui_tables.cpp
     ${imgui_SOURCE_DIR}/imgui_widgets.cpp)
 
-if(WIN32)
+# Dear ImGui needs C++11 or later (constexpr ImVec2), and nothing sets a project-wide standard.
+# Apple's compiler still defaults to C++98, so each library asks for C++17, as the game and app do.
+function(defjam_imgui_cxx target)
+    target_compile_features(${target} PUBLIC cxx_std_17)
+endfunction()
+
+if(WIN32 AND DEFJAM_BUILD_APP)
+    # The app (src/app) draws with SDL's renderer on Windows too; the game keeps Win32 and D3D11.
+    add_library(defjam_imgui_sdl STATIC
+        ${DEFJAM_IMGUI_CORE}
+        ${imgui_SOURCE_DIR}/backends/imgui_impl_sdlrenderer3.cpp)
+    target_include_directories(defjam_imgui_sdl PUBLIC ${imgui_SOURCE_DIR} ${imgui_SOURCE_DIR}/backends)
+    target_compile_definitions(defjam_imgui_sdl PUBLIC IMGUI_DISABLE_DEBUG_TOOLS)
+    target_link_libraries(defjam_imgui_sdl PUBLIC SDL3::SDL3)
+    defjam_imgui_cxx(defjam_imgui_sdl)
+elseif(WIN32)
     add_library(defjam_imgui STATIC
         ${DEFJAM_IMGUI_CORE}
         ${imgui_SOURCE_DIR}/backends/imgui_impl_win32.cpp
@@ -36,12 +51,20 @@ if(WIN32)
     target_include_directories(defjam_imgui PUBLIC ${imgui_SOURCE_DIR} ${imgui_SOURCE_DIR}/backends)
     target_compile_definitions(defjam_imgui PUBLIC IMGUI_IMPL_WIN32_DISABLE_GAMEPAD IMGUI_DISABLE_DEBUG_TOOLS)
     target_link_libraries(defjam_imgui PUBLIC d3d11 dxgi d3dcompiler dwmapi)
+    defjam_imgui_cxx(defjam_imgui)
 else()
-    add_library(defjam_imgui STATIC
+    # defjam_imgui_sdl, the core and the SDL renderer, is all the app (src/app) needs; the game adds
+    # the Vulkan backend for the overlay, so only the game links the Vulkan loader.
+    add_library(defjam_imgui_sdl STATIC
         ${DEFJAM_IMGUI_CORE}
-        ${imgui_SOURCE_DIR}/backends/imgui_impl_sdlrenderer3.cpp
-        ${imgui_SOURCE_DIR}/backends/imgui_impl_vulkan.cpp)
-    target_include_directories(defjam_imgui PUBLIC ${imgui_SOURCE_DIR} ${imgui_SOURCE_DIR}/backends)
-    target_compile_definitions(defjam_imgui PUBLIC IMGUI_DISABLE_DEBUG_TOOLS)
-    target_link_libraries(defjam_imgui PUBLIC SDL3::SDL3 Vulkan::Vulkan)
+        ${imgui_SOURCE_DIR}/backends/imgui_impl_sdlrenderer3.cpp)
+    target_include_directories(defjam_imgui_sdl PUBLIC ${imgui_SOURCE_DIR} ${imgui_SOURCE_DIR}/backends)
+    target_compile_definitions(defjam_imgui_sdl PUBLIC IMGUI_DISABLE_DEBUG_TOOLS)
+    target_link_libraries(defjam_imgui_sdl PUBLIC SDL3::SDL3)
+    defjam_imgui_cxx(defjam_imgui_sdl)
+    if(TARGET Vulkan::Vulkan)
+        add_library(defjam_imgui STATIC ${imgui_SOURCE_DIR}/backends/imgui_impl_vulkan.cpp)
+        target_link_libraries(defjam_imgui PUBLIC defjam_imgui_sdl Vulkan::Vulkan)
+        defjam_imgui_cxx(defjam_imgui)
+    endif()
 endif()

@@ -43,10 +43,11 @@ void pc_input_apply(void);
  * handle the message as it did. Call from the window's own thread. */
 #if defined(_WIN32)
 void pc_input_window_message(HWND window, UINT msg, WPARAM wp, LPARAM lp);
-#else
-/* The same for a window that is not Win32's (src/host_posix.c): a key or
- * mouse button by its Windows virtual-key code, and wheel notches (positive
- * is away from the user). */
+#endif
+#if !defined(_WIN32) || defined(DEFJAM_APP)
+/* The same for a window that is not Win32's (src/host_posix.c, and the app's
+ * SDL window on every platform): a key or mouse button by its Windows
+ * virtual-key code, and wheel notches (positive is away from the user). */
 void pc_input_host_key(int vk, int down);
 void pc_input_host_wheel(int notches);
 #endif

@@ -1,5 +1,11 @@
 # Setup installers
 
+Most players want the app: see the [install guide](install-guide.md). This page covers the older
+`DefJamSetup` tools. Windows and macOS setup assets are available on releases before v1.1.0;
+Linux setup assets were published through v0.13.0. From v1.1.0, all platforms publish only the app
+packages. The legacy setup tools are still built and tested in CI, but are not attached to releases.
+Use the app's **Use an existing installation** option to keep an older installation's data.
+
 Setup contains tools and source and compiles your own USA Xbox dump locally. It
 exists for Windows x64, macOS on Apple Silicon (see
 [macOS setup](#macos-setup-apple-silicon)) and x86-64 Linux including the Steam Deck
@@ -66,7 +72,7 @@ folder; uninstallation preserves them with the rest of the player's data.
 The packaged v0.6.0 installer was run end to end with this option from a real dump,
 and the installed game loaded the generated packs; see
 [release validation](research/hd-v060-release-validation.md) for what was and was
-not exercised. See also [HD setup integration](research/hd-setup-integration.md).
+not exercised. See also [HD setup integration](research/hd-v060-release-validation.md#prototype-controls-and-artwork-acceptance-2026-10-08).
 
 ## Silent mode
 
@@ -91,9 +97,8 @@ No dump, game data or generated code is uploaded.
 
 ## Update, repair and uninstall
 
-The updater implementation in [PR #18](https://github.com/vyanhursky/DefJamFFNY-recomp/pull/18)
-adds **Fetch GitHub releases**, a release picker and an operation picker to all
-three setup wizards. It is not yet in a published setup release. The bundled
+Since v0.8.0, **Fetch GitHub releases**, a release picker and an operation picker
+are available in all three setup wizards. The bundled
 release remains available offline; fetching chooses the newest stable release
 with a complete setup for this platform. Releases without host assets are shown
 as unavailable. The CLI's `--release latest` follows GitHub's latest stable endpoint
@@ -106,6 +111,17 @@ Clean Update, Downgrade and Clean Rebuild use fresh analysis, lifted code and
 compiler objects in a separate attempt directory. Repair may reuse verified
 analysis/lift work. Every successful attempt gets a distinct build directory.
 The stable launcher and receipts switch through a recoverable activation journal.
+
+On Windows, starting setup from an older installed shortcut briefly restarts the app
+directly, then resumes the same operation after the old shortcut wrapper exits. This
+lets setup replace `DefJamLauncher.exe`. Standalone setup reports a running wrapper
+before recovery or compilation; close the app and its background `DefJamLauncher.exe`,
+then start `DefJamRecompiled.exe` directly or run standalone setup again. A wrapper
+opened during a build also stops activation with this message. macOS and Linux
+forwarders already replace themselves with the app (`exec`), so they need no restart.
+On all platforms, recovery leaves files that already match their backup unchanged.
+If activation and recovery both fail, the error includes both failures and setup
+keeps the recovery journal and backups for the next retry.
 Close the game first; setup, data and launcher lifetime locks prevent overlapping
 operations. If interrupted activation blocks the launcher, rerun setup to recover.
 Previous successful builds are retained, so repeated updates consume disk space (about 0.9 GB each on Linux);
@@ -132,17 +148,17 @@ Repair an existing historical installation using its original setup directly.
 The new updater refuses remote historical repair/update on an existing destination.
 Historical versions cannot be downgrade targets. Future downgrade requires both
 receipts/payloads to declare the same supported updater protocol and data schema;
-no published future pair exists yet. Local synthetic future packages test this
-path without publishing fake releases. Linux acceptance for these new operations
+Do not infer downgrade compatibility from version order alone. Synthetic future
+packages exercise this path without publishing fake releases. Linux acceptance for these new operations
 is limited to Steam Deck/SteamOS. See the [test contract](setup-update-test-plan.md)
-and [current results and pending gates](setup-update-test-results.md).
+and [initial v0.8 updater acceptance evidence](setup-update-test-results.md).
 
 The following updater CLI options are forwarded by all packaged entry points:
 `--operation auto|install|repair|update|downgrade|rebuild`, `--release vX.Y.Z|latest`,
 `--bundled-only`, `--list-releases`, `--releases-file PATH` and `--download-cache PATH`.
 Omit `--dump` for recognized installed data; install/data locations remain required
 unless the data location can be read from the existing receipt. `--release` and
-`--bundled-only` are mutually exclusive. Example for a future published target:
+`--bundled-only` are mutually exclusive. Example for updating to the latest compatible release:
 
 ```powershell
 DefJamSetup.exe --silent --operation update --release latest --install-dir "D:\Games\DefJamApp" --data-dir "D:\Games\DefJamData"
@@ -288,11 +304,18 @@ same `ditto` and `xattr` calls on a quarantined archive).
 
 ## Linux setup
 
+Since 1.0.0 Linux releases attach only the app, `DefJamRecompiled-<version>-linux-x86_64.AppImage`,
+which carries this same payload. The setup archive below was attached to releases up to v0.13.0;
+`scripts/build-setup-linux.sh` still builds it (CI runs its wizard smoke test), but it is not published.
+A v0.13.0 Linux setup lists 1.0.0 and later as having no setup for the platform, so those players
+download the AppImage and open it once; it finds their installation and offers to update the game.
+
 `DefJamSetup-<version>-linux-x64.tar.gz` unpacks to a folder holding `DefJamSetup.sh`,
 "READ ME FIRST" and the third-party licenses. It needs x86-64 Linux with a Vulkan
-GPU and, at run time, SDL3 3.2 or newer, the Vulkan loader and shaderc -- SteamOS 3.8
-has all three -- plus about 12 GiB free and room for the dump copy. It brings its own
-Python (with Tk, for the wizard) and needs no Python, CMake or Git of your own.
+GPU, glibc 2.31 or newer and the Vulkan loader -- SteamOS and every current desktop
+distribution have them -- plus about 13 GiB free and room for the dump copy. It brings its
+own Python (with Tk, for the wizard) and its own build toolchain, and needs no compiler,
+packages, Python, CMake or Git of your own, and no internet connection.
 
 **Start it.** Open `DefJamSetup.sh`; on the Steam Deck, in Desktop Mode, double-click it
 in Dolphin and choose Execute. The wizard has the same controls as the others -- your
@@ -307,15 +330,24 @@ Python after the game is built ([HD textures](hd-textures.md)). **On the Steam D
 install with upscaled textures takes about 15 minutes** (about 10 of them for the upscale;
 see [Validation](#validation-1)); keep the Deck plugged in and awake.
 
-**The compiler.** If this computer has one (clang, cmake, ninja and the SDL3, Vulkan
-and shaderc development packages; one probe build checks them), setup uses it. If not
--- SteamOS has no compiler, but has podman -- setup builds in a container: Arch Linux
-pinned by image digest and by an archive date whose glibc, SDL3, shaderc and Vulkan
-loader are SteamOS 3.8's own, so the game it builds runs on SteamOS's libraries. The
-container is fetched once (about 1 GB, so the first install needs internet), runs
-without network access and sees only the install and data folders. `--toolchain host`
-or `--toolchain container` forces either. After the build, setup checks with `ldd`
-that the game's libraries are all present on this computer and says which are not.
+**The compiler.** Setup builds with the toolchain it carries (since v0.14.0, design §6):
+Zig's clang targeting x86-64 Linux with glibc 2.31 symbols, CMake, Ninja, and SDL3 and
+shaderc built with that compiler and linked into the game statically. Nothing from the
+computer is used for the build, so it is the same on every distribution (the CachyOS
+failure of #83/#90 came from a computer's own toolchain), and the game it builds needs
+only glibc 2.31 or newer and the computer's own Vulkan loader: SDL loads X11 or Wayland,
+PipeWire, PulseAudio or ALSA, D-Bus and udev from the computer when the game starts. Zig
+compiles its C and C++ runtimes once per version, into the version's `zig-cache`. Zig's
+runtime also defines `memcpy`, `memset`, `strlen`, `floor`, `fmod`, `sin` and other functions
+glibc has, and a program's own definition wins over the C library's: the game's scene loads
+on the Steam Deck were 17-20% longer than the container build's until the compilers bound
+those calls to glibc (`setup/linux/glibc-symbols.h`, included by `zig-cc` and `zig-c++`). Two
+developer options remain: `--toolchain host` (the computer's clang, cmake, ninja and the
+SDL3, Vulkan and shaderc development packages; one probe build checks them; the game then
+uses the computer's SDL3 and shaderc) and `--toolchain container` (the pinned Arch Linux
+container of v0.6-v0.13, fetched once with podman, about 1 GB). After the build, setup
+checks with `ldd` that the game's libraries are all present on this computer and says
+which are not.
 
 **Afterwards.** Setup writes the launcher, `Def Jam Recompiled`, into the install folder,
 an application-menu entry, a desktop shortcut unless you clear the choice, and asks
@@ -332,19 +364,21 @@ opens its launcher window first and has the F1 overlay, as on the other platform
 ./DefJamSetup.sh --silent --dump ~/Dumps/DefJam.iso \
     --install-dir ~/Games/DefJamRecompiled/App --data-dir ~/Games/DefJamRecompiled/Data \
     [--steam-shortcut | --steam-art] [--no-desktop-shortcut | --no-shortcuts] [--hd-textures] \
-    [--toolchain host|container]
+    [--toolchain bundled|host|container]
 ./DefJamSetup.sh --uninstall --install-dir ~/Games/DefJamRecompiled/App
 ```
 
 Exit codes as on the other platforms: 0 success; 2 invalid input; 3 prerequisites
-missing (no toolchain and no podman, the container could not be fetched, or the
+missing (the bundled toolchain does not run here; with `--toolchain host` or
+`container`, no toolchain or no podman, or the container could not be fetched; or the
 game's libraries are missing); 4 failed stage; 5 another setup or the game is
 running; 6 cancelled. `--hd-textures` generates and enables the HD packs. Uninstalling
 removes the application, the launcher and the menu and desktop entries it made, and keeps
 the dump copy, saves, settings, generated HD packs and logs. A
 Steam shortcut stays in Steam until you remove it there (in the Library, the game's
-**Manage** menu, *Remove non-Steam game from your library*), and the build container stays
-in podman's store (`podman rmi $(podman images -q localhost/defjam-recompiled-build)`).
+**Manage** menu, *Remove non-Steam game from your library*), and a build container
+(`--toolchain container` only) stays in podman's store
+(`podman rmi $(podman images -q localhost/defjam-recompiled-build)`).
 
 ### What the Linux payload carries
 
@@ -352,10 +386,20 @@ The source, python-build-standalone's CPython with the `pyxbe` and `capstone` wh
 and, for the HD upscale, the manylinux `Pillow` and `NumPy` wheels (since v0.7.2),
 the wizard, the engine and the launcher template, each pinned by SHA-256 in
 `setup/dependencies-linux.json` with the build container's image digest, archive
-date and package list. It carries no compiler and no libraries. Build it with
-`scripts/build-setup-linux.sh` (`--development` for a local prototype from a dirty
-checkout); `check-setup-assets.py` verifies that the tarball's payload is the
-inspected one, byte for byte, and nothing else.
+date and package list. Since v0.14.0 it also carries the game's build toolchain
+(`toolchain` in the same file): `tools/zig` (Zig's release, pruned to what an
+x86_64-linux-gnu build reads) with the `tools/bin/zig-cc`, `zig-c++`, `zig-ar` and
+`zig-ranlib` wrappers and `tools/include/glibc-symbols.h` (made for the pinned Zig by
+`scripts/zig-glibc-symbols.py`: run it again when the pin changes), CMake and Ninja in
+`tools/`, and in `deps/` the static SDL3 (the
+toolkit's pin) and shaderc (the macOS payload's pin), the Vulkan headers and a link-only
+stub of the Vulkan loader's entry points. `scripts/build-toolchain-linux.sh` builds `deps/`
+with the payload's own Zig in the pinned Ubuntu 22.04 image, which supplies only headers.
+Build it with `scripts/build-setup-linux.sh` (`--development` for a local prototype from a
+dirty checkout); `check-setup-assets.py` verifies that the tarball's payload is the
+inspected one, byte for byte, and nothing else, and that its compiler builds and runs a C++
+program linked against glibc 2.31 at most, whose `memcpy`, `strlen`, `floor` and `fmod` calls
+go to glibc even with Zig's runtime linked in.
 
 ### Validation
 
@@ -393,3 +437,10 @@ covers Windows x64, Apple Silicon macOS and Steam Deck/SteamOS, and the
 can be installed fresh but cannot update or repair an existing installation; the picker marks them
 **(update unavailable)** when an installation is selected. Clean updates preserve player data, and
 downgrade is only to future compatible updater-capable releases.
+
+
+## HD activation and payload contract
+
+The HD builder runs after the verified game pipeline and before activation. Generated pack names are recorded in the receipt, so a later selected generation replaces their active names without accumulating old Setup entries; old files remain local. Unrelated/custom packs, comments and effective last values in duplicate or padded INI sections are preserved. Cancellation stops the builder through Setup's normal process-tree mechanism; failed generation never enables unfinished packs.
+
+The original Windows HD payload pinned Pillow 12.3.0 and NumPy 2.5.2 for embedded Python 3.13 / win_amd64/cp313 and verified imports, resizing and NumPy execution inside that interpreter. Its wheel notices remained in the inventoried metadata. These are dated v0.6.0 payload facts, not replacement pins for current dependency manifests. No Torch, neural model, GPU dependency or artwork was bundled. [Historical validation](research/hd-v060-release-validation.md) distinguishes generation/UI fixtures from the actual packaged install and lists the untested real-install scenarios.

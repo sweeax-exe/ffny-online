@@ -72,3 +72,12 @@ input is step-timed and whose random seeds are pinned (`scripts/regress.py --onl
 identical on the Release and Debug builds and on two save fixtures. It is a hash of derived state;
 no game data is stored. Update it with `--only repeat --update-golden` when a change is meant to
 alter how the fight plays, and say so in the commit.
+
+## fight-stream-isolated.json
+
+The same fight with `--isolate-crowd` (`RECOMP_TEST_ISOLATE_CROWD=1`): the match logic's generators are
+seeded, the fighters meet no spectators and the general-purpose generator restarts at every step, which is what
+makes the fight repeat on a slow host ([the Steam Deck report](../../docs/research/deck-determinism-98.md)).
+It plays differently from the plain fight, so it has its own hash. It was recorded on a Steam Deck and is
+proven when a second platform records the same value: `scripts/regress.py --only repeat --isolate-crowd
+--update-golden` (then `--only replay --isolate-crowd`). The plain golden and the plain checks are unchanged.

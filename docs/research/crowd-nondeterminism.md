@@ -27,6 +27,9 @@ background-crowd updates. Two runs of the same pinned fight are compared.
   `0x375F68` (seeded at setup with the constants the match generator starts from).
 - 60 draws of `rand` from `sub_000DB2D0` (return address `0xDB592`) in both: the
   background crowd's members are set up the same way.
+- (Correction, 2026-10-27, [deck-determinism-98.md](deck-determinism-98.md): the background
+  crowd's update runs once per outer loop iteration, not once per screen update, and
+  the spectators do reach the fight through `sub_001B8760`.)
 - From match setup to the first fight step the game makes **906 screen updates in
   both runs**, and from then on exactly one per fight step. The loading window is
   the same length in game time.

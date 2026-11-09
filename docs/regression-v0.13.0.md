@@ -1,5 +1,8 @@
 # v0.13.0 regression reproduction
 
+> Dated evidence: this records the named build/release, not current pending work.
+> Current support and qualifications are in the release notes and GitHub Issues.
+
 Run the same release PR head and toolkit `d569ca1` on Windows, macOS and Linux.
 The owner runs macOS/Linux; the release agent runs Windows. Keep games serial
 on each machine. Use a disposable data root with a copy of the local save fixture;

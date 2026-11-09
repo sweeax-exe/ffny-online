@@ -5,7 +5,9 @@ No game is run here; the routes themselves are exercised by scripts/regress.py.
 import importlib.util
 import json
 import os
+from pathlib import Path
 import pytest
+import subprocess
 import sys
 import time
 
@@ -449,7 +451,7 @@ def test_launch_failure_restores_full_save_root(tmp_path, monkeypatch, original)
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(b'original')
     monkeypatch.setattr(harness, 'kill_stray', lambda: None)
-    monkeypatch.setattr(harness.pipeline_state, 'verify_build', lambda *a: None)
+    monkeypatch.setattr(harness.pipeline_state, 'verify_build', lambda *a, **k: None)
     repo = tmp_path / 'repo'
     monkeypatch.setattr(harness, 'REPO', str(repo))
     for name in ('build/%s/%s' % (harness.RELEASE_PRESET, harness.EXE_NAME), 'game/default.xbe'):
@@ -647,3 +649,79 @@ def test_a_failed_run_points_at_the_triage_digest(capsys):
     out = capsys.readouterr().out
     assert 'FAIL' in out
     assert 'triage   python scripts/triage.py logs/run-20261014-101500.log.err' in out
+
+
+@pytest.mark.parametrize('change', ['commands', 'interpreter', 'tool data', 'key version'])
+def test_analysis_key_covers_commands_interpreter_tool_data_and_version(tmp_path, monkeypatch, change):
+    # An Update reuses certified analysis, so every input that can change its output is keyed.
+    repo, toolkit = pipeline_fixture(tmp_path)
+    pipeline.verify_analysis(repo, toolkit)
+    if change == 'commands':
+        monkeypatch.setattr(pipeline, 'ANALYSIS_COMMANDS', pipeline.ANALYSIS_COMMANDS[:-1])
+    elif change == 'interpreter':
+        real = pipeline.interpreter()
+        monkeypatch.setattr(pipeline, 'interpreter', lambda python=None: {
+            **real, 'packages': {**real['packages'], 'capstone': '0.0.synthetic'}})
+    elif change == 'tool data':
+        data = toolkit / 'tools/recomp/data/win32_api_names.txt'
+        data.parent.mkdir(parents=True)
+        data.write_text('SyntheticApi\n')
+    else:
+        monkeypatch.setattr(pipeline, 'KEY_VERSION', pipeline.KEY_VERSION + 1)
+    with pytest.raises(ValueError, match='Analysis is stale'):
+        pipeline.verify_analysis(repo, toolkit)
+
+
+def test_a_finished_build_can_be_checked_from_another_python(tmp_path, monkeypatch):
+    # A Steam Deck analyzes and builds in the container and runs the harness on SteamOS's Python:
+    # RECORDED accepts the interpreter the analysis recorded and still checks everything else.
+    repo, toolkit = pipeline_fixture(tmp_path)
+    real = pipeline.interpreter()
+    monkeypatch.setattr(pipeline, 'interpreter', lambda python=None: {**real, 'python': '3.99 (another host)'})
+    with pytest.raises(ValueError, match=r'Analysis is stale \(interpreter changed\)'):
+        pipeline.verify_analysis(repo, toolkit)
+    pipeline.verify_analysis(repo, toolkit, python=pipeline.RECORDED)
+    monkeypatch.setattr(pipeline, 'KEY_VERSION', pipeline.KEY_VERSION + 1)
+    with pytest.raises(ValueError, match=r'Analysis is stale \(key changed\)'):
+        pipeline.verify_analysis(repo, toolkit, python=pipeline.RECORDED)
+
+
+def test_interpreter_action_reports_what_the_engine_compares(tmp_path):
+    script = os.path.join(ROOT, 'scripts', 'pipeline-state.py')
+    reported = json.loads(subprocess.check_output([sys.executable, str(script), 'interpreter'], text=True))
+    assert reported == pipeline.interpreter()
+    assert set(reported['packages']) == set(pipeline.ANALYSIS_PACKAGES)
+    with pytest.raises(ValueError, match='analysis interpreter'):
+        pipeline.interpreter(tmp_path / 'missing-python')
+
+
+def test_analyze_runs_the_keyed_commands_and_certifies_them(tmp_path, monkeypatch):
+    repo, toolkit = pipeline_fixture(tmp_path)
+    (toolkit / 'game_files/defjam-analysis-state.json').unlink()
+    ran = []
+
+    def run(argv, cwd=None, **kwargs):
+        ran.append(argv[1:])
+        assert Path(cwd) == toolkit
+        return subprocess.CompletedProcess(argv, 0)
+    monkeypatch.setattr(pipeline.subprocess, 'run', run)
+    pipeline.analyze(repo, toolkit)
+    seeds = str(repo / 'config/seed_functions.json')
+    assert [a for a in ran if '--seed-functions' in a][0][-2:] == ['--seed-functions', seeds]
+    assert len(ran) == len(pipeline.ANALYSIS_COMMANDS)
+    pipeline.verify_analysis(repo, toolkit)
+
+
+def test_lift_records_its_options_in_the_key(tmp_path, monkeypatch):
+    repo, toolkit = pipeline_fixture(tmp_path)
+
+    def translate(argv, cwd=None, check=False):
+        staged = Path(argv[argv.index('--gen-dir') + 1])
+        (staged / 'recomp_0000.c').write_text('// new generated set')
+        (staged / 'recomp_dispatch.c').write_text('// dispatcher')
+    monkeypatch.setattr(pipeline.subprocess, 'run', translate)
+    pipeline.lift(repo, toolkit, 500, ['--no-inline'])
+    state = pipeline.read_state(repo / 'src/recomp/gen/lift-state.json')
+    assert state['inputs']['options'] == {'split': 500, 'extra': ['--no-inline']}
+    assert state['inputs']['key'] == pipeline.KEY_VERSION
+    pipeline.verify_lift(repo, toolkit)

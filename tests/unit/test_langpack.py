@@ -304,7 +304,7 @@ def runtime_tool(tmp_path_factory):
     driver.write_text(DRIVER)
     exe = folder / ('language.exe' if os.name == 'nt' else 'language')
     includes = [folder, ROOT / 'src/hooks', ROOT / 'tools/xboxrecomp/src/settings']
-    sources = [driver, ROOT / 'src/hooks/pc_language.c', ROOT / 'src/patches/subtitles.c',
+    sources = [driver, ROOT / 'src/hooks/pc_language.c', ROOT / 'src/hooks/pc_language_settings.c', ROOT / 'src/patches/subtitles.c',
                ROOT / 'src/patches/game_language.c', ROOT / 'tools/xboxrecomp/src/settings/recomp_settings.c']
     if os.name == 'nt':
         cmd = [compiler, '/nologo', '/O2', '/TC', *['/I' + str(p) for p in includes], *map(str, sources),
@@ -399,6 +399,64 @@ def test_a_language_mod_takes_the_place_of_french(runtime_tool, dump):
     assert "game language french not used: the language mod" in err
 
 
+def add_base(pack, value):
+    ini = pack / 'language.ini'
+    ini.write_text(ini.read_text().replace('schema=1\n', 'schema=1\nbase=%s\n' % value, 1))
+
+
+@pytest.mark.parametrize('game_language', ['english', 'french'])
+def test_a_pack_built_on_french_starts_the_game_in_french(runtime_tool, dump, game_language):
+    tmp, game, pack = dump
+    add_base(pack, 'french')
+    lines, err = run_runtime(runtime_tool, tmp / 'data', game, 'gconfig.xml', RECOMP_LANGUAGE_PACK='xx-test',
+                             RECOMP_GAME_LANGUAGE=game_language)
+    assert lines[0].startswith('serve gconfig.xml')          # the pack is built and in use
+    assert lines[-1] == 'language 3' and "built on the game's own French" in err
+    assert '(built now)' in err
+    lines, err = run_runtime(runtime_tool, tmp / 'data', game, RECOMP_LANGUAGE_PACK='xx-test',
+                             RECOMP_GAME_LANGUAGE=game_language)
+    assert lines[-1] == 'language 3' and '(built now)' not in err   # cached pack keeps its base
+    lines, _ = run_runtime(runtime_tool, tmp / 'data', game, 'gconfig.xml', RECOMP_GAME_LANGUAGE=game_language)
+    expected = 'language 3' if game_language == 'french' else 'language 1'
+    assert lines[0] == 'keep gconfig.xml' and lines[-1] == expected  # off: restore the ordinary setting
+
+
+@pytest.mark.parametrize('game_language', ['english', 'french'])
+def test_a_refused_french_based_pack_keeps_the_ordinary_language(runtime_tool, dump, game_language):
+    tmp, game, pack = dump
+    add_base(pack, 'french')
+    (game / 'gconfig.xml').write_bytes(b'<config lang="fr"/>\n' * 20)      # a different dump: the pack is refused
+    lines, err = run_runtime(runtime_tool, tmp / 'data', game, 'gconfig.xml', RECOMP_LANGUAGE_PACK='xx-test',
+                             RECOMP_GAME_LANGUAGE=game_language)
+    expected = 'language 3' if game_language == 'french' else 'language 1'
+    assert lines[0] == 'keep gconfig.xml' and lines[-1] == expected
+    assert 'not used' in err and 'built on the game' not in err
+
+
+@pytest.mark.parametrize('value', ['', 'spanish', 'French'])
+def test_unsupported_base_is_refused_by_authoring_and_runtime(runtime_tool, dump, value):
+    tmp, game, pack = dump
+    add_base(pack, value)
+    with pytest.raises(lp.PackError, match='base must be english or french'):
+        lp.read_pack(pack)
+    lines, err = run_runtime(runtime_tool, tmp / 'data', game, 'gconfig.xml', RECOMP_LANGUAGE_PACK='xx-test')
+    assert lines[0] == 'keep gconfig.xml' and lines[-1] == 'language 1'
+    assert 'base must be english or french' in err and 'built on the game' not in err
+
+
+def test_changing_pack_base_invalidates_cache_and_replaces_french(runtime_tool, dump):
+    tmp, game, pack = dump
+    add_base(pack, 'french')
+    lines, _ = run_runtime(runtime_tool, tmp / 'data', game, RECOMP_LANGUAGE_PACK='xx-test')
+    assert lines[-1] == 'language 3'
+    ini = pack / 'language.ini'
+    ini.write_text(ini.read_text().replace('base=french', 'base=english'))
+    lines, err = run_runtime(runtime_tool, tmp / 'data', game, RECOMP_LANGUAGE_PACK='xx-test',
+                             RECOMP_GAME_LANGUAGE='french')
+    assert lines[-1] == 'language 1' and '(built now)' in err
+    assert 'game language french not used' in err
+
+
 def test_runtime_finds_the_mod_in_the_texture_root(runtime_tool, dump):
     # The language mod sits in the mods folder the launcher and the texture loader use.
     tmp, game, pack = dump
@@ -433,3 +491,19 @@ def test_runtime_refuses_xbe_code_changes(runtime_tool, dump):
     (pack / 'language.ini').write_text('\n'.join(ini) + '\n')
     lines, err = run_runtime(runtime_tool, tmp / 'data', game, RECOMP_LANGUAGE_PACK='xx-test')
     assert 'xbe LOADING' in lines and 'outside .rdata/.data' in err
+
+
+def test_game_start_up_calls_language_start():
+    # The runtime tests above call pc_language_start themselves, so they cannot notice when the
+    # game's own start-up stops calling it (a merge dropped it once and packs silently did nothing).
+    text = (ROOT / 'src/hooks/pc_settings.c').read_text(encoding='utf-8')
+    assert 'pc_language_start(have_root ? root : NULL, "game");' in text
+
+
+def test_the_pack_name_is_not_copied_onto_itself():
+    # snprintf(folder, ..., "%s", trim(folder)) empties the name on glibc, so no language mod loaded on
+    # Linux. The runtime tests see that when built with the bundled Zig compiler, but they are skipped on
+    # a machine with no cc, so check the source too.
+    text = (ROOT / 'src/hooks/pc_language.c').read_text(encoding='utf-8')
+    assert 'trim(folder));' not in text.replace('const char *name = trim(folder);', '')
+    assert 'memmove(folder, name, strlen(name) + 1);' in text
