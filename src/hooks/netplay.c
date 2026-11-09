@@ -274,6 +274,10 @@ void netplay_crowd_update(void) { sub_00081170(); }
 #define WINNER_DRAW   0xFFu
 #define SET_MENU_MS   4000u     /* a ranked set's game: the results' Rematch menu goes back to the room by itself */
 #define SET_LEAVE_MS  15000u    /* ... and when it has not reached the menus this long after that, it is forced */
+#define HILL_RESULTS_MS 15000u  /* King of the Hill, FFA rotation: with the next fight agreed, the results of the
+                                 * last one leave by themselves this long after it was decided (hill_results_tick) */
+#define HILL_SUMMARY_MS 20000u  /* ... or this long while the summary and the rewards (not saved yet) still show */
+#define HILL_CAP_MS() (N.hill_menu ? HILL_RESULTS_MS : HILL_SUMMARY_MS)
 #define LEFT_ROOM_MS  3000u     /* after LEAVE: a ROOM of the room left is a stale one this long (on_room) */
 #define RESULT_TRIES  75        /* RESULT every RETRY_MS until a HILL shows the fight over (30 s) */
 
@@ -451,6 +455,9 @@ static struct {
     int test_leave_due;             /* tests (RECOMP_TEST_RANKED_LEAVE): leave the room at the next update */
     int decided_alone;              /* this match was decided in lockstep, then the other PC went on ahead */
     ULONGLONG deferred_toast;       /* the last "... is waiting for you" notice */
+    ULONGLONG hill_decided_at;      /* King of the Hill, FFA rotation: this PC's last fight was decided at (0: none) */
+    ULONGLONG hill_force_at;        /* ... the last step forced off its results (0: none yet) */
+    int hill_summary, hill_menu;    /* ... its summary came; its Rematch menu came (1), No was chosen there (2) */
     int peer_results[MAXP];         /* each position said (P_RTT) it was still on the last fight's results */
     int peer_on_results[MAXP];      /* ... and says so in its latest P_RTT */
     /* controllers */
@@ -918,6 +925,11 @@ int netplay_rematch_request(void)
 void netplay_results_funccall(const char *text)
 {
     if (!strcmp(text, "Game.Quit()")) rollback_off_leaving("Game.Quit()");
+    if (N.koth_results && N.lobby && !N.watching) {     /* where a hill fight's results are (hill_results_tick) */
+        if (!strncmp(text, "Game.GetMatchSummary(", 21)) N.hill_summary = 1;
+        else if (!strncmp(text, "MemCard.Save( battle/rewardun", 29)) N.hill_menu = 1;
+        else if (!strncmp(text, "Game.GetHeroFighterNumber(", 26)) N.hill_menu = 2;
+    }
     if (!strncmp(text, "Game.GetMatchSummary(", 21) && N.lobby && N.match_live && !N.watching && !N.on_results) {
         InterlockedExchange(&N.on_results, 1);
         fprintf(stderr, "[NETPLAY] the match's summary: the other players' controllers stay off this PC's menus\n");
@@ -956,6 +968,43 @@ void netplay_hang_dump(void)
             N.rb_on, N.predicting, N.resim, N.rb_fought, N.last_late);
 }
 
+/* King of the Hill, FFA rotation: the next fight was agreed while this game still shows the last one's
+ * results (a deferred START), and it is set up only once the game is back in the menus. A player who
+ * stayed there held every other fighter of the room on a frozen "FIGHT!" (F9 b6b79d, build 66: 75.5 s
+ * in a three-player FFA rotation, the relay had called the fight 2 s after the last one). From
+ * HILL_RESULTS_MS after the decision (HILL_SUMMARY_MS while the summary and the rewards still show: a
+ * player going through them at the test's pace reaches the rewards' save by then; at 15 s the three-copy
+ * test's pressing copies were taken off before it, and the fight's rewards were never saved) the results
+ * leave by themselves: on the Rematch menu as Rematch does there (the hill's No path, netplay_rematch_request), elsewhere on them (the summary, the rewards,
+ * the tips after No) with Game.Quit(), as the ranked set's forced way back does; again every 5 s while
+ * the game is not back. Never while a screen loads. Only this PC's own results: the fight itself waits
+ * for every fighter as before (lockstep), so no fight starts while a fighter is still in the last one. */
+static void hill_results_tick(void)
+{
+    ULONGLONG now;
+    uint32_t sm;
+    if (!N.start_deferred || !N.koth_results || !N.lobby || N.watching || !N.hill_decided_at || !N.hill_summary)
+        return;
+    now = GetTickCount64();
+    if (now - N.hill_decided_at < HILL_CAP_MS() || (N.hill_force_at && now - N.hill_force_at < 5000))
+        return;
+    sm = MEM32(0x002FB148u + 0x17u * 4u);
+    if (sm >= 0x10000u && MEM32(sm + 0x24u) != 0) return;     /* a screen loads: later */
+    N.hill_force_at = now;
+    if (N.hill_menu == 1 && !N.koth_quit) {
+        fprintf(stderr, "[NETPLAY] hill: still on the results' Rematch menu %.1f s after the fight was decided, "
+                "the next fight agreed: leaving them\n", (now - N.hill_decided_at) / 1000.0);
+        defjam_menu_call("Game.Rematch()");     /* netplay_rematch_request: the hill's No path */
+    } else {
+        fprintf(stderr, "[NETPLAY] hill: still on the results (%s) %.1f s after the fight was decided, the next "
+                "fight agreed: Game.Quit() forced\n", N.hill_menu == 2 ? "the tips after No" : N.hill_menu ? "after Rematch" :
+                "the summary or the rewards", (now - N.hill_decided_at) / 1000.0);
+        rollback_off_leaving("the hill's forced way back");
+        defjam_menu_call("Game.Quit()");
+    }
+    toast(6000, "The next fight is ready: back to it.");
+}
+
 /* Once per game update, on the game thread, between two updates: a held Rematch that every player
  * has now chosen runs here, as the menu's own call would (the same hooks, so created fighters are
  * linked again). Not while a screen loads. */
@@ -967,6 +1016,7 @@ static void netplay_rematch_tick(void)
         fprintf(stderr, "[NETPLAY] tests: leaving the ranked set's room on the results (RECOMP_TEST_RANKED_LEAVE)\n");
         netplay_lobby_leave();
     }
+    hill_results_tick();
     if (N.set_leave) {  /* a ranked set's game on its way to the room: it must not be able to stay there */
         if (!N.lobby || !N.match_live || N.watching) {
             N.set_leave = 0;
@@ -3727,8 +3777,15 @@ static DWORD WINAPI net_thread(LPVOID unused)
             int other = N.players == 2 ? 1 - N.pos : -1;
             N.deferred_toast = now;
             /* not while the other one is on its results too (its P_RTT says so): nobody waits yet */
-            if (other < 0 || !N.peer_on_results[other])
-                toast(6500, "%s is waiting for you: choose No to start the next fight.", player_name(other));
+            ULONGLONG since = N.hill_decided_at ? now - N.hill_decided_at : 0;
+            ULONGLONG cap = HILL_CAP_MS();
+            int left = N.hill_decided_at && since < cap ? (int)((cap - since + 999u) / 1000u) : 0;
+            if ((other < 0 || !N.peer_on_results[other]) && left > 0)
+                toast(6500, "%s waiting for you: choose No to start the next fight (it starts by itself in %d s).",
+                      other < 0 ? "The other fighters are" : player_name(other), left);
+            else if (other < 0 || !N.peer_on_results[other])
+                toast(6500, "%s waiting for you: choose No to start the next fight.",
+                      other < 0 ? "The other fighters are" : player_name(other));
         }
         if (N.state == NETPLAY_CONNECTING) {
             if (now - N.hello_sent >= 500) { send_hello(); N.hello_sent = now; }
@@ -5313,6 +5370,7 @@ void netplay_on_main_menu(void)
     if (N.lobby && InterlockedExchange(&N.start_deferred, 0)) {
         /* King of the Hill: back from the last fight's results; the next one, agreed meanwhile */
         N.koth_results = N.koth_quit = 0;
+        N.hill_summary = N.hill_menu = 0;
         log_contiguous("at the match end");
         fprintf(stderr, "[NETPLAY] back from the last fight's results: setting up the next King of the Hill fight\n");
         N.start_tick = GetTickCount64();    /* the load starts now */
@@ -5347,6 +5405,7 @@ void netplay_on_main_menu(void)
         fprintf(stderr, "[NETPLAY] back from the last fight's results: on the hill\n");
     N.koth_results = 0;
     N.koth_quit = 0;
+    N.hill_summary = N.hill_menu = 0;
     N.set_menu = 0;
     N.set_leave = 0;
 }
@@ -6716,8 +6775,12 @@ static void koth_check_result(int final)
         N.koth_order_n = n;
     }
     N.koth_done = 1;
-    if (N.koth_match)
+    if (N.koth_match) {
         N.koth_results = 1;     /* the winner's scene, the summary and the results follow, until the menu */
+        N.hill_decided_at = GetTickCount64();
+        N.hill_force_at = 0;
+        N.hill_summary = N.hill_menu = 0;
+    }
     N.koth_tries = 0;
     N.koth_sent = 0;
     N.koth_winner = winner;
@@ -7021,6 +7084,11 @@ void netplay_on_step(void)
          * venue endings that skip phases 2 and 3 not at all (docs/research/team-and-special-match-types.md
          * 10; the same reading as koth_check_result). */
         uint32_t phase = MEM32(G_MATCH_PHASE), count = MEM32(G_RESULT_COUNT), code = 0;
+        if (phase == 1u && !N.fighting_seen && N.koth_match && !N.watching && N.hill_decided_at) {
+            fprintf(stderr, "[NETPLAY] hill: this fight is under way %.1f s after this PC's last one was decided\n",
+                    (GetTickCount64() - N.hill_decided_at) / 1000.0);
+            N.hill_decided_at = 0;
+        }
         if (phase == 1u) N.fighting_seen = 1;
         if (N.fighting_seen && N.match_seen && count && count <= RESULTS_MAX)
             code = MEM16(G_RESULTS + (count - 1u) * 0x10u + 0xEu);

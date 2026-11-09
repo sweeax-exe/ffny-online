@@ -112,6 +112,7 @@ def _rb_relay_extra(rollback, modes=None):
 
 WATCH = ["[CRASH]", "[WATCHDOG]", "[NETPLAY] desync in", "[NETPLAY] gave up", " starts in ",
          "[FUNCCALL] Game.UpdateMatchRewardsPoints()", "[FUNCCALL] Game.GetMatchSummary(", MAIN_MENU,
+         "[FUNCCALL] Game.GetMatchSummary(0)",
          '"event":"match_start"', '"event":"result"', '"event":"match_over"', "[AUTOMATCH] Game.StartGame()",
          "[NETPLAY] START:", "[TEST-KO] match", HANG_MARK]
 
@@ -1577,8 +1578,12 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
            lock_timeout=None, log=None, require_hits=False, stall=300, keep_roots=False, quick=None,
            created=False, cp_records=None, rematch=False, venues=None, cp_pick=None, cp_names=None,
            more_shots=False, spectators=0, copy_env=None, fixtures=None, ranked=None, rollback_modes=None,
-           rollback_max_ping=None, leave=None, spectate_after=0, spectate_delay=0, maintenance=0, cpu_level=None):
-    """cpu_level: "easy", "normal" or "hard" (build 67): the room's host sets its CPU level (RECOMP_TEST_CPU_LEVEL);
+           rollback_max_ping=None, leave=None, spectate_after=0, spectate_delay=0, maintenance=0, cpu_level=None,
+           linger=None):
+    """linger: King of the Hill or FFA rotation, the index of a copy with no presses after the main menu: it sits on
+    each fight's results (summary page 1) until the game takes it off them (netplay.c hill_results_tick). The
+    result's `hill_gaps` lists per copy the seconds from its last fight's decision to the next one under way.
+    cpu_level: "easy", "normal" or "hard" (build 67): the room's host sets its CPU level (RECOMP_TEST_CPU_LEVEL);
     the result's `cpu` says, per copy, the level its STARTs named and how often a fight ended with only CPU
     fighters left. maintenance: SECS, the relay's restart countdown from the start (<updates-dir>/maintenance "SECS Server
     update"): the relay holds every new fight; the file goes SECS + 5 s later (the restart that never comes),
@@ -1692,7 +1697,9 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
                 # fights before the others reach that count: presses for a few more, or it sat on its last
                 # results and the other fighter gave up waiting (a test artefact, 2026-11-03); the game
                 # ignores a script over 4095 characters, so no more than that
-                "RECOMP_PAD_SCRIPT": _koth_script(matches, per, p2) if koth or rot_wait else
+                "RECOMP_PAD_SCRIPT": harness().build_pad_script(["getscreeninfo(intmain/mainmenu=lt@0.5"])
+                                     if linger is not None and i == int(linger) else
+                                     _koth_script(matches, per, p2) if koth or rot_wait else
                                      harness().build_pad_script(["getscreeninfo(intmain/mainmenu=lt@0.5"],
                                                                 online_tail(matches, per, p2)),
             })
@@ -1777,6 +1784,10 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
             s.poll()
             cs = list(s.copies.values())
             rewards = [c.watch.count("[FUNCCALL] Game.UpdateMatchRewardsPoints()") for c in cs]
+            if linger is not None:
+                # a copy taken off its results by the game may skip the rewards (and the lingering one always
+                # does): each fight's summary counts instead
+                rewards = [c.watch.count("[FUNCCALL] Game.GetMatchSummary(0)") for c in cs]
             if spectate_after and len(cs) == players and rewards[0] >= spectate_after and not spectate_due:
                 spectate_due = time.time() + float(spectate_delay or 0)
             if spectate_due and len(cs) == players and time.time() >= spectate_due:
@@ -1895,6 +1906,11 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
     if cpu_level or winner == "humans":
         result["cpu"] = cpu_check(logs, cpu_level, winner == "humans", leaver, problems, players)
         ok = ok and not any(p.startswith("cpu:") for p in problems)
+    if mode in ("koth", "ffarot"):
+        result["hill_gaps"], result["hill_forced"] = hill_gap_check(logs, linger, problems)
+        if linger is not None:      # taken off the summary by the game: no rewards step (expected)
+            problems[:] = [p for p in problems if not re.match(r"m\d+ copy \d+: summary not accepted", p)]
+            ok = not problems       # online_rows failed on those alone otherwise
     if mode == "ffarot":
         result["rotation"] = rotation_check(logs, rot_relay_log, matches, players, problems, leaver)
     if maintenance:
@@ -1938,6 +1954,29 @@ def cpu_check(logs, level, humans_out, leaver, problems, players=2):
         if humans_out and any(w & ((1 << players) - 1) or not w for w in results):
             problems.append("cpu: copy %d reported a fight won by a human or nobody: %s" % (i, results))
     return out
+
+
+HILL_GAP_LIMIT = 35.0     # s from a fight's decision to the next one under way, with one copy idle on its results
+
+
+def hill_gap_check(logs, linger, problems):
+    """King of the Hill, FFA rotation: per copy the seconds from its last fight's decision to its next fight under
+    way (netplay.c), and how often its results were left by themselves. With a lingering copy, a gap of that copy
+    over HILL_GAP_LIMIT is a problem (the cap did not hold), and so is a lingering copy never taken off its results.
+    (Only that copy's: on the hill a challenger who lost watches a fight before its next one.)"""
+    import re
+    gaps, forced = {}, {}
+    for i, p in sorted(logs.items()):
+        text = logparse.read_text(p)
+        gaps[i] = [float(x) for x in re.findall(r"hill: this fight is under way ([\d.]+) s after", text)]
+        forced[i] = len(re.findall(r"hill: still on the results", text))
+    if linger is not None:
+        worst = max(gaps.get(int(linger)) or [0.0])
+        if worst > HILL_GAP_LIMIT:
+            problems.append("hill: %.1f s between a fight's decision and the next fight (limit %.0f)" % (worst, HILL_GAP_LIMIT))
+        if not forced.get(int(linger)):
+            problems.append("hill: copy %s was never taken off its results" % linger)
+    return gaps, forced
 
 
 def rotation_check(logs, relay_log, matches, players, problems, leaver=None):
