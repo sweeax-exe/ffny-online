@@ -427,6 +427,7 @@ static Served g_served[16];
 static int g_served_count;
 static int g_active;
 static int g_pack_subtitles;
+static char g_pack_dir[LANG_PATH];     /* the active mod's folder, for pc_language_dir() */
 
 static void pack_free(Pack *p)
 {
@@ -909,6 +910,7 @@ void pc_language_start(const char *data_root, const char *game_dir)
     }
     g_pack_subtitles = g_pack.all_subtitles;
     g_active = 1;
+    snprintf(g_pack_dir, sizeof g_pack_dir, "%s", dir);
     g_xbox_game_file_redirect = lang_redirect;
     netplay_data_print_reset();     /* a print made before this (the launcher's online) missed the rebuilt files */
     fprintf(stderr, "[LANG] %s (%s, %s): %d file(s) served from %s%s\n", g_pack.name, g_pack.language, folder,
@@ -972,6 +974,11 @@ int pc_language_all_subtitles(void)
     if (choice == 1) return 1;
     if (choice == 2) return 0;
     return g_active && g_pack_subtitles;
+}
+
+const char *pc_language_dir(void)
+{
+    return g_active && g_pack_dir[0] ? g_pack_dir : NULL;
 }
 
 int pc_language_french(void)

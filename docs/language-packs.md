@@ -171,6 +171,27 @@ is on, the game adds its folder to the texture-pack list beneath every texture p
 `[LANG] es-zarf: its own images load beneath the texture packs`), even with texture packs switched off.
 The Mods page and the installer check this manifest like any texture pack's. A `[wide]` section works too.
 
+An image the game draws from `default.xbe` (the "LOADING" label) can be translated this way without a
+delta: key the original image's ID to the translated PNG.
+
+### Its own online screen art
+
+FFNY Online's online screens draw their match-type logos from `<data>/online-art/modes/` (made from the
+player's dump by `scripts/online-art.py`). A language mod may carry translated copies in its own
+`online-art/` folder, same layout (`online-art/modes/oneOnOne.png`, `team.png`, `ffa.png`, `cage.png`,
+`demolition.png`, `inferno.png`, `subway.png`, `window.png`, `ringOut.png`); while the mod is on the online
+screens take each file from there when it is present, and from `<data>/online-art` otherwise. These are
+pictures only: they change nothing a fight reads, so players with and without the mod still play together.
+
+### The main menu's ONLINE slot
+
+`scripts/apt-patch.py` adds the ONLINE poster and slot to the main menu by writing a patched
+`screens/screens.viv` to `<data>/override`. A language mod that rebuilds `screens/screens.viv` is served
+ahead of that override copy and is built from the dump, so it must carry the same change: make the pack
+from a translated copy of the **override** `screens.viv` (the patched `mainMenu.apt`, `cmtype.apt` and the
+poster in `mainMenu.xsh` then become part of its deltas). When `apt-patch.py`'s output changes, such a
+pack is remade.
+
 ## Format
 
 A pack folder holds `language.ini`, its deltas, optionally its own images (`manifest.ini` and PNGs, above),
@@ -222,6 +243,7 @@ produce identical files.
 
 | Language | Pack | Author | Licence |
 |---|---|---|---|
+| Spanish | `es-chanock` 1.0.0, "Mod Español by chanock": 28 deltas (menus, HUD, Story subtitles, memory-unit messages, `fetext.loc`, 23 translated image sheets, and the ONLINE slot's two menu scripts), the CARGANDO label and nine online match-type logos | chanock | his; shared with FFNY Online |
 | Spanish | `es-zarf`, from "Parche textos en español DJFFNY" v1.1 ([source](https://github.com/MODZARF/Parche-textos-en-espanol-DJFFNY-Compatible-con-Xbox-360)) | ZARF (MOD-ZARF) | CC BY-NC-SA 4.0; a conversion exists and awaits its author's agreement before it is shared |
 
 French text is on the USA disc already (`cmfren.loc`); use the [built-in French setting](#the-games-own-french), which needs no separate pack.
