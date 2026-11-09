@@ -88,7 +88,12 @@ space). **Enter** or **A** sends it, **Esc** or **B** sends the report without t
 nothing pressed. The box is never in the picture. While it is up the game and the screens under it get no
 input; the game keeps running. In an online match there is no box and the report goes at once: the fight runs
 in lockstep and cannot pause, so a box would leave the fighter standing while the player types (or turn the
-typing into moves). A match that starts while the box is up sends the report without text. The service keeps
+typing into moves). The toast says *Bug report sent. Add a note after the match.* (build 68): the report goes
+with a random `note_key`, and once the room's match is over (back in the room or the menus) a line offers
+*Add a note to your bug report? (Y)* for 20 s. Y (pad or key; not while a text field has the keys) opens the
+same box; its line goes to `POST /api/report/note` and is kept as `note.txt` beside that report (only with
+the key and, for a signed-in report, the same account; once; within three hours). A match that starts while
+the box is up sends the report without text (the late box: with what is typed so far). The service keeps
 the line in the report's `info.txt` as `note: ...`; the bot's post shows it as *What's wrong*.
 
 ## The pages
@@ -207,6 +212,7 @@ nobody at it (a locked screen, a remote run):
 | `RECOMP_TEST_SOCIAL_UI=<steps>` | The chat window's own steps, `<s>:<action>` from the moment the lists are loaded: `chat=<tab>`, `keyboard=<text>`, `friend=<name>`, `dm=<friend>`, `type=<text>`, `send`, `close`; the overlay captures are then named after the tab (`social-global`, `social-keyboard`, ...) |
 | `RECOMP_TEST_PICTURE_REPORT_SECS=<secs>` | Presses F9 (a picture report) once at that point on the pad script's clock (`RECOMP_SCRIPT_ANCHOR`). Only with `RECOMP_ACCOUNT_SERVER` set, so the report goes to a local service or a closed port. On Windows the picture is the window's, the overlay included (`[REPORT] picture report: the window's picture with the overlay ...`); the game's own frame is what the next frame's `[BATCH]` draws belong to |
 | `RECOMP_TEST_REPORT_NOTE=<text>` | With `RECOMP_ACCOUNT_SERVER` set: once F9's *What's wrong?* box has been up 1.5 s, types `<text>` into it, a character a frame through the overlay's own input queue, then presses Enter 2.5 s later. `<esc>` presses Esc instead, `<wait>` lets the minute run out. The log says `[REPORT] "What's wrong?" box open ...`, `... box closed (Send): sent with the note` and `[REPORT] note (<n> characters): <text>` |
+| `RECOMP_TEST_PICTURE_REPORT_STEP=<n>` | With `RECOMP_ACCOUNT_SERVER` set: presses F9 once at lockstep step `n` of the first online match (`[REPORT] test: F9 at online step n`); the report goes at once and the note offer follows after the match. `RECOMP_TEST_REPORT_NOTE` then also takes the offer 1.5 s after it shows and types the note into the box |
 | `RECOMP_TEST_REPORT_BODY=<file>` | With `RECOMP_ACCOUNT_SERVER` set: keeps a copy of the report's multipart body (`kind`, `build`, `log`, `picture`, `note`) before it is sent, to read the fields back when the send goes to a closed port |
 | `RECOMP_MODS_PAGE=1` | The Textures page becomes upstream's Mods page (installed packs, load order, the signed project catalogue through the mod helper). Upstream's mod support is beta and not wired into FFNY Online's launcher and updater yet, so it is off by default |
 | `RECOMP_TEST_UPDATE_PROGRESS=<step>[,popup]` | Windows: a made-up update in progress at step 1 (the download) to 8 (finishing up), with no network and no setup, for pictures of the GAME card; `,popup` opens the "Update available" window first, which then shows the same progress |

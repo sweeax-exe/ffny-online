@@ -19,6 +19,7 @@
 #define WIN32_LEAN_AND_MEAN
 #endif
 #include <windows.h>
+#include <bcrypt.h>
 #include <io.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -255,7 +256,28 @@ static int own_log(char *out, int size)
     return 1;
 }
 
-typedef struct { char kind[16], log[MAX_PATH + 8], picture[MAX_PATH + 8], note[BUG_REPORT_NOTE_MAX + 1]; } Job;
+typedef struct {
+    char kind[16], log[MAX_PATH + 8], picture[MAX_PATH + 8], note[BUG_REPORT_NOTE_MAX + 1];
+    char key[33];       /* online (bug_report_send_online): the note_key for the note after the match */
+} Job;
+
+/* The report sent from an online match, waiting for its note: its id and key, set once the service
+ * took it (s_later_cs guards them). The note may follow for LATER_MS (the service: 3 hours). */
+#define LATER_MS (2 * 60 * 60 * 1000ULL)
+static CRITICAL_SECTION s_later_cs;
+static INIT_ONCE s_later_once = INIT_ONCE_STATIC_INIT;
+static char s_later_id[8], s_later_key[33];
+static ULONGLONG s_later_at;
+static volatile LONG s_note_busy;
+
+static BOOL CALLBACK later_init(PINIT_ONCE o, PVOID p, PVOID *c)
+{
+    (void)o; (void)p; (void)c;
+    InitializeCriticalSection(&s_later_cs);
+    return TRUE;
+}
+static void later_lock(void) { InitOnceExecuteOnce(&s_later_once, later_init, NULL, NULL); EnterCriticalSection(&s_later_cs); }
+static void later_unlock(void) { LeaveCriticalSection(&s_later_cs); }
 
 static void field(Buf *b, const char *boundary, const char *name, const char *file, const char *ctype)
 {
@@ -344,6 +366,11 @@ static DWORD WINAPI send_thread(LPVOID param)
         puts_(&body, job->note);
         puts_(&body, "\r\n");
     }
+    if (job->key[0]) {          /* the note after the match must name it (accounts/reports.go) */
+        field(&body, boundary, "note_key", NULL, NULL);
+        puts_(&body, job->key);
+        puts_(&body, "\r\n");
+    }
     puts_(&body, "--");
     puts_(&body, boundary);
     if (!puts_(&body, "--\r\n")) {
@@ -354,7 +381,15 @@ static DWORD WINAPI send_thread(LPVOID param)
     status = account_send_bug_report(ctype, body.p, (int)body.n, answer, sizeof(answer));
     fprintf(stderr, "[REPORT] bug report (%s, log %zu bytes, picture %zu bytes, note %zu characters) sent: HTTP %d %s\n",
             job->kind, log.n, pic.n, strlen(job->note), status, status == 201 ? answer : "");
-    if (status == 201)
+    if (status == 201 && job->key[0]) {
+        later_lock();
+        snprintf(s_later_id, sizeof(s_later_id), "%.6s", answer);
+        snprintf(s_later_key, sizeof(s_later_key), "%s", job->key);
+        s_later_at = GetTickCount64();
+        later_unlock();
+        fprintf(stderr, "[REPORT] report %.6s: a note may follow after the match\n", answer);
+        snprintf(text, sizeof(text), "Bug report sent - code %.6s. Add a note after the match.", answer);
+    } else if (status == 201)
         snprintf(text, sizeof(text), "Bug report sent - code %.6s. Thanks!", answer);
     else if (status == 429)
         snprintf(text, sizeof(text), "Bug report not sent: too many reports, try again in an hour.");
@@ -393,6 +428,112 @@ void bug_report_send_note(const char *kind, const char *log_path, const char *pi
     t = CreateThread(NULL, 0, send_thread, job, 0, NULL);
     if (t) CloseHandle(t);
     else { free(job); InterlockedExchange(&s_busy, 0); set_toast("", 1); }
+}
+
+void bug_report_send_online(const char *kind, const char *log_path, const char *picture_path)
+{
+    Job *job;
+    HANDLE t;
+    unsigned char raw[16];
+    int i;
+    if (InterlockedExchange(&s_busy, 1)) return;
+    job = (Job *)calloc(1, sizeof(*job));
+    if (!job) { InterlockedExchange(&s_busy, 0); return; }
+    snprintf(job->kind, sizeof(job->kind), "%s", kind);
+    if (log_path) snprintf(job->log, sizeof(job->log), "%s", log_path);
+    if (picture_path) snprintf(job->picture, sizeof(job->picture), "%s", picture_path);
+    if (BCryptGenRandom(NULL, raw, sizeof(raw), BCRYPT_USE_SYSTEM_PREFERRED_RNG) == 0)
+        for (i = 0; i < 16; i++) snprintf(job->key + 2 * i, 3, "%02x", raw[i]);
+    SecureZeroMemory(raw, sizeof(raw));
+    later_lock();                       /* a newer report replaces the one still waiting */
+    s_later_id[0] = 0;
+    later_unlock();
+    set_toast("Bug report sent. Add a note after the match.", 0);
+    t = CreateThread(NULL, 0, send_thread, job, 0, NULL);
+    if (t) CloseHandle(t);
+    else { free(job); InterlockedExchange(&s_busy, 0); set_toast("", 1); }
+}
+
+int bug_report_note_waiting(char *id, int size)
+{
+    int on;
+    later_lock();
+    if (s_later_id[0] && GetTickCount64() - s_later_at > LATER_MS) s_later_id[0] = 0;
+    on = s_later_id[0] != 0 && !s_note_busy;
+    if (on && id && size > 0) snprintf(id, size, "%s", s_later_id);
+    later_unlock();
+    return on;
+}
+
+void bug_report_note_drop(void)
+{
+    later_lock();
+    if (s_later_id[0]) fprintf(stderr, "[REPORT] report %s: no note after the match\n", s_later_id);
+    s_later_id[0] = 0;
+    SecureZeroMemory(s_later_key, sizeof(s_later_key));
+    later_unlock();
+}
+
+typedef struct { char id[8], key[33], note[BUG_REPORT_NOTE_MAX + 1]; } NoteJob;
+
+static DWORD WINAPI note_thread(LPVOID param)
+{
+    NoteJob *job = (NoteJob *)param;
+    Buf body = { 0 };
+    char boundary[48], ctype[96], answer[64], text[160];
+    int status = 0;
+    snprintf(boundary, sizeof(boundary), "ffny%08lx%08lx", (unsigned long)GetTickCount(), (unsigned long)GetCurrentProcessId());
+    snprintf(ctype, sizeof(ctype), "multipart/form-data; boundary=%s", boundary);
+    field(&body, boundary, "id", NULL, NULL);
+    puts_(&body, job->id);
+    puts_(&body, "\r\n");
+    field(&body, boundary, "key", NULL, NULL);
+    puts_(&body, job->key);
+    puts_(&body, "\r\n");
+    field(&body, boundary, "note", NULL, NULL);
+    puts_(&body, job->note);
+    puts_(&body, "\r\n");
+    puts_(&body, "--");
+    puts_(&body, boundary);
+    if (puts_(&body, "--\r\n"))
+        status = account_send_report_note(ctype, body.p, (int)body.n, answer, sizeof(answer));
+    fprintf(stderr, "[REPORT] note after the match for report %s (%zu characters) sent: HTTP %d\n", job->id, strlen(job->note), status);
+    if (status == 201)
+        snprintf(text, sizeof(text), "Note added to bug report %s. Thanks!", job->id);
+    else
+        snprintf(text, sizeof(text), "Note not added (%s).",
+                 status == 409 ? "it already has one" : status ? "the server said no" : "no connection");
+    set_toast(text, 1);
+    SecureZeroMemory(job->key, sizeof(job->key));
+    free(body.p);
+    free(job);
+    InterlockedExchange(&s_note_busy, 0);
+    return 0;
+}
+
+void bug_report_add_note(const char *note)
+{
+    NoteJob *job;
+    HANDLE t;
+    char clean[BUG_REPORT_NOTE_MAX + 1];
+    clean_note(clean, sizeof(clean), note);
+    if (!clean[0]) { bug_report_note_drop(); return; }
+    if (InterlockedExchange(&s_note_busy, 1)) return;
+    job = (NoteJob *)calloc(1, sizeof(*job));
+    if (!job) { InterlockedExchange(&s_note_busy, 0); return; }
+    later_lock();
+    snprintf(job->id, sizeof(job->id), "%s", s_later_id);
+    snprintf(job->key, sizeof(job->key), "%s", s_later_key);
+    s_later_id[0] = 0;                  /* one note per report */
+    SecureZeroMemory(s_later_key, sizeof(s_later_key));
+    later_unlock();
+    if (!job->id[0]) { free(job); InterlockedExchange(&s_note_busy, 0); return; }
+    snprintf(job->note, sizeof(job->note), "%s", clean);
+    fprintf(stderr, "[REPORT] note for report %s (%zu characters): %s\n", job->id, strlen(job->note), job->note);
+    set_toast("Adding the note to the bug report...", 0);
+    t = CreateThread(NULL, 0, note_thread, job, 0, NULL);
+    if (t) CloseHandle(t);
+    else { free(job); InterlockedExchange(&s_note_busy, 0); set_toast("", 1); }
 }
 
 int bug_report_busy(void) { return s_busy != 0; }
@@ -482,6 +623,11 @@ void bug_report_send(const char *kind, const char *log_path, const char *picture
 void bug_report_send_note(const char *kind, const char *log_path, const char *picture_path, const char *note)
 { (void)kind; (void)log_path; (void)picture_path; (void)note; }
 int bug_report_toast(char *out, int size) { (void)out; (void)size; return 0; }
+void bug_report_send_online(const char *kind, const char *log_path, const char *picture_path)
+{ (void)kind; (void)log_path; (void)picture_path; }
+int bug_report_note_waiting(char *id, int size) { (void)id; if (size > 0) id[0] = 0; return 0; }
+void bug_report_note_drop(void) {}
+void bug_report_add_note(const char *note) { (void)note; }
 int bug_report_busy(void) { return 0; }
 int bug_report_f9(void) { return 0; }
 int bug_report_last_crash(char *out, int size) { (void)out; (void)size; return 0; }

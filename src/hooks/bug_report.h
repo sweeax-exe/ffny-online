@@ -17,6 +17,16 @@ void bug_report_send(const char *kind, const char *log_path, const char *picture
 #define BUG_REPORT_NOTE_MAX 200
 void bug_report_send_note(const char *kind, const char *log_path, const char *picture_path, const char *note);
 
+/* F9 in an online match (no box: the fight cannot pause): send now with a note_key, and offer the
+ * note after the match (pc_ui.cpp). The toast says so at once. */
+void bug_report_send_online(const char *kind, const char *log_path, const char *picture_path);
+/* That report, once the service took it: 1 and its id while a note may still follow (two hours). */
+int bug_report_note_waiting(char *id, int size);
+/* The player let the offer go: no note for it. */
+void bug_report_note_drop(void);
+/* The note for it (POST /api/report/note, in the background); an empty one drops the offer. */
+void bug_report_add_note(const char *note);
+
 /* A line for the screen while a report is on its way and for a few seconds after; 0 otherwise. */
 int bug_report_toast(char *out, int size);
 int bug_report_busy(void);

@@ -227,7 +227,9 @@ class Session:
         args = [exe, "-listen", "127.0.0.1:%d" % port, "-internal-listen", "127.0.0.1:%d" % (port + 1),
                 "-data", data, "-public-url", "http://127.0.0.1:%d" % port, "-ranked",
                 "-client-id", "0", "-client-secret-file", secret,
-                "-test-accounts", ",".join(names)] + list(extra)
+                "-test-accounts", ",".join(names),
+                # F9 reports from the copies (RECOMP_TEST_PICTURE_REPORT_SECS) land in the session's folder
+                "-reports", os.path.join(self.dir, "reports")] + list(extra)
         tag = "accounts%d" % len(self.relays)
         p = subprocess.Popen(args, stdout=open(os.path.join(self.dir, tag + ".out"), "wb"),
                              stderr=open(os.path.join(self.dir, tag + ".err"), "wb"),

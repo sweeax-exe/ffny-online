@@ -3,7 +3,9 @@
 F9 in the game, or "Send crash report" in the launcher after a crash, sends the run's log and
 (F9) a picture to POST /api/report (server/relay/accounts/reports.go). The service keeps each
 report as a folder <reports>/<YYYYMMDD-HHMMSS>-<id>/ with info.txt, log.txt and picture.png.
-info.txt has a "note:" line when the player wrote what is wrong in F9's box.
+info.txt has a "note:" line when the player wrote what is wrong in F9's box. A report sent from an
+online match (no box there) may get its note after the match: note.txt in the same folder (build 68,
+POST /api/report/note), shown here as "note (after the match)".
 
     python scripts/bug-reports.py list [--last 20]     # newest last: time, id, kind, build, player, note
     python scripts/bug-reports.py get ID [ID ...]      # copies them to logs/bug-reports/<folder>/
@@ -24,7 +26,9 @@ LOCAL = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 def remote_list(host):
     """[(folder, info dict)], oldest first."""
     script = ("cd %s 2>/dev/null || exit 0; for d in $(ls -1 | sort); do echo \"@@ $d\"; cat \"$d/info.txt\" 2>/dev/null; "
-              "ls -1 \"$d\" | sed 's/^/file: /'; done" % REMOTE)
+              "ls -1 \"$d\" | sed 's/^/file: /'; "
+              "[ -f \"$d/note.txt\" ] && echo \"late_note: $(head -c 600 \"$d/note.txt\")\"; "
+              "done" % REMOTE)
     out = subprocess.run(["ssh", host, script], capture_output=True, text=True, encoding="utf-8", errors="replace")
     if out.returncode != 0:
         sys.exit("ssh %s failed: %s" % (host, out.stderr.strip()))
@@ -73,6 +77,8 @@ def main():
                                                 info.get("player", "?"), pic))
             if info.get("note"):
                 print("    note: %s" % info["note"])
+            if info.get("late_note"):
+                print("    note (after the match): %s" % info["late_note"])
         print("%d report(s)" % len(reports))
         return
     if a.cmd == "get":
@@ -85,6 +91,8 @@ def main():
             print(dest, "|", info.get("kind"), "build", info.get("build"), "|", info.get("player"))
             if info.get("note"):
                 print("    note:", info["note"])
+            if info.get("late_note"):
+                print("    note (after the match):", info["late_note"])
     if not want:
         print("nothing to fetch")
 
