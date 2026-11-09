@@ -346,6 +346,8 @@ def read_pack(folder):
     for key in ("name", "language"):
         if not ini.get("language", key, fallback="").strip():
             raise PackError("%s: [language] %s is required" % (path, key))
+    if ini.get("language", "base", fallback="english") not in ("english", "french"):
+        raise PackError("%s: [language] base must be english or french" % path)
     files = []
     for target, patch in (ini.items("files") if ini.has_section("files") else []):
         patch = patch.strip()

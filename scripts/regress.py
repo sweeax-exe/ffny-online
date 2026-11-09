@@ -27,6 +27,9 @@ Checks, in order:
            land damaging hits (the second pad through the USB model)
   two-matches  (--only) a One on One and a Free For All played to their results in
            one launch, each judged on its own events (about 12 minutes)
+  fight-cycles  (--only) five One on Ones in one launch, then the battle menu held
+           for 90 seconds: memory compared between settled fight samples (#166,
+           about 15 minutes)
   ffa-result  (--only) a four-fighter match played to its result: every fighter but
            the winner put out once
   replay   one step-timed, seed-pinned fight: the first thirty seconds of game state
@@ -78,11 +81,11 @@ evidence = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(evidence)
 REPO = harness.REPO
 
-ORDER = ["unit", "m2", "m3", "m4a", "launcher", "overlay", "unlockopt", "picture", "skipintro", "fight", "ffa", "fight-terrordome", "ffa-terrordome", "combat", "versus", "ffa-result", "two-matches", "replay", "repeat", "visual",
+ORDER = ["unit", "m2", "m3", "m4a", "launcher", "overlay", "unlockopt", "picture", "skipintro", "fight", "ffa", "fight-terrordome", "ffa-terrordome", "combat", "versus", "ffa-result", "two-matches", "fight-cycles", "replay", "repeat", "visual",
          "intro", "crib", "gym", "soak", "french", "subtitles-en", "input-trace"]
 # Opt-in (--only): the One on One at the Terrordome, which the Free For All covers, and
 # the repeatability check, which is two more fights.
-DEFAULT = [n for n in ORDER if n not in ("fight-terrordome", "ffa-result", "two-matches", "repeat", "visual", "skipintro")]
+DEFAULT = [n for n in ORDER if n not in ("fight-terrordome", "ffa-result", "two-matches", "fight-cycles", "repeat", "visual", "skipintro")]
 QUICK = ["unit", "m2", "m3", "m4a", "fight"]
 
 # A 2 s line of a 60 Hz title holds 120 presents. Loading screens run at 30, so the
@@ -239,8 +242,8 @@ def check_launcher(a):
     if os.path.exists(shot):
         os.remove(shot)
     settings = ui_settings_file("launcher")
-    # Visit direct routes, save skip in Interface, return Home, capture and click Play.
-    script = "800:ui:Mods;1300:ui:Back;1800:ui:Configure;2300:ui:Back;2800:ui:Advanced;3300:ui:Interface;3800:ui:launcher.skip;4300:ui:Back;4700:move:1050:25;5100:shot:%s;5600:ui:Play" % shot
+    # Visit direct routes, save skip in App preferences, return Home, capture and click Play.
+    script = "800:ui:Mods;1300:ui:Back;1800:ui:Configure;2300:ui:Back;2800:ui:Advanced;3300:ui:App preferences;3800:ui:launcher.skip;4300:ui:Back;4700:move:1050:25;5100:shot:%s;5600:ui:Play" % shot
     run = harness.run_game("ui-launcher", secs=120, preset=a.preset, scripted=False, quiet=True, until_file=shot,
                            env={"RECOMP_SETTINGS": settings, "RECOMP_LAUNCHER_SCRIPT": script,
                                 "RECOMP_INPUT_IGNORE_FOCUS": "1"})
@@ -290,9 +293,9 @@ def check_overlay(a):
 
 
 def check_unlock_option(a):
-    """The launcher's "Debug - Unlock all Fighters and Venues" checkbox, and what it does.
+    """The launcher's "Unlock all fighters and venues" button (Cheats), and what it does.
 
-    Part one clicks it in the launcher and expects `unlock_all = true` under [debug] in the settings
+    Part one clicks it and its confirmation in the launcher and expects `unlock_all = true` under [debug] in the settings
     file. Part two starts the game from a file that says so, with no environment variable, and expects
     the unlock routine to run; a file without it must leave the routine alone."""
     if sys.platform == "win32":
@@ -303,11 +306,10 @@ def check_unlock_option(a):
     if os.path.exists(shot):
         os.remove(shot)
     settings = ui_settings_file("unlockopt")
-    # Open Diagnostics, click unlock, capture and click Play. The harness turns the
-    # unlock on for its runs, which would lock the checkbox, so the variable is left unset here.
-    # A narrow or large-text launcher (the Steam Deck's) draws the choice as an Off/On list: the first
-    # click opens it and the optional second picks On. With a checkbox the first click is enough.
-    script = ("800:ui:Advanced;1300:ui:Diagnostics;1900:ui:debug.unlock_all;2500:uiopt:debug.unlock_all.on;"
+    # Open Cheats, click unlock and confirm the permanent-unlock warning, capture and click Play. The
+    # harness turns the unlock on for its runs, which would hide the button, so the variable is left
+    # unset here.
+    script = ("800:ui:Advanced;1300:ui:Cheats;1900:ui:cheats.unlock_all;2500:ui:cheats.unlock_all.confirm;"
               "3300:shot:%s;3700:ui:Play" % shot)
     run = harness.run_game("ui-unlockopt", secs=120, preset=a.preset, scripted=False, quiet=True, until_file=shot,
                            env={"RECOMP_SETTINGS": settings, "RECOMP_LAUNCHER_SCRIPT": script,
@@ -316,7 +318,7 @@ def check_unlock_option(a):
     with open(settings, encoding="utf-8") as f:
         ini = f.read()
     if not re.search(r"^\[debug\][^\[]*^unlock_all\s*=\s*true\s*$", ini, re.M | re.S):
-        faults.append("the click on the Debug checkbox did not reach settings.ini")
+        faults.append("the Cheats page's unlock and its confirmation did not reach settings.ini")
     if "[UI] launcher closed: play" not in run.text:
         faults.append("Play did not close the launcher")
     if faults:
@@ -334,7 +336,7 @@ def check_unlock_option(a):
             faults.append("unlock_all = true in the file, but the unlock routine did not run")
         if not want and (started or ran):
             faults.append("unlock_all is off in the file, but the unlock routine ran")
-    return verdict(faults, "the checkbox saves [debug] unlock_all; from the file alone the unlock runs, and without it does not")
+    return verdict(faults, "the confirmed button saves [debug] unlock_all; from the file alone the unlock runs, and without it does not")
 
 
 def check_picture_options(a):
@@ -352,9 +354,12 @@ def check_picture_options(a):
     if os.path.exists(shot):
         os.remove(shot)
     settings = ui_settings_file("picture")
-    # The vignette is a checkbox, or in a narrow or large-text launcher an Off/On list (see check_unlock_option).
-    script = ("800:ui:Advanced;1400:ui:display.brightness;2000:ui:display.vignette;2600:uiopt:display.vignette.off;"
-              "3300:shot:%s;3700:ui:Play" % shot)
+    # The vignette is in the collapsed "Original visual effects" section: open it first. It is a checkbox,
+    # or in a narrow or large-text launcher an Off/On list whose optional second click picks Off.
+    # Hover first: the Graphics page is taller than the window, so controls may need scrolling into view.
+    script = ("800:ui:Advanced;1200:hover:display.brightness;1600:ui:display.brightness;2000:ui:graphics.effects;"
+              "2500:hover:display.vignette;2800:ui:display.vignette;3300:uiopt:display.vignette.off;"
+              "3800:shot:%s;4300:ui:Play" % shot)
     run = harness.run_game("ui-picture", secs=60, preset=a.preset, scripted=False, quiet=True,
                            env={"RECOMP_SETTINGS": settings, "RECOMP_LAUNCHER_SCRIPT": script,
                                 "RECOMP_INPUT_IGNORE_FOCUS": "1"})
@@ -559,6 +564,13 @@ def check_two_matches(a):
                           ("combat.result.match1", "combat.result.match2", "combat.eliminations.match2"))
 
 
+def check_fight_cycles(a):
+    # Five One on Ones in one launch; the memory check compares settled fight samples (#166).
+    return scenario_check(a, "fight-cycles", "fight-cycles",
+                          ("combat.result.match1", "combat.result.match5",
+                           "performance.memory_growth", "performance.memory_transition"))
+
+
 def check_ffa_result(a):
     return scenario_check(a, "ffa-result", "ffa-result", ("combat.eliminations", "combat.result"))
 
@@ -590,6 +602,11 @@ def check_visual(a):
     return code == 0 and bool(checks) and not bad, detail + "  " + os.path.relpath(folder, REPO)
 
 
+def fight_golden(a):
+    """The golden stream a fight check compares with: the plain one, or the one recorded with --isolate-crowd."""
+    return os.path.join(REPO, "tests", "golden", "fight-stream-isolated.json" if a.isolate_crowd else "fight-stream.json")
+
+
 def check_replay(a):
     spec = importlib.util.spec_from_file_location("scenario_suite", os.path.join(HERE, "scenario_suite.py"))
     suite = importlib.util.module_from_spec(spec)
@@ -602,11 +619,12 @@ def check_replay(a):
     folder = os.path.join(REPO, "logs", "scenarios", "regress-replay-" + stamp)
     stream = os.path.join(REPO, "logs", "scenarios", "regress-replay-%s.stream" % stamp)
     code = suite.main(["run", "fight", "--fixture", fixture, "--no-audio", "--observe-combat", "--step-input", "default",
-                       "--rng-seed", "20261006", "--no-unlock", "--preset", a.preset, "--stream-out", stream, "--output", folder])
+                       "--rng-seed", "20261006", "--no-unlock", "--preset", a.preset, "--stream-out", stream, "--output", folder]
+                      + (["--isolate-crowd"] if a.isolate_crowd else []))
     try:
         with open(stream, encoding="utf-8") as f:
             lines = [line for line in f.read().splitlines() if line]
-        with open(os.path.join(REPO, "tests", "golden", "fight-stream.json"), encoding="utf-8") as f:
+        with open(fight_golden(a), encoding="utf-8") as f:
             golden = json.load(f)
     except (OSError, ValueError) as ex:
         return False, "no stream: %s" % ex
@@ -632,7 +650,7 @@ def check_repeat(a):
     second = os.path.join(REPO, "logs", "scenarios", "regress-repeat-b-" + stamp)
     stream = os.path.join(REPO, "logs", "scenarios", "regress-repeat-%s.stream" % stamp)
     common = ["run", "fight", "--fixture", fixture, "--no-audio", "--observe-combat", "--step-input", "default",
-              "--rng-seed", "20261006", "--no-unlock", "--preset", a.preset]
+              "--rng-seed", "20261006", "--no-unlock", "--preset", a.preset] + (["--isolate-crowd"] if a.isolate_crowd else [])
     if suite.main(common + ["--stream-out", stream, "--output", first]) != 0:
         return False, "the recording run failed  " + os.path.relpath(first, REPO)
     code = suite.main(common + ["--stream-expect", stream, "--output", second])
@@ -647,7 +665,7 @@ def check_repeat(a):
         detail = "%d records identical over %d steps" % (metrics.get("records", 0), metrics.get("max_step", 0))
         # The stream was the same on Release and Debug and on two fixtures, so its
         # hash is a reference for how the fight plays, not just for this machine.
-        path = os.path.join(REPO, "tests", "golden", "fight-stream.json")
+        path = fight_golden(a)
         with open(path, encoding="utf-8") as f:
             golden = json.load(f)
         if a.update_golden:
@@ -658,7 +676,7 @@ def check_repeat(a):
             detail += "; golden updated"
         elif metrics.get("sha256") != golden["sha256"]:
             golden_ok = False
-            detail += "; but the fight no longer plays as recorded in tests/golden/fight-stream.json" \
+            detail += "; but the fight no longer plays as recorded in " + os.path.relpath(path, REPO).replace(os.sep, "/") + \
                       " (if the change is meant to alter play, rerun with --update-golden)"
         else:
             detail += ", matching the golden hash"
@@ -757,7 +775,7 @@ CHECKS = {"unit": check_unit, "m2": check_m2, "m3": check_m3, "m4a": check_m4a, 
           "overlay": check_overlay, "unlockopt": check_unlock_option, "picture": check_picture_options, "skipintro": check_skip_intro, "fight": check_fight, "ffa": check_ffa,
           "fight-terrordome": lambda a: check_fight(a, 'fight-terrordome'),
           "ffa-terrordome": lambda a: check_fight(a, 'ffa-terrordome'),
-          "combat": check_combat, "versus": check_versus, "ffa-result": check_ffa_result, "two-matches": check_two_matches, "replay": check_replay, "visual": check_visual, "repeat": check_repeat, "intro": check_intro, "crib": check_crib, "gym": check_gym, "soak": check_soak}
+          "combat": check_combat, "versus": check_versus, "ffa-result": check_ffa_result, "two-matches": check_two_matches, "fight-cycles": check_fight_cycles, "replay": check_replay, "visual": check_visual, "repeat": check_repeat, "intro": check_intro, "crib": check_crib, "gym": check_gym, "soak": check_soak}
 
 
 def status_word(ok):
@@ -774,6 +792,10 @@ def main(argv=None):
     ap.add_argument("--only", help="comma-separated checks: " + ",".join(ORDER))
     ap.add_argument("--soak", type=int, default=3, help="boots in the soak check (default 3)")
     ap.add_argument("--fixture", help="save fixture for the combat check (default: a fresh copy of the saved profiles)")
+    ap.add_argument("--isolate-crowd", action="store_true",
+                    help="replay and repeat with the fight isolated from the host's timing (#98): the match logic's "
+                         "generators seeded and no spectators for the fighters to meet. Compares with "
+                         "tests/golden/fight-stream-isolated.json")
     ap.add_argument("--update-golden", action="store_true",
                     help="repeat check: record the new state-stream hash instead of comparing with it")
     ap.add_argument("--shared-story", action="store_true", help="evaluate crib and gym from one story-tour launch")

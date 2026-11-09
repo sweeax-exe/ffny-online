@@ -1,5 +1,6 @@
-/* Picture options: brightness and the venue vignette ([display] brightness, vignette,
- * vignette_strength). Both apply as they change, in the launcher or the overlay.
+/* Picture options: brightness, the venue vignette, colour tint and film scratches ([display]
+ * brightness, vignette, vignette_strength, color_tint, scratches). All apply as they change, in
+ * the launcher or the overlay.
  *
  * Brightness is a power curve on top of the title's own gamma ramp (src/recomp_manual.c,
  * sub_002203C6_enter): out = in^(100/brightness), so black and white stay where they are and
@@ -18,10 +19,21 @@
  *                  four channels: dst * (s * vignette + 1 - s), the game's picture blended
  *                  towards the undarkened one. This assumes an opaque vignette texture; the
  *                  measured captures agree with it to a few levels.
+ *
+ * The same draw carries the venue's colour tint: modulate R, G, B and fill R, G, B, one byte each
+ * in the first six arguments (the variance's TintModulateColor and TintFillColor). color_tint
+ * below 100 moves them towards no tint (modulate 255, fill 0) in proportion; the vignette, the
+ * last argument, is left to the vignette options.
+ *
+ * Film scratches are the variance's ScratchesEnable: sub_000D8C40 then calls the scratch overlay's
+ * draw, sub_000D8AD0 (thiscall, no arguments). scratches = false skips that draw
+ * (src/recomp_manual.c). RECOMP_POSTFX_TRACE=1 logs each new variance a scene settles on.
  */
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include "recomp/gen/recomp_types.h"
 #include "recomp_settings.h"
 #include "picture.h"
@@ -37,6 +49,8 @@ static int s_applied;           /* a ramp has been handed to the presentation pa
 static int s_brightness = 100;
 
 static volatile int s_vignette_alpha = 255;     /* 0: not drawn */
+static volatile int s_tint = 100;               /* percent of the venue's colour tint */
+static volatile int s_scratches = 1;
 static uint32_t s_fade_quad;                    /* the vignette quad of the draw in progress */
 
 static void compose(void)
@@ -86,14 +100,19 @@ void picture_apply_settings(void)
     if (strength < 0) strength = 0;
     if (strength > 100) strength = 100;
     s_vignette_alpha = recomp_settings_get("display", "vignette", 1) ? (strength * 255 + 50) / 100 : 0;
+    s_tint = recomp_settings_get("display", "color_tint", 100);
+    if (s_tint < 0) s_tint = 0;
+    if (s_tint > 100) s_tint = 100;
+    s_scratches = recomp_settings_get("display", "scratches", 1) != 0;
     if (b != s_brightness) {
         s_brightness = b;
         compose();
     }
-    if (logged != s_brightness * 1000 + s_vignette_alpha) {
-        logged = s_brightness * 1000 + s_vignette_alpha;
-        fprintf(stderr, "[PICTURE] brightness %d, vignette %s (alpha %d)\n", s_brightness,
-                s_vignette_alpha ? "on" : "off", s_vignette_alpha);
+    if (logged != ((s_brightness * 1000 + s_vignette_alpha) * 101 + s_tint) * 2 + s_scratches) {
+        logged = ((s_brightness * 1000 + s_vignette_alpha) * 101 + s_tint) * 2 + s_scratches;
+        fprintf(stderr, "[PICTURE] brightness %d, vignette %s (alpha %d), colour tint %d%%, scratches %s\n",
+                s_brightness, s_vignette_alpha ? "on" : "off", s_vignette_alpha, s_tint,
+                s_scratches ? "on" : "off");
     }
 }
 
@@ -102,7 +121,18 @@ void picture_tint_draw_enter(void)
 {
     static int reported = -1;
     int alpha = s_vignette_alpha;
+    int tint = s_tint;
     s_fade_quad = 0;
+    if (tint < 100) {
+        int i;
+        for (i = 0; i < 6; i++) {
+            uint32_t at = g_esp + 4 + 4 * (uint32_t)i;
+            int v = MEM8(at);
+            /* modulate (the first three) towards 255, fill towards 0 */
+            v = i < 3 ? 255 - ((255 - v) * tint + 50) / 100 : (v * tint + 50) / 100;
+            MEM32(at) = (uint32_t)v;
+        }
+    }
     if (!MEM8(g_esp + 0x1C))
         return;
     if (reported != alpha) {        /* once a setting: whether a scene draws one at all */
@@ -114,6 +144,47 @@ void picture_tint_draw_enter(void)
         MEM8(g_esp + 0x1C) = 0;
     else if (alpha < 255)
         s_fade_quad = MEM32(g_ecx + 4);
+}
+
+/* sub_000D8AD0, the film scratch overlay's draw: 1 to draw it as the variance asks. */
+int picture_scratches_on(void)
+{
+    static int reported = -1;
+    if (reported != s_scratches) {
+        reported = s_scratches;
+        fprintf(stderr, "[PICTURE] film scratches %s\n", s_scratches ? "drawn as authored" : "removed");
+    }
+    return s_scratches;
+}
+
+/* sub_000D8C40_enter (thiscall): the variance drawn last frame, at this+0x4E0, logged when it
+ * changes (RECOMP_POSTFX_TRACE=1). Keys as docs/research/picture-options.md tables them. */
+void picture_postfx_enter(void)
+{
+    static int on = -1;
+    static uint32_t last[0x11];
+    uint32_t now[0x11], v = g_ecx + 0x4E0;
+    int i, same = 1;
+    if (on < 0) {
+        const char *e = getenv("RECOMP_POSTFX_TRACE");
+        on = e && *e == '1';
+    }
+    if (!on || g_ecx < 0x10000u)
+        return;
+    for (i = 0; i < 0x11; i++) {
+        now[i] = MEM32(v + 4u * (uint32_t)i);
+        if (now[i] != last[i])
+            same = 0;
+    }
+    if (same)
+        return;
+    memcpy(last, now, sizeof last);
+    fprintf(stderr, "[POSTFX] variance: glow %u vignette %u tint %u scratches %u flicker %u"
+                    " | +14 %08X %08X %08X %08X | vignette id %u alpha %08X"
+                    " | modulate %u %u %u fill %u %u %u\n",
+            now[0], now[1], now[2], now[3], now[4], now[5], now[6], now[7], now[8],
+            now[9], now[10], now[11] & 0xFF, now[12] & 0xFF, now[13] & 0xFF,
+            now[14] & 0xFF, now[15] & 0xFF, now[16] & 0xFF);
 }
 
 /* sub_00028460_enter: a quad's colour, (this, four channel bytes as dwords), `ret 0x10`. The

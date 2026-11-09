@@ -28,8 +28,8 @@ void pc_language_patch_xbe(void *xbe, size_t size);
  * or with "auto" what the active pack asks for (src/patches/subtitles.c). */
 int pc_language_all_subtitles(void);
 
-/* Whether the game should start in its own French ([language] game = french): never while a
- * language mod is on, which keeps the English slot it translates (src/patches/game_language.c). */
+/* Whether to start in the French slot: the active mod's base, otherwise [language] game.
+ * Mods default to the English slot (src/patches/game_language.c). */
 int pc_language_french(void);
 
 #ifdef __cplusplus

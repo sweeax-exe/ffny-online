@@ -59,28 +59,7 @@ extern BOOL (*g_xbox_game_file_redirect)(const char *relative, xbox_host_char *h
 #define LANG_MAX_ENTRY   (64u << 20)    /* one decompressed entry */
 #define DELTA_HEADER     80
 
-static const char *const k_subtitles[] = { "auto", "all cutscenes", "as the game does", NULL };
-static const char *const k_game[] = { "english", "french", NULL };
-
-size_t pc_language_settings(RecompSetting *out, size_t max)
-{
-    size_t n = 0;
-    if (max < 3) return 0;
-    memset(out, 0, sizeof(*out) * 3);
-#define ADD(...) do { RecompSetting s_ = { __VA_ARGS__ }; out[n++] = s_; } while (0)
-    ADD("language", "pack", RECOMP_SETTING_STRING, 0, 0, 0, NULL, "RECOMP_LANGUAGE_PACK", RECOMP_SETTING_RESTART,
-        "Language mod: a folder in the mods folder with language.ini (the Mods page sets it); empty plays the "
-        "game in its own English.");
-    ADD("language", "story_subtitles", RECOMP_SETTING_ENUM, 0, 0, 0, k_subtitles, "RECOMP_STORY_SUBTITLES",
-        RECOMP_SETTING_RESTART,
-        "Subtitles in Story cutscenes: auto follows the language pack (a translation shows them in every "
-        "cutscene), or choose.");
-    ADD("language", "game", RECOMP_SETTING_ENUM, 0, 0, 0, k_game, "RECOMP_GAME_LANGUAGE", RECOMP_SETTING_RESTART,
-        "The game's own language: english, or the french built into the game (text and Story subtitles; the "
-        "voices stay English). A language mod takes its place.");
-#undef ADD
-    return n;
-}
+/* The [language] settings are in pc_settings_catalog.c, which the game-free app links too. */
 
 /* ---- SHA-256 ------------------------------------------------------------------------------------ */
 
@@ -433,6 +412,7 @@ typedef struct {
 typedef struct {
     char folder[64], name[96], language[16];
     int all_subtitles;
+    int base_french;        /* The validated pack replaces the French language slot. */
     PackFile files[LANG_MAX_FILES];
     int count;
     Buf ini;
@@ -524,6 +504,13 @@ static int pack_load(const char *dir, const char *folder, Pack *p, int read_delt
             else if (!strcmp(key, "name")) snprintf(p->name, sizeof p->name, "%s", value);
             else if (!strcmp(key, "language")) snprintf(p->language, sizeof p->language, "%s", value);
             else if (!strcmp(key, "story_subtitles")) p->all_subtitles = !strcmp(value, "all");
+            else if (!strcmp(key, "base")) {
+                if (strcmp(value, "english") && strcmp(value, "french")) {
+                    free(text);
+                    return fail("%s: [language] base must be english or french", folder);
+                }
+                p->base_french = !strcmp(value, "french");
+            }
         } else if (!strcmp(section, "[files]")) {
             size_t vlen = strlen(value);
             if (p->count >= LANG_MAX_FILES) { free(text); return fail("%s: too many files", folder); }
@@ -801,7 +788,12 @@ void pc_language_start(const char *data_root, const char *game_dir)
     Sha sha;
 
     recomp_settings_get_text("language", "pack", folder, sizeof folder, "");
-    snprintf(folder, sizeof folder, "%s", trim(folder));
+    {
+        /* trim() points into folder, so this may overlap. snprintf onto its own source is undefined,
+         * and glibc empties the text first: the pack was lost on Linux. */
+        const char *name = trim(folder);
+        memmove(folder, name, strlen(name) + 1);
+    }
     if (!folder[0]) {
         fprintf(stderr, "[LANG] the game's own language (no language pack)\n");
         return;
@@ -978,6 +970,12 @@ int pc_language_all_subtitles(void)
 int pc_language_french(void)
 {
     static int logged;
+    /* A pack declaring base=french replaces the French strings and art, so the game must start in French. */
+    if (g_active && g_pack.base_french) {
+        if (!logged++)
+            fprintf(stderr, "[LANG] the language mod '%s' is built on the game's own French\n", g_pack.name);
+        return 1;
+    }
     if (recomp_settings_get("language", "game", 0) != 1) return 0;
     if (g_active) {
         if (!logged++)

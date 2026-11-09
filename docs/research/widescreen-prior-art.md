@@ -1,5 +1,8 @@
 # Widescreen prior art: 4:3 to 16:9 / 16:10 / ultrawide in ports, recomps and emulator patches
 
+> Dated external-source survey. Negative searches and original external issue states are not current guarantees.
+> The Def Jam community annex below supersedes any original “no PS2 patch found” statement.
+
 Purpose: survey how other decompilation ports, static recompilations and emulator/patch communities widened 4:3 games, and extract lessons for the Def Jam: Fight for NY PC port (640x480 source, Xbox GPU command stream translated to D3D11/Vulkan; targets 16:9, 16:10 Steam Deck 1280x800, 21:9, 32:9).
 
 Method and confidence: this is web research only (project READMEs, config docs, source files, issue/PR trackers, forum threads). Source files were read through a summarising fetch tool, so statements about code are paraphrases of what was returned, not line-by-line audits. Anything I could not confirm is marked **[UNVERIFIED]**. Statements that are my own inference rather than something a source said are marked **[INFERENCE]**. Dates in some trackers are 2026 (current as of this research).
@@ -271,3 +274,14 @@ Honest summary: there is very little direct documentation of fight-camera behavi
 - Other items cited inline above.
 
 Known gaps: sm64ex / sm64-port HUD handling, 2Ship2Harkinian internals, re3 source, Flawless Widescreen internals, RPCS3 patch format, xemu widescreen patches, direct Def Jam widescreen patches, and official 16:10-specific guidance from any recomp other than Unleashed were not found or could not be fetched.
+
+
+## Def Jam community patch annex (2026-10-10)
+
+This later targeted search supersedes the earlier annex statements that no Def Jam PS2 patch was found. Directly read files in the [official PCSX2 repository](https://github.com/PCSX2/pcsx2_patches/tree/main/patches): FFNY `SLUS-21004_4538436F.pnach`, `SLES-52507_873F8ED6.pnach`, `SLPM-65907_B2EC9660.pnach`; Vendetta `SLUS-20639_4042248C.pnach`, `SLES-51479_7B8477F9.pnach` (Japanese `SLPS-25275_DBD0E172.pnach` existed but was not read). Matching [OPL cheats](https://github.com/PS2-Widescreen/OPL-Widescreen-Cheats/tree/main/CHT) use `SLUS_210.04.cht`, `SLES_525.07.cht`, `SLPM_659.07.cht` and credit ElHecht.
+
+FFNY PAL edits 0 x 0021 e 97 c/990/9 a 8/9 c 0,0 x 0021 ea 78/ebb 0/ebb 4 and menu 0 x 0021 f 164–1 ac load/multiply a 0.75 horizontal factor and carry `renderfix left/right` comments; Japanese edits use different addresses. Hor+ and clip/cull interpretation are instruction-level inference. USA rewrites roughly 30 words at 0 x 00361 a 34–ad 8 with 1.336/0.25/0.5 constants;0 x 00361 a 9 c has an optional cutscene-zoom multiply disabled by default. This does not prove its FMV behavior. No read patch has HUD-position/FMV-resize edits. Vendetta USA edits 0 x 001 a 17 b 4/0 x 00197 bbc; PAL0 x 001 A1 D24/0 x 00198154 (0 x 3 f 10/0 x 3 f 22 constants).
+
+Dolphin's inspected [FFNY](https://github.com/dolphin-emu/dolphin/blob/master/Data/Sys/GameSettings/GNWE69.ini) and [Vendetta](https://github.com/dolphin-emu/dolphin/blob/master/Data/Sys/GameSettings/GDTE69.ini) settings had cheats rather than game-specific wide codes. [Swiss issue1046](https://github.com/emukidid/swiss-gc/issues/1046) reported skinny FFNY characters under its generic 3Dwidescreen patch; it was one unresolved user report, not proof of native support or a verified FOV diagnosis. Xbox/xemu/GC widescreen-patch searches were negative within that search scope. No public source was found for `gWidescreenMode`/`gEH.WIDESCREEN`, four-player HUD placement, or patch FMV handling. PCSX2 forum claims of a partial HUD fix and wiki 1440 p-no-issues claims were blocked/second-hand and remain unverified. Generic rendering complaints in [ResetEra](https://www.resetera.com/threads/pcsx2-users-help-me-with-this-weird-ghosting-lines-issue.165478/) do not isolate patch causality.
+
+Format/tool leads are existence evidence only: [EA BIG/BIGF documentation](https://rewiki.miraheze.org/wiki/EA_BIG_BIGF_Archive), [vivtool](https://github.com/Aleksei-Miller/vivtool) (lists FFNY), and [jonwil's APT tools](https://github.com/jonwil/aptdump). The [APT author's format warning](https://www.ppmforums.com/topic-60956/i-updated-my-apt-tools-to-fix-bugs-and-make-them-work/) concerns later C&C titles; FFNY compatibility was not established. Public [Dolphin texture packs](https://forums.dolphin-emu.org/Thread-def-jam-fight-for-ny-hd-textures) do not validate this port's source identities or widescreen layer mapping.

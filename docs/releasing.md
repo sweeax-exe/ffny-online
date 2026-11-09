@@ -1,7 +1,7 @@
 # Source releases
 
-A GitHub Release is a versioned source snapshot with game-free setup tools,
-checksums and provenance. The setup compiles locally from the player's dump.
+A GitHub Release is a versioned source snapshot with game-free app packages,
+checksums and provenance. The app sets up and compiles locally from the player's dump.
 The locally built game uses
 `win-x64-release` (optimized `RelWithDebInfo`, with diagnostic symbols). Hosted
 CI builds runtime libraries and native fixtures with `CMAKE_BUILD_TYPE=Release`.
@@ -114,12 +114,27 @@ last release plus docs), with the same gate.
    Verify every asset's SHA-256 against GitHub's digest and its provenance, then
    publish the draft. Version tags are immutable; use a new version to correct a
    published release.
+6. A beta for player play-testing uses the tag `vMAJOR.MINOR.PATCH-beta.N` with the CMake
+   version it leads up to and `docs/releases/<tag>.md`. The workflow drafts it as a prerelease
+   that is never Latest, and the app and setup never offer prereleases as updates. A beta
+   reports the final version number, so its testers download the next beta or the final release
+   themselves. The final release is tagged `vMAJOR.MINOR.PATCH` later, from `main`.
+7. Publishing a stable release also deploys the project site (`.github/workflows/pages.yml`,
+   [site/README.md](../site/README.md)). Check that the Pages run succeeded and the site shows
+   the new version. Update the site's copy in the release PR when a release adds a headline
+   feature.
 
 GitHub supplies the source ZIP/tar archives. They do not include submodules;
-the supported command-line setup is a recursive clone at the tag. Only the
-setup tools (`DefJamSetup-<version>-windows-x64.exe`, `-macos-arm64.dmg`,
-`-linux-x64.tar.gz`), each with its `.sha256` and `.provenance.json`, are
-attached after standalone setup inventory/tests pass. `check-setup-assets.py`
+the supported command-line setup is a recursive clone at the tag. From v1.1.0, only
+the app packages (`DefJamRecompiled-<version>-macos-arm64.zip`,
+`DefJamRecompiled-<version>-windows-x64.exe` and `DefJamRecompiled-<version>-linux-x86_64.AppImage`,
+D215), each with its `.sha256` and `.provenance.json`, are attached: exactly nine release assets.
+Legacy setup tools are still built, inventoried and tested in CI; `check-setup-assets.py --app`
+emits only the app package, checksum and provenance, rejecting extra files in its output directory.
+The release workflow uploads an explicit list of the nine app assets, so leftover setup files cannot
+be published. Standalone setup packaging without `--app` is for local use only.
+The app carries the same payload (in the bundle's Resources on macOS, built
+into the program on Windows, in the AppImage's image on Linux) and updates itself from these assets. `check-setup-assets.py`
 refuses development payloads and generated/game inputs. Source-tree binary bans
 remain intact; a precompiled game is never published. See [setup installer](setup-installer.md)
 for behavior and remaining acceptance gates.

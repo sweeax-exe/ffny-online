@@ -257,12 +257,22 @@ class Session:
         self.roots.append(r)
         return r
 
+    def copy_exe(self, i):
+        """The executable copy i runs: this checkout's build, or the one DJ_COPY_EXE names for it
+        ("1=D:/other/build/defjam_recomp.exe[;2=...]"). Mixed-build tests: one copy on another build."""
+        for item in os.environ.get("DJ_COPY_EXE", "").split(";"):
+            n, _, path = item.partition("=")
+            if n.strip() == str(i) and path.strip():
+                return path.strip()
+        return self.exe
+
     def launch(self, i, env=None, root=None, core=None, control_port=None, watch=(), fixture=None):
         """Start copy i on its own data root and CPU. Refuses before starting when anything is missing."""
         if self.closed or not self.lock.held:
             raise RuntimeError("open the session (take the lock) first")
         root = root or self.make_root(i, fixture=fixture)
-        bad = machine.preflight(self.exe, root)
+        exe = self.copy_exe(i)
+        bad = machine.preflight(exe, root)
         if bad:
             raise FileNotFoundError("; ".join(bad))
         core = 2 + 2 * i if core is None else core
@@ -277,7 +287,9 @@ class Session:
         log = os.path.join(self.dir, "copy%d.log.err" % i)
         with open(os.path.join(self.dir, "copy%d.env.json" % i), "w", encoding="utf-8") as f:
             json.dump({k: v for k, v in e.items() if k.startswith("RECOMP_") or k == "DEFJAM_DATA"}, f, indent=1)
-        p = subprocess.Popen([self.exe], cwd=machine.REPO, env=e,
+        if exe != self.exe:
+            self.log("copy %d runs %s (DJ_COPY_EXE)" % (i, exe))
+        p = subprocess.Popen([exe], cwd=machine.REPO, env=e,
                              stdout=open(os.path.join(self.dir, "copy%d.log" % i), "wb"), stderr=open(log, "wb"))
         if self.job:
             self.job.add(p)

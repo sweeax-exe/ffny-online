@@ -311,8 +311,8 @@ hash once.
   `bbox [0,29,639,479]`). With a wide target the capture must crop the 4:3 region `[ox*s, (ox+640)*s)` so the goldens stay bit-exact,
   and a separate opt-in (like the existing `RECOMP_TRANS_SHOT_NATIVE`, 505-512) should capture the whole wide frame. The Vulkan
   readback has the same shape (`d3d8_vk.c:1225-1257`, `shot_record` 2079). Default widescreen **off** under `RECOMP_SETTINGS=none` (what
-  the harness uses, `src/hooks/pc_settings.c` header) keeps `scripts/regress.py` unchanged by construction; `docs/07-m6-plan.md`
-  already states "the goldens run at 4:3 with the gamma ramp off and an explicit render scale". For the `visual` check
+  the harness uses, `src/hooks/pc_settings.c` header) keeps `scripts/regress.py` unchanged by construction; the current test policy
+  preserves "the goldens run at 4:3 with the gamma ramp off and an explicit render scale". For the `visual` check
   (`<data>/test-baselines`) run at 4:3. [V on the sites; I that the default-off approach is enough.] Add a golden for the wide frame
   only as a frame signature (box, counts, hash) per the no-pixels rule.
 - **HD textures.** Texture packs bind by source identity and keep guest dimensions and UVs (`docs/hd-textures.md:72-75`); they are

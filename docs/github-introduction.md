@@ -22,8 +22,8 @@ direction, compatibility, contributing, technical identity and credits.
 
 Use ordinary Markdown and descriptive links. Small tables work well for
 platform choices and project stages. Avoid deeply nested lists and large HTML
-layout tables. Keep one gameplay still and one short preview in the README;
-put additional examples in the [media index](media/README.md) or feature guides.
+layout tables. Keep the README's gameplay section to a few comparisons and the trailer;
+put additional examples in feature guides.
 
 ## Where information belongs
 
@@ -33,13 +33,13 @@ put additional examples in the [media index](media/README.md) or feature guides.
 | Install, update and repair | [Setup installers](setup-installer.md) and platform build guides | Setup choice and link |
 | Setting names and defaults | [Settings reference](settings-reference.md) | Feature benefit and link |
 | Texture formats and load order | [HD textures](hd-textures.md) | Released capability and link |
-| User-visible limits | [Known issues](known-issues.md) | Material limits and link |
+| User-visible limits | [GitHub Issues](https://github.com/vyanhursky/DefJamFFNY-recomp/issues) | Material limits and link |
 | Version changes and measurements | [Release notes](releases) and [GitHub releases](https://github.com/vyanhursky/DefJamFFNY-recomp/releases) | Latest-release link |
 | Future work | Linked issues/PRs and plans | Released, beta, proposed or stretch stage |
 | Capture provenance | [Media index](media/README.md) | Platform and texture context in captions |
 
 Keep essential qualifiers beside the feature: up to four **local** players;
-**4:3** remains available and **widescreen is beta** on all three platforms;
+**4:3** remains available and **widescreen** works on all three platforms;
 the supported frame-rate target is **60 fps**.
 Do not confuse 120-Hz display support with 120-fps gameplay. The Windows present
 interval is display Hz divided by 60, and the default flip timer is 60 Hz.

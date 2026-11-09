@@ -1,5 +1,7 @@
 """Behavioral negative controls for reports, captures, fixtures and ownership."""
+import argparse
 import importlib.util
+import os
 import json
 import re
 from pathlib import Path
@@ -168,7 +170,8 @@ def test_fixture_output_inside_source_is_rejected(tmp_path):
 def test_scenario_settings_are_explicit_and_reject_ambiguous_values(tmp_path):
     settings, env = suite.scenario_settings()
     assert settings == {'render_scale': 2, 'gamma': True, 'vsync': True,
-                        'brightness': 100, 'vignette': True, 'vignette_strength': 100}
+                        'brightness': 100, 'vignette': True, 'vignette_strength': 100,
+                        'texture_mips': False, 'anisotropy': 1, 'color_tint': 100, 'scratches': True, 'msaa': 1}
     assert env['RECOMP_RENDER_SCALE'] == '2' and env['RECOMP_GAMMA'] == '1'
     assert env['RECOMP_BRIGHTNESS'] == '100' and env['RECOMP_VIGNETTE'] == '1' and env['RECOMP_VIGNETTE_STRENGTH'] == '100'
     p = tmp_path / 'settings.json'
@@ -178,13 +181,31 @@ def test_scenario_settings_are_explicit_and_reject_ambiguous_values(tmp_path):
     p.write_text(json.dumps({'brightness': 150, 'vignette': False, 'vignette_strength': 40}))
     settings, env = suite.scenario_settings(p)
     assert env['RECOMP_BRIGHTNESS'] == '150' and env['RECOMP_VIGNETTE'] == '0' and env['RECOMP_VIGNETTE_STRENGTH'] == '40'
-    for bad in ({'brightness': 49}, {'brightness': 201}, {'vignette_strength': 101}, {'brightness': '120'}):
+    p.write_text(json.dumps({'texture_mips': True, 'anisotropy': 16, 'color_tint': 0, 'scratches': False}))
+    settings, env = suite.scenario_settings(p)
+    assert env['RECOMP_TEXTURE_MIPS'] == '1' and env['RECOMP_ANISOTROPY'] == '16x'
+    assert env['RECOMP_COLOR_TINT'] == '0' and env['RECOMP_SCRATCHES'] == '0'
+    assert suite.scenario_settings()[1]['RECOMP_ANISOTROPY'] == 'off'
+    assert suite.scenario_settings()[1]['RECOMP_MSAA'] == 'off'
+    p.write_text(json.dumps({'msaa': 4}))
+    assert suite.scenario_settings(p)[1]['RECOMP_MSAA'] == '4x'
+    for bad in ({'anisotropy': 3}, {'anisotropy': True}):
+        p.write_text(json.dumps(bad))
+        with pytest.raises(ValueError, match='anisotropy'):
+            suite.scenario_settings(p)
+    for bad in ({'msaa': 16}, {'msaa': '4x'}):
+        p.write_text(json.dumps(bad))
+        with pytest.raises(ValueError, match='msaa'):
+            suite.scenario_settings(p)
+    for bad in ({'brightness': 49}, {'brightness': 201}, {'vignette_strength': 101}, {'brightness': '120'},
+                {'color_tint': 101}):
         p.write_text(json.dumps(bad))
         with pytest.raises(ValueError, match='integer'):
             suite.scenario_settings(p)
-    p.write_text(json.dumps({'gamma': 'false'}))
-    with pytest.raises(ValueError, match='booleans'):
-        suite.scenario_settings(p)
+    for bad in ({'gamma': 'false'}, {'texture_mips': 1}):
+        p.write_text(json.dumps(bad))
+        with pytest.raises(ValueError, match='booleans'):
+            suite.scenario_settings(p)
     p.write_text(json.dumps({'game_folder': 'unexpected'}))
     with pytest.raises(ValueError, match='unknown'):
         suite.scenario_settings(p)
@@ -423,7 +444,7 @@ def test_missing_build_writes_failed_report_before_copying_fixture(tmp_path, mon
     (src / 'profile').write_bytes(b'synthetic')
     fixture = tmp_path / 'fixture'
     suite.create_fixture(src, fixture, 'synthetic profile')
-    def missing_build(*args): raise ValueError('synthetic missing build certificate')
+    def missing_build(*args, **kwargs): raise ValueError('synthetic missing build certificate')
     monkeypatch.setattr(suite.harness.pipeline_state, 'verify_build', missing_build)
     monkeypatch.setattr(suite, 'source_identity', lambda _: {})
     output = tmp_path / 'report'
@@ -445,7 +466,7 @@ def test_scenario_runner_requires_audio_and_retains_browsable_evidence(tmp_path,
     fixture = tmp_path / 'fixture'
     suite.create_fixture(src, fixture, 'synthetic')
     monkeypatch.setattr(suite, 'source_identity', lambda _: {'head': 'synthetic'})
-    monkeypatch.setattr(suite.harness.pipeline_state, 'verify_build', lambda *a: {})
+    monkeypatch.setattr(suite.harness.pipeline_state, 'verify_build', lambda *a, **k: {})
     received = {}
     monkeypatch.setenv('RECOMP_TEXTURE_PACKS', 'inherited-must-not-enter-scenario')
     def launch(route, **kwargs):
@@ -526,6 +547,75 @@ def test_memory_checks_measure_growth_during_play():
     loading = ev.memory_checks(samples([50, 100, 200, 300, 320, 318, 319, 321, 320, 322], first=0), start_seconds=15)
     assert loading[0]['status'] == 'pass'
     assert ev.memory_checks(samples([300, 320]), start_seconds=30)[0]['status'] == 'fail'
+    assert steady[0]['metrics']['method'] == 'endpoint' and len(steady) == 1
+
+
+def _cycle_run(fight_mb, between_mb, matches, fight_samples=8, gap_samples=4, tail_mb=None):
+    """Memory samples every 5 s and a timeline for `matches` fights. `fight_mb(k, i)` is sample i of
+    match k (k from 1), `between_mb(k, i)` a sample of the scene change after it."""
+    samples, timeline, t = [], [], 0.0
+    def add(value):
+        nonlocal t
+        samples.append({'seconds': t, 'private_bytes': int(value * 1048576), 'working_set': 0})
+        t += 5.0
+    for k in range(1, matches + 1):
+        timeline.append({'observed_seconds': t, 'call': 'Game.StartGame()'})
+        for i in range(4):       # streaming in, before the settled window
+            add(fight_mb(k, 0) - 40)
+        for i in range(fight_samples):
+            add(fight_mb(k, i))
+        timeline.append({'observed_seconds': t, 'call': 'Game.GetMatchSummary()'})
+        for i in range(gap_samples):
+            add(between_mb(k, i))
+    if tail_mb is not None:
+        add(tail_mb)
+    return samples, timeline
+
+
+def test_memory_checks_compare_settled_fights_and_report_transitions_apart():
+    # Issue #166: flat play, but the run ends in a scene change that holds +60 MiB
+    # (decode buffers and allocator arenas). Growth is settled-to-settled, the end is reported.
+    samples, timeline = _cycle_run(lambda k, i: 1400, lambda k, i: 1460, matches=2)
+    checks = {c['name']: c for c in ev.memory_checks(samples, start_seconds=20, timeline=timeline)}
+    growth, transition = checks['performance.memory_growth'], checks['performance.memory_transition']
+    assert growth['status'] == 'pass' and growth['metrics']['method'] == 'settled'
+    assert growth['metrics']['growth_mb'] == 0.0 and growth['metrics']['cycle_growth_mb'] == [0.0, 0.0]
+    assert transition['status'] == 'pass' and transition['metrics']['end_over_baseline_mb'] == 60.0
+    # The old endpoint reading of the same samples.
+    assert ev.memory_checks(samples, start_seconds=20)[0]['metrics']['growth_mb'] == 60.0
+
+
+def test_memory_checks_still_fail_growth_that_continues_across_cycles():
+    # A leak of about 6 MiB a minute through five matches (the Deck positive control was
+    # 100 KiB/s): every settled window is higher than the last.
+    rate = 0.5  # MiB per 5 s sample
+    clock = {'n': 0}
+    def leaking(k, i):
+        clock['n'] += 1
+        return 1400 + rate * clock['n']
+    samples, timeline = _cycle_run(leaking, lambda k, i: 1400 + rate * clock['n'], matches=5,
+                                   fight_samples=40, gap_samples=12)
+    growth = ev.memory_checks(samples, start_seconds=20, timeline=timeline)[0]
+    assert growth['status'] == 'fail' and growth['metrics']['method'] == 'settled'
+    cycles = growth['metrics']['cycle_growth_mb']
+    assert len(cycles) == 5 and cycles == sorted(cycles) and cycles[-1] > 64
+
+
+def test_memory_checks_bound_the_transition_peak():
+    # Settled fights agree, but a scene change spikes past the separate transition limit.
+    samples, timeline = _cycle_run(lambda k, i: 1400, lambda k, i: 1800 if k == 1 and i == 1 else 1400, matches=2)
+    checks = {c['name']: c for c in ev.memory_checks(samples, start_seconds=20, timeline=timeline)}
+    assert checks['performance.memory_growth']['status'] == 'pass'
+    assert checks['performance.memory_transition']['status'] == 'fail'
+    assert checks['performance.memory_transition']['metrics']['peak_over_baseline_mb'] == 400.0
+
+
+def test_memory_checks_fall_back_to_the_endpoint_when_the_last_fight_is_too_short():
+    samples, timeline = _cycle_run(lambda k, i: 1400, lambda k, i: 1480, matches=2)
+    # Cut the second fight's settled window to two samples.
+    timeline[-1]['observed_seconds'] = timeline[-2]['observed_seconds'] + 30
+    growth = ev.memory_checks(samples, start_seconds=20, timeline=timeline)
+    assert growth[0]['metrics']['method'] == 'endpoint' and growth[0]['status'] == 'fail' and len(growth) == 1
 
 
 def test_default_fixture_copies_only_profiles_and_leaves_the_source_alone(tmp_path, monkeypatch):
@@ -614,6 +704,29 @@ def test_fight_stream_golden_is_a_hash_and_matches_the_repeat_check():
                            'recorded', 'note'}
 
 
+def test_isolated_fight_stream_golden_matches_what_the_isolated_checks_run():
+    """--isolate-crowd (#98) is a separate pinned fight with its own hash: same shape, same parameters, same
+    route, selected by regress.py and switched on in the game by the suite."""
+    plain = json.loads((ROOT / 'tests/golden/fight-stream.json').read_text(encoding='utf-8'))
+    iso = json.loads((ROOT / 'tests/golden/fight-stream-isolated.json').read_text(encoding='utf-8'))
+    assert set(iso) == set(plain)
+    assert re.fullmatch(r'[0-9a-f]{64}', iso['sha256']) and iso['records'] > 0 and iso['sha256'] != plain['sha256']
+    assert (iso['route'], iso['rng_seed'], iso['step_input'], iso['max_step']) == \
+        (plain['route'], plain['rng_seed'], plain['step_input'], plain['max_step'])
+    regress = (ROOT / 'scripts/regress.py').read_text(encoding='utf-8')
+    assert regress.count('--isolate-crowd') >= 3 and 'fight-stream-isolated.json' in regress
+    suite = (ROOT / 'scripts/scenario_suite.py').read_text(encoding='utf-8')
+    assert "env['RECOMP_TEST_ISOLATE_CROWD'] = '1'" in suite
+
+
+def test_regress_picks_the_isolated_golden_only_when_asked():
+    spec = importlib.util.spec_from_file_location('regress_for_golden', ROOT / 'scripts/regress.py')
+    regress = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(regress)
+    assert os.path.basename(regress.fight_golden(argparse.Namespace(isolate_crowd=False))) == 'fight-stream.json'
+    assert os.path.basename(regress.fight_golden(argparse.Namespace(isolate_crowd=True))) == 'fight-stream-isolated.json'
+
+
 def played_free_for_all():
     """Event shapes of a live four-fighter match: two fighters put out, then the decisive result."""
     def roster(health):
@@ -700,3 +813,15 @@ def test_two_matches_route_judges_each_match_on_its_own():
     route = harness.ROUTES['two-matches']
     assert route['until'] == 'game.getmatchsummary(#3' and '@game.startgame(#2' in route['tail']
     assert suite.SESSION_ROUTES['two-matches'] == ((1, 2), (2, 4))
+
+
+def test_fight_cycles_route_fits_the_native_pad_script():
+    # The runtime ignores a script over 4095 characters and watches at most 32 distinct
+    # anchors (#166 found both limits); five matches is the most that fits.
+    route = harness.ROUTES['fight-cycles']
+    script = harness.build_pad_script(suite.bootstrap_stages('fight-cycles'), route['tail'])
+    anchors = {e.split(',')[0] for e in script.split(',') if e.startswith('@')}
+    assert len(script) <= 4095 and len(anchors) <= 32
+    assert route['until'] == 'game.getmatchsummary(#9' and '@game.startgame(#5' in route['tail']
+    assert suite.SESSION_ROUTES['fight-cycles'] == tuple((k, 2) for k in range(1, 6))
+    assert 'fight-cycles' in regress.CHECKS and 'fight-cycles' not in regress.DEFAULT

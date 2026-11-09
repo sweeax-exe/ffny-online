@@ -10,6 +10,7 @@ docstring has the syntax. The front end logs each call into the game as a `[FUNC
 python scripts/harness.py routes                    # boot, fight, crib, gym, intro
 python scripts/harness.py run intro --png           # Story from a new ID: the cutscenes, to the creator
 python scripts/harness.py run gym --stage "getscreeninfo(story/gym=down@4;down@6;a@9;x@16"
+python scripts/harness.py run story-map-shops --png --env RECOMP_ASPECT=16:9
 python scripts/harness.py soak --boots 20           # stops at a boot that stops presenting and dumps its state
 python scripts/regress.py [--quick] [--only fight,intro]
 python scripts/scenario_suite.py run fight-result --fixture logs/fixtures/NAME --require-combat
@@ -21,7 +22,7 @@ python scripts/scenario_suite.py run fight-result --fixture logs/fixtures/NAME -
   macOS/APFS uses independent copy-on-write file clones for guard copies; other filesystems fall back
   to a normal copy. Complete-tree byte verification still runs, and failed backups are still retained.
 - Harness runs have every fighter and venue unlocked: `harness.py` sets `RECOMP_UNLOCK_ALL=1` (`--env RECOMP_UNLOCK_ALL=0`, or `scenario_suite.py --no-unlock`, turns it off). `replay` and `repeat` run without it, because it changes the pinned fight. `RECOMP_START_FIGHTERS` / `RECOMP_START_VENUE` choose the match (`docs/09-testing-harness.md`).
-- Captures land in `logs/shots/<route>/` and remain local. Only the two owner-approved README visuals (D58) may be committed, with exact CI fingerprints.
+- Captures land in `logs/shots/<route>/` and remain local. Only the approved paths/fingerprints in `scripts/check-source-tree.py` may be committed; there is no general capture exception.
 - `scripts/scenario_suite.py` runs one route on a throw-away copy of a hashed save fixture and writes a
   JSON/JUnit/HTML report under `logs/scenarios/`. `--require-combat` asserts movement, a player attack,
   damage and the match result from game state (`src/hooks/test_telemetry.c`, on with
@@ -45,3 +46,8 @@ python scripts/scenario_suite.py run fight-result --fixture logs/fixtures/NAME -
   (`harness.py montage`), and add the stage to `ROUTES` once it is right.
 - Scripts written for one investigation belong in the session's scratch directory. Anything used twice
   belongs in `scripts/`, with a docstring and, if it has logic worth breaking, a test in `tests/unit`.
+
+
+## Front-end movie routes
+
+For creator/loading/Crib Options/tips/late-Story background consumers, use the [route-boundary inventory](../09-testing-harness.md#front-end-background-route-boundaries-inventory-2026-10-20). It distinguishes observed parent routes from uncalibrated child movies. CINEMA scene selection does not load front-end APT/SWF movies, and a command found in APT strings is not evidence of an arbitrary-screen loader.

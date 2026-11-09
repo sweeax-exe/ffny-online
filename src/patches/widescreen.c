@@ -4,6 +4,8 @@
  */
 #define _CRT_SECURE_NO_WARNINGS
 #include "widescreen.h"
+#include "story_map.h"
+#include "cheats.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -33,7 +35,7 @@ float ws_fov_cap(void) { return g_fov_cap; }
 /* The choices of [display] widescreen, as aspects; "auto" is resolved from the
  * screen. The first release supports 16:9 and 16:10; wider ones are offered as
  * experimental (owner, 2026-10-11) and "auto" does not pick them. */
-/* [display] aspect: 4:3, stretch, widescreen (auto), 16:9, 16:10, 21:9, 32:9 (src/hooks/pc_settings.c). */
+/* [display] aspect: 4:3, stretch, widescreen (auto), 16:9, 16:10, 21:9, 32:9 (src/hooks/pc_settings_catalog.c). */
 static const float k_choice_aspect[] = { 0.0f, 0.0f, -1.0f, 16.0f / 9.0f, 16.0f / 10.0f, 21.0f / 9.0f, 32.0f / 9.0f };
 
 static float snap_auto(float a)
@@ -89,6 +91,7 @@ float ws_init(int window_w, int window_h, int fullscreen)
     if (a <= WS_DESIGN_ASPECT)
         a = 0.0f;
     g_aspect = a;
+    ws_story_map_init();
     g_k = a > 0.0f ? WS_DESIGN_ASPECT / a : 1.0f;
     g_hud = recomp_settings_get("display", "widescreen_hud", 0);
     if (g_hud == WS_HUD_AUTO)
@@ -133,7 +136,10 @@ float ws_init(int window_w, int window_h, int fullscreen)
  * tag band, from where it is moved back and anchored left. The literal is the
  * operand of a PushShort in the movie's first-frame action, patched in memory
  * after the loader resolves feloader.apt and before any of it runs. A hash of
- * the instruction window guards against any other build of the movie. */
+ * the instruction window guards against any other build of the movie. Over a
+ * 4:3 menu background that gets the side fill (no [wide] art), the renderer
+ * keeps the tagged clip in the 4:3 box instead, as the fill covers the sides
+ * (docs/research/widescreen-song-banner-side-fill.md). */
 #define WS_FELOADER_Y_AT 0xCD1Fu        /* the PushShort operand in feloader.apt */
 #define WS_FELOADER_WINDOW_AT 0xCD10u   /* chyron._x = 0; chyron._y = 385 */
 #define WS_FELOADER_WINDOW_LEN 18u
@@ -141,6 +147,8 @@ float ws_init(int window_w, int window_h, int fullscreen)
 #define WS_CHYRON_Y 385
 
 static int g_apt_feloader;               /* the loader is resolving feloader */
+static int g_apt_story_map;
+static int g_apt_venue_map;
 
 static int guest_name_is(uint32_t s, const char *want)
 {
@@ -161,6 +169,8 @@ static int guest_name_is(uint32_t s, const char *want)
 void ws_apt_load_begin(uint32_t name)
 {
     g_apt_feloader = g_k < 1.0f && name && guest_name_is(name, "feloader");
+    g_apt_story_map = g_k < 1.0f && cheats_in_story() && name && guest_name_is(name, "map");
+    g_apt_venue_map = g_k < 1.0f && name && guest_name_is(name, "chsvenue");
 }
 
 void ws_apt_load_done(uint32_t apt)
@@ -168,6 +178,21 @@ void ws_apt_load_done(uint32_t apt)
     static const char magic[] = "Apt Data";
     uint32_t h = 0x811C9DC5u, i;
     int y;
+    if (g_apt_venue_map) {
+        int tagged;
+        g_apt_venue_map = 0;
+        tagged = ws_map_tag_pins(apt ? (uint8_t *)XBOX_PTR(apt) : NULL, 0x10457);
+        fprintf(stderr, "[WS] map pins: %s (chsVenue.apt %08X, %d children)\n",
+                tagged < 0 ? "unknown layout; unchanged" : tagged ? "extended clip tagged" : "already tagged",
+                apt, tagged < 0 ? 0 : tagged);
+    }
+    if (g_apt_story_map) {
+        int tagged;
+        g_apt_story_map = 0;
+        tagged = ws_story_map_tag_text(apt ? (uint8_t *)XBOX_PTR(apt) : NULL, 0xB24);
+        fprintf(stderr, "[WS] Story map heading: %s (map.apt %08X)\n",
+                tagged < 0 ? "unknown layout; unchanged" : tagged ? "extended clip tagged" : "already tagged", apt);
+    }
     if (!g_apt_feloader)
         return;
     g_apt_feloader = 0;

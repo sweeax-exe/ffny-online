@@ -1,10 +1,8 @@
 # Launcher implementation and playtest — 2026-10-19
 
-Vlad approved the Brick & paper proposal and requested implementation in a worktree, tests and a push.
-Branch `codex/launcher-redesign`, based on main `63207ea`; source commit `205582d`.
-[Draft PR #58](https://github.com/vyanhursky/DefJamFFNY-recomp/pull/58) is pushed for owner playtest. No release/tag or merge was requested.
-
-Incoming agents: start with the [short launcher handover](../agent/launcher-handoff.md).
+Historical native redesign evidence for [PR58](https://github.com/vyanhursky/DefJamFFNY-recomp/pull/58),
+merged in v0.10.6. Original tested source205582d; this report retains the original
+validation scopes and failures. Current behavior is in the [launcher guide](../launcher-and-overlay.md).
 
 ## Delivered behavior
 
@@ -152,3 +150,36 @@ and Back to Home. Receipts: logs/launcher-review/display-20261020/max-layout-che
 fit100/fit200/fit250 captures. Final quick **5/5** (logs/regress-20261020-105429.txt), picture/overlay **2/2** (logs/regress-20261020-105615.txt);
 quick units remain 528 pass/32 skip/one slow deselected. Source hygiene 430/0. No further broad
 suite is needed for this UI correction; the earlier full-run limitations remain above.
+
+
+## Design rationale and preserved invariants
+
+The approved 2026-10-19 design chose the existing Dear ImGui/native hosts so Home, Advanced and the compact overlay share controls, labels, persistence and navigation. The browser concept supplied visual hierarchy only. Home utilities are routes/actions over the same settings, rather than additional settings stores. The restrained procedural brick/paper shell keeps texture away from form fields and needs no additional artwork loader.
+
+Preserve unknown-key round-tripping, environment precedence, capture cancellation, skip/force/test bypasses and arbitrary saved window dimensions (displayed as Custom). Fullscreen means borderless, and internal render scale is separate from window size. Startup timing is setting-specific: transitions into/out of a wide canvas cannot rely solely on the registry restart flag. UI navigation/theme teardown must not leave stale restart snapshots. Toggling HD never generates/downloads artwork or enables save-affecting developer tools. Performance profiles remain a proposal requiring measured presets. Native setup handoff must close the launcher and release inherited play locks before setup can act; folder/setup failures must expose a resolved path and an actionable error.
+
+The concept was checked at desktop, 1024px and 320px widths (288px content without horizontal overflow), with shared render-scale values, six categories, Mods routing and fullscreen window-size disabling. This was concept validation, not native controller acceptance; the native evidence above is separate.
+
+
+## Maintained code map and historical final acceptance
+
+
+Paths below are under `src/hooks/`:
+
+| File | Responsibility |
+|---|---|
+| `pc_launcher_home.*` | Home, common settings, controller summary, utility navigation |
+| `pc_ui.cpp` | Shared Advanced/overlay widgets; Display, Controls, Mods, Interface, Diagnostics, Maintenance |
+| `pc_ui_theme.*` | Palette, fonts, procedural brickwork/paper, responsive geometry |
+| `pc_ui_model.h` | Pack inventory/order and live/startup timing helpers |
+| `pc_ui_actions.*` | Native paths, clipboard, Setup selection and child launch |
+| `pc_launcher.cpp`, `pc_launcher_sdl.cpp` | Windows and SDL/Metal launcher hosts |
+
+Installed context/prefill comes from `setup/main.cpp`, the macOS Swift wrappers and Linux launcher/wizard.
+The [implementation report](launcher-ui-implementation-2026-10-19.md) has details;
+the [player guide](../launcher-and-overlay.md) explains the settings layout.
+
+
+The initial full aggregate remained16/18 (combat audio underrun and historical callback target); later quick5/5, UI4/4 and combat27/27 were scoped retries. October20 follow-up quick5/5 is `logs/regress-20261020-105429.txt`, picture/overlay2/2 is `logs/regress-20261020-105615.txt`; units528pass/32skip/1slow deselected, then529pass/32skip/1slow deselected for media preparation. These dated results are not a new cross-platform certification.
+
+Current pack-list capacity is1023characters; the old95-byte handoff limit was superseded. Setup selection remains a handoff after launcher teardown with play locks released; unknown keys, environment overrides and startup/live-setting semantics remain shared.

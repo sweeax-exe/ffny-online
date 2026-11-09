@@ -6,9 +6,9 @@ for a capture-to-pack walkthrough. This page is the format and processing refere
 v0.6.0 added optional Windows Direct3D 11 texture packs and local
 Lanczos 4x generation; v0.6.1 draws the same packs through Vulkan on macOS
 (Apple Silicon), and v0.7.2 offers them in the Linux setup (the Steam Deck included),
-whose Vulkan renderer is the macOS one. The integrated menu RC adds optional
+whose Vulkan renderer is the macOS one. Compatible menu packs add optional
 wide background extensions when a compatible pack is loaded; vector fonts and HD
-movies remain follow-ups. See `research/hd-textures-notes.md` for evidence and gaps.
+movies remain follow-ups. See [the HD acceptance record](research/hd-v060-release-validation.md) for dated evidence and coverage limits.
 
 A pack is named by the contents of the original texture, not by the renderer, so the
 packs Setup makes on a Mac or on Linux are the same files (18,971 images, 6,212,168,677
@@ -18,7 +18,7 @@ bytes) as on Windows, and a pack made on one can be used on the others.
 
 Run the Windows setup (`DefJamSetup-<version>-windows-x64.exe`), the macOS setup
 (`DefJamSetup-<version>-macos-arm64.dmg`, v0.6.1 or newer) or the Linux setup
-(`DefJamSetup-<version>-linux-x64.tar.gz`, v0.7.2 or newer) with your supported USA Xbox
+(`DefJamSetup-<version>-linux-x64.tar.gz`, v0.7.2 to v0.13.0; since 1.0.0 the Linux app) with your supported USA Xbox
 dump and select **Apply HD texture upscale during install (increases install time)**.
 The option starts unchecked. Setup generates the textures on your CPU after
 building the game, then enables the generated packs for the first launch.
@@ -32,10 +32,10 @@ Generation took about four minutes on the development PC; game compilation and
 texture verification add time, and other CPUs may take longer. On a Steam Deck the upscale
 takes about ten minutes, and the whole install with it about 15.
 
-The first time a screen is drawn with the packs, its HD textures are decoded and uploaded
-(the main menu's are 2048x2048), so it can take a moment to respond: about 3 s for the main
-menu on a Steam Deck. On the Deck a one-on-one fight runs at 60 frames a second with the packs
-and a four-fighter Free For All at about 56 (both 60 without them).
+Replacement decoding/upload can add work when a screen first appears. The runtime
+uses background preparation where supported and displays originals until replacements
+are ready. Historical synchronous-load timings are not current performance guarantees;
+measure the exact build, packs, cache, venue and display settings.
 
 In the launcher or F1 overlay (Windows, macOS since v0.6.2, Linux since v0.7.0), open **Mods** to disable HD
 packs, change the pack list or adjust the cache. Restart after changes. Or edit `[textures]` in
@@ -137,6 +137,8 @@ corpora, generated candidates and review state in the private workspace. See the
 ## Movies and original fonts
 
 ```powershell
+$hdPython = "python"
+$hdData = "D:\DefJamData" # your existing data folder
 & $hdPython scripts/hd_assets.py export --root "$hdData\extracted" --output "$hdData\video-scratch\originals" --kind video --limit 3
 & $hdPython scripts/hd_assets.py export --root "$hdData\extracted" --output "$hdData\hd-work\fonts" --kind fonts --limit 24
 ```
@@ -154,21 +156,15 @@ the game's timing, skips, loops and audio while presenting host-decoded frames. 
 UI assets rather than these prerecorded videos. No movie decoder or host playback change is implemented here.
 
 
-## Full Lanczos corpus gallery
+## Corpus and acceptance evidence
 
-Owner selected Lanczos after the SwinIR audition. `scripts/hd_corpus.py build`
-processes the supported static census at4x and retains all source aliases;
-`serve --output <local-corpus-root> --port 8767` provides searchable categories,
-original comparisons and locally saved concern flags/notes. See
-`research/hd-full-lanczos-corpus.md` for full commands, counts and verification.
-The generated gallery and all images/reviews stay in the data root. Runtime
-correlation and remaining release gates precede installation of the whole corpus.
-
-
-Owner accepts the full static Lanczos gallery (D91). For exact storage, proposed
-source-only local generation and remaining runtime assembly steps, see
-[release packaging](research/hd-texture-release-packaging.md). Reusable commands,
-model experiments and saved-review behavior are in [workflow guide](hd-texture-workflow.md).
+General extraction/review galleries and optional processing live in
+[Modding Tools](https://github.com/vyanhursky/DefJam-Modding-Tools).
+The game keeps its frozen Setup generator and runtime aliases for compatibility;
+do not replace that snapshot as part of authoring cleanup. The
+[v0.6 acceptance record](research/hd-v060-release-validation.md) distinguishes
+prototype controls, static gallery review and later packaged-install acceptance.
+Generated images, galleries and authoring history remain private/local.
 
 ## Download independent menu mods through the launcher
 
@@ -179,3 +175,24 @@ The menu pack is separate; Faithful generation stays optional. No manual mod ZIP
 is needed. See [mod management](mod-manager.md) and the
 [original integration acceptance record](research/integrated-menu-launcher-rc-2026-10-23.md).
 That record describes the initial RC; current release behavior is documented above.
+
+
+## Wide-layer authoring contract
+
+A schema-1 pack may combine `[textures]` replacements with `[wide]` side slabs/stretch registrations. The game's foreground/layout and source identities remain live. Slabs must match their native center, sampled UV rectangle, alpha semantics and draw placement; preserve original padding and geometry. Manifest slab offsets are integer source texels: fractional source UV spans must be accounted for without emitting fractional offsets. Native acceptance covers transitions, masks, scrolling, overlays and each supported aspect. Title and Mode Select lighting require native checks independently of artwork approval. Authoring/export procedures belong in [Modding Tools](https://github.com/vyanhursky/DefJam-Modding-Tools).
+
+
+## Runtime correlation and immutable generated packs
+
+Archive identities alone do not establish runtime coverage: the guest may transform pixels, format, palette or row width. Correlation uses full decoded RGBA, including alpha, and the five-field descriptor above; legacy four-field census IDs must not be installed as verified runtime keys. One accepted PNG can serve several independently verified runtime IDs. The frozen Setup mapping adds 13 exact runtime aliases to canonical source keys, producing 18,984 manifest entries from 18,971 PNGs; this bounded mapping is not exhaustive renderer coverage. Keep that snapshot and its runtime aliases unchanged until an explicitly tested pin update.
+
+Setup's generated opacity and material-channel packs use `faithful-hd-<recipe-id-prefix>-opacity` and `...-channels`. A changed processing source revision changes the recipe prefix. The builder verifies input/code recipes, dimensions and output hashes, then publishes owned manifests atomically. Hard links avoid a second physical PNG copy where supported; copying is the fallback. Cache repair publishes a new PNG path rather than modifying a shared hard-link inode. A modified installed PNG is preserved and assembly rejects the mismatch; author manual changes in a separate overriding pack.
+
+Measured content bytes in the original review corpus were 6,212,168,677 HD PNGs, 525,848,032 decoded originals, 79,256,057 thumbnails, 20,331,619 recipe/hash records and 25,188,620 gallery/review metadata: 6,862,793,005 bytes total. These are file-content sizes, not allocation, compressed downloads or VRAM requirements. The initial prototype budget was 512 MiB; the current default is documented above. No full compression trial established a download-size saving. The accepted PNG baseline does not certify lossy DDS conversion or every alpha-test/additive/wrap/mip material.
+
+The source-only local-generation policy keeps original archives intact and distributes neither derived artwork nor a compiled game. Authoring, model experiments and private review state now belong in [Modding Tools](https://github.com/vyanhursky/DefJam-Modding-Tools); [v0.6.0 validation](research/hd-v060-release-validation.md) retains the prototype controls, artwork decision and packaged acceptance limits.
+
+
+## Source shape and identity checks
+
+A wider PNG alone cannot extend a menu: uniform 1×–8× scale validation preserves source aspect, while APT triangles/UVs, crop/padding, placement and scissor remain independent. One source identity selects one replacement, without an aspect-variant selector. Extend verified logical layers through supported wide metadata rather than relaxing source-shape validation or globally stretching all large 2Ddraws. Preserve each layer's alpha and animation, with separate masks/text/logos. The 2026-10-17 audit found only 13 bounded exact-RGBA runtime aliases; archive names/hashes were not automatically runtime IDs because palettes/swizzles may transform before binding. That count was a dated pilot scope, not a completeness guarantee. Establish new mappings through runtime capture metadata, decoded-pixel matching and reviewed aliases.

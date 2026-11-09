@@ -16,4 +16,4 @@ Full guidance: `docs/agent/playtest.md`; what the recorder writes: `docs/playtes
 3. No bundle yet: ask for a run with `[debug] record = true` (or `--record`) and F9 just after the fault.
 4. Reproduce with `scripts/scenarios.py` (fixture, `generate --seed N --record`, `cutscene`), then the
    usual tools in `docs/agent/diagnostics.md`.
-5. Bundles hold the game's pictures and sound: never commit or upload them. Note the path in `PROGRESS.md` §6.
+5. Bundles hold the game's pictures and sound: never commit or upload them. Record the local path in the feature PR description; on main/release branches and main-only docs PRs use PROGRESS §6.
