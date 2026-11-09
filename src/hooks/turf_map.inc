@@ -18,6 +18,8 @@ const ImU32 TM_CREAM = IM_COL32(242, 230, 200, 255), TM_INK = IM_COL32(10, 6, 6,
             TM_LIVE = IM_COL32(255, 59, 84, 255), TM_OPEN = IM_COL32(154, 150, 166, 255), TM_ORANGE = IM_COL32(255, 168, 26, 255),
             TM_RED = IM_COL32(200, 16, 46, 255), TM_OPEN_LIT = IM_COL32(222, 214, 196, 255);
 
+ImFont *tm_serif();     // the titles' serif (below)
+
 ImU32 tm_rgba(int r, int g, int b, float a) { return IM_COL32(r, g, b, (int)(255 * std::max(0.0f, std::min(1.0f, a)))); }
 
 // a colour toward white by k (0..1)
@@ -624,9 +626,12 @@ void tm_city(ImDrawList *dl, const TmView &v, ImVec2 display, const TurfMap &m, 
         unsigned seed = 0x7A11u;
         auto rnd = [&]() { seed = seed * 1664525u + 1013904223u; return (float)(seed >> 8) / 16777216.0f; };
         float ca = cosf(-8 * 3.14159265f / 180), sa = sinf(-8 * 3.14159265f / 180);
-        for (int i = 0; i < 260; i++) {
-            float x = -300 + 2300 * rnd(), y = -60 + 1120 * rnd(), l = rnd() < 0.6f ? 14.0f : 9.0f;
-            dl->AddLine(v.w(x, y), v.w(x + l * ca, y + l * sa), IM_COL32(120, 170, 230, 20), std::max(1.0f, 1.4f * v.D.s()));
+        for (int i = 0; i < 260; i++) {     // the ripples glint in turn, drifting with the current
+            float x = -300 + 2300 * rnd(), y = -60 + 1120 * rnd(), l = rnd() < 0.6f ? 14.0f : 9.0f, ph = rnd() * 6.2832f;
+            float glint = 0.5f + 0.5f * sinf(t * 1.4f + ph);
+            x += fmodf(t * 3.0f + ph * 10, 40.0f) - 20;
+            dl->AddLine(v.w(x, y), v.w(x + l * ca, y + l * sa), IM_COL32(130, 180, 240, (int)(10 + 34 * glint * glint)),
+                        std::max(1.0f, 1.4f * v.D.s()));
         }
     }
     // sodium light on the rivers
@@ -656,21 +661,24 @@ void tm_city(ImDrawList *dl, const TmView &v, ImVec2 display, const TurfMap &m, 
         tm_fill_tris(dl, p, bo.n, tris, IM_COL32(22, 20, 26, 255));
         if (b.holder_n[i] == 1) {      // the crew's paint: a wash and the brushed, grainy coat over it
             ImU32 c = tm_crew(m, b.holders[i][0]);
-            tm_fill_tris(dl, p, bo.n, tris, with_alpha(c, 0.16f));
-            tm_paint_fill(dl, v, bo.pts, bo.n, with_alpha(c, 0.42f));
+            tm_fill_tris(dl, p, bo.n, tris, with_alpha(c, 0.22f));
+            tm_paint_fill(dl, v, bo.pts, bo.n, with_alpha(c, 0.58f));
         } else if (b.holder_n[i] == 0) {    // open: a cool slate coat, so the city still has texture
-            tm_paint_fill(dl, v, bo.pts, bo.n, IM_COL32(120, 128, 160, 30));
+            tm_paint_fill(dl, v, bo.pts, bo.n, IM_COL32(120, 128, 160, 34));
+            tm_paint_fill(dl, v, bo.pts, bo.n, IM_COL32(255, 196, 90, 40));     // warm: the city lights, nobody's yet
         }
         if (b.holder_n[i] > 1) {    // contested: the tied crews' colours mixed in the paint, and in stripes
             ImU32 mix = tm_crew(m, b.holders[i][0]);
             for (int h = 1; h < b.holder_n[i]; h++) mix = tm_mix(mix, tm_crew(m, b.holders[i][h]), 1.0f / (h + 1));
-            tm_paint_fill(dl, v, bo.pts, bo.n, with_alpha(mix, 0.26f));
+            tm_paint_fill(dl, v, bo.pts, bo.n, with_alpha(mix, 0.34f));
+            // the stripes march: a borough in dispute never sits still
+            float step = 9.0f * b.holder_n[i], drift = fmodf(t * 7.0f, step);
             for (int h = 0; h < b.holder_n[i]; h++) {
                 ImU32 c = tm_crew(m, b.holders[i][h]);
-                float step = 9.0f * b.holder_n[i];
                 std::vector<ImVec2> q(bo.pts, bo.pts + bo.n);
-                for (auto &e : q) { e.x += 9.0f * h * 0.7071f; e.y -= 9.0f * h * 0.7071f; }
-                tm_hatch(dl, v, q.data(), bo.n, 45, step, with_alpha(c, 0.26f), std::max(1.0f, 2.4f * k));
+                float off = 9.0f * h + drift;
+                for (auto &e : q) { e.x += off * 0.7071f; e.y -= off * 0.7071f; }
+                tm_hatch(dl, v, q.data(), bo.n, 45, step, with_alpha(c, 0.36f), std::max(1.0f, 2.6f * k));
             }
         }
         tm_hatch(dl, v, bo.pts, bo.n, 29, 13, IM_COL32(255, 176, 80, 26), std::max(1.0f, 0.9f * v.D.s()));
@@ -683,6 +691,12 @@ void tm_city(ImDrawList *dl, const TmView &v, ImVec2 display, const TurfMap &m, 
     tm_glow(dl, v.w(760, 760), 140 * k, 140 * k, tm_rgba(255, 150, 40, 0.16f), tm_rgba(255, 150, 40, 0));
     tm_glow(dl, v.w(840, 420), 120 * k, 120 * k, tm_rgba(255, 150, 40, 0.14f), tm_rgba(255, 150, 40, 0));
     tm_glow(dl, v.w(830, 130), 130 * k, 130 * k, tm_rgba(255, 150, 40, 0.14f), tm_rgba(255, 150, 40, 0));
+    // each held venue lights its block in its crew's colour
+    for (int i = 0; i < (int)m.venues.size() && i < (int)b.pins.size(); i++) {
+        if (!m.venues[i].owner) continue;
+        ImU32 c = tm_crew(m, m.venues[i].owner);
+        tm_glow(dl, v.w(b.pins[i].x, b.pins[i].y), 85 * k, 85 * k, with_alpha(c, 0.20f), with_alpha(c, 0), 0, 28);
+    }
     // Manhattan: the lit strip down the island (the city's lights along its spine)
     {
         const float spine[4][2] = { { 512, 690 }, { 540, 570 }, { 572, 450 }, { 610, 320 } };
@@ -699,23 +713,38 @@ void tm_city(ImDrawList *dl, const TmView &v, ImVec2 display, const TurfMap &m, 
         if (b.holder_n[i] >= 1) {
             ImU32 c = tm_crew(m, b.holders[i][0]);
             for (int h = 1; h < b.holder_n[i]; h++) c = tm_mix(c, tm_crew(m, b.holders[i][h]), 1.0f / (h + 1));
-            dl->AddPolyline(p, bo.n, with_alpha(c, 0.035f), ImDrawFlags_Closed, 70 * gk);
-            dl->AddPolyline(p, bo.n, with_alpha(c, 0.06f), ImDrawFlags_Closed, 42 * gk);
-            dl->AddPolyline(p, bo.n, with_alpha(c, 0.10f), ImDrawFlags_Closed, 22 * gk);
-            dl->AddPolyline(p, bo.n, with_alpha(c, 0.24f), ImDrawFlags_Closed, 9 * gk);
-            dl->AddPolyline(p, bo.n, with_alpha(tm_light(c, 0.35f), 0.85f), ImDrawFlags_Closed, 2.2f * v.D.s());
-        } else {
-            dl->AddPolyline(p, bo.n, IM_COL32(242, 230, 200, 10), ImDrawFlags_Closed, 16 * gk);
-            dl->AddPolyline(p, bo.n, IM_COL32(242, 230, 200, 72), ImDrawFlags_Closed, 2 * v.D.s());
+            float beat = b.holder_n[i] > 1 ? 0.75f + 0.25f * sinf(t * 2.6f) : 1.0f;     // a contested edge pulses
+            dl->AddPolyline(p, bo.n, with_alpha(c, 0.045f * beat), ImDrawFlags_Closed, 80 * gk);
+            dl->AddPolyline(p, bo.n, with_alpha(c, 0.08f * beat), ImDrawFlags_Closed, 46 * gk);
+            dl->AddPolyline(p, bo.n, with_alpha(c, 0.14f * beat), ImDrawFlags_Closed, 24 * gk);
+            dl->AddPolyline(p, bo.n, with_alpha(c, 0.32f * beat), ImDrawFlags_Closed, 10 * gk);
+            dl->AddPolyline(p, bo.n, with_alpha(tm_light(c, 0.45f), 0.95f), ImDrawFlags_Closed, 2.6f * v.D.s());
+        } else {    // nobody's turf: a slow yellow beat along its edge, up for grabs
+            float beat = 0.6f + 0.4f * sinf(t * 1.6f + i);
+            dl->AddPolyline(p, bo.n, with_alpha(TM_YELLOW, 0.035f * beat), ImDrawFlags_Closed, 46 * gk);
+            dl->AddPolyline(p, bo.n, with_alpha(TM_YELLOW, 0.07f * beat), ImDrawFlags_Closed, 18 * gk);
+            dl->AddPolyline(p, bo.n, IM_COL32(242, 230, 200, 90), ImDrawFlags_Closed, 2 * v.D.s());
         }
     }
     // the avenues' light trails
     {
         const float tr[4][8] = { { 640, 210, 600, 330, 560, 470, 500, 760 }, { 720, 120, 800, 140, 900, 120, 1030, 60 },
                                  { 612, 600, 700, 560, 820, 500, 1100, 470 }, { 600, 800, 700, 760, 840, 780, 1100, 720 } };
-        for (auto &c : tr) {
+        for (int r = 0; r < 4; r++) {
+            const float *c = tr[r];
             dl->AddBezierCubic(v.w(c[0], c[1]), v.w(c[2], c[3]), v.w(c[4], c[5]), v.w(c[6], c[7]), IM_COL32(255, 190, 90, 40), 6 * v.D.s(), 40);
             dl->AddBezierCubic(v.w(c[0], c[1]), v.w(c[2], c[3]), v.w(c[4], c[5]), v.w(c[6], c[7]), IM_COL32(255, 225, 160, 125), 1.4f * v.D.s(), 40);
+            // the traffic: head lights one way, tail lights the other
+            for (int j = 0; j < 7; j++) {
+                bool back = (j % 2) == 1;
+                float u = fmodf(t * (0.020f + 0.004f * r) + j / 7.0f + r * 0.11f, 1.0f);
+                if (back) u = 1 - u;
+                float a = 1 - u, w0 = a * a * a, w1 = 3 * a * a * u, w2 = 3 * a * u * u, w3 = u * u * u;
+                ImVec2 q = v.w(c[0] * w0 + c[2] * w1 + c[4] * w2 + c[6] * w3, c[1] * w0 + c[3] * w1 + c[5] * w2 + c[7] * w3);
+                ImU32 lc = back ? IM_COL32(255, 70, 60, 255) : IM_COL32(255, 244, 220, 255);
+                tm_glow(dl, q, 7 * v.D.s(), 7 * v.D.s(), with_alpha(lc, 0.5f), with_alpha(lc, 0), 0, 10);
+                dl->AddCircleFilled(q, 1.5f * v.D.s(), lc, 6);
+            }
         }
     }
     {   // Central Park
@@ -735,7 +764,18 @@ void tm_city(ImDrawList *dl, const TmView &v, ImVec2 display, const TurfMap &m, 
     tm_glow(dl, v.w(300, 560), 260 * k, 90 * k, tm_rgba(150, 170, 210, 0.06f), tm_rgba(150, 170, 210, 0));
     tm_glow(dl, v.w(560, 860), 300 * k, 70 * k, tm_rgba(150, 170, 210, 0.07f), tm_rgba(150, 170, 210, 0));
     tm_glow(dl, v.w(900, 300), 320 * k, 60 * k, tm_rgba(150, 170, 210, 0.05f), tm_rgba(150, 170, 210, 0));
-    (void)t;
+    // two searchlights sweeping the sky over the city, slowly (from below the map)
+    const float ds = v.D.s();
+    for (int i = 0; i < 2; i++) {
+        ImVec2 base = v.D.p(i ? 960.0f : 300.0f, 1010);
+        float ang = (i ? -0.32f : 0.30f) + 0.36f * sinf(t * (i ? 0.11f : 0.09f) + i * 2.1f), len = 1250 * ds;
+        ImVec2 dir(sinf(ang), -cosf(ang)), nrm(cosf(ang), sinf(ang));
+        float w0 = 8 * ds, w1 = 120 * ds;
+        ImVec2 tip(base.x + dir.x * len, base.y + dir.y * len);
+        tm_quad(dl, ImVec2(base.x - nrm.x * w0, base.y - nrm.y * w0), ImVec2(base.x + nrm.x * w0, base.y + nrm.y * w0),
+                ImVec2(tip.x + nrm.x * w1, tip.y + nrm.y * w1), ImVec2(tip.x - nrm.x * w1, tip.y - nrm.y * w1),
+                IM_COL32(200, 215, 255, 26), IM_COL32(200, 215, 255, 26), IM_COL32(200, 215, 255, 0), IM_COL32(200, 215, 255, 0));
+    }
 }
 
 // The crews' tags sprayed over their boroughs, and the boroughs' names.
@@ -758,16 +798,30 @@ void tm_names(ImDrawList *dl, const TmView &v, const TurfMap &m, const TmBoard &
                 tm_turn(dl, from, c, i == 1 ? -66.0f : -8.0f);
             }
         }
+        if (b.holder_n[i] == 0) {      // nobody's turf: OPEN sprayed where a crew's tag would be
+            bool any = false;
+            for (auto &e : m.venues) any = any || (!e.owner && !e.boss && tm_borough_of(e.borough) == i);
+            if (any) {
+                int from = dl->VtxBuffer.Size;
+                ImVec2 c = v.w(bo.tx, bo.ty);
+                float px = bo.tsize * 0.95f * v.k(), o = px * 0.035f;
+                tm_text(dl, g_hand, px, ImVec2(c.x + o, c.y - px * 0.5f + o), IM_COL32(0, 0, 0, 60), "OPEN", CENTER);
+                tm_text(dl, g_hand, px, ImVec2(c.x, c.y - px * 0.5f), with_alpha(TM_YELLOW, 0.17f), "OPEN", CENTER);
+                tm_turn(dl, from, c, i == 1 ? -66.0f : -8.0f);
+            }
+        }
         int from = dl->VtxBuffer.Size;
         ImVec2 at = v.w(bo.lx, bo.ly);
         float px = bo.lsize * v.D.s() * std::min(1.4f, sqrtf(v.z));
         std::string spaced;
         for (const char *c = bo.label; *c; c++) { spaced += *c; if (c[1]) spaced += ' '; }
-        tm_text(dl, g_stencil, px, at, IM_COL32(242, 230, 200, 44), spaced.c_str());
+        px *= 0.85f;
+        tm_text(dl, tm_serif(), px, ImVec2(at.x + 2 * v.D.s(), at.y + 2 * v.D.s()), IM_COL32(0, 0, 0, 110), spaced.c_str());
+        tm_text(dl, tm_serif(), px, at, IM_COL32(242, 230, 200, b.holder_n[i] ? 92 : 70), spaced.c_str());
         if (bo.lrot) tm_turn(dl, from, at, bo.lrot);
     }
     ImVec2 nj = v.w(60, 540);
-    tm_text(dl, g_stencil, 16 * v.D.s(), nj, IM_COL32(242, 230, 200, 32), "N E W   J E R S E Y");
+    tm_text(dl, tm_serif(), 17 * v.D.s(), nj, IM_COL32(242, 230, 200, 40), "N E W   J E R S E Y");
 }
 
 // The front lines (a battle between two boroughs' holders) and the challenges (dashed yellow, pin to pin).
@@ -862,14 +916,29 @@ void tm_venue(ImDrawList *dl, const TmView &v, const TurfMap &m, const TurfVenue
             dl->AddCircle(c, 14 * s * (1 + 2.4f * ph), with_alpha(TM_LIVE, 0.95f * (1 - ph)), 32, 2 * s);
         }
     } else if (tv.owner) {
-        tm_glow(dl, c, 36 * s, 36 * s, with_alpha(col, sel ? 0.55f : 0.35f), with_alpha(col, 0));
+        tm_glow(dl, c, 44 * s, 44 * s, with_alpha(col, sel ? 0.65f : 0.45f), with_alpha(col, 0));
     }
     float r = 9 * s;
     ImU32 ring = live ? TM_LIVE : sel ? TM_YELLOW : col;
     if (tv.owner || live) tm_glow(dl, c, 26 * s, 26 * s, with_alpha(live ? TM_LIVE : sel ? TM_YELLOW : col, 0.55f), with_alpha(col, 0));
+    if (tv.chal && !live) {    // called out: a yellow ring of dashes turning round it, and a beat of light
+        float beat = 0.5f + 0.5f * sinf(t * 4.0f);
+        tm_glow(dl, c, 44 * s, 44 * s, with_alpha(TM_YELLOW, 0.18f + 0.22f * beat), with_alpha(TM_YELLOW, 0));
+        const float R = 21 * s, rot = t * 1.6f;
+        for (int q = 0; q < 10; q++) {
+            float a0 = rot + q * 0.6283f;
+            dl->PathArcTo(c, R, a0, a0 + 0.36f, 6);
+            dl->PathStroke(with_alpha(TM_YELLOW, 0.95f), ImDrawFlags_None, 2.6f * s);
+        }
+        dl->AddCircle(c, R + (6 + 8 * beat) * s, with_alpha(TM_YELLOW, 0.35f * (1 - beat)), 32, 2 * s);
+    }
     dl->AddCircleFilled(c, r + 6 * s, ring, 28);
     dl->AddCircleFilled(c, r + 3 * s, IM_COL32(8, 7, 10, 255), 28);
     dl->AddCircleFilled(c, r, tv.owner ? col : IM_COL32(42, 38, 48, 255), 28);
+    if (tv.owner) dl->AddCircleFilled(ImVec2(c.x - 2.5f * s, c.y - 2.5f * s), 3 * s, with_alpha(tm_light(col, 0.7f), 0.8f), 10);
+    if (open) {     // the open pin: a cream core, ready to take a colour
+        dl->AddCircle(c, r - 2.5f * s, with_alpha(claim ? TM_YELLOW : TM_OPEN_LIT, 0.8f), 20, 1.6f * s);
+    }
     if (live) {     // the flame over the fight
         float fl = 1 + 0.06f * sinf(t * 18);
         ImVec2 o(c.x - 15 * s, c.y - 50 * s * fl);
@@ -1407,6 +1476,49 @@ void tm_mycrew(ImDrawList *dl, const Frame &D, const TurfMap &m, const TurfSeaso
     tm_text(dl, g_body, 15 * s, D.p(bx + bw - 14, by + 154), IM_COL32(242, 230, 200, 190), ready, RIGHT);
 }
 
+float tm_hint(ImDrawList *dl, const Frame &D, float x, float y, const char *button, const char *word);     // below
+
+// The call to open turf, under the legend while any venue is open: how many, and how to take one. True on
+// a click (the page then picks the next open venue).
+bool tm_open_call(ImDrawList *dl, const Frame &D, const TurfMap &m, bool signed_in, float t)
+{
+    int open = 0, all = 0;
+    for (auto &v : m.venues) if (!v.boss) { all++; open += !v.owner; }
+    if (!open) return false;
+    const float s = D.s(), x = 46, y = 404, w = 330, h = 166;
+    float beat = 0.5f + 0.5f * sinf(t * 2.4f);
+    tm_glass(dl, D, x, y, w, h, tm_mix(TM_YELLOW, TM_ORANGE, beat));
+    tm_glow(dl, D.p(x + w - 70, y + 50), 120 * s, 80 * s, tm_rgba(255, 205, 60, 0.10f + 0.06f * beat), tm_rgba(255, 205, 60, 0));
+    // the beacon and the kicker
+    dl->AddCircleFilled(D.p(x + 30, y + 27), 6 * s, TM_YELLOW, 14);
+    dl->AddCircle(D.p(x + 30, y + 27), (8 + 10 * beat) * s, with_alpha(TM_YELLOW, 0.7f * (1 - beat)), 20, 2 * s);
+    tm_text(dl, g_title, 16 * s, D.p(x + 46, y + 17), TM_YELLOW, "OPEN TURF");
+    // the count, big, in the serif
+    char big[40];
+    if (open == all) snprintf(big, sizeof(big), "ALL %d VENUES", open);
+    else snprintf(big, sizeof(big), "%d VENUE%s", open, open == 1 ? "" : "S");
+    float bpx = fit_size(D, tm_serif(), 42, big, w - 48);
+    tm_serif_text(dl, bpx * s, D.p(x + 24, y + 44), big, 3 * s);
+    {
+        int from = dl->VtxBuffer.Size;
+        ImVec2 c = D.p(x + w - 92, y + 112);
+        tm_text(dl, g_hand, 26 * s, ImVec2(c.x, c.y - 14 * s), TM_YELLOW, open == 1 ? "UP FOR GRABS" : "COME CLAIM IT", CENTER);
+        tm_turn(dl, from, c, -5);
+    }
+    // how to take one, for who may
+    bool officer = signed_in && m.my_crew && m.officer;
+    if (officer) {
+        float hx = x + 22;
+        hx += tm_hint(dl, D, hx, y + 98, "a", "CLAIM");
+        tm_text(dl, g_body, 16 * s, D.p(x + 22, y + 134), IM_COL32(242, 230, 200, 190), "on a venue with a pulsing ring");
+    } else {
+        const char *why = !signed_in ? "Sign in with Discord to fight for turf." : !m.my_crew ? "Join a crew to fight for turf."
+                                                                                                : "Your Boss or a Lieutenant can claim it.";
+        text(dl, D, g_body, 16, x + 22, y + 104, IM_COL32(242, 230, 200, 200), why, LEFT, 0, w - 150);
+    }
+    return mouse_click(D, x, y, w, h);
+}
+
 // The street wire: the map's recent events running along the bottom.
 struct TmSeg { std::string text; ImU32 col; ImFont *font; float px; };
 
@@ -1643,7 +1755,8 @@ void draw_turf_board(ImDrawList *dl, ImVec2 display, const Frame &f, const Pad &
         }
     }
 
-    // the header, the legend
+    // the header (on a shade of night, so the map under it never fights the title), the legend
+    tm_glow(dl, D.p(250, 110), 560 * s, 250 * s, IM_COL32(3, 3, 7, 215), IM_COL32(3, 3, 7, 0), 0, 40);
     tm_header(dl, D, TW.region);
     float y0 = 22 + tm_title_px(D) * 1.02f + 30;
     {
@@ -1651,12 +1764,19 @@ void draw_turf_board(ImDrawList *dl, ImVec2 display, const Frame &f, const Pad &
         float lw = tm_plate_key(dl, D, lx, y0, "{LB}");
         if (mouse_click(D, lx, y0, lw, 24)) tm_set_region(m, TW.region - 1);
         lx += lw + 12;
-        tm_text(dl, g_title, 22 * s, D.p(lx, y0 - 1), TM_CREAM, TM_REGIONS[TW.region]);
-        lx += tm_width(g_title, 22 * s, TM_REGIONS[TW.region]) / s + 12;
+        tm_text(dl, g_title, 26 * s, D.p(lx, y0 - 3), TM_CREAM, TM_REGIONS[TW.region]);
+        lx += tm_width(g_title, 26 * s, TM_REGIONS[TW.region]) / s + 12;
         float rw = tm_plate_key(dl, D, lx, y0, "{RB}");
         if (mouse_click(D, lx, y0, rw, 24)) tm_set_region(m, TW.region + 1);
     }
     tm_legend(dl, D);
+    if (TW.region == 0 && !TW.picker && tm_open_call(dl, D, m, signed_in, t)) {     // a click: the next open venue
+        int n = (int)m.venues.size();
+        for (int k = 1; k <= n; k++) {
+            const TurfVenue &e = m.venues[((sel < 0 ? 0 : sel) + k) % n];
+            if (!e.owner && !e.boss) { TW.sel_id = e.id; TW.armed.clear(); break; }
+        }
+    }
 
     // the right column: the season, and the standings and the player's crew, or the venue's details
     tm_season(dl, D, m, ss);
@@ -1669,13 +1789,13 @@ void draw_turf_board(ImDrawList *dl, ImVec2 display, const Frame &f, const Pad &
     std::string why;
     if (sel >= 0) turf_actions(m, m.venues[sel], signed_in, acts, why);
     if (TW.details && sel >= 0) {
-        // turf_detail's 260 x 286 panel at 346,124 of the menu's space, over the standings and the crew panel
+        // turf_detail's 260 x TURF_DETAIL_H panel at 346,124 of the menu's space, over the standings and the crew panel
         const float kk = 460.0f / 260.0f;
         Frame fd;
         fd.sx = fd.sy = s * kk;
         ImVec2 at = D.p(1100, 242);
         fd.o = ImVec2(at.x - 346 * fd.sx, at.y - 124 * fd.sy);
-        dl->AddRectFilled(D.p(1100, 242), D.p(1560, 242 + 286 * kk), IM_COL32(14, 10, 12, 140), 16 * s);
+        dl->AddRectFilled(D.p(1100, 242), D.p(1560, 242 + TURF_DETAIL_H * kk), IM_COL32(14, 10, 12, 140), 16 * s);
         Pad dp = pad;
         if (acts.size() < 2) dp.y = false;
         turf_detail(dl, fd, dp, m, m.venues[sel], signed_in);

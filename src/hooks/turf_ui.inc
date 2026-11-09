@@ -659,55 +659,51 @@ ImU32 tm_crew(const TurfMap &m, long long crew);      // turf_map.inc
 void tm_crown(ImDrawList *dl, ImVec2 o, float s, ImU32 col);
 ImFont *tm_serif();
 ImU32 tm_light(ImU32 c, float k);
+const float TURF_DETAIL_H = 330;      // the details' panel's height (menu units; the map shows it 1.77x)
 
-// The venue's picture (the game's own card of it) in the details' free space, its borough written over its
-// foot, framed in its holder's colour (cream while it is open turf). Nothing where there is no room.
-void turf_detail_picture(ImDrawList *dl, const Frame &f, const TurfMap &m, const TurfVenue &v, float x, float y, float w, float h)
+// The details' head: the venue's picture (a wide band of the game's own card of it) across the panel's top,
+// washed in its holder's colour from the left, its name and borough over its foot, OPEN TURF or BOSS VENUE in
+// its corner. Without the art, a dark band in the holder's colour.
+void turf_detail_hero(ImDrawList *dl, const Frame &f, const TurfMap &m, const TurfVenue &v, float x, float y, float w, float h)
 {
-    if (h < 46 || w < 60) return;
-    float pw = w, ph = w / 1.5f;      // the card's photo, without its tilted edges and the logo under it
-    if (ph > h) { ph = h; pw = ph * 1.5f; }
-    float px = x + (w - pw) / 2, py = y + (h - ph) / 2;
-    ImU32 edge = v.owner ? tm_crew(m, v.owner) : CREAM;
-    rect(dl, f, px - 2, py - 2, pw + 4, ph + 4, IM_COL32(0, 0, 0, 170), 5);
+    ImU32 col = v.owner ? tm_crew(m, v.owner) : v.boss ? GOLD : IM_COL32(255, 205, 60, 255);
+    ImVec2 a = f.p(x + 1, y + 1), b = f.p(x + w - 1, y + h);
+    float r = 9 * f.s();
     const Tex &t = venue_tex(v.id);
-    bool pic = image(dl, f, t, px, py, pw, ph, IM_COL32(235, 230, 225, 255), ImVec2(0.10f, 0.10f), ImVec2(0.80f, 0.565f));
-    if (!pic) dl->AddRectFilledMultiColor(f.p(px, py), f.p(px + pw, py + ph), IM_COL32(40, 34, 40, 255), IM_COL32(40, 34, 40, 255),
-                                          IM_COL32(16, 12, 16, 255), IM_COL32(16, 12, 16, 255));
-    // the foot darkened for the caption, the frame
-    float fh = std::min(ph * 0.42f, 34.0f);
-    dl->AddRectFilledMultiColor(f.p(px, py + ph - fh), f.p(px + pw, py + ph), IM_COL32(8, 6, 8, 0), IM_COL32(8, 6, 8, 0),
-                                IM_COL32(8, 6, 8, 235), IM_COL32(8, 6, 8, 235));
-    dl->AddRect(f.p(px, py), f.p(px + pw, py + ph), with_alpha(edge, 0.85f), 3 * f.s(), 0, 1.5f * f.s());
-    rect(dl, f, px, py + ph - 16, 3, 12, edge, 1);
-    std::string b = turf_borough(v.borough), spaced;
-    for (const char *c = b.c_str(); *c; c++) { spaced += *c; if (c[1]) spaced += ' '; }
-    text(dl, f, g_stencil, fit_size(f, g_stencil, 12, spaced.c_str(), pw - 20), px + 8, py + ph - 17, CREAM, spaced.c_str(), LEFT, 0.8f);
-    if (!v.owner && !v.boss) text(dl, f, g_title, 9, px + pw - 6, py + 5, IM_COL32(255, 205, 60, 255), "OPEN TURF", RIGHT, 1.0f);
+    if (t.srv) dl->AddImageRounded((ImTextureID)(intptr_t)t.srv, a, b, ImVec2(0.10f, 0.21f), ImVec2(0.80f, 0.457f),
+                                   IM_COL32(225, 220, 215, 255), r, ImDrawFlags_RoundCornersTop);
+    else dl->AddRectFilled(a, b, IM_COL32(30, 24, 30, 255), r, ImDrawFlags_RoundCornersTop);
+    // the holder's wash from the left, the foot darkened for the words
+    dl->AddRectFilledMultiColor(a, ImVec2((a.x + b.x) / 2, b.y), with_alpha(col, 0.38f), with_alpha(col, 0), with_alpha(col, 0),
+                                with_alpha(col, 0.38f));
+    float fy = a.y + (b.y - a.y) * 0.35f;
+    dl->AddRectFilledMultiColor(ImVec2(a.x, fy), b, IM_COL32(10, 8, 10, 0), IM_COL32(10, 8, 10, 0), IM_COL32(10, 8, 10, 245),
+                                IM_COL32(10, 8, 10, 245));
+    dl->AddRectFilled(ImVec2(a.x, b.y - 2 * f.s()), b, with_alpha(col, 0.9f));
+    rect(dl, f, x + 1, y + h - 40, 4, 30, col);
+    std::string name = upper(v.name.c_str());
+    text(dl, f, g_title, fit_size(f, g_title, 21, name.c_str(), w - 28), x + 14, y + h - 44, CREAM, name.c_str(), LEFT, 1.4f);
+    text(dl, f, g_hand, 13, x + 14, y + h - 19, ORANGE, turf_borough(v.borough).c_str(), LEFT, 1.0f);
+    const char *chip = v.boss ? "BOSS VENUE" : !v.owner ? "OPEN TURF" : nullptr;
+    if (chip) {
+        float cw = text_width(f, g_title, 10, chip) + 12;
+        rect(dl, f, x + w - 10 - cw, y + 8, cw, 16, v.boss ? IM_COL32(120, 90, 10, 235) : IM_COL32(255, 205, 60, 240), 4);
+        text(dl, f, g_title, 10, x + w - 10 - cw / 2, y + 10, v.boss ? GOLD : IM_COL32(10, 6, 6, 255), chip, CENTER, 0);
+    }
 }
 
 // The chosen venue on the right: holder, since, protection, the challenge, what this crew may do.
 void turf_detail(ImDrawList *dl, const Frame &f, const Pad &pad, const TurfMap &m, const TurfVenue &v, bool signed_in)
 {
-    const float x = 346, y = 124, w = 260, h = 286;
+    const float x = 346, y = 124, w = 260, h = TURF_DETAIL_H;
     glass(dl, f, x, y, w, h);
     long long now = turf_now(m);
-    std::string name = upper(v.name.c_str());
-    text(dl, f, g_title, fit_size(f, g_title, 19, name.c_str(), w - 24), x + 12, y + 8, CREAM, name.c_str(), LEFT, 1.3f);
-    std::string sub = turf_borough(v.borough);
-    text(dl, f, g_hand, 13, x + 12, y + 32, ORANGE, sub.c_str(), LEFT, 0.8f);
-    if (v.boss) {
-        float bw = text_width(f, g_title, 10, "BOSS VENUE") + 12;
-        rect(dl, f, x + w - 12 - bw, y + 33, bw, 16, IM_COL32(120, 90, 10, 220), 4);
-        text(dl, f, g_title, 10, x + w - 12 - bw / 2, y + 35, GOLD, "BOSS VENUE", CENTER, 0);
-    }
-    float yy = y + 56;
-    dl->AddLine(f.p(x + 10, yy), f.p(x + w - 10, yy), IM_COL32(255, 255, 255, 30), 1.0f);
-    yy += 6;
+    turf_detail_hero(dl, f, m, v, x, y, w, 96);
+    float yy = y + 104;
     bool ours = v.owner && v.owner == m.my_crew;
     if (v.owner) {
         text(dl, f, g_title, 10, x + 12, yy, GREY, "HELD BY", LEFT, 0);
-        float tw = turf_tag(dl, f, x + 12, yy + 15, 12, v.otag, ours ? GOLD : CREAM);
+        float tw = turf_tag(dl, f, x + 12, yy + 15, 12, v.otag, ours ? GOLD : tm_light(tm_crew(m, v.owner), 0.3f));
         std::string on = upper(v.oname.c_str());
         text(dl, f, g_title, fit_size(f, g_title, 15, on.c_str(), w - 34 - tw), x + 20 + tw, yy + 14, ours ? GOLD : WHITE, on.c_str(), LEFT, 1.0f);
         yy += 38;
@@ -716,10 +712,28 @@ void turf_detail(ImDrawList *dl, const Frame &f, const Pad &pad, const TurfMap &
         text(dl, f, g_title, fit_size(f, g_title, 11, held.c_str(), w - 24), x + 12, yy, CREAM, held.c_str(), LEFT, 0.6f);
         yy += 18;
     } else {
-        text(dl, f, g_title, 18, x + 12, yy + 2, v.boss ? GREY : IM_COL32(255, 205, 60, 255), v.boss ? "OPEN" : "OPEN TURF", LEFT, 1.0f);
+        if (v.boss) text(dl, f, g_title, 18, x + 12, yy + 2, GREY, "OPEN", LEFT, 1.0f);
+        else text(dl, f, g_hand, 20, x + 12, yy, IM_COL32(255, 205, 60, 255), "UP FOR GRABS", LEFT, 1.0f);
         text(dl, f, g_body, 9.5f, x + 12, yy + 26, with_alpha(CREAM, 0.75f),
              v.boss ? "No crew holds this venue." : "No crew holds this venue yet.", LEFT, 0);
         yy += 44;
+        if (!v.boss && !v.chal && !v.claim_battle) {   // how it is taken: a crew battle, in the formats the service allows
+            yy += 4;
+            rect(dl, f, x + 8, yy, w - 16, 54, IM_COL32(255, 205, 60, 26), 6);
+            dl->AddRect(f.p(x + 8, yy), f.p(x + w - 8, yy + 54), IM_COL32(255, 205, 60, 90), 6 * f.s(), 0, 1.0f * f.s());
+            text(dl, f, g_title, 10, x + 16, yy + 5, IM_COL32(255, 205, 60, 255), "CLAIM IT IN A CREW BATTLE", LEFT, 0);
+            std::vector<int> fm = m.claim_formats.empty() ? std::vector<int>{ 3, 5 } : m.claim_formats;
+            float cx = x + 16;
+            for (int n : fm) {
+                std::string l = std::to_string(n) + " V " + std::to_string(n);
+                float cw = text_width(f, g_title, 11, l.c_str()) + 12;
+                rect(dl, f, cx, yy + 21, cw, 16, IM_COL32(255, 205, 60, 230), 3);
+                text(dl, f, g_title, 11, cx + cw / 2, yy + 22, IM_COL32(10, 6, 6, 255), l.c_str(), CENTER, 0);
+                cx += cw + 5;
+            }
+            text(dl, f, g_body, 9, x + 16, yy + 40, with_alpha(CREAM, 0.75f), "against a crew you pick", LEFT, 0);
+            yy += 60;
+        }
     }
     if (v.protect > now) {
         std::string p = "PROTECTED FOR " + turf_span(v.protect - now);
@@ -730,7 +744,7 @@ void turf_detail(ImDrawList *dl, const Frame &f, const Pad &pad, const TurfMap &
         yy += 4;
         rect(dl, f, x + 8, yy, w - 16, 58, IM_COL32(120, 12, 26, 140), 6);
         text(dl, f, g_title, 10, x + 16, yy + 5, ORANGE, "CHALLENGED BY", LEFT, 0);
-        float tw = turf_tag(dl, f, x + 16, yy + 19, 11, v.ctag, v.chal_crew == m.my_crew ? GOLD : CREAM);
+        float tw = turf_tag(dl, f, x + 16, yy + 19, 11, v.ctag, v.chal_crew == m.my_crew ? GOLD : tm_light(tm_crew(m, v.chal_crew), 0.3f));
         std::string cn = upper(v.cname.c_str());
         text(dl, f, g_title, fit_size(f, g_title, 13, cn.c_str(), w - 46 - tw), x + 24 + tw, yy + 18, WHITE, cn.c_str(), LEFT, 0.8f);
         std::string d = v.chal_battle ? "BATTLE SET UP" : v.deadline > now ? "BATTLE DUE IN " + turf_span(v.deadline - now) : "DEADLINE REACHED";
@@ -752,7 +766,11 @@ void turf_detail(ImDrawList *dl, const Frame &f, const Pad &pad, const TurfMap &
         text(dl, f, g_body, 11, x + 12, yy + 8, with_alpha(CREAM, 0.8f), why.c_str(), LEFT, 0, w - 24);
         yy += 8 + font_or_default(g_body)->CalcTextSizeA(11 * f.s(), FLT_MAX, (w - 24) * f.sx, why.c_str()).y / f.s();
     }
-    turf_detail_picture(dl, f, m, v, x + 12, yy + 8, w - 24, by - 8 - (yy + 8));
+    {   // the free space: the venue's gold name banner, from the game's art
+        const Tex &banner = venue_name_tex(v.id);
+        float top = yy + 10, room = by - 10 - top;
+        if (banner.srv && room > 24) image_fit(dl, f, banner, x + 20, top, w - 40, std::min(room, 46.0f), IM_COL32(255, 255, 255, 215));
+    }
     unsigned long long tick = GetTickCount64();
     if (!TW.armed.empty() && tick - TW.armed_at > 4000) TW.armed.clear();
     bool busy = TW.post_busy != 0;
