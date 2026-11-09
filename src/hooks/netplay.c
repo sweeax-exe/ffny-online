@@ -5408,6 +5408,8 @@ void netplay_sync_point(void)
     fprintf(stderr, "[NETPLAY] sync point: setting up the room's match\n");
 }
 
+void xbox_NoteAnchorEvent(const char *text);     /* kernel.h: an event a pad script can wait for */
+
 void netplay_on_main_menu(void)
 {
     if (N.lobby && InterlockedExchange(&N.start_deferred, 0)) {
@@ -5416,6 +5418,7 @@ void netplay_on_main_menu(void)
         N.hill_summary = N.hill_menu = 0;
         log_contiguous("at the match end");
         fprintf(stderr, "[NETPLAY] back from the last fight's results: setting up the next King of the Hill fight\n");
+        xbox_NoteAnchorEvent("netplay.hill-back");     /* tests: a pad script's end of one fight's presses */
         N.start_tick = GetTickCount64();    /* the load starts now */
         become_connected();
         automatch_request(&N.deferred_m);
@@ -5444,8 +5447,10 @@ void netplay_on_main_menu(void)
         N.rb_on = N.predicting = N.resim = 0;
         rollback_reset();
     }
-    if (N.koth_results)         /* also after the next fight was called off meanwhile */
+    if (N.koth_results) {       /* also after the next fight was called off meanwhile */
         fprintf(stderr, "[NETPLAY] back from the last fight's results: on the hill\n");
+        xbox_NoteAnchorEvent("netplay.hill-back");     /* tests: a pad script's end of one fight's presses */
+    }
     N.koth_results = 0;
     N.koth_quit = 0;
     N.hill_summary = N.hill_menu = 0;
