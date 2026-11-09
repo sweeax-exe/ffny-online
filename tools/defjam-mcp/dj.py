@@ -77,7 +77,10 @@ def cmd_scenario(a):
                              fixtures=a.fixtures.split(",") if a.fixtures else None, ranked=a.ranked,
                              rollback_modes=a.rollback_modes, rollback_max_ping=a.rollback_max_ping, leave=a.leave,
                              spectate_after=a.spectate_after, spectate_delay=a.spectate_delay,
-                             maintenance=a.maintenance, cpu_level=a.cpu_level, **common)
+                             maintenance=a.maintenance, cpu_level=a.cpu_level, fighter_rules=a.fighter_rules,
+                             max_ping=a.max_ping,
+                             banned_tier=[int(x) for x in a.banned_tier.split(",") if x.strip()] if a.banned_tier is not None else None,
+                             **common)
     elif a.kind == "offline":
         r = scenarios.offline(type=a.type, venue=a.venue, f0=a.f0, f1=a.f1, cpu=not a.human, bot=a.bot,
                               fast_ko=a.fast_ko, turbo=a.turbo, timeout=a.timeout or 420,
@@ -208,6 +211,10 @@ def main(argv=None):
     sc.add_argument("--ko-winner", help="slot, alt or humans (only the human fighters; default alt; koth 0)")
     sc.add_argument("--cpu-level", choices=["easy", "normal", "hard"],
                     help="online (3-Way, FFA): the host sets its room's CPU level (RECOMP_TEST_CPU_LEVEL)")
+    sc.add_argument("--fighter-rules", choices=["all", "nobanned", "nocreated", "stock"],
+                    help="online: the host sets its room's FIGHTER RULES (RECOMP_TEST_FIGHTER_RULES, build 68)")
+    sc.add_argument("--max-ping", type=int, help="online: the host sets its room's MAX PING in ms (RECOMP_TEST_MAX_PING)")
+    sc.add_argument("--banned-tier", help="online: fighter IDs, comma-separated, for the relay's banned-tier.txt ('' empty)")
     sc.add_argument("--bot", nargs="?", const=True, default=None,
                     help="the state-reading bot fights (aggression 0..100, or p1=..,p2=.. behaviours)")
     sc.add_argument("--timeout", type=int)

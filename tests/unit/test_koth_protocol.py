@@ -92,6 +92,24 @@ def test_cpu_level_matches_the_relay():
     assert "CAPS_SPEC_LATE | CAPS_CPULEVEL |" in NETPLAY_C       # announced in CAPS
 
 
+def test_room_rules_match_the_relay():
+    # build 68: room rules (CAPS bit 16; FIGHTER RULES 0..3, MAX PING u16, ERROR 13 ping too high)
+    path = RELAY_SRC / 'protocol_rules.go'
+    if not path.exists():
+        pytest.skip('the relay source checked out has no room rules yet (server branch feat/room-rules)')
+    go = path.read_text(encoding='utf-8')
+    def const(name):
+        m = re.search(r'^\s*%s\s+(?:\w+\s+)?=\s+(\d+)(?:\s*<<\s*(\d+))?' % name, go, re.M)
+        assert m, name
+        return int(m.group(1)) << int(m.group(2) or 0)
+    assert c_define(NETPLAY_C, 'CAPS_ROOMRULES') == const('CapRoomRules') == c_define(NETPLAY_H, 'NETPLAY_CAP_ROOMRULES')
+    assert [c_define(NETPLAY_H, 'NETPLAY_RULES_' + k) for k in ('ALL', 'NO_BANNED', 'NO_CREATED')] ==         [const('Rules' + k) for k in ('All', 'NoBanned', 'NoCreated')]
+    assert c_define(NETPLAY_H, 'NETPLAY_RULES_STOCK') == 3 and 'RulesStock     uint8 = RulesNoBanned | RulesNoCreated' in go
+    assert c_define(NETPLAY_H, 'NETPLAY_MAX_BLOCKED') == const('MaxBlocked')
+    assert const('ErrPingTooHigh') == 13 and 'code == 13' in NETPLAY_C
+    assert 'CAPS_CPULEVEL | CAPS_ROOMRULES |' in NETPLAY_C      # announced in CAPS
+
+
 def test_hill_phases_line_states_and_results_match_the_relay():
     phases = c_enum(NETPLAY_H, 'NetHillPhase')
     assert [phases[k] for k in ('NETHILL_WAITING', 'NETHILL_CALLING', 'NETHILL_VOTING', 'NETHILL_FIGHTING')] == \

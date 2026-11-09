@@ -1577,8 +1577,13 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
            lock_timeout=None, log=None, require_hits=False, stall=300, keep_roots=False, quick=None,
            created=False, cp_records=None, rematch=False, venues=None, cp_pick=None, cp_names=None,
            more_shots=False, spectators=0, copy_env=None, fixtures=None, ranked=None, rollback_modes=None,
-           rollback_max_ping=None, leave=None, spectate_after=0, spectate_delay=0, maintenance=0, cpu_level=None):
-    """cpu_level: "easy", "normal" or "hard" (build 67): the room's host sets its CPU level (RECOMP_TEST_CPU_LEVEL);
+           rollback_max_ping=None, leave=None, spectate_after=0, spectate_delay=0, maintenance=0, cpu_level=None,
+           fighter_rules=None, max_ping=None, banned_tier=None):
+    """fighter_rules: "all", "nobanned", "nocreated" or "stock" (build 68): the room's host sets its FIGHTER RULES
+    (RECOMP_TEST_FIGHTER_RULES); max_ping: MS, its MAX PING (RECOMP_TEST_MAX_PING); banned_tier: fighter IDs, the
+    relay's <updates-dir>/banned-tier.txt. The result's `rules` lists, per copy, the fighters its STARTs named and
+    the fighters the room blocked; a START naming a blocked fighter is a problem.
+    cpu_level: "easy", "normal" or "hard" (build 67): the room's host sets its CPU level (RECOMP_TEST_CPU_LEVEL);
     the result's `cpu` says, per copy, the level its STARTs named and how often a fight ended with only CPU
     fighters left. maintenance: SECS, the relay's restart countdown from the start (<updates-dir>/maintenance "SECS Server
     update"): the relay holds every new fight; the file goes SECS + 5 s later (the restart that never comes),
@@ -1651,13 +1656,21 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
             relay_extra += ["-accounts-internal", "http://127.0.0.1:%d" % (acc_port + 1)]
             result["params"]["ranked"] = ranked
         maint_timer = None
+        if banned_tier is not None:     # build 68: the relay's banned tier (room FIGHTER RULES)
+            updates = os.path.join(s.dir, "updates")
+            os.makedirs(updates, exist_ok=True)
+            with open(os.path.join(updates, "banned-tier.txt"), "w") as f:
+                f.write("".join("%d\n" % int(x) for x in banned_tier))
+            relay_extra += ["-updates-dir", updates]
+            result["params"]["banned_tier"] = [int(x) for x in banned_tier]
         if maintenance:     # build 64: the relay's restart countdown holds every new fight until the file goes
             updates = os.path.join(s.dir, "updates")
             os.makedirs(updates, exist_ok=True)
             maint_file = os.path.join(updates, "maintenance")
             with open(maint_file, "w") as f:
                 f.write("%d Server update" % int(maintenance))
-            relay_extra += ["-updates-dir", updates]
+            if "-updates-dir" not in relay_extra:
+                relay_extra += ["-updates-dir", updates]
             result["params"]["maintenance"] = int(maintenance)
             def end_maintenance():
                 try:
@@ -1713,6 +1726,10 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
                 env["RECOMP_TEST_KO_STEP"] = "%d,%s" % (int(fast_ko), winner)
             if cpu_level:
                 env["RECOMP_TEST_CPU_LEVEL"] = cpu_level
+            if fighter_rules:
+                env["RECOMP_TEST_FIGHTER_RULES"] = fighter_rules
+            if max_ping:
+                env["RECOMP_TEST_MAX_PING"] = str(int(max_ping))
             env.update(_bot_env(bot))
             if cp_records and i < len(cp_records) and cp_records[i]:
                 recs = [os.path.abspath(r) for r in cp_records[i].split(";") if r]
@@ -1894,6 +1911,8 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
     rows, ok = online_rows(analyses, matches, require_hits, problems)
     if cpu_level or winner == "humans":
         result["cpu"] = cpu_check(logs, cpu_level, winner == "humans", leaver, problems, players)
+    if fighter_rules or max_ping or banned_tier is not None:
+        result["rules"] = rules_check(logs, fighter_rules, banned_tier, problems)
         ok = ok and not any(p.startswith("cpu:") for p in problems)
     if mode == "ffarot":
         result["rotation"] = rotation_check(logs, rot_relay_log, matches, players, problems, leaver)
@@ -1937,6 +1956,27 @@ def cpu_check(logs, level, humans_out, leaver, problems, players=2):
             problems.append("cpu: copy %d never ended a fight of CPU fighters only" % i)
         if humans_out and any(w & ((1 << players) - 1) or not w for w in results):
             problems.append("cpu: copy %d reported a fight won by a human or nobody: %s" % (i, results))
+    return out
+
+
+def rules_check(logs, fighter_rules, banned_tier, problems):
+    """Build 68: per copy the room's rules as its host set them, the fighters its STARTs named, the RANDOM
+    re-draws and MAX PING refusals; a START naming a fighter the rules leave out is a problem."""
+    bits = {"all": 0, "nobanned": 1, "nocreated": 2, "stock": 3}.get(fighter_rules or "all", 0)
+    blocked = set(int(x) for x in (banned_tier or [])) if bits & 1 else set()
+    if bits & 2:
+        blocked.add(99)
+    out = {}
+    for i, path in logs.items():
+        text = logparse.read_text(path)
+        starts = [[int(x) for x in m.split()] for m in re.findall(r"\[NETPLAY\] START: fighters ([\d ]+)", text)]
+        named = sorted(set(x for st in starts for x in st))
+        out[str(i)] = {"start_fighters": starts, "set": re.findall(r"tests: the room's fighter rules are (\d+), its max ping (\d+)", text)[:1],
+                       "random_redraws": re.findall(r"RANDOM fighter again \(the room blocks \d+ fighters\): (\d+)", text),
+                       "refused": re.findall(r"refused: (Your ping[^\n]*)", text)[:3]}
+        bad = sorted(set(named) & blocked)
+        if bad:
+            problems.append("rules: copy %d's STARTs named blocked fighters %s" % (i, bad))
     return out
 
 

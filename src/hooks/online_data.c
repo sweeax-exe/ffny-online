@@ -225,11 +225,23 @@ int online_random_below(int n)
     return (int)(z % (unsigned long long)n);
 }
 
-int online_random_fighter(void)
+int online_random_fighter(void) { return online_random_fighter_except(NULL, 0); }
+
+int online_random_fighter_except(const unsigned char *blocked, int nblocked)
 {
     const OnlineFighter *all;
-    int n = online_fighters(&all);
-    return n > 0 ? all[online_random_below(n)].id : 55;
+    int n = online_fighters(&all), allowed = 0, i, k, pick;
+    for (i = 0; i < n; i++) {
+        for (k = 0; k < nblocked && blocked[k] != all[i].id; k++) {}
+        allowed += k == nblocked;
+    }
+    if (!allowed) return n > 0 ? all[online_random_below(n)].id : 55;
+    pick = online_random_below(allowed);
+    for (i = 0; i < n; i++) {
+        for (k = 0; k < nblocked && blocked[k] != all[i].id; k++) {}
+        if (k == nblocked && pick-- == 0) return all[i].id;
+    }
+    return 55;
 }
 
 int online_fighter_id(int id)

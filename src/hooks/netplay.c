@@ -264,6 +264,9 @@ void netplay_crowd_update(void) { sub_00081170(); }
 #define CAPS_RANDOM_VENUE 16384u /* RANDOM in the venue vote (build 67), both ways: VOTE 0xFE, ROOM voted 0xFE */
 #define CAPS_CPULEVEL 32768u    /* the room's CPU level (build 67), both ways: a byte after CREATE's / SETTINGS'
                                  * Settings, after ROOM's spectators, after START's created fighters */
+#define CAPS_ROOMRULES 65536u   /* room rules (build 68), both ways: FIGHTER RULES and MAX PING after CREATE's /
+                                 * SETTINGS' CPU level, this PC's ping after JOIN / QUICK, the rules and the
+                                 * blocked fighters after ROOM's CPU level; ERROR 13: the ping is over MAX PING */
 #define CAPS_RB_MODES 512u      /* rollback everywhere (build 52), both ways: the answer carries a u32 of the
                                  * NETPLAY_RB_* modes in which rollback is mandatory (0: the setting decides) */
 #define CAPS_RB_PING  1024u     /* the rollback ping limit (build 54), both ways, with CAPS_RB_MODES: the answer
@@ -2352,9 +2355,27 @@ static int put_settings(uint8_t *b, const NetRoomSettings *s)
     b[n++] = (uint8_t)pool;
     memcpy(b + n, s->pool, (size_t)pool); n += pool;
     /* build 67: the CPU level, only to a relay that takes it (an older one refuses a longer request) */
-    if (relay_has(CAPS_CPULEVEL))
+    if (relay_has(CAPS_CPULEVEL) || relay_has(CAPS_ROOMRULES))
         b[n++] = (uint8_t)(NETPLAY_CPU_FILL(s->mode) && s->cpu_level > 0 && s->cpu_level <= NETPLAY_CPU_EASY ? s->cpu_level : 0);
+    /* build 68: FIGHTER RULES and MAX PING (u16 ms, 0 off), after the CPU level, to a relay that takes them */
+    if (relay_has(CAPS_ROOMRULES)) {
+        int mp = s->max_ping < 50 ? 0 : s->max_ping > 1000 ? 1000 : s->max_ping;
+        b[n++] = (uint8_t)(s->fighter_rules >= 0 && s->fighter_rules <= NETPLAY_RULES_STOCK ? s->fighter_rules : 0);
+        b[n++] = (uint8_t)mp;
+        b[n++] = (uint8_t)(mp >> 8);
+    }
     return n;
+}
+
+/* build 68: this PC's ping to its relay after JOIN / QUICK (the room's MAX PING), to a relay that takes it */
+static int put_ping(uint8_t *b)
+{
+    int rtt = N.rtt_ms;
+    if (!relay_has(CAPS_ROOMRULES)) return 0;
+    if (rtt < 0 || rtt >= 0xFFFF) rtt = 0xFFFF;     /* not known yet: never refused for it */
+    b[0] = (uint8_t)rtt;
+    b[1] = (uint8_t)(rtt >> 8);
+    return 2;
 }
 
 static void on_rooms(const uint8_t *b, int len)
@@ -2672,6 +2693,15 @@ static void on_room(const uint8_t *b, int len)
     if (r.i < r.n) {    /* build 67: the CPU level (relays answering CAPS_CPULEVEL) */
         v.settings.cpu_level = rd8(&r);
         if (r.bad || v.settings.cpu_level > NETPLAY_CPU_EASY) return;
+    }
+    if (r.i < r.n) {    /* build 68: the room rules and the fighters they leave out (relays answering CAPS_ROOMRULES) */
+        v.settings.fighter_rules = rd8(&r);
+        v.settings.max_ping = rd8(&r);
+        v.settings.max_ping |= rd8(&r) << 8;
+        v.blocked_count = rd8(&r);
+        if (r.bad || v.settings.fighter_rules > NETPLAY_RULES_STOCK || v.blocked_count > NETPLAY_MAX_BLOCKED) return;
+        rdbytes(&r, v.blocked, v.blocked_count);
+        if (r.bad) return;
     }
     v.in_room = 1;
     v.received = GetTickCount64();
@@ -3211,6 +3241,12 @@ static void on_start_as(const uint8_t *b, int len, int watching)
                 N.rot_match ? " (an FFA rotation fight)" : N.koth_match ? " (a King of the Hill fight)" : "");
     if (m.count > count)
         fprintf(stderr, "[NETPLAY] START: %d CPU fighters at level %s\n", m.count - count, cpu_level_name(N.start_cpu));
+    {   /* the fighters START names, by player (tests read them: the room's FIGHTER RULES, build 68) */
+        char list[8 * MAXP] = "";
+        int at = 0;
+        for (i = 0; i < count && at < (int)sizeof(list) - 6; i++) at += snprintf(list + at, sizeof(list) - at, " %d", fighters[i]);
+        fprintf(stderr, "[NETPLAY] START: fighters%s\n", list);
+    }
     if (late) {
         /* The players fight, or sit on their results, and choose Rematch there: no new START comes
          * until they are back in the room (a player report, 2026-11-07: watching only worked from the
@@ -3548,9 +3584,15 @@ static void on_packet(const uint8_t *b, int len)
                 "Not possible here: not in a room, or already in one.",
                 "A new build is out: close the game and update in the launcher to play online.",
                 "FFNY Online is already online on this PC.",
-                "Your created fighter has stats the game does not allow; it can't be used online." };
+                "Your created fighter has stats the game does not allow; it can't be used online.",
+                "Your ping is over this room's MAX PING: try a closer server or another room." };
             int code = b[6];
-            const char *text = code >= 1 && code <= 12 ? why[code] : "The server refused the request.";
+            const char *text = code >= 1 && code <= 13 ? why[code] : "The server refused the request.";
+            char ping_why[112];
+            if (code == 13 && N.rtt_ms >= 0) {  /* build 68 relays: MAX PING, with this PC's ping */
+                snprintf(ping_why, sizeof(ping_why), "Your ping (%d ms) is over this room's MAX PING: try a closer server or another room.", N.rtt_ms);
+                text = ping_why;
+            }
             if (code == 8 && N.pend_len && N.pend[5] == T_TPICK) text = "That stage can't be picked now.";
             if (N.lobby && code == 12) {
                 /* build 46 relays: this player's created fighter has stats Story mode never gives (a
@@ -3571,7 +3613,7 @@ static void on_packet(const uint8_t *b, int len)
                     fprintf(stderr, "[NETPLAY] refused: %s (a created fighter's record, RECGET)\n", text);
                 break;
             }
-            if (N.lobby && (code == 1 || code == 2 || code == 3 || code == 8 || code == 9 || code == 10)) {
+            if (N.lobby && (code == 1 || code == 2 || code == 3 || code == 8 || code == 9 || code == 10 || code == 13)) {
                 /* refused, but the session goes on */
                 EnterCriticalSection(&g_cs);
                 /* "not in a room" to a room action (a vote, ready, settings) while this side still
@@ -3779,7 +3821,7 @@ static DWORD WINAPI net_thread(LPVOID unused)
                 int n = header(cb, T_CAPS);
                 memcpy(cb + n, N.token, 8); n += 8;
                 put32(cb + n, CAPS_KOTH | CAPS_CREATED | CAPS_SPECTATE | CAPS_STATS_ERR | CAPS_SPEC_REMATCH | CAPS_CHAT |
-                              CAPS_CREW | CAPS_RB_MODES | CAPS_RB_PING | CAPS_SPEC_LATE | CAPS_CPULEVEL |
+                              CAPS_CREW | CAPS_RB_MODES | CAPS_RB_PING | CAPS_SPEC_LATE | CAPS_CPULEVEL | CAPS_ROOMRULES |
                               CAPS_TSET | CAPS_FFAROT | CAPS_RANDOM_VENUE); n += 4;
                 send_raw(cb, n);
             } else {
@@ -4605,10 +4647,10 @@ void netplay_lobby_create(const NetRoomSettings *settings)
 
 void netplay_lobby_join(const char *code)
 {
-    uint8_t b[6];
+    uint8_t b[8];
     int i;
     for (i = 0; i < 6; i++) b[i] = (uint8_t)toupper((unsigned char)(code && code[i] ? code[i] : 0));
-    request(T_JOIN, b, 6);
+    request(T_JOIN, b, 6 + put_ping(b + 6));
 }
 
 void netplay_lobby_spectate(const char *code)
@@ -4643,8 +4685,8 @@ int netplay_spectating(void)
 void netplay_lobby_quick(int mode, int max)
 {
     int most = room_max(mode);
-    uint8_t b[2] = { (uint8_t)mode, (uint8_t)(max < 2 ? 2 : max > most ? most : max) };
-    request(T_QUICK, b, 2);
+    uint8_t b[4] = { (uint8_t)mode, (uint8_t)(max < 2 ? 2 : max > most ? most : max) };
+    request(T_QUICK, b, 2 + put_ping(b + 2));
 }
 
 /* Asks the account service for a ticket (it blocks), then joins the queue with it. */
@@ -5647,6 +5689,13 @@ static DWORD WINAPI autostart_thread(LPVOID unused)
                 Sleep(5000);
             }
         } else {
+            /* RECOMP_TEST_QUICK_DELAY_MS (tests, build 68): QUICK that much later, so another copy's room (and
+             * its MAX PING) is there first */
+            const char *qd = getenv("RECOMP_TEST_QUICK_DELAY_MS");
+            if (qd && atoi(qd) > 0) {
+                fprintf(stderr, "[NETPLAY] tests: QUICK in %d ms (this PC's ping now %d ms)\n", atoi(qd), N.rtt_ms);
+                Sleep((DWORD)atoi(qd));
+            }
             netplay_lobby_quick(qmode, qmax);
         }
         ULONGLONG koth_readied = 0;
@@ -5816,6 +5865,30 @@ static DWORD WINAPI autostart_thread(LPVOID unused)
                     continue;
                 }
             }
+            {   /* RECOMP_TEST_FIGHTER_RULES=all|nobanned|nocreated|stock and RECOMP_TEST_MAX_PING=MS (tests, build 68):
+                 * the host sets its room's rules */
+                const char *tr = getenv("RECOMP_TEST_FIGHTER_RULES"), *tp = getenv("RECOMP_TEST_MAX_PING");
+                int want_rules = !tr || !*tr ? -1 : !strcmp(tr, "nobanned") ? NETPLAY_RULES_NO_BANNED
+                               : !strcmp(tr, "nocreated") ? NETPLAY_RULES_NO_CREATED : !strcmp(tr, "stock") ? NETPLAY_RULES_STOCK
+                               : NETPLAY_RULES_ALL;
+                int want_ping = tp && *tp ? atoi(tp) : -1;
+                if ((want_rules >= 0 || want_ping >= 0) && r.in_room && r.phase == 0 && r.you == r.host && !N.match_live &&
+                    relay_has(CAPS_ROOMRULES) &&
+                    ((want_rules >= 0 && r.settings.fighter_rules != want_rules) || (want_ping >= 0 && r.settings.max_ping != want_ping))) {
+                    static ULONGLONG asked;
+                    if (GetTickCount64() - asked > 1000) {
+                        NetRoomSettings want = r.settings;
+                        asked = GetTickCount64();
+                        if (want_rules >= 0) want.fighter_rules = want_rules;
+                        if (want_ping >= 0) want.max_ping = want_ping;
+                        fprintf(stderr, "[NETPLAY] tests: the room's fighter rules are %d, its max ping %d ms\n",
+                                want.fighter_rules, want.max_ping);
+                        netplay_lobby_settings(&want);
+                    }
+                    Sleep(100);
+                    continue;
+                }
+            }
             if (!strcmp(mode, "tset") && r.in_room && !N.match_live) {
                 /* tests, tournament sets: the loser's stage pick (RECOMP_TEST_TSET_PICK="7,8": the first of these
                  * the relay offers, else its first choice) two seconds after the pick opened; nothing after
@@ -5863,6 +5936,17 @@ static DWORD WINAPI autostart_thread(LPVOID unused)
                 for (me = 0; me < r.player_count; me++)
                     if (r.players[me].slot == r.you) { mine = !r.players[me].ready; break; }
                 if (mine && !readied) {
+                    if (f && !_stricmp(f, "random") && r.blocked_count > 0) {
+                        /* build 68: the room's FIGHTER RULES block some fighters: RANDOM draws among the others,
+                         * as the hub's RANDOM card does */
+                        int k;
+                        for (k = 0; k < r.blocked_count && r.blocked[k] != fighter; k++) {}
+                        if (k < r.blocked_count) {
+                            fighter = online_random_fighter_except(r.blocked, r.blocked_count);
+                            fprintf(stderr, "[NETPLAY] tests: RANDOM fighter again (the room blocks %d fighters): %d (%s)\n",
+                                    r.blocked_count, fighter, online_fighter_name(fighter));
+                        }
+                    }
                     netplay_lobby_ready(1, fighter);
                     readied = 1;
                 } else if (mine && readied) {
