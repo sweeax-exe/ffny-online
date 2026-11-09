@@ -1967,7 +1967,7 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
         result["rules"] = rules_check(logs, fighter_rules, banned_tier, problems)
         ok = ok and not any(p.startswith("cpu:") for p in problems)
     if mode in ("koth", "ffarot"):
-        result["hill_gaps"], result["hill_forced"] = hill_gap_check(logs, linger, problems)
+        result["hill_gaps"], result["hill_forced"], result["hill_gaps_watched"] = hill_gap_check(logs, linger, problems)
         if linger is not None:      # taken off the summary by the game: no rewards step (expected)
             problems[:] = [p for p in problems if not re.match(r"m\d+ copy \d+: summary not accepted", p)]
             ok = not problems       # online_rows failed on those alone otherwise
@@ -2023,12 +2023,24 @@ def hill_gap_check(logs, linger, problems):
     """King of the Hill, FFA rotation: per copy the seconds from its last fight's decision to its next fight under
     way (netplay.c), and how often its results were left by themselves. With a lingering copy, a gap of that copy
     over HILL_GAP_LIMIT is a problem (the cap did not hold), and so is a lingering copy never taken off its results.
-    (Only that copy's: on the hill a challenger who lost watches a fight before its next one.)"""
+    (Only that copy's.) A gap with a watched fight in it (WATCH between the decision and the next fight: on the hill a
+    challenger who lost waits through the next pair's fight) does not measure the cap and goes to `watched` instead
+    of the gaps: build 68's release run counted 39.3 and 40.9 s that were a 34 s watched fight, then the copy taken
+    off its results at once when its START came and the fight under way 5.4 s later."""
     import re
-    gaps, forced = {}, {}
+    gaps, forced, watched = {}, {}, {}
     for i, p in sorted(logs.items()):
         text = logparse.read_text(p)
-        gaps[i] = [float(x) for x in re.findall(r"hill: this fight is under way ([\d.]+) s after", text)]
+        gaps[i], watched[i], saw_watch = [], [], False
+        for m in re.finditer(r"\[NETPLAY\] (?:\S.*?: the fight is decided|WATCH: seed|hill: this fight is under way ([\d.]+) s after)",
+                             text):
+            line = m.group(0)
+            if "the fight is decided" in line:
+                saw_watch = False
+            elif "WATCH: seed" in line:
+                saw_watch = True
+            else:
+                (watched if saw_watch else gaps)[i].append(float(m.group(1)))
         forced[i] = len(re.findall(r"hill: still on the results", text))
     if linger is not None:
         worst = max(gaps.get(int(linger)) or [0.0])
@@ -2036,7 +2048,7 @@ def hill_gap_check(logs, linger, problems):
             problems.append("hill: %.1f s between a fight's decision and the next fight (limit %.0f)" % (worst, HILL_GAP_LIMIT))
         if not forced.get(int(linger)):
             problems.append("hill: copy %s was never taken off its results" % linger)
-    return gaps, forced
+    return gaps, forced, watched
 
 
 def rules_check(logs, fighter_rules, banned_tier, problems):
