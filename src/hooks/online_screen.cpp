@@ -2637,7 +2637,7 @@ void draw_settings(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom
         was_koth = NETPLAY_IS_KOTH(s.mode);
     }
     bool koth = NETPLAY_IS_KOTH(s.mode), rot = NETPLAY_IS_FFAROT(s.mode);
-    float row_step = rows >= 8 ? 39 : rows >= 6 ? 46 : 54, row_h = rows >= 8 ? 36 : rows >= 6 ? 40 : 44;
+    float row_step = rows >= 7 ? 37 : rows >= 6 ? 46 : 54, row_h = rows >= 7 ? 34 : rows >= 6 ? 40 : 44;   // up to 8 rows above the hints
 
     page_title(dl, f, S.settings_edit ? "ROOM SETTINGS" : "CREATE A ROOM");
     text(dl, f, g_hand, 15, 54, 66, ORANGE, s.name, LEFT, 0.8f);
