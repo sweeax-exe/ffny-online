@@ -1556,22 +1556,22 @@ def crew_tail(fights, p2):
     The first Quit closing everything left the King on its second summary (20261108-085153-turf). online_tail's 12 timed A's
     after the summary ran on past the Quit into the hub's QUICK MATCH and a quick room
     (logs/dj/20261108-070806-turf: room_stays_left, pages_show_holder).
-    The Rematch menu and the tips take one A: their presses stop after 15 s. Build 68 takes a King who sits on
-    the Rematch menu off it after 15 s (netplay.c hill_results_tick) through the Rematch path, with no tips and
-    no Game.Quit() the script sees, so the Nth tips and Quit anchors of every later fight came one fight late; the
-    second fight's save presses, ended only by a tips anchor that never came, ran their 60 s on past the room into
-    the hub's QUICK MATCH, which opened rooms WUM8AN and 7GUG4A (logs/dj/20261109-231233-turf: room_stays_left)."""
+    Build 68 takes a King who sits on the Rematch menu off it after 15 s (netplay.c hill_results_tick) through the
+    Rematch path, with no tips and no Game.Quit() the script sees, so the Nth tips and Quit anchors of every later
+    fight came one fight late, and the last fight's presses, ended by anchors that never came, ran on past the room
+    into the hub (QUICK MATCH rooms in logs/dj/20261109-231233-turf, the match-type menu and a room again in
+    20261109-233542-turf: room_stays_left). Now each fight's presses after its summary are one A every 3 s,
+    from the Nth summary (every fought fight has one, whichever way it is left) to the Nth
+    "netplay.hill-back" event, which netplay.c notes once per fought fight when the game is back from its
+    results: no A reaches the online screens after a fight."""
     h = harness()
     fight = h.FIGHT_TAIL.replace("right:", "left:") if p2 else h.FIGHT_TAIL
     parts = []
     for k in range(1, fights + 1):
         nth = "#%d" % k if k > 1 else ""
         parts.append(fight.replace("@game.startgame(", "@game.startgame(%s" % nth))
-        parts.append("@game.getmatchsummary(0%s,a:4:60:3:0.3" % nth)
-        parts.append("@game.updatematchrewardspoints(%s,a:3:60:3:0.3" % nth)
-        parts.append("@memcard.save( battle/rewardun%s,a:3:15:3:0.3" % nth)
-        parts.append("@game.gettips(%s,a:3:15:3:0.3" % nth)
-        parts.append("@game.quit(%s" % nth)
+        parts.append("@game.getmatchsummary(0%s,a:4:120:3:0.3" % nth)
+        parts.append("@netplay.hill-back%s" % nth)
     return ",".join(parts)
 
 
