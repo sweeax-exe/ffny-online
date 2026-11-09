@@ -286,7 +286,7 @@ by older relays.
 
 | Type | Name | Direction | Body after the header |
 |---|---|---|---|
-| 0x20 | `CAPS` | client -> server | `token` 8, `caps` u32 (bit 0: King of the Hill; bit 13: FFA rotation; bit 14: RANDOM in the venue vote, build 67; bit 15: CPU level, build 67) |
+| 0x20 | `CAPS` | client -> server | `token` 8, `caps` u32 (bit 0: King of the Hill; bit 13: FFA rotation; bit 14: RANDOM in the venue vote, build 67; bit 15: CPU level, build 67; bit 16: room rules, build 68) |
 | 0x20 | `CAPS` | server -> client | `caps` u32 (what the relay supports: bit 0 King of the Hill, bit 1 rollback allowed, bit 2 `YIELD`, since build 36) |
 | 0x21 | `HILL` | server -> client | `room` 6, `phase` u8 (0 waiting, 1 calling, 2 voting, 3 fighting), `king` u8 (slot, 0xFF none), `streak` u16, `ms_left` u16, `seed` u32, `fights` u16, `last_winner` u8, `last_loser` u8, `last_how` u8 (0 none, 1 won, 2 draw, 3 loser left, 4 void), `count` u8, per player in line order: `slot` u8, `state` u8 (0 waiting, 1 called, 2 ready, 3 fighting, 4 away), `wins` u16 |
 | 0x22 | `RESULT` | client -> server | `token` 8, `seed` u32, `winner` u8 (slot, 0xFF draw); from the two fighters, repeated until `HILL.fights` changes; in a ranked set's room until `RANKINFO` counts the game (see "Ranked queue") |
@@ -344,6 +344,28 @@ by older relays.
   rest), the fight ends: the CPU fighter with the most health (the lowest slot of equals) wins and
   the others still up are knocked out, each once it stands free. Every PC decides this from the
   fight's state at the start of a step, so it agrees in lockstep and with rollback.
+
+### Room rules (build 68)
+
+- The host's **FIGHTER RULES**: `0` every fighter (the default), `1` no fighter of the server's banned
+  tier, `2` no created fighter, `3` both (stock fighters, no banned tier). The banned tier is the
+  server's own list (fighter IDs), empty unless the server sets one.
+- The host's **MAX PING**: `0` off, else a limit in ms (the game offers 100, 150 and 200; the relay takes
+  50..1000).
+- Only between a relay and a client that both sent `CAPS` bit 16 (`65536`): `CREATE` and `SETTINGS`
+  carry, after the CPU level byte (then always sent), `rules` u8 and `max_ping` u16; `JOIN` and `QUICK`
+  carry the client's ping to this relay, u16 ms (`0xFFFF` not known); `ROOM` carries, after the CPU
+  level byte (then always sent), `rules` u8, `max_ping` u16, `count` u8 and that many fighter IDs the
+  rules block in this room (`99` for created fighters), so the fighter grid greys them out.
+- The relay enforces the rules: a `READY` with a fighter they leave out plays another (Doc, or the
+  lowest allowed fighter); new rules replace picks they leave out; `START` applies the list again.
+- A `JOIN` whose ping is over the room's MAX PING gets **`ERROR 13`** ("ping too high"); `QUICK` places
+  such a player in another room (or opens one). Players already in the room stay.
+- A room with rules other than the defaults is left out of `LIST` for, and refuses `JOIN`, `QUICK` and a
+  v1 join (`ERROR 8`) from, a client without the bit; its host cannot set them while a client without
+  the bit is in the room (`ERROR 8`).
+- The room page colours each player's ping (green under 80 ms, yellow under 150, red from 150) and,
+  while someone is red, says before READY that the fight may stutter and rollback helps.
 
 ## Spectator extension (watching a room's matches)
 

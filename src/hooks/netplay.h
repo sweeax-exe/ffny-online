@@ -59,7 +59,19 @@ typedef struct NetRoomSettings {
     int pool_count;         /* venues to vote on (venue.xml feID) */
     unsigned char pool[32];
     int cpu_level;          /* build 67: the CPU fighters' level, NETPLAY_CPU_* (relays with NETPLAY_CAP_CPULEVEL) */
+    int fighter_rules;      /* build 68: FIGHTER RULES, NETPLAY_RULES_* bits (relays with NETPLAY_CAP_ROOMRULES) */
+    int max_ping;           /* build 68: MAX PING in ms, 0 off: the relay refuses joins over it */
 } NetRoomSettings;
+
+/* Room rules (build 68): which fighters a room's players may pick, and the highest ping a joining player
+ * may have. The relay enforces both (a pick the rule leaves out plays another fighter) and names the
+ * blocked fighters in ROOM (NetRoom.blocked), so CHOOSE FIGHTER greys them out. The banned tier is the
+ * server's own list. */
+#define NETPLAY_RULES_ALL        0
+#define NETPLAY_RULES_NO_BANNED  1      /* no fighter of the server's banned tier */
+#define NETPLAY_RULES_NO_CREATED 2      /* no created fighter */
+#define NETPLAY_RULES_STOCK      3      /* both: stock fighters, no banned tier */
+#define NETPLAY_MAX_BLOCKED      128
 
 /* The CPU level of a 3-Way's or Free for All's CPU fighters (build 67): the game's own CPU difficulty
  * (its Battle mode's Easy / Normal / Hard), counted from the default down. Online CPU fighters always
@@ -131,6 +143,8 @@ typedef struct NetRoom {
     char spectators[NETPLAY_MAX_SPECTATORS][25];
     char error[96];                 /* the last refusal, "" if none */
     unsigned version;               /* changes whenever anything here does */
+    int blocked_count;              /* build 68: the fighters this room's rules leave out (NETPLAY_CREATED_FIGHTER */
+    unsigned char blocked[NETPLAY_MAX_BLOCKED];     /* for created fighters), as the relay names them */
 } NetRoom;
 
 /* What the relay supports (its answer to CAPS): -1 not known yet (or no answer: an older relay,
@@ -145,6 +159,7 @@ typedef struct NetRoom {
  * it wins. Only with relays answering NETPLAY_CAP_RANDOM_VENUE. */
 #define NETPLAY_VOTE_RANDOM 0xFE
 #define NETPLAY_CAP_CPULEVEL 32768 /* the room's CPU level (NetRoomSettings.cpu_level, build 67) */
+#define NETPLAY_CAP_ROOMRULES 65536 /* room rules (NetRoomSettings.fighter_rules, max_ping, build 68) */
 int netplay_lobby_caps(void);
 /* 1 when the relay refused the hub session because this PC already has a live session there (ERROR 11,
  * build 46 relays): another copy of the game is online on this PC. Not a connection problem. */

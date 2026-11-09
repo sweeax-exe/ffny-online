@@ -259,7 +259,7 @@ Frame menu_frame(ImVec2 display)
 const ImU32 CREAM = IM_COL32(242, 230, 200, 255), ORANGE = IM_COL32(255, 168, 26, 255),
             WHITE = IM_COL32(245, 245, 245, 255), GREY = IM_COL32(150, 150, 150, 255),
             RED = IM_COL32(200, 16, 46, 255), GREEN = IM_COL32(110, 210, 110, 255),
-            BLACK = IM_COL32(0, 0, 0, 255);
+            BLACK = IM_COL32(0, 0, 0, 255), YELLOW = IM_COL32(240, 212, 64, 255);
 
 enum Align { LEFT, CENTER, RIGHT };
 
@@ -1099,7 +1099,7 @@ int lobby_queue(int *waited, int *searching, char *why, int size)
 }
 int lobby_caps()
 {
-    return gallery_on() ? NETPLAY_CAP_KOTH | NETPLAY_CAP_YIELD | NETPLAY_CAP_FFAROT | NETPLAY_CAP_RANDOM_VENUE |
+    return gallery_on() ? NETPLAY_CAP_KOTH | NETPLAY_CAP_YIELD | NETPLAY_CAP_FFAROT | NETPLAY_CAP_RANDOM_VENUE | NETPLAY_CAP_ROOMRULES |
                               NETPLAY_CAP_CPULEVEL | (G.rollback ? NETPLAY_CAP_ROLLBACK : 0)
                         : netplay_lobby_caps();
 }
@@ -1114,6 +1114,32 @@ bool cpu_level_offered(int mode)
 const char *cpu_level_text(int level)
 {
     return level == NETPLAY_CPU_EASY ? "Easy" : level == NETPLAY_CPU_NORMAL ? "Normal" : "Hard";
+}
+// build 68: room rules (FIGHTER RULES, MAX PING): the relay takes them and enforces them
+bool rules_offered() { int c = lobby_caps(); return c > 0 && (c & NETPLAY_CAP_ROOMRULES); }
+const char *rules_text(int rules)
+{
+    switch (rules) {
+    case NETPLAY_RULES_NO_BANNED: return "No banned tier";
+    case NETPLAY_RULES_NO_CREATED: return "No created fighters";
+    case NETPLAY_RULES_STOCK: return "Stock, no banned tier";
+    default: return "All fighters";
+    }
+}
+std::string max_ping_text(int ms)
+{
+    if (ms <= 0) return "Off";
+    char buf[24];
+    snprintf(buf, sizeof(buf), "%d ms", ms);
+    return buf;
+}
+// A fighter this room's FIGHTER RULES leave out (the relay names them in ROOM; NETPLAY_CREATED_FIGHTER for
+// created fighters). Out of a room, none.
+bool fighter_blocked(const NetRoom &r, int id)
+{
+    if (!r.in_room) return false;
+    for (int i = 0; i < r.blocked_count && i < NETPLAY_MAX_BLOCKED; i++) if (r.blocked[i] == id) return true;
+    return false;
 }
 // spectator mode: the relay takes spectators (docs/research/spectator-mode.md)
 bool can_watch() { int c = lobby_caps(); return c > 0 && (c & NETPLAY_CAP_SPECTATE); }
@@ -1207,7 +1233,9 @@ int maintenance_left(char *text, int size)
 }
 
 // Ping colours: good, fair, high.
-ImU32 ping_colour(int ms) { return ms < 0 ? GREY : ms < 80 ? GREEN : ms < 150 ? ORANGE : IM_COL32(235, 70, 60, 255); }
+// a ping's colour: green under 80 ms, yellow under 150, red from 150 (build 68: the room page's warning)
+const int PING_RED_MS = 150;
+ImU32 ping_colour(int ms) { return ms < 0 ? GREY : ms < 80 ? GREEN : ms < PING_RED_MS ? YELLOW : IM_COL32(235, 70, 60, 255); }
 
 // The answering relay with the lowest ping besides `than` (Automatic's second try), -1 none.
 int other_server(const NetServerInfo *s, int than)
@@ -2539,8 +2567,9 @@ void venue_showcase(ImDrawList *dl, const Frame &f, const NetRoomSettings &s, fl
 void draw_settings(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &room)
 {
     // the rows; a King of the Hill room has one more, how each fight's venue is chosen
-    enum Row { R_MODE, R_VENUE_CHOICE, R_PLAYERS, R_POOL, R_LISTED, R_OPEN, R_CPU };
-    static const char *const labels[] = { "MODE", "VENUE OF EACH FIGHT", "PLAYERS", "VENUES", "LISTED", "", "CPU LEVEL" };
+    enum Row { R_MODE, R_VENUE_CHOICE, R_PLAYERS, R_POOL, R_LISTED, R_OPEN, R_CPU, R_RULES, R_PING };
+    static const char *const labels[] = { "MODE", "VENUE OF EACH FIGHT", "PLAYERS", "VENUES", "LISTED", "", "CPU LEVEL",
+                                          "FIGHTER RULES", "MAX PING" };
     NetRoomSettings &s = S.settings;
     bool was_koth = NETPLAY_IS_KOTH(s.mode), was_rot = NETPLAY_IS_FFAROT(s.mode);
     // the host cannot turn a room into the other kind (the relay refuses it)
@@ -2549,6 +2578,8 @@ void draw_settings(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom
     if (was_koth) rows_of.insert(rows_of.begin() + 1, R_VENUE_CHOICE);
     // build 67: how strong the CPU fighters are that fill a 3-Way's or Free for All's free places
     if (cpu_level_offered(s.mode)) rows_of.insert(rows_of.begin() + 2, R_CPU);
+    // build 68: which fighters may be picked, and the highest ping a joining player may have (before LISTED)
+    if (rules_offered()) rows_of.insert(rows_of.end() - 2, { R_RULES, R_PING });
     const int rows = (int)rows_of.size();
     if (S.settings_sel >= rows) S.settings_sel = rows - 1;
     if (pad.up) S.settings_sel = (S.settings_sel + rows - 1) % rows;
@@ -2589,6 +2620,14 @@ void draw_settings(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom
             s.cpu_level = order[std::max(0, std::min(2, at + step))];
             break;
         }
+        case R_RULES: s.fighter_rules = (s.fighter_rules + step + 4) % 4; break;    // the NETPLAY_RULES_* order
+        case R_PING: {     // OFF, 100, 150, 200 ms
+            static const int order[] = { 0, 100, 150, 200 };
+            int at = 0;
+            for (int k = 0; k < 4; k++) if (order[k] == s.max_ping) at = k;
+            s.max_ping = order[(at + step + 4) % 4];
+            break;
+        }
         }
     }
     if (!NETPLAY_CPU_FILL(s.mode)) s.cpu_level = NETPLAY_CPU_HARD;     // no CPU fighters: the default
@@ -2600,7 +2639,7 @@ void draw_settings(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom
         was_koth = NETPLAY_IS_KOTH(s.mode);
     }
     bool koth = NETPLAY_IS_KOTH(s.mode), rot = NETPLAY_IS_FFAROT(s.mode);
-    float row_step = rows >= 6 ? 46 : 54, row_h = rows >= 6 ? 40 : 44;
+    float row_step = rows >= 7 ? 37 : rows >= 6 ? 46 : 54, row_h = rows >= 7 ? 34 : rows >= 6 ? 40 : 44;   // up to 8 rows above the hints
 
     page_title(dl, f, S.settings_edit ? "ROOM SETTINGS" : "CREATE A ROOM");
     text(dl, f, g_hand, 15, 54, 66, ORANGE, s.name, LEFT, 0.8f);
@@ -2632,8 +2671,10 @@ void draw_settings(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom
             { int p = preset_of(s); value = p >= 0 ? presets()[p].name : "Custom"; snprintf(buf, sizeof(buf), " (%d)", s.pool_count); value += buf; } break;
         case R_LISTED: value = s.is_public ? "In the room list" : "By code only"; break;
         case R_CPU: value = cpu_level_text(s.cpu_level); break;
+        case R_RULES: value = rules_text(s.fighter_rules); break;
+        case R_PING: value = s.max_ping > 0 ? "Up to " + max_ping_text(s.max_ping) : "Off: anyone joins"; break;
         }
-        text(dl, f, g_title, 17, x + 12, y + 19, sel ? WHITE : GREY, value.c_str());
+        text(dl, f, g_title, 17, x + 12, y + (row_h < 40 ? 16 : 19), sel ? WHITE : GREY, value.c_str());
         // a fixed row (a special match's venue and players) has nothing to step through
         bool fixed = (fixed_venue(s.mode) && (row == R_POOL || row == R_PLAYERS)) || (is_team(s.mode) && row == R_PLAYERS);
         if (sel && !fixed) { text(dl, f, g_title, 17, x + w - 26, y + h / 2 - 10, ORANGE, "<", CENTER); text(dl, f, g_title, 17, x + w - 10, y + h / 2 - 10, ORANGE, ">", CENTER); }
@@ -2691,7 +2732,8 @@ const std::vector<OnlineFighter> &grid_fighters()
     g_grid_cp.assign(list.size(), -1);
     NetRoom r;
     lobby_room(&r);
-    if (cp_available() && ranked_created_ok(r) && tset_created_ok(r) && !(r.in_room && NETPLAY_IS_HILL(r.settings.mode))) {
+    if (cp_available() && ranked_created_ok(r) && tset_created_ok(r) && !(r.in_room && NETPLAY_IS_HILL(r.settings.mode)) &&
+        !fighter_blocked(r, NETPLAY_CREATED_FIGHTER)) {     // build 68: FIGHTER RULES without created fighters
         const std::vector<CpCard> cards = cp_cards();
         styles.assign(cards.size(), std::string());
         for (size_t i = 0; i < cards.size(); i++)
@@ -2757,6 +2799,10 @@ void draw_fighters(ImDrawList *dl, const Frame &f, const Pad &pad, bool *chosen,
     page_title(dl, f, "CHOOSE FIGHTER");
     const OnlineFighter &cur = list[S.fighter_sel];
     int cur_cp = S.fighter_sel < (int)g_grid_cp.size() ? g_grid_cp[S.fighter_sel] : -1;
+    // build 68: the room's FIGHTER RULES leave some fighters out (greyed, not picked; RANDOM skips them)
+    NetRoom rules_room;
+    lobby_room(&rules_room);
+    auto blocked = [&](int i) { return list[i].id != FIGHTER_RANDOM && fighter_blocked(rules_room, list[i].id); };
     // the chosen fighter, large, with name and style
     glass(dl, f, 36, 74, 180, 308);
     if (cur.id == FIGHTER_RANDOM) random_card(dl, f, 46, 84, 160, 240, true, 110);
@@ -2780,6 +2826,10 @@ void draw_fighters(ImDrawList *dl, const Frame &f, const Pad &pad, bool *chosen,
     {
         float size = fit_size(f, g_hand, 22, cur.name, 168);
         text(dl, f, g_hand, size, 126, 330 + (22 - size) * 0.5f, ORANGE, cur.name, CENTER, 1.2f);
+    }
+    if (blocked(S.fighter_sel)) {   // on the big portrait's foot
+        rect(dl, f, 46, 300, 160, 22, with_alpha(RED, 0.9f), 4);
+        text(dl, f, g_title, 11, 126, 304, WHITE, "NOT ALLOWED IN THIS ROOM", CENTER, 0.6f);
     }
     text(dl, f, g_title, 13, 126, 356, WHITE, cur.style, CENTER, 0, 170);
     // the grid
@@ -2820,16 +2870,29 @@ void draw_fighters(ImDrawList *dl, const Frame &f, const Pad &pad, bool *chosen,
                 }
                 text(dl, f, g_title, 8, x + cw / 2, y + 3, with_alpha(ORANGE, sel ? 1.0f : 0.7f), "YOURS", CENTER, 0.6f);
             }
+            if (blocked(i)) {   // left out by the room's FIGHTER RULES: dimmed, a red band
+                rect(dl, f, x + 1, y + 1, cw - 2, ch - 2, IM_COL32(0, 0, 0, 170), 3);
+                rect(dl, f, x + 1, y + ch / 2 - 7, cw - 2, 14, with_alpha(RED, 0.85f));
+                text(dl, f, g_title, 8, x + cw / 2, y + ch / 2 - 5, WHITE, "BANNED", CENTER, 0.6f);
+            }
             if (sel) selector(dl, f, x, y, cw, ch);
             if (mouse_click(f, x, y, cw, ch)) const_cast<Pad &>(pad).a = true;
         }
     char page[32];
     snprintf(page, sizeof(page), "%d / %d", S.fighter_sel + 1, n);
     text(dl, f, g_title, 12, gx + cols * (cw + 4) - 4, gy + rows * (ch + 6), GREY, page, RIGHT, 0.8f);
+    if (pad.a && blocked(S.fighter_sel)) {
+        say("This room's FIGHTER RULES leave " + std::string(cur.name) + " out: pick another fighter.");
+        const_cast<Pad &>(pad).a = false;
+    }
     if (pad.a) {
         int pick = S.fighter_sel;
         S.random_pick = cur.id == FIGHTER_RANDOM;
-        if (S.random_pick) pick = online_random_below(n - 1);  // RANDOM is the last card: one of the others
+        if (S.random_pick) {    // RANDOM is the last card: one of the others the room's rules allow
+            std::vector<int> allowed;
+            for (int i = 0; i + 1 < n; i++) if (!blocked(i)) allowed.push_back(i);
+            pick = allowed.empty() ? online_random_below(n - 1) : allowed[online_random_below((int)allowed.size())];
+        }
         int pick_cp = pick < (int)g_grid_cp.size() ? g_grid_cp[pick] : -1;
         if (pick_cp >= 0) cp_choose(pick_cp);   // which created fighter: remembered, and sent to the relay
         *chosen = true;
@@ -3483,8 +3546,19 @@ void draw_room(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
             sx -= text_width(f, g_title, 10, sn.c_str()) + 12;
         }
         // build 67: the CPU fighters' level, in a room whose free places go to CPU fighters
-        if (cpu_level_offered(r.settings.mode) && !NETPLAY_IS_HILL(r.settings.mode))
-            text(dl, f, g_title, 10, sx, 73, ORANGE, ("CPU " + upper(cpu_level_text(r.settings.cpu_level))).c_str(), RIGHT, 0.6f);
+        if (cpu_level_offered(r.settings.mode) && !NETPLAY_IS_HILL(r.settings.mode)) {
+            std::string cl = "CPU " + upper(cpu_level_text(r.settings.cpu_level));
+            text(dl, f, g_title, 10, sx, 73, ORANGE, cl.c_str(), RIGHT, 0.6f);
+            sx -= text_width(f, g_title, 10, cl.c_str()) + 12;
+        }
+        // build 68: the room's rules, when not the defaults
+        if (r.settings.fighter_rules != NETPLAY_RULES_ALL) {
+            std::string rl = upper(rules_text(r.settings.fighter_rules));
+            text(dl, f, g_title, 10, sx, 73, ORANGE, rl.c_str(), RIGHT, 0.6f);
+            sx -= text_width(f, g_title, 10, rl.c_str()) + 12;
+        }
+        if (r.settings.max_ping > 0)
+            text(dl, f, g_title, 10, sx, 73, ORANGE, ("MAX PING " + upper(max_ping_text(r.settings.max_ping).c_str())).c_str(), RIGHT, 0.6f);
     }
     if (worst > 150) {
         char warn[96];
@@ -3694,6 +3768,9 @@ void draw_room(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
     // hints
     bool ready = me && me->ready;
     float hx = 54, hy = 392;
+    // build 68: a player with a red ping (150 ms or more): said before READY
+    bool red_ping = false;
+    for (int i = 0; i < r.player_count; i++) red_ping |= room_ping(r.players[i].slot) >= PING_RED_MS;
     // The staged quick-match search (build 38, netplay_servers_rules.h): alone in a quick room, the
     // search covers this relay first, then (Automatic and All) the other North American relay from 10 s
     // and every relay from 30 s (a fixed choice too); a player waiting there for this mode is met (the
@@ -3747,6 +3824,9 @@ void draw_room(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
                  4 - r.player_count == 1 ? "" : "s");
         text(dl, f, g_hand, 15, 320, my, ORANGE, line, CENTER, 0.8f);
     } else if (r.player_count < 2) text(dl, f, g_hand, 15, 320, my, ORANGE, "Waiting for another player...", CENTER, 0.8f);
+    else if (red_ping && !ready && !ranked)
+        text(dl, f, g_hand, 15, 320, my, IM_COL32(235, 70, 60, 255), "High ping: the fight may stutter. Rollback helps: Settings > Online",
+             CENTER, 0.8f, 540);
     else if (ranked) {
         char why[96];
         text(dl, f, g_hand, 15, 320, my, ORANGE, ready ? ranked_picker_line(r, ri, why, sizeof(why)) :
@@ -3761,6 +3841,13 @@ void draw_room(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
     hx += hint(dl, f, hx, hy, "rb", "VOICE");
     hint(dl, f, hx, hy, "b", ranked ? ranked_leave_hint(ri) : "LEAVE ROOM");
 
+    if (pad.a && !ready && fighter_blocked(r, fighter)) {
+        // build 68: this player's fighter is left out by the room's FIGHTER RULES: choose another first
+        say("This room's FIGHTER RULES leave " + fighter_label(fighter) + " out: choose another fighter.");
+        S.page = FIGHTERS;
+        S.fighter_sel = grid_pos(grid_fighters(), fighter);
+        return;
+    }
     if (pad.a) netplay_lobby_ready(ready ? 0 : 1, fighter);
     if (pad.x && !ready) {
         S.page = FIGHTERS;
@@ -4289,6 +4376,9 @@ void gallery_step()
                                          "up", "watch", "room-voice", "match",
                                          // build 67: the CPU level (CREATE A ROOM's row, the room's line)
                                          "create-cpu", "room-cpu",
+                                         // build 68: room rules (CREATE A ROOM's rows, the room's line and its ping
+                                         // warning, the grid with blocked fighters)
+                                         "create-rules", "room-rules", "fighters-rules",
                                          // build 66: FFA rotation (its room, called, watching, its door)
                                          "rot", "rot-up", "rot-watch", "rot-fight", "create-rot", "hub-rot", "versus-rot",
                                          // build 30: the server choice
@@ -4520,12 +4610,28 @@ void gallery_step()
             apply_preset(S.settings, 0);
             S.settings_sel = 2;
         }
+        if (p == "create-rules") {  // stock fighters, no banned tier, MAX PING 150; the cursor on FIGHTER RULES
+            S.settings.fighter_rules = NETPLAY_RULES_STOCK;
+            S.settings.max_ping = 150;
+            S.settings_sel = 3;
+        }
     }
     else if (p == "voice") { S.page = VOICE; S.voice_sel = 1; }
     else if (p == "stats" || p == "stats-1v1") { S.page = STATS; S.stats_page = 0; }
     else if (p == "players") S.page = PLAYERS;
     else if (p == "players-all") { S.page = PLAYERS; G.choice = NETCHOICE_ALL; }
     else if (p == "fighters") { S.page = FIGHTERS; S.fighter_sel = 9; S.fighter_top = 0; }
+    else if (p == "fighters-rules") {   // a room of stock fighters and no banned tier: two fighters blocked, one chosen
+        S.page = FIGHTERS;
+        G.room = sample_room(0, 2, 2);
+        G.room.settings.fighter_rules = NETPLAY_RULES_STOCK;
+        const auto &list = roster();
+        G.room.blocked_count = 0;
+        for (int k : { 2, 9 }) if (k < (int)list.size()) G.room.blocked[G.room.blocked_count++] = (unsigned char)list[k].id;
+        G.room.blocked[G.room.blocked_count++] = NETPLAY_CREATED_FIGHTER;
+        S.fighter_sel = 9;
+        S.fighter_top = 0;
+    }
     else if (p == "fighters-random") { S.page = FIGHTERS; S.fighter_sel = (int)grid_fighters().size() - 1; S.fighter_top = 0; }
     else if (p.rfind("fighters-", 0) == 0) {    // the grid scrolled to one fighter (by Battle-mode ID)
         const auto &list = roster();
@@ -4537,6 +4643,13 @@ void gallery_step()
     }
     else if (p == "room") { S.page = HUB; G.room = sample_room(2, 4, 3); }
     else if (p == "room-cpu") { S.page = HUB; G.room = sample_room(3, 4, 2); G.room.settings.cpu_level = NETPLAY_CPU_EASY; }
+    else if (p == "room-rules") {   // FIGHTER RULES and MAX PING on the server line; one player far away: the warning
+        S.page = HUB;
+        G.room = sample_room(0, 2, 2);
+        G.room.settings.fighter_rules = NETPLAY_RULES_NO_CREATED;
+        G.room.settings.max_ping = 200;
+        G.room_pings[0] = 46; G.room_pings[1] = 172;
+    }
     else if (p == "name-created" || p == "name-created-wide") {     // the first card's online name: half typed, or too wide
         G.cp_slots = 1;
         G.room = sample_room(0, 2, 2);

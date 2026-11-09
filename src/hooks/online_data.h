@@ -51,6 +51,8 @@ const OnlineMode *online_mode(int type);    /* NULL if not offered */
 int online_random_below(int n);
 /* A fighter of online_fighters() at random (55 when the list is empty): the tests' RANDOM pick. */
 int online_random_fighter(void);
+/* The same among the fighters not in blocked (a room's FIGHTER RULES, build 68); every fighter blocked: any. */
+int online_random_fighter_except(const unsigned char *blocked, int nblocked);
 
 #ifdef __cplusplus
 }
