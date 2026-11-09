@@ -81,3 +81,6 @@ CLAUDE.local.md
 # The server (relay, account service, Discord bot) lives in the private repository
 # sweeax-exe/ffny-server, cloned here as server/.
 /server/
+
+# FFNY Studio lives in the private repository sweeax-exe/ffny-studio, cloned here as studio/.
+/studio/
