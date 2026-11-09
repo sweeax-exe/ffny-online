@@ -207,6 +207,8 @@ const char *mode_logo(int type)
 // ---- fonts ------------------------------------------------------------------------------------
 
 ImFont *g_title = nullptr, *g_hand = nullptr, *g_body = nullptr, *g_cond = nullptr, *g_stencil = nullptr;
+ImFont *g_serif = nullptr;     // the game's own AachenStd-Bold: Turf War's titles (the stencil without it)
+ImFont *g_numbers = nullptr;   // Anton (SIL OFL, ffny-branding/fonts): Turf War's countdown (TradeBld without it)
 bool g_fonts_tried = false;
 
 ImFont *add_font(const char *file)
@@ -4332,7 +4334,7 @@ void gallery_step()
                                          // social stage 3: crew battles
                                          "crew-battle", "crew-battle-up", "crew-battle-forming", "crew-battle-over",
                                          // social stage 4: Turf War
-                                         "hub-turf", "turf", "turf-zoom", "turf-detail", "turf-open", "turf-claim", "turf-member", "turf-why", "turf-season",
+                                         "hub-turf", "turf", "turf-zoom", "turf-detail", "turf-open", "turf-claim", "turf-member", "turf-why", "turf-season", "turf-empty",
                                          // tournament sets (tset_ui.inc)
                                          "hub-tset", "tset-coin", "tset-select", "tset-why", "tset-pick", "tset-pick-wait",
                                          "tset-intro", "tset-waiting", "tset-over", "tset-grid",
@@ -4829,6 +4831,15 @@ void prepare(void *device)
         g_cond = g_body;
         g_stencil = add_font("FERRO___.TTF");           // page titles, like MAIN MENU
         if (!g_stencil) g_stencil = g_title;
+        g_serif = add_font("AachenStd-Bold.ttf");
+        std::wstring anton;
+        if (find_ffny_branding(L"fonts\\Anton-Regular.ttf", anton)) {
+            char path[MAX_PATH * 3];
+            WideCharToMultiByte(CP_UTF8, 0, anton.c_str(), -1, path, sizeof(path), nullptr, nullptr);
+            ImFontConfig cfg;
+            cfg.OversampleH = 2;
+            g_numbers = ImGui::GetIO().Fonts->AddFontFromFileTTF(path, 24.0f, &cfg);
+        }
         fprintf(stderr, "[ONLINE] art %s, fonts %s\n", tex("ui/online_poster.png").srv ? "found" : "missing",
                 g_title ? "found" : "missing");
     }
