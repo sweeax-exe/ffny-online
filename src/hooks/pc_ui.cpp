@@ -1009,8 +1009,65 @@ static void window_size_widget()
 
 // ---- the pages ----------------------------------------------------------------------------------------------
 
+static bool packs_available();
+
+// One click for a weak PC (a 30 fps lock cannot be: the fights and online lockstep run per 60 Hz frame).
+// Low-end PC: 480p rendering, no anti-aliasing, sharpening or anisotropic filtering, no HD textures and no
+// Enhanced graphics (ReShade / DLSS). Default: the table's defaults again, and the HD textures back on when
+// packs are installed (setup turns them on). Settings an environment variable holds stay as they are.
+static const char *const k_lowend_keys[][2] = {
+    { "display", "render_scale" }, { "display", "anti_aliasing" }, { "display", "anisotropy" },
+    { "display", "sharpen" },      { "textures", "enabled" },      { "graphics", "enabled" },
+};
+static bool quality_is_lowend()
+{
+    return recomp_settings_get("display", "render_scale", 2) == 1 && !recomp_settings_get("display", "anti_aliasing", 1) &&
+           !recomp_settings_get("display", "anisotropy", 4) && !recomp_settings_get("display", "sharpen", 30) &&
+           !recomp_settings_get("textures", "enabled", 0) && !recomp_settings_get("graphics", "enabled", 0);
+}
+static void quality_preset_apply(bool lowend)
+{
+    for (auto &k : k_lowend_keys) {
+        RecompSetting *s = find(k[0], k[1]);
+        if (!s || s->source == RECOMP_SETTING_FROM_ENV) continue;
+        if (lowend) recomp_settings_set(k[0], k[1], !strcmp(k[1], "render_scale") ? 1 : 0);
+        else recomp_settings_reset_to_default(k[0], k[1]);
+    }
+    if (!lowend && find("textures", "enabled") && find("textures", "enabled")->source != RECOMP_SETTING_FROM_ENV &&
+        packs_available())
+        recomp_settings_set("textures", "enabled", 1);
+    commit();
+    fprintf(stderr, "[SETTINGS] quality preset: %s\n", lowend ? "low-end PC" : "default");
+}
+static void quality_presets()
+{
+    static bool tested;     // RECOMP_TEST_QUALITY_PRESET=lowend|default: a test presses that button once
+    if (!tested) {
+        tested = true;
+        const char *t = getenv("RECOMP_TEST_QUALITY_PRESET");
+        if (t && (!strcmp(t, "lowend") || !strcmp(t, "default"))) quality_preset_apply(!strcmp(t, "lowend"));
+    }
+    const bool low = quality_is_lowend();
+    if (low) ImGui::BeginDisabled();
+    if (ImGui::Button("Low-end PC")) quality_preset_apply(true);
+    if (low) ImGui::EndDisabled();
+    ui_target("Low-end PC");
+    ImGui::SetItemTooltip("For a weak PC: the Quality settings below at their lightest.");
+    ImGui::SameLine();
+    if (ImGui::Button("Default")) quality_preset_apply(false);
+    ui_target("Default quality");
+    ImGui::SetItemTooltip("Render scale, anti-aliasing, anisotropic filtering and sharpening back to their defaults, "
+                          "HD textures on again when installed.");
+    ImGui::SameLine();
+    ImGui::TextDisabled(low ? "Low-end PC is on." : "");
+    ImGui::TextWrapped("Low-end PC: renders at 480p with no anti-aliasing, sharpening, anisotropic filtering, HD textures "
+                       "or Enhanced graphics. The game still runs at 60 fps; render scale and textures apply next start.");
+}
+
 static void page_display()
 {
+    ImGui::SeparatorText("Quick preset");
+    quality_presets();
     ImGui::SeparatorText("Window and picture");
     settings_group("display", { "fullscreen", "window_width", "window_height", "aspect" });
     if (recomp_settings_get("display", "aspect", 0) >= 2) {

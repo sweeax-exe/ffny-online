@@ -71,6 +71,13 @@ brightness curve are marked *(restart)* and take effect the next time the game s
 lists the changes that are waiting for a restart. Keys: `[ui] overlay_key` and `overlay_pad` in
 `settings.ini`, or the General page.
 
+**Quick preset** (top of the Display page, build 68): **Low-end PC** sets render scale 1x (480p), anti-aliasing
+off, anisotropic filtering off, sharpening 0, HD textures off and Enhanced graphics (ReShade / DLSS) off; the
+game still runs at 60 fps (a 30 fps lock is not possible: fights and online lockstep run per 60 Hz frame).
+**Default** puts those back to their defaults and turns HD textures on again when packs are installed. A
+setting an environment variable holds is left alone. Test: `RECOMP_TEST_QUALITY_PRESET=lowend|default` presses
+the button once when the page is drawn.
+
 ### F9: a picture report
 
 **F9** (Windows) takes a picture of the window as it is, overlay included, and sends it with this session's
