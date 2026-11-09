@@ -1718,6 +1718,14 @@ void draw_turf_board(ImDrawList *dl, ImVec2 display, const Frame &f, const Pad &
         tm_ring(dl, c, rx * 0.55f, ry * 0.55f, rx, ry, IM_COL32(0, 0, 0, 0), IM_COL32(0, 0, 0, 200));
         tm_ring(dl, c, rx, ry, rx * 3, ry * 3, IM_COL32(0, 0, 0, 200), IM_COL32(0, 0, 0, 200));
     }
+    // the open turf card, under the pins (a picked venue's plate may reach over it); a click: the next open venue
+    if (TW.region == 0 && !TW.picker && tm_open_call(dl, D, m, signed_in, t)) {
+        int n = (int)m.venues.size();
+        for (int k = 1; k <= n; k++) {
+            const TurfVenue &e = m.venues[((sel < 0 ? 0 : sel) + k) % n];
+            if (!e.owner && !e.boss) { TW.sel_id = e.id; sel = tm_index_of(m, e.id); TW.armed.clear(); break; }
+        }
+    }
     // the player's next challenge's venue gets the yellow strip
     int next_id = 0;
     long long next_due = 0;
@@ -1770,13 +1778,6 @@ void draw_turf_board(ImDrawList *dl, ImVec2 display, const Frame &f, const Pad &
         if (mouse_click(D, lx, y0, rw, 24)) tm_set_region(m, TW.region + 1);
     }
     tm_legend(dl, D);
-    if (TW.region == 0 && !TW.picker && tm_open_call(dl, D, m, signed_in, t)) {     // a click: the next open venue
-        int n = (int)m.venues.size();
-        for (int k = 1; k <= n; k++) {
-            const TurfVenue &e = m.venues[((sel < 0 ? 0 : sel) + k) % n];
-            if (!e.owner && !e.boss) { TW.sel_id = e.id; TW.armed.clear(); break; }
-        }
-    }
 
     // the right column: the season, and the standings and the player's crew, or the venue's details
     tm_season(dl, D, m, ss);
