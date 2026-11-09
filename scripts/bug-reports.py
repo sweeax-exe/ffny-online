@@ -27,8 +27,8 @@ def remote_list(host):
     """[(folder, info dict)], oldest first."""
     script = ("cd %s 2>/dev/null || exit 0; for d in $(ls -1 | sort); do echo \"@@ $d\"; cat \"$d/info.txt\" 2>/dev/null; "
               "ls -1 \"$d\" | sed 's/^/file: /'; "
-              "[ -f \"$d/note.txt\" ] && echo \"late_note: $(head -c 600 \"$d/note.txt\")\"; "
-              "done" % REMOTE)
+              "if [ -f \"$d/note.txt\" ]; then echo \"late_note: $(head -c 600 \"$d/note.txt\")\"; fi; "
+              "done; true" % REMOTE)
     out = subprocess.run(["ssh", host, script], capture_output=True, text=True, encoding="utf-8", errors="replace")
     if out.returncode != 0:
         sys.exit("ssh %s failed: %s" % (host, out.stderr.strip()))
