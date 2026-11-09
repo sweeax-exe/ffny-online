@@ -110,6 +110,24 @@ def _rb_relay_extra(rollback, modes=None):
     return ["-rollback-modes", modes or "all"] if rollback == "mandatory" else []
 
 
+NOTE_SENT = "[REPORT] note after the match for report "     # ... sent: HTTP <status> (bug_report.c, the note after the match)
+
+
+def _bug_reports(folder):
+    """The local account service's reports (online --reports): folder, files, the note.txt added after the match."""
+    out = []
+    for name in sorted(os.listdir(folder)) if os.path.isdir(folder) else []:
+        d = os.path.join(folder, name)
+        if not os.path.isdir(d):
+            continue
+        item = {"folder": name, "files": sorted(f for f in os.listdir(d) if not f.startswith("."))}
+        note = os.path.join(d, "note.txt")
+        if os.path.isfile(note):
+            item["note_after_match"] = open(note, encoding="utf-8", errors="replace").read().strip()
+        out.append(item)
+    return out
+
+
 WATCH = ["[CRASH]", "[WATCHDOG]", "[NETPLAY] desync in", "[NETPLAY] gave up", " starts in ",
          "[FUNCCALL] Game.UpdateMatchRewardsPoints()", "[FUNCCALL] Game.GetMatchSummary(", MAIN_MENU,
          "[FUNCCALL] Game.GetMatchSummary(0)",
@@ -1579,8 +1597,11 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
            created=False, cp_records=None, rematch=False, venues=None, cp_pick=None, cp_names=None,
            more_shots=False, spectators=0, copy_env=None, fixtures=None, ranked=None, rollback_modes=None,
            rollback_max_ping=None, leave=None, spectate_after=0, spectate_delay=0, maintenance=0, cpu_level=None,
-           linger=None):
-    """linger: King of the Hill or FFA rotation, the index of a copy with no presses after the main menu: it sits on
+           linger=None, reports=False):
+    """reports (build 68): a local account service with test accounts (not ranked) keeps the copies' F9 reports in
+    <session>/reports; the result's `bug_reports` lists them (files, note.txt). With RECOMP_TEST_REPORT_NOTE in a
+    copy's environment the run waits, after the matches, up to 45 s for that copy's note after the match to be sent.
+    linger: King of the Hill or FFA rotation, the index of a copy with no presses after the main menu: it sits on
     each fight's results (summary page 1) until the game takes it off them (netplay.c hill_results_tick). The
     result's `hill_gaps` lists per copy the seconds from its last fight's decision to the next one under way.
     cpu_level: "easy", "normal" or "hard" (build 67): the room's host sets its CPU level (RECOMP_TEST_CPU_LEVEL);
@@ -1650,11 +1671,15 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
             relay_extra += ["-rollback-max-ping", str(int(rollback_max_ping))]
             result["params"]["rollback_max_ping"] = int(rollback_max_ping)
         tokens = {}
-        if ranked:
+        note_copies = []
+        if ranked or reports:
             acc_port = relay_port + 100
             tokens = s.accounts(acc_port, ["Copy %d" % i for i in range(players)])
             relay_extra += ["-accounts-internal", "http://127.0.0.1:%d" % (acc_port + 1)]
-            result["params"]["ranked"] = ranked
+            if ranked:
+                result["params"]["ranked"] = ranked
+            else:
+                result["params"]["reports"] = True
         maint_timer = None
         if maintenance:     # build 64: the relay's restart countdown holds every new fight until the file goes
             updates = os.path.join(s.dir, "updates")
@@ -1679,6 +1704,8 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
         koth = mode == "koth"
         draft = bool(ranked) and "draft" in ranked
         watch = WATCH + list(DRAFT_SHOTS) if draft else WATCH
+        if reports:
+            watch = watch + [NOTE_SENT]
         for i in range(players):
             # which way the copy's fighter approaches: Team puts room slots 0 and 1 on the left and 2 and
             # 3 on the right; on the hill (the KO winner is slot 0) copy 0 stays king on the left and
@@ -1733,11 +1760,16 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
             if rematch:
                 env["RECOMP_PAD_SCRIPT"] = harness().build_pad_script(["getscreeninfo(intmain/mainmenu=lt@0.5"],
                                                                        rematch_tail(matches, p2))
+            if reports and not ranked:
+                env.update({"RECOMP_ACCOUNT_SERVER": "127.0.0.1:%d" % (relay_port + 100),
+                            "RECOMP_ACCOUNT_TEST_TOKEN": tokens["Copy %d" % i]})
             for k, v in (extra_env or {}).items():     # NAME@N: only copy N gets it
                 name, _, only = k.partition("@")
                 if not only or (only.isdigit() and int(only) == i):
                     env[name] = v
             env.update((copy_env or {}).get(i, {}))
+            if reports and env.get("RECOMP_TEST_REPORT_NOTE"):
+                note_copies.append(i)
             if maintenance and i == 0:
                 env.update({"RECOMP_OVERLAY_SHOT_DIR": os.path.join(s.dir, "maint"), "RECOMP_OVERLAY_SHOT_MS": "3000",
                             "RECOMP_TEST_OPEN_ONLINE": "1"})     # the online screens up: the room, the vote, the banner
@@ -1860,6 +1892,16 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
             time.sleep(1.0)
         else:
             stop_reason = "timeout after %d s" % timeout
+        if note_copies and stop_reason == "done":
+            # the note offer comes once the room's match is over: give the copies time to type and send it
+            until = time.time() + 45
+            while time.time() < until and not all(s.copies[i].watch.count(NOTE_SENT) for i in note_copies):
+                s.poll()
+                time.sleep(1)
+            if not all(s.copies[i].watch.count(NOTE_SENT) for i in note_copies):
+                problems.append("no note after the match was sent within 45 s (copies %s)" % note_copies)
+        if reports:
+            result["bug_reports"] = _bug_reports(os.path.join(s.dir, "reports"))
         if ranked and stop_reason == "done":
             # the set is rated once the last game's reports are in (the account service's report window,
             # 45 s): wait for ranked-sets.jsonl, then each copy's results page and its MY STATS tab

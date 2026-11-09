@@ -642,17 +642,26 @@ void account_cancel_call(void *volatile *live)
     ReleaseSRWLockExclusive(&g_live_lock);
 }
 
-int account_send_bug_report(const char *ctype, const void *body, int len, char *out, int size)
+static int send_report_body(const wchar_t *path, const char *ctype, const void *body, int len, char *out, int size)
 {
     char token[65];
     int status;
     AcquireSRWLockShared(&g_lock);
     memcpy(token, g_token, sizeof(token));
     ReleaseSRWLockShared(&g_lock);
-    status = request_body(L"POST", L"/api/report?format=text", g_state == ACCOUNT_IN ? token : NULL, ctype, body,
-                          (DWORD)len, out, size);
+    status = request_body(L"POST", path, g_state == ACCOUNT_IN ? token : NULL, ctype, body, (DWORD)len, out, size);
     SecureZeroMemory(token, sizeof(token));
     return status;
+}
+
+int account_send_bug_report(const char *ctype, const void *body, int len, char *out, int size)
+{
+    return send_report_body(L"/api/report?format=text", ctype, body, len, out, size);
+}
+
+int account_send_report_note(const char *ctype, const void *body, int len, char *out, int size)
+{
+    return send_report_body(L"/api/report/note?format=text", ctype, body, len, out, size);
 }
 
 void account_report_match(const char *json)
@@ -729,6 +738,8 @@ int account_call(const char *method, const char *path, const char *json, char *b
 { (void)method; (void)path; (void)json; (void)receive_ms; (void)live; if (size > 0) buf[0] = 0; return -1; }
 void account_cancel_call(void *volatile *live) { (void)live; }
 int account_send_bug_report(const char *ctype, const void *body, int len, char *out, int size)
+{ (void)ctype; (void)body; (void)len; if (size > 0) out[0] = 0; return 0; }
+int account_send_report_note(const char *ctype, const void *body, int len, char *out, int size)
 { (void)ctype; (void)body; (void)len; if (size > 0) out[0] = 0; return 0; }
 
 #endif

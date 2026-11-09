@@ -804,6 +804,25 @@ static void capture_backbuffer(IDirect3DDevice8 *dev)
             const char *acc = getenv("RECOMP_ACCOUNT_SERVER");
             test_f9 = (e && *e && acc && *acc) ? atof(e) : -1.0;
         }
+        {   /* RECOMP_TEST_PICTURE_REPORT_STEP=<n>: the same at lockstep step n of the first online match */
+            static long test_step = -2;
+            if (test_step == -2) {
+                const char *e = getenv("RECOMP_TEST_PICTURE_REPORT_STEP");
+                const char *acc = getenv("RECOMP_ACCOUNT_SERVER");
+                test_step = (e && *e && acc && *acc) ? atol(e) : -1;
+            }
+            if (test_step > 0) {
+                extern unsigned netplay_test_step(void);
+                extern int bug_report_f9(void);
+                unsigned st = netplay_test_step();
+                if (st >= (unsigned)test_step) {
+                    test_step = -1;
+                    fprintf(stderr, "[REPORT] test: F9 at online step %u\n", st);
+                    if (bug_report_f9())
+                        InterlockedExchange(&s_report_shot, 1);
+                }
+            }
+        }
         if (test_f9 >= 0.0) {
             extern double xbox_ScriptSeconds(void);
             extern int bug_report_f9(void);

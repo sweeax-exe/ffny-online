@@ -1009,8 +1009,65 @@ static void window_size_widget()
 
 // ---- the pages ----------------------------------------------------------------------------------------------
 
+static bool packs_available();
+
+// One click for a weak PC (a 30 fps lock cannot be: the fights and online lockstep run per 60 Hz frame).
+// Low-end PC: 480p rendering, no anti-aliasing, sharpening or anisotropic filtering, no HD textures and no
+// Enhanced graphics (ReShade / DLSS). Default: the table's defaults again, and the HD textures back on when
+// packs are installed (setup turns them on). Settings an environment variable holds stay as they are.
+static const char *const k_lowend_keys[][2] = {
+    { "display", "render_scale" }, { "display", "anti_aliasing" }, { "display", "anisotropy" },
+    { "display", "sharpen" },      { "textures", "enabled" },      { "graphics", "enabled" },
+};
+static bool quality_is_lowend()
+{
+    return recomp_settings_get("display", "render_scale", 2) == 1 && !recomp_settings_get("display", "anti_aliasing", 1) &&
+           !recomp_settings_get("display", "anisotropy", 4) && !recomp_settings_get("display", "sharpen", 30) &&
+           !recomp_settings_get("textures", "enabled", 0) && !recomp_settings_get("graphics", "enabled", 0);
+}
+static void quality_preset_apply(bool lowend)
+{
+    for (auto &k : k_lowend_keys) {
+        RecompSetting *s = find(k[0], k[1]);
+        if (!s || s->source == RECOMP_SETTING_FROM_ENV) continue;
+        if (lowend) recomp_settings_set(k[0], k[1], !strcmp(k[1], "render_scale") ? 1 : 0);
+        else recomp_settings_reset_to_default(k[0], k[1]);
+    }
+    if (!lowend && find("textures", "enabled") && find("textures", "enabled")->source != RECOMP_SETTING_FROM_ENV &&
+        packs_available())
+        recomp_settings_set("textures", "enabled", 1);
+    commit();
+    fprintf(stderr, "[SETTINGS] quality preset: %s\n", lowend ? "low-end PC" : "default");
+}
+static void quality_presets()
+{
+    static bool tested;     // RECOMP_TEST_QUALITY_PRESET=lowend|default: a test presses that button once
+    if (!tested) {
+        tested = true;
+        const char *t = getenv("RECOMP_TEST_QUALITY_PRESET");
+        if (t && (!strcmp(t, "lowend") || !strcmp(t, "default"))) quality_preset_apply(!strcmp(t, "lowend"));
+    }
+    const bool low = quality_is_lowend();
+    if (low) ImGui::BeginDisabled();
+    if (ImGui::Button("Low-end PC")) quality_preset_apply(true);
+    if (low) ImGui::EndDisabled();
+    ui_target("Low-end PC");
+    ImGui::SetItemTooltip("For a weak PC: the Quality settings below at their lightest.");
+    ImGui::SameLine();
+    if (ImGui::Button("Default")) quality_preset_apply(false);
+    ui_target("Default quality");
+    ImGui::SetItemTooltip("Render scale, anti-aliasing, anisotropic filtering and sharpening back to their defaults, "
+                          "HD textures on again when installed.");
+    ImGui::SameLine();
+    ImGui::TextDisabled(low ? "Low-end PC is on." : "");
+    ImGui::TextWrapped("Low-end PC: renders at 480p with no anti-aliasing, sharpening, anisotropic filtering, HD textures "
+                       "or Enhanced graphics. The game still runs at 60 fps; render scale and textures apply next start.");
+}
+
 static void page_display()
 {
+    ImGui::SeparatorText("Quick preset");
+    quality_presets();
     ImGui::SeparatorText("Window and picture");
     settings_group("display", { "fullscreen", "window_width", "window_height", "aspect" });
     if (recomp_settings_get("display", "aspect", 0) >= 2) {
@@ -3809,13 +3866,17 @@ extern "C" void pc_ui_report_shot(const char *path)
 //
 // Not in an online match (lockstep): it cannot pause, so a box that held the controls would leave the
 // fighter standing while the player types, and one that did not would turn the typing into moves.
-// There the report goes at once, as before; a match that starts while the box is up sends it without text.
+// There the report goes at once ("Bug report sent. Add a note after the match."), and once the match is
+// over (back in the room or the menus) a small line offers the box for about 20 s: "Add a note to your bug
+// report? (Y)". Y opens the same box; its line is added to that report (bug_report_add_note). A match
+// that starts while the box is up sends it without text (the late box: with what is typed so far).
 
 struct NoteBox {
     bool pending = false;           // asked for: opens the frame after the picture is taken
     bool open = false;
     bool swallow = false;           // closed over a screen: the keys that closed it stay away from it until let go
     bool pad_used = false;          // up/down picked a letter: show where
+    bool late = false;              // the note for the report an online match sent (the offer's box)
     char path[1024] = "";
     char text[BUG_REPORT_NOTE_MAX + 1] = "";
     int pos = 0;                    // the cursor: before text[pos]
@@ -3835,8 +3896,10 @@ extern "C" int pc_ui_report_ask(const char *path)
 {
     if (!path || !*path) return 0;
     if (netplay_active()) {
-        fprintf(stderr, "[REPORT] online match: no \"What's wrong?\" box, the report goes now\n");
-        return 0;
+        fprintf(stderr, "[REPORT] online match: no \"What's wrong?\" box, the report goes now; a note may follow "
+                        "after the match\n");
+        bug_report_send_online("picture", NULL, path);
+        return 1;
     }
     ui_lock();
     bool asked = g_window && !g_note.open && !g_note.pending;
@@ -3875,9 +3938,12 @@ static void note_finish(bool with_text, const char *how)
     NoteBox &n = g_note;
     if (!with_text) n.text[0] = 0;
     fprintf(stderr, "[REPORT] \"What's wrong?\" box closed (%s): %s\n", how,
+            n.late ? (n.text[0] ? "the note goes to the match's report" : "no note") :
             n.text[0] ? "sent with the note" : "sent without text");
     fflush(stderr);
-    bug_report_send_note("picture", NULL, n.path, n.text);
+    if (n.late) bug_report_add_note(n.text);        // empty: the offer is dropped
+    else bug_report_send_note("picture", NULL, n.path, n.text);
+    n.late = false;
     n.open = false;
     g_note_shown = false;
     if (g_open.load()) {
@@ -3931,9 +3997,14 @@ static void note_input(ImGuiIO &io)
         if (controls_released()) n.swallow = false;
         return;
     }
+    // RECOMP_TEST_REPORT_NOTE: the test types; the pad script's presses (a room's ready-ups) are not answers
+    static const bool test_types = getenv("RECOMP_ACCOUNT_SERVER") && *getenv("RECOMP_ACCOUNT_SERVER") &&
+                                   getenv("RECOMP_TEST_REPORT_NOTE") && *getenv("RECOMP_TEST_REPORT_NOTE");
     auto hit = [&](std::initializer_list<ImGuiKey> keys, bool repeat) {
-        for (ImGuiKey k : keys)
+        for (ImGuiKey k : keys) {
+            if (test_types && k >= ImGuiKey_GamepadStart && k <= ImGuiKey_GamepadRStickDown) continue;
             if (ImGui::IsKeyPressed(k, repeat ? ImGuiInputFlags_Repeat : ImGuiInputFlags_None, owner)) return true;
+        }
         return false;
     };
     auto inside = [&](const ImVec4 &r) {
@@ -3999,8 +4070,100 @@ static void note_input(ImGuiIO &io)
     if (any) n.last = now;
     if (send) note_finish(true, "Send");
     else if (skip) note_finish(false, "Send without text");
-    else if (netplay_active()) note_finish(false, "an online match started");
+    else if (netplay_active()) note_finish(n.late, "an online match started");
     else if (now - n.last >= NOTE_TIMEOUT_MS) note_finish(false, "no answer in 60 s");
+}
+
+// ---- the offer after an online match ---------------------------------------------------------------------------------
+//
+// The report an online match sent may get its note once the match is over: a line under the toast,
+// "Add a note to your bug report? (Y)", for 20 s of being shown (it waits while a match runs, the overlay's
+// QUIT prompt or F9's own box is up). Y on a pad (a new press) or the Y key (not while a text field has
+// the keys, pc_ui_window_message) opens the box; the time running out drops the offer.
+struct NoteOffer {
+    bool active = false;
+    UiTick left = 0, last = 0;      // left: of the 20 s, counted only while it shows
+    bool pad_down = true;           // Y held when it came up: only a new press counts
+    char id[8] = "";
+};
+static NoteOffer g_offer;
+static std::atomic<bool> g_offer_visible(false), g_offer_key(false);
+static const UiTick OFFER_MS = 20000;
+
+// Called each frame under the lock, before F9's box opens: whether the line shows this frame.
+static bool note_offer_update()
+{
+    NoteOffer &o = g_offer;
+    char id[8];
+    UiTick now = ui_ticks();
+    bool pad = false;
+    for (int slot = 0; slot < 4; slot++) {
+        InputRaw raw;
+        if (xbox_HostInputRawPad(slot, &raw) && raw.src[INPUT_SRC_NORTH] >= 16384) pad = true;
+    }
+    bool press = pad && !o.pad_down;
+    o.pad_down = pad;
+    bool key = g_offer_key.exchange(false);
+    if (!bug_report_note_waiting(id, sizeof(id))) {
+        o.active = false;
+        return false;
+    }
+    // after the room's whole match (a ranked set, a rematch run): the next fight would close the box
+    if (netplay_active() || netplay_match_locked() || g_note.open || g_note.pending || g_exit || ui_capturing()) {
+        o.last = 0;                 // waits; the time runs only while it shows
+        return false;
+    }
+    if (!o.active || strcmp(o.id, id) != 0) {
+        o.active = true;
+        o.left = OFFER_MS;
+        o.last = 0;
+        press = key = false;
+        snprintf(o.id, sizeof(o.id), "%s", id);
+        fprintf(stderr, "[REPORT] note offer for report %s: Y adds a note, %u s\n", id, (unsigned)(OFFER_MS / 1000));
+    }
+    if (o.last) o.left = now - o.last >= o.left ? 0 : o.left - (now - o.last);
+    o.last = now;
+    // RECOMP_TEST_REPORT_NOTE (with RECOMP_ACCOUNT_SERVER, as for the box): Y 1.5 s after it shows
+    static const bool test = getenv("RECOMP_ACCOUNT_SERVER") && *getenv("RECOMP_ACCOUNT_SERVER") &&
+                             getenv("RECOMP_TEST_REPORT_NOTE") && *getenv("RECOMP_TEST_REPORT_NOTE");
+    bool test_y = test && OFFER_MS - o.left >= 1500;     // 1.5 s of being shown (not of waiting)
+    if (press || key || test_y) {
+        fprintf(stderr, "[REPORT] note offer for report %s: taken (%s)\n", id,
+                press ? "pad Y" : key ? "the Y key" : "test");
+        o.active = false;
+        g_note.path[0] = 0;
+        g_note.late = true;
+        g_note.pending = true;      // opens below, this frame
+        return false;
+    }
+    if (!o.left) {
+        fprintf(stderr, "[REPORT] note offer for report %s: no answer in %u s\n", id, (unsigned)(OFFER_MS / 1000));
+        o.active = false;
+        bug_report_note_drop();
+        return false;
+    }
+    return true;
+}
+
+static void note_offer_draw(ImVec2 display)
+{
+    NoteOffer &o = g_offer;
+    ImDrawList *fg = ImGui::GetForegroundDrawList();
+    ImFont *font = g_font_bold ? g_font_bold : ImGui::GetFont(), *body = ImGui::GetFont();
+    const bool ps = pc_ui_button_icons() == PC_UI_ICONS_PLAYSTATION;
+    float size = std::max(17.0f, display.y * 0.025f);
+    char text[96], left[24];
+    snprintf(text, sizeof(text), "Add a note to your bug report? (%s)", ps ? "Triangle" : "Y");
+    snprintf(left, sizeof(left), "%u s", (unsigned)((o.left + 999) / 1000));
+    ImVec2 t = font->CalcTextSizeA(size, FLT_MAX, 0, text), l = body->CalcTextSizeA(size * 0.8f, FLT_MAX, 0, left);
+    float w = t.x + size * 0.8f + l.x;
+    ImVec2 at((display.x - w) * 0.5f, display.y * 0.24f);
+    fg->AddRectFilled(ImVec2(at.x - size, at.y - size * 0.5f), ImVec2(at.x + w + size, at.y + t.y + size * 0.5f),
+                      IM_COL32(0, 0, 0, 210), size * 0.3f);
+    fg->AddRectFilled(ImVec2(at.x - size, at.y - size * 0.5f), ImVec2(at.x - size + size * 0.18f, at.y + t.y + size * 0.5f),
+                      ImGui::GetColorU32(k_red));
+    fg->AddText(font, size, at, IM_COL32(255, 255, 255, 255), text);
+    fg->AddText(body, size * 0.8f, ImVec2(at.x + t.x + size * 0.8f, at.y + (t.y - l.y) * 0.5f), IM_COL32(165, 165, 172, 255), left);
 }
 
 // The box: small, in the middle, over everything else this frame draws.
@@ -4026,12 +4189,14 @@ static void note_draw(ImVec2 display)
     dl->AddRect(ImVec2(x0, y0), ImVec2(x0 + w, y0 + h), IM_COL32(255, 255, 255, 30), s * 0.45f, 0, 1.0f);
     dl->AddRectFilled(ImVec2(x0, y0), ImVec2(x0 + w, y0 + s * 0.22f), red, s * 0.45f, ImDrawFlags_RoundCornersTop);
     float cy = y0 + pad;
-    const char *head = "What's wrong?";
+    const char *head = n.late ? "Add a note to your bug report" : "What's wrong?";
     dl->AddText(bold, title, ImVec2(x0 + pad, cy), gold, head);
     float hw = bold->CalcTextSizeA(title, FLT_MAX, 0, head).x;
     dl->AddText(body, s, ImVec2(x0 + pad + hw + s * 0.5f, cy + (title - s) * 0.7f), grey, "(optional)");
     cy += title + s * 0.5f;
-    dl->AddText(body, s * 0.9f, ImVec2(x0 + pad, cy), grey, "The picture is taken. One line on what went wrong helps us find it.");
+    dl->AddText(body, s * 0.9f, ImVec2(x0 + pad, cy), grey,
+                n.late ? "The match's report is sent. One line on what went wrong helps us find it."
+                       : "The picture is taken. One line on what went wrong helps us find it.");
     cy += line + s * 0.6f;
 
     // the field: one line that moves left as it fills, the cursor always in sight
@@ -4085,12 +4250,14 @@ static void note_draw(ImVec2 display)
     button(fx0, fx0 + half, "Send", buf, true, n.send);
     char keys2[64];
     snprintf(keys2, sizeof(keys2), "Esc or %s", b);
-    button(fx0 + half + gap, fx1, "Send without text", keys2, false, n.skip);
+    button(fx0 + half + gap, fx1, n.late ? "No note" : "Send without text", keys2, false, n.skip);
     cy += line * 1.7f + s * 0.6f;
     snprintf(buf, sizeof(buf), "Pad: up/down pick a letter, left/right move, %s deletes, %s adds a space.", x, y);
     dl->AddText(body, s * 0.8f, ImVec2(fx0, cy), dim, buf);
 }
 #else
+static bool note_offer_update() { return false; }
+static void note_offer_draw(ImVec2) {}
 extern "C" void pc_ui_report_shot(const char *path) { (void)path; }
 extern "C" int pc_ui_report_ask(const char *path) { (void)path; return 0; }
 #endif
@@ -4119,6 +4286,16 @@ extern "C" int pc_ui_window_message(HWND window, UINT msg, WPARAM wp, LPARAM lp)
     bool note = g_note_shown.load();
     if (note && (msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN) && ((int)wp == VK_F9 || (int)wp == g_overlay_vk))
         return 1;
+    // The note offer after an online match: the Y key, unless a text field (room chat) has the keys.
+    if (!note && g_offer_visible.load() && msg == WM_KEYDOWN && (int)wp == 'Y' && !(lp & (1 << 30))) {
+        ui_lock();
+        bool typing = ui_capturing() || (g_open.load() && g_ready && ImGui::GetIO().WantTextInput);
+        ui_unlock();
+        if (!typing) {
+            g_offer_key = true;
+            return 1;
+        }
+    }
     if (!note && (msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN) && !(lp & (1 << 30)) && recorder_mark_vk() &&
         (int)wp == recorder_mark_vk() && (int)wp != g_overlay_vk) {
         ui_lock();
@@ -4260,12 +4437,15 @@ extern "C" void pc_ui_overlay(void *device, void *context, void *window_rtv, uns
     // would cover the screen being reported. With nothing else drawn, the game's frame stays the picture.
     bool report = g_report_pending.exchange(false);
     if (report) toast = false;
+    // The offer after an online match (it may ask for the box, which then opens below).
+    bool offer = !report && note_offer_update();
+    g_offer_visible = offer;
     // F9's box opens once its picture is taken: never in this frame, whose picture report_shot may read.
     if (g_note.pending && !report) note_open();
     if (g_note.open) toast = false;     // F9's "taking a picture" would sit over the box
     char talk[160];
     bool talking = voice_overlay(talk, sizeof(talk)) != 0;               // voice chat: who talks
-    if (!g_open.load() && !decor && !versus && !toast && !talking && !g_note.open && !fightchat) { ui_unlock(); return; }
+    if (!g_open.load() && !decor && !versus && !toast && !talking && !g_note.open && !fightchat && !offer) { ui_unlock(); return; }
 
     ID3D11Device *dev = (ID3D11Device *)device;
     ID3D11DeviceContext *ctx = (ID3D11DeviceContext *)context;
@@ -4350,6 +4530,7 @@ extern "C" void pc_ui_overlay(void *device, void *context, void *window_rtv, uns
                           IM_COL32(0, 0, 0, 170), size * 0.3f);
         fg->AddText(font, size, at, IM_COL32(120, 220, 120, 255), talk);
     }
+    if (offer) note_offer_draw(io.DisplaySize);
     note_draw(io.DisplaySize);      // over the screens; the toast is off while it is up
     if (toast) {    // last, so no screen drawn this frame covers it
         ImDrawList *fg = ImGui::GetForegroundDrawList();

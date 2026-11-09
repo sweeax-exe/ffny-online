@@ -69,6 +69,7 @@ void netplay_room(char *c, int size) { if (size > 0) c[0] = 0; }
 void netplay_autostart(void) {}
 int netplay_active(void) { return 0; }
 int netplay_in_fight(void) { return 0; }
+unsigned netplay_test_step(void) { return 0; }
 int netplay_on_results(void) { return 0; }
 int netplay_match_locked(void) { return 0; }
 int netplay_voice_room(void) { return 0; }
@@ -5976,6 +5977,8 @@ void netplay_autostart(void)
 
 int netplay_active(void) { return N.lockstep != 0; }
 int netplay_in_fight(void) { return MEM32(G_MATCH_PHASE) == 1u; }
+/* tests (RECOMP_TEST_PICTURE_REPORT_STEP): the step of the first match in lockstep, else 0 */
+unsigned netplay_test_step(void) { return N.lockstep && N.match_count == 1 ? N.step : 0; }
 int netplay_on_results(void) { return N.lobby && N.match_live && !N.watching && N.on_results; }
 int netplay_match_locked(void) { return N.lobby && N.match_live; }
 

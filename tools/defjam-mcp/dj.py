@@ -77,7 +77,8 @@ def cmd_scenario(a):
                              fixtures=a.fixtures.split(",") if a.fixtures else None, ranked=a.ranked,
                              rollback_modes=a.rollback_modes, rollback_max_ping=a.rollback_max_ping, leave=a.leave,
                              spectate_after=a.spectate_after, spectate_delay=a.spectate_delay,
-                             maintenance=a.maintenance, cpu_level=a.cpu_level, linger=a.linger, **common)
+                             maintenance=a.maintenance, cpu_level=a.cpu_level, linger=a.linger, reports=a.reports,
+                             **common)
     elif a.kind == "offline":
         r = scenarios.offline(type=a.type, venue=a.venue, f0=a.f0, f1=a.f1, cpu=not a.human, bot=a.bot,
                               fast_ko=a.fast_ko, turbo=a.turbo, timeout=a.timeout or 420,
@@ -228,6 +229,9 @@ def main(argv=None):
     sc.add_argument("--rematch", action="store_true", help="online: matches after the first are Rematch from the results menu")
     sc.add_argument("--ranked", help="online: a ranked set (classic, open, classic,open or draft) against a local account service "
                                      "with test accounts (accounts -ranked -test-accounts)")
+    sc.add_argument("--reports", action="store_true", help="online: a local account service (test accounts, not "
+                    "ranked) keeps the copies' F9 reports in <session>/reports (RECOMP_TEST_PICTURE_REPORT_STEP, "
+                    "RECOMP_TEST_REPORT_NOTE); the result lists them")
     sc.add_argument("--leave", help="online: N@STEP, copy N leaves the room at fight step STEP of the first match "
                     "(RECOMP_TEST_LEAVE_STEP) and is left out of the checks")
     sc.add_argument("--spectators", type=int, default=0, help="online: this many more copies watch the room (spectator mode)")
