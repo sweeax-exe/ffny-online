@@ -63,6 +63,20 @@ def cmake_version(text):
     return (int(match.group(1)), int(match.group(2))) if match else None
 
 
+def stale_compiler_cache(cache_file, compiler):
+    """True when a CMakeCache.txt names a C++ compiler other than `compiler` (paths compared
+    case-insensitively and normalised); False when there is no cache or it names none."""
+    try:
+        text = Path(cache_file).read_text(encoding='utf-8', errors='replace')
+    except OSError:
+        return False
+    match = re.search(r'^CMAKE_CXX_COMPILER:[A-Z]+=(.+)$', text, re.M)
+    if not match:
+        return False
+    norm = lambda p: os.path.normcase(os.path.normpath(str(p).strip()))
+    return norm(match.group(1)) != norm(compiler)
+
+
 def digest(path):
     with Path(path).open('rb') as stream:
         return hashlib.file_digest(stream, 'sha256').hexdigest()
@@ -1024,6 +1038,16 @@ class Engine:
                     work = self.install / 'work'
                     self.junction(work, self.source)
                     build_dir = work
+                    # A newer Visual Studio installed since the last build: CMake keeps the old
+                    # compiler from its cache while the environment brings the new headers, and
+                    # every C++ file fails with STL1001 ("expected MSVC Compiler 19.50 or newer").
+                    # Configure afresh when the cached compiler is not the one on PATH now.
+                    cl = shutil.which('cl.exe', path=self.env.get('PATH', ''))
+                    tree = cache / PRESET
+                    if cl and stale_compiler_cache(tree / 'CMakeCache.txt', cl):
+                        self.event('Visual Studio changed since the last build; configuring the build again')
+                        (tree / 'CMakeCache.txt').unlink()
+                        shutil.rmtree(tree / 'CMakeFiles', ignore_errors=True)
                     deps = json.loads((self.payload / 'dependencies.json').read_text())
                     overrides = [f'-DFETCHCONTENT_SOURCE_DIR_{name.upper()}={work / item["source_dir"]}'
                                  for name, item in zip(('sdl3', 'imgui'), [d for d in deps if 'source_dir' in d])]

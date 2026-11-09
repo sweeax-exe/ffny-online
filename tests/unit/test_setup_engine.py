@@ -930,3 +930,16 @@ def test_cmake_minimum_matches_the_project():
     lists = (root / 'CMakeLists.txt').read_text(encoding='utf-8')
     match = re.search(r'cmake_minimum_required\(VERSION (\d+)\.(\d+)', lists)
     assert (int(match.group(1)), int(match.group(2))) == engine.CMAKE_MINIMUM
+
+
+def test_a_cmake_cache_with_another_compiler_is_stale(tmp_path):
+    # A player's cache named Visual Studio 2022's cl.exe after Visual Studio 18 came in: STL1001.
+    old = 'C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/cl.exe'
+    new = 'C:/Program Files (x86)/Microsoft Visual Studio/18/BuildTools/VC/Tools/MSVC/14.51.36231/bin/Hostx64/x64/cl.exe'
+    cache = tmp_path / 'CMakeCache.txt'
+    assert not engine.stale_compiler_cache(cache, new)            # no cache yet
+    cache.write_text('CMAKE_BUILD_TYPE:STRING=Release\nCMAKE_CXX_COMPILER:FILEPATH=' + old + '\n')
+    assert engine.stale_compiler_cache(cache, new)
+    assert not engine.stale_compiler_cache(cache, old)
+    cache.write_text('CMAKE_BUILD_TYPE:STRING=Release\n')
+    assert not engine.stale_compiler_cache(cache, new)
