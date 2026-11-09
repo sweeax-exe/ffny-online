@@ -1555,7 +1555,12 @@ def crew_tail(fights, p2):
     tips. A copy out of the battle never reaches the next StartGame, so nothing presses after its Quit.
     The first Quit closing everything left the King on its second summary (20261108-085153-turf). online_tail's 12 timed A's
     after the summary ran on past the Quit into the hub's QUICK MATCH and a quick room
-    (logs/dj/20261108-070806-turf: room_stays_left, pages_show_holder)."""
+    (logs/dj/20261108-070806-turf: room_stays_left, pages_show_holder).
+    The Rematch menu and the tips take one A: their presses stop after 15 s. Build 68 takes a King who sits on
+    the Rematch menu off it after 15 s (netplay.c hill_results_tick) through the Rematch path, with no tips and
+    no Game.Quit() the script sees, so the Nth tips and Quit anchors of every later fight came one fight late; the
+    second fight's save presses, ended only by a tips anchor that never came, ran their 60 s on past the room into
+    the hub's QUICK MATCH, which opened rooms WUM8AN and 7GUG4A (logs/dj/20261109-231233-turf: room_stays_left)."""
     h = harness()
     fight = h.FIGHT_TAIL.replace("right:", "left:") if p2 else h.FIGHT_TAIL
     parts = []
@@ -1564,8 +1569,8 @@ def crew_tail(fights, p2):
         parts.append(fight.replace("@game.startgame(", "@game.startgame(%s" % nth))
         parts.append("@game.getmatchsummary(0%s,a:4:60:3:0.3" % nth)
         parts.append("@game.updatematchrewardspoints(%s,a:3:60:3:0.3" % nth)
-        parts.append("@memcard.save( battle/rewardun%s,a:3:60:3:0.3" % nth)
-        parts.append("@game.gettips(%s,a:3:60:3:0.3" % nth)
+        parts.append("@memcard.save( battle/rewardun%s,a:3:15:3:0.3" % nth)
+        parts.append("@game.gettips(%s,a:3:15:3:0.3" % nth)
         parts.append("@game.quit(%s" % nth)
     return ",".join(parts)
 
