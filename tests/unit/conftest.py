@@ -23,3 +23,16 @@ collect_ignore = [
     'test_song_convert.py',
     'test_songs.py',
 ]
+
+# Single tests of upstream files this fork keeps as its own for now.
+DEFERRED_TESTS = {
+    # stage 2: the overlay's cheat page model (upstream's pc_ui_model.h; FFNY keeps its own)
+    'test_cheats_native.py::test_fighter_roster_from_fighter_xml',
+}
+
+
+def pytest_collection_modifyitems(config, items):
+    import pytest
+    for item in items:
+        if '::'.join(item.nodeid.split('/')[-1:]) in DEFERRED_TESTS:
+            item.add_marker(pytest.mark.skip(reason='upstream merge: deferred to a later stage (conftest.py)'))

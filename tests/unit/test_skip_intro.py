@@ -31,6 +31,10 @@ void defjam_unlock_all_on_funccall(const char *text);
 recomp_func_t recomp_lookup(uint32_t va) { (void)va; return 0; }
 void cheats_start_game(uint32_t gamedata) { (void)gamedata; }  /* src/patches/cheats.c */
 void cheats_start_game_done(uint32_t gamedata) { (void)gamedata; }
+/* FFNY Online: dev_unlock.c asks whether a session is open (src/patches/online_guard.h). */
+#include "hooks/netplay.h"
+int netplay_active(void) { return 0; }
+enum NetplayState netplay_state(void) { return NETPLAY_OFF; }
 void sub_000158F0(void) { unlock_calls++; g_esp += 4; }
 void sub_00055640(void)
 {
@@ -100,7 +104,7 @@ def startup_tool(tmp_path_factory):
     driver = folder / 'driver.c'
     driver.write_text(DRIVER)
     exe = folder / ('startup.exe' if os.name == 'nt' else 'startup')
-    includes = [folder, ROOT / 'src/hooks', ROOT / 'tools/xboxrecomp/src/settings']
+    includes = [folder, ROOT / 'src/hooks', ROOT / 'src', ROOT / 'tools/xboxrecomp/src/settings']
     sources = [driver, ROOT / 'src/patches/skip_intro.c', ROOT / 'src/patches/dev_unlock.c', ROOT / 'src/hooks/pc_ui_settings.c',
                ROOT / 'tools/xboxrecomp/src/settings/recomp_settings.c']
     if os.name == 'nt':
