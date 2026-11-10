@@ -381,7 +381,7 @@ static void community_view(float lx, float top, float inner, float height, float
         dl->AddImageRounded(c.tex, ImVec2(x, py), ImVec2(x + iw, py + ih), ImVec2(0, 0), ImVec2(1, 1), IM_COL32_WHITE, 8 * s);
         py += ih + 12 * s;
     }
-    dl->PushClipRect(pa, pb, true);
+    dl->PushClipRect(pa, ImVec2(pb.x, pb.y - 64 * s), true);      // the text stops above the vote
     dl->AddText(display_font(), 22 * s, ImVec2(x, py), col(k_white), c.title.c_str());
     py += 30 * s;
     std::string meta = std::string(content_type_label(c.type.c_str())) + "  \xC2\xB7  " +
