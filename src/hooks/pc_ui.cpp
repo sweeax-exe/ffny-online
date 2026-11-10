@@ -3177,6 +3177,7 @@ static void settings_dialog(ImVec2 o, float w, float h, float s, int &tab, int &
 #include "pc_launcher_name.inc"       // the Account card's Change name dialog (the FFNY name)
 #include "pc_launcher_graphics.inc"   // the Graphics card and dialog (Enhanced graphics), the same glass
 #include "pc_launcher_content.inc"    // the Content page (community packs from our signed catalogue)
+#include "pc_launcher_studio.inc"     // the FFNY Studio card (get, open and update Studio)
 
 #if defined(_WIN32)
 // The borderless window's own minimise and close buttons, top right.
@@ -3304,11 +3305,10 @@ static UiResult draw_launcher(float x, float y, float width, float height)
         ImGui::OpenPopup("Content");
     if (glass_button("##discord", "Discord", at(256.5f, 578), ImVec2(61.5f * s, 36 * s), s, GLASS_PLAIN, nullptr, 13.5f * s))
         open_url(k_discord_invite);
-    if (studio_button_visible() &&
-        glass_button("##studio", "FFNY Studio", at(48, 622), ImVec2(130 * s, 22 * s), s, GLASS_PLAIN, nullptr, 12.5f * s)) {
-        // a stub: Studio's download and start through the signed update path come later
-    }
     dl->AddText(ImGui::GetFont(), 12.5f * s, at(48, 648), col(k_white, 0.5f), "Fan project, not affiliated with EA.");
+
+    // FFNY Studio between the logo and PLAY (hidden until Studio is published or installed).
+    studio_card(at(48, 372), at(318, 462), s);
 
     // The cards. While an update runs the GAME card is taller (step, what it is doing, bar, time)
     // and the news gives it the room.

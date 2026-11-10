@@ -13,8 +13,9 @@ repository (`docs/content-catalogue.md` there); Studio's side is in the Studio r
 | `setup/mods.py sync` | Fetches `https://play.defjam.online/updates/content/index.json` and `.sig`, checks the Ed25519 signature against `config/mods/catalogue-keys.json` (the content key's public half), the 30-day expiry and the revision (no rollback). Installs every listed pack in the catalogue's `order` (clothing IDs depend on it), downloading only packs whose version or archive changed; checks each pack's `content_sha256` and `pack_signature`; removes synced packs the catalogue dropped or revoked; keeps a folder the player installed by hand. Writes `<data>/mod-manager/content.ini`. |
 | `setup/mod_catalogue.py` | The catalogue contract, with FFNY's optional fields: `kind` (`content` / `replacement`), `type`, `order`, `language`; per version `content_sha256`, `pack_signature`. |
 | `src/hooks/pc_content.c` | Reads `content.ini` and the player's switches (`settings.ini [content] off`). At game start the synced texture packs go beneath the player's own packs in `RECOMP_TEXTURE_PACKS`; the online **content print** (FNV-1a over id, version and content hash of every `content` pack, in order) is mixed into the build fingerprint and sent after the build number in HELLO, so rooms only match PCs with the same `content` set. Replacements and language packs never count. |
-| Launcher | Syncs at its start and with each update check (`pc_launcher_content.inc`); PLAY during a sync cancels the download and waits for it to stop. The **Content** button opens the page: installed packs in catalogue order, `content` packs marked ALWAYS ON, a switch for each `replacement`. Settings > General > Game language lists English, French and every language pack that is on. A hidden **FFNY Studio** button stub (`RECOMP_STUDIO_BUTTON=1` shows it). |
+| Launcher | Syncs at its start and with each update check (`pc_launcher_content.inc`); PLAY during a sync cancels the download and waits for it to stop. The **Content** button opens the page: installed packs in catalogue order, `content` packs marked ALWAYS ON, a switch for each `replacement`. Settings > General > Game language lists English, French and every language pack that is on. |
 | Community tab | The Content page's second tab (`pc_launcher_community.inc`): every submitted pack from the account service's gallery (`GET /api/gallery`, sorted by votes or newest), also packs in review and rejected ones with the reason; the selected pack's page with its preview, description and changelog; Vote / Voted for signed-in players (one vote per account and pack). View only: nothing is downloaded from here. FFNY Studio's Community view reads the same endpoints. `RECOMP_CONTENT_TAB=community` opens it (screenshots). |
+| FFNY Studio button | The home screen's **FFNY STUDIO** card between the logo and PLAY (`pc_launcher_studio.inc`, `studio_app.cpp`, `studio_unzip.cpp`; Windows only). At the launcher's start (and on hover, at most every two minutes) it reads `studio/studio-latest.json` and its `.sig` from the update port, falling back to `https://play.defjam.online/updates/studio/`, and believes it only with a valid signature by the update key (`update_sig.h`, as `latest.json`). The card stays hidden until such a manifest exists or Studio is installed. Its button: **Get FFNY Studio (<size>)**, the download's progress, **Open FFNY Studio**, or **Update Studio** when the published `build` is newer; a failure is one line in the card. The zip is the manifest's `setup` beside the manifest (an absolute `url` only on the same host), resumed, checked against `size` and `sha256`, unpacked (deflate, CRC-checked, only names under `FFNYStudio/`) into `<studio>\versions\<version>\`, then `<studio>\current.txt` is switched; the previous version stays, older ones go. `<studio>` = `RECOMP_STUDIO_DIR`, else `studio` beside the data folder (`%LOCALAPPDATA%\DefJamRecompiled\studio`). Open starts `FFNYStudio.exe --install-dir <install> --data-root <data> --account-file <data>\account.dat` in the exe's folder (`--install-dir` only for an installed copy). Tests: `RECOMP_STUDIO_SERVER=127.0.0.1:<port>` (plain HTTP, `/studio/...`), `RECOMP_STUDIO_TEST_KEY=<128 hex>` (only with that local server), `RECOMP_TEST_STUDIO=<frame>:press;...`, `RECOMP_STUDIO_BUTTON=1` (show the card without a manifest); `scripts/test-studio-launcher.py` runs the whole path. |
 | `RECOMP_OFFLINE_ONLY=1` | Studio's Test in a fight: every online start is refused ("Online is off in this test session"). |
 
 Kinds: `content` (new fighters, clothing, venues) is always on and part of online matching; `replacement`
@@ -42,3 +43,21 @@ python -m pytest -q tests/unit/test_content_sync.py
 `FFNY_CONTENT_URL` may name a plain-HTTP catalogue on 127.0.0.1 only, with its key from
 `FFNY_CONTENT_TEST_KEYS`; `RECOMP_TEST_CONTENT_PRINT=<hex>` fakes a content set (the mismatch test);
 `RECOMP_CONTENT=0` turns synced packs off for a run.
+
+## Publishing FFNY Studio
+
+The Studio repository's `scripts/package.ps1` writes `dist\FFNYStudio-<version>-windows-x64.zip` and
+`dist\studio-latest.json` (`build` = its commit count, `version`, `notes`, `setup`, `url`, `sha256`, `size`). The
+publisher signs the manifest's exact bytes with the update key, as for `latest.json`
+(`updatesign` from the server repository; the private key stays on the publisher's PC), and uploads three files to
+`/srv/ffny-updates/studio/` on each update server (EU, and the NA copy as for `latest.json`):
+
+```
+studio-latest.json          exactly the bytes that were signed
+studio-latest.json.sig      r||s, 128 hex digits
+FFNYStudio-<version>-windows-x64.zip
+```
+
+Upload the zip first and the manifest and `.sig` last, so a launcher never sees a manifest whose zip is missing. A
+launcher offers **Update Studio** when `build` is higher than the installed one. Older zips can be removed once the
+new manifest is up.
