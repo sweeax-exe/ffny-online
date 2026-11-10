@@ -380,3 +380,34 @@ def test_turf_map_venue_line_and_steps():
     assert boss.index("ui:turfhub") < boss.index("ui:pad=a") < boss.index("ui:turfpick=RHR") < boss.index("battledone")
     assert "ui:turfsel=%d" % scenarios.TURF_VENUE in boss and "battleaccept" in scenarios.TURF_NET[2]
     assert all("ui:turflog=%d" % scenarios.TURF_VENUE in scenarios.TURF_NET[i] for i in range(4))
+
+
+def test_hill_watch_fights_are_kept_apart(tmp_path):
+    # build 70: a waiting player's game runs the hill fight it watches; it is not one of its own matches
+    watched = "\n".join([
+        "[NETPLAY] WATCH: seed BBBB0001, venue 3, 2 fighters, slots 0 and 1 (watching live: the fight runs here)",
+        "[NETPLAY] START: seed BBBB0001, type 0, rules 0, venue 3, 2 players, this PC watches (a hill fight, live)",
+        "[NETPLAY] match 33333333 starts in lockstep (2 players, delay 2); loaded in 20.0 s since the START",
+        '[TEST-EVENT] {"event":"match_start","match":1,"step":1,"host_ms":500}',
+        "[NETPLAY] in step: 10 checksums compared and equal (match 33333333, step 600)",
+        "[NETPLAY] watching: 640 steps played, 1 stop(s) for late entries in the fight (40 ms) and 0 after the "
+        "decision (0 ms), 2 buffer fill(s) of 6 steps (90 ms, 0 not full)",
+        "[NETPLAY] watching: back on the hill screen (the fight is over)",
+    ])
+    text = watched + "\n" + ONLINE.replace("this PC is player 1", "this PC is player 2 (a King of the Hill fight)", 1) \
+        .replace("[NETPLAY] match result: winners 0x1, code 0x1; reporting it when signed in",
+                 "[NETPLAY] match result: winners 0x1, code 0x1; reporting it when signed in\n"
+                 "[NETPLAY] fight waits: 2 of 100 ms or more mid-fight, the longest 180 ms", 1)
+    a = logparse.analyze_copy(text)
+    assert [m["start"]["seed"] for m in a["started"]] == ["AAAA0001", "AAAA0002"]
+    assert len(a["watched"]) == 1
+    w = a["watched"][0]
+    assert w["start"]["seed"] == "BBBB0001" and w["watch_steps"] == 640 and w["checks"] == 10
+    assert w["watch_end"] == "the fight is over"
+    assert a["started"][0]["fight_waits"] == 2 and a["started"][0]["fight_wait_max_ms"] == 180
+    log = tmp_path / "copy.log"
+    log.write_text(text)
+    problems = []
+    out = scenarios.hill_watch_check({0: a}, {0: str(log)}, problems)
+    assert out["0"]["live_watches"] == 1 and out["0"]["watched"][0]["steps"] == 640
+    assert not [p for p in problems if "watched fight" in p or "none with steps" in p], problems

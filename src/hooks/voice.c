@@ -411,7 +411,7 @@ static DWORD WINAPI voice_thread(LPVOID unused)
         }
         if (!s_open && !open_playback()) continue;
         feed_speakers();
-        if (netplay_spectating()) {     /* spectator mode: it hears the room, it never talks */
+        if (netplay_listen_only()) {    /* spectator mode: it hears the room, it never talks (a hill's watchers do) */
             if (s_in) close_mic();
             InterlockedExchange(&s_sending, 0);
             continue;

@@ -204,8 +204,8 @@ fight, so v2 needs the relay's replay feed and the fast-forward, not a new input
 
 - Join a fight already running (v2, section 8). (Rematches the players choose on their results are
   watched since build 47; a spectator that comes during a match watches its next fight since bit 11.)
-- King of the Hill: its watchers keep the phase-1 names screen; switching them to this game side is
-  the hill's phase 2 (the hill's own results and calls need care).
+- King of the Hill: since build 70 its waiting players run the fight with this game side (CAPS bit 17,
+  `docs/research/king-of-the-hill.md` 9.5); a hill room still takes no `SPECTATE`.
 - A match of four human players: the spectator's own pad sits on the fourth player's port outside
   the fight (the toolkit maps the local pad to a port 0..3); during the fight it has no effect.
 - Ranked rooms; spectators in the room list (`ROOMS` shows players only); talking spectators.

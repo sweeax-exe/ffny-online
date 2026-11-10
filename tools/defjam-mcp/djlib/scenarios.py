@@ -1979,6 +1979,7 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
         ok = ok and not any(p.startswith("cpu:") for p in problems)
     if mode in ("koth", "ffarot"):
         result["hill_gaps"], result["hill_forced"], result["hill_gaps_watched"] = hill_gap_check(logs, linger, problems)
+        result["hill_watch"] = hill_watch_check(analyses, logs, problems)
         if linger is not None:      # taken off the summary by the game: no rewards step (expected)
             problems[:] = [p for p in problems if not re.match(r"m\d+ copy \d+: summary not accepted", p)]
             ok = not problems       # online_rows failed on those alone otherwise
@@ -2060,6 +2061,36 @@ def hill_gap_check(logs, linger, problems):
         if not forced.get(int(linger)):
             problems.append("hill: copy %s was never taken off its results" % linger)
     return gaps, forced, watched
+
+
+def hill_watch_check(analyses, logs, problems):
+    """Build 70: the hill fights each copy watched live (it ran them from the fighters' entries): steps played,
+    checksums compared and equal with the fighters', any desync, how it went back to the hill screen; and per copy
+    its own fights' lockstep waits mid-fight (a watcher must never hold the fighters up). A copy that announced
+    live watching but never ran a fight it waited through, a watched fight with no steps, no checksums or a
+    desync, and a fighter's wait of a second or more mid-fight are problems. A copy whose log never ran one (an
+    older build: its WATCH lines say "not running the fight") is listed as old."""
+    out = {}
+    for i, a in sorted(analyses.items()):
+        text = logparse.read_text(logs[i]) if i in logs else ""
+        live = text.count("(watching live: the fight runs here)")
+        old = text.count("(watching, not running the fight)")
+        fights = [{"seed": (m.get("start") or {}).get("seed"), "id": m.get("id"), "steps": m.get("watch_steps", 0),
+                   "stops": m.get("watch_stops", 0), "checks": m.get("checks", 0),
+                   "desync": (m.get("desync") or {}).get("step"), "back": m.get("watch_end")}
+                  for m in a.get("watched", [])]
+        waits = [(m.get("fight_waits"), m.get("fight_wait_max_ms")) for m in a.get("started", [])
+                 if m.get("fight_waits") is not None]
+        out[str(i)] = {"live_watches": live, "old_watches": old, "watched": fights,
+                       "fight_waits": [w[0] for w in waits], "fight_wait_max_ms": max([w[1] for w in waits] or [0])}
+        for f in fights:
+            if f["desync"] is not None:
+                problems.append("hill watch: copy %d's watched fight %s went out of sync at step %s" % (i, f["seed"], f["desync"]))
+        if live and not any(f["steps"] > 0 and f["checks"] > 0 for f in fights):
+            problems.append("hill watch: copy %d ran %d watched fights but none with steps and checksums" % (i, live))
+        if waits and max(w[1] for w in waits) >= 1000:
+            problems.append("hill watch: copy %d waited %d ms mid-fight for another fighter" % (i, max(w[1] for w in waits)))
+    return out
 
 
 def rules_check(logs, fighter_rules, banned_tier, problems):

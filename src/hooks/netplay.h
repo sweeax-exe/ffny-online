@@ -311,6 +311,26 @@ void netplay_lobby_spectate(const char *code);
  * counts the fights as the players count them). */
 int netplay_fights_skipped(void);
 int netplay_spectating(void);   /* 1 while this PC watches a room or one of its matches */
+/* 1 while this PC only listens to the room's voice chat: a spectator, or a watcher in an ordinary room.
+ * A hill room's waiting players watch as members and still talk among themselves (build 70). */
+int netplay_listen_only(void);
+/* Build 70: live watching in King of the Hill and FFA rotation rooms (docs/research/king-of-the-hill.md
+ * 9.2). A waiting player's game runs the fight it gets a WATCH for from the fighters' inputs, as a
+ * spectator's does, when the relay answers NETPLAY_CAP_HILL_WATCH and the setting [online] hill_watch
+ * is on. netplay_hill_watch fills the spectator HUD over that fight and returns 1 while it is up. */
+#define NETPLAY_CAP_HILL_WATCH 131072
+typedef struct {
+    int count;                                  /* the fighters, 2..4, in their positions */
+    int slot[NETPLAY_MAX_PLAYERS];              /* their room slots */
+    char name[NETPLAY_MAX_PLAYERS][25];
+    int king, streak;                           /* the king's position as the fight started (-1 none), its streak */
+    int called;                                 /* this PC is called for the next fight: on its way out */
+    int leaving;                                /* the watched fight is being left for the hill screen */
+} NetHillWatch;
+int netplay_hill_watch(NetHillWatch *out);
+/* Tests and pad scripts: 1 while the game runs a fight this PC only watches in a hill room; the front
+ * end's calls then are not anchors for a pad script (a copy's presses count its own fights). */
+int netplay_hill_watch_quiet(void);
 /* The account report key of this PC's last room match ("ROOM12-1A2B3C4D-1"; "" before the first), for
  * REPORT PLAYER. Returns its length. */
 int netplay_last_match_key(char *out, int size);

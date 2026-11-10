@@ -36,6 +36,7 @@
 #include <time.h>
 #include "recomp/gen/recomp_types.h"
 #include "netplay.h"
+#include "recomp_settings.h"
 #include "updater.h"
 #include "automatch.h"
 #include "online_data.h"
@@ -89,6 +90,9 @@ void netplay_lobby_join(const char *c) { (void)c; }
 void netplay_lobby_quick(int m, int x) { (void)m; (void)x; }
 void netplay_lobby_spectate(const char *c) { (void)c; }
 int netplay_spectating(void) { return 0; }
+int netplay_listen_only(void) { return 0; }
+int netplay_hill_watch(NetHillWatch *o) { memset(o, 0, sizeof(*o)); return 0; }
+int netplay_hill_watch_quiet(void) { return 0; }
 int netplay_last_match_key(char *out, int size) { if (size > 0) out[0] = 0; return 0; }
 void netplay_lobby_settings(const NetRoomSettings *s) { (void)s; }
 void netplay_lobby_ready(int r, int f) { (void)r; (void)f; }
@@ -265,6 +269,8 @@ void netplay_crowd_update(void) { sub_00081170(); }
 #define CAPS_RANDOM_VENUE 16384u /* RANDOM in the venue vote (build 67), both ways: VOTE 0xFE, ROOM voted 0xFE */
 #define CAPS_CPULEVEL 32768u    /* the room's CPU level (build 67), both ways: a byte after CREATE's / SETTINGS'
                                  * Settings, after ROOM's spectators, after START's created fighters */
+#define CAPS_HILL_WATCH 131072u /* live watching in hill rooms (build 70), both ways: a waiting player runs the
+                                 * fight from the fighters' DATA (docs/research/king-of-the-hill.md 9.2) */
 #define CAPS_ROOMRULES 65536u   /* room rules (build 68), both ways: FIGHTER RULES and MAX PING after CREATE's /
                                  * SETTINGS' CPU level, this PC's ping after JOIN / QUICK, the rules and the
                                  * blocked fighters after ROOM's CPU level; ERROR 13: the ping is over MAX PING */
@@ -638,6 +644,14 @@ static struct {
      * every seeding's count (netplay_on_seed), as the players' fights before it counted theirs */
     int spec_late;
     AutoMatch spec_late_m;
+    /* build 70, a hill room's waiting player: the watched match is a hill fight run here (hill_watch); it is
+     * being left for the hill screen (hill_leave: this PC is called, the fight is over, START, the next
+     * fight came), since hill_leave_at; the fight whose WATCH is not run again (START took this PC back
+     * to the hill screen); the summary forced off at (hill_quit_at) */
+    int hill_watch, hill_leave, hill_called;
+    ULONGLONG hill_leave_at, hill_quit_at;
+    const char *hill_leave_why;
+    uint32_t hill_skip_seed;
     uint32_t seed_base;
     /* a player's fight that went out of sync and whose other players stopped sending: left for the
      * room the way the pause menu's Quit leaves it (desync_quit_tick, between two updates) */
@@ -665,6 +679,8 @@ static struct {
 
 /* This PC is in its room as a spectator (the relay's ROOM says `you` 0xFD). */
 #define SPECTATOR_HERE() (N.roomv.in_room && N.roomv.you == SLOT_SPECTATOR)
+/* Build 70: a hill room's waiting player watching a fight live, the game in it or on its way there or back. */
+#define HILL_WATCHING() (N.lobby && N.watching && N.hill_watch && N.match_live)
 
 /* Rollback (rollback.h) is on with RECOMP_ROLLBACK=on (off by default since build 21); off, every step waits for every entry. */
 static int rollback_wanted(void) { return rollback_enabled(); }
@@ -1073,10 +1089,24 @@ static void netplay_rematch_tick(void)
  * they go back to the room the taps choose No and lead there (spec_tick). */
 void netplay_spectator_funccall(const char *text)
 {
+    if (N.hill_leave && !N.spec_results && !strncmp(text, "Game.GetMatchSummary(", 21) && !(N.watching && N.hill_watch)) {
+        N.spec_results = GetTickCount64();      /* build 70: the left hill fight's summary (hill_leave_tick) */
+        fprintf(stderr, "[NETPLAY] watching: the left hill fight's summary; back to the hill screen\n");
+        return;
+    }
     if (!N.watching || !N.match_seen) return;
     if (!N.spec_results) {
         if (strncmp(text, "Game.GetMatchSummary(", 21)) return;
         N.spec_results = GetTickCount64();
+        if (N.hill_watch) {     /* build 70: no results for a watched hill fight; back to the hill screen */
+            fprintf(stderr, "[NETPLAY] watching: the hill fight's summary; back to the hill screen\n");
+            if (!N.hill_leave) {
+                N.hill_leave = 1;
+                N.hill_leave_at = N.spec_results;
+                N.hill_leave_why = "the fight is over";
+            }
+            return;
+        }
         fprintf(stderr, "[NETPLAY] watching: the match's summary; going through it to the players' choice\n");
     } else if (!N.spec_menu && !N.spec_leave && !strncmp(text, "MemCard.Save( battle/rewardun", 29)) {
         N.spec_menu = GetTickCount64();
@@ -1126,7 +1156,7 @@ int netplay_toast(char *out, int size)
     EnterCriticalSection(&g_cs);
     on = N.toast[0] && GetTickCount64() < N.toast_until;
     if (on) snprintf(out, size, "%s", N.toast);
-    else if (N.watching && N.match_seen && N.lockstep && !N.spec_results && size > 0) {
+    else if (N.watching && !N.hill_watch && N.match_seen && N.lockstep && !N.spec_results && size > 0) {
         /* spectator mode: who fights, over the whole watched fight */
         int i, n = snprintf(out, (size_t)size, "SPECTATING:");
         for (i = 0; i < N.players && i < MAXP && n > 0 && n < size; i++)
@@ -1426,7 +1456,7 @@ static DWORD remote_slot_state(int slot, XBOX_INPUT_STATE *state)
         if (slot < 0 || slot >= N.players) return ERROR_DEVICE_NOT_CONNECTED;
         memset(state, 0, sizeof(*state));
         state->dwPacketNumber = 1;
-        if (since && slot == 0 && (!N.spec_menu || N.spec_leave)) {     /* not on the Rematch menu while it waits */
+        if (since && slot == 0 && (!N.spec_menu || N.spec_leave) && !N.hill_watch) {   /* not on the Rematch menu while it waits */
             ULONGLONG t = GetTickCount64() - since;
             int down = t % 500u < 100u;
             if (down) state->Gamepad.bAnalogButtons[0] = 255;
@@ -1551,6 +1581,11 @@ static void rematch_declined(void);
 static void disarm_crash_report(void);
 static void spec_play_summary(void);
 
+/* A fighter's lockstep waits mid-fight (build 70, for the hill watchers' tests: a watcher must never hold
+ * the fighters up): waits of 100 ms or more for another player's entries once the fight is under way, and
+ * the longest, logged when the match ends for this PC. */
+static struct { unsigned n; ULONGLONG longest; } g_fight_waits;
+
 static void end_hub_match(const char *why)
 {
     log_contiguous("at the match end");
@@ -1559,11 +1594,19 @@ static void end_hub_match(const char *why)
     assign_input(0);
     SetEvent(N.arrived);
     disarm_crash_report();
+    if (!N.watching && N.match_seen)
+        fprintf(stderr, "[NETPLAY] fight waits: %u of 100 ms or more mid-fight, the longest %llu ms\n", g_fight_waits.n,
+                (unsigned long long)g_fight_waits.longest);
+    memset(&g_fight_waits, 0, sizeof(g_fight_waits));
     N.match_live = N.match_seen = 0;
     N.over_pending = 1;
     if (N.watching) {
         spec_play_summary();
+        if (N.hill_watch)
+            fprintf(stderr, "[NETPLAY] watching: back on the hill screen (%s)\n", N.hill_leave_why ? N.hill_leave_why : "the fight ended");
         N.watching = 0;         /* a spectator's match counts for nobody: no OVER */
+        N.hill_watch = N.hill_leave = N.hill_called = 0;
+        N.hill_leave_why = NULL;
         N.pos = 0;
     } else {
         request(T_OVER, NULL, 0);
@@ -2807,6 +2850,18 @@ static void on_room(const uint8_t *b, int len)
         }
     }
     LeaveCriticalSection(&g_cs);
+    if (gone && HILL_WATCHING()) {
+        /* build 70: a fighter of the watched hill fight left the room; its feed ends, back to the hill screen */
+        fprintf(stderr, "[NETPLAY] watching: a fighter left the room (step %u); back to the hill screen\n", N.step);
+        InterlockedExchange(&N.lockstep, 0);
+        SetEvent(N.arrived);
+        if (!N.hill_leave) {
+            N.hill_leave = 1;
+            N.hill_leave_at = GetTickCount64();
+            N.hill_leave_why = "a fighter left";
+        }
+        return;
+    }
     if (gone && N.lockstep) {
         uint32_t left = 0, fresh = 0;
         int k, j, go_on;
@@ -2931,14 +2986,56 @@ static void on_hill(const uint8_t *b, int len)
         else
             toast(8000, "The next fight was called off: back on the hill.");
     }
+    {   /* build 70: called for the next fight while this PC watches the last one: off to the hill screen */
+        int called = 0;
+        EnterCriticalSection(&g_cs);
+        if (h.phase == NETHILL_CALLING && HILL_WATCHING() && !N.hill_called)
+            for (i = 0; i < h.count; i++)
+                if (h.line[i].slot == N.roomv.you && (h.line[i].state == NETLINE_CALLED || h.line[i].state == NETLINE_READY))
+                    called = N.hill_called = 1;
+        LeaveCriticalSection(&g_cs);
+        if (called) {
+            fprintf(stderr, "[NETPLAY] hill: called for the next fight while watching (step %u): leaving the watched fight\n", N.step);
+            if (!N.hill_leave) {
+                N.hill_leave = 1;
+                N.hill_leave_at = GetTickCount64();
+                N.hill_leave_why = "this PC is called";
+            }
+            toast(8000, "YOU'RE UP: back to the hill to get ready.");
+        }
+    }
     if (auto_ready >= 0) {
         fprintf(stderr, "[NETPLAY] hill: called again straight after the fight; ready with fighter %d\n", auto_ready);
         netplay_lobby_ready(1, auto_ready);
     }
 }
 
-/* King of the Hill: a fight this PC watches (START's body). Phase 1: the names only; the fight is
- * not run here (docs/research/king-of-the-hill.md 9.2 is phase 2). */
+/* Build 70: whether this PC runs the hill fight of this WATCH (docs/research/king-of-the-hill.md 9.2): the
+ * relay sends the fighters' entries to watchers that announced it (CAPS_HILL_WATCH), the player's setting
+ * [online] hill_watch is on (RECOMP_HILL_WATCH=0 turns it off), and START did not take it back to the hill
+ * screen from this fight. Otherwise the hill screen shows the names (build 69 and older always). */
+static int hill_watch_wanted(void)
+{
+    const char *e = getenv("RECOMP_HILL_WATCH");
+    if (e && *e) return atoi(e) != 0;
+    return recomp_settings_get("online", "hill_watch", 1) != 0;
+}
+
+static int hill_watch_runs(uint32_t seed, const int *slots, int count)
+{
+    int i;
+    if (!relay_has(CAPS_HILL_WATCH) || !hill_watch_wanted() || seed == N.hill_skip_seed || !N.roomv.in_room ||
+        SPECTATOR_HERE())
+        return 0;
+    for (i = 0; i < count; i++) if (slots[i] == N.roomv.you) return 0;     /* a fighter gets START */
+    /* this PC's own fight still runs here (not decided yet); decided, on its results, the watch waits for the
+     * menus (on_start_as defers it as it defers a START there) */
+    if (N.match_live && !N.watching && !N.koth_results) return 0;
+    return 1;
+}
+
+/* King of the Hill, FFA rotation: a fight this PC watches (START's body). Build 69 and older showed the
+ * names only; since build 70 the fight runs here as a spectator's would (hill_watch_runs). */
 static void on_start_as(const uint8_t *b, int len, int watching);
 static void on_watch(const uint8_t *b, int len)
 {
@@ -2963,14 +3060,19 @@ static void on_watch(const uint8_t *b, int len)
     if (r.bad) return;
     EnterCriticalSection(&g_cs);
     if (N.roomv.in_room && N.roomv.hill.watch_seed != seed) {
+        int live = hill_watch_runs(seed, slots, count);
         N.roomv.hill.watch_seed = seed;
         N.roomv.hill.watch_venue = venue;
         N.roomv.hill.watch_count = count;
         memcpy(N.roomv.hill.watch_slots, slots, sizeof(slots));
         memcpy(N.roomv.hill.watch_fighters, fighters, sizeof(fighters));
         N.roomv.version++;
-        fprintf(stderr, "[NETPLAY] WATCH: seed %08X, venue %d, %d fighters, slots %d and %d (watching, not running the fight)\n",
-                seed, venue, count, slots[0], slots[1]);
+        fprintf(stderr, "[NETPLAY] WATCH: seed %08X, venue %d, %d fighters, slots %d and %d (%s)\n",
+                seed, venue, count, slots[0], slots[1], live ? "watching live: the fight runs here" :
+                "watching, not running the fight");
+        LeaveCriticalSection(&g_cs);
+        if (live) on_start_as(b, len, 3);      /* 3: a hill fight, watched */
+        return;
     }
     LeaveCriticalSection(&g_cs);
 }
@@ -3121,8 +3223,9 @@ static void on_start_as(const uint8_t *b, int len, int watching)
     AutoMatch m;
     uint32_t seed;
     int count, i, j, slots[MAXP], fighters[MAXP], pos = -1, deferred, late = watching == 2, cpu = NETPLAY_CPU_HARD;
+    int hill_watch = watching == 3, leaving = 0;
     if (len < 4) return;
-    if (late) watching = 1;     /* T_WATCHLATE: watched like a WATCH, from the players' next fight */
+    if (late || hill_watch) watching = 1;   /* T_WATCHLATE: watched like a WATCH, from the players' next fight */
     seed = get32(b);
     r.i = 4;
     memset(&m, 0, sizeof(m));
@@ -3160,6 +3263,16 @@ static void on_start_as(const uint8_t *b, int len, int watching)
     /* King of the Hill: the last fight of this PC is still on its results screen (also when a
      * START deferred there was called off since: its match is over, the results still show) */
     deferred = N.lobby && N.koth_results && NETPLAY_IS_HILL(N.roomv.settings.mode);
+    /* Build 70: this PC's game runs a watched hill fight (or loads it, or leaves it): the new fight, its own or
+     * the next one watched, is set up once the game is back in the menus, as after its own fight's results */
+    if (N.lobby && NETPLAY_IS_HILL(N.roomv.settings.mode) && (HILL_WATCHING() || N.hill_leave)) {
+        deferred = leaving = 1;
+        if (HILL_WATCHING()) {
+            spec_play_summary();
+            fprintf(stderr, "[NETPLAY] hill: %s while this PC still watches the last fight: leaving it first\n",
+                    watching ? "the next fight's WATCH" : "this PC's START");
+        }
+    }
     /* positions follow the room slots in order */
     for (i = 1; i < count; i++)
         for (j = i; j > 0 && slots[j - 1] > slots[j]; j--) {
@@ -3201,6 +3314,13 @@ static void on_start_as(const uint8_t *b, int len, int watching)
     N.start_cpu = m.count > count ? cpu : NETPLAY_CPU_HARD;
     N.pos = pos;
     N.watching = watching;
+    N.hill_watch = hill_watch;
+    N.hill_called = 0;
+    if (leaving && !N.hill_leave) {
+        N.hill_leave = 1;
+        N.hill_leave_at = GetTickCount64();
+        N.hill_leave_why = "a new fight came";
+    }
     N.spec_start_down = 1;          /* a START held from before does not stop the watching */
     N.delay = LOBBY_DELAY;
     N.delay_fixed = 0;
@@ -3284,8 +3404,8 @@ static void on_start_as(const uint8_t *b, int len, int watching)
         fprintf(stderr, "[NETPLAY] WATCHLATE: seed %08X, type %d, rules %d, venue %d, %d players; the match runs already: "
                 "this PC watches from the players' next fight\n", seed, m.type, m.rules, m.venue, count);
     else if (watching)
-        fprintf(stderr, "[NETPLAY] START: seed %08X, type %d, rules %d, venue %d, %d players, this PC watches (spectator)\n",
-                seed, m.type, m.rules, m.venue, count);
+        fprintf(stderr, "[NETPLAY] START: seed %08X, type %d, rules %d, venue %d, %d players, this PC watches (%s)\n",
+                seed, m.type, m.rules, m.venue, count, hill_watch ? "a hill fight, live" : "spectator");
     else
         fprintf(stderr, "[NETPLAY] START: seed %08X, type %d, rules %d, venue %d, %d players, this PC is player %d%s\n",
                 seed, m.type, m.rules, m.venue, count, pos + 1,
@@ -3320,7 +3440,8 @@ static void on_start_as(const uint8_t *b, int len, int watching)
         N.deferred_m = m;
         N.deferred_toast = GetTickCount64() - 4500;     /* the first notice in 1.5 s (the other's P_RTT first), then every 6 s */
         send_rtt();                 /* and the opponent, who otherwise sees only a long load (P_RTT's flag) */
-        fprintf(stderr, "[NETPLAY] the match starts once this game is back from the last fight's results\n");
+        fprintf(stderr, "[NETPLAY] the %s starts once this game is back from the last %s\n",
+                watching ? "watched fight" : "match", leaving ? "watched fight" : "fight's results");
         return;
     }
     become_connected();
@@ -3816,7 +3937,7 @@ static DWORD WINAPI net_thread(LPVOID unused)
         }
         /* King of the Hill: the next opponent waits, loaded, while this player stays on the last
          * fight's results (13, 14 and 61 s in build 33, pressing Rematch): say so until they leave */
-        if (N.start_deferred && now - N.deferred_toast >= 6000) {
+        if (N.start_deferred && !N.watching && !N.hill_leave && now - N.deferred_toast >= 6000) {   /* not after a watched fight */
             int other = N.players == 2 ? 1 - N.pos : -1;
             N.deferred_toast = now;
             /* not while the other one is on its results too (its P_RTT says so): nobody waits yet */
@@ -3880,7 +4001,7 @@ static DWORD WINAPI net_thread(LPVOID unused)
                 memcpy(cb + n, N.token, 8); n += 8;
                 put32(cb + n, CAPS_KOTH | CAPS_CREATED | CAPS_SPECTATE | CAPS_STATS_ERR | CAPS_SPEC_REMATCH | CAPS_CHAT |
                               CAPS_CREW | CAPS_RB_MODES | CAPS_RB_PING | CAPS_SPEC_LATE | CAPS_CPULEVEL | CAPS_ROOMRULES |
-                              CAPS_TSET | CAPS_FFAROT | CAPS_RANDOM_VENUE); n += 4;
+                              CAPS_TSET | CAPS_FFAROT | CAPS_RANDOM_VENUE | CAPS_HILL_WATCH); n += 4;
                 send_raw(cb, n);
             } else {
                 N.relay_caps = 0;
@@ -4730,6 +4851,40 @@ int netplay_last_match_key(char *out, int size)
     return n < size ? n : size - 1;
 }
 
+int netplay_listen_only(void)
+{
+    int on;
+    InitOnceExecuteOnce(&g_once, init_once, NULL, NULL);
+    EnterCriticalSection(&g_cs);
+    on = (N.watching && !N.hill_watch) || (N.lobby && SPECTATOR_HERE());
+    LeaveCriticalSection(&g_cs);
+    return on;
+}
+
+int netplay_hill_watch_quiet(void) { return N.lobby && ((N.watching && N.hill_watch) || N.hill_leave); }
+
+int netplay_hill_watch(NetHillWatch *out)
+{
+    int on, i;
+    InitOnceExecuteOnce(&g_once, init_once, NULL, NULL);
+    memset(out, 0, sizeof(*out));
+    EnterCriticalSection(&g_cs);
+    on = HILL_WATCHING() && N.match_seen && !N.spec_results && N.roomv.in_room;
+    if (on) {
+        out->count = N.players < MAXP ? N.players : MAXP;
+        for (i = 0; i < out->count; i++) {
+            out->slot[i] = N.start_slots[i];
+            snprintf(out->name[i], sizeof(out->name[i]), "%s", N.report_names[i][0] ? N.report_names[i] : "?");
+        }
+        out->king = N.vs_king;
+        out->streak = N.vs_streak;
+        out->called = N.hill_called;
+        out->leaving = N.hill_leave;
+    }
+    LeaveCriticalSection(&g_cs);
+    return on;
+}
+
 int netplay_spectating(void)
 {
     int on;
@@ -5413,12 +5568,21 @@ void xbox_NoteAnchorEvent(const char *text);     /* kernel.h: an event a pad scr
 void netplay_on_main_menu(void)
 {
     if (N.lobby && InterlockedExchange(&N.start_deferred, 0)) {
-        /* King of the Hill: back from the last fight's results; the next one, agreed meanwhile */
+        /* King of the Hill: back from the last fight's results; the next one, agreed meanwhile. Build 70:
+         * or back from a watched fight that was left for this one (its own, or the next one watched) */
+        int was_results = N.koth_results, was_watching = N.hill_leave;
         N.koth_results = N.koth_quit = 0;
         N.hill_summary = N.hill_menu = 0;
+        N.spec_results = 0;
+        N.spec_menu = 0;
+        N.spec_leave = N.spec_rematch = N.spec_quit = 0;
+        N.hill_leave = N.hill_called = 0;
+        N.hill_quit_at = 0;
         log_contiguous("at the match end");
-        fprintf(stderr, "[NETPLAY] back from the last fight's results: setting up the next King of the Hill fight\n");
-        xbox_NoteAnchorEvent("netplay.hill-back");     /* tests: a pad script's end of one fight's presses */
+        fprintf(stderr, "[NETPLAY] back from the last %s: setting up the next King of the Hill fight%s\n",
+                was_watching && !was_results ? "watched fight" : "fight's results", N.watching ? " (watched)" : "");
+        if (was_results || !was_watching)
+            xbox_NoteAnchorEvent("netplay.hill-back");     /* tests: a pad script's end of one fight's presses */
         N.start_tick = GetTickCount64();    /* the load starts now */
         become_connected();
         automatch_request(&N.deferred_m);
@@ -5427,6 +5591,7 @@ void netplay_on_main_menu(void)
     N.spec_results = 0;         /* spectator mode: the results are behind it */
     N.spec_menu = 0;
     N.spec_leave = N.spec_rematch = N.spec_quit = 0;
+    N.hill_quit_at = 0;
     if (N.lobby && N.match_live && N.match_seen && N.watching) {
         end_hub_match("Back in the room; watching the next match when it starts.");
         N.koth_results = N.koth_quit = 0;
@@ -6079,7 +6244,7 @@ int netplay_voice_room(void)
 
 void netplay_send_voice(const uint8_t *payload, int len)
 {
-    if (netplay_voice_room() && !netplay_spectating()) send_data(payload, len);    /* a spectator only listens */
+    if (netplay_voice_room() && !netplay_listen_only()) send_data(payload, len);    /* a spectator only listens */
 }
 
 int netplay_room_name(int slot, char *out, int size)
@@ -6820,7 +6985,8 @@ static void koth_check_result(int final)
     int winner = -1;
     const char *how = "";
     /* match_seen: this START's match is set up (the last one's phase and records linger until then) */
-    if (!N.lobby || !(N.koth_match || N.set_match) || !N.match_live || !N.match_seen || N.koth_done || N.resim) return;
+    if (!N.lobby || !(N.koth_match || N.set_match) || !N.match_live || !N.match_seen || N.koth_done || N.resim ||
+        N.watching) return;     /* a hill watcher (build 70) reports nothing */
     if (!final && N.lockstep && N.rb_on && N.step > N.final_step) return;  /* the state may come from a prediction */
     phase = MEM32(G_MATCH_PHASE);
     if (phase == 1u) N.koth_fought = 1;
@@ -6971,6 +7137,9 @@ static void steplog_keep(uint32_t s)
     }
 }
 
+static void hill_stop_watching(const char *why);
+#define HILL_BEHIND_STEPS (60u * 25u)   /* build 70: a hill watcher this far behind the fighters stops watching */
+
 /* RECOMP_TEST_SPEC_STOP_STEP=<n> (tests): the spectator stops watching at step n of the first match it
  * watches, as with START (the test copies' pads cannot press it at a given step). */
 static int spec_test_stop(uint32_t s)
@@ -7023,7 +7192,8 @@ static void spec_fill(uint32_t s)
             fprintf(stderr, "[NETPLAY] watching: stopped with START at step %u\n", s);
             InterlockedExchange(&N.lockstep, 0);
             N.spec_quit = 1;        /* spec_tick, between two updates */
-            toast(8000, "You stopped watching: back to the room.");
+            if (N.hill_watch) hill_stop_watching("START");
+            toast(8000, N.hill_watch ? "You stopped watching: back to the hill screen." : "You stopped watching: back to the room.");
             break;
         }
     }
@@ -7055,11 +7225,29 @@ static void spec_step(uint32_t s)
         spec_compare(slot);
         LeaveCriticalSection(&g_cs);
     }
+    if (N.hill_watch && s % 60 == 0 && !N.hill_leave) {
+        /* build 70: a hill watcher far behind the fighters (a slow load, a slow PC) drops to the hill screen:
+         * the next fight is called before it sees this one end */
+        uint32_t ahead = 0;
+        int i;
+        for (i = 0; i < N.players && i < MAXP; i++)
+            if (g_steps_match[i] == N.match && g_steps_last[i] > s && g_steps_last[i] - s > ahead) ahead = g_steps_last[i] - s;
+        if (ahead > HILL_BEHIND_STEPS) {
+            fprintf(stderr, "[NETPLAY] watching: %u steps behind the fighters at step %u; back to the hill screen\n", ahead, s);
+            InterlockedExchange(&N.lockstep, 0);
+            hill_stop_watching("too far behind");
+            toast(8000, "Too far behind the fight: back to the hill screen.");
+            return;
+        }
+    }
     if (spec_stop_pressed() || spec_test_stop(s)) {
-        fprintf(stderr, "[NETPLAY] watching: stopped with START at step %u; leaving the fight for the room\n", s);
+        fprintf(stderr, "[NETPLAY] watching: stopped with START at step %u; leaving the fight for the %s\n", s,
+                N.hill_watch ? "hill screen" : "room");
         InterlockedExchange(&N.lockstep, 0);
         N.spec_quit = 1;        /* spec_tick, between two updates */
-        toast(8000, "You stopped watching: back to the room.");
+        if (N.hill_watch) hill_stop_watching("START");
+        toast(8000, N.hill_watch ? "You stopped watching: back to the hill screen. The next fight shows again."
+                                 : "You stopped watching: back to the room.");
         return;
     }
     if (s <= (uint32_t)N.delay) return;
@@ -7098,10 +7286,13 @@ static void spec_step(uint32_t s)
         now = GetTickCount64();
         if (now - since >= 1000) waited_long = 1;
         if (spec_stop_pressed()) {
-            fprintf(stderr, "[NETPLAY] watching: stopped with START at step %u; leaving the fight for the room\n", s);
+            fprintf(stderr, "[NETPLAY] watching: stopped with START at step %u; leaving the fight for the %s\n", s,
+                    N.hill_watch ? "hill screen" : "room");
             InterlockedExchange(&N.lockstep, 0);
             N.spec_quit = 1;
-            toast(8000, "You stopped watching: back to the room.");
+            if (N.hill_watch) hill_stop_watching("START");
+            toast(8000, N.hill_watch ? "You stopped watching: back to the hill screen. The next fight shows again."
+                                     : "You stopped watching: back to the room.");
             break;
         }
         {
@@ -7113,9 +7304,10 @@ static void spec_step(uint32_t s)
                             "the rest runs on this PC\n", s);
                 } else {
                     fprintf(stderr, "[NETPLAY] watching: the feed stopped at step %u (player %d's entries); not "
-                            "watching any more, leaving the fight for the room\n", s, late + 1);
+                            "watching any more, leaving the fight for the %s\n", s, late + 1, N.hill_watch ? "hill screen" : "room");
                     N.spec_quit = 1;
-                    toast(8000, "The match's feed stopped: back to the room.");
+                    if (N.hill_watch) hill_stop_watching("the feed stopped");
+                    toast(8000, N.hill_watch ? "The fight's feed stopped: back to the hill screen." : "The match's feed stopped: back to the room.");
                 }
                 break;
             }
@@ -7388,6 +7580,10 @@ void netplay_on_step(void)
         LeaveCriticalSection(&g_cs);
         if (ready || !N.lockstep) {
             ULONGLONG waited = GetTickCount64() - waited_since;
+            if (ready && waited >= 100 && s > (uint32_t)N.delay + 1 && N.fighting_seen && MEM32(G_MATCH_PHASE) == 1u) {
+                g_fight_waits.n++;
+                if (waited > g_fight_waits.longest) g_fight_waits.longest = waited;
+            }
             /* a frozen picture of half a second or more: say why once it moves again */
             if (ready && waited >= 500 && s > (uint32_t)N.delay + 1 && !last_note)
                 toast(4000, "Waited %.1f s for %s (connection).", waited / 1000.0, player_name(N.last_late));
@@ -8163,6 +8359,7 @@ static void spec_tick(void)
     if (!N.lobby || !N.watching) { tries = 0; return; }
     if (N.spec_quit) {
         int r = spec_quit_fight("watching");
+        if (r > 0) N.hill_quit_at = GetTickCount64();      /* build 70: hill_leave_tick does not quit it again */
         if (r > 0 || (r < 0 && ++tries > 600)) {
             if (r < 0) fprintf(stderr, "[NETPLAY] watching: the fight screen is not up; the game goes on by itself\n");
             N.spec_quit = 0;
@@ -8195,6 +8392,7 @@ static void spec_tick(void)
         }
         LeaveCriticalSection(&g_cs);
         if (gone >= 0) why = "a player went back to the room";
+        else if (N.hill_watch) why = "a hill fight has no rematch";
         else if (!SPECTATOR_HERE()) why = "the room is gone";
         else if (N.roomv.phase != 2) why = "the room is back in its lobby";
         else if (spec_stop_pressed()) why = "START";
@@ -8226,6 +8424,61 @@ static void spec_tick(void)
         defjam_menu_call("Game.Rematch()");
         N.spec_rematch = 0;
     }
+}
+
+/* Build 70: a watched hill fight is left for the hill screen (hill_leave): this PC is called for the next
+ * fight, the fight is over (its summary came), START, its feed stopped, or the next fight's START or WATCH
+ * came meanwhile (set up once the game is back in the menus, netplay_on_main_menu). In the fight: the pause
+ * menu's Quit, as a spectator leaves (spec_quit_fight; under the knockout's scene, where it cannot, the game
+ * goes on to the summary). On the summary: Game.Quit(), as a fighter's game is taken off its results
+ * (hill_results_tick), a second after it came and again every 5 s while the game is not back. Never while a
+ * screen loads or the memory card saves. The fighters never know: nothing of this goes out. */
+static void hill_stop_watching(const char *why)
+{
+    N.hill_skip_seed = N.start_seed;    /* a WATCH again (a VOTE's answer) does not bring it back */
+    if (!N.hill_leave) {
+        N.hill_leave = 1;
+        N.hill_leave_at = GetTickCount64();
+        N.hill_leave_why = why;
+    }
+}
+
+static void hill_leave_tick(void)
+{
+    static unsigned tries;
+    ULONGLONG now;
+    uint32_t sm;
+    if (!N.hill_leave || !N.lobby) { tries = 0; return; }
+    now = GetTickCount64();
+    if (N.spec_quit) {                  /* spec_tick leaves the fight first; with the next fight's START set up */
+        if (N.watching) return;         /* (no longer watching) this tick does it */
+        N.spec_quit = 0;
+    }
+    /* still loading the watched fight: it first (with a deferred START the session is the next fight's) */
+    if (!N.start_deferred && N.watching && N.match_live && !N.match_seen) return;
+    sm = MEM32(0x002FB148u + 0x17u * 4u);
+    if (sm >= 0x10000u && MEM32(sm + 0x24u) != 0) return;     /* a screen loads: later */
+    if (memcard_save_busy()) return;
+    if (!N.spec_results) {
+        /* in the fight, or its knockout's scene: the pause menu's Quit once it can, else the summary */
+        int r;
+        if (N.lockstep) {
+            InterlockedExchange(&N.lockstep, 0);
+            SetEvent(N.arrived);
+        }
+        if (tries > 600 || N.hill_quit_at) return;     /* given up, or quit already: the menus come */
+        r = spec_quit_fight("watching the hill");
+        if (r > 0) { tries = 601; N.hill_quit_at = now; }
+        else if (r < 0 && ++tries == 600)
+            fprintf(stderr, "[NETPLAY] watching: the fight screen does not take the Quit; leaving at the summary\n");
+        return;
+    }
+    if (now - N.spec_results < 1000 || (N.hill_quit_at && now - N.hill_quit_at < 5000)) return;
+    tries = 0;
+    N.hill_quit_at = now;
+    fprintf(stderr, "[NETPLAY] watching: leaving the hill fight's summary (%s, %.1f s after the leave began): Game.Quit()\n",
+            N.hill_leave_why ? N.hill_leave_why : "?", (now - N.hill_leave_at) / 1000.0);
+    defjam_menu_call("Game.Quit()");
 }
 
 /* A player's fight that went out of sync and that the other players left (the wait in netplay_on_step):
@@ -8326,6 +8579,7 @@ void netplay_on_update(void)
     int i, rb_stays;
     rollback_check_tables(N.resim ? "a re-run update starts" : "an update starts");
     if (!N.resim) spec_tick();
+    if (!N.resim) hill_leave_tick();
     /* A rollback match that went out of sync leaves for the room at once. Its desync can come from a
      * load that put the game's memory back only in part, and the fight then plays on that memory: F9
      * 0b7e16 (build 47) had one rollback in the whole fight (back to step 2861), the desync at step

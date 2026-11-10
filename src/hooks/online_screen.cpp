@@ -935,6 +935,7 @@ struct Gallery {
     int room_rb[NETPLAY_ROOM_SLOTS] = {};   // each sample member's rollback byte (netplay_room_rollback)
     NetCrew crew = {};              // crew battles (stage 3): the crew-battle pages' sample (battle 0: none)
 } G;
+NetHillWatch G_hill_hud;            // build 70: the spectator HUD pages' sample (count 0: none)
 
 bool gallery_on()
 {
@@ -3142,6 +3143,9 @@ void choose_fighter(int fighter)
     for (size_t i = 0; i < list.size(); i++) if (list[i].id == fighter) S.fighter_sel = (int)i;
 }
 
+// [online] hill_watch (build 70): the next fight is watched live on this PC (netplay_hill_watch).
+bool hill_watch_setting() { return recomp_settings_get("online", "hill_watch", 1) != 0; }
+
 // The watching screen: the fight this PC does not play in. Phase 1 shows who fights, the king's
 // crown and streak, and the line; the fight itself runs on the fighters' PCs only.
 void draw_watch_rot(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r, const HillView &v);
@@ -3196,7 +3200,9 @@ void draw_watch(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r
     glass(dl, f, 40, 382, 560, 28, 8);
     text(dl, f, g_title, 14, 52, 388, WHITE, line.c_str(), LEFT, 1.0f);
     if (v.next == r.you) text(dl, f, g_hand, 18, 588, 386, ORANGE, "YOU'RE UP NEXT", RIGHT, 1.2f);
-    text(dl, f, g_title, 11, 320, 362, GREY, "The fight runs on the fighters' PCs. The result comes here when it is over.",
+    text(dl, f, g_title, 11, 320, 362, GREY, (lobby_caps() & NETPLAY_CAP_HILL_WATCH) && hill_watch_setting()
+             ? "Watching live: the next fight shows on your screen. The result comes here when it is over."
+             : "The fight runs on the fighters' PCs. The result comes here when it is over.",
          CENTER, 0.8f);
     float hx = 54;
     bool left = false;
@@ -4381,6 +4387,9 @@ void gallery_step()
                                          "create-rules", "room-rules", "fighters-rules",
                                          // build 66: FFA rotation (its room, called, watching, its door)
                                          "rot", "rot-up", "rot-watch", "rot-fight", "create-rot", "hub-rot", "versus-rot",
+                                         // build 70: the spectator HUD over a watched fight (the line, up next,
+                                         // called; an FFA rotation's four)
+                                         "hill-hud", "hill-hud-next", "hill-hud-up", "rot-hud",
                                          // build 30: the server choice
                                          "connecting-auto", "hub-server", "servers", "servers-offline", "hub-ranked-na",
                                          "room-ping", "offline-server",
@@ -4523,6 +4532,7 @@ void gallery_step()
     G.queue = NETQUEUE_SEARCHING;
     G.account = ACCOUNT_IN;
     S.watch_hidden = 0;
+    G_hill_hud = NetHillWatch();
     S.note_until = 0;
     S.settings_edit = false;
     {   // the relays as a player in Europe sees them, the hub on Europe
@@ -4779,6 +4789,39 @@ void gallery_step()
         G.room.players[0].voted = 1;
         G.room.ms_left = 11000;
         S.vote_sel = 1;
+    } else if (p == "hill-hud" || p == "hill-hud-next" || p == "hill-hud-up" || p == "rot-hud") {
+        // a fight watched live: Ben (the king, x3) against Cal; the line behind them
+        bool rot = p == "rot-hud";
+        NetRoom &r = G.room = rot ? sample_room(NETPLAY_MODE_FFAROT, NETPLAY_FFAROT_SLOTS, 7)
+                                  : sample_room(NETPLAY_MODE_KOTH_RANDOM, 10, 7);
+        NetHill &h = r.hill;
+        h.valid = 1;
+        h.phase = p == "hill-hud-up" ? NETHILL_CALLING : NETHILL_FIGHTING;
+        h.king = 1;
+        h.streak = 3;
+        h.received = r.received;
+        h.count = 7;
+        int fighters = rot ? 4 : 2;
+        // this PC (slot 0) waits: third in the line, or next (hill-hud-next), or called (hill-hud-up)
+        const int order[7] = { 1, 2, 3, 4, 5, 0, 6 }, next_order[7] = { 1, 2, 0, 3, 4, 5, 6 };
+        const int *o = p == "hill-hud-next" || p == "hill-hud-up" ? next_order : order;
+        if (rot) { static const int ro[7] = { 1, 2, 3, 4, 5, 0, 6 }; o = ro; }
+        for (int i = 0; i < 7; i++) {
+            h.line[i].slot = o[i];
+            h.line[i].state = i < fighters ? NETLINE_FIGHTING : NETLINE_WAITING;
+            h.line[i].wins = i == 0 ? 3 : 0;
+        }
+        h.line[6].state = NETLINE_AWAY;
+        NetHillWatch &w = G_hill_hud;
+        w = NetHillWatch();
+        w.count = fighters;
+        for (int i = 0; i < fighters; i++) {
+            w.slot[i] = h.line[i].slot;
+            snprintf(w.name[i], sizeof(w.name[i]), "%s", r.players[h.line[i].slot].name);
+        }
+        w.king = 0;
+        w.streak = 3;
+        w.called = p == "hill-hud-up";
     } else if (p == "hill" || p == "up" || p == "watch") {
         S.page = HUB;
         NetRoom &r = G.room = sample_room(NETPLAY_MODE_KOTH_RANDOM, 10, 9);
@@ -5128,6 +5171,96 @@ void draw_versus(ImDrawList *dl, ImVec2 display)
     if (g_versus_up) versus_page(dl, display, g_versus);
 }
 
+// ---- the spectator HUD over a watched hill fight (build 70) --------------------------------------------
+//
+// A hill room's waiting player watches the current fight live (netplay_hill_watch): over the game's own
+// HUD a strip along the bottom names the fighters, crowns the king with the streak, lists the next three
+// in the line and says "YOU'RE UP NEXT"; once this PC is called a banner says it goes back to the hill.
+// Drawing only, no input (START, read by the game thread, goes back to the hill screen).
+NetHillWatch g_hill_watch;
+bool g_hill_hud_up = false;
+
+bool hill_hud_wanted()
+{
+    g_hill_hud_up = !gallery_on() && netplay_hill_watch(&g_hill_watch) != 0;
+    return g_hill_hud_up;
+}
+
+void hill_hud(ImDrawList *dl, const Frame &f, const NetHillWatch &w, const NetRoom &r)
+{
+    const NetHill &h = r.hill;
+    bool rot = NETPLAY_IS_FFAROT(r.settings.mode);
+    unsigned long long now = GetTickCount64();
+    // the strip: LIVE, the fighters (the king crowned, with the streak), the hint
+    const float y = 404, ph = 36;
+    glass(dl, f, 28, y, 584, ph, 8, IM_COL32(8, 8, 11, 255), 0.72f);
+    rect(dl, f, 36, y + 9, 52, 18, with_alpha(RED, 0.95f), 3);
+    dl->AddCircleFilled(f.p(45, y + 18), 3.5f * f.s(), (now / 600) % 2 ? WHITE : with_alpha(WHITE, 0.3f));
+    text(dl, f, g_title, 13, 52, y + 11, WHITE, "LIVE", LEFT, 1.0f);
+    std::string names;
+    float x = 100;
+    int n = w.count < 2 ? 2 : w.count > 4 ? 4 : w.count;
+    float each = (rot && n > 2 ? 360.0f : 340.0f) / n;
+    for (int i = 0; i < n; i++) {
+        float cx = x + each * i;
+        bool king = i == w.king, me = w.slot[i] == r.you;
+        if (i) text(dl, f, g_stencil, 16, cx - 4, y + 8, with_alpha(CREAM, 0.7f), "VS", CENTER, 1.2f);
+        float nx = cx + (i ? 12 : 0);
+        if (king) {
+            crown(dl, f, nx + 9, y + 18, 18);
+            nx += 22;
+        }
+        std::string nm = upper(w.name[i][0] ? w.name[i] : "?");
+        text(dl, f, g_title, n > 2 ? 14 : 17, nx, y + 6, me ? ORANGE : CREAM, nm.c_str(), LEFT, 1.1f, each - 30);
+        if (king) {
+            char st[16];
+            snprintf(st, sizeof(st), rot ? "x%d" : "KING x%d", w.streak);
+            text(dl, f, g_title, 10, nx, y + 24, GOLD, st, LEFT, 0.9f);
+        }
+    }
+    const char *stop = ps_icons() ? "OPTIONS: HILL SCREEN" : "START: HILL SCREEN";
+    text(dl, f, g_title, 10, 604, y + 13, GREY, stop, RIGHT, 0.8f);
+
+    // above it on the right: the line behind the fight, the next three
+    std::string line = "NEXT:";
+    int shown = 0;
+    bool up_next = false;
+    for (int i = 0; h.valid && i < h.count && shown < 3; i++) {
+        const NetHillEntry &e = h.line[i];
+        bool fights = false;
+        for (int k = 0; k < n; k++) fights = fights || w.slot[k] == e.slot;
+        if (fights || e.state == NETLINE_AWAY) continue;
+        if (shown == 0 && e.slot == r.you && e.state == NETLINE_WAITING) up_next = true;
+        char one[48];
+        snprintf(one, sizeof(one), "%s %d. %s", shown ? "," : "", shown + 1, upper(slot_name(r, e.slot)).c_str());
+        line += one;
+        shown++;
+    }
+    if (!shown) line = "NOBODY ELSE IN THE LINE";
+    float lw = std::min(330.0f, text_width(f, g_title, 12, line.c_str()) + 24);
+    glass(dl, f, 612 - lw, y - 28, lw, 24, 7, IM_COL32(8, 8, 11, 255), 0.66f);
+    text(dl, f, g_title, 12, 600, y - 23, WHITE, line.c_str(), RIGHT, 1.0f, lw - 18);
+    if (w.called) {
+        // called for the next fight: on the way back to the hill
+        float pulse = 0.7f + 0.3f * sinf((float)(now % 1000) / 1000.0f * 6.2832f);
+        glass(dl, f, 170, 150, 300, 92, 12, IM_COL32(40, 22, 4, 255), 0.82f);
+        text(dl, f, g_stencil, 44, 320, 156, with_alpha(ORANGE, pulse), "YOU'RE UP", CENTER, 2.0f);
+        text(dl, f, g_hand, 16, 320, 212, CREAM, "Back to the hill to get ready...", CENTER, 1.0f);
+    } else if (up_next) {
+        float tw = text_width(f, g_hand, 16, "YOU'RE UP NEXT") + 26;
+        glass(dl, f, 28, y - 28, tw, 24, 7, IM_COL32(40, 22, 4, 255), 0.75f);
+        text(dl, f, g_hand, 16, 28 + tw / 2, y - 26, ORANGE, "YOU'RE UP NEXT", CENTER, 1.1f);
+    }
+}
+
+void draw_hill_hud(ImDrawList *dl, ImVec2 display)
+{
+    if (!g_hill_hud_up) return;
+    NetRoom room;
+    lobby_room(&room);
+    hill_hud(dl, menu_frame(display), g_hill_watch, room);
+}
+
 // Room chat over a match (social_ui.inc): read once a frame, drawn by draw_fight_chat.
 bool g_fight_chat_up = false;
 
@@ -5276,6 +5409,11 @@ bool draw_pages(ImVec2 display)
     NetRoom room;
     lobby_room(&room);
     enum NetplayState st = net_state();
+    if (gallery_on() && G_hill_hud.count) {     // the spectator HUD's pages: over a stand-in for the fight
+        backdrop(dl, f, display, true, LOOK_MATCH);
+        hill_hud(dl, f, G_hill_hud, room);
+        return true;
+    }
     // Over any screen but the main menu (after a match: the battle menu) every page is full-screen.
     {   // who is online: asked every five seconds while the online screens are up
         static unsigned long long asked;
@@ -5559,6 +5697,8 @@ bool closed_for_match() { return false; }
 bool versus_wanted() { return false; }
 void draw_versus(ImDrawList *, ImVec2) {}
 const char *shot_label() { return nullptr; }
+bool hill_hud_wanted() { return false; }
+void draw_hill_hud(ImDrawList *, ImVec2) {}
 bool fight_chat_wanted() { return false; }
 bool draw_fight_chat(ImDrawList *, ImVec2) { return false; }
 bool fight_chat_typing() { return false; }

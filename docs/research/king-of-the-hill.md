@@ -10,8 +10,8 @@ and RESULT in `src/hooks/netplay.c`, room slots 0..9 (routing, names, voice), th
 fight per START with RESULT and no rematch, and in `src/hooks/online_screen.cpp` the create screen
 (King of the Hill, venue by vote or random, 3..10 players), the hill screen, "YOU'RE UP" with
 one-press ready and a watching screen with the names, the line and the streak. Phase 2, spectators
-running the fight (section 9.2) and the spectator HUD over it, is not started. Nothing here is
-deployed.
+running the fight (section 9.2) and the spectator HUD over it, is built in build 70 (section 9.5),
+for King of the Hill and FFA rotation rooms alike.
 
 ## 1. What players see
 
@@ -295,7 +295,7 @@ room of another mode `ERROR 8`.
 | `PEER` | never sent (even with `max` 2) |
 | `DATA` | routed as in section 7.1 |
 
-## 9. What the game client needs (src/; 9.1 and 9.3 built in phase 1, 9.2 and the spectator HUD not)
+## 9. What the game client needs (src/; 9.1 and 9.3 built in phase 1, 9.2 and the spectator HUD in build 70)
 
 Phase 1 notes: a client hides King of the Hill until the relay answers CAPS (5 tries, 400 ms
 apart). A watcher drops every DATA but voice while it does not fight (`N.match_live` 0), so the
@@ -368,6 +368,32 @@ A new session state "watching", entered on WATCH:
 - A "back to the hill screen" toggle while watching, and "watch" from the hill screen during a
   fight that started while the player was there (it has the WATCH; it re-enters the match only
   if it kept the inputs).
+
+### 9.5 Live watching as built (build 70)
+
+- **CAPS bit 17** (`131072`, `CAPS_HILL_WATCH` / `CapHillWatch`), both ways: a client announces it; the relay
+  answers it only to such a client. During a fight the relay sends a fighter's lockstep payloads (`P_LIVEPAD`,
+  `P_STEPS`, `P_HASH`, `P_RTT`, `P_REMATCH`) only to watchers with the bit; older watchers (build 69) get the
+  rest (voice) as before and keep the names screen. Nothing a watcher sends reaches a fighter (as in 7.1).
+- **The game** runs a WATCH (`on_watch`) as a spectator runs one in another room (`on_start_as`, no position,
+  `N.watching`, the whole fight's entries kept, the players' agreed delay from `P_RTT`, never rollback), when the
+  relay answered the bit and the setting `[online] hill_watch` (on by default; `RECOMP_HILL_WATCH=0`) is on.
+  A player on its own fight's results when the WATCH comes watches once back in the menus (the START deferral).
+  Its game sends nothing for the fight and never reports a result (`koth_check_result` skips a watcher); its
+  voice still goes to the other waiting players (`netplay_listen_only`).
+- **Leaving** (`hill_leave_tick`): the fight's summary is left at once with `Game.Quit()` (no results for a
+  watched fight); this PC called for the next fight (HILL), START (back to the hill screen for that fight), a
+  fighter leaving the room, a feed that stops, 25 s behind the fighters, or the next fight's START or WATCH
+  while the game still shows the old one: the pause menu's Quit in the fight, `Game.Quit()` on the summary. A
+  START or WATCH that comes meanwhile is set up once the game is back in the menus, as after a fighter's own
+  results (`start_deferred`; its `P_RTT` says so to the other fighter), so the 15-20 s results cap
+  (`hill_results_tick`) and the deferred START of the fighters are unchanged.
+- **The HUD** (`online_screen.cpp` `hill_hud`, gallery pages `hill-hud`, `hill-hud-next`, `hill-hud-up`,
+  `rot-hud`): a strip along the bottom with LIVE, the fighters (the king crowned, with the streak), the hint
+  START: HILL SCREEN, the next three in the line above it, YOU'RE UP NEXT, and a YOU'RE UP banner once called.
+- **Tests:** the front end's calls of a watched fight are not pad-script anchors (`netplay_hill_watch_quiet`);
+  `dj.py scenario online --mode koth|ffarot` lists each copy's watched fights (`hill_watch`: steps, checksums,
+  how it went back) and each fighter's lockstep waits mid-fight (`fight waits` lines).
 
 ## 10. What is hard, honestly
 

@@ -147,7 +147,8 @@ static void call(const char *format, ...)
     va_start(args, format);
     vsnprintf(command, sizeof(command), format, args);
     va_end(args);
-    xbox_NoteAnchorEvent(command);     /* a pad script can wait for these as for the front end's own */
+    if (!netplay_hill_watch_quiet())    /* a pad script can wait for these as for the front end's own (not for a */
+        xbox_NoteAnchorEvent(command);  /* hill fight only watched, build 70) */
     result = defjam_fe_call(command);
     fprintf(stderr, "[AUTOMATCH] %s -> %s\n", command, result ? "ok" : "0");
 }
@@ -384,7 +385,7 @@ unsigned int defjam_menu_call(const char *text)
     memcpy(fp, g_fp_stack, sizeof(fp));
     fprintf(stderr, "[FUNCCALL] %s (for the menu)\n", text);
     recorder_event_text("fe", "text", text);
-    xbox_NoteAnchorEvent(text);
+    if (!netplay_hill_watch_quiet()) xbox_NoteAnchorEvent(text);
     if (!automatch_hold_funccall(text)) {
         r = defjam_fe_call(text);
         automatch_on_funccall(text);
