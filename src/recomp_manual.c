@@ -976,10 +976,25 @@ extern void sub_0027E075_gen(void);
 /* The main menu's EXIT (src/hooks/online_screen.cpp): there the pad's BACK (VIEW) opens the quit
  * prompt, so the title must not read it (its menu would go to the title screen, as on B). */
 extern int pc_ui_menu_eats_back(void);
-static void strip_menu_back(uint32_t state)
+extern void pc_ui_menu_back_pressed(void);
+/* A press the title saw (BACK set where its last read of that pad had it clear) is also handed to the
+ * overlay, which samples the pads only once a frame and missed short presses in slow frames. */
+static void strip_menu_back(uint32_t handle, uint32_t state)
 {
-    if (!g_eax && state && pc_ui_menu_eats_back())
+    static uint32_t handles[4];
+    static int held[4];
+    int k, down;
+    if (g_eax || !state)
+        return;
+    down = (MEM16(state + 4) & 0x0020u) != 0;
+    for (k = 0; k < 3 && handles[k] && handles[k] != handle; k++) {}
+    handles[k] = handle;
+    if (pc_ui_menu_eats_back()) {
+        if (down && !held[k])
+            pc_ui_menu_back_pressed();
         MEM16(state + 4) &= (uint16_t)~0x0020u;     /* XINPUT_GAMEPAD_BACK in wButtons, after the packet DWORD */
+    }
+    held[k] = down;
 }
 void sub_0027E075(void)
 {
@@ -987,12 +1002,12 @@ void sub_0027E075(void)
     if (input_latency_on() || input_consumption_on()) {
         input_latency_xdk_begin(handle);
         sub_0027E075_gen();
-        strip_menu_back(state);
+        strip_menu_back(handle, state);
         input_consumption_xdk_end(handle, state, g_eax);
         input_late_capture(handle, state, g_eax);
     } else {
         sub_0027E075_gen();
-        strip_menu_back(state);
+        strip_menu_back(handle, state);
     }
 }
 /* Optional fresh report at the controller manager's existing update, before
