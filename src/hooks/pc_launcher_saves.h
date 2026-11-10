@@ -22,6 +22,9 @@ bool game_running();
 enum class Pick { FOLDER, ZIP, PS2 };
 void pick_start(Pick what, void *window);
 bool pick_poll(std::string &path);
+// The game's database (assets/djv2.sod) as the game reads it: a mod's copy in <data>/override first, then
+// the dump (the install's game folder, or <data>/extracted). `where` says which file it was.
+bool game_database(saves::Bytes &out, std::string *where);
 } // namespace pcsaves
 
 extern "C" {

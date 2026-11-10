@@ -50,6 +50,16 @@ and the backups in `<data folder>/save-backups/`:
   `scripts/save-import.py` does ([importing Xbox saves](importing-xbox-saves.md)): copies each profile's
   three files and signs the profile again with the port's key. It backs the saves up first and never
   replaces a profile you already have unless you tick *Replace* for it.
+- **Unlock all** (on a profile) sets that profile to 100%: every fighter and venue (and with the venues every
+  match type) and every song, and in the Story shops every piece of clothing, jewellery, tattoo and hair style,
+  every Blazin move and fighting style to buy or learn. It asks first ("This changes <profile>. A backup is
+  kept. Undo with Restore."), with a box for *and $999,999* of Story cash, then makes a backup
+  (*Before Unlock everything*), edits the profile file and the Options file and signs both again. Items you own
+  stay owned; stats, level, development points, the created fighter and story progress are not touched.
+  Fighters, venues and songs are kept once for the whole save area by the game, so they are unlocked for every
+  profile. **Undo** at the foot of the page (or **Restore** of that backup later) puts the files back byte for
+  byte. Online play does not read any of it. The layout is in
+  [unlocking everything](research/unlock-everything.md#the-save-edit).
 - **Open folder** opens the save area.
 
 Restore and import refuse while the game runs on that save area (the game marks it as in use while it
@@ -201,7 +211,7 @@ nobody at it (a locked screen, a remote run):
 | Variable | What it does |
 |---|---|
 | `RECOMP_WINDOW_SHOT=<file.bmp>` | Writes what the launcher (first frame) or the game window (the overlay, after `RECOMP_WINDOW_SHOT_FRAME` overlay frames, 20 by default) shows, as a 32-bit BMP. macOS and Linux |
-| `RECOMP_LAUNCHER_PAGE=saves`, `RECOMP_TEST_SAVES` | Windows: the launcher opens with the Saves page, and `RECOMP_TEST_SAVES` presses its buttons: `<frame>:<action>[:<argument>]` separated by `;`, with `backup`, `import:<folder or zip>` (as if picked), `replace:<profile name>`, `import-ok`, `restore:<row>`, `restore-ok`, `folder`, `bring:<row>` (Bring back a quarantine copy). With `RECOMP_WINDOW_SHOT` for the picture; `scripts/test-saves-launcher.py` uses them on a made-up data folder |
+| `RECOMP_LAUNCHER_PAGE=saves`, `RECOMP_TEST_SAVES` | Windows: the launcher opens with the Saves page, and `RECOMP_TEST_SAVES` presses its buttons: `<frame>:<action>[:<argument>]` separated by `;`, with `backup`, `import:<folder or zip>` (as if picked), `replace:<profile name>`, `import-ok`, `restore:<row>`, `restore-ok`, `folder`, `bring:<row>` (Bring back a quarantine copy), `unlock:<profile name>` (Unlock all, to its confirmation), `unlock-cash`, `unlock-ok`, `undo`. With `RECOMP_WINDOW_SHOT` for the picture; `scripts/test-saves-launcher.py` uses them on a made-up data folder |
 | `RECOMP_LAUNCHER_SCRIPT` | The launcher's input: `<ms>:click:<x>:<y>`, `<ms>:move:<x>:<y>`, `<ms>:shot:<file>`, `<ms>:play`, `<ms>:quit`, separated by `;`, times from the window's first frame and positions in window points |
 | `RECOMP_HOST_SCRIPT` | The game window's input: `<ms>:key:<SDL key name>` (`F1`, `Escape`), `<ms>:click:<x>:<y>`, `<ms>:move:<x>:<y>`, `<ms>:text:<chars>`, times from the window's opening |
 | `RECOMP_OVERLAY_SHOT_DIR=<folder>`, `RECOMP_OVERLAY_SHOT_MS` | Windows: the finished picture with the overlay, every `RECOMP_OVERLAY_SHOT_MS` (2000 by default) while the overlay draws, as `<ms>.bmp` |

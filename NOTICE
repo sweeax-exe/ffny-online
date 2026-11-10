@@ -90,6 +90,8 @@ Files:
   src/hooks/rollback.h
   src/hooks/save_manager.cpp
   src/hooks/save_manager.h
+  src/hooks/save_unlock.cpp
+  src/hooks/save_unlock.h
   src/hooks/social.cpp
   src/hooks/social.h
   src/hooks/social_ui.inc
@@ -105,6 +107,7 @@ Files:
   src/hooks/updater_guard.h
   src/hooks/voice.c
   src/hooks/voice.h
+  tests/unit/test_save_unlock.py
   tools/defjam-mcp/README.md
   tools/defjam-mcp/dj.py
   tools/defjam-mcp/djlib/__init__.py

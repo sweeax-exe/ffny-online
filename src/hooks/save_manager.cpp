@@ -884,6 +884,7 @@ std::string describe_reason(const std::string &reason)
     if (reason == "manual") return "Made by you";
     if (reason == "restore") return "Before a restore";
     if (reason == "import") return "Before an import";
+    if (reason == "unlock") return "Before Unlock everything";
     if (reason == "leftover") return "Left by an unfinished restore";
     return "Backup";
 }
