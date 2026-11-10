@@ -23,11 +23,16 @@ constexpr uint32_t kHairStyle = 0x7450591Au, kTattoo = 0x30948EA0u, kJewelry = 0
                    kBlazin = 0x47D305FDu, kFightingStyle = 0x906455C6u, kCharacter = 0x4CE5B1B2u, kVenue = 0xD7DCA628u;
 constexpr uint32_t kClothingColours = 0xAC3E66A4u;  // a clothing row: one item per colour (sub_000151C0)
 constexpr uint32_t kJewelryVariants = 0xC2E12E98u;  // a jewellery row: one per entry, or one when empty (sub_000153D0)
+constexpr uint32_t kClothingType = 0x0E334DC7u;     // "Type": a clothing row's shop section, 0..15
 
 // ---- the profile file (a user ID): profile offset p is at file 0x80 + p ----
 constexpr size_t kProfileFile = 0x5990, kProfileAt = 0x80;
 constexpr size_t kItemStates = 0x4DC4;      // sub_000148B0: the six state arrays, one after another
 constexpr size_t kCash = 0x20;              // GetPlayerCash (sub_0004CA30)
+// Unlocked-row counters (sub_00015B80 raises them per delivered item): word per kind, in profile
+// order of kinds hair, tattoo, jewellery, clothing, Blazin (styles have none); dwords per clothing type.
+constexpr size_t kRowCounter[6] = {0xA8, 0xAA, 0xAE, 0xAC, 0xB0, 0};
+constexpr size_t kClothingTypeCounters = 0xB8;
 constexpr size_t kProfileEnd = 0x5910;      // the file holds the profile up to here
 
 // ---- the Options file (the global record): record offset g is at file g + 0x3C ----
@@ -171,14 +176,24 @@ bool unlock_layout(const Bytes &sod, UnlockLayout &out, std::string *error)
     for (int k = 0; k < 6; k++) {
         if (!s.rows(order[k], index, rows)) return fail("the game's database has no item table it needs");
         uint32_t n = (uint32_t)rows.size();
+        out.rows[k] = n;
         if (order[k] == kClothing || order[k] == kJewelry) {
-            uint32_t word, len;
-            if (!s.field(order[k], order[k] == kClothing ? kClothingColours : kJewelryVariants, word))
+            uint32_t word, len, type_word = 0, type;
+            if (!s.field(order[k], order[k] == kClothing ? kClothingColours : kJewelryVariants, word) ||
+                (order[k] == kClothing && !s.field(kClothing, kClothingType, type_word)))
                 return fail("the game's database has no item list it needs");
             n = 0;
+            out.rows[k] = 0;
             for (uint32_t row : rows) {
                 if (!s.list_size(row, word, len)) return fail("the game's database is damaged");
-                n += order[k] == kClothing ? len : std::max(len, 1u);
+                if (order[k] == kJewelry) len = std::max(len, 1u);
+                n += len;
+                if (!len) continue;         // a clothing row without colours has no item
+                out.rows[k]++;
+                if (order[k] == kClothing) {
+                    if (!s.u(row + 4 * type_word, type) || type >= 16) return fail("the game's database is damaged");
+                    out.clothing_type_rows[type]++;
+                }
             }
         }
         out.items[k] = n;
@@ -210,6 +225,17 @@ bool unlock_profile_bytes(Bytes &b, const UnlockLayout &layout, bool cash, Unloc
             byte |= (uint8_t)(1u << shift);        // locked -> unlocked; an owned item stays owned
         }
         at += n / 4 + 1;
+    }
+    // The shops' counts of unlocked rows: every row now (never lowered).
+    for (int k = 0; k < 6; k++) {
+        if (!kRowCounter[k]) continue;
+        size_t o = kProfileAt + kRowCounter[k];
+        uint32_t have = b[o] | b[o + 1] << 8, want = std::min<uint32_t>(layout.rows[k], 0xFFFF);
+        if (have < want) { b[o] = (uint8_t)want; b[o + 1] = (uint8_t)(want >> 8); }
+    }
+    for (int t = 0; t < 16; t++) {
+        size_t o = kProfileAt + kClothingTypeCounters + 4 * t;
+        if (rd(b, o) < layout.clothing_type_rows[t]) wr(b, o, layout.clothing_type_rows[t]);
     }
     counts.cash = false;
     if (cash && rd(b, kProfileAt + kCash) < kUnlockCash) {

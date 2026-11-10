@@ -43,6 +43,10 @@ int main(int argc, char **argv) {
         if (!unlock_layout(slurp(argv[2]), l, &error)) { std::cout << "error " << error << "\n"; return 1; }
         std::cout << "items";
         for (auto n : l.items) std::cout << " " << n;
+        std::cout << "\nrows";
+        for (auto n : l.rows) std::cout << " " << n;
+        std::cout << "\ntypes";
+        for (auto n : l.clothing_type_rows) std::cout << " " << n;
         std::cout << "\ncharacters " << l.character_table << " " << l.characters << "\nvenues " << l.venue_table << " "
                   << l.venues << "\n";
         return 0;
@@ -124,7 +128,7 @@ def name_hash(text):
 
 HAIR, TATTOO, JEWEL, CLOTH, BLAZIN, STYLE = 0x7450591A, 0x30948EA0, 0x426B8667, 0x912016DD, 0x47D305FD, 0x906455C6
 CHAR, VENUE, SONG = 0x4CE5B1B2, 0xD7DCA628, 0x0E1BB13C
-COLOURS, VARIANTS = 0xAC3E66A4, 0xC2E12E98
+COLOURS, VARIANTS, TYPE = 0xAC3E66A4, 0xC2E12E98, 0x0E334DC7
 
 
 def make_sod(tables):
@@ -137,16 +141,16 @@ def make_sod(tables):
         out.extend(struct.pack('<%dI' % len(words), *words))
         return o
     # schema: the two list fields at word 3
-    keys = [CLOTH ^ COLOURS, JEWEL ^ VARIANTS, 0x1234]
-    schema = put([0x414D4B53, len(keys), 2] + keys + [3, 0x3000000, 3, 0x3000000, 1, 0])
+    keys = [CLOTH ^ COLOURS, JEWEL ^ VARIANTS, CLOTH ^ TYPE, 0x1234]
+    schema = put([0x414D4B53, len(keys), 2] + keys + [3, 0x3000000, 3, 0x3000000, 4, 0, 1, 0])
     offs = []
     for index, (th, rows) in enumerate(tables):
         ptrs = []
-        for r in rows:
+        for row, r in enumerate(rows):
             lst = 0
             if r is not None:
                 lst = put([r] + [0] * r)
-            ptrs.append(put([index, 0, 0, lst, 0]))
+            ptrs.append(put([index, 0, 0, lst, row % 3]))       # word 4: a clothing row's type
         block = put([0x41544144, len(rows), 1] + list(range(len(rows))) + ptrs)
         offs.append(put([th, 0, 0, len(rows), 1, 0, th, block]))
     data = put([0x41544144, len(tables), 1] + [t for t, _ in tables] + offs)
@@ -164,7 +168,7 @@ def sample_tables():
     t[7] = (CHAR, [None] * 75)
     t[14] = (HAIR, [None] * 9)
     t[15] = (STYLE, [None] * 5)
-    t[16] = (CLOTH, [3, 0, 5, 2])           # 10 items
+    t[16] = (CLOTH, [3, 0, 5, 2])           # 10 items in 3 rows (row 1 has no colour): types 0, 2, 0
     t[23] = (VENUE, [None] * 24)
     t[24] = (JEWEL, [0, 2, 0, 4])           # 1 + 2 + 1 + 4 = 8 items
     return t
@@ -199,6 +203,8 @@ def profile_blob(seed=1, cash=500):
     body[states] = 0b10_00_00_10        # hair 0 owned-not-unlocked (2), hair 3 owned (2)
     body[states + 1] = 0b00_00_11_00    # hair 5 owned (3)
     struct.pack_into('<I', body, 0x80 + 0x20, cash)
+    struct.pack_into('<6H', body, 0x80 + 0xA8, 2, 0, 1, 0, 0, 7)       # hair, tattoo, cloth, jewel, Blazin, owned Blazins
+    struct.pack_into('<16I', body, 0x80 + 0xB8, *([1] + [0] * 15))
     return save_file(0x5990, b'DJFFNY::User 17 5', body)
 
 
@@ -246,6 +252,7 @@ def sod(tmp_path):
 def test_layout_counts_items_as_the_game_builds_them(tool, sod):
     out = parse(run(tool, 'layout', sod))
     assert out['items'] == '9 30 8 10 82 5'
+    assert out['rows'] == '9 30 4 3 82 5' and out['types'] == '2 0 1' + ' 0' * 13
     assert out['characters'] == '7 75' and out['venues'] == '23 24'
 
 
@@ -259,7 +266,10 @@ def test_profile_unlocks_every_item_and_nothing_else(tool, sod, tmp_path):
     sizes = [9, 30, 8, 10, 82, 5]
     end = states + sum(n // 4 + 1 for n in sizes)
     changed = [i for i in range(len(before)) if before[i] != after[i]]
-    assert changed and min(changed) >= states and max(changed) < end      # header unsigned, cash and stats untouched
+    counters = range(0x80 + 0xA8, 0x80 + 0xF8)
+    assert changed and all(states <= i < end or i in counters for i in changed)    # header unsigned, cash, stats untouched
+    assert struct.unpack_from('<6H', after, 0x80 + 0xA8) == (9, 30, 3, 4, 82, 7)     # rows; owned Blazins kept
+    assert struct.unpack_from('<16I', after, 0x80 + 0xB8) == (2, 0, 1) + (0,) * 13
     at = states
     for n in sizes:
         for i in range(n):
@@ -363,4 +373,7 @@ def test_the_dumps_item_counts(tool):
         pytest.skip('no dump')
     out = parse(run(tool, 'layout', sod))
     assert out['items'] == '93 30 405 1454 82 5'
+    assert out['rows'] == '93 30 120 326 82 5'
+    # what a finished profile (a converted PS2 sample) holds in its per-type counters
+    assert out['types'] == '40 15 21 11 36 23 15 19 18 7 6 0 73 13 7 22'
     assert out['characters'] == '7 75' and out['venues'] == '23 24'

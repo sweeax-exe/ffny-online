@@ -242,6 +242,15 @@ moves and fighting styles are **per profile**.
   `0xC2E12E98`, or one for an empty list, `sub_000153D0`). For the USA dump: 93, 30, 405, 1454, 82, 5, so the
   arrays end at `S+0x4FCD`. Two played profiles (the PS2 samples, converted) agree: every padding bit is 0 and
   the bytes after the last array are 0; a finished one has no clothing or hair locked.
+- **Row counters.** Beside the states the slot keeps how many rows of each kind are unlocked: words at
+  `S+0xA8` (hair), `S+0xAA` (tattoos), `S+0xAC` (clothing), `S+0xAE` (jewellery), `S+0xB0` (Blazin moves;
+  `S+0xB2` looks like the owned Blazins) and sixteen dwords from `S+0xB8`, one per clothing type (the row's
+  `Type`, the shop section). `sub_00015B80` raises them when a delivery unlocks a row. The clothing shop's
+  "126 / 326 UNLOCKED" and its sections' lines are these counters, not the states: a first edit that set only
+  the states left SUS at 126 / 326 although the game held 1449 of 1454 clothing items unlocked
+  (`RECOMP_UNLOCK_REPORT=1`, below). The gym's "LEARN MOVES n/82" counts the states. A finished profile (the
+  AMP sample) holds exactly the table totals: 93, 30, 326, 120 rows and per type 40 15 21 11 36 23 15 19 18 7 6
+  0 73 13 7 22.
 - **Shipments** (table 8, 175 rows) are the story's deliveries: `sub_00015B80` gives a row's cash and development
   points and ORs state 1 (or 2 with flag `0x20`) into each item's bits. A shipment has no record of its own in the
   save, so "every shipment delivered" is the same as every item unlocked. A later delivery in Story only sets the
@@ -258,7 +267,7 @@ moves and fighting styles are **per profile**.
 - Options: every fighter and venue id added to its set (existing ids and their flag kept, sorted, unused slots
   `0xFFFFFFFF`), every locked song set to 1 with the next unlock order. Reward points are left alone.
 - The profile: bit 0 (Unlocked) set for every item of the six arrays, so locked items become Unlocked and Owned
-  ones stay Owned; padding bits untouched. Optionally cash raised to 999,999 (never lowered). Nothing else:
+  ones stay Owned; padding bits untouched. The row counters raised to the totals (never lowered). Optionally cash raised to 999,999 (never lowered). Nothing else:
   stats, development points, styles chosen, the created fighter, story progress and the header stay as they are.
 - Both files signed again with the port's key (the three HMAC-SHA1 fields, as the import does), written beside
   the file and renamed over it, after a backup of `UserData` (reason `unlock`). Undo restores that backup.
@@ -266,6 +275,10 @@ moves and fighting styles are **per profile**.
   Options file yet, more fighters or venues than the game's sets hold (a database with appended rows).
 - The item counts are read from the database the game reads (`<data>/override/assets/djv2.sod` first, then the
   dump), so a mod with more clothing rows gets the layout the game builds for it.
+
+`RECOMP_UNLOCK_REPORT=1` (`src/patches/dev_unlock.c`, read only) logs on each screen change what the current
+profile holds as the game sees it: `[UNLOCK-REPORT] <screen> profile <i> fighters <n> venues <n> cash <n>`, then
+per kind `<items>@+<offset in the slot> <locked>/<unlocked>/<owned>`.
 
 Online is not affected: the online hub's fighters and venues come from the dump (`src/hooks/online_data.c`), a
 room's match is started with explicit fighter and venue ids (`Game.ChooseVenue`, `Controller.ControllerSetup`,

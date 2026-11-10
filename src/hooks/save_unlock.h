@@ -15,6 +15,10 @@
 //     (0 locked, 1 unlocked, 2/3 owned) for hair styles, tattoos, jewellery, clothing, Blazin moves and
 //     fighting styles, in that order, each (items / 4 + 1) bytes. The item counts come from the
 //     database (assets/djv2.sod), as the game builds them (sub_00013CB0 and the five after it).
+//     Beside them the profile keeps counts of unlocked rows, which the shops show as "N / M UNLOCKED"
+//     and the story's deliveries (sub_00015B80) raise one by one: words at profile +0xA8 (hair),
+//     +0xAA (tattoos), +0xAC (clothing), +0xAE (jewellery), +0xB0 (Blazin moves), and one dword per
+//     clothing type from +0xB8. Unlocking sets them to the totals, as a finished profile has them.
 #pragma once
 #include "save_manager.h"
 
@@ -25,6 +29,10 @@ struct UnlockLayout
 {
     // hair styles, tattoos, jewellery, clothing, Blazin moves, fighting styles (the order in the profile)
     uint32_t items[6] = {};
+    // The rows behind them (a clothing row has one item per colour), and the clothing rows per type: the
+    // shops' "N / M UNLOCKED" lines read per-profile counters of rows, not the states (below).
+    uint32_t rows[6] = {};
+    uint32_t clothing_type_rows[16] = {};
     uint32_t character_table = 0, characters = 0;   // table index (an id is table << 24 | row) and rows
     uint32_t venue_table = 0, venues = 0;
 };
