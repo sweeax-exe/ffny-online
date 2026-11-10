@@ -255,7 +255,7 @@ def test_handshake_and_activity_json(output):
     assert act['state'] == 'as "Quote\\Back" vs B'
     assert act['timestamps'] == {'start': 1762000000}
     assert act['assets'] == {'large_image': 'ffny_logo', 'large_text': 'FFNY Online'}
-    assert act['buttons'] == [{'label': 'Join the Discord', 'url': 'https://discord.gg/zCZKVDnKaP'},
+    assert act['buttons'] == [{'label': 'Join the Discord', 'url': 'https://discord.gg/ffnyonline'},
                               {'label': 'Website', 'url': 'https://play.defjam.online'}]
     short = json.loads(line(output, 'short'))
     assert short['args']['activity'] == {'state': 'Main menu'}      # a one-character text is left out

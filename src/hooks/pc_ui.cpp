@@ -2247,7 +2247,7 @@ static ImU32 col(const ImVec4 &v, float alpha = 1.0f) { return ImGui::GetColorU3
 static const ImVec4 k_white(1, 1, 1, 1), k_black(0, 0, 0, 1), k_glass(0.07f, 0.07f, 0.085f, 1.0f);
 static const ImVec4 k_green(0.35f, 0.85f, 0.45f, 1.0f), k_error(1.0f, 0.45f, 0.4f, 1.0f);
 static const ImVec4 k_discord(0.345f, 0.396f, 0.949f, 1.0f);
-static const char *const k_discord_invite = "https://discord.gg/zCZKVDnKaP";
+static const char *const k_discord_invite = "https://discord.gg/ffnyonline";
 
 // Where the background picture lies this frame, in screen pixels (larger than the window while it
 // zooms). The glass samples the blurred copy at the same place, so it looks like frosted glass over it.

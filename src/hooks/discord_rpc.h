@@ -23,7 +23,7 @@ extern "C" {
 #define DRPC_LARGE_IMAGE    "ffny_logo"
 #define DRPC_LARGE_TEXT     "FFNY Online"
 #define DRPC_BUTTON1_LABEL  "Join the Discord"
-#define DRPC_BUTTON1_URL    "https://discord.gg/zCZKVDnKaP"
+#define DRPC_BUTTON1_URL    "https://discord.gg/ffnyonline"
 #define DRPC_BUTTON2_LABEL  "Website"
 #define DRPC_BUTTON2_URL    "https://play.defjam.online"
 

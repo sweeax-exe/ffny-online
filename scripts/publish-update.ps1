@@ -115,7 +115,7 @@ $Notes
 ### Install
 Download ``DefJamSetup-$version-windows-x64.exe``, run it, point it at your dump. The setup is unsigned, so Windows SmartScreen may warn; choose "More info" and "Run anyway". Installed copies update through the launcher.
 
-Questions, bugs, opponents: [Discord](https://discord.gg/zCZKVDnKaP). SHA-256 of the setup is in the ``.sha256`` file next to it.
+Questions, bugs, opponents: [Discord](https://discord.gg/ffnyonline). SHA-256 of the setup is in the ``.sha256`` file next to it.
 "@
 $notesFile = Join-Path $out 'release-notes.md'
 [IO.File]::WriteAllText($notesFile, $body, (New-Object Text.UTF8Encoding($false)))

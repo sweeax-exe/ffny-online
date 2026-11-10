@@ -56,8 +56,10 @@ copy of the game, `scripts/apt-patch.py`; the art and fonts of the online screen
 
 In a room every player's card shows their ping to the server (players of build 30 and later report it),
 and a red line warns when a match would have a high ping (above 150 ms between the two slowest players:
-inputs will feel delayed). Ranked play runs on the Europe server only: on US East and US West the RANKED
-MATCH entry says so and switches over with A.
+inputs will feel delayed). Ranked play searches every server: one matchmaker on the account service pairs
+players from Europe, US East and US West, and the set is played on the relay with the better ping for both
+(the game moves there by itself). Should the current server not offer ranked at the moment, the RANKED MATCH
+entry says so and switches over with A.
 
 Modes offered online: One on One, 3-Way, Free for All (more follow once tested online). The
 fight's first-time help cards (BLAZIN', weapon, KO) are skipped in online matches: they depend on

@@ -161,7 +161,7 @@ UINT dpi = 96;
 constexpr UINT WM_PAYLOAD = WM_APP + 10, WM_FOUND = WM_APP + 11, WM_IDENTITY = WM_APP + 12, WM_PLAN = WM_APP + 13,
                WM_SETUP_READY = WM_APP + 14, WM_SETUP_FAILED = WM_APP + 15, WM_TRAY = WM_APP + 16;
 constexpr float W = 1100, H = 680;
-const wchar_t* DISCORD = L"https://discord.gg/zCZKVDnKaP";
+const wchar_t* DISCORD = L"https://discord.gg/ffnyonline";
 const wchar_t* DUMP_GUIDE = L"https://github.com/sweeax-exe/ffny-online/blob/main/docs/dump-your-disc.md";
 
 struct Answer { int token; DWORD code; std::string text; };
