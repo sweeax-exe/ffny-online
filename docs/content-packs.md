@@ -70,6 +70,8 @@ python tools/defjam-mcp/dj.py lock run -- python scripts/test-content-launcher.p
   --catalogue http://127.0.0.1:8195/updates/content/index.json --keys <keys.json with the test key>
 python -m pytest -q tests/unit/test_content_sync.py tests/unit/test_content_compose.py
 python setup/mods.py compose --data-dir <data> [--game-dir <dump>]     (compose by hand)
+python tools/defjam-mcp/dj.py scenario offline --content-root <data>    (a fight with that folder's packs;
+  online: --content-root "<data>," gives copy 0 the packs and copy 1 none, for ERROR 15)
 ```
 
 `FFNY_CONTENT_URL` may name a plain-HTTP catalogue on 127.0.0.1 only, with its key from
