@@ -112,6 +112,7 @@ extern ptrdiff_t g_xbox_mem_offset;
 static BOOL load_xbe(const char *path, void **out_data, size_t *out_size);
 int pc_settings_init(void);   /* src/hooks/pc_settings.c */
 void account_init(void);      /* src/hooks/account.c */
+void netplay_data_print_start(void);  /* src/hooks/netplay.c: the online game-file print, in the background */
 void pc_settings_capture_start(void);   /* src/hooks/pc_settings.c (Windows) */
 void pc_settings_set_args(int argc, char **argv);
 void netplay_on_crash(void);  /* src/hooks/netplay.c: an online match becomes a no contest */
@@ -766,6 +767,7 @@ static int host_main(void)
     if (!pc_settings_init())
         return 1;
     account_init();             /* a saved Discord sign-in is checked in the background */
+    netplay_data_print_start(); /* the fight files hashed for online play, in the background */
 
     printf("=== Def Jam: Fight for NY - Static Recompilation ===\n");
     printf("Loading XBE...\n");

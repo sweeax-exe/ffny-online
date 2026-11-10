@@ -153,7 +153,9 @@ each round trip plus one step, between 2 and 10. A code match uses the host's se
 - **Languages (build 44, upstream v0.13.0):** the game's own French (`[language] game = french`) and
   language mods change text, subtitles, fonts and menu art, not the fight. Two PCs with different
   languages play together; a French and an English copy stayed in step in the two-copy test. The game
-  files' print sent with each START (`make_data_print`) hashes the fight files as the game opens them,
+  files' print sent with each START (`make_data_print`) hashes the fight files as the game opens them
+  (since build 72 also the animation archives `motion/wres_all.viv`, `blazin.viv`, `base00.viv` and
+  `assets/v2ta.viv`, about 80 MB, hashed once on a background thread from the start of the game),
   a language mod's rebuilt copy included, so a mod that rebuilds one of those files shows the "game
   files differ" notice; one that only translates text archives does not. A mod's changes to
   `default.xbe`'s data sections (strings) are not part of the print.

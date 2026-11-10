@@ -2057,15 +2057,20 @@ static void check_hashes(void)
         }
 }
 
-/* The game files a fight reads (fighters, moves, the CPU fighters' AI, and the database Battle
- * mode takes each fighter's record from), as this PC has them: the override folder's copy where
- * there is one (a mod). Two PCs whose files differ play the same inputs differently, and the setup
- * checks only default.xbe. Made once, on the network thread. */
+/* The game files a fight reads (fighters, moves, the CPU fighters' AI, the database Battle mode
+ * takes each fighter's record from, and since build 72 the animation archives: the per-core banks
+ * of wres_all.viv, the Blazins, the base motions and v2ta.viv, whose root motion moves the
+ * fighters), as this PC has them: the override folder's copy where there is one (a mod). Two PCs
+ * whose files differ play the same inputs differently, and the setup checks only default.xbe.
+ * About 80 MB, read once on a background thread from the start of the game
+ * (netplay_data_print_start). */
 static const char *const k_fight_files[] = {
     "fighter.xml", "gamedata.xml", "gconfig.xml", "venue.xml", "assets\\gamecore.xml", "assets\\combs.xml",
     "assets\\ai\\ai.viv", "motion\\main_all.dat", "assets\\djv2.sod",
+    "motion\\wres_all.viv", "motion\\blazin.viv", "motion\\base00.viv", "assets\\v2ta.viv",
 };
-static uint32_t g_data_print;
+static volatile uint32_t g_data_print;
+static INIT_ONCE g_data_print_once = INIT_ONCE_STATIC_INIT;
 static char g_data_over[160];       /* the fight files read from the override folder, for the reports */
 
 /* The toolkit's game-file redirect (kernel.h): a language mod's rebuilt copy of a file
@@ -2082,7 +2087,9 @@ static uint32_t file_print(const char *name, int *overridden)
     const char *data = getenv("DEFJAM_DATA");
     char path[MAX_PATH];
     FILE *f = NULL;
-    uint32_t h = 2166136261u;
+    uint64_t lane[4] = { 0xCBF29CE484222325ull, 0x84222325CBF29CE4ull, 0x6C62272E07BB0142ull, 0x07BB01426C62272Eull };
+    uint64_t total = 0, x;
+    uint32_t h;
     size_t got, i;
     *overridden = 0;
     /* A language mod that rebuilds one of these files changes what the fight reads: printed as
@@ -2105,18 +2112,40 @@ static uint32_t file_print(const char *name, int *overridden)
         f = fopen(path, "rb");
     }
     if (!f) return 0;
-    while ((got = fread(buf, 1, sizeof(buf), f)) > 0)
-        for (i = 0; i < got; i++) h = (h ^ buf[i]) * 16777619u;
+    /* FNV-1a's step on four 64-bit lanes of 8-byte words, so wres_all.viv's 64 MB take tens of
+     * milliseconds rather than a byte loop's few hundred; the bytes after a chunk's last full 32 go
+     * into lane 0 one at a time. Little-endian on every platform the game runs on. */
+    while ((got = fread(buf, 1, sizeof(buf), f)) > 0) {
+        size_t full = got & ~(size_t)31;
+        for (i = 0; i < full; i += 32) {
+            uint64_t w[4];
+            memcpy(w, buf + i, sizeof(w));
+            lane[0] = (lane[0] ^ w[0]) * 0x100000001B3ull;
+            lane[1] = (lane[1] ^ w[1]) * 0x100000001B3ull;
+            lane[2] = (lane[2] ^ w[2]) * 0x100000001B3ull;
+            lane[3] = (lane[3] ^ w[3]) * 0x100000001B3ull;
+        }
+        for (; i < got; i++) lane[0] = (lane[0] ^ buf[i]) * 0x100000001B3ull;
+        total += got;
+    }
     fclose(f);
+    x = total * 0x9E3779B97F4A7C15ull;
+    for (i = 0; i < 4; i++) {
+        x ^= lane[i] + 0x9E3779B97F4A7C15ull + (x << 6) + (x >> 2);
+        x = (x ^ (x >> 31)) * 0xBF58476D1CE4E5B9ull;
+    }
+    h = (uint32_t)(x ^ (x >> 32));
     return h ? h : 1;
 }
 
-static void make_data_print(void)
+static BOOL CALLBACK make_data_print(PINIT_ONCE once, PVOID param, PVOID *context)
 {
-    char text[400], over[160];
+    char text[640], over[160];
     int n = 0, o = 0;
     unsigned i;
     uint32_t h = 2166136261u;
+    ULONGLONG began = GetTickCount64();
+    (void)once; (void)param; (void)context;
     over[0] = 0;
     for (i = 0; i < sizeof(k_fight_files) / sizeof(k_fight_files[0]); i++) {
         int overridden;
@@ -2125,9 +2154,34 @@ static void make_data_print(void)
         if (n < (int)sizeof(text)) n += snprintf(text + n, sizeof(text) - (size_t)n, "%s%s %08X", i ? ", " : "", k_fight_files[i], f);
         if (overridden && o < (int)sizeof(over)) o += snprintf(over + o, sizeof(over) - (size_t)o, " %s", k_fight_files[i]);
     }
-    g_data_print = h ? h : 1;
     snprintf(g_data_over, sizeof(g_data_over), "%s", o ? over + 1 : "");
-    fprintf(stderr, "[NETPLAY] game files %08X: %s%s%s\n", g_data_print, text, o ? "; from the override folder:" : "", over);
+    g_data_print = h ? h : 1;
+    fprintf(stderr, "[NETPLAY] game files %08X (%u ms): %s%s%s\n", g_data_print,
+            (unsigned)(GetTickCount64() - began), text, o ? "; from the override folder:" : "", over);
+    return TRUE;
+}
+
+/* The print, made exactly once: by the background pass started with the game, or by the first
+ * caller before it (a later caller waits for that pass to end; nothing is hashed twice). */
+static void data_print_ready(void)
+{
+    InitOnceExecuteOnce(&g_data_print_once, make_data_print, NULL, NULL);
+}
+
+static DWORD WINAPI data_print_thread(LPVOID unused)
+{
+    (void)unused;
+    SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);
+    data_print_ready();
+    return 0;
+}
+
+/* main.c, once the game folder and the language and song redirects are known: the print is made
+ * while the game boots, so going online never waits for the reads. */
+void netplay_data_print_start(void)
+{
+    HANDLE t = CreateThread(NULL, 0, data_print_thread, NULL, 0, NULL);
+    if (t) CloseHandle(t);
 }
 
 /* Hub: this PC's ping for the current START, so every PC derives the same input delay. */
@@ -3958,7 +4012,7 @@ static DWORD WINAPI net_thread(LPVOID unused)
         if (name) name(GetCurrentThread(), L"online play");
     }
     N.started = N.last_rx = GetTickCount64();
-    if (!g_data_print) make_data_print();
+    data_print_ready();     /* made in the background since the start: waits only while that pass runs */
     while (!N.stop) {
         ULONGLONG now = GetTickCount64();
         int got;

@@ -391,6 +391,9 @@ int netplay_in_lobby(void);     /* 1 while the session came from netplay_lobby *
 int netplay_lobby_address(char *out, int size);
 int netplay_rtt(void);          /* this PC's last ping to its relay in ms, -1 unknown */
 void netplay_build_fingerprint(uint8_t out[8]);     /* HELLO's build field: rooms meet only the same one */
+/* The fight files' print (fighters, moves, AI, database, animation archives), made once on a background
+ * thread; main.c starts it at boot, the network thread waits for it only if it still runs. */
+void netplay_data_print_start(void);
 /* A room member's ping to the relay in ms, as it reports it (relay slot), -1 not known; this PC's
  * own slot gives netplay_rtt(). Players report it every two seconds in a room (builds from 30). */
 int netplay_room_ping(int slot);

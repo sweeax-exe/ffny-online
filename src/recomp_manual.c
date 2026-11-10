@@ -53,6 +53,7 @@
 #include "patches/cheats.h"
 #include "patches/online_guard.h"   /* cheats refused while online */
 #include "patches/menu_geometry.h"
+#include "hooks/dynload_guard.h"
 #include "patches/cinema_timing.h"
 
 /* Crowd test controls (src/hooks/crowd_control.c, RECOMP_TEST_CROWD; off unless set). */
@@ -152,8 +153,21 @@ void sub_001810B0_enter(void) { ws_apt_load_begin(MEM32(g_esp + 8)); }
 void sub_00056F50_enter(void) { ws_apt_load_done(MEM32(g_esp + 8)); }
 /* DynamicLoader's ELF parser: the input descriptor's +0x10 is the raw header,
  * still before section fixup, relocation and vertex-buffer upload. */
+/* The two dlopen + Resolve constructors (sub_0010B3E0, sub_0010B430): the address their caller left,
+ * from the return address of their dlopen or Resolve call; 0 for another caller (CModel). */
+static uint32_t dynload_outer(uint32_t esp)
+{
+    switch (MEM32(esp)) {
+    case 0x0010B41Cu: return MEM32(esp + 0xC);  /* sub_0010B3E0's dlopen: arg, esi */
+    case 0x0010B423u: return MEM32(esp + 8);    /* sub_0010B3E0's Resolve: esi */
+    case 0x0010B471u: return MEM32(esp + 0x10); /* sub_0010B430's dlopen: arg, esi, ebx */
+    case 0x0010B47Eu: return MEM32(esp + 0xC);  /* sub_0010B430's Resolve: esi, ebx */
+    default: return 0;
+    }
+}
 void sub_00109F80_enter(void)
 {
+    dynload_guard_image(g_ecx, MEM32(g_esp), dynload_outer(g_esp));
     rollback_loader_parse(g_ecx);
     menu_geometry_register(MEM32(g_ecx + 0x10));
 }
@@ -466,8 +480,16 @@ void sub_0002C530_enter(void)
 }
 void sub_0003C6E0_enter(void) { rollback_audio_init_begin(); }
 void sub_00012CC0_enter(void) { rollback_audio_init_end(); }
-/* EAGL's DynamicLoader::Resolve: a model, weapon or render object is linked in (rollback.c logs it in fights). */
-void sub_0010AC20_enter(void) { rollback_note_dynamic_load(MEM32(g_esp), g_ecx); }
+/* EAGL's DynamicLoader::Resolve: a model, weapon or render object is linked in (rollback.c logs it in
+ * fights). Checked first (dynload_guard.c): a damaged object (report 5519e0: relocations of text, a
+ * callback of 0xF68) is taken back as a failed dlopen, so Resolve returns at once instead of reading
+ * garbage; the [DYNLOAD] line names the caller and the image. */
+void sub_0010AC20_enter(void)
+{
+    dynload_guard_check(g_ecx, MEM32(g_esp), dynload_outer(g_esp));
+    rollback_note_dynamic_load(MEM32(g_esp), g_ecx);
+}
+
 /* The music director's stream (re)opens and flushes, and the stream layer's flush (docs/research/
  * stream-table-crash.md 8): whether rollback's re-run steps reach them. Logged with the re-run flag. */
 static void music_trace(const char *what)
@@ -2424,3 +2446,9 @@ void sub_00028F90_enter(void) { ws_trace_pos(); }
 void sub_0002E390_enter(void) { ws_trace_vtx_arr(); }
 void sub_0002E470_enter(void) { ws_trace_vtx(); }
 
+/* dynload_guard.c: Resolve's unresolved-symbol callback must be a function the lifted code has. */
+extern recomp_func_t recomp_lookup(uint32_t xbox_va);
+int dynload_code_ok(uint32_t va)
+{
+    return va >= 0x10000u && (recomp_lookup_manual(va) != NULL || recomp_lookup(va) != NULL);
+}
