@@ -255,7 +255,8 @@ class Session:
         return tokens
 
     def make_root(self, i, fixture=None, partitions=False):
-        r = roots.create("%s%d" % (self.name[:12], i), fixture=fixture, partitions=partitions)
+        r = roots.create("%s%d" % (self.name[:12], i), fixture=fixture, partitions=partitions,
+                         content=roots.content_for(i))
         self.roots.append(r)
         return r
 

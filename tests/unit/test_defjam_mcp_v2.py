@@ -160,6 +160,25 @@ def test_a_test_override_is_laid_over_the_data_override(fake_data, tmp_path, mon
     assert (fake_data / "override" / "screens" / "a.big").read_bytes() == b"port"
 
 
+def test_a_content_root_gives_each_copy_its_packs(fake_data, tmp_path, monkeypatch):
+    content = tmp_path / "content-root"
+    (content / "mods" / "pack-a").mkdir(parents=True)
+    (content / "mods" / "pack-a" / "manifest.ini").write_text("[pack]")
+    (content / "mod-manager" / "content-files" / "assets").mkdir(parents=True)
+    (content / "mod-manager" / "content.ini").write_text("[content]")
+    (content / "mod-manager" / "content-files" / "assets" / "v2ip.viv").write_bytes(b"BIGF composed")
+    monkeypatch.setenv("DJ_CONTENT", str(content) + ",")
+    assert roots.content_for(0) == str(content) and roots.content_for(1) is None
+    root = roots.create("ct", content=roots.content_for(0))
+    assert not roots.is_link(os.path.join(root, "mods"))                             # copies
+    assert open(os.path.join(root, "mod-manager", "content.ini")).read() == "[content]"
+    files = os.path.join(root, "mod-manager", "content-files")
+    assert roots.is_link(files)                                                      # the big files: a junction
+    assert open(os.path.join(files, "assets", "v2ip.viv"), "rb").read() == b"BIGF composed"
+    roots.destroy(root)
+    assert (content / "mod-manager" / "content-files" / "assets" / "v2ip.viv").read_bytes() == b"BIGF composed"
+
+
 def test_destroy_refuses_unmanaged_folders(fake_data, tmp_path):
     with pytest.raises(PermissionError):
         roots.destroy(str(fake_data))
