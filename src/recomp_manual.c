@@ -1744,7 +1744,8 @@ static void funccall_hook(void)
         fprintf(stderr, "[FUNCCALL] %s\n", text);
     /* The play-test recorder keeps every one, with its time (the log stops at 4000). */
     recorder_event_text("fe", "text", text);
-    xbox_NoteAnchorEvent(text);
+    if (!netplay_hill_watch_quiet())       /* a fight only watched (build 70): not an anchor of this copy's presses */
+        xbox_NoteAnchorEvent(text);
     if (automatch_hold_funccall(text)) {    /* online: a rematch the others have not chosen yet */
         g_eax = 0;
         g_esp += 4;                         /* cdecl: only the return address is popped */

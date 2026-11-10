@@ -58,6 +58,10 @@ const char *shot_label();
  * spectator's text bar (ENTER). Fighters never type during their match: their keys stay the fight's.
  * fight_chat_wanted() once a frame; draw_fight_chat returns true while the bar takes the keyboard
  * (then the game gets no input on this PC: a spectator's only). */
+/* Build 70: the spectator HUD over a hill fight this PC watches live (netplay_hill_watch): call
+ * hill_hud_wanted() once a frame; draw_hill_hud draws it (no input). */
+bool hill_hud_wanted();
+void draw_hill_hud(ImDrawList *dl, ImVec2 display);
 bool fight_chat_wanted();
 bool draw_fight_chat(ImDrawList *dl, ImVec2 display);
 bool fight_chat_typing();

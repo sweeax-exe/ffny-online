@@ -119,6 +119,12 @@ def condense_crash(block, sites=None, callers=6):
 
 START_RE = re.compile(r"\[NETPLAY\] START: seed (\w+), type (\d+), rules (\d+), venue (\d+), (\d+) players, "
                       r"this PC is player (\d+)(.*)")
+# build 70: a hill room's waiting player runs the fight it watches (netplay.c on_watch)
+WATCHED_RE = re.compile(r"\[NETPLAY\] START: seed (\w+), type (\d+), rules (\d+), venue (\d+), (\d+) players, "
+                        r"this PC watches \(a hill fight, live\)")
+WATCH_PLAYED_RE = re.compile(r"\[NETPLAY\] watching: (\d+) steps played, (\d+) stop\(s\) for late entries in the fight")
+WATCH_BACK_RE = re.compile(r"\[NETPLAY\] watching: back on the hill screen \((.*)\)")
+FIGHT_WAITS_RE = re.compile(r"\[NETPLAY\] fight waits: (\d+) of 100 ms or more mid-fight, the longest (\d+) ms")
 REPORTED_RE = re.compile(r"\[NETPLAY\] match result: winners 0x([0-9A-Fa-f]+)")
 STARTS_RE = re.compile(r"\[NETPLAY\] match (\w+) starts in (\w+) \((\d+) players, delay (\d+)\); loaded in ([\d.]+) s")
 CHECKS_RE = re.compile(r"\[NETPLAY\] in step: (\d+) checksums compared and equal \(match (\w+), step (\d+)\)")
@@ -161,6 +167,12 @@ def parse_matches(lines):
                           "venue": int(m.group(4)), "players": int(m.group(5)), "me": int(m.group(6)),
                           "note": m.group(7).strip(" ()")})
             continue
+        m = WATCHED_RE.match(l)
+        if m:   # a hill fight this copy only watches (build 70): kept apart from the fought ones (analyze_copy)
+            cur = new(i, {"seed": m.group(1), "type": int(m.group(2)), "rules": int(m.group(3)),
+                          "venue": int(m.group(4)), "players": int(m.group(5)), "me": 0, "note": "watched"})
+            cur.update(watched=True, watch_steps=0, watch_stops=0, watch_end=None)
+            continue
         m = STARTS_RE.match(l)
         if m:
             if cur is None or cur["id"] is not None:
@@ -201,6 +213,14 @@ def parse_matches(lines):
             cur["result"] = RESULT_RE.match(l).group(1)
         elif OVER_RE.match(l):
             cur["over"] = OVER_RE.match(l).group(1)
+        elif WATCH_PLAYED_RE.match(l) and cur.get("watched"):
+            mm = WATCH_PLAYED_RE.match(l)
+            cur["watch_steps"], cur["watch_stops"] = int(mm.group(1)), int(mm.group(2))
+        elif WATCH_BACK_RE.match(l) and cur.get("watched"):
+            cur["watch_end"] = WATCH_BACK_RE.match(l).group(1)[:60]
+        elif FIGHT_WAITS_RE.match(l) and not cur.get("watched"):
+            mm = FIGHT_WAITS_RE.match(l)
+            cur["fight_waits"], cur["fight_wait_max_ms"] = int(mm.group(1)), int(mm.group(2))
         elif RB_SUM_RE.match(l):
             cur["rollbacks"] = l[len("[ROLLBACK] "):][:120]
         elif UNPLUG_RE.match(l):
@@ -534,7 +554,11 @@ def analyze_copy(text):
         k = owner(i)
         if 0 <= k < len(started):
             started[k].setdefault("crash", c[0])
-    return {"matches": matches, "started": started, "crashes": crashes,
+    # build 70: the hill fights this copy only watched are not its matches (their telemetry kept the order)
+    watched = [m for m in started if m.get("watched")] + [m for m in matches if m.get("watched") and m.get("starts_line") is None]
+    started = [m for m in started if not m.get("watched")]
+    return {"matches": [m for m in matches if not m.get("watched")], "started": started, "watched": watched,
+            "crashes": crashes,
             "screens": [m.group(1) for m in (SCREEN_RE.match(l) for l in lines) if m][-3:],
             "lines": len(lines)}
 

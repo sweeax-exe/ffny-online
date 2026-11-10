@@ -110,6 +110,7 @@ def _rb_relay_extra(rollback, modes=None):
     return ["-rollback-modes", modes or "all"] if rollback == "mandatory" else []
 
 
+HILL_LIVE_UP = "since the START (watching)"   # netplay.c: a watched fight under way (in hill rooms, build 70)
 NOTE_SENT = "[REPORT] note after the match for report "     # ... sent: HTTP <status> (bug_report.c, the note after the match)
 
 
@@ -1729,6 +1730,8 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
         watch = WATCH + list(DRAFT_SHOTS) if draft else WATCH
         if reports:
             watch = watch + [NOTE_SENT]
+        if mode in ("koth", "ffarot"):
+            watch = watch + [HILL_LIVE_UP]  # build 70: a waiting copy runs the fight it watches
         for i in range(players):
             # which way the copy's fighter approaches: Team puts room slots 0 and 1 on the left and 2 and
             # 3 on the right; on the hill (the KO winner is slot 0) copy 0 stays king on the left and
@@ -1896,6 +1899,18 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
                         more_done[("draft", name)] = True
                         for k in range(len(cs)):
                             _png(s, k, "%s-copy%d" % (name, k), shots)
+            if mode in ("koth", "ffarot"):
+                # build 70: each copy's first two watched fights, 6 s after they are under way on it (mid-fight:
+                # the test knockout comes at step 600, 10 s in)
+                for c in cs:
+                    for n in (1, 2):
+                        key = ("watch", c.index, n)
+                        if c.watch.count(HILL_LIVE_UP) >= n and key not in more_done:
+                            more_done[key] = time.time() + 6
+                        due = more_done.get(key)
+                        if isinstance(due, float) and time.time() >= due:
+                            more_done[key] = True
+                            _png(s, c.index, "watch-w%d-copy%d" % (n, c.index), shots)
             if shot_due is None and cs[0].watch.count(" starts in "):
                 shot_due = time.time() + 8
             if more_shots and shot_due and not more_done.get("versus") and time.time() >= shot_due - 7:
@@ -1979,6 +1994,7 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
         ok = ok and not any(p.startswith("cpu:") for p in problems)
     if mode in ("koth", "ffarot"):
         result["hill_gaps"], result["hill_forced"], result["hill_gaps_watched"] = hill_gap_check(logs, linger, problems)
+        result["hill_watch"] = hill_watch_check(analyses, logs, problems)
         if linger is not None:      # taken off the summary by the game: no rewards step (expected)
             problems[:] = [p for p in problems if not re.match(r"m\d+ copy \d+: summary not accepted", p)]
             ok = not problems       # online_rows failed on those alone otherwise
@@ -2060,6 +2076,39 @@ def hill_gap_check(logs, linger, problems):
         if not forced.get(int(linger)):
             problems.append("hill: copy %s was never taken off its results" % linger)
     return gaps, forced, watched
+
+
+def hill_watch_check(analyses, logs, problems):
+    """Build 70: the hill fights each copy watched live (it ran them from the fighters' entries): steps played,
+    checksums compared and equal with the fighters', any desync, how it went back to the hill screen; and per copy
+    its own fights' lockstep waits mid-fight (a watcher must never hold the fighters up). A copy that announced
+    live watching but played no step of any watched fight it left, a watched fight's desync, and a fighter's wait of a
+    second or more mid-fight are problems. A copy whose log never ran one (an
+    older build: its WATCH lines say "not running the fight") is listed as old."""
+    out = {}
+    for i, a in sorted(analyses.items()):
+        text = logparse.read_text(logs[i]) if i in logs else ""
+        live = text.count("(watching live: the fight runs here)")
+        old = text.count("(watching, not running the fight)")
+        fights = [{"seed": (m.get("start") or {}).get("seed"), "id": m.get("id"), "steps": m.get("watch_steps", 0),
+                   "stops": m.get("watch_stops", 0), "checks": m.get("checks", 0),
+                   "desync": (m.get("desync") or {}).get("step"), "back": m.get("watch_end")}
+                  for m in a.get("watched", [])]
+        waits = [(m.get("fight_waits"), m.get("fight_wait_max_ms")) for m in a.get("started", [])
+                 if m.get("fight_waits") is not None]
+        out[str(i)] = {"live_watches": live, "old_watches": old, "watched": fights,
+                       "fight_waits": [w[0] for w in waits], "fight_wait_max_ms": max([w[1] for w in waits] or [0])}
+        for f in fights:
+            if f["desync"] is not None:
+                problems.append("hill watch: copy %d's watched fight %s went out of sync at step %s" % (i, f["seed"], f["desync"]))
+        # a fight left early (this copy called for the next one) may end before its first logged checksums, and
+        # the run may stop while a watched fight loads: only the watched fights that ended count
+        ended = [f for f in fights if f["back"]]
+        if ended and not any(f["steps"] > 0 for f in ended):
+            problems.append("hill watch: copy %d left %d watched fights but played no step of any" % (i, len(ended)))
+        if waits and max(w[1] for w in waits) >= 1000:
+            problems.append("hill watch: copy %d waited %d ms mid-fight for another fighter" % (i, max(w[1] for w in waits)))
+    return out
 
 
 def rules_check(logs, fighter_rules, banned_tier, problems):

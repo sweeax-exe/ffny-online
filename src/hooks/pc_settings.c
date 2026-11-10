@@ -109,6 +109,10 @@ static RecompSetting g_display_settings[] = {
       "Show \"Playing FFNY Online\" in your Discord profile while the Discord app runs on this PC: where you are "
       "(launcher, menus, Story, Battle, the online lobby or a room), and in an online match the mode, the venue, your "
       "fighter and the other players' names. Everyone who can see your Discord profile sees it." },
+    { "online", "hill_watch", RECOMP_SETTING_BOOL, 1, 0, 0, NULL, "RECOMP_HILL_WATCH", 0,
+      "Watch fights while waiting: in King of the Hill and FFA rotation rooms the current fight runs live on your "
+      "screen while you wait for your turn (START goes back to the hill screen for that fight). Off: the hill screen "
+      "shows who fights and the result." },
     { "online", "rollback", RECOMP_SETTING_BOOL, 0, 0, 0, NULL, NULL, RECOMP_SETTING_RESTART,
       "Beta: rollback netcode in online fights, used only when every player in the match has it on. Your presses "
       "count at once and the game corrects itself when the other player's arrive late. It can still crash." },
