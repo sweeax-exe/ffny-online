@@ -8526,7 +8526,10 @@ static void hill_leave_tick(void)
         }
     } else if (sm >= 0x10000u && MEM32(sm + 0x24u) != 0) {
         wait = "a screen loads";
-    } else if (memcard_save_busy()) {
+    } else if (memcard_save_busy() && now - N.spec_results < 3000) {
+        /* only a short while: in the build 71 turf run its flags stayed set on a watcher's summary and the
+         * copy never left it (logs/dj/20261110-063902-turf copy 3); a fighter's results are left the same way
+         * without this wait (hill_results_tick) */
         wait = "the memory card saves";
     } else if (now - N.spec_results >= 1000 && !(N.hill_quit_at && now - N.hill_quit_at < 5000)) {
         tries = 0;

@@ -2103,7 +2103,7 @@ def hill_watch_check(analyses, logs, problems):
                 problems.append("hill watch: copy %d's watched fight %s went out of sync at step %s" % (i, f["seed"], f["desync"]))
         # a fight left early (this copy called for the next one) may end before its first logged checksums, and
         # the run may stop while a watched fight loads: only the watched fights that ended count
-        ended = [f for f in fights if f["back"]]
+        ended = [f for f in fights if f["back"] and f["id"]]     # set up and under way on this copy
         if ended and not any(f["steps"] > 0 for f in ended):
             problems.append("hill watch: copy %d left %d watched fights but played no step of any" % (i, len(ended)))
         # a wait mid-fight is listed, not a problem: runs of build 69 (no watcher) show 1-3 s waits on this machine
