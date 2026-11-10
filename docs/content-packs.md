@@ -102,7 +102,8 @@ The Studio repository's `scripts/package.ps1` writes `dist\FFNYStudio-<version>-
 `dist\studio-latest.json` (`build` = its commit count, `version`, `notes`, `setup`, `url`, `sha256`, `size`). The
 publisher signs the manifest's exact bytes with the update key, as for `latest.json`
 (`updatesign` from the server repository; the private key stays on the publisher's PC), and uploads three files to
-`/srv/ffny-updates/studio/` on each update server (EU, and the NA copy as for `latest.json`):
+`/opt/defjam-relay/updates/studio/` on each update server (EU, and the NA copy as for `latest.json`; the folder
+the update port and `https://play.defjam.online/updates/` serve, not the content catalogue's `/srv/ffny-updates`):
 
 ```
 studio-latest.json          exactly the bytes that were signed
