@@ -29,6 +29,7 @@ import zipfile
 # directory to sys.path. Resolve the sibling contract from this installation.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import mod_catalogue as contract
+import content_compose
 
 # FFNY Online's own catalogue: the account service signs it with its content key when the team accepts a
 # pack (docs/content-packs.md); the launcher syncs it at every start ("sync").
@@ -59,7 +60,7 @@ MAX_INDEX = 8 * 1024**2
 MAX_FILE = 512 * 1024**2
 MAX_ARCHIVE = 8 * 1024**3
 MAX_FILES = 65536
-ALLOWED = {'.ini', '.png', '.dds', '.json', '.txt', '.md', '.djd'}  # .djd: language deltas
+ALLOWED = {'.ini', '.png', '.dds', '.json', '.txt', '.md', '.djd', '.ffdelta'}  # language and FFNY Studio deltas
 
 
 class ModError(ValueError):
@@ -260,7 +261,38 @@ def validate_language(folder):
     return {'capabilities': ['language-v1'], 'texture_ids': [], 'wide_ids': []}
 
 
+def validate_install(folder):
+    """A composed pack (fighter-body, clothing, venue; docs/content-packs.md): install.json and its deltas. The
+    deltas are checked against the player's files when the launcher composes them (content_compose.py)."""
+    path = folder / 'install.json'
+    check(path.is_file() and not linked(path) and path.stat().st_size <= 4 * 1024**2, 'Missing/oversized install.json')
+    try:
+        info = json.loads(path.read_bytes(), object_pairs_hook=contract.unique_object)
+        listed = content_compose.check_install(info)
+    except ValueError as error:
+        raise ModError('Invalid install.json: %s' % error) from error
+    for relative in sorted(listed):
+        safe_relative(relative)
+        delta = folder.joinpath(*PurePosixPath(relative).parts)
+        check(delta.is_file() and not linked(delta), 'Missing delta: ' + relative)
+        with delta.open('rb') as stream:
+            head = stream.read(8)
+        check(len(head) == 8 and head[:4] == b'FFDL' and struct.unpack('<I', head[4:8])[0] == 1,
+              'Not an FFNY delta: ' + relative)
+    present = {p.relative_to(folder).as_posix() for p in folder.rglob('*.ffdelta')}
+    check(present <= listed, 'Delta not listed in install.json')
+    return {'capabilities': ['content-v1'], 'texture_ids': [], 'wide_ids': []}
+
+
 def validate_pack(folder):
+    if (folder / 'install.json').exists():
+        result = validate_install(folder)
+        if (folder / 'manifest.ini').exists():
+            # A venue's texture edits beside it, in the texture-pack format; the catalogue lists such a pack
+            # with content-v1 (every launcher with content-v1 loads texture packs).
+            images = validate_textures(folder)
+            result = dict(images, capabilities=result['capabilities'])
+        return result
     if (folder / 'language.ini').exists():
         result = validate_language(folder)
         if (folder / 'manifest.ini').exists():
@@ -421,8 +453,16 @@ def verify_index(raw, signature, keys, highest=0, digest=None, now=None, fresh=F
 
 
 class Manager:
-    def __init__(self, data, runtime='0.0.0', capabilities=('textures-v1',), keys=None, cancel=None, prerelease=False):
+    def __init__(self, data, runtime='0.0.0', capabilities=('textures-v1',), keys=None, cancel=None, prerelease=False,
+                 game_dir=None):
         self.data = Path(data).resolve()
+        # The player's dump: --game-dir, else <data>/extracted, else <cwd>/game.
+        if game_dir:
+            self.game = Path(game_dir)
+        elif (self.data / 'extracted').is_dir():
+            self.game = self.data / 'extracted'
+        else:
+            self.game = Path.cwd() / 'game'
         safe_dir(self.data)
         self.root = safe_dir(self.data / 'mod-manager')
         self.mods = safe_dir(self.data / 'mods')
@@ -684,6 +724,23 @@ class Manager:
         except (ValueError, OSError) as error:
             self.write_content()
             raise ModError('; '.join(problems) or str(error)) from error
+        try:
+            done = self.sync_packs(index, problems)
+        except ModError:
+            # PLAY cancelled the downloads: the game still gets files that match the packs on disk
+            self.write_content(index['revision'])
+            self.compose_quietly(problems)
+            raise
+        self.write_content(index['revision'])
+        self.compose_quietly(problems)
+        count = sum(1 for r in self.state()['installed'].values() if r.get('synced'))
+        message = 'Community content up to date: %d pack(s)' % count if not done else \
+            'Community content synced: %d change(s), %d pack(s) installed' % (done, count)
+        if problems:
+            message += '. Not synced: ' + '; '.join(problems)
+        self.progress(message)
+
+    def sync_packs(self, index, problems):
         listed, done = set(), 0
         for mod in sorted(index['mods'], key=lambda m: (m.get('order', 1 << 30), m['id'])):
             listed.add(mod['id'])
@@ -710,13 +767,41 @@ class Manager:
                     done += 1
                 except (ValueError, OSError) as error:
                     problems.append('%s: %s' % (mod_id, error))
-        self.write_content(index['revision'])
-        count = sum(1 for r in self.state()['installed'].values() if r.get('synced'))
-        message = 'Community content up to date: %d pack(s)' % count if not done else \
-            'Community content synced: %d change(s), %d pack(s) installed' % (done, count)
-        if problems:
-            message += '. Not synced: ' + '; '.join(problems)
-        self.progress(message)
+        return done
+
+    def composed_packs(self):
+        """Every synced pack with an install.json, for content_compose."""
+        out = []
+        for mod_id, r in self.state()['installed'].items():
+            contract.slug(mod_id)
+            folder = self.mods / mod_id
+            if r.get('synced') and not linked(folder) and (folder / 'install.json').is_file():
+                out.append(dict(id=mod_id, version=r.get('version', ''), content_sha256=r.get('content_sha256', ''),
+                                kind=r.get('kind', 'replacement'), order=r.get('order', 0), folder=folder))
+        return out
+
+    def compose(self):
+        """Compose the fighter-body, clothing and venue packs into <data>/mod-manager/content-files (the game
+        serves them). Holds the runtime lock, so never while the game runs."""
+        with file_lock(self.root / 'runtime.lock'):
+            self.progress('Preparing community content')
+            result = content_compose.compose(self.data, self.game, self.composed_packs(), root=self.root,
+                                             log=lambda text: None)
+        skipped = '; '.join('%s: %s' % s for s in result['skipped'])
+        if result['unchanged']:
+            text = 'Community content ready: %d pack(s) applied' % len(result['applied'])
+        else:
+            text = 'Community content prepared: %d pack(s) applied, %d file(s)' % (len(result['applied']),
+                                                                                  len(result['files']))
+        self.progress(text + ('. Not applied: ' + skipped if skipped else ''))
+        return result
+
+    def compose_quietly(self, problems):
+        try:
+            result = self.compose()
+            problems.extend('%s: %s' % s for s in result['skipped'])
+        except (ValueError, OSError) as error:
+            problems.append('Composing: %s' % error)
 
     def write_content(self, revision=0):
         """<data>/mod-manager/content.ini: the synced packs for the game (pc_content.c) and the Content page."""
@@ -730,6 +815,8 @@ class Manager:
                         'description'):
                 value = str(r.get(key, '')).replace('\n', ' ').replace('\r', ' ')[:500]
                 lines.append(key + '=' + value)
+            if (self.mods / mod_id / 'install.json').is_file():
+                lines.append('composed=1')     # pc_content.c counts it online only when content-files applied it
         atomic_bytes(self.root / 'content.ini', ('\n'.join(lines) + '\n').encode('utf-8'))
 
     def view(self):
@@ -794,8 +881,10 @@ def pack_signature_ok(keys, mod_id, version, kind):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('command', choices=('status', 'refresh', 'install', 'remove', 'rollback', 'recover', 'sync'))
+    parser.add_argument('command', choices=('status', 'refresh', 'install', 'remove', 'rollback', 'recover', 'sync',
+                                            'compose'))
     parser.add_argument('--data-dir', type=Path, required=True)
+    parser.add_argument('--game-dir', type=Path, help="the player's dump (default <data>/extracted, else ./game)")
     parser.add_argument('--runtime', default='0.0.0')
     parser.add_argument('--capability', action='append', default=['textures-v1'])
     parser.add_argument('--id')
@@ -808,7 +897,8 @@ def main():
         print(json.dumps(dict(event='error', message=str(error))), flush=True)
         return 1
     try:
-        manager = Manager(args.data_dir, args.runtime, args.capability, cancel=args.cancel_file, prerelease=args.prerelease)
+        manager = Manager(args.data_dir, args.runtime, args.capability, cancel=args.cancel_file, prerelease=args.prerelease,
+                          game_dir=args.game_dir)
         with file_lock(manager.root / 'writer.lock'):
             try:
                 if (manager.root / 'journal.json').exists():
@@ -818,6 +908,8 @@ def main():
                     manager.refresh()
                 elif args.command == 'sync':
                     manager.sync()
+                elif args.command == 'compose':
+                    manager.compose()
                 elif args.command == 'install':
                     manager.install(args.id, args.version, args.prerelease)
                 elif args.command == 'remove':

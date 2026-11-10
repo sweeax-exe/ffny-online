@@ -122,12 +122,28 @@ void cp_record_from_profile(const uint8_t *profile, uint8_t rec[CP_REC_LEN])
 static int g_sod_loaded, g_sod_tables;
 static uint32_t g_sod_count[SOD_TABLES];
 
+/* The toolkit's game-file redirect (kernel.h): a language pack's rebuilt files, the launcher's composed
+ * community files (pc_content.c), served before <data>/override as the game opens them. */
+#if defined(_WIN32)
+extern BOOL (*g_xbox_game_file_redirect)(const char *relative, WCHAR *host_path, DWORD size);
+#else
+extern BOOL (*g_xbox_game_file_redirect)(const char *relative, char *host_path, DWORD size);
+#endif
+
 static FILE *open_game_file(const char *name)
 {
     const char *data = getenv("DEFJAM_DATA");
     char path[MAX_PATH];
     FILE *f = NULL;
-    if (data && *data) {        /* a mod's copy, as the game reads it */
+    if (g_xbox_game_file_redirect) {
+#if defined(_WIN32)
+        WCHAR wide[MAX_PATH];
+        if (g_xbox_game_file_redirect(name, wide, MAX_PATH)) f = _wfopen(wide, L"rb");
+#else
+        if (g_xbox_game_file_redirect(name, path, MAX_PATH)) f = fopen(path, "rb");
+#endif
+    }
+    if (!f && data && *data) {  /* a mod's copy, as the game reads it */
         snprintf(path, sizeof(path), "%s\\override\\%s", data, name);
         f = fopen(path, "rb");
     }

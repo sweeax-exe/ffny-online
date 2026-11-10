@@ -33,6 +33,8 @@ typedef struct PcContentPack {
     long long bytes;
     int installed;          /* its folder is in <data>/mods */
     int off;                /* a replacement the player switched off */
+    int composed;           /* fighter-body, clothing, venue: install.json, composed by the launcher */
+    int applied;            /* composed: content-files/files.ini lists it in applied */
 } PcContentPack;
 
 /* The installed catalogue packs in catalogue order (re-read on every call; content.ini is small).
@@ -44,13 +46,16 @@ int pc_content_is_off(const char *id);
 void pc_content_set_off(const char *id, int off);
 
 /* The online content fingerprint: FNV-1a over "id\0version\0content_sha256\n" of every installed
- * pack of kind "content", in catalogue order; 0 with none (rooms then match as before). Replacements
- * and language packs never count. RECOMP_TEST_CONTENT_PRINT=<hex> overrides it (tests). */
+ * pack of kind "content", in catalogue order; 0 with none (rooms then match as before). A composed
+ * pack counts only when the launcher's composition applied it (files.ini). Replacements and language
+ * packs never count. RECOMP_TEST_CONTENT_PRINT=<hex> overrides it (tests). */
 uint32_t pc_content_print(void);
 
 /* At game start, after the launcher and before pc_language_start: the synced texture packs
  * (kind content, and replacements that are on) go beneath the player's own texture packs in
- * RECOMP_TEXTURE_PACKS, in catalogue order. */
+ * RECOMP_TEXTURE_PACKS, in catalogue order; the files the launcher composed for fighter-body,
+ * clothing and venue packs (<data>/mod-manager/content-files, listed in its files.ini) are served
+ * through the game-file redirect, ahead of <data>/override. */
 void pc_content_start(const char *data_root);
 
 /* A language pack id is a synced pack the player switched off (pc_language.c then skips it). */

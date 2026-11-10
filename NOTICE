@@ -14,6 +14,16 @@ The server side of FFNY Online is in a separate private repository and is not co
 
 Files:
 
+  setup/content_compose.py
+  setup/ffnycontent/__init__.py
+  setup/ffnycontent/clothing.py
+  setup/ffnycontent/cpparts.py
+  setup/ffnycontent/delta.py
+  setup/ffnycontent/loc.py
+  setup/ffnycontent/newvenue.py
+  setup/ffnycontent/sod.py
+  setup/ffnycontent/sodwrite.py
+  setup/ffnycontent/viv.py
   src/hooks/abort_report.cpp
   src/hooks/account.c
   src/hooks/account.h

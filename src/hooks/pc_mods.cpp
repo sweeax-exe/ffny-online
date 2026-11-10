@@ -97,11 +97,11 @@ void mod_cancel() {
 }
 bool mod_start(const std::string &command, const std::string &id) {
     if (running) return false;
-    if (command != "status" && command != "refresh" && command != "install" && command != "remove" && command != "rollback" && command != "recover" && command != "sync") return false;
+    if (command != "status" && command != "refresh" && command != "install" && command != "remove" && command != "rollback" && command != "recover" && command != "sync" && command != "compose") return false;
     if (!id.empty() && !pack_name(id)) return false;
     const char *override_root = getenv("RECOMP_TEXTURE_ROOT");
     if (override_root && *override_root && command != "status" && command != "refresh") {
-        if (command == "sync") return false;     // a test root of its own: nothing to sync into
+        if (command == "sync" || command == "compose") return false;     // a test root of its own: nothing to sync into
         status = "Managed installs use the data folder's mods directory; unset RECOMP_TEXTURE_ROOT first."; return false;
     }
     std::error_code error;
@@ -141,6 +141,16 @@ bool mod_start(const std::string &command, const std::string &id) {
 #endif
     // Language mods (src/hooks/pc_language.c): every build with this launcher loads them.
     args.insert(args.end(), {"--capability", "language-v1"});
+    // Fighter bodies, clothing, venues: mods.py composes them from the player's dump (pc_content.c serves them).
+    args.insert(args.end(), {"--capability", "content-v1"});
+    {
+        auto game = fs::current_path(error) / "game";
+        if (!error && fs::is_directory(game, error)) {
+            auto real = fs::canonical(game, error);      // the junction to the dump, resolved
+            args.insert(args.end(), {"--game-dir", path_utf8(error ? game : real)});
+        }
+        error.clear();
+    }
     if (testing_versions) args.push_back("--prerelease");
     if (!id.empty()) args.insert(args.end(), {"--id",id});
 #if defined(_WIN32)

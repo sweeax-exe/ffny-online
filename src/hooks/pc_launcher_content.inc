@@ -62,7 +62,8 @@ static void content_dialog(ImVec2 o, float w, float h, float s)
 {
     static PcContentPack packs[PC_CONTENT_MAX];
     static int count = -1;
-    static bool changed;            // a switch moved: applies at the next start
+    static bool changed;            // a switch moved
+    static bool composing;          // ... and the launcher composes the packs' files again
     ImVec2 size(std::min(w - 40 * s, 820 * s), std::min(h - 40 * s, 620 * s));
     ImGui::SetNextWindowPos(ImVec2(o.x + (w - size.x) / 2, o.y + (h - size.y) / 2));
     ImGui::SetNextWindowSize(size);
@@ -155,6 +156,8 @@ static void content_dialog(ImVec2 o, float w, float h, float s)
             pc_content_set_off(p.id, on ? 1 : 0);
             pc_settings_save();
             changed = true;
+            // fighter bodies, clothing and venues are composed into the game's files: again, now
+            composing = pcui::mod_start("compose");
         }
         y += 86 * s;
         ImGui::SetCursorScreenPos(ImVec2(lx, y));
@@ -167,7 +170,9 @@ static void content_dialog(ImVec2 o, float w, float h, float s)
     // The foot: the sync's message, and DONE.
     {
         std::string text = tab == 1 ? community_status() : pcui::mod_status();
-        if (changed && tab == 0) text = "Switched packs apply at the next start.";
+        if (changed && tab == 0)
+            text = composing ? (busy ? "Applying the switched packs..." : "Switched packs are applied; they show when the game starts.")
+                             : "Switched packs apply at the next start.";
         if (!text.empty()) {
             float wrap = size.x - 60 * s - 170 * s;
             dl->PushClipRect(a, ImVec2(b.x - 170 * s, b.y), true);

@@ -22,7 +22,11 @@ import zipfile
 ROOT = Path(__file__).resolve().parents[1]
 PYTHON_VERSION = '3.13.5'
 PACKAGES = ['pyxbe==1.0.4', 'capstone==5.0.9', 'Pillow==12.3.0', 'numpy==2.5.2', 'cryptography==50.0.2', 'cffi==2.0.0', 'pycparser==2.23']
-MOD_SOURCES = ('setup/mods.py', 'setup/mod_catalogue.py', 'config/mods/catalogue-keys.json')
+MOD_SOURCES = ('setup/mods.py', 'setup/mod_catalogue.py', 'config/mods/catalogue-keys.json',
+               'setup/content_compose.py', 'setup/ffnycontent/__init__.py', 'setup/ffnycontent/clothing.py',
+               'setup/ffnycontent/cpparts.py', 'setup/ffnycontent/delta.py', 'setup/ffnycontent/loc.py',
+               'setup/ffnycontent/newvenue.py', 'setup/ffnycontent/sod.py', 'setup/ffnycontent/sodwrite.py',
+               'setup/ffnycontent/viv.py')
 HD_SOURCES = ('scripts/build-hd-pack.py', 'scripts/hd_assets.py',
               'scripts/hd_corpus.py', 'scripts/hd_corpus.html',
               'config/hd-runtime-aliases.json')
