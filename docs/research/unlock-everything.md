@@ -276,6 +276,25 @@ moves and fighting styles are **per profile**.
 - The item counts are read from the database the game reads (`<data>/override/assets/djv2.sod` first, then the
   dump), so a mod with more clothing rows gets the layout the game builds for it.
 
+### Checked (2026-11-10, Windows, build 73 tree, test saves only)
+
+The fixtures: the dev save area (an Options file only), a user ID `AAA` made by the game itself (harness `intro`),
+and the two PS2 sample profiles converted by Import saves (`SWEEAX`, partly played; `AMP`, finished). All runs on
+disposable data roots under the machine lock, `RECOMP_UNLOCK_ALL=0`.
+
+| Check | Before | After Unlock all |
+|---|---|---|
+| Battle lists (`RECOMP_FE_PROBE=1`) | 12 fighters, 4 venues; match types Demolition..Ringout locked | 74 of 74 fighters, every venue for every type, every match type but 1vs2 and 1vs3 (no venue in the database carries those two bits, so nothing can unlock them) |
+| Unlock Rewards > Unlock Fighters | | "UNLOCKED 74 / 74", "You've unlocked all the fighters" |
+| Fighter select, Choose Venue | | no locked portraits; all venue pins |
+| SUS (Story, `SWEEAX`) | 126 / 326, Tops 46 / 123, Jackets 14 / 40, $2,180 | 326 / 326, 123 / 123, 40 / 40, $999,999 |
+| Gym, Learn Moves | 17 / 82 by its states (not captured) | 82 / 82, every one "for sale" at its dev-point price |
+| In memory at the shop (`RECOMP_UNLOCK_REPORT`) | | the six arrays at `S+0x4DC4..` with the counts above, none locked |
+| `SWEEAX` file | | only the states, the counters, the cash and the signatures changed; dev points 400, stats, styles, fighter as before; Options: only `0x12A0..0x1517` |
+| Undo (unlock, then Undo, one visit) | | the save area byte for byte as before (14 files) |
+| Online, one copy unlocked and one not (`dj.py scenario online --matches 3`) | | 3 matches in lockstep, all checksums equal |
+| `regress.py --quick` | | 5 of 5 |
+
 `RECOMP_UNLOCK_REPORT=1` (`src/patches/dev_unlock.c`, read only) logs on each screen change what the current
 profile holds as the game sees it: `[UNLOCK-REPORT] <screen> profile <i> fighters <n> venues <n> cash <n>`, then
 per kind `<items>@+<offset in the slot> <locked>/<unlocked>/<owned>`.
