@@ -60,6 +60,15 @@ void account_cancel_call(void *volatile *live);
  * session token is sent. Blocks (off the game's threads only); *len gets the bytes read (a 200 only;
  * an answer of size - 1 bytes or more is cut). Returns the HTTP status, 0 when unreachable. */
 int account_fetch(const char *path, void *buf, int size, int *len);
+/* A large file for this account (FFNY Studio's zip, GET /api/studio/download/<file>): the same session
+ * token and client name as account_call, from byte `from` (a Range request when not 0). Each piece of the
+ * body of a 200 or 206 goes to sink(ctx, data, n); a sink returning 0 ends the request. *partial is 1 for
+ * a 206 (the body starts at `from`) and is set before the first sink call. Blocks (off the game's threads
+ * only). Returns the HTTP status, 0 when unreachable, cut off or ended by the sink, -1 when not signed in. */
+int account_download(const char *path, unsigned long long from, int (*sink)(void *ctx, const char *data, unsigned n),
+                     void *ctx, int *partial);
+/* 1 when RECOMP_ACCOUNT_SERVER names a test account service on this PC (127.0.0.1 or localhost). */
+int account_test_server_local(void);
 /* The launcher's Change name dialog: the service's answer to POST /api/me/name ({"account": ...})
  * becomes the shown and saved name. */
 void account_take_renamed(const char *json);

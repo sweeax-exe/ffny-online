@@ -5,8 +5,9 @@
 // the download's size, the download's progress, "Open FFNY Studio", or "Update Studio" when the published build
 // is newer; a failure is one line in the card. The work is studio_app.cpp (studio_app.h).
 //
-// The card stays hidden until the update server publishes Studio (a signed studio-latest.json) or Studio is
-// installed; RECOMP_STUDIO_BUTTON=1 shows it anyway (pictures of the empty state). Windows only.
+// FFNY Studio is in a closed test: the card is hidden unless the signed-in account has Studio access (the
+// account service's GET /api/studio/access; a Discord role) and Studio is published for it or installed.
+// RECOMP_STUDIO_BUTTON=1 shows it anyway (pictures of the empty state). Windows only.
 // Tests: RECOMP_TEST_STUDIO steps "<frame>:<action>" separated by ';': press, check.
 
 #include "studio_app.h"
@@ -64,7 +65,8 @@ void studio_card(ImVec2 a, ImVec2 b, float s)
     studio::View v = studio::view();
     const char *forced = getenv("RECOMP_STUDIO_BUTTON");
     bool force = forced && !strcmp(forced, "1");
-    if (!v.supported || (!force && !v.installed && !v.available && !v.busy)) return;
+    if (!v.supported) return;
+    if (!force && !v.busy && (!v.allowed || (!v.installed && !v.available))) return;    // the closed test: testers only
 
     ImDrawList *dl = ImGui::GetWindowDrawList();
     glass(dl, a, b, 14 * s);

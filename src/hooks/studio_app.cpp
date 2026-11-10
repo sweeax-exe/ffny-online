@@ -24,6 +24,7 @@
 
 #include "pc_ui_actions.h"
 extern "C" {
+#include "account.h"
 #include "pc_settings.h"
 #include "update_sig.h"
 }
@@ -242,7 +243,9 @@ bool read_manifest(const std::string &text, Manifest &m, std::string *error)
 
 #if defined(_WIN32)
 // ---- HTTP ----
-struct Server { std::wstring host; INTERNET_PORT port; bool https; std::wstring prefix; };
+// account: the manifest and the zip come through the account service with the player's session
+// (/api/studio/latest, /api/studio/download/<setup>); host, port and prefix are then unused.
+struct Server { std::wstring host; INTERNET_PORT port = 0; bool https = false; std::wstring prefix; bool account = false; };
 
 std::wstring wide(const std::string &s) { return std::wstring(s.begin(), s.end()); }
 
@@ -252,6 +255,16 @@ std::string test_server()
 {
     const char *s = getenv("RECOMP_STUDIO_SERVER");
     return s && *s ? s : "";
+}
+
+// FFNY Studio is in a closed test: the launcher asks the account service, which hands the manifest and the zip
+// only to accounts with access. The public update folder is read only behind a test switch: RECOMP_STUDIO_SERVER
+// (a local test server) or RECOMP_STUDIO_PUBLIC=1 (the update servers, should a manifest be published there).
+bool public_path()
+{
+    if (!test_server().empty()) return true;
+    const char *p = getenv("RECOMP_STUDIO_PUBLIC");
+    return p && !strcmp(p, "1");
 }
 
 std::vector<Server> servers()
@@ -268,6 +281,38 @@ std::vector<Server> servers()
     for (int i = 0; updater_host(i); i++) out.push_back({updater_host(i), (INTERNET_PORT)updater_port(), false, L"/studio/"});
     out.push_back({L"play.defjam.online", INTERNET_DEFAULT_HTTPS_PORT, true, L"/updates/studio/"});
     return out;
+}
+
+const char *const kClosed = "FFNY Studio is in a closed test; this account has no access.";
+
+// Access for the signed-in account (GET /api/studio/access).
+enum Access { ACCESS_UNKNOWN, ACCESS_ALLOWED, ACCESS_DENIED, ACCESS_SIGNED_OUT, ACCESS_NO_ANSWER };
+
+bool signed_in()
+{
+    AccountState st = account_state();
+    return st == ACCOUNT_IN || st == ACCOUNT_CHECKING;
+}
+
+Access ask_access()
+{
+    if (!signed_in()) return ACCESS_SIGNED_OUT;
+    std::vector<char> buf(4096);
+    int st = account_call("GET", "/api/studio/access", nullptr, buf.data(), (int)buf.size(), 0, nullptr);
+    if (st == -1 || st == 401) return ACCESS_SIGNED_OUT;
+    std::map<std::string, std::pair<std::string, bool>> f;
+    if (st != 200 || !parse_object(buf.data(), f)) {
+        log_line("access: no answer from the account service (status " + std::to_string(st) + ")");
+        return ACCESS_NO_ANSWER;
+    }
+    bool allowed = f["allowed"].first == "true";
+    log_line(std::string("access: ") + (allowed ? "allowed" : "not allowed") + " (" + f["reason"].first + ")");
+    return allowed ? ACCESS_ALLOWED : ACCESS_DENIED;
+}
+
+int sink_call(void *ctx, const char *data, unsigned n)
+{
+    return (*(const std::function<bool(const char *, DWORD)> *)ctx)(data, (DWORD)n) ? 1 : 0;
 }
 
 // GET sv.host + path from byte `from`; the sink gets the body. Returns the HTTP status (0: no answer).
@@ -341,12 +386,28 @@ bool file_sha256(const fs::path &path, std::string &hex)
     return true;
 }
 
-// The signed manifest and the server that gave it.
+// The signed manifest and the server that gave it: the account service (the closed test), or the public
+// update folder behind a test switch. Either way it is believed only with the update key's signature.
 bool fetch_manifest(Manifest &m, Server &used, std::string *error)
 {
     std::string text, sig;
-    bool got = false;
-    for (auto &sv : servers()) {
+    bool got = false, by_account = !public_path();
+    if (by_account) {
+        std::vector<char> buf(8 * kManifestMax);
+        int st = account_call("GET", "/api/studio/latest", nullptr, buf.data(), (int)buf.size(), 0, nullptr);
+        if (st == 403) return fail(error, kClosed);
+        if (st == -1 || st == 401) return fail(error, "Sign in to FFNY Online to get FFNY Studio.");
+        if (st == 404) return fail(error, "FFNY Studio is not published yet.");
+        std::map<std::string, std::pair<std::string, bool>> f;
+        if (st != 200 || !parse_object(buf.data(), f) || f["manifest"].first.empty() || f["manifest"].first.size() > kManifestMax)
+            return fail(error, "Could not reach the account service for FFNY Studio.");
+        text = f["manifest"].first;
+        sig = f["signature"].first;
+        used = Server();
+        used.account = true;
+        got = true;
+    }
+    for (auto &sv : by_account ? std::vector<Server>() : servers()) {
         if (!get_small(sv, sv.prefix + L"studio-latest.json", text, kManifestMax)) continue;
         if (!get_small(sv, sv.prefix + L"studio-latest.json.sig", sig, 1024)) {
             log_line("studio-latest.json without its .sig on one server; trying the next");
@@ -362,8 +423,9 @@ bool fetch_manifest(Manifest &m, Server &used, std::string *error)
     std::string test_key;
     if (const char *k = getenv("RECOMP_STUDIO_TEST_KEY")) {
         std::string t = test_server();
-        if (t.empty() || !local_host(t.substr(0, t.rfind(':')))) {
-            log_line("a test key is only taken with a Studio server on this PC; ignored");
+        bool local = by_account ? account_test_server_local() != 0 : !t.empty() && local_host(t.substr(0, t.rfind(':')));
+        if (!local) {
+            log_line("a test key is only taken with a Studio server or an account service on this PC; ignored");
         } else {
             test_key = k;
             key = test_key.c_str();
@@ -381,6 +443,10 @@ bool fetch_manifest(Manifest &m, Server &used, std::string *error)
 std::vector<std::pair<Server, std::wstring>> zip_sources(const Manifest &m, const Server &used)
 {
     std::vector<std::pair<Server, std::wstring>> out;
+    if (used.account) {         // only through the account service; the manifest's url is not used
+        out.push_back({used, L"/api/studio/download/" + wide(m.setup)});
+        return out;
+    }
     std::string u = m.url;
     bool https = u.compare(0, 8, "https://") == 0, http = u.compare(0, 7, "http://") == 0;
     if (https || http) {
@@ -423,7 +489,7 @@ bool download(const Manifest &m, const Server &used, const fs::path &cache, fs::
             bool partial = false;
             std::unique_ptr<FILE, int (*)(FILE *)> out(nullptr, fclose);
             uint64_t got = have;
-            int st = http_get(src.first, src.second, have, [&](const char *d, DWORD n) {
+            const std::function<bool(const char *, DWORD)> sink = [&](const char *d, DWORD n) {
                 if (!out) {
                     out.reset(_wfopen(part.c_str(), partial ? L"ab" : L"wb"));     // 206: append; 200: all again
                     if (!out) return false;
@@ -434,8 +500,23 @@ bool download(const Manifest &m, const Server &used, const fs::path &cache, fs::
                 got += n;
                 if (progress) progress(got, m.size);
                 return true;
-            }, &partial);
+            };
+            int st;
+            if (src.first.account) {
+                int part206 = 0;
+                std::string path(src.second.begin(), src.second.end());
+                // account_download sets part206 before the first piece arrives; the sink reads `partial`
+                const std::function<bool(const char *, DWORD)> first = [&](const char *d, DWORD n) {
+                    partial = part206 != 0;
+                    return sink(d, n);
+                };
+                st = account_download(path.c_str(), have, sink_call, (void *)&first, &part206);
+            } else {
+                st = http_get(src.first, src.second, have, sink, &partial);
+            }
             out.reset();
+            if (src.first.account && (st == 403 || st == 401 || st == -1))
+                return fail(error, st == 403 ? kClosed : "Sign in to FFNY Online to get FFNY Studio.");
             if (st != 200 && st != 206) {
                 log_line("download stopped at " + std::to_string(got) + " of " + std::to_string(m.size) + " bytes (status " +
                          std::to_string(st) + "); retrying");
@@ -619,6 +700,11 @@ Server g_server;
 std::atomic<bool> g_checking{false};
 std::chrono::steady_clock::time_point g_last_check;
 bool g_started;
+#if defined(_WIN32)
+Access g_access = ACCESS_UNKNOWN;       // the account's access (the closed test); unused on the public path
+bool g_was_signed_in;                   // launcher_starts watches the sign-in (the launcher's thread only)
+bool g_want_check;
+#endif
 
 void refresh_locked()
 {
@@ -637,6 +723,11 @@ void refresh_locked()
         g_view.size = g_manifest.size;
     }
     g_view.update = g_view.installed && g_have_manifest && g_manifest.build > c.build;
+#if defined(_WIN32)
+    // the closed test: the card is for accounts with access. An installed Studio stays reachable while the
+    // account service does not answer (Studio checks the access itself, and works offline for seven days).
+    g_view.allowed = public_path() || g_access == ACCESS_ALLOWED || (g_access == ACCESS_NO_ANSWER && g_view.installed);
+#endif
 }
 
 void set_progress(const std::string &text, double fraction)
@@ -672,14 +763,23 @@ bool fetch(std::string *error)
 {
     Manifest m;
     Server used;
-    bool ok = fetch_manifest(m, used, error);
+    Access access = ACCESS_ALLOWED;
+    bool ok = false;
+    if (!public_path()) access = ask_access();
+    if (access == ACCESS_ALLOWED) ok = fetch_manifest(m, used, error);
+    else if (access == ACCESS_DENIED) fail(error, kClosed);
+    else if (access == ACCESS_SIGNED_OUT) fail(error, "Sign in to FFNY Online to get FFNY Studio.");
+    else fail(error, "Could not reach the account service for FFNY Studio.");
     std::lock_guard<std::mutex> lock(g_mutex);
     g_view.checked = true;
     g_last_check = std::chrono::steady_clock::now();
+    g_access = access;
     if (ok) {
         g_manifest = m;
         g_server = used;
         g_have_manifest = true;
+    } else if (access == ACCESS_DENIED || access == ACCESS_SIGNED_OUT) {
+        g_have_manifest = false;        // nothing is offered to an account without access
     }
     refresh_locked();
     return ok;
@@ -741,11 +841,34 @@ View view()
 void launcher_starts()
 {
 #if defined(_WIN32)
-    if (g_started) return;
-    g_started = true;
-    log_line("root " + root_folder());
-    if (g_checking.exchange(true)) return;
-    std::thread(run_check).detach();
+    bool now_in = signed_in();
+    if (!g_started) {
+        g_started = true;
+        g_was_signed_in = now_in;
+        g_want_check = true;
+        log_line("root " + root_folder());
+        log_line(public_path() ? "source: the public update folder (test switch)" : "source: the account service (closed test)");
+    } else if (now_in != g_was_signed_in && !public_path()) {
+        // signed in or out since the last frame: the access is another account's (or nobody's)
+        g_was_signed_in = now_in;
+        g_want_check = true;
+        std::lock_guard<std::mutex> lock(g_mutex);
+        g_access = now_in ? ACCESS_UNKNOWN : ACCESS_SIGNED_OUT;
+        g_have_manifest = false;
+        if (!g_view.busy) g_view.error.clear();
+    }
+    if (now_in && !g_want_check && !public_path()) {
+        // a tester who just got the role sees the card without restarting the launcher: ask again every ten
+        // minutes while the answer is no (or none came)
+        std::lock_guard<std::mutex> lock(g_mutex);
+        if ((g_access == ACCESS_DENIED || g_access == ACCESS_NO_ANSWER) && !g_view.busy &&
+            std::chrono::steady_clock::now() - g_last_check >= std::chrono::minutes(10))
+            g_want_check = true;
+    }
+    if (g_want_check && !g_checking.exchange(true)) {
+        g_want_check = false;
+        std::thread(run_check).detach();
+    }
 #endif
 }
 
@@ -803,6 +926,10 @@ void press()
 #if defined(_WIN32)
     View v = view();
     if (v.busy) return;
+    if (!v.allowed) {
+        log_line("button: not available (no FFNY Studio access for this account)");
+        return;
+    }
     log_line(std::string("button: ") + (v.update ? "update" : v.installed ? "open" : "get"));
     if (v.installed && !v.update) {
         std::string error;

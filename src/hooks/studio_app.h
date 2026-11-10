@@ -21,8 +21,18 @@
 //        --account-file <data>\account.dat, working folder = the exe's folder. --install-dir only for an
 //        installed copy (DEFJAM_INSTALL_DIR, or the launcher's working folder <install>\versions\<id>\source).
 //
-// Tests: RECOMP_STUDIO_SERVER=host:port (plain HTTP, /studio/...); with that server on this PC,
-// RECOMP_STUDIO_TEST_KEY=<128 hex digits> is the key that must have signed the manifest.
+// The closed test (2026-11-10): Studio goes to testers first, by a Discord role the account service checks. The
+// launcher asks GET /api/studio/access with the player's session; the card is hidden when nobody is signed in or
+// the account has no access. With access, the manifest and its signature come from GET /api/studio/latest
+// ({"manifest": the signed text, "signature"}) and the zip from GET /api/studio/download/<setup>, with the
+// session as every other account call; the signature, size and SHA-256 are checked exactly as before. The public
+// update folder (studio/studio-latest.json on the update port, https://play.defjam.online/updates/studio/) is
+// read only behind a test switch.
+//
+// Tests: RECOMP_STUDIO_SERVER=host:port (the public path on a local server: plain HTTP, /studio/...; no access
+// check), RECOMP_STUDIO_PUBLIC=1 (the public path on the update servers); RECOMP_STUDIO_TEST_KEY=<128 hex
+// digits> is the key that must have signed the manifest, taken only with RECOMP_STUDIO_SERVER or
+// RECOMP_ACCOUNT_SERVER on this PC (the account path: RECOMP_ACCOUNT_SERVER and RECOMP_ACCOUNT_TEST_TOKEN).
 #pragma once
 
 #include <cstdint>
@@ -38,6 +48,8 @@ struct View
     bool installed = false;
     std::string installed_version;
     int installed_build = 0;
+    bool allowed = false;           // the account has Studio access (the closed test), or a test switch reads
+                                    // the public folder; false: the card is hidden
     bool available = false;         // a signed manifest is known
     std::string version, notes;     // the published one
     int build = 0;
@@ -50,7 +62,8 @@ struct View
 };
 
 View view();
-void launcher_starts();             // a quiet manifest check in the background (once)
+void launcher_starts();             // every frame of the home screen: a quiet access and manifest check in the
+                                    // background at the first call and whenever the player signs in or out
 void check();                       // another check, at most every two minutes (hover, press)
 void press();                       // the card's button: get, update or open, whichever applies
 
