@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 sweeax-exe (FFNY Online) */
 /* Combo log, RECOMP_COMBO_LOG=1: one [COMBO] line per hit and per state change that matters,
  * so play-testers and mods can replay legal and illegal combos and a detector can be designed
  * from real data later (docs/research/combo-log.md). Diagnostic only: it reads the fighter

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 sweeax-exe (FFNY Online)
 // The launcher's Graphics card and dialog: "Enhanced graphics (community)", the ReShade / DLSS pack with
 // presets by Marleymarletto (included by pc_ui.cpp after the Music dialog; the same glass). The card says
 // whether it is on and which preset; the dialog turns it on (download, about 420 MB, with progress),

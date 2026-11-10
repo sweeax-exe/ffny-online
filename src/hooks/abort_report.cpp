@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 sweeax-exe (FFNY Online)
 // abort(), std::terminate and an uncaught C++ exception: a [CRASH] report like an access violation's.
 //
 // The crash report (src/main.c's vectored handler) sees access violations and a few other faults. An

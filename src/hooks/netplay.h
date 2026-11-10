@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 sweeax-exe (FFNY Online) */
 /* Online play through a relay server (docs/netplay-protocol.md, docs/netplay.md).
  *
  * Two copies of the port, each with its own dump, play one match: the host is

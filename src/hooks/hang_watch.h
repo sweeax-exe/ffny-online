@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 sweeax-exe (FFNY Online) */
 /* The hang watch (hang_watch.c): a host thread that logs a [HANG] block when the game stops moving. */
 #ifndef DEFJAM_HANG_WATCH_H
 #define DEFJAM_HANG_WATCH_H

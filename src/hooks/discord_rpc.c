@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 sweeax-exe (FFNY Online) */
 /* Discord Rich Presence: frames, JSON, text rules and the composer. See discord_rpc.h. */
 #define _CRT_SECURE_NO_WARNINGS
 #include <stdio.h>

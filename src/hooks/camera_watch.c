@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 sweeax-exe (FFNY Online) */
 /* The fight camera and what it frames, as one log line (read-only; nothing here writes guest memory).
  *
  * Why: a Team picture report (9a2c08, build 39) showed the HUD of four fighters and a camera on an

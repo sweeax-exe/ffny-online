@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 sweeax-exe (FFNY Online) */
 /* Draft mode's pick and ban on the game's side (ranked phase 2b; docs/netplay-protocol.md "Ranked
  * queue", relay server/relay/draft.go). The relay is the authority; this is pure C with no Windows
  * or game dependencies (tests/unit/test_netplay_draft_native.py compiles it natively):

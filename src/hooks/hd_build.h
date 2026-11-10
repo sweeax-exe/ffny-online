@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 sweeax-exe (FFNY Online) */
 /* Making the HD texture packs from the launcher, for a player who left them out at
  * install time: the same local Lanczos 4x upscale the setup runs (scripts/build-hd-pack.py),
  * from the player's own dump, with its progress for a bar. Windows only for now. */

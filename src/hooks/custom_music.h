@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 sweeax-exe (FFNY Online) */
 /* Custom music: the player's own songs as the game's soundtrack.
  *
  * Design (why it is safe online):

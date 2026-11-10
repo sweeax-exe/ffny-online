@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 sweeax-exe (FFNY Online) */
 /* Decoding the player's own songs: see music_decode.h.
  *
  * Vendored decoders (thirdparty/audio/, unmodified copies; licences in thirdparty/):

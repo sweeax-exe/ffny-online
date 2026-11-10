@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 sweeax-exe (FFNY Online)
 // "Enhanced graphics (community)": the launcher installs, switches and removes the community ReShade /
 // DLSS pack (presets by Marleymarletto) in the game's bin folder, next to defjam_recomp.exe. The game is
 // never changed; the pack loads through its dxgi.dll proxy, in the game's process only.

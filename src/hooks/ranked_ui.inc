@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 sweeax-exe (FFNY Online)
 // Ranked play's pages (ranked phase 2a: Classic and Open sets; phase 2b: Draft). Included into
 // online_screen.cpp's anonymous namespace after its helpers (text, glass, the gallery's wrappers), so
 // it is not a translation unit of its own (the hooks' CMake glob takes *.c and *.cpp only). The wire

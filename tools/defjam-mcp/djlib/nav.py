@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 sweeax-exe (FFNY Online)
 """Navigation by name: the main menu's entries reached through the cursor the menu reports.
 
 The patched main menu (scripts/apt-patch.py) reports its cursor as `Online.Focus(n)` front-end

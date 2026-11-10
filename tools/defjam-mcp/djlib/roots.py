@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 sweeax-exe (FFNY Online)
 """Disposable data roots, one per test copy.
 
 A root is <parent of data>\\data-dj-<owner>-<name>: junctions to <data>\\extracted, online-art and

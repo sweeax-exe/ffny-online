@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 sweeax-exe (FFNY Online) */
 /* The lockstep checksum message (P_HASH, netplay.c) and what a desync report says about it.
  * Pure functions, no guest memory: tests/unit/test_netplay_check_native.py builds them alone.
  *

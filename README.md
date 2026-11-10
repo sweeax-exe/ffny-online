@@ -3,7 +3,7 @@
 # FFNY Online — Def Jam: Fight for NY on PC, with online multiplayer
 
 [![Release](https://img.shields.io/github/v/release/sweeax-exe/ffny-online)](https://github.com/sweeax-exe/ffny-online/releases)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![License: MIT and GPL-3.0](https://img.shields.io/badge/License-MIT%20%2B%20GPL--3.0-blue.svg)](LICENSE)
 [![Discord](https://img.shields.io/badge/Discord-join-5865F2?logo=discord&logoColor=white)](https://discord.gg/zCZKVDnKaP)
 [![Ko-fi](https://img.shields.io/badge/Ko--fi-support%20the%20servers-FF5E5B?logo=ko-fi&logoColor=white)](https://ko-fi.com/ffnyonline)
 
@@ -280,7 +280,20 @@ in the toolkit. [Burnout 3](https://github.com/sp00nznet/burnout3) and
 [Mercenaries Recompiled](https://github.com/KraftMacAndChee/Mercenaries-Recompiled)
 are related projects that helped shape the documentation.
 
-This repository's code is [MIT licensed](LICENSE). Toolkit components keep their
+### License
+
+The repository has two licenses:
+
+- **Vlad Yanhursky's recompilation** (the port FFNY Online builds on) is [MIT licensed](LICENSE).
+- **FFNY Online's own game-client code** (online play, the online screens, rollback, accounts,
+  social, voice, updates and the other files listed in [NOTICE](NOTICE)) is licensed under
+  [GPL-3.0-or-later](LICENSES/GPL-3.0.txt) from build 73 on. Each of those files says so in its
+  first lines. Anyone who distributes this code, or a game built with it, must publish their full
+  source code under the GPL too. Builds up to and including build 72 stay MIT.
+- **FFNY Online's server code** (relay, accounts, Discord bot) is private and not covered by
+  either license.
+
+Toolkit components keep their
 own licenses, including LGPL-2.1-or-later components; see the toolkit's
 [NOTICE](https://github.com/vyanhursky/xboxrecomp/blob/4bff2573127c5499ad795d58ddd90159240520bd/NOTICE)
 and [license texts](https://github.com/vyanhursky/xboxrecomp/tree/4bff2573127c5499ad795d58ddd90159240520bd/LICENSES).

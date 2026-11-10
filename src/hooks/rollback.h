@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 sweeax-exe (FFNY Online) */
 /* Save states of a fight, for rollback netcode (docs/research/rollback-state.md,
  * docs/research/rollback-step-structure.md).
  *

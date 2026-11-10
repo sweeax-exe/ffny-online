@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 sweeax-exe (FFNY Online)
 // The launcher's Music dialog underneath: see pc_launcher_music.h.
 #define _CRT_SECURE_NO_WARNINGS
 #include "pc_launcher_music.h"

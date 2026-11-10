@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 sweeax-exe (FFNY Online)
 // TURF WAR's map page (Turf Map v2, the owner's approved design: logs/social-design/11-TurfMap-v2.png). Included
 // into turf_ui.inc before draw_turf. A stylised New York in its own 1600x960 design space, fitted to the window
 // (the water fills the rest): the five boroughs tinted by the crew holding most venues there, a pin and name

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 sweeax-exe (FFNY Online)
 """High-level scenarios, each ending in one compact JSON result (the main token saver).
 
     boot      one copy to the main menu: boot time, faults, a picture

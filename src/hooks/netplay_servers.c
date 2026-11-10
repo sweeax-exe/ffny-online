@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 sweeax-exe (FFNY Online) */
 /* The online relays and the choice between them; see netplay_servers.h. */
 #define _CRT_SECURE_NO_WARNINGS
 #if defined(_WIN32)

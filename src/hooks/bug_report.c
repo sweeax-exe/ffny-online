@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 sweeax-exe (FFNY Online) */
 /*
  * Bug reports. Players found it hard to find and attach the right run-....log.err, and a log
  * alone cannot show a wrong picture, so F9 in the game sends both: this session's log and the

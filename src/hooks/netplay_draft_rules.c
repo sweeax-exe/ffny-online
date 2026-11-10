@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 sweeax-exe (FFNY Online) */
 /* Draft mode's pick and ban: the wire and the rules (see netplay_draft_rules.h). */
 #include "netplay_draft_rules.h"
 

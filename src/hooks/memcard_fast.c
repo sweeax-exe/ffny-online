@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 sweeax-exe (FFNY Online) */
 /* Faster save loading: the memory-card driver's steps run several to a frame while it only reads.
  *
  * How the game reads saves (measured, build 66, RECOMP_MEMCARD_TRACE=1):

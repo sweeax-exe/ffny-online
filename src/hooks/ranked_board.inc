@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 sweeax-exe (FFNY Online)
 // The RANKED board and the searching counts (build 62). Included into online_screen.cpp's anonymous
 // namespace after ranked_ui.inc, like it.
 //

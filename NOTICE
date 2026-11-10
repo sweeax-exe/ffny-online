@@ -1,0 +1,113 @@
+FFNY Online: GPL-3.0-or-later files
+
+The files below were written by sweeax-exe for FFNY Online (no upstream author in their git
+history) and are licensed under the GNU General Public License, version 3 or (at your option)
+any later version, from the first commit after build 72 onward. The full text is in
+LICENSES/GPL-3.0.txt. Each file also carries an SPDX-License-Identifier line.
+
+Copyright (c) 2026 sweeax-exe (FFNY Online)
+
+Everything not listed here keeps the MIT license in LICENSE, including files that both
+projects edited (for example src/main.c, src/hooks/pc_launcher.cpp, pc_ui.cpp, pc_settings.c).
+tools/xboxrecomp keeps its own licenses (tools/xboxrecomp/LICENSE, NOTICE, LICENSES/).
+The server side of FFNY Online is in a separate private repository and is not covered here.
+
+Files:
+
+  src/hooks/abort_report.cpp
+  src/hooks/account.c
+  src/hooks/account.h
+  src/hooks/anticheat.c
+  src/hooks/anticheat.h
+  src/hooks/automatch.c
+  src/hooks/automatch.h
+  src/hooks/bug_report.c
+  src/hooks/bug_report.h
+  src/hooks/camera_watch.c
+  src/hooks/combo_log.c
+  src/hooks/combo_log.h
+  src/hooks/created_fighter.c
+  src/hooks/created_fighter.h
+  src/hooks/crew_ui.inc
+  src/hooks/custom_music.cpp
+  src/hooks/custom_music.h
+  src/hooks/custom_music_guest.c
+  src/hooks/discord_ipc.c
+  src/hooks/discord_ipc.h
+  src/hooks/discord_presence.c
+  src/hooks/discord_presence.h
+  src/hooks/discord_rpc.c
+  src/hooks/discord_rpc.h
+  src/hooks/dynload_guard.c
+  src/hooks/dynload_guard.h
+  src/hooks/graphics_mod.cpp
+  src/hooks/graphics_mod.h
+  src/hooks/graphics_mod_launcher.cpp
+  src/hooks/hang_watch.c
+  src/hooks/hang_watch.h
+  src/hooks/hd_build.c
+  src/hooks/hd_build.h
+  src/hooks/locker_ui.inc
+  src/hooks/memcard_fast.c
+  src/hooks/memcard_fast.h
+  src/hooks/music_decode.c
+  src/hooks/music_decode.h
+  src/hooks/music_library.cpp
+  src/hooks/music_library.h
+  src/hooks/netplay.c
+  src/hooks/netplay.h
+  src/hooks/netplay_check.h
+  src/hooks/netplay_draft_rules.c
+  src/hooks/netplay_draft_rules.h
+  src/hooks/netplay_ranked.c
+  src/hooks/netplay_ranked.h
+  src/hooks/netplay_servers.c
+  src/hooks/netplay_servers.h
+  src/hooks/netplay_servers_rules.c
+  src/hooks/netplay_servers_rules.h
+  src/hooks/online_data.c
+  src/hooks/online_data.h
+  src/hooks/online_screen.cpp
+  src/hooks/online_screen.h
+  src/hooks/options_audio.c
+  src/hooks/options_audio.h
+  src/hooks/pc_launcher_graphics.inc
+  src/hooks/pc_launcher_music.cpp
+  src/hooks/pc_launcher_music.h
+  src/hooks/pc_launcher_music.inc
+  src/hooks/pc_launcher_name.inc
+  src/hooks/pc_launcher_saves.cpp
+  src/hooks/pc_launcher_saves.h
+  src/hooks/pc_launcher_saves.inc
+  src/hooks/rank_art.inc
+  src/hooks/ranked_board.inc
+  src/hooks/ranked_ui.inc
+  src/hooks/rollback.c
+  src/hooks/rollback.h
+  src/hooks/save_manager.cpp
+  src/hooks/save_manager.h
+  src/hooks/social.cpp
+  src/hooks/social.h
+  src/hooks/social_ui.inc
+  src/hooks/test_bot.c
+  src/hooks/test_control.c
+  src/hooks/tset_ui.inc
+  src/hooks/turf_map.inc
+  src/hooks/turf_ui.inc
+  src/hooks/update_sig.c
+  src/hooks/update_sig.h
+  src/hooks/updater.c
+  src/hooks/updater.h
+  src/hooks/updater_guard.h
+  src/hooks/voice.c
+  src/hooks/voice.h
+  tools/defjam-mcp/README.md
+  tools/defjam-mcp/dj.py
+  tools/defjam-mcp/djlib/__init__.py
+  tools/defjam-mcp/djlib/copies.py
+  tools/defjam-mcp/djlib/logparse.py
+  tools/defjam-mcp/djlib/machine.py
+  tools/defjam-mcp/djlib/nav.py
+  tools/defjam-mcp/djlib/roots.py
+  tools/defjam-mcp/djlib/scenarios.py
+  tools/defjam-mcp/server.py

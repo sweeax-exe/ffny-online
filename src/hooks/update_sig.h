@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 sweeax-exe (FFNY Online) */
 /* The project's signature check for what the update server hands out: latest.json (updater.c) and
  * graphics.json (graphics_mod.cpp). An ECDSA P-256 signature over the exact bytes, made with
  * server/relay/cmd/updatesign; the .sig file is the 64-byte r||s as 128 hex digits. Windows only. */

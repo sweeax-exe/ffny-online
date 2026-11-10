@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 sweeax-exe (FFNY Online) */
 /* What the online hub offers: the fighters, venues and match types, read at run time from the
  * player's own dump (game/fighter.xml, game/venue.xml), so no names ship with the port. */
 #ifndef DEFJAM_ONLINE_DATA_H

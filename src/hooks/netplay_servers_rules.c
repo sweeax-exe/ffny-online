@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 sweeax-exe (FFNY Online) */
 /* The server choice and the staged quick-match rules; see netplay_servers_rules.h. */
 #include "netplay_servers_rules.h"
 

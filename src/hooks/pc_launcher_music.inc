@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 sweeax-exe (FFNY Online)
 // The launcher's Music card and dialog (included by pc_ui.cpp after the Saves dialog, so it draws with
 // the same glass, fonts and buttons). The card on the start page says how many songs there are and
 // what plays; its button opens the dialog: what plays (My music only / Mix with the original / Original

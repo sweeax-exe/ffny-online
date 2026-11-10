@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 sweeax-exe (FFNY Online)
 """A test session: the machine lock, managed data roots, a local relay and 1..4 game copies.
 
 Session.open() takes the lock (waiting for other agents and for the owner's game to close) and

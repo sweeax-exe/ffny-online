@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 sweeax-exe (FFNY Online) */
 /* Starting a match without the menus. See automatch.h and docs/research/online-match-setup.md.
  *
  * The front end hands the game a match through FuncCall strings (Game.SetMatchType,

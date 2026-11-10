@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 sweeax-exe (FFNY Online) */
 /* Bug reports: the game's log and a picture of the screen, sent to the developers through the
  * account service (server/relay/accounts/reports.go). F9 in the game takes the picture
  * (d3d11_translator.c) and sends both. Windows only, like the account service. */

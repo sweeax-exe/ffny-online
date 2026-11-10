@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 sweeax-exe (FFNY Online) */
 /* Created (Story mode) fighters online. See created_fighter.c and
  * docs/research/created-fighter-online.md. */
 #ifndef DEFJAM_CREATED_FIGHTER_H

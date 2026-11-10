@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 sweeax-exe (FFNY Online)
 // The rank emblems and the rewards' looks (build 52; the owner's approved designs "Ranks", "Rank up" and
 // "Season rewards", 2026-11-03). Included by online_screen.cpp inside its anonymous namespace, before
 // ranked_ui.inc.

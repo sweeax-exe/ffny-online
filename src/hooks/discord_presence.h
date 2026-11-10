@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 sweeax-exe (FFNY Online) */
 /* Discord Rich Presence for FFNY Online (discord_presence.c): "Playing FFNY Online" in the player's
  * Discord profile, with what they are doing: the launcher, the game's menus, Story or Battle mode,
  * the online lobby, a room, an online fight (mode, venue, fighter, opponents) or King of the Hill.

@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 sweeax-exe (FFNY Online)
 """dj: the game-test CLI (defjam-mcp v2 from Bash; the MCP server offers the same).
 
 Every game launch waits for the machine lock (D:\\DefJam\\test-lock.txt and test-priority.txt, and no

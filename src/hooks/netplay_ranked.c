@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 sweeax-exe (FFNY Online) */
 /* Ranked play: the wire forms and the ladder (see netplay_ranked.h). */
 #include "netplay_ranked.h"
 

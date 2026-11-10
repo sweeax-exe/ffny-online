@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 sweeax-exe (FFNY Online) */
 /* The online relays and the choice between them (build 30; build 38: three): Europe
  * (play.defjam.online), US East (na.defjam.online) and US West (west.defjam.online), all port 27777.
  *

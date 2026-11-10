@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 sweeax-exe (FFNY Online) */
 /* The game's audio options survive a restart.
  *
  * Players reported that the volumes they set came back at the defaults on every start. The game

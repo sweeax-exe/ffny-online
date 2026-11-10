@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 sweeax-exe (FFNY Online) */
 /* Decoding the player's own songs (custom music, custom_music.cpp): MP3, Ogg Vorbis, FLAC and WAV
  * through single-header decoders vendored as source under thirdparty/audio/ (minimp3, stb_vorbis,
  * dr_flac, dr_wav; licences in thirdparty/*-LICENSE.txt).

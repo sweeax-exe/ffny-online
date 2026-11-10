@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 sweeax-exe (FFNY Online) */
 /* Per-hit combo log for tests and mods, RECOMP_COMBO_LOG=1 (src/hooks/combo_log.c,
  * docs/research/combo-log.md). Read-only: it writes [COMBO] lines to the run log and
  * changes nothing in the game. Off by default; when off each hook is one test of a flag. */

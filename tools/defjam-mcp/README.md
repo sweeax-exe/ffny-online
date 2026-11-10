@@ -1,3 +1,5 @@
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!-- Copyright (c) 2026 sweeax-exe (FFNY Online) -->
 # defjam-mcp v2
 
 Game tests for agents, as an MCP server (`server.py`, registered in the repository's `.mcp.json`)

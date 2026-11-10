@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 sweeax-exe (FFNY Online)
 // The launcher's Saves page (included by pc_ui.cpp after the settings dialog, so it draws with the
 // same glass, fonts and buttons). A glass dialog like Settings: the profiles and the Options file
 // on the left with Import saves (Xbox folders or zips, PS2 .psu exports), the backups on the right with Back up now and Restore, and

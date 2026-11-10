@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 sweeax-exe (FFNY Online)
 // TURF WAR (the Social Update, stage 4): the crews' map of New York's venues and the season's standings.
 // Included into online_screen.cpp's anonymous namespace after crew_ui.inc (it reads the social view C.v).
 //

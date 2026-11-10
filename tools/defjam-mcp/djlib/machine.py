@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 sweeax-exe (FFNY Online)
 """The machine: paths, the shared test lock, game processes and the safe environment.
 
 One PC runs every agent's game tests, and two copies on the same CPUs starve each other (and once

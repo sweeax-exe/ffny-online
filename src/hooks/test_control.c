@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 sweeax-exe (FFNY Online) */
 /* A live control channel for tests (tools/defjam-mcp): RECOMP_CONTROL_PORT=<port> opens a TCP
  * listener on 127.0.0.1 only, one client at a time, one command per line, one JSON line back.
  *

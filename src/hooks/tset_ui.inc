@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 sweeax-exe (FFNY Online)
 // Tournament sets: the room of a tournament match (relays answering CAPS bit 12, netplay.h NetTSet). The
 // relay runs the set by the tournament's rules and sends TSET after every ROOM; this page only shows it
 // and sends the player's choices (READY with the fighter, the loser's stage pick, VOTE 0 to start a game

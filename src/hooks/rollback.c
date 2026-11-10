@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 sweeax-exe (FFNY Online) */
 /* Save states of a fight, for rollback netcode. See rollback.h.
  *
  * What a save holds, and why (measured with the test channel's memdiff and freeze verbs,

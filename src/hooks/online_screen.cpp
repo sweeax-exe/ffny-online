@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 sweeax-exe (FFNY Online)
 // The online screens inside the game. See online_screen.h.
 //
 // The game's main menu has an ONLINE entry in its seventh slot (scripts/apt-patch.py): the menu

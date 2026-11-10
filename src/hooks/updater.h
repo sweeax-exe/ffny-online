@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 sweeax-exe (FFNY Online) */
 /* The launcher's updater. A signed manifest on the update server names the newest build
  * and its setup; when it is newer than this installation, the launcher offers it, and on
  * yes downloads the setup, checks it against the manifest's SHA-256 and starts it in its

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 sweeax-exe (FFNY Online)
 // The launcher's Saves page underneath: listing the profiles, backups of the save area, and
 // bringing in Xbox profiles (scripts/save-import.py, ported) and PS2 ones (converted, hK's
 // converter ported). No UI, no game state and no

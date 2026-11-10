@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 sweeax-exe (FFNY Online)
 // "Enhanced graphics (community)", the launcher's part: the background work and what the card shows,
 // the settings, the re-install after an update, the GPU check and the log header line. See graphics_mod.h.
 #define _CRT_SECURE_NO_WARNINGS

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 sweeax-exe (FFNY Online)
 // The launcher's Change name dialog (included by pc_ui.cpp, after the glass helpers). The FFNY name is taken from
 // Discord at the first sign-in and then stays; a player changes it here, once every 30 days. The account service
 // checks everything (characters, duplicates, the chat filter, reserved names, the cooldown: server

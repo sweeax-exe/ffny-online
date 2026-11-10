@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 sweeax-exe (FFNY Online) */
 /* Discord Rich Presence: the pipe to the Discord app and its thread. See discord_ipc.h. */
 #define _CRT_SECURE_NO_WARNINGS
 #include <stdio.h>
