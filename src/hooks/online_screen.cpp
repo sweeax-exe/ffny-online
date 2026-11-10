@@ -5329,37 +5329,36 @@ bool hill_results_wanted()
 
 void hill_results_strip(ImDrawList *dl, const Frame &f, const NetHillMenu &m, const NetRoom &r)
 {
+    // top left, clear of the results' own CONTINUE (top right) as far as the panel allows
     bool rot = NETPLAY_IS_FFAROT(r.settings.mode);
     const char *st = ps_icons() ? "OPTIONS" : "START";
-    const float y = 12, ph = 40;
-    char head[96], sub[128] = "";
-    glass(dl, f, 28, y, 584, ph, 8, IM_COL32(8, 8, 11, 255), 0.8f);
-    rect(dl, f, 36, y + 8, 4, ph - 16, rot ? ORANGE : GOLD, 2);
-    text(dl, f, g_title, 11, 48, y + 5, rot ? ORANGE : GOLD, rot ? "FFA ROTATION" : "KING OF THE HILL", LEFT, 0.9f);
+    const char *mode = rot ? "FFA ROTATION" : "KING OF THE HILL";
+    const float x = 28, y = 10, w = 436, ph = 42;
+    char head[96], note[96] = "", leave[48];
+    glass(dl, f, x, y, w, ph, 8, IM_COL32(8, 8, 11, 255), 0.82f);
+    rect(dl, f, x + 8, y + 8, 4, ph - 16, rot ? ORANGE : GOLD, 2);
     if (m.room_req) {
         snprintf(head, sizeof(head), "TO THE ROOM...");
     } else if (m.next_set || m.room_next) {
-        snprintf(head, sizeof(head), "YOUR NEXT FIGHT IS SET");
-        snprintf(sub, sizeof(sub), "The room menu (choose fighter, leave) comes after it.");
+        snprintf(head, sizeof(head), "NEXT FIGHT SET");
+        snprintf(note, sizeof(note), "The room menu comes after it.");
     } else {
         snprintf(head, sizeof(head), "%s: ROOM MENU", st);
-        snprintf(sub, sizeof(sub), "Choose another fighter or leave the room there.");
+        snprintf(note, sizeof(note), "Choose another fighter or leave there.");
     }
     if (m.auto_ms >= 0 && !m.room_req && !m.next_set && !m.room_next)
-        snprintf(sub, sizeof(sub), "You're up again: ready by itself in %d s. Choose another fighter there first.",
-                 (m.auto_ms + 999) / 1000);
-    // the line under the mode's name; the note right of both (it may wrap to two lines there)
-    float lw = std::max(text_width(f, g_title, 11, rot ? "FFA ROTATION" : "KING OF THE HILL"), text_width(f, g_title, 15, head)) + 18;
-    text(dl, f, g_title, 15, 48, y + 18, WHITE, head, LEFT, 1.0f, 300);
-    if (sub[0]) text(dl, f, g_title, 10, 48 + lw, y + 8, GREY, sub, LEFT, 0.8f, 410 - lw);
-    // right: the hold that leaves the room, with its bar while START is held
-    char leave[48];
+        snprintf(note, sizeof(note), "You're up again: ready by itself in %d s.", (m.auto_ms + 999) / 1000);
+    // line 1: the mode, the note; line 2: what START does, and holding it
+    text(dl, f, g_title, 11, x + 20, y + 5, rot ? ORANGE : GOLD, mode, LEFT, 0.9f);
+    float tw = text_width(f, g_title, 11, mode) + 12;
+    if (note[0]) text(dl, f, g_title, 10, x + 20 + tw, y + 6, GREY, note, LEFT, 0.8f, w - 30 - tw);
+    text(dl, f, g_title, 15, x + 20, y + 19, WHITE, head, LEFT, 1.0f, 220);
     snprintf(leave, sizeof(leave), "HOLD %s: LEAVE ROOM", st);
-    text(dl, f, g_title, 13, 604, y + 8, m.hold_ms > 0 ? RED : CREAM, leave, RIGHT, 1.0f);
-    if (m.hold_ms > 0 && m.hold_total_ms > 0) {
+    text(dl, f, g_title, 12, x + w - 12, y + 21, m.hold_ms > 0 ? RED : CREAM, leave, RIGHT, 1.0f);
+    if (m.hold_ms > 0 && m.hold_total_ms > 0) {     // the hold's bar under it
         float k = std::min(1.0f, (float)m.hold_ms / (float)m.hold_total_ms);
-        rect(dl, f, 454, y + 28, 150, 5, IM_COL32(255, 255, 255, 40), 2);
-        rect(dl, f, 454, y + 28, 150 * k, 5, RED, 2);
+        rect(dl, f, x + w - 162, y + ph - 6, 150, 3, IM_COL32(255, 255, 255, 40), 1);
+        rect(dl, f, x + w - 162, y + ph - 6, 150 * k, 3, RED, 1);
     }
 }
 
