@@ -110,6 +110,7 @@ def _rb_relay_extra(rollback, modes=None):
     return ["-rollback-modes", modes or "all"] if rollback == "mandatory" else []
 
 
+HILL_LIVE = "this PC watches (a hill fight, live)"   # netplay.c on_start_as, build 70
 NOTE_SENT = "[REPORT] note after the match for report "     # ... sent: HTTP <status> (bug_report.c, the note after the match)
 
 
@@ -1729,6 +1730,8 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
         watch = WATCH + list(DRAFT_SHOTS) if draft else WATCH
         if reports:
             watch = watch + [NOTE_SENT]
+        if mode in ("koth", "ffarot"):
+            watch = watch + [HILL_LIVE]     # build 70: a waiting copy runs the fight it watches
         for i in range(players):
             # which way the copy's fighter approaches: Team puts room slots 0 and 1 on the left and 2 and
             # 3 on the right; on the hill (the KO winner is slot 0) copy 0 stays king on the left and
@@ -1896,6 +1899,18 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
                         more_done[("draft", name)] = True
                         for k in range(len(cs)):
                             _png(s, k, "%s-copy%d" % (name, k), shots)
+            if mode in ("koth", "ffarot"):
+                # build 70: each copy's first two watched fights, 30 s after their START (loaded, mid-fight;
+                # with the test knockout at step 600 the fight lasts about 10 s more)
+                for c in cs:
+                    for n in (1, 2):
+                        key = ("watch", c.index, n)
+                        if c.watch.count(HILL_LIVE) >= n and key not in more_done:
+                            more_done[key] = time.time() + 30
+                        due = more_done.get(key)
+                        if isinstance(due, float) and time.time() >= due:
+                            more_done[key] = True
+                            _png(s, c.index, "watch-w%d-copy%d" % (n, c.index), shots)
             if shot_due is None and cs[0].watch.count(" starts in "):
                 shot_due = time.time() + 8
             if more_shots and shot_due and not more_done.get("versus") and time.time() >= shot_due - 7:
