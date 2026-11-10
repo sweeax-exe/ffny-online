@@ -3822,9 +3822,10 @@ static void on_packet(const uint8_t *b, int len)
                 "FFNY Online is already online on this PC.",
                 "Your created fighter has stats the game does not allow; it can't be used online.",
                 "Your ping is over this room's MAX PING: try a closer server or another room.",
+                "This client isn't supported by FFNY Online. Use the official PC version from defjam.online.",
                 "The other players have different community packs: both need the same ones (launcher, Content)." };
             int code = b[6];
-            const char *text = code >= 1 && code <= 14 ? why[code] : "The server refused the request.";
+            const char *text = code >= 1 && code <= 15 ? why[code] : "The server refused the request.";
             char ping_why[112];
             if (code == 13 && N.rtt_ms >= 0) {  /* build 68 relays: MAX PING, with this PC's ping */
                 snprintf(ping_why, sizeof(ping_why), "Your ping (%d ms) is over this room's MAX PING: try a closer server or another room.", N.rtt_ms);

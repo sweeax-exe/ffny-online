@@ -22,7 +22,7 @@ Kinds: `content` (new fighters, clothing, venues) is always on and part of onlin
 when chosen as the Game language.
 
 A relay before this branch refuses the longer HELLO; it is sent only by a PC with `content` packs, so the relay
-goes out first. The relay answers a code join between different content sets with ERROR 14.
+goes out first. The relay answers a code join between different content sets with ERROR 15 (14 is the relay's "client not supported").
 
 ## Testing
 
