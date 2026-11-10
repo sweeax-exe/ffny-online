@@ -18,9 +18,37 @@ def require(value, message):
         raise ValueError(message)
 
 
-def fields(value, expected):
-    require(isinstance(value, dict) and set(value) == set(expected.split()),
+def fields(value, expected, optional=''):
+    require(isinstance(value, dict) and set(expected.split()) <= set(value) <= set(expected.split()) | set(optional.split()),
             'Missing or unknown fields: expected ' + expected)
+
+
+# FFNY Online's own catalogue (play.defjam.online/updates/content, signed by the account service on
+# accept): every mod says its kind, type and install order; every version its content hash and the
+# pack signature. Optional here, so the upstream catalogue format stays valid.
+KINDS = ('content', 'replacement')
+TYPES = ('fighter-texture', 'fighter-body', 'fighter-model', 'clothing', 'venue', 'language')
+
+
+def ffny_mod(mod):
+    if 'kind' in mod:
+        require(mod['kind'] in KINDS, 'Invalid kind')
+    if 'type' in mod:
+        require(mod['type'] in TYPES, 'Invalid type')
+    if 'order' in mod:
+        positive(mod['order'])
+    if 'language' in mod:
+        require(isinstance(mod['language'], str) and re.fullmatch(r'[a-z]{2,3}(-[A-Za-z0-9]{2,8})?', mod['language']),
+                'Invalid language code')
+
+
+def ffny_version(row):
+    if 'content_sha256' in row:
+        require(isinstance(row['content_sha256'], str) and re.fullmatch(r'[0-9a-f]{64}', row['content_sha256']),
+                'Invalid content SHA-256')
+    if 'pack_signature' in row:
+        require(isinstance(row['pack_signature'], str) and re.fullmatch(r'[0-9a-f]{128}', row['pack_signature']),
+                'Invalid pack signature')
 
 
 def text(value):
@@ -67,7 +95,9 @@ def positive(value):
 
 
 def validate_mod(mod):
-    fields(mod, 'id name description authors class licence homepage versions revoked_versions')
+    fields(mod, 'id name description authors class licence homepage versions revoked_versions',
+           'kind type order language')
+    ffny_mod(mod)
     slug(mod['id'])
     for key in ('name', 'description', 'licence'):
         text(mod[key])
@@ -77,7 +107,9 @@ def validate_mod(mod):
     require(isinstance(mod['versions'], list) and mod['versions'], 'Missing versions')
     seen = set()
     for row in mod['versions']:
-        fields(row, 'version channel min_recomp capabilities reviewed depends conflicts load_after archive')
+        fields(row, 'version channel min_recomp capabilities reviewed depends conflicts load_after archive',
+               'content_sha256 pack_signature')
+        ffny_version(row)
         parsed = version(row['version'])
         require(row['version'] not in seen, 'Duplicate version')
         seen.add(row['version'])

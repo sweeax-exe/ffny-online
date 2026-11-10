@@ -45,6 +45,8 @@
 
 #include "recomp_settings.h"
 #include "pc_language.h"
+#include "pc_content.h"
+#include "netplay.h"
 
 /* The toolkit's game-file redirect (kernel.h, not on this target's include path). */
 #if defined(_WIN32)
@@ -798,6 +800,10 @@ void pc_language_start(const char *data_root, const char *game_dir)
         fprintf(stderr, "[LANG] the game's own language (no language pack)\n");
         return;
     }
+    if (pc_content_language_blocked(folder)) {
+        fprintf(stderr, "[LANG] %s is switched off on the Content page: the game's own language\n", folder);
+        return;
+    }
     if (!data_root || !*data_root) {
         fprintf(stderr, "[LANG] language pack '%s' needs a data folder; playing in the game's own language\n", folder);
         return;
@@ -904,6 +910,7 @@ void pc_language_start(const char *data_root, const char *game_dir)
     g_pack_subtitles = g_pack.all_subtitles;
     g_active = 1;
     g_xbox_game_file_redirect = lang_redirect;
+    netplay_data_print_reset();     /* a print made before this (the launcher's online) missed the rebuilt files */
     fprintf(stderr, "[LANG] %s (%s, %s): %d file(s) served from %s%s\n", g_pack.name, g_pack.language, folder,
             g_served_count, cache, fresh ? "" : " (built now)");
     language_texture_layer(dir, folder);

@@ -49,6 +49,7 @@
 #include "anticheat.h"
 #include "created_fighter.h"
 #include "pc_input.h"
+#include "pc_content.h"
 
 #define G_MATCH_PHASE   0x003B8F30u     /* test_telemetry.c G_PHASE */
 #define G_MATCH_WINNER  0x003B8F40u     /* test_telemetry.c G_WINNER: the winner's fighter slot */
@@ -123,6 +124,7 @@ int netplay_in_lobby(void) { return 0; }
 int netplay_lobby_address(char *o, int n) { (void)o; (void)n; return 0; }
 int netplay_rtt(void) { return -1; }
 void netplay_build_fingerprint(uint8_t o[8]) { memset(o, 0, 8); }
+void netplay_data_print_reset(void) {}
 int netplay_room_ping(int s) { (void)s; return -1; }
 int netplay_room_results_wait(unsigned *s) { if (s) *s = 0; return 0; }
 int netplay_maintenance(char *t, int n) { if (t && n > 0) t[0] = 0; return -1; }
@@ -1281,7 +1283,13 @@ static void send_hello(void)
     memcpy(b + n, N.name, (size_t)len); n += len;
     {   /* since build 26: the build number, so the relay can turn away builds older than the published one */
         int build = updater_local_build();
-        if (build > 0) { put32(b + n, (uint32_t)build); n += 4; }
+        if (build > 0) {
+            uint32_t content = pc_content_print();
+            put32(b + n, (uint32_t)build); n += 4;
+            /* build 72: the content print after the build number, only with content packs (relays
+             * before it refuse the longer HELLO; a PC without such packs sends what it sent before) */
+            if (content) { put32(b + n, content); n += 4; }
+        }
     }
     send_raw(b, n);
 }
@@ -2065,7 +2073,7 @@ static const char *const k_fight_files[] = {
     "fighter.xml", "gamedata.xml", "gconfig.xml", "venue.xml", "assets\\gamecore.xml", "assets\\combs.xml",
     "assets\\ai\\ai.viv", "motion\\main_all.dat", "assets\\djv2.sod",
 };
-static uint32_t g_data_print;
+static volatile uint32_t g_data_print;
 static char g_data_over[160];       /* the fight files read from the override folder, for the reports */
 
 /* The toolkit's game-file redirect (kernel.h): a language mod's rebuilt copy of a file
@@ -2111,6 +2119,14 @@ static uint32_t file_print(const char *name, int *overridden)
     return h ? h : 1;
 }
 
+/* The fight files' print is made when the network thread starts, which can be in the launcher, before
+ * pc_language_start serves a language mod's rebuilt files: then it missed them. pc_language_start resets
+ * it, and the next P_RTT makes it again with the redirect in place. */
+void netplay_data_print_reset(void)
+{
+    g_data_print = 0;
+}
+
 static void make_data_print(void)
 {
     char text[400], over[160];
@@ -2136,6 +2152,7 @@ static void send_rtt(void)
     uint8_t p[17];
     int rtt;
     if (N.pos < 0 || N.watching) return;    /* a spectator: nothing of the lockstep goes out */
+    if (!g_data_print) make_data_print();   /* reset at game start (netplay_data_print_reset) */
     rtt = N.peer_rtt[N.pos] < 0 ? 0 : N.peer_rtt[N.pos];
     p[0] = P_RTT;
     put32(p + 1, N.start_seed);
@@ -3804,9 +3821,10 @@ static void on_packet(const uint8_t *b, int len)
                 "A new build is out: close the game and update in the launcher to play online.",
                 "FFNY Online is already online on this PC.",
                 "Your created fighter has stats the game does not allow; it can't be used online.",
-                "Your ping is over this room's MAX PING: try a closer server or another room." };
+                "Your ping is over this room's MAX PING: try a closer server or another room.",
+                "The other players have different community packs: both need the same ones (launcher, Content)." };
             int code = b[6];
-            const char *text = code >= 1 && code <= 13 ? why[code] : "The server refused the request.";
+            const char *text = code >= 1 && code <= 14 ? why[code] : "The server refused the request.";
             char ping_why[112];
             if (code == 13 && N.rtt_ms >= 0) {  /* build 68 relays: MAX PING, with this PC's ping */
                 snprintf(ping_why, sizeof(ping_why), "Your ping (%d ms) is over this room's MAX PING: try a closer server or another room.", N.rtt_ms);
@@ -4311,6 +4329,12 @@ void netplay_build_fingerprint(uint8_t out[8])
     for (v = DEFJAM_VERSION; *v; v++) h1 = (h1 ^ (uint8_t)*v) * 16777619u;
     for (k = 0; k < 4; k++) h1 = (h1 ^ (uint8_t)(build >> (8 * k))) * 16777619u;
     h2 = mix32(h1 ^ LOCKSTEP_VERSION);
+    {   /* FFNY Online's community content (pc_content.c): a PC with `content` packs (new fighters,
+         * clothing, venues) only meets PCs with the same set. None: the fingerprint builds before
+         * 72 had. Replacements and language packs never count. */
+        uint32_t content = pc_content_print();
+        if (content) { h1 = mix32(h1 ^ content); h2 = mix32(h2 ^ content ^ 0x434F4E54u); }
+    }
     put32(out, h1); put32(out + 4, h2);
 }
 
@@ -4319,6 +4343,12 @@ static int start(const char *server, const char *name, int creating, const char 
     int i;
     InitOnceExecuteOnce(&g_once, init_once, NULL, NULL);
     netplay_stop();
+    if (pc_content_offline_only()) {   /* Studio's Test in a fight: an unreviewed pack never goes online */
+        InterlockedExchange(&N.state, NETPLAY_FAILED);
+        set_status("Online is off in this test session (FFNY Studio).");
+        fprintf(stderr, "[NETPLAY] refused: online is off in this test session (RECOMP_OFFLINE_ONLY)\n");
+        return -1;
+    }
     if (!server || !*server) { InterlockedExchange(&N.state, NETPLAY_FAILED); set_status("Enter the server address first."); return -1; }
     snprintf(N.server_text, sizeof(N.server_text), "%s", server);
     snprintf(N.name, sizeof(N.name), "%s", name && *name ? name : "Player");

@@ -166,8 +166,61 @@ bool load_art(const wchar_t *relative, Art &art)
     return ok;
 }
 
+// The community gallery's pictures (pc_ui.cpp, ui_set_png_loader): PNG bytes from the account service as
+// textures, all released when the launcher closes. At most 64, at most 2048 x 2048.
+std::vector<ID3D11ShaderResourceView *> g_net_pictures;
+
+ImTextureID png_texture(const void *png, int len, int *out_w, int *out_h)
+{
+    IWICImagingFactory *factory = nullptr;
+    IWICStream *stream = nullptr;
+    IWICBitmapDecoder *decoder = nullptr;
+    IWICBitmapFrameDecode *frame = nullptr;
+    IWICFormatConverter *converter = nullptr;
+    ID3D11ShaderResourceView *srv = nullptr;
+    UINT w = 0, h = 0;
+    if (!png || len < 8 || g_net_pictures.size() >= 64) return 0;
+    HRESULT com = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    if (SUCCEEDED(CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&factory))) &&
+        SUCCEEDED(factory->CreateStream(&stream)) &&
+        SUCCEEDED(stream->InitializeFromMemory((BYTE *)png, (DWORD)len)) &&
+        SUCCEEDED(factory->CreateDecoderFromStream(stream, &GUID_ContainerFormatPng, WICDecodeMetadataCacheOnDemand, &decoder)) &&
+        SUCCEEDED(decoder->GetFrame(0, &frame)) &&
+        SUCCEEDED(factory->CreateFormatConverter(&converter)) &&
+        SUCCEEDED(converter->Initialize(frame, GUID_WICPixelFormat32bppRGBA, WICBitmapDitherTypeNone, nullptr, 0.0,
+                                        WICBitmapPaletteTypeCustom)) &&
+        SUCCEEDED(converter->GetSize(&w, &h)) && w && h && w <= 2048 && h <= 2048) {
+        std::vector<BYTE> pixels((size_t)w * h * 4);
+        if (SUCCEEDED(converter->CopyPixels(nullptr, w * 4, (UINT)pixels.size(), pixels.data()))) {
+            D3D11_TEXTURE2D_DESC desc = {};
+            desc.Width = w; desc.Height = h; desc.MipLevels = 1; desc.ArraySize = 1;
+            desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM; desc.SampleDesc.Count = 1;
+            desc.Usage = D3D11_USAGE_IMMUTABLE; desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+            D3D11_SUBRESOURCE_DATA data = { pixels.data(), w * 4, 0 };
+            ID3D11Texture2D *texture = nullptr;
+            if (SUCCEEDED(g_dev->CreateTexture2D(&desc, &data, &texture))) {
+                if (FAILED(g_dev->CreateShaderResourceView(texture, nullptr, &srv))) srv = nullptr;
+                texture->Release();
+            }
+        }
+    }
+    if (converter) converter->Release();
+    if (frame) frame->Release();
+    if (decoder) decoder->Release();
+    if (stream) stream->Release();
+    if (factory) factory->Release();
+    if (SUCCEEDED(com)) CoUninitialize();
+    if (!srv) return 0;
+    g_net_pictures.push_back(srv);
+    if (out_w) *out_w = (int)w;
+    if (out_h) *out_h = (int)h;
+    return (ImTextureID)(intptr_t)srv;
+}
+
 void drop_art()
 {
+    for (auto *srv : g_net_pictures) srv->Release();
+    g_net_pictures.clear();
     if (g_banner.srv) { g_banner.srv->Release(); g_banner = Art(); }
     if (g_logo.srv) { g_logo.srv->Release(); g_logo = Art(); }
     if (g_backdrop.srv) { g_backdrop.srv->Release(); g_backdrop = Art(); }
@@ -373,6 +426,7 @@ extern "C" int pc_launcher_run(void)
     ui_set_launcher_backdrop((ImTextureID)(intptr_t)g_backdrop.srv, (float)g_backdrop.width, (float)g_backdrop.height,
                              (ImTextureID)(intptr_t)g_backdrop_blur.srv, (float)g_backdrop_blur.width,
                              (float)g_backdrop_blur.height);
+    ui_set_png_loader(png_texture);
     fprintf(stderr, "[UI] launcher artwork: banner %s, logo %s, background %s\n", g_banner.srv ? "loaded" : "not found",
             g_logo.srv ? "loaded" : "not found", g_backdrop.srv && g_backdrop_blur.srv ? "loaded" : "not found");
     ui_unlock();
@@ -434,6 +488,7 @@ extern "C" int pc_launcher_run(void)
     ui_lock();
     ui_set_launcher_art(0, 0, 0, 0, 0, 0);
     ui_set_launcher_backdrop(0, 0, 0, 0, 0, 0);
+    ui_set_png_loader(nullptr);
     ImGui_ImplDX11_Shutdown();
     ImGui_ImplWin32_Shutdown();
     ui_context_end();

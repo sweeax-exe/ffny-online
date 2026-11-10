@@ -9,8 +9,8 @@ static const char *const k_game[] = { "english", "french", NULL };
 size_t pc_language_settings(RecompSetting *out, size_t max)
 {
     size_t n = 0;
-    if (max < 3) return 0;
-    memset(out, 0, sizeof(*out) * 3);
+    if (max < 4) return 0;
+    memset(out, 0, sizeof(*out) * 4);
 #define ADD(...) do { RecompSetting s_ = { __VA_ARGS__ }; out[n++] = s_; } while (0)
     ADD("language", "pack", RECOMP_SETTING_STRING, 0, 0, 0, NULL, "RECOMP_LANGUAGE_PACK", RECOMP_SETTING_RESTART,
         "Language mod: a folder in the mods folder with language.ini (the Mods page sets it); empty plays the "
@@ -22,6 +22,10 @@ size_t pc_language_settings(RecompSetting *out, size_t max)
     ADD("language", "game", RECOMP_SETTING_ENUM, 0, 0, 0, k_game, "RECOMP_GAME_LANGUAGE", RECOMP_SETTING_RESTART,
         "The game's own language: english, or the french built into the game (text and Story subtitles; the "
         "voices stay English). A language mod takes its place.");
+    /* FFNY Online's synced catalogue packs (pc_content.c): the replacements this player switched off. */
+    ADD("content", "off", RECOMP_SETTING_STRING, 0, 0, 0, NULL, "RECOMP_CONTENT_OFF", RECOMP_SETTING_RESTART,
+        "Community packs switched off on this PC (pack ids, comma-separated; the launcher's Content page sets "
+        "it). Only retextures and language packs can be off; new fighters, clothing and venues are always on.");
 #undef ADD
     return n;
 }
