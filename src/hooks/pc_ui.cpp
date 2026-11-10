@@ -3580,6 +3580,10 @@ bool g_exit = false;                // the overlay shows the main menu's QUIT FF
 std::atomic<bool> g_exit_req{false};    // ESC or a click on the EXIT chip (window thread)
 std::atomic<int> g_menu_eats_back{0};   // the title reads no BACK (VIEW) on the main menu (game thread)
 bool g_exit_view_down = true;       // the pad's VIEW was held last frame (true: a held one never opens it)
+// A VIEW press the title's own pad read saw and lost to g_menu_eats_back (game thread,
+// pc_ui_menu_back_pressed). The overlay samples the pads once a frame, so a short press during a
+// slow frame never reached it: the press was eaten and nothing opened (build 69's boot --goto exit).
+std::atomic<bool> g_exit_view_latch{false};
 bool g_just_opened = false;
 bool g_ready = false;               // the context and backends exist (under the lock)
 #if defined(_WIN32)
@@ -4265,6 +4269,7 @@ extern "C" int pc_ui_report_ask(const char *path) { (void)path; return 0; }
 // The main menu's own BACK handler sends it to the title screen, as B does; on the main menu VIEW opens
 // EXIT instead, so the title's pad reads (sub_0027E075, src/recomp_manual.c) lose the BACK bit there.
 extern "C" int pc_ui_menu_eats_back(void) { return g_menu_eats_back.load(std::memory_order_relaxed); }
+extern "C" void pc_ui_menu_back_pressed(void) { g_exit_view_latch.store(true); }
 
 extern "C" int pc_ui_overlay_open(void) { return g_open.load() || g_note_shown.load() ? 1 : 0; }
 
@@ -4394,7 +4399,10 @@ extern "C" void pc_ui_overlay(void *device, void *context, void *window_rtv, uns
             if (xbox_HostInputRawPad(slot, &raw) && raw.src[INPUT_SRC_BACK] >= 16384) view = true;
         }
         bool ptt = recomp_settings_get("online", "voice_pad", 0) == 1;     // VIEW is push-to-talk
-        bool view_press = view && !g_exit_view_down && !ptt;
+        // a press the overlay's own sample missed still counts once (taken every frame, so one that
+        // came while the prompt or the overlay was open is dropped, not kept for later)
+        bool latched = g_exit_view_latch.exchange(false);
+        bool view_press = ((view && !g_exit_view_down) || latched) && !ptt;
         g_exit_view_down = view;
         g_menu_eats_back = online_screen::exit_wanted() && !ptt ? 1 : 0;
         bool req = g_exit_req.exchange(false);
