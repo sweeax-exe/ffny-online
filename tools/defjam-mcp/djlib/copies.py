@@ -267,11 +267,15 @@ class Session:
         return self.exe
 
     def launch(self, i, env=None, root=None, core=None, control_port=None, watch=(), fixture=None):
-        """Start copy i on its own data root and CPU. Refuses before starting when anything is missing."""
+        """Start copy i on its own data root and CPU. Refuses before starting when anything is missing.
+        DJ_COPY_EXE=<path> in env (e.g. --copy-env 1:DJ_COPY_EXE=...) runs that game image for this copy
+        instead of this checkout's: a mixed-build sync check (two builds in one room)."""
         if self.closed or not self.lock.held:
             raise RuntimeError("open the session (take the lock) first")
+        env = dict(env or {})
+        own = env.pop("DJ_COPY_EXE", None)
+        exe = os.path.abspath(own) if own else self.copy_exe(i)
         root = root or self.make_root(i, fixture=fixture)
-        exe = self.copy_exe(i)
         bad = machine.preflight(exe, root)
         if bad:
             raise FileNotFoundError("; ".join(bad))
