@@ -24,6 +24,7 @@ Files:
   setup/ffnycontent/sod.py
   setup/ffnycontent/sodwrite.py
   setup/ffnycontent/viv.py
+  scripts/test-studio-launcher.py
   src/hooks/abort_report.cpp
   src/hooks/account.c
   src/hooks/account.h
@@ -93,6 +94,7 @@ Files:
   src/hooks/pc_launcher_saves.cpp
   src/hooks/pc_launcher_saves.h
   src/hooks/pc_launcher_saves.inc
+  src/hooks/pc_launcher_studio.inc
   src/hooks/rank_art.inc
   src/hooks/ranked_board.inc
   src/hooks/ranked_ui.inc
@@ -103,6 +105,9 @@ Files:
   src/hooks/social.cpp
   src/hooks/social.h
   src/hooks/social_ui.inc
+  src/hooks/studio_app.cpp
+  src/hooks/studio_app.h
+  src/hooks/studio_unzip.cpp
   src/hooks/test_bot.c
   src/hooks/test_control.c
   src/hooks/tset_ui.inc

@@ -188,11 +188,3 @@ static void content_dialog(ImVec2 o, float w, float h, float s)
     }
     ImGui::EndPopup();
 }
-
-// FFNY Studio (docs in the Studio repository): its launcher button, hidden until Studio ships through the
-// update path. RECOMP_STUDIO_BUTTON=1 shows the stub for tests.
-static bool studio_button_visible()
-{
-    const char *v = getenv("RECOMP_STUDIO_BUTTON");
-    return v && !strcmp(v, "1");
-}
