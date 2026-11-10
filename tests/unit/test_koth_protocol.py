@@ -170,6 +170,35 @@ def test_an_idle_player_on_the_results_holds_the_next_fight_briefly():
     assert '    hill_results_tick();' in NETPLAY_C
 
 
+def test_the_room_menu_between_hill_fights():
+    # build 73 (a player report: an FFA rotation room never went back to its room screen, no CHOOSE FIGHTER, no
+    # LEAVE ROOM): the call on this PC's results readies it HILL_AUTOREADY_MS later, inside the relay's ready time
+    # with a margin, so the room screen can come first (crew battles keep readying at once)
+    relay = (RELAY_SRC / 'relay.go').read_text(encoding='utf-8')
+    m = re.search(r'c\.KothReadyTime = (\d+) \* time\.Second', relay)
+    assert m
+    ready_ms = int(m.group(1)) * 1000
+    assert c_define(NETPLAY_C, 'HILL_AUTOREADY_MS') + c_define(NETPLAY_C, 'HILL_AUTOREADY_MARGIN_MS') <= ready_ms
+    on_hill = NETPLAY_C.split('static void on_hill(const uint8_t *b, int len)', 1)[1].split('\n}\n', 1)[0]
+    called = on_hill.split('N.koth_ready_for != h.fights + 1) {', 1)[1].split('\n    }\n', 1)[0]
+    assert 'if (CREW_HERE()) {' in called and 'auto_ready = koth_ready_fighter();' in called
+    assert 'N.koth_auto_at = now +' in called
+    # the auto-ready, a pick kept until the room has it, START on the results and from a watched fight
+    assert 'hill_autoready_tick(now);' in NETPLAY_C and 'hill_pick_tick(now);' in NETPLAY_C
+    assert '    hill_room_tick();' in NETPLAY_C
+    tick = NETPLAY_C.split('static void hill_room_tick(void)\n{', 1)[1].split('\n}\n', 1)[0]
+    assert 'hill_room_request("START on the results")' in tick and 'HILL_HOLD_LEAVE_MS' in tick
+    leave = NETPLAY_C.split('static void hill_leave_room(const char *why)', 1)[1].split('\n}\n', 1)[0]
+    assert 'InterlockedExchange(&N.start_deferred, 0)' in leave and 'netplay_lobby_leave();' in leave
+    # the overlay draws the results strip; every hill screen this PC waits on has a way out
+    ui = (ROOT / 'src/hooks/online_screen.cpp').read_text(encoding='utf-8')
+    pc_ui = (ROOT / 'src/hooks/pc_ui.cpp').read_text(encoding='utf-8')
+    assert 'online_screen::draw_hill_results(' in pc_ui and 'netplay_hill_menu(&g_hill_menu_now)' in ui
+    for screen in ('void draw_watch(', 'void draw_watch_rot(', 'void draw_up(', 'void draw_hill('):
+        body = re.split(re.escape(screen) + r'[^;{]*\)\n\{', ui, maxsplit=1)[1].split('\n}\n', 1)[0]  # the definition
+        assert 'LEAVE ROOM' in body and 'CHOOSE FIGHTER' in body, screen
+
+
 def test_late_spectator_type_and_caps_match_the_relay():
     # a spectator that comes while the match runs (docs/research/spectator-mode.md section 5): WATCHLATE
     # and the client's CAPS bit 11, from the relay's protocol_spectate.go

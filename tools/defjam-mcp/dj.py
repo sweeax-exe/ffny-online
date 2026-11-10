@@ -80,7 +80,8 @@ def cmd_scenario(a):
                              rollback_modes=a.rollback_modes, rollback_max_ping=a.rollback_max_ping, leave=a.leave,
                              spectate_after=a.spectate_after, spectate_delay=a.spectate_delay,
                              maintenance=a.maintenance, cpu_level=a.cpu_level, linger=a.linger, reports=a.reports,
-                             fighter_rules=a.fighter_rules, max_ping=a.max_ping,
+                             fighter_rules=a.fighter_rules, max_ping=a.max_ping, room_menu=a.room_menu,
+                             results_leave=a.results_leave,
                              banned_tier=[int(x) for x in a.banned_tier.split(",") if x.strip()] if a.banned_tier is not None else None,
                              **common)
     elif a.kind == "offline":
@@ -249,6 +250,10 @@ def main(argv=None):
                     "(e.g. into the next fight)")
     sc.add_argument("--maintenance", type=int, default=0, help="online: the relay's restart countdown (SECS) holds the "
                     "fights from the start until the file goes SECS + 5 s later; copy 0's online screens are captured")
+    sc.add_argument("--room-menu", help="online, koth/ffarot: COPY@K:F, copy COPY presses START on the results of its K-th "
+                    "fight (the room screen), picks fighter F there (default 7) and fights the next one with it")
+    sc.add_argument("--results-leave", help="online, koth/ffarot: COPY@K, copy COPY holds START on the results of its K-th "
+                    "fight and leaves the room; the others fight on")
     sc.add_argument("--linger", type=int, help="online, koth/ffarot: copy N presses nothing after the main menu and sits on "
                     "each fight's results (the game must take it off them; result hill_gaps)")
     sc.add_argument("--type", type=int, default=0)

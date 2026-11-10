@@ -395,6 +395,35 @@ A new session state "watching", entered on WATCH:
   `dj.py scenario online --mode koth|ffarot` lists each copy's watched fights (`hill_watch`: steps, checksums,
   how it went back) and each fighter's lockstep waits mid-fight (`fight waits` lines).
 
+### 9.6 The room menu between fights (build 73)
+
+A player report on builds 71/72: in an FFA rotation room nobody could go back to choose a fighter or leave; the
+room "kept continuing without the button to leave". In a room of up to four every player fights every fight, and
+each was called for the next one on the last one's results, readied there at once (the auto-ready of 9.1), so the
+relay started the next fight a second after the decision; the START waited for the menus (`start_deferred`) and
+the game went from the results (a press, or the 15-20 s cap of `hill_results_tick`) straight into it. The room
+screen with CHOOSE FIGHTER and LEAVE ROOM never came, and the results have no overlay input of their own.
+
+- **The call on the results readies later**: `HILL_AUTOREADY_MS` (8 s) after the call, at the latest
+  `HILL_AUTOREADY_MARGIN_MS` (4 s) before the relay's 20 s ready time ends (`hill_autoready_tick`), on the results
+  or on the room screen. A player who leaves the results first reaches the room screen ("YOU'RE UP": A ready,
+  X CHOOSE FIGHTER, B LEAVE ROOM, "ready by itself in n s"). Nobody waits longer than before: the fight still
+  needs every fighter back from the results, and the cap is unchanged. Crew battles ready at once as before.
+- **START on this PC's own results** (a strip over them, `hill_results_strip`, from the summary on): the room
+  screen now (`Game.Quit()` / the Rematch menu's No, as the cap does); this PC then readies by itself only at the
+  margin, so it can pick first. With its next fight set already (the START came) it goes to the room screen after
+  that fight. **START held** (1.2 s, a bar fills) leaves the room from the results; a next fight set for this PC
+  is dropped (FFA rotation: the others fight on).
+- **Watching**: START leaves the watched fight for the room screen's line (not the watching screen), where B
+  leaves; held on, it leaves the room. The watching screens also have Y LEAVE ROOM.
+- **A pick that the room could not take** (the relay keeps a fighter's fighter while it votes or fights) is kept
+  (`koth_pick`) and sent again once the room can take it (`hill_pick_tick`), so it counts from the next fight; it is
+  also the fighter of the next ready (the auto-ready, A).
+- Tests: `RECOMP_TEST_HILL_ROOM=K[:F]` presses START on the results of this PC's K-th fight (and picks F on the
+  room screen), `RECOMP_TEST_HILL_LEAVE=K` holds it; `dj.py scenario online --mode ffarot --room-menu COPY@K:F
+  --results-leave COPY@K` checks them (`room_menu` in the result) and captures the strip and the room screen. The
+  gallery has `rot-results`, `rot-results-set` and `rot-up-auto`.
+
 ## 10. What is hard, honestly
 
 1. **Spectators running the simulation.** The whole design rests on a third PC reproducing the

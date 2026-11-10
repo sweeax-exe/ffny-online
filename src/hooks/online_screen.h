@@ -62,6 +62,10 @@ const char *shot_label();
  * hill_hud_wanted() once a frame; draw_hill_hud draws it (no input). */
 bool hill_hud_wanted();
 void draw_hill_hud(ImDrawList *dl, ImVec2 display);
+/* Build 73: over this PC's own hill fight's results, what START does there (the room menu; held, leave the
+ * room): hill_results_wanted() once a frame; draw_hill_results draws it (no input). */
+bool hill_results_wanted();
+void draw_hill_results(ImDrawList *dl, ImVec2 display);
 bool fight_chat_wanted();
 bool draw_fight_chat(ImDrawList *dl, ImVec2 display);
 bool fight_chat_typing();
