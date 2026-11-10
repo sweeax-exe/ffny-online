@@ -39,8 +39,9 @@ KEYS = Path(__file__).resolve().parents[1] / 'config/mods/catalogue-keys.json'
 
 def local_test_url(url):
     """Tests only: FFNY_CONTENT_URL may name a plain-HTTP catalogue on this machine (a local account
-    service with -content-serve); its key comes from FFNY_CONTENT_TEST_KEYS. Never another host."""
-    return isinstance(url, str) and re.match(r'http://(127\.0\.0\.1|localhost):[0-9]{1,5}/', url) is not None
+    service with -content-serve; its packs' homepage is the bare -public-url, http://127.0.0.1:<port>); its key
+    comes from FFNY_CONTENT_TEST_KEYS. Never another host."""
+    return isinstance(url, str) and re.match(r'http://(127\.0\.0\.1|localhost):[0-9]{1,5}(/|$)', url) is not None
 
 
 def local_catalogue_url():

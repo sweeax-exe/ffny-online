@@ -141,6 +141,8 @@ def test_catalogue_url_is_ours_and_local_http_only_for_tests():
     assert mods.local_test_url('http://127.0.0.1:8095/updates/content/index.json')
     assert not mods.local_test_url('http://example.com:80/index.json')
     assert not mods.local_test_url('http://127.0.0.1.evil.com:80/x')
+    assert mods.local_test_url('http://127.0.0.1:8095')          # a pack's homepage: the bare -public-url
+    assert not mods.local_test_url('http://127.0.0.1:8095.evil.com/x')
 
 
 def body_package(tmp, game, name='new-body', new=b'modder body'):
