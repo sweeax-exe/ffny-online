@@ -187,8 +187,30 @@ keys are Blazins and must be rows of the Blazin table (table 6, colour 0, rows 0
 PC's djv2.sod holds; build 72, before which a key of any table passed), else the fresh-fighter move
 0x06000033; recipe parts must be keys the game's database has (`(table<<24)|(colour<<16)|row`: a
 table of djv2.sod, a row below its record count, colour below 16 [I]), else the default part (-1);
-the twelve body/face values at most 0xFF. The relay checks only
-the shape (size, version, CRC, name, archetype, first style, flag).
+the twelve body/face values at most 0xFF. The relay checks the shape (size, version, CRC, name,
+archetype, first style, flag), the stat limits (build 46) and, since build 74, the parts' ranges: move keys
+in the Blazin table, body values at most 0xFF, parts -1 or a table below 64 and a colour below 16
+(`server/relay/record_stats.go`, `RecordPartsRefused`; it has no djv2.sod, so not the rows).
+
+**The database the check reads (build 74).** djv2.sod (table sizes) and fighter.xml (archetype names, for
+display only) are opened the way the game-file print opens them (`netplay_open_fight_file`: a language
+mod's rebuilt copy, then the override folder's, then the dump's); both files are in the print
+(`k_fight_files`). Before build 74 the check skipped the language redirect, so two PCs with one print could
+read different copies. A print mismatch is only a warning (a toast; the content print of build 73 covers
+community packs and blocks), so PCs with different databases can still meet; they then differ in the fight
+itself as well, not only in this clamp.
+
+**No cap on the base stats' sum (build 74 check).** A Story run can buy 50 in all five trained stats:
+- the gym (`sub_0004EB60`) charges, per point, `cost[base / 5]` development points (profile `+0x28`)
+  from the table at 0x2DBB70: 5, 25, 50, 100, 225, 500, 1000, 1500, 2500, 5000 [V]. 0 -> 50 costs
+  54,525; all five stats 272,625;
+- the match rewards (`sub_00015B80`) add a bounty row's development points (djv2.sod table 8, 175 rows,
+  field `0x3CB71621`) times 0.75 / 1.0 / 1.25 by the Story difficulty (`+0x5E` = 0 / 1 / 2) [V]; cash is
+  field `0xC392EC0D` (profile `+0x20`). The rows hold 313,700 points in all (392,125 on hard; e.g.
+  `Crow_Bounty` 25,000, `357HighStakes_Doc_Bounty` 10,000) [V];
+- so five stats at 50 need 87 % of all bounties on normal, 70 % on hard. Whether every bounty falls in
+  one run (story branches) is [U], but the margin makes 5 x 50 reachable; the sixth base stat is not
+  bought (`sub_00014C20` recomputes it, up to 50). The client and relay keep only the 50-a-stat limit.
 
 **The player's own records** (`cp_local_list`, `cp_local_record`): every user ID save in
 `<data>/save/UserData/45410049/*/` (0x5990 bytes: a 0x80-byte header, then the profile) whose

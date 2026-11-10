@@ -2119,16 +2119,14 @@ extern BOOL (*g_xbox_game_file_redirect)(const char *relative, WCHAR *host_path,
 extern BOOL (*g_xbox_game_file_redirect)(const char *relative, char *host_path, DWORD size);
 #endif
 
-static uint32_t file_print(const char *name, int *overridden)
+/* A fight file as the game opens it: a language mod's rebuilt copy, then the override folder's, then
+ * the dump's. The print hashes what this opens, and the created-fighter check (created_fighter.c, the
+ * database's table sizes) reads the same bytes, so two PCs with one print clamp a record alike. */
+FILE *netplay_open_fight_file(const char *name, int *overridden)
 {
-    static uint8_t buf[65536];
     const char *data = getenv("DEFJAM_DATA");
     char path[MAX_PATH];
     FILE *f = NULL;
-    uint64_t lane[4] = { 0xCBF29CE484222325ull, 0x84222325CBF29CE4ull, 0x6C62272E07BB0142ull, 0x07BB01426C62272Eull };
-    uint64_t total = 0, x;
-    uint32_t h;
-    size_t got, i;
     *overridden = 0;
     /* A language mod that rebuilds one of these files changes what the fight reads: printed as
      * the game opens it, so two PCs with different such mods are told apart (a pack that only
@@ -2149,6 +2147,17 @@ static uint32_t file_print(const char *name, int *overridden)
         snprintf(path, sizeof(path), "game\\%s", name);
         f = fopen(path, "rb");
     }
+    return f;
+}
+
+static uint32_t file_print(const char *name, int *overridden)
+{
+    static uint8_t buf[65536];
+    FILE *f = netplay_open_fight_file(name, overridden);
+    uint64_t lane[4] = { 0xCBF29CE484222325ull, 0x84222325CBF29CE4ull, 0x6C62272E07BB0142ull, 0x07BB01426C62272Eull };
+    uint64_t total = 0, x;
+    uint32_t h;
+    size_t got, i;
     if (!f) return 0;
     /* FNV-1a's step on four 64-bit lanes of 8-byte words, so wres_all.viv's 64 MB take tens of
      * milliseconds rather than a byte loop's few hundred; the bytes after a chunk's last full 32 go
@@ -2185,6 +2194,7 @@ void netplay_data_print_reset(void)
     AcquireSRWLockExclusive(&g_data_print_lock);
     g_data_print = 0;
     ReleaseSRWLockExclusive(&g_data_print_lock);
+    cp_game_files_reset();      /* the created-fighter check reads the redirected copies too */
 }
 
 static void make_data_print(void)
@@ -4009,7 +4019,7 @@ static void on_packet(const uint8_t *b, int len)
                 "Not possible here: not in a room, or already in one.",
                 "A new build is out: close the game and update in the launcher to play online.",
                 "FFNY Online is already online on this PC.",
-                "Your created fighter has stats the game does not allow; it can't be used online.",
+                "Your created fighter has stats or parts the game does not allow; it can't be used online.",
                 "Your ping is over this room's MAX PING: try a closer server or another room.",
                 "This client isn't supported by FFNY Online. Get the official PC version at defjam.online and join us on Discord: discord.gg/ffnyonline",
                 "The other players have different community packs: both need the same ones (launcher, Content)." };

@@ -31,6 +31,7 @@
 #include "created_fighter.h"
 
 int automatch_queue_fe(const char *command);     /* automatch.c: a front-end call at the next call */
+FILE *netplay_open_fight_file(const char *name, int *overridden);  /* netplay.c: as the print reads it */
 
 #define GS_PTR          (0x2FB148u + 4u * 0x18u)    /* game-flow singleton, component 0x18 */
 #define GS_PROFILES     4u                          /* MEM32(GS+4) + 0x177C: 16 profiles */
@@ -58,6 +59,12 @@ int automatch_queue_fe(const char *command);     /* automatch.c: a front-end cal
 #define MIN_ARCHETYPE   86      /* fighter.xml: CP B__ .. CP MW_, CP_HERO */
 #define MAX_ARCHETYPE   141
 #define MAX_BASE        50      /* the gym's cost table (0x2DBB70) has ten tiers of five */
+/* No cap on the sum of the base stats: a Story run can buy 50 in all five trained ones. The gym
+ * (sub_0004EB60) charges cost[base / 5] development points (profile +0x28) a point, the table being
+ * 5, 25, 50, 100, 225, 500, 1000, 1500, 2500, 5000: 54,525 for 0..50, 272,625 for five stats. The
+ * match rewards (sub_00015B80) add a bounty row's points (djv2.sod table 8, field 0x3CB71621) times
+ * 0.75 / 1.0 / 1.25 by difficulty; the 175 rows hold 313,700 (392,125 on hard). base[5] is not bought:
+ * sub_00014C20 recomputes it from clothes, wins and losses, up to 50. (created-fighter-online.md) */
 /* The bonus stats as the game itself makes them (sub_00014C20 recomputes them from zero: three learned
  * styles' masks and the milestone counters), the limits the relay refuses beyond since build 46
  * (server relay/record_stats.go; docs/research/created-fighter-online.md). Before build 47 the clamp was
@@ -122,20 +129,13 @@ void cp_record_from_profile(const uint8_t *profile, uint8_t rec[CP_REC_LEN])
 static int g_sod_loaded, g_sod_tables;
 static uint32_t g_sod_count[SOD_TABLES];
 
+/* The copy the game reads and the game-file print hashes (netplay.c: a language mod's rebuilt copy, the
+ * override folder's, the dump's): two PCs whose prints agree read the same bytes here, so they clamp a
+ * record alike. Before build 74 this skipped the language redirect the print takes first. */
 static FILE *open_game_file(const char *name)
 {
-    const char *data = getenv("DEFJAM_DATA");
-    char path[MAX_PATH];
-    FILE *f = NULL;
-    if (data && *data) {        /* a mod's copy, as the game reads it */
-        snprintf(path, sizeof(path), "%s\\override\\%s", data, name);
-        f = fopen(path, "rb");
-    }
-    if (!f) {
-        snprintf(path, sizeof(path), "game\\%s", name);
-        f = fopen(path, "rb");
-    }
-    return f;
+    int overridden;
+    return netplay_open_fight_file(name, &overridden);
 }
 
 static uint8_t *read_game_file(const char *name, size_t *size)
@@ -160,10 +160,15 @@ static void load_sod(void)
 {
     size_t size = 0, t;
     uint8_t *d;
+    uint32_t count[SOD_TABLES] = { 0 };
+    int tables_found = 0;
     if (g_sod_loaded) return;
     g_sod_loaded = 1;
     d = read_game_file("assets\\djv2.sod", &size);
-    if (!d) return;
+    if (!d) {
+        g_sod_tables = 0;       /* none: every recipe part goes back to its default */
+        return;
+    }
     if (size > 0x20 && !memcmp(d, "SODB", 4)) {
         uint32_t tables = rd32(d + 0x10), nt;
         if (tables + 12 <= size) {
@@ -176,13 +181,16 @@ static void load_sod(void)
                     if (!ncls || off + 0x18 + 8 * (size_t)ncls > size) continue;
                     block = rd32(d + off + 0x18 + 4 * ncls);
                     if (block + 12 > size) continue;
-                    g_sod_count[t] = rd32(d + block + 4);
+                    count[t] = rd32(d + block + 4);
                 }
-                g_sod_tables = (int)nt;
+                tables_found = (int)nt;
             }
         }
     }
     free(d);
+    /* published whole after a reload (cp_game_files_reset): never a half-read table */
+    memcpy(g_sod_count, count, sizeof(g_sod_count));
+    g_sod_tables = tables_found;
     fprintf(stderr, "[CREATED] database: %d tables\n", g_sod_tables);
 }
 
@@ -222,6 +230,12 @@ static void load_archetypes(void)
         }
     }
     free(x);
+}
+
+void cp_game_files_reset(void)
+{
+    g_sod_loaded = 0;
+    g_xml_loaded = 0;
 }
 
 const char *cp_record_style(const uint8_t rec[CP_REC_LEN])

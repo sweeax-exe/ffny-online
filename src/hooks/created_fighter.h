@@ -34,6 +34,10 @@ uint32_t cp_record_crc(const uint8_t rec[CP_REC_LEN]);
 int cp_record_sanitize(const uint8_t in[CP_REC_LEN], uint8_t out[CP_REC_LEN]);
 /* A move key the record may hold: a row of the Blazin table (table 6, rows 0..81, colour 0). */
 int cp_move_key_ok(uint32_t key);
+/* The game files the check reads (djv2.sod's table sizes, fighter.xml's archetype names) are read again
+ * at the next use: netplay_data_print_reset calls it once a language mod's redirect is in place, so the
+ * check reads the same copies the game-file print hashes (netplay_open_fight_file). */
+void cp_game_files_reset(void);
 /* The record's name (NUL-terminated, at most CP_NAME_MAX characters). */
 void cp_record_name(const uint8_t rec[CP_REC_LEN], char *out, int size);
 /* The record's fighting styles in words ("KICKBOXING / STREETFIGHTING"), from its archetype's
