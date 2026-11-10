@@ -109,6 +109,19 @@ translated ones. HD versions of the translated images belong **in the language m
 and since no English pack replaces a translated image, nothing covers them. Keep the usual order for the
 rest (HD Widescreen Menus above Faithful HD).
 
+## With community content packs (clothing, fighter bodies, venues)
+
+FFNY Online's composed packs ([content packs](content-packs.md)) change some of the files a language pack
+rebuilds: a clothing pack writes its item names into `assets/misc.viv`'s string tables and its shop pictures
+into `screens/screens.viv`. The launcher composes those packs once more on top of every installed language
+pack (`<data>/mod-manager/content-files/lang/<pack>/`, built from the dump exactly as the game's own rebuild,
+then the packs' changes), and while that language is on the game serves these copies instead of rebuilding the
+files itself: the menus are translated and the new clothing keeps its name and picture. Files the packs do not
+touch are rebuilt by the game as described above. The log says which: `[CONTENT] n composed file(s) built on
+the language pack <pack>` and `[LANG] ...: n file(s) served from <cache> and the rest from the composed
+community content`. Nothing changes for online matching: the language pack never counts, and the packs' own
+content is the same bytes under every language.
+
 ## Making a pack
 
 You need the USA dump's files, a copy of them with your translation in place, and Python 3.8 or newer

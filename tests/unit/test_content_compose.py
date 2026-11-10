@@ -2,6 +2,7 @@
 player's own files plus each pack's deltas and ops. Synthetic files only: every archive, database, parts list,
 name table and venue list is built here (the layouts follow FFNY Studio's fixtures)."""
 import hashlib
+import shutil
 import json
 import os
 from pathlib import Path
@@ -424,6 +425,111 @@ def test_interrupted_swap_keeps_the_complete_folder(game, data):
     (root / "content-files.new").mkdir()
     cc.recover(root)
     assert (root / "content-files" / "files.ini").is_file() and not (root / "content-files.new").exists()
+
+
+# -- with a language pack (docs/language-packs.md): the same packs once more on top of its translation -------------
+
+def language_pack(game, data, tmp_path, pack_id="xx-test", names=((0x11110001, "Blanco"), (0x11110002, "Negro")),
+                  original=None):
+    """A language pack made by scripts/langpack.py from a translated copy of the fixture: the colour names in
+    misc.viv's name tables. ``original``: the dump the pack is made against (another than ``game``: a pack for a
+    different dump)."""
+    lp = cc.langpack()
+    translated = tmp_path / ("translated-" + pack_id)
+    shutil.copytree(original or game, translated)
+    table = loc.build(list(names))
+    (translated / "assets" / "misc.viv").write_bytes(viv.build_archive(
+        [("cmusen.loc", viv.refpack_store(table)), ("cmuken.loc", viv.refpack_store(table))], magic=b"BIG4",
+        align=128))
+    folder = data / "mods" / pack_id
+    assert lp.main(["make", str(original or game), str(translated), "--out", str(folder)]) == 0
+    return folder
+
+
+def clothing_pack(game, data, pack_id="hoodies", order=1):
+    item = item_op("Brick City Hoody", "Z01", clothing_floor(game))
+    return make_pack(data, pack_id, "clothing", [
+        ("assets/v2cp_1.viv", "V2CP_114_0005_Z01_01.xsh", "add", "assets/v2cp_1.viv", "V2CP_114_0005_A01_01.xsh",
+         TEX_A, TEX_A[:50] + b"gold" * 60)], [item], order=order)
+
+
+def names_in(path):
+    return loc.Loc(viv.Archive(path).read("cmusen.loc"))
+
+
+def test_language_variant_keeps_the_translation_and_the_packs(game, data, tmp_path):
+    pack = clothing_pack(game, data)
+    language_pack(game, data, tmp_path)
+    result = compose(data, game, [pack])
+    assert result["applied"] == ["hoodies"] and result["lang_skipped"] == []
+    assert result["lang_files"] == [("xx-test", "assets/misc.viv")]       # the one file both change
+    assert not out(data, "lang/xx-test/assets/djv2.sod").exists()
+    text = out(data, "files.ini").read_text(encoding="utf-8").splitlines()
+    assert "lang=xx-test|assets/misc.viv" in text and not any(t.startswith("language-skipped") for t in text)
+    assert files_ini(data)["lang"] == [("xx-test", "assets/misc.viv")]
+    plain, variant = names_in(out(data, "assets/misc.viv")), names_in(out(data, "lang/xx-test/assets/misc.viv"))
+    texts = lambda table: {table.text_at(i) for i in range(table.count)}
+    assert plain.get(0x11110001) == "White" and "Brick City Hoody" in texts(plain)
+    assert variant.get(0x11110001) == "Blanco" and "Brick City Hoody" in texts(variant)
+    # the translation's entries are what the game's own rebuild makes (langpack.py is its tested reference)
+    reference = viv.Archive(cc.langpack().apply_pack(str(data / "mods" / "xx-test"), str(game))["assets/misc.viv"])
+    assert loc.Loc(reference.read("cmusen.loc")).get(0x11110002) == "Negro" == variant.get(0x11110002)
+    # the same pack's row ids: the variant's database is the plain one (not written twice)
+    db = sod.Sod(out(data, "assets/djv2.sod").read_bytes())
+    assert [r for r in db.clothing() if r.name.startswith("FFNY_")]
+
+
+def test_language_variant_is_deterministic_and_tracked(game, data, tmp_path):
+    pack = clothing_pack(game, data)
+    language_pack(game, data, tmp_path)
+    compose(data, game, [pack])
+    first = out(data, "lang/xx-test/assets/misc.viv").read_bytes()
+    # another PC: the same packs and language pack, a different data folder
+    other = tmp_path / "other"
+    (other / "mods").mkdir(parents=True)
+    shutil.copytree(data / "mods" / "hoodies", other / "mods" / "hoodies")
+    shutil.copytree(data / "mods" / "xx-test", other / "mods" / "xx-test")
+    again = compose(other, game, [dict(pack, folder=other / "mods" / "hoodies")])
+    assert again["lang_files"] == [("xx-test", "assets/misc.viv")]
+    assert (other / "mod-manager" / "content-files" / "lang" / "xx-test" / "assets" / "misc.viv").read_bytes() == first
+    assert (other / "mod-manager" / "content-files" / "assets" / "misc.viv").read_bytes() == out(data, "assets/misc.viv").read_bytes()
+    assert files_ini(other)["set"] == files_ini(data)["set"]           # the online print's set is the packs alone
+    # unchanged: the same inputs; changed: the language pack's deltas, or the pack gone
+    assert compose(data, game, [pack])["unchanged"]
+    ini = data / "mods" / "xx-test" / "language.ini"
+    ini.write_text(ini.read_text(encoding="utf-8") + "\n; a new line\n", encoding="utf-8")
+    assert not compose(data, game, [pack])["unchanged"]
+    out(data, "lang/xx-test/assets/misc.viv").unlink()
+    assert not compose(data, game, [pack])["unchanged"] and out(data, "lang/xx-test/assets/misc.viv").is_file()
+    shutil.rmtree(data / "mods" / "xx-test")
+    result = compose(data, game, [pack])
+    assert not result["unchanged"] and result["lang_files"] == [] and not out(data, "lang").exists()
+    assert "lang=" not in out(data, "files.ini").read_text(encoding="utf-8")
+
+
+def test_language_pack_without_overlap_off_or_for_another_dump(game, data, tmp_path):
+    body = body_pack(data, "body-one", BODY_O + b"mine")
+    language_pack(game, data, tmp_path)
+    result = compose(data, game, [body])         # the language pack changes misc.viv, the body pack v2ip.viv
+    assert result["applied"] == ["body-one"] and result["lang_files"] == [] and result["lang_skipped"] == []
+    assert not out(data, "lang").exists()
+    # switched off on the Content page: not composed with
+    pack = clothing_pack(game, data, order=2)
+    assert compose(data, game, [body, pack], off=["xx-test"])["lang_files"] == []
+    assert compose(data, game, [body, pack])["lang_files"] == [("xx-test", "assets/misc.viv")]
+    # a pack made for another dump does not rebuild here: left out, reported, the plain files stay
+    other = tmp_path / "other-dump"
+    shutil.copytree(game, other)
+    table = loc.build([(0x11110001, "Weiss"), (0x11110002, "Schwarz")])
+    (other / "assets" / "misc.viv").write_bytes(viv.build_archive(
+        [("cmusen.loc", viv.refpack_store(table)), ("cmuken.loc", viv.refpack_store(table))], magic=b"BIG4",
+        align=128))
+    language_pack(game, data, tmp_path, pack_id="yy-other", original=other)
+    result = compose(data, game, [body, pack])
+    assert result["lang_files"] == [("xx-test", "assets/misc.viv")]
+    assert [i for i, _ in result["lang_skipped"]] == ["yy-other"]
+    assert "language-skipped=yy-other: " in out(data, "files.ini").read_text(encoding="utf-8")
+    assert not out(data, "lang/yy-other").exists() and out(data, "assets/misc.viv").is_file()
 
 
 def test_install_json_shape_is_checked(data):
