@@ -8,7 +8,8 @@ given. Needs MSVC (`cl` on PATH, e.g. after scripts/env.ps1); skips without it.
 
 The game files the record check reads (djv2.sod, fighter.xml) are absent here, so the check keeps
 every record whose shape is right and resets the recipe parts it cannot look up; the move keys need no
-game file (Blazin table rows, build 72)."""
+game file (Blazin table rows, build 72). The recipe tests write a small djv2.sod under game/, which the
+driver's stand-in for netplay_open_fight_file (the game-file print's open) finds."""
 import os
 import shutil
 import subprocess
@@ -40,6 +41,15 @@ void cp_pick_setting_get(char *out, int size)
 }
 void cp_pick_setting_set(const char *key) { printf("setting|%s\n", key); }
 int automatch_queue_fe(const char *command) { (void)command; return 0; }   /* tests' user ID load */
+
+/* netplay.c's fight-file open (the print's order); here only the dump's copy under the working folder */
+FILE *netplay_open_fight_file(const char *name, int *overridden)
+{
+    char path[512];
+    *overridden = 0;
+    snprintf(path, sizeof(path), "game\\%s", name);
+    return fopen(path, "rb");
+}
 
 /* the setting online.created_names: STUB_NAMES, and what a set writes */
 static char g_names[CP_NAMES_TEXT_MAX];
@@ -116,6 +126,24 @@ int main(int argc, char **argv)
         printf("moves|1");
         for (i = 0; i < 4; i++) { unsigned v; memcpy(&v, ok + 1 + 0x50 + 4 * i, 4); printf("|%08X", v); }
         printf("|%d\n", cp_record_sealed(ok));
+        return 0;
+    }
+    if (argc > 2 && !strcmp(argv[1], "recipe")) {   /* recipe parts 12.. = argv[2..] (hex), checked */
+        static uint8_t p[0x5950];
+        uint8_t rec[CP_REC_LEN], ok[CP_REC_LEN];
+        int i;
+        memcpy(p + 0xC, "RECIPE", 6);
+        p[0x143] = 98; p[0x140] = 1; p[0x141] = p[0x142] = 0xFF; p[0x13C] = 3; p[0x4D8A] = 1;
+        memset(p + 0x5564, 0xFF, 0x98);
+        for (i = 0; i + 2 < argc && i < 26; i++) {
+            unsigned v = (unsigned)strtoul(argv[2 + i], NULL, 16);
+            memcpy(p + 0x5564 + 4 * (12 + i), &v, 4);
+        }
+        cp_record_from_profile(p, rec);
+        if (!cp_record_sanitize(rec, ok)) { printf("recipe|0\n"); return 0; }
+        printf("recipe|1");
+        for (i = 0; i + 2 < argc && i < 26; i++) { unsigned v; memcpy(&v, ok + 1 + 0x69 + 4 * (12 + i), 4); printf("|%08X", v); }
+        printf("\n");
         return 0;
     }
     if (argc > 13 && !strcmp(argv[1], "stats")) {   /* base[0..5] bonus[0..5] (argv[2..13]), checked */
@@ -318,6 +346,8 @@ def stats(exe, tmp_path, base, bonus):
 def test_stats_within_limits_unchanged(exe, tmp_path):
     base, bonus = stats(exe, tmp_path, (50, 50, 50, 50, 50, 50), (8, 2, 0, 4, 5, 5))
     assert base == [50] * 6 and bonus == [8, 2, 0, 4, 5, 5]      # total 24: the most the game makes
+    # no cap on the base stats' sum: a Story run buys 50 in all five trained ones (272,625 development
+    # points; the bounties give 313,700, 392,125 on hard: created_fighter.c at MAX_BASE)
 
 
 def test_stats_clamped_to_relay_limits(exe, tmp_path):
@@ -436,3 +466,45 @@ def test_move_keys_outside_the_blazin_table_become_the_default(exe, tmp_path):
     assert moves(exe, tmp_path, '06000052', '07000005', '00000003', '06010033') == ['06000033'] * 4
     got = moves(exe, tmp_path, 'FFFFFFFF', '0600FFFF', '0F000033', '06000010')
     assert got == ['06000033', '06000033', '06000033', '06000010']
+
+
+# ---- recipe parts (build 74): checked against the database the game-file print hashes ----
+
+def sod(tables):
+    """A minimal djv2.sod: one class per table, `tables` its record counts (the fields load_sod reads)."""
+    nt = len(tables)
+    head = bytearray(0x20)
+    head[0:4] = b'SODB'
+    toff = len(head)
+    body = bytearray(12 + 8 * nt)
+    body[4:8] = nt.to_bytes(4, 'little')
+    out = head + body
+    for t, count in enumerate(tables):
+        off = len(out)
+        out[toff + 12 + 4 * nt + 4 * t:toff + 16 + 4 * nt + 4 * t] = off.to_bytes(4, 'little')
+        table = bytearray(0x20)
+        table[0x10:0x14] = (1).to_bytes(4, 'little')            # one class
+        block = off + len(table)
+        table[0x1C:0x20] = block.to_bytes(4, 'little')          # its record block
+        out += table + bytearray(4) + count.to_bytes(4, 'little') + bytearray(4)
+    out[0x10:0x14] = toff.to_bytes(4, 'little')
+    return bytes(out)
+
+
+def recipe(exe, cwd, *parts):
+    row = run(exe, cwd, {}, 'recipe', *parts)['recipe'][0]
+    assert row[0] == '1'
+    return row[1:]
+
+
+def test_recipe_parts_against_the_database(exe, tmp_path):
+    (tmp_path / 'game/assets').mkdir(parents=True)
+    (tmp_path / 'game/assets/djv2.sod').write_bytes(sod([0] * 16 + [0x100, 0, 0x30]))
+    # a row of table 16 (colour 2), the default, row 0x100 (one past), table 18's last row, table 19
+    # (none), colour 16
+    got = recipe(exe, tmp_path, '10020099', 'FFFFFFFF', '10000100', '1200002F', '13000000', '10100001')
+    assert got == ['10020099', 'FFFFFFFF', 'FFFFFFFF', '1200002F', 'FFFFFFFF', 'FFFFFFFF']
+
+
+def test_recipe_parts_without_a_database_become_defaults(exe, tmp_path):
+    assert recipe(exe, tmp_path, '10020099', '1000000B') == ['FFFFFFFF', 'FFFFFFFF']

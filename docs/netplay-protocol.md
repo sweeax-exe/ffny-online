@@ -559,9 +559,15 @@ types from 0x27, dropped silently by older relays.
 - Since build 46 the relay also checks the stats against what Story mode can give (the game's code
   and data: base stats at most 50; bonus stats never negative, at most 8 each for the first five, 5 for
   the sixth, 24 together). A record beyond that is not kept (empty `RECORD` 0xFE) and a game that
-  announced `CAPS` bit 5 (`32`, build 46) gets **`ERROR 12`** ("fighter stats"), which it shows as "Your created fighter has stats the game does
-  not allow; it can't be used online." without ending the session; the relay logs the name and the
-  values. Values within the limits that the record's own styles do not explain are only logged.
+  announced `CAPS` bit 5 (`32`, build 46) gets **`ERROR 12`** ("fighter stats"), which it shows as "Your created fighter has stats or parts
+  the game does not allow; it can't be used online." without ending the session; the relay logs the name and the
+  values. Values within the limits that the record's own styles do not explain are only logged. There is no
+  limit on the base stats' sum: a Story run can buy 50 in all five trained ones (`docs/research/created-fighter-online.md`).
+- Since build 74 the relay refuses the same way (empty `RECORD`, `ERROR 12`) a record whose parts no client
+  sends: a move key outside the Blazin table (table 6, colour 0, rows 0..81), a body or face value (recipe
+  0..11) above 0xFF, a recipe part (12..37) that is neither -1 nor a key with a table below 64 and a colour
+  below 16. It has no `djv2.sod`, so it checks ranges, not rows; every client clamps its own record to these
+  before uploading it.
 - Otherwise the relay checks only the record's shape. Every client checks and clamps the record the same way
   before the game sees it (`cp_record_sanitize`, `src/hooks/created_fighter.c`): name cut to 16
   printable ASCII characters, voice 1..6, styles 0..4, base stats at most 50, bonus stats 0..38, move keys and

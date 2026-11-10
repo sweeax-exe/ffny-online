@@ -65,3 +65,20 @@ def test_stat_limits_agree():
     assert _int(game, r"#define MAX_BONUS\s+(\d+)") == _int(go, r"MaxBonusStat\s+= (\d+)")
     assert _int(game, r"#define MAX_BONUS_CHARM\s+(\d+)") == _int(go, r"MaxBonusCharm\s+= (\d+)")
     assert _int(game, r"#define MAX_BONUS_TOTAL\s+(\d+)") == _int(go, r"MaxBonusTotal\s+= (\d+)")
+
+
+def test_part_limits_agree():
+    """The relay's part check (build 74, RecordPartsRefused) takes every record the game's clamp makes:
+    the same Blazin table and rows, the same body-value limit, the same table and colour bounds, the
+    same offsets; and neither side caps the base stats' sum (a Story run can buy 5 x 50)."""
+    game = (ROOT / "src/hooks/created_fighter.c").read_text(encoding="utf-8")
+    go = (RELAY_SRC / "record_stats.go").read_text(encoding="utf-8")
+    assert _int(game, r"#define BLAZIN_TABLE\s+(\d+)u") == _int(go, r"BlazinTable = (\d+)") == 6
+    assert _int(game, r"#define BLAZIN_ROWS\s+(\d+)u") == _int(go, r"BlazinRows\s+= (\d+)") == 82
+    assert _int(game, r"#define SOD_TABLES (\d+)") == _int(go, r"SodTables\s+= (\d+)")
+    assert "colour < 16" in game and _int(go, r"SodColours = (\d+)") == 16
+    assert "v > 0xFF" in game and _int(go, r"MaxRecipeBody = (0x[0-9A-Fa-f]+)") == 0xFF
+    assert "if (i < 12)" in game and _int(go, r"RecipeBody\s+= (\d+)") == 12
+    assert _int(game, r"#define R_RECIPE\s+(0x[0-9A-Fa-f]+)") == _int(go, r"recRecipe = (0x[0-9A-Fa-f]+)")
+    assert _int(game, r"#define R_MOVES\s+\(R_PROFILE \+ (0x[0-9A-Fa-f]+)\)") == _int(go, r"recMoves\s+= recProfile \+ (0x[0-9A-Fa-f]+)")
+    assert "MAX_TOTAL_BASE" not in game and "MaxTotalBase" not in go
