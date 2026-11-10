@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 sweeax-exe (FFNY Online) */
 /* FFNY Online's community content: the catalogue packs the launcher synced (pc_content.h,
  * docs/content-packs.md). Read-only here: setup/mods.py owns the files, this file reads its
  * content.ini and the player's switches, and tells the texture loader and the netplay which packs

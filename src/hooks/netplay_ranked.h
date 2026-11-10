@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 sweeax-exe (FFNY Online) */
 /* Ranked play, the game's side of the wire and the rank ladder (ranked phase 2a;
  * docs/netplay-protocol.md "Ranked queue", server/docs/ranked-design.md). Pure C with no Windows or game
  * dependencies, so tests/unit/test_netplay_ranked_native.py compiles it natively:

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 sweeax-exe (FFNY Online)
 """defjam-mcp v2: the shared library behind the MCP server (server.py) and the CLI (dj.py).
 
     machine    paths, the machine-wide test lock, game processes, the safe environment

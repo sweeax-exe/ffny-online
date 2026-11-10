@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 sweeax-exe (FFNY Online) */
 /* The launcher's update download: one at a time per Windows session, in a folder found by its wide
  * path (src/hooks/updater.c; tests/unit/test_updater_guard_native.py). Windows only, header only. */
 #pragma once

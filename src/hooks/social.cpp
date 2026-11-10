@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 sweeax-exe (FFNY Online)
 // The Social Update, stage 2a: the network side of the chat window. See social.h.
 //
 // The account service's social API (server: relay/accounts/social*.go) is used as it is. The game

@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 sweeax-exe (FFNY Online)
 """defjam-mcp v2: drive test copies of the game, as an MCP server over stdio.
 
 Claude Code starts it from the repository's .mcp.json. The same features work from Bash through

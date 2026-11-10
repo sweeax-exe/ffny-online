@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 sweeax-exe (FFNY Online)
 // The player's own songs on disk (custom music): the folder <data>/music, what is in it, which files
 // play, adding and removing songs. Used by the launcher's Music dialog (pc_launcher_music.inc) and by
 // the game's music player (custom_music.cpp). Host only; nothing here touches the game.

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 sweeax-exe (FFNY Online)
 // The Saves page's glue: where the save area and its backups are, whether the game is running on
 // them, the automatic backups, and the folder / zip picker. The page is pc_launcher_saves.inc
 // (drawn by pc_ui.cpp); the work is save_manager.cpp.

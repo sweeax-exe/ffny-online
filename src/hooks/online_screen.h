@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 sweeax-exe (FFNY Online) */
 /* The online screens inside the game: the ONLINE entry of the main menu (slot 6, filled by
  * scripts/apt-patch.py) and the screens it opens (hub, room list, room, fighter choice, venue
  * vote), drawn by the port in the game's look with the art scripts/online-art.py takes from the

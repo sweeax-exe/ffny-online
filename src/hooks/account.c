@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 sweeax-exe (FFNY Online) */
 /*
  * FFNY Online account: sign-in with Discord, through the project's account service
  * (server/relay/accounts, behind https://play.defjam.online).

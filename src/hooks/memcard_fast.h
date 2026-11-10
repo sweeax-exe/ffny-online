@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 sweeax-exe (FFNY Online) */
 /* Faster save loading: the memory-card driver's tick run more than once a frame while it reads
  * (src/hooks/memcard_fast.c). */
 #ifndef DEFJAM_MEMCARD_FAST_H

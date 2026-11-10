@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 sweeax-exe (FFNY Online) */
 /* The game's own audio options (Options > Audio and the pause menu's sliders) after a restart.
  * The volumes are saved with the global "Options" save and read back at start, but nothing in the
  * game hands the loaded values to the sound system, and both menus show the sound system's live

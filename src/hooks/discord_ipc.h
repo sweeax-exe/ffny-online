@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 sweeax-exe (FFNY Online) */
 /* Discord Rich Presence: the connection to the Discord app on this PC (discord_ipc.c).
  *
  * One background thread owns the named pipe (\\.\pipe\discord-ipc-0 .. -9). It asks a provider

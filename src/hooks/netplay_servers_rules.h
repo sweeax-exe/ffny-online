@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 sweeax-exe (FFNY Online) */
 /* The online relays' indices, the server choice and the rules of the staged quick-match search, as
  * plain functions without sockets or Windows (netplay_servers_rules.c), so a unit test can build
  * them alone (tests/unit/test_netplay_servers_native.py). netplay_servers.h includes this. */

@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 sweeax-exe (FFNY Online) */
 /* The Social Update, stage 2a (game side): friends with their online status, private messages,
  * global chat and crew chat through the account service's social API (/api/social/...), for the chat
  * window of the online screens (social_ui.inc). Signed-in players only.

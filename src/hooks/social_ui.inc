@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 sweeax-exe (FFNY Online)
 // The chat window of the online screens (the Social Update, stage 2a; docs in the private server
 // repository, the owner's approved design of 2026-11-03): tabs ROOM / GLOBAL / FRIENDS / MESSAGES /
 // CREW, a PlayStation-style on-screen keyboard for the pad, the friends list with online status, and

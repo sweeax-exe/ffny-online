@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 sweeax-exe (FFNY Online) */
 /* Starting a match without the menus: the front end's own FuncCall strings, replayed on the
  * game thread from the main menu (docs/research/online-match-setup.md). Online rooms use it so
  * both PCs start the same match with the settings the room agreed on; RECOMP_AUTOMATCH starts

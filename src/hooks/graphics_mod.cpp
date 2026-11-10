@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 sweeax-exe (FFNY Online)
 // "Enhanced graphics (community)", the work underneath: the manifest, downloads, install, switch and
 // removal. See graphics_mod.h. The launcher's part (background work, settings, the log line) is
 // graphics_mod_launcher.cpp.

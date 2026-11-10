@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 sweeax-exe (FFNY Online)
 // The launcher's Content page (included by pc_ui.cpp after the glass helpers): FFNY Online's community
 // packs, synced from our signed catalogue by setup/mods.py sync (pc_mods.cpp runs it) and read back from
 // <data>/mod-manager/content.ini (pc_content.c). New fighters, clothing and venues ("content") are always

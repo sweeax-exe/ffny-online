@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 sweeax-exe (FFNY Online) */
 /* Created (Story mode) fighters online. See docs/research/created-fighter-online.md.
  *
  * Battle mode already builds a created fighter for a slot whose ControllerSetup fighter byte is

@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 sweeax-exe (FFNY Online) */
 /*
  * The hang watch (build 58). A frozen game could not be reported: F9 takes its picture at the next
  * present, and a freeze has none (ranked set W34VFS: both players on the results picture, F9 dead,

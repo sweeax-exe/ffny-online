@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 sweeax-exe (FFNY Online)
 // The Content page's Community tab (included by pc_launcher_content.inc): every pack players submitted, also
 // the ones still in review, as the account service's gallery shows them (GET /api/gallery, server repository
 // docs/content-catalogue.md; FFNY Studio's Community view reads the same). View only: an unaccepted pack has

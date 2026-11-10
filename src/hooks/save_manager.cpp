@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 sweeax-exe (FFNY Online)
 // The Saves page underneath: see save_manager.h. Standard C++17 only.
 #define _CRT_SECURE_NO_WARNINGS
 #include "save_manager.h"

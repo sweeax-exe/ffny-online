@@ -135,4 +135,12 @@ opened by the maintainer, or with the maintainer's approval for each one.
 ## Conduct and license
 
 Participation is covered by the [code of conduct](CODE_OF_CONDUCT.md).
-Contributions are accepted under the repository's [MIT license](LICENSE).
+Contributions are accepted under the license of the files they change: the
+[MIT license](LICENSE) for the recompilation, GPL-3.0-or-later for FFNY Online's
+files (listed in [NOTICE](NOTICE)). **New online code is GPL-3.0-or-later**: start a
+new file for FFNY Online with the two header lines
+
+    SPDX-License-Identifier: GPL-3.0-or-later
+    Copyright (c) 2026 sweeax-exe (FFNY Online)
+
+in its comment style, and add it to NOTICE.

@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 sweeax-exe (FFNY Online) */
 /* Discord Rich Presence: what the game is doing, read through the online code's own accessors and
  * the front end's screen names, handed to the presence thread (discord_ipc.c). See
  * discord_presence.h. */

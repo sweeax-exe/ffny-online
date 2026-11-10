@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 sweeax-exe (FFNY Online)
 // Crew battles (the Social Update, stage 3): the crew battle screen of the design (CrewBattle): the two
 // crews' lineups, who fights, the fights won, who watches; in a crew battle room it takes the place of the
 // King of the Hill pages (the relay runs the battle as a hill by crews, netplay.h NetCrew). Included by

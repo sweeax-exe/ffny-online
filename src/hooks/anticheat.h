@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 sweeax-exe (FFNY Online) */
 /*
  * The facts a signed-in game adds to its online match reports for the anti-cheat (build 37):
  * whether the whole game stood still during the fight (a frozen or suspended process, not the

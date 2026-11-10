@@ -1,3 +1,29 @@
+This repository is under two licenses.
+
+1. MIT: Vlad Yanhursky's Def Jam: Fight for NY Recompiled and everything else in
+   this repository that is not listed in NOTICE. Its text follows.
+
+2. GPL-3.0-or-later: the game-client code written by sweeax-exe for FFNY Online,
+   from the first commit after build 72 onward. Every such file carries the line
+   "SPDX-License-Identifier: GPL-3.0-or-later" and is listed in NOTICE. The full
+   text is in LICENSES/GPL-3.0.txt.
+
+       Copyright (c) 2026 sweeax-exe (FFNY Online)
+
+       This program is free software: you can redistribute it and/or modify it
+       under the terms of the GNU General Public License as published by the Free
+       Software Foundation, either version 3 of the License, or (at your option)
+       any later version. It is distributed WITHOUT ANY WARRANTY; see the GNU
+       General Public License for more details.
+
+   Versions released before this change (up to and including build 72,
+   v0.13.0-remaster.72) stay available under the MIT license below.
+
+A program built from both parts is distributed under GPL-3.0-or-later as a whole;
+the MIT parts keep their MIT license when used on their own.
+
+===============================================================================
+
 MIT License
 
 Copyright (c) 2026 Vlad Yanhursky
@@ -22,7 +48,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ---
-This license covers the code in this repository only. tools/xboxrecomp is a
+These licenses cover the code in this repository only. tools/xboxrecomp is a
 separate MIT-licensed project that bundles LGPL-2.1+ components derived from
 xemu; see tools/xboxrecomp/LICENSE, NOTICE and LICENSES/. No game code or
 assets from Def Jam: Fight for NY are included or licensed here.

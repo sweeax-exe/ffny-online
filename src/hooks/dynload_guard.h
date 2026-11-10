@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 sweeax-exe (FFNY Online) */
 /* A check of EAGL's DynamicLoader object before DynamicLoader::Resolve (sub_0010AC20) relocates it
  * (dynload_guard.c). */
 #ifndef DYNLOAD_GUARD_H

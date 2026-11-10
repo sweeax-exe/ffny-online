@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 sweeax-exe (FFNY Online) */
 /* EAGL's DynamicLoader::Resolve (sub_0010AC20) checked before it runs.
  *
  * Resolve links a loaded ELF object in place (docs/research/rollback-async-loads.md 1.3): for every

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 sweeax-exe (FFNY Online)
 // Custom music, the host side (custom_music.h): the playlist and the player thread. The songs are
 // decoded here (music_decode.c) and played on an XAudio2 voice of our own; nothing here reads or
 // writes the guest. The game thread only tells us what its music does (custom_music_guest.c).

@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 sweeax-exe (FFNY Online) */
 /* HD texture packs made from the launcher. See hd_build.h.
  *
  * The working directory is the source tree (pc_settings_init makes the folder that holds

@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 sweeax-exe (FFNY Online) */
 /* Discord Rich Presence, the parts without Windows or the game (discord_rpc.c): the IPC frames, the
  * JSON Discord takes, the text rules, and what each moment of the game shows. Plain C, so a unit test
  * builds it alone (tests/unit/test_discord_rpc_native.py). The pipe and its thread are in

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 sweeax-exe (FFNY Online)
 // The launcher's Music dialog underneath (custom music): the folder, the background work (copying added
 // songs, checking new ones) with a progress line, the multi-file picker and files dropped on the
 // window. The dialog is pc_launcher_music.inc (drawn by pc_ui.cpp); the files, music_library.cpp.

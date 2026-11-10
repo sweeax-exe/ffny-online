@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 sweeax-exe (FFNY Online)
 """Pure log parsing: the digest of a game log and the per-match analysis of a test.
 
 Nothing here touches the game or the disk except read_text() and load_call_sites(); everything

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 sweeax-exe (FFNY Online)
 // Ranked rewards and the Locker (build 52; the owner's approved designs "Season rewards" and "Locker",
 // 2026-11-03). Included by online_screen.cpp inside its anonymous namespace after social_ui.inc and crew_ui.inc.
 //

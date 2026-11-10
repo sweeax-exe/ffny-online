@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 sweeax-exe (FFNY Online)
 // The player's own songs on disk: see music_library.h.
 #define _CRT_SECURE_NO_WARNINGS
 #include "music_library.h"

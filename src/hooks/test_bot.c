@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 sweeax-exe (FFNY Online) */
 /* A test bot that fights like a simple player: RECOMP_TEST_BOT=1[,<aggression 0..100>].
  *
  * Scripted pads press fixed or random buttons on the host's clock and rarely finish a fighter,

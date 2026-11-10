@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 sweeax-exe (FFNY Online) */
 /* Online play through a relay server. See netplay.h, docs/netplay.md and the wire
  * format in docs/netplay-protocol.md.
  *

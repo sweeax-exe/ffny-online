@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 sweeax-exe (FFNY Online) */
 /*
  * Anti-cheat facts for the online match reports (anticheat.h). Windows only, like online play.
  *

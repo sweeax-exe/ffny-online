@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 sweeax-exe (FFNY Online) */
 /* The project's signature check: see update_sig.h. */
 #define _CRT_SECURE_NO_WARNINGS
 #include "update_sig.h"

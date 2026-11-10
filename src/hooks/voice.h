@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 sweeax-exe (FFNY Online) */
 /* Voice chat in online rooms: everyone in the room hears everyone, in the room and in the fight.
  * Through the relay as DATA (netplay.c forwards P_VOICE packets here), 16 kHz mono IMA ADPCM,
  * 40 ms a packet, only while a player talks. Push-to-talk (a key), open microphone with voice

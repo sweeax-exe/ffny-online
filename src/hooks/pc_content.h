@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 sweeax-exe (FFNY Online) */
 /* FFNY Online's community content: the packs the launcher syncs from our signed catalogue
  * (setup/mods.py sync, docs/content-packs.md).
  *

@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 sweeax-exe (FFNY Online) */
 /* Custom music, the game-thread side (custom_music.h): reads the music volume the game asked for and
  * silences or restores the game's own music at its music players.
  *

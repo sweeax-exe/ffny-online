@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 sweeax-exe (FFNY Online) */
 /* The launcher's updater. See updater.h and docs/updates.md.
  *
  * Trust: latest.json is only believed when latest.json.sig is a valid ECDSA P-256
