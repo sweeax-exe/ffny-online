@@ -9,6 +9,7 @@
  *   RECOMP_START_FIGHTERS=a,b[,c,d]  the fighter ids (fighter.xml <ID>) a match starts with, by slot
  *   RECOMP_START_VENUE=n             the venue, as the script id Game.ChooseVenue carries
  *   RECOMP_START_LOG=1               log what Game.StartGame is about to be given
+ *   RECOMP_UNLOCK_REPORT=1           log what the current profile has unlocked, per screen (read only)
  *                        The last three act at Game.StartGame (the end of this file).
  *
  * Developer unlock (RECOMP_UNLOCK_ALL=1): every fighter and venue, 10,000 points.
@@ -54,6 +55,7 @@ static int s_enabled = -1;
 static int s_debug = -1;
 static int s_started;
 static unsigned long s_runs;
+#define GAMEDATA_SLOT_REPORT 0x18u
 
 int defjam_unlock_all_enabled(void)
 {
@@ -95,11 +97,55 @@ static void run_unlock(void)
         fprintf(stderr, "[UNLOCK] sub_000158F0 run %lu\n", s_runs);
 }
 
+/* RECOMP_UNLOCK_REPORT=1 (tests, read only): on each screen change, what the current profile has
+ * unlocked as the game holds it: per item kind (the six containers at save record +0x14E4, the
+ * launcher's Unlock all, src/hooks/save_unlock.h) the item count, where its 2-bit states sit in the
+ * profile slot, and how many are locked / unlocked / owned; and the fighter and venue set sizes. */
+static void unlock_report(const char *text)
+{
+    static const uint32_t at[6] = {0x0, 0x58, 0x108, 0xB0, 0x160, 0x1B8};   /* profile order */
+    static const char *const name[6] = {"hair", "tattoo", "jewel", "cloth", "blazin", "style"};
+    uint32_t gd = MEM32(0x002FB148u + GAMEDATA_SLOT_REPORT * 4u), p, idx, slot, k;
+    char line[512];
+    int n;
+    const char *screen = text + 22;
+    if (!gd || !(p = MEM32(gd + 4)))
+        return;
+    idx = MEM32(p + 0x5AC7Cu);
+    n = snprintf(line, sizeof line, "[UNLOCK-REPORT] %.40s profile %d fighters %u venues %u", screen, (int)idx,
+                 MEM32(p + 0x1268u), MEM32(p + 0x1264u));
+    if (idx < 16) {
+        slot = p + 0x177Cu + idx * 0x5950u;
+        n += snprintf(line + n, sizeof line - n, " cash %u", MEM32(slot + 0x20u));
+        for (k = 0; k < 6 && n < (int)sizeof line - 64; k++) {
+            uint32_t c = p + 0x14E4u + at[k], count = MEM32(c + 8), states = MEM32(c + 0xC + idx * 4), i;
+            unsigned lk = 0, un = 0, ow = 0;
+            if (!states || count > 4096) continue;
+            for (i = 0; i < count; i++) {
+                unsigned v = (MEM8(states + i / 4) >> (i % 4 * 2)) & 3;
+                if (!v) lk++; else if (v == 1) un++; else ow++;
+            }
+            n += snprintf(line + n, sizeof line - n, " %s %u@+0x%X %u/%u/%u", name[k], count,
+                          (unsigned)(states - slot), lk, un, ow);
+        }
+    }
+    fprintf(stderr, "%s\n", line);
+    fflush(stderr);
+}
+
 /* Called with the text of each front-end call, before the game handles it. */
 void defjam_unlock_all_on_funccall(const char *text)
 {
     int unlock = defjam_unlock_all_enabled();
     int debug = debug_enabled();
+    static int report = -1;
+
+    if (report < 0) {
+        const char *v = getenv("RECOMP_UNLOCK_REPORT");
+        report = v && *v && strcmp(v, "0") != 0;
+    }
+    if (report && strncmp(text, "Control.GetScreenInfo(", 22) == 0)
+        unlock_report(text);
 
     if (!unlock && !debug)
         return;

@@ -14,6 +14,7 @@ extern "C" {
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
+#include <fstream>
 #include <mutex>
 
 #if defined(_WIN32)
@@ -210,6 +211,24 @@ bool pick_poll(std::string &path)
     path = g_picked;
     g_picked.clear();
     return true;
+}
+bool game_database(saves::Bytes &out, std::string *where)
+{
+    fs::path data = fs::u8path(pcui::folder_path(pcui::Folder::Data));
+    fs::path install = fs::u8path(pcui::folder_path(pcui::Folder::Install));
+    const fs::path tries[] = {data / "override" / "assets" / "djv2.sod", install / "game" / "assets" / "djv2.sod",
+                              fs::path("game") / "assets" / "djv2.sod", data / "extracted" / "assets" / "djv2.sod"};
+    for (auto &p : tries) {
+        std::error_code ec;
+        uintmax_t size = fs::file_size(p, ec);
+        if (ec || size < 24 || size > (64u << 20)) continue;
+        std::ifstream f(p, std::ios::binary);
+        out.resize((size_t)size);
+        if (!f || !f.read((char *)out.data(), (std::streamsize)out.size())) continue;
+        if (where) *where = pcui::path_utf8(p);
+        return true;
+    }
+    return false;
 }
 } // namespace pcsaves
 

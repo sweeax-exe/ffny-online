@@ -200,6 +200,110 @@ fills are covered (a four-fighter mode needs `ffa` and four ids, not tried); the
 "character" is the engine's index, not the `<ID>`, so assert fighters by the names on the HUD or add
 the `<ID>`-to-index map before asserting; the venue was judged from a capture, and the table above is read from the code plus the one garage test.
 
+## The save edit
+
+2026-11-10, branch `feat/unlock-all`: the launcher's Saves page has **Unlock all** per profile
+(`src/hooks/save_unlock.cpp`, tests `tests/unit/test_save_unlock.py`, the page in
+[the launcher](../launcher-and-overlay.md#saves)). It writes the files the game reads, signed again, so the
+unlock is in the save and needs no switch. The section above ("Why not a save") was written before the
+layout below was known; its guess about the fixed id lists was wrong: they are the game's own sets.
+Read from the USA dump's code; guest addresses.
+
+### Where the game keeps what
+
+The game-data object (slot `0x18` of `0x002FB148`) holds the save record `P` at `+4`.
+
+| Part | Saved in | What |
+|---|---|---|
+| `P+0x50 .. P+0x14E0` | the **Options** file (`DJFFNY::Global` identity, payload from file `0x8C`, so record offset = file offset − `0x3C`); `sub_000D2340` writes it | reward points `P+0x50`; the venue set (count `P+0x1264`, 30 sorted ids at `P+0x126C`) and the fighter set (count `P+0x1268`, 80 sorted ids at `P+0x12E4`); songs (one state byte per song at `P+0x1424`, the song ids at `P+0x1448`, the unlock-order counter `P+0x14D8`) |
+| 16 slots `S = P+0x177C + i*0x5950` | each user ID's file (`DJFFNY::User`, profile from file `0x80`; the file holds `S+0xC .. S+0x5910`); `sub_000D23B0` writes it | cash `S+0x20`, development points `S+0x28`, stats `S+0xFC..`, styles `S+0x140..`, created-fighter flag `S+0x4D8A`, and from `S+0x4DC4` the item states (below) |
+
+So fighters, venues and songs are **global**: one set for the whole save area (the Unlock Rewards screen
+calls them `GetGlobalCharUnlockInfo` / `GetGlobalVenueUnlockInfo`). Clothing, jewellery, tattoos, hair, Blazin
+moves and fighting styles are **per profile**.
+
+- **Sets.** A set is `{capacity, count, pointer to the saved count, pointer to the ids}` (`sub_000144B0`), kept
+  sorted by `id & 0xFF7FFFFF` (`sub_00017000` finds, `sub_00016810` inserts). After a load `sub_00014540` copies
+  the saved counts back. An id is `table << 24 | row` of `assets/djv2.sod`: fighters table 7 (75 rows), venues
+  table 23 (24 rows). Bit `0x800000` is the element's own flag ("Owned" in `sub_00048810`); a story reward with
+  flag `0x20` sets it. `BuyCharacter` (`sub_00054080`) and the developers' `sub_000158F0` insert plain ids.
+- **Match types** are not stored: `sub_00047520` ORs the match-type mask of every unlocked venue (venue field
+  `0xC88C9087`), so all venues unlock all match types. `GetMatchTypeEnabled` always answers `true`.
+- **Songs.** The container at `P+0x34` (vtable `0x286204`): a song's byte is its state in bits 0-1 (1 unlocked)
+  and its unlock order in bits 2-7; unlocking a locked song (`sub_00016C30`, `sub_00016DA0`) writes
+  `1 | counter << 2` and increments the counter. The Beat Box / jukebox list reads these.
+- **Item states.** Six containers at `P+0x14E4` (`sub_00015890`), one per table: HairStyle (14), Tattoo (4),
+  Jewelry (24), Clothing (16), Blazin (6), FightingStyle (15); vtable methods `0x16F30..0x174D0` (shared). Each
+  holds a sorted item array and, per profile slot, a pointer to 2 bits per item: 0 Locked, 1 Unlocked, 2 or 3
+  Owned (`sub_00048810` turns them into the strings the shops show). `sub_000148B0` lays the six arrays out in
+  the slot one after another from `S+0x4DC4`, each `items / 4 + 1` bytes, in the order hair, tattoo, jewellery,
+  clothing, Blazin, style. The item counts are the rows of each table, except clothing (one item per colour,
+  `sub_000151C0`: list field `0xAC3E66A4`, ids `row | colour << 16`) and jewellery (one per entry of field
+  `0xC2E12E98`, or one for an empty list, `sub_000153D0`). For the USA dump: 93, 30, 405, 1454, 82, 5, so the
+  arrays end at `S+0x4FCD`. Two played profiles (the PS2 samples, converted) agree: every padding bit is 0 and
+  the bytes after the last array are 0; a finished one has no clothing or hair locked.
+- **Row counters.** Beside the states the slot keeps how many rows of each kind are unlocked: words at
+  `S+0xA8` (hair), `S+0xAA` (tattoos), `S+0xAC` (clothing), `S+0xAE` (jewellery), `S+0xB0` (Blazin moves;
+  `S+0xB2` looks like the owned Blazins) and sixteen dwords from `S+0xB8`, one per clothing type (the row's
+  `Type`, the shop section). `sub_00015B80` raises them when a delivery unlocks a row. The clothing shop's
+  "126 / 326 UNLOCKED" and its sections' lines are these counters, not the states: a first edit that set only
+  the states left SUS at 126 / 326 although the game held 1449 of 1454 clothing items unlocked
+  (`RECOMP_UNLOCK_REPORT=1`, below). The gym's "LEARN MOVES n/82" counts the states. A finished profile (the
+  AMP sample) holds exactly the table totals: 93, 30, 326, 120 rows and per type 40 15 21 11 36 23 15 19 18 7 6
+  0 73 13 7 22.
+- **Shipments** (table 8, 175 rows) are the story's deliveries: `sub_00015B80` gives a row's cash and development
+  points and ORs state 1 (or 2 with flag `0x20`) into each item's bits. A shipment has no record of its own in the
+  save, so "every shipment delivered" is the same as every item unlocked. A later delivery in Story only sets the
+  same bits again (and pays its cash and points as usual).
+- **The developers' item unlock** `sub_00016040` (flags at byte `0x2FB1F0`, nothing sets them) does the same with
+  `sub_000168E0`: state 1 for everything, or 3 for all but hair, plus cash 10,000,000 and 100,000 points.
+- **Extras.** `Extras.PlayMovie` (`sub_00049CA0`) plays a movie with no lock check, and the cheat codes are
+  the only other Extras item; there is no gallery state to unlock.
+- **Story progress** gates none of the above (fighters, venues and songs are global sets; items are their bits),
+  so the edit leaves it alone.
+
+### What Unlock all writes
+
+- Options: every fighter and venue id added to its set (existing ids and their flag kept, sorted, unused slots
+  `0xFFFFFFFF`), every locked song set to 1 with the next unlock order. Reward points are left alone.
+- The profile: bit 0 (Unlocked) set for every item of the six arrays, so locked items become Unlocked and Owned
+  ones stay Owned; padding bits untouched. The row counters raised to the totals (never lowered). Optionally cash raised to 999,999 (never lowered). Nothing else:
+  stats, development points, styles chosen, the created fighter, story progress and the header stay as they are.
+- Both files signed again with the port's key (the three HMAC-SHA1 fields, as the import does), written beside
+  the file and renamed over it, after a backup of `UserData` (reason `unlock`). Undo restores that backup.
+- Refused with nothing changed: a profile signed by another Xbox, a file of another size or identity, no
+  Options file yet, more fighters or venues than the game's sets hold (a database with appended rows).
+- The item counts are read from the database the game reads (`<data>/override/assets/djv2.sod` first, then the
+  dump), so a mod with more clothing rows gets the layout the game builds for it.
+
+### Checked (2026-11-10, Windows, build 73 tree, test saves only)
+
+The fixtures: the dev save area (an Options file only), a user ID `AAA` made by the game itself (harness `intro`),
+and the two PS2 sample profiles converted by Import saves (`SWEEAX`, partly played; `AMP`, finished). All runs on
+disposable data roots under the machine lock, `RECOMP_UNLOCK_ALL=0`.
+
+| Check | Before | After Unlock all |
+|---|---|---|
+| Battle lists (`RECOMP_FE_PROBE=1`) | 12 fighters, 4 venues; match types Demolition..Ringout locked | 74 of 74 fighters, every venue for every type, every match type but 1vs2 and 1vs3 (no venue in the database carries those two bits, so nothing can unlock them) |
+| Unlock Rewards > Unlock Fighters | | "UNLOCKED 74 / 74", "You've unlocked all the fighters" |
+| Fighter select, Choose Venue | | no locked portraits; all venue pins |
+| SUS (Story, `SWEEAX`) | 126 / 326, Tops 46 / 123, Jackets 14 / 40, $2,180 | 326 / 326, 123 / 123, 40 / 40, $999,999 |
+| Gym, Learn Moves | 17 / 82 by its states (not captured) | 82 / 82, every one "for sale" at its dev-point price |
+| In memory at the shop (`RECOMP_UNLOCK_REPORT`) | | the six arrays at `S+0x4DC4..` with the counts above, none locked |
+| `SWEEAX` file | | only the states, the counters, the cash and the signatures changed; dev points 400, stats, styles, fighter as before; Options: only `0x12A0..0x1517` |
+| Undo (unlock, then Undo, one visit) | | the save area byte for byte as before (14 files) |
+| Online, one copy unlocked and one not (`dj.py scenario online --matches 3`) | | 3 matches in lockstep, all checksums equal |
+| `regress.py --quick` | | 5 of 5 |
+
+`RECOMP_UNLOCK_REPORT=1` (`src/patches/dev_unlock.c`, read only) logs on each screen change what the current
+profile holds as the game sees it: `[UNLOCK-REPORT] <screen> profile <i> fighters <n> venues <n> cash <n>`, then
+per kind `<items>@+<offset in the slot> <locked>/<unlocked>/<owned>`.
+
+Online is not affected: the online hub's fighters and venues come from the dump (`src/hooks/online_data.c`), a
+room's match is started with explicit fighter and venue ids (`Game.ChooseVenue`, `Controller.ControllerSetup`,
+`Game.StartGame`), and nothing on that path reads the sets; ranked clamps created-fighter stats, which the edit
+does not touch.
+
 ## Why not a save
 
 A profile is a 22,928-byte file (`20CM` magic, a header whose bytes `0x10` to `0x4B` change with any
@@ -224,7 +328,7 @@ switch makes one unnecessary for tests. It also means nothing is shared (saves a
   not touch it. The Story routes (`intro`, `crib`, `gym`) still need their profile, as the backlog
   item on golden saves says.
 - **Songs** (Extras): codes only, once each. Typing the sixteen codes through the harness would do it.
-- **Clothing, tattoos, items, moves**: bought in Story with cash; not looked at.
+- **Clothing, tattoos, items, moves**: bought in Story with cash; see "The save edit" (2026-11-10).
 - **A real save.** The routine tells the profile's owner it changed. On a profile you care about,
   do not use it until it is known which flows save it.
 

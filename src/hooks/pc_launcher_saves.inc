@@ -11,13 +11,19 @@
 // "<frame>:<action>[:<argument>]" separated by ';' once the dialog is open: backup, import:<path>
 // (as if that folder or zip was picked), replace:<profile name> (ticks Replace), import-ok,
 // restore:<row>, restore-ok, folder (Open folder), bring:<row> (Bring back a profile the game deleted),
-// aside:<profile name> (Put aside), back:<profile name> (Bring back a profile put aside).
+// aside:<profile name> (Put aside), back:<profile name> (Bring back a profile put aside),
+// unlock:<profile name> (Unlock all: opens its confirmation), unlock-cash (ticks "and $999,999"),
+// unlock-ok, undo (Undo after an unlock).
 //
 // Put aside (save_manager.h): the game loads at most 16 user IDs, so a profile can be moved out of the
 // folder it reads, whole, and brought back later; the count of profiles in the game is in the heading.
+//
+// Unlock all (save_unlock.h): the profile and the Options file are edited to everything unlocked, after
+// a backup; Undo (at the foot, until the page closes) restores that backup, as Restore in the list does.
 
 #include "pc_launcher_saves.h"
 #include "created_fighter.h"     // cp_names_setting_get: the created fighters' online names
+#include "save_unlock.h"
 
 namespace {
 
@@ -42,6 +48,9 @@ struct SavesPage
     std::vector<Step> steps;
     bool want_import_ok = false, want_restore_ok = false;
     bool open_restore = false;      // opened at the dialog's own level (a row's button is in a child)
+    // Unlock all: the profile asked about, the cash box, and the backup Undo restores
+    std::string unlock_folder, unlock_name, undo_backup, undo_name;
+    bool unlock_cash = false, open_unlock = false, want_unlock_ok = false;
 };
 SavesPage g_sp;
 
@@ -175,6 +184,48 @@ void saves_bring_back_aside(const std::string &stash)
     saves_refresh();
 }
 
+void saves_ask_unlock(const std::string &folder, const std::string &name)
+{
+    if (saves_refuse_while_running("a profile can be unlocked")) return;
+    g_sp.unlock_folder = folder;
+    g_sp.unlock_name = name;
+    g_sp.unlock_cash = false;
+    g_sp.open_unlock = true;
+}
+
+void saves_do_unlock()
+{
+    if (g_sp.unlock_folder.empty() || saves_refuse_while_running("a profile can be unlocked")) return;
+    saves::Bytes sod;
+    std::string where;
+    if (!pcsaves::game_database(sod, &where)) {
+        saves_say("Nothing was changed: the game's files were not found (assets/djv2.sod).", 2);
+        return;
+    }
+    fprintf(stderr, "[SAVES] unlock: database %s\n", where.c_str());
+    auto r = saves::unlock_everything(pcsaves::save_dir(), pcsaves::backup_dir(), g_sp.unlock_folder, sod, g_sp.unlock_cash,
+                                      pcsaves::now());
+    if (r.ok) {
+        g_sp.undo_backup = r.backup;
+        g_sp.undo_name = g_sp.unlock_name;
+        saves_say(r.message + " Undo puts it back.", 1);
+    } else {
+        saves_say(r.message, 2);
+    }
+    g_sp.unlock_folder.clear();
+    saves_refresh();
+}
+
+void saves_undo_unlock()
+{
+    if (g_sp.undo_backup.empty() || saves_refuse_while_running("a backup can be restored")) return;
+    std::string message;
+    bool ok = saves::restore(pcsaves::save_dir(), pcsaves::backup_dir(), g_sp.undo_backup, pcsaves::now(), &message);
+    saves_say(ok ? g_sp.undo_name + " is back as it was before Unlock everything." : message, ok ? 1 : 2);
+    if (ok) g_sp.undo_backup.clear();
+    saves_refresh();
+}
+
 int saves_in_game()
 {
     int n = 0;
@@ -226,6 +277,15 @@ void saves_test_steps()
             for (auto &e : g_sp.entries)
                 if (e.kind == saves::Entry::PROFILE && e.name == s.arg) folder = e.folder;
             if (!folder.empty()) saves_put_aside(folder);
+        } else if (s.action == "unlock") {
+            for (auto &e : g_sp.entries)
+                if (e.kind == saves::Entry::PROFILE && e.name == s.arg) saves_ask_unlock(e.folder, e.name);
+        } else if (s.action == "unlock-cash") {
+            g_sp.unlock_cash = true;
+        } else if (s.action == "unlock-ok") {
+            g_sp.want_unlock_ok = true;
+        } else if (s.action == "undo") {
+            saves_undo_unlock();
         } else if (s.action == "back") {
             std::string stash;
             for (auto &e : g_sp.aside)
@@ -273,7 +333,7 @@ void saves_profiles(float w, float h, float s)
     ImVec4 detail(0.80f, 0.80f, 0.82f, 1);
     float row_h = 60 * s, gap = 8 * s, rw = ImGui::GetContentRegionAvail().x;
     int shown = 0;
-    std::string aside_folder, back_stash;       // pressed this frame (acted on after the lists)
+    std::string aside_folder, back_stash, unlock_folder, unlock_name;   // pressed this frame (acted on after the lists)
     for (auto &e : g_sp.entries) {
         if (e.kind == saves::Entry::OTHER) continue;
         ImVec2 a = ImGui::GetCursorScreenPos(), b(a.x + rw, a.y + row_h);
@@ -287,9 +347,19 @@ void saves_profiles(float w, float h, float s)
             line = saves_profile_line(e, c);
         }
         bool profile = e.kind == saves::Entry::PROFILE;
-        saves_row(dl, a, b, s, head.c_str(), line.c_str(), c, profile ? 104 * s : 0);
+        saves_row(dl, a, b, s, head.c_str(), line.c_str(), c, profile ? 204 * s : 0);
         if (profile) {
             ImGui::PushID(e.folder.c_str());
+            ImGui::BeginDisabled(!e.signed_ok);
+            if (glass_button("##unlock", "Unlock all", ImVec2(b.x - 204 * s, a.y + 16 * s), ImVec2(92 * s, 28 * s), s,
+                             GLASS_PLAIN, bold_font(), 13.5f * s)) {
+                unlock_folder = e.folder;
+                unlock_name = e.name;
+            }
+            ImGui::EndDisabled();
+            if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+                ImGui::SetTooltip(e.signed_ok ? "Every fighter, venue, song, item, Blazin and style unlocked (asks first)"
+                                              : "Bring this profile in with Import saves first");
             if (glass_button("##aside", "Put aside", ImVec2(b.x - 104 * s, a.y + 16 * s), ImVec2(90 * s, 28 * s), s,
                              GLASS_PLAIN, bold_font(), 13.5f * s))
                 aside_folder = e.folder;
@@ -334,7 +404,8 @@ void saves_profiles(float w, float h, float s)
         }
     }
     ImGui::EndChild();
-    if (!aside_folder.empty()) saves_put_aside(aside_folder);
+    if (!unlock_folder.empty()) saves_ask_unlock(unlock_folder, unlock_name);
+    else if (!aside_folder.empty()) saves_put_aside(aside_folder);
     else if (!back_stash.empty()) saves_bring_back_aside(back_stash);
 }
 
@@ -479,6 +550,38 @@ void saves_restore_confirm()
     end_glass_modal();
 }
 
+void saves_unlock_confirm()
+{
+    if (!begin_glass_modal("Unlock everything##confirm", ImGui::GetFontSize() * 30)) return;
+    ImGui::PushTextWrapPos(ImGui::GetFontSize() * 28);
+    ImGui::Text("This changes %s. A backup is kept. Undo with Restore.", g_sp.unlock_name.c_str());
+    ImGui::Spacing();
+    ImGui::TextWrapped("Unlocked: every fighter and venue (and so every match type) and every song; in the shops all "
+                       "clothing, jewellery, tattoos and hair styles, and every Blazin move and fighting style to buy "
+                       "or learn. What you own stays owned.");
+    ImGui::Spacing();
+    ImGui::TextDisabled("Fighters, venues and songs are shared by every profile on this PC. Stats, level, development "
+                        "points and story progress stay as they are. Online play is not affected.");
+    ImGui::Spacing();
+    ImGui::Checkbox("and $999,999 to spend in Story", &g_sp.unlock_cash);
+    ImGui::PopTextWrapPos();
+    ImGui::Spacing();
+    ImGui::PushStyleColor(ImGuiCol_Button, k_red);
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, k_red_hi);
+    bool go = ImGui::Button("Unlock everything", ImVec2(ImGui::GetFontSize() * 11, 0));
+    ImGui::PopStyleColor(2);
+    if (g_sp.want_unlock_ok) { g_sp.want_unlock_ok = false; go = true; }
+    ImGui::SameLine();
+    if (go) {
+        saves_do_unlock();
+        ImGui::CloseCurrentPopup();
+    } else if (ImGui::Button("Cancel", ImVec2(ImGui::GetFontSize() * 8, 0))) {
+        g_sp.unlock_folder.clear();
+        ImGui::CloseCurrentPopup();
+    }
+    end_glass_modal();
+}
+
 } // namespace
 
 static void saves_dialog(ImVec2 o, float w, float h, float s)
@@ -495,6 +598,7 @@ static void saves_dialog(ImVec2 o, float w, float h, float s)
     ImGui::PopStyleColor();
     if (!open) {
         g_sp.loaded = false;        // read again the next time it opens
+        g_sp.undo_backup.clear();   // Undo is for this visit; Restore in the list stays
         return;
     }
     if (!g_sp.loaded) saves_refresh();
@@ -577,14 +681,23 @@ static void saves_dialog(ImVec2 o, float w, float h, float s)
         g_sp.open_restore = false;
         ImGui::OpenPopup("Restore a backup##confirm");
     }
+    if (g_sp.open_unlock) {
+        g_sp.open_unlock = false;
+        ImGui::OpenPopup("Unlock everything##confirm");
+    }
     saves_import_confirm(s);
     saves_restore_confirm();
+    saves_unlock_confirm();
     pop_glass_style();
 
+    float undo_w = g_sp.undo_backup.empty() ? 0 : 110 * s;
+    if (undo_w && glass_button("##saves_undo", "Undo", ImVec2(b.x - 30 * s - 130 * s - undo_w, b.y - foot / 2 - 17 * s),
+                               ImVec2(96 * s, 34 * s), s, GLASS_PLAIN, bold_font(), 14.5f * s))
+        saves_undo_unlock();
     if (!g_sp.message.empty()) {
         ImVec4 c = g_sp.tone == 1 ? k_green : g_sp.tone == 2 ? k_gold : ImVec4(1, 1, 1, 0.75f);
-        float wrap = size.x - 60 * s - 150 * s;
-        dl->PushClipRect(a, ImVec2(b.x - 170 * s, b.y), true);
+        float wrap = size.x - 60 * s - 150 * s - undo_w;
+        dl->PushClipRect(a, ImVec2(b.x - 170 * s - undo_w, b.y), true);
         float th = text_size(ImGui::GetFont(), 13.5f * s, g_sp.message.c_str(), wrap).y;
         dl->AddText(ImGui::GetFont(), 13.5f * s, ImVec2(a.x + 30 * s, b.y - foot / 2 - th / 2), col(c), g_sp.message.c_str(),
                     nullptr, wrap);
