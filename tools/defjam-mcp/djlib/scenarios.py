@@ -2082,7 +2082,7 @@ def hill_watch_check(analyses, logs, problems):
     """Build 70: the hill fights each copy watched live (it ran them from the fighters' entries): steps played,
     checksums compared and equal with the fighters', any desync, how it went back to the hill screen; and per copy
     its own fights' lockstep waits mid-fight (a watcher must never hold the fighters up). A copy that announced
-    live watching but played no step of any watched fight, a watched fight's desync, and a fighter's wait of a
+    live watching but played no step of any watched fight it left, a watched fight's desync, and a fighter's wait of a
     second or more mid-fight are problems. A copy whose log never ran one (an
     older build: its WATCH lines say "not running the fight") is listed as old."""
     out = {}
@@ -2101,9 +2101,11 @@ def hill_watch_check(analyses, logs, problems):
         for f in fights:
             if f["desync"] is not None:
                 problems.append("hill watch: copy %d's watched fight %s went out of sync at step %s" % (i, f["seed"], f["desync"]))
-        # a fight left early (this copy called for the next one) may end before its first logged checksums
-        if live and not any(f["steps"] > 0 for f in fights):
-            problems.append("hill watch: copy %d ran %d watched fights but played no step of any" % (i, live))
+        # a fight left early (this copy called for the next one) may end before its first logged checksums, and
+        # the run may stop while a watched fight loads: only the watched fights that ended count
+        ended = [f for f in fights if f["back"]]
+        if ended and not any(f["steps"] > 0 for f in ended):
+            problems.append("hill watch: copy %d left %d watched fights but played no step of any" % (i, len(ended)))
         if waits and max(w[1] for w in waits) >= 1000:
             problems.append("hill watch: copy %d waited %d ms mid-fight for another fighter" % (i, max(w[1] for w in waits)))
     return out
