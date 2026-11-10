@@ -258,11 +258,15 @@ class Session:
         return r
 
     def launch(self, i, env=None, root=None, core=None, control_port=None, watch=(), fixture=None):
-        """Start copy i on its own data root and CPU. Refuses before starting when anything is missing."""
+        """Start copy i on its own data root and CPU. Refuses before starting when anything is missing.
+        DJ_COPY_EXE=<path> in env (e.g. --copy-env 1:DJ_COPY_EXE=...) runs that game image for this copy
+        instead of this checkout's: a mixed-build sync check (two builds in one room)."""
         if self.closed or not self.lock.held:
             raise RuntimeError("open the session (take the lock) first")
+        env = dict(env or {})
+        exe = os.path.abspath(env.pop("DJ_COPY_EXE", None) or self.exe)
         root = root or self.make_root(i, fixture=fixture)
-        bad = machine.preflight(self.exe, root)
+        bad = machine.preflight(exe, root)
         if bad:
             raise FileNotFoundError("; ".join(bad))
         core = 2 + 2 * i if core is None else core
@@ -276,8 +280,9 @@ class Session:
         e = machine.safe_env(core, root, extra)
         log = os.path.join(self.dir, "copy%d.log.err" % i)
         with open(os.path.join(self.dir, "copy%d.env.json" % i), "w", encoding="utf-8") as f:
-            json.dump({k: v for k, v in e.items() if k.startswith("RECOMP_") or k == "DEFJAM_DATA"}, f, indent=1)
-        p = subprocess.Popen([self.exe], cwd=machine.REPO, env=e,
+            json.dump(dict({k: v for k, v in e.items() if k.startswith("RECOMP_") or k == "DEFJAM_DATA"},
+                           DJ_COPY_EXE=exe), f, indent=1)
+        p = subprocess.Popen([exe], cwd=machine.REPO, env=e,
                              stdout=open(os.path.join(self.dir, "copy%d.log" % i), "wb"), stderr=open(log, "wb"))
         if self.job:
             self.job.add(p)
