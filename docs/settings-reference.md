@@ -82,6 +82,12 @@ line turns it on for one run. Every key here is read at start-up.
 | `vignette_strength` | `100` | How dark the vignette is, 0-100 percent of the game's own; 0 is the same as off. Applies at once. Env `RECOMP_VIGNETTE_STRENGTH`. [How both work](research/picture-options.md). |
 | `crowd_near` | `fade` | Spectators close to the camera. `fade` is the game's own: they fade out but stay faintly see-through (alpha 0.2) in front of the fight; `hide` drops them until the camera moves away. Only the picture changes (online checksums are unaffected). Applies at once. Launcher: Basics and Advanced, Display ("Crowd near the camera"). Env `RECOMP_CROWD_NEAR` (`fade`, `hide`). |
 
+## [gameplay]
+
+| Key | Default | Meaning |
+|---|---|---|
+| `toughness_fix` | `true` | Fixes a bug of the original game: a profile fighter's first Toughness milestone (win 10 matches with more than two fighters, +1 bonus Toughness) could never be reached, because the game overwrote the win count with 0 or 1 after every match instead of adding to it. On, the wins count and the point is earned at the tenth; nothing is granted for earlier matches. Off is the original game (a count above 1 is then lost again at the next match). Only the profile's save changes; fights and online matches are unaffected. Applies at once. Env `RECOMP_TOUGHNESS_FIX` (`1` on, `0` off). |
+
 ## [language]
 
 | Key | Default | Meaning |

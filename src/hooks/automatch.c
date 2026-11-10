@@ -32,6 +32,11 @@ extern void xbox_NoteAnchorEvent(const char *text);
 #define SETTLE_CALLS 4
 
 static AutoMatch g_req;
+/* Tests only ("u0=2" in RECOMP_AUTOMATCH): the profile slot linked to a slot's pad, plus one; 0 is
+ * none, as every online match and every request without the key has it. A Battle match with a
+ * user ID chosen for the pad, without the menus: the post-match reward pass then feeds that
+ * profile (src/patches/toughness_fix.c). */
+static int g_test_user[4];
 static volatile LONG g_armed;
 static int g_on_menu, g_quiet, g_ticks, g_running, g_env_read, g_results = -1;
 
@@ -66,6 +71,7 @@ static int settled(const char *text)
 void automatch_request(const AutoMatch *m)
 {
     g_req = *m;
+    memset(g_test_user, 0, sizeof(g_test_user));
     if (g_req.count < 2) g_req.count = 2;
     if (g_req.count > 4) g_req.count = 4;
     InterlockedExchange(&g_armed, 1);
@@ -79,7 +85,7 @@ int automatch_request_text(const char *e)
 {
     AutoMatch m;
     char key[8];
-    int value, n = 0;
+    int value, n = 0, user[4] = { 0, 0, 0, 0 };
     if (!e || !*e) return 0;
     memset(&m, 0, sizeof(m));
     m.venue = 1;
@@ -91,6 +97,7 @@ int automatch_request_text(const char *e)
             else if (!strcmp(key, "venue")) m.venue = value;
             else if (key[0] == 'f' && key[1] >= '0' && key[1] <= '3') m.fighter[key[1] - '0'] = value;
             else if (key[0] == 'p' && key[1] >= '0' && key[1] <= '3') m.pad[key[1] - '0'] = value;
+            else if (key[0] == 'u' && key[1] >= '0' && key[1] <= '3' && value >= 0 && value < 16) user[key[1] - '0'] = value + 1;
             if (key[0] == 'f' && key[1] >= '0' && key[1] <= '3' && key[1] - '0' + 1 > m.count) m.count = key[1] - '0' + 1;
         }
         e += n ? n : 1;
@@ -99,6 +106,7 @@ int automatch_request_text(const char *e)
     }
     if (m.count < 2) m.count = 2;
     automatch_request(&m);
+    memcpy(g_test_user, user, sizeof(g_test_user));
     return 1;
 }
 
@@ -223,7 +231,7 @@ static void run_sequence(void)
     call("Game.SetMatchRules(%d)", m->rules);
     call("Controller.ControllerBind(-1)");
     for (i = 0; i < m->count; i++) if (m->pad[i] >= 0) call("Controller.ControllerBind(%d)", m->pad[i]);
-    for (i = 0; i < m->count; i++) if (m->pad[i] >= 0) call("MemCard.SetBMCurrentUserIndex(%d,-1)", m->pad[i]);
+    for (i = 0; i < m->count; i++) if (m->pad[i] >= 0) call("MemCard.SetBMCurrentUserIndex(%d,%d)", m->pad[i], g_test_user[i] - 1);
     call("Battle.LoadCreatePlayerData(%d)", humans);
     call("Controller.ControllerSetup(-1,0,0,0)");
     /* As the game's own versus screens do: each slot's controller number (setup entry byte 4), which
