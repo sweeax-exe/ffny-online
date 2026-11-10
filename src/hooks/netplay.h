@@ -390,6 +390,8 @@ int netplay_in_lobby(void);     /* 1 while the session came from netplay_lobby *
  * none (offline, or a failed connection). */
 int netplay_lobby_address(char *out, int size);
 int netplay_rtt(void);          /* this PC's last ping to its relay in ms, -1 unknown */
+/* The fight files' print is made again at the next P_RTT (pc_language_start, after a language mod's redirect). */
+void netplay_data_print_reset(void);
 void netplay_build_fingerprint(uint8_t out[8]);     /* HELLO's build field: rooms meet only the same one */
 /* The fight files' print (fighters, moves, AI, database, animation archives), made once on a background
  * thread; main.c starts it at boot, the network thread waits for it only if it still runs. */

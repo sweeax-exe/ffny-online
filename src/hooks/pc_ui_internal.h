@@ -97,6 +97,11 @@ void ui_set_launcher_art(ImTextureID banner, float banner_w, float banner_h,
 // The launcher's background picture and a blurred copy of it for the glass panels (0 for none).
 void ui_set_launcher_backdrop(ImTextureID picture, float picture_w, float picture_h,
                               ImTextureID blurred, float blurred_w, float blurred_h);
+// Pictures from the network (the Content page's community gallery): the front end turns PNG bytes into a
+// texture it owns (0 when it cannot) and releases them all when it closes. nullptr (no pictures) before
+// the device goes; pc_ui then forgets every texture it got. Call with the UI lock held.
+typedef ImTextureID (*UiPngLoader)(const void *png, int len, int *w, int *h);
+void ui_set_png_loader(UiPngLoader loader);
 // Whether a point of the launcher window (client pixels) is on its drag strip: the borderless window
 // answers WM_NCHITTEST with the caption there. Call with the UI lock held.
 bool ui_launcher_caption(float x, float y);

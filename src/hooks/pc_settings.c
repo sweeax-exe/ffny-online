@@ -41,6 +41,7 @@
 #include "pc_debug.h"
 #include "discord_presence.h"
 #include "pc_language.h"
+#include "pc_content.h"
 #include "patches/widescreen.h"
 #include "patches/picture.h"
 
@@ -1066,6 +1067,8 @@ int pc_settings_init(void)
 #endif
     /* [language] pack: rebuild the pack's files from the dump if needed and serve them in place of
      * the originals. After the launcher, which chooses it, and before the XBE is loaded. */
+    /* FFNY Online's synced community packs (pc_content.c): beneath the player's own texture packs. */
+    pc_content_start(have_root ? root : NULL);
     pc_language_start(have_root ? root : NULL, "game");
 
     /* [debug] unlock_all: src/patches/dev_unlock.c reads the variable once the game runs. */

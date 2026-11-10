@@ -97,10 +97,11 @@ void mod_cancel() {
 }
 bool mod_start(const std::string &command, const std::string &id) {
     if (running) return false;
-    if (command != "status" && command != "refresh" && command != "install" && command != "remove" && command != "rollback" && command != "recover") return false;
+    if (command != "status" && command != "refresh" && command != "install" && command != "remove" && command != "rollback" && command != "recover" && command != "sync") return false;
     if (!id.empty() && !pack_name(id)) return false;
     const char *override_root = getenv("RECOMP_TEXTURE_ROOT");
     if (override_root && *override_root && command != "status" && command != "refresh") {
+        if (command == "sync") return false;     // a test root of its own: nothing to sync into
         status = "Managed installs use the data folder's mods directory; unset RECOMP_TEXTURE_ROOT first."; return false;
     }
     std::error_code error;

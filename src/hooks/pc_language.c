@@ -45,6 +45,8 @@
 
 #include "recomp_settings.h"
 #include "pc_language.h"
+#include "pc_content.h"
+#include "netplay.h"
 
 /* The toolkit's game-file redirect (kernel.h, not on this target's include path). */
 #if defined(_WIN32)
@@ -425,6 +427,7 @@ static Served g_served[16];
 static int g_served_count;
 static int g_active;
 static int g_pack_subtitles;
+static char g_pack_dir[LANG_PATH];     /* the active mod's folder, for pc_language_dir() */
 
 static void pack_free(Pack *p)
 {
@@ -798,6 +801,10 @@ void pc_language_start(const char *data_root, const char *game_dir)
         fprintf(stderr, "[LANG] the game's own language (no language pack)\n");
         return;
     }
+    if (pc_content_language_blocked(folder)) {
+        fprintf(stderr, "[LANG] %s is switched off on the Content page: the game's own language\n", folder);
+        return;
+    }
     if (!data_root || !*data_root) {
         fprintf(stderr, "[LANG] language pack '%s' needs a data folder; playing in the game's own language\n", folder);
         return;
@@ -903,7 +910,9 @@ void pc_language_start(const char *data_root, const char *game_dir)
     }
     g_pack_subtitles = g_pack.all_subtitles;
     g_active = 1;
+    snprintf(g_pack_dir, sizeof g_pack_dir, "%s", dir);
     g_xbox_game_file_redirect = lang_redirect;
+    netplay_data_print_reset();     /* a print made before this (the launcher's online) missed the rebuilt files */
     fprintf(stderr, "[LANG] %s (%s, %s): %d file(s) served from %s%s\n", g_pack.name, g_pack.language, folder,
             g_served_count, cache, fresh ? "" : " (built now)");
     language_texture_layer(dir, folder);
@@ -965,6 +974,11 @@ int pc_language_all_subtitles(void)
     if (choice == 1) return 1;
     if (choice == 2) return 0;
     return g_active && g_pack_subtitles;
+}
+
+const char *pc_language_dir(void)
+{
+    return g_active && g_pack_dir[0] ? g_pack_dir : NULL;
 }
 
 int pc_language_french(void)

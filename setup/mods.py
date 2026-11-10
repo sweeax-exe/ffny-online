@@ -30,8 +30,31 @@ import zipfile
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import mod_catalogue as contract
 
-CATALOGUE_URL = 'https://vyanhursky.github.io/DefJamFFNY-mods/index.json'
+# FFNY Online's own catalogue: the account service signs it with its content key when the team accepts a
+# pack (docs/content-packs.md); the launcher syncs it at every start ("sync").
+CATALOGUE_URL = 'https://play.defjam.online/updates/content/index.json'
 KEYS = Path(__file__).resolve().parents[1] / 'config/mods/catalogue-keys.json'
+
+
+def local_test_url(url):
+    """Tests only: FFNY_CONTENT_URL may name a plain-HTTP catalogue on this machine (a local account
+    service with -content-serve); its key comes from FFNY_CONTENT_TEST_KEYS. Never another host."""
+    return isinstance(url, str) and re.match(r'http://(127\.0\.0\.1|localhost):[0-9]{1,5}/', url) is not None
+
+
+def local_catalogue_url():
+    url = os.environ.get('FFNY_CONTENT_URL', '')
+    return url if local_test_url(url) else ''
+
+
+if local_catalogue_url():
+    _https = contract.https
+
+    def _https_or_local(value):
+        if local_test_url(value):
+            return
+        _https(value)
+    contract.https = _https_or_local
 MAX_INDEX = 8 * 1024**2
 MAX_FILE = 512 * 1024**2
 MAX_ARCHIVE = 8 * 1024**3
@@ -407,6 +430,8 @@ class Manager:
         self.staging = safe_dir(self.root / 'staging')
         self.backups = safe_dir(self.root / 'rollback')
         self.runtime, self.capabilities = runtime, set(capabilities)
+        if keys is None and local_catalogue_url() and os.environ.get('FFNY_CONTENT_TEST_KEYS'):
+            keys = read_json(os.environ['FFNY_CONTENT_TEST_KEYS'], {}).get('keys', [])
         key_config = read_json(KEYS, {}) if keys is None else {'keys': keys}
         self.keys = key_config.get('keys', [])
         self.cancel_file = Path(cancel) if cancel else None
@@ -585,7 +610,7 @@ class Manager:
                 shutil.rmtree(backup)
                 sync_directory(self.backups)
 
-    def install(self, mod_id, requested=None, prerelease=None, archive_path=None):
+    def install(self, mod_id, requested=None, prerelease=None, archive_path=None, synced=False):
         mod, version = self.choose(mod_id, requested, prerelease)
         state = self.state()
         check(all(dep in state['installed'] for dep in version['depends']), 'Install required dependencies first')
@@ -601,10 +626,25 @@ class Manager:
             check(set(receipt['capabilities']) <= set(version['capabilities']), 'Catalogue omits a required pack capability')
             receipt.update(id=mod_id, folder=mod_id, version=version['version'], name=mod['name'],
                            archive_sha256=version['archive']['sha256'], conflicts=version['conflicts'])
+            if synced:
+                # FFNY Online's catalogue: the signed content hash must be what was unpacked, and the
+                # pack's own signature must check out with the catalogue key (the index already covers
+                # both; this keeps a pack's identity checkable on its own).
+                if 'content_sha256' in version:
+                    check(content_hash(receipt['files']) == version['content_sha256'], 'Pack content does not match its signed hash')
+                if 'pack_signature' in version:
+                    check(pack_signature_ok(self.keys, mod_id, version, mod.get('kind', 'replacement')),
+                          'Pack signature is invalid')
+                receipt.update(synced=True, kind=mod.get('kind', 'replacement'), type=mod.get('type', ''),
+                               order=mod.get('order', 0), language=mod.get('language', ''),
+                               authors=', '.join(mod['authors']), description=mod['description'][:500],
+                               content_sha256=version.get('content_sha256', content_hash(receipt['files'])),
+                               bytes=version['archive']['unpacked_size'])
             self.cancelled()
             self.progress('Installing verified package')
             self.commit(mod_id, stage, receipt)
-            self.progress('Installed; enable this pack in the Installed mods table, then set its priority in Load Order')
+            self.progress(('Installed ' + mod['name']) if synced else
+                          'Installed; enable this pack in the Installed mods table, then set its priority in Load Order')
         finally:
             if stage.exists():
                 shutil.rmtree(stage)
@@ -627,6 +667,70 @@ class Manager:
         finally:
             if stage.exists():
                 shutil.rmtree(stage)
+
+    def sync(self, url=None):
+        """FFNY Online: every pack of the verified catalogue, installed for everyone in catalogue order.
+        Only packs whose version or archive changed are downloaded; synced packs the catalogue no longer lists
+        (or revoked) are removed. A pack that fails is left as it was and the others go on. Writes
+        content.ini for the game and the launcher's Content page."""
+        url = url or local_catalogue_url() or CATALOGUE_URL
+        problems = []
+        try:
+            self.refresh(url)
+        except (ValueError, OSError, urllib.error.URLError) as error:
+            problems.append('Catalogue: ' + str(error))
+        try:
+            index = self.trusted(fresh=True)
+        except (ValueError, OSError) as error:
+            self.write_content()
+            raise ModError('; '.join(problems) or str(error)) from error
+        listed, done = set(), 0
+        for mod in sorted(index['mods'], key=lambda m: (m.get('order', 1 << 30), m['id'])):
+            listed.add(mod['id'])
+            installed = self.state()['installed'].get(mod['id'])
+            try:
+                _, version = self.choose(mod['id'])
+                if installed and not installed.get('synced'):
+                    raise ModError('a pack installed by hand uses this id; it is kept')
+                if (installed and installed.get('version') == version['version']
+                        and installed.get('archive_sha256') == version['archive']['sha256']):
+                    continue
+                self.progress('Downloading ' + mod['name'])
+                self.install(mod['id'], version['version'], synced=True)
+                done += 1
+            except (ValueError, OSError, KeyError, zipfile.BadZipFile, urllib.error.URLError) as error:
+                if isinstance(error, ModError) and 'cancelled' in str(error):
+                    raise
+                problems.append('%s: %s' % (mod['id'], error))
+        for mod_id, receipt in list(self.state()['installed'].items()):
+            mod = next((m for m in index['mods'] if m['id'] == mod_id), None)
+            if receipt.get('synced') and (mod is None or receipt.get('version') in mod['revoked_versions']):
+                try:
+                    self.commit(mod_id, None, None)
+                    done += 1
+                except (ValueError, OSError) as error:
+                    problems.append('%s: %s' % (mod_id, error))
+        self.write_content(index['revision'])
+        count = sum(1 for r in self.state()['installed'].values() if r.get('synced'))
+        message = 'Community content up to date: %d pack(s)' % count if not done else \
+            'Community content synced: %d change(s), %d pack(s) installed' % (done, count)
+        if problems:
+            message += '. Not synced: ' + '; '.join(problems)
+        self.progress(message)
+
+    def write_content(self, revision=0):
+        """<data>/mod-manager/content.ini: the synced packs for the game (pc_content.c) and the Content page."""
+        lines = ['; FFNY Online community packs, written by setup/mods.py sync. Do not edit.',
+                 '[content]', 'revision=%d' % revision]
+        rows = [(r.get('order', 0), mod_id, r) for mod_id, r in self.state()['installed'].items() if r.get('synced')]
+        for order, mod_id, r in sorted(rows, key=lambda x: (x[0], x[1])):
+            contract.slug(mod_id)
+            lines.append('[pack.' + mod_id + ']')
+            for key in ('name', 'authors', 'kind', 'type', 'version', 'language', 'content_sha256', 'order', 'bytes',
+                        'description'):
+                value = str(r.get(key, '')).replace('\n', ' ').replace('\r', ' ')[:500]
+                lines.append(key + '=' + value)
+        atomic_bytes(self.root / 'content.ini', ('\n'.join(lines) + '\n').encode('utf-8'))
 
     def view(self):
         state = self.state()
@@ -665,9 +769,32 @@ class Manager:
         atomic_bytes(self.root / 'view.ini', ('\n'.join(lines) + '\n').encode())
 
 
+def content_hash(files):
+    """The pack's content hash: SHA-256 over "path\\0sha256\\n" of every file, sorted by path (Studio's
+    contentpack and the account service compute the same)."""
+    digest = hashlib.sha256()
+    for path in sorted(files):
+        digest.update(path.encode('utf-8') + b'\0' + files[path].encode('ascii') + b'\n')
+    return digest.hexdigest()
+
+
+def pack_signature_ok(keys, mod_id, version, kind):
+    from cryptography.exceptions import InvalidSignature
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+    signed = json.dumps(dict(content_sha256=version.get('content_sha256', ''), id=mod_id, kind=kind,
+                             version=version['version']), sort_keys=True, separators=(',', ':')).encode()
+    for key in keys:
+        try:
+            Ed25519PublicKey.from_public_bytes(bytes.fromhex(key)).verify(bytes.fromhex(version['pack_signature']), signed)
+            return True
+        except (InvalidSignature, ValueError):
+            pass
+    return False
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('command', choices=('status', 'refresh', 'install', 'remove', 'rollback', 'recover'))
+    parser.add_argument('command', choices=('status', 'refresh', 'install', 'remove', 'rollback', 'recover', 'sync'))
     parser.add_argument('--data-dir', type=Path, required=True)
     parser.add_argument('--runtime', default='0.0.0')
     parser.add_argument('--capability', action='append', default=['textures-v1'])
@@ -689,6 +816,8 @@ def main():
                         manager.recover()
                 if args.command == 'refresh':
                     manager.refresh()
+                elif args.command == 'sync':
+                    manager.sync()
                 elif args.command == 'install':
                     manager.install(args.id, args.version, args.prerelease)
                 elif args.command == 'remove':

@@ -44,6 +44,7 @@
 #include "account.h"
 #include "online_data.h"
 #include "pc_settings.h"
+#include "pc_language.h"
 #include "pc_ui.h"
 #include "patches/widescreen.h"
 #include "recomp_settings.h"
@@ -177,9 +178,18 @@ const Tex &tex(const std::string &rel)
     Tex &t = g_tex[rel];
     if (!t.tried) {
         t.tried = true;
-        std::wstring path = art_root();
-        for (char c : rel) path += (wchar_t)(c == '/' ? '\\' : c);
-        load_png(path, t);
+        std::wstring name;
+        for (char c : rel) name += (wchar_t)(c == '/' ? '\\' : c);
+        // A language mod may carry translated copies in its own online-art folder (same layout).
+        bool done = false;
+        if (const char *lang = pc_language_dir()) {
+            wchar_t wide[MAX_PATH];
+            if (MultiByteToWideChar(CP_ACP, 0, lang, -1, wide, MAX_PATH)) {
+                std::wstring path = std::wstring(wide) + L"\\online-art\\" + name;
+                if (GetFileAttributesW(path.c_str()) != INVALID_FILE_ATTRIBUTES) done = load_png(path, t);
+            }
+        }
+        if (!done) load_png(art_root() + name, t);
     }
     return t;
 }

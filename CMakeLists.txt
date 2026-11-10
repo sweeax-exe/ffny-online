@@ -315,6 +315,7 @@ if(DEFJAM_BUILD_APP AND DEFJAM_SDL3)
         src/host_posix_keys.c
         src/patches/cheats_settings.c
         src/hooks/pc_language_settings.c
+        src/hooks/pc_content.c
         src/hooks/pc_songs_settings.c
         src/hooks/song_library.c
         src/hooks/song_convert.c

@@ -32,6 +32,11 @@ int pc_language_all_subtitles(void);
  * Mods default to the English slot (src/patches/game_language.c). */
 int pc_language_french(void);
 
+/* The active language mod's folder, or NULL with none on. The port's online screens take
+ * <folder>/online-art/<file> in place of <data>/online-art/<file> when the mod has it: its
+ * translated match-type logos (docs/language-packs.md). */
+const char *pc_language_dir(void);
+
 #ifdef __cplusplus
 }
 #endif

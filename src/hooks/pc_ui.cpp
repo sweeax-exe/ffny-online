@@ -40,6 +40,7 @@
 #include "pc_ui_theme.h"
 #include "pc_ui_actions.h"
 #include "pc_launcher_home.h"
+#include "pc_content.h"
 
 #include "imgui.h"
 #include "imgui_internal.h"     // SetKeyOwner: F9's box keeps the keys from the screens under it
@@ -1960,6 +1961,44 @@ static void fit_step(ImFont *font, float size, const char *whole, const char *sh
     else fit_line(font, size, shorter, max_w, out, out_size);
 }
 
+// Game language: the game's English and French, and every language pack from the Content page that is
+// on (a synced pack sets [language] pack; English or French clear it). A pack set by hand stays listed.
+static void game_language_combo()
+{
+    static PcContentPack packs[PC_CONTENT_MAX];
+    int n = pc_content_list(packs, PC_CONTENT_MAX);
+    RecompSetting *game = find("language", "game"), *pack = find("language", "pack");
+    if (!game || !pack) return;
+    std::string current_pack = get_text("language", "pack");
+    std::vector<std::pair<std::string, std::string>> rows = {{"", "English (the game's own)"}, {"", "French (built into the game)"}};
+    int current = current_pack.empty() ? (recomp_settings_get("language", "game", 0) == 1 ? 1 : 0) : -1;
+    for (int i = 0; i < n; i++) {
+        if (strcmp(packs[i].type, "language") || pc_content_is_off(packs[i].id)) continue;
+        rows.push_back({packs[i].id, std::string(packs[i].name[0] ? packs[i].name : packs[i].id) + "  (community pack)"});
+        if (current_pack == packs[i].id) current = (int)rows.size() - 1;
+    }
+    if (current < 0) { rows.push_back({current_pack, current_pack + "  (language mod)"}); current = (int)rows.size() - 1; }
+    bool locked = pack->source == RECOMP_SETTING_FROM_ENV || game->source == RECOMP_SETTING_FROM_ENV;
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextUnformatted("Game language:");
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(ImGui::GetFontSize() * 18);
+    ImGui::BeginDisabled(locked);
+    if (ImGui::BeginCombo("##game_language", rows[current].second.c_str())) {
+        for (int i = 0; i < (int)rows.size(); i++) {
+            if (ImGui::Selectable(rows[i].second.c_str(), i == current) && i != current) {
+                recomp_settings_set_text("language", "pack", rows[i].first.c_str());
+                recomp_settings_set("language", "game", i == 1 ? 1 : 0);
+                pc_settings_save();
+            }
+        }
+        ImGui::EndCombo();
+    }
+    ImGui::EndDisabled();
+    ui_target("Game language");
+    if (locked) ImGui::TextDisabled("Set for this run by the environment.");
+}
+
 static void page_general(UiMode mode)
 {
     (void)mode;
@@ -1986,10 +2025,8 @@ static void page_general(UiMode mode)
                            "sees no input and keeps running.");
     }
     ImGui::SeparatorText("Language and subtitles");
-    settings_group("language", { "game", "story_subtitles" });
-    if (!get_text("language", "pack").empty())
-        ImGui::TextWrapped("A language mod is on (Mods page), so the game uses its language; the game language "
-                           "above applies when no language mod is on.");
+    game_language_combo();
+    settings_group("language", { "story_subtitles" });
     ImGui::TextWrapped("French is built into the game: menus and Story subtitles in French, with the voices and "
                        "menu icons in English. The game has English subtitles for every Story cutscene but shows "
                        "them only in the opening one (in French, in all of them). Choose all cutscenes to see them "
@@ -3139,6 +3176,7 @@ static void settings_dialog(ImVec2 o, float w, float h, float s, int &tab, int &
 #include "pc_launcher_music.inc"      // the Music card and dialog (custom music), the same glass
 #include "pc_launcher_name.inc"       // the Account card's Change name dialog (the FFNY name)
 #include "pc_launcher_graphics.inc"   // the Graphics card and dialog (Enhanced graphics), the same glass
+#include "pc_launcher_content.inc"    // the Content page (community packs from our signed catalogue)
 
 #if defined(_WIN32)
 // The borderless window's own minimise and close buttons, top right.
@@ -3251,14 +3289,25 @@ static UiResult draw_launcher(float x, float y, float width, float height)
         if (note) dl->AddText(ImGui::GetFont(), 13 * s, at(48, 472), col(k_gold), note, nullptr, 270 * s);
     }
     if (ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere();
-    if (glass_button("##play", "PLAY", at(48, 498), ImVec2(270 * s, 64 * s), s, GLASS_RED, display_font(), 36 * s, !busy))
-        result.play = true;
-    if (glass_button("##settings", "Settings", at(48, 578), ImVec2(84 * s, 36 * s), s, GLASS_PLAIN, nullptr, 15 * s))
+    content_sync_tick();
+    {
+        bool pressed = glass_button("##play", g_content_play_waiting ? "WAIT" : "PLAY", at(48, 498), ImVec2(270 * s, 64 * s), s,
+                                    GLASS_RED, display_font(), 36 * s, !busy && !g_content_play_waiting);
+        if (content_play_gate(pressed)) result.play = true;
+    }
+    // Four small buttons under PLAY (61.5 wide, 8 apart).
+    if (glass_button("##settings", "Settings", at(48, 578), ImVec2(61.5f * s, 36 * s), s, GLASS_PLAIN, nullptr, 13.5f * s))
         ImGui::OpenPopup("Settings");
-    if (glass_button("##saves", "Saves", at(141, 578), ImVec2(84 * s, 36 * s), s, GLASS_PLAIN, nullptr, 15 * s))
+    if (glass_button("##saves", "Saves", at(117.5f, 578), ImVec2(61.5f * s, 36 * s), s, GLASS_PLAIN, nullptr, 13.5f * s))
         ImGui::OpenPopup("Saves");
-    if (glass_button("##discord", "Discord", at(234, 578), ImVec2(84 * s, 36 * s), s, GLASS_PLAIN, nullptr, 15 * s))
+    if (glass_button("##content", "Content", at(187, 578), ImVec2(61.5f * s, 36 * s), s, GLASS_PLAIN, nullptr, 13.5f * s))
+        ImGui::OpenPopup("Content");
+    if (glass_button("##discord", "Discord", at(256.5f, 578), ImVec2(61.5f * s, 36 * s), s, GLASS_PLAIN, nullptr, 13.5f * s))
         open_url(k_discord_invite);
+    if (studio_button_visible() &&
+        glass_button("##studio", "FFNY Studio", at(48, 622), ImVec2(130 * s, 22 * s), s, GLASS_PLAIN, nullptr, 12.5f * s)) {
+        // a stub: Studio's download and start through the signed update path come later
+    }
     dl->AddText(ImGui::GetFont(), 12.5f * s, at(48, 648), col(k_white, 0.5f), "Fan project, not affiliated with EA.");
 
     // The cards. While an update runs the GAME card is taller (step, what it is doing, bar, time)
@@ -3274,6 +3323,7 @@ static UiResult draw_launcher(float x, float y, float width, float height)
         static bool opened;
         const char *want = getenv("RECOMP_LAUNCHER_PAGE");
         if (!opened && want && !strcmp(want, "saves")) ImGui::OpenPopup("Saves");
+        else if (!opened && want && !strcmp(want, "content")) ImGui::OpenPopup("Content");
         else if (!opened && start_page >= 0) ImGui::OpenPopup("Settings");
         opened = true;
     }
@@ -3282,6 +3332,7 @@ static UiResult draw_launcher(float x, float y, float width, float height)
     music_dialog(origin, width, height, s);
     name_dialog(origin, width, height, s);
     graphics_dialog(origin, width, height, s);
+    content_dialog(origin, width, height, s);
     update_popup(result);
     crash_popup();
     outside_launcher_notice();
