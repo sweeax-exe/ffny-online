@@ -806,12 +806,14 @@ class Manager:
             self.progress('Preparing community content')
             result = content_compose.compose(self.data, self.game, self.composed_packs(), root=self.root,
                                              log=lambda text: None)
-        skipped = '; '.join('%s: %s' % s for s in result['skipped'])
+        skipped = '; '.join('%s: %s' % s for s in result['skipped'] + result.get('lang_skipped', []))
+        languages = sorted({i for i, _ in result.get('lang_files', [])})
+        with_lang = ' (also with %s)' % ', '.join(languages) if languages else ''
         if result['unchanged']:
-            text = 'Community content ready: %d pack(s) applied' % len(result['applied'])
+            text = 'Community content ready: %d pack(s) applied%s' % (len(result['applied']), with_lang)
         else:
-            text = 'Community content prepared: %d pack(s) applied, %d file(s)' % (len(result['applied']),
-                                                                                  len(result['files']))
+            text = 'Community content prepared: %d pack(s) applied, %d file(s)%s' % (len(result['applied']),
+                                                                                    len(result['files']), with_lang)
         self.progress(text + ('. Not applied: ' + skipped if skipped else ''))
         return result
 

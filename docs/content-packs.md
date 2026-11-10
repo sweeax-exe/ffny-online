@@ -53,6 +53,24 @@ pack off or the catalogue dropping it restores the originals. `content-compose.j
 inputs and the bases' size and mtime for the unchanged check. Added entries are stored as literal RefPack (raw
 past 16 MiB), replacements as the original entry was stored.
 
+**With a language pack.** A language pack rebuilds some of the same files from the dump at game start
+(`assets/misc.viv` for its string tables, `screens/screens.viv` for its menu art), and the game serves its
+copies ahead of the composed ones, which would lose a clothing pack's item names (`cmusen.loc`) and shop
+pictures (the thumbnails added to `screens.viv`) while the language is on. So the composer applies the same
+packs once more for every installed language pack that is not switched off (`<data>/mods/<id>/language.ini`,
+at most 8, by id): the files the pack covers among those the packs change are rebuilt first as the game would
+(`scripts/langpack.py`, the reference the game's rebuild is tested against; from the dump, never the override
+copy, as the game does), the packs' ops and entries go on top (the deltas' originals stay the player's own
+files; of a language edit and a pack's `replace` of one entry the pack wins), and the results go to
+`content-files/lang/<id>/<path>`, listed as `lang=<id>|<path>`. Byte-identical on two PCs with the same packs
+and language pack; the `set` and the online print are the packs alone. At game start, once the chosen language
+pack has loaded, `pc_language.c` asks `pc_content_language_files` for those paths: the content redirect serves
+the `lang/<id>/` copies from then on, and the pack rebuilds only its other files (`[CONTENT] n composed file(s)
+built on the language pack <id>`). A language pack whose rebuild fails here, or on whose files the packs do not
+apply alike, is left out (`language-skipped=<id>: <reason>`): the game then rebuilds that pack's files itself,
+as before, without the packs' names. The language packs' `language.ini` and deltas are part of the unchanged
+check, so a pack installed by hand is taken up at the next sync or `compose`.
+
 A relay before this branch refuses the longer HELLO; it is sent only by a PC with `content` packs, so the relay
 goes out first. The relay answers a code join between different content sets with ERROR 15 (14 is the relay's "client not supported").
 

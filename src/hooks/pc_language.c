@@ -788,7 +788,7 @@ void pc_language_start(const char *data_root, const char *game_dir)
 {
     char folder[RECOMP_SETTING_TEXT_MAX], dir[LANG_PATH], cache[LANG_PATH], stamp_path[LANG_PATH];
     char files[16][256];
-    int nfiles = 0;
+    int nfiles = 0, ncomposed = 0;
     uint8_t digest[32];
     char stamp[65], old[65] = "";
     Sha sha;
@@ -837,6 +837,21 @@ void pc_language_start(const char *data_root, const char *game_dir)
         split_target(g_pack.files[i].target, file, sizeof file, &rest);
         for (int j = 0; j < nfiles; j++) seen |= same_file_name(files[j], file);
         if (!seen && _stricmp(file, "default.xbe") && nfiles < 16) snprintf(files[nfiles++], sizeof files[0], "%s", file);
+    }
+
+    /* The launcher composed the community packs on top of this pack's translation for some of these
+     * (content-files/lang/<pack>/, setup/content_compose.py): pc_content.c serves those from now on, and
+     * they are not rebuilt here (a clothing pack's names and shop pictures stay with the translation). */
+    {
+        char composed[16][256];
+        int n = pc_content_language_files(folder, composed, 16), kept = 0;
+        for (int j = 0; j < nfiles; j++) {
+            int served = 0;
+            for (int k = 0; k < n; k++) served |= same_file_name(files[j], composed[k]);
+            if (!served) { if (kept != j) memcpy(files[kept], files[j], sizeof files[0]); kept++; }
+        }
+        ncomposed = nfiles - kept;
+        nfiles = kept;
     }
 
     /* The cache is valid while the pack and the dump files it reads are unchanged. */
@@ -895,6 +910,7 @@ void pc_language_start(const char *data_root, const char *game_dir)
             if (g_error[0]) {
                 fprintf(stderr, "[LANG] language pack '%s' not used: %s\n", folder, g_error);
                 pack_free(&g_pack);
+                pc_content_language_files("", NULL, 0);     /* the plain composed copies again */
                 return;
             }
         }
@@ -917,8 +933,9 @@ void pc_language_start(const char *data_root, const char *game_dir)
     if (g_xbox_game_file_redirect != lang_redirect) g_lang_previous = g_xbox_game_file_redirect;
     g_xbox_game_file_redirect = lang_redirect;
     netplay_data_print_reset();     /* a print made before this (the launcher's online) missed the rebuilt files */
-    fprintf(stderr, "[LANG] %s (%s, %s): %d file(s) served from %s%s\n", g_pack.name, g_pack.language, folder,
-            g_served_count, cache, fresh ? "" : " (built now)");
+    fprintf(stderr, "[LANG] %s (%s, %s): %d file(s) served from %s%s%s\n", g_pack.name, g_pack.language, folder,
+            g_served_count, cache, fresh ? "" : " (built now)",
+            ncomposed ? " and the rest from the composed community content" : "");
     language_texture_layer(dir, folder);
     /* Keep only what pc_language_patch_xbe still needs. */
     for (int i = 0; i < g_pack.count; i++) {

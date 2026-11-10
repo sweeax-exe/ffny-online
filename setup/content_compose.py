@@ -15,13 +15,25 @@ list, name tables, venue list and entity list. This module builds the result for
 * the output is ``<data>/mod-manager/content-files/<P>`` plus ``files.ini`` (which packs applied, which were
   skipped and why, the files), built in ``content-files.new`` and swapped in. With nothing applied the folder is
   removed, so the game reads the originals again;
-* nothing is rebuilt when the packs, the switches and the bases (size and mtime) are what the last run saw
-  (``content-compose.json`` beside the folder).
+* nothing is rebuilt when the packs, the switches, the language packs and the bases (size and mtime) are what
+  the last run saw (``content-compose.json`` beside the folder).
+
+A language pack (docs/language-packs.md) rebuilds some of the same files from the dump at game start (string
+tables in ``assets/misc.viv``, the menu art in ``screens/screens.viv``), and the game serves its copies ahead
+of the composed ones, which would lose a clothing pack's item names and shop pictures while it is on. So for
+every installed language pack the same packs are composed once more, on top of its translation: the files it
+covers are rebuilt here as the game would (``scripts/langpack.py`` is the reference the game's rebuild is
+tested against), the packs' ops and entries go on top (two PCs with the same packs and the same language
+build byte-identical files), and the results go to ``content-files/lang/<language pack>/<P>``, listed in
+``files.ini`` as ``lang=<id>|<P>``. The game serves those for the chosen language and leaves the rest of the
+pack's files to its own rebuild. A language pack whose translation does not take the packs is left out
+(``language-skipped``), and the game then rebuilds its files itself, as before.
 
 The game (src/hooks/pc_content.c) serves the listed files through the game-file redirect.
 """
 
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path, PurePosixPath
@@ -32,9 +44,12 @@ import struct
 from ffnycontent import clothing, cpparts, delta, loc, newvenue, viv
 
 SCHEMA = 1
-COMPOSER = 1                    # bump when the output for the same inputs changes
+COMPOSER = 2                    # bump when the output for the same inputs changes
 TYPES = ('fighter-body', 'clothing', 'venue')
 OUT = 'content-files'
+LANG_DIR = 'lang'               # content-files/lang/<language pack>/<P>: the packs on top of that translation
+LANG_MAX = 8                    # language packs composed with (each costs a copy of the files it covers)
+LANG_NAME = re.compile(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,63}')
 STATE = 'content-compose.json'
 MAX_RESULT = 64 * 1024**2
 MAX_DELTA = 32 * 1024**2
@@ -135,21 +150,95 @@ def read_off(data):
     return off
 
 
-class Bases:
-    """The player's files: <data>/override/P, else <game>/P. Remembers what it resolved (the unchanged check)."""
+_langpack_module = None
 
-    def __init__(self, data, game):
+
+def langpack():
+    """scripts/langpack.py, the language packs' reference implementation (beside setup/ in every install)."""
+    global _langpack_module
+    if _langpack_module is None:
+        path = Path(__file__).resolve().parent.parent / 'scripts' / 'langpack.py'
+        spec = importlib.util.spec_from_file_location('content_langpack', path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        _langpack_module = module
+    return _langpack_module
+
+
+def language_packs(data, off, log=print):
+    """The installed language packs (<data>/mods/<id>/language.ini) the packs are composed with: those not switched
+    off, by id, at most LANG_MAX. Each: {id, folder, stamp (over language.ini and the deltas), covered (the game
+    paths it rebuilds, lower-case; default.xbe is patched in memory, not a file), edits {path key: (path, [(parts
+    inside the file, delta bytes)])}}."""
+    lp = langpack()
+    out = []
+    mods = Path(data) / 'mods'
+    try:
+        folders = sorted(p for p in mods.iterdir() if p.is_dir() and not p.is_symlink())
+    except OSError:
+        return out
+    for folder in folders:
+        pack_id = folder.name
+        if not LANG_NAME.fullmatch(pack_id) or pack_id in off or not (folder / 'language.ini').is_file():
+            continue
+        try:
+            _, files = lp.read_pack(str(folder))
+            digest = hashlib.sha256((folder / 'language.ini').read_bytes())
+            edits = {}
+            for parts, patch in files:
+                blob = folder.joinpath(*PurePosixPath(patch).parts).read_bytes()
+                digest.update(blob)
+                if parts[0].lower() == 'default.xbe':
+                    continue
+                edits.setdefault(parts[0].lower(), (parts[0], []))[1].append((parts[1:], blob))
+        except (lp.PackError, OSError, UnicodeError, ValueError) as error:
+            log('[compose] language pack %s not composed with: %s' % (pack_id, error))
+            continue
+        if len(out) >= LANG_MAX:
+            log('[compose] language pack %s not composed with: more than %d language packs' % (pack_id, LANG_MAX))
+            continue
+        out.append({'id': pack_id, 'folder': folder, 'stamp': digest.hexdigest(), 'covered': set(edits),
+                    'edits': edits})
+    return out
+
+
+def build_language_file(lang, key, bases, folder):
+    """The file ``key`` as the game rebuilds it for the language pack: its deltas on the dump's copy (never the
+    override's: the pack carries the port's own changes itself, docs/language-packs.md), written under ``folder``."""
+    lp = langpack()
+    rel, edits = lang['edits'][key]
+    source = Path(lp.find_file(str(bases.game), rel))
+    bases.seen['game:' + key] = [rel] + (stat_of('game', source) or [None])
+    data = lp.rebuild(source.read_bytes(), edits)
+    target = folder.joinpath(*PurePosixPath(rel).parts)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(data)
+    return target
+
+
+class Bases:
+    """The player's files: <data>/override/P, else <game>/P. Remembers what it resolved (the unchanged check).
+    With ``lang`` ({path key: file}), those paths are read from the language pack's rebuilt copies instead (a
+    variant's bases); the deltas' originals stay the player's own files (``read_original``)."""
+
+    def __init__(self, data, game, lang=None):
         self.override, self.game = Path(data) / 'override', Path(game)
+        self.lang = dict(lang or {})
         self.seen = {}
         self._archives = {}
+        self._originals = {}
 
-    def path(self, rel):
+    def plain_path(self, rel):
         key = rel.lower()
         over = self.override.joinpath(*PurePosixPath(rel).parts)
         where, path = ('override', over) if over.is_file() else ('game', self.game.joinpath(*PurePosixPath(rel).parts))
         if key not in self.seen:
             self.seen[key] = [rel] + (stat_of(where, path) or [None])
         return path
+
+    def path(self, rel):
+        plain = self.plain_path(rel)
+        return self.lang.get(rel.lower(), plain)
 
     def exists(self, rel):
         return self.path(rel).is_file()
@@ -170,6 +259,20 @@ class Bases:
                 raise ComposeError('%s is not in your game folder' % rel)
             return path.read_bytes()
         return self.archive(rel).read(entry)
+
+    def read_original(self, rel, entry=''):
+        """The player's own file or entry, whatever language the variant is built on."""
+        if rel.lower() not in self.lang:
+            return self.read(rel, entry)
+        path = self.plain_path(rel)
+        if not path.is_file():
+            raise ComposeError('%s is not in your game folder' % rel)
+        if entry == '':
+            return path.read_bytes()
+        key = rel.lower()
+        if key not in self._originals:
+            self._originals[key] = viv.Archive(path)
+        return self._originals[key].read(entry)
 
 
 def stat_of(where, path):
@@ -281,7 +384,7 @@ def apply_pack(work, folder, info):
         path = Path(folder).joinpath(*PurePosixPath(e['delta']).parts)
         if path.is_symlink() or not path.is_file() or path.stat().st_size > MAX_DELTA:
             raise ComposeError('delta %s is missing' % e['delta'])
-        base = work.bases.read(e['base_archive'], e['base_entry'])
+        base = work.bases.read_original(e['base_archive'], e['base_entry'])
         if hashlib.sha256(base).hexdigest() != e['original_sha256']:
             raise ComposeError('%s in your game is not the version this pack was made for'
                                % (e['base_entry'] or e['base_archive']))
@@ -318,36 +421,73 @@ def stored(data):
     return viv.refpack_store(data) if len(data) < 1 << 24 else data
 
 
-def write_output(root, work, applied, skipped, off):
-    new = root / (OUT + '.new')
-    if new.exists():
-        shutil.rmtree(new)
-    new.mkdir(parents=True)
+def write_files(folder, work, only=None):
+    """The composed files under ``folder`` (``only``: these path keys alone). Returns the paths written."""
     files = []
     for rel, data in sorted(work.loose.values()):
-        target = new.joinpath(*PurePosixPath(rel).parts)
+        if only is not None and rel.lower() not in only:
+            continue
+        target = folder.joinpath(*PurePosixPath(rel).parts)
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(data)
         files.append(rel)
     for rel, replace, add in sorted(work.archives.values(), key=lambda a: a[0]):
+        if only is not None and rel.lower() not in only:
+            continue
         src = work.bases.path(rel)
         source = work.bases.archive(rel)
         rep = {}
         for name, data in replace.values():
             raw = source.raw(name)
             rep[name] = (viv.refpack_store(data) if len(data) < 1 << 24 else data) if viv.is_refpack(raw) else data
-        target = new.joinpath(*PurePosixPath(rel).parts)
+        target = folder.joinpath(*PurePosixPath(rel).parts)
         target.parent.mkdir(parents=True, exist_ok=True)
         viv.compose_archive(str(src), str(target), replace=rep, add=[(n, stored(d)) for n, d in add])
         files.append(rel)
+    return files
+
+
+def write_files_ini(new, applied, skipped, off, files, lang_files, lang_skipped):
     lines = ['[content-files]', 'schema=%d' % SCHEMA, 'set=' + set_hash(applied, off),
              'applied=' + ','.join(p['id'] for p in applied),
              'skipped=' + '; '.join('%s: %s' % (i, clean(r)) for i, r in skipped)]
     lines += ['file=' + rel for rel in sorted(files, key=str.lower)]
+    lines += ['lang=%s|%s' % (pack_id, rel) for pack_id, rel in sorted(lang_files, key=lambda x: (x[0], x[1].lower()))]
+    if lang_skipped:
+        lines.append('language-skipped=' + '; '.join('%s: %s' % (i, clean(r)) for i, r in lang_skipped))
     with (new / 'files.ini').open('w', encoding='utf-8', newline='\n') as f:
         f.write('\n'.join(lines) + '\n')
-    swap(root, new)
-    return files
+
+
+def run_packs(bases, chosen, log):
+    """Apply ``chosen`` on ``bases`` in order: (work, applied, skipped)."""
+    work = Work(bases)
+    applied, skipped = [], []
+    for p in chosen:
+        snap = work.snapshot()
+        try:
+            info = read_install(p['folder'])
+            apply_pack(work, p['folder'], info)
+            applied.append(p)
+        except PACK_ERRORS + (cpparts.PartsError, loc.LocError) as error:
+            work.restore(snap)
+            reason = str(error) if not isinstance(error, KeyError) else 'not found: %s' % error.args[0]
+            skipped.append((p['id'], reason))
+            log('[compose] %s skipped: %s' % (p['id'], reason))
+    return work, applied, skipped
+
+
+def compose_language(lang, chosen, applied, touched, data, game, bases, new, tmp):
+    """The same packs once more on top of the language pack's rebuilt files: the paths it covers among
+    ``touched`` (those the packs changed) go to <new>/lang/<id>/. Returns the paths written ([]: no overlap)."""
+    overlap = sorted(touched & lang['covered'])
+    if not overlap:
+        return []
+    built = {key: build_language_file(lang, key, bases, tmp / lang['id']) for key in overlap}
+    work, again, _ = run_packs(Bases(data, game, built), chosen, lambda text: None)
+    if [p['id'] for p in again] != [p['id'] for p in applied]:
+        raise ComposeError('the packs do not apply the same way on its files')
+    return write_files(new / LANG_DIR / lang['id'], work, only=set(built))
 
 
 def swap(root, new):
@@ -367,7 +507,7 @@ def recover(root):
     out, old, new = root / OUT, root / (OUT + '.old'), root / (OUT + '.new')
     if old.exists() and not out.exists():
         os.replace(old, out)
-    for leftover in (old, new):
+    for leftover in (old, new, root / (OUT + '.lang-tmp')):
         if leftover.exists():
             shutil.rmtree(leftover)
 
@@ -380,7 +520,7 @@ def remove_output(root):
 
 def read_files_ini(root):
     path = root / OUT / 'files.ini'
-    result = {'files': []}
+    result = {'files': [], 'lang': []}
     try:
         text = path.read_text(encoding='utf-8')
     except OSError:
@@ -391,14 +531,19 @@ def read_files_ini(root):
             continue
         if key == 'file':
             result['files'].append(value)
+        elif key == 'lang':
+            pack_id, bar, rel = value.partition('|')
+            if bar:
+                result['lang'].append((pack_id, rel))
         else:
             result[key] = value
     return result
 
 
-def inputs_key(game, packs, off):
+def inputs_key(game, packs, off, languages=()):
     raw = json.dumps([COMPOSER, str(Path(game).resolve()),
-                      [[p['id'], p['version'], p['content_sha256']] for p in packs], sorted(off)])
+                      [[p['id'], p['version'], p['content_sha256']] for p in packs], sorted(off),
+                      [[lang['id'], lang['stamp']] for lang in languages]])
     return hashlib.sha256(raw.encode('utf-8')).hexdigest()
 
 
@@ -407,22 +552,27 @@ def unchanged(root, state, key, data, game):
         return False
     bases = Bases(data, game)
     for seen in state.get('bases', {}).values():
-        rel = seen[0]
-        over = bases.override.joinpath(*PurePosixPath(rel).parts)
-        where, path = ('override', over) if over.is_file() else ('game', bases.game.joinpath(*PurePosixPath(rel).parts))
-        if [rel] + (stat_of(where, path) or [None]) != seen:
+        rel, where = seen[0], seen[1]
+        base = bases.override if where == 'override' else bases.game
+        if [rel] + (stat_of(where, base.joinpath(*PurePosixPath(rel).parts)) or [None]) != seen:
             return False
     if not state.get('applied'):
         return not (root / OUT).exists()
     files = read_files_ini(root)
     if not files or files.get('set') != state.get('set'):
         return False
-    return all((root / OUT).joinpath(*PurePosixPath(f).parts).is_file() for f in files['files'])
+    if files['lang'] != [tuple(x) for x in state.get('lang_files', [])]:
+        return False
+    out = root / OUT
+    return (all(out.joinpath(*PurePosixPath(f).parts).is_file() for f in files['files'])
+            and all((out / LANG_DIR / i).joinpath(*PurePosixPath(f).parts).is_file() for i, f in files['lang']))
 
 
-def compose(data, game, packs, off=None, root=None, log=print):
+def compose(data, game, packs, off=None, root=None, log=print, languages=None):
     """Compose ``packs`` ([{id, version, content_sha256, kind, order, folder}], every synced pack with an
-    install.json) for the player. Returns {applied, skipped, files, unchanged}."""
+    install.json) for the player, and once more with each installed language pack (``languages``: the list
+    ``language_packs`` makes, found when None). Returns {applied, skipped, files, lang_files, lang_skipped,
+    unchanged}."""
     data = Path(data)
     root = Path(root) if root else data / 'mod-manager'
     root.mkdir(parents=True, exist_ok=True)
@@ -431,7 +581,8 @@ def compose(data, game, packs, off=None, root=None, log=print):
     packs = sorted(packs, key=lambda p: (p.get('order', 1 << 30), p['id']))
     switched = sorted(p['id'] for p in packs if p.get('kind') != 'content' and p['id'] in off)
     chosen = [p for p in packs if p['id'] not in switched]
-    key = inputs_key(game, chosen, switched)
+    languages = language_packs(data, off, log) if languages is None else list(languages)
+    key = inputs_key(game, chosen, switched, languages)
     state_path = root / STATE
     try:
         state = json.loads(state_path.read_text(encoding='utf-8'))
@@ -439,29 +590,39 @@ def compose(data, game, packs, off=None, root=None, log=print):
         state = None
     if unchanged(root, state, key, data, game):
         return {'applied': state['applied'], 'skipped': [tuple(s) for s in state.get('skipped', [])],
-                'files': state.get('files', []), 'unchanged': True}
+                'files': state.get('files', []), 'lang_files': [tuple(x) for x in state.get('lang_files', [])],
+                'lang_skipped': [tuple(s) for s in state.get('lang_skipped', [])], 'unchanged': True}
     bases = Bases(data, game)
-    work = Work(bases)
-    applied, skipped = [], []
-    for p in chosen:
-        snap = work.snapshot()
-        try:
-            info = read_install(p['folder'])
-            apply_pack(work, p['folder'], info)
-            applied.append(p)
-        except PACK_ERRORS + (cpparts.PartsError, loc.LocError) as error:
-            work.restore(snap)
-            reason = str(error) if not isinstance(error, KeyError) else 'not found: %s' % error.args[0]
-            skipped.append((p['id'], reason))
-            log('[compose] %s skipped: %s' % (p['id'], reason))
-    files = []
+    work, applied, skipped = run_packs(bases, chosen, log)
+    files, lang_files, lang_skipped = [], [], []
     if applied:
-        files = write_output(root, work, applied, skipped, switched)
+        new, tmp = root / (OUT + '.new'), root / (OUT + '.lang-tmp')
+        for folder in (new, tmp):
+            if folder.exists():
+                shutil.rmtree(folder)
+        new.mkdir(parents=True)
+        files = write_files(new, work)
+        touched = set(work.loose) | set(work.archives)
+        for lang in languages:
+            try:
+                written = compose_language(lang, chosen, applied, touched, data, game, bases, new, tmp)
+                lang_files += [(lang['id'], rel) for rel in written]
+            except PACK_ERRORS + (ComposeError, cpparts.PartsError, loc.LocError, langpack().PackError) as error:
+                lang_skipped.append((lang['id'], str(error)))
+                log('[compose] language pack %s not composed with: %s' % (lang['id'], error))
+                if (new / LANG_DIR / lang['id']).exists():
+                    shutil.rmtree(new / LANG_DIR / lang['id'])
+        if tmp.exists():
+            shutil.rmtree(tmp)
+        write_files_ini(new, applied, skipped, switched, files, lang_files, lang_skipped)
+        swap(root, new)
     else:
         remove_output(root)
     state = {'schema': SCHEMA, 'key': key, 'bases': bases.seen, 'applied': [p['id'] for p in applied],
-             'skipped': skipped, 'files': files, 'set': set_hash(applied, switched) if applied else ''}
+             'skipped': skipped, 'files': files, 'lang_files': lang_files, 'lang_skipped': lang_skipped,
+             'set': set_hash(applied, switched) if applied else ''}
     tmp = root / (STATE + '.tmp')
     tmp.write_text(json.dumps(state, sort_keys=True), encoding='utf-8')
     os.replace(tmp, state_path)
-    return {'applied': state['applied'], 'skipped': skipped, 'files': files, 'unchanged': False}
+    return {'applied': state['applied'], 'skipped': skipped, 'files': files, 'lang_files': lang_files,
+            'lang_skipped': lang_skipped, 'unchanged': False}

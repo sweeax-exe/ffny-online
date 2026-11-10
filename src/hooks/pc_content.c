@@ -251,11 +251,46 @@ int pc_content_offline_only(void)
 }
 
 #if !defined(DEFJAM_APP)
-/* The composed files: <data>/mod-manager/content-files/<path> for each path files.ini lists. */
+/* The composed files: <data>/mod-manager/content-files/<path> for each path files.ini lists; with a
+ * language pack in use, <data>/mod-manager/content-files/<sub><path> for the paths the launcher
+ * composed on top of that pack's translation (files.ini `lang=<id>|<path>`, pc_content_language_files). */
 static char g_files[CONTENT_FILES_MAX][256];
+static char g_files_sub[CONTENT_FILES_MAX][160];
 static char g_files_dir[1024];
 static int g_file_count;
+static char g_lang_ids[CONTENT_FILES_MAX][96];
+static char g_lang_paths[CONTENT_FILES_MAX][256];
+static int g_lang_count;
 static BOOL (*g_files_previous)(const char *relative, content_host_char *host_path, DWORD size);
+
+/* files.ini's `lang=<id>|<path>` lines: which composed paths have a copy built with which language pack. */
+static void read_lang_lines(const char *root)
+{
+    char path[1024], line[1200];
+    FILE *f;
+    int in_section = 0;
+    g_lang_count = 0;
+    snprintf(path, sizeof path, "%s" HOST_SEP "mod-manager" HOST_SEP "content-files" HOST_SEP "files.ini", root);
+    if (!(f = fopen(path, "rb"))) return;
+    while (fgets(line, sizeof line, f) && g_lang_count < CONTENT_FILES_MAX) {
+        char *s = trim(line), *bar;
+        if (*s == '[') { in_section = !strcmp(s, "[content-files]"); continue; }
+        if (!in_section || strncmp(s, "lang=", 5) || !(bar = strchr(s + 5, '|'))) continue;
+        *bar = 0;
+        {   /* the pack id is one folder name (as pc_language.c accepts them), the path a listed file */
+            const char *c;
+            size_t n = strlen(s + 5);
+            int safe = n > 0 && n < sizeof g_lang_ids[0] && s[5] != '.' && !strstr(s + 5, "..");
+            for (c = s + 5; safe && *c; c++)
+                safe = isalnum((unsigned char)*c) || *c == '_' || *c == '-' || *c == '.';
+            if (!safe || !bar[1] || strlen(bar + 1) >= 256 || strstr(bar + 1, "..")) continue;
+        }
+        snprintf(g_lang_ids[g_lang_count], sizeof g_lang_ids[0], "%s", s + 5);
+        snprintf(g_lang_paths[g_lang_count], sizeof g_lang_paths[0], "%s", bar + 1);
+        g_lang_count++;
+    }
+    fclose(f);
+}
 
 static int same_game_path(const char *a, const char *b)
 {
@@ -274,7 +309,7 @@ static BOOL content_redirect(const char *relative, content_host_char *host_path,
         char host[1400];
         char *c;
         if (!same_game_path(relative, g_files[i])) continue;
-        if (snprintf(host, sizeof host, "%s" HOST_SEP "%s", g_files_dir, g_files[i]) >= (int)sizeof host) break;
+        if (snprintf(host, sizeof host, "%s" HOST_SEP "%s%s", g_files_dir, g_files_sub[i], g_files[i]) >= (int)sizeof host) break;
 #if defined(_WIN32)
         for (c = host; *c; c++) if (*c == '/') *c = '\\';
         if (!MultiByteToWideChar(CP_ACP, 0, host, -1, host_path, (int)size)) return FALSE;
@@ -301,15 +336,54 @@ static void serve_composed_files(const char *root)
         if (!(f = fopen(host, "rb"))) { fprintf(stderr, "[CONTENT] composed file missing: %s\n", g_files[i]); continue; }
         fclose(f);
         if (g_file_count != i) memcpy(g_files[g_file_count], g_files[i], sizeof g_files[i]);
+        g_files_sub[g_file_count][0] = 0;
         g_file_count++;
     }
     if (!g_file_count) return;
+    read_lang_lines(root);
     g_files_previous = g_xbox_game_file_redirect;
     g_xbox_game_file_redirect = content_redirect;
     netplay_data_print_reset();     /* a print made before this (the launcher's online) missed the composed files */
     fprintf(stderr, "[CONTENT] %d composed file(s) served from %s (packs: %s)\n", g_file_count, g_files_dir,
             applied[0] ? applied : "-");
     for (i = 0; i < g_file_count; i++) fprintf(stderr, "[CONTENT]   %s\n", g_files[i]);
+}
+
+int pc_content_language_files(const char *id, char (*paths)[256], int max)
+{
+    int i, j, n = 0;
+    for (i = 0; i < g_file_count; i++) g_files_sub[i][0] = 0;
+    if (!id || !*id || !g_file_count) return 0;
+    for (i = 0; i < g_file_count; i++) {
+        for (j = 0; j < g_lang_count; j++) {
+            char host[1400];
+            FILE *f;
+            if (strcmp(g_lang_ids[j], id) || !same_game_path(g_lang_paths[j], g_files[i])) continue;
+            if (snprintf(host, sizeof host, "%s" HOST_SEP "lang" HOST_SEP "%s" HOST_SEP "%s", g_files_dir, id,
+                         g_files[i]) >= (int)sizeof host) continue;
+            if (!(f = fopen(host, "rb"))) {
+                fprintf(stderr, "[CONTENT] composed file missing: lang/%s/%s\n", id, g_files[i]);
+                continue;
+            }
+            fclose(f);
+            snprintf(g_files_sub[i], sizeof g_files_sub[i], "lang" HOST_SEP "%s" HOST_SEP, id);
+            if (paths && n < max) snprintf(paths[n], 256, "%s", g_files[i]);
+            n++;
+            break;
+        }
+    }
+    if (n) {
+        fprintf(stderr, "[CONTENT] %d composed file(s) built on the language pack %s:", n, id);
+        for (i = 0; i < g_file_count; i++) if (g_files_sub[i][0]) fprintf(stderr, " %s", g_files[i]);
+        fprintf(stderr, "\n");
+    }
+    return n > max ? max : n;
+}
+#else
+int pc_content_language_files(const char *id, char (*paths)[256], int max)
+{
+    (void)id; (void)paths; (void)max;
+    return 0;
 }
 #endif
 

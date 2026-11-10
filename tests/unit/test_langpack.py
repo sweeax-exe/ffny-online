@@ -234,6 +234,10 @@ BOOL (*g_xbox_game_file_redirect)(const char *relative, char *host_path, DWORD s
 #endif
 void defjam_subtitles_after_nis_setup(uint32_t state);
 uint32_t defjam_game_language_at_boot(uint32_t asked);
+/* pc_content.c and netplay.c are not part of this fixture: no community packs, no composed files. */
+int pc_content_language_blocked(const char *id) { (void)id; return 0; }
+int pc_content_language_files(const char *id, char (*paths)[256], int max) { (void)id; (void)paths; (void)max; return 0; }
+void netplay_data_print_reset(void) {}
 
 int main(int argc, char **argv)
 {

@@ -61,6 +61,13 @@ void pc_content_start(const char *data_root);
 /* A language pack id is a synced pack the player switched off (pc_language.c then skips it). */
 int pc_content_language_blocked(const char *id);
 
+/* pc_language_start, once its pack is loaded: the composed files the launcher built on top of that
+ * pack's translation (content-files/lang/<id>/<path>, files.ini `lang=<id>|<path>`) are served from
+ * now on in place of the plain composed copies, and their game paths are written to `paths` (at
+ * most `max`): the language pack leaves those to the composed copies instead of rebuilding them.
+ * Returns the count; an empty id (the pack was not used after all) goes back to the plain copies. */
+int pc_content_language_files(const char *id, char (*paths)[256], int max);
+
 /* RECOMP_OFFLINE_ONLY=1 (Studio's Test in a fight with an unreviewed pack): online is refused. */
 int pc_content_offline_only(void);
 
