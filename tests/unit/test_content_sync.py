@@ -203,6 +203,22 @@ def test_sync_composes_a_fighter_body_pack_and_marks_it_composed(tmp_path, monke
     assert not files.exists() and not (manager.mods / 'new-body').exists()
 
 
+def test_removing_a_synced_composed_pack_updates_content_ini_and_the_composed_files(tmp_path, monkeypatch):
+    monkeypatch.setenv('RECOMP_SETTINGS', 'none')
+    key = Ed25519PrivateKey.generate()
+    game = tmp_path / 'game'
+    manager = mods.Manager(tmp_path / 'data', '0.13.0', ['textures-v1', 'language-v1', 'content-v1'],
+                           keys=[key.public_key().public_bytes_raw().hex()], game_dir=game)
+    path, mod, _ = body_package(tmp_path, game)
+    ffny(key, path, mod, kind='replacement', type_='fighter-body')
+    raw, sig = publish(key, [mod], 3)
+    run_sync(manager, raw, sig, {mod['versions'][0]['archive']['sha256']: path})
+    assert (manager.root / 'content-files').is_dir()
+    manager.remove('new-body')
+    assert '[pack.new-body]' not in content_ini(manager) and 'revision=3' in content_ini(manager)
+    assert not (manager.root / 'content-files').exists()
+
+
 def test_install_json_pack_validation(tmp_path):
     game = tmp_path / 'game'
     path, mod, _ = body_package(tmp_path, game)

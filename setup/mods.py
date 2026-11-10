@@ -692,8 +692,26 @@ class Manager:
 
     def remove(self, mod_id):
         check(mod_id in self.state()['installed'], 'Only managed mods can be removed here')
+        synced = self.state()['installed'][mod_id].get('synced')
         self.commit(mod_id, None, None)
+        if synced:
+            # a community pack: content.ini and the composed files follow at once (as a sync that drops it),
+            # so the game neither lists a missing pack nor serves files built with it
+            self.write_content(self.content_revision())
+            problems = []
+            self.compose_quietly(problems)
+            for problem in problems:
+                self.progress(problem)
         self.progress('Removed managed mod; local folders were preserved')
+
+    def content_revision(self):
+        """The catalogue revision content.ini was last written for (0 when there is none)."""
+        c = configparser.ConfigParser(interpolation=None)
+        try:
+            c.read(self.root / 'content.ini', encoding='utf-8')
+            return int(c.get('content', 'revision', fallback='0'))
+        except (OSError, ValueError, configparser.Error):
+            return 0
 
     def rollback(self, mod_id):
         contract.slug(mod_id)
