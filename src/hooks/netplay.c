@@ -455,6 +455,7 @@ static struct {
     ULONGLONG koth_sent;
     int koth_fought, koth_done;     /* the fight was seen fighting; its RESULT was made */
     int koth_ready_for;             /* HILL `fights` + 1 of the call this PC readied for by itself */
+    int koth_own_fighter;           /* the fighter of this PC's last own hill fight (-1 none): a watch may follow it */
     volatile LONG start_deferred;   /* a START taken while the last fight's results still show */
     AutoMatch deferred_m;
     int koth_results;               /* this game still shows the results of a hill fight it fought (until the menu) */
@@ -945,7 +946,10 @@ int netplay_rematch_request(void)
 void netplay_results_funccall(const char *text)
 {
     if (!strcmp(text, "Game.Quit()")) rollback_off_leaving("Game.Quit()");
-    if (N.koth_results && N.lobby && !N.watching) {     /* where a hill fight's results are (hill_results_tick) */
+    /* where a hill fight's results are (hill_results_tick); also while a WATCH waits for the menus (a deferred
+     * watch: the results are still this PC's own; build 71, the lingering copy of 20261110-061821-online never
+     * had its summary noted, so its next fight's START never took it off them and the king gave up) */
+    if (N.koth_results && N.lobby && (!N.watching || N.start_deferred)) {
         if (!strncmp(text, "Game.GetMatchSummary(", 21)) N.hill_summary = 1;
         else if (!strncmp(text, "MemCard.Save( battle/rewardun", 29)) N.hill_menu = 1;
         else if (!strncmp(text, "Game.GetHeroFighterNumber(", 26)) N.hill_menu = 2;
@@ -2991,7 +2995,7 @@ static void on_hill(const uint8_t *b, int len)
     if (h.phase == NETHILL_CALLING && N.koth_results && N.koth_ready_for != h.fights + 1) {
         for (i = 0; i < h.count; i++)
             if (h.line[i].slot == N.roomv.you && h.line[i].state == NETLINE_CALLED) {
-                auto_ready = N.report_m.fighter[N.pos];
+                auto_ready = N.koth_own_fighter >= 0 ? N.koth_own_fighter : N.report_m.fighter[N.pos];
                 N.koth_ready_for = h.fights + 1;
             }
     }
@@ -3006,6 +3010,12 @@ static void on_hill(const uint8_t *b, int len)
         InterlockedExchange(&N.start_deferred, 0))
         called_off = 1;
     LeaveCriticalSection(&g_cs);
+    if (called_off && N.watching) {     /* a watch that waited for the menus: nothing to say */
+        fprintf(stderr, "[NETPLAY] hill: the watched fight is over on the relay before this game was back from its "
+                "results (fights %d); not watched\n", h.fights);
+        end_hub_match("Back on the hill.");
+        called_off = 0;
+    }
     if (called_off) {
         fprintf(stderr, "[NETPLAY] hill: the deferred fight is over on the relay (fights %d, how %d, phase %d); not started\n",
                 h.fights, h.last_how, h.phase);
@@ -3057,6 +3067,12 @@ static int hill_watch_runs(uint32_t seed, const int *slots, int count)
         SPECTATOR_HERE())
         return 0;
     for (i = 0; i < count; i++) if (slots[i] == N.roomv.you) return 0;     /* a fighter gets START */
+    /* Build 71: not a fight of four (an FFA rotation room of five or more). This PC's pad has to sit on a
+     * port (the toolkit's netplay input has no "none"), and with four fighters every port is one: the
+     * watcher's own presses reached the fourth fighter's intro on its PC alone, and its picture went out of
+     * sync at step 120-240 in three of four five-copy runs (logs/dj/20261110-061005-online, -060501-online).
+     * Such a fight keeps the names screen until the toolkit can leave the pad off every port. */
+    if (count >= 4) return 0;
     /* this PC's own fight still runs here (not decided yet); decided, on its results, the watch waits for the
      * menus (on_start_as defers it as it defers a START there) */
     if (N.match_live && !N.watching && !N.koth_results) return 0;
@@ -3343,6 +3359,7 @@ static void on_start_as(const uint8_t *b, int len, int watching)
     N.start_cpu = m.count > count ? cpu : NETPLAY_CPU_HARD;
     memset(&g_fight_waits, 0, sizeof(g_fight_waits));    /* a new fight's own waits */
     N.pos = pos;
+    if (pos >= 0 && pos < MAXP) N.koth_own_fighter = fighters[pos];
     N.watching = watching;
     N.hill_watch = hill_watch;
     N.hill_called = 0;
@@ -4340,6 +4357,7 @@ static int start(const char *server, const char *name, int creating, const char 
     N.koth_match = 0;
     N.set_match = 0;
     N.koth_winner = -1;
+    N.koth_own_fighter = -1;
     N.start_deferred = 0;
     N.koth_results = 0;
     memset(&N.rank, 0, sizeof(N.rank));
@@ -8508,7 +8526,10 @@ static void hill_leave_tick(void)
         }
     } else if (sm >= 0x10000u && MEM32(sm + 0x24u) != 0) {
         wait = "a screen loads";
-    } else if (memcard_save_busy()) {
+    } else if (memcard_save_busy() && now - N.spec_results < 3000) {
+        /* only a short while: in the build 71 turf run its flags stayed set on a watcher's summary and the
+         * copy never left it (logs/dj/20261110-063902-turf copy 3); a fighter's results are left the same way
+         * without this wait (hill_results_tick) */
         wait = "the memory card saves";
     } else if (now - N.spec_results >= 1000 && !(N.hill_quit_at && now - N.hill_quit_at < 5000)) {
         tries = 0;
